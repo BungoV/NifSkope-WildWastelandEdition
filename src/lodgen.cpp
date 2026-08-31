@@ -1850,3 +1850,189 @@ bool lodgenBakeTerrainTextures( const EsmWorld & world, int chunkX, int chunkY,
 		error->clear();
 	return true;
 }
+
+bool lodgenBuildAtlas( const QStringList & btoPaths, const QString & dataRoot,
+	const QString & atlasFileBase, const QString & atlasGameBase,
+	QString * error )
+{
+	auto fail = [error]( const QString & message ) {
+		if ( error )
+			*error = message;
+		return false;
+	};
+	constexpr int AW = 4096, AH = 2048, CELL = 256;
+	constexpr int COLS = AW / CELL, ROWS = AH / CELL;   // 16 x 8 = 128 cells
+	constexpr float INSET = 2.0f;                       // texels, against mip bleed
+
+	const QString atlasDds = atlasGameBase + QStringLiteral( ".DDS" );
+	const QString atlasNrm = atlasGameBase + QStringLiteral( "_n.DDS" );
+
+	/* Pass 1: find every atlasable shape and give each unique diffuse a
+	 * cell. Atlasable = UVs inside [0,1] (tiling breaks under an atlas). */
+	QHash<QString, int> cellOf;         // lowercased tex0 -> cell index
+	QHash<QString, QPair<QString, QString>> cellTex;   // key -> (tex0, tex1)
+	int overflow = 0, tilingShapes = 0;
+
+	auto shapeInfo = [&]( NifModel & nif, const QModelIndex & iShape,
+		QString & tex0, QString & tex1, bool & inRange ) -> bool {
+		QModelIndex iShader = nif.getBlockIndex( nif.getLink( iShape, "Shader Property" ) );
+		if ( !iShader.isValid() )
+			return false;
+		QModelIndex iTexSet = nif.getBlockIndex( nif.getLink( iShader, "Texture Set" ) );
+		if ( !iTexSet.isValid() )
+			return false;
+		QModelIndex iArr = nif.getIndex( iTexSet, "Textures" );
+		if ( !iArr.isValid() )
+			return false;
+		tex0 = nif.get<QString>( nif.getIndex( iArr, 0 ) );
+		tex1 = nif.get<QString>( nif.getIndex( iArr, 1 ) );
+		if ( tex0.isEmpty() || tex0.compare( atlasDds, Qt::CaseInsensitive ) == 0 )
+			return false;
+		inRange = true;
+		QModelIndex iVerts = nif.getIndex( iShape, "Vertex Data" );
+		const int numVerts = int( nif.get<quint32>( iShape, "Num Vertices" ) );
+		if ( !iVerts.isValid() || numVerts <= 0 )
+			return false;
+		for ( int v = 0; v < numVerts && inRange; v++ ) {
+			const Vector2 uv = nif.get<HalfVector2>(
+				nif.index( v, 0, iVerts ), "UV" );
+			if ( uv[0] < -0.002f || uv[0] > 1.002f
+				|| uv[1] < -0.002f || uv[1] > 1.002f )
+				inRange = false;
+		}
+		return true;
+	};
+
+	for ( const QString & path : btoPaths ) {
+		NifModel nif;
+		if ( !nif.loadFromFile( path ) )
+			continue;
+		for ( int b = 0; b < nif.getBlockCount(); b++ ) {
+			QModelIndex iShape = nif.getBlockIndex( b );
+			if ( !nif.isNiBlock( iShape, "BSSubIndexTriShape" )
+				&& !nif.isNiBlock( iShape, "BSTriShape" ) )
+				continue;
+			QString tex0, tex1;
+			bool inRange = false;
+			if ( !shapeInfo( nif, iShape, tex0, tex1, inRange ) )
+				continue;
+			if ( !inRange ) {
+				tilingShapes++;
+				continue;
+			}
+			const QString key = tex0.toLower();
+			if ( cellOf.contains( key ) )
+				continue;
+			if ( cellOf.size() >= COLS * ROWS ) {
+				overflow++;
+				continue;
+			}
+			cellTex.insert( key, qMakePair( tex0, tex1 ) );
+			cellOf.insert( key, cellOf.size() );
+		}
+	}
+	if ( cellOf.isEmpty() )
+		return fail( QStringLiteral( "no atlasable shapes in the input files" ) );
+
+	/* Pass 2: compose the sheets. Each cell is the source texture sampled
+	 * at the mip whose texel footprint matches a 256-wide cell. */
+	std::vector<quint32> sheet( size_t( AW ) * AH, 0x00000000U );
+	std::vector<quint32> nrmSheet( size_t( AW ) * AH, 0xFF8080FFU );
+	QHash<QString, DDSTexture16 *> texCache;
+	for ( auto it = cellOf.constBegin(); it != cellOf.constEnd(); ++it ) {
+		const int cx = ( it.value() % COLS ) * CELL;
+		const int cy = ( it.value() / COLS ) * CELL;
+		const QPair<QString, QString> & texes = cellTex[it.key()];
+		const DDSTexture16 * d = lodgenLoadTexture( dataRoot, texes.first, texCache );
+		const DDSTexture16 * nm = texes.second.isEmpty() ? nullptr
+			: lodgenLoadTexture( dataRoot, texes.second, texCache );
+		for ( int y = 0; y < CELL; y++ ) {
+			for ( int x = 0; x < CELL; x++ ) {
+				const float u = ( float( x ) + 0.5f ) / CELL;
+				const float v = ( float( y ) + 0.5f ) / CELL;
+				quint32 dp = 0xFF808080U, np = 0xFF8080FFU;
+				if ( d ) {
+					const float mip = qBound( 0.0f,
+						std::log2( qMax( 1.0f, float( d->getWidth() ) / CELL ) ),
+						float( d->getMaxMipLevel() ) );
+					const FloatVector4 c = d->getPixelT( u, v, mip );
+					dp = ( quint32( qBound( 0, int( c[3] * 255.0f + 0.5f ), 255 ) ) << 24 )
+						| ( quint32( qBound( 0, int( c[0] * 255.0f + 0.5f ), 255 ) ) << 16 )
+						| ( quint32( qBound( 0, int( c[1] * 255.0f + 0.5f ), 255 ) ) << 8 )
+						| quint32( qBound( 0, int( c[2] * 255.0f + 0.5f ), 255 ) );
+				}
+				if ( nm ) {
+					const float mip = qBound( 0.0f,
+						std::log2( qMax( 1.0f, float( nm->getWidth() ) / CELL ) ),
+						float( nm->getMaxMipLevel() ) );
+					const FloatVector4 c = nm->getPixelT( u, v, mip );
+					np = 0xFF000000U
+						| ( quint32( qBound( 0, int( c[0] * 255.0f + 0.5f ), 255 ) ) << 16 )
+						| ( quint32( qBound( 0, int( c[1] * 255.0f + 0.5f ), 255 ) ) << 8 )
+						| quint32( qBound( 0, int( c[2] * 255.0f + 0.5f ), 255 ) );
+				}
+				sheet[size_t( cy + y ) * AW + cx + x] = dp;
+				nrmSheet[size_t( cy + y ) * AW + cx + x] = np;
+			}
+		}
+	}
+	for ( DDSTexture16 * t : texCache )
+		delete t;
+
+	/* Pass 3: repoint the shapes and remap their UVs into the cells. */
+	int movedShapes = 0;
+	for ( const QString & path : btoPaths ) {
+		NifModel nif;
+		if ( !nif.loadFromFile( path ) )
+			continue;
+		bool changed = false;
+		for ( int b = 0; b < nif.getBlockCount(); b++ ) {
+			QModelIndex iShape = nif.getBlockIndex( b );
+			if ( !nif.isNiBlock( iShape, "BSSubIndexTriShape" )
+				&& !nif.isNiBlock( iShape, "BSTriShape" ) )
+				continue;
+			QString tex0, tex1;
+			bool inRange = false;
+			if ( !shapeInfo( nif, iShape, tex0, tex1, inRange ) || !inRange )
+				continue;
+			auto cellIt = cellOf.constFind( tex0.toLower() );
+			if ( cellIt == cellOf.constEnd() )
+				continue;
+			const float cx = float( ( cellIt.value() % COLS ) * CELL );
+			const float cy = float( ( cellIt.value() / COLS ) * CELL );
+			nif.setState( BaseModel::Processing );
+			QModelIndex iVerts = nif.getIndex( iShape, "Vertex Data" );
+			const int numVerts = int( nif.get<quint32>( iShape, "Num Vertices" ) );
+			for ( int v = 0; v < numVerts; v++ ) {
+				QModelIndex row = nif.index( v, 0, iVerts );
+				const Vector2 uv = nif.get<HalfVector2>( row, "UV" );
+				const float su = qBound( 0.0f, uv[0], 1.0f );
+				const float sv = qBound( 0.0f, uv[1], 1.0f );
+				nif.set<HalfVector2>( row, "UV", HalfVector2( Vector2(
+					( cx + INSET + su * ( CELL - 2.0f * INSET ) ) / AW,
+					( cy + INSET + sv * ( CELL - 2.0f * INSET ) ) / AH ) ) );
+			}
+			nif.restoreState();
+			QModelIndex iShader = nif.getBlockIndex( nif.getLink( iShape, "Shader Property" ) );
+			QModelIndex iTexSet = nif.getBlockIndex( nif.getLink( iShader, "Texture Set" ) );
+			QModelIndex iArr = nif.getIndex( iTexSet, "Textures" );
+			nif.set<QString>( nif.getIndex( iArr, 0 ), atlasDds );
+			nif.set<QString>( nif.getIndex( iArr, 1 ), atlasNrm );
+			changed = true;
+			movedShapes++;
+		}
+		if ( changed && !nif.saveToFile( path ) )
+			return fail( QString( "could not rewrite %1" ).arg( path ) );
+	}
+
+	if ( !lodgenWriteDds( atlasFileBase + QStringLiteral( ".DDS" ), AW, AH, sheet ) )
+		return fail( QStringLiteral( "could not write the atlas sheet" ) );
+	if ( !lodgenWriteDds( atlasFileBase + QStringLiteral( "_n.DDS" ), AW, AH, nrmSheet ) )
+		return fail( QStringLiteral( "could not write the atlas normal sheet" ) );
+	fprintf( stderr, "atlas: %d textures in cells, %d shapes moved, "
+		"%d tiling shapes kept direct, %d textures past capacity\n",
+		cellOf.size(), movedShapes, tilingShapes, overflow );
+	if ( error )
+		error->clear();
+	return true;
+}

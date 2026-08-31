@@ -2294,7 +2294,7 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 	bool haveRegion, const int * region, const QString & outDir,
 	bool haveObjects, const QString & dataRoot, bool identity,
 	const QString & texDir, bool geomorph, bool terrainIdentity,
-	const QString & impostors, bool listCandidates )
+	const QString & impostors, bool listCandidates, bool atlas )
 {
 	if ( listCandidates && haveRegion ) {
 		EsmWorld world;
@@ -2379,6 +2379,7 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 		const int x0 = floorTo( region[0], d ), y0 = floorTo( region[1], d );
 		QDir().mkpath( outDir );
 		int done = 0, skipped = 0, failed = 0;
+		QStringList writtenBto;
 		for ( int cy = y0; cy <= region[3]; cy += d ) {
 			for ( int cx = x0; cx <= region[2]; cx += d ) {
 				{
@@ -2431,6 +2432,7 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 							.arg( world.worldspaceEdid() ).arg( d ).arg( cx ).arg( cy );
 						if ( nif.saveToFile( outDir + "/" + name ) ) {
 							done++;
+							writtenBto.append( outDir + "/" + name );
 							out() << "[" << done << "] " << name << Qt::endl;
 							out().flush();
 							if ( oopts.identity ) {
@@ -2444,6 +2446,23 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 						}
 					}
 				}
+			}
+		}
+		if ( atlas && !writtenBto.isEmpty() ) {
+			const QString ws = world.worldspaceEdid();
+			const QString atlasDir = texDir.isEmpty() ? outDir : texDir;
+			QDir().mkpath( atlasDir );
+			QString aerr;
+			if ( !lodgenBuildAtlas( writtenBto,
+				dataRoot.isEmpty()
+					? QStringLiteral( "E:/Tools/Fallout 4/DataUnpacked/Data" )
+					: dataRoot,
+				atlasDir + "/" + ws + QStringLiteral( "Objects" ),
+				QString( "Textures\\Terrain\\%1\\%1Objects" ).arg( ws ), &aerr ) ) {
+				err() << "atlas: " << aerr << Qt::endl;
+				failed++;
+			} else {
+				out() << "atlas written: " << ws << "Objects.DDS (+_n)" << Qt::endl;
 			}
 		}
 		out() << done << " chunk(s) written to " << outDir
@@ -3635,8 +3654,11 @@ int usage()
 		  << "                                          inspect a worldspace / one cell:\n"
 		  << "                                          LAND heights, refs, LOD models\n"
 		  << "  lodgen <file.esm> --worldspace HEX --terrain-region X0 Y0 X1 Y1\n"
-		  << "         [--dim 4] --out-dir DIR         sweep: every chunk touching the\n"
-		  << "                                          cell region, vanilla file naming\n"
+		  << "         [--dim 4] --out-dir DIR [--atlas] sweep: every chunk touching the\n"
+		  << "                                          cell region, vanilla file naming;\n"
+		  << "                                          --atlas packs the swept BTOs'\n"
+		  << "                                          non-tiling textures onto one\n"
+		  << "                                          4096x2048 <ws>Objects sheet (+_n)\n"
 		  << "  lodgen <file.esm> --worldspace HEX --objects X Y [--dim 4]\n"
 		  << "         [--data-root DIR] [--no-identity] -o OUT.bto\n"
 		  << "                                          rung 2: stitch one object chunk\n"
@@ -3741,6 +3763,7 @@ int nifskopeCliMain( const QStringList & args )
 	bool lgGeomorph = false;
 	bool lgTerrainIdentity = false;
 	QString lgImpostors;
+	bool lgAtlas = false;
 	bool lgListCandidates = false;
 	bool constraintsOnly = false;
 	bool skeletonOnly = false;
@@ -3804,6 +3827,7 @@ int nifskopeCliMain( const QStringList & args )
 		else if ( t == QLatin1String( "--geomorph" ) ) lgGeomorph = true;
 		else if ( t == QLatin1String( "--terrain-identity" ) ) lgTerrainIdentity = true;
 		else if ( t == QLatin1String( "--impostors" ) ) lgImpostors = next();
+		else if ( t == QLatin1String( "--atlas" ) ) lgAtlas = true;
 		else if ( t == QLatin1String( "--list-impostor-candidates" ) ) lgListCandidates = true;
 		else if ( t == QLatin1String( "--roundtrip" ) ) roundTrip = true;
 		else if ( t == QLatin1String( "--constraints" ) ) constraintsOnly = true;
@@ -3940,7 +3964,7 @@ int nifskopeCliMain( const QStringList & args )
 			lgHaveTerrain, lgChunk[0], lgChunk[1], lgDim, outFile,
 			lgHaveRegion, lgRegion, lgOutDir,
 			lgHaveObjects, lgDataRoot, lgIdentity, lgTexDir, lgGeomorph,
-			lgTerrainIdentity, lgImpostors, lgListCandidates );
+			lgTerrainIdentity, lgImpostors, lgListCandidates, lgAtlas );
 	else if ( cmd == QLatin1String( "anim-setup" ) )
 		rc = cmdAnimSetup( file, block, controllers, sequence, newSequence,
 						   standalone, effectVar, intVar, listOnly, outFile );

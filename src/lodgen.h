@@ -96,4 +96,14 @@ bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
 bool lodgenBakeTerrainTextures( const EsmWorld & world, int chunkX, int chunkY,
 	int dim, const QString & dataRoot, const QString & outDir, QString * error );
 
+/* Object atlas pass (vanilla-style: one 4096x2048 sheet per worldspace).
+ * Post-processes generated .bto files: shapes whose UVs sit inside [0,1]
+ * move onto 256x256 atlas cells (diffuse + matching normal sheet, 2-texel
+ * inset against mip bleed) and their texture sets are repointed at
+ * atlasGameBase (+".DDS"/"_n.DDS"); tiling shapes keep their source
+ * textures. Writes atlasFileBase(.DDS/_n.DDS) and rewrites the files. */
+bool lodgenBuildAtlas( const QStringList & btoPaths, const QString & dataRoot,
+	const QString & atlasFileBase, const QString & atlasGameBase,
+	QString * error );
+
 #endif // LODGEN_H
