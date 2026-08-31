@@ -7,6 +7,18 @@ the measured format groundwork is
 This document is the execution plan: rungs, deliverables, verification,
 risks. Each rung ships independently.
 
+**STATUS 2026-08-31 (one sitting, 149a120..0a69846):** rungs 0, 1, 2
+SHIPPED and harnessed (lodgen_terrain.sh 14/14); rung 3 items shipped:
+per-placement AO bake, terrain texture baking v1 (splat -> DDS;
+calibration vs vanilla's grading open), instance manifests, geomorph
+weights (--geomorph, gated). One sweep command emits BTR + BTO +
+manifests + texture bakes per chunk. REMAINING: the impostor card baker
+(needs an ortho capture hook -- the one subsystem requiring new render
+infrastructure), the GUI World LOD manager with live preview, LTEX-class/
+wetness terrain VERTEX bakes (CS terrain profile), BC compression for the
+bakes, splat calibration, and the two gates: bungo's in-game load and the
+stock-engine tolerance checks (fat desc / alpha / EyeData without CS).
+
 ## What is being built
 
 NifSkope-WW becomes an FO4 world-LOD generator: base-game-parity terrain

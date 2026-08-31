@@ -68,6 +68,18 @@ descriptors, density, surface agreement with shifted control, the skirt
 invariant, water parity, and the identity contract (every triangle
 carries exactly ONE object id; manifest covers the id range; AO varies).
 
+### Later the same sitting: texture bakes, instances, geomorph
+
+Terrain texture baking v1 (LAND splat + LTEX->TXST textures, footprint-
+matched mip sampling via the vendored DDSTexture16 -- whose coordinates
+are NORMALIZED 0..1 -- to uncompressed engine-loadable DDS + heightfield
+_msn; calibration against vanilla's graded bakes stays open). Instance
+manifests: bases repeated >=8x listed with their identity indices so a
+CS consumer can draw them instanced and kill the stitched fragments.
+Geomorph weights: --geomorph adds EYEDATA to the terrain desc, each
+vertex carrying its world delta to the parent ring's surface --
+continuous LOD transitions as file data. Harness 14/14 throughout.
+
 ### Still chartered (next sessions)
 
 Terrain texture baking (needs a BC1 writer), the impostor card baker
