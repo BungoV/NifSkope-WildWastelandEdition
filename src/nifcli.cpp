@@ -2457,8 +2457,10 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 				dataRoot.isEmpty()
 					? QStringLiteral( "E:/Tools/Fallout 4/DataUnpacked/Data" )
 					: dataRoot,
-				atlasDir + "/" + ws + QStringLiteral( "Objects" ),
-				QString( "Textures\\Terrain\\%1\\%1Objects" ).arg( ws ), &aerr ) ) {
+				atlasDir + "/" + ws + QStringLiteral( ".Objects" ),
+				// vanilla convention: data\Textures\Terrain\<ws>\Objects\<ws>.Objects.DDS
+				QString( "data\\Textures\\Terrain\\%1\\Objects\\%1.Objects" ).arg( ws ),
+				&aerr ) ) {
 				err() << "atlas: " << aerr << Qt::endl;
 				failed++;
 			} else {
@@ -2847,11 +2849,19 @@ int cmdVerts( const QString & file )
 			  << " '" << nif.get<QString>( iShape, "Name" ) << "'" << Qt::endl;
 		const BSVertexDesc desc( nif.get<BSVertexDesc>( iShape, "Vertex Desc" ) );
 		const bool full = ( desc.GetFlags() & VertexFlags::VF_FULLPREC );
+		const bool colors = ( desc.GetFlags() & VertexFlags::VF_COLORS );
 		for ( int v = 0; v < numVerts; v++ ) {
 			QModelIndex row = nif.index( v, 0, iVerts );
 			const Vector3 p = full ? nif.get<Vector3>( row, "Vertex" )
 				: Vector3( nif.get<HalfVector3>( row, "Vertex" ) );
-			out() << "v " << p[0] << " " << p[1] << " " << p[2] << Qt::endl;
+			out() << "v " << p[0] << " " << p[1] << " " << p[2];
+			if ( colors ) {
+				// LODGEN identity: object index = R + G*256
+				const ByteColor4 c = nif.get<ByteColor4>( row, "Vertex Colors" );
+				out() << " " << ( int( c[0] * 255.0f + 0.5f )
+					+ int( c[1] * 255.0f + 0.5f ) * 256 );
+			}
+			out() << Qt::endl;
 		}
 	}
 	return 0;

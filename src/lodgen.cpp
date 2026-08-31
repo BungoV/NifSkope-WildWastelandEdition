@@ -1174,14 +1174,19 @@ bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
 	for ( const EsmRefr & r : refs ) {
 		if ( r.initiallyDisabled || r.deleted || !r.base )
 			continue;
+		/* Bethesda's stored euler angles are applied NEGATED relative to
+		 * Matrix::fromEuler: world R = Rx(-x)·Ry(-y)·Rz(-z). Proven against
+		 * vanilla chunks on multi-axis-rotated refs (RockCliff at
+		 * 38°/33°/77°: 62% vertex match under this convention vs 14% under
+		 * fromEuler(+x,+y,+z); pure-Z road pieces confirm too). */
 		Matrix rm;
-		rm.fromEuler( r.rot[0], r.rot[1], r.rot[2] );
+		rm.fromEuler( -r.rot[0], -r.rot[1], -r.rot[2] );
 		const Vector3 rp( r.pos[0], r.pos[1], r.pos[2] );
 		if ( std::memcmp( &r.baseType, "SCOL", 4 ) == 0 ) {
 			for ( const EsmScolPart & part : world.scolParts( r.base ) ) {
 				for ( const EsmScolPlacement & pl : part.placements ) {
 					Matrix pm;
-					pm.fromEuler( pl.rot[0], pl.rot[1], pl.rot[2] );
+					pm.fromEuler( -pl.rot[0], -pl.rot[1], -pl.rot[2] );
 					LodPlacement out;
 					out.base = part.base;
 					out.pos = rp + rm * ( Vector3( pl.pos[0], pl.pos[1],
@@ -1253,8 +1258,16 @@ bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
 		 * tree's card set and mirrors half of them in U, so distant forests
 		 * stop reading as copies. Rotation about the tree's own Z is safe —
 		 * crossed-card LOD models are radially symmetric by construction. */
+		/* NOT a bare substring test: "sTREEt" — the first cut randomly spun
+		 * every street and highway piece downtown. Tree records, the LOD
+		 * trees folder, and tree-prefixed model names only. */
+		const int slash = qMax( model.lastIndexOf( QChar( '\\' ) ),
+			model.lastIndexOf( QChar( '/' ) ) );
+		const QString modelFile = model.mid( slash + 1 ).toLower();
 		const bool isTree = std::memcmp( &base.type, "TREE", 4 ) == 0
-			|| model.contains( QLatin1String( "tree" ), Qt::CaseInsensitive );
+			|| model.contains( QLatin1String( "\\trees\\" ), Qt::CaseInsensitive )
+			|| model.contains( QLatin1String( "/trees/" ), Qt::CaseInsensitive )
+			|| modelFile.startsWith( QLatin1String( "tree" ) );
 		quint32 treeHash = 0;
 		if ( isTree ) {
 			treeHash = ( quint32( qRound( r.pos[0] ) ) * 2654435761U )

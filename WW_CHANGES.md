@@ -2,6 +2,25 @@
 
 ## 2026-08-31 — LODGEN: NifSkope generates Fallout 4's world LOD
 
+### REFR euler convention fix: object placement is now vertex-exact
+
+- bungo spotted a rotated highway in the comparison screenshots that
+  the audit's aggregate medians had forgiven. Per-object orphan
+  analysis (identity channel + `verts` now printing the object index)
+  ranked the worst offenders: all multi-axis-rotated refs. Testing four
+  candidate conventions per-object against vanilla settled it: the
+  engine applies REFR angles NEGATED into our fromEuler (world
+  R = Rx(-x)Ry(-y)Rz(-z)) - 62% vs 14% vertex match on a RockCliff at
+  38/33/77 degrees. With the fix, downtown and dim16 chunks measure NN
+  median 0.0u / p90 0.0-3.6u / 98-100% within 64u BOTH directions -
+  vertex-exact placement. SCOL part rotations use the same convention.
+- Same pass: the tree repetition classifier matched "sTREEt" and spun
+  street/highway pieces (now TREE records, the trees folder, or
+  tree-prefixed model names only), and --atlas output uses vanilla's
+  exact naming (data\Textures\Terrain\<ws>\Objects\<ws>.Objects.DDS).
+  Mistake recorded in docs/MISTAKES.md (aggregate-metric blindness +
+  convention extrapolation). Harness 18/18.
+
 ### LODGEN completion round: six items + vanilla parity audit
 
 One overnight batch (bungo's list, then "parity check with vanilla"):

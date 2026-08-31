@@ -3,6 +3,34 @@
 What went wrong, why it went wrong, and what stops it next time. Newest first.
 Kept because the same shapes keep coming back in different clothes.
 
+## 2026-08-31 — 93% coverage passed while every rotated object was wrong
+
+**What:** LODGEN applied REFR euler angles straight into `Matrix::fromEuler`;
+the engine's convention is the NEGATED angles (world R = Rx(-x)·Ry(-y)·Rz(-z)).
+Every object with a non-trivial rotation was spun wrongly all night, through
+an audit that reported "89–96% mutual vertex coverage" — and bungo saw a
+rotated highway in the first screenshot batch.
+
+**Why (two shapes):** First, the aggregate metric: most refs are Z-rotated
+boxes and radially-fuzzy trees/rocks, so a per-vertex median forgives a
+wrongly-spun minority; a metric passed over a population cleared every
+individual in it. Second, convention extrapolation: `fromEuler` was PROVEN
+exact for SAM pose files, and that proof was silently carried over to a
+different producer (engine REFR records). A convention proof binds one data
+source only.
+
+**Instead:** parity means per-ELEMENT checks on the elements most able to
+fail — here, the refs with large X/Y rotations, found by grouping orphan
+verts by identity index and ranking. And when adopting a rotation/axis
+convention for a new record type, test candidate conventions against ground
+truth for that record type before writing any of them into the generator
+(four candidates, one afternoon vertex test, 62% vs 14% settled it).
+
+Same family: 2026-08-25's five blind comparisons — agreement across weak
+checks is not coverage. The tree classifier bug found in the same pass
+("sTREEt" contains "tree") is the oldest shape of all: substring matching
+is not word matching.
+
 ## 2026-08-25 — Five comparisons agreed, and none of them could see the field
 
 **What:** the inertia FRAME at `dyn_inertia +0x40` was written as the identity on

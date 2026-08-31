@@ -20,7 +20,7 @@ trees + ponds), (0,-4) dim 4 (dense downtown), (-16,16) dim 16
 | Terrain surface | harness surface-height test: median |dz| 0.00 vs vanilla at shared sample points (authoritative; see divergence note on vertex sets) |
 | Terrain density | per-CHUNK budget ~2100 tris on every ring, matching vanilla's measured 128/32/8/2 tris-per-cell falloff (ours 2267/2252/2280/2260 at 0,0) |
 | Water rule | hasWater flag + resolved height (explicit XCLW else WRLD default) + exposure above the cell's terrain minimum. Harbor chunk 0,0: our 12 wet cells at height 450 equal vanilla's set EXACTLY (zero difference either way); Sanctuary: only the two explicit-height ponds, like vanilla |
-| Object placement | mutual nearest-vertex coverage 89–96% within 64 miniature units, medians 15–27u, both directions, dim4 and dim16 (Sanctuary incl. SCOL-expanded houses: ours 34,958v vs vanilla 33,703v) |
+| Object placement | after the euler-convention fix: downtown and dim16 medians 0.0u (p90 0.0–3.6u), 98–100% within 64u both directions — vertex-exact against vanilla. Sanctuary 9–10u median / 98–99% (residual = designed tree rotation+mirror). REFR world rotation = `fromEuler(-x,-y,-z)`: Bethesda's stored angles are negated relative to NifSkope's convention, proven per-object on multi-axis RockCliff refs (62% vs 14% vertex match) |
 | Ring dropout | empty MNAM slot drops the object, per vanilla: dim16 (-16,16) ours 7,646v vs vanilla 7,122v (was 244,186v with slot substitution — now opt-in `slotFallback`) |
 | Skirt | duplicated border ring dropped 1000 world units, harness-held invariant |
 | SCOL contribution | Sanctuary tris 25,475 vs vanilla 24,482 (104%); was 41% before expansion |
@@ -54,3 +54,25 @@ trees + ponds), (0,-4) dim 4 (dense downtown), (-16,16) dim 16
   flags (vanilla water names are empty strings, same as ours).
 - In-game load remains the only gate for engine acceptance — not
   claimable from file-level parity.
+
+## Post-audit follow-up (same night)
+
+bungo spotted a rotated highway in the screenshots that the aggregate NN
+medians had hidden. Per-object orphan analysis (identity channel + the
+extended `verts` dump) traced it to the REFR euler convention: angles
+must be NEGATED into `fromEuler` (world R = Rx(-x)·Ry(-y)·Rz(-z)),
+tested per-object against vanilla across four candidate conventions.
+With the fix, object chunks are vertex-exact (medians 0.0u). Lesson
+recorded in docs/MISTAKES.md: aggregate medians pass while individual
+objects are wrong — verify per-element, and never extrapolate a
+convention proven on one data source (SAM poses) to another (REFR).
+Also fixed in the same pass: the tree classifier matched "sTREEt" and
+spun street pieces (now TREE records / trees folder / tree-prefixed
+names only), and the atlas now uses vanilla's exact naming
+(`data\Textures\Terrain\<ws>\Objects\<ws>.Objects.DDS`).
+
+Viewer note: magenta shapes in NifSkope comparison screenshots are a
+texture-RESOLUTION artifact — our BTOs reference source LOD textures
+(verified present on disk) that NifSkope's resource paths don't search;
+vanilla BTOs reference their prebuilt atlas. In-game deployment or the
+`--atlas` pass resolves it.
