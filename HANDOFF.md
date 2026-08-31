@@ -15,6 +15,16 @@ Updated **2026-08-30**. Edition **0.3.3**, packaged and released. Build green.
 The current work is a sweep of the **compiled-collision backlog**, and since
 2026-08-21 it is being tested IN THE GAME, which changed what the work is.
 
+## CHARTERED 2026-08-31: NifSkope generates FO4's world LOD
+
+bungo-scoped campaign: base-game .btr/.bto generation plus per-placement
+vertex-colour identity for FO4CS. **Execution plan =
+[docs/LODGEN_PLAN.md](docs/LODGEN_PLAN.md)** (rungs, verification, risks);
+design contract = top of [docs/TO_BE_IMPLEMENTED.md](docs/TO_BE_IMPLEMENTED.md);
+format groundwork = the measured FO4-vs-FO76 comparison in the FO4CS Codex.
+First session: compile the vendored esmfile.cpp, read one cell's LAND,
+feed the existing terrain builder, diff against vanilla.
+
 ## New 2026-08-30: NifSkope opens Fallout 76 terrain (.btd)
 
 A `.btd` is the whole worldspace's heightmap database, not a NIF — FO76 has no
