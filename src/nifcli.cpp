@@ -2871,6 +2871,10 @@ int cmdVerts( const QString & file )
 				out() << " " << ( int( c[0] * 255.0f + 0.5f )
 					+ int( c[1] * 255.0f + 0.5f ) * 256 );
 			}
+			if ( desc.GetFlags() & VertexFlags::VF_UV ) {
+				const Vector2 uv = nif.get<HalfVector2>( row, "UV" );
+				out() << " uv " << uv[0] << " " << uv[1];
+			}
 			out() << Qt::endl;
 		}
 	}

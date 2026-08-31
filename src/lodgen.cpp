@@ -1040,7 +1040,7 @@ namespace
 {
 // defined with the texture-bake section below (same anonymous namespace)
 bool lodgenWriteDds( const QString & path, int w, int h,
-	const std::vector<quint32> & bgra );
+	const std::vector<quint32> & bgra, bool bc3 = false );
 
 struct LodgenCard
 {
@@ -1431,6 +1431,14 @@ bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
 			QStringLiteral( "BSSubIndexTriShape" ),
 			bucket.hasAlpha ? QStringLiteral( "obj-at" ) : QStringLiteral( "obj" ),
 			float( dim ) );
+		/* Vanilla BTO shapes carry the chunk's WORLD position in their own
+		 * translation (verts stay chunk-relative miniatures) — the engine
+		 * does NOT filename-place object chunks the way it places terrain.
+		 * Measured: Commonwealth.4.-20.24.BTO shape T = (-81920, 98304, 0)
+		 * = chunk * 4096; its .BTR Land sits at T = 0. bungo spotted the
+		 * origin mismatch in the viewer. */
+		nif->set<Vector3>( iShape, "Translation",
+			Vector3( cwX, cwY, 0.0f ) );
 
 		QVector<Triangle> tris;
 		QVector<QPair<int, int>> segRuns;
@@ -1554,10 +1562,13 @@ quint16 lodgenPack565( quint32 bgra )
 }
 
 void lodgenEncodeBC1Block( const quint32 * img, int w, int h, int bx, int by,
-	quint8 * out )
+	quint8 * out, bool allowPunch = true )
 {
 	// endpoints: the block's min/max-luminance colours; blocks holding
-	// transparent pixels (alpha < 128) use BC1's punch-through mode.
+	// transparent pixels (alpha < 128) use BC1's punch-through mode when
+	// allowPunch (a BC3 colour block is always 4-colour — its alpha lives
+	// in the alpha block, and RGB under transparent texels must survive so
+	// filtering doesn't pull edges to black).
 	// Edge blocks of non-multiple-of-4 mips CLAMP their reads — the
 	// unclamped version walked off the last row of a 558-wide mip.
 	int bestLo = 0, bestHi = 0;
@@ -1570,7 +1581,7 @@ void lodgenEncodeBC1Block( const quint32 * img, int w, int h, int bx, int by,
 			const int sy = qMin( by * 4 + y, h - 1 );
 			const quint32 p = img[size_t( sy ) * w + sx];
 			c[y * 4 + x] = p;
-			if ( ( ( p >> 24 ) & 0xFF ) < 128 ) {
+			if ( allowPunch && ( ( p >> 24 ) & 0xFF ) < 128 ) {
 				punch = true;
 				continue;
 			}
@@ -1660,12 +1671,13 @@ void lodgenEncodeBC1Block( const quint32 * img, int w, int h, int bx, int by,
 } // namespace
 
 bool lodgenWriteDds( const QString & path, int w, int h,
-	const std::vector<quint32> & bgra )
+	const std::vector<quint32> & bgra, bool bc3 )
 {
 	QFile f( path );
 	if ( !f.open( QIODevice::WriteOnly ) )
 		return false;
-	// mip chain by box filter, down to 4x4 (BC1 block floor)
+	// mip chain by box filter, down to 4x4 (block floor); BC3 carries alpha
+	// through the chain, BC1 stays opaque
 	std::vector<std::vector<quint32>> mips;
 	mips.push_back( bgra );
 	int mw = w, mh = h;
@@ -1675,15 +1687,17 @@ bool lodgenWriteDds( const QString & path, int w, int h,
 		std::vector<quint32> next( size_t( nw ) * nh );
 		for ( int y = 0; y < nh; y++ )
 			for ( int x = 0; x < nw; x++ ) {
-				quint32 acc[3] = { 0, 0, 0 };
+				quint32 acc[4] = { 0, 0, 0, 0 };
 				for ( int sy = 0; sy < 2; sy++ )
 					for ( int sx = 0; sx < 2; sx++ ) {
 						const quint32 p = prev[size_t( y * 2 + sy ) * mw + ( x * 2 + sx )];
 						acc[0] += ( p >> 16 ) & 0xFF;
 						acc[1] += ( p >> 8 ) & 0xFF;
 						acc[2] += p & 0xFF;
+						acc[3] += ( p >> 24 ) & 0xFF;
 					}
-				next[size_t( y ) * nw + x] = 0xFF000000U
+				next[size_t( y ) * nw + x] =
+					( ( bc3 ? ( acc[3] / 4 ) : 0xFFU ) << 24 )
 					| ( ( acc[0] / 4 ) << 16 ) | ( ( acc[1] / 4 ) << 8 ) | ( acc[2] / 4 );
 			}
 		mips.push_back( std::move( next ) );
@@ -1691,28 +1705,63 @@ bool lodgenWriteDds( const QString & path, int w, int h,
 		mh = nh;
 	}
 
+	const quint32 blockBytes = bc3 ? 16 : 8;
 	quint32 hdr[32] = { 0 };
 	hdr[0] = 0x20534444;            // 'DDS '
 	hdr[1] = 124;
 	hdr[2] = 0x000A1007;            // caps|height|width|linearsize|pf|mipcount
 	hdr[3] = quint32( h );
 	hdr[4] = quint32( w );
-	hdr[5] = quint32( ( ( w + 3 ) / 4 ) * ( ( h + 3 ) / 4 ) * 8 );
+	hdr[5] = quint32( ( ( w + 3 ) / 4 ) * ( ( h + 3 ) / 4 ) * blockBytes );
 	hdr[7] = quint32( mips.size() );
 	hdr[19] = 32;
 	hdr[20] = 0x4;                  // fourCC
-	hdr[21] = 0x31545844;           // 'DXT1'
+	hdr[21] = bc3 ? 0x35545844U : 0x31545844U;   // 'DXT5' / 'DXT1'
 	hdr[27] = 0x401008;             // caps: complex|texture|mipmap
 	f.write( reinterpret_cast<const char *>( hdr ), 128 );
 	mw = w;
 	mh = h;
 	for ( const std::vector<quint32> & mip : mips ) {
 		const int bw = ( mw + 3 ) / 4, bh = ( mh + 3 ) / 4;
-		std::vector<quint8> block( size_t( bw ) * bh * 8 );
-		for ( int by = 0; by < bh; by++ )
-			for ( int bx = 0; bx < bw; bx++ )
-				lodgenEncodeBC1Block( mip.data(), mw, mh, bx, by,
-					block.data() + ( size_t( by ) * bw + bx ) * 8 );
+		std::vector<quint8> block( size_t( bw ) * bh * blockBytes );
+		for ( int by = 0; by < bh; by++ ) {
+			for ( int bx = 0; bx < bw; bx++ ) {
+				quint8 * out = block.data() + ( size_t( by ) * bw + bx ) * blockBytes;
+				if ( bc3 ) {
+					/* BC3 alpha block: 8-step interpolated palette over the
+					 * block's min/max alpha. */
+					quint8 a[16];
+					quint8 aMin = 255, aMax = 0;
+					for ( int i = 0; i < 16; i++ ) {
+						const int sx = qMin( bx * 4 + ( i & 3 ), mw - 1 );
+						const int sy = qMin( by * 4 + ( i >> 2 ), mh - 1 );
+						a[i] = quint8( mip[size_t( sy ) * mw + sx] >> 24 );
+						aMin = qMin( aMin, a[i] );
+						aMax = qMax( aMax, a[i] );
+					}
+					out[0] = aMax;
+					out[1] = aMin;
+					quint64 bits = 0;
+					quint8 pal[8];
+					pal[0] = aMax;
+					pal[1] = aMin;
+					for ( int k = 1; k < 7; k++ )
+						pal[k + 1] = quint8( ( ( 7 - k ) * aMax + k * aMin ) / 7 );
+					for ( int i = 15; i >= 0; i-- ) {
+						int best = 0, bd = 256;
+						for ( int k = 0; k < 8; k++ ) {
+							const int d = qAbs( int( a[i] ) - int( pal[k] ) );
+							if ( d < bd ) { bd = d; best = k; }
+						}
+						bits = ( bits << 3 ) | quint64( best );
+					}
+					for ( int k = 0; k < 6; k++ )
+						out[2 + k] = quint8( bits >> ( k * 8 ) );
+					out += 8;
+				}
+				lodgenEncodeBC1Block( mip.data(), mw, mh, bx, by, out, !bc3 );
+			}
+		}
 		f.write( reinterpret_cast<const char *>( block.data() ), qint64( block.size() ) );
 		mw = qMax( 4, mw / 2 );
 		mh = qMax( 4, mh / 2 );
@@ -2071,7 +2120,8 @@ bool lodgenBuildAtlas( const QStringList & btoPaths, const QString & dataRoot,
 						std::log2( qMax( 1.0f, float( nm->getWidth() ) / CELL ) ),
 						float( nm->getMaxMipLevel() ) );
 					const FloatVector4 c = nm->getPixelT( u, v, mip );
-					np = 0xFF000000U
+					// alpha carries the source's smoothness/specular channel
+					np = ( quint32( qBound( 0, int( c[3] * 255.0f + 0.5f ), 255 ) ) << 24 )
 						| ( quint32( qBound( 0, int( c[0] * 255.0f + 0.5f ), 255 ) ) << 16 )
 						| ( quint32( qBound( 0, int( c[1] * 255.0f + 0.5f ), 255 ) ) << 8 )
 						| quint32( qBound( 0, int( c[2] * 255.0f + 0.5f ), 255 ) );
@@ -2083,6 +2133,68 @@ bool lodgenBuildAtlas( const QStringList & btoPaths, const QString & dataRoot,
 	}
 	for ( DDSTexture16 * t : texCache )
 		delete t;
+
+	/* Colour dilation: filtering and mips blend RGB across the alpha edge,
+	 * so transparent texels must hold plausible colour, not black — the
+	 * black-fringed mud on tree cards came exactly from here (found by
+	 * bungo's vanilla-vs-atlas colour comparison; vanilla's sheet keeps
+	 * filled RGB under its transparency). Dilate opaque RGB outward, then
+	 * flood what remains with the sheet's average opaque colour. */
+	{
+		quint64 accR = 0, accG = 0, accB = 0, accN = 0;
+		for ( quint32 p : sheet ) {
+			if ( ( p >> 24 ) >= 128 ) {
+				accR += ( p >> 16 ) & 0xFF;
+				accG += ( p >> 8 ) & 0xFF;
+				accB += p & 0xFF;
+				accN++;
+			}
+		}
+		const quint32 avg = accN ? ( ( quint32( accR / accN ) << 16 )
+			| ( quint32( accG / accN ) << 8 ) | quint32( accB / accN ) ) : 0x808080U;
+		std::vector<quint8> filled( sheet.size() );
+		for ( size_t i = 0; i < sheet.size(); i++ )
+			filled[i] = ( sheet[i] >> 24 ) >= 128;
+		for ( int pass = 0; pass < 20; pass++ ) {
+			bool changed = false;
+			std::vector<quint8> nextFilled = filled;
+			for ( int y = 0; y < AH; y++ ) {
+				for ( int x = 0; x < AW; x++ ) {
+					const size_t i = size_t( y ) * AW + x;
+					if ( filled[i] )
+						continue;
+					quint32 r = 0, gc = 0, b = 0, n = 0;
+					for ( int dy = -1; dy <= 1; dy++ ) {
+						for ( int dx = -1; dx <= 1; dx++ ) {
+							const int sx = x + dx, sy = y + dy;
+							if ( sx < 0 || sy < 0 || sx >= AW || sy >= AH )
+								continue;
+							const size_t j = size_t( sy ) * AW + sx;
+							if ( !filled[j] )
+								continue;
+							const quint32 p = sheet[j];
+							r += ( p >> 16 ) & 0xFF;
+							gc += ( p >> 8 ) & 0xFF;
+							b += p & 0xFF;
+							n++;
+						}
+					}
+					if ( n ) {
+						sheet[i] = ( sheet[i] & 0xFF000000U )
+							| ( ( r / n ) << 16 ) | ( ( gc / n ) << 8 ) | ( b / n );
+						nextFilled[i] = 1;
+						changed = true;
+					}
+				}
+			}
+			filled.swap( nextFilled );
+			if ( !changed )
+				break;
+		}
+		for ( size_t i = 0; i < sheet.size(); i++ )
+			if ( !filled[i] )
+				sheet[i] = ( sheet[i] & 0xFF000000U ) | avg;
+	}
 
 	/* Pass 3: repoint the shapes and remap their UVs into the cells. */
 	int movedShapes = 0;
@@ -2130,9 +2242,11 @@ bool lodgenBuildAtlas( const QStringList & btoPaths, const QString & dataRoot,
 			return fail( QString( "could not rewrite %1" ).arg( path ) );
 	}
 
-	if ( !lodgenWriteDds( atlasFileBase + QStringLiteral( ".DDS" ), AW, AH, sheet ) )
+	// BC3, like vanilla's sheet: 8-bit alpha (soft card edges survive) and
+	// RGB kept under transparent texels
+	if ( !lodgenWriteDds( atlasFileBase + QStringLiteral( ".DDS" ), AW, AH, sheet, true ) )
 		return fail( QStringLiteral( "could not write the atlas sheet" ) );
-	if ( !lodgenWriteDds( atlasFileBase + QStringLiteral( "_n.DDS" ), AW, AH, nrmSheet ) )
+	if ( !lodgenWriteDds( atlasFileBase + QStringLiteral( "_n.DDS" ), AW, AH, nrmSheet, true ) )
 		return fail( QStringLiteral( "could not write the atlas normal sheet" ) );
 
 	/* Textures still referenced directly (tiling shapes, cell overflow) are

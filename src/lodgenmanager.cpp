@@ -442,6 +442,15 @@ private:
 	{
 		if ( !previewCheck->isChecked() || !skope )
 			return;
+		// BTO shapes self-place (world translation baked, per vanilla) —
+		// only terrain needs the preview offset
+		if ( tag.endsWith( QStringLiteral( "_bto" ) ) ) {
+			const QString previewPath = QDir::tempPath()
+				+ QStringLiteral( "/lodgen_preview_" ) + tag + QStringLiteral( ".nif" );
+			if ( nif.saveToFile( previewPath ) )
+				skope->addWorkspaceDocumentFromFile( previewPath );
+			return;
+		}
 		QModelIndex root = nif.getBlockIndex( 0 );
 		nif.set<Vector3>( root, "Translation",
 			Vector3( float( cx ) * 4096.0f, float( cy ) * 4096.0f, 0.0f ) );
