@@ -15,6 +15,28 @@ Updated **2026-08-30**. Edition **0.3.3**, packaged and released. Build green.
 The current work is a sweep of the **compiled-collision backlog**, and since
 2026-08-21 it is being tested IN THE GAME, which changed what the work is.
 
+## LODGEN 2026-08-31 (second pass): completion round + parity audit DONE
+
+Overnight batch on bungo's six-item list, every item shipped and pushed
+(149a120..c8d7861): SCOL expansion (Sanctuary 104% of vanilla's tris),
+TES4-MAST formID load-order remapping (mod ESPs merge correctly, DLCs no
+longer collide), splat-bake fixes (BGSM-backed TXSTs + NULL layers +
+VCLR), UV2 extended terrain profile (sky vis + second class; nif.xml
+gained the missing "UV 2" vertex field), deterministic tree repetition
+breaking, and the `--atlas` object atlas pass. Then the chartered
+**vanilla parity audit** — see **docs/LODGEN_PARITY.md** — which found
+and fixed the real water rule (hasWater + default height + exposure
+above cell terrain min; harbor wet-cell set now EQUALS vanilla's), the
+far-ring plain-BSTriShape water type, and empty-MNAM-slot dropout
+(substitution now opt-in `slotFallback`). Terrain budget is per CHUNK
+(~2100 tris on every ring, like vanilla). Manager grew a drag-and-drop
+plugin load-order list + worldspace combo. Harness 18/18 throughout.
+Open gaps (in the parity doc): roads not rasterized into terrain bakes,
+splat grading, and the in-game load gates only bungo can run.
+THREE LODGEN CATEGORIES ratified (TO_BE_IMPLEMENTED.md top): vanilla /
+vanilla+ (engine-legal extras) / improved (CS-exclusive, .pbrm-style
+module gating, legacy fallback).
+
 ## LODGEN 2026-08-31: rungs 0-2 SHIPPED same night, rung 3 started
 
 NifSkope generates FO4 world LOD. **Working now** (WW_CHANGES 2026-08-31,
