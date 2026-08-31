@@ -32,9 +32,11 @@ struct LodgenTerrainOptions
 {
 	int dim = 4;                //!< chunk edge in cells (4/8/16/32)
 	bool water = true;
-	/*! Decimation target, triangles per cell (vanilla dim4 chunks run
-	 * ~130). 0 = no decimation, emit the full 32x32-per-cell grid. The
-	 * simplifier locks the border ring so the skirt stays exact. */
+	/*! Decimation target, triangles per cell AT DIM 4 (vanilla dim4 chunks
+	 * run ~130/cell). The real budget is the chunk total (x16): vanilla
+	 * holds ~2100 tris per chunk on EVERY ring, so per-cell density falls
+	 * 4x per ring (measured 128 -> 32 -> 8 -> 2). 0 = no decimation, emit
+	 * the full 32x32-per-cell grid. */
 	int targetTrisPerCell = 130;
 	/*! CS profile: store per-vertex WORLD height deltas to the parent ring's
 	 * surface in Eye Data, enabling continuous (geomorphed) LOD transitions.

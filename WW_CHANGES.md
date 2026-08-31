@@ -2,6 +2,15 @@
 
 ## 2026-08-31 — LODGEN: NifSkope generates Fallout 4's world LOD
 
+### Terrain budget is per chunk, not per cell (far-ring fix)
+
+- Measured vanilla Commonwealth .btr across the rings: ~2100 tris per
+  CHUNK at every dim (tris/cell falls 128 -> 32 -> 8 -> 2). Our target
+  was per-cell-constant, so a dim32 chunk aimed at ~130k tris - ~60x
+  vanilla's spend. The knob now means tris/cell AT DIM 4 and the x16
+  chunk total holds for the far rings; generated rings measure ~2260
+  tris at dim 4/8/16/32 alike. dim4 output unchanged; harness 18/18.
+
 ### World LOD Manager: load order, worldspace picker, full option set
 
 - The manager's single ESM field is now an ordered plugin list (+/- buttons,

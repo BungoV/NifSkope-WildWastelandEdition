@@ -116,7 +116,12 @@ bool lodgenLandGeometry( const EsmWorld & world, int chunkX, int chunkY,
 			idx.push_back( a ); idx.push_back( a + n + 1 ); idx.push_back( a + n );
 		}
 	if ( targetTrisPerCell > 0 ) {
-		const size_t targetIdx = size_t( targetTrisPerCell ) * dim * dim * 3;
+		/* The budget is per CHUNK, not per cell: vanilla holds every ring
+		 * near ~2100 tris per chunk (measured Commonwealth.{4,8,16,32}.0.0:
+		 * 128 -> 32 -> 8 -> 2 tris/cell), so the knob is calibrated as
+		 * tris-per-cell AT DIM 4 and the far rings inherit the same chunk
+		 * total. */
+		const size_t targetIdx = size_t( targetTrisPerCell ) * 16 * 3;
 		std::vector<unsigned int> simplified( idx.size() );
 		float resultError = 0.0f;
 		const size_t count = meshopt_simplify( simplified.data(), idx.data(), idx.size(),
@@ -366,7 +371,8 @@ bool lodgenBuildTerrainChunk( NifModel * nif, const EsmWorld & world,
 		}
 	}
 	if ( opts.targetTrisPerCell > 0 ) {
-		const size_t targetIdx = size_t( opts.targetTrisPerCell ) * dim * dim * 3;
+		// per-CHUNK budget calibrated at dim 4 — see lodgenLandGeometry
+		const size_t targetIdx = size_t( opts.targetTrisPerCell ) * 16 * 3;
 		std::vector<unsigned int> simplified( idx.size() );
 		float resultError = 0.0f;
 		/* No border lock: vanilla decimates its border too — cracks between

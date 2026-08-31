@@ -191,7 +191,7 @@ public:
 			dimBox->addItem( QString::number( d ) );
 		grid->addWidget( dimBox, row++, 3 );
 
-		grid->addWidget( new QLabel( tr( "Terrain tris/cell (0 = full grid)" ), this ), row, 0 );
+		grid->addWidget( new QLabel( tr( "Terrain tris/cell at dim 4 (0 = full grid)" ), this ), row, 0 );
 		trisSpin = new QSpinBox( this );
 		trisSpin->setRange( 0, 2048 );
 		trisSpin->setValue( 130 );
