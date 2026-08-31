@@ -1,5 +1,49 @@
 # NifSkope — WW Edition: To Be Implemented
 
+## CHARTERED: FO4 LOD generation — bungo-scoped 2026-08-31
+
+NifSkope generates Fallout 4's world LOD — base-game parity plus a few
+additions, the first of them for FO4CS. Groundwork and format knowledge:
+E:\Projects\Fo4CommunityShaders\Codex\lod-fo4-vs-fo76-comparison.md (the
+measured FO4-vs-FO76 comparison; .bto/.btr anatomy, segments, miniature
+scaling, provenance, the BA2 name-hash decoder).
+
+Why this tool: the .btd terrain builder already does grid→seam-closed-
+BSTriShape generation; nifmerge already does transform-composed stitching;
+BA2File reads the archives; the harness culture can hold output against
+vanilla chunks. The genuinely new subsystems are ESM reading (WRLD→CELL→
+REFR→STAT MNAM + LAND; the vendored fo76utils esmfile.cpp sits UNCOMPILED in
+lib/, and the cached wbDefinitionsFO4.pas gives every record layout) and,
+later, texture baking.
+
+The ladder (each rung independently shippable):
+
+  1. **Terrain .btr from LAND records** — per-cell 33×33 heightfields, a
+     simpler input than the .btd the builder already meshes. Water shape from
+     cell water heights (16-segment, per vanilla). Chunk textures can point
+     at vanilla's existing bakes at first.
+  2. **Object .bto stitch** — REFR walk, per-object _LOD.nif inputs at the
+     dim-appropriate rung, miniature transform, per-material weld, 16
+     segments at dim4, multibound bookkeeping. NO atlas in v1: reference the
+     source LOD textures directly (xLODGen runs this way too; the atlas is
+     an optimization pass, not a requirement).
+  3. **Bake passes** — atlas or FO76-style texture arrays, impostor cards
+     for the long tail, possibly instancing manifests for CS. This rung is
+     the asset half of the FO4CS LOD campaign.
+
+ADDITIONS over base-game parity (list open, bungo to extend):
+
+  * **Vertex-colour identity for merged chunk LODs (for FO4CS).** Every
+    stitched vertex carries its source object's identity in the colour
+    channel — RGBA8 = 24-bit object ID + 8 flag bits (class: tree/building/
+    wind...). This dissolves the hybrid-LOD charter's stated objects limit
+    ("BTO merges bake the LOD decision into the mesh") — CS can then do
+    per-object screen-size fade, dither, wind sway and material selection
+    INSIDE a merged chunk. Mechanically: add VF_COLORS to the LOD vertex
+    desc (+4 B/vertex); CS owns the shader. OWED: one in-game check that
+    the stock engine tolerates the fatter desc on chunk meshes when CS is
+    not loaded.
+
 ## BTD terrain: textures, ground cover, colour — OPEN 2026-08-30
 
 Heights shipped 2026-08-30 (WW_CHANGES): a .btd opens through a region picker
