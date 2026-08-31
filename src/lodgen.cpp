@@ -16,6 +16,8 @@ BSD License - see nifskope.h
 #include <cmath>
 #include <vector>
 
+#include "meshoptimizer/src/meshoptimizer.h"
+
 /* Measured constants from Commonwealth.4.-20.24.BTR — see
  * docs/LODGEN_ESM_LAYOUTS.md and the 2026-08-31 dumps. The Land vertex
  * descriptor is vanilla's: flags VERTEX|UV, 12-byte stride (half3 position,
@@ -120,20 +122,99 @@ bool lodgenBuildTerrainChunk( NifModel * nif, const EsmWorld & world,
 
 	const float invDim = 1.0f / float( dim );
 	const float spacing = 128.0f * invDim;   // 128 world units between samples
-	float zMin = 3.4e38f, zMax = -3.4e38f;
 
-	/* Vanilla adds a SKIRT: the border ring is duplicated 1000 world units
-	 * lower and joined to the true border by vertical flaps, hiding cracks
-	 * against neighbouring chunks and rings. Measured on
-	 * Commonwealth.4.-20.24.BTR: border positions appear TWICE, once at the
-	 * LAND height and once exactly 1000 below. */
+	/* Geometry in plain buffers first, so the simplifier can run before any
+	 * model writes. Vanilla adds a SKIRT: the border ring duplicated exactly
+	 * 1000 world units lower, joined by vertical flaps (measured on
+	 * Commonwealth.4.-20.24.BTR: border positions appear TWICE). The
+	 * simplifier locks the border so the skirt stays exact. */
 	constexpr float SKIRT_DROP = 1000.0f;
-	const int borderCount = 4 * ( n - 1 );
-	nif->set<BSVertexDesc>( iLand, "Vertex Desc", LAND_VERTEX_DESC );
-	const quint32 numVerts = quint32( n ) * quint32( n ) + quint32( borderCount );
-	const quint32 numTris = quint32( n - 1 ) * quint32( n - 1 ) * 2 + quint32( borderCount ) * 2;
+	std::vector<float> pos;
+	pos.reserve( size_t( n ) * n * 3 );
+	for ( int row = 0; row < n; row++ ) {
+		for ( int col = 0; col < n; col++ ) {
+			pos.push_back( float( col ) * spacing );
+			pos.push_back( float( row ) * spacing );
+			pos.push_back( grid[size_t( row ) * n + col] * invDim );
+		}
+	}
+	std::vector<unsigned int> idx;
+	idx.reserve( size_t( n - 1 ) * ( n - 1 ) * 6 );
+	for ( int row = 0; row < n - 1; row++ ) {
+		for ( int col = 0; col < n - 1; col++ ) {
+			const unsigned int a = (unsigned int) ( row * n + col );
+			idx.push_back( a ); idx.push_back( a + 1 ); idx.push_back( a + n + 1 );
+			idx.push_back( a ); idx.push_back( a + n + 1 ); idx.push_back( a + n );
+		}
+	}
+	if ( opts.targetTrisPerCell > 0 ) {
+		const size_t targetIdx = size_t( opts.targetTrisPerCell ) * dim * dim * 3;
+		std::vector<unsigned int> simplified( idx.size() );
+		float resultError = 0.0f;
+		/* No border lock: vanilla decimates its border too — cracks between
+		 * neighbouring chunks are exactly what the skirt exists to hide. */
+		const size_t count = meshopt_simplify( simplified.data(), idx.data(), idx.size(),
+			pos.data(), pos.size() / 3, 12, targetIdx, 0.05f, 0, &resultError );
+		simplified.resize( count );
+		idx.swap( simplified );
+	}
+
+	// compact to the surviving vertices
+	std::vector<unsigned int> remap( pos.size() / 3, 0xFFFFFFFFU );
+	std::vector<float> cpos;
+	cpos.reserve( pos.size() );
+	for ( unsigned int & i : idx ) {
+		if ( remap[i] == 0xFFFFFFFFU ) {
+			remap[i] = (unsigned int) ( cpos.size() / 3 );
+			cpos.push_back( pos[size_t( i ) * 3] );
+			cpos.push_back( pos[size_t( i ) * 3 + 1] );
+			cpos.push_back( pos[size_t( i ) * 3 + 2] );
+		}
+		i = remap[i];
+	}
+
+	/* Skirt: walk the perimeter (CCW from above) keeping only the vertices
+	 * the simplifier retained, duplicate them one SKIRT_DROP lower, and flap
+	 * between consecutive survivors. The flaps span whatever gaps decimation
+	 * opened along the border — the same reason vanilla's skirt exists. */
+	{
+		QVector<unsigned int> survivors;
+		auto keep = [&]( int row, int col ) {
+			const unsigned int old = (unsigned int) ( row * n + col );
+			if ( remap[old] != 0xFFFFFFFFU )
+				survivors.append( remap[old] );
+		};
+		for ( int col = 0; col < n - 1; col++ ) keep( 0, col );
+		for ( int row = 0; row < n - 1; row++ ) keep( row, n - 1 );
+		for ( int col = n - 1; col > 0; col-- ) keep( n - 1, col );
+		for ( int row = n - 1; row > 0; row-- ) keep( row, 0 );
+		const size_t ringStart = cpos.size() / 3;
+		for ( unsigned int top : survivors ) {
+			cpos.push_back( cpos[size_t( top ) * 3] );
+			cpos.push_back( cpos[size_t( top ) * 3 + 1] );
+			cpos.push_back( cpos[size_t( top ) * 3 + 2] - SKIRT_DROP * invDim );
+		}
+		for ( int k = 0; k < survivors.size(); k++ ) {
+			const int k2 = ( k + 1 ) % survivors.size();
+			const unsigned int t0 = survivors[k], t1 = survivors[k2];
+			const unsigned int b0 = (unsigned int) ( ringStart + k );
+			const unsigned int b1 = (unsigned int) ( ringStart + size_t( k2 ) );
+			idx.push_back( t0 ); idx.push_back( b0 ); idx.push_back( t1 );
+			idx.push_back( t1 ); idx.push_back( b0 ); idx.push_back( b1 );
+		}
+	}
+
+	const quint32 numVerts = quint32( cpos.size() / 3 );
+	const quint32 numTris = quint32( idx.size() / 3 );
 	if ( numVerts > 65535 )
-		return fail( QStringLiteral( "vertex grid exceeds the u16 limit (decimation rung not built yet)" ) );
+		return fail( QStringLiteral( "vertex count exceeds the u16 limit" ) );
+	float zMin = 3.4e38f, zMax = -3.4e38f;
+	for ( size_t v = 0; v < cpos.size(); v += 3 ) {
+		zMin = qMin( zMin, cpos[v + 2] );
+		zMax = qMax( zMax, cpos[v + 2] );
+	}
+
+	nif->set<BSVertexDesc>( iLand, "Vertex Desc", LAND_VERTEX_DESC );
 	nif->set<quint32>( iLand, "Num Vertices", numVerts );
 	nif->set<quint32>( iLand, "Num Triangles", numTris );
 	nif->set<quint32>( iLand, "Data Size", numVerts * 12 + numTris * 6 );
@@ -141,69 +222,21 @@ bool lodgenBuildTerrainChunk( NifModel * nif, const EsmWorld & world,
 	nif->setState( BaseModel::Processing );
 	QModelIndex iVertexData = nif->getIndex( iLand, "Vertex Data" );
 	nif->updateArraySize( iVertexData );
-	for ( int row = 0; row < n; row++ ) {
-		for ( int col = 0; col < n; col++ ) {
-			const float z = grid[size_t( row ) * n + col] * invDim;
-			zMin = qMin( zMin, z );
-			zMax = qMax( zMax, z );
-			QModelIndex v = nif->index( row * n + col, 0, iVertexData );
-			nif->set<HalfVector3>( v, "Vertex",
-				HalfVector3( Vector3( float( col ) * spacing, float( row ) * spacing, z ) ) );
-			nif->set<float>( v, "Bitangent X", 1.0f );
-			nif->set<HalfVector2>( v, "UV",
-				HalfVector2( Vector2( float( col ) / float( n - 1 ),
-					1.0f - float( row ) / float( n - 1 ) ) ) );
-		}
+	for ( quint32 v = 0; v < numVerts; v++ ) {
+		const float x = cpos[size_t( v ) * 3], y = cpos[size_t( v ) * 3 + 1],
+			z = cpos[size_t( v ) * 3 + 2];
+		QModelIndex row = nif->index( int( v ), 0, iVertexData );
+		nif->set<HalfVector3>( row, "Vertex", HalfVector3( Vector3( x, y, z ) ) );
+		nif->set<float>( row, "Bitangent X", 1.0f );
+		nif->set<HalfVector2>( row, "UV",
+			HalfVector2( Vector2( x / 4096.0f, 1.0f - y / 4096.0f ) ) );
 	}
-	/* The skirt ring: perimeter positions in walk order (south row, east
-	 * column, north row reversed, west column reversed), duplicated at
-	 * height-1000, then a flap quad per perimeter edge, wound to face
-	 * outward. */
 	{
-		QVector<QPair<int, int>> ring;
-		ring.reserve( borderCount );
-		for ( int col = 0; col < n - 1; col++ )
-			ring.append( qMakePair( 0, col ) );
-		for ( int row = 0; row < n - 1; row++ )
-			ring.append( qMakePair( row, n - 1 ) );
-		for ( int col = n - 1; col > 0; col-- )
-			ring.append( qMakePair( n - 1, col ) );
-		for ( int row = n - 1; row > 0; row-- )
-			ring.append( qMakePair( row, 0 ) );
-		const int gridVerts = n * n;
-		for ( int k = 0; k < ring.size(); k++ ) {
-			const int row = ring[k].first, col = ring[k].second;
-			const float z = ( grid[size_t( row ) * n + col] - SKIRT_DROP ) * invDim;
-			zMin = qMin( zMin, z );
-			QModelIndex v = nif->index( gridVerts + k, 0, iVertexData );
-			nif->set<HalfVector3>( v, "Vertex",
-				HalfVector3( Vector3( float( col ) * spacing, float( row ) * spacing, z ) ) );
-			nif->set<float>( v, "Bitangent X", 1.0f );
-			nif->set<HalfVector2>( v, "UV",
-				HalfVector2( Vector2( float( col ) / float( n - 1 ),
-					1.0f - float( row ) / float( n - 1 ) ) ) );
-		}
-
 		QVector<Triangle> tris;
 		tris.reserve( int( numTris ) );
-		for ( int row = 0; row < n - 1; row++ ) {
-			for ( int col = 0; col < n - 1; col++ ) {
-				const int a = row * n + col;
-				tris.append( Triangle( quint16( a ), quint16( a + 1 ), quint16( a + n + 1 ) ) );
-				tris.append( Triangle( quint16( a ), quint16( a + n + 1 ), quint16( a + n ) ) );
-			}
-		}
-		for ( int k = 0; k < ring.size(); k++ ) {
-			const int k2 = ( k + 1 ) % ring.size();
-			const quint16 t0 = quint16( ring[k].first * n + ring[k].second );
-			const quint16 t1 = quint16( ring[k2].first * n + ring[k2].second );
-			const quint16 b0 = quint16( gridVerts + k );
-			const quint16 b1 = quint16( gridVerts + k2 );
-			// ring runs counter-clockwise seen from above, so (top, bottom,
-			// next-top) faces outward on every side
-			tris.append( Triangle( t0, b0, t1 ) );
-			tris.append( Triangle( t1, b0, b1 ) );
-		}
+		for ( size_t t = 0; t < idx.size(); t += 3 )
+			tris.append( Triangle( quint16( idx[t] ), quint16( idx[t + 1] ),
+				quint16( idx[t + 2] ) ) );
 		QModelIndex iTriangles = nif->getIndex( iLand, "Triangles" );
 		nif->updateArraySize( iTriangles );
 		nif->setArray<Triangle>( iTriangles, tris );

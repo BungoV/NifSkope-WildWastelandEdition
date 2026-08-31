@@ -133,6 +133,12 @@ void EsmWorld::indexWorldspace()
 
 bool EsmWorld::cellWater( int cx, int cy, float & height ) const
 {
+	/* Only cells with an EXPLICIT water height make LOD water quads —
+	 * measured on Commonwealth.4.-20.24.BTR: the chunk's two water shapes
+	 * sit exactly at the explicit XCLW heights (7250, 10000), and its
+	 * has-water-at-default cells get NO quads (the worldspace's NAM4 LOD
+	 * water plane serves those). Treating sentinel XCLW as the default
+	 * height produced a third shape vanilla does not have. */
 	height = defWaterH;
 	auto it = cellIndex.constFind( qMakePair( cx, cy ) );
 	if ( it == cellIndex.constEnd() )
@@ -141,22 +147,22 @@ bool EsmWorld::cellWater( int cx, int cy, float & height ) const
 	if ( !cr )
 		return false;
 	bool hasWater = false;
+	bool explicitHeight = false;
 	ESMFile::ESMField f( *esm, *cr );
 	while ( f.next() ) {
 		if ( f == "DATA" && f.size() >= 2 ) {
 			hasWater = ( f.readUInt16() & 0x0002 ) != 0;
 		} else if ( f == "XCLW" && f.size() >= 4 ) {
 			const quint32 raw = f.readUInt32();
-			// $FF7FFFFF (and the +inf pattern some tools write) mean
-			// "no local height": keep the worldspace default
 			if ( raw != 0xFF7FFFFFU && raw != 0x7F7FFFFFU && raw != 0x4F7FFFC9U ) {
 				float v;
 				std::memcpy( &v, &raw, 4 );
 				height = v;
+				explicitHeight = true;
 			}
 		}
 	}
-	return hasWater;
+	return hasWater && explicitHeight;
 }
 
 void EsmWorld::cellBounds( int & minX, int & minY, int & maxX, int & maxY ) const

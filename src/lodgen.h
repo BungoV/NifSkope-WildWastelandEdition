@@ -32,6 +32,10 @@ struct LodgenTerrainOptions
 {
 	int dim = 4;                //!< chunk edge in cells (4/8/16/32)
 	bool water = true;
+	/*! Decimation target, triangles per cell (vanilla dim4 chunks run
+	 * ~130). 0 = no decimation, emit the full 32x32-per-cell grid. The
+	 * simplifier locks the border ring so the skirt stays exact. */
+	int targetTrisPerCell = 130;
 	//! texture path template; {ws}/{dim}/{x}/{y} are substituted
 	QString textureBase = QStringLiteral( "Data\\Textures\\Terrain\\%1\\%1.%2.%3.%4.DDS" );
 };

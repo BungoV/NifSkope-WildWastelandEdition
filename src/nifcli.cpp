@@ -2290,8 +2290,57 @@ int cmdBtd( const QString & file, bool infoOnly, bool haveRegion,
 //! how many bases carry LOD models. The generation rungs build on this.
 int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 	bool haveCell, int cellX, int cellY,
-	bool haveTerrain, int chunkX, int chunkY, int dim, const QString & outFile )
+	bool haveTerrain, int chunkX, int chunkY, int dim, const QString & outFile,
+	bool haveRegion, const int * region, const QString & outDir )
 {
+	if ( haveRegion ) {
+		if ( outDir.isEmpty() ) {
+			err() << "error: --terrain-region needs --out-dir" << Qt::endl;
+			return 2;
+		}
+		EsmWorld world;
+		QString error;
+		if ( !world.load( file, worldspace ? worldspace : 0x3CU, &error ) ) {
+			err() << "error: " << error << Qt::endl;
+			return 1;
+		}
+		LodgenTerrainOptions opts;
+		opts.dim = dim > 0 ? dim : 4;
+		const int d = opts.dim;
+		// snap the requested cell region outward to chunk alignment
+		auto floorTo = []( int v, int m ) { return v >= 0 ? v - v % m : -( ( -v + m - 1 ) / m ) * m; };
+		const int x0 = floorTo( region[0], d ), y0 = floorTo( region[1], d );
+		QDir().mkpath( outDir );
+		int done = 0, skipped = 0, failed = 0;
+		for ( int cy = y0; cy <= region[3]; cy += d ) {
+			for ( int cx = x0; cx <= region[2]; cx += d ) {
+				NifModel nif;
+				QString cerr;
+				if ( !lodgenBuildTerrainChunk( &nif, world, cx, cy, opts, &cerr ) ) {
+					if ( cerr.startsWith( QLatin1String( "no LAND" ) ) )
+						skipped++;
+					else {
+						err() << "chunk (" << cx << "," << cy << "): " << cerr << Qt::endl;
+						failed++;
+					}
+					continue;
+				}
+				const QString name = QString( "%1.%2.%3.%4.BTR" )
+					.arg( world.worldspaceEdid() ).arg( d ).arg( cx ).arg( cy );
+				if ( !nif.saveToFile( outDir + "/" + name ) ) {
+					err() << "chunk (" << cx << "," << cy << "): save failed" << Qt::endl;
+					failed++;
+					continue;
+				}
+				done++;
+				out() << "[" << done << "] " << name << Qt::endl;
+				out().flush();
+			}
+		}
+		out() << done << " chunk(s) written to " << outDir
+			  << ", " << skipped << " empty, " << failed << " failed" << Qt::endl;
+		return failed ? 1 : 0;
+	}
 	if ( haveTerrain ) {
 		EsmWorld world;
 		QString error;
@@ -3474,6 +3523,9 @@ int usage()
 		  << "  lodgen <file.esm> --worldspace HEX [--cell X Y]\n"
 		  << "                                          inspect a worldspace / one cell:\n"
 		  << "                                          LAND heights, refs, LOD models\n"
+		  << "  lodgen <file.esm> --worldspace HEX --terrain-region X0 Y0 X1 Y1\n"
+		  << "         [--dim 4] --out-dir DIR         sweep: every chunk touching the\n"
+		  << "                                          cell region, vanilla file naming\n"
 		  << "  lodgen <file.esm> --worldspace HEX --terrain X Y [--dim 4] -o OUT.btr\n"
 		  << "                                          rung 1: generate one terrain chunk\n"
 		  << "                                          (X,Y = SW cell, dim-aligned) in the\n"
@@ -3561,6 +3613,9 @@ int nifskopeCliMain( const QStringList & args )
 	bool lgHaveTerrain = false;
 	int lgChunk[2] = { 0, 0 };
 	int lgDim = 4;
+	bool lgHaveRegion = false;
+	int lgRegion[4] = { 0, 0, 0, 0 };
+	QString lgOutDir;
 	bool constraintsOnly = false;
 	bool skeletonOnly = false;
 	bool bodiesOnly = false;
@@ -3606,6 +3661,12 @@ int nifskopeCliMain( const QStringList & args )
 			lgChunk[1] = next().toInt();
 		}
 		else if ( t == QLatin1String( "--dim" ) ) lgDim = next().toInt();
+		else if ( t == QLatin1String( "--terrain-region" ) ) {
+			lgHaveRegion = true;
+			for ( int r = 0; r < 4; r++ )
+				lgRegion[r] = next().toInt();
+		}
+		else if ( t == QLatin1String( "--out-dir" ) ) lgOutDir = next();
 		else if ( t == QLatin1String( "--roundtrip" ) ) roundTrip = true;
 		else if ( t == QLatin1String( "--constraints" ) ) constraintsOnly = true;
 		else if ( t == QLatin1String( "--skeleton" ) ) skeletonOnly = true;
@@ -3738,7 +3799,8 @@ int nifskopeCliMain( const QStringList & args )
 	else if ( cmd == QLatin1String( "lodgen" ) )
 		rc = cmdLodgen( file, lgListWorldspaces, lgWorldspace,
 			lgHaveCell, lgCell[0], lgCell[1],
-			lgHaveTerrain, lgChunk[0], lgChunk[1], lgDim, outFile );
+			lgHaveTerrain, lgChunk[0], lgChunk[1], lgDim, outFile,
+			lgHaveRegion, lgRegion, lgOutDir );
 	else if ( cmd == QLatin1String( "anim-setup" ) )
 		rc = cmdAnimSetup( file, block, controllers, sequence, newSequence,
 						   standalone, effectVar, intVar, listOnly, outFile );
