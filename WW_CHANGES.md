@@ -2,6 +2,31 @@
 
 ## 2026-08-31 — LODGEN: NifSkope generates Fallout 4's world LOD
 
+### LODGEN completion round: six items + vanilla parity audit
+
+One overnight batch (bungo's list, then "parity check with vanilla"):
+
+- **SCOL expansion** - static collections unpack into their source bases
+  (Sanctuary 207 -> 678 objects, tris now 104% of vanilla's chunk).
+- **FormID load-order remapping** - TES4 MAST maps stored prefixes into
+  input-list space; two DLCs no longer collide on prefix 01, mod ESPs
+  merge correctly; every embedded reference routed through mapFormID.
+- **Splat-bake fixes** - BGSM-backed TXSTs (65k grey samples on one
+  chunk), NULL-layer default ground, LAND VCLR multiplied in.
+- **UV2 extended terrain profile** - sky visibility (half precision) +
+  second material class; nif.xml gained the missing UV 2 vertex field.
+- **Tree repetition breaking** - position-stable hash rotation + U-mirror
+  about each shape's own U midpoint (atlas-cell safe); deterministic.
+- **Object atlas pass** (--atlas) - one 4096x2048 sheet per worldspace,
+  256 cells, UV remap + texture-set repoint; tiling shapes stay direct.
+- **Parity audit** (docs/LODGEN_PARITY.md, new CLI `verts` command):
+  found and fixed the real water rule (hasWater + default height +
+  exposure above cell terrain minimum - harbor wet-cell set now equals
+  vanilla's exactly), far-ring water as one plain BSTriShape, and
+  empty-MNAM-slot dropout (dim16 chunk 244k -> 7.6k verts vs vanilla
+  7.1k; substitution now opt-in). Object placement 89-96% mutual
+  coverage within 64u; block anatomy and Land desc exact at all rings.
+
 ### Terrain budget is per chunk, not per cell (far-ring fix)
 
 - Measured vanilla Commonwealth .btr across the rings: ~2100 tris per
