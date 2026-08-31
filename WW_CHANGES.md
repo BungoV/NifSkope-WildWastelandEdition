@@ -1,5 +1,81 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-08-31 — LODGEN: NifSkope generates Fallout 4's world LOD
+
+One night, chartered to first light and beyond (commits 149a120..adbecad;
+plan docs/LODGEN_PLAN.md, design contract at the top of
+docs/TO_BE_IMPLEMENTED.md, layouts docs/LODGEN_ESM_LAYOUTS.md, format
+groundwork in the FO4CS Codex FO4-vs-FO76 comparison).
+
+### Rung 0 — the ESM record layer
+
+The vendored fo76utils esmfile.cpp joined the build (it had never been
+compiled) and parses Fallout4.esm whole: 1.24M REFRs, 40k CELLs, 37k
+LANDs. src/esmdata.{h,cpp} is the record layer: worldspace/cell indexing,
+VHGT decoding, REFR extraction, STAT MNAM / TREE CNAM resolution. Facts
+it owns: only GRUPs carry children (a record's child group is its NEXT
+SIBLING labeled with its form ID) and the worldspace PERSISTENT cell also
+claims grid (0,0) — 32,795 refs, no LAND — distinguished by parent group
+type and served separately. VHGT deltas are SIGNED: xEdit types them
+itU8, but signed decoding lands within 8 units of the vanilla .btr's own
+vertices; unsigned is off by thousands.
+
+### Rung 1 — terrain .btr (harness 9 checks, then 14)
+
+lodgenBuildTerrainChunk emits vanilla's measured anatomy — the dim scale
+is EXPLICIT in-file (Land shape Scale = dim); the 12-byte no-normals
+vertex layout (the _msn texture carries them); per-height dim²-segment
+water; multibound frames (X/Y chunk-relative, Z absolute). Discovered by
+comparison flip: vanilla's SKIRT is a DUPLICATED border ring exactly
+1000 world units lower joined by flaps, not a displaced border.
+meshoptimizer decimation to vanilla-scale density with UNLOCKED borders
+(vanilla decimates its border too; cracks are the skirt's job), skirt
+rebuilt on the surviving perimeter. Water: only cells with EXPLICIT XCLW
+make quads (has-water-at-default cells belong to the worldspace NAM4
+plane) — the generated chunk carries vanilla's two water shapes with
+byte-equal bound centres. Verdict on Commonwealth.4.-20.24.BTR: 1,055 of
+1,068 vanilla vertices exactly on our heights (median 0.00), the 13
+stragglers ≤ 48 units = the DataUnpacked-vs-installed build delta.
+
+### Rung 2 — object .bto stitching, with the FO4CS identity contract
+
+REFR walk (cells + persistent overlay), per-object _LOD.nif meshes
+loaded and cached (transforms composed up the parent chain), placed by
+REFR transform into miniature space, welded per material — per-cell
+segments at dim4, NiAlphaProperty carried through for alpha-tested
+foliage (without it the blasted forest rendered as solid blobs). First
+chunk: 207 objects, 8 buckets, rock clusters landing position-for-
+position on vanilla's .bto. With identity (default): 24-byte COLORS
+desc, R+G = 16-bit per-chunk object index, A = the source tree's own
+authored sway alpha riding through the stitch, and a .manifest.txt
+(index, form ID, type, world position, scale).
+
+### Rung 3 (started) — the AO bake
+
+Channel B is live: CPU ray-cast AO against the assembled chunk (XY
+triangle bins + the terrain heightfield as ground occluder), 8-dir
+hemisphere per vertex, negligible cost. LESSON RE-LEARNED: vertex
+colours must be written as ByteColor4 — set<Color4> silently no-ops on
+the byte field and every colour stayed white until the OUTPUT was
+sampled (telemetry echoes truth).
+
+### The sweep and the harness
+
+`lodgen --terrain-region X0 Y0 X1 Y1 --out-dir DIR` emits BTR + BTO +
+manifest per chunk under vanilla naming — the 9-chunk Sanctuary region
+in 2.3 s. tests/spells/lodgen_terrain.sh, 14 checks: anatomy, exact
+descriptors, density, surface agreement with shifted control, the skirt
+invariant, water parity, and the identity contract (every triangle
+carries exactly ONE object id; manifest covers the id range; AO varies).
+
+### Still chartered (next sessions)
+
+Terrain texture baking (needs a BC1 writer), the impostor card baker
+(offscreen renders), instancing manifests, geomorph weights in EyeData,
+LTEX-class/wetness terrain vertex bakes, the in-game gate (bungo's),
+and the two stock-engine tolerance checks (fat desc + vertex alpha on
+chunks without CS loaded).
+
 ## 2026-08-30 — NifSkope opens Fallout 76 terrain (.btd)
 
 Fallout 76 ships no .btr meshes. Its terrain is one database per worldspace —

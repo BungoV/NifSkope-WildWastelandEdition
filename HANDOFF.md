@@ -15,15 +15,26 @@ Updated **2026-08-30**. Edition **0.3.3**, packaged and released. Build green.
 The current work is a sweep of the **compiled-collision backlog**, and since
 2026-08-21 it is being tested IN THE GAME, which changed what the work is.
 
-## CHARTERED 2026-08-31: NifSkope generates FO4's world LOD
+## LODGEN 2026-08-31: rungs 0-2 SHIPPED same night, rung 3 started
 
-bungo-scoped campaign: base-game .btr/.bto generation plus per-placement
-vertex-colour identity for FO4CS. **Execution plan =
-[docs/LODGEN_PLAN.md](docs/LODGEN_PLAN.md)** (rungs, verification, risks);
-design contract = top of [docs/TO_BE_IMPLEMENTED.md](docs/TO_BE_IMPLEMENTED.md);
-format groundwork = the measured FO4-vs-FO76 comparison in the FO4CS Codex.
-First session: compile the vendored esmfile.cpp, read one cell's LAND,
-feed the existing terrain builder, diff against vanilla.
+NifSkope generates FO4 world LOD. **Working now** (WW_CHANGES 2026-08-31,
+harness `lodgen_terrain.sh` 14/14):
+
+    lodgen <esm> --worldspace 3C --terrain-region X0 Y0 X1 Y1 --out-dir DIR
+
+emits BTR + BTO + identity manifest per chunk under vanilla naming (the
+9-chunk Sanctuary region in 2.3 s). Terrain holds against vanilla to
+median 0.00 world units; objects land position-for-position; the FO4CS
+identity contract is real in the files (R+G object index, B baked AO,
+A authored sway alpha, .manifest.txt). Code: src/esmdata + src/lodgen;
+layouts: docs/LODGEN_ESM_LAYOUTS.md; plan: docs/LODGEN_PLAN.md.
+
+**Next in the campaign:** the IN-GAME GATE (bungo: drop a sweep output
+into a mod folder over vanilla LOD), the two stock-engine tolerance
+checks (fat vertex desc + vertex alpha on chunks WITHOUT CS), terrain
+texture baking (needs a BC1 writer), impostor baker, instancing
+manifests, geomorph weights, LTEX-class/wetness terrain bakes, and the
+GUI World LOD manager with live chunk preview.
 
 ## New 2026-08-30: NifSkope opens Fallout 76 terrain (.btd)
 
