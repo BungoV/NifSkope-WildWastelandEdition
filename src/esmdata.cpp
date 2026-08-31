@@ -430,6 +430,41 @@ void EsmWorld::ltexTextures( quint32 ltexForm, QString & diffuse, QString & norm
 	ltexCache.insert( ltexForm, qMakePair( diffuse, normal ) );
 }
 
+const QVector<EsmScolPart> & EsmWorld::scolParts( quint32 formID ) const
+{
+	auto it = scolCache.constFind( formID );
+	if ( it != scolCache.constEnd() )
+		return *it;
+
+	QVector<EsmScolPart> parts;
+	const ESMFile::ESMRecord * r = esm->findRecord( formID );
+	if ( r && r->type != GRUP && *r == "SCOL" ) {
+		/* wbDefinitionsFO4 SCOL: repeating [ONAM part base, DATA placement
+		 * array], each placement 28 bytes: pos XYZ, rot XYZ (radians),
+		 * scale — the part's copies in the collection's local space. */
+		ESMFile::ESMField f( *esm, *r );
+		while ( f.next() ) {
+			if ( f == "ONAM" && f.size() >= 4 ) {
+				EsmScolPart p;
+				p.base = f.readUInt32();
+				parts.append( p );
+			} else if ( f == "DATA" && !parts.isEmpty() ) {
+				const size_t n = f.size() / 28;
+				for ( size_t i = 0; i < n; i++ ) {
+					EsmScolPlacement pl;
+					for ( int k = 0; k < 3; k++ )
+						pl.pos[k] = f.readFloat();
+					for ( int k = 0; k < 3; k++ )
+						pl.rot[k] = f.readFloat();
+					pl.scale = f.readFloat();
+					parts.last().placements.append( pl );
+				}
+			}
+		}
+	}
+	return *scolCache.insert( formID, parts );
+}
+
 QVector<QPair<quint32, QString>> EsmWorld::listWorldspaces( const QString & esmPath, QString * error )
 {
 	QVector<QPair<quint32, QString>> out;

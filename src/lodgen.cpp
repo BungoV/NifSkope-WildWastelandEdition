@@ -1055,6 +1055,46 @@ bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
 	refs += world.persistentRefrsIn( cwX, cwY,
 		cwX + float( dim ) * 4096.0f, cwY + float( dim ) * 4096.0f );
 
+	/* SCOL expansion: a static collection has no LOD models of its own — the
+	 * CK generates its LOD by unpacking the parts back into their source
+	 * bases (xLODGen does the same). Each part placement composes under the
+	 * placing REFR: world = T_ref * T_placement. Everything downstream sees
+	 * one flat placement list, so identity/AO/manifests treat expanded
+	 * copies exactly like first-class refs. */
+	struct LodPlacement
+	{
+		quint32 base;
+		Vector3 pos;    // world units
+		Matrix rot;
+		float scale;
+	};
+	QVector<LodPlacement> placements;
+	placements.reserve( refs.size() );
+	for ( const EsmRefr & r : refs ) {
+		if ( r.initiallyDisabled || r.deleted || !r.base )
+			continue;
+		Matrix rm;
+		rm.fromEuler( r.rot[0], r.rot[1], r.rot[2] );
+		const Vector3 rp( r.pos[0], r.pos[1], r.pos[2] );
+		if ( std::memcmp( &r.baseType, "SCOL", 4 ) == 0 ) {
+			for ( const EsmScolPart & part : world.scolParts( r.base ) ) {
+				for ( const EsmScolPlacement & pl : part.placements ) {
+					Matrix pm;
+					pm.fromEuler( pl.rot[0], pl.rot[1], pl.rot[2] );
+					LodPlacement out;
+					out.base = part.base;
+					out.pos = rp + rm * ( Vector3( pl.pos[0], pl.pos[1],
+						pl.pos[2] ) * r.scale );
+					out.rot = rm * pm;
+					out.scale = r.scale * pl.scale;
+					placements.append( out );
+				}
+			}
+			continue;
+		}
+		placements.append( LodPlacement{ r.base, rp, rm, r.scale } );
+	}
+
 	QHash<QString, QVector<LodSrcShape>> modelCache;
 	QHash<quint32, LodgenCard> cardCache;
 	QMap<QString, ObjBucket> buckets;   // key = tex0|tex1
@@ -1064,9 +1104,7 @@ bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
 	int objectIndex = 0;
 	int placed = 0, skippedNoLod = 0;
 
-	for ( const EsmRefr & r : refs ) {
-		if ( r.initiallyDisabled || r.deleted || !r.base )
-			continue;
+	for ( const LodPlacement & r : placements ) {
 		const EsmLodBase & base = world.lodBase( r.base );
 		if ( !base.hasLod )
 			continue;
@@ -1099,8 +1137,7 @@ bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
 		Transform xf;
 		xf.translation = Vector3( ( r.pos[0] - cwX ) * invDim,
 			( r.pos[1] - cwY ) * invDim, r.pos[2] * invDim );
-		xf.rotation = Matrix();
-		xf.rotation.fromEuler( r.rot[0], r.rot[1], r.rot[2] );
+		xf.rotation = r.rot;
 		xf.scale = r.scale * invDim;
 
 		// cell attribution for the dim4 segment split

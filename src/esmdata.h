@@ -57,6 +57,21 @@ struct EsmLodBase
 	float leafFrequency = 0.0f;
 };
 
+//! One placement inside a static-collection part, in the SCOL's local space.
+struct EsmScolPlacement
+{
+	float pos[3] = { 0, 0, 0 };
+	float rot[3] = { 0, 0, 0 };  //!< radians, same euler convention as REFR
+	float scale = 1.0f;
+};
+
+//! One part of a static collection: a source base and where its copies sit.
+struct EsmScolPart
+{
+	quint32 base = 0;
+	QVector<EsmScolPlacement> placements;
+};
+
 //! One additional splat layer on a cell quadrant: 17x17 opacities.
 struct EsmLandLayer
 {
@@ -111,6 +126,9 @@ public:
 	//! LOD model info for a base object, cached. Never null.
 	const EsmLodBase & lodBase( quint32 baseFormID ) const;
 
+	//! A static collection's parts, cached; empty for non-SCOL bases.
+	const QVector<EsmScolPart> & scolParts( quint32 formID ) const;
+
 	//! An LTEX form's diffuse/normal texture paths (via TNAM -> TXST), cached.
 	void ltexTextures( quint32 ltexForm, QString & diffuse, QString & normal ) const;
 
@@ -131,6 +149,7 @@ private:
 	QHash<QPair<int, int>, CellEntry> cellIndex;
 	quint32 persistentCellGroup = 0;
 	mutable QHash<quint32, EsmLodBase> lodBaseCache;
+	mutable QHash<quint32, QVector<EsmScolPart>> scolCache;
 	mutable QHash<quint32, QPair<QString, QString>> ltexCache;
 	mutable QVector<EsmRefr> persistentCache;
 	mutable bool persistentCacheBuilt = false;
