@@ -8,6 +8,43 @@ E:\Projects\Fo4CommunityShaders\Codex\lod-fo4-vs-fo76-comparison.md (the
 measured FO4-vs-FO76 comparison; .bto/.btr anatomy, segments, miniature
 scaling, provenance, the BA2 name-hash decoder).
 
+THREE LODGEN CATEGORIES (bungo-ratified 2026-08-31):
+
+  1. **Vanilla LODGEN** — stock-parity .btr/.bto, loadable by the
+     unmodified engine. Shipped; the fidelity baseline and fallback-set
+     writer.
+  2. **Vanilla LODGEN+** — parity files carrying the extra data in
+     engine-legal vertex fields (R+G identity / B AO / A class param,
+     UV2, EyeData geomorph) + manifests. Shipped behind toggles. Still
+     owes the stock-engine tolerance gate for the fatter desc.
+  3. **Improved LODGEN** — a CS-exclusive format, free of every vanilla
+     constraint. GATING RULE (bungo): the FO4CS LOD module resolves the
+     improved set when enabled; module off = legacy LODs used untouched
+     (the .pbrm-beside-.bgsm pattern — two complete sets, zero-effort
+     fallback built into the architecture). Because only CS ever parses
+     it, files need not be engine-legal at all.
+
+  IMPROVED-LODGEN DESIGN FRONTIER (discussion 2026-08-31, to be ranked
+  in a CS LOD v1 spec):
+    * Draw-time LOD selection — all rungs resident, per-object
+      screen-size pick + dither cross-fade (no file-swap pop), sub-pixel
+      cull, geomorph ring blending. Hybrid-ladder rung 0 reaching LOD.
+    * Instancing — unique mesh once, chunks = transform lists; draw-call
+      and memory collapse; per-instance hue/scale/rotation/sway-phase
+      jitter kills tree repetition for free.
+    * Terrain from the heightmap DB, no meshes (FO76-proved) —
+      clipmap/CDLOD from our bake, error-driven tessellation, per-pixel
+      normals off 192u/texel data, full-precision heights (no 32-unit
+      miniature wobble).
+    * Shading parity — PBR materials on LOD, specular on distant
+      terrain, baked AO/horizon shadowing, depth+normal impostor cards
+      that relight.
+    * Identity-unlocked extras: dynamic world state (mask destroyed/
+      disabled refs out of merged chunks), distant emissive lights by
+      time-of-day, weather response (wetness darkening, snow by
+      height/slope), heightmap-marched far-field shadows, horizon
+      occlusion culling, far grass cards, incremental regeneration.
+
 Why this tool: the .btd terrain builder already does grid→seam-closed-
 BSTriShape generation; nifmerge already does transform-composed stitching;
 BA2File reads the archives; the harness culture can hold output against
