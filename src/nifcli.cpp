@@ -2342,27 +2342,56 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 		int done = 0, skipped = 0, failed = 0;
 		for ( int cy = y0; cy <= region[3]; cy += d ) {
 			for ( int cx = x0; cx <= region[2]; cx += d ) {
-				NifModel nif;
-				QString cerr;
-				if ( !lodgenBuildTerrainChunk( &nif, world, cx, cy, opts, &cerr ) ) {
-					if ( cerr.startsWith( QLatin1String( "no LAND" ) ) )
-						skipped++;
-					else {
-						err() << "chunk (" << cx << "," << cy << "): " << cerr << Qt::endl;
-						failed++;
+				{
+					NifModel nif;
+					QString cerr;
+					if ( !lodgenBuildTerrainChunk( &nif, world, cx, cy, opts, &cerr ) ) {
+						if ( cerr.startsWith( QLatin1String( "no LAND" ) ) )
+							skipped++;
+						else {
+							err() << "chunk (" << cx << "," << cy << "): " << cerr << Qt::endl;
+							failed++;
+						}
+					} else {
+						const QString name = QString( "%1.%2.%3.%4.BTR" )
+							.arg( world.worldspaceEdid() ).arg( d ).arg( cx ).arg( cy );
+						if ( !nif.saveToFile( outDir + "/" + name ) ) {
+							err() << "chunk (" << cx << "," << cy << "): save failed" << Qt::endl;
+							failed++;
+						} else {
+							done++;
+							out() << "[" << done << "] " << name << Qt::endl;
+							out().flush();
+						}
 					}
-					continue;
 				}
-				const QString name = QString( "%1.%2.%3.%4.BTR" )
-					.arg( world.worldspaceEdid() ).arg( d ).arg( cx ).arg( cy );
-				if ( !nif.saveToFile( outDir + "/" + name ) ) {
-					err() << "chunk (" << cx << "," << cy << "): save failed" << Qt::endl;
-					failed++;
-					continue;
+				{
+					// the matching object chunk, when anything stands there
+					LodgenObjectOptions oopts;
+					oopts.dim = d;
+					oopts.identity = identity;
+					oopts.dataRoot = dataRoot.isEmpty()
+						? QStringLiteral( "E:/Tools/Fallout 4/DataUnpacked/Data" ) : dataRoot;
+					NifModel nif;
+					QString manifest, cerr;
+					if ( lodgenBuildObjectChunk( &nif, world, cx, cy, oopts, &manifest, &cerr ) ) {
+						const QString name = QString( "%1.%2.%3.%4.BTO" )
+							.arg( world.worldspaceEdid() ).arg( d ).arg( cx ).arg( cy );
+						if ( nif.saveToFile( outDir + "/" + name ) ) {
+							done++;
+							out() << "[" << done << "] " << name << Qt::endl;
+							out().flush();
+							if ( oopts.identity ) {
+								QFile mf( outDir + "/" + name + QStringLiteral( ".manifest.txt" ) );
+								if ( mf.open( QIODevice::WriteOnly | QIODevice::Text ) )
+									mf.write( manifest.toUtf8() );
+							}
+						} else {
+							err() << "objects (" << cx << "," << cy << "): save failed" << Qt::endl;
+							failed++;
+						}
+					}
 				}
-				done++;
-				out() << "[" << done << "] " << name << Qt::endl;
-				out().flush();
 			}
 		}
 		out() << done << " chunk(s) written to " << outDir

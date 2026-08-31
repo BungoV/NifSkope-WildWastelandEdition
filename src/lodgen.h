@@ -62,6 +62,7 @@ struct LodgenObjectOptions
 	int dim = 4;
 	QString dataRoot;           //!< Data folder holding meshes\\lod\\... sources
 	bool identity = true;       //!< vertex-colour identity + manifest (CS profile)
+	bool bakeAO = true;         //!< ray-cast per-placement AO into channel B
 	int lodLevel = -1;          //!< MNAM slot; -1 = pick by dim (4->0, 8->1, 16->2, 32->3)
 };
 

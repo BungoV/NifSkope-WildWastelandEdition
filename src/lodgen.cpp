@@ -466,7 +466,8 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 				s.nrm.append( xf.rotation * Vector3( src.get<ByteVector3>( row, "Normal" ) ) );
 				s.tan.append( xf.rotation * Vector3( src.get<ByteVector3>( row, "Tangent" ) ) );
 				s.uv.append( Vector2( src.get<HalfVector2>( row, "UV" ) ) );
-				s.col.append( hasColors ? src.get<Color4>( row, "Vertex Colors" )
+				s.col.append( hasColors
+					? Color4( src.get<ByteColor4>( row, "Vertex Colors" ) )
 					: Color4( 1, 1, 1, 1 ) );
 			}
 			QModelIndex iTris = src.getIndex( iShape, "Triangles" );
@@ -510,6 +511,142 @@ struct ObjBucket
 	bool hasAlpha = false;
 	quint16 alphaFlags = 4844;
 	quint8 alphaThreshold = 128;
+};
+
+} // namespace
+
+
+/* ================= rung 3: per-placement AO bake ======================= */
+
+namespace
+{
+
+/* CPU ambient-occlusion over the assembled chunk: a uniform XY grid of
+ * triangle bins plus the terrain heightfield. Per vertex, a fixed cosine
+ * hemisphere (rotated to the vertex normal) is sampled; ray hits against
+ * nearby chunk geometry or the ground darken the vertex. This is the
+ * per-PLACEMENT data no shared texture can carry — the reason the B channel
+ * exists (docs/TO_BE_IMPLEMENTED.md). */
+struct LodgenAoScene
+{
+	static constexpr int BINS = 64;
+	float span = 4096.0f;               // miniature chunk span
+	std::vector<float> tri;             // 9 floats per triangle
+	std::vector<std::vector<int>> bins; // BINS*BINS triangle lists
+	// terrain heightfield in miniature units (n x n), optional
+	int hn = 0;
+	float hSpacing = 1.0f;
+	std::vector<float> hgt;
+
+	void addTriangle( const Vector3 & a, const Vector3 & b, const Vector3 & c )
+	{
+		const int t = int( tri.size() / 9 );
+		for ( const Vector3 * p : { &a, &b, &c } ) {
+			tri.push_back( (*p)[0] );
+			tri.push_back( (*p)[1] );
+			tri.push_back( (*p)[2] );
+		}
+		if ( bins.empty() )
+			bins.resize( BINS * BINS );
+		const float mnx = qMin( a[0], qMin( b[0], c[0] ) ), mxx = qMax( a[0], qMax( b[0], c[0] ) );
+		const float mny = qMin( a[1], qMin( b[1], c[1] ) ), mxy = qMax( a[1], qMax( b[1], c[1] ) );
+		const int bx0 = qBound( 0, int( mnx / span * BINS ), BINS - 1 );
+		const int bx1 = qBound( 0, int( mxx / span * BINS ), BINS - 1 );
+		const int by0 = qBound( 0, int( mny / span * BINS ), BINS - 1 );
+		const int by1 = qBound( 0, int( mxy / span * BINS ), BINS - 1 );
+		for ( int by = by0; by <= by1; by++ )
+			for ( int bx = bx0; bx <= bx1; bx++ )
+				bins[by * BINS + bx].push_back( t );
+	}
+
+	float groundHeight( float x, float y ) const
+	{
+		if ( !hn )
+			return -3.4e38f;
+		const float fx = qBound( 0.0f, x / hSpacing, float( hn - 1 ) - 0.001f );
+		const float fy = qBound( 0.0f, y / hSpacing, float( hn - 1 ) - 0.001f );
+		const int ix = int( fx ), iy = int( fy );
+		const float tx = fx - ix, ty = fy - iy;
+		const float h00 = hgt[size_t( iy ) * hn + ix], h10 = hgt[size_t( iy ) * hn + ix + 1];
+		const float h01 = hgt[size_t( iy + 1 ) * hn + ix], h11 = hgt[size_t( iy + 1 ) * hn + ix + 1];
+		return ( h00 * ( 1 - tx ) + h10 * tx ) * ( 1 - ty )
+			+ ( h01 * ( 1 - tx ) + h11 * tx ) * ty;
+	}
+
+	bool rayHit( const Vector3 & o, const Vector3 & d, float maxT ) const
+	{
+		// terrain: march and compare against the heightfield
+		if ( hn && d[2] < 0.9f ) {
+			for ( float t = 8.0f; t < maxT; t += 24.0f ) {
+				const float x = o[0] + d[0] * t, y = o[1] + d[1] * t;
+				if ( x < 0 || y < 0 || x > span || y > span )
+					break;
+				if ( o[2] + d[2] * t < groundHeight( x, y ) )
+					return true;
+			}
+		}
+		if ( bins.empty() )
+			return false;
+		// DDA over the XY bins
+		const float cell = span / BINS;
+		float t = 0.0f;
+		int guard = 0;
+		while ( t < maxT && guard++ < 2 * BINS ) {
+			const float x = o[0] + d[0] * t, y = o[1] + d[1] * t;
+			const int bx = int( x / cell ), by = int( y / cell );
+			if ( bx < 0 || by < 0 || bx >= BINS || by >= BINS )
+				break;
+			for ( int ti : bins[by * BINS + bx] ) {
+				const float * p = tri.data() + size_t( ti ) * 9;
+				// Moller-Trumbore
+				const Vector3 v0( p[0], p[1], p[2] ), v1( p[3], p[4], p[5] ), v2( p[6], p[7], p[8] );
+				const Vector3 e1 = v1 - v0, e2 = v2 - v0;
+				const Vector3 pv = Vector3::crossproduct( d, e2 );
+				const float det = Vector3::dotproduct( e1, pv );
+				if ( std::fabs( det ) < 1e-8f )
+					continue;
+				const float inv = 1.0f / det;
+				const Vector3 tv = o - v0;
+				const float u = Vector3::dotproduct( tv, pv ) * inv;
+				if ( u < 0.0f || u > 1.0f )
+					continue;
+				const Vector3 qv = Vector3::crossproduct( tv, e1 );
+				const float vv = Vector3::dotproduct( d, qv ) * inv;
+				if ( vv < 0.0f || u + vv > 1.0f )
+					continue;
+				const float hitT = Vector3::dotproduct( e2, qv ) * inv;
+				if ( hitT > 1.0f && hitT < maxT )
+					return true;
+			}
+			// advance to the next bin boundary along the dominant axis
+			const float step = cell / qMax( 0.05f,
+				qMax( std::fabs( d[0] ), std::fabs( d[1] ) ) );
+			t += step;
+		}
+		return false;
+	}
+
+	float ambientOcclusion( const Vector3 & p, const Vector3 & n, float maxT ) const
+	{
+		// 8 fixed hemisphere directions blended toward the normal
+		static const float dirs[8][3] = {
+			{ 0.7f, 0.0f, 0.7f }, { -0.7f, 0.0f, 0.7f },
+			{ 0.0f, 0.7f, 0.7f }, { 0.0f, -0.7f, 0.7f },
+			{ 0.5f, 0.5f, 0.7f }, { -0.5f, 0.5f, 0.7f },
+			{ 0.5f, -0.5f, 0.7f }, { -0.5f, -0.5f, 0.7f } };
+		const Vector3 o = p + n * 2.0f;
+		int hits = 0;
+		for ( const auto & dv : dirs ) {
+			Vector3 d( dv[0], dv[1], dv[2] );
+			d = d + n * 0.6f;
+			d.normalize();
+			if ( Vector3::dotproduct( d, n ) < 0.05f )
+				continue;
+			if ( rayHit( o, d, maxT ) )
+				hits++;
+		}
+		return 1.0f - 0.85f * float( hits ) / 8.0f;
+	}
 };
 
 } // namespace
@@ -641,6 +778,38 @@ bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
 		return fail( QString( "no LOD-bearing refs in chunk (%1,%2)x%3" )
 			.arg( chunkX ).arg( chunkY ).arg( dim ) );
 
+	/* Rung 3 bake: per-placement AO into the identity B channel, ray-cast
+	 * against the whole assembled chunk plus the terrain heightfield. */
+	if ( opts.identity && opts.bakeAO ) {
+		LodgenAoScene scene;
+		const int hn = dim * 32 + 1;
+		scene.hn = hn;
+		scene.hSpacing = 4096.0f / float( hn - 1 );
+		scene.hgt.assign( size_t( hn ) * hn, world.defaultLandHeight() * invDim );
+		EsmLand land;
+		for ( int cy = 0; cy < dim; cy++ )
+			for ( int cx = 0; cx < dim; cx++ )
+				if ( world.land( chunkX + cx, chunkY + cy, land ) )
+					for ( int row = 0; row < 33; row++ )
+						for ( int col = 0; col < 33; col++ )
+							scene.hgt[size_t( cy * 32 + row ) * hn + size_t( cx * 32 + col )] =
+								land.heights[row][col] * invDim;
+		for ( auto it = buckets.constBegin(); it != buckets.constEnd(); ++it )
+			for ( const QVector<Triangle> & ct : it.value().cellTris )
+				for ( const Triangle & t : ct )
+					scene.addTriangle( it.value().pos[t.v1()],
+						it.value().pos[t.v2()], it.value().pos[t.v3()] );
+		for ( auto it = buckets.begin(); it != buckets.end(); ++it ) {
+			ObjBucket & bucket = it.value();
+			for ( int v = 0; v < bucket.pos.size(); v++ ) {
+				const float ao = scene.ambientOcclusion( bucket.pos[v],
+					bucket.nrm[v], 300.0f );
+				bucket.col[v].setRGBA( bucket.col[v].red(), bucket.col[v].green(),
+					ao, bucket.col[v].alpha() );
+			}
+		}
+	}
+
 	// ---- emit ---------------------------------------------------------
 	if ( !nif->createNew( 0x14020007, 12, 130 ) )
 		return fail( QStringLiteral( "could not create a Fallout 4 document" ) );
@@ -695,8 +864,11 @@ bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
 			nif->set<float>( row, "Bitangent X", bt[0] );
 			nif->set<float>( row, "Bitangent Y", bt[1] );
 			nif->set<float>( row, "Bitangent Z", bt[2] );
-			if ( opts.identity )
-				nif->set<Color4>( row, "Vertex Colors", bucket.col[int( v )] );
+			if ( opts.identity ) {
+				const Color4 & c = bucket.col[int( v )];
+				nif->set<ByteColor4>( row, "Vertex Colors", ByteColor4(
+					FloatVector4( c.red(), c.green(), c.blue(), c.alpha() ) ) );
+			}
 		}
 		QModelIndex iTris = nif->getIndex( iShape, "Triangles" );
 		nif->updateArraySize( iTris );

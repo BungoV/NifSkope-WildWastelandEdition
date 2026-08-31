@@ -152,6 +152,57 @@ for b in 5 7; do
 done
 check "water bound centres equal vanilla's" "$wok"
 
+# --- rung 2: the object chunk and its identity contract ----------------
+OBJ="$W/gen.bto"
+"$NS" -no-gui lodgen "$ESM" --worldspace 3C --objects -20 24 --dim 4 -o "$OBJ" >/dev/null 2>&1
+check "the object chunk generates" "$([ -f "$OBJ" ] && echo 1 || echo 0)"
+if [ -f "$OBJ" ]; then
+	check "...with its manifest" "$([ -f "$OBJ.manifest.txt" ] && echo 1 || echo 0)"
+	"$PY" - "$OBJ" "$OBJ.manifest.txt" > "$W/obj.txt" <<'PYEOF2'
+import struct, sys, io, contextlib
+sys.path.insert(0, "E:/Projects/NifskopeWildWastelandEdition/tools/rigging_prototype")
+import nifparse
+with contextlib.redirect_stdout(io.StringIO()):
+    data, hdr, strings, blocks = nifparse.parse(sys.argv[1])
+manifest = [l for l in open(sys.argv[2]).read().splitlines() if l.strip()]
+maxid = -1
+aos = set()
+badtris = 0
+shapes = 0
+for i, tname, start, size in blocks:
+    if tname != 'BSSubIndexTriShape':
+        continue
+    shapes += 1
+    o = start + 4
+    ne = struct.unpack_from('<I', data, o)[0]; o += 4 + 4*ne
+    o += 4+4+12+36+4+4+16+12
+    desc = struct.unpack_from('<Q', data, o)[0]; o += 8
+    nt = struct.unpack_from('<I', data, o)[0]; o += 4
+    nv = struct.unpack_from('<H', data, o)[0]; o += 2
+    o += 4
+    stride = (desc & 0xF) * 4
+    cols = []
+    for v in range(nv):
+        vo = o + v*stride + 20   # colours at +20 in the 24-byte layout
+        r, g, b, a = data[vo], data[vo+1], data[vo+2], data[vo+3]
+        cols.append((r, g, b, a))
+        maxid = max(maxid, r + g*256)
+        aos.add(b)
+    to = o + nv*stride
+    for t in range(nt):
+        i0, i1, i2 = struct.unpack_from('<HHH', data, to + t*6)
+        ids = { (cols[k][0], cols[k][1]) for k in (i0, i1, i2) }
+        if len(ids) != 1:
+            badtris += 1
+print(len(manifest), maxid, badtris, len(aos), shapes)
+PYEOF2
+	read -r mlines maxid badtris aovals oshapes < "$W/obj.txt"
+	echo "  objects: $mlines manifest lines, max id $maxid, $oshapes shapes, $aovals distinct AO values"
+	check "every triangle carries ONE object id (no cross-weld)" "$([ "$badtris" = "0" ] && echo 1 || echo 0)"
+	check "manifest covers the id range" "$([ "$mlines" -gt "$maxid" ] && echo 1 || echo 0)"
+	check "the AO bake VARIES (not a constant channel)" "$([ "$aovals" -gt 8 ] && echo 1 || echo 0)"
+fi
+
 echo "$checks checks, $fails failures"
 [ "$fails" = "0" ] && echo PASS || echo FAIL
 [ "$fails" = "0" ]
