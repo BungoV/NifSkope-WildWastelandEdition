@@ -3,6 +3,31 @@
 What went wrong, why it went wrong, and what stops it next time. Newest first.
 Kept because the same shapes keep coming back in different clothes.
 
+## 2026-08-31b — One broken probe grew an architecture, then poisoned its own test
+
+**What:** a scratch BA2 tool's hash lookup silently false-negatived on every
+path queried, which became "the source LOD textures are CK-only, the game
+ships none of them, the atlas pass is REQUIRED" — docs, commit messages, a
+default flipped, loose-copy machinery built. All of it wrong: a plain
+name-table grep found every texture in `Fallout4 - Textures6.ba2` and the
+vanilla atlas in `Textures4.ba2`. Worse, the atlas initially shipped under
+VANILLA'S name, so the "verification" screenshots resolved vanilla's sheet
+under our UV layout — the wrong-textures-on-wrong-meshes bungo reported was
+partly manufactured by the test setup itself.
+
+**Why:** a single tool's negative result was treated as ground truth without
+a positive control on the SAME kind of path (the beachgrass control used a
+different path style and passed, which laundered the broken lookups). And
+sharing vanilla's filename made every visual check ambiguous about WHICH
+sheet was being sampled.
+
+**Instead:** a probe that reports absence must first prove it can find a
+thing known to be present in the same namespace, same path shape. And
+generated artifacts NEVER reuse a vanilla filename — not even in tests —
+because collision converts every downstream check into noise. bungo's
+"compare vanilla colors with atlas colors" was the instrument that unwound
+it; the per-vertex comparison now lives in the audit scripts.
+
 ## 2026-08-31 — 93% coverage passed while every rotated object was wrong
 
 **What:** LODGEN applied REFR euler angles straight into `Matrix::fromEuler`;

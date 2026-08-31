@@ -241,6 +241,13 @@ public:
 		waterCheck->setChecked( true );
 		geomorphCheck = new QCheckBox( tr( "Geomorph weights (CS-only files)" ), this );
 		geomorphCheck->setChecked( false );
+		atlasCheck = new QCheckBox( tr( "Pack object atlas (draw-call optimization)" ), this );
+		atlasCheck->setChecked( false );
+		atlasCheck->setToolTip( tr(
+			"Packs the generated BTOs' non-tiling textures onto one\n"
+			"<ws>.LodgenObjects.DDS sheet. Direct references are stock-legal\n"
+			"(the source LOD textures ship in the game's BA2s), so this is\n"
+			"purely an optimization. Never reuses vanilla's atlas name." ) );
 		previewCheck = new QCheckBox( tr( "Live preview in the workspace" ), this );
 		previewCheck->setChecked( true );
 		auto toggles = new QGridLayout();
@@ -253,7 +260,8 @@ public:
 		toggles->addWidget( terrainIdCheck, 1, 1 );
 		toggles->addWidget( aoCheck, 1, 2 );
 		toggles->addWidget( geomorphCheck, 1, 3 );
-		toggles->addWidget( previewCheck, 2, 0, 1, 2 );
+		toggles->addWidget( atlasCheck, 2, 0, 1, 2 );
+		toggles->addWidget( previewCheck, 2, 2, 1, 2 );
 
 		progress = new QProgressBar( this );
 		progress->setTextVisible( true );
@@ -356,11 +364,12 @@ private:
 	{
 		if ( cancelled || done >= queue.size() ) {
 			QString tail;
-			if ( !cancelled && !writtenBto.isEmpty() ) {
-				/* Atlas pass, always: the source LOD textures the shapes
-				 * reference are CK-only resources — a stock game ships NONE
-				 * of them, so un-atlased output renders magenta outside this
-				 * machine (docs/LODGEN_PARITY.md). */
+			if ( !cancelled && !writtenBto.isEmpty() && atlasCheck->isChecked() ) {
+				/* Optional draw-call optimization. Direct source-texture
+				 * refs are stock-legal (they ship in the game's BA2s — the
+				 * "CK-only" scare was a broken membership probe, see
+				 * docs/MISTAKES.md 2026-08-31b). Own name, never
+				 * vanilla's. */
 				const QString ws = world->worldspaceEdid();
 				const QString atlasDir = texDir + QStringLiteral( "/Objects" );
 				QDir().mkpath( atlasDir );
@@ -473,7 +482,8 @@ private:
 	QComboBox * wsBox, * dimBox;
 	QSpinBox * x0Spin, * y0Spin, * x1Spin, * y1Spin, * trisSpin;
 	QCheckBox * terrainCheck, * objectsCheck, * texCheck, * identityCheck,
-		* terrainIdCheck, * aoCheck, * waterCheck, * geomorphCheck, * previewCheck;
+		* terrainIdCheck, * aoCheck, * waterCheck, * geomorphCheck,
+		* atlasCheck, * previewCheck;
 	QProgressBar * progress;
 	QPushButton * startButton, * cancelButton;
 	std::unique_ptr<EsmWorld> world;

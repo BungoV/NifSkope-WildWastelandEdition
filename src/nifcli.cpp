@@ -3716,15 +3716,17 @@ int usage()
 		  << "                                          inspect a worldspace / one cell:\n"
 		  << "                                          LAND heights, refs, LOD models\n"
 		  << "  lodgen <file.esm> --worldspace HEX --terrain-region X0 Y0 X1 Y1\n"
-		  << "         [--dim 4] --out-dir DIR [--no-atlas]\n"
+		  << "         [--dim 4] --out-dir DIR [--atlas]\n"
 		  << "                                          sweep: every chunk touching the\n"
 		  << "                                          cell region, vanilla file naming.\n"
-		  << "                                          The swept BTOs' non-tiling textures\n"
-		  << "                                          are packed onto one 4096x2048\n"
-		  << "                                          <ws>.Objects sheet (+_n) by DEFAULT\n"
-		  << "                                          - the source LOD textures are\n"
-		  << "                                          CK-only, a stock game ships none of\n"
-		  << "                                          them. --no-atlas keeps direct refs\n"
+		  << "                                          Default: direct source-texture refs\n"
+		  << "                                          (stock-legal; they ship in the\n"
+		  << "                                          game's BA2s). --atlas packs the\n"
+		  << "                                          BTOs' non-tiling textures onto one\n"
+		  << "                                          <ws>.LodgenObjects sheet (+_n) as a\n"
+		  << "                                          draw-call optimization - own name,\n"
+		  << "                                          never vanilla's (collision shadows\n"
+		  << "                                          the vanilla sheet for vanilla BTOs)\n"
 		  << "  lodgen <file.esm> --worldspace HEX --objects X Y [--dim 4]\n"
 		  << "         [--data-root DIR] [--no-identity] -o OUT.bto\n"
 		  << "                                          rung 2: stitch one object chunk\n"
@@ -3829,7 +3831,12 @@ int nifskopeCliMain( const QStringList & args )
 	bool lgGeomorph = false;
 	bool lgTerrainIdentity = false;
 	QString lgImpostors;
-	bool lgAtlas = true;    // required for stock installs: source LOD textures are CK-only
+	/* Opt-in. The "atlas is REQUIRED, textures are CK-only" episode was a
+	 * broken membership probe: every source LOD texture checked ships in
+	 * Fallout4 - Textures6.ba2 (BA2 name-table grep is the ground truth,
+	 * ba2x's hash lookup false-negatives). Direct refs are stock-legal,
+	 * xLODGen-style; the atlas remains a draw-call optimization. */
+	bool lgAtlas = false;
 	bool lgListCandidates = false;
 	bool constraintsOnly = false;
 	bool skeletonOnly = false;
