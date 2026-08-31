@@ -57,12 +57,22 @@ struct EsmLodBase
 	float leafFrequency = 0.0f;
 };
 
+//! One additional splat layer on a cell quadrant: 17x17 opacities.
+struct EsmLandLayer
+{
+	quint32 ltex = 0;
+	float opacity[17][17];      //!< [row][col] over the quadrant, 0..1
+};
+
 //! One exterior cell's landscape: 33x33 heights in game units, world-placed.
 struct EsmLand
 {
 	int cellX = 0, cellY = 0;
 	bool valid = false;
 	float heights[33][33];      //!< [row=y][col=x], SW origin, game units
+	// splat data (docs/LODGEN_ESM_LAYOUTS.md): quadrants 0 BL, 1 BR, 2 TL, 3 TR
+	quint32 baseTex[4] = { 0, 0, 0, 0 };    //!< BTXT LTEX per quadrant
+	QVector<EsmLandLayer> layers[4];        //!< ATXT/VTXT layers, draw order
 };
 
 class EsmWorld
@@ -101,6 +111,9 @@ public:
 	//! LOD model info for a base object, cached. Never null.
 	const EsmLodBase & lodBase( quint32 baseFormID ) const;
 
+	//! An LTEX form's diffuse/normal texture paths (via TNAM -> TXST), cached.
+	void ltexTextures( quint32 ltexForm, QString & diffuse, QString & normal ) const;
+
 	//! All worldspaces in the file: formID -> EDID (static convenience).
 	static QVector<QPair<quint32, QString>> listWorldspaces( const QString & esmPath, QString * error );
 
@@ -118,6 +131,7 @@ private:
 	QHash<QPair<int, int>, CellEntry> cellIndex;
 	quint32 persistentCellGroup = 0;
 	mutable QHash<quint32, EsmLodBase> lodBaseCache;
+	mutable QHash<quint32, QPair<QString, QString>> ltexCache;
 	mutable QVector<EsmRefr> persistentCache;
 	mutable bool persistentCacheBuilt = false;
 

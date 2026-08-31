@@ -2292,7 +2292,8 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 	bool haveCell, int cellX, int cellY,
 	bool haveTerrain, int chunkX, int chunkY, int dim, const QString & outFile,
 	bool haveRegion, const int * region, const QString & outDir,
-	bool haveObjects, const QString & dataRoot, bool identity )
+	bool haveObjects, const QString & dataRoot, bool identity,
+	const QString & texDir )
 {
 	if ( haveObjects ) {
 		EsmWorld world;
@@ -2362,6 +2363,18 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 							done++;
 							out() << "[" << done << "] " << name << Qt::endl;
 							out().flush();
+							if ( !texDir.isEmpty() ) {
+								QDir().mkpath( texDir );
+								QString terr2;
+								if ( !lodgenBakeTerrainTextures( world, cx, cy, d,
+									dataRoot.isEmpty()
+										? QStringLiteral( "E:/Tools/Fallout 4/DataUnpacked/Data" )
+										: dataRoot,
+									texDir, &terr2 ) ) {
+									err() << "texture bake (" << cx << "," << cy << "): "
+										  << terr2 << Qt::endl;
+								}
+							}
 						}
 					}
 				}
@@ -3683,6 +3696,7 @@ int nifskopeCliMain( const QStringList & args )
 	bool lgHaveObjects = false;
 	QString lgDataRoot;
 	bool lgIdentity = true;
+	QString lgTexDir;
 	bool constraintsOnly = false;
 	bool skeletonOnly = false;
 	bool bodiesOnly = false;
@@ -3741,6 +3755,7 @@ int nifskopeCliMain( const QStringList & args )
 		}
 		else if ( t == QLatin1String( "--data-root" ) ) lgDataRoot = next();
 		else if ( t == QLatin1String( "--no-identity" ) ) lgIdentity = false;
+		else if ( t == QLatin1String( "--tex-dir" ) ) lgTexDir = next();
 		else if ( t == QLatin1String( "--roundtrip" ) ) roundTrip = true;
 		else if ( t == QLatin1String( "--constraints" ) ) constraintsOnly = true;
 		else if ( t == QLatin1String( "--skeleton" ) ) skeletonOnly = true;
@@ -3875,7 +3890,7 @@ int nifskopeCliMain( const QStringList & args )
 			lgHaveCell, lgCell[0], lgCell[1],
 			lgHaveTerrain, lgChunk[0], lgChunk[1], lgDim, outFile,
 			lgHaveRegion, lgRegion, lgOutDir,
-			lgHaveObjects, lgDataRoot, lgIdentity );
+			lgHaveObjects, lgDataRoot, lgIdentity, lgTexDir );
 	else if ( cmd == QLatin1String( "anim-setup" ) )
 		rc = cmdAnimSetup( file, block, controllers, sequence, newSequence,
 						   standalone, effectVar, intVar, listOnly, outFile );

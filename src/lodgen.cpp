@@ -931,3 +931,215 @@ bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
 			.arg( placed ).arg( skippedNoLod ).arg( buckets.size() );
 	return true;
 }
+
+/* ============ rung 3: terrain texture baking (splat -> DDS) ============ */
+
+#include "ddstxt16.hpp"
+
+#include <QFile>
+
+namespace
+{
+
+//! Uncompressed BGRA8 DDS writer — engine-loadable; BC compression is an
+//! optimization pass for later, not a requirement.
+bool lodgenWriteDds( const QString & path, int w, int h,
+	const std::vector<quint32> & bgra )
+{
+	QFile f( path );
+	if ( !f.open( QIODevice::WriteOnly ) )
+		return false;
+	quint32 hdr[32] = { 0 };
+	hdr[0] = 0x20534444;            // 'DDS '
+	hdr[1] = 124;
+	hdr[2] = 0x0000100F;            // caps|height|width|pitch|pixelformat
+	hdr[3] = quint32( h );
+	hdr[4] = quint32( w );
+	hdr[5] = quint32( w * 4 );
+	hdr[7] = 1;                     // mip count
+	hdr[19] = 32;                   // pixel format size
+	hdr[20] = 0x41;                 // RGBA + alpha
+	hdr[22] = 32;                   // bit count
+	hdr[23] = 0x00FF0000;           // B G R A masks (BGRA in memory)
+	hdr[24] = 0x0000FF00;
+	hdr[25] = 0x000000FF;
+	hdr[26] = 0xFF000000;
+	hdr[27] = 0x1000;               // caps: texture
+	f.write( reinterpret_cast<const char *>( hdr ), 128 );
+	f.write( reinterpret_cast<const char *>( bgra.data() ),
+		qint64( bgra.size() * 4 ) );
+	return true;
+}
+
+//! Cached loader for source landscape textures.
+const DDSTexture16 * lodgenLoadTexture( const QString & dataRoot,
+	const QString & texPath, QHash<QString, DDSTexture16 *> & cache )
+{
+	QString key = texPath.toLower();
+	auto it = cache.constFind( key );
+	if ( it != cache.constEnd() )
+		return *it;
+	DDSTexture16 * tex = nullptr;
+	QString path = texPath;
+	path.replace( QChar( '\\' ), QChar( '/' ) );
+	if ( !path.startsWith( QStringLiteral( "textures/" ), Qt::CaseInsensitive ) )
+		path.prepend( QStringLiteral( "textures/" ) );
+	try {
+		tex = new DDSTexture16(
+			( dataRoot + "/" + path ).toLocal8Bit().constData() );
+	} catch ( std::exception & ) {
+		tex = nullptr;
+	}
+	cache.insert( key, tex );
+	return tex;
+}
+
+} // namespace
+
+bool lodgenBakeTerrainTextures( const EsmWorld & world, int chunkX, int chunkY,
+	int dim, const QString & dataRoot, const QString & outDir, QString * error )
+{
+	auto fail = [error]( const QString & message ) {
+		if ( error )
+			*error = message;
+		return false;
+	};
+	constexpr int RES = 512;
+	// world-space tiling of the source landscape textures; near-terrain
+	// repeats roughly every half cell (calibration against vanilla bakes is
+	// an open refinement — the constant only affects apparent texel density)
+	constexpr float TILE = 2048.0f;
+	const float span = float( dim ) * 4096.0f;
+	const float cwX = float( chunkX ) * 4096.0f, cwY = float( chunkY ) * 4096.0f;
+
+	// per-cell land data, loaded once
+	std::vector<EsmLand> cells( size_t( dim ) * dim );
+	std::vector<bool> haveLand( size_t( dim ) * dim, false );
+	const int hn = dim * 32 + 1;
+	std::vector<float> hgt( size_t( hn ) * hn, world.defaultLandHeight() );
+	for ( int cy = 0; cy < dim; cy++ ) {
+		for ( int cx = 0; cx < dim; cx++ ) {
+			EsmLand & land = cells[size_t( cy ) * dim + cx];
+			if ( world.land( chunkX + cx, chunkY + cy, land ) ) {
+				haveLand[size_t( cy ) * dim + cx] = true;
+				for ( int row = 0; row < 33; row++ )
+					for ( int col = 0; col < 33; col++ )
+						hgt[size_t( cy * 32 + row ) * hn + size_t( cx * 32 + col )] =
+							land.heights[row][col];
+			}
+		}
+	}
+
+	QHash<QString, DDSTexture16 *> texCache;
+	std::vector<quint32> diffuse( size_t( RES ) * RES, 0xFF808080U );
+	std::vector<quint32> msn( size_t( RES ) * RES, 0xFFFF8080U );
+
+	// quadrants painted with no BTXT fall back to the chunk's dominant base
+	quint32 dominantBase = 0;
+	{
+		QMap<quint32, int> counts;
+		for ( const EsmLand & land : cells )
+			for ( int q = 0; q < 4; q++ )
+				if ( land.baseTex[q] )
+					counts[land.baseTex[q]]++;
+		int best = 0;
+		for ( auto it = counts.constBegin(); it != counts.constEnd(); ++it )
+			if ( it.value() > best ) { best = it.value(); dominantBase = it.key(); }
+	}
+
+	for ( int py = 0; py < RES; py++ ) {
+		// image row 0 = V 0 = NORTH edge (v = 1 - y/span in the Land UVs)
+		const float wy = cwY + ( 1.0f - ( float( py ) + 0.5f ) / RES ) * span;
+		for ( int px = 0; px < RES; px++ ) {
+			const float wx = cwX + ( ( float( px ) + 0.5f ) / RES ) * span;
+			const int cx = qBound( 0, int( ( wx - cwX ) / 4096.0f ), dim - 1 );
+			const int cy = qBound( 0, int( ( wy - cwY ) / 4096.0f ), dim - 1 );
+			const size_t ci = size_t( cy ) * dim + cx;
+			FloatVector4 color( 0.5f, 0.5f, 0.5f, 1.0f );
+			if ( haveLand[ci] ) {
+				const EsmLand & land = cells[ci];
+				// quadrant within the cell: 0 BL, 1 BR, 2 TL, 3 TR
+				const float lx = ( wx - cwX ) - float( cx ) * 4096.0f;
+				const float ly = ( wy - cwY ) - float( cy ) * 4096.0f;
+				const int q = ( ly >= 2048.0f ? 2 : 0 ) + ( lx >= 2048.0f ? 1 : 0 );
+				const float qx = ( lx - ( q & 1 ? 2048.0f : 0.0f ) ) / 2048.0f;
+				const float qy = ( ly - ( q & 2 ? 2048.0f : 0.0f ) ) / 2048.0f;
+				auto sampleLtex = [&]( quint32 ltex ) -> FloatVector4 {
+					QString d, n;
+					world.ltexTextures( ltex, d, n );
+					const DDSTexture16 * tex = d.isEmpty() ? nullptr
+						: lodgenLoadTexture( dataRoot, d, texCache );
+					if ( !tex )
+						return FloatVector4( 0.5f, 0.5f, 0.5f, 1.0f );
+					// wrap by hand: getPixelB clamps, and the tiling is ours
+					float u = std::fmod( wx / TILE, 1.0f );
+					float v = std::fmod( wy / TILE, 1.0f );
+					if ( u < 0.0f ) u += 1.0f;
+					if ( v < 0.0f ) v += 1.0f;
+					/* getPixelB/T take NORMALIZED 0..1 coordinates. Sample at
+					 * the mip whose texel matches the bake texel's WORLD
+					 * footprint (span/RES units), or the result is tiling
+					 * noise instead of the material's local average. */
+					const float texelWorld = TILE / float( tex->getWidth() );
+					const float footprint = span / float( RES );
+					const float mip = qBound( 0.0f,
+						std::log2( qMax( 1.0f, footprint / texelWorld ) ),
+						float( tex->getMaxMipLevel() ) );
+					return tex->getPixelT( u, v, mip );
+				};
+				const quint32 baseTex = land.baseTex[q] ? land.baseTex[q] : dominantBase;
+				if ( baseTex )
+					color = sampleLtex( baseTex );
+				for ( const EsmLandLayer & layer : land.layers[q] ) {
+					// bilinear over the 17x17 quadrant opacities
+					const float fx = qBound( 0.0f, qx * 16.0f, 15.999f );
+					const float fy = qBound( 0.0f, qy * 16.0f, 15.999f );
+					const int ix = int( fx ), iy = int( fy );
+					const float tx = fx - ix, ty = fy - iy;
+					const float a =
+						( layer.opacity[iy][ix] * ( 1 - tx ) + layer.opacity[iy][ix + 1] * tx ) * ( 1 - ty )
+						+ ( layer.opacity[iy + 1][ix] * ( 1 - tx ) + layer.opacity[iy + 1][ix + 1] * tx ) * ty;
+					if ( a <= 0.001f )
+						continue;
+					const FloatVector4 lc = sampleLtex( layer.ltex );
+					color = color + ( lc - color ) * qBound( 0.0f, a, 1.0f );
+				}
+			}
+			const int r = qBound( 0, int( color[0] * 255.0f + 0.5f ), 255 );
+			const int g = qBound( 0, int( color[1] * 255.0f + 0.5f ), 255 );
+			const int b = qBound( 0, int( color[2] * 255.0f + 0.5f ), 255 );
+			diffuse[size_t( py ) * RES + px] =
+				0xFF000000U | quint32( r << 16 ) | quint32( g << 8 ) | quint32( b );
+
+			// model-space normal from the heightfield (central differences)
+			const float gx = ( wx - cwX ) / span * float( hn - 1 );
+			const float gy = ( wy - cwY ) / span * float( hn - 1 );
+			const int hx = qBound( 1, int( gx ), hn - 2 );
+			const int hy = qBound( 1, int( gy ), hn - 2 );
+			const float spacing = span / float( hn - 1 );
+			const float dzdx = ( hgt[size_t( hy ) * hn + hx + 1]
+				- hgt[size_t( hy ) * hn + hx - 1] ) / ( 2.0f * spacing );
+			const float dzdy = ( hgt[size_t( hy + 1 ) * hn + hx]
+				- hgt[size_t( hy - 1 ) * hn + hx] ) / ( 2.0f * spacing );
+			Vector3 nrm( -dzdx, -dzdy, 1.0f );
+			nrm.normalize();
+			const int nr = qBound( 0, int( ( nrm[0] * 0.5f + 0.5f ) * 255.0f + 0.5f ), 255 );
+			const int ng = qBound( 0, int( ( nrm[1] * 0.5f + 0.5f ) * 255.0f + 0.5f ), 255 );
+			const int nb = qBound( 0, int( ( nrm[2] * 0.5f + 0.5f ) * 255.0f + 0.5f ), 255 );
+			msn[size_t( py ) * RES + px] =
+				0xFF000000U | quint32( nr << 16 ) | quint32( ng << 8 ) | quint32( nb );
+		}
+	}
+	for ( DDSTexture16 * t : texCache )
+		delete t;
+
+	const QString base = QString( "%1/%2.%3.%4.%5" )
+		.arg( outDir ).arg( world.worldspaceEdid() ).arg( dim ).arg( chunkX ).arg( chunkY );
+	if ( !lodgenWriteDds( base + QStringLiteral( ".DDS" ), RES, RES, diffuse ) )
+		return fail( QStringLiteral( "could not write the diffuse bake" ) );
+	if ( !lodgenWriteDds( base + QStringLiteral( "_msn.DDS" ), RES, RES, msn ) )
+		return fail( QStringLiteral( "could not write the normal bake" ) );
+	if ( error )
+		error->clear();
+	return true;
+}

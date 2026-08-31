@@ -213,8 +213,38 @@ bool EsmWorld::land( int cx, int cy, EsmLand & out ) const
 
 	const ESMFile::ESMRecord & lr = esm->getRecord( landForm );
 	ESMFile::ESMField f( *esm, lr );
+	int pendingQuadrant = -1;       // set by ATXT, consumed by the next VTXT
 	while ( f.next() ) {
-		if ( f == "VHGT" && f.size() >= 4 + 33 * 33 ) {
+		if ( f == "BTXT" && f.size() >= 8 ) {
+			const quint32 ltex = f.readUInt32();
+			const int quadrant = int( f.readUInt8() );
+			if ( quadrant >= 0 && quadrant < 4 )
+				out.baseTex[quadrant] = ltex;
+		} else if ( f == "ATXT" && f.size() >= 8 ) {
+			const quint32 ltex = f.readUInt32();
+			const int quadrant = int( f.readUInt8() );
+			if ( quadrant >= 0 && quadrant < 4 ) {
+				EsmLandLayer layer;
+				layer.ltex = ltex;
+				std::memset( layer.opacity, 0, sizeof( layer.opacity ) );
+				out.layers[quadrant].append( layer );
+				pendingQuadrant = quadrant;
+			} else {
+				pendingQuadrant = -1;
+			}
+		} else if ( f == "VTXT" && pendingQuadrant >= 0
+			&& !out.layers[pendingQuadrant].isEmpty() ) {
+			EsmLandLayer & layer = out.layers[pendingQuadrant].last();
+			const size_t entries = f.size() / 8;
+			for ( size_t e = 0; e < entries; e++ ) {
+				const quint16 posn = f.readUInt16();
+				(void) f.readUInt16();
+				const float opacity = f.readFloat();
+				if ( posn <= 288 )
+					layer.opacity[posn / 17][posn % 17] = opacity;
+			}
+			pendingQuadrant = -1;
+		} else if ( f == "VHGT" && f.size() >= 4 + 33 * 33 ) {
 			/* VHGT: float base + 33x33 signed byte deltas, times 8 game
 			 * units. Column 0 of each row offsets from the PREVIOUS row's
 			 * column 0; other columns accumulate along the row. */
@@ -365,6 +395,39 @@ const EsmLodBase & EsmWorld::lodBase( quint32 baseFormID ) const
 	}
 	auto ins = lodBaseCache.insert( baseFormID, b );
 	return *ins;
+}
+
+void EsmWorld::ltexTextures( quint32 ltexForm, QString & diffuse, QString & normal ) const
+{
+	auto it = ltexCache.constFind( ltexForm );
+	if ( it != ltexCache.constEnd() ) {
+		diffuse = it->first;
+		normal = it->second;
+		return;
+	}
+	diffuse.clear();
+	normal.clear();
+	const ESMFile::ESMRecord * lr = esm->findRecord( ltexForm );
+	if ( lr && *lr == "LTEX" ) {
+		quint32 txst = 0;
+		{
+			ESMFile::ESMField f( *esm, *lr );
+			while ( f.next() )
+				if ( f == "TNAM" && f.size() >= 4 )
+					txst = f.readUInt32();
+		}
+		const ESMFile::ESMRecord * tr = txst ? esm->findRecord( txst ) : nullptr;
+		if ( tr && *tr == "TXST" ) {
+			ESMFile::ESMField f( *esm, *tr );
+			while ( f.next() ) {
+				if ( f == "TX00" )
+					diffuse = fieldString( f );
+				else if ( f == "TX01" )
+					normal = fieldString( f );
+			}
+		}
+	}
+	ltexCache.insert( ltexForm, qMakePair( diffuse, normal ) );
 }
 
 QVector<QPair<quint32, QString>> EsmWorld::listWorldspaces( const QString & esmPath, QString * error )

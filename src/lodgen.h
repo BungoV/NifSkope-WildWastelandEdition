@@ -70,4 +70,11 @@ bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
 	int chunkX, int chunkY, const LodgenObjectOptions & opts,
 	QString * manifestOut, QString * error );
 
+/* Rung 3: bake a chunk's terrain textures from the LAND splat — evaluate
+ * the CK paint (per-quadrant LTEX palette + 17x17 opacities) with the
+ * source landscape textures world-tiled, plus a model-space normal map
+ * from the heightfield. Uncompressed BGRA DDS (BC1 later). */
+bool lodgenBakeTerrainTextures( const EsmWorld & world, int chunkX, int chunkY,
+	int dim, const QString & dataRoot, const QString & outDir, QString * error );
+
 #endif // LODGEN_H
