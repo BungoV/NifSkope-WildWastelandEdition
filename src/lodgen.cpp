@@ -862,7 +862,13 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 			if ( iAlpha.isValid() ) {
 				s.hasAlpha = true;
 				s.alphaFlags = quint16( src.get<int>( iAlpha, "Flags" ) );
-				s.alphaThreshold = quint8( src.get<int>( iAlpha, "Threshold" ) );
+				/* NOT the source's threshold: near-tree materials test at
+				 * 65-80, which at LOD distance passes far more canopy
+				 * texels than vanilla's chunks do. Vanilla LOD alpha
+				 * properties test at 128 across the board (measured, flags
+				 * 4844 threshold 128) — bungo diagnosed the denser-canopy
+				 * difference as exactly this cutoff. */
+				s.alphaThreshold = 128;
 			}
 			QModelIndex iShader = src.getBlockIndex(
 				src.getLink( iShape, "Shader Property" ) );
