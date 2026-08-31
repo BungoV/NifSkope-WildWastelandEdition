@@ -71,8 +71,18 @@ spun street pieces (now TREE records / trees folder / tree-prefixed
 names only), and the atlas now uses vanilla's exact naming
 (`data\Textures\Terrain\<ws>\Objects\<ws>.Objects.DDS`).
 
-Viewer note: magenta shapes in NifSkope comparison screenshots are a
-texture-RESOLUTION artifact — our BTOs reference source LOD textures
-(verified present on disk) that NifSkope's resource paths don't search;
-vanilla BTOs reference their prebuilt atlas. In-game deployment or the
-`--atlas` pass resolves it.
+Magenta shapes, the REAL story (corrected after checking archive
+membership file-by-file with the BA2 name-hash tool): the source LOD
+textures our BTOs reference (`textures\LOD\...`) are NOT in the shipped
+game at all — absent from every base-game and DLC BA2 tested, and the
+game folder holds no loose textures. They are CK LOD-GENERATION
+resources; they exist in E:\Tools\Fallout 4\DataUnpacked (which carries
+them) but a stock install cannot resolve them, in the viewer or
+in-game. Vanilla never hits this because its pipeline consumes those
+textures at generation time and ships only the baked atlas
+(`Commonwealth.Objects.DDS`), which its BTOs reference.
+
+CONSEQUENCE: for release-quality output the `--atlas` pass is
+REQUIRED, not an optimization — or the referenced source textures must
+ship loose with the output. Our --atlas writes vanilla's exact naming,
+so atlased runs are fully resolvable on a stock install.
