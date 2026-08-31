@@ -11,6 +11,10 @@
   both the GUI and the CLI comma form. KNOWN LIMIT (tooltip says so too):
   form IDs are taken as stored, so plugins whose prefixes index their own
   master list are not remapped into load-order space yet.
+- The plugin list is a drop target: drag .esm/.esp/.esl files straight from
+  the file manager, and drag rows to reorder the load order (later wins).
+  Worldspace refresh now watches the list model (insert/remove/move),
+  debounced so a multi-file drop parses the plugin set once.
 - Worldspace is a real combo (`EDID (formid)`) populated from the selected
   plugins via `EsmWorld::listWorldspaces`, refreshed whenever the list
   changes — no more raw hex field.

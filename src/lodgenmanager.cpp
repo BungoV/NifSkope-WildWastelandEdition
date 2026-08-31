@@ -20,6 +20,10 @@ BSD License - see nifskope.h
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QDragEnterEvent>
+#include <QDropEvent>
+#include <QMimeData>
+#include <QUrl>
 #include <QProgressBar>
 #include <QPushButton>
 #include <QSpinBox>
@@ -37,6 +41,67 @@ BSD License - see nifskope.h
 namespace
 {
 
+//! Plugin list accepting .esm/.esp/.esl drops from the file manager, with
+//! drag-reordering of the load order (later file wins).
+class PluginListWidget final : public QListWidget
+{
+public:
+	PluginListWidget( QWidget * parent ) : QListWidget( parent )
+	{
+		setSelectionMode( QAbstractItemView::SingleSelection );
+		setDragDropMode( QAbstractItemView::InternalMove );
+		setDefaultDropAction( Qt::MoveAction );
+		setAcceptDrops( true );
+	}
+
+protected:
+	static bool pluginUrls( const QMimeData * mime )
+	{
+		if ( !mime->hasUrls() )
+			return false;
+		for ( const QUrl & u : mime->urls() ) {
+			const QString f = u.toLocalFile();
+			if ( f.endsWith( QLatin1String( ".esm" ), Qt::CaseInsensitive )
+				|| f.endsWith( QLatin1String( ".esp" ), Qt::CaseInsensitive )
+				|| f.endsWith( QLatin1String( ".esl" ), Qt::CaseInsensitive ) )
+				return true;
+		}
+		return false;
+	}
+
+	void dragEnterEvent( QDragEnterEvent * e ) override
+	{
+		if ( pluginUrls( e->mimeData() ) )
+			e->acceptProposedAction();
+		else
+			QListWidget::dragEnterEvent( e );
+	}
+
+	void dragMoveEvent( QDragMoveEvent * e ) override
+	{
+		if ( pluginUrls( e->mimeData() ) )
+			e->acceptProposedAction();
+		else
+			QListWidget::dragMoveEvent( e );
+	}
+
+	void dropEvent( QDropEvent * e ) override
+	{
+		if ( pluginUrls( e->mimeData() ) ) {
+			for ( const QUrl & u : e->mimeData()->urls() ) {
+				const QString f = u.toLocalFile();
+				if ( f.endsWith( QLatin1String( ".esm" ), Qt::CaseInsensitive )
+					|| f.endsWith( QLatin1String( ".esp" ), Qt::CaseInsensitive )
+					|| f.endsWith( QLatin1String( ".esl" ), Qt::CaseInsensitive ) )
+					addItem( f );
+			}
+			e->acceptProposedAction();
+		} else {
+			QListWidget::dropEvent( e );
+		}
+	}
+};
+
 class LodgenManagerDialog final : public QDialog
 {
 public:
@@ -52,13 +117,13 @@ public:
 		int row = 0;
 
 		grid->addWidget( new QLabel( tr( "Plugins (load order, later wins)" ), this ), row, 0 );
-		pluginList = new QListWidget( this );
-		pluginList->setSelectionMode( QAbstractItemView::SingleSelection );
+		pluginList = new PluginListWidget( this );
 		pluginList->setMaximumHeight( 96 );
 		pluginList->addItem( QStringLiteral(
 			"X:/Programs/Steam/steamapps/common/Fallout 4/Data/Fallout4.esm" ) );
 		pluginList->setToolTip( tr(
 			"Ordered master/plugin list; a later file's version of a record wins.\n"
+			"Drop .esm/.esp/.esl files here, drag rows to reorder.\n"
 			"KNOWN LIMIT: plugins whose form IDs index their own master list\n"
 			"(most mod ESPs) are not remapped yet - Bethesda's own masters and\n"
 			"correctly prefixed files merge correctly." ) );
@@ -77,12 +142,16 @@ public:
 					QStringLiteral( "Plugins (*.esm *.esp *.esl)" ) );
 				for ( const QString & f : files )
 					pluginList->addItem( f );
-				refreshWorldspaces();
 			} );
 			connect( delBtn, &QPushButton::clicked, this, [this]() {
 				delete pluginList->currentItem();
-				refreshWorldspaces();
 			} );
+			for ( auto sig : { &QAbstractItemModel::rowsInserted,
+				&QAbstractItemModel::rowsRemoved } )
+				connect( pluginList->model(), sig, this,
+					[this]() { scheduleWorldspaceRefresh(); } );
+			connect( pluginList->model(), &QAbstractItemModel::rowsMoved, this,
+				[this]() { scheduleWorldspaceRefresh(); } );
 		}
 		row++;
 
@@ -211,6 +280,17 @@ private:
 		for ( int i = 0; i < pluginList->count(); i++ )
 			files.append( pluginList->item( i )->text() );
 		return files.join( QChar( ',' ) );
+	}
+
+	void scheduleWorldspaceRefresh()
+	{
+		if ( wsRefreshPending )
+			return;
+		wsRefreshPending = true;
+		QTimer::singleShot( 0, this, [this]() {
+			wsRefreshPending = false;
+			refreshWorldspaces();
+		} );
 	}
 
 	void refreshWorldspaces()
@@ -352,6 +432,7 @@ private:
 
 	NifSkope * skope;
 	QListWidget * pluginList;
+	bool wsRefreshPending = false;
 	QLineEdit * outEdit, * dataRootEdit, * impostorEdit;
 	QComboBox * wsBox, * dimBox;
 	QSpinBox * x0Spin, * y0Spin, * x1Spin, * y1Spin, * trisSpin;
