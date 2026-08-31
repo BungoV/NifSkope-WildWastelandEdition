@@ -65,6 +65,12 @@ bool Material::openFile( const QString & name, const NifModel * nif, const QMode
 	if ( data.isEmpty() )
 		return false;
 
+	return openData( data );
+}
+
+bool Material::openData( const QByteArray & constData )
+{
+	QByteArray data( constData );
 	QBuffer f( &data );
 	if ( f.open( QIODevice::ReadOnly ) ) {
 		QDataStream	in;
@@ -118,6 +124,13 @@ ShaderMaterial::ShaderMaterial( const QString & name, const NifModel * nif, cons
 {
 	isBGSM = true;
 	readable = openFile( name, nif, index );
+}
+
+ShaderMaterial::ShaderMaterial( const QByteArray & data )
+	: Material()
+{
+	isBGSM = true;
+	readable = openData( data );
 }
 
 bool ShaderMaterial::readFile( QDataStream & in )

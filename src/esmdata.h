@@ -88,6 +88,8 @@ struct EsmLand
 	// splat data (docs/LODGEN_ESM_LAYOUTS.md): quadrants 0 BL, 1 BR, 2 TL, 3 TR
 	quint32 baseTex[4] = { 0, 0, 0, 0 };    //!< BTXT LTEX per quadrant
 	QVector<EsmLandLayer> layers[4];        //!< ATXT/VTXT layers, draw order
+	bool hasColors = false;                 //!< VCLR present
+	quint8 colors[33][33][3];               //!< [row][col] RGB, 255 = neutral
 };
 
 class EsmWorld

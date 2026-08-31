@@ -82,6 +82,7 @@ public:
 
 protected:
 	bool openFile( const QString & name, const NifModel * nif, const QModelIndex & index );
+	bool openData( const QByteArray & data );
 	virtual bool readFile( QDataStream & in );
 
 	QStringList textureList;
@@ -145,6 +146,8 @@ class ShaderMaterial : public Material
 
 public:
 	ShaderMaterial( const QString & name, const NifModel * nif, const QModelIndex & index );
+	//! Parse straight from file bytes, no NifModel resource context needed.
+	explicit ShaderMaterial( const QByteArray & data );
 	quint32 shaderFlags2() const {
 		return ( bEnableEditorAlphaRef ? 0x00000001U : 0U ) | ( bTranslucency ? 0x00000002U : 0U )
 			| ( bTranslucencyThickObject ? 0x00000004U : 0U ) | ( bTranslucencyMixAlbedoWithSubsurfaceCol ? 0x00000008U : 0U )

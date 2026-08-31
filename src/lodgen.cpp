@@ -7,9 +7,11 @@ BSD License - see nifskope.h
 #include "lodgen.h"
 
 #include "esmdata.h"
+#include "io/material.h"
 #include "model/nifmodel.h"
 #include "spells/blocks.h"
 
+#include <QFile>
 #include <QMap>
 #include <QVector>
 
@@ -1566,7 +1568,8 @@ bool lodgenWriteDds( const QString & path, int w, int h,
 	return true;
 }
 
-//! Cached loader for source landscape textures.
+//! Cached loader for source landscape textures. A .bgsm path (material-backed
+//! TXSTs carry no TX00) is resolved through the material's diffuse slot.
 const DDSTexture16 * lodgenLoadTexture( const QString & dataRoot,
 	const QString & texPath, QHash<QString, DDSTexture16 *> & cache )
 {
@@ -1577,6 +1580,22 @@ const DDSTexture16 * lodgenLoadTexture( const QString & dataRoot,
 	DDSTexture16 * tex = nullptr;
 	QString path = texPath;
 	path.replace( QChar( '\\' ), QChar( '/' ) );
+	if ( path.endsWith( QStringLiteral( ".bgsm" ), Qt::CaseInsensitive ) ) {
+		if ( !path.startsWith( QStringLiteral( "materials/" ), Qt::CaseInsensitive ) )
+			path.prepend( QStringLiteral( "materials/" ) );
+		QFile mf( dataRoot + "/" + path );
+		path.clear();
+		if ( mf.open( QIODevice::ReadOnly ) ) {
+			const ShaderMaterial sm( mf.readAll() );
+			if ( sm.isValid() && !sm.textures().isEmpty() )
+				path = sm.textures().first();
+		}
+		path.replace( QChar( '\\' ), QChar( '/' ) );
+		if ( path.isEmpty() ) {
+			cache.insert( key, nullptr );
+			return nullptr;
+		}
+	}
 	if ( !path.startsWith( QStringLiteral( "textures/" ), Qt::CaseInsensitive ) )
 		path.prepend( QStringLiteral( "textures/" ) );
 	try {
@@ -1628,6 +1647,9 @@ bool lodgenBakeTerrainTextures( const EsmWorld & world, int chunkX, int chunkY,
 	QHash<QString, DDSTexture16 *> texCache;
 	std::vector<quint32> diffuse( size_t( RES ) * RES, 0xFF808080U );
 	std::vector<quint32> msn( size_t( RES ) * RES, 0xFFFF8080U );
+	// diagnostics: where the bake falls back to the flat default
+	int statNoLand = 0, statNoBase = 0, statNoTex = 0;
+	QSet<quint32> failedLtex;
 
 	// quadrants painted with no BTXT fall back to the chunk's dominant base
 	quint32 dominantBase = 0;
@@ -1651,6 +1673,8 @@ bool lodgenBakeTerrainTextures( const EsmWorld & world, int chunkX, int chunkY,
 			const int cy = qBound( 0, int( ( wy - cwY ) / 4096.0f ), dim - 1 );
 			const size_t ci = size_t( cy ) * dim + cx;
 			FloatVector4 color( 0.5f, 0.5f, 0.5f, 1.0f );
+			if ( !haveLand[ci] )
+				statNoLand++;
 			if ( haveLand[ci] ) {
 				const EsmLand & land = cells[ci];
 				// quadrant within the cell: 0 BL, 1 BR, 2 TL, 3 TR
@@ -1664,8 +1688,11 @@ bool lodgenBakeTerrainTextures( const EsmWorld & world, int chunkX, int chunkY,
 					world.ltexTextures( ltex, d, n );
 					const DDSTexture16 * tex = d.isEmpty() ? nullptr
 						: lodgenLoadTexture( dataRoot, d, texCache );
-					if ( !tex )
+					if ( !tex ) {
+						statNoTex++;
+						failedLtex.insert( ltex );
 						return FloatVector4( 0.5f, 0.5f, 0.5f, 1.0f );
+					}
 					// wrap by hand: getPixelB clamps, and the tiling is ours
 					float u = std::fmod( wx / TILE, 1.0f );
 					float v = std::fmod( wy / TILE, 1.0f );
@@ -1685,6 +1712,8 @@ bool lodgenBakeTerrainTextures( const EsmWorld & world, int chunkX, int chunkY,
 				const quint32 baseTex = land.baseTex[q] ? land.baseTex[q] : dominantBase;
 				if ( baseTex )
 					color = sampleLtex( baseTex );
+				else
+					statNoBase++;
 				for ( const EsmLandLayer & layer : land.layers[q] ) {
 					// bilinear over the 17x17 quadrant opacities
 					const float fx = qBound( 0.0f, qx * 16.0f, 15.999f );
@@ -1696,8 +1725,28 @@ bool lodgenBakeTerrainTextures( const EsmWorld & world, int chunkX, int chunkY,
 						+ ( layer.opacity[iy + 1][ix] * ( 1 - tx ) + layer.opacity[iy + 1][ix + 1] * tx ) * ty;
 					if ( a <= 0.001f )
 						continue;
-					const FloatVector4 lc = sampleLtex( layer.ltex );
+					// NULL-texture layers paint the engine's hardcoded default
+					// ground; the chunk's dominant base is the local stand-in
+					const FloatVector4 lc = sampleLtex(
+						layer.ltex ? layer.ltex : dominantBase );
 					color = color + ( lc - color ) * qBound( 0.0f, a, 1.0f );
+				}
+				if ( land.hasColors ) {
+					/* VCLR: the landscape shader multiplies the hand-painted
+					 * vertex colour into the ground, and vanilla's LOD bakes
+					 * inherit it — bilinear over the 33x33 grid. */
+					const float gx = qBound( 0.0f, lx / 4096.0f * 32.0f, 31.999f );
+					const float gy = qBound( 0.0f, ly / 4096.0f * 32.0f, 31.999f );
+					const int ix = int( gx ), iy = int( gy );
+					const float tx = gx - ix, ty = gy - iy;
+					for ( int k = 0; k < 3; k++ ) {
+						const float c =
+							( land.colors[iy][ix][k] * ( 1 - tx )
+								+ land.colors[iy][ix + 1][k] * tx ) * ( 1 - ty )
+							+ ( land.colors[iy + 1][ix][k] * ( 1 - tx )
+								+ land.colors[iy + 1][ix + 1][k] * tx ) * ty;
+						color[k] *= c / 255.0f;
+					}
 				}
 			}
 			const int r = qBound( 0, int( color[0] * 255.0f + 0.5f ), 255 );
@@ -1727,6 +1776,15 @@ bool lodgenBakeTerrainTextures( const EsmWorld & world, int chunkX, int chunkY,
 	}
 	for ( DDSTexture16 * t : texCache )
 		delete t;
+	if ( statNoLand || statNoBase || statNoTex ) {
+		QStringList ids;
+		for ( quint32 id : failedLtex )
+			ids.append( QString::number( id, 16 ) );
+		fprintf( stderr, "bake %d,%d: %d px no land, %d px no base tex, "
+			"%d samples unresolvable LTEX [%s]\n", chunkX, chunkY,
+			statNoLand, statNoBase, statNoTex,
+			ids.join( QChar( ' ' ) ).toLatin1().constData() );
+	}
 
 	const QString base = QString( "%1/%2.%3.%4.%5" )
 		.arg( outDir ).arg( world.worldspaceEdid() ).arg( dim ).arg( chunkX ).arg( chunkY );

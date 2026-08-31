@@ -261,6 +261,15 @@ bool EsmWorld::land( int cx, int cy, EsmLand & out ) const
 				}
 			}
 			out.valid = true;
+		} else if ( f == "VCLR" && f.size() >= 33 * 33 * 3 ) {
+			// hand-painted vertex colours, multiplied into the ground by the
+			// landscape shader; same 33x33 SW-origin grid as VHGT
+			const unsigned char * d = f.data();
+			for ( int row = 0; row < 33; row++ )
+				for ( int col = 0; col < 33; col++ )
+					for ( int k = 0; k < 3; k++ )
+						out.colors[row][col][k] = d[( row * 33 + col ) * 3 + k];
+			out.hasColors = true;
 		}
 	}
 	return out.valid;
@@ -418,13 +427,21 @@ void EsmWorld::ltexTextures( quint32 ltexForm, QString & diffuse, QString & norm
 		}
 		const ESMFile::ESMRecord * tr = txst ? esm->findRecord( txst ) : nullptr;
 		if ( tr && *tr == "TXST" ) {
+			QString material;
 			ESMFile::ESMField f( *esm, *tr );
 			while ( f.next() ) {
 				if ( f == "TX00" )
 					diffuse = fieldString( f );
 				else if ( f == "TX01" )
 					normal = fieldString( f );
+				else if ( f == "MNAM" )
+					material = fieldString( f );
 			}
+			/* Material-backed TXSTs (common on landscape sets) carry no TX00
+			 * — the textures live inside the referenced .bgsm. Hand the
+			 * material path through; the texture loader resolves it. */
+			if ( diffuse.isEmpty() && !material.isEmpty() )
+				diffuse = material;
 		}
 	}
 	ltexCache.insert( ltexForm, qMakePair( diffuse, normal ) );
