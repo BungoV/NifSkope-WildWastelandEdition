@@ -45,4 +45,28 @@ struct LodgenTerrainOptions
 bool lodgenBuildTerrainChunk( NifModel * nif, const EsmWorld & world,
 	int chunkX, int chunkY, const LodgenTerrainOptions & opts, QString * error );
 
+/* Rung 2: object .bto stitching. REFRs with LOD models are gathered per
+ * chunk, their per-object _LOD.nif meshes loaded from the data root,
+ * transformed into miniature chunk space and welded into per-material
+ * shapes — per-cell segments at dim4, one segment otherwise. No atlas:
+ * shapes reference the source LOD textures directly (xLODGen-legal).
+ *
+ * With identity on, the output vertex format gains COLORS: R+G = 16-bit
+ * per-chunk object index, B = 255 (AO bake slot), A = the source mesh's
+ * own alpha (tree sway weight) — the FO4CS extra-data channel contract
+ * from docs/TO_BE_IMPLEMENTED.md. A manifest text file (one line per
+ * index: formID, base type, position, scale) is written beside the chunk.
+ */
+struct LodgenObjectOptions
+{
+	int dim = 4;
+	QString dataRoot;           //!< Data folder holding meshes\\lod\\... sources
+	bool identity = true;       //!< vertex-colour identity + manifest (CS profile)
+	int lodLevel = -1;          //!< MNAM slot; -1 = pick by dim (4->0, 8->1, 16->2, 32->3)
+};
+
+bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
+	int chunkX, int chunkY, const LodgenObjectOptions & opts,
+	QString * manifestOut, QString * error );
+
 #endif // LODGEN_H

@@ -2291,8 +2291,36 @@ int cmdBtd( const QString & file, bool infoOnly, bool haveRegion,
 int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 	bool haveCell, int cellX, int cellY,
 	bool haveTerrain, int chunkX, int chunkY, int dim, const QString & outFile,
-	bool haveRegion, const int * region, const QString & outDir )
+	bool haveRegion, const int * region, const QString & outDir,
+	bool haveObjects, const QString & dataRoot, bool identity )
 {
+	if ( haveObjects ) {
+		EsmWorld world;
+		QString error;
+		if ( !world.load( file, worldspace ? worldspace : 0x3CU, &error ) ) {
+			err() << "error: " << error << Qt::endl;
+			return 1;
+		}
+		LodgenObjectOptions opts;
+		opts.dim = dim > 0 ? dim : 4;
+		opts.identity = identity;
+		opts.dataRoot = dataRoot.isEmpty()
+			? QStringLiteral( "E:/Tools/Fallout 4/DataUnpacked/Data" ) : dataRoot;
+		NifModel nif;
+		QString manifest;
+		if ( !lodgenBuildObjectChunk( &nif, world, chunkX, chunkY, opts, &manifest, &error ) ) {
+			err() << "error: " << error << Qt::endl;
+			return 1;
+		}
+		out() << "object chunk (" << chunkX << "," << chunkY << ") dim " << opts.dim
+			  << ": " << nif.getBlockCount() << " blocks — " << error << Qt::endl;
+		if ( opts.identity && !outFile.isEmpty() ) {
+			QFile mf( outFile + QStringLiteral( ".manifest.txt" ) );
+			if ( mf.open( QIODevice::WriteOnly | QIODevice::Text ) )
+				mf.write( manifest.toUtf8() );
+		}
+		return saveNif( nif, outFile ) ? 0 : 1;
+	}
 	if ( haveRegion ) {
 		if ( outDir.isEmpty() ) {
 			err() << "error: --terrain-region needs --out-dir" << Qt::endl;
@@ -3526,6 +3554,13 @@ int usage()
 		  << "  lodgen <file.esm> --worldspace HEX --terrain-region X0 Y0 X1 Y1\n"
 		  << "         [--dim 4] --out-dir DIR         sweep: every chunk touching the\n"
 		  << "                                          cell region, vanilla file naming\n"
+		  << "  lodgen <file.esm> --worldspace HEX --objects X Y [--dim 4]\n"
+		  << "         [--data-root DIR] [--no-identity] -o OUT.bto\n"
+		  << "                                          rung 2: stitch one object chunk\n"
+		  << "                                          from per-object _LOD meshes; with\n"
+		  << "                                          identity (default) vertices carry\n"
+		  << "                                          the FO4CS channel contract and a\n"
+		  << "                                          .manifest.txt is written beside\n"
 		  << "  lodgen <file.esm> --worldspace HEX --terrain X Y [--dim 4] -o OUT.btr\n"
 		  << "                                          rung 1: generate one terrain chunk\n"
 		  << "                                          (X,Y = SW cell, dim-aligned) in the\n"
@@ -3616,6 +3651,9 @@ int nifskopeCliMain( const QStringList & args )
 	bool lgHaveRegion = false;
 	int lgRegion[4] = { 0, 0, 0, 0 };
 	QString lgOutDir;
+	bool lgHaveObjects = false;
+	QString lgDataRoot;
+	bool lgIdentity = true;
 	bool constraintsOnly = false;
 	bool skeletonOnly = false;
 	bool bodiesOnly = false;
@@ -3667,6 +3705,13 @@ int nifskopeCliMain( const QStringList & args )
 				lgRegion[r] = next().toInt();
 		}
 		else if ( t == QLatin1String( "--out-dir" ) ) lgOutDir = next();
+		else if ( t == QLatin1String( "--objects" ) ) {
+			lgHaveObjects = true;
+			lgChunk[0] = next().toInt();
+			lgChunk[1] = next().toInt();
+		}
+		else if ( t == QLatin1String( "--data-root" ) ) lgDataRoot = next();
+		else if ( t == QLatin1String( "--no-identity" ) ) lgIdentity = false;
 		else if ( t == QLatin1String( "--roundtrip" ) ) roundTrip = true;
 		else if ( t == QLatin1String( "--constraints" ) ) constraintsOnly = true;
 		else if ( t == QLatin1String( "--skeleton" ) ) skeletonOnly = true;
@@ -3800,7 +3845,8 @@ int nifskopeCliMain( const QStringList & args )
 		rc = cmdLodgen( file, lgListWorldspaces, lgWorldspace,
 			lgHaveCell, lgCell[0], lgCell[1],
 			lgHaveTerrain, lgChunk[0], lgChunk[1], lgDim, outFile,
-			lgHaveRegion, lgRegion, lgOutDir );
+			lgHaveRegion, lgRegion, lgOutDir,
+			lgHaveObjects, lgDataRoot, lgIdentity );
 	else if ( cmd == QLatin1String( "anim-setup" ) )
 		rc = cmdAnimSetup( file, block, controllers, sequence, newSequence,
 						   standalone, effectVar, intVar, listOnly, outFile );

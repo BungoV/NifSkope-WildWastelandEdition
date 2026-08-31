@@ -390,3 +390,372 @@ bool lodgenBuildTerrainChunk( NifModel * nif, const EsmWorld & world,
 		error->clear();
 	return true;
 }
+
+/* ================= rung 2: object .bto stitching ======================= */
+
+namespace
+{
+
+//! Object-LOD vertex layouts, measured: 20-byte (pos half + UV + normal +
+//! tangent) for parity, 24-byte with COLORS for the identity profile.
+constexpr std::uint64_t OBJ_VERTEX_DESC = 474989027590661ULL;       // 0x1B00000650405
+constexpr std::uint64_t OBJ_VERTEX_DESC_COLORS = 1037939064898054ULL; // 0x3B00000650406
+
+struct LodSrcShape
+{
+	QVector<Vector3> pos, nrm, tan;
+	QVector<Vector2> uv;
+	QVector<Color4> col;
+	QVector<Triangle> tris;
+	QString tex0, tex1;
+	bool hasAlpha = false;
+	quint16 alphaFlags = 4844;
+	quint8 alphaThreshold = 128;
+};
+
+//! Compose a block's transform up the parent chain (local -> model space).
+Transform lodgenWorldTransform( const NifModel * nif, const QModelIndex & block )
+{
+	Transform t( nif, block );
+	QModelIndex parent = nif->getBlockIndex( nif->getParent( nif->getBlockNumber( block ) ) );
+	while ( parent.isValid() && nif->blockInherits( parent, "NiAVObject" ) ) {
+		t = Transform( nif, parent ) * t;
+		parent = nif->getBlockIndex( nif->getParent( nif->getBlockNumber( parent ) ) );
+	}
+	return t;
+}
+
+//! Load every shape of a per-object LOD model, transforms applied, textures
+//! resolved from its shader property. Results cached per path.
+const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
+	const QString & meshPath, QHash<QString, QVector<LodSrcShape>> & cache )
+{
+	const QString key = meshPath.toLower();
+	auto it = cache.constFind( key );
+	if ( it != cache.constEnd() )
+		return *it;
+
+	QVector<LodSrcShape> shapes;
+	QString path = meshPath;
+	path.replace( QChar( '\\' ), QChar( '/' ) );
+	if ( !path.startsWith( QStringLiteral( "meshes/" ), Qt::CaseInsensitive ) )
+		path.prepend( QStringLiteral( "meshes/" ) );
+	NifModel src;
+	if ( src.loadFromFile( dataRoot + "/" + path ) ) {
+		for ( int b = 0; b < src.getBlockCount(); b++ ) {
+			QModelIndex iShape = src.getBlockIndex( b );
+			if ( !src.blockInherits( iShape, "BSTriShape" ) )
+				continue;
+			const quint32 numVerts = src.get<quint32>( iShape, "Num Vertices" );
+			if ( !numVerts )
+				continue;
+			const BSVertexDesc desc = src.get<BSVertexDesc>( iShape, "Vertex Desc" );
+			const quint16 flags = quint16( ( desc.Value() >> 44 ) & 0xFFFF );
+			const bool fullPrec = ( flags & 0x400 ) != 0;
+			const bool hasColors = ( flags & 0x20 ) != 0;
+			const Transform xf = lodgenWorldTransform( &src, iShape );
+			LodSrcShape s;
+			QModelIndex iVD = src.getIndex( iShape, "Vertex Data" );
+			if ( !iVD.isValid() )
+				continue;
+			for ( quint32 v = 0; v < numVerts; v++ ) {
+				QModelIndex row = src.index( int( v ), 0, iVD );
+				const Vector3 p = fullPrec ? src.get<Vector3>( row, "Vertex" )
+					: Vector3( src.get<HalfVector3>( row, "Vertex" ) );
+				s.pos.append( xf * p );
+				s.nrm.append( xf.rotation * Vector3( src.get<ByteVector3>( row, "Normal" ) ) );
+				s.tan.append( xf.rotation * Vector3( src.get<ByteVector3>( row, "Tangent" ) ) );
+				s.uv.append( Vector2( src.get<HalfVector2>( row, "UV" ) ) );
+				s.col.append( hasColors ? src.get<Color4>( row, "Vertex Colors" )
+					: Color4( 1, 1, 1, 1 ) );
+			}
+			QModelIndex iTris = src.getIndex( iShape, "Triangles" );
+			if ( iTris.isValid() )
+				s.tris = src.getArray<Triangle>( iTris );
+			QModelIndex iAlpha = src.getBlockIndex(
+				src.getLink( iShape, "Alpha Property" ) );
+			if ( iAlpha.isValid() ) {
+				s.hasAlpha = true;
+				s.alphaFlags = quint16( src.get<int>( iAlpha, "Flags" ) );
+				s.alphaThreshold = quint8( src.get<int>( iAlpha, "Threshold" ) );
+			}
+			QModelIndex iShader = src.getBlockIndex(
+				src.getLink( iShape, "Shader Property" ) );
+			if ( iShader.isValid() ) {
+				QModelIndex iTexSet = src.getBlockIndex(
+					src.getLink( iShader, "Texture Set" ) );
+				if ( iTexSet.isValid() ) {
+					QModelIndex iArr = src.getIndex( iTexSet, "Textures" );
+					if ( iArr.isValid() ) {
+						s.tex0 = src.get<QString>( src.getIndex( iArr, 0 ) );
+						s.tex1 = src.get<QString>( src.getIndex( iArr, 1 ) );
+					}
+				}
+			}
+			if ( !s.tris.isEmpty() )
+				shapes.append( s );
+		}
+	}
+	return *cache.insert( key, shapes );
+}
+
+struct ObjBucket
+{
+	QVector<Vector3> pos, nrm, tan;
+	QVector<Vector2> uv;
+	QVector<Color4> col;
+	// triangles grouped per cell for the dim4 segment split
+	QVector<QVector<Triangle>> cellTris;
+	QString tex0, tex1;
+	bool hasAlpha = false;
+	quint16 alphaFlags = 4844;
+	quint8 alphaThreshold = 128;
+};
+
+} // namespace
+
+bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
+	int chunkX, int chunkY, const LodgenObjectOptions & opts,
+	QString * manifestOut, QString * error )
+{
+	auto fail = [error]( const QString & message ) {
+		if ( error )
+			*error = message;
+		return false;
+	};
+	if ( !nif )
+		return fail( QStringLiteral( "no model" ) );
+	const int dim = opts.dim;
+	if ( dim != 4 && dim != 8 && dim != 16 && dim != 32 )
+		return fail( QStringLiteral( "dim must be 4, 8, 16 or 32" ) );
+	if ( chunkX % dim || chunkY % dim )
+		return fail( QString( "chunk (%1,%2) is not aligned to dim %3" )
+			.arg( chunkX ).arg( chunkY ).arg( dim ) );
+	const int lodLevel = opts.lodLevel >= 0 ? opts.lodLevel
+		: ( dim == 4 ? 0 : dim == 8 ? 1 : dim == 16 ? 2 : 3 );
+	const int segs = ( dim == 4 ) ? 16 : 1;
+	const float invDim = 1.0f / float( dim );
+	const float cwX = float( chunkX ) * 4096.0f, cwY = float( chunkY ) * 4096.0f;
+
+	// gather refs: every cell's own plus the persistent overlay
+	QVector<EsmRefr> refs;
+	for ( int cy = 0; cy < dim; cy++ )
+		for ( int cx = 0; cx < dim; cx++ )
+			refs += world.refrs( chunkX + cx, chunkY + cy );
+	refs += world.persistentRefrsIn( cwX, cwY,
+		cwX + float( dim ) * 4096.0f, cwY + float( dim ) * 4096.0f );
+
+	QHash<QString, QVector<LodSrcShape>> modelCache;
+	QMap<QString, ObjBucket> buckets;   // key = tex0|tex1
+	QStringList manifest;
+	int objectIndex = 0;
+	int placed = 0, skippedNoLod = 0;
+
+	for ( const EsmRefr & r : refs ) {
+		if ( r.initiallyDisabled || r.deleted || !r.base )
+			continue;
+		const EsmLodBase & base = world.lodBase( r.base );
+		if ( !base.hasLod )
+			continue;
+		QString model = base.models[qMin( lodLevel, 3 )];
+		for ( int l = lodLevel; l >= 0 && model.isEmpty(); l-- )
+			model = base.models[l];
+		for ( int l = lodLevel; l < 4 && model.isEmpty(); l++ )
+			model = base.models[l];
+		if ( model.isEmpty() ) {
+			skippedNoLod++;
+			continue;
+		}
+		const QVector<LodSrcShape> & shapes =
+			lodgenLoadModel( opts.dataRoot, model, modelCache );
+		if ( shapes.isEmpty() ) {
+			skippedNoLod++;
+			continue;
+		}
+
+		Transform xf;
+		xf.translation = Vector3( ( r.pos[0] - cwX ) * invDim,
+			( r.pos[1] - cwY ) * invDim, r.pos[2] * invDim );
+		xf.rotation = Matrix();
+		xf.rotation.fromEuler( r.rot[0], r.rot[1], r.rot[2] );
+		xf.scale = r.scale * invDim;
+
+		// cell attribution for the dim4 segment split
+		int cellIdx = 0;
+		if ( segs > 1 ) {
+			const int lx = qBound( 0, int( ( r.pos[0] - cwX ) / 4096.0f ), dim - 1 );
+			const int ly = qBound( 0, int( ( r.pos[1] - cwY ) / 4096.0f ), dim - 1 );
+			cellIdx = ly * dim + lx;
+		}
+		// identity channel: 16-bit per-chunk index in R+G
+		Color4 idColor( 1, 1, 1, 1 );
+		if ( opts.identity ) {
+			idColor = Color4( float( objectIndex & 0xFF ) / 255.0f,
+				float( ( objectIndex >> 8 ) & 0xFF ) / 255.0f, 1.0f, 1.0f );
+			manifest.append( QString( "%1 %2 %3 %4 %5 %6 %7" )
+				.arg( objectIndex )
+				.arg( r.base, 8, 16, QChar( '0' ) )
+				.arg( QString::fromLatin1(
+					reinterpret_cast<const char *>( &base.type ), 4 ) )
+				.arg( double( r.pos[0] ) ).arg( double( r.pos[1] ) )
+				.arg( double( r.pos[2] ) ).arg( double( r.scale ) ) );
+		}
+
+		for ( const LodSrcShape & s : shapes ) {
+			ObjBucket & bucket = buckets[s.tex0.toLower() + QChar( '|' )
+				+ s.tex1.toLower() + ( s.hasAlpha ? QStringLiteral( "|at" ) : QString() )];
+			if ( bucket.cellTris.isEmpty() ) {
+				bucket.cellTris.resize( segs );
+				bucket.tex0 = s.tex0;
+				bucket.tex1 = s.tex1;
+				bucket.hasAlpha = s.hasAlpha;
+				bucket.alphaFlags = s.alphaFlags;
+				bucket.alphaThreshold = s.alphaThreshold;
+			}
+			const quint32 vBase = quint32( bucket.pos.size() );
+			if ( vBase + quint32( s.pos.size() ) > 65535 )
+				continue;   // bucket full; a second shape would need splitting
+			for ( int v = 0; v < s.pos.size(); v++ ) {
+				bucket.pos.append( xf * s.pos[v] );
+				Vector3 wn = xf.rotation * s.nrm[v];
+				wn.normalize();
+				bucket.nrm.append( wn );
+				Vector3 wt = xf.rotation * s.tan[v];
+				wt.normalize();
+				bucket.tan.append( wt );
+				bucket.uv.append( s.uv[v] );
+				Color4 c = idColor;
+				if ( opts.identity )
+					c.setAlpha( s.col[v].alpha() );   // authored sway weight rides along
+				bucket.col.append( c );
+			}
+			for ( const Triangle & t : s.tris )
+				bucket.cellTris[cellIdx].append( Triangle(
+					quint16( vBase + t.v1() ), quint16( vBase + t.v2() ),
+					quint16( vBase + t.v3() ) ) );
+		}
+		objectIndex++;
+		placed++;
+	}
+	if ( buckets.isEmpty() )
+		return fail( QString( "no LOD-bearing refs in chunk (%1,%2)x%3" )
+			.arg( chunkX ).arg( chunkY ).arg( dim ) );
+
+	// ---- emit ---------------------------------------------------------
+	if ( !nif->createNew( 0x14020007, 12, 130 ) )
+		return fail( QStringLiteral( "could not create a Fallout 4 document" ) );
+	nif->holdUpdates( true );
+	QModelIndex iRoot = nif->insertNiBlock( QStringLiteral( "NiNode" ) );
+	nif->set<QString>( iRoot, "Name", QStringLiteral( "obj" ) );
+	nif->set<quint32>( iRoot, "Flags", 14 );
+	nif->set<float>( iRoot, "Scale", 1.0f );
+
+	const std::uint64_t desc = opts.identity ? OBJ_VERTEX_DESC_COLORS : OBJ_VERTEX_DESC;
+	const int stride = opts.identity ? 24 : 20;
+
+	for ( auto it = buckets.begin(); it != buckets.end(); ++it ) {
+		ObjBucket & bucket = it.value();
+		QModelIndex iBoundNode = insertAvObject( nif,
+			QStringLiteral( "BSMultiBoundNode" ), QString(), 1.0f );
+		nif->set<quint32>( iBoundNode, "Culling Mode", 1 );
+		QModelIndex iShape = insertAvObject( nif,
+			QStringLiteral( "BSSubIndexTriShape" ),
+			bucket.hasAlpha ? QStringLiteral( "obj-at" ) : QStringLiteral( "obj" ),
+			float( dim ) );
+
+		QVector<Triangle> tris;
+		QVector<QPair<int, int>> segRuns;
+		for ( int sIdx = 0; sIdx < bucket.cellTris.size(); sIdx++ ) {
+			segRuns.append( qMakePair( tris.size(), bucket.cellTris[sIdx].size() ) );
+			tris += bucket.cellTris[sIdx];
+		}
+		const quint32 numVerts = quint32( bucket.pos.size() );
+		const quint32 numTris = quint32( tris.size() );
+		nif->set<BSVertexDesc>( iShape, "Vertex Desc", desc );
+		nif->set<quint32>( iShape, "Num Vertices", numVerts );
+		nif->set<quint32>( iShape, "Num Triangles", numTris );
+		nif->set<quint32>( iShape, "Data Size",
+			numVerts * quint32( stride ) + numTris * 6 );
+
+		nif->setState( BaseModel::Processing );
+		QModelIndex iVD = nif->getIndex( iShape, "Vertex Data" );
+		nif->updateArraySize( iVD );
+		float mnx = 3.4e38f, mny = 3.4e38f, mnz = 3.4e38f;
+		float mxx = -3.4e38f, mxy = -3.4e38f, mxz = -3.4e38f;
+		for ( quint32 v = 0; v < numVerts; v++ ) {
+			QModelIndex row = nif->index( int( v ), 0, iVD );
+			const Vector3 & p = bucket.pos[int( v )];
+			mnx = qMin( mnx, p[0] ); mny = qMin( mny, p[1] ); mnz = qMin( mnz, p[2] );
+			mxx = qMax( mxx, p[0] ); mxy = qMax( mxy, p[1] ); mxz = qMax( mxz, p[2] );
+			nif->set<HalfVector3>( row, "Vertex", HalfVector3( p ) );
+			nif->set<HalfVector2>( row, "UV", HalfVector2( bucket.uv[int( v )] ) );
+			nif->set<ByteVector3>( row, "Normal", ByteVector3( bucket.nrm[int( v )] ) );
+			nif->set<ByteVector3>( row, "Tangent", ByteVector3( bucket.tan[int( v )] ) );
+			Vector3 bt = Vector3::crossproduct( bucket.nrm[int( v )], bucket.tan[int( v )] );
+			nif->set<float>( row, "Bitangent X", bt[0] );
+			nif->set<float>( row, "Bitangent Y", bt[1] );
+			nif->set<float>( row, "Bitangent Z", bt[2] );
+			if ( opts.identity )
+				nif->set<Color4>( row, "Vertex Colors", bucket.col[int( v )] );
+		}
+		QModelIndex iTris = nif->getIndex( iShape, "Triangles" );
+		nif->updateArraySize( iTris );
+		nif->setArray<Triangle>( iTris, tris );
+
+		nif->set<quint32>( iShape, "Num Primitives", numTris );
+		nif->set<quint32>( iShape, "Num Segments", quint32( segRuns.size() ) );
+		nif->set<quint32>( iShape, "Total Segments", quint32( segRuns.size() ) );
+		QModelIndex iSegs = nif->getIndex( iShape, "Segment" );
+		if ( iSegs.isValid() ) {
+			nif->updateArraySize( iSegs );
+			for ( int sIdx = 0; sIdx < segRuns.size(); sIdx++ ) {
+				QModelIndex seg = nif->index( sIdx, 0, iSegs );
+				nif->set<quint32>( seg, "Start Index", quint32( segRuns[sIdx].first * 3 ) );
+				nif->set<quint32>( seg, "Num Primitives", quint32( segRuns[sIdx].second ) );
+				nif->set<quint32>( seg, "Parent Array Index", 0xFFFFFFFFU );
+			}
+		}
+		setBound( nif, iShape, mnx, mny, mnz, mxx, mxy, mxz );
+		nif->restoreState();
+
+		QModelIndex iShader = nif->insertNiBlock( QStringLiteral( "BSLightingShaderProperty" ) );
+		nif->set<quint32>( iShader, "Shader Type", 0 );
+		nif->set<quint32>( iShader, "Shader Flags 1", 2151677953U );
+		nif->set<quint32>( iShader, "Shader Flags 2",
+			opts.identity ? ( 5U | 0x20U ) : 5U );   // vertex-colours bit with identity
+		QModelIndex iTexSet = nif->insertNiBlock( QStringLiteral( "BSShaderTextureSet" ) );
+		nif->setLink( iShader, "Texture Set", nif->getBlockNumber( iTexSet ) );
+		nif->set<uint>( iTexSet, "Num Textures", 10 );
+		nif->updateArraySize( iTexSet, "Textures" );
+		QModelIndex iArr = nif->getIndex( iTexSet, "Textures" );
+		nif->set<QString>( nif->getIndex( iArr, 0 ), bucket.tex0 );
+		nif->set<QString>( nif->getIndex( iArr, 1 ), bucket.tex1 );
+		nif->setLink( iShape, "Shader Property", nif->getBlockNumber( iShader ) );
+		if ( bucket.hasAlpha ) {
+			QModelIndex iAlpha = nif->insertNiBlock( QStringLiteral( "NiAlphaProperty" ) );
+			nif->set<int>( iAlpha, "Flags", bucket.alphaFlags );
+			nif->set<int>( iAlpha, "Threshold", bucket.alphaThreshold );
+			nif->setLink( iShape, "Alpha Property", nif->getBlockNumber( iAlpha ) );
+		}
+
+		QModelIndex mb = insertMultiBound( nif,
+			( mnx + mxx ) * 0.5f * float( dim ), ( mny + mxy ) * 0.5f * float( dim ),
+			( mnz + mxz ) * 0.5f * float( dim ),
+			( mxx - mnx ) * 0.5f * float( dim ), ( mxy - mny ) * 0.5f * float( dim ),
+			( mxz - mnz ) * 0.5f * float( dim ) );
+		nif->setLink( iBoundNode, "Multi Bound", nif->getBlockNumber( mb ) );
+		addLink( nif, iBoundNode, QStringLiteral( "Children" ),
+			nif->getBlockNumber( iShape ) );
+		addLink( nif, iRoot, QStringLiteral( "Children" ),
+			nif->getBlockNumber( iBoundNode ) );
+	}
+
+	nif->holdUpdates( false );
+	nif->updateModel();
+	if ( manifestOut )
+		*manifestOut = manifest.join( QChar( '\n' ) );
+	if ( error )
+		*error = QString( "placed %1 objects, %2 without usable LOD, %3 material buckets" )
+			.arg( placed ).arg( skippedNoLod ).arg( buckets.size() );
+	return true;
+}
