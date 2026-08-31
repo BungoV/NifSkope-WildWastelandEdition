@@ -33,16 +33,38 @@ The ladder (each rung independently shippable):
 
 ADDITIONS over base-game parity (list open, bungo to extend):
 
-  * **Vertex-colour identity for merged chunk LODs (for FO4CS).** Every
-    stitched vertex carries its source object's identity in the colour
-    channel — RGBA8 = 24-bit object ID + 8 flag bits (class: tree/building/
-    wind...). This dissolves the hybrid-LOD charter's stated objects limit
-    ("BTO merges bake the LOD decision into the mesh") — CS can then do
-    per-object screen-size fade, dither, wind sway and material selection
-    INSIDE a merged chunk. Mechanically: add VF_COLORS to the LOD vertex
-    desc (+4 B/vertex); CS owns the shader. OWED: one in-game check that
-    the stock engine tolerates the fatter desc on chunk meshes when CS is
-    not loaded.
+  * **Vertex-colour identity + per-placement bakes for merged chunk LODs
+    (for FO4CS).** WORKING LAYOUT (settled with bungo 2026-08-31):
+    **R+G = 16-bit per-chunk object index** (decode `R + G*256`, exact —
+    NOT evenly-spaced colours: those re-assign on regeneration and need
+    fuzzy decode; the rainbow debug view is a shader hash of the stable
+    index instead), **B = baked ambient occlusion** (ray-cast against the
+    assembled chunk at generation time), **A = one class-interpreted
+    parameter** — the manifest's class decides the meaning: tree → wind-sway
+    weight (0 trunk → 1 canopy), building → ground-blend factor (kills the
+    floating-on-terrain seam), rock/misc → moss/wetness mask. A per-chunk
+    MANIFEST sidecar maps index → object constants (form ID, bound radius
+    for screen-size fade, class flags, emissive toggle).
+
+    **DATA-PLACEMENT RULE (bungo's framing): textures are SHARED — one wall
+    texture serves every wall — so texture space carries what is true of
+    the SURFACE (material response, normal detail, window emissive
+    pattern); vertex channels carry what is true of the PLACEMENT (this
+    wall's occlusion, this tree's sway, this base's terrain contact —
+    individual by construction, only computable at bake time); the manifest
+    carries what is true of the OBJECT as a constant.** Texture-space AO on
+    repeated pieces is actively WRONG (every copy inherits the same
+    courtyard shadow); vertex AO is correct because it is individual.
+
+    Terrain .btr verts get the same treatment: dominant LTEX material
+    class (distant wet-rock-vs-grass response for Physical Weathers) and
+    heightmap flow-accumulation wetness pooling.
+
+    Generator rules: NEVER weld vertices across source objects (any ID
+    encoding breaks under cross-object interpolation); every bake is a
+    toggle (generator time). OWED: stock-engine tolerance for the fatter
+    desc AND for vertex alpha on chunk meshes (vanilla LOD shader may
+    read alpha) when CS is not loaded.
 
 ## BTD terrain: textures, ground cover, colour — OPEN 2026-08-30
 
