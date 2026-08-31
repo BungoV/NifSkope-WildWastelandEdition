@@ -2293,7 +2293,7 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 	bool haveTerrain, int chunkX, int chunkY, int dim, const QString & outFile,
 	bool haveRegion, const int * region, const QString & outDir,
 	bool haveObjects, const QString & dataRoot, bool identity,
-	const QString & texDir )
+	const QString & texDir, bool geomorph )
 {
 	if ( haveObjects ) {
 		EsmWorld world;
@@ -2335,6 +2335,7 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 		}
 		LodgenTerrainOptions opts;
 		opts.dim = dim > 0 ? dim : 4;
+		opts.geomorph = geomorph;
 		const int d = opts.dim;
 		// snap the requested cell region outward to chunk alignment
 		auto floorTo = []( int v, int m ) { return v >= 0 ? v - v % m : -( ( -v + m - 1 ) / m ) * m; };
@@ -2420,6 +2421,7 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 		}
 		LodgenTerrainOptions opts;
 		opts.dim = dim > 0 ? dim : 4;
+		opts.geomorph = geomorph;
 		NifModel nif;
 		if ( !lodgenBuildTerrainChunk( &nif, world, chunkX, chunkY, opts, &error ) ) {
 			err() << "error: " << error << Qt::endl;
@@ -3697,6 +3699,7 @@ int nifskopeCliMain( const QStringList & args )
 	QString lgDataRoot;
 	bool lgIdentity = true;
 	QString lgTexDir;
+	bool lgGeomorph = false;
 	bool constraintsOnly = false;
 	bool skeletonOnly = false;
 	bool bodiesOnly = false;
@@ -3756,6 +3759,7 @@ int nifskopeCliMain( const QStringList & args )
 		else if ( t == QLatin1String( "--data-root" ) ) lgDataRoot = next();
 		else if ( t == QLatin1String( "--no-identity" ) ) lgIdentity = false;
 		else if ( t == QLatin1String( "--tex-dir" ) ) lgTexDir = next();
+		else if ( t == QLatin1String( "--geomorph" ) ) lgGeomorph = true;
 		else if ( t == QLatin1String( "--roundtrip" ) ) roundTrip = true;
 		else if ( t == QLatin1String( "--constraints" ) ) constraintsOnly = true;
 		else if ( t == QLatin1String( "--skeleton" ) ) skeletonOnly = true;
@@ -3890,7 +3894,7 @@ int nifskopeCliMain( const QStringList & args )
 			lgHaveCell, lgCell[0], lgCell[1],
 			lgHaveTerrain, lgChunk[0], lgChunk[1], lgDim, outFile,
 			lgHaveRegion, lgRegion, lgOutDir,
-			lgHaveObjects, lgDataRoot, lgIdentity, lgTexDir );
+			lgHaveObjects, lgDataRoot, lgIdentity, lgTexDir, lgGeomorph );
 	else if ( cmd == QLatin1String( "anim-setup" ) )
 		rc = cmdAnimSetup( file, block, controllers, sequence, newSequence,
 						   standalone, effectVar, intVar, listOnly, outFile );

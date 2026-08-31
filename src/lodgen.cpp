@@ -14,6 +14,7 @@ BSD License - see nifskope.h
 #include <QVector>
 
 #include <cmath>
+#include <limits>
 #include <vector>
 
 #include "meshoptimizer/src/meshoptimizer.h"
@@ -65,6 +66,85 @@ QModelIndex insertMultiBound( NifModel * nif,
 	nif->set<Vector3>( aabb, "Position", Vector3( cx, cy, cz ) );
 	nif->set<Vector3>( aabb, "Extent", Vector3( ex, ey, ez ) );
 	return mb;
+}
+
+} // namespace
+
+
+namespace
+{
+
+//! Land geometry for any chunk: filled grid + decimated index buffer, in
+//! that chunk's miniature space. Shared by the builder and the geomorph
+//! parent-surface sampling.
+bool lodgenLandGeometry( const EsmWorld & world, int chunkX, int chunkY,
+	int dim, int targetTrisPerCell, std::vector<float> & pos,
+	std::vector<unsigned int> & idx )
+{
+	const int n = dim * 32 + 1;
+	std::vector<float> grid( size_t( n ) * size_t( n ), world.defaultLandHeight() );
+	int landCells = 0;
+	EsmLand land;
+	for ( int cy = 0; cy < dim; cy++ )
+		for ( int cx = 0; cx < dim; cx++ )
+			if ( world.land( chunkX + cx, chunkY + cy, land ) ) {
+				landCells++;
+				for ( int row = 0; row < 33; row++ )
+					for ( int col = 0; col < 33; col++ )
+						grid[size_t( cy * 32 + row ) * n + size_t( cx * 32 + col )] =
+							land.heights[row][col];
+			}
+	if ( !landCells )
+		return false;
+	const float invDim = 1.0f / float( dim );
+	const float spacing = 128.0f * invDim;
+	pos.clear();
+	pos.reserve( size_t( n ) * n * 3 );
+	for ( int row = 0; row < n; row++ )
+		for ( int col = 0; col < n; col++ ) {
+			pos.push_back( float( col ) * spacing );
+			pos.push_back( float( row ) * spacing );
+			pos.push_back( grid[size_t( row ) * n + col] * invDim );
+		}
+	idx.clear();
+	idx.reserve( size_t( n - 1 ) * ( n - 1 ) * 6 );
+	for ( int row = 0; row < n - 1; row++ )
+		for ( int col = 0; col < n - 1; col++ ) {
+			const unsigned int a = (unsigned int) ( row * n + col );
+			idx.push_back( a ); idx.push_back( a + 1 ); idx.push_back( a + n + 1 );
+			idx.push_back( a ); idx.push_back( a + n + 1 ); idx.push_back( a + n );
+		}
+	if ( targetTrisPerCell > 0 ) {
+		const size_t targetIdx = size_t( targetTrisPerCell ) * dim * dim * 3;
+		std::vector<unsigned int> simplified( idx.size() );
+		float resultError = 0.0f;
+		const size_t count = meshopt_simplify( simplified.data(), idx.data(), idx.size(),
+			pos.data(), pos.size() / 3, 12, targetIdx, 0.05f, 0, &resultError );
+		simplified.resize( count );
+		idx.swap( simplified );
+	}
+	return true;
+}
+
+//! Height of a triangle surface at (x, y) in its own space; NaN when outside.
+float lodgenSurfaceHeight( const std::vector<float> & pos,
+	const std::vector<unsigned int> & idx, float x, float y )
+{
+	for ( size_t t = 0; t + 2 < idx.size(); t += 3 ) {
+		const float * a = pos.data() + size_t( idx[t] ) * 3;
+		const float * b = pos.data() + size_t( idx[t + 1] ) * 3;
+		const float * c = pos.data() + size_t( idx[t + 2] ) * 3;
+		const float d = ( b[1] - c[1] ) * ( a[0] - c[0] ) + ( c[0] - b[0] ) * ( a[1] - c[1] );
+		if ( std::fabs( d ) < 1e-9f )
+			continue;
+		const float w0 = ( ( b[1] - c[1] ) * ( x - c[0] ) + ( c[0] - b[0] ) * ( y - c[1] ) ) / d;
+		const float w1 = ( ( c[1] - a[1] ) * ( x - c[0] ) + ( a[0] - c[0] ) * ( y - c[1] ) ) / d;
+		const float w2 = 1.0f - w0 - w1;
+		if ( w0 < -0.001f || w1 < -0.001f || w2 < -0.001f )
+			continue;
+		return w0 * a[2] + w1 * b[2] + w2 * c[2];
+	}
+	return std::numeric_limits<float>::quiet_NaN();
 }
 
 } // namespace
@@ -208,16 +288,54 @@ bool lodgenBuildTerrainChunk( NifModel * nif, const EsmWorld & world,
 	const quint32 numTris = quint32( idx.size() / 3 );
 	if ( numVerts > 65535 )
 		return fail( QStringLiteral( "vertex count exceeds the u16 limit" ) );
+
+	/* Geomorph weights (CS profile): per vertex, the WORLD-unit height
+	 * delta to the parent ring's surface (dim*2), stored in Eye Data. A
+	 * shader lerping z toward z+delta as the swap distance approaches makes
+	 * the chunk morph into an exact copy of its parent before the swap --
+	 * the transition neither Bethesda game had. NaN-outside samples and
+	 * dim=32 (no parent) store 0. */
+	std::vector<float> morph;
+	if ( opts.geomorph && dim < 32 ) {
+		const int pDim = dim * 2;
+		const int pX = ( chunkX >= 0 ? chunkX - chunkX % pDim
+			: -( ( -chunkX + pDim - 1 ) / pDim ) * pDim );
+		const int pY = ( chunkY >= 0 ? chunkY - chunkY % pDim
+			: -( ( -chunkY + pDim - 1 ) / pDim ) * pDim );
+		std::vector<float> ppos;
+		std::vector<unsigned int> pidx;
+		if ( lodgenLandGeometry( world, pX, pY, pDim, opts.targetTrisPerCell,
+			ppos, pidx ) ) {
+			morph.resize( numVerts, 0.0f );
+			for ( quint32 v = 0; v < numVerts; v++ ) {
+				// our miniature -> world -> parent miniature
+				const float wx = cpos[size_t( v ) * 3] * dim + float( chunkX ) * 4096.0f;
+				const float wy = cpos[size_t( v ) * 3 + 1] * dim + float( chunkY ) * 4096.0f;
+				const float pxm = ( wx - float( pX ) * 4096.0f ) / float( pDim );
+				const float pym = ( wy - float( pY ) * 4096.0f ) / float( pDim );
+				const float pz = lodgenSurfaceHeight( ppos, pidx, pxm, pym );
+				if ( pz == pz )     // not NaN
+					morph[v] = pz * pDim - cpos[size_t( v ) * 3 + 2] * dim;
+			}
+		}
+	}
 	float zMin = 3.4e38f, zMax = -3.4e38f;
 	for ( size_t v = 0; v < cpos.size(); v += 3 ) {
 		zMin = qMin( zMin, cpos[v + 2] );
 		zMax = qMax( zMax, cpos[v + 2] );
 	}
 
-	nif->set<BSVertexDesc>( iLand, "Vertex Desc", LAND_VERTEX_DESC );
+	BSVertexDesc landDesc( LAND_VERTEX_DESC );
+	quint32 landStride = 12;
+	if ( !morph.empty() ) {
+		landDesc.SetFlag( VertexFlags::VF_EYEDATA );
+		landDesc.ResetAttributeOffsets( 130 );
+		landStride = landDesc.GetVertexSize();
+	}
+	nif->set<BSVertexDesc>( iLand, "Vertex Desc", landDesc.Value() );
 	nif->set<quint32>( iLand, "Num Vertices", numVerts );
 	nif->set<quint32>( iLand, "Num Triangles", numTris );
-	nif->set<quint32>( iLand, "Data Size", numVerts * 12 + numTris * 6 );
+	nif->set<quint32>( iLand, "Data Size", numVerts * landStride + numTris * 6 );
 
 	nif->setState( BaseModel::Processing );
 	QModelIndex iVertexData = nif->getIndex( iLand, "Vertex Data" );
@@ -230,6 +348,8 @@ bool lodgenBuildTerrainChunk( NifModel * nif, const EsmWorld & world,
 		nif->set<float>( row, "Bitangent X", 1.0f );
 		nif->set<HalfVector2>( row, "UV",
 			HalfVector2( Vector2( x / 4096.0f, 1.0f - y / 4096.0f ) ) );
+		if ( !morph.empty() )
+			nif->set<float>( row, "Eye Data", morph[v] );
 	}
 	{
 		QVector<Triangle> tris;
@@ -685,6 +805,8 @@ bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
 	QHash<QString, QVector<LodSrcShape>> modelCache;
 	QMap<QString, ObjBucket> buckets;   // key = tex0|tex1
 	QStringList manifest;
+	// instance grouping: base form -> (model, member object indices)
+	QMap<quint32, QPair<QString, QVector<int>>> instanceGroups;
 	int objectIndex = 0;
 	int placed = 0, skippedNoLod = 0;
 
@@ -771,8 +893,31 @@ bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
 					quint16( vBase + t.v1() ), quint16( vBase + t.v2() ),
 					quint16( vBase + t.v3() ) ) );
 		}
+		if ( opts.identity ) {
+			auto & group = instanceGroups[r.base];
+			group.first = model;
+			group.second.append( objectIndex );
+		}
 		objectIndex++;
 		placed++;
+	}
+	/* Instance groups (FO76's BSDistantObjectInstancedNode, ours as manifest
+	 * data): bases repeated >= 8 times in the chunk. The stitched copies stay
+	 * in the mesh for vanilla; a CS consumer can kill those fragments by the
+	 * listed identity indices and draw the model instanced instead. */
+	if ( opts.identity ) {
+		for ( auto it = instanceGroups.constBegin(); it != instanceGroups.constEnd(); ++it ) {
+			if ( it.value().second.size() < 8 )
+				continue;
+			QStringList ids;
+			for ( int id : it.value().second )
+				ids.append( QString::number( id ) );
+			manifest.append( QString( "I %1 %2 %3 %4" )
+				.arg( it.key(), 8, 16, QChar( '0' ) )
+				.arg( it.value().first )
+				.arg( it.value().second.size() )
+				.arg( ids.join( QChar( ',' ) ) ) );
+		}
 	}
 	if ( buckets.isEmpty() )
 		return fail( QString( "no LOD-bearing refs in chunk (%1,%2)x%3" )

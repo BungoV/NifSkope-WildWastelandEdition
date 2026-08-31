@@ -36,6 +36,10 @@ struct LodgenTerrainOptions
 	 * ~130). 0 = no decimation, emit the full 32x32-per-cell grid. The
 	 * simplifier locks the border ring so the skirt stays exact. */
 	int targetTrisPerCell = 130;
+	/*! CS profile: store per-vertex WORLD height deltas to the parent ring's
+	 * surface in Eye Data, enabling continuous (geomorphed) LOD transitions.
+	 * Widens the vertex stride -- gated on the stock-engine tolerance check. */
+	bool geomorph = false;
 	//! texture path template; {ws}/{dim}/{x}/{y} are substituted
 	QString textureBase = QStringLiteral( "Data\\Textures\\Terrain\\%1\\%1.%2.%3.%4.DDS" );
 };
