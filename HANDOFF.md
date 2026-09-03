@@ -34,6 +34,20 @@ WW_CHANGES 2026-09-03.
     of a morphed body against an unmodified copy of the same mesh, in the bone
     NODE's frame. Recovers a synthetic 1.37 to 4e-6.
 
+**Held against the WHOLE corpus, not a sample** (bungo: "when in doubt if
+something works, generate the two files from samples from Fallout 4, and
+compare"): 489 meshes regenerated, **2465 of 2554 shipped assignments
+reproduced**, **455 of 489 files reproducing every one**, and **0 unresolved
+bone hashes corpus-wide**. It also caught three format facts the ten-file sample
+had not — both formats are CRLF, .sclp has no trailing newline, and the number
+rule is %.17g (measured: 7695 of 7776 literals, against shortest-round-trip's
+6705). All fixed; harness is 10 of 10.
+
+**Every one of the 89 remaining misses is vanilla disagreeing with its own
+mesh**, all in creature assets: Deathclaw.ssf names a Tail4 its mesh does not
+have, and mcoatpostwar.ssf keys shapes that were renamed `_PW`. We follow the
+mesh. On those 34 files our output is deliberately not vanilla's.
+
 **What is owed: the in-game gate.** Neither file has been loaded by the engine
 from our output, and both fail invisibly — a wrong base name is a limb that will
 not come off, not a crash.

@@ -37,6 +37,11 @@
 #      the bone's frame whatever its rotation, and must come back as 1.37
 #   8. CONTROL for 7: a bone whose vertices were not touched stays at 1.0, so a
 #      writer that scaled everything would fail
+#   9. the bytes match vanilla's conventions: both formats CRLF, .ssf ends in a
+#      newline (497 of 497 shipped) and .sclp does not (0 of 54), neither has a
+#      BOM
+#  10. a generated .sclp is byte-identical to a shipped one once the numbers are
+#      blanked -- same key order, same bone order, same indent, same punctuation
 #
 # WHAT IT DOES NOT MEASURE. Whether the game likes the files. No shipped outfit
 # carries a body its .sclp can be re-derived from -- the "fitted" shapes in them
@@ -100,7 +105,7 @@ for rel in $SAMPLE; do
 		generated=$((generated+1))
 	fi
 	cp "$van" "$W/gen/$base.vanilla.ssf"
-done
+done		# the generated trees stay: check 9 reads MaleBody's back
 check "$([ "$generated" -ge 8 ] && echo 1 || echo 0)" "1. generated $generated sampled meshes"
 
 if grep -lq "name a bone no block" "$W"/gen/*.log 2>/dev/null; then
@@ -284,6 +289,36 @@ sed 's/^/     /' "$W/sclp/synth.txt"
 R7=$(awk '/^RESULT/{print $2}' "$W/sclp/synth.txt"); R8=$(awk '/^RESULT/{print $3}' "$W/sclp/synth.txt")
 check "${R7:-0}" "7. a known 1.37 bone scale is recovered"
 check "${R8:-0}" "8. CONTROL: an untouched bone stays at 1.0"
+
+echo "== bytes match vanilla's conventions =="
+VAN_SSF="$DATA/Meshes/Actors/Character/CharacterAssets/MaleBody.ssf"
+VAN_SCLP="$DATA/Meshes/Armor/ArmyFatigues/FatiguesM.sclp"
+OUR_SSF="$W/gen/MaleBody/Meshes/MaleBody.ssf"
+OUR_SCLP="$W/sclp/target.sclp"
+"$PY" - "$OUR_SSF" "$OUR_SCLP" "$VAN_SSF" "$VAN_SCLP" > "$W/bytes.txt" 2>&1 <<'PYEOF'
+import re, sys
+ours_ssf, ours_sclp, van_ssf, van_sclp = (open(p, 'rb').read() for p in sys.argv[1:5])
+
+def conv(blob):
+    return (b'\r\n' in blob, blob.endswith(b'\n'), blob[:3] == b'\xef\xbb\xbf')
+
+def blank(blob):
+    return re.sub(rb'-?\d+\.?\d*(?:[eE][-+]?\d+)?', b'N', blob)
+
+print('ssf  ours', conv(ours_ssf), 'vanilla', conv(van_ssf))
+print('sclp ours', conv(ours_sclp), 'vanilla', conv(van_sclp))
+print('RESULT',
+      1 if conv(ours_ssf) == conv(van_ssf) else 0,
+      1 if conv(ours_sclp) == conv(van_sclp) else 0,
+      1 if blank(ours_sclp) == blank(van_sclp) else 0)
+PYEOF
+sed 's/^/     /' "$W/bytes.txt"
+B1=$(awk '/^RESULT/{print $2}' "$W/bytes.txt")
+B2=$(awk '/^RESULT/{print $3}' "$W/bytes.txt")
+B3=$(awk '/^RESULT/{print $4}' "$W/bytes.txt")
+check "$([ "${B1:-0}" = "1" ] && [ "${B2:-0}" = "1" ] && echo 1 || echo 0)" \
+	"9. line endings, trailing newline and BOM match vanilla in both formats"
+check "${B3:-0}" "10. a generated .sclp is byte-identical to a shipped one, numbers aside"
 
 echo
 echo "$pass passed, $fail failed"

@@ -7781,52 +7781,59 @@ static quint32 riggingBoneNameHash( const QString & name )
  *  found in the open file win, so a custom skeleton still works, and a hash that
  *  matches nothing is reported rather than guessed at.
  */
-static const char * const riggingKnownBoneNames[] = {
+static const char * const riggingSkeletonBoneNames[] = {
 	"AnimObjectA", "AnimObjectB", "AnimObjectL1", "AnimObjectL2", "AnimObjectL3", "AnimObjectR1",
-	"AnimObjectR2", "AnimObjectR3", "Back_LLeg2", "Back_RLeg2", "Belly_skin", "COM", "CamTarget",
-	"CamTargetParent", "Camera", "Camera Control", "CharacterBumper", "Chest", "Chest_Rear_Skin",
-	"Chest_Upper_skin", "Chest_skin", "Dogmeat_Front_LLeg1", "Dogmeat_Front_LLeg2",
-	"Dogmeat_Front_LLegAnkle", "Dogmeat_Front_RLeg2", "Dogmeat_Front_RLegAnkle", "Dogmeat_Head",
-	"Dogmeat_Rear_LLeg2", "Dogmeat_Rear_LLegAnkle", "Dogmeat_Rear_RLeg2",
-	"Dogmeat_Rear_RLegAnkle", "Face_skin", "Front_LLeg2", "Front_RLeg2", "HEAD", "Head",
-	"Head_skin", "LArm1", "LArm2", "LArm3", "LArmForeArm", "LArmPalm", "LArmUpper",
-	"LArmUpperArm", "LArm_Claw", "LArm_Collarbone", "LArm_Collarbone_skin", "LArm_Elbow",
+	"AnimObjectR2", "AnimObjectR3", "Belly_skin", "COM", "CamTarget", "CamTargetParent", "Camera",
+	"Camera Control", "CharacterBumper", "Chest", "Chest_Rear_Skin", "Chest_Upper_skin",
+	"Chest_skin", "Face_skin", "HEAD", "Head_skin", "LArm_Collarbone", "LArm_Collarbone_skin",
 	"LArm_Finger11", "LArm_Finger12", "LArm_Finger13", "LArm_Finger21", "LArm_Finger22",
 	"LArm_Finger23", "LArm_Finger31", "LArm_Finger32", "LArm_Finger33", "LArm_Finger41",
 	"LArm_Finger42", "LArm_Finger43", "LArm_Finger51", "LArm_Finger52", "LArm_Finger53",
 	"LArm_ForeArm1", "LArm_ForeArm1_skin", "LArm_ForeArm2", "LArm_ForeArm2_skin", "LArm_ForeArm3",
-	"LArm_ForeArm3_skin", "LArm_Hand", "LArm_Shoulder", "LArm_ShoulderFat_skin", "LArm_UpperArm",
+	"LArm_ForeArm3_skin", "LArm_Hand", "LArm_ShoulderFat_skin", "LArm_UpperArm",
 	"LArm_UpperArm_skin", "LArm_UpperFat_skin", "LArm_UpperTwist1", "LArm_UpperTwist1_skin",
-	"LArm_UpperTwist2", "LArm_UpperTwist2_skin", "LBackLegCalf", "LBackLegThigh", "LBackLegfoot",
-	"LBreast_skin", "LButtFat_skin", "LCALF", "LForeArm1", "LFrontLegCalf", "LFrontLegFoot",
-	"LFrontLegThigh", "LLeg12", "LLeg13", "LLeg14", "LLeg2", "LLeg22", "LLeg23", "LLeg24",
-	"LLeg3", "LLeg32", "LLeg33", "LLeg34", "LLeg42", "LLeg43", "LLeg44", "LLeg_Calf",
-	"LLeg_Calf_Low_skin", "LLeg_Calf_skin", "LLeg_FM_Knee", "LLeg_FM_Thigh", "LLeg_FR_Knee",
-	"LLeg_FR_Thigh", "LLeg_F_Knee", "LLeg_F_Thigh", "LLeg_Foot", "LLeg_Front_Ankle",
-	"LLeg_Front_Knee", "LLeg_Knee", "LLeg_R_Knee", "LLeg_R_Thigh", "LLeg_Rear_Ankle",
-	"LLeg_Rear_Knee", "LLeg_Thigh", "LLeg_Thigh_Fat_skin", "LLeg_Thigh_Low_skin",
-	"LLeg_Thigh_skin", "LLeg_Toe1", "LTHIGH", "LUPPERARM", "L_RibHelper", "Neck", "Neck1_skin",
+	"LArm_UpperTwist2", "LArm_UpperTwist2_skin", "LBreast_skin", "LButtFat_skin", "LLeg_Calf",
+	"LLeg_Calf_Low_skin", "LLeg_Calf_skin", "LLeg_Foot", "LLeg_Thigh", "LLeg_Thigh_Fat_skin",
+	"LLeg_Thigh_Low_skin", "LLeg_Thigh_skin", "LLeg_Toe1", "L_RibHelper", "Neck", "Neck1_skin",
 	"Neck_Low_skin", "Neck_skin", "Pelvis", "Pelvis_Rear_skin", "Pelvis_skin", "PipboyBone",
-	"RArm1", "RArm2", "RArm3", "RArmForeArm", "RArmPalm", "RArmUpper", "RArmUpperArm",
-	"RArm_Claw", "RArm_Collarbone", "RArm_Collarbone_skin", "RArm_Elbow", "RArm_Finger11",
-	"RArm_Finger12", "RArm_Finger13", "RArm_Finger21", "RArm_Finger22", "RArm_Finger23",
-	"RArm_Finger31", "RArm_Finger32", "RArm_Finger33", "RArm_Finger41", "RArm_Finger42",
-	"RArm_Finger43", "RArm_Finger51", "RArm_Finger52", "RArm_Finger53", "RArm_ForeArm1",
-	"RArm_ForeArm1_skin", "RArm_ForeArm2", "RArm_ForeArm2_skin", "RArm_ForeArm3",
-	"RArm_ForeArm3_skin", "RArm_Hand", "RArm_Shoulder", "RArm_ShoulderFat_skin", "RArm_UpperArm",
-	"RArm_UpperArm_skin", "RArm_UpperFat_skin", "RArm_UpperTwist1", "RArm_UpperTwist1_skin",
-	"RArm_UpperTwist2", "RArm_UpperTwist2_skin", "RBackLegCalf", "RBackLegFoot", "RBackLegThigh",
-	"RBreast_skin", "RButtFat_skin", "RCALF", "RForeArm1", "RFrontLegCalf", "RFrontLegFoot",
-	"RFrontLegThigh", "RLeg12", "RLeg13", "RLeg14", "RLeg2", "RLeg22", "RLeg23", "RLeg24",
-	"RLeg3", "RLeg32", "RLeg33", "RLeg34", "RLeg42", "RLeg43", "RLeg44", "RLeg_Calf",
-	"RLeg_Calf_Low_skin", "RLeg_Calf_skin", "RLeg_FM_Knee", "RLeg_FM_Thigh", "RLeg_FR_Knee",
-	"RLeg_FR_Thigh", "RLeg_F_Knee", "RLeg_F_Thigh", "RLeg_Foot", "RLeg_Front_Ankle",
-	"RLeg_Front_Knee", "RLeg_Knee", "RLeg_R_Knee", "RLeg_R_Thigh", "RLeg_Rear_Ankle",
-	"RLeg_Rear_Knee", "RLeg_Rear_Thigh", "RLeg_Thigh", "RLeg_Thigh_Fat_skin",
-	"RLeg_Thigh_Low_skin", "RLeg_Thigh_skin", "RLeg_Toe1", "RTHIGH", "RUPPERARM", "R_RibHelper",
-	"Root", "SPINE1", "SPINE2", "Spine1_Rear_skin", "Spine1_skin", "Spine2_Rear_skin",
-	"Spine2_skin", "Tail2", "Tail3", "Tail4", "Tail5", "TailStinger", "UpperBelly_skin", "WEAPON",
-	"WeaponLeft", "skeleton.nif"
+	"RArm_Collarbone", "RArm_Collarbone_skin", "RArm_Finger11", "RArm_Finger12", "RArm_Finger13",
+	"RArm_Finger21", "RArm_Finger22", "RArm_Finger23", "RArm_Finger31", "RArm_Finger32",
+	"RArm_Finger33", "RArm_Finger41", "RArm_Finger42", "RArm_Finger43", "RArm_Finger51",
+	"RArm_Finger52", "RArm_Finger53", "RArm_ForeArm1", "RArm_ForeArm1_skin", "RArm_ForeArm2",
+	"RArm_ForeArm2_skin", "RArm_ForeArm3", "RArm_ForeArm3_skin", "RArm_Hand",
+	"RArm_ShoulderFat_skin", "RArm_UpperArm", "RArm_UpperArm_skin", "RArm_UpperFat_skin",
+	"RArm_UpperTwist1", "RArm_UpperTwist1_skin", "RArm_UpperTwist2", "RArm_UpperTwist2_skin",
+	"RBreast_skin", "RButtFat_skin", "RLeg_Calf", "RLeg_Calf_Low_skin", "RLeg_Calf_skin",
+	"RLeg_Foot", "RLeg_Thigh", "RLeg_Thigh_Fat_skin", "RLeg_Thigh_Low_skin", "RLeg_Thigh_skin",
+	"RLeg_Toe1", "R_RibHelper", "Root", "SPINE1", "SPINE2", "Spine1_Rear_skin", "Spine1_skin",
+	"Spine2_Rear_skin", "Spine2_skin", "UpperBelly_skin", "WEAPON", "WeaponLeft", "skeleton.nif"
+};
+
+//! The spellings the shipped .ssf files themselves use, which win over the
+//! skeleton's when both name the same hash -- vanilla writes "Head" where the
+//! feral ghoul skeleton's node is "HEAD", and the point is to match vanilla.
+static const char * const riggingAuthoredBoneNames[] = {
+	"Back_LLeg2", "Back_RLeg2", "Dogmeat_Front_LLeg1", "Dogmeat_Front_LLeg2",
+	"Dogmeat_Front_LLegAnkle", "Dogmeat_Front_RLeg2", "Dogmeat_Front_RLegAnkle", "Dogmeat_Head",
+	"Dogmeat_Rear_LLeg2", "Dogmeat_Rear_LLegAnkle", "Dogmeat_Rear_RLeg2",
+	"Dogmeat_Rear_RLegAnkle", "Front_LLeg2", "Front_RLeg2", "Head", "LArm1", "LArm2", "LArm3",
+	"LArmForeArm", "LArmPalm", "LArmUpper", "LArmUpperArm", "LArm_Claw", "LArm_Elbow",
+	"LArm_ForeArm1", "LArm_Shoulder", "LArm_UpperArm", "LBackLegCalf", "LBackLegThigh",
+	"LBackLegfoot", "LCALF", "LForeArm1", "LFrontLegCalf", "LFrontLegFoot", "LFrontLegThigh",
+	"LLeg12", "LLeg13", "LLeg14", "LLeg2", "LLeg22", "LLeg23", "LLeg24", "LLeg3", "LLeg32",
+	"LLeg33", "LLeg34", "LLeg42", "LLeg43", "LLeg44", "LLeg_Calf", "LLeg_FM_Knee",
+	"LLeg_FM_Thigh", "LLeg_FR_Knee", "LLeg_FR_Thigh", "LLeg_F_Knee", "LLeg_F_Thigh",
+	"LLeg_Front_Ankle", "LLeg_Front_Knee", "LLeg_Knee", "LLeg_R_Knee", "LLeg_R_Thigh",
+	"LLeg_Rear_Ankle", "LLeg_Rear_Knee", "LLeg_Thigh", "LTHIGH", "LUPPERARM", "RArm1", "RArm2",
+	"RArm3", "RArmForeArm", "RArmPalm", "RArmUpper", "RArmUpperArm", "RArm_Claw", "RArm_Elbow",
+	"RArm_ForeArm1", "RArm_Shoulder", "RArm_UpperArm", "RBackLegCalf", "RBackLegFoot",
+	"RBackLegThigh", "RCALF", "RForeArm1", "RFrontLegCalf", "RFrontLegFoot", "RFrontLegThigh",
+	"RLeg12", "RLeg13", "RLeg14", "RLeg2", "RLeg22", "RLeg23", "RLeg24", "RLeg3", "RLeg32",
+	"RLeg33", "RLeg34", "RLeg42", "RLeg43", "RLeg44", "RLeg_Calf", "RLeg_FM_Knee",
+	"RLeg_FM_Thigh", "RLeg_FR_Knee", "RLeg_FR_Thigh", "RLeg_F_Knee", "RLeg_F_Thigh",
+	"RLeg_Front_Ankle", "RLeg_Front_Knee", "RLeg_Knee", "RLeg_R_Knee", "RLeg_R_Thigh",
+	"RLeg_Rear_Ankle", "RLeg_Rear_Knee", "RLeg_Rear_Thigh", "RLeg_Thigh", "RTHIGH", "RUPPERARM",
+	"Tail2", "Tail3", "Tail4", "Tail5", "TailStinger"
 };
 
 //! Bone names indexed by hash: the known set first, then every named block in
@@ -7834,7 +7841,12 @@ static const char * const riggingKnownBoneNames[] = {
 static QHash<quint32, QString> riggingBoneNamesByHash( const NifModel * nif )
 {
 	QHash<quint32, QString> table;
-	for ( const char * known : riggingKnownBoneNames ) {
+	// Weakest source first: each pass overrides the one before it.
+	for ( const char * known : riggingSkeletonBoneNames ) {
+		const QString name = QLatin1String( known );
+		table.insert( riggingBoneNameHash( name ), name );
+	}
+	for ( const char * known : riggingAuthoredBoneNames ) {
 		const QString name = QLatin1String( known );
 		table.insert( riggingBoneNameHash( name ), name );
 	}
@@ -7998,7 +8010,8 @@ static QByteArray riggingWriteSsfJson( const QVector<RigSsfShape> & shapes )
 		text += QStringLiteral( "   }%1\n" ).arg( k + 1 < keys.size() ? QStringLiteral( "," ) : QString() );
 	}
 	text += QStringLiteral( "}\n" );
-	return text.toUtf8();
+	// All 497 shipped .ssf files are CRLF, end in a newline, and carry no BOM.
+	return text.replace( QLatin1Char( '\n' ), QLatin1String( "\r\n" ) ).toUtf8();
 }
 
 class spRiggingGenerateSSF final : public Spell
@@ -8231,10 +8244,20 @@ static QVector<Vector3> riggingSclpScales( const RigShape & reference, const Rig
 //! point on every number — the writer that made them was not jsoncpp's.
 static QByteArray riggingWriteSclpJson( const QVector<Vector3> & scales )
 {
+	/* Seventeen significant digits, plus a decimal point when that leaves none.
+	 *
+	 * MEASURED against the 7776 numbers in the 54 shipped files, because the
+	 * obvious alternative looked better and is worse: %.17g reproduces 7695 of
+	 * them and is the exact rule for 20 whole files, while shortest-round-trip --
+	 * which is what vanilla's 0.94000643491745 looks like next to %.17g's
+	 * 0.94000643491744995 -- reproduces only 6705 and explains no file at all.
+	 * Neither rule explains the other 34, so those were written by something else
+	 * again; it is a cosmetic difference either way, since every one of these
+	 * strings parses back to the same double.
+	 */
 	auto number = []( float value ) {
 		QString s = QString::number( double( value ), 'g', 17 );
-		if ( !s.contains( QLatin1Char( '.' ) ) && !s.contains( QLatin1Char( 'e' ) )
-			&& !s.contains( QLatin1Char( 'n' ) ) )		// nan/inf never reach here
+		if ( !s.contains( QLatin1Char( '.' ) ) && !s.contains( QLatin1Char( 'e' ) ) )
 			s += QStringLiteral( ".0" );
 		return s;
 	};
@@ -8251,8 +8274,9 @@ static QByteArray riggingWriteSclpJson( const QVector<Vector3> & scales )
 		text += QStringLiteral( "    }\n" );
 		text += QStringLiteral( "  }%1\n" ).arg( i + 1 < count ? QStringLiteral( "," ) : QString() );
 	}
-	text += QStringLiteral( "]\n" );
-	return text.toUtf8();
+	// CRLF, and no trailing newline: 54 of 54 shipped files end at the bracket.
+	text += QStringLiteral( "]" );
+	return text.replace( QLatin1Char( '\n' ), QLatin1String( "\r\n" ) ).toUtf8();
 }
 
 class spRiggingGenerateSCLP final : public Spell

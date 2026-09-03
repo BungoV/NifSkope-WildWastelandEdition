@@ -121,6 +121,59 @@ bungo's.
 - `WW_SCLP_REFERENCE` is the harness door: a path measures against it, an empty
   value asks for the identity table.
 
+### The whole corpus, not a sample (bungo, same day)
+
+"When in doubt if something works, generate the two files from samples from
+Fallout 4, and compare." Run over **every** shipped pair rather than the ten in
+the harness — 489 meshes regenerated — and it found three real things the
+sample had not.
+
+- **Both formats are CRLF, and .sclp has no trailing newline.** 497 of 497
+  shipped .ssf files are CRLF and end in a newline; 54 of 54 .sclp files are
+  CRLF and end at the closing bracket. Neither has a BOM. We were writing LF
+  with a trailing newline in both. Fixed, and a generated .sclp is now
+  byte-identical to a shipped one once the numbers are blanked.
+- **Number formatting is `%.17g`, measured rather than assumed.** Shortest
+  round-trip looks like the right rule next to vanilla's `0.94000643491745`
+  (where `%.17g` gives `0.94000643491744995`) and is worse: it reproduces 6705
+  of the 7776 shipped literals and explains no file, while `%.17g` reproduces
+  7695 and is the exact rule for 20 whole files. Neither explains the other 34,
+  so those came from something else again. Cosmetic either way — every one of
+  these strings parses to the same double.
+- **Names now prefer the spelling the .ssf files themselves use.** The lookup
+  table is two arrays, skeleton then authored, each overriding the last and both
+  overridden by the open file, so we write vanilla's "Head" rather than the
+  feral ghoul skeleton's node name "HEAD".
+
+**The numbers, with the comparison done case-insensitively** — which it must be,
+because `LoadSSF` matches a shape by BSFixedString identity and that pool is
+case-insensitive, which is how vanilla's `fatiguesm.ssf` keys
+`BaseMaleBody_fitted:0` against a shape the NIF calls `BaseMaleBody_Fitted:0`:
+
+| | |
+|---|---|
+| meshes regenerated | 489 (1 skipped: Alien_Glass.ssf is `null`) |
+| shipped assignments reproduced | **2465 of 2554** (96.5%) |
+| files reproducing every shipped assignment | **455 of 489** |
+| bone hashes left unresolved | **0**, corpus-wide |
+| vanilla entries authored as DISABLED/Generic | 469 (a decision no NIF carries) |
+
+**Every one of the 89 remaining is vanilla's own file disagreeing with its own
+mesh**, and they cluster in the creature assets:
+
+- `Deathclaw.ssf` names **Tail4**, and that mesh's segment 7 holds
+  Tail2, Tail2, Tail3, Tail5, Tail6 — two Tail2 subsegments and no Tail4 at all.
+  The .ssf reads like the segmentation before a re-export the file never caught
+  up with. Same shape on the feral ghoul's `pants` (vanilla LTHIGH where the
+  mesh says LCALF) and on the mirelurk king.
+- `mcoatpostwar.ssf` keys `BaseMaleBodyFitted:0` and `MCoat:0` against a NIF
+  whose shapes are `BaseMaleBodyFitted_PW:0` and `MCoat_PW:0`, so the engine
+  finds neither.
+
+We follow the mesh, because the mesh is the only source a generator has and is
+the more current of the two. Worth knowing before regenerating a vanilla file:
+on those 34, our output is deliberately not vanilla's.
+
 ## 2026-08-31 — LODGEN: NifSkope generates Fallout 4's world LOD
 
 ### REFR euler convention fix: object placement is now vertex-exact
