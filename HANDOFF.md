@@ -11,9 +11,38 @@ happening again.
 (GitHub: [BungoV/NifSkope-WildWastelandEdition](https://github.com/BungoV/NifSkope-WildWastelandEdition),
 branch `main`, `origin` is the fork — never push upstream.)
 
-Updated **2026-08-30**. Edition **0.3.3**, packaged and released. Build green.
+Updated **2026-09-03**. Edition **0.3.3**, packaged and released. Build green.
 The current work is a sweep of the **compiled-collision backlog**, and since
 2026-08-21 it is being tested IN THE GAME, which changed what the work is.
+
+## 2026-09-03 — Outfit sidecars: .ssf and .sclp are written now
+
+Two Rigging spells, both castable headlessly, both new capability rather than a
+fix. Harness `tests/spells/outfit_sidecars.sh`, 8 of 8. Full entry in
+WW_CHANGES 2026-09-03.
+
+  * **Generate Segment File (.ssf)** — the dismemberment table, from the Bone
+    IDs the shape's own subsegments already carry. The engine reads a bone NAME
+    per segment address and the name IS the visibility flag (`GetEnabled` is
+    `GetSegmentBoneName(id) != "DISABLED"`). The address is
+    `((segment << 8) | subsegment) << 8` and the second byte is the
+    subsegment's ORDINAL, resolved as `SegmentStarts[segment] + 1 + ordinal`,
+    not its User Index — the two disagree on OutfitM's left arm. Held against
+    the shipped files: 56 of 56 assignments reproduced, 0 missed.
+  * **Generate Bone Scale File (.sclp)** — the body shape an outfit imposes,
+    48 `*_skin` bones, either an identity table or a weighted least-squares fit
+    of a morphed body against an unmodified copy of the same mesh, in the bone
+    NODE's frame. Recovers a synthetic 1.37 to 4e-6.
+
+**What is owed: the in-game gate.** Neither file has been loaded by the engine
+from our output, and both fail invisibly — a wrong base name is a limb that will
+not come off, not a crash.
+
+**A latent defect was found and NOT fixed** (docs/TO_BE_IMPLEMENTED.md, top):
+"Parent Array Index" means the parent's shared-data row in vanilla and the
+entry's own row in this fork's writer, so `riggingReadSegmentDefinitions` reads
+vanilla subsegments' Bone IDs off by a row. The .ssf writer sidesteps it by
+using Segment Starts, the engine's own rule.
 
 ## LODGEN 2026-08-31 (second pass): completion round + parity audit DONE
 

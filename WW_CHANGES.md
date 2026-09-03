@@ -1,5 +1,126 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-09-03 — Outfit sidecars: NifSkope writes .ssf and .sclp
+
+Two JSON files ship beside Fallout 4's outfit meshes, and nothing in this fork
+could make either. Both readers were disassembled out of 1.10.155 rather than
+inferred, and both writers are now spells on the Rigging page, castable
+headlessly (`nifskope-cli cast -s "Rigging/Generate Segment File (.ssf)"`).
+Harness `tests/spells/outfit_sidecars.sh`, 8 of 8.
+
+### What a .ssf is
+
+`BSGeometrySegmentSharedData::LoadSSF` (@0x1b9b9c0) opens the path in a
+`BSSubIndexTriShape`'s "Segment Data / SSF File" field, looks the SHAPE UP BY
+NAME among the top-level keys, and hands that object to
+`BSGeometrySegmentFlagData::ReadFromJson` (@0x1b9a9f0). What it builds is a map
+from a segment ADDRESS to a BONE NAME, and **the bone name doubles as the
+visibility flag**: `GetEnabled` (@0x1ed2b0) is literally
+`GetSegmentBoneName(id) != "DISABLED"`, and `DisableSegment` (@0x1ed2a0) is
+`SetSegmentBoneName(id, "DISABLED")`. It is the dismemberment table: which
+triangles vanish with which limb, and which caps appear in their place.
+
+- **The address is six instructions.** `BSGeometrySegmentID::GetSegmentID`
+  (@0x1289b30) is `((segment << 8) | subsegment) << 8`, so `131840` is
+  `0x020300` — segment 2, subsegment 3 — and the low byte is always zero.
+- **The second byte is an ORDINAL, not a User Index.** The consumer, the
+  `ApplyTo` lambda @0x1b9eb50, resolves it as
+  `SegmentStarts[segment] + 1 + subsegment`, with `0xFF` addressing the segment
+  itself. The two readings agree on most of the corpus and disagree on
+  OutfitM's left arm, whose User Indices run 1, 2, 3, 160, 60 — which is what
+  makes them distinguishable at all.
+- **The bone hash is raw CRC-32** (EDB88320 table, seed 0, no final XOR) over
+  the LOWERCASED name. All ten Bone IDs in MaleBody.nif's segment data come
+  back from it.
+- **BaseBoneName covers unlisted ids and does not hide plain segments.**
+  Vanilla MaleBody.ssf has base `DISABLED` while its segment 3 — 1045 triangles
+  of torso — appears in no delta and is visible in game. Two attested forms:
+  `DISABLED` where there is dismemberment data (634 of the 693 shapes in the
+  shipped corpus) and `Generic` where there is none, which is the name
+  headgear1.ssf's `bAllSegmentsAreEnabled: true` resolves to.
+- Two legacy branches also decode: `Deltas` + `bAllSegmentsAreEnabled`, and
+  `CollisionFilterDeltas` + `uiBaseCollisionFilter`, whose values pack
+  `filter << 24 | id` and whose base name is sprintf'd as `*<n>`.
+
+### The .ssf writer
+
+Every subsegment gets an explicit entry, grouped by bone. Vanilla is often more
+economical — F_Arm_R.ssf makes RArm_UpperArm the base and lists only the two
+ids that differ — but the economical form needs a judgement about which bone
+deserves to be the default, and an explicit list is the same map without one.
+Held against the shipped files on ten meshes: **56 of 56 assignments
+reproduced, 0 missed**, and MaleBody's eight all appear under the same names
+inside our ten. Regenerating vanilla's own MaleBody.ssf yields vanilla's map
+plus the eight ids vanilla left to the base.
+
+**A hash is all the mesh keeps, and the names are mostly not in it.** MaleBody
+is skinned to the tri-scale `*_skin` bones, so eight of the ten bones its
+segments name appear nowhere in the file; resolving from the open document
+alone found two of ten. The lookup is now the union of two closed sets — every
+node in the shipped human skeleton.nif (129) and every BoneName the 497 shipped
+.ssf files use (123) — with names found in the open file overriding both, so a
+custom skeleton still works and an unknown hash is reported rather than guessed.
+
+**A latent defect surfaced on the way.** "Parent Array Index" means the
+PARENT's shared-data row in vanilla (0xFFFFFFFF on a segment, the segment's row
+on a subsegment) but the entry's OWN row in this fork's
+`riggingWriteSegmentLayout`. `riggingReadSegmentDefinitions` assumes the
+fork's convention, so it reads every vanilla subsegment's Bone ID off by a row
+— which is why the first run of this writer found 18 subsegments and no owners.
+The .ssf reader is built on Segment Starts, the engine's own rule, and does not
+touch that field. The shared reader is left alone for now; see
+docs/TO_BE_IMPLEMENTED.md.
+
+### What a .sclp is
+
+`TESObjectARMA::ImportBoneScaleModifiers` (@0x32f3a0) swaps the model path's
+extension for `.sclp`, reads the JSON, and fills a `BSFixedString -> NiPoint3`
+map that reaches the skeleton through `TESNPC::FillBoneScaleMap` and
+`BSFlattenedBoneTree::SetBoneScale`. It is the body shape an outfit imposes on
+whoever wears it — how a raider looks beefy in armour and slim in a dress with
+one body mesh. All 54 shipped files carry the same 48 `*_skin` tri-scale bones,
+52 of them in the same order, and **2551 of their 2592 entries leave x at
+exactly 1**: these bones thicken a limb, they do not lengthen it.
+
+### The .sclp writer
+
+Two sources. An identity table for hand editing, and a MEASUREMENT against an
+unmodified body: per bone, a weighted least-squares fit of
+`target = scale * reference` on each axis of the bone's own frame, weighted by
+the skin weight so a vertex a bone barely touches does not vote like one it
+owns. Correspondence is by vertex index, so the reference has to be the same
+mesh — an unmodified copy of the body that was morphed — and the spell says so
+rather than fitting nonsense to a different one.
+
+**The frame is the bone NODE's, not BSSkin::BoneData's.** What the engine
+scales is the skeleton bone, so the node frame is what gives x, y and z their
+meaning. `BSSkinBoneTrans` was tried first and is a different transform: for
+RArm_UpperFat_skin in vanilla MaleBody.nif it is neither the node's world
+transform nor its inverse — its translation is 24.7 units where the inverse
+bind's is 103.2 — and vertices carried through it do not land inside the
+bounding sphere stored beside it.
+
+**Measured:** scaling every vertex one bone influences by 1.37 about that
+bone's own origin is exactly a 1.37 scale in that bone's frame whatever its
+rotation, and the writer recovers **1.37000 on all three axes**, worst error
+4e-6, while an untouched bone at the other end of the body stays at 1.0
+exactly. No shipped outfit carries a body its own .sclp could be re-derived
+from — the "fitted" shapes in them are 58-vertex patches — so that is a round
+trip through our own frame, not an external authority. The in-game gate is
+bungo's.
+
+### Both
+
+- Vanilla's punctuation is reproduced: the .ssf in jsoncpp's StyledWriter style
+  (three-space indent, `" : "`, scalar arrays inline, members sorted), the
+  .sclp in its own (two-space, `": "`, a decimal point on every number).
+- The .ssf spell also repoints every shape's "SSF File" at the file it wrote,
+  Data-relative with backslashes, anchored by spMakePathsRelative's rule; a NIF
+  outside a Data folder is reported rather than given a path that resolves on
+  one machine.
+- `WW_SCLP_REFERENCE` is the harness door: a path measures against it, an empty
+  value asks for the identity table.
+
 ## 2026-08-31 — LODGEN: NifSkope generates Fallout 4's world LOD
 
 ### REFR euler convention fix: object placement is now vertex-exact

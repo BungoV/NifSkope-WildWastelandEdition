@@ -11,7 +11,7 @@ listed here; they are inherited and still present.
 | Commits since the fork point | **383** |
 | `src/` | **145 files changed, +112,219 / −7,902 lines** |
 | New source files under `src/` | **57** |
-| Spells (menu operations) | **158 → 204** (+46) |
+| Spells (menu operations) | **158 → 206** (+48) |
 | Rebindable shortcut actions | **53** |
 | Headless regression harnesses | **61** |
 
@@ -92,7 +92,17 @@ A donor → receiver bone and weight transfer pipeline that did not exist:
   merges donor segments into matching **dismemberment slots**; **Separate (P)**
   clones its own skin, rebuilds segment ranges by prefix sum and compacts orphan
   vertices.
-- 12 rigging spells, addressable from the CLI as well as the menus.
+- 16 rigging spells, addressable from the CLI as well as the menus.
+- **The outfit sidecars the game reads beside a mesh**, neither of which any
+  exporter here could make before:
+  - **Generate Segment File (.ssf)** — the dismemberment table, built from the
+    Bone IDs the shape's own subsegments carry, and it repoints every shape's
+    "SSF File" at what it wrote. Held against the shipped files on ten meshes:
+    56 of 56 assignments reproduced.
+  - **Generate Bone Scale File (.sclp)** — the body shape an outfit imposes on
+    its wearer, 48 tri-scale bones, measured as a weighted fit of a morphed
+    body against an unmodified copy of the same mesh, or written flat for hand
+    editing.
 
 ## 4. Blender-shaped editing in the viewport
 

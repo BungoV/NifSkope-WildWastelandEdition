@@ -8,6 +8,9 @@
 #include "ui/widgets/colorwheel.h"
 
 #include "model/nifmodel.h"
+#include "libfo76utils/src/common.hpp"
+
+#include <cstdio>
 
 #include <QApplication>
 #include <QBuffer>
@@ -7705,3 +7708,703 @@ QDockWidget * tlCreateVertexPaintManagerDock( NifModel * nif, QMainWindow * mw, 
 	} );
 	return dock;
 }
+
+/* ===========================================================================
+ * FO4 OUTFIT SIDECARS — .ssf (segment ownership) and .sclp (bone scales)
+ *
+ * Two JSON files the engine loads from beside the .nif. Neither can be built
+ * from anything this fork had, and neither is derivable from the other: the
+ * .ssf says which triangles belong to which bone, the .sclp says how thick the
+ * wearer's body becomes. Both readers were disassembled out of 1.10.155 rather
+ * than guessed at, and the RVAs below are that build's.
+ *
+ * .ssf — BSGeometrySegmentSharedData::LoadSSF (@0x1b9b9c0) opens the path in
+ *   the shape's "Segment Data / SSF File" field, looks the SHAPE UP BY NAME
+ *   among the top-level keys, and hands that object to
+ *   BSGeometrySegmentFlagData::ReadFromJson (@0x1b9a9f0). What it builds is a
+ *   map from a segment ADDRESS to a BONE NAME, and the name doubles as the
+ *   visibility flag: GetEnabled (@0x1ed2b0) is literally
+ *   `GetSegmentBoneName(id) != "DISABLED"`, and DisableSegment (@0x1ed2a0) is
+ *   `SetSegmentBoneName(id, "DISABLED")`.
+ *
+ *   The address is BSGeometrySegmentID::GetSegmentID (@0x1289b30), six
+ *   instructions: `((segment << 8) | subsegment) << 8`. Its consumer, the
+ *   ApplyTo lambda @0x1b9eb50, resolves it as
+ *   `SegmentStarts[segment] + 1 + subsegment` — so the second byte is the
+ *   subsegment's ORDINAL WITHIN ITS SEGMENT, not its User Index, and 0xFF in
+ *   that byte addresses the segment itself. Ordinal and User Index agree on
+ *   OutfitM's right arm and disagree on its left (User Indices 1, 2, 3, 160,
+ *   60), which is what makes the two readings distinguishable at all; every id
+ *   in MaleBody, OutfitM and F_Arm_R lands on a subsegment whose Bone ID hashes
+ *   to the name their .ssf gives it.
+ *
+ *   BaseBoneName covers ids that are not listed, and it does NOT hide plain
+ *   segments: vanilla MaleBody.ssf has base "DISABLED" while its segment 3 —
+ *   1045 triangles of torso — appears in no delta and is visible in game. This
+ *   writer therefore lists every subsegment explicitly and leaves the base to
+ *   vanilla's two attested forms: "DISABLED" where there is dismemberment data
+ *   (634 of the 693 shapes in the shipped corpus) and "Generic" where there is
+ *   none — the name headgear1.ssf's `bAllSegmentsAreEnabled: true` resolves to
+ *   through ReadFromJson's legacy branch.
+ *
+ * .sclp — TESObjectARMA::ImportBoneScaleModifiers (@0x32f3a0) swaps the model
+ *   path's extension for .sclp, reads the JSON, and fills a
+ *   BSFixedString -> NiPoint3 map that reaches the skeleton through
+ *   TESNPC::FillBoneScaleMap and BSFlattenedBoneTree::SetBoneScale. It is the
+ *   body shape an outfit imposes on whoever wears it. All 54 shipped files
+ *   carry the same 48 *_skin tri-scale bones, and 2551 of their 2592 entries
+ *   leave x at exactly 1 — these bones thicken a limb, they do not lengthen it.
+ * ========================================================================= */
+
+//! The engine's bone-name hash, and the .nif's: raw CRC-32 (EDB88320 table,
+//! seed 0, no final XOR) over the LOWERCASED name. Recovers all ten Bone IDs
+//! in MaleBody.nif's segment data from the node names in the same file.
+static quint32 riggingBoneNameHash( const QString & name )
+{
+	quint32 hash = 0;
+	for ( QChar c : name )
+		hashFunctionCRC32( hash, static_cast<unsigned char>( c.toLower().unicode() ) );
+	return hash;
+}
+
+/*! Bone names a segment can name, for turning a stored hash back into a string.
+ *
+ *  A HASH IS ALL THE MESH KEEPS, and the names are mostly not in it: MaleBody is
+ *  skinned to the tri-scale `*_skin` bones, so eight of the ten bones its own
+ *  segments name -- RArm_UpperArm and the rest -- appear nowhere in the file.
+ *  Resolving from the open document alone found two of ten.
+ *
+ *  So this is the union of two closed sets: every node in the shipped human
+ *  skeleton.nif (129) and every BoneName the 497 shipped .ssf files use (123,
+ *  which is where the creature bones come from). Together they resolve every
+ *  Bone ID in the vanilla corpus. It is a lookup, not an authority -- names
+ *  found in the open file win, so a custom skeleton still works, and a hash that
+ *  matches nothing is reported rather than guessed at.
+ */
+static const char * const riggingKnownBoneNames[] = {
+	"AnimObjectA", "AnimObjectB", "AnimObjectL1", "AnimObjectL2", "AnimObjectL3", "AnimObjectR1",
+	"AnimObjectR2", "AnimObjectR3", "Back_LLeg2", "Back_RLeg2", "Belly_skin", "COM", "CamTarget",
+	"CamTargetParent", "Camera", "Camera Control", "CharacterBumper", "Chest", "Chest_Rear_Skin",
+	"Chest_Upper_skin", "Chest_skin", "Dogmeat_Front_LLeg1", "Dogmeat_Front_LLeg2",
+	"Dogmeat_Front_LLegAnkle", "Dogmeat_Front_RLeg2", "Dogmeat_Front_RLegAnkle", "Dogmeat_Head",
+	"Dogmeat_Rear_LLeg2", "Dogmeat_Rear_LLegAnkle", "Dogmeat_Rear_RLeg2",
+	"Dogmeat_Rear_RLegAnkle", "Face_skin", "Front_LLeg2", "Front_RLeg2", "HEAD", "Head",
+	"Head_skin", "LArm1", "LArm2", "LArm3", "LArmForeArm", "LArmPalm", "LArmUpper",
+	"LArmUpperArm", "LArm_Claw", "LArm_Collarbone", "LArm_Collarbone_skin", "LArm_Elbow",
+	"LArm_Finger11", "LArm_Finger12", "LArm_Finger13", "LArm_Finger21", "LArm_Finger22",
+	"LArm_Finger23", "LArm_Finger31", "LArm_Finger32", "LArm_Finger33", "LArm_Finger41",
+	"LArm_Finger42", "LArm_Finger43", "LArm_Finger51", "LArm_Finger52", "LArm_Finger53",
+	"LArm_ForeArm1", "LArm_ForeArm1_skin", "LArm_ForeArm2", "LArm_ForeArm2_skin", "LArm_ForeArm3",
+	"LArm_ForeArm3_skin", "LArm_Hand", "LArm_Shoulder", "LArm_ShoulderFat_skin", "LArm_UpperArm",
+	"LArm_UpperArm_skin", "LArm_UpperFat_skin", "LArm_UpperTwist1", "LArm_UpperTwist1_skin",
+	"LArm_UpperTwist2", "LArm_UpperTwist2_skin", "LBackLegCalf", "LBackLegThigh", "LBackLegfoot",
+	"LBreast_skin", "LButtFat_skin", "LCALF", "LForeArm1", "LFrontLegCalf", "LFrontLegFoot",
+	"LFrontLegThigh", "LLeg12", "LLeg13", "LLeg14", "LLeg2", "LLeg22", "LLeg23", "LLeg24",
+	"LLeg3", "LLeg32", "LLeg33", "LLeg34", "LLeg42", "LLeg43", "LLeg44", "LLeg_Calf",
+	"LLeg_Calf_Low_skin", "LLeg_Calf_skin", "LLeg_FM_Knee", "LLeg_FM_Thigh", "LLeg_FR_Knee",
+	"LLeg_FR_Thigh", "LLeg_F_Knee", "LLeg_F_Thigh", "LLeg_Foot", "LLeg_Front_Ankle",
+	"LLeg_Front_Knee", "LLeg_Knee", "LLeg_R_Knee", "LLeg_R_Thigh", "LLeg_Rear_Ankle",
+	"LLeg_Rear_Knee", "LLeg_Thigh", "LLeg_Thigh_Fat_skin", "LLeg_Thigh_Low_skin",
+	"LLeg_Thigh_skin", "LLeg_Toe1", "LTHIGH", "LUPPERARM", "L_RibHelper", "Neck", "Neck1_skin",
+	"Neck_Low_skin", "Neck_skin", "Pelvis", "Pelvis_Rear_skin", "Pelvis_skin", "PipboyBone",
+	"RArm1", "RArm2", "RArm3", "RArmForeArm", "RArmPalm", "RArmUpper", "RArmUpperArm",
+	"RArm_Claw", "RArm_Collarbone", "RArm_Collarbone_skin", "RArm_Elbow", "RArm_Finger11",
+	"RArm_Finger12", "RArm_Finger13", "RArm_Finger21", "RArm_Finger22", "RArm_Finger23",
+	"RArm_Finger31", "RArm_Finger32", "RArm_Finger33", "RArm_Finger41", "RArm_Finger42",
+	"RArm_Finger43", "RArm_Finger51", "RArm_Finger52", "RArm_Finger53", "RArm_ForeArm1",
+	"RArm_ForeArm1_skin", "RArm_ForeArm2", "RArm_ForeArm2_skin", "RArm_ForeArm3",
+	"RArm_ForeArm3_skin", "RArm_Hand", "RArm_Shoulder", "RArm_ShoulderFat_skin", "RArm_UpperArm",
+	"RArm_UpperArm_skin", "RArm_UpperFat_skin", "RArm_UpperTwist1", "RArm_UpperTwist1_skin",
+	"RArm_UpperTwist2", "RArm_UpperTwist2_skin", "RBackLegCalf", "RBackLegFoot", "RBackLegThigh",
+	"RBreast_skin", "RButtFat_skin", "RCALF", "RForeArm1", "RFrontLegCalf", "RFrontLegFoot",
+	"RFrontLegThigh", "RLeg12", "RLeg13", "RLeg14", "RLeg2", "RLeg22", "RLeg23", "RLeg24",
+	"RLeg3", "RLeg32", "RLeg33", "RLeg34", "RLeg42", "RLeg43", "RLeg44", "RLeg_Calf",
+	"RLeg_Calf_Low_skin", "RLeg_Calf_skin", "RLeg_FM_Knee", "RLeg_FM_Thigh", "RLeg_FR_Knee",
+	"RLeg_FR_Thigh", "RLeg_F_Knee", "RLeg_F_Thigh", "RLeg_Foot", "RLeg_Front_Ankle",
+	"RLeg_Front_Knee", "RLeg_Knee", "RLeg_R_Knee", "RLeg_R_Thigh", "RLeg_Rear_Ankle",
+	"RLeg_Rear_Knee", "RLeg_Rear_Thigh", "RLeg_Thigh", "RLeg_Thigh_Fat_skin",
+	"RLeg_Thigh_Low_skin", "RLeg_Thigh_skin", "RLeg_Toe1", "RTHIGH", "RUPPERARM", "R_RibHelper",
+	"Root", "SPINE1", "SPINE2", "Spine1_Rear_skin", "Spine1_skin", "Spine2_Rear_skin",
+	"Spine2_skin", "Tail2", "Tail3", "Tail4", "Tail5", "TailStinger", "UpperBelly_skin", "WEAPON",
+	"WeaponLeft", "skeleton.nif"
+};
+
+//! Bone names indexed by hash: the known set first, then every named block in
+//! the open file, which therefore overrides it.
+static QHash<quint32, QString> riggingBoneNamesByHash( const NifModel * nif )
+{
+	QHash<quint32, QString> table;
+	for ( const char * known : riggingKnownBoneNames ) {
+		const QString name = QLatin1String( known );
+		table.insert( riggingBoneNameHash( name ), name );
+	}
+	for ( qint32 block = 0; block < nif->getBlockCount(); block++ ) {
+		const QString name = nif->get<QString>( nif->getBlockIndex( block ), "Name" );
+		if ( !name.isEmpty() )
+			table.insert( riggingBoneNameHash( name ), name );
+	}
+	return table;
+}
+
+/*! The Data-relative form of an absolute path, or empty when there is nothing
+ *  to anchor to.
+ *
+ *  Same anchor rule as spMakePathsRelative in sanitize.cpp — components matched
+ *  EXACTLY (so "tex" never matches "textures") and the LAST match wins — kept
+ *  here rather than shared because that spell's copy is the documented one and
+ *  a header for two dozen lines would be the bigger change.
+ */
+static QString riggingDataRelativePath( const QString & path )
+{
+	QString p = path;
+	p.replace( QLatin1Char( '/' ), QLatin1Char( '\\' ) );
+	static const char * const dataDirs[] = {
+		"geometries", "icons", "interface", "materials", "meshes", "particles",
+		"planetdata", "scripts", "shadersfx", "sound", "strings", "terrain",
+		"textures", "vis"
+	};
+	const QStringList parts = p.split( QLatin1Char( '\\' ), Qt::SkipEmptyParts );
+	int anchor = -1;
+	for ( int i = 0; i < parts.size() - 1; i++ )	// never the file name itself
+		for ( const char * d : dataDirs )
+			if ( parts.at( i ).compare( QLatin1String( d ), Qt::CaseInsensitive ) == 0 )
+				anchor = i;
+	if ( anchor < 0 )
+		return QString();
+	return QStringList( parts.mid( anchor ) ).join( QLatin1Char( '\\' ) );
+}
+
+//! Report to whichever caller there is. A -no-gui build is a QCoreApplication,
+//! where constructing a QMessageBox aborts the process, so the harnesses read
+//! stdout instead.
+static void riggingSidecarReport( const QString & title, const QString & text, bool warning = false )
+{
+	if ( qobject_cast<QApplication *>( QCoreApplication::instance() ) ) {
+		if ( warning )
+			QMessageBox::warning( nullptr, title, text );
+		else
+			QMessageBox::information( nullptr, title, text );
+		return;
+	}
+	QByteArray line = text.toLocal8Bit();
+	fprintf( stdout, "%s\n", line.constData() );
+	fflush( stdout );
+}
+
+//! What one shape contributes to an .ssf.
+struct RigSsfShape
+{
+	QString name;
+	QString baseBone;
+	QMap<QString, QVector<quint32>> deltas;	// bone name -> segment ids, both sorted
+	int subsegments = 0;
+	QVector<quint32> unresolved;			// bone hashes no block in the file names
+};
+
+/*! Read one shape's segment ownership into the .ssf's own terms.
+ *
+ *  Every subsegment gets an explicit entry. Vanilla is often more economical
+ *  than that — F_Arm_R.ssf makes RArm_UpperArm the base and lists only the two
+ *  ids that differ — but the economical form needs a judgement about which bone
+ *  deserves to be the default, and an explicit list is the same map with no
+ *  judgement in it.
+ */
+static RigSsfShape riggingReadSsfShape( const NifModel * nif, const QModelIndex & shape,
+	const QHash<quint32, QString> & boneNames )
+{
+	RigSsfShape out;
+	out.name = nif->get<QString>( shape, "Name" );
+
+	/* Resolved through SEGMENT STARTS, which is the engine's own rule
+	 * (`SegmentStarts[segment] + 1 + ordinal`), and deliberately not through
+	 * riggingReadSegmentDefinitions. "Parent Array Index" cannot be trusted for
+	 * this: vanilla writes 0xFFFFFFFF on a segment and the PARENT's flat row on
+	 * a subsegment, while this fork's own riggingWriteSegmentLayout writes each
+	 * entry's OWN flat row. A reader built on that field agrees with whichever
+	 * tool wrote the file and reads the other one's Bone IDs off by a row --
+	 * which is how every subsegment in vanilla MaleBody.nif came back unowned.
+	 */
+	QModelIndex shared = nif->getIndex( shape, "Segment Data" );
+	QModelIndex starts = nif->getIndex( shared, "Segment Starts" );
+	QModelIndex perSegment = nif->getIndex( shared, "Per Segment Data" );
+	QModelIndex segments = nif->getIndex( shape, "Segment" );
+	if ( !starts.isValid() || !perSegment.isValid() || !segments.isValid() )
+		return out;
+	const int segmentCount = qMin( nif->rowCount( starts ), nif->rowCount( segments ) );
+	for ( int segment = 0; segment < segmentCount; segment++ ) {
+		const int base = int( nif->get<quint32>( nif->getIndex( starts, segment ) ) );
+		QModelIndex children = nif->getIndex( nif->getIndex( segments, segment ), "Sub Segment" );
+		const int childCount = children.isValid() ? nif->rowCount( children ) : 0;
+		for ( int sub = 0; sub < childCount; sub++ ) {
+			out.subsegments++;
+			const int row = base + 1 + sub;
+			if ( row < 0 || row >= nif->rowCount( perSegment ) )
+				continue;
+			const quint32 id = ( quint32( segment ) << 16 ) | ( quint32( sub ) << 8 );
+			const quint32 boneId = nif->get<quint32>( nif->getIndex( perSegment, row ), "Bone ID" );
+			if ( boneId == std::numeric_limits<quint32>::max() )
+				continue;					// no owner: the base already says DISABLED
+			auto named = boneNames.constFind( boneId );
+			if ( named == boneNames.constEnd() ) {
+				out.unresolved << boneId;
+				continue;
+			}
+			out.deltas[*named] << id;
+		}
+	}
+
+	// "DISABLED" is what the 634 vanilla shapes with dismemberment data use, and
+	// it is inert for anything this writer did not list. A shape with no
+	// subsegments has nothing to own, so it takes the enabled name instead.
+	out.baseBone = out.deltas.isEmpty() && out.subsegments == 0
+		? QStringLiteral( "Generic" ) : QStringLiteral( "DISABLED" );
+	return out;
+}
+
+//! jsoncpp's StyledWriter, which is what wrote the shipped files: three-space
+//! indent, " : " between key and value, scalar arrays inline.
+static QByteArray riggingWriteSsfJson( const QVector<RigSsfShape> & shapes )
+{
+	QStringList keys;
+	QHash<QString, const RigSsfShape *> byName;
+	for ( const RigSsfShape & s : shapes ) {
+		keys << s.name;
+		byName.insert( s.name, &s );
+	}
+	keys.sort();								// jsoncpp holds members in a std::map
+
+	QString text = QStringLiteral( "{\n" );
+	for ( int k = 0; k < keys.size(); k++ ) {
+		const RigSsfShape & s = *byName.value( keys.at( k ) );
+		text += QStringLiteral( "   \"%1\" : {\n" ).arg( s.name );
+		text += QStringLiteral( "      \"BaseBoneName\" : \"%1\"" ).arg( s.baseBone );
+		if ( !s.deltas.isEmpty() ) {
+			text += QStringLiteral( ",\n      \"DeltaBones\" : [\n" );
+			int written = 0;
+			for ( auto it = s.deltas.constBegin(); it != s.deltas.constEnd(); ++it, ++written ) {
+				QStringList ids;
+				for ( quint32 id : it.value() )
+					ids << QString::number( id );
+				text += QStringLiteral( "         {\n" );
+				text += QStringLiteral( "            \"BoneDeltaList\" : [ %1 ],\n" ).arg( ids.join( QStringLiteral( ", " ) ) );
+				text += QStringLiteral( "            \"BoneName\" : \"%1\"\n" ).arg( it.key() );
+				text += QStringLiteral( "         }%1\n" ).arg( written + 1 < s.deltas.size() ? QStringLiteral( "," ) : QString() );
+			}
+			text += QStringLiteral( "      ],\n" );
+			text += QStringLiteral( "      \"uiNumDeltas\" : %1\n" ).arg( s.deltas.size() );
+		} else {
+			text += QStringLiteral( "\n" );
+		}
+		text += QStringLiteral( "   }%1\n" ).arg( k + 1 < keys.size() ? QStringLiteral( "," ) : QString() );
+	}
+	text += QStringLiteral( "}\n" );
+	return text.toUtf8();
+}
+
+class spRiggingGenerateSSF final : public Spell
+{
+public:
+	QString name() const override final { return Spell::tr( "Generate Segment File (.ssf)" ); }
+	QString group() const override { return Spell::tr( "Segments" ); }
+	QString page() const override final { return Spell::tr( "Rigging" ); }
+	QString hint() const override final
+	{
+		return Spell::tr( "Writes the dismemberment ownership file the engine loads beside this "
+			"mesh, from the Bone IDs the shape's own subsegments already carry." );
+	}
+	bool undoable() const override final { return true; }
+
+	static bool hasSegmentedShape( const NifModel * nif )
+	{
+		for ( qint32 block = 0; block < nif->getBlockCount(); block++ ) {
+			QModelIndex shape = nif->getBlockIndex( block );
+			if ( nif->isNiBlock( shape, "BSSubIndexTriShape" )
+				&& nif->getIndex( shape, "Segment Data" ).isValid() )
+				return true;
+		}
+		return false;
+	}
+
+	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
+	{
+		// One file per NIF holding an entry per shape, so this belongs to the
+		// file rather than to any one shape.
+		return nif && !index.isValid() && nif->getBSVersion() == 130 && hasSegmentedShape( nif );
+	}
+
+	QModelIndex cast( NifModel * nif, const QModelIndex & index ) override final
+	{
+		const QFileInfo nifInfo = nif->getFileInfo();
+		if ( nifInfo.fileName().isEmpty() ) {
+			riggingSidecarReport( name(), Spell::tr( "Save the NIF first — the .ssf is found by "
+				"the mesh's own name and path, so an unsaved document has nothing to name it "
+				"after." ), true );
+			return index;
+		}
+
+		const QHash<quint32, QString> boneNames = riggingBoneNamesByHash( nif );
+		QVector<RigSsfShape> shapes;
+		QVector<quint32> unresolved;
+		for ( qint32 block = 0; block < nif->getBlockCount(); block++ ) {
+			QModelIndex shape = nif->getBlockIndex( block );
+			if ( !nif->isNiBlock( shape, "BSSubIndexTriShape" )
+				|| !nif->getIndex( shape, "Segment Data" ).isValid() )
+				continue;
+			RigSsfShape entry = riggingReadSsfShape( nif, shape, boneNames );
+			if ( entry.name.isEmpty() ) {
+				riggingSidecarReport( name(), Spell::tr( "Block %1 has no name. LoadSSF matches "
+					"shapes to the file's keys BY NAME, so an unnamed shape can never be found." )
+					.arg( block ), true );
+				return index;
+			}
+			unresolved += entry.unresolved;
+			shapes << entry;
+		}
+		if ( shapes.isEmpty() )
+			return index;
+
+		const QString ssfPath = QDir( nifInfo.absolutePath() )
+			.filePath( nifInfo.completeBaseName() + QStringLiteral( ".ssf" ) );
+		QFile file( ssfPath );
+		if ( !file.open( QIODevice::WriteOnly | QIODevice::Truncate ) ) {
+			riggingSidecarReport( name(), Spell::tr( "Could not write '%1'." ).arg( ssfPath ), true );
+			return index;
+		}
+		const QByteArray json = riggingWriteSsfJson( shapes );
+		file.write( json );
+		file.close();
+
+		// Point every shape at it. The field is a Data-relative path with
+		// backslashes; vanilla points both of OutfitM.nif's shapes at the one
+		// file, because the file holds an entry for each.
+		const QString relative = riggingDataRelativePath( ssfPath );
+		int repointed = 0;
+		for ( qint32 block = 0; block < nif->getBlockCount(); block++ ) {
+			QModelIndex shared = nif->getIndex( nif->getBlockIndex( block ), "Segment Data" );
+			QModelIndex field = nif->getIndex( shared, "SSF File" );
+			if ( !field.isValid() || relative.isEmpty() )
+				continue;
+			nif->set<QString>( field, relative );
+			repointed++;
+		}
+
+		QStringList report;
+		int deltas = 0, subsegments = 0;
+		for ( const RigSsfShape & s : shapes ) {
+			deltas += s.deltas.size();
+			subsegments += s.subsegments;
+			report << Spell::tr( "  %1 — %2 subsegments, %3 bones" )
+				.arg( s.name ).arg( s.subsegments ).arg( s.deltas.size() );
+		}
+		QString summary = Spell::tr( "Wrote %1 (%2 bytes): %3 shapes, %4 subsegments, %5 bone groups.\n%6" )
+			.arg( QDir::toNativeSeparators( ssfPath ) ).arg( json.size() )
+			.arg( shapes.size() ).arg( subsegments ).arg( deltas ).arg( report.join( QStringLiteral( "\n" ) ) );
+		if ( relative.isEmpty() )
+			summary += Spell::tr( "\n\nThe NIF is not under a Data folder, so 'SSF File' was left alone: "
+				"the engine needs a Data-relative path and this one cannot be anchored." );
+		else
+			summary += Spell::tr( "\n\nSSF File = %1 on %2 shape(s)." ).arg( relative ).arg( repointed );
+		if ( !unresolved.isEmpty() ) {
+			QStringList hashes;
+			for ( quint32 h : unresolved )
+				hashes << QStringLiteral( "0x%1" ).arg( h, 8, 16, QLatin1Char( '0' ) );
+			summary += Spell::tr( "\n\n%1 subsegment(s) name a bone no block in this file carries, "
+				"so they were left to the base: %2. Import those bone nodes and run this again." )
+				.arg( unresolved.size() ).arg( hashes.join( QStringLiteral( ", " ) ) );
+		}
+		riggingSidecarReport( name(), summary );
+		return index;
+	}
+};
+
+REGISTER_SPELL( spRiggingGenerateSSF )
+
+//! The 48 tri-scale bones, in the order 52 of the 54 shipped .sclp files use.
+static const char * const riggingSclpBones[] = {
+	"Spine1_Rear_skin", "Belly_skin", "Spine1_skin", "Spine2_Rear_skin",
+	"UpperBelly_skin", "Spine2_skin", "Neck_Low_skin", "Chest_Upper_skin",
+	"Chest_Rear_Skin", "RBreast_skin", "LBreast_skin", "Chest_skin",
+	"RArm_ShoulderFat_skin", "RArm_Collarbone_skin", "RArm_UpperArm_skin",
+	"RArm_UpperTwist1_skin", "RArm_UpperFat_skin", "RArm_UpperTwist2_skin",
+	"RArm_ForeArm1_skin", "RArm_ForeArm2_skin", "RArm_ForeArm3_skin",
+	"Neck1_skin", "Neck_skin", "Face_skin", "Head_skin",
+	"LArm_ShoulderFat_skin", "LArm_Collarbone_skin", "LArm_UpperArm_skin",
+	"LArm_UpperTwist1_skin", "LArm_UpperFat_skin", "LArm_UpperTwist2_skin",
+	"LArm_ForeArm1_skin", "LArm_ForeArm2_skin", "LArm_ForeArm3_skin",
+	"Pelvis_Rear_skin", "LButtFat_skin", "RButtFat_skin", "Pelvis_skin",
+	"RLeg_Thigh_Fat_skin", "RLeg_Thigh_Low_skin", "RLeg_Thigh_skin",
+	"RLeg_Calf_Low_skin", "RLeg_Calf_skin",
+	"LLeg_Thigh_Fat_skin", "LLeg_Thigh_Low_skin", "LLeg_Thigh_skin",
+	"LLeg_Calf_Low_skin", "LLeg_Calf_skin"
+};
+
+/*! World-to-bone frames, by bone name, taken from the BONE NODES.
+ *
+ *  Not from BSSkin::BoneData, which was the first thing tried. What the engine
+ *  scales is the skeleton bone -- BSFlattenedBoneTree::SetBoneScale, reached
+ *  from the ARMA's map -- so the frame that gives x, y and z their meaning is
+ *  the bone's own node frame, and the file's job is to describe a scale in it.
+ *  BSSkinBoneTrans is a different transform: for RArm_UpperFat_skin in vanilla
+ *  MaleBody.nif it is neither the node's world transform nor its inverse (its
+ *  translation is 24.7 units where the inverse bind's is 103.2), and vertices
+ *  carried through it do not land inside the bounding sphere stored beside it.
+ *  Whatever it is for, it is not this.
+ */
+static QHash<QString, Transform> riggingSkinBoneFrames( const NifModel * nif, const QModelIndex & shape )
+{
+	QHash<QString, Transform> frames;
+	QModelIndex skin = riggingSkinInstance( nif, shape );
+	QModelIndex bones = nif->getIndex( skin, "Bones" );
+	if ( !bones.isValid() )
+		return frames;
+	for ( int i = 0; i < nif->rowCount( bones ); i++ ) {
+		const int block = nif->getLink( nif->getIndex( bones, i ) );
+		QModelIndex node = nif->getBlockIndex( block );
+		if ( !node.isValid() )
+			continue;
+		const QString name = nif->get<QString>( node, "Name" );
+		Transform world;
+		if ( name.isEmpty() || !riggingNodeAbsoluteWorld( nif, block, world ) )
+			continue;
+		frames.insert( name, world.inverted() );
+	}
+	return frames;
+}
+
+/*! Per-axis scale that carries the reference body onto the target one, bone by
+ *  bone, in each bone's own frame.
+ *
+ *  A weighted least squares fit of `target = scale * reference` on each axis
+ *  separately, which is exactly the model SetBoneScale applies: the bone scales
+ *  its own axes about its own origin. Weighting by the skin weight is what
+ *  keeps a vertex that a bone barely touches from voting like one it owns.
+ *
+ *  Correspondence is by vertex INDEX, so the two shapes have to be the same
+ *  mesh — a morphed body, not a different one. The caller checks that.
+ */
+static QVector<Vector3> riggingSclpScales( const RigShape & reference, const RigShape & target,
+	const QHash<QString, Transform> & frames, int & bonesFitted )
+{
+	QVector<Vector3> scales;
+	bonesFitted = 0;
+	for ( const char * boneName : riggingSclpBones ) {
+		const QString bone = QLatin1String( boneName );
+		Vector3 scale( 1.0f, 1.0f, 1.0f );
+		auto frame = frames.constFind( bone );
+		if ( frame == frames.constEnd() ) {
+			scales << scale;
+			continue;					// the body is not weighted to this bone
+		}
+		double num[3] = { 0.0, 0.0, 0.0 };
+		double den[3] = { 0.0, 0.0, 0.0 };
+		for ( int v = 0; v < reference.pos.size() && v < target.pos.size(); v++ ) {
+			float weight = 0.0f;
+			for ( const auto & influence : reference.skin.at( v ) )
+				if ( influence.first == bone )
+					weight = influence.second;
+			if ( weight <= 0.0f )
+				continue;
+			const Vector3 r = *frame * reference.pos.at( v );
+			const Vector3 t = *frame * target.pos.at( v );
+			for ( int axis = 0; axis < 3; axis++ ) {
+				num[axis] += double( weight ) * double( r[axis] ) * double( t[axis] );
+				den[axis] += double( weight ) * double( r[axis] ) * double( r[axis] );
+			}
+		}
+		bool fitted = false;
+		for ( int axis = 0; axis < 3; axis++ ) {
+			// A bone whose vertices all sit on one of its own planes says nothing
+			// about that axis, and dividing by that is how a NaN reaches a file.
+			if ( den[axis] > 1.0e-6 ) {
+				scale[axis] = float( num[axis] / den[axis] );
+				fitted = true;
+			}
+		}
+		if ( fitted )
+			bonesFitted++;
+		scales << scale;
+	}
+	return scales;
+}
+
+//! The shipped .sclp punctuation: two-space indent, "key": value, and a decimal
+//! point on every number — the writer that made them was not jsoncpp's.
+static QByteArray riggingWriteSclpJson( const QVector<Vector3> & scales )
+{
+	auto number = []( float value ) {
+		QString s = QString::number( double( value ), 'g', 17 );
+		if ( !s.contains( QLatin1Char( '.' ) ) && !s.contains( QLatin1Char( 'e' ) )
+			&& !s.contains( QLatin1Char( 'n' ) ) )		// nan/inf never reach here
+			s += QStringLiteral( ".0" );
+		return s;
+	};
+	QString text = QStringLiteral( "[\n" );
+	const int count = int( sizeof( riggingSclpBones ) / sizeof( riggingSclpBones[0] ) );
+	for ( int i = 0; i < count; i++ ) {
+		const Vector3 s = i < scales.size() ? scales.at( i ) : Vector3( 1.0f, 1.0f, 1.0f );
+		text += QStringLiteral( "  {\n" );
+		text += QStringLiteral( "    \"Name\": \"%1\",\n" ).arg( QLatin1String( riggingSclpBones[i] ) );
+		text += QStringLiteral( "    \"Scale\": {\n" );
+		text += QStringLiteral( "      \"x\": %1,\n" ).arg( number( s[0] ) );
+		text += QStringLiteral( "      \"y\": %1,\n" ).arg( number( s[1] ) );
+		text += QStringLiteral( "      \"z\": %1\n" ).arg( number( s[2] ) );
+		text += QStringLiteral( "    }\n" );
+		text += QStringLiteral( "  }%1\n" ).arg( i + 1 < count ? QStringLiteral( "," ) : QString() );
+	}
+	text += QStringLiteral( "]\n" );
+	return text.toUtf8();
+}
+
+class spRiggingGenerateSCLP final : public Spell
+{
+public:
+	QString name() const override final { return Spell::tr( "Generate Bone Scale File (.sclp)..." ); }
+	QString group() const override { return Spell::tr( "Segments" ); }
+	QString page() const override final { return Spell::tr( "Rigging" ); }
+	QString hint() const override final
+	{
+		return Spell::tr( "Writes the body shape this outfit imposes on its wearer, measured "
+			"against an unmodified body of the same mesh." );
+	}
+
+	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
+	{
+		return nif && nif->getBSVersion() == 130 && riggingIsSkinnedShape( nif, index )
+			&& nif->getIndex( index, "Vertex Data" ).isValid();
+	}
+
+	QModelIndex cast( NifModel * nif, const QModelIndex & index ) override final
+	{
+		const QFileInfo nifInfo = nif->getFileInfo();
+		if ( nifInfo.fileName().isEmpty() ) {
+			riggingSidecarReport( name(), Spell::tr( "Save the NIF first — the .sclp is found by "
+				"the mesh's own name and path." ), true );
+			return index;
+		}
+
+		/* The reference is the SAME body, unmodified. WW_SCLP_REFERENCE is the
+		 * harness door, and an empty value there asks for the identity table
+		 * deliberately rather than by accident.
+		 */
+		bool identityOnly = false;
+		QString referencePath = qEnvironmentVariable( "WW_SCLP_REFERENCE" );
+		if ( !qEnvironmentVariableIsSet( "WW_SCLP_REFERENCE" ) ) {
+			if ( !qobject_cast<QApplication *>( QCoreApplication::instance() ) )
+				return index;						// headless with nothing to ask
+			QMessageBox ask( QMessageBox::Question, name(),
+				Spell::tr( "Measure the shape against an unmodified body of the same mesh, or "
+					"write the 48 bones at 1.0 for hand editing?" ) );
+			QPushButton * measure = ask.addButton( Spell::tr( "Choose Reference Body..." ), QMessageBox::AcceptRole );
+			ask.addButton( Spell::tr( "Identity Table" ), QMessageBox::AcceptRole );
+			ask.addButton( QMessageBox::Cancel );
+			ask.exec();
+			if ( ask.clickedButton() == ask.button( QMessageBox::Cancel ) )
+				return index;
+			if ( ask.clickedButton() == measure ) {
+				referencePath = QFileDialog::getOpenFileName( qApp->activeWindow(),
+					Spell::tr( "Choose Reference Body NIF" ), nif->getFolder(),
+					Spell::tr( "NIF files (*.nif)" ) );
+				if ( referencePath.isEmpty() )
+					return index;
+			} else {
+				identityOnly = true;
+			}
+		} else if ( referencePath.isEmpty() ) {
+			identityOnly = true;
+		}
+
+		QVector<Vector3> scales;
+		int bonesFitted = 0;
+		QString provenance;
+		if ( identityOnly ) {
+			for ( int i = 0; i < int( sizeof( riggingSclpBones ) / sizeof( riggingSclpBones[0] ) ); i++ )
+				scales << Vector3( 1.0f, 1.0f, 1.0f );
+			provenance = Spell::tr( "identity table, nothing measured" );
+		} else {
+			NifModel reference;
+			if ( !reference.loadFromFile( referencePath ) ) {
+				riggingSidecarReport( name(), Spell::tr( "Could not read '%1'." ).arg( referencePath ), true );
+				return index;
+			}
+			QStringList labels;
+			QList<int> candidates = riggingSkinnedShapes( &reference, labels );
+			if ( candidates.isEmpty() ) {
+				riggingSidecarReport( name(), Spell::tr( "The reference NIF has no skinned shapes." ), true );
+				return index;
+			}
+
+			const RigShape targetShape = riggingReadShape( nif, index );
+			/* Vertex INDEX is the correspondence, so the reference has to be the
+			 * same mesh. Picking the shape by vertex count rather than by order
+			 * is what lets a reference body NIF hold more than one shape.
+			 */
+			QModelIndex iReference;
+			for ( int block : candidates ) {
+				QModelIndex candidate = reference.getBlockIndex( block );
+				if ( int( reference.get<quint16>( candidate, "Num Vertices" ) ) == targetShape.pos.size() ) {
+					iReference = candidate;
+					break;
+				}
+			}
+			if ( !iReference.isValid() ) {
+				riggingSidecarReport( name(), Spell::tr( "No shape in the reference has this shape's "
+					"%1 vertices. The scales are measured per vertex, so the reference must be the "
+					"SAME body mesh — an unmodified copy of the one that was morphed, not a "
+					"different body." ).arg( targetShape.pos.size() ), true );
+				return index;
+			}
+
+			const RigShape referenceShape = riggingReadShape( &reference, iReference );
+			if ( !referenceShape.valid || !targetShape.valid
+				|| referenceShape.pos.size() != targetShape.pos.size() ) {
+				riggingSidecarReport( name(), Spell::tr( "Could not read both shapes' vertex data." ), true );
+				return index;
+			}
+			QHash<QString, Transform> frames = riggingSkinBoneFrames( &reference, iReference );
+			if ( frames.isEmpty() ) {
+				riggingSidecarReport( name(), Spell::tr( "The reference shape has no BSSkin::BoneData, "
+					"so there are no bone frames to measure in." ), true );
+				return index;
+			}
+			scales = riggingSclpScales( referenceShape, targetShape, frames, bonesFitted );
+			provenance = Spell::tr( "%1 of 48 bones measured against %2" )
+				.arg( bonesFitted ).arg( QFileInfo( referencePath ).fileName() );
+		}
+
+		const QString sclpPath = QDir( nifInfo.absolutePath() )
+			.filePath( nifInfo.completeBaseName() + QStringLiteral( ".sclp" ) );
+		QFile file( sclpPath );
+		if ( !file.open( QIODevice::WriteOnly | QIODevice::Truncate ) ) {
+			riggingSidecarReport( name(), Spell::tr( "Could not write '%1'." ).arg( sclpPath ), true );
+			return index;
+		}
+		const QByteArray json = riggingWriteSclpJson( scales );
+		file.write( json );
+		file.close();
+
+		int moved = 0;
+		float widest = 1.0f;
+		QString widestBone;
+		for ( int i = 0; i < scales.size(); i++ ) {
+			const Vector3 & s = scales.at( i );
+			if ( qAbs( s[0] - 1.0f ) > 1.0e-4f || qAbs( s[1] - 1.0f ) > 1.0e-4f
+				|| qAbs( s[2] - 1.0f ) > 1.0e-4f )
+				moved++;
+			for ( int axis = 0; axis < 3; axis++ )
+				if ( s[axis] > widest ) {
+					widest = s[axis];
+					widestBone = QLatin1String( riggingSclpBones[i] );
+				}
+		}
+		QString summary = Spell::tr( "Wrote %1 (%2 bytes): 48 bones, %3 away from 1.0 — %4." )
+			.arg( QDir::toNativeSeparators( sclpPath ) ).arg( json.size() ).arg( moved ).arg( provenance );
+		if ( !widestBone.isEmpty() )
+			summary += Spell::tr( "\nWidest: %1 at %2." ).arg( widestBone ).arg( double( widest ), 0, 'f', 3 );
+		summary += Spell::tr( "\n\nThe engine finds this by the ARMOR ADDON's model path, not by the "
+			"NIF's — an ARMA pointing at a different mesh will not load it." );
+		riggingSidecarReport( name(), summary );
+		return index;
+	}
+};
+
+REGISTER_SPELL( spRiggingGenerateSCLP )

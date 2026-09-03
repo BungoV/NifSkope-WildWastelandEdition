@@ -1,5 +1,49 @@
 # NifSkope — WW Edition: To Be Implemented
 
+## OPEN DEFECT: "Parent Array Index" means two different things
+
+Found 2026-09-03 while building the .ssf writer, and left alone deliberately
+because fixing it changes files this fork has already written.
+
+`BSGeometrySegmentData` / `BSGeometrySubSegment`'s **Parent Array Index** holds
+the PARENT's row in the shared Per Segment Data array in every vanilla file --
+`0xFFFFFFFF` on a top-level segment, the segment's own row on each of its
+subsegments. `riggingWriteSegmentLayout` writes the entry's OWN row instead
+(`sharedIndex++` straight down the list), and `riggingReadSegmentDefinitions`
+reads it back the same way. The pair is self-consistent, so the subsegment
+editor round-trips its own output -- and reads every VANILLA subsegment's shared
+entry off by a row, taking Bone ID, User Index and Cut Offsets from the parent.
+That is why the first run of the .ssf writer reported 18 subsegments and no
+owners on MaleBody.
+
+The engine does not read the field for this. `BSGeometrySegmentFlagData::ApplyTo`'s
+lambda addresses shared entries as `SegmentStarts[segment] + 1 + ordinal`, and
+the .ssf writer uses that rule, which is why it is correct under either
+convention.
+
+What is owed: decide which convention the fork writes (vanilla's, presumably),
+fix the reader to match, and check what the subsegment editor has been showing
+on vanilla meshes all along. Files this fork has already written will need
+reading under the old rule or rewriting.
+
+## OPEN: outfit sidecars, what is not done yet
+
+Shipped 2026-09-03 (WW_CHANGES). Still open:
+
+  * **The in-game gate.** Neither file has been loaded by the engine from our
+    output. A .ssf whose ids are right but whose base name is wrong looks
+    identical on disk and only shows up as a limb that will not come off.
+  * **.sclp has no external authority.** No shipped outfit carries a body its
+    own .sclp can be re-derived from, so the writer is validated by round trip
+    against our own bone frame. If a way to check one against vanilla appears,
+    take it.
+  * **Authored DISABLED overrides.** Vanilla hides individual subsegments by
+    naming them DISABLED (F_Arm_R's inner shell, the Courser gloves). The NIF
+    does not carry that decision and the writer cannot invent it; a way to mark
+    a subsegment hidden in the segment editor would close the gap.
+  * **The economical base.** Vanilla often makes the dominant bone the base and
+    lists only the exceptions. Ours lists everything. Same map, larger file.
+
 ## CHARTERED: FO4 LOD generation — bungo-scoped 2026-08-31
 
 NifSkope generates Fallout 4's world LOD — base-game parity plus a few
