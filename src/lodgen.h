@@ -74,8 +74,8 @@ struct LodgenObjectOptions
 	QString dataRoot;           //!< Data folder holding meshes\\lod\\... sources
 	bool identity = true;       //!< vertex-colour identity + manifest (CS profile)
 	bool bakeAO = true;         //!< ray-cast per-placement AO into channel B
-	/*! Drop object geometry that is entirely buried under the terrain, which is
-	 *  what vanilla's generator does -- measured on Sanctuary (-20,24): of our
+	/*! Drop object geometry the TERRAIN hides, which is what vanilla's generator
+	 *  does -- measured on Sanctuary (-20,24): of our
 	 *  rock vertices, the ones vanilla does NOT have are 97.7% below ground,
 	 *  median 424 units down. Two rails, both required:
 	 *
@@ -106,7 +106,11 @@ struct LodgenObjectOptions
 	 *  vertices get a colour written.
 	 */
 	int aoSkirtCells = 1;
-	//! World units below the surface before anything is considered buried.
+	/*! World units below the surface before a vertex counts as under it.
+	 *  Only selects CANDIDATES -- a candidate still has to be invisible from
+	 *  every one of nine directions before it goes, so this is no longer the
+	 *  thing standing between the cull and a hole.
+	 */
 	float cullMargin = 128.0f;
 	int lodLevel = -1;          //!< MNAM slot; -1 = pick by dim (4->0, 8->1, 16->2, 32->3)
 	/*! Substitute the nearest filled MNAM slot when the requested one is

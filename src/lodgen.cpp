@@ -1193,9 +1193,19 @@ bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
 	auto terrainFloorAt = [&]( float x, float y ) {
 		const int i0 = int( std::floor( ( x - terrainOx ) / terrainSpacing ) );
 		const int j0 = int( std::floor( ( y - terrainOy ) / terrainSpacing ) );
+		/* The LOWEST sample in a WINDOW, not just the enclosing four.
+		 *
+		 * The reference has to be the terrain as the LOD DRAWS it, and that is a
+		 * decimated mesh -- ~2100 triangles for a whole chunk against this
+		 * field's 33x33 per cell -- so between its vertices it sags below the
+		 * source heightfield and exposes geometry the fine grid says is buried.
+		 * Reading the minimum over a window is a cheap stand-in for that sag: it
+		 * assumes the drawn ground could be as low as anything nearby.
+		 */
+		const int R = 2;
 		float lo = std::numeric_limits<float>::max();
-		for ( int dj = 0; dj <= 1; dj++ ) {
-			for ( int di = 0; di <= 1; di++ ) {
+		for ( int dj = -R; dj <= 1 + R; dj++ ) {
+			for ( int di = -R; di <= 1 + R; di++ ) {
 				const int i = qBound( 0, i0 + di, terrainN - 1 );
 				const int j = qBound( 0, j0 + dj, terrainN - 1 );
 				lo = qMin( lo, terrainHgt[size_t( j ) * size_t( terrainN ) + size_t( i )] );
@@ -1203,6 +1213,63 @@ bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
 		}
 		return lo;
 	};
+	/*! Does the TERRAIN alone block this ray?
+	 *
+	 *  The buried cull asks whether the ground hides a triangle, not how deep it
+	 *  is. Depth was the first rule and it removed geometry that was plainly
+	 *  visible: a boulder in a shallow dip has vertices far below the
+	 *  surrounding surface and is still in full view. Only the terrain is
+	 *  consulted -- objects are ignored on purpose, so an object hidden purely
+	 *  behind another object is KEPT. That is the conservative direction, and
+	 *  the cheap one: it needs no assembled scene, so the test can run at
+	 *  placement time where the never-disappear rail lives.
+	 */
+	auto terrainBlocks = [&]( const Vector3 & o, const Vector3 & d, float maxT ) {
+		const float step = qMax( terrainSpacing * 0.5f, 1.0f );
+		for ( float t = step; t < maxT; t += step ) {
+			const float x = o[0] + d[0] * t, y = o[1] + d[1] * t;
+			if ( x < terrainOx || y < terrainOy
+				|| x > terrainOx + float( terrainCells ) * 4096.0f * invDim
+				|| y > terrainOy + float( terrainCells ) * 4096.0f * invDim )
+				return false;             // left the known ground: assume open sky
+			if ( o[2] + d[2] * t < terrainFloorAt( x, y ) )
+				return true;
+		}
+		return false;
+	};
+
+	/*! Is every escape route from this point blocked by ground?
+	 *
+	 *  Nine directions: straight up plus a ring at 45 and 20 degrees. A single
+	 *  unblocked direction keeps the triangle, so the test errs towards keeping.
+	 */
+	auto terrainHides = [&]( const Vector3 & p ) {
+		/* Up, 45 degrees, 20 degrees AND near-horizontal.
+		 *
+		 * The horizontal ring is the one that matters and the one an
+		 * up-facing-only test was missing: LOD is looked at from ground level
+		 * across a valley, not from above. Without these, geometry that a hill
+		 * hides from a bird is culled and then plainly visible to a player
+		 * standing on the far side -- measured at 166,579 pixels of hole from a
+		 * low camera against 11,001 from a high one.
+		 */
+		static const float dirs[13][3] = {
+			{ 0.0f, 0.0f, 1.0f },
+			{ 0.7f, 0.0f, 0.7f }, { -0.7f, 0.0f, 0.7f },
+			{ 0.0f, 0.7f, 0.7f }, { 0.0f, -0.7f, 0.7f },
+			{ 0.94f, 0.0f, 0.34f }, { -0.94f, 0.0f, 0.34f },
+			{ 0.0f, 0.94f, 0.34f }, { 0.0f, -0.94f, 0.34f },
+			{ 0.996f, 0.0f, 0.087f }, { -0.996f, 0.0f, 0.087f },
+			{ 0.0f, 0.996f, 0.087f }, { 0.0f, -0.996f, 0.087f } };
+		const float reach = 4096.0f * invDim;      // one cell of ground to clear
+		for ( const auto & dv : dirs ) {
+			const Vector3 d( dv[0], dv[1], dv[2] );
+			if ( !terrainBlocks( p, d, reach ) )
+				return false;
+		}
+		return true;
+	};
+
 	int culledTris = 0, culledPlacements = 0, rescuedPlacements = 0;
 	int aoSkirtTris = 0, aoSkirtPlacements = 0;
 
@@ -1414,14 +1481,26 @@ bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
 			bool culled = false;
 			if ( opts.cullBuried && !s.tris.isEmpty() ) {
 				const float margin = opts.cullMargin * invDim;
+				QVector<Vector3> world( s.pos.size() );
 				QVector<quint8> buried( s.pos.size(), 0 );
 				for ( int v = 0; v < s.pos.size(); v++ ) {
-					const Vector3 w = xf * s.pos[v];
-					buried[v] = ( w[2] < terrainFloorAt( w[0], w[1] ) - margin ) ? 1 : 0;
+					world[v] = xf * s.pos[v];
+					buried[v] = ( world[v][2] < terrainFloorAt( world[v][0], world[v][1] ) - margin )
+						? 1 : 0;
 				}
+				/* Two gates, and the second is the one that matters. Being under
+				 * the surface only makes a triangle a CANDIDATE; it goes only if
+				 * the ground actually hides it from every direction. Depth alone
+				 * removed geometry in shallow dips that was in full view. */
 				for ( const Triangle & t : s.tris ) {
-					if ( !( buried[t.v1()] && buried[t.v2()] && buried[t.v3()] ) )
-						keptTris.append( t );
+					const bool under = buried[t.v1()] && buried[t.v2()] && buried[t.v3()];
+					if ( under ) {
+						const Vector3 mid = ( world[t.v1()] + world[t.v2()]
+							+ world[t.v3()] ) / 3.0f;
+						if ( terrainHides( mid ) )
+							continue;             // invisible: drop it
+					}
+					keptTris.append( t );
 				}
 				if ( keptTris.isEmpty() ) {
 					// Everything is under the ground. Keep the object whole:
