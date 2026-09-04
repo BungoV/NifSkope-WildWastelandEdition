@@ -42,6 +42,19 @@
 #      BOM
 #  10. a generated .sclp is byte-identical to a shipped one once the numbers are
 #      blanked -- same key order, same bone order, same indent, same punctuation
+#  11. `segments` resolves each SUBSEGMENT's own shared entry on a vanilla mesh:
+#      MaleBody's segment 2 is RArm_UpperArm x3 then RArm_ForeArm1
+#  12. CONTROL for 11: the top-level segments have no bone, so 11 is not just
+#      "every row has a name". Together they pin the defect that prompted them --
+#      reading "Parent Array Index" as the entry's own shared row instead of its
+#      parent's returned the PARENT's entry for every subsegment, which is
+#      exactly bone "none" on all four of those rows.
+#
+# NOT COVERED: the matching writer change. riggingWriteSegmentLayout now emits
+# vanilla's convention (0xFFFFFFFF on a segment, the parent's row on a
+# subsegment), but every path that calls it lives in the Rigging Manager dock,
+# which a headless run cannot drive. It was checked by hand against MaleBody,
+# OutfitM and Deathclaw. The reader no longer depends on that field either way.
 #
 # WHAT IT DOES NOT MEASURE. Whether the game likes the files. No shipped outfit
 # carries a body its .sclp can be re-derived from -- the "fitted" shapes in them
@@ -319,6 +332,18 @@ B3=$(awk '/^RESULT/{print $4}' "$W/bytes.txt")
 check "$([ "${B1:-0}" = "1" ] && [ "${B2:-0}" = "1" ] && echo 1 || echo 0)" \
 	"9. line endings, trailing newline and BOM match vanilla in both formats"
 check "${B3:-0}" "10. a generated .sclp is byte-identical to a shipped one, numbers aside"
+
+echo "== segment reader, against a vanilla mesh =="
+"$NS" -no-gui segments "$(winpath "$W/sclp/reference.nif")" > "$W/segments.txt" 2>&1
+sed -n '/segment 2 /,/segment 3 /p' "$W/segments.txt" | sed 's/^/     /'
+SUBS=$(sed -n '/segment 2 /,/segment 3 /p' "$W/segments.txt" | grep -c "sub [0-3] ")
+OWNED=$(sed -n '/segment 2 /,/segment 3 /p' "$W/segments.txt" \
+	| grep -cE "sub [0-3] .*bone (RArm_UpperArm|RArm_ForeArm1)")
+UNOWNED=$(grep -cE "^  segment [0-9]+ .*bone none" "$W/segments.txt")
+check "$([ "${SUBS:-0}" = "4" ] && [ "${OWNED:-0}" = "4" ] && echo 1 || echo 0)" \
+	"11. all $SUBS subsegments of MaleBody segment 2 resolve to their own bone ($OWNED named)"
+check "$([ "${UNOWNED:-0}" -ge 7 ] && echo 1 || echo 0)" \
+	"12. CONTROL: the $UNOWNED top-level segments carry no bone, as vanilla writes them"
 
 echo
 echo "$pass passed, $fail failed"

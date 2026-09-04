@@ -1,5 +1,55 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-09-04 — Segment reader: subsegments were reading their parent's data
+
+`riggingReadSegmentRanges` and `riggingReadSegmentDefinitions` resolved a
+segment entry's shared data through its **Parent Array Index**, and that field
+does not mean what the fork assumed.
+
+**In every vanilla file it is the PARENT's row** in Per Segment Data —
+`0xFFFFFFFF` on a top-level segment, and `SegmentStarts[parent]` on each of its
+subsegments (checked on MaleBody, OutfitM and Deathclaw). `riggingWriteSegmentLayout`
+wrote each entry's OWN row instead, `sharedIndex++` straight down the list, and
+both readers read it back the same way. Self-consistent, so the subsegment
+editor round-tripped its own output — and on a vanilla mesh it took every
+subsegment's **Bone ID, User Index and Cut Offsets from the parent segment**,
+which carries no bone at all. Every subsegment in Fallout 4's own body meshes
+read as unowned.
+
+Found on 2026-09-03 while building the .ssf writer, which reported 18
+subsegments and no owners on MaleBody and sidestepped the field entirely.
+
+**The fix is to stop reading that field for this.** Both readers now resolve
+shared entries the way the ENGINE does — `SegmentStarts[segment]` for the
+segment, `+ 1 + ordinal` for its subsegments, which is
+`BSGeometrySegmentFlagData::ApplyTo`'s lambda at 1.10.155 `@0x1b9eb50`. That is
+convention-independent, so files this fork already wrote read correctly too and
+no migration is owed. The writer now emits vanilla's convention as well.
+
+**New CLI probe, because the defect was invisible to every harness.** Everything
+else that reads segments lives in the Rigging Manager dock, which a headless run
+cannot drive, so there was no way to see the reader's output at all:
+
+    nifskope-cli segments <file> [-b N]
+
+prints each shape's segments and subsegments, their triangle ranges, the owning
+bone (hash resolved through the same lookup the .ssf writer uses) and the .ssf
+id that addresses each subsegment. On vanilla MaleBody it now reads
+
+      segment 2  tris 0..434  UI 2  bone none
+          sub 0  tris 0..132    UI 1  bone RArm_UpperArm  id 0x020000
+          sub 1  tris 133..237  UI 2  bone RArm_UpperArm  id 0x020100
+          sub 2  tris 238..354  UI 3  bone RArm_UpperArm  id 0x020200
+          sub 3  tris 355..434  UI 4  bone RArm_ForeArm1  id 0x020300
+
+where before the fix all four said `bone none`. `outfit_sidecars.sh` gains
+checks 11 and 12 on exactly that, 12 of 12.
+
+**Not covered by a harness: the writer change.** Every path that calls
+`riggingWriteSegmentLayout` is in the dock. It was checked by hand against the
+three vanilla families above, and the reader no longer depends on the field
+either way.
+
 ## 2026-09-03 — Outfit sidecars: NifSkope writes .ssf and .sclp
 
 Two JSON files ship beside Fallout 4's outfit meshes, and nothing in this fork

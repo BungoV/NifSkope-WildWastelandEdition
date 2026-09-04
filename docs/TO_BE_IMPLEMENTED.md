@@ -1,6 +1,6 @@
 # NifSkope — WW Edition: To Be Implemented
 
-## OPEN DEFECT: "Parent Array Index" means two different things
+## ~~OPEN DEFECT: "Parent Array Index" means two different things~~ — FIXED 2026-09-04
 
 Found 2026-09-03 while building the .ssf writer, and left alone deliberately
 because fixing it changes files this fork has already written.
@@ -25,6 +25,15 @@ What is owed: decide which convention the fork writes (vanilla's, presumably),
 fix the reader to match, and check what the subsegment editor has been showing
 on vanilla meshes all along. Files this fork has already written will need
 reading under the old rule or rewriting.
+
+**FIXED 2026-09-04** (WW_CHANGES): both readers moved onto Segment Starts, which
+is the engine's own rule and independent of this field, so files already written
+under the old convention read correctly and no migration is owed; the writer now
+emits vanilla's convention too. `nifskope-cli segments` is the new probe --
+there was previously no headless view of that reader at all -- and
+outfit_sidecars.sh checks 11 and 12 fail on the old behaviour. The writer half
+has no headless path and was checked by hand.
+
 
 ## OPEN: outfit sidecars, what is not done yet
 

@@ -421,6 +421,32 @@ struct RigSegmentDefinition
 	QVector<RigSegmentSharedEntry> children;
 };
 
+/*! Flat Per-Segment-Data row of each segment's OWN shared entry.
+ *
+ *  This is Segment Starts, and it is the only sound way to reach a shared entry
+ *  because it is what the ENGINE uses: BSGeometrySegmentFlagData::ApplyTo's
+ *  lambda (1.10.155 @0x1b9eb50) resolves a segment id as
+ *  `SegmentStarts[segment] + 1 + subsegmentOrdinal`.
+ *
+ *  "Parent Array Index" is NOT that row and must not be used for it. In every
+ *  vanilla file it is the PARENT's row -- 0xFFFFFFFF on a top-level segment, and
+ *  SegmentStarts[parent] on each of its subsegments (checked on MaleBody,
+ *  OutfitM and Deathclaw). This fork used to write, and read, each entry's own
+ *  row instead, which round-tripped its own output and read every vanilla
+ *  subsegment's Bone ID, User Index and Cut Offsets off the parent segment.
+ */
+static QVector<int> riggingSegmentStarts( const NifModel * nif, const QModelIndex & shape )
+{
+	QVector<int> starts;
+	QModelIndex shared = nif->getIndex( shape, "Segment Data" );
+	QModelIndex index = nif->getIndex( shared, "Segment Starts" );
+	if ( !index.isValid() || !nif->isArray( index ) )
+		return starts;
+	for ( int i = 0; i < nif->rowCount( index ); i++ )
+		starts << int( nif->get<quint32>( nif->getIndex( index, i ) ) );
+	return starts;
+}
+
 //! Read FO4 BSSubIndexTriShape segment ranges. Start Index is an index-buffer
 //! offset, hence the division by three used by NifSkope's existing renderer.
 static QVector<RigSegmentRange> riggingReadSegmentRanges( const NifModel * nif,
@@ -433,10 +459,11 @@ static QVector<RigSegmentRange> riggingReadSegmentRanges( const NifModel * nif,
 
 	QModelIndex shared = nif->getIndex( shape, "Segment Data" );
 	QModelIndex perSegment = nif->getIndex( shared, "Per Segment Data" );
-	auto addSharedData = [&]( RigSegmentRange & range ) {
+	const QVector<int> starts = riggingSegmentStarts( nif, shape );
+	auto addSharedData = [&]( RigSegmentRange & range, int row ) {
 		if ( !perSegment.isValid() || !nif->isArray( perSegment )
-			|| range.parentArrayIndex >= quint32( nif->rowCount( perSegment ) ) ) return;
-		QModelIndex data = nif->getIndex( perSegment, int( range.parentArrayIndex ) );
+			|| row < 0 || row >= nif->rowCount( perSegment ) ) return;
+		QModelIndex data = nif->getIndex( perSegment, row );
 		range.userIndex = nif->get<quint32>( data, "User Index" );
 		range.boneId = nif->get<quint32>( data, "Bone ID" );
 		range.hasSharedData = true;
@@ -449,7 +476,8 @@ static QVector<RigSegmentRange> riggingReadSegmentRanges( const NifModel * nif,
 		parent.startTriangle = int( nif->get<quint32>( segment, "Start Index" ) / 3U );
 		parent.triangleCount = int( nif->get<quint32>( segment, "Num Primitives" ) );
 		parent.parentArrayIndex = nif->get<quint32>( segment, "Parent Array Index" );
-		addSharedData( parent );
+		const int base = segmentIndex < starts.size() ? starts.at( segmentIndex ) : -1;
+		addSharedData( parent, base );
 		result.append( parent );
 
 		QModelIndex subsegments = nif->getIndex( segment, "Sub Segment" );
@@ -462,7 +490,7 @@ static QVector<RigSegmentRange> riggingReadSegmentRanges( const NifModel * nif,
 			child.startTriangle = int( nif->get<quint32>( subsegment, "Start Index" ) / 3U );
 			child.triangleCount = int( nif->get<quint32>( subsegment, "Num Primitives" ) );
 			child.parentArrayIndex = nif->get<quint32>( subsegment, "Parent Array Index" );
-			addSharedData( child );
+			addSharedData( child, base < 0 ? -1 : base + 1 + subIndex );
 			result.append( child );
 		}
 	}
@@ -477,10 +505,11 @@ static QVector<RigSegmentDefinition> riggingReadSegmentDefinitions( const NifMod
 	definitions.resize( qMax( count, 0 ) );
 	QModelIndex shared = nif->getIndex( shape, "Segment Data" );
 	QModelIndex perData = nif->getIndex( shared, "Per Segment Data" );
-	auto readEntry = [&]( quint32 arrayIndex ) {
+	const QVector<int> starts = riggingSegmentStarts( nif, shape );
+	auto readEntry = [&]( int row ) {
 		RigSegmentSharedEntry entry;
-		if ( !perData.isValid() || arrayIndex >= quint32( nif->rowCount( perData ) ) ) return entry;
-		QModelIndex data = nif->getIndex( perData, int( arrayIndex ) );
+		if ( !perData.isValid() || row < 0 || row >= nif->rowCount( perData ) ) return entry;
+		QModelIndex data = nif->getIndex( perData, row );
 		entry.userIndex = nif->get<quint32>( data, "User Index" );
 		entry.boneId = nif->get<quint32>( data, "Bone ID" );
 		QModelIndex cuts = nif->getIndex( data, "Cut Offsets" );
@@ -492,11 +521,12 @@ static QVector<RigSegmentDefinition> riggingReadSegmentDefinitions( const NifMod
 	QModelIndex segments = nif->getIndex( shape, "Segment" );
 	for ( int segment = 0; segment < definitions.size() && segment < nif->rowCount( segments ); segment++ ) {
 		QModelIndex row = nif->getIndex( segments, segment );
-		definitions[segment].parent = readEntry( nif->get<quint32>( row, "Parent Array Index" ) );
+		const int base = segment < starts.size() ? starts.at( segment ) : -1;
+		definitions[segment].parent = readEntry( base );
 		QModelIndex children = nif->getIndex( row, "Sub Segment" );
 		for ( int child = 0; child < nif->rowCount( children ); child++ )
-			definitions[segment].children.append( readEntry(
-				nif->get<quint32>( nif->getIndex( children, child ), "Parent Array Index" ) ) );
+			definitions[segment].children.append(
+				readEntry( base < 0 ? -1 : base + 1 + child ) );
 	}
 	return definitions;
 }
@@ -565,12 +595,19 @@ static bool riggingWriteSegmentLayout( NifModel * nif, const QModelIndex & shape
 	nif->set<quint32>( shape, "Num Primitives", quint32( ordered.size() ) );
 	nif->updateArraySize( shape, "Segment" );
 	QModelIndex segments = nif->getIndex( shape, "Segment" );
+	/* Parent Array Index is the PARENT's shared row, which is what every vanilla
+	 * file carries: 0xFFFFFFFF on a top-level segment because it has no parent,
+	 * and the segment's own row on each of its subsegments. This used to be the
+	 * entry's OWN row on both, self-consistent with a reader that has since been
+	 * moved onto Segment Starts.
+	 */
 	quint32 sharedIndex = 0;
 	for ( int segment = 0; segment < definitions.size(); segment++ ) {
 		QModelIndex row = nif->getIndex( segments, segment );
+		const quint32 segmentRow = sharedIndex++;
 		nif->set<quint32>( row, "Start Index", quint32( ranges.at( segment ).start * 3 ) );
 		nif->set<quint32>( row, "Num Primitives", quint32( ranges.at( segment ).count ) );
-		nif->set<quint32>( row, "Parent Array Index", sharedIndex++ );
+		nif->set<quint32>( row, "Parent Array Index", std::numeric_limits<quint32>::max() );
 		nif->set<quint32>( row, "Num Sub Segments", quint32( definitions.at( segment ).children.size() ) );
 		nif->updateArraySize( row, "Sub Segment" );
 		QModelIndex children = nif->getIndex( row, "Sub Segment" );
@@ -578,7 +615,8 @@ static bool riggingWriteSegmentLayout( NifModel * nif, const QModelIndex & shape
 			QModelIndex sub = nif->getIndex( children, child );
 			nif->set<quint32>( sub, "Start Index", quint32( ranges.at( segment ).children.at( child ).first * 3 ) );
 			nif->set<quint32>( sub, "Num Primitives", quint32( ranges.at( segment ).children.at( child ).second ) );
-			nif->set<quint32>( sub, "Parent Array Index", sharedIndex++ );
+			nif->set<quint32>( sub, "Parent Array Index", segmentRow );
+			sharedIndex++;
 		}
 	}
 	nif->setArray<Triangle>( shape, "Triangles", ordered );
@@ -7856,6 +7894,47 @@ static QHash<quint32, QString> riggingBoneNamesByHash( const NifModel * nif )
 			table.insert( riggingBoneNameHash( name ), name );
 	}
 	return table;
+}
+
+/*! One shape's segment table with its shared data resolved, as text.
+ *
+ *  This is the CLI's `segments` probe, and it exists because it is the only
+ *  external view of riggingReadSegmentRanges there is: everything else that
+ *  reads segments lives in the Rigging Manager dock, which a headless run
+ *  cannot drive, so a reader defect there is invisible to every harness. The
+ *  one that prompted it read each vanilla subsegment's Bone ID off its parent.
+ */
+QString tlRiggingSegmentReport( const NifModel * nif, const QModelIndex & shape )
+{
+	const QHash<quint32, QString> boneNames = riggingBoneNamesByHash( nif );
+	const QVector<RigSegmentRange> ranges = riggingReadSegmentRanges( nif, shape );
+	QString text;
+	for ( const RigSegmentRange & range : ranges ) {
+		QString owner = QStringLiteral( "-" );
+		if ( range.hasSharedData && range.boneId != std::numeric_limits<quint32>::max() ) {
+			owner = boneNames.value( range.boneId,
+				QStringLiteral( "#%1" ).arg( range.boneId, 8, 16, QLatin1Char( '0' ) ) );
+		} else if ( range.hasSharedData ) {
+			owner = QStringLiteral( "none" );
+		}
+		if ( range.subsegment < 0 ) {
+			text += QStringLiteral( "  segment %1  tris %2..%3  UI %4  bone %5\n" )
+				.arg( range.segment ).arg( range.startTriangle )
+				.arg( range.startTriangle + range.triangleCount - 1 )
+				.arg( range.hasSharedData ? QString::number( range.userIndex ) : QStringLiteral( "-" ) )
+				.arg( owner );
+		} else {
+			// The address the .ssf would use for this subsegment.
+			const quint32 id = ( quint32( range.segment ) << 16 )
+				| ( quint32( range.subsegment ) << 8 );
+			text += QStringLiteral( "      sub %1  tris %2..%3  UI %4  bone %5  id 0x%6\n" )
+				.arg( range.subsegment ).arg( range.startTriangle )
+				.arg( range.startTriangle + range.triangleCount - 1 )
+				.arg( range.hasSharedData ? QString::number( range.userIndex ) : QStringLiteral( "-" ) )
+				.arg( owner ).arg( id, 6, 16, QLatin1Char( '0' ) );
+		}
+	}
+	return text;
 }
 
 /*! The Data-relative form of an absolute path, or empty when there is nothing

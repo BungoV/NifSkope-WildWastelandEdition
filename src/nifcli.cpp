@@ -64,6 +64,7 @@ extern int tlCollWriteConstraint( NifModel * nif, const HknpConstraint & c,
 extern bool tlCollReadConstraint( const NifModel * nif, const QModelIndex & index,
 								HknpConstraint & c, int * childBody, int * parentBody );
 extern QModelIndex tlCollDescriptor( const NifModel * nif, const QModelIndex & iCon, bool ragdoll );
+extern QString tlRiggingSegmentReport( const NifModel * nif, const QModelIndex & shape );
 
 namespace
 {
@@ -2945,6 +2946,38 @@ int cmdWorld( const QString & file, int block, const QString & typeFilter )
 	return 0;
 }
 
+/*! Every shape's segment/subsegment table, with the shared data resolved.
+ *
+ *  Bone IDs are hashes; the names come from the same lookup the .ssf writer
+ *  uses, so an unresolved one prints as #hash rather than being guessed at.
+ */
+int cmdSegments( const QString & file, int block )
+{
+	NifModel nif;
+	if ( !loadNif( nif, file ) )
+		return 1;
+
+	int shapes = 0;
+	for ( int b = 0; b < nif.getBlockCount(); b++ ) {
+		if ( block >= 0 && b != block )
+			continue;
+		QModelIndex shape = nif.getBlockIndex( b );
+		if ( !nif.isNiBlock( shape, "BSSubIndexTriShape" ) )
+			continue;
+		const QString report = tlRiggingSegmentReport( &nif, shape );
+		if ( report.isEmpty() )
+			continue;
+		shapes++;
+		out() << blockLabel( &nif, b ) << Qt::endl;
+		out() << report;
+	}
+	if ( !shapes ) {
+		err() << "no BSSubIndexTriShape with segments" << Qt::endl;
+		return 1;
+	}
+	return 0;
+}
+
 int cmdList( const QString & file, const QString & typeFilter )
 {
 	NifModel nif;
@@ -3641,6 +3674,10 @@ int usage()
 		  << "  world <file> [-b N] [-t <type>]         each NiAVObject's WORLD transform,\n"
 		  << "                                          for diffing two files by name\n"
 		  << "  list <file> [-t <type>]                 block list, optionally filtered\n"
+		  << "  segments <file> [-b N]                  FO4 dismemberment table: every\n"
+		  << "                                          segment and subsegment, its\n"
+		  << "                                          triangles, its owning bone and\n"
+		  << "                                          the .ssf id that addresses it\n"
 		  << "  dump <file> -b N [-f PATH] [-d DEPTH] [-n MAX] [--all]\n"
 		  << "                                          print a block's fields\n"
 		  << "                                          (--all also shows rows this file's\n"
@@ -3999,6 +4036,8 @@ int nifskopeCliMain( const QStringList & args )
 		rc = cmdVerts( file );
 	else if ( cmd == QLatin1String( "list" ) )
 		rc = cmdList( file, type );
+	else if ( cmd == QLatin1String( "segments" ) )
+		rc = cmdSegments( file, block );
 	else if ( cmd == QLatin1String( "world" ) )
 		rc = cmdWorld( file, block, type );
 	else if ( cmd == QLatin1String( "dump" ) )
