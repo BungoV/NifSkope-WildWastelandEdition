@@ -46,10 +46,12 @@ Shipped 2026-09-03 (WW_CHANGES). Still open:
     own .sclp can be re-derived from, so the writer is validated by round trip
     against our own bone frame. If a way to check one against vanilla appears,
     take it.
-  * **Authored DISABLED overrides.** Vanilla hides individual subsegments by
-    naming them DISABLED (F_Arm_R's inner shell, the Courser gloves). The NIF
-    does not carry that decision and the writer cannot invent it; a way to mark
-    a subsegment hidden in the segment editor would close the gap.
+  * ~~**Authored DISABLED overrides.**~~ CLOSED 2026-09-04: the writer reads the
+    .ssf already beside the mesh and carries its DISABLED/Generic assignments
+    forward, so regenerating preserves them (461 of the corpus's 469; the 8 it
+    drops name subsegments their mesh no longer has, and are reported). A way to
+    author a NEW hide without hand-editing the JSON is still open, and would
+    belong in the segment editor.
   * **The economical base.** Vanilla often makes the dominant bone the base and
     lists only the exceptions. Ours lists everything. Same map, larger file.
 

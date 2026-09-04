@@ -10,6 +10,10 @@
 #include "model/nifmodel.h"
 #include "libfo76utils/src/common.hpp"
 
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+
 #include <cstdio>
 
 #include <QApplication>
@@ -7989,8 +7993,57 @@ struct RigSsfShape
 	QString baseBone;
 	QMap<QString, QVector<quint32>> deltas;	// bone name -> segment ids, both sorted
 	int subsegments = 0;
+	int preserved = 0;						// authored assignments carried forward
+	int dropped = 0;						// authored assignments whose subsegment is gone
 	QVector<quint32> unresolved;			// bone hashes no block in the file names
 };
+
+/*! Assignments in an existing .ssf that the mesh cannot regenerate, by shape.
+ *
+ *  A subsegment hidden with "DISABLED" is a DECISION, not a fact about the
+ *  mesh: vanilla uses it for an arm plate's inner shell and for the Courser
+ *  gloves, and the NIF's own Bone IDs still name a real bone underneath. So
+ *  regenerating from the mesh alone would silently throw that authoring away,
+ *  which is the one thing a generator must not do to a file someone edited.
+ *  These are read back and reapplied. "Generic" comes with it, being the other
+ *  name that says something about intent rather than about geometry.
+ *
+ *  Keys are lowercased: LoadSSF matches shapes by BSFixedString identity, and
+ *  that pool is case-insensitive, which is why vanilla's fatiguesm.ssf keys
+ *  "BaseMaleBody_fitted:0" against a shape the NIF calls "BaseMaleBody_Fitted:0".
+ */
+static QHash<QString, QHash<quint32, QString>> riggingReadAuthoredSsf( const QString & path )
+{
+	QHash<QString, QHash<quint32, QString>> authored;
+	QFile file( path );
+	if ( !file.open( QIODevice::ReadOnly ) )
+		return authored;
+	QJsonParseError error;
+	const QJsonDocument doc = QJsonDocument::fromJson( file.readAll(), &error );
+	file.close();
+	if ( error.error != QJsonParseError::NoError || !doc.isObject() )
+		return authored;					// unreadable, or the null files vanilla ships
+	const QJsonObject root = doc.object();
+	for ( auto shape = root.constBegin(); shape != root.constEnd(); ++shape ) {
+		if ( !shape.value().isObject() )
+			continue;
+		QHash<quint32, QString> ids;
+		for ( const QJsonValue & entry : shape.value().toObject().value(
+				QStringLiteral( "DeltaBones" ) ).toArray() ) {
+			const QJsonObject delta = entry.toObject();
+			const QString bone = delta.value( QStringLiteral( "BoneName" ) ).toString();
+			if ( bone.compare( QLatin1String( "DISABLED" ), Qt::CaseInsensitive ) != 0
+				&& bone.compare( QLatin1String( "Generic" ), Qt::CaseInsensitive ) != 0 )
+				continue;
+			for ( const QJsonValue & id : delta.value(
+					QStringLiteral( "BoneDeltaList" ) ).toArray() )
+				ids.insert( quint32( id.toDouble() ), bone );
+		}
+		if ( !ids.isEmpty() )
+			authored.insert( shape.key().toLower(), ids );
+	}
+	return authored;
+}
 
 /*! Read one shape's segment ownership into the .ssf's own terms.
  *
@@ -8001,10 +8054,12 @@ struct RigSsfShape
  *  judgement in it.
  */
 static RigSsfShape riggingReadSsfShape( const NifModel * nif, const QModelIndex & shape,
-	const QHash<quint32, QString> & boneNames )
+	const QHash<quint32, QString> & boneNames,
+	const QHash<QString, QHash<quint32, QString>> & authored )
 {
 	RigSsfShape out;
 	out.name = nif->get<QString>( shape, "Name" );
+	const QHash<quint32, QString> kept = authored.value( out.name.toLower() );
 
 	/* Resolved through SEGMENT STARTS, which is the engine's own rule
 	 * (`SegmentStarts[segment] + 1 + ordinal`), and deliberately not through
@@ -8032,6 +8087,17 @@ static RigSsfShape riggingReadSsfShape( const NifModel * nif, const QModelIndex 
 			if ( row < 0 || row >= nif->rowCount( perSegment ) )
 				continue;
 			const quint32 id = ( quint32( segment ) << 16 ) | ( quint32( sub ) << 8 );
+
+			// An authored decision outranks the mesh, because the mesh cannot
+			// hold it. It applies only to ids this mesh still HAS, so a
+			// subsegment that has since been deleted takes its override with it.
+			auto override_ = kept.constFind( id );
+			if ( override_ != kept.constEnd() ) {
+				out.deltas[*override_] << id;
+				out.preserved++;
+				continue;
+			}
+
 			const quint32 boneId = nif->get<quint32>( nif->getIndex( perSegment, row ), "Bone ID" );
 			if ( boneId == std::numeric_limits<quint32>::max() )
 				continue;					// no owner: the base already says DISABLED
@@ -8043,6 +8109,13 @@ static RigSsfShape riggingReadSsfShape( const NifModel * nif, const QModelIndex 
 			out.deltas[*named] << id;
 		}
 	}
+
+	/* An authored id the mesh no longer has is unreachable anyway -- the
+	 * engine's own lambda bails when the segment holds fewer subsegments than
+	 * the id names -- but it is still someone's decision going missing, so it
+	 * is counted and reported rather than dropped in silence.
+	 */
+	out.dropped = kept.size() - out.preserved;
 
 	// "DISABLED" is what the 634 vanilla shapes with dismemberment data use, and
 	// it is inert for anything this writer did not list. A shape with no
@@ -8134,6 +8207,9 @@ public:
 			return index;
 		}
 
+		const QString ssfPath = QDir( nifInfo.absolutePath() )
+			.filePath( nifInfo.completeBaseName() + QStringLiteral( ".ssf" ) );
+		const QHash<QString, QHash<quint32, QString>> authored = riggingReadAuthoredSsf( ssfPath );
 		const QHash<quint32, QString> boneNames = riggingBoneNamesByHash( nif );
 		QVector<RigSsfShape> shapes;
 		QVector<quint32> unresolved;
@@ -8142,7 +8218,7 @@ public:
 			if ( !nif->isNiBlock( shape, "BSSubIndexTriShape" )
 				|| !nif->getIndex( shape, "Segment Data" ).isValid() )
 				continue;
-			RigSsfShape entry = riggingReadSsfShape( nif, shape, boneNames );
+			RigSsfShape entry = riggingReadSsfShape( nif, shape, boneNames, authored );
 			if ( entry.name.isEmpty() ) {
 				riggingSidecarReport( name(), Spell::tr( "Block %1 has no name. LoadSSF matches "
 					"shapes to the file's keys BY NAME, so an unnamed shape can never be found." )
@@ -8155,8 +8231,6 @@ public:
 		if ( shapes.isEmpty() )
 			return index;
 
-		const QString ssfPath = QDir( nifInfo.absolutePath() )
-			.filePath( nifInfo.completeBaseName() + QStringLiteral( ".ssf" ) );
 		QFile file( ssfPath );
 		if ( !file.open( QIODevice::WriteOnly | QIODevice::Truncate ) ) {
 			riggingSidecarReport( name(), Spell::tr( "Could not write '%1'." ).arg( ssfPath ), true );
@@ -8181,16 +8255,27 @@ public:
 		}
 
 		QStringList report;
-		int deltas = 0, subsegments = 0;
+		int deltas = 0, subsegments = 0, preserved = 0, dropped = 0;
 		for ( const RigSsfShape & s : shapes ) {
 			deltas += s.deltas.size();
 			subsegments += s.subsegments;
+			preserved += s.preserved;
+			dropped += s.dropped;
 			report << Spell::tr( "  %1 — %2 subsegments, %3 bones" )
 				.arg( s.name ).arg( s.subsegments ).arg( s.deltas.size() );
 		}
 		QString summary = Spell::tr( "Wrote %1 (%2 bytes): %3 shapes, %4 subsegments, %5 bone groups.\n%6" )
 			.arg( QDir::toNativeSeparators( ssfPath ) ).arg( json.size() )
 			.arg( shapes.size() ).arg( subsegments ).arg( deltas ).arg( report.join( QStringLiteral( "\n" ) ) );
+		if ( preserved )
+			summary += Spell::tr( "\n\nCarried forward %1 authored assignment(s) from the .ssf "
+				"that was already there \u2014 a subsegment hidden with DISABLED is a decision the "
+				"mesh does not carry, so regenerating does not throw it away." ).arg( preserved );
+		if ( dropped )
+			summary += Spell::tr( "\n\n%1 authored assignment(s) named a subsegment this mesh no "
+				"longer has and were dropped. They addressed nothing the engine could reach "
+				"either, but if that is a surprise, the segmentation changed under the old file." )
+				.arg( dropped );
 		if ( relative.isEmpty() )
 			summary += Spell::tr( "\n\nThe NIF is not under a Data folder, so 'SSF File' was left alone: "
 				"the engine needs a Data-relative path and this one cannot be anchored." );

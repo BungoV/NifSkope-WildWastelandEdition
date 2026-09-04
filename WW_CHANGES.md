@@ -1,5 +1,44 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-09-04b — .ssf: regenerating no longer throws away what was authored
+
+A subsegment hidden with `DISABLED` is a DECISION, not a fact about the mesh.
+Vanilla uses it for the inner shell of an arm plate (`F_Arm_R`) and for the
+Courser gloves, and the NIF's own Bone IDs still name a real bone underneath —
+so a writer that reads only the mesh silently discards it, which is the one
+thing a generator must not do to a file someone has edited.
+
+The .ssf writer now reads the file already sitting beside the mesh and carries
+its `DISABLED` and `Generic` assignments forward. `Generic` comes with it,
+being the other name that says something about intent rather than geometry.
+Shape keys are matched case-insensitively, for the same reason the comparison
+is: BSFixedString identity.
+
+An authored id whose subsegment the mesh no longer has is **dropped and
+reported**. It addressed nothing the engine could reach either — `ApplyTo`'s
+lambda bails when the segment holds fewer subsegments than the id names — but
+it is still someone's decision going missing, so it is counted out loud rather
+than in silence.
+
+**Measured over the whole corpus, regenerating IN PLACE**, which is the real
+workflow — copy mesh and .ssf into a tree, run the writer, compare:
+
+| | before | after |
+|---|---|---|
+| shipped assignments reproduced | 2465 of 2554 | 2465 of 2554 |
+| authored assignments preserved | 0 of 469 | **461 of 469** |
+| total | 2465 of 3023 (81.5%) | **2926 of 2934 (99.7%)** |
+| files reproducing everything | 455 of 489 | 455 of 489 |
+
+The 8 authored assignments not carried are all ids naming a subsegment their
+mesh does not have — five of them in `Raider02BaseArmor.ssf`, which hides
+`0x040000`, `0x040200` and `0x040300` on a shape whose segment 4 has no
+subsegments at all.
+
+Harness gains checks 13 and 14: F_Arm_R's authored hide on `0x020100` survives
+a regenerate, and three regenerates over the same pair are byte-identical, so
+the carry-forward cannot drift a file it re-reads. 14 of 14.
+
 ## 2026-09-04 — Segment reader: subsegments were reading their parent's data
 
 `riggingReadSegmentRanges` and `riggingReadSegmentDefinitions` resolved a

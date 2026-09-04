@@ -49,6 +49,12 @@
 #      reading "Parent Array Index" as the entry's own shared row instead of its
 #      parent's returned the PARENT's entry for every subsegment, which is
 #      exactly bone "none" on all four of those rows.
+#  13. an authored DISABLED in an .ssf that is already there SURVIVES a
+#      regenerate -- F_Arm_R hides its inner shell that way, and the mesh's own
+#      Bone IDs name a real bone underneath, so a writer that only read the mesh
+#      would silently throw the decision away
+#  14. regenerating is idempotent: three passes over the same pair are
+#      byte-identical, so the carry-forward cannot drift a file it re-reads
 #
 # NOT COVERED: the matching writer change. riggingWriteSegmentLayout now emits
 # vanilla's convention (0xFFFFFFFF on a segment, the parent's row on a
@@ -344,6 +350,36 @@ check "$([ "${SUBS:-0}" = "4" ] && [ "${OWNED:-0}" = "4" ] && echo 1 || echo 0)"
 	"11. all $SUBS subsegments of MaleBody segment 2 resolve to their own bone ($OWNED named)"
 check "$([ "${UNOWNED:-0}" -ge 7 ] && echo 1 || echo 0)" \
 	"12. CONTROL: the $UNOWNED top-level segments carry no bone, as vanilla writes them"
+
+echo "== regenerating over an .ssf that is already there =="
+PRES="$W/pres/Meshes"
+mkdir -p "$PRES"
+cp "$DATA/Meshes/Armor/CombatArmor/F_Arm_R.nif" "$PRES/F_Arm_R.nif"
+cp "$DATA/Meshes/Armor/CombatArmor/F_Arm_R.ssf" "$PRES/F_Arm_R.ssf"
+for attempt in 1 2 3; do
+	"$NS" -no-gui cast "$(winpath "$PRES/F_Arm_R.nif")" \
+		-s "Rigging/Generate Segment File (.ssf)" \
+		-o "$(winpath "$W/pres/out.nif")" > "$W/pres/pass$attempt.log" 2>&1
+	cp "$PRES/F_Arm_R.ssf" "$W/pres/pass$attempt.ssf"
+done
+"$PY" - "$W/pres/pass1.ssf" > "$W/pres/check.txt" 2>&1 <<'PYEOF'
+import json, sys
+doc = json.load(open(sys.argv[1], encoding='utf-8-sig'))
+# vanilla hides 0x020100, the inner shell, while the mesh says RArm_UpperArm
+hidden = [v for shape in doc.values() for d in shape.get('DeltaBones', [])
+          if d['BoneName'] == 'DISABLED' for v in d['BoneDeltaList']]
+print('hidden ids', [hex(v) for v in hidden])
+print('RESULT', 1 if 0x020100 in hidden else 0)
+PYEOF
+sed 's/^/     /' "$W/pres/check.txt"
+KEPT=$(awk '/^RESULT/{print $2}' "$W/pres/check.txt")
+check "${KEPT:-0}" "13. the authored DISABLED on 0x020100 survives a regenerate"
+if cmp -s "$W/pres/pass1.ssf" "$W/pres/pass2.ssf" \
+	&& cmp -s "$W/pres/pass2.ssf" "$W/pres/pass3.ssf"; then
+	check 1 "14. three regenerates are byte-identical"
+else
+	check 0 "14. three regenerates are byte-identical" "the carry-forward drifts"
+fi
 
 echo
 echo "$pass passed, $fail failed"
