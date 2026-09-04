@@ -8018,7 +8018,7 @@ class spRiggingGenerateSSF final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Generate Segment File (.ssf)" ); }
-	QString group() const override { return Spell::tr( "Segments" ); }
+	QString group() const override { return Spell::tr( "Skinning" ); }
 	QString page() const override final { return Spell::tr( "Rigging" ); }
 	QString hint() const override final
 	{
@@ -8283,7 +8283,7 @@ class spRiggingGenerateSCLP final : public Spell
 {
 public:
 	QString name() const override final { return Spell::tr( "Generate Bone Scale File (.sclp)..." ); }
-	QString group() const override { return Spell::tr( "Segments" ); }
+	QString group() const override { return Spell::tr( "Skinning" ); }
 	QString page() const override final { return Spell::tr( "Rigging" ); }
 	QString hint() const override final
 	{
