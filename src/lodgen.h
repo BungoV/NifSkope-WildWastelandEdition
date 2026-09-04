@@ -106,6 +106,18 @@ struct LodgenObjectOptions
 	 *  vertices get a colour written.
 	 */
 	int aoSkirtCells = 1;
+	/*! Per-vertex sky visibility (UV2.x) and ground-contact blend (Eye Data).
+	 *
+	 *  Both are bake-time-only and per PLACEMENT, which is what earns them a
+	 *  vertex slot: no shared tiling texture can say how open the sky is HERE,
+	 *  or how far THIS vertex is above the ground it stands on.
+	 *
+	 *  They widen the identity descriptor from 24 to 32 bytes. That desc already
+	 *  owes the stock-engine tolerance gate, so this makes the owed measurement
+	 *  bigger rather than adding a new kind of risk -- but it does make it
+	 *  bigger, which is why it is a switch.
+	 */
+	bool objectChannels = true;
 	/*! World units below the surface before a vertex counts as under it.
 	 *  Only selects CANDIDATES -- a candidate still has to be invisible from
 	 *  every one of nine directions before it goes, so this is no longer the

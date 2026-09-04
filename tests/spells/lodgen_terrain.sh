@@ -181,9 +181,16 @@ for i, tname, start, size in blocks:
     nv = struct.unpack_from('<H', data, o)[0]; o += 2
     o += 4
     stride = (desc & 0xF) * 4
+    # Colour offset comes FROM THE DESCRIPTOR, not from a remembered layout.
+    # It was hardcoded at +20, correct for the 24-byte profile and wrong the
+    # moment UV2 was added ahead of it -- the reader then sampled normal and
+    # tangent bytes as an object id and reported cross-welded triangles that
+    # do not exist. BSVertexDesc::GetAttributeOffset(VA_COLOR=5) is
+    # (desc >> (4*5+2)) & 0x3C.
+    colOff = (desc >> 22) & 0x3C
     cols = []
     for v in range(nv):
-        vo = o + v*stride + 20   # colours at +20 in the 24-byte layout
+        vo = o + v*stride + colOff
         r, g, b, a = data[vo], data[vo+1], data[vo+2], data[vo+3]
         cols.append((r, g, b, a))
         maxid = max(maxid, r + g*256)

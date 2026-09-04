@@ -27,9 +27,24 @@ and carries none of this.
 | Vertex Colors **R + G** | 16 bits | per-chunk object index, `index = R + G*256` | **SHIPPED** |
 | Vertex Colors **B** | 8 bits | baked ambient occlusion | **SHIPPED** |
 | Vertex Colors **A** | 8 bits | tree sway weight, 0 trunk base → 1 branch tip | **DECIDED** |
-| UV2.x | ~11 bits | — | **FREE** |
+| UV2.x | ~11 bits | sky visibility: fraction of the upper hemisphere that reaches open sky | **SHIPPED** |
 | UV2.y | ~11 bits | — | **FREE** |
-| Eye Data | 32 bits | — | **FREE** (terrain uses it for geomorph; objects could) |
+| Eye Data | 32 bits | ground-contact blend: 1 at the terrain surface, 0 by 256 world units above it | **SHIPPED** |
+
+With the extra channels the stride is **32 bytes**, not 24 — built from the
+flags by `ResetAttributeOffsets`, never hardcoded. **Colours move from +20 to
++24** when UV2 is present, because UV2 is laid out ahead of them. Read every
+offset from the descriptor: `GetAttributeOffset(VA_COLOR) = (desc >> 22) & 0x3C`.
+A reader that remembers +20 samples normal and tangent bytes as an object id and
+reports cross-welded triangles that do not exist — which is exactly what the
+terrain harness did until it was fixed.
+
+Sky visibility is NOT ambient occlusion under another name: AO is
+cosine-weighted about the surface normal and answers "how enclosed is this
+point", sky visibility is normal-independent and answers "can weather and
+skylight land here". A vertical wall face has low AO and high sky visibility; a
+gully floor has the reverse. Both are quantised by their ray counts — nine
+directions, so nine steps.
 
 ### The index is exact, not a hash
 
@@ -85,13 +100,32 @@ profile is on.
 | Vertex Colors **R** | 8 bits | dominant LTEX material class | **SHIPPED** |
 | Vertex Colors **G** | 8 bits | flow-accumulation wetness | **SHIPPED** |
 | Vertex Colors **B** | 8 bits | heightfield ambient occlusion | **SHIPPED** |
-| Vertex Colors **A** | 8 bits | written 1.0 | **FREE** |
+| Vertex Colors **A** | 8 bits | shore proximity: 1 at/below the water plane, falling with height above it (512 units) and distance from water (32 samples ≈ 4096 units) | **SHIPPED** — terrain is now FULL |
 | UV2.x (`VF_UV_2`) | ~11 bits | sky visibility, before byte quantisation | **SHIPPED** |
 | UV2.y | ~11 bits | second-strongest material class, for two-material blending | **SHIPPED** |
 | Eye Data (`VF_EYEDATA`) | 32 bits | geomorph weight: WORLD-unit height delta to the parent ring's surface | **SHIPPED** (`--geomorph`, dim < 32; dim 32 has no parent and stores 0) |
 
 Terrain and objects deliberately do **not** share a layout: terrain has no
 object index, objects have no material class.
+
+**Terrain has no free slots left.** Anything further needs either a wider desc
+or a per-chunk texture.
+
+### Water carries nothing, and cannot
+
+LOD water is its own `BSMultiBoundNode 'WATER'` under a `BSEffectShaderProperty`,
+with `WATER_VERTEX_DESC` = `0x100000000002` — **position only, 8 bytes**. It is
+also one quad per wet cell: the far-ring shape for a whole dim-4 chunk measured
+**8 vertices, 4 triangles**, corners 4096 units apart. Even widened, that mesh
+cannot describe a shoreline, and foam wants metres.
+
+That is why shore proximity lives on the TERRAIN vertices, at 128-unit sample
+spacing, following the true contour because the contour comes from terrain
+height rather than from the per-cell water plane. Two further obstacles if water
+data is ever revisited: the quads would have to be tessellated near shores to
+have vertices worth writing to, and vertex colour on an EFFECT shader is not
+known to be inert to stock FO4 the way UV2 and Eye Data are on lighting
+shaders — that would need the PDB or a live test, not an assumption.
 
 ---
 

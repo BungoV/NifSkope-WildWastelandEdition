@@ -192,7 +192,8 @@ void lodgenTerrainChannels( const EsmWorld & world, int chunkX, int chunkY,
 	int dim, const std::vector<float> & grid,
 	std::vector<quint8> & matClass, std::vector<quint8> & wetness,
 	std::vector<quint8> & ao,
-	std::vector<float> & skyVis, std::vector<quint8> & matClass2 )
+	std::vector<float> & skyVis, std::vector<quint8> & matClass2,
+	std::vector<quint8> & shore )
 {
 	const int n = dim * 32 + 1;
 	matClass.assign( size_t( n ) * n, 0 );
@@ -200,6 +201,7 @@ void lodgenTerrainChannels( const EsmWorld & world, int chunkX, int chunkY,
 	ao.assign( size_t( n ) * n, 255 );
 	skyVis.assign( size_t( n ) * n, 1.0f );
 	matClass2.assign( size_t( n ) * n, 0 );
+	shore.assign( size_t( n ) * n, 0 );
 
 	// dominant material per sample: strongest layer (or base) at the sample
 	EsmLand land;
@@ -238,6 +240,85 @@ void lodgenTerrainChannels( const EsmWorld & world, int chunkX, int chunkY,
 					matClass2[s] = ltex2 ? classOf( ltex2 ) : matClass[s];
 				}
 			}
+		}
+	}
+
+	/* Shore proximity: how close this sample is to standing water, in both
+	 * senses at once -- how far it sits ABOVE the water plane, and how far it
+	 * is FROM any water at all.
+	 *
+	 * It has to live on the terrain's vertices because LOD water cannot carry
+	 * it: the water shapes are position-only, 8 bytes a vertex
+	 * (WATER_VERTEX_DESC), under their own BSEffectShaderProperty. There is
+	 * nowhere to put a channel on them.
+	 *
+	 * Water height is per CELL, but terrain height is per SAMPLE, so the band
+	 * this produces still follows the true shoreline contour rather than a
+	 * 4096-unit staircase -- the contour comes from the terrain, not the water.
+	 * The exposure rule is the water shapes' own (height above the cell's
+	 * terrain minimum), so a shore band never appears around water that was
+	 * culled for being submerged.
+	 */
+	{
+		constexpr float HEIGHT_RANGE = 512.0f;   // world units above water -> 0
+		constexpr int MAX_STEPS = 32;            // samples; 32 * 128u = 4096u
+		std::vector<float> wZ( size_t( n ) * n, 0.0f );
+		std::vector<int> dist( size_t( n ) * n, -1 );
+		std::vector<int> queue;
+		for ( int cy = 0; cy < dim; cy++ ) {
+			for ( int cx = 0; cx < dim; cx++ ) {
+				float h = 0.0f;
+				if ( !world.cellWater( chunkX + cx, chunkY + cy, h ) )
+					continue;
+				float cellMin = 3.4e38f;
+				for ( int row = cy * 32; row <= cy * 32 + 32; row++ )
+					for ( int col = cx * 32; col <= cx * 32 + 32; col++ )
+						cellMin = qMin( cellMin, grid[size_t( row ) * n + col] );
+				if ( !( h > cellMin ) )
+					continue;                     // submerged: no water drawn, no shore
+				for ( int row = cy * 32; row <= cy * 32 + 32; row++ ) {
+					for ( int col = cx * 32; col <= cx * 32 + 32; col++ ) {
+						const size_t s = size_t( row ) * n + col;
+						if ( dist[s] < 0 || h > wZ[s] ) {
+							wZ[s] = h;
+							if ( dist[s] < 0 ) {
+								dist[s] = 0;
+								queue.push_back( int( s ) );
+							}
+						}
+					}
+				}
+			}
+		}
+		// Breadth-first spread, so a dry sample inherits the height of the
+		// nearest water rather than of whichever cell happens to be scanned.
+		for ( size_t qi = 0; qi < queue.size(); qi++ ) {
+			const int s = queue[qi];
+			if ( dist[size_t( s )] >= MAX_STEPS )
+				continue;
+			const int row = s / n, col = s % n;
+			for ( int dy = -1; dy <= 1; dy++ ) {
+				for ( int dx = -1; dx <= 1; dx++ ) {
+					const int r2 = row + dy, c2 = col + dx;
+					if ( r2 < 0 || c2 < 0 || r2 >= n || c2 >= n )
+						continue;
+					const size_t s2 = size_t( r2 ) * n + c2;
+					if ( dist[s2] >= 0 )
+						continue;
+					dist[s2] = dist[size_t( s )] + 1;
+					wZ[s2] = wZ[size_t( s )];
+					queue.push_back( int( s2 ) );
+				}
+			}
+		}
+		for ( size_t s = 0; s < shore.size(); s++ ) {
+			if ( dist[s] < 0 )
+				continue;                         // no water within reach
+			const float above = grid[s] - wZ[s];
+			const float byHeight = qBound( 0.0f, 1.0f - above / HEIGHT_RANGE, 1.0f );
+			const float byDist = qBound( 0.0f,
+				1.0f - float( dist[s] ) / float( MAX_STEPS ), 1.0f );
+			shore[s] = quint8( qBound( 0.0f, byHeight * byDist * 255.0f, 255.0f ) );
 		}
 	}
 
@@ -488,11 +569,11 @@ bool lodgenBuildTerrainChunk( NifModel * nif, const EsmWorld & world,
 		zMax = qMax( zMax, cpos[v + 2] );
 	}
 
-	std::vector<quint8> tMat, tWet, tAo, tMat2;
+	std::vector<quint8> tMat, tWet, tAo, tMat2, tShore;
 	std::vector<float> tSky;
 	if ( opts.terrainIdentity )
 		lodgenTerrainChannels( world, chunkX, chunkY, dim, grid,
-			tMat, tWet, tAo, tSky, tMat2 );
+			tMat, tWet, tAo, tSky, tMat2, tShore );
 
 	BSVertexDesc landDesc( LAND_VERTEX_DESC );
 	quint32 landStride = 12;
@@ -532,9 +613,10 @@ bool lodgenBuildTerrainChunk( NifModel * nif, const EsmWorld & world,
 			const int col = qBound( 0, int( x / spacing + 0.5f ), n - 1 );
 			const int rowIdx = qBound( 0, int( y / spacing + 0.5f ), n - 1 );
 			const size_t s = size_t( rowIdx ) * n + col;
+			// A = shore proximity. It was the terrain profile's last free slot.
 			nif->set<ByteColor4>( row, "Vertex Colors", ByteColor4( FloatVector4(
 				float( tMat[s] ) / 255.0f, float( tWet[s] ) / 255.0f,
-				float( tAo[s] ) / 255.0f, 1.0f ) ) );
+				float( tAo[s] ) / 255.0f, float( tShore[s] ) / 255.0f ) ) );
 			nif->set<HalfVector2>( row, "UV 2", HalfVector2( Vector2(
 				tSky[s], float( tMat2[s] ) / 255.0f ) ) );
 		}
@@ -895,6 +977,8 @@ struct ObjBucket
 	QVector<Vector3> pos, nrm, tan;
 	QVector<Vector2> uv;
 	QVector<Color4> col;
+	QVector<float> sky;                 //!< UV2.x: fraction of upper hemisphere open
+	QVector<float> groundBlend;         //!< Eye Data: 1 at terrain contact, 0 clear of it
 	// triangles grouped per cell for the dim4 segment split
 	QVector<QVector<Triangle>> cellTris;
 	QString tex0, tex1;
@@ -1019,6 +1103,33 @@ struct LodgenAoScene
 			t += step;
 		}
 		return false;
+	}
+
+	/*! Fraction of the UPPER hemisphere that reaches open sky.
+	 *
+	 *  Not ambient occlusion with a different name: AO is cosine-weighted about
+	 *  the surface normal and answers "how enclosed is this point", while this
+	 *  is normal-independent and answers "can weather and skylight land here".
+	 *  A vertical wall face has low AO and high sky visibility; the floor of a
+	 *  narrow gully has the reverse.
+	 */
+	float skyVisibility( const Vector3 & p, float maxT ) const
+	{
+		static const float dirs[9][3] = {
+			{ 0.0f, 0.0f, 1.0f },
+			{ 0.5f, 0.0f, 0.87f }, { -0.5f, 0.0f, 0.87f },
+			{ 0.0f, 0.5f, 0.87f }, { 0.0f, -0.5f, 0.87f },
+			{ 0.7f, 0.0f, 0.71f }, { -0.7f, 0.0f, 0.71f },
+			{ 0.0f, 0.7f, 0.71f }, { 0.0f, -0.7f, 0.71f } };
+		const Vector3 o = p + Vector3( 0.0f, 0.0f, 2.0f );
+		int open = 0;
+		for ( const auto & dv : dirs ) {
+			Vector3 d( dv[0], dv[1], dv[2] );
+			d.normalize();
+			if ( !rayHit( o, d, maxT ) )
+				open++;
+		}
+		return float( open ) / 9.0f;
 	}
 
 	float ambientOcclusion( const Vector3 & p, const Vector3 & n, float maxT ) const
@@ -1660,7 +1771,24 @@ bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
 						it.value().pos[t.v2()], it.value().pos[t.v3()] );
 		for ( auto it = buckets.begin(); it != buckets.end(); ++it ) {
 			ObjBucket & bucket = it.value();
+			bucket.sky.resize( bucket.pos.size() );
+			bucket.groundBlend.resize( bucket.pos.size() );
 			for ( int v = 0; v < bucket.pos.size(); v++ ) {
+				if ( opts.objectChannels ) {
+					bucket.sky[v] = scene.skyVisibility( bucket.pos[v], 300.0f );
+					/* Ground contact: 1 at or below the surface, falling to 0
+					 * over CONTACT_RANGE world units above it. The BILINEAR
+					 * ground, not the conservative windowed minimum the cull
+					 * uses -- the cull wants to under-read the ground so it
+					 * never eats something visible, this wants the surface
+					 * where it actually is so a wall's base blends at its
+					 * base. */
+					constexpr float CONTACT_RANGE = 256.0f;
+					const Vector3 & p = bucket.pos[v];
+					const float g = scene.groundHeight( p[0], p[1] );
+					bucket.groundBlend[v] = qBound( 0.0f,
+						1.0f - ( p[2] - g ) / ( CONTACT_RANGE * invDim ), 1.0f );
+				}
 				const float ao = scene.ambientOcclusion( bucket.pos[v],
 					bucket.nrm[v], 300.0f );
 				if ( opts.aoGrey )
@@ -1681,8 +1809,20 @@ bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
 	nif->set<quint32>( iRoot, "Flags", 14 );
 	nif->set<float>( iRoot, "Scale", 1.0f );
 
-	const std::uint64_t desc = opts.identity ? OBJ_VERTEX_DESC_COLORS : OBJ_VERTEX_DESC;
-	const int stride = opts.identity ? 24 : 20;
+	/* Built rather than hardcoded once the extra channels are in play: the
+	 * stride is whatever the flags add up to, and a constant that disagrees
+	 * with the flags writes a file whose Data Size and vertex rows do not
+	 * match -- which reads as corruption, not as a wrong number. */
+	BSVertexDesc objDesc( opts.identity ? OBJ_VERTEX_DESC_COLORS : OBJ_VERTEX_DESC );
+	const bool extraChannels = opts.identity && opts.objectChannels;
+	if ( extraChannels ) {
+		objDesc.SetFlag( VertexFlags::VF_UV_2 );
+		objDesc.SetFlag( VertexFlags::VF_EYEDATA );
+		objDesc.ResetAttributeOffsets( 130 );
+	}
+	const std::uint64_t desc = objDesc.Value();
+	const int stride = extraChannels ? int( objDesc.GetVertexSize() )
+		: ( opts.identity ? 24 : 20 );
 
 	for ( auto it = buckets.begin(); it != buckets.end(); ++it ) {
 		ObjBucket & bucket = it.value();
@@ -1738,6 +1878,11 @@ bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
 				const Color4 & c = bucket.col[int( v )];
 				nif->set<ByteColor4>( row, "Vertex Colors", ByteColor4(
 					FloatVector4( c.red(), c.green(), c.blue(), c.alpha() ) ) );
+			}
+			if ( extraChannels && int( v ) < bucket.sky.size() ) {
+				nif->set<HalfVector2>( row, "UV 2",
+					HalfVector2( Vector2( bucket.sky[int( v )], 0.0f ) ) );
+				nif->set<float>( row, "Eye Data", bucket.groundBlend[int( v )] );
 			}
 		}
 		QModelIndex iTris = nif->getIndex( iShape, "Triangles" );
