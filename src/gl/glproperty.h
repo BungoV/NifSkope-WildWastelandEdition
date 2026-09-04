@@ -33,6 +33,10 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #ifndef GLPROPERTY_H
 #define GLPROPERTY_H
 
+//! LOD channel preview: 0 off, 1 identity hashed, 2 raw index bytes, 3 baked
+//! AO, 4 class parameter. Defined in glproperty.cpp.
+extern int wwLodChannelView;
+
 #include "icontrollable.h" // Inherited
 #include "data/niftypes.h"
 #include "material.hpp"

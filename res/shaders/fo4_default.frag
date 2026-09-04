@@ -27,6 +27,14 @@ uniform float alphaThreshold;
 
 uniform vec3 tintColor;
 
+/* LOD channel preview: 0 off, 1 identity as a hashed colour, 2 raw index bytes,
+ * 3 baked AO, 4 class parameter. Non-zero replaces the whole shading path with
+ * the chosen vertex-colour channel, flat -- no textures, no normals, no light.
+ * A per-vertex payload is otherwise invisible: it is multiplied into an albedo
+ * and then lit, and what reaches the screen says nothing about the number that
+ * is actually stored. */
+uniform int lodChannelView;
+
 uniform vec2 uvScale;
 uniform vec2 uvOffset;
 
@@ -236,6 +244,11 @@ void main()
 
 	vec4 color = vec4( baseMap.rgb, 1.0 );
 	if ( alphaFlags > 0 ) {
+		/* The class parameter LIVES in vertex alpha, so the alpha test has to
+		 * run on the real value even when the preview is about to replace the
+		 * colour -- otherwise a tree card previews as a solid quad and its
+		 * silhouette, the thing you are looking at, is gone. Hence the preview
+		 * early-out sits AFTER this and not at the top of main(). */
 		float	a = C.a * baseMap.a * alpha;
 		// 0: always, 1: <, 2: ==, 3: <=, 4: >, 5: !=, 6: >=, 7: never
 		int	m = ( a < alphaThreshold ? 0x2B2B : ( a > alphaThreshold ? 0x7171 : 0x4D4D ) );
@@ -243,6 +256,26 @@ void main()
 			discard;
 		if ( ( alphaFlags & 8 ) != 0 )
 			color.a = a;
+	}
+
+	if ( lodChannelView != 0 ) {
+		vec3 v = vec3( 0.0 );
+		if ( lodChannelView == 1 ) {
+			/* The index HASHED to a colour, not the raw bytes: consecutive
+			 * indices differ by one part in 255 of red and are
+			 * indistinguishable, which is exactly the case worth seeing. */
+			float idx = floor( C.r * 255.0 + 0.5 ) + floor( C.g * 255.0 + 0.5 ) * 256.0;
+			v = fract( sin( ( idx + 1.0 ) * vec3( 12.9898, 78.233, 45.164 ) ) * 43758.5453 );
+			v = v * 0.8 + 0.2;
+		} else if ( lodChannelView == 2 ) {
+			v = vec3( C.r, C.g, 0.0 );      // the raw 16-bit index bytes
+		} else if ( lodChannelView == 3 ) {
+			v = C.bbb;                      // baked ambient occlusion
+		} else {
+			v = C.aaa;                      // class parameter: sway / blend / wetness
+		}
+		fragColor = vec4( v, 1.0 );
+		return;
 	}
 
 	vec4 normalMap = texture( NormalMap, offset );

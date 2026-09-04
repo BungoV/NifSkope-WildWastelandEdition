@@ -5,6 +5,8 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "lodgen.h"
+#include "gl/glproperty.h"
+#include "glview.h"
 #include "esmdata.h"
 #include "nifskope.h"
 #include "model/nifmodel.h"
@@ -252,6 +254,48 @@ public:
 		previewCheck->setChecked( true );
 		auto toggles = new QGridLayout();
 		layout->addLayout( toggles );
+
+		/* Channel preview.
+		 *
+		 * The generated channels are invisible in a normal render -- each is
+		 * multiplied into an albedo and then lit, so what reaches the screen says
+		 * nothing about the number that was written. These draw one channel flat:
+		 * no textures, no normals, no lighting.
+		 *
+		 * LOD-GENNED GEOMETRY ONLY, and that is enforced rather than assumed: the
+		 * box is enabled only while a .bto or .btr is the open document, because
+		 * on anything else the same vertex colours mean something completely
+		 * different and the view would be a confident lie.
+		 */
+		{
+			auto previewRow = new QHBoxLayout();
+			previewLabel = new QLabel( tr( "Preview channel" ), this );
+			previewRow->addWidget( previewLabel );
+			previewBox = new QComboBox( this );
+			previewBox->addItem( tr( "Off (normal shading)" ), 0 );
+			previewBox->addItem( tr( "Identity - hashed colour per object" ), 1 );
+			previewBox->addItem( tr( "Identity - raw R+G bytes" ), 2 );
+			previewBox->addItem( tr( "Baked AO (B)" ), 3 );
+			previewBox->addItem( tr( "Class parameter (A)" ), 4 );
+			previewBox->setToolTip( tr(
+				"Draw one generated vertex channel flat, with no textures, normals or\n"
+				"lighting.\n\n"
+				"Identity hashed gives every object a distinct colour: neighbouring\n"
+				"indices differ by one part in 255 of red, so the raw bytes look\n"
+				"identical exactly where a collision would show.\n\n"
+				"Only available while a .bto or .btr is open - on any other mesh these\n"
+				"channels mean something else entirely." ) );
+			previewRow->addWidget( previewBox, 1 );
+			layout->addLayout( previewRow );
+
+			connect( previewBox, QOverload<int>::of( &QComboBox::currentIndexChanged ),
+				this, [this]( int i ) {
+					wwLodChannelView = previewBox->itemData( i ).toInt();
+					if ( skope && skope->getGLView() )
+						skope->getGLView()->update();
+				} );
+			refreshPreviewAvailability();
+		}
 		toggles->addWidget( terrainCheck, 0, 0 );
 		toggles->addWidget( objectsCheck, 0, 1 );
 		toggles->addWidget( texCheck, 0, 2 );
@@ -273,6 +317,13 @@ public:
 		cancelButton = buttons->addButton( QDialogButtonBox::Cancel );
 		layout->addWidget( buttons );
 		connect( startButton, &QPushButton::clicked, this, &LodgenManagerDialog::start );
+
+		/* The open document can change under the dialog -- generating a sweep and
+		 * then opening a chunk is the whole point -- so availability is re-checked
+		 * rather than decided once at construction. */
+		if ( skope )
+			connect( skope, &NifSkope::completeLoading, this,
+				[this]( bool, QString & ) { refreshPreviewAvailability(); } );
 		connect( cancelButton, &QPushButton::clicked, this, [this]() {
 			if ( running )
 				cancelled = true;    // honoured between chunks
@@ -280,6 +331,30 @@ public:
 				close();
 		} );
 		refreshWorldspaces();
+	}
+
+	/*! The preview only means anything on generated LOD, so it is only offered
+	 *  there. Switching to another file turns it off rather than leaving a
+	 *  stale mode painting an unrelated mesh's vertex colours. */
+	void refreshPreviewAvailability()
+	{
+		bool isLod = false;
+		if ( skope ) {
+			const QString name = skope->getNifModel()
+				? skope->getNifModel()->getFileInfo().fileName().toLower() : QString();
+			isLod = name.endsWith( QLatin1String( ".bto" ) )
+				|| name.endsWith( QLatin1String( ".btr" ) );
+		}
+		previewBox->setEnabled( isLod );
+		previewLabel->setEnabled( isLod );
+		previewBox->setToolTip( isLod ? previewBox->toolTip()
+			: tr( "Open a generated .bto or .btr to preview its channels." ) );
+		if ( !isLod && wwLodChannelView != 0 ) {
+			previewBox->setCurrentIndex( 0 );
+			wwLodChannelView = 0;
+			if ( skope && skope->getGLView() )
+				skope->getGLView()->update();
+		}
 	}
 
 private:
@@ -480,6 +555,8 @@ private:
 	bool wsRefreshPending = false;
 	QLineEdit * outEdit, * dataRootEdit, * impostorEdit;
 	QComboBox * wsBox, * dimBox;
+	QComboBox * previewBox = nullptr;
+	QLabel * previewLabel = nullptr;
 	QSpinBox * x0Spin, * y0Spin, * x1Spin, * y1Spin, * trisSpin;
 	QCheckBox * terrainCheck, * objectsCheck, * texCheck, * identityCheck,
 		* terrainIdCheck, * aoCheck, * waterCheck, * geomorphCheck,

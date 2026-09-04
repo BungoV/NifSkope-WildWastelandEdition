@@ -67,6 +67,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/controllers.h"
 #include "gl/glparticles.h"
 #include "gl/glscene.h"
+#include "gl/glproperty.h"
 #include "gl/glshape.h"
 #include "gl/renderer.h"
 #include "model/kfmmodel.h"
@@ -21338,6 +21339,11 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						 * mask is restored from the user's persisted preferences at
 						 * startup, so a capture would carry whatever was last ticked.
 						 */
+						/* WW_LOD_CHANNEL=<1..4> drives the same channel preview the
+						 * World LOD Generator's Preview box sets, so the shader path
+						 * has a headless test rather than only a GUI one. */
+						if ( qEnvironmentVariableIsSet( "WW_LOD_CHANNEL" ) )
+							wwLodChannelView = qEnvironmentVariableIntValue( "WW_LOD_CHANNEL" );
 						if ( qEnvironmentVariableIntValue( "WW_RENDER_FLAT" ) != 0 ) {
 							sc->options |= Scene::DoVertexColors;
 							sc->options &= ~( Scene::DoTexturing | Scene::DoLighting

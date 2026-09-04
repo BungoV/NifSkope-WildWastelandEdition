@@ -1141,6 +1141,14 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 		prog->uni4f( "vertexColorOverride", c );
 	}
 
+	/* LOD channel preview. Set HERE and not only in
+	 * VertexColorProperty::glProperty, which is where the sibling
+	 * vertexColorOverride uniform lives: this path sets that one directly and
+	 * never calls it, so a value written there reaches every renderer except
+	 * the FO4 one -- the only one that matters for generated LOD.
+	 */
+	prog->uni1i( "lodChannelView", wwLodChannelView );
+
 	if ( mesh->isDoubleSided ) {
 		glDisable( GL_CULL_FACE );
 	} else {

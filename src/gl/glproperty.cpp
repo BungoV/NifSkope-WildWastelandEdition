@@ -32,6 +32,12 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "glproperty.h"
 
+/*! Which vertex-colour channel the viewport previews, or 0 for normal shading.
+ *  It lives here because this is where the vertex-colour uniforms are set: the
+ *  World LOD Generator writes it, the shader reads it.
+ */
+int wwLodChannelView = 0;
+
 #include "message.h"
 #include "gl/controllers.h"
 #include "gl/glscene.h"
@@ -725,6 +731,8 @@ void VertexColorProperty::glProperty(
 		vertexColorFlags = p->vertexColorFlags;
 	prog->uni4f( "vertexColorOverride", overrideColor );
 	prog->uni1i( "vertexColorFlags", vertexColorFlags );
+	// LOD channel preview, driven by the World LOD Generator's Preview box.
+	prog->uni1i( "lodChannelView", wwLodChannelView );
 }
 
 void StencilProperty::updateImpl( const NifModel * nif, const QModelIndex & index )

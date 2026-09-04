@@ -1,5 +1,44 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-09-04f — World LOD Generator: preview the generated channels
+
+The generated vertex channels are invisible in a normal render — each is
+multiplied into an albedo and then lit, so what reaches the screen says nothing
+about the number that was written. The World LOD Generator gains a **Preview
+channel** box that draws one of them flat: no textures, no normals, no lighting.
+
+| mode | shows |
+|---|---|
+| Identity — hashed colour per object | R+G decoded to an index, hashed to a distinct colour |
+| Identity — raw R+G bytes | what the file literally stores |
+| Baked AO (B) | the ray-cast occlusion |
+| Class parameter (A) | sway weight / ground blend / wetness, by class |
+
+**Hashed, not raw, is the default identity view for a reason.** Consecutive
+indices differ by one part in 255 of red, so the raw bytes are indistinguishable
+exactly where a collision would show — the raw mode is kept because it is what
+the file holds, not because it is readable.
+
+**LOD-genned geometry only, enforced rather than assumed.** The box is enabled
+only while a .bto or .btr is the open document, and switching to anything else
+resets it: on another mesh the same vertex colours mean something completely
+different and the view would be a confident lie.
+
+Three things worth keeping:
+
+  * **The preview early-out sits AFTER the alpha test, not at the top of
+    main().** The class parameter LIVES in vertex alpha, and skipping the test
+    turns every tree card into a solid quad — losing the silhouette, which is
+    the thing being looked at.
+  * **The uniform is set in `setupProgramCE1`, not only in
+    `VertexColorProperty::glProperty`.** That function is where the sibling
+    `vertexColorOverride` uniform lives, but the FO4 path sets that one directly
+    and never calls it — so the first version reached every renderer except the
+    only one that draws generated LOD. All four modes rendered byte-identical
+    output until that was found.
+  * `WW_LOD_CHANNEL=<1..4>` drives the same mode headlessly, so the shader path
+    has a test that is not a screenshot of a dialog.
+
 ## 2026-09-04e — AO bake: the chunk edge was a seam, and now it is not
 
 bungo: "does the AO generate based on that proximity from nearby chunks?" It did
