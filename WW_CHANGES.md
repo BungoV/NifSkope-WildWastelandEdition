@@ -1,5 +1,54 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-09-04e — AO bake: the chunk edge was a seam, and now it is not
+
+bungo: "does the AO generate based on that proximity from nearby chunks?" It did
+not, and the artefact was measurable.
+
+**What was wrong.** Both occluders stopped dead at the chunk border — the
+terrain march broke when a ray left the span, and the triangle bins only ever
+held this chunk's own placements. An object on the edge was therefore occluded
+by nothing beyond it, and the neighbouring chunk's edge objects were too open in
+exactly the same way, so every chunk boundary carried a seam of over-bright AO.
+
+Measured on Sanctuary (-20,24), above-ground object vertices by distance to the
+border:
+
+| band | verts | no skirt | 1-cell skirt | 2-cell skirt |
+|---|---|---|---|---|
+| 0-150 from the edge | 482 | **229.3** | 209.1 | 210.3 |
+| 150-400 | 652 | 205.0 | 197.0 | 197.6 |
+| 400-1000 | 1962 | 197.1 | 193.8 | 195.3 |
+| interior | 13640 | 196.1 | 196.6 | 197.7 |
+| **edge above interior** | | **+33.2** | **+12.5** | **+12.7** |
+
+**The fix is a bake skirt.** `--ao-skirt N` (default 1) gathers the ring of
+cells around the chunk — terrain heightfield AND object placements, SCOLs
+expanded the same way — and lets rays be stopped by them. Skirt geometry is
+never emitted, never indexed, never in the manifest: only the chunk's own
+vertices get a colour written. On this chunk that is 2934 neighbouring
+placements and 32,189 occluder triangles, and the bake still finishes in about
+1.6 s.
+
+**Why 1 cell and not more.** Skirt 2 lands within noise of skirt 1 (+12.7 vs
++12.5), so the residual is not missing occluders — it is that boundary's own
+geography, where the edge objects genuinely stand more in the open. A wider
+skirt costs 2.8x the placements for nothing. The AO ray reaches 300 miniature
+units, 1200 game units at dim 4, so one 4096-unit cell already covers it with
+room to spare.
+
+Two things came out of the same work:
+
+  * `LodgenAoScene` gained an explicit origin (`ox`, `oy`). It used to assume
+    the binned area and the heightfield both started at zero, which is false the
+    moment a skirt puts the chunk in the middle of a larger field.
+  * The heightfield's sample spacing is now the constant it always was —
+    128 game units, scaled to miniature — instead of being derived from the
+    field width. Deriving it silently rescaled the entire field as soon as the
+    skirt made that width larger than the chunk.
+
+`lodgen_terrain.sh` 18/18.
+
 ## 2026-09-04d — Render harness: flat vertex colours, and captures past the desktop
 
 Two doors on `WW_RENDER_SHOT`, both added to photograph the LODGEN identity

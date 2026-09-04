@@ -2296,7 +2296,7 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 	bool haveObjects, const QString & dataRoot, bool identity,
 	const QString & texDir, bool geomorph, bool terrainIdentity,
 	const QString & impostors, bool listCandidates, bool atlas, bool bakeAO,
-	bool cullBuried, float cullMargin, bool aoGrey )
+	bool cullBuried, float cullMargin, bool aoGrey, int aoSkirt )
 {
 	if ( listCandidates && haveRegion ) {
 		EsmWorld world;
@@ -2346,6 +2346,7 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 		opts.cullBuried = cullBuried;
 		opts.cullMargin = cullMargin;
 		opts.aoGrey = aoGrey;
+		opts.aoSkirtCells = aoSkirt;
 		opts.impostorDir = impostors;
 		opts.dataRoot = dataRoot.isEmpty()
 			? QStringLiteral( "E:/Tools/Fallout 4/DataUnpacked/Data" ) : dataRoot;
@@ -2432,6 +2433,7 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 					oopts.cullBuried = cullBuried;
 					oopts.cullMargin = cullMargin;
 					oopts.aoGrey = aoGrey;
+					oopts.aoSkirtCells = aoSkirt;
 					oopts.impostorDir = impostors;
 					oopts.dataRoot = dataRoot.isEmpty()
 						? QStringLiteral( "E:/Tools/Fallout 4/DataUnpacked/Data" ) : dataRoot;
@@ -3845,7 +3847,12 @@ int usage()
 		  << "                                          the vanilla sheet for vanilla BTOs)\n"
 		  << "  lodgen <file.esm> --worldspace HEX --objects X Y [--dim 4]\n"
 		  << "         [--data-root DIR] [--no-identity] [--no-ao]\n"
-		  << "         [--cull-buried [--cull-margin N]] [--ao-grey] -o OUT.bto\n"
+		  << "         [--cull-buried [--cull-margin N]] [--ao-grey] [--ao-skirt N]\n"
+		  << "         -o OUT.bto                       --ao-skirt is how many cells\n"
+		  << "                                          of neighbouring terrain and\n"
+		  << "                                          objects the AO bake sees past\n"
+		  << "                                          the chunk edge (default 1,\n"
+		  << "                                          0 = chunk only, which seams)\n"
 		  << "                                          rung 2: stitch one object chunk\n"
 		  << "                                          from per-object _LOD meshes; with\n"
 		  << "                                          identity (default) vertices carry\n"
@@ -3950,6 +3957,8 @@ int nifskopeCliMain( const QStringList & args )
 	bool lgCullBuried = false;
 	float lgCullMargin = 128.0f;
 	bool lgAoGrey = false;
+	// Cells of neighbours to bake AO against; 0 is the old chunk-only bake.
+	int lgAoSkirt = 1;
 	QString lgTexDir;
 	bool lgGeomorph = false;
 	bool lgTerrainIdentity = false;
@@ -4023,6 +4032,7 @@ int nifskopeCliMain( const QStringList & args )
 		else if ( t == QLatin1String( "--cull-buried" ) ) lgCullBuried = true;
 		else if ( t == QLatin1String( "--cull-margin" ) ) lgCullMargin = next().toFloat();
 		else if ( t == QLatin1String( "--ao-grey" ) ) lgAoGrey = true;
+		else if ( t == QLatin1String( "--ao-skirt" ) ) lgAoSkirt = next().toInt();
 		else if ( t == QLatin1String( "--tex-dir" ) ) lgTexDir = next();
 		else if ( t == QLatin1String( "--geomorph" ) ) lgGeomorph = true;
 		else if ( t == QLatin1String( "--terrain-identity" ) ) lgTerrainIdentity = true;
@@ -4172,7 +4182,7 @@ int nifskopeCliMain( const QStringList & args )
 			lgHaveRegion, lgRegion, lgOutDir,
 			lgHaveObjects, lgDataRoot, lgIdentity, lgTexDir, lgGeomorph,
 			lgTerrainIdentity, lgImpostors, lgListCandidates, lgAtlas, lgBakeAO,
-			lgCullBuried, lgCullMargin, lgAoGrey );
+			lgCullBuried, lgCullMargin, lgAoGrey, lgAoSkirt );
 	else if ( cmd == QLatin1String( "anim-setup" ) )
 		rc = cmdAnimSetup( file, block, controllers, sequence, newSequence,
 						   standalone, effectVar, intVar, listOnly, outFile );

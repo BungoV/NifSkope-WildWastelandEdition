@@ -95,6 +95,17 @@ struct LodgenObjectOptions
 	 *  written, but the identity channel this produces is NOT decodable.
 	 */
 	bool aoGrey = false;
+	/*! Cells of neighbouring terrain and objects to bake AO against, beyond the
+	 *  chunk's own edge. 0 reproduces the old behaviour, where both occluders
+	 *  stopped dead at the border and edge objects came out too open -- measured
+	 *  on Sanctuary (-20,24): mean AO 229 within 150 units of the edge against
+	 *  196 in the interior, ~17% too bright, and the neighbouring chunk is too
+	 *  bright in the same way, so it reads as a seam along every boundary.
+	 *
+	 *  Skirt geometry occludes but is never emitted: only this chunk's own
+	 *  vertices get a colour written.
+	 */
+	int aoSkirtCells = 1;
 	//! World units below the surface before anything is considered buried.
 	float cullMargin = 128.0f;
 	int lodLevel = -1;          //!< MNAM slot; -1 = pick by dim (4->0, 8->1, 16->2, 32->3)

@@ -920,7 +920,12 @@ namespace
 struct LodgenAoScene
 {
 	static constexpr int BINS = 64;
-	float span = 4096.0f;               // miniature chunk span
+	/* The binned area and the heightfield may reach BEYOND the chunk, so the
+	 * origin is explicit rather than assumed to be zero. With a bake skirt the
+	 * chunk's own geometry sits in the middle of a larger field and skirt
+	 * coordinates are negative on two sides. */
+	float ox = 0.0f, oy = 0.0f;         // miniature position of the field origin
+	float span = 4096.0f;               // miniature span of the BINNED area
 	std::vector<float> tri;             // 9 floats per triangle
 	std::vector<std::vector<int>> bins; // BINS*BINS triangle lists
 	// terrain heightfield in miniature units (n x n), optional
@@ -940,10 +945,10 @@ struct LodgenAoScene
 			bins.resize( BINS * BINS );
 		const float mnx = qMin( a[0], qMin( b[0], c[0] ) ), mxx = qMax( a[0], qMax( b[0], c[0] ) );
 		const float mny = qMin( a[1], qMin( b[1], c[1] ) ), mxy = qMax( a[1], qMax( b[1], c[1] ) );
-		const int bx0 = qBound( 0, int( mnx / span * BINS ), BINS - 1 );
-		const int bx1 = qBound( 0, int( mxx / span * BINS ), BINS - 1 );
-		const int by0 = qBound( 0, int( mny / span * BINS ), BINS - 1 );
-		const int by1 = qBound( 0, int( mxy / span * BINS ), BINS - 1 );
+		const int bx0 = qBound( 0, int( ( mnx - ox ) / span * BINS ), BINS - 1 );
+		const int bx1 = qBound( 0, int( ( mxx - ox ) / span * BINS ), BINS - 1 );
+		const int by0 = qBound( 0, int( ( mny - oy ) / span * BINS ), BINS - 1 );
+		const int by1 = qBound( 0, int( ( mxy - oy ) / span * BINS ), BINS - 1 );
 		for ( int by = by0; by <= by1; by++ )
 			for ( int bx = bx0; bx <= bx1; bx++ )
 				bins[by * BINS + bx].push_back( t );
@@ -953,8 +958,8 @@ struct LodgenAoScene
 	{
 		if ( !hn )
 			return -3.4e38f;
-		const float fx = qBound( 0.0f, x / hSpacing, float( hn - 1 ) - 0.001f );
-		const float fy = qBound( 0.0f, y / hSpacing, float( hn - 1 ) - 0.001f );
+		const float fx = qBound( 0.0f, ( x - ox ) / hSpacing, float( hn - 1 ) - 0.001f );
+		const float fy = qBound( 0.0f, ( y - oy ) / hSpacing, float( hn - 1 ) - 0.001f );
 		const int ix = int( fx ), iy = int( fy );
 		const float tx = fx - ix, ty = fy - iy;
 		const float h00 = hgt[size_t( iy ) * hn + ix], h10 = hgt[size_t( iy ) * hn + ix + 1];
@@ -969,7 +974,7 @@ struct LodgenAoScene
 		if ( hn && d[2] < 0.9f ) {
 			for ( float t = 8.0f; t < maxT; t += 24.0f ) {
 				const float x = o[0] + d[0] * t, y = o[1] + d[1] * t;
-				if ( x < 0 || y < 0 || x > span || y > span )
+				if ( x < ox || y < oy || x > ox + span || y > oy + span )
 					break;
 				if ( o[2] + d[2] * t < groundHeight( x, y ) )
 					return true;
@@ -983,7 +988,7 @@ struct LodgenAoScene
 		int guard = 0;
 		while ( t < maxT && guard++ < 2 * BINS ) {
 			const float x = o[0] + d[0] * t, y = o[1] + d[1] * t;
-			const int bx = int( x / cell ), by = int( y / cell );
+			const int bx = int( ( x - ox ) / cell ), by = int( ( y - oy ) / cell );
 			if ( bx < 0 || by < 0 || bx >= BINS || by >= BINS )
 				break;
 			for ( int ti : bins[by * BINS + bx] ) {
@@ -1159,15 +1164,23 @@ bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
 	/* The chunk's terrain heightfield, in the same miniature space as the
 	 * placements. Built once here and shared by the buried-geometry cull and
 	 * the AO bake, which used to build its own identical copy. */
-	const int terrainN = dim * 32 + 1;
-	const float terrainSpacing = 4096.0f / float( terrainN - 1 );
+	/* Extended by the AO skirt, so a ray leaving the chunk still meets ground.
+	 * Spacing is a CONSTANT 128 game units per sample (scaled to miniature) --
+	 * deriving it from the field width silently rescales the whole field the
+	 * moment the skirt makes that width bigger than the chunk. */
+	const int skirt = ( opts.identity && opts.bakeAO ) ? qMax( 0, opts.aoSkirtCells ) : 0;
+	const int terrainCells = dim + 2 * skirt;
+	const int terrainN = terrainCells * 32 + 1;
+	const float terrainSpacing = 128.0f * invDim;
+	const float terrainOx = -float( skirt ) * 4096.0f * invDim;
+	const float terrainOy = terrainOx;
 	std::vector<float> terrainHgt( size_t( terrainN ) * size_t( terrainN ),
 		world.defaultLandHeight() * invDim );
 	{
 		EsmLand land;
-		for ( int cy = 0; cy < dim; cy++ )
-			for ( int cx = 0; cx < dim; cx++ )
-				if ( world.land( chunkX + cx, chunkY + cy, land ) )
+		for ( int cy = 0; cy < terrainCells; cy++ )
+			for ( int cx = 0; cx < terrainCells; cx++ )
+				if ( world.land( chunkX - skirt + cx, chunkY - skirt + cy, land ) )
 					for ( int row = 0; row < 33; row++ )
 						for ( int col = 0; col < 33; col++ )
 							terrainHgt[size_t( cy * 32 + row ) * size_t( terrainN )
@@ -1178,8 +1191,8 @@ bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
 	 * geometry that a dip might expose, where over-reading would quietly eat
 	 * something visible. */
 	auto terrainFloorAt = [&]( float x, float y ) {
-		const int i0 = int( std::floor( x / terrainSpacing ) );
-		const int j0 = int( std::floor( y / terrainSpacing ) );
+		const int i0 = int( std::floor( ( x - terrainOx ) / terrainSpacing ) );
+		const int j0 = int( std::floor( ( y - terrainOy ) / terrainSpacing ) );
 		float lo = std::numeric_limits<float>::max();
 		for ( int dj = 0; dj <= 1; dj++ ) {
 			for ( int di = 0; di <= 1; di++ ) {
@@ -1191,6 +1204,7 @@ bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
 		return lo;
 	};
 	int culledTris = 0, culledPlacements = 0, rescuedPlacements = 0;
+	int aoSkirtTris = 0, aoSkirtPlacements = 0;
 
 	// gather refs: every cell's own plus the persistent overlay
 	QVector<EsmRefr> refs;
@@ -1199,6 +1213,15 @@ bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
 			refs += world.refrs( chunkX + cx, chunkY + cy );
 	refs += world.persistentRefrsIn( cwX, cwY,
 		cwX + float( dim ) * 4096.0f, cwY + float( dim ) * 4096.0f );
+
+	/* The AO skirt's refs: the ring of cells around the chunk. They are
+	 * OCCLUDERS ONLY -- never emitted, never indexed, never in the manifest --
+	 * so they are gathered separately and never mixed into `refs`. */
+	QVector<EsmRefr> skirtRefs;
+	for ( int cy = -skirt; cy < dim + skirt; cy++ )
+		for ( int cx = -skirt; cx < dim + skirt; cx++ )
+			if ( cx < 0 || cy < 0 || cx >= dim || cy >= dim )
+				skirtRefs += world.refrs( chunkX + cx, chunkY + cy );
 
 	/* SCOL expansion: a static collection has no LOD models of its own — the
 	 * CK generates its LOD by unpacking the parts back into their source
@@ -1243,6 +1266,32 @@ bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
 			continue;
 		}
 		placements.append( LodPlacement{ r.base, rp, rm, r.scale } );
+	}
+
+	QVector<LodPlacement> skirtPlacements;
+	for ( const EsmRefr & r : skirtRefs ) {
+		if ( r.initiallyDisabled || r.deleted || !r.base )
+			continue;
+		Matrix rm;
+		rm.fromEuler( -r.rot[0], -r.rot[1], -r.rot[2] );
+		const Vector3 rp( r.pos[0], r.pos[1], r.pos[2] );
+		if ( std::memcmp( &r.baseType, "SCOL", 4 ) == 0 ) {
+			for ( const EsmScolPart & part : world.scolParts( r.base ) ) {
+				for ( const EsmScolPlacement & pl : part.placements ) {
+					Matrix pm;
+					pm.fromEuler( -pl.rot[0], -pl.rot[1], -pl.rot[2] );
+					LodPlacement out;
+					out.base = part.base;
+					out.pos = rp + rm * ( Vector3( pl.pos[0], pl.pos[1],
+						pl.pos[2] ) * r.scale );
+					out.rot = rm * pm;
+					out.scale = r.scale * pl.scale;
+					skirtPlacements.append( out );
+				}
+			}
+			continue;
+		}
+		skirtPlacements.append( LodPlacement{ r.base, rp, rm, r.scale } );
 	}
 
 	QHash<QString, QVector<LodSrcShape>> modelCache;
@@ -1482,6 +1531,49 @@ bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
 		scene.hn = terrainN;
 		scene.hSpacing = terrainSpacing;
 		scene.hgt.assign( terrainHgt.begin(), terrainHgt.end() );
+		// The binned area follows the heightfield, so a ray leaving the chunk
+		// still finds both ground and neighbours to be stopped by.
+		scene.ox = terrainOx;
+		scene.oy = terrainOy;
+		scene.span = float( terrainCells ) * 4096.0f * invDim;
+
+		/* Skirt occluders. No repetition-breaking rotation is applied: it spins
+		 * a tree's cards about its own axis, which changes what the neighbour
+		 * chunk DRAWS but not the volume it occupies, and occlusion only cares
+		 * about the volume. */
+		int skirtTris = 0;
+		for ( const LodPlacement & r : skirtPlacements ) {
+			const EsmLodBase & base = world.lodBase( r.base );
+			if ( !base.hasLod )
+				continue;
+			QString model = base.models[qMin( lodLevel, 3 )];
+			if ( model.isEmpty() && opts.slotFallback ) {
+				for ( int l = lodLevel; l >= 0 && model.isEmpty(); l-- )
+					model = base.models[l];
+				for ( int l = lodLevel; l < 4 && model.isEmpty(); l++ )
+					model = base.models[l];
+			}
+			if ( model.isEmpty() )
+				continue;
+			const QVector<LodSrcShape> & shapes =
+				lodgenLoadModel( opts.dataRoot, model, modelCache );
+			if ( shapes.isEmpty() )
+				continue;
+			Transform xf;
+			xf.translation = Vector3( ( r.pos[0] - cwX ) * invDim,
+				( r.pos[1] - cwY ) * invDim, r.pos[2] * invDim );
+			xf.rotation = r.rot;
+			xf.scale = r.scale * invDim;
+			for ( const LodSrcShape & s : shapes ) {
+				for ( const Triangle & t : s.tris ) {
+					scene.addTriangle( xf * s.pos[t.v1()], xf * s.pos[t.v2()],
+						xf * s.pos[t.v3()] );
+					skirtTris++;
+				}
+			}
+		}
+		aoSkirtTris = skirtTris;
+		aoSkirtPlacements = skirtPlacements.size();
 		for ( auto it = buckets.constBegin(); it != buckets.constEnd(); ++it )
 			for ( const QVector<Triangle> & ct : it.value().cellTris )
 				for ( const Triangle & t : ct )
@@ -1635,6 +1727,9 @@ bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
 			*error += QString( "; buried cull: %1 triangles from %2 placements, "
 				"%3 kept whole (all-buried)" )
 				.arg( culledTris ).arg( culledPlacements ).arg( rescuedPlacements );
+		if ( aoSkirtPlacements )
+			*error += QString( "; AO skirt: %1 neighbouring placements, %2 occluder triangles" )
+				.arg( aoSkirtPlacements ).arg( aoSkirtTris );
 	}
 	return true;
 }
