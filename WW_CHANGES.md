@@ -45,6 +45,12 @@ id that addresses each subsegment. On vanilla MaleBody it now reads
 where before the fix all four said `bone none`. `outfit_sidecars.sh` gains
 checks 11 and 12 on exactly that, 12 of 12.
 
+**The check was proved able to fail**, not assumed to be. Reverting the one line
+that resolves a subsegment's row, rebuilding, and running again puts all four
+rows back to `UI 2, bone none` -- the parent segment's entry, which is the
+defect itself -- and check 11 fails while check 12 still passes, so it
+discriminates rather than merely noticing a broken build.
+
 **Not covered by a harness: the writer change.** Every path that calls
 `riggingWriteSegmentLayout` is in the dock. It was checked by hand against the
 three vanilla families above, and the reader no longer depends on the field
