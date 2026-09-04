@@ -2295,7 +2295,7 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 	bool haveRegion, const int * region, const QString & outDir,
 	bool haveObjects, const QString & dataRoot, bool identity,
 	const QString & texDir, bool geomorph, bool terrainIdentity,
-	const QString & impostors, bool listCandidates, bool atlas )
+	const QString & impostors, bool listCandidates, bool atlas, bool bakeAO )
 {
 	if ( listCandidates && haveRegion ) {
 		EsmWorld world;
@@ -2341,6 +2341,7 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 		LodgenObjectOptions opts;
 		opts.dim = dim > 0 ? dim : 4;
 		opts.identity = identity;
+		opts.bakeAO = bakeAO;
 		opts.impostorDir = impostors;
 		opts.dataRoot = dataRoot.isEmpty()
 			? QStringLiteral( "E:/Tools/Fallout 4/DataUnpacked/Data" ) : dataRoot;
@@ -2423,6 +2424,7 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 					LodgenObjectOptions oopts;
 					oopts.dim = d;
 					oopts.identity = identity;
+					oopts.bakeAO = bakeAO;
 					oopts.impostorDir = impostors;
 					oopts.dataRoot = dataRoot.isEmpty()
 						? QStringLiteral( "E:/Tools/Fallout 4/DataUnpacked/Data" ) : dataRoot;
@@ -3835,7 +3837,7 @@ int usage()
 		  << "                                          never vanilla's (collision shadows\n"
 		  << "                                          the vanilla sheet for vanilla BTOs)\n"
 		  << "  lodgen <file.esm> --worldspace HEX --objects X Y [--dim 4]\n"
-		  << "         [--data-root DIR] [--no-identity] -o OUT.bto\n"
+		  << "         [--data-root DIR] [--no-identity] [--no-ao] -o OUT.bto\n"
 		  << "                                          rung 2: stitch one object chunk\n"
 		  << "                                          from per-object _LOD meshes; with\n"
 		  << "                                          identity (default) vertices carry\n"
@@ -3934,6 +3936,9 @@ int nifskopeCliMain( const QStringList & args )
 	bool lgHaveObjects = false;
 	QString lgDataRoot;
 	bool lgIdentity = true;
+	// The AO bake is the identity channel's B. Off leaves it at 255, which is
+	// what makes each object ONE flat colour -- the index and nothing else.
+	bool lgBakeAO = true;
 	QString lgTexDir;
 	bool lgGeomorph = false;
 	bool lgTerrainIdentity = false;
@@ -4003,6 +4008,7 @@ int nifskopeCliMain( const QStringList & args )
 		}
 		else if ( t == QLatin1String( "--data-root" ) ) lgDataRoot = next();
 		else if ( t == QLatin1String( "--no-identity" ) ) lgIdentity = false;
+		else if ( t == QLatin1String( "--no-ao" ) ) lgBakeAO = false;
 		else if ( t == QLatin1String( "--tex-dir" ) ) lgTexDir = next();
 		else if ( t == QLatin1String( "--geomorph" ) ) lgGeomorph = true;
 		else if ( t == QLatin1String( "--terrain-identity" ) ) lgTerrainIdentity = true;
@@ -4151,7 +4157,7 @@ int nifskopeCliMain( const QStringList & args )
 			lgHaveTerrain, lgChunk[0], lgChunk[1], lgDim, outFile,
 			lgHaveRegion, lgRegion, lgOutDir,
 			lgHaveObjects, lgDataRoot, lgIdentity, lgTexDir, lgGeomorph,
-			lgTerrainIdentity, lgImpostors, lgListCandidates, lgAtlas );
+			lgTerrainIdentity, lgImpostors, lgListCandidates, lgAtlas, lgBakeAO );
 	else if ( cmd == QLatin1String( "anim-setup" ) )
 		rc = cmdAnimSetup( file, block, controllers, sequence, newSequence,
 						   standalone, effectVar, intVar, listOnly, outFile );
