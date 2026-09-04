@@ -55,6 +55,11 @@
 #      would silently throw the decision away
 #  14. regenerating is idempotent: three passes over the same pair are
 #      byte-identical, so the carry-forward cannot drift a file it re-reads
+#  15. the Issue Manager's sidecar check finds each fault and stays QUIET on a
+#      healthy pair -- a checker that fires on everything is worse than none
+#  16. and the fix it offers actually resolves the finding: generate, re-check,
+#      nothing left. A button that exists is not a fix; this is the same bar the
+#      Repairs button failed once already.
 #
 # NOT COVERED: the matching writer change. riggingWriteSegmentLayout now emits
 # vanilla's convention (0xFFFFFFFF on a segment, the parent's row on a
@@ -380,6 +385,54 @@ if cmp -s "$W/pres/pass1.ssf" "$W/pres/pass2.ssf" \
 else
 	check 0 "14. three regenerates are byte-identical" "the carry-forward drifts"
 fi
+
+echo "== Issue Manager: the sidecar check =="
+ISS="$W/issues"
+mkdir -p "$ISS/absent" "$ISS/donor" "$ISS/orphan" "$ISS/healthy"
+SRC_NIF="$DATA/Meshes/Armor/ArmoredCoat/OutfitM.nif"
+SRC_SSF="$DATA/Meshes/Armor/ArmoredCoat/OutfitM.ssf"
+
+# the .ssf is simply not there
+cp "$SRC_NIF" "$ISS/absent/OutfitM.nif"
+# a copied mesh still naming its donor's file
+cp "$SRC_NIF" "$ISS/donor/MyOutfit.nif"; cp "$SRC_SSF" "$ISS/donor/MyOutfit.ssf"
+# a shape the file has no key for
+cp "$SRC_NIF" "$ISS/orphan/OutfitM.nif"
+"$PY" - "$SRC_SSF" "$ISS/orphan/OutfitM.ssf" <<'PYEOF'
+import json, sys
+doc = json.load(open(sys.argv[1], encoding='utf-8-sig'))
+doc['OutfitM_PW:0'] = doc.pop('OutfitM:0')      # the shape was renamed, the file was not
+open(sys.argv[2], 'w', encoding='utf-8', newline='\r\n').write(json.dumps(doc, indent=3))
+PYEOF
+# and one that is fine
+cp "$SRC_NIF" "$ISS/healthy/OutfitM.nif"; cp "$SRC_SSF" "$ISS/healthy/OutfitM.ssf"
+
+sidecheck() { "$NS" -no-gui check "$(winpath "$1")" -t "Outfit Sidecars" 2>&1; }
+A=$(sidecheck "$ISS/absent/OutfitM.nif" | grep -c "not beside this mesh")
+B=$(sidecheck "$ISS/donor/MyOutfit.nif" | grep -c "still pointing at its donor")
+C=$(sidecheck "$ISS/orphan/OutfitM.nif" | grep -c "finds no segment data for it")
+H=$(sidecheck "$ISS/healthy/OutfitM.nif" | grep -c "no findings")
+echo "     absent $A  donor $B  orphan $C  healthy-quiet $H"
+check "$([ "${A:-0}" -ge 1 ] && [ "${B:-0}" -ge 1 ] && [ "${C:-0}" -ge 1 ] && [ "${H:-0}" -eq 1 ] \
+	&& echo 1 || echo 0)" \
+	"15. the check finds all three faults and stays quiet on a healthy pair"
+
+# 16: the offered fix has to RESOLVE the finding, not merely exist.
+resolved=0
+for case in absent donor orphan; do
+	nifname=OutfitM.nif
+	[ "$case" = donor ] && nifname=MyOutfit.nif
+	"$NS" -no-gui cast "$(winpath "$ISS/$case/$nifname")" \
+		-s "Rigging/Generate Segment File (.ssf)" \
+		-o "$(winpath "$ISS/$case/$nifname")" > "$ISS/$case.fix.log" 2>&1
+	if sidecheck "$ISS/$case/$nifname" | grep -q "no findings"; then
+		resolved=$((resolved+1))
+	else
+		echo "     $case still reports:"; sidecheck "$ISS/$case/$nifname" | sed 's/^/       /' | head -3
+	fi
+done
+check "$([ "$resolved" -eq 3 ] && echo 1 || echo 0)" \
+	"16. generating the .ssf resolves all $resolved of 3 findings"
 
 echo
 echo "$pass passed, $fail failed"

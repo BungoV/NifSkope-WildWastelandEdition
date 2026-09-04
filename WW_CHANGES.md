@@ -1,5 +1,49 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-09-04c — Issue Manager finds the sidecar faults, and offers the fix
+
+Every one of these is **silent in the game**. A mesh with subsegments and no
+.ssf still loads, still renders, and simply never loses a limb. Nothing in the
+file is malformed, so nothing else in the panel would ever report it.
+
+New checker `Outfit Sidecars` (`spCheckOutfitSidecars`), six findings:
+
+| finding | why it matters | fix offered |
+|---|---|---|
+| subsegments but no `SSF File` | nothing hides when a limb comes off | Generate Segment File (.ssf) |
+| `SSF File` names another mesh's file | a copied outfit loads the ORIGINAL's dismemberment data, or none | same |
+| `SSF File` set, file not beside the mesh | same silence as having no file | same |
+| a shape is not a key in the .ssf | LoadSSF matches BY NAME, so renaming a shape orphans it — the bug Bethesda shipped in `mcoatpostwar.ssf` | same |
+| a sidecar will not parse | the reader gives up on the whole file | none |
+| .sclp names a bone outside the 48 | that entry is ignored in game; usually a typo | none |
+
+**A mesh with no .sclp is NOT reported.** Most outfits have none and want none,
+so that would be noise rather than a finding.
+
+### The Issue Manager, headless
+
+    nifskope-cli check <file> [-t <name>]
+
+runs every `checker()` spell the way the panel does — invalid index, MSG_TEST
+mode — and prints the findings, `!!` critical and `!` warning, exiting 1 if
+anything worse than a note turned up so a script can gate on it. Without
+MSG_TEST those findings go nowhere a CLI can see, which is why casting a checker
+directly appears to do nothing. `constant()` is deliberately not the filter: it
+promises a spell does not modify the file, not that it stays quiet, and a
+message box in a headless build aborts the process.
+
+### What the harness caught on the way
+
+Check 16 does not ask whether a fix button exists, it asks whether the fix
+**resolves the finding** — and the copied-mesh case failed it. The generator
+anchors `SSF File` to the Data folder, and a mesh outside one got the field left
+alone, which is worse than useless when it already names another mesh's file.
+The fallback now keeps whatever folder the field had and corrects only the file
+name, so a copy is repaired wherever it lives; a properly anchored path still
+needs the mesh under `Meshes\`, and the report says so.
+
+Harness 16 of 16.
+
 ## 2026-09-04b — .ssf: regenerating no longer throws away what was authored
 
 A subsegment hidden with `DISABLED` is a DECISION, not a fact about the mesh.

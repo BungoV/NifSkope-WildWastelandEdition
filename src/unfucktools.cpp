@@ -273,6 +273,45 @@ const IssueClass issueClasses[] = {
 	  "", "", false,
 	  "Often correct — effect meshes, editor markers and decoration are meant to be walked through." },
 
+	/* Outfit sidecars, from spCheckOutfitSidecars (riggingtools.cpp).
+	 *
+	 * Four of the five are repaired by the same spell, and it is the same
+	 * repair each time — write the .ssf from the mesh's own Bone IDs and point
+	 * the shapes at it — so they share `wholeFile` rather than being one
+	 * heading. They stay SEPARATE headings because the caveat differs: a
+	 * missing file is nothing lost, while a mesh pointing at its donor's file
+	 * means a copy someone may not know they made.
+	 */
+	{ "but no SSF File",
+	  "Dismemberment file missing",
+	  "Generate Segment File (.ssf)", "", false,
+	  "Writes the .ssf from the Bone IDs the subsegments already carry, and points every shape's SSF File at it. Save the NIF afterwards \u2014 that field is a change to the model." },
+
+	{ "still pointing at its donor",
+	  "Dismemberment file named after another mesh",
+	  "Generate Segment File (.ssf)", "", false,
+	  "A copied mesh keeps the original's SSF File, and the engine loads the ORIGINAL's dismemberment data or none at all. Regenerating renames it after this mesh." },
+
+	{ "which is not beside this mesh",
+	  "Dismemberment file not found",
+	  "Generate Segment File (.ssf)", "", false,
+	  "The field is right and the file is absent, so nothing hides when a limb comes off. Regenerating writes it." },
+
+	{ "finds no segment data for it",
+	  "Shape missing from its dismemberment file",
+	  "Generate Segment File (.ssf)", "", false,
+	  "LoadSSF matches shapes to the file's keys BY NAME, so renaming a shape orphans it \u2014 the bug Bethesda shipped in mcoatpostwar.ssf. Regenerating re-keys the file to the shapes that are actually there." },
+
+	{ "is not valid JSON",
+	  "Sidecar file will not parse",
+	  "", "", false,
+	  "No automatic fix \u2014 the engine's reader gives up on the whole file, so none of it loads. Repair the JSON, or regenerate the .ssf to replace it." },
+
+	{ "not one of the 48 tri-scale bones",
+	  "Bone scale names an unknown bone",
+	  "", "", false,
+	  "No automatic fix \u2014 the entry is ignored in game. Every shipped .sclp carries the same 48 *_skin bones; a name outside that set is usually a typo." },
+
 	{ "mixes compiled and editable collision",
 	  "Compiled and editable collision in one file",
 	  "", "", false,

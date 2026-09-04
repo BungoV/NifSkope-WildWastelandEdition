@@ -2951,6 +2951,70 @@ int cmdWorld( const QString & file, int block, const QString & typeFilter )
  *  Bone IDs are hashes; the names come from the same lookup the .ssf writer
  *  uses, so an unresolved one prints as #hash rather than being guessed at.
  */
+/*! Every checker spell, the way the Issue Manager runs them.
+ *
+ *  The panel's own scan, headless: cast each `checker()` spell with an invalid
+ *  index in MSG_TEST mode and print what it logs. Without MSG_TEST the findings
+ *  go nowhere a CLI can see, which is why casting a checker directly appears to
+ *  do nothing.
+ *
+ *  `constant()` is deliberately NOT the filter here, for the reason the panel
+ *  records: it promises a spell does not modify the file, not that it stays
+ *  quiet, and several constant spells open a message box -- which in a headless
+ *  QCoreApplication aborts the process.
+ */
+int cmdCheck( const QString & file, const QString & only )
+{
+	NifModel nif;
+	if ( !loadNif( nif, file ) )
+		return 1;
+
+	QList<SpellPtr> checkers;
+	for ( SpellPtr s : SpellBook::spells() ) {
+		if ( !s || checkers.contains( s ) || !s->checker() )
+			continue;
+		if ( !only.isEmpty() && !s->name().contains( only, Qt::CaseInsensitive ) )
+			continue;
+		checkers.append( s );
+	}
+	std::sort( checkers.begin(), checkers.end(),
+		[]( const SpellPtr & a, const SpellPtr & b ) { return a->name() < b->name(); } );
+
+	const BaseModel::MsgMode was = nif.getMessageMode();
+	nif.setMessageMode( BaseModel::MSG_TEST );
+	int findings = 0, worst = 2;
+	for ( SpellPtr s : checkers ) {
+		if ( !s->isApplicable( &nif, QModelIndex() ) )
+			continue;
+		nif.getMessages();						// drain anything pending
+		s->cast( &nif, QModelIndex() );
+		const QList<TestMessage> messages = nif.getMessages();
+		if ( messages.isEmpty() )
+			continue;
+		out() << s->name() << Qt::endl;
+		for ( const TestMessage & msg : messages ) {
+			const QtMsgType type = msg.type();
+			const char * mark = ( type == QtCriticalMsg || type == QtFatalMsg ) ? "!!"
+				: ( type == QtWarningMsg ? " !" : "  " );
+			out() << "  " << mark << " " << QString( msg ) << Qt::endl;
+			findings++;
+			worst = qMin( worst, ( type == QtCriticalMsg || type == QtFatalMsg ) ? 0
+				: ( type == QtWarningMsg ? 1 : 2 ) );
+		}
+	}
+	nif.setMessageMode( was );
+
+	if ( !findings ) {
+		out() << "no findings" << Qt::endl;
+		return 0;
+	}
+	out() << findings << " finding(s). The Issue Manager groups these and offers "
+		  << "the spell that repairs each one." << Qt::endl;
+	// A clean exit code for "nothing wrong", 1 for anything worse than a note,
+	// so a script can gate on it.
+	return worst < 2 ? 1 : 0;
+}
+
 int cmdSegments( const QString & file, int block )
 {
 	NifModel nif;
@@ -3674,6 +3738,12 @@ int usage()
 		  << "  world <file> [-b N] [-t <type>]         each NiAVObject's WORLD transform,\n"
 		  << "                                          for diffing two files by name\n"
 		  << "  list <file> [-t <type>]                 block list, optionally filtered\n"
+		  << "  check <file> [-t <name>]                the Issue Manager's scan, headless:\n"
+		  << "                                          every checker spell, its findings\n"
+		  << "                                          marked !! critical / ! warning;\n"
+		  << "                                          -t runs only checks whose name\n"
+		  << "                                          contains that text. Exit 1 if\n"
+		  << "                                          anything worse than a note\n"
 		  << "  segments <file> [-b N]                  FO4 dismemberment table: every\n"
 		  << "                                          segment and subsegment, its\n"
 		  << "                                          triangles, its owning bone and\n"
@@ -4038,6 +4108,8 @@ int nifskopeCliMain( const QStringList & args )
 		rc = cmdList( file, type );
 	else if ( cmd == QLatin1String( "segments" ) )
 		rc = cmdSegments( file, block );
+	else if ( cmd == QLatin1String( "check" ) )
+		rc = cmdCheck( file, type );
 	else if ( cmd == QLatin1String( "world" ) )
 		rc = cmdWorld( file, block, type );
 	else if ( cmd == QLatin1String( "dump" ) )

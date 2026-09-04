@@ -11,7 +11,7 @@ listed here; they are inherited and still present.
 | Commits since the fork point | **383** |
 | `src/` | **145 files changed, +112,219 / −7,902 lines** |
 | New source files under `src/` | **57** |
-| Spells (menu operations) | **158 → 206** (+48) |
+| Spells (menu operations) | **158 → 207** (+49) |
 | Rebindable shortcut actions | **53** |
 | Headless regression harnesses | **61** |
 
@@ -276,6 +276,12 @@ corresponding spell, so there is one implementation per fix, not two.
 
 Destructive spells declare themselves (`Spell::destructive()`), and the
 confirmation prompt asks in the spell's own words instead of a generic warning.
+
+It also reports the faults that are **silent in game** rather than malformed in
+the file — an outfit whose .ssf dismemberment sidecar is missing, named after
+the mesh it was copied from, or does not mention its shapes, each with Generate
+Segment File (.ssf) as the fix. `nifskope-cli check <file>` runs the same scan
+headlessly and exits 1 if anything worse than a note turned up.
 
 ## 12. Headless CLI
 

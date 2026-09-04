@@ -1,6 +1,7 @@
 #include "spellbook.h"
 #include "wwskin.h"
 #include "blocks.h"
+#include "sanitize.h"
 #include "mesh.h"
 #include "nifsnapshot.h"
 #include "nifskope.h"
@@ -8179,6 +8180,7 @@ public:
 	}
 	bool undoable() const override final { return true; }
 
+	//! Public because the sidecar checker asks the same question.
 	static bool hasSegmentedShape( const NifModel * nif )
 	{
 		for ( qint32 block = 0; block < nif->getBlockCount(); block++ ) {
@@ -8240,18 +8242,40 @@ public:
 		file.write( json );
 		file.close();
 
-		// Point every shape at it. The field is a Data-relative path with
-		// backslashes; vanilla points both of OutfitM.nif's shapes at the one
-		// file, because the file holds an entry for each.
+		/* Point every shape at it. The field is a Data-relative path with
+		 * backslashes; vanilla points both of OutfitM.nif's shapes at the one
+		 * file, because the file holds an entry for each.
+		 *
+		 * When the mesh is not under a Data folder there is nothing to anchor
+		 * to, and the field cannot be written from scratch -- but leaving it
+		 * ALONE is worse than useless if it already names another mesh's file,
+		 * which is exactly what a copied outfit carries. So the fallback keeps
+		 * whatever directory the field already has and corrects only the file
+		 * name, which fixes the copy without inventing a path.
+		 */
 		const QString relative = riggingDataRelativePath( ssfPath );
-		int repointed = 0;
+		const QString wanted = nifInfo.completeBaseName() + QStringLiteral( ".ssf" );
+		int repointed = 0, renamed = 0;
 		for ( qint32 block = 0; block < nif->getBlockCount(); block++ ) {
 			QModelIndex shared = nif->getIndex( nif->getBlockIndex( block ), "Segment Data" );
 			QModelIndex field = nif->getIndex( shared, "SSF File" );
-			if ( !field.isValid() || relative.isEmpty() )
+			if ( !field.isValid() )
 				continue;
-			nif->set<QString>( field, relative );
-			repointed++;
+			if ( !relative.isEmpty() ) {
+				nif->set<QString>( field, relative );
+				repointed++;
+				continue;
+			}
+			const QString had = nif->get<QString>( field );
+			if ( had.isEmpty() )
+				continue;
+			const int cut = qMax( had.lastIndexOf( QLatin1Char( '\\' ) ),
+								  had.lastIndexOf( QLatin1Char( '/' ) ) );
+			const QString rebuilt = had.left( cut + 1 ) + wanted;
+			if ( rebuilt != had ) {
+				nif->set<QString>( field, rebuilt );
+				renamed++;
+			}
 		}
 
 		QStringList report;
@@ -8276,11 +8300,18 @@ public:
 				"longer has and were dropped. They addressed nothing the engine could reach "
 				"either, but if that is a surprise, the segmentation changed under the old file." )
 				.arg( dropped );
-		if ( relative.isEmpty() )
-			summary += Spell::tr( "\n\nThe NIF is not under a Data folder, so 'SSF File' was left alone: "
-				"the engine needs a Data-relative path and this one cannot be anchored." );
-		else
+		if ( !relative.isEmpty() ) {
 			summary += Spell::tr( "\n\nSSF File = %1 on %2 shape(s)." ).arg( relative ).arg( repointed );
+		} else if ( renamed ) {
+			summary += Spell::tr( "\n\nThe NIF is not under a Data folder, so 'SSF File' keeps the "
+				"folder it already had; the file name was corrected to %1 on %2 shape(s). Move the "
+				"mesh under Meshes\\ and run this again for a properly anchored path." )
+				.arg( wanted ).arg( renamed );
+		} else {
+			summary += Spell::tr( "\n\nThe NIF is not under a Data folder and 'SSF File' is empty, so "
+				"it was left that way: the engine needs a Data-relative path and there is nothing "
+				"here to anchor one to." );
+		}
 		if ( !unresolved.isEmpty() ) {
 			QStringList hashes;
 			for ( quint32 h : unresolved )
@@ -8596,3 +8627,143 @@ public:
 };
 
 REGISTER_SPELL( spRiggingGenerateSCLP )
+
+/*! Sidecar faults, for the Issue Manager.
+ *
+ *  Every one of these is silent in the game. A mesh with subsegments and no
+ *  .ssf still loads, still renders, and simply never loses a limb; a shape
+ *  renamed out from under its .ssf does the same, which is a bug Bethesda
+ *  shipped in mcoatpostwar.ssf. Nothing in the file is malformed, so nothing
+ *  else here would report it.
+ *
+ *  What is NOT reported: a mesh with no .sclp. Most outfits have none and want
+ *  none, so that would be noise rather than a finding.
+ */
+class spCheckOutfitSidecars final : public spChecker
+{
+public:
+	QString name() const override final { return Spell::tr( "Outfit Sidecars" ); }
+	QString page() const override final { return Spell::tr( "Error Checking" ); }
+	QString hint() const override final
+	{
+		return Spell::tr( "Reports meshes whose .ssf dismemberment file is missing, misnamed, "
+			"or does not mention their shapes, and .sclp bone-scale files the engine cannot use." );
+	}
+
+	bool isApplicable( const NifModel * nif, const QModelIndex & index ) override final
+	{
+		if ( !nif || index.isValid() || nif->getBSVersion() != 130 )
+			return false;
+		if ( nif->getFileInfo().fileName().isEmpty() )
+			return false;					// unsaved: there is no "beside the mesh" yet
+		return spRiggingGenerateSSF::hasSegmentedShape( nif );
+	}
+
+	QModelIndex cast( NifModel * nif, const QModelIndex & ) override final
+	{
+		const QFileInfo nifInfo = nif->getFileInfo();
+		const QDir folder( nifInfo.absolutePath() );
+		const QString expected = nifInfo.completeBaseName() + QStringLiteral( ".ssf" );
+
+		// Read whatever .ssf is actually there ONCE, by the name the engine
+		// would look under: beside the mesh, named after the mesh.
+		const QString ssfPath = folder.filePath( expected );
+		QSet<QString> shapesInFile;
+		bool ssfPresent = QFileInfo::exists( ssfPath );
+		if ( ssfPresent ) {
+			QFile file( ssfPath );
+			if ( file.open( QIODevice::ReadOnly ) ) {
+				QJsonParseError error;
+				const QJsonDocument doc = QJsonDocument::fromJson( file.readAll(), &error );
+				file.close();
+				if ( error.error != QJsonParseError::NoError ) {
+					nif->logMessage( name(), tr( "%1 is not valid JSON (%2), so no segment data loads." )
+						.arg( expected ).arg( error.errorString() ), QMessageBox::Critical );
+					ssfPresent = false;
+				} else if ( doc.isObject() ) {
+					for ( const QString & key : doc.object().keys() )
+						shapesInFile.insert( key.toLower() );
+				}
+			}
+		}
+
+		for ( qint32 block = 0; block < nif->getBlockCount(); block++ ) {
+			QModelIndex shape = nif->getBlockIndex( block );
+			if ( !nif->isNiBlock( shape, "BSSubIndexTriShape" ) )
+				continue;
+			QModelIndex shared = nif->getIndex( shape, "Segment Data" );
+			if ( !shared.isValid() )
+				continue;
+
+			int subsegments = 0;
+			QModelIndex segments = nif->getIndex( shape, "Segment" );
+			for ( int s = 0; s < nif->rowCount( segments ); s++ ) {
+				QModelIndex children = nif->getIndex( nif->getIndex( segments, s ), "Sub Segment" );
+				if ( children.isValid() )
+					subsegments += nif->rowCount( children );
+			}
+			if ( !subsegments )
+				continue;					// nothing to own, so nothing to report
+
+			const QString shapeName = nif->get<QString>( shape, "Name" );
+			const QString field = nif->get<QString>( nif->getIndex( shared, "SSF File" ) );
+
+			if ( field.isEmpty() ) {
+				nif->logMessage( name(), tr( "[%1] '%2' has %3 subsegments but no SSF File, "
+					"so nothing hides when a limb comes off." )
+					.arg( block ).arg( shapeName ).arg( subsegments ), QMessageBox::Warning );
+				continue;
+			}
+
+			const QString named = QFileInfo( QString( field )
+				.replace( QLatin1Char( '\\' ), QLatin1Char( '/' ) ) ).fileName();
+			if ( named.compare( expected, Qt::CaseInsensitive ) != 0 ) {
+				nif->logMessage( name(), tr( "[%1] SSF File names '%2', but this mesh is '%3' \u2014 "
+					"a copy still pointing at its donor." )
+					.arg( block ).arg( named ).arg( nifInfo.fileName() ), QMessageBox::Warning );
+				continue;
+			}
+			if ( !ssfPresent ) {
+				nif->logMessage( name(), tr( "[%1] SSF File names '%2', which is not beside this mesh." )
+					.arg( block ).arg( named ), QMessageBox::Warning );
+				continue;
+			}
+			if ( !shapeName.isEmpty() && !shapesInFile.contains( shapeName.toLower() ) ) {
+				nif->logMessage( name(), tr( "[%1] '%2' is not a key in %3, so the engine finds no "
+					"segment data for it." ).arg( block ).arg( shapeName ).arg( named ),
+					QMessageBox::Warning );
+			}
+		}
+
+		// .sclp: only faults, never absence.
+		const QString sclpName = nifInfo.completeBaseName() + QStringLiteral( ".sclp" );
+		const QString sclpPath = folder.filePath( sclpName );
+		if ( QFileInfo::exists( sclpPath ) ) {
+			QFile file( sclpPath );
+			if ( file.open( QIODevice::ReadOnly ) ) {
+				QJsonParseError error;
+				const QJsonDocument doc = QJsonDocument::fromJson( file.readAll(), &error );
+				file.close();
+				if ( error.error != QJsonParseError::NoError ) {
+					nif->logMessage( name(), tr( "%1 is not valid JSON (%2), so no bone scales load." )
+						.arg( sclpName ).arg( error.errorString() ), QMessageBox::Critical );
+				} else {
+					QSet<QString> known;
+					for ( const char * bone : riggingSclpBones )
+						known.insert( QString::fromLatin1( bone ).toLower() );
+					for ( const QJsonValue & entry : doc.array() ) {
+						const QString bone = entry.toObject().value(
+							QStringLiteral( "Name" ) ).toString();
+						if ( !bone.isEmpty() && !known.contains( bone.toLower() ) )
+							nif->logMessage( name(), tr( "%1 names '%2', which is not one of the 48 "
+								"tri-scale bones, so that entry is ignored." )
+								.arg( sclpName ).arg( bone ), QMessageBox::Warning );
+					}
+				}
+			}
+		}
+		return QModelIndex();
+	}
+};
+
+REGISTER_SPELL( spCheckOutfitSidecars )
