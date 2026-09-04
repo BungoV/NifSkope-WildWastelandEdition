@@ -116,7 +116,7 @@ object index, objects have no material class.
 **Terrain has no free slots left.** Anything further needs either a wider desc
 or a per-chunk texture.
 
-### Water carries nothing, and cannot
+### Water carries nothing TODAY, and that is a choice, not a law
 
 LOD water is its own `BSMultiBoundNode 'WATER'` under a `BSEffectShaderProperty`,
 with `WATER_VERTEX_DESC` = `0x100000000002` — **position only, 8 bytes**. It is
@@ -124,13 +124,38 @@ also one quad per wet cell: the far-ring shape for a whole dim-4 chunk measured
 **8 vertices, 4 triangles**, corners 4096 units apart. Even widened, that mesh
 cannot describe a shoreline, and foam wants metres.
 
-That is why shore proximity lives on the TERRAIN vertices, at 128-unit sample
-spacing, following the true contour because the contour comes from terrain
-height rather than from the per-cell water plane. Two further obstacles if water
-data is ever revisited: the quads would have to be tessellated near shores to
-have vertices worth writing to, and vertex colour on an EFFECT shader is not
-known to be inert to stock FO4 the way UV2 and Eye Data are on lighting
-shaders — that would need the PDB or a live test, not an assumption.
+That is why shore proximity lives on the TERRAIN vertices today, at 128-unit
+sample spacing, following the true contour because the contour comes from
+terrain height rather than from the per-cell water plane.
+
+**But the water mesh is ours to generate, and 4 vertices a cell is only what
+nothing has needed yet.** Subdivide it — adaptively, dense near shores where the
+gradients are and coarse in open water, with the decimation the terrain pass
+already has — and real per-vertex water data becomes possible. Ranked by value:
+
+  * **depth** (water height minus terrain height): absorption and colour,
+    transparency, where waves shoal and break, where foam forms. The single
+    thing that makes water read as water. Computable from data the water pass
+    already holds — the per-cell height and the per-sample terrain grid it
+    already tests exposure against.
+  * **distance to land**, at the water's own resolution rather than inferred
+    from the far side. The same BFS the terrain shore channel uses.
+  * **flow direction and speed** for rivers, off the steepest-descent machinery
+    the wetness channel is already built on.
+  * **direction to shore**, so waves travel toward land and break parallel to
+    it — the gradient of the distance field, so it arrives with it.
+  * **fetch**: how far open water runs upwind, which sets wave amplitude and
+    separates open ocean from a sheltered inlet.
+
+Sizing: uniform 128-unit sampling would be ~1089 vertices per CELL against the
+Land shape's 1068 for a whole chunk, so adaptive is not an optimisation, it is
+the only version that fits.
+
+The one genuine unknown is which slots are inert. Water is a
+`BSEffectShaderProperty`, and effect shaders certainly sample **UV0** for their
+base texture, so that slot is not free the way it is on Land. UV2 and Eye Data
+are probably free and "probably" is not the standard this file holds itself to
+— settle it with the PDB or a live test before writing anything there.
 
 ---
 
