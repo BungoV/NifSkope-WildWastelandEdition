@@ -18,9 +18,10 @@ written. **FREE** = unused, reserved.
 
 ## Objects — `.bto`
 
-Identity profile, `OBJ_VERTEX_DESC_COLORS` = `0x3B00000650406`, **24-byte
-stride**. Without `--no-identity` the profile is `0x1B00000650405`, 20 bytes,
-and carries none of this.
+Identity profile. `--no-identity` gives `0x1B00000650405`, 20 bytes, carrying
+none of this. With identity: `0x3B00000650406`, 24 bytes. With identity AND the
+extra channels (the default, `objectChannels`): **32 bytes**, UV2 and Eye Data
+added. Never hardcode any of it — see the offsets note below.
 
 | slot | width | holds | status |
 |---|---|---|---|
@@ -69,9 +70,13 @@ and free for us.
 > sway weight into a discard mask and eats the branch cards from the inside out.
 > If a generator option ever needs that flag, sway moves to UV2.x that day.
 
-Choosing A over UV2 also keeps the stride at 24 bytes. The 24-byte desc still
-owes the stock-engine tolerance gate; widening it to 28 before that gate is run
-would stack an unmeasured risk on an unmeasured risk.
+A costs no stride at all, which is why sway went there even though the profile
+has since widened to 32 for sky visibility and ground blend. That widening makes
+the **stock-engine tolerance gate** — still unrun — a bigger measurement than
+it was, not a different one: the question was always whether stock FO4 tolerates
+a fatter object desc, and the answer covers 32 as it would have covered 24.
+Until it is run, every channel here is unproven in the engine, however well
+measured in the file.
 
 ### Movement type is NOT in the mesh
 
