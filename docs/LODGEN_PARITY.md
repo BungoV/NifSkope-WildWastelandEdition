@@ -82,3 +82,45 @@ vanilla's. The `--atlas` pass is an opt-in draw-call optimization
 its OWN name (`<ws>.LodgenObjects.DDS` — vanilla's name shadows the
 archived sheet under every vanilla BTO still in play), BC3 with dilated
 RGB. Full post-mortem: docs/MISTAKES.md 2026-08-31b.
+
+## Vanilla clips object geometry below the terrain; we do not (2026-09-04)
+
+bungo, looking at the rendered comparison: "the rocks are fuller in our lod, is
+it because during LOD gen part of them under the terrain gets culled?" Yes.
+
+Measured on Sanctuary (-20,24) dim 4, our rock vertices against vanilla's, then
+each vertex against the chunk's own .btr surface:
+
+| our rock vertices | count | below ground | median height |
+|---|---|---|---|
+| present in vanilla | 3696 | 46.0% | +12 |
+| absent from vanilla | 796 | **97.7%** | **-424** |
+
+So the 18% of rock geometry vanilla does not have is almost entirely buried.
+Vanilla's generator drops it; ours keeps it, which is why our rocks read as
+fuller and why this chunk is 104% of vanilla's triangles.
+
+FIRST ANSWER WAS WRONG, and the reason is worth keeping: the orphan vertices
+were first measured against each ROCK'S OWN Z range, where they sat at 0.18-0.62
+of the height and looked like "the middle of the rock, so not a terrain cut". A
+half-buried boulder puts its buried half in exactly that band. The reference has
+to be the ground, not the object.
+
+Per material, ours against vanilla, same chunk:
+
+| texture | verts | vertex-exact in vanilla |
+|---|---|---|
+| ShackLOD01 | 201 | 100% |
+| CommonwealthRockSlab01LOD | 1467 | 83.2% |
+| CommonwealthRockSlab02LOD | 3044 | 81.9% |
+| tree trunks and branches | ~30k | 0-4% |
+
+The trees are near zero BY DESIGN -- the deterministic repetition breaking
+rotates and U-mirrors every tree, so no vertex coincides. That is what makes the
+global figure (86% of vanilla's vertices unmatched) meaningless on its own.
+
+Two things follow. Shacks at 100% and rocks at 82% vertex-exact say vanilla's
+object LOD is built from the same per-object `_LOD_N.nif` meshes we read from
+MNAM -- not from precombined geometry, which would not coincide vertex for
+vertex with the shipped LOD meshes. And a below-terrain cull is an open item for
+us: it would cut ~18% of rock geometry with no visible change.
