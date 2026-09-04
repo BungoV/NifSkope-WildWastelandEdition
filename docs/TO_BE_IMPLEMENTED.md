@@ -74,6 +74,21 @@ settings can be concatenated into one BSSubIndexTriShape, which is what would
 reproduce vanilla's 2-shape structure. The tiling shapes cannot join and would
 stay separate, so the target is 3 rather than 2.
 
+## LODGEN vertex packing is specified: docs/LODGEN_VERTEX_PACKING.md
+
+CS is the consumer, so the packing is an INTERFACE between the two repos and now
+has a file of its own. Read it before adding a channel on either side.
+
+Open items it names:
+
+  * the manifest has no CLASS and no BOUND RADIUS. The charter's rule is that
+    the class decides what the A channel means; without it A is interpretable
+    only because it is currently written for trees alone.
+  * tree sway is DECIDED (vertex alpha, 0 trunk -> 1 branch tip) and not yet
+    written.
+  * the 24-byte identity desc still owes the stock-engine tolerance gate. That
+    is why sway went into the existing alpha byte rather than widening to 28.
+
 ## CHARTERED: FO4 LOD generation — bungo-scoped 2026-08-31
 
 NifSkope generates Fallout 4's world LOD — base-game parity plus a few
