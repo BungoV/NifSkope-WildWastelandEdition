@@ -55,6 +55,25 @@ Shipped 2026-09-03 (WW_CHANGES). Still open:
   * **The economical base.** Vanilla often makes the dominant bone the base and
     lists only the exceptions. Ours lists everything. Same map, larger file.
 
+## OPEN: --atlas repoints textures but does not merge shapes
+
+Measured 2026-09-04 while rendering the vanilla-vs-generated comparison.
+
+Vanilla's Commonwealth.4.-20.24.BTO is **2 shapes, 1 texture set** -- one
+pre-baked worldspace atlas. Ours is **8 shapes, 8 texture sets**, one per
+distinct source LOD texture the chunk's 678 objects use. That is deliberate for
+the default (direct refs are stock-legal; the textures ship in the BA2s), but
+`--atlas` only closes half of it:
+
+    atlas: 6 textures in cells, 6 shapes moved, 2 tiling shapes kept direct
+
+The UVs are remapped and 6 buckets now point at one sheet -- and the shape count
+stays 8. Texture binds drop, draw calls do not. What is missing is a merge pass
+after the atlas: shapes that ended up sharing the sheet and the same shader
+settings can be concatenated into one BSSubIndexTriShape, which is what would
+reproduce vanilla's 2-shape structure. The tiling shapes cannot join and would
+stay separate, so the target is 3 rather than 2.
+
 ## CHARTERED: FO4 LOD generation — bungo-scoped 2026-08-31
 
 NifSkope generates Fallout 4's world LOD — base-game parity plus a few

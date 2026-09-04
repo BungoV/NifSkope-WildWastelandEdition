@@ -377,6 +377,13 @@ public:
 
 	QModelIndex indexAt( const QPointF & p, bool shiftModifier = false );
 
+	/*! The scene rendered offscreen at 2^shift times the viewport size.
+	 *
+	 *  grabFramebuffer() can only return what the window is, and a window
+	 *  cannot be resized past the desktop. This renders into an FBO instead.
+	 */
+	QImage grabSupersampled( int shift );
+
 	//! Where the timeline is parked right now.
 	/*! The freeze dialog seeds itself from this, so "scrub until it looks right,
 	 *  then freeze this file there" needs no second guess at the number. */

@@ -20792,6 +20792,59 @@ void GLView::advanceGears()
 }
 
 
+/*! The scene rendered offscreen at 2^shift times the viewport size.
+ *
+ *  The window's own framebuffer cannot be grabbed larger than the desktop. A
+ *  resize past it is clamped, and the clamp is not symmetric: on a multi-monitor
+ *  row the width can span the whole virtual desktop while the height stops at
+ *  one screen, so asking for 3840x2400 returns 3840x1067 -- a caller that trusts
+ *  the request gets a squashed capture rather than an error.
+ *
+ *  Save Screenshot already solves this with an FBO and a temporary resizeGL.
+ *  This is that path, factored out so the WW_RENDER_SHOT harness can reach it;
+ *  the alternative was a second copy, and the copy is the one that drifts.
+ */
+QImage GLView::grabSupersampled( int shift )
+{
+	shift = qBound( 0, shift, 3 );
+	if ( shift == 0 )
+		return grabFramebuffer();
+
+	const int w = width();
+	const int h = height();
+	const double p = devicePixelRatioF();
+
+	auto prvContext = pushGLContext();
+	resizeGL( int( p * ( w << shift ) + 0.5 ), int( p * ( h << shift ) + 0.5 ) );
+
+	const QSize fboSize( getSizeInPixels() );
+	QImage image;
+	const Color4 & background = cfg.background;
+	try {
+		QOpenGLFramebufferObjectFormat fboFmt;
+		fboFmt.setTextureTarget( GL_TEXTURE_2D );
+		fboFmt.setInternalTextureFormat( GL_SRGB8_ALPHA8 );
+		fboFmt.setMipmap( false );
+		fboFmt.setAttachment( QOpenGLFramebufferObject::Attachment::Depth );
+		// Fewer MSAA samples the larger the target, exactly as saveImage does:
+		// the sample count multiplies an already multiplied buffer.
+		fboFmt.setSamples( 16 >> shift );
+
+		QOpenGLFramebufferObject fbo( fboSize.width(), fboSize.height(), fboFmt );
+		fbo.bind();
+		paintGL();
+		fbo.release();
+		image = fbo.toImage();
+	} catch ( std::exception & ) {
+		image = QImage();
+	}
+
+	glClearColor( background.red(), background.green(), background.blue(), background.alpha() );
+	resizeGL( int( p * w + 0.5 ), int( p * h + 0.5 ) );
+	popGLContext( prvContext );
+	return image;
+}
+
 // TODO: Separate widget
 void GLView::saveImage()
 {

@@ -21324,6 +21324,28 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						sc->showRefraction = !qEnvironmentVariableIsSet( "WW_RENDER_REFRACTION" )
 							|| qEnvironmentVariableIntValue( "WW_RENDER_REFRACTION" ) != 0;
 						sc->showParticles = true;
+
+						/* WW_RENDER_FLAT=1: photograph the VERTEX COLOURS and nothing
+						 * else. Texturing, lighting and every map that modulates them
+						 * off, vertex colours on.
+						 *
+						 * A per-vertex payload is invisible in a normal capture -- LOD
+						 * identity (R+G object index, B baked AO), a wind-sway weight,
+						 * an authored blend mask are all buried under the diffuse map
+						 * and then shaded on top. Turning the scene flat is the only
+						 * way to see the numbers that are actually in the file, and
+						 * doing it through the menu is not reproducible: the options
+						 * mask is restored from the user's persisted preferences at
+						 * startup, so a capture would carry whatever was last ticked.
+						 */
+						if ( qEnvironmentVariableIntValue( "WW_RENDER_FLAT" ) != 0 ) {
+							sc->options |= Scene::DoVertexColors;
+							sc->options &= ~( Scene::DoTexturing | Scene::DoLighting
+								| Scene::DoSpecular | Scene::DoGlow | Scene::DoNormalMap
+								| Scene::DoCubeMapping | Scene::DoParallax | Scene::DoGloss
+								| Scene::DoDetailTextures | Scene::DoMaterialTint
+								| Scene::DoDiffuse );
+						}
 					}
 
 					// WW_RENDER_SEQ=<name> selects a sequence. Without it the
@@ -21353,7 +21375,17 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						skope->ogl->update();
 						qApp->processEvents();
 					}
-					skope->ogl->grabFramebuffer().save( out );
+					/* WW_RENDER_SS=<0..3> supersamples through an offscreen FBO,
+					 * which is the only way past the desktop's clamp on window
+					 * height: WW_RENDER_SIZE alone tops out at one screen however
+					 * wide the window is allowed to get, and returns a squashed
+					 * capture rather than an error. 1400x900 at SS=2 is 5600x3364.
+					 */
+					const int renderSS = qEnvironmentVariableIntValue( "WW_RENDER_SS" );
+					const QImage shotImage = renderSS > 0
+						? skope->ogl->grabSupersampled( renderSS )
+						: skope->ogl->grabFramebuffer();
+					shotImage.save( out );
 					// TEMP DIAGNOSTIC (WW_GRID_PROBE): bracket the grab so the log
 					// shows which paintGL frames precede it, and whether any grid
 					// draw belongs to the frame actually captured.

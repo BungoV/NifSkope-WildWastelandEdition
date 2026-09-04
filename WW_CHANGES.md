@@ -1,5 +1,51 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-09-04d — Render harness: flat vertex colours, and captures past the desktop
+
+Two doors on `WW_RENDER_SHOT`, both added to photograph the LODGEN identity
+channel and both reusable for anything per-vertex.
+
+**`WW_RENDER_FLAT=1`** turns the scene flat: vertex colours ON, texturing,
+lighting, specular, glow, normal/parallax/detail maps and cube mapping OFF. A
+per-vertex payload is invisible in a normal capture — LOD identity (R+G object
+index, B baked AO), a wind-sway weight, an authored blend mask are all buried
+under the diffuse map and then shaded on top. Doing it through the menu is not
+reproducible either: the options mask is restored from the user's persisted
+preferences at startup, so a capture would carry whatever was last ticked.
+
+**`WW_RENDER_SS=<0..3>`** supersamples through an offscreen FBO.
+`grabFramebuffer()` can only return what the window is, and a window cannot be
+resized past the desktop — **and the clamp is not symmetric**: on a
+multi-monitor row the width can span the whole virtual desktop while the height
+stops at one screen, so asking for 3840x2400 returns **3840x1067** and a caller
+that trusts the request gets a squashed capture rather than an error. Save
+Screenshot already solved this with an FBO and a temporary `resizeGL`; that path
+is now `GLView::grabSupersampled( shift )` and the harness calls it, rather than
+a second copy that would drift. 1400x900 at SS=2 is 5600x3364.
+
+### What the identity channel looks like
+
+Sanctuary object chunk (-20,24) dim 4, `lodgen --objects`, flat:
+
+  * every object carries one R+G pair, constant across its vertices — the
+    16-bit per-chunk index, so the colours step through the chunk rather than
+    being assigned at random;
+  * the variation WITHIN a single rock is the blue channel, which is the AO
+    baked by ray-casting against the assembled chunk at generation time;
+  * `--no-identity` writes the same chunk without any of it.
+
+Also measured while framing the comparison: our chunk is **8 texture sets to
+vanilla's 1**, which is not a defect but the documented trade. Vanilla ships one
+pre-baked worldspace atlas (`Commonwealth.Objects.DDS`), so every chunk needs a
+single texture set. We reference the source LOD textures directly — they all
+ship in the game's BA2s, so a generated chunk works on a stock install with no
+atlas step — and this chunk's 678 objects use 8 distinct ones (ShackLOD01,
+CommonwealthRockSlab01/02, and five tree sheets). `--atlas` packs 6 of the 8
+onto one sheet and keeps 2 tiling shapes direct, **but does not merge the
+shapes**: the chunk stays 8 BSSubIndexTriShapes, so texture binds drop and draw
+calls do not. Merging shapes that share the sheet is the step that would
+reproduce vanilla's 2-shape structure, and it does not exist yet.
+
 ## 2026-09-04c — Issue Manager finds the sidecar faults, and offers the fix
 
 Every one of these is **silent in the game**. A mesh with subsegments and no
