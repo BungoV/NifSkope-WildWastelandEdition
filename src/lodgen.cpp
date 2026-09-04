@@ -1156,6 +1156,42 @@ bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
 	const float invDim = 1.0f / float( dim );
 	const float cwX = float( chunkX ) * 4096.0f, cwY = float( chunkY ) * 4096.0f;
 
+	/* The chunk's terrain heightfield, in the same miniature space as the
+	 * placements. Built once here and shared by the buried-geometry cull and
+	 * the AO bake, which used to build its own identical copy. */
+	const int terrainN = dim * 32 + 1;
+	const float terrainSpacing = 4096.0f / float( terrainN - 1 );
+	std::vector<float> terrainHgt( size_t( terrainN ) * size_t( terrainN ),
+		world.defaultLandHeight() * invDim );
+	{
+		EsmLand land;
+		for ( int cy = 0; cy < dim; cy++ )
+			for ( int cx = 0; cx < dim; cx++ )
+				if ( world.land( chunkX + cx, chunkY + cy, land ) )
+					for ( int row = 0; row < 33; row++ )
+						for ( int col = 0; col < 33; col++ )
+							terrainHgt[size_t( cy * 32 + row ) * size_t( terrainN )
+								+ size_t( cx * 32 + col )] = land.heights[row][col] * invDim;
+	}
+	/* The LOWEST of the four surrounding samples, not a bilinear one.
+	 * Under-reading the ground is the safe direction for a cull: it keeps
+	 * geometry that a dip might expose, where over-reading would quietly eat
+	 * something visible. */
+	auto terrainFloorAt = [&]( float x, float y ) {
+		const int i0 = int( std::floor( x / terrainSpacing ) );
+		const int j0 = int( std::floor( y / terrainSpacing ) );
+		float lo = std::numeric_limits<float>::max();
+		for ( int dj = 0; dj <= 1; dj++ ) {
+			for ( int di = 0; di <= 1; di++ ) {
+				const int i = qBound( 0, i0 + di, terrainN - 1 );
+				const int j = qBound( 0, j0 + dj, terrainN - 1 );
+				lo = qMin( lo, terrainHgt[size_t( j ) * size_t( terrainN ) + size_t( i )] );
+			}
+		}
+		return lo;
+	};
+	int culledTris = 0, culledPlacements = 0, rescuedPlacements = 0;
+
 	// gather refs: every cell's own plus the persistent overlay
 	QVector<EsmRefr> refs;
 	for ( int cy = 0; cy < dim; cy++ )
@@ -1319,8 +1355,59 @@ bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
 				bucket.alphaFlags = s.alphaFlags;
 				bucket.alphaThreshold = s.alphaThreshold;
 			}
+			/* Buried-geometry cull. Done HERE, per placement, because both
+			 * safety rails are per placement: the all-three-vertices rule
+			 * needs the source triangles, and the never-disappear rule needs
+			 * to know this object's own total. Once shapes are merged into a
+			 * bucket neither is recoverable. */
+			QVector<Triangle> keptTris;
+			QVector<int> remap;
+			bool culled = false;
+			if ( opts.cullBuried && !s.tris.isEmpty() ) {
+				const float margin = opts.cullMargin * invDim;
+				QVector<quint8> buried( s.pos.size(), 0 );
+				for ( int v = 0; v < s.pos.size(); v++ ) {
+					const Vector3 w = xf * s.pos[v];
+					buried[v] = ( w[2] < terrainFloorAt( w[0], w[1] ) - margin ) ? 1 : 0;
+				}
+				for ( const Triangle & t : s.tris ) {
+					if ( !( buried[t.v1()] && buried[t.v2()] && buried[t.v3()] ) )
+						keptTris.append( t );
+				}
+				if ( keptTris.isEmpty() ) {
+					// Everything is under the ground. Keep the object whole:
+					// a vanished tree card is worse than a buried one.
+					rescuedPlacements++;
+				} else if ( keptTris.size() < s.tris.size() ) {
+					culled = true;
+					culledTris += s.tris.size() - keptTris.size();
+					culledPlacements++;
+				}
+			}
+
+			// Which source vertices survive, and where they land in the bucket.
+			QVector<int> keep;
+			const QVector<Triangle> & useTris = culled ? keptTris : s.tris;
+			if ( culled ) {
+				remap.fill( -1, s.pos.size() );
+				keep.reserve( s.pos.size() );
+				for ( const Triangle & t : useTris ) {
+					const int idx[3] = { t.v1(), t.v2(), t.v3() };
+					for ( int k = 0; k < 3; k++ ) {
+						if ( remap[idx[k]] < 0 ) {
+							remap[idx[k]] = keep.size();
+							keep.append( idx[k] );
+						}
+					}
+				}
+			} else {
+				keep.reserve( s.pos.size() );
+				for ( int v = 0; v < s.pos.size(); v++ )
+					keep.append( v );
+			}
+
 			const quint32 vBase = quint32( bucket.pos.size() );
-			if ( vBase + quint32( s.pos.size() ) > 65535 )
+			if ( vBase + quint32( keep.size() ) > 65535 )
 				continue;   // bucket full; a second shape would need splitting
 			/* Mirror about the shape's own U midpoint, not 1-u: tree LOD
 			 * textures are often atlas cells, and a global flip would sample
@@ -1334,7 +1421,8 @@ bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
 				}
 				uMid = uMin + uMax;
 			}
-			for ( int v = 0; v < s.pos.size(); v++ ) {
+			for ( int kv = 0; kv < keep.size(); kv++ ) {
+				const int v = keep[kv];
 				bucket.pos.append( xf * s.pos[v] );
 				Vector3 wn = xf.rotation * s.nrm[v];
 				wn.normalize();
@@ -1349,10 +1437,13 @@ bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
 					c.setAlpha( s.col[v].alpha() );   // authored sway weight rides along
 				bucket.col.append( c );
 			}
-			for ( const Triangle & t : s.tris )
+			for ( const Triangle & t : useTris ) {
+				const quint32 a = culled ? quint32( remap[t.v1()] ) : quint32( t.v1() );
+				const quint32 b = culled ? quint32( remap[t.v2()] ) : quint32( t.v2() );
+				const quint32 cIdx = culled ? quint32( remap[t.v3()] ) : quint32( t.v3() );
 				bucket.cellTris[cellIdx].append( Triangle(
-					quint16( vBase + t.v1() ), quint16( vBase + t.v2() ),
-					quint16( vBase + t.v3() ) ) );
+					quint16( vBase + a ), quint16( vBase + b ), quint16( vBase + cIdx ) ) );
+			}
 		}
 		if ( opts.identity ) {
 			auto & group = instanceGroups[r.base];
@@ -1388,18 +1479,9 @@ bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
 	 * against the whole assembled chunk plus the terrain heightfield. */
 	if ( opts.identity && opts.bakeAO ) {
 		LodgenAoScene scene;
-		const int hn = dim * 32 + 1;
-		scene.hn = hn;
-		scene.hSpacing = 4096.0f / float( hn - 1 );
-		scene.hgt.assign( size_t( hn ) * hn, world.defaultLandHeight() * invDim );
-		EsmLand land;
-		for ( int cy = 0; cy < dim; cy++ )
-			for ( int cx = 0; cx < dim; cx++ )
-				if ( world.land( chunkX + cx, chunkY + cy, land ) )
-					for ( int row = 0; row < 33; row++ )
-						for ( int col = 0; col < 33; col++ )
-							scene.hgt[size_t( cy * 32 + row ) * hn + size_t( cx * 32 + col )] =
-								land.heights[row][col] * invDim;
+		scene.hn = terrainN;
+		scene.hSpacing = terrainSpacing;
+		scene.hgt.assign( terrainHgt.begin(), terrainHgt.end() );
 		for ( auto it = buckets.constBegin(); it != buckets.constEnd(); ++it )
 			for ( const QVector<Triangle> & ct : it.value().cellTris )
 				for ( const Triangle & t : ct )
@@ -1410,8 +1492,11 @@ bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
 			for ( int v = 0; v < bucket.pos.size(); v++ ) {
 				const float ao = scene.ambientOcclusion( bucket.pos[v],
 					bucket.nrm[v], 300.0f );
-				bucket.col[v].setRGBA( bucket.col[v].red(), bucket.col[v].green(),
-					ao, bucket.col[v].alpha() );
+				if ( opts.aoGrey )
+					bucket.col[v].setRGBA( ao, ao, ao, bucket.col[v].alpha() );
+				else
+					bucket.col[v].setRGBA( bucket.col[v].red(), bucket.col[v].green(),
+						ao, bucket.col[v].alpha() );
 			}
 		}
 	}
@@ -1540,9 +1625,17 @@ bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
 	nif->updateModel();
 	if ( manifestOut )
 		*manifestOut = manifest.join( QChar( '\n' ) );
-	if ( error )
+	if ( error ) {
 		*error = QString( "placed %1 objects, %2 without usable LOD, %3 material buckets" )
 			.arg( placed ).arg( skippedNoLod ).arg( buckets.size() );
+		// The cull says what it took AND what it refused to take: a rescued
+		// placement is one that would have vanished, and that number going up
+		// is the rail doing its job, not a fault.
+		if ( opts.cullBuried )
+			*error += QString( "; buried cull: %1 triangles from %2 placements, "
+				"%3 kept whole (all-buried)" )
+				.arg( culledTris ).arg( culledPlacements ).arg( rescuedPlacements );
+	}
 	return true;
 }
 

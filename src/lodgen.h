@@ -74,6 +74,29 @@ struct LodgenObjectOptions
 	QString dataRoot;           //!< Data folder holding meshes\\lod\\... sources
 	bool identity = true;       //!< vertex-colour identity + manifest (CS profile)
 	bool bakeAO = true;         //!< ray-cast per-placement AO into channel B
+	/*! Drop object geometry that is entirely buried under the terrain, which is
+	 *  what vanilla's generator does -- measured on Sanctuary (-20,24): of our
+	 *  rock vertices, the ones vanilla does NOT have are 97.7% below ground,
+	 *  median 424 units down. Two rails, both required:
+	 *
+	 *    * a triangle goes only when ALL THREE of its vertices are below the
+	 *      surface by cullMargin, so the shell that crosses the ground is never
+	 *      opened and no gap can appear at the terrain line;
+	 *    * a PLACEMENT that would lose every triangle keeps all of them. A flat
+	 *      tree card sitting under the ground would otherwise vanish outright,
+	 *      and a missing object is a worse artefact than a buried one.
+	 */
+	bool cullBuried = false;
+	/*! DEBUG VIEW, not a shipping profile: write the baked AO into R, G and B
+	 *  so the channel can be looked at on its own, and multiplied over the
+	 *  textured and lit geometry the way the engine would. With the identity
+	 *  index in R+G the AO is invisible under it -- the object colour dominates
+	 *  and every render is a study of the index instead. The manifest is still
+	 *  written, but the identity channel this produces is NOT decodable.
+	 */
+	bool aoGrey = false;
+	//! World units below the surface before anything is considered buried.
+	float cullMargin = 128.0f;
 	int lodLevel = -1;          //!< MNAM slot; -1 = pick by dim (4->0, 8->1, 16->2, 32->3)
 	/*! Substitute the nearest filled MNAM slot when the requested one is
 	 * empty. OFF matches vanilla, where an empty slot drops the object at
