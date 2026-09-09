@@ -58,6 +58,13 @@ typedef unsigned int GLuint;
 //! Manages rendering and shaders
 class Renderer : public QObject, public NifSkopeOpenGLContext
 {
+	/* The PBRM program, once any shape has been routed to it. A shape caches
+	 * the program it last drew with and hands it back as the hint; if that
+	 * cached program is this one while the current verdict is "not PBRM", the
+	 * hint must be refused or the shape stays pinned to a program that has no
+	 * lodChannelView uniform. See setupProgram. */
+	NifSkopeOpenGLContext::Program * pbrmProgramSeen = nullptr;
+
 	Q_OBJECT
 
 public:

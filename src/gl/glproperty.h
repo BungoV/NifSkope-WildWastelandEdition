@@ -36,6 +36,10 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //! LOD channel preview: 0 off, 1 identity hashed, 2 raw index bytes, 3 baked
 //! AO, 4 class parameter. Defined in glproperty.cpp.
 extern int wwLodChannelView;
+//! The impostor bake's subsurface-mask rule for channel 11: 1 = the shape's
+//! tree-animation flag (a near tree: branch cards carry it, the bark card does
+//! not), 0 = the shape's alpha test (a LOD tree: leaf cards against an opaque trunk).
+extern int wwLodMaskByTree;
 
 #include "icontrollable.h" // Inherited
 #include "data/niftypes.h"
@@ -755,6 +759,12 @@ public:
 	bool pbrmUnsupported = false;
 	//! the material path the PBRM came from (may differ from `name`)
 	QString pbrmPath;
+
+	/*! Texture slots retargeted for a bake, consulted before every other
+	 * source by fileName(). The impostor bake sets these from a source .lodm
+	 * (docs/LODGEN_IMPOSTOR_SPEC.md) so the photograph is of the textures the
+	 * LOD material names, not the vanilla set's; empty in every other use. */
+	QHash<int, QString> wwTextureOverride;
 
 protected:
 	ShaderFlags::SF1 flags1 = ShaderFlags::SLSF1_ZBuffer_Test;

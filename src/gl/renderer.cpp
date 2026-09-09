@@ -120,18 +120,57 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 	//                    legacy material so the whole scene sits under one BRDF
 	//   Legacy and PBR : only where a PBRM resolved; PBR overrides legacy there
 	const int lightingMode = pbrmMode();
-	const bool wantPbrm = mesh->bslsp
+	/* The LOD channel preview is a DATA view, not a shading mode: it draws one
+	 * generated vertex channel flat. Routing it through the PBRM program shows
+	 * PBR shading instead, because that program has no preview branch -- which
+	 * is why every terrain channel rendered byte-identical while the object
+	 * ones differed: terrain LOD resolves a baked PBRM and objects do not. */
+	const bool wantPbrm = mesh->bslsp && wwLodChannelView == 0
 		&& ( lightingMode == PbrmModePBR
 			|| ( lightingMode == PbrmModeLegacyAndPBR && mesh->bslsp->pbrmValid ) );
 	if ( wantPbrm ) {
 		if ( Program * program = useProgram( "pbrm_default.prog" ) ) {
+			pbrmProgramSeen = program;
 			if ( setupProgramPBRM( nif, program, mesh ) )
 				return program;
 			stopProgram();
 		}
 	}
 
-	if ( hint && hint->status ) [[likely]] {
+	/* The LOD channel preview lives in fo4_default.frag and nowhere else, and
+	 * fo4_default.prog's conditions exclude Shader Type 18 - LOD landscape.
+	 * So a TERRAIN chunk never reached a program that had the uniform: not
+	 * through the hint, not through the condition scan, in any lighting mode.
+	 * Measured before this: one chunk rendered top-down under channels 0, 3
+	 * and 6, flat and lit, six images byte-identical in a fresh process where
+	 * no hint could have been cached. Objects are a different shader type and
+	 * always did vary, which is what made the cache look like the cause.
+	 *
+	 * The preview is a flat data view - texture layout, the reason type 18
+	 * has its own path, does not matter to it - so while it is on, every
+	 * FO4 lighting-shader shape goes to fo4_default.prog by name, the way the
+	 * PBRM route above is chosen by name. */
+	if ( wwLodChannelView != 0 && mesh->bslsp
+		&& nif->getBSVersion() >= 130 && nif->getBSVersion() <= 139 ) {
+		if ( Program * program = useProgram( "fo4_default.prog" ) ) {
+			if ( setupProgramCE1( nif, program, mesh ) )
+				return program;
+			stopProgram();
+		}
+	}
+
+	/* The hint is the program the shape drew with LAST frame, and the only
+	 * thing that ever cleared it was a NIF-block edit (Shape::updateImpl).
+	 * So a terrain shape that resolved a PBRM on its first, ordinary paint
+	 * handed pbrm_default back as its hint on every later frame - including
+	 * the frames after the LOD channel preview was switched on, when the
+	 * verdict above had already said "not PBRM". That program has no
+	 * lodChannelView uniform, the uniform write is a silent no-op, and every
+	 * terrain channel rendered byte-identical while objects - never PBRM -
+	 * varied. Gating the NEW selection on the preview (above) did not touch
+	 * the cached one; this does. */
+	const bool stalePbrmHint = hint && hint == pbrmProgramSeen && !wantPbrm;
+	if ( hint && hint->status && !stalePbrmHint ) [[likely]] {
 		Program * program = hint;
 		fn->glUseProgram( program->id );
 		currentProgram = program;
@@ -1148,6 +1187,28 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 	 * the FO4 one -- the only one that matters for generated LOD.
 	 */
 	prog->uni1i( "lodChannelView", wwLodChannelView );
+	/* The impostor bake's material channel: a shape whose slot 7 was
+	 * retargeted to a source .lodm's third texture is read raw; every other
+	 * shape bakes the legacy pair, which needs the specular strength whether
+	 * or not lighting is on (specStrength above is zeroed when it is off). */
+	prog->uni1i( "lodMaskRaw", bsprop->wwTextureOverride.contains( 7 ) ? 1 : 0 );
+	/* The impostor bake's emissive channel: a shape whose GLOW slot (2) a
+	 * source .lodm retargeted reads that texture raw - GlowMap is bound from
+	 * fileName( 2 ) above, which consults the retarget, and falls back to the
+	 * black texture when the override is empty. Every other shape bakes the
+	 * vanilla LOD glow rule from its own diffuse. */
+	prog->uni1i( "lodEmissiveRaw", bsprop->wwTextureOverride.contains( 2 ) ? 1 : 0 );
+	/* ...and the source's EMISSIVE COLOUR, which the vanilla glow rule folds
+	 * into the sheet. Set UNCONDITIONALLY, unlike the sibling glowColor above,
+	 * which is only written while DoGlow and DoLighting are on: the card bake
+	 * photographs with lighting OFF, so a value written under those options
+	 * would never reach channel 13. Black without a lighting property, which
+	 * is a shape that emits nothing. */
+	prog->uni3f( "lodEmissiveColor", lsp ? lsp->emissiveColor.red() : 0.0f,
+		lsp ? lsp->emissiveColor.green() : 0.0f, lsp ? lsp->emissiveColor.blue() : 0.0f );
+	prog->uni1i( "lodTreeAnim", bsprop->isVertexAlphaAnimation ? 1 : 0 );
+	prog->uni1i( "lodMaskByTree", wwLodMaskByTree );
+	prog->uni1f( "lodSpecStrength", lsp ? lsp->specularStrength : 1.0f );
 
 	if ( mesh->isDoubleSided ) {
 		glDisable( GL_CULL_FACE );

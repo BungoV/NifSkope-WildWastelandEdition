@@ -14,8 +14,8 @@
  * "bgCard", "bgInput", "bgBtn", "bgBtnHover", "bgBtnDown", "bgHeader",
  * "border", "borderDim", "borderStrong", "focus", "scroll", "scrollHover",
  * "text", "textMuted", "textBright", "accent", "accentText", "accentBg",
- * "textDisabled", "accentDisabled", "danger", "viewport", "selBgActive",
- * "selBgInactive", "selTextActive", "selTextInactive".
+ * "textDisabled", "accentDisabled", "toggle", "toggleDisabled", "danger",
+ * "viewport", "selBgActive", "selBgInactive", "selTextActive", "selTextInactive".
  *
  * "textDisabled"/"accentDisabled" are the INERT register: `textMuted` and
  * `accent` mean "off" and "on" for a control you can click, and a control you

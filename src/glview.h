@@ -350,6 +350,17 @@ public:
 	void setPosition( const Vector3 & );
 	void setProjection( bool );
 	void setRotation( float, float, float );
+	/*! While set, updateSettings() leaves cfg.background alone. The impostor
+	 *  bake's two-pass matte needs a black and then a white clear; the paint
+	 *  path re-reads the background from settings, so every card since the
+	 *  theme work came out opaque over the viewport grey (measured: front
+	 *  card alpha 255 everywhere, background pixel 43,45,49). */
+	bool wwLockBackground = false;
+	/*! Set the clear colour NOW, in the driver. Assigning cfg.background
+	 *  alone changes nothing until the next resize: the ortho paint clears
+	 *  with whatever glClearColor last received, which is why the bake's
+	 *  matte passes came out identical however the field was set. */
+	void setBackground( const Color4 & c );
 	void setZoom( float );
 
 	void setOrientation( GLView::ViewState, bool recenter = true );

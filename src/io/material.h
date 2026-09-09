@@ -167,8 +167,11 @@ public:
 	Color3 specularColor() const { return cSpecularColor; }
 	float specularStrength() const { return fSpecularMult; }
 	float smoothness() const { return fSmoothness; }
+	bool specularEnabled() const { return bSpecularEnabled != 0; }
 	float fresnelPower() const { return fFresnelPower; }
 	float emittanceMultiple() const { return fEmittanceMult; }
+	//! Own-Emit: the material lights itself by its emittance colour x multiple.
+	bool emitEnabled() const { return bEmitEnabled != 0; }
 	float grayscaleToPaletteScale() const { return fGrayscaleToPaletteScale; }
 	QString rootMaterialPath() const { return sRootMaterialPath; }
 

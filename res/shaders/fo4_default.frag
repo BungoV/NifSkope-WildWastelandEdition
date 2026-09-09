@@ -34,6 +34,12 @@ uniform vec3 tintColor;
  * and then lit, and what reaches the screen says nothing about the number that
  * is actually stored. */
 uniform int lodChannelView;
+uniform bool lodMaskRaw;		// channel 10: the specular slot raw (a source .lodm's third texture)
+uniform bool lodEmissiveRaw;	// channel 13: the glow slot raw (a source .lodm's emissive texture)
+uniform vec3 lodEmissiveColor;	// channel 13: the source's emissive colour, folded into the legacy sheet
+uniform float lodSpecStrength;	// channel 10: the material's specular strength, lighting or not
+uniform bool lodTreeAnim;		// channel 11: this shape carries the tree-animation flag
+uniform bool lodMaskByTree;		// channel 11: the mask is the tree flag (a near tree), not the alpha test
 
 uniform vec2 uvScale;
 uniform vec2 uvOffset;
@@ -270,9 +276,86 @@ void main()
 		} else if ( lodChannelView == 2 ) {
 			v = vec3( C.r, C.g, 0.0 );      // the raw 16-bit index bytes
 		} else if ( lodChannelView == 3 ) {
-			v = C.bbb;                      // baked ambient occlusion
+			v = C.bbb;                      // ambient occlusion (objects and terrain)
+		} else if ( lodChannelView == 4 ) {
+			v = C.aaa;                      // A: tree sway / terrain shore proximity
+		} else if ( lodChannelView == 5 ) {
+			/* Terrain R is a material CLASS id, not a magnitude -- shown hashed
+			 * for the same reason the object index is: neighbouring classes
+			 * differ by a few parts in 255 and read as one flat grey. */
+			float cls = floor( C.r * 255.0 + 0.5 );
+			v = fract( sin( ( cls + 1.0 ) * vec3( 12.9898, 78.233, 45.164 ) ) * 43758.5453 );
+			v = v * 0.8 + 0.2;
+		} else if ( lodChannelView == 6 ) {
+			v = C.ggg;                      // terrain flow-accumulation wetness
+		} else if ( lodChannelView == 8 ) {
+			/* The impostor bake's normal sheet: the GEOMETRIC normal in the
+			 * view's space, half-packed, flipped for back faces as the lit
+			 * path flips it. After the alpha test above, so a leaf card
+			 * writes its normal only where it has a leaf. */
+			vec3 n = normalize( btnMatrix_norm[2] );
+			if ( !gl_FrontFacing )
+				n = -n;
+			v = n * 0.5 + 0.5;
+		} else if ( lodChannelView == 9 ) {
+			// the impostor bake's height: window z, linear under the ortho projection
+			v = vec3( gl_FragCoord.z );
+		} else if ( lodChannelView == 10 ) {
+			/* The impostor bake's material channel (docs/LODGEN_IMPOSTOR_SPEC.md).
+			 * A shape retargeted to a source .lodm: its third texture, raw --
+			 * roughness/metallic/AO or gloss/specular/AO as the file says.
+			 * Otherwise the LEGACY pair from the vanilla material, the way the
+			 * lit path composes it: R gloss = smoothness x the specular map's
+			 * G, G specular = the map's R (the normal's alpha without a map)
+			 * x the specular strength. */
+			vec4 sm = texture( SpecularMap, offset );
+			if ( lodMaskRaw ) {
+				v = sm.rgb;
+			} else {
+				float gl = clamp( specGlossiness, 0.0, 1.0 ) * ( hasSpecularMap ? sm.g : 1.0 );
+				float sp = ( hasSpecularMap ? sm.r : texture( NormalMap, offset ).a )
+					* ( lodSpecStrength > 0.0 ? lodSpecStrength : 1.0 );
+				v = vec3( gl, clamp( sp, 0.0, 1.0 ), 1.0 );	// B: neutral AO, one per-pixel law for mixed shapes
+			}
+		} else if ( lodChannelView == 12 ) {
+			/* The impostor bake's colour sheet: the base colour as the source
+			 * has it, times the vertex colour, and NOTHING else - the lit path
+			 * below tone-maps before it writes, so an "unlit" render of it is
+			 * a curved albedo. The consumer lights the card. */
+			v = baseMap.rgb * C.rgb;
+		} else if ( lodChannelView == 11 ) {
+			/* The impostor bake's subsurface mask source. A LOD tree: the
+			 * alpha-tested shapes are the leaf cards, the trunk is opaque. A
+			 * near tree: every shape is alpha-tested (the bark card too), and
+			 * the branch cards are the ones that carry the tree-animation
+			 * flag; the bake picks the rule for the model. */
+			float leaf = lodMaskByTree ? ( lodTreeAnim ? 1.0 : 0.0 ) : ( alphaFlags > 0 ? 1.0 : 0.0 );
+			v = vec3( leaf );
+		} else if ( lodChannelView == 13 ) {
+			/* The impostor bake's emissive sheet (docs/LODGEN_IMPOSTOR_SPEC.md).
+			 * A shape whose GLOW SLOT a source .lodm retargeted reads that
+			 * texture raw - and an EMPTY retarget binds black, which is how a
+			 * pbr set that names no emissive says it emits nothing.
+			 * Otherwise the VANILLA LOD GLOW RULE, measured off the shipped
+			 * atlases: a LOD chunk shape carries Own-Emit with a black emissive
+			 * colour and no glow slot, so what lights it is its DIFFUSE'S ALPHA
+			 * on the opaque shapes (Diamond City's DXT5 atlas: 216,521 of
+			 * 262,144 alpha blocks varying, none fully transparent). An
+			 * alpha-tested shape spends its alpha on the cut-out instead and
+			 * emits nothing.
+			 * The EMISSIVE COLOUR is folded in here, because the engine scales
+			 * that alpha by it: a chunk shape own-emits with a black colour and
+			 * therefore emits nothing, which is the whole answer to "an opaque
+			 * source with alpha 255 throughout would light every wall". The
+			 * MULTIPLE is not folded in - it can exceed 1 and this sheet is eight
+			 * bits - and rides in the set's .lodm as `emissiveScale`. A retargeted
+			 * glow slot stays RAW: a source .lodm's emissive is its own picture. */
+			if ( lodEmissiveRaw )
+				v = texture( GlowMap, offset ).rgb;
+			else
+				v = ( alphaFlags == 0 ) ? baseMap.rgb * baseMap.a * lodEmissiveColor : vec3( 0.0 );
 		} else {
-			v = C.aaa;                      // class parameter: sway / blend / wetness
+			v = C.rrr;                      // raw red: water depth
 		}
 		fragColor = vec4( v, 1.0 );
 		return;

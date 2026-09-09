@@ -39,6 +39,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QAbstractSpinBox>
 #include <QApplication>
 #include <QComboBox>
+#include <QEvent>
 #include <QDoubleSpinBox>
 #include <QLineEdit>
 #include <QMouseEvent>
@@ -890,6 +891,43 @@ static bool wwScrubbable( QWidget * w )
 	return false;
 }
 
+/*! The wheel scrolls the panel, not the value.
+ *
+ *  A spin box and a combo take the wheel by default (Qt::WheelFocus), so
+ *  scrolling a settings column past one changed it - bungo, on the LOD
+ *  Generation panel, 2026-09-06: "a real risk with these rows". Blender's
+ *  rule instead: the wheel changes a field only while that field has focus
+ *  (click it first); otherwise the event is left unaccepted and the scroll
+ *  area above takes it. Both helpers below apply it, so every scrub field
+ *  and every matched selector in the program behaves the same. */
+class WwWheelGuard final : public QObject
+{
+public:
+	explicit WwWheelGuard( QWidget * host ) : QObject( host ) {}
+
+protected:
+	bool eventFilter( QObject * o, QEvent * ev ) override
+	{
+		if ( ev->type() == QEvent::Wheel ) {
+			auto * w = qobject_cast<QWidget *>( o );
+			if ( w && !w->hasFocus() ) {
+				ev->ignore();		// unaccepted: propagates to the scroll area
+				return true;		// and never reaches the field
+			}
+		}
+		return QObject::eventFilter( o, ev );
+	}
+};
+
+void wwGuardWheel( QWidget * host )
+{
+	if ( !host || host->property( "wwWheelGuarded" ).toBool() )
+		return;
+	host->setProperty( "wwWheelGuarded", true );
+	host->setFocusPolicy( Qt::StrongFocus );		// not WheelFocus: the wheel must not focus it either
+	host->installEventFilter( new WwWheelGuard( host ) );
+}
+
 void wwMakeScrubField( QWidget * host, const WwScrubSpec & spec )
 {
 	if ( !host || host->property( WW_SCRUBBED ).toBool() || host->property( WW_NO_SCRUB ).toBool() )
@@ -904,6 +942,7 @@ void wwMakeScrubField( QWidget * host, const WwScrubSpec & spec )
 		return;
 
 	auto * scrub = new WwScrub( host, le, spec );
+	wwGuardWheel( host );
 
 	// Centre the number, as the reference field does. Without this every
 	// retro-fitted field (which is most of them) kept Qt's left alignment and
@@ -941,6 +980,7 @@ void wwMatchFieldStyle( QWidget * selector )
 {
 	if ( !selector )
 		return;
+	wwGuardWheel( selector );
 	/* Same tokens as WwScrubChrome::restyle, deliberately: if the two ever
 	 * disagree the whole point is lost, so they read from the same names.
 	 * The drop-down button keeps its arrow but loses its frame and its separate

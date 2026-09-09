@@ -16,6 +16,10 @@
         <file alias="sizeGrip">icon/sizegrip.png</file>
         <file alias="close">icon/close.png</file>
         <file alias="undock">icon/undock.png</file>
+        <file alias="check.png">icon/check.png</file>
+        <file alias="check@2x.png">icon/check@2x.png</file>
+        <file alias="radio.png">icon/radio.png</file>
+        <file alias="radio@2x.png">icon/radio@2x.png</file>
     </qresource>
     <qresource prefix="/btn">
         <file alias="blockNode">icon/block-node.png</file>

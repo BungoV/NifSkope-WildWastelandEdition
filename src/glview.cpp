@@ -2440,9 +2440,11 @@ void GLView::updateSettings()
 	settings.beginGroup( "Settings/Render" );
 
 	// Default follows the skin ("viewport") rather than a neutral 46/46/46 grey,
-	// which read cold next to the blue-charcoal chrome.
-	cfg.background = Color4( settings.value( "Colors/Background",
-		QColor::fromString( wwSkinColor( "viewport" ) ) ).value<QColor>() );
+	// which read cold next to the blue-charcoal chrome. A bake that clears
+	// to its own colours holds the lock (see wwLockBackground).
+	if ( !wwLockBackground )
+		cfg.background = Color4( settings.value( "Colors/Background",
+			QColor::fromString( wwSkinColor( "viewport" ) ) ).value<QColor>() );
 
 	// Same-name .pbrm discovery. Cached into a static so material resolution
 	// never reads QSettings per shader property. Direct .pbrm links are not
@@ -2585,6 +2587,14 @@ void GLView::selectPBRCubeMap()
 Color4 GLView::clearColor() const
 {
 	return cfg.background;
+}
+
+void GLView::setBackground( const Color4 & c )
+{
+	cfg.background = c;
+	auto prvContext = pushGLContext();
+	glClearColor( c.red(), c.green(), c.blue(), c.alpha() );
+	popGLContext( prvContext );
 }
 
 
@@ -21145,8 +21155,13 @@ void GLView::dragEnterEvent( QDragEnterEvent * e )
 			if ( url.scheme() == "file" ) {
 				QString fn = url.toLocalFile();
 				QFileInfo finfo( fn );
+				// Every extension the Open dialog accepts, from the same table
+				// it builds its filter from. A hardcoded "nif" here silently
+				// refused the .btr/.bto LOD chunks File > Open loads happily,
+				// and would drift again the next time a type is added.
 				if ( finfo.exists() && finfo.isFile()
-					&& finfo.suffix().compare( QStringLiteral( "nif" ), Qt::CaseInsensitive ) == 0 ) {
+					&& NifSkope::fileExtensions().contains( finfo.suffix(),
+						Qt::CaseInsensitive ) ) {
 					draggedNifs << finfo.absoluteFilePath();
 				}
 			}

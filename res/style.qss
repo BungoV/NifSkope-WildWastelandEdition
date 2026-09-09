@@ -30,7 +30,10 @@
     - ::item colours and checkbox ::indicator images: the palette already
       carries Highlight/HighlightedText, and the item delegates paint their
       own foregrounds (link blue, diff grey, pinned star). Leave both to
-      Fusion + the delegates so nothing fights over them.
+      Fusion + the delegates so nothing fights over them. (The check-box and
+      radio BOX itself is styled below, plate and border only, no image:
+      Fusion's box comes out invisible on the dark column. Item-view check
+      marks stay Fusion's.)
 */
 
 
@@ -245,4 +248,31 @@ QToolBar::separator { background: ${border}; width: 2px; height: 2px; margin: 4p
 
 QCheckBox, QRadioButton { spacing: 6px; background: transparent; }
 QCheckBox:disabled, QRadioButton:disabled { color: ${textMuted}; }
+
+/* The box. Fusion draws it from palette(base) with an outline of
+   window-darker(140); this theme sets Base equal to Window, so on the dark
+   column an unticked box was invisible - "Pack an object texture atlas" read
+   as plain text (LOD Generation, 2026-09-06; measured at 0 levels against
+   the ground). Plate and border are the input field's. Ticked is Blender's
+   check box - the wcol_option blue with its white mark, the mark an image
+   resource because a stylesheet cannot draw one - bungo's call over the
+   accent orange the first cut used: a tick is a state, not a selection.
+   Ordered base, hover, disabled, checked, checked+disabled: equal
+   specificity, later wins. */
+QCheckBox::indicator, QRadioButton::indicator {
+    width: 13px;
+    height: 13px;
+    background: ${bgInput};
+    border: 1px solid ${border};
+}
+QCheckBox::indicator { border-radius: 2px; }
+QRadioButton::indicator { border-radius: 7px; }
+QCheckBox::indicator:hover, QRadioButton::indicator:hover { border-color: ${focus}; }
+QCheckBox::indicator:disabled, QRadioButton::indicator:disabled { background: ${bgWin}; border-color: ${borderDim}; }
+QCheckBox::indicator:checked { background: ${toggle}; border-color: ${toggle}; image: url(:/wnd/check.png); }
+QRadioButton::indicator:checked { background: ${toggle}; border-color: ${toggle}; image: url(:/wnd/radio.png); }
+QCheckBox::indicator:checked:disabled, QRadioButton::indicator:checked:disabled {
+    background: ${toggleDisabled};
+    border-color: ${toggleDisabled};
+}
 QLabel { background: transparent; }

@@ -37,6 +37,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *  World LOD Generator writes it, the shader reads it.
  */
 int wwLodChannelView = 0;
+int wwLodMaskByTree = 0;
 
 #include "message.h"
 #include "gl/controllers.h"
@@ -1234,6 +1235,13 @@ enum
 
 QString BSShaderLightingProperty::fileName( int id ) const
 {
+	// a bake's retarget wins over every source (see wwTextureOverride)
+	if ( !wwTextureOverride.isEmpty() ) {
+		auto it = wwTextureOverride.constFind( id );
+		if ( it != wwTextureOverride.constEnd() )
+			return it.value();
+	}
+
 	// Starfield (not implemented here)
 	if ( bsVersion >= 170 )
 		return QString();

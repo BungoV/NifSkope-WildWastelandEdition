@@ -231,6 +231,11 @@ void wwMakeScrubFields( QWidget * root );
 //! Re-read theme colours for every scrub field under `root`.
 void wwRestyleScrubFields( QWidget * root );
 
+//! The wheel scrolls the panel, not the value: a field takes the wheel only
+//! while it has focus (Blender's rule). Applied by wwMakeScrubField and
+//! wwMatchFieldStyle; call it directly for any other field in a scroll area.
+void wwGuardWheel( QWidget * host );
+
 //! Evaluate an arithmetic expression typed into a number field.
 /*! "1024/3", "2^10", "pi", "sqrt(2)", "rad(90)". Returns false - leaving `out`
  *  untouched - for a plain number or anything it does not understand, so the
