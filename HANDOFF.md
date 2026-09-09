@@ -12,10 +12,16 @@ worth 67.7% of the light, the quintic ease 0.947 -> 0.209, card fill 0.500 ->
 19); `080f0cf` the LOD Generation panel, the channel preview and the plane
 picker; `e760cc8` headless never prompts and never shows a window (15/0 then
 55/0); `7ee437e` the seven format contracts and the FO4CS handoff package;
-`164d24b` the 683 scratchpad reports, briefs, scripts and pictures; and the
-ledger commit that carries this paragraph. Nothing was built or run for the
-commit; the exe on disk is still 19:35:14 and the PENDING gates are still
-pending.
+`164d24b` the 683 scratchpad reports, briefs, scripts and pictures; and
+`5e023f4` the ledger commit that carries this paragraph. Nothing was built or
+run for the commit; the exe on disk is still 19:35:14 and the PENDING gates
+are still pending.
+
+The push moved `origin/main` from `965dfe8` to `5e023f4` -- **26 commits, not
+8.** Eighteen of them were the 2026-09-03/04 work (the outfit sidecars, the
+segment reader, the AO chunk edge, the LOD water and `.lodt` rounds) that had
+been committed locally and never pushed. Nothing was rewritten and nothing was
+forced; it was a fast-forward.
 
 EXCLUDED, and why: 1,904 files and 647.3 MB that a public repo must not
 carry -- `heightmaps/` (436.2 MB of generated far-terrain HeightMap DDS, 13

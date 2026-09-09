@@ -17,7 +17,7 @@ Repo hygiene, no source change and no build. bungo lifted his "Not yet" of
 | 5 | `e760cc8` | headless never prompts and never shows a window | 5 |
 | 6 | `7ee437e` | the seven format contracts and the FO4CS handoff package | 23 |
 | 7 | `164d24b` | the 683 scratchpad reports, briefs, scripts and pictures | 683 |
-| 8 | this one | CONSTITUTION, MISTAKES, the skills, the handoff and this log | 6 |
+| 8 | `5e023f4` | CONSTITUTION, MISTAKES, the skills, the handoff and this log | 10 |
 
 Commits 2-5 carry the source: 6,028 + 13,833 + 4,052 + 1,045 insertions
 across 64 paths, the whole of `src/lodgen.cpp` (+5,896), `src/nifcli.cpp`
@@ -71,8 +71,13 @@ lines it removes:
 normalised, none was flipped wholesale, and no binary splice was needed. This
 entry itself is LF-only, appended to a mixed file that stays mixed.
 
-**Read-back.** `git push origin main`, then `git log origin/main -1` and
-`git status`: the tree is clean apart from the ignored paths.
+**Read-back.** `git push origin main` moved `origin/main` from `965dfe8` to
+`5e023f4` -- **26 commits, not 8.** Eighteen of them were the 2026-09-03/04
+work (outfit sidecars, the segment reader, the AO chunk edge, the LOD water
+and `.lodt` rounds) that had been committed locally and never pushed; the
+push was a fast-forward, nothing was rewritten and nothing was forced.
+`git status --porcelain -uall` afterwards: zero lines. The tree is clean
+apart from the ignored paths, and `main` is level with `origin/main`.
 
 ## 2026-09-09 - the card spacing is the GAP between two trees, not the margin beside one
 
