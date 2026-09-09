@@ -31,3 +31,41 @@ tools/link.log
 
 # one-off decoder scratch binaries built by hand next to their source
 tools/*.exe
+
+# --- 2026-09-09: bulk that a public repo must not carry -------------------
+# Generated far-terrain heightmap DDS set (13 worldspaces, 436 MB); regenerate
+# with the lodgen heightmap bake.
+heightmaps/
+
+# Hand-made .btr/.bto scratch bakes from the water/AO rounds (5.5 MB).
+scratch_water/
+
+# scratchpad/ is the deliverable home (CONSTITUTION 8): the reports, briefs,
+# scripts, manifests and the pictures a handoff points at ARE tracked. The
+# bakes and renders they were measured FROM are not -- 647 MB of them.
+scratchpad/**/*.dds
+scratchpad/**/*.bto
+scratchpad/**/*.btr
+scratchpad/**/*.nif
+scratchpad/**/*.lodt
+scratchpad/**/*.lodl
+scratchpad/**/*.lodo
+scratchpad/**/*.lodi
+scratchpad/**/*.lodm
+scratchpad/**/*.bin
+scratchpad/**/*.head
+scratchpad/**/*.orig
+scratchpad/**/*.manifest.txt
+scratchpad/**/*.verts.txt
+scratchpad/mountains_20260907/layers.txt
+scratchpad/mountains_20260907/out_wrld.txt
+scratchpad/mountains_20260907/recovered.txt
+scratchpad/mountains_20260907/recovered_blend.txt
+scratchpad/mountains_20260907/training.txt
+
+# Renders: only the four folders a handoff or a committed report points at.
+scratchpad/**/*.png
+!scratchpad/images_20260909/*.png
+!scratchpad/mountains_20260907/images/*.png
+!scratchpad/cardfit_20260909/pics/*.png
+!scratchpad/cardpad_20260909/pics/*.png
