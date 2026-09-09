@@ -30,6 +30,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ***** END LICENCE BLOCK *****/
 
+#include "lodgen.h"
 #include "nifcli.h"
 #include "nifskope.h"
 #include "version.h"
@@ -177,6 +178,35 @@ int main( int argc, char * argv[] )
 
 		// Init game manager
 		(void) Game::GameManager::get();
+
+		/* WW_LODGEN_RESOURCES=<entry>;<entry>;... - the LOD generator's resource
+		 * stack, in Mod Organizer's order (the LAST one overrides the earlier
+		 * ones), for a headless card bake: tools/bake_impostor_cards.sh passes
+		 * the same stack the generator will read, so a mod's trees photograph
+		 * with their own textures instead of vanilla's. Session only, never
+		 * written to QSettings (GameManager::save() is what persists, and only
+		 * the Settings dialog calls it). WW_LODGEN_MO2=1 builds the stack from
+		 * the profile's plugins.txt instead. */
+		{
+			QStringList stack;
+			const QString env = qEnvironmentVariable( "WW_LODGEN_RESOURCES" );
+			if ( !env.isEmpty() )
+				stack = env.split( QChar( ';' ), Qt::SkipEmptyParts );
+			if ( qEnvironmentVariableIntValue( "WW_LODGEN_MO2" ) == 1 ) {
+				const QString data = Game::GameManager::path( Game::FALLOUT_4 ) + QStringLiteral( "/Data" );
+				QString perr;
+				stack = lodgenMo2Stack( data, lodgenReadPluginsTxt( lodgenPluginsTxtPath(), &perr ) ) + stack;
+			}
+			if ( !stack.isEmpty() ) {
+				lodgenSetResources( stack );
+				QStringList view = lodgenResourceSearchPaths();
+				for ( const QString & f : Game::GameManager::folders( Game::FALLOUT_4 ) )
+					if ( !view.contains( f, Qt::CaseInsensitive ) )
+						view.append( f );
+				Game::GameManager::update_folders( Game::FALLOUT_4, view );
+				Game::GameManager::close_resources();
+			}
+		}
 
 		int port = NIFSKOPE_IPC_PORT;
 

@@ -126,6 +126,16 @@ public:
 
 	Ui::MainWindow * ui;
 
+	//! True in a WW harness / batch run rather than an interactive one.
+	//! The one headless predicate; see nifskope.cpp for what it answers for.
+	static bool wwHeadlessRun();
+
+	//! Put one top-level window where a headless run's windows go: off the
+	//! primary monitor, un-maximised, and at opacity 0 unless WW_WINDOW_VISIBLE=1.
+	//! Called from the constructor (before any native window can exist), from
+	//! createWindow after restoreUi has had its say, and from the application
+	//! event filter for every other top-level window this process shows.
+	static void wwPlaceHeadlessWindow( QWidget * w );
 	//! Save Confirm dialog
 	bool saveConfirm();
 	//! Save NifSkope application settings.
@@ -822,6 +832,11 @@ private:
 	//! no-dialog paths (command line, harness) fall back to the environment
 	//! override or the whole-worldspace default.
 	BtdRegionSpec btdPendingRegion;
+
+	//! The same for a .lodt, which remembers its PLANE as well as its
+	//! region: Reload must rebuild the view that is on screen, not the
+	//! default one.
+	LodtRegionSpec lodtPendingRegion;
 
 	//! Stores the NIF file in memory.
 	NifModel * nif;

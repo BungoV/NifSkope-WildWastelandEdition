@@ -106,6 +106,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QLabel>
 #include <QMenu>
 #include <QMessageBox>
+#include <QProcessEnvironment>
 #include <QProgressBar>
 #include <QPushButton>
 #include <QMouseEvent>
@@ -158,6 +159,9 @@ const QList<QPair<QString, QString>> NifSkope::filetypes = {
 	// not a NIF: the FO76 whole-worldspace terrain database, opened through a
 	// region picker and MESHED here (btdterrain.cpp), since it stores heightmaps
 	{ "Bethesda Terrain Database", "btd" },
+	// nor is our own whole-worldspace landscape file (docs/LODGEN_BTD_FORMAT.md):
+	// it stores planes, not meshes, so it opens the same way and MESHES the same way
+	{ "Landscape Terrain", "lodl" },
 	// KF types
 	{ "Keyframe", "kf" }, { "Keyframe Animation", "kfa" }, { "Keyframe Motion", "kfm" },
 	// Miscellaneous NIF types
@@ -1541,6 +1545,30 @@ NifSkope::NifSkope( bool background )
 	: QMainWindow(), ui( new Ui::MainWindow )
 {
 	backgroundWorkspaceDocument = background;
+
+	/* PLACE A HEADLESS WINDOW BEFORE ANYTHING CAN CREATE A NATIVE ONE
+	 * (bungo 2026-09-09: "Agent is launching nifskope on my main monitor,
+	 * which is a no no").
+	 *
+	 * Doing it in createWindow alone was too late, and it was MEASURED too
+	 * late: an EnumWindows probe at 25 ms saw a 426x306 OPAQUE window of this
+	 * process on the PRIMARY monitor at t=371 ms -- Qt's default geometry,
+	 * class Qt6111QWindowIcon, the application title and no filename -- which
+	 * was gone by t=1403 ms and replaced by the real window, class
+	 * Qt6111QWindowOwnDCIcon, at the asked-for place with layered alpha 0. The
+	 * class change is the tell: the Windows plugin picks the window class by
+	 * whether the surface needs its own DC, so realising the GL container
+	 * (createWindowContainer, below) destroys the first native window and
+	 * creates a second. The first one was created and shown while this widget
+	 * still had its default geometry, because createWindow does not touch it
+	 * until this constructor has returned.
+	 *
+	 * Setting the geometry and the opacity HERE means whatever native window
+	 * is created carries them from birth. createWindow applies them again,
+	 * because restoreUi()'s restoreGeometry() overwrites both. */
+	if ( !background )
+		wwPlaceHeadlessWindow( this );
+
 	// Init UI
 	ui->setupUi( this );
 	// The native GL container and the specialist tree views accept their own
@@ -7385,11 +7413,124 @@ SettingsDialog * NifSkope::getOptions()
 
 
 
+/*! True when this process is a WW harness or batch run rather than a person.
+ *
+ *  ONE predicate for every headless entry, and deliberately the SAME test
+ *  saveUi() has made since 2026-07-27: any environment variable whose name
+ *  starts with WW_.  Every headless route this application has is selected by
+ *  exactly such a variable -- WW_RENDER_SHOT and its WW_RENDER_* switches,
+ *  WW_LOD_CHANNEL, WW_IMPOSTOR_BAKE, WW_FIRSTFRAME_TEST and the WW_*_TEST
+ *  harnesses -- so a new switch is covered the day it is written and there is
+ *  no second list to keep in step.  `-no-gui` is answered too for completeness,
+ *  although that path selects a QCoreApplication in main.cpp and never builds a
+ *  window at all.
+ *
+ *  Cached: the environment and the command line do not change under us, and
+ *  this is asked on a close path that must not walk the environment per window.
+ */
+bool NifSkope::wwHeadlessRun()
+{
+	static const bool headless = []() {
+		const QStringList envKeys = QProcessEnvironment::systemEnvironment().keys();
+		for ( const QString & key : envKeys ) {
+			if ( key.startsWith( QLatin1String( "WW_" ) ) )
+				return true;
+		}
+		return QCoreApplication::arguments().contains( QLatin1String( "-no-gui" ) );
+	}();
+	return headless;
+}
+
+
 void NifSkope::closeEvent( QCloseEvent * e )
 {
 	if ( closingWorkspaceGroup ) {
 		e->accept();
 		return;
+	}
+
+	/* HEADLESS RUNS DISCARD; THEY NEVER ASK (2026-09-09).
+	 *
+	 * `qApp->quit()` is not a bare exit(0) any more.  QCoreApplicationPrivate::quit()
+	 * is virtual (Qt 6.11 QtCore/private/qcoreapplication_p.h:105) and
+	 * QGuiApplicationPrivate overrides it (QtGui/private/qguiapplication_p.h:83) to
+	 * CLOSE EVERY TOP-LEVEL WINDOW before the event loop exits.  So every WW_* hook
+	 * that ends in qApp->quit() -- the render shot, the impostor card bake, every
+	 * WW_*_TEST harness -- arrives HERE, asks saveConfirm(), and raises a modal
+	 * question that nobody is there to answer.  The run then hangs until its own
+	 * `timeout` kills it, and writes no picture.  Reported by bungo 2026-09-09,
+	 * "agents keep always hanging on save confirmation", with the Save Confirmation
+	 * box on TreeMapleForest3 -- the bake writes LOD1/LOD2 Size and the `_L*` shape
+	 * flags into the loaded model (src/nifskope_ui.cpp, IMPOSTOR CARD BAKER), which
+	 * is what made that document modified.
+	 *
+	 * A headless run has no user whose work could be lost.  Its document is scratch:
+	 * the bake writes its own PNGs and .txt, a render writes its own framebuffer,
+	 * and neither has anything to do with the file on disk.  So the honest answer to
+	 * every one of those questions is No, and it is given here as STATE rather than
+	 * as a branch -- one guard, and the whole close path below then takes the
+	 * discard answer by itself: this window's saveConfirm(), every group member's,
+	 * and the "unsaved and not on disk anywhere" background-document question.
+	 * Nothing on the interactive path is touched: with no WW_ variable set this
+	 * block does not run, and a real edit still prompts exactly as it did.
+	 *
+	 * The ~40 harnesses that call undoStack->setClean() by hand to dodge this
+	 * dialog, and the two that keep a timer clicking "No" on it, no longer need to;
+	 * they are left alone because doing nothing is still correct for them.
+	 */
+	if ( wwHeadlessRun() ) {
+		/* WHAT WAS DISCARDED IS WRITTEN DOWN.
+		 *
+		 * The dialog this replaces left a trace on the screen; a discard leaves
+		 * none, and "the harness did not hang" passes equally well on a run whose
+		 * document was never dirty -- so it cannot tell a working guard from a
+		 * case that never reached one.  Every document actually decided for is
+		 * therefore named in release/ww_headless_close.log, and a run with nothing
+		 * to discard writes no file at all.  That pair is what a harness can fail
+		 * on in both directions.
+		 *
+		 * Collected BEFORE anything is cleared, or the answer is always "nothing".
+		 */
+		QStringList discarded;
+		auto dirty = []( const NifModel * model, bool windowFlag ) {
+			return windowFlag || ( model && model->undoStack && !model->undoStack->isClean() );
+		};
+		auto takeWindow = [&discarded, &dirty]( NifSkope * document ) {
+			if ( !document )
+				return;
+			if ( dirty( document->nif, document->isWindowModified() ) )
+				discarded << ( document->nif
+					? document->nif->getFileInfo().completeBaseName() : QString() );
+			document->cfg.suppressSaveConfirm = true;
+			if ( document->nif && document->nif->undoStack )
+				document->nif->undoStack->setClean();
+			document->setWindowModified( false );
+		};
+		takeWindow( this );
+		for ( NifSkope * document : std::as_const( sessionDocumentWindows ) )
+			takeWindow( document );
+		for ( BackgroundNifDocument * document : std::as_const( sessionBackgroundDocuments ) ) {
+			if ( !document )
+				continue;
+			if ( document->isModified() )
+				discarded << document->displayName();
+			document->unsavedInMemory = false;
+			if ( document->nif && document->nif->undoStack )
+				document->nif->undoStack->setClean();
+		}
+		if ( !discarded.isEmpty() ) {
+			qInfo().noquote() << "headless close: discarded unsaved changes to"
+				<< discarded.join( QStringLiteral( ", " ) );
+			/* A FILE, not only qInfo(): NifSkope links as a Windows GUI subsystem
+			 * binary, so a harness that pipes it cannot count on the message
+			 * arriving.  Same home and same append discipline as WW_GRID_PROBE. */
+			QFile probe( QApplication::applicationDirPath()
+				+ QStringLiteral( "/ww_headless_close.log" ) );
+			if ( probe.open( QIODevice::Append | QIODevice::Text ) ) {
+				for ( const QString & name : std::as_const( discarded ) )
+					QTextStream( &probe ) << "discarded " << name << "\n";
+			}
+		}
 	}
 
 	// uiRestored, not just visibility: a promoted background window is visible
@@ -9554,6 +9695,22 @@ bool NifSkope::openFile( QString & file )
 		btdPendingRegion = spec;
 	}
 
+	/* A .lodl is the same species of file and takes the same route: the
+	 * picker chooses a cell rectangle, a detail level AND which of the
+	 * stored planes paints the surface, all before the load begins. */
+	if ( file.endsWith( QStringLiteral( ".lodl" ), Qt::CaseInsensitive ) ) {
+		LodtWorldInfo info;
+		QString error;
+		if ( !lodtReadWorldInfo( file, info, &error ) ) {
+			Message::warning( this, tr( "Could not read the landscape file." ), error );
+			return false;
+		}
+		LodtRegionSpec spec = lodtPendingRegion;
+		if ( !lodtQueryRegion( this, file, info, spec ) )
+			return false;
+		lodtPendingRegion = spec;
+	}
+
 	loadFile( file );
 	return true;
 }
@@ -9605,8 +9762,12 @@ static QStringList validExternalNifPaths( const QStringList & files )
 	QSet<QString> seen;
 	for ( const QString & path : files ) {
 		QFileInfo info( path );
+		// The same set as the Open dialog (NifSkope::filetypes), not just
+		// .nif: this is the second gate a dropped file passes, and it has
+		// to agree with GLView::dragEnterEvent or a file is accepted on
+		// hover and then silently discarded on release.
 		if ( !info.exists() || !info.isFile()
-			|| info.suffix().compare( QStringLiteral( "nif" ), Qt::CaseInsensitive ) != 0 )
+			|| !NifSkope::fileExtensions().contains( info.suffix(), Qt::CaseInsensitive ) )
 			continue;
 		const QString absolute = info.absoluteFilePath();
 		const QString identity = QDir::cleanPath( absolute ).toLower();
@@ -9936,8 +10097,53 @@ void NifSkope::load()
 		}
 		if ( !loaded && !terr.isEmpty() )
 			qWarning() << "btd terrain:" << terr;
+	} else if ( f.suffix().compare( QLatin1String( "lodl" ), Qt::CaseInsensitive ) == 0 ) {
+		/* Landscape file: GENERATED the same way, off the same picker, kept
+		 * the same way so Reload rebuilds the same region AND the same plane.
+		 * The notes the builder returns are what the plane MEASURED -- range,
+		 * how many samples carry anything -- so a picture is never the only
+		 * evidence that a plane was read. */
+		LodtWorldInfo linfo;
+		QString terr, notes;
+		if ( lodtReadWorldInfo( fname, linfo, &terr ) ) {
+			LodtRegionSpec spec = lodtPendingRegion;
+			if ( !spec.valid && !lodtRegionFromEnv( spec ) ) {
+				const LodtPlane wanted = spec.plane;   // WW_LODT_PLANE alone
+				spec = lodtDefaultRegion( linfo );
+				spec.plane = wanted;
+			}
+			loaded = nifCreateLodtTerrainScene( nif, fname, spec, &terr, &notes );
+			if ( loaded )
+				lodtPendingRegion = spec;
+		}
+		if ( loaded && !notes.isEmpty() )
+			qInfo().noquote() << "lodt terrain:\n" << notes;
+		if ( !loaded && !terr.isEmpty() )
+			qWarning() << "lodt terrain:" << terr;
 	} else {
 		loaded = nif->loadFromFile( fname );
+	}
+	/* A GENERATED DOCUMENT IS NOT A MODIFIED ONE (2026-09-09).
+	 *
+	 * The .btd and .lodl routes above do not PARSE a document, they BUILD one, and
+	 * building it fires NifModel::dataChanged, which is wired to setWindowModified
+	 * (this file, the constructor).  So a terrain document was born dirty: closing
+	 * it -- or quitting a headless render of it -- asked whether to save changes
+	 * that nobody had made, to a file the save path refuses to write anyway
+	 * (NifSkope::save() sends .btd and .lodl to Save As so a game file is never
+	 * overwritten with foreign bytes).
+	 *
+	 * As generated IS as loaded here, exactly as it already is for the starter
+	 * scene above, so the stack is cleared and marked clean before anyone is told
+	 * the document is ready.  A later real edit dirties it again through the same
+	 * signal, so the prompt still protects actual work.
+	 */
+	if ( loaded && nif && nif->undoStack
+		&& ( f.suffix().compare( QLatin1String( "btd" ), Qt::CaseInsensitive ) == 0
+			|| f.suffix().compare( QLatin1String( "lodl" ), Qt::CaseInsensitive ) == 0 ) ) {
+		nif->undoStack->clear();
+		nif->undoStack->setClean();
+		setWindowModified( false );
 	}
 	perfMark( "loadFromFile (views detached)" );
 
@@ -9965,7 +10171,8 @@ bool NifSkope::save()
 
 	// A document generated FROM a .btd is a NIF; writing it over the terrain
 	// database it came from would destroy a game file with foreign bytes.
-	if ( curFile.suffix().compare( QLatin1String( "btd" ), Qt::CaseInsensitive ) == 0 )
+	if ( curFile.suffix().compare( QLatin1String( "btd" ), Qt::CaseInsensitive ) == 0
+		|| curFile.suffix().compare( QLatin1String( "lodl" ), Qt::CaseInsensitive ) == 0 )
 		return saveAsDlg();
 
 	return saveFile( currentFile );
