@@ -1,0 +1,4 @@
+verify: E:/Projects/Fallout 4 Mods/mods/FO4CS/Terrain/Commonwealth.lodl
+  readback: cells 192x192  rate 32  levels 4  blocks 48960  LTEX 100  WATR 15  quantum 8
+  cross-check: 36864 samples against the ESM, 0 mismatched, worst 0 (129 seam samples raised by the max rule)
+  alpha words: 0 of 36864 differ (2328 nonzero); colour words: 0 of 36864 differ (2112 coloured)

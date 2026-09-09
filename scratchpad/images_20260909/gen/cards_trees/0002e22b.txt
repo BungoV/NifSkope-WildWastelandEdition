@@ -1,0 +1,11 @@
+model QryRubbleRaisedFloor02.nif
+lodm Materials\Architecture\Quarry\QuarryMarble01.lodm none textures\architecture\quarry\qrymarble01_d.dds
+lodm Materials\Architecture\Quarry\QuarryMarble04.lodm none textures\architecture\quarry\qrymarble04_d.dds
+lodm Materials\Architecture\Quarry\QuarryMarbleFloor01.lodm none textures\architecture\quarry\qrymarblefloor01_d.dds
+lodm Materials\Architecture\Quarry\QuarryMarbleRough01.lodm none textures\architecture\quarry\qrymarblerough01_d.dds
+mask alpha
+emissive 0 shapes 0
+front 1177.92 391.597 0.520741 0.520749 -0.00628662
+side 1177.92 391.597 0.520741 0.520749 -0.00628662
+class 32 32
+oct 8 32 32 422.706 422.706 0.520741 0.520749 -0.00628662 3072 legacy 128

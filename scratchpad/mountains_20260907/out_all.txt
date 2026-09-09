@@ -1,0 +1,18 @@
+master X:\Programs\Steam\steamapps\common\Fallout 4\Data\Fallout4.esm (330,776,576 bytes)
+  36864 cells, 36864 with a LAND, 36 blocks, 576 sub-blocks
+assignments: 32909 cells, placeholder LTEX 00021336
+  WRLD FULL: string id 0x0003613F -> 'Commonwealth', written inline
+  WRLD large references: merged in 997 refs across 65 new grids from DLCCoast.esm(739), DLCNukaWorld.esm(426), DLCRobot.esm(53), ccOTMFO4001-Remnants.esl(36)
+built: 51,915,616 bytes  (32909 cells, 65819 records, 66391 GRUPs)
+  LAND records 46,519,636 bytes, CELL records 2,853,307 bytes, WRLD record 949,190 bytes
+  BTXT inserted 131636, replaced 0
+  the same LAND records weigh 45,686,553 bytes in the master (payload 144,515,437 -> 146,358,341, +1,842,904)
+  per cell: 1577.6 bytes total, 1413.6 bytes of LAND record
+  per cell without the one-off WRLD record: 1548.7 bytes
+  verify: 65819 records, 66391 GRUPs, HEDR=132210
+  verify: 32909 CELL records byte-identical to the master
+  verify: 32909 LAND records checked against the expected splice
+  verify: every LAND on the path Top -> WorldChildren -> ExteriorBlock -> ExteriorSubBlock -> CellChildren -> CellTemporary
+  VERIFY OK
+wrote C:\Users\bungo\AppData\Local\Temp\claude\laneb\LandFix_all.esp (51,915,616 bytes)
+done in 4.9 s

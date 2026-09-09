@@ -1,0 +1,12 @@
+master X:\Programs\Steam\steamapps\common\Fallout 4\Data\Fallout4.esm (330,776,576 bytes)
+  36864 cells, 36864 with a LAND, 36 blocks, 576 sub-blocks
+assignments: 32909 cells, placeholder LTEX 00021336
+  WRLD FULL: string id 0x0003613F -> 'Commonwealth', written inline
+  WRLD large references: merged in 997 refs across 65 new grids from DLCCoast.esm(739), DLCNukaWorld.esm(426), DLCRobot.esm(53), ccOTMFO4001-Remnants.esl(36)
+built: 152,544,137 bytes  (32909 cells, 65819 records, 66391 GRUPs)
+  LAND records 147,148,157 bytes, CELL records 2,853,307 bytes, WRLD record 949,190 bytes
+  BTXT inserted 131636, replaced 0
+  the same LAND records weigh 45,686,553 bytes in the master (payload 144,515,437 -> 146,358,341, +1,842,904)
+  per cell: 4635.3 bytes total, 4471.4 bytes of LAND record
+  per cell without the one-off WRLD record: 4606.5 bytes
+done in 2.3 s

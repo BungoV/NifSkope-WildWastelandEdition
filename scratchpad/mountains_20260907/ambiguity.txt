@@ -1,0 +1,65 @@
+AMBIGUITY OF COLOUR -> DOMINANT MATERIAL
+far-area-weighted mean top-1 share over the bins the far terrain actually uses: 27.3%
+far area in bins with no painted sample at all (top 60): 0.74%
+
+# bin(6-bit RGB)  farQuads  farShare  cum  paintedN  top1Share  nDistinct  entropyBits   materials
+(18, 16, 14)      19361  14.71%  14.71%       164      20.1%         28        3.67   LNF_Dirt01 20%, <no BTXT under layers> 19%, LNFoothillsRubbleRock01 16%
+(17, 15, 14)      15115  11.48%  26.19%       132      19.7%         29        4.15   LBlastedForestDirt01 20%, LCoastSandWet01 11%, LRiverbedSilt01 7%
+(18, 17, 15)       9807   7.45%  33.64%       446      16.1%         38        4.24   <no BTXT under layers> 16%, LNF_Dirt01 13%, LCoastSandWet01 10%
+(17, 16, 14)       6876   5.22%  38.86%       375      14.1%         39        4.26   LNF_Dirt01 14%, LCoastSandWet01 13%, <no BTXT under layers> 11%
+(19, 17, 15)       5074   3.85%  42.72%       130      28.5%         23        3.76   <no BTXT under layers> 28%, LDriedGrass01 7%, LCoastSandDry01 7%
+(16, 15, 14)       4199   3.19%  45.91%       222      18.5%         29        3.88   LBlastedForestDirt01 18%, LGlowingSeaRubble01 17%, LCoastSandWet01 11%
+(18, 17, 14)       3539   2.69%  48.60%       128      27.3%         22        3.17   LNF_Dirt01 27%, LNFoothillsRubbleRock01 26%, <no BTXT under layers> 16%
+(16, 15, 13)       3476   2.64%  51.24%       288      14.9%         35        4.21   <no BTXT under layers> 15%, LCoastSandWet01 14%, LNFoothillsRubbleRock01 8%
+(19, 17, 16)       2955   2.24%  53.48%        25      16.0%         15        3.67   LBlastedForestDirt01 16%, LGlowingSeaRubble01NoGrass 12%, LDirtGravel01 12%
+(20, 18, 16)       2761   2.10%  55.58%       197      42.1%         24        3.26   <no BTXT under layers> 42%, LCoastSandDry01 10%, LRubbleRock01 9%
+(22, 20, 17)       2751   2.09%  57.67%       331      48.6%         24        2.76   <no BTXT under layers> 49%, LRubbleRock01 19%, LForestFloor01 6%
+(23, 21, 18)       2743   2.08%  59.75%       261      46.4%         24        2.97   <no BTXT under layers> 46%, LRubbleRock01 14%, LForestFloor01 6%
+(16, 14, 12)       2675   2.03%  61.79%        74      23.0%         15        3.35   LMarshMudFloor01 23%, <no BTXT under layers> 15%, LNFoothillsRubbleRock01 12%
+(19, 18, 16)       2167   1.65%  63.43%       419      19.1%         31        4.10   <no BTXT under layers> 19%, LNF_Dirt01 10%, LDirtGravel01 8%
+(21, 19, 16)       2106   1.60%  65.03%       296      43.6%         21        2.99   <no BTXT under layers> 44%, LRubbleRock01 16%, LForestFloor01 7%
+(24, 22, 19)       2100   1.60%  66.63%       208      56.2%         16        2.24   <no BTXT under layers> 56%, LRubbleRock01 19%, LForestFloor01 7%
+(17, 15, 13)       2095   1.59%  68.22%       155      14.8%         29        4.00   LNF_Dirt01 15%, LNFoothillsRubbleRock01 13%, <no BTXT under layers> 11%
+(18, 16, 15)       1824   1.39%  69.60%        54      22.2%         18        3.53   LBlastedForestDirt01 22%, LCoastSandWet01 19%, LGlowingSeaRubble01NoGrass 11%
+(21, 19, 17)       1800   1.37%  70.97%       168      42.3%         26        3.28   <no BTXT under layers> 42%, LRubbleRock01 12%, LCoastSandDry01 9%
+(18, 17, 16)       1577   1.20%  72.17%       127      15.0%         30        4.24   LDirtGravel01 15%, <no BTXT under layers> 10%, LCoastSandWet01 10%
+(20, 18, 15)       1486   1.13%  73.30%       177      42.4%         21        3.07   <no BTXT under layers> 42%, LRubbleRock01 14%, LRiverbedSilt01 7%
+(22, 20, 18)       1308   0.99%  74.29%       138      37.7%         21        3.26   <no BTXT under layers> 38%, LRubbleRock01 9%, LCoastSandWet01 9%
+(19, 18, 15)       1294   0.98%  75.28%       192      27.6%         29        3.58   <no BTXT under layers> 28%, LNFoothillsRubbleRock01 19%, LNF_Dirt01 14%
+(20, 19, 16)       1275   0.97%  76.24%       171      35.1%         26        3.42   <no BTXT under layers> 35%, LCoastSandDry01 12%, LRubbleRock01 10%
+(16, 14, 13)       1189   0.90%  77.15%       218      17.0%         29        4.07   LCoastSandWet01 17%, LBlastedForestDirt01 15%, LRiverbedSilt01Wet 8%
+(21, 20, 17)       1096   0.83%  77.98%       193      36.3%         25        3.45   <no BTXT under layers> 36%, LDirtGravel01 10%, LRubbleRock01 9%
+(14, 12, 10)       1044   0.79%  78.77%        48      70.8%          8        1.63   LMarshMudFloor01 71%, LOceanFloor01 8%, LCoastGrassSand01 6%
+(25, 23, 20)       1025   0.78%  79.55%        89      40.4%         11        2.58   <no BTXT under layers> 40%, LRubbleRock01 25%, LRootsEroded01 8%
+(15, 13, 11)        963   0.73%  80.28%        56      71.4%         12        1.76   LMarshMudFloor01 71%, <no BTXT under layers> 9%, LRiverbedSilt01 4%
+(15, 13, 12)        922   0.70%  80.98%       230      21.7%         29        3.91   LBlastedForestDirt01 22%, LRiverbedSilt01Wet 12%, LMarshMudFloor01 11%
+(13, 11, 10)        839   0.64%  81.62%       137      40.9%         20        3.22   LMarshMudFloor01 41%, LCoastSandWet01 9%, LBlastedForestDirt01 9%
+(14, 13, 11)        754   0.57%  82.19%       189      34.4%         26        3.32   LMarshMudFloor01 34%, LCoastSandWet01 22%, LGlowingSeaRubble01 7%
+(13, 12, 10)        738   0.56%  82.75%       151      54.3%         17        2.38   LMarshMudFloor01 54%, LCoastSandWet01 20%, <no BTXT under layers> 4%
+(26, 23, 20)        730   0.55%  83.31%        11      54.5%          4        1.62   LRubbleRock01 55%, <no BTXT under layers> 27%, LDirtGravel01 9%
+(25, 22, 19)        722   0.55%  83.86%        36      41.7%          8        2.37   <no BTXT under layers> 42%, LRubbleRock01 22%, LRootsEroded01 14%
+(15, 14, 12)        720   0.55%  84.40%       220      21.4%         30        3.97   LCoastSandWet01 21%, LMarshMudFloor01 13%, LRiverbedSilt01Wet 13%
+(23, 21, 19)        694   0.53%  84.93%       102      48.0%         16        2.78   <no BTXT under layers> 48%, LDirtGravel01 11%, LRubbleRock01 11%
+(12, 11, 10)        687   0.52%  85.45%       534      37.6%         27        3.15   LCoastSandWet01 38%, LOceanFloor01 19%, LGlowingSeaMud01 8%
+(22, 21, 18)        671   0.51%  85.96%       170      40.0%         23        3.13   <no BTXT under layers> 40%, LDirtGravel01 14%, LRubbleRock01 11%
+(19, 17, 14)        655   0.50%  86.46%        63      39.7%         15        2.90   <no BTXT under layers> 40%, LNFoothillsRubbleRock01 16%, LDriedGrass01 13%
+(14, 12, 11)        557   0.42%  86.88%       244      21.3%         23        3.65   LMarshMudFloor01 21%, LBlastedForestDirt01 17%, LCoastSandWet01 16%
+(26, 25, 23)        484   0.37%  87.25%         4      25.0%          4        2.00   LDebrisGround 25%, <no BTXT under layers> 25%, LDirtGravel01 25%
+(17, 16, 13)        467   0.35%  87.61%        94      37.2%         19        2.84   LNFoothillsRubbleRock01 37%, LNF_Dirt01 29%, <no BTXT under layers> 7%
+(12, 10, 8)         467   0.35%  87.96%         5      60.0%          3        1.37   LMarshMudFloor01 60%, LCoastGrassSand01 20%, LOceanFloor01 20%
+(16, 15, 12)        438   0.33%  88.29%        20      35.0%          8        2.56   LNF_Dirt01 35%, LNFoothillsRubbleRock01 25%, <no BTXT under layers> 10%
+(12, 11, 9)         433   0.33%  88.62%        58      63.8%          9        1.93   LMarshMudFloor01 64%, LCoastSandWet01 10%, LOceanFloor01 7%
+(23, 22, 19)        430   0.33%  88.95%       110      42.7%         11        2.64   <no BTXT under layers> 43%, LDirtGravel01 20%, LRubbleRock01 7%
+(24, 22, 20)        400   0.30%  89.25%        59      52.5%         14        2.62   <no BTXT under layers> 53%, LDebrisGround 8%, LRubbleRock01 8%
+(26, 24, 21)        396   0.30%  89.55%        10      60.0%          5        1.77   <no BTXT under layers> 60%, LDirtPath01 10%, LRootsEroded01 10%
+(27, 26, 26)        376   0.29%  89.84%   (no painted sample in this bin)
+(25, 23, 21)        376   0.29%  90.13%        25      44.0%          8        2.26   <no BTXT under layers> 44%, LDirtGravel01 28%, LRiverbedSilt01 8%
+(27, 26, 24)        370   0.28%  90.41%         1     100.0%          1       -0.00   LRiverbedSilt01 100%
+(18, 16, 13)        357   0.27%  90.68%        27      29.6%         10        2.85   LNFoothillsRubbleRock01 30%, LNF_Dirt01 22%, <no BTXT under layers> 15%
+(24, 21, 18)        350   0.27%  90.94%        37      70.3%          7        1.60   <no BTXT under layers> 70%, LForestFloor01 8%, LFallenLeaves01 8%
+(25, 24, 22)        330   0.25%  91.19%        24      45.8%          7        2.30   LDirtGravel01 46%, LDebrisGround 17%, <no BTXT under layers> 12%
+(26, 24, 22)        330   0.25%  91.44%         6      50.0%          4        1.79   <no BTXT under layers> 50%, LRiverbedSilt01 17%, LDirtGravel01 17%
+(20, 19, 17)        319   0.24%  91.69%       329      25.8%         29        3.68   <no BTXT under layers> 26%, LDirtGravel01 18%, LCoastSandDry01 12%
+(27, 26, 25)        319   0.24%  91.93%   (no painted sample in this bin)
+(24, 23, 20)        307   0.23%  92.16%        55      41.8%         11        2.67   <no BTXT under layers> 42%, LDirtGravel01 18%, LRubbleRock01 9%
+(27, 27, 27)        278   0.21%  92.37%   (no painted sample in this bin)

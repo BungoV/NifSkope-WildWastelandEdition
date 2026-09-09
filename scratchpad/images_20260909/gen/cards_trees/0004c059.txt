@@ -1,0 +1,8 @@
+model QryLedgeDiag01FloorONLY.nif
+lodm Materials\Architecture\Quarry\QuarryMarble01.lodm none textures\architecture\quarry\QryMarble01_d.DDS
+mask alpha
+emissive 0 shapes 0
+front 1306.81 434.446 0 0 -256
+side 1306.81 434.446 0 0 -256
+class 32 32
+oct 8 32 32 1.38667 1.38667 0 0 -256 3072 legacy 128

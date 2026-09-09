@@ -1,0 +1,278 @@
+msn_features.npz -- per-quadrant features from the vanilla terrain LOD normal
+maps.  Sub-lane of RECOVER.  Everything below is MEASURED unless a line says
+`reasoned`.  Load with allow_pickle=True; `names` is an object array.
+
+    M     float32 (192, 192, 4, 31)   [cy+96][cx+96][quadrant][feature]
+    have  bool    (192, 192)
+    names object  (31,)
+
+Quadrant order is the ESM's: 0 BL, 1 BR, 2 TL, 3 TR.  Nothing is normalised.
+
+
+WHAT WAS SWEPT
+--------------
+All 2,304 `Commonwealth.4.<x>.<y>_msn.DDS` tiles, 512x512 BC3_UNORM, 10 mips,
+at MIP 0 -- so a cell is 128x128 texels and a quadrant is 64x64 = 4,096 texels.
+603,979,776 texels in total, 367 s.  Channels are decoded signed as
+(v/255 - 0.5)*2 with R = nx east, G = ny up, B = nz north.
+
+Neighbourhood operators (laplacian, box residuals, first differences) run over
+the WHOLE 512x512 tile before the quadrants are cut out, not inside each 64x64
+quadrant.  A quadrant's edge texels therefore see their real neighbours in the
+adjacent cell rather than a truncated window; only the outer 4-texel ring of a
+whole tile is edge-padded.  This differs deliberately from rec_features.py,
+which truncates per quadrant.
+
+
+THE 31 COLUMNS
+--------------
+   0-2   mean_nx  mean_ny  mean_nz        per-channel mean (mostly geometry)
+   3-5   std_nx   std_ny   std_nz         per-channel std
+   6-8   lap_nx   lap_ny   lap_nz         mean |3x3 laplacian|      <- narrowest band
+   9-11  hp9_nx   hp9_ny   hp9_nz         std of (channel - 9x9 box mean)
+  12-14  hp5_nx   hp5_ny   hp5_nz         std of (channel - 5x5 box mean)
+  15-17  dh_nx    dh_ny    dh_nz          mean |horizontal first difference|
+  18-20  dv_nx    dv_ny    dv_nz          mean |vertical first difference|
+  21     rough                            mean angle (rad) between a texel normal
+                                          and the quadrant's mean normal
+  22     aniso                            Eh / (Eh + Ev), gradient energy summed
+                                          over channels.  Bounded form of the
+                                          brief's horizontal/vertical ratio, so a
+                                          flat quadrant cannot divide by zero.
+                                          0.5 = isotropic.
+  23     lapVec                           mean || 3-vector laplacian ||
+  24     tiltMean                         mean sqrt(nx^2 + nz^2)
+  25     tiltStd                          std of that
+  26     hpTilt                           std of (tilt - its 9x9 box mean)
+  27-29  detRat_nx/ny/nz                  lap / (std + 1e-4): scale-free
+                                          speckliness, so a flat-but-gritty and a
+                                          steep-and-gritty quadrant score alike
+  30     hpCorr_xz                        correlation of hp9(nx) with hp9(nz)
+
+Two high-pass widths are kept on purpose.  The geometric normal comes from the
+33x33 VHGT grid at 4 texels per vertex, so the 3x3 laplacian (2-texel band) is
+the closer approximation to pure material, while the 9x9 residual keeps
+material plus the finest geometry.  The covariate-shift table decides which.
+
+
+GATES
+-----
+1. DECODE -- PASS.  bcnp.decode_rgb vs dds.py at mip 0 on four _msn tiles
+   (0.0, -40.-40, 60.60, 16.-24): 0 mismatching channels, max abs diff 0 on
+   every one.  Alpha is min 255 max 255 on all four, so the RGB-only vectorised
+   path loses nothing.  `python msn_decode_check.py`
+
+2. RESHAPE SELF-TEST -- PASS.  The whole-tile 8x8-quadrant reduction is
+   compared against a naive per-quadrant recomputation of the means, stds,
+   roughness and tilt on 9 quadrants of 2 tiles: worst difference 7.8e-08.
+   `python msn_selftest.py`
+
+3. ORIENTATION -- PASS.  Independent end-to-end check that my reshape landed
+   the features on the right cell: correlate per-quadrant tiltMean against the
+   per-quadrant VHGT mean slope from features.npz over 71,888 quadrants.
+       as written                       r = +0.6036
+       quadrants N/S swapped in cell    r = +0.5039
+       cell rows flipped (cy mirrored)  r = +0.2553
+       cell cols flipped (cx mirrored)  r = -0.1819
+   `python msn_orient_check.py`
+
+4. GREEN SANITY -- the stated convention holds, emphatically.
+       mean(ny_up)          = 0.9363
+       fraction ny_up > 0   = 0.999998   over 603,979,776 texels
+   Green is up.  Not a hint of the usual up-in-blue tangent-space layout.
+
+5. COVERAGE -- 36,864 of 36,864 cells got features.  `have` is all True.
+
+
+COVARIATE SHIFT (rec_shift.py's rule, 15,820 painted vs 131,636 far quadrants)
+------------------------------------------------------------------------------
+feature      paint mu paint sd |    far mu   far sd |  overlap shift/sd
+mean_nx        0.0254   0.1712 |   -0.0175   0.1728 |    94.6%    -0.25
+mean_ny        0.9188   0.0434 |    0.9384   0.0977 |    44.3%     0.45
+mean_nz       -0.0369   0.1764 |   -0.0434   0.1745 |    95.1%    -0.04
+std_nx         0.2613   0.0480 |    0.2157   0.0563 |    95.7%    -0.95
+std_ny         0.0527   0.0252 |    0.0336   0.0328 |    47.3%    -0.76
+std_nz         0.2020   0.0650 |    0.1341   0.0697 |    62.7%    -1.04
+lap_nx         0.6218   0.0886 |    0.6353   0.0720 |    97.0%     0.15
+lap_ny         0.0631   0.0301 |    0.0502   0.0445 |    85.3%    -0.43
+lap_nz         0.3049   0.0602 |    0.2908   0.0650 |    97.1%    -0.23
+hp9_nx         0.2041   0.0330 |    0.1981   0.0343 |    96.5%    -0.18
+hp9_ny         0.0295   0.0130 |    0.0238   0.0190 |    87.3%    -0.44
+hp9_nz         0.1202   0.0272 |    0.1078   0.0347 |    96.8%    -0.45
+hp5_nx         0.1955   0.0305 |    0.1923   0.0297 |    96.6%    -0.11
+hp5_ny         0.0257   0.0117 |    0.0207   0.0171 |    81.8%    -0.43
+hp5_nz         0.1089   0.0239 |    0.0988   0.0296 |    97.1%    -0.42
+dh_nx          0.2006   0.0323 |    0.2017   0.0292 |    96.3%     0.04
+dh_ny          0.0201   0.0097 |    0.0157   0.0144 |    86.2%    -0.44
+dh_nz          0.0949   0.0177 |    0.0899   0.0186 |    97.4%    -0.28
+dv_nx          0.1923   0.0274 |    0.1954   0.0210 |    97.5%     0.11
+dv_ny          0.0202   0.0100 |    0.0159   0.0149 |    84.6%    -0.43
+dv_nz          0.1014   0.0225 |    0.0948   0.0262 |    96.7%    -0.30
+rough          0.2944   0.0652 |    0.2219   0.0708 |    69.5%    -1.11
+aniso          0.5059   0.0350 |    0.5045   0.0393 |    96.0%    -0.04
+lapVec         0.7339   0.0884 |    0.7341   0.0702 |    97.4%     0.00
+tiltMean       0.3707   0.1067 |    0.2969   0.1724 |    46.9%    -0.69
+tiltStd        0.1677   0.0335 |    0.1265   0.0349 |    74.3%    -1.23
+hpTilt         0.1255   0.0196 |    0.1150   0.0228 |    97.1%    -0.54
+detRat_nx      2.4480   0.4959 |    3.0665   0.5623 |    72.7%     1.25
+detRat_ny      1.2715   0.4630 |    1.5916   0.3054 |    96.5%     0.69
+detRat_nz      1.6347   0.4929 |    2.4278   0.5716 |    46.1%     1.61
+hpCorr_xz     -0.0007   0.2335 |    0.0081   0.2318 |    96.9%     0.04
+
+TRANSFERABLE (overlap >= 90% and |shift| <= 0.60), 16 of 31:
+  mean_nx mean_nz lap_nx lap_nz hp9_nx hp9_nz hp5_nx hp5_nz
+  dh_nx dh_nz dv_nx dv_nz aniso lapVec hpTilt hpCorr_xz
+
+REJECTED, 15 of 31: every ny (up-channel) column, every std, rough, tiltMean,
+tiltStd and all three detRat.  `python msn_shift.py`
+
+
+SURPRISES, IN ORDER OF HOW MUCH THEY MATTER
+-------------------------------------------
+A. THE COLUMN THAT ACTUALLY IDENTIFIES MATERIAL IS THE ONE THAT DOES NOT
+   TRANSFER.  A one-way F-ratio screen over painted quadrants owned >= 70% by a
+   single material (2,766 quadrants, 17 materials) ranks the up-channel
+   high-pass columns first, and their class means run in exactly the physical
+   order you would want:
+
+     LOceanFloor01              lap_ny 0.021   (smoothest)
+     LCoastSandWet01                   0.031
+     LRiverbedSilt01Wet                0.035
+     LRiverbedSilt01                   0.045
+     LDirtGravel01                     0.054
+     LMarshMudFloor01                  0.061
+     LCoastSandDry01                   0.074
+     LGlowingSeaMud01                  0.082
+     LGlowingSeaRubble01               0.088
+     LBlastedForestDirt01              0.092
+     LGlowingSeaRubble01NoGrass        0.106  (roughest)
+
+   That is not noise.  Ocean floor smooth, rubble rough, gravel between them --
+   the hypothesis in the brief is CORRECT IN KIND.  But lap_ny scores overlap
+   85.3% against the 90% bar, and every one of its siblings lands at 82-87%.
+   The single most informative normal-map column is the one the transferability
+   rule forbids.  It misses on overlap, not on shift (-0.43).
+   `python msn_probe.py 0.70 20`
+
+B. THE TRANSFERABLE COLUMNS ARE HALF A SMUGGLED ELEVATION PROXY.  Correlating
+   each transferable column against all 22 colour/terrain features over all
+   147,456 quadrants, the strongest partner is nearly always hMean:
+
+     hp9_nz +0.668   hp5_nz +0.665   dh_nz +0.609   hpTilt +0.609
+     lap_nz +0.572   dv_nz  +0.566   hp9_nx +0.516  lapVec +0.451
+     hp5_nx +0.464   dh_nx  +0.240   dv_nx  +0.227  lap_nx -0.208
+     mean_nx +0.150  mean_nz +0.139  aniso +0.124   hpCorr_xz -0.017
+
+   hMean was REJECTED by rec_shift.py (overlap 83.8%, shift +0.66).  `reasoned`:
+   a column can pass the shift gate on its own marginal and still be doing part
+   of its work through a variable that does not transfer, so the nz-family
+   columns should be trusted less than their own overlap numbers suggest.  The
+   four with |r| <= 0.25 against everything colour knows -- mean_nx, mean_nz,
+   aniso, hpCorr_xz -- are the clean ones, and they are also the weakest.
+   `python msn_indep.py`
+
+C. THE FINE DETAIL IS REAL DATA, NOT BC3 ARTEFACT -- for nx.  mean |laplacian|
+   of nx is 0.62 on a channel whose whole range is [-1, 1], which looked at
+   first like an encoder tantrum.  Testing it: mean |first difference| ACROSS a
+   4x4 block boundary over the same WITHIN blocks, with the diffuse tiles as
+   the "real content, same compressor" control:
+
+     msn nx                 h 1.11   v 1.10
+     msn ny                 h 1.55   v 1.58
+     msn nz                 h 1.38   v 1.57
+     diffuse lum (control)  h 1.10   v 1.09
+
+   nx sits exactly on the control.  ny and nz carry a visible block signature
+   because their amplitude is smaller and the 5/6-bit endpoint quantisation is
+   relatively larger there.  `python msn_blockcheck.py`
+
+D. THE CHANNELS ARE NOT SYMMETRIC AND I CANNOT EXPLAIN IT.  East (nx) is about
+   twice as rough as north (nz) at texel scale everywhere: lap 0.62 vs 0.30,
+   dh 0.201 vs 0.095, hp9 0.204 vs 0.120.  Both are 5-bit endpoints in BC1
+   colour, so it is not a bit-depth difference, and terrain has no reason to
+   prefer an axis.  Comparing measured mean|laplacian| against what white noise
+   of the same std would give, nx is at 67% of white and nz at 42% -- nx is
+   nearly unstructured at texel scale while nz is not.  This is why lap_nx has
+   the highest overlap of any column (97.0%) and the LOWEST F-ratio of the
+   detail columns (32.1): it transfers perfectly because it is close to noise.
+   Flagging it rather than explaining it.
+
+E. THE FAR TERRAIN IS MEASURABLY SMOOTHER, THE SAME WAY IT WAS IN THE DIFFUSE.
+   Every detail column shifts negative out of bounds (hp9_nz -0.45, hpTilt
+   -0.54, std_nz -1.04, rough -1.11).  This matches rec_shift.py's finding that
+   the far diffuse is smoother (laplace -0.42 sd), so it is a property of the
+   region, not of my operators.  It biases detail matching toward the smoother
+   materials out of bounds.
+
+F. mean_ny has only 44.3% overlap although its shift is only +0.45.  The far
+   distribution is bimodal -- flat procedural filler plus the steep border
+   mountains -- so its 1-99 band sticks out of the painted band on both sides
+   at once.  Overlap and shift disagree here; overlap is the honest one.
+
+
+WHETHER IT IS WORTH ANYTHING (measured, beyond the brief's ask)
+--------------------------------------------------------------
+Same k-NN, same folds, same labels as rec_holdout.py; only the columns differ.
+The colour+ row reproduces the parent lane's 28.4% exactly, which is the check
+that my pipeline is comparable to theirs.
+
+  OUTWARD (inner core -> outer rim)      LTEX top-1   texture-group top-1
+    colour+     (14 cols)                   28.4%          29.0%
+    msn only    (16 cols)                   25.0%          25.2%
+    colour+msn  (30 cols)                   30.1%          30.5%
+
+  BLOCKED (5 folds, 12-cell blocks)
+    colour+                                 39.3%          39.8%
+    msn only                                28.2%          28.7%
+    colour+msn                              39.7%          40.3%
+  `python msn_holdout.py`
+
+The decay test is the one that matters, because rec_decay.py showed colour's
+28.4% was mostly spatial autocorrelation.  Deep 50% rim holdout:
+
+  dist to train      n     colour+   msn only   colour+msn
+      1 - 2         808     43.9%      28.7%      43.6%
+      2 - 4        1433     43.3%      28.0%      41.6%
+      4 - 8        2406     38.3%      29.7%      39.6%
+      8 - 16       2526     23.6%      21.9%      23.4%
+     16+            515     11.3%      13.4%      13.8%
+  `python msn_decay.py`
+
+The normal map decays FLATTER than colour (28.7 -> 13.4, a factor of 2.1,
+against colour's 43.9 -> 11.3, a factor of 3.9) and BEATS colour outright
+beyond 16 cells.  That is the signature of a feature that is describing the
+material rather than describing where it is, and it is the strongest evidence
+in this lane that the brief's hypothesis was right in kind.
+
+It is still not enough.  At 16+ cells colour+msn reaches 13.8% against the
+18.5% null of "always assign the most common material", and the real recovery
+targets sit up to ~60 cells out.  Adding every transferable normal-map column
+moves the honest OUTWARD number from 28.4% to 30.1%, and the far-range number
+from 11.3% to 13.8% -- from clearly worse than a constant guess to still worse
+than a constant guess.
+
+
+BOTTOM LINE
+-----------
+The `_msn` does carry baked material normal detail; it is not compression
+noise; it orders materials by physical roughness correctly; and it generalises
+with distance better than colour does.  It does not make the recovery work.
+`reasoned`: the two facts are consistent -- the discriminating band is the
+up-channel high-pass, which is exactly the part that fails the transferability
+gate, so what survives the gate is the weaker half of a signal that was already
+too weak.
+
+
+FILES
+-----
+  msn_features.py        the sweep (writes msn_features.npz, 18.3 MB)
+  msn_decode_check.py    gate 1
+  msn_selftest.py        gate 2
+  msn_orient_check.py    gate 3
+  msn_shift.py           the covariate-shift table
+  msn_probe.py           F-ratio screen  [DOM MINN as optional argv]
+  msn_indep.py           redundancy of each transferable column with colour
+  msn_blockcheck.py      BC3 block-boundary artefact test
+  msn_band.py            radial power spectra + msn detail vs diffuse detail
+  msn_holdout.py         OUTWARD / BLOCKED accuracy with and without the msn
+  msn_decay.py           accuracy against distance to nearest training cell

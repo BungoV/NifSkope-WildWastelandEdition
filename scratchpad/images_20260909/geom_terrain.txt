@@ -1,0 +1,8 @@
+Commonwealth.4.28.24 vanilla: total shapes 2 verts 1110 tris 2084
+Commonwealth.4.28.24 ours   : total shapes 2 verts 1649 tris 3140
+Commonwealth.8.24.24 vanilla: total shapes 2 verts 1196 tris 2134
+Commonwealth.8.24.24 ours   : total shapes 2 verts 1329 tris 2364
+Commonwealth.16.16.16 vanilla: total shapes 2 verts 6582 tris 2429
+Commonwealth.16.16.16 ours   : total shapes 2 verts 1843 tris 2606
+Commonwealth.32.0.0 vanilla: total shapes 2 verts 8252 tris 3358
+Commonwealth.32.0.0 ours   : total shapes 2 verts 3556 tris 3450

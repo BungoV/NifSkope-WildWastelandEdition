@@ -1,0 +1,12 @@
+model TreeMapleForest7.nif
+ranges TreeMapleForest7_Temp:0 - L2_TreeMapleForest012:0 0+31
+ranges TreeMapleForest7_Temp:1 - L2_TreeMapleForest012:1 0+19
+lodm Materials\Landscape\Trees\MapleAtlas01.lodm none textures\Landscape\Trees\MapleAtlas01_d.dds
+lodm Materials\Landscape\Trees\MapleAtlas02.lodm none textures\Landscape\Trees\MapleAtlas02_d.dds
+mask alpha
+emissive 0 shapes 0
+front 2848.25 946.895 61.4752 23.0338 769.617
+side 2848.25 946.895 61.4752 23.0338 769.617
+class 16 64
+pad 2 4
+oct 8 16 64 207.253 829.013 61.4752 23.0338 769.617 3072 legacy 128

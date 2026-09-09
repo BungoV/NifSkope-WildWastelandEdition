@@ -1,0 +1,23 @@
+authority: cells [-100 -100 100 100], heights [-700.000 38209.996], spread 8229.670
+  worldspace cells [-100,-100]..[100,100]  heights -700 to 38210  land textures 43  ground covers 39
+  ok   our reader reports the header's worldspace rectangle
+  ok   our reader reports the header's height range
+  LOD4 build: 4 blocks, shape 1 has 289 verts, 512 tris
+  ok   2x2 cells at LOD4 mesh as one 17x17 shape, 512 triangles
+  ok   as exactly 4 blocks: root, shape, shader, texture set
+  corner Z 18937.570313 (file says 18937.570), mid 20334.613281 (20334.613), rim 21739.375000 (21739.374)
+  ok   vertex (0,0) carries the file's own height for that sample
+  ok   vertex (8,8) too
+  ok   the rim vertex (16,16), read from the neighbour cell, too
+  ok   the region's heights vary (spread 8229.670 > 10), so the matches are not vacuous
+  ok   a one-row-shifted decode does NOT match, so the comparison can fail
+  LOD0 build: 4 shapes, shape 1 has 16641 verts
+  ok   the same cells at LOD0 build 2x2 shapes of 129x129 verts
+  ok   LOD0 and LOD4 agree at their shared corner sample
+  seam row 0: 22099.173828 vs 22099.173828
+  seam row 64: 20960.402344 vs 20960.402344
+  ok   the seam between shapes is closed (equal Z on the shared column)
+  bitangent at (8,8): -0.723278 0.5294 -0.4431
+  ok   the bitangent has magnitude (zero renders BLACK)
+13 checks, 0 failures
+PASS

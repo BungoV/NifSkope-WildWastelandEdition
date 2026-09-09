@@ -1,0 +1,17 @@
+tile                   side     sheet  mean RGB                 lumSD   colour  relief 
+Commonwealth.4.28.24   vanilla  diffuse 76.3, 70.1, 61.0         9.74    15.52   nan    
+Commonwealth.4.28.24   vanilla  _msn   128.6, 245.6, 109.0      16.79   147.99  20.07  
+Commonwealth.4.28.24   ours     diffuse 69.0, 63.1, 51.7         16.02   17.38   nan    
+Commonwealth.4.28.24   ours     _msn   132.5, 250.7, 115.6      11.59   140.63  9.21   
+Commonwealth.8.24.24   vanilla  diffuse 83.9, 77.2, 67.2         8.91    16.73   nan    
+Commonwealth.8.24.24   vanilla  _msn   123.9, 243.1, 120.7      13.56   136.18  22.26  
+Commonwealth.8.24.24   ours     diffuse 65.4, 59.1, 48.5         13.47   16.89   nan    
+Commonwealth.8.24.24   ours     _msn   126.3, 253.2, 122.4      8.85    138.12  4.68   
+Commonwealth.16.16.16  vanilla  diffuse 75.8, 70.3, 62.1         13.63   13.92   nan    
+Commonwealth.16.16.16  vanilla  _msn   128.3, 242.6, 126.0      11.93   127.67  21.64  
+Commonwealth.16.16.16  ours     diffuse 72.2, 65.8, 54.7         17.00   17.61   nan    
+Commonwealth.16.16.16  ours     _msn   131.6, 250.7, 126.2      11.74   132.91  8.84   
+Commonwealth.32.0.0    vanilla  diffuse 69.7, 65.6, 58.4         15.78   11.79   nan    
+Commonwealth.32.0.0    vanilla  _msn   127.6, 241.7, 125.3      10.51   125.17  23.04  
+Commonwealth.32.0.0    ours     diffuse 76.6, 68.9, 58.2         17.17   18.36   nan    
+Commonwealth.32.0.0    ours     _msn   131.6, 247.6, 124.2      14.38   132.84  14.56  

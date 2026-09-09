@@ -1,0 +1,118 @@
+=== A. render_shot.sh on the reverted build
+rc=1
+5. bungo's hazard: a headless run puts no window on any screen
+  ok   render_plain: the run recorded where its window was 4 window record(s) in ww_headless_windows.log
+  FAIL render_plain: the process saw no window on a screen 2 of 4 records onscreen=1
+  FAIL render_plain: and nothing was on a screen from outside 12 sample(s); 32268 2552,184,2978,490 on \\.\DISPLAY5
+  ok   bake_plain: the run recorded where its window was 4 window record(s) in ww_headless_windows.log
+  FAIL bake_plain: the process saw no window on a screen 2 of 4 records onscreen=1
+  FAIL bake_plain: and nothing was on a screen from outside 7 sample(s); 33348 2552,184,2834,444 on \\.\DISPLAY5
+  ok   bake_lod: the run recorded where its window was 4 window record(s) in ww_headless_windows.log
+  FAIL bake_lod: the process saw no window on a screen 2 of 4 records onscreen=1
+  FAIL bake_lod: and nothing was on a screen from outside 7 sample(s); 16444 2552,184,2978,495 on \\.\DISPLAY5
+
+6. the control: WW_WINDOW_VISIBLE=1 brings the window back, and the pixels do not move
+  ok   the visible control run exits 0              rc=0 after 5s
+  ok   the process CAN see a window on a screen     2 of 4 records onscreen=1
+  ok   and so can the sampler                       10 sample(s); 17488 1912,-73,3848,983 on \\.\DISPLAY5
+  ok   off-screen and on-screen photograph the same pixels off fedab869884174fb / on fedab869884174fb
+
+render_shot.sh: 28 checks, 6 failures
+FAIL
+
+=== B. rename bungo's installed set .lodt -> .lodl (the .bak-20260909 untouched)
+moved Commonwealth.lodt -> Commonwealth.lodl
+moved DLC03FarHarbor.lodt -> DLC03FarHarbor.lodl
+moved DiamondCity.lodt -> DiamondCity.lodl
+moved NukaWorld.lodt -> NukaWorld.lodl
+moved NukaWorldAmphitheater.lodt -> NukaWorldAmphitheater.lodl
+total 102408
+-rw-r--r-- 1 bungo 197609 35953294 2026-09-09_17:27 Commonwealth.lodl
+-rw-r--r-- 1 bungo 197609 35953286 2026-09-05_03:14 Commonwealth.lodt.bak-20260909
+-rw-r--r-- 1 bungo 197609  9195933 2026-09-09_17:27 DLC03FarHarbor.lodl
+-rw-r--r-- 1 bungo 197609  9195806 2026-09-05_03:14 DLC03FarHarbor.lodt.bak-20260909
+-rw-r--r-- 1 bungo 197609    53148 2026-09-09_17:27 DiamondCity.lodl
+-rw-r--r-- 1 bungo 197609    53220 2026-09-05_03:14 DiamondCity.lodt.bak-20260909
+-rw-r--r-- 1 bungo 197609  7182356 2026-09-09_17:27 NukaWorld.lodl
+-rw-r--r-- 1 bungo 197609  7182348 2026-09-05_03:14 NukaWorld.lodt.bak-20260909
+-rw-r--r-- 1 bungo 197609    38303 2026-09-09_17:27 NukaWorldAmphitheater.lodl
+-rw-r--r-- 1 bungo 197609    38104 2026-09-05_03:14 NukaWorldAmphitheater.lodt.bak-20260909
+
+=== C. each renamed file, read back with the NEW command
+-- Commonwealth
+   rc=0
+worldspace cells [-96,-96]..[95,95]  heights -8320 to 44872  quantum 8  samples/cell 32  block edge 32  levels 4  blocks 48960
+sections 0xd  ltex 100  watr 15  gcvr 0  ao 8/cell  overview 8/cell
+planes height ao blend colour waterheight watertype cellflags cellrange overview
+-- DLC03FarHarbor
+   rc=0
+worldspace cells [-73,-59]..[69,78]  heights -1576 to 8216  quantum 8  samples/cell 32  block edge 32  levels 4  blocks 26286
+sections 0xd  ltex 68  watr 4  gcvr 0  ao 8/cell  overview 8/cell
+planes height ao blend colour waterheight watertype cellflags cellrange overview
+-- DiamondCity
+   rc=0
+worldspace cells [-4,-4]..[9,7]  heights -2104 to -2048  quantum 8  samples/cell 32  block edge 32  levels 4  blocks 226
+sections 0xc  ltex 0  watr 0  gcvr 0  ao 8/cell  overview 8/cell
+planes height ao waterheight watertype cellflags cellrange overview
+-- NukaWorld
+   rc=0
+worldspace cells [-32,-32]..[32,32]  heights -40 to 14888  quantum 8  samples/cell 32  block edge 32  levels 4  blocks 5684
+sections 0xd  ltex 53  watr 0  gcvr 0  ao 8/cell  overview 8/cell
+planes height ao blend colour waterheight watertype cellflags cellrange overview
+-- NukaWorldAmphitheater
+   rc=0
+worldspace cells [-11,-8]..[4,-2]  heights 0 to 560  quantum 8  samples/cell 32  block edge 32  levels 4  blocks 154
+sections 0xd  ltex 9  watr 0  gcvr 0  ao 8/cell  overview 8/cell
+planes height ao blend colour waterheight watertype cellflags cellrange overview
+
+=== D. the five-worldspace verify against the plugins, 0 differing
+-- Commonwealth (ws 3C)
+   rc=0
+verify: E:/Projects/Fallout 4 Mods/mods/FO4CS/Terrain/Commonwealth.lodl
+  cross-check: 36864 samples against the ESM, 0 mismatched, worst 0 (129 seam samples raised by the max rule)
+  alpha words: 0 of 36864 differ (2328 nonzero); colour words: 0 of 36864 differ (2112 coloured)
+-- DiamondCity (ws F94)
+   rc=0
+verify: E:/Projects/Fallout 4 Mods/mods/FO4CS/Terrain/DiamondCity.lodl
+  cross-check: 256 samples against the ESM, 0 mismatched, worst 0 (0 seam samples raised by the max rule)
+  alpha words: 0 of 256 differ (0 nonzero); colour words: 0 of 256 differ (0 coloured)
+-- DLC03FarHarbor (ws B0F)
+   rc=0
+verify: E:/Projects/Fallout 4 Mods/mods/FO4CS/Terrain/DLC03FarHarbor.lodl
+  cross-check: 5568 samples against the ESM, 0 mismatched, worst 0 (0 seam samples raised by the max rule)
+  alpha words: 0 of 5568 differ (3111 nonzero); colour words: 0 of 5568 differ (1728 coloured)
+-- NukaWorld (ws 290F)
+   rc=0
+verify: E:/Projects/Fallout 4 Mods/mods/FO4CS/Terrain/NukaWorld.lodl
+  cross-check: 69696 samples against the ESM, 0 mismatched, worst 0 (0 seam samples raised by the max rule)
+  alpha words: 0 of 69696 differ (16893 nonzero); colour words: 0 of 69696 differ (13760 coloured)
+-- NukaWorldAmphitheater (ws 52931)
+   rc=0
+verify: E:/Projects/Fallout 4 Mods/mods/FO4CS/Terrain/NukaWorldAmphitheater.lodl
+  cross-check: 128 samples against the ESM, 0 mismatched, worst 0 (0 seam samples raised by the max rule)
+  alpha words: 0 of 128 differ (53 nonzero); colour words: 0 of 128 differ (128 coloured)
+
+=== E. --candidates trees on Fallout4.esm (Sanctuary region -20 24 -17 27)
+trees candidates: 19
+0004a074 835.0 Landscape\Trees\TreeMapleForest2.nif
+0004a075 915.9 Landscape\Trees\TreeMapleForest3.nif
+0004a073 712.9 Landscape\Trees\TreeMapleForest1.nif
+00038599 463.9 Landscape\Trees\TreeBlasted01.nif
+000393cd 437.0 Landscape\Trees\TreeBlasted02.nif
+000531ae 636.3 Landscape\Trees\TreeMapleblasted04.nif
+000531b3 345.8 Landscape\Trees\TreeMapleblasted05.nif
+0003e0d1 781.0 Landscape\Trees\TreeMapleForest7.nif
+000503b6 560.2 Landscape\Trees\TreeMapleblasted02.nif
+000d9ca9 1007.8 Landscape\Trees\TreeElmForest02.nif
+0003e08d 451.9 Landscape\Trees\TreeBlasted05.nif
+0003e08f 566.2 Landscape\Trees\TreeMapleblasted07.nif
+00049532 645.1 Landscape\Trees\TreeBlasted04.nif
+0004d93b 581.9 Landscape\Trees\TreeMapleblasted01.nif
+000d9ca8 1101.2 Landscape\Trees\TreeElmForest01.nif
+0012154f 367.4 Landscape\Trees\BlastedForestBurntTreeUpright03.nif
+00121550 439.9 Landscape\Trees\BlastedForestBurntTreeUpright02.nif
+0003a28b 1183.3 Landscape\Trees\TreeHero01.nif
+000a7206 465.4 Landscape\Trees\TreeBlasted01Lichen.nif
+-- for contrast, the default (missing) filter, count only:
+33
+ALL DONE 18:45:05

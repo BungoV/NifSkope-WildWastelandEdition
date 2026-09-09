@@ -1,0 +1,1652 @@
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 
+Cannot compare "{X=1920,Y=-65,Width=1920,Height=1080}" because it is not IComparable.
+At E:\Projects\NifskopeWildWastelandEdition\release\ww_render_shot\window_watch.ps1:50 char:13
++         if (($L -lt ($b.X + $b.Width)) -and ($R -gt $b.X) -and
++             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (:) [], RuntimeException
+    + FullyQualifiedErrorId : NotIcomparable
+ 

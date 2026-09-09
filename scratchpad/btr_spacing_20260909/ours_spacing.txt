@@ -1,0 +1,84 @@
+=== VANILLA 4 (-60,36)  level 4  (4x4 = 16 cells)
+  stored vertices        1086   triangles 2084   vertexSize 12  desc 0x300000000203
+  distinct xy columns    1000
+  world extent           0 .. 16384 x  0 .. 16384 y   span 16384 (= 4 cells)
+  unique x / unique y    126 / 123
+  gap min / median / max 128 / 128 / 384
+  most common gaps       [(128.0, 239), (256.0, 7), (384.0, 1)]
+  columns on 128 grid    1000 of 1000 (100.0%)
+  full LAND grid here    129^2 = 16641 columns -> vanilla keeps 6.01%
+  triangle edge len      min 128  median 512  mean 628.6  p90 1280  max 2999
+  effective spacing      span/(sqrt(cols)-1) = 535.0 units
+    -> samples per cell  7.66 per axis    vs LAND 32   ratio 4.18x coarser
+  triangles per cell     130.2
+  columns per quarter-tile (4x4, y up):
+         87     89     83     62
+         65    147     56     46
+         43     44     50     76
+         37     55     57     49
+    tile min/max ratio   4.0x
+  columns on chunk edge  86
+
+=== OURS 4 (-60,36)  level 4  (4x4 = 16 cells)
+  stored vertices        1237   triangles 2341   vertexSize 12  desc 0x300000000203
+  distinct xy columns    1106
+  world extent           0 .. 16384 x  0 .. 16384 y   span 16384 (= 4 cells)
+  unique x / unique y    125 / 128
+  gap min / median / max 128 / 128 / 256
+  most common gaps       [(128.0, 246), (256.0, 5)]
+  columns on 128 grid    1106 of 1106 (100.0%)
+  full LAND grid here    129^2 = 16641 columns -> vanilla keeps 6.65%
+  triangle edge len      min 128  median 572.4  mean 605.5  p90 923  max 1903
+  effective spacing      span/(sqrt(cols)-1) = 507.9 units
+    -> samples per cell  8.06 per axis    vs LAND 32   ratio 3.97x coarser
+  triangles per cell     146.3
+  columns per quarter-tile (4x4, y up):
+         77     65     76     75
+         71    102     62     59
+         67     65     65     70
+         83     72     71     71
+    tile min/max ratio   1.7x
+  columns on chunk edge  131
+
+=== VANILLA 16 (-64,32)  level 16  (16x16 = 256 cells)
+  stored vertices        1093   triangles 2091   vertexSize 12  desc 0x300000000203
+  distinct xy columns    1000
+  world extent           0 .. 65536 x  0 .. 65536 y   span 65536 (= 16 cells)
+  unique x / unique y    388 / 389
+  gap min / median / max 128 / 128 / 1024
+  most common gaps       [(128.0, 587), (256.0, 143), (384.0, 37), (512.0, 5), (768.0, 2), (1024.0, 1)]
+  columns on 128 grid    1000 of 1000 (100.0%)
+  full LAND grid here    513^2 = 263169 columns -> vanilla keeps 0.38%
+  triangle edge len      min 128  median 2187  mean 2491  p90 4810  max 1.424e+04
+  effective spacing      span/(sqrt(cols)-1) = 2140.1 units
+    -> samples per cell  1.91 per axis    vs LAND 32   ratio 16.72x coarser
+  triangles per cell     8.2
+  columns per quarter-tile (4x4, y up):
+         47     55     85     80
+         52     87     43     48
+         41     65     94     30
+         87     83     61     70
+    tile min/max ratio   3.1x
+  columns on chunk edge  93
+
+=== OURS 16 (-64,32)  level 16  (16x16 = 256 cells)
+  stored vertices        1216   triangles 2313   vertexSize 12  desc 0x300000000203
+  distinct xy columns    1099
+  world extent           0 .. 65536 x  0 .. 65536 y   span 65536 (= 16 cells)
+  unique x / unique y    422 / 415
+  gap min / median / max 128 / 128 / 768
+  most common gaps       [(128.0, 683), (256.0, 121), (384.0, 28), (512.0, 1), (640.0, 1), (768.0, 1)]
+  columns on 128 grid    1099 of 1099 (100.0%)
+  full LAND grid here    513^2 = 263169 columns -> vanilla keeps 0.42%
+  triangle edge len      min 181  median 2308  mean 2394  p90 3638  max 8109
+  effective spacing      span/(sqrt(cols)-1) = 2038.4 units
+    -> samples per cell  2.01 per axis    vs LAND 32   ratio 15.92x coarser
+  triangles per cell     9.0
+  columns per quarter-tile (4x4, y up):
+         69     77     74     81
+         62     75     59     50
+         66     74     76     45
+         82     77     71     80
+    tile min/max ratio   1.8x
+  columns on chunk edge  117
+

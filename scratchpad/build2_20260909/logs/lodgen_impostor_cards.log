@@ -1,0 +1,13 @@
+  ok   an impostor candidate exists in cells (-20,24)..(-17,27): 0004a074
+  ok   object chunk written with --impostors
+  ok   the chunk references the front|side sheet 0004a074_fs.DDS
+  ok   at dim 4 the base keeps its own mesh by default
+  ok   with --impostors-from-level 0 the base stands on the card at dim 4
+  108 placements on cards in place of their ring's mesh
+  ok   the chunk report counts the placements on cards
+  dim-4 chunk: 1280239 bytes with meshes, 1001308 bytes with cards from ring 0
+  ok   the chunk shrinks when cards replace the meshes
+  ok   the sheet was written beside the cards
+  ok     the sheet is twice the card width (64x64)
+  ok     left and right halves differ (front vs side)
+RESULT PASS

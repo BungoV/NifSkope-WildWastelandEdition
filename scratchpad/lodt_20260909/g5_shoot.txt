@@ -1,0 +1,23 @@
+== lodt_open_commonwealth.png  region=-96,-96,95,95,2 plane=height port=42341
+   rc=0  127146 bytes
+== lodt_open_closeup.png  region=-8,-8,7,7,0 plane=height port=42342
+   rc=0  184394 bytes
+== lodt_open_height.png  region=-96,-96,95,95,2 plane=height port=42343
+   rc=127  NO FILE
+== lodt_open_ao.png  region=-96,-96,95,95,2 plane=ao port=42344
+   rc=127  NO FILE
+== lodt_open_blend.png  region=-96,-96,95,95,2 plane=blend port=42345
+   rc=127  NO FILE
+== lodt_open_colour.png  region=-96,-96,95,95,2 plane=colour port=42346
+   rc=127  NO FILE
+== lodt_open_waterheight.png  region=-96,-96,95,95,2 plane=waterheight port=42347
+   rc=127  NO FILE
+== lodt_open_watertype.png  region=-96,-96,95,95,2 plane=watertype port=42348
+   rc=127  NO FILE
+== lodt_open_cellflags.png  region=-96,-96,95,95,2 plane=cellflags port=42349
+   rc=127  NO FILE
+== lodt_open_cellrange.png  region=-96,-96,95,95,2 plane=cellrange port=42350
+   rc=127  NO FILE
+== lodt_open_overview.png  region=-96,-96,95,95,2 plane=overview port=42351
+   rc=127  NO FILE
+done

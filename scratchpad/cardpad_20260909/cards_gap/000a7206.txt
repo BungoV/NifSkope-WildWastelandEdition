@@ -1,0 +1,11 @@
+model TreeBlasted01Lichen.nif
+lodm Materials\Landscape\Trees\MapleAtlas01.lodm none textures\Landscape\Trees\MapleAtlas01_d.dds
+lodm materials\Landscape\Trees\GlowingCreepLichen\Lichen01_d.lodm none Textures\Landscape\Trees\GlowingCreepLichen\Lichen01_d.dds
+lodm Materials\Landscape\Trees\MapleAtlas02.lodm none textures\Landscape\Trees\MapleAtlas02_d.dds
+mask alpha
+emissive 0 shapes 0
+front 1706.01 567.159 10.6588 -24.0088 449.157
+side 1706.01 567.159 10.6588 -24.0088 449.157
+class 16 64
+gap 2 4
+oct 8 16 64 119.521 478.083 10.6588 -24.0088 449.157 3072 legacy 128

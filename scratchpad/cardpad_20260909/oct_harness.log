@@ -1,0 +1,114 @@
+  ok   candidate 0004a074: Landscape\Trees\TreeMapleForest2.nif
+  ok   the four legacy sheets were written (albedo, normal, gsaos, g)
+  ok   the meta's oct line says legacy and names the run's 64 px
+  .lodm candidates looked for: 2
+  ok   the meta names every .lodm candidate it looked for
+  ok   the meta names the model it photographed
+  engine detail steps hidden for the bake: 0 (the model names 0)
+  ok   every _L detail step of the model was hidden, and nothing else
+  subsurface mask decided by: tree
+  meta emissive line: emissive 0 shapes 0
+  ok   the meta names the set's emissive multiple
+  ok   the legacy bake's multiple is 0 (nothing own-emits with a lit colour)
+  in-mesh detail ranges reduced to the first: 1 (the model has 1 BSMeshLODTriShape)
+  ok   the bake draws only the first range of the in-mesh steps
+  frame: 48 x 64 px, 676.697 x 902.262 units, family legacy
+  ok   sheets are N frames wide and tall
+  frame law: long 64 (the run's 64), short 48, multiples of 16 allowed [16, 32, 48, 64]
+  ok   the long side is the run's resolution and the short side is a multiple of 16 within it
+  gap: derived 4,4  sidecar ['4', '4']; margin per side 2,2; inner rect 44x60 of 48x64 (0.9167 x 0.9375 of the frame)
+  ok   the meta names the gap on a line of its own, per axis
+  ok   the meta does not also carry the superseded per-side `pad` line
+  ok   the inner rect is exactly 15/16 of the 64-texel frame side
+  ok   the oct line names the run's resolution as its last token
+  ok   the meta names the class on a line of its own
+  distinct albedo frames: 16 of 16; covered pixels per frame: min 43 max 87 of 2640 inside the margins (best 3.3%)
+  ok   the views differ and none is empty
+  ok   the matte leaves the background transparent (no frame is fully covered)
+  frame aspect 0.7500, extents aspect 0.7500
+  ok   the recorded extents carry the frame's aspect (the silhouette is given air, not stretched), best view >= 2% of the inner rect
+  covered texels inside the 2,2-texel padding: 0
+  ok   every frame keeps its padding clear on all four sides
+  union of the 16 silhouette boxes: 29 x 53 texels; inner rect 44 x 60 (long axis fill 88.3%)
+  ok   the silhouette fills at least 85% of the inner rect on the long axis
+  ok   and does not exceed it (the padding is not eaten)
+  air on the short axis: inner 44, silhouette 29 -> 15 texels (one rung is 16)
+  ok   the short side carries at most ONE rung of air, which is the bound the quantisation itself sets
+  3 shipped mips (gap 4,4): narrowest gap across an interior frame border 1.659 texels, over 2352 border samples
+  ok   every shipped mip keeps a whole texel of gap between the silhouettes that meet on a frame border
+  CONTROL, every silhouette cropped to its own box and filling its cell: 380 covered texels sit on a cell border; narrowest gap 0.431 texels over 2184 samples (must be under 1)
+  ok   the gap check FAILS on a sheet with no spacing at all (the metric can see it)
+  normal X: opposite-view red difference max 28.3 (view space if large)
+  ok   the normal sheet differs between opposite views (not one frame copied)
+  ok   normals vary within a covered frame
+  height distinct values 18 in one frame
+  ok   height varies over the covered pixels (normal blue)
+  sway (normal alpha): top quarter 89.4, bottom quarter 1.3
+  ok   sway rises with height (normal alpha)
+  gloss (R) distinct values 18 mean 80.4, specular (G) distinct values 10 mean 16.7, AO distinct values 38
+  ok   gloss carries the map (more than four values)
+  ok   specular carries the map (more than four values)
+  ok   AO varies over the covered pixels (mask sheet blue)
+  subsurface mask: crown rows 220.2, trunk rows 0.0
+  ok   the subsurface mask marks the leaf cards and not the trunk
+  emissive over 4508 covered texels: max channel 0 (the alpha-tested rule says 0)
+  ok   an alpha-tested model emits nothing (the emissive sheet is black wherever it is covered)
+  C lines in the manifest: 863
+  ok   the manifest's C line names the grid and the set's .lodm
+  ok   0004a074_oct_d.DDS written
+  ok   0004a074_oct_n.DDS written
+  ok   0004a074_oct_gsaos.DDS written
+  ok   0004a074_oct_g.DDS written
+  ok   0004a074_oct.lodm written
+  ok   the .lodm envelope is LODM v1 with an exact payload size
+  lodm: {"card":{"base":64,"center":[93.17890167236328,66.29779815673828,886.405029296875],"depthSpan":3072,"frame":[48,64],"gap":[4,4],"half":[676.697021484375,902.2620239257812],"mips":3,"oct":4,"pad":[2,2]
+  ok   the .lodm is a lodm 1 legacy card
+  ok   the .lodm names the four sheets under the family's keys
+  ok   the .lodm carries the grid, the frame and the extents of the meta
+  .lodm spacing: pad [2, 2] (derived [2, 2]), gap [4, 4] (derived [4, 4])
+  ok   the .lodm records the per-side padding and the gap, and the gap is twice the padding
+  emissiveScale in the card .lodm: 0 (the meta said '0')
+  ok   the card .lodm carries the meta's emissive multiple at the top level
+  ok   a model whose shapes do not own-emit with a lit colour carries emissiveScale 0
+  ring texels outside the silhouette: 2228
+  edge blocks in the colour sheet: 396, with a near-black endpoint: 0
+  ok   the colour under the cut-out is dilated (no black endpoint at the edges)
+  _oct_d.DDS: 192x256 DXT5 mips 3 (expected 3)
+  _oct_n.DDS: 192x256 DXT5 mips 3 (expected 3)
+  _oct_gsaos.DDS: 192x256 DXT5 mips 3 (expected 3)
+  ok   the sheets are BC3 and mip only while a whole texel of gap survives (mips 3)
+  _oct_g.DDS: 192x256 DXT1 mips 3, 32384 bytes (128 + 32256 expected)
+  ok   the emissive sheet is BC1 (DXT1) at the same size and mip cap, exactly header + its blocks
+  fixture Materials\Landscape\Trees\MapleAtlas02_Tree.lodm -> {'rmaos': 'textures\\Landscape\\Trees\\MapleAtlas02_d.dds', 'emissive': 'textures\\Landscape\\Trees\\MapleAtlas02_d.dds'}
+  fixture Materials\Landscape\Trees\MapleAtlas01.lodm -> {'rmaos': 'textures\\Landscape\\Trees\\MapleAtlas01_d.dds', 'emissive': 'textures\\Landscape\\Trees\\MapleAtlas01_d.dds'}
+  ok   a pbr source .lodm written per candidate
+  ok   the four pbr sheets were written (albedo, normal, rmaos, e)
+  ok   the meta's oct line says pbr and names the run's 64 px
+  pbr meta emissive line: emissive 2.5 shapes 2
+  ok   the pbr bake takes its multiple from the source .lodm (2.5)
+  ok   every candidate resolved its .lodm (2 of 2)
+  ok   the pbr bake has the legacy bake's sheet size
+  texels at least a quarter covered in both bakes: 2605, with identical coverage: 2605
+  ok   the cut-out is the same in both bakes
+  pbr mask vs colour sheet (R, G, premultiplied): 0.02; pbr mask vs legacy gsaos (R, G): 60.91 (mean over the texels)
+  ok   a source .lodm retargets the slot and the bake reads it RAW (the mask sheet is the colour sheet)
+  ok   the raw slot differs from the legacy composition
+  emissive: legacy bake max over the compared texels 0; pbr bake vs its colour sheet 0.02, mean level 98.0
+  ok   the alpha-tested legacy bake emits nothing
+  ok   a source .lodm's emissive is read RAW off the glow slot (the emissive sheet is the colour sheet)
+  ok   the pbr card set's chunk names the set's .lodm
+  ok   0004a074_oct_bc.DDS written
+  ok   0004a074_oct_n.DDS written
+  ok   0004a074_oct_rmaos.DDS written
+  ok   0004a074_oct_e.DDS written
+  ok   0004a074_oct.lodm written
+  ok   the pbr set's .lodm says pbr and names _bc/_rmaos/_e
+  ok   the pbr set's .lodm carries the source's emissiveScale 2.5 (got 2.5)
+  ok   the pbr emissive sheet is BC1 (DXT1), fourCC DXT1
+  bake 3: the candidate's extent is 835.0 units, the run's largest is claimed at 3340.0 (four times)
+  bake 3 oct line: oct 4 48 64 676.697 902.262 93.1789 66.2978 886.405 3072 legacy 256
+  ok   a base a quarter of the run's largest drops two rungs (256 -> 64)
+  ok   the downscaled set still records the run's 256 px, so it is not read as another run
+  bake 3 frame: 48 x 64
+  ok   the aspect quantisation applies beneath the size rung (short 48, a multiple of 16 within the long side)
+RESULT PASS

@@ -1,0 +1,11 @@
+model QryLedgeBroken01.nif
+lodm Materials\Architecture\Quarry\QuarryMarble01.lodm none textures\architecture\quarry\qrymarble01_d.dds
+lodm Materials\Architecture\Quarry\QuarryMarble04.lodm none textures\architecture\quarry\qrymarble04_d.dds
+lodm Materials\Architecture\Quarry\QuarryMarbleFloor01.lodm none textures\architecture\quarry\qrymarblefloor01_d.dds
+lodm Materials\Architecture\Quarry\QuarryMarbleRough01.lodm none textures\architecture\quarry\qrymarblerough01_d.dds
+mask alpha
+emissive 0 shapes 0
+front 2805.87 932.808 0 -139.389 108.611
+side 2805.87 932.808 0 -139.389 108.611
+class 32 32
+oct 8 32 32 846.838 846.838 0 -139.389 108.611 3072 legacy 128

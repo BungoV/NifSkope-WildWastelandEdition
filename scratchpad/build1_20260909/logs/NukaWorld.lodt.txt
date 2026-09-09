@@ -1,0 +1,6 @@
+lodt: E:/Projects/NifskopeWildWastelandEdition/scratchpad/build1_20260909/fourws/NukaWorld/Terrain/NukaWorld.lodt
+  v2 cells 65x65, land 4225, water 4225 (worldspace default height 325 type 00102d5b), WATR types 0, height -40..14888, overview 520^2
+  timing: pass one 582 ms (decodes included when the world fits), coarse+sections 5 ms, AO 41 ms, levels 9+15+38+127 ms (zlib 61 ms, io 4 ms), 4225 cell decodes for 4225 cells; per level 4225/0/0/0/0/0/0/0, null-plane calls 0
+  readback: cells 65x65  rate 32  levels 4  blocks 5684  LTEX 53  WATR 0  quantum 8
+  cross-check: 69696 samples against the ESM, 0 mismatched, worst 0 (0 seam samples raised by the max rule)
+  alpha words: 0 of 69696 differ (16893 nonzero); colour words: 0 of 69696 differ (13760 coloured)

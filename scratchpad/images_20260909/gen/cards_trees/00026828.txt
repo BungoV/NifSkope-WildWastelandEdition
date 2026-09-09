@@ -1,0 +1,10 @@
+model QryRampCurveRSkirt01.nif
+lodm Materials\Architecture\Quarry\QuarryMarble01.lodm none textures\architecture\quarry\qrymarble01_d.dds
+lodm Materials\Architecture\Quarry\QuarryMarble02.lodm none textures\architecture\quarry\qrymarble02_d.dds
+lodm Materials\Architecture\Quarry\QuarryMarble04.lodm none textures\architecture\quarry\qrymarble04_d.dds
+mask alpha
+emissive 0 shapes 0
+front 3483.3 1158.02 771.411 55.7734 -256
+side 3483.3 1158.02 771.411 55.7734 -256
+class 32 32
+oct 8 32 32 1256.42 1256.42 771.411 55.7734 -256 3072 legacy 128

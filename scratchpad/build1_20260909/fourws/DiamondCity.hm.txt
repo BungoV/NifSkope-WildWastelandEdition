@@ -1,0 +1,3 @@
+height map: E:/Projects/NifskopeWildWastelandEdition/scratchpad/build1_20260909/fourws/DiamondCity/Textures/Terrain/DiamondCity/DiamondCity.HeightMap.-4.-4.7.9.-2104.-2048.dds
+  provenance F4FX v1: corpus hash 1d59ef9266653e26 over 4 VHGT, pixel hash fd9954ba05b07a9e, 4225 of 172032 texels covered
+  worldspace DiamondCity  cells S -4 W -4 N 7 E 9  (14x12 cells)  448x384 native R16_UNORM

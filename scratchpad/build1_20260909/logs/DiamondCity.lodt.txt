@@ -1,0 +1,6 @@
+lodt: E:/Projects/NifskopeWildWastelandEdition/scratchpad/build1_20260909/fourws/DiamondCity/Terrain/DiamondCity.lodt
+  v2 cells 14x12, land 4, water 164 (worldspace default height -10000 type 000016c2), WATR types 0, height -2104..-2048, overview 112^2
+  timing: pass one 3 ms (decodes included when the world fits), coarse+sections 0 ms, AO 1 ms, levels 13+11+19+11 ms (zlib 6 ms, io 0 ms), 9 cell decodes for 168 cells; per level 4/0/0/0/5/0/0/0, null-plane calls 330752
+  readback: cells 14x12  rate 32  levels 4  blocks 226  LTEX 0  WATR 0  quantum 8
+  cross-check: 256 samples against the ESM, 0 mismatched, worst 0 (0 seam samples raised by the max rule)
+  alpha words: 0 of 256 differ (0 nonzero); colour words: 0 of 256 differ (0 coloured)

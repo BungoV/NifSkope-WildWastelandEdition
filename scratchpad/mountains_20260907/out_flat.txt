@@ -1,0 +1,28 @@
+cells with a LAND and a VHGT: 36864  (textured 3955, untextured 32909)
+
+=== relief of the untextured cells (max - min height, game units) ===
+  dead flat (relief == 0)                     18890
+  under 1 unit                                    0
+  under 64 units (under half a metre-ish)        37
+  under 512                                    1856
+  under 4096                                  11089
+  4096 or more                                 1037
+
+untextured cells with more than 64 units of relief: 13982
+  their extent: x -77..76  y -77..76
+  their total on-disk LAND bytes in the master: 43,583,619
+
+=== how far out do textured cells go? (the playable ring) ===
+  textured extent: x -36..32  y -41..32
+  furthest textured cell, Chebyshev radius from (0,0): 41
+
+=== cells inside successive rings (all cells / untextured only) ===
+  ring +-16   cells   1089  untextured      0  of those with relief      0   master LAND bytes 0
+  ring +-24   cells   2401  untextured      0  of those with relief      0   master LAND bytes 0
+  ring +-32   cells   4225  untextured    496  of those with relief    480   master LAND bytes 1,328,000
+  ring +-40   cells   6561  untextured   2613  of those with relief   2220   master LAND bytes 6,551,501
+  ring +-48   cells   9409  untextured   5454  of those with relief   4291   master LAND bytes 12,911,342
+  ring +-56   cells  12769  untextured   8814  of those with relief   6581   master LAND bytes 20,208,740
+  ring +-64   cells  16641  untextured  12686  of those with relief   9148   master LAND bytes 28,635,100
+  ring +-80   cells  25921  untextured  21966  of those with relief  13982   master LAND bytes 44,156,210
+  ring +-96   cells  36864  untextured  32909  of those with relief  13982   master LAND bytes 44,896,737

@@ -1,0 +1,20 @@
+34985 .nif under E:/Tools/Fallout 4/DataUnpacked/Data/Meshes
+parsed shapes: 108010, skipped/errors: 278
+
+attribute set                                    shapes stride  example
+VERT+UV+NRM+TAN                                   60832     20  0x1B00000430205 TranslatingPlatform01.nif
+VERT+UV+NRM+TAN+COL                               29242     24  0x3B00005430206 AutoLoadMarker01.nif
+VERT+UV+NRM+TAN+SKIN                               8331     32  0x5B00050430208 Alien_Body.nif
+VERT+UV+NRM+TAN+COL+SKIN                           7344     36  0x7B00065430209 Alien_Body.nif
+VERT+NRM                                           1068     12  0x900000020003 LibertyPrimeHSBodyLights.nif
+VERT+UV+NRM+TAN+COL+SKIN+EYE                        623     40  0x17B0906543020A MaleEyes.nif
+VERT+NRM+COL                                        441     16  0x2900003020004 MarkerAudioUmlaut01.nif
+(none)                                               64      0  0x0 Assaultron_head_explosion.nif
+VERT+UV+COL+SKIN                                     50     28  0x6300043000207 MaleEyesShade.nif
+VERT+UV+SKIN                                          8     24  0x4300030000206 1stPersonReverseArm.nif
+VERT+UV+NRM                                           3     16  0xB00000030204 SuperMutantSlamExplosion.nif
+VERT+UV+COL                                           2     16  0x2300003000204 static.nif
+VERT+UV+NRM+COL                                       1     20  0x2B00004030205 SuperMutantSlamExplosion.nif
+VERT+UV                                               1     12  0x300000000203 Static.nif
+
+strides seen: {0: 64, 12: 1069, 16: 446, 20: 53981, 24: 22156, 28: 6902, 32: 15422, 36: 7341, 40: 626, 44: 3}

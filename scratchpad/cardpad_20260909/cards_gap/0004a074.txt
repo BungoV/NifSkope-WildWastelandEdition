@@ -1,0 +1,11 @@
+model TreeMapleForest2.nif
+ranges TreeMapleForest02:1 - L2_TreeMapleForest02:1 - L1_TreeMapleForest02:1 23+8
+lodm Materials\Landscape\Trees\MapleAtlas02_Tree.lodm none textures\Landscape\Trees\MapleAtlas02_d.dds
+lodm Materials\Landscape\Trees\MapleAtlas01.lodm none textures\Landscape\Trees\MapleAtlas01_d.dds
+mask tree
+emissive 0 shapes 0
+front 3303.94 1098.39 93.1789 66.2978 886.405
+side 3303.94 1098.39 93.1789 66.2978 886.405
+class 96 128
+gap 6 8
+oct 8 96 128 680.24 906.986 93.1789 66.2978 886.405 3072 legacy 128

@@ -1,0 +1,10 @@
+model RockCliff03.nif
+lodm C:\Projects\Fallout4\Build\PC\Data\Materials\Landscape\rockslab02.lodm none 
+lodm C:\Projects\Fallout4\Build\PC\Data\Materials\Landscape\rockslab01.lodm none 
+lodm C:\Projects\Fallout4\Build\PC\Data\Materials\Landscape\rockslabtrim.lodm none 
+mask alpha
+emissive 0 shapes 0
+front 4877.1 1621.39 -10.9055 124.243 -296.861
+side 4877.1 1621.39 -10.9055 124.243 -296.861
+class 32 32
+oct 8 32 32 1364.25 1364.25 -10.9055 124.243 -296.861 4053.46 legacy 128

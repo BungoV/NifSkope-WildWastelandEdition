@@ -1,0 +1,1 @@
+idx 200 base 0003a28b world 88169.4944 73309.46673 1795.221 half 1286.41 1286.41 frames 8 span 3786.58 lodm Data\Textures\Lodgen\Cards\0003a28b_oct.lodm

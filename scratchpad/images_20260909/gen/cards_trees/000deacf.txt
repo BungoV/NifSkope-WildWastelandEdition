@@ -1,0 +1,13 @@
+model ShackMetalWallOuterCap01Door01.nif
+lodm materials\Architecture\Shacks\ShackMetal01.lodm none textures\architecture\shacks\shackmetal01_d.dds
+lodm materials\Architecture\Shacks\ShackMetalFraming01.lodm none textures\architecture\shacks\shackmetalframing01_d.dds
+lodm materials\Architecture\Shacks\ShackMetalFraming01NoAlpha.lodm none textures\architecture\shacks\shackmetalframing01_d.dds
+lodm materials\Architecture\Shacks\ShackPlywood02.lodm none textures\Architecture\Shacks\ShackPlywood02_d.dds
+lodm materials\Architecture\Shacks\ShackWoodTile01.lodm none textures\architecture\shacks\shackwoodtile01_d.dds
+lodm materials\Architecture\Shacks\ShackWoodPlanks01.lodm none textures\architecture\shacks\shackplanks01_d.dds
+mask alpha
+emissive 0 shapes 0
+front 622.631 206.993 -0.0117161 -143.928 96.4288
+side 622.631 206.993 -0.0117161 -143.928 96.4288
+class 32 32
+oct 8 32 32 221.145 221.145 -0.0117161 -143.928 96.4288 3072 legacy 128

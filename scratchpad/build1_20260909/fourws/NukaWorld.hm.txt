@@ -1,0 +1,3 @@
+height map: E:/Projects/NifskopeWildWastelandEdition/scratchpad/build1_20260909/fourws/NukaWorld/Textures/Terrain/NukaWorld/NukaWorld.HeightMap.-32.-32.32.32.-40.14888.dds
+  provenance F4FX v1: corpus hash a8e1c609479e7074 over 4225 VHGT, pixel hash cca967fa5447bd07, 4326400 of 4326400 texels covered
+  worldspace NukaWorld  cells S -32 W -32 N 32 E 32  (65x65 cells)  2080x2080 native R16_UNORM

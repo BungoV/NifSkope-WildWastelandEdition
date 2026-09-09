@@ -1,0 +1,51 @@
+authority: cells [-96 -96 95 95], heights/quantum [-8320.000 44872.000 8.000], shape [32 32 4 48960]
+authority: sections [100 15 0 8 8 13], planes [height ao blend colour waterheight watertype cellflags cellrange overview]
+region cells [-20,24]..[-19,25], global sample origin (2432,3840)
+  worldspace cells [-96,-96]..[95,95]  heights -8320 to 44872  quantum 8  samples/cell 32  block edge 32  levels 4  blocks 48960
+  sections 0xd  ltex 100  watr 15  gcvr 0  ao 8/cell  overview 8/cell
+  planes height ao blend colour waterheight watertype cellflags cellrange overview
+  ok   our reader reports the header's worldspace rectangle
+  ok   our reader reports the height range and quantum
+  ok   our reader reports the sample rate, block edge, level and block counts
+  ok   the plane list is exactly what the section flags imply (height ao blend colour waterheight watertype cellflags cellrange overview)
+  LOD2 build: 4 blocks, shape 1 has 289 verts, 512 tris, data 11164 bytes
+  ok   2x2 cells at LOD2 mesh as one 17x17 shape, 512 triangles
+  ok   as exactly 4 blocks: root, shape, shader, texture set
+  corner Z 8208.000000 (file 8208.000), mid 8160.000000 (8160.000), rim 9256.000000 (9256.000)
+  ok   vertex (0,0) carries the file's own height for that sample
+  ok   vertex (8,8) too
+  ok   the rim vertex (16,16), read from the neighbour cell, too
+  ok   the region's heights vary (spread 2640.000 > 10), so the matches are not vacuous
+  shifted control: vertex (7,8) is 8264.000000, one sample north the file says 8896.000
+  ok   a one-sample-shifted decode does NOT match, so the comparison can fail
+  LOD0 build: shape 1 has 4225 verts (arithmetic says 4225), corner Z 8208.000000
+  ok   the same cells at LOD0 build 4225 vertices and agree at the shared corner
+  ok   the shape sits at the region's own world origin (-81920, 98304)
+  whole worldspace: region [-96,-96]..[95,95] LOD2 plane height: 49 shape(s), 2380849 vertices
+  ok   the default view is the whole worldspace at 49 shapes / 2380849 vertices
+  ok   a Height view's vertex is 28 bytes — the same scene a .btd builds
+  ...  plane ao: AO plane 1536x1536 texels at 8 a cell; values 173..249, mean 216.6 (255 = open sky)
+  ...  plane blend: land texture blend: 100 LTEX records; 201 of 289 samples (69.6%) carry a layer over their quadrant's base, deepest stack 5
+  ...  plane colour: terrain colour: 0 of 289 samples (0.0%) carry a tint, 280 carry a colour record. A region with no tint paints white -- the file's own answer, not a plane that went unread
+  ...  plane waterheight: water height: 4 of 4 cells have water, plane 450.0..7250.0 units
+  ...  plane watertype: water type: 15 WATR records; 4 of 4 cells have water (cyan = the worldspace default, 0xFFFF)
+  ...  plane cellflags: cell flags: 4 of 4 cells have land (green), 4 have water (red); both = yellow
+  ...  plane cellrange: cell height range: 4 land cells, deepest relief 1752.0 units
+  ...  plane overview: coarse overview: 1536x1536 at 8 a cell, heights 7232.0..9872.0; greatest disagreement with the block pyramid on the overview lattice 0.000 units (quantum 8.00)
+  ok   every plane the file lists builds
+  ok   every plane view's vertex is 32 bytes — the colour channel is present
+  AO: ours [173..249] mean 216.6, file says [173..249] mean 216.6
+  ok   the AO plane reports the file's own AO bytes over this region
+  water: ours [450.0..7250.0], file says [450.0..7250.0]
+  ok   the water plane reports the file's own per-cell water heights
+  overview: greatest disagreement with the block pyramid 0.000 units
+  ok   the coarse overview and the block pyramid describe the SAME terrain
+  refusal for the absent "groundcover" plane (rc 1): error: this file carries no "groundcover" plane (section flags 0xd, AO 8 a cell, 100 LTEX, 15 WATR, 0 GCVR, overview 8 a cell)
+  ok   a plane this file does not carry is refused in words, not drawn black
+  ...  planes colour and height render alike — excused, one of them reports nothing to draw over this region
+  ...  9 planes rendered, 8 distinct pictures, blank-by-their-own-account: colour
+  ok   all 9 planes render, 8 distinct pictures, and no two differ only by accident
+  whole-worldspace render: 89270 bytes, coverage 0.0959, luminance SD 39.05
+  ok   the whole worldspace renders non-blank (coverage > 0.05, contrast SD > 2)
+23 checks, 0 failures
+PASS

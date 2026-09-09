@@ -1,0 +1,4 @@
+verify: E:/Projects/Fallout 4 Mods/mods/FO4CS/Terrain/DiamondCity.lodl
+  readback: cells 14x12  rate 32  levels 4  blocks 226  LTEX 0  WATR 0  quantum 8
+  cross-check: 256 samples against the ESM, 0 mismatched, worst 0 (0 seam samples raised by the max rule)
+  alpha words: 0 of 256 differ (0 nonzero); colour words: 0 of 256 differ (0 coloured)

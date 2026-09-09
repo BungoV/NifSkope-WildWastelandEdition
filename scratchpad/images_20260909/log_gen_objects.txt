@@ -1,0 +1,18 @@
+--- obj_ring0  dim 4  cells -20,24 .. -17,27  extra: 
+[1] Commonwealth.4.-20.24.BTR
+[2] Commonwealth.4.-20.24.BTO
+merged: 10 shapes -> 10 across 1 chunks
+far rings: 0 shapes cut in 0 chunks: 0 -> 0 triangles, 0 -> 0 vertices (0 shapes and 0 groups kept whole, 0 restored; worst error 0.0 units)
+2 chunk(s) written to E:/Projects/NifskopeWildWastelandEdition/scratchpad/images_20260909/gen/obj_ring0, 0 empty, 0 failed
+rc=0
+1280239 E:/Projects/NifskopeWildWastelandEdition/scratchpad/images_20260909/gen/obj_ring0/Commonwealth.4.-20.24.BTO
+--- obj_far16  dim 16  cells 16,16 .. 31,31  extra: --slot-fallback
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/lod/metalindbeamslod01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/lod/metalindbeamslod01.bgsm" ' not found in archives
+[2] Commonwealth.16.16.16.BTO
+merged: 46 shapes -> 38 across 1 chunks
+far rings: 25 shapes cut in 1 chunks: 78154 -> 72022 triangles, 120761 -> 112029 vertices (13 shapes and 764 groups kept whole, 0 restored; worst error 511.7 units)
+2 chunk(s) written to E:/Projects/NifskopeWildWastelandEdition/scratchpad/images_20260909/gen/obj_far16, 0 empty, 0 failed
+rc=0
+4693763 E:/Projects/NifskopeWildWastelandEdition/scratchpad/images_20260909/gen/obj_far16/Commonwealth.16.16.16.BTO
+GEN-OBJ-DONE

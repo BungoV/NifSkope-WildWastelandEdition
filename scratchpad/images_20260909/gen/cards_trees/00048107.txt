@@ -1,0 +1,9 @@
+model IndFrameCat256x256EmptyShape01.nif
+ranges IndFrameCat256x256EmptyShape01:14 - L2_IndFrameCat256x256EmptyShape01:14 0+800
+lodm C:\Projects\Fallout4\Build\PC\Data\materials\Interiors\Industrial\MetalIndBeamsRed01.lodm none 
+mask alpha
+emissive 0 shapes 0
+front 625.359 207.9 0 0 128
+side 625.359 207.9 0 0 128
+class 32 32
+oct 8 32 32 227.868 227.868 0 0 128 3072 legacy 128

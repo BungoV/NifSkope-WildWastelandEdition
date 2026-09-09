@@ -1,0 +1,247 @@
+== preflight ==
+       exe: 2026-09-09 18:43:13
+       ESM: 330776576 bytes
+  ok   the exe is newer than every source this answer depends on
+       corpus worldspace Commonwealth cells 36864 west -96 south -96 east 95 north 95
+       corpus vhgtCorpusHash 0xD8337D022F637F22 lands 36864
+       corpus vhgtCorpusHashSorted 0x3D5967B82969D23E lands 36864
+       corpus paintCorpusHash 0x3C79201598FEF809
+       corpus ltexTotal 105 grasTotal 82 gnamLinks 122 ltexWithGnam 52 grasDataMin 32 grasDataMax 32 grasWithoutData 0
+  ok   the corpus is the shipped Commonwealth
+== the estimate, before any work ==
+       vt estimate: levels 5 tiles 12276 finest 2 coarsest 32 content 256 border 8 mips 2 cover 0 compression 0
+       vt estimate: pyramid 1709919968 btr 0 delivered 1709919968 minutes unmeasured
+       vt level 0 dim 2 tiles 9216 unitsPerTexel 32 worldUnitsPerTile 8192
+       vt level 1 dim 4 tiles 2304 unitsPerTexel 64 worldUnitsPerTile 16384
+       vt level 2 dim 8 tiles 576 unitsPerTexel 128 worldUnitsPerTile 32768
+       vt level 3 dim 16 tiles 144 unitsPerTexel 256 worldUnitsPerTile 65536
+       vt level 4 dim 32 tiles 36 unitsPerTexel 512 worldUnitsPerTile 131072
+  ok   --vt-estimate prints a cost and bakes nothing
+  ok   and it says the bake time is unmeasured rather than inventing one
+== the bakes ==
+       vt: levels 3 tiles 21 present 21 coverTiles 17 bytes 7651072 cover 1 finest 2 coarsest 8 content 256 border 8 mips 2 compression 0 vhgtCorpusHash 0xD8337D022F637F22 paintCorpusHash 0x3C79201598FEF809 vhgtCorpusHashSorted 0x3D5967B82969D23E
+       total 7484
+       -rw-r--r-- 1 bungo 197609 5784832 Sep  9 18:46 Commonwealth.VT.2.lodt
+       -rw-r--r-- 1 bungo 197609 1492224 Sep  9 18:46 Commonwealth.VT.4.lodt
+       -rw-r--r-- 1 bungo 197609  374016 Sep  9 18:46 Commonwealth.VT.8.lodt
+       -rw-r--r-- 1 bungo 197609    1612 Sep  9 18:46 Commonwealth.VT.lodm
+  ok   the containers are written under Terrain/, one per level
+       levels written: 3
+  ok   the fixture's ladder is dim 2, 4 and 8
+== V1/V3/V4/V7/V18 the header, exactly ==
+  Commonwealth.VT.2.lodt
+    magic LDTX version 1 headerBytes 256 flags 1 compression 0
+    worldspace Commonwealth  padded S/W/N/E 24 -24 31 -17  world 24 -24 31 -17
+    levelDim 2 index 0 count 3 tiles 4x4 = 16
+    content 256 border 8 stored 272 mips 2 sheets 4 aniso 8
+    levelDims [2, 4, 8, 0, 0, 0, 0, 0]  coverNorm 96 tint 0.35
+    vhgt 0xD8337D022F637F22  paint 0x3C79201598FEF809
+    sheet 0 role 1 dxgi 71 dxgiCover 71 space 1
+    sheet 1 role 2 dxgi 71 dxgiCover 71 space 0
+    sheet 2 role 3 dxgi 71 dxgiCover 77 space 0
+    sheet 3 role 4 dxgi 56 dxgiCover 56 space 0
+  ok   V1 Commonwealth.VT.2.lodt magic, version and header size
+  ok   V1 Commonwealth.VT.2.lodt the geometry is the one the document fixes
+  ok   V1 Commonwealth.VT.2.lodt FOUR sheets: colour, msn, data and HEIGHT -- roles [1, 2, 3, 4]
+  ok   V1 Commonwealth.VT.2.lodt the reserved tail is zero
+  ok   V1 Commonwealth.VT.2.lodt row order is north-up and it is a refusal to be otherwise
+  ok   V3 Commonwealth.VT.2.lodt fileBytes matches the file -- 5784832 vs 5784832
+  ok   V4 Commonwealth.VT.2.lodt tilesX/tilesY are EXACT divides of the padded rectangle
+  ok   V4 Commonwealth.VT.2.lodt the padded rectangle contains the world rectangle
+  ok   V18 Commonwealth.VT.2.lodt the file is exactly header + table + aligned payloads -- 5784832 vs 5784832
+  ok   V7 Commonwealth.VT.2.lodt indexCrc32 covers the header and the whole table -- 0x9F8C7414 vs 0x9F8C7414
+  Commonwealth.VT.4.lodt
+    magic LDTX version 1 headerBytes 256 flags 1 compression 0
+    worldspace Commonwealth  padded S/W/N/E 24 -24 31 -17  world 24 -24 31 -17
+    levelDim 4 index 1 count 3 tiles 2x2 = 4
+    content 256 border 8 stored 272 mips 2 sheets 4 aniso 8
+    levelDims [2, 4, 8, 0, 0, 0, 0, 0]  coverNorm 96 tint 0.35
+    vhgt 0xD8337D022F637F22  paint 0x3C79201598FEF809
+    sheet 0 role 1 dxgi 71 dxgiCover 71 space 1
+    sheet 1 role 2 dxgi 71 dxgiCover 71 space 0
+    sheet 2 role 3 dxgi 71 dxgiCover 77 space 0
+    sheet 3 role 4 dxgi 56 dxgiCover 56 space 0
+  ok   V1 Commonwealth.VT.4.lodt magic, version and header size
+  ok   V1 Commonwealth.VT.4.lodt the geometry is the one the document fixes
+  ok   V1 Commonwealth.VT.4.lodt FOUR sheets: colour, msn, data and HEIGHT -- roles [1, 2, 3, 4]
+  ok   V1 Commonwealth.VT.4.lodt the reserved tail is zero
+  ok   V1 Commonwealth.VT.4.lodt row order is north-up and it is a refusal to be otherwise
+  ok   V3 Commonwealth.VT.4.lodt fileBytes matches the file -- 1492224 vs 1492224
+  ok   V4 Commonwealth.VT.4.lodt tilesX/tilesY are EXACT divides of the padded rectangle
+  ok   V4 Commonwealth.VT.4.lodt the padded rectangle contains the world rectangle
+  ok   V18 Commonwealth.VT.4.lodt the file is exactly header + table + aligned payloads -- 1492224 vs 1492224
+  ok   V7 Commonwealth.VT.4.lodt indexCrc32 covers the header and the whole table -- 0xDBC93347 vs 0xDBC93347
+  Commonwealth.VT.8.lodt
+    magic LDTX version 1 headerBytes 256 flags 1 compression 0
+    worldspace Commonwealth  padded S/W/N/E 24 -24 31 -17  world 24 -24 31 -17
+    levelDim 8 index 2 count 3 tiles 1x1 = 1
+    content 256 border 8 stored 272 mips 2 sheets 4 aniso 8
+    levelDims [2, 4, 8, 0, 0, 0, 0, 0]  coverNorm 96 tint 0.35
+    vhgt 0xD8337D022F637F22  paint 0x3C79201598FEF809
+    sheet 0 role 1 dxgi 71 dxgiCover 71 space 1
+    sheet 1 role 2 dxgi 71 dxgiCover 71 space 0
+    sheet 2 role 3 dxgi 71 dxgiCover 77 space 0
+    sheet 3 role 4 dxgi 56 dxgiCover 56 space 0
+  ok   V1 Commonwealth.VT.8.lodt magic, version and header size
+  ok   V1 Commonwealth.VT.8.lodt the geometry is the one the document fixes
+  ok   V1 Commonwealth.VT.8.lodt FOUR sheets: colour, msn, data and HEIGHT -- roles [1, 2, 3, 4]
+  ok   V1 Commonwealth.VT.8.lodt the reserved tail is zero
+  ok   V1 Commonwealth.VT.8.lodt row order is north-up and it is a refusal to be otherwise
+  ok   V3 Commonwealth.VT.8.lodt fileBytes matches the file -- 374016 vs 374016
+  ok   V4 Commonwealth.VT.8.lodt tilesX/tilesY are EXACT divides of the padded rectangle
+  ok   V4 Commonwealth.VT.8.lodt the padded rectangle contains the world rectangle
+  ok   V18 Commonwealth.VT.8.lodt the file is exactly header + table + aligned payloads -- 374016 vs 374016
+  ok   V7 Commonwealth.VT.8.lodt indexCrc32 covers the header and the whole table -- 0xCF3B9976 vs 0xCF3B9976
+  ok   V1/V3/V4/V7/V18 (the block above)
+== V5/V6/V7 the table and the payloads ==
+  Commonwealth.VT.2.lodt: 16 present, 0 absent
+  ok   V5 an absent tile is 24 ZERO bytes, not just a zero offset
+  V5 distinct rawBytes: [323680, 369920] (the header implies 323680 without cover, 369920 with)
+  ok   V5 every payload is exactly the size the header implies
+  ok   V5 the payloads really are that long when read -- first 64 present tiles
+  ok   V6 payloads are 4,096-aligned
+  ok   V6 payloads do not overlap and are in table-index order
+  ok   V6 every alignment pad byte is zero (this is what makes two runs match)
+  ok   V7 every tile CRC recomputes
+  ok   V5/V6/V7 (the block above)
+== V8/V10 the filter law ==
+  ok   V8 the two levels share one origin (a coarse tile covers exactly four fine)
+  V8 content  height violations 0 (bar 0); colour outside its children's range widened by both sides' BC1 blocks 0 (bar 0); colour vs box median 3 max 19, for information
+  ok   V8 content obeys (a+b+c+d+2)>>2 exactly on the R16 height sheet
+  ok   V8 content colour stays inside the range of the four texels it averaged
+  V8 north    height violations 0 (bar 0); colour outside its children's range widened by both sides' BC1 blocks 0 (bar 0); colour vs box median 2 max 13, for information
+  ok   V8 north obeys (a+b+c+d+2)>>2 exactly on the R16 height sheet
+  ok   V8 north colour stays inside the range of the four texels it averaged
+  V8 south    height violations 0 (bar 0); colour outside its children's range widened by both sides' BC1 blocks 0 (bar 0); colour vs box median 2 max 15, for information
+  ok   V8 south obeys (a+b+c+d+2)>>2 exactly on the R16 height sheet
+  ok   V8 south colour stays inside the range of the four texels it averaged
+  V8 west     height violations 0 (bar 0); colour outside its children's range widened by both sides' BC1 blocks 0 (bar 0); colour vs box median 3 max 17, for information
+  ok   V8 west obeys (a+b+c+d+2)>>2 exactly on the R16 height sheet
+  ok   V8 west colour stays inside the range of the four texels it averaged
+  V8 east     height violations 0 (bar 0); colour outside its children's range widened by both sides' BC1 blocks 0 (bar 0); colour vs box median 2 max 15, for information
+  ok   V8 east obeys (a+b+c+d+2)>>2 exactly on the R16 height sheet
+  ok   V8 east colour stays inside the range of the four texels it averaged
+  V10 best parent tile 2: 1259 texels can tell box from nearest; the file matches box on 1259 of them and nearest on 645
+  ok   V10 the region has texels that can discriminate at all (bar 20)
+  ok   V10 the coarse level is a box filter, not a nearest resample
+  ok   V8/V10 (the block above)
+== V11 the border ==
+  V11 horizontal: border texels 688, disagreeing with the neighbour 0 (bar 0), equal to this tile's own edge 76 (bar < 75%)
+  ok   V11 horizontal the border IS the neighbour's content
+  ok   V11 horizontal and it is not a clamp of this tile's edge
+  V11 vertical: border texels 688, disagreeing with the neighbour 0 (bar 0), equal to this tile's own edge 7 (bar < 75%)
+  ok   V11 vertical the border IS the neighbour's content
+  ok   V11 vertical and it is not a clamp of this tile's edge
+  ok   V11 (the block above)
+== V20 georeferencing, and the clipmap ladder ==
+  V20 tile (0,0) vs tile (1,0): identical samples 1 of 3025 (bar < 90%)
+  ok   V20 two tiles are not one tile
+  V20 tile row 0 covers cells y 30..31, row 3 covers y 24..25 (north 31, south 24)
+  ok   V20 row 0 is the NORTH row of the padded rectangle
+  ok   V20 (the block above)
+  ladder: [2, 4, 8]
+  ok   the ladder doubles from the finest level up
+  ok   every level names the same ladder in its own header
+  ok   every level is anchored to ONE north-west origin
+  ok   a coarse tile covers exactly four finer ones
+  ok   every container agrees on the world rectangle and both corpus hashes
+    dim  2: 4 x 4 tiles, 8192 world units a tile, 256 texels a tile edge, 32 units a texel
+    dim  4: 2 x 2 tiles, 16384 world units a tile, 256 texels a tile edge, 64 units a texel
+    dim  8: 1 x 1 tiles, 32768 world units a tile, 256 texels a tile edge, 128 units a texel
+  ok   one aligned grid (the block above)
+== V2 the validator refuses, by name ==
+  ok   the landscape route names the .lodt texture container it was handed
+  ok   V2 the unmutated root passes the shipped validator
+       lodt ok 1
+       lodt magic LDTX
+       lodt version 1
+       lodt headerBytes 256
+       lodt flags 1
+       lodt worldspace Commonwealth
+       lodt south 24
+       lodt west -24
+       lodt north 31
+       lodt east -17
+       lodt worldSouth 24
+       lodt worldWest -24
+       23 mutations written
+       anisoSupported: lodt refused: anisoSupported 64 needs a border of at least 32 at the coarsest stored mip
+       borderTexels: lodt refused: borderTexels is not a multiple of 4
+       compression: lodt refused: compression 2 is not 0 or 1
+       contentTexels: lodt refused: contentTexels is not a power of two in 128..1024
+       fileBytes: lodt refused: fileBytes says 12345, the file is 374016
+       headerBytes: lodt refused: headerBytes is not 256
+       indexCrc32: lodt refused: indexCrc32 deadbeef, recomputed cf3b9976
+       levelDim: lodt refused: levelDim 7 is not 1, 2, 4, 8, 16 or 32
+       levelDims: lodt refused: indexCrc32 cf3b9976, recomputed e98c954b
+       magic: lodt refused: magic is not LDTX
+       mipCount: lodt refused: mipCount is zero
+       payloadOffset: lodt refused: the tile table runs into payloadOffset
+       rectangle: lodt refused: the padded rectangle does not contain the world rectangle
+       rowOrder: lodt refused: flags bit 0 ROW_ORDER_NORTH_UP is clear and no other row order is defined
+       sheetCount: lodt refused: sheetCount outside 1..4
+       sheetFormat: lodt refused: sheet 0 has dxgiFormat 999 / 71
+       sheetRole: lodt refused: sheet 0 has role 0
+       storedTexels: lodt refused: storedTexels is not content + 2 * border
+       tileCount: lodt refused: tileCount is not tilesX * tilesY
+       tileTableOffset: lodt refused: tileTableOffset is below the header or not 8-aligned
+       tilesX: lodt refused: tilesX or tilesY disagrees with the rectangle
+       version: lodt refused: version 2, this reader knows 1
+       worldspaceEdid: lodt refused: worldspaceEdid is empty or not NUL-terminated
+       refusals: 23 of 23
+  ok   V2 every mutated container is refused
+== V15/V16 truncation and a flipped payload byte ==
+  ok   V15 a container short by one byte is refused, naming fileBytes
+       lodt refused: fileBytes says 374016, the file is 374015
+  ok   V16 a flipped payload byte fails that tile's CRC, by index
+       lodt refused: tile 0 crc32 f629512a, recomputed ac19bfc6
+== V12/V13/V19 the index ==
+       lodm ok 1
+       lodm version 1
+       lodm family legacy
+       lodm kind terrainVT
+       lodm fileBytes 1612
+       lodm payloadBytes 1600
+       terrain alignedToWorldOrigin true
+       terrain aniso 8
+       terrain border 8
+       terrain cellUnits 4096
+       terrain coarseLevelsAreDownsamples true
+       terrain compression none
+       terrain content 256
+       terrain mips 2
+       terrain paintCorpusHash 0x3C79201598FEF809
+       terrain partial true
+       terrain rowOrder northUp
+       terrain stored 272
+       terrain vhgtCorpusHash 0xD8337D022F637F22
+       terrain worldspace Commonwealth
+       level 0 dim 2 tilesX 4 tilesY 4 unitsPerTexel 32 worldUnitsPerTile 8192 tiles 16 present 16 container Terrain\Commonwealth.VT.2.lodt
+       level 1 dim 4 tilesX 2 tilesY 2 unitsPerTexel 64 worldUnitsPerTile 16384 tiles 4 present 4 container Terrain\Commonwealth.VT.4.lodt
+       level 2 dim 8 tilesX 1 tilesY 1 unitsPerTexel 128 worldUnitsPerTile 32768 tiles 1 present 1 container Terrain\Commonwealth.VT.8.lodt
+  ok   V12 the index parses through this tree's OWN parser
+  ok   V12 and it says kind terrainVT
+  ok   V12 with family legacy, which is what parses today
+  ok   V13 the index names one container per level (3)
+  ok   V19 the index's VHGT hash is the plugin's own
+  ok   V19 and its PAINT hash is too (the one that catches a grass mod)
+  ok   V13 the index states the row order
+  ok   V13 and says in the file that coarse levels are downsamples, not measurements
+  ok   V13 and that every level is on one aligned grid
+  ok   V13 each level states its world span and its texel count, not implies them
+       the index is at Terrain\, which lodmSourceCandidate() cannot produce: it
+       prepends materials\ for a diffuse and strips only a leading data\ for a
+       material, so no source lookup can reach Terrain\*.VT.lodm.
+== V22 two runs, byte for byte ==
+  ok   V22 two --vt runs are byte-identical, containers and index
+== V17 a terrain-only change moved nothing on the object path ==
+  ok   V17 the .bto files and their manifests are identical with and without --vt
+== V9 the chunk sheets assembled from the pyramid ==
+       assembled: 174888 bytes, direct: 174888
+  FAIL V9a the assembled colour sheet is byte-identical to a direct bake
+       expected where dominantBase is chunk-scoped; a difference here means it was rescoped
+       the msn sheets differ, which is the ringed bake fixing the per-chunk edge clamp
+  ok   V9 the assembled and direct sheets were both produced and compared
+
+31 checks, 1 failures
+RESULT FAIL

@@ -1,0 +1,4 @@
+verify: E:/Projects/Fallout 4 Mods/mods/FO4CS/Terrain/DLC03FarHarbor.lodl
+  readback: cells 143x138  rate 32  levels 4  blocks 26286  LTEX 68  WATR 4  quantum 8
+  cross-check: 5568 samples against the ESM, 0 mismatched, worst 0 (0 seam samples raised by the max rule)
+  alpha words: 0 of 5568 differ (3111 nonzero); colour words: 0 of 5568 differ (1728 coloured)

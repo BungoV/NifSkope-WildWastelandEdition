@@ -1,0 +1,35 @@
+### render_shot  start 18:30:40
+### render_shot  rc=1  18:31:13
+render_shot.sh: 28 checks, 6 failures
+FAIL
+
+### lodl_write  start 18:31:13
+### lodl_write  rc=0  18:31:31
+PASS
+
+### lodgen_terrain  start 18:31:31
+### lodgen_terrain  rc=0  18:32:04
+26 checks, 0 failures
+PASS
+
+### lodgen_identity  start 18:32:04
+### lodgen_identity  rc=0  18:32:13
+
+### lodgen_terrain_vt  start 18:32:13
+### lodgen_terrain_vt  rc=1  18:32:53
+31 checks, 1 failures
+
+### lod_generation  start 18:32:53
+### lod_generation  rc=0  18:33:01
+97 checks, 0 failures
+PASS
+
+### btd_terrain  start 18:33:01
+### btd_terrain  rc=0  18:33:10
+13 checks, 0 failures
+PASS
+
+### lodgen_impostor_cards  start 18:33:10
+### lodgen_impostor_cards  rc=0  18:33:21
+
+ALL DONE 18:33:22

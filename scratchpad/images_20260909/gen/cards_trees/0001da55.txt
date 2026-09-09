@@ -1,0 +1,11 @@
+model IndCat1WayBrokenCap02.nif
+ranges L2_IndCat1WayBrokenCap02:3 0+26
+ranges IndCat1WayBrokenCap02:2 - L2_IndCat1WayBrokenCap02:2 0+96
+lodm c:\projects\fallout4\build\pc\data\materials\interiors\industrial\metalindbeams01.lodm none 
+lodm c:\projects\fallout4\build\pc\data\materials\interiors\industrial\metalcatwalk01alpha.lodm none 
+mask alpha
+emissive 0 shapes 0
+front 401.234 133.39 0.0384372 -103.182 17.1352
+side 401.234 133.39 0.0384372 -103.182 17.1352
+class 32 32
+oct 8 32 32 127.742 127.742 0.0384372 -103.182 17.1352 3072 legacy 128

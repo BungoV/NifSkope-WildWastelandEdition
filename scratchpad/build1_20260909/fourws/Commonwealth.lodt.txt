@@ -1,0 +1,6 @@
+lodt: E:/Projects/NifskopeWildWastelandEdition/scratchpad/build1_20260909/fourws/Commonwealth/Terrain/Commonwealth.lodt
+  v2 cells 192x192, land 36864, water 36864 (worldspace default height 450 type 00000018), WATR types 15, height -8320..44872, overview 1536^2
+  timing: pass one 2251 ms (decodes included when the world fits), coarse+sections 51 ms, AO 306 ms, levels 70+120+311+1220 ms (zlib 445 ms, io 22 ms), 36864 cell decodes for 36864 cells; per level 36864/0/0/0/0/0/0/0, null-plane calls 0
+  readback: cells 192x192  rate 32  levels 4  blocks 48960  LTEX 100  WATR 15  quantum 8
+  cross-check: 36864 samples against the ESM, 0 mismatched, worst 0 (129 seam samples raised by the max rule)
+  alpha words: 0 of 36864 differ (2328 nonzero); colour words: 0 of 36864 differ (2112 coloured)

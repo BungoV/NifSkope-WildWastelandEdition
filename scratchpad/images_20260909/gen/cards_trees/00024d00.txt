@@ -1,0 +1,8 @@
+model QrySlab128x256.nif
+lodm Materials\Architecture\Quarry\QuarryMarble01.lodm none textures\architecture\quarry\qrymarble01_d.dds
+mask alpha
+emissive 0 shapes 0
+front 1058.64 351.942 0 0 0
+side 1058.64 351.942 0 0 0
+class 32 32
+oct 8 32 32 385.745 385.745 0 0 0 3072 legacy 128

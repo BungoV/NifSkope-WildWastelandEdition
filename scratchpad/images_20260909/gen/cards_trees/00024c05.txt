@@ -1,0 +1,8 @@
+model QryCubeSlope01.nif
+lodm Materials\Architecture\Quarry\QuarryMarble01.lodm none textures\architecture\quarry\QryMarble01_d.DDS
+mask alpha
+emissive 0 shapes 0
+front 1327.07 441.182 0 -320 0
+side 1327.07 441.182 0 -320 0
+class 32 32
+oct 8 32 32 483.557 483.557 0 -320 0 3072 legacy 128

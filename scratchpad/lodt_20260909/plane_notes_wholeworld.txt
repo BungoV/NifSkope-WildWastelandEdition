@@ -1,0 +1,36 @@
+== height
+heights read in 216 ms
+49 shapes, 2,380,849 vertices; sample grids 9,449,476 bytes; plane read at 216 ms
+meshed and built at 9289 ms
+== ao
+AO plane 1536x1536 texels at 8 a cell; values 0..255, mean 235.7 (255 = open sky)
+49 shapes, 2,380,849 vertices; sample grids 18,898,952 bytes; plane read at 218 ms
+meshed and built at 10167 ms
+== blend
+land texture blend: 100 LTEX records; 155028 of 2362369 samples (6.6%) carry a layer over their quadrant's base, deepest stack 5
+49 shapes, 2,380,849 vertices; sample grids 18,898,952 bytes; plane read at 447 ms
+meshed and built at 10577 ms
+== colour
+terrain colour: 4335 of 2362369 samples (0.2%) carry a tint, 151168 carry a colour record. A region with no tint paints white -- the file's own answer, not a plane that went unread
+49 shapes, 2,380,849 vertices; sample grids 18,898,952 bytes; plane read at 428 ms
+meshed and built at 10456 ms
+== waterheight
+water height: 36864 of 36864 cells have water, plane -3000.0..12470.0 units
+49 shapes, 2,380,849 vertices; sample grids 18,898,952 bytes; plane read at 227 ms
+meshed and built at 10505 ms
+== watertype
+water type: 15 WATR records; 36864 of 36864 cells have water (cyan = the worldspace default, 0xFFFF)
+49 shapes, 2,380,849 vertices; sample grids 18,898,952 bytes; plane read at 231 ms
+meshed and built at 11050 ms
+== cellflags
+cell flags: 36864 of 36864 cells have land (green), 36864 have water (red); both = yellow
+49 shapes, 2,380,849 vertices; sample grids 18,898,952 bytes; plane read at 246 ms
+meshed and built at 11588 ms
+== cellrange
+cell height range: 36864 land cells, deepest relief 25760.0 units
+49 shapes, 2,380,849 vertices; sample grids 18,898,952 bytes; plane read at 293 ms
+meshed and built at 11954 ms
+== overview
+coarse overview: 1536x1536 at 8 a cell, heights -8320.0..44872.0; greatest disagreement with the block pyramid on the overview lattice 0.000 units (quantum 8.00)
+49 shapes, 2,380,849 vertices; sample grids 18,898,952 bytes; plane read at 362 ms
+meshed and built at 10701 ms

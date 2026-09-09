@@ -1,0 +1,9 @@
+lane OFFSCREEN2 finished with the build at 2026-09-09 19:35:14.
+
+release/NifSkope.exe 19:35:14, release/style.qss 19:35:19 (byte-equal to res/).
+No further build is owed by this lane. Files changed: src/nifskope.cpp,
+src/nifskope.h, src/nifskope_ui.cpp, tests/spells/render_shot.sh,
+tools/bake_impostor_cards.sh, WW_CHANGES.md, MISTAKES.md. Nothing committed.
+
+Gates: tests/spells/render_shot.sh 55 checks, 0 failures, PASS.
+       tests/spells/lod_generation.sh 97 checks, 0 failures, PASS.

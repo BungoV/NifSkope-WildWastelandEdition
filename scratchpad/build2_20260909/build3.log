@@ -1,0 +1,105 @@
+make -f Makefile.Release
+make[1]: Entering directory '/e/Projects/NifskopeWildWastelandEdition'
+g++ -c -fno-keep-inline-dllexport -march=nocona -msahf -mtune=generic -Wa,-mbig-obj -Ilib/qhull/src -isystem lib/gli/gli -isystem lib/gli/external -Ilib/libfo76utils/src -std=c++20 -O3 -march=haswell -std=gnu++2a -Wall -Wextra -Wextra -fexceptions -mthreads -DUNICODE -D_UNICODE -DWIN32 -DMINGW_HAS_SECURE_API=1 -DQT_DISABLE_DEPRECATED_BEFORE=0x060400 -DQT_NO_DEBUG_OUTPUT -D_USE_MATH_DEFINES -DQT_NO_CAST_FROM_BYTEARRAY -DQT_NO_URL_CAST_FROM_STRING -DNIFSKOPE_VERSION=\"2.0.dev11\" -DNIFSKOPE_REVISION=\"2dd8444\" -DWW_EDITION_VERSION=\"0.3.3\" -DEDIT_ON_ACTIVATE -DQT_NO_DEBUG -DQT_OPENGLWIDGETS_LIB -DQT_OPENGL_LIB -DQT_WIDGETS_LIB -DQT_GUI_LIB -DQT_XML_LIB -DQT_NETWORK_LIB -DQT_CORE_LIB -DQT_NEEDS_QMAIN -I. -Isrc -Ilib -IC:/msys64/ucrt64/include/qt6 -IC:/msys64/ucrt64/include/qt6/QtOpenGLWidgets -IC:/msys64/ucrt64/include/qt6/QtOpenGL -IC:/msys64/ucrt64/include/qt6/QtWidgets -IC:/msys64/ucrt64/include/qt6/QtGui -IC:/msys64/ucrt64/include/qt6/QtXml -IC:/msys64/ucrt64/include/qt6/QtNetwork -IC:/msys64/ucrt64/include/qt6/QtCore -IGeneratedFiles/.moc -IGeneratedFiles/.ui -I/include -IC:/msys64/ucrt64/share/qt6/mkspecs/win32-g++  -o GeneratedFiles/.obj/nifskope_ui.o src/nifskope_ui.cpp
+src/nifskope_ui.cpp:1:9: warning: '_USE_MATH_DEFINES' redefined
+    1 | #define _USE_MATH_DEFINES
+      |         ^~~~~~~~~~~~~~~~~
+<command-line>: note: this is the location of the previous definition
+src/nifskope_ui.cpp:25826:57: warning: '/*' within comment [-Wcomment]
+25826 |                  * slider under Settings/Render/Lighting/*; re-authoring seven sliders
+src/nifskope_ui.cpp:28387:28: warning: '/*' within comment [-Wcomment]
+28387 |  * Settings/Render/Lighting/* keys, disagreeing whenever one was moved.
+src/nifskope_ui.cpp: In lambda function:
+src/nifskope_ui.cpp:6670:81: warning: variable 'findings' set but not used [-Wunused-but-set-variable=]
+ 6670 |                                         int groups = tree->topLevelItemCount(), findings = 0, located = 0, coloured = 0;
+      |                                                                                 ^~~~~~~~
+src/nifskope_ui.cpp: In lambda function:
+src/nifskope_ui.cpp:21589:50: warning: ignoring return value of 'virtual bool QFile::open(QIODeviceBase::OpenMode)', declared with attribute 'nodiscard' [-Wunused-result]
+21589 |                                         meta.open( QIODevice::WriteOnly | QIODevice::Text );
+      |                                         ~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+In file included from C:/msys64/ucrt64/include/qt6/QtCore/qfileinfo.h:9,
+                 from C:/msys64/ucrt64/include/qt6/QtCore/QFileInfo:1,
+                 from src/nifskope.h:38,
+                 from src/nifskope_ui.cpp:37:
+C:/msys64/ucrt64/include/qt6/QtCore/qfile.h:264:32: note: declared here
+  264 |     QFILE_MAYBE_NODISCARD bool open(OpenMode flags) override;
+      |                                ^~~~
+In file included from C:/msys64/ucrt64/include/qt6/QtCore/qarraydatapointer.h:8,
+                 from C:/msys64/ucrt64/include/qt6/QtCore/qbytearray.h:12,
+                 from C:/msys64/ucrt64/include/qt6/QtCore/qstringview.h:11,
+                 from C:/msys64/ucrt64/include/qt6/QtCore/qchar.h:730,
+                 from C:/msys64/ucrt64/include/qt6/QtCore/qstring.h:15,
+                 from C:/msys64/ucrt64/include/qt6/QtCore/QString:1,
+                 from src/gamemanager.h:7,
+                 from src/nifskope_ui.cpp:34:
+In member function 'void QtPrivate::QPodArrayOps<T>::copyAppend(qsizetype, parameter_type) [with T = int]',
+    inlined from 'void QtPrivate::QPodArrayOps<T>::copyAppend(qsizetype, parameter_type) [with T = int]' at C:/msys64/ucrt64/include/qt6/QtCore/qarraydataops.h:56:10,
+    inlined from 'QList<T>::QList(qsizetype, parameter_type) [with T = int]' at C:/msys64/ucrt64/include/qt6/QtCore/qlist.h:315:26,
+    inlined from 'NifSkope::createWindow(const QString&, bool)::<lambda(bool, QString&)>::<lambda(int)>' at src/nifskope_ui.cpp:1102:33:
+C:/msys64/ucrt64/include/qt6/QtCore/qarraydataops.h:66:22: warning: 'void* __builtin_memset(void*, int, long long unsigned int)' specified bound between 18446744065119617024 and 18446744073709551612 exceeds maximum object size 9223372036854775807 [-Wstringop-overflow=]
+   66 |             *where++ = t;
+      |             ~~~~~~~~~^~~
+sed.exe -e s/@VERSION@/2.0.dev11/ -e s/@WWVERSION@/0.3.3/ E:/Projects/NifskopeWildWastelandEdition/build/README.md.in > E:/Projects/NifskopeWildWastelandEdition/README.md 
+git -C E:/Projects/NifskopeWildWastelandEdition rev-parse --short HEAD > E:/Projects/NifskopeWildWastelandEdition/release/build_rev.txt 
+g++ -Wl,-s -Wl,-subsystem,windows -mthreads -o release/NifSkope.exe @GeneratedFiles/.obj/object_script.NifSkope.Release -lopengl32 -lgdi32 C:/msys64/ucrt64/lib/libQt6OpenGLWidgets.dll.a C:/msys64/ucrt64/lib/libQt6OpenGL.dll.a C:/msys64/ucrt64/lib/libQt6Widgets.dll.a C:/msys64/ucrt64/lib/libQt6Gui.dll.a C:/msys64/ucrt64/lib/libQt6Xml.dll.a C:/msys64/ucrt64/lib/libQt6Network.dll.a C:/msys64/ucrt64/lib/libQt6Core.dll.a -lmingw32 C:/msys64/ucrt64/lib/libQt6EntryPoint.a -lshell32  
+test -d E:/Projects/NifskopeWildWastelandEdition/release/shaders || mkdir -p E:/Projects/NifskopeWildWastelandEdition/release/shaders 
+rm -rf E:/Projects/NifskopeWildWastelandEdition/release/shaders 
+cp -f -R E:/Projects/NifskopeWildWastelandEdition/res/shaders E:/Projects/NifskopeWildWastelandEdition/release/shaders 
+test -d E:/Projects/NifskopeWildWastelandEdition/release/ || mkdir -p E:/Projects/NifskopeWildWastelandEdition/release/ 
+cp -f E:/Projects/NifskopeWildWastelandEdition/build/nif.xml E:/Projects/NifskopeWildWastelandEdition/release/ 
+cp -f E:/Projects/NifskopeWildWastelandEdition/build/docsys/kfmxml/kfm.xml E:/Projects/NifskopeWildWastelandEdition/release/ 
+cp -f E:/Projects/NifskopeWildWastelandEdition/res/style.qss E:/Projects/NifskopeWildWastelandEdition/release/ 
+cp -f E:/Projects/NifskopeWildWastelandEdition/res/qt.conf E:/Projects/NifskopeWildWastelandEdition/release/ 
+test -d E:/Projects/NifskopeWildWastelandEdition/release/ || mkdir -p E:/Projects/NifskopeWildWastelandEdition/release/ 
+cp -f E:/Projects/NifskopeWildWastelandEdition/CHANGELOG.md E:/Projects/NifskopeWildWastelandEdition/release/CHANGELOG.txt 
+cp -f E:/Projects/NifskopeWildWastelandEdition/LICENSE.md E:/Projects/NifskopeWildWastelandEdition/release/LICENSE.txt 
+cp -f E:/Projects/NifskopeWildWastelandEdition/README.md E:/Projects/NifskopeWildWastelandEdition/release/README.txt 
+cp -f E:/Projects/NifskopeWildWastelandEdition/WW_FEATURES.md E:/Projects/NifskopeWildWastelandEdition/release/WW_FEATURES.txt 
+cp -f E:/Projects/NifskopeWildWastelandEdition/docs/README_GLTF.md E:/Projects/NifskopeWildWastelandEdition/release/README_GLTF.txt 
+cp -f E:/Projects/NifskopeWildWastelandEdition/docs/TROUBLESHOOTING.md E:/Projects/NifskopeWildWastelandEdition/release/TROUBLESHOOTING.txt 
+cp -f E:/Projects/NifskopeWildWastelandEdition/docs/CLI.md E:/Projects/NifskopeWildWastelandEdition/release/CLI.txt 
+test -d E:/Projects/NifskopeWildWastelandEdition/release/ || mkdir -p E:/Projects/NifskopeWildWastelandEdition/release/ 
+cp -f C:/msys64/ucrt64/bin/Qt6core.dll E:/Projects/NifskopeWildWastelandEdition/release/ 
+cp -f C:/msys64/ucrt64/bin/Qt6gui.dll E:/Projects/NifskopeWildWastelandEdition/release/ 
+cp -f C:/msys64/ucrt64/bin/Qt6xml.dll E:/Projects/NifskopeWildWastelandEdition/release/ 
+cp -f C:/msys64/ucrt64/bin/Qt6opengl.dll E:/Projects/NifskopeWildWastelandEdition/release/ 
+cp -f C:/msys64/ucrt64/bin/Qt6network.dll E:/Projects/NifskopeWildWastelandEdition/release/ 
+cp -f C:/msys64/ucrt64/bin/Qt6widgets.dll E:/Projects/NifskopeWildWastelandEdition/release/ 
+cp -f C:/msys64/ucrt64/bin/Qt6openglwidgets.dll E:/Projects/NifskopeWildWastelandEdition/release/ 
+cp -f C:/msys64/ucrt64/bin/libb2-1.dll E:/Projects/NifskopeWildWastelandEdition/release/ 
+cp -f C:/msys64/ucrt64/bin/libbrotlicommon.dll E:/Projects/NifskopeWildWastelandEdition/release/ 
+cp -f C:/msys64/ucrt64/bin/libbrotlidec.dll E:/Projects/NifskopeWildWastelandEdition/release/ 
+cp -f C:/msys64/ucrt64/bin/libbz2-1.dll E:/Projects/NifskopeWildWastelandEdition/release/ 
+cp -f C:/msys64/ucrt64/bin/libdouble-conversion.dll E:/Projects/NifskopeWildWastelandEdition/release/ 
+cp -f C:/msys64/ucrt64/bin/libfreetype-6.dll E:/Projects/NifskopeWildWastelandEdition/release/ 
+cp -f C:/msys64/ucrt64/bin/libglib-2.*.dll E:/Projects/NifskopeWildWastelandEdition/release/ 
+cp -f C:/msys64/ucrt64/bin/libgraphite2.dll E:/Projects/NifskopeWildWastelandEdition/release/ 
+cp -f C:/msys64/ucrt64/bin/libharfbuzz-0.dll E:/Projects/NifskopeWildWastelandEdition/release/ 
+cp -f C:/msys64/ucrt64/bin/libiconv-2.dll E:/Projects/NifskopeWildWastelandEdition/release/ 
+cp -f C:/msys64/ucrt64/bin/libicudt*.dll E:/Projects/NifskopeWildWastelandEdition/release/ 
+cp -f C:/msys64/ucrt64/bin/libicuin*.dll E:/Projects/NifskopeWildWastelandEdition/release/ 
+cp -f C:/msys64/ucrt64/bin/libicuuc*.dll E:/Projects/NifskopeWildWastelandEdition/release/ 
+cp -f C:/msys64/ucrt64/bin/libintl-8.dll E:/Projects/NifskopeWildWastelandEdition/release/ 
+cp -f C:/msys64/ucrt64/bin/libjpeg-8.dll E:/Projects/NifskopeWildWastelandEdition/release/ 
+cp -f C:/msys64/ucrt64/bin/libmd4c.dll E:/Projects/NifskopeWildWastelandEdition/release/ 
+cp -f C:/msys64/ucrt64/bin/libpcre2-16*.dll E:/Projects/NifskopeWildWastelandEdition/release/ 
+cp -f C:/msys64/ucrt64/bin/libpcre2-8*.dll E:/Projects/NifskopeWildWastelandEdition/release/ 
+cp -f C:/msys64/ucrt64/bin/libpng16-*.dll E:/Projects/NifskopeWildWastelandEdition/release/ 
+cp -f C:/msys64/ucrt64/bin/libsharpyuv-*.dll E:/Projects/NifskopeWildWastelandEdition/release/ 
+cp -f C:/msys64/ucrt64/bin/libwebp-*.dll E:/Projects/NifskopeWildWastelandEdition/release/ 
+cp -f C:/msys64/ucrt64/bin/libwebpdemux-*.dll E:/Projects/NifskopeWildWastelandEdition/release/ 
+cp -f C:/msys64/ucrt64/bin/libwebpmux-*.dll E:/Projects/NifskopeWildWastelandEdition/release/ 
+cp -f C:/msys64/ucrt64/bin/libzstd.dll E:/Projects/NifskopeWildWastelandEdition/release/ 
+cp -f C:/msys64/ucrt64/bin/zlib1.dll E:/Projects/NifskopeWildWastelandEdition/release/ 
+cp -f C:/msys64/ucrt64/bin/libgcc_s_seh-1.dll E:/Projects/NifskopeWildWastelandEdition/release/ 
+cp -f C:/msys64/ucrt64/bin/libstdc++-6.dll E:/Projects/NifskopeWildWastelandEdition/release/ 
+cp -f C:/msys64/ucrt64/bin/libwinpthread-1.dll E:/Projects/NifskopeWildWastelandEdition/release/ 
+test -d E:/Projects/NifskopeWildWastelandEdition/release/platforms || mkdir -p E:/Projects/NifskopeWildWastelandEdition/release/platforms 
+cp -f C:/msys64/ucrt64/share/qt6/plugins/platforms/qminimal.dll E:/Projects/NifskopeWildWastelandEdition/release/platforms 
+cp -f C:/msys64/ucrt64/share/qt6/plugins/platforms/qwindows.dll E:/Projects/NifskopeWildWastelandEdition/release/platforms 
+test -d E:/Projects/NifskopeWildWastelandEdition/release/imageformats || mkdir -p E:/Projects/NifskopeWildWastelandEdition/release/imageformats 
+cp -f C:/msys64/ucrt64/share/qt6/plugins/imageformats/qjpeg.dll E:/Projects/NifskopeWildWastelandEdition/release/imageformats 
+cp -f C:/msys64/ucrt64/share/qt6/plugins/imageformats/qwebp.dll E:/Projects/NifskopeWildWastelandEdition/release/imageformats 
+test -d E:/Projects/NifskopeWildWastelandEdition/release/styles || mkdir -p E:/Projects/NifskopeWildWastelandEdition/release/styles 
+cp -f C:/msys64/ucrt64/share/qt6/plugins/styles/qmodernwindowsstyle.dll E:/Projects/NifskopeWildWastelandEdition/release/styles 
+make[1]: Leaving directory '/e/Projects/NifskopeWildWastelandEdition'

@@ -1,0 +1,6 @@
+lodt: E:/Projects/NifskopeWildWastelandEdition/scratchpad/build1_20260909/fourws/NukaWorldAmphitheater/Terrain/NukaWorldAmphitheater.lodt
+  v2 cells 16x7, land 2, water 62 (worldspace default height 0 type 00000000), WATR types 0, height 0..560, overview 128^2
+  timing: pass one 0 ms (decodes included when the world fits), coarse+sections 0 ms, AO 0 ms, levels 1+1+4+8 ms (zlib 4 ms, io 0 ms), 6 cell decodes for 112 cells; per level 2/0/0/0/4/0/0/0, null-plane calls 337920
+  readback: cells 16x7  rate 32  levels 4  blocks 154  LTEX 9  WATR 0  quantum 8
+  cross-check: 128 samples against the ESM, 0 mismatched, worst 0 (0 seam samples raised by the max rule)
+  alpha words: 0 of 128 differ (53 nonzero); colour words: 0 of 128 differ (128 coloured)

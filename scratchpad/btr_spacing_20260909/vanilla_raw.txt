@@ -1,0 +1,96 @@
+--- L4 block 1 BSTriShape 'Land'
+    vertices        11713  (unique xy 1982)
+    shape scale     4.0
+    world extent x  0.0 .. 16384.0   span 16384.0
+    world extent y  0.0 .. 16384.0   span 16384.0
+    world z         -1392.0 .. 1160.0
+    unique x        464   unique y 498
+    gap min/max     1.248 / 160.0
+    gap histogram   [(1.248, 1), (1.252, 1), (1.5156, 1), (1.6876, 1), (2.0, 18), (2.1872, 1), (2.5, 1), (3.0, 2), (4.0, 70), (4.5, 1), (4.752, 1), (5.0, 3)]
+    implied grid    13129 x 13129 at step 1.248  -> 172370641 full-grid points, mesh has 1982 (0.0%)
+    step vs LAND    1.248 units = 0.010 x 128
+
+--- L4 block 5 BSSubIndexTriShape ''
+    vertices        48  (unique xy 21)
+    shape scale     4.0
+    world extent x  0.0 .. 16384.0   span 16384.0
+    world extent y  0.0 .. 16384.0   span 16384.0
+    world z         450.0 .. 450.0
+    unique x        5   unique y 5
+    gap min/max     4096.0 / 4096.0
+    gap histogram   [(4096.0, 8)]
+    implied grid    5 x 5 at step 4096.0  -> 25 full-grid points, mesh has 21 (84.0%)
+    step vs LAND    4096.0 units = 32.000 x 128
+
+--- L8 block 1 BSTriShape 'Land'
+    vertices        6587  (unique xy 1105)
+    shape scale     8.0
+    world extent x  0.0 .. 32768.0   span 32768.0
+    world extent y  0.0 .. 32768.0   span 32768.0
+    world z         -2568.0 .. 1616.0
+    unique x        333   unique y 245
+    gap min/max     6.0 / 384.0
+    gap histogram   [(6.0, 3), (6.1563, 1), (8.0, 4), (12.0, 1), (16.0, 29), (18.0, 1), (20.0, 2), (24.0, 4), (26.0, 1), (32.0, 24), (36.0, 2), (40.0, 2)]
+    implied grid    5462 x 5462 at step 6.0  -> 29833444 full-grid points, mesh has 1105 (0.0%)
+    step vs LAND    6.0 units = 0.047 x 128
+
+--- L8 block 5 BSTriShape ''
+    vertices        200  (unique xy 72)
+    shape scale     8.0
+    world extent x  0.0 .. 32768.0   span 32768.0
+    world extent y  0.0 .. 32768.0   span 32768.0
+    world z         450.0 .. 450.0
+    unique x        9   unique y 9
+    gap min/max     4096.0 / 4096.0
+    gap histogram   [(4096.0, 16)]
+    implied grid    9 x 9 at step 4096.0  -> 81 full-grid points, mesh has 72 (88.9%)
+    step vs LAND    4096.0 units = 32.000 x 128
+
+--- L16 block 1 BSTriShape 'Land'
+    vertices        5960  (unique xy 1004)
+    shape scale     16.0
+    world extent x  0.0 .. 65536.0   span 65536.0
+    world extent y  0.0 .. 65536.0   span 65536.0
+    world z         -3760.0 .. 2760.0
+    unique x        417   unique y 416
+    gap min/max     16.0 / 768.0
+    gap histogram   [(16.0, 4), (24.0, 2), (32.0, 8), (36.0, 1), (64.0, 4), (92.0, 1), (96.0, 9), (104.0, 1), (112.0, 2), (128.0, 651), (160.0, 3), (224.0, 2)]
+    implied grid    4097 x 4097 at step 16.0  -> 16785409 full-grid points, mesh has 1004 (0.0%)
+    step vs LAND    16.0 units = 0.125 x 128
+
+--- L16 block 5 BSTriShape ''
+    vertices        512  (unique xy 190)
+    shape scale     16.0
+    world extent x  0.0 .. 65536.0   span 65536.0
+    world extent y  0.0 .. 65536.0   span 65536.0
+    world z         450.0 .. 450.0
+    unique x        17   unique y 17
+    gap min/max     4096.0 / 4096.0
+    gap histogram   [(4096.0, 32)]
+    implied grid    17 x 17 at step 4096.0  -> 289 full-grid points, mesh has 190 (65.7%)
+    step vs LAND    4096.0 units = 32.000 x 128
+
+--- L32 block 1 BSTriShape 'Land'
+    vertices        5872  (unique xy 1005)
+    shape scale     32.0
+    world extent x  0.0 .. 131072.0   span 131072.0
+    world extent y  0.0 .. 131072.0   span 131072.0
+    world z         -11728.0 .. 5584.0
+    unique x        617   unique y 583
+    gap min/max     8.0 / 1664.0
+    gap histogram   [(8.0, 1), (14.0, 1), (16.0, 1), (28.0, 1), (32.0, 7), (40.0, 2), (44.0, 1), (64.0, 26), (72.0, 1), (80.0, 1), (84.0, 1), (88.0, 1)]
+    implied grid    16385 x 16385 at step 8.0  -> 268468225 full-grid points, mesh has 1005 (0.0%)
+    step vs LAND    8.0 units = 0.062 x 128
+
+--- L32 block 5 BSTriShape ''
+    vertices        2380  (unique xy 756)
+    shape scale     32.0
+    world extent x  0.0 .. 131072.0   span 131072.0
+    world extent y  0.0 .. 131072.0   span 131072.0
+    world z         450.0 .. 2400.0
+    unique x        33   unique y 33
+    gap min/max     4096.0 / 4096.0
+    gap histogram   [(4096.0, 64)]
+    implied grid    33 x 33 at step 4096.0  -> 1089 full-grid points, mesh has 756 (69.4%)
+    step vs LAND    4096.0 units = 32.000 x 128
+

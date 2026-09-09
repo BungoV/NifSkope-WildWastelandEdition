@@ -1,0 +1,84 @@
+=== vanilla 4.0.0  level 4  (4x4 = 16 cells)
+  stored vertices        11713   triangles 4215   vertexSize 12  desc 0x300000000203
+  distinct xy columns    1982
+  world extent           0 .. 16384 x  0 .. 16384 y   span 16384 (= 4 cells)
+  unique x / unique y    464 / 498
+  gap min / median / max 1.25 / 16 / 160
+  most common gaps       [(8.0, 237), (16.0, 73), (4.0, 70), (24.0, 49), (32.0, 43), (128.0, 35)]
+  columns on 128 grid    1000 of 1982 (50.5%)
+  full LAND grid here    129^2 = 16641 columns -> vanilla keeps 11.91%
+  triangle edge len      min 2  median 277.3  mean 431.6  p90 1025  max 4138
+  effective spacing      span/(sqrt(cols)-1) = 376.5 units
+    -> samples per cell  10.88 per axis    vs LAND 32   ratio 2.94x coarser
+  triangles per cell     263.4
+  columns per quarter-tile (4x4, y up):
+        195    123    109     97
+        151    181    119    101
+        173    131    128    116
+         82    117     78    137
+    tile min/max ratio   2.5x
+  columns on chunk edge  75
+
+=== vanilla 8.0.0  level 8  (8x8 = 64 cells)
+  stored vertices        6587   triangles 2272   vertexSize 12  desc 0x300000000203
+  distinct xy columns    1105
+  world extent           0 .. 32768 x  0 .. 32768 y   span 32768 (= 8 cells)
+  unique x / unique y    333 / 245
+  gap min / median / max 6 / 128 / 384
+  most common gaps       [(128.0, 422), (16.0, 29), (32.0, 24), (256.0, 16), (64.0, 11), (96.0, 10)]
+  columns on 128 grid    999 of 1105 (90.4%)
+  full LAND grid here    257^2 = 66049 columns -> vanilla keeps 1.67%
+  triangle edge len      min 8  median 819.6  mean 1163  p90 2541  max 9728
+  effective spacing      span/(sqrt(cols)-1) = 1016.3 units
+    -> samples per cell  4.03 per axis    vs LAND 32   ratio 7.94x coarser
+  triangles per cell     35.5
+  columns per quarter-tile (4x4, y up):
+         59     98     41      9
+         31     62     62     73
+         98     43     44     92
+         56     80    134    145
+    tile min/max ratio   16.1x
+  columns on chunk edge  52
+
+=== vanilla 16.0.0  level 16  (16x16 = 256 cells)
+  stored vertices        5960   triangles 2085   vertexSize 12  desc 0x300000000203
+  distinct xy columns    1004
+  world extent           0 .. 65536 x  0 .. 65536 y   span 65536 (= 16 cells)
+  unique x / unique y    417 / 416
+  gap min / median / max 16 / 128 / 768
+  most common gaps       [(128.0, 651), (256.0, 100), (384.0, 24), (512.0, 10), (96.0, 9), (32.0, 8)]
+  columns on 128 grid    991 of 1004 (98.7%)
+  full LAND grid here    513^2 = 263169 columns -> vanilla keeps 0.38%
+  triangle edge len      min 128  median 1639  mean 2352  p90 5253  max 2.191e+04
+  effective spacing      span/(sqrt(cols)-1) = 2135.7 units
+    -> samples per cell  1.92 per axis    vs LAND 32   ratio 16.69x coarser
+  triangles per cell     8.1
+  columns per quarter-tile (4x4, y up):
+         49     51     76    107
+         69     14     12     40
+        122     78     20     38
+         93    157     52     37
+    tile min/max ratio   13.1x
+  columns on chunk edge  79
+
+=== vanilla 32.0.0  level 32  (32x32 = 1024 cells)
+  stored vertices        5872   triangles 2168   vertexSize 12  desc 0x300000000203
+  distinct xy columns    1005
+  world extent           0 .. 131072 x  0 .. 131072 y   span 131072 (= 32 cells)
+  unique x / unique y    617 / 583
+  gap min / median / max 8 / 128 / 1664
+  most common gaps       [(128.0, 647), (256.0, 243), (384.0, 111), (512.0, 34), (64.0, 26), (640.0, 24)]
+  columns on 128 grid    961 of 1005 (95.6%)
+  full LAND grid here    1025^2 = 1050625 columns -> vanilla keeps 0.10%
+  triangle edge len      min 128  median 3442  mean 4737  p90 1.011e+04  max 3.955e+04
+  effective spacing      span/(sqrt(cols)-1) = 4269.2 units
+    -> samples per cell  0.96 per axis    vs LAND 32   ratio 33.35x coarser
+  triangles per cell     2.1
+  columns per quarter-tile (4x4, y up):
+         93     89     65     45
+         66     30     37     82
+         40     28     15     80
+        101     35     91    115
+    tile min/max ratio   7.7x
+  columns on chunk edge  160
+

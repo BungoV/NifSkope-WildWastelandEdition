@@ -1,0 +1,13 @@
+model TreeMapleForest02.nif
+hidden _L1
+hidden _L2
+lodm materials\Landscape\MapleBranches.lodm none textures\landscape\trees\maplebranches_d.dds
+lodm materials\Landscape\MapleBranches.lodm none textures\landscape\trees\maplebranches_d.dds
+lodm materials\Landscape\maplebark01.lodm none textures\landscape\trees\MapleBark01_D.dds
+lodm materials\Landscape\MapleBranches.lodm none textures\landscape\trees\maplebranches_d.dds
+mask alpha
+emissive 0 shapes 0
+front 3866.54 1285.43 104.494 65.8291 1011.84
+side 3748.17 1246.08 104.494 65.8291 1011.84
+class 48 64
+oct 4 48 64 893.951 1191.93 104.494 65.8291 1011.84 3115.19 legacy 64

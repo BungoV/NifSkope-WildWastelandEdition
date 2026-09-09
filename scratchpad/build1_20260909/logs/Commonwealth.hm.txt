@@ -1,0 +1,4 @@
+height map: E:/Projects/NifskopeWildWastelandEdition/scratchpad/build1_20260909/fourws/Commonwealth/Textures/Terrain/Commonwealth/Commonwealth.HeightMap.-96.-96.95.95.-8320.44872.dds
+  provenance F4FX v1: corpus hash d8337d022f637f22 over 36864 VHGT, pixel hash 0b9232eaeec51d7e, 37748736 of 37748736 texels covered
+  corpus hash matches the loader's pinned Commonwealth constant
+  worldspace Commonwealth  cells S -96 W -96 N 95 E 95  (192x192 cells)  6144x6144 native R16_UNORM

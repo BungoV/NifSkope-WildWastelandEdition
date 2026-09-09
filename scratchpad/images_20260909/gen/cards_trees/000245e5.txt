@@ -1,0 +1,11 @@
+model IndCat2Way01.nif
+ranges L2_IndCat2Way01:3 0+117
+ranges IndCat2Way01:2 - L2_IndCat2Way01:2 0+261
+lodm c:\projects\fallout4\build\pc\data\materials\interiors\industrial\metalindbeams01.lodm none 
+lodm c:\projects\fallout4\build\pc\data\materials\interiors\industrial\metalcatwalk01alpha.lodm none 
+mask alpha
+emissive 0 shapes 0
+front 594.215 197.546 12.724 12.8384 12.6939
+side 594.215 197.546 12.724 12.8384 12.6939
+class 32 32
+oct 8 32 32 199.023 199.023 12.724 12.8384 12.6939 3072 legacy 128

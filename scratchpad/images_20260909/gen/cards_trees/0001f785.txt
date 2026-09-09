@@ -1,0 +1,10 @@
+model RockCliff02.nif
+lodm materials\Landscape\rockslab01.lodm none textures\Landscape\Rocks\CommonwealthRockSlab01_D.dds
+lodm materials\Landscape\rockslab02.lodm none textures\landscape\rocks\commonwealthrockslab02_d.dds
+lodm materials\Landscape\rockslabtrim.lodm none textures\landscape\rocks\commonwealthrockslabtrim_d.dds
+mask alpha
+emissive 0 shapes 0
+front 6086.87 2023.57 -83.5482 -63.2155 -274.743
+side 6086.87 2023.57 -83.5482 -63.2155 -274.743
+class 64 64
+oct 8 64 64 1843.47 1843.47 -83.5482 -63.2155 -274.743 5058.92 legacy 128

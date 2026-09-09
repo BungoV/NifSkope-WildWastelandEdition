@@ -1,0 +1,23 @@
+rc=1
+=== Commonwealth (ws 3C, Fallout4.esm)
+  write rc=0  35953294 bytes
+  verify rc=0
+  installed
+=== DLC03FarHarbor (ws B0F, DLCCoast.esm)
+  write rc=0  9195933 bytes
+  verify rc=0
+  installed
+=== DiamondCity (ws F94, Fallout4.esm)
+  write rc=0  53148 bytes
+  verify rc=0
+  installed
+=== NukaWorld (ws 290F, DLCNukaWorld.esm)
+  write rc=0  7182356 bytes
+  verify rc=0
+  installed
+=== NukaWorldAmphitheater (ws 52931, DLCNukaWorld.esm)
+  write rc=0  38303 bytes
+  verify rc=0
+  installed
+
+[exited with code 0]

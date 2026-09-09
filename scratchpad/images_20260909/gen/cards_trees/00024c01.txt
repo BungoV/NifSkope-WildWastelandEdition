@@ -1,0 +1,11 @@
+model QryCube01.nif
+lodm Materials\Architecture\Quarry\QuarryMarble01.lodm none textures\architecture\quarry\qrymarble01_d.dds
+lodm Materials\Architecture\Quarry\QuarryMarble02.lodm none textures\architecture\quarry\qrymarble02_d.dds
+lodm Materials\Architecture\Quarry\QuarryMarble04.lodm none textures\architecture\quarry\qrymarble04_d.dds
+lodm Materials\Architecture\Quarry\QuarryMarble03.lodm none textures\architecture\quarry\qrymarble03_d.dds
+mask alpha
+emissive 0 shapes 0
+front 2299.44 764.446 16.0607 40.0944 0
+side 2299.44 764.446 16.0607 40.0944 0
+class 32 32
+oct 8 32 32 583.969 583.969 16.0607 40.0944 0 3072 legacy 128

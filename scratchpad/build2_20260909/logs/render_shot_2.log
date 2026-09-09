@@ -1,0 +1,44 @@
+deriving fixtures through the app's own CLI
+  ok   the plain fixture has nothing the bake edits shape [1] named 'Cube'
+  ok   the dirty fixture really carries a _L1 shape shape [1] named 'Cube_L1'
+
+1. a plain render exits on its own
+  ok   WW_RENDER_SHOT exits 0                       rc=0 after 5s (cap 90s)
+  ok   and promptly                                 5s < 45s
+  FAIL and wrote its framebuffer                     bytes
+  ok   and discarded nothing                        0 lines in ww_headless_close.log
+
+2. the card bake, with nothing in the file for it to edit
+  ok   WW_IMPOSTOR_BAKE exits 0                     rc=0 after 3s (cap 90s)
+  ok   and promptly                                 3s < 45s
+  ok   and wrote its sidecar                        cube_plain.txt
+  ok   and still discarded nothing                  0 lines in ww_headless_close.log
+
+3. the card bake on a document it EDITS - bungo's case
+  ok   the bake exits 0 instead of asking           rc=0 after 3s (cap 90s; rc=124 is the dialog)
+  ok   and promptly                                 3s < 45s
+  ok   the bake really edited the document          1 'hidden' line(s) in cube_lod.txt
+  ok   and the close path says what it discarded    discarded cube_lod
+
+4. nothing is left running
+  ok   no harness NifSkope survived                 0 running with --port
+
+5. bungo's hazard: a headless run puts no window on any screen
+  ok   render_plain: the run recorded where its window was 4 window record(s) in ww_headless_windows.log
+  ok   render_plain: the process saw no window on a screen 0 of 4 records onscreen=1
+  ok   render_plain: and nothing was on a screen from outside 0 sample(s); 
+  ok   bake_plain: the run recorded where its window was 4 window record(s) in ww_headless_windows.log
+  ok   bake_plain: the process saw no window on a screen 0 of 4 records onscreen=1
+  ok   bake_plain: and nothing was on a screen from outside 0 sample(s); 
+  ok   bake_lod: the run recorded where its window was 4 window record(s) in ww_headless_windows.log
+  ok   bake_lod: the process saw no window on a screen 0 of 4 records onscreen=1
+  FAIL bake_lod: and nothing was on a screen from outside 1 sample(s); 32500 2552,184,2978,452 on \\.\DISPLAY5
+
+6. the control: WW_WINDOW_VISIBLE=1 brings the window back, and the pixels do not move
+  ok   the visible control run exits 0              rc=0 after 5s
+  ok   the process CAN see a window on a screen     2 of 4 records onscreen=1
+  ok   and so can the sampler                       10 sample(s); 25280 1912,-73,3848,983 on \\.\DISPLAY5
+  FAIL off-screen and on-screen photograph the same pixels off  / on fedab869884174fb
+
+render_shot.sh: 28 checks, 3 failures
+FAIL

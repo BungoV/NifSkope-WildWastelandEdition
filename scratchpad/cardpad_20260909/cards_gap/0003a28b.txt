@@ -1,0 +1,16 @@
+model TreeHero01.nif
+ranges HeroTree01:0 - L1_HeroTree01:0 166+0
+ranges HeroTree01:1 - L1_HeroTree01:1 198+0
+ranges HeroTree01:2 - L1_HeroTree01:2 110+0
+ranges HeroTree01:3 - L2_HeroTree01:3 - L1_HeroTree01:3 610+393
+lodm materials\Landscape\HeroBark.lodm none textures\landscape\trees\herotreebark_d.dds
+lodm materials\Landscape\Herostump.lodm none textures\landscape\trees\herotreestump_d.dds
+lodm materials\Landscape\woodpieces.lodm none Textures\Landscape\Trees\woodchunks_d.dds
+lodm Materials\Landscape\Trees\MapleAtlas02.lodm none textures\Landscape\Trees\MapleAtlas02_d.dds
+mask alpha
+emissive 0 shapes 0
+front 4555.99 1514.63 -12.8056 -5.23327 1070.19
+side 4555.99 1514.63 -12.8056 -5.23327 1070.19
+class 128 128
+gap 8 8
+oct 8 128 128 1166.01 1166.01 -12.8056 -5.23327 1070.19 3786.58 legacy 128

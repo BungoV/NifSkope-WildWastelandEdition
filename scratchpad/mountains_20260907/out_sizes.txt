@@ -1,0 +1,24 @@
+master X:\Programs\Steam\steamapps\common\Fallout 4\Data\Fallout4.esm (330,776,576 bytes)
+  36864 cells, 36864 with a LAND, 36 blocks, 576 sub-blocks
+  ring +-32                   496 cells  compressed    2,488,535  uncompressed    3,376,639  compressed-no-WRLD    1,539,345
+  ring +-40                  2613 cells  compressed    8,362,779  uncompressed   13,556,631  compressed-no-WRLD    7,413,589
+  ring +-48                  5454 cells  compressed   15,328,458  uncompressed   26,704,538  compressed-no-WRLD   14,379,268
+  ring +-64                 12686 cells  compressed   32,275,152  uncompressed   59,854,728  compressed-no-WRLD   31,325,962
+  ring +-96                 32909 cells  compressed   51,915,616  uncompressed  152,544,137  compressed-no-WRLD   50,966,426
+  all untextured cells      32909 cells  compressed   51,915,616  uncompressed  152,544,137  compressed-no-WRLD   50,966,426
+
+| selection | cells | compressed | uncompressed | compressed, no WRLD record |
+| --- | ---: | ---: | ---: | ---: |
+| ring +-16 | 0 | 0 | 0 | 0 |
+| ring +-24 | 0 | 0 | 0 | 0 |
+| ring +-32 | 496 | 2,488,535 | 3,376,639 | 1,539,345 |
+| ring +-40 | 2,613 | 8,362,779 | 13,556,631 | 7,413,589 |
+| ring +-48 | 5,454 | 15,328,458 | 26,704,538 | 14,379,268 |
+| ring +-64 | 12,686 | 32,275,152 | 59,854,728 | 31,325,962 |
+| ring +-96 | 32,909 | 51,915,616 | 152,544,137 | 50,966,426 |
+| all untextured cells | 32,909 | 51,915,616 | 152,544,137 | 50,966,426 |
+
+=== ESL flag ===
+  TES4 flags with --esl-flag: 0x00000200 (ESL bit 0x200 set: True)
+  records in the plugin whose FormID is NOT master-index 00: 0
+  (ESL restricts NEW records to 0x800-0xFFF; this plugin creates none, so the restriction cannot be violated)

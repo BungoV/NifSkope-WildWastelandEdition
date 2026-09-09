@@ -1,0 +1,49 @@
+--- dim 4  cells 28,24 .. 31,27
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/lod/coastcliff01wetlod.bgsm" ' not found in archives
+[2] Commonwealth.4.28.24.BTO
+merged: 1 shapes -> 1 across 1 chunks
+far rings: 0 shapes cut in 0 chunks: 0 -> 0 triangles, 0 -> 0 vertices (0 shapes and 0 groups kept whole, 0 restored; worst error 0.0 units)
+2 chunk(s) written to E:/Projects/NifskopeWildWastelandEdition/scratchpad/images_20260909/gen/ours4, 0 empty, 0 failed
+rc=0
+40124 E:/Projects/NifskopeWildWastelandEdition/scratchpad/images_20260909/gen/ours4/Commonwealth.4.28.24.BTR
+40124 E:/Projects/NifskopeWildWastelandEdition/scratchpad/images_20260909/gen/ours4/Commonwealth.4.28.24_nowater.BTR
+174888 E:/Projects/NifskopeWildWastelandEdition/scratchpad/images_20260909/gen/ours4/textures/terrain/Commonwealth/Commonwealth.4.28.24.DDS
+174888 E:/Projects/NifskopeWildWastelandEdition/scratchpad/images_20260909/gen/ours4/textures/terrain/Commonwealth/Commonwealth.4.28.24_data.DDS
+174888 E:/Projects/NifskopeWildWastelandEdition/scratchpad/images_20260909/gen/ours4/textures/terrain/Commonwealth/Commonwealth.4.28.24_msn.DDS
+--- dim 8  cells 24,24 .. 31,31
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/lod/coastcliff01wetlod.bgsm" ' not found in archives
+[2] Commonwealth.8.24.24.BTO
+merged: 7 shapes -> 6 across 1 chunks
+far rings: 0 shapes cut in 0 chunks: 0 -> 0 triangles, 0 -> 0 vertices (0 shapes and 0 groups kept whole, 0 restored; worst error 0.0 units)
+2 chunk(s) written to E:/Projects/NifskopeWildWastelandEdition/scratchpad/images_20260909/gen/ours8, 0 empty, 0 failed
+rc=0
+30858 E:/Projects/NifskopeWildWastelandEdition/scratchpad/images_20260909/gen/ours8/Commonwealth.8.24.24.BTR
+30858 E:/Projects/NifskopeWildWastelandEdition/scratchpad/images_20260909/gen/ours8/Commonwealth.8.24.24_nowater.BTR
+174888 E:/Projects/NifskopeWildWastelandEdition/scratchpad/images_20260909/gen/ours8/textures/terrain/Commonwealth/Commonwealth.8.24.24.DDS
+174888 E:/Projects/NifskopeWildWastelandEdition/scratchpad/images_20260909/gen/ours8/textures/terrain/Commonwealth/Commonwealth.8.24.24_data.DDS
+174888 E:/Projects/NifskopeWildWastelandEdition/scratchpad/images_20260909/gen/ours8/textures/terrain/Commonwealth/Commonwealth.8.24.24_msn.DDS
+--- dim 16  cells 16,16 .. 31,31
+bake 16,16: 0 px no land, 0 px no base tex, 23 samples unresolvable LTEX [464c5]
+[2] Commonwealth.16.16.16.BTO
+merged: 5 shapes -> 5 across 1 chunks
+far rings: 2 shapes cut in 1 chunks: 1100 -> 1077 triangles, 1854 -> 1827 vertices (3 shapes and 82 groups kept whole, 0 restored; worst error 504.4 units)
+2 chunk(s) written to E:/Projects/NifskopeWildWastelandEdition/scratchpad/images_20260909/gen/ours16, 0 empty, 0 failed
+rc=0
+36352 E:/Projects/NifskopeWildWastelandEdition/scratchpad/images_20260909/gen/ours16/Commonwealth.16.16.16.BTR
+36352 E:/Projects/NifskopeWildWastelandEdition/scratchpad/images_20260909/gen/ours16/Commonwealth.16.16.16_nowater.BTR
+174888 E:/Projects/NifskopeWildWastelandEdition/scratchpad/images_20260909/gen/ours16/textures/terrain/Commonwealth/Commonwealth.16.16.16.DDS
+174888 E:/Projects/NifskopeWildWastelandEdition/scratchpad/images_20260909/gen/ours16/textures/terrain/Commonwealth/Commonwealth.16.16.16_data.DDS
+174888 E:/Projects/NifskopeWildWastelandEdition/scratchpad/images_20260909/gen/ours16/textures/terrain/Commonwealth/Commonwealth.16.16.16_msn.DDS
+--- dim 32  cells 0,0 .. 31,31
+bake 0,0: 0 px no land, 0 px no base tex, 3 samples unresolvable LTEX [464c5]
+[2] Commonwealth.32.0.0.BTO
+merged: 1 shapes -> 1 across 1 chunks
+far rings: 0 shapes cut in 1 chunks: 0 -> 0 triangles, 0 -> 0 vertices (1 shapes and 0 groups kept whole, 0 restored; worst error 0.0 units)
+2 chunk(s) written to E:/Projects/NifskopeWildWastelandEdition/scratchpad/images_20260909/gen/ours32, 0 empty, 0 failed
+rc=0
+55056 E:/Projects/NifskopeWildWastelandEdition/scratchpad/images_20260909/gen/ours32/Commonwealth.32.0.0.BTR
+55056 E:/Projects/NifskopeWildWastelandEdition/scratchpad/images_20260909/gen/ours32/Commonwealth.32.0.0_nowater.BTR
+174888 E:/Projects/NifskopeWildWastelandEdition/scratchpad/images_20260909/gen/ours32/textures/terrain/Commonwealth/Commonwealth.32.0.0.DDS
+174888 E:/Projects/NifskopeWildWastelandEdition/scratchpad/images_20260909/gen/ours32/textures/terrain/Commonwealth/Commonwealth.32.0.0_data.DDS
+174888 E:/Projects/NifskopeWildWastelandEdition/scratchpad/images_20260909/gen/ours32/textures/terrain/Commonwealth/Commonwealth.32.0.0_msn.DDS
+GEN-DONE

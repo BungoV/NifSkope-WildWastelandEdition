@@ -1,0 +1,9 @@
+model IndFreeRoomCorIn01.nif
+ranges IndFreeRoomCorIn01:12 - L2_IndFreeRoomCorIn01:12 0+356
+lodm C:\Projects\Fallout4\Build\PC\Data\Materials\interiors\industrial\metalfreeroom01.lodm none 
+mask alpha
+emissive 0 shapes 0
+front 727.805 241.958 7.73703 7.0722 84.443
+side 727.805 241.958 7.73703 7.0722 84.443
+class 32 32
+oct 8 32 32 258.5 258.5 7.73703 7.0722 84.443 3072 legacy 128

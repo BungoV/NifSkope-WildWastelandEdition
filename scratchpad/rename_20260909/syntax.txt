@@ -1,0 +1,22 @@
+lane RENAME -- syntax pass, 2026-09-09, no build slot (lane OFFSCREEN's DONE marker absent).
+
+Command (MSYS2 UCRT64), flags lifted from Makefile.Release CXXFLAGS/DEFINES/INCPATH:
+
+  g++ -fsyntax-only -std=gnu++2a <DEFINES from Makefile.Release:16> \
+      -Ilib/qhull/src -isystem lib/gli/gli -isystem lib/gli/external \
+      -Ilib/libfo76utils/src -I. -Isrc -Ilib \
+      -IC:/msys64/ucrt64/include/qt6{,/QtOpenGLWidgets,/QtOpenGL,/QtWidgets,/QtGui,/QtXml,/QtNetwork,/QtCore} \
+      -IGeneratedFiles/.moc -IGeneratedFiles/.ui \
+      -IC:/msys64/ucrt64/share/qt6/mkspecs/win32-g++ <file>
+
+Result:
+
+  src/lodtfile.cpp             RC=0
+  src/io/lodvfile.cpp          RC=0
+  src/btdterrain.cpp           RC=0
+  src/lodgen.cpp               RC=0
+  src/nifcli.cpp               RC=0
+  src/lodgenmanager.cpp        RC=0
+
+It proves they compile. It proves nothing about linking or behaviour; every gate
+is still owed and is listed in PENDING.md.

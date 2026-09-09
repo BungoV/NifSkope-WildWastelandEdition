@@ -1,0 +1,40 @@
+LEVEL 4: 2304 of 2304 chunks parsed, 16 cells each
+  distinct columns   min 9  p25 9  median 552  p75 1000  p95 1000  max 1982
+  triangles          min 24  median 1140  p95 2074  max 4215
+  columns per cell   median 34.531   -> spacing 697 units/sample per axis
+  on 128 grid (%)    min 50.5  median 100.0  mean 99.9
+  chunks 100% on grid 2292 of 2304   chunks below 90%: 4
+  modal gap          [8.0, 128.0]   min gap seen 6.198883056640625e-06
+  least grid-aligned: 4.0.0.BTR 50%, 4.12.-4.BTR 68%, 4.-4.-4.BTR 70%, 4.12.-24.BTR 89%, 4.0.-24.BTR 91%
+  densest chunks:     4.0.0.BTR 1982c/4215t, 4.12.-4.BTR 1461c/3101t, 4.-4.-4.BTR 1410c/2922t, 4.12.-24.BTR 1074c/2223t, 4.0.-24.BTR 1053c/2166t
+
+LEVEL 8: 576 of 576 chunks parsed, 64 cells each
+  distinct columns   min 9  p25 9  median 999  p75 1000  p95 1000  max 1194
+  triangles          min 24  median 2051  p95 2080  max 2438
+  columns per cell   median 15.609   -> spacing 1037 units/sample per axis
+  on 128 grid (%)    min 66.8  median 100.0  mean 99.7
+  chunks 100% on grid 558 of 576   chunks below 90%: 7
+  modal gap          [16.0, 128.0]   min gap seen 1.430511474609375e-06
+  least grid-aligned: 8.8.-32.BTR 67%, 8.8.-24.BTR 68%, 8.0.-24.BTR 70%, 8.-8.-24.BTR 75%, 8.0.-32.BTR 79%
+  densest chunks:     8.-8.-24.BTR 1194c/2438t, 8.0.-24.BTR 1150c/2331t, 8.0.-32.BTR 1144c/2339t, 8.8.-24.BTR 1140c/2347t, 8.8.-32.BTR 1108c/2265t
+
+LEVEL 16: 144 of 144 chunks parsed, 256 cells each
+  distinct columns   min 9  p25 9  median 999  p75 1000  p95 1001  max 1064
+  triangles          min 24  median 2080  p95 2114  max 2215
+  columns per cell   median 3.902   -> spacing 2073 units/sample per axis
+  on 128 grid (%)    min 87.9  median 100.0  mean 99.8
+  chunks 100% on grid 131 of 144   chunks below 90%: 1
+  modal gap          [128.0]   min gap seen 4.0
+  least grid-aligned: 16.0.-32.BTR 88%, 16.-16.-32.BTR 96%, 16.16.16.BTR 96%, 16.0.-16.BTR 96%, 16.16.0.BTR 98%
+  densest chunks:     16.0.-32.BTR 1064c/2215t, 16.-16.-32.BTR 1020c/2114t, 16.16.16.BTR 1007c/2103t, 16.-16.-16.BTR 1006c/2089t, 16.0.-16.BTR 1004c/2091t
+
+LEVEL 32: 36 of 36 chunks parsed, 1024 cells each
+  distinct columns   min 9  p25 934  median 1000  p75 1000  p95 1010  max 1027
+  triangles          min 24  median 2166  p95 2254  max 2283
+  columns per cell   median 0.977   -> spacing 4145 units/sample per axis
+  on 128 grid (%)    min 94.6  median 100.0  mean 99.6
+  chunks 100% on grid 32 of 36   chunks below 90%: 0
+  modal gap          [128.0]   min gap seen 8.0
+  least grid-aligned: 32.0.-32.BTR 95%, 32.-32.-32.BTR 95%, 32.0.0.BTR 96%, 32.-32.0.BTR 99%, 32.-32.-64.BTR 100%
+  densest chunks:     32.-32.-32.BTR 1027c/2214t, 32.0.-32.BTR 1024c/2205t, 32.0.0.BTR 1005c/2168t, 32.-32.-64.BTR 1000c/2164t, 32.-32.-96.BTR 1000c/2249t
+

@@ -1,0 +1,111 @@
+roots searched: ['E:\\\\', 'X:\\\\', 'C:\\Users\\bungo', 'C:\\Program Files', 'C:\\Program Files (x86)', 'C:\\ProgramData']
+directories visited: 62232  elapsed 900s
+
+=== A. directories whose NAME matches a tool pattern (31) ===
+    E:\\Mods\Skyrim\mods\Aspens Ablaze Add-On - DynDOLOD 3
+    E:\\Mods\Skyrim\mods\Aspens Ablaze Add-On - DynDOLOD 3\DynDOLOD
+    E:\\Mods\Skyrim\mods\Aspens Ablaze Add-On - DynDOLOD 3\DynDOLOD\Render\Billboards\DynDOLOD
+    E:\\Mods\Skyrim\mods\Aspens Ablaze Add-On - DynDOLOD 3\meshes\DynDOLOD
+    E:\\Mods\Skyrim\mods\Assorted mesh fixes\DynDOLOD
+    E:\\Mods\Skyrim\mods\Assorted mesh fixes\DynDOLOD\Render\Billboards\DynDOLOD
+    E:\\Mods\Skyrim\mods\Assorted mesh fixes\meshes\DynDOLOD
+    E:\\Mods\Skyrim\mods\DynDOLOD DLL NG
+    E:\\Mods\Skyrim\mods\DynDOLOD Resources SE
+    E:\\Mods\Skyrim\mods\DynDOLOD Resources SE\DynDOLOD
+    E:\\Mods\Skyrim\mods\DynDOLOD Resources SE\Interface\DynDOLOD
+    E:\\Mods\Skyrim\mods\DynDOLOD Resources SE\Meshes\DynDOLOD
+    E:\\Mods\Skyrim\mods\DynDOLOD Resources SE\Textures\DynDOLOD
+    E:\\Mods\Skyrim\mods\Enhanced Solitude SSE\DynDOLOD
+    E:\\Mods\Skyrim\mods\Flying Crows SSE\DynDOLOD
+    E:\\Mods\Skyrim\mods\Mists of Tamriel\DynDOLOD
+    E:\\Mods\Skyrim\mods\Nature of the Wild Lands - Snowier Spruce Trees\dyndolod
+    E:\\Mods\Skyrim\mods\Nature of the Wild Lands - Snowier Spruce Trees\dyndolod\render\billboards\dyndolod
+    E:\\Mods\Skyrim\mods\Nature of the Wild Lands - Snowier Spruce Trees\meshes\dyndolod
+    E:\\Mods\Skyrim\mods\Nature of the Wild Lands 3.14 - 3D hybrid LODs and regions addon\dyndolod
+    E:\\Mods\Skyrim\mods\Nature of the Wild Lands 3.14 - 3D hybrid LODs and regions addon\dyndolod\render\billboards\dyndolod
+    E:\\Mods\Skyrim\mods\Nature of the Wild Lands 3.14 - 3D hybrid LODs and regions addon\meshes\dyndolod
+    E:\\Mods\Skyrim\mods\Nature of the Wild Lands\dyndolod
+    E:\\Mods\Skyrim\mods\Nature of the Wild Lands\dyndolod\render\billboards\dyndolod
+    E:\\Mods\Skyrim\mods\Nature of the Wild Lands\meshes\dyndolod
+    E:\\Mods\Skyrim\mods\Riften Docks Overhaul\DynDOLOD
+    E:\\Mods\Skyrim\mods\Roastlawyer's Restored Whiterun Defences\DynDOLOD
+    E:\\Projects\Claude\.claude\skills\nifskope-ww-lodgen
+    E:\\Projects\Fallout 4 Mods\overwrite\FO4Edit Backups
+    E:\\Projects\Fallout 4 Mods\overwrite\FO4Edit Cache
+    E:\\Projects\Fo4CommunityShaders\Codex\backups\reflections-gap2-preedit-20260804\active-mo2
+
+=== B. config/log files matching tool patterns (10) ===
+           133  E:\\Mods\Skyrim\mods\Aspens Ablaze Add-On - DynDOLOD 3\DynDOLOD\DynDOLOD_SSE_TexGen_Billboards_aspensablazeesp.txt
+          1035  E:\\Mods\Skyrim\mods\Aspens Ablaze Add-On - DynDOLOD 3\DynDOLOD\DynDOLOD_SSE_aspensablazeesp_high.ini
+           588  E:\\Mods\Skyrim\mods\Aspens Ablaze Add-On - DynDOLOD 3\DynDOLOD\DynDOLOD_SSE_aspensablazeesp_low.ini
+          1135  E:\\Mods\Skyrim\mods\Aspens Ablaze Add-On - DynDOLOD 3\DynDOLOD\DynDOLOD_SSE_aspensablazeesp_medium.ini
+            47  E:\\Mods\Skyrim\mods\Enhanced Solitude SSE\DynDOLOD\DynDOLOD_SSE_enhancedsolitudesseesp.ini
+           226  E:\\Mods\Skyrim\mods\Flying Crows SSE\DynDOLOD\DynDOLOD_SSE_FlyingCrowsSSEesp.ini
+           141  E:\\Mods\Skyrim\mods\Mists of Tamriel\DynDOLOD\DynDOLOD_SSE_mistsoftamrielesp.ini
+            45  E:\\Mods\Skyrim\mods\Riften Docks Overhaul\DynDOLOD\DynDOLOD_SSE_riftendocksoverhaulesp.ini
+           215  E:\\Mods\Skyrim\mods\Roastlawyer's Restored Whiterun Defences\DynDOLOD\DynDOLOD_SSE_RestoredWRDefencesCapitalWhiterunPatchesp.ini
+           279  E:\\Mods\Skyrim\mods\Roastlawyer's Restored Whiterun Defences\DynDOLOD\DynDOLOD_SSE_RoastlawyersRestoredWhiterunDefencesesp.ini
+
+=== C. directories holding GENERATED-LOOKING terrain LOD, outside the vanilla unpack (0) ===
+
+=== D. pruned / errored / budget (398 entries, first 60) ===
+    [prune] E:\\ -> $RECYCLE.BIN,System Volume Information
+    [prune] E:\\Games\Roberts Space Industries\RSI Launcher\resources\app.asar.unpacked -> node_modules
+    [prune] E:\\Projects\Claude\.xmake -> windows
+    [prune] E:\\Projects\Claude\build -> windows
+    [prune] E:\\Projects\Claude\build\.deps\commonlib-shared -> windows
+    [prune] E:\\Projects\Claude\build\.deps\commonlibf4 -> windows
+    [prune] E:\\Projects\Claude\build\.deps\f4fx_tests -> windows
+    [prune] E:\\Projects\Claude\build\.deps\FO4CS -> windows
+    [prune] E:\\Projects\Claude\build\.gens\commonlib-shared -> windows
+    [prune] E:\\Projects\Claude\build\.gens\commonlibf4 -> windows
+    [prune] E:\\Projects\Claude\build\.gens\FO4CS -> windows
+    [prune] E:\\Projects\Claude\build\.objs\commonlib-shared -> windows
+    [prune] E:\\Projects\Claude\build\.objs\commonlibf4 -> windows
+    [prune] E:\\Projects\Claude\build\.objs\f4fx_tests -> windows
+    [prune] E:\\Projects\Claude\build\.objs\FO4CS -> windows
+    [prune] E:\\Projects\Compare\New\meshes\interiors\building\details -> windows
+    [prune] E:\\Projects\Compare\New\meshes\setdressing -> windows
+    [prune] E:\\Projects\F4Movement -> .git
+    [prune] E:\\Projects\F4Movement\.xmake -> windows
+    [prune] E:\\Projects\F4Movement\build -> windows
+    [prune] E:\\Projects\F4Movement\build\.deps\commonlib-shared -> windows
+    [prune] E:\\Projects\F4Movement\build\.deps\commonlibf4 -> windows
+    [prune] E:\\Projects\F4Movement\build\.deps\F4Movement -> windows
+    [prune] E:\\Projects\F4Movement\build\.deps\f4movement_tests -> windows
+    [prune] E:\\Projects\F4Movement\build\.gens\commonlib-shared -> windows
+    [prune] E:\\Projects\F4Movement\build\.gens\commonlibf4 -> windows
+    [prune] E:\\Projects\F4Movement\build\.gens\F4Movement -> windows
+    [prune] E:\\Projects\F4Movement\build\.objs\commonlib-shared -> windows
+    [prune] E:\\Projects\F4Movement\build\.objs\commonlibf4 -> windows
+    [prune] E:\\Projects\F4Movement\build\.objs\F4Movement -> windows
+    [prune] E:\\Projects\F4Movement\build\.objs\f4movement_tests -> windows
+    [prune] E:\\Projects\F4Movement\lib\commonlibf4 -> .git
+    [prune] E:\\Projects\F76\Data\meshes\interiors\building\details -> windows
+    [prune] E:\\Projects\F76\Data\meshes\setdressing -> windows
+    [prune] E:\\Projects\Fo4CommunityShaders\fallout4-community-shaders -> .git
+    [prune] E:\\Projects\Fo4CommunityShaders\fallout4-community-shaders\.xmake -> windows
+    [prune] E:\\Projects\Fo4CommunityShaders\fallout4-community-shaders\build -> windows
+    [prune] E:\\Projects\Fo4CommunityShaders\fallout4-community-shaders\build\.deps\B21_F4FX -> windows
+    [prune] E:\\Projects\Fo4CommunityShaders\fallout4-community-shaders\build\.deps\bake_heightmap -> windows
+    [prune] E:\\Projects\Fo4CommunityShaders\fallout4-community-shaders\build\.deps\commonlib-shared -> windows
+    [prune] E:\\Projects\Fo4CommunityShaders\fallout4-community-shaders\build\.deps\commonlibf4 -> windows
+    [prune] E:\\Projects\Fo4CommunityShaders\fallout4-community-shaders\build\.deps\f4fx_tests -> windows
+    [prune] E:\\Projects\Fo4CommunityShaders\fallout4-community-shaders\build\.deps\FO4CS -> windows
+    [prune] E:\\Projects\Fo4CommunityShaders\fallout4-community-shaders\build\.gens\B21_F4FX -> windows
+    [prune] E:\\Projects\Fo4CommunityShaders\fallout4-community-shaders\build\.gens\commonlib-shared -> windows
+    [prune] E:\\Projects\Fo4CommunityShaders\fallout4-community-shaders\build\.gens\commonlibf4 -> windows
+    [prune] E:\\Projects\Fo4CommunityShaders\fallout4-community-shaders\build\.gens\FO4CS -> windows
+    [prune] E:\\Projects\Fo4CommunityShaders\fallout4-community-shaders\build\.objs\B21_F4FX -> windows
+    [prune] E:\\Projects\Fo4CommunityShaders\fallout4-community-shaders\build\.objs\bake_heightmap -> windows
+    [prune] E:\\Projects\Fo4CommunityShaders\fallout4-community-shaders\build\.objs\commonlib-shared -> windows
+    [prune] E:\\Projects\Fo4CommunityShaders\fallout4-community-shaders\build\.objs\commonlibf4 -> windows
+    [prune] E:\\Projects\Fo4CommunityShaders\fallout4-community-shaders\build\.objs\f4fx_tests -> windows
+    [prune] E:\\Projects\Fo4CommunityShaders\fallout4-community-shaders\build\.objs\FO4CS -> windows
+    [prune] E:\\Projects\Fo4CommunityShaders\fallout4-community-shaders\build_z7 -> windows
+    [prune] E:\\Projects\Fo4CommunityShaders\fallout4-community-shaders\build_z7\.deps\commonlib-shared -> windows
+    [prune] E:\\Projects\Fo4CommunityShaders\fallout4-community-shaders\build_z7\.deps\commonlibf4 -> windows
+    [prune] E:\\Projects\Fo4CommunityShaders\fallout4-community-shaders\build_z7\.deps\FO4CS -> windows
+    [prune] E:\\Projects\Fo4CommunityShaders\fallout4-community-shaders\build_z7\.gens\commonlib-shared -> windows
+    [prune] E:\\Projects\Fo4CommunityShaders\fallout4-community-shaders\build_z7\.gens\commonlibf4 -> windows
+    [prune] E:\\Projects\Fo4CommunityShaders\fallout4-community-shaders\build_z7\.gens\FO4CS -> windows

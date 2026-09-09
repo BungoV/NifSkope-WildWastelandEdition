@@ -1,0 +1,3 @@
+height map: E:/Projects/NifskopeWildWastelandEdition/scratchpad/build1_20260909/fourws/DLC03FarHarbor/Textures/Terrain/DLC03FarHarbor/DLC03FarHarbor.HeightMap.-59.-73.78.69.-1576.8216.dds
+  provenance F4FX v1: corpus hash 3c48ea75d9f5a430 over 2067 VHGT, pixel hash f2ca950b40e49e68, 2119424 of 20207616 texels covered
+  worldspace DLC03FarHarbor  cells S -59 W -73 N 78 E 69  (143x138 cells)  4576x4416 native R16_UNORM

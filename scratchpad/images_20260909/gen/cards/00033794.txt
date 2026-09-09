@@ -1,0 +1,11 @@
+model ShackBalconyFloor03.nif
+ranges ShackBalconyFloor03:5 - L2_Boards:5 0+24
+lodm C:\Projects\Fallout4\Build\PC\Data\materials\Architecture\Shacks\ShackWoodPlanks01.lodm none 
+lodm C:\Projects\Fallout4\Build\PC\Data\materials\Architecture\Shacks\ShackWoodTile01.lodm none 
+lodm C:\Projects\Fallout4\Build\PC\Data\materials\Architecture\Shacks\ShackPlywood02Alpha.lodm none 
+mask alpha
+emissive 0 shapes 0
+front 327.419 108.85 0 0 -8
+side 327.419 108.85 0 0 -8
+class 32 32
+oct 8 32 32 119.305 119.305 0 0 -8 3072 legacy 256

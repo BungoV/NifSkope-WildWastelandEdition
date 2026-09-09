@@ -1,0 +1,35 @@
+DLCCoast.esm                       WRLD records=6    WorldChildren groups=6    ORPHAN=0 
+                                   CELL records=17923  CellChildren groups=2583   ORPHAN=0 
+DLCNukaWorld.esm                   WRLD records=5    WorldChildren groups=5    ORPHAN=0 
+                                   CELL records=4650   CellChildren groups=4574   ORPHAN=0 
+DLCRobot.esm                       WRLD records=1    WorldChildren groups=1    ORPHAN=0 
+                                   CELL records=112    CellChildren groups=61     ORPHAN=0 
+DLCworkshop01.esm                  WRLD records=0    WorldChildren groups=0    ORPHAN=0 
+                                   CELL records=0      CellChildren groups=4      ORPHAN=0 
+DLCworkshop02.esm                  WRLD records=0    WorldChildren groups=0    ORPHAN=0 
+                                   CELL records=0      CellChildren groups=2      ORPHAN=0 
+DLCworkshop03.esm                  WRLD records=1    WorldChildren groups=1    ORPHAN=0 
+                                   CELL records=73     CellChildren groups=17     ORPHAN=0 
+Fallout4.esm                       WRLD records=5    WorldChildren groups=5    ORPHAN=0 
+                                   CELL records=38970  CellChildren groups=38285  ORPHAN=0 
+ccBGSFO4044-HellfirePowerArmor.esl WRLD records=1    WorldChildren groups=1    ORPHAN=0 
+                                   CELL records=2      CellChildren groups=2      ORPHAN=0 
+ccBGSFO4046-TesCan.esl             WRLD records=1    WorldChildren groups=1    ORPHAN=0 
+                                   CELL records=11     CellChildren groups=11     ORPHAN=0 
+ccBGSFO4096-AS_Enclave.esl         WRLD records=0    WorldChildren groups=0    ORPHAN=0 
+                                   CELL records=0      CellChildren groups=0      ORPHAN=0 
+ccBGSFO4110-WS_Enclave.esl         WRLD records=0    WorldChildren groups=0    ORPHAN=0 
+                                   CELL records=0      CellChildren groups=0      ORPHAN=0 
+ccBGSFO4115-X02.esl                WRLD records=1    WorldChildren groups=1    ORPHAN=0 
+                                   CELL records=3      CellChildren groups=6      ORPHAN=0 
+ccBGSFO4116-HeavyFlamer.esl        WRLD records=0    WorldChildren groups=0    ORPHAN=0 
+                                   CELL records=0      CellChildren groups=1      ORPHAN=0 
+ccFSVFO4007-Halloween.esl          WRLD records=0    WorldChildren groups=0    ORPHAN=0 
+                                   CELL records=0      CellChildren groups=2      ORPHAN=0 
+ccOTMFO4001-Remnants.esl           WRLD records=1    WorldChildren groups=1    ORPHAN=0 
+                                   CELL records=11     CellChildren groups=12     ORPHAN=0 
+ccSBJFO4003-Grenade.esl            WRLD records=1    WorldChildren groups=1    ORPHAN=0 
+                                   CELL records=3      CellChildren groups=4      ORPHAN=0 
+
+TOTAL orphan World Children groups across every shipped plugin: 0
+TOTAL orphan Cell  Children groups across every shipped plugin: 0

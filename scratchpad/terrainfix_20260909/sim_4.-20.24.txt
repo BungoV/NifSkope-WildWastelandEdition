@@ -1,0 +1,12 @@
+tile Commonwealth.4.-20.24  heights 7224..11272 from E:/Projects/Fallout 4 Mods/mods/FO4CS/Terrain/Commonwealth.lodt
+                                   roughness  left-diff by x mod 4 (%)   light lightSD  meanUp
+OLD  nearest, up in blue               2.000  93/0/0/0                  0.5331  0.1402 -0.1512
+NEW  eased bilinear, up in green       0.150  40/93/95/93               0.7004  0.1255  0.9430
+VAN  vanilla shipped (BC3)             0.031  100/67/68/67              0.6267  0.1680  0.8941
+
+per-residue-class mean |second difference|:
+  OLD  nearest, up in blue         0.07575 0.00000 0.00000 0.07577
+  NEW  eased bilinear, up in green 0.01771 0.01529 0.01531 0.01776
+  VAN  vanilla shipped (BC3)       0.42249 0.41512 0.41463 0.42766
+
+the fix, on this tile: roughness 2.000 -> 0.150 (-93%), light 0.5331 -> 0.7004 (+31.4%), mean UP as the shader reads it -0.1512 -> 0.9430

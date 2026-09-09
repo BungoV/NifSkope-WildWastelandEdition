@@ -1,0 +1,13 @@
+model QryRampCurveL01.nif
+lodm Materials\Architecture\Quarry\QuarryMarble01.lodm none textures\architecture\quarry\qrymarble01_d.dds
+lodm Materials\Architecture\Quarry\QuarryMarble02.lodm none textures\architecture\quarry\qrymarble02_d.dds
+lodm Materials\Architecture\Quarry\QuarryMarble04.lodm none textures\architecture\quarry\qrymarble04_d.dds
+lodm Materials\Architecture\Quarry\QuarryMarble03.lodm none textures\architecture\quarry\qrymarble03_d.dds
+lodm Materials\Architecture\Quarry\QuarryMarbleFloor01.lodm none textures\architecture\quarry\qrymarblefloor01_d.dds
+lodm Materials\Architecture\Quarry\QuarryMarbleRough01.lodm none textures\architecture\quarry\qrymarblerough01_d.dds
+mask alpha
+emissive 0 shapes 0
+front 4023.64 1337.65 -796.089 153.042 293.52
+side 4023.64 1337.65 -796.089 153.042 293.52
+class 32 32
+oct 8 32 32 1206.97 1206.97 -796.089 153.042 293.52 3344.13 legacy 128

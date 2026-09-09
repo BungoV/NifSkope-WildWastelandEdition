@@ -1,0 +1,12 @@
+  ok   three chunks built (dim 4 twice, dim 8 once)
+  ok   two bakes of one chunk are byte-identical, chunk and manifest
+  header: # lodgen manifest 2 ws Commonwealth dim 4 chunk -20 24 columns index base type x y z scale class height ref part
+  ok   the first line names ring, chunk and columns
+  ok   the dim-8 header names its own ring and chunk
+  dim 4: 678 rows, 471 SCOL parts, 0 duplicate keys; dim 8: 1536 rows, 1073 parts, 0 duplicates
+  ok   (ref, part) is unique within a chunk
+  ok   SCOL parts carry their ordinal
+  shared between the rings: 406 objects, 406 with the same base and position
+  ok   the rings share objects by (ref, part)
+  ok   every shared object has the same base and position in both rings
+RESULT PASS

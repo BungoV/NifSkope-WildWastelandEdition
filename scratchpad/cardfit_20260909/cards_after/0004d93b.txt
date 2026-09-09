@@ -1,0 +1,11 @@
+model TreeMapleblasted01.nif
+ranges TreeMapleblasted01_TEMP:1 - L2_TreeMapleblasted005:1 - L1_TreeMapleblasted004:1 42+127
+lodm Materials\Landscape\Trees\MapleAtlas02.lodm none textures\Landscape\Trees\MapleAtlas02_d.dds
+lodm Materials\Landscape\Trees\MapleAtlas01.lodm none textures\Landscape\Trees\MapleAtlas01_d.dds
+mask alpha
+emissive 0 shapes 0
+front 2237.29 743.783 -27.4289 -3.3663 619.166
+side 2237.29 743.783 -27.4289 -3.3663 619.166
+class 32 64
+pad 2 4
+oct 8 32 64 327.307 654.614 -27.4289 -3.3663 619.166 3072 legacy 128

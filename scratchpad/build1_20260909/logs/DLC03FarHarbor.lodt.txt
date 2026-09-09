@@ -1,0 +1,6 @@
+lodt: E:/Projects/NifskopeWildWastelandEdition/scratchpad/build1_20260909/fourws/DLC03FarHarbor/Terrain/DLC03FarHarbor.lodt
+  v2 cells 143x138, land 2066, water 16833 (worldspace default height 450 type 00000018), WATR types 4, height -1576..8216, overview 1144^2
+  timing: pass one 429 ms (decodes included when the world fits), coarse+sections 8 ms, AO 114 ms, levels 127+172+466+1247 ms (zlib 264 ms, io 5 ms), 2186 cell decodes for 19734 cells; per level 2066/0/0/0/120/0/0/0, null-plane calls 54096384
+  readback: cells 143x138  rate 32  levels 4  blocks 26286  LTEX 68  WATR 4  quantum 8
+  cross-check: 5568 samples against the ESM, 0 mismatched, worst 0 (0 seam samples raised by the max rule)
+  alpha words: 0 of 5568 differ (3111 nonzero); colour words: 0 of 5568 differ (1728 coloured)

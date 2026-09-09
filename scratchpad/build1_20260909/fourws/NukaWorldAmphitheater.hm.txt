@@ -1,0 +1,3 @@
+height map: E:/Projects/NifskopeWildWastelandEdition/scratchpad/build1_20260909/fourws/NukaWorldAmphitheater/Textures/Terrain/NukaWorldAmphitheater/NukaWorldAmphitheater.HeightMap.-8.-11.-2.4.0.560.dds
+  provenance F4FX v1: corpus hash 1adecba7b763cd08 over 2 VHGT, pixel hash bca3dd6786e69e1f, 2145 of 114688 texels covered
+  worldspace NukaWorldAmphitheater  cells S -8 W -11 N -2 E 4  (16x7 cells)  512x224 native R16_UNORM

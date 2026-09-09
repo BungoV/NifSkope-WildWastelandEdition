@@ -1,0 +1,11 @@
+﻿[0] BSMultiBoundNode 'chunk'
+[1] BSTriShape 'Land'
+[2] BSLightingShaderProperty
+[3] BSShaderTextureSet
+[4] BSMultiBoundNode 'WATER'
+[5] BSTriShape
+[6] BSEffectShaderProperty
+[7] BSMultiBound
+[8] BSMultiBoundAABB
+[9] BSMultiBound
+[10] BSMultiBoundAABB

@@ -1,0 +1,48 @@
+rc=1
+== Commonwealth
+  lodt rc=0
+  heightmap rc=0
+lodt   v2 cells x -96..95 (192) y -96..95 (192) spc 32 be 32 levels 4 quantum 8
+dds    6144x6144  DX10  37748736 texels
+lodt   grid 6144x6144  37748736 samples
+  orientation north-up (row = RY-1-gy)  0 of 37748736 texels differ
+  orientation south-up                  19053132 of 37748736 texels differ
+DIFFERING TEXELS: 0 of 37748736 (0%)
+== NukaWorld
+  lodt rc=0
+  heightmap rc=0
+lodt   v2 cells x -32..32 (65) y -32..32 (65) spc 32 be 32 levels 4 quantum 8
+dds    2080x2080  DX10  4326400 texels
+lodt   grid 2080x2080  4326400 samples
+  orientation north-up (row = RY-1-gy)  0 of 4326400 texels differ
+  orientation south-up                  4316218 of 4326400 texels differ
+DIFFERING TEXELS: 0 of 4326400 (0%)
+== DLC03FarHarbor
+  lodt rc=0
+  heightmap rc=0
+lodt   v2 cells x -73..69 (143) y -59..78 (138) spc 32 be 32 levels 4 quantum 8
+dds    4576x4416  DX10  20207616 texels
+lodt   grid 4576x4416  20207616 samples
+  orientation north-up (row = RY-1-gy)  0 of 20207616 texels differ
+  orientation south-up                  2247054 of 20207616 texels differ
+DIFFERING TEXELS: 0 of 20207616 (0%)
+== DiamondCity
+  lodt rc=0
+  heightmap rc=0
+lodt   v2 cells x -4..9 (14) y -4..7 (12) spc 32 be 32 levels 4 quantum 8
+dds    448x384  DX10  172032 texels
+lodt   grid 448x384  172032 samples
+  orientation north-up (row = RY-1-gy)  0 of 172032 texels differ
+  orientation south-up                  18 of 172032 texels differ
+DIFFERING TEXELS: 0 of 172032 (0%)
+== NukaWorldAmphitheater
+  lodt rc=0
+  heightmap rc=0
+lodt   v2 cells x -11..4 (16) y -8..-2 (7) spc 32 be 32 levels 4 quantum 8
+dds    512x224  DX10  114688 texels
+lodt   grid 512x224  114688 samples
+  orientation north-up (row = RY-1-gy)  0 of 114688 texels differ
+  orientation south-up                  1726 of 114688 texels differ
+DIFFERING TEXELS: 0 of 114688 (0%)
+
+[exited with code 0]

@@ -1,0 +1,9 @@
+model BlastedForestBurntTreeUpright02.nif
+ranges BlastedForestBurntTreeUpright02:0 - L1_BlastedForestBurntTreeUpright02:0 - L2_BlastedForestBurntTreeUpright02:0 275+395
+lodm materials\Landscape\Trees\BlastedForestBurntTreeAtlas.lodm none textures\Landscape\Trees\BlastedForestBurntTreeAtlas_d.dds
+mask alpha
+emissive 0 shapes 0
+front 1700.3 565.263 -60.7813 -61.3828 379.688
+side 1700.3 565.263 -60.7813 -61.3828 379.688
+class 32 64
+oct 8 32 64 341.068 682.136 -60.7813 -61.3828 379.688 3072 legacy 128

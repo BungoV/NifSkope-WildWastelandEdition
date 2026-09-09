@@ -1,0 +1,12 @@
+model IndBgPipe1WayLong01.nif
+ranges L2_Bolts006:3 0+832
+ranges IndBgPipe1WayLong01:6 - L2_Bolts006:6 0+1024
+lodm c:\projects\fallout4\build\pc\data\materials\interiors\industrial\metalindbeams01.lodm none 
+lodm C:\Projects\Fallout4\Build\PC\Data\materials\Interiors\Industrial\metalindbgpipesrusty01.lodm none 
+lodm c:\projects\fallout4\build\pc\data\materials\interiors\industrial\metalindbgpipes01.lodm none 
+mask alpha
+emissive 0 shapes 0
+front 1006.46 334.596 0.00121219 -256 0.000468106
+side 1006.46 334.596 0.00121219 -256 0.000468106
+class 32 32
+oct 8 32 32 364.882 364.882 0.00121219 -256 0.000468106 3072 legacy 128

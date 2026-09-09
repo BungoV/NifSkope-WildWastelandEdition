@@ -1,0 +1,10 @@
+model TreeElmForest01.nif
+ranges TreeElmForest01:0 - L1_TreeElmForest01:0 104+0
+lodm materials\Landscape\TreeElmAtlas.lodm none textures\landscape\trees\elmatlas_d.dds
+mask tree
+emissive 0 shapes 0
+front 4010.34 1333.23 0 0 0
+side 4010.34 1333.23 0 0 0
+class 96 128
+pad 6 8
+oct 8 96 128 866.224 1154.97 0 0 0 3333.08 legacy 128

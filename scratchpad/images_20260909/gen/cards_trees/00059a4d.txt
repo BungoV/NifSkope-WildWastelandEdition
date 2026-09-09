@@ -1,0 +1,11 @@
+model QryLedgeCorner02.nif
+lodm Materials\Architecture\Quarry\QuarryMarble01.lodm none textures\architecture\quarry\qrymarble01_d.dds
+lodm Materials\Architecture\Quarry\QuarryMarble04.lodm none textures\architecture\quarry\qrymarble04_d.dds
+lodm Materials\Architecture\Quarry\QuarryMarbleFloor01.lodm none textures\architecture\quarry\qrymarblefloor01_d.dds
+lodm Materials\Architecture\Quarry\QuarryMarbleRough01.lodm none textures\architecture\quarry\qrymarblerough01_d.dds
+mask alpha
+emissive 0 shapes 0
+front 2178.41 724.209 59.7321 6.70643 29.908
+side 2178.41 724.209 59.7321 6.70643 29.908
+class 32 32
+oct 8 32 32 633.41 633.41 59.7321 6.70643 29.908 3072 legacy 128

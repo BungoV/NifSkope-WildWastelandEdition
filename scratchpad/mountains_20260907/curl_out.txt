@@ -1,0 +1,98 @@
+msn_curl.py -- is the _msn high-frequency residual integrable?
+mip 0, blur 9, margin 8, up floor 0.15, gate ceiling/floor >= 5.0x
+
+=== 0. the metric on fields whose answer is known ===
+field                            CURL   CURL(in)    NON-INT
+exact gradient (float)         0.0477     0.0476     0.0000
+the same, components swapped     0.6655     0.6653     0.5180
+white noise                    0.9969     0.9867     0.4980
+    (a gradient must read near 0 on both; noise near 1 on CURL and near 0.5 on NON-INT)
+
+=== Commonwealth.4.-12.44   mip 0   512x512   vanilla BC3_UNORM / ours BC1_UNORM ===
+    high-frequency energy (mean |channel - blur9|, bytes): vanilla 14.46  ours 2.25  ratio 6.41x
+    n_up min 0.333, 0 of 262144 texels below the 0.15 divisor floor
+    codec model: re-encoding vanilla adds 2.10 bytes rms and moves CURL 0.6454 -> 0.6477
+field                            CURL   CURL(in)    NON-INT
+INT-CTRL  floor                0.4124     0.3818     0.0984
+PHASE-CTRL floor (indep)       0.5844     0.5899     0.1641
+SOL-CTRL  ceiling              1.5209     1.5047     0.8010
+VANILLA                        0.6454     0.6231     0.2728
+VAN-SWAP                       0.7181     0.6914     0.4232
+OURS shipped (fyi)             0.9374     0.9345     0.2262
+    CURL      floor 0.4124  ceiling 1.5209  separation  3.69x FAIL   vanilla 0.6454 = +21% of the way up
+    CURL(in)  floor 0.3818  ceiling 1.5047  separation  3.94x FAIL   vanilla 0.6231 = +21% of the way up
+    NON-INT   floor 0.0984  ceiling 0.8010  separation  8.14x PASS   vanilla 0.2728 = +25% of the way up
+              independent floor (same spectrum, random structure) 0.1641 -> vanilla is 1.66x it, and 2.77x the paired floor
+    NON-INT by period (texels), and each band's share of the residual energy:
+      period        energy%    floor  VANILLA  ceiling
+      >16              0.6%   0.0313   0.0476   0.1632
+      8 - 16           9.2%   0.0284   0.0871   0.7170
+      4 - 8           36.1%   0.0551   0.1776   0.8181
+      2.7 - 4         29.6%   0.1019   0.2713   0.8018
+      2 - 2.7         24.4%   0.1667   0.3951   0.8059
+    mixture: 43% of the residual energy has no height field behind it (lower bound)
+    the floor, step by step: float 0.0013 -> 8-bit 0.0014 -> block codec 0.0984
+    (a second generation of block noise on vanilla itself, +2.10 bytes rms, moves NON-INT 0.2728 -> 0.2746)
+    slope residual rms: vanilla 0.4157  floor 0.4074  ceiling 0.3609  ours 0.0525
+    refuter: an unrelated height field matched on slope residual (0.4158 vs 0.4157; hf 16.37 bytes vs 14.46), baked 4x and filtered to 512, reads NON-INT 0.2166; the SAME field with no supersampling reads 0.2153
+    sanity: with UP read as BLUE instead of GREEN, vanilla NON-INT = 0.4873 (green 0.2728)
+
+=== Commonwealth.4.-16.44   mip 0   512x512   vanilla BC3_UNORM / ours BC1_UNORM ===
+    high-frequency energy (mean |channel - blur9|, bytes): vanilla 13.57  ours 2.41  ratio 5.64x
+    n_up min 0.302, 0 of 262144 texels below the 0.15 divisor floor
+    codec model: re-encoding vanilla adds 2.11 bytes rms and moves CURL 0.6265 -> 0.6298
+field                            CURL   CURL(in)    NON-INT
+INT-CTRL  floor                0.4037     0.3777     0.0838
+PHASE-CTRL floor (indep)       0.6062     0.6093     0.1495
+SOL-CTRL  ceiling              1.5374     1.5102     0.8078
+VANILLA                        0.6265     0.6023     0.2500
+VAN-SWAP                       0.7186     0.6875     0.4522
+OURS shipped (fyi)             0.9393     0.9285     0.2103
+    CURL      floor 0.4037  ceiling 1.5374  separation  3.81x FAIL   vanilla 0.6265 = +20% of the way up
+    CURL(in)  floor 0.3777  ceiling 1.5102  separation  4.00x FAIL   vanilla 0.6023 = +20% of the way up
+    NON-INT   floor 0.0838  ceiling 0.8078  separation  9.64x PASS   vanilla 0.2500 = +23% of the way up
+              independent floor (same spectrum, random structure) 0.1495 -> vanilla is 1.67x it, and 2.98x the paired floor
+    NON-INT by period (texels), and each band's share of the residual energy:
+      period        energy%    floor  VANILLA  ceiling
+      >16              0.6%   0.0289   0.0454   0.1543
+      8 - 16           9.4%   0.0251   0.0785   0.7154
+      4 - 8           37.0%   0.0442   0.1572   0.8239
+      2.7 - 4         29.3%   0.0847   0.2433   0.8047
+      2 - 2.7         23.7%   0.1515   0.3773   0.8139
+    mixture: 40% of the residual energy has no height field behind it (lower bound)
+    the floor, step by step: float 0.0013 -> 8-bit 0.0014 -> block codec 0.0838
+    (a second generation of block noise on vanilla itself, +2.11 bytes rms, moves NON-INT 0.2500 -> 0.2525)
+    slope residual rms: vanilla 0.3437  floor 0.3380  ceiling 0.3010  ours 0.0507
+    refuter: an unrelated height field matched on slope residual (0.3437 vs 0.3437; hf 14.64 bytes vs 13.57), baked 4x and filtered to 512, reads NON-INT 0.2091; the SAME field with no supersampling reads 0.2064
+    sanity: with UP read as BLUE instead of GREEN, vanilla NON-INT = 0.4892 (green 0.2500)
+
+=== Commonwealth.4.-12.48   mip 0   512x512   vanilla BC3_UNORM / ours BC1_UNORM ===
+    high-frequency energy (mean |channel - blur9|, bytes): vanilla 13.27  ours 1.93  ratio 6.87x
+    n_up min 0.365, 0 of 262144 texels below the 0.15 divisor floor
+    codec model: re-encoding vanilla adds 1.64 bytes rms and moves CURL 0.6518 -> 0.6539
+field                            CURL   CURL(in)    NON-INT
+INT-CTRL  floor                0.3937     0.3742     0.0899
+PHASE-CTRL floor (indep)       0.6058     0.6058     0.1560
+SOL-CTRL  ceiling              1.5642     1.5488     0.8081
+VANILLA                        0.6518     0.6333     0.2737
+VAN-SWAP                       0.7322     0.7099     0.4313
+OURS shipped (fyi)             0.9406     0.9309     0.2098
+    CURL      floor 0.3937  ceiling 1.5642  separation  3.97x FAIL   vanilla 0.6518 = +22% of the way up
+    CURL(in)  floor 0.3742  ceiling 1.5488  separation  4.14x FAIL   vanilla 0.6333 = +22% of the way up
+    NON-INT   floor 0.0899  ceiling 0.8081  separation  8.98x PASS   vanilla 0.2737 = +26% of the way up
+              independent floor (same spectrum, random structure) 0.1560 -> vanilla is 1.75x it, and 3.04x the paired floor
+    NON-INT by period (texels), and each band's share of the residual energy:
+      period        energy%    floor  VANILLA  ceiling
+      >16              0.5%   0.0266   0.0339   0.1233
+      8 - 16           7.6%   0.0282   0.0752   0.6885
+      4 - 8           34.5%   0.0468   0.1538   0.8008
+      2.7 - 4         30.7%   0.0890   0.2565   0.8008
+      2 - 2.7         26.8%   0.1525   0.4040   0.8225
+    mixture: 45% of the residual energy has no height field behind it (lower bound)
+    the floor, step by step: float 0.0011 -> 8-bit 0.0012 -> block codec 0.0899
+    (a second generation of block noise on vanilla itself, +1.64 bytes rms, moves NON-INT 0.2737 -> 0.2751)
+    slope residual rms: vanilla 0.3177  floor 0.3096  ceiling 0.2794  ours 0.0392
+    refuter: an unrelated height field matched on slope residual (0.3177 vs 0.3177; hf 13.93 bytes vs 13.27), baked 4x and filtered to 512, reads NON-INT 0.2085; the SAME field with no supersampling reads 0.2057
+    sanity: with UP read as BLUE instead of GREEN, vanilla NON-INT = 0.4787 (green 0.2737)
+
+GATE: see per-metric PASS/FAIL above

@@ -1,0 +1,33 @@
+master Commonwealth WRLD: 7133 subrecords, 7111 RNAM grids, 9624 large refs
+
+=== A. are the DLC large-reference sets subsets of the master? ===
+  DLCCoast.esm           167 grids, 173 refs | grids not in master: 65 | refs not in master: 167
+        sample refs absent from master: ['01002932@(28,19)', '01002933@(28,19)', '01002934@(28,19)', '01002935@(29,18)', '01002A5A@(29,20)']
+  DLCNukaWorld.esm       133 grids, 85 refs | grids not in master: 0 | refs not in master: 75
+        sample refs absent from master: ['0100A7B7@(6,-27)', '0100A7BA@(6,-27)', '0100A7BB@(6,-27)', '0100A7BC@(6,-27)', '0100A7D2@(6,-26)']
+  DLCRobot.esm           53 grids, 2 refs | grids not in master: 0 | refs not in master: 0
+  DLCworkshop01.esm      no Commonwealth WRLD override
+  DLCworkshop02.esm      no Commonwealth WRLD override
+  DLCworkshop03.esm      0 grids, 0 refs | grids not in master: 0 | refs not in master: 0
+
+=== B. non-RNAM subrecords: master vs each DLC ===
+  master non-RNAM tags: [('CLSZ', 1), ('CNAM', 1), ('DATA', 1), ('DNAM', 1), ('EDID', 1), ('FULL', 1), ('ICON', 1), ('MHDT', 1), ('MNAM', 1), ('NAM0', 1), ('NAM2', 1), ('NAM3', 1), ('NAM4', 1), ('NAM9', 1), ('NAMA', 1), ('OFST', 1), ('ONAM', 1), ('WLEV', 2), ('XLCN', 1), ('XWEM', 1), ('ZNAM', 1)]
+  --- DLCCoast.esm
+      CLSZ: CHANGED  master [148996]  this [148996]
+      ICON: REMOVED by this plugin (master had 1)
+      OFST: CHANGED  master [148996]  this [148996]
+      non-RNAM tags identical to master: 18 of 21
+  --- DLCNukaWorld.esm
+      CLSZ: CHANGED  master [148996]  this [148996]
+      OFST: CHANGED  master [148996]  this [148996]
+      non-RNAM tags identical to master: 19 of 21
+  --- DLCRobot.esm
+      CLSZ: CHANGED  master [148996]  this [148996]
+      ICON: REMOVED by this plugin (master had 1)
+      OFST: CHANGED  master [148996]  this [148996]
+      non-RNAM tags identical to master: 18 of 21
+
+=== C. the WRLD FULL string ID ===
+  master WRLD FULL raw bytes: 3f610300
+  as a string ID: 0x0003613F (221503)
+  X:\Programs\Steam\steamapps\common\Fallout 4\Data\Strings\Fallout4_en.STRINGS exists: False

@@ -1,0 +1,7 @@
+wall 14.8 s  peak working set 4431.2 MB  rc 0
+== control A: 2x2 cells at LOD2 (289 verts) — the app's own baseline
+wall 4.4 s  peak working set 426.6 MB  rc 0
+== control B: whole worldspace at LOD3 (fewer verts, same file walk)
+wall 6.7 s  peak working set 1296.5 MB  rc 0
+== the measured whole-worldspace open, repeated
+wall 14.2 s  peak working set 4433.6 MB  rc 0

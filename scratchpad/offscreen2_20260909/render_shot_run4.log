@@ -1,0 +1,75 @@
+deriving fixtures through the app's own CLI
+  ok   the plain fixture has nothing the bake edits shape [1] named 'Cube'
+  ok   the dirty fixture really carries a _L1 shape shape [1] named 'Cube_L1'
+
+0. the desktop's own noise floor, with no NifSkope running at all
+  ok   the pixel sampler produced samples at all    75 samples of 200x200 at 2120,200
+  ..   desktop noise range 0.233 -> hidden runs must stay under 15.000
+
+1. a plain render exits on its own
+  ok   WW_RENDER_SHOT exits 0                       rc=0 after 6s (cap 90s)
+  ok   and promptly                                 6s < 45s
+  ok   and wrote its framebuffer                    30356 bytes
+  ok   and discarded nothing                        0 lines in ww_headless_close.log
+
+2. the card bake, with nothing in the file for it to edit
+  ok   WW_IMPOSTOR_BAKE exits 0                     rc=0 after 9s (cap 90s)
+  ok   and promptly                                 9s < 45s
+  ok   and wrote its sidecar                        cube_plain.txt
+  ok   and a card IMAGE, not just a sidecar         2 png(s) in bake_plain_cards
+  ok   and still discarded nothing                  0 lines in ww_headless_close.log
+
+3. the card bake on a document it EDITS - bungo's case
+  ok   the bake exits 0 instead of asking           rc=0 after 4s (cap 90s; rc=124 is the dialog)
+  ok   and promptly                                 4s < 45s
+  ok   the bake really edited the document          1 'hidden' line(s) in cube_lod.txt
+  ok   and the close path says what it discarded    discarded cube_lod
+
+4. nothing is left running
+  ok   no harness NifSkope survived                 0 running with --port
+
+5. bungo's two rules: nothing on his main monitor, and nothing an eye can see
+  the hidden runs, including one 4x4 octahedral bake (148 matte repaints)
+  ok   the octahedral bake exits 0                  rc=0 after 7s (cap 90s)
+  ok   and wrote its sheets                         6 png(s) in bake_oct_cards
+  ok   render_plain: the run recorded a window it really had 2 mapped of 4 record(s), arm=WW_WINDOW_AT
+  ok   render_plain: no window of it was on the primary 0 of 4 records onprimary=1
+  ok   render_plain: and none from outside either   0 of 11 sample(s) on the primary
+  ok   render_plain: every window it had was invisible or absent 0 of 2 mapped records at opacity > 0
+  ok   render_plain: and Windows agrees its layered alpha was 0 0 of 11 sample(s) with alpha > 0
+  ok   render_plain: and the screen itself did not change luminance range 0.233 over 78 samples (bar 15.000, desktop noise 0.233)
+  ok   bake_plain: the run recorded a window it really had 2 mapped of 4 record(s), arm=WW_WINDOW_AT
+  ok   bake_plain: no window of it was on the primary 0 of 4 records onprimary=1
+  ok   bake_plain: and none from outside either     0 of 26 sample(s) on the primary
+  ok   bake_plain: every window it had was invisible or absent 0 of 2 mapped records at opacity > 0
+  ok   bake_plain: and Windows agrees its layered alpha was 0 0 of 26 sample(s) with alpha > 0
+  ok   bake_plain: and the screen itself did not change luminance range 0.233 over 111 samples (bar 15.000, desktop noise 0.233)
+  ok   bake_lod: the run recorded a window it really had 2 mapped of 4 record(s), arm=WW_WINDOW_AT
+  ok   bake_lod: no window of it was on the primary 0 of 4 records onprimary=1
+  ok   bake_lod: and none from outside either       0 of 6 sample(s) on the primary
+  ok   bake_lod: every window it had was invisible or absent 0 of 2 mapped records at opacity > 0
+  ok   bake_lod: and Windows agrees its layered alpha was 0 0 of 6 sample(s) with alpha > 0
+  ok   bake_lod: and the screen itself did not change luminance range 0.233 over 50 samples (bar 15.000, desktop noise 0.233)
+  ok   bake_oct: the run recorded a window it really had 3 mapped of 6 record(s), arm=WW_WINDOW_AT
+  ok   bake_oct: no window of it was on the primary 0 of 6 records onprimary=1
+  ok   bake_oct: and none from outside either       0 of 18 sample(s) on the primary
+  ok   bake_oct: every window it had was invisible or absent 0 of 3 mapped records at opacity > 0
+  ok   bake_oct: and Windows agrees its layered alpha was 0 0 of 18 sample(s) with alpha > 0
+  ok   bake_oct: and the screen itself did not change luminance range 0.233 over 86 samples (bar 15.000, desktop noise 0.233)
+
+6. the controls: the way back, the floors, and the pixels that must not move
+  ok   the visible control run exits 0              rc=0 after 5s
+  ok   the control is on the second monitor, not the primary 0 of 4 onprimary=1, arm=WW_WINDOW_AT
+  ok   the process CAN report an opaque window      2 of 2 mapped records at opacity > 0
+  ok   and the window sampler CAN see one           11 of 11 sample(s) with alpha > 0
+  ok   and the pixel sampler CAN see a window's pixels luminance range 27.146 over 71 samples (bar 15.000)
+  ok   the visible octahedral bake exits 0          rc=0 after 7s
+  ok   and the pixel sampler catches the black/white matte luminance range 246.788 over 83 samples (bar 30)
+  ok   even the strobe control stayed off the primary 0 of 6 onprimary=1
+  ok   precondition: the hidden render really was hidden 0 opaque of 2 mapped records
+  ok   hidden and visible photograph the same pixels hidden fedab869884174fb / visible fedab869884174fb
+  ok   precondition: the hidden card bake really was hidden 0 opaque of 3 mapped records
+  ok   hidden and visible bake the same cards       hidden 3f2db029bde9d94d / visible 3f2db029bde9d94d over 6 sheet(s)
+
+render_shot.sh: 55 checks, 0 failures
+PASS

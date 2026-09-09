@@ -1,0 +1,4 @@
+Objects/Commonwealth.4.-20.24.BTO: total shapes 2 verts 33703 tris 24482
+obj_ring0/Commonwealth.4.-20.24.BTO: total shapes 10 verts 34958 tris 25475
+Objects/Commonwealth.16.16.16.BTO: total shapes 2 verts 4170 tris 2564
+obj_far16/Commonwealth.16.16.16.BTO: total shapes 38 verts 129814 tris 80827
