@@ -191,6 +191,8 @@ HEADERS += \
 	src/gl/renderer.h \
 	src/io/material.h \
 	src/io/pbrmfile.h \
+	src/io/lodmfile.h \
+	src/io/lodvfile.h \
 	src/io/MeshFile.h \
 	src/io/nifstream.h \
 	src/lib/importex/3ds.h \
@@ -258,6 +260,7 @@ HEADERS += \
 	src/btdterrain.h \
 	src/esmdata.h \
 	src/lodgen.h \
+	src/lodtfile.h \
 	src/rdccapture.h \
 	src/nifsnapshot.h \
 	src/qt5compat.hpp \
@@ -305,6 +308,8 @@ SOURCES += \
 	src/gl/renderer.cpp \
 	src/io/materialfile.cpp \
 	src/io/pbrmfile.cpp \
+	src/io/lodmfile.cpp \
+	src/io/lodvfile.cpp \
 	src/io/MeshFile.cpp \
 	src/io/nifstream.cpp \
 	src/lib/importex/3ds.cpp \
@@ -405,7 +410,7 @@ SOURCES += \
 	src/starterscene.cpp \
 	src/btdterrain.cpp \
 	src/esmdata.cpp \
-	src/lodgen.cpp 	src/lodgenmanager.cpp \
+	src/lodgen.cpp 	src/lodgenmanager.cpp 	src/lodtfile.cpp \
 	src/rdccapture.cpp \
 	src/skeletonops.cpp \
 	src/uvtools.cpp \

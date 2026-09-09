@@ -6,11 +6,15 @@ BSD License - see nifskope.h
 
 #include "esmdata.h"
 
+#include <cstdio>
+
 #include "esmfile.hpp"
 
 #include <climits>
 #include <cstring>
 #include <functional>
+#include <algorithm>
+#include <QSet>
 
 /* Group-tree conventions, measured against Fallout4.esm (2026-08-31):
  * only GRUP entries carry `children`; a RECORD's child group is its NEXT
@@ -43,10 +47,24 @@ EsmWorld::~EsmWorld() = default;
 
 bool EsmWorld::load( const QString & esmPath, quint32 worldspaceFormID, QString * error )
 {
+	/* WW_ESM_TRACE=1: where load() is, on stderr, unbuffered. Put in for a
+	 * FO76 plugin that blocked with zero CPU while listWorldspaces() on the
+	 * same file returned at once; the trace says which step never returns. */
+	const bool trace = qEnvironmentVariableIsSet( "WW_ESM_TRACE" );
+	auto tr = [trace]( const char * what ) {
+		if ( trace ) {
+			std::fputs( what, stderr );
+			std::fputc( 10, stderr );
+			std::fflush( stderr );
+		}
+	};
 	try {
+		tr( "load: opening the plugin" );
 		esm = std::make_unique<ESMFile>( esmPath.toLocal8Bit().constData() );
+		tr( "load: plugin opened, looking up the worldspace" );
 		wsForm = worldspaceFormID;
 		const ESMFile::ESMRecord & w = esm->getRecord( wsForm );
+		tr( "load: worldspace record found" );
 		if ( !( w == "WRLD" ) ) {
 			if ( error )
 				*error = QString( "form %1 is not a WRLD record" ).arg( wsForm, 8, 16, QChar( '0' ) );
@@ -60,10 +78,16 @@ bool EsmWorld::load( const QString & esmPath, quint32 worldspaceFormID, QString 
 				} else if ( f == "DNAM" && f.size() >= 8 ) {
 					defLandH = f.readFloat();
 					defWaterH = f.readFloat();
+				} else if ( f == "NAM2" && f.size() >= 4 ) {
+					// the worldspace's default water type; cells override it
+					// with XCWT. Commonwealth's is ExtOceanWater.
+					defWaterType = f.readUInt32();
 				}
 			}
 		}
+		tr( "load: header fields read, indexing cells" );
 		indexWorldspace();
+		tr( "load: cells indexed" );
 		if ( cellIndex.isEmpty() ) {
 			if ( error )
 				*error = QStringLiteral( "worldspace has no indexed exterior cells" );
@@ -131,7 +155,8 @@ void EsmWorld::indexWorldspace()
 	walk( wg->children );
 }
 
-bool EsmWorld::cellWater( int cx, int cy, float & height ) const
+bool EsmWorld::cellWater( int cx, int cy, float & height,
+	quint32 * typeForm ) const
 {
 	/* Only cells with an EXPLICIT water height make LOD water quads —
 	 * measured on Commonwealth.4.-20.24.BTR: the chunk's two water shapes
@@ -144,6 +169,8 @@ bool EsmWorld::cellWater( int cx, int cy, float & height ) const
 	 * terrain minimum — Sanctuary's default-height cells sit under 3000+
 	 * terrain, the harbor's above the seabed. */
 	height = defWaterH;
+	if ( typeForm )
+		*typeForm = defWaterType;
 	auto it = cellIndex.constFind( qMakePair( cx, cy ) );
 	if ( it == cellIndex.constEnd() )
 		return false;
@@ -155,6 +182,9 @@ bool EsmWorld::cellWater( int cx, int cy, float & height ) const
 	while ( f.next() ) {
 		if ( f == "DATA" && f.size() >= 2 ) {
 			hasWater = ( f.readUInt16() & 0x0002 ) != 0;
+		} else if ( f == "XCWT" && f.size() >= 4 ) {
+			if ( typeForm )
+				*typeForm = f.readUInt32();
 		} else if ( f == "XCLW" && f.size() >= 4 ) {
 			const quint32 raw = f.readUInt32();
 			if ( raw != 0xFF7FFFFFU && raw != 0x7F7FFFFFU && raw != 0x4F7FFFC9U ) {
@@ -165,6 +195,61 @@ bool EsmWorld::cellWater( int cx, int cy, float & height ) const
 		}
 	}
 	return hasWater;
+}
+
+/* Reproduces FO4CS FarFieldPluginReader.h WalkGroup / FarFieldHeightmapBake.h
+ * exactly, because the loader compares the result against a constant:
+ *   - only this worldspace's world-children GRUP, walked in FILE order
+ *     (pre-order over children/next is the file order: a GRUP's children are
+ *     stored contiguously after its header);
+ *   - the first VHGT of each LAND only, its raw payload bytes post-inflate;
+ *   - a LAND whose owning CELL carried no XCLC contributes nothing;
+ *   - no de-duplication of repeated cells.
+ * ESMField inflates compressed records itself and its window after next() is
+ * the field payload, which is what land() already reads its floats from. */
+quint64 EsmWorld::vhgtCorpusHash( int * landsHashed ) const
+{
+	quint64 h = Q_UINT64_C( 0xCBF29CE484222325 );
+	int n = 0;
+	const ESMFile::ESMRecord & w = esm->getRecord( wsForm );
+	const ESMFile::ESMRecord * wg = w.next ? esm->findRecord( w.next ) : nullptr;
+	if ( wg && wg->type == GRUP && wg->flags == wsForm ) {
+		bool cellHasCoords = false;
+		std::function<void( unsigned int )> walk = [&]( unsigned int id ) {
+			while ( id ) {
+				const ESMFile::ESMRecord * r = esm->findRecord( id );
+				if ( !r )
+					return;
+				if ( r->type != GRUP && *r == "CELL" ) {
+					cellHasCoords = false;
+					ESMFile::ESMField f( *esm, *r );
+					while ( f.next() )
+						if ( f == "XCLC" && f.size() >= 8 )
+							cellHasCoords = true;
+				} else if ( r->type != GRUP && *r == "LAND" && cellHasCoords ) {
+					ESMFile::ESMField f( *esm, *r );
+					while ( f.next() ) {
+						if ( f == "VHGT" ) {
+							const unsigned char * p = f.getDataPtr();
+							for ( size_t i = 0, sz = f.size(); i < sz; i++ ) {
+								h ^= p[i];
+								h *= Q_UINT64_C( 0x100000001B3 );
+							}
+							n++;
+							break;   // first VHGT only, as the loader does
+						}
+					}
+				}
+				if ( r->children )
+					walk( r->children );
+				id = r->next;
+			}
+		};
+		walk( wg->children );
+	}
+	if ( landsHashed )
+		*landsHashed = n;
+	return h;
 }
 
 void EsmWorld::cellBounds( int & minX, int & minY, int & maxX, int & maxY ) const
@@ -394,10 +479,13 @@ const EsmLodBase & EsmWorld::lodBase( quint32 baseFormID ) const
 					(void) f.readFloat();
 				b.leafAmplitude = f.readFloat();
 				b.leafFrequency = f.readFloat();
-			} else if ( f == "MODL" && *br == "TREE" ) {
-				// a TREE's LOD comes from the model naming convention; keep
-				// the model path so the generator can derive _lod variants
-				b.models[0] = fieldString( f );
+			} else if ( f == "MODL" && ( *br == "TREE" || *br == "STAT" ) ) {
+				/* The base's own near model: what the impostor bake photographs
+				 * (bungo, 2026-09-06: "the base is more detailed"). A TREE has
+				 * no MNAM; its near model stands at level 0, as before. */
+				b.model = fieldString( f );
+				if ( *br == "TREE" )
+					b.models[0] = b.model;
 			}
 		}
 		// TREE records always participate in LOD when flagged Has Distant LOD
@@ -447,6 +535,302 @@ void EsmWorld::ltexTextures( quint32 ltexForm, QString & diffuse, QString & norm
 		}
 	}
 	ltexCache.insert( ltexForm, qMakePair( diffuse, normal ) );
+}
+
+static void esmFnvBytes( quint64 & h, const unsigned char * p, size_t n )
+{
+	for ( size_t i = 0; i < n; i++ ) {
+		h ^= p[i];
+		h *= Q_UINT64_C( 0x100000001B3 );
+	}
+}
+
+static quint32 esmLeUInt32( const unsigned char * p )
+{
+	return quint32( p[0] ) | ( quint32( p[1] ) << 8 )
+		| ( quint32( p[2] ) << 16 ) | ( quint32( p[3] ) << 24 );
+}
+
+//! Every indexed exterior cell, ascending y then x. Both corpus hashes below
+//! walk this order so a load-order permutation that changes nothing effective
+//! cannot change a hash and hard-refuse a good bake.
+QVector<QPair<int, int>> EsmWorld::cellsAscending() const
+{
+	QVector<QPair<int, int>> keys;
+	keys.reserve( cellIndex.size() );
+	for ( auto it = cellIndex.constBegin(); it != cellIndex.constEnd(); ++it )
+		keys.append( it.key() );
+	std::sort( keys.begin(), keys.end(),
+		[]( const QPair<int, int> & a, const QPair<int, int> & b ) {
+			return a.second != b.second ? a.second < b.second : a.first < b.first;
+		} );
+	return keys;
+}
+
+//! The LAND record of one indexed cell, 0 when the cell carries none.
+quint32 EsmWorld::landFormOf( int cx, int cy ) const
+{
+	auto it = cellIndex.constFind( qMakePair( cx, cy ) );
+	if ( it == cellIndex.constEnd() || !it->childGroup )
+		return 0;
+	quint32 landForm = 0;
+	std::function<void( unsigned int )> walk = [&]( unsigned int id ) {
+		while ( id && !landForm ) {
+			const ESMFile::ESMRecord * r = esm->findRecord( id );
+			if ( !r )
+				return;
+			if ( r->type != GRUP && *r == "LAND" )
+				landForm = r->formID;
+			if ( r->children )
+				walk( r->children );
+			id = r->next;
+		}
+	};
+	const ESMFile::ESMRecord * cg = esm->findRecord( it->childGroup );
+	if ( cg )
+		walk( cg->children );
+	return landForm;
+}
+
+quint64 EsmWorld::vhgtCorpusHashSorted( int * landsHashed ) const
+{
+	quint64 h = Q_UINT64_C( 0xCBF29CE484222325 );
+	int n = 0;
+	for ( const QPair<int, int> & k : cellsAscending() ) {
+		const quint32 landForm = landFormOf( k.first, k.second );
+		if ( !landForm )
+			continue;
+		const ESMFile::ESMRecord & lr = esm->getRecord( landForm );
+		ESMFile::ESMField f( *esm, lr );
+		while ( f.next() ) {
+			if ( f == "VHGT" ) {
+				esmFnvBytes( h, f.getDataPtr(), f.size() );
+				n++;
+				break;      // first VHGT only, as vhgtCorpusHash() does
+			}
+		}
+	}
+	if ( landsHashed )
+		*landsHashed = n;
+	return h;
+}
+
+quint64 EsmWorld::paintCorpusHash() const
+{
+	quint64 h = Q_UINT64_C( 0xCBF29CE484222325 );
+	QSet<quint32> ltexSeen;
+	for ( const QPair<int, int> & k : cellsAscending() ) {
+		const quint32 landForm = landFormOf( k.first, k.second );
+		if ( !landForm )
+			continue;
+		const ESMFile::ESMRecord & lr = esm->getRecord( landForm );
+		ESMFile::ESMField f( *esm, lr );
+		while ( f.next() ) {
+			const bool isBase = ( f == "BTXT" );
+			if ( !isBase && !( f == "ATXT" ) && !( f == "VTXT" ) )
+				continue;
+			esmFnvBytes( h, f.getDataPtr(), f.size() );
+			if ( ( isBase || f == "ATXT" ) && f.size() >= 4 ) {
+				const quint32 id = esm->mapFormID( lr, esmLeUInt32( f.getDataPtr() ) );
+				if ( id )
+					ltexSeen.insert( id );
+			}
+		}
+	}
+	QVector<quint32> ltexIds( ltexSeen.constBegin(), ltexSeen.constEnd() );
+	std::sort( ltexIds.begin(), ltexIds.end() );
+	QSet<quint32> grasSeen;
+	for ( quint32 id : ltexIds ) {
+		const ESMFile::ESMRecord * lr = esm->findRecord( id );
+		if ( !lr || lr->type == GRUP || !( *lr == "LTEX" ) )
+			continue;
+		ESMFile::ESMField f( *esm, *lr );
+		while ( f.next() ) {
+			const bool isGnam = ( f == "GNAM" );
+			if ( !isGnam && !( f == "TNAM" ) )
+				continue;
+			esmFnvBytes( h, f.getDataPtr(), f.size() );
+			if ( isGnam && f.size() >= 4 ) {
+				const quint32 g = esm->mapFormID( *lr, esmLeUInt32( f.getDataPtr() ) );
+				if ( g )
+					grasSeen.insert( g );
+			}
+		}
+	}
+	QVector<quint32> grasIds( grasSeen.constBegin(), grasSeen.constEnd() );
+	std::sort( grasIds.begin(), grasIds.end() );
+	for ( quint32 id : grasIds ) {
+		const ESMFile::ESMRecord * gr = esm->findRecord( id );
+		if ( !gr || gr->type == GRUP || !( *gr == "GRAS" ) )
+			continue;
+		ESMFile::ESMField f( *esm, *gr );
+		while ( f.next() )
+			if ( f == "DATA" || f == "MODL" )
+				esmFnvBytes( h, f.getDataPtr(), f.size() );
+	}
+	return h;
+}
+
+void EsmWorld::setGrassTintResolver( EsmGrassTintFn fn, void * user ) const
+{
+	/* The tint is folded into the cached T(L), so a DIFFERENT resolver
+	 * invalidates it -- and installing the same one again must not, or a
+	 * per-tile call would drop the cache 9,216 times over one worldspace. */
+	if ( tintFn == fn && tintUser == user )
+		return;
+	tintFn = fn;
+	tintUser = user;
+	ltexCoverCache.clear();
+}
+
+bool EsmWorld::grass( quint32 grasForm, EsmGrass & out ) const
+{
+	auto it = grasCache.constFind( grasForm );
+	if ( it != grasCache.constEnd() ) {
+		out = *it;
+		return out.form != 0;
+	}
+	EsmGrass g;
+	const ESMFile::ESMRecord * r = esm->findRecord( grasForm );
+	if ( r && r->type != GRUP && *r == "GRAS" ) {
+		g.form = grasForm;
+		ESMFile::ESMField f( *esm, *r );
+		while ( f.next() ) {
+			if ( f == "DATA" && f.size() >= 32 ) {
+				/* GRAS DATA, 32 bytes in all 107 records of the shipped corpus.
+				 * Offsets 3, 6..7 and 29..31 are stale slots (they co-vary in
+				 * three fixed groups across the corpus — 4-byte fields now
+				 * written 3, 2 and 1 bytes deep) and are read past, not used. */
+				g.density = f.readUInt8();
+				g.minSlope = f.readUInt8();
+				g.maxSlope = f.readUInt8();
+				(void) f.readUInt8();
+				g.unitsFromWater = f.readUInt16();
+				(void) f.readUInt16();
+				g.waterType = f.readUInt32();
+				g.positionRange = f.readFloat();
+				g.heightRange = f.readFloat();
+				g.colourRange = f.readFloat();
+				g.wavePeriod = f.readFloat();
+				g.flags = f.readUInt8();
+			} else if ( f == "MODL" ) {
+				g.model = fieldString( f );
+			}
+		}
+		grasReads++;
+	}
+	grasCache.insert( grasForm, g );
+	out = g;
+	return g.form != 0;
+}
+
+/* LTEX -> GNAM -> GRAS, the chain the Creation Kit grows grass from, read here
+ * for the first time. D is the density SUM over the links (an LTEX with four
+ * grasses is four times as grassy, not the average); S weights each grass's
+ * Max Slope by its density; T weights each grass's average colour the same way
+ * but over the tint-BEARING density only, so a grass whose mesh or texture
+ * cannot be resolved loses its vote on the colour and keeps its vote on D.
+ *
+ * The returned reference lives in a QHash and a later resolve can rehash it:
+ * callers copy the value out (the paint loop fills a per-quadrant array once
+ * on quadrant entry) rather than holding the reference across another call. */
+const EsmLtexCover & EsmWorld::ltexCover( quint32 ltexForm, const QString & dataRoot ) const
+{
+	auto it = ltexCoverCache.constFind( ltexForm );
+	if ( it != ltexCoverCache.constEnd() )
+		return *it;
+	EsmLtexCover c;
+	c.resolved = true;
+	const ESMFile::ESMRecord * lr = esm->findRecord( ltexForm );
+	if ( lr && lr->type != GRUP && *lr == "LTEX" ) {
+		c.exists = true;
+		QVector<quint32> gnams;
+		{
+			ESMFile::ESMField f( *esm, *lr );
+			while ( f.next() )
+				if ( f == "GNAM" && f.size() >= 4 )
+					gnams.append( esm->mapFormID( *lr, f.readUInt32() ) );
+		}
+		double dsum = 0.0, ssum = 0.0, tw = 0.0;
+		double tsum[3] = { 0.0, 0.0, 0.0 };
+		for ( quint32 gid : gnams ) {
+			EsmGrass g;
+			if ( !grass( gid, g ) ) {
+				c.danglingGnam++;
+				continue;
+			}
+			c.grasses++;
+			dsum += double( g.density );
+			ssum += double( g.density ) * double( g.maxSlope );
+			float rgb[3] = { 0.0f, 0.0f, 0.0f };
+			if ( tintFn && !g.model.isEmpty() && tintFn( g.model, dataRoot, tintUser, rgb ) ) {
+				tw += double( g.density );
+				for ( int k = 0; k < 3; k++ )
+					tsum[k] += double( g.density ) * double( rgb[k] );
+			} else {
+				c.grassesWithoutTint++;
+			}
+		}
+		c.density = quint16( qMin( dsum, 65535.0 ) );
+		c.tintDensity = quint16( qMin( tw, 65535.0 ) );
+		if ( dsum > 0.0 )
+			c.maxSlope = float( ssum / dsum );
+		if ( tw > 0.0 ) {
+			for ( int k = 0; k < 3; k++ )
+				c.tint[k] = float( tsum[k] / tw );
+			c.hasTint = true;
+		}
+	}
+	return *ltexCoverCache.insert( ltexForm, c );
+}
+
+const EsmCoverCensus & EsmWorld::coverCensus() const
+{
+	if ( censusBuilt )
+		return census;
+	censusBuilt = true;
+	EsmCoverCensus c;
+	std::function<void( unsigned int )> walk = [&]( unsigned int id ) {
+		while ( id ) {
+			const ESMFile::ESMRecord * r = esm->findRecord( id );
+			if ( !r )
+				return;
+			if ( r->type != GRUP && *r == "LTEX" ) {
+				c.ltexTotal++;
+				int links = 0;
+				ESMFile::ESMField f( *esm, *r );
+				while ( f.next() )
+					if ( f == "GNAM" )
+						links++;
+				c.gnamLinks += links;
+				if ( links )
+					c.ltexWithGnam++;
+			} else if ( r->type != GRUP && *r == "GRAS" ) {
+				c.grasTotal++;
+				int dataSize = -1;
+				ESMFile::ESMField f( *esm, *r );
+				while ( f.next() )
+					if ( f == "DATA" )
+						dataSize = int( f.size() );
+				if ( dataSize < 0 ) {
+					c.grasWithoutData++;
+				} else {
+					if ( c.grasDataMin < 0 || dataSize < c.grasDataMin )
+						c.grasDataMin = dataSize;
+					if ( dataSize > c.grasDataMax )
+						c.grasDataMax = dataSize;
+				}
+			}
+			if ( r->children )
+				walk( r->children );
+			id = r->next;
+		}
+	};
+	const ESMFile::ESMRecord * r0 = esm->findRecord( 0U );
+	if ( r0 )
+		walk( r0->next );
+	census = c;
+	return census;
 }
 
 const QVector<EsmScolPart> & EsmWorld::scolParts( quint32 formID ) const
