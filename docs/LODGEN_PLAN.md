@@ -8,7 +8,7 @@ This document is the execution plan: rungs, deliverables, verification,
 risks. Each rung ships independently.
 
 **STATUS 2026-08-31, END OF THE SITTING: THE SYSTEM IS BUILT.** All
-rungs shipped and harnessed (lodgen_terrain.sh 18/18): rungs 0-2, the
+rungs shipped and harnessed (lodgen_terrain.sh 21/21): rungs 0-2, the
 AO bake, terrain texture baking (BC1 + mip chains; splat calibration vs
 vanilla's grading stays an open refinement), the CS terrain profile
 (--terrain-identity: LTEX class / flow wetness / horizon AO), instance
