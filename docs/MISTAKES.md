@@ -3,6 +3,540 @@
 What went wrong, why it went wrong, and what stops it next time. Newest first.
 Kept because the same shapes keep coming back in different clothes.
 
+## 2026-09-06 — Compared two empty directories and printed a percentage
+
+**What:** to check what the new height sheet costs, I ran the generator twice with
+and without it and diffed the bytes. Both runs used `--vt-region`, a flag I had
+invented; the real one is `--terrain-region`. Both refused with "unknown option",
+wrote nothing, and the comparison reported "0 containers, 0 bytes" for each. Had
+the script printed only the ratio it would have divided by zero or, worse, printed
+a plausible-looking 0%.
+
+**Why:** I wrote the measurement from memory of the interface instead of from the
+gate that already invokes it correctly two files away.
+
+**Solution:** the script printed the container COUNT and the byte total beside the
+ratio, which is the only reason the emptiness was visible; keep doing that in every
+ad-hoc measurement. And when a harness already drives the thing being measured,
+copy its invocation rather than composing a new one.
+
+## 2026-09-06 — Wrote a function declaration and called it a vector, twice in one evening
+
+**What:** two declarations of the shape
+
+    std::vector<T> name( size_t( count ) );
+
+The functional cast around a BARE IDENTIFIER is a valid parameter declaration, so
+this declares a function returning the vector and taking one unnamed `size_t`.
+The first, in the new container reader, produced one confusing error about
+assigning a vector to a vector. The second, the tile ring buffer in the virtual
+texture writer, produced SEVEN errors across five lines — a reference that would
+not bind, an assignment to a read-only location, and three member lookups on a
+non-class type — which read like five unrelated bugs in unfamiliar code rather
+than one declaration being the wrong kind of thing.
+
+**Why:** the lane that wrote them could not compile, so nothing told it. And the
+cast is only ambiguous when its argument is a lone identifier: the same line with
+`size_t( levels[0].tilesX )` a few lines below is unambiguous and correct, which
+is exactly what makes the trap easy to walk into and hard to see.
+
+**Solution:** `static_cast<size_t>( count )`, and read an error list for a common
+CAUSE before treating its entries as separate defects — five of those seven
+errors were downstream of one line. A regex sweep for the shape now runs after
+any lane that adds container declarations; it found no others.
+
+## 2026-09-06 — A traversal written to a picture of the arithmetic, not the arithmetic
+
+**What:** the terrain-pyramid specification fixed the streaming traversal as a
+THREE-ROW ring: to build parent tile row `p`, stage finer rows `2p−1`, `2p` and
+`2p+1`. It reads right — a parent covers two child rows, plus one above for the
+border — and it is wrong. A parent's stored texel `j` reads the finer mosaic at
+`v0 = 2·(p·256 + j − 8)`, so its last row, `j = 271`, reads mosaic rows
+`512p + 526` and `527`; child row `2p+2` begins at `512p + 512`. The parent needs
+**four** child rows, `2p−1` through `2p+2`. Implemented as written, every
+parent tile's southern border strip — 8 of 272 rows, under 3% of the tile, and
+only at its outer edge — would have been filled from a clamp instead of from the
+neighbour that owns it.
+
+**Why:** the number that decides it is `content + border` against `2 × content`
+— 528 against 512 — and it never gets written down, because the sentence
+describing the ring is about tiles and the failure is about texels. It would
+also have survived a check: a content-only comparison of a filtered parent
+against the box filter never looks at a border strip, and a p95 bar over the
+whole tile hides one wholly wrong edge inside 3% of the samples.
+
+**Solution:** the ring is four rows, the arithmetic is in the code comment and
+in `docs/LODGEN_TERRAIN_VT.md` §2.3 with the 528-against-512 in it, and
+`tests/spells/lodgen_terrain_vt.sh` compares the content **and each of the four
+border strips separately**, on the R16 height sheet where the filter law is
+exact and the bar is zero violations rather than a percentile. Rule: when a
+traversal is described in units of tiles, re-derive its span in TEXELS before
+writing the loop — and give every border strip its own check, because a bar
+averaged over a tile cannot see one edge that is entirely wrong.
+
+## 2026-09-06 — A comment that asserted someone else's file format, and was the argument for a decision
+
+**What:** `lodgenBuildAtlas` wrote its diffuse sheet as BC3 under the comment
+"BC3, like vanilla's sheet: 8-bit alpha (soft card edges survive)". Vanilla's
+sheet is not BC3. Measured on the shipped file —
+`Commonwealth.Objects.DDS`, 4096×2048, 13 mips, fourCC **DXT1**, 5,592,552
+bytes — it is BC1, and its `_n` and `_s` are both `BC5U` where ours is BC3 for
+the normal. So ours was twice the memory of vanilla's on the diffuse and twice
+again on the normal, and the comment saying otherwise is what made that look
+like parity rather than a cost.
+
+**Why:** the comment was written from what the format *ought* to be for the
+feature it was justifying (eight-bit alpha for soft card edges), and a
+plausible sentence about another program's file never gets checked once it is
+in the source. Reading a DDS header is thirty seconds of work; nobody spends it
+on a line that already sounds settled.
+
+**Solution:** the comment now carries the measurement, with the byte count, and
+`tests/spells/lodgen_farring.sh` re-measures vanilla's own header every run, so
+the claim the flag rests on cannot rot. Rule: a comment that states a fact
+about a file we did not write is a MEASUREMENT, and it carries the numbers it
+was measured from — a format, a size and a byte count — or it does not go in.
+
+## 2026-09-06 — A mip chain that dropped the channel its top mip carried
+
+**What:** `lodgenWriteDds` built its mip chain with
+`( bc3 ? ( acc[3] / 4 ) : 0xFFU ) << 24` — BC3 averaged alpha down the chain,
+BC1 forced it opaque. Every BC1 caller at the time was opaque anyway (the
+terrain bakes, the emissive sheets), so the branch was invisible and correct.
+The moment the atlas asked for BC1, mip 0 would have kept the cut-outs and
+every mip below it would have been a solid rectangle — at exactly the distance
+an atlas is looked at, which is the only distance it exists for.
+
+**Why:** "BC1 has no alpha" is true of the common case and false of BC1's
+punch-through mode, which the encoder in the same file already implements. A
+default chosen for the callers that exist is a trap for the caller that
+arrives; nothing about it reads as a decision when you find it.
+
+**Solution:** the caller says (`bc1Alpha`), the default keeps every existing
+byte identical, and the harness counts punch-through blocks PER MIP and
+requires them past the top one — a check that fails on the old filter and
+passes on the new. Rule: when a writer branches on a format flag to drop data,
+the branch is a decision about the DATA, not about the format, and the caller
+that has the data has to be able to say so.
+
+## 2026-09-06 — A hand-written BGSM reader that answered instead of failing
+
+**What:** the stadium measurement needed to know whether a vanilla LOD
+material own-emits, and the only way to ask it from a session that cannot run
+the exe was to mirror `ShaderMaterial::readFile` in Python. Two fields were
+missed: `iAlphaTestRef`, one byte between the alpha blend modes and the alpha
+test flag, and `sRootMaterialPath`, a length-prefixed string immediately before
+`bAnisoLighting` and `bEmitEnabled`. Everything after each of them was read one
+field late. On some versions the reader crashed — fine, that is a failure. On
+others it did not: it printed "0 of 7 materials own-emit with a colour that is
+not black", which is a plausible sentence, which was the answer I wanted, and
+which was read out of the wrong bytes.
+
+**Why:** a binary reader with a wrong offset does not usually fail. It returns
+floats in range and booleans that are 0 or 1, and if the conclusion it supports
+is the one you expected, nothing in the output objects. The crash on the OTHER
+versions was the only reason the error was noticed at all — had every file been
+version 2, the wrong number would have gone into WW_CHANGES.
+
+**Solution:** the reader now returns how many bytes it consumed of how many the
+file holds, and every reported material prints its version beside its values,
+so a shifted read shows up as a consumption that does not track the file size.
+It was then cross-checked against a source that does not share its code: the
+same three quantities read out of the NIF's own shader property, which agreed
+field for field on the Diamond City lights (colour (1,1,1), multiple 6.0).
+Rule: a hand-written parser of someone else's format is not a measurement until
+a second, independent reading of the same quantity agrees with it — and it must
+report how much of its input it accounted for. The same shape caught a second
+time the same day, before it shipped: a dump line of the form
+`S <b> flags1 <u> ownemit <u> emit <r> <g> <b> mult <f> ...` parsed by stepping
+two tokens at a time reads `mult` off the wrong word, because `emit` carries
+three values. Parse by keyword, never by position, whenever a line has a field
+that is not one token wide.
+
+## 2026-09-06 — A panel self-test that asked isHidden() about a row hidden through its host
+
+**What:** the Source section hides the Resources row by hiding the WIDGET THAT
+HOLDS the list and its buttons, which is how a `label | field` grid row is made
+to disappear. The first draft of the check asked `resourceList->isHidden()`.
+`QWidget::isHidden()` is true only when the widget ITSELF was hidden; a child
+of a hidden parent is not hidden, it is merely not visible. So the check would
+have read false in both modes and passed for the wrong reason in one of them.
+
+**Why:** `isHidden()` and `isVisible()` read like opposites and are not. The
+panel's other visibility checks (`lodtSec->isHidden()`) are correct because
+those sections are hidden directly, so the idiom looked established.
+
+**Solution:** the check asks `isVisible()`, and it asserts BOTH states — the
+row visible under Specified and not visible under Mod Organizer 2 — so a
+predicate that cannot change value cannot pass. Rule: assert a visibility
+change in both directions, and use `isVisible()` unless the widget you name is
+the one the code calls `setVisible` on.
+
+## 2026-09-06 — Appended to a file whose last byte I had never looked at
+
+**What:** the chunk manifest was written as its lines joined by newlines, no
+terminator, and the arrays pass opened it for append and wrote its `A` lines
+straight after the last byte. The first appended line was glued to the last
+manifest line (`M 47 Materials\LOD\Trees\MapleTrunksLOD.BGSMA 2 0 data\...`)
+and one shape per chunk lost its `A` line, from the arrays pass's first day.
+The harness counted eighteen `A` lines and passed, because it counted what it
+could parse; it failed only when the swallowed line was the pbr fixture's.
+
+**Why:** an appender assumes the file ends with a newline, and I never read
+the file's last byte before appending to it. A count that omits the broken
+line cannot see the breakage.
+
+**Solution:** the manifest is terminated at the writer and the appender adds
+a newline first when the file lacks one. When appending to a text file, read
+its tail before trusting its shape; when counting lines a parser accepts, also
+count the lines it rejects.
+
+## 2026-09-06 — The CLI wrote the object atlas one directory above the path it bakes into the NIFs
+
+**What:** `lodgenBuildAtlas` takes a file base and a game base. The game base
+has always been `data\Textures\Terrain\<ws>\Objects\<ws>.LodgenObjects`,
+and the panel writes the sheets to `<texDir>/Objects`; the CLI wrote them to
+`<texDir>` itself. Every CLI-built worldspace therefore had every atlased
+shape naming `...\Objects\<ws>.LodgenObjects.DDS` while the three sheets sat
+in the parent directory. It surfaced only when the merge harness looked for
+the new `_s` sheet on disk and failed one check while the check beside it,
+which reads the NIF, passed: the shapes named a file that was not there.
+
+**Why:** the atlas call site was written from the shape's point of view (the
+game path is right, the shapes resolve in-app because the sheet is passed
+around in memory) and never from the file system's. The texture arrays three
+lines above it in the same function already appended `/Objects`; the two were
+not read side by side.
+
+**Solution:** the CLI derives its atlas directory the same way it derives the
+array directory, `( texDir.isEmpty() ? outDir : texDir ) + "/Objects"`, and
+the merge harness checks the sheet as a FILE, not only as a name inside a
+texture set. A pass that writes a path into a mesh gets one check on the mesh
+and one on the disk; either alone can pass while the pair disagrees.
+
+## 2026-09-06 — Downsampled channel renders over black and read the edges as values
+
+**What:** the impostor bake photographs each channel (normal, height, the
+material pair, the mask) at the viewport's size and scales the frame down.
+The background under those renders is black, so a texel that is three
+quarters covered came out as three quarters of its value — a normal pulled
+toward (−1, −1), a height pulled to the far plane, gloss and specular
+darkened — and the hook skipped every texel under half coverage besides.
+Every sheet since the first octahedral bake carried it. On the LOD maple's
+opaque trunk the partial texels were the edge and nothing looked wrong; on a
+bare near tree they are most of the tree, and a raw-diffuse comparison
+measured the factor directly: 1.000 at full coverage, 0.75 at three
+quarters.
+
+**Why:** the colour sheet went through a matte that un-premultiplies, and I
+assumed the channel sheets, taken through the same crop and scale, were on
+the same footing. They were not: no matte, one pass over black. The opaque
+test model hid the difference.
+
+**Solution:** un-premultiply every channel texel by the coverage the matte
+measured, write wherever coverage is above zero, and keep a test model on
+which partial texels are the majority.
+
+## 2026-09-06 — Wrote "unlit albedo" in a spec without checking a pixel against its texel
+
+**What:** the impostor bake's colour sheet came from the lit shader path with
+lighting switched off, and the spec called it "albedo, unlit". The lit path
+tone-maps before it writes (`tonemap()` in `fo4_default.frag`, a filmic
+curve), so every colour sheet was a curved albedo, and the crossed front/side
+cards, which never switched lighting off at all, were lit renders. It
+surfaced only when a harness compared a raw channel render of the diffuse
+against the colour sheet and found them 10 apart on the same texels.
+
+**Why:** "lighting off" was read as "no processing" — an assumption about a
+path I had not read to its last line. The spec was written from the switch,
+not from the pixel.
+
+**Solution:** channel 12, the base colour times the vertex colour and
+nothing else, for every matte pass; the harness now holds the colour sheet
+against a raw render of the same texture. A sheet that claims to be a source
+quantity gets compared with that quantity once, in numbers, before the claim
+goes in a spec.
+
+## 2026-09-06 — Calibrated a harness on one model and called the floors the law
+
+**What:** switching the impostor bake from the LOD mesh to the base's near
+model broke four octahedral checks at once: the coverage floor (12%, set
+from the LOD maple's pre-baked crown; the near maple is a bare tree at 4.6%),
+the opposite-view normal floor (20, set from an opaque trunk; camera-facing
+cards agree between views), the subsurface-mask rows (trunk 0, set from an
+opaque LOD trunk; every shape of a near tree is alpha-tested, bark card
+included), and the "hidden `_L` steps" count, which I had set to at least one
+after inspecting `TreeMapleForest02.nif` — the wrong file: the base's MODL
+is `TreeMapleForest2.nif`, which has none. And the pbr fixture retargeted the
+base colour to the normal map, which changed the alpha cut-out and emptied
+the pixel set the comparison ran on.
+
+**Why:** every floor was the number the one model gave minus a margin, not a
+property of the thing being checked; and one of them rested on a file I had
+matched by eye to the wrong name.
+
+**Solution:** floors from the definition, not the sample — the frame's aspect
+against the recorded extents, a hidden count measured from the model's own
+string table, a mask rule that has a source on near meshes (the tree flag),
+a fixture that keeps the cut-out (the diffuse as the third texture). When a
+harness input changes class (a LOD derivative to a near mesh), re-read every
+floor before trusting a FAIL or a PASS.
+
+## 2026-09-06 — Appended a word to a line every reader split without trimming
+
+**What:** the impostor sidecar's `oct` line gained a family token at the end
+(`... 3072 pbr`). The card builder read lines with `readLine()`, which keeps
+the newline, and split on spaces: the last token had always been a number,
+and `toFloat()` forgives trailing whitespace, so nobody had noticed. The word
+did not forgive it — `pbr\n` never equalled `pbr`, every pbr card set fell
+back to the legacy names, looked for a `_gsaos.png` the bake had not written,
+and converted nothing. The harness caught it on the first pbr run, after the
+bake, the swap check and the retarget check had all passed.
+
+**Why:** I changed a line's shape and checked only the writer. A format has as
+many readers as writers, and the reader's tolerance was an accident of the
+old content, not a property of the reader.
+
+**Solution:** trim before splitting, everywhere a sidecar line is read
+(`lodgenCard` now does). When a line format grows a field, run the reader
+with the new line in hand before the next expensive step depends on it —
+a one-line CLI run would have shown the missing sheets in ten seconds; the
+harness showed them after a three-minute bake.
+
+## 2026-09-06 — Assigned a field and took the driver's word for it, for a month
+
+**What:** the impostor card hook set `cfg.background` to black and then white
+for its two-pass matte. Nothing pushed the value to `glClearColor`: the ortho
+paint clears with whatever the driver last received, set in `resizeGL`, and
+`updateSettings()` rewrote the field from settings on every paint besides.
+Both passes cleared to the theme grey, the difference was zero, and every card
+baked since the hook was written was an opaque grey rectangle. The impostor
+harness passed throughout — it fed synthetic PNGs and never ran the bake.
+
+**Why:** the hook was verified by its structure (two passes, a difference, an
+alpha) and not by its output (alpha statistics of one real card), and the
+harness written for it measured the converter downstream of the bake rather
+than the bake.
+
+**Instead:** a bake hook's gate is a real bake with the output measured —
+`lodgen_octahedral.sh` reports covered pixels per tile, and the first number
+it printed (4096 of 4096) was the defect. A field that must reach the driver
+gets a setter that applies it under the context (`GLView::setBackground`),
+and a harness built on synthetic inputs says so in its first line.
+
+## 2026-09-06 — Blamed the code I had just changed for a chunk that was empty by design
+
+**What:** after routing the generator's asset reads through the game
+manager, a byte-identity gate built the far chunk (-32,16) at dim 16 from the
+unpacked folder and from the archives and got "no LOD-bearing refs" from
+both. Three builds went into the loader: a diagnostic line, a state reset,
+a shape count. None printed, because the loader was never called. An empty
+MNAM slot drops a ref at that ring — vanilla parity, written in the loop —
+and that chunk holds nothing at dim 16 without impostor cards; the impostor
+harness passes there only because the cards stand in. The near chunk at
+dim 4 placed 678 objects at once.
+
+**Why:** the most recently changed code was the first suspect, and the
+refusal message named no counters, so "no refs" read as "no models loaded".
+The chunk was chosen because a harness used it, without reading why that
+harness could use it.
+
+**Instead:** before blaming a change, make the refusal say what it counted —
+it now reports placed and without-a-usable-model — and check the input can
+succeed at all on the unchanged code. A gate's input must be one the old
+build passes.
+
+## 2026-09-06 — Ran the harness on the previous exe after a build that failed
+
+**What:** a patch-build-harness chain was joined with `&&`, but the build step
+was `make | grep error | head`, whose exit status is `head`'s. The compile
+failed, the chain went on, the harness ran the exe from the build before, and
+its grab came back looking like a result. The exe timestamp in the same output
+was the only thing that said otherwise.
+
+**Why:** a pipe reports the last command's status, and the one line that
+mattered was surrounded by thirty that looked like success.
+
+**Instead:** `make` writes to a log and its own `$?` gates the chain; the
+harness step also refuses to run unless the exe is newer than the sources it
+is meant to test. Never read a harness verdict without reading the exe's
+timestamp next to it.
+
+## 2026-09-06 — Built a panel from Qt's parts while the fork's parts sat in the tree
+
+**What:** the LOD Generation panel shipped with group-box titles, plain spin
+boxes, default selector chrome, two settings to a row and the explanation of
+each output after a dash in its label. `wwHeading`, `wwMakeScrubField` and
+`wwMatchFieldStyle` existed, each with a changelog entry saying what it
+replaced and why, and 2026-08-05h records bungo catching exactly this — from a
+screenshot — in the collision panel. He caught it from a screenshot again.
+
+**Why:** the panel was written for its mechanism (worker thread, progress
+map, cancel between chunks) and its self-test measured that mechanism: 26
+checks, none about which species of control was on screen. Nothing in the
+build reads a new dock for the house helpers — the scrub sweep only covers the
+Settings panes — so a panel that never calls them looks finished from inside.
+
+**Instead:** a new dock's self-test counts the house style before it counts
+anything else: spin boxes without the `wwScrubbed` stamp, group boxes,
+selectors without the matched sheet, labels with a dash, settings sharing a
+row — each with a floor so an empty panel cannot pass. The skill for this area
+now lists the helpers by name, so the next panel starts from them.
+
+## 2026-09-05 — Fixed the mechanism I could read before the one the render showed
+
+**What:** an agent's code reading gave a precise, real defect behind the
+terrain preview bug (a cached PBRM program with no preview uniform). I fixed
+it and wrote the harness afterwards. The harness rendered three channels of a
+terrain chunk in a fresh process and got three byte-identical images — no
+cache involved. The cause was a `.prog` condition excluding the terrain shader
+type from the only program with the preview branch.
+
+**Why:** a mechanism that explains the symptom is not the same as the one
+producing it, and a fix aimed by reading was declared before the one
+measurement that could contradict it had been taken.
+
+**Instead:** the harness first, before the fix, on the symptom itself; a fix
+that does not change the harness's verdict has fixed something else. The
+reading was still worth keeping — the cached-hint defect is real and stays
+fixed — but it was the second thing, not the first.
+
+## 2026-09-05 — Read a timer bucket as the phase it was named for
+
+**What:** per-phase timers went into the `.lodt` writer to aim an optimisation.
+The line said the coarsest pyramid level took 61 of 75 seconds. It was the AO
+pass: the `tAo` restart had been anchored on the overview section's closing
+brace, one section early, so AO's time fell into the next bucket. I reasoned
+for a turn about why a level-3 block would thrash a cache that could hold it
+eight times over.
+
+**Why:** the instrument was trusted because it was an instrument. Its anchors
+were placed by text match in a file I had just reordered, and nothing checked
+that the bucket's boundaries enclosed the code its name claimed.
+
+**Instead:** a second counter — decodes per phase — disagreed with the timer
+within one run, and that disagreement is what found the misplacement. Two
+instruments that must agree are worth more than one that is believed. Same
+shape, same day, smaller: the first LOD Generation harness clicked a button
+inside a greyed group and reported the panel broken; `click()` on a disabled
+widget does nothing, by Qt's own contract, and the check now asserts the
+greying first.
+
+## 2026-09-05 — Baked four maps below native on a symmetry argument, with the lossless reference in the target folder
+
+**What:** the heightmap baker put every texel at a cell-relative centre,
+`(i + 0.5)`, "so the resample stays symmetric". At the native 6144 that makes
+every texel the mean of two adjacent `LAND` samples: never a sample, the
+44,872-unit peak shaved to 44,848, 41% of texels off. Lossy at every size, by
+construction. On top of that the maps were baked at 4096 — two thirds of native
+per side — and handed over as done. `Commonwealth_fine.HeightMap...dds`, a
+sample-aligned 6144 map with the exact `LAND` range in its name, was sitting in
+the same `FO4CS/Textures/Terrain` folder the whole time.
+
+**Why:** a plausible-sounding property (symmetry) stood in for the property
+that mattered (a texel IS a sample). And I never asked what native was until
+bungo asked what resolution the terrain would be if every bump were a pixel —
+the question that produces the number 6144 in one line. The reference file was
+found by `find`, after the fact, not by looking before baking.
+
+**Instead:** before writing a bake, ask two things: what is native, and does a
+reference already exist to diff against. Then the diff is the test — ours is
+now checked against `_fine` pixel-for-pixel, and the residual it exposed (seam
+handling between disagreeing `VHGT` edges) is being resolved by measurement
+against a full `--dump-land` of the ESM rather than by another symmetry
+argument.
+
+## 2026-09-05 — Decoded a packed colour from memory while the codec sat in the tree
+
+**What:** the `.btd` converter read Fallout 76 terrain colour as RGB565 and
+printed channel means as its "verification". The source is A1R5G5B5 —
+libfo76utils' own codec for `pixelFormatRGBA16` says so in `filebuf.cpp`
+(`rMask 0x7C00, gMask 0x03E0, bMask 0x001F, aMask 0x8000`), forty lines from
+the reader I was already calling. Under 565 "red" was the alpha bit plus four
+bits of red; every `.lodt` converted before the fix carries a wrong colour
+plane. Same session, same shape, smaller: I created a second `MISTAKES.md` at
+the repository root because I checked one directory and this file lives in
+`docs/`.
+
+**Why:** reached for the most common 16-bit layout instead of grepping the
+third party. And the check I wrote had no known right answer to compare
+against: means of (23, 17, 14) for a varying source look like a plausible warm
+tint, so the test could only ever agree with me.
+
+**Instead:** before decoding a third party's packed field, grep the third
+party. And measure against a value with a KNOWN answer: an untouched
+worldspace must decode neutral. Pitt's one constant word is (24, 16, 16) under
+565 — a tint that cannot be "no tint" — and exactly (16, 16, 16, A=1) under the
+right layout. That number was printed by the first run and not read.
+
+## 2026-09-04 — Reported an invariant as confirmed on an input that could not violate it
+
+**What:** the `.lodt` spec claimed FO76's five 3-bit LTEX weights partition an
+implicit base's share, so they can never sum past 7. The converter tested it
+and reported **0 violations in 245,760,000 samples** of
+`EXM1PittWorldspace.btd`; I wrote that down as the packing being confirmed and
+told bungo so. That worldspace has **zero land textures**: every alpha word in
+it is zero, and zero satisfies any bound. Appalachia, with 43, broke the same
+check on **72% of 21.6 billion samples**. The layers are independent
+opacities composited in order over the base, not a partition of unity.
+
+**Why:** the invariant never got a witness. A single number in the same tool
+output — "LTEX 0" — disqualified the result before it was believed, and I did
+not connect it. Related and earlier the same day: the terrain data map's alpha
+channel and its RGB were written from one variable and correlated at
+r = 0.969; measuring the correlation caught it, reading the code did not.
+
+**Instead:** before reporting an invariant as holding, establish that the input
+*could* have violated it. `tests/spells/lodt_btd.sh` now prints which paths
+the small worldspace leaves UNCOVERED rather than scoring them as passes, and
+the converter reports the sum as a statistic, not a gate.
+
+## 2026-09-04 — Took a rounder number and a bare cast, and paid a quantum for each
+
+**What:** the `.btd` height quantum was rounded up to a power of two because it
+looked cleaner — 1.6× the quantisation error, measured 0.98 units against
+0.32 at the exact bound `maxAbs / 32767`. Then quantising with a bare
+`quint16()` truncated instead of rounding: a whole quantum of error where half
+was available. Both passed every test.
+
+**Why:** a cosmetic choice inside a numeric encoding is a numeric choice. And
+the tolerance was set from what the code produced — "within one quantum" — so
+it could not fail. Invisible on the FO4 path, where `VHGT` heights are exact
+multiples of 8.
+
+**Instead:** derive the bound from the maths first (half a quantum, from the
+two grids sitting half a step apart), then make the code meet it. The bound
+now precedes the run; it is what caught the truncation.
+
+## 2026-09-04 — A DDS writer checked only through the reader that shared its offsets
+
+**What:** the baked heightmap's DDS header put `ddspf` at header+76 instead of
++72, so the fourCC landed in `dwRGBBitCount` and `dwCaps` stayed zero. It read
+back perfectly through the same wrong offsets. Parsing **Bethesda's shipped
+map** with the same code showed `DX10` where flags belonged.
+
+**Why:** the same shape as 2026-08-23's round-trip test that shared one table
+with the code it tested. A writer and reader written together agree by
+construction.
+
+**Instead:** put something that did not come from the writer through the
+reader, or the writer's output through a reader that did not come from it.
+This is why `.lodt` has an independent reader and why `--lodt` cross-checks
+against the ESM's own `LAND` records rather than against what the writer
+believes it wrote.
+
+## 2026-09-04 — Proxies moved the right way while the thing they stood for moved the wrong way
+
+**What:** denser shoreline geometry was called "strictly better" on waterline
+vertex count and sliver-triangle share. Against the undecimated source mesh it
+made fidelity worse — p95 error 30.9 → 89.5. It defaults off.
+
+**Why:** the measurements were the ones easy to collect, not the one that could
+contradict the claim.
+
+**Instead:** name the quantity the claim is actually about and measure that,
+even when it costs a comparison against the full-resolution source.
+
 ## 2026-08-31b — One broken probe grew an architecture, then poisoned its own test
 
 **What:** a scratch BA2 tool's hash lookup silently false-negatived on every

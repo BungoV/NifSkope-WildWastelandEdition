@@ -1,5 +1,3199 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-09-09 - THE COMMIT: five days of work goes to origin/main, and 647 MB does not
+
+Repo hygiene, no source change and no build. bungo lifted his "Not yet" of
+2026-09-04. Eight commits by explicit path list (CONSTITUTION 8, never
+`-a`/`-A`), pushed to `origin/main`.
+
+**THE EIGHT, in the order the work landed.**
+
+| # | hash | what | files |
+|---|------|------|-------|
+| 1 | `1bf719c` | the .gitignore that keeps the bulk out | 1 |
+| 2 | `f6296a8` | the file family and the FINAL NAMES | 15 |
+| 3 | `d934e6e` | the generator round: impostors, ground cover, VT, the terrain normal | 25 |
+| 4 | `080f0cf` | the LOD Generation panel, the channel preview, the plane picker | 19 |
+| 5 | `e760cc8` | headless never prompts and never shows a window | 5 |
+| 6 | `7ee437e` | the seven format contracts and the FO4CS handoff package | 23 |
+| 7 | `164d24b` | the 683 scratchpad reports, briefs, scripts and pictures | 683 |
+| 8 | this one | CONSTITUTION, MISTAKES, the skills, the handoff and this log | 6 |
+
+Commits 2-5 carry the source: 6,028 + 13,833 + 4,052 + 1,045 insertions
+across 64 paths, the whole of `src/lodgen.cpp` (+5,896), `src/nifcli.cpp`
+(+1,747), `src/lodgenmanager.cpp` (+2,103) and `src/nifskope_ui.cpp` (+1,660)
+included. The grouping is by path, and the entangled files say so in their
+own messages: `src/lodgen.cpp` serves the impostor, ground-cover, virtual
+-texture and `_msn` entries at once and could not be split without splitting
+a build that was never split.
+
+**WHAT DID NOT GO IN: 1,904 files, 647.3 MB.** A public repository does not
+carry the bakes; it carries what the bakes were measured into.
+
+| excluded | size | how it comes back |
+|----------|------|-------------------|
+| `heightmaps/` | 436.2 MB, 13 worldspaces | the lodgen heightmap bake |
+| `scratchpad/handoff_fo4cs/samples/` | 162.1 MB, 129 files | `make_samples.sh` (committed) against `MANIFEST.md` (committed) |
+| `scratchpad/images_20260909/gen`, `img` | 163.6 MB + 6.3 MB | the bake commands in the lane report |
+| `scratchpad/cardfit_20260909` bakes | 142.7 MB | `lodgen_impostor_cards.sh` |
+| `scratchpad/mountains_20260907` dumps | 127.3 MB | `msn_curl.py` + the LAND dumps' own scripts |
+| `scratch_water/` | 5.5 MB, 32 scratch bakes | hand-made, disposable |
+| the rest under `scratchpad/` | ~9 MB | per-run renders |
+
+The rule is written into `.gitignore` by extension and by folder, not by
+listing 1,904 paths: `.dds`, `.bto`, `.btr`, `.nif`, `.lod*`, `.bin`,
+`.head`, `.orig`, `*.manifest.txt`, `*.verts.txt`, the five multi-MB LAND
+dumps by name, and every `.png` except the four folders a handoff or a
+committed report points at (`images_20260909`, `mountains_20260907/images`,
+`cardfit_20260909/pics`, `cardpad_20260909/pics`).
+
+**WHAT DID GO IN, measured.** Under `scratchpad/`: 695 files, 23.24 MB -- 234
+scripts, 224 small measurement dumps, 62 reports/briefs/manifests, 39 harness
+logs, 75 pictures. Two files exceed 1 MB, `handoff_contact_sheet.png` at 2.82
+MB and `handoff_card_sheets_0003a28b.png` at 1.88 MB; none reaches 5 MB. That
+is the picture proof CONSTITUTION 5 requires and the deliverable home
+CONSTITUTION 8 requires, and it is why the folder is tracked at all.
+
+**LINE ENDINGS, by Python byte count, before every commit.** Never grep.
+Every LF-only file came through at 0 CR. The three mixed files moved by
+exactly what their own diffs account for -- the check is `dCR` against
+`git show HEAD:<path>` versus the CRLF lines the diff adds minus the CRLF
+lines it removes:
+
+| file | added CRLF / LF | removed CRLF / LF | predicted dCR | actual dCR |
+|------|-----------------|-------------------|---------------|------------|
+| `WW_CHANGES.md` | 0 / 3,120 | 0 / 0 | +0 | +0 |
+| `src/glview.cpp` | 20 / 0 | 3 / 2 | +17 | +17 |
+| `src/nifskope.cpp` | 180 / 29 | 1 / 1 | +179 | +179 |
+
+`src/nifskope.cpp` keeps its CRLF-with-LF-blocks pattern intact -- 29 of its
+209 new lines are LF, inside blocks that were already LF. No file was
+normalised, none was flipped wholesale, and no binary splice was needed. This
+entry itself is LF-only, appended to a mixed file that stays mixed.
+
+**Read-back.** `git push origin main`, then `git log origin/main -1` and
+`git status`: the tree is clean apart from the ignored paths.
+
+## 2026-09-09 - the card spacing is the GAP between two trees, not the margin beside one
+
+`src/nifskope_ui.cpp`, `src/lodgen.cpp`, `tools/bake_impostor_cards.sh`,
+`tests/spells/lodgen_octahedral.sh`, `docs/LODGEN_CARD_SHEETS.md`,
+`docs/LODGEN_LODM_FORMAT.md`.
+
+bungo, correcting the entry above the same evening, verbatim: *"When I say
+padding 8 for 1k, it's 8 pixels of distance between two rendered objects."* The
+lane before this one read his number as the margin on EACH side of a frame and
+spent twice the texels he asked for.
+
+```
+gap(side) = max( 2, side / 16 ), rounded UP to even     // between two silhouettes
+pad(side) = gap(side) / 2                               // on EACH side of a frame
+mips      = 1 + log2( min( gapX, gapY ) )
+```
+
+so the inner rect is `frame - gap`, **15/16 of the frame** wherever a side is a
+multiple of 32 -- 120 of 128 -- and a 128-texel frame still ships **4** levels
+(128, 64, 32, 16), because that count was always the gap's and the gap has not
+changed. The SHEET'S OUTER BORDER needs only half a gap and gets exactly that
+without a special case: an interior border carries `gap/2` from each of the two
+frames meeting on it, an outer border carries `gap/2` and faces the sheet edge.
+That holds because a card sheet is sampled CLAMPED (the quad's UV rect is a
+sub-rect and nothing asks for wrapping); under WRAP the outer border would need
+a whole gap.
+
+Measured over the same 19 Sanctuary trees, OCT=8 TILE=128, both baked by this
+tree (`scratchpad/cardfit_20260909/cards_after` -> `scratchpad/cardpad_20260909/cards_gap`),
+coverage floor 16/255:
+
+| | before | after |
+|---|---|---|
+| silhouette / frame, x | 0.250 / **0.729** / 0.875 (min/median/max) | 0.250 / **0.854** / 0.938 |
+| silhouette / frame, y | 0.797 / **0.859** / 0.875 | 0.844 / **0.922** / 0.938 |
+| inner rect / frame, y | 0.875 on all 19 | **0.9375 on all 19** (15/16) |
+| clear texels between two silhouettes, mip 0 | 4 / 10 / 24 | 2 / 7 / 16 |
+| narrowest gap at any shipped mip | 2.000 texels | **1.408** texels, and never under 1 |
+| total sheet area | 4,915,200 texels | 4,816,896 (-2.0%) |
+| frame shapes | 7 | 6 |
+
+Two trees changed frame shape because the wider inner rect let a narrower frame
+hold them: TreeMapleblasted04 32x64 -> 16x64 (fill x 0.438 -> 0.875) and
+TreeMapleblasted05 32x32 -> 16x32 (0.500 -> 0.875).
+
+**What it costs, stated rather than buried.** His rule keeps a whole texel of
+gap at the deepest shipped level, which is HALF a texel of margin on each side,
+and a bilinear tap taken exactly on a frame border reaches half a texel. So at
+that last level a border tap now picks up some of the neighbour's edge: **13 of
+19 sheets, worst 64/255**, against 0 of 19 under the per-side reading. Zero is
+bought by shipping one level fewer (`mips = 1 + log2(min(pad))` -- 3 levels on a
+128 frame instead of 4), not by more padding. His call; shipped as he stated it.
+
+`.lodm` and sidecar. The meta line is now `gap <x> <y>` (the distance between
+two silhouettes); the `.lodm` keeps `card.pad` / `array.pad` as the **per-side**
+number and gains `card.gap` / `array.gap`, exactly twice it, so a reader never
+has to guess which quantity a lone number meant. Three vintages of card set are
+read, each under its own law: `gap` present (this law), `pad` alone (the
+per-side reading, capped at `1 + log2(min(pad))`), neither (older still,
+`max(4, longSide/16)` per side under that same older cap).
+
+Gates: `tests/spells/lodgen_octahedral.sh` **73 checks / 0 failures / PASS**
+(the bleed check is now the gap rule -- the separation across every interior
+border at every shipped mip, measured as transparent coverage over the two
+texels a border tap reads, narrowest 1.659 on the harness bake; its control,
+every silhouette cropped to its own box and filling its cell, measures 0.431 and
+fails as it must). `tests/spells/lodgen_impostor_cards.sh` PASS,
+`tests/spells/lodgen_identity.sh` PASS (8/0), untouched.
+
+## 2026-09-09 - the impostor frame law: the tree fills the frame, the padding is the mip chain's, and the card does not move
+
+`src/nifskope_ui.cpp`, `src/lodgen.cpp`, `tools/bake_impostor_cards.sh`,
+`tests/spells/lodgen_octahedral.sh`, `tests/spells/lodgen_impostor_cards.sh`,
+`docs/LODGEN_CARD_SHEETS.md`, `docs/LODGEN_LODM_FORMAT.md`,
+`scratchpad/handoff_fo4cs/samples/make_samples.sh`.
+
+bungo, three messages, the rule this entry implements, verbatim: *"biggest,
+texture aspect ratio, maximizing the size of the geometry on each render, so
+that there is still a little bit of padding, 8 pixels on 1024x1024, 16 on 2k,
+and so on"*; *"maximizing the tree's size in each row and column, with enough
+pixel padding so that there's no mip map bleeding into other rows and
+columns"*; *"the tree must be positioned correctly, so that when a 3d tree
+transitions to an imposter, the tree won't change position"*.
+
+**MEASURED FIRST, on the 19-tree Sanctuary library** (`OCT=8 TILE=128`, 1,216
+frames). The number bungo's rule is about is the UNION of the 64 views'
+silhouette boxes, because one scale serves every frame and everything outside
+that union is wasted in all 64:
+
+| union box / frame | min | median | max |
+|---|---|---|---|
+| x, before | 0.125 | 0.500 | 0.875 |
+| x, after | **0.250** | **0.729** | 0.875 |
+| y, before | 0.562 | 0.812 | 0.875 |
+| y, after | **0.797** | **0.859** | 0.875 |
+
+and the sheets came out **2.5% SMALLER** doing it. The frame's own centre was
+never the problem and is not touched: the union box sat within ONE texel of the
+frame centre in x and 3.5 in y before the change.
+
+**Cause, in order of cost.** (1) The short side came off a five-rung ratio
+ladder floored at `max(32, 2G+4)`; a 1:5.5 tree asks for a rung below a quarter
+and there was none, so TreeBlasted05 filled **4 texels of a 32-texel frame**.
+(2) The gutter was a fraction of the LONG side applied to both, so a 32-texel
+short side spent 25% of itself on margin where a 128 side spent 12.5%. (3) The
+mip cap had nothing to do with the gutter at all.
+
+**The padding law, derived from his numbers rather than fitted to them.** A
+reader sampling inside a frame's UV rect reaches half a texel past the rect AT
+the rect's own border, and that tap lands in the next frame. Mip CONSTRUCTION
+never mixes frames (an even frame halves into an even frame), so the bleed is at
+SAMPLE time and a level is clean only while its gutter is a whole texel:
+`pad / 2^k >= 1`, hence `mips = 1 + log2(pad)` and never one more.
+`pad = side/16` IS his two numbers -- an 8x8 grid of 128-texel frames is a 1024
+sheet and gets 8, a grid of 256-texel frames is a 2048 sheet and gets 16 -- now
+applied PER AXIS, floored at 2 so every card ships two clean mips, and rounded
+UP TO EVEN so `--card-half-aux` lands the aux gutter on a whole texel.
+
+**That closes a bleed that was shipping.** Measured with a control (the same
+sheet with the padding stripped, which must bleed and does, on 19 of 19 bases up
+to 127/255): before, every card of 96 texels or more shipped a mip whose gutter
+was half a texel -- **26/255 of a neighbouring frame's alpha across 16 of 28
+frame borders** on the 128x128 sheets, 15/255 on 10 of 28 for 96x128. After: **0
+on every border of every shipped mip of all 19.**
+
+**The aspect** is now the smallest multiple of 16 texels whose inner rect does
+not crop the measured silhouette -- it grows the frame until the tree fits, so
+the loose axis gets air and the binding one is never cut. Seven frame shapes
+over the 19 trees against four; a card array still groups by family, grid and
+frame. The measurement margin on the silhouette came down from 4% to **1%**:
+pass one measures in viewport pixels at the bound fit, whose error is about one
+viewport pixel = 0.24% of a half-extent, and 4% was seventeen times that.
+
+**What that costs, stated:** a card array holds only sets sharing family, grid
+and frame, so more shapes is more binds. On the FO4CS sample set's dim-16 chunk,
+the same 18 card sets: **4 groups / 16 arrays before, 7 groups / 28 arrays
+after.** Twelve more array textures, against 2.5% less sheet area and the fill
+numbers above. That is what the old coarse ladder was buying and it is now being
+spent.
+
+**THE CONTRACT NOW SAYS WHERE THE CARD STANDS.** `card.center` always was the
+offset from the object's PIVOT to the card's centre -- the bake points its camera
+at that one model-space point in all N^2 views -- but nothing said so, and a
+reader that treated it as zero would drop TreeHero01's card **1,070 units**, most
+of the tree. `docs/LODGEN_LODM_FORMAT.md` 3.1 now states it and the reasoning.
+New key `card.pad` / `array.pad` (int[2], the padding per axis on each side), so
+a reader never re-derives the law that produced the sheet.
+
+**Gated against a SECOND reader, never against the bake.** The transition gate
+reads each model's own declared per-shape `Bounding Sphere` fields through
+`-no-gui dump` and merges them, and requires `card.center` to be at least four
+times closer to that centre than the pivot is. Measured 6.4x / 12.3x / 19.7x on
+TreeHero01, TreeMapleForest2 and TreeBlasted01 (delta 14.1% / 8.0% / 4.9% of the
+model's own radius against 90.9% / 97.8% / 96.7% for the zeroed control). It is
+a discrimination test and not a one-texel test on purpose: the renderer
+recomputes each shape's bound from the VERTICES, so the file's declared spheres
+can bound `center` but cannot confirm it to a texel.
+
+**The card quads' `_fs.DDS` is DXT5 now, and carries its alpha.** It went out as
+DXT1 with `pfflags 0x4` and no `DDPF_ALPHAPIXELS`, which is why every card quad
+in a chunk drew as an OPAQUE SQUARE (lane IMAGES5). Vanilla's own alpha-tested
+tree LOD textures -- `Textures/LOD/Trees/MapleBranchesLOD_d.dds` and
+`ElmBranchesLOD_d.dds` -- are DXT5 with `dwFlags 0x000A1007`, `pfflags 0x4`,
+`caps 0x401008`, and those four numbers are what the gate checks, not a guess at
+a format. The sheet doubles, 1,014,600 -> 2,029,072 bytes for a 3014x501 card.
+Measured on the bytes rather than on a picture, because BC1 without
+`DDPF_ALPHAPIXELS` has no alpha to decode and 255 everywhere IS an opaque
+square: decoding the new sheet's BC3 alpha blocks, **98.3% of the quad is cut
+away at a 0.5 alpha test** and only 460 of its 95,004 blocks are fully opaque.
+The picture of a chunk drawn with it is still owed.
+
+**Two defects found in the render hook while building the gate, and fixed.**
+`WW_RENDER_DIST` had NO effect -- `setDistance` sets `Dist` and the
+orthographic half-height is `Dist/Zoom`, and the auto-fit leaves `Zoom` where it
+framed the bound sphere, so one tree photographed at half-heights 1874 and 7496
+produced two BYTE-IDENTICAL PNGs. It reads the value back and corrects now, the
+way the impostor bake always did. And `WW_RENDER_CLEAN=1` photographs the model
+alone -- no viewport grid, no axis lines, no node markers -- because a script
+measuring a silhouette cannot tell a grid line from a twig, and the grid alone
+put the measured bounding box at the full width of the window.
+
+**Still open, and named:** the hook is not yet a metric camera.
+`WW_RENDER_CENTER` has no effect on the framing (two renders 500 units apart are
+byte-identical), and the scale is not proportional to `WW_RENDER_DIST` -- a
+512-unit cube written by `-no-gui new --cube --size 512` spans 547, 107 and 25
+px at `WW_RENDER_DIST` 500, 1000 and 2000. Until that is fixed no picture from
+this hook can carry a world-unit measurement, which is why the transition gate
+is geometric and not photographic.
+
+Gates: `lodgen_impostor_cards.sh` 14/0 (the DXT5 header and a live alpha block
+are new). `lodgen_octahedral.sh` gained the frame law as multiples of 16, the
+padding checked per axis and exact on all four sides, the silhouette FILLING the
+inner rect's long axis to within 2%, cross-frame bleed at every shipped mip with
+the padding-stripped control that must fail, and the dilation under the
+transparent texels.
+
+## 2026-09-09 - a headless run is INVISIBLE and never on the primary monitor
+
+`src/nifskope.cpp`, `src/nifskope.h`, `src/nifskope_ui.cpp`,
+`tests/spells/render_shot.sh`, `tools/bake_impostor_cards.sh`.
+
+bungo, two rules, both verbatim: *"Agent is launching nifskope on my main
+monitor, which is a no no"* and *"the screen is flashing white and black,
+that's a view hazard for epileptics"*.
+
+**The earlier off-every-screen attempt is withdrawn.** It was inert as written
+(`restoreUi()` restores a MAXIMISED window and on Windows `move()` on a
+maximised window only chooses a monitor), and when the maximised bit was
+cleared it worked and NOTHING RENDERED: `GLView` is a `QOpenGLWindow`, a
+surface that is never exposed never gets a context, and `grabFramebuffer()`
+returned a null image while the run exited 0 - no PNG, no card, an empty card
+set reported as success.
+
+**What ships instead.** A headless run (`NifSkope::wwHeadlessRun()` - any `WW_*`
+variable, or `-no-gui`) has its window un-maximised, placed on a NON-PRIMARY
+screen, shown without activating, and shown at WINDOW OPACITY 0. It is still on
+a screen, deliberately, so it is still exposed and still renders. Three places
+apply it, because one was not enough:
+
+* `NifSkope::wwPlaceHeadlessWindow()` (`nifskope_ui.cpp`) is the one
+  implementation. `wwHeadlessWindowOrigin()` beside it serves `WW_WINDOW_AT`
+  when that point is not on the primary, else the first non-primary screen's
+  top-left, else `1920,0`, else the primary with opacity 0 as the only
+  guarantee - and NAMES the arm it served in the window log's `arm=` field, so a
+  refusal is never silent;
+* the `NifSkope` CONSTRUCTOR calls it before `ui->setupUi()`, which is what
+  removes a real flash on his main monitor: an `EnumWindows` probe at 25 ms
+  found a 426x306 OPAQUE window of the process at 632,249 on the PRIMARY at
+  t=371 ms - Qt's default geometry, class `Qt6111QWindowIcon`, the application
+  title, no filename - gone by t=1403 ms and replaced by class
+  `Qt6111QWindowOwnDCIcon` at the asked-for place with layered alpha 0. The
+  class change is the mechanism: the Qt Windows plugin picks a window class by
+  whether the surface needs its own DC, so realising the GL container destroys
+  the first native window and creates a second, and the first was created while
+  the widget still had its default geometry;
+* `createWindow` calls it again after `restoreUi()`, whose `restoreGeometry()`
+  overwrites both the position and the maximised bit;
+* the application event filter calls it on `QEvent::Show` for every OTHER
+  top-level window - a dialog, a floating dock, a tool window - as a backstop.
+
+`WW_WINDOW_VISIBLE=1` makes the window opaque again for watching one run. It
+does NOT move it to the primary: the control run is placed by the same code,
+because a visible-on-purpose control is how a NifSkope came to be on his main
+monitor in the first place. Interactive use is untouched - with no `WW_*`
+variable the maximise-and-raise branch runs exactly as before.
+
+**Measured, on `release/NifSkope.exe` 19:35:14.** `tests/spells/render_shot.sh`,
+rewritten sections 5-6: **55 checks, 0 failures**. Three instruments, each shown
+able to fail, and every floor fired in the same run:
+
+| | hidden runs | visible control | strobe control |
+|---|---|---|---|
+| windows on the primary (process's own log) | 0 of 4-6 records | 0 of 4 | 0 of 6 |
+| windows on the primary (EnumWindows, outside) | 0 of 6-26 samples | 0 | 0 |
+| mapped windows at opacity > 0 | 0 | 2 of 2 | - |
+| layered alpha > 0 (Windows' own answer) | 0 samples | 11 of 11 | - |
+| the SECOND MONITOR'S OWN PIXELS, luminance range | **0.233**, the desktop's own noise | 27.1 | **246.8** |
+
+The pixel row is the one that answers him: the desktop is sampled every ~50 ms
+over a 200x200 region of the second monitor where the window sits, and a hidden
+4x4 octahedral bake - 148 full repaints, two in every nine alternating a black
+clear and a white one - moved it by 0.233, which is what the region does with
+nothing running at all. The same bake made visible on purpose moved it by 246.8.
+
+**And the pixels do not change.** Same build, same scene, opacity 0 and opacity
+1: the render PNG is byte-identical (`fedab869884174fb...`), and so are the six
+card sheets of a bake (`3f2db029bde9d94d...`). Repeated on the real model bungo
+was baking, `TreeMapleForest02.nif` at OCT=4/TILE=64: six sheets each way, card
+set hash `6db4e81468e37b85...` **identical**, desktop luminance range 0.111
+hidden against 251.6 visible.
+
+`tests/spells/lod_generation.sh` 97 checks, 0 failures - a GUI harness that
+takes focus, drives widgets and scrolls a wheel still works on an invisible
+window.
+
+**Not measured:** an OCT=8 bake of a full tree library end to end through
+`tools/bake_impostor_cards.sh` (the driver's candidate machinery belongs to
+another lane); and whether any other machine's driver honours a layered alpha
+the way this one does - the gate's pixel instrument is what would catch it.
+
+## 2026-09-09 - V9a: the terrain colour sheet is a THIRD consumer of the terrain normal
+
+`tests/spells/lodgen_terrain_vt.sh` (harness only -- **no source changed**).
+
+V9a asked for the `--vt` assembled dim-4 colour sheet to be byte-identical to a
+direct bake, and after lane BUILD2 it was not: same size (174,888 B), different
+bytes. Attributed and bounded by lane VTFIX; the full working is
+`scratchpad/lane_vtfix_report.md`.
+
+**It is not `dominantBase`.** Measured, on the harness's own fixture, from a
+copy of the BUILD2 exe: with `--cover` the two colour sheets differ; **without
+`--cover` they are byte-identical**, on all four dim-4 chunks of the fixture.
+`dominantBase` reaches the colour composite unconditionally, so a rescope would
+move texels with the tint off as well. (Reading agrees: the tile baker scopes it
+to the enclosing dim-4 chunk's 16 cells, which is the chunk baker's own set.)
+
+**What it is.** `nrm` is computed before the colour composite on both paths, and
+its Z is the ground-cover slope gate's operand -- `theta = acos(nrm.z)`, then
+`gate`, then `coverByte`, then `tintW = coverByte/255 * tintStrength` (0.350),
+which tints the COLOUR. `spec_terrain_vt.md` §4.4 exempts the msn and the AO
+within one heightfield sample of a chunk boundary, because the tile bake has a
+one-cell ring where the chunk bake clamps; nobody noticed that with `--cover`
+the colour inherits that same exemption through the tint. The msn is not the
+sheet's only consumer.
+
+MEASURED, mip 0, per texel, through a BC1 decoder that shares no code with the
+writer (`scratchpad/vtfix_20260909/ddsdiff.py`):
+
+| chunk | floor (`--no-cover`) | ceiling (tint on vs off) | under test | max | in the 4-texel band |
+|---|---|---|---|---|---|
+| `4.-24.24` | 0 | 207,945 (79.3%) | **43** of 262,144 (0.016%) | 17/255 | 43 of 43 |
+| `4.-20.24` | 0 | 191,588 | **84** (0.032%) | 12/255 | 84 of 84 |
+| `4.-24.28` | 0 | 6,979 | **0** | 0 | -- |
+| `4.-20.28` | 0 | 21,760 | **0** | 0 | -- |
+
+Every differing texel is within 4 texels -- 128 world units, exactly one
+heightfield sample -- of the chunk's OUTER boundary, and the nearest one to an
+interior dim-2 tile seam is 29 texels away, which is the shape a `dominantBase`
+rescope would NOT have.
+
+**The assembled bytes are the better ones**, measured rather than assumed: the
+ground is continuous, so the step across a chunk seam should be the step of any
+adjacent texel pair. `scratchpad/vtfix_20260909/seam.py` reads the `_msn` step
+across the (-24,24)|(-20,24) seam at **4.955 ringed against 7.312 clamped**
+(-32%), north/south 4.600 against 6.068 (-24%), with the interior control the
+same to three digits on both bakes (1.803 / 1.797) and the step onto a sheet's
+own last column 1.961 ringed against 3.310 clamped (-41%). Vanilla cannot
+arbitrate at this size and is reported as a negative result: our sheet differs
+from Bethesda's on 99.6-99.8% of texels either way, and the two variants'
+distance to vanilla agrees to three decimals (18.649 both).
+
+**Attribution.** Lane RENAME's only edits to `src/lodgen.cpp` are two comments,
+three path/message strings and three hex comments beside unchanged values. Run
+on `release/NifSkope.before.exe` (BUILD1: TERRAINFIX in, RENAME out), all twelve
+sheets -- colour, `_msn`, `_data`, four bakes -- are byte-identical to BUILD2's.
+The bytes moved with lane TERRAINFIX's shared normal reconstruction, and they
+moved through the cover gate.
+
+**V9a re-pinned, in two halves, each with a control:**
+* with the tint OFF, byte identity on all four dim-4 chunks -- the exact
+  `dominantBase` gate the spec asked for, and now it is on the pair where byte
+  identity can honestly hold;
+* with the tint ON, every differing texel within 4 texels of the chunk's outer
+  boundary, no texel within 8 of an interior tile seam, max channel difference
+  <= 24/255 (measured 17), differing texels <= 0.05% of a sheet (measured
+  0.032%), **and at least one chunk must differ** -- a floor, so a check that
+  cannot fail is refused.
+
+The check was run against three inputs before it was trusted: the real pair
+(0 bars failed), a sheet-wide difference (16 bars failed across the four
+chunks), and two identical sheets (the floor fired). `lodgen_terrain_vt.sh` is
+**32 checks, 0 failures**; `lodgen_terrain.sh` 26/0 with the pyramid msn
+unchanged at `UP=G 76/32/51/32` against the direct bake's `76/32/51/32` and
+vanilla's `99/67/67/67`; `lodgen_identity.sh` PASS.
+
+**OPEN, and it is bungo's call, not a lane's:** the real defect is the DIRECT
+chunk bake's edge clamp, not the assembled sheet. Giving the chunk baker the
+same one-cell ring would make both paths correct AND identical, but it moves the
+edge bytes of every terrain chunk sheet in every worldspace and re-baselines the
+byte-identity gates.
+
+## 2026-09-09 - THE FINAL FILE NAMES: `.lodl` land, `.lodt` textures, `.lodo` objects
+
+`src/lodtfile.{h,cpp}`, `src/io/lodvfile.{h,cpp}`, `src/btdterrain.{h,cpp}`,
+`src/nifcli.cpp`, `src/lodgen.cpp`, `src/lodgenmanager.cpp`,
+`tools/bake_impostor_cards.sh`, five renamed files under `tests/spells/`, every
+`docs/LODGEN_*.md`, the FO4CS handoff package.
+**BUILT AND GATED 2026-09-09 by lane BUILD2**, together with the six-line GUI
+half of the rename in `src/nifskope.cpp` (the file-type row, the load route and
+the three suffix comparisons) and the one line in `src/nifskope_ui.cpp` that the
+rename lane could not touch. `qmake` was re-run FIRST -- the two new
+cross-includes (`lodtfile.cpp` -> `io/lodvfile.h`, `lodvfile.cpp` ->
+`lodtfile.h`) are invisible to `make` until it is -- and `Makefile.Release` came
+back naming all three dependencies, including the one lane BUILD1 had patched in
+by hand for `btdterrain.o`, which no longer stands in for anything.
+`make -j2` RC=0; `release/NifSkope.exe` 18:43:13, newer than every changed
+source; `release/style.qss` in step.
+
+MEASURED, on that exe: `lodl_write.sh` 34 checks 0 failures (magic still LODT
+after the rename, heights round-trip exactly, and both refusal directions name
+the other format); `lodl_open.sh` **23 checks 0 failures** on bungo's own renamed
+Commonwealth file; `lodgen_terrain.sh` 26/0; `lodgen_identity.sh` 8 checks 0
+failures; `lod_generation.sh` **97/0**
+-- the one expected red, *"with one, the panel says what it will write"*, is
+green now that the GUI line is in; `btd_terrain.sh` 13/0;
+`lodgen_impostor_cards.sh` PASS; `lodgen_terrain_vt.sh` 31/1, the single failure
+being V9a (the assembled colour sheet vs a direct bake, same size, different
+bytes), a `dominantBase` scoping question that predates this rename and is
+recorded as unattributed.
+
+**bungo's installed set was renamed and read back**: `Commonwealth.lodl`
+35,953,294 B, `DLC03FarHarbor.lodl` 9,195,933 B, `DiamondCity.lodl` 53,148 B,
+`NukaWorld.lodl` 7,182,356 B, `NukaWorldAmphitheater.lodl` 38,303 B in
+`E:\Projects\Fallout 4 Mods\mods\FO4CS\Terrain\`, each `lodl ... --info`
+rc=0, and each `--verify-only` against its own plugin **0 mismatched** (36,864 /
+256 / 5,568 / 69,696 / 128 samples; alpha and colour words 0 differing too). The
+five `*.lodt.bak-20260909` copies were left exactly as they were, name included.
+
+`--candidates trees` was measured on the Sanctuary region (-20,24)..(-17,27) of
+Fallout4.esm: **19 candidates, every one under `Landscape\Trees\`**, against 33
+from the default filter -- the 14 shacks and rock cliffs of the bug report are
+gone.
+
+**bungo's ruling, final and approved.** `.lodl` = LAND (heights, AO, LTEX blend,
+colour, water, ground cover, overview - the v2 file, what `.lodt` held until
+today). `.lodt` = TEXTURES (the terrain sheets per pyramid level, what `.lodv`
+held). `.lodo` = OBJECTS (the FO4CS-native mesh library, which the 16:1x ruling
+had called `.lodg`). `.lodi` = instances, `.lodm` = materials. `.lodv` and
+`.lodg` are retired. `.bto`/`.btr` stay the stock bake.
+
+**`.lodt` is REPURPOSED, not renamed, and that is the whole engineering problem.**
+An extension that meant one format yesterday and a different one today is the
+setup for a silent misparse, so:
+
+* the LAND file keeps its magic, `LODT` on disk (`LODL_MAGIC`, promoted out of
+  `lodtfile.cpp`'s anonymous namespace into `lodtfile.h`). **Not one byte moved**
+  - the gate on the rename is that a `.lodl` is byte-identical to the `.lodt`
+  the same worldspace wrote yesterday, and `lodl_write.sh` still asserts
+  `magic is still LODT after the .lodl rename`;
+* the TEXTURE container takes a NEW magic, `LDTX` (`LODTEX_MAGIC`,
+  `0x5854444C`), where it was `LODV`. No `.lodv` was ever written to disk
+  anywhere, so nothing needs converting;
+* **each reader refuses the other's file BY NAME.** `LodtFile::open` handed
+  `LDTX` says *"refused: <name> is a terrain TEXTURE file (.lodt, magic LDTX),
+  not a .lodl landscape file"*; `lodvValidate` handed `LODT` says *"this is the
+  whole-worldspace LANDSCAPE file ... open it as .lodl"*, and handed the retired
+  `LODV` says so too and asks for a re-bake. Neither says only "bad magic".
+
+**Every command, flag, environment variable and panel string followed, and the
+retired spellings REFUSE rather than fall through to a generic error**, because
+the shell history and the scripts that carry them were written for the other
+format:
+
+| was | is | the retired spelling now |
+|---|---|---|
+| `lodt <file.lodt>` | `lodl <file.lodl>` | *"the 'lodt' command is retired ... use 'lodl <file.lodl>'"* |
+| `--lodt <dir>` | `--lodl <dir>` | *"--lodt is retired ... use --lodl <dir>"* |
+| `--lodv-check FILE` | `--lodt-check FILE` | *"--lodv-check is retired ... use --lodt-check"* |
+| `WW_LODT_VERSION` | `WW_LODL_VERSION` | the writer FAILS and names the new one |
+| `WW_LODT_REGION` / `_PLANE` | `WW_LODL_REGION` / `_PLANE` | `qCritical` REFUSED line, then ignored |
+| `lodt: <path>` on stdout | `lodl: <path>` | - |
+| `lodv ok 1` / `lodv <key>` | `lodt ok 1` / `lodt <key>` | - |
+
+Panel rows: *Landscape file (.lodl)*, *Terrain virtual texture (.lodt)*, and the
+summary sentence now names `Terrain\<ws>.lodl`. The panel's objectNames and its
+`LodGeneration/lodt` settings key were deliberately NOT renamed: the first is
+how `src/nifskope_ui.cpp`'s self-test finds the rows (another lane's file), the
+second would silently reset bungo's own ticks.
+
+**A NEW GATE, both directions, with a control on each side.**
+`tests/spells/lodl_write.sh` gained a refusal section: a real `.lodl` must still
+open (control), a 0x98-byte `LDTX` header must be refused with the words
+*TEXTURE file* in it, the shipped Commonwealth landscape file copied to
+`old_meaning.lodt` must be refused by `--lodt-check` with the word *lodl* in it,
+each of the three retired spellings must fail AND name its replacement, and the
+renamed file must still `--verify-only` at 0 mismatches.
+`tests/spells/lodgen_terrain_vt.sh` does the real-file half: the actual baked
+`Commonwealth.VT.8.lodt` handed to the `lodl` route.
+Renamed with `git mv`: `lodt_write.sh` -> `lodl_write.sh`, `lodt_open.sh` ->
+`lodl_open.sh`, `lodt_btd.sh` -> `lodl_btd.sh`, `lodt_open_authority.py` ->
+`lodl_open_authority.py`, `docs/LODGEN_NATIVE_LODG_LODI.md` ->
+`docs/LODGEN_NATIVE_LODO_LODI.md`.
+
+**Three other things owed in these files, done:**
+
+1. **`--candidates trees` meant `tree || missing`** (`src/nifcli.cpp`), which is
+   a SUPERSET of the default, not a tree list: 14 of a 33-candidate Sanctuary
+   run were shacks and rock cliffs (measured by another lane, `HANDOFF.md` bug
+   intake 3). It is `want = tree;` now, and the comment in
+   `tools/bake_impostor_cards.sh` says so.
+2. **The three wrong hex comments** beside correct vertex descriptors in
+   `src/lodgen.cpp` (`WRITER_CHANGES_NEEDED.md` item 1). `0x300000000303` ->
+   `0x0000300000000203`, `0x1B00000650405` -> `0x0001B00000430205`,
+   `0x3B00000650406` -> `0x0003B00005430206`, each verified equal to its own
+   integer, and the computed 32-byte object profile `0x0013F07006543208` written
+   beside `OBJ_VERTEX_DESC_COLORS` where there was nowhere to read it off.
+   **No value moved**; the patch script asserts all three integers survive.
+3. **The qmake re-run owed since BUILD1** is NOT done, because there is no build
+   slot - and it now matters more, not less: `lodtfile.cpp` gained an include of
+   `io/lodvfile.h` and `lodvfile.cpp` one of `lodtfile.h`, and qmake freezes its
+   dependency lists at generation time. The resume runs `qmake` before `make`
+   and then greps `Makefile.Release` for both new dependencies.
+
+**The provenance footers were re-derived, not merely re-stamped.** Every
+`sha256`/bytes/lines row for a source this lane touched was recomputed, and every
+line number in `LODGEN_BTD_FORMAT.md` (45 rows) and `LODGEN_TERRAIN_VT.md` (16)
+was re-found from its own anchor text against the current file - 54 of 61 moved,
+and several had been stale since before this lane (the seam-maximum row pointed
+at 862 and the anchor sits at 1066). Two rows' anchors no longer exist at all
+because another lane extracted `lodtHeightWord`; those were rewritten to name the
+helper. The procedure is now the skill `ww-contract-provenance`.
+
+**What is NOT done, and who owns it:** the GUI open route.
+`src/nifskope.cpp` (five suffix comparisons and the file-type list) and one line
+of `src/nifskope_ui.cpp`'s `WW_LODGEN_TEST` belong to another lane; the exact
+edits are written out in `scratchpad/rename_20260909/GUI_CHANGE_NEEDED.md`.
+Until that line lands, `tests/spells/lod_generation.sh` fails exactly one check
+- *"with one, the panel says what it will write"* - and that is expected.
+
+## 2026-09-09 - Headless runs put no window on any screen (the bake's black/white strobe)
+
+`src/nifskope_ui.cpp`, `tools/bake_impostor_cards.sh`, `tests/spells/render_shot.sh`.
+**BUILT 2026-09-09 by lane BUILD2 -- AND THE FIX IS INERT. THE STROBE IS STILL
+LIVE.** `release/NifSkope.exe` 18:43:13, `tests/spells/render_shot.sh`
+**28 checks, 6 failures**. Sections 1-4 (the Save Confirmation guard) stay green;
+all six failures are sections 5's, and they say the window was on a monitor.
+Read the paragraph at the end of this entry before running any bake.
+
+bungo, verbatim: *"when these trees bake their impostors, the screen is flashing
+white and black, that's a view hazard for epileptics"*.
+
+**WHAT SHOWED.** Every headless run opened a real, visible window. `createWindow`
+had two placement branches and both of them ended in a shown window: with
+`WW_WINDOW_AT` set - which `tests/spells/_harness.sh:29` exports for every
+harness, and which `tools/bake_impostor_cards.sh` inherits by sourcing it - the
+window was moved to `1960,40` and `show()`n on the second monitor; without it,
+`showMaximized()` + `raise()` filled the primary monitor and took focus. There is
+no third path: a `WW_RENDER_SHOT`, a `WW_LOD_CHANNEL` preview, a card bake and
+every `WW_*_TEST` harness all came through it.
+
+**WHAT FLASHED.** The impostor card baker photographs a TWO-PASS MATTE: the scene
+over a black clear and over a white one, the difference of the two being
+`1 - alpha`. Counted from the code, one octahedral view costs NINE full repaints
+of that visible window - two for the extent matte of pass one, then two for the
+card matte of pass two plus five channel renders (view-space normal, depth,
+material, alpha-test, emissive). At `OCT=8` that is `64 * 9 + 4 = 580` repaints
+per model, milliseconds apart, two in every nine of them alternating full-frame
+black and full-frame white, and the driver runs model after model for dozens of
+models. Nothing per-frame was created or destroyed and nothing was hidden and
+re-shown; the strobe is the matte's own clears, on a window that had no reason to
+be on a monitor.
+
+**THE FIX: THE WINDOW IS MOVED OFF EVERY SCREEN BEFORE IT IS SHOWN.**
+`grabFramebuffer()` reads the window's BACK BUFFER after `paintGL()` - the
+capture path never consults the desktop - so a headless run needs a window, not a
+visible one. `NifSkope::createWindow` now takes a third branch first when
+`NifSkope::wwHeadlessRun()` is true (the same one-line predicate the Save
+Confirmation guard uses: any `WW_*` variable, or `-no-gui`): the window is moved
+to the left edge of the union of every screen, 64 px below its bottom, given
+`Qt::WA_ShowWithoutActivating` - an off-screen window that steals the keyboard is
+worse than a visible one - and only then shown. `WW_WINDOW_AT` still decides
+where a window goes, but only when `WW_WINDOW_VISIBLE=1` asks for a visible one:
+that is the exact way back to the old behaviour, and it is what the gate uses as
+its control.
+
+**ONE ROUTE STILL REACHES A SCREEN, DELIBERATELY.** `WW_GIZMONUM_TEST` walks the
+window under the real mouse pointer (`QCursor::setPos` is a no-op for a process
+that is not foreground, so it moves the window instead of the cursor), which
+brings it back onto whichever monitor the pointer is on. It renders no matte,
+repaints a handful of times, and flashes nothing. Every other headless route
+stays off-screen.
+
+**THE INSTRUMENTS, AND THE FLOOR.** A run now records its own top-level windows
+to `release/ww_headless_windows.log` - at show, at each `WW_RENDER_SHOT` grab, at
+the start of the bake matte and at the start of the octahedral sheet - one line
+per window with its geometry and `onscreen=0/1` measured against
+`QGuiApplication::screens()`. `tests/spells/render_shot.sh` gained sections 5 and
+6: section 5 requires the three existing runs to have recorded windows at all
+(anti-vacuity) and then to show zero `onscreen=1` records and zero on-screen
+samples from an outside PowerShell watcher that samples every 200 ms for the life
+of each run; section 6 re-runs the plain render with `WW_WINDOW_VISIBLE=1` and
+requires BOTH instruments to see a window on a screen, or their zeros above prove
+nothing. That control run is also the pixel gate: one build, one scene, two
+window positions, and the two PNGs must be byte-identical. That is a tighter
+comparison than a before/after exe, which would carry every other uncommitted
+change in the tree as well. The gate's own on-screen window is one cube render of
+a few seconds - not a matte and not a strobe.
+
+Section 4 was also narrowed: it counted every `NifSkope.exe`, so a person's own
+open window failed a check that has nothing to do with the code under test. It
+now counts only harness instances, which always carry `--port`.
+
+**MEASURED 2026-09-09 (lane BUILD2), AND BOTH HALVES CAME BACK BADLY.**
+
+**1. The branch above never runs the way it reads.** `restoreUi()`, two lines
+earlier, restores the window state the person last left -- MAXIMISED -- and on
+Windows `move()` on a maximised window changes nothing except which monitor it
+is maximised onto. The off-screen origin is on no monitor, so the move did
+nothing: every headless run came up maximised on the primary screen, `2 of 4`
+window records `onscreen=1`, the outside sampler seeing it at `-8,-8,1928,1048`.
+The control run is the proof: it asked for `move(1960,40)` and the window's
+client origin came out `1920,-42`, the maximised client origin of the monitor
+containing that point, not the point. **bungo's strobe is exactly as it was.**
+
+**2. And the off-screen window does not render.** With one line added to clear
+the maximised bit before the move (built, measured, then REVERTED), the window
+did leave every screen -- `0 of 4` records `onscreen=1` on all three runs -- and
+then `WW_RENDER_SHOT` wrote **no PNG at all** and `WW_IMPOSTOR_BAKE` wrote its
+sidecar and **no card image**, both exiting 0 in a few seconds. A window entirely
+outside every screen is never exposed, so `QOpenGLWidget` never creates its
+context and `grabFramebuffer()` returns a null image. An off-screen bake would
+have written EMPTY card sets while reporting success, and the driver caches by
+form id, so the emptiness would have been cached. That is worse than the hazard,
+so the tree stands as this entry describes it and the cure is a design decision,
+not a build lane's.
+
+**Two candidates for that cure, neither measured.** (a) Render into an FBO
+instead of the window -- `GLView::grabSupersampled` (`src/glview.cpp`) already
+binds a `QOpenGLFramebufferObject` and short-circuits `shift == 0` to
+`grabFramebuffer()`, which is the case that would need writing; an FBO render
+does not need the window exposed once a context exists, and where that context
+comes from is the open question. (b) Leave the window on a screen and set its
+opacity to 0, which stays exposed and composited and so still renders, while
+painting nothing a person can see -- the gate's instrument counts geometry, not
+visibility, so section 5 would have to change with it.
+
+**Section 6's identity check also has to grow a precondition.** It read
+`off fedab869884174fb / on fedab869884174fb  ok` in the same run in which six
+checks said the window was on a screen: it had compared a picture with itself.
+It must first require the off-screen run to have recorded zero `onscreen=1`.
+## 2026-09-09 - Headless runs no longer stop on the Save Confirmation dialog
+
+`src/nifskope.cpp`, `src/nifskope.h`, `tests/spells/render_shot.sh`. BUILT AND
+RUN 2026-09-09 by lane BUILD1: `release/NifSkope.exe` 17:22:05, and
+`tests/spells/render_shot.sh` reads **15 checks, 0 failures, PASS** (exit 0).
+
+bungo, verbatim: *"agents keep always hanging on save confirmation"* - with the
+box reading "You have unsaved changes to TreeMapleForest3" over a card bake that
+was on its way out.
+
+**THE CAUSE IS THAT `qApp->quit()` IS NOT `exit(0)` ANY MORE.**
+`QCoreApplicationPrivate::quit()` is virtual (Qt 6.11,
+`QtCore/private/qcoreapplication_p.h:105`) and `QGuiApplicationPrivate` overrides
+it (`QtGui/private/qguiapplication_p.h:83`) to close every top-level window before
+the loop exits. Every WW_* hook ends in `qApp->quit()`, so every one of them runs
+`NifSkope::closeEvent` (`src/nifskope.cpp:7421`), which asks `saveConfirm()`
+(`src/nifskope_ui.cpp:28489`) - a modal question in a process with nobody to
+answer it. The run sits there until its own `timeout` kills it and writes nothing.
+
+**WHICH ROUTE LEAVES THE DOCUMENT MODIFIED.** Two, measured by reading the
+writers:
+
+| route | what it writes into the loaded model | why it is dirty |
+|---|---|---|
+| impostor card bake (`WW_IMPOSTOR_BAKE`) | `LOD1 Size` / `LOD2 Size` = 0, and `Flags\|1` on every `_L1`/`_L2` shape (`src/nifskope_ui.cpp:21489-21497`) | bungo's exact case: `TreeMapleForest3` is the maple whose near mesh carries those in-cell detail steps |
+| generated terrain documents (`.btd`, `.lodt`) | the whole document, which is BUILT, not parsed (`src/nifskope.cpp`, the load chain) | building it fires `NifModel::dataChanged`, wired to `setWindowModified` in the constructor - so a terrain document was born dirty |
+
+`WW_RENDER_SHOT` and `WW_LOD_CHANNEL` write nothing into the model themselves; a
+plain render of a .nif was only ever caught by the second row above, or by
+whatever the harness around it had edited.
+
+**THE FIX IS ONE PREDICATE AND ONE GUARD.** `NifSkope::wwHeadlessRun()` is the
+predicate, and it is deliberately the SAME test `saveUi()` has made since
+2026-07-27: any environment variable named `WW_*` (plus `-no-gui`, which never
+builds a window anyway). No second list of switches to keep in step. The guard
+is at the top of `closeEvent`, and it sets STATE rather than branching, so the
+whole close path below it - this window's `saveConfirm()`, every group member's,
+and the "unsaved and not on disk anywhere" background-document question - takes
+the discard answer by itself. With no `WW_` variable set the block does not run
+and interactive behaviour is byte-for-byte what it was.
+
+**AND THE GENERATED DOCUMENT IS NO LONGER BORN DIRTY.** A `.btd`/`.lodt` scene
+now clears and cleans its undo stack before `completeLoading`, exactly as the
+starter document already did. That is the honest state: nobody edited anything,
+and `NifSkope::save()` refuses to write those suffixes back anyway.
+
+**A DISCARD IS WRITTEN DOWN.** The dialog left a trace on screen; a discard
+leaves none, and "the harness did not hang" passes just as well on a document
+that was never dirty. So the guard names every document it actually decided for
+in `release/ww_headless_close.log` (and on `qInfo`), and writes no file at all
+when there was nothing to discard. That pair is what the gate fails on in both
+directions.
+
+**THE GATE** is `tests/spells/render_shot.sh`, new: `-no-gui new --cube` and one
+`set -f Name` derive two fixtures from the application itself - no game corpus,
+nothing hand-authored - differing only in whether one shape is named `*_L1`.
+Three runs (plain render, plain bake, dirty bake) are each asserted on exit code
+0, on wall clock well inside the cap, on their own output file, and on the
+discard log: absent for the two clean cases, naming `cube_lod` for the dirty one.
+The bake's own `hidden` sidecar line is asserted too, so the dirty case cannot
+pass by quietly having been clean. On the old code all three fail on the timeout.
+
+MEASURED, on the built exe. The plain render exits 0 in 5 s and writes a
+30,356-byte framebuffer with NO discard line; the bake on the same clean cube
+exits 0 in 3 s, writes its sidecar, and still discards nothing; the bake on the
+`_L1` cube exits 0 in 3 s (rc 124 is the dialog), its sidecar carries one
+`hidden` line, and `release/ww_headless_close.log` reads exactly
+`discarded cube_lod`. No NifSkope process survived any of the three.
+
+NOT measured: the OLD binary was not run to watch the dialog appear -- the
+17:09 link overwrote it and the guard cannot be turned off from outside (it
+fires on any `WW_*` variable, and every headless route sets one). The claim
+that the old code sat at rc 124 stays a reading of the sources.
+
+The harness itself could not run as the lane left it, and BUILD1 fixed it:
+the dirty fixture was made with `-no-gui set -f Name -v <text>`, which the
+CLI refuses -- a block's Name is a `tStringIndex` and
+`NifValue::setFromString` parses that as a NUMBER -- and read back with
+`get -f Name`, which prints the index. The rename now rewrites the one
+length-prefixed entry in the header string table (the bytes still come from
+the app's own `new --cube`) and both names are read out of `list`.
+
+## 2026-09-09 - The file family is frozen: seven contracts, each traced to the writer
+
+Docs only. No `src/` change, no build, no commit. bungo's ruling of the same
+afternoon, verbatim: *"lodg sounds better"* - the FO4CS-native far field is
+`.lodg` + `.lodi`, there is no interim `.lodo`, and `.bto` stays the stock bake.
+
+**ONE CONTRACT DOCUMENT PER FILE TYPE, VERSIONED, WITH A PROVENANCE FOOTER.**
+Each names the version it freezes, the byte or key layout, the invariants a
+reader may assume, what is refused and how, and a sample-file path - and each
+ends with a table mapping every claim to the writer line it was read at, quoted
+by anchor text because two source files moved under this lane while it wrote.
+
+| file type | contract | frozen at |
+|---|---|---|
+| `.lodt` | `docs/LODGEN_BTD_FORMAT.md` (completed) | magic `LODT`, **versions 1 AND 2** |
+| `.lodv` | `docs/LODGEN_TERRAIN_VT.md` (verified, footer added) | magic `LODV`, version 1, header 256 B, stride 24 |
+| `.lodm` | `docs/LODGEN_LODM_FORMAT.md` (**new**) | envelope 1, payload `lodm` 1, five kinds |
+| `<chunk>.bto.manifest.txt` | `docs/LODGEN_MANIFEST_FORMAT.md` (**new**) | `# lodgen manifest 2` |
+| card sheets + card arrays | `docs/LODGEN_CARD_SHEETS.md` (**new**) | `kind` card / cardArray |
+| mesh texture arrays + atlas | `docs/LODGEN_TEXTURE_ARRAYS.md` (**new**) | sidecar version 5 |
+| `.lodg` + `.lodi` | `docs/LODGEN_NATIVE_LODG_LODI.md` (**new**) | **SPEC, NOT WRITTEN** - headers 256 B each, instance record 24 B |
+
+`docs/LODGEN_IMPOSTOR_SPEC.md` is demoted to the DESIGN RECORD and says so at
+the top: rationale and measurements there, bytes and refusals in the contracts,
+and where the two disagree the contract wins because it carries the writer line.
+
+**THREE VERTEX DESCRIPTOR CONSTANTS IN `docs/LODGEN_VERTEX_PACKING.md` WERE
+WRONG, AND THE SAME HEX IS STILL WRONG IN THE SOURCE COMMENTS.** The integers
+are right; the hex beside them is not.
+
+| constant | integer | said | is |
+|---|---|---|---|
+| `LAND_VERTEX_DESC` | 52,776,558,133,763 | `0x300000000303` | `0x0000300000000203` |
+| `OBJ_VERTEX_DESC` | 474,989,027,590,661 | `0x1B00000650405` | `0x0001B00000430205` |
+| `OBJ_VERTEX_DESC_COLORS` | 1,037,939,064,898,054 | `0x3B00000650406` | `0x0003B00005430206` |
+
+Decoded through `BSVertexDesc::ResetAttributeOffsets( 130 )`, the old object
+value puts UV at +16, the normal at +20 and **no colour channel at all** - a
+reader trusting it samples normal and tangent bytes as an object id, which is
+the exact failure the terrain harness once had. The old terrain value puts UV at
++12 on a 12-byte vertex. A new section, *The descriptors, decoded*, gives all
+ten profiles (objects x3, terrain x4, water x2, the `.lodt`/`.btd` viewer scene
+x2) with stride, flags and every attribute offset. The source comments are
+`scratchpad/handoff_fo4cs/WRITER_CHANGES_NEEDED.md` item 1; this lane is docs
+only and did not touch them.
+
+**Two more contradictions between the documents and the code, both fixed here.**
+`LODGEN_VERTEX_PACKING.md` called the array sidecar version 4 (it is 5, with
+`emissiveScale` appended), and listed the manifest's `class` and `bound radius`
+as MISSING when both have shipped since 2026-09-06 - `class` is field 7 and the
+radius is field 8, which the header line misleadingly calls `height`.
+
+**WHAT WAS ADDED TO THE `.lodt` CONTRACT**, all of it reader-critical and none
+of it previously written down: **row 0 is SOUTH** in every grid the file carries
+and `.lodv` is north-up (the two live conventions, one Y mirror already spent);
+quadrant addressing and the q order SW/SE/NW/NE; the optional planes SHIFT the
+plane index, so ground cover is plane 2 without colour and 3 with it; the exact
+three-step walk from a global sample to a byte offset; the block payload is a
+plain zlib stream with Qt's four-byte prefix stripped; AO is 255 when absent and
+its eight-direction march is stated so a consumer can reproduce it; the writer's
+default header fields; twelve invariants and the reader's refusals by name;
+**and version 2**, which a concurrent lane added while this one was writing.
+
+**THE HANDOFF PACKAGE** is `scratchpad/handoff_fo4cs/`: `README.md` carries the
+family in one table (purpose, status, whether a reader exists in FO4CS), the
+read order, the native spec's D3D11 section rewritten as a ten-step reader's
+checklist, the sample-file audit, and the open items; `WRITER_CHANGES_NEEDED.md`
+carries the five things the writer would have to change, with who decides.
+
+**THE SAMPLE-FILE AUDIT IS MOSTLY EMPTY, AND THAT IS THE FINDING.** Of the eight
+shipped file types, exactly one exists on disk anywhere: the five `.lodt` files
+in bungo's mod folder, written 2026-09-05, **version 1, and predating both
+2026-09-09 `.lodt` fixes**. No `.lodv`, no `.lodm` of any kind, no version-2
+manifest (the three in `scratch_water/` are version 1 - no header line, eight
+fields), no card sheet, no texture array, no atlas. One generator run produces
+every one of them; it is blocked on `tests/spells/lodgen_terrain.sh`, PENDING
+since the game was up when lane LATTICE landed.
+
+**ONE LIVE INCOMPATIBILITY, ALREADY NAMED BY THE VERSION-2 LANE AND RESTATED
+HERE FOR THE CONSUMER.** `LodtOptions::headerVersion` defaults to 2 and FO4CS's
+shipped parser pins `kVersion = 1u`. A fresh bake is REFUSED there - cleanly,
+not misread, which is the designed behaviour. The way back needs no rebuild:
+`WW_LODT_VERSION=1`.
+
+Two entries in `MISTAKES.md`: a handoff document quoted as a cause instead of
+the tree (the Far Harbor 62 texels, whose real cause a concurrent lane had
+already measured and fixed), and a contract written against source that moved
+under it.
+
+## 2026-09-09 - The pyramid was writing the 2026-09-07 normal map, and a cell with no landscape read as flat zero
+
+Three defects, one theme: a second copy of something that already had one home.
+
+**THE VIRTUAL-TEXTURE TILE BAKER HAD BOTH 2026-09-07 DEFECTS.**
+`lodgenBakeVtTile` sampled the height grid with `int( ngx )` -- NEAREST, so all
+sixteen texels of a 4x4 block read one height sample and got one normal -- and
+wrote north in green with up in blue, the conventional order. Those are exactly
+the two the per-chunk baker lost on 2026-09-07; this was a COPY of those twelve
+lines and kept them. It is not a future consumer's problem: with `--vt` on, the
+`.btr` chunk sheets are ASSEMBLED from these tiles
+(`docs/LODGEN_TERRAIN_VT.md` 2.4), so a `--vt` bake shipped the pre-2026-09-07
+`_msn` into the stock engine under the same file name.
+
+Both paths now call `lodgenTerrainHeightAt` (bilinear through the quintic ease)
+and `lodgenTerrainMsnPixel` (R east, G up, B north). MEASURED offline on the
+tile's own heights out of a written `.lodt`, before the block codec, against
+vanilla's shipped sheet for the same tile
+(`scratchpad/terrainfix_20260909/vt_msn_sim.py`):
+
+| tile | statistic | pyramid, before | after | vanilla |
+|---|---|---|---|---|
+| 4.-60.36 | grid-phase roughness | 2.001 | **0.209** | 0.065 |
+| 4.-20.24 | grid-phase roughness | 2.000 | **0.150** | 0.031 |
+| 4.-60.36 | left-diff by x mod 4 | 98/0/0/0 | 36/98/99/98 | 100/63/64/63 |
+| 4.-20.24 | left-diff by x mod 4 | 93/0/0/0 | 40/93/95/93 | 100/67/68/67 |
+| 4.-60.36 | mean UP as the shader reads it | 0.288 | **0.841** | 0.770 |
+| 4.-20.24 | mean UP as the shader reads it | -0.151 | **0.943** | 0.894 |
+
+The roughness is lane LATTICE's phase-conditional statistic; its known-answer
+controls read 0.044 on a smooth analytic field and 1.996 on the same field
+creased every fourth column, a separation of 45.7x, and the old pyramid sheet
+sits AT that creased ceiling. The left-difference fractions are 2026-09-07's
+zero-order-hold signature. The last row is the channel order stated as a
+picture: with up in blue, Sanctuary's ground read as facing slightly DOWNWARD.
+
+Gate: `tests/spells/lodgen_terrain.sh` rung 4 bakes the same chunk WITH `--vt`
+and asserts the assembled sheet's up channel is green and that its
+left-difference classes 1..3 clear 20% (nearest gives 0), with vanilla's own
+sheet read beside it as the known-answer control.
+
+**AND THE FLAT-NORMAL FILL WAS THE RENDERER'S CONSTANT IN THE WRONG BYTE
+ORDER.** All five `0xFFFF8080U` fills in `lodgen.cpp` came from
+`src/gl/renderer.cpp`, where a `quint32` is RGBA bytes; these buffers are ARGB,
+so the value decoded as east +1, up 0 -- a sideways normal, wrong under BOTH
+channel orders. `LODGEN_MSN_FLAT = 0xFF80FF80U` is flat ground in the order we
+write. Only reachable where a tile or a mosaic row is missing, which is why it
+never showed.
+
+**A CELL WITH NO `LAND` RECORD WAS WRITTEN AS FLAT HEIGHT ZERO, AND LOST THE
+ROW ITS NEIGHBOURS SHARE WITH IT.** VHGT's row 32 and column 32 ARE the north
+and east neighbours' row 0 and column 0, whether or not that neighbour has a
+record of its own; the shadow heightmap applies the seam maximum there
+regardless, and the `.lodt` refused the plane outright and substituted a bare
+32767 -- height ZERO, not the worldspace's default land height. The two files
+are read by FO4CS as ONE surface, so a sample they disagree on is the
+ridge-that-casts-a-shadow-without-being-drawn of 2026-09-05c.
+
+MEASURED, every worldspace with a written `.lodt`, against its own shadow
+heightmap texel for texel
+(`scratchpad/terrainfix_20260909/lodt_vs_heightmap.py`, an independent decoder;
+the heightmaps are the authority because the Commonwealth one is byte-identical
+to Bethesda's `Commonwealth_fine`):
+
+| worldspace | texels | differing, before | landless cells |
+|---|---|---|---|
+| Commonwealth | 37,748,736 | **0** | 0 of 36,864 |
+| NukaWorld | 4,326,400 | **0** | 0 |
+| DLC03FarHarbor | 20,207,616 | **62** | 1 in the diffed area |
+| NukaWorldAmphitheater | 114,688 | **97** | 110 of 112 |
+| DiamondCity | 172,032 | **167,936** | 164 of 168 |
+
+Far Harbor's 62 are ONE cell, (14,-6), ringed by eight that have land: its row
+0 (32 texels, from the south neighbour's row 32) and its column 0 (rows 1..31
+from the west neighbour's column 32), less the single sample that happened to
+be exactly 0. DiamondCity's 164 landless cells read 0 where the heightmap says
+-2048, that worldspace's default land height. The Commonwealth has not one
+landless cell, which is why four days of byte-identity gates said nothing.
+
+The default height does not take part in the maximum on an inherited sample,
+exactly as it does not in the heightmap -- Far Harbor's default is 0 and its
+inherited row is around -250, so a max against the default would have kept all
+62 wrong. The per-cell min/max now covers the inherited row too, so a renderer
+culling on it cannot cull what the file draws.
+
+Gate: `tests/spells/lodt_write.sh` bakes NukaWorldAmphitheater's `.lodt` AND
+its heightmap and requires every one of the 114,688 texels to agree, having
+first checked that the worldspace HAS landless cells so the check can fail. Run
+against the shipped files it reads 97 and goes red.
+
+**`.lodt` VERSION 2: THE WORLDSPACE'S OWN WATER.** A cell's water type of
+`0xFFFF` means "the worldspace default", and the default's WATR form is
+deliberately not interned in the WATR table -- that is what keeps "inherited"
+distinguishable from "explicitly this type" -- so it appeared nowhere in the
+file and `0xFFFF` was unresolvable. Version 2 appends the default water height
+(`DNAM`) and form (`NAM2`) AFTER the ten section offsets, so every offset a
+version 1 reader uses is at the byte it was. The reader accepts 1 and 2.
+
+**FO4CS's shipped `.lodt` parser (lane LODT1, wave 71) pins `kVersion = 1u` and
+refuses anything else**, so a fresh bake is refused there until that lane
+learns version 2. The way back needs no rebuild on our side: `WW_LODT_VERSION=1`
+writes the version 1 bytes exactly, and the harness proves EXACTLY -- same
+file, every section offset shifted by the eight bytes appended, everything past
+the header byte-identical.
+
+Also: `tests/spells/lodt_write.sh` printed `RESULT PASS`/`FAIL` and threw the
+exit code away -- the python block was the script's last command and never
+called `sys.exit`, so the harness reported success on any measurement at all.
+It exits on its verdict now.
+
+**BUILT AND RUN 2026-09-09 by lane BUILD1**, `release/NifSkope.exe` 17:22:05.
+`lodgen_terrain.sh` **26 checks, 0 failures**: the pyramid-assembled sheet now
+reads `UP=G D0=76 D1=32 D2=51 D3=32`, byte-for-byte the same statistic as the
+direct bake, against vanilla's own `UP=G 99/67/67/67` as the control -- the
+nearest-sampled sheet gave 0 on classes 1..3. `lodt_write.sh` **PASS, exit 0**
+in all three sections, and NukaWorldAmphitheater now reads **0 of 114,688**
+texels differing from its shadow heightmap where the shipped file read 97.
+The whole set, freshly baked and diffed against its own heightmap: Commonwealth
+0 of 37,748,736, NukaWorld 0 of 4,326,400, DLC03FarHarbor 0 of 20,207,616
+(was 62), DiamondCity 0 of 172,032 (was 167,936), NukaWorldAmphitheater 0 of
+114,688 (was 97). The offline `_msn` table reproduced exactly on the built
+exe's own `.lodt`: roughness 2.001 -> 0.209 and 2.000 -> 0.150 on the two
+tiles, mean UP 0.288 -> 0.841 and -0.151 -> 0.943.
+
+Two things the lane could not have known, both found by the build.
+`lodgen_terrain.sh` rung 4 asked the pyramid for a chunk sheet its region
+could not produce (`--terrain-region -20 24 -19 25` is a quarter of the dim-4
+chunk; `assembleChunkRow` needs both child tile rows of a parent row), and it
+now bakes the whole chunk. `lodt_write.sh` asserted the version-1 fallback was
+byte-identical past the header, which the format forbids: the block directory
+stores each payload offset ABSOLUTE, so all 48,960 of them move by the same
+eight bytes. The check now compares those entries as numbers (0 offsets not
++8, 0 sizes changed) and the 9,437,644 bytes before the directory and the
+25,732,130 after it byte for byte -- a stronger statement than the one it
+replaced.
+
+And the version-2 header cost one crash before it was caught.
+`src/btdterrain.cpp` includes `lodtfile.h` and puts a `LodtFile` on the stack,
+but qmake's dependency list for `btdterrain.o` never names that header, so
+make left the object at its 15:30 build while `lodtfile.o` grew three members
+at 17:09; `LodtFile::open()` then wrote past the caller's smaller object and
+every `-no-gui lodt` run segfaulted, on version 1 files as well as version 2.
+Found by `lodt_open.sh`, fixed by rebuilding the object; the dependency was
+added to `Makefile.Release` by hand and a qmake re-run is owed.
+`lodt_open.sh` then reads **23 checks, 0 failures** on a version 1 file and on
+a version 2 one.
+
+## 2026-09-09 - Opening a `.lodt`, and every plane in it viewable on its own
+
+bungo: "We need a way to open it, just like we can open Fo76's map terrain
+file." Then: "I need to view the AO baked and other stuff too."
+
+A `.btd` already opened through `File > Open` (`src/nifskope.cpp:158`
+registration, `:9541` picker, `:9926` load branch, generator
+`src/btdterrain.cpp`). A `.lodt` now joins that route at all four touch points,
+plus `-no-gui lodt` beside `-no-gui btd`. Same picker shape, same generated
+Fallout 4 document, same seam rule, same 254-vertex tile ceiling: the tile
+mesher is now ONE function both formats call, so nothing about the two scenes
+can drift apart.
+
+**Every plane the format lists is viewable on its own.** Heights are the
+geometry; each other plane paints that same surface as vertex colours, one at a
+time, and only that plane is read. Commonwealth.lodt (35,953,286 bytes, sections
+0xd) offers nine: `height ao blend colour waterheight watertype cellflags
+cellrange overview`. It carries no ground cover, and asking for it REFUSES in
+words naming the section flags rather than drawing black.
+
+  * The Height view writes no colour channel, so its vertex descriptor is the
+    `0x0041B00000650407` this route has always written - 28 bytes a vertex, the
+    same bytes a `.btd` of the same terrain builds. A plane view is 32.
+  * The build PRINTS what the plane measured. A plane read back as one constant
+    and a plane never read look identical in a picture; the AO line carries the
+    plane's texel size, its value range and its mean, the water line its cell
+    count and height range, the overview line its greatest disagreement with the
+    block pyramid on the shared lattice.
+
+**Two changes in shared code**, both gated by `lodt_write.sh` / `lodt_btd.sh`:
+
+  * `LodtFile` gained `aoSample()`, `overviewWord()`/`overviewHeight()` and the
+    GCVR table (`gcvrCount()`, `gcvrForm()`) - the AO and overview sections had
+    an offset accessor and no way to read a texel.
+  * `LodtFile`'s one-block inflate cache became an LRU, capacity 1 by default so
+    a sample walk is unchanged. It has to: the pyramid is PROGRESSIVE, so a
+    subsampled read alternates between the level that stores every 4th sample
+    and the one that stores every 8th, and a single slot misses on EVERY sample.
+    The scene builder asks for 256 blocks, ~1.5 MB at Commonwealth's three
+    planes.
+
+**Measured on Commonwealth.lodt**, from the file's own header: 192x192 cells,
+32 samples a cell, quantum 8, 4 levels, 48,960 blocks, 100 LTEX, 15 WATR, AO and
+overview both 8 a cell. The reader holds the 9.75 MB prefix (header, tables,
+per-cell records, the 2.4 MB AO plane, the 4.7 MB overview, the 783 KB block
+directory); the 25.7 MB of block payloads are never resident. A bare open takes
+the whole worldspace at 8 samples a cell: 49 shapes, 2,380,849 vertices, a
+1537x1537 sample grid costing 9.0 MB of heights (18.0 MB with a plane's
+colours) and a 63.6 MB BSTriShape payload (72.7 MB for a plane view).
+
+New gate `tests/spells/lodt_open.sh`, 23 checks, whose right-hand side is
+`tests/spells/lodt_open_authority.py` - a decoder of the header, the flat
+sections and the progressive pyramid written from the format document, sharing
+no code with `lodtfile.cpp`. Floors under every check: the region's heights must
+vary, a one-sample-shifted decode must NOT match, and no two planes may render
+the same picture - a plane selector that ignored its argument would otherwise
+build, size and report correctly and still be wrong.
+
+**MEASURED 2026-09-09 15:22-15:45, game down, on `release/NifSkope.exe` 15:30:27.**
+Build through `tools/ww_build.sh` on all four sources: `BUILD-RC=0`, exe newer
+than every file in `src/`, `res/style.qss` and `release/style.qss` in step. No
+compile or link error at any point.
+
+Gates. **G1** byte identity: `lodt_write.sh` 11 checks / 0 failures (heights
+round-trip EXACTLY vs the ESM over 36,864 samples, worst 0; alpha and colour
+words 0 of 36,864 differ), and Commonwealth regenerated from `Fallout4.esm` in
+4.9 s is `cmp`-identical to the shipped file, all 35,953,286 bytes. **G2**
+parity: `EXM1PittWorldspace.btd` converted in 2.5 s; both routes mesh cells
+[-25,-25]..[24,24] at LOD4 into 4 shapes / 161,604 vertices; max |dx| and
+max |dy| are 0.000000 and max |dz| is 0.305524 world units against a
+half-quantum bound of 0.305185 (100.1%), mean |dz| 0.302154 - a near-constant
+bias, which is the documented range-normalised vs fixed-32767-bias difference,
+not noise. The two renders differ on 98 of 247,363 terrain pixels, max delta 1.
+**G3** `lodt_open.sh` 23 checks / 0 failures. **G4** `lodt_btd.sh` PASS and
+`btd_terrain.sh` 13 checks / 0 failures - the gate that proves the extracted
+shared `buildTerrainSurface()` left the `.btd` scene unchanged. **G5** eleven
+pictures in `scratchpad/lodt_20260909/`, plus the ground-cover refusal as text.
+
+The first G3 run was 23 / 2, and both failures were defects in our own
+materials, now fixed and logged in `MISTAKES.md`: the check's expected
+`Data Size` of 12324 was a mis-added sum (289*32 + 512*6 = 12320, which is what
+the code wrote), and the colour plane's note counted `w != 0xFFFF` while
+calling it "not white" - the writer packs `R<<11 | G<<6 | B` and never sets
+bit 5, so pure white is 0xFFDF and 0xFFFF is the no-record word. The note now
+leads with the tint count. The file's own answer: 4,335 of 2,362,369 samples
+(0.2%) carry a tint, confirmed independently at 23 of 9,216 (0.25%) by the
+Python authority, so Commonwealth has essentially no authored terrain colour
+and its colour plane is a white sheet by right.
+
+Memory and time on the whole Commonwealth, measured (Win32 PeakWorkingSetSize
+via ctypes; psutil is not installed for this Python): **14.8 s wall and
+4431.2 MB peak working set** for the full-rate open of 2,380,849 vertices,
+against a 426.6 MB / 4.4 s baseline for a 2x2-cell open and 1296.5 MB / 6.7 s
+at LOD3 - repeatable to 0.05%, and linear in vertex count at ~1.7 KB a vertex.
+The earlier arithmetic estimate of 20 MB + 64-73 MB was wrong by about fifty
+times because it counted the vertex payload, not `NifModel`'s per-vertex item
+trees. The build's own timing line separates the halves: the `.lodt` read is
+216-447 ms for any plane, meshing and building the document is 9.3-12.0 s. The
+format is not the expense; the document model is, and that is owed to bungo as
+a decision rather than fixed here.
+
+Two render-hook limits, verified rather than assumed: `WW_RENDER_SIZE` is
+clamped to one screen, so every picture is 1507x1067 whatever was asked; and
+`WW_RENDER_CENTER`/`WW_RENDER_DIST` did not take on a generated document (the
+same file at two distances gave one identical picture), so G2's shared camera
+rests instead on the two scenes having identical geometry and on the renderer
+being deterministic - two independent runs of one scene gave byte-identical
+pictures.
+
+## 2026-09-09 - The square pattern on the far terrain: half of it was a crease at every height sample
+
+bungo, on the mountain peak close-up: "You can see the square pattern on the
+right in the terrain, which is not good."
+
+**IT IS IN OUR SHEET.** Four renders on one pinned camera - our mesh and
+vanilla's, our `_msn` and vanilla's, our own flat-grey diffuse in all four so
+nothing else varies. The pattern is in both frames carrying OUR sheet and in
+neither carrying vanilla's, on either mesh
+(`scratchpad/mountains_20260907/images/lattice_swap_2x2.png`). Independently:
+FO4 terrain LOD `.BTR` is Vertex Desc 52776558133763, VERTEX and UVs only, with
+no vertex normals at all on either side, so no mesh can carry a shading lattice.
+
+**THE MEASUREMENT.** A spectral comb cannot see this artefact and says so: the
+pre-fix nearest-sampled sheet, which visibly had squares, reads comb prominence
+**0.19** at its own period, below a broadband field, because a zero-order hold
+has spectral zeros exactly at the comb bins. The instrument that works is
+phase-conditional - the shape of the x-mod-4 table above. On the slope field
+the sheet encodes, minus its own 9x9 box mean, average the second-difference
+magnitude over the columns of each residue class of x mod 4 and report
+`(max - min) / mean`. It reads 0.005 on a fractal field and 0.218 on the same
+field creased every fourth row and column, so it fires on the artefact's shape
+and not on content. Controls: floor = vanilla's shipped sheet, ceiling = the
+pre-fix nearest sheet rebuilt from the same VHGT through the same encoder and
+the same block codec, **separation 6.76x and 8.17x** on the two tiles against a
+pre-registered 5x gate. The offline replica of the generator agrees with the
+shipped file to **1.85 and 1.62 bytes** mean absolute difference.
+
+Tiles `Commonwealth.4.-60.36` and `Commonwealth.4.-12.44`, mip 0, 512x512:
+
+    vanilla shipped        0.296 / 0.245
+    ours shipped           0.809 / 0.878        2.7x and 3.6x vanilla
+    ours before the codec  0.947 / 0.830
+
+and the raised residue classes are 0 and 3 on both tiles - exactly the pair
+straddling a height-sample line, which sits at texel `4k - 0.5`. Shifting the
+texel-to-grid mapping by a quarter of a step moves the pattern, so the
+roughness is locked to the SAMPLE LINES, not to the texel grid.
+
+**CAUSE, AND WHY AN EASE IS THE WHOLE FIX.** The central difference spans a
+full grid step either side, so for any blend `w` of the four corner samples
+`H(g+1) - H(g-1) = (1-w)(H[i+1]-H[i-1]) + w(H[i+2]-H[i])` - algebra, not
+approximation. With `w = t` the encoder is handed a gradient that is continuous
+but KINKED at every sample. `heightAt` in `lodgen.cpp` now passes `tx` and `ty`
+through the quintic ease `t^3(t(6t-15)+10)`, whose first two derivatives vanish
+at both ends. It still hits every VHGT sample exactly and, being monotone,
+still cannot leave the four values it sits between, so unlike Catmull-Rom
+(tried and reverted 2026-09-07) it cannot ring on the 8-unit staircase, and
+unlike a spline or a pre-blur it removes nothing.
+
+    basis                MOD, no codec      high-frequency energy
+    bilinear             0.947 / 0.830      2.681 / 1.977
+    quintic ease         0.209 / 0.197      3.365 / 2.501   (+25.5% / +26.5%)
+    cubic smoothstep     (0.717 with codec, against the quintic's 0.630)
+    cubic B-spline       0.767 / 0.786      -23.5% / -21.8%   REJECTED, blur
+    gaussian pre-blur    0.709 / 0.696      -24.1% / -22.3%   REJECTED, blur
+
+A fall of **78% and 76%**, below vanilla's own 0.296 and 0.245, with the
+high-frequency energy going UP a quarter. Quintic rather than the cubic
+smoothstep because the cubic's SECOND derivative still steps at each sample and
+this sheet is a normal map. Every terrain `_msn` in every worldspace changes.
+
+**THE 8-UNIT VHGT STAIRCASE IS NOT THE CAUSE**, and the 2026-09-07 note warning
+against a smoother basis has been amended rather than left as a trap. On a
+smooth synthetic height field on the same 129-sample grid, quantising the
+heights to 8 units moves the number by **0.000**: 1.254 -> 1.254 with the plain
+blend, 0.217 -> 0.218 with the ease. The reconstruction moves it by 1.04.
+
+**WHAT IS NOT FIXED, and it is visible in the picture**
+(`scratchpad/mountains_20260907/images/mountain_peak_lattice_before_after.png`,
+our chunk both halves, the close-up's own camera and crop; the `.BTR` and the
+diffuse are byte-identical across the pair, so only the sheet moved). The
+shipped file goes **0.809 -> 0.637** and high-frequency energy **+15.9%**, but
+the square pattern is REDUCED, NOT GONE. What remains was measured: the BC1
+encoder returns a sheet with **16.0 / 28.8 / 18.0%** of its 4x4 blocks a
+constant R / G / B, from an input with **0.1%**, against **0.1 / 3.3 / 2.6%**
+in vanilla's. A constant 4x4 block IS a 4-texel square. It happens because
+there is nothing to encode: our high-frequency slope residual is **9-11 8-bit
+code steps** against vanilla's **65**. It is not our encoder being weak - a
+plain principal-axis reference BC1 gives 3.7 vs 2.8 bytes rmse and collapses
+blocks for the same reason - and it is not only the codec: rendered with an
+UNCOMPRESSED `_msn` the pattern is still there, at 0.252 against vanilla's
+0.085, because the sheet still holds 129x129 samples over 512x512 texels. That
+is the open detail thread, not a second bug.
+
+**A SECOND `_msn` WRITER STILL HAS BOTH 2026-09-07 DEFECTS, and was NOT
+touched.** `lodgenBakeVtTile` (the virtual-texture pyramid path) samples the
+height grid with `int( ngx )` - nearest - and writes north in green and up in
+blue, the conventional order that cost 67.7% of the light and 92.0% of the
+shading variation in the chunk path. Nothing about it was measured here.
+
+**Gate PENDING:** `tests/spells/lodgen_terrain.sh` is the only gate this change
+reaches and it launches `release/NifSkope.exe`; `Fallout4.exe` came up mid-lane
+and is still up, so it has not been run.
+
+## 2026-09-07 - The terrain normal map had up in the wrong channel, and was drawn at a quarter of its resolution
+
+Two defects in the same twelve lines of `lodgen.cpp`, found by comparing our
+`_msn` sheets against vanilla's on the same ground. One of them had been there
+since the terrain pass shipped and cost most of the light on distant terrain.
+
+**FALLOUT 4 PUTS UP IN GREEN.** We wrote the conventional (X, Y, Z) -> (R, G, B),
+so green carried north and blue carried up. Measured on vanilla two independent
+ways, and they agree:
+
+  * By the two properties only the up component can have - it is recoverable as
+    `+sqrt(1 - x^2 - y^2)`, and terrain never faces downward so it never encodes
+    a negative. Over eight `_msn` tiles at every LOD level green wins both:
+    residual 1.0-15.8 bytes against 13-71 for red and blue, and exactly zero
+    pixels below 128 in green where red and blue fall below 128 for 4-84% of
+    theirs.
+  * By prediction. Compute each cell's surface normal from VHGT, whose
+    orientation is documented, and match it against the texture. `R = east,
+    G = up, B = north` with texture row 0 at the NORTH edge scores a mean
+    horizontal error of **0.0719 over 6,080 cells**, against 0.2401, 0.2405 and
+    0.2740 for the three other orientations.
+
+WHAT IT COST, simulated on real vanilla data rather than on ours - decode each
+vanilla `_msn`, recover the true normal, re-encode it the way this writer did,
+and shade both with one sun: **light down 67.7% and shading variation down
+92.0%**, mean over seven tiles, with the swapped result landing on the ambient
+constant 0.250-0.252 on every tile. The direct sun term vanishes entirely, for
+any sun above the horizon. And there is nothing to fall back on: vanilla's
+terrain LOD `.BTR` has descriptor `0x300000000203`, twelve bytes a vertex,
+VERTEX and UVs only - no vertex normals at all - so at distance this sheet is
+the whole surface orientation.
+
+It also puts up in the 6-bit channel of RGB565, the only one with a spare bit,
+which is what a careful encoder does.
+
+**And the sheet held 129x129 distinct values magnified into 512x512.** bungo,
+seeing the comparison: "Why are ours so blurry and with visible squares?", then
+"They look lower res". The second is literally true. `int( ngx )` truncated the
+grid coordinate, so all sixteen texels of a 4x4 block read the same height
+sample and got the same central difference and the same normal. MEASURED, our
+own output against vanilla's, same tile, mip 0 - the fraction of texels that
+differ from their left neighbour, by x mod 4:
+
+    ours     x%4=0: 83.3%   x%4=1: 0.0%   x%4=2: 0.0%   x%4=3: 0.0%
+    vanilla  x%4=0: 99.8%   x%4=1: 64.4%  x%4=2: 64.7%  x%4=3: 64.3%
+
+Every block of ours was flat. The fix samples the height field BILINEARLY and
+central-differences over a full grid step either side, so the gradient is
+continuous rather than piecewise constant.
+
+**Catmull-Rom was tried and REVERTED.** A C1 basis kills the faint lattice that
+bilinear's derivative discontinuity leaves, and it is cheaper - sixteen taps
+differentiated analytically rather than four interpolated samples per texel. It
+also rang visibly across the whole tile, because VHGT is a staircase: heights
+are accumulated int8 deltas times 8 units, so every step is a step, and a
+spline overshoots at each one. Do not reintroduce a smoother basis without
+first removing the 8-unit quantisation. The comment at the fix says so.
+
+**Gate:** `tests/spells/lodgen_terrain.sh` gained an up-channel check that
+decodes the sheet and asserts `UPCH = G`, taking the block size from the header
+fourCC because ours is BC1 and vanilla's is BC3 (hardcoding 16 bytes a block
+read past the end of our own file). It was made to fail on the old channel
+order before being kept. 22 checks, PASS.
+
+**What this does NOT fix, and the open question.** Vanilla's `_msn` still
+carries **6.6-8.2x our high-frequency energy** on the same tile at the same
+size and mip - 15.33 against 2.02 on `4.-12.44`, 14.35 against 2.19 on
+`4.-16.44`, 14.63 against 1.78 on `4.-12.48`, as mean deviation from a local
+blur. Interpolation removed our artefacts and the false low resolution; it
+cannot add data. Where vanilla's detail comes from is **not yet settled**. It is
+not a tiled detail-normal texture: autocorrelation of the high-frequency
+residual dies by lag 6 and shows no peak at any lag out to a full cell (lags 1
+to 128 on two tiles, everything past lag 4 within 0.02 of zero). The test that
+would settle it - whether the residual is curl-free, hence integrable, hence
+from a finer heightfield Bethesda never shipped, rather than from landscape
+material normal maps composited in, which we could reproduce - was written and
+not run.
+
+One measurement to read carefully rather than to celebrate: our high-frequency
+energy FELL from 2.02 to 1.18 across the bilinear fix. That is not a
+regression. The metric had been counting the 4x4 block edges as detail.
+
+## 2026-09-06q — One impostor resolution becomes a ladder, and the sheets that are not the silhouette come down
+
+Three things bungo asked for in a row, and they compose into one law.
+
+**The bake is configured, not hardcoded.** Card frames (4 x 4, 6 x 6, 8 x 8) and
+card resolution (64, 128, 256 px) are rows in the panel, saved settings, and
+validated arguments in `tools/bake_impostor_cards.sh`. Both were environment
+variables the driver passed through untouched.
+
+**The resolution is the LARGEST base’s, not everyone’s.** bungo: "if it's really
+small, roughly half the size of the biggest tree we generated an impostor for, we
+can scale that down to 512x512". Two independent quantisations now sit under the
+chosen number, each nearest-in-log:
+
+  * SIZE, pure halving, three rungs at most. A base measured at a quarter of the
+    run’s largest gets a quarter of the long side. Texel density then stays
+    roughly constant across the library, which is the point — a small tree
+    covers proportionally fewer screen pixels at the same distance.
+  * ASPECT, five rungs — 1, 3/4, 1/2, 3/8, 1/4 — for the short side. The
+    three-quarter rung is there because of a measurement, not symmetry:
+    TreeMapleForest2’s silhouette came out 0.75 of its height at 8 x 8, and a
+    pure halving ladder would have rounded that to a SQUARE frame and paid 33%
+    more for air.
+
+This REPLACES the old rule, which quantised the short side up to a multiple of
+16 and gave a worldspace a dozen frame shapes. A card array holds only sets that
+share a grid AND a frame, so every extra shape was another array and another
+bind. The rounding is bounded at about 15% and the fit GROWS whichever extent is
+loose rather than cropping, so a coarse ladder costs air, never a cut silhouette.
+
+The reference cannot come from a bake — the hook photographs one model per
+process. `--list-impostor-candidates` now reports each base’s world extent as
+its second column (the larger of its horizontal radius about the vertical axis
+and its half-height), the driver takes the maximum over the list it already asks
+for, and hands it down as `WW_IMPOSTOR_REF`. No second GL launch. Unset means no
+ladder, which is what every harness did before this.
+
+MEASURED, and this is the only proof the ladder works: a third bake of the same
+model claiming the run’s largest is four times its size dropped 256 px to 64 —
+exactly two rungs — and the aspect rung then applied beneath it, 48 x 64.
+
+**Half-resolution normal, mask and emissive sheets** (`lodgen --card-half-aux`,
+a panel toggle, off by default). bungo: "should our impostors use half the res
+for normal and other map, and full resolution for diffuse? Maybe make it a
+toggle." The base colour is the one sheet that cannot come down, and not for its
+colour: its ALPHA is the coverage, so it is the silhouette, and a soft silhouette
+is the single fault an impostor cannot hide. MEASURED on the two synthetic sets,
+payload across the four arrays: 3,584 bytes to 1,664, **46.4%** — the arithmetic
+in the tooltip, confirmed by the encoder rather than asserted. The halving happens
+after the frame dilation, which is what makes it safe: the gutter is at least four
+texels, so nothing mixes across a frame border.
+
+**The panel prices all three rows on one computed line.** "1024 x 1024 sheets at
+128 x 128 a frame: 4.67 MB for the largest base, and less for every smaller one."
+Nothing there is typed. The figures that were typed were wrong: "0.80 MB a tree"
+was true of a 64 px frame while the driver defaulted to 128, a factor of four. A
+measured bake at 8 x 8 and 128 px came to 3,655,680 bytes.
+
+A card set records the grid AND the run’s resolution in its `.lodm` (`card.base`,
+beside `card.frame`), because a frame smaller than the resolution is that base’s
+rung and must not be mistaken for a differently-configured bake. The panel refuses
+to generate when the cards in the chosen directory disagree with either row.
+
+Gates: the octahedral harness asserts the frame law itself rather than "a
+multiple of 16" (which the new rungs satisfy by luck at 64 px and would have gone
+on satisfying if the ladder were wrong), and gained the third bake above. The card
+array harness gained a second pass with `--card-half-aux` and measures the ratio.
+The workspace gate drives the two combos and the toggle and checks the cost line
+arithmetic, 87 checks to 97.
+
+## 2026-09-06p — Ground cover, and the terrain virtual texture
+
+**Measured after the build, and five things fixed to get there.** The lane wrote
+this entry without an exe, so everything below replaces its predictions.
+
+It did not compile. Seven errors across five lines in the pyramid writer, plus one
+in the container reader, were all TWO declarations of the shape
+`std::vector<T> name( size_t( count ) );` — a cast around a bare identifier is a
+valid parameter declaration, so both declared functions rather than containers.
+`static_cast` in each, a sweep for the shape across every source, which found no
+others, and the trap is in the mistakes ledger.
+
+Then the gate failed fourteen checks against a reader it never reached, because
+`--lodm-check` and `--lodv-check` ask about a file WE WROTE and were not on the
+list of questions that need no plugin argument. That is the third time this has
+happened, after `--dump-geometry` earlier the same evening, so the list itself now
+carries the warning rather than only the fix.
+
+Two of the gate's own checks were then asserting things untrue of correct output.
+The **colour filter bar** compared `decode(coarse)` against `box(decode(fine))` —
+two BC1 round trips taken in opposite orders — against a flat bar of 4, and
+measured a max of 19. It is now a property instead of a bar: the parent texel must
+lie inside the range of the four children it averaged, widened by BOTH sides' own
+BC1 block error, since the children the harness reads back are themselves decoded.
+Zero violations in the content and all four border strips. The **nearest-resample
+control** claimed proof from 0 of 1,369 texels differing by more than 8 units, but
+a Commonwealth pyramid is interpolated up from land samples 128 units apart, so
+neighbouring texels are nearly equal and the two rules agree — the control had no
+power. It now counts the texels whose four children actually differ, searches
+every parent tile for the one with the most relief, and reports: **1,259 texels
+can tell box from nearest, and the file matches box on all 1,259 and nearest on
+645.** The height sheet, the one sheet that is not block-compressed, obeys
+`(a+b+c+d+2)>>2` with zero violations everywhere, which is the exact proof.
+
+The **mutation battery** found a real gap in itself: 22 of 23 refused, and the
+23rd wrote the value 1 into a container that already had exactly one tile, so it
+mutated nothing and the reader correctly accepted a valid file. It now writes the
+current value plus one. All 23 refuse, each by name.
+
+**The height sheet is now off by default.** I asked for it, so that a geometry
+clipmap could read height from the pyramid, and the lane then measured what I had
+not: R16 is uncompressed where the other three sheets are BC1. Measured on
+(-20,24)..(-17,27) with cover on: 943,360 bytes without it and 1,866,240 with,
+so **+98%** — the lane's arithmetic said 133% because it assumed the cheaper
+cover-off data sheet. And for a Fallout 4 source it is mostly invented: the finest
+default level is 32 world units a texel against LAND's own 128, and the worldspace
+heightmap already carries every real height at source resolution in 75.5 MB, or
+100.6 MB with a full mip chain, which a clipmap can mip at load. Kept behind
+`--vt-height`, because a Fallout 76 port has four times the terrain detail and may
+genuinely want it, and the gate turns it on so the exact filter proof keeps
+running. The default writes three sheets, the flag four.
+
+Final state on the 20:55 exe: the terrain gate 30 checks 0 failures, and the whole
+suite green — identity, the `.lodt` writer, terrain (21), merge, arrays, card
+arrays, far rings, impostor cards, resources, both octahedral bakes, and the
+workspace at 87 checks against a floor of 74.
+
+
+Two opt-in additions to the terrain half of the generator, both OFF by default,
+and off means byte-identical.
+
+**Ground cover.** The `LTEX → GNAM → GRAS` chain the Creation Kit grows grass
+from is read for the first time — nothing in this tree had ever opened a GRAS
+record. Per LTEX: `D` the density sum over its grasses, `S` the density-weighted
+Max Slope, `T` the density-weighted average colour of the grass MESH's diffuse
+(the smallest mip, un-premultiplied; NOT the GRAS record's Colour Range, which
+is a per-instance spread, and NOT the LTEX's own diffuse, which is missing on a
+third of the base game's landscape texture sets). Per texel, composited against
+the same bilinear opacities the diffuse loop already computes, gated by
+`acos(n.z)` from the normal the same iteration builds, quantised against a FIXED
+`COVER_FULL = 96` — the largest Density an artist authored — because a
+run-derived constant would make two bakes incomparable, which is the whole point
+of a streaming format.
+
+It goes in the one free channel the terrain data sheet has: the alpha of
+`<ws>.<dim>.<x>.<y>_data.DDS`. That sheet is **BC1 at 174,888 bytes with alpha
+0xFF where a chunk has no grass, byte for byte what it has always been, and BC3
+at 349,648 with alpha = cover where it has.** The fourCC is the switch and it is
+QUALIFIED: `hdr[8] = 'WWCV'`, `hdr[9] = (law << 24) | round(COVER_FULL)` in the
+DDS header's `dwReserved1`, which is zero in every DDS this tree has written.
+Without the stamp an xLODGen sheet's constant-255 alpha would decode as full
+cover on every texel — grass on rubble and on the ocean floor, unrepairable
+afterwards because the bytes would hold nothing to repair.
+
+And a grass TINT, mixed into the far albedo after the VCLR multiply (VCLR is the
+artist's shading of the ground; the grass sits on top of it), weighted by the
+QUANTISED cover byte so a consumer holding the sheet reproduces the mix exactly.
+Default 0.35, because the stock engine — which reads no data sheet at all — is
+what ships today. `--grass-tint 0` writes the plane and leaves the albedo
+byte-identical.
+
+The stale `A = SLOPE` paragraph above that code, which contradicted both the
+comment under it and the code beside it, is deleted; the four rejected alpha
+candidates stay and cover joins them as the fifth, with the argument for why it
+is the first to pass both tests — not derivable from anything shipped, and every
+operand at 512².
+
+**The pyramid.** The same bake restructured into levels of 256-texel tiles with
+an 8-texel border, one `.lodv` container per level under `Data\Terrain\`,
+indexed by a `terrainVT` `.lodm`. Coarser levels are box filters of the finer
+level's UNCOMPRESSED staging, never of decoded BC blocks, under the one rounding
+law `(a+b+c+d+2) >> 2`; the msn is renormalised after the average because its
+channels are not independent; a no-cover tile stages alpha 0 and never 0xFF, or
+a parent bordering one grassy child would inherit full cover across three
+quadrants of bare rock.
+
+FOUR sheets a tile, not three. The fourth is HEIGHT, R16 with the shadow
+heightmap's own `height/8 + 32767` encoding, on the same grid with the same
+border, built the same way — bungo, on reading that the VT is a tile pyramid:
+"So, clipmapping...." What a clipmap consumer needs and gets here is that height
+sheet, ONE aligned grid (every level anchored to one north-west origin, so a
+coarse tile covers exactly four finer ones with no resampling), and the level
+ratios STATED per level rather than implied. Nothing camera-relative, toroidal
+or morph-banded is baked: those are runtime concerns and would make the files
+useless to the per-chunk consumer that comes first.
+
+MEASURED, as arithmetic over the geometry: an all-BC1 tile is 323,680 raw bytes,
+of which the height sheet is 184,960 — so height MORE THAN DOUBLES a tile rather
+than adding the third the note that asked for it estimated. That number is
+stated here rather than discovered on disk.
+
+**Files.** `src/io/lodvfile.{h,cpp}` is the container: header, fixed-stride tile
+table, the streaming writer (the table's space is reserved, payloads are
+appended at increasing 4,096-aligned offsets in table-index order with only the
+24-byte row kept in RAM, and the table, `fileBytes` and `indexCrc32` are patched
+at the end — buffering a level would be over a gigabyte), and ONE validator
+implementing all 22 file-local rules, shared by the CLI and by anything that
+opens a `.lodv` later. `indexCrc32` covers the header and the whole table
+because per-payload CRCs cannot see offset aliasing: a flipped bit in an offset
+points the reader at another tile's payload, whose own CRC is valid.
+
+`EsmWorld` gained `grass()`, `ltexCover()`, `coverCensus()` and
+`paintCorpusHash()` — a second corpus hash, over the paint, the LTEX `GNAM`
+lists and the GRAS `DATA`, because `vhgtCorpusHash` pins HEIGHTS and a grass mod
+or an overridden LTEX leaves it untouched.
+
+**CLI:** `--cover` / `--no-cover` / `--grass-tint` / `--cover-full` /
+`--dump-cover`, `--vt` / `--no-vt` / `--vt-finest` / `--vt-content` /
+`--vt-border` / `--vt-mips` / `--vt-compress` / `--vt-btr` / `--vt-estimate`,
+`--lodm-check`, `--lodv-check`, `--corpus-hash`. All of them documented in
+`usage()`, and so is `--tex-dir`, which turns the terrain bake on at all and was
+parsed and undocumented.
+
+**Panel:** *Ground cover and grass tint* and *Grass tint strength* in the legacy
+terrain section (both targets — the tint is FOR the stock engine); a folding
+*Terrain virtual texture (.lodv)* section with *Finest level* and *Chunk textures
+from the pyramid*, FO4CS-only, and a summary line that is computed by the shared
+estimator and MOVES when the finest level does. The self-test counts them, with
+the floors raised to 13 numbers and 6 selectors.
+
+**Docs:** `docs/LODGEN_TERRAIN_VT.md` is new and is the contract a consumer
+reads. `docs/LODGEN_VERTEX_PACKING.md`'s self-contradiction about the data
+sheet's format — one paragraph said BC3 at 350 KB, another said BC1 at 175, and
+the file on disk said DXT1 — is resolved into the switch that is now true.
+
+**Not measured yet, and it must be before any of these numbers is quoted as a
+cost:** the bake time. Nothing here has been timed, `--vt-estimate` prints
+`minutes unmeasured`, and the earlier draft's extrapolation was withdrawn for
+having been taken with the game running.
+
+## 2026-09-06o — Mips round to nearest
+
+bungo, asked whether this should ride inside the terrain lane or land alone:
+"On its own first."
+
+Every box filter the generator uses to build a mip truncated its four-texel
+average. Truncation loses up to three quarters of a level per channel per step
+and the loss COMPOUNDS down a chain, so the bottom of a seven-mip texture drifts
+several levels dark. The terrain pyramid the next lane builds is a box filter of a
+box filter all the way up its ladder, which would have inherited the drift at
+every rung, which is why it surfaced now.
+
+`(acc + 2) >> 2` in all three sites: the BC5 writer's two eight-bit ramps, the
+single-texture writer's four channels and the array-layer writer's four. Same
+arithmetic with the half-step added first.
+
+It moves the bytes of every DDS the generator has ever written, by at most one
+level a channel. That is the whole reason it landed alone: the byte-identity
+baseline moves once, deliberately, with nothing else in the diff. The identity
+gate compares two bakes of the same build, so it holds either way. Gated on the
+19:11 exe: identity, terrain (21 checks), the `.lodt` writer, arrays, card
+arrays, merge, far ring, impostor cards and resources all pass.
+
+## 2026-09-06n — Proxy meshes for the far rings, and the atlas is DXT1 like vanilla's
+
+**Measured after the build, and two floors corrected.** The lane wrote this
+entry without an exe, so everything below replaces its predictions.
+
+The geometry question the gates ask, `--dump-geometry`, was never added to the
+list of lodgen questions that take no plugin argument, so every call answered
+"error: 'lodgen' needs a <file>", the harness measured zero triangles everywhere
+and failed four checks on a pass that had in fact cut twelve shapes. One line.
+
+Two of its floors then turned out to assert things that are not true of correct
+output:
+
+- *Centroids outside the chunk.* The check demanded none. An object placed near a
+  chunk border legitimately has triangles on both sides of it: the UNSIMPLIFIED
+  ring-2 chunk (-32,16) holds 305 of them and the simplified one 266, so the pass
+  reduces them. The invariant that is true, and that still catches the failure the
+  check was written for, is that the pass must not push more geometry out than it
+  found.
+- *The ratio.* The check demanded the achieved ratio land within ten points of the
+  asked 0.35. It cannot, and no error bound will make it: swept on the ring-2
+  chunk, 32 units gives 0.912, 128 gives 0.848, 512 gives 0.845 and 2048 gives
+  0.845 at a worst error of 8,189 units. The cause is topology. That chunk holds
+  7,626 identity groups across 55,293 triangles, so a group averages between 3.5
+  and 43 triangles, and a shell that small is almost entirely open border, which
+  meshoptimizer will not collapse. The ratio is therefore a REQUEST, the floor is a
+  real reduction, and the achieved figure is printed beside the asked one on every
+  run.
+
+The error default moves from 32 to **128**, the measured knee: at 32 the rail
+binds before topology does, and everything above 128 buys 0.003.
+
+Final numbers on the 19:09 exe: ring 1 cuts 1,909 triangles to 1,705 (0.893) and
+ring 2 cuts 55,293 to 46,087 (0.834), 9 shapes and 9,410 triangles across the two,
+identity sets equal on both, no geometry pushed out, ring 0 byte-identical. The
+atlas half needs no correction: DXT1 at 5,592,528 bytes against vanilla's
+5,592,552, half of the BC3 it replaced, cut-outs alive three mips down, the
+specular sheet still BC5.
+
+**What this measures about the feature, and it is not what the lane assumed.**
+Decimating instanced LOD shells is worth about 15%, and it cannot be worth much
+more, because the shells are tiny by construction. The far-ring cost is set by HOW
+MANY objects are put there, not by how many triangles each one has. Our dim-16
+chunk with slot fallback is 4,884 KB against vanilla's 271 KB mean, eighteen times,
+and vanilla reaches its number by shipping almost nothing at that ring: only 456 of
+28,932 LOD-bearing bases fill the ring-2 slot and 51 fill ring 3, so the chunk over
+Sanctuary has no file at all. The levers that actually pay at the far rings are
+impostor cards, which turn a tree into one quad, and a screen-size cull that
+declines to draw what vanilla never authored. Decimation is a modest extra on top
+of those, not the answer by itself.
+
+
+bungo: "Proxy meshes for the far rings. Every engine since 2017 replaces far
+clusters with one simplified mesh per cell ... ring 2 and 3 chunks could ship
+at a quarter of their triangles with the same textures. Perf, generator only,
+measurable per chunk." And, on whether our LOD is more performant than
+vanilla's: "our atlas is BC3 where vanilla's is DXT1, twice the memory per
+sheet."
+
+**The proxy pass.** `lodgenSimplifyFarRings` runs LAST, after the merge,
+because the merge has already made one shape per material and that shape IS the
+cluster a far ring wants one simplified mesh of. Ring 0 (dim 4) is never
+touched — it is what the player walks up to and it is what every byte-identity
+gate stands on. Ring 1 keeps 1.00 of its triangles by default (off), ring 2
+keeps 0.35, ring 3 keeps 0.20; the panel's *Far-ring simplification* row and
+its three ratios sit under Object LOD chunks for **both** targets, because a
+smaller mesh is a smaller mesh for the stock engine exactly as it is for FO4CS.
+CLI: `--no-simplify`, `--simplify8|16|32 R`, `--simplify-error UNITS`.
+
+**What a simplifier must not lose here.** Every vertex of a chunk carries six
+channels (`docs/LODGEN_VERTEX_PACKING.md`): the object identity index in
+colours R+G, baked AO in B, sway in A, sky visibility in UV2.x, the
+texture-array layer in UV2.y, the ground-contact blend in Eye Data. Two of
+those are INDICES — an interpolated identity is a different object, an
+interpolated layer is a different texture. So the cut is per GROUP, keyed by
+(identity index, layer), and each group is simplified alone. meshoptimizer
+creates no vertices, so the survivors are a SUBSET of the originals and no
+channel is ever blended; the quantities ride along as weighted attributes so
+the metric keeps them meaningful as well as intact. Every group is asked for at
+least two triangles and restored whole if the simplifier returns nothing, which
+makes the identity set of a chunk INVARIANT under the pass: no object can leave
+a ring, so a manifest row still resolves at rings 2 and 3.
+
+Shapes with an alpha property keep every triangle — a cut-out card is four
+vertices that spell a silhouette and a collapse spends the silhouette to save
+nothing — and impostor cards are excluded a second time by object index off the
+manifest's `C` lines, so the rule is checkable rather than incidental.
+Afterwards the segments are regrouped by the cell of each triangle's CENTROID,
+the vertex array is compacted, and the bounding sphere and the node's
+multi-bound AABB are recomputed. The manifest is not rewritten.
+
+**Vanilla's own numbers, measured.** All 465 shipped `.BTO` under
+`meshes\terrain\commonwealth\objects`, read offline with a parser that
+recomputes each shape's `Data Size` from its descriptor and refuses the file on
+a mismatch (all 465 passed):
+
+| ring | dim | chunks | triangles | vertices | tris / chunk | tris / cell |
+|---|---|---|---|---|---|---|
+| 0 | 4  | 344 | 3,708,637 | 5,739,219 | 10,781 | 673.8 |
+| 1 | 8  | 97  | 1,101,390 | 2,034,737 | 11,355 | 177.4 |
+| 2 | 16 | 20  | 89,696    | 155,630   | 4,485  | 17.5 |
+| 3 | 32 | 4   | 10,594    | 17,127    | 2,649  | 2.6 |
+
+Per cell, vanilla's far rings are almost nothing — ring 2 is 9.9% of ring 1 —
+and the coverage collapses with them: 20 chunks at ring 2 and 4 at ring 3
+against 344 at ring 0. The chunk covering Sanctuary is 24,482 triangles at
+ring 0, 7,140 at ring 1, **absent entirely** at ring 2, and 416 at ring 3.
+
+**Why it is absent, and what that costs the gate.** Vanilla fills a ring from
+the base's MNAM slot for that ring, and so do we. Measured over
+`Fallout4.esm` with POSITIONAL slots (four fixed 260-byte records; every STAT
+payload is a whole number of them, the 598 that are not are all FURN, whose
+MNAM means something else and which `src/esmdata.cpp` also ignores): of 28,932
+LOD-bearing bases, **3,081 fill slot 0, 2,940 slot 1, 456 slot 2, 51 slot 3**.
+Over the ring-2 chunk (−32,16), **0 of 19,507 references** has a base that
+fills slot 2; over the ring-3 chunk (−32,0), 0 of 148,362 fills slot 3. So a
+far ring over Sanctuary is EMPTY unless the generator substitutes the nearest
+filled slot (`slotFallback`: 2,518 refs at ring 2, 21,498 at ring 3) or stands
+placements on impostor cards. Cards are excluded from the cut by design, so a
+card-filled chunk would make the gate vacuous — the harness therefore builds
+rings 2 and 3 with the fallback on, which is precisely the case the pass exists
+for. The panel has had that toggle since the chunk builder shipped; the CLI had
+no way to reach it, so `--slot-fallback` is new here.
+
+**The atlas.** Vanilla's diffuse sheet is **DXT1**, not BC3 — measured on the
+shipped file: `Commonwealth.Objects.DDS`, 4096×2048, 13 mips, fourCC `DXT1`,
+5,592,552 bytes. The comment in `lodgenBuildAtlas` claimed BC3 "like vanilla's
+sheet", and that claim was the argument for ours being BC3. It is now
+`--atlas-bc1`, which the panel selects for the **stock target**: BC1 with
+one-bit punch-through alpha for the cut-outs, half the memory, vanilla parity.
+FO4CS keeps BC3 for its eight-bit alpha. Writing BC1 needed one fix in
+`lodgenWriteDds`: with `bc3` false the mip filter forced alpha to 255, so every
+mip below the top would have turned a tree's leaves back into a solid square —
+at exactly the distance an atlas is looked at. Alpha now rides the chain when
+the caller asks for it, which leaves every existing all-opaque BC1 caller (the
+terrain bakes, the emissive sheets) byte for byte as it was.
+
+**A question the gates needed.** `lodgen --dump-geometry FILE.BTO` prints one
+`G` line per shape — what it weighs (vertices, triangles, segments) and the raw
+counts its own invariants stand on: triangles whose centroid is in another
+segment's cell, centroids outside the chunk, vertices outside the bounding
+sphere or the node AABB — plus an `i` line with its object identity indices.
+Every number is a raw count; the comparisons belong to the harness, and each
+one can be non-zero on a real file.
+
+**Gates.** `tests/spells/lodgen_farring.sh`: rings 0, 1 and 2 built twice each,
+`--no-simplify` against the pass, compared shape by shape — the triangles
+within 10 points of the ratio, the vertices down with them, the identity sets
+equal, the segment count unchanged with no centroid in another cell or outside
+the chunk, every vertex inside its bounds, the manifest's placement rows
+byte-identical, **ring 0 byte-identical chunk and manifest**, and the atlas
+DXT1 under `--atlas-bc1` against DXT5 without it with punch-through blocks
+surviving past the top mip (the half of that check which fails on the old mip
+filter). Then `lodgen_merge.sh`, `lodgen_texture_arrays.sh`,
+`lodgen_card_arrays.sh`, `lodgen_identity.sh`, `lodgen_impostor_cards.sh` and
+`lod_generation.sh`.
+
+**Not done.** The build was refused to this lane (account B allowlists no
+NifSkope command), so **no number in this entry that describes OUR output has
+been measured** — every measurement above is of vanilla's shipped files or of
+`Fallout4.esm`, offline, with no exe. Ours before → after is owed and the
+harness is what produces it. Ring 3 is opt-in in the harness
+(`FARRING_RING3=1`) because the ring-3 chunk over Sanctuary is 21,498
+references before SCOL expansion. The centroid regroup is code that does not
+run today: the generator writes ONE segment for every ring but 4
+(`segs = (dim == 4) ? 16 : 1`), and that is vanilla parity — measured across
+all 465 shipped chunks, every dim-8, dim-16 and dim-32 shape carries exactly
+one segment (201, 37 and 5 shapes), while at dim 4 they carry up to sixteen
+(519 of 719 shapes have all sixteen). So at rings 1–3 the regroup collapses to
+the single run it started with, and the harness's "centroid in its own cell"
+check is a floor for the day a far chunk grows a per-cell grid, not a
+measurement of one today. The ratio gate can legitimately miss: meshoptimizer stops short
+of a target on topology, and a chunk of many small disconnected LOD shells is
+exactly where that happens — the harness prints the achieved ratio beside the
+asked one so a miss is diagnosable rather than mysterious. `--ao-grey` writes
+AO into R and G, which is where the identity index lives, so under that debug
+flag the grouping degenerates to grouping by AO level and the pass will barely
+cut anything; it is a debug flag and is not defended against. And vanilla's
+NORMAL atlas is `BC5U` where ours is BC3 — measured on the same shipped files,
+another 2× on a second 11 MB sheet — which this lane did not change.
+
+## 2026-09-06l — The emissive multiple rides in the `.lodm`
+
+bungo: "carry the multiplier in lodm".
+
+The fourth texture shipped with a doubt (2026-09-06j, CARDS1): the legacy law
+was "the diffuse times its own alpha where the material is not alpha-tested",
+which on an opaque source whose alpha is 255 throughout makes the `_g` sheet
+the FULL ALBEDO. A consumer adding that unscaled lights every wall. The
+missing halves are the two things the engine itself multiplies that alpha by:
+the material's emissive COLOUR and its emissive MULTIPLE.
+
+**Where each half goes.** The colour goes in the SHEET, because it is a colour
+and the sheet is three colour channels. The multiple stays in the MATERIAL,
+because it may exceed 1 and the sheet is eight bits a channel — folding a
+multiple of 6 into a texel would clip every emitter brighter than one. So
+`.lodm` gains `emissiveScale`: at the top level of a `source` or a `card` file,
+and as a list parallel to `layers` (`array.emissiveScale`) on an `array` or a
+`cardArray` one, because two layers of one array are two materials. Absent
+means 1, so a hand-written source `.lodm` behaves as it did.
+
+**The completed legacy law.** A `_g` texel is the diffuse × its own alpha ×
+the source's emissive colour, black where the material is alpha-tested; and
+`emissiveScale` is the source's emissive multiple where it OWN-EMITS (Shader
+Flags 1 bit 22, or the BGSM's own flag) with a colour that is not black, else
+**0**. Where a source `.lodm` supplied the emissive picture instead, its own
+`emissiveScale` rides with it: whichever law composed the sheet owns the
+multiple that goes with it.
+
+**What it took.** The bake's channel 13 multiplies by a new `lodEmissiveColor`
+uniform, which the renderer writes UNCONDITIONALLY — unlike the sibling
+`glowColor`, which is only written while DoGlow and DoLighting are on, and the
+card bake photographs with lighting OFF, so a value written under those options
+would never have reached the channel. The bake records the set's multiple on a
+meta line `emissive <scale> shapes <n>`, the largest over the model's shapes,
+and `lodgenCard` copies it into the card `.lodm`. The chunk builder now carries
+the source's `Emissive Color`, `Emissive Multiple` and Own-Emit bit into the
+chunk shape the way it already carried slot 7, smoothness and the specular
+strength (the bucket key and the merge key both take them, so two sources that
+emit differently are two shapes); the arrays pass reads them back off the
+`.BTO`, folds the colour into the `_g` layer and writes the multiple per layer
+into the `.lodm` and a new tenth sidecar column (version 5, on the END, so a
+reader that indexes the first nine by position is unaffected). The card arrays
+copy each set's number into their own list. `lodgen --dump-shapes <file.BTO>`
+prints a chunk's shader constants back, so a gate can check a generated LOD
+material against its SOURCE rather than against the pass that wrote it.
+
+**And the measurement bungo asked for: the Diamond City stadium.** He said
+"there are lights in LODs in Fallout 4, ie diamond city stadium". Measured over
+Fallout4.esm and the unpacked corpus, offline:
+
+* **3361** LOD models are named by an MNAM slot of a base in Fallout4.esm;
+  3354 were read (7 are not in the loose corpus). They hold **3430**
+  `BSLightingShaderProperty` blocks. **All 3430 carry Own-Emit** — and **not
+  one** has an emissive colour that is not black. **Not one** LOD model carries
+  a `BSEffectShaderProperty`, and **not one** has a filled glow slot.
+* The **121** materials those LOD models name all read, and **not one**
+  own-emits with a colour that is not black.
+* Over Diamond City itself (`--window -6 2 -10 2`: those Commonwealth cells plus
+  the DiamondCity and DiamondCityFX worldspaces entire): **8115** bases placed,
+  **1711** distinct LOD models, 1705 read, **1729** shader blocks — all
+  Own-Emit, all black, no effect shader, no filled glow slot, and none of the
+  70 materials they name emits.
+* The stadium's floodlights DO emit, and they have **no LOD model at all**:
+  `DiamondStadiumLight01`/`02`/`03` and their Off/Broke variants are STATs with
+  **zero MNAM slots**, whose near models carry
+  `Materials\Architecture\DiamondCity\DiamondLights01AlphaOn.BGSM` —
+  Own-Emit, emittance colour **(1, 1, 1)**, emittance multiple **6.0**, glow
+  slot `architecture/diamondcity/diamondlights01_s.dds`. The ones seen from
+  outside sit in Commonwealth cells (−4,−6), (−3,−6), (−3,−7) and (−3,−8).
+  Beside them is a LIGH, `DiamondCityStadiumLights01NS`, placed three times
+  across the Commonwealth and DiamondCity.
+
+So the answer is: **nothing in Fallout 4's LOD tree emits.** The stadium's
+lights are near-model geometry and a light record, drawn only inside the loaded
+cells; past that ring vanilla has no emitting geometry at all, which is exactly
+why the `_g` sheet had to be invented and exactly why our own law must scale it
+by something that is 0 for every vanilla surface. The same measurement is the
+one that makes the gates honest: every legacy layer of Sanctuary reads
+`emissiveScale` 0, and its `_g` layer decodes BLACK while its own diffuse ×
+alpha does not — the half of the check that fails if the colour multiply is
+dropped.
+
+The measurement is `tools/lod_emission_probe.py`, which reads the plugin, the
+meshes and the BGSMs itself so it needs neither the game nor a built exe; it
+compares two independent readings of the same quantity (a NIF shader
+property's own emissive fields against the BGSM it names, which agree field
+for field on the stadium lights) and reports how many bytes of each material
+it accounted for, because a hand-written reader of someone else's binary
+format answers rather than fails when it is wrong (docs/MISTAKES.md).
+
+**Gates.** `lodgen_texture_arrays.sh` (sidecar version 5 and its column, every
+layer's multiple against `--dump-shapes` on the written chunk, the muted-layer
+decode, the pbr fixture's 2.5), `lodgen_octahedral.sh` (0 on the legacy bake,
+2.5 on the pbr one, in the meta and in the card `.lodm`),
+`lodgen_card_arrays.sh` (1 and 0 through the array's list per layer), then
+`lodgen_merge.sh`, `lodgen_impostor_cards.sh`, `lodgen_identity.sh` and
+`lod_generation.sh`.
+
+**Not done.** A vanilla source that own-emits with a lit colour does not exist
+in Fallout4.esm, so the "× the emissive colour" branch of the arrays pass is
+measured only in the negative (black in, black out, against a diffuse × alpha
+that is not black) and by the pbr raw path; a lit-colour fixture would need a
+BGSM authored by hand. A pbr set that names no emissive gets its `.lodm`'s
+`emissiveScale` (1 by default) on a black layer rather than 0 — harmless, since
+0 × anything and anything × black agree, but it is a number that means nothing.
+The `_g` sheet for a source that own-emits with a black colour is now black, so
+the quantity vanilla hides in the diffuse alpha is no longer carried anywhere:
+if a consumer ever wants it back it must come off the `_d` sheet's own alpha.
+
+## 2026-09-06k — The source: a resource stack, and Mod Organizer 2
+
+bungo: "Best way would be if we could hook our nifskope directly to mod
+organizer 2, have it know the mods, the enabled ones, the plugins, archives,
+all the order, then bake everything based on that." "We could then have it
+launch through MO2, like xedit already does." "So, in nifskope in lod baker, we
+can toggle either specified bake, where we select our plugins, archives or
+loose files and their order, or we select a MO2 automatic bake, loaded list
+that is already configured in MO2 with the order of plugins, files and what
+overwrites what on load known." "For a specified bake, we can use the nif block
+list dragging system for reordering mod priority." "Instead of top wins, we use
+MO2's standard, the last one in the order overrides the previous ones."
+
+**The stack** (`src/lodgen.h`, `lodgenSetResources`). An ordered list of
+entries, each a mod FOLDER or an ARCHIVE file, read Mod Organizer's way: the
+LAST entry overrides the earlier ones. It is indexed as ONE `BA2File`, whose
+map is FIRST-wins — `addPackedFile` returns null for a name it already holds —
+so the stack is fed backwards, in two passes: pass one takes each folder's
+LOOSE files, handed to `BA2File` one data sub-directory at a time (`meshes\`,
+`textures\`, `materials\`, …), which is what keeps archives out of it; pass
+two takes the archives, the entry itself when it names one, otherwise the
+`.ba2`/`.bsa` files sitting in the folder, mod archives before DLC before the
+game's own, as `loadArchivesFromDir` itself orders them. The result is the
+engine's two rules at once: a loose file beats an archive wherever the archive
+sits in the list, and among archives the later entry wins.
+`lodgenReadAsset()` consults it before `--data-root` and before the game
+manager, for meshes, textures, materials and `.lodm` alike.
+
+An EMPTY stack changes nothing: the index is never built and every read is the
+read it was before. That is deliberate — the panel installs a stack only when
+there is something to layer, so the near-chunk byte-identity gate (a chunk from
+the unpacked folder against one from the archives) keeps measuring what it was
+written to measure.
+
+**Source: Specified.** A selector under the Source heading, and beside the
+plugin list a Resources list — the same drag-to-reorder widget, now
+`OrderedPathList`, taking folders and `.ba2`/`.bsa` by drop or by its own two
+add buttons. LAST row = highest priority, said in the tooltip along with the
+loose-beats-archive rule. Persisted as `LodGeneration/resources`. The stack the
+run reads is the game's own Data underneath, then the rows in order.
+
+**Source: Mod Organizer 2.** Detected by MO2's hook DLL being in the process
+(`GetModuleHandleW(L"usvfs_x64.dll")`), which is what makes a NifSkope launched
+from MO2's executable list — the way FO4Edit is launched — see the VIRTUAL Data
+folder and the profile's `plugins.txt` at `%LOCALAPPDATA%\Fallout4`. The
+enabled plugins (`*Name.esp` lines, in load order) fill the plugin list, read
+only, because the order is MO2's; the stack is the virtual Data, then the base
+game's archives, then each enabled plugin's archives in load order. A muted
+status line counts what was found. NOT under MO2, the line and the summary both
+say "not launched from Mod Organizer 2: add NifSkope to its executable list
+(like FO4Edit), or use Specified", and Generate is greyed — `refreshSummary()`
+owns both, and the source is checked before every other reason, because with
+nothing to read the others are beside the point.
+
+**The renderer sees the same worldspace.** `lodgenResourceSearchPaths()` is the
+stack flattened into index order, and the panel hands that same list to the
+game manager's Fallout 4 folders at Generate time, its own folders left
+underneath as a fallback. Session only: `GameManager::save()` is what persists
+and only the Settings dialog calls it, and the original list is put back when
+the panel closes. (Opening Settings > Resources calls `GameManager::load()`,
+which reloads from QSettings and so DROPS the session view; press Generate
+again to reinstate it.)
+
+**CLI** (`src/nifcli.cpp`). `--resource <folder|archive>`, repeatable, in MO2
+order; `--plugins-txt <file>`; `--mo2` (the profile's file plus the stack built
+from it). Two questions that answer and stop: `--probe <relpath>` prints the
+stack entry that supplied a file, loose or archived, its size and its sha1
+(exit 1 when nothing has it, `--probe-out` writes the bytes), and
+`--print-source` / `--list-files N` print the stack as set, as indexed, and
+what the index holds.
+
+**The card bake** honours it: `tools/bake_impostor_cards.sh` takes
+`RESOURCES="a;b"` or `MO2=1` and passes them to the CLI that lists the
+candidates AND to the GUI launch that photographs each one
+(`WW_LODGEN_RESOURCES` / `WW_LODGEN_MO2`, read in `main.cpp`, session only), so
+Boston Natural Surroundings' trees photograph with their own textures. A model
+that is not loose is pulled out of the stack through `--probe --probe-out`,
+under its own name, because the GUI can only be handed a real file.
+
+**Gates.** `tests/spells/lodgen_resources.sh`, four checks, every one a
+precedence question answered by a printed sha1: the last `--resource` wins both
+ways round; a path only a game archive holds resolves through that archive as
+an entry and through nothing without it; a loose file beats the same path
+inside an archive in either order; a `plugins.txt` fixture yields its two
+enabled plugins in order and drops the unstarred one and the comment. Plus
+`lod_generation.sh` (the workspace self-test gains the Source selector, the
+Resources list and the status line, the selector floor goes 4 → 5, and two new
+behaviour checks) and `lodgen_identity.sh`, which must stay byte-identical
+because an empty stack is a no-op.
+
+**Not done.** The in-process "Bake cards" button does not take the stack (the
+`WW_IMPOSTOR_BAKE` hook and the driver do). MO2's own files are never read —
+`ModOrganizer.ini` and `modlist.txt` are untouched — so outside MO2 there is no
+way to enumerate a profile's mods, and MO2 mode refuses rather than guess. The
+status line counts FILES, not mods: inside the VFS a file cannot be traced to
+the mod it came from, and the count stops at 20,000 rather than walk every
+enabled mod while the panel waits.
+
+## 2026-09-06j — Frame size classes, and the emissive sheet (`_g`, `_e`)
+
+bungo: "Either way, first three are good ideas too, plus we need an emissive
+`_g` texture or `_e` if it's PBRM."
+
+**What vanilla does instead of an emissive sheet.** Measured before a line
+moved. A vanilla LOD chunk shape carries Own-Emit (Shader Flags 1 bit 22) with
+a BLACK emissive colour and no glow slot at all, and the atlas it reads is
+DXT5 with a live alpha channel: Diamond City's has 216,521 of its 262,144
+alpha blocks varying and not one fully transparent, on shapes that are opaque.
+So the light on a distant window is the diffuse's ALPHA, and the diffuse
+colour is what it is the colour of. The Commonwealth's own atlas is DXT1, one
+bit of alpha — that worldspace spends the channel on cut-outs instead, and an
+alpha-tested shape that has spent its alpha on a cut-out emits nothing. Our
+own `_d`/`_bc` sheets already carry the source diffuse's alpha as coverage, so
+the stock engine keeps its lights through our atlas as it is; what was missing
+was somewhere for a consumer to read the quantity by name.
+
+**The fourth texture.** `_g` on a legacy set, `_e` on a pbr one, BC1, RGB the
+emissive colour and no alpha — coverage lives on the colour sheet and nowhere
+else, so the emissive costs half a block. The `.lodm` key is `emissive` under
+both families; only the suffix tells them apart, so a directory listing says
+which family a sheet belongs to. Two laws, one per family: LEGACY is the
+colour times its own alpha where the material is not alpha-tested and black
+where it is — the vanilla rule, written down; PBR is the source `.lodm`'s
+`emissive` texture RAW, black where it names none, because a pbr source has no
+vanilla quantity to fall back on. A source `.lodm` of either family that names
+an emissive retargets it and it is read raw, the same treatment the third
+texture already got.
+
+It reaches all four places a set is built. The bake photographs shader channel
+13 — the glow slot raw where a `.lodm` retargeted it, else `baseMap.rgb *
+baseMap.a` when `alphaFlags == 0` and black otherwise — into a fourth PNG,
+un-premultiplied and coverage-floored like every other channel and dilated at
+DDS time. A pbr `.lodm` that names no emissive marks the slot EMPTY, which
+binds the black texture: the same raw path says "nothing" without a second
+uniform. `lodgenCard` converts it to `<id>_oct_g.DDS`/`_e.DDS` and names it in
+the card `.lodm`; the mesh arrays and the card arrays each grow a fourth,
+BC1 array; the driver moves the new PNG. A card set baked before any of this
+gets a black layer rather than being dropped, so a layer index still means
+what the `C` lines say it means.
+
+**Frame size classes.** The other half, and the reason the card arrays were
+not doing their job. A frame's longer side is the tile and the shorter one
+followed the silhouette's aspect rounded to 4 — which gave nearly every base a
+sheet size of its own, and a card array can only hold sets that share a grid
+AND a frame, so the array pass was grouping almost every base alone. The
+shorter side is now quantised UP to a multiple of 16. Quantising up leaves the
+frame a different shape from the silhouette, and rather than stretch the
+picture into it the RECORDED EXTENTS are widened to the frame's: the
+silhouette maps to the inner rect, so the extents take the inner rect's
+aspect, whichever extent binds is left alone and the other grows, and the
+object gets a little more air on one axis. Solving for the aspect in the other
+direction would have shrunk a side and cropped the silhouette — by 14% for a
+2:1 silhouette in a 64/32 frame. `halfW`/`halfH` now carry the frame's aspect
+EXACTLY, so the harness's fit check went from a 0.12 tolerance to 1%. The meta
+says the class on a `class <w> <h>` line of its own; the `oct` line did not
+change shape, because every reader of it splits on spaces and indexes by
+position (`docs/MISTAKES.md`, the family token that carried a newline).
+
+**Measured.** BUILD PENDING — see `scratchpad/lane_cards_report.md` for what
+ran and what did not.
+
+**Gates added.** `lodgen_octahedral.sh`: both frame sides a size class and the
+longer one the tile, the `class` line, the extents' aspect within 1% of the
+frame's, the fourth sheet in both bakes, BC1 (DXT1) at the same size and mip
+cap and exactly header + its blocks, and the emissive FROM BOTH SIDES — black
+over every covered texel on the legacy bake, because every shape of the near
+maple is alpha-tested, and equal to the colour sheet on the pbr bake, whose
+fixture `.lodm` now names the material's own diffuse as its emissive. Without
+the second the first is a channel that never writes.
+`lodgen_texture_arrays.sh`: the sidecar is version 4 with an `emissive` column
+saying which law ran, the fourth array is decoded rather than merely headed —
+a glow-rule layer must equal its diffuse times that diffuse's alpha and NOT
+the plain diffuse, a layer the sidecar says emits nothing must decode black,
+and the pbr fixture's `_e` layer must decode to its `_bc` layer — for which
+the harness gained a BC1 block decoder beside the BC3 endpoint reader it had.
+`lodgen_card_arrays.sh`: the synthetic sets bake a solid GREEN emissive, and
+the fourth array must be BC1 (dxgi 71) of two layers at exactly header + two
+BC1 mip chains, with green decoded off both layers' endpoints.
+
+Not done: a consumer, still — nothing reads an emissive sheet yet, and what a
+consumer multiplies it by (an emissive multiplier per set, the way a BGSM
+carries one) is not carried anywhere. No real card library, so the size
+classes have never been measured over a worldspace's trees: the claim that
+they collapse a worldspace into a handful of sheet sizes is an argument, not a
+number, until a real bake run is packed. And the legacy rule keys on the
+alpha TEST, not on the material's emissive flags: where an opaque source's
+diffuse alpha is 255 throughout — which is most of a DXT1-atlas worldspace
+like the Commonwealth — its `_g` layer comes out as the full albedo, where
+vanilla's own chunk, carrying Own-Emit with a black emissive colour, emits
+nothing at all. The sheet is honest about what it holds and the sidecar's
+`emissive` column says which law composed each layer, but a consumer that
+adds `_g` unscaled would light every wall in the ring. Whether the rule should
+also read Own-Emit and the emissive colour, or whether the multiplier belongs
+in the `.lodm`, is bungo's call and is not made here.
+
+## 2026-09-06i — Shapes merged after the atlas, the atlas `_s` sheet, card sheet arrays
+
+bungo: "Do that" — and, on the format: "Just keep in mind how Fo4cs will
+actually handle LOD, if there's no conflicts, but there's no code for that
+yet, so we can be elastic for now."
+
+**Why a chunk had ten shapes.** The generator builds one chunk shape per
+source material, and the engine draws each as its own call. Sanctuary
+(-20,24) at dim 4 came out with ten where vanilla's Commonwealth chunk holds
+three. The arrays pass keys its layers on the source and the atlas keys its
+cells on the diffuse, so both need those shapes apart while they run; what
+was missing was a pass that puts them back together once neither cares.
+
+**The atlas `_s` sheet.** `--atlas` packed the chunks' non-tiling diffuses
+and normals onto `<ws>.LodgenObjects.DDS` and `_n.DDS`; it now composes a
+third, `<ws>.LodgenObjects_s.DDS`, BC5 like vanilla's
+`Commonwealth.Objects_s.DDS`, from each cell's slot-7 map with THE SHAPE'S
+OWN CONSTANTS FOLDED IN: R = the map's R × the specular strength, G = the
+map's G × the smoothness. A cell without a map reads 255 and 255, the values
+a shape without one reads. Every atlased shape then carries slot 7 = the
+sheet and smoothness 1, strength 1, which is exactly what vanilla's chunks
+carry — and that is the point of it: two shapes that differed only in their
+constants are now identical to the engine, and can merge.
+
+**The merge** (`lodgenMergeChunkShapes`, `--merge`, on by default in region
+mode, `--no-merge` to keep one shape per source material). It runs LAST,
+after the atlas and after the arrays, and concatenates every shape a chunk
+holds that the engine cannot tell apart. The key is everything the engine
+reads: the name (obj or obj-at), all ten texture slots, the alpha property,
+the shader's type, flags and constants, the vertex descriptor, and the array
+`.lodm` the shape's `A` line names, so a merged shape never spans two texture
+arrays. It refuses across any of those, and it refuses to cross 65535
+vertices: a group past that stays split. Vertices and triangles concatenate
+per SEGMENT, so a merged shape keeps its dim × dim segment grid; the bound
+and the multi bound take the union; the merged-away branches go and the
+root's child list is rebuilt without holes. The manifest's `A` and `M` lines
+are rewritten for the surviving blocks.
+
+**`A <block> -1 <lodm>`.** A merged shape can span array layers, so the `A`
+line's layer takes -1 to mean per vertex, in UV2.y, where the layer has
+always been. A positive layer still means the whole shape sits on that one,
+so a consumer keeps its fast path.
+
+**Card sheet arrays.** `--arrays` together with `--impostors` now packs every
+card set the chunks' `C` lines stand on into one DX10 BC3 array per texture,
+grouped by FAMILY and by SHEET SIZE (a set's sheet is oct × frameW by oct ×
+frameH, and sets that differ in grid or frame cannot share an array), written
+beside the mesh arrays as `<ws>.LodgenCards.<family>.<WxH>_d/_n/_gsaos.DDS`
+(or `_bc/_n/_rmaos`) with a `<ws>.LodgenCards.<family>.<WxH>.lodm` of kind
+`cardArray`: the grid, the frame and the mip cap shared by the set, and per
+layer the card's id, half extents, centre, depth span and source model,
+because two trees of the same sheet size are not the same size in the world.
+A layer is built the way `lodgenCard` builds a set's own sheets — from the
+bake's PNGs, dilated frame by frame, mips stopping while a frame's shorter
+side spans eight texels — so a layer holds what the per-card DDS holds and
+not a re-encoding of it. A `C` line whose card sits in an array gains TWO
+tokens on the END, the array `.lodm` and the layer; a reader that stops at
+the tenth token is unaffected, which is why they are not in the middle. The
+per-card sets stay beside the cards and the crossed `_fs` quads stay in the
+mesh: three readings of one bake, none of them required.
+
+**Elastic, for now.** No FO4CS code reads any of this yet, so nothing here is
+pinned by a consumer. The -1 layer, the two extra `C` tokens and the
+`cardArray` `.lodm` are all additions on the end of forms that already had
+readers, which is the shape a format takes while it can still move.
+`docs/LODGEN_IMPOSTOR_SPEC.md` is the contract and stays the contract; when
+FO4CS grows a LOD path, whatever it needs and whatever conflicts it finds are
+changes to the spec, made then.
+
+**The build wrapper.** Two account-B lanes closed without building. That
+session executes only under the repo, and the MSYS2 incantation starts with
+`/c/msys64/usr/bin/bash`, so it was never allowed to run at all. The chain is
+now `tools/ww_build.sh`, in the tree: the game-up and second-`make` checks,
+the running exe renamed aside and never killed, `make -j2` under MSYS2 UCRT64
+with git on the PATH gated on MAKE'S OWN exit code, the exe proved newer than
+the sources named on the command line (or than all of `src/`), and
+`res/style.qss` and the shaders compared against their link-time copies. It
+exits 0 only when every gate holds, and the MSYS2 bash it calls is a child of
+a script under the repo, which is what makes it reachable.
+
+**Measured**, all of it on the 14:03:22 exe. `lodgen_merge.sh`: the Sanctuary
+region (-20,24)..(-19,25) at dim 4 with `--arrays --atlas`, built twice and
+compared file to file — `Commonwealth.4.-20.24.BTO` goes from TEN shapes to
+FOUR with 34,958 vertices and 25,475 triangles unchanged and 1,281,207 →
+1,275,492 bytes, and 3 `A` lines of which 2 carry layer -1; the atlas put 8
+textures in cells, moved 8 shapes and left 2 tiling shapes direct; the `_s`
+sheet is on disk under `Objects/` as a DX10 BC5 (dxgi 83, 11,184,948 bytes)
+and all 4 shader properties read it at constants 1/1, through 2 texture sets.
+`lodgen_card_arrays.sh`: two synthetic 2 × 2 sets of 8 × 16 frames, one red
+and one blue, for bases 00033794 and 0004a074, the region built with
+`--arrays --impostors --impostors-from-level 0` — 2 card sets in 3 arrays
+(one group, `legacy.16x32`), each a DX10 BC3 array of 2 layers, 1 mip, 1,172
+bytes exactly; the `cardArray` `.lodm` carries the class, the grid, the
+frame, the mips and per layer an id, half, centre and depth span; 109 `C`
+lines, every one naming the array `.lodm` and a layer, each base on its own
+layer, and layer 0's mip-0 centre block decodes blue where layer 1's decodes
+red, so each layer holds its own set's colour. The merge on that build is 12
+shapes to 12: the card shapes differ by texture and rightly refuse.
+`lodgen_texture_arrays.sh` PASS (9 legacy layers and 1 pbr, 18 `A` lines, the
+pbr `_rmaos` layer block-identical to its `_bc`), `lodgen_impostor_cards.sh`
+PASS, `lodgen_identity.sh` PASS (byte-identical rebake, 406 keys shared with
+dim 8), and the two GUI gates `lodgen_octahedral.sh` and `lod_generation.sh`
+PASS with the workspace at 59 of 59.
+
+**Found on the way**: the CLI wrote the object atlas to `<texDir>` while every
+atlased shape carries `<texDir>/Objects`, the directory the arrays already
+used, so every CLI-built worldspace had shipped its sheets one level above
+where its own chunks look for them. The merge harness's on-disk check for the
+`_s` sheet was the first thing that ever looked. `docs/MISTAKES.md` has it.
+
+Not done: a consumer — nothing reads a merged shape, the -1 layer or a card
+array yet. No real card library: the array gate runs on two synthetic sheets,
+and a worldspace's worth of real bakes has never been packed. No instance
+table, so the spec's "one instanced quad per chunk" is still a consumer's to
+build and the chunk carries the crossed quads per placement. And the
+candidate filter is still `missing|trees|all`, a category, where what a card
+is worth is a cost.
+
+## 2026-09-06h — Cards from the base, and cards from a chosen ring
+
+bungo: "Why not the base? The base is more detailed. Also, for the LOD tiers,
+maybe some of the closer ones could be replaced with a higher res LOD
+impostor for performance gain?" — "Good, let's do that."
+
+**From the base.** The candidate listing (`--list-impostor-candidates`,
+driver `tools/bake_impostor_cards.sh`) now prints the base's own near model
+— `EsmLodBase::model`, the STAT's or TREE's MODL — and falls back to the
+first filled LOD slot only where a record names none; SCOL parts are walked
+to their bases (most of Sanctuary's trees are parts). `--candidates
+missing|trees|all` (driver `CANDIDATES=`) picks far-slots-empty (default),
+every tree as well, or every LOD base; Sanctuary's region lists 33 either
+way, its trees all being missing-slot bases. The bake hides the engine's own
+in-cell detail steps — shapes named `_L1`, `_L2`… beside the full shape,
+which the engine draws one of — through the model's own flag, and records
+the model in the meta and the `.lodm` (`card.source`).
+
+What the base turned out to be: the Sanctuary maple's near model,
+`TreeMapleForest2.nif` (not the `…02.nif` beside it), is a BARE tree — 282
+triangles of trunk and branch cards on two alpha-tested atlas materials at
+threshold 80, no crown at all; the LOD mesh had a pre-baked crown. So the
+card is honest now and covers little: best view 4.6% of its frame against
+the LOD's 14%. Two consequences taken on the spot. The subsurface mask can
+no longer be "the alpha-tested shapes" (on a near tree that is every shape,
+bark included): where a model has any shape with the engine's
+tree-animation flag, the flag is the mask (the crown material carries it,
+the trunk's does not), else the alpha test as before; the meta says which
+rule ran. And coverage is a FRACTION after the downsample — a twig thinner
+than a texel reads below 0.5 — so the spec now says a consumer tests lower,
+or blends, for bare trees.
+
+**From a ring.** `LodgenObjectOptions::impostorFromLevel`,
+`--impostors-from-level N`, the panel's "Cards from ring" row (FO4CS target
+only, since the stock engine would show the crossed quads): from MNAM level
+N on, a placement whose base has a card stands on the card even where the
+ring's slot has a mesh, and the chunk report counts them. One 128 px bake
+serves every ring through its mips; the budget per tree type at 8 × 8 fitted
+frames is three sheets of 0.7 MB at 128 px, 2.9 MB at 256 px. Measured
+(`lodgen_impostor_cards.sh`): Sanctuary (-20,24) at dim 4 keeps its meshes
+by default and, with cards from ring 0, puts 108 placements on cards and
+shrinks from 1,280,239 to 1,001,308 bytes.
+
+**Raw colour.** Found while proving the retarget: the colour sheet was the
+lit path with lighting off, and that path tone-maps (Hable's curve) before
+it writes — every "unlit albedo" so far was curved, and the crossed `_fs`
+cards were lit renders. Shader channel 12 is now the base colour times the
+vertex colour and nothing else; every matte pass of the bake renders
+through it.
+
+**Partial texels.** The same comparison, once the pixel set was every
+texel at least half covered, gave ratio 1.000 exactly — and 0.75 at three
+quarters coverage: every channel render was averaged over the black
+background on the way down to the frame, so a partially covered texel
+carried its value times its coverage, and the hook wrote nothing below half
+coverage at all. Unnoticed on the LOD maple's opaque trunk, where partial
+texels are the edge; on a bare tree they are most of the tree. Every texel
+is now un-premultiplied by the coverage the matte measured and written
+wherever there is any, the AO neighbourhood and the sway extents following,
+and dilation fills only texels under the coverage floor of 16/255, where
+the un-premultiplied colour is the rounding of one or two source pixels
+(37 of 321 edge blocks went black when any coverage counted). And the near maple's branch
+shape is a `BSMeshLODTriShape` — [full][L1][L2] = 71 + 23 + 8 triangles —
+which the viewer draws whole at its default level: the bake now zeroes the
+L1 and L2 ranges (`ranges` meta line).
+
+**The harness, recalibrated.** Four octahedral floors had been the LOD
+maple's numbers minus a margin and one rested on the wrong file
+(`docs/MISTAKES.md`): the fit is now the frame's aspect against the recorded
+extents plus a 2% floor, the opposite-view normal floor is 5 (camera-facing
+cards agree between views), the hidden-step count is measured from the
+model's string table, and the pbr fixture's third texture is the material's
+own diffuse, which keeps the cut-out: the raw mask sheet then equals the
+albedo sheet (retarget and raw read proven at once) and differs from the
+legacy composition.
+
+## 2026-09-06g — Two LOD material families, and `.lodm`, our LOD material
+
+bungo, on the roughness caveat: "keep it specular or roughness, depending if
+source texture is vanilla or .pbrm sourced" — "gloss or roughness, metallic or
+specular, base color or diffuse" — and then, since `.pbrm` and `.bgsm` are
+limited in what they can carry for LOD, our own format: "`.lodm` would work,
+too, a json like pbrm and bgsm … compact by design, where performance is the
+goal, aligned with the intention of LOD."
+
+**Two families, one contract** (`docs/LODGEN_IMPOSTOR_SPEC.md`, rewritten).
+A set keeps the quantities its SOURCE carried, never inverted, never renamed:
+
+| family | source | textures | third texture |
+|---|---|---|---|
+| legacy | the vanilla material | `_d`, `_n`, `_gsaos` | gloss, specular, AO, subsurface mask |
+| pbr | a source `.lodm` of family pbr | `_bc`, `_n`, `_rmaos` | roughness, metallic, AO, subsurface mask |
+
+`_gsaos` was his question ("or should `_s` instead get the names of
+`_gsaos`"): it spells its channels the way `_rmaos` does, in the same slots,
+so one shader reads either behind a family switch and nobody mistakes it for
+a vanilla two-channel `_s`. Legacy values compose the way the engine does:
+gloss = smoothness × the `_s` map's G, specular = the map's R (the normal's
+alpha without one) × the specular strength. Measured on the way: the vanilla
+LOD sources DO name materials (`Materials\LOD\PreWarMapleGrLOD.BGSM`) and
+carry an `_s` in slot 7, and vanilla chunks carry `Commonwealth.Objects_s.DDS`
+in theirs with smoothness 1 and strength 1 — so the chunk shape now carries
+the source's slot-7 `_s`, smoothness and strength too (a BGSM's when it
+reads), and one bucket per material rather than per diffuse pair (two
+sources sharing a diffuse but not a material used to merge into one shape).
+
+**`.lodm`** (`src/io/lodmfile.h`): a `LODM` envelope like PBRM's — magic,
+version, size — around ONE flat compact JSON object: `lodm`, `family`,
+`kind` (source / card / array), `textures` (`diffuse|baseColor`, `normal`,
+`gsaos|rmaos`), a `card` block (grid, frame, extents, centre, depth span,
+mips) or an `array` block (class, the source per layer). Nothing a consumer
+does not read at load time. The generator writes one beside every card set
+(`<id>_oct.lodm`) and array set (`<ws>.LodgenArrays.<WxH>.lodm`,
+`<ws>.LodgenArraysPBR.<WxH>.lodm`), and reads one as a SOURCE override:
+beside a material with the `.lodm` extension, or at the diffuse's path under
+`materials\` when a shape names none; loose data root first (`--data-root`,
+the bake's `WW_LODGEN_DATA_ROOT`), then the game's resources. Its textures
+replace the source's for that shape, its third texture is taken RAW, its
+family names the set (arrays: per source; cards: pbr only when every
+textured shape has a pbr `.lodm`). Manifest: `C … <lodm>`, `A block layer
+<lodm>`, and `M block <material>` naming each chunk shape's source material
+(the shape itself names none, as vanilla's do not).
+
+**Bake.** The renderer's PBRM route is gated off, so the bake retargets:
+`BSShaderLightingProperty::wwTextureOverride` (consulted first by
+`fileName()`) points slots 0/1/7 at the `.lodm`'s textures; shader channel 10
+is the legacy pair (gloss, specular, B neutral) or, for a retargeted shape,
+the specular slot raw (`lodMaskRaw`), with the strength passed whether or not
+lighting is on (`lodSpecStrength` — `specStrength` is zeroed when it is off);
+the meta names every `.lodm` candidate it looked for with the shape's
+diffuse, so a harness learns a model's materials from the bake itself. The
+bug on the way: the card builder split the meta line without trimming, and
+the family word carried the newline — `pbr\n` never equalled `pbr`, every
+pbr set fell back to legacy names and converted nothing.
+
+**Measured** (`lodgen_octahedral.sh`, two real bakes of the Sanctuary maple,
+N=4, 64 px): legacy — gloss 45 distinct values (mean 55), specular 14 (mean
+10), AO 95, mask 255 crown / 0 trunk, 863 `C` lines ending in the `.lodm`,
+`_oct_d/_n/_gsaos.DDS` BC3 with 3 mips, 612 edge blocks and 0 black
+endpoints; pbr, from two fixture `.lodm`s in a loose root — both candidates
+resolved, |pbr.R − legacy.G| 0.37 and |pbr.G − legacy.R| 1.47 (the raw slot
+IS the legacy pair swapped) against |pbr.R − legacy.R| 63, the albedo moved
+42 (retargeted to the normal map), `_oct_bc/_n/_rmaos.DDS` + a pbr `.lodm`.
+`lodgen_texture_arrays.sh`: Sanctuary (-20,24)..(-19,25) — 10 legacy layers
+in one 256×256 set, three exact DX10 BC3 arrays, 8 `M` lines, 18 `A` lines
+naming the set's `.lodm`, every vertex carrying its layer; then the same
+build from a loose root with one pbr `.lodm` beside the first material — a
+PBR set appears, its shapes' `A` lines name it, and its `_rmaos` layer equals
+its `_bc` layer colour block for colour block (its mask texture was its own
+diffuse).
+
+Driver: `tools/bake_impostor_cards.sh` moves whichever third sheet the bake
+named. Skill `nifskope-ww-lodgen`, `HANDOFF.md`, `docs/LODGEN_VERTEX_PACKING.md`
+updated. Not done: a consumer; a card library; a source `.lodm` with a
+constant colour and no texture (an empty slot keeps the vanilla texture).
+
+## 2026-09-06f — One LOD texture spec: `_bc`, `_n`, `_rmaos`
+
+Concepted on paper with bungo before a line moved (his "stop, listen to me"
+was right: the first packing had been growing sheet by sheet). The result is
+`docs/LODGEN_IMPOSTOR_SPEC.md`, OUR spec for LOD, shared by the mesh LOD
+arrays and the octahedral cards, so FO4CS reads a distant maple on a card and
+a distant shack on a mesh through one contract:
+
+| texture | R | G | B | A |
+|---|---|---|---|---|
+| `_bc` | albedo, unlit | | | coverage |
+| `_n` | normal X | normal Y | height | sway weight |
+| `_rmaos` | roughness | metallic | AO | subsurface mask |
+
+The decisions, in the order they were made: coverage stays in the base
+colour's alpha (the alpha-test channel, and the sharpest block for an edge);
+height sits in the normal's blue as PBRM's `heightInBlue` has it; curvature
+was PBRM's alpha and is invisible at ring three, so the normal's alpha takes
+**sway**, a rigid object baking zero; RMAOS carries roughness, metallic and
+AO as PBRM does, and its alpha carries the **subsurface mask** rather than F0
+(a constant on a card) or porosity (derivable) — a backlit crown is the
+visible thing. Two sheets could not hold nine values, and a BC3 colour block
+quantises three independent scalars onto one line, so three sheets it is,
+every scalar sharing a block only with smooth company. Names: `_bc`, `_n`,
+`_rmaos` — a LOD set is told from a `.pbrm`-read material by where it lives.
+
+**Bake.** Two shader channels more: 10, the material's smoothness (the
+normal map's alpha, one minus it is the roughness), and 11, the shape's alpha
+test, which on a LOD tree is the leaf cards against the trunk and becomes the
+subsurface mask. Metallic is 0 until a material source exists. The `_ds`
+BC5 sheet is gone (its writer stays for later use); the mips stop while a
+frame's shorter side spans eight texels, and the count is in the header.
+
+**Padding.** bungo, on the first spec bake: "see the pixels on the edges,
+there's no padding." Under every transparent texel the albedo was black and
+the other sheets whatever the channel render's background was, so filtering
+and every mip pulled it into the leaf edges — the atlas's black-fringed mud on
+the impostor sheets, and on the crossed cards since they were written. Every
+frame now keeps a gutter of max(4, tile/16) transparent texels a side, the
+recorded extents spanning the full frame so the sidecar's meaning holds, and
+every channel of every sheet is dilated from the silhouette's edge as deep as
+the gutter and then some, frame by frame, then flooded with the frame's
+average; the coverage alpha itself is untouched. The crossed `_fs` cards get
+the same dilation. The harness reads the shipped BC3's colour endpoints on
+the blocks that straddle the edge and requires them not black.
+
+**Arrays.** A third array per size class, `_rmaos`, and the normal array now
+carries X and Y with height neutral and sway 0, because a mesh carries its
+sway per vertex. The sidecar is version 2 with the three array paths per
+layer; the manifest's `A` lines name the `_bc` array.
+
+## 2026-09-06e — Octahedral impostors, with AO, depth and sway on the sheets
+
+The third go-ahead: "we can bake octahedral impostors, also while we're at it,
+we can bake AO and other stuff on the card textures too", and "would they
+benefit from a depth map?" — yes, it is what turns a card back into a solid.
+
+**The bake.** `WW_IMPOSTOR_OCT=N` on the card hook photographs an N × N grid of
+views over the upper hemisphere (hemi-octahedral mapping, the axis views'
+rotations measured first: Top 0,0,0, Front −90,0,180, Right −90,0,90, so a
+direction's view is `(−90 + elevation, 0, 90 − azimuth)`), each view four
+renders: the two-pass matte for albedo and coverage, and two new shader
+channels drawn with texturing ON so the leaf cards' alpha test still cuts —
+8, the geometric normal in view space, and 9, the window depth, which is
+linear under the ortho projection and sits at 0.5 on the card plane because
+near and far are symmetric about the bound centre. An ambient term comes from
+the depth tile (the share of neighbours nearer the camera, eight directions,
+four rings) and the sway weight from the pixel's height and radius, the chunk
+builder's own law. Three sheets: albedo+coverage BC3, normal+AO BC3, and
+depth+sway as a **two-channel BC5** — two independent scalars, which a BC1
+would have forced through one palette per block; a BC4 block is the BC3 alpha
+block, so the encoder already existed.
+
+**The file.** The crossed quads stay for the stock engine. The manifest gets a
+`C` line per placement on such a card: centre, half extents, grid, depth span,
+sheet base. The card loader now reads every meta line rather than the first.
+
+**And a defect the sheets exposed.** The first real bake reported every
+view fully covered: the two-pass matte had produced no transparency. The old
+front card was opaque too, its background pixel the theme's viewport grey
+(43,45,49). Two causes, found one after the other: `updateSettings()`
+re-reads the background from settings on every paint, and assigning
+`cfg.background` never reaches the driver — the ortho paint clears with
+whatever `glClearColor` last received, which is set in `resizeGL`, so the
+field the hook wrote was decoration. Every card baked since the hook was
+written was an opaque grey rectangle; the impostor harness never saw it
+because it used synthetic cards. A `wwLockBackground` holds the field and
+`GLView::setBackground()` applies the colour under the context; both the
+crossed cards and the sheets carry real alpha now.
+
+**Not mostly air.** "Ain't we losing texture space that's spent on air, for
+these tree bakes?" — yes: the frame was the bound sphere at 1.2 × its radius,
+and a maple's silhouette filled about a third of it. The bake is two passes
+now: the first photographs every view at the sphere fit and takes the widest
+and tallest extent of the silhouette from the centre across all of them; the
+second bakes at that fit, with rectangular frames in the silhouette's aspect
+and one size for every view, so the consumer's quad is one number pair from
+the sidecar (`oct N tileW tileH halfW halfH cx cy cz depthspan`). Measured on
+the maple at N=4, 64 px: the frame went from 1085 × 1085 units to 590 × 856,
+the tile from 64 × 64 to 44 × 64 pixels, and the best view's coverage from
+5.3% to 14.5% — 408 covered pixels where there were 216, inside a frame 31%
+smaller. What is still air is the tree itself: at that size a maple is mostly
+gaps between leaf cards.
+
+**Frames on the vertices.** bungo's reference sheet, 6 × 6 frames with the
+5 × 5 triangle mesh drawn between their centres, corrected the placement: the
+first cut sampled cell centres, which leaves the outermost ring of directions
+with no triangle of frames around it. Frames sit on the grid's vertices now,
+`u = i/(N−1)`, so the corners are exact horizon views and the centre the exact
+top; the blending rule is the triangle a direction falls in.
+
+**Two more things the first bakes taught.** The viewport is 3:1, so a
+grab squashed into a square tile left the maple a sliver of 31 pixels; each
+tile is now the grab's central square and the card is recorded square. And
+the albedo passes render unlit (texturing on, lighting off): the consumer
+lights the card through the normal sheet, and a sun baked into the albedo
+would be lit twice.
+
+*Measured*, `tests/spells/lodgen_octahedral.sh`, a real bake of
+`TreeMapleForest02_LOD_1` at N=4, 64 px: 16 distinct views, 127–217 covered
+pixels a tile, no tile fully covered; the normals are VIEW space by
+measurement (opposite views differ in red by 42, top and horizon agree in
+blue) and vary within a tile; 84 distinct AO and 80 distinct depth values in
+one tile; sway 132 at the crown against 1.5 at the base; the far chunk's
+manifest carries 863 `C` lines naming the grid and the sheet, and the
+depth+sway file is a BC5 DX10 texture.
+
+## 2026-09-06d — Texture arrays, FO76's way and better
+
+The second of bungo's three go-aheads. FO76's instanced LOD node carries three
+texture arrays and every instance samples a layer. Ours: **one DX10 BC3 array
+per texture size class** over every diffuse the chunks reference — tiling or
+not, which is the thing an atlas cannot take — with real mips and no bleed, the
+normals as a second array resampled to the diffuse's size with smoothness kept
+in alpha, the **layer in UV2.y** of every vertex (the slot the sway note
+reserved), an `A <shape block> <layer> <array>` line per shape in each chunk's
+manifest, and a sidecar listing every layer's source. It runs before the atlas,
+which repoints diffuse paths, and the stock engine reads none of it: the
+shapes keep their own textures. `--arrays` on the CLI; *Texture arrays* under
+Object LOD chunks in the panel, greyed with the identity profile and hidden
+under the stock engine.
+
+The array writer repeats the single-texture writer's mip and block loop rather
+than sharing it: that writer's output is under harness and was not to move.
+
+*Measured*, `tests/spells/lodgen_texture_arrays.sh`, on Sanctuary
+(-20,24)..(-19,25): one size class, 256×256, eight layers; both arrays carry a
+DX10 header with the sidecar's layer count and a file size of exactly header +
+8 × mip chain (699,156 bytes); the layers differ; every vertex of all 14 shapes
+across the two chunks carries its layer in UV2.y, read at the offset the
+descriptor gives.
+
+## 2026-09-06c — Stable identity: the manifest carries the reference
+
+bungo's three go-aheads for what FO4CS will read next: texture arrays,
+octahedral impostors, stable identity. This is the third, first because the
+other two lean on the manifest it pins.
+
+**The key is the reference, plus the part.** The identity index is per chunk
+and per ring, and the base is shared by every copy of a maple, so neither can
+say "this is the same object in the dim-4 and the dim-8 chunk". The placed
+reference's form ID can — except for SCOL parts, which have no reference of
+their own and carry the SCOL reference plus their ordinal within it. Measured
+on Sanctuary (-20,24), that exception is most of the chunk: **471 of 678
+objects are SCOL parts**. Every manifest row gains `ref part`; the first line
+names the ring, the chunk and the columns (`# lodgen manifest 2 ws
+Commonwealth dim 4 chunk -20 24 columns …`), so a consumer pairing rings never
+guesses. The first nine columns are unchanged.
+
+*Measured*, `tests/spells/lodgen_identity.sh`: two bakes of one chunk are
+byte-identical, chunk and manifest; `(ref, part)` is unique within a chunk
+(678 rows, 0 duplicates; 1536 and 0 at dim 8); the dim-8 chunk shares **406
+objects** with the dim-4 one by that key, every one with the same base and
+position in both rings. FO4CS has no manifest reader yet, so the format grew
+freely; the terrain harness's row count tolerates the header line.
+
+## 2026-09-06b — The LOD Generation panel, organised for a person
+
+Five changes from "what would make it more pleasant to use", on top of the
+house-style pass of 06a:
+
+- **An unticked box can be seen.** Fusion draws a check box from
+  `palette(base)` with an outline of window-darker(140), and this theme sets
+  Base equal to Window. Measured on the settings page's own render, the
+  strongest contrast anywhere inside an unticked box was **0 levels** — "Pack
+  an object texture atlas" was plain text, in every panel of the program.
+  `QCheckBox::indicator` and `QRadioButton::indicator` now carry the input
+  field's plate and border; 32 levels after. Ticked is **Blender's check
+  box** — its `wcol_option` blue (#4772b3, a new `toggle` skin entry, one
+  value on both columns as Blender keeps it) with a white mark from an image
+  resource, `:/wnd/check.png` and `radio.png`, rasterised in the tree at 1x
+  and 2x because no SVG plugin ships with the build. bungo's call over the
+  accent orange the first cut used: a tick is a state, not a selection. The
+  stylesheet header's "leave the indicator to Fusion" note is amended, not
+  deleted: item-view check marks still are.
+- **The output is the mod folder.** "Output: a mod's Data folder" asked for
+  a path a person does not think in. bungo's ask, made twice — a first
+  reading split it into Mod Organizer's mods root and a mod name, and he
+  said what he meant: *the mod folder is the output folder*. One field,
+  *Output mod*: pick the mod, or make a new folder in the picker and that is
+  the new mod; the files land inside it under `Terrain\`, `Textures\Terrain\`
+  and `meshes\terrain\`. The folder is created on Generate (Mod Organizer
+  lists it on refresh; its own mods carry no `meta.ini`), and the summary
+  names it: *Will write to Generated LOD (a new folder): …*. The default on
+  this machine is a *Generated LOD* folder under the Mod Organizer mods root.
+- **Meshes and textures come from the game's archives.** "Can't it read
+  from the archives?" — it could, with one catch. The game manager serves
+  files out of the BA2s set under Settings → Resources, and the viewer has
+  always read textures and materials that way; but its Fallout 4 archive
+  filter drops every `.nif` at index time (the viewer never needs a mesh out
+  of a BA2), so the first wiring placed none of 678 refs from the archives
+  while placing all 678 from the unpacked folder. Meshes therefore get the
+  generator's own index over the same folders and archives, in the same
+  order, `.nif` only, built once on first use; textures and materials go
+  through the manager. The three read sites (models, materials and textures,
+  the atlas's loose copies) all try a loose folder first, so the *Game data*
+  row and its unpacked copy of the Data folder are gone.
+  The CLI keeps `--data-root` as an optional loose override, because batch
+  mode never initialises the game manager (its init raises a progress
+  dialog). If Fallout 4 is not enabled under Resources the panel says so
+  beside a greyed Generate. *Measured:* the near chunk (-20,24) at dim 4
+  built from the unpacked folder and built from the archives are compared
+  byte for byte in the self-test — a wrong path loads nothing, and a chunk of
+  nothing is still a chunk, so a count of models would not have done. Two
+  things the change surfaced on the way: a model loaded from a buffer must
+  have its Loading state cleared as `loadFromFile` clears it, and the chunk
+  builder's refusal now says how many refs it placed and how many had no
+  usable model for the ring — the first gate used the far chunk at dim 16,
+  which has no LOD at that ring without impostor cards, and both sources
+  came back empty for a reason that was not the loader.
+- **The rest of what a `.bto` carries has rows.** "Where are the toggles for
+  data other than identity and AO?" — nowhere: tree sway weights (vertex
+  alpha) and the sky/ground channels (UV2, Eye Data) had no switch anywhere
+  but the options struct, and the buried-geometry cull, its margin, the AO
+  skirt and nearer-slot substitution were CLI flags only. All six are rows
+  under Object LOD chunks now, persisted, each greyed with what it rides on
+  — sway and the channels with the identity profile (and hidden with it
+  under the stock engine, where they are inert bytes), the margin with the
+  cull box, the skirt with the AO box. The grey-AO debug view stays a CLI
+  flag: a debug view is not a setting.
+- **The wheel scrolls the panel, not a value.** bungo, scrolling the
+  settings: "if I scroll with my mouse wheel over AO samples per cell the
+  number changes — a real risk with these rows." A spin box and a combo take
+  the wheel by default. Now, program-wide through the two house helpers, a
+  field takes the wheel only while it has focus (Blender's rule); otherwise
+  the event goes unaccepted and the scroll area takes it. Proved both ways
+  in the self-test: a wheel over the unfocused field leaves it, the same
+  wheel steps it once the field is focused — a field that simply ignored
+  wheels would pass only the first.
+- **Archives are not the slow way.** Timed in the self-test on the same
+  chunk, two runs: unpacked folder 1187 ms then 8114 ms, archives 549 ms
+  then 1086 ms with the index built in that pass, 251 ms then 414 ms after.
+  The order flatters the archives (the folder pass ran first, cold) and the
+  folder figure swings with the disk, but the index is a one-time cost per
+  session and inflating meshes costs less than opening 678 files.
+- **Generate never scrolls away.** Three bands: the settings scroll; the map
+  and the bar sit on a vertical splitter the user drags (its sizes persist);
+  the summary line and the two buttons are pinned beneath both. The first
+  layout had Generate at the bottom of one long column, below the map, off
+  the screen at 1080p.
+- **One choice a user can make without knowing the formats: Target.** *FO4
+  Community Shaders* or *Stock engine*. Choosing ticks what that reader needs
+  and hides what it cannot use — the landscape file, the heightmap and the
+  identity channels vanish under the stock engine, the way Blender hides the
+  panels of the render engine not chosen. A tick under a hidden section is a
+  saved setting, not a request: the run reads `wantLodt()` and its siblings,
+  which test visibility as well as the box.
+- **Sections fold — Blender's panel with a toggle in its title.** The arrow
+  folds the body, the box is the setting, the fold persists. The legacy
+  `.btr` section starts folded (kept for the stock engine, no longer
+  maintained), which halves the panel.
+- **The panel says what it will write, or why it will not.** *Will write:
+  Terrain\Commonwealth.lodt (about 36 MB); Textures\Terrain\Commonwealth\
+  Commonwealth.HeightMap.dds (6144 x 6144, 72 MB); 3060 chunks (object) under
+  meshes\terrain\Commonwealth.* Sizes from what was measured (a `.lodt` is
+  about 1 KB a cell; a native heightmap 32 texels a cell at 2 bytes), the
+  chunk count from the very queue the run walks. With no output folder, no
+  worldspace, nothing ticked or an inverted range, Generate greys and the
+  line says which, in the error red. A greyed button with no sentence beside
+  it is a broken button.
+
+*Measured.* Twenty-eight checks join `lod_generation.sh` (58 total): Generate and
+the map outside the scroll area while the worldspace box is inside it; the
+target hiding, unticking, ticking and restoring; the legacy section folded and
+the expander unfolding it; the refusal text and the summary text; and the box
+contrast — run against the OLD sheet first, where it failed at 0, before the
+new one passed at 32 — and the ticked box, 16 white mark pixels on 204 blue
+of 225, which a missing image resource would fail. A mod folder that does
+not exist yet must be named and called new. That first sheet run
+caught a trap of its own: the app reads
+`release/style.qss`, a copy `QMAKE_POST_LINK` makes at link time, so a sheet
+edit is invisible until the copy is refreshed. The first "after" run scored 0
+as well, on the stale copy, and the number said so before the picture did.
+
+## 2026-09-06a — The LOD Generation panel joins the house style
+
+**bungo saw it from the screenshot: the panel used none of the fork's own
+helpers.** Four things, each of which already has one implementation and a
+changelog entry saying what it replaced and why:
+
+- **Every number was a plain Qt spin box** — AO samples, overview samples,
+  triangles per cell, shoreline density and the four range cells, stepper
+  arrows and no drag. The same species mistake as 2026-08-05h, in a panel
+  written a month after that entry. `wwMakeScrubFields` never reached it
+  because the sweep only covers the Settings panes; each of the eight now goes
+  through `wwMakeScrubField`.
+- **Sections were `QGroupBox` titles**, the idiom `wwHeading` retired
+  (2026-08-02c, "One heading, one boxed button"). Four headings now, and the
+  chunk-range section is a plain widget so it still greys as one thing while
+  no chunk output is ticked.
+- **Selectors kept their default chrome** beside the number fields — the
+  "different species of control next to a number field" that
+  `wwMatchFieldStyle` exists for. Worldspace, heightmap size, chunk size and
+  preview channel take it.
+- **Two settings to a row, and the explanation after a dash in the label.**
+  West|East and South|North shared rows; *"Landscape file (.lodt) - heights,
+  textures, water, colour, AO for the whole worldspace"* was a check box. One
+  label | field grid per section with the field column stretched, so every
+  value is one width; whole-word labels; the sentence moved to the tooltip.
+  The range section says in a muted line what it does not apply to instead of
+  saying it in its title.
+
+*Measured, not eyeballed.* Six checks join `lod_generation.sh`, each counting
+the thing that was wrong, each with a floor on the other side so an empty
+panel cannot pass: spin boxes without the `wwScrubbed` stamp (0 of 8), group
+boxes in the panel (0) against weight-600 headings (4), selectors whose sheet
+lacks the matched drop-down rule (0 of 4), check-box labels carrying " - " and
+outputs without a tooltip (0 and 0), and the four range cells landing on four
+distinct rows of the laid-out panel — a geometric fact, not a layout-class
+name.
+
+*Then looked at, from inside the app.* `WW_LODGEN_SHOT=<png>` (the harness's
+`SHOT=` variable) grabs the dock at 640 px before the test quits, so the panel
+can be seen without anyone capturing the desktop. The first grab passed all
+six counts and still showed three things worth fixing: every section's grid
+had sized its own label column, so the value edge moved seven times down the
+page — one label width for the whole panel now, less the indent; the labels of
+greyed fields stayed bright while their fields greyed — each `add()` hands its
+label back and the enable rules carry it; and *Whole worldspace* filled the
+value column like a value — it sits at its own width now. A count proves the
+species of control; only a picture shows the alignment.
+
+## 2026-09-05e — Night pass: provenance, AO-only refresh, the LOD Generation workspace, the terrain preview bug
+
+bungo's brief for the night: everything on the lodgen side, unprompted, FO4CS
+work excluded, agents for research only. Five things landed, each with its gate.
+
+**Heightmaps carry FO4CS's `F4FX` provenance block, and the Commonwealth bake
+is byte-identical to FO4CS's own** — header, the eleven reserved words, payload,
+all 75,497,620 bytes, by `cmp` against `Commonwealth_fine`. The corpus hash is
+computed from the ESM by the loader's own walk (FNV-1a 64 over every `VHGT`
+payload under the worldspace GRUP in file order, first `VHGT` per `LAND`, a
+`LAND` skipped when its `CELL` had no `XCLC`) and lands on the loader's pinned
+`0xD8337D022F637F22`; the CLI asserts that after every Commonwealth bake, so a
+mismatch fails loudly here instead of silently in game. The pixel hash is FNV-1a
+64 over the R16 payload as written. An Opus agent extracted the layout from the
+FO4CS source and reproduced both hashes from the real file before a line was
+written; the spec is `docs/F4FX_PROVENANCE.md`. Nine worldspaces redeployed.
+
+**`--refresh-ao`** recomputes only the AO plane of an existing `.lodt`, in place,
+from the file's own heights — "re-bake the AO, keep the heightmap". The plane is
+built by the one function the writer uses, from the samples read back through
+the reader, so a refreshed file is byte-identical to a freshly written one:
+measured, `cmp` clean.
+
+**The LOD Generation workspace.** The World LOD Generator dialog is gone;
+"LOD Generation" sits in the Workspaces dropdown beside Issue Manager, as a dock
+that stays open. Source (plugins in load order, the worldspace read from them,
+game data, output), What to generate (the `.lodt` — full or AO-only — with its
+AO and overview resolutions; the shadow heightmap at native or a fixed size;
+object chunks with their options; legacy `.btr` chunks with theirs), the chunk
+range with a "Whole worldspace" button, and Progress: a north-up map of the
+worldspace's cells that fills in as the bake runs — coarse pyramid levels
+first, each finer level deepening the colour, chunk jobs stamping gold — over
+a progress bar. Whole-worldspace outputs run on a worker thread through the
+writer's new progress/cancel callback (Cancel removes the partial file); chunk
+jobs run one per event-loop tick as before and preview into the viewport, which
+is switched to a top-down orthographic view and framed as chunks land. Settings
+persist. `tests/spells/lod_generation.sh`: 26 checks.
+
+**The terrain preview-channel bug — found by reading, then found again by
+rendering.** Reading gave a real defect: a shape caches the program it last
+drew with and hands it back as a hint, and a terrain shape that resolved a
+PBRM on its first paint stayed pinned to `pbrm_default.prog`, which has no
+`lodChannelView` uniform; the earlier "PBRM bypass" gated only NEW choices.
+That is fixed (a cached PBRM hint is refused when the verdict is not PBRM).
+It was not the cause. The harness written to prove the fix rendered one chunk
+top-down under channels 0, 3 and 6, flat and lit, in a fresh process where no
+hint could exist — six images, byte-identical. The cause: `fo4_default.prog`'s
+conditions exclude **Shader Type 18, LOD landscape**, and only
+`fo4_default.frag` carries the preview branch, so a terrain chunk never
+reached a program with the uniform in any mode. Objects are another shader
+type and always varied. While the preview is on, FO4 lighting-shader shapes
+now go to `fo4_default.prog` by name, as the PBRM route is chosen by name.
+`tests/spells/lod_channel_preview.sh`: three channels, three different images
+(58,859 / 36,928 / 42,689 bytes).
+
+**Impostor cards use their side view.** The bake hook has always photographed
+a model into `_front.png` and `_side.png`; the card builder converted only
+the front and put it on both crossed quads, so an impostor looked the same
+from every angle (found by the Explore agent reading `lodgenCard()`). One
+sheet now holds front | side and the two quads read opposite halves; named
+`<id>_fs.DDS` so no front-only card DDS from before is reused.
+`tests/spells/lodgen_impostor_cards.sh`: synthetic red-front / blue-side
+cards for a real candidate, far chunk baked, sheet twice the width, halves
+differ - 6 of 6. (Two harness lessons on the way: candidates are listed for a
+`--terrain-region`, and a card only stands in at a FAR chunk, dim 16 or 32,
+where the empty slot is.)
+
+**The reader no longer loads the whole file.** `LodtFile` read the entire
+`.lodt` into memory — 1.55 GB for Appalachia, which is what the 2.1 GB peak
+blamed on the writer actually was (a read-only `.btd` probe under the same
+sampler peaked at 259 MB). It now reads everything before the block data (~20
+MB) and seek-reads each block on demand. Measured: Appalachia `--verify-only`
+peaks at **71 MB** of private memory, results identical.
+
+**Water for a `.btd` conversion, from a plugin.** A `.btd` carries no water;
+Fallout 76 keeps it where Fallout 4 does, in `XCLW`/`XCWT`/`WATR`. With a
+plugin and `--worldspace` on the command line the converter now takes water
+from the plugin through the same `cellWater()` the FO4 path uses. Proven on a
+readable plugin (the Pitt `.btd` with `Fallout4.esm`'s water: 2,500 water
+cells, 15 `WATR` types, every cross-check exact). **The Appalachia run itself
+is blocked by the machine, not the code:** `SeventySix.esm` could not be read
+at all tonight - a plain `cat` of the 925 MB file did not finish in 120 s while
+Steam and its service were running against the Playtest library - so every
+open of it hung at the OS with zero CPU. `WW_ESM_TRACE=1` now prints
+`EsmWorld::load`'s steps to stderr, which is how the hang was placed at the
+open. Retry when Steam is idle:
+`lodgen SeventySix.esm --worldspace 25DA15 --from-btd Appalachia.btd --lodt <dir>`.
+
+**Deployed to the FO4CS folder, ready for the reader:** `Terrain/Commonwealth.lodt`
+(36 MB), `DLC03FarHarbor.lodt` (9.2 MB), `NukaWorld.lodt` (7.2 MB),
+`DiamondCity.lodt`, `NukaWorldAmphitheater.lodt`, each cross-checked exact on
+write. DiamondCityFX, Goodneighbor, DLC03VRWorldspace and NukaWorldMarket have
+no `LAND` records - the writer refuses them, correctly; their heightmaps are
+flat at the default height.
+
+Also: the writer's timing line had one bucket mislabelled — the 61 s charged
+to the coarsest pyramid level was the AO pass, and the fix that followed was
+aimed by the second instrument, not the first (docs/MISTAKES.md 2026-09-05).
+
+## 2026-09-05d — `.lodt` writer: streamed to disk, and 75 s to 7.4 s
+
+Two changes to the writer, both checked by the file coming out **byte-identical**
+before and after.
+
+**Streamed output.** The file used to be assembled in one QByteArray and written
+at the end - 2.5 GB resident for Appalachia's 1.55 GB, ~4 GB for the 804-cell
+target. Now the header is patched in memory as each section's offset is
+reached, the block directory's space is reserved ahead of the payloads and
+filled by a seek at the end, and every payload goes to disk as it is
+compressed. Resident: the header, 16 bytes a block, and the block in hand.
+
+**Ten times faster, from a measurement, not a hunch.** Per-phase timers went in
+first. The guess had been LAND decoding and zlib; the numbers said the
+Commonwealth spent **61 of its 75 seconds in the AO pass**, doing 1,055,205 cell
+decodes for a 13 ms computation. The AO march reaches two cell rows either
+side of a 192-cell-wide raster - a working set of ~960 cells - and the cell
+cache held 512, so every texel row re-decoded its cells. (The timer had also
+been charging that to the coarsest pyramid level; the first instrument was one
+section off, which is why there was a second.)
+
+| | before | after |
+|---|---|---|
+| wall, Commonwealth `.lodt` incl. read-back | 75 s | **7.4 s** |
+| cell decodes | 1,202,661 | **36,864** (one each) |
+| pyramid levels | 63.6 + 2.4 + 2.7 + 4.2 s | 0.4 + 0.1 + 0.3 + 1.0 s |
+| zlib | 1.8 s | 0.4 s |
+
+What changed: AO and the overview read one coarse grid built cell-by-cell (at
+the default 8 a cell they are the same grid); the cell cache is sized to a 1 GB
+budget so a world that fits - the Commonwealth's 36,864 cells at ~8 KB - is
+decoded exactly once across all passes; that decode happens during pass one,
+while the source's memo still holds the cell and its seam neighbours, so it
+costs no extra parse; and blocks are compressed in parallel batches of 256,
+written in order. Appalachia at 128 a cell does not fit the budget and streams
+as before; its decode is a tile fetch, not a LAND parse.
+
+The timing line now prints with every run (`timing: pass one .. ms, ..`), so
+the next regression is a number in the log rather than a feeling.
+
+## 2026-09-05c — `.lodt` shared edges take the maximum, same as the heightmap
+
+bungo's call after the explanation: **max in both**. Where two `LAND` records
+disagree about a sample they share - row 32 of one is row 0 of the next - the
+`.lodt` slot now holds the maximum over every cell carrying it, the rule the
+shadow heightmap was measured to follow (0 mismatches against the reference
+over 2.3M edge texels). Terrain and far shadows will be read from the two
+files as one surface; before this, 439 rim cells had a row where the drawn
+terrain dropped to -352 filler while the shadow map still said real terrain -
+a ridge casting a shadow without being drawn.
+
+What changed: the ESM source reads a cell's south, west and south-west
+neighbours (its memo is four entries now, so they cannot evict the cell under
+a live pointer); the per-cell min/max covers the raised edge so nothing culls
+it; the `--lodt` cross-check rebuilds the same maximum from the ESM and reports
+how many samples it lifted. Commonwealth: **129 of 36864 sampled positions raised,
+0 mismatched, worst 0**. The Commonwealth `.lodt` is therefore no longer
+byte-identical to the 2026-09-04 file - it differs on exactly those seam slots,
+by design. `.btd` sources have no shared edge and are untouched.
+
+## 2026-09-05b — Heightmaps at native resolution, byte-identical to the reference
+
+The FO4CS terrain-shadow heightmaps are now baked at **native** resolution -
+`cells x 32` a side, one texel per `LAND` sample, oblong when the worldspace
+is - and the Commonwealth bake is **byte-for-byte identical** to the
+`Commonwealth_fine` reference map: 75,497,472 payload bytes, zero differing.
+All nine playable worldspaces are deployed to the FO4CS folder; the 4K set is
+moved to `Textures/Terrain.4k/`, not deleted.
+
+| worldspace | cells | native map |
+|---|---|---|
+| Commonwealth | 192×192 | 6144×6144 |
+| DLC03FarHarbor | 143×138 | 4576×4416 |
+| NukaWorld | 65×65 | 2080×2080 |
+| the six small ones | 9×7 .. 25×25 | 288×224 .. 800×800 |
+
+It started from bungo asking what resolution the terrain would be if every
+bump were a pixel. The answer - 6144 - was two thirds larger per side than the
+4K maps that had been handed over as done, and the reference map with the
+exact `LAND` range in its filename had been sitting in the target folder the
+whole time. Three defects fell out of diffing against it, in order:
+
+**Texels were at cell-relative centres**, `(i + 0.5)`, "so the resample stays
+symmetric". At native size that makes every texel the mean of two adjacent
+samples - never a sample. Measured: the old 6144 bake was exactly the 2×2
+average of the reference (max 0.8 of a step, 100% within one), the
+44,872-unit peak shaved to 44,848, 41% of texels off. Lossy at every size by
+construction. Texel i is now sample i.
+
+**The shared VHGT edge.** Row 32 is the next cell's row 0 and in a well-formed
+record they agree; 439 Commonwealth cells at the world's edge are flat -352
+filler whose edges disagree with the real terrain next door, and the two
+bakes resolved them differently. Two guesses were tried and each got closer
+(8,675 texels off, then 6,981). The third was not a guess: a new `--dump-land`
+writes every cell's full 33×33 once, and six candidate rules were scored in
+Python against the reference over all 2,322,432 edge texels. **Maximum over
+every cell holding the sample: 0 mismatches.** Own row 0: 8,675. South/west
+owns the edge: 6,981. Last- and first-non-filler: 5,832 and 6,838. The maximum
+is also what a shadow map should hold - the higher surface casts.
+
+**Quantising truncated**, as the `.lodt` writer had until the day before.
+Rounds now; exact at native either way.
+
+`--heightmap-size` defaults to native, takes `native` by name or a number for
+a square resample, and refuses a native map past 8192 a side rather than
+silently clamping. The FO4CS loader's cap is already 8192 - its own comment
+says the 6144 Commonwealth "must load" - so nothing changes on that side for
+size. One thing does for the reader: the sweep shader addresses texels with a
++0.5 centre offset, and a sample-aligned map puts the sample at the corner.
+That is a 64-unit registration question for the shader, not the bake.
+
+Not in these files: the FO4CS provenance block (`F4FX`, corpus and pixel
+hashes) the reference carries in its reserved header. Ours are zeros, which
+the loader accepts as legacy and cannot stale-check.
+
+## 2026-09-04l — `.lodt`: a reader, a streaming writer, and Fallout 76 import
+
+The three things the format was missing.
+
+**A reader.** `LodtFile` walks the progressive pyramid to find the level that
+actually stores a sample, inflates that block and returns the height. It exists
+so the writer is checked by something other than itself — the same defect class
+as a DDS header whose pixel-format block sat four bytes wrong and parsed
+perfectly through the parser that produced it. `--lodt` now writes, reads back
+and cross-checks against the ESM's own `LAND` records in one run: **36,864
+sampled heights, 0 mismatched, worst error 0**.
+
+**The writer streams.** The three whole-world grids are gone — 75 MB a plane for
+the Commonwealth, 1.32 GB a plane for the 804-cell target, which is why the old
+code simply refused anything over 64M samples. Cells are decoded on demand into
+a 512-entry cache instead, and the guard is deleted. It now handles Appalachia's
+**662M samples**, ten times the old ceiling.
+
+The Commonwealth file is **byte-for-byte identical** before and after, which is
+the only interesting thing to say about a refactor. It costs 30 s against 6.8 s:
+one landscape read per LOD level rather than one in total.
+
+**Fallout 76 `.btd` import**, `lodgen --from-btd <file> --lodt <dir>` — no
+plugin, because a `.btd` is the whole landscape. The writer now takes its
+landscape from a *source*, and the `.esm` is just one of two.
+
+| Appalachia | |
+|---|---|
+| cells | 201×201, 128 samples each — **4× the resolution, not 4× the area** |
+| land textures / ground covers | 43 / 39 |
+| height range | −700..38210 |
+| output | 1.55 GB in ~25 min, peak 2.5 GB RSS |
+
+Most of the format copied across untouched, which is what specifying it first
+bought: same alpha packing, same progressive 3/4-per-level pyramid, same block
+edge. Ground cover became a fourth block plane; water did not appear, because a
+`.btd` carries none.
+
+### Three corrections, one of them load-bearing
+
+**The height rescale rule in the spec was wrong.** It said
+`quantum = (max − min) / 65535`, which only holds when the range straddles zero;
+on a 0..40000 range it overflows the encoding twofold. The real constraint is
+the *fixed* 32767 bias, so `quantum ≥ maxAbs / 32767`. The first implementation
+then rounded that up to a power of two for tidiness and paid 1.6× the
+quantisation error — measured, worst case 0.98 units against 0.32 at the exact
+bound.
+
+**Quantising truncated instead of rounding**, costing a whole quantum of error
+where half was available. Invisible on the FO4 path, where `VHGT` heights are
+already exact multiples of 8, and visible the moment a `.btd` is the source.
+
+**An "alpha invariant" was reported as confirmed when it had never been
+tested.** The spec claimed FO76's five 3-bit weights partition an implicit
+base's share, so they could never sum past 7 — and the converter measured
+exactly 0 violations across 245,760,000 samples of `EXM1PittWorldspace.btd`.
+That worldspace has **zero land textures**: every alpha word in it was zero.
+Appalachia, which has 43, breaks the same check on **72% of 21.6 billion
+samples**.
+
+The layers are independent opacities composited in order over the base, the way
+FO4's own layers paint over one another — not a partition of unity. The stored
+bytes are unaffected and still copy verbatim; only the documented meaning was
+wrong. The check is now reported as a statistic rather than a gate, and
+`tests/spells/lodt_btd.sh` states in its own output which paths the small
+worldspace leaves **uncovered** instead of counting them as passes.
+
+### Verification pass (2026-09-05)
+
+A fresh look at what had been *assumed* rather than measured turned up one more
+wrong answer and confirmed three right ones.
+
+**Colour was decoded as RGB565; the source is A1R5G5B5.** libfo76utils' own
+codec says so, and it was in the tree the whole time. The "channel means" the
+first converter reported were the alpha bit plus four bits of red masquerading
+as red. What gave it away was a sanity check, not a test: the untinted Pitt
+worldspace decoded to (24, 16, 16) under 565 and to exactly (16, 16, 16, A=1)
+under the right layout. Fixed; every `.lodt` converted before this has the
+wrong colour plane.
+
+**The alpha field-to-slot pairing is right** - 0.13% of nonzero alphas on an
+empty slot versus 38% reversed. **Ground cover is right** - 0 versus 10.6M.
+**Bit 15 is never set.** All from a new `--btd-probe` that reads a `.btd` in
+thirty seconds without converting it.
+
+**The height bound tightened to half a quantum plus eight float32 ulps of the
+tallest height** - the first is the requantisation bound, the second is what
+the reader's float arithmetic can carry at 38,000 units. The old bound of one
+quantum was set from what the code produced and would have hidden the
+truncation bug indefinitely; a first tightening to `0.5q x 1.001` missed by
+0.0002 on Appalachia because it was the same kind of number.
+
+**Every plane now round-trips against its source, not just heights.** The
+reader gained `colourWord()` and `groundCover()` (plane 3 when colour is
+present, plane 2 when not - the section flags decide, not a constant), and
+both CLI paths rebuild alpha, colour and ground cover from the source the way
+a consumer would and compare. Final numbers, all exact:
+
+| | heights | alpha words | colour | ground cover |
+|---|---|---|---|---|
+| Commonwealth vs `Fallout4.esm` | 36,864, worst 0 | 0 of 36,864 differ (2,328 nonzero) | 0 differ (2,112 coloured) | n/a |
+| Appalachia vs `Appalachia.btd` | 18,496, worst 0.5838 of bound 0.6013 | 0 of 18,496 (18,385 nonzero) | 0 differ | 0 differ (17,217 nonzero) |
+
+`--verify-only` runs all of that against an existing file without rewriting
+it, on either path. `tests/spells/lodt_write.sh` now fails if the tool's own
+round-trip does - an earlier version discarded that exit code with
+`>/dev/null`.
+
+### Known limit
+
+The output file is still assembled in memory before being written. Fine to
+1.55 GB; it is the next ceiling to remove, not a solved problem.
+
+## 2026-09-04k — `.lodt`: one landscape file per worldspace
+
+A new format and its writer. `Data\Terrain\<EditorID>.lodt` replaces the
+per-chunk `.btr` terrain path entirely — heights, LTEX blend alphas, water
+(height **and** type), terrain colour and ambient occlusion, behind a
+progressive LOD pyramid of zlib blocks. Specified in
+`docs/LODGEN_BTD_FORMAT.md` before a line was written, which paid for itself
+twice over.
+
+It takes Fallout 76's *idea* and not its layout: FO76 samples terrain at 128 per
+cell, FO4's `LAND` is fixed at 33×33, and reusing their block sizes would store
+sixteen times the bytes for zero extra information. Magic is `LODT`, not
+`BTDB`, so a real BTD reader refuses ours rather than misparsing it.
+
+**Commonwealth: 34.3 MB in 6.8 s**, against 230.3 MB for vanilla's entire
+terrain and object LOD — while carrying strictly more than the meshes do.
+
+| section | notes |
+|---|---|
+| heights | uint16 at a **header-field quantum**; 8 = `VHGT`'s own, exactly lossless |
+| LTEX alphas | five 3-bit weights a sample, base implicit — six textures in 16 bits |
+| quadrant slots | **global**, not per block |
+| water | per-cell height + type index + `WATR` table — 15 types in the Commonwealth |
+| terrain colour | `VCLR`, 5-5-5, sparse at 6.6% of cells |
+| AO | a flat coarse plane, 8 samples/cell, 2.4 MB |
+
+**Three things the document caught that code would not have:**
+
+  * **The quadrant slot table cannot live in a block.** It was specified there,
+    which works only while a block is one cell — a level-3 block spans 8×8
+    cells, so 256 quadrants. It is a global section now, as FO76 has it.
+  * **"Six slots at three bits" is eighteen bits and does not fit a uint16.**
+    FO76 stores five and leaves the base implicit; that is how six textures fit
+    in sixteen. Measured coverage: five layers plus a base covers **99.27%** of
+    Commonwealth quadrants.
+  * **The alpha present-bitmask was unnecessary.** It existed to avoid writing
+    16 bits a sample for the 89.5% of quadrants with no layers — but those are
+    runs of identical words, which is what zlib collapses. Adding the alpha and
+    colour planes took the file from 27.0 MB to 32.0 MB: 5 MB for 75 MB of raw
+    planes. The bitmask would have bought branching, not bytes.
+
+**The gate is a round trip, not self-consistency.** `tests/spells/lodt_write.sh`
+reconstructs heights by walking the progressive pyramid and compares them with
+the `LAND` corners the generator read: cell (−20,24) gives 8208 / 7336 / 8704 /
+8160 and (0,0) gives 512 / 560 / 608 / 552, **exactly**, from four different
+pyramid levels. A file can be self-consistently wrong — that is precisely how
+the DDS header offsets passed their own reader all day until a shipped file
+disproved them.
+
+The header's height range reads −8320..44872, which is bit-for-bit the B/T in
+Bethesda's own `Commonwealth_fine.HeightMap` — two independent paths agreeing.
+
+`EsmWorld::cellWater` now resolves the water **type** (`XCWT`, falling back to
+`WRLD NAM2`) alongside the height. That had been outstanding since the morning
+and is what gives water type a home at last.
+
+Not implemented: the reader, ground cover (FO4 has no `GCVR`), and the
+streaming build for worldspaces past 64M samples — which the 804-cell FO76 port
+will hit, and which currently refuses with a clear message rather than
+thrashing.
+
+## 2026-09-04j — Tree sway weight, the last decided-but-unbuilt LOD channel
+
+`h² × (0.35 + 0.65·r)` per vertex, into the identity profile's vertex **alpha**:
+0 at the trunk base, 1 at the branch tips. Height is squared because a trunk is
+a cantilever; the radial term separates a branch tip from the trunk at the same
+height. Computed in the placement's own local space, so a leaning or rotated
+tree still reads 0 at its own base.
+
+**A stale patch for this had been sitting in the scratchpad since before the
+water work, and applying it would have been a silent bug.** It targeted UV2.x —
+correct when written, but UV2.x has since shipped as sky visibility, so it would
+have overwritten a live channel. Its rationale was also out of date: it avoided
+alpha because vertex alpha multiplies into the FO4 discard test and the branch
+cards are the alpha-tested geometry. That hazard was later disproved — the
+engine only consults vertex alpha when `SLSF1_Vertex_Alpha` is set, and that
+flag is clear on every LOD shape in vanilla and ours. Alpha is inert to stock
+FO4 and costs no stride.
+
+**Normalised across ALL of a placement's shapes, not per shape.** A tree is two
+shapes split by texture, and normalising each alone would make a branch card's
+base read 0 and put a step change at the join. The measurement shows it working:
+
+| shape | alpha > 0 | bottom quartile → top |
+|---|---|---|
+| `ElmTrunksLOD_d` | 86% | 4.6 → 72.6 |
+| `ElmBranchesLOD_d` | **100%** | 42.8 → 97.3 |
+| `MapleBranchesLOD_d` | **100%** | 78.4 → 148.4 |
+| Shack / Siding / Warehouse | **0%** | — |
+
+Trunks contain the ground contact that reads 0; branches sit above it and
+inherit the trunk's scale. Non-trees carry an explicit zero so a consumer
+applying the channel blindly does nothing rather than something wrong.
+
+`tests/spells/lodgen_tree_sway.sh` guards all four properties, including the
+rise-with-height check that a constant or inverted channel would fail.
+
+Also found while writing that harness: **`--objects` takes its own chunk
+coordinates, exactly like `--terrain`**. Passing both makes it consume the
+wrong tokens and bake a DIFFERENT chunk without complaining — worth knowing
+before trusting any `--objects` output.
+
+Not yet flown in game.
+
+## 2026-09-04i — LOD water: welded and T-junction-free, so channels can ride it
+
+Follow-up to the subdivision below, and the reason it was not finished. Water is
+flat, so a hanging node cannot crack the geometry — which is exactly why this
+stays invisible until a per-vertex channel goes on and then seams along every
+resolution change.
+
+| subdiv | verts | duplicated positions | T-junctions |
+|---|---|---|---|
+| 0 | 48 | 27 | 0 — vanilla, still byte-identical |
+| 3 | 513 | **0** | **0** (was 1380 verts / 945 dup / 106 tj) |
+| 4 | 1304 | **0** | **0** (was 3420 / 2358 / 275) |
+
+Welding is by exact **integer block key** — every corner and every inserted
+split lands on a block coordinate by construction, so equal positions have equal
+keys and no float comparison is involved. Vertices fell 2.7× at subdiv 3, which
+also buys headroom against the 16-bit index cap.
+
+**Two traps, both of which measured clean in the geometry and were wrong:**
+
+  * **Probing an edge's midpoint is not enough** — 63 T-junctions survived. One
+    probe assumes the neighbouring side changes exactly halfway, which holds
+    only when that side is uniformly one level finer. The generator now WALKS
+    each edge and inserts a vertex wherever the neighbouring *leaf* changes:
+    correct for any configuration, and no longer dependent on the 2:1
+    restriction being perfect.
+  * **A stitched leaf must fan from its CENTRE, not a corner** — 6 survived
+    after the first fix. With a corner pivot, a midpoint next to that pivot is
+    collinear with it, so the first triangle has zero area and the full-length
+    edge survives with the midpoint lying on it, restoring the very T-junction
+    being stitched. Leaves with no hanging nodes keep the plain two-triangle
+    split, which is what preserves byte-identical output at subdiv 0.
+
+`tests/spells/lodgen_water_subdiv.sh` now asserts welding and zero T-junctions
+directly. It is a proven guard rather than a hopeful one: it failed at 63 and
+then at 6 on real builds during this work before reaching 0.
+`lodgen_terrain.sh` still passes 18/18.
+
+Still not flown in game.
+
+## 2026-09-04h — LOD water: adaptive subdivision toward the shoreline
+
+Vanilla LOD water is **one quad per wet cell** — four vertices 4096 units
+apart, unwelded, position only. That is why it reads as a flat coloured sheet:
+not because the format is poor, but because four corner values per cell cannot
+describe a coastline, whatever is stored on them. The water shape is a
+`BSSubIndexTriShape` running the same `BSVertexDesc` machinery as Land, so the
+format was never the constraint — resolution was.
+
+`--water-subdiv <levels>` (default **3**) runs a quadtree over each wet cell and
+refines on the depth range of the terrain samples a leaf covers:
+
+  * the waterline **crosses** the leaf → refine to the limit (foam, shoaling and
+    the land edge are all here)
+  * merely **shallow** → one level less
+  * **open water** → no refinement, so depth costs nothing offshore
+
+Measured on the harbour (chunk 0,0), 12 wet cells:
+
+| level | quads | sizes present (world units) |
+|---|---|---|
+| 0 | 12 | 4096 — vanilla |
+| 3 | 345 | 2048 ×12, 1024 ×81, **512 ×252** |
+| 4 | 855 | adds 256 ×572 |
+
+Uniform level-3 would be 768 identical quads. Adaptive spends 345 and puts the
+small ones on the waterline.
+
+**An unbalanced quadtree is correct here and would be wrong on terrain.** Water
+is flat at one height per cell, so leaves at different refinement depths share
+an exactly coplanar edge — a T-junction cannot open a crack, and no 2:1
+balancing is needed.
+
+Per-cell hiding is unaffected: each cell's leaves are emitted consecutively, so
+the cell still owns a contiguous triangle run and its segment still names it.
+
+**`--water-subdiv 0` reproduces the previous output byte-for-byte** (md5
+verified), so the fallback is one flag away.
+
+`tests/spells/lodgen_water_subdiv.sh` guards the property that actually matters
+— that the **fine** quads are the ones near land. Refining on anything else
+(distance from the chunk centre, say) would still produce a convincing mix of
+sizes and pass every other check. `lodgen_terrain.sh` still passes 18/18 with
+subdivision on by default, including *water bound centres equal vanilla's*.
+
+Not yet flown in game. The channels those vertices now make possible — depth
+first — are the next step, and whether the engine's water path reads any of
+them is still an open question, since it substitutes its own water rendering
+rather than using the `BSEffectShaderProperty` in the file.
+
+## 2026-09-04g — Dragging a .btr or .bto in from Explorer now works
+
+File > Open has always loaded Bethesda Terrain (.btr) and Terrain Object
+(.bto) chunks. Dragging one of those same files onto the window did nothing:
+no error, no cursor change, no clue — the drag simply was not accepted.
+
+**Three separate filters each hardcoded the suffix `"nif"`**, and every one of
+them had to agree for a drop to land:
+
+| filter | role |
+|---|---|
+| `NifSkope::eventFilter` | the gate a real Explorer drop passes |
+| `GLView::dragEnterEvent` | the viewport's own handler |
+| `validExternalNifPaths` | the second pass, behind the choice menu |
+
+All three now test against **`NifSkope::fileExtensions()`** — the same table
+`filetypes` that the Open dialog builds its filter from. That is the point of
+the fix: not "add .btr to three lists" but "stop keeping four lists". A new
+file type added to `filetypes` is draggable the day it becomes openable.
+
+The failure mode this had was the expensive kind — **silent**. A rejected drag
+is indistinguishable from a drag onto the wrong spot, so it reads as the user's
+mistake rather than the program's.
+
+`tests/spells/external_lod_drop.sh` is the guard: it runs the shared drop door
+with a **.btr as file 0** and fails unless that file clears every filter and
+becomes the open document. A cube written under a .btr name is a deliberate
+fixture choice — what regressed was the extension test, so the test needs
+neither an ESM nor a generated chunk. `external_nif_drop.sh` still passes
+17/17 unchanged, so ordinary .nif drops are untouched.
+
 ## 2026-09-04f — World LOD Generator: preview the generated channels
 
 The generated vertex channels are invisible in a normal render — each is
