@@ -56,9 +56,20 @@ echo "  vanilla anatomy:   $vtypes"
 echo "  generated anatomy: $gtypes"
 check "block anatomy matches vanilla" "$([ "$vtypes" = "$gtypes" ] && echo 1 || echo 0)"
 
+# The CS terrain profile is ON by default now, so the Land descriptor is
+# DELIBERATELY wider than vanilla's -- it carries material class, wetness, AO,
+# shore proximity, sky visibility and the second class. The guarantee that
+# still has to hold is the FALLBACK: with the profile off, the descriptor must
+# match vanilla's exactly. Asserting both ways keeps the old protection (no
+# accidental widening) without asserting something we chose to stop doing.
+PLAIN="$W/plain.btr"
+"$NS" -no-gui lodgen "$ESM" --worldspace 3C --terrain -20 24 --dim 4 	--no-terrain-identity -o "$PLAIN" >/dev/null 2>&1
 vdesc=$("$NS" -no-gui get "$VAN" -b 1 -f "Vertex Desc" 2>/dev/null)
 gdesc=$("$NS" -no-gui get "$GEN" -b 1 -f "Vertex Desc" 2>/dev/null)
-check "Land vertex descriptor equals vanilla's ($vdesc)" "$([ "$vdesc" = "$gdesc" ] && echo 1 || echo 0)"
+pdesc=$("$NS" -no-gui get "$PLAIN" -b 1 -f "Vertex Desc" 2>/dev/null)
+echo "  Land desc: vanilla $vdesc | CS profile $gdesc | profile off $pdesc"
+check "with the CS profile OFF the Land descriptor equals vanilla's ($vdesc)" 	"$([ "$vdesc" = "$pdesc" ] && echo 1 || echo 0)"
+check "with the CS profile ON it is WIDER (the channels are actually there)" 	"$([ "$gdesc" != "$vdesc" ] && [ -n "$gdesc" ] && echo 1 || echo 0)"
 
 vtris=$("$NS" -no-gui get "$VAN" -b 1 -f "Num Triangles" 2>/dev/null | tr -dc 0-9)
 gtris=$("$NS" -no-gui get "$GEN" -b 1 -f "Num Triangles" 2>/dev/null | tr -dc 0-9)
@@ -215,6 +226,82 @@ fi
 DIF="$W/tb/tex/Commonwealth.4.-20.24.DDS"
 MSN="$W/tb/tex/Commonwealth.4.-20.24_msn.DDS"
 check "the texture bake writes diffuse + msn" 	"$([ -f "$DIF" ] && [ -f "$MSN" ] && echo 1 || echo 0)"
+
+# THE NORMAL MAP'S CHANNEL ORDER. Fallout 4 puts UP in GREEN, not the usual blue,
+# and we wrote it in blue until 2026-09-07 - which cost 68% of the light and 92%
+# of the shading variation on distant terrain, with nothing to fall back on since
+# vanilla's terrain .BTR carries no vertex normals at all (12 bytes a vertex,
+# VERTEX + UVs). Nothing pinned it before, so nothing caught it.
+#
+# The test needs no reference tile: the up component is the only one that is
+# recoverable from the other two (up = +sqrt(1 - x^2 - y^2)) and the only one
+# that never encodes a negative, because terrain never faces downward. Whichever
+# channel wins BOTH is up. Run against our own output, it must be green.
+if [ -f "$MSN" ]; then
+UPCH=$("$PY" - "$MSN" <<'MSNEOF'
+import struct, sys
+b = open(sys.argv[1], 'rb').read()
+h, w = struct.unpack_from('<II', b, 12)
+fcc = b[84:88]
+# BLOCK SIZE FROM THE HEADER, never assumed: vanilla ships these BC3 and our own
+# bake writes BC1, and hardcoding 16 made this read past the end of our file.
+bs = 8 if fcc == b'DXT1' else 16
+col = 0 if bs == 8 else 8          # BC3 puts its alpha block first
+off = 128
+if fcc == b'DX10':
+    off = 148
+MIP = 2
+for i in range(MIP):
+    off += max(1, (max(1, w >> i) + 3) // 4) * max(1, (max(1, h >> i) + 3) // 4) * bs
+mw, mh = max(1, w >> MIP), max(1, h >> MIP)
+bw, bh = (mw + 3) // 4, (mh + 3) // 4
+def block(o):
+    c0, c1 = struct.unpack_from('<HH', b, o)
+    bits = struct.unpack_from('<I', b, o + 4)[0]
+    def rgb(c):
+        return (((c >> 11) & 31) * 255 // 31, ((c >> 5) & 63) * 255 // 63, (c & 31) * 255 // 31)
+    e0, e1 = rgb(c0), rgb(c1)
+    if c0 > c1 or bs == 16:
+        t = [e0, e1, tuple((2 * e0[k] + e1[k]) // 3 for k in range(3)),
+             tuple((e0[k] + 2 * e1[k]) // 3 for k in range(3))]
+    else:
+        t = [e0, e1, tuple((e0[k] + e1[k]) // 2 for k in range(3)), (0, 0, 0)]
+    return [t[(bits >> (2 * k)) & 3] for k in range(16)]
+px = []
+for by in range(bh):
+    for bx in range(bw):
+        px += block(off + (by * bw + bx) * bs + col)
+res = [0.0, 0.0, 0.0]; neg = [0, 0, 0]; n = 0
+for c in px:
+    v = [c[k] / 255.0 * 2 - 1 for k in range(3)]
+    for k in range(3):
+        a, bb = v[(k + 1) % 3], v[(k + 2) % 3]
+        s = 1.0 - a * a - bb * bb
+        res[k] += abs((s ** 0.5 if s > 0 else 0.0) - abs(v[k]))
+        if c[k] < 128: neg[k] += 1
+    n += 1
+# up is the channel that is BOTH recoverable from the other two and never negative
+print('RGB'[min(range(3), key=lambda k: res[k] / n + (1.0 if neg[k] else 0.0))])
+MSNEOF
+)
+echo "  msn up-channel: $UPCH (Fallout 4 ships G)"
+check "the msn writes UP in GREEN, as Fallout 4 does" "$([ "$UPCH" = "G" ] && echo 1 || echo 0)"
+fi
+
+
+# The data map is the copy that gets SHADED. The vertex channels carry the same
+# fields, but on ~1180 decimated vertices some 480 world units apart, which is
+# triangle interpolation rather than occlusion -- the whole reason this exists.
+DATA=$(ls "$W/tb/tex"/*_data.DDS 2>/dev/null | head -1)
+check "the bake writes the packed data map (_data.DDS)" 	"$([ -n "$DATA" ] && [ -s "$DATA" ] && echo 1 || echo 0)"
+if [ -n "$DATA" ]; then
+	fcc=$("$PY" -c "import sys;b=open(sys.argv[1],'rb').read(96);print(b[84:88].decode('latin-1'))" "$DATA")
+	echo "  data map fourCC $fcc"
+	# BC1: nothing has earned the alpha slot. Four candidates were measured and
+	# each was either derivable from what we already ship or duplicated a channel
+	# we already have, so the map does not pay double for an unused byte.
+	check "the data map is BC1 (no alpha until something needs it)" 		"$([ "$fcc" = "DXT1" ] && echo 1 || echo 0)"
+fi
 if [ -f "$DIF" ]; then
 	fourcc=$(dd if="$DIF" bs=1 skip=84 count=4 2>/dev/null)
 	check "the bake is BC1 with mips" "$([ "$fourcc" = "DXT1" ] && echo 1 || echo 0)"
@@ -234,6 +321,129 @@ PYEOF3
 	echo "  bake: $mipn mips, $endn distinct block endpoints"
 	check "the bake has a mip chain" "$([ "$mipn" -gt 5 ] && echo 1 || echo 0)"
 	check "the bake is not a constant colour" "$([ "$endn" -gt 100 ] && echo 1 || echo 0)"
+fi
+
+# --- rung 4: the SECOND _msn writer -- the virtual-texture pyramid ----
+#
+# With --vt on, the .btr chunk sheets are ASSEMBLED from the pyramid tiles
+# (docs/LODGEN_TERRAIN_VT.md 2.4), so `lodgenBakeVtTile` writes the very file
+# rung 3 checks, under the same name, through different code. It was a COPY of
+# the per-chunk normal block and it kept BOTH defects that path lost on
+# 2026-09-07 -- nearest sampling and up-in-blue -- until 2026-09-09. Nothing
+# pinned it, which is exactly why it survived.
+#
+# Two facts, the same two:
+#   * the up channel is GREEN (same argument as rung 3: up is the only
+#     component recoverable as +sqrt(1 - a^2 - b^2) and the only one that never
+#     encodes a negative, so whichever channel wins both IS up);
+#   * the sheet is not BLOCK-FLAT. Nearest sampling made all sixteen texels of
+#     a 4x4 block read one height sample and get one normal, so the fraction of
+#     texels differing from their LEFT NEIGHBOUR, by x mod 4, was
+#     83.3 / 0.0 / 0.0 / 0.0 against vanilla's 99.8 / 64.4 / 64.7 / 64.3
+#     (measured 2026-09-07). Classes 1, 2 and 3 are the intra-block ones and
+#     they are ZERO under the defect. That is the discriminator, and vanilla's
+#     own shipped sheet is read beside it as the known-answer control: a metric
+#     that cannot separate them is not measuring what it claims.
+cat > "$W/msnstat.py" <<'STATEOF'
+import struct, sys
+b = open(sys.argv[1], 'rb').read()
+h, w = struct.unpack_from('<II', b, 12)
+fcc = b[84:88]
+# block size from the HEADER: ours is BC1 and vanilla's is BC3, and assuming
+# 16 read past the end of our own file once (2026-09-07)
+bs = 8 if fcc == b'DXT1' else 16
+col = 0 if bs == 8 else 8          # BC3 puts its alpha block first
+off = 148 if fcc == b'DX10' else 128
+bw, bh = (w + 3) // 4, (h + 3) // 4
+
+
+def block(o):
+    c0, c1 = struct.unpack_from('<HH', b, o)
+    bits = struct.unpack_from('<I', b, o + 4)[0]
+
+    def rgb(c):
+        return (((c >> 11) & 31) * 255 // 31, ((c >> 5) & 63) * 255 // 63,
+                (c & 31) * 255 // 31)
+    e0, e1 = rgb(c0), rgb(c1)
+    if c0 > c1 or bs == 16:
+        t = [e0, e1, tuple((2 * e0[k] + e1[k]) // 3 for k in range(3)),
+             tuple((e0[k] + 2 * e1[k]) // 3 for k in range(3))]
+    else:
+        t = [e0, e1, tuple((e0[k] + e1[k]) // 2 for k in range(3)), (0, 0, 0)]
+    return [t[(bits >> (2 * k)) & 3] for k in range(16)]
+
+
+px = [[(0, 0, 0)] * w for _ in range(h)]
+for by in range(bh):
+    for bx in range(bw):
+        t = block(off + (by * bw + bx) * bs + col)
+        for k in range(16):
+            y, x = by * 4 + k // 4, bx * 4 + k % 4
+            if y < h and x < w:
+                px[y][x] = t[k]
+res = [0.0, 0.0, 0.0]
+neg = [0, 0, 0]
+diff = [0, 0, 0, 0]
+tot = [0, 0, 0, 0]
+for y in range(h):
+    row = px[y]
+    for x in range(w):
+        c = row[x]
+        if x:
+            tot[x % 4] += 1
+            if c != row[x - 1]:
+                diff[x % 4] += 1
+    if y % 8:                      # the channel verdict needs a sample, not all
+        continue
+    for c in row:
+        v = [c[k] / 255.0 * 2 - 1 for k in range(3)]
+        for k in range(3):
+            a, bb = v[(k + 1) % 3], v[(k + 2) % 3]
+            s = 1.0 - a * a - bb * bb
+            res[k] += abs((s ** 0.5 if s > 0 else 0.0) - abs(v[k]))
+            if c[k] < 128:
+                neg[k] += 1
+up = min(range(3), key=lambda k: (neg[k], res[k]))
+print('UP=%s %s' % ('RGB'[up], ' '.join(
+    'D%d=%d' % (i, 100 * diff[i] // max(1, tot[i])) for i in range(4))))
+STATEOF
+
+mkdir -p "$W/vt/obj" "$W/vt/tex" "$W/vt/mod"
+# THE REGION IS A WHOLE CHUNK HERE, unlike rung 3. `assembleChunkRow` builds
+# the dim-4 sheets out of the 2x2 content blocks of the dim-2 level, and only
+# once BOTH child tile rows of a parent row are staged; the chunk (-20,24)
+# spans cells -20..-17 / 24..27, so rung 3's 2x2-cell region left the pyramid
+# with one row and it wrote no sheet at all. The direct bake in rung 3 does
+# not care -- it builds the chunk that CONTAINS the region.
+"$NS" -no-gui lodgen "$ESM" --worldspace 3C \
+	--terrain-region -20 24 -17 27 --dim 4 \
+	--out-dir "$W/vt/obj" --tex-dir "$W/vt/tex" --vt "$W/vt/mod" > "$W/vt.log" 2>&1
+VMSN="$W/vt/tex/Commonwealth.4.-20.24_msn.DDS"
+check "the --vt run assembles the chunk _msn from the pyramid" \
+	"$([ -s "$VMSN" ] && echo 1 || echo 0)"
+if [ -s "$VMSN" ]; then
+	VSTAT=$("$PY" "$W/msnstat.py" "$VMSN")
+	DSTAT="n/a"; [ -f "$MSN" ] && DSTAT=$("$PY" "$W/msnstat.py" "$MSN")
+	VANMSN="$(dirname "$VAN")/../../../textures/terrain/Commonwealth/Commonwealth.4.-20.24_msn.DDS"
+	CSTAT="n/a"; [ -f "$VANMSN" ] && CSTAT=$("$PY" "$W/msnstat.py" "$VANMSN")
+	echo "  pyramid-assembled msn: $VSTAT"
+	echo "  direct-bake msn:       $DSTAT"
+	echo "  vanilla's own sheet:   $CSTAT   (the control)"
+	vup=${VSTAT%% *}
+	check "the pyramid's msn writes UP in GREEN too" \
+		"$([ "$vup" = "UP=G" ] && echo 1 || echo 0)"
+	flat=0
+	for k in 1 2 3; do
+		d=$(echo "$VSTAT" | tr ' ' '\n' | sed -n "s/^D$k=//p")
+		[ "${d:-0}" -gt 20 ] || flat=1
+	done
+	check "the pyramid's msn is not block-flat (D1..D3 > 20%, nearest gave 0)" \
+		"$([ "$flat" = "0" ] && echo 1 || echo 0)"
+	if [ "$CSTAT" != "n/a" ]; then
+		c1=$(echo "$CSTAT" | tr ' ' '\n' | sed -n 's/^D1=//p')
+		check "CONTROL: the same statistic reads high on vanilla's own sheet" \
+			"$([ "${c1:-0}" -gt 20 ] && echo 1 || echo 0)"
+	fi
 fi
 
 echo "$checks checks, $fails failures"

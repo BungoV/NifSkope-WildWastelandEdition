@@ -23,6 +23,17 @@ See the LICENSE.md file for the full license text.
 #include "btdterrain.h"
 #include "esmdata.h"
 #include "lodgen.h"
+#include "lodtfile.h"
+#include "io/lodmfile.h"
+#include "io/lodvfile.h"
+#include <QJsonArray>
+#include <QJsonObject>
+#include <QJsonValue>
+#include "btdfile.hpp"
+#include <QSet>
+#include <cstring>
+#include <memory>
+#include <QDataStream>
 #include "gl/hknpdecode.h"
 #include "gl/hknpencode.h"
 #include "physics/ragdollsim.h"
@@ -36,6 +47,7 @@ See the LICENSE.md file for the full license text.
 #include "io/pbrmfile.h"
 
 #include <QCoreApplication>
+#include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -2285,6 +2297,119 @@ int cmdBtd( const QString & file, bool infoOnly, bool haveRegion,
 	return saveNif( nif, outFile ) ? 0 : 1;
 }
 
+/*! `lodl <file.lodl>` — our own whole-worldspace landscape file to terrain
+ *  geometry, through the SAME generator the GUI's File > Open uses, so a
+ *  headless render and a window show the same scene. `--info` prints the header
+ *  and the plane inventory and stops.
+ *
+ *  `--plane KEY` picks which stored plane paints the surface; the notes the
+ *  builder returns are printed, because a plane that reads back as one constant
+ *  value and a plane that is missing look identical in a picture and the
+ *  difference has to be a NUMBER.
+ */
+int cmdLodt( const QString & file, bool infoOnly, bool haveRegion,
+	int rx0, int ry0, int rx1, int ry1, int lod, const QString & planeKey,
+	const QString & outFile )
+{
+	LodtWorldInfo info;
+	QString error;
+	if ( !lodtReadWorldInfo( file, info, &error ) ) {
+		err() << "error: " << error << Qt::endl;
+		return 1;
+	}
+	out() << "worldspace cells [" << info.cellMinX << "," << info.cellMinY
+		  << "]..[" << info.cellMaxX << "," << info.cellMaxY << "]"
+		  << "  heights " << info.heightMin << " to " << info.heightMax
+		  << "  quantum " << info.heightQuantum
+		  << "  samples/cell " << info.samplesPerCell
+		  << "  block edge " << info.blockEdge
+		  << "  levels " << info.levelCount
+		  << "  blocks " << info.blockCount << Qt::endl;
+	out() << "sections 0x" << QString::number( info.sectionFlags, 16 )
+		  << "  ltex " << info.ltexCount << "  watr " << info.watrCount
+		  << "  gcvr " << info.gcvrCount
+		  << "  ao " << info.aoSamples << "/cell"
+		  << "  overview " << info.overviewSamples << "/cell" << Qt::endl;
+	{
+		QStringList keys;
+		for ( LodtPlane p : lodtAvailablePlanes( info ) )
+			keys << QLatin1String( lodtPlaneKey( p ) );
+		out() << "planes " << keys.join( QLatin1Char( ' ' ) ) << Qt::endl;
+	}
+	if ( infoOnly )
+		return 0;
+
+	LodtRegionSpec spec = lodtDefaultRegion( info );
+	if ( haveRegion ) {
+		spec.x0 = rx0;
+		spec.y0 = ry0;
+		spec.x1 = rx1;
+		spec.y1 = ry1;
+	}
+	if ( lod >= 0 )
+		spec.lod = lod;
+	if ( !planeKey.isEmpty() && !lodtPlaneFromKey( planeKey, spec.plane ) ) {
+		err() << "error: unknown plane '" << planeKey << "'" << Qt::endl;
+		return 1;
+	}
+
+	qint64 shapes = 0, vertCount = 0;
+	if ( !lodtEstimateRegion( info, spec, &shapes, &vertCount, &error ) ) {
+		err() << "error: " << error << Qt::endl;
+		return 1;
+	}
+	out() << "region [" << spec.x0 << "," << spec.y0 << "]..[" << spec.x1
+		  << "," << spec.y1 << "] LOD" << spec.lod
+		  << " plane " << QLatin1String( lodtPlaneKey( spec.plane ) )
+		  << ": " << shapes << " shape(s), " << vertCount << " vertices" << Qt::endl;
+
+	NifModel nif;
+	QString notes;
+	if ( !nifCreateLodtTerrainScene( &nif, file, spec, &error, &notes ) ) {
+		err() << "error: " << error << Qt::endl;
+		return 1;
+	}
+	if ( !notes.isEmpty() )
+		out() << notes << Qt::endl;
+	return outFile.isEmpty() ? 0 : ( saveNif( nif, outFile ) ? 0 : 1 );
+}
+
+/*! The pre-flight estimate, printed by --vt-estimate, by the panel's summary
+ *  line through the same estimator, and by --vt itself BEFORE it does any
+ *  work. Without it `--vt --vt-finest 1` silently begins a job of several
+ *  gigabytes, and `--vt-content 512 --vt-finest 1` a very much larger one: the
+ *  refusals bound each knob alone and never their product.
+ *
+ *  `minutes` is printed as `unmeasured` and stays that way until a game-down
+ *  timing run with a stated sample count has been recorded in WW_CHANGES.md.
+ *  A number here that came from an extrapolation would be the kind of figure
+ *  docs/MISTAKES.md exists for. */
+static bool cmdLodgenVtEstimate( const EsmWorld & world, const LodgenVtOptions & opts,
+	bool alsoBtr )
+{
+	LodgenVtEstimateOut e;
+	if ( !lodgenVtEstimate( world, opts, alsoBtr, &e ) ) {
+		err() << "error: the worldspace has no indexed cells to build a pyramid over" << Qt::endl;
+		return false;
+	}
+	out() << QString( "vt estimate: levels %1 tiles %2 finest %3 coarsest %4 content %5 "
+		"border %6 mips %7 cover %8 compression %9" )
+		.arg( e.levels ).arg( e.tiles ).arg( opts.finestDim ).arg( e.coarsestDim )
+		.arg( opts.content ).arg( opts.border ).arg( opts.mips )
+		.arg( opts.cover.cover ? 1 : 0 ).arg( opts.compression ) << Qt::endl;
+	out() << QString( "vt estimate: pyramid %1 btr %2 delivered %3 minutes unmeasured" )
+		.arg( e.pyramidBytes ).arg( e.btrBytes ).arg( e.deliveredBytes ) << Qt::endl;
+	for ( int i = 0; i < e.levels; i++ )
+		out() << QString( "vt level %1 dim %2 tiles %3 unitsPerTexel %4 worldUnitsPerTile %5" )
+			.arg( i ).arg( e.levelDims[i] ).arg( e.levelTiles[i] )
+			.arg( e.levelDims[i] * 4096 / opts.content ).arg( e.levelDims[i] * 4096 ) << Qt::endl;
+	if ( e.shortened )
+		out() << QString( "note: this worldspace is tile-aligned only to dim %1; the pyramid stops "
+			"there - %2 levels" ).arg( e.coarsestDim ).arg( e.levels ) << Qt::endl;
+	out().flush();
+	return true;
+}
+
 //! `lodgen <file.esm>` — the LOD generation campaign's ESM record layer
 //! (docs/LODGEN_PLAN.md rung 0). --list-worldspaces enumerates WRLD records;
 //! --worldspace/--cell inspect one cell: LAND corner heights, REFR counts,
@@ -2295,9 +2420,776 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 	bool haveRegion, const int * region, const QString & outDir,
 	bool haveObjects, const QString & dataRoot, bool identity,
 	const QString & texDir, bool geomorph, bool terrainIdentity,
-	const QString & impostors, bool listCandidates, bool atlas, bool bakeAO,
-	bool cullBuried, float cullMargin, bool aoGrey, int aoSkirt )
+	const QString & impostors, int impostorFromLevel, const QString & candidateKind,
+	bool listCandidates, bool atlas, bool arrays, bool merge, bool bakeAO,
+	bool cullBuried, float cullMargin, bool aoGrey, int aoSkirt, int waterSubdiv,
+	bool shoreDenser, int shoreDensity, int targetTris,
+	const QString & heightmapDir, int heightmapSize, const QString & lodtDir,
+	const QString & btdPath, bool btdProbe, bool verifyOnly,
+	const QString & dumpLand, const QString & dumpLayers, bool refreshAo,
+	bool slotFallback, bool atlasBc1, const LodgenSimplifyOptions & simplify,
+	const LodgenCoverOptions & coverOpts, const LodgenVtOptions & vtOptsIn,
+	const QString & vtDir, int vtBtr, bool vtEstimate, const QString & lodmCheck,
+	const QString & lodvCheck, bool corpusHash, int cardAuxDiv )
 {
+	/* Ground cover refusals, before any plugin is opened: a flag out of range
+	 * must say so in one line rather than bake a worldspace and be wrong. */
+	if ( !( coverOpts.tintStrength >= 0.0f && coverOpts.tintStrength <= 1.0f ) ) {
+		err() << "error: --grass-tint takes a value in 0..1" << Qt::endl;
+		return 2;
+	}
+	if ( !( coverOpts.coverFull >= 1.0f && coverOpts.coverFull <= 65535.0f ) ) {
+		err() << "error: --cover-full takes a value in 1..65535" << Qt::endl;
+		return 2;
+	}
+	if ( coverOpts.cover && texDir.isEmpty() ) {
+		err() << "error: --cover needs --tex-dir; the cover plane lives in the "
+				 "terrain data sheet" << Qt::endl;
+		return 2;
+	}
+	/* Read a .lodm or a .lodt (the terrain texture sheets) through the repo's
+	 * OWN parser/validator, so a
+	 * harness checks the shipped implementation and not a reimplementation
+	 * of it. Both print keyword lines and return 1 on a refusal. */
+	if ( !lodmCheck.isEmpty() ) {
+		QFile mf( lodmCheck );
+		if ( !mf.open( QIODevice::ReadOnly ) ) {
+			err() << "error: cannot open " << lodmCheck << Qt::endl;
+			return 1;
+		}
+		const QByteArray bytes = mf.readAll();
+		const LodmMaterial m = lodmParse( bytes );
+		out() << "lodm ok " << ( m.ok ? 1 : 0 ) << Qt::endl;
+		if ( !m.ok ) {
+			out() << "lodm error " << m.error << Qt::endl;
+			return 1;
+		}
+		out() << "lodm version " << m.version << Qt::endl;
+		out() << "lodm family " << m.family << Qt::endl;
+		out() << "lodm kind " << m.kind << Qt::endl;
+		out() << "lodm fileBytes " << bytes.size() << Qt::endl;
+		out() << "lodm payloadBytes " << ( bytes.size() - 12 ) << Qt::endl;
+		if ( m.root.contains( QStringLiteral( "terrain" ) ) ) {
+			const QJsonObject t = m.root.value( QStringLiteral( "terrain" ) ).toObject();
+			for ( auto it = t.constBegin(); it != t.constEnd(); ++it ) {
+				const QJsonValue jv = it.value();
+				if ( jv.isObject() || jv.isArray() )
+					continue;
+				// spelled out rather than through QVariant, so a bool prints
+				// `true` and not `1` and a harness can grep for the word
+				QString sv;
+				if ( jv.isBool() )
+					sv = jv.toBool() ? QStringLiteral( "true" ) : QStringLiteral( "false" );
+				else if ( jv.isDouble() )
+					sv = QString::number( jv.toDouble(), 'g', 12 );
+				else
+					sv = jv.toString();
+				out() << "terrain " << it.key() << " " << sv << Qt::endl;
+			}
+			const QJsonArray ls = t.value( QStringLiteral( "levels" ) ).toArray();
+			for ( const QJsonValue & v : ls ) {
+				const QJsonObject o = v.toObject();
+				out() << "level " << o.value( QStringLiteral( "index" ) ).toInt()
+					  << " dim " << o.value( QStringLiteral( "dim" ) ).toInt()
+					  << " tilesX " << o.value( QStringLiteral( "tilesX" ) ).toInt()
+					  << " tilesY " << o.value( QStringLiteral( "tilesY" ) ).toInt()
+					  << " unitsPerTexel " << o.value( QStringLiteral( "unitsPerTexel" ) ).toInt()
+					  << " worldUnitsPerTile " << o.value( QStringLiteral( "worldUnitsPerTile" ) ).toInt()
+					  << " tiles " << o.value( QStringLiteral( "tiles" ) ).toInt()
+					  << " present " << o.value( QStringLiteral( "present" ) ).toInt()
+					  << " container " << o.value( QStringLiteral( "container" ) ).toString()
+					  << Qt::endl;
+			}
+		}
+		return 0;
+	}
+	if ( !lodvCheck.isEmpty() ) {
+		LodvHeaderFields hf;
+		std::vector<LodvTileEntry> table;
+		QString verr;
+		if ( !lodvValidate( lodvCheck, &hf, &table, true, &verr ) ) {
+			out() << "lodt ok 0" << Qt::endl;
+			out() << "lodt " << verr << Qt::endl;
+			return 1;
+		}
+		out() << "lodt ok 1" << Qt::endl;
+		for ( const QString & l : lodvDescribe( hf, table ) )
+			out() << "lodt " << l << Qt::endl;
+		return 0;
+	}
+	if ( corpusHash ) {
+		/* Both corpus hashes and the LTEX/GRAS census, with no bake: every
+		 * floor in the terrain harnesses is a property of ONE plugin set, and
+		 * a harness that cannot pin the corpus silently redefines all of them
+		 * while still printing ok. */
+		EsmWorld chWorld;
+		QString cherr;
+		if ( !chWorld.load( file, worldspace ? worldspace : 0x3CU, &cherr ) ) {
+			err() << "error: " << cherr << Qt::endl;
+			return 1;
+		}
+		int lands = 0, landsSorted = 0;
+		const quint64 vh = chWorld.vhgtCorpusHash( &lands );
+		const quint64 vs = chWorld.vhgtCorpusHashSorted( &landsSorted );
+		const quint64 ph = chWorld.paintCorpusHash();
+		const EsmCoverCensus & cc = chWorld.coverCensus();
+		int minX = 0, minY = 0, maxX = 0, maxY = 0;
+		chWorld.cellBounds( minX, minY, maxX, maxY );
+		auto hex16 = []( quint64 v ) {
+			return QStringLiteral( "0x" )
+				+ QString::number( v, 16 ).toUpper().rightJustified( 16, QChar( '0' ) );
+		};
+		out() << QString( "corpus worldspace %1 cells %2 west %3 south %4 east %5 north %6" )
+			.arg( chWorld.worldspaceEdid() ).arg( chWorld.cellCount() )
+			.arg( minX ).arg( minY ).arg( maxX ).arg( maxY ) << Qt::endl;
+		out() << QString( "corpus vhgtCorpusHash %1 lands %2" ).arg( hex16( vh ) ).arg( lands ) << Qt::endl;
+		out() << QString( "corpus vhgtCorpusHashSorted %1 lands %2" ).arg( hex16( vs ) )
+			.arg( landsSorted ) << Qt::endl;
+		out() << QString( "corpus paintCorpusHash %1" ).arg( hex16( ph ) ) << Qt::endl;
+		out() << QString( "corpus ltexTotal %1 grasTotal %2 gnamLinks %3 ltexWithGnam %4 "
+			"grasDataMin %5 grasDataMax %6 grasWithoutData %7" )
+			.arg( cc.ltexTotal ).arg( cc.grasTotal ).arg( cc.gnamLinks ).arg( cc.ltexWithGnam )
+			.arg( cc.grasDataMin ).arg( cc.grasDataMax ).arg( cc.grasWithoutData ) << Qt::endl;
+		out().flush();
+		return 0;
+	}
+	LodgenVtOptions vtOpts = vtOptsIn;
+	vtOpts.cover = coverOpts;
+	if ( !vtDir.isEmpty() || vtEstimate ) {
+		if ( vtOpts.finestDim != 1 && vtOpts.finestDim != 2 ) {
+			err() << "error: --vt-finest must be 1 or 2" << Qt::endl;
+			return 2;
+		}
+		if ( vtOpts.content < 128 || vtOpts.content > 512
+			|| ( vtOpts.content & ( vtOpts.content - 1 ) ) ) {
+			err() << "error: --vt-content must be a power of two between 128 and 512" << Qt::endl;
+			return 2;
+		}
+		if ( vtOpts.border % 4 ) {
+			err() << "error: --vt-border must be a multiple of 4; a BC block is 4x4 and a border"
+					 " that" << Qt::endl;
+			err() << "       splits one makes a tile depend on its neighbour's bake" << Qt::endl;
+			return 2;
+		}
+		if ( vtOpts.mips < 1 || ( vtOpts.border >> ( vtOpts.mips - 1 ) ) % 4
+			|| ( ( vtOpts.border >> ( vtOpts.mips - 1 ) ) << ( vtOpts.mips - 1 ) ) != vtOpts.border ) {
+			err() << QString( "error: --vt-border %1 cannot carry %2 mips; the border halves at "
+				"every mip and" ).arg( vtOpts.border ).arg( vtOpts.mips ) << Qt::endl;
+			err() << QString( "       must stay a multiple of 4 (that needs at least %1)" )
+				.arg( 4 << ( vtOpts.mips - 1 ) ) << Qt::endl;
+			return 2;
+		}
+		if ( vtOpts.compression < 0 || vtOpts.compression > 1 ) {
+			err() << "error: --vt-compress must be none or zlib" << Qt::endl;
+			return 2;
+		}
+		if ( !worldspace ) {
+			err() << "error: --vt needs --worldspace; a tile pyramid is one worldspace's" << Qt::endl;
+			return 2;
+		}
+		if ( vtBtr == 1 && texDir.isEmpty() ) {
+			err() << "error: --vt-btr needs --tex-dir; there are no chunk sheets to take from "
+					 "the pyramid" << Qt::endl;
+			return 2;
+		}
+	}
+	/* Converting a Fallout 76 .btd needs no plugin: the .btd is the whole
+	 * landscape. This runs before the .esm branch and returns on its own. */
+	if ( !btdPath.isEmpty() ) {
+		if ( lodtDir.isEmpty() && !btdProbe ) {
+			err() << "error: --from-btd needs --lodl <dir>" << Qt::endl;
+			return 1;
+		}
+		/* Report what the source actually is BEFORE the long conversion, so a
+		 * run that is going to take minutes says what it is working on rather
+		 * than sitting silent. Opening a .btd is just a header parse. */
+		try {
+			BTDFile probe( btdPath.toLocal8Bit().constData() );
+			out() << "btd: " << btdPath << Qt::endl;
+			out() << "  cells " << ( probe.getCellMaxX() - probe.getCellMinX() + 1 )
+				  << "x" << ( probe.getCellMaxY() - probe.getCellMinY() + 1 )
+				  << " at (" << probe.getCellMinX() << "," << probe.getCellMinY() << ")"
+				  << "  height " << probe.getMinHeight() << ".." << probe.getMaxHeight()
+				  << "  LTEX " << probe.getLandTextureCount()
+				  << "  GCVR " << probe.getGroundCoverCount() << Qt::endl;
+			out().flush();
+		} catch ( const std::exception & e ) {
+			err() << "error: cannot open .btd: " << e.what() << Qt::endl;
+			return 1;
+		}
+
+		/* --btd-probe: answer, from the .btd alone and in seconds, the two
+		 * questions the converter had been ASSUMING the answer to.
+		 *
+		 * 1. Which alpha field pairs with which texture slot. libfo76utils
+		 *    reverses both on read so they line up as field s <-> t[s+1], but
+		 *    that is reading their conventions, not measuring the data. So:
+		 *    under each candidate pairing, count nonzero alphas whose paired
+		 *    slot is EMPTY. The true pairing scores ~0; a reversed one lights
+		 *    up wherever a quadrant has fewer than five layers.
+		 * 2. What bit 15 is. The A16 codec calls it a sixth layer's 1-bit
+		 *    alpha; the converter copies it through verbatim either way, but
+		 *    the spec should say what it is rather than not mention it. */
+		if ( btdProbe ) {
+			BTDFile src( btdPath.toLocal8Bit().constData() );
+			src.setTileCacheSize( 8 );
+			const int cw = src.getCellMaxX() - src.getCellMinX() + 1;
+			const int stride = qMax( 1, cw / 20 );
+			std::vector<quint16> cellA( size_t( 128 ) * 128 ), cellC( size_t( 32 ) * 32 );
+			std::vector<unsigned char> cellG( size_t( 128 ) * 128 );
+			unsigned char tset[64];
+			qint64 nz = 0, badFwd = 0, badRev = 0, b15 = 0, b15NoBase = 0, n = 0;
+			// ground cover: the same question, mask bit b <-> g[b] or g[7-b]?
+			qint64 gnz = 0, gBadFwd = 0, gBadRev = 0;
+			qint64 cn = 0, cAlpha = 0;
+			double sr = 0, sg = 0, sb = 0;
+			QSet<quint16> distinct;
+			int cells = 0;
+			for ( int cy = src.getCellMinY(); cy <= src.getCellMaxY(); cy += stride ) {
+				for ( int cx = src.getCellMinX(); cx <= src.getCellMaxX(); cx += stride ) {
+					src.getCellTextureSet( tset, cx, cy );
+					src.getCellLandTexture( cellA.data(), cx, cy, 0 );
+					src.getCellTerrainColor( cellC.data(), cx, cy, 2 );
+					src.getCellGroundCover( cellG.data(), cx, cy, 0 );
+					cells++;
+					for ( int r = 0; r < 128; r++ ) {
+						for ( int c = 0; c < 128; c++ ) {
+							const int q = ( r >= 64 ? 2 : 0 ) + ( c >= 64 ? 1 : 0 );
+							const unsigned char * t = tset + ( q << 4 );
+							const quint16 w = cellA[size_t( r ) * 128 + size_t( c )];
+							n++;
+							for ( int s = 0; s < 5; s++ ) {
+								const int a = ( w >> ( s * 3 ) ) & 7;
+								if ( !a )
+									continue;
+								nz++;
+								if ( t[s + 1] == 0xFF ) badFwd++;   // field s <-> t[s+1]
+								if ( t[5 - s] == 0xFF ) badRev++;   // field s <-> t[5-s]
+							}
+							if ( w & 0x8000 ) {
+								b15++;
+								if ( t[0] == 0xFF )
+									b15NoBase++;
+							}
+							const unsigned char * g = t + 8;
+							const unsigned char gm = cellG[size_t( r ) * 128 + size_t( c )];
+							for ( int bb = 0; bb < 8; bb++ ) {
+								if ( !( gm & ( 1 << bb ) ) )
+									continue;
+								gnz++;
+								if ( g[bb] == 0xFF ) gBadFwd++;       // bit b <-> g[b]
+								if ( g[7 - bb] == 0xFF ) gBadRev++;   // bit b <-> g[7-b]
+							}
+						}
+					}
+					for ( quint16 v : cellC ) {
+						cn++;
+						sr += ( v >> 10 ) & 0x1F;
+						sg += ( v >> 5 ) & 0x1F;
+						sb += v & 0x1F;
+						if ( v & 0x8000 ) cAlpha++;
+						if ( distinct.size() < 65536 ) distinct.insert( v );
+					}
+				}
+			}
+			out() << "probe: " << cells << " cells, " << n << " samples, "
+				  << nz << " nonzero alpha fields" << Qt::endl;
+			out() << "  pairing field s <-> t[s+1]: " << badFwd
+				  << " nonzero alphas on an EMPTY slot" << Qt::endl;
+			out() << "  pairing field s <-> t[5-s]: " << badRev
+				  << " nonzero alphas on an EMPTY slot" << Qt::endl;
+			out() << "  ground cover: " << gnz << " set mask bits; bit b <-> g[b]: "
+				  << gBadFwd << " on an EMPTY slot; bit b <-> g[7-b]: " << gBadRev
+				  << " on an EMPTY slot" << Qt::endl;
+			out() << "  bit 15 set on " << b15 << " samples ("
+				  << QString::number( n ? 100.0 * double( b15 ) / double( n ) : 0.0, 'f', 2 )
+				  << "%), of which " << b15NoBase << " have no base texture" << Qt::endl;
+			out() << "  colour A1R5G5B5 over " << cn << " samples: mean R "
+				  << QString::number( cn ? sr / double( cn ) : 0.0, 'f', 1 )
+				  << " G " << QString::number( cn ? sg / double( cn ) : 0.0, 'f', 1 )
+				  << " B " << QString::number( cn ? sb / double( cn ) : 0.0, 'f', 1 )
+				  << " of 31, alpha bit on " << cAlpha << ", "
+				  << distinct.size() << " distinct words" << Qt::endl;
+			return 0;
+		}
+
+		LodtOptions lopts;
+		QString written, berr, notes;
+		/* Water for a .btd: a .btd has none, the plugin does. With a <file> and
+		 * --worldspace on the command line the plugin is loaded for its water
+		 * records only; the landscape still comes from the .btd. */
+		std::unique_ptr<EsmWorld> waterWorld;
+		if ( !file.isEmpty() && worldspace ) {
+			waterWorld = std::make_unique<EsmWorld>();
+			QString werr;
+			if ( !waterWorld->load( file, worldspace, &werr ) ) {
+				err() << "error: water plugin: " << werr << Qt::endl;
+				return 1;
+			}
+			out() << "water from: " << file << "  worldspace " << waterWorld->worldspaceEdid()
+				  << " (" << waterWorld->cellCount() << " cells indexed)" << Qt::endl;
+		}
+		/* --verify-only: an EXISTING file against its source, every check the
+		 * write path runs and none of the writing. A 25-minute conversion is
+		 * the wrong price for asking whether a file still matches its source,
+		 * and a consumer (FO4CS) will want to ask exactly that. */
+		if ( verifyOnly ) {
+			written = lodtDir + QStringLiteral( "/Terrain/" )
+				+ QFileInfo( btdPath ).completeBaseName() + QStringLiteral( ".lodl" );
+			if ( !QFileInfo::exists( written ) ) {
+				err() << "error: --verify-only: no file at " << written << Qt::endl;
+				return 1;
+			}
+			out() << "verify: " << written << Qt::endl;
+		} else {
+			if ( !lodtWriteBtd( btdPath, lodtDir, lopts, &written, &berr, &notes, waterWorld.get() ) ) {
+				err() << "error: " << berr << Qt::endl;
+				return 1;
+			}
+			out() << "lodl: " << written << Qt::endl;
+			out() << "  " << berr << Qt::endl;
+			out() << notes << Qt::endl;
+		}
+
+		LodtFile rf;
+		QString rerr;
+		if ( !rf.open( written, &rerr ) ) {
+			err() << "readback FAILED: " << rerr << Qt::endl;
+			return 1;
+		}
+		out() << "  readback: cells " << rf.cellsX() << "x" << rf.cellsY()
+			  << "  rate " << rf.samplesPerCell()
+			  << "  levels " << rf.levelCount()
+			  << "  blocks " << rf.blockCount()
+			  << "  LTEX " << rf.ltexCount()
+			  << "  quantum " << rf.heightQuantum() << Qt::endl;
+
+		/* Cross-check the reader against the .btd ITSELF, the same way the
+		 * .esm path checks against LAND records. Heights cannot be exact:
+		 * theirs are normalised across the whole world and ours are a
+		 * quantum, and the two grids sit half a step apart -- so the bound is
+		 * HALF a quantum, not one. One quantum was the first bound, and it
+		 * let a truncate-instead-of-round bug through every run: a tolerance
+		 * set from what the code produced is not a tolerance.
+		 *
+		 * Alpha words, by contrast, are copied verbatim, so they must match
+		 * EXACTLY -- and this is the only check that reads plane 1 of a
+		 * four-plane block, so it is also the addressing test for the fourth
+		 * plane. */
+		{
+			BTDFile src( btdPath.toLocal8Bit().constData() );
+			const float lo = src.getMinHeight(), hi = src.getMaxHeight();
+			std::vector<quint16> cellH( size_t( 128 ) * 128 ), cellA( size_t( 128 ) * 128 );
+			std::vector<quint16> cellC( size_t( 32 ) * 32 );
+			std::vector<unsigned char> cellG( size_t( 128 ) * 128 );
+			int bad = 0, tested = 0, aBad = 0, aNonZero = 0;
+			int cBad = 0, gBad = 0, gNonZero = 0;
+			double worst = 0.0;
+			/* Half a quantum is the requantisation bound; the rest is what
+			 * float32 can carry at the tallest height. The reader decodes in
+			 * float32, so (stored - 32767) * quantum near 38,000 units is only
+			 * good to ~0.004. Eight ulps of the tallest height is derived from
+			 * the arithmetic, not from what a run produced; 0.5 * q * 1.001 was
+			 * the latter kind of number and missed by 0.0002 on Appalachia. */
+			const double tallest = qMax( std::fabs( double( lo ) ), std::fabs( double( hi ) ) );
+			const double bound = 0.5 * double( rf.heightQuantum() )
+				+ 8.0 * tallest * 5.96e-8;
+			const int stride = qMax( 1, rf.cellsX() / 16 );
+			for ( int cy = rf.cellMinY(); cy <= rf.cellMaxY(); cy += stride ) {
+				for ( int cx = rf.cellMinX(); cx <= rf.cellMaxX(); cx += stride ) {
+					src.getCellHeightMap( cellH.data(), cx, cy, 0 );
+					src.getCellLandTexture( cellA.data(), cx, cy, 0 );
+					src.getCellTerrainColor( cellC.data(), cx, cy, 2 );
+					src.getCellGroundCover( cellG.data(), cx, cy, 0 );
+					const int x0 = ( cx - rf.cellMinX() ) * rf.samplesPerCell();
+					const int y0 = ( cy - rf.cellMinY() ) * rf.samplesPerCell();
+					for ( int r = 0; r < 128; r += 16 ) {
+						for ( int c = 0; c < 128; c += 16 ) {
+							const size_t k = size_t( r ) * 128 + size_t( c );
+							const double want = double( lo )
+								+ ( double( cellH[k] ) / 65535.0 ) * ( double( hi ) - double( lo ) );
+							const double got = rf.height( x0 + c, y0 + r );
+							tested++;
+							const double d = std::fabs( got - want );
+							worst = qMax( worst, d );
+							if ( d > bound )
+								bad++;
+							if ( cellA[k] )
+								aNonZero++;
+							if ( rf.alphaWord( x0 + c, y0 + r ) != cellA[k] )
+								aBad++;
+							// colour: A1R5G5B5 at 32x32, repacked to 5-5-5 and upsampled 4x
+							const quint16 v = cellC[size_t( r >> 2 ) * 32 + size_t( c >> 2 )];
+							const quint16 wantC = quint16( ( ( ( v >> 10 ) & 0x1F ) << 11 )
+								| ( ( ( v >> 5 ) & 0x1F ) << 6 ) | ( v & 0x1F ) );
+							if ( rf.colourWord( x0 + c, y0 + r ) != wantC )
+								cBad++;
+							if ( cellG[k] )
+								gNonZero++;
+							if ( rf.groundCover( x0 + c, y0 + r ) != quint16( cellG[k] ) )
+								gBad++;
+						}
+					}
+				}
+			}
+			out() << "  cross-check: " << tested << " samples against the .btd, "
+				  << bad << " past half a quantum, worst " << worst
+				  << " (bound " << bound << ")" << Qt::endl;
+			out() << "  alpha words: " << aBad << " of " << tested
+				  << " differ from the .btd (" << aNonZero << " nonzero)" << Qt::endl;
+			out() << "  colour words: " << cBad << " of " << tested
+				  << " differ; ground cover: " << gBad << " of " << tested
+				  << " differ (" << gNonZero << " nonzero)" << Qt::endl;
+			if ( bad || aBad || cBad || gBad )
+				return 1;
+		}
+		return 0;
+	}
+
+	/* --dump-land <file>: every cell's FULL 33x33 VHGT grid, once, so a rule
+	 * about shared edges can be tested offline in seconds instead of through
+	 * a four-minute build per hypothesis. Layout: int32 minX, minY, cellsX,
+	 * cellsY; then per cell (row-major from the south-west) one uint8
+	 * presence flag; then per cell 33*33 int16 heights in units of 8, row 0
+	 * south, column 0 west, absent cells zero-filled. */
+	/* --dump-layers <file>: the painted area, from the MASTER, not from our own
+	 * output. A cell counts as painted where a quadrant carries a BTXT base or
+	 * any ATXT layer. Defining it from a regenerated bake instead would be
+	 * circular - the bake is the thing being checked. */
+	if ( !dumpLayers.isEmpty() ) {
+		EsmWorld world;
+		QString derr;
+		if ( !world.load( file, worldspace, &derr ) ) {
+			err() << "error: " << derr << Qt::endl;
+			return 1;
+		}
+		int mnx, mny, mxx, mxy;
+		world.cellBounds( mnx, mny, mxx, mxy );
+		QFile f( dumpLayers );
+		if ( !f.open( QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text ) ) {
+			err() << "error: cannot write " << dumpLayers << Qt::endl;
+			return 1;
+		}
+		QTextStream ts( &f );
+		ts << "# lodgen dump-layers 1 worldspace "
+		   << QString( "%1" ).arg( worldspace, 8, 16, QChar( '0' ) )
+		   << " cells (" << mnx << "," << mny << ")..(" << mxx << "," << mxy << ")\n";
+		ts << "# L cx cy land vclr base=q0,q1,q2,q3 layers=n0,n1,n2,n3 ltex=<distinct> blend=<q0>|<q1>|<q2>|<q3> each ltex:meanOpacity;...\n";
+		EsmLand lnd;
+		int haveLand = 0, painted = 0, withBase = 0, withLayers = 0, withVclr = 0;
+		QSet<quint32> allLtex;
+		for ( int cy = mny; cy <= mxy; cy++ ) {
+			for ( int cx = mnx; cx <= mxx; cx++ ) {
+				if ( !world.land( cx, cy, lnd ) )
+					continue;
+				haveLand++;
+				QSet<quint32> here;
+				QStringList bases, counts;
+				int nBase = 0, nLayer = 0;
+				for ( int q = 0; q < 4; q++ ) {
+					bases << QString( "%1" ).arg( lnd.baseTex[q], 8, 16, QChar( '0' ) );
+					counts << QString::number( lnd.layers[q].size() );
+					if ( lnd.baseTex[q] ) {
+						nBase++;
+						here.insert( lnd.baseTex[q] );
+					}
+					for ( const EsmLandLayer & l : lnd.layers[q] ) {
+						nLayer++;
+						if ( l.ltex )
+							here.insert( l.ltex );
+					}
+				}
+				if ( nBase ) withBase++;
+				if ( nLayer ) withLayers++;
+				if ( lnd.hasColors ) withVclr++;
+				if ( nBase || nLayer ) painted++;
+				allLtex.unite( here );
+				/* The BLEND, per quadrant: every layer's LTEX with its MEAN opacity
+				 * over the quadrant's 17x17 alpha grid, and the BTXT base at 1.0 in
+				 * front of them. This is what the recovery learns against - an id
+				 * alone does not say whether it covers the quadrant or one corner. */
+				QStringList blend;
+				for ( int q = 0; q < 4; q++ ) {
+					QStringList parts;
+					if ( lnd.baseTex[q] )
+						parts << QString( "%1:1.000" ).arg( lnd.baseTex[q], 8, 16, QChar( '0' ) );
+					for ( const EsmLandLayer & la : lnd.layers[q] ) {
+						double s = 0.0;
+						for ( int r = 0; r < 17; r++ )
+							for ( int c2 = 0; c2 < 17; c2++ )
+								s += double( la.opacity[r][c2] );
+						parts << QString( "%1:%2" ).arg( la.ltex, 8, 16, QChar( '0' ) )
+							.arg( s / ( 17.0 * 17.0 ), 0, 'f', 3 );
+					}
+					blend << ( parts.isEmpty() ? QStringLiteral( "-" ) : parts.join( QChar( ';' ) ) );
+				}
+				QStringList ids;
+				QList<quint32> sorted = here.values();
+				std::sort( sorted.begin(), sorted.end() );
+				for ( quint32 id : sorted )
+					ids << QString( "%1" ).arg( id, 8, 16, QChar( '0' ) );
+				ts << "L " << cx << " " << cy << " 1 " << ( lnd.hasColors ? 1 : 0 )
+				   << " base=" << bases.join( QChar( ',' ) )
+				   << " layers=" << counts.join( QChar( ',' ) )
+				   << " ltex=" << ( ids.isEmpty() ? QStringLiteral( "-" ) : ids.join( QChar( ',' ) ) )
+				   << " blend=" << blend.join( QChar( '|' ) )
+				   << "\n";
+			}
+		}
+		ts << "# cells with LAND " << haveLand << ", painted " << painted
+		   << " (base " << withBase << ", layers " << withLayers << "), vclr " << withVclr
+		   << ", distinct LTEX " << allLtex.size() << "\n";
+		ts.flush();
+		f.close();
+		out() << "dump-layers: " << dumpLayers << "  " << haveLand << " cells with LAND, "
+			  << painted << " painted, " << allLtex.size() << " distinct LTEX" << Qt::endl;
+		return 0;
+	}
+
+	if ( !dumpLand.isEmpty() ) {
+		EsmWorld world;
+		QString derr;
+		if ( !world.load( file, worldspace, &derr ) ) {
+			err() << "error: " << derr << Qt::endl;
+			return 1;
+		}
+		int mnx, mny, mxx, mxy;
+		world.cellBounds( mnx, mny, mxx, mxy );
+		const int cw = mxx - mnx + 1, ch = mxy - mny + 1;
+		QFile f( dumpLand );
+		if ( !f.open( QIODevice::WriteOnly | QIODevice::Truncate ) ) {
+			err() << "error: cannot write " << dumpLand << Qt::endl;
+			return 1;
+		}
+		QByteArray hdr;
+		QDataStream hs( &hdr, QIODevice::WriteOnly );
+		hs.setByteOrder( QDataStream::LittleEndian );
+		hs << qint32( mnx ) << qint32( mny ) << qint32( cw ) << qint32( ch );
+		f.write( hdr );
+		QByteArray present( cw * ch, char( 0 ) );
+		QByteArray grid;
+		grid.resize( qsizetype( cw ) * ch * 33 * 33 * 2 );
+		grid.fill( 0 );
+		EsmLand lnd;
+		int have = 0;
+		for ( int cy = mny; cy <= mxy; cy++ ) {
+			for ( int cx = mnx; cx <= mxx; cx++ ) {
+				const qsizetype ci = qsizetype( cy - mny ) * cw + ( cx - mnx );
+				if ( !world.land( cx, cy, lnd ) )
+					continue;
+				present[ci] = 1;
+				have++;
+				for ( int r = 0; r < 33; r++ )
+					for ( int c = 0; c < 33; c++ ) {
+						const qint16 v = qint16( qRound( lnd.heights[r][c] / 8.0f ) );
+						const qsizetype o = ( ci * 33 * 33 + r * 33 + c ) * 2;
+						grid[o] = char( v & 0xFF );
+						grid[o + 1] = char( ( v >> 8 ) & 0xFF );
+					}
+			}
+		}
+		f.write( present );
+		f.write( grid );
+		f.close();
+		out() << "dump-land: " << dumpLand << "  cells " << cw << "x" << ch
+			  << " from (" << mnx << "," << mny << "), " << have << " with LAND, "
+			  << ( f.size() / 1048576 ) << " MB" << Qt::endl;
+		return 0;
+	}
+
+	if ( !lodtDir.isEmpty() ) {
+		EsmWorld world;
+		QString berr;
+		if ( !world.load( file, worldspace, &berr ) ) {
+			err() << "error: " << berr << Qt::endl;
+			return 1;
+		}
+		LodtOptions lopts;
+		QString written;
+		if ( refreshAo ) {
+			// only the AO plane, in place; then the usual read-back and cross-check
+			written = lodtDir + QStringLiteral( "/Terrain/" )
+				+ world.worldspaceEdid() + QStringLiteral( ".lodl" );
+			QString aerr;
+			if ( !lodtRefreshAo( written, &aerr ) ) {
+				err() << "error: --refresh-ao: " << aerr << Qt::endl;
+				return 1;
+			}
+			out() << "refresh-ao: " << written << Qt::endl;
+			out() << "  " << aerr << Qt::endl;
+		} else if ( verifyOnly ) {
+			written = lodtDir + QStringLiteral( "/Terrain/" )
+				+ world.worldspaceEdid() + QStringLiteral( ".lodl" );
+			if ( !QFileInfo::exists( written ) ) {
+				err() << "error: --verify-only: no file at " << written << Qt::endl;
+				return 1;
+			}
+			out() << "verify: " << written << Qt::endl;
+		} else {
+			if ( !lodtWrite( world, lodtDir, lopts, &written, &berr ) ) {
+				err() << "error: " << berr << Qt::endl;
+				return 1;
+			}
+			out() << "lodl: " << written << Qt::endl;
+			out() << "  " << berr << Qt::endl;   // the writer reports its census here
+		}
+
+		/* Read it straight back with the independent reader. A writer checked
+		 * only by its own assumptions is not checked: this is the same class of
+		 * defect as a DDS header whose pixel-format block sat four bytes wrong
+		 * and parsed perfectly through the parser that produced it. */
+		LodtFile rf;
+		QString rerr;
+		if ( !rf.open( written, &rerr ) ) {
+			err() << "readback FAILED: " << rerr << Qt::endl;
+			return 1;
+		}
+		out() << "  readback: cells " << rf.cellsX() << "x" << rf.cellsY()
+			  << "  rate " << rf.samplesPerCell()
+			  << "  levels " << rf.levelCount()
+			  << "  blocks " << rf.blockCount()
+			  << "  LTEX " << rf.ltexCount() << "  WATR " << rf.watrCount()
+			  << "  quantum " << rf.heightQuantum() << Qt::endl;
+
+		/* Cross-check the READER against the SOURCE, not against the writer's
+		 * own idea of what it wrote. Every corner of a sampled grid of cells,
+		 * which lands on all four pyramid levels: any mismatch at all is a bug,
+		 * because the 8-unit quantum is VHGT's own and nothing rounds. */
+		{
+			int bad = 0, tested = 0;
+			double worst = 0.0;
+			// alphas and colour are what FO4CS will actually read; heights alone
+			// proved the pyramid, not the planes
+			int aBad = 0, aNonZero = 0, cBad = 0, cColoured = 0;
+			int seamRaised = 0;   // samples the max rule lifted above the cell's own record
+			EsmLand lnd, nS, nW, nSW;
+			const int stride = qMax( 1, rf.cellsX() / 24 );
+			for ( int cy = rf.cellMinY(); cy <= rf.cellMaxY(); cy += stride ) {
+				for ( int cx = rf.cellMinX(); cx <= rf.cellMaxX(); cx += stride ) {
+					if ( !world.land( cx, cy, lnd ) )
+						continue;
+					// the seam rule's other holders of this cell's row 0 / column 0
+					const bool hS = world.land( cx, cy - 1, nS );
+					const bool hW = world.land( cx - 1, cy, nW );
+					const bool hSW = world.land( cx - 1, cy - 1, nSW );
+					const int x0 = ( cx - rf.cellMinX() ) * rf.samplesPerCell();
+					const int y0 = ( cy - rf.cellMinY() ) * rf.samplesPerCell();
+					for ( int r = 0; r < 32; r += 4 ) {
+						for ( int c = 0; c < 32; c += 4 ) {
+							/* Rebuilt from the ESM the way the spec says the slot is
+							 * filled: the MAXIMUM over every cell holding the sample. */
+							double want = lnd.heights[r][c];
+							if ( r == 0 && hS )
+								want = qMax( want, double( nS.heights[32][c] ) );
+							if ( c == 0 && hW )
+								want = qMax( want, double( nW.heights[r][32] ) );
+							if ( r == 0 && c == 0 && hSW )
+								want = qMax( want, double( nSW.heights[32][32] ) );
+							if ( want > double( lnd.heights[r][c] ) )
+								seamRaised++;
+							const double got = rf.height( x0 + c, y0 + r );
+							tested++;
+							const double d = std::fabs( got - want );
+							worst = qMax( worst, d );
+							if ( d > 0.001 )
+								bad++;
+
+							/* Rebuild the alpha word from the ESM the way a CONSUMER
+							 * would: slots from the file's quadrant table, forms from
+							 * its LTEX table, opacities from the LAND record. Nothing
+							 * here comes from the writer's own idea of what it packed. */
+							{
+								const int q = ( r >= 16 ? 2 : 0 ) + ( c >= 16 ? 1 : 0 );
+								const int qr = r >= 16 ? r - 16 : r;
+								const int qc = c >= 16 ? c - 16 : c;
+								quint16 qslots[6];   // not "slots": that is a Qt keyword macro and vanishes
+								rf.quadrantSlots( cx, cy, q, qslots );
+								quint16 wantA = 0;
+								for ( int s = 0; s < 5; s++ ) {
+									if ( qslots[s] == 0xFFFFU )
+										continue;
+									const quint32 form = rf.ltexForm( int( qslots[s] ) );
+									float a = 0.0f;
+									for ( const EsmLandLayer & ly : lnd.layers[q] )
+										if ( ly.ltex == form ) {
+											a = ly.opacity[qr][qc];
+											break;
+										}
+									wantA |= quint16( quint16( qBound( 0.0f, a * 7.0f + 0.5f, 7.0f ) )
+										<< ( s * 3 ) );
+								}
+								if ( wantA )
+									aNonZero++;
+								if ( rf.alphaWord( x0 + c, y0 + r ) != wantA )
+									aBad++;
+
+								const quint16 wantC = lnd.hasColors
+									? quint16( ( ( lnd.colors[r][c][0] >> 3 ) << 11 )
+										| ( ( lnd.colors[r][c][1] >> 3 ) << 6 )
+										| ( lnd.colors[r][c][2] >> 3 ) )
+									: quint16( 0xFFFFU );
+								if ( lnd.hasColors )
+									cColoured++;
+								if ( rf.colourWord( x0 + c, y0 + r ) != wantC )
+									cBad++;
+							}
+						}
+					}
+				}
+			}
+			out() << "  cross-check: " << tested << " samples against the ESM, "
+				  << bad << " mismatched, worst " << worst
+				  << " (" << seamRaised << " seam samples raised by the max rule)" << Qt::endl;
+			out() << "  alpha words: " << aBad << " of " << tested << " differ ("
+				  << aNonZero << " nonzero); colour words: " << cBad << " of " << tested
+				  << " differ (" << cColoured << " coloured)" << Qt::endl;
+			if ( bad || aBad || cBad ) {
+				err() << "error: the file does not reproduce its source" << Qt::endl;
+				return 1;
+			}
+		}
+		return 0;
+	}
+	if ( !heightmapDir.isEmpty() ) {
+		EsmWorld world;
+		QString berr;
+		if ( !world.load( file, worldspace, &berr ) ) {
+			err() << "error: " << berr << Qt::endl;
+			return 1;
+		}
+		QString written;
+		if ( !lodgenBakeHeightmap( world, heightmapDir, heightmapSize, &written, &berr ) ) {
+			err() << "error: " << berr << Qt::endl;
+			return 1;
+		}
+		int mnx, mny, mxx, mxy;
+		world.cellBounds( mnx, mny, mxx, mxy );
+		out() << "height map: " << written << Qt::endl;
+		out() << "  " << berr << Qt::endl;   // the baker reports its provenance here
+		/* The loader pins the Commonwealth's corpus hash as a constant and
+		 * refuses any other value. Ours is computed from the ESM by the same
+		 * walk; if the two ever disagree this run fails loudly here rather than
+		 * the map failing silently in game. */
+		if ( world.worldspaceEdid() == QLatin1String( "Commonwealth" ) ) {
+			const quint64 got = world.vhgtCorpusHash();
+			if ( got != EsmWorld::kCommonwealthVhgtCorpusHash ) {
+				err() << "error: Commonwealth corpus hash " << QString::number( got, 16 )
+					  << " does not match the loader's pinned "
+					  << QString::number( EsmWorld::kCommonwealthVhgtCorpusHash, 16 )
+					  << " -- the map would be refused" << Qt::endl;
+				return 1;
+			}
+			out() << "  corpus hash matches the loader's pinned Commonwealth constant" << Qt::endl;
+		}
+		out() << "  worldspace " << world.worldspaceEdid()
+			  << "  cells S " << mny << " W " << mnx << " N " << mxy << " E " << mxx
+			  << "  (" << ( mxx - mnx + 1 ) << "x" << ( mxy - mny + 1 ) << " cells)"
+			  << "  " << ( heightmapSize > 0
+					? QStringLiteral( "%1^2" ).arg( heightmapSize )
+					: QStringLiteral( "%1x%2 native" ).arg( ( mxx - mnx + 1 ) * 32 ).arg( ( mxy - mny + 1 ) * 32 ) )
+			  << " R16_UNORM" << Qt::endl;
+		return 0;
+	}
 	if ( listCandidates && haveRegion ) {
 		EsmWorld world;
 		QString error;
@@ -2305,28 +3197,66 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 			err() << "error: " << error << Qt::endl;
 			return 1;
 		}
-		// bases referenced in the region whose FAR MNAM slots are missing:
-		// these fall back to heavy near meshes at dim16/32 without a card
+		/* Bases referenced in the region, one `formid model` line each. The
+		 * model is the base's own NEAR mesh when the record names one - the
+		 * bake photographs the base, not a LOD derivative (bungo: "the base
+		 * is more detailed") - else the first filled LOD slot. Which bases:
+		 *   missing  far MNAM slots empty: these fall back to heavy near
+		 *            meshes at dim16/32 without a card (the default)
+		 *   trees    every tree, and ONLY trees. It meant `tree || missing`
+		 *            until 2026-09-09, which is a SUPERSET of the default and
+		 *            not a tree list at all: 14 of a 33-candidate Sanctuary
+		 *            run were shacks and rock cliffs
+		 *   all      every base with LOD
+		 * SCOL parts are walked to their bases: most of Sanctuary's trees are
+		 * parts, and a card library that skipped them would miss the forest. */
 		QSet<quint32> seen;
+		auto consider = [&]( quint32 baseId ) {
+			if ( !baseId || seen.contains( baseId ) )
+				return;
+			seen.insert( baseId );
+			const EsmLodBase & b = world.lodBase( baseId );
+			if ( !b.hasLod )
+				return;
+			const bool missing = b.models[2].isEmpty() || b.models[3].isEmpty();
+			QString source = b.model;
+			for ( int l = 0; l < 4 && source.isEmpty(); l++ )
+				source = b.models[l];
+			if ( source.isEmpty() )
+				return;
+			const bool tree = std::memcmp( &b.type, "TREE", 4 ) == 0 || lodgenIsTreeModel( source );
+			bool want = missing;
+			if ( candidateKind == QLatin1String( "all" ) )
+				want = true;
+			else if ( candidateKind == QLatin1String( "trees" ) )
+				want = tree;
+			if ( want ) {
+				/* `formid extent model`, the extent SECOND so the model - the only
+				 * token that can hold a space - stays the line's remainder for a
+				 * `read -r id extent model`. The extent is the larger of the
+				 * model's horizontal radius and its half-height, in world units:
+				 * the scalar the card baker's size ladder measures a base against.
+				 * Zero when the mesh will not load, which the driver reads as
+				 * "no opinion" rather than "infinitely small". */
+				float ew = 0.0f, eh = 0.0f;
+				lodgenModelExtent( dataRoot.isEmpty()
+					? QStringLiteral( "E:/Tools/Fallout 4/DataUnpacked/Data" ) : dataRoot,
+					source, &ew, &eh );
+				out() << QString( "%1" ).arg( baseId, 8, 16, QChar( '0' ) ) << " "
+					  << QString::number( qMax( ew, eh ), 'f', 1 ) << " " << source << Qt::endl;
+			}
+		};
 		for ( int cy = region[1]; cy <= region[3]; cy++ ) {
 			for ( int cx = region[0]; cx <= region[2]; cx++ ) {
 				for ( const EsmRefr & r : world.refrs( cx, cy ) ) {
-					if ( r.initiallyDisabled || r.deleted || !r.base
-						|| seen.contains( r.base ) )
+					if ( r.initiallyDisabled || r.deleted || !r.base )
 						continue;
-					seen.insert( r.base );
-					const EsmLodBase & b = world.lodBase( r.base );
-					if ( !b.hasLod )
-						continue;
-					if ( !b.models[2].isEmpty() && !b.models[3].isEmpty() )
-						continue;
-					QString bakeSource;
-					for ( int l = 0; l < 4 && bakeSource.isEmpty(); l++ )
-						bakeSource = b.models[l];
-					if ( bakeSource.isEmpty() )
-						continue;
-					out() << QString( "%1" ).arg( r.base, 8, 16, QChar( '0' ) )
-						  << " " << bakeSource << Qt::endl;
+					if ( std::memcmp( &r.baseType, "SCOL", 4 ) == 0 ) {
+						for ( const EsmScolPart & part : world.scolParts( r.base ) )
+							consider( part.base );
+					} else {
+						consider( r.base );
+					}
 				}
 			}
 		}
@@ -2348,6 +3278,9 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 		opts.aoGrey = aoGrey;
 		opts.aoSkirtCells = aoSkirt;
 		opts.impostorDir = impostors;
+		opts.impostorFromLevel = impostorFromLevel;
+		opts.cardAuxDiv = cardAuxDiv;
+		opts.slotFallback = slotFallback;
 		opts.dataRoot = dataRoot.isEmpty()
 			? QStringLiteral( "E:/Tools/Fallout 4/DataUnpacked/Data" ) : dataRoot;
 		NifModel nif;
@@ -2365,6 +3298,33 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 		}
 		return saveNif( nif, outFile ) ? 0 : 1;
 	}
+	if ( ( !vtDir.isEmpty() || vtEstimate ) && !haveRegion ) {
+		EsmWorld vtWorld;
+		QString verr;
+		if ( !vtWorld.load( file, worldspace, &verr ) ) {
+			err() << "error: " << verr << Qt::endl;
+			return 1;
+		}
+		if ( !cmdLodgenVtEstimate( vtWorld, vtOpts, !texDir.isEmpty() ) )
+			return 1;
+		if ( vtEstimate )
+			return 0;
+		LodgenVtOptions vo = vtOpts;
+		if ( vtBtr != 0 && !texDir.isEmpty() ) {
+			QDir().mkpath( texDir );
+			vo.btrTexDir = texDir;
+			vo.btrDims = QVector<int>{ 4, 8, 16, 32 };
+		}
+		QString vtReport;
+		if ( !lodgenBakeTerrainVt( vtWorld,
+			dataRoot.isEmpty() ? QStringLiteral( "E:/Tools/Fallout 4/DataUnpacked/Data" ) : dataRoot,
+			vtDir, vo, nullptr, &vtReport, &verr ) ) {
+			err() << "error: " << verr << Qt::endl;
+			return 1;
+		}
+		out() << vtReport << Qt::endl;
+		return 0;
+	}
 	if ( haveRegion ) {
 		if ( outDir.isEmpty() ) {
 			err() << "error: --terrain-region needs --out-dir" << Qt::endl;
@@ -2380,11 +3340,55 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 		opts.dim = dim > 0 ? dim : 4;
 		opts.geomorph = geomorph;
 		opts.terrainIdentity = terrainIdentity;
+		opts.waterSubdiv = waterSubdiv;
+		opts.shoreDenser = shoreDenser;
+		opts.shoreDensity = shoreDensity;
+		if ( targetTris >= 0 )
+			opts.targetTrisPerCell = targetTris;
 		const int d = opts.dim;
 		// snap the requested cell region outward to chunk alignment
 		auto floorTo = []( int v, int m ) { return v >= 0 ? v - v % m : -( ( -v + m - 1 ) / m ) * m; };
 		const int x0 = floorTo( region[0], d ), y0 = floorTo( region[1], d );
 		QDir().mkpath( outDir );
+		/* ONE texture/LTEX/GRAS cache for the whole region: the per-chunk path
+		 * used to own a local one and decode every landscape diffuse again for
+		 * each chunk. Bounded by an LRU, so a whole worldspace does not hold
+		 * sixty 21 MiB decodes at once. */
+		LodgenBakeCaches * bakeCaches = lodgenCreateBakeCaches();
+		struct RegionCacheGuard
+		{
+			LodgenBakeCaches * p;
+			~RegionCacheGuard() { lodgenDestroyBakeCaches( p ); }
+		} regionCacheGuard{ bakeCaches };
+		/* The pyramid runs FIRST and ONCE. It has to: when the chunk sheets
+		 * come from it, they are assembled while its staging is live, and a
+		 * pass that ran after the chunk queue would have nothing to read. */
+		bool texFromVt = false;
+		if ( !vtDir.isEmpty() || vtEstimate ) {
+			if ( !cmdLodgenVtEstimate( world, vtOpts, !texDir.isEmpty() ) )
+				return 1;
+		}
+		if ( !vtDir.isEmpty() ) {
+			LodgenVtOptions vo = vtOpts;
+			vo.haveRegion = true;
+			for ( int r = 0; r < 4; r++ )
+				vo.region[r] = region[r];
+			if ( vtBtr != 0 && !texDir.isEmpty() ) {
+				QDir().mkpath( texDir );
+				vo.btrTexDir = texDir;
+				vo.btrDims = QVector<int>{ 4, 8, 16, 32 };
+				texFromVt = true;
+			}
+			QString vtReport, vterr;
+			if ( !lodgenBakeTerrainVt( world,
+				dataRoot.isEmpty() ? QStringLiteral( "E:/Tools/Fallout 4/DataUnpacked/Data" ) : dataRoot,
+				vtDir, vo, bakeCaches, &vtReport, &vterr ) ) {
+				err() << "error: " << vterr << Qt::endl;
+				return 1;
+			}
+			out() << vtReport << Qt::endl;
+			out().flush();
+		}
 		int done = 0, skipped = 0, failed = 0;
 		QStringList writtenBto;
 		for ( int cy = y0; cy <= region[3]; cy += d ) {
@@ -2409,14 +3413,14 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 							done++;
 							out() << "[" << done << "] " << name << Qt::endl;
 							out().flush();
-							if ( !texDir.isEmpty() ) {
+							if ( !texDir.isEmpty() && !texFromVt ) {
 								QDir().mkpath( texDir );
 								QString terr2;
 								if ( !lodgenBakeTerrainTextures( world, cx, cy, d,
 									dataRoot.isEmpty()
 										? QStringLiteral( "E:/Tools/Fallout 4/DataUnpacked/Data" )
 										: dataRoot,
-									texDir, &terr2 ) ) {
+									texDir, coverOpts, bakeCaches, &terr2 ) ) {
 									err() << "texture bake (" << cx << "," << cy << "): "
 										  << terr2 << Qt::endl;
 								}
@@ -2435,6 +3439,9 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 					oopts.aoGrey = aoGrey;
 					oopts.aoSkirtCells = aoSkirt;
 					oopts.impostorDir = impostors;
+					oopts.impostorFromLevel = impostorFromLevel;
+					oopts.cardAuxDiv = cardAuxDiv;
+					oopts.slotFallback = slotFallback;
 					oopts.dataRoot = dataRoot.isEmpty()
 						? QStringLiteral( "E:/Tools/Fallout 4/DataUnpacked/Data" ) : dataRoot;
 					NifModel nif;
@@ -2460,9 +3467,30 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 				}
 			}
 		}
+		if ( arrays && !writtenBto.isEmpty() ) {
+			// before the atlas: the arrays key on the shapes' own diffuse paths
+			const QString ws = world.worldspaceEdid();
+			const QString arrDir = ( texDir.isEmpty() ? outDir : texDir ) + QStringLiteral( "/Objects" );
+			QDir().mkpath( arrDir );
+			QString rep, aerr;
+			if ( !lodgenBuildTextureArrays( writtenBto,
+				dataRoot.isEmpty() ? QStringLiteral( "E:/Tools/Fallout 4/DataUnpacked/Data" ) : dataRoot,
+				arrDir + "/" + ws + QStringLiteral( ".LodgenArrays" ),
+				QString( "data\\Textures\\Terrain\\%1\\Objects\\%1.LodgenArrays" ).arg( ws ),
+				&rep, &aerr ) ) {
+				err() << "arrays: " << aerr << Qt::endl;
+				failed++;
+			} else {
+				out() << "arrays written: " << rep << Qt::endl;
+			}
+		}
 		if ( atlas && !writtenBto.isEmpty() ) {
 			const QString ws = world.worldspaceEdid();
-			const QString atlasDir = texDir.isEmpty() ? outDir : texDir;
+			/* `/Objects`, like the arrays above and like the panel: the game
+			 * path baked into every atlased shape names that subdirectory,
+			 * so writing the sheets to <texDir> itself put them one level
+			 * above where the chunks look for them. */
+			const QString atlasDir = ( texDir.isEmpty() ? outDir : texDir ) + QStringLiteral( "/Objects" );
 			QDir().mkpath( atlasDir );
 			/* Loose copies of textures the atlas cannot absorb go into the
 			 * output DATA tree: derived when outDir follows the vanilla
@@ -2487,12 +3515,44 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 					: dataRoot,
 				atlasDir + "/" + ws + QStringLiteral( ".LodgenObjects" ),
 				QString( "data\\Textures\\Terrain\\%1\\Objects\\%1.LodgenObjects" ).arg( ws ),
-				looseRoot, &aerr ) ) {
+				looseRoot, atlasBc1, &aerr ) ) {
 				err() << "atlas: " << aerr << Qt::endl;
 				failed++;
 			} else {
-				out() << "atlas written: " << ws << ".LodgenObjects.DDS (+_n)" << Qt::endl;
+				out() << "atlas written: " << ws << ".LodgenObjects.DDS (+_n, _s)" << Qt::endl;
 			}
+		}
+		if ( merge && !writtenBto.isEmpty() ) {
+			// last: one shape per material the engine can tell apart (after the atlas and the arrays)
+			QString rep, merr;
+			if ( lodgenMergeChunkShapes( writtenBto, &rep, &merr ) )
+				out() << "merged: " << rep << Qt::endl;
+			else
+				err() << "merge: " << merr << Qt::endl;
+		}
+		if ( simplify.enabled && !writtenBto.isEmpty() ) {
+			/* After the merge, because the proxy is the MERGED shape: the merge
+			 * has already made one shape per material, which is the cluster a
+			 * far ring wants one simplified mesh of. Ring 0 is never cut. */
+			QString rep, serr;
+			if ( lodgenSimplifyFarRings( writtenBto, simplify, &rep, &serr ) )
+				out() << "far rings: " << rep << Qt::endl;
+			else
+				err() << "far rings: " << serr << Qt::endl;
+		}
+		if ( arrays && !impostors.isEmpty() && !writtenBto.isEmpty() ) {
+			// the card sets the chunks stand on, as arrays beside the mesh arrays
+			const QString ws = world.worldspaceEdid();
+			const QString arrDir = ( texDir.isEmpty() ? outDir : texDir ) + QStringLiteral( "/Objects" );
+			QDir().mkpath( arrDir );
+			QString rep, cerr2;
+			if ( lodgenBuildCardArrays( writtenBto, impostors,
+				arrDir + "/" + ws + QStringLiteral( ".LodgenCards" ),
+				QString( "data\\Textures\\Terrain\\%1\\Objects\\%1.LodgenCards" ).arg( ws ),
+				cardAuxDiv, &rep, &cerr2 ) )
+				out() << "card arrays written: " << rep << Qt::endl;
+			else
+				err() << "card arrays: " << cerr2 << Qt::endl;
 		}
 		out() << done << " chunk(s) written to " << outDir
 			  << ", " << skipped << " empty, " << failed << " failed" << Qt::endl;
@@ -2509,6 +3569,11 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 		opts.dim = dim > 0 ? dim : 4;
 		opts.geomorph = geomorph;
 		opts.terrainIdentity = terrainIdentity;
+		opts.waterSubdiv = waterSubdiv;
+		opts.shoreDenser = shoreDenser;
+		opts.shoreDensity = shoreDensity;
+		if ( targetTris >= 0 )
+			opts.targetTrisPerCell = targetTris;
 		NifModel nif;
 		if ( !lodgenBuildTerrainChunk( &nif, world, chunkX, chunkY, opts, &error ) ) {
 			err() << "error: " << error << Qt::endl;
@@ -3828,6 +4893,18 @@ int usage()
 		  << "                                          whole worldspace at LOD4; lod 0 is\n"
 		  << "                                          one sample every 32 units, each\n"
 		  << "                                          level doubles that)\n"
+		  << "  lodl <file.lodl> --info                 our landscape file: extent, height\n"
+		  << "                                          range and quantum, sample rate, the\n"
+		  << "                                          sections present and the plane keys\n"
+		  << "  lodl <file.lodl> [--region X0 Y0 X1 Y1] [--lod N] [--plane KEY] [-o OUT.nif]\n"
+		  << "                                          build the region as BSTriShape\n"
+		  << "                                          geometry, painted with one stored\n"
+		  << "                                          plane as vertex colours (height ao\n"
+		  << "                                          blend colour groundcover waterheight\n"
+		  << "                                          watertype cellflags cellrange\n"
+		  << "                                          overview); prints what the plane\n"
+		  << "                                          measured. Same generator as\n"
+		  << "                                          File > Open\n"
 		  << "  lodgen <file.esm> --list-worldspaces    LOD generation (rung 0): list\n"
 		  << "                                          worldspaces in an ESM\n"
 		  << "  lodgen <file.esm> --worldspace HEX [--cell X Y]\n"
@@ -3841,12 +4918,16 @@ int usage()
 		  << "                                          (stock-legal; they ship in the\n"
 		  << "                                          game's BA2s). --atlas packs the\n"
 		  << "                                          BTOs' non-tiling textures onto one\n"
-		  << "                                          <ws>.LodgenObjects sheet (+_n) as a\n"
+		  << "                                          <ws>.LodgenObjects sheet (+_n, _s)\n"
+		  << "                                          under <tex-dir>/Objects, as a\n"
 		  << "                                          draw-call optimization - own name,\n"
 		  << "                                          never vanilla's (collision shadows\n"
 		  << "                                          the vanilla sheet for vanilla BTOs)\n"
 		  << "  lodgen <file.esm> --worldspace HEX --objects X Y [--dim 4]\n"
-		  << "         [--data-root DIR] [--no-identity] [--no-ao]\n"
+		  << "         [--data-root DIR] [--no-identity] [--no-ao] [--arrays]\n"
+		  << "         [--no-merge]                     (shapes merge per material after\n"
+		  << "                                          the atlas; --no-merge keeps one\n"
+		  << "                                          shape per source material)\n"
 		  << "         [--cull-buried [--cull-margin N]] [--ao-grey] [--ao-skirt N]\n"
 		  << "         -o OUT.bto                       --ao-skirt is how many cells\n"
 		  << "                                          of neighbouring terrain and\n"
@@ -3858,6 +4939,168 @@ int usage()
 		  << "                                          identity (default) vertices carry\n"
 		  << "                                          the FO4CS channel contract and a\n"
 		  << "                                          .manifest.txt is written beside\n"
+		  << "         [--impostors DIR [--impostors-from-level N]]\n"
+		  << "                                          a card library (bake_impostor_cards.sh)\n"
+		  << "                                          stands in where a ring has no model;\n"
+		  << "                                          from MNAM level N (0 = dim 4) on it\n"
+		  << "                                          replaces the ring's mesh too (FO4CS)\n"
+		  << "  lodgen <file.esm> --worldspace HEX --terrain-region X0 Y0 X1 Y1\n"
+		  << "         --list-impostor-candidates [--candidates missing|trees|all]\n"
+		  << "         --card-half-aux                 impostor normal, mask and emissive\n"
+		  << "                                         sheets at half the base colour's side\n"
+		  << "                                         (54% off a card; the silhouette is in\n"
+		  << "                                         the base colour's alpha and never divides)\n"
+		  << "                                          `formid model` per base, the model\n"
+		  << "                                          being the base's own near mesh for\n"
+		  << "                                          the card bake; missing = far slots\n"
+		  << "                                          empty (default), trees = every tree\n"
+		  << "                                          as well, all = every LOD base\n"
+		  << "  lodgen ... [--resource DIR|ARCHIVE]...    the resource stack, in Mod\n"
+		  << "                                          Organizer's order: the LAST one\n"
+		  << "                                          given overrides the earlier ones,\n"
+		  << "                                          and a loose file beats an archive\n"
+		  << "                                          wherever the archive sits\n"
+		  << "  lodgen ... [--plugins-txt FILE] [--mo2]  take the plugin list (and, with\n"
+		  << "                                          --mo2, the whole stack) from a\n"
+		  << "                                          plugins.txt: '*Name.esp' lines are\n"
+		  << "                                          the enabled plugins, in load order.\n"
+		  << "                                          --mo2 reads the profile's own file\n"
+		  << "                                          at %LOCALAPPDATA%\\Fallout4 and\n"
+		  << "                                          stacks each enabled plugin's\n"
+		  << "                                          archives in that order\n"
+		  << "  lodgen [--resource ...] --probe RELPATH [--probe-out FILE]\n"
+		  << "                                          where one asset actually resolves\n"
+		  << "                                          from: the stack entry, loose or\n"
+		  << "                                          archived, the size and a sha1\n"
+		  << "                                          (exit 1 when nothing has it)\n"
+		  << "  lodgen [--resource ...] --print-source   the stack as set (last wins) and\n"
+		  << "                                          as indexed (first wins)\n"
+		  << "  lodgen [--resource ...] --list-files N   up to N paths the stack's index\n"
+		  << "                                          holds, sorted\n"
+		  << "  lodgen <file.esm> --worldspace HEX --dump-layers FILE\n"
+		  << "                                          which cells carry painted material\n"
+		  << "                                          (BTXT base / ATXT layers) and which\n"
+		  << "                                          LTEX they name, one line a cell.\n"
+		  << "                                          This is what defines the playable\n"
+		  << "                                          area, never a regenerated bake -\n"
+		  << "                                          that would be circular.\n"
+		  << "  lodgen --dump-shapes FILE.BTO            one line per shape: the shader\n"
+		  << "                                          constants a LOD material is\n"
+		  << "                                          composed from - Shader Flags 1,\n"
+		  << "                                          Own-Emit, the emissive colour and\n"
+		  << "                                          multiple, smoothness, specular\n"
+		  << "                                          strength, the alpha property and\n"
+		  << "                                          slot 0\n"
+		  << "  lodgen --dump-geometry FILE.BTO          one line per shape: what it\n"
+		  << "                                          weighs (vertices, triangles,\n"
+		  << "                                          segments) and the counts its\n"
+		  << "                                          own invariants stand on -\n"
+		  << "                                          triangles in the wrong segment\n"
+		  << "                                          cell, centroids outside the\n"
+		  << "                                          chunk, vertices outside the\n"
+		  << "                                          bounding sphere or the node\n"
+		  << "                                          AABB - plus an `i` line with\n"
+		  << "                                          its object identity indices\n"
+		  << "  lodgen ... --terrain-region ... [--slot-fallback]\n"
+		  << "                                          keep an object at a ring whose\n"
+		  << "                                          MNAM slot is empty by using the\n"
+		  << "                                          nearest filled one. OFF matches\n"
+		  << "                                          vanilla, where it drops out;\n"
+		  << "                                          measured, 0 of 19,507 refs in\n"
+		  << "                                          chunk (-32,16) fill slot 2, so\n"
+		  << "                                          Sanctuary's ring 2 is empty\n"
+		  << "                                          without this or --impostors\n"
+		  << "  lodgen ... --terrain-region ... [--atlas [--atlas-bc1]]\n"
+		  << "                                          --atlas-bc1 writes the diffuse\n"
+		  << "                                          sheet as DXT1 with one-bit alpha,\n"
+		  << "                                          which is what vanilla's own sheet\n"
+		  << "                                          is (measured) and half the\n"
+		  << "                                          memory; BC3 is the default and\n"
+		  << "                                          keeps eight-bit alpha for FO4CS\n"
+		  << "  lodgen ... --terrain-region ... [--no-simplify]\n"
+		  << "         [--simplify8 R] [--simplify16 R] [--simplify32 R]\n"
+		  << "         [--simplify-error UNITS]         far-ring proxies: after the\n"
+		  << "                                          merge, each ring's merged shapes\n"
+		  << "                                          keep R of their triangles\n"
+		  << "                                          (default 1 / 0.35 / 0.2 at dim\n"
+		  << "                                          8 / 16 / 32; ring 0 is never\n"
+		  << "                                          touched). Alpha-tested shapes\n"
+		  << "                                          and impostor cards keep every\n"
+		  << "                                          triangle; the error is world\n"
+		  << "                                          units at ring 0, scaled by the\n"
+		  << "                                          ring's dim (default 32)\n"
+		  << "  lodgen ... --terrain-region ... --tex-dir DIR\n"
+		  << "                                          bake the terrain sheets for every\n"
+		  << "                                          chunk in the region into DIR:\n"
+		  << "                                          <ws>.<dim>.<x>.<y>.DDS (albedo),\n"
+		  << "                                          _msn.DDS (model-space normal) and\n"
+		  << "                                          _data.DDS (R sky-free AO, G flow\n"
+		  << "                                          wetness, B shore proximity)\n"
+		  << "  lodgen ... --tex-dir DIR [--cover] [--no-cover] [--grass-tint F]\n"
+		  << "         [--cover-full N] [--dump-cover FILE]\n"
+		  << "                                          --cover reads the landscape\n"
+		  << "                                          textures' grass records (LTEX ->\n"
+		  << "                                          GNAM -> GRAS), composites a cover\n"
+		  << "                                          value against the splat paint,\n"
+		  << "                                          gates it on slope, and writes it\n"
+		  << "                                          into the data sheet's alpha - the\n"
+		  << "                                          sheet turns BC3 and gains a 'WWCV'\n"
+		  << "                                          stamp only when the chunk has any.\n"
+		  << "                                          --grass-tint F (default 0.35) is\n"
+		  << "                                          how far the far albedo moves toward\n"
+		  << "                                          the grass colour at full cover; 0\n"
+		  << "                                          leaves the albedo byte-identical\n"
+		  << "                                          and still writes the plane.\n"
+		  << "                                          --cover-full N (default 96, the\n"
+		  << "                                          largest Density in the shipped\n"
+		  << "                                          corpus) is the FIXED normalisation\n"
+		  << "                                          the byte is measured against; a\n"
+		  << "                                          run-derived one would make two\n"
+		  << "                                          bakes incomparable. --dump-cover\n"
+		  << "                                          also writes the raw 512^2 u8 plane,\n"
+		  << "                                          north-up and headerless.\n"
+		  << "                                          Off, the three sheets are byte for\n"
+		  << "                                          byte what they have always been.\n"
+		  << "  lodgen <file.esm> --worldspace HEX --vt MODFOLDER [--tex-dir DIR]\n"
+		  << "         [--vt-finest 2] [--vt-content 256] [--vt-border 8] [--vt-mips 2]\n"
+		  << "         [--vt-compress none|zlib] [--vt-btr] [--no-vt-btr] [--vt-estimate]\n"
+		  << "         [--vt-height]                    a fourth R16 height sheet per tile,\n"
+		  << "                                          OFF by default: uncompressed where the\n"
+		  << "                                          other three are BC1, so +133% on a tile,\n"
+		  << "                                          and for a Fallout 4 source it is\n"
+		  << "                                          interpolation - the worldspace heightmap\n"
+		  << "                                          already carries every real height in\n"
+		  << "                                          75.5 MB. Worth it for a source finer than\n"
+		  << "                                          FO4's 32 land samples a cell\n"
+		  << "                                          the terrain virtual texture: a\n"
+		  << "                                          pyramid of 256-texel tiles with an\n"
+		  << "                                          8-texel border, one .lodt per level\n"
+		  << "                                          under <MODFOLDER>/Terrain/, indexed\n"
+		  << "                                          by <ws>.VT.lodm. Four sheets a tile:\n"
+		  << "                                          colour, model-space normal, data and\n"
+		  << "                                          HEIGHT (R16, the shadow heightmap's\n"
+		  << "                                          own encoding). Coarser levels are box\n"
+		  << "                                          filters of the finer ones, aligned to\n"
+		  << "                                          one origin so a coarse tile covers\n"
+		  << "                                          exactly four fine ones. --vt-btr (on)\n"
+		  << "                                          ASSEMBLES the .btr chunk sheets from\n"
+		  << "                                          the pyramid instead of baking them\n"
+		  << "                                          again; --vt-estimate prints the cost\n"
+		  << "                                          and exits without baking. With\n"
+		  << "                                          --terrain-region the pyramid covers\n"
+		  << "                                          that rectangle only and its index\n"
+		  << "                                          says so (partial: true).\n"
+		  << "  lodgen <file.esm> --worldspace HEX --corpus-hash\n"
+		  << "                                          both corpus hashes and the LTEX/GRAS\n"
+		  << "                                          census, with no bake: what a harness\n"
+		  << "                                          pins its floors to\n"
+		  << "  lodgen --lodm-check FILE.lodm            parse a .lodm through this tree's\n"
+		  << "                                          own parser and print keyword lines\n"
+		  << "  lodgen --lodt-check FILE.lodt            validate a terrain texture level by\n"
+		  << "                                          every rule of\n"
+		  << "                                          docs/LODGEN_TERRAIN_VT.md, checking\n"
+		  << "                                          every tile's CRC; a refusal NAMES the\n"
+		  << "                                          field that failed\n"
 		  << "  lodgen <file.esm> --worldspace HEX --terrain X Y [--dim 4] -o OUT.btr\n"
 		  << "                                          rung 1: generate one terrain chunk\n"
 		  << "                                          (X,Y = SW cell, dim-aligned) in the\n"
@@ -3938,6 +5181,7 @@ int nifskopeCliMain( const QStringList & args )
 	bool btdHaveRegion = false;
 	int btdRegion[4] = { 0, 0, 0, 0 };
 	int btdLod = -1;
+	QString lodtPlaneName;
 	bool lgListWorldspaces = false;
 	quint32 lgWorldspace = 0;
 	bool lgHaveCell = false;
@@ -3959,17 +5203,76 @@ int nifskopeCliMain( const QStringList & args )
 	bool lgAoGrey = false;
 	// Cells of neighbours to bake AO against; 0 is the old chunk-only bake.
 	int lgAoSkirt = 1;
+	int lgWaterSubdiv = 3;
+	bool lgShoreDenser = false;
+	QString lgHeightmapDir;
+	QString lgLodtDir;
+	QString lgBtdPath;
+	bool lgBtdProbe = false;
+	bool lgLodtVerify = false;
+	bool lgRefreshAo = false;
+	QString lgDumpLand;
+	// the painted area, per cell, from the master's LAND records
+	QString lgDumpLayers;
+	QString lgDumpShapes;
+	int lgHeightmapSize = 0;   // 0 = native, cells*32 a side; the lossless size
+	int lgShoreDensity = 1;
+	// -1 = leave the option default; 0 = no decimation at all (the source
+	// heightfield as a mesh, which is what a fidelity reference needs)
+	int lgTargetTris = -1;
 	QString lgTexDir;
+	/* Ground cover and the grass tint (lodgen.h). OFF by default, and off is
+	 * byte-identical to every bake this generator has ever written. */
+	LodgenCoverOptions lgCover;
+	/* The terrain virtual texture (lodgen.h). OFF by default; --vt names the
+	 * mod folder to write Terrain/ under. */
+	LodgenVtOptions lgVt;
+	QString lgVtDir;
+	int lgVtBtr = -1;
+	bool lgVtEstimate = false;
+	QString lgLodmCheck, lgLodvCheck;
+	bool lgCorpusHash = false;
 	bool lgGeomorph = false;
-	bool lgTerrainIdentity = false;
+	// ON, matching both LodgenTerrainOptions and the LOD Manager checkbox.
+	// These three drifted apart once already: the GUI wrote the terrain
+	// channels while the identical CLI run silently did not.
+	bool lgTerrainIdentity = true;
 	QString lgImpostors;
+	int lgImpostorFromLevel = -1;
+	QString lgCandidates = QStringLiteral( "missing" );
 	/* Opt-in. The "atlas is REQUIRED, textures are CK-only" episode was a
 	 * broken membership probe: every source LOD texture checked ships in
 	 * Fallout4 - Textures6.ba2 (BA2 name-table grep is the ground truth,
 	 * ba2x's hash lookup false-negatives). Direct refs are stock-legal,
 	 * xLODGen-style; the atlas remains a draw-call optimization. */
 	bool lgAtlas = false;
+	bool lgArrays = false;
+	bool lgMerge = true;
+	/* Vanilla's own diffuse sheet is DXT1 (measured: Commonwealth.Objects.DDS,
+	 * 4096x2048, 13 mips, 5,592,552 bytes), so BC1 is parity AND half the
+	 * memory. Ours has been BC3 since the atlas shipped; the panel picks it
+	 * off the Target, the CLI off this flag. */
+	bool lgAtlasBc1 = false;
+	/* The panel has had this toggle since the chunk builder shipped; the CLI
+	 * had no way to reach it, which made every far ring over Sanctuary empty
+	 * (measured: 0 of 19,507 refs in chunk (-32,16) fill MNAM slot 2). */
+	bool lgSlotFallback = false;
+	/* Far-ring proxies (lodgen.h). --no-simplify turns the pass off; the
+	 * three ratios and the error bound are per ring. Ring 0 is never cut. */
+	LodgenSimplifyOptions lgSimplify;
+	QString lgDumpGeometry;
 	bool lgListCandidates = false;
+	// the divisor on an impostor's normal, mask and emissive sheets; 1 = none
+	int lgCardAuxDiv = 1;
+	/* The resource stack (lodgen.h). --resource is repeatable and reads in MOD
+	 * ORGANIZER's order: the LAST one given overrides the earlier ones. */
+	QStringList lgResources;
+	QString lgPluginsTxt;
+	bool lgMo2 = false;
+	QString lgProbe;
+	QString lgProbeOut;
+	bool lgPrintSource = false;
+	int lgListFiles = 0;
 	bool constraintsOnly = false;
 	bool skeletonOnly = false;
 	bool bodiesOnly = false;
@@ -4002,6 +5305,7 @@ int nifskopeCliMain( const QStringList & args )
 				btdRegion[r] = next().toInt();
 		}
 		else if ( t == QLatin1String( "--lod" ) ) btdLod = next().toInt();
+		else if ( t == QLatin1String( "--plane" ) ) lodtPlaneName = next();
 		else if ( t == QLatin1String( "--list-worldspaces" ) ) lgListWorldspaces = true;
 		else if ( t == QLatin1String( "--worldspace" ) ) lgWorldspace = next().toUInt( nullptr, 16 );
 		else if ( t == QLatin1String( "--cell" ) ) {
@@ -4027,19 +5331,100 @@ int nifskopeCliMain( const QStringList & args )
 			lgChunk[1] = next().toInt();
 		}
 		else if ( t == QLatin1String( "--data-root" ) ) lgDataRoot = next();
+		else if ( t == QLatin1String( "--resource" ) ) lgResources << next();
+		else if ( t == QLatin1String( "--plugins-txt" ) ) lgPluginsTxt = next();
+		else if ( t == QLatin1String( "--mo2" ) ) lgMo2 = true;
+		else if ( t == QLatin1String( "--probe" ) ) lgProbe = next();
+		else if ( t == QLatin1String( "--probe-out" ) ) lgProbeOut = next();
+		else if ( t == QLatin1String( "--print-source" ) ) lgPrintSource = true;
+		else if ( t == QLatin1String( "--list-files" ) ) lgListFiles = next().toInt();
 		else if ( t == QLatin1String( "--no-identity" ) ) lgIdentity = false;
 		else if ( t == QLatin1String( "--no-ao" ) ) lgBakeAO = false;
 		else if ( t == QLatin1String( "--cull-buried" ) ) lgCullBuried = true;
 		else if ( t == QLatin1String( "--cull-margin" ) ) lgCullMargin = next().toFloat();
 		else if ( t == QLatin1String( "--ao-grey" ) ) lgAoGrey = true;
 		else if ( t == QLatin1String( "--ao-skirt" ) ) lgAoSkirt = next().toInt();
+		else if ( t == QLatin1String( "--water-subdiv" ) ) lgWaterSubdiv = next().toInt();
+		else if ( t == QLatin1String( "--shore-denser" ) ) lgShoreDenser = true;
+		else if ( t == QLatin1String( "--no-shore-denser" ) ) lgShoreDenser = false;
+		else if ( t == QLatin1String( "--target-tris" ) ) lgTargetTris = next().toInt();
+		else if ( t == QLatin1String( "--heightmap" ) ) lgHeightmapDir = next();
+		else if ( t == QLatin1String( "--lodl" ) ) lgLodtDir = next();
+		/* The retired spellings NAME their replacement instead of falling into
+		 * the generic "unknown option": these two are the commands a harness,
+		 * a script or bungo's own shell history will still be carrying, and a
+		 * bare "unknown option --lodt" does not say that .lodt now means
+		 * something else. */
+		else if ( t == QLatin1String( "--lodt" ) ) {
+			err() << "error: --lodt is retired: the landscape file is .lodl now "
+					 "(.lodt names the terrain texture sheets) -- use --lodl <dir>" << Qt::endl;
+			err().flush();
+			return 2;
+		}
+		else if ( t == QLatin1String( "--from-btd" ) ) lgBtdPath = next();
+		else if ( t == QLatin1String( "--btd-probe" ) ) lgBtdProbe = true;
+		else if ( t == QLatin1String( "--verify-only" ) ) lgLodtVerify = true;
+		else if ( t == QLatin1String( "--refresh-ao" ) ) lgRefreshAo = true;
+		else if ( t == QLatin1String( "--dump-land" ) ) lgDumpLand = next();
+		else if ( t == QLatin1String( "--dump-layers" ) ) lgDumpLayers = next();
+		else if ( t == QLatin1String( "--dump-shapes" ) ) lgDumpShapes = next();
+		else if ( t == QLatin1String( "--heightmap-size" ) ) {
+			const QString v = next();
+			lgHeightmapSize = v.compare( QLatin1String( "native" ), Qt::CaseInsensitive ) == 0 ? 0 : v.toInt();
+		}
+		else if ( t == QLatin1String( "--shore-density" ) ) lgShoreDensity = next().toInt();
 		else if ( t == QLatin1String( "--tex-dir" ) ) lgTexDir = next();
+		else if ( t == QLatin1String( "--cover" ) ) lgCover.cover = true;
+		else if ( t == QLatin1String( "--no-cover" ) ) lgCover.cover = false;
+		else if ( t == QLatin1String( "--grass-tint" ) ) lgCover.tintStrength = next().toFloat();
+		else if ( t == QLatin1String( "--cover-full" ) ) lgCover.coverFull = next().toFloat();
+		else if ( t == QLatin1String( "--dump-cover" ) ) lgCover.dumpCoverPath = next();
+		else if ( t == QLatin1String( "--vt" ) ) lgVtDir = next();
+		else if ( t == QLatin1String( "--no-vt" ) ) lgVtDir.clear();
+		else if ( t == QLatin1String( "--vt-finest" ) ) lgVt.finestDim = next().toInt();
+		else if ( t == QLatin1String( "--vt-content" ) ) lgVt.content = next().toInt();
+		else if ( t == QLatin1String( "--vt-border" ) ) lgVt.border = next().toInt();
+		else if ( t == QLatin1String( "--vt-mips" ) ) lgVt.mips = next().toInt();
+		else if ( t == QLatin1String( "--vt-compress" ) ) {
+			const QString v = next();
+			lgVt.compression = ( v == QLatin1String( "none" ) ) ? 0
+				: ( v == QLatin1String( "zlib" ) ) ? 1 : -1;
+		}
+		else if ( t == QLatin1String( "--vt-height" ) ) lgVt.height = true;
+		else if ( t == QLatin1String( "--vt-btr" ) ) lgVtBtr = 1;
+		else if ( t == QLatin1String( "--no-vt-btr" ) ) lgVtBtr = 0;
+		else if ( t == QLatin1String( "--vt-estimate" ) ) lgVtEstimate = true;
+		else if ( t == QLatin1String( "--lodm-check" ) ) lgLodmCheck = next();
+		else if ( t == QLatin1String( "--lodt-check" ) ) lgLodvCheck = next();
+		else if ( t == QLatin1String( "--lodv-check" ) ) {
+			err() << "error: --lodv-check is retired: the terrain texture sheets are "
+					 ".lodt now -- use --lodt-check <file.lodt>" << Qt::endl;
+			err().flush();
+			return 2;
+		}
+		else if ( t == QLatin1String( "--corpus-hash" ) ) lgCorpusHash = true;
 		else if ( t == QLatin1String( "--geomorph" ) ) lgGeomorph = true;
 		else if ( t == QLatin1String( "--terrain-identity" ) ) lgTerrainIdentity = true;
+		else if ( t == QLatin1String( "--no-terrain-identity" ) ) lgTerrainIdentity = false;
 		else if ( t == QLatin1String( "--impostors" ) ) lgImpostors = next();
+		else if ( t == QLatin1String( "--impostors-from-level" ) ) lgImpostorFromLevel = next().toInt();
+		else if ( t == QLatin1String( "--candidates" ) ) lgCandidates = next();
 		else if ( t == QLatin1String( "--atlas" ) ) lgAtlas = true;
 		else if ( t == QLatin1String( "--no-atlas" ) ) lgAtlas = false;
+		else if ( t == QLatin1String( "--arrays" ) ) lgArrays = true;
+		else if ( t == QLatin1String( "--no-arrays" ) ) lgArrays = false;
+		else if ( t == QLatin1String( "--merge" ) ) lgMerge = true;
+		else if ( t == QLatin1String( "--no-merge" ) ) lgMerge = false;
+		else if ( t == QLatin1String( "--atlas-bc1" ) ) lgAtlasBc1 = true;
+		else if ( t == QLatin1String( "--slot-fallback" ) ) lgSlotFallback = true;
+		else if ( t == QLatin1String( "--no-simplify" ) ) lgSimplify.enabled = false;
+		else if ( t == QLatin1String( "--simplify8" ) ) lgSimplify.ratio8 = next().toFloat();
+		else if ( t == QLatin1String( "--simplify16" ) ) lgSimplify.ratio16 = next().toFloat();
+		else if ( t == QLatin1String( "--simplify32" ) ) lgSimplify.ratio32 = next().toFloat();
+		else if ( t == QLatin1String( "--simplify-error" ) ) lgSimplify.errorWorld = next().toFloat();
+		else if ( t == QLatin1String( "--dump-geometry" ) ) lgDumpGeometry = next();
 		else if ( t == QLatin1String( "--list-impostor-candidates" ) ) lgListCandidates = true;
+		else if ( t == QLatin1String( "--card-half-aux" ) ) lgCardAuxDiv = 2;
 		else if ( t == QLatin1String( "--roundtrip" ) ) roundTrip = true;
 		else if ( t == QLatin1String( "--constraints" ) ) constraintsOnly = true;
 		else if ( t == QLatin1String( "--skeleton" ) ) skeletonOnly = true;
@@ -4110,8 +5495,22 @@ int nifskopeCliMain( const QStringList & args )
 		return rc;
 	}
 
-	// the solver self-test builds its own bodies, so it needs no file
-	if ( file.isEmpty() && !( cmd == QLatin1String( "simulate" ) && selfTest ) ) {
+	/* The solver self-test builds its own bodies, a .btd conversion reads a
+	 * whole landscape that is not a plugin, and asking where an asset comes from
+	 * (--probe / --print-source) is a question about the resource stack, not
+	 * about a plugin -- none of them needs a <file>.
+	 *
+	 * ADD EVERY NEW QUESTION ABOUT A FILE WE WROTE TO THIS LIST. Three have been
+	 * forgotten so far (--dump-geometry, --lodm-check, --lodt-check) and the
+	 * symptom is never a compile error: the question answers "needs a <file>",
+	 * the harness that asks it measures nothing, and its checks fail pointing at
+	 * the feature instead of at this line. --corpus-hash is correctly ABSENT: it
+	 * hashes a plugin's VHGT payloads and really does need one. */
+	if ( file.isEmpty() && !( cmd == QLatin1String( "simulate" ) && selfTest )
+		&& !( cmd == QLatin1String( "lodgen" )
+			&& ( !lgBtdPath.isEmpty() || !lgProbe.isEmpty() || !lgDumpShapes.isEmpty()
+				|| !lgDumpGeometry.isEmpty() || !lgLodmCheck.isEmpty() || !lgLodvCheck.isEmpty()
+				|| lgPrintSource || lgListFiles > 0 ) ) ) {
 		err() << "error: '" << cmd << "' needs a <file>" << Qt::endl;
 		err().flush();
 		return 2;
@@ -4126,6 +5525,307 @@ int nifskopeCliMain( const QStringList & args )
 	}
 
 	if ( !initModelLayer() ) { err().flush(); return 1; }
+
+	/* THE SOURCE, before anything reads an asset (bungo, 2026-09-06: "we can
+	 * toggle either specified bake, where we select our plugins, archives or
+	 * loose files and their order, or we select a MO2 automatic bake").
+	 *
+	 *   --resource <folder|archive>   repeatable, MO2's order: the LAST one
+	 *                                 given overrides the earlier ones
+	 *   --plugins-txt <file>          take the plugin list from a plugins.txt
+	 *   --mo2                         both: the profile's plugins.txt from
+	 *                                 %LOCALAPPDATA%, the stack from the Data
+	 *                                 folder's archives in plugin order
+	 *
+	 * -no-gui never brings the game manager up, so this stack is the only
+	 * resource set a CLI run has besides --data-root. */
+	if ( cmd == QLatin1String( "lodgen" ) ) {
+		QStringList stack = lgResources;
+		QStringList mo2Plugins;
+		if ( lgMo2 || !lgPluginsTxt.isEmpty() ) {
+			/* The Data folder MO2 virtualises. --data-root when given (it IS a
+			 * Data folder), else the folder the first plugin argument sits in,
+			 * else the game path the manager recorded in QSettings. */
+			QString dataDir = lgDataRoot;
+			if ( dataDir.isEmpty() && !file.isEmpty() )
+				dataDir = QFileInfo( file.section( QChar( ',' ), 0, 0 ) ).absolutePath();
+			if ( dataDir.isEmpty() ) {
+				QSettings s;
+				const QVariantMap paths = s.value( QStringLiteral( "Game Paths" ) ).toMap();
+				const QString p = paths.value( QStringLiteral( "Fallout 4" ) ).toString();
+				if ( !p.isEmpty() )
+					dataDir = p + QStringLiteral( "/Data" );
+			}
+			const QString txt = lgPluginsTxt.isEmpty() ? lodgenPluginsTxtPath() : lgPluginsTxt;
+			QString perr;
+			mo2Plugins = lodgenReadPluginsTxt( txt, &perr );
+			out() << "plugins-txt: " << txt << Qt::endl;
+			if ( !perr.isEmpty() )
+				err() << "warning: " << perr << Qt::endl;
+			out() << "data: " << dataDir << Qt::endl;
+			if ( lgMo2 ) {
+				out() << "mo2: " << ( lodgenUnderMo2() ? "yes" : "no (not launched from Mod Organizer 2)" )
+					  << Qt::endl;
+				stack = lodgenMo2Stack( dataDir, mo2Plugins ) + lgResources;
+			}
+			// the plugin list becomes the comma list EsmFile merges, in load order
+			QStringList resolved;
+			for ( const QString & p : mo2Plugins ) {
+				const QString full = QDir( dataDir ).filePath( p );
+				resolved << ( QFileInfo( full ).isFile() ? QDir::cleanPath( full ) : p );
+			}
+			out() << "plugins: " << resolved.size() << Qt::endl;
+			for ( int i = 0; i < resolved.size(); i++ )
+				out() << "plugin " << i << ": " << resolved.at( i ) << Qt::endl;
+			if ( !resolved.isEmpty() )
+				file = resolved.join( QChar( ',' ) );
+		}
+		lodgenSetResources( stack );
+		if ( lgPrintSource ) {
+			const QStringList set = lodgenResources();
+			out() << "source: " << ( lgMo2 ? "mo2" : "specified" ) << Qt::endl;
+			out() << "resources: " << set.size() << " (last wins)" << Qt::endl;
+			for ( int i = 0; i < set.size(); i++ )
+				out() << "resource " << i << ": " << set.at( i ) << Qt::endl;
+			const QStringList search = lodgenResourceSearchPaths();
+			out() << "search: " << search.size() << " (first wins)" << Qt::endl;
+			for ( int i = 0; i < search.size(); i++ )
+				out() << "search " << i << ": " << search.at( i ) << Qt::endl;
+		}
+		if ( lgListFiles > 0 ) {
+			// what the stack's own index holds, so a harness can pick a real
+			// path out of an archive instead of guessing one
+			const QStringList files = lodgenListResourceFiles( lgListFiles );
+			out() << "files: " << files.size() << Qt::endl;
+			for ( const QString & f : files )
+				out() << "file: " << f << Qt::endl;
+		}
+		if ( !lgProbe.isEmpty() ) {
+			QString entry, kind, path;
+			QByteArray bytes;
+			const bool found = lodgenProbeAsset( lgDataRoot, lgProbe, &entry, &kind, &path, &bytes );
+			out() << "probe: " << lgProbe << Qt::endl;
+			out() << "found: " << ( found ? "yes" : "no" ) << Qt::endl;
+			if ( found ) {
+				out() << "entry: " << ( entry.isEmpty() ? QStringLiteral( "(not the stack)" ) : entry ) << Qt::endl;
+				out() << "kind: " << kind << Qt::endl;
+				out() << "path: " << path << Qt::endl;
+				out() << "size: " << bytes.size() << Qt::endl;
+				out() << "sha1: "
+					  << QString::fromLatin1( QCryptographicHash::hash( bytes,
+							QCryptographicHash::Sha1 ).toHex() ) << Qt::endl;
+				if ( !lgProbeOut.isEmpty() ) {
+					QFile f( lgProbeOut );
+					if ( f.open( QIODevice::WriteOnly ) )
+						f.write( bytes );
+					out() << "wrote: " << lgProbeOut << Qt::endl;
+				}
+			}
+			out().flush();
+			err().flush();
+			return found ? 0 : 1;
+		}
+		/* --dump-shapes is a QUESTION about a written chunk: what does each of
+		 * its shapes carry? It exists so a gate can check a generated LOD
+		 * material against the SOURCE and not against the pass that wrote it -
+		 * an emissiveScale read back out of the sidecar that produced it is not
+		 * a measurement. One line per shape:
+		 *
+		 *   S <block> flags1 <u> ownemit <0|1> emit <r> <g> <b> mult <f>
+		 *     smooth <f> spec <f> alpha <0|1> tex0 <path>
+		 *
+		 * The colour is the emissive colour the chunk builder carried over from
+		 * the source's BGSM (or its shader property), which is what the legacy
+		 * `_g` sheet is multiplied by, and `mult` x `ownemit` is the set's
+		 * `emissiveScale` (docs/LODGEN_IMPOSTOR_SPEC.md). */
+		if ( !lgDumpShapes.isEmpty() ) {
+			NifModel dnif;
+			if ( !loadNif( dnif, lgDumpShapes ) ) {
+				err().flush();
+				return 1;
+			}
+			int shapes = 0;
+			out() << "# lodgen dump-shapes 1 " << lgDumpShapes << Qt::endl;
+			for ( int b = 0; b < dnif.getBlockCount(); b++ ) {
+				const QModelIndex iShape = dnif.getBlockIndex( b );
+				if ( !dnif.blockInherits( iShape, "BSTriShape" ) )
+					continue;
+				const QModelIndex iShader = dnif.getBlockIndex( dnif.getLink( iShape, "Shader Property" ) );
+				if ( !iShader.isValid() || !dnif.isNiBlock( iShader, "BSLightingShaderProperty" ) )
+					continue;
+				const quint32 f1 = dnif.get<quint32>( iShader, "Shader Flags 1" );
+				const Color3 ec = dnif.get<Color3>( iShader, "Emissive Color" );
+				QString tex0;
+				const QModelIndex iTexSet = dnif.getBlockIndex( dnif.getLink( iShader, "Texture Set" ) );
+				if ( iTexSet.isValid() ) {
+					const QModelIndex iArr = dnif.getIndex( iTexSet, "Textures" );
+					if ( iArr.isValid() )
+						tex0 = dnif.get<QString>( dnif.getIndex( iArr, 0 ) );
+				}
+				out() << "S " << b
+					<< " flags1 " << f1
+					<< " ownemit " << ( ( f1 & 0x400000U ) ? 1 : 0 )
+					<< " emit " << ec.red() << " " << ec.green() << " " << ec.blue()
+					<< " mult " << dnif.get<float>( iShader, "Emissive Multiple" )
+					<< " smooth " << dnif.get<float>( iShader, "Smoothness" )
+					<< " spec " << dnif.get<float>( iShader, "Specular Strength" )
+					<< " alpha " << ( dnif.getBlockIndex( dnif.getLink( iShape, "Alpha Property" ) ).isValid() ? 1 : 0 )
+					<< " tex0 " << ( tex0.isEmpty() ? QStringLiteral( "-" ) : tex0 ) << Qt::endl;
+				shapes++;
+			}
+			out() << "shapes: " << shapes << Qt::endl;
+			out().flush();
+			err().flush();
+			return shapes ? 0 : 1;
+		}
+		/* --dump-geometry is the other question a gate has to ask of a written
+		 * chunk: what does each shape WEIGH, and do the invariants the file
+		 * itself asserts still hold? One `G` line per shape and one `i` line
+		 * listing that shape's object identity indices, so a harness can weigh
+		 * and diff two builds of the same chunk without a NIF reader of its
+		 * own. Everything printed is a RAW COUNT — the comparisons belong to
+		 * the harness, and every count here can be non-zero on a real file:
+		 *
+		 *   G <block> alpha <0|1> scale <s> verts <n> tris <n> segs <n>
+		 *     segbad <n> outofchunk <n> sphereout <n> aabbout <n>
+		 *     ids <n> layers <n>
+		 *   i <block> <id> <id> ...
+		 *
+		 * segbad counts triangles whose CENTROID falls in a different cell
+		 * from the segment they are listed under (only asked when the shape
+		 * has one segment per cell); outofchunk counts centroids outside the
+		 * chunk's own 4096-unit miniature square; sphereout and aabbout count
+		 * vertices outside the shape's bounding sphere and its node's
+		 * multi-bound box. The tolerance is a half-precision ulp at 4096
+		 * (4 miniature units), because a chunk's positions are halves while
+		 * the bounds that contain them were computed from floats. */
+		if ( !lgDumpGeometry.isEmpty() ) {
+			NifModel dnif;
+			if ( !loadNif( dnif, lgDumpGeometry ) ) {
+				err().flush();
+				return 1;
+			}
+			const QStringList nameParts = QFileInfo( lgDumpGeometry ).fileName().split( QChar( '.' ) );
+			const int gdim = nameParts.size() >= 5 ? nameParts[1].toInt() : 0;
+			constexpr float EPS = 4.0f;                       // one half-float ulp at 4096
+			out() << "# lodgen dump-geometry 1 " << lgDumpGeometry << " dim " << gdim << Qt::endl;
+			int shapes = 0;
+			qint64 totalVerts = 0, totalTris = 0;
+			for ( int b = 0; b < dnif.getBlockCount(); b++ ) {
+				const QModelIndex iShape = dnif.getBlockIndex( b );
+				if ( !dnif.blockInherits( iShape, "BSTriShape" ) )
+					continue;
+				const QModelIndex iVD = dnif.getIndex( iShape, "Vertex Data" );
+				const int nv = int( dnif.get<quint32>( iShape, "Num Vertices" ) );
+				if ( !iVD.isValid() || nv <= 0 )
+					continue;
+				const BSVertexDesc desc( dnif.get<BSVertexDesc>( iShape, "Vertex Desc" ) );
+				const bool full = ( desc.GetFlags() & VertexFlags::VF_FULLPREC );
+				const bool colors = ( desc.GetFlags() & VertexFlags::VF_COLORS );
+				const bool uv2 = ( desc.GetFlags() & VertexFlags::VF_UV_2 );
+				const float scale = dnif.get<float>( iShape, "Scale" );
+				QVector<Vector3> pos( nv );
+				QSet<int> ids, layers;
+				for ( int v = 0; v < nv; v++ ) {
+					const QModelIndex row = dnif.index( v, 0, iVD );
+					pos[v] = full ? dnif.get<Vector3>( row, "Vertex" )
+						: Vector3( dnif.get<HalfVector3>( row, "Vertex" ) );
+					if ( colors ) {
+						const ByteColor4 c = dnif.get<ByteColor4>( row, "Vertex Colors" );
+						ids.insert( int( c[0] * 255.0f + 0.5f ) + int( c[1] * 255.0f + 0.5f ) * 256 );
+					}
+					if ( uv2 ) {
+						const Vector2 t = dnif.get<HalfVector2>( row, "UV 2" );
+						layers.insert( qRound( t[1] ) );
+					}
+				}
+				const QVector<Triangle> tris = dnif.getArray<Triangle>( dnif.getIndex( iShape, "Triangles" ) );
+				const QModelIndex iSegs = dnif.getIndex( iShape, "Segment" );
+				const int ns = iSegs.isValid() ? dnif.rowCount( iSegs ) : 0;
+				// which segment each triangle is listed under
+				QVector<int> segOf( tris.size(), 0 );
+				for ( int s = 0; s < ns; s++ ) {
+					const QModelIndex seg = dnif.index( s, 0, iSegs );
+					const int start = int( dnif.get<quint32>( seg, "Start Index" ) ) / 3;
+					const int count = int( dnif.get<quint32>( seg, "Num Primitives" ) );
+					for ( int t = start; t < start + count && t < tris.size(); t++ )
+						segOf[t] = s;
+				}
+				const int cells = gdim > 0 ? gdim * gdim : 0;
+				const float cellSpan = gdim > 0 ? 4096.0f / float( gdim ) : 4096.0f;
+				int segbad = 0, outofchunk = 0;
+				for ( int t = 0; t < tris.size(); t++ ) {
+					const Vector3 c = ( pos[tris[t].v1()] + pos[tris[t].v2()] + pos[tris[t].v3()] ) * ( 1.0f / 3.0f );
+					if ( c[0] < -EPS || c[1] < -EPS || c[0] > 4096.0f + EPS || c[1] > 4096.0f + EPS )
+						outofchunk++;
+					if ( ns == cells && cells > 1 ) {
+						const int lx = qBound( 0, int( c[0] / cellSpan ), gdim - 1 );
+						const int ly = qBound( 0, int( c[1] / cellSpan ), gdim - 1 );
+						if ( ly * gdim + lx != segOf[t] )
+							segbad++;
+					}
+				}
+				int sphereout = 0, aabbout = 0;
+				const QModelIndex iBound = dnif.getIndex( iShape, "Bounding Sphere" );
+				if ( iBound.isValid() ) {
+					const Vector3 c = dnif.get<Vector3>( iBound, "Center" );
+					const float r = dnif.get<float>( iBound, "Radius" );
+					for ( const Vector3 & p : pos )
+						if ( ( p - c ).length() > r + EPS )
+							sphereout++;
+				}
+				const QModelIndex iNode = dnif.getBlockIndex( dnif.getParent( b ) );
+				const QModelIndex iMB = iNode.isValid()
+					? dnif.getBlockIndex( dnif.getLink( iNode, "Multi Bound" ) ) : QModelIndex();
+				const QModelIndex iBox = iMB.isValid() ? dnif.getBlockIndex( dnif.getLink( iMB, "Data" ) ) : QModelIndex();
+				if ( iBox.isValid() ) {
+					const Vector3 bp = dnif.get<Vector3>( iBox, "Position" ), be = dnif.get<Vector3>( iBox, "Extent" );
+					const float tol = EPS * qMax( 1.0f, scale );
+					for ( const Vector3 & p : pos ) {
+						const Vector3 w = p * scale;
+						if ( w[0] < bp[0] - be[0] - tol || w[0] > bp[0] + be[0] + tol
+							|| w[1] < bp[1] - be[1] - tol || w[1] > bp[1] + be[1] + tol
+							|| w[2] < bp[2] - be[2] - tol || w[2] > bp[2] + be[2] + tol )
+							aabbout++;
+					}
+				}
+				out() << "G " << b
+					<< " alpha " << ( dnif.getBlockIndex( dnif.getLink( iShape, "Alpha Property" ) ).isValid() ? 1 : 0 )
+					<< " scale " << scale
+					<< " verts " << nv
+					<< " tris " << tris.size()
+					<< " segs " << ns
+					<< " segbad " << segbad
+					<< " outofchunk " << outofchunk
+					<< " sphereout " << sphereout
+					<< " aabbout " << aabbout
+					<< " ids " << ids.size()
+					<< " layers " << layers.size() << Qt::endl;
+				if ( !ids.isEmpty() ) {
+					QList<int> sorted = ids.values();
+					std::sort( sorted.begin(), sorted.end() );
+					out() << "i " << b;
+					for ( int id : sorted )
+						out() << " " << id;
+					out() << Qt::endl;
+				}
+				shapes++;
+				totalVerts += nv;
+				totalTris += tris.size();
+			}
+			out() << "total shapes " << shapes << " verts " << totalVerts << " tris " << totalTris << Qt::endl;
+			out().flush();
+			err().flush();
+			return shapes ? 0 : 1;
+		}
+		// --print-source and --list-files are QUESTIONS about the stack: they
+		// answer and stop, so neither can be mistaken for a bake
+		if ( lgPrintSource || lgListFiles > 0 ) {
+			out().flush();
+			err().flush();
+			return 0;
+		}
+	}
 
 	int rc = 2;
 	if ( cmd == QLatin1String( "pbrm-resolve" ) )
@@ -4175,14 +5875,30 @@ int nifskopeCliMain( const QStringList & args )
 	else if ( cmd == QLatin1String( "btd" ) )
 		rc = cmdBtd( file, btdInfo, btdHaveRegion,
 			btdRegion[0], btdRegion[1], btdRegion[2], btdRegion[3], btdLod, outFile );
+	else if ( cmd == QLatin1String( "lodl" ) )
+		rc = cmdLodt( file, btdInfo, btdHaveRegion,
+			btdRegion[0], btdRegion[1], btdRegion[2], btdRegion[3], btdLod,
+			lodtPlaneName, outFile );
+	else if ( cmd == QLatin1String( "lodt" ) ) {
+		err() << "error: the 'lodt' command is retired: the landscape file is .lodl "
+				 "now (.lodt names the terrain texture sheets) -- use "
+				 "'lodl <file.lodl>'" << Qt::endl;
+		rc = 2;
+	}
 	else if ( cmd == QLatin1String( "lodgen" ) )
 		rc = cmdLodgen( file, lgListWorldspaces, lgWorldspace,
 			lgHaveCell, lgCell[0], lgCell[1],
 			lgHaveTerrain, lgChunk[0], lgChunk[1], lgDim, outFile,
 			lgHaveRegion, lgRegion, lgOutDir,
 			lgHaveObjects, lgDataRoot, lgIdentity, lgTexDir, lgGeomorph,
-			lgTerrainIdentity, lgImpostors, lgListCandidates, lgAtlas, lgBakeAO,
-			lgCullBuried, lgCullMargin, lgAoGrey, lgAoSkirt );
+			lgTerrainIdentity, lgImpostors, lgImpostorFromLevel, lgCandidates, lgListCandidates, lgAtlas, lgArrays, lgMerge, lgBakeAO,
+			lgCullBuried, lgCullMargin, lgAoGrey, lgAoSkirt, lgWaterSubdiv,
+			lgShoreDenser, lgShoreDensity, lgTargetTris,
+			lgHeightmapDir, lgHeightmapSize, lgLodtDir, lgBtdPath, lgBtdProbe,
+			lgLodtVerify, lgDumpLand, lgDumpLayers, lgRefreshAo,
+			lgSlotFallback, lgAtlasBc1, lgSimplify, lgCover,
+			lgVt, lgVtDir, lgVtBtr, lgVtEstimate, lgLodmCheck, lgLodvCheck, lgCorpusHash,
+			lgCardAuxDiv );
 	else if ( cmd == QLatin1String( "anim-setup" ) )
 		rc = cmdAnimSetup( file, block, controllers, sequence, newSequence,
 						   standalone, effectVar, intVar, listOnly, outFile );
