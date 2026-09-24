@@ -14,7 +14,7 @@ uniform vec4 fogView;		// world z above the ground = dot( fogView.xyz, posView )
 uniform float fogDistScale;	// view units -> game units (1 / the view scale)
 uniform vec4 fogSun;		// view space, unit, TO the sun; .w = intensity
 uniform vec4 fogSunColour;	// linear; .w = fDirectionalFogPower
-uniform vec4 fogProbe;		// gates only: .z = 0 off, 1 alpha, 2 colour / 2, 3 hb (at d = .x, z = .y); 5 geometry echo
+uniform vec4 fogProbe;		// gates only: .z = 0 off, 1 alpha, 2 colour / 2, 3 hb (at d = .x, z = .y); 5 geometry echo (d / 4096, 0.5 + z / 2000)
 uniform int fogRed;		// gates only: 1 maxclamp, 2 noescape, 4 height0
 
 // fog alpha, height blend and colour (before the sun term) of one fragment
@@ -60,10 +60,10 @@ bool wwFogProbe( vec3 posView, out vec3 o )
 	if ( !fogOn || fogProbe.z < 0.5 )
 		return false;
 	if ( fogProbe.z > 4.5 ) {
-		// the geometry the fog reads: R = d / 16384, G = 0.5 + z / 2000
+		// the geometry the fog reads: R = d / 4096, G = 0.5 + z / 2000
 		float d = length( posView ) * fogDistScale;
 		float z = dot( fogView.xyz, posView ) + fogView.w;
-		o = vec3( d / 16384.0, 0.5 + z / 2000.0, 0.0 );
+		o = vec3( d / 4096.0, 0.5 + z / 2000.0, 0.0 );
 		return true;
 	}
 	float hb;

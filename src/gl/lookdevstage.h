@@ -61,7 +61,7 @@ BSD License - see nifskope.h
  * Pins: WW_LOOKDEV_FOG=0|1, WW_LOOKDEV_FOGPROBE=<d>,<z>,<mode> (every fogged
  * fragment writes, raw: mode 1 the alpha, 2 the fog colour / 2, 3 the height
  * blend, all at eye distance d and height z; 5 the geometry it reads, R = d /
- * 16384, G = 0.5 + z / 2000). Reds: fogleak (fog drawn while OFF), fogsky
+ * 4096, G = 0.5 + z / 2000). Reds: fogleak (fog drawn while OFF), fogsky
  * (Fog ON darkens the dome), fogheight0 (shader height forced to 0), plus the
  * esmweather.h fog reds. */
 
