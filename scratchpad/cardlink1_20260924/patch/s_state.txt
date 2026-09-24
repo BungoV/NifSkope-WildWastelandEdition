@@ -1,0 +1,14 @@
+	LodgenAggStats aggStats;
+	/* THE CARD LINK (lane CARDLINK1, 2026-09-24). Filled by
+	 * `lodgenNativeLinkCards` from the card arrays' `.lodm` files and the
+	 * chunks' `C` lines; empty -- and `cardsLinked` false -- on every bake
+	 * that did not call it, which writes what it always wrote: cardLayer
+	 * 0xFFFF, cardCount 0, cardCorpusHash 0, no FORCE_CARD bit. */
+	bool cardsLinked = false;
+	quint64 cardHash = 0;                         //!< the proposed R19 hash, docs 3 `cardCorpusHash`
+	int cardArrays = 0, cardLayers = 0;
+	quint64 cardLines = 0, cardLinesLinked = 0;  //!< `C` lines read, and those that name an array layer
+	QHash<quint32, quint16> cardLayerOf;          //!< base formId -> (set << 11) | layer
+	QHash<quint32, float> cardRadiusOf;           //!< base formId -> the card's bound radius at scale 1
+	std::set<std::tuple<int, int, int, int>> cardPlaced;   //!< (chunkX, chunkY, dim, objectIndex) standing on a card
+};

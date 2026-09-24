@@ -1,0 +1,27 @@
+		/* THE CARD LINK (lane CARDLINK1, 2026-09-24), on its own prefix. OFF is
+		 * every bake that did not call `lodgenNativeLinkCards`: cardLayer 0xFFFF,
+		 * cardCount 0, cardCorpusHash 0 and no FORCE_CARD bit, byte for byte
+		 * what the emitter wrote before the lane. */
+		{
+			quint32 cardBases = 0;
+			for ( const LodoBase & b : lib.bases )
+				if ( b.cardLayer != LODO_NO_CARD )
+					cardBases++;
+			int cardOutside = 0;
+			for ( auto it = s.cardLayerOf.constBegin(); it != s.cardLayerOf.constEnd(); ++it )
+				if ( !baseRow.contains( it.key() ) )
+					cardOutside++;
+			ladderLine += QString( "\n  native-cards: %1" )
+				.arg( s.cardsLinked
+					? QString( "LINKED: cardCount %1 of %2 bases over %3 array(s) of %4 layer(s), cardCorpusHash 0x%5; "
+						"card-only bases %6; card sets whose base is not in the table %7; FORCE_CARD on %8 of %9 "
+						"instances (%10 whose ring slot has no mesh, %11 on a card by a C line); C lines %12 read, "
+						"%13 linked" )
+						.arg( cardBases ).arg( lib.bases.size() ).arg( s.cardArrays ).arg( s.cardLayers )
+						.arg( lib.cardCorpusHash, 16, 16, QChar( '0' ) )
+						.arg( cardOnlyBases ).arg( cardOutside )
+						.arg( forcedCard ).arg( stats.instances ).arg( forcedEmptySlot ).arg( forcedByLine )
+						.arg( s.cardLines ).arg( s.cardLinesLinked )
+					: QString( "OFF (no card arrays linked); cardCount %1, cardCorpusHash 0x%2, FORCE_CARD on %3 instances" )
+						.arg( cardBases ).arg( lib.cardCorpusHash, 16, 16, QChar( '0' ) ).arg( forcedCard ) );
+		}

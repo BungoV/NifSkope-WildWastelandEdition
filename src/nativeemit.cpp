@@ -12,6 +12,7 @@ BSD License - see nifskope.h
 #include "lodgenlayout.h"
 #include "lodgenparallel.h"
 #include "lodgenao.h"
+#include "io/lodmfile.h"
 #include <array>
 
 #include <QDir>
@@ -21,6 +22,8 @@ BSD License - see nifskope.h
 #include <QFile>
 #include <QFileInfo>
 #include <QHash>
+#include <QJsonArray>
+#include <QJsonObject>
 #include <QMap>
 #include <QSet>
 
@@ -28,6 +31,7 @@ BSD License - see nifskope.h
 #include <cmath>
 #include <cstring>
 #include <map>
+#include <set>
 #include <unordered_map>
 #include <functional>
 #include <tuple>
@@ -130,6 +134,18 @@ struct State
 	QHash<quint32, LodgenAggCard> aggCards;
 	QVector<LodgenAggSet> aggSets;
 	LodgenAggStats aggStats;
+	/* THE CARD LINK (lane CARDLINK1, 2026-09-24). Filled by
+	 * `lodgenNativeLinkCards` from the card arrays' `.lodm` files and the
+	 * chunks' `C` lines; empty -- and `cardsLinked` false -- on every bake
+	 * that did not call it, which writes what it always wrote: cardLayer
+	 * 0xFFFF, cardCount 0, cardCorpusHash 0, no FORCE_CARD bit. */
+	bool cardsLinked = false;
+	quint64 cardHash = 0;                         //!< the proposed R19 hash, docs 3 `cardCorpusHash`
+	int cardArrays = 0, cardLayers = 0;
+	quint64 cardLines = 0, cardLinesLinked = 0;  //!< `C` lines read, and those that name an array layer
+	QHash<quint32, quint16> cardLayerOf;          //!< base formId -> (set << 11) | layer
+	QHash<quint32, float> cardRadiusOf;           //!< base formId -> the card's bound radius at scale 1
+	std::set<std::tuple<int, int, int, int>> cardPlaced;   //!< (chunkX, chunkY, dim, objectIndex) standing on a card
 };
 
 State & st()
@@ -559,6 +575,220 @@ static NativeReuseOffer & reuseOffer()
 void lodgenNativeOfferLibraryReuse( const NativeReuseOffer & offer )
 {
 	reuseOffer() = offer;
+}
+
+/* THE CARD LINK (lane CARDLINK1, 2026-09-24). The contract, in full, is docs
+ * LODGEN_NATIVE_LODO_LODI.md 4.13; the code below is its only implementation.
+ *
+ *   1. The chunks' manifests are read: the header gives (dim, chunk X, chunk
+ *      Y), the rows give index -> base, and a `C` line with TWELVE tokens is
+ *      one the card-arrays pass linked (`... <array .lodm> <layer>`); ten
+ *      tokens is a card that is in no array.
+ *   2. The arrays are the DISTINCT array `.lodm` files those lines name -- not
+ *      a directory listing, so a stale array left in the folder by an older
+ *      bake is never linked. A set's index is its rank in ascending order of
+ *      the lower-cased file name's UTF-8 bytes; at most 32 sets (the 5 high
+ *      bits of `cardLayer`), at most 2048 layers a set (the low 11).
+ *   3. cardCorpusHash = FNV-1a 64 from the offset basis over, for each set in
+ *      that order, its five files in the order .lodm, colour, normal, mask,
+ *      emissive: the lower-cased file name's UTF-8 bytes, the file size as a
+ *      little-endian u64, then every byte of the file.
+ *   4. Every layer's `id` is the base's formID in 8 hex digits; a base in two
+ *      layers is refused, and so is a `C` line whose (array, layer) is not
+ *      the layer its base's id names. */
+bool lodgenNativeLinkCards( const QStringList & btoPaths, const QString & cardArrayBase, QString * error )
+{
+	State & s = st();
+	auto fail = [&]( const QString & m ) {
+		if ( error )
+			*error = QStringLiteral( "native card link: " ) + m;
+		return false;
+	};
+	if ( !s.active )
+		return fail( QStringLiteral( "the emitter is not armed" ) );
+	s.cardsLinked = false;
+	s.cardHash = 0;
+	s.cardArrays = s.cardLayers = 0;
+	s.cardLines = s.cardLinesLinked = 0;
+	s.cardLayerOf.clear();
+	s.cardRadiusOf.clear();
+	s.cardPlaced.clear();
+	auto lastComponent = []( QString p ) {
+		p.replace( QChar( 92 ), QChar( '/' ) );
+		return p.mid( p.lastIndexOf( QChar( '/' ) ) + 1 );
+	};
+	const QFileInfo baseInfo( cardArrayBase );
+	const QDir dir = baseInfo.absoluteDir();
+	const QString stemLower = baseInfo.fileName().toLower() + QChar( '.' );
+
+	// 1. the manifests
+	struct CLine { int cx, cy, dim, idx; quint32 base; QString arrayLower; int layer; QString where; };
+	std::vector<CLine> lines;
+	QMap<QByteArray, QString> arrayNames;    // lower-case UTF-8 name -> the name as the line spells it
+	for ( const QString & bto : btoPaths ) {
+		const QString mpath = bto + QStringLiteral( ".manifest.txt" );
+		QFile mf( mpath );
+		if ( !mf.open( QIODevice::ReadOnly | QIODevice::Text ) )
+			return fail( QString( "%1: no manifest beside the chunk" ).arg( mpath ) );
+		const QString mname = QFileInfo( mpath ).fileName();
+		int dim = -1, cx = 0, cy = 0;
+		bool header = false;
+		QHash<int, quint32> baseOfRow;
+		std::vector<CLine> mine;
+		while ( !mf.atEnd() ) {
+			const QString line = QString::fromUtf8( mf.readLine() ).trimmed();
+			if ( line.isEmpty() )
+				continue;
+			const QStringList t = line.split( QChar( ' ' ), Qt::SkipEmptyParts );
+			if ( line.startsWith( QLatin1String( "# lodgen manifest" ) ) ) {
+				for ( int i = 0; i + 1 < t.size(); i++ ) {
+					if ( t[i] == QLatin1String( "dim" ) )
+						dim = t[i + 1].toInt();
+					if ( t[i] == QLatin1String( "chunk" ) && i + 2 < t.size() ) {
+						cx = t[i + 1].toInt();
+						cy = t[i + 2].toInt();
+						header = true;
+					}
+				}
+				continue;
+			}
+			if ( line.startsWith( QChar( '#' ) ) )
+				continue;
+			if ( t[0] == QLatin1String( "C" ) ) {
+				s.cardLines++;
+				if ( t.size() == 10 )
+					continue;         // a card in no array: nothing to link
+				if ( t.size() != 12 )
+					return fail( QString( "%1: a C line with %2 tokens (10 or 12 expected): %3" )
+						.arg( mname ).arg( t.size() ).arg( line ) );
+				CLine c;
+				c.idx = t[1].toInt();
+				c.base = 0;
+				const QString an = lastComponent( t[10] );
+				c.arrayLower = an.toLower();
+				arrayNames.insert( c.arrayLower.toUtf8(), an );
+				bool ok = false;
+				c.layer = t[11].toInt( &ok );
+				if ( !ok || c.layer < 0 )
+					return fail( QString( "%1: C line for row %2 names layer '%3'" ).arg( mname ).arg( t[1] ).arg( t[11] ) );
+				c.where = mname;
+				mine.push_back( c );
+				continue;
+			}
+			bool ok = false;
+			const int idx = t[0].toInt( &ok );
+			if ( ok && t.size() >= 2 )
+				baseOfRow.insert( idx, t[1].toUInt( nullptr, 16 ) );
+		}
+		if ( !header || dim < 0 )
+			return fail( QString( "%1: no '# lodgen manifest' header naming dim and chunk" ).arg( mname ) );
+		for ( CLine & c : mine ) {
+			auto b = baseOfRow.constFind( c.idx );
+			if ( b == baseOfRow.constEnd() )
+				return fail( QString( "%1: C line for row %2, which the manifest has no row for" ).arg( mname ).arg( c.idx ) );
+			c.base = b.value();
+			c.cx = cx; c.cy = cy; c.dim = dim;
+			lines.push_back( c );
+		}
+	}
+	if ( arrayNames.isEmpty() )
+		return true;          // no C line names an array: nothing linked, the bake writes no card
+
+	// 2 + 3. the arrays, in the documented order, hashed
+	if ( arrayNames.size() > 32 )
+		return fail( QString( "%1 card arrays; cardLayer's 5 set bits hold 32" ).arg( arrayNames.size() ) );
+	quint64 h = Q_UINT64_C( 0xCBF29CE484222325 );
+	auto hashFile = [&]( const QString & name, QString * why ) -> bool {
+		QFile f( dir.filePath( name ) );
+		if ( !f.open( QIODevice::ReadOnly ) ) {
+			*why = QString( "%1 is not on disk beside the array base %2" ).arg( name ).arg( dir.absolutePath() );
+			return false;
+		}
+		const QByteArray bytes = f.readAll();
+		const QByteArray lower = name.toLower().toUtf8();
+		h = lodoFnv1a64( lower.constData(), size_t( lower.size() ), h );
+		const quint64 n = quint64( bytes.size() );
+		unsigned char le[8];
+		for ( int i = 0; i < 8; i++ )
+			le[i] = static_cast<unsigned char>( ( n >> ( 8 * i ) ) & 0xFF );
+		h = lodoFnv1a64( le, 8, h );
+		h = lodoFnv1a64( bytes.constData(), size_t( bytes.size() ), h );
+		return true;
+	};
+	QHash<QString, int> setOf;     // lower-case array name -> set index
+	int set = 0;
+	for ( auto it = arrayNames.constBegin(); it != arrayNames.constEnd(); ++it, ++set ) {
+		const QString name = it.value();
+		if ( !name.toLower().startsWith( stemLower ) )
+			return fail( QString( "a C line names %1, which is not an array of %2" ).arg( name ).arg( cardArrayBase ) );
+		QFile lf( dir.filePath( name ) );
+		if ( !lf.open( QIODevice::ReadOnly ) )
+			return fail( QString( "%1 is not on disk beside the array base %2" ).arg( name ).arg( dir.absolutePath() ) );
+		const LodmMaterial m = lodmParse( lf.readAll() );
+		lf.close();
+		if ( !m.ok || m.kind != QLatin1String( "cardArray" ) )
+			return fail( QString( "%1 does not parse as a cardArray .lodm (kind '%2')" ).arg( name ).arg( m.kind ) );
+		QString why;
+		if ( !hashFile( name, &why ) )
+			return fail( why );
+		const QString sheets[4] = { m.color, m.normal, m.mask, m.emissive };
+		static const char * const sheetRole[4] = { "colour", "normal", "mask", "emissive" };
+		for ( int k = 0; k < 4; k++ ) {
+			if ( sheets[k].isEmpty() )
+				return fail( QString( "%1 names no %2 sheet" ).arg( name ).arg( QLatin1String( sheetRole[k] ) ) );
+			if ( !hashFile( lastComponent( sheets[k] ), &why ) )
+				return fail( why );
+		}
+		const QJsonArray layers = m.root.value( QStringLiteral( "array" ) ).toObject()
+			.value( QStringLiteral( "layers" ) ).toArray();
+		if ( layers.isEmpty() )
+			return fail( QString( "%1 has no layers" ).arg( name ) );
+		if ( layers.size() > int( LODO_LAYER_CAP ) )
+			return fail( QString( "%1 has %2 layers; cardLayer's 11 layer bits hold %3" )
+				.arg( name ).arg( layers.size() ).arg( LODO_LAYER_CAP ) );
+		for ( int li = 0; li < layers.size(); li++ ) {
+			const QJsonObject o = layers[li].toObject();
+			const QString id = o.value( QStringLiteral( "id" ) ).toString();
+			bool ok = false;
+			const quint32 form = id.toUInt( &ok, 16 );
+			if ( id.size() != 8 || !ok )
+				return fail( QString( "%1 layer %2: id '%3' is not a formID in 8 hex digits" ).arg( name ).arg( li ).arg( id ) );
+			const quint16 packed = quint16( ( set << 11 ) | li );
+			if ( packed == LODO_NO_CARD )
+				return fail( QString( "%1 layer %2 packs to 0xFFFF, the no-card value" ).arg( name ).arg( li ) );
+			if ( s.cardLayerOf.contains( form ) )
+				return fail( QString( "base 0x%1 has a layer in two places (0x%2 and 0x%3)" )
+					.arg( form, 8, 16, QChar( '0' ) ).arg( s.cardLayerOf.value( form ), 4, 16, QChar( '0' ) )
+					.arg( packed, 4, 16, QChar( '0' ) ) );
+			s.cardLayerOf.insert( form, packed );
+			const QJsonArray half = o.value( QStringLiteral( "half" ) ).toArray();
+			const QJsonArray ctr = o.value( QStringLiteral( "center" ) ).toArray();
+			const double hw = half.size() > 0 ? half[0].toDouble() : 0.0, hh = half.size() > 1 ? half[1].toDouble() : 0.0;
+			double c2 = 0.0;
+			for ( int k = 0; k < 3 && k < ctr.size(); k++ )
+				c2 += ctr[k].toDouble() * ctr[k].toDouble();
+			s.cardRadiusOf.insert( form, float( std::sqrt( c2 ) + std::sqrt( 2.0 * hw * hw + hh * hh ) ) );
+		}
+		s.cardLayers += int( layers.size() );
+		setOf.insert( QString::fromUtf8( it.key() ), set );
+	}
+
+	// 4. every linked C line agrees with the layer its base's id names
+	for ( const CLine & c : lines ) {
+		const int cs = setOf.value( c.arrayLower, -1 );
+		const quint16 want = quint16( ( cs << 11 ) | c.layer );
+		auto got = s.cardLayerOf.constFind( c.base );
+		if ( cs < 0 || got == s.cardLayerOf.constEnd() || got.value() != want )
+			return fail( QString( "%1: row %2 (base 0x%3) stands on layer %4 of %5, but that array's layer "
+				"%4 is not this base's card" ).arg( c.where ).arg( c.idx ).arg( c.base, 8, 16, QChar( '0' ) )
+				.arg( c.layer ).arg( c.arrayLower ) );
+		s.cardPlaced.insert( std::make_tuple( c.cx, c.cy, c.dim, c.idx ) );
+		s.cardLinesLinked++;
+	}
+	s.cardArrays = int( arrayNames.size() );
+	s.cardHash = h;
+	s.cardsLinked = true;
+	return true;
 }
 
 void lodgenNativeEnd()
@@ -1257,6 +1487,7 @@ bool lodgenNativeWrite( QString * report, QString * error )
 	QHash<quint32, quint16> baseRow;           // formId -> row in the WRITTEN table
 	int modelsLoaded = 0, modelsFailed = 0;
 	int basesWritten = 0, basesWithoutMesh = 0;
+	int cardOnlyBases = 0;     //!< CARDLINK1: bases written with a card and no mesh
 	QStringList failedModels;
 
 	bool libraryReused = false;
@@ -1283,6 +1514,8 @@ bool lodgenNativeWrite( QString * report, QString * error )
 			|| lh.pluginCorpusHash != world.vhgtCorpusHash()
 			|| lh.objectCorpusHash != objHash )
 			libraryWhy = QStringLiteral( "the previous .lodo's own header disagrees with the record" );
+		else if ( lh.cardCorpusHash != ( s.cardsLinked ? s.cardHash : 0 ) )
+			libraryWhy = QStringLiteral( "the card arrays moved" );
 		else
 			libraryReused = true;
 		if ( libraryReused ) {
@@ -1535,7 +1768,8 @@ bool lodgenNativeWrite( QString * report, QString * error )
 		lib.pluginCorpusHash = world.vhgtCorpusHash();
 		lib.objectCorpusHash = objHash;
 		lib.modelCorpusHash = modelHash;
-		lib.cardCorpusHash = 0;
+		// CARDLINK1: the proposed R19 hash over the linked arrays, 0 when none were linked
+	lib.cardCorpusHash = s.cardsLinked ? s.cardHash : 0;
 		lib.addString( QString() );
 		{
 			std::vector<QString> keys;
@@ -1673,7 +1907,7 @@ bool lodgenNativeWrite( QString * report, QString * error )
 			std::memset( &row, 0, sizeof( row ) );
 			row.formId = b;
 			row.modelStringOffset = lib.addString( lb.model );
-			row.cardLayer = LODO_NO_CARD;
+			row.cardLayer = s.cardLayerOf.value( b, LODO_NO_CARD );
 			bool any = false, tree = std::memcmp( &lb.type, "TREE", 4 ) == 0, alpha = false;
 			float radius = 0.0f;
 			QString slot[4];
@@ -1716,11 +1950,21 @@ bool lodgenNativeWrite( QString * report, QString * error )
 							row.fullTriangles += lib.clusters[c].triangleCount;
 				}
 			}
-			if ( !any || !( radius > 0.0f ) ) {
+			/* THE CARD (lane CARDLINK1): the layer the link found for this base,
+			 * or 0xFFFF. A base whose slots loaded nothing but which has a card is
+			 * WRITTEN -- docs 4.4's "no mesh in any slot must have a cardLayer" --
+			 * with the card's own bound radius; without a card it is left out as
+			 * before. */
+			if ( row.cardLayer != LODO_NO_CARD && !( radius > 0.0f ) ) {
+				radius = s.cardRadiusOf.value( b, 0.0f );
+				if ( !any && radius > 0.0f )
+					cardOnlyBases++;
+			}
+			if ( ( !any && row.cardLayer == LODO_NO_CARD ) || !( radius > 0.0f ) ) {
 				basesWithoutMesh++;         // no slot loaded: the stock bake draws nothing for it either
 				continue;
 			}
-			row.flags = quint16( ( tree ? LODO_BASE_TREE : 0 ) | ( alpha ? LODO_BASE_ANY_ALPHA : 0 ) | LODO_BASE_ANY_MESH );
+			row.flags = quint16( ( tree ? LODO_BASE_TREE : 0 ) | ( alpha ? LODO_BASE_ANY_ALPHA : 0 ) | ( any ? LODO_BASE_ANY_MESH : 0 ) );
 			row.boundRadius = radius;
 			baseRow.insert( b, quint16( lib.bases.size() ) );
 			lib.bases.push_back( row );
@@ -1782,6 +2026,8 @@ bool lodgenNativeWrite( QString * report, QString * error )
 	int droppedNoBase = 0, unlit = 0, noIdentity = 0, paoUnmeasured = 0;
 	//! v9 census: how many placements the three-clause workshop rule marked.
 	quint32 scrappablePlacements = 0;
+	//! CARDLINK1 census: instances given FORCE_CARD, and which clause gave it
+	quint32 forcedCard = 0, forcedEmptySlot = 0, forcedByLine = 0;
 	std::vector<std::array<int, 3>> instChunk;   //!< v6: (chunkX, chunkY, dim) that lit each instance, parallel to set.instances
 	std::vector<quint8> instArch;   //!< v7: 1 when the base model path is under the architecture folder
 	quint32 archPlacements = 0;     //!< v7 census: how many placements the path prefix catches
@@ -1846,6 +2092,21 @@ bool lodgenNativeWrite( QString * report, QString * error )
 		r.seed = quint8( p.treeHash & 0xFF );
 		r.flags = quint16( ( p.mirrorU ? LODI_INST_MIRRORED : 0 ) | ( p.hasAlpha ? LODI_INST_ALPHA_TESTED : 0 )
 			| ( p.emits ? LODI_INST_EMITS : 0 ) | ( p.scolPart >= 0 ? LODI_INST_SCOL_PART : 0 ) );
+		/* FORCE_CARD (lane CARDLINK1, 2026-09-24): the base has a card layer AND
+		 * this placement's own ring -- the MNAM slot of the arrival the record
+		 * keeps -- either has no mesh, or its chunk's `C` line stood it on its
+		 * card (`--impostors-from-level`). Never set without a card layer, so a
+		 * bake that linked no cards writes the bit nowhere. */
+		if ( lib.bases[r.baseId].cardLayer != LODO_NO_CARD ) {
+			const bool emptySlot = lib.bases[r.baseId].rep[r.mnamSlot] == LODO_NO_MESH;
+			const bool byLine = s.cardPlaced.count( std::make_tuple( p.chunkX, p.chunkY, p.dim, p.objectIndex ) ) > 0;
+			if ( emptySlot || byLine ) {
+				r.flags |= LODI_INST_FORCE_CARD;
+				forcedCard++;
+				forcedEmptySlot += emptySlot ? 1 : 0;
+				forcedByLine += byLine ? 1 : 0;
+			}
+		}
 		/* v9, THE SCRAPPABLE BIT (lane HORIZON3, 2026-09-19). The rule is read
 		 * out of the plugin, not guessed from the model path: the base must be
 		 * the target of a workshop SCRAP recipe, the placement must stand
@@ -2832,6 +3093,33 @@ bool lodgenNativeWrite( QString * report, QString * error )
 					.arg( scrappablePlacements )
 				: QStringLiteral( "OFF (--scrappable, the default); no bit is written and the .lodi "
 					"stays at version 7, byte for byte; scrappablePlacements 0" ) );
+		/* THE CARD LINK (lane CARDLINK1, 2026-09-24), on its own prefix. OFF is
+		 * every bake that did not call `lodgenNativeLinkCards`: cardLayer 0xFFFF,
+		 * cardCount 0, cardCorpusHash 0 and no FORCE_CARD bit, byte for byte
+		 * what the emitter wrote before the lane. */
+		{
+			quint32 cardBases = 0;
+			for ( const LodoBase & b : lib.bases )
+				if ( b.cardLayer != LODO_NO_CARD )
+					cardBases++;
+			int cardOutside = 0;
+			for ( auto it = s.cardLayerOf.constBegin(); it != s.cardLayerOf.constEnd(); ++it )
+				if ( !baseRow.contains( it.key() ) )
+					cardOutside++;
+			ladderLine += QString( "\n  native-cards: %1" )
+				.arg( s.cardsLinked
+					? QString( "LINKED: cardCount %1 of %2 bases over %3 array(s) of %4 layer(s), cardCorpusHash 0x%5; "
+						"card-only bases %6; card sets whose base is not in the table %7; FORCE_CARD on %8 of %9 "
+						"instances (%10 whose ring slot has no mesh, %11 on a card by a C line); C lines %12 read, "
+						"%13 linked" )
+						.arg( cardBases ).arg( lib.bases.size() ).arg( s.cardArrays ).arg( s.cardLayers )
+						.arg( lib.cardCorpusHash, 16, 16, QChar( '0' ) )
+						.arg( cardOnlyBases ).arg( cardOutside )
+						.arg( forcedCard ).arg( stats.instances ).arg( forcedEmptySlot ).arg( forcedByLine )
+						.arg( s.cardLines ).arg( s.cardLinesLinked )
+					: QString( "OFF (no card arrays linked); cardCount %1, cardCorpusHash 0x%2, FORCE_CARD on %3 instances" )
+						.arg( cardBases ).arg( lib.cardCorpusHash, 16, 16, QChar( '0' ) ).arg( forcedCard ) );
+		}
 		/* THE PER-SOURCE CASTER COUNTS, on their own prefix.  The four are a
 		 * PARTITION of the instance table (bungo 2026-09-11 14:4x: "every
 		 * placement has exactly ONE shadow representation at a time"), so the

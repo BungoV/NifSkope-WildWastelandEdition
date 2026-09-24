@@ -1,0 +1,15 @@
+			/* THE CARD (lane CARDLINK1): the layer the link found for this base,
+			 * or 0xFFFF. A base whose slots loaded nothing but which has a card is
+			 * WRITTEN -- docs 4.4's "no mesh in any slot must have a cardLayer" --
+			 * with the card's own bound radius; without a card it is left out as
+			 * before. */
+			if ( row.cardLayer != LODO_NO_CARD && !( radius > 0.0f ) ) {
+				radius = s.cardRadiusOf.value( b, 0.0f );
+				if ( !any && radius > 0.0f )
+					cardOnlyBases++;
+			}
+			if ( ( !any && row.cardLayer == LODO_NO_CARD ) || !( radius > 0.0f ) ) {
+				basesWithoutMesh++;         // no slot loaded: the stock bake draws nothing for it either
+				continue;
+			}
+			row.flags = quint16( ( tree ? LODO_BASE_TREE : 0 ) | ( alpha ? LODO_BASE_ANY_ALPHA : 0 ) | ( any ? LODO_BASE_ANY_MESH : 0 ) );

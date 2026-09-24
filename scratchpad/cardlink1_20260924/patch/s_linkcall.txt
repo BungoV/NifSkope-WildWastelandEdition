@@ -1,0 +1,17 @@
+			/* THE CARD LINK (lane CARDLINK1, 2026-09-24). The card-arrays pass
+			 * above has appended `<array .lodm> <layer>` to every C line it
+			 * placed; the emitter reads them so the `.lodo` carries cardLayer,
+			 * cardCount and cardCorpusHash and the `.lodi` FORCE_CARD. That is
+			 * the one reason this whole native block now runs AFTER the object
+			 * passes rather than straight after the chunk pass. */
+			if ( arrays && !impostors.isEmpty() && !writtenBto.isEmpty() ) {
+				QString lerr;
+				if ( !lodgenNativeLinkCards( writtenBto,
+					objectsDir() + "/" + world.worldspaceEdid() + QStringLiteral( ".LodgenCards" ), &lerr ) ) {
+					err() << "error: " << lerr << Qt::endl;
+					lodgenNativeEnd();
+					return 1;
+				}
+			}
+			QString nrep, nerr;
+			bool nativeOk = false;
