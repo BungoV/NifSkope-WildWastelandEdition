@@ -168,7 +168,7 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	groundBox->setChecked( wwLookdevGround() );
 	row( tr( "Ground Plane" ), groundBox, true );
 	heading( tr( "Fog" ) );
-	placeholderCheck( tr( "Fog" ) );
+	liveCheck( fogBox, "lookdevFog", tr( "Fog" ), wwLookdevFog() );	// lane FOG1
 	heading( tr( "Effects" ) );
 	placeholderCheck( tr( "Cascaded Shadows" ) );
 	placeholderCheck( tr( "Contact Shadows" ) );
@@ -264,6 +264,7 @@ SceneWindow::SceneWindow( QWidget * mainWindow, std::function<void()> repaint, s
 	liveToggle( cloudsBox, &wwLookdevSetClouds );
 	liveToggle( sunBox, &wwLookdevSetSun );
 	liveToggle( moonBox, &wwLookdevSetMoon );
+	liveToggle( fogBox, &wwLookdevSetFog );
 	connect( gameDayBox, qOverload<double>( &QDoubleSpinBox::valueChanged ), this, [this, live]( double d ) {
 		if ( live )
 			wwLookdevSetGameDay( d );
@@ -311,7 +312,8 @@ void SceneWindow::syncEnabled()
 	for ( QWidget * w : { static_cast<QWidget *>( pluginBox ), static_cast<QWidget *>( weatherBox ),
 			static_cast<QWidget *>( hourBox ), static_cast<QWidget *>( groundBox ),
 			static_cast<QWidget *>( skyBox ), static_cast<QWidget *>( cloudsBox ), static_cast<QWidget *>( sunBox ),
-			static_cast<QWidget *>( moonBox ), static_cast<QWidget *>( gameDayBox ) } )
+			static_cast<QWidget *>( moonBox ), static_cast<QWidget *>( gameDayBox ),
+			static_cast<QWidget *>( fogBox ) } )
 		if ( w )
 			w->setEnabled( ld );
 	syncCloudTimer();

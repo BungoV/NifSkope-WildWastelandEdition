@@ -57,6 +57,8 @@ public:
 	QCheckBox * sunBox = nullptr;
 	QCheckBox * moonBox = nullptr;
 	QDoubleSpinBox * gameDayBox = nullptr;
+	// the weather fog row (lane FOG1)
+	QCheckBox * fogBox = nullptr;
 
 	//! re-read the Data folder's plugins / the loaded weathers / the status line
 	void refreshPlugins();

@@ -610,6 +610,70 @@ void weatherLeg( NifSkope * skope, WwScState & st )
 		!wwLookdevSky() && !wwLookdevClouds() && !wwLookdevSun() && !wwLookdevMoon() );
 }
 
+/* lane FOG1: the Fog row -- exists, ships OFF, greyed outside Lookdev, live, saved,
+ * the hour row moves it, OFF gives the pre-fog picture back */
+void fogLeg( NifSkope * skope, WwScState & st )
+{
+	QWidget * w = skope->findChild<QWidget *>( QStringLiteral( "SceneWindow" ) );
+	check( st, QStringLiteral( "(floor) the Scene window exists (fog leg)" ), w != nullptr );
+	if ( !w )
+		return;
+	auto * mode = w->findChild<QComboBox *>( QStringLiteral( "sceneMode" ) );
+	auto * hour = w->findChild<QDoubleSpinBox *>( QStringLiteral( "lookdevHour" ) );
+	auto * ground = w->findChild<QCheckBox *>( QStringLiteral( "lookdevGround" ) );
+	auto * fog = w->findChild<QCheckBox *>( QStringLiteral( "lookdevFog" ) );
+	const bool all = mode && hour && ground && fog;
+	check( st, QStringLiteral( "(floor) the Fog row exists" ), all );
+	if ( !all )
+		return;
+	check( st, QStringLiteral( "(ship) the Fog row starts OFF in a fresh scope" ), !fog->isChecked() && !wwLookdevFog() );
+	if ( !w->isVisible() ) {
+		w->show();
+		pump();
+	}
+	mode->setCurrentIndex( 0 );
+	pump();
+	check( st, QStringLiteral( "(rows) the Fog row is greyed outside Lookdev" ), !fog->isEnabled() );
+	mode->setCurrentIndex( 2 );
+	pump();
+	check( st, QStringLiteral( "(rows) the Fog row is enabled in Lookdev" ), fog->isEnabled() );
+	ground->setChecked( true );
+	hour->setValue( 1.0 );
+	pump();
+	const QImage off1 = freshGrab( skope );
+	fog->setChecked( true );
+	const QImage on1 = freshGrab( skope );
+	const int d1 = diffCount( off1, on1 );
+	const QString e1 = wwLookdevSummary();
+	say( st, QStringLiteral( "  fog on at 01:00: %1 px differ; status: %2" ).arg( d1 ).arg( e1 ) );
+	check( st, QStringLiteral( "(live) the Fog row reached the state" ), wwLookdevFog() );
+	check( st, QStringLiteral( "(live) Fog on changes the viewport at 01:00 (%1 px >= 200)" ).arg( d1 ), d1 >= 200 );
+	check( st, QStringLiteral( "(live) the echo names the fog pass at night weight 0" ),
+		e1.contains( QLatin1StringView( "fog=on fogw=0.0000" ) ) && e1.contains( QLatin1StringView( "drew=on(" ) ) );
+	check( st, QStringLiteral( "(save) the Fog row wrote ON to its setting" ),
+		QSettings().value( QLatin1StringView( "Settings/Render/Scene/Lookdev Fog" ) ).toBool() );
+	hour->setValue( 12.0 );
+	pump();
+	const QImage on12 = freshGrab( skope );
+	const QString e12 = wwLookdevSummary();
+	say( st, QStringLiteral( "  hour 01:00 -> 12:00 with fog on: %1 px differ; status: %2" ).arg( diffCount( on1, on12 ) ).arg( e12 ) );
+	check( st, QStringLiteral( "(live) the hour row drives the fog (day weight 1 at 12:00)" ),
+		e12.contains( QLatin1StringView( "fog=on fogw=1.0000" ) ) );
+	hour->setValue( 1.0 );
+	pump();
+	freshGrab( skope );
+	fog->setChecked( false );
+	const QImage back = freshGrab( skope );
+	const int dBack = diffCount( off1, back );
+	say( st, QStringLiteral( "  fog off again at 01:00: %1 px differ from the pre-fog grab" ).arg( dBack ) );
+	check( st, QStringLiteral( "(live) Fog off reached the state and saved OFF" ), !wwLookdevFog()
+		&& !QSettings().value( QLatin1StringView( "Settings/Render/Scene/Lookdev Fog" ) ).toBool() );
+	check( st, QStringLiteral( "(live) Fog off restores the pre-fog picture (%1 px)" ).arg( dBack ), dBack == 0 );
+	check( st, QStringLiteral( "(live) the echo drops the fog when off" ), !wwLookdevSummary().contains( QLatin1StringView( "fog=on" ) ) );
+	hour->setValue( 12.0 );
+	pump();
+}
+
 void restartLeg( NifSkope * skope, WwScState & st )
 {
 	QRect want;
@@ -687,6 +751,8 @@ void run( NifSkope * skope, WwScState * st )
 		lookdevLeg( skope, *st );
 	if ( qEnvironmentVariable( "WW_SCENE_TEST_WEATHER" ) == QLatin1StringView( "1" ) )
 		weatherLeg( skope, *st );
+	if ( qEnvironmentVariable( "WW_SCENE_TEST_FOG" ) == QLatin1StringView( "1" ) )
+		fogLeg( skope, *st );
 	restartLeg( skope, *st );
 }
 
