@@ -60,6 +60,34 @@ committed" or names an exe, this block overrides it.
 - Re-run the command-line bakes since 09-19 that used --data-root.
 
 ### Lane and director lines, 2026-09-24, newest first
+- 2026-09-24 22:55 CARDLINK1:
+  **Lane CARDLINK1 (LOD-C), 2026-09-24, branch cardlink1-20260924. Not merged, NOT FLOWN.**
+  A `--native --impostors <cards> --arrays` bake now links its card arrays into the pair:
+  - `.lodo`: `cardLayer` = (set << 11) | layer on every base that has a card, `cardCount`, and `cardCorpusHash`.
+  - `.lodi`: FORCE_CARD on each placement that stands on its card.
+
+  **The hash definition is PROPOSED (R19). bungo has not ruled on it.** It is defined in `docs/LODGEN_NATIVE_LODO_LODI.md` §4.13.
+
+  **No new field and no version bump.** `.lodo` stays v4; every field already existed.
+
+  **The reader now recounts `cardCount`** and refuses a mismatch by name.
+
+  **Change to the CLI order:** the native block runs after the object passes (in `src/nifcli.cpp`, before the scratch teardown).
+
+  **The GUI is not hooked up yet.** `src/lodgenmanager.cpp` is not this lane's file. After the merge, run `python scratchpad/cardlink1_20260924/hookup_lodgenmanager.py <repo>`. It is anchored and refuses to run twice. Until then, a panel bake writes the pair without cards, exactly as before.
+
+  **Gate:** `tests/spells/lodgen_cardlink.sh`, Sanctuary 9 chunks, 23 real tree card sets. It passes with 0 failures:
+  - `cardCount` is 23.
+  - 0 of 23 layers are unresolved.
+  - The hash is `65d2bf61ff72c5b2`. It moves to `f1b93d3ee8c01b3a` when one texel changes.
+  - FORCE_CARD is set on 3,446 of 3,526 placements.
+  - `--native-verify` refuses a `cardCount` changed by one.
+  - The no-cards bake is byte-identical to the rung, all 34 files.
+  - Every card check fails on the rung exe.
+
+  Exe sha1: `1ff89a0804aebbe52020db9307172cfa276e6e4f`.
+
+  Kept green: lodgen_native 29/0, lodgen_card_arrays PASS, lodgen_scrappable 9/0, lodgen_identjoin 10/0, lodi_v7 10/0 (G1 skipped, no fixture). native_open (3 failures) and lodgen_btofree (5 failures) fail identically on the rung exe, verdict lines diffed: pre-existing, not this lane.
 - 2026-09-24 22:30 TOOLFIX1:
   TOOLFIX1 (2026-09-24 22:1x, branch toolfix1-20260924, commits 730977f + 65369a0 + the report commit). Scripts
   only, no src change. tools/ww_build.sh now renames release/NifSkope.exe aside only when a running NifSkope's

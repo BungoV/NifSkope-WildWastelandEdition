@@ -1,5 +1,23 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Native LOD files link the tree cards (CARDLINK1)
+
+**2026-09-24, lane CARDLINK1: the native pair carries its cards (NOT FLOWN).**
+
+A FO4CS bake with impostor cards and arrays now writes, in the `.lodo`:
+- each carded base's card array layer;
+- the number of carded bases;
+- a hash over the card arrays (proposed, not ruled).
+
+It also marks, in the `.lodi`, every placement that stands on its card.
+
+**Changed behaviour:**
+- A base with a card but no LOD mesh is now kept in the table. Before, it was dropped.
+- The pair's own reader recounts the card count and refuses a file where it is wrong.
+- A bake without cards is byte for byte what it was.
+
+Gate: `tests/spells/lodgen_cardlink.sh`.
+
 ## Build script renames only its own held exe (TOOLFIX1)
 
 - Build script: `tools/ww_build.sh` no longer renames the freshly built exe when some other NifSkope is running.

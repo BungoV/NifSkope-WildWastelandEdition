@@ -5,6 +5,12 @@ Written the moment a mistake is recognised, unprompted (CONSTITUTION rule 2).
 Format: date -- what was done -- what was true -- how it was found -- the rule.
 Newest at the top.
 
+## 2026-09-24 -- lane CARDLINK1 (lane text)
+
+**2026-09-24, CARDLINK1: a gate helper looked for the wrong card-set file.** It globbed `<formid>_oct.lodm` in the card bake driver's output. That file is only written beside a chunk that places the card. The driver writes `<formid>_oct_albedo.png` and its siblings. It was caught before the first run, by listing the output by suffix. Rule: list what a producer actually wrote before a gate names its files.
+
+**2026-09-24, CARDLINK1: the first helper unpacked the decoder's return value wrongly** (`h, L = read_lodo(...)`; the function returns only `L`). It was caught by reading the decoder's return statement before the run. Rule: read the callee's return, not a remembered shape.
+
 ## 2026-09-24 -- lane TOOLFIX1 (lane text)
 
 - 2026-09-24 TOOLFIX1: tools/ww_build.sh renamed release/NifSkope.exe whenever ANY NifSkope.exe was running,
