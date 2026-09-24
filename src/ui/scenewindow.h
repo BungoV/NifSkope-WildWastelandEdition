@@ -59,6 +59,8 @@ public:
 	QDoubleSpinBox * gameDayBox = nullptr;
 	// the weather fog row (lane FOG1)
 	QCheckBox * fogBox = nullptr;
+	// the cascaded sun shadows row (lane CSM1)
+	QCheckBox * shadowsBox = nullptr;
 
 	//! re-read the Data folder's plugins / the loaded weathers / the status line
 	void refreshPlugins();

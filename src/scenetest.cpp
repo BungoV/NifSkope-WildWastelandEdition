@@ -674,6 +674,96 @@ void fogLeg( NifSkope * skope, WwScState & st )
 	pump();
 }
 
+//! pixels that differ in exactly one of the two pairs: where the shadow MOVED between two hours
+int maskMoved( const QImage & offA, const QImage & onA, const QImage & offB, const QImage & onB )
+{
+	if ( offA.size() != onA.size() || offB.size() != onB.size() || offA.size() != offB.size() )
+		return -1;
+	const QImage a0 = offA.convertToFormat( QImage::Format_RGB32 ), a1 = onA.convertToFormat( QImage::Format_RGB32 );
+	const QImage b0 = offB.convertToFormat( QImage::Format_RGB32 ), b1 = onB.convertToFormat( QImage::Format_RGB32 );
+	int n = 0;
+	for ( int y = 0; y < a0.height(); y++ ) {
+		const QRgb * p0 = reinterpret_cast<const QRgb *>( a0.constScanLine( y ) );
+		const QRgb * p1 = reinterpret_cast<const QRgb *>( a1.constScanLine( y ) );
+		const QRgb * q0 = reinterpret_cast<const QRgb *>( b0.constScanLine( y ) );
+		const QRgb * q1 = reinterpret_cast<const QRgb *>( b1.constScanLine( y ) );
+		for ( int x = 0; x < a0.width(); x++ )
+			n += ( ( p0[x] != p1[x] ) != ( q0[x] != q1[x] ) ) ? 1 : 0;
+	}
+	return n;
+}
+
+/* lane CSM1: the Cascaded Shadows row -- exists, ships OFF, greyed outside Lookdev,
+ * live, saved, the hour row moves the shadows, OFF gives the pre-CSM picture back */
+void shadowsLeg( NifSkope * skope, WwScState & st )
+{
+	QWidget * w = skope->findChild<QWidget *>( QStringLiteral( "SceneWindow" ) );
+	check( st, QStringLiteral( "(floor) the Scene window exists (shadows leg)" ), w != nullptr );
+	if ( !w )
+		return;
+	auto * mode = w->findChild<QComboBox *>( QStringLiteral( "sceneMode" ) );
+	auto * hour = w->findChild<QDoubleSpinBox *>( QStringLiteral( "lookdevHour" ) );
+	auto * ground = w->findChild<QCheckBox *>( QStringLiteral( "lookdevGround" ) );
+	auto * sh = w->findChild<QCheckBox *>( QStringLiteral( "lookdevShadows" ) );
+	const bool all = mode && hour && ground && sh;
+	check( st, QStringLiteral( "(floor) the Cascaded Shadows row exists" ), all );
+	if ( !all )
+		return;
+	check( st, QStringLiteral( "(ship) the Cascaded Shadows row starts OFF in a fresh scope" ), !sh->isChecked() && !wwLookdevShadows() );
+	if ( !w->isVisible() ) {
+		w->show();
+		pump();
+	}
+	mode->setCurrentIndex( 0 );
+	pump();
+	check( st, QStringLiteral( "(rows) the Cascaded Shadows row is greyed outside Lookdev" ), !sh->isEnabled() );
+	mode->setCurrentIndex( 2 );
+	pump();
+	check( st, QStringLiteral( "(rows) the Cascaded Shadows row is enabled in Lookdev" ), sh->isEnabled() );
+	ground->setChecked( true );
+	hour->setValue( 9.0 );
+	pump();
+	const QImage off9 = freshGrab( skope );
+	sh->setChecked( true );
+	const QImage on9 = freshGrab( skope );
+	const int d9 = diffCount( off9, on9 );
+	const QString e9 = wwLookdevSummary();
+	say( st, QStringLiteral( "  shadows on at 09:00: %1 px differ; status: %2" ).arg( d9 ).arg( e9 ) );
+	check( st, QStringLiteral( "(live) the Cascaded Shadows row reached the state" ), wwLookdevShadows() );
+	check( st, QStringLiteral( "(live) Shadows on changes the viewport at 09:00 (%1 px >= 200)" ).arg( d9 ), d9 >= 200 );
+	check( st, QStringLiteral( "(live) the echo names the cascade pass" ), e9.contains( QLatin1StringView( "csm=on map=" ) ) );
+	check( st, QStringLiteral( "(save) the Cascaded Shadows row wrote ON to its setting" ),
+		QSettings().value( QLatin1StringView( "Settings/Render/Scene/Lookdev Shadows" ) ).toBool() );
+	hour->setValue( 15.0 );
+	pump();
+	const QImage on15 = freshGrab( skope );
+	const QString e15 = wwLookdevSummary();
+	sh->setChecked( false );
+	const QImage off15 = freshGrab( skope );
+	sh->setChecked( true );
+	freshGrab( skope );
+	const int moved = maskMoved( off9, on9, off15, on15 );
+	const int iL9 = e9.indexOf( QLatin1StringView( " L=" ) ), iL15 = e15.indexOf( QLatin1StringView( " L=" ) );
+	const QString L9 = iL9 >= 0 ? e9.mid( iL9, e9.indexOf( QChar( ' ' ), iL9 + 1 ) - iL9 ) : QString();
+	const QString L15 = iL15 >= 0 ? e15.mid( iL15, e15.indexOf( QChar( ' ' ), iL15 + 1 ) - iL15 ) : QString();
+	say( st, QStringLiteral( "  hour 09:00 -> 15:00: the shadow mask moved %1 px;%2 ->%3" ).arg( moved ).arg( L9, L15 ) );
+	check( st, QStringLiteral( "(live) the hour row moves the shadows (%1 px of mask moved >= 200)" ).arg( moved ), moved >= 200 );
+	check( st, QStringLiteral( "(live) the hour row moves the shadow light in the echo" ), !L9.isEmpty() && !L15.isEmpty() && L9 != L15 );
+	hour->setValue( 9.0 );
+	pump();
+	freshGrab( skope );
+	sh->setChecked( false );
+	const QImage back = freshGrab( skope );
+	const int dBack = diffCount( off9, back );
+	say( st, QStringLiteral( "  shadows off again at 09:00: %1 px differ from the pre-CSM grab" ).arg( dBack ) );
+	check( st, QStringLiteral( "(live) Shadows off reached the state and saved OFF" ), !wwLookdevShadows()
+		&& !QSettings().value( QLatin1StringView( "Settings/Render/Scene/Lookdev Shadows" ) ).toBool() );
+	check( st, QStringLiteral( "(live) Shadows off restores the pre-CSM picture (%1 px)" ).arg( dBack ), dBack == 0 );
+	check( st, QStringLiteral( "(live) the echo drops the cascades when off" ), !wwLookdevSummary().contains( QLatin1StringView( "csm=" ) ) );
+	hour->setValue( 12.0 );
+	pump();
+}
+
 void restartLeg( NifSkope * skope, WwScState & st )
 {
 	QRect want;
@@ -753,6 +843,8 @@ void run( NifSkope * skope, WwScState * st )
 		weatherLeg( skope, *st );
 	if ( qEnvironmentVariable( "WW_SCENE_TEST_FOG" ) == QLatin1StringView( "1" ) )
 		fogLeg( skope, *st );
+	if ( qEnvironmentVariable( "WW_SCENE_TEST_SHADOWS" ) == QLatin1StringView( "1" ) )
+		shadowsLeg( skope, *st );
 	restartLeg( skope, *st );
 }
 
