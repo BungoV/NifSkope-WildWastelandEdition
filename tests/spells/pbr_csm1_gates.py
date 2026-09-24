@@ -24,14 +24,17 @@ only its CAMERA (the echoed view: an input, not a result) and its pixels.
   kernel   the Poisson table in the deployed shader = the spec table, radius 3 texels
   seam     probe 5 from the default view: the smoothstep blend over [800, 900] and
            [3000, 3100] = the judge's
-  acne     probe 4 at 08:00, 12:00, 16:00 (default view, map 2048): no lit pixel
-           darkened (acne), no shadowed ground pixel lit (peter-panning), by count
+  acne     probe 4 at 08:00, 12:00, 16:00 (top-down over the down-sun side, map 2048):
+           no lit pixel darkened beyond the law (acne), no shadowed ground pixel lit and
+           no lit pixel in the strip 0..6 units off the base of the faces turned from the
+           sun (peter-panning), by count
   fade     top-down at 2600 with D 3000: probe 4 = 1 - (1 - probe 3)(1 - s^4),
            s = |p|^2 / D^2, and the fade is visible (floor)
-  place    the duct fixture, specular-only and diffuse-only pictures: where the factor
-           is 0 and the sun reaches the surface, the pictures equal the sun-less ones
-           (the factor takes BOTH the sun's diffuse and specular); floor: the sun's
-           specular is visible there without shadows
+  place    the duct fixture, specular-only and diffuse-only pictures: with the factor
+           forced to 0 (WW_CSM_FORCE=0; the duct is convex, so no real shadow falls on
+           a sun-facing part), where the sun reaches the surface the pictures equal the
+           sun-less ones (the factor takes BOTH the sun's diffuse and specular); floor:
+           the sun's specular is visible there without shadows
   off      Shadows OFF (no pin, and WW_LOOKDEV_SHADOWS=0) = release/before_csm1 byte for
            byte: the cube at noon (ground), the cube top-down, the duct fixture
   live     the in-app Shadows leg (WW_SCENE_TEST_SHADOWS=1)
@@ -109,6 +112,7 @@ def parse_echo(path):
     c.C, c.fwd = f(cp[0]), f(cp[1])
     c.tanX, c.tanY = f(cp[2])
     c.near, c.sc = float(cp[3]), float(cp[4])
+    c.far = float(cp[5]) if len(cp) > 5 else np.inf   # the camera's far plane (planar depth)
     rr = e["camrows"].split("|")
     c.rc, c.uc = f(rr[0]), f(rr[1])
     e["camo"] = c
@@ -336,7 +340,11 @@ def scene_pixels(cam, W, H):
     G = cam.C + tg[..., None] * d
     hit, tn, axis = box_hit(cam.C, d)
     cube = hit & (tn > 0)
-    ground = (tg > 0) & ~dilate(cube, 2) & (np.abs(G[..., 0]) < GROUND_KEEP) & (np.abs(G[..., 1]) < GROUND_KEEP)
+    # the ground ends at the camera's far plane (echoed; 2 px of margin around the clip line)
+    dvg = (G - cam.C) @ cam.fwd
+    far = getattr(cam, "far", np.inf)
+    ground = (tg > 0) & ~dilate(cube, 2) & (np.abs(G[..., 0]) < GROUND_KEEP) & (np.abs(G[..., 1]) < GROUND_KEEP) \
+        & ~dilate(dvg > far * 0.995, 2)
     P = cam.C + tn[..., None] * d
     return d, G, ground, cube, P, axis
 
@@ -625,9 +633,18 @@ def main():
                 oth = [k for k in range(3) if k != ax]
                 on &= (np.abs(P[..., oth[0]]) < HALF - 8) & (np.abs(P[..., oth[1]]) < HALF - 8)
                 lit_face |= on
+        # the cube's sun-facing faces receive under the same law (stored depth + caster bias,
+        # receiver offsets, Poisson, blend, fade): a face the sun grazes darkens itself under
+        # the spec's own bias (receiver offsets are depth-only, 2.4) -- that is the law, so the
+        # face is judged against the model, and the law's own darkening is reported
+        mface = np.ones((H, W))
+        if lit_face.any():
+            dvP = (P - cam.C) @ cam.fwd
+            mface[lit_face] = final(P[lit_face], dvP[lit_face], cam.C, fits, hull, right, up, e["Dn"])
         litg = ground & (mfin >= 0.98)
         shg = ground & (mfin <= 0.02)
-        acne = ((litg | lit_face) & (meas < 0.9)).sum()
+        acne = (litg & (meas < 0.9)).sum() + (lit_face & (meas < mface - 0.1)).sum()
+        lawdark = (lit_face & (mface < 0.9)).sum()
         pan = (shg & (meas > 0.1)).sum()
         nl = (litg | lit_face).sum()
         # the strip 0..6 units outside the base of the faces turned from the sun (peter-panning shows there)
@@ -640,11 +657,20 @@ def main():
                     continue
                 oth = 1 - ax
                 strip |= ground & (sg * G[..., ax] > HALF) & (sg * G[..., ax] < HALF + 6) & (np.abs(G[..., oth]) < HALF - 20)
+        # 3 px clear of any BRIGHT cube pixel: a multisampled edge mixes a lit face beside it
+        # (the face turned from the sun that the strip borders is itself dark)
+        strip &= ~dilate(cube & (meas > 0.5), 3)
+        # and where the law shadows it: near a corner the light line leaves through a wall the
+        # sun sees nearly edge-on, whose slope bias (2.6) lets the corner of the strip go lit
+        strip &= mfin <= 0.02
         sl = (strip & (meas > 0.1)).sum()
-        ok = nl >= 1000 and shg.sum() >= 500 and acne <= 10 + 0.0005 * nl and pan <= 10 + 0.0005 * shg.sum() and sl == 0
-        rec(tag, ok, "sun elevation %.1f deg: acne %d of %d lit px (%d on sun-facing cube faces), peter-panning "
-            "%d of %d shadowed ground px; base strip 0..6 units: %d px, %d lit (bars 10 + 0.05%%, strip 0)"
-            % (math.degrees(math.asin(sun[2])), acne, nl, lit_face.sum(), pan, shg.sum(), strip.sum(), sl))
+        ok = nl >= 1000 and shg.sum() >= 500 and acne <= 10 + 0.0005 * nl and pan <= 10 + 0.0005 * shg.sum() \
+            and strip.sum() >= 10 and sl == 0
+        rec(tag, ok, "sun elevation %.1f deg: acne %d of %d lit px (%d on sun-facing cube faces; the law itself "
+            "darkens %d of them, min %.2f), peter-panning %d of %d shadowed ground px; base strip 0..6 units: %d px, "
+            "%d lit (bars 10 + 0.05%%, strip >= 10 px and 0 lit)"
+            % (math.degrees(math.asin(sun[2])), acne, nl, lit_face.sum(), lawdark,
+               mface[lit_face].min() if lit_face.any() else 1.0, pan, shg.sum(), strip.sum(), sl))
 
     # ------------------------------------------------------------------ fade
     e, f3, f4 = echo("fade_p4"), img("fade_p3"), img("fade_p4")
@@ -663,17 +689,21 @@ def main():
                                    bad, len(err), seen))
 
     # ------------------------------------------------------------------ place
-    pl = {k: img("place_" + k) for k in ("p4", "dsun_off", "dnosun", "ssun_off", "snosun", "dsun_on", "ssun_on")}
+    pl = {k: img("place_" + k) for k in ("dsun_off", "dnosun", "ssun_off", "snosun", "dsun_on", "ssun_on")}
     if all(v is not None for v in pl.values()):
-        S = (pl["p4"][..., 0] <= 1.5 / 255) & ((pl["dsun_off"] - pl["dnosun"]).max(-1) > 4 / 255)
+        # S: where the sun's diffuse reaches the duct. With the factor forced to 0 both the
+        # diffuse-only and the specular-only picture must equal the sun-less one there.
+        S = (pl["dsun_off"] - pl["dnosun"]).max(-1) > 4 / 255
+        eo = echo("place_dsun_on")
         dd = np.abs(pl["dsun_on"] - pl["dnosun"]).max(-1)[S]
         ss = np.abs(pl["ssun_on"] - pl["snosun"]).max(-1)[S]
         floor = ((pl["ssun_off"] - pl["snosun"]).max(-1)[S] > 2 / 255).sum()
         bd, bs = (dd > 1.5 / 255).sum(), (ss > 1.5 / 255).sum()
-        rec("place", S.sum() >= 200 and floor >= 50 and bd <= 0.002 * S.sum() and bs <= 0.002 * S.sum(),
-            "%d px fully shadowed where the sun reaches (floor 200); the sun's specular shows on %d of them without "
-            "shadows (floor 50); with shadows, diffuse differs from the sun-less picture on %d, specular on %d"
-            % (S.sum(), floor, bd, bs))
+        forced = eo is not None and eo.get("force") == "0" and eo.get("csm") == "on"
+        rec("place", forced and S.sum() >= 200 and floor >= 50 and bd <= 0.002 * S.sum() and bs <= 0.002 * S.sum(),
+            "%d px the sun's diffuse reaches (floor 200); its specular shows on %d of them (floor 50); with the "
+            "factor forced to 0 (echo force=%s), diffuse differs from the sun-less picture on %d, specular on %d"
+            % (S.sum(), floor, eo.get("force") if eo else "none", bd, bs))
 
     # ------------------------------------------------------------------ off
     offs = sorted(glob.glob(os.path.join(OUT, "off_*_old.png")))

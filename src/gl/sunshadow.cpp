@@ -61,6 +61,7 @@ struct CsmState
 	double D = kDefaultDistance;
 	int map = kDefaultMap;
 	int probe = 0;
+	float force = -1.0f;
 	QStringList reds;
 
 	// GL objects, per context
@@ -73,7 +74,7 @@ struct CsmState
 	QString last = QStringLiteral( "pending" );
 	Cascade c[kCascades];
 	double L[3] = { 0, 0, -1 }, right[3] = { 1, 0, 0 }, up[3] = { 0, 1, 0 };
-	double C[3] = { 0, 0, 0 }, fwd[3] = { 0, 0, -1 }, tanX = 1, tanY = 1, camNear = 1, sc = 1;
+	double C[3] = { 0, 0, 0 }, fwd[3] = { 0, 0, -1 }, tanX = 1, tanY = 1, camNear = 1, camFar = 1, sc = 1;
 	double rc[3] = { 1, 0, 0 }, uc[3] = { 0, 1, 0 };	// the camera's right and up rows (world)
 	double split[2] = { kSplit0, kSplit1 };
 	int casters = 0, tris = 0;
@@ -93,6 +94,11 @@ CsmState & cs()
 		if ( ok && m >= 64 && m <= 8192 )
 			s.map = m;
 		s.probe = qEnvironmentVariable( "WW_CSM_PROBE" ).toInt();
+		// WW_CSM_FORCE=<0..1>: the receiver returns this factor instead of the map's (the
+		// wiring test of the factor sites: both sun terms must take it); unset = -1, off
+		const float f = qEnvironmentVariable( "WW_CSM_FORCE" ).toFloat( &ok );
+		if ( ok && f >= 0.0f && f <= 1.0f )
+			s.force = f;
 		s.reds = qEnvironmentVariable( "WW_CSM_RED" ).split( QChar( ',' ), Qt::SkipEmptyParts );
 		for ( QString & r : s.reds )
 			r = r.trimmed().toLower();
@@ -386,6 +392,7 @@ static void sunShadowPassImpl( Scene * scene )
 	s.tanX = 1.0 / double( P[0][0] );
 	s.tanY = 1.0 / double( P[1][1] );
 	s.camNear = double( P[3][2] ) / ( double( P[2][2] ) - 1.0 ) / s.sc;
+	s.camFar = double( P[3][2] ) / ( double( P[2][2] ) + 1.0 ) / s.sc;	// echo only: the judge's ground ends there
 
 	// the light, as it is shaded (spec 2.2 / 2.7)
 	float sunDir[3], disc[3];
@@ -575,6 +582,7 @@ void wwSunShadowUniforms( Scene * scene )
 	prog->uni4f( "csmParams", FloatVector4( float( 1.0 / s.sc ), float( s.D ), float( s.map ), float( kBlend ) ) );
 	prog->uni4f( "csmSplitOffset", FloatVector4( float( s.split[0] ), float( s.split[1] ), offA, offB ) );
 	prog->uni1i( "csmProbe", s.probe );
+	prog->uni1f( "csmForce", s.force );
 	prog->uni1i( "csmRed", redBits() );
 }
 
@@ -587,7 +595,7 @@ QString wwSunShadowSummary()
 	auto v3 = [&g]( const double * v ) { return g( v[0] ) + "," + g( v[1] ) + "," + g( v[2] ); };
 	QString o = QString( "csm=%1 map=%2 D=%3 split=%4,%5 L=%6 right=%7 up=%8 cam=%9" )
 		.arg( s.last ).arg( s.map ).arg( g( s.D ), g( s.split[0] ), g( s.split[1] ), v3( s.L ), v3( s.right ), v3( s.up ) )
-		.arg( v3( s.C ) + "|" + v3( s.fwd ) + "|" + g( s.tanX ) + "," + g( s.tanY ) + "|" + g( s.camNear ) + "|" + g( s.sc ) );
+		.arg( v3( s.C ) + "|" + v3( s.fwd ) + "|" + g( s.tanX ) + "," + g( s.tanY ) + "|" + g( s.camNear ) + "|" + g( s.sc ) + "|" + g( s.camFar ) );
 	for ( int i = 0; i < kCascades; i++ ) {
 		const Cascade & c = s.c[i];
 		o += QString( " c%1=%2,%3,%4,%5,%6,%7,%8,%9" ).arg( i ).arg( g( c.zn ), g( c.zf ), g( c.texel ) ).arg( c.n ).arg( c.vw ).arg( c.vh )
@@ -602,7 +610,8 @@ QString wwSunShadowSummary()
 			m << QString::number( double( s.c[i].uvdFromView[k] ), 'g', 9 );
 		o += QString( " m%1=%2" ).arg( i ).arg( m.join( QChar( ',' ) ) );
 	}
-	o += QString( " casters=%1 tris=%2 ground=%3 probe=%4 red=%5" ).arg( s.casters ).arg( s.tris ).arg( s.groundCast ? 1 : 0 )
-		.arg( s.probe ).arg( s.reds.isEmpty() ? QStringLiteral( "none" ) : s.reds.join( QChar( '+' ) ) );
+	o += QString( " casters=%1 tris=%2 ground=%3 probe=%4 force=%5 red=%6" ).arg( s.casters ).arg( s.tris ).arg( s.groundCast ? 1 : 0 )
+		.arg( s.probe ).arg( s.force < 0.0f ? QStringLiteral( "off" ) : QString::number( double( s.force ) ) )
+		.arg( s.reds.isEmpty() ? QStringLiteral( "none" ) : s.reds.join( QChar( '+' ) ) );
 	return o;
 }

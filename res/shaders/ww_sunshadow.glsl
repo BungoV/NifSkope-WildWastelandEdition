@@ -10,6 +10,7 @@ uniform vec4 csmParams;		// 1 / view scale, shadow distance D, map size, blend b
 uniform vec4 csmSplitOffset;	// the two pair boundaries (800, 3000), receiver offsets A / B (0.275, 1.0)
 uniform int csmProbe;		// 0 off, 1 hard tap, 2 cascade colour, 3 filtered + blend, 4 final factor, 5 selection
 uniform int csmRed;		// 1 noblend, 2 nofade, 4 diffonly, 8 factorhalf (the OFF leak)
+uniform float csmForce;		// WW_CSM_FORCE: >= 0 replaces the factor (the factor-site wiring test); -1 off
 
 // spec 2.5: the 16 Poisson taps on [0,1]^2, used as (p - 0.5) x 6 texels
 const vec2 csmPoisson[16] = vec2[16](
@@ -72,6 +73,8 @@ float wwSunShadow( vec3 posView )
 {
 	if ( ( csmRed & 8 ) != 0 )
 		return 0.5;
+	if ( csmForce >= 0.0 )
+		return csmForce;
 	float dv = -posView.z * csmParams.x;
 	if ( dv > csmParams.y + csmParams.w )
 		return 1.0;

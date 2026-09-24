@@ -43,7 +43,8 @@ BSD License - see nifskope.h
  * WW_CSM_PROBE=1 (hard single tap of the selected cascade, raw grey) | 2 (cascade
  * colour debug: red / green / blue over the shaded picture) | 3 (the filtered
  * factor with the seam blend, no fade, raw grey) | 4 (the final factor, raw grey) |
- * 5 (the selection as numbers: R = cascade A / 2, G = cascade B / 2, B = blend).
+ * 5 (the selection as numbers: R = cascade A / 2, G = cascade B / 2, B = blend);
+ * WW_CSM_FORCE=<0..1> (the receiver returns that factor: the wiring test of the sites).
  * Reds (WW_CSM_RED=<a,b>): flipsun, nofloor, nosnap, onecascade, wrongsplit,
  * nobias, bigbias (600-unit receiver offset), noblend, nofade, diffonly, factorhalf (Shadows OFF still swaps in the
  * variant and halves the sun: the OFF-identity gate must refuse it).

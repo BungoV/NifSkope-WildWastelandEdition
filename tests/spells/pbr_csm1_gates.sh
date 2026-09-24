@@ -13,10 +13,12 @@
 #            (cascade 0 / 1 / 2; map 512, D 8000 for the last): probes 1, 3, 5
 #   kernel   the deployed shader's Poisson table = the spec table
 #   seam     probe 5 from the default view (both blend bands in frame)
-#   acne     probe 4 at 08:00, 12:00, 16:00, default view, map 2048
+#   acne     probe 4 at 08:00, 12:00, 16:00, top-down over the down-sun side, map 2048
 #   fade     top-down from 2600, D 3000: probes 3 and 4
-#   place    the duct fixture (tests/fixtures/pbr_r2a_data studio.nif) at 16:00: the
-#            factor, and diffuse-only / specular-only pictures with and without the sun
+#   place    the duct fixture (tests/fixtures/pbr_r2a_data studio.nif) at 16:00:
+#            diffuse-only / specular-only pictures without the sun, with it, and with
+#            it under a factor forced to 0 (WW_CSM_FORCE=0; the duct is convex, so no
+#            real shadow falls on a sun-facing part of it)
 #   off      Shadows OFF = release/before_csm1 byte for byte: the cube at noon (ground),
 #            the cube top-down, the duct fixture -- each with no pins and with
 #            WW_LOOKDEV_SHADOWS=0
@@ -168,8 +170,13 @@ fi
 # shellcheck disable=SC2086
 if want acne && aimed nobias bigbias flipsun; then
 	echo "acne"
-	for h in 08 12 16; do
-		shot "$ARM" acne_$h "$CUBE" $V8 WW_LOOKDEV_HOUR=$h WW_CSM_PROBE=4 $ON $REDPIN
+	# top-down, 1500 up, over a point 450 units down-sun of the cube (the sun law's
+	# horizontal travel at that hour): the shadow and the ground at the base of the faces
+	# turned from the sun are in view, and so is the sun-facing top
+	for hc in 08:-448,-45,-256 12:-402,-201,-256 16:444,-74,-256; do
+		IFS=: read -r h cc <<< "$hc"
+		shot "$ARM" acne_$h "$CUBE" WW_RENDER_VIEW=1 WW_RENDER_FOV=60 WW_RENDER_DIST=1500 WW_RENDER_CENTER=$cc $GRD \
+			WW_LOOKDEV_HOUR=$h WW_CSM_PROBE=4 $ON $REDPIN
 	done
 fi
 # shellcheck disable=SC2086
@@ -183,13 +190,14 @@ fi
 if want place && aimed diffonly; then
 	echo "place"
 	PL="WW_RENDER_VIEW=8 WW_LOOKDEV_GROUND=0 WW_LOOKDEV_HOUR=16"
-	shot "$ARM" place_p4 "$DUCT" $PL WW_CSM_PROBE=4 $ON $REDPIN
+	# the duct is convex: nothing on it is both sun-facing and shadowed, so the factor
+	# sites are tested with the factor FORCED to 0 (WW_CSM_FORCE), the map by foot/acne
 	shot "$ARM" place_dsun_off "$DUCT" $PL WW_R3_TERM=diffuse
 	shot "$ARM" place_dnosun "$DUCT" $PL WW_R3_TERM=diffuse WW_STUDIO_SUN=0
 	shot "$ARM" place_ssun_off "$DUCT" $PL WW_R3_TERM=specular
 	shot "$ARM" place_snosun "$DUCT" $PL WW_R3_TERM=specular WW_STUDIO_SUN=0
-	shot "$ARM" place_dsun_on "$DUCT" $PL WW_R3_TERM=diffuse $ON $REDPIN
-	shot "$ARM" place_ssun_on "$DUCT" $PL WW_R3_TERM=specular $ON $REDPIN
+	shot "$ARM" place_dsun_on "$DUCT" $PL WW_R3_TERM=diffuse WW_CSM_FORCE=0 $ON $REDPIN
+	shot "$ARM" place_ssun_on "$DUCT" $PL WW_R3_TERM=specular WW_CSM_FORCE=0 $ON $REDPIN
 fi
 # shellcheck disable=SC2086
 if want off && aimed factorhalf; then
