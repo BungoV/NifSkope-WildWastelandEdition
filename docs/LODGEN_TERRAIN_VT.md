@@ -2494,6 +2494,16 @@ worldspace served entirely by `noneDefault` is a pyramid whose roughness is the
 measurement. The numbers above are the ones measured on the Sanctuary region
 (cells −20..−17 x 24..27) on 2026-09-11.
 
+**Form 0, the null LTEX, is a layer too, and it counts under `noneDefault`**
+(lane VTFIX1, 2026-09-24). A layer whose LTEX is 0, in a chunk with no dominant
+base, is painted with the none-default mask constants, and the mask cache keeps
+an entry for it. Until VTFIX1 that entry was stored and never counted, so on the
+whole Commonwealth `distinctLtex` was 101 against a rule sum of 100 (lane VTBAKE1:
+`pbrm 0 + legacyInverted 99 + noneDefault 1`). It now reads `noneDefault 2`, and
+the census identity above holds. The gate is `tests/spells/lodgen_vtfix.sh` G1,
+which checks the `.lodm` of a whole-map `--vt` bake. A region with no null layer,
+such as Sanctuary's 14 = 14, does not move.
+
 **Two optional keys (lane VTNORMAL1), both absent otherwise**, so an index
 without them is byte-identical to before:
 
@@ -3117,8 +3127,8 @@ bakes under `scratchpad/terrainfmt1_20260912/bake/`, and the renders under
 | 7a.3 the uncompressed B8G8R8A8 writer, DX10 header, chain to 1x1 | `lodgen.cpp:6830` | `static bool lodgenWriteDdsBgra8(` |
 | 7a.3 the cache reader, its channel law, the derived UP and the renormalisation | `lodgen.cpp:6906` | `static bool lodgenMsnFromCache(` |
 | 7a.4 the terrain vertex colour that carries the identity channels | `lodgen.cpp:952` | `nif->set<ByteColor4>( row, "Vertex Colors", ByteColor4( FloatVector4(` |
-| 7a.4 the CLI default for the terrain identity channels is OFF (bungo 2026-09-12; was ON) | `nifcli.cpp:6474` | `bool lgTerrainIdentity = false;` |
-| 7a.4 the CLI default for the OBJECT identity channels is OFF (bungo 2026-09-12; was ON) | `nifcli.cpp:6412` | `bool lgIdentity = false;` |
-| 7a.4 `--terrain-identity` is the opt-in that puts the four channels back | `nifcli.cpp:7013` | `else if ( t == QLatin1String( "--terrain-identity" ) ) lgTerrainIdentity = true;` |
+| 7a.4 the CLI default for the terrain identity channels is OFF (bungo 2026-09-12; was ON) | `nifcli.cpp:7666` (was 6474) | `bool lgTerrainIdentity = false;` |
+| 7a.4 the CLI default for the OBJECT identity channels is OFF (bungo 2026-09-12; was ON) | `nifcli.cpp:7549` (was 6412) | `bool lgIdentity = false;` |
+| 7a.4 `--terrain-identity` is the opt-in that puts the four channels back | `nifcli.cpp:8335` (was 7013) | `else if ( t == QLatin1String( "--terrain-identity" ) ) lgTerrainIdentity = true;` |
 | §5 `--sheet-format` parsing | `nifcli.cpp:6738` | `"--sheet-format"` |
 | §5 `--msn-cache` parsing | `nifcli.cpp:6761` | `"--msn-cache"` |

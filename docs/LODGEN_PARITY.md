@@ -27,9 +27,19 @@ trees + ponds), (0,-4) dim 4 (dense downtown), (-16,16) dim 16
 
 ## Divergences — where it should
 
-- **CS profiles are opt-in extras**: `--terrain-identity` adds
-  COLORS+UV2 (desc `686095322853893`), identity/AO/sway on objects,
-  EyeData geomorph, manifests. Default output carries none of it.
+- **CS profiles are opt-in extras, and there are two of them** (both OFF
+  by default since bungo's ruling of 2026-09-12; corrected by lane VTFIX1,
+  2026-09-24, against `nifcli.cpp`):
+  - `--terrain-identity` (`bool lgTerrainIdentity = false;`, `nifcli.cpp:7666`;
+    the panel row ships unticked) puts COLORS+UV2 on the terrain `.BTR`
+    (desc `686095322853893`). Default `.BTR` = vanilla's `52776558133763`,
+    neutral colours.
+  - `--identity` (`bool lgIdentity = false;`, `nifcli.cpp:7549`) puts the
+    object-index/AO/sway vertex colours, the UV2 layer and the EyeData
+    geomorph on the `.BTO`. Default `.BTO` = the plain `474989027590661`.
+  - The manifest sidecar is NOT part of either: it is written either way,
+    byte for byte the same. This line used to fold all of it under
+    `--terrain-identity` and say default output carried no manifest.
 - **Tree orientation**: position-stable hash rotation + U-mirror per
   tree (repetition breaking). Shows up as part of the residual NN
   distance on forest chunks; deterministic across regenerations.
