@@ -1,5 +1,15 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Weather fog in the Scene window (lane FOG1, 2026-09-24)
+
+- **Fog row** in the Scene popup. It switches on live and is off by default; the choice is remembered.
+- **Fog:** the weather's own fog for the chosen hour, day and night blended the way the game blends
+  them: its distances, thickness and height fade, and its four fog colours, on the ground and the model.
+  The sky is never fogged.
+- The fog follows the hour row as you drag it.
+- `weather --fog` on the command line prints the same fog numbers for any hour and distance.
+- Fog off gives exactly the picture the previous build gave.
+
 ## Ledger recovery after the 2026-09-24 wipe (lane LEDGERFIX1)
 
 Documentation only; no code changed. At 13:57 a one-line script emptied

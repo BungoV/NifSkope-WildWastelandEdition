@@ -1,0 +1,4 @@
+red=nolive
+7b9e3b24f963a44bcfe508025e0dc200d4967923 */e/Projects/NifskopeWildWastelandEdition/release/NifSkope.exe
+45108d839c259f56880c57eb9201390f50f44fff */e/Projects/NifskopeWildWastelandEdition/release/before_fog1/NifSkope.exe
+game=/x/Programs/Steam/steamapps/common/Fallout 4/Data

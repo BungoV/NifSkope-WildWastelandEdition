@@ -1,0 +1,141 @@
+fog
+  fog 117 probe lines
+alpha
+  alpha_12_4096 rc=0 61626 B
+  alpha_12_64750 rc=0 61498 B
+  alpha_12_250000 rc=0 61456 B
+  alpha_1_4096 rc=0 61719 B
+  alpha_1_64750 rc=0 61480 B
+  alpha_1_250000 rc=0 61457 B
+colour
+  colour_12_64750 rc=0 61634 B
+  colour_7_64750 rc=0 61578 B
+  colour_19.5_64750 rc=0 61638 B
+  colour_12_188250 rc=0 61644 B
+height
+  height_0 rc=0 61526 B
+  height_12000 rc=0 61495 B
+geo
+  geo rc=0 85508 B
+  geo_top_1000 rc=0 41559 B
+  geo_top_2000 rc=0 56836 B
+sky
+  sky_on rc=0 117660 B
+  sky_off rc=0 117660 B
+near
+  near_on rc=0 518086 B
+  near_off rc=0 518086 B
+seen
+  seen_on rc=0 851782 B
+  seen_off rc=0 851536 B
+off
+  off_v8_old rc=0 1251051 B
+  off_v8_new rc=0 1251051 B
+  off_v8_pinned_new rc=0 1251051 B
+  off_grd1_old rc=0 851536 B
+  off_grd1_new rc=0 851536 B
+  off_grd1_pinned_new rc=0 851536 B
+  off_up12_old rc=0 117660 B
+  off_up12_new rc=0 117660 B
+  off_up12_pinned_new rc=0 117660 B
+legacy
+  legacy_alpha rc=0 377606 B
+  legacy_off_old rc=0 523579 B
+  legacy_off_new rc=0 523579 B
+  legacy_far_on rc=0 423307 B
+  legacy_far_off rc=0 423353 B
+live
+  live rc=0 done
+pics
+  pic_6_on rc=0 1023661 B
+  picfar_6_on rc=0 60177 B
+  pic_6_off rc=0 1023636 B
+  picfar_6_off rc=0 62281 B
+  pic_12_on rc=0 1230916 B
+  picfar_12_on rc=0 62263 B
+  pic_12_off rc=0 1230916 B
+  picfar_12_off rc=0 67038 B
+  pic_1_on rc=0 842365 B
+  picfar_1_on rc=0 37670 B
+  pic_1_off rc=0 842408 B
+  picfar_1_off rc=0 40510 B
+pbr_fog1_gates judge, red=none, CommonwealthClear fv=131 FNAM 72 bytes NAM4 yes, TNAM=30,54,102,126,175,68 ext=2 dirfogpower=8
+spec
+  ok   (spec) 06:00 w=0.5 near=1900 power=0.325 -- w=0.5000 near=1900.0 power=0.3250
+  ok   (spec) 01:00 near=800
+  ok   (spec) 12:00 d64750 z64 alpha=0.60018 -- 0.60018
+  ok   (spec) 12:00 nearLow = (0.07383, 0.20471, 0.44787) -- (0.07384, 0.20472, 0.44787)
+cli
+  ok   the record as read: FNAM 72 bytes, NAM4 True, 18 floats + 32 scales = the judge's -- fogrec fnam=72 nam4=1 dirfogpower=8 colorext=2 fog=3000,250000,800,250000,0.35,0.3,0.85,0.85,64,25000,64,10000,0.95,0.975,64,15000,64,10000 scale=1,1,1,1,1,1,1,
+  ok   fDirectionalFogPower / fDaytimeColorExtension = the judge's GMST read -- app 8 / 2 judge 8 / 2
+  ok   12.00: day weight 1.0000 and the blended FNAM = the judge
+  ok   12.00: the four fog colours (keys Day->Day t=0.000, Lab x NAM4, pow 2.2) = the judge, +-2/255
+  ok   12.00: the cb12[41..46] packing = the judge
+  ok   01.00: day weight 0.0000 and the blended FNAM = the judge
+  ok   01.00: the four fog colours (keys Night->Night t=0.000, Lab x NAM4, pow 2.2) = the judge, +-2/255
+  ok   01.00: the cb12[41..46] packing = the judge
+  ok   06.00: day weight 0.5000 and the blended FNAM = the judge
+  ok   06.00: the four fog colours (keys Sunrise->LateSunrise t=0.000, Lab x NAM4, pow 2.2) = the judge, +-2/255
+  ok   06.00: the cb12[41..46] packing = the judge
+  ok   07.00: day weight 0.6667 and the blended FNAM = the judge
+  ok   07.00: the four fog colours (keys Sunrise->LateSunrise t=0.667, Lab x NAM4, pow 2.2) = the judge, +-2/255
+  ok   07.00: the cb12[41..46] packing = the judge
+  ok   09.00: day weight 1.0000 and the blended FNAM = the judge
+  ok   09.00: the four fog colours (keys Day->Day t=0.000, Lab x NAM4, pow 2.2) = the judge, +-2/255
+  ok   09.00: the cb12[41..46] packing = the judge
+  ok   17.00: day weight 1.0000 and the blended FNAM = the judge
+  ok   17.00: the four fog colours (keys Day->Day t=0.000, Lab x NAM4, pow 2.2) = the judge, +-2/255
+  ok   17.00: the cb12[41..46] packing = the judge
+  ok   19.50: day weight 0.5833 and the blended FNAM = the judge
+  ok   19.50: the four fog colours (keys EarlySunset->Sunset t=0.667, Lab x NAM4, pow 2.2) = the judge, +-2/255
+  ok   19.50: the cb12[41..46] packing = the judge
+  ok   22.50: day weight 0.0833 and the blended FNAM = the judge
+  ok   22.50: the four fog colours (keys LateSunset->Night t=0.667, Lab x NAM4, pow 2.2) = the judge, +-2/255
+  ok   22.50: the cb12[41..46] packing = the judge
+  ok   04.00: day weight 0.1667 and the blended FNAM = the judge
+  ok   04.00: the four fog colours (keys Night->EarlySunrise t=0.667, Lab x NAM4, pow 2.2) = the judge, +-2/255
+  ok   04.00: the cb12[41..46] packing = the judge
+  ok   every probed fragment (9 hours x 13) = the judge, +-0.5/255 -- 117 of 117
+alpha
+  ok   12.00 d=4096 z=64: the shader's fog alpha = the judge 11.04/255, +-1 -- shader (11, 11, 11) (100% of the ground)
+  ok   12.00 d=64750 z=64: the shader's fog alpha = the judge 153.05/255, +-1 -- shader (153, 153, 153) (100% of the ground)
+  ok   12.00 d=250000 z=64: the shader's fog alpha = the judge 248.62/255, +-1 -- shader (249, 249, 249) (100% of the ground)
+  ok   01.00 d=4096 z=64: the shader's fog alpha = the judge 60.65/255, +-1 -- shader (61, 61, 61) (100% of the ground)
+  ok   01.00 d=64750 z=64: the shader's fog alpha = the judge 167.44/255, +-1 -- shader (167, 167, 167) (100% of the ground)
+  ok   01.00 d=250000 z=64: the shader's fog alpha = the judge 251.81/255, +-1 -- shader (252, 252, 252) (100% of the ground)
+colour
+  ok   12.00 d=64750 z=64 (keys Day->Day t=0.000): the shader's fog colour / 2 = the judge (42.9,64.9,95.9), +-2 -- shader (43, 65, 96) (100%)
+  ok   07.00 d=64750 z=64 (keys Sunrise->LateSunrise t=0.667): the shader's fog colour / 2 = the judge (23.8,35.8,62.3), +-2 -- shader (24, 36, 62) (100%)
+  ok   19.50 d=64750 z=64 (keys EarlySunset->Sunset t=0.667): the shader's fog colour / 2 = the judge (11.8,16.6,28.6), +-2 -- shader (12, 17, 29) (100%)
+  ok   12.00 d=188250 z=0 (keys Day->Day t=0.000): the shader's fog colour / 2 = the judge (56.7,83.2,119.1), +-2 -- shader (57, 83, 119) (100%)
+height
+  ok   12:00 d=64750 z=0: the shader's height blend = the judge 127.12/255, +-1 -- shader (127, 127, 127) (100%)
+  ok   12:00 d=64750 z=12000: the shader's height blend = the judge 198.52/255, +-1 -- shader (198, 198, 198) (100%)
+geo
+  ok   the ground plane reads z = 0 (G = 128 +-1) on most of the bottom quarter -- 4160 of 4160 px, median G 127
+geo_top
+  ok   straight down, the eye 1000 units higher: the fog's distance grows by 1000 game units (62.26/255 +-1.5) -- centre R 63 -> 126
+  ok   straight down, the ground under the centre reads z = 0 (G 128 +-1) at both heights -- G 127 / 127
+sky
+  ok   Sky on, straight up: fog on = fog off, byte for byte (the dome is never fogged) -- 0 px differ
+near
+  ok   the model inside the fog's near distance (ground off, 12:00): fog on = fog off -- 0 px differ
+seen
+  ok   (floor) fog on changes the ground picture at 01:00 (>= 2000 px) -- 19337 px differ
+off
+  ok   off_grd1: Fog OFF = before_fog1, byte for byte -- 0 px differ
+  ok   off_grd1_pinned: Fog OFF = before_fog1, byte for byte -- 0 px differ
+  ok   off_up12: Fog OFF = before_fog1, byte for byte -- 0 px differ
+  ok   off_up12_pinned: Fog OFF = before_fog1, byte for byte -- 0 px differ
+  ok   off_v8: Fog OFF = before_fog1, byte for byte -- 0 px differ
+  ok   off_v8_pinned: Fog OFF = before_fog1, byte for byte -- 0 px differ
+legacy
+  ok   legacy, Fog on: fo4_fog.prog serves the model (program census) -- programs ['fo4_fog.prog']
+  ok   legacy, 12:00 d=64750 z=64: the fog program's alpha = the judge 153.05/255 +-1 (>= 2000 px) -- 131983 px at the judge's value
+  ok   legacy, Fog off: fo4_default.prog, never fo4_fog.prog (program census) -- programs ['fo4_default.prog']
+  ok   legacy, Fog off = before_fog1, byte for byte -- 0 px differ
+  FAIL legacy, from 20000 units at 12:00: fog on changes the model (>= 200 px) -- 6 px differ
+live
+  ok   the in-app Fog leg passes -- 14 checks, 0 failures
+64 checks, 1 failures
+FAIL

@@ -1,0 +1,20 @@
+legacy
+  legacy_alpha rc=0 377606 B
+  legacy_off_old rc=0 523579 B
+  legacy_off_new rc=0 523579 B
+  legacy_far_on rc=0 67939 B
+  legacy_far_off rc=0 68087 B
+pbr_fog1_gates judge, red=none, CommonwealthClear fv=131 FNAM 72 bytes NAM4 yes, TNAM=30,54,102,126,175,68 ext=2 dirfogpower=8
+spec
+  ok   (spec) 06:00 w=0.5 near=1900 power=0.325 -- w=0.5000 near=1900.0 power=0.3250
+  ok   (spec) 01:00 near=800
+  ok   (spec) 12:00 d64750 z64 alpha=0.60018 -- 0.60018
+  ok   (spec) 12:00 nearLow = (0.07383, 0.20471, 0.44787) -- (0.07384, 0.20472, 0.44787)
+legacy
+  ok   legacy, Fog on: fo4_fog.prog serves the model (program census) -- programs ['fo4_fog.prog']
+  ok   legacy, 12:00 d=64750 z=64: the fog program's alpha = the judge 153.05/255 +-1 (>= 2000 px) -- 131983 px at the judge's value
+  ok   legacy, Fog off: fo4_default.prog, never fo4_fog.prog (program census) -- programs ['fo4_default.prog']
+  ok   legacy, Fog off = before_fog1, byte for byte -- 0 px differ
+  ok   legacy, from 20000 units (FOV 8) at 12:00: fog on changes the model (>= 200 px) -- 260 px differ
+9 checks, 0 failures
+PASS

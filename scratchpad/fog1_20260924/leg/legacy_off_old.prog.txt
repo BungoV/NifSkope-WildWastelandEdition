@@ -1,0 +1,2 @@
+# WW_PROGRAM_CENSUS  light(view) = -0.199412 0.907509 0.369677
+shape="ACDuctConnector01:0" bsver=130 msn=0 lodland=0 prog=fo4_default.prog

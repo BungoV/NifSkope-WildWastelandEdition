@@ -34,16 +34,18 @@ committed" or names an exe, this block overrides it.
   tools (178); 5e4f069 docs + constitution + this repo's skills (103);
   92c068f scratchpad text (10,414 files, ~98 MB); then this ledger note.
   Held for bungo (ignored, on disk): skill copies from other projects and five
-  notes naming another outside RE source. Untracked-not-ignored after: 0.
+  notes naming another outside RE source (bungo 17:4x: Nomad MAY be named;
+  the notes stay held only for their other contents). Untracked-not-ignored after: 0.
   Game data, binaries and generated bulk stay local by .gitignore.
-- release/NifSkope.exe = PBRWX1's 2026-09-24 14:30:13, sha1 45108d83,
-  24,630,784 B (carries every landed lane below). Rollback rung
-  release/before_pbrwx1 = b6d37f73 (PBRR4). bungo's open window predates it:
-  RESTART.
+- release/NifSkope.exe = FOG1's 2026-09-24 18:45:55, sha1 629a3911,
+  24,669,184 B (carries every landed lane below). Rollback rung
+  release/before_fog1 = 45108d83 (PBRWX1). bungo's open window predates it:
+  RESTART. Overseer re-ran FOG1's full gate 19:26: 64 checks 0 failures in one run;
+  zero set 10 cases 0 failures.
 
 ### Next
-- NEXT NifSkope lane = FOG: spec scratchpad/pbrprep1_20260924/spec_fog.md; the
-  sky stays unfogged. Then cascaded shadows -> contact shadows -> SSAO -> SSGI ->
+- FOG landed (FOG1). NEXT NifSkope lane = CASCADED SHADOWS: spec
+  scratchpad/pbrprep1_20260924/spec_cascaded_shadows.md. Then -> contact shadows -> SSAO -> SSGI ->
   bloom (linear HDR only while Bloom or SSGI is on); then the R5 card bake
   (specular + tint), not started. bungo: "only stop when it fully works".
 
@@ -58,6 +60,38 @@ committed" or names an exe, this block overrides it.
 - Re-run the command-line bakes since 09-19 that used --data-root.
 
 ### Lane and director lines, 2026-09-24, newest first
+- 2026-09-24 19:25 FOG1:
+  FOG1 (2026-09-24, Opus 5.5) -- weather fog in the Scene popup. BUILT + GATED, NOT FLOWN BY BUNGO.
+  release/NifSkope.exe 18:45:55 sha1 629a3911d8a1c33c1879d9762fcfc0ced86c2ebf; rung release/before_fog1 = 45108d83.
+  Commits (local, not pushed): 5928bb5 model+CLI, 031c521 shaders+stage, 4a4d24b Fog row+live leg, 96bfe94 gates, 52f6fad skill,
+    8bfb374 fog as its own program (Fog off = pre-fog shader), 9c754f3 gate section legacy, 85f052a skill.
+  * Scene popup, the existing "Fog" heading now holds a live Fog checkbox (was a placeholder). OFF as shipped,
+    persisted under Settings/Render/Scene/Lookdev Fog, harness scopes isolate it; greyed outside Lookdev.
+    Divergence from the brief wording ("Sky group"): the row sits under the ruled UI's own Fog heading.
+  * Model (src/esmweather.cpp wwFogAt): FNAM 18 floats (short FNAM copies [8..11] into [14..17]), NAM4 32
+    scales; day weight on the climate TNAM widened by fDaytimeColorExtension (2.0); near/far/power/max/
+    height mids+ranges/HDS blended linearly; the four NAM0 fog rows (1/12/17/18) blended in CIELab on the
+    sky clock's keys x NAM4 on the same keys, then pow 2.2; cb12[41..46] packed as spec_fog.md.
+  * Shader (res/shaders/lookdev_fog.glsl): spec 2.4 line for line (ramp, two-plane height blend, max clamp,
+    near escape x66.67, HDS weight, fog-sun term with fDirectionalFogPower 8 -- sun colour/intensity INFERRED
+    from the lookdev sun). Applied per fragment on the lookdev ground, pbrm_default and the legacy path
+    (Lookdev only). The legacy path fogs through its own program, fo4_fog.prog (fo4_default.frag with
+    WW_FOG defined; the loader drops an included file's #version), swapped in by name only while a draw
+    fogs: the fog code merely present in fo4_default, switched off, moved 783 px of the zero set. SPACE: linear light, before exposure and the view transform (studioOutput); in the legacy
+    fo4_default path that is lin = c^2 (its tonemap squares), fog, then sqrt back. World z is measured from
+    the lookdev ground plane. Sky dome, sun, moon, clouds are NOT fogged (ruling).
+  * Hour row drives it live (echo in the PBRM census: `fog=on fogw= near= far= ... drew=on(groundz= scale=)`).
+  * CLI: `weather --fog [--fog-probe "d,z;..."]` prints the record, per-hour fog, cb12 rows and probes.
+  * Gate: tests/spells/pbr_fog1_gates.sh, 64 checks 0 failures (CLI 117/117 probed fragments = the judge;
+    shader alpha 6/6 +-1, colour 4/4 +-2 incl. 07:00 between keys and 19:30 dusk, height 2/2, distance
+    scale exact, sky identical on/off, the model inside 3000 u untouched, OFF = before_fog1 byte for byte on
+    3 framings pinned + unpinned, legacy path 5/5, live leg 14/0). 14/14 reds FAIL.
+    Regression on this exe: legacy zero set vs before_fog1 10 cases 0 failures; R1 48/0, R2a PASS,
+    R2b PASS (live 14/0), R3 PASS, R4 PASS, WX1 71/0.
+  * Seen at the preview's scale: vanilla day fog starts at 3000 u and the lookdev ground is an ~8192 u quad,
+    so at view 8 noon fog changes 0 px and night 1 level. From 20000 u it is plain (fog1_far_sheet.png).
+    Night fog colour is near-black (NAM0 night bytes ^2.2, no eye adaptation in the preview).
+  * Owed: bungo's in-app look at dawn/noon/night. Any open window of his predates this build -- restart it.
 - 2026-09-24 15:09 PBRWX1 (lane text, re-added by LEDGERFIX1):
   PBRWX1 (2026-09-24, Opus 5.5) -- weather preview in the Scene popup. BUILT + GATED, NOT FLOWN BY BUNGO.
   release/NifSkope.exe 14:30:13 sha1 45108d839c259f56880c57eb9201390f50f44fff; rung release/before_pbrwx1 = b6d37f73.

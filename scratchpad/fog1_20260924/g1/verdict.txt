@@ -1,0 +1,49 @@
+pbr_fog1_gates judge, red=none, CommonwealthClear fv=131 FNAM 72 bytes NAM4 yes, TNAM=30,54,102,126,175,68 ext=2 dirfogpower=8
+spec
+  ok   (spec) 06:00 w=0.5 near=1900 power=0.325 -- w=0.5000 near=1900.0 power=0.3250
+  ok   (spec) 01:00 near=800
+  ok   (spec) 12:00 d64750 z64 alpha=0.60018 -- 0.60018
+  ok   (spec) 12:00 nearLow = (0.07383, 0.20471, 0.44787) -- (0.07384, 0.20472, 0.44787)
+cli
+  ok   the record as read: FNAM 72 bytes, NAM4 True, 18 floats + 32 scales = the judge's -- fogrec fnam=72 nam4=1 dirfogpower=8 colorext=2 fog=3000,250000,800,250000,0.35,0.3,0.85,0.85,64,25000,64,10000,0.95,0.975,64,15000,64,10000 scale=1,1,1,1,1,1,1,
+  ok   fDirectionalFogPower / fDaytimeColorExtension = the judge's GMST read -- app 8 / 2 judge 8 / 2
+  ok   12.00: day weight 1.0000 and the blended FNAM = the judge
+  ok   12.00: the four fog colours (keys Day->Day t=0.000, Lab x NAM4, pow 2.2) = the judge, +-2/255
+  ok   12.00: the cb12[41..46] packing = the judge
+  ok   01.00: day weight 0.0000 and the blended FNAM = the judge
+  ok   01.00: the four fog colours (keys Night->Night t=0.000, Lab x NAM4, pow 2.2) = the judge, +-2/255
+  ok   01.00: the cb12[41..46] packing = the judge
+  ok   06.00: day weight 0.5000 and the blended FNAM = the judge
+  ok   06.00: the four fog colours (keys Sunrise->LateSunrise t=0.000, Lab x NAM4, pow 2.2) = the judge, +-2/255
+  ok   06.00: the cb12[41..46] packing = the judge
+  FAIL 07.00: day weight 0.6667 and the blended FNAM = the judge -- near app 2266.7 judge 2266.67
+  ok   07.00: the four fog colours (keys Sunrise->LateSunrise t=0.667, Lab x NAM4, pow 2.2) = the judge, +-2/255
+  ok   07.00: the cb12[41..46] packing = the judge
+  ok   09.00: day weight 1.0000 and the blended FNAM = the judge
+  ok   09.00: the four fog colours (keys Day->Day t=0.000, Lab x NAM4, pow 2.2) = the judge, +-2/255
+  ok   09.00: the cb12[41..46] packing = the judge
+  ok   17.00: day weight 1.0000 and the blended FNAM = the judge
+  ok   17.00: the four fog colours (keys Day->Day t=0.000, Lab x NAM4, pow 2.2) = the judge, +-2/255
+  ok   17.00: the cb12[41..46] packing = the judge
+  FAIL 19.50: day weight 0.5833 and the blended FNAM = the judge -- near app 2083.3 judge 2083.33
+  ok   19.50: the four fog colours (keys EarlySunset->Sunset t=0.667, Lab x NAM4, pow 2.2) = the judge, +-2/255
+  ok   19.50: the cb12[41..46] packing = the judge
+  FAIL 22.50: day weight 0.0833 and the blended FNAM = the judge -- near app 983.3 judge 983.333
+  ok   22.50: the four fog colours (keys LateSunset->Night t=0.667, Lab x NAM4, pow 2.2) = the judge, +-2/255
+  ok   22.50: the cb12[41..46] packing = the judge
+  FAIL 04.00: day weight 0.1667 and the blended FNAM = the judge -- near app 1166.7 judge 1166.67
+  ok   04.00: the four fog colours (keys Night->EarlySunrise t=0.667, Lab x NAM4, pow 2.2) = the judge, +-2/255
+  ok   04.00: the cb12[41..46] packing = the judge
+  ok   every probed fragment (9 hours x 13) = the judge, +-0.5/255 -- 117 of 117
+alpha
+  ok   12.00 d=4096 z=64: the shader's fog alpha = the judge 11.04/255, +-1 -- shader (11, 11, 11) (100% of the ground)
+  ok   12.00 d=64750 z=64: the shader's fog alpha = the judge 153.05/255, +-1 -- shader (153, 153, 153) (100% of the ground)
+  ok   12.00 d=250000 z=64: the shader's fog alpha = the judge 248.62/255, +-1 -- shader (249, 249, 249) (100% of the ground)
+  ok   01.00 d=4096 z=64: the shader's fog alpha = the judge 60.65/255, +-1 -- shader (61, 61, 61) (100% of the ground)
+  ok   01.00 d=64750 z=64: the shader's fog alpha = the judge 167.44/255, +-1 -- shader (167, 167, 167) (100% of the ground)
+  ok   01.00 d=250000 z=64: the shader's fog alpha = the judge 251.81/255, +-1 -- shader (252, 252, 252) (100% of the ground)
+geo
+  ok   the ground plane reads z = 0 (G = 128 +-1) on most of the bottom quarter -- 4160 of 4160 px, median G 127
+  FAIL the fog's distance grows up the frame along the ground (d/16384: [1, 1, 1, 1, 1, 1])
+42 checks, 5 failures
+FAIL

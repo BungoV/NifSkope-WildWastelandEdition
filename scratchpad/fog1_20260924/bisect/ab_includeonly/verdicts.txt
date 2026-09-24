@@ -1,0 +1,5 @@
+pbr_shade_ab embedded_lit gate=zero old=dcbde7fd new=dcbde7fd size=1280x826 px=0 frac=0.000000 max=0 mean=0.00000 bar=0/0 noise=0/0|0/0 content=0.025 progs=fo4_default.prog -> PASS
+pbr_shade_ab embedded_lit census prog=same(2) cam=same(1) pbrm=same(1) -> PASS
+pbr_shade_ab pistol_10mm gate=zero old=1bdc0244 new=1bdc0244 size=1280x826 px=0 frac=0.000000 max=0 mean=0.00000 bar=0/0 noise=0/0|0/0 content=0.087 progs=fo4_default.prog -> PASS
+pbr_shade_ab pistol_10mm census prog=same(7) cam=same(1) pbrm=same(6) -> PASS
+pbr_shade_ab SUMMARY 2 cases, 0 failures, 0 empty by the viewer (none) -> PASS

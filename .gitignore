@@ -165,3 +165,4 @@ scratchpad/pbrrender0_20260923/research_screen_effects.md
 scratchpad/**/*.bin.*
 scratchpad/**/gdbx/
 scratchpad/**/*.pbrm
+scratchpad/**/*.nifx

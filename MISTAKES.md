@@ -5,6 +5,27 @@ Written the moment a mistake is recognised, unprompted (CONSTITUTION rule 2).
 Format: date -- what was done -- what was true -- how it was found -- the rule.
 Newest at the top.
 
+## 2026-09-24 -- lane FOG1 (lane text)
+
+- 2026-09-24 FOG1: ran `find /e/Projects -maxdepth 5` to locate two skills -- a search over every project
+  root, against search-lean. It ran past 120 s and was stopped. The skills live in the repo's
+  .claude/skills and ~/.claude/skills; list those two folders.
+- 2026-09-24 FOG1: a Python heredoc turned the `\` of a bash line continuation into `\n` text, so
+  `env` got an argument `n` and two shots died rc=127. Known rule (patch scripts via the Write tool);
+  broken again for a one-line insert. Fixed with the Edit tool.
+- 2026-09-24 FOG1: the first straight-down distance probe was centred at x 5000, outside the ~8192 u
+  lookdev ground, so it photographed the Lookdev cube and "failed". Read the framing before the number.
+
+- 2026-09-24 FOG1: the Fog-OFF identity gate covered only the PBR fixture, so the fog code sitting
+  (switched off) in fo4_default.frag was caught by the legacy zero set at regression time, not by the
+  lane's own gate: 783 px on GRailCurveR01. Code behind a false uniform is not "off" to the driver;
+  an off path that must stay byte-identical goes under #ifdef in a variant program. Gate added (legacy).
+- 2026-09-24 FOG1: ran pbr_shade_ab.sh with a RELATIVE --out: every shot, old arm too, came back
+  "NO PICTURE" rc=0. Give it an absolute path (the regress runner did).
+- 2026-09-24 FOG1: a Python splice sent through a bash heredoc turned `'\n'` into a real newline
+  inside C++ source (glcontext.cpp); caught before building, fixed with the Edit tool. Second time
+  in this lane -- C++/shader escapes go in with the Edit tool only.
+
 ## 2026-09-24 -- lane PBRWX1 (lane text)
 
 - 2026-09-24 PBRWX1: timestamps in progress.md were typed from feel ("13:3x/13:4x") and the clock then read

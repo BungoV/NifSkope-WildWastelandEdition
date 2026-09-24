@@ -1,0 +1,50 @@
+pbr_r1 sibling_v6 resolver-self route=sibling path=Materials\WWPbrTest01\SiblingV6Duct.pbrm intent=sibling -> PASS
+pbr_r1 sibling_v6 (b) census=sibling Materials\WWPbrTest01\SiblingV6Duct.pbrm python=sibling Materials\WWPbrTest01\SiblingV6Duct.pbrm -> PASS
+pbr_r1 sibling_v6 (c) f0(read back)=0.040 want 0.040 -> PASS
+pbr_r1 sibling_v6 served-by prog=pbrm_default.prog route=sibling -> PASS
+pbr_r1 sibling_v6 (a) legacy_px=132984 (0.1258 of frame) pbr_px=132984 kept=1.0000 floor 0.99 -> PASS
+pbr_r1 sibling_v6 route-view colour=(0.00,1.00,0.00) want sibling=(0, 1, 0) prog=pbr_route.prog -> PASS
+pbr_r1 sibling_v5 resolver-self route=sibling path=Materials\WWPbrTest01\SiblingV5Duct.pbrm intent=sibling -> PASS
+pbr_r1 sibling_v5 (b) census=sibling Materials\WWPbrTest01\SiblingV5Duct.pbrm python=sibling Materials\WWPbrTest01\SiblingV5Duct.pbrm -> PASS
+pbr_r1 sibling_v5 (c) f0(read back)=0.040 want 0.040 -> PASS
+pbr_r1 sibling_v5 served-by prog=pbrm_default.prog route=sibling -> PASS
+pbr_r1 sibling_v5 (a) legacy_px=132984 (0.1258 of frame) pbr_px=132984 kept=1.0000 floor 0.99 -> PASS
+pbr_r1 sibling_v5 route-view colour=(0.00,1.00,0.00) want sibling=(0, 1, 0) prog=pbr_route.prog -> PASS
+pbr_r1 direct resolver-self route=direct path=Materials\WWPbrTest01\DirectV6Ducts.PBRM intent=direct -> PASS
+pbr_r1 direct (b) census=direct Materials\WWPbrTest01\DirectV6Ducts.PBRM python=direct Materials\WWPbrTest01\DirectV6Ducts.PBRM -> PASS
+pbr_r1 direct (e) route=direct prog=pbrm_default.prog -> PASS
+pbr_r1 direct served-by prog=pbrm_default.prog route=direct -> PASS
+pbr_r1 direct (a) legacy_px=132984 (0.1258 of frame) pbr_px=132984 kept=1.0000 floor 0.99 -> PASS
+pbr_r1 direct route-view colour=(1.00,1.00,0.00) want direct=(1, 1, 0) prog=pbr_route.prog -> PASS
+pbr_r1 nifx resolver-self route=nifx path=Materials\WWPbrTest01\NifxTarget.pbrm intent=nifx -> PASS
+pbr_r1 nifx (b) census=nifx Materials\WWPbrTest01\NifxTarget.pbrm python=nifx Materials\WWPbrTest01\NifxTarget.pbrm -> PASS
+pbr_r1 nifx served-by prog=pbrm_default.prog route=nifx -> PASS
+pbr_r1 nifx (a) legacy_px=132984 (0.1258 of frame) pbr_px=132984 kept=1.0000 floor 0.99 -> PASS
+pbr_r1 nifx route-view colour=(0.00,1.00,1.00) want nifx=(0, 1, 1) prog=pbr_route.prog -> PASS
+pbr_r1 direct_nifx resolver-self route=nifx path=Materials\WWPbrTest01\NifxTarget.pbrm intent=nifx -> PASS
+pbr_r1 direct_nifx (b) census=nifx Materials\WWPbrTest01\NifxTarget.pbrm python=nifx Materials\WWPbrTest01\NifxTarget.pbrm -> PASS
+pbr_r1 direct_nifx served-by prog=pbrm_default.prog route=nifx -> PASS
+pbr_r1 direct_nifx (a) legacy_px=132984 (0.1258 of frame) pbr_px=132984 kept=1.0000 floor 0.99 -> PASS
+pbr_r1 direct_nifx route-view colour=(0.00,1.00,1.00) want nifx=(0, 1, 1) prog=pbr_route.prog -> PASS
+pbr_r1 swap resolver-self route=swap path=Materials\WWPbrTest01\SwapDuct.pbrm intent=swap -> PASS
+pbr_r1 swap (b) census=swap Materials\WWPbrTest01\SwapDuct.pbrm python=swap Materials\WWPbrTest01\SwapDuct.pbrm -> PASS
+pbr_r1 swap served-by prog=pbrm_default.prog route=swap -> PASS
+pbr_r1 swap (a) legacy_px=132984 (0.1258 of frame) pbr_px=132984 kept=1.0000 floor 0.99 -> PASS
+pbr_r1 swap route-view colour=(1.00,0.00,1.00) want swap=(1, 0, 1) prog=pbr_route.prog -> PASS
+pbr_r1 fo76 resolver-self route=fo76 path=Materials\WWPbrTest01\Fo76BgsmDucts.BGSM intent=fo76 -> PASS
+pbr_r1 fo76 (b) census=fo76 Materials\WWPbrTest01\Fo76BgsmDucts.BGSM python=fo76 Materials\WWPbrTest01\Fo76BgsmDucts.BGSM -> PASS
+pbr_r1 fo76 served-by prog=pbrm_default.prog route=fo76 -> PASS
+pbr_r1 fo76 (a) legacy_px=132984 (0.1258 of frame) pbr_px=132984 kept=1.0000 floor 0.99 -> PASS
+pbr_r1 fo76 route-view colour=(1.00,0.50,0.00) want fo76=(1, 0.5, 0) prog=pbr_route.prog -> PASS
+pbr_r1 texfail resolver-self route=sibling path=Materials\WWPbrTest01\TexFailDucts1.pbrm intent=sibling -> PASS
+pbr_r1 texfail (b) census=sibling Materials\WWPbrTest01\TexFailDucts1.pbrm python=sibling Materials\WWPbrTest01\TexFailDucts1.pbrm -> PASS
+pbr_r1 texfail route=legacy refusal="texture load failed: baseColor wwpbrtest01\doesnotexist_d.dds; PBR binding aborted; resolved sibling Materials\WWPbrTest01\TexFailDucts1.pbrm not served" -> PASS
+pbr_r1 texfail (a) legacy_px=132984 (0.1258 of frame) pbr_px=132984 kept=1.0000 floor 0.99 -> PASS
+pbr_r1 texfail route-view colour=(0.00,1.00,0.00) want sibling=(0, 1, 0) prog=pbr_route.prog -> PASS
+pbr_r1 legacy resolver-self route=legacy path=- intent=legacy -> PASS
+pbr_r1 legacy (b) census=legacy - python=legacy - -> PASS
+pbr_r1 legacy (a) legacy_px=132984 (0.1258 of frame) pbr_px=132984 kept=1.0000 floor 0.99 -> PASS
+pbr_r1 legacy route-view colour=(1.00,1.00,1.00) want legacy=(1, 1, 1) prog=pbr_route.prog -> PASS
+pbr_r1 (d) nifx round trip nifx_rt_same.nifx: 272 bytes in, 272 out, identical=True -> PASS
+pbr_r1 (d-info) set+set then remove+restore: edit 342 bytes (differs=True), undo identical to input=True
+pbr_r1 SUMMARY 48 checks, 0 failures (a=9/9 b=9/9 c=2/2 d=1/1 e=1/1 resolver=9/9 routeview=9/9 served=7/7 texfail=1/1) -> PASS

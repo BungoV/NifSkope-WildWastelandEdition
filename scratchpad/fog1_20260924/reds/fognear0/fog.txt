@@ -1,0 +1,422 @@
+# WW_WEATHER data=x:/Programs/Steam/steamapps/common/Fallout 4/Data red=fognear0
+load ok files=Fallout4.esm wthr=71
+climate edid=DefaultClimate tnam=30,54,102,126
+weather id=0002B52A edid=CommonwealthClear src=Fallout4.esm owner=Fallout4.esm fv=131 nam0=608 rows=19 tods=8 dalc=8
+nam0hex 212c4000264063001b253500030709000f161e002e405a00242f46000b121900415667004e7cb100556b8100040609002632400088b7f1005d75900028333e000000000000000000000000000000000000000000000000000000000000000000525252005d5d5d003e3e3e000202020052525200595959004d4d4d001111110053668000e1e1e1004e6075003546570032445800ffb59800dc8e7a003d516800fffccd00ffffff00ff535300ff310f00ff976e00822e0000ff001800ff5d31009b9b9b000000000032323200ffffff00eaeaea001e262a0012171900cbcbcb0062779a005c7a9d006478a1001119220035435c006379a0006373a1002a344900b58074008291a2009e6a5c001b252f004d536300b1877a00a07a6d003f424b005b728c00969696003c41620021334300334050007c605c00664f4d003c496100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008b8fb000a6c0dd00636d8d002b3a49004f6382008ba4d10089a0cf00475a770054586400e3eef0003e424e00212d3a0046515c00be8a8300b0867900404550001d293800e1e1e100232e47000e121d00131b2d00a8867700bc806d0010203f00ffa25000ffffff00ff600a00000000007f512800d58d7900d58d79007f3005000000000000000000c8c8c800d2d2d200dcdcdc000000000000000000d2d2d200172e4400394a5d00152029000203050017253300213b5e00182a3900141e2d0061779c007292b3004550650015202d0034475d0093b1e4005c6f970031425600
+row name=SkyUpper tod=Sunrise rgb=33,44,64
+row name=FogNear tod=Sunrise rgb=65,86,103
+row name=Unused tod=Sunrise rgb=0,0,0
+row name=Ambient tod=Sunrise rgb=82,82,82
+row name=Sunlight tod=Sunrise rgb=83,102,128
+row name=Sun tod=Sunrise rgb=255,252,205
+row name=Stars tod=Sunrise rgb=155,155,155
+row name=SkyLower tod=Sunrise rgb=98,119,154
+row name=Horizon tod=Sunrise rgb=181,128,116
+row name=EffectLighting tod=Sunrise rgb=91,114,140
+row name=CloudLODDiffuse tod=Sunrise rgb=0,0,0
+row name=CloudLODAmbient tod=Sunrise rgb=0,0,0
+row name=FogFar tod=Sunrise rgb=139,143,176
+row name=SkyStatics tod=Sunrise rgb=84,88,100
+row name=WaterMult tod=Sunrise rgb=29,41,56
+row name=SunGlare tod=Sunrise rgb=255,162,80
+row name=MoonGlare tod=Sunrise rgb=0,0,0
+row name=FogNearHigh tod=Sunrise rgb=23,46,68
+row name=FogFarHigh tod=Sunrise rgb=97,119,156
+row name=SkyUpper tod=Day rgb=38,64,99
+row name=FogNear tod=Day rgb=78,124,177
+row name=Unused tod=Day rgb=0,0,0
+row name=Ambient tod=Day rgb=93,93,93
+row name=Sunlight tod=Day rgb=225,225,225
+row name=Sun tod=Day rgb=255,255,255
+row name=Stars tod=Day rgb=0,0,0
+row name=SkyLower tod=Day rgb=92,122,157
+row name=Horizon tod=Day rgb=130,145,162
+row name=EffectLighting tod=Day rgb=150,150,150
+row name=CloudLODDiffuse tod=Day rgb=0,0,0
+row name=CloudLODAmbient tod=Day rgb=0,0,0
+row name=FogFar tod=Day rgb=166,192,221
+row name=SkyStatics tod=Day rgb=227,238,240
+row name=WaterMult tod=Day rgb=225,225,225
+row name=SunGlare tod=Day rgb=255,255,255
+row name=MoonGlare tod=Day rgb=0,0,0
+row name=FogNearHigh tod=Day rgb=57,74,93
+row name=FogFarHigh tod=Day rgb=114,146,179
+row name=SkyUpper tod=Sunset rgb=27,37,53
+row name=FogNear tod=Sunset rgb=85,107,129
+row name=Unused tod=Sunset rgb=0,0,0
+row name=Ambient tod=Sunset rgb=62,62,62
+row name=Sunlight tod=Sunset rgb=78,96,117
+row name=Sun tod=Sunset rgb=255,83,83
+row name=Stars tod=Sunset rgb=50,50,50
+row name=SkyLower tod=Sunset rgb=100,120,161
+row name=Horizon tod=Sunset rgb=158,106,92
+row name=EffectLighting tod=Sunset rgb=60,65,98
+row name=CloudLODDiffuse tod=Sunset rgb=0,0,0
+row name=CloudLODAmbient tod=Sunset rgb=0,0,0
+row name=FogFar tod=Sunset rgb=99,109,141
+row name=SkyStatics tod=Sunset rgb=62,66,78
+row name=WaterMult tod=Sunset rgb=35,46,71
+row name=SunGlare tod=Sunset rgb=255,96,10
+row name=MoonGlare tod=Sunset rgb=200,200,200
+row name=FogNearHigh tod=Sunset rgb=21,32,41
+row name=FogFarHigh tod=Sunset rgb=69,80,101
+row name=SkyUpper tod=Night rgb=3,7,9
+row name=FogNear tod=Night rgb=4,6,9
+row name=Unused tod=Night rgb=0,0,0
+row name=Ambient tod=Night rgb=2,2,2
+row name=Sunlight tod=Night rgb=53,70,87
+row name=Sun tod=Night rgb=255,49,15
+row name=Stars tod=Night rgb=255,255,255
+row name=SkyLower tod=Night rgb=17,25,34
+row name=Horizon tod=Night rgb=27,37,47
+row name=EffectLighting tod=Night rgb=33,51,67
+row name=CloudLODDiffuse tod=Night rgb=0,0,0
+row name=CloudLODAmbient tod=Night rgb=0,0,0
+row name=FogFar tod=Night rgb=43,58,73
+row name=SkyStatics tod=Night rgb=33,45,58
+row name=WaterMult tod=Night rgb=14,18,29
+row name=SunGlare tod=Night rgb=0,0,0
+row name=MoonGlare tod=Night rgb=210,210,210
+row name=FogNearHigh tod=Night rgb=2,3,5
+row name=FogFarHigh tod=Night rgb=21,32,45
+row name=SkyUpper tod=EarlySunrise rgb=15,22,30
+row name=FogNear tod=EarlySunrise rgb=38,50,64
+row name=Unused tod=EarlySunrise rgb=0,0,0
+row name=Ambient tod=EarlySunrise rgb=82,82,82
+row name=Sunlight tod=EarlySunrise rgb=50,68,88
+row name=Sun tod=EarlySunrise rgb=255,151,110
+row name=Stars tod=EarlySunrise rgb=234,234,234
+row name=SkyLower tod=EarlySunrise rgb=53,67,92
+row name=Horizon tod=EarlySunrise rgb=77,83,99
+row name=EffectLighting tod=EarlySunrise rgb=51,64,80
+row name=CloudLODDiffuse tod=EarlySunrise rgb=0,0,0
+row name=CloudLODAmbient tod=EarlySunrise rgb=0,0,0
+row name=FogFar tod=EarlySunrise rgb=79,99,130
+row name=SkyStatics tod=EarlySunrise rgb=70,81,92
+row name=WaterMult tod=EarlySunrise rgb=19,27,45
+row name=SunGlare tod=EarlySunrise rgb=127,81,40
+row name=MoonGlare tod=EarlySunrise rgb=220,220,220
+row name=FogNearHigh tod=EarlySunrise rgb=23,37,51
+row name=FogFarHigh tod=EarlySunrise rgb=52,71,93
+row name=SkyUpper tod=LateSunrise rgb=46,64,90
+row name=FogNear tod=LateSunrise rgb=136,183,241
+row name=Unused tod=LateSunrise rgb=0,0,0
+row name=Ambient tod=LateSunrise rgb=89,89,89
+row name=Sunlight tod=LateSunrise rgb=255,181,152
+row name=Sun tod=LateSunrise rgb=130,46,0
+row name=Stars tod=LateSunrise rgb=30,38,42
+row name=SkyLower tod=LateSunrise rgb=99,121,160
+row name=Horizon tod=LateSunrise rgb=177,135,122
+row name=EffectLighting tod=LateSunrise rgb=124,96,92
+row name=CloudLODDiffuse tod=LateSunrise rgb=0,0,0
+row name=CloudLODAmbient tod=LateSunrise rgb=0,0,0
+row name=FogFar tod=LateSunrise rgb=139,164,209
+row name=SkyStatics tod=LateSunrise rgb=190,138,131
+row name=WaterMult tod=LateSunrise rgb=168,134,119
+row name=SunGlare tod=LateSunrise rgb=213,141,121
+row name=MoonGlare tod=LateSunrise rgb=0,0,0
+row name=FogNearHigh tod=LateSunrise rgb=33,59,94
+row name=FogFarHigh tod=LateSunrise rgb=147,177,228
+row name=SkyUpper tod=EarlySunset rgb=36,47,70
+row name=FogNear tod=EarlySunset rgb=93,117,144
+row name=Unused tod=EarlySunset rgb=0,0,0
+row name=Ambient tod=EarlySunset rgb=77,77,77
+row name=Sunlight tod=EarlySunset rgb=220,142,122
+row name=Sun tod=EarlySunset rgb=255,0,24
+row name=Stars tod=EarlySunset rgb=18,23,25
+row name=SkyLower tod=EarlySunset rgb=99,115,161
+row name=Horizon tod=EarlySunset rgb=160,122,109
+row name=EffectLighting tod=EarlySunset rgb=102,79,77
+row name=CloudLODDiffuse tod=EarlySunset rgb=0,0,0
+row name=CloudLODAmbient tod=EarlySunset rgb=0,0,0
+row name=FogFar tod=EarlySunset rgb=137,160,207
+row name=SkyStatics tod=EarlySunset rgb=176,134,121
+row name=WaterMult tod=EarlySunset rgb=188,128,109
+row name=SunGlare tod=EarlySunset rgb=213,141,121
+row name=MoonGlare tod=EarlySunset rgb=0,0,0
+row name=FogNearHigh tod=EarlySunset rgb=24,42,57
+row name=FogFarHigh tod=EarlySunset rgb=92,111,151
+row name=SkyUpper tod=LateSunset rgb=11,18,25
+row name=FogNear tod=LateSunset rgb=40,51,62
+row name=Unused tod=LateSunset rgb=0,0,0
+row name=Ambient tod=LateSunset rgb=17,17,17
+row name=Sunlight tod=LateSunset rgb=61,81,104
+row name=Sun tod=LateSunset rgb=255,93,49
+row name=Stars tod=LateSunset rgb=203,203,203
+row name=SkyLower tod=LateSunset rgb=42,52,73
+row name=Horizon tod=LateSunset rgb=63,66,75
+row name=EffectLighting tod=LateSunset rgb=60,73,97
+row name=CloudLODDiffuse tod=LateSunset rgb=0,0,0
+row name=CloudLODAmbient tod=LateSunset rgb=0,0,0
+row name=FogFar tod=LateSunset rgb=71,90,119
+row name=SkyStatics tod=LateSunset rgb=64,69,80
+row name=WaterMult tod=LateSunset rgb=16,32,63
+row name=SunGlare tod=LateSunset rgb=127,48,5
+row name=MoonGlare tod=LateSunset rgb=210,210,210
+row name=FogNearHigh tod=LateSunset rgb=20,30,45
+row name=FogFarHigh tod=LateSunset rgb=49,66,86
+dalc tod=Sunrise axis=X+ rgb=47,54,65
+dalc tod=Sunrise axis=X- rgb=31,34,45
+dalc tod=Sunrise axis=Y+ rgb=34,38,45
+dalc tod=Sunrise axis=Y- rgb=46,57,64
+dalc tod=Sunrise axis=Z+ rgb=27,43,56
+dalc tod=Sunrise axis=Z- rgb=80,116,156
+dalc tod=Sunrise axis=Spec rgb=0,0,0
+dalc tod=Day axis=X+ rgb=97,113,130
+dalc tod=Day axis=X- rgb=75,93,111
+dalc tod=Day axis=Y+ rgb=82,96,111
+dalc tod=Day axis=Y- rgb=93,113,132
+dalc tod=Day axis=Z+ rgb=42,52,62
+dalc tod=Day axis=Z- rgb=101,133,169
+dalc tod=Day axis=Spec rgb=161,176,180
+dalc tod=Sunset axis=X+ rgb=52,57,70
+dalc tod=Sunset axis=X- rgb=40,45,54
+dalc tod=Sunset axis=Y+ rgb=37,43,55
+dalc tod=Sunset axis=Y- rgb=45,55,69
+dalc tod=Sunset axis=Z+ rgb=35,48,62
+dalc tod=Sunset axis=Z- rgb=92,117,159
+dalc tod=Sunset axis=Spec rgb=0,0,0
+dalc tod=Night axis=X+ rgb=16,24,31
+dalc tod=Night axis=X- rgb=12,17,23
+dalc tod=Night axis=Y+ rgb=14,20,27
+dalc tod=Night axis=Y- rgb=16,21,27
+dalc tod=Night axis=Z+ rgb=13,19,25
+dalc tod=Night axis=Z- rgb=38,54,71
+dalc tod=Night axis=Spec rgb=0,0,0
+dalc tod=EarlySunrise axis=X+ rgb=37,43,51
+dalc tod=EarlySunrise axis=X- rgb=30,33,42
+dalc tod=EarlySunrise axis=Y+ rgb=32,36,43
+dalc tod=EarlySunrise axis=Y- rgb=36,46,51
+dalc tod=EarlySunrise axis=Z+ rgb=27,43,51
+dalc tod=EarlySunrise axis=Z- rgb=68,98,133
+dalc tod=EarlySunrise axis=Spec rgb=0,0,0
+dalc tod=LateSunrise axis=X+ rgb=89,98,117
+dalc tod=LateSunrise axis=X- rgb=67,75,91
+dalc tod=LateSunrise axis=Y+ rgb=67,76,90
+dalc tod=LateSunrise axis=Y- rgb=80,98,113
+dalc tod=LateSunrise axis=Z+ rgb=49,60,72
+dalc tod=LateSunrise axis=Z- rgb=104,128,171
+dalc tod=LateSunrise axis=Spec rgb=94,102,105
+dalc tod=EarlySunset axis=X+ rgb=80,91,107
+dalc tod=EarlySunset axis=X- rgb=70,76,91
+dalc tod=EarlySunset axis=Y+ rgb=63,72,87
+dalc tod=EarlySunset axis=Y- rgb=78,94,115
+dalc tod=EarlySunset axis=Z+ rgb=40,49,62
+dalc tod=EarlySunset axis=Z- rgb=104,123,165
+dalc tod=EarlySunset axis=Spec rgb=94,102,105
+dalc tod=LateSunset axis=X+ rgb=64,73,86
+dalc tod=LateSunset axis=X- rgb=47,52,65
+dalc tod=LateSunset axis=Y+ rgb=22,25,30
+dalc tod=LateSunset axis=Y- rgb=16,20,23
+dalc tod=LateSunset axis=Z+ rgb=29,39,55
+dalc tod=LateSunset axis=Z- rgb=70,101,136
+dalc tod=LateSunset axis=Spec rgb=0,0,0
+tod hour=12.0000 a=Day b=Day t=0.0000 keys=Day
+sun hour=12.0000 disc=50.000,25.000,350.000 light=0.18996,0.09498,0.97719
+blend hour=12.0000 sunlight=225.00,225.00,225.00 ambient=93.00,93.00,93.00 dalcZm=101.00,133.00,169.00
+tod hour=1.0000 a=Night b=Night t=0.0000 keys=Night
+sun hour=1.0000 disc=600.000,25.000,-200.000 light=0.87476,0.03645,0.48318
+blend hour=1.0000 sunlight=53.00,70.00,87.00 ambient=2.00,2.00,2.00 dalcZm=38.00,54.00,71.00
+tod hour=6.0000 a=EarlySunrise b=Sunrise t=0.3333 keys=EarlySunrise->Sunrise 33%
+sun hour=6.0000 disc=350.000,25.000,50.000 light=0.88173,0.06298,0.46753
+blend hour=6.0000 sunlight=61.00,79.33,101.33 ambient=82.00,82.00,82.00 dalcZm=72.00,104.00,140.67
+tod hour=7.0000 a=Sunrise b=LateSunrise t=0.2222 keys=Sunrise->LateSunrise 22%
+sun hour=7.0000 disc=300.000,25.000,100.000 light=0.87255,0.07271,0.48308
+blend hour=7.0000 sunlight=121.22,119.56,133.33 ambient=83.56,83.56,83.56 dalcZm=85.33,118.67,159.33
+tod hour=9.0000 a=Day b=Day t=0.0000 keys=Day
+sun hour=9.0000 disc=200.000,25.000,200.000 light=0.79854,0.09982,0.59361
+blend hour=9.0000 sunlight=225.00,225.00,225.00 ambient=93.00,93.00,93.00 dalcZm=101.00,133.00,169.00
+tod hour=17.0000 a=Day b=Day t=0.0000 keys=Day
+sun hour=17.0000 disc=-200.000,25.000,200.000 light=-0.79854,0.09982,0.59361
+blend hour=17.0000 sunlight=225.00,225.00,225.00 ambient=93.00,93.00,93.00 dalcZm=101.00,133.00,169.00
+tod hour=19.5000 a=Sunset b=LateSunset t=0.2222 keys=Sunset->LateSunset 22%
+sun hour=19.5000 disc=-325.000,25.000,75.000 light=-0.87831,0.06756,0.47329
+blend hour=19.5000 sunlight=74.22,92.67,114.11 ambient=52.00,52.00,52.00 dalcZm=87.11,113.44,153.89
+tod hour=22.5000 a=Night b=Night t=0.0000 keys=Night
+sun hour=22.5000 disc=-475.000,25.000,-75.000 light=-0.88233,0.04644,0.46834
+blend hour=22.5000 sunlight=53.00,70.00,87.00 ambient=2.00,2.00,2.00 dalcZm=38.00,54.00,71.00
+tod hour=4.0000 a=Night b=Night t=0.0000 keys=Night
+sun hour=4.0000 disc=450.000,25.000,-50.000 light=0.88338,0.04908,0.46609
+blend hour=4.0000 sunlight=53.00,70.00,87.00 ambient=2.00,2.00,2.00 dalcZm=38.00,54.00,71.00
+fogrec fnam=72 nam4=1 dirfogpower=8 colorext=2 fog=3000,250000,800,250000,0.35,0.3,0.85,0.85,64,25000,64,10000,0.95,0.975,64,15000,64,10000 scale=1,1,1,1,1,1,1,1,1,1.4,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1.1,1,1,1,1,1,1
+fog hour=12.0000 w=1.0000 ext=2.000 near=0.0 far=250000.0 power=0.3500 max=0.8500 hds=0.9500 nmid=64.0 nrange=25000.0 fmid=64.0 frange=15000.0 keys=Day,Day,0.000000 scale=1.0000,1.4000,1.0000,1.1000 nearlow=0.07384,0.20472,0.44787 farlow=0.81535,1.12299,1.53025 nearhigh=0.03703,0.06576,0.10871 farhigh=0.20984,0.36163,0.56618 effoff=0
+fogk hour=12.0000 row=41 v=3.99999999e-06,1.99999995e-05,0,-0.49871999
+fogk hour=12.0000 row=42 v=0.0738377571,0.204716593,0.447874665,0.349999994
+fogk hour=12.0000 row=43 v=0.0370307826,0.0657567382,0.108712383,0.850000024
+fogk hour=12.0000 row=44 v=0.815354109,1.12298834,1.53024709,0.949999988
+fogk hour=12.0000 row=45 v=0.209840968,0.361634016,0.566183329,0
+fogk hour=12.0000 row=46 v=1.99999995e-05,3.33333337e-05,-0.49871999,-0.49786666
+fogprobe hour=12.0000 d=500.0 z=0.0 ramp=0.002000 f=0.002000 hb=0.498718 intensity=0.113595 alpha=0.014768 color=0.107496,0.204466,0.366279
+fogprobe hour=12.0000 d=3000.0 z=64.0 ramp=0.012000 f=0.012000 hb=0.500000 intensity=0.212674 alpha=0.165885 color=0.152661,0.264345,0.442035
+fogprobe hour=12.0000 d=4096.0 z=0.0 ramp=0.016384 f=0.016384 hb=0.498706 intensity=0.237163 alpha=0.231249 color=0.164079,0.279583,0.461521
+fogprobe hour=12.0000 d=4096.0 z=64.0 ramp=0.016384 f=0.016384 hb=0.500000 intensity=0.237163 alpha=0.231234 color=0.163856,0.279212,0.460890
+fogprobe hour=12.0000 d=5793.0 z=0.0 ramp=0.023172 f=0.023172 hb=0.498700 intensity=0.267755 alpha=0.261078 color=0.178088,0.298181,0.485102
+fogprobe hour=12.0000 d=64750.0 z=64.0 ramp=0.259000 f=0.259000 hb=0.500000 intensity=0.623239 alpha=0.607659 color=0.340356,0.513590,0.758139
+fogprobe hour=12.0000 d=188250.0 z=64.0 ramp=0.753000 f=0.753000 hb=0.500000 intensity=0.851800 alpha=0.830505 color=0.444846,0.652343,0.934113
+fogprobe hour=12.0000 d=250000.0 z=64.0 ramp=1.000000 f=1.000000 hb=0.500000 intensity=1.000000 alpha=0.975000 color=0.512598,0.742311,1.048215
+fogprobe hour=12.0000 d=250000.0 z=20000.0 ramp=1.000000 f=1.000000 hb=1.000000 intensity=1.000000 alpha=0.950000 color=0.209841,0.361634,0.566183
+fogprobe hour=12.0000 d=250000.0 z=-20000.0 ramp=1.000000 f=1.000000 hb=0.000000 intensity=1.000000 alpha=1.000000 color=0.815354,1.122988,1.530247
+fogprobe hour=12.0000 d=800.0 z=0.0 ramp=0.003200 f=0.003200 hb=0.498717 intensity=0.133907 alpha=0.027854 color=0.116796,0.216813,0.381934
+fogprobe hour=12.0000 d=62950.0 z=64.0 ramp=0.251800 f=0.251800 hb=0.500000 intensity=0.617120 alpha=0.601692 color=0.337559,0.509874,0.753428
+fogprobe hour=12.0000 d=64750.0 z=12000.0 ramp=0.259000 f=0.259000 hb=0.779939 intensity=0.623239 alpha=0.598935 color=0.230831,0.366101,0.554168
+fog hour=1.0000 w=0.0000 ext=2.000 near=0.0 far=250000.0 power=0.3000 max=0.8500 hds=0.9750 nmid=64.0 nrange=10000.0 fmid=64.0 frange=10000.0 keys=Night,Night,0.000000 scale=1.0000,1.0000,1.0000,1.0000 nearlow=0.00011,0.00026,0.00064 farlow=0.01992,0.03847,0.06382 nearhigh=0.00002,0.00006,0.00018 farhigh=0.00412,0.01040,0.02201 effoff=0
+fogk hour=1.0000 row=41 v=3.99999999e-06,4.99999987e-05,0,-0.496800005
+fogk hour=1.0000 row=42 v=0.000107197047,0.000261569046,0.000638199563,0.300000012
+fogk hour=1.0000 row=43 v=2.33306164e-05,5.69269796e-05,0.000175128283,0.850000024
+fogk hour=1.0000 row=44 v=0.0199191738,0.0384744741,0.0638156459,0.975000024
+fogk hour=1.0000 row=45 v=0.00411663484,0.010398305,0.022013247,0
+fogk hour=1.0000 row=46 v=4.99999987e-05,4.99999987e-05,-0.496800005,-0.496800005
+fogprobe hour=1.0000 d=500.0 z=0.0 ramp=0.002000 f=0.002000 hb=0.496800 intensity=0.154992 alpha=0.020409 color=0.001926,0.003936,0.007017
+fogprobe hour=1.0000 d=3000.0 z=64.0 ramp=0.012000 f=0.012000 hb=0.500000 intensity=0.265310 alpha=0.209595 color=0.003236,0.006600,0.011684
+fogprobe hour=1.0000 d=4096.0 z=0.0 ramp=0.016384 f=0.016384 hb=0.496800 intensity=0.291290 alpha=0.287672 color=0.003562,0.007258,0.012829
+fogprobe hour=1.0000 d=4096.0 z=64.0 ramp=0.016384 f=0.016384 hb=0.500000 intensity=0.291290 alpha=0.287649 color=0.003547,0.007231,0.012789
+fogprobe hour=1.0000 d=5793.0 z=0.0 ramp=0.023172 f=0.023172 hb=0.496800 intensity=0.323213 alpha=0.319199 color=0.003945,0.008035,0.014190
+fogprobe hour=1.0000 d=64750.0 z=64.0 ramp=0.259000 f=0.259000 hb=0.500000 intensity=0.666791 alpha=0.658456 color=0.008035,0.016347,0.028750
+fogprobe hour=1.0000 d=188250.0 z=64.0 ramp=0.753000 f=0.753000 hb=0.500000 intensity=0.851800 alpha=0.841153 color=0.010247,0.020839,0.036615
+fogprobe hour=1.0000 d=250000.0 z=64.0 ramp=1.000000 f=1.000000 hb=0.500000 intensity=1.000000 alpha=0.987500 color=0.012018,0.024436,0.042914
+fogprobe hour=1.0000 d=250000.0 z=20000.0 ramp=1.000000 f=1.000000 hb=1.000000 intensity=1.000000 alpha=0.975000 color=0.004117,0.010398,0.022013
+fogprobe hour=1.0000 d=250000.0 z=-20000.0 ramp=1.000000 f=1.000000 hb=0.000000 intensity=1.000000 alpha=1.000000 color=0.019919,0.038474,0.063816
+fogprobe hour=1.0000 d=800.0 z=0.0 ramp=0.003200 f=0.003200 hb=0.496800 intensity=0.178462 alpha=0.037599 color=0.002208,0.004508,0.008018
+fogprobe hour=1.0000 d=62950.0 z=64.0 ramp=0.251800 f=0.251800 hb=0.500000 intensity=0.661175 alpha=0.652911 color=0.007968,0.016211,0.028512
+fogprobe hour=1.0000 d=64750.0 z=12000.0 ramp=0.259000 f=0.259000 hb=1.000000 intensity=0.666791 alpha=0.650122 color=0.002753,0.006952,0.014737
+fog hour=6.0000 w=0.5000 ext=2.000 near=0.0 far=250000.0 power=0.3250 max=0.8500 hds=0.9625 nmid=64.0 nrange=17500.0 fmid=64.0 frange=12500.0 keys=Sunrise,LateSunrise,0.000000 scale=1.0000,1.0000,1.0000,1.0000 nearlow=0.04944,0.09152,0.13610 farlow=0.26318,0.28014,0.44233 nearhigh=0.00503,0.02310,0.05459 farhigh=0.11927,0.18700,0.33923 effoff=0
+fogk hour=6.0000 row=41 v=3.99999999e-06,2.85714286e-05,0,-0.498171419
+fogk hour=6.0000 row=42 v=0.0494362973,0.0915223062,0.136100248,0.324999988
+fogk hour=6.0000 row=43 v=0.0050293114,0.023104379,0.0545928441,0.850000024
+fogk hour=6.0000 row=44 v=0.263182789,0.280137956,0.442327827,0.962499976
+fogk hour=6.0000 row=45 v=0.11927098,0.186996073,0.339226842,0
+fogk hour=6.0000 row=46 v=2.85714286e-05,3.9999999e-05,-0.498171419,-0.49744001
+fogprobe hour=6.0000 d=500.0 z=0.0 ramp=0.002000 f=0.002000 hb=0.498170 intensity=0.132689 alpha=0.017361 color=0.049098,0.080831,0.134701
+fogprobe hour=6.0000 d=3000.0 z=64.0 ramp=0.012000 f=0.012000 hb=0.500000 intensity=0.237538 alpha=0.186468 color=0.066188,0.099180,0.165523
+fogprobe hour=6.0000 d=4096.0 z=0.0 ramp=0.016384 f=0.016384 hb=0.498159 intensity=0.262837 alpha=0.257927 color=0.070466,0.103777,0.173157
+fogprobe hour=6.0000 d=4096.0 z=64.0 ramp=0.016384 f=0.016384 hb=0.500000 intensity=0.262837 alpha=0.257909 color=0.070337,0.103639,0.172997
+fogprobe hour=6.0000 d=5793.0 z=0.0 ramp=0.023172 f=0.023172 hb=0.498154 intensity=0.294180 alpha=0.288684 color=0.075613,0.109303,0.182419
+fogprobe hour=6.0000 d=64750.0 z=64.0 ramp=0.259000 f=0.259000 hb=0.500000 intensity=0.644648 alpha=0.632561 color=0.132951,0.170935,0.285795
+fogprobe hour=6.0000 d=188250.0 z=64.0 ramp=0.753000 f=0.753000 hb=0.500000 intensity=0.851800 alpha=0.835829 color=0.166923,0.207446,0.346994
+fogprobe hour=6.0000 d=250000.0 z=64.0 ramp=1.000000 f=1.000000 hb=0.500000 intensity=1.000000 alpha=0.981250 color=0.191227,0.233567,0.390777
+fogprobe hour=6.0000 d=250000.0 z=20000.0 ramp=1.000000 f=1.000000 hb=1.000000 intensity=1.000000 alpha=0.962500 color=0.119271,0.186996,0.339227
+fogprobe hour=6.0000 d=250000.0 z=-20000.0 ramp=1.000000 f=1.000000 hb=0.000000 intensity=1.000000 alpha=1.000000 color=0.263183,0.280138,0.442328
+fogprobe hour=6.0000 d=800.0 z=0.0 ramp=0.003200 f=0.003200 hb=0.498169 intensity=0.154587 alpha=0.032363 color=0.052694,0.084692,0.141172
+fogprobe hour=6.0000 d=62950.0 z=64.0 ramp=0.251800 f=0.251800 hb=0.500000 intensity=0.638768 alpha=0.626791 color=0.131987,0.169899,0.284058
+fogprobe hour=6.0000 d=64750.0 z=12000.0 ramp=0.259000 f=0.259000 hb=0.876359 intensity=0.644648 alpha=0.623462 color=0.092096,0.139187,0.249880
+fog hour=7.0000 w=0.6667 ext=2.000 near=0.0 far=250000.0 power=0.3333 max=0.8500 hds=0.9583 nmid=64.0 nrange=20000.0 fmid=64.0 frange=13333.3 keys=Sunrise,LateSunrise,0.666667 scale=1.0000,1.0000,1.0000,1.0000 nearlow=0.16227,0.30779,0.54016 farlow=0.26471,0.34381,0.57246 nearhigh=0.00880,0.03371,0.08961 farhigh=0.22688,0.34504,0.60841 effoff=0
+fogk hour=7.0000 row=41 v=3.99999999e-06,2.49999994e-05,0,-0.498400003
+fogk hour=7.0000 row=42 v=0.162265956,0.307787985,0.540158033,0.333333343
+fogk hour=7.0000 row=43 v=0.00880116597,0.033708863,0.0896115378,0.850000024
+fogk hour=7.0000 row=44 v=0.264708757,0.343808115,0.572461009,0.958333313
+fogk hour=7.0000 row=45 v=0.226884589,0.345040411,0.60840714,0
+fogk hour=7.0000 row=46 v=2.49999994e-05,3.75000018e-05,-0.498400003,-0.497599989
+fogprobe hour=7.0000 d=500.0 z=0.0 ramp=0.002000 f=0.002000 hb=0.498398 intensity=0.125992 alpha=0.016450 color=0.105948,0.193014,0.350225
+fogprobe hour=7.0000 d=3000.0 z=64.0 ramp=0.012000 f=0.012000 hb=0.500000 intensity=0.228943 alpha=0.179339 color=0.122225,0.210510,0.377970
+fogprobe hour=7.0000 d=4096.0 z=0.0 ramp=0.016384 f=0.016384 hb=0.498387 intensity=0.253984 alpha=0.248710 color=0.126438,0.215189,0.385397
+fogprobe hour=7.0000 d=4096.0 z=64.0 ramp=0.016384 f=0.016384 hb=0.500000 intensity=0.253984 alpha=0.248693 color=0.126238,0.214859,0.384870
+fogprobe hour=7.0000 d=5793.0 z=0.0 ramp=0.023172 f=0.023172 hb=0.498381 intensity=0.285094 alpha=0.279174 color=0.131419,0.220579,0.393947
+fogprobe hour=7.0000 d=64750.0 z=64.0 ramp=0.259000 f=0.259000 hb=0.500000 intensity=0.637431 alpha=0.624151 color=0.187690,0.281455,0.490528
+fogprobe hour=7.0000 d=188250.0 z=64.0 ramp=0.753000 f=0.753000 hb=0.500000 intensity=0.851800 alpha=0.834054 color=0.222046,0.318686,0.549598
+fogprobe hour=7.0000 d=250000.0 z=64.0 ramp=1.000000 f=1.000000 hb=0.500000 intensity=1.000000 alpha=0.979167 color=0.245797,0.344424,0.590434
+fogprobe hour=7.0000 d=250000.0 z=20000.0 ramp=1.000000 f=1.000000 hb=1.000000 intensity=1.000000 alpha=0.958333 color=0.226885,0.345040,0.608407
+fogprobe hour=7.0000 d=250000.0 z=-20000.0 ramp=1.000000 f=1.000000 hb=0.000000 intensity=1.000000 alpha=1.000000 color=0.264709,0.343808,0.572461
+fogprobe hour=7.0000 d=800.0 z=0.0 ramp=0.003200 f=0.003200 hb=0.498397 intensity=0.147361 alpha=0.030784 color=0.109369,0.196716,0.356097
+fogprobe hour=7.0000 d=62950.0 z=64.0 ramp=0.251800 f=0.251800 hb=0.500000 intensity=0.631469 alpha=0.618313 color=0.186735,0.280419,0.488886
+fogprobe hour=7.0000 d=64750.0 z=12000.0 ramp=0.259000 f=0.259000 hb=0.837043 intensity=0.637431 alpha=0.615200 color=0.160810,0.248227,0.443194
+fog hour=9.0000 w=1.0000 ext=2.000 near=0.0 far=250000.0 power=0.3500 max=0.8500 hds=0.9500 nmid=64.0 nrange=25000.0 fmid=64.0 frange=15000.0 keys=Day,Day,0.000000 scale=1.0000,1.4000,1.0000,1.1000 nearlow=0.07384,0.20472,0.44787 farlow=0.81535,1.12299,1.53025 nearhigh=0.03703,0.06576,0.10871 farhigh=0.20984,0.36163,0.56618 effoff=0
+fogk hour=9.0000 row=41 v=3.99999999e-06,1.99999995e-05,0,-0.49871999
+fogk hour=9.0000 row=42 v=0.0738377571,0.204716593,0.447874665,0.349999994
+fogk hour=9.0000 row=43 v=0.0370307826,0.0657567382,0.108712383,0.850000024
+fogk hour=9.0000 row=44 v=0.815354109,1.12298834,1.53024709,0.949999988
+fogk hour=9.0000 row=45 v=0.209840968,0.361634016,0.566183329,0
+fogk hour=9.0000 row=46 v=1.99999995e-05,3.33333337e-05,-0.49871999,-0.49786666
+fogprobe hour=9.0000 d=500.0 z=0.0 ramp=0.002000 f=0.002000 hb=0.498718 intensity=0.113595 alpha=0.014768 color=0.107496,0.204466,0.366279
+fogprobe hour=9.0000 d=3000.0 z=64.0 ramp=0.012000 f=0.012000 hb=0.500000 intensity=0.212674 alpha=0.165885 color=0.152661,0.264345,0.442035
+fogprobe hour=9.0000 d=4096.0 z=0.0 ramp=0.016384 f=0.016384 hb=0.498706 intensity=0.237163 alpha=0.231249 color=0.164079,0.279583,0.461521
+fogprobe hour=9.0000 d=4096.0 z=64.0 ramp=0.016384 f=0.016384 hb=0.500000 intensity=0.237163 alpha=0.231234 color=0.163856,0.279212,0.460890
+fogprobe hour=9.0000 d=5793.0 z=0.0 ramp=0.023172 f=0.023172 hb=0.498700 intensity=0.267755 alpha=0.261078 color=0.178088,0.298181,0.485102
+fogprobe hour=9.0000 d=64750.0 z=64.0 ramp=0.259000 f=0.259000 hb=0.500000 intensity=0.623239 alpha=0.607659 color=0.340356,0.513590,0.758139
+fogprobe hour=9.0000 d=188250.0 z=64.0 ramp=0.753000 f=0.753000 hb=0.500000 intensity=0.851800 alpha=0.830505 color=0.444846,0.652343,0.934113
+fogprobe hour=9.0000 d=250000.0 z=64.0 ramp=1.000000 f=1.000000 hb=0.500000 intensity=1.000000 alpha=0.975000 color=0.512598,0.742311,1.048215
+fogprobe hour=9.0000 d=250000.0 z=20000.0 ramp=1.000000 f=1.000000 hb=1.000000 intensity=1.000000 alpha=0.950000 color=0.209841,0.361634,0.566183
+fogprobe hour=9.0000 d=250000.0 z=-20000.0 ramp=1.000000 f=1.000000 hb=0.000000 intensity=1.000000 alpha=1.000000 color=0.815354,1.122988,1.530247
+fogprobe hour=9.0000 d=800.0 z=0.0 ramp=0.003200 f=0.003200 hb=0.498717 intensity=0.133907 alpha=0.027854 color=0.116796,0.216813,0.381934
+fogprobe hour=9.0000 d=62950.0 z=64.0 ramp=0.251800 f=0.251800 hb=0.500000 intensity=0.617120 alpha=0.601692 color=0.337559,0.509874,0.753428
+fogprobe hour=9.0000 d=64750.0 z=12000.0 ramp=0.259000 f=0.259000 hb=0.779939 intensity=0.623239 alpha=0.598935 color=0.230831,0.366101,0.554168
+fog hour=17.0000 w=1.0000 ext=2.000 near=0.0 far=250000.0 power=0.3500 max=0.8500 hds=0.9500 nmid=64.0 nrange=25000.0 fmid=64.0 frange=15000.0 keys=Day,Day,0.000000 scale=1.0000,1.4000,1.0000,1.1000 nearlow=0.07384,0.20472,0.44787 farlow=0.81535,1.12299,1.53025 nearhigh=0.03703,0.06576,0.10871 farhigh=0.20984,0.36163,0.56618 effoff=0
+fogk hour=17.0000 row=41 v=3.99999999e-06,1.99999995e-05,0,-0.49871999
+fogk hour=17.0000 row=42 v=0.0738377571,0.204716593,0.447874665,0.349999994
+fogk hour=17.0000 row=43 v=0.0370307826,0.0657567382,0.108712383,0.850000024
+fogk hour=17.0000 row=44 v=0.815354109,1.12298834,1.53024709,0.949999988
+fogk hour=17.0000 row=45 v=0.209840968,0.361634016,0.566183329,0
+fogk hour=17.0000 row=46 v=1.99999995e-05,3.33333337e-05,-0.49871999,-0.49786666
+fogprobe hour=17.0000 d=500.0 z=0.0 ramp=0.002000 f=0.002000 hb=0.498718 intensity=0.113595 alpha=0.014768 color=0.107496,0.204466,0.366279
+fogprobe hour=17.0000 d=3000.0 z=64.0 ramp=0.012000 f=0.012000 hb=0.500000 intensity=0.212674 alpha=0.165885 color=0.152661,0.264345,0.442035
+fogprobe hour=17.0000 d=4096.0 z=0.0 ramp=0.016384 f=0.016384 hb=0.498706 intensity=0.237163 alpha=0.231249 color=0.164079,0.279583,0.461521
+fogprobe hour=17.0000 d=4096.0 z=64.0 ramp=0.016384 f=0.016384 hb=0.500000 intensity=0.237163 alpha=0.231234 color=0.163856,0.279212,0.460890
+fogprobe hour=17.0000 d=5793.0 z=0.0 ramp=0.023172 f=0.023172 hb=0.498700 intensity=0.267755 alpha=0.261078 color=0.178088,0.298181,0.485102
+fogprobe hour=17.0000 d=64750.0 z=64.0 ramp=0.259000 f=0.259000 hb=0.500000 intensity=0.623239 alpha=0.607659 color=0.340356,0.513590,0.758139
+fogprobe hour=17.0000 d=188250.0 z=64.0 ramp=0.753000 f=0.753000 hb=0.500000 intensity=0.851800 alpha=0.830505 color=0.444846,0.652343,0.934113
+fogprobe hour=17.0000 d=250000.0 z=64.0 ramp=1.000000 f=1.000000 hb=0.500000 intensity=1.000000 alpha=0.975000 color=0.512598,0.742311,1.048215
+fogprobe hour=17.0000 d=250000.0 z=20000.0 ramp=1.000000 f=1.000000 hb=1.000000 intensity=1.000000 alpha=0.950000 color=0.209841,0.361634,0.566183
+fogprobe hour=17.0000 d=250000.0 z=-20000.0 ramp=1.000000 f=1.000000 hb=0.000000 intensity=1.000000 alpha=1.000000 color=0.815354,1.122988,1.530247
+fogprobe hour=17.0000 d=800.0 z=0.0 ramp=0.003200 f=0.003200 hb=0.498717 intensity=0.133907 alpha=0.027854 color=0.116796,0.216813,0.381934
+fogprobe hour=17.0000 d=62950.0 z=64.0 ramp=0.251800 f=0.251800 hb=0.500000 intensity=0.617120 alpha=0.601692 color=0.337559,0.509874,0.753428
+fogprobe hour=17.0000 d=64750.0 z=12000.0 ramp=0.259000 f=0.259000 hb=0.779939 intensity=0.623239 alpha=0.598935 color=0.230831,0.366101,0.554168
+fog hour=19.5000 w=0.5833 ext=2.000 near=0.0 far=250000.0 power=0.3292 max=0.8500 hds=0.9604 nmid=64.0 nrange=18750.0 fmid=64.0 frange=12916.7 keys=EarlySunset,Sunset,0.666667 scale=1.0000,1.0000,1.0000,1.0000 nearlow=0.09545,0.15828,0.24267 farlow=0.16197,0.21060,0.37098 nearhigh=0.00461,0.01289,0.02338 farhigh=0.07108,0.10147,0.18107 effoff=0
+fogk hour=19.5000 row=41 v=3.99999999e-06,2.66666666e-05,0,-0.49829334
+fogk hour=19.5000 row=42 v=0.0954508036,0.158281997,0.242669761,0.329166681
+fogk hour=19.5000 row=43 v=0.00461207842,0.0128942467,0.0233760849,0.850000024
+fogk hour=19.5000 row=44 v=0.161973432,0.210599661,0.370981574,0.960416675
+fogk hour=19.5000 row=45 v=0.0710770264,0.101473629,0.181073651,0
+fogk hour=19.5000 row=46 v=2.66666666e-05,3.8709677e-05,-0.49829334,-0.497522593
+fogprobe hour=19.5000 d=500.0 z=0.0 ramp=0.002000 f=0.002000 hb=0.498292 intensity=0.129297 alpha=0.016900 color=0.058784,0.094937,0.151881
+fogprobe hour=19.5000 d=3000.0 z=64.0 ramp=0.012000 f=0.012000 hb=0.500000 intensity=0.233201 alpha=0.182868 color=0.065538,0.102017,0.166372
+fogprobe hour=19.5000 d=4096.0 z=0.0 ramp=0.016384 f=0.016384 hb=0.498281 intensity=0.258373 alpha=0.253277 color=0.067368,0.104024,0.170335
+fogprobe hour=19.5000 d=4096.0 z=64.0 ramp=0.016384 f=0.016384 hb=0.500000 intensity=0.258373 alpha=0.253259 color=0.067212,0.103790,0.169971
+fogprobe hour=19.5000 d=5793.0 z=0.0 ramp=0.023172 f=0.023172 hb=0.498275 intensity=0.289601 alpha=0.283889 color=0.069445,0.106223,0.174801
+fogprobe hour=19.5000 d=64750.0 z=64.0 ramp=0.259000 f=0.259000 hb=0.500000 intensity=0.641029 alpha=0.628342 color=0.092656,0.130748,0.224693
+fogprobe hour=19.5000 d=188250.0 z=64.0 ramp=0.753000 f=0.753000 hb=0.500000 intensity=0.851800 alpha=0.834942 color=0.106671,0.145596,0.254834
+fogprobe hour=19.5000 d=250000.0 z=64.0 ramp=1.000000 f=1.000000 hb=0.500000 intensity=1.000000 alpha=0.980208 color=0.116525,0.156037,0.276028
+fogprobe hour=19.5000 d=250000.0 z=20000.0 ramp=1.000000 f=1.000000 hb=1.000000 intensity=1.000000 alpha=0.960417 color=0.071077,0.101474,0.181074
+fogprobe hour=19.5000 d=250000.0 z=-20000.0 ramp=1.000000 f=1.000000 hb=0.000000 intensity=1.000000 alpha=1.000000 color=0.161973,0.210600,0.370982
+fogprobe hour=19.5000 d=800.0 z=0.0 ramp=0.003200 f=0.003200 hb=0.498291 intensity=0.150931 alpha=0.031564 color=0.060223,0.096460,0.154974
+fogprobe hour=19.5000 d=62950.0 z=64.0 ramp=0.251800 f=0.251800 hb=0.500000 intensity=0.635108 alpha=0.622538 color=0.092262,0.130331,0.223846
+fogprobe hour=19.5000 d=64750.0 z=12000.0 ramp=0.259000 f=0.259000 hb=0.855523 intensity=0.641029 alpha=0.619321 color=0.060347,0.087323,0.153426
+fog hour=22.5000 w=0.0833 ext=2.000 near=0.0 far=250000.0 power=0.3042 max=0.8500 hds=0.9729 nmid=64.0 nrange=11250.0 fmid=64.0 frange=10416.7 keys=LateSunset,Night,0.666667 scale=1.0000,1.0000,1.0000,1.0000 nearlow=0.00368,0.00545,0.00789 farlow=0.03039,0.05532,0.09603 nearhigh=0.00099,0.00193,0.00446 farhigh=0.00901,0.01983,0.03874 effoff=0
+fogk hour=22.5000 row=41 v=3.99999999e-06,4.44444449e-05,0,-0.497155547
+fogk hour=22.5000 row=42 v=0.00368278404,0.00545437448,0.00789067522,0.304166675
+fogk hour=22.5000 row=43 v=0.000988798332,0.00193323533,0.00445805909,0.850000024
+fogk hour=22.5000 row=44 v=0.030390542,0.0553158708,0.096025832,0.972916663
+fogk hour=22.5000 row=45 v=0.00901088957,0.0198281687,0.0387398489,0
+fogk hour=22.5000 row=46 v=4.44444449e-05,4.79999981e-05,-0.497155547,-0.496928006
+fogprobe hour=22.5000 d=500.0 z=0.0 ramp=0.002000 f=0.002000 hb=0.497155 intensity=0.151030 alpha=0.019866 color=0.004974,0.008834,0.015452
+fogprobe hour=22.5000 d=3000.0 z=64.0 ramp=0.012000 f=0.012000 hb=0.500000 intensity=0.260466 alpha=0.205551 color=0.006859,0.012518,0.022117
+fogprobe hour=22.5000 d=4096.0 z=0.0 ramp=0.016384 f=0.016384 hb=0.497152 intensity=0.286343 alpha=0.282487 color=0.007331,0.013431,0.023755
+fogprobe hour=22.5000 d=4096.0 z=64.0 ramp=0.016384 f=0.016384 hb=0.500000 intensity=0.286343 alpha=0.282465 color=0.007308,0.013395,0.023701
+fogprobe hour=22.5000 d=5793.0 z=0.0 ramp=0.023172 f=0.023172 hb=0.497150 intensity=0.318183 alpha=0.313898 color=0.007886,0.014512,0.025708
+fogprobe hour=22.5000 d=64750.0 z=64.0 ramp=0.259000 f=0.259000 hb=0.500000 intensity=0.663049 alpha=0.654070 color=0.013850,0.026157,0.046759
+fogprobe hour=22.5000 d=188250.0 z=64.0 ramp=0.753000 f=0.753000 hb=0.500000 intensity=0.851800 alpha=0.840265 color=0.017127,0.032551,0.058312
+fogprobe hour=22.5000 d=250000.0 z=64.0 ramp=1.000000 f=1.000000 hb=0.500000 intensity=1.000000 alpha=0.986458 color=0.019701,0.037572,0.067383
+fogprobe hour=22.5000 d=250000.0 z=20000.0 ramp=1.000000 f=1.000000 hb=1.000000 intensity=1.000000 alpha=0.972917 color=0.009011,0.019828,0.038740
+fogprobe hour=22.5000 d=250000.0 z=-20000.0 ramp=1.000000 f=1.000000 hb=0.000000 intensity=1.000000 alpha=1.000000 color=0.030391,0.055316,0.096026
+fogprobe hour=22.5000 d=800.0 z=0.0 ramp=0.003200 f=0.003200 hb=0.497155 intensity=0.174241 alpha=0.036671 color=0.005378,0.009623,0.016876
+fogprobe hour=22.5000 d=62950.0 z=64.0 ramp=0.251800 f=0.251800 hb=0.500000 intensity=0.657387 alpha=0.648485 color=0.013751,0.025965,0.046412
+fogprobe hour=22.5000 d=64750.0 z=12000.0 ramp=0.259000 f=0.259000 hb=1.000000 intensity=0.663049 alpha=0.645091 color=0.006308,0.013798,0.027189
+fog hour=4.0000 w=0.1667 ext=2.000 near=0.0 far=250000.0 power=0.3083 max=0.8500 hds=0.9708 nmid=64.0 nrange=12500.0 fmid=64.0 frange=10833.3 keys=Night,EarlySunrise,0.666667 scale=1.0000,1.0000,1.0000,1.0000 nearlow=0.00814,0.01383,0.02299 farlow=0.05221,0.08905,0.15848 nearhigh=0.00331,0.00749,0.01423 farhigh=0.01818,0.03773,0.07051 effoff=0
+fogk hour=4.0000 row=41 v=3.99999999e-06,3.9999999e-05,0,-0.49744001
+fogk hour=4.0000 row=42 v=0.00814206898,0.0138293747,0.0229919776,0.308333337
+fogk hour=4.0000 row=43 v=0.00330856023,0.00749488547,0.0142303612,0.849999964
+fogk hour=4.0000 row=44 v=0.0522133857,0.0890484154,0.158480823,0.970833361
+fogk hour=4.0000 row=45 v=0.0181804039,0.0377257094,0.0705059767,0
+fogk hour=4.0000 row=46 v=3.9999999e-05,4.61538475e-05,-0.49744001,-0.497046143
+fogprobe hour=4.0000 d=500.0 z=0.0 ramp=0.002000 f=0.002000 hb=0.497439 intensity=0.147169 alpha=0.019338 color=0.010086,0.018455,0.032774
+fogprobe hour=4.0000 d=3000.0 z=64.0 ramp=0.012000 f=0.012000 hb=0.500000 intensity=0.255710 alpha=0.201585 color=0.013261,0.024144,0.043129
+fogprobe hour=4.0000 d=4096.0 z=0.0 ramp=0.016384 f=0.016384 hb=0.497434 intensity=0.281479 alpha=0.277395 color=0.014054,0.025552,0.045680
+fogprobe hour=4.0000 d=4096.0 z=64.0 ramp=0.016384 f=0.016384 hb=0.500000 intensity=0.281479 alpha=0.277374 color=0.014021,0.025503,0.045600
+fogprobe hour=4.0000 d=5793.0 z=0.0 ramp=0.023172 f=0.023172 hb=0.497431 intensity=0.313230 alpha=0.308686 color=0.014993,0.027230,0.048731
+fogprobe hour=4.0000 d=64750.0 z=64.0 ramp=0.259000 f=0.259000 hb=0.500000 intensity=0.659327 alpha=0.649712 color=0.025157,0.045425,0.081829
+fogprobe hour=4.0000 d=188250.0 z=64.0 ramp=0.753000 f=0.753000 hb=0.500000 intensity=0.851800 alpha=0.839378 color=0.030829,0.055573,0.100284
+fogprobe hour=4.0000 d=250000.0 z=64.0 ramp=1.000000 f=1.000000 hb=0.500000 intensity=1.000000 alpha=0.985417 color=0.035197,0.063387,0.114493
+fogprobe hour=4.0000 d=250000.0 z=20000.0 ramp=1.000000 f=1.000000 hb=1.000000 intensity=1.000000 alpha=0.970833 color=0.018180,0.037726,0.070506
+fogprobe hour=4.0000 d=250000.0 z=-20000.0 ramp=1.000000 f=1.000000 hb=0.000000 intensity=1.000000 alpha=1.000000 color=0.052213,0.089048,0.158481
+fogprobe hour=4.0000 d=800.0 z=0.0 ramp=0.003200 f=0.003200 hb=0.497439 intensity=0.170120 alpha=0.035766 color=0.010764,0.019668,0.034980
+fogprobe hour=4.0000 d=62950.0 z=64.0 ramp=0.251800 f=0.251800 hb=0.500000 intensity=0.653620 alpha=0.644088 color=0.024989,0.045124,0.081282
+fogprobe hour=4.0000 d=64750.0 z=12000.0 ramp=0.259000 f=0.259000 hb=0.983283 intensity=0.659327 alpha=0.640418 color=0.013517,0.028029,0.052354
+rc=0

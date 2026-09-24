@@ -1,0 +1,5 @@
+45108d839c259f56880c57eb9201390f50f44fff release/before_fog1/NifSkope.exe
+629a3911d8a1c33c1879d9762fcfc0ced86c2ebf /e/Projects/NifskopeWildWastelandEdition/release/NifSkope.exe
+old=release/before_fog1
+new=/e/Projects/NifskopeWildWastelandEdition/release
+red=none

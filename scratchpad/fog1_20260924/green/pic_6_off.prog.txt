@@ -1,0 +1,2 @@
+# WW_PROGRAM_CENSUS  light(view) = -0.162733 0.805965 -0.569155
+shape="ACDuctConnector01:0" bsver=130 msn=0 lodland=0 prog=pbrm_default.prog

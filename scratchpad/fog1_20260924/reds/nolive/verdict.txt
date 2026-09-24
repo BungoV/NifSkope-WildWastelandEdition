@@ -1,0 +1,16 @@
+pbr_fog1_gates judge, red=nolive, CommonwealthClear fv=131 FNAM 72 bytes NAM4 yes, TNAM=30,54,102,126,175,68 ext=2 dirfogpower=8
+spec
+  ok   (spec) 06:00 w=0.5 near=1900 power=0.325 -- w=0.5000 near=1900.0 power=0.3250
+  ok   (spec) 01:00 near=800
+  ok   (spec) 12:00 d64750 z64 alpha=0.60018 -- 0.60018
+  ok   (spec) 12:00 nearLow = (0.07383, 0.20471, 0.44787) -- (0.07384, 0.20472, 0.44787)
+live
+    FAIL (live) the Fog row reached the state
+    FAIL (live) Fog on changes the viewport at 01:00 (0 px >= 200)
+    FAIL (live) the echo names the fog pass at night weight 0
+    FAIL (save) the Fog row wrote ON to its setting
+    FAIL (live) the hour row drives the fog (day weight 1 at 12:00)
+    FAIL
+  FAIL the in-app Fog leg passes -- 14 checks, 5 failures
+5 checks, 1 failures
+FAIL
