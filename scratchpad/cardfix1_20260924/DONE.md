@@ -22,6 +22,15 @@ ww-test-harness-add, search-lean (the common rules' list, loaded with the Skill 
   refuses BY NAME ("the card directory holds no card image ... set CARDS=") instead of reading as a
   generator failure. Kept-green runs pass CARDS=<main tree>/scratchpad/showcase1_20260912/cards.
 
+## Step 2 -- the three "empty" models (Sapling01, TreeElmUndergrowth01, ShrubGroupLarge05)
+- Diagnosis: ONE cause, already repaired before this lane. Every BSMeshLODTriShape of these models ships
+  its LOD0 slot empty (0/n/m); the bake used to keep LOD0 only and so drew 0 triangles. IMPOSTORSHRUB1's
+  per-model rule (keep the lowest slot any such shape of the model fills, sidecar `rangekept LOD<k>`) is
+  in the branch point, so this worktree's rung exe ALREADY bakes all three. The brief's red ("the rung exe
+  bakes them empty") therefore cannot be the rung; the red is the exe from before SHRUB1
+  (main release/NifSkope.before_impostorshrub1.exe, 09-23 03:01, copied as release/NifSkope.pre_shrub1.exe).
+- No code change in this step. Evidence script: step2.sh (impostor_shrubs.sh with MATCH per model).
+
 # 3. Gates (numbers; red runs)
 
 ## Step 1 (exe 97716e49, the worktree's first build = the rung, before the comment rebuild)
@@ -39,10 +48,20 @@ FAILS the trunk bar; draw row 18: strongest-frame control breaks popping 2.06/2.
 lodgen_defaults (d): the red is the worktree's own card dir (0 images -> now a NAMED refusal); green = C 7210.
 Outputs: gates/*.new.out, gates/lodgen_defaults_d_maincards.out.
 
+## Step 2 (exe ff86b488, N8 / TILE 512 / REF 1326.5, impostor_shrubs.sh MATCH=<model>)
+| model | this exe: covered texels | pre-SHRUB1 exe (red) |
+|---|---|---|
+| sapling01 | 43,531 (halfW 93.83), S3 ok | 0 (halfW 1.08 = nothing measured), S3 FAIL |
+| treeelmundergrowth01 | 40,952 (halfW 159.13), S3 ok | 0, S3 FAIL |
+| shrubgrouplarge05 | 212,521 (halfW 405.21), S3 ok | 0, S3 FAIL |
+The full 54-model impostor_shrubs.sh run of step 1 (RESULT PASS, 0 empty) covers the same three.
+Outputs: gates/step2_<model>.<new|red>.out.
+
 # 4. Exe sha1 + commits
 - rung / first build: release/NifSkope.exe 97716e4988e493f7b0eab6952780ac18aca0a609 (21:43:55),
   kept as release/NifSkope.before_cardfix1.exe.
 - step 1 build (comments only, 10 objects recompiled): ff86b488aa769d1e453b719ee8e07e5f9ce8164f (22:24:34), same size 24,716,800.
+- commits: step 1 19c0347; step 2 (evidence only) see git log.
 
 # 5. What the final bake needs
 (filled at the end)

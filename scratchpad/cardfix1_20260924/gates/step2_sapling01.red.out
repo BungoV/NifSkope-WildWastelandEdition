@@ -1,0 +1,7 @@
+exe: /e/Projects/NifskopeWWE-cardfix1/release/NifSkope.pre_shrub1.exe (2026-09-24 22:25:09.511367200 +0200 23832064)
+census: 55 models named by the plugin, 54 on disk
+  fewest covered: sapling01                          0 texels  halfW 1.08
+  ok   S2: every model baked (1 of 1)
+  FAIL S3: no model bakes an EMPTY card (1 empty: sapling01(0 texels, halfW 1.07733))
+  FAIL S4: every model with no LOD0 part names the level that served (0 of 1), none with one does (0)
+RESULT FAIL
