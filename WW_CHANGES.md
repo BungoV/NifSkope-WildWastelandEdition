@@ -1,5 +1,1648 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Ledger recovery after the 2026-09-24 wipe (lane LEDGERFIX1)
+
+Documentation only; no code changed. At 13:57 a one-line script emptied
+HANDOFF.md, WW_CHANGES.md and MISTAKES.md. They were rebuilt from the newest
+surviving copies: this file from its 2026-09-10 copy (1,490,786 B, the same
+19,020 CRLF line ends as the 09-09 commit), HANDOFF.md from a 2026-09-12
+snapshot, MISTAKES.md from the 09-09 commit. The nine 2026-09-24 lane entries
+above were re-added from each lane's own text. Entries for 2026-09-10..09-23
+are NOT here; each lane's report stays in its scratchpad folder.
+
+## Weather preview in the Scene window (lane PBRWX1, 2026-09-24)
+
+- **Sky, Clouds, Sun, Moon and Game Day rows** in the Scene popup. Each part switches on live and is off
+  by default; the choice is remembered.
+- **Sky:** the weather's sky colours for the chosen hour, blended the way the game blends them, on the
+  game's own sky dome. With Sky off the Lookdev backdrop is unchanged.
+- **Sun:** the sun disc follows the game's arc for the hour and fades in and out at the same times the
+  game does. With Sun on, the model is lit from where the disc is.
+- **Clouds:** the weather's cloud layers with their own colours, fades and scrolling speed, in real time.
+- **Moon:** the moon rides the same arc at night, with its phase set by Game Day. It gives no light.
+- `weather --sky` on the command line prints the same sky, sun, cloud and moon numbers for any hour.
+- Every part off gives exactly the picture the previous build gave.
+
+## 2026-09-24 -- Engine-research wording (lane TODDSTREAT1)
+
+Documentation only; no code behaviour changed. References to where our engine research comes
+from now use one stand-in name, "Todd's treat", and its query tools are described as kept
+outside this repo. Every function name, RVA, offset and finding is unchanged.
+
+- The engine comparison doc is now `docs/WW_ENGINE_COMPARISON.md`; every citation of it
+  follows.
+- `tools/fo4_crash_triage.sh`: comment reworded; behaviour unchanged.
+- `scratchpad/mountains_20260907/techscan.py` takes the exe path as its first argument
+  instead of a hard-coded local path.
+- `.gitignore` keeps engine dump files in scratchpad folders out of the repo.
+
+## PBR renderer R4 -- tint masks, emission in nits, opacity modes (lane PBRR4, 2026-09-24)
+
+- Tint masks render: up to four mask channels, each with its own colour, blended the way the PBR Material Editor blends them (Normalize, Add or Priority).
+- Emission is now in nits: 100 nits shows as full white before exposure. An emission texture replaces the constant colour unless the material overrides it.
+- The .pbrm's transparency settings now drive the viewport: Opaque, Alpha Test, Alpha Blend, Premultiplied, Additive and Multiply, with its own depth-write switch.
+- Specular weight now follows OpenPBR (IOR remap): lowering the weight dims head-on reflection in proportion but keeps the grazing edge bright.
+- Diffuse matches the game (Burley), now proven by its own gate.
+- New gate script tests/spells/pbr_r4_gates.sh with fixtures tests/spells/pbr_r4_fixtures.py; every gate has a red control.
+
+## Materials: physically based shading for .pbrm materials (stage R3) (lane PBRR3)
+
+- Materials with a .pbrm now use the same lighting model as the game's FO4CS PBR runtime:
+  - GGX highlights with multiscatter energy compensation;
+  - an analytic split-sum environment term;
+  - diffuse light that gives up exactly the energy the reflection takes.
+  Under a uniform white sky, a white metal and a plain dielectric both read 1.00 at every angle.
+- The v6 specular controls now drive the picture:
+  - **Specular weight** (constant or map): 0 removes the reflection completely.
+  - **Specular colour** (constant or map): tints a dielectric's reflection and a metal's edge. The diffuse keeps its own colour.
+  - **Specular IOR** (constant, or the map's alpha over its maximum): IOR 1.5 gives F0 0.040, IOR 2.0 gives 0.111.
+- **Diffuse roughness** (v6 base colour `diffuseRoughness`) switches the diffuse to EON (OpenPBR's rough diffuse) for direct light.
+- Normal maps decode as the game does, (value x 255 - 128) / 127. Back faces light from the correct side.
+- Vertex colours tint a PBR shape only when its shader has the Vertex Colors flag set.
+- **The PBR display is now ON by default.** The Shading menu's Material Workflow starts in **Legacy and PBR**: any shape with a .pbrm renders PBR, and every other shape keeps the legacy look. **Legacy** is still one click away in the same menu.
+- docs/CLI.md documents the `weather` command.
+- Tests: tests/spells/pbr_r3_gates.sh (white furnace, v5/v6 twins, specular weight/IOR/colour, and the display default, each with a red control). pbr_r2a_gates.sh now accepts a relative output folder.
+
+## Scene window: Lookdev mode with real Fallout 4 weather (lane PBRR2B, 2026-09-24)
+
+- **Lighting mode Lookdev.** The Scene window's Mode row now has Legacy, Studio and Lookdev. Lookdev shows the model
+  against a cube background, standing on a ground plane, lit by the sun and sky ambient of a real weather record.
+- **Weather rows.**
+  - Plugin: the Data folder's plugins, plus Browse... for any other file.
+  - Weather: every WTHR in the loaded plugins, as "EditorID [FormID]".
+  - Hour: 0-23.99.
+  - Status: which weather, which time-of-day keys, the sun, where the ambient comes from, which cube, and ground on/off.
+  - All rows apply live and are remembered.
+- **Ground row.** The ground plane can be switched on or off live (default on).
+- **Master check.** A plugin whose master is missing, or loads after it, is refused by name, and nothing is read from it.
+- **Mod overrides win.** A weather changed by a loaded mod (for example FO4CS Physical Weathers) shows the mod's values.
+- **Command line.** `NifSkope.exe -no-gui weather` prints a weather's colours, ambient cube, time-of-day keys, sun
+  direction and blend for any hour. `--census` checks every weather in the load order.
+- **Sun and colours.**
+  - Sun colour, sky ambient (6 directions) and the time-of-day blend follow the engine's own rules.
+  - The sky colours, clouds, moon and fog are not drawn yet (their rows stay greyed).
+  - The cube is not tinted by the weather yet.
+
+## Scene window: Studio lighting, exposure and view transforms for PBR materials (lane PBRR2A, 2026-09-24)
+
+- **New Scene window.** Open it from View > Scene or from the Scene button on the viewport toolbar.
+  - It is a separate window that you can move to any monitor, and it stays above NifSkope.
+  - It remembers its size and position.
+  - Its sections are Mode, Weather, Sky, Ground, Fog and Effects. Only Mode is active in this release; the other rows arrive in later stages.
+- **Lighting: Legacy / Studio.**
+  - Legacy is the look NifSkope has always had, and it is the mode every session starts in.
+  - Studio lights PBR materials physically: linear light, FO4's default outdoor reflection cube (prefiltered the way the game does it), and exposure plus a view transform.
+- **Exposure (EV)** and **View Transform** (Standard, AgX, Khronos PBR Neutral) act in Studio and are remembered between sessions.
+- **PBR Route View** moved from the Render menu into the Scene window.
+- PBR textures are read as sRGB colour whether their DDS is tagged _SRGB or not, so a texture re-saved with the other tag looks identical.
+- Nothing drawn by the classic FO4 shaders has changed (checked pixel for pixel).
+
+## Command line: the glTF export options no longer shadow other commands (2026-09-24, lane PBRLODFIX1)
+
+- The glTF export options (added 2026-09-19) were read for every command-line command, not only for `gltf`.
+  Two of them share a name with older flags: `--data-root` (the LOD generator's loose data folder) and
+  `--skeleton` (the collision report). Since 2026-09-19 a command-line LOD bake silently ignored its
+  `--data-root`, and `collision <nif> --skeleton` refused to run. Both work again; `gltf` / `gltf-export`
+  read their options exactly as before.
+- The far-terrain PBR bake gate (`tests/spells/lodgen_terrain_pbrm.sh`) is back to 14 of 14: its test
+  materials live in the loose folder `--data-root` names, so it had been failing the PBR checks since then.
+
+## 2026-09-24 -- Light angles remembered across restarts (lane LIGHTANGLES1)
+
+- **Fix:** `src/ui/widgets/lightingwidget.cpp` -- the constructor read the light's two angles from `Lighting/Declination`
+  and `Lighting/Planar Angle`, keys nothing writes; `saveSettings()` (the Save Lighting action) writes
+  `Settings/Render/Lighting/Declination` and `.../Planar Angle`. The load now reads those same keys. The old
+  `tmp % 720` fold turned a saved +-180 degrees (+-720 quarter-degrees, a legal value: rotateLight keeps both ends because
+  roundFloat rounds half to even) into 0; the load now wraps with rotateLight's own formula, so the loaded range equals the
+  range the view can hold. Out-of-range stored values wrap by 360 degrees (1000 -> -110, -1600 -> -40), never fold.
+- **New gate** `tests/spells/light_angles.sh` + in-app harness `src/lightanglestest.cpp` (`WW_LIGHTANGLES_TEST`), in a
+  scratch settings scope (`WW_SETTINGS_SCOPE=lightangles1`, deleted before and after; refuses to write without one).
+  Leg roundtrip: six chained launches, each reads what the previous one saved through the real Save Lighting action
+  (37.3/-123.4, 180/-180, -180/180, 0.3/179.8, plus a planted 1000/-1600): 56 checks, 0 failures; +-180 back exact,
+  37.3 back as 37.25 (one 0.25-degree step is the bar). Leg picture (runs on any exe): planted 180/90 with Frontal Light
+  off moves 129,751 px of the BGSM duct vs planted 0/0; 0/0 vs 0/0 noise 0 px; bar 1,000 px.
+- **Red controls:** the literal rung `release/before_lightangles1` (ae101325) -> picture leg 0 px moved, FAIL; the same
+  harness built against the unchanged lightingwidget.cpp (a433c337) -> rt2..rt6 FAIL, each loading 0,0 while the store
+  held the saved value.
+- **Zero set:** `pbr_shade_ab.sh --old release/before_lightangles1` -> 10 cases, 0 failures, 3 empty by the viewer, PASS.
+- `.gitignore`: `tests/fixtures/pbr_data/` (vanilla + FO76 copies; 0 files were tracked).
+- exe 03:48:01, 24,283,136 B, sha1 e5320fdd. Not committed.
+
+## PBR materials, stage R1: find and load a shape's PBR material (2026-09-24, lane PBRR1)
+
+- **PBR materials, stage R1.** NifSkope now finds and loads a PBR material for a shape in this order: a material swap, a `.nifx` sidecar beside the NIF, a `.pbrm` named directly in the shader property or sitting beside its BGSM/BGEM, a Fallout 76 BGSM, and otherwise the legacy material. It reads PBRM versions 4, 5 and 6 (v6 speculars from weight and IOR).
+  - The Lighting menu's PBR mode is selectable. The default stays Legacy, so nothing you see changes until you pick it.
+  - If a PBR texture cannot load, the shape falls back to legacy, and the census says which texture failed.
+  - New View menu entry "PBR Route View" colours every shape by where its material came from.
+  - New command line: `NifSkope -no-gui nifx <file.nifx> [--set node=material.pbrm] [--remove node] [--out file]` edits a `.nifx` without disturbing anything else in it.
+- Harnesses: `tests/spells/pbr_r1_gates.sh` (R1 gates + five red controls, fixtures from `pbr_r1_fixtures.py`). `pbr_shade_ab.py` compares the PBR census across stages on shape/kind/program/route.
+
+## Havok animation clips play on the open NIF's bones (2026-09-10, lane HKX2)
+
+bungo's ruling, verbatim: *"in animation workspace, add an option to load a hkx
+file with animation, then they get added to the animations list, and if there's
+rigged geometry with nodes / bone names that match, they play"*. Lane HKX1 built
+the reader and the spline decompressor; this is the half that puts the decoded
+pose into the scene graph.
+
+**A loaded clip is an entry in the animations list, and that is the whole of the
+transport.** `HkxPlayback::registerInScene` puts the clip's name into
+`Scene::animGroups` and its start/end into `Scene::animTags`, which is what
+`Scene::timeMin/timeMax` already answer from. Play, pause, loop, reverse, speed,
+scrub, "cycle through sequences" and the Timeline dock's ruler therefore drive a
+Havok clip with no new transport code at all — four lines instead of a second
+player. Selecting one goes through `Scene::setSequence`, so choosing any of the
+NIF's own sequences unbinds it.
+
+**The pose is written where a controller writes it.** `Node::transform()` calls
+`HkxPlayback::applyLocal()` immediately after `IControllable::transform()` — one
+step after the node's own controllers, before its collision body is the first
+thing in the frame to ask for a world transform, and before any child is walked.
+So a clip WINS over a `NiTransformController` that names the same node instead
+of losing to it, no cached world transform can be built from a local that is
+about to change, and skinning, bounds, node markers and picking follow with no
+changes anywhere else. `Node` gained one `friend class HkxPlayback`, beside the
+five controller classes that already write `Node::local`.
+
+**The mapping is case-insensitive and partial, because the files are.**
+skeleton.hkx and skeleton.nif disagree in CASE on Head, Spine1, Spine2 and
+Weapon, and 17 `Weapon*` bones of the animation skeleton have no node in the
+body NIF at all. Measured: 78 matched, 17 unmatched, 4 case-folded. Matched
+bones play; the unmatched are NAMED in the summary line, not counted; zero
+matches refuses in words and writes nothing. The binding is recomputed at every
+`setActive` and at every `Scene::make`, so a clip selected after a different NIF
+was opened can never pose nodes that are gone.
+
+**Unloading is exact.** Every node the clip touches has its pre-pose
+`Transform` kept by value at bind time and assigned back on unbind — the same
+bit patterns, not a re-read of the NIF.
+
+**A clip does not carry its own bone names**, only track -> bone index against a
+skeleton it names. Four fallback arms, and the summary line says which one
+served: a skeleton already loaded this session (including the file's own), then
+`skeleton.hkx` beside the clip or in a `CharacterAssets` folder above it, then
+the same walk from the open NIF, then the game archives. The floor is a refusal
+that names the skeleton it wanted.
+
+**Root motion is a switch of its own and starts off** (his ruling). On it is
+composed OUTSIDE the root bone's own transform, on the node named by the
+animation skeleton's root bone, and the summary says which node that is.
+
+New: `src/hkxplayback.{h,cpp}`, `src/hkxplaybacktest.cpp` (the WW_HKXANIM_TEST
+harness — its own translation unit, so the 400 lines of gates cost the
+31,000-line `nifskope_ui.cpp` three), `tests/spells/hkxanim_play.sh`,
+`scratchpad/hkx2_20260910/` (syntax pass, picture script, PENDING).
+Changed, counted off `git diff -U0` and no deletions anywhere:
+`NifSkope.pro` +3, `src/gl/glscene.h` +10 (the forward declaration and the
+`hkx` member), `src/gl/glscene.cpp` +22 (include, constructor, destructor,
+`clear`, `make`, `setSequence`), `src/gl/glnode.h` +3 (the friend line),
+`src/gl/glnode.cpp` +15 (include and the one call in `Node::transform`), and
+`src/nifskope_ui.cpp` +87 across four spots: the include, the 3-line harness
+call, 19 lines of `WW_HKXANIM_CLIP` in the render hook so a clip can be
+photographed, and 63 lines in the Animation panel — the "Load Animation
+(.hkx)…" button, the summary label under it and the Root motion row.
+
+**STATUS WHEN THE LANE ENDED: NOT BUILT** (it is built now -- the measured block is at the end of this entry)**.** `Fallout4.exe` was up (pid 41056) and no GO file existed,
+so under CONSTITUTION rule 6 the lane ended BUILD PENDING. Every new and changed
+file passes `g++ -fsyntax-only` with the real `Makefile.Release` flags, RC=0,
+with no new warnings. Nothing has been run: gates (a)-(e) are written, ordered
+and unrun, and the numbers above for the 78/17/4 mapping are lane HKX1's
+measurement, not this lane's. Resume: `scratchpad/hkx2_20260910/PENDING.md`.
+
+## A third-party clip with no bone mapping now plays (2026-09-10, lane HKX2b)
+
+`fixtures/Running_To_Slide_And_Back_To_Running.hkx`, out of bungo's Mixamo
+Collection, is a perfectly good FO4 spline clip -- 95 tracks, 93 frames,
+60 fps, THREECOMP40 -- and both decoders refused it in one sentence: *"binding
+maps 0 tracks, the animation has 95"*. Its `hkaAnimationBinding` carries an
+EMPTY `transformTrackToBoneIndices`, and an empty mapping is the IDENTITY map,
+not a missing one: track i drives bone i. Lane FIXTURE measured that rather than
+assuming it -- frame 0's per-track translation against `skeleton.hkx`'s
+reference pose matches on 75 of 95 tracks at shift 0 and on only 18 at any other
+shift, and the 20 that differ at shift 0 are the ones that should (`COM` travels
+487 units, the 13 `Weapon*`/`Camera` nodes the clip places, `Spine1`, and four
+finger tips at float noise).
+
+The rule is now in both readers and in the consumer, and the fallback names
+itself: `HkxAnimClip::trackToBoneIsIdentity` is set when the file gave no
+mapping, so a derived map is never reported as a stored one. A NON-EMPTY vector
+of the wrong length is still refused by name -- that is the floor, and it is run
+on the real bytes of the fixture with the binding substituted
+(`scratchpad/hkx2_20260910/identity_floor.py`, 6/6: empty, full-length and a
+permutation accepted; 94, 96 and 1 refused). Whether the skeleton is big enough
+for an identity map -- at least `numTracks` bones -- is the CONSUMER's gate in
+`HkxPlayback::bind`, because a clip file usually carries no skeleton at all.
+
+Measured with the Python decoder: the clip decodes to 93 x 95 = 8,835 track rows
+plus 93 root-motion rows, with `bone == track` on every one of the 8,835; and
+78 of its 95 bones name a node in `fixtures/human_male_vanilla.nif`
+case-insensitively, 17 do not (the `Weapon*` list, which lives on a weapon NIF)
+and 4 differ only in case -- the same 78 / 17 / 4 the gates pre-registered.
+
+Changed: `src/hkxanim.h` (+6, the flag), `src/hkxanim.cpp` (validate + the
+identity fill in `decodeClip`), `tests/spells/hkxanim_decode.py` (the same two,
+so the C++ and Python oracles stay a matched pair), `src/hkxplayback.cpp` (its
+half was already in). New: `scratchpad/hkx2_20260910/identity_floor.py`.
+`scratchpad/hkx2_20260910/shots.sh` now defaults to the rigged human fixture and
+takes `PREFIX`, so gate (e) runs once per clip.
+
+**STILL NOT BUILT WHEN THE LANE ENDED** (built and gated since -- the measured block is at the end of this entry)**.** Everything above the C++ side was proved with the Python
+decoder, which needs no build; `release/hkxanim_dump.exe` predates the change and
+still prints the refusal until `scratchpad/hkx1_20260910/build_dump.sh` is
+re-run. Resume: `scratchpad/hkx2_20260910/PENDING.md`.
+
+**BUILT AND GATED (lane BUILD7, 2026-09-10).** `release/NifSkope.exe` 14:04:34,
+19,197,952 bytes, `qmake` + `make -j2` both RC=0 with `src/hkxanim.{h,cpp}`,
+`src/hkxplayback.{h,cpp}`, `src/hkxplaybacktest.cpp`, `src/gltfimport.{h,cpp}`
+and `src/hkxwrite.{h,cpp}` in `NifSkope.pro`; the regenerated dependency lists
+name `hkxplayback.h` for all five objects that include it (`glnode.o`,
+`glscene.o`, `nifskope_ui.o`, `hkxplayback.o`, `hkxplaybacktest.o`) and
+`hkxanim.h` for eight; the exe is newer than all 70 changed files under
+`src/ res/ tools/ tests/`; `res/style.qss` and `release/style.qss` compare
+equal.
+
+| gate | expected | measured |
+|---|---|---|
+| `hkxanim_gates.py` | 134 checks / 3 fixture failures | **134 / 3** — the 17 `Weapon*` bones absent from `skeleton.nif`, the 0.00148 `weapon` reference-pose translation, and the furniture T-pose clip that is not the bind pose. All three pre-registered. |
+| `hkxanim_synthetic.py` | 29 / 0 | **29 / 0 PASS** |
+| `hkxanim_mutate.py` | 20 / 0 | **20 / 0 PASS** |
+| (g) identity rule, C++ | 8,835 rows, `bone == track` on every one | **8,835 / 0 mismatches**; `hkxanim_dump.exe` (14:05:13) prints `frames 93 tracks 95 ... blendHint NORMAL skeleton Root rootMotion yes` and no refusal |
+| (g) `identity_floor.py` | 6 / 6 | **6 / 6 PASS** — empty, full-length and a permutation accepted; 94, 96 and 1 refused by name |
+| (a)-(d), (f) `hkxanim_play.sh` on `skeleton.nif` | PASS | **27 checks, 0 failures.** (a) worst translation 0, rotation 7.64e-06 deg, scale 0 over 234 comparisons; (a floor) the wrong frame fails at 5.85e-05 / 0.218 deg; (b) 0 of 129 nodes differ after unload, (b floor) 78 differed while posed; (c) 78 / 17 / 4 with the unmatched bones named; (d) the road sign loads, refuses in words, changes 0 of 2 nodes |
+| (a)-(d), (f) on `fixtures/human_male_vanilla.nif` | 78 / 17 / 4 | **27 checks, 0 failures**, 78 / 17 / 4, the four case-folded ones being `Spine1`, `Spine2`, `Head`, `Weapon` |
+| (e) pictures, `jog` | 4 PNGs, >= 3 distinct | **4 of 4 distinct** |
+| (e) pictures, Mixamo | 4 PNGs, >= 3 distinct | **3 of 4 distinct** — a pass, but the two that match are 5 KB of empty background: under gate (e)'s 35-degree perspective the clip's 487-unit COM travel carries the figure out of frame. See the frames below. |
+
+**The frames bungo asked for** (*"a few frames of imported animations on the
+human rig, at different points in animation's time"*):
+`scratchpad/build7_20260910/frames_jog.png` and `frames_mixamo.png` — the bind
+pose plus frames 0, 1/4, 1/2, 3/4 and last of each clip on
+`fixtures/human_male_vanilla.nif`, plus a side view of the Mixamo clip at its
+lowest COM frame (20, t=0.333334). ONE camera for every tile of both sheets,
+read back from `release/ww_camera_pin.log` at every grab:
+`arm=center/ortho/view view=5 lookat=0,0,62 halfW=80 halfH=70.6854 persp=0
+vp=1065x941 upp=0.150235`. It is ORTHOGRAPHIC on purpose: in a front view the
+Mixamo clip's travel runs along the view axis, and a perspective camera shrinks
+the figure to nothing by the last frame. The bind-pose tile of the two sheets is
+byte-identical (md5 `580245fba8bad849de9c5f0a7e9f44bb`), which is the pin's own
+proof; 6 of 6 tiles differ within each sheet.
+
+**Two paths in the resume were RELATIVE and both produced a green-looking
+falsehood** (root `MISTAKES.md`, 2026-09-10 lane BUILD7): a relative `SRC`
+opened a scene of one unnamed node and reported "0 bones matched (expected 78)",
+and a relative `CLIP` produced four identical pictures. Every path handed to
+`NifSkope.exe` is an absolute Windows path. The `WW_HKXANIM_CLIP` hook discards
+the loader's refusal string, which is why the second cost a whole render round;
+reported, not fixed.
+
+**Still not measured:** Fallout 4 has never loaded a file written by
+`src/hkxwrite.cpp`, and the round trip bungo actually asked for -- export an
+animation, import it back, and hold the two against each other 1:1 -- has not
+been run. The flight files are in `scratchpad/hkx5_20260910/flight/`.
+
+## glTF animation IMPORT and the FO4 .hkx WRITER (lane HKX5, 2026-09-10)
+
+`src/gltfimport.{h,cpp}` reads one animation out of a `.gltf` (+`.bin`), an
+embedded-base64 `.gltf` or a `.glb` and produces lane HKX1's clip type;
+`src/hkxwrite.{h,cpp}` writes that clip back out as a Fallout 4 `.hkx`. With
+the two, an animation authored anywhere Blender can export goes into the game's
+own format, and a shipped clip comes back out of it. Contracts:
+`docs/GLTF_IMPORT.md` and `docs/HKX_WRITE_FORMAT.md`. Both files are in
+`NifSkope.pro` since lane BUILD7 applied the lane's refusing hook-up
+(`scratchpad/hkx5_20260910/hookup.py`'s four anchored lines, +80 bytes, CR
+unchanged) and re-ran `qmake`; `gltfimport.o` and `hkxwrite.o` are linked
+into `release/NifSkope.exe` 14:04:34. They also build standalone through `scratchpad/hkx5_20260910/build_dump.sh` into
+`release/hkxwrite_dump.exe`, which is what the gates ran on.
+
+**The clip is written as `hkaInterleavedUncompressedAnimation`**, the class lane
+HKXCLASS found registered in the shipped exe. **Two routes, one API:** the
+default emits the Havok 2014 packfile directly (no Java), and the alternative
+writes HKXPACK XML and runs `hkxpack-cli.jar pack`. For `jog` both produce a
+109,376-byte file, and decoding both agrees to **4.7e-10 units / 1.10e-7
+degrees** — route A's only cost is its decimal text. Cost of the format: 48
+bytes per bone per frame, so `jog` goes from 12,288 bytes compressed to 109,376
+uncompressed.
+
+**The element order was measured, not assumed.** Lane HKXCLASS's proof clip has
+one track, on which frame-major and track-major are the same bytes. The engine's
+own `hkaInterleavedUncompressedAnimation::transformTrack` (rva `0x01fa1ac0`)
+computes `data + 48 * (frame * numberOfTransformTracks + track)` and derives the
+frame count by dividing `transforms.size` by the track count — both are now
+laws the writer obeys and the decoder gates on.
+
+**Round trip 1** (shipped clip → decode → write interleaved → decode) over five
+fixtures and both routes: worst **1.0e-07 units**, worst **1.62e-07 degrees**,
+64,379 bone-frames. **Round trip 2** (clip → glTF through lane HKX4's exporter →
+import → write → decode): **8.0e-06 units, 3.40e-05 degrees** over the 1,794
+bone-frames the exporter carries; the 391 rows it drops are the 17 `Weapon*`
+bones that have no node on `skeleton.nif`. Root motion survives the same loop to
+**1.5e-05 units and 0.0 degrees of yaw**.
+
+**The Mixamo fixture is now writable.** Lane FIXTURE found the Mixamo clip is
+refused only because its `transformTrackToBoneIndices` is empty. Read with
+HKX2b's identity rule and written by this writer, it comes out with an explicit
+95-entry binding, its 60 fps intact, its 93 all-zero root-motion samples
+carried, and 8,835 rows bit-identical to the source.
+
+**Resampling** is exact where the grids meet: the 60 fps fixture resampled to 30
+gives 47 frames, every one **bit-identical** to the matching 60 fps frame.
+A hand-written 3-bone glTF exercising LINEAR, STEP and CUBICSPLINE in one file
+imports to its hand-computed values to **0.0 units / 4.38e-06 degrees /
+3.93e-08 scale**.
+
+**Gates: 23/23**, `tests/spells/hkxwrite_gates.py`. 13 corruptions of a glTF and
+12 of a written `.hkx` are each refused by a sentence naming the field and the
+value; because a Havok packfile has no checksum, the floor is a flipped payload
+float, which the decoder accepts and the comparator catches at 1.0 unit — the
+proof the round-trip gate can go red at all. HKXPACK re-reads our own
+directly-emitted file and sees the interleaved class, signature `0xa5eff3f2`,
+2,185 transforms and a 95-track binding.
+
+**Three defects were caught by the gates and fixed, and one contract number
+corrected** (all four in `MISTAKES.md`): the bone matcher let a partial match
+outrank a later exact one (`CamTargetParent` stole `CamTarget`); the floor
+harness counted a crash as a red gate; the quaternion angle metric inherited
+from the `ww-hkx-animation` skill reports **half** the true angle, proven by a
+known-answer control at 0.5/5/45/120 degrees — **lane HKX1's published angle
+figures and the skill's section 7 carry the same factor of 2 and are owed an
+amendment**; and `docs/HKX_ANIMATION_FORMAT.md`'s `NamedVariant` stride is
+0x18, not the 0x20 it states.
+
+**NOT MEASURED: Fallout 4 has never loaded one of these files.** No shipped
+`.hkx` uses this class (0 of 15,320). The flight is two files in
+`scratchpad/hkx5_20260910/flight/` — an exact rewrite of `JogForward` and the
+same file with the head yawed 45 degrees as the positive control.
+
+**BUILT AND GATED (lane BUILD7, 2026-09-10).** `release/NifSkope.exe`
+14:04:34: `qmake` + `make -j2` RC=0 with these two sources and lane HKX1's
+and HKX2's in `NifSkope.pro`. The measured gate table is at the end of the
+"Havok animation clips play on the open NIF's bones" entry above; lane HKX5's
+own 23 gates were already green on `release/hkxwrite_dump.exe` and were not
+re-run, because linking the two files into the application changes neither
+translation unit. **Nothing here has been flown in Fallout 4.**
+
+## 2026-09-10 - every contract page's line numbers re-derived from their own anchors, and the FO4CS entry point brought current (lane DOCS2)
+
+Documents only: no source file, harness or build was touched.
+
+**The provenance pass** (`ww-contract-provenance` step 3, script
+`scratchpad/docs2_20260910/anchors.py`, generalised from lane RENAME's
+`p14_anchors.py` to eight pages and eleven sources). Every `| claim | line |
+anchor |` row on `docs/LODGEN_BTD_FORMAT.md`, `LODGEN_CARD_SHEETS.md`,
+`LODGEN_LODM_FORMAT.md`, `LODGEN_MANIFEST_FORMAT.md`, `LODGEN_TEXTURE_ARRAYS.md`,
+`LODGEN_TERRAIN_VT.md`, `LODGEN_NATIVE_LODO_LODI.md` and
+`LODGEN_VERTEX_PACKING.md` was located again by its ANCHOR TEXT in the current
+source and rewritten from where it was actually found -- never shifted by a
+delta, and never rewritten unless the match was EXACT and UNIQUE.
+
+**243 rows checked: 111 moved, 132 were already right, 0 anchors missing, 0
+ambiguous, 5 multi-site rows re-derived by hand.** A second run of the same
+script over the written pages reports 0 moved, which is the idempotence check.
+It also caught `src/nifskope_ui.cpp` moving TWICE MORE under a concurrent lane
+(`f5d1e3bf9fab7a27` 31,409 lines -> `e820666628d97a51` 31,496 ->
+`1073ddef14f8562e` 31,495): 17 rows on the card-sheets page and 5 on the `.lodm`
+page were re-derived each time, the stamps rewritten with them, and both pages
+now say that file is under live edit.
+
+| page | rows | moved | already right |
+|---|---:|---:|---:|
+| `LODGEN_BTD_FORMAT.md` | 66 | 26 | 40 |
+| `LODGEN_CARD_SHEETS.md` | 36 | 24 | 12 |
+| `LODGEN_LODM_FORMAT.md` | 34 | 22 | 12 |
+| `LODGEN_MANIFEST_FORMAT.md` | 14 | 13 | 1 |
+| `LODGEN_TEXTURE_ARRAYS.md` | 15 | 7 | 7 (+1 multi-site) |
+| `LODGEN_TERRAIN_VT.md` | 23 | 6 | 13 (+4 multi-site) |
+| `LODGEN_NATIVE_LODO_LODI.md` | 49 | 4 | 45 |
+| `LODGEN_VERTEX_PACKING.md` | 11 | 9 | 2 |
+
+**What moved, and why.** `src/lodgen.cpp` `6d7388c53a13343e` (8,286 lines) /
+`64191a7ed236ddb8` (8,619) / `3e4815416faa4aba` (8,850) are all now
+`c05fd079655ac03e` (391,673 B, 8,924 lines) -- three vintages of stamp on seven
+pages, because lanes CARDWIDTH, CLAMP2b and NATIVE0b each grew the file after a
+page was stamped. `src/nifskope_ui.cpp` `dbf4540b51166e31` -> `f5d1e3bf9fab7a27`
+(31,409 lines), `src/lodtfile.cpp` `10ad5f58262d8620` -> `601fb65136c8766d`
+(3,658), `src/lodtfile.h` `128dcd3f4c011a08` -> `4ffeccdc9b581e5e` (435),
+`src/btdterrain.cpp` `cbe06adb7394f59b` -> `35c2adc319852901` on the packing
+page. `src/io/lodvfile.{h,cpp}`, `src/io/lodmfile.cpp`, `src/data/niftypes.h`,
+`src/hkxanim.{h,cpp}` and the six native files did NOT move (same sha256), which
+is why 132 rows needed no change and why `docs/HKX_ANIMATION_FORMAT.md` needed
+none at all.
+
+**Seven anchors were repaired rather than renumbered**, because the code they
+named had changed shape: the AO row-0 comment and the no-ground-cover comment in
+`lodtfile.cpp` now WRAP, so each anchor was trimmed to the line it starts on
+(and the ground-cover row was 2424, is 2429); the `I`-line row's
+`if ( ... < 8 ) continue;` is now two lines, so the anchor is the `if` alone;
+the `coverage` sidecar row carried a literal newline where the C++ `\n` had
+been pasted, which had silently broken that markdown row in two; three
+`LODGEN_TEXTURE_ARRAYS.md` anchors are now written VERBATIM by the card-array
+pass as well and were lengthened until each names the array pass alone; and
+`constexpr std::uint64_t OBJ_VERTEX_DESC` is a prefix of `OBJ_VERTEX_DESC_COLORS`
+on the next line. One range END was wrong after the pass and was fixed by hand:
+`niftypes.h:1907-1987` was carried by the start's delta and ran into
+`ClearAttributeOffsets`; the accessors end at 1979.
+
+Three inline citations outside the footer tables were stale as well:
+`src/lodgen.cpp:1357-1358` -> `1358-1359` and `src/lodgen.cpp:57` -> `58` in
+`LODGEN_VERTEX_PACKING.md`'s prose, and `src/lodtfile.h:58` -> `159` in
+`scratchpad/handoff_fo4cs/WRITER_CHANGES_NEEDED.md`. The writer's default is
+still `headerVersion = 2` (`src/lodtfile.h:159`), raised to 3 only under
+`--water-bodies` -- read from the source last of all, per the skill's step 4.
+
+**`scratchpad/handoff_fo4cs/README.md` rewritten** as the FO4CS reader's single
+entry point: the two changes FO4CS must make up front (the loader reads `.lodl`;
+it must accept version 3), the file-family table extended with the v3 water
+sections, the `<WS>.water.json` curves file and the native pair AS BUILT, and a
+new section 3 carrying the reader checklists as they actually landed -- the
+`.lodl` v3 body-table lookup for tint / flow / fog, the body-ID plane as the
+mask (nearest, never filtered, no mips) and the flow plane filtered only inside
+it, the dye plane's source/weight blend, depth = water height minus terrain,
+shore distance as the winter freeze-from-the-shore path, the card rules
+(`coverage 16 128 160`, orthographic, gap = max(2, side/16), mips = log2(gap),
+per-frame extents and `frameOffset`), the native pair's ten-step draw with its
+two deviations, the terrain pyramid's NORTH-UP row order and per-tile CRC, and
+the DirectX flow-PNG ruling against `src/watercurves.cpp:932`, which still says
+`+green = north`. Section 6 is a placeholder: **a whole-Commonwealth bake has
+never been timed by any lane**, and bungo's four GUI stage times (landscape,
+meshes, textures, impostors) go in the table there.
+
+`docs/LODGEN_*.md` (8 pages), `scratchpad/handoff_fo4cs/README.md`,
+`scratchpad/handoff_fo4cs/WRITER_CHANGES_NEEDED.md`, `WW_CHANGES.md`,
+`MISTAKES.md`, `scratchpad/docs2_20260910/`,
+`scratchpad/lane_docs2_report.md`.
+
+## 2026-09-10 - FO4 .hkx animation reader and spline decompressor (lane HKX1) -- **BUILD PENDING** for the NifSkope link only: the reader, its standalone driver and every gate are built and run (`release/hkxanim_dump.exe` 05:10:22); `src/hkxanim.cpp` passed `g++ -fsyntax-only` with the real `Makefile.Release` flags (rc=0); `qmake` + `make` owed (two NEW files in the .pro)
+
+**Build state: BUILT (lane BUILD7, 2026-09-10 14:04:34).** The heading's
+"BUILD PENDING" is superseded -- `qmake` + `make -j2` both RC=0 and `hkxanim.o`
+is linked into `release/NifSkope.exe`; `release/hkxanim_dump.exe` was rebuilt at
+14:05:13 and gates 134/3, 29/0, 20/0 re-ran on it. As lane DOCS2 found it,
+`release/NifSkope.exe` was 03:57:46 and `src/hkxanim.cpp` 05:10:14, so the reader
+was NOT in the built exe; `NifSkope.pro` already names both files (lines 187 and 312), so the resume
+is `qmake` + `make`, nothing else. `release/hkxanim_dump.exe` (05:10:22) is the
+standalone driver every gate above was actually run on.
+
+bungo, 2026-09-10 ~05:0x, verbatim: *"in animation workspace, add an option to
+load a hkx file with animation, then they get added to the animations list,
+and if there's rigged geometry with nodes / bone names that match, they play"*.
+HKX1 = the reader + decompressor with its gates; HKX2 playback/mapping and
+HKX3 the UI rows follow.
+
+`docs/HKX_ANIMATION_FORMAT.md` (NEW, the contract: every offset tagged REFL /
+DISASM / XML / CENSUS), `src/hkxanim.{h,cpp}` (NEW: `hkxAnimLoad()`, route A
+= HKXPACK XML, route B = the packfile; `HkxAnimFile { skeletons, clips }`,
+`HkxAnimClip.frames[frame][track]` of translation / Quat / scale, the binding's
+`trackToBone`, annotations, root motion, blendHint, diagnostics), `NifSkope.pro`
+(+2 lines), `tests/hkxanim_dump.cpp` + `tests/hkxanim_shim.cpp` (the standalone
+driver, Qt6Core + Qt6Gui), `tests/spells/hkxanim_decode.py` (the independent
+Python decoder, both routes), `tests/spells/hkxanim_gates.py` /
+`hkxanim_synthetic.py` / `hkxanim_mutate.py` (the gates),
+`.claude/skills/ww-hkx-animation/SKILL.md` (NEW), `MISTAKES.md` (5 entries),
+`scratchpad/hkx1_20260910/`, `scratchpad/lane_hkx1_report.md`.
+
+**The format, from the exe.** The `hkClass` reflection arrays of the 1.10.155
+exe name every serialised member and its offset (`hkaSplineCompressedAnimation::Members`
+at RVA 0x2e46140: numFrames +0x38, numBlocks +0x3c, maxFramesPerBlock +0x40,
+maskAndQuantizationSize +0x44, blockDuration +0x48, frameDuration +0x50,
+blockOffsets +0x58, floatBlockOffsets +0x68, data +0x98; `hkaSkeleton`: name
++0x10, parentIndices +0x18, bones +0x28, referencePose +0x38;
+`hkaAnimationBinding`: originalSkeletonName +0x10, transformTrackToBoneIndices
++0x20, blendHint +0x50). The block layout, which reflection does not describe,
+is read off the engine's own decoder (`samplePartialTracks` 0x1ec4140,
+`readNURBSCurve<1>` 0x1ec5e50, `readKnots` 0x1ec55e0,
+`hkaSignedQuaternion::unpackSignedQuaternion40` 0x1fbfa00 / `48` 0x1fbfc30,
+`hkaDefaultAnimatedReferenceFrame::getReferenceFrame` 0x1f9ea20): 4-byte masks
+per track, per-axis static/spline vector channels with (min,max) ranges and
+16-bit control points, packed quaternion splines (THREECOMP40 = 3x12 bits +
+missing index + sign, scale (sqrt2/2)/2047; THREECOMP48 = 3x15 bits, scale
+(sqrt2/2)/16383), u8 knots in local frames, de Boor of degree 1..3, blocks of
+256 frames overlapping by one, root motion as (xyz, yaw about up) per frame.
+The container's section headers start at `0x40 + u16@0x3e` (0x50 in every
+animation file) -- the collision walker's hardcoded 0x40 would refuse them.
+
+**Census** (`census.py`, all 15,320 `.hkx` of `Fallout4 - Animations.ba2`,
+6 s): 13,514 spline clips; THREECOMP40 on 1,173,390 tracks, THREECOMP48 on
+118,436, nothing else; 16-bit scalars everywhere; blocks up to 25; 856
+`hkaLosslessCompressedAnimation` files (the 1st-person set) refused by name;
+bindings permuted in 192; blendHint ADDITIVE in 230.
+
+**Gates** (pre-registered): (a) C++ vs Python on 5 clips x 2 routes, 64,379
+rows: translation 3.8e-6, rotation 1e-5 deg, scale exact -- PASS; (d) a
+hand-built 90-degree clip packed by HKXPACK: 90.0000 deg at frame 9, worst
+0.0214 deg -- PASS 29/29; (e) 20 single-byte corruptions refused by name on
+both decoders -- PASS 20/20 (it found and fixed two holes first); (f) frame
+count, duration, walk-end == float offset -- PASS; (g) the block-boundary frame
+from both blocks: 2.7e-4 -- PASS. (b) and (c) FAIL as pre-registered and the
+fixtures are why: skeleton.nif lacks the 17 `Weapon*` bones and spells
+Head/Spine1/Spine2/Weapon in capitals (rotations agree to 2.7e-4, translations
+to 1e-3 on 77 of 78 shared bones, `Weapon` 1.48e-3); the furniture "Tpose"
+idle is NOT the bind pose (15 of 94 bones match; no bind-pose clip exists in
+the archive). Totals 134/3, 29/0, 20/0.
+
+**For HKX2:** names case-insensitively, partial matches are the norm, the hkx
+quaternion maps to the NiNode rotation directly (no transpose), ADDITIVE
+clips are deltas, root motion separate from track 0.
+
+MISTAKES: the exe launched once via `nifskope-cli` after an rc=1 check (still
+against the brief); the census copied the 0x40 section-header constant instead
+of reading the header; an acos-based angle metric with no resolution below
+0.03 deg; two decoder crash/blind spots the mutation gate found; a heredoc
+backslash halving.
+
+## 2026-09-10 -- the water window: curves, Solve, a curves file, PNG export / import (lane WATER5, **BUILD PENDING**)
+
+**Build state, 2026-09-10 (lane DOCS2 checked it):** `release/NifSkope.exe` is
+03:57:46 and the four new sources are 04:50:17 - 05:04:17, so none of them is in
+the built exe; `NifSkope.pro` does NOT yet name `src/watercurves.*` or
+`src/waterwindow.*` (hook-up H1 unapplied), so the resume is
+`scratchpad/water5_20260910/PENDING.md` in full, after WATER4's build.
+
+**Status: written and syntax-checked (`g++ -fsyntax-only` with the real
+`Makefile.Release` flags, rc=0, no warnings), NOT compiled, NOT run, no
+hook-up applied.** The one gate check (2026-09-10 05:07:16) found neither
+`water4_20260910/GO` nor `DONE`, so the four new files sit outside the build
+until `scratchpad/water5_20260910/PENDING.md` is run after WATER4's build.
+
+bungo, verbatim: *"curves you can draw in nifskope, that can have as many
+connection points as you want. Then you solve the rest with a button to fill
+in the gaps, something like a simulation"*; *"just make it open a new popup
+window that can be set to full screen and you can drag that shows the
+flowmap"*; *"Add all the tools needed to mark the rivers and solve it and
+export import there, into that new window"*; *"allow me to save the curves as
+some type of a file"*; and on the dock's map, *"do you draw it on that tiny
+map?"*.
+
+* **The water window** (`src/waterwindow.{h,cpp}`, NEW): a top-level window
+  of its own, draggable and resizable, F11 or its button for full screen,
+  geometry remembered.  Settings on the left in a scroll area (Landscape
+  file, Curves, Selected body, Dye, a folding Files section), the map on the
+  right on a splitter, the summary sentence and Reload / Solve / Save pinned
+  under both.  Every control through the shared helpers; the self-test counts
+  them with floors.  The map fits the whole worldspace at first open and
+  zooms to 64 px a texel: an overview at ~1024 texels a side while the view
+  moves, a texel-for-texel detail image once it settles.  Planes: Body ID,
+  Flow, Shore distance, Dye, Water type, Imported flow.
+* **Curve tools, Blender curve-edit style** (Curve Pen): click adds a point
+  to the active curve (as many as wanted), click a point selects it (Shift
+  extends), drag moves, Ctrl+click a segment inserts, Delete / X removes,
+  Enter / Esc / right-click / double-click finishes, box select in the
+  Select tool, A selects all, Home fits.  An arrow at every segment's middle
+  and at the end shows the direction; Reverse switches it.  A per-point speed
+  weight (the "Point weight" row: Blender's per-point Radius, as an idea).  A
+  one-point curve is a pin.  Source / Outlet / Dye pins are one click each.
+  Ctrl+Z / Ctrl+Shift+Z over the curve document.
+* **Solve** runs `WaterMarkDoc::solve()` as WATER4 wrote it, after the curves
+  are mirrored into the stroke store; nothing is reimplemented.  What the
+  solver does not yet consume (the per-point weight, a one-point pin, the
+  raster layer's authority) is `scratchpad/water5_20260910/CHANGE_NEEDED.md`.
+* **The curves file** `<Worldspace>.water.json` beside the land file
+  (`src/watercurves.{h,cpp}`, NEW): version 1, world coordinates, every curve
+  with its points and weights, the pins, the dye pins, the per-body overrides
+  (name, class, water form, colour, still, dye at mouth), the dye half
+  distance, and the flow-map layers by file name + sha256.  Written by a
+  deterministic hand serialiser (fixed key order, 9 significant digits, LF),
+  so save -> load -> save is a byte comparison.  Save writes the `.lodl` AND
+  the json; Save curves / Load curves take a path.  Loading onto a
+  regenerated `.lodl` re-creates the curves editable and Solve re-derives.
+* **Export / Import PNG** at the file's body-plane grid: R, G = the direction
+  as (cos + 1) / 2, (sin + 1) / 2 with +G = north, B = the speed step x 17,
+  A = the confidence x 17 (a wet unmarked texel gets A = 1 so water and land
+  differ by alpha), every field exactly invertible; the body mask beside it
+  as 16-bit grey.  Import = a raster layer, and a FLIPPED GREEN CHANNEL is
+  refused: the map's mean cosine against the file's own flow is taken as-is
+  and with G mirrored, and when the mirrored reading agrees better and the
+  as-is one is below 0.9 the import says so with both numbers.
+* **The dock** keeps its rows and gains a "Water window" button; its tiny
+  canvas is HIDDEN (hook-up H3, unapplied).
+* **Gates, pre-registered** (`scratchpad/lane_water5_report.md` section 0)
+  and run by `tests/spells/water_window.sh` (NEW): W1 panel style with
+  floors, W2 json round trip byte-identical, W3 store round trip (weights
+  only after hook-up H2, else a named SKIP), W4 load-onto-regenerated =
+  same flow words (hash), W5 export -> import 0 words differ, W6 flipped green
+  refused + unflipped accepted, W7 the harness (headless, `onprimary=0`), W8
+  the two pictures.  **None has run.**
+* **Hook-ups, written and NOT applied** (`scratchpad/water5_20260910/hookup.py`,
+  12 anchors, each counted once): H1 the four `.pro` paths; H2
+  `WaterStroke::extra` + the codec keeping a record's trailing bytes +
+  `addStroke` accepting kind 10; H3 the dock's include, hidden canvas, button,
+  `waterWindowInstall()`.
+* Files NEW: `src/watercurves.h` (9,728 B), `src/watercurves.cpp` (34,210 B),
+  `src/waterwindow.h` (1,979 B), `src/waterwindow.cpp` (95,217 B),
+  `tests/spells/water_window.sh`, `scratchpad/water5_20260910/`.  All LF-only
+  by Python byte count.  No existing file touched.
+
+## 2026-09-10 - potential flow inside each water body, and dye (lane WATER4) -- **BUILD PENDING** -- written and syntax-checked (`g++ -fsyntax-only` with the real `Makefile.Release` flags, rc=0 on all four files), NOT compiled, NOT run; the numbers below that come from the numpy prototype say so
+
+bungo, 2026-09-10, on the marking tool's after-picture: *"That stroke doesn't
+look smooth at all, it's like overlapping circles more like."* Measured
+(`scratchpad/water4_20260910/disc_metric.py`, through WATER2's independent
+decoder): on the Charles after one stroke, **39 seam-bounded constant-direction
+patches** of equivalent radius 12-15 texels (the stroke's half-width is 16),
+seams of 20-73 degrees, p99 of the adjacent angle difference **40.78 degrees**,
+2.97 percent of adjacent pairs across a seam. The cause, by line: the fill held
+every stroke SEGMENT's tangent over a capsule of the half-width
+(`src/watermark.cpp` 1077-1097 as built by BUILD5b) and the SOR solved only the
+slivers between. His design, agreed: *"Could this maybe use a bit of some
+simulation though?"*
+
+`src/watermark.{h,cpp}` (the solver core `WaterFlowGrid`, the solve rebuilt as
+`solveBody` + `solveDye`, the dye API, the dye plane packer, the flow gates and
+F5/F8 and the dye round trip in the selftest), `src/watermarkpanel.cpp` (Tool
+"Dye pin", rows "Dye colour" and "Dye fade", tick "Dye at mouth", Show "Dye"),
+`src/lodtfile.{h,cpp}` (`LODL_SECT_DYE`, the dye plane read from the 0xF4 word,
+`dyeWordAt`), `tests/spells/water_flow.sh` (NEW), `docs/LODGEN_BTD_FORMAT.md`,
+`scratchpad/specs_20260909/spec_water.md`, `MISTAKES.md`,
+`scratchpad/water4_20260910/`, `scratchpad/lane_water4_report.md`.
+
+**The method.** Potential flow on the body's mask: `div( k grad phi ) = S`, k
+the water depth from the file's own terrain (floored) times a smooth quartic
+bump under a stroke; no-flux banks by construction; sources and sinks from
+pins, then the table's own outlet/source contacts, then the strokes' ends, a
+uniform "rain" when one side is missing; `u = -grad phi`, so a half-width
+narrows doubles the speed (F1: 2.0000) and the flow parts round an island and
+rejoins (F2: 0.5000 / 0.5000) by property, not by rule. Jacobi-PCG on the
+compacted wet set, per-piece balanced, residual 1e-9. The written direction is
+continued into slack water and bank texels and low-passed by 8 in-mask 3x3
+vector averages; the speed nibble is the solve's own. **Dye:** a fourth plane
+(uint32 source | weight << 16, the flow plane's rate) under a new section bit
+from the version-3 header's reserved word -- the version stays 3, no offset
+moves -- written only while a DyePin (7, with RGBA) or DyeMouth (9) mark
+exists; the weight is the exact one-pass steady advection-decay in descending
+potential (F7: 0.5000 at L, 0.1250 at 3L; F6: the plume's length predicted
+before the dye 96, measured after 98.2 texels).
+
+**Gates, pre-registered before the code** (`lane_water4_report.md` section 0)
+and run so far only in the numpy prototype: F1, F3, F4, F6, F7 green; **F2's
+island-bank gate FAILS as registered** (12.0 mean / 22.4 max against 5 / 15:
+the face-averaged velocity at a staircase bank cell, R-independent, one ring
+in 4.0 degrees); **F5's p99 FAILS as registered** (7.0 against 5 at 8 passes;
+patches 0 of 39, seams 0.26 percent of 2.97). Neither gate was moved. The C++
+has not run: P0-P8, `water_mark.sh`, `lodl_water.sh`, `water_flow.sh`, the
+render-hook picture pair and the dye picture are all owed to the build
+(`scratchpad/water4_20260910/PENDING.md`).
+
+## 2026-09-10 - the FO4CS-native far field has a writer: `.lodo` + `.lodi`, read back independently, built into the exe 2026-09-10 (lane BUILD6)
+
+`src/lodofile.{h,cpp}` (new: the object library), `src/lodifile.{h,cpp}` (new: the
+instance table + the synthetic fixture), `src/nativeemit.{h,cpp}` (new: the emitter and
+`--native-verify`), `tests/spells/lodgen_native_decode.py` (new: the independent
+decoder), `tests/spells/lodgen_native_baseline.sh` (new: lane 0), `NifSkope.pro` (+6
+lines), `docs/LODGEN_NATIVE_LODO_LODI.md` (SPEC -> AS BUILT, deviations, an
+anchor-derived provenance footer of 52 rows), `scratchpad/handoff_fo4cs/README.md`
+(the two rows, section 5, section 6 item 1), `MISTAKES.md` (three entries),
+`scratchpad/native0_20260910/` (the audit, the standalone fixture tool, the refusal
+controls, `HOOKUP_CHANGE_NEEDED.md`), `scratchpad/lane_native0_report.md`. Lanes
+NATIVE0 (killed 03:1x by the rate limit) and NATIVE0b.
+
+**What exists.** `lodoWrite`/`lodoRead` for the library (five packed rows with their
+strides pinned by `static_assert`: vertex 16 B, mesh **56 B**, cluster 16, material 16,
+base 32; oct 12:12 normals, a roll-angle tangent, a 16-triangle / 48-vertex cluster
+partitioner where whichever cap binds first closes the cluster), `lodiWrite`/`lodiRead`
+for the instances (24-byte records, smallest-three 2 + 3 x 15 rotation, the two u16
+refusals computed over the whole set BEFORE a byte is written and naming the ref or the
+base, the 65,536-chunk cap naming the extreme chunk, north-up chunk and cell order,
+per-chunk CRCs), and `lodgenNativeWrite`, which builds the base table from the FULL
+worldspace census (formId ascending, so `baseId` is worldspace-stable in a one-chunk
+bake), hashes exactly what the object walk reads into `objectCorpusHash`, loads each
+model once, and averages the finest ring's AO / sky / ground into the record.
+
+**What was measured.** Standalone link of the three writer TUs against Qt6Core
+(`scratchpad/native0_20260910/fixture_tool.exe`, no NifSkope object touched): the
+synthetic 3-instance / 2-mesh worldspace written by hand (`fixture/Synthetic.lodo`
+28,903 B, `.lodi` 16,408 B); the Python decoder, which shares no code with the writers,
+passed **46 checks, 0 failures** against answers written before the run (positions to
+0.125 u, rotation to 0.02 deg including a 123-degree tree yaw, every count, every sort,
+the pairing identity); two writes **byte-identical**; **20 single-byte mutations
+refused**, 9 by the CRCs and **11 with the CRCs re-signed so the row rule itself
+answered by name** (base sort law, cluster reserved flag, material family, reserved
+header bytes in both files, `boundRadius` -216, instance reserved word / reserved flag,
+NOLIB with an identity, `ROW_ORDER_NORTH_UP` clear, the pairing identity). All three
+TUs pass `g++ -fsyntax-only` with the flags of `Makefile.Release`. The lane-0 harness's
+comparator names a one-digit flip (self-test 2/2).
+
+**Two deviations from the spec, ratified on the contract page with the measurement:**
+the mesh row is 56 B because the spec's 48 carried no model path and its own sort law
+was uncheckable; the instance rotation is the DRAWN one (ESM x tree yaw) with `seed` =
+the hash's low byte, because `treeHash % 360` needs 9 bits and the u8 holds 8
+(`audit_out.txt` section 3) -- the decoder's ESM leg recomputes the yaw from the
+plugin's float position, so the cross-check the spec feared losing still runs.
+
+**The audit** (`audit.py`): the spec's 682 B a placement is 703.3 on today's emitter
+over the (0,0) sample set; the silent bucket-cap drop is confirmed in kind (87 of 30,941
+rows without geometry on the (0,0) dim-32 sample, first missing index 26,249) but the
+spec's 6.17% chunk (-32,0) was not re-baked; the quaternion's worst error is 0.0073 deg
+(the spec's 0.0146 was a bound); every `lodgen.cpp` line anchor in the spec has moved
+(8,286 -> 8,848 lines); 538.3 -> 60.2 MiB and 8-14 draws stay [arith] until lane 0's
+bake and a consumer exist.
+
+**Built 2026-09-10 03:57:46 by lane BUILD6** (the hook-up's 4 + 6 sites applied
+from `HOOKUP_CHANGE_NEEDED.md` by anchor, 1 of 1 each, 0 CR; `qmake` then `make`,
+rc 0; exe sha256 `664e0de4...`). Measured on it: the synthetic fixture written
+through the exe is **byte-identical** to the standalone tool's pair and the
+decoder reads it **46 checks, 0 failures**; the (0,0) 4x4-cell region at dim 4
+(`--no-ao`) writes `Commonwealth.lodo` **5,696,484 B** (2,970 bases, 2,982
+meshes, 10,634 clusters, 142,138 triangles; 4 `WrhsLeanTo*_LOD.nif` models
+failed to load) and `Commonwealth.lodi` **136,992 B** (3,812 instances, 1
+chunk), and at dim 8 / 16 / 32 the `.lodi` is 279,624 / 33,064 / 16,392 B
+(8,329 / 549 / 1 instances) beside the same `.lodo`; `--native-verify` accepts
+all five pairs; the decoder's ESM leg passes on all four dims (X/Y worst 0.1254
+u, rotation worst 0.0048 deg incl. the tree yaw) and its manifest leg passes
+base, membership and scale but **fails X/Y at 0.125 u on dim 4 / 8 / 16** (288
+/ 1,118 / 92 rows, worst 0.174) -- measured to be the manifest's own
+6-significant-digit print (step 0.1 above 10,000 u; with half that step budgeted,
+0 coordinates exceed), so the bar, not the writer, and NOT re-pinned by the
+build lane. **Lane 0 is baked**: `tests/baselines/stock_baseline.sha256`, 25
+files off this exe, `bake-seconds 8` (the harness's REGION SET -- four chunks
+incl. the (-32,0) dim-32 bucket-cap chunk plus a 2x2-cell region with arrays
+and atlas, AO on -- not a worldspace), `--selftest` 2/2, `--check` **0 differ**;
+`PENDING.txt` removed. Still owed: the manifest-leg bar (director), HOOKUP §C
+step 5 (the (-32,0) asymmetric-drop proof, not run), the writer-mutation half
+of lane 0, the two-instance order fixture, and a consumer in FO4CS. Numbers and
+logs: `scratchpad/lane_native0_report.md` "## Build (BUILD6)".
+
+## 2026-09-10 - marking water direction by hand (lanes WATER3, BUILD5, BUILD5b)
+
+bungo, 2026-09-09: *"in nifskope, have the player mark the water direction in a
+smart way"*, *"lakes have no flow if they're not connected to rivers, then
+rivers end up at sea"*, *"different water colors for different bodies of
+water"* -- *"or at least an ID for them"*.
+
+`src/watermark.{h,cpp}` and `src/watermarkpanel.{h,cpp}` (NEW, ~3,700 lines),
+`src/nifskope.cpp` and `src/nifcli.cpp` (the three hook-ups), `NifSkope.pro`,
+`tests/spells/water_mark.sh`, `scratchpad/specs_20260909/spec_water.md`.
+**BUILT and GATED**: `release/NifSkope.exe` 2026-09-10 03:38:56, harness
+**21 model checks + 20 dock checks, 0 failures**, and the four sibling
+harnesses that share the reader or the Workspaces menu are unmoved
+(`lodl_water` PASS, `lodl_open` 23/0, `lodgen_terrain` 26/0, `lodgen_identity`
+PASS, `render_shot` 55/0).
+
+**A Water Marking dock** (in the Workspaces dropdown) over a new model. The
+worldspace is drawn from above, one stored plane at a time -- Body ID as a
+hashed hue, Flow as direction-hue, Shore as a ramp -- and a drag along a river
+is a CONSTRAINT on its direction. Strokes, pins, a source/outlet pin pair that
+means "the path between these", a still-water mark for a lake nothing feeds,
+per-body class, water form, colour override and name. `lodl <file>
+--water-mark-selftest` is the headless half.
+
+**The strokes are the SOURCE and the planes are DERIVED.** The store is written
+in WORLD coordinates (spec 3.7), so a stroke survives a re-derivation at another
+sample rate; nothing in the tool edits a plane. `save()` rewrites the file from
+the body table onward: table, name blob and stroke store re-encoded, the flow
+plane re-derived tile by tile, and the body-ID and shore planes copied through
+VERBATIM with their absolute offsets rebased -- because nothing a marking tool
+does can move a body's shape. The original is renamed `.bak-watermark`.
+
+**What the marking actually does to the plane, measured through lane WATER2's
+independent decoder** (`scratchpad/water3_20260910/flow_mean.py`, body 3, the
+Charles, 25,114 samples): before, the whole reach carries **one** direction,
+115.31 degrees, angular concentration R = 1.000 -- that is the drain rule's
+single vector painted over every texel. After one stroke down the river toward
+its mouth: **99 distinct directions**, mean 111.31 degrees, R = 0.807. The flow
+bends with the banks. Pictures: `scratchpad/water3_20260910/images/`.
+
+**The gates, all with a floor on the other side.** P0 identity: a file nobody
+marked re-derives to the writer's own bytes, 0 differ over 37,748,736 texels
+(pre-measured in Python before a line was compiled, floor 25,114). P1
+isolation: a stroke on body 3 changes 0 texels outside it and 25,110 of its own
+25,114 (100%), with the refuter run FIRST so the isolation check is seen able
+to fail. "Rivers end up at sea": the mouth is found IN THE FILE and the marked
+plane's mean points at it, cos = 1.000. P3 undo and P8 round trip: both
+byte-identical, 0 bytes differ. P4 re-bake: marked at 32 samples a cell,
+re-written at 8, the body still points the same way -- **moved 0.21 degrees**
+against a tolerance of 5, with a floor asserting the file really was rewritten
+at 8. P5: the house-style counts, twenty of them. P7: a stroke on dry land is
+refused in words, at a dry point FOUND in the file.
+
+**Four defects the first gated run caught, and what each one was.** (1) The
+"dry land" control was placed at the worldspace's own corner -- which on the
+Commonwealth is open SEA, body 1, so the tool correctly accepted the stroke and
+the control read as a failure; the dry point is now measured out of the file.
+(2) `solve()` wrote the body table's derived fields -- flow vector, flow source,
+confidence, source, outlet -- and nothing ever put them back, so removing a
+stroke could not reproduce the file it started from: gate P3 failed by
+**1,021,405 bytes**, the sea's share of a flow plane derived from a mean a
+solve had moved. The derived fields are now re-derived from the table as the
+generator wrote it, on every solve, and `solve()` no longer sets the
+"user-edited" bit it cannot clear. (3) The canvas dropped every point that was
+not on water before the model saw the stroke, so a stroke drawn entirely on land
+came back "that stroke has no points"; it now hands the stroke over AS DRAWN and
+the model names the body from the first point that lands on water. (4) The dock
+opened with **0 of its 6 named settings** inside the visible band -- a
+QScrollArea reports a fixed ~100x30 sizeHint whatever it holds, so the splitter
+gave the map everything -- while all nineteen dock checks stayed green, because
+"6 settings on 6 distinct rows" is a fact about the layout and not about what a
+person sees. Only the screenshot saw it (CONSTITUTION 5). The splitter now opens
+each band at its own height, and the count that would have caught it ships with
+a floor: 6 of 6.
+
+**The spec's pre-registered gate numbers did not survive their audit**
+(`ww-spec-gate-audit`). `spec_water.md` marked "body 233, the Charles, 25,112
+texels" and refuted on "body 136": under the rule lane WATER2 shipped, ids are
+assigned by descending area over 346 bodies, so the Charles is **body 3**
+(25,114 texels, same cells) and the marsh is **body 2** (29,312). The harness
+hard-codes neither -- it picks the largest river and the largest other non-sea
+body and prints which, and `WW_WATER_MARK_BODY=<id>` names one for a picture at
+a framing that already exists.
+
+**`spec_water.md` is current**, 557 -> 735 lines: 346 bodies everywhere, the
+SIZE-guarded merge clause, 3.8's stride refusal reversed (it had the
+forward-compatibility rule backwards), 7's G5 and G6 restated with the numbers
+that hold, 5 rewritten as built, and a provenance footer rebuilt from scratch
+whose 38 line numbers were re-derived from their anchors.
+
+**Divergences, stated.** The spec said the 3-D water plane would be the canvas;
+it is a top-down map in the dock, because `src/glview.cpp` was another lane's
+file and because a river reach eleven cells long is a fact about the map.
+Blender's grease pencil is the reference for the gestures; the eraser removes a
+WHOLE stroke (a stroke is one constraint), there is no tablet pressure (the
+Width row is the only source, so a stroke is reproducible from the file), and
+pan/zoom are Blender's. The map's own palette is a hash of the body id rather
+than the skin table, because 346 bodies cannot come out of a twenty-entry
+palette; dry land is drawn at a literal (24,26,30) and that one IS a miss.
+Confidence is not the spec's second harmonic fill -- that converges to 15
+everywhere -- but a geodesic distance inside the body's mask, halving every
+stroke width, which is what the spec's own sentence asked for.
+
+**Owed, and named:** Barrier and Merge strokes do nothing (they need the
+classifier re-run, so they belong to the writer); the writer does not read the
+stroke store, so a full re-bake from the ESM (`lodgen --water-bodies`) still
+discards a user's marks -- the sharpest owed item here; the plane packer is a
+TWIN of `lodtPackPlane` rather than a call, kept safe only by the identity gate,
+and retiring it into shared code is a `src/lodtfile.cpp` lane; the 3-D viewport
+cannot be marked on; `EsmWorld` still has no `WATR` accessor.
+
+## 2026-09-10 - the cell owns its own boundary rows
+
+`src/lodgen.cpp` (`lodgenTerrainFillRing` and a new
+`lodgenTerrainRingSelfTest`), `docs/LODGEN_TERRAIN_VT.md` (§2.4 and the
+provenance footer), `tests/spells/lodgen_terrain_vt.sh` (a comment; the check
+count stays 35), `scratchpad/clamp2_20260910/ringcontrol.sh`.
+
+**BUILT AND GATED 2026-09-10 (lane BUILD6), one gate RED.** The exe that carries
+this code is `release/NifSkope.exe` **03:38:56** -- lane BUILD5b's link, which
+picked up `src/lodgen.cpp` (03:33:44) on its way (`lodgen.o` 03:38:54 holds the
+`lodgenTerrainRingSelfTest` symbols; `make` had nothing to do). The seven gates
+pre-registered in `PENDING.md`, in order: (1) `ringcontrol.sh` **13 checks, 0
+failures** (12 were pre-registered; the 13th is the self-test's own verdict),
+the CONTROL line reads the old order **REFUSED** at 1096/1096 on the inner
+boundary; (2) `lodgen_terrain_vt.sh` **35 checks, 1 failure, RESULT FAIL**; (3)
+V9a byte-identical tint ON and OFF on all four chunks, **V9b FAILS**: the
+pyramid-assembled and direct `_msn` sheets differ on `Commonwealth.4.-20.28`
+only, by **32 texels** (0.0122%), two BC1 blocks, rows 0-3 of the NORTH border
+at x = 252..259, centred on x = 256 = the -19|-18 cell corner on the region's
+outer y=31|32 edge; -24.28 and both y=24 chunks are identical between the two
+paths (lane BUILD4 read this bar green at 35/0, so this is the ownership rule's
+own regression, cause measured, NOT cured here); (4) V9c edge step **1.961**
+(bar 2.60), E/W ratio 2.75, N/S 2.87, interior 1.803/1.603 -- the same digits
+as BUILD4's; (5) `lodgen_terrain.sh` **26/0**, pyramid `UP=G D0=76 D1=32 D2=51
+D3=32` on both paths; (6) `lodgen_identity.sh` **8 ok, RESULT PASS**, baseline
+unmoved; (7) the edge band against lane CLAMP's clamped bake: colour and `_msn`
+**0 beyond 4 on all four borders of all four chunks**, cover and no-cover --
+BUILD4's 994 and 1,405 north `_msn` misses are gone -- and `_data` **16 texels
+beyond 64 survive on -20.28** (the wetness-domain defect, left as the resume
+says); colour moved 127 texels with `--cover` and 0 without (the same reading
+as BUILD4's, not new). The second run, against BUILD4's own after-sheets: the
+y=24 chunks came back **byte-identical, all 12 files, cover and no-cover** as
+predicted; the y=28 `_msn` sheets moved 3,199 and 2,519 texels, **every one in
+rows 0-7 of the north border** (maxd 7, none in the east column beyond the
+corners, none interior), narrower than the prediction's "north or east".
+Verdict and the numbers: `scratchpad/lane_clamp2_report.md` "## Build (BUILD6)".
+
+Bethesda's landscape does not always agree with itself across a shared cell
+edge. Over the cells x = -24..-17 the shared VHGT row **y=31|32 differs by 2, 1,
+4, 6, 9, 8, 7 and 4 units of 8** -- 16 to 72 world units -- while y=23|24,
+y=27|28, y=32|33 and both east seams differ by exactly 0 (lane BUILD4, from
+`--dump-land`, not from our output). The one-cell ring the terrain bake got on
+2026-09-10 filled south to north and west to east with later-wins, so the y=32
+neighbour rewrote the row it shares with y=31 -- **which is the chunk's own
+northern boundary row** -- and a bilinear tap carried that 7 texels into the
+sheet, past the 4-texel band the normal's central difference can reach. The
+`_msn` sheets of the two y=28 fixture chunks moved 994 and 1,405 texels beyond
+that band, every one of them on the NORTH border, at distances 4, 5, 6 and 7.
+
+bungo's ruling, verbatim: **"The cell owns it then."** `lodgenTerrainFillRing`
+now fills ONLY the samples BEYOND its inner unit: a ring cell never writes the
+inner unit's own boundary row or column, so the cell's copy of a disagreeing
+shared row stays and the hairline disagreement is kept AT the seam rather than
+smeared inwards. The rule is derived inside the one shared filler from
+`LODGEN_TERRAIN_RING_CELLS`, so the chunk baker and `lodgenBakeVtTile` get it
+from the same seven lines and the V9a/V9b byte-identity bars still stand on one
+implementation. Inside the inner unit the order is unchanged -- south to north,
+west to east, later wins -- which is also the mesh path's convention, and the
+south and west borders were already the cell's own, so only the north row and
+the east column move.
+
+**The land VERTEX channels do not need the ring for this rule and are
+unchanged** (`src/lodgen.cpp:903`, `lodgenTerrainChannels` on the mesh path):
+its `grid` is built over the chunk's own `dim` cells only, `n = dim*32+1`, with
+no ring at all, so every boundary sample it holds was written by the chunk's own
+cell and the cell already owned it. What that grid still lacks is the ring
+itself -- its AO march is clamped at the chunk edge, which is a different defect,
+named as owed and untouched here because it moves `.bto`/`.btr` bytes and
+`lodgen_identity.sh`'s baseline.
+
+**The known-answer control**, `scratchpad/clamp2_20260910/ringcontrol.sh` on the
+exe's own `WW_TERRAIN_RING_TEST` self-test: a synthetic pair of cells whose
+shared row disagrees by 72 world units -- the measured 9-unit worst case -- is
+filled through the shipped filler, and every sample of all four inner boundary
+rows/columns must equal the inner cell's value EXACTLY while the samples one
+step beyond must equal the neighbour's, so a filler that stopped ringing fails
+too. The bilinear tap is asserted at the same place, and half a step beyond it,
+so the claim is about a texel's operand. **The refuter is the OLD fill order**,
+reproduced verbatim beside it: it must give the neighbour's value on the inner
+boundary, and if it does not the self-test fails on that alone.
+
+## 2026-09-10 - the card's coverage is written the way the reader tests it
+
+`src/nifskope_ui.cpp` (the bake's pass two and the sidecar), `src/lodgen.cpp`
+(the card sidecar reader, the card `.lodm`, the card-array layer),
+`tests/spells/lodgen_octahedral.sh`, `docs/LODGEN_CARD_SHEETS.md` (§4),
+`docs/LODGEN_LODM_FORMAT.md`.
+
+The bake defines coverage at a floor of 16/255 and measures every extent it
+writes -- `half`, and every `frameOffset` -- against that silhouette. Both specs
+then tell the consumer to alpha-test at 0.5. **Those are two different
+silhouettes**, and the gap between them is the tree changing size at the moment
+the mesh hands over: measured on three Sanctuary trees, the set a consumer drew
+at 0.5 was up to **5.41 texels of half-width short** of the extents the `.lodm`
+declared -- TreeHero01 handing over to a card **9.1% narrower and 3.2% shorter
+than its own mesh**.
+
+The bake was not wide. At the card's own texel pitch the sheet reproduces
+pass one's silhouette box to **+0.09 to +0.74 texels** on all three trees and both
+axes. Three candidates were killed by measurement rather than argument: the frame
+dilation moves coverage by **exactly 0 texels** (its `put` writes the existing
+alpha back on the coverage sheet), BC3 moves the silhouette by **at most 0.5
+texel** while moving 167,254 alpha VALUES, and the coverage floor itself is
+right -- decided inside the source render alone, with no bake in the comparison,
+the 941-px silhouette box-filtered to the card's texel pitch reproduces its own
+box to **0.63 texels at 16/255 and 2.07 at 0.5**.
+
+The 18-121% "width excess" of the 2026-09-10 01:1x trunk table is **resolution**:
+the same statistic taken between the fine source mask and the same mask
+box-filtered to the card's texel pitch -- the card not in the comparison at all --
+gives +36% to +65% on the crown band and +2% to +15% on the trunk band. The rest
+is that instrument's own, and it measured CLIPPED renders (MISTAKES.md).
+
+So the base-colour sheet's alpha is now re-encoded on the way in:
+
+    a' = 0                                                    coverage <  floor
+    a' = base + round( (coverage-floor) * (255-base) / (255-floor) )
+
+with floor 16, test 128 and base 160, stated on a new sidecar line
+`coverage <floor> <test> <base>` and carried into the card `.lodm` (and each
+`cardArray` layer) as a `coverage` object. `{ a' >= test } == { coverage >= floor }`
+exactly -- 0 disagreeing texels of 209,793 / 64,709 / 13,510 -- 255 stays 255 so a
+solid silhouette cannot be fattened, an empty texel becomes a clean 0, and the
+FRACTION survives monotone and invertible to one alpha step. The base is 160 and
+not 128 because `lodgenWriteDds`'s BC3 alpha block is endpoints max/min with an
+eight-step ramp, so a texel moves by at most (aMax-aMin)/14 = 18.2: at 128 a
+covered texel can round below the test (5,250 texels of one sheet), at 160 it
+cannot. **A set with no `coverage` key is from before this and must be tested at
+16/255**; absence is passed through as absence, so older `.lodm` files stay
+byte-identical.
+
+A law was tried and REFUSED with numbers: the alpha-coverage-preserving
+downsample (scale each frame's alpha until the area drawn at 0.5 equals the
+frame's own alpha integral). It left the worst silhouette at -9.1%, because the
+outermost twigs carry almost no area, and it fattened a solid rectangle by a whole
+texel -- the cube fixture's own condition.
+
+The fixture, pre-registered: the existing 512-cube bake is now also read at the
+READER's threshold and must span its predicted texels within **1 texel** (the
+perspective control must exceed it); the sheet must carry **0** texels with alpha
+between 1 and 159 while the DECODED fraction must carry some, so the check can
+fail on its own input; and the contract must reach both the sidecar and the
+`.lodm`.
+
+BUILT AND GATED. `Fallout4.exe` went DOWN at the lane's one build check, so the
+whole chain ran: `qmake` rc 0, `make -j2` rc 0, `release/NifSkope.exe` 02:07:48,
+0 stale of five changed files, stylesheet in step. `lodgen_octahedral` **110 ok,
+1 FAIL**; `lodgen_card_arrays` 35/0 PASS, `lodgen_impostor_cards` 12/0 PASS,
+`lodgen_identity` 8/0 PASS. 19 trees re-baked, 0 failed; **0 texels of all 19
+sheets carry an alpha the contract forbids**; the contract is in 19 of 19
+sidecars, 18 of 18 card `.lodm` and 38 of 38 sample-set card entries.
+
+THE ONE FAILURE IS PRE-REGISTERED AND LEFT RED: F1 asks the 512-cube to span its
+predicted texels within 1 at the reader's threshold and it spans within **1.78**
+-- the SAME 1.78 the same instrument read on the PRE-FIX build, so the fix moved
+the cube by 0.00 texels, which is what it must do to a solid silhouette. F1b, the
+invariant the contract actually guarantees, is green: the reader's threshold and
+the bake's floor now measure the same silhouette (1.78 vs 1.78) where a
+pre-contract sheet has them 5.41 texels apart. The 0.78 is the predictor's own
+integer rounding, which is why the check beside it is written at 2.0. The bar was
+carried from a brief and is a hypothesis about the instrument; it is not moved.
+
+The orthographic profile, unclipped this time, is the number for bungo's rule:
+card height against mesh height **0.16% / 0.31% / 1.24%**, and the trunk band is
+EXACTLY the source measured at the card's own texel pitch (164 = 164, 38 = 38).
+The transition rows in a perspective scene refuse (0 of 8; four more rows were
+refused by an over-blunt source floor) and their bars are unmeasurable as written
+-- one card texel is 0.43 px at that distance against an integer bounding box --
+so they stay red with the pixel offsets quoted instead. Pictures:
+`scratchpad/cardwidth_20260910/cardwidth_transition_*.png` (source | card |
+overlay) and `cardwidth_coverage_*.png` (the three-column texel picture).
+
+Nothing committed. **His open NifSkope window predates the change: the next launch
+of `release\NifSkope.exe` (02:07:48) has it.** The measurement is
+`scratchpad/lane_cardwidth_report.md` (section 15 is the build).
+
+## 2026-09-10 - the impostor bake's camera is ORTHOGRAPHIC (it never was)
+
+`src/nifskope_ui.cpp` (the bake block), `src/lodgen.cpp` (the card sidecar
+reader, the card `.lodm`, the card-array layer), `tests/spells/lodgen_octahedral.sh`,
+`tests/spells/lodgen_card_arrays.sh`, `tools/bake_impostor_cards.sh`,
+`docs/LODGEN_CARD_SHEETS.md` (new §3.7), `docs/LODGEN_LODM_FORMAT.md`.
+
+Every geometric number an impostor card carries -- `half`, `center`,
+`frameOffset`, the front/side extents, the aspect its frame is chosen from -- is
+a world measurement taken off VIEWPORT PIXELS through a single units-per-pixel
+constant, and only an orthographic camera makes that arithmetic true. **The
+headless renderer never had one.** `restoreUi()` hard-codes `isPersp = true`,
+the only other callers of `setProjection` are the View menu and Numpad-5, and the
+bake never called it -- so every card sheet baked up to 2026-09-09 was DRAWN
+through a 60-degree perspective frustum while being MEASURED as if it were not.
+Lane HOOKCAM measured the frustum on 2026-09-09 and recorded it as a finding for
+this lane.
+
+Why no check caught it: `orthographicHalfHeight()` returns `Dist / Zoom`
+whatever the projection is. The bake's own read-back beside the fit compares two
+numbers that are both `Dist / Zoom`, so it ran, passed, and could not tell the
+two cases apart. A NAME IS NOT A MEASUREMENT (MISTAKES.md).
+
+What the perspective camera cost: the SCALE (a point `d` in front of the card
+plane is magnified by `eye / (eye - d)`, tens of per cent over a tree's own
+depth, so the recorded extents described no picture and a reader's quad could
+not match the mesh); the SHAPE (the magnification varies across a frame, so each
+silhouette was foreshortened, wider at the frame's near edge than its far one);
+and the HEIGHT sheet (near and far sit symmetric about the bound centre and
+window z 0.5 is called the card plane, which is exactly true under an
+orthographic projection and false under a perspective one).
+
+The bake now asserts the projection before pass one, and says which arm served,
+read back off the live viewport rather than off what was asked for: the sidecar
+gains `projection ortho` / `projection persp` and `orthofit <asked> <achieved>
+<persp 0|1>`, and the word travels into the `.lodm` -- per card, and per
+card-array layer, because an array can hold a metric set beside a foreshortened
+one. **Absent = the older vintage**, not "unknown": the line arrived in the same
+change that fixed the camera, so a reader may refuse such a set by name.
+`WW_IMPOSTOR_PERSP=1` restores the old camera exactly (CONSTITUTION 10) and is
+the control the gates fail against. `LODM_VERSION` does not move: the key is
+optional and its absence has a defined meaning.
+
+THE PROOF, pre-registered before the build in
+`scratchpad/cardortho_20260910/prereg_cube.md`: a 512-unit cube baked at OCT=8,
+TILE=64. Its orthographic silhouette is arithmetic -- for a box of half-extents
+h seen with screen axes r and u, `halfR = hx|rx| + hy|ry| + hz|rz|` -- so all 64
+frames have a predicted texel span, a seven-rung ladder from 35.81 to 50.13
+texels on the right axis. The cube's own half-extent is measured through the
+render hook's PINNED ORTHOGRAPHIC camera (`WW_RENDER_ORTHO`, a different code
+path, gated by `tests/spells/render_shot.sh` section 7), so this is not our
+output judging our output. Two further invariants on the same frames: an
+orthographic projection of a centrally symmetric solid is centrally symmetric,
+and the widest row of a silhouette's top fifth equals that of its bottom fifth --
+the no-foreshortening statement in its most direct form. The PERSPECTIVE CONTROL
+must fail all three.
+
+STATUS: BUILT AND MEASURED (lane BUILD4, 2026-09-10). `qmake` rc 0, `make -j2`
+rc 0 (`Nothing to be done` -- lane WATER2's 01:01:04 link already carried this
+code, confirmed at the object level, `nifskope_ui.o` 00:44:24 against
+`src/nifskope_ui.cpp` 00:38:50). 0 stale over all 15 changed files; stylesheet
+in step.
+
+**The harnesses.** `lodgen_octahedral.sh` **100 ok, 0 FAIL**;
+`lodgen_card_arrays.sh` **35 ok, 0 FAIL**; and the two floors did not move --
+`lodgen_impostor_cards.sh` **12 ok**, `lodgen_identity.sh` **8 ok**. CARDFINAL's
+gap, mip and per-frame laws sit inside that 100 and are now measured rather than
+expected.
+
+**The camera reaches the format.** Bake 1's sidecar says it was photographed
+orthographically and its read-back is `orthofit 972.833 972.833 0` -- asked and
+achieved agree EXACTLY and the projection field is 0. The perspective control
+says `persp` on the same line, so both the switch and the line move. The card
+array carries `projection` per LAYER and one array holds both states:
+`{'0004a074': 'ortho', '0004a075': None}` -- the layer whose sidecar named no
+camera carries no key at all, which is what gives absence its defined meaning.
+
+**THE CUBE PROOF PASSES AGAINST THE PRE-REGISTRATION AS PRE-REGISTERED.** All 64
+frames of the 512-unit cube are within **1.78** texels of the table the harness
+recomputes at run time and within **1.87** of the FROZEN table in
+`prereg_cube.md` (bar 2); those two tables differ by at most 0.10 texels, so the
+recomputation did not loosen the bar. Central asymmetry **0.000** and near-edge
+vs far-edge width difference **0.000** (bar 0.05 each). The `WW_IMPOSTOR_PERSP=1`
+control exceeds every one: **18.70** texels (23.19 against the frozen table),
+**0.495**, **0.850**. The fixture's own size, measured through a DIFFERENT code
+path (`WW_RENDER_ORTHO`), is **256.5097** units against 256 +- 3.
+
+**The library was re-baked**: 19 baked, 0 failed, **19 of 19** card sidecars
+saying `projection ortho`, **0 of 19** `orthofit` lines read through a
+perspective camera, **18 of 18** card `.lodm` files carrying
+`projection: "ortho"` and none absent. The FO4CS sample set was regenerated on
+it: **38 card entries, every one ortho, no `(absent)` count at all.** (`run.sh`
+reports `19 of 20` because its denominator counts `cards/library.txt`, the run
+manifest, which has no camera and correctly no line.)
+
+**THE TRANSITION GATE MISSES: 1 of 12 card rows**, against a pre-registered 12
+of 12 -- centre within one card texel AND both extents within 2%, over 3 trees x
+2 axis views x 2 distances. The zeroed-offset control passes **0 of 12**, so the
+measurement is sensitive to the thing it names. The row that passes is
+`0004a074` front at the ring distance (centre **0.81** texels, extents 0.92% and
+0.43%); four more meet the centre bar and are turned away by an extent, the
+sharpest being `00038599` right at mid, **0.15** texels off centre with 18.70%
+on dx.
+
+**What the trunk-width half says, and it is the honest half.** The card's HEIGHT
+matches the source model to **0.00% on all three trees** -- the vertical world
+scale, which is what the orthographic camera was changed to fix, is right. The
+WIDTHS are 18.14% / 65.62% / 44.94% wider at the trunk and 90.03% / 120.54% /
+37.88% wider at the crown, and the three pictures
+(`scratchpad/cardortho_20260910/cardortho_transition_*.png`, all opened) show a
+filled blob where the mesh is lacy. That is the shape of coverage-threshold
+dilation at a 128-texel frame, not of a projection error -- named as a candidate
+with its discriminator (re-measure at two frame sizes; dilation scales with the
+texel, a projection error does not). It is NOT stated as the cause.
+
+**And a finding about the instrument** (CONSTITUTION 4, rule 1): comparing every
+card row with its own control, the centre column differs on **12 of 12** rows,
+the dy extent on 4 of 12, and the **dx extent on 0 of 12**. The control therefore
+fails only through the centre; the 2% extent bars -- which turn away four of the
+eleven failing rows -- have no floor under them yet.
+
+**Nothing was fixed and nothing was re-pinned** (a resuming lane measures a
+failure and stops). NOT COMMITTED; bungo's open window needs a restart.
+## 2026-09-10 - `.lodl` version 3: water BODIES, flow, shore and a stroke store
+
+`src/lodtfile.cpp`, `src/lodtfile.h`, `src/nifcli.cpp` (the `lodl` and `lodgen`
+switches), `src/btdterrain.cpp`/`.h` (the plane list only),
+`tests/spells/lodl_water.sh` (new), `docs/LODGEN_BTD_FORMAT.md`.
+
+A `.lodl` could say what water is in a cell and could not say WHICH BODY of
+water it is. Sixteen `WATR` forms serve the whole Commonwealth: `ExtLakeWater`
+alone paints sixteen separate lakes with one colour and one velocity, and
+`ExtOceanWater` paints the harbour and four hundred inland pools. Version 3 adds
+a per-body table, a per-texel body-ID plane, a flow plane, a shore-distance
+plane and a stroke store, so two lakes can have two colours and a river can have
+a direction that is not its form's.
+
+**Nothing moves.** `0x00..0x9F` is what version 2 writes, the header grows by 88
+bytes at the end, every section and every absolute block-payload offset slides
+by exactly 88, and version 3's own sections are appended AFTER the block data.
+Gated both ways: with the module off the Commonwealth is byte-identical to the
+shipped 35,953,294-byte file, and `WW_LODL_VERSION=2` with the module ON writes
+those same bytes.
+
+**The module raises the version and nothing else does.** `--water-bodies` is
+off by default, so a run that does not ask for bodies produces the file it
+always produced. That is the fallback floor: a consumer with no version-3 reader
+loses nothing.
+
+**Two measured corrections to the spec's own rule D**, both argued in
+`scratchpad/lane_water2_report.md` §2 and both in `MISTAKES.md`:
+
+1. **The shore test is EXACT.** The read-only census that produced the spec's
+   590 bodies compared point clouds decimated to 4,000 points a body -- 4,000
+   of the sea's 21,585,117 texels -- and a decimated distance can only be too
+   LARGE. It found 218 of the 545 texel pairs that are within two texels.
+2. **A merge in which exactly one side inherits the worldspace type is
+   accepted only when the inheriting side is the SMALLER of the two** -- in
+   rule C's ADJACENT merge and in rule D's bridge, both. Without it in the
+   bridge, the exact test lets the 21.5 M-texel sea absorb a painted marsh that
+   passes within two texels of it and the whole Commonwealth ocean comes out
+   named `ExtMarshScumWater` (21,587,443 texels, 332 components, five forms);
+   without it in rule C, the known-answer control's sea takes the form of the
+   painted river reach it TOUCHES at its own height, which is how the second
+   half of this was found. Rule C already states the direction ("an inheriting
+   component is merged INTO the painted one"); the clause is what makes it
+   safe.
+
+Commonwealth, measured: 805 components -> 793 after rule C's merge (12 merged,
+1 refused because the inheriting side was not the smaller, 1 with more than one
+candidate) -> **346 bodies**, 528 bridge merges accepted, 13 refused.
+1 sea, 115 rivers, 230 lakes; 89 bodies at 64 texels or more; 115 under 4
+texels, flagged TINY. Flow sources: none 132, form NAM0 182, bed 2, drain 30.
+**The per-form TEXEL totals are identical to the read-only census's, form for
+form** -- no grouping decision can move them, which is what makes them the
+strong half of the gate.
+
+**One container, three planes.** Body ID, flow and shore share a tiled zlib
+store, one tile a cell, and a tile whose compressed size is 0 is UNIFORM with
+its sample in the size field -- the sea's 21.6 M texels cost sixteen bytes a
+cell instead of an inflate.
+
+**The stroke store ships EMPTY AND PRESENT.** A count of zero is not the same as
+an absent section: a marking tool can write into a store that exists, and a
+consumer can tell "nobody has marked anything" from "this file predates
+marking".
+
+**The header size is a table now** (`lodtHeaderBytes`), and the version refusal
+runs BEFORE any offset is read. The old `ver >= 2 ? V2 : V1` ternary would have
+measured a version-3 file against version 2's 160-byte floor.
+
+New refusals, each with its own sentence and each provoked on a hand-corrupted
+file by the harness: a section bit over an empty rate or offset, a record
+stride SHORTER than the 48 this reader knows (a LONGER one is the
+forward-compatible case and strides past the fields it does not know, which is
+the rule the `.lodm` sidecars already use), a record whose `id` is not its
+index + 1, and a plane naming a body past the table.
+
+**The viewer** gains `--plane bodyid`, `flow` and `shore`; body ID paints as a
+categorical hue, sampled NEAREST because an id is a name and the average of two
+names is a third body that does not exist.
+
+**What is NOT done, named:** no marking tool (lane WATER3), so nothing writes a
+stroke and no body carries flow source 4, a colour override, a name or a
+hand-set class. `EsmWorld` exposes no `WATR` accessor, so the `NAM0` velocities
+are read by opening the plugin a second time inside `src/lodtfile.cpp` --
+`scratchpad/water2_20260909/ESMDATA_CHANGE_NEEDED.md` has the twenty-line
+accessor that retires it. Nothing has been flown in a consumer: FO4CS pins
+version 1.
+
+## 2026-09-10 - the per-chunk terrain bake gets the pyramid's one-cell ring
+
+`src/lodgen.cpp` (the terrain bake only), `tests/spells/lodgen_terrain_vt.sh`,
+`docs/LODGEN_TERRAIN_VT.md`. **BUILT AND MEASURED** (lane BUILD4) -- see the
+status block at the end of this entry.
+
+The defect lane VTFIX named on 2026-09-09 and did not fix: the DIRECT chunk
+bake reads its heights out of a grid that stops at the chunk edge, so both of
+its neighbourhood operators are served a CLAMP outside -- the chunk's own edge
+sample repeated outwards, a plateau that is not the ground. The pyramid's tile
+baker has always baked a one-cell RING and read real neighbours. That is why
+the same chunk's sheets differed between the two paths (43 colour texels and
+5,524 `_msn` texels on Commonwealth.4.-24.24, every one of them within 4 texels
+of the chunk boundary), and why the step in the normal ACROSS a chunk seam read
+7.312 on the clamped bake against 4.955 on the ringed one while their interior
+controls agreed to three digits (1.797 against 1.803). bungo's call: give the
+direct bake the same ring so both paths are correct AND identical.
+
+**One home, not a second copy.** Four things the two bakers must never drift
+on now live once, at the top of the terrain section:
+`lodgenTerrainHeightAt` (the eased reconstruction, already shared),
+`lodgenTerrainMsnPixel` (already shared), and new here
+`lodgenTerrainFillRing` (fills the (rdim*32+1)^2 grid from a caller-supplied
+cell fetch, in the iteration order that decides a shared VHGT edge) and
+`lodgenTerrainGridSample` (the plain-bilinear tap). The tap replaced FIVE
+byte-for-byte copies of the same seven lines. The per-texel loops stay apart,
+deliberately, because their outputs are gated against files measured before
+either lane existed.
+
+The chunk baker now builds `hgt` on `dim + 2` cells and offsets its own
+coordinates by 4,096 units into it. The msn central difference and the
+2,048-unit AO march read that ring. Two things deliberately did NOT move, and
+both are stated rather than left to be discovered:
+
+* **the PAINT stays scoped to the chunk** -- `cells`, `haveLand`,
+  `dominantBase`, the per-quadrant cover constants. Every texel this bake
+  writes lands inside the chunk, so a neighbour's paint has nothing to
+  contribute, and widening the scope would move the dominant base (which is
+  exactly what V9a's cover-free half exists to catch).
+* **the per-sample channels stay on the chunk grid** (`chgt`, a copy of the
+  ring's middle). `lodgenTerrainChannels` computes wetness as a flow
+  accumulation over the WHOLE grid it is handed, so widening that grid moves
+  the sheet's INTERIOR, not its edge -- and it still would not match the
+  pyramid, whose tiles accumulate over a tile-sized grid. The `_data` sheet is
+  therefore NOT pinned to identity between the two paths, the harness says so,
+  and giving wetness a domain that is not the bake unit is a separate track.
+
+**The gate got TIGHTER, not looser.** V9a's tinted half was a bounded band
+(<= 4 texels from the boundary, <= 24/255, <= 0.05% of a sheet) because the
+two paths' normals legitimately disagreed there. It is now a plain `cmp` on
+all four fixture chunks, with three things beside it: **V9b** pins the `_msn`
+sheets to identity in their own right (they are the operand that used to
+differ), **a FLOOR** requires each path's cover sheet to differ from its own
+cover-free sheet -- two byte-identical files also compare equal when the cover
+pass, the tint or the bake is silently inert -- and **V9c** measures WHICH
+normal is right, on the direct sheets alone: the step across a chunk seam
+against the ordinary step between two adjacent columns taken WELL INSIDE the
+sheet (x = 100, 200, 300, 400; a clamped bake's own edge column is inside the
+defect and using it once reversed the verdict -- MISTAKES.md, lane VTFIX).
+Its bars sit BETWEEN the two known readings, so they discriminate: E/W ratio
+<= 3.20 (ringed 2.75, clamped 4.07), N/S <= 3.30 (2.87 against 3.78), a
+sheet's own edge step <= 2.60 (1.961 against 3.310), and the interior control
+must land in 1.20..2.20 or the sheets are not the terrain the bars were
+measured on.
+
+**The re-baseline, and the bands it was pre-registered against.** The change
+moves the EDGE bytes of every terrain chunk sheet in every worldspace, so the
+per-sheet band was written down from the code BEFORE any bake existed, at dim
+4 = 32 world units a texel: colour <= 4 texels and `_msn` <= 4 texels (the
+normal's one-step central difference, 128 units), `_data` <= 64 texels (the AO
+march's own `dist <= 2048.0f`). Beyond each band the count must be ZERO --
+that zero-change interior is the control. `scratchpad/clamp_20260910/edgeband.py`
+is the instrument and it was run against two known-answer inputs before it was
+believed: two identical sheet sets read 0 everywhere and the FLOOR fired
+(rc 1), and the cover-vs-no-cover pair (the ceiling) read 428,272 texels with
+416,280 of them beyond the 4-texel band, failing the band bar on all four
+chunks (rc 1). That pair also trips the msn floor, because the ground-cover
+tint does not touch the msn and those four sheets are identical on both
+sides of it -- which is the floor doing exactly what it is for. Its
+ceiling count reproduces lane VTFIX's 207,945 on Commonwealth.4.-24.24 exactly,
+through a decoder that shares no code with `lodgenWriteDds`.
+
+`tests/spells/lodgen_identity.sh` is NOT affected and that is a reading, not an
+assumption: it bakes `--objects ... --no-ao` and compares `.bto` files and
+manifests, and no terrain sheet is written on that path. The Land VERTEX
+channels are untouched too -- `lodgenTerrainChannels` is called a second time,
+from the mesh path, and that call was not changed.
+
+**STATUS: BUILT AND MEASURED** (lane BUILD4, 2026-09-10). `qmake` rc 0 then
+`make -j2` rc 0, `Nothing to be done` -- lane WATER2's link of **01:01:04**
+already carried this code, and the object-level check says so rather than
+inferring it (`lodgen.o` 00:44:00 against `src/lodgen.cpp` 00:40:11, and every
+object including a header a pending lane touched is newer than that header).
+Staleness sweep over all 15 changed files under `src/ res/ tools/ tests/`: 0
+stale. `res/style.qss` and `release/style.qss` in step.
+
+**The harnesses.**
+
+| harness | result |
+|---|---|
+| `lodgen_terrain_vt.sh` | **35 checks, 0 failures, RESULT PASS** (32 -> 35 as predicted) |
+| `lodgen_terrain.sh` | **26 checks, 0 failures, PASS** |
+| `lodgen_identity.sh` | **8 ok, RESULT PASS**, baseline unmoved |
+
+V9a is byte-identical with the tint OFF and, newly tightened to a `cmp`, with
+the tint ON; V9b's `_msn` sheets are byte-identical on all four chunks; the
+FLOOR reports **8 of 8** cover/no-cover sheet pairs differing. V9c landed on its
+pre-registration to three significant figures: **E/W 2.75** (bar <= 3.20,
+clamped 4.07) with interior control 1.803, **N/S 2.87** (bar <= 3.30, clamped
+3.78) with interior 1.603, **edge step 1.961** (bar <= 2.60, clamped 3.310).
+`lodgen_terrain.sh`'s pyramid statistics did not move: assembled and direct both
+`UP=G D0=76 D1=32 D2=51 D3=32`, vanilla's own sheet `99/67/67/67` as the control.
+
+**The edge-band re-baseline**, both AFTER bakes rc 0, 24 of 24 `.DDS` written,
+absolute paths throughout.
+
+| sheet | band | differing, 4 chunks | max distance | beyond the band |
+|---|---|---|---|---|
+| colour, cover | <= 4 | 127 | 3 | **0** |
+| `_msn`, cover | <= 4 | 25,537 | 3 on the y=24 chunks, **7** on the y=28 chunks | **0 / 1,014 / 1,405** |
+| `_data`, cover | <= 64 | 65,872 | 47 on three chunks, **79** on `-20.28` | **0 / 16** |
+| colour, cover-free | byte-identical | **0 on all four chunks** | - | **0** |
+
+The new baseline, the twelve `sha256[:16]` of the cover AFTER sheets, written
+here beside the numbers that justify it and never alone:
+`-24.24` **1f39d6aa0c64e83c** / `_msn` **594e49b57eadbb0b** / `_data`
+**7f8af632f8e07c96**; `-20.24` **5478915e2145d15f** / **5b5e55e3279c0fc7** /
+**7b58975182a55c6a**; `-24.28` **ce8a81d375d2cd97** / **dffe13752c2321b1** /
+**72b268e4b00da1bb**; `-20.28` **dbbdeb8d39227021** / **3dc2c5b40b135e27** /
+**b2ec30e781bb8dfb**.
+
+**TWO BANDS MISSED, AND THE CAUSE IS IN BETHESDA'S DATA, NOT IN THE RING.**
+994 of 1,014 and 1,405 of 1,405 beyond-band `_msn` texels sit on the **north**
+border, at distances 4,5,6,7 and nowhere further; every passing border reaches
+exactly 3. `--dump-land` over cells x=-24..-17 says the master disagrees across
+exactly ONE shared vertex row here -- **y=31 | y=32, by 1..9 VHGT units** -- while
+y=23|24, y=27|28, y=32|33 and both east seams read **0**. So
+`lodgenTerrainFillRing`'s documented south-to-north order lets the y=32 cell
+overwrite the row it shares with y=31, which is the chunk's OWN boundary grid
+row; everywhere else the two cells agree and only points outside the chunk can
+move. The reach then follows: a texel at distance `t` reads heights at `t +- 4`
+texels through a bilinear tap, so grid index -1 is read out to `t = 3` and grid
+index 0 out to `t = 7`. **The pre-registered band of 4 counted the central
+difference's 128-unit step but not the bilinear tap's own 128-unit footprint.**
+The 16 `_data` texels are exactly one 4x4 BC block and are the wetness flow
+accumulation -- a global operator over the chunk grid whose north boundary row
+moved, already named as owed item 2 of the lane's report.
+
+**Neither miss was fixed and neither band was re-pinned** (a resuming lane
+measures a failure and stops). The band is the lane's to re-derive or bungo's to
+accept. NOT COMMITTED; bungo's open window needs a restart.
+## 2026-09-09 - the render hook's camera can be pinned, and the pin is metric
+
+`src/glview.h`, `src/glview.cpp`, `src/nifskope_ui.cpp` (the hook's call site
+only), `tests/spells/render_shot.sh`. Owed by lane CARDFIT3, which could not
+deliver its one-texel transition test because no picture out of the render hook
+carried a world-unit number.
+
+**THE CAUSE, and it was not in the hook.** `GLView::center()` does not centre:
+it sets `doCenter` and asks for a repaint, and the auto-fit (`setCenter()`:
+`Pos = -bounds.centre`, `Dist = radius * 1.2`, `Zoom = 1`) runs inside the NEXT
+`paintGL`. `setOrientation( state, true )` ends in `center()`, so the hook set
+the camera, one frame ran, and `paintGL` replaced it. Two consequences, both
+measured on a 512-unit cube fixture with the 22:04:35 exe:
+
+* `WW_RENDER_CENTER` did nothing on an axis view -- look-ats `0,0,256` and
+  `400,0,256` gave two files with the same md5 `fff710bd...`. It appeared to
+  work on `WW_RENDER_VIEW=8` only because `setOrientation` returns early when
+  the requested state is already the current one, so on ViewUser it never queued
+  the auto-fit at all. The old note blaming generated documents was wrong.
+* `WW_RENDER_DIST` scaled as **1/D squared**. Spans at DIST 400 / 500 / 600 /
+  700 / 768 / 800 / 900 / 1000: 540.8 / 273.0 / 170.5 / 117.7 / 95.0 / 87.0 /
+  67.0 / 53.7 px, which inverts to an eye distance of `want^2 / 532.8 (+-0.5%)`
+  -- and 532.09 is that fixture's own auto-fit distance, `443.405 * 1.2`. Lane
+  CARDFIT3's read-back "fix" is what produced the wrong law: the pump between
+  the set and the read-back is the thing that destroys the camera.
+
+**THE FIX.** `GLView::WwCameraPin` cancels the queued auto-fit and RE-ASSERTS
+itself at the top of every paint, immediately after the `doCenter` block that
+used to eat it -- which is what makes it hold on a generated `.lodl`/`.btd`
+document that rebuilds its scene long after the hook has run. It is a module
+with its own switch: armed only by `WW_RENDER_CENTER` / `_DIST` / `_FOV` /
+`_ORTHO`, so a `WW_RENDER_VIEW`-only capture keeps exactly the old auto-fit
+framing and no existing baseline moves. Every refusal is named in the census's
+`arm=` field.
+
+**THE SWITCHES.** `WW_RENDER_DIST` now means the EYE's distance to the look-at
+in world units (it used to mean the orthographic half-height, a meaning that
+never once took effect). New: `WW_RENDER_FOV=<full vertical degrees>` and
+`WW_RENDER_ORTHO=<half-width in world units>`, the metric arm. A picture now
+carries `upp`, the units per pixel at the look-at plane, so an extent of E world
+units spans `E / upp` pixels:
+
+    orthographic   upp = 2 * W / viewportWidth
+    perspective    upp = 2 * tan( fov / 2 ) * eye / viewportHeight
+
+**CENSUS.** `release/ww_camera_pin.log` (or `$WW_CAMERA_CENSUS`), truncated by
+each process's first record: `arm view rot lookat eye dist zoom persp fov halfW
+halfH vp upp`, read off the live members at the grab, never off what was asked
+for.
+
+**ALSO.** `WW_RENDER_CLEAN=1` now turns the 3D cursor off. It is not in
+`Scene::options`, so it survived every "clean" render at a fixed 27 px, and a
+silhouette box read off a small object returned 27 px when the object was 11.
+
+**FOUND, NOT FIXED:** the impostor bake fits its frames with
+`orthographicHalfHeight()` while `glProjection` draws them through a 60 degree
+PERSPECTIVE frustum. Nothing headless ever calls `setProjection`; `restoreUi()`
+hard-codes `isPersp = true`. Measured two ways (two identical cubes 1024 units
+apart in depth photograph 31 px and 27 px in one frame; the auto-fit frames the
+512-unit cube at 231 px where perspective predicts 231.0 and orthographic
+202.6). It belongs to the bake's owner and it is in `MISTAKES.md`.
+
+**GATE.** `tests/spells/render_shot.sh` section 7: the cube's span against the
+projection's own prediction, within 1 px, at three eye distances on two views in
+orthographic and at three in perspective; the ortho scale law at three
+half-widths; a look-at 400 units across moving the silhouette by exactly
+400/upp px (the check that was red on byte-identical files); a refusal named;
+two runs byte-identical; and the same pin on a generated `.lodl`. The control is
+a run with no camera switch at all, which must still frame the cube at 231.0 px.
+
+**STATUS: BUILT AND MEASURED** (lane BUILD3, 2026-09-10). `release/NifSkope.exe`
+2026-09-10 00:13:19, qmake + `make -j2`, zero errors. It carries this camera
+work, lane CARDFINAL's bake changes and lane WATER2's `src/lodtfile.h` /
+`.cpp` in one link; `src/nifskope_ui.cpp` now holds BOTH HOOKCAM's hook edits
+and CARDFINAL's bake edits, where the 23:41:00 exe held only CARDFINAL's.
+
+`tests/spells/render_shot.sh`: **82 checks, 1 failure**, and section 7 -- the
+camera -- is **27 of 27 green**, every pre-registered number hit on the
+1507x421 viewport the clamp gives:
+
+| check | predicted | measured |
+|---|---|---|
+| control, no camera switch | 230.98 px | 231.0 |
+| ortho half-width 1024, eye 500/1000/2000, views Front and Right | 376.75 px, all six | 376.91, all six |
+| ortho half-width 2048 / 4096 | 188.38 / 94.19 | 188.82 / 94.50 |
+| perspective fov 60, eye 500 / 1000 / 2000 | 765.06 / 250.91 / 107.04 | 765.01 / 251.0 / 107.0 |
+| look-at moved 400 units | 294.34 px | 294.36 |
+| `WW_RENDER_ORTHO=-5` | refused by name | `arm=...refused-WW_RENDER_ORTHO-not-positive...`, `persp=1` |
+| two runs of one pinned camera | identical | `ea644af68f880bcb` twice |
+| the same pin on a generated `.lodl` | holds | `upp` 53.086 at half-width 40000, 106.171 at 80000 |
+
+The census agrees with the arithmetic to six figures (`upp=1.358991`
+computed and reported) and reports the viewport the PNG actually has.
+
+**The one failure is not the camera.** Section 6's floor "the pixel sampler
+CAN see a window's pixels" measured the visible control at a luminance range
+of 169.847 against a bar of 295.737. That bar is three times the desktop
+noise floor taken in section 0, and section 0 caught a transient: 98.579 at
+00:14:24, where the same region with the same sampler at 00:17 measured
+**0.111**. Every fixed-bar check in the run passed and every hidden run
+measured 0.111-0.233. Reported as a number, not re-pinned and not fixed.
+
+Also green on this exe: `lodgen_octahedral` 85/0, `lodgen_impostor_cards`
+12/0, `lod_generation` 97/0, `lodl_open` 23/0, `btd_terrain` 13/0,
+`lodgen_identity` 8/0.
+
+**THE TRANSITION RENDER IS UNMET, AND THE REASON IS THE SCENE, NOT THE PIN.**
+`scratchpad/hookcam_20260909/transition.py` ran in full on lane CARDFINAL's
+fresh library (`scratchpad/cardfinal_20260909/cards_perframe`, 20 sidecars).
+All three chunks baked, all eighteen frames were shot, and the pin held
+exactly in every one -- the census `upp` matches
+`2*tan(30 deg)*eye/421` to four figures at all six distances. But **0 of 6
+card rows and 0 of 6 control rows pass**, and on one row the control beats
+the card (`00038599` mid: control 12.50 px off, card 565.00 px), which is
+the signature of a measurement that is not measuring the offset.
+
+The cause is measured and it is not tunable. The test frames one instance
+inside a fully placed Sanctuary chunk, and the most isolated instance of each
+tree still has a neighbour 644-892 units away while the ring distances the
+test must use are 767-1874 units, so the neighbour sits 25.5-40.0 degrees off
+axis. Fitting the subject at those distances needs a vertical field of view of
+58.8-61.3 degrees; excluding the neighbour from the 1507x421 frame allows at
+most 15.1-26.4. **There is no field of view that does both, on any of the
+three trees.** The flood fill therefore takes a neighbouring card or the
+ground, which the three pictures show plainly
+(`scratchpad/hookcam_20260909/transition_<base>.png`). A one-texel transition
+measurement needs a scene with ONE ref in it; that is a design change and it
+was not made here.
+
+## 2026-09-09 - impostor cards: one mip fewer, and every frame in its own place
+
+Two rulings of bungo's, agreed together ("I agree on all these"), in
+`src/nifskope_ui.cpp` (the bake) and `src/lodgen.cpp` (the sidecar reader, the
+`.lodm`, the card-array packer). Built 23:41:00, four gates green, nothing flown.
+
+**1. SHIP ONE MIP FEWER.** `mips = log2(gap)`, not `1 + log2(gap)`; `auxMips =
+log2(gap/auxDiv)`; both floored at one level. His words: *"so the deepest shipped
+level still has a full texel of margin per side (128 frame, gap 8 -> 3 levels
+128/64/32)"*.
+
+A tap taken exactly ON a frame's UV border reads half of that frame's last texel
+and half of the neighbour's first, so what it picks up OF THE NEIGHBOUR is
+decided by the MARGIN INSIDE EACH FRAME, `gap/2^(k+1)` -- not by the gap. The
+previous cap shipped the level where that margin is half a texel, which is
+exactly a border tap's reach. Measured on the same 19-tree library under both
+caps, changing nothing else:
+
+| | the old cap | the new cap |
+|---|---|---|
+| shipped mips, min / median / max | 2 / 2 / 4 | 1 / 1 / 3 |
+| narrowest gap at any shipped mip | 1.408 / 1.957 / 2.000 texels | 2.000 / 2.000 / 2.000 |
+| worst neighbour alpha a border tap picks up | 0 / 5 / **64** per 255 | **0 / 0 / 0** |
+| **sheets that bleed at any shipped mip** | **13 of 19** | **0 of 19** |
+
+The two OLDER sidecar vintages do not move: each wrote a PER-SIDE number whose
+gap is twice it, and `log2(2*pad) = 1 + log2(pad)` is the chain they were built
+for. `octMipUnit` is now the GAP under all three readings, which is what makes
+that arithmetic rather than luck.
+
+**2. PER-FRAME POSITIONING, shipped.** Every frame now shifts its OWN silhouette
+to its own centre, and the shift is written into the `.lodm` as
+`card.frameOffset` -- two numbers per frame, in model units, along that view's
+own right and up axes, frame `(i,j)` at index `j*oct+i` -- with the same key per
+LAYER on a `cardArray`. The sidecar gains `frameoff <i> <j> <ox> <oy>` (one line
+a frame), `frameclamped <n>` and `framefit <sx> <sy> <ux> <uy>`.
+
+At one scale about one centre, each view's silhouette box sits at its own offset
+inside the frame, so the frame had to hold the UNION of all N^2 boxes. Centring
+each view in its own frame means the frame holds only the WIDEST SINGLE VIEW.
+The scale does not change (`half` is still one pair, so the tree is the same size
+in every view, his rule of the same afternoon), the quad is still the whole frame
+(so a three-frame blend still blends one shape), and `center` still means what it
+meant. Over the 19 trees, OCT=8 TILE=128:
+
+| | before | now |
+|---|---|---|
+| what ONE view fills of its frame, x, min / median / max | 0.188 / **0.646** / 0.938 | 0.250 / **0.750** / 0.938 |
+| the same, y | 0.812 / **0.891** / 0.938 | 0.906 / **0.938** / 0.938 |
+| a frame's silhouette off its own centre, worst texels | 15.0 x, 20.5 y | **7.0 x, 4.5 y** |
+| total sheet area | 4,816,896 texels | **4,358,144 (-9.5%)** |
+| frame shapes (one card array each) | 6 | 7 |
+| frames whose crop had to be clamped | n/a | **0 of 1,216** |
+
+From the bake's own `framefit` line, the frame is narrower than a fixed centre
+needs by a median **24.8% on x** and **7.7% on y**. Five bases dropped a frame
+rung on it; `00121550` BurntTreeUpright02 went from 48x64 to 32x64 with its
+single view filling **0.938** of the frame where it filled 0.646. One base,
+`000531b3`, lost a texel of width because the aspect widening's binding axis
+flipped when its inputs shrank -- measured and stated, not hidden.
+
+**A reader that ignores `frameOffset`** draws every quad at `center`, which is
+what a set from before this law carries, and the tree steps sideways as the mesh
+hands over. Absent means absent: a layer from an older set carries no key.
+
+**Contracts:** `docs/LODGEN_CARD_SHEETS.md` 3.1, 3.4, 3.5, the new 3.6 and
+invariants 1a/1b; `docs/LODGEN_LODM_FORMAT.md` `card.mips`, `card.frameOffset`,
+the `cardArray` layer, 3.1 and invariant 5. The `--card-half-aux` figure in 3.5
+is corrected from 46.4% to **42.9%** -- the same saving under a chain that lost a
+level, not a smaller saving.
+
+**Gates**, all green on the 23:41:00 exe: `lodgen_octahedral.sh` **85 ok / 0**
+(two real bakes; new: the per-frame centring with the control that undoing the
+shift makes it worse, the offsets against the picture with the control that a
+sheet of zeros could not reach the extent, zero border alpha at every shipped
+mip with the stripped-margin control at 255/255, and the aspect ladder as its own
+law rather than as a texel budget), `lodgen_card_arrays.sh` **33 ok / 0** (the
+fixtures now state their own `gap`, and the half-aux saving is the exact byte
+count the class, the gap and `auxDiv` account for), `lodgen_impostor_cards.sh`
+**12 ok / 0**, `lodgen_identity.sh` **8 ok / 0**.
+
+**The transition rule, extended per frame and re-run**
+(`scratchpad/cardfinal_20260909/transition_bounds.py`, against the models' OWN
+declared bound spheres, an instrument independent of the bake): PASS on
+TreeHero01, TreeMapleForest2 and TreeBlasted01. `card.center` is 6.4x / 12.3x /
+19.7x closer to the model's bound centre than the pivot is, unchanged; the MOST
+DISPLACED frame's quad still lies inside the model's own bound sphere, and the
+control -- that same quad anchored at the pivot -- does not fit, on all three.
+
+**The FO4CS sample set** (`scratchpad/handoff_fo4cs/samples/`) was regenerated on
+the new library: four chunk levels plus the VT pyramid, 159 files, 151.6 MB, 7
+card-array groups. `make_manifest.py` was corrected first -- its prose carried a
+TYPED exe timestamp and a TYPED card-library path, both stale, and both had been
+fixed before by hand-splicing MANIFEST.md, which the file's own header forbids.
+
+**Pictures:** `scratchpad/cardfinal_20260909/pics/cardfinal_0003a28b.png`
+(TreeHero01) and `cardfinal_000393cd.png` (TreeBlasted02) -- four panels each,
+before above and now below, mip 0 left and each library's own deepest shipped mip
+right, on the border that bleeds worst, texel grid and checkerboard, red where a
+covered texel touches the border. TreeHero01: **56/255 -> 0**.
+
+**Skill written** (rule 1a, third time this was built from scratch):
+`ww-texel-picture`, in the REPO skills tree -- how to photograph a texel-level
+claim about a generated sheet. It has to be applied to the live tree at
+`E:\Projects\Claude\.claude\skills` as well.
+
 ## 2026-09-09 - THE COMMIT: five days of work goes to origin/main, and 647 MB does not
 
 Repo hygiene, no source change and no build. bungo lifted his "Not yet" of
@@ -4053,11 +5696,11 @@ point, because **the comparison covered the ragdoll packfile and I had dismissed
 the second one in the same file at "66 bytes differ" without looking.** Two of
 those 66 bytes were this.
 
-The wider miss is the ORDER. This project's rule is PDB first for vanilla engine
-behaviour — `Fo4PDB` plus `tools/exere/f4pdb.py` — and every in-game collision
+The wider miss is the ORDER. This project's rule is Todd's treat first for vanilla engine
+behaviour — through the Todd's treat tooling (kept outside this repo) — and every in-game collision
 defect before this one was found by disassembling the engine, not by diffing
 bytes. Byte diffs answer "is our file the same"; they cannot answer "what does
-the engine do with it". Asked properly, the PDB gave straight answers in minutes:
+the engine do with it". Asked properly, Todd's treat gave straight answers in minutes:
 `hknpRagdollData::checkConsistency` is `ret 0`, so nothing validates our data,
 and `hkbnpRagdollInterface::getOriginalMassOfBody` reads mass through
 cinfo +0x0c → dyn_inertia stride 0x70, +0x04 — exactly where we write it, so that
@@ -5008,7 +6651,7 @@ inside the **dyn_inertia record**:
 
 **That low u16 is the record's own motion index, and the engine tests it.** The
 symbol in the crash log said `BShkNonTransformController::FindTarget`, which is
-wrong -- the PDB is 1.10.155 and the address is 1.11.221, so the name is the
+wrong -- the logger's symbol names are 1.10.155 and the address is 1.11.221, so the name is the
 nearest preceding symbol and nothing more. Disassembling the LIVE build at the
 faulting RVA gives the real thing:
 
@@ -5336,7 +6979,7 @@ compound checker passed. The AABB matched vanilla to six decimals. The shape was
 correct in every respect except the one byte that tells the engine what it is.
 
 Two authorities settle questions like this, and neither is our own code: **Elric
-says what the tool WRITES, the PDB says what the engine READS.** The capsule
+says what the tool WRITES, Todd's treat says what the engine READS.** The capsule
 radius came from the first one yesterday; this came from the second one tonight.
 
 ### What is guarded now
@@ -5468,8 +7111,8 @@ a `--damage` mode that reproduces exactly what shipped.
 
 `tools/fo4_crash_triage.sh` reads the newest Addictol log, prints the exception,
 the objects the logger could name, every Havok frame in the stack, and
-cross-references the mesh paths against a rebuilt-mesh manifest. Addictol ships
-Fallout4.pdb and msdia140.dll, so the stack names `hknpDynamicCompoundShape::updateAabb`
+cross-references the mesh paths against a rebuilt-mesh manifest. Addictol's logger
+symbolises its stacks, so the stack names `hknpDynamicCompoundShape::updateAabb`
 outright and the log quotes `"__data__"` and `"k_2014.1.0-r1"` straight out of our
 own blob.
 
@@ -12679,7 +14322,7 @@ under the filter is empty and hidden and the tree starts that much higher.
 
 bungo: *"Time to fix 1 2 3 4 and 5."* Area 6 is a fact about the game, not about
 this code, so it stays a note in `LOADING_SCREEN_BAKE_PLAN.md`. Details of each
-rule and its RVA are in `WW_PDB_COMPARISON.md`; what follows is what changed and
+rule and its RVA are in `WW_ENGINE_COMPARISON.md`; what follows is what changed and
 what it was measured against.
 
 **1 — Sequence binding.** `ControllerManager::setSequence` resolves each
@@ -12752,9 +14395,9 @@ four only govern when the engine bothers to call a controller.
 
 ## 2026-07-31o — Six guesses checked against the engine
 
-bungo asked for a comparison check on the six areas where the FO4 PDB could
+bungo asked for a comparison check on the six areas where Todd's treat could
 settle something NifSkope currently guesses. No code changed; the findings are
-in **`WW_PDB_COMPARISON.md`**, one section per area, every claim cited by RVA in
+in **`WW_ENGINE_COMPARISON.md`**, one section per area, every claim cited by RVA in
 1.10.155 so it can be re-read rather than re-argued.
 
 1. **Sequence binding differs, and it is the bug class we hit.**
@@ -13056,7 +14699,7 @@ machine. Writes `<out>` (the popup), `<out>.toolbar.png` (the strip) and
 
 ## 2026-07-31i — the bolt rule, read out of the game instead of guessed
 
-bungo asked whether the leaked 1.10.155 PDB would help with the arcs. It did, and
+bungo asked whether Todd's treat (1.10.155) would help with the arcs. It did, and
 the first thing it produced was a negative: **the engine never looks up a node
 name anywhere in the procedural-lightning path.**
 

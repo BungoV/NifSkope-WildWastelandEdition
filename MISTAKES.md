@@ -5,6 +5,133 @@ Written the moment a mistake is recognised, unprompted (CONSTITUTION rule 2).
 Format: date -- what was done -- what was true -- how it was found -- the rule.
 Newest at the top.
 
+## 2026-09-24 -- lane PBRWX1 (lane text)
+
+- 2026-09-24 PBRWX1: timestamps in progress.md were typed from feel ("13:3x/13:4x") and the clock then read
+  13:27. Rule already exists: run `date` in the same turn as any timestamp.
+- 2026-09-24 PBRWX1: edited tests/spells/pbr_wx1_gates.sh while bash was running it. bash reads a script as
+  it goes, so the running copy hit "FR: command not found" and a syntax error and died with no verdict.
+  Never edit a driver mid-run; copy it aside if it must change.
+- 2026-09-24 PBRWX1: the sky dome was never pixel-tested before the full gate. Every harness shot drew the
+  Lookdev cube because the dome mesh was "not found": a fresh settings scope has no archive index and
+  GameManager::folders() returns empty too, and the first loose-folder fix joined the path to the
+  resource stack's <entry>/Meshes folder (meshes/meshes/...). The census line `drew=sky:refused(...)` said
+  so from the first run. Read the census drew= line before believing a sky picture.
+- 2026-09-24 PBRWX1: renamed held exes aside under made-up suffixes (NifSkope_inuse_wx1b/c/d) instead of
+  the holder's pid, and trusted `( : >> exe )` as a "free to link" test -- the link then died
+  "Permission denied" with another lane's harness on it. Name the rename by pid; rename whenever any
+  NifSkope runs from release/.
+- 2026-09-24 PBRWX1: the six older PBR gates' guard matched ANY `--port` NifSkope, so another lane's
+  harness made the zero set and R1/R2a refuse shots and report FAIL. Guards now match their own port.
+
+## 2026-09-24 -- director: a one-liner opened three ledgers for writing before reading them, and emptied them
+
+- **What was done:** at 13:57 a one-line Python script opened HANDOFF.md,
+  WW_CHANGES.md, MISTAKES.md and scratchpad/_handoff_anchor.txt with 'wb' in the
+  same expression that was meant to read them. Opening for writing truncates
+  first, so the read saw an empty file and wrote it back empty.
+- **What was true:** the three ledgers were last committed 2026-09-09; no other
+  backup existed. Recovery found a 09-12 HANDOFF snapshot and a 09-10
+  WW_CHANGES copy; 09-10..09-23 of the ledgers is lost from these files (the
+  lane folders keep the detail).
+- **How it was found:** the next splice found empty targets.
+- **The rule:** read into a variable, close, then write. Before every write of
+  HANDOFF.md / WW_CHANGES.md / MISTAKES.md assert the new content is LONGER
+  than the old. Splice scripts refuse an empty anchor and a target under 10 kB.
+  Commit the ledgers daily.
+
+## 2026-09-24 -- TODDSTREAT1 -- the brief's file list came from an exact-token search, and it missed paraphrases
+
+The brief listed the files its search found. A second, wider search (the same idea in other
+words: another name for the symbol source, a hard-coded path to the engine files, the old doc name cited from a
+test script) found seven more tracked files carrying the same provenance, including a
+user-facing feature list. The lane edited them too.
+
+Two small slips inside the lane: the first splice script was written into the repo's own
+scratchpad folder, which is not ignored and carried every string being removed (moved to the
+session scratchpad before it ran); and a Python syntax check wrote two .pyc files into a
+shared scratchpad folder (deleted).
+
+The rule: a wording scrub is proved by a search for the IDEA, not only for the tokens; and any
+tool that carries the removed strings lives outside the repo.
+
+## 2026-09-24 -- lane PBRR4 (lane text)
+
+- 2026-09-24 PBRR4: the composition judge measured the background as "everything not the plane", which swept in the plane's filtered rim (std 8 against a limit of 2) and failed a correct Alpha Test picture. Fix: sample the background in UV space clear of the plane (outside [-0.05, 1.05]). Rule: a "background" sample for a uniformity check must exclude a margin around the object, never just the object's mask.
+- 2026-09-24 PBRR4: a Python edit sent through a bash heredoc died with "unexpected EOF" on quoting. Rule (already in nifskope-ww-build-verify): multi-line edit scripts go through the Write tool, then run.
+
+## 2026-09-24 -- lane PBRR3 (lane text)
+
+- **2026-09-24 PBRR3: the judge's disk mask assumed the Studio probe is the final value.** WW_STUDIO_PROBE replaces the lit colour BEFORE the exposure, so 0.5 at EV log2(0.8) reads sRGB 170, not 188. Every disk gate failed with "mask ABSENT". Fixed by computing the probe value times 2^EV. Rule: a mask colour is derived from the whole output chain, never typed from the pin alone.
+- **2026-09-24 PBRR3: a numpy bool is never `is False`.** The red-control summary tested `results[g] is False` and printed "absent -> BROKEN" for three reds whose gates HAD failed. Fixed with `bool()` in `verdict()`. Rule: coerce numpy results to Python bools before any identity test.
+- **2026-09-24 PBRR3: `nifskope-cli set -f Name -v <string>` cannot set a string-table Name** ("cannot parse ... as string"). The fixture patches the header string table in Python instead (pbr_r3_fixtures.py `nif_set_shader_name`).
+- **2026-09-24 PBRR3: a large Python patch sent through a bash heredoc died on quoting** ("unexpected EOF"). This was already a skill rule, and was broken once more. Patch scripts go through the Write tool into the scratchpad.
+- **2026-09-24 PBRR3: progress.md got guessed timestamps** ("12:0x", "12:2x"), corrected after reading the clock. Rule unchanged: run `date` in the same turn.
+
+## 2026-09-24 -- lane PBRR2B (lane text)
+
+- **2026-09-24 PBRR2B: a `find` over the repo root.** The standing rule is one folder per search, never the root. I
+  ran it before scoping. Fix: search the named folder (src/, res/shaders/, tests/spells/) or ask an Explore agent.
+- **2026-09-24 PBRR2B: a relative `--out` gave a full run of "NO PICTURE".** The new gate driver passed a
+  repo-relative --out through to WW_RENDER_SHOT and WW_SCENE_TEST_LOG. NifSkope writes from its own working folder, so
+  every shot "succeeded" (rc 0) with no picture. The render-shot skill already says every WW_* output path is ABSOLUTE.
+  I re-checked the rung and new exe by hand before blaming the build. Fix: the driver now makes OUT absolute itself
+  (`OUT="$(cd "$OUT" && pwd)"`). pbr_r2a_gates.sh has the same trap and is still unfixed.
+
+## 2026-09-24 PBRR2A
+
+- **Typed a progress timestamp instead of reading the clock.**
+  - What happened: a progress.md entry said 04:50 when `date` said 04:42.
+  - Fix: corrected in place.
+  - Rule, as standing: run `date` in the same turn as every stamp.
+- **Wrapped tools/ww_build.sh in `timeout 590` while the link took longer.**
+  - What happened: the link took over 10 minutes because other builds were running on the machine. The timeout killed the script, but not its MSYS2 child. BUILD-RC=0 arrived from the orphan, and the exe-newer and copies-in-step gates never ran.
+  - Fix: I re-ran ww_build.sh as a no-op, which printed them.
+  - Rule: never wrap ww_build.sh in a timeout shorter than a link. Run it in the background and wait on its own output.
+- **Edited NifSkope.pro through a bash heredoc with Python byte literals holding backslashes.**
+  - What happened: the heredoc mangled the escapes, and the replacement assertion failed on bytes that were really there.
+  - Fix: the house rule, a script file written with the Write tool. It applied at once.
+- **Wrote the Scene window's geometry gate without checking what else moves top-level windows in a WW_* run.**
+  - What happened: the headless backstop (NifSkope::wwPlaceHeadlessWindow) re-placed the window on every show, so the gate first measured the backstop.
+  - Rule: before gating a window's geometry, grep for code that places windows on Show in the harness path.
+- **Accepted "3/255 is filtering noise" as the first reading of the srgbtag gate.**
+  - What happened: the brief says "render identically". The difference was a real path difference (hardware decode before the filter vs shader decode after it), and it was removable.
+  - Fix: skip the hardware decode.
+  - Rule: when a gate says identical and the reading is small but non-zero, find the mechanism before loosening the bar.
+
+## 2026-09-24 PBRLODFIX1 -- a hook-up into a SHARED argument loop shadowed two commands' flags for five days
+
+- What: GLTFEXPORT1's anchored hook-up (2026-09-19) inserted `else if ( gltfExportParseFlag(...) )` into
+  nifcli.cpp's one flag loop that every command shares. The parser answers `--data-root` and `--skeleton`,
+  both already owned by lodgen and collision further down the same else-if chain, so their lines became dead
+  code. Every lodgen CLI bake with `--data-root` since then ran without its loose root; `collision --skeleton`
+  refused.
+- Why it lived: the gltf gates only ran gltf; the lodgen gates that pass `--data-root "$DATA"` also pass (or
+  fall back to) the same Data through the resource stack, so they stayed green. The one gate whose fixture
+  lives ONLY under `--data-root` (lodgen_terrain_pbrm) went red and was not run again until 09-24; the brief
+  that found it named VTNORMAL1 as prime suspect, and the rung bisect cleared it.
+- Rule: a flag parser added to nifcli's shared loop is scoped to its own command (`cmd == ...`) or its tokens
+  are grepped against every `t == QLatin1String( "--x" )` in the loop first. A hook-up's gate runs the
+  neighbouring commands' harnesses that pass a flag of the same name, not only its own.
+- Lane's own slip: progress.md stamps between 04:0x and 04:15 were typed from feel, not read; corrected in
+  the file when the build's 04:15:57 exposed it.
+
+## 2026-09-24 -- lane LIGHTANGLES1 (lane text)
+
+- 2026-09-24, lane LIGHTANGLES1: two searches ran unscoped and hit the 120 s timeout -- a `grep -rn roundFloat lib/ src/`
+  plus a `grep -rn ... .` from the repo root, and an `ls release/ ; du -sh release` over a folder holding dozens of rung
+  exes and rung folders. What was true instead: the definition was one scoped search away (`lib/libfo76utils/src/common.hpp`),
+  and release/ needed only `ls -d release/before_*`. Found by the timeouts themselves; both background tasks were stopped.
+  Rule that prevents it: search-lean -- one folder per search, list files before lines, never a repo root, never a
+  recursive size/listing of release/.
+
+## 2026-09-24 -- lane PBRR1 (lane text)
+
+- **2026-09-24, lane PBRR1: a heredoc edit again.** A shell heredoc was used to patch `pbr_r1_gates.sh`, and it turned `\n`/`\r` escapes into literal bytes. A Python table printed on Windows also ended its lines in `\r`, which reached `env` as an argument (rc=127). Rule: patch scripts are written with the Write tool, and a shell loop strips `\r` from any Python-generated table it reads.
+- **2026-09-24, lane PBRR1: a colour-band coverage test misread shading as holes.** Gate (a) first called a pixel "covered" when it differed from the background by more than 6. The PBR duct is darker, so 2.2% of its texels came within 6 of the grey background and read as missing (0.978 < 0.99) on a correct render. The background is one flat colour, so the test is now "differs at all" (1.000). The discard red still fails 8 of 9 cases. Rule: coverage is measured against the exact clear colour, not against a tolerance band.
+- **2026-09-24, lane PBRR1: a relative `--out` gave no pictures.** The exe resolves `WW_RENDER_SHOT` against its own working directory. Harness `--out` paths are absolute.
+- **2026-09-24, lane PBRR1: the fixture root was not on the resource stack.** NifSkope's NIF-local root is the NIF's own directory, not the parent of `Meshes`, so the loose test folder was invisible until it was added to `WW_LODGEN_RESOURCES` (last entry wins).
+
 ## 2026-09-09 -- lane COMMIT hit the heredoc backslash trap a sixth time
 
 - **What was done:** the repository inventory was written as Python inside a
