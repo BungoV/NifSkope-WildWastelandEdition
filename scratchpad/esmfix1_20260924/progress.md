@@ -8,3 +8,6 @@
 - census.py over his 47 plugins: only TestWorldspace has record top bytes > master count (483); every one of them rung-refused.
 ## 21:56 fix built
 - esmfile.cpp: form version < 0xC0 -> every index >= master count maps to the file itself, and the raw-ID refusal is off; FO76/Starfield unchanged. Build 21:55:01 rc 0 (esmfile.o only), sha1 ec5959c4.
+## 22:03 gates
+- G1 PASS / red, G2 PASS / red, G3 PASS (56/57 identical, lodb metadata only) / sensitivity red; loadorder 24/0, resources 4/0. gate/GATES.txt.
+- Skills amended: nifskope-ww-worktree-build 5b, nifskope-ww-lodgen, mo2-mod-content-census. DONE.md + DELIVERABLE_TEXT.md written.
