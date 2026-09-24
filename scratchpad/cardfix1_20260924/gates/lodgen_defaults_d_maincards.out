@@ -1,0 +1,4 @@
+== lodgen_defaults: the exe under test ==
+       -rwxr-xr-x 1 bungo 197609 24716800 2026-09-24_21:44:17 /e/Projects/NifskopeWWE-cardfix1/release/NifSkope.before_cardfix1.exe
+== (d) arrays and impostor cards with identity OFF ==
+       d_new: rc=0, 635 s, 93 files
