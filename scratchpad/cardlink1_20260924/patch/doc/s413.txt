@@ -1,0 +1,78 @@
+### 4.13 The card link (lane CARDLINK1, 2026-09-24) -- `cardLayer`, `cardCount`, `cardCorpusHash`, FORCE_CARD
+
+**Status: the `cardCorpusHash` definition below is PROPOSED (R19).** bungo has
+not ruled on it. It is what the writer does from this date, and a reader may
+compare it, but it can still move before FO4CS reads it. No field was added and
+the version did not move: every field below already had its place in `.lodo`
+v4 and `.lodi` v7/v9, and no exe before this one ever wrote a non-zero card
+value, so no file on disk means anything else by them.
+
+**Where the numbers come from.** A `--native --impostors <dir> --arrays` bake
+builds the chunks, then the card-arrays pass packs every octahedral card set a
+chunk's `C` line stands on into DX10 arrays
+(`<mod>/FO4CSLOD/<ws>/Objects/<ws>.LodgenCards.<family>.<WxH>` -- a
+`cardArray` `.lodm` and four DDS) and appends `<array .lodm> <layer>` to each
+`C` line it placed (twelve tokens; ten = a card in no array). Only then is the
+pair written: `lodgenNativeLinkCards()` (`src/nativeemit.cpp`) reads the
+manifests and the arrays, and the emitter writes what follows. On the CLI the
+native block therefore runs after the object passes; in the panel the link is
+called right after the card arrays, before the scratch teardown deletes the
+manifests.
+
+1. **The sets.** The arrays are the DISTINCT array `.lodm` files the `C` lines
+   name -- never a directory listing, so an array an older bake left in the
+   folder is never linked. A set's index is its rank in ascending order of the
+   lower-cased file name's UTF-8 bytes. At most 32 sets (the 5 high bits of
+   `cardLayer`) and 2048 layers a set (the low 11); more is refused.
+2. **`cardLayer`** = `(set << 11) | layer` for the base whose formID is that
+   layer's `id` (8 hex digits) in that set's `.lodm`; 0xFFFF on every other
+   base. A base named by two layers, a packed value of 0xFFFF, and a `C` line
+   whose (array, layer) is not the layer its base's id names are each refused
+   by name, and the pair is not written.
+3. **`cardCount`** = the base rows whose `cardLayer` is not 0xFFFF. The reader
+   (`lodoRead`) RECOUNTS it and refuses a mismatch by name (`cardCount N but M
+   base row(s) name a card layer`), and refuses rows naming a layer while
+   `cardCorpusHash` is 0 (no arrays are named for them).
+4. **`cardCorpusHash`** (proposed R19) = FNV-1a 64 from the offset basis
+   `0xCBF29CE484222325` over, for each set in the order of 1, its five files in
+   the order `.lodm`, colour, normal, mask, emissive (the names the `.lodm`'s
+   `textures` object gives, last path component): the lower-cased file name's
+   UTF-8 bytes, the file size as a little-endian u64, then every byte of the
+   file. 0 when no set is linked. One byte of one card sheet moves it.
+   `tests/spells/lodgen_cardlink.py hash <pair dir>` recomputes it outside the
+   exe.
+5. **FORCE_CARD** (`.lodi` instance flags bit 1) is set on a placement whose
+   base has a card AND either (a) the base has no mesh in the placement's
+   MNAM slot (`rep[mnamSlot]` = 0xFFFF), or (b) the chunk pass put that
+   (chunk, dim, object index) on its card -- a `C` line, which is where
+   `--impostors-from-level N` lands. Never on a base without a card.
+6. **Card-only bases.** A base with no loadable LOD mesh in any slot but a
+   linked card is now WRITTEN (it was dropped before, deviation 5):
+   `rep[0..3]` all 0xFFFF, `ANY_MESH` clear, `boundRadius` =
+   `|center| + sqrt(2 hw^2 + hh^2)` from its layer's `half`/`center`, which is
+   §4.4's "must have a `cardLayer`" made true.
+7. **Library reuse** compares `cardCorpusHash` too: a library whose arrays
+   moved is rebuilt (`the card arrays moved`).
+
+**Without `--impostors` (or without `--arrays`) nothing is linked** and the
+pair is byte-identical to the one the exe before this lane wrote.
+
+**Census**, on its own line: `native-cards: LINKED: cardCount N of M bases over
+N array(s) of N layer(s), cardCorpusHash 0x...; card-only bases N; card sets
+whose base is not in the table N; FORCE_CARD on N of M instances (N whose ring
+slot has no mesh, N on a card by a C line); C lines N read, N linked` -- or
+`native-cards: OFF (no card arrays linked); cardCount 0, cardCorpusHash
+0x0000000000000000, FORCE_CARD on 0 instances`.
+
+**For whoever makes the native bake incremental:** `--incremental --native` is
+refused today (CONSTITUTION 10), so the link never meets a chunk replayed from
+the `.lodj` cache. When that changes, a replayed chunk must bring its manifest
+`C` lines with it, or FORCE_CARD rule (b) misses it (the link refuses a chunk
+with no manifest at all, so a pair is never written half-linked).
+
+**Gate:** `tests/spells/lodgen_cardlink.sh` -- Sanctuary, 9 chunks, the real
+tree card sets: G1 cardCount, G2 every layer resolves, G3 the hash is the
+contract and moves with one byte, G4 `--native-verify` refuses a cardCount off
+by one, the no-cards bake byte-identical to the rung, and every one of them red
+on the rung exe.
+

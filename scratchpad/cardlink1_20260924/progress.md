@@ -9,3 +9,21 @@
   about_dialog.o deleted (NIFSKOPE_REVISION define differs: a worktree .git is a file, qmake finds no revision).
 - Build script: scratchpad/cardlink1_20260924/wt_build.sh (gated on make's rc, exe mtime moved, MZ, -nt).
 - RUNG exe = release/before_cardlink1.exe, sha1 0af99c9921a331f6db19ea45a43488fb3736c5d4 (45 objects rebuilt).
+
+## 2026-09-24 21:31 -- code landed, compiled (commit 99816ee)
+- nativeemit: `lodgenNativeLinkCards(btoPaths, cardArrayBase, error)`; Write assigns cardLayer, card-only bases,
+  cardCorpusHash (proposed R19), FORCE_CARD, census clause `native-cards:`; library reuse refuses "the card arrays moved".
+- lodofile reader: cardCount recount (refused by name) + "card with hash 0" refusal; "version 3" strings -> 4.
+- No new field: `.lodo` stays v4 (every field existed; only cardCorpusHash's definition changed, no exe ever wrote non-0).
+- nifcli: the native block moved after the card arrays (before the scratch teardown); link call inside it.
+- GUI: `hookup_lodgenmanager.py` (refusing, anchored; dry-run on a temp copy: applies once, refuses a second run).
+- Build: 9 objects, BUILD-RC=0, exe sha1 1ff89a0804aebbe52020db9307172cfa276e6e4f (kept as release/cardlink1_step1.exe).
+- Card bake started: CANDIDATES=trees, cells -20 24 -9 35, 23 candidates, port 45917 (driver's own), own exe.
+
+## 21:39 card bake done, gate running, docs patched
+- Card bake: 23 of 23 tree sets (`<formid>_oct_albedo.png` + normal/gsaos/g), rc 0, lock released.
+- Gate `tests/spells/lodgen_cardlink.sh` + helper `lodgen_cardlink.py` written; run 1 in progress.
+  G1/G2/G3a on the new exe: cardCount 23 of 2970 bases, 23 == 23 tree bases with a set, 0 of 23 layers
+  unresolved over 10 arrays, cardCorpusHash 65d2bf61ff72c5b2 == contract recomputed, FORCE_CARD 3446 of 3526, 0 on a card-less base.
+- docs/LODGEN_NATIVE_LODO_LODI.md: p4_docs.py, 8 edits (new 4.13; 3 hash row, cardCount row, cardLayer; 4.1 flags; 4.4; 5 table; deviation 5).
+- Skill nifskope-ww-worktree-build: section 6 added (make -n proof, REVISION define, touch, card driver port 45917, set file names).

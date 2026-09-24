@@ -206,7 +206,7 @@ a refusal that names the instance, the ref and the two numbers.
 | 0x10 | u64 | `pluginCorpusHash` — the terrain writers' hash, carried for the object/terrain/plugin triple |
 | 0x18 | u64 | `objectCorpusHash` — see §8 |
 | 0x20 | u64 | `modelCorpusHash` — over every source model read (path, size, content) |
-| 0x28 | u64 | `cardCorpusHash` — over the card candidate list, N, tile class and every card source model |
+| 0x28 | u64 | `cardCorpusHash` — **PROPOSED (R19, not ruled), §4.13:** FNV-1a 64 over the linked card arrays' files (name, size, bytes), sets in lower-cased-name order; **0 = no card linked** |
 | 0x30 | char[32] | worldspace editor ID, NUL-padded |
 | 0x50 | u32 | `baseCount` |
 | 0x54 | u32 | `meshCount` |
@@ -233,7 +233,7 @@ a refusal that names the instance, the ref and the two numbers.
 | **0xCC** | **u8** | **`levelMax` (v3) — the deepest `level` in the file; checked against the table** |
 | **0xCD** | **u8** | **`ladderGroup` (v3) — the grouping target the ladder was built at; 0 iff the LADDER flag is clear** |
 | 0xCE…0xCF | — | reserved, zero |
-| **0xD0** | **u32** | **`cardCount` (v4) — bases whose `cardLayer` is not `LODO_NO_CARD`. A reader sizes its card-draw pass from the header alone; `cardCount > baseCount` is refused by name** |
+| **0xD0** | **u32** | **`cardCount` (v4) — bases whose `cardLayer` is not `LODO_NO_CARD`. A reader sizes its card-draw pass from the header alone; `cardCount > baseCount` is refused by name, and (CARDLINK1) the reader RECOUNTS it over the base rows and refuses a mismatch by name, §4.13** |
 | 0xD4…0xFF | — | reserved, zero |
 
 The ladder table sits **between the cluster table and the material table** in
@@ -303,7 +303,7 @@ path does not branch on level at all.
 
 **Base entry — 32 B:** `u32 formId`, `u32 modelStringOffset`, `u16 rep[4]` (per
 MNAM slot 0–3: a mesh index, or **0xFFFF**), `u16 cardLayer` (**low 11 bits the
-layer, high 5 bits the card array set**; 0xFFFF = no card), `u16 flags`,
+layer, high 5 bits the card array set**, the set's rank in §4.13's order; 0xFFFF = no card), `u16 flags`,
 `f32 boundRadius` (at scale 1, **never 0** — the reader refuses it), and **(v4)**
 `u32 fullTriangles` (the base's full-detail triangle count over the DISTINCT
 meshes its `rep` slots name, never 0, recounted by the reader) followed by
@@ -723,7 +723,7 @@ against `zMin`/`zExtent` alone would pop it.
 | 0x11 | 1 | `sky` | u8, sky visibility |
 | 0x12 | 1 | `ground` | u8 ground-contact blend over the 256-unit ramp |
 | 0x13 | 1 | `seed` | u8 = `treeHash & 0xFF` (0 for a non-tree): sway phase / jitter only, **not** the yaw — see §4.3 |
-| 0x14 | 2 | `flags` | u16: bit0 mirrored, bit1 force-card, bit2 alpha-tested, bit3 emits, bit4 SCOL part, bit5 buried-cull candidate, **bit6 workshop-scrappable (version 9 only, §4.12: set in a file below version 9 it is refused by name)**; **bits 7–15 reserved, and a set reserved bit is a refusal** (`LODI_INST_FLAGS_KNOWN` = 0x7F) |
+| 0x14 | 2 | `flags` | u16: bit0 mirrored, bit1 force-card (§4.13: the base has a card and the ring slot has no mesh, or a `C` line put it on its card), bit2 alpha-tested, bit3 emits, bit4 SCOL part, bit5 buried-cull candidate, **bit6 workshop-scrappable (version 9 only, §4.12: set in a file below version 9 it is refused by name)**; **bits 7–15 reserved, and a set reserved bit is a refusal** (`LODI_INST_FLAGS_KNOWN` = 0x7F) |
 | 0x16 | 2 | `drawKey` (v2) | the base's (primary mesh, that mesh's first material) rank, §2.1 |
 
 **Cold record — 8 B, parallel to the instance blob:** `u32 refFormId`,
@@ -930,6 +930,8 @@ rotation within 0.02° of it: measured worst **0.0046°** over the nine chunks.
 
 `rep[0..3]` are MNAM's own four positional slots. A base with **no** authored LOD
 mesh in any slot has `rep[0..3]` all 0xFFFF and **must** have a `cardLayer`.
+From lane CARDLINK1 such a base is written when a card array links it, and
+left out of the table otherwise (§4.13, deviation 5).
 
 **THE CUT, and it is the whole point of v3.** For a cluster of an instance,
 
@@ -1612,6 +1614,84 @@ be a lie — and dropped visibly, because the census then reads 0.
 **Census**, on its own `native-scrappable:` prefix, ending with the word the
 gate greps for: `scrappablePlacements`.
 
+### 4.13 The card link (lane CARDLINK1, 2026-09-24) -- `cardLayer`, `cardCount`, `cardCorpusHash`, FORCE_CARD
+
+**Status: the `cardCorpusHash` definition below is PROPOSED (R19).** bungo has
+not ruled on it. It is what the writer does from this date, and a reader may
+compare it, but it can still move before FO4CS reads it. No field was added and
+the version did not move: every field below already had its place in `.lodo`
+v4 and `.lodi` v7/v9, and no exe before this one ever wrote a non-zero card
+value, so no file on disk means anything else by them.
+
+**Where the numbers come from.** A `--native --impostors <dir> --arrays` bake
+builds the chunks, then the card-arrays pass packs every octahedral card set a
+chunk's `C` line stands on into DX10 arrays
+(`<mod>/FO4CSLOD/<ws>/Objects/<ws>.LodgenCards.<family>.<WxH>` -- a
+`cardArray` `.lodm` and four DDS) and appends `<array .lodm> <layer>` to each
+`C` line it placed (twelve tokens; ten = a card in no array). Only then is the
+pair written: `lodgenNativeLinkCards()` (`src/nativeemit.cpp`) reads the
+manifests and the arrays, and the emitter writes what follows. On the CLI the
+native block therefore runs after the object passes; in the panel the link is
+called right after the card arrays, before the scratch teardown deletes the
+manifests.
+
+1. **The sets.** The arrays are the DISTINCT array `.lodm` files the `C` lines
+   name -- never a directory listing, so an array an older bake left in the
+   folder is never linked. A set's index is its rank in ascending order of the
+   lower-cased file name's UTF-8 bytes. At most 32 sets (the 5 high bits of
+   `cardLayer`) and 2048 layers a set (the low 11); more is refused.
+2. **`cardLayer`** = `(set << 11) | layer` for the base whose formID is that
+   layer's `id` (8 hex digits) in that set's `.lodm`; 0xFFFF on every other
+   base. A base named by two layers, a packed value of 0xFFFF, and a `C` line
+   whose (array, layer) is not the layer its base's id names are each refused
+   by name, and the pair is not written.
+3. **`cardCount`** = the base rows whose `cardLayer` is not 0xFFFF. The reader
+   (`lodoRead`) RECOUNTS it and refuses a mismatch by name (`cardCount N but M
+   base row(s) name a card layer`), and refuses rows naming a layer while
+   `cardCorpusHash` is 0 (no arrays are named for them).
+4. **`cardCorpusHash`** (proposed R19) = FNV-1a 64 from the offset basis
+   `0xCBF29CE484222325` over, for each set in the order of 1, its five files in
+   the order `.lodm`, colour, normal, mask, emissive (the names the `.lodm`'s
+   `textures` object gives, last path component): the lower-cased file name's
+   UTF-8 bytes, the file size as a little-endian u64, then every byte of the
+   file. 0 when no set is linked. One byte of one card sheet moves it.
+   `tests/spells/lodgen_cardlink.py hash <pair dir>` recomputes it outside the
+   exe.
+5. **FORCE_CARD** (`.lodi` instance flags bit 1) is set on a placement whose
+   base has a card AND either (a) the base has no mesh in the placement's
+   MNAM slot (`rep[mnamSlot]` = 0xFFFF), or (b) the chunk pass put that
+   (chunk, dim, object index) on its card -- a `C` line, which is where
+   `--impostors-from-level N` lands. Never on a base without a card.
+6. **Card-only bases.** A base with no loadable LOD mesh in any slot but a
+   linked card is now WRITTEN (it was dropped before, deviation 5):
+   `rep[0..3]` all 0xFFFF, `ANY_MESH` clear, `boundRadius` =
+   `|center| + sqrt(2 hw^2 + hh^2)` from its layer's `half`/`center`, which is
+   §4.4's "must have a `cardLayer`" made true.
+7. **Library reuse** compares `cardCorpusHash` too: a library whose arrays
+   moved is rebuilt (`the card arrays moved`).
+
+**Without `--impostors` (or without `--arrays`) nothing is linked** and the
+pair is byte-identical to the one the exe before this lane wrote.
+
+**Census**, on its own line: `native-cards: LINKED: cardCount N of M bases over
+N array(s) of N layer(s), cardCorpusHash 0x...; card-only bases N; card sets
+whose base is not in the table N; FORCE_CARD on N of M instances (N whose ring
+slot has no mesh, N on a card by a C line); C lines N read, N linked` -- or
+`native-cards: OFF (no card arrays linked); cardCount 0, cardCorpusHash
+0x0000000000000000, FORCE_CARD on 0 instances`.
+
+**For whoever makes the native bake incremental:** `--incremental --native` is
+refused today (CONSTITUTION 10), so the link never meets a chunk replayed from
+the `.lodj` cache. When that changes, a replayed chunk must bring its manifest
+`C` lines with it, or FORCE_CARD rule (b) misses it (the link refuses a chunk
+with no manifest at all, so a pair is never written half-linked).
+
+**Gate:** `tests/spells/lodgen_cardlink.sh` -- Sanctuary, 9 chunks, the real
+tree card sets: G1 cardCount, G2 every layer resolves, G3 the hash is the
+contract and moves with one byte, G4 `--native-verify` refuses a cardCount off
+by one, the no-cards bake byte-identical to the rung, and every one of them red
+on the rung exe.
+
 ## 5. Refusal policy — hard for the generator, soft for the consumer
 
 The generator refuses on anything wrong and names the field. **The consumer does
@@ -1622,7 +1702,7 @@ first time any mod is installed or removed after a bake.
 |---|---|---|---|
 | **hard: both files** | magic, **version (see the per-file rows)**, `vertexStride`, `instanceStride`, **`groupStride` (v7), a group id that is not dense per chunk, a `groupCount` that disagrees with the chunks' sum, a sky slice whose length disagrees with the same placement's AO slice, a version-3…6 file carrying version-7 header words,** `clusterMaxTris`, **`clusterLodStride`**, **`occluderStride`**, a set reserved bit, `ROW_ORDER_NORTH_UP` clear, `chunkCount` over cap, a zero `lodoIdentity` without `NOLIB`, **a `scale` of 0**, **a `drawKey` out of order or not the base's rank**, **a cluster whose `geometricError` exceeds its `parentError`**, **a `CONE_OPEN` cluster carrying a cone (or the reverse)**, **an occluder naming an instance outside its own cell**, any CRC mismatch | refuse, name the field | **refuse to load, and never hide the engine's own LOD tree** |
 | **hard: pairing** (between the two files) | the two files name different worldspaces; `pluginCorpusHash` or `objectCorpusHash` differs **between the `.lodo` and the `.lodi`**; `loadOrderHash` differs **between the two files** (§4 row 0x90); `lodoIdentity` does not name this `.lodo` (unless `NOLIB`) — `src/nativeemit.cpp`, every `pairing:` refusal | refuse, name the field | **refuse to load, and never hide the engine's own LOD tree** |
-| **hard: `.lodo`** (`lodoRead`) | versions **1, 2 and 3 refused by name**, anything but 4; the `LADDER` flag disagreeing with `ladderGroup` / `levelMax`, `levelMax` > 15; `cardCount` > `baseCount`; a base's `fullTriangles` that its own meshes do not recount to, or non-zero on a base with no mesh; mesh flags beyond ALPHA / SWAY / WATERTIGHT; reserved header bytes 0xCE…0xCF and 0xD4…0xFF | refuse, name the field | as above |
+| **hard: `.lodo`** (`lodoRead`) | versions **1, 2 and 3 refused by name**, anything but 4; the `LADDER` flag disagreeing with `ladderGroup` / `levelMax`, `levelMax` > 15; `cardCount` > `baseCount`; `cardCount` not equal to the base rows naming a card layer, or rows naming one while `cardCorpusHash` is 0 (CARDLINK1, §4.13); a base's `fullTriangles` that its own meshes do not recount to, or non-zero on a base with no mesh; mesh flags beyond ALPHA / SWAY / WATERTIGHT; reserved header bytes 0xCE…0xCF and 0xD4…0xFF | refuse, name the field | as above |
 | **hard: `.lodi`** (`lodiRead`) | versions **1 and 2 refused by name**, anything outside 3…9; a version whose defining table is missing (v5 without the placement-AO blob, v6 without the vertex-AO blob, v7/v9 with neither group table nor sky stream, v8 without the horizon stream); a file carrying a LATER version's header words (v3/v4 with placement-AO words, v3–v6 with v7 words at 0x100/0x110, v7/v9 with v8 words at 0x11C); reserved header bytes by version (from 0xB0 on v3, 0xD4 on v4, 0xF1…0xFF on v5, 0xF1…0xF3 on v6 and later, plus 0x11C…0x1FF on v7/v9, 0x130…0x1FF on v8); instance flag bit 6 below v9 (§4.1); a stored cell outside the quantisation band (§4.1, `lodiCellAgrees`); the vertex-AO, sky and horizon offset tables and their slice lengths; the aggregate rows and their covered list (§4.6) | refuse, name the field | as above |
 | **soft** (against the user's LIVE data only) | `pluginCorpusHash`, `objectCorpusHash`, `modelCorpusHash`, `cardCorpusHash`, **`loadOrderHash`** recomputed from the running load order and disagreeing with the file — a mod installed, removed or reordered since the bake | refuse, name the field and the plugin | **load anyway, log it, raise a `stale=1` census row, keep rendering** |
 
@@ -1901,7 +1981,10 @@ would otherwise be vacuous.
 4. **`material.layer` may be 0xFFFF** ("unassigned"); the spec's `< 2048`
    holds for every assigned layer and the reader refuses 2048..0xFFFE.
 5. **The bake writes what the stock ring bakes and nothing more:** no card layer
-   (`cardLayer` = 0xFFFF everywhere, `cardCorpusHash` = 0), no `crossPx16` (0),
+   (`cardLayer` = 0xFFFF everywhere, `cardCorpusHash` = 0) **unless a
+   `--impostors --arrays` bake links its card arrays (lane CARDLINK1,
+   2026-09-24, §4.13): then cardLayer, cardCount, cardCorpusHash and
+   FORCE_CARD are written, and a base with a card but no mesh is kept**; no `crossPx16` (0),
    `selfAO` = 255, `arrayClass`/`arraySet` = 0 with `layer` unassigned. A base
    with no loadable LOD model in any slot is left OUT of the base table and its
    instances are counted (`dropped for a base outside the table` in the census
