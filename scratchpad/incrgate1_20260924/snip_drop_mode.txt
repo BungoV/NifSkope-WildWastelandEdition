@@ -1,0 +1,64 @@
+
+# ------------------------------------------------ --drop-proof (plan 5 row 13)
+# THE ASYMMETRIC-DROP PROOF ON THE NATIVE PATH (lane INCRGATE1, 2026-09-24).
+# docs/LODGEN_NATIVE_LODO_LODI.md 9 says the stock (-32,0) dim-32 chunk writes
+# no geometry at all for 2,628 of its 42,560 placements (6.17%), because a
+# bucket's 16-bit index domain fills, and that the native format cannot drop
+# one by construction. Both halves measured from ONE bake of that chunk:
+#   --slot-fallback --identity --keep-bto --native
+# so the stock chunk and the native pair come from the same placements.
+#   stock   manifest rows whose identity index is on no `i` line of
+#           `lodgen --dump-geometry` (tests/spells/lodgen_drop_count.py) > 0
+#   native  the decoder finds EVERY manifest row in the .lodi (--manifest),
+#           instanceCount = the manifest's rows, and --native-verify reads
+#           instancesWithNeitherGeometryNorCard 0
+# RED CONTROLS: the stock count IS the first one (a stock side that dropped
+# nothing makes the proof vacuous and fails); the second is the same decoder
+# check on a copy of the manifest with one row whose ref is in no table -- it
+# must fail by name, or "every row is in the table" could not see a drop.
+if [ "$MODE" = "--drop-proof" ]; then
+	D="$W/drop"; DW="$(cd "$W" && { pwd -W 2>/dev/null || pwd; })/drop"
+	mkdir -p "$D/Native"
+	t0=$(date +%s)
+	"$NS" -no-gui lodgen "$ESM" --worldspace 3C --terrain-region -32 0 -1 31 --dim 32 $AOFLAG \
+		--slot-fallback --identity --keep-bto --data-root "$DATA" --out-dir "$DW" --native "$DW/Native" \
+		> "$W/bake_drop.log" 2>&1 || { bad "the (-32,0) dim-32 bake failed: $(tail -2 "$W/bake_drop.log")"; }
+	echo "  bake wall-clock $(( $(date +%s) - t0 )) s"
+	bto="$(find "$D" -maxdepth 1 -name "Commonwealth.32.-32.0.BTO" | head -1)"
+	man="$bto.manifest.txt"
+	pd="$D/Native"; [ -d "$pd/FO4CSLOD/Commonwealth" ] && pd="$pd/FO4CSLOD/Commonwealth"
+	if [ -z "$bto" ] || [ ! -s "$man" ] || [ ! -s "$pd/Commonwealth.lodi" ]; then
+		bad "the bake left the chunk, its manifest and the pair (bto '$bto', pair dir $pd)"
+		echo "$fails failures"; echo "RESULT FAIL"; exit 1
+	fi
+	"$NS" -no-gui lodgen --dump-geometry "$bto" > "$W/geom.txt" 2>&1
+	"$PY" "$ROOT/tests/spells/lodgen_drop_count.py" "$man" "$W/geom.txt" | tee "$W/drop.txt"
+	N="$(sed -n 's/^drop.placements \([0-9]*\).*/\1/p' "$W/drop.txt")"
+	M="$(sed -n 's/^drop.dropped \([0-9]*\).*/\1/p' "$W/drop.txt")"
+	[ -n "$M" ] && [ "$M" -gt 0 ] \
+		&& ok "(red control) the stock chunk drops $M of $N placements: the comparator sees a drop" \
+		|| bad "(red control) the stock chunk dropped ${M:-?} of ${N:-?}: the proof has nothing to prove"
+	"$PY" "$ROOT/tests/spells/lodgen_native_decode.py" "$pd/Commonwealth.lodo" "$pd/Commonwealth.lodi" \
+		--manifest "$man" > "$W/decode.txt" 2>&1; rc=$?
+	grep -E "^lodi.instanceCount|manifest .*rows|^(REFUSED|[0-9]+ checks)" "$W/decode.txt"
+	IC="$(sed -n 's/^lodi.instanceCount \([0-9]*\).*/\1/p' "$W/decode.txt")"
+	[ $rc -eq 0 ] && ok "the native pair holds every manifest row (decoder --manifest, rc 0)" \
+		|| bad "the decoder refused the native pair against the manifest (rc $rc)"
+	[ -n "$IC" ] && [ "$IC" = "$N" ] && ok "instanceCount $IC = the manifest's $N placements: 0 dropped natively" \
+		|| bad "instanceCount ${IC:-?} against the manifest's ${N:-?} placements"
+	"$NS" -no-gui lodgen "$ESM" --worldspace 3C --native-verify "$pd/Commonwealth.lodo" "$pd/Commonwealth.lodi" \
+		> "$W/verify.txt" 2>&1; rc=$?
+	grep -E "instancesWith|REFUSED" "$W/verify.txt" | head -3
+	[ $rc -eq 0 ] && grep -q "instancesWithNeitherGeometryNorCard 0" "$W/verify.txt" \
+		&& ok "--native-verify: every instance has geometry or a card" \
+		|| bad "--native-verify did not read instancesWithNeitherGeometryNorCard 0 (rc $rc)"
+	cp "$man" "$W/doctored.manifest.txt"
+	echo "999999 00000000 STAT 0 0 0 1 building 0 ffffffff 0" >> "$W/doctored.manifest.txt"
+	"$PY" "$ROOT/tests/spells/lodgen_native_decode.py" "$pd/Commonwealth.lodo" "$pd/Commonwealth.lodi" \
+		--manifest "$W/doctored.manifest.txt" > "$W/decode_red.txt" 2>&1; rc=$?
+	[ $rc -ne 0 ] && grep -q "FAIL.*manifest: every row is in the table" "$W/decode_red.txt" \
+		&& ok "(red control) one row in no table fails \"every row is in the table\" by name" \
+		|| bad "(red control) a manifest row in no table was not caught (rc $rc)"
+	echo "  exe $NS $(date -r "$NS" +%Y-%m-%dT%H:%M:%S)"
+	echo "$fails failures"; echo "RESULT $([ $fails -eq 0 ] && echo PASS || echo FAIL)"; exit $fails
+fi
