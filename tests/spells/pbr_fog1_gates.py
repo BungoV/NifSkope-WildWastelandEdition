@@ -350,6 +350,30 @@ def main():
             n, why = same(base + "_new", old)
             rec("%s: Fog OFF = before_fog1, byte for byte" % base, n == 0, why or "%d px differ" % n)
 
+    if img("legacy_alpha") is not None or img("legacy_off_new") is not None:
+        say("legacy")
+        def progs(tag):
+            t = txt(tag + ".prog")
+            return set(re.findall(r"prog=(\S+)", t or ""))
+        pa = progs("legacy_alpha")
+        rec("legacy, Fog on: fo4_fog.prog serves the model (program census)", "fo4_fog.prog" in pa,
+            "programs %s" % sorted(pa))
+        im = img("legacy_alpha")
+        exp = 255 * min(1.0, Fog.sample(W.at(12.0), 64750, 64)["alpha"])
+        n = 0
+        if im is not None:
+            n = sum(1 for p in im.getdata() if all(abs(c - exp) <= 1.0 + 1e-6 for c in p[:3]))
+        rec("legacy, 12:00 d=64750 z=64: the fog program's alpha = the judge %.2f/255 +-1 (>= 2000 px)" % exp,
+            n >= 2000, "%d px at the judge's value" % n)
+        po = progs("legacy_off_new")
+        rec("legacy, Fog off: fo4_default.prog, never fo4_fog.prog (program census)",
+            "fo4_default.prog" in po and "fo4_fog.prog" not in po, "programs %s" % sorted(po))
+        n, why = same("legacy_off_new", "legacy_off_old")
+        rec("legacy, Fog off = before_fog1, byte for byte", n == 0, why or "%d px differ" % n)
+        n, why = same("legacy_far_on", "legacy_far_off")
+        rec("legacy, from 20000 units (FOV 8) at 12:00: fog on changes the model (>= 200 px)", n >= 200,
+            why or "%d px differ" % n)
+
     hl = os.path.join(OUT, "live.harness.log")
     if os.path.isfile(hl):
         say("live")

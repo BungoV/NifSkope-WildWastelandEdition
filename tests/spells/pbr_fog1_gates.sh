@@ -18,6 +18,10 @@
 #   off      Fog OFF = release/before_fog1 byte for byte: 3 framings (view 8 at
 #            12:00; view 8 + ground at 01:00; straight up + sky at 12:00), each with
 #            no pins and with WW_LOOKDEV_FOG=0
+#   legacy   the legacy path (PBR mode legacy, ground off, view 8): the fog program
+#            fo4_fog.prog serves the model with Fog on (census) and its probed alpha
+#            = the judge at 12:00 d 64750; Fog off = before_fog1 byte for byte with
+#            fo4_default.prog; from 20000 units (FOV 8) fog on changes the model
 #   live     the in-app Fog leg (WW_SCENE_TEST_FOG=1)
 #   pics     fog on / off at dawn 06:00, noon, night 01:00 (sky + sun + clouds +
 #            ground), at view 8 and from 20000 units (picfar_) -- pictures for the
@@ -27,6 +31,7 @@
 # usage: bash tests/spells/pbr_fog1_gates.sh [--out DIR] [--only fog,alpha,...] [--red NAME]
 #   CPU reds (WW_LOOKDEV_RED): fogext05 fogpower1 fognoblend fognogamma fognonam4 fognear0
 #   shader reds (WW_LOOKDEV_RED): fogmaxclamp fognoescape fogheight0 fogleak fogsky
+#   program red (WW_LOOKDEV_RED): fognoswap -- fo4_fog.prog never swapped in
 #   WW_R2A_RED: nolive nosave (live)
 # Every red must end FAIL. One NifSkope of ours at a time (our --port), second
 # monitor; bungo's window (no --port) and other lanes' harnesses are never touched.
@@ -65,7 +70,7 @@ python "$HERE/pbr_r2a_fixtures.py" > /dev/null || exit 2
 REDPIN=""
 case "$RED" in
 	'') ;;
-	fogext05|fogpower1|fognoblend|fognogamma|fognonam4|fognear0|fogmaxclamp|fognoescape|fogheight0|fogleak|fogsky)
+	fogext05|fogpower1|fognoblend|fognogamma|fognonam4|fognear0|fogmaxclamp|fognoescape|fogheight0|fogleak|fogsky|fognoswap)
 		REDPIN="WW_LOOKDEV_RED=$RED" ;;
 	nolive|nosave) REDPIN="WW_R2A_RED=$RED" ;;
 	*) echo "unknown red $RED"; exit 2 ;;
@@ -207,6 +212,16 @@ if want off && aimed fogleak; then
 		shot "$ARM" off_${f}_new $FR $REDPIN
 		shot "$ARM" off_${f}_pinned_new $FR WW_LOOKDEV_FOG=0 $REDPIN
 	done
+fi
+# shellcheck disable=SC2086
+if want legacy && aimed fognoswap fogleak fogpower1; then
+	echo "legacy"
+	LEG="WW_PBRM_MODE=legacy WW_RENDER_VIEW=8 WW_LOOKDEV_GROUND=0 WW_LOOKDEV_HOUR=12"
+	shot "$ARM" legacy_alpha $LEG $FOG WW_LOOKDEV_FOGPROBE=64750,64,1 $REDPIN
+	shot "$OLD" legacy_off_old $LEG
+	shot "$ARM" legacy_off_new $LEG $REDPIN
+	shot "$ARM" legacy_far_on $LEG WW_RENDER_DIST=20000 WW_RENDER_FOV=8 $FOG $REDPIN
+	shot "$ARM" legacy_far_off $LEG WW_RENDER_DIST=20000 WW_RENDER_FOV=8 WW_LOOKDEV_FOG=0 $REDPIN
 fi
 # shellcheck disable=SC2086
 if want live && aimed nolive nosave; then
