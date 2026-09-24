@@ -29,6 +29,12 @@ committed" or names an exe, this block overrides it.
 ### Tree and exe
 - Committed and pushed to origin main by LEDGERFIX1 on bungo's word ("then
   COMMIT AND PUSH"); the hashes are in the WW_CHANGES entry "Ledger recovery".
+  a4c2069 ledgers rebuilt; cea8808 .gitignore (game data, extracts, binaries,
+  two groups held for bungo); 85c0b14 src + res (203 files); 8fa18e3 tests +
+  tools (178); 5e4f069 docs + constitution + this repo's skills (103);
+  92c068f scratchpad text (10,414 files, ~98 MB); then this ledger note.
+  Held for bungo (ignored, on disk): skill copies from other projects and five
+  notes naming another outside RE source. Untracked-not-ignored after: 0.
   Game data, binaries and generated bulk stay local by .gitignore.
 - release/NifSkope.exe = PBRWX1's 2026-09-24 14:30:13, sha1 45108d83,
   24,630,784 B (carries every landed lane below). Rollback rung

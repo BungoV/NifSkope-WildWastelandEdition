@@ -10,6 +10,15 @@ snapshot, MISTAKES.md from the 09-09 commit. The nine 2026-09-24 lane entries
 above were re-added from each lane's own text. Entries for 2026-09-10..09-23
 are NOT here; each lane's report stays in its scratchpad folder.
 
+Committed and pushed to origin main the same evening, by path list:
+
+  a4c2069 ledgers rebuilt; cea8808 .gitignore (game data, extracts, binaries,
+  two groups held for bungo); 85c0b14 src + res (203 files); 8fa18e3 tests +
+  tools (178); 5e4f069 docs + constitution + this repo's skills (103);
+  92c068f scratchpad text (10,414 files, ~98 MB); then this ledger note.
+  Held for bungo (ignored, on disk): skill copies from other projects and five
+  notes naming another outside RE source. Untracked-not-ignored after: 0.
+
 ## Weather preview in the Scene window (lane PBRWX1, 2026-09-24)
 
 - **Sky, Clouds, Sun, Moon and Game Day rows** in the Scene popup. Each part switches on live and is off

@@ -46,3 +46,12 @@
 - Line endings: 111 tracked modified, 8 mixed, all CR deltas match the diff; one LF file now CRLF =
   scratchpad/handoff_fo4cs/samples/make_samples.log, a regenerated tool log (79 new lines, native CRLF), committed as is.
 - commits so far: a4c2069 ledgers; cea8808 .gitignore; 85c0b14 src/res (203 files); 8fa18e3 tests/tools (178); 5e4f069 docs/skills (103). Note: a4c2069 also carried pdbscrub1's pre-staged rename of the engine comparison doc (content change followed in 5e4f069).
+
+## 5 Commits (branch main, by explicit path list; numstat reviewed before each; cached_check.py flags 0 except test/handoff PNGs + 3 gdb text logs)
+- a4c2069 ledgers: HANDOFF, WW_CHANGES and MISTAKES rebuilt after the 2026-09-24 wipe (+6737/-17, plus the pre-staged doc rename)
+- cea8808 ignore: game data, vanilla and third-party extracts, scratchpad binaries; hold two groups for bungo
+- 85c0b14 src, res: the code of every lane from 2026-09-10 to 2026-09-24 (203 files)
+- 8fa18e3 tests, tools: the gates and scripts of the 2026-09-10..09-24 lanes (178 files)
+- 5e4f069 docs, skills: contracts, plans, the constitution and this repo's own skills (103 files)
+- 92c068f scratchpad: lane reports, briefs, measurement scripts and pictures (10,414 text files; +3 ignore rules)
+- then: ledger note with these hashes + this report (next commit), push, read-back below.
