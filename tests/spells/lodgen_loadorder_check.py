@@ -8,8 +8,7 @@ Prints one `ok   ...` or `FAIL ...` line per check; the spell counts them.
   python lodgen_loadorder_check.py g1 <print-source output> <profile> <mods> <data>
   python lodgen_loadorder_check.py probe <probe output> <field> <expected suffix> <label>
   python lodgen_loadorder_check.py swap <modlist in> <modlist out> <mod A> <mod B>
-  python lodgen_loadorder_check.py record <bake-record output> <profile> <mods> <data>
-  python lodgen_loadorder_check.py untick <print-source output> <plugins.txt in> <plugins.txt out>
+  python lodgen_loadorder_check.py record <bake-record output> <profile> <mods> <data> [plugin.esp ...]
 """
 import os
 import sys
@@ -148,12 +147,26 @@ def swap(src, dst, a, b):
     print('  swapped lines %d and %d into %s' % (ia[0] + 1, ib[0] + 1, dst))
 
 
-def record(outfile, profile, mods, data):
+def record(outfile, profile, mods, data, *must):
     out = lines_of(outfile)
     plugins = expected(profile, mods, data)[0]
     n = next((l.split()[-1] for l in out if l.startswith('bake-record plugins ')), '?')
-    body = '\n'.join(out)
     (ok if n == str(len(plugins)) else bad)('G5 the record lists %s plugins (the load order has %d)' % (n, len(plugins)))
+    rec = [l for l in out if l.startswith('bake-record plugin ') and not l.startswith('bake-record plugins ')]
+    if len(rec) == len(plugins) and all(norm(l).endswith(norm(p)) for l, p in zip(rec, plugins)):
+        ok('G5 the record carries the whole load order, path for path (%d)' % len(plugins))
+    else:
+        diff = [(i, p) for i, (l, p) in enumerate(zip(rec, plugins)) if not norm(l).endswith(norm(p))][:2]
+        bad('G5 the record differs from the load order: %d lines vs %d plugins, first mismatch %s' % (len(rec), len(plugins), diff))
+    for esp in must:
+        want = next((p for p in plugins if os.path.basename(p).lower() == esp.lower()), None)
+        if want is None:
+            bad('G5 %s is not ticked in the profile, so the gate cannot ask for it' % esp)
+            continue
+        m, hi = refused_ids(want) if os.path.isfile(want) else (0, 0)
+        hit = [l for l in rec if norm(l).endswith(norm(want))]
+        (ok if hit else bad)('G5 the record carries %s by full path %s (%d records with form IDs above 0x0FFFFFFF, %d master(s))'
+                             % (esp, want.replace(os.sep, '/'), hi, m))
     for esp, mod in (('BNS Trees.esp', 'Boston Natural Surroundings'), ('TrueGrass.esp', 'True Grass')):
         want = os.path.join(mods, mod, esp).replace(os.sep, '/')
         hit = [l for l in out if l.startswith('bake-record plugin ') and norm(l).endswith(norm(want))]
@@ -185,26 +198,6 @@ def refused_ids(path):
     return masters, bad
 
 
-def untick(srcfile, ptxt_in, ptxt_out):
-    """write plugins.txt with every plugin the ESM reader refuses unticked (the MO2 way: drop the '*')"""
-    got = field_lines(lines_of(srcfile), 'plugin')
-    drop = set()
-    for p in got:
-        if os.path.normcase(os.path.dirname(p)).lower().endswith(os.path.normcase(os.sep + 'data').lower()):
-            continue    # the game's own masters
-        m, n = refused_ids(p)
-        if n:
-            drop.add(os.path.basename(p).lower())
-            print('  unticked %s: %d records carry a form ID above 0x0FFFFFFF (%d master(s))' % (os.path.basename(p), n, m))
-    raw = open(ptxt_in, 'rb').read()
-    nl = b'\r\n' if b'\r\n' in raw else b'\n'
-    out = [l[1:] if l.startswith(b'*') and l[1:].decode('utf-8', 'replace').strip().lower() in drop else l
-           for l in raw.split(nl)]
-    with open(ptxt_out, 'wb') as f:
-        f.write(nl.join(out))
-    print('  %d plugin(s) unticked into %s' % (len(drop), ptxt_out))
-
-
 if __name__ == '__main__':
     cmd = sys.argv[1]
     if cmd == 'g1':
@@ -214,9 +207,7 @@ if __name__ == '__main__':
     elif cmd == 'swap':
         swap(*sys.argv[2:6])
     elif cmd == 'record':
-        record(*sys.argv[2:6])
+        record(*sys.argv[2:])
     elif cmd == 'counts':
         pl, st = expected(*sys.argv[2:5])[:2]
         print('%d %d' % (len(pl), len(st)))
-    elif cmd == 'untick':
-        untick(*sys.argv[2:5])

@@ -21,21 +21,27 @@
 #      mod ships is not found, and IS found once that mod is named with
 #      --resource (the control: the path is real); a file a disabled and an
 #      enabled mod both ship resolves to the enabled one.
-#   G5 a one-chunk Sanctuary bake (--native into $OUT) loads with the MO2 input
-#      and its .lodb lists BNS Trees.esp and TrueGrass.esp by full path.
-#      RED: the rung given the same load order through --plugins-txt.
+#   G5 a one-chunk Sanctuary bake (--native into $OUT) from his LIVE profile
+#      as-is (every ticked plugin, 47 on 2026-09-24) loads, and its .lodb lists
+#      the whole load order path for path, BNS Trees.esp, TrueGrass.esp and
+#      TestWorldspace.esp by full path (lane TOOLFIX1: ESMFIX1 made
+#      TestWorldspace.esp load; G5 no longer unticks it).
+#      RED: RUNG5 (default the pre-ESMFIX1 exe) through the same G5 fails.
 #   Also: --plugins-txt on his profile now REFUSES by name and points at
 #      --mo2-profile (the rung passed bare names and failed later).
 #
 # USAGE
 #   bash tests/spells/lodgen_loadorder.sh
 #   RUNG=<pre-lane exe> OUT=<dir> LEGS=12345 bash tests/spells/lodgen_loadorder.sh
+#   RUNG5=<exe> overrides G5's red rung; RUNG5=none skips it.
 
 set -u
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 NS="${EXE:-$ROOT/release/NifSkope.exe}"
 RUNG="${RUNG:-}"
+RUNG5="${RUNG5:-E:/Projects/NifskopeWWE-esmfix1/release/NifSkope.before_esmfix1.exe}"
+MUST5="${MUST5:-TestWorldspace.esp}"
 PROFILE="${PROFILE:-E:/Projects/Fallout 4 Mods/profiles/Default}"
 MODS="${MODS:-E:/Projects/Fallout 4 Mods/mods}"
 DATA="${DATA:-X:/Programs/Steam/steamapps/common/Fallout 4/Data}"
@@ -150,39 +156,35 @@ fi
 # ============================================================================
 if [ -z "${LEGS##*5*}" ]; then
 echo; echo "== G5 a one-chunk Sanctuary bake from his load order =="
-# His live load order first, as information: the ESM reader (libfo76utils) refuses a plugin whose raw form
-# IDs sit above 0x0FFFFFFF (TestWorldspace.esp: 483 records under top byte FF on 2026-09-24); the error
-# names the plugin. The gate bake then runs on a COPY of his profile with exactly those plugins unticked.
-mkdir -p "$W/g5live/stock" "$W/g5live/tex" "$W/prof_g5"
-lg --mo2-profile "$PROFILE" --worldspace 3C --terrain-region -20 24 -20 24 --dim 4 \
-	--out-dir "$WA/g5live/stock" --tex-dir "$WA/g5live/tex" --native "$WA/g5live" > "$W/g5live.log"; lrc=$?
-echo "  his live profile: bake rc=$lrc; $(grep -i -m1 -E 'error|refused' "$W/g5live.log" | cut -c1-200)"
-lg --mo2-profile "$PROFILE" --print-source > "$W/g5_src.txt"
-cp "$PROFILE/modlist.txt" "$W/prof_g5/"
-"$PY" "$CHK" untick "$W/g5_src.txt" "$PROFILE/plugins.txt" "$W/prof_g5/plugins.txt"
-mkdir -p "$W/g5/stock" "$W/g5/tex"
-t0=$(date +%s)
-lg --mo2-profile "$WA/prof_g5" --mo2-mods "$MODS" --data-root "$DATA" --worldspace 3C \
-	--terrain-region -20 24 -20 24 --dim 4 \
-	--out-dir "$WA/g5/stock" --tex-dir "$WA/g5/tex" --native "$WA/g5" > "$W/g5.log"; rc=$?
-echo "  bake rc=$rc in $(( $(date +%s) - t0 )) s; $(grep -c '' "$W/g5.log") log lines; $(grep -i -m3 -E 'error|refused' "$W/g5.log" | head -3)"
-REC="$(find "$W/g5" -name '*.lodb' | head -1)"
-if [ "$rc" = "0" ] && [ -n "$REC" ]; then ok "G5 the bake ran (rc 0) and wrote $(basename "$REC")"; else bad "G5 the bake: rc=$rc, record '${REC}'"; fi
-if [ -n "$REC" ]; then
-	RECW="$(cd "$(dirname "$REC")" && { pwd -W 2>/dev/null || pwd; })/$(basename "$REC")"
-	lg --bake-record "$RECW" > "$W/g5_rec.txt"
-	grep -iE "^bake-record plugin (0|[0-9]+ (BNS Trees|TrueGrass))" "$W/g5_rec.txt" | cut -c1-200 | sed 's/^/  | /'
-	"$PY" "$CHK" record "$W/g5_rec.txt" "$W/prof_g5" "$MODS" "$DATA" > "$W/g5.chk"; tally "$W/g5.chk"
-fi
-if [ -n "$RUNG" ]; then
-	mkdir -p "$W/g5red/stock" "$W/g5red/tex"
-	"$RUNG" -no-gui lodgen "$DATA/Fallout4.esm" --plugins-txt "$WA/prof_g5/plugins.txt" --data-root "$DATA" --worldspace 3C \
-		--terrain-region -20 24 -20 24 --dim 4 --out-dir "$WA/g5red/stock" --tex-dir "$WA/g5red/tex" \
-		--native "$WA/g5red" 2>&1 | tr -d '\r' > "$W/g5red.log"; rrc=${PIPESTATUS[0]}
-	RREC="$(find "$W/g5red" -name '*.lodb' | head -1)"
-	echo "  rung bake rc=$rrc, record '${RREC}', $(grep -i -m1 -E 'error' "$W/g5red.log" | cut -c1-160)"
-	if [ "$rrc" != "0" ] || [ -z "$RREC" ]; then ok "RED G5: the rung cannot bake his load order from --plugins-txt (rc $rrc)"
-	else bad "RED G5: the rung baked it (rc 0)"; fi
+# His live profile AS-IS: every ticked plugin, TestWorldspace.esp included (its 483 records under top byte FF
+# name the plugin itself since ESMFIX1). g5run <exe> <dir tag> writes the checker's lines to $W/<tag>.chk.
+g5run() {
+	local x="$1" t="$2" r rec recw
+	rm -rf "$W/$t"; mkdir -p "$W/$t/stock" "$W/$t/tex"
+	local t0; t0=$(date +%s)
+	"$x" -no-gui lodgen --mo2-profile "$PROFILE" --worldspace 3C --terrain-region -20 24 -20 24 --dim 4 \
+		--out-dir "$WA/$t/stock" --tex-dir "$WA/$t/tex" --native "$WA/$t" > "$W/$t.raw" 2>&1; r=$?
+	tr -d '\r' < "$W/$t.raw" > "$W/$t.log"
+	echo "  $t: bake rc=$r in $(( $(date +%s) - t0 )) s; $(grep -c '' "$W/$t.log") log lines; $(grep -i -m2 -E 'error|refused' "$W/$t.log" | cut -c1-200 | tr '\n' ' ')"
+	rec="$(find "$W/$t" -name '*.lodb' | head -1)"
+	{ if [ "$r" = "0" ] && [ -n "$rec" ]; then echo "ok   G5 the bake of his live profile ran (rc 0) and wrote $(basename "$rec")"
+	  else echo "FAIL G5 the bake of his live profile: rc=$r, record '${rec}'"; fi
+	  if [ -n "$rec" ]; then
+		recw="$(cd "$(dirname "$rec")" && { pwd -W 2>/dev/null || pwd; })/$(basename "$rec")"
+		"$x" -no-gui lodgen --bake-record "$recw" 2>&1 | tr -d '\r' > "$W/${t}_rec.txt"
+		grep -iE "^bake-record plugin (0|[0-9]+ (BNS Trees|TrueGrass|${MUST5%.*}))" "$W/${t}_rec.txt" | cut -c1-200 | sed 's/^/  | /' >&2
+		"$PY" "$CHK" record "$W/${t}_rec.txt" "$PROFILE" "$MODS" "$DATA" $MUST5
+	  else
+		echo "FAIL G5 no record, so $MUST5 is not in it"
+	  fi
+	} > "$W/$t.chk"
+}
+g5run "$NS" g5; tally "$W/g5.chk"
+if [ "$RUNG5" != "none" ] && [ -x "$RUNG5" ]; then
+	echo "  red rung: $RUNG5"
+	g5run "$RUNG5" g5red; red "$W/g5red.chk" "G5 (the pre-ESMFIX1 exe on his live profile)"
+elif [ "$RUNG5" != "none" ]; then
+	bad "RED G5: no rung exe at $RUNG5 (RUNG5=none to skip)"
 fi
 fi
 
