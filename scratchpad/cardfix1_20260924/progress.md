@@ -17,3 +17,4 @@
 01:34:06 ring s6n 17/0 (R7 green, red = step-5 driver ring 16); step 6 committed 24e7835; DONE 6b + sections 5/6 written; committing 6b
 01:36:05 DIRECTOR DECISION G4 (a): bar = codec floor of the sheet's other channels x1.25 (fix31), red = next frame + 4-bit sway; preview on existing elm set: 3.573/13 vs bar 4.083/15, 4-bit 6.702 fails; wind gate run4 start
 2026-09-25 01:38 step 6c: wind gate run4 28/0 PASS (G4 3.573/13 <= 4.082/15; next frame 51.099, 4-bit 6.702 fail the bar); DONE 6c + DELIVERABLE written (fix32); committing
+2026-09-25 01:49 step 7 job 1: maple .pbrm fixture made (none on disk for a tree); exe 309f3aa9 bakes it family legacy, _gsaos vanilla (gloss 80.8/80.4), no _s -- the .pbrm is never opened. Design written to DONE (fix33): _s = sqrt(F0') RGB + weight A, BC7 aux, no version bump; mixed = legacy; CPU texture-space law, no shader edit
