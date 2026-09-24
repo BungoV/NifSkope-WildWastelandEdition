@@ -270,6 +270,87 @@ second path fires the "switches differ" refusal. That is correct — a different
 plugin is a different input — and it is why a person editing `Fallout4.esm`
 edits it in place and keeps the fast path.
 
+### The identity word: a default that moves now moves `switches` (lane INCRGATE1, 2026-09-24)
+
+The argv digest has one blind spot, and INCR1 recorded it as an open finding: it
+hashes what was **typed**, so a default that moves inside the exe (lane DEFAULTS1
+moved seven on 2026-09-12) leaves `switches` exactly where it was. An
+`--incremental` run over a record baked under the old defaults then kept every
+chunk it judged clean -- chunks whose bytes the new exe would no longer write.
+Measured on the rung exe: a record from `release/NifSkope.before_defaults2.exe`
+was accepted with `0 of 1 chunks dirty`.
+
+The record's `switches` line is now
+`sha1( argv digest, 0x1F, identity word )`, and the **identity word** is
+`gen<N>:<sha1>` over one `key=value` line per EFFECTIVE setting -- the value the
+bake used, typed or defaulted -- in a fixed order, first line `generator=<N>`:
+
+* `lodgenIdentityDump( pass, extras )` in `src/lodgenchunkpass.cpp` writes the
+  lines: every field of `LodgenChunkPassOptions`, then `LodgenIdentityExtras`
+  (atlas, arrays, merge, BC1, keep-BTO, the far-ring cut, the pyramid, the native
+  modules) and any `more` lines a front end owns, sorted.
+* `kLodgenGeneratorRevision` (`src/lodgenchunkpass.h`, now 1) is the manual half:
+  bump it when a change moves output bytes with no setting moving. The dump
+  cannot see a constant inside `lodgen.cpp`.
+* Paths, thread counts and progress hooks are not in the dump, for the reason
+  they are not in the argv digest.
+* The command line prints `identity: <word>, N setting(s)`; with
+  `WW_LODGEN_IDENTITY_DUMP=<file>` it also writes the lines, for a gate to diff.
+  A bare Sanctuary bake reads 112 settings; `--blend-edges off` moves the word.
+
+**One-time cost:** every record written before this lane carries an argv-only
+digest, so the first `--incremental` after it refuses "the switches differ" and
+asks for one full bake. That is the refusal doing its job.
+
+Gate: `tests/spells/lodgen_incr_identity.py` (G1). Leg (b) bakes with the
+`before_defaults2` exe and runs this exe `--incremental` over it: it must refuse
+with the switches reason. Leg (c) forges a record whose `switches` is the old
+argv-only digest; it must refuse too. This exe: 11 checks, 0 failures. The rung
+(no identity word): 11 checks, 6 failures -- the red run.
+
+The ledger code itself moved in the same lane, unchanged in behaviour, from
+`src/nifcli.cpp` into `src/lodgenchunkpass.{h,cpp}` (`lodgenIncrementalBegin`,
+`...ArmCache`, `...NoteRetired`, `...CacheCensus`, `...CacheRefusal`,
+`...OfferReuse`, `...WriteRecord`), so the panel and the command line run one
+implementation.
+
+### The panel row "Rebake only what changed" (lane INCRGATE1, 2026-09-24)
+
+The LOD Generation panel's Run section has the row (`LodgenIncrementalCheck`,
+settings key `incremental`), **OFF by default**. With it OFF the panel's bake is
+byte-identical to the exe before the row (G2 leg (a)). With it ON the panel runs
+the functions above with switches `--panel` and the identity word, which hashes
+the pass's options, the post passes and every extra row the run reads (as the
+run reads it: a hidden row counts as its default). Two differences from the flag,
+both because a row is a standing setting and a flag is a request:
+
+* **No record yet is not a refusal.** The whole range bakes and the record is
+  written, so the next run can diff. Census:
+  `incremental: no bake record at <path> yet; all N chunk(s) baked and the record written`.
+* **A verdict the record cannot vouch for bakes whole and says why**, instead of
+  refusing: `incremental: every chunk baked because <why>; all N chunk(s) baked
+  and the record rewritten`. A refusing row would have no way back short of
+  unticking it, and an unticked row writes no record.
+
+Also: a run over more than one chunk size keeps the row off for that run and says
+so; a cancelled run and a refused native pair write no record. **The panel's
+texture arrays are ON by default, and they are built from the whole range**, so
+with the default settings every run is a full bake plus a fresh record; the row
+saves time only once arrays, the atlas and the cards are unticked.
+
+**A known limit, in the tooltip:** the asset-byte digests are cached per process
+(`g_ledgerAssetDigest`, `src/lodgen.cpp`), so a model or texture edited while the
+panel stays open is seen after a restart. Fixing it means clearing that cache at
+the start of a run, in `lodgen.cpp`; that change is owed.
+
+Gate: `tests/spells/lodgen_panel_incremental.sh` (G2). Three `WW_LODGEN_RUN`
+launches: the rung, this exe with the row OFF, this exe with it ON. (a) rung ==
+OFF, 10 files, 45,582,390 bytes. (b) ON = OFF plus exactly the record and one
+`.lodj`; the record names 1 chunk, `--panel` and the first-run census. RED: the
+rung's tree read as the ON tree fails (b2) and (b3). Not covered: a second panel
+run over the first run's record. The harness in `src/nifskope_ui.cpp` wipes its
+output folder at every launch.
+
 ---
 
 ## 4. The refusals

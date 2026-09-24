@@ -447,6 +447,17 @@ version 3 `.lodi`** (their first eight bytes read `LODO 03 00 00 00` and
 needs a re-bake at `.lodo` 4 / `.lodi` 7 and a fresh run; until then 59/0/31 is a
 2026-09-11 measurement, not a gate.
 
+**Re-run 2026-09-24 (lane INCRGATE1) on a v4 pair:** the default-settings Sanctuary
+pair (`.lodo` 4, 6,204,388 B / `.lodi` 7, 527,989 B), made by
+`tests/spells/lodgen_sanctuary_pair.sh`, reads **38 ok / 0 RED / 32 not-derivable**,
+the floor caught. The first run was 37 / 1 RED / 31. The one RED was the checker:
+with the ladder OFF (the default) the `native-ladder:` line still prints
+`(group 4, ...)`, the target of a ladder that was not built, and the file writes
+`ladderGroup` 0 by contract. The checker now claims 0 for the file in that case and
+carries the printed target as the not-derivable `bake.ladderGroupTarget`. A red leg
+in the spell shows a doctored 4 is still caught. There are fewer checks than 59
+because an authored-only pair has no ladder levels to compare.
+
 **The floor.** `--self-floor` doctors three claims one at a time —
 `lodo.clusterCount`, `lodi.instanceCount`, `lodo.level1.triangles` — and each must
 be caught by name. All three were, on both pairs. `--doctor field=value` does one

@@ -54,3 +54,21 @@
   `--panel`, first-run census; RED: the rung tree as ON fails b2 and b3. RESULT PASS.
 - lod_generation.sh b2 128/0 (rung 128/0; check boxes 39 -> 40, dash 0, untipped 0).
 - lodgen_panel_run.sh b2 137/0 (floor 130).
+
+## Step 5 -- plan 5 rows 13 / 25 / 26 (commit 64e0d69)
+- Row 13 `lodgen_native_baseline.sh --drop-proof`: one bake of (-32,0) dim 32 (84 s). Stock drops
+  2,628 of 42,560 (6.17 %); native instanceCount 42,560, decoder 12/0, verify neither=0. Both reds ok.
+- Rows 25/26 `lodgen_sanctuary_pair.sh` 7/0 (20 s): lodo v4 6,204,388 B, lodi v7 527,989 B, 3,526
+  placements / 10 chunks, decoder 54/0, truncated lodi refused. Census checker 38/0/32 after the
+  ladder-OFF fix (was 37/1/31); red leg: doctored ladderGroup 4 caught.
+- Finding: the checked-in tests/baselines/stock_baseline.sha256 is STALE. --check is red with the same
+  6 files on the RUNG and on b2. Against a baseline written from the rung (work/rung_baseline.sha256),
+  b2 is 25/25 byte-identical, PASS. Re-pinning the checked-in file is the director's call; it was not
+  touched here.
+
+## Step 6 -- plan 5 row 6 + docs (22:05)
+- lodgen_native.sh leg 13b: the decoder reads the downtown pair (33,123 inst, 280 occ),
+  cellQuantAmbiguous 14, worst 0.062501 u (band 0.126955). Red: band 0 refuses at instance 3358.
+  Whole spell b2: 32 checks, 0 failures, RESULT PASS (was 29 before the leg).
+- Docs: LEDGER_FORMAT (identity word, panel row), BAKE_RECORD 5, PLAN rows 6/13/25/26 + lodi size,
+  CENSUS re-run, NATIVE 9 drop proof + 4.1 measurement.
