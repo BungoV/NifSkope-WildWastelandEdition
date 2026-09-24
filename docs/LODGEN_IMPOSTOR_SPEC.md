@@ -42,7 +42,7 @@ two-channel `_s`.
 | texture | format | R | G | B | A |
 |---|---|---|---|---|---|
 | `_d` / `_bc` | BC3 | colour (diffuse / albedo), unlit | | | coverage |
-| `_n` | BC3 | normal X | normal Y | height | sway weight |
+| `_n` | BC3; **BC7** on a card | normal X | normal Y | height | sway weight |
 | `_gsaos` / `_rmaos` | BC3 | gloss / roughness | specular / metallic | AO | subsurface mask |
 | `_g` / `_e` | BC1 | emissive colour | | | — |
 
@@ -119,6 +119,16 @@ the highest-contrast scalar and gets the ramp. AO, the smoothest, shares the
 third texture's colour block with two channels that are nearly material
 labels.
 
+**The card's `_n` is BC7** (2026-09-23, bungo's ruling). On a card the
+height is not a detail: it places every frame at its depth, and under BC3 it
+came back 2.81 levels (34 units) wrong on average with 27 of 59 heights left,
+which doubled and thinned the trunk. BC7 spends the same 16 bytes per 4x4 on
+up to 16 index levels with 7-bit end points, and the in-tree encoder
+(`src/lodgenbc7.h`) weights the height 32 to 1: 0.57 levels, p95 2, 57 of 58
+heights. The price is the sway, which leaves its private alpha ramp (0.02 ->
+1.34 levels mean). Numbers and the gate: `docs/LODGEN_CARD_SHEETS.md` §6.1.
+Mesh `_n` sheets (source arrays, the atlas) and the aggregate `_n` stay BC3.
+
 ## `.lodm` — the LOD material
 
 Envelope like PBRM's so a file is sniffable: ASCII `LODM`, uint32 version
@@ -185,12 +195,23 @@ Reader/writer: `src/io/lodmfile.h`.
 
 ## Cards (octahedral impostors)
 
-Files `Data\Textures\Lodgen\Cards\<formid8hex>_oct_d.DDS`, `_oct_n.DDS`,
+Files `Data\FO4CSLOD\Cards\<formid8hex>_oct_d.DDS`, `_oct_n.DDS`,
 `_oct_gsaos.DDS`, `_oct_g.DDS` (legacy) or `_oct_bc.DDS`, `_oct_n.DDS`,
 `_oct_rmaos.DDS`, `_oct_e.DDS`
 (pbr), and `<formid8hex>_oct.lodm` beside them. One set per base. The crossed
 quads in the mesh keep `<id>_fs.DDS` for the stock engine; a consumer reading
 the manifest's `C` line opens the `.lodm` and draws the sheets instead.
+
+**What FO4CS must decode (2026-09-23).** `_oct_n.DDS` is a DX10 DDS:
+`dxgiFormat` **98** (`DXGI_FORMAT_BC7_UNORM`, linear, not sRGB),
+`resourceDimension` 3, `arraySize` 1, the full mip chain; the card `_n`
+ARRAY is the same with `arraySize` = the layer count. Direct3D 11 samples
+BC7 in hardware, so this is a load change and no shader change: create the
+texture with the format the header names. The other card sheets keep BC3 /
+BC1. A set baked before this date carries a DXT5 `_n`; a loader that takes
+the format from the header (DirectXTex `LoadFromDDSMemory` does) reads both.
+Channel meaning is unchanged and the `.lodm` names files, not formats, so no
+version moved.
 
 **Source.** The base's own near model (the record's MODL), not a LOD
 derivative: the candidate listing (`--list-impostor-candidates`, driver
@@ -230,7 +251,36 @@ on the grid's VERTICES under the hemi-octahedral mapping:
 
 so the four corners are exact horizon directions, the centre frame the exact
 top, and every direction falls inside a triangle of three frames — the
-(N−1)² triangle mesh between frame centres is the blending rule. Frames are
+(N−1)² triangle mesh between frame centres is the blending rule.
+
+**The camera for a frame, and the 2026-09-19 repair.** Frame (i, j) is the
+view FROM direction (i, j): a camera standing at that direction, looking at
+the object's centre, orthographic. With this codebase's Euler convention
+(`Matrix::fromEuler(rotX, 0, rotZ)`, whose ROWS are the camera's axes in world
+space, so the camera sits at row2) that is
+
+    elev = asin(d.z),  azim = atan2(d.y, d.x)
+    rotX = −90 + elev,  rotY = 0,  rotZ = 270 − azim
+
+because rotX = −90 + elev already gives cos X = sin(elev) and sin X =
+−cos(elev), and row2 = d then requires sin Z = −cos(azim) and cos Z =
+−sin(azim), which Z = 270 − azim satisfies exactly. Every bake before
+2026-09-19 used `rotZ = 90 − azim`, which puts the camera at (−d.x, −d.y,
++d.z): the right elevation with the AZIMUTH TURNED BY 180 DEGREES, so frame
+(i, j) held the view from the far side. **Every impostor set baked before that
+date must be re-baked**; on anything not symmetric about its own axis, an old
+set drawn to this spec shows the back of the object at the front.
+
+A set says which bake made it with the CONVENTION TOKEN. The meta's `oct` line
+carries it as a thirteenth token after `base` (`conv`, currently `spec1`), and
+it is passed into the `.lodm` as `card.conv`, or per layer as the layer's
+`conv` in a `cardArray`. It goes last, and is written only when the bake states
+it, so every reader that indexes by position is untouched and every `.lodm`
+produced before the token is byte-identical still. **An ABSENT token is not
+"unknown": it means the set predates the repair**, because the token arrived in
+the same change. A consumer may draw such a set under the old reading as a
+diagnostic, and should say out loud that it is doing so, but the set is owed a
+re-bake and nothing should be measured against it. Frames are
 RECTANGULAR and one size for every view, fitted by
 a first pass that photographs every view at the bound-sphere fit and takes
 the widest and tallest extent from the centre over all of them (the sphere
@@ -336,7 +386,7 @@ unaffected, which is why they go on the END and not in the middle.
 
 The per-card sets are one texture bind per tree type. `--arrays` together with
 `--impostors` packs every card set the chunks' `C` lines stand on into one
-DX10 array per texture (BC3, and BC1 for the emissive), grouped by FAMILY and
+DX10 array per texture (BC3; BC7 for `_n`; BC1 for the emissive), grouped by FAMILY and
 by SHEET SIZE (a card set's
 sheet is `oct x frameW` by `oct x frameH`; sets that differ in grid or frame
 cannot share an array — which is what the frame size classes above are for),
@@ -476,6 +526,21 @@ manifest's `A` line takes layer **−1** to mean *per vertex, in UV2.y* — the
 place the layer has always been. A positive layer still means the whole shape
 is on that one, so a consumer can keep its fast path.
 
+**That −1 needs UV2, and since 2026-09-12 a default bake has none.** Object
+identity is off by default now (bungo's ruling), so a default `.BTO` carries
+the plain descriptor `474989027590661` — no vertex colours, no UV 2 — while the
+manifest, the arrays and the cards are still written. A merged shape that
+spanned layers would then write `A <block> -1 <lodm>` with nothing per vertex
+to resolve it. Measured, that case does not occur: a dim-16 bake of the
+Sanctuary chunk with `--arrays --impostors --slot-fallback` writes 21 `A` lines
+with identity off and the same 21 with identity on, every one of them a
+POSITIVE layer, because the merge key already holds the array `.lodm` and in
+practice the shapes that merge sit on one layer. It is a latent hole, not a
+live one: a consumer that meets `-1` in a file baked without `--identity`
+should treat the shape as unresolved rather than read UV 2 that is not there,
+and the durable fix — putting the layer in the merge key so a merged shape can
+never span layers — is bungo's call, not a lane's.
+
 Gate: `tests/spells/lodgen_merge.sh` — the region built twice, `--no-merge`
 and `--merge`, compared file to file: fewer shapes, the same vertices and
 triangles in total, dim × dim segments, every `A` line's layer matching its
@@ -561,6 +626,13 @@ derive or are invisible at ring three and four.
 
 ## The frame law: one resolution, two ladders
 
+**The default is 8 x 8 frames at 256 px a frame -- a 2048-texel sheet for the
+largest base** (bungo 2026-09-23, "8x8 at 2k"; lane DEFAULTS2). Until then it was
+8 x 8 at 128 px, a 1024-texel sheet. The grid was already 8 everywhere; only the
+frame moved: the driver's `TILE` default, the panel's *Card resolution* default
+and the bake hook's fallback when `WW_IMPOSTOR_TILE` is unset are all 256 now.
+`TILE=128` (or the panel row) is the way back. The ladders below are unchanged.
+
 The resolution chosen in the panel (or `TILE=` on the driver) is what the run's
 LARGEST base gets. Every other base comes down from it by two independent
 quantisations, each picking the nearest rung in log space.
@@ -579,19 +651,19 @@ three rungs at most, floored at 32 px:
 With no reference set there is no size ladder and every base bakes at the
 resolution.
 
-**Aspect**, from the silhouette the bake has just measured over every view. Five
-rungs for the short side, rounded to a multiple of four, never below the floor
-that clears the gutter:
+**Aspect**, from the silhouette the bake has just measured over every view: the
+short side is the smallest **multiple of 16** texels whose INNER rect (the frame
+less its margin on both sides) is not narrower than the silhouette's ratio
+(`src/nifskope_ui.cpp`, `for ( int s = 16; s <= tileLong; s += 16 ) {`; the
+derivation is `docs/LODGEN_CARD_SHEETS.md` §3.2). Until 2026-09-09 it was a
+five-rung ratio ladder (1, 3/4, 1/2, 3/8, 1/4, rounded to a multiple of four);
+that ladder is retired, because its floor forced a SQUARE frame on a
+needle-shaped tree (TreeBlasted05 filled 4 texels of a 32-texel frame, 12.5%).
 
-    1    3/4    1/2    3/8    1/4
-
-The three-quarter rung is measured, not symmetric: TreeMapleForest2's silhouette
-is 0.75 of its height at 8 x 8, and rounding that to a square frame costs 33%.
-
-Both ladders are coarse ON PURPOSE. A card array holds only sets sharing a grid
-AND a frame, so each additional frame shape is another array and another bind.
-Nearest-in-log bounds the rounding to about 15%, and the fit GROWS whichever
-extent is loose rather than cropping — the cost is air inside a frame, never a
+Both quantisations are coarse ON PURPOSE. A card array holds only sets sharing a
+grid AND a frame, so each additional frame shape is another array and another
+bind. The size ladder's nearest-in-log bounds its rounding to about 15%, and
+both fits GROW whichever extent is loose rather than cropping — the cost is air inside a frame, never a
 cut silhouette.
 
 A set records `card.oct`, `card.frame` and `card.base` (the run's resolution). A
@@ -601,15 +673,18 @@ frame below the base is a rung, not a different run.
 
 `lodgen --card-half-aux` writes the normal, mask and emissive sheets at half of
 each side and leaves the base colour alone. Measured across a two-layer array
-set, the payload falls from 3,584 to 1,664 bytes: 46.4%.
+set (the card-array gate's, `gap 4`, a 16x32 sheet of 8x16 frames), the payload
+falls from 4,480 to 1,920 bytes: 42.9% (`docs/LODGEN_CARD_SHEETS.md` §3.5). It
+read 46.4% on 2026-09-06; the difference is the mip law, not the saving.
 
 The base colour never divides. Its alpha is the coverage, so it is the
 silhouette, and that is what an impostor is judged on. The other three are
 lit-appearance data at LOD distance.
 
-The divide happens after frame dilation. The gutter is at least four texels, so a
-halving mixes nothing across a frame border. Frames are multiples of four, so a
-halved frame is still even. Sampling is unaffected — normalised UV reads a
+The divide happens after frame dilation. The gap is rounded up to an EVEN number
+of texels so a halving lands its margins on whole texels, and frames are
+multiples of 16, so a halved frame is still even and nothing mixes across a
+frame border. Sampling is unaffected — normalised UV reads a
 smaller sheet with the same coordinates — but a consumer sizing its own
 allocation reads `card.auxDiv` / `array.auxDiv`, `array.auxClass` and
 `array.auxMips`.

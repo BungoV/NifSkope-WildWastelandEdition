@@ -3,6 +3,98 @@
 What went wrong, why it went wrong, and what stops it next time. Newest first.
 Kept because the same shapes keep coming back in different clothes.
 
+## 2026-09-17 — A refusal aimed at a corner case landed on the only pipeline anybody bakes
+
+**What:** `--incremental` refused `--native`. bungo's ruled FO4CS command is
+`--native <dir>`, everything under `Data/FO4CSLOD/`, and it is the default
+pipeline in this tree — so `--incremental` was usable only on the stock engine
+target, which is the target nobody bakes. The feature shipped, was gated, was
+documented, and refused every real command for five days.
+
+**Why it got through:** the refusal is *correct about its mechanism*. `--native`
+builds ONE `.lodo`/`.lodi` pair for the whole region out of the placements the
+chunk pass hands it, so an incremental run would have written a pair covering
+only the rebaked chunks and said nothing about the rest — and it would have
+loaded, passed `--native-verify --native-verify-corpus`, matched its own three
+staleness hashes, and simply been missing most of the worldspace. That argument
+was reviewed on its own terms and it survives on its own terms. What nobody
+asked was **what fraction of the commands an operator actually types it**
+**refused**. The answer was all of them.
+
+The gate made it invisible. `--incremental`'s identity gate baked the STOCK
+target, because the stock target was the only one `--incremental` would run on.
+A gate shaped by the defect it is meant to catch reports green forever.
+
+**How it was found:** it was written down as a gap in a lane brief, not found
+by anything in the tree.
+
+**The rule:** a change that adds a refusal states, in the same change, which of
+the project's RULED default commands it now refuses, **by name**. A refusal
+that covers the default pipeline is a missing feature wearing a refusal's
+clothes. And a gate that can only run in the configuration the defect permits
+is not a gate for that defect: say so in the gate, or make it fail.
+
+### The second half: the cost model was never measured either
+
+**What:** with the refusal removed and the per-chunk cache proved bit-identical,
+a null incremental — no chunk work at all — on a four-chunk FO4CS region saved
+**2 seconds of 72**.
+
+**Why:** `lodgenNativeWrite()` builds the object library from the worldspace's
+FULL base census. That is chunk-independent by design (spec 8 / 9.3): the
+`.lodo` is an append-only library of every base, not of every placement. Against
+a nine-chunk bake of the same tree a chunk is worth about 1.6 s, so the FIXED
+cost of an FO4CS bake is around 58 s — roughly **80 %**. "Incremental" was
+assumed to mean "the work is per chunk" because that is what it means on the
+stock target, where it is true.
+
+**The rule:** before building a skip, measure what fraction of the wall clock
+the skipped thing is, on the target that matters. The lane still shipped,
+because incremental-and-correct is the precondition for reusing the library at
+all — but it shipped saying 2 of 72 in its own report, not implying more.
+
+---
+
+## 2026-09-17 — Every resource gate opened a file BY PATH, so the deadlock lived in the one route no gate took
+
+**What:** `GameManager::archiveLock()` is one static `QReadWriteLock(Recursive)`.
+`GameResources::get_file` and `::find_file` took the READ lock, missed in their
+own index, and then recursed `return parent->get_file(...)` **while still
+holding it**. The parent's lazy `init_archives()` opens with a `QWriteLocker` on
+that same lock, and `Recursive` grants read-after-read and write-after-write to
+one thread but never a read → write UPGRADE: `lockForWrite` waits for the reader
+count to reach zero and the reader it waits for is the calling thread. The GUI
+thread slept on itself, forever, at 0% CPU, with the window painted. bungo:
+"When I click on anything from 'files', it freezes nifskope".
+
+**Why it got through:** the condition needs TWO things at once and every gate we
+had supplied at most one. First, a document whose own resource set has an EMPTY
+data path — that happens only when the bytes arrive through a `QBuffer`, i.e.
+the Files tab's **configured-resource** row, because `NifModel::load(QBuffer&)`
+has no file name, so `getNIFDataPath` is empty and `addNIFResourcePath(nif, "")`
+leaves `dataPaths` empty; the document's own `init_archives()` therefore never
+runs and every lookup falls through to the parent. Second, a parent index that
+is **not built yet**. Every existing gate opened a `.nif` by path (on argv, or
+through `openFile`), which gives the document a data path of its own and builds
+the shared index from a call site holding no lock at all; and the lodgen gates
+ran in long-lived processes where something had already warmed
+`archives[game].ba2File`. The Files tab's own `currentArchive` is a *different*
+`BA2File` object, so even browsing the tree did not warm the index under test.
+Two green routes, both missing the third.
+
+**Solution:** release the read lock before recursing to the parent (the hotfix:
+at that point the `FileInfo *` is null, so no `std::string_view` into the index
+is still alive), and the rule is now written at the lock's declaration in
+`src/gamemanager.h` where the next person will read it. The gate that would have
+caught it is `tests/spells/gamemanager_archlock.sh`: it FORCES both halves in a
+fresh process — `close_archives()` on the parent and a floor check that
+`ba2File == nullptr`, then the file opened through the configured-resource route
+with the empty data path read back off `GameResources::dataPaths` rather than
+assumed — and it runs the same case against the previous exe, where the passing
+result is a watchdog kill. The general shape: when a bug needs a *state*, a gate
+that merely performs the action is not a gate; it must assert the state it
+reproduces before it acts.
+
 ## 2026-09-06 — Compared two empty directories and printed a percentage
 
 **What:** to check what the new height sheet costs, I ran the generator twice with
@@ -643,7 +735,7 @@ test the reference.** A reference with a long history of being right is the last
 thing you doubt and often the thing that is wrong -- and the cost of checking it
 was one script and ten minutes, against hours spent diffing a file that was fine.
 
-## 2026-08-23 — Diffed bytes for hours without opening the PDB
+## 2026-08-23 — Diffed bytes for hours without opening Todd's treat
 
 **What:** a rebuilt human ragdoll misbehaved in game. I spent the next stretch
 comparing our packfile against vanilla's — object censuses, offsets, a
@@ -658,16 +750,16 @@ The small one: I decided "66 bytes, probably the capsule roll" and moved on
 without checking. It was 64 bytes of capsule roll and 2 bytes of defect.
 
 The real one: **wrong instrument, wrong order.** The rule here is already
-written down — PDB first for vanilla engine behaviour, and our reader agreeing
+written down — Todd's treat first for vanilla engine behaviour, and our reader agreeing
 with our writer is ONE measurement. Every previous in-game collision defect in
 this project was found by disassembling the engine. A byte diff can only answer
 "is our file the same as vanilla's"; when the answer is yes and the game still
 disagrees, the diff has nothing left to say, and continuing to run it is motion
-rather than progress. bungo asked "have you consulted the .pdb" after I had
+rather than progress. bungo asked whether I had consulted Todd's treat after I had
 already reported "everything matches" twice.
 
 **Solution:** when a defect is visible in the GAME and not in our checks, the
-first move is the PDB, not another comparison. Ask what the engine READS and
+first move is Todd's treat, not another comparison. Ask what the engine READS and
 under what conditions it behaves differently — `checkConsistency` being `ret 0`
 and `getOriginalMassOfBody`'s exact field path took minutes and closed off two
 whole hypotheses. And when a diff is dismissed as "probably X", either check that
@@ -909,7 +1001,7 @@ including `flags` at cinfo +0x18 -- the field whose absence the entire
 impact-sound dig turned out to be about. `hknpMotionCinfo +0x08`, filed here as
 "density", is `massFactor` by the same table.
 
-**Why:** "the PDB says what the engine READS" was already the rule, and it was
+**Why:** "Todd's treat says what the engine READS" was already the rule, and it was
 taken to mean "disassemble the function that touches the field". Disassembly
 answers what a field DOES. Reflection answers what it IS, in one read, and the
 tables were never looked for because nothing had said they were there.

@@ -6,7 +6,14 @@ amended in place by the texture-array pass, the merge pass and the card-array
 pass. There is no reader in this tree except those three passes; FO4CS's
 *Improved LOD* module is the first outside consumer.
 
-One UTF-8 text file beside every `.BTO`, same stem plus `.manifest.txt`. LF line
+One UTF-8 text file per `.BTO`, same stem plus `.manifest.txt`.
+
+WHERE IT LANDS, 2026-09-16 (lanes BTOFREE1 then LAYOUT1): the `.BTO` itself is
+scaffolding under the FO4CS target — built in `<mod>/lodgen_bto_scratch/`, read
+by the five passes that need it, then removed — and the sidecar is KEPT. It is
+written beside the files it describes, `FO4CSLOD/<ws>/<stem>.BTO.manifest.txt`
+(bungo 2026-09-16 19:3x, "The folder should be called FO4CSLOD maybe, so it'd be Data/FO4CSLOD, sound fine?" (lane LAYOUT1)). Under the stock engine, and under `--keep-bto`, the `.BTO` and
+its sidecar are where they always were. LF line
 endings, one record a line, **space-separated**, the file always ends with a
 newline. It carries the per-object constants the `.BTO` has nowhere to put:
 which placed reference each drawn object is, what class of thing it is, how big
@@ -237,22 +244,28 @@ bungo's mod folder** — see `scratchpad/handoff_fo4cs/README.md` §5.
 
 ## Provenance
 
-`src/lodgen.cpp` sha256 `6d7388c53a13343e`,8286 lines, at the time of reading;
+`src/lodgen.cpp` sha256 `c05fd079655ac03e`, 8,924 lines, at the time of reading;
 it is under active edit by another lane, so anchors are quoted.
+
+**Re-derived 2026-09-10 by lane DOCS2** (`ww-contract-provenance` step 3, script
+`scratchpad/docs2_20260910/anchors.py`): every line number below was found again
+from its own anchor text against the sources stamped above, never shifted by a
+delta. 13 of 14 rows moved; the `I`-line row's anchor lost its `continue;` (the writer
+now puts it on its own line) and was re-anchored on the `if` alone.
 
 | claim | line | anchor |
 |---|---|---|
-| header line and its column list | `3552-3554` | `"# lodgen manifest 2 ws %1 dim %2 chunk %3 %4 "` |
-| object row, 9 fields then `ref part` | `3098-3107` | `manifest.append( QString( "%1 %2 %3 %4 %5 %6 %7 %8 %9" )` |
-| field 8 is `localMaxDist * r.scale` | `3106`, computed `3055-3066` | `.arg( double( localMaxDist * r.scale ) )` |
-| `class` heuristic and its four words | `3076-3091` | `const char * objClass = "misc";` |
-| identity colour is `index & 0xFF`, `index >> 8` | `3096-3097` | `idColor = Color4( float( objectIndex & 0xFF ) / 255.0f, …` |
-| `C` line, nine tokens, gated on `oct >= 2` | `3113-3118` | `if ( usedCard.valid && usedCard.oct >= 2 )` |
-| `I` line and the ≥ 8 threshold | `3288-3297` | `if ( it.value().second.size() < 8 ) continue;` |
-| `M` line | `3526` | `manifest.append( QString( "M %1 %2" )` |
-| `A` line written by the array pass | `4344` | `lines.append( QString( "A %1 %2 %3" ).arg( b ).arg( lit.value().second )` |
-| `A` line rewritten by the merge | `7575` | `lines.append( QString( "A %1 %2 %3" ).arg( b ).arg( recs[i].layer )` |
-| `layer = −1` on a multi-layer merge | `7532` | `target.layer = ( layers.size() == 1 ) ? *layers.constBegin() : ( layers.isEmpty() ? target.layer : -1 )` |
-| `A`/`M` remainder joined, not split | `7272-7274` (also `4068`) | `t.mid( 3 ).join( QChar( ' ' ) )` |
-| card-array appends exactly two tokens, only at 10 | `8301-8304` | `if ( t.size() == 10 )`, `line += QString( " %1 %2" )` |
-| the file always ends with a newline | `3555` | `manifest.join( QChar( '\n' ) ) + QChar( '\n' )` |
+| header line and its column list | `3877-3879` | `"# lodgen manifest 2 ws %1 dim %2 chunk %3 %4 "` |
+| object row, 9 fields then `ref part` | `3394-3403` | `manifest.append( QString( "%1 %2 %3 %4 %5 %6 %7 %8 %9" )` |
+| field 8 is `localMaxDist * r.scale` | `3402`, computed `3055-3066` | `.arg( double( localMaxDist * r.scale ) )` |
+| `class` heuristic and its four words | `3372-3387` | `const char * objClass = "misc";` |
+| identity colour is `index & 0xFF`, `index >> 8` | `3392-3393` | `idColor = Color4( float( objectIndex & 0xFF ) / 255.0f, …` |
+| `C` line, nine tokens, gated on `oct >= 2` | `3409-3414` | `if ( usedCard.valid && usedCard.oct >= 2 )` |
+| `I` line and the ≥ 8 threshold | `3608-3617` | `if ( it.value().second.size() < 8 )` |
+| `M` line | `3851` | `manifest.append( QString( "M %1 %2" )` |
+| `A` line written by the array pass | `4669` | `lines.append( QString( "A %1 %2 %3" ).arg( b ).arg( lit.value().second )` |
+| `A` line rewritten by the merge | `8163` | `lines.append( QString( "A %1 %2 %3" ).arg( b ).arg( recs[i].layer )` |
+| `layer = −1` on a multi-layer merge | `8120` | `target.layer = ( layers.size() == 1 ) ? *layers.constBegin() : ( layers.isEmpty() ? target.layer : -1 )` |
+| `A`/`M` remainder joined, not split | `7860-7862` (also `4068`) | `t.mid( 3 ).join( QChar( ' ' ) )` |
+| card-array appends exactly two tokens, only at 10 | `8903-8906` | `if ( t.size() == 10 )`, `line += QString( " %1 %2" )` |
+| the file always ends with a newline | `3880` | `manifest.join( QChar( '\n' ) ) + QChar( '\n' )` |

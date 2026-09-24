@@ -28,6 +28,10 @@ anim-setup <file> -b N --list
 anim-setup <file> -b N --controller TYPE [--controller TYPE ...]
       [--sequence NAME] [--new-sequence] [--standalone]
       [--effect-var 0..9] [--int-var N] -o OUT
+
+weather (--plugins a,b,.. | --plugin p) [--data DIR] [--list] [--census]
+      [--weather KEY] [--hour h[,h..]] [--climate ID]
+weather --tnam a,b,c,d --hour h[,h..]      time-of-day blend, no plugin
 ```
 
 Field paths are `/`-separated; a numeric segment indexes an array by row:
@@ -201,6 +205,60 @@ the core resolves the target sequence **by name**, where the dialog used a combo
 | `Animation/Fix Invalid AV Object Refs` | **no-op** (file hash unchanged) → refs valid |
 | add second node by sequence name | controlled blocks 1 → 2, palette objs 1 → 2 |
 | unknown sequence name | clean error, exit 1 |
+
+## Weather records (`weather`)
+
+Reads `WTHR` and `CLMT` records from a plugin load list. It needs no NIF and
+no model layer. It is the reader behind the W1 weather gates
+(`tests/spells/pbr_r2b_gates.sh`). Source: `cmdWeather` in
+`src/esmweather.cpp`. It prints one line per fact, meant for a script to
+parse.
+
+```powershell
+nifskope-cli weather --plugin Fallout4.esm --list
+nifskope-cli weather --plugin Fallout4.esm --census
+nifskope-cli weather --plugin Fallout4.esm --weather CommonwealthClear --hour 6.75,12,21:30
+nifskope-cli weather --plugins Fallout4.esm,DLCCoast.esm --weather 0002B52A --climate 0000015F
+nifskope-cli weather --tnam 30,54,102,126 --hour 5,6.5,19:45
+```
+
+| option | meaning |
+|---|---|
+| `--plugins a,b,c` | the load list, in order. Full paths; a bare name that is not found resolves in `--data` |
+| `--plugin p` | ONE plugin. Its masters are added in `MAST` order, looked up beside it and then in `--data`. A master found nowhere stays in the list by name, so the load refuses and names it |
+| `--data DIR` | the Data folder. Default: the first Data folder the game manager serves that holds `Fallout4.esm` |
+| `--weather KEY` | one weather by EditorID or FormID (hex, `0x` optional) |
+| `--hour h[,h..]` | hours as `6.75` or `21:30` |
+| `--climate ID` | the climate whose `TNAM` sunrise/sunset times drive `--hour` (hex). Default `0000015F` (DefaultClimate); when absent, `30,54,102,126` |
+| `--tnam a,b,c,d` | a pure time-of-day blend from four `TNAM` bytes. No plugin is needed; with a plugin, the rest runs too |
+| `--census` | parses every `WTHR` and prints the `NAM0` size and `DALC` count histograms |
+| `--list` | every `WTHR`, one line each |
+
+Output lines, in order:
+
+```
+# WW_WEATHER data=<dir|none> red=<WW_LOOKDEV_RED|none>
+load ok files=<base names> wthr=<count>        | load refused reason="..." records=0
+entry id=<hex8> edid=<..> src=<file> owner=<file> override=0|1       (--list)
+census refused id=<hex8> reason="..."                                 (--census, per failure)
+census wthr=N parsed=N refused=N nam0=<size>:<n>,.. dalc=<count>:<n>,..
+climate edid=<..> tnam=a,b,c,d                | climate fallback reason="..." tnam=30,54,102,126
+weather id=<hex8> edid=<..> src=<file> owner=<file> fv=<form version> nam0=<bytes> rows=<n> tods=<n> dalc=<n>
+nam0hex <the raw NAM0 bytes>
+row name=<SkyUpper..FogFarHigh> tod=<Sunrise..LateSunset> rgb=r,g,b   (8 times of day x each row)
+dalc tod=<..> axis=X+|X-|Y+|Y-|Z+|Z-|Spec rgb=r,g,b                   (when the weather has DALC)
+tod hour=<h> a=<key> b=<key> t=<0..1> keys=<Day | Sunrise->Day 40%>
+sun hour=<h> disc=x,y,z light=x,y,z
+blend hour=<h> sunlight=r,g,b ambient=r,g,b dalcZm=r,g,b              (--weather with --hour)
+```
+
+The eight times of day are `Sunrise Day Sunset Night EarlySunrise
+LateSunrise EarlySunset LateSunset`. `--hour` without `--weather` prints only
+the `tod` and `sun` lines. `WW_LOOKDEV_RED` is echoed on the first line
+because its red controls change the time-of-day math.
+
+Exit codes: `0` ok, `2` usage (an unknown argument, or no plugins), `3` the
+load was refused, `4` the `--weather` key was not found or would not parse.
 
 ## Scope — what batch mode can and cannot reach
 

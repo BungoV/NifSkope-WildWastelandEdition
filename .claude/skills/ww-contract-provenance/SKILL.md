@@ -65,10 +65,44 @@ For a RANGE, anchor the START and mark the rest with `…`:
 
 Not while writing — at the end, after the last edit, because a concurrent lane
 moves the file under you while you write. A worked script is
-`E:\Projects\NifskopeWildWastelandEdition\scratchpad\rename_20260909\p14_anchors.py`;
-copy it rather than re-writing it. It parses the footer's markdown rows, pulls
+`E:\Projects\NifskopeWildWastelandEdition\scratchpad\docs2_20260910\anchors.py`
+(2026-09-10, lane DOCS2: eight pages, eleven sources, 243 rows in one run); it
+supersedes `scratchpad\rename_20260909\p14_anchors.py`, which handled one file
+per page. Copy it rather than re-writing it: four of its rules were each learned
+by a wrong report. It parses the footer's markdown rows, pulls
 the FIRST backticked span out of the anchor column, unescapes markdown (`\|`),
 finds it in the current source, and rewrites the number.
+
+**Four things the extractor must handle, or it reports rot that is not there**
+(lane DOCS2, 2026-09-10: 11 of its 13 first-run MISSING rows were the script,
+not the tree):
+
+* **An ellipsis INSIDE the backticks** — `` `const qint16 rect[8] = { f.south, … ` ``
+  — leaves the span unclosed, so a `` `([^`]+)` `` regex finds nothing at all and
+  the row reads as a dead anchor. Split on the ellipsis AFTER extracting the
+  span, and fall back to "text after the opening backtick, up to the ellipsis".
+* **Normalise whitespace on both sides before matching.** An anchor that was
+  copied across a wrapped markdown cell carries a newline; a source line carries
+  tabs. Collapse runs of whitespace in the anchor and in each source line, then
+  require the match to be exact and unique as before.
+* **Skip the STAMP table.** Its rows have the same three-pipe shape as the claim
+  table, and a 16-hex sha256 in the "line" column parses as a number.
+* **A cite may carry a path** (`gl/glmesh.cpp:732`), not just a basename.
+
+**Two failures that survive a correct extractor**, and are hand work:
+
+* **A range's END is re-derived, not carried.** Adding the start's delta to the
+  end moved `niftypes.h:1899-1979` to `1907-1987`, which runs into the next
+  function — on a file whose sha256 had not changed at all. If the source's hash
+  matches the page's stamp, a "moved" row on it is a bug in the pass.
+* **An anchor that a SECOND site now writes verbatim** is not ambiguous by
+  accident: a pass was copied. Lengthen the anchor with the unique neighbouring
+  line rather than picking a number, or the next run reports it ambiguous
+  forever. Three `LODGEN_TEXTURE_ARRAYS.md` rows needed this once the card-array
+  pass grew its own copy of the texture-array writer.
+
+**Run the pass twice.** The second run over the written pages must report
+`0 moved`; that is the idempotence check, and it is cheap.
 
 **Three rules the script must enforce, each of which cost something:**
 
@@ -144,3 +178,8 @@ Same procedure, run backwards, and it is owed in the same session as the code:
 byte counts (`b.count(b"\r")`), splice mixed files in binary, and assert the CR
 count is unchanged before writing. `grep` lies about this and heredocs arrive
 CRLF (CONSTITUTION rule 8).
+
+## Traps learned (PLANSYNC1, 2026-09-23)
+
+* A splice script must open its OWN inputs and outputs as UTF-8 (`encoding="utf-8"` or binary). The Windows default code page garbles em dashes, and a replace whose anchor carries one silently matches nothing. Assert the anchor count before writing.
+* Never grep or find across the FO4CS tree (or any tree with build outputs): it hangs past the tool timeout. Search NAMED files or named directories only.

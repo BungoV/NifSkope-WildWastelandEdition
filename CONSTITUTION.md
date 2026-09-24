@@ -23,6 +23,11 @@ really warranted because there's some serious issue to figure out."*
   on the Agent tool; `-Model claude-opus-5` through run-b.ps1). Sonnet for
   purely mechanical sweeps. Fable 5.1 only on a fresh, explicit, per-case
   authorisation from bungo, never assumed.
+- **Budget balance (bungo 2026-09-10, verbatim: "Fable is at 35 percent but
+  weekly at 50, match the fable usage to weekly"):** when the Fable meter is
+  below the weekly all-models meter, the demanding lanes run on Fable 5.1
+  until the two match; when Fable is above, everything runs on Opus. The two
+  numbers come from bungo, never assumed.
 - Hands-on work by the director is the exception and is named when it
   happens: a serious issue the agents could not crack, stated in the reply
   as "I did this myself because ...". Doing a lane's work without saying so
@@ -110,6 +115,53 @@ possible"*.
     had existed, and the ones it wrote.
   - Declining is allowed and is not silence: name the procedure and say why it
     will not recur.
+
+## 1b. Compact at 50 percent context (bungo 2026-09-10)
+
+His words, verbatim: *"New amendment to the constitution, compact at 50 percent
+context."*
+
+- The director's session compacts its context when it reaches half of the
+  window, not when the harness forces it. Before compacting: the HANDOFF.md
+  top block is current (every live lane, every owed item, every pending
+  build and its resume path), MISTAKES.md and WW_CHANGES.md carry everything
+  the session learned, and the reply to bungo says the compaction is
+  happening. After compacting: re-read CONSTITUTION.md, then the HANDOFF.md
+  top block, before the next launch.
+- A lane's own context follows the same rule: a lane past half its window
+  writes its report sections and PENDING resume first, so a compaction or a
+  death costs nothing on disk.
+- **The line is 500,000 tokens of context** (bungo 2026-09-11, verbatim:
+  *"500k is the compact line"*, after *"68 percent memory, why no
+  compact?"*). The director's own budget counter ("tokens left") is NOT the
+  context gauge and is never read as it (MISTAKES.md 2026-09-11 19:08). The
+  director cannot read the gauge directly, so the top block is kept
+  compaction-ready at every lane landing and the reply says so; when bungo
+  names the number, the block is finished and he is told to run `/compact`.
+
+## 1c. At 100 percent usage: stop and write the handoff (bungo 2026-09-10)
+
+His words, verbatim: *"when you reach 100 percent usage, stop what you're
+doing and write a handoff"*.
+
+- Usage here is the account's five-hour or weekly meter, not the context
+  window (that is rule 1b). His refinement the same hour, verbatim: "when the
+  number changes to 100 (so like 99.6 percent) you write a handoff" -> the
+  threshold is the DISPLAYED number rounding to 100; at his "97 percent" the
+  block is written early and kept current, so the tick costs nothing. The director cannot read the meter directly; the
+  signals are the harness's rate-limit notice, a lane dying with a limit
+  error, or bungo naming the number. Any of those at 100 percent means: no
+  new lane, no build, no gate run.
+- The handoff is the HANDOFF.md top block, rewritten as a complete block at
+  that moment: every live lane and whether it died mid-step, every BUILD
+  PENDING and its resume file, every owed item (bungo's and the director's),
+  the exe on disk (time, size) and whether it carries every landed change,
+  what is uncommitted, and the first three actions after the reset. The
+  reply to bungo says the stop happened and where the block is.
+- Because the meter can hit 100 without warning, the top block is kept
+  current as lanes report (rule 1b already asks this); the stop then costs
+  one rewrite, not a reconstruction. A lane that reaches its own limit
+  follows the same rule: report sections and PENDING resume first.
 
 ## 2. Mistakes are recorded, unprompted (bungo 2026-09-09)
 
@@ -317,3 +369,8 @@ iteration loop. Iterate against our own renders and harnesses first.
   rules (2026-08-27). FO4CS rules bound to its runtime -- waves, DLL deploys,
   INI keys, the END menu, RenderDoc capture rounds, shader trees, the
   account-swap protocol and game flights -- were left out.
+- 2026-09-10: rule 1b, compact at 50 percent context (bungo).
+- 2026-09-10: rule 1, the Fable/weekly budget balance (bungo).
+- 2026-09-10: rule 1c, at 100 percent usage stop and write the handoff (bungo).
+- 2026-09-11: rule 1b, the compaction line is 500,000 tokens of context and
+  the director's budget counter is not the gauge (bungo, 19:0x).

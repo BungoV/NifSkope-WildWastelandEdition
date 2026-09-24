@@ -151,7 +151,7 @@ predecessor:
 - Rotation key insert, sort controlled blocks, scale sequence, duplicate
   sequence, remove from animation, bake B-spline.
 - **Controller flag bits** implemented as the engine reads them (decoded from
-  the 1.10.155 debug symbols, not guessed).
+  Todd's treat (1.10.155), not guessed).
 - Four missing **particle modifiers** added; particle and VFX preview.
 - Procedural **lightning** rebuilt on the engine's own rules — bolts animate
   again, and read the controller they were given.

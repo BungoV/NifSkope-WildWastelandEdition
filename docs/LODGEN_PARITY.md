@@ -44,9 +44,21 @@ trees + ponds), (0,-4) dim 4 (dense downtown), (-16,16) dim 16
 
 ## Known gaps — divergences that are NOT by design (open)
 
-- Terrain texture bakes do not rasterize road meshes; vanilla's bakes
-  do (the Sanctuary loop road is plainly visible in vanilla's tile and
-  absent from ours). Needs top-down object rasterization.
+- CLOSED 2026-09-11 by lane ROADS1. Terrain texture bakes now
+  rasterize road meshes top-down into the colour sheet, as vanilla's
+  do, on by default under both targets (`--no-roads` is byte-identical
+  to the bake before it, 9 of 9 files). MEASURED on the Sanctuary
+  loop-road chunk (-20,20), which is the chunk that HAS the loop road --
+  chunk (-20,24), the tile the earlier note and lane TERRAIN-R's picture
+  used, contains zero road triangles: on the road centreline extracted
+  from vanilla's own sheet by colour, the fraction of texels within 16 of
+  255 of vanilla goes from 0.127 to 0.307 against a ceiling of 1.000 and
+  the surrounding ground's own 0.345, and the mean colour error on those
+  texels falls from 38.85 to 24.36 of 255. Whole-tile mean error 24.39 ->
+  22.81. Vanilla's `_msn` was measured NOT to carry the road, and ours
+  does not either. Still open: the road our bake paints is lighter and
+  less blue than vanilla's, which is the same splat-grading gap as the
+  next line.
 - Splat grading: structure and orientation confirmed (identity best of
   8 transforms), luminance correlation ~0.55 downtown; vanilla's bakes
   look additionally graded/filtered.

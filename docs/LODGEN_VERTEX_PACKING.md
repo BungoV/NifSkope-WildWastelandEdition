@@ -26,7 +26,7 @@ any of it — see the offsets note below.
 
 > **Two of those three constants were wrong on this page until 2026-09-09**, and
 > the same wrong hex is still in the source comments beside the constants it
-> annotates (`src/lodgen.cpp:1357-1358` say `0x1B00000650405` and
+> annotates (`src/lodgen.cpp:1358-1359` say `0x1B00000650405` and
 > `0x3B00000650406`; the *integer values* are right, only the hex comments lie —
 > `scratchpad/handoff_fo4cs/WRITER_CHANGES_NEEDED.md` item 1). A reader who
 > trusted the old numbers would have put UV at +16, the normal at +20 and no
@@ -254,7 +254,7 @@ plus flags, extended only when the CS profile is on. The full-profile value is
 **`0x0012705004003206`**, 24 bytes.
 
 > This page said `0x300000000303` until 2026-09-09, and so does the source
-> comment at `src/lodgen.cpp:57`. The *integer* is right (52,776,558,133,763);
+> comment at `src/lodgen.cpp:58`. The *integer* is right (52,776,558,133,763);
 > the hex is not, and the wrong digit is the UV offset — `0x…303` puts UV at
 > +12 where the writer puts it at +8, on a 12-byte vertex.
 
@@ -468,7 +468,7 @@ geometry can be displaced, so any future wave motion needs them anyway.
 **Two things are still unsettled, and neither is a format question.** Which
 slots the engine's water path actually reads — it substitutes its own water
 rendering rather than using the `BSEffectShaderProperty` in the file, so this
-needs the PDB or a live test. And the water TYPE: `XCWT` names a `WATR` record
+needs Todd's treat or a live test. And the water TYPE: `XCWT` names a `WATR` record
 per cell (16 distinct ones across exterior Commonwealth cells, over a default of
 `ExtOceanWater`), and LODGEN currently reads only `XCLW`, the height — so a
 shader cannot tell the Glowing Sea from the harbour.
@@ -594,20 +594,28 @@ Height scene and a `.btd` Height scene are the same bytes.
 
 ### Provenance for this section
 
-`src/lodgen.cpp` sha256 `6d7388c53a13343e` (8286 lines),
-`src/btdterrain.cpp` `cbe06adb7394f59b`, `src/data/niftypes.h` `28ad54471e9c5044`,
-all read 2026-09-09.
+`src/lodgen.cpp` sha256 `c05fd079655ac03e` (8,924 lines),
+`src/btdterrain.cpp` `35c2adc319852901` (1,484 lines), `src/data/niftypes.h` `28ad54471e9c5044`
+(2,255 lines), re-derived 2026-09-10 (lane DOCS2).
+
+**Re-derived 2026-09-10 by lane DOCS2** (`ww-contract-provenance` step 3, script
+`scratchpad/docs2_20260910/anchors.py`): every line number below was found again
+from its own anchor text against the sources stamped above, never shifted by a
+delta. 9 of 11 rows moved; the `OBJ_VERTEX_DESC` anchor was a prefix of
+`OBJ_VERTEX_DESC_COLORS` on the next line and was lengthened, and the
+accessor row's range end was put back on `ResetAttributeOffsets`'s own
+closing brace rather than carried by the same delta as its start.
 
 | claim | line | anchor |
 |---|---|---|
-| `LAND_VERTEX_DESC = 52776558133763` | `lodgen.cpp:57` | `constexpr std::uint64_t LAND_VERTEX_DESC` |
-| `WATER_VERTEX_DESC = 17592186044418` | `lodgen.cpp:58` | `constexpr std::uint64_t WATER_VERTEX_DESC` |
-| `OBJ_VERTEX_DESC = 474989027590661` | `lodgen.cpp:1357` | `constexpr std::uint64_t OBJ_VERTEX_DESC` |
-| `OBJ_VERTEX_DESC_COLORS = 1037939064898054` | `lodgen.cpp:1358` | `constexpr std::uint64_t OBJ_VERTEX_DESC_COLORS` |
-| terrain flags added and reset at stream 130 | `lodgen.cpp:906-919` | `BSVertexDesc landDesc( LAND_VERTEX_DESC );` … `landDesc.ResetAttributeOffsets( 130 );` |
-| terrain stride is 12 without either arm | `lodgen.cpp:907` | `quint32 landStride = 12;` |
-| object flags added and reset at stream 130 | `lodgen.cpp:3403-3412` | `BSVertexDesc objDesc( opts.identity ? OBJ_VERTEX_DESC_COLORS : OBJ_VERTEX_DESC );` |
-| water `VF_EYEDATA` variant | `lodgen.cpp:1262-1266` | `BSVertexDesc wdesc( WATER_VERTEX_DESC );` |
-| viewer descriptor and its `+VF_COLORS` variant | `btdterrain.cpp:190-193` | `BSVertexDesc desc( 0x0041B00000650407ULL );` |
-| the bit layout and the offset accessors | `niftypes.h:1899-1979` | `GetVertexSize`, `GetAttributeOffset`, `ResetAttributeOffsets` |
+| `LAND_VERTEX_DESC = 52776558133763` | `lodgen.cpp:58` | `constexpr std::uint64_t LAND_VERTEX_DESC` |
+| `WATER_VERTEX_DESC = 17592186044418` | `lodgen.cpp:59` | `constexpr std::uint64_t WATER_VERTEX_DESC` |
+| `OBJ_VERTEX_DESC = 474989027590661` | `lodgen.cpp:1358` | `constexpr std::uint64_t OBJ_VERTEX_DESC = 474989027590661ULL;` |
+| `OBJ_VERTEX_DESC_COLORS = 1037939064898054` | `lodgen.cpp:1359` | `constexpr std::uint64_t OBJ_VERTEX_DESC_COLORS` |
+| terrain flags added and reset at stream 130 | `lodgen.cpp:907-920` | `BSVertexDesc landDesc( LAND_VERTEX_DESC );` … `landDesc.ResetAttributeOffsets( 130 );` |
+| terrain stride is 12 without either arm | `lodgen.cpp:908` | `quint32 landStride = 12;` |
+| object flags added and reset at stream 130 | `lodgen.cpp:3728-3737` | `BSVertexDesc objDesc( opts.identity ? OBJ_VERTEX_DESC_COLORS : OBJ_VERTEX_DESC );` |
+| water `VF_EYEDATA` variant | `lodgen.cpp:1263-1267` | `BSVertexDesc wdesc( WATER_VERTEX_DESC );` |
+| viewer descriptor and its `+VF_COLORS` variant | `btdterrain.cpp:192-195` | `BSVertexDesc desc( 0x0041B00000650407ULL );` |
+| the bit layout and the offset accessors | `niftypes.h:1907-1979` | `GetVertexSize`, `GetAttributeOffset`, `ResetAttributeOffsets` |
 | attribute widths at stream 130 | `niftypes.h:1941-1976` | `uint attributeSizes[VA_COUNT] = {};` |

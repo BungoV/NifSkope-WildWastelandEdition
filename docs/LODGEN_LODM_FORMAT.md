@@ -44,8 +44,8 @@ A reader refuses — naming the field — on:
 6. the payload is not well-formed JSON, or is not a JSON **object**;
 7. `lodm` != 1;
 8. `family` is neither `"legacy"` nor `"pbr"` — **a third family word is a hard
-   refusal, not a fallback.** This is why the terrain-VT index says `legacy`
-   although it is neither (see §5).
+   refusal, not a fallback.** The terrain-VT index used to say `legacy` for that
+   reason alone; since 2026-09-11 it says `pbr` and means it (see §5).
 
 Everything else is defaulted, never refused: an absent `kind` reads as
 `"source"`, an absent `emissiveScale` as **1.0**, an absent `heightInBlue` as
@@ -63,11 +63,12 @@ emits a key whose value is the default (that is what keeps the file compact).
 |---|---|---|---|
 | `lodm` | int | every kind | payload version, **1** |
 | `family` | string | every kind | `"legacy"` or `"pbr"` — decides the texture key names and what the third texture's channels mean |
-| `kind` | string | every kind | `"source"` \| `"card"` \| `"array"` \| `"cardArray"` \| `"terrainVT"`; **absent means `"source"`** |
+| `kind` | string | every kind | `"source"` \| `"card"` \| `"array"` \| `"cardArray"` \| `"aggregate"` \| `"terrainVT"`; **absent means `"source"`** |
 | `textures` | object | every kind but `terrainVT` | see §2.1 |
-| `emissiveScale` | number | `source`, `card` | the multiple a consumer scales the emissive **sheet** by; absent = 1; **0 means this set emits nothing** |
+| `emissiveScale` | number | `source`, `card`, `aggregate` | the multiple a consumer scales the emissive **sheet** by; absent = 1; **0 means this set emits nothing**, and an `aggregate` always writes 0 because it has no emissive sheet at all (§3a) |
 | `heightInBlue` | bool | `source` only | the source normal's blue channel carries height, not Z |
 | `card` | object | `card` | §3 |
+| `aggregate` | object | `aggregate` | §3a |
 | `array` | object | `array`, `cardArray` | §4 |
 | `terrain` | object | `terrainVT` | §5 — defined by `docs/LODGEN_TERRAIN_VT.md`, not here |
 
@@ -76,7 +77,7 @@ emits a key whose value is the default (that is what keeps the file compact).
 | slot | legacy key | pbr key | file suffix (legacy / pbr) | format | channels |
 |---|---|---|---|---|---|
 | colour | `diffuse` | `baseColor` | `_d` / `_bc` | BC3 | RGB colour (unlit, sRGB), **A = coverage** |
-| normal | `normal` | `normal` | `_n` / `_n` | BC3 | R = normal X, G = normal Y, B = height, A = sway weight |
+| normal | `normal` | `normal` | `_n` / `_n` | **BC7** (a `DX10` header, `BC7_UNORM`; since 2026-09-23, lane IMPOSTORDEPTH2: BC3 carried the height in the 5:6:5 colour block) | R = normal X, G = normal Y, B = height, A = sway weight |
 | mask | `gsaos` | `rmaos` | `_gsaos` / `_rmaos` | BC3 | R gloss / roughness, G specular / metallic, B AO, A subsurface mask |
 | emissive | `emissive` | `emissive` | `_g` / `_e` | BC1 | RGB emissive colour, no alpha |
 
@@ -110,7 +111,7 @@ eight bits a channel.
 ## 3. `kind: "card"` — one octahedral impostor set
 
 Written beside the sheets as `<formid8hex>_oct.lodm`; game path
-`Data\Textures\Lodgen\Cards\<formid8hex>_oct.lodm`. The four sheets are the same
+`Data\FO4CSLOD\Cards\<formid8hex>_oct.lodm`. The four sheets are the same
 stem with the family's suffixes and `.DDS`.
 
 `card` object:
@@ -122,11 +123,15 @@ stem with the family's suffixes and `.DDS`.
 | `base` | int | the run's chosen resolution before the size ladder. `frame` at or below it is a **rung, not a different run** |
 | `half` | float[2] | `[halfW, halfH]`, the quad's half extents in **model units**, spanning the WHOLE frame including its padding |
 | `pad` | int[2] | `[padX, padY]`, **the margin in texels on EACH side** of every frame, per axis. The silhouette occupies the inner rect `frame - 2*pad`. Absent on a set written before 2026-09-09: read `max(4, max(frame)/16)` on both axes, which is what those sheets carry |
-| `gap` | int[2] | `[gapX, gapY]`, the **distance between two neighbouring silhouettes** across a frame border, per axis, in texels -- exactly `2*pad`, and the quantity bungo's number names (*"8 pixels of distance between two rendered objects"*, 2026-09-09). `mips` is `1 + log2(min(gapX,gapY))` by construction. Absent with `pad` present = a set from earlier the same day whose `pad` was written as the whole spacing and whose `mips` was `1 + log2(min(pad))`; absent with `pad` absent = older still, and the same older law applies |
+| `gap` | int[2] | `[gapX, gapY]`, the **distance between two neighbouring silhouettes** across a frame border, per axis, in texels -- exactly `2*pad`, and the quantity bungo's number names (*"8 pixels of distance between two rendered objects"*, 2026-09-09). `mips` is `log2(min(gapX,gapY))` by construction. Absent with `pad` present = a set from earlier the same day whose `pad` was written as the whole spacing; absent with `pad` absent = older still. Both of those wrote a per-side number, so their gap is twice it and the same expression gives the chain they were built for |
 | `center` | float[3] | **the offset from the object's PIVOT to the card's centre**, in model units. The pivot is the NIF root, i.e. the reference's own placement origin, so a reader places the quad at `pivot + center`. The bake points its camera at this one point in every one of the N-squared views, so it is the projection of the frame's centre in all of them -- which is what makes the model-to-card transition still (3.1 below) |
 | `depthSpan` | float | world units the height channel spans: `units = (B − 0.5) × depthSpan`, 0.5 = the card plane |
-| `mips` | int | stored mips, `1 + log2(min(gapX,gapY))`: the chain stops at the last level where **a whole texel of gap still separates the two silhouettes** that meet on an interior frame border, because the next one has them touching |
+| `mips` | int | stored mips, `max(1, log2(min(gapX,gapY)))`: the chain stops at the last level where **each of the two frames meeting on an interior border still keeps a whole texel of margin**, because at the next level that margin is half a texel and a border tap reaches across (bungo, 2026-09-09 evening: ship one mip fewer -- a 128 frame at gap 8 ships 128/64/32) |
+| `frameOffset` | float[2·oct²] | **per-frame positioning.** Where each frame's quad sits relative to `center`, in model units, along that view's own right and up axes: frame `(i,j)` at index `j·oct + i`, so `[2·(j·oct+i)]` is its right offset and the next its up offset. Every frame shifts its own silhouette to its own centre, so the frame holds the widest SINGLE view rather than the union of all of them; `half` is still ONE size for the whole card. Absent = a set from before 2026-09-09 evening, whose frames were all centred on `center`. A reader that ignores it draws every quad at `center`, and the tree steps sideways by the offset when the mesh hands over |
 | `auxDiv` | int | **present only when > 1.** The normal, mask and emissive sheets were written at `1/auxDiv` of each side; the colour sheet never divides. Sampling is unaffected (normalised UV); a consumer needs this only to size its own allocation |
+| `projection` | string | **the camera the sheet was photographed through**: `ortho`, or `persp` for a set deliberately baked the old way. `half`, `center` and `frameOffset` are world measurements taken off viewport pixels through ONE units-per-pixel constant, which only an orthographic camera makes true; this is what says they describe the sheet beside them. **Absent = the bake did not say, and every bake that did not say drew a 60-degree perspective frustum** -- absence is the older, foreshortened vintage, not "unknown". See `docs/LODGEN_CARD_SHEETS.md` §3.7 |
+| `coverage` | object | **the coverage contract of the base-colour sheet**: `{ floor, test, base }`. `floor` is the coverage at which the bake counted a texel covered and measured `half` and every `frameOffset`; `test` is the alpha a consumer must ALPHA-TEST at to select that same set (`128`, i.e. 0.5, on a sheet written under the contract); `base` is the alpha the floor was written at, so the coverage FRACTION is `floor + (a - base) * (255 - floor) / (255 - base)`. **Absent = the sheet's alpha is the raw fraction and its declared extents describe the silhouette at 16/255, which is what such a set must be tested at** -- reading an older set at 0.5 draws a tree up to 5.41 texels of half-width narrower than `half` declares. See `docs/LODGEN_CARD_SHEETS.md` §4 |
+| `conv` | string | **the view convention the frames were photographed under** (2026-09-19, the azimuth repair). `spec1` = frame `(i,j)` is the view from direction `(i,j)`, the spec's own law, and every bake from that exe on writes it. **Absent = a set baked before the repair, whose azimuth is turned by 180 degrees: it must be re-baked**; a viewer opens it only under the diagnostic `AsBaked` convention and says so. An unrecognised word is carried through verbatim, never read as `spec1` (`src/lodgen.cpp` `octConv`; `src/impostorcard.h` `legacyBake()`; `src/impostoroct.h` `Convention`) |
 | `source` | string | the model file photographed; absent when unknown |
 
 **Frame addressing.** Frame `(i, j)`, `i` and `j` in `0 … N−1`, occupies pixels
@@ -137,9 +142,11 @@ u = i/(N−1)·2 − 1        v = j/(N−1)·2 − 1
 x = (u+v)/2              y = (u−v)/2         z = 1 − |x| − |y|      normalise
 ```
 
-so the four corners are exact horizon directions and the centre frame is the
-exact top. A direction always falls inside a triangle of three frame centres;
-that `(N−1)²` triangle mesh **is** the blending rule. Frames are rectangular and
+so the four corners are exact horizon directions and the centre of the grid is
+the exact top (a frame only when N is odd). A direction always falls inside a
+triangle of three frame centres; that `(N−1)²`-cell triangle mesh **is** the
+blending rule, with the diagonal and weights fixed in
+`docs/LODGEN_CARD_SHEETS.md` §2. Frames are rectangular and
 one size for every view.
 
 Every frame carries a transparent **margin** of `pad[0]` texels on its left and
@@ -159,17 +166,134 @@ when a 3d tree transitions to an imposter, the tree won't change position"*.
 The bake photographs every view with the camera pointed at ONE model-space point,
 and `center` is that point expressed as an offset from the object's pivot. Each
 frame is the crop of that view about that point, plus and minus `halfW` by
-`halfH` in model units. So a reader that draws the quad at `pivot + center`
-spanning plus/minus `half`, with the frame's own UV rect, reproduces the model's
-silhouette in the same place at the same size, from any of the N-squared
-directions.
+`halfH` in model units -- **shifted, per frame, by `frameOffset`**, which the
+same bake measured and wrote. So a reader that draws the quad at
 
-A reader that treats `center` as zero draws the card at the pivot instead, which
-for a tree is the trunk's base: TreeHero01's `center` is
-`[-12.81, -5.23, 1070.19]`, so the card would sit **1,070 units low**. That is
-the control the generator's transition gate runs and requires to FAIL.
+```
+pivot + center + frameOffset[2k] * right(i,j) + frameOffset[2k+1] * up(i,j)
+```
+
+with `k = j*oct + i`, spanning plus/minus `half`, with the frame's own UV rect,
+reproduces the model's silhouette in the same place at the same size, from any of
+the N-squared directions. `right` and `up` are that view's own screen axes, the
+basis the frame was photographed in; `half` is one pair for the whole card, so
+the tree is the same SIZE in every frame and only its PLACE moves.
+
+**All of this rests on the bake's camera being ORTHOGRAPHIC**, because `half`
+and `frameOffset` are world lengths read off viewport pixels through one
+units-per-pixel constant. Under a perspective camera that constant is not one --
+a point `d` in front of the card plane is magnified by `eye / (eye - d)` -- so
+the quad drawn from those numbers is the wrong size AND the silhouette inside it
+is foreshortened, wider at the frame's near edge than at its far one. Sets baked
+before 2026-09-10 carry no `projection` key and were photographed that way; a
+consumer that cares about the transition should treat their numbers as
+approximate and ask for a re-bake.
+
+Three ways to get it wrong, and what each costs:
+
+* treating `center` as zero draws the card at the pivot instead, which for a
+  tree is the trunk's base: TreeHero01's `center` is `[-12.81, -5.23, 1070.19]`,
+  so the card would sit **1,070 units low**;
+* honouring `center` but ignoring `frameOffset` draws every frame centred, which
+  is a set from before the law and makes the tree step sideways by that frame's
+  offset as the mesh hands over;
+* drawing a set whose `projection` is absent or `persp` as if it were metric: the
+  quad is sized from numbers taken through the wrong projection, so it neither
+  matches the mesh's silhouette nor holds still across the N-squared views.
+
+The first two are controls the generator's transition gate runs and requires to
+FAIL; the third is refused by name rather than measured, because a set that does
+not say what camera made it cannot be corrected after the fact.
 
 ---
+
+---
+
+## 3a. `kind: "aggregate"` — one forested CELL's whole tree cluster on one card set
+
+bungo, 2026-09-11 08:2x → 08:3x, verbatim: *"At ring 3 the bake takes each
+cell's trees, places their cards with the same rotation and mirror the
+repetition breaking would give them, photographs the whole cluster from the
+horizon views, and writes one aggregate sheet per cell. The ring 3 instance list
+then holds one placement per cell instead of one per tree. At the ring 2 to 3
+border the per-tree cards cross-fade into the cell card. Same sheet format, same
+sway rule from the height channel."* — and *"1 sounds good"*.
+
+Written beside the sheets as
+`Data\FO4CSLOD\<worldspace>\Aggregate\<cellX>_<cellY>_agg.lodm`; the
+three sheets are the same stem with the family's suffixes and `.DDS`. **The path
+is DERIVED from the worldspace and the cell and is not stored in the `.lodi`
+row**, so a reader can never be handed a path that disagrees with the cell it
+came from (zero-authoring, CONSTITUTION 10).
+
+**THREE sheets, not four.** Colour + coverage, normal + height + sway, and the
+mask. There is **no emissive sheet**: a forest emits nothing, and
+`emissiveScale` is written as **0**, which is exactly how a set says so in one
+number (§2.2). A reader binds black. This is the one place an `aggregate`
+differs from a `card` in its texture set, and it is stated here rather than left
+to a missing file.
+
+`aggregate` object:
+
+| key | type | meaning |
+|---|---|---|
+| `cell` | int[2] | `[cellX, cellY]`, the exterior cell this set stands for. With the worldspace it is the set's whole identity: the file's own path is derived from these two numbers |
+| `views` | int | **azimuths photographed at the HORIZON**, one elevation band. 8 by default. This is NOT `oct`: a card's `oct` is frames per side of a hemi-octahedral grid, and an aggregate has no grid — it has a ring |
+| `grid` | int[2] | `[views, 1]`, the sheet's frame layout: the frames sit in ONE ROW, frame `v` at pixels `[v·frameW, (v+1)·frameW) × [0, frameH)`. Stated rather than implied, so a later elevation band is a `grid` change and not a reinterpretation |
+| `frame` | int[2] | `[frameW, frameH]` in texels. The long side is the run's aggregate tile, the short side the smallest multiple of 16 whose inner rect is not narrower than the measured silhouette — `docs/LODGEN_CARD_SHEETS.md` §3.2, unchanged |
+| `pad`, `gap` | int[2] | the margin on each side of a frame, and twice it — the distance between two neighbouring silhouettes across a frame border. The card law, unchanged |
+| `mips` | int | `max(1, log2(min(gap)))`, the card law, unchanged |
+| `half` | float[2] | the quad's half extents in **world units**, spanning the WHOLE frame. ONE pair for every view, exactly as a card's is |
+| `center` | float[3] | the card's centre in **world** coordinates — the cell's own centre in X and Y, and the mid-height of the cluster in Z. Unlike a card's `center`, which is an offset from a pivot, an aggregate has no pivot: it is a placement in the world |
+| `depthSpan` | float | world units the height channel spans: `units = (B − 0.5) × depthSpan`, 0.5 = the card plane. Same law, same decoder |
+| `boundRadius` | float | the tree cloud's radius about `center`, for the projected-size test that selects the aggregate |
+| `trees` | int | **how many tree placements were photographed into this sheet.** It must equal the `coveredCount` of this cell's row in the `.lodi` — that equality is the count-identity gate, and it is stated in two files on purpose so one can check the other |
+| `frameOffset` | float[2·views] | where each view's quad sits relative to `center`, along that view's own right and up axes, in world units: view `v` at `[2v]` and `[2v+1]`. The card law of `docs/LODGEN_CARD_SHEETS.md` §3.6, applied per azimuth |
+| `identity` | string | **`"per-aggregate"`, always.** The far-shadow pass keys on the identity index (bungo 08:4x), and once a cell's trees are one card they are ONE caster: the aggregate carries its own index, `0x80000000 \| aggregateIndex` in the `.lodi` row, and NOT the dominant tree's. The sheet therefore carries no identity channel, and this word says that is deliberate rather than missing |
+| `projection` | string | `"ortho"`. An aggregate is composited from orthographic card sheets by an orthographic resample, so its `half`, `center` and `frameOffset` are metric. A value other than `ortho` is not written by any generator |
+| `coverage` | object | `{floor, test, base}`, the colour sheet's coverage contract, identical in meaning to a card's (`docs/LODGEN_CARD_SHEETS.md` §4). This bake writes `16 / 128 / 160` |
+
+### 3a.1 What a reader does with one
+
+```
+quadCentre = center + frameOffset[2v] * right(v) + frameOffset[2v+1] * up(v)
+```
+
+spanning ±`half`, with `right(v) = (−sin φ, cos φ, 0)`, `up(v) = (0, 0, 1)` and
+`φ = 2π·v/views` — the azimuth of the view the frame was photographed from, with
+the eye direction `(cos φ, sin φ, 0)`. Between two azimuths a reader blends the
+two neighbouring frames; the frames are a RING, so view `views−1` blends back
+into view 0.
+
+**When to draw it instead of the trees.** The `.lodi` header carries
+`aggSwitchPx` and `aggBandRatio`
+(`docs/LODGEN_NATIVE_LODO_LODI.md` §4.6): the aggregate takes over when the
+CELL's projected width falls to `aggSwitchPx`, and the per-tree cards cross-fade
+out over `aggSwitchPx … aggBandRatio × aggSwitchPx`. Which instances to stop
+drawing is not a guess either — the `.lodi` row names them, one u32 each.
+
+### 3a.2 The three things an aggregate does NOT inherit from a card
+
+1. **`oct` does not apply.** An aggregate has `views` and `grid`, and a reader
+   that looks for `oct` on an aggregate finds nothing. The hemi-octahedral
+   mapping is a hemisphere's worth of directions; an aggregate is photographed
+   at the horizon only, because that is where ring 3 is.
+2. **`center` is WORLD, not an offset from a pivot.** A card stands in for a
+   placed object and is drawn at `pivot + center`; an aggregate stands in for a
+   CELL and is drawn at `center`.
+3. **There is no emissive sheet and no `textures.emissive` key.** See above.
+
+### 3a.3 What the sway channel carries, and why it is not re-derived
+
+bungo asked for *"the same sway rule from the height channel"*. The rule
+(`h²·(0.35 + 0.65·r)`, `h` up from the view's own bottom row) is measured
+**per tree, on the tree's own card**, and carried through the composite
+unchanged — it is not recomputed from the aggregate frame's bottom row. Deriving
+it from the aggregate would make a tree standing on a hill sway at its trunk,
+because the aggregate's bottom row is the lowest point in the whole cell and not
+the base of that tree. Each texel keeps the sway weight of the tree it came
+from, which is the same rule applied where the rule means something.
+
 
 ## 4. `kind: "array"` and `kind: "cardArray"`
 
@@ -179,13 +303,13 @@ the control the generator's transition gate runs and requires to FAIL.
 |---|---|---|---|
 | `class` | both | int[2] | `array`: the **per-layer texture size**. `cardArray`: the **whole sheet size** (`oct·frameW` × `oct·frameH`). The `<WxH>` in the file name is this same pair |
 | `layers` | `array` | string[] | one entry per layer: the **source colour texture path** that layer was built from |
-| `layers` | `cardArray` | object[] | one per layer: `{ id, half[2], center[3], depthSpan, source }` — `id` is the base's form ID, and the geometry is per layer because two trees of one sheet size are not the same size in the world |
+| `layers` | `cardArray` | object[] | one per layer: `{ id, half[2], center[3], depthSpan, frameOffset?, projection?, conv?, coverage?, source }` — `id` is the base's form ID, and the geometry is per layer because two trees of one sheet size are not the same size in the world. `frameOffset` is per layer for the same reason: two sets in one array have different per-frame shifts, and a layer from a set baked before the law carries no key at all. `projection` is per layer for the same reason again: an array can hold a metric set beside a foreshortened one, and only the layer knows which it is. `conv` (§3) is per layer for the same reason: a library part-way through the re-bake holds both vintages in one size class |
 | `emissiveScale` | both | number[] | one per layer, **parallel to `layers`** |
 | `oct` | `cardArray` | int | frames per side, shared by every layer of the array |
 | `frame` | `cardArray` | int[2] | frame size, shared by every layer |
 | `pad` | `cardArray` | int[2] | the margin in texels on each side of a frame, per axis, shared. An array is built from the same PNGs and the same dilation as the per-card sets, so it inherits their spacing and their clean mip depth |
 | `gap` | `cardArray` | int[2] | the distance between two neighbouring silhouettes across a frame border, per axis, shared -- `2*pad` |
-| `mips` | `cardArray` | int | mip cap, shared -- `1 + log2(min(gap))` |
+| `mips` | `cardArray` | int | mip cap, shared -- `max(1, log2(min(gap)))` |
 | `auxDiv`, `auxClass`, `auxMips` | `cardArray` only, when `auxDiv > 1` | int, int[2], int | the half-resolution auxiliary sheets' divisor, size and mip count |
 
 **A `kind: "array"` file carries no `aux*` keys**, because `--card-half-aux`
@@ -209,11 +333,32 @@ The one kind that carries **no `textures` object at all**. It names a set of
 `.lodt` tile containers and is defined by `docs/LODGEN_TERRAIN_VT.md` §4; the
 whole payload lives under `terrain`.
 
-Two collisions are resolved here rather than discovered:
+**`family` IS NO LONGER VESTIGIAL HERE** (2026-09-11, bungo: *"you can mirror
+how it's set up for the .lodm"*, *"we just add the coverage for whatever's
+missing in terrain textures that lod objects have in the texture department"*).
 
-* **`family` is vestigial.** A tile pyramid is neither legacy nor PBR. It writes
-  `"legacy"` only because §1.1 rule 8 hard-refuses a third family word.
-  **`kind` is the discriminator.**
+Until container version 2 the pyramid's third sheet was terrain's own invention
+— AO, wetness, shore proximity and ground cover — and `family` wrote `"legacy"`
+because a tile pyramid was neither family and §1.1 rule 8 hard-refuses a third
+word. Version 2 gave the pyramid **this page's own texture family**:
+
+| §2.1 slot | what the pyramid stores | note |
+|---|---|---|
+| colour | the `color` sheet, RGB albedo with the grass tint folded in | its alpha is FREE, and is the other candidate for the ground cover — see the terrain page §2.2a |
+| normal | the `msn` sheet | MODEL-space, not tangent-space: terrain has one basis and needs no tangents. Z IS stored, so the `sqrt(1 - x^2 - y^2)` rebuild does **not** apply |
+| mask | the `mask` sheet, **`rmaos` exactly**: R roughness, G metallic, B AO, **A ground cover in place of subsurface** | the one substitution, and the index names it in the sheet's `channels` string |
+| emissive | the `emissive` sheet, RGB, BC1 | written only when a layer supplies one; **absent** otherwise, and `terrain.emissive` says `"none"` in words |
+
+Two sheets have no slot on this page and are terrain's own: **height** (R16, the
+shadow heightmap's encoding) and nothing else.
+
+So `family` is **`"pbr"`** and it describes the bytes: a legacy landscape
+material is CONVERTED at bake — its gloss inverted into roughness, its metallic
+0, never guessed from its specular colour — and `terrain.maskRules` counts how
+many landscape textures came by which road, so a reader can audit the word
+instead of trusting it. `kind` is still the discriminator for WHICH payload
+object to read.
+
 * **Its path is deliberately unreachable from a source lookup.** The index lives
   at `Data\Terrain\<EDID>.VT.lodm`, and `lodmSourceCandidate()` always prepends
   `materials\`, so no shape can ever resolve to it by accident.
@@ -258,16 +403,32 @@ textured shape of the model carries a pbr `.lodm`, else legacy.
    `class` equals that pair.
 4. On a `card`, `frame[0] ≤ base` and `frame[1] ≤ base`; a frame **below** the
    base is a size-ladder rung and is correct, not a mismatch.
-5. `mips == 1 + log2(min(gap[0], gap[1]))`, so **no shipped mip bleeds across a
-   frame border**: a reader sampling on a frame's own UV border reaches half a
-   texel into the neighbour, and the padding at the deepest shipped level is
-   still at least one whole texel on both axes. On a set with no `pad` key the
+5. `mips == max(1, log2(min(gap[0], gap[1])))`, so **no shipped mip bleeds across
+   a frame border**: a reader sampling on a frame's own UV border reaches half a
+   texel into the neighbour, and the margin at the deepest shipped level is
+   still a whole texel on both axes -- measured 0 of 19 sheets bleeding, against
+   13 of 19 (worst 64/255) under the cap one level deeper. On a set with no `pad` key the
    invariant does not hold -- those sheets shipped one bleeding level whenever
    their frame was 96 texels or more (measured 26/255 of a neighbour's alpha
    across 16 of 28 borders at mip 4 of a 128x128 frame).
 6. `depthSpan > 0` on any set with a usable height channel.
 7. Texture paths, where non-empty, are Data-relative game paths with
    backslashes.
+8a. `card.coverage` / a `cardArray` layer's `coverage`, when present, is
+   `{floor, test, base}` with `1 <= floor < test <= base <= 255`, and it is the
+   ONLY statement of which alpha selects the silhouette `half` and `frameOffset`
+   describe. A reader that ignores it and tests at 0.5 on a set that carries no
+   key draws a smaller tree than the mesh it replaced; a reader that ignores it
+   on a set that DOES carry one is right by accident, because the contract this
+   generator writes puts `test` at 0.5 exactly.
+
+8. `card.projection` / a `cardArray` layer's `projection`, when present, names
+   the camera the sheet was photographed through. `ortho` is the only value a
+   generator writes for a metric set; ABSENT means the bake did not say, and
+   every bake that did not say drew a 60-degree perspective frustum, so the
+   set's `half`, `center` and `frameOffset` are approximate and its frames are
+   foreshortened. A reader may refuse such a set by name; it must not silently
+   treat absence as `ortho`.
 
 ## 8. Sample files
 
@@ -289,8 +450,20 @@ day). Anchor text is quoted beside every line number.
 | file | sha256 (16) | lines |
 |---|---|---|
 | `src/io/lodmfile.cpp` | `f3d9a99b7a12677b` | 115 |
-| `src/lodgen.cpp` | `63f9971cf5cbb438` | 8,394 |
-| `src/nifskope_ui.cpp` | `c0fc470f94d7ec16` | 31,133 |
+| `src/lodgen.cpp` | `c05fd079655ac03e` | 8,924 |
+| `src/nifskope_ui.cpp` | `1073ddef14f8562e` | 31,495 |
+| `src/gl/glmesh.cpp` | `2352b01248694327` | 1,118 |
+
+**Re-derived 2026-09-10 by lane DOCS2** (`ww-contract-provenance` step 3, script
+`scratchpad/docs2_20260910/anchors.py`): every line number below was found again
+from its own anchor text against the sources stamped above, never shifted by a
+delta. 22 of 34 rows moved, 12 were already right; the coverage-sidecar row's anchor
+had a literal newline pasted into it, which had broken that markdown row in two.
+Then `src/nifskope_ui.cpp` moved TWICE MORE under a concurrent lane while this
+page was being written, and 5 of those rows were re-derived again each time; the
+stamp above is the state the pass finally settled on, with the source's hash
+unchanged across the last run. **That file is under live edit: check its sha256
+before trusting a number here.**
 
 | claim | line | anchor |
 |---|---|---|
@@ -302,17 +475,29 @@ day). Anchor text is quoted beside every line number.
 | `emissiveScale` defaults to 1 | `lodmfile.cpp:63` | `.toDouble( 1.0 )` |
 | family-dependent key and suffix names | `lodmfile.h:113-118` | `lodmColorKey`, `lodmMaskKey`, `lodmColorSuffix` |
 | `lodmSourceCandidate` two-branch rule | `lodmfile.cpp:96-118` | `c.prepend( QStringLiteral( "materials\\" ) )` |
-| `kind: "card"` key set | `lodgen.cpp:2679-2713` | `root.insert( QStringLiteral( "kind" ), QStringLiteral( "card" ) )` |
-| `card.pad`, per axis, in texels a side | `lodgen.cpp:2706` | `oc.insert( QStringLiteral( "pad" ), QJsonArray{ padX, padY } );` |
-| `card.gap`, per axis, twice the padding | `lodgen.cpp:2707` | `oc.insert( QStringLiteral( "gap" ), QJsonArray{ gapX, gapY } );` |
-| the three vintages read under their own laws | `lodgen.cpp:8207-8216` | `const int mipUnit = gapA.size() == 2 ? qMin( gapX, gapY ) : qMin( padX, padY );` |
-| `card.center` is the bake's own look-at point | `lodgen.cpp:2709` | `oc.insert( QStringLiteral( "center" ), QJsonArray{ double( card.octCenter[0] )` |
-| that point is the scene's bound centre in MODEL space | `nifskope_ui.cpp:22442` | `<< bs.center[0] << " " << bs.center[1] << " " << bs.center[2] << " " << depthSpan` |
+| `kind: "card"` key set | `lodgen.cpp:2835-2869` | `root.insert( QStringLiteral( "kind" ), QStringLiteral( "card" ) )` |
+| `card.pad`, per axis, in texels a side | `lodgen.cpp:2863` | `oc.insert( QStringLiteral( "pad" ), QJsonArray{ padX, padY } );` |
+| `card.gap`, per axis, twice the padding | `lodgen.cpp:2864` | `oc.insert( QStringLiteral( "gap" ), QJsonArray{ gapX, gapY } );` |
+| the three vintages all reduce to a GAP, and the cap divides it | `lodgen.cpp:8711-8720` | `const int mipUnit = qMin( gapX, gapY );` |
+| `card.center` is the bake's own look-at point | `lodgen.cpp:2866` | `oc.insert( QStringLiteral( "center" ), QJsonArray{ double( card.octCenter[0] )` |
+| that point is the scene's bound centre in MODEL space | `nifskope_ui.cpp:22706` | `<< bs.center[0] << " " << bs.center[1] << " " << bs.center[2] << " " << depthSpan` |
 | the renderer recomputes a shape's bound FROM VERTICES | `gl/glmesh.cpp:732` | `boundSphere = BoundSphere( verts );` |
-| `mips` is derived from the gap | `lodgen.cpp:2624-2625` | `for ( int g = mipUnit; g >= 2; g /= 2 )` |
-| card `auxDiv` written only above 1 | `lodgen.cpp:2697` | `oc.insert( QStringLiteral( "auxDiv" ), auxDiv );` |
-| `kind: "array"` key set, no aux keys | `lodgen.cpp:4361-4380` | `root.insert( QStringLiteral( "kind" ), QStringLiteral( "array" ) )` |
-| `kind: "cardArray"` key set incl. `pad` and `gap` | `lodgen.cpp:8317-8362` | `root.insert( QStringLiteral( "kind" ), QStringLiteral( "cardArray" ) )` |
-| `array.gap`, shared | `lodgen.cpp:8328` | `arr.insert( QStringLiteral( "gap" ), QJsonArray{ g.gapX, g.gapY } );` |
-| `kind: "terrainVT"` payload | `lodgen.cpp:6842` | `QStringLiteral( "terrainVT" )` |
-| the `u = i/(N−1)·2 − 1` mapping | `nifskope_ui.cpp:22065-22067` | `auto viewDir = [octN]` |
+| `mips` is derived from the gap, one level shallower than before | `lodgen.cpp:2780-2781` | `frameMips = qMax( 1, frameMips );` |
+| `card.frameOffset`, one pair a frame in sheet order | `lodgen.cpp:2882` | `oc.insert( QStringLiteral( "frameOffset" ), fo );` |
+| a `cardArray` layer's own `frameOffset` | `lodgen.cpp:8870` | `o.insert( QStringLiteral( "frameOffset" ), L.frameOff );` |
+| card `auxDiv` written only above 1 | `lodgen.cpp:2853` | `oc.insert( QStringLiteral( "auxDiv" ), auxDiv );` |
+| `kind: "array"` key set, no aux keys | `lodgen.cpp:4599-4618` | `root.insert( QStringLiteral( "kind" ), QStringLiteral( "array" ) )` |
+| `kind: "cardArray"` key set incl. `pad` and `gap` | `lodgen.cpp:8841-8886` | `root.insert( QStringLiteral( "kind" ), QStringLiteral( "cardArray" ) )` |
+| `array.gap`, shared | `lodgen.cpp:8852` | `arr.insert( QStringLiteral( "gap" ), QJsonArray{ g.gapX, g.gapY } );` |
+| `kind: "terrainVT"` payload | `lodgen.cpp:7343` | `QStringLiteral( "terrainVT" )` |
+| the `u = i/(N−1)·2 − 1` mapping | `nifskope_ui.cpp:22145-22147` | `auto viewDir = [octN]` |
+| `card.projection`, the camera the sheet was photographed through | `lodgen.cpp:2898` | `oc.insert( QStringLiteral( "projection" ), card.octProjection );` |
+| a `cardArray` layer's own `projection` | `lodgen.cpp:8872` | `o.insert( QStringLiteral( "projection" ), L.projection );` |
+| the layer reads it off its set's own `.lodm` | `lodgen.cpp:8796` | `l.projection = card.value( QStringLiteral( "projection" ) ).toString();` |
+| `card.coverage`, the contract | `lodgen.cpp:2919` | `oc.insert( QStringLiteral( "coverage" ), cov );` |
+| a `cardArray` layer's own `coverage` | `lodgen.cpp:8874` | `o.insert( QStringLiteral( "coverage" ), L.coverage );` |
+| the layer reads it off its set's own `.lodm` | `lodgen.cpp:8803` | `l.coverage = card.value( QStringLiteral( "coverage" ) ).toObject();` |
+| the sidecar's three numbers | `lodgen.cpp:2629-2631` | `card.octCovFloor = qBound( 1, line[1].toInt(), 255 );` |
+| the bake writes the word after asserting the projection | `nifskope_ui.cpp:21845` | `ms << "projection "` |
+| the bake states the coverage contract on the sidecar | `nifskope_ui.cpp:22698` | `ms << "coverage " << covFloor << " " << covTest << " " << covBase` |
+| the bake re-encodes the coverage into the sheet | `nifskope_ui.cpp:22561-22569` | `auto coverageEncode = [covFloor, covBase]( int a ) {` |

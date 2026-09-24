@@ -1,8 +1,8 @@
 # What the engine does with a ragdoll
 
-Findings from the leaked 1.10.155 exe+PDB pair (`E:\Projects\Fo4CommunityShaders\Fo4PDB`,
-queried with `tools/exere/f4pdb.py`). **Every RVA below is 1.10.155.** The live game
-is 1.11.221; bodies match closely, addresses do not — re-find with `f4re.py` before
+Findings from Todd's treat (1.10.155), queried with the Todd's treat tooling (kept outside this repo).
+**Every RVA below is 1.10.155.** The live game
+is 1.11.221; bodies match closely, addresses do not — re-find with the Todd's treat tooling before
 trusting an address against the running build.
 
 Written after a rebuilt human ragdoll misbehaved in game while every offline

@@ -90,6 +90,22 @@ against `git show HEAD:<p>`:
 New untracked files have no neighbour to match. Captured tool output that is
 natively CRLF stays CRLF — normalising it would corrupt the record.
 
+**NO LINE TOOL EVER TOUCHES ONE OF THE FIVE** (2026-09-10, lane CARDORTHO).
+`sed -i`, `tr`, `awk > file`, a `>` redirect and every editor rewrite the WHOLE
+file with LF. One `sed -i` to fix a single mis-typed character took all 19,020
+CRs out of `WW_CHANGES.md` three lines after a binary splice that had asserted
+the count on both sides. The fix for a typo inside a spliced block is to REDO
+THE SPLICE, not to reach for a line tool, and the byte count belongs after the
+LAST write of a turn rather than after the first.
+
+If it happens anyway, it is repairable as long as HEAD still has the bytes:
+`orig = git show HEAD:<p>`, `body = orig[len(header):]`, check that the damaged
+file ends with `body.replace(b'\r\n', b'\n')`, and rebuild as
+`damaged[:len(damaged)-len(body_lf)] + body`. Assert the CR count equals HEAD's
+and the LF count equals the damaged file's, so no content moved. Anything a
+CONCURRENT lane added to the file in CRLF is lost by this repair — compare the
+CR count with HEAD's BEFORE the accident to know whether there was any.
+
 ## 4. Group into a small number of path-list commits
 
 `git add -- <explicit paths>`, never `-a` / `-A`. Review

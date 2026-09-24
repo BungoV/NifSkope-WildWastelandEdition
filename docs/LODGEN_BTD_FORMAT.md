@@ -1,4 +1,4 @@
-# `.lodl` v1 / v2 - the whole-worldspace landscape file
+# `.lodl` v1 / v2 / v3 - the whole-worldspace landscape file
 
 **THE EXTENSION CHANGED ON 2026-09-09 AND THE BYTES DID NOT.** bungo's
 ruling: this file is `.lodl`; `.lodt`, which it used to be, now names the
@@ -12,10 +12,17 @@ file, and vice versa. The C++ names (`LodtFile`, `lodtWrite`,
 `src/lodtfile.cpp`) did NOT move -- they are internal, and they appear in
 no file on disk and in no command.
 
-**Contract versions: `magic 'LODT'`, `version 1` (header 0x98 = 152 bytes) and
-`version 2` (header 0xA0 = 160 bytes, adding the worldspace default water).**
-**The writer defaults to version 2**; the reader accepts 1 and 2.
+**Contract versions: `magic 'LODT'`, `version 1` (header 0x98 = 152 bytes),
+`version 2` (header 0xA0 = 160 bytes, adding the worldspace default water) and
+`version 3` (header 0xF8 = 248 bytes, adding WATER BODIES - a body table, a
+per-texel body-ID plane, flow, shore distance and a stroke store).**
+**The writer still defaults to version 2**; the reader accepts 1, 2 and 3.
+**Version 3 is written only when the water module is switched on**
+(`--water-bodies`), so a run that does not ask for bodies is byte-identical to
+what this writer produced before the section existed.
 **Status: WRITER, READER AND .btd CONVERSION SHIPPED** (`src/lodtfile.cpp`).
+**Version 3's writer and reader are shipped and gated
+(`tests/spells/lodl_water.sh`); NOTHING HAS BEEN FLOWN in a consumer.**
 
 **A CONSUMER EXISTS, AND IT KNOWS VERSION 1 ONLY.** FO4CS lane LODT1 (wave 71,
 2026-09-05) reads this file as the far-field heightmap source -
@@ -72,7 +79,13 @@ this" rule that no longer applies to terrain.
 
 ## Location
 
-    Data\Terrain\<WorldspaceEditorID>.lodl
+    Data\FO4CSLOD\<WorldspaceEditorID>\<WorldspaceEditorID>.lodl
+
+MOVED 2026-09-16 (bungo 2026-09-16 19:3x, "The folder should be called FO4CSLOD maybe, so it'd be Data/FO4CSLOD, sound fine?" (lane LAYOUT1)): every FO4CS-target output of a bake now
+lives under one root inside the mod folder, `Data\FO4CSLOD\`, and each
+worldspace has its own folder under it. It was `Data\Terrain\<WS>.lodl`
+until that day. `src/lodgenlayout.cpp` composes the folder and is the only
+place the name is spelled; `tests/spells/lodgen_layout.sh` is the gate.
 
 **FO4 has no `Data\Terrain\`** - it puts LOD under `Data\Meshes\Terrain\<WS>\`
 with objects in an `Objects\` subfolder (FO4CS `docs/RE/far-field-terrain-lod.md`
@@ -135,14 +148,45 @@ refusal. The magic makes that a clean rejection whatever the file is named.
 | 0x80 | uint64 | offset: block directory |
 | 0x88 | uint64 | offset: block data |
 | 0x90 | uint64 | total file size |
-| **0x98** | float | **v2 only** — worldspace default water height |
-| **0x9C** | uint32 | **v2 only** — worldspace default water type, a WATR form ID |
+| **0x98** | float | **v2 and later** — worldspace default water height |
+| **0x9C** | uint32 | **v2 and later** — worldspace default water type, a WATR form ID |
+| **0xA0** | uint64 | **v3 only** — offset: body table |
+| **0xA8** | uint32 | **v3 only** — body count |
+| **0xAC** | uint32 | **v3 only** — body record bytes (48 in this revision) |
+| **0xB0** | uint64 | **v3 only** — offset: body name blob (UTF-8, NUL-terminated; 0 = none) |
+| **0xB8** | uint32 | **v3 only** — body name blob bytes |
+| **0xBC** | uint32 | **v3 only** — body-ID plane samples per cell edge (0 = no plane) |
+| **0xC0** | uint64 | **v3 only** — offset: body-ID plane store |
+| **0xC8** | uint32 | **v3 only** — flow plane samples per cell edge (0 = no plane) |
+| **0xCC** | uint32 | **v3 only** — flow encoding (0 = dir8 / speed4 / confidence4) |
+| **0xD0** | uint64 | **v3 only** — offset: flow plane store |
+| **0xD8** | uint32 | **v3 only** — shore-distance plane samples per cell edge (0 = no plane) |
+| **0xDC** | uint32 | **v3 only** — shore quantum, world units per stored step (32) |
+| **0xE0** | uint64 | **v3 only** — offset: shore plane store |
+| **0xE8** | uint64 | **v3 only** — offset: stroke store (0 = none) |
+| **0xF0** | uint32 | **v3 only** — stroke store bytes |
+| **0xF4** | uint32 | **v3 only** — the **dye plane** store offset, 32 bits (lane WATER4); 0 = none, and the generator always writes 0. A reader tests bit 8 of `0x44`, never this word |
 
-Header is **0x98 = 152 bytes at version 1** and **0xA0 = 160 bytes at
-version 2**. Every section offset is measured from the start of the file, so the
-header size is not something a reader has to compute — but it **is** the floor a
-reader checks `blockDataOffset` against, and the writer refuses if its own
-assembled header is not the size its version declares.
+Header is **0x98 = 152 bytes at version 1**, **0xA0 = 160 bytes at version 2**
+and **0xF8 = 248 bytes at version 3**. Every section offset is measured from the
+start of the file, so the header size is not something a reader has to compute —
+but it **is** the floor a reader checks `blockDataOffset` against, and the
+writer refuses if its own assembled header is not the size its version declares.
+
+**The header size is a TABLE, not a comparison.** It used to be
+`ver >= 2 ? V2 : V1`, evaluated BEFORE the version check, so the moment a third
+version existed a version-3 file would have been measured against a 160-byte
+floor by the very reader that was about to refuse it. `lodtHeaderBytes()`
+answers 0 for a version it does not know, and the version refusal now runs
+first, on the eight bytes every version shares.
+
+**What version 3 adds, and where.** Nothing a version-2 reader addresses
+CHANGES: `0x00..0x9F` holds the same fields with the same meanings, and the
+version-3 fields are appended from `0xA0`. The header is 88 bytes longer, so
+every section — and every absolute block-payload offset in the directory —
+**slides by exactly 88 bytes** and nothing else moves, which is the same
+discipline and the same gate the version 1 → 2 step had. Version 3's own
+sections are appended **after the block data**.
 
 **What version 2 adds, and why.** Without those two fields, the per-cell
 "water type `0xFFFF` = the worldspace default" is a promise the file cannot
@@ -154,7 +198,11 @@ Version 1 files carry neither and report **0** and "no default water"; a reader
 **must not** treat that zero as a form ID.
 
 `section-present flags`: bit 0 terrain colour, bit 1 ground cover, bit 2 AO,
-bit 3 water. A reader checks the bit, not the offset.
+bit 3 water, and at version 3 bit 4 **water bodies** (the table and the body-ID
+plane together), bit 5 **flow**, bit 6 **shore distance**, bit 7 **strokes**, and (still version 3, lane WATER4)
+bit 8 **dye** (`LODL_SECT_DYE`, `src/lodtfile.h`; its offset lives in the
+reserved word `0xF4`, and the generator always writes 0).
+A reader checks the bit, not the offset.
 
 Cell bounds are **inclusive**, matching the `HeightMap` texture convention, so
 the world rectangle is `[west*4096, (east+1)*4096] x [south*4096, (north+1)*4096]`.
@@ -646,6 +694,323 @@ carrying this plane.
 
 ---
 
+## Water bodies (version 3)
+
+**A `.lodl` before version 3 answers "what water is in this cell" and cannot
+answer "which body of water is this".** The Commonwealth's sixteen `WATR` forms
+serve hundreds of separate sheets of water — `ExtLakeWater` alone paints sixteen
+different lakes with one colour and one velocity, `ExtOceanWater` paints the
+harbour and four hundred inland pools — so per-form is the wrong granularity for
+a tint, and there is no per-body anything in vanilla at all. Version 3 adds one.
+
+Everything here is written **only** under `--water-bodies`. The module's
+fallback is the version-2 path a consumer already has: per-cell water height and
+type, one tint per form, and the form's own `NAM0` for flow.
+
+### The body rule
+
+```
+wet texel   terrain height (level-0 sample) < the cell's RESOLVED water height,
+            in a cell whose flags carry `has water`.
+component   4-connected wet texels with equal water HEIGHT (quantised to 1/8
+            world unit) AND equal water TYPE index.
+merge       a component whose type is the worldspace default (0xFFFF) joins the
+            same-height PAINTED component it TOUCHES, and only when it is the
+            SMALLER of the two; with more than one candidate, the largest, and
+            the body is flagged AMBIGUOUS. REFUSED when the inheriting side is
+            the larger -- an ocean does not become an unpainted reach of the
+            river it happens to touch.
+bridge      two components at the same height whose SHORES are within
+            `--water-bridge` texels (default 2 = 256 world units) are merged
+            when their types are equal, or when both inherit, or when exactly
+            one inherits AND the inheriting one is the SMALLER of the two.
+            REFUSED when both are painted with different types, and refused
+            when the inheriting side is the larger.
+class       sea    the body reaches the worldspace edge
+            river  elongation >= 6, or a lower body within 64 texels
+            lake   everything else
+form        the PAINTED type with the largest area; the worldspace default only
+            when nothing in the body was painted.
+```
+
+**Why BOTH merges are asymmetric, measured.** Rule C states the direction — an
+INHERITING component joins the painted one — because an unpainted reach of a
+river is the river. Neither merge said what happens when the inheriting side is
+the OCEAN.
+
+* In the BRIDGE, with an exact shore test, the Commonwealth's ocean absorbs a
+  painted marsh that passes within two texels of it and the whole
+  21,587,443-texel body comes out named `ExtMarshScumWater`.
+* In rule C's ADJACENT merge the same thing happens wherever the two actually
+  TOUCH. The Commonwealth hides it (its ocean never touches a painted body at
+  its own height, it only ever passes near one); the known-answer control does
+  not, and that is where it was found.
+
+With the clause in both, the sea keeps its own form, every large painted body
+survives intact, and there is **not one** body where "the painted majority" and
+"the majority counting inherited area" disagree — the two readings of the form
+rule coincide, which they do not without it. Three guards were measured, in both
+merges, end to end; the size clause is the only one that leaves zero such bodies.
+Scripts: `scratchpad/water2_20260909/bridge_exact.py`, `bridge_effect.py`,
+`bridge_variants.py`, `merge_guard_variants.py`.
+
+Measured on the Commonwealth: 805 components → 793 after rule C's merge (12
+merged, 1 refused because the inheriting side was not the smaller, 1 with more
+than one candidate) → **346 bodies**, 528 bridge merges accepted and **13
+refused**; 1 sea, 115 rivers, 230 lakes; 115 bodies under 4 texels,
+flagged `TINY`, which a consumer and a body list may drop. The per-form TEXEL
+totals are identical to the ones the read-only census measured before any of
+this existed — no merging decision can move them, which is what makes them the
+strong half of the gate.
+
+**The bridge distance is a parameter, not a constant** (`--water-bridge N`).
+Every worldspace re-measures it.
+
+### The body table
+
+`bodyCount` records of `bodyRecordBytes`, at `bodyTableOffset`, in ID order;
+**record `i` is body ID `i + 1`**, and a reader refuses when it is not. ID 0 in
+the plane means "no body here". IDs are assigned by **descending area**, so ID 1
+is the largest body.
+
+| off | type | field |
+|---|---|---|
+| 0x00 | uint16 | id (redundant, and checked: `id == index + 1` or refuse) |
+| 0x02 | uint8 | class: 0 sea, 1 river, 2 lake |
+| 0x03 | uint8 | flags: bit0 user-edited, bit1 flow from a stroke, bit2 colour override present, bit3 merge was ambiguous, bit4 TINY (< 4 texels), bit5 class was set by hand |
+| 0x04 | float | water height, world units (the body's one plane) |
+| 0x08 | uint32 | WATR form id, RESOLVED — never 0, never 0xFFFF |
+| 0x0C | uint32 | area, texels of the body-ID plane |
+| 0x10 | int16 x4 | cell bbox: x0, y0, x1, y1 (inclusive, the file's own cell space) |
+| 0x18 | uint16 | source body (flows FROM), 0 = none |
+| 0x1A | uint16 | outlet body (flows INTO), 0 = none |
+| 0x1C | float x2 | mean flow, world units per second, X then Y |
+| 0x24 | uint8 x4 | colour override R, G, B, A — **A = 0 means no override** |
+| 0x28 | uint8 | flow confidence 0..255 |
+| 0x29 | uint8 | flow source: 0 none, 1 the form's NAM0, 2 bed slope, 3 drain, 4 user stroke |
+| 0x2A | uint16 | reserved, written 0 |
+| 0x2C | uint32 | name offset into the name blob, 0 = unnamed |
+
+48 bytes. **`bodyRecordBytes` is a field** for the same reason the `.lodm`
+sidecars carry one: a reader whose record is SHORTER strides by the file's value
+and reads the prefix it knows; a reader whose record is LONGER refuses by name.
+A colour or a name can therefore be added later without a version bump.
+
+### The plane store — one container, three planes
+
+The body-ID, flow and shore planes share ONE container, so there is one
+implementation and one gate:
+
+```
+uint32 tilesX, tilesY          tiles, one per CELL (tilesX = cellsX)
+uint32 tileEdge                samples per tile edge = this plane's rate
+uint32 bytesPerSample          2 (body id), 2 (flow), 1 (shore)
+uint64 directoryOffset         absolute
+uint64 dataOffset              absolute
+-> directory: tilesX*tilesY * { uint64 offset, uint32 csize, uint32 usize }
+-> data:      plain zlib streams (as the blocks are), row 0 SOUTH inside a tile,
+              tiles row 0 SOUTH
+```
+
+**A tile whose `csize` is 0 is UNIFORM, and its `usize` field holds the single
+sample value repeated across the tile.** The sea's 21.6 M texels then cost
+sixteen bytes a cell instead of an inflate. That is not an optimisation for its
+own sake: 99.2% of the Commonwealth's wet area is one body.
+
+**Sample rates are header fields, never constants.** Each defaults to the file's
+own `samplesPerCell` (32), because the narrowest measured river reach is one
+texel wide at 128 units and any coarser rate loses it; `--water-body-samples`
+and `--water-flow-samples` take a rate that DIVIDES the file's own.
+
+### The flow plane
+
+One uint16 a sample, encoding 0:
+
+```
+bits 0..7    direction, 0..255 = 0..2pi measured from +X toward +Y in the
+             file's own row-0-SOUTH space (1.41 degrees a step)
+bits 8..11   speed, 0..15, times the body's speed quantum = |mean flow| / 8,
+             so 8 is the body's mean and 15 is ~1.9x it
+bits 12..15  confidence, 0..15: 15 = a stroke crosses this sample, 0 = the
+             body's own mean (cross-fade to `meanFlow`)
+```
+
+**Dry samples write 0, which is also "no flow", and the two are the same value
+on purpose**: a consumer that forgets to test the body-ID plane draws still
+water, never garbage. With no strokes the field is constant over a body and
+equal to its mean, so every tile is uniform and the automatic case costs no
+solve at all.
+
+The four flow sources, in the order the writer tries them; the first that
+answers sets the `flow source` byte:
+
+1. **stroke (4)** — the body carries stroke or pin constraints. *(No stroke tool
+   exists yet; nothing writes 4.)*
+2. **drain (3)** — a LOWER body within 64 texels, on a body whose anisotropy is
+   at least 0.5. Direction along the body's principal axis, toward the contact,
+   signed from the body's own centroid.
+3. **bed (2)** — the terrain under the water falls monotonically along that axis
+   (|r| >= 0.7 and >= 64 units of drop).
+4. **form NAM0 (1)** — the WATR form's Linear Velocity, the vanilla floor.
+5. **none (0)** — a sea, or a round lake with no outlet: zero flow, which is the
+   rule this was asked for ("lakes have no flow if they're not connected to
+   rivers").
+
+The magnitude always comes from the form's `NAM0`, because that is the only
+speed vanilla carries; the automatic rules give a DIRECTION and no speed. When
+the velocity source is unavailable the census says so and the body's flow source
+is 0 rather than a made-up number.
+
+Measured on the Commonwealth: none 134, form NAM0 181, bed 2, drain 30.
+
+### The shore-distance plane
+
+uint8, `shoreQuantum` (32) world units a step, saturating at 255 = 8,160 units,
+measured from a wet sample to the nearest sample that is **not in the same
+body** — dry land, or another body across a seam. A 3-4 chamfer, two passes,
+with the one rule that makes it per-body: a neighbour belonging to a different
+body counts as a shore at distance zero.
+
+Baked rather than derived because the runtime alternative is a search. **Depth
+stays derived**, exactly as the table further down says: `body.waterHeight -
+height(gx, gy)`, both sides in this file, nothing baked for it.
+
+### The stroke store — the SOURCE, not a cache
+
+```
+uint32 count
+count * {
+  uint32 recordBytes        including this field
+  uint16 body               the body the stroke was drawn on, 0 = resolve by
+                            position at bake time
+  uint8  kind               0 stroke, 1 pin, 2 barrier, 3 merge,
+                            4 source pin, 5 outlet pin, 6 still water (WATER3);
+                            7 dye pin, 8 dye knob, 9 dye at mouth (WATER4)
+  uint8  flags              bit0 sets speed, bit1 sets direction,
+                            bit2 pins the body id, bit3 disabled
+  float  speed              world units per second, when flags bit0;
+                            a dye pin's / dye-mouth's STRENGTH 0..1
+  float  width              world units, the stroke's influence radius;
+                            a dye knob's HALF-DISTANCE
+  uint16 pointCount
+  uint16 reserved
+  pointCount * { float worldX, float worldY }
+  kind 7 only: uint8 R, G, B, A   the dye's colour, after the points
+}
+```
+
+A reader that does not know a kind skips it by `recordBytes`; a DyePin record
+is 24 + 8 n bytes, every other kind 20 + 8 n.
+
+**Points are WORLD coordinates**, not texels, so a stroke survives a re-bake at
+a different sample rate, a different bridge distance, or a heightmap change. The
+three planes are DERIVED from the `.lodl` plus this store; the store is where a
+user's work lives and the only part of the file a marking tool writes.
+
+**The writer emits it EMPTY and PRESENT** — a count of zero, four bytes, bit 7
+set. That is deliberately not the same as absent: a consumer can tell "nobody
+has marked anything" from "this file predates marking", and a panel can write
+into a store that already exists.
+
+### The dye plane (lane WATER4) — carried water
+
+bungo, 2026-09-10: *"a factory that's releasing toxic sludge into a river, or
+river flowing into an ocean and the river and the ocean may have slightly
+different color"*.
+
+A fourth plane in the SAME container format as the three above, at the FLOW
+plane's rate, **4 bytes a sample**, referenced from the version-3 header's
+reserved word at `0xF4` as a 32-bit absolute offset under a new section bit:
+
+```
+SECT_DYE = 1u << 8     dye plane
+uint32 sample:
+  bits  0..15   the SOURCE: 1..32767 = a body id (this is that body's water,
+                carried past its mouth; the consumer takes that body's colour
+                -- its override if A > 0, else its WATR form's);
+                0x8000 | n = the n-th DyePin record of the stroke store, in
+                store order, counting enabled DyePin records only (the pin
+                carries its RGBA); 0 = no dye
+  bits 16..23   weight 0..255 (255 = undiluted)
+  bits 24..31   written 0
+```
+
+The version stays 3 and no existing offset moves: the container is
+self-describing (its own rate and sample size are in its head), so one word is
+all it needs. A file past 4 GB cannot carry one; the marking tool refuses by
+name rather than truncating the offset.
+
+**Only the marking tool writes it, and only while the store carries a dye
+mark** (a DyePin, kind 7, or a DyeMouth, kind 9). The generator never writes
+one; an unmarked file, and a file whose dye marks were removed, carry no dye
+plane and the word at `0xF4` is 0 again -- which is what keeps the marking
+tool's undo gate byte-identical. Its weight is the steady advection-decay of
+the dye along the potential flow inside the receiving body (`u . grad c =
+-|u| c ln2 / L`), `L` the half-distance in world units (default 8,192 = two
+cells; a DyeKnob record, kind 8, holds another in `width`), solved exactly by
+one pass in descending potential. `src/watermark.cpp`, `WaterMarkDoc::solveDye`
+and `WaterFlowGrid::dye`. Reader: `LodtFile::dyeWordAt`, `dyePlaneSamples`,
+`dyePlaneOffset`. **BUILT AND RUN 2026-09-10 by lane BUILD10** (`release/NifSkope.exe` 15:52:46; 47 checks / 2 failures on the Charles, and both failures are the two gates the lane pre-registered as expected red). The plane was written, read back through the reader (8,649 of 8,649 sampled texels agree with the document), and removed again by undo byte for byte; the file with it is 39,235,147 bytes against the unmarked 38,612,038, and save-reopen-save reproduces it exactly.
+
+### Refusals, by name
+
+Beside the version-1 list further down, a version-3 reader refuses — naming the
+field, never returning a silent zero — on:
+
+* a section bit set with a zero offset, a zero sample rate, or a directory that
+  does not fit the file → *"section &lt;name&gt; is declared present but its
+  &lt;offset/rate/directory&gt; is empty"*;
+* `bodyRecordBytes` shorter than this reader's record → *"the body table's
+  records are N bytes; this reader knows M"*;
+* `id != index + 1` in the body table → *"record i is body i + 1"*;
+* a body-ID plane sample naming an ID past `bodyCount` → refuse, do not clamp.
+  **Every UNIFORM tile is checked at open** (its value is in the directory, so
+  this costs a directory scan and covers the whole of the sea); the compressed
+  tiles are checked by the census sweep, `lodl <file> --water-census`, because
+  inflating 36,864 tiles would make every `File > Open` pay for a verification.
+
+### Reading one, in order
+
+1. `sectionFlags & (1 << 4)`? If not: **fall back** to the version-2 path — per
+   cell water height and type, one tint per form. Nothing else below runs.
+2. Sample the **body-ID plane** at the fragment's world position, **nearest,
+   never filtered** — an id is a name, and the average of two names is a third
+   body that does not exist. ID 0 = no water here.
+3. Look the body up in the **body table**. Its `water height` is the plane's
+   height; the per-cell height need not be read at all.
+4. **Tint**: if `colour override A != 0`, use it. Otherwise resolve the body's
+   `WATR form` through the engine's own loaded form. **The form is the fallback,
+   the override is the answer.**
+5. **Depth** = `body.waterHeight - terrainHeight(gx, gy)`; both from this file.
+6. **Shore**: `value * shoreQuantum` world units, saturating at 255. Absent →
+   skip foam; never synthesise it.
+7. **Flow**: direction = `(bits 0..7) * 2pi / 256`, speed = `(bits 8..11) *
+   |body.meanFlow| / 8`, confidence = `bits 12..15`. Where confidence is 0,
+   cross-fade to `body.meanFlow`; where the plane is absent, use
+   `body.meanFlow`; where the table is absent, use the form's `NAM0`. Three
+   floors, each named in the file.
+8. **Fog and underwater**: from the form, per body, so two lakes with different
+   forms fog differently at the same height — which the per-cell path already
+   allowed and this preserves.
+
+Row 0 is SOUTH in all three of these planes, like everything else here.
+
+### The CLI
+
+```
+lodgen <esm> --worldspace <id> --lodl <dir> --water-bodies
+        [--water-bridge N] [--water-near N]
+        [--water-body-samples N] [--water-flow-samples N] [--water-no-shore]
+        [--water-velocities <plugin>] [--water-report <file>]
+lodl <file.lodl> --water-census      the body table, read back out of the FILE
+lodl <file.lodl> --water-selftest    the classifier's known-answer control
+lodl <file.lodl> --plane bodyid|flow|shore     mesh and paint one of them
+```
+
+Gate: `tests/spells/lodl_water.sh`, whose independent decoder is
+`scratchpad/water2_20260909/lodl_v3_authority.py` and whose census oracle is
+`scratchpad/water2_20260909/census_water2.py`.
+
 ---
 
 ## What is NOT in this file, and why
@@ -725,7 +1090,8 @@ source before converting it; it is what turned three assumptions in this table
 into measurements.
 
 `--verify-only`, on either path, skips the write and runs every cross-check
-against an EXISTING `<dir>/Terrain/<name>.lodl`: heights (exact for FO4, half
+against an EXISTING `<dir>/FO4CSLOD/<name>/<name>.lodl` (moved 2026-09-16,
+lane LAYOUT1): heights (exact for FO4, half
 a quantum for a `.btd`), alpha words, colour words and ground cover, all
 against the source. About a minute for Appalachia against twenty-five to
 convert it. A consumer that wants to know whether a file still matches its
@@ -800,6 +1166,65 @@ no second one.
     `tests/spells/lodl_open_authority.py` -- an independent decoder of the
     header, the flat sections and the progressive pyramid, sharing no code with
     `lodtfile.cpp`.
+
+### Lit from the `.lodt` sheets, when they are beside the file
+
+A `.lodl` carries heights and a per-vertex colour word; it carries no land
+textures. The colour word is a *data* view -- it is what the file says, painted
+so it can be read -- and it is not what the far field looks like in a game. The
+pictures of the far field come from the `.lodt` sheet pyramid the same bake
+writes (`docs/LODGEN_TERRAIN_VT.md`), which is where the composited land
+textures actually live.
+
+So the open route looks for that pyramid and, when it finds it, **lights the
+terrain with it instead of painting the data view**:
+
+  * **Where it looks.** `<worldspace>.VT.<dim>.lodt` in the `.lodl`'s own
+    directory, or in `WW_LODL_SHEETS=<dir>`. With several levels present the
+    **smallest `dim`** (the finest) is taken; `WW_LODL_SHEET_DIM=<n>` asks for
+    one by name. Nothing found, nothing readable, or no colour sheet in the
+    container -- the build says which in words and **draws the data view**, so
+    the default behaviour of the route is unchanged.
+  * **What it does with a tile.** The container's tiles are a packed payload,
+    not files a texture loader can open, so each one is unpacked ONCE to a loose
+    `.dds` pair (colour, `_msn`) in a cache directory -- the system temporary
+    directory by default, `WW_LODL_SHEET_CACHE=<dir>` to put it where a lane can
+    look at it afterwards. That directory is pushed onto the session's Fallout 4
+    folder list exactly as `WW_LODGEN_RESOURCES` does it in `src/main.cpp`:
+    prepended, archives closed so the next lookup re-scans, and never saved --
+    `GameManager::save()` is what persists a folder list and only the Settings
+    dialog calls it, so a user's own Resources page is untouched.
+  * **What the shape gets.** A `BSLightingShaderProperty` with a real
+    `BSShaderTextureSet`: the colour sheet in slot 0, the `_msn` in slot 1.
+    Sheet row 0 is the NORTH row while the mesh is built row-0-SOUTH, so the
+    sheet row is `tilesY - 1 - rowFromSouth`; the border texels are skipped by a
+    UV bias and scale rather than by re-cutting the image.
+  * **The shader flags say the normal map is MODEL-SPACE**, because the sheet's
+    is an `_msn`. Read as a tangent-space map it lights the land about 40 percent
+    too dark (measured: mean luma 70.6 against the `.BTR` of the same cells at
+    121.1, mean absolute colour difference 50.457). The bake's own `.BTR` of the
+    same chunk is the authority for what those flags should be -- Shader Flags 1
+    `0x80401000`, which is `Model_Space_Normals` set with `Specular` clear (the
+    two are documented as incompatible), and Shader Flags 2 `3`, which is
+    `ZBuffer_Write` with `LOD_Landscape`. The sheet branch sets exactly those
+    three bits and leaves every other bit of the block alone; the no-sheets arm
+    never reaches this code, which is why the module-off identity holds. After
+    the fix the same comparison reads 35.821 with the lumas correlating at
+    +0.6008, against +0.2023 for a different chunk and -0.0242 for the same
+    chunk mirrored in Y.
+  * **The region snaps outward to whole sheet tiles**, because half a tile has
+    no texture of its own; the build prints the widened rectangle. A region that
+    snaps entirely outside what the sheets cover falls back to the data view.
+  * **The mesh tile size is forced to a divisor of the sheet tile size**, so no
+    mesh tile ever straddles two sheets. At LOD 2 the vertex cap allows 7 cells a
+    tile and the sheet tile is 4, so the build drops to 4 and says so.
+  * **`WW_LODL_PLANE` is unchanged and wins.** Asking for a plane is asking for
+    the data view; the sheets are not consulted and the document is the same
+    bytes it has always been. This is the module-off identity the gate holds.
+  * **Objects in the same document.** `WW_LODL_OBJECTS=<file.lodi>` appends the
+    native object LOD under the same root, so one picture can carry the terrain
+    and the objects of a region together (`docs/LODGEN_NATIVE_LODO_LODI.md`, the
+    Viewer section). Unset, nothing of it runs.
 
 ---
 
@@ -894,60 +1319,108 @@ is under active edit by another lane** (it grew from 1,534 to 1,682 lines and
 gained header version 2 while this page was being written), so the ANCHOR TEXT
 is authoritative and the line numbers are the state below.
 
+**Version 3's rows were added 2026-09-10 by lane WATER2**, and the two source
+hashes below moved with it — the version-1/2 rows above were re-derived from
+their anchor text against the same state, not carried over.
+
 | file | sha256 (16) | bytes | lines |
 |---|---|---|---|
-| `src/lodtfile.cpp` | `efaf56673b8e09d2` | 65,592 | 1,706 |
-| `src/lodtfile.h` | `804f949cd3d75e4b` | 11,868 | 252 |
+| `src/lodtfile.cpp` | `601fb65136c8766d` | 141,680 | 3,658 |
+| `src/lodtfile.h` | `4ffeccdc9b581e5e` | 21,491 | 435 |
+| `src/btdterrain.cpp` | `35c2adc319852901` | 56,630 | 1,484 |
+| `tests/spells/lodl_water.sh` | `5283130abe320a5f` | 8,519 | 204 |
+
+**Re-derived 2026-09-10 by lane DOCS2** (`ww-contract-provenance` step 3, script
+`scratchpad/docs2_20260910/anchors.py`): every line number below was found again
+from its own anchor text against the sources stamped above, never shifted by a
+delta. 26 of 66 rows moved, 40 were already right, 0 anchors missing after two were
+trimmed to the single source line they start on (the AO row-0 comment and the
+no-ground-cover comment now wrap in the writer).
 
 | claim | line | anchor |
 |---|---|---|
 | magic `'LODT'` (unchanged by the `.lodl` rename) | `lodtfile.h` | `constexpr quint32 LODL_MAGIC = 0x54444F4CU;` |
-| versions 1..2, header sizes 0x98 / 0xA0 | 48-51 | `constexpr quint32 LODL_VERSION = 2;` … `LODL_HEADER_V2 = 0xA0;` |
-| section flag bits 0..3 | 53-56 | `constexpr quint32 SECT_COLOUR = 1u << 0;` |
-| cell flag bits, water-type sentinel | 58-60 | `constexpr quint16 WATER_TYPE_DEFAULT = 0xFFFFU;` |
-| everything is little-endian | 72 | `//! Little-endian appenders. Everything in the file is LE regardless of host.` |
-| AO row 0 is SOUTH | 135 | `Row 0 is SOUTH (the grid's own order, cell row 0 first)` |
-| the AO march: 8 directions, step ladder, 1.6 gain | 141-180 | `static QByteArray lodtComputeAo(`, `for ( int step = 1; step <= 12; step += ( step < 4 ? 1 : 3 ) )` |
-| overview built cell by cell, row 0 south | 457 | `g[row * ( size_t( cellsX ) * k ) + col] =` |
-| written version, `WW_LODL_VERSION`, refusal | 489-500 | `if ( qEnvironmentVariableIsSet( "WW_LODL_VERSION" ) )` |
-| the whole header, in write order | 496-523 | `h.u32( LODL_MAGIC );` … `const qsizetype offSizeAt = h.size(); h.u64( 0 );` |
-| v2's two default-water fields at 0x98 / 0x9C | 533-534 | `h.f32( src.defaultWaterHeight ); h.u32( src.defaultWaterType );` |
-| the writer checks its own header size | 538-540 | `if ( h.size() != ( version >= 2 ? LODL_HEADER_V2 : LODL_HEADER_V1 ) )` |
-| section write order and offset patching | 572-645 | `patch64( hdr, offLtexAt, pos );` |
-| GCVR table then slots, contiguous, no own offset | 596-597 | `for ( size_t s = 0; s < gcvrSlots.size(); s++ )` |
-| per-cell record: 3 floats then 2 u16 | 618-624 | `t.f32( cellMinH[s] );` |
-| AO plane written flat at its own offset | 645 | `t.b = lodtComputeAo( aoGrid, cellsX * aoS, cellsY * aoS, aoS, quantum );` |
-| `blocksX/Y(L) = ceil(cells / 2^L)` | 652-653 | `auto blocksX = [&]( int L ) { return ( cellsX + ( 1 << L ) - 1 ) >> L; };` |
-| plain zlib, level 9, 4-byte prefix stripped | 702-704 | `QByteArray z = qCompress( rawBatch[k], 9 );` |
-| directory entry u64 / u32 / u32, absolute | 712-714 | `dirBuf.u64( pos );` |
-| directory ordered COARSEST first | 719-720 | `const int coarsest = levels - 1;` … `for ( int L = coarsest; L >= 0; L-- ) {` |
-| progressive: full grid coarsest, 3/4 finer | 742-755 | `blk.u16( at( plane, L, ox + x + 1, oy + y ) );` |
-| plane order 0 h, 1 alpha, 2 colour, 3 gcvr | 749-754 | `emitPlane( 0 );` |
-| the seam MAXIMUM rule | 1066-1070, 1036 | `hh = qMax( hh, sm.sRow[cc] );` |
-| five layers ranked by peak opacity | 958-963 | `std::sort( rank.begin(), rank.end(),` |
-| FO4 writes no ground cover | 1054-1059 | `FO4 has no ground cover HERE: measured, Fallout4.esm carries 0 GCVR records` |
-| height encode `h/quantum + 32767`, round-half-up | 67-70 | `static inline quint16 lodtHeightWord( double h, double quantum )` … `qBound( 0.0, std::floor( h / quantum + 32767.0 + 0.5 ), 65535.0 )` — ONE encoder for every plane and for the landless fallback |
-| q order SW/SE/NW/NE | 1073 | `const int q = ( r >= 16 ? 2 : 0 ) + ( cc >= 16 ? 1 : 0 );` |
-| alpha packing, five 3-bit fields | 1087-1089 | `word \|= quint16( quint16( qBound( 0.0f, alpha * 7.0f + 0.5f, 7.0f ) ) << ( s * 3 ) );` |
-| colour packing R11 G6 B0, bit 5 unused | 1092-1094 | `( ( l->colors[r][cc][0] >> 3 ) << 11 )` |
-| `.btd` quantum = `maxAbs / 32767`, floored | 1156 | `const float quantum = qMax( maxAbs / 32767.0f, 1.0f / 4096.0f );` |
-| `.btd` rate and block edge forced to 128 | 1162-1163 | `o.samplesPerCell = 128;` |
-| `.btd` colour is A1R5G5B5, repacked | 1318-1323 | `const int r = ( v >> 10 ) & 0x1F;` |
-| reader reads 0x98 first, then the prefix | 1388-1414 | `buf = file.read( LODL_HEADER_V1 );` … the LDTX and bad-magic refusals |
-| the reader's offset refusal | 1410 | `return fail( QStringLiteral( "header offsets do not fit the file" ) );` |
-| version range refusal | 1417-1419 | `this reader knows %2..%3` |
-| v2 fields read at 0x98 / 0x9C | 1420-1423 | `defWaterH = rd<float>( buf, 0x98 );` |
-| every header field's offset, from the reader | 1426-1449 | `spc = int( rd<quint32>( buf, 0x18 ) );` |
-| degenerate-field refusals | 1457-1470 | `return fail( QStringLiteral( "degenerate rate/block/level count" ) );` |
-| per-cell record addressing, stride 16 | 1488 | `const qsizetype at = qsizetype( oCell ) + s * 16;` |
-| quadrant addressing `(qx, qy)`, stride 6 words | 1503-1510 | `const int qx = ( cx - minX ) * 2 + ( quad & 1 );` |
-| which level stores a sample | 1519-1527 | `while ( L < coarsest && ( gx % ( 1 << ( L + 1 ) ) ) == 0` |
-| `first(L)` sums the coarser levels | 1528-1530 | `for ( int j = coarsest; j > L; j-- )` |
-| the 4-byte zlib prefix put back for `qUncompress` | 1554-1558 | `z.resize( 4 );` |
-| in-block index at both level kinds | 1592-1602 | `k = ( py * ( blkEdge / 2 ) + px ) * 3 + sub;` |
-| ground cover shifts to plane 2 without colour | 1665 | `return planeSample( gx, gy, ( sect & SECT_COLOUR ) ? 3 : 2 );` |
-| AO returns 255 when absent | 1682-1686 | `// 255 = nothing occludes this` |
-| AO plane addressing | 1689 | `const qsizetype at = qsizetype( oAo ) + qsizetype( ay ) * aw + ax;` |
-| the writer's default options, `headerVersion = 2` | `lodtfile.h:78-96` | `int headerVersion = 2;` |
-| v1 reports no default water | `lodtfile.h:148-154` | `bool hasDefaultWater() const { return ver >= 2 && defWaterType != 0; }` |
-| block cache sizing note for subsampled walks | `lodtfile.h:191-197` | `a consumer that reads a SUBSAMPLED grid needs more` |
+| versions 1..3, header sizes 0x98 / 0xA0 / 0xF8 | 56-63 | `constexpr quint32 LODL_VERSION = 3;` … `LODL_HEADER_V3 = 0xF8;` |
+| section flag bits 0..7, now named in the header | 84-91 | `constexpr quint32 SECT_COLOUR = LODL_SECT_COLOUR;` |
+| cell flag bits, water-type sentinel | 101-103 | `constexpr quint16 WATER_TYPE_DEFAULT = 0xFFFFU;` |
+| everything is little-endian | 115 | `//! Little-endian appenders. Everything in the file is LE regardless of host.` |
+| AO row 0 is SOUTH | 186 | `Row 0 is SOUTH (the grid's own` |
+| the AO march: 8 directions, step ladder, 1.6 gain | 192-231 | `static QByteArray lodtComputeAo(`, `for ( int step = 1; step <= 12; step += ( step < 4 ? 1 : 3 ) )` |
+| overview built cell by cell, row 0 south | 1678 | `g[row * ( size_t( cellsX ) * k ) + col] =` |
+| written version, `WW_LODL_VERSION`, refusal | 1716-1727 | `if ( qEnvironmentVariableIsSet( "WW_LODL_VERSION" ) )` |
+| the whole header, in write order | 1723-1750 | `h.u32( LODL_MAGIC );` … `const qsizetype offSizeAt = h.size(); h.u64( 0 );` |
+| v2's two default-water fields at 0x98 / 0x9C | 1761-1762 | `h.f32( src.defaultWaterHeight );` |
+| the writer checks its own header size, against the TABLE | 1789-1791 | `if ( h.size() != lodtHeaderBytes( int( version ) ) )` |
+| section write order and offset patching | 1823-1896 | `patch64( hdr, offLtexAt, pos );` |
+| GCVR table then slots, contiguous, no own offset | 1847-1848 | `for ( size_t s = 0; s < gcvrSlots.size(); s++ )` |
+| per-cell record: 3 floats then 2 u16 | 1869-1875 | `t.f32( cellMinH[s] );` |
+| AO plane written flat at its own offset | 1896 | `t.b = lodtComputeAo( aoGrid, cellsX * aoS, cellsY * aoS, aoS, quantum );` |
+| `blocksX/Y(L) = ceil(cells / 2^L)` | 1903-1904 | `auto blocksX = [&]( int L ) { return ( cellsX + ( 1 << L ) - 1 ) >> L; };` |
+| plain zlib, level 9, 4-byte prefix stripped | 1953-1955 | `QByteArray z = qCompress( rawBatch[k], 9 );` |
+| directory entry u64 / u32 / u32, absolute | 1963-1965 | `dirBuf.u64( pos );` |
+| directory ordered COARSEST first | 1971-1972 | `for ( int L = coarsest; L >= 0; L-- ) {` |
+| progressive: full grid coarsest, 3/4 finer | 1993-2006 | `blk.u16( at( plane, L, ox + x + 1, oy + y ) );` |
+| plane order 0 h, 1 alpha, 2 colour, 3 gcvr | 2000-2005 | `emitPlane( 0 );` |
+| the seam MAXIMUM rule | 2441 | `hh = qMax( hh, sm.sRow[cc] );` |
+| five layers ranked by peak opacity | 2333-2338 | `std::sort( rank.begin(), rank.end(),` |
+| FO4 writes no ground cover | 2429 | `FO4 has no ground cover HERE: measured, Fallout4.esm carries 0 GCVR` |
+| height encode `h/quantum + 32767`, round-half-up | 110-113 | `static inline quint16 lodtHeightWord( double h, double quantum )` … `qBound( 0.0, std::floor( h / quantum + 32767.0 + 0.5 ), 65535.0 )` — ONE encoder for every plane and for the landless fallback |
+| q order SW/SE/NW/NE | 2448 | `const int q = ( r >= 16 ? 2 : 0 ) + ( cc >= 16 ? 1 : 0 );` |
+| alpha packing, five 3-bit fields | 2457-2459 | `word \|= quint16( quint16( qBound( 0.0f, alpha * 7.0f + 0.5f, 7.0f ) ) << ( s * 3 ) );` |
+| colour packing R11 G6 B0, bit 5 unused | 2467-2469 | `( ( l->colors[r][cc][0] >> 3 ) << 11 )` |
+| `.btd` quantum = `maxAbs / 32767`, floored | 2531 | `const float quantum = qMax( maxAbs / 32767.0f, 1.0f / 4096.0f );` |
+| `.btd` rate and block edge forced to 128 | 2537-2538 | `o.samplesPerCell = 128;` |
+| `.btd` colour is A1R5G5B5, repacked | 2693-2698 | `const int r = ( v >> 10 ) & 0x1F;` |
+| reader reads 0x98 first, then the prefix | 2763-2789 | `buf = file.read( LODL_HEADER_V1 );` … the LDTX and bad-magic refusals |
+| the reader's offset refusal | 2796 | `return fail( QStringLiteral( "header offsets do not fit the file" ) );` |
+| version range refusal | 2791-2793 | `this reader knows %2..%3` |
+| v2 fields read at 0x98 / 0x9C | 2807-2810 | `defWaterH = rd<float>( buf, 0x98 );` |
+| every header field's offset, from the reader | 2813-2836 | `spc = int( rd<quint32>( buf, 0x18 ) );` |
+| degenerate-field refusals | 2844-2857 | `return fail( QStringLiteral( "degenerate rate/block/level count" ) );` |
+| per-cell record addressing, stride 16 | 3131 | `const qsizetype at = qsizetype( oCell ) + s * 16;` |
+| quadrant addressing `(qx, qy)`, stride 6 words | 3146-3153 | `const int qx = ( cx - minX ) * 2 + ( quad & 1 );` |
+| which level stores a sample | 3162-3170 | `while ( L < coarsest && ( gx % ( 1 << ( L + 1 ) ) ) == 0` |
+| `first(L)` sums the coarser levels | 3171-3173 | `for ( int j = coarsest; j > L; j-- )` |
+| the 4-byte zlib prefix put back for `qUncompress` | 3197-3201 | `z.resize( 4 );` |
+| in-block index at both level kinds | 3235-3245 | `k = ( py * ( blkEdge / 2 ) + px ) * 3 + sub;` |
+| ground cover shifts to plane 2 without colour | 3308 | `return planeSample( gx, gy, ( sect & SECT_COLOUR ) ? 3 : 2 );` |
+| AO returns 255 when absent | 3325-3329 | `// 255 = nothing occludes this` |
+| AO plane addressing | 3332 | `const qsizetype at = qsizetype( oAo ) + qsizetype( ay ) * aw + ax;` |
+| the writer's default options, `headerVersion = 2` | `lodtfile.h:159-177` | `int headerVersion = 2;` |
+| v1 reports no default water | `lodtfile.h:248-254` | `bool hasDefaultWater() const { return ver >= 2 && defWaterType != 0; }` |
+| block cache sizing note for subsampled walks | `lodtfile.h:339` | `a consumer that reads a SUBSAMPLED grid needs` |
+
+**Version 3 (lane WATER2, 2026-09-10).** The ANCHOR TEXT is authoritative; the
+line numbers are the state of the hashes above.
+
+| claim | line | anchor |
+|---|---|---|
+| versions 1..3, header sizes 0x98 / 0xA0 / 0xF8 | lodtfile.cpp 56-63 | `constexpr quint32 LODL_VERSION = 3;` … `LODL_HEADER_V3 = 0xF8;` |
+| the header size is a TABLE, 0 for an unknown version | lodtfile.cpp 74 | `static inline qsizetype lodtHeaderBytes( int version )` |
+| section bits 4..7 | lodtfile.h 42-45 | `constexpr quint32 LODL_SECT_BODIES      = 1u << 4;` |
+| the body record is 48 bytes; the shore quantum is 32 | lodtfile.cpp 97-99 | `constexpr int LODL_BODY_RECORD = 48;` |
+| the body record's own layout, field by field | lodtfile.h 63-81 | `struct LodtWaterBody` |
+| the module's switches, and that `enabled` is false | lodtfile.h 89-103 | `struct LodtWaterOptions` |
+| rule C's merge, and the clause that gives it a direction | lodtfile.cpp 704 | `if ( comps[size_t( c )].area >= comps[size_t( best )].area ) {` |
+| rule D's bridge, and the same clause across a gap | lodtfile.cpp 813 | `join = small.area < big.area;` |
+| the whole water pass | lodtfile.cpp 497 | `static bool lodtBuildWater( const WaterInput & in, quint64 baseOffset,` |
+| ONE tiled plane container; a uniform tile's sample is its usize | lodtfile.cpp 433 | `static QByteArray lodtPackPlane( int tilesX, int tilesY, int tileEdge,` |
+| the principal axis the class and the flow rule gate on | lodtfile.cpp 390 | `static void lodtPrincipalAxis( double n, double sx, double sy, double sxx,` |
+| the refusal when the grid will not fit in memory | lodtfile.cpp 515 | `return fail( QString( "water bodies need the whole %1 x %2 sample grid resident "` |
+| the version-3 header fields, in write order, patched at the end | lodtfile.cpp 1772-1787 | `offBodyAt = h.size();       h.u64( 0 );` |
+| the section-flag word is PATCHED, once the sections exist | lodtfile.cpp 2142 | `patch32( hdr, offSectAt, sect );` |
+| the version refusal runs BEFORE any offset is read | lodtfile.cpp 2788-2793 | `an unknown version has no header size, so there is nothing honest to` |
+| the version-3 reader and its four named refusals | lodtfile.cpp 2872 | `if ( ver >= 3 && ( sect & LODL_SECT_BODIES ) ) {` |
+| `--water-census`, read out of the FILE | lodtfile.cpp 3361 | `bool lodtWaterCensus( const QString & path, QString * text, QString * error )` |
+| the known-answer control and its refuter | lodtfile.cpp 3510 | `bool lodtWaterSelfTest( QString * text, QString * error )` |
+| the three viewer planes and their availability from the BITS | btdterrain.cpp | `case LodtPlane::WaterBodyId:       return "bodyid";` |
+| the gates G1..G9 | lodl_water.sh | `# G6  the known-answer control, with its refuter -- FIRST` |
+
+Measured inputs, with their own stamps:
+
+| input | stamp |
+|---|---|
+| `Commonwealth.lodl`, module off | 35,953,294 bytes, byte-identical to the file at `E:\Projects\Fallout 4 Mods\mods\FO4CS\Terrain\Commonwealth.lodl` (mtime 2026-09-09 17:27) |
+| `Commonwealth.lodl`, module on | 38,612,038 bytes; water sections 2,658,744 (id 693,671 + flow 628,750 + shore 1,319,623 + table 16,608 + strokes 4 + three plane heads and directories); 34,958 / 36,291 / 33,334 uniform tiles of 36,864 |
+| the census | 346 bodies, 528 bridge merges accepted, 13 refused; sea 1, river 115, lake 230 |
+| the write | 6 s wall against version 2's own 4.7 s of reported phases |

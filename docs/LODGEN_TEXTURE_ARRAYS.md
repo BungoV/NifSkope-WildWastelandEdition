@@ -226,24 +226,31 @@ see `scratchpad/handoff_fo4cs/README.md` §5.
 
 ## Provenance
 
-`src/lodgen.cpp` sha256 `6d7388c53a13343e`,8286 lines;
-`src/lodgenmanager.cpp` read at the same time.
+`src/lodgen.cpp` sha256 `c05fd079655ac03e`, 8,924 lines;
+`src/lodgenmanager.cpp` sha256 `20d3089cf0adb199`, 2,392 lines, read at the same time.
+
+**Re-derived 2026-09-10 by lane DOCS2** (`ww-contract-provenance` step 3, script
+`scratchpad/docs2_20260910/anchors.py`): every line number below was found again
+from its own anchor text against the sources stamped above, never shifted by a
+delta. 7 of 14 rows moved; three anchors that the card-array pass now duplicates
+verbatim were lengthened until each names the array pass alone, and the
+multi-site mip row was re-derived by hand inside `lodgenEncodeArrayLayer`.
 
 | claim | line | anchor |
 |---|---|---|
-| file stem `.<W>x<H>` / `PBR.<W>x<H>` | `lodgen.cpp:4255` | `QString( "%1.%2" ).arg( cls.pbr ? QStringLiteral( "PBR" ) : QString() ).arg( sizeKey )` |
+| file stem `.<W>x<H>` / `PBR.<W>x<H>` | `lodgen.cpp:4580` | `QString( "%1.%2" ).arg( cls.pbr ? QStringLiteral( "PBR" ) : QString() ).arg( sizeKey )` |
 | grouping key `family\|<W>x<H>`, W/H = layer size | `lodgen.cpp:4144` | `classes[QString( "%1\|%2x%3" )…arg( w ).arg( h )]` |
-| the four sheets and their suffixes | `lodgen.cpp:4260-4264` | `const struct { QString suffix; … } sheets[4]` |
-| `textures.emissive` always written on an array | `lodgen.cpp:4278` | `tex.insert( QStringLiteral( "emissive" ), gameBase + emSfx );` |
-| `array.emissiveScale` parallel to `layers` | `lodgen.cpp:4281-4289` | `arr.insert( QStringLiteral( "emissiveScale" ), scales );` |
-| sidecar version 5 header and column order | `lodgen.cpp:4250` | `ss << "# lodgen texture arrays 5: family class layer lodm color normal mask emissive source emissiveScale` |
-| layer written into UV2.y; `shapesWithoutUv2` | `lodgen.cpp:4333-4339` | `nif.set<HalfVector2>( row, "UV 2", HalfVector2( Vector2( uv2[0], float( lit.value().second ) ) ) )` |
-| `A` line appended to the manifest | `lodgen.cpp:4344` | `lines.append( QString( "A %1 %2 %3" )` |
-| the channel laws, legacy and pbr | `lodgen.cpp:3998-4019` | doc comment on `lodgenBuildTextureArrays` |
+| the four sheets and their suffixes | `lodgen.cpp:4585-4589` | `const struct { QString suffix; const std::vector<std::vector<quint32>> * px; bool bc3; } sheets[4]` |
+| `textures.emissive` always written on an array | `lodgen.cpp:4602-4603` | `lodmMaskKey( cls.pbr ) ), gameBase + maskSfx` then `tex.insert( QStringLiteral( "emissive" ), gameBase + emSfx );` — the card-array pass writes that second line verbatim, so the mask line above it is the address |
+| `array.emissiveScale` parallel to `layers` | `lodgen.cpp:4612-4613` | `two layers of one array` (the comment above it) then `arr.insert( QStringLiteral( "emissiveScale" ), scales );` — the card-array pass writes the same insert under a different comment |
+| sidecar version 5 header and column order | `lodgen.cpp:4575` | `ss << "# lodgen texture arrays 5: family class layer lodm color normal mask emissive source emissiveScale` |
+| layer written into UV2.y; `shapesWithoutUv2` | `lodgen.cpp:4664-4670` | `nif.set<HalfVector2>( row, "UV 2", HalfVector2( Vector2( uv2[0], float( lit.value().second ) ) ) )` |
+| `A` line appended to the manifest | `lodgen.cpp:4669` | `lines.append( QString( "A %1 %2 %3" ).arg( b ).arg( lit.value().second )` |
+| the channel laws, legacy and pbr | `lodgen.cpp:4346-4367` | doc comment on `lodgenBuildTextureArrays` |
 | arrays run BEFORE the atlas | `lodgenmanager.cpp:2061` | `// before the atlas: the arrays key on the shapes' own diffuse paths` |
 | array file and game paths | `lodgenmanager.cpp:2069-2070` | `arrDir + "/" + ws + QStringLiteral( ".LodgenArrays" )` |
 | atlas sheet paths | `lodgenmanager.cpp:2088-2089` | `atlasDir + "/" + ws + QStringLiteral( ".LodgenObjects" )` |
 | card arrays run after, same folder | `lodgenmanager.cpp:2131-2132` | `arrDir + "/" + ws + QStringLiteral( ".LodgenCards" )` |
-| DX10 header, formats 77 / 71, arraySize | `lodgen.cpp:3968-3982` | `const quint32 dx10[5] = { bc3 ? 77U : 71U, 3U, 0U, quint32( layers.size() ), 0U };` |
-| payload layer-major | `lodgen.cpp:3965-3966` | `for ( const std::vector<quint32> & layer : layers )` |
-| mip law and BC1 alpha forcing | `lodgen.cpp:3878, 3895` | `while ( mw > 4 && mh > 4 …`, `( bc3 ? … : 0xFFU ) << 24` |
+| DX10 header, formats 77 / 71, arraySize | `lodgen.cpp:4306-4320` | `const quint32 dx10[5] = { bc3 ? 77U : 71U, 3U, 0U, quint32( layers.size() ), 0U };` |
+| payload layer-major | `lodgen.cpp:4290-4291` | `for ( const std::vector<quint32> & layer : layers )` |
+| mip law and BC1 alpha forcing | `lodgen.cpp:4203, 4220` | `while ( mw > 4 && mh > 4 …`, `( bc3 ? … : 0xFFU ) << 24` (both inside `lodgenEncodeArrayLayer`, whose signature is at 4198) |

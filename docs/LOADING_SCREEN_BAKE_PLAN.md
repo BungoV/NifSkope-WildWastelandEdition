@@ -3,8 +3,8 @@
 Turn an assembled, posed rig into a single static NIF the game can use as
 loading-screen art. Design only; nothing here is built yet.
 
-> **The static premise is confirmed, 2026-07-31.** `WW_PDB_COMPARISON.md` §6
-> decoded `LoadingMenu` out of the 1.10.155 PDB: it never activates a
+> **The static premise is confirmed, 2026-07-31.** `WW_ENGINE_COMPARISON.md` §6
+> decoded `LoadingMenu` out of Todd's treat (1.10.155): it never activates a
 > `NiControllerSequence` and never ticks a controller — `InitModel`,
 > `AdvanceMovie`, `Render`, `RotateModel` and `SetForegroundModel` are all clean,
 > and the per-frame work is only spin/pan/zoom from INI settings. The vanilla

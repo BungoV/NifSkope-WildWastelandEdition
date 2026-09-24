@@ -1292,9 +1292,9 @@ through three in-game crashes and a door that would not open.** Start where that
 track ended up starting: with the two external authorities, not with our own
 reader agreeing with our own writer.
 
-**The PDB has the whole path** (`E:\Projects\Fo4CommunityShaders\Fo4PDB`, queried
-with `fallout4-community-shaders/tools/exere/f4pdb.py`, and see
-[[feedback-debug-views-over-pdb]] — PDB FIRST for vanilla engine research):
+**Todd's treat has the whole path** (queried
+with the Todd's treat tooling (kept outside this repo) — Todd's treat FIRST
+for vanilla engine research):
 
 - **`BSClothExtraData::LoadBinary` and `::SaveBinary`** — the engine's own reader
   and writer for the blob. Disassemble `LoadBinary` and the field order and sizes
@@ -2136,8 +2136,8 @@ the effect in game. Three *other* interpretations were disproven by rendering
 and reverted — subdivisions-as-recursion-depth, Length-as-branch-length, and the
 `Animate Arc Offset` re-reading. Do not re-try those without new evidence.
 
-> **Superseded 2026-07-31 — the evidence arrived.** `WW_PDB_COMPARISON.md` §2
-> decodes the engine's generator out of the 1.10.155 PDB. Amplitude decay 0.5 is
+> **Superseded 2026-07-31 — the evidence arrived.** `WW_ENGINE_COMPARISON.md` §2
+> decodes the engine's generator out of Todd's treat (1.10.155). Amplitude decay 0.5 is
 > **correct**. The 1/24 s cadence **does not exist**: `Lightning::Process` holds
 > exactly three float constants (1.0, 0.5, 0.25) and no cadence; the rate comes
 > from interpolator 2 (Mutation), which NifSkope does not read.
@@ -2154,7 +2154,7 @@ and reverted — subdivisions-as-recursion-depth, Length-as-branch-length, and t
 hug the coil. Parked with what is already known, so it is not re-derived:
 
 - The generation rule is settled and shipped (`WW_CHANGES 2026-07-31i`), read out
-  of the 1.10.155 PDB: the bolt runs **from the target's origin, along its local
+  of Todd's treat (1.10.155): the bolt runs **from the target's origin, along its local
   +Y, for `Length`**, and the engine never resolves a node name. That fixed the
   torso. It did **not** move the legs — it changes direction and length, not the
   origin.

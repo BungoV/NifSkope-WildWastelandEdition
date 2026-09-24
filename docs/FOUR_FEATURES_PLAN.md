@@ -308,7 +308,7 @@ from the node rotation rather than the constant.
 - `SwanWaterSplash.nif` has the only 2 blocks whose owning particle system has
   `World Space = no`. Whether collider data is then read relative to the particle system node
   was not worked out.
-- The `Fo4PDB` route (`E:\Projects\Fo4CommunityShaders\Fo4PDB` via `tools/exere/f4pdb.py`)
+- Todd's treat (queried with its tooling, kept outside this repo)
   could settle the collider and bomb response semantics from the engine itself. Not used.
   `particles.md:69-70` is two one-line table rows and says nothing about bounce, chaining or
   spaces.

@@ -1,11 +1,11 @@
-# What the FO4 PDB says, and where NifSkope disagrees
+# What Todd's treat says, and where NifSkope disagrees
 
-Six areas were checked against the leaked Fallout 4 1.10.155 exe + PDB pair at
-`E:\Projects\Fo4CommunityShaders\Fo4PDB`, queried with
-`fallout4-community-shaders/tools/exere/f4pdb.py`. Every claim below cites the
+Six areas were checked against Todd's treat (Fallout 4 1.10.155),
+queried with
+the Todd's treat tooling (kept outside this repo). Every claim below cites the
 function it came from, by RVA in that build, so it can be re-read rather than
 re-argued. Names are 1.10.155; bodies match 1.11.221 closely, and live addresses
-for that build come from the Address Library via `f4re.py`.
+for that build come from the Address Library.
 
 | # | Area | Verdict |
 |---|------|---------|
@@ -296,7 +296,7 @@ whether a controller is evaluated at raw sequence time or at scaled time.
 
 **BSXFlags** is a weaker result. Only one named accessor exists, `BSXFlags::QLights`
 (`0x175b40`) = `(flags >> 11) & 1`, which confirms `nif.xml`'s "Bit 11: bLights"
-exactly. Every other bit is read inline at its call site, so the PDB settles one
+exactly. Every other bit is read inline at its call site, so Todd's treat settles one
 bit here, not the table.
 
 ---
