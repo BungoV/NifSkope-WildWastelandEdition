@@ -126,7 +126,28 @@ A chunk at `(cx, cy)` of size `dim` reads:
 | 6 | each ref base's four LOD model paths (`MNAM` slots) **and the bytes of those `.nif` files** | the object chunk | with (5) |
 | 7 | a `SCOL` base's parts: each part's base, and every placement's raw position/rotation/scale, plus those bases' LOD models and their bytes | the object chunk | with (5) |
 | 8 | the switches (section 3) | everywhere | whole region |
+| 8a | **the generator itself**: the sha1 of the running executable's bytes, fed FIRST into every chunk's `inputs` digest as `generator <sha1>;` (`lodgenGeneratorIdentity()`, `lodgen.cpp`; lane VTFIX1, 2026-09-24) | everywhere | whole region |
 | 9 | with `--terrain-object-ao` only: the same `REFR` rows as (5), (6) and (7), read a SECOND time as an occluder of the far TERRAIN | the object height field, and through it the AO byte (mask sheet B) of both terrain composites | **1 cell** — the march's longest step is **1,458 world units**, which is 0.356 of a cell |
+
+Row 8a is there because rows 1—8 describe what the chunk READS and nothing
+describes the program that turns those reads into bytes. The defaults live in
+three places (nifcli's `lg*` locals, `lodgen.h`'s option initialisers, the `g_*`
+globals in `lodgen.cpp`), so a default flip changes no argument and no input:
+before VTFIX1, `--incremental` on the new exe called every chunk clean and kept
+the old exe's bytes. The same was true of any code change that moves bytes with
+no default touched at all. The exe hash covers both without anyone bumping a
+constant. It can only over-rebake: a rebuild that moves no output byte still
+dirties every chunk once, which is this ledger's stated direction. An exe that
+cannot be read gets a word that never matches a stored ledger. The consequence
+for a gate: **two bakes from DIFFERENT exes now always write different `inputs`
+digests**, so a byte comparison of `.lodb` files across a rung and a new exe
+is expected to differ. Same-exe comparisons (section 1's determinism, the
+`--vt`/`--native` pairs below) are unaffected. The census reports such a
+chunk as `inputs moved`. It has no separate "generator changed" reason yet;
+that belongs to `nifcli.cpp`'s comparison (the dirty list at the ledger read).
+Gate: `tests/spells/lodgen_vtfix.sh` G3, which flips a default inside a copy
+of the exe and requires the incremental run to equal a full flipped bake. On the
+pre-VTFIX1 exe it reported `0 of 2 chunks dirty` and left 4 stale files.
 
 Row 9 does not widen the map beyond what rows 5—7 already ask for: it reads the
 same references, and 1,458 units is inside the one cell those rows already

@@ -60,6 +60,44 @@ committed" or names an exe, this block overrides it.
 - Re-run the command-line bakes since 09-19 that used --data-root.
 
 ### Lane and director lines, 2026-09-24, newest first
+- 2026-09-24 22:30 TOOLFIX1:
+  TOOLFIX1 (2026-09-24 22:1x, branch toolfix1-20260924, commits 730977f + 65369a0 + the report commit). Scripts
+  only, no src change. tools/ww_build.sh now renames release/NifSkope.exe aside only when a running NifSkope's
+  image path IS this tree's exe AND the exe really refuses an exclusive open; a window from another tree is left
+  be. It also builds the tree it lives in (was hard-coded to main), so it works in lane worktrees, with a per-tree
+  lock instead of the machine-wide make refusal; WW_BUILD_LOCK_ONLY=1 runs the rename decision alone. Measured: a
+  process's reported image path does not follow a rename (bungo's pid 23560 still reports main's NifSkope.exe; no
+  exe in main's release/ is held). Main's release/ holds 7 stale NifSkope_inuse_*.exe, all free, listed in
+  scratchpad/toolfix1_20260924/DONE.md, not deleted. tests/spells/lodgen_loadorder.sh G5 bakes his live profile
+  as-is (47 plugins) and asserts TestWorldspace.esp in the record; red = the pre-ESMFIX1 exe (bake rc 1). Spell
+  24/24 PASS on exe 664d465b.
+- 2026-09-24 22:30 INCRGATE1:
+  **2026-09-24 22:05 -- lane INCRGATE1 (LOD-E): INCR1's ledger now reaches the panel, a moved default refuses, plan 5 rows 6/13/25/26 closed with evidence.** Not merged. Branch `incrgate1-20260924`, commits listed in the lane's DONE.md.
+
+  - **The ledger code moved.** It went from `src/nifcli.cpp` to `src/lodgenchunkpass.{h,cpp}`, with no change in behaviour. The command line and the panel now run one implementation. `lodgen_incremental.sh`: 11/0 on the rung and 12 ok / 0 failures on b2.
+  - **The identity word.** The record's `switches` is now sha1(argv digest, identity word). The word is `gen1:<sha1>` over every EFFECTIVE setting (112 on a bare Sanctuary bake), plus a manual generator revision `kLodgenGeneratorRevision` = 1.
+    - **Why:** before this, a default that moved inside the exe left `switches` unchanged, and `--incremental` kept stale chunks. On the rung, a record baked by the before_defaults2 exe was accepted with "0 of 1 chunks dirty".
+    - **Gate G1** `tests/spells/lodgen_incr_identity.py`: 11/0 on this exe; 11 checks / 6 failures on the rung (the red run).
+    - **One-time cost:** every record written before today refuses once, as "the switches differ", and asks for one full bake.
+  - **The panel row "Rebake only what changed".** It sits in the LOD Generation panel's Run section and is OFF by default.
+    - **Row OFF:** byte-identical to the rung: 10 files, 45,582,390 B.
+    - **Row ON:** the same bake plus the bake record and the `.lodj` caches. The record carries `switch --panel` and the identity word. When there is no record yet, or the record cannot vouch for the run, the row bakes the whole range and (re)writes the record, and the census says why. It never refuses.
+    - **Gate G2** `tests/spells/lodgen_panel_incremental.sh`: PASS. Red control: the rung's tree read as the ON tree fails.
+    - **Heads-up:** the panel's texture arrays are ON by default and are built from the whole range. With the default settings every run is therefore a full bake. The row only saves time with arrays, the atlas and cards unticked.
+  - **Plan section 5 rows** (evidence marked in `docs/FO4CS_IMPROVED_LOD_PLAN.md`):
+    - **Row 6:** `lodgen_native.sh` leg 13b. The decoder reads the downtown-Boston pair (33,123 placements, 280 boxes) with 14 instances inside the cell-line band, worst 0.0625 u of 0.127. Red control: with the band at 0 it refuses at instance 3358. Note: the decoder's band is one float ulp narrower than the C++ reader's.
+    - **Row 13:** `lodgen_native_baseline.sh --drop-proof`. The stock (-32,0) dim-32 chunk drops 2,628 of 42,560 placements (6.17 %). The native pair keeps all 42,560, and `--native-verify` finds 0 instances with neither geometry nor a card.
+    - **Row 25:** the census checker was re-run on a v4 pair: 38 ok / 0 RED / 32 not-derivable. Its first run had 1 RED, and that was a checker defect, fixed (see MISTAKES text).
+    - **Row 26:** `tests/spells/lodgen_sanctuary_pair.sh` makes a default-settings Sanctuary pair: `.lodo` v4 6,204,388 B, `.lodi` v7 527,989 B, 3,526 placements in 10 chunks. It is written to a scratch folder and never committed.
+  - **Rulings owed to bungo** (INCR1's behaviour is kept unchanged on each):
+    1. Should `.lodj` caches be written by default? Today every `--native` bake writes them, and `--no-native-cache` is the way back.
+    2. `--native` together with `--incremental`: today it is allowed, and the pair is rebuilt from rebuilt plus replayed chunks.
+    - `.lodo` reuse under the panel row waits for CARDLINK1 and was not touched.
+  - **Owed, not in this lane's files:**
+    - (a) `g_ledgerAssetDigest` in `src/lodgen.cpp` is a process-wide cache that is never cleared. If a model or texture is edited while the panel stays open, the next run's diff does not see it until a restart. The row's tooltip says so; the fix is one clear at the start of a run.
+    - (b) A second panel run over the first run's record (the 0-dirty replay) has no gate. The `WW_LODGEN_RUN` harness in `src/nifskope_ui.cpp` wipes its folder at every launch.
+  - **The checked-in stock baseline is stale** (`tests/baselines/stock_baseline.sha256`, from exe 2026-09-10). `lodgen_native_baseline.sh --check` is red on the RUNG and on b2 with the same 6 files. Those are the dim 4/8/16 chunks and the region `.BTO`, which moved when the defaults moved on 09-12. Against a baseline written from the rung, b2 is 25 of 25 byte-identical. Re-writing the checked-in file is the director's call.
+  - **What the final bake needs:** nothing new. The row ships OFF. The first `--incremental` on any old record is one full bake.
 - 2026-09-24 22:03 ESMFIX1:
   ESMFIX1 (2026-09-24, branch esmfix1-20260924 from 541bbe5; commit ab12bf3 + report; exe sha1 ec5959c4) -- DONE, not merged.
 

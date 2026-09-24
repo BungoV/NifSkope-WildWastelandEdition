@@ -5,6 +5,24 @@ Written the moment a mistake is recognised, unprompted (CONSTITUTION rule 2).
 Format: date -- what was done -- what was true -- how it was found -- the rule.
 Newest at the top.
 
+## 2026-09-24 -- lane TOOLFIX1 (lane text)
+
+- 2026-09-24 TOOLFIX1: tools/ww_build.sh renamed release/NifSkope.exe whenever ANY NifSkope.exe was running,
+  naming that process's pid, so lanes (CSM1 twice) had their own fresh, unused exe renamed after bungo's window,
+  and main's release/ gathered 7 NifSkope_inuse_*.exe. Lesson: decide "is this exe in use" on the file itself
+  (path match AND an exclusive open fails), never on the process list alone, and never on the reported image
+  path alone: it keeps the pre-rename name for the life of the process.
+
+## 2026-09-24 -- lane INCRGATE1 (lane text)
+
+### 2026-09-24 -- a checker written against a default that later moved (lane INCRGATE1)
+
+`tests/spells/lodgen_census_check.py` was written on 2026-09-11 against pairs baked with the cluster ladder ON. It compared the `native-ladder:` line's `(group 4, ...)` with the `.lodo` header's `ladderGroup`. When the authored-only library became the default, the ladder went OFF. The census line kept printing `group 4`, which is the target of a ladder that was not built. The file correctly writes 0 ("0 iff the LADDER flag is clear", NATIVE 3 0xCD). No one re-ran the checker on a v4 pair, so the false RED stayed hidden until plan 5 row 25 asked for that run. **Rule:** when a default moves, re-run every checker that parses the census line on a pair baked with the NEW default. This is the harness skill's "sweep for stale premises", applied to Python checkers. Fixed: with the ladder OFF the checker claims 0 for the file, and the printed target becomes a not-derivable word. A red leg shows that a doctored 4 is still caught.
+
+### 2026-09-24 -- the incremental switch digest could not see a moved default (lane INCRGATE1; INCR1's open finding, closed)
+
+INCR1's `switches` hashed the typed argument vector only. When DEFAULTS1 moved seven defaults, a record from the old exe still matched, and `--incremental` kept chunks baked under the old defaults. The rung accepted a before_defaults2 record with "0 of 1 chunks dirty". **Rule:** a digest that decides whether bytes may be reused must hash the EFFECTIVE settings, not what was typed. It also needs a manual revision number for changes no setting names. Fixed by the identity word, gate G1.
+
 ## 2026-09-24 -- lane ESMFIX1 (lane text)
 
 (none)

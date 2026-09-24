@@ -1,5 +1,26 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Build script renames only its own held exe (TOOLFIX1)
+
+- Build script: `tools/ww_build.sh` no longer renames the freshly built exe when some other NifSkope is running.
+  It renames the exe aside only when that exact file is in use by a running NifSkope, and it builds the copy of
+  the project it sits in, so each lane worktree can use it directly. (TOOLFIX1)
+- Load-order test: G5 of `tests/spells/lodgen_loadorder.sh` now bakes the live Mod Organizer profile unchanged
+  (all 47 plugins, TestWorldspace.esp included) and checks the bake record lists every plugin by full path.
+  (TOOLFIX1)
+
+## 2026-09-24 -- lane INCRGATE1: "Rebake only what changed" in the LOD panel; the incremental ledger sees moved defaults
+
+- **LOD Generation panel, Run section: new row "Rebake only what changed"**, OFF by default. When ticked, only the chunks whose inputs changed since the last bake are rebuilt. The first run, and any run the last bake cannot vouch for, rebuilds everything and says why on the result line. The command-line equivalent is `--incremental`.
+- **`--incremental` now notices a changed default.** The bake record's switch digest now includes a hash of every setting the bake actually used, typed or defaulted. The command line prints it as `identity: gen1:<hash>, N setting(s)`. **Records written before this change are refused once**, so the first `--incremental` after updating asks for one full bake.
+- Internal: the incremental ledger code moved from `nifcli.cpp` to `lodgenchunkpass.cpp`, so the panel and the command line share one implementation.
+- New gates:
+  - `lodgen_incr_identity.py` (a moved default refuses)
+  - `lodgen_panel_incremental.sh` (row OFF is byte-identical, row ON adds only the record and caches)
+  - `lodgen_native_baseline.sh --drop-proof` (the stock far chunk drops 6.17 % of placements, the native pair none)
+  - `lodgen_sanctuary_pair.sh` (a default-settings Sanctuary `.lodo`/`.lodi` pair, and the census checker on it)
+- Fixed: the census checker (`tests/spells/lodgen_census_check.py`) reported a false RED on `ladderGroup` for every pair baked with the ladder OFF (the default).
+
 ## Plugin reader accepts self-indexed form IDs (ESMFIX1)
 
 - LOD generation now loads plugins whose form IDs point past their own master list, for example TestWorldspace.esp. Those form IDs resolve to the plugin itself, as they do in game. Before, the whole plugin was refused with "invalid form ID".
