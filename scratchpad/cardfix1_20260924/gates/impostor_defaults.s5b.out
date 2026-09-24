@@ -1,0 +1,15 @@
+exe: /e/Projects/NifskopeWWE-cardfix1/release/NifSkope.exe (2026-09-24 23:00:20.113045100 +0200 24729600)
+  ok    D1 the bake driver's grid default is 8
+  ok    D2 the LOD panel's card-frames default is 8
+  grab default: 16 pictures
+  grab strong: 16 pictures
+  grab mean: 16 pictures
+  grab smooth: 16 pictures
+  grab rung: 16 pictures
+  ok    D3 the default draw is the slider's crisp end, one frame, flat
+  ok    D4 the default cut is the strongest frame, by name
+  ok    D5 no pixel moved: the default equals the strongest-frame and mean cuts at all 16 views
+  ok    D6 floor: the smooth end differs from the default at 8 of 16 views
+  ok    D7 the default picture is byte-identical to the rung's default at all 16 views
+7 checks, 0 failures
+PASS

@@ -1,0 +1,4 @@
+impostor_trunk gate 2026-09-24 23:15:55
+exe /e/Projects/NifskopeWWE-cardfix1/release/NifSkope.exe  24729600 2026-09-24_23:00:20  sha1 eaa4b0b6
+set E:/Projects/NifskopeWildWastelandEdition/scratchpad/impostordepth2_20260923/n8_2k_bc7/cards/000531b3_oct.lodm
+REFUSED: 1 harness NifSkope(s) with --port already running (one at a time)

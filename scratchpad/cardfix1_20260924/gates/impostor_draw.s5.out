@@ -1,0 +1,59 @@
+impostor_draw gate  2026-09-24 23:15:56
+root /e/Projects/NifskopeWWE-cardfix1
+PASS  0 python is '/c/Users/bungo/AppData/Local/Programs/Python/Python39/python'
+PASS  1 reference selftest (11 property families, grids 2 3 4 5 8 12 16)
+PASS  2 src/impostoroct.cpp compiles standalone (-Wall -Wextra -Werror, no Qt, no GL)
+PASS  3 N=2  C++ mapping == Python reference (20 probe directions)
+PASS  3 N=3  C++ mapping == Python reference (20 probe directions)
+PASS  3 N=4  C++ mapping == Python reference (20 probe directions)
+PASS  3 N=5  C++ mapping == Python reference (20 probe directions)
+PASS  3 N=8  C++ mapping == Python reference (20 probe directions)
+PASS  3 N=12  C++ mapping == Python reference (20 probe directions)
+PASS  3 N=16  C++ mapping == Python reference (20 probe directions)
+PASS  4 WW_IMPOSTOR_PREVIEW=map ran
+PASS  4b the viewport is the size that was asked for (1024x1024)
+FAIL  5 KNOWN RED (director 2026-09-23: 4x4 flat snap is below the outline floor by construction; not the shipped grid) silhouette IoU mean 0.3920 < floor 0.50 (16 views)
+PASS  5t 8x8 card, crisp end (flat snap): silhouette IoU mean 0.7029 >= floor 0.50 (16 views)
+PASS  6 red control: shuffled 0.0695 vs honest 0.3920, collapse >= 0.03
+PASS  7 azimuth: same 0.5093 vs opposite 0.0294, mean margin 0.4799 > 0.03, 7 of 8 azimuths positive (worst -0.0291)
+PASS  8 red control: forced AsBaked gives same 0.0294 < opposite 0.5093 -- the old formula fails row 7
+SKIP  9 variable N: set IMPOSTOR_LODM_MORE to the same subject baked at other N
+PASS  10 non-square frame 160x512 keeps its aspect: frame 0.3125 vs extents 0.3125
+SKIP  11 two grids in one scene: set IMPOSTOR_LODM_B to a set of a DIFFERENT N
+SKIP  12 chunk placement: set IMPOSTOR_CHUNK to a .bto with a .manifest.txt beside it
+PASS  13 the .lodm opened as a document and drew its one card, with the chunk master OFF
+      [Warning] impostor card: "not an impostor card set: E:/Projects/NifskopeWWE-cardfix1/release/impostor_draw_tmp/material_not_a_card.lodm: kind is \"source\" -- this preview draws \"card\" and \"cardArray\" only (a \"source\" .lodm is a material, not a baked set)"
+PASS  13b a material .lodm is refused by name, not by an empty window
+PASS  14 height channel: sheet check: 16 frames measured, 0 fail, worst excursion 0 world units (card half 112.7 x 360.6, depthSpan 3072)
+PASS  14a BC3 alpha decoder: known-answer: 0 of 16 ramp entries wrong
+PASS  14b outside-band reach: 16 frames, mean 13.9% of the 8-ring band off the card plane (floor 10%), worst frame 0.0%, best 61.1%
+PASS  14c oct height decode: 0.001% of 1310720 texels more than 12 levels from the encoder's input (max 0.5%, mean err 3.39, worst 14, mean 4x4 block range 0.38, fill = 16-ring ramp)
+PASS  15 photograph: 16 bake directions, parallax off 0.9108, on 0.9102 (no-op, as the algebra requires)
+  ok   the view count: 16 lit pairs and 16 normal pairs, 16 asked for
+  ok   the mesh NORMAL grab is not its lit grab: 100.0 % of 605237 covered pixels differ (floor 50 %; an exe that ignores WW_IMPOSTOR_MESH_CHANNEL reads ~0)
+  ok   the mesh normals face the camera: mean view-space z 0.683 (floor 0.30)
+  ok   NORMAL sign agreement card vs mesh: x 98.7 % y 98.2 % z 96.5 %, mean angle 5.8 deg (bar >= 80 % every axis, <= 25 deg; bf6aa749 read 40.6..50.8 % on x/y)
+  ok   BRIGHTNESS card/mesh 0.940 (mesh 121.5, card 114.2 luma over 554992 px; bar 0.90..1.10; bf6aa749 read 0.475)
+  ok   TRANSFER rises: Spearman rho 0.251, upper-half minus lower-half 11.8 luma (bar rho >= the colour sheet rho 0.092 - 0.10 = -0.008, and rho, rise > 0; bf6aa749 read 0.145 and 2.1 on blast_n4)
+  info colour sheet (unlit) card luma by mesh decile: 100 99 101 101 102 103 104 105 104 100 (rise 2.7)
+  info card luma by mesh decile: 98 104 109 114 117 118 120 122 121 119
+  info dark card pixels the harness background rule drops: 1.00 % of 555006
+light check: 0 failure(s)
+PASS  16 the view count: 16 lit pairs and 16 normal pairs, 16 asked for
+PASS  16d the mesh NORMAL grab is not its lit grab: 100.0 % of 605237 covered pixels differ (floor 50 %; an exe that ignores WW_IMPOSTOR_MESH_CHANNEL reads ~0)
+PASS  16e the mesh normals face the camera: mean view-space z 0.683 (floor 0.30)
+PASS  16a NORMAL sign agreement card vs mesh: x 98.7 % y 98.2 % z 96.5 %, mean angle 5.8 deg (bar >= 80 % every axis, <= 25 deg; bf6aa749 read 40.6..50.8 % on x/y)
+PASS  16b BRIGHTNESS card/mesh 0.940 (mesh 121.5, card 114.2 luma over 554992 px; bar 0.90..1.10; bf6aa749 read 0.475)
+PASS  16c TRANSFER rises: Spearman rho 0.251, upper-half minus lower-half 11.8 luma (bar rho >= the colour sheet rho 0.092 - 0.10 = -0.008, and rho, rise > 0; bf6aa749 read 0.145 and 2.1 on blast_n4)
+views 36  mesh&nearest px 824423  torn px 87067
+worst view az170 el20 torn 0.4572
+torn share 0.1056
+PASS  17 tear: torn share 0.1056 <= bar 0.1340 over 36 azimuths at el 20 (az170 el20 torn 0.4572)
+pop mean  card worst 16208 at step 3  mean 3975.9  mesh worst 5120 mean 3585.2  steps 360
+pop default  card worst 7778 at step 10  mean 4583.5  mesh worst 5120 mean 3585.2  steps 360
+pop strong  card worst 33452 at step 322  mean 4212.6  mesh worst 5120 mean 3585.2  steps 360
+pop mean  card worst 11079 at step 19  mean 3894.2  mesh worst 2977 mean 2364.7  steps 89
+pop default  card worst 6290 at step 34  mean 4421.4  mesh worst 2977 mean 2364.7  steps 89
+pop strong  card worst 23171 at step 26  mean 3955.2  mesh worst 2977 mean 2364.7  steps 89
+PASS  18 popping: worst step <= 1.5 x the mean cut's, and the strongest-frame red control breaks it -- az default 7778 / mean 16208 = 0.48, strong 2.06; el default 6290 / mean 11079 = 0.57, strong 2.09
+done  33 steps, 1 failures
