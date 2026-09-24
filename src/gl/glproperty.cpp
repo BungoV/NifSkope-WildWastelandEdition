@@ -1404,7 +1404,8 @@ void wwPbrmCensusNoteUploadF0( float f0 )
 
 QString BSShaderLightingProperty::wwPbrmCensusFields( const QString & servedProgram ) const
 {
-	const bool	pbrServed = ( servedProgram == QLatin1StringView( "pbrm_default.prog" ) );
+	const bool	pbrServed = ( servedProgram == QLatin1StringView( "pbrm_default.prog" )
+		|| servedProgram == QLatin1StringView( "pbrm_csm.prog" ) );	// lane CSM1: the shadow variant
 	const QString	envelope = pbrmEnvelope.isEmpty() ? QStringLiteral( "none" ) : pbrmEnvelope;
 
 	QString	route, path, refusal, f0;

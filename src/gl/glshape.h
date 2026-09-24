@@ -132,6 +132,11 @@ public:
 	int boneCount() const { return int( boneData.size() ); }
 	//! The name of bone `i` as its own file records it, or empty.
 	QString boneNameAt( int i ) const;
+	//! lane CSM1: an opaque, depth-writing, non-effect shape goes into the sun's shadow map
+	bool wwCastsSunShadow() const { return !drawInSecondPass && !translucent && depthWrite && !bsesp; }
+	bool wwDoubleSided() const { return isDoubleSided; }
+	//! the GPU applies the bone transforms to this shape (the caster pass skins it on the CPU)
+	bool wwGpuSkinned() const { return isSkinned && !transformRigid && !boneTransforms.empty(); }
 protected:
 	//! Number of triangles to render at the current level of detail
 	qsizetype lodTriangleCount = 0;

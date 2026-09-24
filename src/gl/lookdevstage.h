@@ -63,7 +63,10 @@ BSD License - see nifskope.h
  * blend, all at eye distance d and height z; 5 the geometry it reads, R = d /
  * 4096, G = 0.5 + z / 2000). Reds: fogleak (fog drawn while OFF), fogsky
  * (Fog ON darkens the dome), fogheight0 (shader height forced to 0), plus the
- * esmweather.h fog reds. */
+ * esmweather.h fog reds.
+ *
+ * The cascaded sun shadows (lane CSM1): one Shadows row, ships OFF, live; the
+ * pass, fit and receiver are gl/sunshadow.h. Pin: WW_LOOKDEV_SHADOWS=0|1. */
 
 #include <QString>
 #include <QStringList>
@@ -99,6 +102,13 @@ void wwLookdevSetMoon( bool on );
 //! the weather fog row (lane FOG1), OFF by default
 bool wwLookdevFog();
 void wwLookdevSetFog( bool on );
+//! the cascaded sun shadows row (lane CSM1, gl/sunshadow.h), OFF by default
+bool wwLookdevShadows();
+void wwLookdevSetShadows( bool on );
+//! the light as it is shaded (TO the light, floored) and the unfloored disc position, world
+void wwLookdevShadowLight( float sunDir[3], float disc[3] );
+//! the ground frame the ground quad sits on; true = the ground draws (so it casts)
+bool wwLookdevGroundFrame( Scene * scene, float & z, float xy[2], float & half );
 double wwLookdevGameDay();
 void wwLookdevSetGameDay( double d );
 //! seconds on the cloud scroll clock (the pin, 0 in a harness run, else real time since Clouds went on)

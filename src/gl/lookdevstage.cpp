@@ -12,6 +12,7 @@ BSD License - see nifskope.h
 #include "gl/glshape.h"
 #include "gl/renderer.h"
 #include "gl/scenelighting.h"
+#include "gl/sunshadow.h"
 #include "model/nifmodel.h"
 
 #include "gamemanager.h"
@@ -42,6 +43,7 @@ const char * const kCloudsKey = "Settings/Render/Scene/Lookdev Clouds";
 const char * const kMoonKey = "Settings/Render/Scene/Lookdev Moon";
 const char * const kDayKey = "Settings/Render/Scene/Lookdev Game Day";
 const char * const kFogKey = "Settings/Render/Scene/Lookdev Fog";
+const char * const kShadowsKey = "Settings/Render/Scene/Lookdev Shadows";
 
 const char * const kDefaultCube = "textures/shared/cubemaps/mipblur_defaultoutside1.dds";
 const char * const kGroundD = "textures/landscape/ground/commonwealthdefault01_d.dds";
@@ -89,6 +91,9 @@ struct LdState
 	bool fog = false, pinFog = false;
 	float fogProbe[3] = { 0, 0, 0 };	// WW_LOOKDEV_FOGPROBE=d,z,mode
 	QString fogLast = QStringLiteral( "pending" );	// what the last fogged draw uploaded, for the echo
+
+	// the cascaded sun shadows (lane CSM1, gl/sunshadow.cpp)
+	bool shadows = false, pinShadows = false;
 
 	// ground height cache
 	float bsKey[4] = { 0, 0, 0, -1 };
@@ -140,6 +145,7 @@ LdState & st()
 		pinBool( "WW_LOOKDEV_CLOUDS", s.clouds, s.pinClouds );
 		pinBool( "WW_LOOKDEV_MOON", s.moon, s.pinMoon );
 		pinBool( "WW_LOOKDEV_FOG", s.fog, s.pinFog );
+		pinBool( "WW_LOOKDEV_SHADOWS", s.shadows, s.pinShadows );
 		const QStringList fp = qEnvironmentVariable( "WW_LOOKDEV_FOGPROBE" ).split( QChar( ',' ), Qt::SkipEmptyParts );
 		if ( fp.size() == 3 )
 			for ( int i = 0; i < 3; i++ )
@@ -596,6 +602,36 @@ void wwLookdevSetFog( bool on )
 	setPart( st().fog, on, st().pinFog, kFogKey );
 }
 
+bool wwLookdevShadows()
+{
+	return st().shadows;
+}
+
+void wwLookdevSetShadows( bool on )
+{
+	setPart( st().shadows, on, st().pinShadows, kShadowsKey );
+}
+
+void wwLookdevShadowLight( float sunDir[3], float disc[3] )
+{
+	const LdLight L = currentLight();
+	for ( int c = 0; c < 3; c++ ) {
+		sunDir[c] = L.sunDir[c];
+		disc[c] = L.discPos[c];
+	}
+}
+
+bool wwLookdevGroundFrame( Scene * scene, float & z, float xy[2], float & half )
+{
+	LdState & s = st();
+	updateGroundFrame( scene );
+	z = s.groundZ;
+	xy[0] = s.groundXY[0];
+	xy[1] = s.groundXY[1];
+	half = s.groundHalf;
+	return s.ground && qEnvironmentVariable( "WW_LOOKDEV_GROUNDPASS" ) != QLatin1StringView( "0" );
+}
+
 double wwLookdevGameDay()
 {
 	return st().gameDay;
@@ -647,6 +683,7 @@ void wwLookdevLoadSettings()
 	part( s.pinClouds, kCloudsKey, s.clouds );
 	part( s.pinMoon, kMoonKey, s.moon );
 	part( s.pinFog, kFogKey, s.fog );
+	part( s.pinShadows, kShadowsKey, s.shadows );
 	if ( !s.pinDay && settings.contains( QLatin1StringView( kDayKey ) ) )
 		s.gameDay = std::max( 0.0, settings.value( QLatin1StringView( kDayKey ) ).toDouble() );
 }
@@ -674,7 +711,8 @@ QString wwLookdevSummary()
 				.arg( s.sky ? 1 : 0 ).arg( s.sun ? 1 : 0 ).arg( s.clouds ? 1 : 0 ).arg( s.moon ? 1 : 0 )
 				.arg( s.gameDay, 0, 'f', 2 ).arg( wwLookdevCloudSeconds(), 0, 'f', 2 ).arg( s.skyLast )
 			: QString() )
-		+ ( s.fog ? QString( " fog=on %1 drew=%2" ).arg( fogSummary(), s.fogLast ) : QString() );
+		+ ( s.fog ? QString( " fog=on %1 drew=%2" ).arg( fogSummary(), s.fogLast ) : QString() )
+		+ ( ( s.shadows || !qEnvironmentVariable( "WW_CSM_RED" ).isEmpty() ) ? QStringLiteral( " " ) + wwSunShadowSummary() : QString() );
 }
 
 QString wwLookdevEcho()
@@ -1312,7 +1350,10 @@ void wwLookdevDrawGround( Scene * scene )
 	updateGroundFrame( scene );
 
 	Renderer * r = scene->renderer;
-	NifSkopeOpenGLContext::Program * prog = r->useProgram( "lookdev_ground.prog" );
+	// lane CSM1: the shadow-receiving ground is its own program (WW_SUNSHADOW defined),
+	// swapped in only while the map was built this frame, so Shadows off draws the pre-CSM ground
+	const bool receives = wwSunShadowWanted( scene );
+	NifSkopeOpenGLContext::Program * prog = r->useProgram( receives ? "lookdev_ground_csm.prog" : "lookdev_ground.prog" );
 	if ( !prog )
 		return;
 	const LdLight L = currentLight();
@@ -1340,6 +1381,8 @@ void wwLookdevDrawGround( Scene * scene )
 	prog->uni1i( "viewTransform", wwSceneViewTransform() );
 	prog->uni4m( "modelViewMatrix", scene->view.toMatrix4() );
 	wwLookdevFogUniforms( scene );
+	if ( receives )
+		wwSunShadowUniforms( scene );
 
 	if ( leak ) {
 		glEnable( GL_BLEND );

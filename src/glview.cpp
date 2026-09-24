@@ -39,6 +39,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "cellclick.h"		// lane CELLVIEW2: one call, in mouseReleaseEvent
 #include "gl/controllers.h"
 #include "gl/lookdevstage.h"
+#include "gl/sunshadow.h"
 #include "gl/glparticles.h"
 #include "gl/renderer.h"
 #include "impostorchunk.h"
@@ -3828,6 +3829,12 @@ void GLView::paintGL()
 
 	if ( scene->hasOption(Scene::DoMultisampling) )
 		glEnable( GL_MULTISAMPLE );
+
+	/* Lookdev (lane CSM1): the three sun-shadow cascade maps, rendered before
+	 * anything else this frame so the ground and the PBR shapes can receive.
+	 * A no-op with the Shadows row off (the default): no map, no program swap. */
+	if ( wwLookdevActive() )
+		wwSunShadowPass( scene );
 
 	if ( perspectiveMode ) {
 		// Lookdev: the lookdev cube background replaces the (FO76+) skybox
