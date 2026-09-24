@@ -49,7 +49,21 @@ BSD License - see nifskope.h
  * Reds (WW_LOOKDEV_RED): skyswap, skygamma, skyscale, and the toggle leaks
  * skyleak, sunleak, cloudleak, moonleak (the OFF path still draws at 0.02).
  * Nothing here is HDR: every element goes out through studioOutput and is
- * blended in display space (the engine blends in HDR; ruling: no HDR yet). */
+ * blended in display space (the engine blends in HDR; ruling: no HDR yet).
+ *
+ * The weather fog (lane FOG1): one Fog row, ships OFF, live. The engine fog of
+ * the picked WTHR at the hour (esmweather.h WwFog: FNAM day/night on
+ * Sky::UpdateFog's weight, the NAM0 fog colours in CIELab x NAM4, pow 2.2),
+ * the composite formula in res/shaders/lookdev_fog.glsl, applied to scene
+ * geometry (ground, PBR, legacy fo4_default) in LINEAR light before the
+ * exposure and the view transform; the dome, moon, sun and clouds are never
+ * fogged. Height is measured from the ground plane (groundZ = world z 0).
+ * Pins: WW_LOOKDEV_FOG=0|1, WW_LOOKDEV_FOGPROBE=<d>,<z>,<mode> (every fogged
+ * fragment writes, raw: mode 1 the alpha, 2 the fog colour / 2, 3 the height
+ * blend, all at eye distance d and height z; 5 the geometry it reads, R = d /
+ * 16384, G = 0.5 + z / 2000). Reds: fogleak (fog drawn while OFF), fogsky
+ * (Fog ON darkens the dome), fogheight0 (shader height forced to 0), plus the
+ * esmweather.h fog reds. */
 
 #include <QString>
 #include <QStringList>
@@ -82,6 +96,9 @@ bool wwLookdevClouds();
 void wwLookdevSetClouds( bool on );
 bool wwLookdevMoon();
 void wwLookdevSetMoon( bool on );
+//! the weather fog row (lane FOG1), OFF by default
+bool wwLookdevFog();
+void wwLookdevSetFog( bool on );
 double wwLookdevGameDay();
 void wwLookdevSetGameDay( double d );
 //! seconds on the cloud scroll clock (the pin, 0 in a harness run, else real time since Clouds went on)
@@ -107,5 +124,9 @@ bool wwLookdevDalc( float rgb[6][3] );
 bool wwLookdevDrawBackground( Scene * scene );
 //! the ground quad at the lowest visible vertex; no-op when the Ground row is off
 void wwLookdevDrawGround( Scene * scene );
+/*! the fog uniforms of the renderer's CURRENT program (lane FOG1): a no-op for a
+ *  program without `fogOn`; fogOn = false outside Lookdev, under an orthographic
+ *  camera, with the Fog row off, or with no weather */
+void wwLookdevFogUniforms( Scene * scene );
 
 #endif

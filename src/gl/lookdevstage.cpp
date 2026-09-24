@@ -41,6 +41,7 @@ const char * const kSunKey = "Settings/Render/Scene/Lookdev Sun";
 const char * const kCloudsKey = "Settings/Render/Scene/Lookdev Clouds";
 const char * const kMoonKey = "Settings/Render/Scene/Lookdev Moon";
 const char * const kDayKey = "Settings/Render/Scene/Lookdev Game Day";
+const char * const kFogKey = "Settings/Render/Scene/Lookdev Fog";
 
 const char * const kDefaultCube = "textures/shared/cubemaps/mipblur_defaultoutside1.dds";
 const char * const kGroundD = "textures/landscape/ground/commonwealthdefault01_d.dds";
@@ -83,6 +84,11 @@ struct LdState
 	WwClimateData clim;
 	QElapsedTimer cloudClock;
 	QString skyLast = QStringLiteral( "pending" );	// what the last sky pass drew, for the echo
+
+	// the weather fog (lane FOG1)
+	bool fog = false, pinFog = false;
+	float fogProbe[3] = { 0, 0, 0 };	// WW_LOOKDEV_FOGPROBE=d,z,mode
+	QString fogLast = QStringLiteral( "pending" );	// what the last fogged draw uploaded, for the echo
 
 	// ground height cache
 	float bsKey[4] = { 0, 0, 0, -1 };
@@ -133,6 +139,11 @@ LdState & st()
 		pinBool( "WW_LOOKDEV_SUN", s.sun, s.pinSun );
 		pinBool( "WW_LOOKDEV_CLOUDS", s.clouds, s.pinClouds );
 		pinBool( "WW_LOOKDEV_MOON", s.moon, s.pinMoon );
+		pinBool( "WW_LOOKDEV_FOG", s.fog, s.pinFog );
+		const QStringList fp = qEnvironmentVariable( "WW_LOOKDEV_FOGPROBE" ).split( QChar( ',' ), Qt::SkipEmptyParts );
+		if ( fp.size() == 3 )
+			for ( int i = 0; i < 3; i++ )
+				s.fogProbe[i] = fp.at( i ).toFloat();
 		const double d = qEnvironmentVariable( "WW_LOOKDEV_DAY" ).toDouble( &ok );
 		if ( ok ) {
 			s.gameDay = std::max( 0.0, d );
@@ -307,7 +318,109 @@ QString cubeSource()
 	return QString( "%1(%2)" ).arg( s.cube, s.pinCube ? QStringLiteral( "pinned" ) : QStringLiteral( "default" ) );
 }
 
+//! the ground frame (lowest visible vertex, centre, half size), recomputed when the scene's bounds move;
+//! the ground quad sits on it and the fog measures height from it (lane FOG1)
+void updateGroundFrame( Scene * scene )
+{
+	LdState & s = st();
+	const BoundSphere bs = scene->bounds();
+	const float key[4] = { bs.center[0], bs.center[1], bs.center[2], bs.radius };
+	if ( std::equal( key, key + 4, s.bsKey ) )
+		return;
+	std::copy( key, key + 4, s.bsKey );
+	float zmin = std::numeric_limits<float>::max();
+	for ( Node * node : scene->nodes.list() ) {
+		Shape * sh = dynamic_cast<Shape *>( node );
+		if ( !sh || !sh->isVisible() )
+			continue;
+		const Transform & t = sh->worldTrans();
+		for ( const Vector3 & p : std::as_const( sh->verts ) )
+			zmin = std::min( zmin, ( t * p )[2] );
+	}
+	if ( zmin == std::numeric_limits<float>::max() )
+		zmin = bs.center[2] - bs.radius;
+	s.groundZ = zmin;
+	s.groundXY[0] = bs.center[0];
+	s.groundXY[1] = bs.center[1];
+	s.groundHalf = std::max( kGroundHalf, bs.radius * 4.0f );
+}
+
+//! the fog at the current hour (lane FOG1): always the engine clock, whatever the Sun row says
+WwFog currentFog()
+{
+	resolve();
+	const LdState & s = st();
+	return wwFogAt( s.w, s.hour, s.tnam, s.gmst );
+}
+
+QString fogSummary()
+{
+	const LdState & s = st();
+	if ( !s.haveWeather )
+		return QStringLiteral( "fog=refused(no weather)" );
+	const WwFog f = currentFog();
+	return QString( "fogw=%1 near=%2 far=%3 power=%4 max=%5 keys=%6,%7,%8 farlow=%9,%10,%11" )
+		.arg( double( f.w ), 0, 'f', 4 ).arg( double( f.fogNear ), 0, 'f', 1 ).arg( double( f.fogFar ), 0, 'f', 1 )
+		.arg( double( f.power ), 0, 'f', 4 ).arg( double( f.maxv ), 0, 'f', 4 )
+		.arg( wwTodName( f.keys.a ), wwTodName( f.keys.b ) ).arg( double( f.keys.t ), 0, 'f', 4 )
+		.arg( double( f.farLow[0] ), 0, 'f', 4 ).arg( double( f.farLow[1] ), 0, 'f', 4 ).arg( double( f.farLow[2] ), 0, 'f', 4 );
+}
+
 } // namespace
+
+void wwLookdevFogUniforms( Scene * scene )
+{
+	if ( !scene || !scene->renderer )
+		return;
+	Renderer * r = scene->renderer;
+	NifSkopeOpenGLContext::Program * prog = r->getCurrentProgram();
+	if ( !prog || prog->uniLocation( "fogOn" ) < 0 )
+		return;
+	LdState & s = st();
+	const bool leak = !s.fog && wwLookdevRed( "fogleak" );
+	const bool perspective = r->globalUniforms->projectionMatrix[3][3] != 1.0f;
+	bool on = ( s.fog || leak ) && wwLookdevActive() && perspective && !scene->selecting;
+	if ( on ) {
+		resolve();
+		if ( !s.haveWeather ) {
+			on = false;
+			s.fogLast = QStringLiteral( "refused(no weather)" );
+		}
+	}
+	prog->uni1b( "fogOn", on );
+	if ( !on )
+		return;
+	updateGroundFrame( scene );
+	const WwFog f = currentFog();
+	for ( int k = 0; k < 6; k++ )
+		prog->uni4f_l( prog->uniLocation( "fogK[%d]", k ), FloatVector4( f.K[k][0], f.K[k][1], f.K[k][2], f.K[k][3] ) );
+	// the view: posView = R (sc p) + t, so p = R^T (posView - t) / sc; the z row, measured from the ground
+	const Transform & vt = scene->view;
+	const float sc = vt.scale != 0.0f ? vt.scale : 1.0f;
+	float zr[4] = { 0, 0, 0, 0 };
+	for ( int k = 0; k < 3; k++ ) {
+		zr[k] = vt.rotation( k, 2 ) / sc;
+		zr[3] -= vt.rotation( k, 2 ) * vt.translation[k] / sc;
+	}
+	zr[3] -= s.groundZ;
+	prog->uni4f( "fogView", FloatVector4( zr[0], zr[1], zr[2], zr[3] ) );
+	prog->uni1f( "fogDistScale", 1.0f / sc );
+	// the fog sun (INFERRED, spec_fog.md 2.5): the lookdev light's direction and Sunlight colour, intensity 1
+	const LdLight L = currentLight();
+	float v[3];
+	for ( int i = 0; i < 3; i++ )
+		v[i] = vt.rotation( i, 0 ) * L.sunDir[0] + vt.rotation( i, 1 ) * L.sunDir[1] + vt.rotation( i, 2 ) * L.sunDir[2];
+	const float vl = std::sqrt( v[0] * v[0] + v[1] * v[1] + v[2] * v[2] );
+	for ( int i = 0; i < 3 && vl > 0.0f; i++ )
+		v[i] /= vl;
+	prog->uni4f( "fogSun", FloatVector4( v[0], v[1], v[2], 1.0f ) );
+	prog->uni4f( "fogSunColour", FloatVector4( L.sun[0], L.sun[1], L.sun[2], s.gmst.dirFogPower ) );
+	prog->uni4f( "fogProbe", FloatVector4( s.fogProbe[0], s.fogProbe[1], s.fogProbe[2], 0.0f ) );
+	prog->uni1i( "fogRed", ( wwLookdevRed( "fogmaxclamp" ) ? 1 : 0 ) | ( wwLookdevRed( "fognoescape" ) ? 2 : 0 )
+		| ( wwLookdevRed( "fogheight0" ) ? 4 : 0 ) );
+	s.fogLast = QString( "on(groundz=%1 scale=%2%3)" ).arg( double( s.groundZ ), 0, 'f', 2 ).arg( double( sc ), 0, 'g', 6 )
+		.arg( leak ? QStringLiteral( " leak" ) : QString() );
+}
 
 bool wwLookdevActive()
 {
@@ -464,6 +577,16 @@ void wwLookdevSetMoon( bool on )
 	setPart( st().moon, on, st().pinMoon, kMoonKey );
 }
 
+bool wwLookdevFog()
+{
+	return st().fog;
+}
+
+void wwLookdevSetFog( bool on )
+{
+	setPart( st().fog, on, st().pinFog, kFogKey );
+}
+
 double wwLookdevGameDay()
 {
 	return st().gameDay;
@@ -514,6 +637,7 @@ void wwLookdevLoadSettings()
 	part( s.pinSun, kSunKey, s.sun );
 	part( s.pinClouds, kCloudsKey, s.clouds );
 	part( s.pinMoon, kMoonKey, s.moon );
+	part( s.pinFog, kFogKey, s.fog );
 	if ( !s.pinDay && settings.contains( QLatin1StringView( kDayKey ) ) )
 		s.gameDay = std::max( 0.0, settings.value( QLatin1StringView( kDayKey ) ).toDouble() );
 }
@@ -540,7 +664,8 @@ QString wwLookdevSummary()
 			? QString( " preview=sky:%1,sun:%2,clouds:%3,moon:%4 day=%5 cloudtime=%6 drew=%7" )
 				.arg( s.sky ? 1 : 0 ).arg( s.sun ? 1 : 0 ).arg( s.clouds ? 1 : 0 ).arg( s.moon ? 1 : 0 )
 				.arg( s.gameDay, 0, 'f', 2 ).arg( wwLookdevCloudSeconds(), 0, 'f', 2 ).arg( s.skyLast )
-			: QString() );
+			: QString() )
+		+ ( s.fog ? QString( " fog=on %1 drew=%2" ).arg( fogSummary(), s.fogLast ) : QString() );
 }
 
 QString wwLookdevEcho()
@@ -1084,7 +1209,8 @@ bool wwLookdevDrawBackground( Scene * scene )
 		// the dome replaces the cube; a dome that will not resolve falls back to the cube, by name
 		bool dome = false;
 		if ( sx.sky ) {
-			dome = drawDome( scene, f, 1.0f, drew );
+			// the dome is never fogged (ruling); red "fogsky": Fog ON darkens the dome, the sky gate must fail
+			dome = drawDome( scene, f, ( sx.fog && wwLookdevRed( "fogsky" ) ) ? 0.97f : 1.0f, drew );
 		}
 		if ( !dome && !drawCube( scene, !sx.sun ) )
 			return false;
@@ -1174,27 +1300,7 @@ void wwLookdevDrawGround( Scene * scene )
 	if ( !s.ground && !leak )
 		return;
 
-	// the lowest visible vertex, recomputed when the scene's bounds move
-	const BoundSphere bs = scene->bounds();
-	const float key[4] = { bs.center[0], bs.center[1], bs.center[2], bs.radius };
-	if ( !std::equal( key, key + 4, s.bsKey ) ) {
-		std::copy( key, key + 4, s.bsKey );
-		float zmin = std::numeric_limits<float>::max();
-		for ( Node * node : scene->nodes.list() ) {
-			Shape * sh = dynamic_cast<Shape *>( node );
-			if ( !sh || !sh->isVisible() )
-				continue;
-			const Transform & t = sh->worldTrans();
-			for ( const Vector3 & p : std::as_const( sh->verts ) )
-				zmin = std::min( zmin, ( t * p )[2] );
-		}
-		if ( zmin == std::numeric_limits<float>::max() )
-			zmin = bs.center[2] - bs.radius;
-		s.groundZ = zmin;
-		s.groundXY[0] = bs.center[0];
-		s.groundXY[1] = bs.center[1];
-		s.groundHalf = std::max( kGroundHalf, bs.radius * 4.0f );
-	}
+	updateGroundFrame( scene );
 
 	Renderer * r = scene->renderer;
 	NifSkopeOpenGLContext::Program * prog = r->useProgram( "lookdev_ground.prog" );
@@ -1224,6 +1330,7 @@ void wwLookdevDrawGround( Scene * scene )
 	prog->uni1f( "sceneExposure", wwSceneExposureScale() );
 	prog->uni1i( "viewTransform", wwSceneViewTransform() );
 	prog->uni4m( "modelViewMatrix", scene->view.toMatrix4() );
+	wwLookdevFogUniforms( scene );
 
 	if ( leak ) {
 		glEnable( GL_BLEND );

@@ -1165,6 +1165,7 @@ bool Renderer::setupProgramPBRM( const NifModel * nif, Program * prog, Shape * m
 			prog->uni3f_l( prog->uniLocation( "lookdevDalc[%d]", a ), dalc[a][0], dalc[a][1], dalc[a][2] );
 		prog->uni1b( "lookdevDalcFlip", wwLookdevRed( "dalcflip" ) );
 	}
+	wwLookdevFogUniforms( scene );	// lane FOG1: fogOn is false outside Lookdev
 
 	// Per-draw GL state, same as the spec/gloss path ends with. Omitting it made
 	// the shape inherit whatever blend/depth state the previous program left
@@ -1728,6 +1729,7 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 	glDepthMask( !mesh->depthWrite || mesh->translucent ? GL_FALSE : GL_TRUE );
 	glPolygonMode( GL_FRONT_AND_BACK, GL_FILL );
 
+	wwLookdevFogUniforms( scene );	// lane FOG1: fo4_default reads it; fogOn is false outside Lookdev
 	return true;
 }
 

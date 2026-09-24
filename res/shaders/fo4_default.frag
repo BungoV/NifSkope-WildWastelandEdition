@@ -1,6 +1,7 @@
 #version 410 core
 
 #include "uniforms.glsl"
+#include "lookdev_fog.glsl"
 
 uniform sampler2D BaseMap;
 uniform sampler2D NormalMap;
@@ -535,6 +536,10 @@ void main()
 	// Emissive
 	color.rgb += emissive * glowScaleSRGB;
 
+	// lane FOG1 (Lookdev weather fog): this colour is sqrt of linear light (tonemap squares it),
+	// so the fog runs on its square, before the exposure and the curve
+	if ( fogOn )
+		color.rgb = sqrt( max( wwFog( color.rgb * color.rgb, -ViewDir ), vec3( 0.0 ) ) );
 	color.rgb = tonemap( color.rgb );
 
 	if ( doRefraction ) {
@@ -585,4 +590,7 @@ void main()
 	}
 
 	fragColor = color;
+	vec3 fogProbeOut;
+	if ( wwFogProbe( -ViewDir, fogProbeOut ) )
+		fragColor = vec4( fogProbeOut, 1.0 );
 }

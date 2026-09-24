@@ -22,10 +22,12 @@ uniform float sceneExposure;
 uniform int viewTransform;
 
 in vec3 worldPos;
+in vec3 viewPos;
 
 out vec4 fragColor;
 
 #include "lookdev_output.glsl"
+#include "lookdev_fog.glsl"
 
 vec3 dalcAmbient( vec3 n )
 {
@@ -53,9 +55,13 @@ void main()
 	}
 	float NdotL = max( dot( n, sunDirWorld ), 0.0 );
 	vec3 color = base * sunLinear * NdotL + base * dalcAmbient( n );
+	color = wwFog( color, viewPos );	// lane FOG1: linear, before the exposure
 	if ( groundLeak >= 0.0 )
 		color = mix( vec3( 0.0 ), color, groundLeak );
 	fragColor = vec4( studioOutput( color ), 1.0 );
 	if ( groundLeak >= 0.0 )
 		fragColor.a = groundLeak;
+	vec3 probe;
+	if ( wwFogProbe( viewPos, probe ) )
+		fragColor = vec4( probe, 1.0 );
 }

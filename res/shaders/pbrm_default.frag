@@ -1,6 +1,7 @@
 #version 410 core
 
 #include "uniforms.glsl"
+#include "lookdev_fog.glsl"
 
 // PBRM (PBR Material Editor) metallic/roughness path.
 //
@@ -565,6 +566,8 @@ void main()
 	}
 
 	if ( sceneMode >= 1 ) {
+		if ( sceneMode == 2 )
+			color.rgb = wwFog( color.rgb, -ViewDir );	// lane FOG1: linear, before the exposure
 		if ( studioProbe >= 0.0 )
 			color.rgb = vec3( studioProbe );
 		color.rgb = studioOutput( color.rgb );
@@ -578,4 +581,7 @@ void main()
 		color.rgb *= color.a;
 
 	fragColor = color;
+	vec3 fogProbeOut;
+	if ( wwFogProbe( -ViewDir, fogProbeOut ) )
+		fragColor = vec4( fogProbeOut, 1.0 );
 }
