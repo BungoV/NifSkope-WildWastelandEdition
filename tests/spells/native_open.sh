@@ -71,6 +71,18 @@ GNATIVE="${GNATIVE:-$GBAKE}"  # its --native half; the bake writes them to two d
 AUTH="$ROOT/tests/spells/native_open_authority.py"
 PORT="${PORT:-42931}"
 WS="${WS:-Commonwealth}"
+# Every window this harness opens runs in its OWN settings scope
+# (src/harnesswindow.cpp, WW_SETTINGS_SCOPE): the whole QSettings tree moves to
+# HKCU\Software\NifTools\NifSkope 2.0 <scope>, wiped before and after, so a
+# picture depends on the fixtures and the exe and never on the profile of the
+# person who last used the viewer. Measured 2026-09-24 (lane GATEFIX1): the
+# (d) .BTR drew its water shape pure white under bungo's persisted profile and
+# dark under the defaults, and NCC read -0.21 against 0.84 with the SAME exe
+# and the SAME files -- on every exe back to before_btofree1, which passed
+# 17/0 on 2026-09-16. A gate that reads the user's profile measures the profile.
+SCOPE="${SCOPE:-nativeopen}"
+REGKEY="HKCU\\Software\\NifTools\\NifSkope 2.0 $SCOPE"
+wipe_scope() { reg delete "$REGKEY" //f > /dev/null 2>&1; }
 
 # the chunk everything is measured on, and an EMPTY one for the floor
 CX=${CX:--20}; CY=${CY:-24}; DIM=${DIM:-4}
@@ -92,7 +104,8 @@ fi
 
 PY="${PY:-$(command -v python || echo /c/Windows/py)}"
 W="$(mktemp -d)"
-trap 'rm -rf "$W"' EXIT
+wipe_scope
+trap 'rm -rf "$W"; wipe_scope' EXIT
 mkdir -p "$W/empty"
 
 checks=0; fails=0; skips=0
@@ -125,7 +138,11 @@ shot() {  # shot <out.png> <file to open> [extra env assignments...]
 	local out="$1" file="$2"; shift 2
 	local ctr="${SHOT_CENTER:-$CENTER}"
 	rm -f "$out"
-	env "$@" \
+	# EVERY window from an empty scope: a window saves its layout on close, and
+	# the next one then opens a different viewport (991 against 989 rows,
+	# measured), which (c) rightly refuses to compare
+	wipe_scope
+	env "$@" WW_SETTINGS_SCOPE="$SCOPE" \
 		WW_RENDER_SHOT="$(winpath "$out")" WW_RENDER_SIZE="$SIZE" WW_RENDER_VIEW=1 \
 		WW_RENDER_CENTER="$ctr" WW_RENDER_ORTHO="$ORTHO" WW_RENDER_CLEAN=1 \
 		timeout 300 "$NS" --port "$PORT" "$(winpath "$file")" >/dev/null 2>&1
@@ -164,7 +181,9 @@ check "a non-height plane ignores the sheets entirely (byte-identical with them 
 	"$([ -s "$P_OFF" ] && [ -s "$P_ON" ] && cmp -s "$P_OFF" "$P_ON" && echo 1 || echo 0)"
 
 if [ "${RUN_LODL_OPEN:-1}" = "1" ] && [ -f "$ROOT/tests/spells/lodl_open.sh" ]; then
-	lo=$(bash "$ROOT/tests/spells/lodl_open.sh" 2>&1 | tail -3)
+	# its OWN fixtures: lodl_open.sh reads LODL and PORT too and means another
+	# file, so an LODL= given to this harness must not reach it (EXE and PY may)
+	lo=$(env -u LODL -u PORT bash "$ROOT/tests/spells/lodl_open.sh" 2>&1 | tail -3)
 	echo "$lo" | sed 's/^/    /'
 	locount=$(echo "$lo" | grep -oE '^[0-9]+ checks' | grep -oE '^[0-9]+')
 	lofail=$(echo "$lo" | grep -oE '[0-9]+ failures' | grep -oE '^[0-9]+')
