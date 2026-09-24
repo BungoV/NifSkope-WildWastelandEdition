@@ -26,6 +26,8 @@ A `--native --impostors <cards> --arrays` bake now links its card arrays into th
 
 Exe sha1: `1ff89a0804aebbe52020db9307172cfa276e6e4f`.
 
+Kept green: lodgen_native 29/0, lodgen_card_arrays PASS, lodgen_scrappable 9/0, lodgen_identjoin 10/0, lodi_v7 10/0 (G1 skipped, no fixture). native_open (3 failures) and lodgen_btofree (5 failures) fail identically on the rung exe, verdict lines diffed: pre-existing, not this lane.
+
 ## WW_CHANGES text
 
 **2026-09-24, lane CARDLINK1: the native pair carries its cards (NOT FLOWN).**
