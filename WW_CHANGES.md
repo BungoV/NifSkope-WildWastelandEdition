@@ -1,5 +1,15 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Cascaded sun shadows (lane CSM1, 2026-09-24)
+
+The lookdev sun and the night light now cast shadows in the PBR renderer. There are three
+cascades, split at 800, at 3000 and at the shadow distance. They are texel-snapped so they do not
+swim as the camera moves. A 16-tap Poisson filter softens them, and they blend across the cascade
+seams. A **Cascaded Shadows** row in the Scene window turns them on; it is off by default. The
+hour row moves the shadows live. With the row off, the picture is unchanged, byte for byte. Models
+and the preview ground cast shadows. Older non-PBR shapes cast shadows but do not receive them.
+Orthographic views get none.
+
 ## Weather fog in the Scene window (lane FOG1, 2026-09-24)
 
 - **Fog row** in the Scene popup. It switches on live and is off by default; the choice is remembered.
