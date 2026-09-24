@@ -358,6 +358,10 @@ bool ImpostorDraw::drawCard( Scene * scene, const ImpostorCardSet & set,
 		return refuse( QStringLiteral( "the colour sheet did not bind: %1"
 				"  (a loose set outside a data folder is unreachable by the texture cache --"
 				" see ImpostorDraw::registerLooseSheets)" ).arg( set.colour.resolved ) );
+	/* THE CRISP CUT (R5, bungo 2026-09-24 21:1x). One frame at weight 1 under
+	 * the stipple rule already cut exactly where that frame's coverage does;
+	 * naming rule 2 here makes it so by construction, not by arithmetic. */
+	r.cutRule = ( r.frameCount == 1 ) ? 2 : opt.cutRule;
 	}
 	if ( !haveNormal ) {
 		scene->renderer->stopProgram();
@@ -535,7 +539,7 @@ bool ImpostorDraw::drawCard( Scene * scene, const ImpostorCardSet & set,
 			return 2;
 		return -1;
 	}();
-	prog->uni1i( "cutRule", envCutRule >= 0 ? envCutRule : opt.cutRule );
+	prog->uni1i( "cutRule", envCutRule >= 0 ? envCutRule : rs.cutRule );
 	/* The depth search (lane IMPOSTORDEPTH1): the slider's number unless
 	 * Options or WW_IMPOSTOR_SEARCH=N force one (clamped to 64 so a typo cannot
 	 * hang the GPU). The coverage is always decoded per texel, then filtered:

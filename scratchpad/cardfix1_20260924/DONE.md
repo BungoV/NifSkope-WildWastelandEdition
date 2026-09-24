@@ -39,6 +39,16 @@ ww-test-harness-add, search-lean (the common rules' list, loaded with the Skill 
   picture-based instrument). Step 4 below takes the stipple out of the DEFAULT draw by name, which is the
   class SHRUB1 suspected; if islands remain at the crisp end they are the frame's own coverage.
 
+## Step 4 -- R5 defaults: N8, the crisp cut, the slider at the crisp end
+- Checked first: N8 (the bake driver's OCT default, the panel's Card frames default) and the slider at
+  the crisp end (frameCount 1, flat) were ALREADY the shipped defaults (IMPOSTORDEPTH2). Nothing moved there.
+- The crisp cut is now the default BY NAME: `Resolved::cutRule`, which is 2 (the strongest frame) whenever
+  one frame is drawn, and the Options cut otherwise; the shader's `cutRule` uniform reads the resolved rule
+  (src/gl/impostordraw.h/.cpp). Before, the crisp end drew under the stipple rule and was crisp only because
+  one frame at weight 1 happens to cut where that frame does. No pixel moves (D5, D7).
+- The preview harness names the resolved cut in its log (src/impostorpreviewtest.cpp).
+- New gate tests/spells/impostor_defaults.sh, rows D1-D7.
+
 # 3. Gates (numbers; red runs)
 
 ## Step 1 (exe 97716e49, the worktree's first build = the rung, before the comment rebuild)
@@ -77,11 +87,21 @@ part of the maple's gap, not all of it). The FIX5-era fixtures read differently 
 blast +0.015): the drawer moved since c529e3c1 (AA4, DEPTH2 crisp end), so only same-exe pairs compare.
 Output: gates/cardres_test.out (pictures under cardres/, not committed).
 
+## Step 4 (exe 56724fa6)
+- impostor_defaults.sh: 7 checks / 0 failures (gates/impostor_defaults.new.out). D7 = the default picture is
+  byte-identical to the rung's default at all 16 views. RED on the rung exe 97716e49: 6 / 1, D4 (the rung
+  names no strongest-frame cut; gates/impostor_defaults.rung.out). D6 is the floor: the smooth end differs
+  from the default at 8 of 16 views, so D5/D7 can see a change.
+- kept green on 56724fa6: impostor_trunk 38/3 (the three named: flat-snap tear el 0 and el 20 = bungo's
+  13:1x ruling, smooth end el 20), impostor_draw 33/1 (row 5, the known red), impostor_aa 7/0.
+  Outputs gates/*.s4.out.
+
 # 4. Exe sha1 + commits
 - rung / first build: release/NifSkope.exe 97716e4988e493f7b0eab6952780ac18aca0a609 (21:43:55),
   kept as release/NifSkope.before_cardfix1.exe.
 - step 1 build (comments only, 10 objects recompiled): ff86b488aa769d1e453b719ee8e07e5f9ce8164f (22:24:34), same size 24,716,800.
-- commits: step 1 19c0347; step 2 (evidence only) see git log.
+- step 4 build: 56724fa6332362467884619efe19667e158024fc (22:31:49), 24,717,312 B.
+- commits: step 1 19c0347; step 2 91ddd41 (evidence only); step 3 d8302c9; step 4 see git log.
 
 # 5. What the final bake needs
 (filled at the end)

@@ -1,0 +1,12 @@
+diff --git a/src/gl/impostordraw.cpp b/src/gl/impostordraw.cpp
+index 72c6d6d..331652a 100644
+--- a/src/gl/impostordraw.cpp
++++ b/src/gl/impostordraw.cpp
+@@ -323,0 +361,4 @@ ImpostorDraw::Resolved ImpostorDraw::resolve( const Options & opt )
++	/* THE CRISP CUT (R5, bungo 2026-09-24 21:1x). One frame at weight 1 under
++	 * the stipple rule already cut exactly where that frame's coverage does;
++	 * naming rule 2 here makes it so by construction, not by arithmetic. */
++	r.cutRule = ( r.frameCount == 1 ) ? 2 : opt.cutRule;
+@@ -538 +595 @@ bool ImpostorDraw::drawCard( Scene * scene, const ImpostorCardSet & set,
+-	prog->uni1i( "cutRule", envCutRule >= 0 ? envCutRule : opt.cutRule );
++	prog->uni1i( "cutRule", envCutRule >= 0 ? envCutRule : rs.cutRule );

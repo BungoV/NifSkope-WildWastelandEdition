@@ -583,9 +583,14 @@ bool wwImpostorPreviewStart( NifSkope * skope, GLView * ogl, QWidget * viewportH
 		s.opt.cutRule = cut.compare( QStringLiteral( "mean" ), Qt::CaseInsensitive ) == 0 ? 1
 				: cut.compare( QStringLiteral( "strong" ), Qt::CaseInsensitive ) == 0 ? 2 : 0;
 	}
-	s.log << ( s.opt.cutRule == 1
+	// Lane CARDFIX1 (R5): the rule the DRAWER resolves, so the crisp end's own
+	// cut (the strongest frame, by name) is what the log says.
+	const int cutDrawn = s.opt.cutRule != 0 ? s.opt.cutRule : ImpostorDraw::resolve( s.opt ).cutRule;
+	s.log << ( cutDrawn == 1
 			? QStringLiteral( "cut rule: mean -- the 3-frame MEAN coverage (WW_IMPOSTOR_CUT=mean, the way back)" )
-			: s.opt.cutRule == 2
+			: cutDrawn == 2 && s.opt.cutRule == 0
+			? QStringLiteral( "cut rule: strong -- the STRONGEST frame alone: the crisp end's own cut (R5, the default)" )
+			: cutDrawn == 2
 			? QStringLiteral( "cut rule: strong -- the STRONGEST frame alone (WW_IMPOSTOR_CUT=strong, row 18's red control)" )
 			: QStringLiteral( "cut rule: stipple -- each frame's own silhouette at density min(1, 2w), mean as the floor (IMPOSTORTEAR1)" ) );
 	// Lane IMPOSTORDEPTH1: the blend, the snap and the depth search, each said
