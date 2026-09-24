@@ -38,3 +38,8 @@
 - RED on the rung: cardCount 0, cardCorpusHash 0, forced 0 -> G1/G2/G3/FORCE_CARD all FAIL there; bumped rung .lodo refused only by pairing (lodoIdentity), never by cardCount.
 - docs/FO4CS_IMPROVED_LOD_PLAN.md rows 11 + 28 closed with these numbers (p5_plan.py).
 - Kept-green spells running (btfxkz7if).
+
+## 22:29 kept-green spells, DONE written
+- lodgen_native 29/0, lodgen_card_arrays PASS, lodgen_scrappable 9/0, lodgen_identjoin 10/0, lodi_v7 10 ok/0 fail/1 skip.
+- native_open 17 checks 3 failures and lodgen_btofree 27 checks 5 failures: IDENTICAL verdict lines on the rung exe -> pre-existing.
+- Fixtures for those spells copied into this worktree's gitignored scratchpad (read from main, main untouched).
