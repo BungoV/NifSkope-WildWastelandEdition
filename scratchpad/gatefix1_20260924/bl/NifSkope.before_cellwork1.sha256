@@ -1,8 +1,8 @@
 # stock_baseline 1  (tests/spells/lodgen_native_baseline.sh --write)
-# exe f5b83ddc13471c88180d807042caa3db43dee4ff9dfe3cea82fa646d80f73f74 2026-09-24T22:38:24 /e/Projects/NifskopeWWE-gatefix1/release/NifSkope.exe
+# exe b78f3ecf5ff157542d5401e7076acda4e3e6c1c11947240bfc5279090da7ad39 2026-09-24T22:41:19 /e/Projects/NifskopeWWE-gatefix1/release/NifSkope.before_cellwork1.exe
 # git v0.3.3-127-gb2f3073
 # profile ao=1 identity=1 arrays=1 atlas=1 slot-fallback=dim16 exclude=BTR
-# bake-seconds 19
+# bake-seconds 11
 # region (-20,24)d4 (-24,24)d8 (-32,16)d16+slot-fallback (-32,0)d32 region(-20,24..-19,25)d4+arrays+atlas
 74643693e5046ab17db04230baec5cf828e8dec2f7145fb0c999e25a43be568f  chunks/Commonwealth.16.-32.16.bto
 969b0faf439a4c10c24c4b4fc28d52e9a956f77b935ed2a8d7517dfcf5b2bf98  chunks/Commonwealth.16.-32.16.bto.manifest.txt

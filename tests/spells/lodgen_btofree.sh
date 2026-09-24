@@ -31,14 +31,22 @@
 #
 # USAGE
 #   bash tests/spells/lodgen_btofree.sh
-#   RUNG=release/NifSkope.before_btofree1.exe  the exe the bytes are pinned to
+#   RUNG=release/NifSkope.before_gatefix1.exe  the exe the bytes are pinned to
+#        (b2f3073, sha1 dca43d83; before_btofree1 still works, see bake())
 #   EXE=...   the exe under test          REGION="-20 24 -19 25"   DIM=4
 #   OUT=<dir> keep the trees for a look
 set -u
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 NS="${EXE:-$ROOT/release/NifSkope.exe}"
-RUNG="${RUNG:-$ROOT/release/NifSkope.before_btofree1.exe}"
+# RE-PINNED 2026-09-24 (lane GATEFIX1). The pin was before_btofree1 (09-16) and
+# ruled changes since then moved four of its files -- the native .lodo/.lodi, the
+# chunk .BTO and the chunk colour DDS -- so legs (a)-(c) went red on every exe with
+# nothing wrong in the drop itself. Nine moves over 47 rung exes, each named in
+# scratchpad/gatefix1_20260924/DONE.md, rung by rung. A rung from after BTOFREE1
+# is baked with --keep-bto (bake() below), which leg (b) proved on 09-16 is the
+# old bytes exactly.
+RUNG="${RUNG:-$ROOT/release/NifSkope.before_gatefix1.exe}"
 ESM="${ESM:-X:/Programs/Steam/steamapps/common/Fallout 4/Data/Fallout4.esm}"
 DATA="${DATA:-E:/Tools/Fallout 4/DataUnpacked/Data}"
 REGION="${REGION:--20 24 -19 25}"
@@ -103,23 +111,40 @@ echo "region: $REGION dim $DIM"
 bake () {
 	local exe="$1" name="$2"; shift 2
 	local stock=0
-	# bungo 2026-09-17, "Authored LODs only": the ladder and the near library ship
-	# OFF. The rung exes predate that and cannot take the switch, so the exe under
-	# test is asked for the rung's old default by name and the bytes stay comparable.
-	local eq=""
-	[ "$exe" != "$RUNG" ] && eq="--library near --native-ladder"
 	if [ "${1:-}" = "--stock" ]; then stock=1; shift; fi
-	mkdir -p "$WA/$name" "$WA/$name/tex" "$WA/$name/nat"
-	local nat=""
-	[ "$stock" = "0" ] && nat="--native $WA/$name/nat"
-	# shellcheck disable=SC2086
-	"$exe" -no-gui lodgen "$ESM" --worldspace 3C \
-		--terrain-region $REGION --dim "$DIM" --data-root "$DATA" \
-		--out-dir "$WA/$name" --tex-dir "$WA/$name/tex" $nat \
-		--cover --arrays --road-detail 1 $eq "$@" \
-		> "$W/$name.log" 2>&1
-	local rc=$?
-	echo "  $name: rc=$rc, $(find "$W/$name" -type f | wc -l) file(s)"
+	# bungo 2026-09-17, "Authored LODs only": the ladder and the near library ship
+	# OFF. The exe under test is always asked for the old default by name, so its
+	# bytes stay comparable with a rung from before that ruling, which cannot take
+	# the switches. A RUNG THAT CAN is asked the same thing, and a rung from after
+	# BTOFREE1 also gets --keep-bto on its FO4CS bake: it drops its chunks by
+	# default, and leg (a) compares against a tree that HAS them (its refuter says
+	# so). What the rung was actually given is written to <name>.flags and printed;
+	# an option the rung refuses is taken off and the bake run again.
+	local eqs=("--library near --native-ladder")
+	if [ "$exe" = "$RUNG" ]; then
+		if [ "$stock" = "0" ]; then
+			eqs=("--library near --native-ladder --keep-bto" "--keep-bto" "--library near --native-ladder" "")
+		else
+			eqs=("--library near --native-ladder" "")
+		fi
+	fi
+	local eq rc
+	for eq in "${eqs[@]}"; do
+		rm -rf "$W/$name"
+		mkdir -p "$WA/$name" "$WA/$name/tex" "$WA/$name/nat"
+		local nat=""
+		[ "$stock" = "0" ] && nat="--native $WA/$name/nat"
+		# shellcheck disable=SC2086
+		"$exe" -no-gui lodgen "$ESM" --worldspace 3C \
+			--terrain-region $REGION --dim "$DIM" --data-root "$DATA" \
+			--out-dir "$WA/$name" --tex-dir "$WA/$name/tex" $nat \
+			--cover --arrays --road-detail 1 $eq "$@" \
+			> "$W/$name.log" 2>&1
+		rc=$?
+		grep -q "error: unknown option" "$W/$name.log" || break
+	done
+	echo "$eq" > "$W/$name.flags"
+	echo "  $name: rc=$rc, $(find "$W/$name" -type f | wc -l) file(s), given [${eq}${eq:+ }$*]"
 	return $rc
 }
 
@@ -191,6 +216,18 @@ if [ -x "$RUNG" ]; then
 	bake "$RUNG" rung_native   || bad "the rung's FO4CS bake ran"
 	bake "$RUNG" rung_stock --stock || bad "the rung's stock bake ran"
 fi
+# what the rung's FO4CS bake was given decides two questions below
+RUNG_KEPT=0
+[ "$HAVE_RUNG" = "1" ] && grep -q -- "--keep-bto" "$W/rung_native.flags" 2>/dev/null && RUNG_KEPT=1
+# THE GENERATOR WORD (lane VTFIX1, 2026-09-24): each chunk's inputs digest in the
+# ledger starts with the sha1 of the exe that baked it, so two different exes
+# can never record the same inputs. The ledger checker is told which case this
+# is, and then checks that the word moved them rather than excusing anything.
+GENFLAG=""
+if [ "$HAVE_RUNG" = "1" ] && [ "$(sha1sum < "$NS" | cut -c1-40)" != "$(sha1sum < "$RUNG" | cut -c1-40)" ]; then
+	GENFLAG="--generators-differ"
+fi
+echo "  rung kept its chunks: $RUNG_KEPT; generators: ${GENFLAG:-the same exe bytes}"
 bake "$NS" drop        || bad "the FO4CS default bake ran"
 bake "$NS" keep --keep-bto || bad "the --keep-bto bake ran"
 bake "$NS" stock --stock   || bad "the stock bake ran"
@@ -229,7 +266,19 @@ if [ "$HAVE_RUNG" = "1" ]; then
 	# that once forced full rebakes. `cmp` can only say that it moved; the leg
 	# below says which rows moved and asserts that NOTHING else did, which is a
 	# stronger statement than the sweep was making.
-	echo "    everything except the chunks, the ledger and the native cache, against the rung:"
+	# THE EXCLUSION IS NARROWED BY THE RUNG ITSELF (lane GATEFIX1, 2026-09-24).
+	# A rung from before INCR1 writes no .lodj, and the cache is left out of the
+	# sweep as a NEW output, checked by name below. A rung that DOES write one
+	# (every rung from before_msnfix on, the pin since GATEFIX1 included) has it
+	# swept like any other file, byte for byte -- the check below said the
+	# exclusion "would now hide a real difference", and it was right.
+	RLODJ="$(find "$W/rung_native" -name "*.lodj" | wc -l)"
+	LODJ_EX='|[.]lodj$'; [ "$RLODJ" -gt 0 ] && LODJ_EX=''
+	if [ -n "$LODJ_EX" ]; then
+		echo "    everything except the chunks, the ledger and the native cache, against the rung:"
+	else
+		echo "    everything except the chunks and the ledger, the native cache INCLUDED, against the rung:"
+	fi
 	# THE NATIVE CACHE IS NOT SWEPT HERE EITHER (lane INCR1, 2026-09-17, added by
 	# AUDIT1 2026-09-17). `<ws>.<dim>.<cx>.<cy>.lodj` is written by every FO4CS
 	# bake from this exe and the rung predates the feature, so it is "only in
@@ -237,7 +286,7 @@ if [ "$HAVE_RUNG" = "1" ]; then
 	# that, so the file is taken out of it by name and then CHECKED BY NAME just
 	# below: excluded here, asserted present there, and the rung asserted to have
 	# none, so the exclusion can never hide a file that stopped being written.
-	treecmp "$W/rung_native" "$W/drop" '[.]BTO$|[.]lodb$|[.]lodj$'
+	treecmp "$W/rung_native" "$W/drop" "[.]BTO\$|[.]lodb\$$LODJ_EX"
 	if [ "$TC_DIFF" -eq 0 ] && [ "$TC_ONLYA" -eq 0 ] && [ "$TC_ONLYB" -eq 0 ] && [ "$TC_SAME" -gt 0 ]; then
 		note "(a) every other file is byte-identical to the rung's ($TC_SAME files, $TC_PATH more equal after the path rewrite)"
 	else
@@ -246,12 +295,16 @@ if [ "$HAVE_RUNG" = "1" ]; then
 	# the two halves of the exclusion above, stated as checks so the sweep is
 	# narrowed and not weakened: the new side HAS a native cache, the rung has none.
 	NLODJ="$(find "$W/drop" -name "*.lodj" | wc -l)"
-	RLODJ="$(find "$W/rung_native" -name "*.lodj" | wc -l)"
 	echo "    native cache files: this exe $NLODJ, rung $RLODJ"
 	[ "$NLODJ" -gt 0 ] && note "(a) and the excluded native cache IS written by this exe ($NLODJ .lodj)" \
 		|| bad "(a) and the excluded native cache IS written by this exe (found $NLODJ .lodj)"
-	[ "$RLODJ" -eq 0 ] && note "(a) and the rung wrote none, so the exclusion covers a NEW output and hides no change" \
-		|| bad "(a) and the rung wrote none (found $RLODJ .lodj: the exclusion would now hide a real difference)"
+	if [ -n "$LODJ_EX" ]; then
+		[ "$RLODJ" -eq 0 ] && note "(a) and the rung wrote none, so the exclusion covers a NEW output and hides no change" \
+			|| bad "(a) and the rung wrote none (found $RLODJ .lodj: the exclusion would now hide a real difference)"
+	else
+		[ "$RLODJ" -eq "$NLODJ" ] && note "(a) and the rung wrote the same count ($RLODJ .lodj), so the sweep above compared them byte for byte, not excluded" \
+			|| bad "(a) and the rung wrote the same count of native cache files (rung $RLODJ, this exe $NLODJ)"
+	fi
 	# THE SWEEP'S OWN REFUTER, in the same run: a byte flipped in one compared
 	# file must make treecmp say DIFFERS. Without this the three legs above pass
 	# on a comparison that cannot fail.
@@ -281,7 +334,7 @@ if [ "$HAVE_RUNG" = "1" ]; then
 	if recv1 "$RREC"; then
 		skip "(a) the ledger row-by-row leg: the rung writes the version 1 BINARY record and this exe writes version 2 plain text -- no reader reads both, by design"
 	elif [ -n "$RREC" ] && [ -n "$DREC" ] && "$PY" "$LEDGER" drop "$RREC" "$DREC" \
-		"$W/rung_native" "$W/drop"; then
+		"$W/rung_native" "$W/drop" $GENFLAG; then
 		note "(a) the ledger drops the .BTO row and keeps every other digest, the manifest's included"
 	else bad "(a) the ledger drops the .BTO row and keeps every other digest, the manifest's included"; fi
 else
@@ -303,7 +356,8 @@ if [ "$HAVE_RUNG" = "1" ]; then
 	# --incremental run has to refuse to reuse chunks a different line produced.
 	# `.lodj` out of the sweep for the reason leg (a) states, and checked by name
 	# right after it (AUDIT1, 2026-09-17).
-	treecmp "$W/rung_native" "$W/keep" '[.]lodb$|[.]lodj$'
+	# (GATEFIX1) and, as in leg (a), swept byte for byte when the rung writes one.
+	treecmp "$W/rung_native" "$W/keep" "[.]lodb\$$LODJ_EX"
 	KLODJ="$(find "$W/keep" -name "*.lodj" | wc -l)"
 	echo "    native cache files with --keep-bto: $KLODJ"
 	[ "$KLODJ" -gt 0 ] && note "(b) the excluded native cache is written on this side too ($KLODJ .lodj)" \
@@ -319,8 +373,15 @@ if [ "$HAVE_RUNG" = "1" ]; then
 	echo "      this record: ${KREC:-none}"
 	if recv1 "$RREC"; then
 		skip "(b) the ledger row-by-row leg: the rung writes the version 1 BINARY record and this exe writes version 2 plain text -- no reader reads both, by design"
+	elif [ "$RUNG_KEPT" = "1" ]; then
+		# the rung was given --keep-bto too, so the two command lines are the
+		# same and the question is `same`: the same rows, the digest unmoved
+		if [ -n "$RREC" ] && [ -n "$KREC" ] && "$PY" "$LEDGER" same "$RREC" "$KREC" \
+			"$W/rung_native" "$W/keep" $GENFLAG; then
+			note "(b) the ledger names the rung's --keep-bto outputs, digest for digest, on the same command line"
+		else bad "(b) the ledger names the rung's --keep-bto outputs, digest for digest, on the same command line"; fi
 	elif [ -n "$RREC" ] && [ -n "$KREC" ] && "$PY" "$LEDGER" keep "$RREC" "$KREC" \
-		"$W/rung_native" "$W/keep"; then
+		"$W/rung_native" "$W/keep" $GENFLAG; then
 		note "(b) the ledger differs only in the command-line digest, and that digest moved"
 	else bad "(b) the ledger differs only in the command-line digest, and that digest moved"; fi
 else
@@ -365,7 +426,7 @@ if [ "$HAVE_RUNG" = "1" ]; then
 		# BOTH SIDES VERSION 2: then the stock target's recorded OUTPUT ROWS --
 		# which files, and each one's digest -- have to be the same rows, and
 		# the sweep above has already proved the files themselves identical.
-		if "$PY" "$LEDGER" same "$SRREC" "$SREC" "$W/rung_stock" "$W/stock"; then
+		if "$PY" "$LEDGER" same "$SRREC" "$SREC" "$W/rung_stock" "$W/stock" $GENFLAG; then
 			note "(c) and the two records name the same stock outputs, digest for digest"
 		else bad "(c) and the two records name the same stock outputs, digest for digest"; fi
 	else

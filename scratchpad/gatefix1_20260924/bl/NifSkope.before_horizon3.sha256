@@ -1,11 +1,11 @@
 # stock_baseline 1  (tests/spells/lodgen_native_baseline.sh --write)
-# exe f5b83ddc13471c88180d807042caa3db43dee4ff9dfe3cea82fa646d80f73f74 2026-09-24T22:38:24 /e/Projects/NifskopeWWE-gatefix1/release/NifSkope.exe
+# exe e1c61b08f3bc67d7129e33f7ee7b0ef6e7eff5f74ad926a4333dbbf1b5ca9f47 2026-09-24T22:42:01 /e/Projects/NifskopeWWE-gatefix1/release/NifSkope.before_horizon3.exe
 # git v0.3.3-127-gb2f3073
 # profile ao=1 identity=1 arrays=1 atlas=1 slot-fallback=dim16 exclude=BTR
-# bake-seconds 19
+# bake-seconds 15
 # region (-20,24)d4 (-24,24)d8 (-32,16)d16+slot-fallback (-32,0)d32 region(-20,24..-19,25)d4+arrays+atlas
-74643693e5046ab17db04230baec5cf828e8dec2f7145fb0c999e25a43be568f  chunks/Commonwealth.16.-32.16.bto
-969b0faf439a4c10c24c4b4fc28d52e9a956f77b935ed2a8d7517dfcf5b2bf98  chunks/Commonwealth.16.-32.16.bto.manifest.txt
+abdef4a91f9702dd980d8f05524d9e57215028d84116b1e2d20850e89db92def  chunks/Commonwealth.16.-32.16.bto
+5fd89853f69a8f37d12bd957ab593c3db173b37ff8cd2ddbfb6c7d57e3d23f04  chunks/Commonwealth.16.-32.16.bto.manifest.txt
 aa7ed2a63a823363233b8ed0ccf9101f36cb9eed45528c4ca962f21facff3c77  chunks/Commonwealth.32.-32.0.bto
 f3adf818321c3c0e09306d9be07dfba9b9aec1d6dadaad307321e954ac9701c1  chunks/Commonwealth.32.-32.0.bto.manifest.txt
 7bec54e3c7c9a31e0b2f56635a9b43a64fe84bff2a07291b59710ac489ada55a  chunks/Commonwealth.4.-20.24.bto
