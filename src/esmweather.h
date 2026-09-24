@@ -71,6 +71,15 @@ BSD License - see nifskope.h
  *   nam1ignore    NAM1 ignored (only the missing-texture mask disables)
  *   speedswap     the cloud X and Y speeds swapped
  *   cloudalphaone every cloud alpha forced to 1
+ * The fog (lane FOG1, WwFog; gates tests/spells/pbr_fog1_gates.sh):
+ *   fogext05      the day weight on fDaytimeColorExtension 0.5 instead of the plugins' value
+ *   fogpower1     the fog power forced to 1
+ *   fognoblend    no day <-> night blend: the day values at every hour
+ *   fognogamma    the fog colours without the pow 2.2
+ *   fognonam4     the NAM4 fog colour scale ignored
+ *   fognear0      the fog near distance forced to 0
+ *   fogmaxclamp   the intensity capped at Max past ramp 0.75 (also in the shader)
+ *   fognoescape   the near-escape factor dropped (also in the shader)
  */
 
 #include <QByteArray>
@@ -89,7 +98,8 @@ const char * wwTodName( int slot );
 
 //! NAM0 row names (xEdit wbWeatherColors, wbDefinitionsCommon.pas:9707-9757)
 enum WwNam0Row { WwRowSkyUpper = 0, WwRowFogNear = 1, WwRowAmbient = 3, WwRowSunlight = 4, WwRowSun = 5,
-	WwRowStars = 6, WwRowSkyLower = 7, WwRowHorizon = 8, WwRowSunGlare = 15, WwRowMoonGlare = 16 };
+	WwRowStars = 6, WwRowSkyLower = 7, WwRowHorizon = 8, WwRowSunGlare = 15, WwRowMoonGlare = 16,
+	WwRowFogFar = 12, WwRowFogNearHigh = 17, WwRowFogFarHigh = 18 };
 
 //! true when WW_LOOKDEV_RED names this red control
 bool wwLookdevRed( const char * name );
@@ -137,6 +147,7 @@ struct WwSkyGmst
 	float secundaFadeStart = 5.0f, secundaFadeEnd = 10.0f;
 	float masserFadeStart = 5.0f, masserFadeEnd = 10.0f;
 	QStringList fromEsm;	// the EditorIDs a loaded plugin set
+	float dirFogPower = 8.0f;	// fDirectionalFogPower (lane FOG1; ESM and exe agree on 8)
 	//! "name=value(esm|exe) ..." for the CLI and the census
 	QString describe() const;
 };
@@ -222,7 +233,47 @@ struct WwWeatherData
 	float cloudAlpha[8][32] = {};	// JNAM
 	quint8 cloudSpeedX[32] = {};	// QNAM (ONAM b/2+127 when only ONAM is present)
 	quint8 cloudSpeedY[32] = {};	// RNAM
+
+	// lane FOG1: the fog fields (scratchpad/pbrprep1_20260924/spec_fog.md 1.1, 1.3)
+	//! FNAM as stored, padded with the engine defaults (InitializeData); when FNAM is not
+	//! 72 bytes the far height pair [14..17] is a copy of the near pair [8..11]
+	float fog[18] = { 0, 0, 0, 0, 1, 1, 1, 1, 0, 10000, 0, 10000, 1, 1, 0, 10000, 0, 10000 };
+	int fogFnamSize = 0;	// 72 / 56 / 32 (0 = no FNAM)
+	//! NAM4, [k][tod], k = FogNear, FogFar, FogNearHigh, FogFarHigh; 1.0 where absent
+	float fogScale[4][8] = { { 1, 1, 1, 1, 1, 1, 1, 1 }, { 1, 1, 1, 1, 1, 1, 1, 1 },
+		{ 1, 1, 1, 1, 1, 1, 1, 1 }, { 1, 1, 1, 1, 1, 1, 1, 1 } };
+	bool hasNam4 = false;
 };
+
+/*! The engine fog at one hour (lane FOG1, spec_fog.md 2.1-2.3): the FNAM floats
+ *  blended day <-> night on Sky::UpdateFog's weight, the four NAM0 fog colours
+ *  (rows 1 / 12 / 17 / 18) blended in CIELab on the colour keys, times the NAM4
+ *  scale blended on the same keys, then pow 2.2; and the cb12 packing the
+ *  shader reads (K = cb12[41..46]). */
+struct WwFog
+{
+	double hour = 12.0;
+	float ext = 0.5f;	// fDaytimeColorExtension the weight used
+	float w = 1.0f;	// the day weight (NOT the colour keys' four-quarter ramp)
+	float fogNear = 0, fogFar = 0, power = 1, maxv = 1, hds = 1;
+	float nMid = 0, nRange = 10000, fMid = 0, fRange = 10000;
+	WwTodKeys keys;	// the colour keys (engine clock, fDaytimeColorExtension)
+	float scale[4] = { 1, 1, 1, 1 };	// the NAM4 scale at the keys: near, far, nearHigh, farHigh
+	float nearLow[3] = {}, farLow[3] = {}, nearHigh[3] = {}, farHigh[3] = {};	// linear
+	bool effOff = false;	// near == far == 0: packed as 1e8 / 1e9 (fog effectively off)
+	float K[6][4] = {};	// cb12[41..46]
+	QString describe() const;
+};
+//! Sky::UpdateFog's day weight: linear ramps rb..re up, sb..se down (rb, se widened by ext)
+float wwFogDayWeight( double hour, const unsigned char tnam[4], double ext );
+WwFog wwFogAt( const WwWeatherData & w, double hour, const unsigned char tnam[4], const WwSkyGmst & g );
+//! one fragment through the engine fog formula (spec_fog.md 2.4, before the sun term), from the packed K
+struct WwFogSample
+{
+	float ramp = 0, f = 0, hb = 0, intensity = 0, alpha = 0;
+	float color[3] = {};
+};
+WwFogSample wwFogSample( const WwFog & fog, float d, float z );
 
 class EsmWeather
 {

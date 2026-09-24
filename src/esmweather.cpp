@@ -182,7 +182,7 @@ QString WwSkyGmst::describe() const
 	  << one( "fWeatherCloudSpeedMax", cloudSpeedMax ) << one( "iSecundaSize", secundaSize )
 	  << one( "iMasserSize", masserSize ) << one( "fSecundaAngleFadeStart", secundaFadeStart )
 	  << one( "fSecundaAngleFadeEnd", secundaFadeEnd ) << one( "fMasserAngleFadeStart", masserFadeStart )
-	  << one( "fMasserAngleFadeEnd", masserFadeEnd );
+	  << one( "fMasserAngleFadeEnd", masserFadeEnd ) << one( "fDirectionalFogPower", dirFogPower );
 	return o.join( QChar( ' ' ) );
 }
 
@@ -671,7 +671,14 @@ bool EsmWeather::read( quint32 formID, WwWeatherData & out, QString * why )
 				out.hasLnam = true;
 			} else if ( f == "NAM1" && f.size() >= 4 )
 				std::memcpy( &out.cloudNam1, f.data(), 4 );
-			else {
+			else if ( f == "FNAM" ) {
+				// lane FOG1: as many floats as stored (18 / 14 / 8); the rest keep the defaults
+				out.fogFnamSize = int( f.size() );
+				std::memcpy( out.fog, f.data(), std::min<size_t>( sizeof( out.fog ), f.size() & ~size_t( 3 ) ) );
+			} else if ( f == "NAM4" ) {
+				std::memcpy( out.fogScale, f.data(), std::min<size_t>( sizeof( out.fogScale ), f.size() & ~size_t( 3 ) ) );
+				out.hasNam4 = true;
+			} else {
 				// x0TX: chr(0x30 + i) + "0TX", i = 0..31
 				for ( int i = 0; i < 32; i++ ) {
 					const char sig[5] = { char( 0x30 + i ), '0', 'T', 'X', 0 };
@@ -689,6 +696,9 @@ bool EsmWeather::read( quint32 formID, WwWeatherData & out, QString * why )
 			*why = QString::fromLatin1( e.what() );
 		return false;
 	}
+	// TESWeather::Load: an FNAM that is not 0x48 bytes gets the near height pair copied into the far pair
+	if ( out.fogFnamSize != 72 )
+		std::copy( out.fog + 8, out.fog + 12, out.fog + 14 );
 	out.nam0Size = out.nam0.size();
 	const int need = out.nam0Rows * out.nam0Tods * 4;
 	if ( out.nam0Size < need ) {
@@ -844,6 +854,7 @@ WwSkyGmst EsmWeather::gmst()
 		{ "iMasserSize", &g.masserSize, true }, { "fSecundaAngleFadeStart", &g.secundaFadeStart, false },
 		{ "fSecundaAngleFadeEnd", &g.secundaFadeEnd, false }, { "fMasserAngleFadeStart", &g.masserFadeStart, false },
 		{ "fMasserAngleFadeEnd", &g.masserFadeEnd, false },
+		{ "fDirectionalFogPower", &g.dirFogPower, false },
 	};
 	const ESMFile::ESMRecord * r0 = esm->findRecord( 0U );
 	if ( !r0 )
@@ -969,6 +980,132 @@ float EsmWeather::cloudSpeed( quint8 b, const WwSkyGmst & g )
 }
 
 /* ------------------------------------------------------------------------
+ * The engine fog (lane FOG1). The law: scratchpad/pbrprep1_20260924/spec_fog.md
+ * (Sky::UpdateFog 0x64f940@155 for the day weight, Sky::SetColor + UpdateColors
+ * for the colours, SetPerFrameConstants 0x1d11150@155 for the packing, the
+ * engine composite shader for the formula), checked against fog_model.py.
+ * ---------------------------------------------------------------------- */
+
+float wwFogDayWeight( double h, const unsigned char tnam[4], double ext )
+{
+	const double rb = std::max( 0.0, double( tnam[0] ) / 6.0 - ext );
+	const double re = double( tnam[1] ) / 6.0;
+	const double sb = double( tnam[2] ) / 6.0;
+	const double se = std::min( 23.99, double( tnam[3] ) / 6.0 + ext );
+	if ( rb < h && h < re )
+		return float( ( h - rb ) / ( re - rb ) );
+	if ( re <= h && h <= sb )
+		return 1.0f;
+	if ( sb < h && h < se )
+		return float( ( se - h ) / ( se - sb ) );
+	return 0.0f;
+}
+
+WwFog wwFogAt( const WwWeatherData & w, double hour, const unsigned char tnam[4], const WwSkyGmst & g )
+{
+	WwFog o;
+	if ( wwLookdevRed( "hourstuck" ) )
+		hour = 12.0;
+	o.hour = hour;
+	o.ext = wwLookdevRed( "fogext05" ) ? 0.5f : g.colorExt;
+	o.w = wwLookdevRed( "fognoblend" ) ? 1.0f : wwFogDayWeight( hour, tnam, o.ext );
+	const float * F = w.fog;
+	auto mix = [&o]( float day, float night ) { return o.w * day + ( 1.0f - o.w ) * night; };
+	o.fogNear = mix( F[0], F[2] );
+	o.fogFar = mix( F[1], F[3] );
+	o.power = mix( F[4], F[5] );
+	o.maxv = mix( F[6], F[7] );
+	o.nMid = mix( F[8], F[10] );
+	o.nRange = mix( F[9], F[11] );
+	o.hds = mix( F[12], F[13] );
+	o.fMid = mix( F[14], F[16] );
+	o.fRange = mix( F[15], F[17] );
+	if ( wwLookdevRed( "fogpower1" ) )
+		o.power = 1.0f;
+	if ( wwLookdevRed( "fognear0" ) )
+		o.fogNear = 0.0f;
+
+	// the colours: CIELab on the engine clock's keys, x NAM4 on the same keys, then pow 2.2
+	o.keys = wwSkyClock( hour, tnam, g ).keys;
+	const int rows[4] = { WwRowFogNear, WwRowFogFar, WwRowFogNearHigh, WwRowFogFarHigh };
+	float * dst[4] = { o.nearLow, o.farLow, o.nearHigh, o.farHigh };
+	const bool noNam4 = wwLookdevRed( "fognonam4" ), noGamma = wwLookdevRed( "fognogamma" );
+	for ( int k = 0; k < 4; k++ ) {
+		float rgb[3];
+		wwLabBlend( w.color[o.keys.a][rows[k]], w.color[o.keys.b][rows[k]], o.keys.t, rgb );
+		o.scale[k] = noNam4 ? 1.0f : w.fogScale[k][o.keys.a] * ( 1.0f - o.keys.t ) + w.fogScale[k][o.keys.b] * o.keys.t;
+		for ( int c = 0; c < 3; c++ ) {
+			const float v = std::max( 0.0f, rgb[c] * o.scale[k] );
+			dst[k][c] = noGamma ? v : std::pow( v, 2.2f );
+		}
+	}
+
+	// cb12[41..46]
+	float fn = o.fogNear, ff = o.fogFar;
+	if ( fn == 0.0f && ff == 0.0f ) {
+		fn = 1e8f;
+		ff = 1e9f;
+		o.effOff = true;
+	}
+	// guards the engine does not need for vanilla data (a zero span would divide by zero)
+	const float span = ( ff - fn ) != 0.0f ? ( ff - fn ) : 1.0f;
+	const float nR = o.nRange != 0.0f ? o.nRange : 1.0f;
+	const float fR = o.fRange != 0.0f ? o.fRange : 1.0f;
+	const float K[6][4] = {
+		{ 1.0f / span, 1.0f / ( 2.0f * nR ), fn / span, ( o.nMid - nR ) / ( 2.0f * nR ) },
+		{ o.nearLow[0], o.nearLow[1], o.nearLow[2], o.power },
+		{ o.nearHigh[0], o.nearHigh[1], o.nearHigh[2], o.maxv },
+		{ o.farLow[0], o.farLow[1], o.farLow[2], o.hds },
+		{ o.farHigh[0], o.farHigh[1], o.farHigh[2], 0.0f },
+		{ 1.0f / ( 2.0f * nR ), 1.0f / ( 2.0f * fR ), ( o.nMid - nR ) / ( 2.0f * nR ), ( o.fMid - fR ) / ( 2.0f * fR ) },
+	};
+	std::memcpy( o.K, K, sizeof( K ) );
+	return o;
+}
+
+WwFogSample wwFogSample( const WwFog & fog, float d, float z )
+{
+	WwFogSample s;
+	const auto & K = fog.K;
+	auto sat = []( float v ) { return std::clamp( v, 0.0f, 1.0f ); };
+	s.ramp = d * K[0][0] - K[0][2];
+	s.f = sat( s.ramp );
+	const float hN = sat( z * K[5][0] - K[5][2] );
+	const float hF = sat( z * K[5][1] - K[5][3] );
+	s.hb = hN + ( hF - hN ) * s.f;
+	const float mx = K[2][3];
+	const float clampT = ( s.ramp > 0.75f && !wwLookdevRed( "fogmaxclamp" ) )
+		? std::min( ( s.f - 0.75f ) * 4.0f * ( 1.0f - mx ) + mx, 1.0f ) : mx;
+	const float esc = ( s.ramp < 0.015f && !wwLookdevRed( "fognoescape" ) ) ? s.f * 66.666672f : 1.0f;
+	s.intensity = s.f > 0.0f ? std::min( clampT, std::pow( s.f, K[1][3] ) ) : 0.0f;
+	const float weight = s.hb * K[3][3] + ( 1.0f - s.hb );
+	s.alpha = weight * s.intensity * esc;
+	for ( int c = 0; c < 3; c++ ) {
+		const float lo = K[1][c] + ( K[3][c] - K[1][c] ) * s.intensity;
+		const float hi = K[2][c] + ( K[4][c] - K[2][c] ) * s.intensity;
+		s.color[c] = lo + ( hi - lo ) * s.hb;
+	}
+	return s;
+}
+
+QString WwFog::describe() const
+{
+	auto c3 = []( const float v[3] ) {
+		return QString( "%1,%2,%3" ).arg( double( v[0] ), 0, 'f', 5 ).arg( double( v[1] ), 0, 'f', 5 ).arg( double( v[2] ), 0, 'f', 5 );
+	};
+	return QString( "w=%1 ext=%2 near=%3 far=%4 power=%5 max=%6 hds=%7 nmid=%8 nrange=%9 fmid=%10 frange=%11 keys=%12,%13,%14 "
+		"scale=%15 nearlow=%16 farlow=%17 nearhigh=%18 farhigh=%19 effoff=%20" )
+		.arg( double( w ), 0, 'f', 4 ).arg( double( ext ), 0, 'f', 3 ).arg( double( fogNear ), 0, 'f', 1 ).arg( double( fogFar ), 0, 'f', 1 )
+		.arg( double( power ), 0, 'f', 4 ).arg( double( maxv ), 0, 'f', 4 ).arg( double( hds ), 0, 'f', 4 )
+		.arg( double( nMid ), 0, 'f', 1 ).arg( double( nRange ), 0, 'f', 1 ).arg( double( fMid ), 0, 'f', 1 ).arg( double( fRange ), 0, 'f', 1 )
+		.arg( wwTodName( keys.a ), wwTodName( keys.b ) ).arg( double( keys.t ), 0, 'f', 6 )
+		.arg( QString( "%1,%2,%3,%4" ).arg( double( scale[0] ), 0, 'f', 4 ).arg( double( scale[1] ), 0, 'f', 4 )
+			.arg( double( scale[2] ), 0, 'f', 4 ).arg( double( scale[3] ), 0, 'f', 4 ) )
+		.arg( c3( nearLow ), c3( farLow ), c3( nearHigh ), c3( farHigh ) )
+		.arg( effOff ? 1 : 0 );
+}
+
+/* ------------------------------------------------------------------------
  * `NifSkope.exe -no-gui weather` -- the W1 gates' reader. One verdict line per
  * fact, machine-parsed by tests/spells/pbr_r2b_gates.py.
  *
@@ -984,6 +1121,10 @@ float EsmWeather::cloudSpeed( quint8 b, const WwSkyGmst & g )
  *                     hour `skyclock`, `skycolor`, `cloud` (layers 0..15) and `moon` (per --day)
  *   --day d[,d..]     game days for the `moon` lines (default 0)
  *   --cloudtime s     real seconds for the `cloud` offsets (default 0)
+ *   --fog             (with --weather + --hour) the engine fog (lane FOG1): `fogrec`, and per hour `fog`
+ *                     (the blended state + the linear colours) and `fogk` (cb12[41..46])
+ *   --fog-probe d,z[;d,z..]  implies --fog: per hour a `fogprobe` line per fragment (eye distance d,
+ *                     world height z): ramp, f, hb, intensity, alpha, the fog colour before the sun term
  * ---------------------------------------------------------------------- */
 int cmdWeather( const QStringList & args )
 {
@@ -994,7 +1135,8 @@ int cmdWeather( const QStringList & args )
 		std::fflush( stdout );
 	};
 	QString plugins, plugin, dataDir, weather, hours, tnamArg, climateArg, daysArg;
-	bool census = false, doList = false, sky = false;
+	QString fogProbeArg;
+	bool census = false, doList = false, sky = false, fog = false;
 	double cloudTime = 0.0;
 	for ( int i = 0; i < args.size(); i++ ) {
 		const QString & a = args.at( i );
@@ -1023,6 +1165,12 @@ int cmdWeather( const QStringList & args )
 			daysArg = next();
 		else if ( a == "--cloudtime" )
 			cloudTime = next().toDouble();
+		else if ( a == "--fog" )
+			fog = true;
+		else if ( a == "--fog-probe" ) {
+			fog = true;
+			fogProbeArg = next();
+		}
 		else {
 			say( QString( "error unknown argument %1" ).arg( a ) );
 			return 2;
@@ -1179,6 +1327,41 @@ int cmdWeather( const QStringList & args )
 				.arg( double( sl[0] ), 0, 'f', 2 ).arg( double( sl[1] ), 0, 'f', 2 ).arg( double( sl[2] ), 0, 'f', 2 )
 				.arg( double( am[0] ), 0, 'f', 2 ).arg( double( am[1] ), 0, 'f', 2 ).arg( double( am[2] ), 0, 'f', 2 )
 				.arg( double( zm[0] ), 0, 'f', 2 ).arg( double( zm[1] ), 0, 'f', 2 ).arg( double( zm[2] ), 0, 'f', 2 ) );
+		}
+		if ( fog ) {
+			// lane FOG1: the record as read, then the engine fog per hour and the probed fragments
+			const WwSkyGmst g = ew.gmst();
+			QStringList fl, sl;
+			for ( int i = 0; i < 18; i++ )
+				fl << QString::number( double( w.fog[i] ), 'g', 7 );
+			for ( int k = 0; k < 4; k++ )
+				for ( int t = 0; t < 8; t++ )
+					sl << QString::number( double( w.fogScale[k][t] ), 'g', 7 );
+			say( QString( "fogrec fnam=%1 nam4=%2 dirfogpower=%3 colorext=%4 fog=%5 scale=%6" ).arg( w.fogFnamSize )
+				.arg( w.hasNam4 ? 1 : 0 ).arg( double( g.dirFogPower ), 0, 'g', 7 ).arg( double( g.colorExt ), 0, 'g', 7 )
+				.arg( fl.join( QChar( ',' ) ), sl.join( QChar( ',' ) ) ) );
+			QVector<QPair<float, float>> probes;
+			for ( const QString & p : fogProbeArg.split( QChar( ';' ), Qt::SkipEmptyParts ) ) {
+				const QStringList dz = p.split( QChar( ',' ) );
+				if ( dz.size() == 2 )
+					probes << qMakePair( dz.at( 0 ).toFloat(), dz.at( 1 ).toFloat() );
+			}
+			for ( double hr : hourList() ) {
+				const WwFog f = wwFogAt( w, hr, tnam, g );
+				say( QString( "fog hour=%1 %2" ).arg( hr, 0, 'f', 4 ).arg( f.describe() ) );
+				for ( int r = 0; r < 6; r++ )
+					say( QString( "fogk hour=%1 row=%2 v=%3,%4,%5,%6" ).arg( hr, 0, 'f', 4 ).arg( 41 + r )
+						.arg( double( f.K[r][0] ), 0, 'g', 9 ).arg( double( f.K[r][1] ), 0, 'g', 9 )
+						.arg( double( f.K[r][2] ), 0, 'g', 9 ).arg( double( f.K[r][3] ), 0, 'g', 9 ) );
+				for ( const auto & p : probes ) {
+					const WwFogSample s = wwFogSample( f, p.first, p.second );
+					say( QString( "fogprobe hour=%1 d=%2 z=%3 ramp=%4 f=%5 hb=%6 intensity=%7 alpha=%8 color=%9,%10,%11" )
+						.arg( hr, 0, 'f', 4 ).arg( double( p.first ), 0, 'f', 1 ).arg( double( p.second ), 0, 'f', 1 )
+						.arg( double( s.ramp ), 0, 'f', 6 ).arg( double( s.f ), 0, 'f', 6 ).arg( double( s.hb ), 0, 'f', 6 )
+						.arg( double( s.intensity ), 0, 'f', 6 ).arg( double( s.alpha ), 0, 'f', 6 )
+						.arg( double( s.color[0] ), 0, 'f', 6 ).arg( double( s.color[1] ), 0, 'f', 6 ).arg( double( s.color[2] ), 0, 'f', 6 ) );
+				}
+			}
 		}
 		if ( sky ) {
 			const WwSkyGmst g = ew.gmst();
