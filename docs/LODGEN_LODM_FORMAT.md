@@ -213,10 +213,12 @@ not say what camera made it cannot be corrected after the fact.
 ### 3.2 A horizon-RING card (2026-09-24, lane CARDFIX1 step 5)
 
 bungo, 2026-09-23 04:4x, RULED: *"for fo4cs use the convention was 22.5 degrees
-per take"*. **Tree** cards are photographed at 16 azimuths, 22.5 degrees apart, at
-elevation 0 -- not over the hemi-octahedral grid. The card bake driver makes the
-ring the default for `CANDIDATES=trees` (`RING=16`); the empty-slot run keeps the
-grid (`RING=0`), and either can be forced.
+per take"*. A ring card is photographed at 16 azimuths, 22.5 degrees apart, at
+elevation 0 -- not over the hemi-octahedral grid. **It is an option, not the
+default:** bungo RULED 2026-09-25, *"Yes, 8x8 is the default choice for a bake"*,
+after step 5 measured the N8 grid better than the ring at every elevation, the
+horizon included. The card bake driver defaults every run, trees included, to the
+grid (`RING=0`); `RING=16` bakes the ring (`tests/spells/impostor_ring.sh` R7).
 
 A ring card uses **the aggregate's own layout keys (section 3a)**, not a third
 layout:

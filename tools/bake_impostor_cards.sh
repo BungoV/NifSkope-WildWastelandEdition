@@ -139,15 +139,16 @@ case "${CANDIDATES:-missing}" in
 	*) echo "CANDIDATES must be trees or missing; got '${CANDIDATES}'" >&2; exit 2 ;;
 esac
 CANDIDATES="${CANDIDATES:-missing}"
-# THE HORIZON RING (lane CARDFIX1 step 5, IMPOSTORRING1). bungo 2026-09-23 04:4x, RULED: "for fo4cs
-# use the convention was 22.5 degrees per take" -- TREE cards are 16 azimuths at elevation 0, one
-# row (the aggregate's ring layout), instead of the OCT x OCT hemi-octahedral grid. So the tree run
-# defaults to RING=16 and the empty-slot run keeps the grid; RING=0 forces the grid, RING=16 the ring.
-# With a ring, OCT is not used for the sheets (the library.txt says which one the set carries).
-if [ "$CANDIDATES" = trees ]; then RING="${RING:-16}"; else RING="${RING:-0}"; fi
+# THE HORIZON RING (lane CARDFIX1 step 5, IMPOSTORRING1) is an OPTION: RING=16 photographs 16 azimuths
+# at elevation 0 in one row (the aggregate's ring layout) instead of the OCT x OCT hemi-octahedral grid.
+# THE DEFAULT IS THE N8 GRID (RING=0) for every run, trees included. bungo RULED 2026-09-25: "Yes, 8x8
+# is the default choice for a bake" -- replacing his 2026-09-23 ring default for tree runs, after step 5
+# measured N8 better than the ring at every elevation, the horizon included (docs/LODGEN_LODM_FORMAT.md
+# 3.2). With a ring, OCT is not used for the sheets (the library.txt says which one the set carries).
+RING="${RING:-0}"
 case "$RING" in
 	0|16) ;;
-	*) echo "RING must be 16 (the ruled 22.5-degree ring) or 0 (the grid); got '${RING}'" >&2; exit 2 ;;
+	*) echo "RING must be 0 (the N8 grid, the default) or 16 (the 22.5-degree horizon ring); got '${RING}'" >&2; exit 2 ;;
 esac
 RESOURCES="${RESOURCES:-}"
 MO2="${MO2:-}"

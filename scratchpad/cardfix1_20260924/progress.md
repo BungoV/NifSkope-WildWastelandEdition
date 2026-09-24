@@ -14,3 +14,4 @@
 01:15:59 s6 chain: ring 13/0, trunk 38/3 named, draw 1 known red (row 5), aa 7/0, shrubs PASS, card_arrays PASS, impostor_cards PASS, defaults 7/0 RUNG; octahedral 115/1 on its stale lodm-1 premise -> fix27; rerun + pbr_shade_ab + GIF
 01:24:11 octahedral s6b PASS (fix27); GIF run 2 OK (run 1 blank: no textures\ tree beside the .lodm, fixed in wind_gif.sh); pbr_shade_ab s6b 10 cases 11 fail = OLD arm missing DLLs (my copy, rc 127), fixed, s6c running
 01:28:37 pbr_shade_ab s6c 10/0 PASS; director relays bungo 2026-09-25 RULING 'Yes, 8x8 is the default choice for a bake' -> fix29 (driver RING=0 default, docs, ring gate R7); ring gate s6n run
+01:34:06 ring s6n 17/0 (R7 green, red = step-5 driver ring 16); step 6 committed 24e7835; DONE 6b + sections 5/6 written; committing 6b

@@ -142,7 +142,8 @@ and `grid` instead of `oct`, frame `v` at `[v·frameW, (v+1)·frameW) × [0, fra
 two neighbours blended by angle. Everything in §3 onward -- the gap, the padding,
 the size ladders, per-frame positioning, the orthographic camera, the channels --
 is the grid's, frame for frame. The bake: `WW_IMPOSTOR_RING=16` (it wins over
-`WW_IMPOSTOR_OCT`); the driver: `RING=16`, the default for `CANDIDATES=trees`.
+`WW_IMPOSTOR_OCT`); the driver: `RING=16`, an option -- the default is the N8 grid
+(`RING=0`) for every run, trees included (bungo 2026-09-25: "Yes, 8x8 is the default choice for a bake").
 
 Measured against the N8 grid on the same model at the same tile: the grid's
 horizon is 28 frames whose azimuths bunch toward the diagonals (per quadrant 0,

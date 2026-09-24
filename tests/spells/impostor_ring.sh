@@ -36,6 +36,10 @@
 #   R6  the blend rule: at 5.625 + 22.5k (a quarter step past frame k) the selection is frames k and k+1
 #       at weights 0.75 / 0.25 (+-0.01), and the third slot carries weight 0: TWO frames, weighted by
 #       angle. Computed here from the logged camera azimuth, not from the drawer's arithmetic.
+#   R7  THE DRIVER'S DEFAULT (bungo RULED 2026-09-25: "Yes, 8x8 is the default choice for a bake"):
+#       tools/bake_impostor_cards.sh with CANDIDATES=trees and no RING writes `ring 0` in its library.txt;
+#       RING=16 writes `ring 16` (the option still reaches the bake); RING=5 is refused by name. RED: the
+#       step-5 driver (git 1303334) wrote `ring 16` with no RING. MAX=0, so nothing is photographed.
 #   M   MEASUREMENT, not a gate: ring16 vs N8 IoU at the in-between azimuths at el 0/5/15/30/60 (the ring
 #       has no frame above the horizon; this is what that costs, printed).
 #
@@ -341,6 +345,29 @@ r = [((M[a] & M[int(22.5 * (round(a / 22.5) % 16))]).sum()) / max(1, (M[a] | M[i
 print('mean %.4f' % np.mean(r))
 PYEOF
 )"
+# ---- R7: the driver's default ring (bungo RULED 2026-09-25: "Yes, 8x8 is the default choice for a bake").
+# MAX=0: the driver lists the candidates and writes library.txt, then bakes nothing. The red is the step-5
+# driver, pulled out of git beside the real one (tools/ is its ROOT anchor) and removed afterwards.
+drvlib() {   # $1 tag  $2 driver  rest = env -> the `ring` line of that run's library.txt
+	rm -rf "$WORK/drv_$1"
+	env "${@:3}" MAX=0 CANDIDATES=trees bash "$2" "$ESM" -21 23 -19 25 "$WORK/drv_$1" > "$WORK/drv_$1.log" 2>&1
+	echo "rc $? $( grep -m1 '^ring ' "$WORK/drv_$1/library.txt" 2>/dev/null || echo 'no library.txt' )"
+}
+d0="$( drvlib default "$root/tools/bake_impostor_cards.sh" )"
+d16="$( drvlib ring16 "$root/tools/bake_impostor_cards.sh" RING=16 )"
+d5="$( drvlib ring5 "$root/tools/bake_impostor_cards.sh" RING=5 )"
+redDrv="$root/tools/.r7_step5_driver.sh"
+git -C "$root" show 1303334:tools/bake_impostor_cards.sh > "$redDrv" 2>/dev/null
+dRed="$( drvlib red "$redDrv" )"; rm -f "$redDrv"
+case "$d0" in "rc 0 ring 0") ok "R7 the driver's tree run defaults to the N8 grid: $d0 (CANDIDATES=trees, no RING)" ;;
+	*) bad "R7 the driver's tree run defaults to the N8 grid: $d0 (CANDIDATES=trees, no RING)" ;; esac
+case "$d16" in "rc 0 ring 16") ok "R7 RING=16 still bakes the ring: $d16" ;; *) bad "R7 RING=16 still bakes the ring: $d16" ;; esac
+case "$d5" in "rc 2 "*) grep -q "RING must be 0" "$WORK/drv_ring5.log" \
+	&& ok "R7 RING=5 is refused by name: $d5, '$( grep -m1 'RING must be' "$WORK/drv_ring5.log" | cut -c1-60 )...'" \
+	|| bad "R7 RING=5 is refused by name: $d5 (rc 2 but not the RING message)" ;;
+	*) bad "R7 RING=5 is refused by name: $d5" ;; esac
+case "$dRed" in "rc 0 ring 16") ok "R7 red control: the step-5 driver (1303334) defaulted the tree run to the ring: $dRed" ;;
+	*) bad "R7 red control: the step-5 driver (1303334) defaulted the tree run to the ring: $dRed" ;; esac
 say "$steps checks, $fails failures"
 [ "$fails" -eq 0 ] && say "PASS" || say "FAIL"
 [ "$fails" -eq 0 ]

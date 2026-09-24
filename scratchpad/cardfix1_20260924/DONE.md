@@ -1,6 +1,7 @@
 PARTIAL -- lane CARDFIX1 (LOD-D), chain of seven steps. Steps 1-5 landed; step 6 (sway A) built, committed and
 gated, RED on G4 only (the BC7 error bar, pre-registered from the synthetic; decision owed, section 3). NEXT:
 step 7, IMPOSTORPBRM1 (brief_impostorpbrm1.md), not started: the brief forbids a step on a red one.
+Step 6b (the director's relay of bungo's 2026-09-25 ruling, the N8 grid as the bake default) landed after 6.
 
 # 1. Skills loaded
 nifskope-ww-worktree-build, nifskope-ww-build-verify, nifskope-ww-lodgen, nifskope-ww-render-shot,
@@ -94,6 +95,17 @@ ww-test-harness-add, search-lean (the common rules' list, loaded with the Skill 
   game animates it. (untracked: binaries stay out of the public repo)
 - lodgen_octahedral.sh's "lodm 1 card" check was stale (its fixture is a tree, so its card is now lodm 2): it
   now ties the version to the sidecar's sway line (fix27).
+
+## Step 6b -- the N8 grid is the bake default (bungo RULED 2026-09-25)
+- bungo, 2026-09-25, verbatim (relayed by the director): **"Yes, 8x8 is the default choice for a bake"**.
+  It replaces his 2026-09-23 ring default for tree bakes, after step 5 measured N8 better than the ring at
+  every elevation, the horizon included.
+- tools/bake_impostor_cards.sh: RING defaults to 0 (the N8 grid) for every run, trees included; RING=16
+  still bakes the ring, anything else is refused by name. The panel has no ring path (the only
+  WW_IMPOSTOR_RING reader is the bake hook), so nothing changed there. docs/LODGEN_LODM_FORMAT.md 3.2 and
+  docs/LODGEN_CARD_SHEETS.md say the ring is an option. No exe change (script and docs only).
+- New gate row R7 in tests/spells/impostor_ring.sh: it runs the driver itself with MAX=0 (nothing is
+  photographed) and reads its library.txt.
 
 # 3. Gates (numbers; red runs)
 
@@ -212,6 +224,11 @@ Output: gates/cardres_test.out (pictures under cardres/, not committed).
   mesh 0.42 .. 0.46. Run 1 drew the card blank: the sheets need a `textures\` tree beside the .lodm for the
   preview's texture cache (the log said so by name); wind_gif.sh now builds one.
 
+## Step 6b (exe 309f3aa9, unchanged)
+- tests/spells/impostor_ring.sh 17 / 0 (gates/impostor_ring.s6n.out): R1-R6 as before, plus R7: the tree
+  run with no RING writes `ring 0`; RING=16 writes `ring 16`; RING=5 exits 2 naming the rule. RED: the
+  step-5 driver (git 1303334, pulled out beside the real one and removed afterwards) wrote `ring 16`.
+
 # 4. Exe sha1 + commits
 - rung / first build: release/NifSkope.exe 97716e4988e493f7b0eab6952780ac18aca0a609 (21:43:55),
   kept as release/NifSkope.before_cardfix1.exe.
@@ -220,12 +237,31 @@ Output: gates/cardres_test.out (pictures under cardres/, not committed).
 - step 5 build: eaa4b0b60e9ff6796df846f54ebf292a94cc0aca (23:00:20), 24,729,600 B; kept as
   release/NifSkope.s5_eaa4b0b6.exe (the step-6 gates' previous exe).
 - commits: step 1 19c0347; step 2 91ddd41 (evidence only); step 3 d8302c9; step 4 7896ad1;
-  step 5 1303334 (code) + 6c5f5f8 (DONE); step 6 = the commit carrying this text (code, gate, DONE together).
+  step 5 1303334 (code) + 6c5f5f8 (DONE); step 6 24e7835 (code, gate, DONE); step 6b = the commit carrying
+  this text.
 - step 6 builds: 0eeade3a (23:59:42, first); 309f3aa9a09897da12c94db644ff70f57f33dc7b (2026-09-25 00:22:33,
   24,737,280 B; + the ring array file name, fix24) = the exe every step-6 number is from.
 
 # 5. What the final bake needs
-(filled at the end)
+- A card bake from THIS branch: the N8 grid by default (no RING), TILE 256, the crisp cut (steps 4, 6b).
+- Sway A is on for every model with a tree-animation shape (no switch; ruled). Those cards and their card
+  arrays are `lodm` 2: an exe from before step 6 and FO4CS's current reader refuse them BY NAME. So the
+  in-game test needs the FO4CS reader to learn `lodm` 2 (owed, FO4CS built last by standing order); the
+  NifSkope side reads and draws them.
+- The G4 ruling (accept 3.573 / 13, or raise the BC7 alpha weight) comes BEFORE the final bake, because
+  option (b) changes every model-sway card's bytes.
+- lodgenaggregate does not know ring sets or `lodm` 2 (not this lane's file): with the N8 default no ring
+  set is made, and the aggregate composites the weight but writes lodm 1 with no `sway` key.
+- Previewing a loose card set needs a `textures\` tree beside the .lodm (the harness says so by name).
 
 # 6. Skill review
-(filled at the end)
+- Written: E:\Projects\Claude\.claude\skills\ww-preregister-bar-from-the-subject\SKILL.md -- measure the
+  reference's own ceiling, the subject's population and the REAL input before writing a bar; print the
+  codec's error on an untouched channel beside a lossy-codec bar; a pre-registered bar that turns red on
+  correct code is reported with options, not re-pinned in the same step. It folds this lane's four
+  MISTAKES entries into one procedure.
+- Candidates for the director (DELIVERABLE_TEXT.md, Skill review): staging one step's hunks of a file that
+  already holds the next step's (stage6_docs.py: undo the later patch's pairs in memory, write the INDEX
+  only); D7 in impostor_defaults.sh needs RUNG=; the preview's `textures\` tree for a loose set; the
+  pbr_shade_ab OLD arm needs the whole runtime (DLLs, qt.conf), and an OLD arm that cannot start reads as
+  "NO PICTURE" on every case, not as a refusal.
