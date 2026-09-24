@@ -1,0 +1,29 @@
+TOOLFIX1 ww_build.sh gates, 2026-09-24 22:1x (transcribed from the tool output, trimmed)
+
+running NifSkope at G1: 23560 main tree (bungo's window), 20824 incrgate1, 35216 cardlink1, 15356 cardfix1
+
+== G1 RED: 5c3a51f's lock step (lines 1-34 of the old script) in a scratch tree <scratch>/g1tree
+   whose release/NifSkope.exe no process runs
+running copy (pid 23560) renamed aside           -> release/NifSkope_inuse_23560.exe   (RED: renamed)
+
+== G1 GREEN (same scratch tree, new script, WW_BUILD_LOCK_ONLY=1)
+this tree's exe is not held by a window (4 NifSkope running from elsewhere, left be)   rc=0, exe untouched
+
+== G1 GREEN end to end (this worktree, full bash tools/ww_build.sh)
+this tree's exe is not held by a window (4 NifSkope running from elsewhere, left be)
+BUILD-RC=0 / exe newer than the sources / copies in step / WWBUILD-RC=0
+release/ = NifSkope.before_toolfix1.exe + NifSkope.exe only; sha1 a67b55f59f0e before and after
+
+== G2: this tree's exe launched (pid 30248, WW_WINDOW_AT=1960,40, --port 45993, netstat: port unused)
+pid 30248 ExecutablePath = E:\Projects\NifskopeWWE-toolfix1\release\NifSkope.exe; exclusive open: LOCKED
+this tree's exe is held by pid(s) 30248: renamed aside to release/NifSkope_inuse_30248.exe
+BUILD-RC=0 (1 g++ line = the relink of the missing target) / exe newer / copies in step / WWBUILD-RC=0
+release/NifSkope.exe 22:15:16 sha1 664d465b315f (new link); NifSkope_inuse_30248.exe 22:11:57 LOCKED;
+new NifSkope.exe free
+
+== G2b (stale image path) pid 30248 still up, image now NifSkope_inuse_30248.exe
+pid 30248 ExecutablePath STILL = ...\release\NifSkope.exe   (the reported path does not follow a rename)
+new script (LOCK_ONLY): "pid(s) 30248 report this tree's exe path, but the exe is not held (renamed earlier?): not renamed"
+RED, old lock step in the same state: "running copy (pid 23560) renamed aside" -> the FREE fresh exe renamed,
+  named after bungo's pid (the CSM1 symptom); moved back by hand afterwards.
+pid 30248 closed with CloseMainWindow (exited within 15 s).

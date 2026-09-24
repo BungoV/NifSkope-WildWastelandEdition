@@ -1,0 +1,10 @@
+exe   : E:/Projects/NifskopeWWE-esmfix1/release/NifSkope.before_esmfix1.exe (24799744 bytes, 2026-09-24 21:50:16)
+work  : C:/Users/bungo/AppData/Local/Temp/claude/E--Projects-Claude/b560e4ec-6e66-4c21-9572-1ad4acca0043/scratchpad/g5_red_whole
+
+== G5 a one-chunk Sanctuary bake from his load order ==
+  g5: bake rc=1 in 13 s; 155 log lines; error: E:/Projects/Fallout 4 Mods/mods/AnotherOne's Test World/TestWorldspace.esp: invalid form ID 
+  FAIL G5 the bake of his live profile: rc=1, record ''
+  FAIL G5 no record, so TestWorldspace.esp is not in it
+
+2 checks, 2 failures
+RESULT FAIL
