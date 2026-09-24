@@ -54,6 +54,9 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 //! @file nifmodel.cpp The NIF data model.
 
+#include <QMutex>
+#include <QMutexLocker>
+
 const QString EMPTY_QSTRING;
 const QString SPACE_QSTRING(" ");
 const QString DOT_QSTRING(".");
@@ -66,6 +69,13 @@ QHash<QString, QString> multiArrayPseudonyms2;
 
 void setupArrayPseudonyms()
 {
+	/* THE FIRST NifModel USED TO BE BUILT ON THE MAIN THREAD, ALWAYS.
+	 * The LOD generator's chunk pass (lodgenchunkpass.h) builds them on
+	 * workers, so sixteen threads can reach this empty hash at once and all
+	 * sixteen fill it. One mutex; taken once per NifModel construction, which
+	 * is microseconds against a chunk. (lane BAKEPERF1, 2026-09-11) */
+	static QMutex pseudonymGuard;
+	QMutexLocker pseudonymLock( &pseudonymGuard );
 	if ( !arrayPseudonyms.isEmpty() )
 		return;
 
@@ -1418,18 +1428,25 @@ QVariant NifModel::data( const QModelIndex & index, int role ) const
 						? PIN_QSTRING : EMPTY_QSTRING;
 
 					if ( p && p->isArray() && !p->isBinary() ) {
-						QHash<QString, QString> & pseudonymMap = arrayPseudonyms;
+						/* A POINTER, NOT A REFERENCE (lane NIFPARSE1, 2026-09-11; found by
+						 * BAKEPERF1 as its red R3 and left). `QHash & m = arrayPseudonyms;`
+						 * followed by `m = multiArrayPseudonyms1;` does not re-point m -- it
+						 * COPY-ASSIGNS into the global, so the first multi-array row ever
+						 * displayed replaced the application's singular-name table for the
+						 * rest of the session, and did it as a process-wide write from a
+						 * display call. */
+						const QHash<QString, QString> * pseudonymMap = &arrayPseudonyms;
 						// Is it a 2nd level array of a multi-array?
 						if ( p->isMultiArray() )
-							pseudonymMap = multiArrayPseudonyms1;
+							pseudonymMap = &multiArrayPseudonyms1;
 						else {
 							// Is it an item (3rd level) of a multi-array?
 							auto pp = p->parent();
 							if ( pp && pp->isMultiArray() )
-								pseudonymMap = multiArrayPseudonyms2;
+								pseudonymMap = &multiArrayPseudonyms2;
 						}
 
-						return QString( namePrefix % pinMark % pseudonymMap.value( item->name(), item->name() ) % SPACE_QSTRING % QString::number( item->row() ) );
+						return QString( namePrefix % pinMark % pseudonymMap->value( item->name(), item->name() ) % SPACE_QSTRING % QString::number( item->row() ) );
 					}
 
 					return namePrefix + pinMark + item->name();
@@ -2185,8 +2202,10 @@ bool NifModel::load( QIODevice & device, const char* fileName )
 																	   "Block Type Hashes" ) )
 							);
 
-							if ( blockHashes.contains( hash ) )
-								blktyp = blockHashes[hash]->id;
+							// .value(), not operator[]: the non-const one detaches a
+							// process-wide QMap from inside a per-file load (NIFPARSE1)
+							if ( const NifBlockPtr blkForHash = blockHashes.value( hash ) )
+								blktyp = blkForHash->id;
 							else
 								throw tr( "Block Hash not found." );
 						}
@@ -3388,6 +3407,39 @@ QString NifModel::findResourceFile( const QString & path, const char * archiveFo
 {
 	std::string	fullPath( Game::GameManager::get_full_path( path, archiveFolder, extension ) );
 	return gameResources->find_file( fullPath );
+}
+
+void NifModel::addResourceRoot( const QString & dataPath )
+{
+	if ( dataPath.isEmpty() )
+		return;
+
+	/* WHETHER THE ROOTS THIS MODEL ALREADY HAS ARE CARRIED ACROSS depends on
+	 * whose they are. `addNIFResourcePath` gives the new object `dataPath`
+	 * ALONE, so a NIF opened out of a loose data folder would lose its own
+	 * textures; those are carried. The process-wide `archives[game]` roots are
+	 * NOT, because they are the whole game install and are already reachable
+	 * through `parent` -- copying them would make this one model re-scan it. */
+	const bool nifLocal = gameResources
+			&& gameResources != &( Game::GameManager::getGameResources( Game::GameManager::get_game( this ) ) );
+	const QStringList carried = nifLocal ? gameResources->dataPaths : QStringList();
+	if ( carried.contains( dataPath, Qt::CaseInsensitive ) )
+		return;
+
+	Game::GameManager::GameResources * r = Game::GameManager::addNIFResourcePath( this, dataPath );
+	if ( !r )
+		return;
+	/* refCnt > 0 means another window is already using this exact object; its
+	 * roots are not this model's to extend. */
+	if ( r->refCnt <= 0 ) {
+		for ( const QString & p : carried ) {
+			if ( !r->dataPaths.contains( p, Qt::CaseInsensitive ) )
+				r->dataPaths.append( p );
+		}
+		// the index was built before the roots changed; the next lookup rebuilds it
+		r->close_archives();
+	}
+	gameResources = r;
 }
 
 bool NifModel::getResourceFile(

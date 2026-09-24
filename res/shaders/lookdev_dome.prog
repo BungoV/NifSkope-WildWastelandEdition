@@ -1,0 +1,4 @@
+# Lookdev weather sky dome (lane PBRWX1): Meshes\Sky\Atmosphere.nif in the WTHR
+# sky colours. Never enabled on models: selected by name from gl/lookdevstage.cpp.
+
+shaders lookdev_dome.vert lookdev_dome.frag

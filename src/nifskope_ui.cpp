@@ -33,14 +33,23 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "gamemanager.h"
 #include "lodgen.h"
+#include "lodgenlayout.h"
 #include "esmdata.h"
+#include "cellclick.h"		// lane CELLVIEW2
+#include "cellpanel.h"		// lane CELLVIEW2
+#include "cellpicktest.h"	// lane CELLVIEW2
+#include "cellrefs.h"		// lane CELLWORK1
+#include "cellworkspace.h"	// lane CELLWORK1
 #include "nifskope.h"
 #include "starterscene.h"
+#include "harnesswindow.h"
 #include "ui_nifskope.h"
 
 #include "bakegeom.h"
 #include "bsamodel.h"
 #include "glview.h"
+#include "impostorchunk.h"
+#include "impostorpreviewtest.h"
 #include "ui/wwglyphs.h"
 #include "nifmerge.h"
 #include "gl/gltools.h"
@@ -70,7 +79,15 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/controllers.h"
 #include "gl/glparticles.h"
 #include "gl/glscene.h"
+#include "hkxplayback.h"
+#include "hkxanimui.h"		// lane HKX3
+#include "animworkspace.h"		// lane HKXEDIT2
+#include "bodybuildpanel.h"		// lane GLTFEXPORT1
+#include "hkxmodel.h"		// (lane BUILD11) the WW_ANIMWS_HKXMODEL branch reads hkx->undoStack
+#include "filestab.h"
 #include "gl/glproperty.h"
+#include "gl/scenelighting.h"
+#include "ui/scenewindow.h"
 #include "io/lodmfile.h"
 #include "gl/glshape.h"
 #include "gl/renderer.h"
@@ -96,6 +113,9 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <QAction>
 #include <QActionGroup>
+#include <QOpenGLContext>
+#include <QOpenGLFramebufferObject>
+#include <QOpenGLFunctions>
 #include <QApplication>
 #include <QBuffer>
 #include <QButtonGroup>
@@ -117,6 +137,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDir>
+#include <QDirIterator>
+#include <QCryptographicHash>
 #include <QDockWidget>
 #include <QDoubleSpinBox>
 #include <QFile>
@@ -152,11 +174,14 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QTabBar>
 #include <QTabWidget>
 #include <QUndoStack>
+#include <QUndoGroup>	// (lane BUILD11) HKXEDIT2 creates the Undo/Redo actions from wwAnimUndoGroup()
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QSettings>
 #include <QTextStream>
 #include <QTimer>
+
+#include <algorithm>
 #include <QToolBar>
 #include <QToolButton>
 #include <QSpinBox>
@@ -354,6 +379,54 @@ static const struct WwSkinVar { const char * name; const char * dark; const char
 	{ "selBgInactive", "#2b425f", "#b9cbe0" },  // other selected rows
 	{ "selTextActive", "#ff9d00", "#a05a00" },  // text on the primary row
 	{ "selTextInactive", "#ff7200", "#8a4a00" },  // text on the others
+	/* THE ANIMATION SHEET'S OWN SIX (lane UINOTES1, 2026-09-12), from bungo's
+	 * rulings 2, 7b, 8: a selected key must stay VISIBLE and be orange, the
+	 * other selected ones orange-red, the playhead BLUE, and everything
+	 * outside the clip's range darkened like Blender's.
+	 *
+	 * WHY THEY ARE NEEDED AND NOT JUST THE OLD NAMES. The sheet painted a
+	 * selected key in `toggle` (#4772b3) and the CURRENT ROW's background in
+	 * `selBgActive` (#4a7ab0). Those two differ by 3/8/3 in R/G/B -- a
+	 * selected key on the row you had just clicked was blue ink on a blue
+	 * plate, which is exactly the "they go invisible" bungo saw on the COM
+	 * row. The playhead was `accent`, the same orange selection is supposed
+	 * to own.
+	 *
+	 * EVERY VALUE IS READ OUT OF THE INSTALLED BLENDER 4.5, not remembered:
+	 * `blender.exe -b --factory-startup --python-expr` printing
+	 * `bpy.context.preferences.themes[0].dopesheet_editor.*`
+	 * (E:/Tools/3D/Blender 4.5, run 2026-09-12 02:0x), cross-checked against
+	 * 4.5/scripts/presets/interface_theme/Blender_Light.xml for the light
+	 * column:
+	 *
+	 *   keyframe_selected  #FFBE33 dark, #FFBE33 light   -> animKeySel
+	 *   long_key_selected  #FF8C00 both (alpha dropped)  -> animKeySelOther
+	 *   keyframe           #BFBFBF dark, #E8E8E8 light   -> animKey
+	 *   frame_current      #4772B3 dark, #5680C2 light   -> animPlayhead
+	 *
+	 * TWO DIVERGENCES, both stated rather than hidden:
+	 *   - the LIGHT unselected key. Blender's light theme paints the dope
+	 *     sheet on a DARK ground (its `space.back` is #6B6B6B light), so its
+	 *     #E8E8E8 key reads. Our light panel ground is #E8E8E8 itself, so
+	 *     that value would be the invisibility bug again with the colours
+	 *     swapped; the light column carries #3C3C3C, the same distance from
+	 *     our ground that #BFBFBF is from the dark one.
+	 *   - animOutOfRange is NOT a theme entry at all. Blender darkens the
+	 *     out-of-frame-range columns in code (`ANIM_draw_framerange`:
+	 *     TH_BACK shaded -25, alpha -100), so the value here is that
+	 *     arithmetic applied to OUR ground -- #303236 shaded -25 = #171d1d,
+	 *     rounded to the neutral #17191c, and #e8e8e8 -> #cfcfcf -- and the
+	 *     painter applies Blender's own alpha (155/255) over it. Source
+	 *     named as Blender's C function, not as a file we can read here.
+	 *
+	 * animPlayheadText is the ink of the frame number inside the blue box;
+	 * Blender draws it white on both themes. */
+	{ "animKey",          "#bfbfbf", "#3c3c3c" },  // unselected key diamond / marker
+	{ "animKeySel",       "#ffbe33", "#ffbe33" },  // the ACTIVE selected key or annotation
+	{ "animKeySelOther",  "#ff8c00", "#ff8c00" },  // the other members of the selection
+	{ "animPlayhead",     "#4772b3", "#5680c2" },  // the playhead line and its ruler box
+	{ "animPlayheadText", "#ffffff", "#ffffff" },  // the frame number in that box
+	{ "animOutOfRange",   "#17191c", "#cfcfcf" },  // the overlay outside the clip's range
 };
 
 //! Which column wwSkinColor() serves. loadTheme() keeps it current; defaults to
@@ -527,22 +600,104 @@ QString wwBoxedButtonQss( const QString & padding )
 			  wwSkinColor( "textMuted" ) );
 }
 
+int wwSegmentedStripAir()
+{
+	/* THE WAY BACK, exact at its off value (CONSTITUTION 7): 0 puts the
+	 * segments back flush against the row's edges and against one another,
+	 * which is the 18:25:20 strip to the pixel. ONE reader, so the sheet, the
+	 * call site and the gate can never disagree about the number. */
+	const int air = QSettings().value( QStringLiteral( "UI/SegmentedStripAir" ), 4 ).toInt();
+	return qBound( 0, air, 12 );
+}
+
 namespace
 {
 QString wwSegmentedQss( const QString & base, const QString & first,
-	const QString & last )
+	const QString & last, int rowHeight = 0, int neighbourGap = 0 )
 {
-	return QStringLiteral(
-		"%1 { min-height: 18px; padding: 3px 10px; color: %4; background: %5;"
-		" border: 1px solid %6; border-left: 0; border-radius: 0; }"
+	/* FOUR PIXELS FROM EVERY NEIGHBOUR (bungo, 2026-09-10, on a screenshot of
+	 * the top rows, verbatim: "just do what is on my screenshot, 4 pixels from
+	 * each nearby element of separation for the header / blocks / files").
+	 *
+	 * The air is MARGIN, and nothing else moves: wwAlignBarRow still pins the
+	 * strip to the shared row (35 px, measured), so the row's own top and
+	 * bottom edges, the toolbars, their buttons and the search row underneath
+	 * stay exactly where lane UI3 left them. The SEGMENTS get shorter by twice
+	 * the air inside the same row.
+	 *
+	 * MEASURED, NOT REASONED -- scratchpad/ui4_20260910/probe.cpp builds this
+	 * strip in a QMainWindow of its own and reproduced the shipped 18:25:20
+	 * geometry exactly (segments 128/127/128 filling a 383x35 bar, 3 px to the
+	 * toolbar beside it) before anything here changed. Three things it settled,
+	 * none of which reading Qt's documentation would have given:
+	 *
+	 *   1. QSS margins on QTabBar::tab ARE honoured, but tabRect() RETURNS THE
+	 *      RECT INCLUDING THE MARGIN. Rect arithmetic cannot see this air at
+	 *      all, which is why the gate reads the PAINTED box out of a grab.
+	 *   2. the segment's box is min-height + 3+3 padding + 1+1 border, so a
+	 *      segment sitting in a row of H with A px of air is min-height
+	 *      H - 8 - 2A: 35 - 8 - 8 = 19 puts its painted box at y 4, 27 px
+	 *      tall, 4 px clear of the row's bottom. One either way moves that
+	 *      bottom edge by one, so it is arithmetic here and never a constant.
+	 *   3. what stands to the RIGHT of the strip is not the toolbar but
+	 *      QMainWindow::separator (res/style.qss:66, 3 px, painted), so the
+	 *      last segment adds only the air the separator does not already give
+	 *      -- `neighbourGap`, which the caller reads off the style because
+	 *      that metric only answers correctly for a widget.
+	 *
+	 * THE SEGMENTS TOUCH (bungo, 2026-09-10 21:0x, over a zoomed screenshot of
+	 * the strip lane UI4 had just gapped, verbatim: "Why are they separated?").
+	 * A segmented control is ONE element, so the air is measured from its OUTER
+	 * box and nowhere else: four pixels from the row's top and bottom, from the
+	 * window's left edge and from the toolbar beside it, and NOTHING between the
+	 * segments. They share one seam again (`border-left: 0` on every segment,
+	 * the first putting its own back), their inner corners are square and the
+	 * two outer corners stay rounded as UI4 left them.
+	 *
+	 * Measured before it was written, scratchpad/ui6_20260910/probe.cpp:
+	 *   case 0  (shipped)  top 4 bottom 4 left 4 right 4 between 4 / 4, h 27
+	 *   case J4 (this)     top 4 bottom 4 left 4 right 4 between 0 / 0, h 27
+	 *   case J0 == case 1  -- the way back at air 0 is the 18:25:20 sheet, and
+	 *                         the two strings are byte-identical, not merely
+	 *                         equivalent.
+	 */
+	const int air = rowHeight > 0 ? wwSegmentedStripAir() : 0;
+	/* The segment's own box is min-height + 3+3 padding + 1+1 border, so a
+	 * segment asked to fill a bar row of H is min-height H-8, less the air
+	 * above and below it. Kept as the ONE piece of arithmetic that knows this
+	 * sheet's padding, rather than a second number typed at the call site that
+	 * would drift from it. */
+	const int minH = rowHeight > 0 ? qMax( 10, rowHeight - 8 - 2 * air ) : 18;
+	const int rightAir = qMax( 0, air - neighbourGap );
+	/* MINH is a token, not a numbered arg: "%10" would be read by QString::arg
+	 * as marker ten, not as marker one followed by a zero, and this sheet
+	 * already uses %1 to %9. SEAM, BRAD and the two MARGIN tokens are tokens
+	 * for the same reason. */
+	QString sheet = QStringLiteral(
+		"%1 { min-height: MINHpx; padding: 3px 10px; color: %4; background: %5;"
+		" border: 1px solid %6; border-left: 0; border-radius: 0px; MARGINALL }"
 		"%2 { border-left: 1px solid %6; border-top-left-radius: 3px;"
-		" border-bottom-left-radius: 3px; }"
-		"%3 { border-top-right-radius: 3px; border-bottom-right-radius: 3px; }"
+		" border-bottom-left-radius: 3px;MARGINFIRST }"
+		"%3 { border-top-right-radius: 3px; border-bottom-right-radius: 3px;"
+		" MARGINLAST }"
 		"%1:hover { background: %7; }"
 		"%1:checked, %1:selected { border-color: %8; color: %9; background: %8; }" )
 		.arg( base, first, last, wwSkinColor( "text" ), wwSkinColor( "bgBtn" ),
 			wwSkinColor( "border" ), wwSkinColor( "bgBtnHover" ),
 			wwSkinColor( "selBgActive" ), wwSkinColor( "textBright" ) );
+	sheet.replace( QLatin1String( "MINH" ), QString::number( minH ) );
+	/* The air is on the OUTER edges only. MARGINFIRST carries its own leading
+	 * space, so at air 0 the emitted string is the 18:25:20 sheet byte for
+	 * byte rather than one space off it. */
+	sheet.replace( QLatin1String( "MARGINALL" ), air > 0
+		? QStringLiteral( "margin-top: %1px; margin-bottom: %1px; margin-left: 0px;"
+			" margin-right: 0px;" ).arg( air )
+		: QString() );
+	sheet.replace( QLatin1String( "MARGINFIRST" ), air > 0
+		? QStringLiteral( " margin-left: %1px;" ).arg( air ) : QString() );
+	sheet.replace( QLatin1String( "MARGINLAST" ), air > 0
+		? QStringLiteral( "margin-right: %1px;" ).arg( rightAir ) : QString() );
+	return sheet;
 }
 }
 
@@ -553,11 +708,360 @@ QString wwSegmentedToolButtonQss()
 		QStringLiteral( "QToolButton[wwSegmentLast=\"true\"]" ) );
 }
 
-QString wwSegmentedTabBarQss()
+QString wwSegmentedTabBarQss( int rowHeight, const QWidget * inWindow )
 {
+	/* The dock separator is the only part of the air that already exists, and
+	 * it is a STYLE METRIC: asked with the window it answers res/style.qss's
+	 * 3 px, asked with nullptr it answers the base style's 6 -- measured, both
+	 * of them, in scratchpad/ui4_20260910/probe.cpp. No widget means no claim,
+	 * and the last segment then takes the full air on that side. */
+	const int gap = inWindow
+		? inWindow->style()->pixelMetric( QStyle::PM_DockWidgetSeparatorExtent,
+			nullptr, inWindow )
+		: 0;
 	return wwSegmentedQss( QStringLiteral( "QTabBar::tab" ),
 		QStringLiteral( "QTabBar::tab:first" ),
-		QStringLiteral( "QTabBar::tab:last" ) );
+		QStringLiteral( "QTabBar::tab:last" ), rowHeight, gap );
+}
+
+/* ONE BAR HEIGHT AND ONE TOP EDGE ACROSS THE WIDTH.
+ *
+ * bungo, 2026-09-10, on a screenshot: "See the issue with alignment here?".
+ * Measured the same day, before this: the main toolbars 35 px, the viewport's
+ * own toolbar 33, the left dock's tab strip 26 -- three bars meeting along one
+ * line, at three heights, so there was a 7 px step at the dock/viewport seam
+ * and the dock's search row started 3 px above the viewport's content.
+ *
+ * They are in three different parents (the QMainWindow toolbar area, the
+ * central column, the dock), so no layout could ever have made them agree;
+ * something has to state the rule. This is that statement, and it lives beside
+ * the other shared skin helpers rather than as three setFixedHeight calls at
+ * three call sites, which is how they came to disagree in the first place.
+ *
+ * The row is the TALLEST natural height among the bars, never a typed
+ * constant: growing a bar is safe, and shrinking a QToolBar is not -- it does
+ * not clip, it hides controls behind an extension chevron.
+ */
+static int wwBarRow = 0;
+
+int wwBarRowHeight()
+{
+	return wwBarRow;
+}
+
+/* ...AND THE BUTTONS IN THE ROW ARE THE ROW (lane WATER7, corrected by lane
+ * UI3; bungo, 2026-09-10, on a screenshot of the aligned strip: "compact these
+ * vertically like this, the top bar and the buttons").
+ *
+ * WATER7 stated the rule and missed it by four pixels: BUILD12 measured the
+ * row at 35 px and the buttons inside it at 39, and its gate passed only
+ * because it allowed 8 px where its own header promised 1.
+ *
+ * Lane UI3 measured WHY outside the application -- scratchpad/ui3_20260910/
+ * probe.cpp and probe2.cpp, a QToolBar carrying the same four QToolButtons
+ * with the same res/style.qss and the same appended sheet -- and reproduced
+ * 39 exactly. Three things made it, and none of them was the row height:
+ *
+ *   1. A WIDGET'S OWN STYLESHEET OUTRANKS EVERY ANCESTOR'S, whatever the
+ *      selectors say. These buttons carry one: wwBoxedButtonQss above, set on
+ *      the Workspaces button and on the LOD / Animation / Collision group, so
+ *      its `padding: 3px 6px` beat the row's padding before the row ever saw
+ *      the button. A rule appended to the BAR can only reach a property the
+ *      button's own sheet does not mention -- which is why WATER7's
+ *      `min-height` did arrive and its `padding` did not.
+ *   2. QSS `min-height` ON A QToolButton IS A MINIMUM ON THE CONTENTS, not on
+ *      the widget. Qt expands the contents to it, adds 3 px of its own for
+ *      CT_ToolButton, then the padding and the border: 31 + 3 + (3 + 3) + 2 =
+ *      42 asked for, 39 laid out. `max-height` is not consulted on this path
+ *      at all -- measured, not read: the probe set it and nothing moved.
+ *   3. THE BAR'S OWN LAYOUT MARGIN. A QToolBar starts its items
+ *      PM_ToolBarItemMargin + PM_ToolBarFrameWidth = 2 + 2 = 4 px below its
+ *      top, so even a button of exactly the row's height would hang 4 px past
+ *      the bottom of a bar of exactly the row's height, and be clipped there.
+ *
+ * So the row STATES three things and MEASURES the fourth:
+ *
+ *   - wwBarRowBoxQss() takes the bar's own box away, which puts its items at
+ *     y = 0 with the whole row to sit in. With that gone the layout CLAMPS a
+ *     button to the bar instead of letting it overflow, so any hint from the
+ *     row's height up to 3 px over lands on exactly the row -- a basin, not a
+ *     knife edge (probe2.cpp: content 26..29 all measured 35 px at y 0).
+ *   - wwBarRowButtonQss( content ) states the glyph line and the air above and
+ *     below it, and nothing horizontal, so the row has ONE vertical box and
+ *     every button keeps its own width.
+ *   - wwAlignBarRow appends them to the bars AND to every tool button in them,
+ *     because of (1).
+ *   - and it CALIBRATES `content` rather than typing Qt's 3: it asks for a
+ *     content height certainly taller than any glyph line in the row, reads
+ *     what the style added to it, and takes that much back out of the row. No
+ *     number here moves with a Qt version.
+ */
+bool wwCompactTopBars()
+{
+	/* THE WAY BACK, exact at its off value (CONSTITUTION 7). ONE reader, so
+	 * the sheet below and the call site that decides whether the menu bar
+	 * joins the row can never disagree about it. */
+	return QSettings().value( QStringLiteral( "UI/CompactTopBars" ), true ).toBool();
+}
+
+//! The air above and below the glyph line, the same for every button in the row.
+static const int wwBarRowPad = 2;
+/*! THE MENU ARROW GETS ITS OWN COLUMN (bungo, 2026-09-11 05:4x, over
+ *  scratchpad/ui3_20260910/images/cmp_zoom.png, verbatim: "That's fine, as long
+ *  as the dropdown arrows do not intersect with the text / icons like on the
+ *  screenshots you showed me").
+ *
+ *  Lane UI3 made the row's buttons the row's height, which finally SHOWED the
+ *  dropdown arrow they had always had -- and on the two narrow icon-only
+ *  buttons of the viewport header it was drawn on top of the glyph.
+ *
+ *  Measured, scratchpad/ui6_20260910/probe.cpp, from two renders of the same
+ *  button (one with its menu taken away, so the columns that differ ARE the
+ *  arrow):
+ *
+ *    padding-right   4 (res/style.qss's own)   6    8    10
+ *    pivot dot                        gap 3    5    7     9
+ *    grid / snap                      gap 0    2    4     6
+ *
+ *  The arrow is 9 columns wide and sits against the padding box's right edge,
+ *  so every pixel of padding-right above res/style.qss's 4 is a pixel of clear
+ *  background between the glyph and the arrow. 8 leaves FOUR on the tightest
+ *  button in the row, which is the middle of the usable range rather than the
+ *  2 the gate demands. The button grows by the same 4 px and the row does not
+ *  move: this is horizontal, and nothing here touches a height. */
+static const int wwBarRowArrowAir = 8;
+//! What wwAlignBarRow calibrated, so a gate reads back the numbers it used.
+static int wwBarRowContent = 0;
+static int wwBarRowOverhead = -1;
+
+QString wwBarRowBoxQss()
+{
+	if ( !wwCompactTopBars() )
+		return QString();
+	/* The border is already transparent in res/style.qss; what it costs is the
+	 * 4 px of item margin the style derives from it, which is the whole point
+	 * of taking it away here. */
+	return QStringLiteral( "QToolBar { border: 0px; padding: 0px; margin: 0px; }" );
+}
+
+QString wwBarRowButtonQss( int contentHeight )
+{
+	if ( contentHeight <= 0 || !wwCompactTopBars() )
+		return QString();
+	/* The menu arrow comes with the height. A QToolButton's default
+	 * menu-indicator sits in the BOTTOM-RIGHT corner of the button, which is
+	 * invisible while the button is only as tall as its own text and obvious
+	 * the moment it is the row's height: the first build of this lane put the
+	 * arrows of the viewport header's Global / snap / grid buttons a row-height
+	 * below their glyphs. wwBoxedButtonQss already centres it, which is why the
+	 * four boxed buttons in the top row never showed it; stating the same rule
+	 * here means the row does not depend on which sheet a button happens to
+	 * carry. Identical to the boxed rule, so appending it to a boxed button
+	 * changes nothing. */
+	/* The LAST rule is the only horizontal one in this sheet, and it is stated
+	 * for the buttons that HAVE a menu and no others. `wwHasMenu` is a property
+	 * wwAlignBarRow stamps after LOOKING -- popupMode is not the test, because a
+	 * QToolButton's default mode is DelayedPopup and every button in the row
+	 * carries it whether it has a menu or not. */
+	return QStringLiteral(
+		"QMenuBar::item { min-height: %1px; padding-top: %2px; padding-bottom: %2px; }"
+		"QToolButton { min-height: %1px; padding-top: %2px; padding-bottom: %2px; }"
+		"QToolButton::menu-indicator { subcontrol-position: right center;"
+		" subcontrol-origin: padding; }"
+		"QToolButton[wwHasMenu=\"true\"] { padding-right: %3px; }" )
+		.arg( contentHeight ).arg( wwBarRowPad ).arg( wwBarRowArrowAir );
+}
+
+int wwBarRowButtonContent()
+{
+	return wwBarRowContent;
+}
+
+int wwBarRowButtonOverhead()
+{
+	return wwBarRowOverhead;
+}
+
+/* THE TITLES IN THE MENU BAR, lane UI5. The measurement this rests on is in
+ * wwskin.h; the short of it is that the menu-item `min-height` the row has
+ * stated since lane WATER7 is not consulted at all, and the two vertical
+ * paddings are. Stated from the row's own height and the item's own content, so
+ * the only literal here is the even split itself. */
+static int wwBarRowMenuContent = 0;
+static int wwBarRowMenuPadTop = -1;
+static int wwBarRowMenuPadBottom = -1;
+
+QString wwBarRowMenuItemQss( int rowHeight, int itemContent )
+{
+	if ( !wwCompactTopBars() || rowHeight <= 0 || itemContent <= 0
+		 || itemContent > rowHeight )
+		return QString();
+	const int top = ( rowHeight - itemContent ) / 2;
+	const int bottom = rowHeight - itemContent - top;
+	/* Nothing horizontal: res/style.qss gives a title 8 px on either side and
+	 * that is its own business. */
+	return QStringLiteral(
+		"QMenuBar::item { padding-top: %1px; padding-bottom: %2px; }" )
+		.arg( top ).arg( bottom );
+}
+
+int wwBarRowMenuItemContent()
+{
+	return wwBarRowMenuContent;
+}
+
+int wwBarRowMenuItemPadTop()
+{
+	return wwBarRowMenuPadTop;
+}
+
+int wwBarRowMenuItemPadBottom()
+{
+	return wwBarRowMenuPadBottom;
+}
+
+void wwAlignBarRow( const QList<QWidget *> & bars )
+{
+	int h = 0;
+	for ( QWidget * w : bars ) {
+		if ( w )
+			h = qMax( h, qMax( w->sizeHint().height(), w->minimumSizeHint().height() ) );
+	}
+	if ( h <= 0 )
+		return;
+	wwBarRow = h;
+
+	/* Everything the row's sheet has to reach: the bars, and every tool button
+	 * inside them -- a button carrying its own stylesheet cannot be reached
+	 * from its bar's, see (1) above. Qt's extension chevron is not one of ours.
+	 *
+	 * The sheets are saved BEFORE anything is appended, because the row's sheet
+	 * is applied TWICE (once to measure, once for real) and appending twice
+	 * would state the rule twice. Appended, never assigned: a bar or a button
+	 * may already carry a per-widget sheet, and replacing it would take that
+	 * look away while fixing the height. */
+	QList<QWidget *> barTargets;
+	QStringList barSaved;
+	QList<QToolButton *> buttons;
+	QStringList btnSaved;
+	for ( QWidget * w : bars ) {
+		if ( !w )
+			continue;
+		// the property is what a sheet or a gate can find the family by
+		w->setProperty( "wwBarRow", true );
+		w->setMinimumHeight( h );
+		w->setMaximumHeight( h );
+		barTargets.append( w );
+		barSaved.append( w->styleSheet() );
+		const QList<QToolButton *> kids = w->findChildren<QToolButton *>();
+		for ( QToolButton * b : kids ) {
+			if ( b->objectName() == QLatin1String( "qt_toolbar_ext_button" ) )
+				continue;
+			buttons.append( b );
+			/* MEASURED, never assumed: whether this button has a menu decides
+			 * whether it needs the arrow's column (wwBarRowArrowAir). Set
+			 * before the sheet is applied, so the first polish already sees
+			 * it. A default action's menu counts -- that is how the render
+			 * toolbar's display-toggles button carries one. */
+			b->setProperty( "wwHasMenu",
+				b->menu() != nullptr
+					|| ( b->defaultAction() && b->defaultAction()->menu() != nullptr ) );
+			btnSaved.append( b->styleSheet() );
+		}
+	}
+
+	if ( !wwCompactTopBars() ) {
+		/* The way back, exact: nothing is appended and no widget's own sheet is
+		 * touched, so the top of the window is BUILD9's, to the pixel. */
+		wwBarRowContent = 0;
+		wwBarRowOverhead = -1;
+		return;
+	}
+
+	/* `menuItem` is appended LAST so it outranks the menu-item rule
+	 * wwBarRowButtonQss states: same selector, same specificity, and the later
+	 * declaration is the one Qt keeps. Empty by default, which is what lets the
+	 * calibrating pass below measure an item with no vertical padding at all. */
+	auto applyRow = [&]( int content, const QString & menuItem = QString() ) {
+		const QString btn = wwBarRowButtonQss( content );
+		const QString bar = wwBarRowBoxQss() + btn + menuItem;
+		for ( int i = 0; i < barTargets.size(); i++ )
+			barTargets.at( i )->setStyleSheet( barSaved.at( i ) + bar );
+		for ( int i = 0; i < buttons.size(); i++ )
+			buttons.at( i )->setStyleSheet( btnSaved.at( i ) + btn );
+	};
+
+	/* THE CALIBRATION. `h` is the tallest bar's own natural height, so it is
+	 * certainly at least as tall as any glyph line in the row: asking for it as
+	 * a content height makes what comes back the style's additions and nothing
+	 * else. */
+	applyRow( h );
+	int overhead = -1;
+	for ( QToolButton * b : buttons ) {
+		b->ensurePolished();
+		overhead = qMax( overhead, b->sizeHint().height() - h );
+	}
+	wwBarRowOverhead = overhead;
+	/* FALLBACK, named in the output (CONSTITUTION 10): with no button to
+	 * measure, or a measurement that would leave no room for a glyph, the row
+	 * keeps the arithmetic the probe measured on this Qt -- 3 for CT_ToolButton,
+	 * two paddings, two borders -- rather than shipping no rule at all. */
+	const int fallback = qMax( 8, h - ( 3 + 2 * wwBarRowPad + 2 ) );
+	wwBarRowContent = ( overhead >= 0 && h - overhead >= 8 ) ? h - overhead : fallback;
+	applyRow( wwBarRowContent );
+
+	/* AND THE TITLES IN THE MENU BAR SIT ON THE ROW'S CENTRE LINE (lane UI5;
+	 * bungo, 2026-09-10: "Also, please center file / view / spells / options /
+	 * help buttons, top left").
+	 *
+	 * The sheet above already reaches QMenuBar::item, but what it states there
+	 * is a min-height, and a min-height is not consulted on that path at all --
+	 * fifteen probe cases from 22 to 36 px leave the item 20 px tall -- so the
+	 * titles stayed at the top of a 35 px row. The two vertical paddings are
+	 * consulted, and unlike a margin they leave actionGeometry() honest.
+	 *
+	 * The item's own content height is MEASURED, never typed: the row's sheet is
+	 * applied once more with both vertical paddings taken away and the item's
+	 * height read back. ensurePolished() is enough and no event loop is needed
+	 * (probe case E), which is what makes this possible here at all -- the row
+	 * is aligned during construction, where nothing can be pumped. */
+	wwBarRowMenuContent = 0;
+	wwBarRowMenuPadTop = -1;
+	wwBarRowMenuPadBottom = -1;
+	QMenuBar * rowMenu = nullptr;
+	for ( QWidget * w : barTargets ) {
+		if ( auto * m = qobject_cast<QMenuBar *>( w ) ) {
+			rowMenu = m;
+			break;
+		}
+	}
+	if ( rowMenu ) {
+		applyRow( wwBarRowContent, QStringLiteral(
+			"QMenuBar::item { padding-top: 0px; padding-bottom: 0px; }" ) );
+		rowMenu->ensurePolished();
+		int itemContent = 0;
+		for ( QAction * a : rowMenu->actions() )
+			itemContent = qMax( itemContent, rowMenu->actionGeometry( a ).height() );
+		/* FALLBACK, and it is named by the number it lands on (CONSTITUTION 10):
+		 * a menu bar with no titles to measure, or one whose items read back
+		 * taller than the row itself, takes the font's own line height rather
+		 * than shipping no rule and leaving the titles at the top. */
+		if ( itemContent < 8 || itemContent > h )
+			itemContent = qBound( 8, rowMenu->fontMetrics().height(), h );
+		wwBarRowMenuContent = itemContent;
+		wwBarRowMenuPadTop = ( h - itemContent ) / 2;
+		wwBarRowMenuPadBottom = h - itemContent - wwBarRowMenuPadTop;
+		applyRow( wwBarRowContent, wwBarRowMenuItemQss( h, itemContent ) );
+	}
+}
+
+void wwStartContentBelowBar( QWidget * page )
+{
+	if ( !page || !page->layout() )
+		return;
+	QMargins m = page->layout()->contentsMargins();
+	m.setTop( 0 );
+	page->layout()->setContentsMargins( m );
 }
 
 
@@ -1027,8 +1531,33 @@ void NifSkope::wwPlaceHeadlessWindow( QWidget * w )
 	if ( !w || !NifSkope::wwHeadlessRun() )
 		return;
 	w->setWindowState( w->windowState() & ~( Qt::WindowMaximized | Qt::WindowFullScreen ) );
+	/* A WINDOW THAT REMEMBERS ITS OWN GEOMETRY KEEPS IT when that geometry lies
+	 * wholly on a screen that is not the primary one (lane PBRR2A, 2026-09-24).
+	 * The Scene window's gate is "it reopens where it was": forcing it to the
+	 * harness origin and WW_RENDER_SIZE here made that gate measure this
+	 * backstop instead. The backstop's reason -- never on his main monitor,
+	 * never visible, never activating -- still holds: the primary screen is
+	 * refused, and the opacity and no-activate rules below still apply. */
+	if ( w->property( "wwOwnGeometry" ).toBool() ) {
+		const QRect g = w->geometry();
+		const QScreen * s = QGuiApplication::screenAt( g.center() );
+		if ( s && s != QGuiApplication::primaryScreen() && s->geometry().contains( g ) ) {
+			w->setAttribute( Qt::WA_ShowWithoutActivating, true );
+			if ( qEnvironmentVariableIntValue( "WW_WINDOW_VISIBLE" ) != 1 )
+				w->setWindowOpacity( 0.0 );
+			return;
+		}
+	}
 	QString arm;
 	w->move( wwHeadlessWindowOrigin( &arm ) );
+	/* THE SIZE IS FORCED TOO, NOT ONLY THE PLACE (lane HARNESSWIN1,
+	 * 2026-09-19).  A harness run that inherits bungo's window measures
+	 * his last session: a persisted MAXIMIZED geometry swallows the
+	 * resize() that WW_RENDER_SIZE asks for without a word, which is the
+	 * standing native_open.sh (c) red -- asked 1024x1024, got 1822x989.
+	 * After the move(), so the default size is derived from the screen
+	 * this window was just placed on.  See src/harnesswindow.cpp. */
+	wwApplyHarnessWindow( w );
 	w->setAttribute( Qt::WA_ShowWithoutActivating, true );
 	if ( qEnvironmentVariableIntValue( "WW_WINDOW_VISIBLE" ) != 1 )
 		w->setWindowOpacity( 0.0 );
@@ -1168,6 +1697,11 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		 * (WW_WINDOW_VISIBLE=1) has to be able to produce an opacity=1.00
 		 * record, or the gate's floor cannot fire. */
 		wwLogTopLevelWindows( "shown" );
+		/* AND THE SIZE IT GOT, beside the placement (lane HARNESSWIN1,
+		 * 2026-09-19).  Installs the resize watcher too, so the LAST
+		 * line of release/ww_harness_window.log is the settled window
+		 * rather than the one first shown. */
+		wwHarnessRecordViewport( skope, skope->getGLView(), "shown" );
 	}
 
 	// TEMP DIAGNOSTIC (WW_EXTRUDE_TEST=1, remove when the append-row condition
@@ -7046,7 +7580,13 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					if ( !ok ) { log << "load failed\n"; break; }
 					GLView * ogl = skope->getGLView();
 					TimelineWidget * tl = skope->timeline;
-					if ( !ogl || !tl || !ogl->getScene() ) { log << "no view/timeline\n"; break; }
+					if ( !ogl || !tl || !ogl->getScene() ) {
+						// lane UI6 retired the Animation Manager dock this harness drove
+						log << "WW_ANIMPLAY_TEST pressed the Animation MANAGER dock's Play; "
+							   "lane UI6 retired that dock on 2026-09-11. The same question "
+							   "for the Animation dock is animws.sh's transport. RETIRED.\n";
+						break;
+					}
 
 					log << "scene time range " << ogl->getScene()->timeMin()
 						<< " .. " << ogl->getScene()->timeMax() << "\n";
@@ -7714,6 +8254,68 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		} );
 	}
 
+	// TEST HARNESS (WW_HKXANIM_TEST=1): lane HKX2's playback and mapping gates.
+	// The whole harness is src/hkxplaybacktest.cpp; this is its only line here.
+	wwHkxAnimHarness( skope );
+
+	// TEST HARNESS (WW_SKELOVERLAY_TEST=1): lane SKELOVERLAY's gates for
+	// Overlays > Show Skeleton. The whole harness is src/skeloverlaytest.cpp;
+	// this is its only line here.
+	{
+		extern void wwSkelOverlayHarness( NifSkope * );
+		wwSkelOverlayHarness( skope );
+	}
+	// WW_HKXANIM_UI_TEST: lane HKX3's gates, src/hkxanimuitest.cpp.
+	wwHkxAnimUiHarness( skope );
+	wwAnimWorkspaceHarness( skope );	// (lane HKXEDIT2) WW_ANIMWS_TEST
+	{
+		// lane GLTFEXPORT1: WW_BODY_BUILD (the build triangle) and
+		// WW_GLTF_EXPORT_DIALOG (the export options dialog).
+		extern void wwBodyBuildHarness( NifSkope * );
+		extern void wwGltfExportDialogHarness( NifSkope * );
+		wwBodyBuildHarness( skope );
+		wwGltfExportDialogHarness( skope );
+	}
+
+	// TEST HARNESS (WW_UIALIGN_TEST=1): lane BUILD9's bar-alignment gate --
+	// the dock's tab strip and the viewport toolbar are ONE row, and the dock's
+	// search row starts where the viewport's content starts. The whole harness
+	// is src/uialigntest.cpp; this is its only line here.
+	{
+		extern void wwUiAlignHarness( NifSkope * );
+		wwUiAlignHarness( skope );
+	}
+	{
+		// lane WATER7: the Water tab and the compact bar row
+		extern void wwWaterUiHarness( NifSkope * );
+		wwWaterUiHarness( skope );
+	}
+
+	// TEST HARNESS (WW_FILESTAB_TEST=1): lane FILESTAB's Files-tab gates.
+	// The whole harness is src/filestabtest.cpp; this is its only line here.
+	wwFilesTabHarness( skope );
+	{
+		// TEST HARNESS (WW_ARCHLOCK_TEST=1): lane ARCHLOCK1's refuter for the
+		// archive-lock self-deadlock. The whole harness is src/archlocktest.cpp;
+		// this is its only line here.
+		extern void wwArchLockHarness( NifSkope * );
+		wwArchLockHarness( skope );
+	}
+	{
+		extern void wwHkxModelHarness( NifSkope * );	// (lane HKXEDIT1) WW_HKXMODEL_TEST
+		wwHkxModelHarness( skope );
+	}
+	{
+		// lane LIGHTANGLES1: WW_LIGHTANGLES_TEST, src/lightanglestest.cpp
+		extern void wwLightAnglesHarness( NifSkope * );
+		wwLightAnglesHarness( skope );
+	}
+	{
+		// lane PBRR2A: WW_SCENE_TEST, src/scenetest.cpp
+		extern void wwSceneHarness( NifSkope * );
+		wwSceneHarness( skope );
+	}
+
 	/* TEST HARNESS (WW_CYCLETYPE_TEST=1): does the preview do what the SEQUENCE
 	 * says it does at its end?
 	 *
@@ -7975,7 +8577,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				log << ( pass ? "  ok   " : "  FAIL " ) << what << "\n";
 			};
 			static const char * const dockNames[] = {
-				"TimelineDock", "MatTexManagerDock", "CollisionManagerDock",
+				"AnimWorkspaceDock", "MatTexManagerDock", "CollisionManagerDock",
 				"RiggingManagerDock", "UVManagerDock", "PoseManagerDock",
 				"SkeletonManagerDock", "UnfuckManagerDock",
 			};
@@ -8107,7 +8709,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 
 			// ...and a workspace still opens its dock. Hiding at construction
 			// would be a regression if it made one unreachable.
-			QDockWidget * tl = skope->findChild<QDockWidget *>( QStringLiteral( "TimelineDock" ) );
+			QDockWidget * tl = skope->findChild<QDockWidget *>( QStringLiteral( "AnimWorkspaceDock" ) );
 			if ( tl ) {
 				tl->setFloating( false );
 				tl->show();
@@ -10624,7 +11226,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							&& skope->leftColumnSelector->tabData( 0 ).toInt() == NifSkope::LeftHeader
 							&& skope->leftColumnSelector->tabText( 1 ) == QStringLiteral( "Blocks" )
 							&& skope->leftColumnSelector->tabData( 1 ).toInt() == NifSkope::LeftBlocks
-							&& skope->leftColumnSelector->tabText( 2 ) == QStringLiteral( "NIFs" )
+							&& skope->leftColumnSelector->tabText( 2 ) == QStringLiteral( "Files" )
 							&& skope->leftColumnSelector->tabData( 2 ).toInt() == NifSkope::LeftNifs );
 					if ( skope->leftColumnSelector ) {
 						skope->leftColumnSelector->setCurrentIndex( 0 );
@@ -10961,7 +11563,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						skope->loadedNifsView->verticalScrollBarPolicy() == Qt::ScrollBarAsNeeded );
 					check( "Loaded NIFs reports total workspace membership and explains its glyphs",
 						skope->loadedNifsModel->headerData( 0, Qt::Horizontal ).toString()
-							== QStringLiteral( "Loaded NIFs · 2" )
+							== QStringLiteral( "Loaded files · 2" )
 							&& !skope->loadedNifsView->header()->toolTip().isEmpty() );
 					const QList<int> nifSplitterBefore = skope->nifWorkspaceSplitter->sizes();
 					skope->nifWorkspaceSplitter->setSizes( { 200, 160 } );
@@ -11045,7 +11647,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							if ( !skope->loadedNifsView->isRowHidden( r, QModelIndex() ) ) shown++;
 						check( "Loaded NIF search finds the named row and reports shown/total",
 							shown == 1 && skope->loadedNifsModel->headerData(
-								0, Qt::Horizontal ).toString() == QStringLiteral( "Loaded NIFs · 1 of 2" ) );
+								0, Qt::Horizontal ).toString() == QStringLiteral( "Loaded files · 1 of 2" ) );
 						skope->loadedNifsFilter->setText(
 							QStringLiteral( "no-such-loaded-nif-ww-probe" ) );
 						QApplication::processEvents();
@@ -11641,7 +12243,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 									== QStringLiteral( "Make this the primary document" ) );
 							check( "...its skull, pistol and bone say what marking them would do",
 								tipAt( otherRow, 1 ) == QStringLiteral(
-										"Use as the skeleton for Loaded NIFs — only one at a time" )
+										"Use as the skeleton for Loaded files — only one at a time" )
 									&& tipAt( otherRow, 2 ) == QStringLiteral(
 										"Use as a weapon part, to merge onto a target's WEAPON bone" )
 									&& tipAt( otherRow, 3 ) == QStringLiteral( "Follow the skeleton's pose" ) );
@@ -11685,7 +12287,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							QApplication::processEvents();
 							check( "marking the skeleton changes what its skull says",
 								markedSkull == QStringLiteral(
-									"The skeleton for Loaded NIFs — click to unmark it" ) );
+									"The skeleton for Loaded files — click to unmark it" ) );
 
 							/* DEAD ZONES STAY DEAD. The rule, the empty marker slot and the name
 							 * have nothing to explain, and answering there would have replaced
@@ -11809,7 +12411,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						check( "the data-only row menu has no duplicate Close action",
 							!menuTexts.contains( QStringLiteral( "Close Document" ) ) );
 						const int skeletonAction = menuTexts.indexOf(
-							QStringLiteral( "Use as Skeleton for Loaded NIFs" ) );
+							QStringLiteral( "Use as Skeleton for Loaded files" ) );
 						const int visibleAction = menuTexts.indexOf(
 							QStringLiteral( "Visible in Workspace" ) );
 						check( "rigging actions precede workspace display actions",
@@ -14159,7 +14761,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					// the panel says what it did before it does it; if this is empty the
 					// drop never reached the create at all
 					log << "the panel's own account of the first drop: \""
-						<< skope->statusBar()->currentMessage() << "\"\n";
+						<< skope->transientMessage() << "\"\n";
 					/* DID ANYTHING HAPPEN AT ALL? The block count and the undo depth
 					 * separate "the create ran and made nothing" from "the create never
 					 * ran": every create here goes through nifSnapshotOp, which pushes
@@ -14306,7 +14908,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						}
 						const QList<int> heldNow = shapeCounts();
 						log << "after the drop the status bar says: \""
-							<< skope->statusBar()->currentMessage() << "\"\n";
+							<< skope->transientMessage() << "\"\n";
 						log << "after the drop: current block "
 							<< nif->getBlockNumber( skope->currentNifIndex() )
 							<< ", meshes left " << [&]() {
@@ -17298,8 +17900,13 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					if ( !ok ) { log << "load failed\n"; break; }
 					NifModel * nif = skope->getNifModel();
 					TimelineWidget * tl = skope->timeline;
-					if ( !nif || !tl ) { log << "no model or timeline\n"; break; }
-					if ( skope->dTimeline ) { skope->dTimeline->show(); skope->dTimeline->raise(); }
+					if ( !nif || !tl ) {
+						// lane UI6 retired the Animation Manager dock this harness drove
+						log << "WW_ROTKEY_TEST measured the Animation Manager dock's key "
+							   "lanes; lane UI6 retired that dock on 2026-09-11, so there "
+							   "is no timeline widget to insert a key on. RETIRED.\n";
+						break;
+					}
 					QApplication::processEvents();
 					QEventLoop settle;
 					QTimer::singleShot( 600, &settle, &QEventLoop::quit );
@@ -21508,6 +22115,14 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 	//
 	// Uses ogl->grabFramebuffer(), NOT skope->grab(): the viewport is a native
 	// window, so the widget grab returns white where the 3D content should be.
+	// WW_IMPOSTOR_PREVIEW (lane IMPOSTORSHOW, 2026-09-19): the octahedral
+	// impostor preview and its harness. Returns false and costs one
+	// environment read when the variable is unset, which is every ordinary
+	// session. It forces its own window size and prints the size it GOT --
+	// the native_open.sh lesson, where a maximized persisted geometry
+	// floored WW_RENDER_SIZE and the harness measured the machine.
+	wwImpostorPreviewStart( skope, skope->ogl, skope->viewportHeader );
+
 	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_RENDER_SHOT" ) ) {
 		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool, QString & ) {
 			QTimer::singleShot( 2500, skope, [skope]() {
@@ -21530,6 +22145,40 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						}
 					}
 					skope->showNormal();
+					/* THE DOCKS COME DOWN BEFORE THE RESIZE (lane HARNESSWIN2, 2026-09-19).
+					 *
+					 * Qt will not make a window narrower than its layout's minimum, and
+					 * the docks are part of that layout until they are hidden. Hiding
+					 * them AFTER the resize -- which is what this did -- meant the
+					 * resize below was measured against a minimum that the shot itself
+					 * then removed, and the window was never resized again: a request
+					 * for 1024x1024 came out 1822x1024 and the viewport 1822x989, so
+					 * `upp` read 8.99 where the spell asked for 16.0. That is
+					 * tests/spells/native_open.sh row (c) at covered 0.8978, and it is
+					 * NOT the maximized persisted geometry it was blamed on -- that was
+					 * a second, real defect, repaired separately in src/harnesswindow.cpp.
+					 * The two were indistinguishable from outside because a maximized
+					 * window and the dock minimum both land on 1822 px on a 1920-wide
+					 * screen (lane HARNESSWIN1, 2026-09-19, measured row (a) against row
+					 * (d) on one binary: the same request obtained exactly with a small
+					 * fixture, floored with a .lodi scene whose docks raise the minimum).
+					 *
+					 * processEvents() is needed between the hide and the resize because
+					 * the layout minimum is recomputed lazily; without it the resize is
+					 * still measured against the docks that are already hidden. It is
+					 * safe here and only here: this lambda runs only when WW_RENDER_SHOT
+					 * is set, so it is always a harness run, never a restore path (see
+					 * the both-maximized crash table in NifSkope::restoreUi()).
+					 *
+					 * The hide loop further down is left exactly where it is and runs a
+					 * second time. Hiding a hidden dock costs nothing, and leaving it
+					 * there keeps this edit purely additive.
+					 */
+					for ( QDockWidget * dw : skope->findChildren<QDockWidget *>() )
+						dw->hide();
+					if ( skope->viewportHeader )
+						skope->viewportHeader->hide();
+					qApp->processEvents();
 					skope->resize( rw, rh );
 					// Hide every dock. Pinning the WINDOW size is not enough: the GL
 					// viewport gets whatever the docks leave it, so any change to the
@@ -21555,54 +22204,43 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				}
 
 				if ( skope->ogl ) {
-					int	viewIdx = qEnvironmentVariableIntValue( "WW_RENDER_VIEW" );
-					// ViewUser (the Blender-style startup view) sits past
-					// ViewWalk, so the old bound silently rewrote it to Front:
-					// a capture that looked like a passing test of a view it
-					// had never actually used.
-					//
-					// NEGATIVE leaves the camera exactly as startup left it,
-					// which is the only way to photograph the startup view
-					// itself — every other value overrides the thing under
-					// test. Unset is still 0 and still means Front, so the
-					// existing baselines are unaffected.
-					if ( viewIdx >= 0 ) {
-						if ( viewIdx == 0 || viewIdx > int( GLView::ViewUser ) )
-							viewIdx = int( GLView::ViewFront );
-						skope->ogl->setOrientation( GLView::ViewState( viewIdx ), true );
-					}
-
-					/* Close-up framing: WW_RENDER_CENTER="x,y,z" points the
-					 * camera at a model-space position (overriding the
-					 * recenter), WW_RENDER_DIST=<units> sets the camera
-					 * distance. Together they photograph a detail (a single
-					 * tree, a wall) instead of the whole scene. */
-					{
-						const QString ctr = qEnvironmentVariable( "WW_RENDER_CENTER" );
-						if ( ctr.contains( QChar( ',' ) ) ) {
-							const QStringList parts = ctr.split( QChar( ',' ) );
-							if ( parts.size() == 3 )
-								skope->ogl->setPosition( -parts.at( 0 ).toFloat(),
-									-parts.at( 1 ).toFloat(), -parts.at( 2 ).toFloat() );
-						}
-						const QString dist = qEnvironmentVariable( "WW_RENDER_DIST" );
-						if ( !dist.isEmpty() ) {
-							/* setDistance sets Dist, and the ORTHOGRAPHIC HALF-HEIGHT
-							 * is Dist / Zoom. setOrientation( recenter ) above leaves
-							 * Zoom at whatever framed the bound sphere, so asking for
-							 * a half-height here used to change nothing at all:
-							 * measured 2026-09-09, one tree photographed at 1874 and
-							 * at 7496 produced two BYTE-IDENTICAL PNGs, and a camera
-							 * pin that cannot move is a harness that guards nothing.
-							 * The impostor bake has always read the value back and
-							 * corrected; this does the same. */
-							const float want = dist.toFloat();
-							skope->ogl->setDistance( want );
-							qApp->processEvents();
-							const float got = skope->ogl->orthographicHalfHeight();
-							if ( want > 0.0f && got > 0.0f
-								&& std::fabs( got - want ) > 1.0e-3f * want )
-								skope->ogl->setDistance( want * want / got );
+					/* THE CAMERA -- pinned, or left exactly where it was.
+					 *
+					 * WW_RENDER_VIEW on its own keeps the old auto-fit framing,
+					 * so every baseline taken that way is unchanged. The moment
+					 * WW_RENDER_CENTER, _DIST, _FOV or _ORTHO appears the whole
+					 * camera -- view, look-at, eye distance, projection -- is
+					 * PINNED by GLView and re-asserted on every later paint.
+					 *
+					 * What this replaces could not work, and the reason was not
+					 * in it: setOrientation( view, true ) ends in center(), and
+					 * center() only sets a flag, so the auto-fit ran in the NEXT
+					 * paintGL and overwrote the look-at and the distance that had
+					 * just been set. Measured 2026-09-09 on the 512-unit cube
+					 * fixture: two look-ats 400 units apart gave BYTE-IDENTICAL
+					 * PNGs, and the distance read-back turned a 1/D law into
+					 * 1/D^2 -- 539 px at DIST 400 down to 11 px at 2000, which is
+					 * want^2 / 532 within 1%, 532 being that fixture's own
+					 * auto-fit distance. See GLView::WwCameraPin. */
+					const GLView::WwCameraPin pin = GLView::wwCameraPinFromEnvironment();
+					if ( pin.active ) {
+						skope->ogl->wwApplyCameraPin( pin );
+					} else {
+						int	viewIdx = qEnvironmentVariableIntValue( "WW_RENDER_VIEW" );
+						// ViewUser (the Blender-style startup view) sits past
+						// ViewWalk, so the old bound silently rewrote it to Front:
+						// a capture that looked like a passing test of a view it
+						// had never actually used.
+						//
+						// NEGATIVE leaves the camera exactly as startup left it,
+						// which is the only way to photograph the startup view
+						// itself — every other value overrides the thing under
+						// test. Unset is still 0 and still means Front, so the
+						// existing baselines are unaffected.
+						if ( viewIdx >= 0 ) {
+							if ( viewIdx == 0 || viewIdx > int( GLView::ViewUser ) )
+								viewIdx = int( GLView::ViewFront );
+							skope->ogl->setOrientation( GLView::ViewState( viewIdx ), true );
 						}
 					}
 
@@ -21618,7 +22256,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						// available for paired distortion-on/off captures.
 						sc->showRefraction = !qEnvironmentVariableIsSet( "WW_RENDER_REFRACTION" )
 							|| qEnvironmentVariableIntValue( "WW_RENDER_REFRACTION" ) != 0;
-						sc->showParticles = true;
+						// WW_RENDER_PARTICLES=0 turns them off for a paired capture (lane
+						// PBRR0); unset keeps the old forced-on.
+						sc->showParticles = wwRenderParticlesPin();
 
 						/* WW_RENDER_CLEAN=1: the MODEL and nothing else -- no viewport
 						 * grid, no axis lines, no node markers. A script that measures
@@ -21627,9 +22267,19 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						 * the full width of the window (2026-09-09). It changes only
 						 * these three overlays; lighting, texturing and the camera are
 						 * untouched, so a CLEAN render and a normal one differ by
-						 * exactly the overlays. */
-						if ( qEnvironmentVariableIntValue( "WW_RENDER_CLEAN" ) != 0 )
+						 * exactly the overlays.
+						 *
+						 * AND THE 3D CURSOR, which is not in Scene::options and
+						 * was therefore still in every CLEAN picture: measured
+						 * 2026-09-09, the cursor gizmo is 27 px wide whatever the
+						 * camera does, so a silhouette box taken off a small
+						 * object read 27 px when the object itself was 11, and a
+						 * span sweep looked as if it saturated. The bake has
+						 * always turned it off; a clean render now does too. */
+						if ( qEnvironmentVariableIntValue( "WW_RENDER_CLEAN" ) != 0 ) {
 							sc->options &= ~( Scene::ShowGrid | Scene::ShowAxes | Scene::ShowNodes );
+							skope->ogl->showCursor = false;
+						}
 
 						/* WW_RENDER_FLAT=1: photograph the VERTEX COLOURS and nothing
 						 * else. Texturing, lighting and every map that modulates them
@@ -21657,9 +22307,74 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 								| Scene::DoDetailTextures | Scene::DoMaterialTint
 								| Scene::DoDiffuse );
 						}
+						/* WW_LODL_AO=1 is a picture of a vertex payload too: the
+						 * .lodl/.lodi builders put the baked AO into the vertex
+						 * colour, and the lit path multiplies it in only with
+						 * vertex colours ON -- an option persisted from the
+						 * user's last tick, so the switch forces it. */
+						if ( qEnvironmentVariableIntValue( "WW_LODL_AO" ) != 0 )
+							sc->options |= Scene::DoVertexColors;
+						/* WW_LODL_CHANNEL=<name> is the same picture of a vertex
+						 * payload, one baked channel at a time (lane CHANVIEW1), so
+						 * it forces the same persisted option. Without this, the
+						 * channel is in the document and invisible, which is the
+						 * shape of "a dial whose two settings render identically"
+						 * (root MISTAKES 05:1x) with nothing wrong in the builder. */
+						if ( !qEnvironmentVariable( "WW_LODL_CHANNEL" ).trimmed().isEmpty() )
+							sc->options |= Scene::DoVertexColors;
 					}
 
-					// WW_RENDER_SEQ=<name> selects a sequence. Without it the
+					/* WW_HKXANIM_CLIP=<file.hkx>: load a Havok animation into the
+				 * scene's playback BEFORE the sequence is chosen, so a picture
+				 * of a loaded clip is WW_RENDER_SEQ naming it and WW_RENDER_TIME
+				 * picking the frame. Lane HKX2's gate (e) is three of these.
+				 * WW_HKXANIM_ROOTMOTION=1 turns the root motion on for the shot.
+				 */
+				if ( Scene * hsc = skope->ogl->getScene(); hsc && hsc->hkx ) {
+					const QString hkxPath = qEnvironmentVariable( "WW_HKXANIM_CLIP" );
+					if ( !hkxPath.isEmpty() ) {
+						QStringList hkxAdded;
+						const QString hkxErr = hsc->hkx->load( hkxPath, &hkxAdded );
+						hsc->hkx->setRootMotion(
+							qEnvironmentVariableIntValue( "WW_HKXANIM_ROOTMOTION" ) != 0 );
+						if ( hkxErr.isEmpty() && !hkxAdded.isEmpty() )
+							skope->ogl->setSceneSequence( hkxAdded.first() );
+					}
+				}
+
+					/* WW_SKELETON_OVERLAY=1: draw Overlays > Show Skeleton in this
+					 * capture (lane SKELOVERLAY). It is a viewport toggle, not a
+					 * Scene::option, so WW_RENDER_CLEAN cannot reach it and a
+					 * picture of the armature would otherwise depend on whatever
+					 * the user last ticked -- which is not reproducible.
+					 */
+					if ( qEnvironmentVariableIntValue( "WW_SKELETON_OVERLAY" ) != 0 )
+						skope->ogl->setSkeletonOverlay( true );
+
+					/* lane SKEL2: the armature's own switches, on the same
+					 * grounds -- a picture of a display mode, an X-ray state or
+					 * a Skeleton Manager chip has to be reproducible, and a
+					 * QSettings value the user last ticked is not.
+					 * WW_SKELOVERLAY_DUMP (read in GLView::drawSkeletonOverlay)
+					 * writes every drawn node's screen position for THIS frame.
+					 */
+					if ( qEnvironmentVariableIsSet( "WW_SKELETON_DISPLAY" ) )
+						skope->ogl->setArmatureDisplay(
+							qEnvironmentVariableIntValue( "WW_SKELETON_DISPLAY" ) );
+					if ( qEnvironmentVariableIsSet( "WW_SKELETON_XRAY" ) )
+						skope->ogl->setArmatureXray(
+							qEnvironmentVariableIntValue( "WW_SKELETON_XRAY" ) != 0 );
+					if ( qEnvironmentVariableIsSet( "WW_SKELETON_NAMES" ) )
+						skope->ogl->setArmatureNames(
+							qEnvironmentVariableIntValue( "WW_SKELETON_NAMES" ) );
+					if ( qEnvironmentVariableIsSet( "WW_SKELETON_CHIP" )
+						 || qEnvironmentVariableIsSet( "WW_SKELETON_SEARCH" ) )
+						skope->ogl->setSkeletonOverlayFilter(
+							qEnvironmentVariableIntValue( "WW_SKELETON_CHIP" ),
+							qEnvironmentVariable( "WW_SKELETON_SEARCH" ) );
+
+
+				// WW_RENDER_SEQ=<name> selects a sequence. Without it the
 					// scene takes animGroups.first(), which on FO4 VFX files is
 					// the one-shot "autoPlay" — sequence-gated effects (the
 					// procedural lightning's Generation keys) never fire there.
@@ -21695,6 +22410,36 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					// What the window is doing at the moment the picture is taken
 					// -- the honest record for the no-visible-window gate.
 					wwLogTopLevelWindows( "grab" );
+					/* WW_PBRM_CENSUS rows for particle systems (lane PBRR0).
+					 * docs/NIFSKOPE_PBR_RENDERER.md s8 forbids edits to
+					 * glparticles.cpp, so particles are censused here, at the
+					 * grab, off the scene's own nodes: drawn or not is what
+					 * Particles::drawShapes' early-outs read (particles shown,
+					 * node visible, live count). They never reach the PBR route. */
+					if ( wwPbrmCensusArmed() ) {
+						if ( Scene * psc = skope->ogl->getScene() ) {
+							for ( Node * pn : psc->nodes.list() ) {
+								auto *	ps = dynamic_cast<Particles *>( pn );
+								if ( !ps )
+									continue;
+								const char *	notDrawn = !psc->showParticles ? "particles off"
+									: ps->isHidden() ? "hidden"
+									: ps->liveCount() < 1 ? "0 live particles" : nullptr;
+								wwPbrmCensus( ps->getName(), "particles",
+									ps->findProperty<BSShaderLightingProperty>(),
+									notDrawn ? QStringLiteral( "(not drawn: %1)" ).arg( QLatin1StringView( notDrawn ) )
+										: QStringLiteral( "particles.prog" ) );
+							}
+						}
+					}
+					/* And what the CAMERA is doing, read off the live members
+					 * rather than off what was asked for. release/ww_camera_pin.log
+					 * (or $WW_CAMERA_CENSUS) is what turns a picture into a
+					 * measurement: `upp` is the units per pixel at the look-at
+					 * plane, so an extent of E world units spans E / upp pixels.
+					 * Logged at the grab, which is the only moment that can be
+					 * quoted -- anything logged earlier is a claim about intent. */
+					skope->ogl->wwLogCameraCensus( "grab" );
 					const int renderSS = qEnvironmentVariableIntValue( "WW_RENDER_SS" );
 					const QImage shotImage = renderSS > 0
 						? skope->ogl->grabSupersampled( renderSS )
@@ -21734,7 +22479,19 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						break;
 					QDir().mkpath( outDir );
 					skope->showNormal();
-					skope->resize( 560, 560 );
+					{
+						/* WW_IMPOSTOR_WINDOW=WxH (lane IMPOSTORAA1): the bake window's
+						 * size, a TEST KNOB. Under the 2x offscreen bake (the default)
+						 * nothing the sheets hold depends on it, and the gate proves
+						 * that by baking at two sizes and comparing the bytes. */
+						int bw = 560, bh = 560;
+						const QStringList ws = qEnvironmentVariable( "WW_IMPOSTOR_WINDOW" ).split( QLatin1Char( 'x' ) );
+						if ( ws.size() == 2 && ws[0].toInt() >= 320 && ws[1].toInt() >= 240 ) {
+							bw = ws[0].toInt();
+							bh = ws[1].toInt();
+						}
+						skope->resize( bw, bh );
+					}
 					for ( QDockWidget * dw : skope->findChildren<QDockWidget *>() )
 						dw->hide();
 					if ( skope->viewportHeader )
@@ -21743,6 +22500,45 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						sc->options = Scene::SceneOptions(
 							sc->options & ~( Scene::ShowAxes | Scene::ShowGrid ) );
 					skope->ogl->showCursor = false;
+					/* THE PROJECTION, ASSERTED (lane CARDORTHO, 2026-09-10).
+					 *
+					 * Everything below sizes its frames with
+					 * `orthographicHalfHeight()` -- `Dist / Zoom` -- and reads a
+					 * silhouette's world extent back out of viewport pixels with
+					 * a single units-per-pixel constant. Both are statements about
+					 * an ORTHOGRAPHIC camera, and until now nothing headless ever
+					 * set one: `restoreUi()` hard-codes `isPersp = true` and the
+					 * only other callers of `setProjection` are the View menu and
+					 * Numpad-5, so every card ever baked was photographed through
+					 * a 60-degree PERSPECTIVE frustum while being measured as if
+					 * it were not (lane HOOKCAM measured it, 2026-09-09; see
+					 * MISTAKES.md). `orthographicHalfHeight()` returns `Dist/Zoom`
+					 * whatever the projection is -- the NAME is not a measurement,
+					 * which is why the read-back beside the fit below never caught
+					 * it.
+					 *
+					 * What that cost, and what asserting it buys:
+					 *   - the SCALE. A perspective frame magnifies by
+					 *     `eye / (eye - d)` for a point `d` in front of the card
+					 *     plane; over a tree's own depth that is tens of per cent,
+					 *     so the recorded half-extents did not describe the
+					 *     picture and a reader's quad could not match the mesh.
+					 *   - the SHAPE. The same magnification varies across the
+					 *     frame, so a silhouette was foreshortened -- wider at the
+					 *     near edge than the far one -- and an octahedral set's
+					 *     frames disagreed with each other.
+					 *   - the HEIGHT sheet. The bake puts near and far symmetric
+					 *     about the bound centre and calls window z 0.5 the card
+					 *     plane; that is exactly true in an orthographic
+					 *     projection and false in a perspective one, where the
+					 *     window z of the midpoint is not 0.5.
+					 *
+					 * MODULE AND FALLBACK (CONSTITUTION 10): `WW_IMPOSTOR_PERSP=1`
+					 * restores the old perspective camera exactly, and the sidecar
+					 * NAMES the arm that served, so a set is never silently one or
+					 * the other. It is the control the gates fail against. */
+					const bool bakePersp = qEnvironmentVariableIntValue( "WW_IMPOSTOR_PERSP" ) == 1;
+					skope->ogl->setProjection( bakePersp );
 					/* The matte's two clears are the hook's, not the settings':
 					 * without the lock every paint put the viewport grey back and
 					 * both passes came out identical - cards opaque, alpha 255
@@ -21764,6 +22560,17 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					meta.open( QIODevice::WriteOnly | QIODevice::Text );
 					QTextStream ms( &meta );
 					ms << "model " << QFileInfo( fname ).fileName() << "\n";
+					/* THE ARM THAT SERVED, read back off the live GLView rather
+					 * than off what was asked for (CONSTITUTION 4, telemetry
+					 * echoes truth): `projection ortho` or `projection persp`.
+					 * Every extent this sidecar records is measured through it,
+					 * so a reader can tell a metric set from a pre-2026-09-10
+					 * one without guessing at the exe that made it. An unknown
+					 * line is ignored by every reader of this file, so old
+					 * sidecars keep working and this one does not move any
+					 * existing line's shape. */
+					ms << "projection "
+					   << ( skope->ogl->isPerspectiveProjection() ? "persp" : "ortho" ) << "\n";
 
 					/* The engine's own in-cell detail steps: shapes named `_L1`,
 					 * `_L2`... beside the full shape (the maple's near mesh: 28
@@ -21772,6 +22579,23 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					 * each other. Hidden through the model's own flag, which
 					 * every render of the bake honours. */
 					if ( NifModel * mnif = skope->getNifModel() ) {
+						/* THE MESH-LOD LEVEL THE BAKE PHOTOGRAPHS, one for the whole
+						 * model (lane IMPOSTORSHRUB1, 2026-09-23): the lowest slot that
+						 * ANY BSMeshLODTriShape fills. See the slot rule below. */
+						int keptLevel = -1;
+						for ( int b = 0; b < mnif->getBlockCount(); b++ ) {
+							const QModelIndex iB = mnif->getBlockIndex( b );
+							if ( !mnif->isNiBlock( iB, "BSMeshLODTriShape" ) )
+								continue;
+							for ( int k = 0; k < 3; k++ ) {
+								if ( mnif->get<uint>( iB, QStringLiteral( "LOD%1 Size" ).arg( k ) ) ) {
+									keptLevel = keptLevel < 0 ? k : std::min( keptLevel, k );
+									break;
+								}
+							}
+						}
+						if ( keptLevel > 0 )
+							ms << "rangekept LOD" << keptLevel << " (no shape fills the LOD0 slot)\n";
 						for ( int b = 0; b < mnif->getBlockCount(); b++ ) {
 							const QModelIndex iB = mnif->getBlockIndex( b );
 							if ( !mnif->isNiBlock( iB, "BSTriShape" ) && !mnif->isNiBlock( iB, "BSSubIndexTriShape" )
@@ -21781,9 +22605,36 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							if ( mnif->isNiBlock( iB, "BSMeshLODTriShape" ) ) {
 								/* The in-mesh steps: the triangle list is [full][L1][L2]
 								 * (the maple: 71 + 23 + 8), the engine draws one range and
-								 * the viewer draws every range at its default level. */
+								 * the viewer draws every range at its default level
+								 * (BSShape::updateLodLevel: the first LOD0+LOD1+LOD2 triangles).
+								 *
+								 * ONE LEVEL FOR THE WHOLE MODEL, the lowest slot any shape
+								 * fills (lane IMPOSTORSHRUB1, 2026-09-23). The shape names say
+								 * what the slots hold: the exporter merges a full part (no
+								 * prefix) into LOD0, its `L1_` copy into LOD1 and its `L2_`
+								 * copy into LOD2 (HollyShrub01 `L1_HollyShrubSmall01` 0/302/0,
+								 * DeadShrub04 `L2_DeadShrub04` 0/0/158, FoothillsShrubLarge01
+								 * full + `L1_` 672/546/0). 27 of the 54 vanilla shrub, bush,
+								 * sapling, hedge and undergrowth models ship NO full part at
+								 * all - every shape's LOD0 slot is empty - so keeping LOD0
+								 * left 0 triangles and every one of them baked an EMPTY card
+								 * (halfW 1.077, 0 covered texels). Those now bake their
+								 * lowest filled level (DeadShrub01 0/123/198 keeps the `L1_`
+								 * 123, which has the larger box and 2.6x the triangle area of
+								 * the `L2_` 198: scratchpad/impostorshrub1_20260923/ranges.py).
+								 * The level is chosen per MODEL, not per shape: the maple
+								 * TreeMapleblasted05 has its full tree in one shape (141/0/42)
+								 * and its `L1_` copy alone in another (0/75/5); a per-shape
+								 * rule would draw both, one over the other. Every slot below
+								 * the kept level is empty in every shape, so the kept range
+								 * starts at triangle 0 and `LOD0 Size` triangles draw exactly
+								 * it; a shape that does not fill the kept level draws nothing,
+								 * as the engine's level does. A model with any LOD0 part
+								 * (keptLevel 0) bakes byte for byte as before. */
 								const uint l1 = mnif->get<uint>( iB, "LOD1 Size" ), l2 = mnif->get<uint>( iB, "LOD2 Size" );
 								if ( l1 || l2 ) {
+									if ( keptLevel > 0 )
+										mnif->set<uint>( iB, "LOD0 Size", keptLevel == 1 ? l1 : l2 );
 									mnif->set<uint>( iB, "LOD1 Size", 0 );
 									mnif->set<uint>( iB, "LOD2 Size", 0 );
 									ms << "ranges " << name << " " << l1 << "+" << l2 << "\n";
@@ -22030,7 +22881,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					if ( octN >= 2 && octN <= 16 ) {
 						int tile = qEnvironmentVariableIntValue( "WW_IMPOSTOR_TILE" );
 						if ( tile < 32 || tile > 512 )
-							tile = 128;
+							tile = 256;	// 8 x 8 at 2k (bungo 2026-09-23, lane DEFAULTS2); was 128
 						/* To a multiple of 32: the size ladder below halves this up
 						 * to three times, and block compression needs a multiple of
 						 * 4 at the bottom of that. */
@@ -22071,9 +22922,24 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							dx /= len; dy /= len; dz /= len;
 							const float elev = std::asin( qBound( -1.0f, dz, 1.0f ) ) * 180.0f / 3.14159265f;
 							const float azim = std::atan2( dy, dx ) * 180.0f / 3.14159265f;
-							// the axis views measured: Top (0,0,0), Front (-90,0,180), Right (-90,0,90)
+							/* WW: the camera for the frame whose spec direction is
+							 * d = ( cos(elev)cos(azim), cos(elev)sin(azim), sin(elev) ).
+							 * Matrix::fromEuler is row-major and its ROWS are the camera's
+							 * axes in world space (measured against all six of
+							 * GLView::viewRotations), so the camera SITS at
+							 *     row2 = ( sinX sinZ, sinX cosZ, cosX ).
+							 * rx = -90 + elev gives cosX = sin(elev) -- the elevation was
+							 * always right -- and sinX = -cos(elev). Wanting row2 = d then
+							 * requires sinZ = -cos(azim) and cosZ = -sin(azim), which
+							 * Z = 270 - azim satisfies exactly. The old Z = 90 - azim gives
+							 * sinZ = +cos(azim), cosZ = +sin(azim), i.e. row2 =
+							 * ( -d.x, -d.y, +d.z ): the azimuth turned by 180 degrees, which
+							 * is what every set baked before this exe holds.
+							 * Repair ruled by bungo 2026-09-19 ("fix the 180 issue"); the
+							 * sheet block below stamps `conv spec1` so a reader can tell the
+							 * two apart. EVERY OLDER SET MUST BE RE-BAKED. */
 							rx = -90.0f + elev;
-							rz = 90.0f - azim;
+							rz = 270.0f - azim;
 						};
 						const Color4 bgs[2] = { Color4( 0, 0, 0, 1 ), Color4( 1, 1, 1, 1 ) };
 						Scene * bakeScene = skope->ogl->getScene();
@@ -22117,23 +22983,215 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							return img;
 						};
 
-						// pass one: the silhouette's extent from the centre, over every view, in units
+						/* THE 2x OFFSCREEN BAKE (lane IMPOSTORAA1, 2026-09-23; bungo
+						 * 2026-09-22: "Preferable solution would be a 2x render then
+						 * downscale to achieve AA").
+						 *
+						 * Until this lane every view was a photograph of the LIVE
+						 * WINDOW: `grabFramebuffer()` at whatever size the window came
+						 * out (its width floored by the main window's minimum size),
+						 * with whatever MSAA the user's "Msaa Samples" setting gave the
+						 * window surface, cropped and then resized to the frame with
+						 * `QImage::scaled( SmoothTransformation )`. So two machines
+						 * baked two different sheets, and an MSAA resolve averaged the
+						 * DATA channels (normal, depth, material) across silhouette
+						 * edges behind the bake's back.
+						 *
+						 * Now each view renders into its own FBO -- GL_RGBA8, NO MSAA,
+						 * no sRGB -- at EXACTLY 2 x the frame's inner size, framed on
+						 * that view's own silhouette centre by panning the camera in
+						 * its own view plane, and is box-filtered 2:1:
+						 *   coverage       = the mean of the four samples' matte alpha;
+						 *   colour, height, material, mask, emissive
+						 *                  = sum(value x a) / sum(a) over the four,
+						 *                    i.e. premultiply, box, un-premultiply;
+						 *   normal         = the same weighted sum of the DECODED
+						 *                    3-vectors, renormalised.
+						 * The frames come out UN-premultiplied, so the per-texel
+						 * `unp` below is the identity on this arm. Pass one reads its
+						 * silhouette boxes from an offscreen matte of fixed size too.
+						 *
+						 * MODULE AND FALLBACK (CONSTITUTION 10): `WW_IMPOSTOR_AA=0`
+						 * restores the window photograph exactly, and the sidecar's
+						 * `aa` line names the arm that served. */
+						/* THE FACTOR (lane IMPOSTORTEAR1, 2026-09-23): 4 x 4 samples a texel,
+						 * raised from IMPOSTORAA1's 2 x 2. Measured on the 512-unit cube
+						 * (tests/spells/lodgen_octahedral.sh F1, N 8, tile 64): the 2x
+						 * bake reproduces its own ideal 2x2 estimator exactly and that
+						 * estimator reads 1.27-1.32 texels against F1's bar of 1.0 -- the
+						 * DESIGN could not pass, whatever the code did -- while 3x3 and
+						 * 4x4 point sampling read 0.68, the area truth's own number. The
+						 * ruled rules are unchanged: offscreen, MSAA off, coverage-
+						 * weighted, window-size independent. WW_IMPOSTOR_AA=K picks K
+						 * (1..8; 2 is IMPOSTORAA1's bake exactly), =0 the window
+						 * photograph. The fill is K^2 per texel: 4x the 2x arm's. */
+						const int aaK = qEnvironmentVariableIsSet( "WW_IMPOSTOR_AA" )
+							? qBound( 0, qEnvironmentVariableIntValue( "WW_IMPOSTOR_AA" ), 8 ) : 4;
+						const bool aaOn = aaK > 0;
+						const int p1Size = qMax( 1024, 2 * tile );		// pass one's offscreen matte, square
+						float aaCentreErr = 0.0f;						// worst silhouette-centre miss, output texels
+						auto renderOff = [&]( int w, int h, float half, float ox, float oy ) {
+							GLView * gl = skope->ogl;
+							const float oldDist = gl->Dist;
+							const Vector3 oldPos = gl->Pos;
+							const QSize oldSize = gl->getSizeInPixels();
+							QImage out;
+							auto prv = gl->pushGLContext();
+							gl->resizeGL( w, h );
+							// ortho half-height = Dist / Zoom; depth is |centre| +- 1.5 bound, so
+							// neither this nor the pan moves the window z the height sheet stores
+							gl->Dist = float( double( half ) * gl->Zoom );
+							/* The pan: the view-space point ( ox, -oy ) -- `oy` is pixel-down --
+							 * to the centre. viewTransform() translates by R * Pos with R the
+							 * UNshuffled Euler matrix, so Pos moves by R^-1 * ( -ox, +oy, 0 ). */
+							Matrix R;
+							R.fromEuler( deg2rad( gl->Rot[0] ), deg2rad( gl->Rot[1] ), deg2rad( gl->Rot[2] ) );
+							gl->Pos = oldPos + R.inverted() * Vector3( -ox, oy, 0.0f );
+							try {
+								QOpenGLFramebufferObjectFormat ff;
+								ff.setTextureTarget( GL_TEXTURE_2D );
+								ff.setInternalTextureFormat( GL_RGBA8 );
+								ff.setMipmap( false );
+								ff.setSamples( 0 );
+								ff.setAttachment( QOpenGLFramebufferObject::CombinedDepthStencil );
+								QOpenGLFramebufferObject fbo( w, h, ff );
+								if ( fbo.isValid() ) {
+									fbo.bind();
+									gl->paintGL();
+									fbo.bind();
+									std::vector<uchar> buf( size_t( w ) * size_t( h ) * 4 );
+									QOpenGLFunctions * f = QOpenGLContext::currentContext()->functions();
+									f->glPixelStorei( GL_PACK_ALIGNMENT, 4 );
+									f->glReadPixels( 0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, buf.data() );
+									fbo.release();
+									out = QImage( w, h, QImage::Format_ARGB32 );
+									for ( int y = 0; y < h; y++ ) {
+										const uchar * src = buf.data() + size_t( h - 1 - y ) * size_t( w ) * 4;
+										QRgb * dst = reinterpret_cast<QRgb *>( out.scanLine( y ) );
+										for ( int x = 0; x < w; x++ )
+											dst[x] = qRgb( src[4 * x], src[4 * x + 1], src[4 * x + 2] );
+									}
+								}
+							} catch ( std::exception & ) {
+								out = QImage();
+							}
+							gl->Dist = oldDist;
+							gl->Pos = oldPos;
+							gl->resizeGL( oldSize.width(), oldSize.height() );
+							gl->popGLContext( prv );
+							return out;
+						};
+						/* The matte, offscreen: rgb = the BLACK pass as rendered (colour x
+						 * coverage, still premultiplied), alpha = this sample's coverage. */
+						auto matteOff = [&]( int w, int h, float half, float ox, float oy ) {
+							// settle the view once through the window path's own event
+							// round, so the offscreen passes see exactly what a grab would
+							skope->ogl->update();
+							qApp->processEvents();
+							QImage pass[2];
+							if ( bakeScene )
+								bakeScene->options = Scene::SceneOptions( litOptions & ~Scene::DoLighting );
+							wwLodChannelView = 12;
+							for ( int b = 0; b < 2; b++ ) {
+								skope->ogl->setBackground( bgs[b] );
+								pass[b] = renderOff( w, h, half, ox, oy );
+							}
+							wwLodChannelView = 0;
+							if ( bakeScene )
+								bakeScene->options = litOptions;
+							skope->ogl->setBackground( bgs[0] );
+							QImage cov( w, h, QImage::Format_ARGB32 );
+							cov.fill( 0 );
+							if ( pass[0].isNull() || pass[1].isNull() )
+								return cov;
+							for ( int y = 0; y < h; y++ )
+								for ( int x = 0; x < w; x++ ) {
+									const QRgb pb = pass[0].pixel( x, y ), pw = pass[1].pixel( x, y );
+									const int d = ( ( qRed( pw ) - qRed( pb ) ) + ( qGreen( pw ) - qGreen( pb ) )
+										+ ( qBlue( pw ) - qBlue( pb ) ) ) / 3;
+									cov.setPixel( x, y, qRgba( qRed( pb ), qGreen( pb ), qBlue( pb ), qBound( 0, 255 - d, 255 ) ) );
+								}
+							return cov;
+						};
+						auto channelOff = [&]( int which, int w, int h, float half, float ox, float oy ) {
+							wwLodChannelView = which;
+							const QImage img = renderOff( w, h, half, ox, oy );
+							wwLodChannelView = 0;
+							return img;
+						};
+
+						/* PASS ONE: the silhouette's own BOX, per view, in units, signed
+						 * about the camera centre -- and from those, TWO different things.
+						 *
+						 * PER-FRAME POSITIONING (bungo, 2026-09-09: "each frame shifts its
+						 * own silhouette to its own centre for minimal waste, with the
+						 * per-frame offset written into the .lodm"). At one scale and one
+						 * fixed centre a frame had to hold the UNION of every view's box,
+						 * and the union is wider than any single view because the views'
+						 * boxes sit at DIFFERENT offsets -- a tree leans one way from the
+						 * front and the other from the side, and the frame paid for both.
+						 * Centre each view's own box in its own frame and the frame has to
+						 * hold only the WIDEST SINGLE VIEW.
+						 *
+						 * What does NOT change is the SCALE: `halfW`/`halfH` are still one
+						 * pair for the whole card, so the tree is the same size in every
+						 * frame (his rule, 2026-09-09: "the tree is equal in size on each
+						 * one"), and the quad is still the whole frame, so a reader still
+						 * blends three neighbouring frames of one shape. What moves is
+						 * WHERE the quad sits: `frameOffX/Y[v]` per view, written to the
+						 * sidecar and to the `.lodm`, added to `center` along that view's
+						 * own right and up axes. Without them the tree would jump sideways
+						 * at the transition by exactly the shift, which is why the offset
+						 * is part of the format and not an internal detail. */
 						const float halfH0 = skope->ogl->orthographicHalfHeight();
-						float maxDx = 1.0f, maxDy = 1.0f;
+						QVector<float> frameOffX( octN * octN, 0.0f ), frameOffY( octN * octN, 0.0f );
+						float maxDx = 1.0f, maxDy = 1.0f;			// the widest SINGLE view's half box
+						float maxOffX = 0.0f, maxOffY = 0.0f;		// how far a view's centre sits from the camera's
+						/* The UNION half-extent about the camera centre -- what the frame
+						 * had to hold before per-frame positioning. It is kept because the
+						 * SIZE LADDER measures this base's world size against the run's
+						 * largest, and the reference it is compared with is a MODEL extent
+						 * from `--list-impostor-candidates`, not a per-view box. Feeding
+						 * the ladder the smaller number would drop trees a rung for a
+						 * reason that has nothing to do with how big they are. It is also
+						 * the denominator of the fill gain this law is measured by. */
+						float unionDx = 1.0f, unionDy = 1.0f;
 						for ( int j = 0; j < octN; j++ ) {
 							for ( int i = 0; i < octN; i++ ) {
 								float rx, rz;
 								viewDir( i, j, rx, rz );
 								skope->ogl->setRotation( rx, 0.0f, rz );
-								const QImage cov = matte();
+								// the 2x arm: a square offscreen matte at a fixed size, half-extent
+								// halfH0 on both axes, so the boxes do not depend on the window
+								const QImage cov = aaOn ? matteOff( p1Size, p1Size, halfH0, 0.0f, 0.0f ) : matte();
 								const int W = cov.width(), H = cov.height();
 								const float upp = 2.0f * halfH0 / float( H );		// units per pixel, both axes
+								float x0 = 0.0f, x1 = 0.0f, y0 = 0.0f, y1 = 0.0f;
+								bool any = false;
 								for ( int y = 0; y < H; y++ )
 									for ( int x = 0; x < W; x++ )
 										if ( qAlpha( cov.pixel( x, y ) ) >= 16 ) {		// the coverage floor (spec)
-											maxDx = qMax( maxDx, ( std::fabs( float( x ) + 0.5f - 0.5f * W ) ) * upp );
-											maxDy = qMax( maxDy, ( std::fabs( float( y ) + 0.5f - 0.5f * H ) ) * upp );
+											const float dx = ( float( x ) + 0.5f - 0.5f * W ) * upp;
+											const float dy = ( float( y ) + 0.5f - 0.5f * H ) * upp;
+											if ( !any ) {
+												x0 = x1 = dx; y0 = y1 = dy; any = true;
+											} else {
+												x0 = qMin( x0, dx ); x1 = qMax( x1, dx );
+												y0 = qMin( y0, dy ); y1 = qMax( y1, dy );
+											}
 										}
+								if ( !any )
+									continue;		// an empty view keeps offset 0 and contributes no extent
+								const int v = j * octN + i;
+								// the shift in the PIXEL-DOWN sense here; negated for the sidecar, where up is +
+								frameOffX[v] = 0.5f * ( x0 + x1 );
+								frameOffY[v] = 0.5f * ( y0 + y1 );
+								maxDx = qMax( maxDx, 0.5f * ( x1 - x0 ) );
+								maxDy = qMax( maxDy, 0.5f * ( y1 - y0 ) );
+								maxOffX = qMax( maxOffX, std::fabs( frameOffX[v] ) );
+								maxOffY = qMax( maxOffY, std::fabs( frameOffY[v] ) );
+								unionDx = qMax( unionDx, qMax( std::fabs( x0 ), std::fabs( x1 ) ) );
+								unionDy = qMax( unionDy, qMax( std::fabs( y0 ), std::fabs( y1 ) ) );
 							}
 						}
 						/* THE MEASUREMENT MARGIN. Pass one reads the silhouette in VIEWPORT
@@ -22173,7 +23231,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 								steps = int( std::lround( std::log2( 1.0 / double( ratio ) ) ) );
 							return qMax( 32, from >> qBound( 0, steps, 3 ) );
 						};
-						const float myExtent = qMax( maxDx, maxDy );
+						// the ladder's own quantity: the base's SIZE, not one view's box
+						const float myExtent = qMax( unionDx, unionDy );
 						const int tileLong = ( refExtent > 0.0f && myExtent > 0.0f )
 							? sizeRung( tile, qMin( 1.0f, myExtent / refExtent ) ) : tile;
 						/* THE GAP, PER AXIS, AND THE MIPS IT BUYS (bungo, 2026-09-09, correcting
@@ -22282,7 +23341,17 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						 * widen the recorded extents. */
 						const float viewW = float( qMax( 1, skope->ogl->width() ) );
 						const float viewH = float( qMax( 1, skope->ogl->height() ) );
-						const float fitH = qMax( halfH, halfW * viewH / viewW );
+						/* PER-FRAME POSITIONING WIDENS THE FIT, and it has to. The crop
+						 * below is no longer centred on the camera: it is the frame's
+						 * extents taken around THAT VIEW'S OWN CENTRE, so the viewport
+						 * must hold `maxOff + half` on each axis, not `half`. Fitting to
+						 * `half` alone would let the crop rectangle run off the edge of
+						 * the photograph on the views whose silhouette leans furthest,
+						 * and a crop can only take what was photographed. The cost is
+						 * that the model is drawn a little smaller in the viewport, so
+						 * the downsample into the frame starts from marginally fewer
+						 * pixels; over the 19 trees `maxOff` is a few per cent of `half`. */
+						const float fitH = qMax( maxOffY + halfH, ( maxOffX + halfW ) * viewH / viewW );
 						skope->ogl->setDistance( fitH );
 						qApp->processEvents();
 						{
@@ -22290,6 +23359,18 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							if ( std::fabs( got - fitH ) > 1.0e-3f * fitH && got > 0.0f )
 								skope->ogl->setDistance( fitH * fitH / got );
 						}
+						/* THE FIT, READ BACK, AND THE PROJECTION IT WAS READ
+						 * THROUGH. `orthofit <asked> <achieved> <persp 0|1>`.
+						 * The read-back above compares two numbers that are both
+						 * `Dist / Zoom`, so it is true in either projection and
+						 * cannot see a perspective frustum -- which is how a
+						 * whole day's cards were fitted orthographically and
+						 * drawn perspectively without a single check going red.
+						 * The third field is what makes this line an instrument
+						 * rather than a restatement: it MOVES with
+						 * WW_IMPOSTOR_PERSP while the first two do not. */
+						const float orthoFitGot = skope->ogl->orthographicHalfHeight();
+						const bool orthoFitPersp = skope->ogl->isPerspectiveProjection();
 						/* A GUTTER inside every frame: a few transparent texels of margin,
 						 * so no silhouette touches a frame border and no mip below the
 						 * cap mixes neighbours. The silhouette maps to the inner rect;
@@ -22305,15 +23386,28 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						normal.fill( qRgba( 128, 128, 128, 0 ) );		// X, Y neutral; height at the card plane; no sway
 						rmaos.fill( qRgba( 128, 0, 255, 0 ) );			// the mask sheet (GSAOS or RMAOS): mid, none, open, no subsurface
 						emissive.fill( qRgba( 0, 0, 0, 255 ) );			// the emissive sheet: black, and opaque - it ships as BC1
-						// the crop: the frame's extents out of the viewport's, centred
-						auto frameOf = [&]( const QImage & img ) {
+						/* The crop: the frame's extents out of the viewport's, around THIS
+						 * VIEW'S OWN silhouette centre (`ox`, `oy` in units, the pair pass
+						 * one measured). The crop's SIZE is the card's one scale, so the
+						 * tree is the same size in every frame; only the window moves. The
+						 * offset is clamped so the rectangle stays inside the photograph --
+						 * the fit above is sized to make that clamp a no-op, and `clamped`
+						 * counts the times it was not, so a silent crop cannot happen. */
+						int clamped = 0;
+						auto frameOf = [&]( const QImage & img, float ox, float oy ) {
 							const float viewHalfW = fitH * float( img.width() ) / float( img.height() );
 							int cw = int( float( img.width() ) * halfW / viewHalfW + 0.5f );
 							cw = qBound( 4, cw, img.width() );
 							// the height too: the fit is halfH only while halfH is the binding axis
 							int chh = int( float( img.height() ) * halfH / fitH + 0.5f );
 							chh = qBound( 4, chh, img.height() );
-							const QImage inner = img.copy( ( img.width() - cw ) / 2, ( img.height() - chh ) / 2, cw, chh )
+							const int px = int( ox * 0.5f * float( img.width() ) / viewHalfW + 0.5f );
+							const int py = int( oy * 0.5f * float( img.height() ) / fitH + 0.5f );
+							int cx = ( img.width() - cw ) / 2 + px, cy = ( img.height() - chh ) / 2 + py;
+							const int cx0 = qBound( 0, cx, img.width() - cw ), cy0 = qBound( 0, cy, img.height() - chh );
+							if ( cx0 != cx || cy0 != cy )
+								clamped++;
+							const QImage inner = img.copy( cx0, cy0, cw, chh )
 								.scaled( iw, ih, Qt::IgnoreAspectRatio, Qt::SmoothTransformation );
 							QImage frame( tw, th, QImage::Format_ARGB32 );
 							frame.fill( 0 );
@@ -22323,18 +23417,167 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							return frame;
 						};
 
+						/* THE COVERAGE, WRITTEN THE WAY THE READER TESTS IT (lane
+						 * CARDWIDTH, 2026-09-10).
+						 *
+						 * The bake defines coverage at a FLOOR of 16/255 and every
+						 * extent it writes -- `half`, and every `frameoff` -- is the
+						 * box of that silhouette. Both specs then tell the consumer to
+						 * alpha-test at 0.5. Those are two different silhouettes, and
+						 * the gap between them is the tree changing size at the
+						 * transition: over the library's three measured subjects the
+						 * set a consumer draws at 0.5 is up to 5.41 texels of
+						 * half-width short of the extents the `.lodm` declares --
+						 * TreeHero01 hands over to a card 9.1% narrower and 3.2%
+						 * shorter than its own mesh.
+						 *
+						 * WHICH OF THE TWO IS RIGHT was decided inside the source
+						 * render alone, with no bake in the comparison: the 941-px
+						 * silhouette box-filtered to the card's own texel pitch --
+						 * exactly what the downsample above computes -- reproduces its
+						 * own bounding box to 0.63 texels worst of twelve half-extents
+						 * at 16/255, and to 2.07 at 0.5. The FLOOR is right; the TEST
+						 * is what has to be made to agree with it.
+						 *
+						 * So the coverage is re-encoded on the way into the sheet:
+						 *
+						 *   a' = 0                                              a < floor
+						 *   a' = base + round( (a-floor) * (255-base) / (255-floor) )
+						 *
+						 * and then `{ a' >= test } == { a >= floor }` by construction
+						 * (measured: 0 disagreeing texels of 209,793 / 64,709 / 13,510
+						 * on the three sheets). 255 stays 255, so a solid silhouette --
+						 * the cube fixture -- cannot be fattened by a texel; an empty
+						 * texel becomes a clean 0 rather than a 1..15 no consumer can
+						 * use, so the sheet's coverage set and the dilation's `filled`
+						 * set become the same set; and the FRACTION survives, monotone
+						 * and invertible,
+						 *
+						 *   a = floor + (a'-base) * (255-floor) / (255-base)
+						 *
+						 * to a maximum error of one alpha step, so a consumer that
+						 * blends a bare crown instead of testing it loses nothing.
+						 *
+						 * WHY THE BASE IS 160 AND NOT THE TEST ITSELF. The sheet ships
+						 * as BC3 and `lodgenWriteDds`'s alpha block is endpoints
+						 * max/min with an eight-step ramp and nearest-palette indices,
+						 * so a texel's alpha can move by half a step, at most
+						 * (aMax-aMin)/14 <= 255/14 = 18.2. Written at 128 a covered
+						 * texel can round BELOW the test -- measured, 5,250 texels of
+						 * one sheet -- and written at 160 it cannot, because
+						 * 160 - 18.2 = 141.8. That leaves 96 of the 256 levels for the
+						 * fraction, against the eight a BC3 block resolves anyway.
+						 *
+						 * A LAW TRIED AND REFUSED, so it is not tried again: the
+						 * alpha-coverage-preserving downsample (scale each frame's
+						 * alpha until the area drawn at 0.5 equals the frame's own
+						 * alpha integral, which a box filter conserves). It left the
+						 * worst silhouette at -9.1%, because the outermost twigs carry
+						 * almost no AREA, and it fattened a solid rectangle by a whole
+						 * texel -- the cube fixture's own condition.
+						 *
+						 * The rest of the bake keeps reading the RAW matte alpha: the
+						 * un-premultiply divides by the coverage that was MEASURED, not
+						 * by the coverage that is written, and the AO and sway laws take
+						 * their neighbourhoods off the same raw frames. */
+						const int covFloor = 16;		// the spec's coverage floor
+						const int covTest = 128;		// the alpha test both specs give a consumer, 0.5
+						const int covBase = 160;		// where the floor is written, so BC3 cannot round under the test
+						auto coverageEncode = [covFloor, covBase]( int a ) {
+							if ( a < covFloor )
+								return 0;
+							return covBase + ( ( a - covFloor ) * ( 255 - covBase ) + ( 255 - covFloor ) / 2 )
+								/ ( 255 - covFloor );
+						};
 						// pass two: the sheets
 						for ( int j = 0; j < octN; j++ ) {
 							for ( int i = 0; i < octN; i++ ) {
 								float rx, rz;
 								viewDir( i, j, rx, rz );
 								skope->ogl->setRotation( rx, 0.0f, rz );
-								const QImage tA = frameOf( matte() );
-								const QImage tN = frameOf( channel( 8 ) );		// normal, view space
-								const QImage tD = frameOf( channel( 9 ) );		// window depth
-								const QImage tS = frameOf( channel( 10 ) );		// the material channel: legacy pair, or a .lodm's third texture raw
-								const QImage tM = frameOf( channel( 11 ) );		// alpha-tested: the leaf cards
-								const QImage tE = frameOf( channel( 13 ) );		// the emissive: a .lodm's texture raw, or the vanilla glow rule
+								// this view's own silhouette centre: every channel is cropped around the same point
+								const float ox = frameOffX[j * octN + i], oy = frameOffY[j * octN + i];
+								QImage tA, tN, tD, tS, tM, tE;
+								if ( !aaOn ) {
+									tA = frameOf( matte(), ox, oy );
+									tN = frameOf( channel( 8 ), ox, oy );		// normal, view space
+									tD = frameOf( channel( 9 ), ox, oy );		// window depth
+									tS = frameOf( channel( 10 ), ox, oy );		// the material channel: legacy pair, or a .lodm's third texture raw
+									tM = frameOf( channel( 11 ), ox, oy );		// alpha-tested: the leaf cards
+									tE = frameOf( channel( 13 ), ox, oy );		// the emissive: a .lodm's texture raw, or the vanilla glow rule
+								} else {
+									/* THE OFFSCREEN ARM: the frame's inner rect, exactly, at aaK x iw
+									 * by aaK x ih samples -- halfW / halfH == iw / ih, so the samples
+									 * are square -- centred on this view's silhouette, then aaK:1
+									 * (a K x K box; K = 4 since IMPOSTORTEAR1, 2 before). */
+									const int RW = aaK * iw, RH = aaK * ih, KK = aaK * aaK;
+									const QImage sA = matteOff( RW, RH, halfH, ox, oy );
+									const QImage s8 = channelOff( 8, RW, RH, halfH, ox, oy );
+									const QImage s9 = channelOff( 9, RW, RH, halfH, ox, oy );
+									const QImage s10 = channelOff( 10, RW, RH, halfH, ox, oy );
+									const QImage s11 = channelOff( 11, RW, RH, halfH, ox, oy );
+									const QImage s13 = channelOff( 13, RW, RH, halfH, ox, oy );
+									QImage * outs[6] = { &tA, &tN, &tD, &tS, &tM, &tE };
+									for ( QImage * o : outs ) {
+										*o = QImage( tw, th, QImage::Format_ARGB32 );
+										o->fill( 0 );
+									}
+									const QImage * chans[4] = { &s9, &s10, &s11, &s13 };
+									QImage * chOut[4] = { &tD, &tS, &tM, &tE };
+									// the self-check on the pan: the covered samples' box must sit
+									// on the render's centre, as pass one measured it
+									int bx0 = RW, bx1 = -1, by0 = RH, by1 = -1;
+									for ( int y = 0; y < ih; y++ ) {
+										for ( int x = 0; x < iw; x++ ) {
+											int sa = 0, cr = 0, cg = 0, cb = 0;
+											int ch[4][3] = {};
+											float nx = 0.0f, ny = 0.0f, nz = 0.0f;
+											for ( int q = 0; q < KK; q++ ) {
+												const int sx = aaK * x + q % aaK, sy = aaK * y + q / aaK;
+												const QRgb pa = sA.pixel( sx, sy );
+												const int a = qAlpha( pa );
+												if ( a >= 16 ) {
+													bx0 = qMin( bx0, sx ); bx1 = qMax( bx1, sx );
+													by0 = qMin( by0, sy ); by1 = qMax( by1, sy );
+												}
+												if ( a == 0 )
+													continue;
+												sa += a;
+												cr += qRed( pa ); cg += qGreen( pa ); cb += qBlue( pa );
+												for ( int c = 0; c < 4; c++ ) {
+													const QRgb pc = chans[c]->pixel( sx, sy );
+													ch[c][0] += qRed( pc ); ch[c][1] += qGreen( pc ); ch[c][2] += qBlue( pc );
+												}
+												// the normal: this sample's value un-premultiplied, decoded,
+												// weighted by its coverage -- i.e. 2c - a per component
+												const QRgb pn = s8.pixel( sx, sy );
+												nx += float( 2 * qRed( pn ) - a );
+												ny += float( 2 * qGreen( pn ) - a );
+												nz += float( 2 * qBlue( pn ) - a );
+											}
+											const int X = padX + x, Y = padY + y;
+											const int cov = ( sa + KK / 2 ) / KK;
+											if ( sa == 0 )
+												continue;
+											auto un = [sa]( int c ) { return qBound( 0, ( c * 255 + sa / 2 ) / sa, 255 ); };
+											tA.setPixel( X, Y, qRgba( un( cr ), un( cg ), un( cb ), cov ) );
+											for ( int c = 0; c < 4; c++ )
+												chOut[c]->setPixel( X, Y, qRgba( un( ch[c][0] ), un( ch[c][1] ), un( ch[c][2] ), 255 ) );
+											const float len = std::sqrt( nx * nx + ny * ny + nz * nz );
+											if ( len > 1.0e-6f ) {
+												auto enc = [len]( float v ) { return qBound( 0, int( ( v / len * 0.5f + 0.5f ) * 255.0f + 0.5f ), 255 ); };
+												tN.setPixel( X, Y, qRgba( enc( nx ), enc( ny ), enc( nz ), 255 ) );
+											} else {
+												tN.setPixel( X, Y, qRgba( 128, 128, 255, 255 ) );
+											}
+										}
+									}
+									if ( bx1 >= 0 ) {
+										const float ex = std::fabs( 0.5f * float( bx0 + bx1 + 1 ) - 0.5f * float( RW ) );
+										const float ey = std::fabs( 0.5f * float( by0 + by1 + 1 ) - 0.5f * float( RH ) );
+										aaCentreErr = qMax( aaCentreErr, qMax( ex, ey ) / float( aaK ) );	// samples -> texels
+									}
+								}
 								// coverage extent for the sway law: rows and columns the object occupies
 								int top = th, bottom = -1, left = tw, right = -1;
 								for ( int y = 0; y < th; y++ )
@@ -22349,7 +23592,13 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 								for ( int y = 0; y < th; y++ ) {
 									for ( int x = 0; x < tw; x++ ) {
 										const int a = qAlpha( tA.pixel( x, y ) );
-										albedo.setPixel( i * tw + x, j * th + y, tA.pixel( x, y ) );
+										// the colour as the matte gave it; the COVERAGE re-encoded so the
+										// consumer's own alpha test selects the set the bake measured
+										{
+											const QRgb pa = tA.pixel( x, y );
+											albedo.setPixel( i * tw + x, j * th + y,
+												qRgba( qRed( pa ), qGreen( pa ), qBlue( pa ), coverageEncode( a ) ) );
+										}
 										/* The channel renders are averaged over the black background
 										 * on the way down to the frame, so a partially covered texel
 										 * carries its value times its coverage (measured: 1.000 at
@@ -22361,7 +23610,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 										 * 2), and dilation fills those from their neighbours. */
 										if ( a < 16 )
 											continue;
-										auto unp = [a]( int c ) { return qMin( 255, ( c * 255 + a / 2 ) / a ); };
+										auto unp = [a, aaOn]( int c ) { return aaOn ? c : qMin( 255, ( c * 255 + a / 2 ) / a ); };
 										const int z = unp( qRed( tD.pixel( x, y ) ) );
 										/* ambient from the height frame: the share of neighbours
 										 * nearer the camera than this pixel by more than a step,
@@ -22376,7 +23625,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 												if ( na < 16 )
 													continue;
 												tested++;
-												if ( qMin( 255, ( qRed( tD.pixel( sx, sy ) ) * 255 + na / 2 ) / na ) + 2 < z )
+												if ( ( aaOn ? qRed( tD.pixel( sx, sy ) )
+														: qMin( 255, ( qRed( tD.pixel( sx, sy ) ) * 255 + na / 2 ) / na ) ) + 2 < z )
 													occl++;
 											}
 										const int ao = tested ? 255 - 255 * occl / tested : 255;
@@ -22432,15 +23682,86 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						 * both paths so those sheets still convert to exactly the chains they were
 						 * built for. */
 						ms << "gap " << gapX << " " << gapY << "\n";
-						/* oct N frameW frameH halfW halfH cx cy cz depthspan family base
+						/* THE COVERAGE CONTRACT, in the bake's own words (lane CARDWIDTH,
+						 * 2026-09-10): `coverage <floor> <test> <base>`. The base-colour
+						 * sheet's alpha is written so that a consumer testing at `test`
+						 * selects exactly the texels whose measured coverage reached
+						 * `floor`, with `base` the alpha the floor was written at; the
+						 * fraction is recovered by
+						 * floor + (a-base)*(255-floor)/(255-base).
+						 *
+						 * A sidecar WITHOUT this line is a sheet whose alpha is the raw
+						 * fraction and whose extents therefore describe the `floor`
+						 * silhouette while a consumer testing at 0.5 draws a smaller one
+						 * -- so absence is not "unknown", it is the older vintage, and
+						 * lodgenCard passes the absence through to the `.lodm` rather
+						 * than inventing a contract the bytes do not have. */
+						ms << "coverage " << covFloor << " " << covTest << " " << covBase << "\n";
+						/* oct N frameW frameH halfW halfH cx cy cz depthspan family base conv
 						 * `base` is the RUN's chosen resolution, which frameW/frameH
 						 * may sit BELOW: a smaller frame is this base's rung on the
 						 * size ladder, not a differently-configured bake. Nothing
 						 * downstream could tell those apart without it, and the panel
-						 * refuses a directory whose base disagrees with its rows. */
+						 * refuses a directory whose base disagrees with its rows.
+						 *
+						 * `conv` is the VIEW CONVENTION TOKEN (2026-09-19). `spec1`
+						 * says frame (i,j) really is the view from direction (i,j),
+						 * which is what the camera above now produces. It goes LAST so
+						 * every reader that indexes by position and stops at `base` is
+						 * untouched, and its ABSENCE is the statement that the set came
+						 * from the bake whose azimuth was turned by 180 degrees.
+						 * EVERY SET WITHOUT IT MUST BE RE-BAKED. */
 						ms << "oct " << octN << " " << tw << " " << th << " " << fullHalfW << " " << fullHalfH << " "
 						   << bs.center[0] << " " << bs.center[1] << " " << bs.center[2] << " " << depthSpan << " "
-						   << ( familyPbr ? "pbr" : "legacy" ) << " " << tile << "\n";
+						   << ( familyPbr ? "pbr" : "legacy" ) << " " << tile << " spec1" << "\n";
+						/* PER-FRAME POSITIONING, one line per frame: `frameoff i j ox oy`,
+						 * the offset in MODEL UNITS from the card's centre along that
+						 * view's own RIGHT and UP axes. Pass one measured `oy` in the
+						 * image's own downward sense, so it is negated here: everything
+						 * else this sidecar records about the vertical is up-positive.
+						 *
+						 * A reader places frame (i,j)'s quad at `center + ox*right +
+						 * oy*up` with the card's one pair of half extents; ignoring the
+						 * lines puts every quad at `center`, which is what a set from
+						 * before the law carries and is a tree that steps sideways when
+						 * the mesh hands over to the card. One line per frame, not one
+						 * long line, because every reader of this file splits on spaces
+						 * and indexes by position.
+						 *
+						 * `clamped` is the count of frames whose crop rectangle had to be
+						 * pulled back inside the photograph. The fit is sized so it is
+						 * zero; it is written out rather than asserted so a bake that hit
+						 * it says so instead of silently cropping a silhouette. */
+						for ( int j = 0; j < octN; j++ )
+							for ( int i = 0; i < octN; i++ )
+								ms << "frameoff " << i << " " << j << " "
+								   << frameOffX[j * octN + i] << " "
+								   << -frameOffY[j * octN + i] << "\n";
+						ms << "frameclamped " << clamped << "\n";
+						/* THE PHOTOGRAPH'S ARM (lane IMPOSTORAA1): `aa 2 <pass-one size>
+						 * <worst centre miss in texels>` for the 2x offscreen bake (`aa 4 ...`
+						 * since IMPOSTORTEAR1: the first number is the factor K), `aa 0
+						 * <window WxH>` for the window photograph (WW_IMPOSTOR_AA=0).
+						 * Unknown to every older reader, which skips lines it does not
+						 * name; the sheet bytes keep their meaning either way. */
+						if ( aaOn )
+							ms << "aa " << aaK << " " << p1Size << " " << aaCentreErr << "\n";
+						else
+							ms << "aa 0 " << skope->ogl->getSizeInPixels().width() << "x"
+							   << skope->ogl->getSizeInPixels().height() << " crop "
+							   << int( float( skope->ogl->getSizeInPixels().height() ) * halfH / fitH + 0.5f )
+							   << " rows into " << ih << "\n";
+						/* What per-frame positioning bought, in the bake's own units and
+						 * before the 1.01 measurement margin: the widest SINGLE view's
+						 * half box, then the UNION half-extent about the camera centre
+						 * that a fixed-centre frame had to hold. The frame is sized from
+						 * the first and used to be sized from the second, so
+						 * `1 - single/union` is the waste this law removed on that axis.
+						 * Written so the gain is readable from the bake itself and not
+						 * only by differencing two libraries. */
+						ms << "framefit " << maxDx << " " << maxDy << " " << unionDx << " " << unionDy << "\n";
+						ms << "orthofit " << fitH << " " << orthoFitGot << " "
+						   << ( orthoFitPersp ? 1 : 0 ) << "\n";
 					}
 					meta.close();
 				} while ( false );
@@ -23242,6 +24563,38 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							skope->getCurrentFile() == primaryWas
 							&& skope->workspaceDocumentCount() == loadedBefore );
 						if ( opened ) opened->close();
+						// the closed window is deleted on the next event-loop turn;
+						// count windows only after it has actually gone
+						settle( 300 );
+
+						/* OPENHERE1: the drop REPLACES the window. Floor: two Loaded
+						 * files and a different primary exist before it, so a route
+						 * that merely added would fail the count and the name. */
+						check( "floor: two Loaded files and primary = first before Open Here",
+							skope->workspaceDocumentCount() == 2
+							&& QFileInfo( skope->getCurrentFile() ).absoluteFilePath().compare(
+								QFileInfo( files.at( 0 ) ).absoluteFilePath(), Qt::CaseInsensitive ) == 0 );
+						const int windowsBefore = NifSkope::openDocuments().size();
+						check( "Open Here handles both dropped files",
+							skope->performExternalNifDrop( { files.at( 1 ), files.at( 2 ) },
+								NifSkope::ExternalDropOpenHere ) == 2 );
+						settle( 900 );
+						check( "Open Here makes the first dropped file the document",
+							QFileInfo( skope->getCurrentFile() ).absoluteFilePath().compare(
+								QFileInfo( files.at( 1 ) ).absoluteFilePath(), Qt::CaseInsensitive ) == 0 );
+						check( "Open Here replaced Loaded files with the rest of the drop",
+							skope->workspaceDocumentCount() == 1
+							&& skope->workspaceDocumentName( 0 ) == QFileInfo( files.at( 2 ) ).fileName() );
+						check( "Open Here opens no new window",
+							NifSkope::openDocuments().size() == windowsBefore );
+						check( "Open Here with one file empties Loaded files",
+							skope->performExternalNifDrop( { files.at( 0 ) },
+								NifSkope::ExternalDropOpenHere ) == 1 );
+						settle( 900 );
+						check( "the single Open Here file is the document and Loaded files is empty",
+							QFileInfo( skope->getCurrentFile() ).absoluteFilePath().compare(
+								QFileInfo( files.at( 0 ) ).absoluteFilePath(), Qt::CaseInsensitive ) == 0
+							&& skope->workspaceDocumentCount() == 0 );
 					}
 					log << checks << " checks, " << fails << " failures\n";
 					log << ( fails == 0 ? "PASS\n" : "CHECK: failures above\n" );
@@ -23292,12 +24645,12 @@ void NifSkope::initActions()
 		allActions.insert( i );
 
 	// Undo/Redo
-	undoAction = nif->undoStack->createUndoAction( this, tr( "&Undo" ) );
+	undoAction = wwAnimUndoGroup()->createUndoAction( this, tr( "&Undo" ) );	// (lane HKXEDIT2) one group: the NIF's stack, the .hkx document's, the workspace's
 	undoAction->setShortcut( QKeySequence::Undo );
 	undoAction->setObjectName( "aUndo" );
 	undoAction->setIcon( QIcon( ":btn/undo" ) );
 	allActions << undoAction;
-	redoAction = nif->undoStack->createRedoAction( this, tr( "&Redo" ) );
+	redoAction = wwAnimUndoGroup()->createRedoAction( this, tr( "&Redo" ) );	// (lane HKXEDIT2)
 	redoAction->setShortcut( QKeySequence::Redo );
 	redoAction->setObjectName( "aRedo" );
 	redoAction->setIcon( QIcon( ":btn/redo" ) );
@@ -23670,6 +25023,12 @@ void NifSkope::initActions()
 
 void NifSkope::setLeftColumnMode( LeftColumnMode mode )
 {
+	/* lane WATER8: back to LeftHeader. WATER7 raised this clamp to LeftWater
+	 * so a fourth page of this stack could be reached; bungo's "What? I
+	 * wanted it in that right panel though" retired that page, and a clamp
+	 * that still admitted 3 would let a stale saved mode select a page this
+	 * stack no longer has. Gate L6 of tests/spells/water_ui.sh counts the
+	 * strip's tabs and the stack's pages at 3 in both workspace states. */
 	if ( mode < LeftBlocks || mode > LeftHeader )
 		mode = LeftBlocks;
 	leftColumnMode = mode;
@@ -23779,9 +25138,9 @@ void NifSkope::initDockWidgets()
 	leftColumnSelector->addTab( tr( "Blocks" ) );
 	leftColumnSelector->setTabData( 1, int( LeftBlocks ) );
 	leftColumnSelector->setTabToolTip( 1, tr( "Block List and Block Details" ) );
-	leftColumnSelector->addTab( tr( "NIFs" ) );
+	leftColumnSelector->addTab( tr( "Files" ) );
 	leftColumnSelector->setTabData( 2, int( LeftNifs ) );
-	leftColumnSelector->setTabToolTip( 2, tr( "NIF Browser and Loaded NIFs" ) );
+	leftColumnSelector->setTabToolTip( 2, tr( "File Browser and Loaded files" ) );
 	leftColumnSelector->setAccessibleName( tr( "Left editor mode" ) );
 	hostLayout->addWidget( leftColumnSelector, 0 );
 
@@ -23800,16 +25159,16 @@ void NifSkope::initDockWidgets()
 	nifWorkspaceSplitter->setObjectName( QStringLiteral( "NifBrowserSplitter" ) );
 	nifWorkspaceSplitter->setChildrenCollapsible( false );
 	nifWorkspaceSplitter->setHandleWidth( 4 );
-	nifWorkspaceSplitter->setToolTip( tr( "Drag to resize NIF Browser and Loaded NIFs" ) );
-	nifWorkspaceSplitter->setAccessibleName( tr( "NIF Browser and Loaded NIFs splitter" ) );
+	nifWorkspaceSplitter->setToolTip( tr( "Drag to resize File Browser and Loaded files" ) );
+	nifWorkspaceSplitter->setAccessibleName( tr( "File Browser and Loaded files splitter" ) );
 	nifWorkspaceSplitter->addWidget( browserContents );
 	nifWorkspaceSplitter->addWidget( loadedNifsPane );
 	nifWorkspaceSplitter->setStretchFactor( 0, 5 );
 	nifWorkspaceSplitter->setStretchFactor( 1, 2 );
 	nifWorkspaceSplitter->setSizes( { 500, 180 } );
 	if ( QSplitterHandle * handle = nifWorkspaceSplitter->handle( 1 ) ) {
-		handle->setToolTip( tr( "Drag to resize NIF Browser and Loaded NIFs" ) );
-		handle->setAccessibleName( tr( "Resize NIF Browser and Loaded NIFs" ) );
+		handle->setToolTip( tr( "Drag to resize File Browser and Loaded files" ) );
+		handle->setAccessibleName( tr( "Resize File Browser and Loaded files" ) );
 	}
 
 	headerContents->setObjectName( QStringLiteral( "LeftHeaderPage" ) );
@@ -23832,54 +25191,155 @@ void NifSkope::initDockWidgets()
 			QTimer::singleShot( 0, this, &NifSkope::populateConfiguredNifBrowser );
 	} );
 
-	// Animation Manager
-	dTimeline = new QDockWidget( tr( "Animation Manager" ), this );
-	dTimeline->setObjectName( "TimelineDock" );
-	timeline = new TimelineWidget( dTimeline );
-	// timeline buttons must not take keyboard focus, otherwise Tab (edit-mode
-	// toggle) cycles the transport buttons after clicking one
-	for ( QAbstractButton * b : timeline->findChildren<QAbstractButton *>() )
-		b->setFocusPolicy( Qt::NoFocus );
-	timeline->setNif( nif );
-	dTimeline->setWidget( timeline );
-	/* Docked, area-restricted and hidden, like its seven siblings.
+	/* THE ANIMATION MANAGER DOCK IS GONE (lane UI6, 2026-09-11).
 	 *
-	 * It was added with neither setAllowedAreas nor hide(), so a fresh profile
-	 * opened with the Animation Manager already spread across the bottom before
-	 * any workspace was chosen -- and because it accepted all four areas,
-	 * activateWorkspace needed a special case to keep it where it belongs.
-	 * Bottom stays allowed because this one really does live there; the point is
-	 * that the allowance is now declared rather than assumed.
+	 * bungo had already called it "old and outdated"; on 2026-09-10 21:1x he
+	 * sent three screenshots of it -- two spin boxes with their steppers
+	 * clipped to a sliver ("Do you see it?"), "we have a new standard for
+	 * those sliders, don't you remember?" and "look at all this text clutter"
+	 * -- and the Animation dock built below, gated 57/0 by animws.sh, is its
+	 * replacement. So nothing is constructed here any more: no QDockWidget
+	 * named TimelineDock, no TimelineWidget, no connections, and the
+	 * Workspaces menu's "Animation" entry (which pointed at this dock) now
+	 * opens the one below.
+	 *
+	 * `NifSkope::timeline` stays declared and stays null. Two old harnesses
+	 * (WW_ANIMPLAY_TEST, WW_ROTKEY_TEST) drove this widget and now refuse by
+	 * name rather than measuring nothing; deleting TimelineWidget itself is a
+	 * separate lane, because src/ui/widgets/timeline.cpp also holds the icon
+	 * set (tlMakeIcon / tlIconNames / tlWriteIconSheet) the whole window uses.
 	 */
-	dTimeline->setAllowedAreas( Qt::BottomDockWidgetArea | Qt::LeftDockWidgetArea
+
+	/* THE BODY BUILD dock (lane GLTFEXPORT1, bungo 2026-09-19 05:0x: "Fallout 4
+	 * has 'skin' bones, those are not used for animations, but only for the
+	 * character's build?"). A PREVIEW: it scales the loaded character's *_skin
+	 * nodes from the RACE record's own Bone Scale Data and writes nothing.
+	 * The dock is a local -- the harness finds the panel by object name, and
+	 * nothing else in the window addresses it -- so nifskope.h gains no member
+	 * while another lane is holding that file. */
+	{
+		QDockWidget * dBodyBuild = new QDockWidget( tr( "Body Build" ), this );
+		dBodyBuild->setObjectName( "BodyBuildDock" );
+		BodyBuildPanel * bodyBuild = new BodyBuildPanel( dBodyBuild );
+		bodyBuild->setObjectName( "BodyBuildPanel" );
+		bodyBuild->setNif( nif );
+		bodyBuild->setGLView( ogl );
+		dBodyBuild->setWidget( bodyBuild );
+		dBodyBuild->setAllowedAreas( Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea
+			| Qt::BottomDockWidgetArea );
+		addDockWidget( Qt::RightDockWidgetArea, dBodyBuild );
+		dBodyBuild->hide();
+		// A rebuilt scene has new Node objects: the saved transforms the panel
+		// holds point at nodes that no longer exist, so it drops them WITHOUT
+		// restoring and works the preview out again against what is there now.
+		connect( this, &NifSkope::completeLoading, bodyBuild,
+				 [bodyBuild]( bool, QString & ) { bodyBuild->onSceneRebuilt(); } );
+	}
+
+	/* THE CELL PICK dock and its master (lane CELLVIEW2). Flat Name|Value rows
+	 * for the reference under the cursor in a `.wwcell` scene, straight out of
+	 * CellPickTable::rowsFor() so the dock and the harness read the same
+	 * function. A LOCAL, exactly like the Body Build dock above: the harness
+	 * finds the panel by object name and nothing else in the window addresses
+	 * it, so nifskope.h gains no member while another lane holds that file. */
+	{
+		QDockWidget * dCellPick = new QDockWidget( tr( "Reference" ), this );
+		dCellPick->setObjectName( "CellPickDock" );
+		CellPickPanel * cellPick = new CellPickPanel( dCellPick );
+		dCellPick->setWidget( cellPick );
+		dCellPick->setAllowedAreas( Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea
+			| Qt::BottomDockWidgetArea );
+		addDockWidget( Qt::RightDockWidgetArea, dCellPick );
+		dCellPick->hide();
+
+		/* THE MASTER SHIPS OFF, WITH A ROW (bungo's standing rule: every feature
+		 * master ships off, and nothing exists without a row to reach it).
+		 * While it is unticked cellPickClick() returns false, the viewport's
+		 * click falls through to the ordinary block selection and this lane
+		 * changes nothing. The colour overlays INSIDE the cell view are not
+		 * masters and get no row -- they are one view's display setting. */
+		QAction * aCellPick = new QAction( tr( "Cell Pick Panel" ), this );
+		aCellPick->setCheckable( true );
+		aCellPick->setChecked( false );
+		cellPickSetEnabled( false );
+		connect( aCellPick, &QAction::toggled, this, [dCellPick]( bool on ) {
+			cellPickSetEnabled( on );
+			dCellPick->setVisible( on );
+			CellPickBus::instance()->sceneChanged();
+		} );
+		ui->mRender->addAction( aCellPick );
+
+		/* THE SELF-TEST (WW_CELLPICK_TEST=<report path>, src/cellpicktest.h).
+		 * The click path starts in the viewport and ends in this dock, so it
+		 * is measured INSIDE the running window and the answers are written
+		 * to a file tests/spells/cell_pick.sh greps -- never judged from a
+		 * screenshot. It runs after completeLoading because the cell scene
+		 * the placement table describes is built by that load, and it ticks
+		 * the master itself: a harness forces the state it measures rather
+		 * than inheriting it from QSettings. */
+		if ( !qgetenv( "WW_CELLPICK_TEST" ).isEmpty() ) {
+			aCellPick->setChecked( true );
+			connect( this, &NifSkope::completeLoading, this,
+				[this, cellPick]( bool, QString & ) {
+					cellPickSelfTest( nif, cellPick, QString::fromLocal8Bit(
+						qgetenv( "WW_CELLPICK_TEST" ) ) );
+				} );
+		}
+	}
+
+	/* THE ANIMATION WORKSPACE (lane HKXEDIT2, bungo 2026-09-10: "Just make hkx
+	 * fully editable in our nifskope"; "Animation manager was one of the
+	 * first features for nifskope, and it's pretty old and outdated btw").
+	 * One dock: the NIF's sequences and the loaded .hkx clips in one list,
+	 * Blender's dope sheet with keys per bone track, annotations as markers,
+	 * float tracks, one transport row, the old manager's sequence controls as
+	 * rows, and the clip fully editable (keys, annotations, trim, retime,
+	 * root-motion bake, Save as .hkx). The Animation Manager dock above stays
+	 * until this one is proven in the app; a follow-up retires it. */
+	dAnimWs = new QDockWidget( tr( "Animation" ), this );
+	dAnimWs->setObjectName( "AnimWorkspaceDock" );
+	animws = new AnimWorkspace( dAnimWs );
+	animws->setNif( nif );
+	animws->setGLView( ogl );
+	animws->addAnimActions( ui->aAnimLoop, ui->aAnimSwitch );
+#ifdef WW_ANIMWS_HKXMODEL
+	animws->setHkxModel( hkx );
+	animws->installUndoGroup( nif->undoStack, hkx->undoStack );
+#else
+	animws->installUndoGroup( nif->undoStack, nullptr );
+#endif
+	dAnimWs->setWidget( animws );
+	dAnimWs->setAllowedAreas( Qt::BottomDockWidgetArea | Qt::LeftDockWidgetArea
 		| Qt::RightDockWidgetArea );
-	addDockWidget( Qt::BottomDockWidgetArea, dTimeline );
-	dTimeline->hide();
-
-	connect( timeline, &TimelineWidget::indexSelected, this, &NifSkope::select );
-	connect( timeline, &TimelineWidget::timeChanged, ogl, &GLView::setSceneTime );
-	connect( ogl, &GLView::sceneTimeChanged, timeline, &TimelineWidget::setTime );
-	connect( this, &NifSkope::completeLoading, timeline, &TimelineWidget::refreshLater );
-
-	// Two way sequence sync with the animation toolbar / scene
-	connect( timeline, &TimelineWidget::sequenceActivated, ogl, &GLView::setSceneSequence );
-	connect( ogl, &GLView::sequenceChanged, timeline, &TimelineWidget::setSequenceByName );
-
-	connect( timeline, &TimelineWidget::isolateBlock, ogl, &GLView::setSoloBlock );
-
-	// Loop / switch-animation toggles mirrored from the render toolbar
-	timeline->addAnimActions( ui->aAnimLoop, ui->aAnimSwitch );
+	addDockWidget( Qt::BottomDockWidgetArea, dAnimWs );
+	dAnimWs->hide();
+	connect( animws, &AnimWorkspace::indexSelected, this, &NifSkope::select );
+	connect( animws, &AnimWorkspace::timeChanged, ogl, &GLView::setSceneTime );
+	connect( ogl, &GLView::sceneTimeChanged, animws, &AnimWorkspace::setTime );
+	connect( this, &NifSkope::completeLoading, animws, &AnimWorkspace::refreshLater );
+	connect( animws, &AnimWorkspace::sequenceActivated, ogl, &GLView::setSceneSequence );
+	connect( ogl, &GLView::sequenceChanged, animws, &AnimWorkspace::setSequenceByName );
+	connect( animws, &AnimWorkspace::isolateBlock, ogl, &GLView::setSoloBlock );
+	connect( ogl, &GLView::transformCommitted, animws, &AnimWorkspace::keyNodeTransform );
+	// the transport asks the application exactly as the old dock does: forward
+	// the signal into the old dock's, whose lambda below owns the clock
+	connect( ui->aAnimPlay, &QAction::toggled, animws, [this]( bool on ) {
+		animws->setPlayingState( on, ogl->animationSpeed() < 0.0f );
+	} );
+	connect( ogl, &GLView::sequenceStopped, animws, [this]() {
+		animws->setPlayingState( false, false );
+	} );
+	connect( dAnimWs->toggleViewAction(), &QAction::triggered, [this]( bool on ) {
+		if ( on && dAnimWs->isFloating() ) {
+			dAnimWs->setFloating( false );
+			addDockWidget( Qt::BottomDockWidgetArea, dAnimWs );
+		}
+	} );
 
 	// Re-dock at the bottom when reopened from the menu: a floating dock that
 	// was closed can come back with its title bar off screen and become unmovable.
 	// Only on the menu action's triggered — toggled also fires during the
 	// drag-to-float transition and would make the dock impossible to detach.
-	connect( dTimeline->toggleViewAction(), &QAction::triggered, [this]( bool on ) {
-		if ( on && dTimeline->isFloating() ) {
-			dTimeline->setFloating( false );
-			addDockWidget( Qt::BottomDockWidgetArea, dTimeline );
-		}
-	} );
 
 	/* The Animation dock's transport, routed into the ONE playback engine.
 	 *
@@ -23891,7 +25351,7 @@ void NifSkope::initDockWidgets()
 	 * and Switch behave identically forwards and backwards. The dock used to keep
 	 * a private playDir the renderer never saw.
 	 */
-	connect( timeline, &TimelineWidget::playPauseRequested, this, [this]( int dir ) {
+	connect( animws, &AnimWorkspace::playPauseRequested, this, [this]( int dir ) {
 		if ( dir == 0 ) {
 			if ( ui->aAnimPlay->isChecked() )
 				ui->aAnimPlay->trigger();
@@ -23901,7 +25361,7 @@ void NifSkope::initDockWidgets()
 		ogl->setAnimSpeed( dir < 0 ? -speed : speed );
 		if ( !ui->aAnimPlay->isChecked() )
 			ui->aAnimPlay->trigger();
-		timeline->setPlayingState( true, dir < 0 );
+		animws->setPlayingState( true, dir < 0 );
 	} );
 
 	/* ...and the buttons follow the APPLICATION, not their own clicks.
@@ -23910,12 +25370,6 @@ void NifSkope::initDockWidgets()
 	 * playback without going through this dock. btnPlay's checked state used to
 	 * track only its own clicks, so it drifted out of step with everything else.
 	 */
-	connect( ui->aAnimPlay, &QAction::toggled, timeline, [this]( bool on ) {
-		timeline->setPlayingState( on, ogl->animationSpeed() < 0.0f );
-	} );
-	connect( ogl, &GLView::sequenceStopped, timeline, [this]() {
-		timeline->setPlayingState( false, false );
-	} );
 
 	// Solo / preview-only rendering of the selected node
 	QAction * aSolo = new QAction( tr( "Solo Selected" ), this );
@@ -23931,14 +25385,14 @@ void NifSkope::initDockWidgets()
 	// Transform gizmo companions
 	connect( ogl, &GLView::gizmoStatus, [this]( const QString & s ) {
 		if ( s.isEmpty() )
-			ui->statusbar->clearMessage();
+			clearTransientMessage();
 		else
-			ui->statusbar->showMessage( s );
+			showTransientMessage( s, 0 );	// held until the gizmo says otherwise
 	} );
 
 	QAction * aAutoKey = new QAction( tr( "Auto-Key Transforms" ), this );
 	aAutoKey->setCheckable( true );
-	aAutoKey->setToolTip( tr( "After a gizmo transform (G/R/S in the viewport), key it on the Animation Manager's transform lane at the playhead" ) );
+	aAutoKey->setToolTip( tr( "After a gizmo transform (G/R/S in the viewport), key the bone on the Animation dock's dope sheet at the playhead" ) );
 	connect( aAutoKey, &QAction::toggled, [this]( bool on ) { ogl->gizmoAutoKey = on; } );
 	ui->mRender->addAction( aAutoKey );
 
@@ -24662,7 +26116,6 @@ void NifSkope::initDockWidgets()
 	// dropdown (Show 3D Cursor), and the duplication confused more than it
 	// helped. The menu object stays alive as the owner of its actions.
 
-	connect( ogl, &GLView::transformCommitted, timeline, &TimelineWidget::keyNodeTransform );
 
 	/* The viewport's own keys: Search on Space, Quick Favourites on Q.
 	 *
@@ -25178,6 +26631,108 @@ void NifSkope::initDockWidgets()
 		for ( QAction * a : ds )
 			m->addAction( a );
 
+		/* Show Skeleton (lane SKELOVERLAY). bungo 2026-09-10, verbatim:
+		 * "Add to the overlays: View skeleton, shows you the bones, basically
+		 * the same view as in the skeleton manager".
+		 *
+		 * Beside Show Nodes and Do Skinning because it is the same kind of
+		 * thing: what the viewport draws on top of the model. Its bone list and
+		 * its three colours come from skeletonAnalyse(), the Skeleton Manager
+		 * dock's own analysis, so the two views cannot disagree -- and the bone
+		 * NAMES ride on Show Nodes rather than a row of their own.
+		 */
+		QAction * aShowSkeleton = new QAction( tr( "Show Skeleton" ), this );
+		aShowSkeleton->setCheckable( true );
+		aShowSkeleton->setChecked( false );
+		const QString skelTipBase = tr( "Draw the rig's bones over the model and through it, "
+			"coloured the way the Skeleton Manager colours them. Tick Show Nodes as well for bone names.\n\n"
+			"A bone body joins two ARMATURE nodes only -- the nodes a skin lists, plus the nodes "
+			"between them. Camera, anim-object, weapon and attach nodes are still listed and still "
+			"get a joint marker, but nothing is drawn to them: they sit where the file puts them "
+			"while an animated character moves away, and joining the two drew segments across the "
+			"whole scene (lane SKELFIX)." );
+		aShowSkeleton->setToolTip( skelTipBase );
+		connect( aShowSkeleton, &QAction::toggled, this, [this, aShowSkeleton, skelTipBase]( bool on ) {
+			if ( ogl ) {
+				ogl->setSkeletonOverlay( on );
+				// The measured sentence for the file that is open NOW: which
+				// node the armature is rooted at, and how many nodes are
+				// marker-only. Built by setSkeletonOverlay(), so it is there
+				// by the time this line runs (lane SKELFIX).
+				const QString rule = on ? ogl->skeletonOverlayRule() : QString();
+				aShowSkeleton->setToolTip( rule.isEmpty() ? skelTipBase
+					: ( skelTipBase + QStringLiteral( "\n\n" ) + rule ) );
+				ogl->update();
+			}
+		} );
+		m->addAction( aShowSkeleton );
+
+		/* Overlays > Bone Display (lane SKEL2, bungo 2026-09-11).
+		 *
+		 * His words: "what about the bone shape? Shouldn't it be something like
+		 * in Blender?", over a screenshot of Blender 4.5.3's default armature
+		 * bone -- and then "Just keep the color of the bones blue".
+		 *
+		 * This is Blender's Armature > Viewport Display > Display As, with its
+		 * own X-ray and Names beside it. ROWS ONLY, no descriptions: his rule
+		 * for the END menu, which is the rule for every menu in the fork.
+		 *
+		 * B-Bone and Envelope are the two Blender modes that are NOT here, and
+		 * the reason is the zero-authoring rule rather than effort: a B-Bone
+		 * needs a per-bone segment count and two handle bones, an Envelope
+		 * needs a head radius, a tail radius and a distance, and a NIF NiNode
+		 * carries none of the five. Inventing them would be hand-authored data
+		 * coupled to one rig.
+		 */
+		{
+			QMenu * bm = m->addMenu( tr( "Bone Display" ) );
+			bm->setToolTipsVisible( true );
+			QSettings bs;
+			const int startDisplay = qBound( 0,
+				bs.value( QStringLiteral( "GLView/ArmatureDisplay" ), 0 ).toInt(), 2 );
+			const bool startXray = bs.value( QStringLiteral( "GLView/ArmatureXray" ), true ).toBool();
+			const bool startNames = bs.value( QStringLiteral( "GLView/ArmatureNames" ), false ).toBool();
+			auto * grp = new QActionGroup( bm );
+			grp->setExclusive( true );
+			const QStringList shapeNames = { tr( "Octahedral" ), tr( "Stick" ), tr( "Wire" ) };
+			for ( int i = 0; i < shapeNames.size(); i++ ) {
+				QAction * a = bm->addAction( shapeNames.at( i ) );
+				a->setObjectName( QStringLiteral( "BoneDisplay%1" ).arg( i ) );
+				a->setCheckable( true );
+				a->setActionGroup( grp );
+				a->setChecked( i == startDisplay );
+				connect( a, &QAction::triggered, this, [this, i]() {
+					QSettings().setValue( QStringLiteral( "GLView/ArmatureDisplay" ), i );
+					if ( ogl )
+						ogl->setArmatureDisplay( i );
+				} );
+			}
+			bm->addSeparator();
+			QAction * aBoneXray = bm->addAction( tr( "X-ray" ) );
+			aBoneXray->setObjectName( QStringLiteral( "BoneXray" ) );
+			aBoneXray->setCheckable( true );
+			aBoneXray->setChecked( startXray );
+			connect( aBoneXray, &QAction::toggled, this, [this]( bool on ) {
+				QSettings().setValue( QStringLiteral( "GLView/ArmatureXray" ), on );
+				if ( ogl )
+					ogl->setArmatureXray( on );
+			} );
+			QAction * aBoneNames = bm->addAction( tr( "Names" ) );
+			aBoneNames->setObjectName( QStringLiteral( "BoneNames" ) );
+			aBoneNames->setCheckable( true );
+			aBoneNames->setChecked( startNames );
+			connect( aBoneNames, &QAction::toggled, this, [this]( bool on ) {
+				QSettings().setValue( QStringLiteral( "GLView/ArmatureNames" ), on ? 1 : 0 );
+				if ( ogl )
+					ogl->setArmatureNames( on ? 1 : 0 );
+			} );
+			if ( ogl ) {
+				ogl->setArmatureDisplay( startDisplay );
+				ogl->setArmatureXray( startXray );
+				ogl->setArmatureNames( startNames ? 1 : 0 );
+			}
+		}
+
 		/* How collision is drawn, beside the toggle for whether it is drawn.
 		 *
 		 * These six were a row across the top of the Collision Manager, which is
@@ -25297,6 +26852,7 @@ void NifSkope::initDockWidgets()
 			persist( aOrigins,      QStringLiteral( "GLView/Display/ShowOrigins" ) );
 			persist( aBillboard,    QStringLiteral( "GLView/Display/Billboards" ) );
 			persist( aOrbitSel,     QStringLiteral( "GLView/Display/OrbitSelection" ) );
+			persist( aShowSkeleton, QStringLiteral( "GLView/Display/ShowSkeleton" ) );	// lane SKELOVERLAY
 		}
 
 		/* Everything else in here loses its colour.
@@ -25716,7 +27272,7 @@ void NifSkope::initDockWidgets()
 				if ( !started ) {
 					QSignalBlocker blocker( bWeightBrush );
 					bWeightBrush->setChecked( false );
-					statusBar()->showMessage(
+					showTransientMessage(
 						tr( "Select a mesh (and a bone for Weight Paint) in the manager, then click the brush." ), 5000 );
 				}
 			} );
@@ -25857,22 +27413,18 @@ void NifSkope::initDockWidgets()
 			  tr( "Render both: PBR wherever a .pbrm is available, spec/gloss everywhere else. "
 			      "PBR always overrides a legacy material when one is available." ) },
 		};
-		// The PBR modes are UNFINISHED — they bind and draw but render nothing for
-		// lighting-shader shapes (WW_CHANGES 2026-07-27e). Greyed out and forced
-		// to Legacy until that is fixed; `pbrmFeatureEnabled` in glproperty.cpp
-		// gates the runtime side so a stored setting cannot re-enable them.
-		const int activeMode = PbrmModeLegacy;
+		// Q9 (lane PBRR3, the R3 gates passed): the DISPLAY DEFAULT is Legacy and
+		// PBR -- a shape a .pbrm serves renders PBR, every other shape spec/gloss.
+		// Legacy stays selectable here; every launch starts in Legacy and PBR, a
+		// stored choice is not restored (as in R1).
+		const int activeMode = PbrmModeLegacyAndPBR;
 		setPbrmMode( activeMode );
 		for ( const LightingModeDef & def : lightingModes ) {
-			const bool finished = ( def.mode == PbrmModeLegacy );
 			QAction * a = shadeMenu->addAction( def.mode == PbrmModeLegacy ? ui->aSpecular->icon() : QIcon(),
-				finished ? def.name : tr( "%1 (unfinished)" ).arg( def.name ) );
+				def.name );
 			a->setCheckable( true );
 			a->setChecked( def.mode == activeMode );
-			a->setEnabled( finished );
-			a->setToolTip( finished ? def.tip
-				: tr( "Not finished: the PBR path issues draws but renders nothing for "
-				      "lighting-shader shapes. Disabled until that is fixed." ) );
+			a->setToolTip( def.tip );
 			workflowGrp->addAction( a );
 			const int mode = def.mode;
 			connect( a, &QAction::triggered, this, [this, mode]( bool on ) {
@@ -25888,16 +27440,12 @@ void NifSkope::initDockWidgets()
 		shadeMenu->addSeparator();
 
 		// Same-name .pbrm discovery. NOT part of the workflow radio group: it is
-		// an independent toggle, and it governs discovery only — a material whose
+		// an independent toggle, and it governs discovery only -- a material whose
 		// name already ends in .pbrm is a direct link and is always honoured.
-		// Greyed out alongside the PBR modes: substituting a material that nothing
-		// can draw would only hide the legacy one.
-		QAction * pbrmAuto = shadeMenu->addAction( tr( "Auto-replace BGSM/BGEM with .pbrm (unfinished)" ) );
+		QAction * pbrmAuto = shadeMenu->addAction( tr( "Auto-replace BGSM/BGEM with .pbrm" ) );
 		pbrmAuto->setCheckable( true );
-		pbrmAuto->setChecked( false );
-		pbrmAuto->setEnabled( false );
-		pbrmAuto->setToolTip( tr( "When a material has a same-name .pbrm beside it, use the .pbrm instead. "
-			"Disabled until the PBR render path works." ) );
+		pbrmAuto->setChecked( QSettings().value( QStringLiteral( "Settings/Render/PBRM Auto Replace" ), true ).toBool() );
+		pbrmAuto->setToolTip( tr( "When a material has a same-name .pbrm beside it, use the .pbrm instead." ) );
 		connect( pbrmAuto, &QAction::toggled, this, [this]( bool on ) {
 			QSettings settings;
 			settings.setValue( QStringLiteral( "Settings/Render/PBRM Auto Replace" ), on );
@@ -25911,6 +27459,11 @@ void NifSkope::initDockWidgets()
 				ogl->update();
 			}
 		} );
+
+		// PBR route view (R1): a data view that tints every lighting-shader shape
+		// by the route its material resolved through. R1 put it in the Render
+		// menu; R2a (lane PBRR2A) moved it into the Scene window's Mode section.
+		// Never persisted, so every launch starts with it off.
 
 		shadeMenu->addSeparator();
 		shadeMenu->addSection( tr( "Material Contributions" ) );
@@ -26096,6 +27649,39 @@ void NifSkope::initDockWidgets()
 
 		shadeButton->setMenu( shadeMenu );
 		ui->tRender->addWidget( shadeButton );
+
+		/* The Scene window (lane PBRR2A; bungo's UI ruling 2026-09-24): one
+		 * non-modal tool window above NifSkope only, opened from View > Scene and
+		 * from this toolbar button, remembering its size and position. */
+		{
+			wwSceneLoadSettings();
+			QAction * aScene = new QAction( tlMakeIcon( QStringLiteral( "bulb" ), icoColHdr ), tr( "Scene" ), this );
+			aScene->setObjectName( QStringLiteral( "aSceneWindow" ) );
+			aScene->setCheckable( true );
+			auto * sceneWin = new SceneWindow( this,
+				[this]() {
+					if ( ogl )
+						ogl->update();
+				},
+				[aScene]( bool shown ) {
+					const QSignalBlocker block( aScene );
+					aScene->setChecked( shown );
+				} );
+			connect( aScene, &QAction::toggled, sceneWin, [sceneWin]( bool on ) {
+				if ( on ) {
+					sceneWin->show();
+					sceneWin->raise();
+				} else {
+					sceneWin->hide();
+				}
+			} );
+			if ( ui->mView )
+				ui->mView->addAction( aScene );
+			QToolButton * sceneButton = new QToolButton( this );
+			sceneButton->setDefaultAction( aScene );
+			sceneButton->setAutoRaise( true );
+			ui->tRender->addWidget( sceneButton );
+		}
 
 		auto currentShadeMode = std::make_shared<int>( 2 );
 		auto soloContribution = std::make_shared<int>( -1 );
@@ -26331,8 +27917,12 @@ void NifSkope::initDockWidgets()
 	extern QDockWidget * tlCreateLodGenerationDock( NifModel * nif, QMainWindow * mw, GLView * ogl );
 	QDockWidget * dLodGen = tlCreateLodGenerationDock( nif, this, ogl );
 
+	/* lane UI6: the Animation Manager dock that used to be first in this list
+	 * is gone, and the Animation WORKSPACE takes its place -- the same position,
+	 * so every stored workspace index still points where it did, and the dock
+	 * that had no Workspaces entry of its own now has the one that matters. */
 	const QList<QDockWidget *> workspaceManagers = {
-		dTimeline, dMatMgr, dCollisionMgr, dRiggingMgr, dVertexPaintMgr, dUVMgr, dPoseMgr,
+		dAnimWs, dMatMgr, dCollisionMgr, dRiggingMgr, dVertexPaintMgr, dUVMgr, dPoseMgr,
 		dSkeletonMgr, dUnfuckMgr, dLodGen
 	};
 	for ( QDockWidget * manager : workspaceManagers )
@@ -26436,6 +28026,31 @@ void NifSkope::initDockWidgets()
 		lodMenu->addSeparator();
 		QAction * lodNote = lodMenu->addAction( tr( "Level 3 is Starfield only" ) );
 		lodNote->setEnabled( false );
+
+		/* OCTAHEDRAL IMPOSTOR CARDS (lane IMPOSTORSHOW, 2026-09-19).
+		 *
+		 * A FEATURE MASTER, SHIPPED OFF, which is the standing rule for every
+		 * one of them. It belongs in this menu because it is the same question
+		 * the rows above it ask -- which level of detail the viewport draws --
+		 * and the answer it adds is "the baked card, where the chunk's manifest
+		 * puts one".
+		 *
+		 * It only ever does anything for a file that has a lodgen
+		 * `<name>.manifest.txt` beside it with `C` lines in it. The row is left
+		 * enabled for every file even so: greying it out on an ordinary NIF
+		 * would make a switch that is merely inapplicable look broken, and the
+		 * application log already says how many placements were read.
+		 */
+		QAction * aOctCards = lodMenu->addAction( tr( "Octahedral Impostor Cards" ) );
+		aOctCards->setCheckable( true );
+		aOctCards->setChecked( ImpostorChunk::enabled() );
+		aOctCards->setToolTip( tr( "Draw the baked impostor card where this chunk's manifest"
+				" places one. The chunk's own LOD shapes are still drawn underneath." ) );
+		connect( aOctCards, &QAction::toggled, this, [this]( bool on ) {
+			ImpostorChunk::setEnabled( on );
+			if ( ogl )
+				ogl->update();
+		} );
 
 		/* The enable signal fires from the shape classes as they build, once per
 		 * LOD shape found, so it arrives repeatedly and only ever with true. The
@@ -26568,13 +28183,74 @@ void NifSkope::initDockWidgets()
 		connect( ui->aAnimSwitch, &QAction::toggled, cycleChk, &QCheckBox::setChecked );
 		grid->addWidget( cycleChk, 6, 0, 1, 2 );
 
-		auto * timelineBtn = new QPushButton( tr( "Timeline dock…" ), animPanel );
+		auto * timelineBtn = new QPushButton( tr( "Animation dock…" ), animPanel );
 		timelineBtn->setStyleSheet( boxQss );
 		connect( timelineBtn, &QPushButton::clicked, this, [animMenu, this]() {
 			animMenu->close();
-			dTimeline->toggleViewAction()->trigger();
+			dAnimWs->toggleViewAction()->trigger();
 		} );
 		grid->addWidget( timelineBtn, 7, 0, 1, 2 );
+
+		/* LOAD ANIMATION (.hkx) -- bungo 2026-09-10, lane HKX2/HKX3.
+		 *
+		 * His words: "in animation workspace, add an option to load a hkx file
+		 * with animation, then they get added to the animations list, and if
+		 * there's rigged geometry with nodes / bone names that match, they play".
+		 *
+		 * The loaded clip goes into Scene::animGroups and Scene::animTags, so the
+		 * Sequence row above, the scrub bar, Loop, Speed and Cycle are already
+		 * its transport and nothing else here changes. The label under the button
+		 * is the summary line: how many bones play, which ones do not, and where
+		 * the bone names came from.
+		 */
+		auto * hkxBtn = new QPushButton( tr( "Load Animation (.hkx)…" ), animPanel );
+		hkxBtn->setStyleSheet( boxQss );
+		hkxBtn->setToolTip( tr( "Load a Havok animation and add it to the animations "
+								"list. It plays on the bones of the open NIF whose "
+								"names match its tracks." ) );
+		auto * hkxNote = new QLabel( animPanel );
+		hkxNote->setWordWrap( true );
+		hkxNote->setStyleSheet( QStringLiteral( "color:%1;" ).arg( wwSkinColor( "textMuted" ) ) );
+		connect( hkxBtn, &QPushButton::clicked, this, [this, hkxNote]() {
+			Scene * sc = ogl->getScene();
+			if ( !sc || !sc->hkx )
+				return;
+			const QString f = QFileDialog::getOpenFileName( this, tr( "Load Animation" ),
+				QString(), tr( "Havok animation (*.hkx *.xml);;All files (*)" ) );
+			if ( f.isEmpty() )
+				return;
+			// ONE loader for the button, the Animation Manager dock and a
+			// dropped file (lane HKX3). It loads, activates, MEASURES
+			// whether the clip actually bound, and returns the sentence.
+			hkxNote->setText(
+				WwHkxAnimHub::instance()->loadFiles( ogl, { f }, true ) );
+			// The panel re-reads the animations list from this signal, which is
+			// also what the rest of the program listens to. Calling
+			// refreshAnimPanel directly is not possible here: it is declared
+			// further down this same block.
+			emit ogl->sequencesUpdated();
+		} );
+		grid->addWidget( hkxBtn, 8, 0, 1, 2 );
+		grid->addWidget( hkxNote, 9, 0, 1, 2 );
+
+		// Root motion is a switch of its own and starts OFF (bungo's ruling): a
+		// clip that walks forward would otherwise carry the rig out of frame the
+		// moment it is selected.
+		auto * rootChk = new QCheckBox( tr( "Root motion" ), animPanel );
+		rootChk->setToolTip( tr( "Apply the loaded animation's extracted root motion "
+								 "to the skeleton root" ) );
+		connect( rootChk, &QCheckBox::toggled, this, [this, hkxNote]( bool on ) {
+			Scene * sc = ogl->getScene();
+			if ( !sc || !sc->hkx )
+				return;
+			// through the hub so the dock's own Root motion button follows
+			// this one (lane HKX3)
+			WwHkxAnimHub::instance()->setRootMotion( ogl, on );
+			if ( !sc->hkx->activeName().isEmpty() )
+				hkxNote->setText( sc->hkx->summary() );
+			ogl->update();
+		} );
+		grid->addWidget( rootChk, 10, 0, 1, 2 );
 
 		QWidgetAction * animWa = new QWidgetAction( animMenu );
 		animWa->setDefaultWidget( animPanel );
@@ -26929,46 +28605,101 @@ void NifSkope::initDockWidgets()
 		workspaceMenu->setObjectName( QStringLiteral( "ViewWorkspacesMenu" ) );
 		QActionGroup * workspaceGroup = new QActionGroup( workspaceMenu );
 		workspaceGroup->setExclusive( true );
-		const QStringList workspaceNames = {
+		// The "Skeleton Manager (Planned)" placeholder that used to sit below a
+		// separator here is gone: the workspace exists now (read-only phase 1 of
+		// SKELETON_AND_POSE_PLAN.md A.7). No planned entries remain, so the
+		// separator went with it.
+		const QList<QDockWidget *> managers = {
+			dAnimWs, dMatMgr, dCollisionMgr, dRiggingMgr, dVertexPaintMgr, dUVMgr, dPoseMgr,
+			dSkeletonMgr, dUnfuckMgr, dLodGen	// lane UI6: index 0 is the Animation dock
+		};
+		QStringList workspaceNames = {
 			tr( "Default" ), tr( "Animation" ), tr( "Materials" ), tr( "Collision" ),
 			tr( "Rigging" ), tr( "Vertex Paint" ), tr( "UV Editing" ), tr( "Pose" ),
-				tr( "Skeleton" ), tr( "Issue Manager" ), tr( "LOD Generation" )
+			tr( "Skeleton" ), tr( "Issue Manager" ), tr( "LOD Generation" )
 		};
-		QList<QAction *> workspaceActions;
+
+		/* ---- THE WORKSPACE TABLE (lane CELLWORK1, 2026-09-19) --------------
+		 *
+		 * The same switch, moved out of a lambda and into a table with a member
+		 * function over it (NifSkope::setWorkspace). Nothing about what a
+		 * workspace IS changed: one dock, one area, hide the rest. What changed
+		 * is that the switch is now REACHABLE -- by the `.wwcell` open path, by
+		 * the harness and by the gate -- instead of only by the lambdas that
+		 * captured it. That was the whole reason every earlier harness poked a
+		 * dock by object name rather than opening a workspace.
+		 *
+		 * The `managers` list stays the source of truth for the ten manager
+		 * workspaces, so index 0 = Default with no dock and index i+1 = the i-th
+		 * manager, exactly as the old `workspace > 0 ? managers.at(workspace-1)`
+		 * arithmetic said. The persisted `UI/Workspace` index is POSITIONAL, so
+		 * this table is appended to and never inserted into.
+		 * -------------------------------------------------------------------- */
+		workspaceDefs.clear();
+		workspaceDefs.append( WorkspaceDef() );		// Default: no manager dock
+		for ( int i = 0; i < managers.size(); i++ ) {
+			WorkspaceDef d;
+			d.dock = managers.at( i );
+			// Animation benefits from horizontal working room; the inspector
+			// workspaces share the right dock area. (Was a branch in the lambda.)
+			d.area = ( i == 0 ) ? Qt::BottomDockWidgetArea : Qt::RightDockWidgetArea;
+			workspaceDefs.append( d );
+		}
+
+		/* THE CELL WORKSPACE, APPENDED LAST (bungo 2026-09-19 20:40: "Cell
+		 * viewing will be a new workspace btw").
+		 *
+		 * It is the first workspace that REPLACES the NIF editor column rather
+		 * than sitting beside it: a cell has no block list, no block details and
+		 * no header, so leaving them on screen is three empty panels. That is
+		 * the one capability the table gained (`hideNifDocks`), and the way back
+		 * is the BYTES -- see NifSkope::setWorkspace.
+		 *
+		 * Its reference inspector is the CellPickDock that already exists: a
+		 * companion, not a copy. One panel, one set of rows, one place a
+		 * reference is described. */
+		{
+			QDockWidget * dCellWs = new QDockWidget( tr( "Cell" ), this );
+			dCellWs->setObjectName( QStringLiteral( "CellWorkspaceDock" ) );
+			CellWorkspacePanel * cellWs = new CellWorkspacePanel( dCellWs );
+			cellWs->setNif( nif );
+			cellWs->setGLView( ogl );
+			dCellWs->setWidget( cellWs );
+			dCellWs->setAllowedAreas( Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea
+				| Qt::BottomDockWidgetArea );
+			addDockWidget( Qt::LeftDockWidgetArea, dCellWs );
+			dCellWs->hide();
+			/* A view row that changes the BAKED colours re-opens the same
+			 * `.wwcell` through the proven open path. It does not repaint: the
+			 * overlay colours are welded into vertex colours when the scene is
+			 * built, so there is nothing in the document to recolour. */
+			connect( cellWs, &CellWorkspacePanel::reopenRequested, this,
+				[this]( const QString & path ) { loadFile( path ); } );
+
+			WorkspaceDef d;
+			d.dock = dCellWs;
+			d.area = Qt::LeftDockWidgetArea;
+			if ( QDockWidget * pick = findChild<QDockWidget *>( QStringLiteral( "CellPickDock" ) ) )
+				d.companions.append( pick );
+			d.hideNifDocks = true;
+			wsCellIndex = workspaceDefs.size();
+			workspaceDefs.append( d );
+			workspaceNames.append( tr( "Cell" ) );
+		}
+
+		workspaceActions.clear();
 		for ( const QString & name : workspaceNames ) {
 			QAction * action = workspaceMenu->addAction( name );
 			action->setCheckable( true );
 			workspaceGroup->addAction( action );
 			workspaceActions.append( action );
 		}
-		// The "Skeleton Manager (Planned)" placeholder that used to sit below a
-			// separator here is gone: the workspace exists now (read-only phase 1 of
-			// SKELETON_AND_POSE_PLAN.md A.7). No planned entries remain, so the
-			// separator went with it.
-			const QList<QDockWidget *> managers = {
-			dTimeline, dMatMgr, dCollisionMgr, dRiggingMgr, dVertexPaintMgr, dUVMgr, dPoseMgr,
-			dSkeletonMgr, dUnfuckMgr, dLodGen
-		};
-		auto activateWorkspace = [this, managers, workspaceActions]( int workspace ) {
-			workspace = std::clamp( workspace, 0, int( managers.size() ) );
-			for ( QDockWidget * manager : managers )
-				manager->hide();
-			QDockWidget * target = workspace > 0 ? managers.at( workspace - 1 ) : nullptr;
-			if ( target ) {
-				target->setFloating( false );
-				// Animation benefits from horizontal working room; the inspector
-				// workspaces share the right dock area.
-				addDockWidget( ( workspace == 1 )
-					? Qt::BottomDockWidgetArea : Qt::RightDockWidgetArea, target );
-				target->show();
-				target->raise();
-			}
-			workspaceActions.at( workspace )->setChecked( true );
-			QSettings().setValue( QStringLiteral( "UI/Workspace" ), workspace );
-		};
+		/* The three viewport paint modes below still say `activateWorkspace(4)`.
+		 * They now go through the one door like everything else. */
+		auto activateWorkspace = [this]( int workspace ) { setWorkspace( workspace ); };
 		for ( int i = 0; i < workspaceActions.size(); i++ )
 			connect( workspaceActions.at( i ), &QAction::triggered, this,
-				[activateWorkspace, i]( bool ) { activateWorkspace( i ); } );
+				[this, i]( bool ) { setWorkspace( i ); } );
 		// Weight Paint is already implemented by the Rigging Manager. Entering it
 		// from the viewport selector opens that workspace, chooses the first bone
 		// when necessary, and delegates to the same Start Painting button so there
@@ -27036,7 +28767,7 @@ void NifSkope::initDockWidgets()
 					weightPaintMode->setChecked( false );
 					if ( ogl->editModeActive() && editMode ) editMode->setChecked( true );
 					else if ( objectMode ) objectMode->setChecked( true );
-					statusBar()->showMessage(
+					showTransientMessage(
 						( bones && bones->topLevelItemCount() == 0 )
 							? ( acquired == AcquireAmbiguous
 								? tr( "Weight Paint: select which skinned mesh to paint (this file has several)." )
@@ -27059,7 +28790,7 @@ void NifSkope::initDockWidgets()
 					vertexPaintMode->setChecked( false );
 					if ( ogl->editModeActive() && editMode ) editMode->setChecked( true );
 					else if ( objectMode ) objectMode->setChecked( true );
-					statusBar()->showMessage(
+					showTransientMessage(
 						acquired == AcquireAmbiguous
 							? tr( "Vertex Paint: select which mesh to paint (this file has several)." )
 							: tr( "Vertex Paint: no paintable mesh — select a tri-shape first." ),
@@ -27080,7 +28811,7 @@ void NifSkope::initDockWidgets()
 					segmentPaintMode->setChecked( false );
 					if ( ogl->editModeActive() && editMode ) editMode->setChecked( true );
 					else if ( objectMode ) objectMode->setChecked( true );
-					statusBar()->showMessage(
+					showTransientMessage(
 						( bones && bones->topLevelItemCount() == 0 )
 							? ( acquired == AcquireAmbiguous
 								? tr( "Segment Paint: select which skinned mesh to paint (this file has several)." )
@@ -27109,10 +28840,16 @@ void NifSkope::initDockWidgets()
 		// exclusive-visibility logic, would otherwise leave a stale radio dot on
 		// the wrong entry). The active entry is also bolded for a clearer
 		// highlight than the small radio dot alone.
-		auto syncWorkspaceIndicators = [workspaceActions, managers]() {
+		auto syncWorkspaceIndicators = [this]() {
 			int active = 0;
-			for ( int i = 0; i < managers.size(); i++ )
-				if ( managers.at( i )->isVisible() ) { active = i + 1; break; }
+			// Index 0 (Default) owns no dock, so the walk starts at 1 and the
+			// fallback IS Default -- the same answer the old managers-only walk
+			// gave, now taken from the table so a workspace cannot be added to
+			// one and forgotten in the other.
+			for ( int i = 1; i < workspaceDefs.size(); i++ ) {
+				QDockWidget * d = workspaceDefs.at( i ).dock;
+				if ( d && d->isVisible() ) { active = i; break; }
+			}
 			for ( int i = 0; i < workspaceActions.size(); i++ ) {
 				QAction * a = workspaceActions.at( i );
 				QSignalBlocker blocker( a );
@@ -27126,8 +28863,13 @@ void NifSkope::initDockWidgets()
 
 		// Always open a NIF in the Default workspace, regardless of the last
 		// session's workspace.
-		activateWorkspace( 0 );
+		setWorkspace( 0 );
 		syncWorkspaceIndicators();
+
+		// lane CELLWORK1: the workspace self-test (WW_CELLWS_TEST), which drives
+		// the switch, the dock hiding and the layout round trip from inside the
+		// running window. It forces every state it measures.
+		wwCellWorkspaceHarness( this );
 	}
 
 	// Set Inspect widget
@@ -27260,9 +29002,11 @@ void NifSkope::initMenu()
 								"LodgenSimplify32Spin", "LodgenSimplifyErrorSpin",
 								"LodgenImpostorLevelBox", "LodgenCardFramesBox", "LodgenCardResBox",
 								"LodgenCardHalfAuxCheck", "LodgenCardCostLabel",
+								"LodgenNativeCheck", "LodgenTreesOnlyCheck", "LodgenResultLabel",
 								"LodgenTexCheck", "LodgenCoverCheck", "LodgenTintSpin",
 								"LodgenVtCheck", "LodgenVtFinestBox", "LodgenVtBtrCheck",
 								"LodgenVtSummary",
+								"LodgenOutputRootLabel",
 								"LodgenProgressMap", "LodgenProgressBar", "LodgenGenerateButton",
 								"LodgenCancelButton" } )
 							check( QString( "panel has %1" ).arg( QLatin1String( n ) ),
@@ -27283,10 +29027,12 @@ void NifSkope::initMenu()
 							auto * cr2 = findChild<QComboBox *>( QStringLiteral( "LodgenCardResBox" ) );
 							auto * ha = findChild<QCheckBox *>( QStringLiteral( "LodgenCardHalfAuxCheck" ) );
 							auto * cl = findChild<QLabel *>( QStringLiteral( "LodgenCardCostLabel" ) );
-							check( "the card rows offer 4, 6 and 8 frames and 64, 128 and 256 px",
-								cf && cr2 && cf->count() == 3 && cr2->count() == 3
+							// 512 added by lane LODUI1 (bungo 2026-09-11 07:3x: "Add it, why not")
+							check( "the card rows offer 4, 6 and 8 frames and 64, 128, 256 and 512 px",
+								cf && cr2 && cf->count() == 3 && cr2->count() == 4
 								&& cf->itemData( 0 ).toInt() == 4 && cf->itemData( 2 ).toInt() == 8
-								&& cr2->itemData( 0 ).toInt() == 64 && cr2->itemData( 2 ).toInt() == 256 );
+								&& cr2->itemData( 0 ).toInt() == 64 && cr2->itemData( 2 ).toInt() == 256
+								&& cr2->itemData( 3 ).toInt() == 512 );
 							if ( cf && cr2 && ha && cl ) {
 								cf->setCurrentIndex( cf->findData( 8 ) );
 								cr2->setCurrentIndex( cr2->findData( 128 ) );
@@ -27342,12 +29088,35 @@ void NifSkope::initMenu()
 						 * on a disabled button does nothing, by Qt's contract. The first
 						 * run of this check clicked a greyed button and called the panel
 						 * broken. */
-						check( "the chunk range is greyed while no chunk output is selected",
-							whole && !whole->isEnabled() );
-						if ( objects )
-							objects->setChecked( true );
-						QApplication::processEvents();
-						check( "ticking Object LOD chunks enables the chunk range", whole && whole->isEnabled() );
+						/* RE-AIMED by lane LODUI1 (2026-09-11). The object pass has two heads
+						 * now and the FO4CS one is ticked by default, so "no chunk output is
+						 * selected" is no longer the state the panel opens in -- the check was
+						 * reading the default rather than the rule. Every head is unticked
+						 * first, and the head the TARGET offers is the one driven, so a target
+						 * that offered neither would fail here. */
+						{
+							auto * nativeHead = findChild<QCheckBox *>( QStringLiteral( "LodgenNativeCheck" ) );
+							auto * btrHead = findChild<QCheckBox *>( QStringLiteral( "LodgenBtrCheck" ) );
+							QCheckBox * head = ( objects && !objects->isHidden() ) ? objects
+								: ( ( nativeHead && !nativeHead->isHidden() ) ? nativeHead : objects );
+							for ( QCheckBox * c : { objects, nativeHead, btrHead } )
+								if ( c )
+									c->setChecked( false );
+							QApplication::processEvents();
+							check( "the chunk range is greyed while no chunk output is selected",
+								whole && !whole->isEnabled() );
+							if ( head )
+								head->setChecked( true );
+							QApplication::processEvents();
+							log << "  the object head this target offers: "
+								<< ( head ? head->text() : QStringLiteral( "none" ) ) << "\n";
+							check( "ticking the target's own object output enables the chunk range",
+								head && whole && whole->isEnabled() );
+							// the rows below are the .bto section's, so its head goes back on
+							if ( objects )
+								objects->setChecked( true );
+							QApplication::processEvents();
+						}
 						/* The rest of the .bto's data has rows, and each greys with
 						 * what it rides on: sway with identity, the margin with the
 						 * cull box. */
@@ -27404,8 +29173,9 @@ void NifSkope::initMenu()
 						log << "number fields: " << numbers << ", left as plain spin boxes: " << plain << "\n";
 						/* The floor rises with every number added, or the count stops
 						 * being a floor: 8 before the far-ring rows, 12 with their four,
-						 * 13 with the grass tint. */
-						check( "the numbers are scrub fields, like every other number", numbers >= 13 && plain == 0 );
+						 * 13 with the grass tint, and 45 after lane PANEL1 put a row on
+						 * every bake number the command line has (measured 49). */
+						check( "the numbers are scrub fields, like every other number", numbers >= 45 && plain == 0 );
 						int groups = -1, headings = 0;
 						if ( panel ) {
 							groups = panel->findChildren<QGroupBox *>().size();
@@ -27414,7 +29184,8 @@ void NifSkope::initMenu()
 									headings++;
 						}
 						log << "group boxes: " << groups << ", headings: " << headings << "\n";
-						check( "sections are headings, not group-box frames", groups == 0 && headings >= 4 );
+						// 4 before lane PANEL1's seven new families, 11 after
+						check( "sections are headings, not group-box frames", groups == 0 && headings >= 10 );
 						int combos = 0, unmatched = 0;
 						if ( panel )
 							for ( QComboBox * c : panel->findChildren<QComboBox *>() ) {
@@ -27423,8 +29194,9 @@ void NifSkope::initMenu()
 									unmatched++;
 							}
 						log << "selectors: " << combos << ", in default chrome: " << unmatched << "\n";
-						// 5 before the pyramid's finest-level row, 6 with it
-						check( "every selector takes the matched field chrome", combos >= 6 && unmatched == 0 );
+						// 5 before the pyramid's finest-level row, 6 with it, 14 after
+						// lane PANEL1's eight new selectors (measured 15)
+						check( "every selector takes the matched field chrome", combos >= 14 && unmatched == 0 );
 						int boxes = 0, dashed = 0, untipped = 0;
 						if ( panel )
 							for ( QCheckBox * c : panel->findChildren<QCheckBox *>() ) {
@@ -27470,6 +29242,247 @@ void NifSkope::initMenu()
 						check( "the map sits outside the scrolling settings",
 							scrollA && mapW && !scrollA->isAncestorOf( mapW ) );
 						check( "the settings themselves do scroll", scrollA && ws && scrollA->isAncestorOf( ws ) );
+						/* ================= LANE PANEL1, 2026-09-12 =================
+						 *
+						 * bungo, 15:4x: "Erosion is a knob in the menu, corret?" --
+						 * it was not -- then "They should all be configurable in the
+						 * gen menu, anything else we're missing in that menu?".
+						 *
+						 * Every bake setting the `lodgen` command line has and the
+						 * panel did not now has a row. The floors above rose with
+						 * them; these checks are the PER-ROW ones, and each is a way
+						 * the row could be there and still be useless: not in the
+						 * scrolling settings (so it cannot be reached at 1080p),
+						 * eating the wheel while the mouse only passes over it, or
+						 * not written to its settings key (so it forgets itself).
+						 *
+						 * The list is the rows the lane added, by object name and by
+						 * the settings key each one owns. A row deleted or renamed
+						 * fails here by name, not by a count nobody can place. */
+						/* obj = the widget, key = its settings key, dep = the row this one only
+						 * means something under (the gate turns THAT on and bakes a local
+						 * baseline before moving this one), why = this bake cannot reach the row
+						 * at all, in plain language. A row with a why is a NAMED SKIP: never
+						 * baked, never counted as a pass. Lane PANEL1, 2026-09-12. */
+						/* depVal = the value the dependency must TAKE, not merely "on": the land
+						 * guide read as a selector steps to `drag`, and drag does not read the
+						 * slope reference at all, so the slope row can only be asked under a rule
+						 * that does (measured on the command line, 2026-09-12). bump = the value
+						 * THIS row is moved to instead of one step, for the rows that are a
+						 * threshold rather than a dial: the water drainage radius at 64 -> 65 asks
+						 * whether two bodies sit exactly 65 texels apart, which is not the question
+						 * anybody means. Both are written as text and parsed into the widget. */
+						/* dep2 / depVal2: a row can hang off TWO rows. The guide slope reference
+						 * needs the land warp to have an amplitude at all AND the guide to be on a
+						 * rule that reads it -- slope warp multiplies the one by the other, and the
+						 * amplitude default is 0.
+						 * dflt: the row's own default, FORCED before the base bake. A panel loads
+						 * what this machine last saved, so "every row at its default" has to be made
+						 * true rather than assumed -- on this machine Water subdivision was saved at
+						 * 4 against a code default of 3, and that alone was the whole of the
+						 * panel-versus-command-line disagreement. nullptr = leave it alone (a path).
+						 * Ticks are "1"/"0", selectors carry the item DATA, not its position. */
+						static const struct { const char * obj; const char * key;
+								const char * dep; const char * why;
+								const char * depVal; const char * bump;
+								const char * dep2; const char * depVal2; const char * dflt; } wwNewRows[] = {
+							{ "LodgenWaterSubdivSpin", "waterSubdiv", nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, "3" },
+							{ "LodgenLandTilingSpin", "landTiling", nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, "341.3333" },
+							{ "LodgenLandSampleBox", "landSample", nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, "0" },
+							{ "LodgenLandDetailSpin", "landDetail", "LodgenLandSampleBox", nullptr, nullptr, nullptr, nullptr, nullptr, "0.0" },
+							{ "LodgenLandHexSpin", "landHex", nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, "0.0" },
+							{ "LodgenLandWarpSpin", "landWarp", nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, "0.0" },
+							{ "LodgenLandWarpLatticeSpin", "landWarpLattice", "LodgenLandWarpSpin", nullptr, nullptr, nullptr, nullptr, nullptr, "1024.0" },
+							{ "LodgenLandWarpOctavesSpin", "landWarpOctaves", "LodgenLandWarpSpin", nullptr, nullptr, nullptr, nullptr, nullptr, "1" },
+							{ "LodgenLandMipBiasSpin", "landMipBias", nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, "0.0" },
+							{ "LodgenLandGuideBox", "landGuide", nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, "0" },
+							{ "LodgenLandGuideStrengthSpin", "landGuideStrength", "LodgenLandGuideBox", nullptr, nullptr, nullptr, nullptr, nullptr, "1.0" },
+							{ "LodgenLandGuideScaleSpin", "landGuideScale", "LodgenLandGuideBox", nullptr, nullptr, nullptr, nullptr, nullptr, "1024.0" },
+							{ "LodgenLandGuideSlopeSpin", "landGuideSlope", "LodgenLandWarpSpin", nullptr, nullptr, nullptr, "LodgenLandGuideBox", "4", "0.5" },
+							{ "LodgenLandDetailSourceBox", "landDetailSource", nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, "1" },
+							{ "LodgenVanillaLodRootEdit", "vanillaLodRoot", nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr },
+							{ "LodgenLandShadeSpin", "landShade", nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, "-3.242" },
+							{ "LodgenLandGradeSpin", "landGrade", nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, "1.0" },
+							{ "LodgenBlendEdgesBox", "blendEdges", nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, "1" },
+							/* depVal "1": the edge blend is ON by default since 2026-09-23 (lane DEFAULTS2), and a
+							 * bumped combo flips 1 -> 0, which measured the margin with the blend OFF. */
+							{ "LodgenBlendMarginSpin", "blendMargin", "LodgenBlendEdgesBox", nullptr, "1", nullptr, nullptr, nullptr, "128.0" },
+							{ "LodgenErosionSpin", "erosion", nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, "0.0" },
+							{ "LodgenErosionIterationsSpin", "erosionIterations", "LodgenErosionSpin", nullptr, nullptr, nullptr, nullptr, nullptr, "1" },
+							{ "LodgenErosionSeedSpin", "erosionSeed", "LodgenErosionSpin", nullptr, nullptr, nullptr, nullptr, nullptr, "1" },
+							{ "LodgenSheetFormatBox", "sheetFormat", nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, "0" },
+							{ "LodgenMsnCacheEdit", "msnCache", nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr },
+							{ "LodgenCoverFullSpin", "coverFull", nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, "96.0" },
+							{ "LodgenRoadsCheck", "roads", nullptr,
+								"the road pass writes nothing on this chunk -- the command line own --no-roads moves only the ledger here (measured 2026-09-12); tests/spells/lodgen_roads.sh reads the road rows", nullptr, nullptr, nullptr, nullptr, "1" },
+							{ "LodgenRoadDetailSpin", "roadDetail", nullptr,
+								"the road pass writes nothing on this chunk -- the command line own --no-roads moves only the ledger here (measured 2026-09-12); tests/spells/lodgen_roads.sh reads the road rows", nullptr, nullptr, nullptr, nullptr, "1.0" },
+							{ "LodgenRoadGroundPaintSpin", "roadGroundPaint", nullptr,
+								"the road pass writes nothing on this chunk -- the command line own --no-roads moves only the ledger here (measured 2026-09-12); tests/spells/lodgen_roads.sh reads the road rows", nullptr, nullptr, nullptr, nullptr, "1.0" },
+							{ "LodgenRoadCoverSuppressSpin", "roadCoverSuppress", nullptr,
+								"the road pass writes nothing on this chunk -- the command line own --no-roads moves only the ledger here (measured 2026-09-12); tests/spells/lodgen_roads.sh reads the road rows", nullptr, nullptr, nullptr, nullptr, "1.0" },
+							{ "LodgenRoadCompositeBox", "roadComposite", nullptr,
+								"the road pass writes nothing on this chunk -- the command line own --no-roads moves only the ledger here (measured 2026-09-12); tests/spells/lodgen_roads.sh reads the road rows", nullptr, nullptr, nullptr, nullptr, "0" },
+							{ "LodgenRoadRaisedCheck", "roadRaised", nullptr,
+								"the road pass writes nothing on this chunk -- the command line own --no-roads moves only the ledger here (measured 2026-09-12); tests/spells/lodgen_roads.sh reads the road rows", nullptr, nullptr, nullptr, nullptr, "0" },
+							{ "LodgenRoadSidewalksCheck", "roadSidewalks", nullptr,
+								"the road pass writes nothing on this chunk -- the command line own --no-roads moves only the ledger here (measured 2026-09-12); tests/spells/lodgen_roads.sh reads the road rows", nullptr, nullptr, nullptr, nullptr, "0" },
+							{ "LodgenTerrainObjectAoCheck", "terrainObjectAo", nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, "0" },
+							{ "LodgenTerrainObjectAoStrengthSpin", "terrainObjectAoStrength", "LodgenTerrainObjectAoCheck", nullptr, nullptr, nullptr, nullptr, nullptr, "0.5" },
+							{ "LodgenWaterBodiesCheck", "waterBodies", nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, "0" },
+							{ "LodgenWaterBridgeSpin", "waterBridge", "LodgenWaterBodiesCheck", nullptr, nullptr, nullptr, nullptr, nullptr, "2" },
+							{ "LodgenWaterNearSpin", "waterNear", "LodgenWaterBodiesCheck", nullptr, nullptr, "512", nullptr, nullptr, "64" },
+							{ "LodgenWaterBodySamplesSpin", "waterBodySamples", "LodgenWaterBodiesCheck", nullptr, nullptr, nullptr, nullptr, nullptr, "0" },
+							{ "LodgenWaterFlowSamplesSpin", "waterFlowSamples", "LodgenWaterBodiesCheck", nullptr, nullptr, nullptr, nullptr, nullptr, "0" },
+							{ "LodgenWaterShoreCheck", "waterShore", "LodgenWaterBodiesCheck", nullptr, nullptr, nullptr, nullptr, nullptr, "1" },
+							{ "LodgenWaterVelocitiesEdit", "waterVelocities", nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr },
+							{ "LodgenAggregateCheck", "aggregate", nullptr,
+								"aggregate sheets need a card library and this gate arms none, so the run has nothing to aggregate; tools/bake_impostor_cards.sh builds one and tests/spells/lodgen_card_arrays.sh reads it", nullptr, nullptr, nullptr, nullptr, "0" },
+							{ "LodgenAggregateMinSpin", "aggregateMin", nullptr,
+								"aggregate sheets need a card library and this gate arms none, so the run has nothing to aggregate; tools/bake_impostor_cards.sh builds one and tests/spells/lodgen_card_arrays.sh reads it", nullptr, nullptr, nullptr, nullptr, "8" },
+							{ "LodgenAggregateTileSpin", "aggregateTile", nullptr,
+								"aggregate sheets need a card library and this gate arms none, so the run has nothing to aggregate; tools/bake_impostor_cards.sh builds one and tests/spells/lodgen_card_arrays.sh reads it", nullptr, nullptr, nullptr, nullptr, "64" },
+							{ "LodgenAggregateViewsSpin", "aggregateViews", nullptr,
+								"aggregate sheets need a card library and this gate arms none, so the run has nothing to aggregate; tools/bake_impostor_cards.sh builds one and tests/spells/lodgen_card_arrays.sh reads it", nullptr, nullptr, nullptr, nullptr, "8" },
+							{ "LodgenNativeLadderCheck", "nativeLadder", nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, "0" },
+							{ "LodgenNativeOccludersCheck", "nativeOccluders", nullptr,
+								"no occluder box is found on this chunk -- the command line own --native-no-occluders moves only the ledger here (measured 2026-09-12); tests/spells/lodgen_native.sh reads it", nullptr, nullptr, nullptr, nullptr, "1" },
+							{ "LodgenKeepBtoCheck", "keepBto", nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, "0" },
+							{ "LodgenMergeCheck", "merge", nullptr,
+								"hidden under the FO4 Community Shaders target this gate arms, and a hidden row reads as its default by design; the stock-engine target is where it reaches the bake", nullptr, nullptr, nullptr, nullptr, "1" },
+							{ "LodgenAtlasFormatBox", "atlasFormat", nullptr,
+								"hidden under the FO4 Community Shaders target this gate arms, and a hidden row reads as its default by design; the stock-engine target is where it reaches the bake", nullptr, nullptr, nullptr, nullptr, "-1" },
+							{ "LodgenThreadsSpin", "threads", nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, "0" },
+							{ "LodgenChunkThreadsSpin", "chunkThreads", nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, "1" },
+							{ "LodgenVtBorderSpin", "vtBorder", nullptr,
+								"the terrain virtual texture module is off in this gate module set -- the pyramid is worldspace-wide, not one chunk; tests/spells/lodgen_terrain_vt.sh reads the pyramid rows", nullptr, nullptr, nullptr, nullptr, "8" },
+							{ "LodgenVtMipsSpin", "vtMips", nullptr,
+								"the terrain virtual texture module is off in this gate module set -- the pyramid is worldspace-wide, not one chunk; tests/spells/lodgen_terrain_vt.sh reads the pyramid rows", nullptr, nullptr, nullptr, nullptr, "2" },
+							{ "LodgenVtCompressBox", "vtCompress", nullptr,
+								"the terrain virtual texture module is off in this gate module set -- the pyramid is worldspace-wide, not one chunk; tests/spells/lodgen_terrain_vt.sh reads the pyramid rows", nullptr, nullptr, nullptr, nullptr, "0" },
+							{ "LodgenVtHeightCheck", "vtHeight", nullptr,
+								"the terrain virtual texture module is off in this gate module set -- the pyramid is worldspace-wide, not one chunk; tests/spells/lodgen_terrain_vt.sh reads the pyramid rows", nullptr, nullptr, nullptr, nullptr, "0" },
+							{ "LodgenVtCoverInColorCheck", "vtCoverInColor", nullptr,
+								"the terrain virtual texture module is off in this gate module set -- the pyramid is worldspace-wide, not one chunk; tests/spells/lodgen_terrain_vt.sh reads the pyramid rows", nullptr, nullptr, nullptr, nullptr, "0" },
+							{ "LodgenVtHalfAuxCheck", "vtHalfAux", nullptr,
+								"the terrain virtual texture module is off in this gate module set -- the pyramid is worldspace-wide, not one chunk; tests/spells/lodgen_terrain_vt.sh reads the pyramid rows", nullptr, nullptr, nullptr, nullptr, "0" },
+						};
+						const int wwNewRowCount = int( sizeof( wwNewRows ) / sizeof( wwNewRows[0] ) );
+						// what a row says, whatever kind of row it is
+						auto rowValue = []( QWidget * w ) -> QVariant {
+							if ( auto * d = qobject_cast<QDoubleSpinBox *>( w ) ) return d->value();
+							if ( auto * s = qobject_cast<QSpinBox *>( w ) ) return s->value();
+							if ( auto * c = qobject_cast<QCheckBox *>( w ) ) return c->isChecked();
+							if ( auto * b = qobject_cast<QComboBox *>( w ) ) return b->currentData();
+							if ( auto * e = qobject_cast<QLineEdit *>( w ) ) return e->text();
+							return QVariant();
+						};
+						// move it to a DIFFERENT value, or say it could not be moved
+						auto bumpRow = []( QWidget * w ) -> bool {
+							if ( auto * d = qobject_cast<QDoubleSpinBox *>( w ) ) {
+								const double was = d->value();
+								d->setValue( was + d->singleStep() <= d->maximum()
+									? was + d->singleStep() : was - d->singleStep() );
+								return d->value() != was;
+							}
+							if ( auto * s = qobject_cast<QSpinBox *>( w ) ) {
+								const int was = s->value();
+								s->setValue( was < s->maximum() ? was + 1 : was - 1 );
+								return s->value() != was;
+							}
+							if ( auto * c = qobject_cast<QCheckBox *>( w ) ) {
+								c->setChecked( !c->isChecked() );
+								return true;
+							}
+							if ( auto * b = qobject_cast<QComboBox *>( w ) ) {
+								if ( b->count() < 2 )
+									return false;
+								b->setCurrentIndex( b->currentIndex() == 0 ? 1 : 0 );
+								return true;
+							}
+							if ( auto * e = qobject_cast<QLineEdit *>( w ) ) {
+								e->setText( e->text() + QLatin1String( "\\ww_probe" ) );
+								return true;
+							}
+							return false;
+						};
+						auto putRow = []( QWidget * w, const QVariant & v ) {
+							if ( auto * d = qobject_cast<QDoubleSpinBox *>( w ) ) d->setValue( v.toDouble() );
+							else if ( auto * s = qobject_cast<QSpinBox *>( w ) ) s->setValue( v.toInt() );
+							else if ( auto * c = qobject_cast<QCheckBox *>( w ) ) c->setChecked( v.toBool() );
+							else if ( auto * b = qobject_cast<QComboBox *>( w ) ) {
+								const int i = b->findData( v );
+								if ( i >= 0 ) b->setCurrentIndex( i );
+							}
+							else if ( auto * e = qobject_cast<QLineEdit *>( w ) ) e->setText( v.toString() );
+						};
+						{
+							int missing = 0, outsideScroll = 0, wheelUnfocused = 0, noRoundTrip = 0, unTipped2 = 0;
+							QStringList missingNames, wheelNames, tripNames;
+							int saveTick = 0;   // setProperty only fires when the VALUE moves
+							QSettings st;
+							for ( int i = 0; i < wwNewRowCount; i++ ) {
+								auto * w = panel ? panel->findChild<QWidget *>( QLatin1String( wwNewRows[i].obj ) ) : nullptr;
+								if ( !w ) {
+									missing++;
+									missingNames << QLatin1String( wwNewRows[i].obj );
+									continue;
+								}
+								if ( !scrollA || !scrollA->isAncestorOf( w ) )
+									outsideScroll++;
+								if ( w->toolTip().isEmpty() )
+									unTipped2++;
+								/* THE WHEEL, Blender's rule: a field in a scroll area
+								 * takes the wheel only while it has focus, or a scroll
+								 * down the page silently retunes every row it passes. */
+								if ( qobject_cast<QAbstractSpinBox *>( w ) || qobject_cast<QComboBox *>( w ) ) {
+									w->clearFocus();
+									const QVariant before = rowValue( w );
+									const QPointF at( 5, 5 );
+									QWheelEvent unfocused( at, w->mapToGlobal( at.toPoint() ), QPoint(),
+										QPoint( 0, 120 ), Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false );
+									QApplication::sendEvent( w, &unfocused );
+									if ( rowValue( w ) != before ) {
+										wheelUnfocused++;
+										wheelNames << QLatin1String( wwNewRows[i].obj );
+										putRow( w, before );
+									}
+								}
+								/* THE ROUND TRIP: move the row, ask the panel to save,
+								 * and read the key back out of QSettings. A row whose
+								 * key the save forgot fails here. */
+								const QVariant was = rowValue( w );
+								if ( bumpRow( w ) ) {
+									const QVariant moved = rowValue( w );
+									panel->setProperty( "wwSaveSettings", ++saveTick );
+									st.sync();
+									const QVariant stored =
+										st.value( QStringLiteral( "LodGeneration/" ) + QLatin1String( wwNewRows[i].key ) );
+									if ( stored.toString() != moved.toString() ) {
+										noRoundTrip++;
+										tripNames << QLatin1String( wwNewRows[i].key );
+									}
+									putRow( w, was );
+									panel->setProperty( "wwSaveSettings", ++saveTick );
+								}
+							}
+							log << "new rows checked: " << wwNewRowCount << ", missing: " << missing
+								<< ", outside the scroll area: " << outsideScroll
+								<< ", taking the wheel unfocused: " << wheelUnfocused
+								<< ", not round-tripping through QSettings: " << noRoundTrip
+								<< ", without a tooltip: " << unTipped2 << "\n";
+							if ( !missingNames.isEmpty() )
+								log << "  missing: " << missingNames.join( QLatin1String( ", " ) ) << "\n";
+							if ( !wheelNames.isEmpty() )
+								log << "  wheel: " << wheelNames.join( QLatin1String( ", " ) ) << "\n";
+							if ( !tripNames.isEmpty() )
+								log << "  no round trip: " << tripNames.join( QLatin1String( ", " ) ) << "\n";
+							check( "every row lane PANEL1 added is in the panel", missing == 0 );
+							check( "and in the scrolling settings, where it can be reached", outsideScroll == 0 );
+							check( "and takes the wheel only when focused", wheelUnfocused == 0 );
+							check( "and round-trips through its own settings key", noRoundTrip == 0 );
+							check( "and says what it does and its command-line switch", unTipped2 == 0 );
+						}
 						auto * target = findChild<QComboBox *>( QStringLiteral( "LodgenTargetBox" ) );
 						auto * lodtSec = findChild<QWidget *>( QStringLiteral( "LodgenLodtSection" ) );
 						auto * lodtChk = findChild<QCheckBox *>( QStringLiteral( "LodgenLodtCheck" ) );
@@ -27485,8 +29498,244 @@ void NifSkope::initMenu()
 							QApplication::processEvents();
 							check( "FO4 Community Shaders brings them back, ticked, and drops the legacy chunks",
 								!lodtSec->isHidden() && lodtChk->isChecked() && !btrChk->isChecked() );
+							/* THE ROOT LABEL (lane LAYOUT1, 2026-09-16). One line under the
+							 * output field saying where this bake lands inside the mod
+							 * folder, and hidden under the stock engine, whose files did not
+							 * move. Both sides are counted: a label that is always there and
+							 * a label that is never there both fail. */
+							if ( auto * rootL = findChild<QLabel *>( QStringLiteral( "LodgenOutputRootLabel" ) ) ) {
+								check( "the FO4CS target shows the LOD root under the output field",
+									!rootL->isHidden() && rootL->text().startsWith( lodgenFo4csFolderName() ) );
+								/* the NAME is spelled once, in lodgenlayout.cpp, and the
+								 * layout gate's leg (e) is what holds it to one file --
+								 * so this test asks the composer rather than adding a
+								 * second literal for the gate to trip over. */
+								log << "  root label: '" << rootL->text() << "'" << QLatin1Char( 10 );
+								target->setCurrentIndex( 1 );
+								QApplication::processEvents();
+								check( "and the stock engine hides it, its files having not moved",
+									rootL->isHidden() );
+								target->setCurrentIndex( 0 );
+								QApplication::processEvents();
+							} else {
+								check( "the FO4CS target shows the LOD root under the output field", false );
+							}
 						} else {
 							check( "the target switches the outputs", false );
+						}
+						/* ================= LANE LODUI1, 2026-09-11 =================
+						 *
+						 * bungo's four rulings of that morning, each counted with a
+						 * floor on the other side, so a panel that hid everything and
+						 * a panel that hid nothing both fail:
+						 *
+						 *   06:4x  "we should only have those 5 .lod types in fo4
+						 *          community shaders target"
+						 *   07:0x  "I've only wanted trees for the impostors",
+						 *          amended 07:1x "Make trees only a toggle"
+						 *   07:3x  the card resolution list gains 512 px
+						 *   07:4x  "Cards from ring" IS the tree override he asked
+						 *          for, and its label now says so
+						 *
+						 * Every row's hidden flag is PRINTED beside its name before it
+						 * is counted, so a count that moves in a later lane is read
+						 * against a list and not against a number nobody can place. */
+						{
+							auto * nativeChk = findChild<QCheckBox *>( QStringLiteral( "LodgenNativeCheck" ) );
+							auto * objChk = findChild<QCheckBox *>( QStringLiteral( "LodgenObjectsCheck" ) );
+							auto * btrSec = findChild<QWidget *>( QStringLiteral( "LodgenBtrSection" ) );
+							auto * atlasChk2 = findChild<QCheckBox *>( QStringLiteral( "LodgenAtlasCheck" ) );
+							auto * vtBtrChk2 = findChild<QCheckBox *>( QStringLiteral( "LodgenVtBtrCheck" ) );
+							auto * treesChk = findChild<QCheckBox *>( QStringLiteral( "LodgenTreesOnlyCheck" ) );
+							auto * ringBox = findChild<QComboBox *>( QStringLiteral( "LodgenImpostorLevelBox" ) );
+							auto * sumL = findChild<QLabel *>( QStringLiteral( "LodgenSummaryLabel" ) );
+							auto * outE2 = findChild<QLineEdit *>( QStringLiteral( "LodgenOutputEdit" ) );
+							auto * resL = findChild<QLabel *>( QStringLiteral( "LodgenResultLabel" ) );
+							if ( target && nativeChk && objChk && btrSec && atlasChk2 && vtBtrChk2
+								&& treesChk && ringBox && sumL && outE2 && resL ) {
+								const int keepTarget = target->currentIndex();
+								const QString keepOut = outE2->text();
+								/* An output folder, so the summary is the "Will write"
+								 * sentence and not a refusal: the extension list is what
+								 * is under test and a refusal carries none. */
+								outE2->setText( QDir::tempPath() + QStringLiteral( "/Lodgen_LODUI1" ) );
+
+								// ---- FO4 Community Shaders: the five .lod types ----
+								target->setCurrentIndex( 0 );
+								QApplication::processEvents();
+								QVector<QPair<QString, QWidget *>> legacy;
+								legacy << qMakePair( QStringLiteral( "the .btr section" ), (QWidget *) btrSec )
+									   << qMakePair( QStringLiteral( "the .bto head" ), (QWidget *) objChk )
+									   << qMakePair( QStringLiteral( "the object atlas" ), (QWidget *) atlasChk2 )
+									   << qMakePair( QStringLiteral( "chunk textures from the pyramid" ), (QWidget *) vtBtrChk2 );
+								int legacyHidden = 0;
+								for ( const auto & row : legacy ) {
+									log << "  FO4CS: " << row.first << " hidden: "
+										<< ( row.second->isHidden() ? "yes" : "no" ) << "\n";
+									if ( row.second->isHidden() )
+										legacyHidden++;
+								}
+								check( "FO4 Community Shaders hides all four legacy object rows",
+									legacyHidden == 4 );
+								check( "and shows the native .lodo/.lodi row instead", !nativeChk->isHidden() );
+								/* THE WAY BACK FROM THE DROP (lane BTOFREE1, 2026-09-16).
+								 * From today the FO4CS target builds its .BTO chunks in a
+								 * scratch folder and removes them, so the mod folder gets
+								 * our five types and nothing else. That is a default, and
+								 * a default needs a door: the row is offered here, it
+								 * ships OFF, and under the stock engine -- which never
+								 * drops a chunk -- it is not offered at all. */
+								auto * keepBtoChk = findChild<QCheckBox *>( QStringLiteral( "LodgenKeepBtoCheck" ) );
+								log << "  FO4CS: Keep legacy .BTO chunks hidden: "
+									<< ( !keepBtoChk || keepBtoChk->isHidden() ? "yes" : "no" )
+									<< ", ticked: "
+									<< ( keepBtoChk && keepBtoChk->isChecked() ? "yes" : "no" ) << "\n";
+								check( "FO4 Community Shaders offers 'Keep legacy .BTO chunks' and ships it OFF",
+									keepBtoChk && !keepBtoChk->isHidden() && !keepBtoChk->isChecked() );
+								/* The pyramid is ticked for this reading. It is an OUTPUT, off by
+								 * default, and the summary names only what the run will write -- so
+								 * asking the default panel for all five extensions asks it to name a
+								 * file nobody ticked. Put back straight after. */
+								auto * vtHead = findChild<QCheckBox *>( QStringLiteral( "LodgenVtCheck" ) );
+								const bool keepVt = vtHead && vtHead->isChecked();
+								if ( vtHead )
+									vtHead->setChecked( true );
+								QApplication::processEvents();
+								const QString sumCs = sumL->text();
+								log << "  FO4CS summary: '" << sumCs << "'\n";
+								check( "the FO4CS summary names .lodl, .lodt, .lodo and .lodi",
+									sumCs.contains( QLatin1String( ".lodl" ) )
+									&& sumCs.contains( QLatin1String( ".lodt" ) )
+									&& sumCs.contains( QLatin1String( ".lodo" ) )
+									&& sumCs.contains( QLatin1String( ".lodi" ) ) );
+								check( "and never the legacy .btr chunks",
+									!sumCs.contains( QLatin1String( ".btr" ), Qt::CaseInsensitive ) );
+								/* The sentence beside Generate has to SAY that a folder
+								 * will lose files at the end of the run. A surprise is
+								 * not a census. */
+								check( "and says the object chunks are built in a scratch folder and dropped",
+									sumCs.contains( QLatin1String( "scratch" ) )
+									&& sumCs.contains( QLatin1String( "dropped" ) ) );
+								/* AND IT SAYS WHERE THEY LAND (lane LAYOUT1, 2026-09-16).
+								 * The sidecar moved under the one root with the files it
+								 * describes; the sentence used to name the folder it was
+								 * in before, which is a path nothing writes.  Asked of the
+								 * composer so the name is still spelled once in the tree. */
+								check( "and names the root those sidecars land under",
+									sumCs.contains( lodgenFo4csGameWorldPath( QStringLiteral( "Commonwealth" ) ) ) );
+
+								if ( vtHead )
+									vtHead->setChecked( keepVt );
+								QApplication::processEvents();
+								// ---- the stock engine: the reverse, row for row ----
+								target->setCurrentIndex( 1 );
+								QApplication::processEvents();
+								int legacyShown = 0;
+								for ( const auto & row : legacy ) {
+									log << "  Stock: " << row.first << " hidden: "
+										<< ( row.second->isHidden() ? "yes" : "no" ) << "\n";
+									if ( !row.second->isHidden() )
+										legacyShown++;
+								}
+								check( "the stock engine shows all four of them again", legacyShown == 4 );
+								check( "and hides the native row, which it cannot read", nativeChk->isHidden() );
+								log << "  Stock: Keep legacy .BTO chunks hidden: "
+									<< ( !keepBtoChk || keepBtoChk->isHidden() ? "yes" : "no" ) << "\n";
+								check( "the stock engine hides 'Keep legacy .BTO chunks', which it never needs",
+									keepBtoChk && keepBtoChk->isHidden() );
+								const QString sumStock = sumL->text();
+								log << "  Stock summary: '" << sumStock << "'\n";
+								check( "the stock summary names .btr and .bto",
+									sumStock.contains( QLatin1String( ".btr" ), Qt::CaseInsensitive )
+									&& sumStock.contains( QLatin1String( ".bto" ), Qt::CaseInsensitive ) );
+								check( "and none of the four .lod types its reader has no use for",
+									!sumStock.contains( QLatin1String( ".lodl" ) )
+									&& !sumStock.contains( QLatin1String( ".lodt" ) )
+									&& !sumStock.contains( QLatin1String( ".lodo" ) )
+									&& !sumStock.contains( QLatin1String( ".lodi" ) ) );
+
+								/* THE SAVED-TICK LAW this lane had to keep: restoring a
+								 * target only HIDES; a tick under a hidden row is a
+								 * saved setting, never a request. Ticked here while the
+								 * stock engine owns the panel, and the run must not see
+								 * it. */
+								nativeChk->setChecked( true );
+								QApplication::processEvents();
+								check( "a native tick under the stock target does not reach the run",
+									!sumL->text().contains( QLatin1String( ".lodo" ) ) );
+
+								target->setCurrentIndex( 0 );
+								QApplication::processEvents();
+
+								// ---- Trees only, and the ring override it renamed ----
+								log << "  Trees only default: " << ( treesChk->isChecked() ? "on" : "off" ) << "\n";
+								check( "Trees only is ON by default", treesChk->isChecked() );
+								check( "its label is a name and its tooltip is one sentence",
+									treesChk->text() == QLatin1String( "Trees only" )
+									&& !treesChk->toolTip().isEmpty()
+									&& !treesChk->toolTip().contains( QLatin1Char( '\n' ) ) );
+								int ringLabelled = 0;
+								if ( panel )
+									for ( QLabel * l : panel->findChildren<QLabel *>() )
+										if ( l->text() == QLatin1String( "Tree cards from ring" ) )
+											ringLabelled++;
+								log << "  labels reading 'Tree cards from ring': " << ringLabelled << "\n";
+								check( "the ring override says it is trees only", ringLabelled == 1 );
+								check( "and its tooltip is one sentence",
+									!ringBox->toolTip().isEmpty()
+									&& !ringBox->toolTip().contains( QLatin1Char( '\n' ) ) );
+
+								// ---- 512 px, and the cost line that moves with it ----
+								{
+									auto * cf2 = findChild<QComboBox *>( QStringLiteral( "LodgenCardFramesBox" ) );
+									auto * cr3 = findChild<QComboBox *>( QStringLiteral( "LodgenCardResBox" ) );
+									auto * ha2 = findChild<QCheckBox *>( QStringLiteral( "LodgenCardHalfAuxCheck" ) );
+									auto * cl2 = findChild<QLabel *>( QStringLiteral( "LodgenCardCostLabel" ) );
+									if ( cf2 && cr3 && ha2 && cl2 ) {
+										const int keepF = cf2->currentIndex(), keepR = cr3->currentIndex();
+										const bool keepH = ha2->isChecked();
+										cf2->setCurrentIndex( cf2->findData( 8 ) );
+										ha2->setChecked( false );
+										cr3->setCurrentIndex( cr3->findData( 256 ) );
+										qApp->processEvents();
+										const QString at256 = cl2->text();
+										cr3->setCurrentIndex( cr3->findData( 512 ) );
+										qApp->processEvents();
+										const QString at512 = cl2->text();
+										log << "  cost at 8x8/256: " << at256 << "\n";
+										log << "  cost at 8x8/512: " << at512 << "\n";
+										check( "512 px is offered and reaches the sheet arithmetic",
+											cr3->findData( 512 ) >= 0
+											&& at512.contains( QLatin1String( "4096 x 4096" ) )
+											&& at512.contains( QLatin1String( "512 x 512" ) ) );
+										/* The floor: the same line at 256 must be a
+										 * DIFFERENT sentence naming the 2048 sheet, so a
+										 * fixed string cannot pass either half. */
+										check( "and the cost line moves when the row moves",
+											at256 != at512 && at256.contains( QLatin1String( "2048 x 2048" ) ) );
+										cf2->setCurrentIndex( keepF );
+										cr3->setCurrentIndex( keepR );
+										ha2->setChecked( keepH );
+										qApp->processEvents();
+									} else {
+										check( "512 px is offered and reaches the sheet arithmetic", false );
+										check( "and the cost line moves when the row moves", false );
+									}
+								}
+
+								// ---- the result line: the four stage times live here ----
+								log << "  result line before a run: '" << resL->text() << "'\n";
+								check( "the result line carries nothing until something has run",
+									resL->text().isEmpty() );
+
+								outE2->setText( keepOut );
+								target->setCurrentIndex( keepTarget );
+								QApplication::processEvents();
+							} else {
+								for ( const char * w : { "the five .lod types under FO4CS",
+										"Trees only", "512 px", "the native row", "the result line" } )
+									check( QString( "LODUI1 row missing: %1" ).arg( QLatin1String( w ) ), false );
+							}
 						}
 						/* 2026-09-06 TERRAIN1: the ground-cover rows and the terrain
 						 * virtual texture. Each is measured against its OPPOSITE
@@ -27538,13 +29787,18 @@ void NifSkope::initMenu()
 								const bool vtRowsOn = vtFin->isEnabled() && vtBtr->isEnabled();
 								check( "the pyramid's rows grey with its own box", vtRowsOff && vtRowsOn );
 								const QString sum2 = vtSum->text();
-								vtFin->setCurrentIndex( 1 );		// one cell a tile
+								// another density than the one showing (the default is 16 u,
+								// the middle entry since lane VTNORMAL1), then back
+								const int vtWas = vtFin->currentIndex();
+								const QString den2 = vtFin->currentText();
+								vtFin->setCurrentIndex( ( vtWas + 1 ) % qMax( 1, vtFin->count() ) );
 								QApplication::processEvents();
 								const QString sum1 = vtSum->text();
-								vtFin->setCurrentIndex( 0 );
+								const QString den1 = vtFin->currentText();
+								vtFin->setCurrentIndex( vtWas );
 								QApplication::processEvents();
-								log << "pyramid summary at 2 cells a tile: " << sum2 << "\n";
-								log << "pyramid summary at 1 cell a tile:  " << sum1 << "\n";
+								log << "pyramid summary at " << den2 << ": " << sum2 << "\n";
+								log << "pyramid summary at " << den1 << ": " << sum1 << "\n";
 								check( "the pyramid's summary is computed, not a fixed sentence",
 									!sum2.isEmpty() && !sum1.isEmpty() && sum1 != sum2 );
 								if ( vtSec ) {
@@ -27695,10 +29949,24 @@ void NifSkope::initMenu()
 						 * pixel of the indicator and the ground beside it, on the
 						 * settings page's own render - not the check box's grab,
 						 * which is transparent and would read as black. */
-						auto * atlas = findChild<QCheckBox *>( QStringLiteral( "LodgenAtlasCheck" ) );
+						/* LANE PANEL1, 2026-09-12: this read LodgenAtlasCheck, which the
+						 * FO4 Community Shaders target HIDES -- the same run says so three
+						 * lines above ("FO4CS: the object atlas hidden: yes"). A hidden
+						 * widget keeps its last geometry, so the grab was of whatever was
+						 * painted at those coordinates: with four rows above it that was
+						 * another row's box and the check read 32 levels and passed; with
+						 * sixty-one rows above it, it is empty ground and reads 0. Measure
+						 * a box that is ON SCREEN, and name it in the log. */
+						QCheckBox * atlas = nullptr;
 						QWidget * pageW = scrollA ? scrollA->widget() : nullptr;
+						if ( panel && scrollA )
+							for ( QCheckBox * c : panel->findChildren<QCheckBox *>() )
+								if ( c->isVisible() && !c->isChecked() && scrollA->isAncestorOf( c ) ) {
+									atlas = c;
+									break;
+								}
 						int contrast = -1;
-						if ( atlas && pageW && !atlas->isChecked() ) {
+						if ( atlas && pageW ) {
 							QStyleOptionButton opt;
 							opt.initFrom( atlas );
 							const QRect r = atlas->style()->subElementRect( QStyle::SE_CheckBoxIndicator, &opt, atlas )
@@ -27715,7 +29983,8 @@ void NifSkope::initMenu()
 											qMax( qAbs( c.green() - ground.green() ), qAbs( c.blue() - ground.blue() ) ) );
 										contrast = qMax( contrast, d );
 									}
-								log << "unticked box: ground " << ground.name() << ", strongest contrast inside the box "
+								log << "unticked box (" << atlas->objectName() << "): ground " << ground.name()
+									<< ", strongest contrast inside the box "
 									<< contrast << " levels\n";
 							}
 						}
@@ -27726,8 +29995,18 @@ void NifSkope::initMenu()
 						 * - white pixels inside the box prove the image loaded (a
 						 * missing resource draws a plain blue square), blue-over-red
 						 * pixels prove the field is the toggle blue, not the accent. */
+						/* The identity box is UNTICKED by default since 2026-09-12 (bungo's
+						 * ruling, lane DEFAULTS1) and the FO4CS target no longer ticks it, so
+						 * this check can no longer BORROW a ticked box from the rows above:
+						 * it ticks the box itself, grabs, and puts the box back the way it
+						 * found it. A harness forces the state it measures. */
 						auto * ident = findChild<QCheckBox *>( QStringLiteral( "LodgenIdentityCheck" ) );
 						int whitePx = 0, bluePx = 0;
+						const bool identWasTicked = ident && ident->isChecked();
+						if ( ident && !identWasTicked ) {
+							ident->setChecked( true );
+							QApplication::processEvents();
+						}
 						if ( ident && pageW && ident->isChecked() ) {
 							QStyleOptionButton opt;
 							opt.initFrom( ident );
@@ -27744,6 +30023,10 @@ void NifSkope::initMenu()
 								}
 							log << "ticked box: " << whitePx << " white mark pixels, " << bluePx << " blue field pixels of "
 								<< img.width() * img.height() << "\n";
+						}
+						if ( ident && !identWasTicked ) {
+							ident->setChecked( false );
+							QApplication::processEvents();
 						}
 						check( "a ticked box is a white mark on Blender's blue", whitePx >= 4 && bluePx >= 20 );
 
@@ -27854,15 +30137,809 @@ void NifSkope::initMenu()
 						 * grabbed from inside the app at 640 px wide. The state is
 						 * the one this test leaves - a chunk output ticked so the
 						 * range is live - with the .lodt radio put back to full. */
+						/* ===== LANE LODUI1: THE PANEL ACTUALLY RUNS (WW_LODGEN_RUN=1) =====
+						 *
+						 * The structural checks above read widgets. These two drive the
+						 * panel the way a person does -- set the rows, press Generate,
+						 * wait for it -- because two of bungo's asks cannot be answered
+						 * by reading a widget:
+						 *
+						 *   * the native row must WIRE the emitter, not merely exist:
+						 *     the `.lodo`/`.lodi` pair has to be on disk after a
+						 *     GUI-driven region run;
+						 *   * the four stage times have to be WRITTEN and to MOVE. Run 1
+						 *     is meshes-and-textures with no landscape file, run 2 is the
+						 *     shadow heightmap and nothing else, so each of the two
+						 *     stages is seen at zero in one run and above zero in the
+						 *     other. That pairing is the floor.
+						 *
+						 * It is opt-in because it writes files and takes seconds, and
+						 * `lod_generation.sh` says in its own header that it is structure
+						 * only. `tests/spells/lodgen_panel_run.sh` is the spell for it.
+						 *
+						 * THE PANEL'S SETTINGS ARE PUT BACK. Pressing Generate calls
+						 * saveSettings(), which writes the whole LodGeneration group --
+						 * so the group is snapshotted here and restored at the end,
+						 * keys that did not exist removed. A harness forces the state it
+						 * measures and leaves nobody's panel rearranged. */
+						if ( qEnvironmentVariableIntValue( "WW_LODGEN_RUN" ) == 1 ) {
+							QMap<QString, QVariant> savedGroup;
+							{
+								QSettings s;
+								s.beginGroup( QStringLiteral( "LodGeneration" ) );
+								for ( const QString & k : s.allKeys() )
+									savedGroup.insert( k, s.value( k ) );
+								s.endGroup();
+							}
+							auto * gen2 = findChild<QPushButton *>( QStringLiteral( "LodgenGenerateButton" ) );
+							auto * cancel2 = findChild<QPushButton *>( QStringLiteral( "LodgenCancelButton" ) );
+							auto * resL2 = findChild<QLabel *>( QStringLiteral( "LodgenResultLabel" ) );
+							auto * target2 = findChild<QComboBox *>( QStringLiteral( "LodgenTargetBox" ) );
+							auto * ws2 = findChild<QComboBox *>( QStringLiteral( "LodgenWorldspaceBox" ) );
+							auto * out2 = findChild<QLineEdit *>( QStringLiteral( "LodgenOutputEdit" ) );
+							auto * nat2 = findChild<QCheckBox *>( QStringLiteral( "LodgenNativeCheck" ) );
+							auto * lodt2 = findChild<QCheckBox *>( QStringLiteral( "LodgenLodtCheck" ) );
+							auto * hm2 = findChild<QCheckBox *>( QStringLiteral( "LodgenHeightmapCheck" ) );
+							auto * hmSize2 = findChild<QComboBox *>( QStringLiteral( "LodgenHeightmapSizeBox" ) );
+							auto * vt2 = findChild<QCheckBox *>( QStringLiteral( "LodgenVtCheck" ) );
+							auto * w2 = findChild<QSpinBox *>( QStringLiteral( "LodgenWestSpin" ) );
+							auto * e2 = findChild<QSpinBox *>( QStringLiteral( "LodgenEastSpin" ) );
+							auto * s2 = findChild<QSpinBox *>( QStringLiteral( "LodgenSouthSpin" ) );
+							auto * n2 = findChild<QSpinBox *>( QStringLiteral( "LodgenNorthSpin" ) );
+							const QString runOut = QDir::tempPath() + QStringLiteral( "/Lodgen_LODUI1_run" );
+							/* A clean folder, so "the pair exists" cannot be answered by
+							 * a pair some earlier run left behind. */
+							QDir( runOut ).removeRecursively();
+							QDir().mkpath( runOut );
+							// the chunk-size selector: index 0 is every ring, 1 is dim 4
+							QComboBox * dimBox2 = nullptr;
+							if ( panel )
+								for ( QComboBox * c : panel->findChildren<QComboBox *>() )
+									if ( c->count() == 5 && c->itemText( 1 ) == QLatin1String( "4" ) )
+										dimBox2 = c;
+							/* Pump the event loop until the run is over. The chunk loop
+							 * is driven by QTimer::singleShot( 0 ), so processEvents()
+							 * is what advances it; Cancel is enabled for exactly as long
+							 * as a run is live, which is the only public "still running"
+							 * this panel has. */
+							auto waitForRun = [&]( int budgetMs ) {
+								QElapsedTimer t;
+								t.start();
+								while ( cancel2 && cancel2->isEnabled() && t.elapsed() < budgetMs ) {
+									QApplication::processEvents( QEventLoop::AllEvents, 20 );
+									QThread::msleep( 5 );
+								}
+								return t.elapsed();
+							};
+							auto stageOf = []( const QString & line, const QString & name ) {
+								// "landscape 1.2 s, meshes 3.4 s, ..." -> the number after `name`
+								const int i = line.indexOf( name );
+								if ( i < 0 )
+									return -1.0;
+								return line.mid( i + name.size() ).trimmed()
+									.section( QLatin1Char( ' ' ), 0, 0 ).toDouble();
+							};
+							if ( gen2 && cancel2 && resL2 && target2 && ws2 && out2 && nat2 && lodt2
+								&& hm2 && hmSize2 && vt2 && w2 && e2 && s2 && n2 && dimBox2 ) {
+								// ---- RUN 1: one object chunk, the native pair, no landscape ----
+								target2->setCurrentIndex( 0 );		// FO4 Community Shaders
+								QApplication::processEvents();
+								ws2->setCurrentIndex( 0 );
+								out2->setText( runOut );
+								lodt2->setChecked( false );
+								hm2->setChecked( false );
+								vt2->setChecked( false );
+								nat2->setChecked( true );
+								w2->setValue( -20 ); e2->setValue( -20 );
+								s2->setValue( 24 ); n2->setValue( 24 );
+								dimBox2->setCurrentIndex( 1 );		// dim 4
+								/* The viewport preview off: it splices every finished
+								 * chunk into the workspace and reframes, which is a
+								 * person's feature and a harness's noise. Found by its
+								 * text -- it carries no object name. */
+								if ( panel )
+									for ( QCheckBox * c : panel->findChildren<QCheckBox *>() )
+										if ( c->text().startsWith( QLatin1String( "Show chunks" ) ) )
+											c->setChecked( false );
+								QApplication::processEvents();
+								log << "  run 1 armed, Generate enabled: "
+									<< ( gen2->isEnabled() ? "yes" : "no" ) << "\n";
+								check( "with the native row ticked the panel will run", gen2->isEnabled() );
+								gen2->click();
+								const qint64 ms1 = waitForRun( 600000 );
+								const QString line1 = resL2->text();
+								log << "  run 1 finished in " << ms1 << " ms\n";
+								log << "  run 1 result line: '" << line1 << "'\n";
+								// the pair moved to FO4CSLOD/<ws>/ (lane LAYOUT1, 2026-09-16)
+								const QString nativeOut = lodgenFo4csWorldDir( runOut, QStringLiteral( "Commonwealth" ) );
+								const QString lodo = nativeOut + QStringLiteral( "/Commonwealth.lodo" );
+								const QString lodi = nativeOut + QStringLiteral( "/Commonwealth.lodi" );
+								const qint64 lodoBytes = QFileInfo( lodo ).size();
+								const qint64 lodiBytes = QFileInfo( lodi ).size();
+								log << "  Commonwealth.lodo " << lodoBytes << " bytes, .lodi "
+									<< lodiBytes << " bytes\n";
+								check( "a GUI run with the native row on writes the .lodo/.lodi pair",
+									QFileInfo::exists( lodo ) && QFileInfo::exists( lodi )
+									&& lodoBytes > 4096 && lodiBytes > 64 );
+								check( "the result line names all four stages",
+									line1.contains( QLatin1String( "landscape" ) )
+									&& line1.contains( QLatin1String( "meshes" ) )
+									&& line1.contains( QLatin1String( "textures" ) )
+									&& line1.contains( QLatin1String( "impostors" ) ) );
+								const double land1 = stageOf( line1, QStringLiteral( "landscape" ) );
+								const double mesh1 = stageOf( line1, QStringLiteral( "meshes" ) );
+								const double imp1 = stageOf( line1, QStringLiteral( "impostors" ) );
+								log << "  run 1 stages: landscape " << land1 << ", meshes " << mesh1
+									<< ", impostors " << imp1 << "\n";
+								check( "the meshes stage is above zero when meshes were built", mesh1 > 0.0 );
+								check( "and the landscape stage is exactly zero when no landscape file was written",
+									land1 == 0.0 );
+								check( "and the impostors stage is zero with no card library",
+									imp1 == 0.0 );
+
+								// ---- RUN 2: the shadow heightmap and nothing else ----
+								nat2->setChecked( false );
+								lodt2->setChecked( false );
+								vt2->setChecked( false );
+								hm2->setChecked( true );
+								hmSize2->setCurrentIndex( hmSize2->findData( 4096 ) );
+								QApplication::processEvents();
+								log << "  run 2 armed, Generate enabled: "
+									<< ( gen2->isEnabled() ? "yes" : "no" ) << "\n";
+								gen2->click();
+								const qint64 ms2 = waitForRun( 600000 );
+								const QString line2 = resL2->text();
+								log << "  run 2 finished in " << ms2 << " ms\n";
+								log << "  run 2 result line: '" << line2 << "'\n";
+								const double land2 = stageOf( line2, QStringLiteral( "landscape" ) );
+								const double mesh2 = stageOf( line2, QStringLiteral( "meshes" ) );
+								const double tex2 = stageOf( line2, QStringLiteral( "textures" ) );
+								log << "  run 2 stages: landscape " << land2 << ", meshes " << mesh2
+									<< ", textures " << tex2 << "\n";
+								check( "the landscape stage is above zero when the heightmap was baked",
+									land2 > 0.0 );
+								check( "and the meshes and textures stages fall back to zero",
+									mesh2 == 0.0 && tex2 == 0.0 );
+								check( "so the line is not the last run's, reprinted",
+									line1 != line2 );
+								/* THE RESULT-LINE PICTURE: the action bar on its own,
+								 * with the four times in it. */
+								const QByteArray rshot = qgetenv( "WW_LODGEN_SHOT_RESULT" );
+								if ( !rshot.isEmpty() ) {
+									if ( auto * bar = findChild<QWidget *>( QStringLiteral( "LodgenActionBar" ) ) ) {
+										const bool sv = bar->grab().save( QString::fromLocal8Bit( rshot ) );
+										log << "  result-line shot " << ( sv ? "saved: " : "NOT saved: " )
+											<< QString::fromLocal8Bit( rshot ) << "\n";
+									}
+								}
+							} else {
+								for ( const char * w : { "a GUI run writes the pair",
+										"the four stage times are written", "and they move" } )
+									check( QString( "LODUI1 run leg: %1" ).arg( QLatin1String( w ) ), false );
+							}
+							// put the panel's settings back exactly as they were found
+							{
+								QSettings s;
+								s.beginGroup( QStringLiteral( "LodGeneration" ) );
+								for ( const QString & k : s.allKeys() )
+									if ( !savedGroup.contains( k ) )
+										s.remove( k );
+								for ( auto it = savedGroup.constBegin(); it != savedGroup.constEnd(); ++it )
+									s.setValue( it.key(), it.value() );
+								s.endGroup();
+								s.sync();
+							}
+						}
+						/* ===== LANE PANEL1: THE BYTE GATE (WW_LODGEN_GATE=1) =====
+						 *
+						 * A row that exists, scrolls, keeps its value and names its
+						 * switch can still be wired to nothing. The only thing that
+						 * settles it is the BAKE: move one row, bake the same chunk
+						 * again, and see whether a byte moved.
+						 *
+						 * The chunk is Sanctuary, (-20,24), dim 4 -- one chunk, the
+						 * cheapest input that still runs the terrain pass, the sheets,
+						 * the ground cover, the object pass and the landscape file.
+						 *
+						 *   base  = every new row at its default. Its digest is the
+						 *           rung's: `release/NifSkope.before_panel1.exe` run
+						 *           through the same harness leg writes the same files,
+						 *           which is gate (a) and is compared in the spell,
+						 *           across the two exes, not here.
+						 *   row i = that row alone moved off its default. Different
+						 *           digest = the row reaches the bake. Same digest =
+						 *           the row reaches NOTHING at this module set, and it
+						 *           is named, not counted.
+						 *
+						 * Three rows carry a PATH and are not bumped: a made-up path is
+						 * not a setting, it is a typo. They are named as skipped.
+						 * `threads` and `chunk threads` are bumped and must NOT move a
+						 * byte -- a bake that depends on how many cores ran it is a bug,
+						 * not a setting -- so they are the gate's own control.
+						 *
+						 * Opt-in: this is 50-odd bakes. `tests/spells/lodgen_byte_gate.sh`
+						 * is the spell, and it carries the budget. */
+						if ( qEnvironmentVariableIntValue( "WW_LODGEN_GATE" ) == 1 ) {
+							QMap<QString, QVariant> savedGate;
+							{
+								QSettings s;
+								s.beginGroup( QStringLiteral( "LodGeneration" ) );
+								for ( const QString & k : s.allKeys() )
+									savedGate.insert( k, s.value( k ) );
+								s.endGroup();
+							}
+							auto * gen3 = findChild<QPushButton *>( QStringLiteral( "LodgenGenerateButton" ) );
+							auto * cancel3 = findChild<QPushButton *>( QStringLiteral( "LodgenCancelButton" ) );
+							auto * resL3 = findChild<QLabel *>( QStringLiteral( "LodgenResultLabel" ) );
+							auto * target3 = findChild<QComboBox *>( QStringLiteral( "LodgenTargetBox" ) );
+							auto * ws3 = findChild<QComboBox *>( QStringLiteral( "LodgenWorldspaceBox" ) );
+							auto * out3 = findChild<QLineEdit *>( QStringLiteral( "LodgenOutputEdit" ) );
+							auto * w3 = findChild<QSpinBox *>( QStringLiteral( "LodgenWestSpin" ) );
+							auto * e3 = findChild<QSpinBox *>( QStringLiteral( "LodgenEastSpin" ) );
+							auto * s3 = findChild<QSpinBox *>( QStringLiteral( "LodgenSouthSpin" ) );
+							auto * n3 = findChild<QSpinBox *>( QStringLiteral( "LodgenNorthSpin" ) );
+							const QString gateOut = QDir::tempPath() + QStringLiteral( "/Lodgen_PANEL1_gate" );
+							QComboBox * dimBox3 = nullptr;
+							if ( panel )
+								for ( QComboBox * c : panel->findChildren<QComboBox *>() )
+									if ( c->count() == 5 && c->itemText( 1 ) == QLatin1String( "4" ) )
+										dimBox3 = c;
+							auto tick = [this]( const char * name, bool on ) {
+								if ( auto * c = findChild<QCheckBox *>( QLatin1String( name ) ) )
+									c->setChecked( on );
+							};
+							/* One digest for a whole output tree: every file, in path
+							 * order, its relative path and its bytes. Two trees with the
+							 * same digest hold the same files with the same contents. */
+							auto digestOf = []( const QString & root, int * files, qint64 * bytes ) {
+								QStringList rel;
+								QDirIterator it( root, QDir::Files, QDirIterator::Subdirectories );
+								while ( it.hasNext() ) {
+									it.next();
+									rel << QDir( root ).relativeFilePath( it.filePath() );
+								}
+								rel.sort();
+								QCryptographicHash h( QCryptographicHash::Sha1 );
+								*files = rel.size();
+								*bytes = 0;
+								for ( const QString & r : rel ) {
+									h.addData( r.toUtf8() );
+									QFile f( root + QLatin1Char( '/' ) + r );
+									if ( f.open( QIODevice::ReadOnly ) ) {
+										const QByteArray b = f.readAll();
+										*bytes += b.size();
+										h.addData( b );
+									}
+								}
+								return QString::fromLatin1( h.result().toHex() );
+							};
+							auto waitGate = [&]( int budgetMs ) {
+								QElapsedTimer t;
+								t.start();
+								while ( cancel3 && cancel3->isEnabled() && t.elapsed() < budgetMs ) {
+									QApplication::processEvents( QEventLoop::AllEvents, 20 );
+									QThread::msleep( 5 );
+								}
+								return t.elapsed();
+							};
+							/* One bake: a clean folder, press Generate, wait, digest. */
+							int bakeFiles = 0;
+							qint64 bakeBytes = 0, bakeMs = 0;
+							auto bake = [&]() -> QString {
+								QDir( gateOut ).removeRecursively();
+								QDir().mkpath( gateOut );
+								QApplication::processEvents();
+								if ( !gen3 || !gen3->isEnabled() )
+									return QStringLiteral( "REFUSED" );
+								QElapsedTimer bt;
+								bt.start();
+								gen3->click();
+								waitGate( 900000 );
+								bakeMs = bt.elapsed();
+								return digestOf( gateOut, &bakeFiles, &bakeBytes );
+							};
+							if ( gen3 && cancel3 && resL3 && target3 && ws3 && out3 && w3 && e3 && s3 && n3 && dimBox3 ) {
+								target3->setCurrentIndex( 0 );			// FO4 Community Shaders
+								QApplication::processEvents();
+								ws3->setCurrentIndex( 0 );
+								out3->setText( gateOut );
+								w3->setValue( -20 ); e3->setValue( -20 );
+								s3->setValue( 24 ); n3->setValue( 24 );
+								dimBox3->setCurrentIndex( 1 );			// dim 4
+								/* The module set: the terrain pass and its sheets, the
+								 * ground cover, the object pass, the landscape file and
+								 * the native pair. NOT the pyramid -- a .lodt pyramid is
+								 * built for the whole worldspace and is 1.59 GB, which is
+								 * not a one-chunk gate. */
+								tick( "LodgenBtrCheck", true );
+								tick( "LodgenTexCheck", true );
+								tick( "LodgenCoverCheck", true );
+								tick( "LodgenObjectsCheck", true );
+								tick( "LodgenNativeCheck", true );
+								tick( "LodgenLodtCheck", true );
+								tick( "LodgenVtCheck", false );
+								tick( "LodgenHeightmapCheck", false );
+								if ( auto * full3 = findChild<QRadioButton *>( QStringLiteral( "LodgenLodtFullRadio" ) ) )
+									full3->setChecked( true );
+								if ( panel )
+									for ( QCheckBox * c : panel->findChildren<QCheckBox *>() )
+										if ( c->text().startsWith( QLatin1String( "Show chunks" ) ) )
+											c->setChecked( false );
+								/* A row moved to a NAMED value rather than by one step. Text, because
+								 * the table is a plain C array: a number for a spin box, the item DATA
+								 * for a selector (not its position), 1/0 for a tick. Returns false when
+								 * the widget did not actually move, which the caller reports rather
+								 * than swallowing. */
+								auto putText = []( QWidget * w, const char * text ) -> bool {
+									const QString s = QLatin1String( text );
+									if ( auto * dd = qobject_cast<QDoubleSpinBox *>( w ) ) {
+										const double was = dd->value();
+										dd->setValue( s.toDouble() );
+										return dd->value() != was;
+									}
+									if ( auto * ss = qobject_cast<QSpinBox *>( w ) ) {
+										const int was = ss->value();
+										ss->setValue( s.toInt() );
+										return ss->value() != was;
+									}
+									if ( auto * cc = qobject_cast<QCheckBox *>( w ) ) {
+										const bool was = cc->isChecked();
+										cc->setChecked( s.toInt() != 0 );
+										return cc->isChecked() != was;
+									}
+									if ( auto * bb = qobject_cast<QComboBox *>( w ) ) {
+										const int was = bb->currentIndex();
+										const int i = bb->findData( s.toInt() );
+										if ( i < 0 )
+											return false;
+										bb->setCurrentIndex( i );
+										return bb->currentIndex() != was;
+									}
+									return false;
+								};
+								/* EVERY ROW AT ITS DEFAULT, MADE TRUE RATHER THAN ASSUMED. The panel
+								 * loads what this machine last saved, so without this the base bake is
+								 * "whatever is in the registry" and every row after it is measured
+								 * against that. The rows this machine had saved differently are NAMED,
+								 * because that difference is also the answer to "why does the command
+								 * line disagree with the panel". The saved group is put back wholesale
+								 * at the end of the gate, so nothing of the operator's is changed. */
+								QStringList forcedRows;
+								for ( int i = 0; i < wwNewRowCount; i++ ) {
+									if ( !wwNewRows[i].dflt || !panel )
+										continue;
+									auto * w = panel->findChild<QWidget *>( QLatin1String( wwNewRows[i].obj ) );
+									if ( !w )
+										continue;
+									const QVariant had = rowValue( w );
+									if ( putText( w, wwNewRows[i].dflt ) )
+										forcedRows << QLatin1String( wwNewRows[i].key ) + QLatin1String( " (this machine had " )
+											+ had.toString() + QLatin1String( ", the default is " )
+											+ QLatin1String( wwNewRows[i].dflt ) + QLatin1String( ")" );
+								}
+								log << "rows this machine had saved away from their default: "
+									<< forcedRows.size() << "\n";
+								if ( !forcedRows.isEmpty() )
+									log << "  forced back: " << forcedRows.join( QLatin1String( ", " ) ) << "\n";
+								QApplication::processEvents();
+								const QString base = bake();
+								const int baseFiles = bakeFiles;
+								const qint64 baseBytes = bakeBytes, baseMs = bakeMs;
+								log << "gate base bake: " << baseFiles << " files, " << baseBytes
+									<< " bytes, " << baseMs << " ms, digest " << base << "\n";
+								log << "gate base result line: '" << resL3->text() << "'\n";
+								/* The base tree is KEPT beside the gate folder, because the
+								 * per-row loop wipes the output before every bake. The spell
+								 * compares it with the command line's own bake of the same
+								 * chunk, which is the half of the gate a GUI cannot do. */
+								const QString baseKeep = QDir::tempPath() + QStringLiteral( "/Lodgen_PANEL1_base" );
+								QDir( baseKeep ).removeRecursively();
+								{
+									QDirIterator ci( gateOut, QDir::Files, QDirIterator::Subdirectories );
+									while ( ci.hasNext() ) {
+										ci.next();
+										const QString r = QDir( gateOut ).relativeFilePath( ci.filePath() );
+										const QString dst = baseKeep + QLatin1Char( '/' ) + r;
+										QDir().mkpath( QFileInfo( dst ).absolutePath() );
+										QFile::copy( ci.filePath(), dst );
+									}
+								}
+								log << "gate base tree kept at " << baseKeep << "\n";
+								check( "the gate's own bake writes files with every new row at its default",
+									base != QLatin1String( "REFUSED" ) && baseFiles > 0 && baseBytes > 4096 );
+								/* the rows that carry a PATH: a made-up path is a typo,
+								 * not a setting, so they are named and skipped */
+								static const char * const skipRows[] = {
+									"vanillaLodRoot", "msnCache", "waterVelocities" };
+								auto skipped = []( const QString & k ) {
+									for ( const char * s : skipRows )
+										if ( k == QLatin1String( s ) )
+											return true;
+									return false;
+								};
+								int moved = 0, same = 0, notBumped = 0, refused = 0, notHere = 0;
+								QStringList sameRows, refusedRows, movedRows, notHereRows;
+								QElapsedTimer gateClock;
+								gateClock.start();
+								const int gateBudgetMs = qEnvironmentVariableIntValue( "WW_LODGEN_GATE_MS" ) > 0
+									? qEnvironmentVariableIntValue( "WW_LODGEN_GATE_MS" ) : 2400000;
+								int done = 0;
+								/* the settings key an OBJECT name belongs to, so a dependent
+								 * row can name the row it hangs off in plain language */
+								auto keyOf = []( const char * obj ) -> QString {
+									for ( int j = 0; j < wwNewRowCount; j++ )
+										if ( qstrcmp( wwNewRows[j].obj, obj ) == 0 )
+											return QLatin1String( wwNewRows[j].key );
+									return QString::fromLatin1( obj );
+								};
+								/* PASS 1: the rows that stand on their own. Each is moved off
+								 * its default alone and the chunk re-baked; a digest that does
+								 * not move means the row reaches nothing. */
+								for ( int i = 0; i < wwNewRowCount && base != QLatin1String( "REFUSED" ); i++ ) {
+									const QString key = QLatin1String( wwNewRows[i].key );
+									if ( skipped( key ) ) {
+										log << "  row " << key << ": skipped, it carries a path\n";
+										continue;
+									}
+									if ( wwNewRows[i].why ) {
+										notHere++;
+										notHereRows << key;
+										log << "  row " << key << ": NOT EXERCISED HERE -- "
+											<< QLatin1String( wwNewRows[i].why ) << "\n";
+										continue;
+									}
+									if ( wwNewRows[i].dep )
+										continue;   // pass 2 bakes it with its own row turned on
+									if ( gateClock.elapsed() > gateBudgetMs ) {
+										log << "  row " << key << ": NOT MEASURED, the gate's budget ran out\n";
+										continue;
+									}
+									auto * w = panel ? panel->findChild<QWidget *>( QLatin1String( wwNewRows[i].obj ) ) : nullptr;
+									if ( !w )
+										continue;
+									const QVariant was = rowValue( w );
+									/* a threshold row is asked with a step big enough to mean something;
+									 * one spin-box step off a radius asks a question nobody meant. */
+									const bool didMove = wwNewRows[i].bump
+										? putText( w, wwNewRows[i].bump ) : bumpRow( w );
+									if ( !didMove ) {
+										notBumped++;
+										log << "  row " << key << ": could not be moved off its default\n";
+										continue;
+									}
+									const QVariant now = rowValue( w );
+									QApplication::processEvents();
+									const QString d = bake();
+									done++;
+									if ( d == QLatin1String( "REFUSED" ) ) {
+										refused++;
+										refusedRows << key;
+										log << "  row " << key << " " << was.toString() << " -> " << now.toString()
+											<< ": the panel REFUSED to run\n";
+									} else if ( d != base ) {
+										moved++;
+										movedRows << key;
+										log << "  row " << key << " " << was.toString() << " -> " << now.toString()
+											<< ": bytes MOVED (" << bakeFiles << " files, " << bakeBytes
+											<< " bytes, " << bakeMs << " ms)\n";
+									} else {
+										same++;
+										sameRows << key;
+										log << "  row " << key << " " << was.toString() << " -> " << now.toString()
+											<< ": SAME bytes -- this row reaches nothing in this bake\n";
+									}
+									putRow( w, was );
+									QApplication::processEvents();
+								}
+								/* PASS 2: the rows that only mean something while another row
+								 * is on. Bumping one of these against the BASE bake is a rigged
+								 * question -- erosion rounds cannot move a bake whose erosion
+								 * strength is 0 -- so the gate turns the row it hangs off on,
+								 * bakes THAT as a local baseline, and only then moves the row.
+								 * Two bakes each, and the answer means something. */
+								for ( int i = 0; i < wwNewRowCount && base != QLatin1String( "REFUSED" ); i++ ) {
+									if ( !wwNewRows[i].dep || wwNewRows[i].why )
+										continue;
+									const QString key = QLatin1String( wwNewRows[i].key );
+									const QString depKey = keyOf( wwNewRows[i].dep );
+									if ( !movedRows.contains( depKey ) ) {
+										notHere++;
+										notHereRows << key;
+										log << "  row " << key << ": NOT EXERCISED HERE -- " << depKey
+											<< " itself moves no bytes in this bake, so nothing under it can\n";
+										continue;
+									}
+									if ( gateClock.elapsed() > gateBudgetMs ) {
+										log << "  row " << key << ": NOT MEASURED, the gate's budget ran out\n";
+										continue;
+									}
+									auto * w = panel ? panel->findChild<QWidget *>( QLatin1String( wwNewRows[i].obj ) ) : nullptr;
+									auto * dw = panel ? panel->findChild<QWidget *>( QLatin1String( wwNewRows[i].dep ) ) : nullptr;
+									if ( !w || !dw )
+										continue;
+									const QVariant depWas = rowValue( dw );
+									/* "on" is not always enough: a selector has to land on the RULE that
+									 * reads this row, which is what depVal names. */
+									/* A dependency ALREADY at its named value is on, not stuck (lane
+									 * DEFAULTS2, 2026-09-23: the edge blend became a default-on dependency). */
+									auto atText = []( QWidget * w, const char * text ) -> bool {
+										if ( auto * bb = qobject_cast<QComboBox *>( w ) )
+											return bb->currentIndex() >= 0
+												&& bb->currentIndex() == bb->findData( QString::fromLatin1( text ).toInt() );
+										if ( auto * cc = qobject_cast<QCheckBox *>( w ) )
+											return cc->isChecked() == ( QString::fromLatin1( text ).toInt() != 0 );
+										return false;
+									};
+									const bool depMoved = wwNewRows[i].depVal
+										? ( putText( dw, wwNewRows[i].depVal ) || atText( dw, wwNewRows[i].depVal ) )
+										: bumpRow( dw );
+									if ( !depMoved ) {
+										notBumped++;
+										log << "  row " << key << ": " << depKey << " could not be turned on\n";
+										continue;
+									}
+									/* the second half of the chain, where there is one */
+									auto * dw2 = ( wwNewRows[i].dep2 && panel )
+										? panel->findChild<QWidget *>( QLatin1String( wwNewRows[i].dep2 ) ) : nullptr;
+									const QVariant dep2Was = dw2 ? rowValue( dw2 ) : QVariant();
+									if ( dw2 && !( wwNewRows[i].depVal2
+										? putText( dw2, wwNewRows[i].depVal2 ) : bumpRow( dw2 ) ) ) {
+										notBumped++;
+										log << "  row " << key << ": " << keyOf( wwNewRows[i].dep2 )
+											<< " could not be turned on\n";
+										putRow( dw, depWas );
+										QApplication::processEvents();
+										continue;
+									}
+									QApplication::processEvents();
+									const QString localBase = bake();
+									done++;
+									const QVariant was = rowValue( w );
+									const bool rowMoved = wwNewRows[i].bump
+										? putText( w, wwNewRows[i].bump ) : bumpRow( w );
+									if ( !rowMoved ) {
+										notBumped++;
+										log << "  row " << key << ": could not be moved off its default\n";
+										putRow( dw, depWas );
+										if ( dw2 ) putRow( dw2, dep2Was );
+										QApplication::processEvents();
+										continue;
+									}
+									const QVariant now = rowValue( w );
+									QApplication::processEvents();
+									const QString d = bake();
+									done++;
+									if ( d == QLatin1String( "REFUSED" ) || localBase == QLatin1String( "REFUSED" ) ) {
+										refused++;
+										refusedRows << key;
+										log << "  row " << key << " (with " << depKey
+										<< ( wwNewRows[i].depVal ? QString( " at " )
+											+ QLatin1String( wwNewRows[i].depVal ) : QString( " on" ) )
+										<< ( wwNewRows[i].dep2 ? QString( ", " ) + keyOf( wwNewRows[i].dep2 )
+											+ ( wwNewRows[i].depVal2 ? QString( " at " )
+												+ QLatin1String( wwNewRows[i].depVal2 ) : QString( " on" ) )
+											: QString() ) << ") "
+											<< was.toString() << " -> " << now.toString()
+											<< ": the panel REFUSED to run\n";
+									} else if ( d != localBase ) {
+										moved++;
+										movedRows << key;
+										log << "  row " << key << " (with " << depKey
+										<< ( wwNewRows[i].depVal ? QString( " at " )
+											+ QLatin1String( wwNewRows[i].depVal ) : QString( " on" ) )
+										<< ( wwNewRows[i].dep2 ? QString( ", " ) + keyOf( wwNewRows[i].dep2 )
+											+ ( wwNewRows[i].depVal2 ? QString( " at " )
+												+ QLatin1String( wwNewRows[i].depVal2 ) : QString( " on" ) )
+											: QString() ) << ") "
+											<< was.toString() << " -> " << now.toString()
+											<< ": bytes MOVED (" << bakeFiles << " files, " << bakeBytes
+											<< " bytes, " << bakeMs << " ms)\n";
+									} else {
+										same++;
+										sameRows << key;
+										log << "  row " << key << " (with " << depKey
+										<< ( wwNewRows[i].depVal ? QString( " at " )
+											+ QLatin1String( wwNewRows[i].depVal ) : QString( " on" ) )
+										<< ( wwNewRows[i].dep2 ? QString( ", " ) + keyOf( wwNewRows[i].dep2 )
+											+ ( wwNewRows[i].depVal2 ? QString( " at " )
+												+ QLatin1String( wwNewRows[i].depVal2 ) : QString( " on" ) )
+											: QString() ) << ") "
+											<< was.toString() << " -> " << now.toString()
+											<< ": SAME bytes -- this row reaches nothing in this bake\n";
+									}
+									putRow( w, was );
+									putRow( dw, depWas );
+									if ( dw2 ) putRow( dw2, dep2Was );
+									QApplication::processEvents();
+								}
+								log << "gate rows bumped: " << done << ", bytes moved: " << moved
+									<< ", same bytes: " << same << ", not exercised here: " << notHere
+									<< ", could not be moved: " << notBumped
+									<< ", refused: " << refused << "\n";
+								if ( !movedRows.isEmpty() )
+									log << "  moved: " << movedRows.join( QLatin1String( ", " ) ) << "\n";
+								if ( !sameRows.isEmpty() )
+									log << "  same bytes: " << sameRows.join( QLatin1String( ", " ) ) << "\n";
+								if ( !notHereRows.isEmpty() )
+									log << "  not exercised here: " << notHereRows.join( QLatin1String( ", " ) ) << "\n";
+								if ( !refusedRows.isEmpty() )
+									log << "  refused: " << refusedRows.join( QLatin1String( ", " ) ) << "\n";
+								/* THE CONTROL, taken out of the verdict first: two rows that
+								 * must NOT move a byte. A bake whose output depends on how many
+								 * cores ran it is a bug, and this is where it would be caught. */
+								bool threadsSame = sameRows.contains( QLatin1String( "threads" ) )
+									&& sameRows.contains( QLatin1String( "chunkThreads" ) );
+								QStringList unexplained = sameRows;
+								unexplained.removeAll( QLatin1String( "threads" ) );
+								unexplained.removeAll( QLatin1String( "chunkThreads" ) );
+								if ( !unexplained.isEmpty() )
+									log << "  UNEXPLAINED (a row this bake can reach that moves nothing): "
+										<< unexplained.join( QLatin1String( ", " ) ) << "\n";
+								/* THE VERDICT. Not a count and not a floor: every row this bake
+								 * can reach has to move its bytes, and every row it cannot reach
+								 * has to be NAMED with the reason. A row that is merely quiet is
+								 * a row nobody has shown to be wired. */
+								check( "every row this bake can reach moves its bytes, and every row it cannot is named",
+									unexplained.isEmpty() );
+								check( "and no row makes the panel refuse to run", refused == 0 );
+								log << "gate control (threads, chunk threads) leave the bytes alone: "
+									<< ( threadsSame ? "yes" : "NO" ) << "\n";
+								check( "the same chunk on a different thread count is the same bytes", threadsSame );
+							} else {
+								check( "PANEL1 byte gate: the panel's own controls were found", false );
+							}
+							{
+								QSettings s;
+								s.beginGroup( QStringLiteral( "LodGeneration" ) );
+								for ( const QString & k : s.allKeys() )
+									if ( !savedGate.contains( k ) )
+										s.remove( k );
+								for ( auto it = savedGate.constBegin(); it != savedGate.constEnd(); ++it )
+									s.setValue( it.key(), it.value() );
+								s.endGroup();
+								s.sync();
+							}
+						}
+						/* THE DOCK, ARRANGED SO THE GRAB SHOWS THE OUTPUT ROWS (lane
+						 * LODUI1). Left alone, the grab opens on the settings scrolled to
+						 * the top and the splitter giving the progress map most of the
+						 * height, so a picture of the panel showed Source, Plugins and an
+						 * empty map and none of the rows under test. Stated once and used by
+						 * both grabs. */
+						QWidget * grabHiddenPane = nullptr;
+						auto arrangeDockForGrab = [this, dock, &grabHiddenPane, &log]() {
+							if ( !dock )
+								return;
+							/* THE GRAB WIDTH IS A KNOB (lane PANEL1, 2026-09-12). The brief asks
+							 * for a picture at the panel MINIMUM width as well as at a comfortable
+							 * one. WW_LODGEN_SHOT_W=min asks the dock what it will not go under, a
+							 * number asks for that many pixels, and unset is the 640 every earlier
+							 * picture used, so no existing grab moves. The width the dock ACTUALLY
+							 * took is logged either way: resizeDocks() is advisory, and the main
+							 * window own width has been clamping it to 497. */
+							const QByteArray wEnv = qgetenv( "WW_LODGEN_SHOT_W" );
+							int want = 640;
+							if ( wEnv == QByteArray( "min" ) )
+								want = qMax( dock->minimumSizeHint().width(), dock->minimumWidth() );
+							else if ( !wEnv.isEmpty() && wEnv.toInt() > 0 )
+								want = wEnv.toInt();
+							resizeDocks( { dock }, { want }, Qt::Horizontal );
+							/* THE PROGRESS PANE IS HIDDEN FOR THE GRAB. Asking the splitter for
+							 * the height does not work: the map alone has a 160 px minimum and
+							 * the pane around it another ~140, so the settings never get past
+							 * about 270 px of a 741 px dock and a picture of the panel shows
+							 * four rows. Hidden, the settings get the whole dock. Put back by
+							 * restoreDockAfterGrab() so nothing the harness measures afterwards
+							 * sees a panel with no progress pane. */
+							if ( auto * sp = findChild<QSplitter *>( QStringLiteral( "LodgenSplitter" ) ) ) {
+								if ( sp->count() > 1 && sp->widget( 1 ) ) {
+									grabHiddenPane = sp->widget( 1 );
+									grabHiddenPane->setVisible( false );
+								}
+							}
+							QApplication::processEvents();
+							if ( auto * sc = findChild<QScrollArea *>( QStringLiteral( "LodgenSettingsScroll" ) ) ) {
+								/* Centre on the object head this target OFFERS -- the native row
+								 * under FO4CS, the .bto row under the stock engine -- so the rows
+								 * the picture exists to show are in frame under both. */
+								QWidget * anchor = findChild<QCheckBox *>( QStringLiteral( "LodgenNativeCheck" ) );
+								if ( !anchor || anchor->isHidden() )
+									anchor = findChild<QCheckBox *>( QStringLiteral( "LodgenObjectsCheck" ) );
+								if ( !anchor || anchor->isHidden() )
+									anchor = findChild<QComboBox *>( QStringLiteral( "LodgenTargetBox" ) );
+								if ( anchor )
+									sc->ensureWidgetVisible( anchor, 0, 300 );
+							}
+							QApplication::processEvents();
+							QApplication::processEvents();
+							log << "grab width: asked " << want << ", the dock took " << dock->width()
+								<< ", it will not go under " << dock->minimumSizeHint().width() << "\n";
+						};
+						auto restoreDockAfterGrab = [&grabHiddenPane]() {
+							if ( grabHiddenPane ) {
+								grabHiddenPane->setVisible( true );
+								grabHiddenPane = nullptr;
+								QApplication::processEvents();
+							}
+						};
 						const QByteArray shot = qgetenv( "WW_LODGEN_SHOT" );
 						if ( !shot.isEmpty() && dock ) {
 							if ( auto * full = findChild<QRadioButton *>( QStringLiteral( "LodgenLodtFullRadio" ) ) )
 								full->setChecked( true );
-							resizeDocks( { dock }, { 640 }, Qt::Horizontal );
-							QApplication::processEvents();
-							QApplication::processEvents();
+							arrangeDockForGrab();
 							const bool saved = dock->grab().save( QString::fromLocal8Bit( shot ) );
+							restoreDockAfterGrab();
 							log << "screenshot " << ( saved ? "saved: " : "NOT saved: " ) << QString::fromLocal8Bit( shot ) << "\n";
+						}
+						/* THE WHOLE SETTINGS COLUMN IN ONE PICTURE (lane PANEL1, second pass,
+						 * 2026-09-12). dock->grab() photographs the scroll area's VIEWPORT, so a
+						 * panel with fifty-seven new rows still comes out as the top twenty and
+						 * the change is below the frame -- which is what happened to the first
+						 * three pictures this lane took. This grabs the scroll area's INNER
+						 * widget, whose height is the whole column, and opens every folding
+						 * section first so nothing is hidden behind an arrow.
+						 *
+						 * The fold state is the OPERATOR'S and it persists
+						 * (LodGeneration/expanded/<key>), so each section that had to be opened
+						 * is clicked shut again after the grab: the click is what writes the
+						 * setting, so clicking twice restores the stored value as well as the
+						 * widget. An expander is named Lodgen<key>Expander and its body
+						 * Lodgen<key>Body, which is how one is matched to the other without
+						 * LodgenSection being visible from this file. */
+						const QByteArray shotFull = qgetenv( "WW_LODGEN_SHOT_FULL" );
+						if ( !shotFull.isEmpty() && dock ) {
+							if ( auto * full = findChild<QRadioButton *>( QStringLiteral( "LodgenLodtFullRadio" ) ) )
+								full->setChecked( true );
+							arrangeDockForGrab();
+							QList<QToolButton *> reopened;
+							const QList<QToolButton *> expanders = findChildren<QToolButton *>();
+							for ( QToolButton * b : expanders ) {
+								const QString n = b->objectName();
+								if ( !n.endsWith( QLatin1String( "Expander" ) ) )
+									continue;
+								QWidget * body = findChild<QWidget *>( n.left( n.size() - 8 )
+									+ QStringLiteral( "Body" ) );
+								if ( !body || !body->isHidden() )
+									continue;
+								b->click();
+								reopened << b;
+							}
+							QApplication::processEvents();
+							QApplication::processEvents();
+							auto * sc = findChild<QScrollArea *>( QStringLiteral( "LodgenSettingsScroll" ) );
+							QWidget * column = sc ? sc->widget() : nullptr;
+							if ( !column ) {
+								log << "full screenshot NOT saved: no settings column to grab\n";
+							} else {
+								const QPixmap pm = column->grab();
+								const bool sv = pm.save( QString::fromLocal8Bit( shotFull ) );
+								log << "full screenshot " << ( sv ? "saved: " : "NOT saved: " )
+									<< QString::fromLocal8Bit( shotFull ) << ", the whole settings column "
+									<< pm.width() << "x" << pm.height() << " px, "
+									<< reopened.size() << " folding section(s) opened for it and folded back\n";
+							}
+							for ( QToolButton * b : reopened )
+								b->click();
+							QApplication::processEvents();
+							restoreDockAfterGrab();
+						}
+						/* THE STOCK TARGET'S OWN GRAB (lane LODUI1). The row list
+						 * differs by target now, so one picture cannot show both; this
+						 * switches, grabs, and switches back so the panel is left where
+						 * it was found. */
+						const QByteArray shotStock = qgetenv( "WW_LODGEN_SHOT_STOCK" );
+						if ( !shotStock.isEmpty() && dock ) {
+							if ( auto * tb = findChild<QComboBox *>( QStringLiteral( "LodgenTargetBox" ) ) ) {
+								const int keep = tb->currentIndex();
+								tb->setCurrentIndex( 1 );
+								arrangeDockForGrab();
+								const bool sv = dock->grab().save( QString::fromLocal8Bit( shotStock ) );
+								restoreDockAfterGrab();
+								log << "stock screenshot " << ( sv ? "saved: " : "NOT saved: " )
+									<< QString::fromLocal8Bit( shotStock ) << "\n";
+								tb->setCurrentIndex( keep );
+								QApplication::processEvents();
+							}
 						}
 					} while ( false );
 					log << checksRun << " checks, " << fails << " failures\n";
@@ -28494,12 +31571,15 @@ void NifSkope::initToolBars()
 	ui->tRender->setEnabled( false );
 	ui->tRender->setContextMenuPolicy( Qt::ActionsContextMenu );
 
-	// Status Bar
-	ui->statusbar->setContentsMargins( 0, 0, 0, 0 );
-	ui->statusbar->addPermanentWidget( progress );
-
-	// TODO: Split off into own widget
-	ui->statusbar->addPermanentWidget( filePathWidget( this ) );
+	/* NO STATUS BAR (lane UINOTES1, 2026-09-12, bungo's ruling 1: "that entire
+	 * bottom bar that shows you the loaded nif, waste of space"). The
+	 * QStatusBar is gone from src/ui/nifskope.ui, so nothing may call
+	 * QMainWindow::statusBar() -- that accessor CREATES one on demand and
+	 * would silently put the 24 px back. The loaded-file path display
+	 * (filePathWidget) is retired with the bar; the progress bar and every
+	 * transient sentence moved to showTransientMessage's viewport line, which
+	 * ensureTransientLine() re-parents `progress` into on first use. */
+	ensureTransientLine();
 
 
 	// Render
@@ -29030,7 +32110,16 @@ void NifSkope::restoreUi()
 			addDockWidget( Qt::LeftDockWidgetArea, dLeft );
 		dLeft->show();
 	}
-	restoreGeometry( settings.value( "Window Geometry"_uip ).toByteArray() );
+	/* A HARNESS RUN DOES NOT INHERIT A WINDOW (lane HARNESSWIN1,
+	 * 2026-09-19).  saveUi() has refused to PERSIST from a WW_* run
+	 * since 2026-07-27; the read half never got the same guard, so
+	 * every harness still replayed the position, the size and the
+	 * MAXIMIZED BIT of whatever window was last closed by hand.  A
+	 * maximized window discards resize(), so WW_RENDER_SIZE was
+	 * silently floored and the gate measured the machine.  Same
+	 * predicate on both sides, or the two can disagree. */
+	if ( !wwHarnessGeometryRestoreSuppressed() )
+		restoreGeometry( settings.value( "Window Geometry"_uip ).toByteArray() );
 	/* Schema 1 saved the new dock at whatever width Qt assigned while replacing
 	 * the four legacy docks — commonly its ~260 px size hint. Because that state
 	 * already contained LeftColumnDock, the fresh/migration 400 px request above
@@ -29062,8 +32151,8 @@ void NifSkope::restoreUi()
 	if ( nifWorkspaceSplitter ) {
 		nifWorkspaceSplitter->setHandleWidth( 4 );
 		if ( QSplitterHandle * handle = nifWorkspaceSplitter->handle( 1 ) ) {
-			handle->setToolTip( tr( "Drag to resize NIF Browser and Loaded NIFs" ) );
-			handle->setAccessibleName( tr( "Resize NIF Browser and Loaded NIFs" ) );
+			handle->setToolTip( tr( "Drag to resize File Browser and Loaded files" ) );
+			handle->setAccessibleName( tr( "Resize File Browser and Loaded files" ) );
 		}
 	}
 	setLeftColumnMode( hasLeftColumnLayout
@@ -29137,6 +32226,82 @@ void NifSkope::restoreUi()
 			headerRow->addWidget( ui->tRender, 1 );
 		}
 	}
+
+	/* ONE BAR HEIGHT AND ONE TOP EDGE ACROSS THE WIDTH (bungo, 2026-09-10:
+	 * "See the issue with alignment here?").
+	 *
+	 * HERE, and not at any of the three construction sites, for the same reason
+	 * the block above is here: restoreState has just replayed a saved layout,
+	 * and the viewport header has only just been filled, so this is the first
+	 * moment all three bars exist in their final parents with their final
+	 * contents -- which is what makes their natural heights worth reading.
+	 *
+	 * Measured before this call, 2026-09-10: main toolbars 35, viewport header
+	 * 33, dock tab strip 26. wwAlignBarRow takes the tallest and gives it to
+	 * all of them, so nothing is squeezed; the strip is then restyled through
+	 * the SAME shared sheet so its tabs fill the row rather than sitting in the
+	 * top 26 px of it with a gap underneath. WW_UIALIGN_TEST is the gate.
+	 */
+	/* THE MENU BAR IS PART OF THE ROW (lane WATER7).
+	 *
+	 * bungo, 2026-09-10, on a screenshot of the aligned strip beside the
+	 * Object Mode row: "compact these vertically like this, the top bar and
+	 * the buttons". BUILD9 aligned the toolbars, the viewport header and the
+	 * dock strip with one another and left the menu row out of it entirely,
+	 * so the top of the window was still two rows of different heights.
+	 *
+	 * THE WAY BACK, exact at its off value (CONSTITUTION 7): with
+	 * UI/CompactTopBars set false the menu bar is not in the row and no bar's
+	 * children are restyled, which is the 2026-09-10 BUILD9 behaviour, and
+	 * the gate pins that the off value changes nothing. wwCompactTopBars()
+	 * is the ONE reader of that key -- wwBarRowButtonQss asks it too. */
+	QList<QWidget *> wwBarRowBars =
+		{ ui->tFile, ui->tLOD, ui->tView, viewportHeader, leftColumnSelector };
+	if ( wwCompactTopBars() )
+		wwBarRowBars.prepend( ui->menubar );
+	/* THE LOD GENERATION PANEL'S STRIP IS THE SAME ROW (lane WATER8).
+	 *
+	 * bungo's correction of 2026-09-10, verbatim: "What? I wanted it in that
+	 * right panel though" -- the water tool is a tab of the LOD Generation
+	 * panel, and that panel's strip has to be the same 35 px row and the same
+	 * skin as Header | Blocks | Files or the two segmented strips in one
+	 * window would be two different controls. It is built in
+	 * src/lodgenmanager.cpp and found here by object name, because the rule
+	 * about the row lives ONCE, here, for every bar at once -- three
+	 * setFixedHeight calls at three call sites is how the bars came to
+	 * disagree in the first place.
+	 *
+	 * It is APPENDED, so the row is still whatever the tallest bar needs: a
+	 * 2-tab QTabBar's natural height is about 26 and cannot be the tallest,
+	 * and gate L4 prints the number so a strip that DID grow the row is read
+	 * as a number rather than seen as a taller window.
+	 *
+	 * FALLBACK (CONSTITUTION 10): no LOD dock in this window -- a build with
+	 * the generator absent -- and nothing is appended; every other bar is
+	 * unaffected and the strip, if it appears later, keeps the compact
+	 * default it was built with. */
+	QTabBar * lodPanelSelector =
+		findChild<QTabBar *>( QStringLiteral( "LodPanelModeSelector" ) );
+	if ( lodPanelSelector )
+		wwBarRowBars.append( lodPanelSelector );
+	wwAlignBarRow( wwBarRowBars );
+	if ( leftColumnSelector && wwBarRowHeight() > 0 )
+		/* `this` is the QMainWindow, and the strip needs it: the RIGHT hand
+		 * air is the full air less the dock separator's width, and that style
+		 * metric only answers res/style.qss's 3 px when it is asked WITH a
+		 * widget (lane UI4, measured). */
+		leftColumnSelector->setStyleSheet( wwSegmentedTabBarQss( wwBarRowHeight(), this ) );
+	if ( lodPanelSelector && wwBarRowHeight() > 0 )
+		/* lane WATER8: THE SAME CALL, with the same two arguments, so the two
+		 * strips cannot carry different sheets. Gate L5 compares them byte for
+		 * byte and hashes both into the log, which is the only way a drift
+		 * between two call sites is ever noticed. */
+		lodPanelSelector->setStyleSheet( wwSegmentedTabBarQss( wwBarRowHeight(), this ) );
+	/* The second half of the same complaint: the dock's search row still began
+	 * 4 px below the line the viewport's content begins on, because the file
+	 * browser page's Designer layout carries topMargin 4. Only the top margin
+	 * is the shared grid's business; the page keeps its own left and right. */
+	wwStartContentBelowBar( ui->dockWidgetContents_7 );
 
 	aSanitize->setChecked( settings.value( "File/Auto Sanitize", true ).toBool() );
 
@@ -29526,6 +32691,108 @@ void NifSkope::positionRedoPanel()
 			p->move( graphicsView->mapToGlobal(
 				QPoint( 10, graphicsView->height() - p->height() - 10 ) ) );
 	}
+	positionTransientLine();
+}
+
+
+/*
+ *  THE TRANSIENT MESSAGE LINE -- what the deleted status bar used to say
+ *  (lane UINOTES1, 2026-09-12; the rationale is in nifskope.h above
+ *  showTransientMessage).
+ */
+
+void NifSkope::ensureTransientLine()
+{
+	if ( transientLine )
+		return;
+	// A CHILD widget cannot be used: the viewport is a native window container
+	// and paints over any sibling. Same reason, same shape as the redo panels.
+	auto * f = new QFrame( this, Qt::Tool | Qt::FramelessWindowHint );
+	f->setObjectName( QStringLiteral( "TransientMessageLine" ) );
+	f->setFrameShape( QFrame::StyledPanel );
+	f->setAutoFillBackground( true );
+	f->setAttribute( Qt::WA_ShowWithoutActivating );
+	f->setFocusPolicy( Qt::NoFocus );
+	f->setStyleSheet( QStringLiteral(
+		"QFrame#TransientMessageLine { background: %1; border: 1px solid %2; border-radius: 3px; }"
+		"QLabel { color: %3; background: transparent; }"
+		"QProgressBar { background: transparent; border: none; text-align: center; color: %3; }"
+		"QProgressBar::chunk { background-color: %4; }" )
+		.arg( wwSkinColor( "bgCard" ), wwSkinColor( "borderStrong" ),
+			  wwSkinColor( "text" ), wwSkinColor( "focus" ) ) );
+	auto * lay = new QHBoxLayout( f );
+	lay->setContentsMargins( 10, 4, 10, 4 );
+	lay->setSpacing( 8 );
+	transientLabel = new QLabel( f );
+	transientLabel->setObjectName( QStringLiteral( "TransientMessageText" ) );
+	transientLabel->setTextInteractionFlags( Qt::TextSelectableByMouse );
+	lay->addWidget( transientLabel );
+	if ( progress ) {
+		progress->setParent( f );
+		progress->setMaximumSize( 200, 14 );
+		lay->addWidget( progress );
+	}
+	f->hide();
+	transientLine = f;
+
+	transientTimer = new QTimer( this );
+	transientTimer->setSingleShot( true );
+	connect( transientTimer, &QTimer::timeout, this, &NifSkope::clearTransientMessage );
+}
+
+void NifSkope::positionTransientLine()
+{
+	if ( !transientLine || !graphicsView || !transientLine->isVisible() )
+		return;
+	transientLine->adjustSize();
+	// stack above whichever redo panel is up, rather than under it
+	int lift = 0;
+	for ( QFrame * p : { gizmoRedoPanel, operatorRedoPanel, boxRedoPanel, operatorExRedoPanel } ) {
+		if ( p && p->isVisible() )
+			lift = std::max( lift, p->height() + 6 );
+	}
+	const int h = transientLine->height();
+	transientLine->move( graphicsView->mapToGlobal(
+		QPoint( 10, std::max( 0, graphicsView->height() - h - 10 - lift ) ) ) );
+}
+
+void NifSkope::showTransientMessage( const QString & text, int ms )
+{
+	if ( text.trimmed().isEmpty() ) {
+		clearTransientMessage();
+		return;
+	}
+	ensureTransientLine();
+	transientLabel->setText( text );
+	// the line never grows past the viewport; long sentences elide at the end
+	if ( graphicsView )
+		transientLabel->setMaximumWidth( std::max( 160, graphicsView->width() - 240 ) );
+	transientLine->adjustSize();
+	transientLine->show();
+	positionTransientLine();
+	if ( ms > 0 )
+		transientTimer->start( ms );
+	else
+		transientTimer->stop();
+}
+
+void NifSkope::clearTransientMessage()
+{
+	if ( !transientLine )
+		return;
+	transientTimer->stop();
+	transientLabel->clear();
+	// the progress bar keeps the line up while a load is running
+	if ( progress && progress->isVisible() )
+		return;
+	transientLine->hide();
+}
+
+QString NifSkope::transientMessage() const
+{
+	if ( !transientLine || !transientLine->isVisible() || !transientLabel )
+		return QString();
+	return transientLabel->text();
 }
 
 void NifSkope::applyShortcutOverrides()
@@ -29612,6 +32879,41 @@ bool NifSkope::eventFilter( QObject * o, QEvent * e )
 		QWidget * eventWidget = qobject_cast<QWidget *>( o );
 		const bool belongsHere = o == this || o == ogl || o == graphicsView
 			|| ( eventWidget && isAncestorOf( eventWidget ) );
+
+		/* A DROPPED .hkx IS AN ANIMATION, NOT A DOCUMENT (lane HKX3).
+		 *
+		 * bungo, 2026-09-10: "So either win exporer pick or drag and drop".
+		 * .hkx is deliberately NOT one of NifSkope::fileExtensions() -- it is
+		 * not a thing this program opens as a file -- so the loop above never
+		 * collects it and the drop was ignored with no feedback at all. It
+		 * goes to the same loader the two Load buttons use, onto the model
+		 * that is already open, and the loader's sentence (the summary, or
+		 * the refusal when nothing is open to animate) goes to the status bar
+		 * as well as to the Animation Manager's own line.
+		 */
+		QStringList hkxUrls;
+		if ( drop->mimeData() && drop->mimeData()->hasUrls() ) {
+			for ( const QUrl & url : drop->mimeData()->urls() ) {
+				if ( url.isLocalFile() )
+					hkxUrls.append( url.toLocalFile() );
+			}
+		}
+		const QStringList hkxDropped = WwHkxAnimHub::animationFilesIn( hkxUrls );
+		if ( belongsHere && !hkxDropped.isEmpty() ) {
+			drop->setDropAction( Qt::CopyAction );
+			drop->accept();
+			if ( e->type() == QEvent::Drop ) {
+				// Queued for the same reason the .nif route is: never run a
+				// dialog or a scene rebuild while Qt is unwinding the
+				// platform drag.
+				QTimer::singleShot( 0, this, [this, hkxDropped]() {
+					const QString said = WwHkxAnimHub::instance()->loadFiles(
+						ogl, hkxDropped, true );
+					showTransientMessage( said, 15000 );
+				} );
+			}
+			return true;
+		}
 		if ( belongsHere && !nifFiles.isEmpty() ) {
 			drop->setDropAction( Qt::CopyAction );
 			drop->accept();
@@ -30564,8 +33866,8 @@ void NifSkope::buildBlockListMenuExtras( SpellBook & contextBook, const QModelIn
 			{ "BSShaderTextureSet",        "MatTexManagerDock",    QT_TR_NOOP( "Material Manager" ) },
 			{ "NiSkinInstance",            "RiggingManagerDock",   QT_TR_NOOP( "Rigging Manager" ) },
 			{ "BSSkin::Instance",          "RiggingManagerDock",   QT_TR_NOOP( "Rigging Manager" ) },
-			{ "NiControllerManager",       "TimelineDock",         QT_TR_NOOP( "Animation" ) },
-			{ "NiControllerSequence",      "TimelineDock",         QT_TR_NOOP( "Animation" ) },
+			{ "NiControllerManager",       "AnimWorkspaceDock",    QT_TR_NOOP( "Animation" ) },
+			{ "NiControllerSequence",      "AnimWorkspaceDock",    QT_TR_NOOP( "Animation" ) },
 		};
 		const QModelIndex block = nif->getBlockIndex( bn );
 		for ( const DockFor & d : dockFor ) {
@@ -31031,6 +34333,120 @@ void NifSkope::on_aSelectFont_triggered()
 	setViewFont( fnt );
 	QSettings settings;
 	settings.setValue( "UI/View Font", fnt );
+}
+
+/* ---------------------------------------------------------------------------
+ * THE WORKSPACE SWITCH (lane CELLWORK1, 2026-09-19)
+ *
+ * One door. The Workspaces menu, the `.wwcell` open path, the three viewport
+ * paint modes, the harness and the gate all arrive here, so a workspace cannot
+ * be entered halfway by a route that skips part of the switch.
+ *
+ * THE WAY BACK IS THE BYTES.
+ * A workspace that hides the NIF editor column takes `saveState(0x074)` on the
+ * way in and replays it on the way out. Not a re-derived approximation of the
+ * layout -- the bytes Qt itself wrote. That is why the gate can assert that the
+ * layout is byte-identical after a round trip: the claim and the mechanism are
+ * the same object. When the way back is to the very workspace the snapshot was
+ * taken in, NOTHING is re-docked on top of the restore, because addDockWidget()
+ * re-docks and would change the bytes the round trip promises. Going somewhere
+ * ELSE from a hiding workspace restores first and then applies that workspace
+ * normally -- correct, and honestly not byte-identical to anything, because no
+ * snapshot of that destination was ever taken.
+ * --------------------------------------------------------------------------- */
+void NifSkope::setWorkspace( int index )
+{
+	if ( workspaceDefs.isEmpty() )
+		return;
+	index = std::clamp( index, 0, int( workspaceDefs.size() ) - 1 );
+	const WorkspaceDef def = workspaceDefs.at( index );
+
+	bool restoredExact = false;
+	if ( def.hideNifDocks ) {
+		if ( !workspaceLayoutSaved ) {
+			workspaceLayoutBefore = saveState( 0x074 );
+			workspaceLayoutSaved = true;
+			workspaceBeforeCell = workspaceIndex;
+		}
+	} else if ( workspaceLayoutSaved ) {
+		restoreState( workspaceLayoutBefore, 0x074 );
+		restoredExact = ( index == workspaceBeforeCell );
+		workspaceLayoutSaved = false;
+		workspaceLayoutBefore.clear();
+	}
+
+	if ( restoredExact ) {
+		/* The restored bytes ARE the layout, including which manager dock was
+		 * up. The only thing they cannot answer for is a dock that must not
+		 * come back with them, so those are hidden explicitly -- hiding an
+		 * already-hidden dock changes no state and no bytes. */
+		for ( const WorkspaceDef & d : workspaceDefs ) {
+			if ( !d.hideNifDocks )
+				continue;
+			if ( d.dock )
+				d.dock->hide();
+			for ( QDockWidget * c : d.companions )
+				if ( c )
+					c->hide();
+		}
+	} else {
+		for ( const WorkspaceDef & d : workspaceDefs ) {
+			if ( d.dock )
+				d.dock->hide();
+			for ( QDockWidget * c : d.companions )
+				if ( c )
+					c->hide();
+		}
+		if ( def.dock ) {
+			def.dock->setFloating( false );
+			addDockWidget( def.area, def.dock );
+			def.dock->show();
+			def.dock->raise();
+		}
+		for ( QDockWidget * c : def.companions ) {
+			if ( !c )
+				continue;
+			c->setFloating( false );
+			c->show();
+		}
+	}
+
+	/* The NIF-only editor column. A cell has no block list, no block details and
+	 * no header; leaving them up is three panels that can never fill. */
+	if ( def.hideNifDocks && dLeft )
+		dLeft->hide();
+
+	/* CELL PICKING FOLLOWS THE CELL WORKSPACE, AND ONLY THE CELL WORKSPACE.
+	 * Its master ships off and keeps its menu row (bungo's standing rule); what
+	 * happens here is not a second master but the workspace doing what a
+	 * workspace does -- while you are in it, clicking the viewport picks a
+	 * reference. The state it found is put back on the way out, so a person who
+	 * had it on stays on and a person who had it off goes back to off. */
+	if ( index == wsCellIndex ) {
+		if ( !cellPickBeforeWorkspaceValid ) {
+			cellPickBeforeWorkspace = cellPickEnabled();
+			cellPickBeforeWorkspaceValid = true;
+		}
+		cellPickSetEnabled( true );
+	} else if ( cellPickBeforeWorkspaceValid ) {
+		cellPickSetEnabled( cellPickBeforeWorkspace );
+		cellPickBeforeWorkspaceValid = false;
+	}
+
+	workspaceIndex = index;
+	if ( index < workspaceActions.size() && workspaceActions.at( index ) ) {
+		QSignalBlocker blocker( workspaceActions.at( index ) );
+		workspaceActions.at( index )->setChecked( true );
+	}
+	QSettings().setValue( QStringLiteral( "UI/Workspace" ), index );
+}
+
+QStringList NifSkope::workspaceNamesInOrder() const
+{
+	QStringList names;
+	for ( QAction * a : workspaceActions )
+		names.append( a ? a->text() : QString() );
+	return names;
 }
 
 void NifSkope::on_aWindow_triggered()

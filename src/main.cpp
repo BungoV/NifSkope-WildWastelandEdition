@@ -34,6 +34,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "nifcli.h"
 #include "nifskope.h"
 #include "version.h"
+#include "harnesswindow.h"
 #include "data/nifvalue.h"
 #include "model/nifmodel.h"
 #include "model/kfmmodel.h"
@@ -98,7 +99,12 @@ int main( int argc, char * argv[] )
 	if ( auto a = qobject_cast<QApplication *>(app.data()) ) {
 		a->setOrganizationName( "NifTools" );
 		a->setOrganizationDomain( "niftools.org" );
-		a->setApplicationName( "NifSkope " + NifSkopeVersion::rawToMajMin( NIFSKOPE_VERSION ) );
+		/* WW_SETTINGS_SCOPE gives a harness run its own settings key, so a
+		 * gate can PLANT window geometry without borrowing the user's and
+		 * without having to restore it afterwards (lane HARNESSWIN1,
+		 * 2026-09-19). Empty in an ordinary session. */
+		a->setApplicationName( "NifSkope " + NifSkopeVersion::rawToMajMin( NIFSKOPE_VERSION )
+			+ wwHarnessSettingsSuffix() );
 		a->setApplicationVersion( NIFSKOPE_VERSION );
 		/* The display name carries the edition; applicationName deliberately
 		 * does not. applicationName is the QSettings key ("NifSkope 2.0"), so

@@ -1,0 +1,11 @@
+# PBR route debug view (lane PBRR1, docs/NIFSKOPE_PBR_RENDERER.md R1 "debug overlay").
+#
+# Tints every FO4 lighting- and effect-shader shape by the route its .pbrm
+# resolved through (swap / nifx / direct / sibling / fo76 / stem / legacy), lit
+# by N.L so the shape still reads. A data view, not a shading mode.
+#
+# No conditions: Renderer::setupProgram selects it by name while the View menu's
+# "PBR Route View" (or the WW_PBRM_ROUTE_VIEW=1 pin) is on, the same way
+# pbrm_default.prog is chosen. An empty condition list never matches the scan.
+
+shaders fo4_default.vert pbr_route.frag

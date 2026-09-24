@@ -1,0 +1,4 @@
+# Lookdev sky billboards (lane PBRWX1): the sun disc, the sun glare, the moon and
+# its shadow disc. Never enabled on models: selected by name from gl/lookdevstage.cpp.
+
+shaders lookdev_bill.vert lookdev_bill.frag

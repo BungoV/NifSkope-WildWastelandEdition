@@ -36,9 +36,13 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "message.h"
 #include "nifskope.h"
+#include "cellclick.h"		// lane CELLVIEW2: one call, in mouseReleaseEvent
 #include "gl/controllers.h"
+#include "gl/lookdevstage.h"
 #include "gl/glparticles.h"
 #include "gl/renderer.h"
+#include "impostorchunk.h"
+#include "impostorpreviewtest.h"
 #include "gl/glshape.h"
 #include "gl/gltex.h"
 #include "model/nifmodel.h"
@@ -48,6 +52,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "shortcutregistry.h"
 #include "wwskin.h"
 #include "spells/animationsetup.h"
+#include "skeletontools.h"	// skeletonAnalyse: the Skeleton Manager's own classes
 #include "ui/settingsdialog.h"
 #include "ui/widgets/fileselect.h"
 #include "fp32vec4.hpp"
@@ -1565,11 +1570,27 @@ void GLView::refreshPoseBones()
  */
 void GLView::refreshPoseBoneSize()
 {
-	if ( !scene || !model || poseBones.size() < 2 )
-		return;
+	const float s = characteristicBoneSize( poseBones );
+	if ( s > 0.0f )
+		poseBoneSize = s;
+}
+
+/*! The law itself, against an arbitrary drawn set.
+ *
+ * Extracted from refreshPoseBoneSize() so the Overlays armature sizes its bones
+ * by exactly the same rule as the Pose Mode / Skeleton Manager one. Two copies
+ * of this would be two armatures that look different on the same rig, which is
+ * the one thing bungo's ruling asks not to happen ("basically the same view as
+ * in the skeleton manager"). Returns -1 when there is nothing to measure, so
+ * the caller keeps whatever size it had rather than collapsing to a default.
+ */
+float GLView::characteristicBoneSize( const QVector<int> & drawn ) const
+{
+	if ( !scene || !model || drawn.size() < 2 )
+		return -1.0f;
 	QVector<Vector3> pos;
-	pos.reserve( poseBones.size() );
-	for ( int b : poseBones )
+	pos.reserve( drawn.size() );
+	for ( int b : drawn )
 		if ( Node * n = scene->getNode( model, model->getBlockIndex( b ) ) )
 			pos.append( n->worldTrans().translation );
 	QVector<float> nn;
@@ -1584,13 +1605,18 @@ void GLView::refreshPoseBoneSize()
 		if ( best > 0 )
 			nn.append( best );
 	}
-	if ( !nn.isEmpty() ) {
-		std::sort( nn.begin(), nn.end() );
-		poseBoneSize = qMax( 0.5f, nn.at( nn.size() / 2 ) * 0.6f );
-	}
+	if ( nn.isEmpty() )
+		return -1.0f;
+	std::sort( nn.begin(), nn.end() );
+	return qMax( 0.5f, nn.at( nn.size() / 2 ) * 0.6f );
 }
 
 Vector3 GLView::poseBoneTail( int boneBlock ) const
+{
+	return boneTailIn( boneBlock, poseBones, poseBoneSize * 2.0f );
+}
+
+Vector3 GLView::boneTailIn( int boneBlock, const QVector<int> & drawn, float cap ) const
 {
 	// The bone is drawn as a short shape from its head toward its tail, with the
 	// length CAPPED to the characteristic bone size so a bone parented to a
@@ -1600,12 +1626,11 @@ Vector3 GLView::poseBoneTail( int boneBlock ) const
 	if ( !n )
 		return Vector3();
 	const Vector3 head = n->worldTrans().translation;
-	const float cap = poseBoneSize * 2.0f;
 
 	Vector3 sum;
 	int count = 0;
 	for ( int c : model->getChildLinks( boneBlock ) ) {
-		if ( !poseBones.contains( c ) )
+		if ( !drawn.contains( c ) )
 			continue;
 		if ( Node * cn = scene->getNode( model, model->getBlockIndex( c ) ) ) {
 			sum += cn->worldTrans().translation;
@@ -2002,13 +2027,19 @@ void GLView::drawPoseWeights()
  * way down from the head, with four edges fanning back to the head and four
  * converging on the tail. Because the wide end is at the head and it tapers to a
  * point at the tail, the bone's DIRECTION is visible at a glance — which a plain
- * head-to-tail line cannot show. Blender's own proportions: the collar sits at
- * ~15% of the length and its radius is ~10%.
+ * head-to-tail line cannot show.
+ *
+ * \a ringAt is the collar's position along the bone, as a fraction of its
+ * length. 0.15 is what both views drew before lane SKEL2 and is what the `Wire`
+ * display keeps, byte for byte; 0.10 is Blender's own, and bungo's reference
+ * picture (Blender 4.5.3, a default bone in Object Mode) shows the ring "about a
+ * tenth of the length from the head", so the solid octahedron uses that.
  *
  * Drawn as 12 line segments rather than solid geometry, so it works through the
- * existing streaming line path and needs no new shader or render state.
+ * existing streaming line path and needs no new shader or render state. The
+ * SOLID facets are armatureOctahedronFaces() below, which is a different pass.
  */
-void GLView::drawOctahedralBone( const Vector3 & head, const Vector3 & tail )
+void GLView::drawOctahedralBone( const Vector3 & head, const Vector3 & tail, float ringAt )
 {
 	const Vector3 axis = tail - head;
 	const float len = axis.length();
@@ -2026,7 +2057,7 @@ void GLView::drawOctahedralBone( const Vector3 & head, const Vector3 & tail )
 	Vector3 y = Vector3::crossproduct( dir, x ).normalize();
 
 	const float r = len * 0.10f;
-	const Vector3 collar = head + dir * ( len * 0.15f );
+	const Vector3 collar = head + dir * ( len * qBound( 0.01f, ringAt, 0.9f ) );
 	const Vector3 p[4] = { collar + x * r, collar + y * r, collar - x * r, collar - y * r };
 
 	for ( int i = 0; i < 4; i++ ) {
@@ -2036,6 +2067,305 @@ void GLView::drawOctahedralBone( const Vector3 & head, const Vector3 & tail )
 	}
 }
 
+/*! The SOLID octahedron of bungo's reference picture: eight flat-lit facets.
+ *
+ * His words, 2026-09-11: "what about the bone shape? Shouldn't it be something
+ * like in Blender?", over a screenshot of Blender 4.5.3's default armature bone
+ * in Object Mode — a solid-shaded octahedron whose four faces each take a
+ * different light, which is what makes the twist of a bone readable and what a
+ * wireframe of the same shape cannot show.
+ *
+ * Two decisions worth stating, because both are measurable rather than taste:
+ *
+ *  - BACK FACES ARE DROPPED HERE, on the CPU, by the sign of the facet normal in
+ *    camera space. The armature draws with the depth test OFF (it is a diagram
+ *    read through the mesh), so the GPU cannot resolve which facet is in front
+ *    and the far side of each bone would blend over the near side. Four facets
+ *    survive per bone, which is exactly what Blender shows;
+ *  - the light is FIXED IN CAMERA SPACE, not in the world. A world light makes
+ *    the same bone change shade as the user orbits, which reads as the bone
+ *    changing colour rather than the camera moving.
+ *
+ * Appends into a shared triangle soup with per-vertex colours so the whole
+ * armature is ONE draw call (`selection.prog` reads attribute 1 as the vertex
+ * colour when `vertexColorOverride` is zero, which is what passing a colour
+ * array to Scene::drawTriangles does).
+ */
+void GLView::armatureOctahedronFaces( const Vector3 & head, const Vector3 & tail, float ringAt,
+	FloatVector4 base, QVector<Vector3> & tri, QVector<FloatVector4> & col ) const
+{
+	const Vector3 axis = tail - head;
+	const float len = axis.length();
+	if ( len < 1.0e-5f )
+		return;
+	const Vector3 dir = Vector3( axis ).normalize();
+	Vector3 up( 0.0f, 0.0f, 1.0f );
+	if ( fabsf( dir[2] ) > 0.9f )
+		up = Vector3( 1.0f, 0.0f, 0.0f );
+	Vector3 x = Vector3::crossproduct( dir, up ).normalize();
+	Vector3 y = Vector3::crossproduct( dir, x ).normalize();
+
+	const float r = len * 0.10f;
+	const Vector3 collar = head + dir * ( len * qBound( 0.01f, ringAt, 0.9f ) );
+	const Vector3 p[4] = { collar + x * r, collar + y * r, collar - x * r, collar - y * r };
+
+	const Transform vt = viewTransform();
+	// Camera space: the eye looks down -Z, so a facet faces us when its normal
+	// has a POSITIVE z there. The light sits up and to the left of the eye.
+	const Vector3 lightCam = Vector3( 0.35f, 0.45f, 0.82f ).normalize();
+
+	auto face = [&]( const Vector3 & a, const Vector3 & b, const Vector3 & c ) {
+		Vector3 n = Vector3::crossproduct( b - a, c - a );
+		if ( n.length() < 1.0e-9f )
+			return;
+		n.normalize();
+		/* Point the normal OUTWARD without trusting the winding.
+		 *
+		 * A cross product only gives an outward normal if the three points are
+		 * wound the right way round, and getting that wrong here does not look
+		 * wrong -- it drops every facet and the bone silently draws as a
+		 * wireframe. The octahedron's own axis settles it instead: the outward
+		 * direction at a facet is the one that leads AWAY from the head->tail
+		 * line, which is true whichever way the triangle was listed.
+		 */
+		const Vector3 cen = ( a + b + c ) / 3.0f;
+		const Vector3 outward = cen - ( head + dir * Vector3::dotproduct( cen - head, dir ) );
+		if ( outward.length() > 1.0e-9f && Vector3::dotproduct( n, outward ) < 0.0f )
+			n = -n;
+		Vector3 nc = vt.rotation * n;
+		if ( nc[2] <= 0.0f )
+			return;						// facing away from the eye: drop it
+		const float lambert = qMax( 0.0f, Vector3::dotproduct( nc, lightCam ) );
+		const float shade = 0.42f + 0.58f * lambert;
+		const FloatVector4 c4( base[0] * shade, base[1] * shade, base[2] * shade, base[3] );
+		tri.append( a ); col.append( c4 );
+		tri.append( b ); col.append( c4 );
+		tri.append( c ); col.append( c4 );
+	};
+
+	for ( int i = 0; i < 4; i++ ) {
+		const Vector3 & q0 = p[i];
+		const Vector3 & q1 = p[( i + 1 ) & 3];
+		face( head, q0, q1 );		// the four facets back to the head ball
+		face( q0, tail, q1 );		// the four facets tapering to the tail
+	}
+}
+
+/*! THE ONE ARMATURE RENDERER (lane SKEL2, bungo 2026-09-11).
+ *
+ * His words: "shouldn't we improve both views (that will now be shared)?".
+ * Before this lane there were two routines drawing the same rig --
+ * drawPoseSkeleton() for Pose Mode and the Skeleton Manager, and
+ * drawSkeletonOverlay() for the Overlays tick -- with two colour laws, two
+ * shape rules and two sets of widths. They now both build a list of
+ * ArmatureBone and hand it here, which is CONSTITUTION rule 10 taken literally:
+ * what is shared lives in the shared code, and a feature owns only its own
+ * selection and gating.
+ *
+ * The passes are in the order the old overlay drew them -- every BODY, then
+ * every STUB, then the joint balls -- because the armature draws blended with
+ * no depth test, so the order decides which line wins a crossing pixel, and the
+ * `Wire` display has to reproduce the old picture.
+ */
+void GLView::drawArmature( const QVector<ArmatureBone> & bones, const ArmatureStyle & style )
+{
+	if ( !scene || bones.isEmpty() )
+		return;
+
+	const bool xray = style.xray;
+	if ( xray )
+		glDisable( GL_DEPTH_TEST );
+	glDepthMask( GL_FALSE );
+	scene->loadModelViewMatrix( viewTransform() );
+	const float dpr = float( devicePixelRatioF() );
+
+	/* THE COLOUR LAW, once, for both callers.
+	 *
+	 * skeletonKindColor() is the single palette function the Skeleton Manager's
+	 * rows also call, so a bone and its row cannot be two different colours.
+	 * bungo, verbatim: "Just keep the color of the bones blue".
+	 */
+	auto colourOf = [&]( const ArmatureBone & b, float alpha ) {
+		const QColor c = skeletonKindColor( b.kind,
+			b.active ? 2 : ( b.selected ? 1 : ( b.hovered ? 3 : 0 ) ) );
+		float f = 1.0f;
+		if ( style.depthFade && !b.active && !b.selected && !b.hovered )
+			f = 0.45f + 0.55f * qBound( 0.0f, b.fade, 1.0f );
+		if ( b.pinned && !b.active && !b.selected )
+			f *= 0.70f;				// a locked bone reads as held, not as chosen
+		return FloatVector4( float( c.redF() ) * f, float( c.greenF() ) * f,
+							 float( c.blueF() ) * f, alpha );
+	};
+
+	// ---- pass 1: the solid facets, all of them in ONE draw ----------------
+	if ( style.display == ArmOctahedral ) {
+		QVector<Vector3> tri;
+		QVector<FloatVector4> col;
+		tri.reserve( bones.size() * 24 );
+		col.reserve( bones.size() * 24 );
+		for ( const ArmatureBone & b : bones ) {
+			if ( !b.body )
+				continue;
+			armatureOctahedronFaces( b.head, b.tail, 0.10f, colourOf( b, 0.88f ), tri, col );
+		}
+		if ( !tri.isEmpty() )
+			scene->drawTriangles( tri.constData(), size_t( tri.size() ), col.constData(), true );
+	}
+
+	// ---- pass 2: the edges (and the whole shape in Stick / Wire) ----------
+	// Bodies first, then stubs: the old overlay's order exactly.
+	for ( int phase = 0; phase < 2; phase++ ) {
+		for ( const ArmatureBone & b : bones ) {
+			if ( !b.body || ( b.stub ? 0 : 1 ) != phase )
+				continue;
+			// 1.55 keeps Pose Mode's active bone at the 2.8 px it has always been
+			// (1.8 * 1.55 = 2.79) without a second width in the style.
+			scene->setGLLineWidth( ( b.active ? style.lineWidth * 1.55f : style.lineWidth ) * dpr );
+			scene->setGLColor( colourOf( b, 0.95f ) );
+			if ( style.display == ArmStick )
+				scene->drawLine( b.head, b.tail );
+			else if ( style.display == ArmWire )
+				drawOctahedralBone( b.head, b.tail, 0.15f );
+			else
+				drawOctahedralBone( b.head, b.tail, 0.10f );
+		}
+	}
+
+	// ---- pass 3: the balls. Blender draws one at the head (the joint) and a
+	// smaller one at the tail; `Wire` draws only the head, which is what the
+	// old overlay and the old pose armature both did.
+	for ( const ArmatureBone & b : bones ) {
+		if ( !b.ball )
+			continue;
+		scene->setGLColor( colourOf( b, 0.95f ) );
+		const float ps = b.active ? style.pointSize * 1.8f
+			: ( b.hovered ? style.pointSize * 1.4f : style.pointSize );
+		scene->setGLPointSize( ps * dpr );
+		scene->drawPoints( &b.head, 1 );
+	}
+	if ( style.display != ArmWire ) {
+		for ( const ArmatureBone & b : bones ) {
+			if ( !b.body )
+				continue;
+			scene->setGLColor( colourOf( b, 0.95f ) );
+			const float ps = b.active ? style.pointSize * 1.8f
+				: ( b.hovered ? style.pointSize * 1.4f : style.pointSize );
+			scene->setGLPointSize( qMax( 1.0f, ps * 0.55f ) * dpr );
+			scene->drawPoints( &b.tail, 1 );
+		}
+	}
+
+	glDepthMask( GL_TRUE );
+	if ( xray )
+		glEnable( GL_DEPTH_TEST );
+}
+
+void GLView::setArmatureDisplay( int mode )
+{
+	const int m = qBound( 0, mode, int( ArmWire ) );
+	if ( m == armDisplay )
+		return;
+	armDisplay = m;
+	update();
+}
+
+void GLView::setArmatureXray( bool on )
+{
+	if ( on == armXray )
+		return;
+	armXray = on;
+	update();
+}
+
+void GLView::setArmatureNames( int mode )
+{
+	const int m = qBound( 0, mode, 1 );
+	if ( m == armNames )
+		return;
+	armNames = m;
+	update();
+}
+
+void GLView::setSkeletonOverlayHover( int block )
+{
+	if ( block == skelOverlayHover )
+		return;
+	skelOverlayHover = block;
+	emit skeletonOverlayHoverChanged( block );
+	update();
+}
+
+/*! The chip and search text of the Skeleton Manager, mirrored into the overlay.
+ *
+ * bungo, verbatim: "for that bone view toggle, shouldn't it mirror the skeleton
+ * manager view?". The dock pushes its state here at the end of every refresh();
+ * the overlay applies the SAME four predicates to the SAME skeletonAnalyse()
+ * report, so the two lists are equal by construction rather than by agreement.
+ */
+void GLView::setSkeletonOverlayFilter( int chip, const QString & search )
+{
+	const int c = qBound( 0, chip, 3 );
+	if ( c == skelOverlayChip && search == skelOverlaySearch )
+		return;
+	skelOverlayChip = c;
+	skelOverlaySearch = search;
+	skelOverlayDirty = true;
+	if ( skeletonOverlay ) {
+		if ( model && scene )
+			refreshSkeletonOverlay();
+		update();
+	}
+}
+
+/*! The viewport half of the two-way selection: which overlay bone is here?
+ *
+ * Deliberately NOT poseBoneAt() reached a second way. That one picks over
+ * poseBones, which is built from the skinned shapes by a different rule and is
+ * empty unless Pose Mode or the Skeleton Manager dock is up; this picks over the
+ * list the overlay is actually drawing, under the chip the dock is showing.
+ */
+int GLView::skeletonOverlayBoneAt( const QPointF & pos ) const
+{
+	if ( !skeletonOverlay || !model || !scene || skelOverlayBones.isEmpty() )
+		return -1;
+	const float pickR = 12.0f;
+	float best = pickR * pickR;
+	int bestBone = -1;
+	for ( int b : skelOverlayBones ) {
+		Node * n = scene->findNode( model, model->getBlockIndex( b ) );
+		if ( !n )
+			continue;
+		QPointF hs, ts;
+		if ( !worldToScreen( n->worldTrans().translation, hs ) )
+			continue;
+		float d2 = float( QPointF::dotProduct( pos - hs, pos - hs ) );
+		if ( skelOverlayArm.contains( b )
+			 && worldToScreen( boneTailIn( b, skelOverlayArmList, skelOverlaySize * 2.0f ), ts ) ) {
+			QPointF ab = ts - hs;
+			float len2 = float( QPointF::dotProduct( ab, ab ) );
+			if ( len2 > 1e-3f ) {
+				float t = qBound( 0.0f, float( QPointF::dotProduct( pos - hs, ab ) ) / len2, 1.0f );
+				QPointF proj = hs + ab * t;
+				d2 = qMin( d2, float( QPointF::dotProduct( pos - proj, pos - proj ) ) );
+			}
+		}
+		if ( d2 < best ) {
+			best = d2;
+			bestBone = b;
+		}
+	}
+	return bestBone;
+}
+
+/*! Pose Mode's armature, and the Skeleton Manager's.
+ *
+ * Everything that is PER-VIEW stays here -- the relationship lines, the depth
+ * ramp, the pins, the hover, the selection -- and nothing that is per-view
+ * draws a bone. The drawing itself is drawArmature(), which the Overlays
+ * armature also calls, so the two cannot look different on the same rig
+ * (bungo 2026-09-11: "shouldn't we improve both views (that will now be
+ * shared)?").
+ */
 void GLView::drawPoseSkeleton()
 {
 	// Also runs for the Skeleton Manager, which wants the same armature drawing
@@ -2043,15 +2373,13 @@ void GLView::drawPoseSkeleton()
 	if ( ( !poseMode && !skeletonView ) || !model || !scene || poseBones.isEmpty() )
 		return;
 
-	glDisable( GL_DEPTH_TEST );
-	glDepthMask( GL_FALSE );
-	scene->loadModelViewMatrix( viewTransform() );
-	const float dpr = float( devicePixelRatioF() );
-
 	// Pass 1: thin dashed relationship lines to each bone's parent (Blender's
 	// bone relationship lines) — dim, so they read as structure, not clutter.
 	if ( poseShowRelations ) {
-		scene->setGLLineWidth( 1.0f * dpr );
+		glDisable( GL_DEPTH_TEST );
+		glDepthMask( GL_FALSE );
+		scene->loadModelViewMatrix( viewTransform() );
+		scene->setGLLineWidth( 1.0f * float( devicePixelRatioF() ) );
 		scene->setGLColor( 0.5f, 0.5f, 0.55f, 0.45f );
 		for ( int b : poseBones ) {
 			int p = model->getParent( b );
@@ -2062,6 +2390,8 @@ void GLView::drawPoseSkeleton()
 			if ( n && pn )
 				scene->drawDashLine( pn->worldTrans().translation, n->worldTrans().translation, 8 );
 		}
+		glDepthMask( GL_TRUE );
+		glEnable( GL_DEPTH_TEST );
 	}
 
 	// Depth range across the drawn bones, so nearer bones can be drawn brighter
@@ -2081,45 +2411,554 @@ void GLView::drawPoseSkeleton()
 	}
 	const float dRange = qMax( 1e-3f, dMax - dMin );
 
-	// Pass 2: the bones themselves — a short capped shape head->tail + a joint dot.
+	/* The bone list, in the terms the shared renderer understands.
+	 *
+	 * The KIND is the Skeleton Manager's class, exactly as the Overlays armature
+	 * reads it, so a deforming bone is the same blue in both views. Pose Mode
+	 * builds poseBones from the skinned shapes rather than from
+	 * skeletonAnalyse(), so a block it draws may have no class recorded; a
+	 * missing class falls back to `deforming`, which is what every bone in
+	 * poseBones is by that list's own construction.
+	 */
+	QVector<ArmatureBone> list;
+	list.reserve( poseBones.size() );
 	for ( int b : poseBones ) {
 		Node * n = scene->getNode( model, model->getBlockIndex( b ) );
 		if ( !n )
 			continue;
-		const Vector3 head = n->worldTrans().translation;
-		const Vector3 tail = poseBoneTail( b );
-
-		const bool isActive = ( b == objActive || objSelection.contains( b ) );
-		const bool isHover = ( b == poseHoverBone );
-		const bool isPinned = posePinned.contains( b );
-		// near = 1.0, far = 0.35; selected/hover ignore depth so they stay clear
-		const float t = ( dMax - depth.value( b, dMax ) ) / dRange;   // 1 near, 0 far
-		const float f = 0.35f + 0.65f * t;
-		if ( isActive )
-			scene->setGLColor( 1.0f, 0.616f, 0.0f, 1.0f );          // #FF9D00
-		else if ( isPinned )
-			scene->setGLColor( 0.85f * f, 0.85f * f, 0.88f * f, 0.4f + 0.6f * t );  // locked = pale grey
-		else if ( isHover )
-			scene->setGLColor( 1.0f, 0.85f, 0.4f, 1.0f );           // warm hover
-		else
-			scene->setGLColor( 0.55f * f, 0.72f * f, 1.0f * f, 0.35f + 0.6f * t );
-
-		scene->setGLLineWidth( ( isActive ? 2.8f : 1.8f ) * dpr );
-		// Octahedral in the Skeleton Manager (reading the rig is the whole point
-		// there); a plain stick in Pose Mode, where bones are drag targets and a
-		// dense octahedral cluster gets in the way of picking.
-		if ( skeletonView )
-			drawOctahedralBone( head, tail );
-		else
-			scene->drawLine( head, tail );
-
-		// joint dot at the head — the main click target; nearer dots a touch bigger
-		scene->setGLPointSize( ( isActive ? 9.0f : ( isHover ? 7.0f : ( 4.0f + 2.0f * t ) ) ) * dpr );
-		scene->drawPoints( &head, 1 );
+		ArmatureBone ab;
+		ab.block = b;
+		ab.head = n->worldTrans().translation;
+		ab.tail = poseBoneTail( b );
+		ab.kind = skelOverlayClass.value( b, int( SkelDeforming ) );
+		ab.body = true;
+		ab.stub = false;
+		ab.active = ( b == objActive );
+		ab.selected = objSelection.contains( b );
+		ab.hovered = ( b == poseHoverBone );
+		ab.pinned = posePinned.contains( b );
+		ab.fade = ( dMax - depth.value( b, dMax ) ) / dRange;   // 1 near, 0 far
+		list.append( ab );
 	}
 
-	glDepthMask( GL_TRUE );
-	glEnable( GL_DEPTH_TEST );
+	ArmatureStyle style;
+	style.display = armDisplay;
+	style.xray = armXray;
+	style.lineWidth = 1.8f;
+	style.pointSize = 5.0f;
+	style.depthFade = true;
+	drawArmature( list, style );
+}
+
+/* ===================================================================
+ * Overlays > Show Skeleton   (lane SKELOVERLAY, bungo 2026-09-10)
+ *
+ * His words: "Add to the overlays: View skeleton, shows you the bones,
+ * basically the same view as in the skeleton manager".
+ *
+ * THREE THINGS MAKE THE TWO VIEWS AGREE, and none of them is a coincidence:
+ *
+ *  1. the bone LIST is skeletonAnalyse()'s -- the same call the Skeleton
+ *     Manager dock builds its tree from, and the same call the `skeleton` CLI
+ *     prints. Not poseBones, which is built from the skinned shapes' Bones
+ *     arrays by a different rule and reaches a different set;
+ *  2. the CLASSES are the dock's own three predicates (SkeletonBoneInfo:
+ *     verts > 0 = deforming, isUnusedBone() = listed but unused,
+ *     isNotABone() = no skin references it), so the dock's Deforming and
+ *     Unused filter counts are this overlay's colour counts;
+ *  3. the SHAPE is drawOctahedralBone() and the joint dot, which is what
+ *     drawPoseSkeleton() draws for the dock.
+ *
+ * WHAT IS DIFFERENT from drawPoseSkeleton(), deliberately:
+ *
+ *  - no depth ramp. The pose armature dims far bones so a dense cluster is
+ *    pickable; nothing here is pickable, and a colour that also encodes depth
+ *    cannot also encode a class;
+ *  - a FIXED pixel width, so the line weight is the same at every zoom;
+ *  - no selection / hover / pin colours. This is a read-only overlay.
+ *
+ * BLENDER, the reference (CONSTITUTION rule 10). Blender's Armature "In Front"
+ * plus the Viewport Overlays popover is the interaction being copied: one tick
+ * draws the whole armature through the mesh, at a constant screen weight, and
+ * it follows the animation. DIVERGENCES, stated:
+ *
+ *  - Blender puts Names, Axes, Shapes, Group Colors and Relationship Lines in
+ *    the ARMATURE data tab as five more checkboxes. This is one tick. Bone
+ *    names ride on the Overlays menu's existing "Show Nodes" entry instead of
+ *    a sixth row of its own -- the same toggle that labels the scene's nodes
+ *    now labels the bones (bungo's END-menu rule: rows only when a setting is
+ *    really added);
+ *  - Blender colours bones by BONE GROUP (an authored property). A NIF has no
+ *    bone groups, so the colour carries the only classification this file
+ *    actually has, which is the Skeleton Manager's;
+ *  - Blender draws the bone from head to tail as authored. A NIF bone has no
+ *    tail, so a parent's body is drawn to each child it has (one segment per
+ *    parent -> child pair, which is what the ruling asks for) and a leaf gets
+ *    a capped stub down its own +Y -- the same rule poseBoneTail() uses.
+ * =================================================================== */
+
+void GLView::setSkeletonOverlay( bool on )
+{
+	if ( skeletonOverlay == on )
+		return;
+	skeletonOverlay = on;
+	if ( on ) {
+		// Always rebuild on the way in: the flag is restored from QSettings
+		// during construction, before any file is open, so "it was already on"
+		// is not evidence that the list belongs to the model now loaded. The
+		// Skeleton Manager's own setSkeletonView() carries the same note, and
+		// for the same measured reason.
+		skelOverlayDirty = true;
+		skelOverlayCensus = SkeletonOverlayCensus();
+		/* ...and build it NOW as well (lane SKELFIX). The rebuild is otherwise
+		 * lazy, inside the next draw, so `skeletonOverlayRule()` -- the sentence
+		 * the Overlays entry puts in its tooltip -- would be empty at the exact
+		 * moment the entry is ticked. The dirty flag stays set, so anything that
+		 * renumbers blocks still forces the rebuild it always did.
+		 */
+		if ( model && scene )
+			refreshSkeletonOverlay();
+		skelOverlayDirty = true;
+	} else {
+		skelOverlayBones.clear();
+		skelOverlayClass.clear();
+		skelOverlayDrawnAt.clear();
+		skelOverlayDrawnSegs.clear();
+		skelOverlayCensus = SkeletonOverlayCensus();
+		skelOverlayHover = -1;			// lane SKEL2
+		skelOverlayFiltered = 0;
+	}
+	update();
+}
+
+void GLView::refreshSkeletonOverlay()
+{
+	skelOverlayDirty = false;
+	skelOverlayBones.clear();
+	skelOverlayClass.clear();
+	skelOverlayMissing = 0;
+	skelOverlayFiltered = 0;
+	if ( !model || !scene )
+		return;
+
+	const SkeletonReport report = skeletonAnalyse( model );
+
+	/* THE OVERLAY LISTS EXACTLY WHAT THE SKELETON MANAGER LISTS (lane SKEL2).
+	 *
+	 * bungo, 2026-09-11, verbatim: "for that bone view toggle, shouldn't it
+	 * mirror the skeleton manager view?".
+	 *
+	 * Not "the same numbers, arrived at the same way" -- the SAME FUNCTION.
+	 * skeletonListedBlocks() is the one place the chip's four predicates, the
+	 * search text and the dock's Isolate set are applied, and the dock's tree is
+	 * built from its answer too. Two copies of that rule would be two views that
+	 * agree until somebody edits one of them (CONSTITUTION rule 10).
+	 */
+	const QList<int> listed = skeletonListedBlocks( report, skelOverlayChip,
+		skelOverlaySearch, skeletonIsolated );
+	const QSet<int> listedSet( listed.begin(), listed.end() );
+
+	for ( const SkeletonBoneInfo & b : report.bones ) {
+		if ( b.block < 0 )
+			continue;
+		if ( !scene->findNode( model, model->getBlockIndex( b.block ) ) ) {
+			// The analysis reads the FILE; the overlay draws the SCENE. A block
+			// the scene never built has no world transform to draw at, and
+			// silently dropping it would make the overlay's count quietly
+			// smaller than the dock's. Counted instead, and the harness holds
+			// the sum against the dock.
+			skelOverlayMissing++;
+			continue;
+		}
+		// The class is recorded for EVERY node the file has, not only the drawn
+		// ones, because Pose Mode's own bone list is built by a different rule
+		// and reads its colours out of this table.
+		skelOverlayClass.insert( b.block, b.isNotABone() ? int( SkelNotABone )
+			: ( b.isUnusedBone() ? int( SkelUnused ) : int( SkelDeforming ) ) );
+		if ( !listedSet.contains( b.block ) ) {
+			skelOverlayFiltered++;		// the chip or the search removed this row
+			continue;
+		}
+		skelOverlayBones.append( b.block );
+	}
+	std::sort( skelOverlayBones.begin(), skelOverlayBones.end() );
+
+	/* THE ARMATURE -- which pairs may be joined by a BODY (lane SKELFIX).
+	 *
+	 * The first cut of this overlay drew a body between every parent and child
+	 * in the list, and at frame 46 of a running clip that produced segments
+	 * 300.5 units long fanning out of the character: the clip carries the
+	 * travel on the COM track (487 units), while `Root`, `Camera`, `CamTarget`,
+	 * `CamTargetParent`, `Camera Control` and the eight `AnimObject*` nodes
+	 * stay at the world origin, and each of them was being joined to a relative
+	 * that had moved. `CharacterBumper` and `EyeLeftDummy001` did the same from
+	 * the file's own root. Measured, all of them, in
+	 * scratchpad/skelfix_20260910/segments_frame46.tsv.
+	 *
+	 * THE RULE, and it is a rule about the FILE, never a list of names: a body
+	 * is drawn only between two ARMATURE nodes, where the armature is
+	 *
+	 *   every node a skin lists (the Skeleton Manager's Bones filter -- its
+	 *   Deforming and Unused classes), CLOSED UPWARDS through the parent chain,
+	 *   and then CUT at the deepest node that still has every one of those
+	 *   bones at or beneath it.
+	 *
+	 * The upward closure is what keeps the rig intact: FO4 body meshes weight
+	 * the `*_skin` helper bones, so `Pelvis`, `LLeg_Thigh`, `LLeg_Calf`,
+	 * `LArm_UpperArm`, `COM` and the whole limb chain are NOT in the Bones
+	 * filter at all -- taking the filter alone would have cut the skeleton into
+	 * 60 disconnected pieces of the 129 it draws (40 with a track test on top).
+	 * The cut at the common root is what removes `Root` and the file root above
+	 * it, and with them the last long segment (`Root` -> `COM`, 300.5 units).
+	 * Camera, weapon, anim-object, bumper and eye-dummy nodes are outside the
+	 * armature because no skin bone is beneath them, not because of their names.
+	 *
+	 * A NODE IS NEVER HIDDEN by this: every row in the list still gets a joint
+	 * marker, so the overlay's census still equals the Skeleton Manager's, which
+	 * is the harness's gate (a).
+	 *
+	 * The closure is computed over the WHOLE file, not over the listed rows
+	 * (lane SKEL2). Under the Bones chip the listed rows are the 93 skin bones
+	 * and none of the `*_skin` helpers' parents is among them; closing over the
+	 * listing alone would cut the rig into 93 pieces, which is the very defect
+	 * SKELFIX measured. What the chip decides is which nodes are DRAWN; the
+	 * armature stays a fact about the file.
+	 */
+	skelOverlayArm.clear();
+	skelOverlayRule.clear();
+	{
+		QVector<int> boneRows;
+		QSet<int> fileNodes;
+		for ( const SkeletonBoneInfo & b : report.bones ) {
+			if ( b.block < 0 )
+				continue;
+			fileNodes.insert( b.block );
+			if ( !b.isNotABone() )
+				boneRows.append( b.block );
+		}
+		const QSet<int> shown( skelOverlayBones.begin(), skelOverlayBones.end() );
+
+		if ( boneRows.isEmpty() ) {
+			/* FALLBACK, named in words (CONSTITUTION rule 10). A file with no
+			 * skin at all -- an exported skeleton.nif -- gives the closure
+			 * nothing to close over, and refusing every body there would leave
+			 * a cloud of dots. Every node keeps its body, and the summary SAYS
+			 * that is the arm that served.
+			 */
+			skelOverlayArm = shown;
+			skelOverlayRule = tr( "No skin in this file, so there is no bone class to "
+				"close over: every one of the %1 drawn nodes is drawn as a bone." ).arg( shown.count() );
+		} else {
+			// how many of the bones sit at or beneath each block
+			QHash<int, int> below;
+			for ( int b : boneRows ) {
+				int x = b;
+				for ( int guard = 0; x >= 0 && guard <= fileNodes.count() + 2; guard++ ) {
+					below[x] = below.value( x, 0 ) + 1;
+					x = model->getParent( x );
+				}
+			}
+			// the DEEPEST block that still has all of them beneath it
+			int common = -1, commonDepth = -1;
+			for ( auto it = below.constBegin(); it != below.constEnd(); ++it ) {
+				if ( it.value() != boneRows.count() )
+					continue;
+				int d = 0, x = model->getParent( it.key() );
+				for ( ; x >= 0 && d <= fileNodes.count() + 2; d++ )
+					x = model->getParent( x );
+				if ( d > commonDepth ) {
+					commonDepth = d;
+					common = it.key();
+				}
+			}
+			for ( int b : skelOverlayBones ) {
+				/* ONLY A NODE ON SOME BONE'S OWN CHAIN (lane SKELFIX's set,
+				 * restored by lane SKEL2 after its own gate caught the widening).
+				 *
+				 * `below` holds every bone and every ancestor of a bone, and
+				 * nothing else. Testing only "is COM an ancestor of this node"
+				 * also takes in the nodes that hang BENEATH a bone without being
+				 * one -- PipboyBone, WEAPON, WeaponLeft, the AnimObject* nodes --
+				 * and gives each of them a body. Measured: armature 111 -> 120,
+				 * marker-only 19 -> 10, and 782 more pixels covered in the `Wire`
+				 * display, which is what gate S2 (the way back covers the same
+				 * pixels) refused. The set is SKELFIX's again.
+				 */
+				if ( !below.contains( b ) )
+					continue;
+				bool inside = false;
+				int x = b;
+				for ( int guard = 0; x >= 0 && guard <= fileNodes.count() + 2; guard++ ) {
+					if ( x == common ) {
+						inside = true;
+						break;
+					}
+					x = model->getParent( x );
+				}
+				if ( inside )
+					skelOverlayArm.insert( b );
+			}
+			const QString rootName = ( common >= 0 )
+				? model->get<QString>( model->getBlockIndex( common ), "Name" ) : QString();
+			skelOverlayRule = tr( "Bones are drawn between armature nodes only: the %1 node(s) "
+				"a skin lists, plus every node between them, rooted at %2. The other %3 drawn node(s) "
+				"-- camera, anim-object, weapon, attach and root nodes, which no skin bone sits "
+				"beneath -- get a joint marker and no bone.%4" )
+				.arg( boneRows.count() )
+				.arg( rootName.isEmpty() ? tr( "the file root" ) : rootName )
+				.arg( skelOverlayBones.count() - skelOverlayArm.count() )
+				.arg( skelOverlayFiltered > 0
+					? tr( " The Skeleton Manager's filter is hiding %1 more." ).arg( skelOverlayFiltered )
+					: QString() );
+		}
+		skelOverlayArmList.clear();
+		skelOverlayArmList.reserve( skelOverlayArm.count() );
+		for ( int b : skelOverlayBones ) {
+			if ( skelOverlayArm.contains( b ) )
+				skelOverlayArmList.append( b );
+		}
+	}
+
+	const float s = characteristicBoneSize( skelOverlayBones );
+	if ( s > 0.0f )
+		skelOverlaySize = s;
+}
+
+void GLView::drawSkeletonOverlay()
+{
+	if ( !skeletonOverlay || !model || !scene )
+		return;
+	if ( skelOverlayDirty )
+		refreshSkeletonOverlay();
+	if ( skelOverlayBones.isEmpty() )
+		return;
+
+	SkeletonOverlayCensus c;
+	c.draws = skelOverlayCensus.draws + 1;
+	c.missingNodes = skelOverlayMissing;
+	c.filtered = skelOverlayFiltered;
+	skelOverlayDrawnAt.clear();
+	skelOverlayDrawnAt.reserve( skelOverlayBones.size() );
+	skelOverlayDrawnSegs.clear();
+
+	QHash<int, Vector3> head;
+	head.reserve( skelOverlayBones.size() );
+	for ( int b : skelOverlayBones )
+		if ( Node * n = scene->findNode( model, model->getBlockIndex( b ) ) )
+			head.insert( b, n->worldTrans().translation );
+
+	/* THE BODY'S OTHER END is the nearest DRAWN armature ancestor, not simply
+	 * the parent (lane SKEL2).
+	 *
+	 * Under the All chip those are the same node and the picture is the one
+	 * SKELFIX shipped, unchanged. Under Bones, Deforming or a search the chip
+	 * has removed the nodes in between -- FO4 body meshes weight the `*_skin`
+	 * helpers, so a listed bone's parent is very often NOT listed -- and joining
+	 * only listed parents would leave 93 disconnected bones, which is exactly
+	 * the disconnection SKELFIX measured and refused. Reaching to the nearest
+	 * listed ancestor keeps the rig readable while drawing nothing the Skeleton
+	 * Manager is not listing.
+	 */
+	auto drawnAncestor = [&]( int b ) {
+		int x = model->getParent( b );
+		for ( int guard = 0; x >= 0 && guard <= skelOverlayClass.size() + 2; guard++ ) {
+			if ( head.contains( x ) && skelOverlayArm.contains( x ) )
+				return x;
+			x = model->getParent( x );
+		}
+		return -1;
+	};
+
+	// Which ARMATURE bones have a drawn child: a bone with none gets a stub
+	// instead of a body.
+	QSet<int> hasDrawnChild;
+	QHash<int, int> bodyFrom;
+	for ( int b : skelOverlayBones ) {
+		if ( !skelOverlayArm.contains( b ) || !head.contains( b ) )
+			continue;
+		const int p = drawnAncestor( b );
+		if ( p >= 0 ) {
+			bodyFrom.insert( b, p );
+			hasDrawnChild.insert( p );
+		}
+	}
+
+	const float cap = skelOverlaySize * 2.0f;
+	QVector<ArmatureBone> list;
+	list.reserve( skelOverlayBones.size() );
+
+	auto fill = [&]( int b ) {
+		ArmatureBone ab;
+		ab.block = b;
+		ab.kind = qBound( 0, skelOverlayClass.value( b, 2 ), 2 );
+		ab.selected = objSelection.contains( b );
+		ab.active = ( b == objActive );
+		ab.hovered = ( b == skelOverlayHover );
+		return ab;
+	};
+
+	// Bodies first, then stubs, then one joint ball per NODE -- the order the
+	// overlay has always drawn in, which drawArmature() keeps (the armature is
+	// blended with no depth test, so the order decides a crossing pixel).
+	for ( int b : skelOverlayBones ) {
+		if ( !bodyFrom.contains( b ) )
+			continue;
+		ArmatureBone ab = fill( b );
+		ab.head = head.value( bodyFrom.value( b ) );
+		ab.tail = head.value( b );
+		ab.body = true;
+		ab.stub = false;
+		ab.ball = false;
+		list.append( ab );
+		skelOverlayDrawnSegs.append( qMakePair( ab.head, ab.tail ) );
+		c.segments++;
+	}
+	for ( int b : skelOverlayBones ) {
+		if ( !head.contains( b ) )
+			continue;
+		if ( !skelOverlayArm.contains( b ) || hasDrawnChild.contains( b ) )
+			continue;
+		// The stub points at the mean of the bone's DRAWN children, so a bone
+		// whose only child is outside the armature does not aim at it.
+		ArmatureBone ab = fill( b );
+		ab.head = head.value( b );
+		ab.tail = boneTailIn( b, skelOverlayArmList, cap );
+		ab.body = true;
+		ab.stub = true;
+		ab.ball = false;
+		list.append( ab );
+		skelOverlayDrawnSegs.append( qMakePair( ab.head, ab.tail ) );
+		c.stubs++;
+	}
+	// EVERY listed node gets its joint ball, armature or not: a node outside the
+	// armature is still listed and still visible, it is simply never joined to
+	// anything (lane SKELFIX's rule, unchanged).
+	for ( int b : skelOverlayBones ) {
+		if ( !head.contains( b ) )
+			continue;
+		ArmatureBone ab = fill( b );
+		ab.head = head.value( b );
+		ab.tail = ab.head;
+		ab.body = false;
+		ab.ball = true;
+		list.append( ab );
+		skelOverlayDrawnAt.insert( b, ab.head );
+		c.nodes++;
+		if ( ab.kind == SkelDeforming )
+			c.deforming++;
+		else if ( ab.kind == SkelUnused )
+			c.unused++;
+		else
+			c.notABone++;
+		if ( !skelOverlayArm.contains( b ) )
+			c.skipped++;		// a joint marker, and nothing else
+	}
+
+	ArmatureStyle style;
+	style.display = armDisplay;
+	style.xray = armXray;
+	style.lineWidth = 1.6f;		// a FIXED pixel width: the same weight at every zoom
+	style.pointSize = 5.0f;
+	// `Wire` is the exact way back, and the old overlay had no depth ramp --
+	// "a colour that also encodes depth cannot also encode a class".
+	style.depthFade = ( armDisplay != ArmWire );
+	drawArmature( list, style );
+
+	c.bones = c.deforming + c.unused;
+	c.names = skelOverlayCensus.names;	// written by the QPainter pass below
+	skelOverlayCensus = c;
+
+	/* WW_SKELOVERLAY_DUMP=<file>: every drawn node, with the screen position
+	 * THIS draw put it at (lane SKEL2, brief item 5).
+	 *
+	 * Written here rather than in a harness because the question owed to bungo
+	 * -- which two marker-only nodes are the grey dots above the back at frame
+	 * 46 -- is a question about a PICTURE, and only the frame that produced the
+	 * picture knows its own viewport size and camera. A harness window is a
+	 * different size and would answer about a different projection.
+	 */
+	static const QString dumpPath = qEnvironmentVariable( "WW_SKELOVERLAY_DUMP" );
+	if ( !dumpPath.isEmpty() ) {
+		QFile f( dumpPath );
+		if ( f.open( QIODevice::WriteOnly | QIODevice::Text ) ) {
+			QTextStream ts( &f );
+			ts << "# viewport " << width() << "x" << height()
+				<< "  chip " << skelOverlayChip << "  search '" << skelOverlaySearch
+				<< "'  display " << armDisplay << "  xray " << ( armXray ? 1 : 0 ) << "\n";
+			ts << "block\tname\tkind\tmarkerOnly\tscreenX\tscreenY\tworldX\tworldY\tworldZ\n";
+			for ( const ArmatureBone & ab : list ) {
+				QPointF sp( -1.0, -1.0 );
+				worldToScreen( ab.head, sp );
+				ts << ab.block << "\t"
+					<< model->get<QString>( model->getBlockIndex( ab.block ), "Name" ) << "\t"
+					<< ab.kind << "\t" << ( ab.body ? 0 : 1 ) << "\t"
+					<< QString::number( sp.x(), 'f', 1 ) << "\t"
+					<< QString::number( sp.y(), 'f', 1 ) << "\t"
+					<< QString::number( ab.head[0], 'f', 3 ) << "\t"
+					<< QString::number( ab.head[1], 'f', 3 ) << "\t"
+					<< QString::number( ab.head[2], 'f', 3 ) << "\n";
+			}
+			ts.flush();
+			f.close();
+		}
+	}
+}
+
+/*! Bone names for the Overlays armature.
+ *
+ * bungo's screenshot that started this lane had all 130 node names painted at
+ * once over the model, and his word for it was clutter. So the default is
+ * Blender's: the bone under the cursor and the bones that are selected, and
+ * nothing else. Overlays > Bone Display > Names turns every name on, and the
+ * Overlays menu's existing Show Nodes still does too, so the picture that
+ * shipped is still one tick away.
+ */
+void GLView::paintSkeletonOverlayNames( QPainter & painter )
+{
+	skelOverlayCensus.names = 0;
+	if ( !skeletonOverlay || !model || !scene || skelOverlayDrawnAt.isEmpty() )
+		return;
+
+	const bool all = ( armNames == 1 ) || scene->hasOption( Scene::ShowNodes );
+	QSet<int> want;
+	if ( !all ) {
+		if ( skelOverlayHover >= 0 )
+			want.insert( skelOverlayHover );
+		if ( objActive >= 0 )
+			want.insert( objActive );
+		for ( int s : objSelection )
+			want.insert( s );
+		if ( want.isEmpty() )
+			return;
+	}
+
+	painter.setRenderHint( QPainter::Antialiasing, true );
+	QFont f = painter.font();
+	f.setPointSizeF( 8.0 );
+	painter.setFont( f );
+	int painted = 0;
+	for ( auto it = skelOverlayDrawnAt.constBegin(); it != skelOverlayDrawnAt.constEnd(); ++it ) {
+		if ( !all && !want.contains( it.key() ) )
+			continue;
+		const QString name = model->get<QString>( model->getBlockIndex( it.key() ), "Name" );
+		if ( name.isEmpty() )
+			continue;
+		QPointF sp;
+		if ( !worldToScreen( it.value(), sp ) )
+			continue;
+		const QPointF at = sp + QPointF( 6, 3 );
+		painter.setPen( QColor( 0, 0, 0, 200 ) );
+		painter.drawText( at + QPointF( 1, 1 ), name );
+		// The SAME palette function the bone itself and the dock's row use.
+		const int cls = qBound( 0, skelOverlayClass.value( it.key(), 2 ), 2 );
+		const int state = ( it.key() == objActive ) ? 2
+			: ( objSelection.contains( it.key() ) ? 1
+			: ( it.key() == skelOverlayHover ? 3 : 0 ) );
+		painter.setPen( skeletonKindColor( cls, state ) );
+		painter.drawText( at, name );
+		painted++;
+	}
+	skelOverlayCensus.names = painted;
 }
 
 void GLView::setVertexPaintPreviewColors( int targetBlock, const QVector<Color4> & colors )
@@ -2880,6 +3719,16 @@ void GLView::paintGL()
 		doCenter = false;
 	}
 
+	/* AND THEN THE PIN, because the block above is exactly what used to eat an
+	 * explicit camera. center() does not centre: it sets doCenter and asks for
+	 * a repaint, so a caller that set Pos and Dist and then let one frame run
+	 * had both replaced HERE, by a line it never called. Re-asserting the pin
+	 * every paint also makes it survive a generated .lodl / .btd document,
+	 * which builds its scene and reframes long after the render hook ran.
+	 * Nothing happens without an armed pin (WwCameraPin::active). */
+	if ( wwPin.active )
+		wwApplyCameraPinNow();
+
 	NifSkopeOpenGLContext *	cx = scene->renderer;
 
 	// Transform the scene (viewTransform() must stay identical to this)
@@ -2952,6 +3801,22 @@ void GLView::paintGL()
 		mat_diff = FloatVector4( 0.0f );
 	}
 
+	/* Lookdev (lane PBRR2B, docs s6.2): the weather's sun (vanilla tent arc,
+	 * NAM0 Sunlight, linear) and ambient replace the viewport light. Only in the
+	 * Lookdev scene mode, so every other mode is untouched. */
+	if ( wwLookdevActive() && scene->hasOption(Scene::DoLighting) && !scene->hasVisMode(Scene::VisSilhouette) ) {
+		float	ld[3];
+		float	dif[4] = { mat_diff[0], mat_diff[1], mat_diff[2], mat_diff[3] };
+		float	amb[4] = { mat_amb[0], mat_amb[1], mat_amb[2], mat_amb[3] };
+		wwLookdevLight( ld, dif, amb );
+		lightDir = FloatVector4( ld[0], ld[1], ld[2], 0.0f );
+		globalUniforms.lightSourcePosition[0] = globalUniforms.viewMatrix[0] * ld[0];
+		globalUniforms.lightSourcePosition[0] += globalUniforms.viewMatrix[1] * ld[1];
+		globalUniforms.lightSourcePosition[0] += globalUniforms.viewMatrix[2] * ld[2];
+		mat_diff = FloatVector4( dif[0], dif[1], dif[2], dif[3] );
+		mat_amb = FloatVector4( amb[0], amb[1], amb[2], amb[3] );
+	}
+
 	globalUniforms.lightSourceAmbient = mat_amb;
 	globalUniforms.lightSourceDiffuse[0] = mat_diff;
 	globalUniforms.glowScaleSRGB = float( std::sqrt( globalUniforms.glowScale ) );
@@ -2965,12 +3830,16 @@ void GLView::paintGL()
 		glEnable( GL_MULTISAMPLE );
 
 	if ( perspectiveMode ) {
-		bool	colorBufCleared = scene->renderer->drawSkyBox( scene );
+		// Lookdev: the lookdev cube background replaces the (FO76+) skybox
+		bool	colorBufCleared = wwLookdevActive() ? wwLookdevDrawBackground( scene ) : scene->renderer->drawSkyBox( scene );
 		if ( clearNeeded ) {
 			glClear( colorBufCleared ? GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT
 										: GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT );
 		}
 	}
+	// Lookdev: the ground plane, before the model so the model depth-tests against it
+	if ( wwLookdevActive() )
+		wwLookdevDrawGround( scene );
 
 	if ( drawLightPos ) {
 		glEnable( GL_DEPTH_TEST );
@@ -3074,9 +3943,18 @@ void GLView::paintGL()
 	const bool collisionOnly = Scene::collisionOnlySetting
 		&& scene->hasOption( Scene::ShowCollision );
 	if ( workspaceDrawScenes.isEmpty() || collisionOnly ) {
-		scene->draw();
-		for ( Scene * ws : std::as_const( workspaceDrawScenes ) )
-			ws->draw();
+		// lane IMPOSTORSHOW 2026-09-19: the octahedral impostor card, when one
+		// is armed. Inert in every ordinary session -- see impostorpreviewtest.h.
+		wwImpostorPreviewDraw( scene );
+		// ... and the cards a native LOD chunk's manifest places, when the
+		// person has switched that master on. Inert otherwise: it returns 0
+		// without touching GL state.
+		ImpostorChunk::draw( scene, ImpostorDraw::Options() );
+		if ( !wwImpostorPreviewSuppressScene() ) {
+			scene->draw();
+			for ( Scene * ws : std::as_const( workspaceDrawScenes ) )
+				ws->draw();
+		}
 	} else {
 		NodeList secondPass;
 		scene->collectShapes( secondPass );
@@ -4365,6 +5243,11 @@ void GLView::paintGL()
 		drawPoseSkeleton();
 	}
 
+	// Overlays > Show Skeleton. AFTER the pose armature deliberately: when both
+	// are on the overlay's class colours are what should be read, and it is the
+	// overlay whose census the harness reads back.
+	drawSkeletonOverlay();
+
 	// Blender-style origin dots + parent relationship lines for the selection
 	if ( model && showOrigins && ( !objSelection.isEmpty() || ( editMode && !editShapeBlocks.isEmpty() ) ) ) {
 		const QSet<int> & selN = editMode ? editShapeBlocks : objSelection;
@@ -4568,6 +5451,7 @@ void GLView::paintGL()
 			if ( poseHoverBone >= 0 )
 				label( poseHoverBone, true );   // always, and under the cursor
 		}
+		paintSkeletonOverlayNames( painter );
 		if ( model && showCursor )
 			drawCursorOverlay( painter );
 		if ( scene->hasOption( Scene::ShowAxes ) )
@@ -5289,6 +6173,33 @@ void GLView::frameSelected()
 			}
 		}
 	}
+	/* A BONE IS NOT A SHAPE (lane SKEL2).
+	 *
+	 * objSelection can hold bone NODES -- a click in Pose Mode, or on the
+	 * Overlays armature, puts one there -- and scene->shapes has nothing with
+	 * that id, so Frame Selected fell through to center() and framed the whole
+	 * model. Double-clicking a row in the Skeleton Manager is supposed to frame
+	 * THAT BONE, so the same selection has to answer for nodes as well.
+	 */
+	if ( !have && !editMode && !objSelection.isEmpty() && scene ) {
+		const float cap = ( skeletonOverlay ? skelOverlaySize : poseBoneSize ) * 2.0f;
+		const QVector<int> & drawnSet = skelOverlayArmList.isEmpty() ? poseBones : skelOverlayArmList;
+		for ( int b : objSelection ) {
+			Node * bn = scene->findNode( model, model->getBlockIndex( b ) );
+			if ( !bn )
+				continue;
+			grow( bn->worldTrans().translation );
+			grow( boneTailIn( b, drawnSet, cap ) );
+		}
+		if ( have ) {
+			// A single bone is a point or a very short segment; pad it so the
+			// camera does not end up inside the rig.
+			const Vector3 l2 = lo, h2 = hi;
+			const Vector3 pad( cap, cap, cap );
+			grow( l2 - pad );
+			grow( h2 + pad );
+		}
+	}
 	if ( !have ) {
 		center();
 		return;
@@ -5457,6 +6368,243 @@ void GLView::setZoom( float z )
 	Zoom = std::min< float >( std::max< float >( z, ZOOM_MIN ), ZOOM_MAX );
 
 	update();
+}
+
+
+/* ---------------------------------------------------------------------------
+ *  THE PINNED CAMERA (WW_RENDER_CENTER / _DIST / _VIEW / _FOV / _ORTHO)
+ *
+ *  The design note, and the measurement that forced it, is on
+ *  GLView::WwCameraPin in glview.h. In one line: center() only QUEUES the
+ *  auto-fit, so every explicit camera set by the render hook was overwritten
+ *  by the next paintGL -- which is why WW_RENDER_CENTER produced
+ *  byte-identical pictures and WW_RENDER_DIST produced an inverse-SQUARE
+ *  scale instead of an inverse one.
+ * ------------------------------------------------------------------------- */
+
+GLView::WwCameraPin GLView::wwCameraPinFromEnvironment()
+{
+	WwCameraPin	pin;
+	QStringList	arms;
+
+	const QString ctr = qEnvironmentVariable( "WW_RENDER_CENTER" );
+	if ( !ctr.isEmpty() ) {
+		const QStringList parts = ctr.split( QChar( ',' ) );
+		if ( parts.size() == 3 ) {
+			bool okx = false, oky = false, okz = false;
+			const float x = parts.at( 0 ).trimmed().toFloat( &okx );
+			const float y = parts.at( 1 ).trimmed().toFloat( &oky );
+			const float z = parts.at( 2 ).trimmed().toFloat( &okz );
+			if ( okx && oky && okz ) {
+				pin.center = Vector3( x, y, z );
+				pin.haveCenter = true;
+				arms << QStringLiteral( "center" );
+			}
+		}
+		if ( !pin.haveCenter )
+			arms << QStringLiteral( "refused-WW_RENDER_CENTER-not-x,y,z" );
+	}
+
+	/* WW_RENDER_DIST is the EYE's distance to the look-at point, in world
+	 * units. It used to mean the orthographic half-height, a meaning that
+	 * never once took effect (see the header), so nothing can have relied
+	 * on it. */
+	const QString dst = qEnvironmentVariable( "WW_RENDER_DIST" );
+	if ( !dst.isEmpty() ) {
+		bool ok = false;
+		const float d = dst.toFloat( &ok );
+		if ( ok && d > 0.0f ) {
+			pin.dist = d;
+			pin.haveDist = true;
+			arms << QStringLiteral( "dist" );
+		} else {
+			arms << QStringLiteral( "refused-WW_RENDER_DIST-not-positive" );
+		}
+	}
+
+	const QString fv = qEnvironmentVariable( "WW_RENDER_FOV" );
+	if ( !fv.isEmpty() ) {
+		bool ok = false;
+		const float f = fv.toFloat( &ok );
+		if ( ok && f > 0.5f && f < 179.0f ) {
+			pin.fov = f;
+			pin.haveFov = true;
+			arms << QStringLiteral( "fov" );
+		} else {
+			arms << QStringLiteral( "refused-WW_RENDER_FOV-outside-0.5..179" );
+		}
+	}
+
+	/* WW_RENDER_ORTHO=<half-width in world units>: the metric arm. The scale
+	 * is exact and independent of the eye distance, so an object of E units
+	 * spans E * viewportWidth / ( 2 * half-width ) pixels whatever
+	 * WW_RENDER_DIST says. */
+	const QString ort = qEnvironmentVariable( "WW_RENDER_ORTHO" );
+	if ( !ort.isEmpty() ) {
+		bool ok = false;
+		const float w = ort.toFloat( &ok );
+		if ( ok && w > 0.0f ) {
+			pin.orthoHalfWidth = w;
+			pin.haveOrtho = true;
+			arms << QStringLiteral( "ortho" );
+		} else {
+			arms << QStringLiteral( "refused-WW_RENDER_ORTHO-not-positive" );
+		}
+	}
+	if ( pin.haveOrtho && pin.haveFov ) {
+		pin.haveFov = false;
+		arms << QStringLiteral( "refused-WW_RENDER_FOV-ortho-has-no-fov" );
+	}
+
+	pin.active = pin.haveCenter || pin.haveDist || pin.haveFov || pin.haveOrtho;
+
+	/* The view joins the pin only when something else already pinned the
+	 * camera. A WW_RENDER_VIEW-only capture stays on the old auto-fit path, so
+	 * every picture taken that way keeps its framing. */
+	if ( pin.active ) {
+		if ( qEnvironmentVariableIsSet( "WW_RENDER_VIEW" ) ) {
+			int v = qEnvironmentVariableIntValue( "WW_RENDER_VIEW" );
+			if ( v < 0 ) {
+				arms << QStringLiteral( "view-kept" );
+			} else if ( v == int( ViewWalk ) ) {
+				// ViewWalk drops the eye offset in viewTransform(), so a
+				// distance could not mean anything there.
+				arms << QStringLiteral( "refused-WW_RENDER_VIEW-walk" );
+			} else {
+				if ( v == 0 || v > int( ViewUser ) )
+					v = int( ViewFront );
+				pin.view = ViewState( v );
+				pin.haveView = true;
+				arms << QStringLiteral( "view" );
+			}
+		} else {
+			pin.view = ViewFront;
+			pin.haveView = true;
+			arms << QStringLiteral( "view-default-front" );
+		}
+	}
+
+	pin.arm = arms.isEmpty() ? QStringLiteral( "none" ) : arms.join( QChar( '/' ) );
+	return pin;
+}
+
+void GLView::wwApplyCameraPinNow()
+{
+	if ( !wwPin.active )
+		return;
+
+	// Whatever asked for a recentre does not get one while a pin is armed.
+	doCenter = false;
+
+	if ( wwPin.haveView ) {
+		// setOrientation() cannot be used here: it returns early when the
+		// requested state is already the current one, which is how the old
+		// pin came to work on ViewUser and nowhere else.
+		const int i = int( wwPin.view ) - int( ViewTop );
+		if ( i >= 0 && i <= 5 )
+			Rot = viewRotations[i];
+		else if ( wwPin.view == ViewUser )
+			Rot = wwBlenderStartupRotation;
+		view = wwPin.view;
+	}
+
+	if ( wwPin.haveCenter )
+		Pos = -wwPin.center;
+
+	const double asp = ( aspect > 1.0e-6 ) ? aspect : 1.0;
+
+	if ( wwPin.haveOrtho ) {
+		perspectiveMode = false;
+		const double halfH = double( wwPin.orthoHalfWidth ) / asp;
+		/* In an orthographic projection the eye distance changes nothing but
+		 * the clip planes, so Dist carries it and Zoom carries the scale:
+		 * glProjection() uses Dist / Zoom as the half-height. An unset
+		 * WW_RENDER_DIST parks the eye four half-heights back. */
+		const double eye = wwPin.haveDist ? double( wwPin.dist ) : ( 4.0 * halfH );
+		Dist = float( eye * 0.5 );
+		Zoom = ( halfH > 1.0e-9 ) ? ( double( Dist ) / halfH ) : 1.0;
+	} else {
+		perspectiveMode = true;
+		Zoom = 1.0;
+		if ( wwPin.haveFov )
+			cfg.fov = wwPin.fov;
+		if ( wwPin.haveDist )
+			Dist = wwPin.dist * 0.5f;	// viewTransform() puts the eye at Dist * 2
+	}
+}
+
+void GLView::wwApplyCameraPin( const GLView::WwCameraPin & pin )
+{
+	wwPin = pin;
+	if ( !wwPin.active )
+		return;
+	wwApplyCameraPinNow();
+	update();
+}
+
+void GLView::wwClearCameraPin()
+{
+	wwPin = WwCameraPin();
+}
+
+double GLView::wwUnitsPerPixel() const
+{
+	const double vpW = double( std::max( 1, pixelWidth ) );
+	const double asp = ( aspect > 1.0e-6 ) ? aspect : 1.0;
+	double	halfW;
+	if ( isPerspectiveProjection() ) {
+		const double eye = double( Dist ) * 2.0;
+		halfW = std::tan( ( cfg.fov / Zoom ) / 360.0 * M_PI ) * eye * asp;
+	} else {
+		halfW = ( double( Dist ) / Zoom ) * asp;
+	}
+	return ( vpW > 0.0 ) ? ( 2.0 * halfW / vpW ) : 0.0;
+}
+
+QString GLView::wwCameraCensus( const char * stage ) const
+{
+	auto f4 = []( double v ) { return QString::number( v, 'f', 4 ); };
+	const bool persp = isPerspectiveProjection();
+	const double eye = double( Dist ) * 2.0;
+	const double asp = ( aspect > 1.0e-6 ) ? aspect : 1.0;
+	const double halfH = persp ? ( std::tan( ( cfg.fov / Zoom ) / 360.0 * M_PI ) * eye )
+							   : ( double( Dist ) / Zoom );
+	const Vector3 lookAt = -Pos;
+	QString s = QString::fromLatin1( stage );
+	s += QStringLiteral( " arm=" ) + ( wwPin.active ? wwPin.arm : QStringLiteral( "unpinned" ) );
+	s += QStringLiteral( " view=" ) + QString::number( int( view ) );
+	s += QStringLiteral( " rot=" ) + f4( Rot[0] ) + QLatin1Char( ',' ) + f4( Rot[1] )
+		+ QLatin1Char( ',' ) + f4( Rot[2] );
+	s += QStringLiteral( " lookat=" ) + f4( lookAt[0] ) + QLatin1Char( ',' ) + f4( lookAt[1] )
+		+ QLatin1Char( ',' ) + f4( lookAt[2] );
+	s += QStringLiteral( " eye=" ) + f4( eye );
+	s += QStringLiteral( " dist=" ) + f4( double( Dist ) );
+	s += QStringLiteral( " zoom=" ) + f4( double( Zoom ) );
+	s += QStringLiteral( " persp=" ) + QString::number( persp ? 1 : 0 );
+	s += QStringLiteral( " fov=" ) + f4( double( cfg.fov ) );
+	s += QStringLiteral( " halfW=" ) + f4( halfH * asp );
+	s += QStringLiteral( " halfH=" ) + f4( halfH );
+	s += QStringLiteral( " vp=" ) + QString::number( pixelWidth ) + QLatin1Char( 'x' )
+		+ QString::number( pixelHeight );
+	s += QStringLiteral( " upp=" ) + QString::number( wwUnitsPerPixel(), 'f', 6 );
+	return s;
+}
+
+void GLView::wwLogCameraCensus( const char * stage ) const
+{
+	QString path = qEnvironmentVariable( "WW_CAMERA_CENSUS" );
+	if ( path.isEmpty() )
+		path = QApplication::applicationDirPath() + QStringLiteral( "/ww_camera_pin.log" );
+	// One process, one file: the first record of a run truncates it, so a gate
+	// reads THIS run's camera and never the last one's.
+	static bool	started = false;
+	QFile f( path );
+	if ( !f.open( started ? ( QIODevice::Append | QIODevice::Text )
+						  : ( QIODevice::WriteOnly | QIODevice::Text ) ) )
+		return;
+	started = true;
+	QTextStream ts( &f );
+	ts << wwCameraCensus( stage ) << "\n";
 }
 
 
@@ -21992,6 +23140,13 @@ void GLView::mouseMoveEvent( QMouseEvent * event )
 			update();
 		}
 	}
+	/* The Overlays armature lights the bone under the cursor too, and names it
+	 * (lane SKEL2). Its OWN member, not poseHoverBone: that one also drives the
+	 * weight-influence overlay and Pose Mode's labels, which belong to Pose
+	 * Mode and would start running with the overlay merely ticked.
+	 */
+	if ( skeletonOverlay && !poseMode && !gizmoMode )
+		setSkeletonOverlayHover( skeletonOverlayBoneAt( getQMouseEventPosition( event ) ) );
 
 	// knife rubber band follows the cursor (also while MMB-orbiting)
 	if ( knifeActive ) {
@@ -22601,6 +23756,35 @@ void GLView::mouseReleaseEvent( QMouseEvent * event )
 			return;
 		}
 
+		/* THE OVERLAYS ARMATURE IS CLICKABLE (lane SKEL2).
+		 *
+		 * bungo, 2026-09-11: the bone view is to mirror the Skeleton Manager,
+		 * and "click a bone in the viewport -> its row is current and visible in
+		 * the manager" is half of what mirroring means. `clicked()` is what the
+		 * application's own selection listens to, and the dock's
+		 * currentNifIndexChanged handler is what makes the row current, so this
+		 * adds no second selection path.
+		 *
+		 * It does NOT return when nothing is within the pick radius: a click on
+		 * the mesh then still selects the mesh, so ticking the overlay costs a
+		 * user nothing they had before.
+		 */
+		if ( skeletonOverlay && !poseMode && !editMode && !riggingWeightPaintMode
+			 && !vertexPaintMode && !segmentPaintMode
+			 && event->button() == selectMouseButton() && !isColorPicker ) {
+			const int bone = skeletonOverlayBoneAt( evtPos );
+			if ( bone >= 0 ) {
+				const bool extend = event->modifiers() & ( Qt::ShiftModifier | Qt::ControlModifier );
+				objectSelectClick( bone, extend );
+				scene->currentBlock = model->getBlockIndex( bone );
+				scene->currentIndex = scene->currentBlock;
+				emit poseBonePicked( bone );
+				emit clicked( model->getBlockIndex( bone ) );
+				update();
+				return;
+			}
+		}
+
 		// edit-mode element picking happens here (on a click, not a drag) so
 		// camera orbiting never changes the selection: click = pick,
 		// Ctrl+click = extend/toggle, Shift+click = shortest-path,
@@ -22617,6 +23801,26 @@ void GLView::mouseReleaseEvent( QMouseEvent * event )
 			}
 			update();
 			return;
+		}
+
+		/* THE CELL VIEW'S PICK (lane CELLVIEW2). A `.wwcell` scene WELDS every
+		 * placement of a (base, material) bucket into ONE BSTriShape, so the
+		 * ordinary selection below would hand back a shape holding a hundred
+		 * thousand vertices of unrelated references -- the one selection a
+		 * person clicking in a cell view never wants. cellPickClick does the
+		 * ray test against the placement table (src/cellpick.h), moves the
+		 * highlight and tells the dock. It returns false, and touches nothing,
+		 * whenever its master row is unticked or no cell scene is open, so a
+		 * user who never ticks the row loses nothing they had. */
+		if ( !isColorPicker && event->button() == selectMouseButton() ) {
+			Vector3 cellRayO, cellRayD;
+			mouseRayWorld( QPointF( evtPos ), cellRayO, cellRayD );
+			const float cellO[3] = { cellRayO[0], cellRayO[1], cellRayO[2] };
+			const float cellD[3] = { cellRayD[0], cellRayD[1], cellRayD[2] };
+			if ( cellPickClick( model, cellO, cellD ) ) {
+				update();
+				return;
+			}
 		}
 
 		if ( !isColorPicker && event->button() == selectMouseButton() ) {

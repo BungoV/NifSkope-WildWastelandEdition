@@ -219,6 +219,13 @@ EffectMaterial::EffectMaterial( const QString & name, const NifModel * nif, cons
 	readable = openFile( name, nif, index );
 }
 
+EffectMaterial::EffectMaterial( const QByteArray & data )
+	: Material()
+{
+	isBGEM = true;
+	readable = openData( data );
+}
+
 bool EffectMaterial::readFile( QDataStream & in )
 {
 	Material::readFile( in );

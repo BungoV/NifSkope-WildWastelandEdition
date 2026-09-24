@@ -38,6 +38,9 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/glproperty.h"
 #include "gl/glscene.h"
 #include "gl/gltex.h"
+#include "gl/scenelighting.h"
+#include "gl/lookdevstage.h"
+#include "esmweather.h"
 #include "io/material.h"
 #include "model/nifmodel.h"
 #include "ui/settingsdialog.h"
@@ -45,10 +48,13 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "libfo76utils/src/ddstxt16.hpp"
 #include "glview.h"
 
+#include <limits>
 #include <QCoreApplication>
 #include <QDebug>
 #include <QDir>
 #include <QFile>
+#include <QOpenGLContext>
+#include <QSet>
 #include <QSettings>
 #include <QTextStream>
 #include <chrono>
@@ -101,13 +107,142 @@ void Renderer::updateSettings()
 	TexCache::loadSettings( settings );
 }
 
+/* WW_PROGRAM_CENSUS -- which program actually lights which shape.
+ *
+ * `fo4_default.prog` excludes Shader Type 18 and `sk_msn.prog`'s conditions
+ * look like they match an FO4 .BTR, so which of the two lights the legacy
+ * terrain cannot be settled by reading the condition files: it is decided at
+ * runtime by the scan order in setupProgram below.  This writes the answer
+ * down instead of inferring it -- one line per first-sighted (shape, program)
+ * pair, plus the view-space light direction the lighting arithmetic uses.
+ *
+ * Armed only by an ABSOLUTE path in WW_PROGRAM_CENSUS; it renders nothing and
+ * touches no uniform, so a frame is byte-identical whether it is armed or not.
+ */
+void wwPbrmCensusNoteUploadF0( float f0 );	// src/gl/glproperty.cpp
+
+static NifSkopeOpenGLContext::Program * wwProgramCensus( const NifModel * nif, Shape * mesh,
+	const BSShaderLightingProperty * wwSp, const char * wwKind,
+	int msn, int lodLand, NifSkopeOpenGLContext::Program * program,
+	const FloatVector4 & lightViewDir )
+{
+	/* WW_PBRM_CENSUS (lane PBRR0) rides the same exits: every return of
+	 * setupProgram passes through here with the program it actually bound,
+	 * so the route it prints is the served one. Pick renders (wwKind null) are skipped. */
+	if ( wwPbrmCensusArmed() && mesh && wwKind ) {
+		QString	served( "(none)" );
+		if ( program )
+			served = QString::fromLatin1( program->name.data(), qsizetype( program->name.length() ) );
+		// Read the uploaded pbrF0 back from the program (lane PBRR1): the row's
+		// f0= is what the GPU holds, not what the law says it should be.
+		float	f0 = std::numeric_limits<float>::quiet_NaN();
+		if ( program && served == QLatin1StringView( "pbrm_default.prog" ) ) {
+			const int	l = program->uniLocation( "pbrF0" );
+			if ( l >= 0 ) {
+				GLfloat	v = -1.0f;
+				program->f->glGetUniformfv( program->id, l, &v );
+				f0 = v;
+			}
+		}
+		wwPbrmCensusNoteUploadF0( f0 );
+		wwPbrmCensus( mesh->getName(), wwKind, wwSp, served );
+		wwPbrmCensusNoteUploadF0( std::numeric_limits<float>::quiet_NaN() );
+	}
+
+	static int	armed = -1;
+	static QString	censusPath;
+	if ( armed < 0 ) {
+		QString	p = QString::fromLocal8Bit( qgetenv( "WW_PROGRAM_CENSUS" ) ).trimmed();
+		armed = ( !p.isEmpty() && QDir::isAbsolutePath( p ) ) ? 1 : 0;
+		censusPath = p;
+	}
+	if ( !armed )
+		return program;
+
+	QString	progName( "(none)" );
+	if ( program )
+		progName = QString::fromLatin1( program->name.data(), qsizetype( program->name.length() ) );
+
+	QString	row = QString( "shape=\"%1\" bsver=%2 msn=%3 lodland=%4 prog=%5" )
+		.arg( mesh ? mesh->getName() : QString( "(null)" ) )
+		.arg( nif ? int( nif->getBSVersion() ) : -1 )
+		.arg( msn ).arg( lodLand ).arg( progName );
+
+	static QSet<QString>	seen;
+	if ( seen.contains( row ) )
+		return program;
+	bool	first = seen.isEmpty();
+	seen.insert( row );
+
+	QFile	f( censusPath );
+	if ( f.open( QIODevice::Append | QIODevice::Text ) ) {
+		QTextStream	s( &f );
+		if ( first ) {
+			s << "# WW_PROGRAM_CENSUS  light(view) = "
+			  << lightViewDir[0] << " " << lightViewDir[1] << " " << lightViewDir[2] << "\n";
+		}
+		s << row << "\n";
+	}
+	return program;
+}
+
+/* sRGB tag (lane PBRR2A, 2026-09-24). The PBR program samples an sRGB-tagged
+ * base or emissive texture with the hardware decode SKIPPED
+ * (GL_EXT_texture_sRGB_decode) and decodes it in the shader exactly as it does
+ * a UNORM one, so both tags take one path -- filter, then decode -- and render
+ * byte-identically. Letting the hardware decode the tagged one (decode, then
+ * filter) left up to 3/255 on minified texels: measured, gate srgbtag. The
+ * texture object is shared with the legacy programs, which expect the decode,
+ * so every skip is undone at the start of the next shape's program setup. */
+namespace {
+QVector<QPair<const void *, GLuint>> & wwSkippedDecode()
+{
+	static QVector<QPair<const void *, GLuint>> v;
+	return v;
+}
+
+void wwRestoreSrgbDecode()
+{
+	auto & v = wwSkippedDecode();
+	if ( v.isEmpty() )
+		return;
+	const void * ctx = QOpenGLContext::currentContext();
+	GLint prev = 0;
+	glGetIntegerv( GL_TEXTURE_BINDING_2D, &prev );
+	for ( int i = int( v.size() ) - 1; i >= 0; i-- ) {
+		if ( v[i].first != ctx )
+			continue;
+		if ( glIsTexture( v[i].second ) ) {
+			glBindTexture( GL_TEXTURE_2D, v[i].second );
+			glTexParameteri( GL_TEXTURE_2D, 0x8A48, 0x8A49 );	// TEXTURE_SRGB_DECODE_EXT = DECODE_EXT
+		}
+		v.remove( i );
+	}
+	glBindTexture( GL_TEXTURE_2D, GLuint( prev ) );
+}
+} // namespace
+
 NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program * hint )
 {
+	wwRestoreSrgbDecode();
 	const NifModel *	nif = mesh->scene->nifModel;
+
+	/* Read here, not inside wwProgramCensus: `Shape::bslsp` is protected and
+	 * only a Shape's friends -- Renderer's own members -- may read it. */
+	const int	wwMsn = ( mesh->bslsp
+		? int( mesh->bslsp->hasSF1( ShaderFlags::SLSF1_Model_Space_Normals ) ) : 0 );
+	const int	wwLodLand = ( mesh->bslsp
+		? int( mesh->bslsp->isST( ShaderFlags::ST_WorldMap4 ) ) : 0 );
+	const BSShaderLightingProperty *	wwSp = mesh->bssp;
+	// nullptr during a pick render: the PBRM census skips those.
+	const char *	wwKind = mesh->scene->selecting ? nullptr
+		: ( mesh->bslsp ? "lit" : ( mesh->bsesp ? "effect" : "other" ) );
+
 	if ( nif == nullptr || nif->getBSVersion() == 0 ) {
 		useProgram( "default.prog" );
 		setupFixedFunction( mesh );
-		return currentProgram;
+		return wwProgramCensus( nif, mesh, wwSp, wwKind, wwMsn, wwLodLand, currentProgram,
+		globalUniforms->lightSourcePosition[0] );
 	}
 
 	// PBRM route. Whether a shape uses it depends on a runtime material
@@ -119,6 +254,19 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 	//   PBR            : always — shapes without a PBRM are driven from their
 	//                    legacy material so the whole scene sits under one BRDF
 	//   Legacy and PBR : only where a PBRM resolved; PBR overrides legacy there
+	/* PBR route view (lane PBRR1): a DATA view, chosen by name ahead of every
+	 * shading route, for FO4 lighting and effect shapes only. */
+	if ( pbrmRouteView() && wwSp && wwLodChannelView == 0
+		&& nif->getBSVersion() >= 130 && nif->getBSVersion() < 140 ) {
+		if ( Program * program = useProgram( "pbr_route.prog" ) ) {
+			routeProgramSeen = program;
+			if ( setupProgramRoute( nif, program, mesh ) )
+				return wwProgramCensus( nif, mesh, wwSp, wwKind, wwMsn, wwLodLand, program,
+				globalUniforms->lightSourcePosition[0] );
+			stopProgram();
+		}
+	}
+
 	const int lightingMode = pbrmMode();
 	/* The LOD channel preview is a DATA view, not a shading mode: it draws one
 	 * generated vertex channel flat. Routing it through the PBRM program shows
@@ -132,7 +280,8 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 		if ( Program * program = useProgram( "pbrm_default.prog" ) ) {
 			pbrmProgramSeen = program;
 			if ( setupProgramPBRM( nif, program, mesh ) )
-				return program;
+				return wwProgramCensus( nif, mesh, wwSp, wwKind, wwMsn, wwLodLand, program,
+				globalUniforms->lightSourcePosition[0] );
 			stopProgram();
 		}
 	}
@@ -154,7 +303,8 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 		&& nif->getBSVersion() >= 130 && nif->getBSVersion() <= 139 ) {
 		if ( Program * program = useProgram( "fo4_default.prog" ) ) {
 			if ( setupProgramCE1( nif, program, mesh ) )
-				return program;
+				return wwProgramCensus( nif, mesh, wwSp, wwKind, wwMsn, wwLodLand, program,
+				globalUniforms->lightSourcePosition[0] );
 			stopProgram();
 		}
 	}
@@ -169,7 +319,12 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 	 * terrain channel rendered byte-identical while objects - never PBRM -
 	 * varied. Gating the NEW selection on the preview (above) did not touch
 	 * the cached one; this does. */
-	const bool stalePbrmHint = hint && hint == pbrmProgramSeen && !wantPbrm;
+	/* Reaching this line means neither the PBR route nor the route view served
+	 * the shape THIS frame -- including a PBR binding aborted on a texture
+	 * failure (lane PBRR1), where wantPbrm is still true -- so a hint naming
+	 * either of those programs is stale. */
+	const bool stalePbrmHint = hint
+		&& ( ( pbrmProgramSeen && hint == pbrmProgramSeen ) || ( routeProgramSeen && hint == routeProgramSeen ) );
 	if ( hint && hint->status && !stalePbrmHint ) [[likely]] {
 		Program * program = hint;
 		fn->glUseProgram( program->id );
@@ -182,7 +337,8 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 		else
 			setupStatus = setupProgramFO3( nif, program, mesh );
 		if ( setupStatus )
-			return program;
+			return wwProgramCensus( nif, mesh, wwSp, wwKind, wwMsn, wwLodLand, program,
+				globalUniforms->lightSourcePosition[0] );
 		stopProgram();
 	}
 
@@ -210,14 +366,16 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 			else
 				setupStatus = setupProgramFO3( nif, program, mesh );
 			if ( setupStatus )
-				return program;
+				return wwProgramCensus( nif, mesh, wwSp, wwKind, wwMsn, wwLodLand, program,
+				globalUniforms->lightSourcePosition[0] );
 			stopProgram();
 		}
 	}
 
 	useProgram( "default.prog" );
 	setupFixedFunction( mesh );
-	return currentProgram;
+	return wwProgramCensus( nif, mesh, wwSp, wwKind, wwMsn, wwLodLand, currentProgram,
+		globalUniforms->lightSourcePosition[0] );
 }
 
 static int setFlipbookParameters( const CE2Material::Material & m, FloatVector4 & uvScaleAndOffset )
@@ -701,6 +859,8 @@ bool Renderer::setupProgramPBRM( const NifModel * nif, Program * prog, Shape * m
 		return false;
 
 	int texunit = 0;
+	// the units the base and emissive textures landed on, for the sRGB-tag query
+	int baseUnit = -1, emissiveUnit = -1, specUnit = -1;
 
 	// PBR mode renders EVERYTHING through this program, so a shape with no PBRM
 	// has to be driven from its legacy material instead. Spec/gloss maps onto
@@ -723,49 +883,202 @@ bool Renderer::setupProgramPBRM( const NifModel * nif, Program * prog, Shape * m
 	}
 	const PbrmMaterial & m = lsp->pbrmValid ? lsp->pbrm : derived;
 
-	auto bindPath = [&]( const char * uniform, const QString & path, const QString & fallback ) {
+	lsp->pbrmBindRefusal.clear();
+
+	// `required` = the material SAMPLES this texture (its feature bit is set):
+	// then a failed bind returns false and the caller aborts the whole binding.
+	auto bindPath = [&]( const char * uniform, const QString & path, const QString & fallback, bool required ) -> bool {
 		int uni = prog->uniLocation( uniform );
 		if ( uni < 0 )
-			return;
+			return true;
 		fn->glActiveTexture( GL_TEXTURE0 + GLenum( texunit ) );
 		bool bound = false;
-		if ( !path.isEmpty() )
+		if ( required && !path.isEmpty() )
 			bound = scene->textures->bind( QStringView( path ), nif );
-		if ( !bound )
+		if ( !bound ) {
+			if ( required )
+				return false;
 			scene->textures->bind( QStringView( fallback ), nif );
+		}
 		prog->uni1i_l( uni, texunit );
 		texunit++;
+		return true;
 	};
 
-	// A slot that is off is a legitimate authoring state, so missing textures
-	// fall back to a neutral rather than to magenta.
 	if ( lsp->pbrmValid ) {
-		bindPath( "BaseMap", m.baseColor.lookupPath, white );
-		bindPath( "NormalMap", m.normal.lookupPath, ::default_n );
-		bindPath( "RmaosMap", m.rmaos.lookupPath, white );
-		bindPath( "EmissiveMap", m.emissive.lookupPath, black );
+		/* THE WHOLE-BINDING ABORT (lane PBRR1, docs s2.1 "texture failure"): a
+		 * texture the material samples that fails to load aborts the PBR
+		 * binding -- the shape falls back to legacy and the census names the
+		 * slot and path -- as the game does, rather than rendering the PBRM
+		 * with a neutral stand-in. A slot the material does NOT sample (off, or
+		 * every channel overridden) still binds its neutral: that is a
+		 * legitimate authoring state, not a failure. */
+		struct SlotBind
+		{
+			const char * uniform;
+			const char * slot;
+			const PbrmMaterial::Slot * s;
+			quint32 bit;
+			QString fallback;
+			bool sampled;	//!< the shader reads the texture (for the feature-bit slots: the bit)
+		};
+		// the tint mask (lane PBRR4) has no feature bit: it is sampled when any mask channel reads it
+		const bool tintSampled = m.tintEnabled
+			&& ( m.tintUseTexture[0] || m.tintUseTexture[1] || m.tintUseTexture[2] || m.tintUseTexture[3] );
+		const SlotBind binds[] = {
+			{ "BaseMap", "baseColor", &m.baseColor, PbrmMaterial::BaseColorTexture, white, false },
+			{ "NormalMap", "normal", &m.normal, PbrmMaterial::NormalTexture, ::default_n, false },
+			{ "RmaosMap", "rmaos", &m.rmaos, PbrmMaterial::RmaosTexture, white, false },
+			{ "EmissiveMap", "emissive", &m.emissive, PbrmMaterial::EmissiveTexture, black, false },
+			// v6 (lane PBRR3): the specular colour map -- RGB the sRGB tint (bit 25), A the IOR over
+			// [0, iorMax] (bit 30). Sampled under either bit, so either makes it required.
+			{ "SpecColorMap", "specularColor", &m.specularColor,
+				quint32( PbrmMaterial::SpecularColorTexture | PbrmMaterial::SpecularIorTexture ), white, false },
+			{ "TintMaskMap", "tintMask", &m.tintMask, 0u, black, tintSampled },
+		};
+		for ( const SlotBind & sb : binds ) {
+			const bool required = ( sb.bit ? ( m.features & sb.bit ) != 0 : sb.sampled )
+				&& sb.s->enabled && sb.s->pathValid;
+			const int unitBefore = texunit;
+			const bool bindOk = bindPath( sb.uniform, sb.s->lookupPath, sb.fallback, required );
+			if ( bindOk && texunit > unitBefore ) {
+				if ( sb.bit == PbrmMaterial::BaseColorTexture )
+					baseUnit = unitBefore;
+				else if ( sb.bit == PbrmMaterial::EmissiveTexture )
+					emissiveUnit = unitBefore;
+				else if ( sb.s == &m.specularColor )
+					specUnit = unitBefore;
+			}
+			if ( !bindOk ) {
+				lsp->pbrmBindRefusal = QStringLiteral( "texture load failed: %1 %2; PBR binding aborted" )
+					.arg( QLatin1StringView( sb.slot ), sb.s->lookupPath );
+				return false;
+			}
+		}
 	} else {
 		// Legacy fallback: pull diffuse and normal from the property's own slots
 		// via uniSampler, which is what resolves them for the spec/gloss path.
 		TexClampMode clamp = lsp->clampMode;
 		QString emptyString;
+		baseUnit = texunit;
 		prog->uniSampler( lsp, "BaseMap", 0, texunit, white, clamp, emptyString );
+		if ( texunit == baseUnit )
+			baseUnit = -1;
 		prog->uniSampler( lsp, "NormalMap", 1, texunit, ::default_n, clamp, emptyString );
-		bindPath( "RmaosMap", QString(), white );
-		bindPath( "EmissiveMap", QString(), black );
+		bindPath( "RmaosMap", QString(), white, false );
+		emissiveUnit = texunit;
+		bindPath( "EmissiveMap", QString(), black, false );
+		if ( texunit == emissiveUnit )
+			emissiveUnit = -1;
+		bindPath( "SpecColorMap", QString(), white, false );
+		bindPath( "TintMaskMap", QString(), black, false );
 	}
 
+	/* sRGB tag (lane PBRR2A, docs s5.2 "decoded as sRGB regardless of the DXGI
+	 * tag"): a texture whose DXGI format is _SRGB was created with a GL sRGB
+	 * internal format, so the sampler already returns linear; any other is decoded
+	 * in the shader. Read off the bound texture itself (the GL truth), not guessed
+	 * from the file name. Red "srgbtag": always decode, so the sRGB twin is decoded
+	 * twice. */
+	auto srgbAt = [&]( int unit ) -> bool {
+		if ( unit < 0 || wwR2aRed( "srgbtag" ) )
+			return false;
+		fn->glActiveTexture( GL_TEXTURE0 + GLenum( unit ) );
+		GLint tex = 0;
+		glGetIntegerv( GL_TEXTURE_BINDING_2D, &tex );
+		if ( !tex )
+			return false;
+		GLint f = 0;
+		glGetTexLevelParameteriv( GL_TEXTURE_2D, 0, GL_TEXTURE_INTERNAL_FORMAT, &f );
+		switch ( f ) {
+		case 0x8C40:	// GL_SRGB
+		case 0x8C41:	// GL_SRGB8
+		case 0x8C42:	// GL_SRGB_ALPHA
+		case 0x8C43:	// GL_SRGB8_ALPHA8
+		case 0x8C48:	// GL_COMPRESSED_SRGB
+		case 0x8C49:	// GL_COMPRESSED_SRGB_ALPHA
+		case 0x8C4C:	// GL_COMPRESSED_SRGB_S3TC_DXT1_EXT
+		case 0x8C4D:	// GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT1_EXT
+		case 0x8C4E:	// GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT3_EXT
+		case 0x8C4F:	// GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT
+		case 0x8E8D:	// GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM
+			break;
+		default:
+			return false;
+		}
+		// sRGB-tagged: skip the hardware decode so the shader's decode is the only
+		// one (see wwRestoreSrgbDecode); without the extension the sampler decodes
+		if ( QOpenGLContext * c = QOpenGLContext::currentContext();
+			c && c->hasExtension( QByteArrayLiteral( "GL_EXT_texture_sRGB_decode" ) ) ) {
+			glTexParameteri( GL_TEXTURE_2D, 0x8A48, 0x8A4A );	// TEXTURE_SRGB_DECODE_EXT = SKIP_DECODE_EXT
+			wwSkippedDecode().append( { c, GLuint( tex ) } );
+			return false;
+		}
+		return true;
+	};
+	prog->uni1i( "baseIsSrgbTex", srgbAt( baseUnit ) );
+	prog->uni1i( "emissiveIsSrgbTex", srgbAt( emissiveUnit ) );
+	prog->uni1i( "specIsSrgbTex", srgbAt( specUnit ) );
+
+	/* v6 specular (lane PBRR3, PBRM-v6-Specular.md; FO4CS wave 89 SPECV6 is the runtime twin).
+	 * The shader takes the law apart, because the weight scales the whole dielectric Fresnel
+	 * (OpenPBR: weight 0 = no specular lobe), not only F0:
+	 *   pbrSpecV6     bit 7 is the WEIGHT map (v6), not an F0 map (v4/v5)
+	 *   pbrSpecWeight the weight constant (1 for v4/v5)
+	 *   pbrF0         the untinted F0 of a weight-1 surface: v6 min(IorF0(ior), 1); v4/v5 min(f0, 0.16)
+	 *   pbrSpecTint   the constant tint, sRGB-decoded here (white when the slot is off)
+	 *   pbrIorMax     the IOR map's ceiling (bit 30: ior = A x iorMax)
+	 * so pbrSpecWeight x pbrF0 is pbrmDielectricF0 (the census level) in every case. The red
+	 * law V5 (WW_PBRM_F0_LAW=v5) is uploaded as a v5 reading: weight 1, the scalar as F0. */
+	const bool specV6 = lsp->pbrmValid && m.specularV6 && wwPbrmF0Law() == PbrmF0Law::Auto;
+	const float specWeight = specV6 ? m.specularWeight : 1.0f;
+	const float specF0 = !lsp->pbrmValid ? m.f0
+		: specV6 ? std::min( pbrmIorF0( m.specularIor ), 1.0f ) : pbrmDielectricF0( m, wwPbrmF0Law() );
+	auto srgbDecode = []( float c ) {
+		return c <= 0.04045f ? c / 12.92f : std::pow( ( c + 0.055f ) / 1.055f, 2.4f );
+	};
 	prog->uni1i( "pbrFeatures", int( m.features ) );
+	prog->uni1i( "pbrSpecV6", specV6 );
+	prog->uni1f( "pbrSpecWeight", specWeight );
+	prog->uni3f( "pbrSpecTint", srgbDecode( m.specularTint[0] ), srgbDecode( m.specularTint[1] ),
+		srgbDecode( m.specularTint[2] ) );
+	prog->uni1f( "pbrIorMax", m.specularIorMax );
+	prog->uni1f( "pbrDiffuseRoughness", m.diffuseRoughness );
 
 	prog->uni3f( "pbrBaseColor", m.baseColorRGB[0], m.baseColorRGB[1], m.baseColorRGB[2] );
 	prog->uni1f( "pbrOpacity", m.opacity );
 	prog->uni1f( "pbrRoughness", m.roughness );
 	prog->uni1f( "pbrMetallic", m.metallic );
 	prog->uni1f( "pbrAo", m.ao );
-	prog->uni1f( "pbrF0", m.f0 );
+	prog->uni1f( "pbrF0", specF0 );
 	prog->uni1f( "pbrNormalStrength", m.normalStrength );
 	prog->uni3f( "pbrEmissiveColor", m.emissiveRGB[0], m.emissiveRGB[1], m.emissiveRGB[2] );
 	prog->uni1f( "pbrEmissiveIntensity", m.emissiveIntensity );
+	// lane PBRR4 (docs s3.2 items 4, 7, 9): emission replace semantics, tint masks, composition
+	prog->uni1f( "pbrEmissiveMask", m.emissiveMask );
+	prog->uni1b( "pbrEmissiveMapColor", !m.overrideEmissiveColor );
+	prog->uni1b( "pbrEmissiveMapMask", !m.overrideEmissiveMask );
+	{
+		int useTex = 0;
+		for ( int c = 0; c < 4; c++ )
+			useTex |= ( m.tintUseTexture[c] ? 1 << c : 0 );
+		prog->uni1b( "pbrTintEnabled", m.tintEnabled );
+		prog->uni1i( "pbrTintUseTex", m.tintEnabled ? useTex : 0 );
+		prog->uni4f( "pbrTintMasks", FloatVector4( m.tintMaskConst[0], m.tintMaskConst[1], m.tintMaskConst[2],
+			m.tintMaskConst[3] ) );
+		for ( int c = 0; c < 4; c++ )
+			prog->uni3f_l( prog->uniLocation( "pbrTintColors[%d]", c ), m.tintColor[c][0], m.tintColor[c][1],
+				m.tintColor[c][2] );
+		prog->uni1i( "pbrTintMode", m.tintOverlap );
+	}
+	// -1 = the NIF alpha property: derived (non-.pbrm) shapes, and the red "nocomp"
+	const int r4Red = wwR4RedBits();
+	const int composition = ( lsp->pbrmValid && !( r4Red & 16 ) ) ? std::clamp( m.composition, 0, 7 ) : -1;
+	prog->uni1i( "pbrComposition", composition );
+	prog->uni1f( "pbrGlobalOpacity", m.globalOpacity );
+	prog->uni1f( "pbrAlphaThreshold", m.alphaThreshold );
+	prog->uni1b( "pbrAlphaConst", m.alphaSourceConstant );
+	prog->uni1i( "r4Red", r4Red );
 
 	// Alpha and the UV transform still come from the NIF/BGSM side: how a shape
 	// blends is a property of the geometry's use, not of the PBRM document.
@@ -800,12 +1113,91 @@ bool Renderer::setupProgramPBRM( const NifModel * nif, Program * prog, Shape * m
 	prog->uni1i( "hasCubeMap", hasCubeMap );
 	prog->uni1f( "envReflection", lsp->environmentReflection );
 
+	/* Scene lighting (lane PBRR2A, docs s5.2). Studio binds the SFCubeMapCache
+	 * pair of the ONE Studio cube (the FO4 default outdoor cube until R2b's
+	 * lookdev picks another); Legacy binds the complete grey colour cube on both
+	 * units, because a samplerCube left on unit 0 would share it with BaseMap's
+	 * sampler2D and invalidate the draw. */
+	const int sceneMode = wwSceneMode();
+	bool hasStudioCube = ( sceneMode == WwSceneStudio || sceneMode == WwSceneLookdev );
+	/* Lookdev (lane PBRR2B, docs s6.3 stage-1 cube order): the material's own
+	 * EnvmapTexture first, else the lookdev cube (mipblur_DefaultOutside1 unless
+	 * picked). The irradiance half follows whichever cube the specular half took. */
+	QString ldCube;
+	if ( sceneMode == WwSceneLookdev ) {
+		ldCube = wwLookdevCubePath();
+		const QString & own = lsp->fileName( 4 );
+		if ( lsp->hasEnvironmentMap && !own.isEmpty() ) {
+			fn->glActiveTexture( GL_TEXTURE0 + GLenum( texunit ) );
+			if ( wwBindStudioCube( scene->textures, nif, own, false ) )
+				ldCube = own;
+		}
+	}
+	for ( int k = 0; k < 2; k++ ) {
+		const int uni = prog->uniLocation( k ? "IrradianceMap" : "StudioCube" );
+		if ( uni < 0 ) {
+			hasStudioCube = false;
+			continue;
+		}
+		fn->glActiveTexture( GL_TEXTURE0 + GLenum( texunit ) );
+		const bool ok = ( sceneMode == WwSceneStudio
+			&& wwBindStudioCube( scene->textures, nif, wwStudioCubePath(), k == 1 ) )
+			|| ( sceneMode == WwSceneLookdev && wwBindStudioCube( scene->textures, nif, ldCube, k == 1 ) );
+		if ( !ok ) {
+			hasStudioCube = false;
+			scene->bindCube( ::grayCube );
+		}
+		prog->uni1i_l( uni, texunit );
+		texunit++;
+	}
+	prog->uni1i( "sceneMode", sceneMode );
+	prog->uni1i( "hasStudioCube", hasStudioCube );
+	prog->uni1f( "sceneExposure", wwSceneExposureScale() );
+	prog->uni1i( "viewTransform", wwSceneViewTransform() );
+	prog->uni1f( "studioProbe", wwStudioProbe() );
+	prog->uni1f( "studioSun", wwStudioSunScale() );
+	prog->uni1i( "r3Term", wwR3Term() );
+	prog->uni1i( "r3Red", wwR3RedBits() );
+	if ( sceneMode == WwSceneLookdev ) {
+		float dalc[6][3];
+		wwLookdevDalc( dalc );
+		for ( int a = 0; a < 6; a++ )
+			prog->uni3f_l( prog->uniLocation( "lookdevDalc[%d]", a ), dalc[a][0], dalc[a][1], dalc[a][2] );
+		prog->uni1b( "lookdevDalcFlip", wwLookdevRed( "dalcflip" ) );
+	}
+
 	// Per-draw GL state, same as the spec/gloss path ends with. Omitting it made
 	// the shape inherit whatever blend/depth state the previous program left
 	// behind, and it drew nothing at all — the geometry was there, the state was
 	// not. AlphaProperty::glProperty also supplies alphaFlags/alphaThreshold,
 	// which the fragment shader reads.
-	if ( mesh->translucent && scene->hasOption( Scene::DoBlending ) ) {
+	if ( composition >= 0 ) {
+		/* The .pbrm composition replaces the NIF alpha property (lane PBRR4; FO4CS
+		 * PBRM.cpp:679-705 rewrites the NiAlphaProperty flags from it; the blend
+		 * functions are the editor's, ED:5447-5450). 0/1 draw opaque (the test is the
+		 * shader's discard), the rest blend. Draw order is not re-sorted (owed). */
+		prog->uni1i( "alphaFlags", 0 );
+		prog->uni1f( "alphaThreshold", m.alphaThreshold );
+		if ( composition >= 2 && scene->hasOption( Scene::DoBlending ) ) {
+			glEnable( GL_BLEND );
+			switch ( composition ) {
+			case 3:	// Premultiplied
+				fn->glBlendFuncSeparate( GL_ONE, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA );
+				break;
+			case 4:	// Additive
+				fn->glBlendFuncSeparate( GL_SRC_ALPHA, GL_ONE, GL_ZERO, GL_ONE );
+				break;
+			case 5:	// Multiply
+				fn->glBlendFuncSeparate( GL_DST_COLOR, GL_ZERO, GL_ZERO, GL_ONE );
+				break;
+			default:	// Alpha Blend, and Transmission / Water until the merge
+				fn->glBlendFuncSeparate( GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA );
+				break;
+			}
+		} else {
+			glDisable( GL_BLEND );
+		}
+	} else if ( mesh->translucent && scene->hasOption( Scene::DoBlending ) ) {
 		glEnable( GL_BLEND );
 		fn->glBlendFuncSeparate( GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA );
 		prog->uni1i( "alphaFlags", ( mesh->alphaProperty && mesh->alphaProperty->hasAlphaTest() ? 12 : 8 ) );
@@ -819,13 +1211,21 @@ bool Renderer::setupProgramPBRM( const NifModel * nif, Program * prog, Shape * m
 		glPolygonOffset( -1.0f, -1.0f );
 	}
 
-	if ( !mesh->depthTest ) {
+	/* The runtime's bind-time flag writes (docs s2.1, TruePBRShimRuntime.cpp
+	 * 3807-3828), the depth subset (lane PBRR1): a shape a .pbrm serves gets
+	 * ZBufferTest, and ZBufferWrite unless it alpha-blends. TwoSided and
+	 * AlphaTest from the .pbrm are not read by this reader yet (owed). */
+	const bool pbrmDepthTest = lsp->pbrmValid || mesh->depthTest;
+	// lane PBRR4: a .pbrm composition's Transparency/Depth depthWrite (default: composition <= 1)
+	const bool pbrmDepthWrite = composition >= 0 ? m.depthWrite
+		: lsp->pbrmValid ? !mesh->translucent : ( mesh->depthWrite && !mesh->translucent );
+	if ( !pbrmDepthTest ) {
 		glDisable( GL_DEPTH_TEST );
 	} else {
 		glEnable( GL_DEPTH_TEST );
 		glDepthFunc( GL_LEQUAL );
 	}
-	glDepthMask( !mesh->depthWrite || mesh->translucent ? GL_FALSE : GL_TRUE );
+	glDepthMask( pbrmDepthWrite ? GL_TRUE : GL_FALSE );
 	glPolygonMode( GL_FRONT_AND_BACK, GL_FILL );
 
 	/* Two uniforms this path never uploaded.
@@ -840,11 +1240,39 @@ bool Renderer::setupProgramPBRM( const NifModel * nif, Program * prog, Shape * m
 	 * uploading them at all. Latent, and independent of the colour bug.
 	 */
 	mesh->setUniforms( prog );
+	/* Q14 (lane PBRR3): vertex colour reaches the PBR base colour only when the shader
+	 * property's SLSF2_Vertex_Colors flag is set, the flag the game applies them under. */
 	prog->uni4f( "vertexColorOverride",
 		( mesh->hasVertexColors && mesh->colors.size() >= mesh->verts.size()
-			&& scene->hasOption( Scene::DoVertexColors ) )
+			&& scene->hasOption( Scene::DoVertexColors ) && lsp->hasSF2( ShaderFlags::SLSF2_Vertex_Colors ) )
 			? FloatVector4( 0.0f ) : FloatVector4( 1.0f ) );
 
+	return true;
+}
+
+/*! The PBR route debug view (lane PBRR1): the shape flat in its route's
+ * colour (pbrmRouteColor), lit by N.L. A shape whose PBR binding was aborted by
+ * a texture failure shows legacy grey, because legacy is what it draws.
+ */
+bool Renderer::setupProgramRoute( const NifModel * nif, Program * prog, Shape * mesh )
+{
+	Q_UNUSED( nif );
+	const BSShaderLightingProperty * sp = mesh->bssp;
+	if ( !sp || !mesh->scene )
+		return false;
+	float c[3];
+	pbrmRouteColor( ( sp->pbrmValid && sp->pbrmBindRefusal.isEmpty() ) ? sp->pbrmRoute : PbrmRoute::Legacy, c );
+	prog->uni3f( "routeColor", c[0], c[1], c[2] );
+
+	glDisable( GL_BLEND );
+	glDisable( GL_POLYGON_OFFSET_FILL );
+	glEnable( GL_DEPTH_TEST );
+	glDepthFunc( GL_LEQUAL );
+	glDepthMask( GL_TRUE );
+	glPolygonMode( GL_FRONT_AND_BACK, GL_FILL );
+
+	mesh->setUniforms( prog );
+	prog->uni4f( "vertexColorOverride", FloatVector4( 1.0f ) );
 	return true;
 }
 
@@ -887,6 +1315,19 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 		if ( !scene->hasOption(Scene::DoLighting) || !scene->hasOption(Scene::DoNormalMap) )
 			forced = &default_n;
 		prog->uniSampler( lsp, "NormalMap", 1, texunit, emptyString, clamp, *forced );
+
+		/* Shader Flags 1 bit 12 says the map just bound is a MODEL-space
+		 * normal map (an `_msn`).  fo4_default.frag then transforms it by the
+		 * model matrix alone instead of the tangent frame.
+		 *
+		 * Gated on `forced == &emptyString`, the SAME test that decided whether
+		 * a real normal map was bound just above: with lighting or normal maps
+		 * switched off the substitute is default_n, a flat TANGENT-space
+		 * texel, and reading that as model-space would read it as "north" and
+		 * tilt the whole surface over. */
+		prog->uni1i( "hasModelSpaceNormals",
+			int( forced == &emptyString
+				&& lsp->hasSF1( ShaderFlags::SLSF1_Model_Space_Normals ) ) );
 
 		prog->uniSampler( lsp, "GlowMap", 2, texunit, black, clamp );
 
@@ -1240,6 +1681,17 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 		if ( mat->hasAlphaTest() && scene->hasOption(Scene::DoBlending) ) {
 			alphaFlags |= 4;	// greater
 			alphaThreshold = float( mat->iAlphaTestRef ) / 255.0f;
+			/* PICTURE-ONLY dial for the tree-card cutoff question (bungo
+			 * 2026-09-18, "what is going with those trees? They seem broken"):
+			 * WW_LODL_TREE_ALPHA=1..255 tests every BGSM whose first texture
+			 * lives under a trees/ folder at that threshold instead of the
+			 * BGSM's own (80/82 on the tree LOD sets). The BGSM wins over the
+			 * NiAlphaProperty here, so this is the only place the dial bites. */
+			static const int treeDial = qEnvironmentVariableIntValue( "WW_LODL_TREE_ALPHA" );
+			if ( treeDial >= 1 && treeDial <= 255 && !mat->textureList.isEmpty()
+				&& QString( mat->textureList.at( 0 ) ).replace( QChar( '\\' ), QChar( '/' ) )
+					.contains( QLatin1String( "/trees/" ), Qt::CaseInsensitive ) )
+				alphaThreshold = float( treeDial ) / 255.0f;
 		}
 		prog->uni1i( "alphaFlags", alphaFlags );
 		prog->uni1f( "alphaThreshold", alphaThreshold );

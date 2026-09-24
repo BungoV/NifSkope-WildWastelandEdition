@@ -26,7 +26,7 @@ namespace
 
 /* LODTEX_MAGIC ('LDTX') is in lodvfile.h, because src/lodtfile.cpp refuses
  * it by name; LODL_MAGIC ('LODT') is in lodtfile.h for the same reason. */
-constexpr quint32 LODV_VERSION = 1;
+constexpr quint32 LODV_VERSION = LODTEX_VERSION;
 constexpr quint32 LODV_HEADER_BYTES = 256;
 constexpr quint32 LODV_TABLE_STRIDE = 24;
 constexpr quint64 LODV_PAYLOAD_ALIGN = 4096;
@@ -93,10 +93,16 @@ quint64 alignUp( quint64 v, quint64 a )
 	return r ? v + ( a - r ) : v;
 }
 
-bool validFormat( quint16 f, bool height )
+bool validFormat( quint16 f, int role )
 {
-	if ( height )
+	/* ONE FORMAT PER ROLE THAT HAS ONE. Height is R16 and horizon is RGBA8
+	 * because both carry a NUMBER a consumer compares, not a colour it looks
+	 * at, and a block-compressed number is a number with a quantisation floor
+	 * nobody declared. Everything else is BC1 or BC3. */
+	if ( role == LODV_ROLE_HEIGHT )
 		return f == LODV_DXGI_R16_UNORM;
+	if ( role == LODV_ROLE_HORIZON )
+		return f == LODV_DXGI_R8G8B8A8_UNORM;
 	return f == LODV_DXGI_BC1_UNORM || f == LODV_DXGI_BC1_UNORM_SRGB
 		|| f == LODV_DXGI_BC3_UNORM || f == LODV_DXGI_BC3_UNORM_SRGB;
 }
@@ -140,14 +146,21 @@ void writeHeaderBytes( unsigned char * h, const LodvHeaderFields & f,
 	for ( int i = 0; i < 8; i++ )
 		put16( h + 0x88 + i * 2, f.levelDims[i] );
 	// 0x98 indexCrc32 stays zero here, 0x9C reserved0 zero
-	for ( int i = 0; i < 4; i++ ) {
+	/* SIX sheet descriptors since version 2, 0xA0..0xCF. v1 held four and its
+	 * reserved tail began at 0xC0; the two extra slots are what the mask and
+	 * emissive roles cost, and they come out of that tail rather than out of a
+	 * second header. TEN since 2026-09-18, 0xA0..0xEF: the four horizon sheets
+	 * (role 7) come out of the same tail on the same stride, so a reader written
+	 * against six slots reads the first six of ten at the same addresses. */
+	for ( int i = 0; i < LODV_MAX_SHEETS; i++ ) {
 		unsigned char * s = h + 0xA0 + i * 8;
 		put16( s + 0, f.sheets[i].dxgiFormat );
 		put16( s + 2, f.sheets[i].dxgiFormatCover );
 		put8( s + 4, f.sheets[i].role );
 		put8( s + 5, f.sheets[i].colorSpace );
+		put8( s + 6, f.sheets[i].mipSkip );
 	}
-	// 0xC0..0xFF reserved, already zero
+	// 0xF0..0xFF reserved, already zero
 }
 
 bool readHeaderBytes( const unsigned char * h, LodvHeaderFields & f,
@@ -189,12 +202,13 @@ bool readHeaderBytes( const unsigned char * h, LodvHeaderFields & f,
 	for ( int i = 0; i < 8; i++ )
 		f.levelDims[i] = get16( h + 0x88 + i * 2 );
 	indexCrc = get32( h + 0x98 );
-	for ( int i = 0; i < 4; i++ ) {
+	for ( int i = 0; i < LODV_MAX_SHEETS; i++ ) {
 		const unsigned char * s = h + 0xA0 + i * 8;
 		f.sheets[i].dxgiFormat = get16( s + 0 );
 		f.sheets[i].dxgiFormatCover = get16( s + 2 );
 		f.sheets[i].role = s[4];
 		f.sheets[i].colorSpace = s[5];
+		f.sheets[i].mipSkip = s[6];
 	}
 	return true;
 }
@@ -203,15 +217,31 @@ bool readHeaderBytes( const unsigned char * h, LodvHeaderFields & f,
 
 quint32 lodvSheetMipBytes( const LodvHeaderFields & h, int sheet, int mip, bool cover )
 {
-	if ( sheet < 0 || sheet >= int( h.sheetCount ) || mip < 0 || mip >= int( h.mipCount ) )
+	if ( sheet < 0 || sheet >= int( h.sheetCount ) || mip < 0
+		|| mip + int( h.sheets[sheet].mipSkip ) >= int( h.mipCount ) )
 		return 0;
-	const quint32 s = quint32( h.storedTexels ) >> mip;
+	const quint32 s = quint32( h.storedTexels ) >> ( mip + int( h.sheets[sheet].mipSkip ) );
 	if ( h.sheets[sheet].role == LODV_ROLE_HEIGHT )
 		return s * s * 2;
-	const quint16 fmt = ( h.sheets[sheet].role == LODV_ROLE_DATA && cover )
-		? h.sheets[sheet].dxgiFormatCover : h.sheets[sheet].dxgiFormat;
+	//! Role 7 is uncompressed RGBA: four azimuth bins, one byte each.
+	if ( h.sheets[sheet].role == LODV_ROLE_HORIZON )
+		return s * s * 4;
+	/* THE COVER CARRIER IS WHICHEVER SHEET DECLARES TWO FORMATS. Rule 13 lets
+	 * exactly one sheet do that, and only the colour or the mask, so this needs
+	 * no role test of its own and it stays correct whichever of the two carries
+	 * the ground-cover alpha. */
+	const LodvSheetDesc & sd = h.sheets[sheet];
+	const quint16 fmt = ( cover && sd.dxgiFormatCover != sd.dxgiFormat )
+		? sd.dxgiFormatCover : sd.dxgiFormat;
 	const quint32 blockBytes = ( fmt == LODV_DXGI_BC3_UNORM || fmt == LODV_DXGI_BC3_UNORM_SRGB ) ? 16 : 8;
 	return ( s / 4 ) * ( s / 4 ) * blockBytes;
+}
+
+int lodvSheetSide( const LodvHeaderFields & h, int sheet, int mip )
+{
+	if ( sheet < 0 || sheet >= int( h.sheetCount ) || mip < 0 )
+		return 0;
+	return int( h.storedTexels ) >> ( mip + int( h.sheets[sheet].mipSkip ) );
 }
 
 quint32 lodvTileRawBytes( const LodvHeaderFields & h, bool cover )
@@ -447,8 +477,24 @@ bool lodvValidate( const QString & path, LodvHeaderFields * fieldsOut,
 				"since 2026-09-09 -- re-bake it" ) );
 		return fail( QStringLiteral( "refused: magic is not LDTX" ) );
 	}
-	if ( get32( h + 0x04 ) != LODV_VERSION )                             // rule 3
-		return fail( QString( "refused: version %1, this reader knows 1" ).arg( get32( h + 0x04 ) ) );
+	if ( get32( h + 0x04 ) != LODV_VERSION ) {                           // rule 3
+		const quint32 v = get32( h + 0x04 );
+		/* A v1 container is named for what it IS, not lumped into "bad
+		 * version": its third sheet is role 3 `data` -- AO, wetness, shore,
+		 * cover -- and three of those four channels no longer exist. There is
+		 * no converter and there is nothing to convert: the writer is opt-in
+		 * behind --vt and no .lodt pyramid has ever been written outside this
+		 * tree. Re-bake. */
+		if ( v == 1 )
+			return fail( QStringLiteral( "refused: version 1 container -- four sheets whose "
+				"role 3 is `data` (R sky AO, G flow wetness, B shore proximity, A ground "
+				"cover). Version 2 replaced it with role 5 `mask` (RMAOS: R roughness, "
+				"G metallic, B AO, A ground cover) and an optional role 6 `emissive`; "
+				"wetness and shore proximity were dropped. No conversion exists -- re-bake "
+				"with --vt" ) );
+		return fail( QString( "refused: version %1, this reader knows %2" )
+			.arg( v ).arg( LODV_VERSION ) );
+	}
 	if ( get32( h + 0x08 ) != LODV_HEADER_BYTES )                        // rule 4
 		return fail( QStringLiteral( "refused: headerBytes is not 256" ) );
 
@@ -515,29 +561,101 @@ bool lodvValidate( const QString & path, LodvHeaderFields * fieldsOut,
 				"every mip and must stay a multiple of 4" ).arg( b ).arg( m ) );
 	}
 	{                                                                     // rule 13
-		if ( fd.sheetCount < 1 || fd.sheetCount > 4 )
-			return fail( QStringLiteral( "refused: sheetCount outside 1..4" ) );
-		bool seen[5] = { false, false, false, false, false };
+		if ( fd.sheetCount < 1 || fd.sheetCount > LODV_MAX_SHEETS )
+			return fail( QString( "refused: sheetCount outside 1..%1" ).arg( LODV_MAX_SHEETS ) );
+		bool seen[LODV_ROLE_HORIZON + 1] = { false };
+		int coverCarrier = -1;
+		int horizonSheets = 0, firstHorizon = -1;
 		for ( int i = 0; i < int( fd.sheetCount ); i++ ) {
 			const LodvSheetDesc & s = fd.sheets[i];
-			if ( s.role == LODV_ROLE_UNUSED || s.role > LODV_ROLE_HEIGHT )
+			/* Role 3 is RETIRED and is refused BY NAME rather than by falling
+			 * off the end of the range: a v2 file carrying it was written by
+			 * something that believed role 3 still meant AO/wetness/shore/cover,
+			 * and saying so is the difference between a diagnosable file and
+			 * "bad role". */
+			if ( s.role == LODV_ROLE_DATA )
+				return fail( QString( "refused: sheet %1 has role 3 `data` (R AO, G wetness, "
+					"B shore, A cover), which version 1 carried and version 2 retired; the "
+					"mask sheet is role 5 (RMAOS)" ).arg( i ) );
+			if ( s.role == LODV_ROLE_UNUSED || s.role > LODV_ROLE_HORIZON )
 				return fail( QString( "refused: sheet %1 has role %2" ).arg( i ).arg( s.role ) );
-			if ( seen[s.role] )
+			/* ROLE 7 IS THE ONE ROLE THAT REPEATS: four azimuth bins fit in one
+			 * RGBA sheet and sixteen do not. Every other role appears once, and
+			 * the horizon's own shape is checked below rather than here, so a
+			 * scattered pair of horizon sheets is refused by the rule it breaks
+			 * and not by "role 7 appears twice". */
+			if ( s.role == LODV_ROLE_HORIZON ) {
+				if ( firstHorizon < 0 )
+					firstHorizon = i;
+				horizonSheets++;
+			} else if ( seen[s.role] ) {
 				return fail( QString( "refused: role %1 appears twice" ).arg( s.role ) );
+			}
 			seen[s.role] = true;
-			const bool height = ( s.role == LODV_ROLE_HEIGHT );
-			if ( !validFormat( s.dxgiFormat, height ) || !validFormat( s.dxgiFormatCover, height ) )
+			if ( !validFormat( s.dxgiFormat, s.role ) || !validFormat( s.dxgiFormatCover, s.role ) )
 				return fail( QString( "refused: sheet %1 has dxgiFormat %2 / %3" )
 					.arg( i ).arg( s.dxgiFormat ).arg( s.dxgiFormatCover ) );
 			if ( s.colorSpace > 1 )
 				return fail( QString( "refused: sheet %1 has colorSpace %2" ).arg( i ).arg( s.colorSpace ) );
-			if ( s.role != LODV_ROLE_DATA && s.dxgiFormatCover != s.dxgiFormat )
-				return fail( QString( "refused: sheet %1 is not the data sheet and its "
-					"dxgiFormatCover differs" ).arg( i ) );
+			/* DESCRIPTOR BYTE 6, mipSkip: 0, or 1 on a half-resolution sheet. The
+			 * colour sheet sets the texel density and is never halved; a sheet may
+			 * not skip every mip the tile has. */
+			if ( s.mipSkip > 1 || int( s.mipSkip ) >= int( fd.mipCount ) )
+				return fail( QString( "refused: sheet %1 has mipSkip %2 with mipCount %3; it is 0, "
+					"or 1 when the tile has at least two mips" ).arg( i ).arg( s.mipSkip ).arg( fd.mipCount ) );
+			if ( s.mipSkip && s.role == LODV_ROLE_COLOR )
+				return fail( QString( "refused: sheet %1 is the colour sheet and has mipSkip %2; the "
+					"colour sheet is always stored at full resolution" ).arg( i ).arg( s.mipSkip ) );
+			if ( s.dxgiFormatCover != s.dxgiFormat ) {
+				/* The ground-cover alpha lives in ONE sheet and the header says
+				 * which by declaring two formats for it. It may be the mask's
+				 * alpha (the shipped default, mirroring the object family's
+				 * subsurface slot) or the colour sheet's (the object family's
+				 * `coverage` slot, `--vt-cover-in-color`). Any other sheet, or
+				 * two of them at once, is a file no reader can size. */
+				if ( s.role != LODV_ROLE_MASK && s.role != LODV_ROLE_COLOR )
+					return fail( QString( "refused: sheet %1 (role %2) declares a "
+						"dxgiFormatCover; only the mask (role 5) or the colour sheet "
+						"(role 1) may carry the ground-cover alpha" ).arg( i ).arg( s.role ) );
+				if ( coverCarrier >= 0 )
+					return fail( QString( "refused: sheets %1 and %2 both declare a "
+						"dxgiFormatCover; exactly one sheet carries the ground cover" )
+						.arg( coverCarrier ).arg( i ) );
+				coverCarrier = i;
+			}
 		}
-		for ( int i = int( fd.sheetCount ); i < 4; i++ )
+		/* The three sheets every container must carry. A pyramid with no colour
+		 * or no mask is not a cheaper pyramid, it is a broken bake -- and a
+		 * reader that discovers the absence at sample time cannot say so. */
+		if ( !seen[LODV_ROLE_COLOR] || !seen[LODV_ROLE_MSN] || !seen[LODV_ROLE_MASK] )
+			return fail( QStringLiteral( "refused: a version 2 container must carry the colour "
+				"(role 1), msn (role 2) and mask (role 5) sheets" ) );
+		/* THE HORIZON'S SHAPE, said once. A consumer finds bin b at sheet
+		 * `firstHorizon + b / 4`, channel `b % 4`, and that arithmetic is only
+		 * sound if the sheets are contiguous and last. A file whose horizon
+		 * sheets straddle the height sheet would sample the wrong bin silently,
+		 * which is the one failure a format like this must not allow. */
+		if ( horizonSheets > LODV_HORIZON_MAX_SHEETS )
+			return fail( QString( "refused: %1 horizon sheets (role 7); at most %2, "
+				"which is %3 azimuth bins" ).arg( horizonSheets )
+				.arg( LODV_HORIZON_MAX_SHEETS )
+				.arg( LODV_HORIZON_MAX_SHEETS * LODV_HORIZON_BINS_PER_SHEET ) );
+		if ( horizonSheets > 0 ) {
+			if ( firstHorizon + horizonSheets != int( fd.sheetCount ) )
+				return fail( QString( "refused: the horizon sheets (role 7) are not the last "
+					"%1 sheets; they start at %2 of %3" ).arg( horizonSheets )
+					.arg( firstHorizon ).arg( fd.sheetCount ) );
+			for ( int i = firstHorizon; i < int( fd.sheetCount ); i++ )
+				if ( fd.sheets[i].role != LODV_ROLE_HORIZON )
+					return fail( QString( "refused: sheet %1 sits inside the horizon run "
+						"(sheets %2..%3) and has role %4; the horizon sheets are contiguous" )
+						.arg( i ).arg( firstHorizon ).arg( int( fd.sheetCount ) - 1 )
+						.arg( fd.sheets[i].role ) );
+		}
+		for ( int i = int( fd.sheetCount ); i < LODV_MAX_SHEETS; i++ )
 			if ( fd.sheets[i].role != 0 || fd.sheets[i].dxgiFormat != 0
-				|| fd.sheets[i].dxgiFormatCover != 0 || fd.sheets[i].colorSpace != 0 )
+				|| fd.sheets[i].dxgiFormatCover != 0 || fd.sheets[i].colorSpace != 0
+				|| fd.sheets[i].mipSkip != 0 )
 				return fail( QString( "refused: sheet %1 is past sheetCount and not zero" ).arg( i ) );
 	}
 	if ( fd.compression > 1 )                                            // rule 14
@@ -686,7 +804,7 @@ QStringList lodvDescribe( const LodvHeaderFields & h, const std::vector<LodvTile
 	};
 	auto kvi = [&kv]( const char * k, qint64 v ) { kv( k, QString::number( v ) ); };
 	kv( "magic", QStringLiteral( "LDTX" ) );
-	kvi( "version", 1 );
+	kvi( "version", LODTEX_VERSION );
 	kvi( "headerBytes", 256 );
 	kvi( "flags", h.flags );
 	kv( "worldspace", h.worldspaceEdid );
@@ -726,7 +844,8 @@ QStringList lodvDescribe( const LodvHeaderFields & h, const std::vector<LodvTile
 	for ( int i = 0; i < int( h.sheetCount ); i++ )
 		out << QString( "sheet %1 role %2 dxgi %3 dxgiWithCover %4 colorSpace %5" )
 			.arg( i ).arg( h.sheets[i].role ).arg( h.sheets[i].dxgiFormat )
-			.arg( h.sheets[i].dxgiFormatCover ).arg( h.sheets[i].colorSpace );
+			.arg( h.sheets[i].dxgiFormatCover ).arg( h.sheets[i].colorSpace )
+			+ ( h.sheets[i].mipSkip ? QString( " mipSkip %1" ).arg( h.sheets[i].mipSkip ) : QString() );
 	int present = 0, cover = 0;
 	quint64 stored = 0;
 	for ( const LodvTileEntry & e : table ) {

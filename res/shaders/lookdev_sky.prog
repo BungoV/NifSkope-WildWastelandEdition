@@ -1,0 +1,4 @@
+# Lookdev background (lane PBRR2B): the lookdev cube + the sun disc glow.
+# Never enabled on models: selected by name from gl/lookdevstage.cpp.
+
+shaders lookdev_sky.vert lookdev_sky.frag

@@ -2338,7 +2338,7 @@ void ProcLightningController::updateTime( float time )
 	 * This used to hunt for a `<name>_Start` ancestor and a `<name>_End` node of
 	 * the same stem, and stretch the bolt between them — a convention read off the
 	 * shieldtesla and edison_pa rigs, i.e. a guess. The engine does no such thing.
-	 * Walked in the 1.10.155 PDB: BSProceduralLightningController::Update ->
+	 * Walked in Todd's treat (1.10.155): BSProceduralLightningController::Update ->
 	 * UpdateGenerationParams / UpdateProcessParams / AddTasklet ->
 	 * BSProceduralGeometry::Lightning::CreateInstance / Process. Not one of them
 	 * touches a BSFixedString or searches the scene; the whole path takes the NIF's
@@ -2503,7 +2503,7 @@ bool ProcLightningController::buildRibbon( const Vector3 & viewAxis, QVector<Vec
 		return false;
 
 	// Target origin, along its local +Y, for Length — the engine's own rule; see
-	// updateTime for how it was read out of the 1.10.155 PDB and checked.
+	// updateTime for how it was read out of Todd's treat (1.10.155) and checked.
 	const Transform & tt = target->worldTrans();
 	const Vector3 A = tt.translation;
 	const Vector3 B = A + tt.rotation * Vector3( 0.0f, effLength, 0.0f );

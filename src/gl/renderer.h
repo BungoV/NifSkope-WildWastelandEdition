@@ -64,6 +64,9 @@ class Renderer : public QObject, public NifSkopeOpenGLContext
 	 * hint must be refused or the shape stays pinned to a program that has no
 	 * lodChannelView uniform. See setupProgram. */
 	NifSkopeOpenGLContext::Program * pbrmProgramSeen = nullptr;
+	//! pbr_route.prog once the PBR route view has drawn a shape (lane PBRR1):
+	//! any hint equal to it is stale once the view is off.
+	NifSkopeOpenGLContext::Program * routeProgramSeen = nullptr;
 
 	Q_OBJECT
 
@@ -87,6 +90,8 @@ protected:
 	// PBRM (PBR Material Editor) metallic/roughness, selected by name rather
 	// than by .prog conditions — see setupProgram()
 	bool setupProgramPBRM( const NifModel *, Program *, Shape * );
+	// the PBR route debug view (pbr_route.prog), selected by name
+	bool setupProgramRoute( const NifModel *, Program *, Shape * );
 	// other games
 	void setupFixedFunction( Shape * );
 

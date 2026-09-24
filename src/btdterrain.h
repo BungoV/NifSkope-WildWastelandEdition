@@ -103,6 +103,13 @@ enum class LodtPlane
 	CellFlags,
 	CellHeightRange,
 	CoarseOverview,
+	/* Version 3's water planes. They are per-TEXEL, not per-cell like
+	 * WaterHeight and WaterType above -- which is the whole point of them:
+	 * sixteen WATR forms serve hundreds of separate bodies, and only an ID
+	 * per texel can give two lakes two colours. */
+	WaterBodyId,
+	WaterFlow,
+	WaterShore,
 	Count
 };
 
@@ -123,6 +130,9 @@ struct LodtWorldInfo
 	int aoSamples = 0, overviewSamples = 0;
 	int ltexCount = 0, watrCount = 0, gcvrCount = 0, blockCount = 0;
 	quint32 sectionFlags = 0;
+	//! version 3: 0 when the file carries no such plane (check the FLAG, then this).
+	int bodyCount = 0, bodySamples = 0, flowSamples = 0, shoreSamples = 0;
+	int headerVersion = 1;
 };
 
 /*! One .lodl view: an inclusive cell rectangle, a detail level and a plane.

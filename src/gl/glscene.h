@@ -52,6 +52,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 class NifModel;
 class Renderer;
 class Shape;
+class HkxPlayback;
 class ProcLightningController;
 class QAction;
 class QOpenGLContext;
@@ -125,9 +126,29 @@ public:
 
 	void setSequence( const QString & seqname );
 
+	/*! Havok animation clips (.hkx) loaded into this scene's animations list.
+	 *
+	 *  Lane HKX2. Owned here, created with the Scene and destroyed with it, so
+	 *  every path that already has a Scene can reach the playback without a new
+	 *  singleton. Its clips appear in `animGroups` / `animTags`, so the existing
+	 *  transport plays them; `Node::transform()` asks it for each node's pose.
+	 */
+	HkxPlayback * hkx = nullptr;
+
 	QString textStats();
 
 	Node * getNode( const NifModel * nif, const QModelIndex & iNode );
+	/*! Look a node up WITHOUT creating one (lane SKELOVERLAY).
+	 *
+	 * getNode() CONSTRUCTS a Node for any valid block it is handed and files it
+	 * in `nodes` -- right for the scene-graph walk, wrong for a read-only
+	 * overlay. Overlays > Show Skeleton is offered every NiAVObject block the
+	 * file contains, including any the graph does not reach, and building nodes
+	 * for those would grow `nodes`, move Scene::bounds() and so change the very
+	 * picture the overlay is only meant to draw on top of. Returns nullptr for a
+	 * block the scene never built, which the overlay COUNTS rather than hides.
+	 */
+	Node * findNode( const NifModel * nif, const QModelIndex & iNode ) const;
 	inline const QVector<Node *> & getNodes() const { return nodes.list(); }
 	Property * getProperty( const NifModel * nif, const QModelIndex & iProperty );
 	Property * getProperty( const NifModel * nif, const QModelIndex & iParentBlock, const QString & itemName, const QString & mustInherit );

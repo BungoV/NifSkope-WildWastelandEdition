@@ -861,6 +861,18 @@ public:
 	// or an empty string otherwise.
 	QString findResourceFile( const QString & path, const char * archiveFolder, const char * extension ) const;
 
+	/*! Add `dataPath` to the resource roots this model searches, AND re-point the
+	 *  cached `gameResources` at the object that now holds them.
+	 *
+	 *  Both halves are the point. `GameManager::addNIFResourcePath` does not add
+	 *  to an existing entry: it removes the old one -- which deletes it -- and
+	 *  returns a NEW object, so a caller that ignores the return value leaves
+	 *  this model's `gameResources` dangling and every later lookup is a
+	 *  use-after-free. Nothing outside NifModel can repair that, because the
+	 *  pointer is the model's own. (lane IMPOSTORSHOW, 2026-09-19)
+	 */
+	void addResourceRoot( const QString & dataPath );
+
 	/*! If 'item' is a texture-path field, set 'path' to the string it holds and
 	 *  'resolved' to where that resolves in the configured resources — empty when
 	 *  it resolves nowhere — and return true. False for every other kind of field,

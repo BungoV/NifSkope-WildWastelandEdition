@@ -255,6 +255,12 @@ class EffectMaterial : public Material
 
 public:
 	EffectMaterial( const QString & name, const NifModel * nif, const QModelIndex & index );
+	/*! Parse straight from file bytes, no NifModel resource context needed --
+	 *  the twin of `ShaderMaterial( const QByteArray & )` above, added for the
+	 *  same reason (lane CELLVIEW3): an offline loader has the bytes and no
+	 *  model. `Material::openData` already accepts the BGEM magic, so this is
+	 *  the missing CONSTRUCTOR, not a second reader. */
+	explicit EffectMaterial( const QByteArray & data );
 	quint32 effectShaderFlags2() const {
 		return ( bEnvironmentMapping ? 0x0001U : 0U ) | ( bBloodEnabled ? 0x0002U : 0U )
 			| ( bEffectLightingEnabled ? 0x0004U : 0U ) | ( bFalloffEnabled ? 0x0008U : 0U )

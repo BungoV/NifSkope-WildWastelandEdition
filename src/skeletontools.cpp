@@ -315,6 +315,93 @@ enum SkelFilter { FilterAll = 0, FilterBones, FilterDeforming, FilterUnused };
 
 } // namespace
 
+// ---------------------------------------------------------------------------
+// shared with the viewport (lane SKEL2) -- see the header for bungo's words
+// ---------------------------------------------------------------------------
+
+QList<int> skeletonListedBlocks( const SkeletonReport & report, int chip,
+	const QString & search, const QSet<int> & isolated )
+{
+	const QString needle = search.trimmed();
+	QHash<int, int> parentOf;
+	for ( const SkeletonBoneInfo & b : report.bones )
+		parentOf.insert( b.block, b.parent );
+
+	QSet<int> keep;
+	for ( const SkeletonBoneInfo & b : report.bones ) {
+		if ( b.block < 0 )
+			continue;
+		switch ( chip ) {
+		case FilterBones:      if ( !b.inSkin ) continue; break;
+		case FilterDeforming:  if ( b.verts < 1 ) continue; break;
+		case FilterUnused:     if ( !b.isUnusedBone() ) continue; break;
+		default: break;
+		}
+		if ( !needle.isEmpty() && !b.name.contains( needle, Qt::CaseInsensitive ) )
+			continue;
+		if ( !isolated.isEmpty() && !isolated.contains( b.block ) )
+			continue;
+		keep.insert( b.block );
+	}
+
+	// A SEARCH KEEPS ANCESTORS. The guard is the node count, so a file whose
+	// parent links form a cycle cannot hang the dock.
+	if ( !needle.isEmpty() && !keep.isEmpty() ) {
+		QSet<int> withParents = keep;
+		for ( int b : keep ) {
+			int p = parentOf.value( b, -1 );
+			for ( int guard = 0; p >= 0 && guard <= report.bones.size() + 2; guard++ ) {
+				if ( withParents.contains( p ) )
+					break;
+				if ( !isolated.isEmpty() && !isolated.contains( p ) )
+					break;
+				withParents.insert( p );
+				p = parentOf.value( p, -1 );
+			}
+		}
+		keep = withParents;
+	}
+
+	QList<int> out;
+	out.reserve( keep.size() );
+	for ( const SkeletonBoneInfo & b : report.bones )
+		if ( keep.contains( b.block ) )
+			out << b.block;
+	return out;
+}
+
+QColor skeletonKindColor( int kind, int state )
+{
+	/* The base hue per kind, out of the palette and nowhere else.
+	 *
+	 * `accent` for the unused class is kept from what shipped: it is the dock's
+	 * attention colour, its tooltip already says "listed as a bone ... but no
+	 * vertex is weighted to it", and on the human fixture there are none of
+	 * them, so the blue ruling is what a user actually sees. Named as a
+	 * divergence in the lane report rather than decided silently.
+	 */
+	const char * var = ( kind == 1 ) ? "accent" : ( kind >= 2 ? "textMuted" : "toggle" );
+	QColor c = QColor::fromString( wwSkinColor( var ) );
+	if ( !c.isValid() )
+		c = QColor( 128, 128, 128 );
+
+	// bungo's list, in his order: "unselected = that blue at reduced
+	// brightness, selected = the blue, active = lighter still, hovered = a rim".
+	float gain = 1.0f, toWhite = 0.0f;
+	switch ( state ) {
+	case 1: gain = 1.00f; break;                  // selected: the palette value
+	case 2: gain = 1.00f; toWhite = 0.42f; break; // active: lighter still
+	case 3: gain = 1.00f; toWhite = 0.24f; break; // hovered: the rim
+	default: gain = 0.78f; break;                 // unselected
+	}
+	auto step = [gain, toWhite]( qreal v ) {
+		double x = double( v ) * double( gain );
+		x = x + ( 1.0 - x ) * double( toWhite );
+		return qBound( 0.0, x, 1.0 );
+	};
+	return QColor::fromRgbF( step( c.redF() ), step( c.greenF() ), step( c.blueF() ) );
+}
+
 QDockWidget * tlCreateSkeletonManagerDock( NifModel * nif, QMainWindow * mw, GLView * ogl )
 {
 	auto * skope = qobject_cast<NifSkope *>( mw );
@@ -382,10 +469,44 @@ QDockWidget * tlCreateSkeletonManagerDock( NifModel * nif, QMainWindow * mw, GLV
 	// something to act on.
 	tree->setSelectionMode( QAbstractItemView::ExtendedSelection );
 	tree->setContextMenuPolicy( Qt::CustomContextMenu );
-	tree->header()->setStretchLastSection( false );
-	tree->header()->setSectionResizeMode( 0, QHeaderView::Stretch );
-	for ( int c = 1; c < 4; c++ )
-		tree->header()->setSectionResizeMode( c, QHeaderView::ResizeToContents );
+	/* THE BONE COLUMN NEVER ELIDES TO NOTHING (lane SKEL2, bungo 2026-09-11).
+	 *
+	 * As shipped, column 0 was Stretch and the three numeric columns were
+	 * ResizeToContents, so the name got whatever width was left over -- and a
+	 * QTreeWidget spends `indentation() * depth` of that on the branch alone,
+	 * before a glyph is drawn. The human rig's arm chain is nine deep: at Qt's
+	 * default 20 px indent that is 180 px of a ~400 px dock, and the rows under
+	 * `LArm_UpperArm` read `LAr...` and then nothing at all, which is the
+	 * screenshot he sent.
+	 *
+	 * The fix is Blender's Outliner: a narrow indent, the NUMBERS pinned to a
+	 * fixed width on the right, and the NAME column sized to what the deepest
+	 * row actually needs -- so when the dock is too narrow it is the dock that
+	 * scrolls, never the name that disappears. skelSizeNameColumn() below does
+	 * the measuring, from the rows refresh() has just built.
+	 */
+	/* WW_SKELETON_LEGACY_COLUMNS=1 is the EXACT WAY BACK (CONSTITUTION rule 7)
+	 * and the gate's own floor: the column law exactly as it shipped, in the
+	 * same build, so "before" and "after" differ by one variable instead of by
+	 * one exe. It is what cmp_manager_names.png is made of.
+	 */
+	tree->setMouseTracking( true );			// hover, mirrored into the viewport
+	if ( qEnvironmentVariableIntValue( "WW_SKELETON_LEGACY_COLUMNS" ) != 0 ) {
+		tree->header()->setStretchLastSection( false );
+		tree->header()->setSectionResizeMode( 0, QHeaderView::Stretch );
+		for ( int c = 1; c < 4; c++ )
+			tree->header()->setSectionResizeMode( c, QHeaderView::ResizeToContents );
+	} else {
+		tree->setIndentation( 12 );
+		tree->setTextElideMode( Qt::ElideRight );
+		tree->setHorizontalScrollBarPolicy( Qt::ScrollBarAsNeeded );
+		tree->header()->setStretchLastSection( false );
+		tree->header()->setSectionResizeMode( 0, QHeaderView::Interactive );
+		for ( int c = 1; c < 4; c++ ) {
+			tree->header()->setSectionResizeMode( c, QHeaderView::Fixed );
+			tree->header()->resizeSection( c, c == 3 ? 58 : 46 );
+		}
+	}
 	layout->addWidget( tree, 1 );
 
 	// Rest pose: the same toggle edit mode already exposes, surfaced here where
@@ -461,26 +582,19 @@ QDockWidget * tlCreateSkeletonManagerDock( NifModel * nif, QMainWindow * mw, GLV
 		const int filter = currentFilter();
 		const QString needle = search->text().trimmed();
 
-		// Coloured text, not badges — the Block Details visual rule.
-		const QColor colText = QColor::fromString( wwSkinColor( "text" ) );
-		const QColor colMuted = QColor::fromString( wwSkinColor( "textMuted" ) );
-		// An unused bone wants an attention colour. This was `textBright`, which
-		// reads as amber from its name but is actually #f2f3f5 — near-white, i.e.
-		// indistinguishable from normal text. `accent` is the palette's orange.
-		const QColor colBright = QColor::fromString( wwSkinColor( "accent" ) );
+		/* WHICH ROWS ARE LISTED is decided ONCE, by skeletonListedBlocks(), and
+		 * the viewport's Overlays armature asks the same function with the same
+		 * three arguments (lane SKEL2). That is what makes bungo's "shouldn't it
+		 * mirror the skeleton manager view?" true by construction rather than by
+		 * two files happening to agree.
+		 */
+		const QList<int> listedRows = skeletonListedBlocks( report, filter, needle, *isolated );
+		const QSet<int> listed( listedRows.begin(), listedRows.end() );
 
 		QHash<int, QTreeWidgetItem *> itemOf;
 		int shown = 0;
 		for ( const SkeletonBoneInfo & b : report.bones ) {
-			switch ( filter ) {
-			case FilterBones:      if ( !b.inSkin ) continue; break;
-			case FilterDeforming:  if ( b.verts < 1 ) continue; break;
-			case FilterUnused:     if ( !b.isUnusedBone() ) continue; break;
-			default: break;
-			}
-			if ( !needle.isEmpty() && !b.name.contains( needle, Qt::CaseInsensitive ) )
-				continue;
-			if ( !isolated->isEmpty() && !isolated->contains( b.block ) )
+			if ( !listed.contains( b.block ) )
 				continue;
 
 			// Parent the row when its parent is also shown; otherwise promote it
@@ -501,22 +615,52 @@ QDockWidget * tlCreateSkeletonManagerDock( NifModel * nif, QMainWindow * mw, GLV
 			item->setTextAlignment( 2, Qt::AlignRight | Qt::AlignVCenter );
 			item->setTextAlignment( 3, Qt::AlignRight | Qt::AlignVCenter );
 
-			QColor fg = colText;
+			/* ROWS ARE COLOURED BY KIND, in the SAME colours the viewport draws
+			 * the bone in, because both call skeletonKindColor() and nothing
+			 * else decides (lane SKEL2). A deforming bone is the palette's blue,
+			 * an unused one the attention amber, a node no skin references the
+			 * muted grey it always was. The kind colour is stashed on the row so
+			 * paintSelection() can put it BACK when the row is deselected --
+			 * before this lane it never did, and a row that had once been
+			 * selected stayed orange for the rest of the session.
+			 */
+			const int kind = b.isNotABone() ? 2 : ( b.isUnusedBone() ? 1 : 0 );
+			const QColor fg = skeletonKindColor( kind, 0 );
 			QString tip = QObject::tr( "block %1" ).arg( b.block );
-			if ( b.isNotABone() ) {
-				fg = colMuted;
+			if ( kind == 2 )
 				tip = QObject::tr( "block %1 — not referenced by any skin" ).arg( b.block );
-			} else if ( b.isUnusedBone() ) {
-				fg = colBright;
+			else if ( kind == 1 )
 				tip = QObject::tr( "block %1 — listed as a bone by %2 shape(s) but no vertex is weighted to it" )
 					.arg( b.block ).arg( b.shapes );
-			}
+			item->setData( 0, Qt::UserRole + 1, kind );
 			for ( int c = 0; c < 4; c++ ) {
 				item->setForeground( c, fg );
 				item->setToolTip( c, tip );
 			}
 		}
 		tree->expandAll();
+
+		/* The name column is as wide as the DEEPEST row needs, or as wide as
+		 * the dock leaves after the three fixed number columns -- whichever is
+		 * larger. A name is therefore elided only when the dock is narrower
+		 * than the widest row, and even then the row scrolls into view rather
+		 * than vanishing. */
+		if ( qEnvironmentVariableIntValue( "WW_SKELETON_LEGACY_COLUMNS" ) == 0 ) {
+			const QFontMetrics fm( tree->font() );
+			int need = fm.horizontalAdvance( tree->headerItem()->text( 0 ) ) + 24;
+			std::function<void( QTreeWidgetItem *, int )> measure =
+				[&]( QTreeWidgetItem * it, int depth ) {
+				need = qMax( need, fm.horizontalAdvance( it->text( 0 ) )
+					+ tree->indentation() * ( depth + 1 ) + 16 );
+				for ( int i = 0; i < it->childCount(); i++ )
+					measure( it->child( i ), depth + 1 );
+			};
+			for ( int i = 0; i < tree->topLevelItemCount(); i++ )
+				measure( tree->topLevelItem( i ), 0 );
+			const int fixed = 46 + 46 + 58;
+			tree->header()->resizeSection( 0,
+				qMax( need, tree->viewport()->width() - fixed ) );
+		}
 
 		QStringList problems;
 		for ( const QString & d : report.danglingSkinBones )
@@ -538,6 +682,14 @@ QDockWidget * tlCreateSkeletonManagerDock( NifModel * nif, QMainWindow * mw, GLV
 			.arg( report.deformingCount() )
 			.arg( report.unusedCount() )
 			.arg( report.skinnedShapes ) );
+
+		/* THE OVERLAY MIRRORS THIS DOCK (lane SKEL2). The chip and the search
+		 * box are pushed to the viewport here, at the end of the same refresh
+		 * that built the rows, so Overlays > Show Skeleton draws exactly the
+		 * rows above and nothing else. It is a no-op when neither has changed.
+		 */
+		if ( ogl )
+			ogl->setSkeletonOverlayFilter( filter, needle );
 	};
 
 	// ---- selection colouring -------------------------------------------
@@ -562,6 +714,12 @@ QDockWidget * tlCreateSkeletonManagerDock( NifModel * nif, QMainWindow * mw, GLV
 			for ( int c = 0; c < 4; c++ ) {
 				if ( !sel ) {
 					it->setBackground( c, QBrush() );
+					/* PUT THE KIND COLOUR BACK (lane SKEL2). Deselecting only
+					 * cleared the background, so a row that had ever been
+					 * selected kept the selection's orange text for the rest of
+					 * the session and stopped saying what kind of node it was. */
+					it->setForeground( c, skeletonKindColor(
+						it->data( 0, Qt::UserRole + 1 ).toInt(), 0 ) );
 				} else {
 					it->setBackground( c, it == cur ? blueActive : blueInactive );
 					it->setForeground( c, it == cur ? active : secondary );
@@ -1045,6 +1203,78 @@ QDockWidget * tlCreateSkeletonManagerDock( NifModel * nif, QMainWindow * mw, GLV
 					}
 				}
 				refresh();
+
+				/* SELECTION IS TWO-WAY (lane SKEL2, bungo 2026-09-11: "click a
+				 * bone in the viewport -> its row is current and visible in the
+				 * manager").
+				 *
+				 * Refreshing the tree was all this handler ever did, so a click
+				 * on a bone in the viewport rebuilt the rows and then left them
+				 * pointing at nothing. The row is now made CURRENT and scrolled
+				 * to. `syncing` stops the row's own selection signal from
+				 * selecting the block again and re-entering refresh().
+				 */
+				if ( NifModel * m2 = skope->getNifModel() ) {
+					const int blk = m2->getBlockNumber( index );
+					if ( blk >= 0 ) {
+						if ( QTreeWidgetItem * it = itemForBlock( blk ) ) {
+							*syncing = true;
+							tree->setCurrentItem( it );
+							tree->clearSelection();
+							it->setSelected( true );
+							QTreeWidgetItem * p = it->parent();
+							while ( p ) { p->setExpanded( true ); p = p->parent(); }
+							tree->scrollToItem( it, QAbstractItemView::EnsureVisible );
+							*syncing = false;
+							paintSelection();
+						}
+					}
+				}
+			} );
+
+		/* DOUBLE-CLICK A ROW FRAMES THE BONE (bungo, same ruling). It goes
+		 * through the application's own Frame Selected -- GLView::frameSelected()
+		 * -- rather than moving the camera here, so a bone frames the way a mesh
+		 * does and there is one camera law.
+		 */
+		QObject::connect( tree, &QTreeWidget::itemDoubleClicked, panel,
+			[=]( QTreeWidgetItem * it, int ) {
+				NifModel * m2 = skope->getNifModel();
+				const int blk = it ? it->data( 0, Qt::UserRole ).toInt() : -1;
+				if ( !m2 || blk < 0 || !ogl )
+					return;
+				ogl->objectSelectClick( blk, false );
+				ogl->frameSelected();
+			} );
+	}
+
+	/* HOVER IS TWO-WAY TOO. The row under the pointer lights the bone in the
+	 * viewport, and the bone under the pointer lights the row -- the same
+	 * highlight, because both ends read skeletonKindColor( kind, 3 ).
+	 */
+	QObject::connect( tree, &QTreeWidget::itemEntered, panel,
+		[=]( QTreeWidgetItem * it, int ) {
+			if ( ogl )
+				ogl->setSkeletonOverlayHover( it ? it->data( 0, Qt::UserRole ).toInt() : -1 );
+		} );
+	if ( ogl ) {
+		QObject::connect( ogl, &GLView::skeletonOverlayHoverChanged, panel,
+			[=]( int block ) {
+				const QColor hov = skeletonKindColor( 0, 3 );
+				std::function<void( QTreeWidgetItem * )> walk = [&]( QTreeWidgetItem * w ) {
+					const bool hit = ( w->data( 0, Qt::UserRole ).toInt() == block );
+					if ( !w->isSelected() ) {
+						for ( int c = 0; c < 4; c++ )
+							w->setForeground( c, hit ? hov
+								: skeletonKindColor( w->data( 0, Qt::UserRole + 1 ).toInt(), 0 ) );
+					}
+					if ( hit )
+						tree->scrollToItem( w, QAbstractItemView::EnsureVisible );
+					for ( int i = 0; i < w->childCount(); i++ )
+						walk( w->child( i ) );
+				};
+				for ( int i = 0; i < tree->topLevelItemCount(); i++ )
+					walk( tree->topLevelItem( i ) );
 			} );
 	}
 

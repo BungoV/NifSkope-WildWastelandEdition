@@ -22,10 +22,23 @@ See the LICENSE.md file for the full license text.
 #include "starterscene.h"
 #include "btdterrain.h"
 #include "esmdata.h"
+#include "esmweather.h"
 #include "lodgen.h"
+#include "lodgenchunkpass.h"
+#include "lodgenlayout.h"
+#include "lodgenparallel.h"
+#include "nifparsestress.h"
+#include "nativeemit.h"
+#include "lodifile.h"
+#include "lodofile.h"
+#include "lodbfile.h"
+#include <QDateTime>
+#include <QDirIterator>
 #include "lodtfile.h"
+#include "watermark.h"
 #include "io/lodmfile.h"
 #include "io/lodvfile.h"
+#include <QElapsedTimer>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QJsonValue>
@@ -35,6 +48,11 @@ See the LICENSE.md file for the full license text.
 #include <memory>
 #include <QDataStream>
 #include "gl/hknpdecode.h"
+#include "gltfexportnif.h"			// lane HKX4
+#include "gltfexportchar.h"			// lane GLTFEXPORT1
+#include "gltfexportopts.h"			// lane GLTFEXPORT1
+#include "gltfimport.h"				// lane BUILD8
+#include "hkxwrite.h"				// lane BUILD8
 #include "gl/hknpencode.h"
 #include "physics/ragdollsim.h"
 
@@ -45,12 +63,18 @@ See the LICENSE.md file for the full license text.
 #include "spells/animationsetup.h"
 #include "spells/normaltransfer.h"
 #include "io/pbrmfile.h"
+#include "io/pbrmresolve.h"
+#include "io/nifxfile.h"
 
 #include <QCoreApplication>
+#include <QMutex>
+#include <cstdio>
 #include <QCryptographicHash>
 #include <QDir>
+#include <QBuffer>
 #include <QFile>
 #include <QFileInfo>
+#include <QJsonDocument>
 #include <QSettings>
 #include <QTextStream>
 
@@ -111,17 +135,51 @@ void attachParentConsole()
 }
 #endif
 
-//! Silence Qt's chatter; the CLI's own output is the product.
+/* Silence Qt's chatter; the CLI's own output is the product.
+ *
+ * THIS HANDLER IS CALLED FROM WORKER THREADS, AND IT USED TO WRITE THROUGH
+ * err() -- a function-local static QTextStream with no lock (lane RESUME3,
+ * 2026-09-11). QTextStream is not reentrant: it grows one QString write
+ * buffer in place. A `-no-gui lodgen --chunk-threads 16` bake reaches here
+ * from every worker at once through qWarning() in
+ * GameResources::get_file -- one warning per missing .bgsm, and the road
+ * pass misses the same material on every placement -- and the heap went:
+ * 0xC0000374 on 3 of 5 bare Sanctuary runs, with two of four symbolised
+ * faults taken INSIDE this function and the other two in an innocent
+ * QList reallocation that reached the corrupted heap first.
+ *
+ * The CRT locks the FILE *, so fputs from many threads is safe; the mutex is
+ * only so a line and its newline cannot be split. On one thread the bytes
+ * and their order are exactly what err() produced -- that is the way back.
+ */
 void cliMessageHandler( QtMsgType type, const QMessageLogContext &, const QString & msg )
 {
-	if ( type == QtWarningMsg || type == QtCriticalMsg || type == QtFatalMsg )
-		err() << msg << Qt::endl;
+	if ( type != QtWarningMsg && type != QtCriticalMsg && type != QtFatalMsg )
+		return;
+	static QMutex cliLogMutex;
+	const QByteArray line = msg.toLocal8Bit();
+	QMutexLocker lock( &cliLogMutex );
+	std::fputs( line.constData(), stderr );
+	std::fputc( '\n', stderr );
 }
 
 //! Shared init the GUI path does in main.cpp: settings identity, working
 //! directory (nif.xml is resolved relative to it) and the format descriptions.
 bool initModelLayer()
 {
+#ifdef Q_OS_WIN32
+	/* NO CRASH DIALOG FROM A HEADLESS RUN (2026-09-11, lane BAKEPERF1).
+	 *
+	 * Six Windows "Application Error" boxes reached bungo's desktop while this
+	 * lane was bisecting a fault in a `-no-gui lodgen` bake. A headless run has
+	 * no business showing a window at all, and a modal error box obeys neither
+	 * the second-monitor rule nor the never-foreground one. The mode is
+	 * inherited by anything this process starts, so a driver script gets it
+	 * too. A crash still fails the run and still sets the exit code -- what
+	 * goes away is the dialog. */
+	SetErrorMode( SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX
+		| SEM_NOALIGNMENTFAULTEXCEPT | SEM_NOOPENFILEERRORBOX );
+#endif
 	QCoreApplication::setOrganizationName( "NifTools" );
 	QCoreApplication::setOrganizationDomain( "niftools.org" );
 
@@ -279,6 +337,19 @@ int cmdPbrm( const QString & file )
 	out() << "  ao         " << m.ao << " (override " << m.overrideAo << ")" << Qt::endl;
 	out() << "  f0         " << m.f0 << " (override " << m.overrideF0 << ")" << Qt::endl;
 	out() << "  alpha      " << m.alphaCarries << Qt::endl;
+	if ( m.specularV6 ) {
+		out() << "  specWeight " << m.specularWeight << " (override " << m.overrideSpecularWeight << ")" << Qt::endl;
+		out() << "  specIor    " << m.specularIor << " max " << m.specularIorMax
+		      << " (override " << m.overrideSpecularIor << ")" << Qt::endl;
+		out() << "  specTint   " << m.specularTint[0] << " " << m.specularTint[1] << " " << m.specularTint[2]
+		      << " (override " << m.overrideSpecularColor << ")" << Qt::endl;
+		slotLine( "specColor", m.specularColor );
+	}
+	// The dielectric F0 LEVEL the upload carries (FO4CS wave 88 law), and the
+	// same file read through the v4/v5 law -- the gate's red control.
+	out() << "  F0 level   " << QString::number( double( pbrmDielectricF0( m ) ), 'f', 3 )
+	      << ( m.specularV6 ? " (v6: weight x ((ior-1)/(ior+1))^2, cap 1)" : " (v4/v5: f0, cap 0.16)" )
+	      << "  v5-law read " << QString::number( double( pbrmDielectricF0( m, PbrmF0Law::V5 ) ), 'f', 3 ) << Qt::endl;
 	out() << "  porosity   " << m.porosity << " (override " << m.overridePorosity << ")" << Qt::endl;
 	out() << "  normal str " << m.normalStrength << " (override " << m.overrideNormal
 	      << ", heightInBlue " << m.heightInBlue << ", curvatureInAlpha " << m.curvatureInAlpha << ")" << Qt::endl;
@@ -297,13 +368,15 @@ int cmdPbrm( const QString & file )
 }
 
 /*! `pbrm-resolve <file.nif>` — for every shader property in a NIF, report which
- * `.pbrm` (if any) would be adopted and by which route. Resolution otherwise has
- * no observable effect until the PBR shader path exists, so without this it
- * could only be checked by reading the code.
+ * `.pbrm` (if any) would be adopted, by which route, and why every other
+ * candidate was declined.
  *
- * Deliberately reimplements the resolution rule rather than calling
- * BSShaderLightingProperty: that lives in the GL layer, which `-no-gui` never
- * builds. Keep the two in step — the rule is small and stated in both places.
+ * Calls THE ONE candidate function, pbrmResolve() in src/io/pbrmresolve.h, the
+ * same one the viewport's BSShaderLightingProperty::resolvePbrm and lodgen's
+ * material mask call (lane PBRR1). What this command cannot see is the
+ * WW_PBRM_SWAP pin's swap (a viewport pin); the .nifx beside the NIF, the
+ * Auto-replace setting (QSettings, or WW_PBRM_AUTOREPLACE=0/1), WW_PBRM_ORDER
+ * and the FO76 step (FO4 NIFs, bsver 130-139) are honoured.
  */
 int cmdPbrmResolve( const QString & file )
 {
@@ -314,55 +387,155 @@ int cmdPbrmResolve( const QString & file )
 	}
 
 	QSettings settings;
-	const bool autoReplace = settings.value( QStringLiteral( "Settings/Render/PBRM Auto Replace" ), true ).toBool();
-	out() << "auto-replace: " << ( autoReplace ? "on" : "off" ) << Qt::endl;
+	bool autoReplace = settings.value( QStringLiteral( "Settings/Render/PBRM Auto Replace" ), true ).toBool();
+	const QString envAuto = qEnvironmentVariable( "WW_PBRM_AUTOREPLACE" );
+	if ( envAuto == QLatin1String( "0" ) )
+		autoReplace = false;
+	else if ( envAuto == QLatin1String( "1" ) )
+		autoReplace = true;
+	QList<PbrmRoute> order = pbrmDefaultOrder();
+	const QString envOrder = qEnvironmentVariable( "WW_PBRM_ORDER" );
+	if ( !envOrder.isEmpty() ) {
+		QString why;
+		if ( !pbrmParseOrder( envOrder, order, why ) ) {
+			err() << "error: WW_PBRM_ORDER refused: " << why << Qt::endl;
+			return 2;
+		}
+	}
+	const PbrmF0Law law = qEnvironmentVariable( "WW_PBRM_F0_LAW" ) == QLatin1String( "v5" )
+		? PbrmF0Law::V5 : PbrmF0Law::Auto;
+	QStringList orderNames;
+	for ( PbrmRoute r : order )
+		orderNames << QLatin1String( pbrmRouteName( r ) );
+	out() << "auto-replace: " << ( autoReplace ? "on" : "off" )
+	      << "  order: " << orderNames.join( QLatin1Char( ',' ) )
+	      << "  f0law: " << ( law == PbrmF0Law::V5 ? "v5" : "auto" ) << Qt::endl;
+
+	auto reader = [&nif]( const QString & path, QByteArray & bytes ) -> bool {
+		bytes.clear();
+		if ( nif.findResourceFile( path, "materials", "" ).isEmpty() )
+			return false;
+		nif.getResourceFile( bytes, path, "materials", "" );
+		return !bytes.isEmpty();
+	};
+	const QString nifAbs = QFileInfo( file ).absoluteFilePath();
+	const quint32 bsver = nif.getBSVersion();
 
 	int shaders = 0, adopted = 0;
 	for ( int b = 0; b < nif.getBlockCount(); b++ ) {
 		const QModelIndex iBlock = nif.getBlockIndex( b );
 		if ( !nif.blockInherits( iBlock, "BSShaderProperty" ) )
 			continue;
-		const QString matName = nif.get<QString>( iBlock, "Name" );
-		if ( matName.isEmpty() )
-			continue;
 		shaders++;
 
-		QString candidate, route;
-		if ( matName.endsWith( QLatin1String( ".pbrm" ), Qt::CaseInsensitive ) ) {
-			candidate = matName;
-			route = QStringLiteral( "direct" );
-		} else if ( autoReplace
-			&& ( matName.endsWith( QLatin1String( ".bgsm" ), Qt::CaseInsensitive )
-				|| matName.endsWith( QLatin1String( ".bgem" ), Qt::CaseInsensitive ) ) ) {
-			candidate = matName.left( matName.length() - 5 ) + QStringLiteral( ".pbrm" );
-			route = QStringLiteral( "same-name" );
-		}
+		PbrmResolveInput in;
+		in.material = nif.get<QString>( iBlock, "Name" );
+		const int parent = nif.getParent( b );
+		if ( parent >= 0 )
+			in.shapeName = nif.get<QString>( nif.getBlockIndex( parent ), "Name" );
+		if ( !in.shapeName.isEmpty() )
+			in.nifxPbrm = nifxMaterialFor( nifAbs, in.shapeName, &in.nifxNote );
+		in.sibling = autoReplace;
+		in.fo76 = ( bsver >= 130 && bsver < 140 );
+		in.order = order;
 
-		out() << QStringLiteral( "[%1] %2" ).arg( b ).arg( matName ) << Qt::endl;
-		if ( candidate.isEmpty() ) {
-			out() << "      no pbrm route" << Qt::endl;
-			continue;
-		}
-
-		QByteArray data;
-		nif.getResourceFile( data, candidate, "materials", "" );
-		if ( data.isEmpty() ) {
-			out() << "      " << route << " -> " << candidate << " : not found" << Qt::endl;
-			continue;
-		}
-		const PbrmMaterial m = pbrmParse( data );
-		if ( !m.error.isEmpty() ) {
-			out() << "      " << route << " -> " << candidate << " : PARSE ERROR " << m.error << Qt::endl;
-		} else if ( m.unsupported ) {
-			out() << "      " << route << " -> " << candidate << " : unsupported (fail closed)" << Qt::endl;
-		} else {
-			out() << "      " << route << " -> " << candidate
-			      << " : ADOPTED, features 0x" << Qt::hex << m.features << Qt::dec << Qt::endl;
+		const PbrmResolveResult r = pbrmResolve( in, reader );
+		QString f0 = QStringLiteral( "none" );
+		if ( r.route != PbrmRoute::Legacy ) {
+			f0 = QString::number( double( pbrmDielectricF0( r.material, law ) ), 'f', 3 );
 			adopted++;
 		}
+		out() << QStringLiteral( "[%1] shape=\"%2\" material=\"%3\"" ).arg( b ).arg( in.shapeName, in.material ) << Qt::endl;
+		out() << QStringLiteral( "      route=%1 path=\"%2\" envelope=%3 f0=%4" )
+			.arg( QLatin1String( pbrmRouteName( r.route ) ), r.path, r.envelope, f0 ) << Qt::endl;
+		if ( r.route == PbrmRoute::Legacy )
+			out() << "      refusal=\"" << r.refusal << "\"" << Qt::endl;
+		for ( const QString & t : r.tried )
+			out() << "      tried " << t << Qt::endl;
 	}
 
 	out() << shaders << " shader properties, " << adopted << " would adopt a pbrm" << Qt::endl;
+	return 0;
+}
+
+/*! `nifx <in.nifx> [--set <node>=<pbrm>]... [--remove <node>]... [--canonical] [--out <file>]`
+ *
+ * Reads a .nifx (docs/NIFSKOPE_PBR_RENDERER.md s2.4) with the span-preserving
+ * reader, applies the edits in order and writes the bytes. With no edit the
+ * output is the input, byte for byte: the round-trip gate (d). `--canonical`
+ * re-serialises through QJsonDocument instead -- the RED control, since that
+ * reorders keys and reformats unknown sections. Prints the parse summary.
+ * Exit 0 ok, 1 read/parse/edit failure, 2 usage.
+ */
+int cmdNifx( const QStringList & args )
+{
+	QString in, outPath;
+	bool canonical = false;
+	QList<QPair<QString, QString>> edits;	// (node, pbrm); pbrm null = remove
+	for ( int i = 0; i < args.size(); i++ ) {
+		const QString & t = args.at( i );
+		if ( t == QLatin1String( "--set" ) && i + 1 < args.size() ) {
+			const QString v = args.at( ++i );
+			const int eq = v.indexOf( QLatin1Char( '=' ) );
+			if ( eq <= 0 ) {
+				err() << "error: --set wants <node>=<pbrm>" << Qt::endl;
+				return 2;
+			}
+			edits.append( { v.left( eq ), v.mid( eq + 1 ) } );
+		} else if ( t == QLatin1String( "--remove" ) && i + 1 < args.size() ) {
+			edits.append( { args.at( ++i ), QString() } );
+		} else if ( t == QLatin1String( "--canonical" ) ) {
+			canonical = true;
+		} else if ( t == QLatin1String( "--out" ) && i + 1 < args.size() ) {
+			outPath = args.at( ++i );
+		} else if ( !t.startsWith( QLatin1String( "--" ) ) && in.isEmpty() ) {
+			in = t;
+		} else {
+			err() << "error: unknown nifx argument " << t << Qt::endl;
+			return 2;
+		}
+	}
+	if ( in.isEmpty() ) {
+		err() << "error: 'nifx' needs a <file.nifx>" << Qt::endl;
+		return 2;
+	}
+
+	NifxDocument d = nifxParseFile( in );
+	if ( !d.ok ) {
+		err() << "error: " << d.error << Qt::endl;
+		return 1;
+	}
+	for ( const auto & e : edits ) {
+		QString why;
+		const bool ok = e.second.isNull() ? nifxRemoveMaterial( d, e.first, &why )
+			: nifxSetMaterial( d, e.first, e.second, &why );
+		if ( !ok ) {
+			err() << "error: edit of \"" << e.first << "\" refused: " << why << Qt::endl;
+			return 1;
+		}
+	}
+
+	out() << "nifx version=" << d.version << " members=" << d.members.size()
+	      << " unknown=" << d.unknownSections.join( QLatin1Char( ',' ) )
+	      << " material=" << d.material.size() << Qt::endl;
+	for ( const auto & m : d.material )
+		out() << "  node=\"" << m.node << "\" pbrm=\"" << m.pbrm << "\" valid=" << ( m.valid ? 1 : 0 )
+		      << ( m.problem.isEmpty() ? QString() : QStringLiteral( " problem=\"%1\"" ).arg( m.problem ) ) << Qt::endl;
+	for ( const QString & w : d.warnings )
+		out() << "  warning: " << w << Qt::endl;
+
+	if ( !outPath.isEmpty() ) {
+		const QByteArray bytes = canonical
+			? QJsonDocument::fromJson( d.bytes ).toJson( QJsonDocument::Indented )
+			: nifxSerialize( d );
+		QFile f( outPath );
+		if ( !f.open( QIODevice::WriteOnly ) || f.write( bytes ) != bytes.size() ) {
+			err() << "error: cannot write " << outPath << Qt::endl;
+			return 1;
+		}
+		out() << "wrote " << bytes.size() << " bytes to " << outPath
+		      << ( canonical ? " (canonical: QJsonDocument re-serialised)" : "" ) << Qt::endl;
+	}
 	return 0;
 }
 
@@ -2309,10 +2482,33 @@ int cmdBtd( const QString & file, bool infoOnly, bool haveRegion,
  */
 int cmdLodt( const QString & file, bool infoOnly, bool haveRegion,
 	int rx0, int ry0, int rx1, int ry1, int lod, const QString & planeKey,
-	const QString & outFile )
+	const QString & outFile, bool waterCensus, bool waterSelfTest )
 {
 	LodtWorldInfo info;
 	QString error;
+	/* --water-census reads the FILE, not the writer that made it, and prints
+	 * the body table it finds. It runs before the header print because a file
+	 * with no bodies must SAY so and stop, rather than draw an empty table. */
+	if ( waterSelfTest ) {
+		/* The control needs no file at all -- the worldspace it classifies is
+		 * built in memory -- but the command takes one, so it is accepted and
+		 * ignored rather than made a second spelling of the command. */
+		QString report;
+		const bool ok = lodtWaterSelfTest( &report, &error );
+		out() << report << Qt::endl;
+		if ( !ok && !error.isEmpty() )
+			err() << "error: " << error << Qt::endl;
+		return ok ? 0 : 1;
+	}
+	if ( waterCensus ) {
+		QString census;
+		if ( !lodtWaterCensus( file, &census, &error ) ) {
+			err() << "error: " << error << Qt::endl;
+			return 1;
+		}
+		out() << census << Qt::endl;
+		return 0;
+	}
 	if ( !lodtReadWorldInfo( file, info, &error ) ) {
 		err() << "error: " << error << Qt::endl;
 		return 1;
@@ -2410,6 +2606,193 @@ static bool cmdLodgenVtEstimate( const EsmWorld & world, const LodgenVtOptions &
 	return true;
 }
 
+/*! The `.lodl` water-body module's switches, filled by the argument loop.
+ *
+ *  `cmdLodgen` already carries forty-five parameters; five more for one
+ *  optional section would be churn nobody reads. Default-constructed means the
+ *  module is OFF, which is the state every run that does not name
+ *  `--water-bodies` is in. */
+static LodtWaterOptions gLodlWater;
+
+/*! INCREMENTAL REGENERATION (lane INCR1, 2026-09-12), filled by the argument
+ *  loop for the same reason gLodlWater is: cmdLodgen already carries
+ *  forty-five parameters.
+ *
+ *  `gLgIncremental` is the out-dir the operator pointed `--incremental` at,
+ *  empty when the flag was not given.
+ *
+ *  `gLgSwitchDigest` is sha1 over the ARGUMENT VECTOR, in order, with the
+ *  tokens in gLgSwitchSkip and their values dropped. It is deliberately
+ *  CONSERVATIVE: reordering flags, or spelling a default explicitly, changes
+ *  the digest and forces a full bake. That costs time and can never cost
+ *  correctness, which is the right way round -- a switch digest that missed a
+ *  flag would ship yesterday's sheets under today's settings.
+ *  docs/LODGEN_LEDGER_FORMAT.md section 3 has the skip list and why each
+ *  entry on it cannot reach a single output byte. */
+static QString gLgIncremental;
+static QString gLgSwitchDigest;
+
+/*! The argument vector verbatim and the resource stack as the run was given
+ *  them (lane BAKEREC1, 2026-09-17). Globals for the same reason the two above
+ *  are: `cmdLodgen` already carries forty-five parameters. The record writes
+ *  both, so the way back to reproducing a bake exactly is IN the bake. */
+static QStringList gLgArgv;
+static QStringList gLgResourceStack;
+
+/*! `--bake-record <ws.lodb>` (lane BAKEREC1, 2026-09-17): print a record's
+ *  summary and diff its plugin list against the one in hand. The output INCR1
+ *  acts on. A global for the same reason the others are. */
+static QString gLgBakeRecord;
+/*! THE PER-CHUNK NATIVE CACHE (lane INCR1, 2026-09-17), on by default.
+ *  `--no-native-cache` is the EXACT way back: no `.lodj` is written, the
+ *  record's `out` rows are what they were before this lane, and
+ *  `--incremental --native` refuses exactly as it used to (CONSTITUTION 10).
+ *  Sticky like `gLgBakeRecord` beside it, for the same reason: the parser
+ *  and the driver are different functions and this is not worth a parameter
+ *  in a signature that already has thirty. */
+static bool gLgNativeCache = true;
+
+/*! Print a line AND record it if it is a census line. One choke point, so a
+ *  census line that is printed is a census line that is recorded. The FLOOR is
+ *  in the gate: `tests/spells/lodgen_bakerec.sh` leg (a) greps the bake's own
+ *  log for the registered keywords and requires the record's set to equal it,
+ *  so a print site that forgot this helper fails a check. */
+static void censusOut( const QString & line )
+{
+	lodbNoteCensus( line );
+	out() << line << Qt::endl;
+}
+
+/*! WHERE THE RECORD GOES, composed in ONE place (lane BAKEREC1, 2026-09-17).
+ *
+ *  Under the FO4CS target it sits with the files it describes, at
+ *  `<mod>/FO4CSLOD/<ws>/<ws>.lodb` -- lane LAYOUT1's ruling, written down in
+ *  `docs/LODGEN_LEDGER_FORMAT.md` section 1 and in `src/lodgenlayout.h`.
+ *  Without that target there is no FO4CSLOD root at all, so it keeps its
+ *  version-1 home beside the `.BTR`/`.BTO` files it is a record OF.
+ *
+ *  THE STOCK TARGET STILL WRITES ONE, and that is a deliberate divergence from
+ *  this lane's brief. `--incremental` has refused without a record since lane
+ *  INCR1 shipped it; making the record FO4CS-only would have retired the
+ *  incremental path for every stock bake, silently, on the way to adding a
+ *  feature. The stock ENGINE output -- `.BTR`, `.BTO`, the chunk sheets -- is
+ *  untouched either way, which is what the byte-identity gates actually pin;
+ *  each of them already excuses the `.lodb` by name and compares it field by
+ *  field instead. */
+static QString lodbRecordPath( const QString & outDir, const QString & ws, bool fo4csTarget )
+{
+	return fo4csTarget
+		? ( lodgenFo4csWorldDir( outDir, ws ) + QChar( '/' ) + ws + QStringLiteral( ".lodb" ) )
+		: ( outDir + QChar( '/' ) + ws + QStringLiteral( ".lodb" ) );
+}
+
+/*! The record an `--incremental` run must diff against, FOUND rather than
+ *  assumed: the previous bake may have been a stock one or an FO4CS one, and
+ *  this run has no way to know which. Both spots are looked at, the FO4CS one
+ *  first. Empty when neither holds a file, which is the `NO_LEDGER` refusal. */
+static QString lodbFindRecord( const QString & dir, const QString & ws )
+{
+	const QString a = lodbRecordPath( dir, ws, true );
+	if ( QFileInfo( a ).isFile() )
+		return a;
+	const QString b = lodbRecordPath( dir, ws, false );
+	if ( QFileInfo( b ).isFile() )
+		return b;
+	return QString();
+}
+
+/*! `--keep-bto` (lane BTOFREE1, 2026-09-16), a global for the same reason the
+ *  two above are: cmdLodgen already carries forty-five parameters.
+ *
+ *  Under the FO4CS target (`--native <dir>`) the `.BTO` chunk files are
+ *  scaffolding, not output: the texture arrays, the card arrays, the shape
+ *  merge and the far-ring cut read them back, and nothing downstream of the
+ *  bake does. Default now builds them in a scratch directory and removes them.
+ *  `--keep-bto` is the exact way back -- the chunks land in the mod folder
+ *  exactly as they did, byte for byte, which is what the gate pins. It is NOT
+ *  in the switch-digest skip list, because it decides what is on disk. */
+static bool gLgKeepBto = false;
+
+/*! Flags whose TOKEN AND VALUE are both dropped from the digest, because
+ *  neither can make a TRACKED CHUNK OUTPUT stale. That is the whole test, and
+ *  it is narrower than "cannot reach an output byte": the ledger tracks the
+ *  per-chunk .BTO/.BTR/.DDS files it lists and nothing else, so a flag that
+ *  writes a SEPARATE product into a SEPARATE directory is not its business.
+ *
+ *  A flag is here if it names WHERE files go, or HOW MANY threads carry them,
+ *  or WHICH FILE an asset is read from -- and in that last case only because
+ *  the ledger digests the asset's BYTES through the same lodgenReadAsset() the
+ *  bake uses, so moving a mod folder still dirties every chunk whose assets
+ *  changed under it.
+ *
+ *  --native and --native-mesh-report are here, and they were taken OFF for one
+ *  afternoon on the reasoning that a flag changing what a run WRITES belongs in
+ *  the digest. That reasoning cost tests/spells/lodgen_native.sh check 5 -- the
+ *  stock bake is byte-identical with and without --native -- because the only
+ *  file that then differed was the ledger recording the flag. The pair goes to
+ *  its own --native directory and cannot touch a chunk; the run that WOULD be
+ *  wrong (an incremental one) is refused outright a few lines below, which is a
+ *  better answer than a switch digest that fires on the honest case too.
+ *
+ *  --threads is on the list, and that is a claim: BAKEPERF1's pass retires
+ *  every job on the calling thread IN JOB ORDER, so the worker count cannot
+ *  reach a byte. If that ever stops being true this line is the bug. */
+static const char * const gLgSwitchSkip[] = {
+	"--out-dir", "--tex-dir", "--data-root", "--incremental",
+	"--threads", "--chunk-threads", "--preview-dir",
+	"--resource", "--plugins-txt",
+	"--native", "--native-mesh-report",
+	nullptr
+};
+
+/*! Flags whose TOKEN stays in the digest and whose VALUE is dropped. The list
+ *  exists because a flag can be both things at once: --vt makes the chunk
+ *  sheets come from the virtual-texture pyramid instead of the stock per-chunk
+ *  composite -- a different picture from the same inputs, so the flag must be
+ *  digested -- while its argument is only a place to put the pyramid, exactly
+ *  like --out-dir's.
+ *
+ *  Digesting that path made two identical commands write two different ledgers
+ *  whenever they were pointed at different directories, which is what
+ *  tests/spells/lodgen_roads.sh R1 does on purpose: it bakes --no-roads twice
+ *  into roadOff/ and roadOff2/ and compares every byte. One of the two kinds of
+ *  list would have been enough for either flag; neither was enough for both. */
+static const char * const gLgSwitchSkipValue[] = {
+	"--vt",
+	nullptr
+};
+
+static QString lodgenSwitchDigestOf( const QStringList & a )
+{
+	QCryptographicHash h( QCryptographicHash::Sha1 );
+	for ( int i = 0; i < a.size(); i++ ) {
+		bool skip = false;
+		for ( const char * const * s = gLgSwitchSkip; *s; s++ ) {
+			if ( a.at( i ) == QLatin1String( *s ) ) {
+				skip = true;
+				i++;                    /* and its value */
+				break;
+			}
+		}
+		if ( skip )
+			continue;
+		for ( const char * const * s = gLgSwitchSkipValue; *s; s++ ) {
+			if ( a.at( i ) == QLatin1String( *s ) ) {
+				h.addData( a.at( i ).toUtf8() );   /* the flag, never its path */
+				h.addData( QByteArray( "\x1f", 1 ) );
+				skip = true;
+				i++;
+				break;
+			}
+		}
+		if ( skip )
+			continue;
+		h.addData( a.at( i ).toUtf8() );
+		h.addData( QByteArray( "\x1f", 1 ) );
+	}
+	return QString::fromLatin1( h.result().toHex() );
+}
+
 //! `lodgen <file.esm>` — the LOD generation campaign's ESM record layer
 //! (docs/LODGEN_PLAN.md rung 0). --list-worldspaces enumerates WRLD records;
 //! --worldspace/--cell inspect one cell: LAND corner heights, REFR counts,
@@ -2430,8 +2813,20 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 	bool slotFallback, bool atlasBc1, const LodgenSimplifyOptions & simplify,
 	const LodgenCoverOptions & coverOpts, const LodgenVtOptions & vtOptsIn,
 	const QString & vtDir, int vtBtr, bool vtEstimate, const QString & lodmCheck,
-	const QString & lodvCheck, bool corpusHash, int cardAuxDiv )
+	const QString & lodvCheck, bool corpusHash, int cardAuxDiv, const QString & nativeDir, const QString & nativeVerifyLodo,
+	const QString & nativeVerifyLodi, const QString & nativeFixture, const QString & nativeMeshReport,
+	bool nativeVerifyCorpus, bool nativeLadder, bool nativeOccluders,
+	bool libraryNear, bool ladderFoliage, float silhouetteMin, bool placementAo, bool vertexAo, bool lodiV7,
+	bool scrappable, bool identityJoinLegacy, float identityJoinGap, bool treesOnly,
+	bool aggregate, int aggMin, int aggTile, int aggViews )
 {
+	/* The layout clause starts blank for this run and is filled by the writers
+	 * themselves as they open their files (lane LAYOUT1, 2026-09-16). It is
+	 * cleared HERE, at the head of the whole sub-command, because the pyramid,
+	 * the landscape file and the native pair are written by three different
+	 * branches below and a clear next to any one of them would throw the
+	 * others' notes away. */
+	lodgenClearLayoutCensus();
 	/* Ground cover refusals, before any plugin is opened: a flag out of range
 	 * must say so in one line rather than bake a worldspace and be wrong. */
 	if ( !( coverOpts.tintStrength >= 0.0f && coverOpts.tintStrength <= 1.0f ) ) {
@@ -2451,6 +2846,174 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 	 * OWN parser/validator, so a
 	 * harness checks the shipped implementation and not a reimplementation
 	 * of it. Both print keyword lines and return 1 on a refusal. */
+	if ( !nativeFixture.isEmpty() ) {
+		QStringList rep; QString nerr;
+		if ( !lodNativeFixtureWrite( nativeFixture, &rep, &nerr ) ) { err() << "error: " << nerr << Qt::endl; return 1; }
+		for ( const QString & l : rep ) out() << l << Qt::endl;
+		return 0;
+	}
+	/* ===== `--bake-record <ws.lodb>` (lane BAKEREC1, 2026-09-17) =========
+	 *
+	 * Prints what the record says, then -- when a plugin list is in hand
+	 * (positional, `--plugins-txt` or `--mo2`) -- says what has moved since.
+	 * Keyword lines, one fact a line, because this is the output lane INCR1
+	 * parses to decide whether a partial rebake is even legal.
+	 *
+	 * It reads a file and loads no ESM of its own, so it answers in
+	 * milliseconds; the plugin BYTE hashes are only recomputed for the
+	 * plugins whose name and size still match, which is the only case the
+	 * cheap fields cannot settle. */
+	if ( !gLgBakeRecord.isEmpty() ) {
+		LodgenLedger rec;
+		QString rerr;
+		if ( !lodgenReadLedger( gLgBakeRecord, &rec, &rerr ) ) {
+			out() << "bake-record REFUSED " << rerr << Qt::endl;
+			return 1;
+		}
+		out() << "bake-record path " << gLgBakeRecord << Qt::endl;
+		out() << "bake-record worldspace " << rec.worldEdid << Qt::endl;
+		out() << "bake-record worldspaceForm " << QString::number( rec.worldspace, 16 ) << Qt::endl;
+		out() << "bake-record dim " << rec.dim << Qt::endl;
+		out() << "bake-record region " << QString( "%1 %2 %3 %4" ).arg( rec.region[0] )
+			.arg( rec.region[1] ).arg( rec.region[2] ).arg( rec.region[3] ) << Qt::endl;
+		out() << "bake-record target " << ( rec.fo4csTarget ? "fo4cs" : "stock" ) << Qt::endl;
+		out() << "bake-record exe " << rec.exeStamp << Qt::endl;
+		out() << "bake-record exeBytes " << rec.exeBytes << Qt::endl;
+		out() << "bake-record baked " << rec.bakedUtc << Qt::endl;
+		out() << "bake-record switchesDigest " << rec.switches << Qt::endl;
+		for ( const QString & n : { QStringLiteral( "loadOrderHash" ), QStringLiteral( "pluginCorpusHash" ),
+				QStringLiteral( "objectCorpusHash" ), QStringLiteral( "modelCorpusHash" ),
+				QStringLiteral( "cardCorpusHash" ) } ) {
+			const QString v = n == QLatin1String( "loadOrderHash" )    ? rec.loadOrderHashHex
+							: n == QLatin1String( "pluginCorpusHash" ) ? rec.pluginCorpusHashHex
+							: n == QLatin1String( "objectCorpusHash" ) ? rec.objectCorpusHashHex
+							: n == QLatin1String( "modelCorpusHash" )  ? rec.modelCorpusHashHex
+							                                          : rec.cardCorpusHashHex;
+			//  A hash the bake never wrote reads `n/a`, never a zero: a zero is
+			//  a value and would be believed.
+			out() << "bake-record hash " << n << " " << ( v.isEmpty() ? QStringLiteral( "n/a" ) : v ) << Qt::endl;
+		}
+		out() << "bake-record plugins " << rec.plugins.size() << Qt::endl;
+		for ( const LodbPlugin & pl : rec.plugins )
+			out() << QString( "bake-record plugin %1 %2 %3 %4 %5" ).arg( pl.index ).arg( pl.name )
+				.arg( pl.bytes ).arg( pl.hash, 16, 16, QChar( '0' ) ).arg( pl.path ) << Qt::endl;
+		out() << "bake-record resources " << rec.resources.size() << Qt::endl;
+		for ( const LodbResource & r : rec.resources )
+			out() << QString( "bake-record resource %1 %2 %3 %4" ).arg( r.kind ).arg( r.path )
+				.arg( r.bytes ).arg( r.mtimeIso.isEmpty() ? QStringLiteral( "-" ) : r.mtimeIso ) << Qt::endl;
+		out() << "bake-record switchTokens " << rec.switchTokens.size() << Qt::endl;
+		out() << "bake-record command " << rec.switchTokens.join( QChar( ' ' ) ) << Qt::endl;
+		out() << "bake-record chunks " << rec.chunks.size() << Qt::endl;
+		int outs = 0;
+		for ( const LodgenLedgerEntry & e : rec.chunks )
+			outs += e.outFiles.size();
+		out() << "bake-record outputs " << outs << Qt::endl;
+		for ( const LodgenLedgerEntry & e : rec.chunks )
+			out() << QString( "bake-record chunk %1 %2 %3 %4" ).arg( e.cx ).arg( e.cy )
+				.arg( e.dim ).arg( e.inputs ) << Qt::endl;
+		out() << "bake-record census " << rec.census.size() << Qt::endl;
+		for ( const QString & c : rec.census )
+			out() << "bake-record censusLine " << c << Qt::endl;
+		out() << "bake-record endFiles " << rec.endFiles << Qt::endl;
+		out() << "bake-record endBytes " << rec.endBytes << Qt::endl;
+
+		/* THE END LINE, CHECKED against the folder the record sits in: a bake
+		 * that died between two files, or a record truncated on the way to
+		 * disk, shows here and nowhere else. */
+		{
+			int nf = 0;
+			qint64 nb = 0;
+			const QString dir = QFileInfo( gLgBakeRecord ).absolutePath();
+			const QString self = QDir::fromNativeSeparators(
+				QFileInfo( gLgBakeRecord ).absoluteFilePath() ).toLower();
+			QDirIterator it( dir, QDir::Files, QDirIterator::Subdirectories );
+			while ( it.hasNext() ) {
+				it.next();
+				if ( QDir::fromNativeSeparators( it.fileInfo().absoluteFilePath() ).toLower() == self )
+					continue;
+				nf++;
+				nb += it.fileInfo().size();
+			}
+			out() << "bake-record endFilesNow " << nf << Qt::endl;
+			out() << "bake-record endBytesNow " << nb << Qt::endl;
+			out() << "bake-record endAgrees " << ( ( nf == rec.endFiles && nb == rec.endBytes ) ? 1 : 0 )
+				  << Qt::endl;
+		}
+
+		/* THE TWO NORMALISERS, HELD AGAINST EACH OTHER (lane INCR1,
+		 * 2026-09-17). `ww-volatile-field-law` step 3 says the mask is
+		 * written twice, in two languages, because two implementations of
+		 * one rule is the only way a wrong mask is caught. In this tree it
+		 * WAS written twice and never compared: `lodbNormalise()` had no
+		 * caller anywhere in src/, and every gate used the Python half
+		 * (`tests/spells/lodb_read.py`) alone, so a fifth volatile field
+		 * masked in one half and not the other would have gone unnoticed.
+		 *
+		 * A DIGEST is enough: the gate normalises the same file with the
+		 * Python reader, hashes it the same way and compares one hex string,
+		 * with no 97-line dump on either side. Empty lines are dropped before
+		 * masking and the join ends in one newline, which is exactly what
+		 * `lodb_read.normalise()` does -- the two agree on the TEXT, not just
+		 * on the rule. */
+		{
+			QFile nf( gLgBakeRecord );
+			if ( nf.open( QIODevice::ReadOnly ) ) {
+				QStringList raw = QString::fromUtf8( nf.readAll() )
+				                  .split( QChar( '\n' ) );
+				raw.removeAll( QString() );
+				const QStringList norm = lodbNormalise( raw );
+				const QByteArray joined =
+				    ( norm.join( QChar( '\n' ) )
+				      + QChar( '\n' ) ).toUtf8();
+				out() << "bake-record normalisedLines " << norm.size() << Qt::endl;
+				out() << "bake-record normalisedSha1 "
+				      << QString::fromLatin1( QCryptographicHash::hash( joined,
+				            QCryptographicHash::Sha1 ).toHex() ) << Qt::endl;
+			} else {
+				out() << "bake-record normalisedSha1 n/a (cannot reopen the record)"
+				      << Qt::endl;
+			}
+		}
+		/* THE DIFF. `file` is the comma list this run was given -- positional,
+		 * or the one `--plugins-txt` / `--mo2` resolved a few hundred lines
+		 * above -- so the same list the bake would use. */
+		if ( file.isEmpty() ) {
+			out() << "bake-record diff n/a (no plugin list given: pass one positionally, "
+					 "or --plugins-txt / --mo2)" << Qt::endl;
+			return 0;
+		}
+		const QStringList moved = lodbDiffPlugins( rec.plugins, file );
+		out() << "bake-record diffAgainst " << file << Qt::endl;
+		out() << "bake-record moved " << moved.size() << Qt::endl;
+		for ( const QString & m : moved )
+			out() << "bake-record moved: " << m << Qt::endl;
+		out() << "bake-record verdict "
+			  << ( moved.isEmpty() ? "the load order is the one this bake was made from"
+								   : "a partial rebake must treat every chunk those plugins reach as dirty" )
+			  << Qt::endl;
+		return moved.isEmpty() ? 0 : 1;
+	}
+	if ( !nativeVerifyLodo.isEmpty() ) {
+		QString rep, nerr;
+		/* --native-verify-corpus re-reads the plugin and recomputes the three
+		 * staleness hashes. It is OPT-IN because the synthetic fixture's
+		 * hashes are hand-made constants belonging to no plugin, and because
+		 * loading Fallout4.esm costs seconds. A load failure REFUSES in words
+		 * rather than quietly verifying less than was asked for. */
+		EsmWorld corpusWorld;
+		const EsmWorld * cw = nullptr;
+		if ( nativeVerifyCorpus ) {
+			QString werr;
+			if ( !corpusWorld.load( file, worldspace ? worldspace : 0x3CU, &werr ) ) {
+				err() << "error: --native-verify-corpus cannot read " << file << ": " << werr << Qt::endl;
+				return 1;
+			}
+			cw = &corpusWorld;
+		}
+		if ( !lodgenNativeVerify( nativeVerifyLodo, nativeVerifyLodi, &rep, &nerr, cw ) ) { out() << "native REFUSED " << nerr << Qt::endl; return 1; }
+		out() << rep << Qt::endl;
+		return 0;
+	}
 	if ( !lodmCheck.isEmpty() ) {
 		QFile mf( lodmCheck );
 		if ( !mf.open( QIODevice::ReadOnly ) ) {
@@ -2581,6 +3144,11 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 		}
 		if ( vtOpts.compression < 0 || vtOpts.compression > 1 ) {
 			err() << "error: --vt-compress must be none or zlib" << Qt::endl;
+			return 2;
+		}
+		if ( vtOpts.halfAux && vtOpts.mips < 2 ) {
+			err() << "error: --vt-half-aux drops each aux sheet's top mip and keeps the rest, so "
+					 "it needs --vt-mips 2 or more" << Qt::endl;
 			return 2;
 		}
 		if ( !worldspace ) {
@@ -2734,8 +3302,9 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 		 * the wrong price for asking whether a file still matches its source,
 		 * and a consumer (FO4CS) will want to ask exactly that. */
 		if ( verifyOnly ) {
-			written = lodtDir + QStringLiteral( "/Terrain/" )
-				+ QFileInfo( btdPath ).completeBaseName() + QStringLiteral( ".lodl" );
+			// the landscape file moved to FO4CSLOD\<ws>\ (lane LAYOUT1, 2026-09-16)
+			written = lodgenFo4csWorldDir( lodtDir, QFileInfo( btdPath ).completeBaseName() )
+				+ QChar( '/' ) + QFileInfo( btdPath ).completeBaseName() + QStringLiteral( ".lodl" );
 			if ( !QFileInfo::exists( written ) ) {
 				err() << "error: --verify-only: no file at " << written << Qt::endl;
 				return 1;
@@ -3005,11 +3574,19 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 			return 1;
 		}
 		LodtOptions lopts;
+		/* The water module's switches. They ride a file-scope struct rather
+		 * than five more parameters on a function that already takes
+		 * forty-five; what matters is that they are OFF unless the command line
+		 * said otherwise, so a run that did not ask for bodies writes the bytes
+		 * it always wrote. */
+		lopts.water = gLodlWater;
+		if ( lopts.water.enabled && lopts.water.velocityPlugin.isEmpty() )
+			lopts.water.velocityPlugin = file;   // the WATR NAM0 fallback floor
 		QString written;
 		if ( refreshAo ) {
 			// only the AO plane, in place; then the usual read-back and cross-check
-			written = lodtDir + QStringLiteral( "/Terrain/" )
-				+ world.worldspaceEdid() + QStringLiteral( ".lodl" );
+			written = lodgenFo4csWorldDir( lodtDir, world.worldspaceEdid() )
+				+ QChar( '/' ) + world.worldspaceEdid() + QStringLiteral( ".lodl" );
 			QString aerr;
 			if ( !lodtRefreshAo( written, &aerr ) ) {
 				err() << "error: --refresh-ao: " << aerr << Qt::endl;
@@ -3018,20 +3595,29 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 			out() << "refresh-ao: " << written << Qt::endl;
 			out() << "  " << aerr << Qt::endl;
 		} else if ( verifyOnly ) {
-			written = lodtDir + QStringLiteral( "/Terrain/" )
-				+ world.worldspaceEdid() + QStringLiteral( ".lodl" );
+			written = lodgenFo4csWorldDir( lodtDir, world.worldspaceEdid() )
+				+ QChar( '/' ) + world.worldspaceEdid() + QStringLiteral( ".lodl" );
 			if ( !QFileInfo::exists( written ) ) {
 				err() << "error: --verify-only: no file at " << written << Qt::endl;
 				return 1;
 			}
 			out() << "verify: " << written << Qt::endl;
 		} else {
-			if ( !lodtWrite( world, lodtDir, lopts, &written, &berr ) ) {
+			/* THE LANDSCAPE STAGE. A `.lodl` run is where this one of the four
+			 * moves; a region bake writes no landscape file and prints 0.0 for
+			 * it, which is the other half of the written-and-moves pair. */
+			QElapsedTimer landscapeTimer;
+			landscapeTimer.start();
+			const bool lodlOk = lodtWrite( world, lodtDir, lopts, &written, &berr );
+			const qint64 msLandscape = landscapeTimer.elapsed();
+			if ( !lodlOk ) {
 				err() << "error: " << berr << Qt::endl;
 				return 1;
 			}
 			out() << "lodl: " << written << Qt::endl;
 			out() << "  " << berr << Qt::endl;   // the writer reports its census here
+			censusOut( lodgenStageTimeLine( msLandscape, 0, 0, 0 ) );
+			censusOut( lodgenBakeCensusLine() );
 		}
 
 		/* Read it straight back with the independent reader. A writer checked
@@ -3158,7 +3744,11 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 			return 1;
 		}
 		QString written;
-		if ( !lodgenBakeHeightmap( world, heightmapDir, heightmapSize, &written, &berr ) ) {
+		QElapsedTimer landscapeTimer;
+		landscapeTimer.start();
+		const bool hmOk = lodgenBakeHeightmap( world, heightmapDir, heightmapSize, &written, &berr );
+		const qint64 msLandscape = landscapeTimer.elapsed();
+		if ( !hmOk ) {
 			err() << "error: " << berr << Qt::endl;
 			return 1;
 		}
@@ -3166,6 +3756,9 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 		world.cellBounds( mnx, mny, mxx, mxy );
 		out() << "height map: " << written << Qt::endl;
 		out() << "  " << berr << Qt::endl;   // the baker reports its provenance here
+		// the shadow heightmap is the landscape stage too
+		censusOut( lodgenStageTimeLine( msLandscape, 0, 0, 0 ) );
+		censusOut( lodgenBakeCensusLine() );
 		/* The loader pins the Commonwealth's corpus hash as a constant and
 		 * refuses any other value. Ours is computed from the ESM by the same
 		 * walk; if the two ever disagree this run fails loudly here rather than
@@ -3280,6 +3873,7 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 		opts.impostorDir = impostors;
 		opts.impostorFromLevel = impostorFromLevel;
 		opts.cardAuxDiv = cardAuxDiv;
+		opts.treesOnly = treesOnly;
 		opts.slotFallback = slotFallback;
 		opts.dataRoot = dataRoot.isEmpty()
 			? QStringLiteral( "E:/Tools/Fallout 4/DataUnpacked/Data" ) : dataRoot;
@@ -3291,7 +3885,11 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 		}
 		out() << "object chunk (" << chunkX << "," << chunkY << ") dim " << opts.dim
 			  << ": " << nif.getBlockCount() << " blocks — " << error << Qt::endl;
-		if ( opts.identity && !outFile.isEmpty() ) {
+		/* THE MANIFEST IS A SIDECAR, not chunk data (lane DEFAULTS1,
+		 * 2026-09-12): it is written whatever the identity flag says, because
+		 * the arrays, the cards and the far-ring cut all read it back and the
+		 * 15:56 ruling is about what goes INSIDE the .BTO. */
+		if ( !outFile.isEmpty() ) {
 			QFile mf( outFile + QStringLiteral( ".manifest.txt" ) );
 			if ( mf.open( QIODevice::WriteOnly | QIODevice::Text ) )
 				mf.write( manifest.toUtf8() );
@@ -3322,7 +3920,7 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 			err() << "error: " << verr << Qt::endl;
 			return 1;
 		}
-		out() << vtReport << Qt::endl;
+		censusOut( vtReport );
 		return 0;
 	}
 	if ( haveRegion ) {
@@ -3350,6 +3948,65 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 		auto floorTo = []( int v, int m ) { return v >= 0 ? v - v % m : -( ( -v + m - 1 ) / m ) * m; };
 		const int x0 = floorTo( region[0], d ), y0 = floorTo( region[1], d );
 		QDir().mkpath( outDir );
+		/* THE FOUR STAGE TIMES, the command line's half of bungo's ask. The
+		 * panel keeps the same four and prints them with the same words
+		 * (lodgenStageTimeLine). A region bake writes no `.lodl`, so its
+		 * landscape stage is 0 by construction -- the `--lodt-dir` run is where
+		 * that one moves, and it prints the same line. */
+		qint64 msLandscape = 0, msMeshes = 0, msTextures = 0, msImpostors = 0;
+		struct StageTimer
+		{
+			qint64 * acc;
+			QElapsedTimer t;
+			explicit StageTimer( qint64 * a ) : acc( a ) { t.start(); }
+			~StageTimer() { *acc += t.elapsed(); }
+		};
+		const QString nativeDataRoot = dataRoot.isEmpty()
+			? QStringLiteral( "E:/Tools/Fallout 4/DataUnpacked/Data" ) : dataRoot;
+		if ( !nativeDir.isEmpty() ) {
+			// the v4/v5 knobs are sticky and read by Begin; set them first
+			lodgenNativeLadderOptions( libraryNear, ladderFoliage, silhouetteMin, placementAo );
+			lodgenNativeVertexAoOption( vertexAo );
+			lodgenNativeLodiV7Option( lodiV7 );
+			lodgenNativeScrappableOption( scrappable );
+			lodgenNativeIdentityJoinOption( identityJoinLegacy, identityJoinGap );
+			/* `--native` NAMES A MOD FOLDER from today (lane LAYOUT1,
+			 * 2026-09-16), exactly as `--vt` and `--lodl` already did: the pair
+			 * lands at `<MODFOLDER>/FO4CSLOD/<ws>/`, not in the directory
+			 * itself. Every harness that opened `<dir>/<ws>.lodo` was re-based
+			 * in the same lane. */
+			lodgenNativeBegin( &world, lodgenFo4csWorldDir( nativeDir, world.worldspaceEdid() ),
+				lodgenNativeLoadModel, const_cast<QString *>( &nativeDataRoot ),
+				nativeMeshReport, nativeLadder, nativeOccluders );
+		}
+		/* AGGREGATE RING-3 IMPOSTORS: armed only when asked for, and only when
+		 * there is a card library to composite from. Without one the module
+		 * REFUSES IN WORDS rather than writing an empty table -- an aggregate is
+		 * made of the cards it replaces and cannot be invented. */
+		if ( aggregate && !nativeDir.isEmpty() ) {
+			if ( impostors.isEmpty() ) {
+				err() << "error: --aggregate needs --impostors <card bake tree>: an aggregate sheet is "
+					"composited from the cell's own trees' card sheets, so there is nothing to "
+					"photograph without them" << Qt::endl;
+				return 2;
+			}
+			QStringList aggNotes;
+			const QHash<quint32, LodgenAggCard> aggCards =
+				lodgenAggregateCards( world, region, impostors, cardAuxDiv, &aggNotes );
+			for ( const QString & n : aggNotes )
+				out() << n << Qt::endl;
+			if ( aggCards.isEmpty() ) {
+				err() << "error: --aggregate found no usable card set for any tree base of this region in "
+					<< impostors << " (see the line above for what was refused)" << Qt::endl;
+				return 2;
+			}
+			LodgenAggOptions ao;
+			ao.minTrees = aggMin;
+			ao.tile = aggTile;
+			ao.views = aggViews;
+			ao.auxDiv = cardAuxDiv;
+			lodgenNativeSetAggregate( ao, aggCards );
+		}
 		/* ONE texture/LTEX/GRAS cache for the whole region: the per-chunk path
 		 * used to own a local one and decode every landscape diffuse again for
 		 * each chunk. Bounded by an LRU, so a whole worldspace does not hold
@@ -3380,108 +4037,661 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 				texFromVt = true;
 			}
 			QString vtReport, vterr;
-			if ( !lodgenBakeTerrainVt( world,
-				dataRoot.isEmpty() ? QStringLiteral( "E:/Tools/Fallout 4/DataUnpacked/Data" ) : dataRoot,
-				vtDir, vo, bakeCaches, &vtReport, &vterr ) ) {
+			bool vtOk = false;
+			{
+				StageTimer st( &msTextures );		// the pyramid is a TEXTURE stage
+				vtOk = lodgenBakeTerrainVt( world,
+					dataRoot.isEmpty() ? QStringLiteral( "E:/Tools/Fallout 4/DataUnpacked/Data" ) : dataRoot,
+					vtDir, vo, bakeCaches, &vtReport, &vterr );
+			}
+			if ( !vtOk ) {
 				err() << "error: " << vterr << Qt::endl;
 				return 1;
 			}
-			out() << vtReport << Qt::endl;
+			censusOut( vtReport );
 			out().flush();
 		}
 		int done = 0, skipped = 0, failed = 0;
 		QStringList writtenBto;
-		for ( int cy = y0; cy <= region[3]; cy += d ) {
-			for ( int cx = x0; cx <= region[2]; cx += d ) {
-				{
-					NifModel nif;
-					QString cerr;
-					if ( !lodgenBuildTerrainChunk( &nif, world, cx, cy, opts, &cerr ) ) {
-						if ( cerr.startsWith( QLatin1String( "no LAND" ) ) )
-							skipped++;
-						else {
-							err() << "chunk (" << cx << "," << cy << "): " << cerr << Qt::endl;
-							failed++;
-						}
-					} else {
-						const QString name = QString( "%1.%2.%3.%4.BTR" )
-							.arg( world.worldspaceEdid() ).arg( d ).arg( cx ).arg( cy );
-						if ( !nif.saveToFile( outDir + "/" + name ) ) {
-							err() << "chunk (" << cx << "," << cy << "): save failed" << Qt::endl;
-							failed++;
-						} else {
-							done++;
-							out() << "[" << done << "] " << name << Qt::endl;
-							out().flush();
-							if ( !texDir.isEmpty() && !texFromVt ) {
-								QDir().mkpath( texDir );
-								QString terr2;
-								if ( !lodgenBakeTerrainTextures( world, cx, cy, d,
-									dataRoot.isEmpty()
-										? QStringLiteral( "E:/Tools/Fallout 4/DataUnpacked/Data" )
-										: dataRoot,
-									texDir, coverOpts, bakeCaches, &terr2 ) ) {
-									err() << "texture bake (" << cx << "," << cy << "): "
-										  << terr2 << Qt::endl;
-								}
-							}
-						}
-					}
+		/* THE CHUNK QUEUE. The doubly-nested loop that used to stand here is
+		 * now lodgenRunChunkPass (lodgenchunkpass.h), shared with the panel and
+		 * fanned over lodgenThreadCount() workers. Every line below is printed
+		 * from `retire`, which the pass calls on THIS thread in JOB ORDER --
+		 * so `writtenBto`, the `[n] <name>` lines and the native accumulator
+		 * see the same sequence a one-thread run produces. `--threads 1` is
+		 * the exact way back. */
+		QVector<LodgenChunkJob> jobs;
+		for ( int cy = y0; cy <= region[3]; cy += d )
+			for ( int cx = x0; cx <= region[2]; cx += d )
+				jobs.append( LodgenChunkJob{ d, cx, cy } );
+
+		/* ===== INCREMENTAL REGENERATION (lane INCR1, 2026-09-12) ==========
+		 *
+		 * The filter goes HERE, on the job list, and nowhere else. Everything
+		 * downstream -- the retire callback, `writtenBto`, the `[n]` lines,
+		 * the native accumulator -- consumes the pass IN JOB ORDER, so a
+		 * filtered list is still in job order and the bytes of the chunks that
+		 * DO run cannot depend on which of their neighbours ran beside them.
+		 * That is the whole reason the byte-identity gate can pass, and it is
+		 * a property of BAKEPERF1's queue, not of this lane's code.
+		 *
+		 * The ledger lives at <out-dir>/<WorldspaceEdid>.lodb. The brief
+		 * suggested <out>/Terrain/<WS>.lodb; --out-dir has no Terrain/
+		 * subfolder in this generator (that folder belongs to the --vt mod
+		 * tree, which this ledger does not describe), so the ledger sits
+		 * beside the .BTR/.BTO files it is a ledger OF. Stated as a
+		 * divergence rather than done quietly; bungo can move it with a word.
+		 *
+		 * Lane LAYOUT1 (2026-09-16) did NOT move it: the ledger's new home,
+		 * `FO4CSLOD/<ws>/<ws>.lodb`, belongs to lane BAKEREC1 and this lane
+		 * writes NOTHING there. The layout gate names this file as an
+		 * exemption rather than sweeping it.
+		 *
+		 * LANE BAKEREC1 (2026-09-17) MOVED IT AND GREW IT. The ledger and the
+		 * BAKE RECORD bungo asked for on 2026-09-16 are one file: same name,
+		 * version 2, plain text, and it now carries the plugins, the corpus
+		 * hashes, the argument vector and the census as well as the digests.
+		 * `lodbRecordPath()` is the only spelling of where it goes.
+		 */
+		const QString ledgerPath =
+			lodbRecordPath( outDir, world.worldspaceEdid(), !nativeDir.isEmpty() );
+		LodgenLedger prevLedger;
+		QVector<LodgenChunkJob> allJobs = jobs;
+		bool incremental = false;
+		/* The directory the PREVIOUS record's relative output paths resolve
+		 * against: the record's own folder, which is the law the format states
+		 * (`docs/LODGEN_BAKE_RECORD.md`) and which lets a mod folder be moved.
+		 * It is the record's folder, not `--incremental`'s argument, because
+		 * the two stopped being the same directory when the record moved under
+		 * `FO4CSLOD/<ws>/`. */
+		QString prevRecordDir;
+		if ( !gLgIncremental.isEmpty() ) {
+			const QString found = lodbFindRecord( gLgIncremental, world.worldspaceEdid() );
+			const QString srcLedger = found.isEmpty()
+				? lodbRecordPath( gLgIncremental, world.worldspaceEdid(), !nativeDir.isEmpty() )
+				: found;
+			prevRecordDir = QFileInfo( srcLedger ).absolutePath();
+			QString lerr;
+			/* THE REFUSALS. Each prints the reason AND the way forward, then
+			 * exits non-zero WITHOUT baking. An --incremental that silently
+			 * promoted itself to a full bake would have lied to an operator
+			 * who is watching a clock; one that silently did half the work
+			 * would have lied worse. */
+			if ( !lodgenReadLedger( srcLedger, &prevLedger, &lerr ) ) {
+				err() << "refused: --incremental has nothing to diff against -- " << lerr << Qt::endl;
+				err() << "  run the same command once WITHOUT --incremental; every bake writes "
+						 "the ledger, so the next run can be incremental." << Qt::endl;
+				return 1;
+			}
+			if ( prevLedger.worldspace != ( worldspace ? worldspace : 0x3CU )
+				 || prevLedger.dim != d
+				 || prevLedger.region[0] != region[0] || prevLedger.region[1] != region[1]
+				 || prevLedger.region[2] != region[2] || prevLedger.region[3] != region[3] ) {
+				err() << "refused: " << srcLedger << " describes worldspace "
+					  << QString::number( prevLedger.worldspace, 16 ) << " dim " << prevLedger.dim
+					  << " region " << prevLedger.region[0] << " " << prevLedger.region[1] << " "
+					  << prevLedger.region[2] << " " << prevLedger.region[3]
+					  << ", and this run is a different shape." << Qt::endl;
+				err() << "  an incremental run must cover exactly the region its ledger covers; "
+						 "bake this region once without --incremental." << Qt::endl;
+				return 1;
+			}
+			if ( prevLedger.switches != gLgSwitchDigest ) {
+				err() << "refused: the switches differ from the ones the ledger was written with, "
+						 "so EVERY chunk is dirty and an incremental run would be a full run with "
+						 "extra bookkeeping." << Qt::endl;
+				err() << "  bake without --incremental. (The digest covers the argument vector in "
+						 "order; even reordering flags fires it, which is deliberate -- it can "
+						 "only over-rebake, never under-rebake.)" << Qt::endl;
+				return 1;
+			}
+			/* WHICH POST-PASSES ARE ACTUALLY WHOLE-REGION. The dependency map
+			 * was written before the code and named four; MEASURING them cut
+			 * the list to three, and the correction is worth more than the
+			 * original guess. lodgenMergeChunkShapes and lodgenSimplifyFarRings
+			 * are `for ( path : btoPaths )` loops that open one .BTO, rewrite
+			 * it and save it with NO state carried between files -- a filtered
+			 * list gives each rebaked chunk exactly the treatment a full run
+			 * would, and the chunks that were skipped were merged and cut by
+			 * the bake that wrote them. --atlas and --arrays are different:
+			 * they build ONE sheet, ONE array set for the whole region out of
+			 * every written .BTO, so a filtered list would build them from a
+			 * fraction of it and look like an atlas. --impostors is on this
+			 * list with them because the card sets are aggregated per region
+			 * the same way.
+			 *
+			 * Keeping the merge on the refusal list would have been the safe
+			 * reading and the wrong one: it is ON BY DEFAULT, so it would have
+			 * made --incremental refuse every command anybody would type. */
+			if ( atlas || arrays || !impostors.isEmpty() ) {
+				err() << "refused: --atlas, --arrays and --impostors each build ONE region-wide "
+						 "product out of the whole written .BTO list, so a filtered chunk list "
+						 "would build them from a FRACTION of the region and not say so."
+					  << Qt::endl;
+				err() << "  bake without --incremental, or drop those flags from this run and do "
+						 "them in a separate full pass over the finished chunks. (The merge and "
+						 "the far-ring simplify are NOT on this list: both rewrite one .BTO at a "
+						 "time with nothing carried between files.)" << Qt::endl;
+				return 1;
+			}
+			/* --native IS the same case, and it is NOT visible in the output
+			 * tree the way an atlas is. lodgenNativeActive() collects one
+			 * NativePlacement per drawn reference and one lighting sample per
+			 * vertex INSIDE the chunk pass (lodgen.cpp:3784 and :4069), so a
+			 * filtered chunk list writes a .lodo/.lodi holding only the chunks
+			 * that happened to be dirty -- a pair that loads, verifies its own
+			 * hashes, and is missing most of the worldspace. It refuses here
+			 * rather than in the switch digest so the message names the reason:
+			 * the digest would fire on a stock bake that merely wrote a pair
+			 * beside it, which cost lodgen_native.sh check 5. */
+			/* ...and that refusal is what lane INCR1 was opened to remove, because
+			 * it made `--incremental` refuse the RULED pipeline: bungo's FO4CS
+			 * command is `--native <dir>`, so "refuse --native" read "refuse the
+			 * only target anybody bakes". A skipped chunk now speaks from its
+			 * `.lodj` cache instead of being silently missing from the pair; the
+			 * chunk pass replays it in that chunk's own queue position, so the
+			 * arrival order -- which the library's mesh ids depend on -- is the
+			 * order a full bake would have produced.
+			 *
+			 * With the cache turned OFF there is nothing to read back, so the
+			 * refusal is exactly the one that was here before. */
+			if ( !nativeDir.isEmpty() && !gLgNativeCache ) {
+				err() << "refused: --native builds ONE .lodo/.lodi pair for the whole region out of "
+						 "the placements the chunk pass hands it, so an incremental run would write "
+						 "a pair covering only the chunks it rebaked and say nothing about the rest."
+					  << Qt::endl;
+				err() << "  --no-native-cache is what turned the per-chunk cache off; drop it and "
+						 "the skipped chunks speak from their .lodj files. Or bake without "
+						 "--incremental." << Qt::endl;
+				return 1;
+			}
+			/* Now the diff. A chunk is dirty when its input digest moved, when
+			 * the ledger has never heard of it, or when an output it claims is
+			 * missing or has been edited under us. */
+			QSet<QString> dirty;
+			/* THE LIST THE WIDENING IS SEEDED FROM (lane INCR1, 2026-09-17),
+			 * which is NOT the same list. The widening exists because the
+			 * terrain ring and the AO skirt each reach one cell, so a chunk
+			 * whose INPUTS moved changes what its neighbours draw. A chunk
+			 * that is dirty only because its own `.lodj` cache went missing
+			 * changes nothing for anybody: the cache is this tree's record of
+			 * what that chunk once emitted, not an input to it, and rebaking
+			 * the chunk writes the same bytes again. Seeding the widening
+			 * from it made deleting ONE cache file rebake the whole region,
+			 * measured in `scratchpad/incr1_20260917/s2_proof.txt` leg C. */
+			QSet<QString> dirtyWide;
+			QHash<QString, const LodgenLedgerEntry *> byKey;
+			for ( const LodgenLedgerEntry & e : prevLedger.chunks )
+				byKey.insert( QString( "%1,%2" ).arg( e.cx ).arg( e.cy ), &e );
+			int movedInputs = 0, unknown = 0, lostOutput = 0;
+			QStringList reasons;
+			for ( const LodgenChunkJob & j : allJobs ) {
+				const QString key = QString( "%1,%2" ).arg( j.cx ).arg( j.cy );
+				const LodgenLedgerEntry * pe = byKey.value( key, nullptr );
+				if ( !pe ) {
+					dirty.insert( key );
+					dirtyWide.insert( key );
+					unknown++;
+					continue;
 				}
-				{
-					// the matching object chunk, when anything stands there
-					LodgenObjectOptions oopts;
-					oopts.dim = d;
-					oopts.identity = identity;
-					oopts.bakeAO = bakeAO;
-					oopts.cullBuried = cullBuried;
-					oopts.cullMargin = cullMargin;
-					oopts.aoGrey = aoGrey;
-					oopts.aoSkirtCells = aoSkirt;
-					oopts.impostorDir = impostors;
-					oopts.impostorFromLevel = impostorFromLevel;
-					oopts.cardAuxDiv = cardAuxDiv;
-					oopts.slotFallback = slotFallback;
-					oopts.dataRoot = dataRoot.isEmpty()
-						? QStringLiteral( "E:/Tools/Fallout 4/DataUnpacked/Data" ) : dataRoot;
-					NifModel nif;
-					QString manifest, cerr;
-					if ( lodgenBuildObjectChunk( &nif, world, cx, cy, oopts, &manifest, &cerr ) ) {
-						const QString name = QString( "%1.%2.%3.%4.BTO" )
-							.arg( world.worldspaceEdid() ).arg( d ).arg( cx ).arg( cy );
-						if ( nif.saveToFile( outDir + "/" + name ) ) {
-							done++;
-							writtenBto.append( outDir + "/" + name );
-							out() << "[" << done << "] " << name << Qt::endl;
-							out().flush();
-							if ( oopts.identity ) {
-								QFile mf( outDir + "/" + name + QStringLiteral( ".manifest.txt" ) );
-								if ( mf.open( QIODevice::WriteOnly | QIODevice::Text ) )
-									mf.write( manifest.toUtf8() );
-							}
-						} else {
-							err() << "objects (" << cx << "," << cy << "): save failed" << Qt::endl;
-							failed++;
-						}
+				const LodgenLedgerEntry & e = *pe;
+				const QString now = lodgenChunkInputDigest( world, d, j.cx, j.cy,
+					dataRoot.isEmpty()
+						? QStringLiteral( "E:/Tools/Fallout 4/DataUnpacked/Data" ) : dataRoot );
+				if ( now != e.inputs ) {
+					dirty.insert( key );
+					dirtyWide.insert( key );
+					movedInputs++;
+					if ( reasons.size() < 8 )
+						reasons.append( QString( "  (%1,%2) inputs %3 -> %4" )
+							.arg( j.cx ).arg( j.cy ).arg( e.inputs.left( 12 ), now.left( 12 ) ) );
+					continue;
+				}
+				/* EVERY output, not the first lost one, because WHICH output was
+				 * lost decides whether the neighbours are dragged in with it. */
+				bool lostAny = false, lostReal = false;
+				for ( int k = 0; k < e.outFiles.size(); k++ ) {
+					const QString fp = prevRecordDir + "/" + e.outFiles[k];
+					if ( lodgenFileDigest( fp ) == e.outDigests[k] )
+						continue;
+					const bool isCache = e.outFiles[k].endsWith( QLatin1String( ".lodj" ) );
+					if ( !lostAny && reasons.size() < 8 )
+						reasons.append( QString( "  (%1,%2) output %3 is missing or edited%4" )
+							.arg( j.cx ).arg( j.cy ).arg( e.outFiles[k] )
+							.arg( isCache ? QStringLiteral( " (a chunk cache: this chunk only)" )
+								: QString() ) );
+					lostAny = true;
+					if ( !isCache )
+						lostReal = true;
+				}
+				if ( lostAny ) {
+					dirty.insert( key );
+					lostOutput++;
+					if ( lostReal )
+						dirtyWide.insert( key );
+				}
+			}
+			/* THE WIDENING. A chunk is also dirty when a chunk within ONE CELL
+			 * of it is: the terrain ring and the AO skirt each reach exactly
+			 * one cell (docs/LODGEN_LEDGER_FORMAT.md section 2). The input
+			 * digest already covers the ring, so this second pass is belt AND
+			 * braces -- it fires on a neighbour whose OUTPUT was lost, which
+			 * no input digest can see. */
+			QSet<QString> widened = dirty;
+			for ( const LodgenChunkJob & j : allJobs ) {
+				if ( widened.contains( QString( "%1,%2" ).arg( j.cx ).arg( j.cy ) ) )
+					continue;
+				for ( const QString & dk : dirtyWide ) {
+					const int dx = dk.section( QLatin1Char( ',' ), 0, 0 ).toInt();
+					const int dy = dk.section( QLatin1Char( ',' ), 1, 1 ).toInt();
+					if ( j.cx <= dx + d && dx <= j.cx + d && j.cy <= dy + d && dy <= j.cy + d ) {
+						widened.insert( QString( "%1,%2" ).arg( j.cx ).arg( j.cy ) );
+						break;
 					}
 				}
 			}
+			const int spread = widened.size() - dirty.size();
+			/* THE CACHE HAS TO BE THERE FOR EVERY CHUNK THIS RUN WILL SKIP
+			 * (lane INCR1). Two cases, one check. A cache file deleted by hand
+			 * self-heals: its chunk is rebaked and writes it again. And a
+			 * record written BEFORE this lane existed lists no `.lodj` at all,
+			 * so every chunk would look clean, nothing would be replayed, and
+			 * the run would write a valid, self-consistent, EMPTY pair. That is
+			 * the worst shape this bug has, so it is checked against the DISK
+			 * and not against the ledger. */
+			int lostCache = 0;
+			if ( !nativeDir.isEmpty() ) {
+				const QString cdir = lodgenFo4csWorldDir( nativeDir, world.worldspaceEdid() );
+				for ( const LodgenChunkJob & j : allJobs ) {
+					const QString key = QString( "%1,%2" ).arg( j.cx ).arg( j.cy );
+					if ( widened.contains( key ) )
+						continue;
+					const QString cp = QString( "%1/%2.%3.%4.%5.lodj" )
+						.arg( cdir, world.worldspaceEdid() )
+						.arg( j.dim ).arg( j.cx ).arg( j.cy );
+					if ( !QFileInfo::exists( cp ) ) {
+						widened.insert( key );
+						lostCache++;
+						if ( reasons.size() < 8 )
+							reasons.append( QString( "  (%1,%2) has no native chunk cache" )
+								.arg( j.cx ).arg( j.cy ) );
+					}
+				}
+			}
+			QVector<LodgenChunkJob> kept;
+			for ( const LodgenChunkJob & j : allJobs )
+				if ( widened.contains( QString( "%1,%2" ).arg( j.cx ).arg( j.cy ) ) )
+					kept.append( j );
+			censusOut( QString( "incremental: %1 of %2 chunks dirty "
+							  "(%3 inputs moved, %4 not in the ledger, %5 output lost, "
+							  "%6 by neighbour, %7 with no native chunk cache)" )
+				.arg( kept.size() ).arg( allJobs.size() )
+				.arg( movedInputs ).arg( unknown ).arg( lostOutput ).arg( spread )
+				.arg( lostCache ) );
+			for ( const QString & r : reasons )
+				out() << r << Qt::endl;
+			out().flush();
+			jobs = kept;
+			incremental = true;
 		}
+
+		/* ===== THE .BTO SCRATCH FOLDER (lane BTOFREE1, 2026-09-16) =========
+		 *
+		 * bungo, 2026-09-12 18:3x: "essentially, no legacy vanilla file types
+		 * are now used by us or baked in the FO4CS lod bake". The `.BTO` was
+		 * the last one left, and it was left because four post-passes read it
+		 * back -- not because anything downstream of the bake wants it.
+		 *
+		 * So under the FO4CS target it is built HERE instead, every read-back
+		 * works on it here, and the teardown below removes it. The directory
+		 * sits inside the output folder rather than in %TEMP% so that an
+		 * interrupted bake leaves its scaffolding where the operator can see
+		 * it; a run that finds one from a dead bake removes it first, which
+		 * makes that self-healing rather than a second failure. */
+		QString btoScratch;
+		lodgenClearBtoDisposition();
+		if ( !nativeDir.isEmpty() && !gLgKeepBto ) {
+			btoScratch = QDir( outDir ).absolutePath() + QStringLiteral( "/lodgen_bto_scratch" );
+			QDir( btoScratch ).removeRecursively();
+			if ( !QDir().mkpath( btoScratch ) ) {
+				err() << "error: cannot create the .BTO scratch folder " << btoScratch
+					  << " -- pass --keep-bto to write the chunks into the output folder "
+						 "instead" << Qt::endl;
+				return 1;
+			}
+		}
+
+		LodgenChunkPassOptions pass;
+		pass.plugins = file;
+		pass.worldspace = worldspace ? worldspace : 0x3CU;
+		pass.worldEdid = world.worldspaceEdid();
+		pass.wantBtr = true;
+		pass.wantBto = true;
+		pass.btoScratchDir = btoScratch;
+		pass.wantTex = !texDir.isEmpty() && !texFromVt;
+		pass.terrain = opts;
+		pass.cover = coverOpts;
+		pass.texDataRoot = dataRoot.isEmpty()
+			? QStringLiteral( "E:/Tools/Fallout 4/DataUnpacked/Data" ) : dataRoot;
+		pass.meshDir = outDir;
+		pass.texDir = texDir;
+		{
+			LodgenObjectOptions oopts;
+			oopts.dim = d;
+			oopts.identity = identity;
+			oopts.bakeAO = bakeAO;
+			oopts.cullBuried = cullBuried;
+			oopts.cullMargin = cullMargin;
+			oopts.aoGrey = aoGrey;
+			oopts.aoSkirtCells = aoSkirt;
+			oopts.impostorDir = impostors;
+			oopts.impostorFromLevel = impostorFromLevel;
+			oopts.cardAuxDiv = cardAuxDiv;
+			oopts.treesOnly = treesOnly;
+			oopts.slotFallback = slotFallback;
+			oopts.dataRoot = dataRoot.isEmpty()
+				? QStringLiteral( "E:/Tools/Fallout 4/DataUnpacked/Data" ) : dataRoot;
+			pass.object = oopts;
+		}
+
+		/* What each retired job actually put on disk, for the ledger. Filled in
+		 * the retire callback, which runs on THIS thread in job order, so the
+		 * list is deterministic without a sort. */
+		QHash<QString, QStringList> producedFiles;
+
+		/* ---- THE PER-CHUNK NATIVE CACHE (lane INCR1, 2026-09-17) --------
+		 *
+		 * Written on every `--native` bake, full or incremental, because a
+		 * cache only helps the run AFTER the one that made it. It is listed
+		 * in the record's `out` rows below like every other output, so the
+		 * layout census counts it and editing one by hand makes its chunk
+		 * dirty by the ordinary output check. */
+		const QString lodjDir = nativeDir.isEmpty() ? QString()
+			: lodgenFo4csWorldDir( nativeDir, world.worldspaceEdid() );
+		auto lodjPath = [&]( int dm, int cx, int cy ) {
+			return QString( "%1/%2.%3.%4.%5.lodj" )
+				.arg( lodjDir, world.worldspaceEdid() ).arg( dm ).arg( cx ).arg( cy );
+		};
+		int lodjWritten = 0, lodjReplayed = 0, lodjFailed = 0;
+		qint64 lodjPlacements = 0;
+		if ( !nativeDir.isEmpty() && gLgNativeCache ) {
+			pass.nativeJournalSink = [&]( const LodgenChunkOutcome & r,
+				LodgenNativeJournal * jr ) {
+				const QString cp = lodjPath( r.dim, r.cx, r.cy );
+				QString jerr;
+				if ( !lodgenNativeJournalWriteCache( jr, cp, world.worldspaceEdid(),
+						r.dim, r.cx, r.cy, &jerr ) ) {
+					err() << "native cache (" << r.cx << "," << r.cy << "): "
+						  << jerr << Qt::endl;
+					lodjFailed++;
+					return;
+				}
+				lodjWritten++;
+				/* the retire callback for this same job appends to this very
+				 * list a moment later, and it runs on this thread too. */
+				producedFiles[QString( "%1,%2" ).arg( r.cx ).arg( r.cy )].append( cp );
+			};
+			if ( incremental ) {
+				pass.nativeAllJobs = allJobs;
+				pass.nativeReplayCached = [&]( const LodgenChunkJob & j ) {
+					QString jerr;
+					if ( !lodgenNativeReplayCache( lodjPath( j.dim, j.cx, j.cy ), &jerr ) ) {
+						err() << "native cache: " << jerr << Qt::endl;
+						lodjFailed++;
+						return;
+					}
+					lodjReplayed++;
+					lodjPlacements += lodgenNativeCacheLastPlacements();
+				};
+			}
+		}
+
+		{
+			QString passErr;
+			const bool passOk = lodgenRunChunkPass( jobs, pass,
+				[&]( const LodgenChunkOutcome & r ) {
+					{
+						QStringList & pf = producedFiles[QString( "%1,%2" ).arg( r.cx ).arg( r.cy )];
+						/* WITH A SCRATCH FOLDER the `.BTO` will not survive this
+						 * run, so it is not a tracked output and does not go in
+						 * the ledger: digesting a file we are about to delete is
+						 * exactly the defect the ledger's own comment below
+						 * records, and it made every later --incremental run
+						 * rebake the whole region. Its manifest DOES survive,
+						 * at its final path in the output folder, and the
+						 * digest is taken at ledger-write time, after the move.
+						 * `.BTR` is unaffected either way. */
+						for ( const QString & p : { r.btrPath, r.btoPath, r.manifestPath } ) {
+							if ( p.isEmpty() )
+								continue;
+							if ( !btoScratch.isEmpty() && p == r.btoPath )
+								continue;
+							if ( !btoScratch.isEmpty() && p == r.manifestPath ) {
+								/* WHERE THE SIDECAR WILL BE (lane LAYOUT1, 2026-09-16):
+								 * the teardown below drops it under the one root, so
+								 * the ledger is told that path and not the mod
+								 * folder's root. Naming a path nothing will ever write
+								 * cost the entry its digest -- the ledger recorded an
+								 * EMPTY hash, which no later run could ever match --
+								 * and the layout gate's ledger leg is what caught it. */
+								pf.append( lodgenFo4csWorldDir( outDir, world.worldspaceEdid() )
+									+ QStringLiteral( "/" )
+									+ QFileInfo( r.btoPath ).fileName()
+									+ QStringLiteral( ".manifest.txt" ) );
+								continue;
+							}
+							/* NO EXISTENCE CHECK HERE (2026-09-18): at more than one
+							 * chunk thread the bytes sit in the writer's queue when
+							 * the job retires, so the file may not be on disk yet;
+							 * an `exists` test dropped the last chunks' `.BTR` rows
+							 * from a parallel bake's record while the serial one
+							 * kept them (lodgen_perf leg (a), 13 rows against 16).
+							 * A path is set only when its write was accepted, the
+							 * queue's failures fail the pass at finish(), and the
+							 * digest is taken at ledger-write time, after the drain. */
+							pf.append( p );
+						}
+						/* The colour/normal/data sheets. LodgenChunkOutcome does
+						 * not carry their paths -- only an error string -- so
+						 * they are named here from the same format string
+						 * lodgenBakeTerrainTextures builds them with. Without
+						 * this the ledger would describe the meshes of a chunk
+						 * and be blind to its sheets, and deleting a sheet by
+						 * hand would not make its chunk dirty. */
+						if ( pass.wantTex && !pass.texDir.isEmpty() ) {
+							const QString sheetBase = QString( "%1/%2.%3.%4.%5" )
+								.arg( pass.texDir ).arg( pass.worldEdid )
+								.arg( r.dim ).arg( r.cx ).arg( r.cy );
+							for ( const QString & sfx : { QStringLiteral( ".DDS" ),
+								QStringLiteral( "_msn.DDS" ), QStringLiteral( "_data.DDS" ) } )
+								if ( QFileInfo::exists( sheetBase + sfx ) )
+									pf.append( sheetBase + sfx );
+						}
+					}
+					if ( pass.wantBtr ) {
+						if ( !r.btrBuilt ) {
+							if ( r.btrNoLand )
+								skipped++;
+							else {
+								err() << "chunk (" << r.cx << "," << r.cy << "): "
+									  << r.btrError << Qt::endl;
+								failed++;
+							}
+						} else if ( !r.btrSaved ) {
+							err() << "chunk (" << r.cx << "," << r.cy << "): save failed" << Qt::endl;
+							failed++;
+						} else {
+							done++;
+							out() << "[" << done << "] "
+								  << QFileInfo( r.btrPath ).fileName() << Qt::endl;
+							out().flush();
+							if ( !r.texError.isEmpty() )
+								err() << "texture bake (" << r.cx << "," << r.cy << "): "
+									  << r.texError << Qt::endl;
+						}
+					}
+					if ( r.btoBuilt ) {
+						if ( r.btoSaved ) {
+							done++;
+							writtenBto.append( r.btoPath );
+							out() << "[" << done << "] "
+								  << QFileInfo( r.btoPath ).fileName() << Qt::endl;
+							out().flush();
+						} else {
+							err() << "objects (" << r.cx << "," << r.cy << "): save failed" << Qt::endl;
+							failed++;
+						}
+					}
+				},
+				std::function<bool()>(), &msMeshes, &msTextures, &passErr );
+			if ( !passOk ) {
+				err() << "error: " << passErr << Qt::endl;
+				return 1;
+			}
+			out() << "chunk pass: " << lodgenLastPassJobs() << " job(s) over "
+				  << lodgenLastPassWorkers() << " worker(s)" << Qt::endl;
+			out().flush();
+		}
+
+		if ( lodgenNativeActive() ) {
+			if ( !nativeDir.isEmpty() && gLgNativeCache ) {
+				censusOut( QString( "native cache: %1 chunk(s) written to .lodj, "
+								  "%2 replayed from cache (%3 placement(s)), %4 failure(s), "
+								  "%5 arrival(s) lit by more than one chunk" )
+					.arg( lodjWritten ).arg( lodjReplayed ).arg( lodjPlacements )
+					.arg( lodjFailed ).arg( lodgenNativeSharedArrivals() ) );
+				out().flush();
+			}
+			if ( lodjFailed > 0 ) {
+				err() << "error: " << lodjFailed << " native chunk cache failure(s); the pair "
+						 "this run would write is missing whole chunks. Bake without "
+						 "--incremental." << Qt::endl;
+				lodgenNativeEnd();
+				return 1;
+			}
+			/* THE ONE CASE THE CACHE CANNOT REPRODUCE BIT FOR BIT, refused
+			 * rather than hoped through. An arrival is keyed `(refForm,
+			 * scolPart)` ACROSS chunks, so a placement two chunks both light
+			 * has sums built from both, and `(prev + a1) + a2` is not
+			 * `prev + (a1 + a2)` in floating point. Zero is the ordinary
+			 * answer -- lighting is keyed on the chunk's own identity index --
+			 * and anything else means the pair would be NEARLY right, which is
+			 * the one thing a bake may not be. */
+			if ( lodjReplayed > 0 && lodgenNativeSharedArrivals() > 0 ) {
+				err() << "refused: " << lodgenNativeSharedArrivals()
+					  << " placement(s) were lit by more than one chunk, so a rebuilt "
+						 "chunk and a cached one would have to have their lighting sums "
+						 "added in an order this run cannot reproduce." << Qt::endl;
+				err() << "  bake without --incremental: a full bake adds them in the one "
+						 "order there is." << Qt::endl;
+				lodgenNativeEnd();
+				return 1;
+			}
+			/* THE LIBRARY-REUSE OFFER (lane PERF1, step 5). Only an incremental
+			 * bake offers, and it offers the three hashes the PREVIOUS record
+			 * wrote. `lodgenNativeWrite` recomputes each from the world this run
+			 * is about to bake and keeps the previous `.lodo` only when all three
+			 * agree and the file reads back whole; otherwise it rebuilds and the
+			 * census says which test refused. The switch digest is NOT passed:
+			 * a run whose digest moved never reaches here, because the
+			 * incremental path refuses it outright further up.
+			 *
+			 * No default moves. A bake without --incremental never arms this and
+			 * is the bake this tree always did, to the byte. */
+			if ( incremental && !prevLedger.loadOrderHashHex.isEmpty()
+				&& !prevLedger.pluginCorpusHashHex.isEmpty()
+				&& !prevLedger.objectCorpusHashHex.isEmpty() ) {
+				NativeReuseOffer offer;
+				offer.armed = true;
+				offer.loadOrderHex    = prevLedger.loadOrderHashHex;
+				offer.pluginCorpusHex = prevLedger.pluginCorpusHashHex;
+				offer.objectCorpusHex = prevLedger.objectCorpusHashHex;
+				lodgenNativeOfferLibraryReuse( offer );
+			}
+			QString nrep, nerr;
+			bool nativeOk = false;
+			{
+				StageTimer st( &msMeshes );
+				nativeOk = lodgenNativeWrite( &nrep, &nerr );
+			}
+			if ( !nativeOk ) {
+				err() << "error: " << nerr << Qt::endl;
+				lodgenNativeEnd();
+				return 1;
+			}
+			censusOut( nrep );
+			/* The aggregate SHEETS, written after the pair because the compositor
+			 * runs inside the .lodi write and the DDS writer lives in lodgen.cpp.
+			 * They go into the output DATA tree, never the card bake tree: a set is
+			 * per WORLDSPACE CELL and the card tree is per base. */
+			if ( !lodgenNativeAggregateSets().isEmpty() ) {
+				QString aggRoot = outDir;
+				{
+					const QString norm = QDir( outDir ).absolutePath();
+					const QString suffix = QString( "/meshes/terrain/%1" ).arg( world.worldspaceEdid() );
+					if ( norm.endsWith( suffix, Qt::CaseInsensitive ) )
+						aggRoot = norm.left( norm.size() - suffix.size() );
+				}
+				QStringList aggWritten;
+				QString aggErr;
+				bool aggOk = true;
+				{
+					StageTimer st2( &msImpostors );
+					for ( const LodgenAggSet & a : lodgenNativeAggregateSets() )
+						if ( !lodgenAggregateWrite( aggRoot, world.worldspaceEdid(), a, &aggWritten, &aggErr ) ) {
+							aggOk = false;
+							break;
+						}
+				}
+				if ( !aggOk ) {
+					err() << "error: " << aggErr << Qt::endl;
+					lodgenNativeEnd();
+					return 1;
+				}
+				out() << "native-aggregate: " << lodgenNativeAggregateSets().size()
+					<< " card set(s), " << aggWritten.size() << " files under "
+					<< lodgenFo4csWorldDir( aggRoot, world.worldspaceEdid() ) << "/Aggregate"
+					<< Qt::endl;
+			}
+			lodgenNativeEnd();
+		}
+		/* WHERE THE OBJECT SHEETS GO, once, for the arrays, the atlas and the
+		 * card arrays (lane LAYOUT1, 2026-09-16). There is no `--target` flag
+		 * on the command line: `--native` IS the FO4CS target. Under it every
+		 * sheet we write goes under the one root with the rest of our types,
+		 * and the game-relative string baked into the chunks says the same; the
+		 * stock target keeps the engine path it always had, byte for byte. */
+		const bool fo4csTarget = !nativeDir.isEmpty();
+		auto objectsDir = [&]() {
+			return fo4csTarget
+				? lodgenFo4csWorldDir( outDir, world.worldspaceEdid() ) + QStringLiteral( "/Objects" )
+				: ( texDir.isEmpty() ? outDir : texDir ) + QStringLiteral( "/Objects" );
+		};
+		auto objectsGame = [&]( const QString & stem ) {
+			const QString ws = world.worldspaceEdid();
+			return fo4csTarget
+				? QStringLiteral( "data\\" ) + lodgenFo4csGameWorldPath( ws )
+					+ QChar( 92 ) + QStringLiteral( "Objects" ) + QChar( 92 ) + ws + QChar( '.' ) + stem
+				: QString( "data\\Textures\\Terrain\\%1\\Objects\\%1.%2" ).arg( ws ).arg( stem );
+		};
 		if ( arrays && !writtenBto.isEmpty() ) {
 			// before the atlas: the arrays key on the shapes' own diffuse paths
 			const QString ws = world.worldspaceEdid();
-			const QString arrDir = ( texDir.isEmpty() ? outDir : texDir ) + QStringLiteral( "/Objects" );
+			const QString arrDir = objectsDir();
 			QDir().mkpath( arrDir );
 			QString rep, aerr;
+			StageTimer st( &msTextures );
 			if ( !lodgenBuildTextureArrays( writtenBto,
 				dataRoot.isEmpty() ? QStringLiteral( "E:/Tools/Fallout 4/DataUnpacked/Data" ) : dataRoot,
 				arrDir + "/" + ws + QStringLiteral( ".LodgenArrays" ),
-				QString( "data\\Textures\\Terrain\\%1\\Objects\\%1.LodgenArrays" ).arg( ws ),
+				objectsGame( QStringLiteral( "LodgenArrays" ) ),
 				&rep, &aerr ) ) {
 				err() << "arrays: " << aerr << Qt::endl;
 				failed++;
 			} else {
-				out() << "arrays written: " << rep << Qt::endl;
+				censusOut( QStringLiteral( "arrays written: " ) + rep );
+				if ( fo4csTarget )
+					lodgenNoteLayoutDir( arrDir );
 			}
 		}
 		if ( atlas && !writtenBto.isEmpty() ) {
@@ -3490,7 +4700,7 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 			 * path baked into every atlased shape names that subdirectory,
 			 * so writing the sheets to <texDir> itself put them one level
 			 * above where the chunks look for them. */
-			const QString atlasDir = ( texDir.isEmpty() ? outDir : texDir ) + QStringLiteral( "/Objects" );
+			const QString atlasDir = objectsDir();
 			QDir().mkpath( atlasDir );
 			/* Loose copies of textures the atlas cannot absorb go into the
 			 * output DATA tree: derived when outDir follows the vanilla
@@ -3503,6 +4713,7 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 					looseRoot = norm.left( norm.size() - suffix.size() );
 			}
 			QString aerr;
+			StageTimer st( &msTextures );
 			/* NOT vanilla's "<ws>.Objects" name: a loose file at that path
 			 * SHADOWS the archived vanilla sheet, and every vanilla BTO
 			 * still in play (unregenerated chunks, the legacy fallback set)
@@ -3514,19 +4725,22 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 					? QStringLiteral( "E:/Tools/Fallout 4/DataUnpacked/Data" )
 					: dataRoot,
 				atlasDir + "/" + ws + QStringLiteral( ".LodgenObjects" ),
-				QString( "data\\Textures\\Terrain\\%1\\Objects\\%1.LodgenObjects" ).arg( ws ),
+				objectsGame( QStringLiteral( "LodgenObjects" ) ),
 				looseRoot, atlasBc1, &aerr ) ) {
 				err() << "atlas: " << aerr << Qt::endl;
 				failed++;
 			} else {
 				out() << "atlas written: " << ws << ".LodgenObjects.DDS (+_n, _s)" << Qt::endl;
+				if ( fo4csTarget )
+					lodgenNoteLayoutDir( atlasDir );
 			}
 		}
 		if ( merge && !writtenBto.isEmpty() ) {
 			// last: one shape per material the engine can tell apart (after the atlas and the arrays)
 			QString rep, merr;
+			StageTimer st( &msMeshes );
 			if ( lodgenMergeChunkShapes( writtenBto, &rep, &merr ) )
-				out() << "merged: " << rep << Qt::endl;
+				censusOut( QStringLiteral( "merged: " ) + rep );
 			else
 				err() << "merge: " << merr << Qt::endl;
 		}
@@ -3535,27 +4749,268 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 			 * has already made one shape per material, which is the cluster a
 			 * far ring wants one simplified mesh of. Ring 0 is never cut. */
 			QString rep, serr;
+			StageTimer st( &msMeshes );
 			if ( lodgenSimplifyFarRings( writtenBto, simplify, &rep, &serr ) )
-				out() << "far rings: " << rep << Qt::endl;
+				censusOut( QStringLiteral( "far rings: " ) + rep );
 			else
 				err() << "far rings: " << serr << Qt::endl;
 		}
 		if ( arrays && !impostors.isEmpty() && !writtenBto.isEmpty() ) {
 			// the card sets the chunks stand on, as arrays beside the mesh arrays
 			const QString ws = world.worldspaceEdid();
-			const QString arrDir = ( texDir.isEmpty() ? outDir : texDir ) + QStringLiteral( "/Objects" );
+			const QString arrDir = objectsDir();
 			QDir().mkpath( arrDir );
 			QString rep, cerr2;
+			StageTimer st( &msImpostors );		// the IMPOSTOR stage
 			if ( lodgenBuildCardArrays( writtenBto, impostors,
 				arrDir + "/" + ws + QStringLiteral( ".LodgenCards" ),
-				QString( "data\\Textures\\Terrain\\%1\\Objects\\%1.LodgenCards" ).arg( ws ),
-				cardAuxDiv, &rep, &cerr2 ) )
-				out() << "card arrays written: " << rep << Qt::endl;
-			else
+				objectsGame( QStringLiteral( "LodgenCards" ) ),
+				cardAuxDiv, &rep, &cerr2 ) ) {
+				censusOut( QStringLiteral( "card arrays written: " ) + rep );
+				if ( fo4csTarget )
+					lodgenNoteLayoutDir( arrDir );
+			} else {
 				err() << "card arrays: " << cerr2 << Qt::endl;
+			}
 		}
+		/* ===== THE SCRATCH TEARDOWN (lane BTOFREE1, 2026-09-16) ============
+		 *
+		 * LAST of the object passes and FIRST of the bookkeeping: every
+		 * read-back above -- the texture arrays, the atlas, the shape merge,
+		 * the far-ring cut and the card arrays -- has had the chunks and their
+		 * manifests side by side, exactly as it did when they lived in the
+		 * output folder. Now the manifest sidecars move to the output folder
+		 * (bungo's open call is to keep them) and the chunks go.
+		 *
+		 * The count and the bytes are MEASURED here, from the files, not
+		 * predicted from `writtenBto.size()`: a census field states what is on
+		 * disk or it states nothing (CONSTITUTION 4). */
+		if ( !btoScratch.isEmpty() ) {
+			/* THE SIDECARS LAND UNDER THE ONE ROOT (lane LAYOUT1, 2026-09-16):
+			 * they describe files that now live under `FO4CSLOD\<ws>\`, so
+			 * they sit beside them rather than at the mod folder's own root. */
+			const QString manifestDir =
+				lodgenFo4csWorldDir( outDir, world.worldspaceEdid() );
+			QDir().mkpath( manifestDir );
+			const LodgenBtoScratchResult r =
+				lodgenDropBtoScratch( writtenBto, btoScratch, manifestDir );
+			for ( const QString & w : r.warnings )
+				err() << w << Qt::endl;
+			censusOut( QString( "bto scratch: %1 chunk(s) built in %2, %3 removed, "
+							  "%4 manifest sidecar(s) kept, %5 bytes freed" )
+				.arg( r.built ).arg( btoScratch ).arg( r.dropped ).arg( r.manifests )
+				.arg( r.freed ) );
+			out().flush();
+		} else if ( pass.wantBto ) {
+			lodgenSetBtoDisposition( QString(), writtenBto.size(), 0, 0 );
+		}
+
+		/* THE LEDGER GOES HERE, LAST, and the reason is a defect this lane
+		 * shipped and its own gate caught. It used to be written straight
+		 * after the chunk pass -- which is where the chunks are finished,
+		 * but NOT where the FILES are: the merge and the far-ring simplify
+		 * both reopen every written .BTO and save it again. Digesting them
+		 * before those passes recorded a hash of a file that no longer
+		 * existed by the time the run ended, so the very next --incremental
+		 * run found all nine outputs "lost" and rebaked the whole region
+		 * while reporting, accurately and uselessly, 9 of 9 dirty.
+		 *
+		 * The null arm of gate B3 is what found it: it passed byte identity
+		 * (a full rebake trivially matches a full bake) and failed the
+		 * census line beside it. That is exactly why the census is printed
+		 * next to the verdict instead of trusted behind it. */
 		out() << done << " chunk(s) written to " << outDir
 			  << ", " << skipped << " empty, " << failed << " failed" << Qt::endl;
+		censusOut( lodgenStageTimeLine( msLandscape, msMeshes, msTextures, msImpostors,
+			lodgenNativeLibrarySplit() ) );
+		censusOut( lodgenBakeCensusLine() );
+		/* ===== THE BAKE RECORD, written by EVERY region bake ==============
+		 *
+		 * Lane INCR1 wrote it first, as the ledger, and its reason still holds:
+		 * not behind a flag, because a feature that needs yesterday to have been
+		 * clairvoyant is not a feature -- the first time anyone wants
+		 * --incremental, the record has to already be there.
+		 *
+		 * Lane BAKEREC1 (2026-09-17) made it the BAKE RECORD as well. It goes
+		 * LAST, after every other file is closed AND after every census line is
+		 * printed -- the second half is new, and it is why this block moved down
+		 * past the two `censusOut` calls now above it: the record carries the census
+		 * VERBATIM, and a record written before the last two lines were printed
+		 * would have carried a census that was two lines short while looking
+		 * complete. Its presence beside the outputs is what says "this bake
+		 * finished".
+		 *
+		 * It is DETERMINISTIC except for the FIVE things `src/lodbfile.h` names
+		 * -- the `baked` line, a plugin's path field, the resource lines, the
+		 * `stage times:` census line and the `peak working set:` clause of the
+		 * `bake census:` one -- so two full bakes of the same tree write the
+		 * same bytes everywhere else.
+		 * Gate B4 and `tests/spells/lodgen_bakerec.sh` leg (h) check exactly
+		 * that. */
+		{
+			LodgenLedger led;
+			led.worldspace = worldspace ? worldspace : 0x3CU;
+			led.worldEdid  = world.worldspaceEdid();
+			led.dim        = d;
+			for ( int k = 0; k < 4; k++ )
+				led.region[k] = region[k];
+			led.switches  = gLgSwitchDigest;
+			led.loadOrder = QString::number( world.loadOrderHash(), 16 );
+			/* THE RELATIVE ROOT IS THE RECORD'S OWN FOLDER, not --out-dir. They
+			 * were the same directory until the record moved under FO4CSLOD/<ws>/;
+			 * keeping the law ("paths are relative to the directory holding the
+			 * record, so a mod folder can be moved") means composing them against
+			 * the record, and the incremental reader resolves them the same way. */
+			const QString ledgerRoot = QFileInfo( ledgerPath ).absolutePath();
+			const QString digestRoot = dataRoot.isEmpty()
+				? QStringLiteral( "E:/Tools/Fallout 4/DataUnpacked/Data" ) : dataRoot;
+			QHash<QString, const LodgenLedgerEntry *> oldByKey;
+			for ( const LodgenLedgerEntry & e : prevLedger.chunks )
+				oldByKey.insert( QString( "%1,%2" ).arg( e.cx ).arg( e.cy ), &e );
+			for ( const LodgenChunkJob & j : allJobs ) {
+				const QString key = QString( "%1,%2" ).arg( j.cx ).arg( j.cy );
+				const bool rebaked = producedFiles.contains( key );
+				if ( !rebaked && incremental ) {
+					/* A chunk this run SKIPPED: carry its row forward unchanged.
+					 * Recomputing it would be honest too, but carrying it forward is
+					 * what makes the record a record of what is on disk rather than
+					 * of what was asked for. */
+					if ( const LodgenLedgerEntry * pe = oldByKey.value( key, nullptr ) )
+						led.chunks.append( *pe );
+					continue;
+				}
+				LodgenLedgerEntry e;
+				e.dim = d; e.cx = j.cx; e.cy = j.cy;
+				e.inputs = lodgenChunkInputDigest( world, d, j.cx, j.cy, digestRoot );
+				for ( const QString & p : producedFiles.value( key ) ) {
+					QString rel = QDir( ledgerRoot ).relativeFilePath( QDir( p ).absolutePath() );
+					e.outFiles.append( rel );
+					e.outDigests.append( lodgenFileDigest( p ) );
+				}
+				led.chunks.append( e );
+			}
+
+			/* ---- v2: everything the RECORD adds to the ledger --------------- */
+			led.fo4csTarget = !nativeDir.isEmpty();
+			led.exeStamp    = lodbExeStamp();
+			led.exeBytes    = lodbExeSize();
+			led.bakedUtc    = QDateTime::currentDateTimeUtc().toString( Qt::ISODate );
+
+			/* THE FIVE CORPUS HASHES, taken from the pair that was just written so
+			 * the record can never disagree with it. A bake that wrote no pair
+			 * writes no hash line rather than five zeros a reader could mistake
+			 * for an answer. `loadOrderHash` is stated whatever the target is,
+			 * because the plugin lines below are only meaningful beside it. */
+			auto hex16 = []( quint64 v ) {
+				return QString( "%1" ).arg( v, 16, 16, QChar( '0' ) );
+			};
+			led.loadOrderHashHex = hex16( world.loadOrderHash() );
+			if ( led.fo4csTarget ) {
+				const QString lodoPath = lodgenFo4csWorldDir( nativeDir, world.worldspaceEdid() )
+					+ QChar( '/' ) + world.worldspaceEdid() + QStringLiteral( ".lodo" );
+				LodoHeader lh;
+				QString rerr;
+				if ( lodoRead( lodoPath, &lh, nullptr, false, &rerr ) ) {
+					led.pluginCorpusHashHex = hex16( lh.pluginCorpusHash );
+					led.objectCorpusHashHex = hex16( lh.objectCorpusHash );
+					led.modelCorpusHashHex  = hex16( lh.modelCorpusHash );
+					led.cardCorpusHashHex   = hex16( lh.cardCorpusHash );
+					led.loadOrderHashHex    = hex16( lh.loadOrderHash );
+				} else {
+					err() << "warning: the bake record cannot read back " << lodoPath
+						  << " for its corpus hashes (" << rerr << ") -- the record will "
+							 "carry loadOrderHash only" << Qt::endl;
+				}
+			}
+
+			/* THE PLUGINS, one a line, IN LOAD ORDER -- bungo 2026-09-16: "each
+			 * bake needs to know plugins used or what's different, to even attempt
+			 * a partial rebake". The list is `EsmWorld::pluginList()`, which IS the
+			 * list `loadOrderHash()` walks, so the hash and the lines can never
+			 * describe two different load orders. The per-file FNV-1a 64 over the
+			 * BYTES is the new thing: `loadOrderHash` folds the name and the size,
+			 * so a plugin edited in place to the same size passes it. */
+			{
+				const QStringList paths =
+					world.pluginList().split( QChar( ',' ), Qt::SkipEmptyParts );
+				for ( int i = 0; i < paths.size(); i++ ) {
+					const QFileInfo fi( paths.at( i ).trimmed() );
+					LodbPlugin p;
+					p.index = i;
+					p.name  = fi.fileName().toLower();
+					p.bytes = fi.size();
+					p.path  = QDir::fromNativeSeparators( fi.absoluteFilePath() );
+					if ( !lodbFileFnv1a64( p.path, &p.hash ) ) {
+						p.hash = 0;
+						err() << "warning: the bake record cannot read " << p.path
+							  << " to hash it -- that plugin line carries a zero hash and "
+								 "cannot detect an edit" << Qt::endl;
+					}
+					led.plugins.append( p );
+				}
+			}
+
+			/* THE RESOURCE STACK, in the order it was given (last wins). An
+			 * archive carries its size and mtime; a folder carries neither,
+			 * because a folder has no bytes of its own to state. The whole line is
+			 * INFORMATIONAL -- nothing here is part of any hash -- and
+			 * `lodbNormalise()` MASKS it (the `kind` and the order stay, so a
+			 * reordered stack still shows; masked, never dropped), which is what
+			 * makes "the mod folder was renamed" a no-op for the record. */
+			for ( const QString & r : gLgResourceStack ) {
+				const QFileInfo fi( r );
+				LodbResource e;
+				e.path = QDir::fromNativeSeparators( fi.absoluteFilePath() );
+				if ( fi.isDir() ) {
+					e.kind = QStringLiteral( "folder" );
+				} else {
+					e.kind = fi.suffix().toLower() == QLatin1String( "bsa" )
+						? QStringLiteral( "bsa" ) : QStringLiteral( "ba2" );
+					e.bytes = fi.size();
+					e.mtimeIso = fi.lastModified().toUTC().toString( Qt::ISODate );
+				}
+				led.resources.append( e );
+			}
+
+			/* THE SWITCHES: the argument vector verbatim, which is the only form
+			 * of "what was the command" an operator can retype, beside the digest
+			 * the incremental path already compares. */
+			led.switchTokens = gLgArgv;
+			/* THE CENSUS, verbatim, as the bake printed it. */
+			led.census = lodbCensusLines();
+
+			QDir().mkpath( QFileInfo( ledgerPath ).absolutePath() );
+			QString lwerr;
+			if ( !lodgenWriteLedger( ledgerPath, led, &lwerr ) ) {
+				err() << "warning: " << lwerr << " -- the bake is fine, but the next "
+						 "--incremental run will refuse" << Qt::endl;
+			} else {
+				if ( led.fo4csTarget )
+					lodgenNoteLayoutFile( ledgerPath );
+				/* THE CENSUS LINE, READ BACK OFF THE FILE (CONSTITUTION 4): every
+				 * number below is parsed out of the record that was just written,
+				 * never out of the structure that wrote it, so a writer that
+				 * dropped a section says so here instead of being believed. It is
+				 * NOT itself a recorded census line -- it describes the record and
+				 * the record is already closed. */
+				LodgenLedger back;
+				QString rerr;
+				if ( !lodgenReadLedger( ledgerPath, &back, &rerr ) ) {
+					out() << QString( "bake-record: %1 REFUSED ON READ-BACK -- %2" )
+						.arg( ledgerPath, rerr ) << Qt::endl;
+				} else {
+					out() << QString( "bake-record: %1, %2 plugin(s), %3 resource(s), "
+									  "%4 switch token(s), %5 chunk(s), %6 census line(s), "
+									  "end %7 file(s) %8 bytes, record %9 bytes" )
+						.arg( ledgerPath ).arg( back.plugins.size() ).arg( back.resources.size() )
+						.arg( back.switchTokens.size() ).arg( back.chunks.size() )
+						.arg( back.census.size() ).arg( back.endFiles ).arg( back.endBytes )
+						.arg( QFileInfo( ledgerPath ).size() ) << Qt::endl;
+				}
+			}
+			out().flush();
+		}
+
 		return failed ? 1 : 0;
 	}
 	if ( haveTerrain ) {
@@ -4790,6 +6245,277 @@ int cmdAnimSetup( const QString & file, int block, const QStringList & controlle
 	return saveNif( nif, outFile ) ? 0 : 1;
 }
 
+/*! The clip TSV both BUILD8 commands write: one row per frame per track,
+ *  `frame track bone tx ty tz qx qy qz qw sx sy sz`, root motion as track -1
+ *  with `tx ty tz yaw`.  Nine significant digits, the same as
+ *  tests/hkxwrite_dump.cpp -- lane BUILD8.
+ */
+bool cmdHkxTsvWrite( const HkxAnimClip & c, const QString & out )
+{
+	QFile fo( out );
+	if ( !fo.open( QIODevice::WriteOnly | QIODevice::Truncate ) ) {
+		err() << "cannot write " << out << Qt::endl;
+		return false;
+	}
+	QTextStream ts( &fo );
+	ts.setRealNumberPrecision( 9 );
+	ts << "# frame\ttrack\tbone\ttx\tty\ttz\tqx\tqy\tqz\tqw\tsx\tsy\tsz\n";
+	for ( int fr = 0; fr < c.numFrames; fr++ ) {
+		for ( int t = 0; t < c.numTracks; t++ ) {
+			const HkxTransform & x = c.frames[fr][t];
+			ts << fr << '\t' << t << '\t' << ( t < c.trackToBone.size() ? c.trackToBone[t] : t );
+			const float v[10] = { x.translation[0], x.translation[1], x.translation[2],
+				x.rotation[1], x.rotation[2], x.rotation[3], x.rotation[0],
+				x.scale[0], x.scale[1], x.scale[2] };
+			for ( float e : v )
+				ts << '\t' << QString::number( double( e ), 'g', 9 );
+			ts << '\n';
+		}
+	}
+	for ( int fr = 0; fr < c.rootMotion.size(); fr++ ) {
+		const HkxRootMotion & r = c.rootMotion[fr];
+		ts << fr << "\t-1\t-1";
+		const float v[4] = { r.translation[0], r.translation[1], r.translation[2], r.yaw };
+		for ( float e : v )
+			ts << '\t' << QString::number( double( e ), 'g', 9 );
+		ts << '\n';
+	}
+	ts.flush();
+	return fo.error() == QFile::NoError;
+}
+
+/*! `gltf <file.nif> -o out.gltf [--clip C.hkx] [--bones skeleton.hkx]
+ *  [--root-motion]` -- lane HKX4.
+ *
+ *  Writes out.gltf and out.bin: the NIF's node tree, its skinned shapes and,
+ *  when --clip is given, that clip as a glTF animation at its own frame rate.
+ *  --bones names the file whose hkaSkeleton gives the tracks their bone names
+ *  (a clip usually carries none of its own; use the game's skeleton.hkx).
+ *  Without --root-motion the clip plays in place and the travel is recorded
+ *  in the animation's extras. docs/GLTF_INTERCHANGE.md is the contract.
+ */
+int cmdGltf( const QString & file, const QString & outFile, const QString & clipFile,
+			 const QString & bonesFile, bool rootMotion, const GltfExportOptions & optsIn )
+{
+	if ( outFile.isEmpty() ) {
+		err() << "gltf: -o <out.gltf> is required" << Qt::endl;
+		return 2;
+	}
+	NifModel nif;
+	if ( !loadNif( nif, file ) )
+		return 1;
+
+	HkxAnimClip clip;
+	QStringList boneNames;
+	bool haveClip = false;
+	if ( !clipFile.isEmpty() ) {
+		const HkxAnimFile cf = hkxAnimLoad( clipFile );
+		if ( !cf.ok() ) {
+			err() << "gltf: " << cf.error << Qt::endl;
+			return 1;
+		}
+		if ( cf.clips.isEmpty() ) {
+			err() << "gltf: " << clipFile << " carries no animation" << Qt::endl;
+			return 1;
+		}
+		clip = cf.clips.first();
+		haveClip = true;
+		if ( !bonesFile.isEmpty() ) {
+			const HkxAnimFile bf = hkxAnimLoad( bonesFile );
+			if ( !bf.ok() || bf.skeletons.isEmpty() ) {
+				err() << "gltf: " << ( bf.ok() ? QStringLiteral( "%1 carries no hkaSkeleton" ).arg( bonesFile )
+											   : bf.error ) << Qt::endl;
+				return 1;
+			}
+			boneNames = bf.skeletons.first().boneNames;
+		} else if ( !cf.skeletons.isEmpty() ) {
+			boneNames = cf.skeletons.first().boneNames;
+		} else {
+			err() << "gltf: " << clipFile << " carries no skeleton; pass --bones skeleton.hkx" << Qt::endl;
+			return 1;
+		}
+	}
+
+	GltfExportReport report;
+	GltfExportCharReport charReport;
+	QString error;
+	// lane GLTFEXPORT1. optsIn carries the flags; --root-motion is folded in so
+	// the old spelling still means what it meant. With no new flag at all this
+	// is gltfExportOptionsAreLegacy() and gltfExportCharacter() forwards to the
+	// old writer unchanged -- the byte-identity row of the gate.
+	GltfExportOptions opts = optsIn;
+	if ( rootMotion && opts.rootMotion == GltfExportOptions::RootMotion::Strip )
+		opts.rootMotion = GltfExportOptions::RootMotion::Root;
+	if ( !haveClip )
+		opts.includeClip = false;
+	if ( !gltfExportCharacter( &nif, QModelIndex(), haveClip ? &clip : nullptr, boneNames,
+							   opts, outFile, report, charReport, error ) ) {
+		err() << "gltf: " << error << Qt::endl;
+		return 1;
+	}
+	for ( const QString & s : gltfExportOptionsSummary( opts ) )
+		out() << "  " << s << Qt::endl;
+	for ( const QString & s : charReport.notes )
+		out() << "  " << s << Qt::endl;
+	if ( !charReport.unmatchedBones.isEmpty() )
+		out() << "  " << charReport.unmatchedBones.size()
+			  << " skin bone(s) the skeleton did not carry (they kept the part's own node): "
+			  << charReport.unmatchedBones.join( QStringLiteral( ", " ) ) << Qt::endl;
+	/* lane GLTFEXPORT1: the MEASURED line. One `key=value` row, so
+	 * tests/spells/gltf_export_options.sh reads numbers out of the export
+	 * itself and does not have to re-derive them from the .gltf -- and so a
+	 * number that moves shows up in the log a human reads too. Every one of
+	 * these is a count the exporter took while it worked, not a re-count. */
+	out() << "  MEASURED"
+		  << " skeleton_nodes=" << charReport.skeletonNodes
+		  << " parts_merged=" << charReport.partsMerged
+		  << " matched_by_name=" << charReport.nodesMatchedByName
+		  << " nodes_added=" << charReport.nodesAdded
+		  << " helpers_dropped=" << charReport.helpersDropped
+		  << " helpers_kept_weighted=" << charReport.helpersKeptWeighted
+		  << " joints_per_skin=" << charReport.jointsPerSkin
+		  << " skins_unified=" << charReport.skinsUnified
+		  << " inverse_binds_derived=" << charReport.inverseBindsDerived
+		  << " textures_copied=" << charReport.texturesCopied
+		  << " textures_missing=" << charReport.texturesMissing
+		  << " build_bones_scaled=" << charReport.buildBonesScaled
+		  << " build_cycle_channels=" << charReport.buildCycleChannels
+		  << " unmatched_bones=" << charReport.unmatchedBones.size()
+		  << " skeleton_auto_missed=" << int( charReport.skeletonAutoMissed )
+		  << " legacy_defaults=" << int( gltfExportOptionsAreLegacy( opts ) )
+		  << " metres_per_unit=" << QString::number( opts.metresPerUnit(), 'g', 9 )
+		  << " tracks_matched=" << report.tracksMatched
+		  << " tracks_unmatched=" << report.tracksUnmatched
+		  << " nodes=" << report.nodes
+		  << " shapes=" << report.shapes
+		  << " skinned=" << report.skinnedShapes
+		  << Qt::endl;
+	out() << "wrote " << outFile << ": " << report.nodes << " nodes, " << report.shapes
+		  << " shapes (" << report.skinnedShapes << " skinned), " << report.vertices
+		  << " vertices, " << report.triangles << " triangles" << Qt::endl;
+	if ( haveClip )
+		out() << "  clip '" << clip.name << "': " << clip.numFrames << " frames at "
+			  << clip.frameDuration << " s, " << report.tracksMatched << " of "
+			  << ( report.tracksMatched + report.tracksUnmatched ) << " tracks matched a node"
+			  << Qt::endl;
+	for ( const QString & n : report.notes )
+		out() << "  " << n << Qt::endl;
+	return 0;
+}
+
+/*! `gltf-import <in.gltf> -o OUT.hkx [--bones S.hkx] [--fps N] [--source-rate]
+ *  [--root-motion] [--route a|b] [--tsv PATH] [--skeleton NAME]` -- lane BUILD8.
+ *
+ *  The inverse of `gltf`: reads one glTF animation (src/gltfimport.cpp) and
+ *  writes it back as a Fallout 4 interleaved .hkx (src/hkxwrite.cpp).
+ *  --bones names the .hkx whose hkaSkeleton gives the target bone order; with
+ *  none, the glTF's own node names become the bone names and the map is the
+ *  identity.  --tsv also dumps the IMPORTED clip, before it is written, in the
+ *  13 columns tests/hkxwrite_dump.cpp uses, so the in-memory clip can be
+ *  compared without going through the writer at all.
+ *  docs/GLTF_IMPORT.md is the contract.
+ */
+int cmdGltfImport( const QString & file, const QString & outFile, const QString & bonesFile,
+				   float fps, bool sourceRate, bool rootMotion, const QString & route,
+				   const QString & tsvFile, const QString & skeletonName,
+				   const QString & rootNode )			// lane BUILD8: --root-node
+{
+	if ( outFile.isEmpty() ) {
+		err() << "gltf-import: -o <out.hkx> is required" << Qt::endl;
+		return 2;
+	}
+
+	GltfImportOptions opt;
+	if ( fps > 0.0f )
+		opt.targetFps = fps;
+	opt.preserveSourceRate = sourceRate;
+	opt.extractRootMotion = rootMotion;
+	// The clip's travel is composed onto the ROOT BONE's node on export, not
+	// onto the NIF's root NiNode -- which is what the single-scene-root rule
+	// would pick, and which reaches no bone.  Name it: --root-node Root.
+	if ( !rootNode.isEmpty() )
+		opt.rootNodeName = rootNode;
+	if ( !skeletonName.isEmpty() )
+		opt.originalSkeletonName = skeletonName;
+	if ( !bonesFile.isEmpty() ) {
+		const HkxAnimFile bf = hkxAnimLoad( bonesFile );
+		if ( !bf.ok() || bf.skeletons.isEmpty() ) {
+			err() << "gltf-import: " << ( bf.ok() ? QStringLiteral( "%1 carries no hkaSkeleton" ).arg( bonesFile )
+												  : bf.error ) << Qt::endl;
+			return 1;
+		}
+		opt.skeletonBoneNames = bf.skeletons.first().boneNames;
+	}
+
+	HkxAnimClip clip;
+	GltfImportReport rep;
+	if ( !gltfImportRead( file, opt, clip, rep ) ) {
+		err() << "gltf-import: " << rep.error << Qt::endl;
+		return 1;
+	}
+	out() << "read " << file << ": " << rep.summary() << Qt::endl;
+	out() << "  container " << rep.container << "; up-axis " << rep.upAxisArm << Qt::endl;
+	out() << "  rate " << rep.rateArm << Qt::endl;
+	out() << "  mapping " << rep.mappingArm << Qt::endl;
+	out() << "  " << clip.numTracks << " tracks x " << clip.numFrames << " frames, "
+		  << rep.matched.size() << " matched, " << rep.unmatchedNodes.size()
+		  << " nodes unmatched, " << rep.unmatchedBones.size() << " bones undriven, "
+		  << rep.staticTracks << " static" << Qt::endl;
+	if ( rep.rootMotionExtracted )
+		out() << "  root motion from '" << rep.rootMotionNode << "': max |T| "
+			  << rep.rootMotionMaxTranslation << ", max yaw " << rep.rootMotionMaxYawDeg
+			  << " deg" << Qt::endl;
+
+	if ( !tsvFile.isEmpty() && !cmdHkxTsvWrite( clip, tsvFile ) )
+		return 1;
+
+	HkxWriteOptions wopt;
+	if ( route == QLatin1String( "a" ) )
+		wopt.route = HkxWriteOptions::RouteXmlPack;
+	if ( !skeletonName.isEmpty() )
+		wopt.skeletonName = skeletonName;
+	HkxWriteReport wrep;
+	if ( !hkxWrite( clip, outFile, wopt, wrep ) ) {
+		err() << "gltf-import: " << wrep.error << Qt::endl;
+		return 1;
+	}
+	out() << "wrote " << outFile << ": " << wrep.summary() << Qt::endl;
+	return 0;
+}
+
+/*! `hkx-tsv <in.hkx> -o OUT.tsv` -- lane BUILD8.
+ *
+ *  Lane HKX1's decode of a clip, as the 13 columns
+ *  `frame track bone tx ty tz qx qy qz qw sx sy sz` with root motion on track
+ *  -1, which is what tests/hkxwrite_dump.cpp writes and what
+ *  scratchpad/hkx5_20260910/tsvcmp.py reads.  It exists so the round trip can
+ *  be measured on the built exe's OWN reader as well as on the independent
+ *  Python decoder.
+ */
+int cmdHkxTsv( const QString & file, const QString & outFile )
+{
+	if ( outFile.isEmpty() ) {
+		err() << "hkx-tsv: -o <out.tsv> is required" << Qt::endl;
+		return 2;
+	}
+	const HkxAnimFile f = hkxAnimLoad( file );
+	if ( !f.ok() ) {
+		err() << "hkx-tsv: " << f.error << Qt::endl;
+		return 1;
+	}
+	if ( f.clips.isEmpty() ) {
+		err() << "hkx-tsv: " << file << " carries no animation" << Qt::endl;
+		return 1;
+	}
+	const HkxAnimClip & c = f.clips.first();
+	if ( !cmdHkxTsvWrite( c, outFile ) )
+		return 1;
+	out() << "wrote " << outFile << ": " << c.numFrames << " frames x " << c.numTracks
+		  << " tracks, " << c.rootMotion.size() << " root-motion samples, frameDuration "
+		  << c.frameDuration << Qt::endl;
+	return 0;
+}
+
 int usage()
 {
 	out() << "NifSkope headless batch mode\n\n"
@@ -4824,6 +6550,22 @@ int usage()
 		  << "                                          segment and subsegment, its\n"
 		  << "                                          triangles, its owning bone and\n"
 		  << "                                          the .ssf id that addresses it\n"
+		  << "  gltf <file> -o OUT.gltf [--clip C.hkx [--bones S.hkx]] [--root-motion]\n"
+		  << "                                          glTF 2.0 export: the node tree,\n"
+		  << "                                          the skinned shapes and one .hkx\n"
+		  << "                                          clip, opened natively by Blender.\n"
+		  << "                                          --bones names the skeleton whose\n"
+		  << "                                          bone names the tracks are read by\n"
+		  << gltfExportOptionsHelp()
+		  << "  gltf-import <in.gltf> -o OUT.hkx [--bones S.hkx] [--fps N] [--source-rate]\n"
+		  << "                                          the inverse: one glTF animation\n"
+		  << "                                          back to a Fallout 4 .hkx.\n"
+		  << "                                          --route a packs through HKXPACK,\n"
+		  << "                                          b (default) emits the packfile;\n"
+		  << "                                          --tsv also dumps the clip it read\n"
+		  << "                                          [--root-motion --root-node Root]\n"
+		  << "                                          lifts the travel off that node\n"
+		  << "  hkx-tsv <in.hkx> -o OUT.tsv             decode a clip to frame/track rows\n"
 		  << "  dump <file> -b N [-f PATH] [-d DEPTH] [-n MAX] [--all]\n"
 		  << "                                          print a block's fields\n"
 		  << "                                          (--all also shows rows this file's\n"
@@ -4896,6 +6638,13 @@ int usage()
 		  << "  lodl <file.lodl> --info                 our landscape file: extent, height\n"
 		  << "                                          range and quantum, sample rate, the\n"
 		  << "                                          sections present and the plane keys\n"
+		  << "  lodl <file.lodl> --water-census          the version-3 water body table,\n"
+		  << "                                          read back out of the file itself\n"
+		  << "  lodl <file.lodl> --water-selftest       the classifier's known-answer\n"
+		  << "                                          control, with its refuter\n"
+		  << "  lodl <file.lodl> --water-mark-selftest  the MARKING tool's gates. It\n"
+		  << "                                          REWRITES the file it is given,\n"
+		  << "                                          so give it a copy\n"
 		  << "  lodl <file.lodl> [--region X0 Y0 X1 Y1] [--lod N] [--plane KEY] [-o OUT.nif]\n"
 		  << "                                          build the region as BSTriShape\n"
 		  << "                                          geometry, painted with one stored\n"
@@ -4906,6 +6655,8 @@ int usage()
 		  << "                                          measured. Same generator as\n"
 		  << "                                          File > Open\n"
 		  << "  lodgen <file.esm> --list-worldspaces    LOD generation (rung 0): list\n"
+		  << "  parsestress <a.nif> [--stress-file b.nif]... [--stress-threads N]\n"
+		  << "              [--stress-reps N] [--stress-sabotage digest|share]\n"
 		  << "                                          worldspaces in an ESM\n"
 		  << "  lodgen <file.esm> --worldspace HEX [--cell X Y]\n"
 		  << "                                          inspect a worldspace / one cell:\n"
@@ -4924,7 +6675,7 @@ int usage()
 		  << "                                          never vanilla's (collision shadows\n"
 		  << "                                          the vanilla sheet for vanilla BTOs)\n"
 		  << "  lodgen <file.esm> --worldspace HEX --objects X Y [--dim 4]\n"
-		  << "         [--data-root DIR] [--no-identity] [--no-ao] [--arrays]\n"
+		  << "         [--data-root DIR] [--identity] [--no-identity] [--no-ao] [--arrays]\n"
 		  << "         [--no-merge]                     (shapes merge per material after\n"
 		  << "                                          the atlas; --no-merge keeps one\n"
 		  << "                                          shape per source material)\n"
@@ -4935,17 +6686,20 @@ int usage()
 		  << "                                          the chunk edge (default 1,\n"
 		  << "                                          0 = chunk only, which seams)\n"
 		  << "                                          rung 2: stitch one object chunk\n"
-		  << "                                          from per-object _LOD meshes; with\n"
-		  << "                                          identity (default) vertices carry\n"
-		  << "                                          the FO4CS channel contract and a\n"
-		  << "                                          .manifest.txt is written beside\n"
+		  << "                                          from per-object _LOD meshes. The\n"
+		  << "                                          .manifest.txt sidecar is ALWAYS\n"
+		  << "                                          written beside the chunk; --identity\n"
+		  << "                                          (DEFAULT OFF since 2026-09-12) adds\n"
+		  << "                                          the FO4CS per-vertex channels to the\n"
+		  << "                                          .BTO itself. Off, the .BTO carries\n"
+		  << "                                          vanilla's vertex layout exactly\n"
 		  << "         [--impostors DIR [--impostors-from-level N]]\n"
 		  << "                                          a card library (bake_impostor_cards.sh)\n"
 		  << "                                          stands in where a ring has no model;\n"
 		  << "                                          from MNAM level N (0 = dim 4) on it\n"
 		  << "                                          replaces the ring's mesh too (FO4CS)\n"
 		  << "  lodgen <file.esm> --worldspace HEX --terrain-region X0 Y0 X1 Y1\n"
-		  << "         --list-impostor-candidates [--candidates missing|trees|all]\n"
+		  << "         --list-impostor-candidates [--candidates missing|trees]\n"
 		  << "         --card-half-aux                 impostor normal, mask and emissive\n"
 		  << "                                         sheets at half the base colour's side\n"
 		  << "                                         (54% off a card; the silhouette is in\n"
@@ -4953,8 +6707,24 @@ int usage()
 		  << "                                          `formid model` per base, the model\n"
 		  << "                                          being the base's own near mesh for\n"
 		  << "                                          the card bake; missing = far slots\n"
-		  << "                                          empty (default), trees = every tree\n"
-		  << "                                          as well, all = every LOD base\n"
+		  << "                                          empty (default), trees = the tree set\n"
+		  << "                                          and only it. `all` was RETIRED on\n"
+		  << "                                          2026-09-11 and refuses by name\n"
+		  << "  lodgen ... [--trees-only] [--no-trees-only]\n"
+		  << "                                          which placements may stand on a card\n"
+		  << "                                          during the bake: --trees-only (the\n"
+		  << "                                          default, the panel's Trees only row)\n"
+		  << "                                          is the tree set; --no-trees-only is\n"
+		  << "                                          any base whose ring slot is EMPTY.\n"
+		  << "                                          --impostors-from-level is tree-only\n"
+		  << "                                          in both states\n"
+		  << "  lodgen ... [--terrain-identity] [--no-terrain-identity]\n"
+		  << "                                          material class, wetness, occlusion and\n"
+		  << "                                          shore in the .BTR's vertex colours.\n"
+		  << "                                          DEFAULT OFF since 2026-09-12: the\n"
+		  << "                                          legacy .BTR carries vanilla's vertex\n"
+		  << "                                          layout and the FO4CS data lives in the\n"
+		  << "                                          .lod* files only\n"
 		  << "  lodgen ... [--resource DIR|ARCHIVE]...    the resource stack, in Mod\n"
 		  << "                                          Organizer's order: the LAST one\n"
 		  << "                                          given overrides the earlier ones,\n"
@@ -5001,6 +6771,223 @@ int usage()
 		  << "                                          bounding sphere or the node\n"
 		  << "                                          AABB - plus an `i` line with\n"
 		  << "                                          its object identity indices\n"
+		  << "  lodgen ... --terrain-region ... --native MODFOLDER\n"
+		  << "                                          ALSO write the FO4CS-native far\n"
+		  << "                                          field. MODFOLDER is a MOD FOLDER\n"
+		  << "                                          (the mod's Data), as --vt and --lodl\n"
+		  << "                                          already are: the pair lands at\n"
+		  << "                                          <MODFOLDER>/FO4CSLOD/<ws>/<ws>.lodo\n"
+		  << "                                          + .lodi, with every other FO4CS\n"
+		  << "                                          output of this bake under the same\n"
+		  << "                                          FO4CSLOD/<ws>/ folder\n"
+		  << "                                          (docs/LODGEN_NATIVE_LODO_LODI.md);\n"
+		  << "                                          the .BTO chunks are built in a\n"
+		  << "                                          scratch folder and REMOVED after\n"
+		  << "                                          the arrays, cards, merge and\n"
+		  << "                                          far-ring cut have read them\n"
+		  << "  lodgen ... --native <dir> --keep-bto     the way back: leave the .BTO chunks\n"
+		  << "                                          in the output folder exactly as a\n"
+		  << "                                          bake before 2026-09-16 did. The\n"
+		  << "                                          manifest sidecar is written either\n"
+		  << "                                          way; a bake with no --native is\n"
+		  << "                                          the stock target and is untouched\n"
+		  << "  lodgen ... --native <dir> --native-mesh-report <file>\n"
+		  << "                                          ALSO write one line a library mesh:\n"
+		  << "                                          triangles, vertices, the GPU cache\n"
+		  << "                                          order before and after, and the\n"
+		  << "                                          boundary-edge silhouette counts\n"
+		  << "  lodgen --native-verify <ws.lodo> <ws.lodi> [--native-verify-corpus]\n"
+		  << "                                          read a pair back, every check;\n"
+		  << "                                          --native-verify-corpus re-reads the\n"
+		  << "                                          plugin and refuses a STALE pair\n"
+		  << "  lodgen --native-fixture <dir>           write the synthetic known-answer pair\n"
+		  << "  archlock-probe <file.nif> --data-root <a;b;c> [--probe <tex>]\n"
+		  << "                                          the archive-lock refuter: the file is\n"
+		  << "                                          loaded through a BUFFER, so the\n"
+		  << "                                          document has an empty data path and\n"
+		  << "                                          every lookup falls through to the\n"
+		  << "                                          shared index\n"
+		  << "  lodgen --bake-record <ws.lodb> [<plugins>]\n"
+		  << "                                          print the bake record beside a bake:\n"
+		  << "                                          exe, date, the five staleness hashes,\n"
+		  << "                                          plugins with sizes and FNV-1a 64,\n"
+		  << "                                          resources, switches, one line a chunk\n"
+		  << "                                          with its input digest, the census and\n"
+		  << "                                          the end counts re-read from disk. With\n"
+		  << "                                          a plugin list (positional, --plugins-txt\n"
+		  << "                                          or --mo2) it also names every plugin\n"
+		  << "                                          added, removed, reordered, resized or\n"
+		  << "                                          edited since, and exits 1 if any moved\n"
+	  << "  lodgen ... --native <dir> --native-ladder | --native-no-ladder\n"
+	  << "                                          no-ladder (the default): one level a\n"
+	  << "                                          mesh, the authored model as is,\n"
+	  << "                                          nothing simplified. --native-ladder\n"
+	  << "                                          builds the simplified cluster ladder\n"
+	  << "  lodgen ... --native <dir> --library near|mnam\n"
+	  << "                                          where the library's level 0 comes\n"
+	  << "                                          from: the authored MNAM LOD slots\n"
+	  << "                                          (mnam, the default) or the base's\n"
+	  << "                                          near MODL (near)\n"
+	  << "  lodgen ... --native <dir> --native-ladder-foliage\n"
+	  << "                                          let alpha-tested foliage clusters\n"
+	  << "                                          ladder; off by default because a\n"
+	  << "                                          simplified leaf card is fragments\n"
+	  << "  lodgen ... --native <dir> --native-silhouette <0..1>\n"
+	  << "                                          the fraction of level 0's horizon\n"
+	  << "                                          outline a level must keep or be\n"
+	  << "                                          refused (default 0.70; 0 = no gate)\n"
+	  << "  lodgen ... --native <dir> --native-no-placement-ao\n"
+  << "  lodgen ... --native <dir> --native-no-vertex-ao\n"
+	  << "  lodgen ... --native <dir> --lodi-v6\n"
+	  << "  lodgen ... --native <dir> --lodi-v7\n"
+	  << "  lodgen ... --native <dir> --scrappable  (off by default; .lodi v9 instance bit 6)\n"
+	  << "  lodgen ... --native <dir> --identity-join-gap 64 | --identity-join legacy\n"
+	  << "                                          v7 GROUPING: a non-tree placement joins\n"
+	  << "                                          a group when its LOD MESH is within the\n"
+	  << "                                          gap of another's (bungo 2026-09-19);\n"
+	  << "                                          `legacy` is the old architecture-only\n"
+	  << "                                          16-unit BOX rule, byte for byte\n"
+	  << "                                          write no group table and no\n"
+	  << "                                          per-vertex sky stream; the\n"
+	  << "                                          .lodi stays at version 6,\n"
+	  << "                                          byte for byte\n"
+	  << "                                          write no per-instance placement-AO\n"
+	  << "                                          byte; the .lodi stays at version 3\n"
+	  << "                                          or 4, byte for byte\n"
+	  << "  lodgen ... --native <dir> --native-no-occluders\n"
+	  << "                                          write no occluder boxes; the\n"
+	  << "                                          census says so in words\n"
+	  << "  lodgen ... --native <dir> --impostors <cards> --aggregate\n"
+	  << "                --aggregate-min 8 --aggregate-tile 64 --aggregate-views 8\n"
+	  << "                                          AGGREGATE RING-3 IMPOSTORS: one card\n"
+	  << "                                          set a FORESTED cell, composited from\n"
+	  << "                                          that cell own trees cards at the\n"
+	  << "                                          rotation and mirror the repetition\n"
+	  << "                                          breaker gives them, photographed from\n"
+	  << "                                          --aggregate-views azimuths at the\n"
+	  << "                                          horizon. A cell is forested at\n"
+	  << "                                          --aggregate-min tree placements. The\n"
+	  << "                                          .lodi then carries one aggregate row a\n"
+	  << "                                          cell and the list of instances it\n"
+	  << "                                          stands for, and is written at VERSION\n"
+	  << "                                          4. OFF is the exact way back: without\n"
+	  << "                                          it the pair is version 3 and byte for\n"
+	  << "                                          byte what it always was\n"
+		  << "  lodgen ... --terrain-region ... [--chunk-threads N]\n"
+		  << "                                          how many chunks the queue builds\n"
+		  << "                                          at once. DEFAULT 1, and it stays 1\n"
+		  << "                                          because of the MEMORY. Measured on\n"
+		  << "                                          this machine, lane PERF1 2026-09-17,\n"
+		  << "                                          8 threads against 1: a 9-chunk FO4CS\n"
+		  << "                                          region 2.29 -> 9.32 GB of peak\n"
+		  << "                                          working set for 49.3 s -> 41.6 s; a\n"
+		  << "                                          16-chunk one 2.55 -> 10.48 GB for\n"
+		  << "                                          59.4 s -> 46.9 s. So about a fifth of\n"
+		  << "                                          the wall clock for about four times\n"
+		  << "                                          the memory. It is CLEAN: 20 of 20\n"
+		  << "                                          consecutive runs a region, 0 faults,\n"
+		  << "                                          every file byte-identical to the\n"
+		  << "                                          1-thread bake (57 and 99). This\n"
+		  << "                                          supersedes the older 2.3x-slower\n"
+		  << "                                          reading, taken before the library was\n"
+		  << "                                          parallel; an earlier lane measured\n"
+		  << "                                          25 GB at 16 threads on 25 chunks, so\n"
+		  << "                                          the ceiling here is memory, not cores\n"
+		  << "  lodgen ... --terrain-region ... [--land-sample MODE]\n"
+		  << "                                          how the land texture is read\n"
+		  << "                                          inside one repeat. footprint\n"
+		  << "                                          (DEFAULT base rule) = one texel of\n"
+		  << "                                          the matching mip; average = its mean\n"
+		  << "                                          over a whole repeat; stochastic = the\n"
+		  << "                                          hex tiling (256 units, bias -0.22)\n"
+		  << "                                          with the warp amplitude forced to 0;\n"
+		  << "                                          warp = lane TILING3's domain warp,\n"
+		  << "                                          kept for the record\n"
+		  << "  lodgen ... --terrain-region ... [--blend-edges off|quadrant]\n"
+		  << "                                          the 2,048-unit quadrant lines of the\n"
+		  << "                                          land colour. DEFAULT quadrant since\n"
+		  << "                                          2026-09-23 (bungo): cross-faded over\n"
+		  << "                                          --blend-margin units (default 128)\n"
+		  << "                                          either side; colour sheets only.\n"
+		  << "                                          off = hard lines, the exact way back\n"
+		  << "  lodgen ... --terrain-region ... [--land-hex UNITS]\n"
+		  << "                                          the hex tile size on its own.\n"
+		  << "                                          DEFAULT 256 since 2026-09-12 (bungo's\n"
+		  << "                                          pick, panel (c) of a_land_guide_*.png).\n"
+		  << "                                          --land-hex 0 --land-warp 0\n"
+		  << "                                          --land-mip-bias 0 --land-guide off is\n"
+		  << "                                          the exact way back to the bake before\n"
+		  << "                                          that ruling, byte for byte\n"
+		  << "  lodgen ... --terrain-region ... [--land-guide RULE[:K]]\n"
+		  << "                                 [--land-guide-scale UNITS] [--land-guide-slope TAN]\n"
+		  << "                                          terrain-guided land sampling (lane\n"
+		  << "                                          LAND1): the land texture's phase is\n"
+		  << "                                          steered by the HEIGHTMAP's own low-pass\n"
+		  << "                                          slope at --land-guide-scale (128..2048,\n"
+		  << "                                          default 1024). RULE is off, drag,\n"
+		  << "                                          aspect, aspecthex, slopewarp or flatwarp.\n"
+		  << "                                          DEFAULT flatwarp:1.0 with --land-warp 341\n"
+		  << "                                          since 2026-09-12 (bungo's pick); off is\n"
+		  << "                                          part of the way back above.\n"
+		  << "                                          K is world units for drag, a 0..1\n"
+		  << "                                          fraction for the two aspects, and a\n"
+		  << "                                          multiplier on --land-warp for the warps.\n"
+		  << "  lodgen ... --terrain-region ... [--incremental OUT-DIR]\n"
+		  << "                                          rebake only the chunks whose INPUTS\n"
+		  << "                                          changed since the bake that wrote\n"
+		  << "                                          OUT-DIR/<Worldspace>.lodb, plus every\n"
+		  << "                                          chunk within one cell of one. Every\n"
+		  << "                                          region bake writes that ledger, so the\n"
+		  << "                                          first incremental run needs only a\n"
+		  << "                                          previous ordinary one. REFUSES rather\n"
+		  << "                                          than silently full-baking when there is\n"
+		  << "                                          no ledger, when the region or the\n"
+		  << "                                          switches differ, or when --atlas,\n"
+		  << "                                          --arrays, the merge or --impostors are\n"
+		  << "                                          asked for -- those four consume the\n"
+		  << "                                          written .BTO list in order and a\n"
+		  << "                                          filtered list would corrupt them.\n"
+		  << "                                          Under --native it also KEEPS the\n"
+		  << "                                          previous .lodo when the base census,\n"
+		  << "                                          the load order, the plugin corpus and\n"
+		  << "                                          the object corpus are all unmoved and\n"
+		  << "                                          the file reads back whole: the census\n"
+		  << "                                          line native-library-build: says reused or\n"
+		  << "                                          rebuilt (why). Occluders being ON\n"
+		  << "                                          always rebuilds (lane PERF1)\n"
+		  << "                                          docs/LODGEN_LEDGER_FORMAT.md\n"
+		  << "  lodgen ... --incremental ... [--no-native-cache]\n"
+		  << "                                          do not write the per-chunk\n"
+		  << "                                          .lodj cache the FO4CS target\n"
+		  << "                                          needs. A full bake still\n"
+		  << "                                          writes its LOD; an\n"
+		  << "                                          --incremental --native run\n"
+		  << "                                          then REFUSES, because a\n"
+		  << "                                          skipped chunk has nothing to\n"
+		  << "                                          replay into the .lodo/.lodi\n"
+		  << "                                          pair and would be silently\n"
+		  << "                                          missing from it. Only for\n"
+		  << "                                          measuring what the cache\n"
+		  << "                                          costs.\n"
+		  << "  lodgen ... --terrain-region ... [--land-tiling UNITS]\n"
+		  << "                                          world units one repeat of a\n"
+		  << "                                          landscape texture covers.\n"
+		  << "                                          DEFAULT 341.333 = 128/0.375,\n"
+		  << "                                          the engine's own tiling;\n"
+		  << "                                          2048 is the exact way back\n"
+		  << "  lodgen ... --terrain-region ... [--threads N]\n"
+		  << "                                          how many cores the chunk queue,\n"
+		  << "                                          the tile bakes, the BC encoders and\n"
+		  << "                                          the object library (model load, cap 4;\n"
+		  << "                                          mesh ladder, uncapped) may use.\n"
+		  << "                                          0 or absent = the machine; measured\n"
+		  << "                                          82.0 s -> 49.3 s on a 9-chunk FO4CS\n"
+		  << "                                          region and 91.5 s -> 59.4 s on a\n"
+		  << "                                          16-chunk one, lane PERF1 2026-09-17;\n"
+		  << "                                          1 is the EXACT way back (one world,\n"
+		  << "                                          one cache set, one chunk at a time)\n"
+		  << "                                          and every output file is\n"
+		  << "                                          byte-identical either way\n"
 		  << "  lodgen ... --terrain-region ... [--slot-fallback]\n"
 		  << "                                          keep an object at a ring whose\n"
 		  << "                                          MNAM slot is empty by using the\n"
@@ -5061,9 +7048,232 @@ int usage()
 		  << "                                          north-up and headerless.\n"
 		  << "                                          Off, the three sheets are byte for\n"
 		  << "                                          byte what they have always been.\n"
+		  << "  lodgen ... [--roads] [--no-roads] [--road-cover-suppress F]\n"
+		  << "                                          --roads (ON by default, both\n"
+		  << "                                          targets) rasterises the placed\n"
+		  << "                                          road meshes top-down into the far\n"
+		  << "                                          terrain COLOUR sheet, the way\n"
+		  << "                                          vanilla does: a STAT whose model\n"
+		  << "                                          sits under Landscape/Roads or\n"
+		  << "                                          Landscape/Sidewalks, its own\n"
+		  << "                                          material diffuse, the topmost\n"
+		  << "                                          triangle winning, alpha-tested\n"
+		  << "                                          shapes honouring their cut-out.\n"
+		  << "                                          The NORMAL sheet is not touched:\n"
+		  << "                                          vanilla does not put the road in\n"
+		  << "                                          it (measured). Ground cover under\n"
+		  << "                                          a road is scaled by\n"
+		  << "                                          --road-cover-suppress F (default 1\n"
+		  << "                                          = no grass under the road, 0 =\n"
+		  << "                                          leave the cover plane alone).\n"
+		  << "                                          --no-roads is byte-identical to\n"
+		  << "                                          the bake before roads existed.\n"
+		  << "  lodgen ... [--road-opacity 0..1]\n"
+		  << "                                          --road-opacity A (default 1)\n"
+		  << "                                          scales how strongly the road\n"
+		  << "                                          paint is mixed into the ground\n"
+		  << "                                          under it: 1 is the bake as it\n"
+		  << "                                          has always been and the multiply\n"
+		  << "                                          is branched over, 0 paints\n"
+		  << "                                          nothing while the road still\n"
+		  << "                                          suppresses the ground cover\n"
+		  << "                                          under it. Vanilla's far road\n"
+		  << "                                          stands +4.29 and +4.40 levels\n"
+		  << "                                          over its surround on two tiles;\n"
+		  << "                                          ours stands +29.96 and +3.84, so\n"
+		  << "                                          the error is not the same on\n"
+		  << "                                          every chunk and no one value\n"
+		  << "                                          fixes both (lane ROADS3).\n"
+		  << "  lodgen ... [--road-composite max-z|blend] [--road-detail 0..1]\n"
+		  << "             [--road-ground-paint 0..1]\n"
+		  << "             [--road-raised] [--no-road-raised]\n"
+		  << "             [--road-sidewalks] [--no-road-sidewalks] [--roads-legacy]\n"
+		  << "                                          --road-detail lerps the diffuse\n"
+		  << "                                          sample toward the texture's own\n"
+		  << "                                          average: 1 (the default) prints the\n"
+		  << "                                          footprint sample; 0 is one flat\n"
+		  << "                                          colour a material, which is what\n"
+		  << "                                          vanilla's far road measures as but\n"
+		  << "                                          is NOT the default -- bungo ruled\n"
+		  << "                                          on 2026-09-12, over a picture of\n"
+		  << "                                          both, that 0 looks terrible and is\n"
+		  << "                                          never to be used. 1 does band the\n"
+		  << "                                          road at its 256-unit UV repeat.\n"
+		  << "                                          --road-ground-paint is how much\n"
+		  << "                                          a shape INSIDE a road model whose\n"
+		  << "                                          material lives under\n"
+		  << "                                          materials/Landscape/Ground/ paints\n"
+		  << "                                          the sheet -- the verge, modelled\n"
+		  << "                                          and materialled as terrain. Such\n"
+		  << "                                          shapes win 36.1 per cent of the\n"
+		  << "                                          road plane on chunk (-20,20) and\n"
+		  << "                                          24.9 on (-8,8), and the step where\n"
+		  << "                                          they meet the asphalt reads 15.387\n"
+		  << "                                          and 8.010 against vanilla 5.362\n"
+		  << "                                          and 5.138 (lane ROADS4). 0 -- THE\n"
+		  << "                                          DEFAULT since 2026-09-12, bungo's\n"
+		  << "                                          16:55 ruling that the grass meshes\n"
+		  << "                                          in the road nifs are excluded --\n"
+		  << "                                          leaves the landscape colour there\n"
+		  << "                                          and also stops that shape\n"
+		  << "                                          suppressing ground cover, since the\n"
+		  << "                                          multiply is on coverage;\n"
+		  << "                                          --road-ground-paint 1 is the way\n"
+		  << "                                          back and is ROADS1s bake.\n"
+		  << "                                          --road-composite max-z (the\n"
+		  << "                                          default) lets the topmost\n"
+		  << "                                          triangle win the texel; blend\n"
+		  << "                                          paints the pieces in order --\n"
+		  << "                                          ascending mean world Z, non-decal\n"
+		  << "                                          before decal -- and composites\n"
+		  << "                                          dst = lerp(dst, src, srcAlpha).\n"
+		  << "                                          max-z is the default because it\n"
+		  << "                                          scores 0.3404 on the road metric\n"
+		  << "                                          of tests/spells and blend 0.2669,\n"
+		  << "                                          against bars 0.2694 and 0.3228.\n"
+		  << "                                          --no-road-raised (the default)\n"
+		  << "                                          refuses a road base that carries\n"
+		  << "                                          its own Distant LOD mesh and\n"
+		  << "                                          anything under\n"
+		  << "                                          Landscape/Roads/HighwayOverpass or\n"
+		  << "                                          .../Bridge, because those are\n"
+		  << "                                          drawn as objects at distance.\n"
+		  << "                                          --no-road-sidewalks (the default)\n"
+		  << "                                          keeps Landscape/Sidewalks out of\n"
+		  << "                                          the paint: on chunk (-8,8) ours\n"
+		  << "                                          read 128.4 mean luminance there\n"
+		  << "                                          against vanilla's 86.5, while the\n"
+		  << "                                          flat road matched vanilla to\n"
+		  << "                                          0.001 of its own floor clearance.\n"
+		  << "                                          --roads-legacy IS THE WAY BACK,\n"
+		  << "                                          one token, and means all four:\n"
+		  << "                                          max-z, full detail, the raised\n"
+		  << "                                          families and the sidewalks, so\n"
+		  << "                                          such a bake is byte-identical to\n"
+		  << "                                          the bake before this existed.\n"
+		  << "  lodgen ... [--terrain-object-ao]\n"
+		  << "             [--terrain-object-ao-strength 0..4, default 0.5]\n"
+		  << "             [--terrain-object-ao-slab 0|1, default 1; 0 = the old\n"
+		  << "              max-Z reading, where a deck blocks from the ground up]\n"
+		  << "             [--dump-object-ao FILE]\n"
+		  << "                                          the far terrain receives ambient\n"
+		  << "                                          occlusion from the PLACED OBJECTS,\n"
+		  << "                                          not only from its own horizon: the\n"
+		  << "                                          same eight-direction march, run a\n"
+		  << "                                          second time over a 128-unit max-Z\n"
+		  << "                                          field of the level-0 LOD meshes, and\n"
+		  << "                                          multiplied in as a second visibility\n"
+		  << "                                          fraction. Reach 1458 units (the\n"
+		  << "                                          march's longest step). OFF by\n"
+		  << "                                          default and off is the previous\n"
+		  << "                                          bake's BYTES -- the term is exactly\n"
+		  << "                                          1.0 where nothing is in reach. A\n"
+		  << "                                          base with no distant-LOD mesh is not\n"
+		  << "                                          drawn at distance, so it does not\n"
+		  << "                                          shadow at distance: it is refused by\n"
+		  << "                                          name into the census. Refused in\n"
+		  << "                                          combination with --lodl, because the\n"
+		  << "                                          .lodl AO plane and --refresh-ao\n"
+		  << "                                          share one function over the stored\n"
+		  << "                                          heights alone.\n"
+		  << "                                          The strength default 0.5 is the\n"
+		  << "                                          largest sampled value at which the\n"
+		  << "                                          AO byte never clamps to 0 on the\n"
+		  << "                                          measured region: at 1.0, 276,234 of\n"
+		  << "                                          1,048,576 texels there go flat to\n"
+		  << "                                          zero and stop carrying occlusion.\n"
+		  << "                                          One region, and a forested one.\n"
+		  << "  lodgen ... [--erosion 0..8, default 0] [--erosion-iterations 1..16]\n"
+		  << "             [--erosion-seed N] [--land-detail-source erosion]\n"
+		  << "                                          a hydraulic erosion pass at BAKE\n"
+		  << "                                          resolution: droplets traced over the\n"
+		  << "                                          sheet's own height lattice cut and\n"
+		  << "                                          fill a height delta, and that delta\n"
+		  << "                                          reaches the normal sheet as an added\n"
+		  << "                                          gradient and the colour as the same\n"
+		  << "                                          crevice shading vanilla's residual\n"
+		  << "                                          fitted (-3.242 levels). It does NOT\n"
+		  << "                                          tint by material: TILING3 measured an\n"
+		  << "                                          R-squared ceiling of 0.018-0.023 on\n"
+		  << "                                          any per-texel law from the fine\n"
+		  << "                                          normal to vanilla's fine colour, so a\n"
+		  << "                                          palette would be a taste, not a\n"
+		  << "                                          measurement. 0 is the default, builds\n"
+		  << "                                          no lattice and is the previous bake's\n"
+		  << "                                          BYTES. Deterministic by construction:\n"
+		  << "                                          paths traced on a STATIC field, start\n"
+		  << "                                          positions seeded from world position,\n"
+		  << "                                          droplets summed in world order, and a\n"
+		  << "                                          32-cell border, so a droplet that\n"
+		  << "                                          never reaches a node never changes it.\n"
+		  << "                                          On Commonwealth pass\n"
+		  << "                                          --land-detail-source erosion as well,\n"
+		  << "                                          or the default (vanilla) copies\n"
+		  << "                                          vanilla's _msn over the pass.\n"
+		  << "  lodgen ... [--sheet-format vanilla|legacy] [--msn-cache DIR|auto]\n"
+		  << "                                          --sheet-format vanilla writes the far\n"
+		  << "                                          terrain sheets the way every one of\n"
+		  << "                                          the 6,120 shipped Commonwealth sheets\n"
+		  << "                                          is written: DXT5, mips all the way to\n"
+		  << "                                          1x1 (10 at 512), alpha a constant 255\n"
+		  << "                                          (measured: one distinct alpha value\n"
+		  << "                                          over 13.1M texels per family). legacy\n"
+		  << "                                          is the default and is the previous\n"
+		  << "                                          bake's BYTES. A sheet copied from\n"
+		  << "                                          vanilla is never re-encoded either\n"
+		  << "                                          way. --msn-cache names a directory of\n"
+		  << "                                          cleaned <ws>.<dim>.<x>.<y>.png normal\n"
+		  << "                                          sheets; each one found replaces that\n"
+		  << "                                          chunk's _msn, written UNCOMPRESSED\n"
+		  << "                                          with a full mip chain (a BC re-encode\n"
+		  << "                                          puts the block grid back). Its R is\n"
+		  << "                                          east and its G is north; up is\n"
+		  << "                                          recomputed and the normal is\n"
+		  << "                                          renormalised. A <name>_msn.DDS in the\n"
+		  << "                                          same directory wins over the .png:\n"
+		  << "                                          uncompressed R8G8B8A8 (DX10 header,\n"
+		  << "                                          one mip) in vanilla's order, R east,\n"
+		  << "                                          G up, B north, and its G is USED, not\n"
+		  << "                                          recomputed. Anything else is refused\n"
+		  << "                                          with a reason on stderr. Empty is the\n"
+		  << "                                          default and reads no directory.\n"
 		  << "  lodgen <file.esm> --worldspace HEX --vt MODFOLDER [--tex-dir DIR]\n"
 		  << "         [--vt-finest 2] [--vt-content 256] [--vt-border 8] [--vt-mips 2]\n"
+		  << "         [--vt-density 32|16|8]           the finest level's texel size in\n"
+		  << "                                          world units, as one word: 32 =\n"
+		  << "                                          --vt-finest 2 --vt-content 256 (the\n"
+		  << "                                          CLI default, ~1.7 GB for the whole\n"
+		  << "                                          Commonwealth), 16 = finest 2 content\n"
+		  << "                                          512 (the panel's default, ~6.4 GB),\n"
+		  << "                                          8 = finest 1 content 512 (the upscaled\n"
+		  << "                                          normal sheets' own density, ~26 GB).\n"
+		  << "                                          Refused beside --vt-finest/--vt-content\n"
+		  << "         [--vt-half-aux]                  normal, mask, height and emissive\n"
+		  << "                                          tiles at HALF the texels a side (their\n"
+		  << "                                          top mip is not stored; the header's\n"
+		  << "                                          sheet descriptor byte 6 says so); the\n"
+		  << "                                          colour keeps the full density. OFF by\n"
+		  << "                                          default; needs --vt-mips 2 or more.\n"
+		  << "                                          With --msn-cache set, the pyramid's\n"
+		  << "                                          NORMAL is that folder's sheets, box-\n"
+		  << "                                          filtered as vectors to each level;\n"
+		  << "                                          a chunk with no sheet keeps the\n"
+		  << "                                          heights normal. DIR may be the\n"
+		  << "                                          sheets' own folder or a mod / Data\n"
+		  << "                                          folder holding them under\n"
+		  << "                                          Textures/Terrain/<world>/. auto: the\n"
+		  << "                                          last --resource folder with sheets\n"
+		  << "                                          wider than vanilla's 512, or none.\n"
 		  << "         [--vt-compress none|zlib] [--vt-btr] [--no-vt-btr] [--vt-estimate]\n"
+		  << "         [--vt-cover-in-color]            put the ground-cover byte in the\n"
+		  << "                                          COLOUR sheet alpha (the object\n"
+		  << "                                          family coverage slot) instead of the\n"
+		  << "                                          mask alpha. OFF: the colour alpha is\n"
+		  << "                                          the one slot .lodm 2.1 defines as\n"
+		  << "                                          OPACITY, so a consumer that\n"
+		  << "                                          alpha-tests it would punch holes in\n"
+		  << "                                          thin grass; and it costs 46,240 bytes\n"
+		  << "                                          a tile on every cover-FREE tile.\n"
 		  << "         [--vt-height]                    a fourth R16 height sheet per tile,\n"
 		  << "                                          OFF by default: uncompressed where the\n"
 		  << "                                          other three are BC1, so +133% on a tile,\n"
@@ -5075,7 +7285,8 @@ int usage()
 		  << "                                          the terrain virtual texture: a\n"
 		  << "                                          pyramid of 256-texel tiles with an\n"
 		  << "                                          8-texel border, one .lodt per level\n"
-		  << "                                          under <MODFOLDER>/Terrain/, indexed\n"
+		  << "                                          under <MODFOLDER>/FO4CSLOD/<ws>/,\n"
+		  << "                                          indexed\n"
 		  << "                                          by <ws>.VT.lodm. Four sheets a tile:\n"
 		  << "                                          colour, model-space normal, data and\n"
 		  << "                                          HEIGHT (R16, the shadow heightmap's\n"
@@ -5123,6 +7334,112 @@ int usage()
 	return 0;
 }
 
+/*! `archlock-probe <file.nif> --data-root <Data folder|.ba2> [--probe <texture>]`
+ *  -- lane ARCHLOCK1, 2026-09-17. The CLI half of the archive-lock refuter.
+ *
+ *  It reproduces, with no window, the two halves of the condition the deadlock
+ *  needed, and it FORCES both rather than hoping for them:
+ *
+ *    1. a document whose own resource set has an EMPTY data path. The bytes are
+ *       read here and handed to NifModel::load through a QBuffer, exactly as
+ *       the Files tab's configured-resource row does, so the model never sees a
+ *       file name and getNIFDataPath gives it nothing. Opening the same file BY
+ *       PATH does not reproduce this: the data path is then derived from the
+ *       name and the document builds the shared index from its own
+ *       init_archives(), with no lock held.
+ *    2. a shared index that is NOT BUILT YET -- close_archives() first, then the
+ *       pointer is printed, because the whole probe is meaningless if something
+ *       already warmed it.
+ *
+ *  On the build before the fix this hangs forever at the first lookup, on this
+ *  thread, with no CPU: get_file took the READ lock, missed, and recursed into
+ *  the parent's init_archives(), whose first line takes the WRITE lock on the
+ *  same QReadWriteLock. -no-gui never brings the game manager up (see
+ *  initModelLayer), so the folders are set here explicitly; without them the
+ *  parent's dataPaths are empty, init_archives is never reached and the bug
+ *  cannot be seen from a CLI run at all.
+ *
+ *  Keyword lines, one fact a line, like the rest of this file's probes. */
+int cmdArchLockProbe( const QString & nifPath, const QString & dataRoot, const QString & texture )
+{
+	if ( nifPath.isEmpty() || dataRoot.isEmpty() ) {
+		err() << "archlock-probe: needs <file.nif> and --data-root <Data folder or .ba2>" << Qt::endl;
+		return 2;
+	}
+	Game::GameManager::update_other_games_fallback( false );
+	/* A ;-SEPARATED LIST, not one folder. The mesh, its material and its
+	 * texture live in three different .ba2 files, and a probe given only one
+	 * of them would report `not-found` for a lookup that is working
+	 * perfectly -- which is the same red as the bug. */
+	const QStringList roots =
+		dataRoot.split( QChar( ';' ), Qt::SkipEmptyParts );
+	Game::GameManager::update_folders( Game::FALLOUT_4, roots );
+	Game::GameManager::update_status( Game::FALLOUT_4, true );
+	Game::GameManager::GameResources & parent =
+		Game::GameManager::getGameResources( Game::FALLOUT_4 );
+	parent.close_archives();
+	out() << "archlock-probe roots " << roots.size() << Qt::endl;
+	for ( const QString & rt : roots )
+		out() << "archlock-probe dataRoot " << rt << Qt::endl;
+	out() << "archlock-probe sharedIndexBuilt " << ( parent.ba2File ? 1 : 0 ) << Qt::endl;
+
+	QFile f( nifPath );
+	if ( !f.open( QIODevice::ReadOnly ) ) {
+		err() << "archlock-probe: cannot read " << nifPath << Qt::endl;
+		return 2;
+	}
+	QByteArray raw = f.readAll();
+	f.close();
+	QBuffer buf( &raw );
+	if ( !buf.open( QIODevice::ReadOnly ) )
+		return 2;
+	NifModel nif;
+	const bool loaded = nif.load( buf );
+	buf.close();
+	out() << "archlock-probe loaded " << ( loaded ? 1 : 0 ) << Qt::endl;
+	out() << "archlock-probe blocks " << nif.getBlockCount() << Qt::endl;
+	Game::GameManager::GameResources & r = nif.getGameResources();
+	out() << "archlock-probe documentDataPaths " << r.dataPaths.size() << Qt::endl;
+	out() << "archlock-probe fallsThroughToShared "
+		<< ( r.parent == &parent ? 1 : 0 ) << Qt::endl;
+
+	// the first material the file names, which is what the renderer asks for
+	QString mat;
+	for ( int i = 0; i < nif.getBlockCount() && mat.isEmpty(); i++ ) {
+		const QString n = nif.get<QString>( nif.getBlockIndex( i ), "Name" );
+		if ( n.endsWith( QLatin1String( ".bgsm" ), Qt::CaseInsensitive )
+			|| n.endsWith( QLatin1String( ".bgem" ), Qt::CaseInsensitive ) )
+			mat = n;
+	}
+	out() << "archlock-probe material " << ( mat.isEmpty() ? QStringLiteral( "n/a" ) : mat ) << Qt::endl;
+	int fails = 0;
+	if ( mat.isEmpty() ) {
+		// a NIF with no material names nothing to look up: say so, do not pass
+		out() << "archlock-probe getFile REFUSED (the file names no material)" << Qt::endl;
+		fails++;
+	} else {
+		QByteArray data;
+		const bool got = nif.getResourceFile( data, mat, "materials", "" );
+		out() << "archlock-probe getFile " << ( got ? "found" : "not-found" )
+			<< " " << data.size() << " byte(s)" << Qt::endl;
+		if ( !got || data.isEmpty() )
+			fails++;
+	}
+	const QString wanted = texture.isEmpty() ? mat : texture;
+	if ( !wanted.isEmpty() ) {
+		const bool isTex = !texture.isEmpty();
+		const QString where = nif.findResourceFile( wanted,
+			isTex ? "textures" : "materials", isTex ? ".dds" : "" );
+		out() << "archlock-probe findFile " << ( where.isEmpty() ? "not-found" : "found" )
+			<< " " << ( where.isEmpty() ? wanted : where ) << Qt::endl;
+		if ( where.isEmpty() )
+			fails++;
+	}
+	out() << "archlock-probe sharedIndexBuiltNow " << ( parent.ba2File ? 1 : 0 ) << Qt::endl;
+	out() << "archlock-probe verdict " << ( fails == 0 ? "answered" : "refused" ) << Qt::endl;
+	return fails == 0 ? 0 : 1;
+}
+
 } // namespace
 
 int nifskopeCliMain( const QStringList & args )
@@ -5144,12 +7461,37 @@ int nifskopeCliMain( const QStringList & args )
 	}
 
 	const QString cmd = a.takeFirst();
+	// `nifx` reads and writes a sidecar, never a NIF: its own arguments, no
+	// model layer (lane PBRR1, gate d).
+	if ( cmd == QLatin1String( "nifx" ) ) {
+		const int rc = cmdNifx( a );
+		out().flush();
+		err().flush();
+		return rc;
+	}
+	// `weather` reads WTHR/CLMT records from a plugin load list: no NIF, no model
+	// layer (lane PBRR2B, the W1 gates; src/esmweather.cpp)
+	if ( cmd == QLatin1String( "weather" ) ) {
+		out().flush();
+		const int rc = cmdWeather( a );
+		err().flush();
+		return rc;
+	}
 
 	// options
 	QString file, path, value, outFile, spellId, type, pattern, sequence;
 	QStringList controllers, adds, addAttach;
 	QString pendingAttach;
 	QString saveName, applyName, importOs, exportOs;
+	QString gltfClip, gltfBones;			// lane HKX4
+	bool gltfRootMotion = false;			// lane HKX4
+	GltfExportOptions gltfOpts;			// lane GLTFEXPORT1: one struct, two front ends
+	bool gltfUsedNext = false;
+	QString gltfFlagError;
+	QString gltfRoute, gltfTsv, gltfSkeletonName;	// lane BUILD8
+	QString gltfRootNode;						// lane BUILD8
+	float gltfFps = 0.0f;						// lane BUILD8
+	bool gltfSourceRate = false;				// lane BUILD8
 	float blend = 1.0f;
 	float freezeTime = 0.0f;
 	bool keepGraph = false;
@@ -5182,6 +7524,9 @@ int nifskopeCliMain( const QStringList & args )
 	int btdRegion[4] = { 0, 0, 0, 0 };
 	int btdLod = -1;
 	QString lodtPlaneName;
+	bool lodtWaterCensusOnly = false;
+	bool lodtWaterSelfTestOnly = false;
+	bool lodtWaterMarkSelfTestOnly = false;
 	bool lgListWorldspaces = false;
 	quint32 lgWorldspace = 0;
 	bool lgHaveCell = false;
@@ -5194,7 +7539,14 @@ int nifskopeCliMain( const QStringList & args )
 	QString lgOutDir;
 	bool lgHaveObjects = false;
 	QString lgDataRoot;
-	bool lgIdentity = true;
+	/* OFF since 2026-09-12 (lane DEFAULTS1), bungo's ruling of 15:56 verbatim:
+	 * "Legacy terrain bakes stay as they were, no extra data for FO4CS to be
+	 * included in them. Only the .lod ones have new data in them." The legacy
+	 * .BTO therefore carries VANILLA'S vertex layout and nothing else, and
+	 * `--identity` is the opt-in that puts the channels back. The .manifest.txt
+	 * SIDECAR, the texture arrays and the impostor cards do NOT ride on this
+	 * flag any more -- it is not inside the .BTO, so the ruling is untouched. */
+	bool lgIdentity = false;
 	// The AO bake is the identity channel's B. Off leaves it at 255, which is
 	// what makes each object ONE flat colour -- the index and nothing else.
 	bool lgBakeAO = true;
@@ -5224,22 +7576,102 @@ int nifskopeCliMain( const QStringList & args )
 	/* Ground cover and the grass tint (lodgen.h). OFF by default, and off is
 	 * byte-identical to every bake this generator has ever written. */
 	LodgenCoverOptions lgCover;
+	/* Which of the road knobs the command line actually named, so
+	 * `--roads-legacy` can mean ROADS1's WHOLE pipeline without overriding a
+	 * value the caller asked for in the same breath. */
+	bool lgRoadGroundPaintSet = false;
+	bool lgRoadDetailSet = false, lgRoadRaisedSet = false,
+		lgRoadSidewalksSet = false, lgRoadsLegacy = false,
+		lgRoadOpacitySet = false;
 	/* The terrain virtual texture (lodgen.h). OFF by default; --vt names the
 	 * mod folder to write Terrain/ under. */
 	LodgenVtOptions lgVt;
 	QString lgVtDir;
+	/* THE FINEST TEXEL DENSITY AS ONE WORD (lane VTNORMAL1, bungo's ruling
+	 * 2026-09-23 09:4x): 32, 16 or 8 world units a texel. It NAMES existing
+	 * pairs and adds nothing underneath -- 32 = finest 2 / content 256 (the
+	 * default), 16 = finest 2 / content 512, 8 = finest 1 / content 512 (his
+	 * sheets' own density) -- so it is refused beside either of them. */
+	int lgVtDensity = 0;
+	bool lgVtFinestGiven = false, lgVtContentGiven = false;
 	int lgVtBtr = -1;
 	bool lgVtEstimate = false;
 	QString lgLodmCheck, lgLodvCheck;
+	QString lgNativeDir, lgNativeVerifyLodo, lgNativeVerifyLodi, lgNativeFixture, lgNativeMeshReport;
+	bool lgNativeVerifyCorpus = false;
+	// v3 (lane NATIVE1b): the two exact ways back off the ladder and the occluders
+	/* bungo 2026-09-17: "Authored LODs only". The ladder ships OFF and the library
+	 * is the MNAM slots; --native-ladder and --library near are the ways back. */
+	bool lgNativeLadder = false, lgNativeOccluders = true;
+	/* v4/v5 (lane NATIVE1c): where the library's level 0 comes from, whether
+	 * alpha-tested foliage may ladder, the silhouette floor, and the
+	 * placement-AO module. Each default is stated beside its way back:
+	 *   --library mnam            the v3 choice of level 0, byte for byte
+	 *   --native-ladder-foliage   let leaf clusters ladder again
+	 *   --native-silhouette 0     turn the level gate off (0 keeps everything)
+	 *   --native-no-placement-ao  no AO blob, no .lodi version 5
+ *   --native-no-vertex-ao     no per-instance vertex-AO stream, no .lodi version 6
+ *   --lodi-v6                 no group table, no per-vertex sky stream; the .lodi
+ *                             stays at version 6, byte for byte
+ *   --lodi-v7                 accepted and a NO-OP since 2026-09-19: version 7 is
+ *                             what a default bake writes. It is kept because
+ *                             command lines and gates carry it, and because it
+ *                             still says what it always said -- "this .lodi is
+ *                             version 7". The baked-horizon route it used to
+ *                             turn off no longer exists; see the history
+ *                             paragraph in docs/LODGEN_NATIVE_LODO_LODI.md.
+ *   --scrappable              mark the placements a player can scrap at a
+ *                             workshop (.lodi v9 instance bit 6; off = v7)
+ *   --identity-join-gap <u>   v7 GROUPING (bungo's ruling 2026-09-19): how close
+ *                             two placements' LOD MESHES must come, in world
+ *                             units, before they are one identity. Default 64,
+ *                             measured by lane IDENTPROX; 128 is the last gap at
+ *                             which no identity holds two different reference
+ *                             buildings. Trees never join.
+ *   --identity-join legacy    the way back: the pre-2026-09-19 rule, only an
+ *                             `architecture`-pathed placement, joined on a WORLD
+ *                             AXIS-ALIGNED BOX gap of 16 u. `--identity-join
+ *                             proximity` says the default out loud. */
+	bool lgLibraryNear = false;
+	bool lgNativeLadderFoliage = LODO_LADDER_FOLIAGE_DEFAULT;
+	float lgNativeSilhouette = LODO_SILHOUETTE_MIN_DEFAULT;
+	bool lgNativePlacementAo = true;
+	bool lgNativeVertexAo = true;
+	bool lgLodiV7 = true;
+	/* v9 (lane HORIZON3, 2026-09-19; kept by lane HORIZONOUT when the rest of
+	 * that lane's baked-horizon route was dropped the same day): mark the
+	 * placements a player can scrap at a workshop. OFF, and off is the exact
+	 * way back -- no bit is written and the .lodi stays at version 7, byte for
+	 * byte. */
+	bool lgScrappable = false;
+	/* v7 GROUPING, bungo's ruling of 2026-09-19 (lane IDENTPROX measured it,
+	 * lane HORIZONOUT shipped it). This one is NOT off by default: it is a
+	 * RULING, not a module, and the rule it replaces is the way back. */
+	bool lgIdentityJoinLegacy = false;
+	float lgIdentityJoinGap = 64.0f;
+	/* THE AGGREGATE MODULE, AND IT SHIPS OFF. Aggregation is
+	 * a module, and CONSTITUTION 10 makes its off value the exact way back --
+	 * with it off the .lodi is written at version 3 and every output file is
+	 * byte for byte what the same bake wrote before this lane. */
+	bool lgAggregate = false;
+	int lgAggMin = 8, lgAggTile = 64, lgAggViews = 8;
 	bool lgCorpusHash = false;
 	bool lgGeomorph = false;
-	// ON, matching both LodgenTerrainOptions and the LOD Manager checkbox.
-	// These three drifted apart once already: the GUI wrote the terrain
-	// channels while the identical CLI run silently did not.
-	bool lgTerrainIdentity = true;
+	/* OFF since 2026-09-12 (lane DEFAULTS1), bungo's ruling of 15:53 verbatim:
+	 * "We don't bake BTR for FO4CS, and so we do not use of that data for it
+	 * at all." `--terrain-identity` is the opt-in. Still matching both
+	 * LodgenTerrainOptions and the LOD Manager checkbox: these three drifted
+	 * apart once already, and the GUI wrote the terrain channels while the
+	 * identical CLI run silently did not. */
+	bool lgTerrainIdentity = false;
 	QString lgImpostors;
 	int lgImpostorFromLevel = -1;
 	QString lgCandidates = QStringLiteral( "missing" );
+	/* The bake's own trees-only gate, the panel row's CLI face. Default ON,
+	 * as the row is. The list above and this are two halves of the same
+	 * ruling: the list says which bases get cards BAKED, this says which
+	 * placements may stand on one. */
+	bool lgTreesOnly = true;
 	/* Opt-in. The "atlas is REQUIRED, textures are CK-only" episode was a
 	 * broken membership probe: every source LOD texture checked ships in
 	 * Fallout4 - Textures6.ba2 (BA2 name-table grep is the ground truth,
@@ -5267,6 +7699,10 @@ int nifskopeCliMain( const QStringList & args )
 	/* The resource stack (lodgen.h). --resource is repeatable and reads in MOD
 	 * ORGANIZER's order: the LAST one given overrides the earlier ones. */
 	QStringList lgResources;
+	QStringList stressFiles;          // lane NIFPARSE1
+	int stressThreads = 16;
+	int stressReps = 8;
+	QString stressSabotage;
 	QString lgPluginsTxt;
 	bool lgMo2 = false;
 	QString lgProbe;
@@ -5276,9 +7712,34 @@ int nifskopeCliMain( const QStringList & args )
 	bool constraintsOnly = false;
 	bool skeletonOnly = false;
 	bool bodiesOnly = false;
+	gLgIncremental.clear();
+	gLgKeepBto = false;
+	gLgSwitchDigest = lodgenSwitchDigestOf( a );
+	/* THE ARGUMENT VECTOR ITSELF (lane BAKEREC1, 2026-09-17). The digest above
+	 * answers "is this the same command"; the record answers "what WAS the
+	 * command", which is the only form of it an operator can retype. It is the
+	 * SAME vector, so the two can never describe different runs. */
+	gLgArgv = a;
+	gLgBakeRecord.clear();
+	gLgNativeCache = true;
+	lodbClearCensus();
+	/* A VALUED SWITCH SPELLED WITHOUT ITS VALUE (lane AUDIT1, 2026-09-17).
+	 * `next()` used to hand back an empty QString at the end of the vector, and
+	 * an empty value cannot be told from a switch that was never given:
+	 * `--incremental` last on the line parsed, set an empty directory, skipped
+	 * the whole incremental block with every refusal in it, and FULL-baked at
+	 * exit 0 while the operator was watching the clock for a cached run. Which
+	 * switch it was is remembered here and refused after the loop, so the
+	 * refusal comes before any work and names the switch. */
+	QString missingValueFor;
 	for ( int i = 0; i < a.size(); i++ ) {
 		const QString & t = a.at( i );
-		auto next = [&]() -> QString { return ( i + 1 < a.size() ) ? a.at( ++i ) : QString(); };
+		auto next = [&]() -> QString {
+			if ( i + 1 < a.size() )
+				return a.at( ++i );
+			missingValueFor = t;
+			return QString();
+		};
 		if ( t == QLatin1String( "-b" ) )      block   = next().toInt();
 		else if ( t == QLatin1String( "-f" ) ) path    = next();
 		else if ( t == QLatin1String( "-v" ) ) value   = next();
@@ -5296,6 +7757,27 @@ int nifskopeCliMain( const QStringList & args )
 		else if ( t == QLatin1String( "--int-var" ) ) intVar = next().toInt();
 		else if ( t == QLatin1String( "--list" ) ) listOnly = true;
 		else if ( t == QLatin1String( "--validate" ) ) validateOnly = true;
+		else if ( t == QLatin1String( "--clip" ) ) gltfClip = next();			// lane HKX4
+		else if ( t == QLatin1String( "--bones" ) ) gltfBones = next();		// lane HKX4
+		else if ( t == QLatin1String( "--root-motion" ) ) gltfRootMotion = true;	// lane HKX4
+		else if ( t == QLatin1String( "--fps" ) ) gltfFps = next().toFloat();	// lane BUILD8
+		else if ( t == QLatin1String( "--source-rate" ) ) gltfSourceRate = true;	// lane BUILD8
+		else if ( t == QLatin1String( "--route" ) ) gltfRoute = next();		// lane BUILD8
+		else if ( t == QLatin1String( "--tsv" ) ) gltfTsv = next();			// lane BUILD8
+		else if ( t == QLatin1String( "--skeleton-name" ) ) gltfSkeletonName = next();	// lane BUILD8
+		else if ( t == QLatin1String( "--root-node" ) ) gltfRootNode = next();	// lane BUILD8
+		// lane GLTFEXPORT1: every export option, through the SAME function the
+		// dialog's rows drive, so a flag and a row cannot mean different things.
+		// ONLY for the gltf commands (lane PBRLODFIX1, 2026-09-24): this loop is
+		// shared by every command, and the export's `--data-root` and `--skeleton`
+		// shadowed lodgen's `--data-root` and collision's `--skeleton` further
+		// down -- every lodgen bake since 2026-09-19 ran without its loose root.
+		else if ( int gr = ( cmd == QLatin1String( "gltf" ) || cmd == QLatin1String( "gltf-export" ) )
+				? gltfExportParseFlag( t, ( i + 1 < a.size() ) ? a.at( i + 1 ) : QString(),
+					gltfOpts, gltfUsedNext, gltfFlagError ) : 0 ) {
+			if ( gr < 0 ) { err() << "gltf: " << gltfFlagError << Qt::endl; return 2; }
+			if ( gltfUsedNext ) i++;
+		}
 		else if ( t == QLatin1String( "--selftest" ) ) selfTest = true;
 		else if ( t == QLatin1String( "--extract" ) ) extract = true;
 		else if ( t == QLatin1String( "--info" ) ) btdInfo = true;
@@ -5306,6 +7788,9 @@ int nifskopeCliMain( const QStringList & args )
 		}
 		else if ( t == QLatin1String( "--lod" ) ) btdLod = next().toInt();
 		else if ( t == QLatin1String( "--plane" ) ) lodtPlaneName = next();
+		else if ( t == QLatin1String( "--water-census" ) ) lodtWaterCensusOnly = true;
+		else if ( t == QLatin1String( "--water-selftest" ) ) lodtWaterSelfTestOnly = true;
+		else if ( t == QLatin1String( "--water-mark-selftest" ) ) lodtWaterMarkSelfTestOnly = true;
 		else if ( t == QLatin1String( "--list-worldspaces" ) ) lgListWorldspaces = true;
 		else if ( t == QLatin1String( "--worldspace" ) ) lgWorldspace = next().toUInt( nullptr, 16 );
 		else if ( t == QLatin1String( "--cell" ) ) {
@@ -5334,12 +7819,263 @@ int nifskopeCliMain( const QStringList & args )
 		else if ( t == QLatin1String( "--resource" ) ) lgResources << next();
 		else if ( t == QLatin1String( "--plugins-txt" ) ) lgPluginsTxt = next();
 		else if ( t == QLatin1String( "--mo2" ) ) lgMo2 = true;
+		else if ( t == QLatin1String( "--bake-record" ) ) gLgBakeRecord = next();
+		else if ( t == QLatin1String( "--no-native-cache" ) ) gLgNativeCache = false;
 		else if ( t == QLatin1String( "--probe" ) ) lgProbe = next();
 		else if ( t == QLatin1String( "--probe-out" ) ) lgProbeOut = next();
 		else if ( t == QLatin1String( "--print-source" ) ) lgPrintSource = true;
 		else if ( t == QLatin1String( "--list-files" ) ) lgListFiles = next().toInt();
+		/* `--identity` is the OPT-IN (the default went off 2026-09-12);
+		 * `--no-identity` stays, so every script written before the flip
+		 * still says what it means. */
+		else if ( t == QLatin1String( "--identity" ) ) lgIdentity = true;
 		else if ( t == QLatin1String( "--no-identity" ) ) lgIdentity = false;
 		else if ( t == QLatin1String( "--no-ao" ) ) lgBakeAO = false;
+		/* THE THREAD BUDGET, and the exact way back. `--threads 1` runs the
+		 * generator on one core the way it always ran: one world, one cache
+		 * set, one chunk at a time, written inline. 0 or absent = the
+		 * machine. Nothing about the arithmetic depends on it -- the gate
+		 * is that every output file is byte-identical either way. */
+		else if ( t == QLatin1String( "--threads" ) ) lodgenSetThreadCount( next().toInt() );
+		/* The CHUNK queue's own number, default 1. See lodgenparallel.h.
+		 * It is SAFE as of 2026-09-11 (lane RESUME3: 20 of 20 clean at 16
+		 * on each of two regions, byte-identical to the serial bake), and it
+		 * still defaults to 1 because it is SLOWER and much hungrier --
+		 * 2.3x the wall time on 9 chunks, 2.2x on 25, and 25 GB of peak
+		 * working set against 3.8. The default is a speed decision now, not
+		 * a safety one. */
+		else if ( t == QLatin1String( "--chunk-threads" ) ) lodgenSetChunkThreadCount( next().toInt() );
+		/* THE LANDSCAPE TEXTURES' WORLD-SPACE TILING (lane SPLAT1 measured it,
+		 * lane RESUME3 landed it). Default 341.3333 = 128/0.375, the engine's
+		 * own number out of Fallout4.exe 1.10.155. `--land-tiling 2048` is the
+		 * exact way back to the pre-2026-09-11 bake. */
+		else if ( t == QLatin1String( "--land-tiling" ) ) lodgenSetLandTiling( next().toFloat() );
+		/* HOW THE LAND TEXTURE IS SAMPLED INSIDE THAT REPEAT (lane TILING2).
+		 * `footprint` is the default and is the 2026-09-11 bake exactly: one
+		 * texel of the mip that matches the bake texel's world footprint, which
+		 * prints the same ~11-texel picture of the texture in every repeat.
+		 * `average` reads the texture's 1x1 mip -- its exact mean over one
+		 * whole repeat -- so no periodic term can reach the sheet at all, and
+		 * `--land-detail k` adds back k of the footprint sample's departure
+		 * from that average (k=1 IS the footprint bake).
+		 *
+		 * `stochastic` (lane TILING3) is the third mode and the only one that
+		 * keeps the grain AND drops the repeat: one token for the four numbers
+		 * that lane picked -- warp amplitude 683 world units, lattice 1024, one
+		 * octave, mip bias -1.00. It leaves `average` OFF, so it replaces
+		 * nothing and composes with nothing; set any of the four switches below
+		 * AFTER it to override one of them. */
+		else if ( t == QLatin1String( "--land-sample" ) ) {
+			const QString v = next().toLower();
+			lodgenSetLandSampleAverage( v == QLatin1String( "average" ) );
+			/* `stochastic` MEANS THE HEX TILING as of lane TILING4: the warp it
+			 * used to mean reads as swirls (the swirl instrument convicts it on
+			 * 5 of 7 shipped sheets, and bungo saw it), and the hex tiling is
+			 * clean on 7 of 7 and 7 of 7 for the same repeat count. The warp is
+			 * still reachable, as `warp`, so the measurement can be repeated.
+			 * Each mode turns the OTHER geometry off, so the two words cannot
+			 * silently compose into a third thing nobody picked. */
+			if ( v == QLatin1String( "stochastic" ) ) {
+				lodgenSetLandHexSize( 256.0f );
+				lodgenSetLandWarpAmp( 0.0f );
+				lodgenSetLandMipBias( -0.22f );
+			}
+			else if ( v == QLatin1String( "warp" ) ) {
+				lodgenSetLandHexSize( 0.0f );
+				lodgenSetLandWarpAmp( 683.0f );
+				lodgenSetLandWarpLattice( 1024.0f );
+				lodgenSetLandWarpOctaves( 1 );
+				lodgenSetLandMipBias( -1.0f );
+			}
+		}
+		else if ( t == QLatin1String( "--land-detail" ) ) lodgenSetLandDetail( next().toFloat() );
+		/* THE FOUR NUMBERS OF THE STOCHASTIC SAMPLE, individually (lane
+		 * TILING3). Since 2026-09-12 the DEFAULTS are bungo's pick -- amplitude
+		 * 341, bias -0.22, hex 256, guide flatwarp:1.0 -- so the way back to
+		 * the 2026-09-11 bake, byte for byte, is
+		 * `--land-hex 0 --land-warp 0 --land-mip-bias 0 --land-guide off`. */
+		else if ( t == QLatin1String( "--land-warp" ) ) lodgenSetLandWarpAmp( next().toFloat() );
+		else if ( t == QLatin1String( "--land-warp-lattice" ) ) lodgenSetLandWarpLattice( next().toFloat() );
+		else if ( t == QLatin1String( "--land-warp-octaves" ) ) lodgenSetLandWarpOctaves( next().toInt() );
+		else if ( t == QLatin1String( "--land-mip-bias" ) ) lodgenSetLandMipBias( next().toFloat() );
+		/* THE HEX TILE SIZE (lane TILING4), individually. 256 world units --
+		 * what the lane picked, and the DEFAULT since 2026-09-12 -- against a
+		 * land repeat of 341.3333. `--land-hex 0` is one quarter of the way
+		 * back to the 2026-09-11 bake; see the comment above for all four. */
+		else if ( t == QLatin1String( "--land-hex" ) ) lodgenSetLandHexSize( next().toFloat() );
+		/* TERRAIN-GUIDED LAND SAMPLING (lane LAND1), bungo 2026-09-12:
+		 * "since we're reusing vanilla terain normals and slope maps,
+		 * might as well use them to guide this a bit". The guide is the
+		 * HEIGHTMAP's own low-pass slope, not the `_msn` sheet, so it is
+		 * continuous across every border. `off` is the default and is the
+		 * rung's bytes; the strength after the colon means world units for
+		 * `drag`, a 0..1 fraction of the rotation for `aspect`/`aspecthex`,
+		 * and a multiplier on --land-warp's amplitude for the two warps. */
+		else if ( t == QLatin1String( "--land-guide" ) ) {
+			QString v = next().toLower();
+			const int colon = v.indexOf( QLatin1Char( ':' ) );
+			if ( colon >= 0 ) {
+				bool ok = false;
+				const float k = v.mid( colon + 1 ).toFloat( &ok );
+				if ( ok )
+					lodgenSetLandGuideStrength( k );
+				else
+					fprintf( stderr, "lodgen: --land-guide %s has no readable strength after the colon; the default stands\n",
+						v.toLatin1().constData() );
+				v = v.left( colon );
+			}
+			if ( v == QLatin1String( "off" ) )
+				lodgenSetLandGuideRule( LODGEN_LANDGUIDE_OFF );
+			else if ( v == QLatin1String( "drag" ) )
+				lodgenSetLandGuideRule( LODGEN_LANDGUIDE_DRAG );
+			else if ( v == QLatin1String( "aspect" ) )
+				lodgenSetLandGuideRule( LODGEN_LANDGUIDE_ASPECT );
+			else if ( v == QLatin1String( "aspecthex" ) )
+				lodgenSetLandGuideRule( LODGEN_LANDGUIDE_ASPECTHEX );
+			else if ( v == QLatin1String( "slopewarp" ) )
+				lodgenSetLandGuideRule( LODGEN_LANDGUIDE_SLOPEWARP );
+			else if ( v == QLatin1String( "flatwarp" ) )
+				lodgenSetLandGuideRule( LODGEN_LANDGUIDE_FLATWARP );
+			else
+				/* "the default stands", not "off stands" (lane AUDIT1,
+				 * 2026-09-17): this branch calls NOTHING, so what stands is
+				 * whatever the defaults ruling put there -- flatwarp:1.0 since
+				 * lane DEFAULTS1 -- and the sheets are flatwarp sheets. The
+				 * sibling message above says it this way for the same reason. */
+				fprintf( stderr, "lodgen: --land-guide %s is not one of off|drag|aspect|aspecthex|slopewarp|flatwarp; the default stands\n",
+					v.toLatin1().constData() );
+		}
+		/* INCREMENTAL REGENERATION (lane INCR1). The value is the out-dir of
+		 * a PREVIOUS bake -- the one carrying the .lodb ledger -- and it is
+		 * normally the same directory --out-dir names. What it does and every
+		 * case in which it REFUSES rather than quietly full-baking is in
+		 * docs/LODGEN_LEDGER_FORMAT.md section 4. */
+		else if ( t == QLatin1String( "--incremental" ) ) gLgIncremental = next();
+		else if ( t == QLatin1String( "--land-guide-scale" ) ) lodgenSetLandGuideScale( next().toFloat() );
+		else if ( t == QLatin1String( "--land-guide-slope" ) ) lodgenSetLandGuideSlopeRef( next().toFloat() );
+		/* VANILLA FAR-TERRAIN REUSE (lane TILING3), bungo's ruling 2026-09-11:
+		 * "so now we do not use our own normal map if that is toggled, but
+		 * reuse these ones for terrain chunks" -- and, on the out-of-bounds
+		 * ground, "out of bounds terrain blends are not included in the actual
+		 * cells out of bounds, they never were, so we can't recover the color
+		 * data anymore, because it was baked in a different tool outside of
+		 * fo4".
+		 *
+		 *   `vanilla` (THE DEFAULT) -- a chunk with a shipped vanilla `_msn`
+		 *       writes VANILLA'S FILE byte for byte and our normal bake is
+		 *       skipped for it; a chunk with no land paint on any cell writes
+		 *       vanilla's COLOUR file byte for byte too; every other chunk
+		 *       keeps our composite and takes the crevice term.
+		 *   `vanilla-blend` -- vanilla's fine detail over OUR coarse normal,
+		 *       up recomputed so the normal stays unit length. Reshaped
+		 *       terrain. Never the default.
+		 *   `none` -- the rung's bytes, exactly.
+		 *
+		 * `--vanilla-lod-root` names where vanilla's sheets are READ AS LOOSE
+		 * FILES. It is never the resource stack on purpose: the stack would
+		 * serve our own previously installed output out of the game's Data and
+		 * the bake would "reuse vanilla" by copying yesterday's copy of
+		 * itself. */
+		else if ( t == QLatin1String( "--land-detail-source" ) ) {
+			const QString v = next().toLower();
+			if ( v == QLatin1String( "none" ) )
+				lodgenSetLandDetailSource( LODGEN_LANDDETAIL_NONE );
+			else if ( v == QLatin1String( "vanilla-blend" ) )
+				lodgenSetLandDetailSource( LODGEN_LANDDETAIL_VANILLA_BLEND );
+			else if ( v == QLatin1String( "vanilla" ) )
+				lodgenSetLandDetailSource( LODGEN_LANDDETAIL_VANILLA );
+			else if ( v == QLatin1String( "erosion" ) )
+				lodgenSetLandDetailSource( LODGEN_LANDDETAIL_EROSION );
+			else
+				fprintf( stderr, "lodgen: --land-detail-source %s is not one of "
+					"none|vanilla|vanilla-blend|erosion; the default (vanilla) stands\n",
+					v.toLatin1().constData() );
+		}
+		else if ( t == QLatin1String( "--vanilla-lod-root" ) ) lodgenSetVanillaLodRoot( next() );
+		/* THE SHEET FORMAT (lane TERRAINFMT1). `legacy` is the default and is
+		 * the previous bake's bytes -- the writer is called with the arguments
+		 * it was called with before. `vanilla` is Bethesda's law as MEASURED
+		 * over the whole shipped corpus: all 6,120 Commonwealth terrain sheets
+		 * are DXT5, 512x512, 10 mips (512 down to 1, past the 4x4 block floor
+		 * ours stops at), and the ALPHA of both families is a constant 255 --
+		 * one distinct value over 13,107,200 texels on each of a 50-sheet
+		 * colour sample and a 50-sheet _msn sample. So `vanilla` writes DXT5
+		 * with the chain to 1x1 and 255 in the alpha, and nothing else. It
+		 * cannot collide with the WWCV cover stamp: that stamp lives in
+		 * dwReserved1 of _data.DDS, a sheet vanilla does not ship at all, and
+		 * no shipped sheet has a non-zero dwReserved1. A sheet COPIED from
+		 * vanilla is untouched by this switch. */
+		else if ( t == QLatin1String( "--sheet-format" ) ) {
+			const QString v = next().toLower();
+			if ( v == QLatin1String( "vanilla" ) )
+				lodgenSetSheetFormat( LODGEN_SHEETFMT_VANILLA );
+			else if ( v == QLatin1String( "legacy" ) )
+				lodgenSetSheetFormat( LODGEN_SHEETFMT_LEGACY );
+			else
+				fprintf( stderr, "lodgen: --sheet-format %s is not one of "
+					"vanilla|legacy; the default (legacy) stands\n",
+					v.toLatin1().constData() );
+		}
+		/* THE CLEANED _msn CACHE (lane TERRAINFMT1, ADDED ITEM 8). A directory
+		 * of <ws>.<dim>.<x>.<y>.png sheets; empty is the default and reads no
+		 * directory. The cache is NOT in vanilla's channel layout and this is
+		 * measured, not assumed: cache R is east (r 0.956 against vanilla's R),
+		 * cache G is north (r 0.794 against vanilla's B) and cache B is
+		 * identically 0 on 14 of 16 sampled sheets, so UP is recomputed here
+		 * and the triple RENORMALISED, never clamped. The sheet is written
+		 * UNCOMPRESSED (B8G8R8A8 through a DX10 header) with a full mip chain,
+		 * because a BC re-encode puts back the 4x4 block grid that is the one
+		 * thing the cache removed. There is no BC7 encoder in this tree. What
+		 * this costs over a worldspace is in the lane report; it is not a
+		 * decision this flag makes for anyone. */
+		else if ( t == QLatin1String( "--msn-cache" ) ) lodgenSetMsnCacheDir( next() );
+		/* The crevice coefficient, in 8-bit luminance levels per unit of
+		 * detail-normal divergence. -3.242 is the median fitted on seven
+		 * vanilla sheets (scratchpad/tiling3_20260911/d3_shade.py); 0 turns the
+		 * shading off while leaving the sheet reuse on. */
+		else if ( t == QLatin1String( "--land-shade" ) ) lodgenSetLandShade( next().toFloat() );
+		/* THE EROSION PASS (lane GROUND1 Part B). A deterministic hydraulic
+		 * pass over the bake's own height lattice, whose height delta reaches
+		 * BOTH the `_msn` sheet (as an added gradient) and the colour (as the
+		 * crevice term's own shading). 0 is the default, takes no branch and
+		 * builds no lattice, so a bake without the flag is the rung's bytes.
+		 * The strength multiplies the gradient it adds and the shading it
+		 * casts, in that one place each, so the two cannot drift apart.
+		 * On Commonwealth the DEFAULT --land-detail-source vanilla replaces
+		 * our `_msn` with vanilla's copy, which would throw the pass away:
+		 * `--land-detail-source erosion` is the value that keeps ours and
+		 * also stops vanilla's crevice term shading the same sheet twice. */
+		else if ( t == QLatin1String( "--erosion" ) ) lodgenSetErosion( next().toFloat() );
+		else if ( t == QLatin1String( "--erosion-iterations" ) )
+			lodgenSetErosionIterations( next().toInt() );
+		else if ( t == QLatin1String( "--erosion-seed" ) )
+			lodgenSetErosionSeed( quint32( next().toUInt() ) );
+		/* THE COLOUR GRADE (lane GRADE1). Every baked colour texel x k before
+		 * quantisation, in both writers, after the road and the grass tint and
+		 * before the crevice term. 1 is the default and skips the branch, so
+		 * the bake is byte-identical without the flag. There is no k that helps
+		 * everywhere: the per-tile optimum runs 0.615..1.241 over a 25-tile
+		 * census and flips sign between the two reference tiles. 0.840 is the
+		 * pooled optimum if a single number is ever wanted. */
+		else if ( t == QLatin1String( "--grade" ) ) lodgenSetLandGrade( next().toFloat() );
+		/* THE QUADRANT BORDER (lane TILING2). `quadrant` is the DEFAULT since
+		 * 2026-09-23 (bungo, lane DEFAULTS2); `off` is the bake before that
+		 * ruling exactly. `quadrant` cross-fades the neighbouring
+		 * quadrant's composite over --blend-margin units either side of every
+		 * 2,048-unit quadrant line. */
+		else if ( t == QLatin1String( "--blend-edges" ) ) {
+			const QString v = next().toLower();
+			lodgenSetBlendEdges( v == QLatin1String( "quadrant" ) ? 1 : 0 );
+		}
+		else if ( t == QLatin1String( "--blend-margin" ) ) lodgenSetBlendMargin( next().toFloat() );
+		/* THE MODEL LAYER ON N THREADS, and nothing else in the picture
+		 * (lane NIFPARSE1, see src/nifparsestress.h). A bake crash cannot
+		 * tell the parser apart from the plugin reader, the texture cache,
+		 * the archive layer and the message sink; this can. */
+		else if ( t == QLatin1String( "--stress-file" ) ) stressFiles << next();
+		else if ( t == QLatin1String( "--stress-threads" ) ) stressThreads = next().toInt();
+		else if ( t == QLatin1String( "--stress-reps" ) ) stressReps = next().toInt();
+		else if ( t == QLatin1String( "--stress-sabotage" ) ) stressSabotage = next();
 		else if ( t == QLatin1String( "--cull-buried" ) ) lgCullBuried = true;
 		else if ( t == QLatin1String( "--cull-margin" ) ) lgCullMargin = next().toFloat();
 		else if ( t == QLatin1String( "--ao-grey" ) ) lgAoGrey = true;
@@ -5365,6 +8101,17 @@ int nifskopeCliMain( const QStringList & args )
 		else if ( t == QLatin1String( "--btd-probe" ) ) lgBtdProbe = true;
 		else if ( t == QLatin1String( "--verify-only" ) ) lgLodtVerify = true;
 		else if ( t == QLatin1String( "--refresh-ao" ) ) lgRefreshAo = true;
+		/* The water-body module (docs/LODGEN_BTD_FORMAT.md, version 3). It is
+		 * the ONLY thing that raises the written version to 3, so a run without
+		 * it is byte-identical to what this writer produced before. */
+		else if ( t == QLatin1String( "--water-bodies" ) ) gLodlWater.enabled = true;
+		else if ( t == QLatin1String( "--water-bridge" ) ) gLodlWater.bridgeGap = next().toInt();
+		else if ( t == QLatin1String( "--water-near" ) ) gLodlWater.nearTexels = next().toInt();
+		else if ( t == QLatin1String( "--water-body-samples" ) ) gLodlWater.bodySamples = next().toInt();
+		else if ( t == QLatin1String( "--water-flow-samples" ) ) gLodlWater.flowSamples = next().toInt();
+		else if ( t == QLatin1String( "--water-no-shore" ) ) gLodlWater.shore = false;
+		else if ( t == QLatin1String( "--water-velocities" ) ) gLodlWater.velocityPlugin = next();
+		else if ( t == QLatin1String( "--water-report" ) ) gLodlWater.reportPath = next();
 		else if ( t == QLatin1String( "--dump-land" ) ) lgDumpLand = next();
 		else if ( t == QLatin1String( "--dump-layers" ) ) lgDumpLayers = next();
 		else if ( t == QLatin1String( "--dump-shapes" ) ) lgDumpShapes = next();
@@ -5379,10 +8126,107 @@ int nifskopeCliMain( const QStringList & args )
 		else if ( t == QLatin1String( "--grass-tint" ) ) lgCover.tintStrength = next().toFloat();
 		else if ( t == QLatin1String( "--cover-full" ) ) lgCover.coverFull = next().toFloat();
 		else if ( t == QLatin1String( "--dump-cover" ) ) lgCover.dumpCoverPath = next();
+		/* ROADS AND DECALS (bungo 2026-09-11: "We do the same with roads and
+		 * decals as vanilla"). ON by default under both targets; --no-roads is
+		 * the exact way back and the bake is byte-identical without it. */
+		else if ( t == QLatin1String( "--roads" ) ) lgCover.roads = true;
+		else if ( t == QLatin1String( "--no-roads" ) ) lgCover.roads = false;
+		else if ( t == QLatin1String( "--road-cover-suppress" ) )
+			lgCover.roadCoverSuppress = next().toFloat();
+		/* HOW STRONGLY the road paint is mixed into the ground under it
+		 * (lane ROADS3). 1 is the default and is branched over, so the off
+		 * value is the previous bake's bytes; 0 paints nothing while the
+		 * road geometry still suppresses the ground cover. The numbers that
+		 * decided the default are on LodgenCoverOptions::roadOpacity. */
+		else if ( t == QLatin1String( "--road-opacity" ) ) {
+			lgCover.roadOpacity = qBound( 0.0f, next().toFloat(), 1.0f );
+			lgRoadOpacitySet = true;
+		}
+		/* HOW road pieces combine, how much of the road diffuse's own pattern
+		 * is printed, and which road families are painted at all (lane ROADS2).
+		 * `--roads-legacy` is the exact way back and means ROADS1's WHOLE
+		 * pipeline: unless they are given on the same command line it restores
+		 * full detail, the raised families and the sidewalks, so a legacy bake
+		 * is byte-identical to the bake before this lane existed. */
+		else if ( t == QLatin1String( "--road-composite" ) ) {
+			const QString v = next().toLower();
+			lgCover.roadComposite = ( v == QLatin1String( "blend" ) )
+				? LodgenCoverOptions::RoadBlend : LodgenCoverOptions::RoadMaxZ;
+		}
+		/* THE FAR TERRAIN RECEIVES AMBIENT OCCLUSION FROM THE PLACED OBJECTS
+		 * (lane GROUND1). OFF is the default and off is the rung's BYTES: the
+		 * object term is its own horizon march and returns exactly 1.0f where no
+		 * occluder is within 1,458 units, so the multiply cannot move a byte.
+		 * `--no-terrain-object-ao` is the way back on a command line that has
+		 * the flag in it already. */
+		else if ( t == QLatin1String( "--terrain-object-ao" ) )
+			lgCover.terrainObjectAo = true;
+		else if ( t == QLatin1String( "--no-terrain-object-ao" ) )
+			lgCover.terrainObjectAo = false;
+		/* THE DIAL. 1 is the law as written and the default; 0 is the rung's
+		 * bytes even with the switch on. It is NOT set away from 1 here, and
+		 * that is a refusal with a reason: vanilla's far terrain has no object
+		 * occlusion to score an absolute strength against. */
+		else if ( t == QLatin1String( "--terrain-object-ao-strength" ) )
+			lgCover.terrainObjectAoStrength = qBound( 0.0f, next().toFloat(), 4.0f );
+		/* THE SLAB SUB-TOGGLE (lane SLAB1, 2026-09-18). Not a dial -- there is
+		 * nothing to tune -- but a boolean way back, default = the new law:
+		 * a square whose object span stands entirely above the sample is a
+		 * CEILING and blocks only from its nearest escape up to the zenith,
+		 * so the ground under an overpass deck is lit from the sides. 0 is the
+		 * max-Z reading bit for bit, which is what the bakes bungo has already
+		 * looked at carry and what the behaviour gate runs red against. */
+		else if ( t == QLatin1String( "--terrain-object-ao-slab" ) )
+			lgCover.terrainObjectAoSlab = next().toInt() != 0;
+		else if ( t == QLatin1String( "--no-terrain-object-ao-slab" ) )
+			lgCover.terrainObjectAoSlab = false;
+		else if ( t == QLatin1String( "--dump-object-ao" ) )
+			lgCover.dumpObjectAoPath = next();
+		else if ( t == QLatin1String( "--road-detail" ) ) {
+			lgCover.roadDetail = qBound( 0.0f, next().toFloat(), 1.0f );
+			lgRoadDetailSet = true;
+		}
+		/* THE GROUND-MATERIAL SHAPES inside a road model (lane ROADS4):
+		 * the coverage multiplier for a shape whose material lives under
+		 * materials/Landscape/Ground/. 1 paints them as road, 0 leaves the
+		 * landscape's own colour there. The numbers are in
+		 * LodgenCoverOptions::roadGroundPaint. */
+		else if ( t == QLatin1String( "--road-ground-paint" ) ) {
+			lgCover.roadGroundPaint = qBound( 0.0f, next().toFloat(), 1.0f );
+			lgRoadGroundPaintSet = true;
+		}
+		else if ( t == QLatin1String( "--road-raised" ) ) {
+			lgCover.roadRaised = true;
+			lgRoadRaisedSet = true;
+		}
+		else if ( t == QLatin1String( "--no-road-raised" ) ) {
+			lgCover.roadRaised = false;
+			lgRoadRaisedSet = true;
+		}
+		else if ( t == QLatin1String( "--road-sidewalks" ) ) {
+			lgCover.roadSidewalks = true;
+			lgRoadSidewalksSet = true;
+		}
+		else if ( t == QLatin1String( "--no-road-sidewalks" ) ) {
+			lgCover.roadSidewalks = false;
+			lgRoadSidewalksSet = true;
+		}
+		else if ( t == QLatin1String( "--roads-legacy" ) ) {
+			lgRoadsLegacy = true;
+			lgCover.roadComposite = LodgenCoverOptions::RoadMaxZ;
+		}
 		else if ( t == QLatin1String( "--vt" ) ) lgVtDir = next();
 		else if ( t == QLatin1String( "--no-vt" ) ) lgVtDir.clear();
-		else if ( t == QLatin1String( "--vt-finest" ) ) lgVt.finestDim = next().toInt();
-		else if ( t == QLatin1String( "--vt-content" ) ) lgVt.content = next().toInt();
+		else if ( t == QLatin1String( "--vt-finest" ) ) {
+			lgVt.finestDim = next().toInt();
+			lgVtFinestGiven = true;
+		}
+		else if ( t == QLatin1String( "--vt-content" ) ) {
+			lgVt.content = next().toInt();
+			lgVtContentGiven = true;
+		}
+		else if ( t == QLatin1String( "--vt-density" ) ) lgVtDensity = qMax( -1, next().toInt() );
+		else if ( t == QLatin1String( "--vt-half-aux" ) ) lgVt.halfAux = true;
 		else if ( t == QLatin1String( "--vt-border" ) ) lgVt.border = next().toInt();
 		else if ( t == QLatin1String( "--vt-mips" ) ) lgVt.mips = next().toInt();
 		else if ( t == QLatin1String( "--vt-compress" ) ) {
@@ -5391,10 +8235,94 @@ int nifskopeCliMain( const QStringList & args )
 				: ( v == QLatin1String( "zlib" ) ) ? 1 : -1;
 		}
 		else if ( t == QLatin1String( "--vt-height" ) ) lgVt.height = true;
+		/* The OTHER arm of bungo's open question on where the ground-cover byte
+		 * lives (lodgen.h, LodgenVtOptions::coverInColor). Off is what ships. */
+		else if ( t == QLatin1String( "--vt-cover-in-color" ) ) lgVt.coverInColor = true;
+		else if ( t == QLatin1String( "--vt-cover-in-mask" ) ) lgVt.coverInColor = false;
 		else if ( t == QLatin1String( "--vt-btr" ) ) lgVtBtr = 1;
 		else if ( t == QLatin1String( "--no-vt-btr" ) ) lgVtBtr = 0;
 		else if ( t == QLatin1String( "--vt-estimate" ) ) lgVtEstimate = true;
 		else if ( t == QLatin1String( "--lodm-check" ) ) lgLodmCheck = next();
+		else if ( t == QLatin1String( "--native" ) ) lgNativeDir = next();
+		else if ( t == QLatin1String( "--keep-bto" ) ) gLgKeepBto = true;
+		else if ( t == QLatin1String( "--native-verify" ) ) { lgNativeVerifyLodo = next(); lgNativeVerifyLodi = next(); }
+		else if ( t == QLatin1String( "--native-fixture" ) ) lgNativeFixture = next();
+		else if ( t == QLatin1String( "--native-mesh-report" ) ) lgNativeMeshReport = next();
+		else if ( t == QLatin1String( "--native-verify-corpus" ) ) lgNativeVerifyCorpus = true;
+		else if ( t == QLatin1String( "--native-no-ladder" ) ) lgNativeLadder = false;
+		else if ( t == QLatin1String( "--native-ladder" ) ) lgNativeLadder = true;
+		else if ( t == QLatin1String( "--native-no-occluders" ) ) lgNativeOccluders = false;
+		else if ( t == QLatin1String( "--library" ) ) {
+			/* `next()` and NOT `args[++i]`: the loop walks `a`, which starts at the
+			 * subcommand's first argument, while `args` is the whole argv. Reading
+			 * the wrong list took the token three places to the left and this switch
+			 * never worked until tests/spells/lodgen_ladder.sh ran it. */
+			const QString v = next().toLower();
+			if ( v == QLatin1String( "near" ) ) {
+				lgLibraryNear = true;
+			} else if ( v == QLatin1String( "mnam" ) ) {
+				lgLibraryNear = false;
+			} else {
+				err() << "error: --library takes near or mnam, not '" << v << "'" << Qt::endl;
+				return 2;
+			}
+		}
+		else if ( t == QLatin1String( "--native-ladder-foliage" ) ) lgNativeLadderFoliage = true;
+		else if ( t == QLatin1String( "--native-no-placement-ao" ) ) lgNativePlacementAo = false;
+		else if ( t == QLatin1String( "--native-no-vertex-ao" ) ) lgNativeVertexAo = false;
+		else if ( t == QLatin1String( "--lodi-v6" ) ) lgLodiV7 = false;
+		/* ACCEPTED AND A NO-OP since lane HORIZONOUT (2026-09-19): a default
+		 * bake writes version 7 already. It stays on the command line because
+		 * gates and saved command lines carry it and because it still states a
+		 * true fact about the file that comes out. */
+		else if ( t == QLatin1String( "--lodi-v7" ) ) { }
+		/* v9 (lane HORIZON3, 2026-09-19). A placement a player can scrap is a
+		 * placement that WILL NOT BE THERE, and a far field that keeps drawing
+		 * it is wrong about a settlement from the first hour of a save onwards.
+		 * The bit says which ones those are; the three-clause rule is read out
+		 * of the plugin (src/esmdata.h, EsmScrapIndex). */
+		else if ( t == QLatin1String( "--scrappable" ) ) lgScrappable = true;
+		/* v7 GROUPING. The MEASURE is not a knob and the GAP is: lane IDENTPROX
+		 * measured that a box gap of any size bridges a street, so `legacy` gets
+		 * the whole old rule (measure and number together) and there is no way to
+		 * ask for the old measure at a new number. */
+		else if ( t == QLatin1String( "--identity-join" ) ) {
+			const QString v = next().toLower();
+			if ( v == QLatin1String( "legacy" ) ) {
+				lgIdentityJoinLegacy = true;
+			} else if ( v == QLatin1String( "proximity" ) ) {
+				lgIdentityJoinLegacy = false;
+			} else {
+				err() << "error: --identity-join takes proximity or legacy, not '" << v << "'" << Qt::endl;
+				return 2;
+			}
+		}
+		else if ( t == QLatin1String( "--identity-join-gap" ) ) {
+			bool ok = false;
+			const QString sv = next();
+			const float v = sv.toFloat( &ok );
+			if ( !ok || !( v >= 0.0f ) || v > 100000.0f ) {
+				err() << "error: --identity-join-gap takes world units in 0..100000, not '"
+					  << sv << "'" << Qt::endl;
+				return 2;
+			}
+			lgIdentityJoinGap = v;
+		}
+		else if ( t == QLatin1String( "--native-silhouette" ) ) {
+			bool ok = false;
+			const QString sv = next();   // see the note on --library above
+			const float v = sv.toFloat( &ok );
+			if ( !ok || v < 0.0f || v > 1.0f ) {
+				err() << "error: --native-silhouette takes a fraction 0..1, not '" << sv << "'" << Qt::endl;
+				return 2;
+			}
+			lgNativeSilhouette = v;
+		}
+		else if ( t == QLatin1String( "--aggregate" ) ) lgAggregate = true;
+		else if ( t == QLatin1String( "--no-aggregate" ) ) lgAggregate = false;
+		else if ( t == QLatin1String( "--aggregate-min" ) ) lgAggMin = next().toInt();
+		else if ( t == QLatin1String( "--aggregate-tile" ) ) lgAggTile = next().toInt();
+		else if ( t == QLatin1String( "--aggregate-views" ) ) lgAggViews = next().toInt();
 		else if ( t == QLatin1String( "--lodt-check" ) ) lgLodvCheck = next();
 		else if ( t == QLatin1String( "--lodv-check" ) ) {
 			err() << "error: --lodv-check is retired: the terrain texture sheets are "
@@ -5408,7 +8336,24 @@ int nifskopeCliMain( const QStringList & args )
 		else if ( t == QLatin1String( "--no-terrain-identity" ) ) lgTerrainIdentity = false;
 		else if ( t == QLatin1String( "--impostors" ) ) lgImpostors = next();
 		else if ( t == QLatin1String( "--impostors-from-level" ) ) lgImpostorFromLevel = next().toInt();
-		else if ( t == QLatin1String( "--candidates" ) ) lgCandidates = next();
+		/* `all` was retired by bungo on 2026-09-11 07:0x ("I've only wanted
+		 * trees for the impostors"), so it refuses here BY NAME rather than
+		 * quietly listing every base with LOD -- a script that still passes it
+		 * is asking for a card library nobody wants, and a silent downgrade to
+		 * `missing` would hand it one that merely looks smaller. */
+		else if ( t == QLatin1String( "--candidates" ) ) {
+			lgCandidates = next();
+			if ( lgCandidates != QLatin1String( "trees" ) && lgCandidates != QLatin1String( "missing" ) ) {
+				err() << "error: --candidates takes trees or missing; '" << lgCandidates
+					  << "' is not offered" << Qt::endl;
+				if ( lgCandidates == QLatin1String( "all" ) )
+					err() << "       `all` was retired on 2026-09-11: impostor cards are trees only, "
+						  << "and `missing` is the way back to a card for any empty far slot" << Qt::endl;
+				return 2;
+			}
+		}
+		else if ( t == QLatin1String( "--trees-only" ) ) lgTreesOnly = true;
+		else if ( t == QLatin1String( "--no-trees-only" ) ) lgTreesOnly = false;
 		else if ( t == QLatin1String( "--atlas" ) ) lgAtlas = true;
 		else if ( t == QLatin1String( "--no-atlas" ) ) lgAtlas = false;
 		else if ( t == QLatin1String( "--arrays" ) ) lgArrays = true;
@@ -5479,9 +8424,47 @@ int nifskopeCliMain( const QStringList & args )
 		}
 	}
 
+	if ( !missingValueFor.isEmpty() ) {
+		err() << "error: " << missingValueFor << " needs a value" << Qt::endl;
+		err().flush();
+		return 2;
+	}
+
+	/* `--roads-legacy` IS THE WAY BACK, and the way back is ROADS1's whole
+	 * pipeline: the max-z overwrite, the full-detail diffuse sample, the raised
+	 * families and the sidewalks all painted. Anything the caller named
+	 * explicitly on the same command line still wins, so the flag can also be
+	 * used to move exactly one thing away from ROADS1. */
+	if ( lgRoadsLegacy ) {
+		if ( !lgRoadDetailSet )
+			lgCover.roadDetail = 1.0f;
+		/* ROADS1 painted every shape in a road model, the verge included. */
+		if ( !lgRoadGroundPaintSet )
+			lgCover.roadGroundPaint = 1.0f;
+		/* A no-op while the default is 1.0, and written anyway so that the
+		 * way back stays the way back if the default is ever moved. */
+		if ( !lgRoadOpacitySet )
+			lgCover.roadOpacity = 1.0f;
+		if ( !lgRoadRaisedSet )
+			lgCover.roadRaised = true;
+		if ( !lgRoadSidewalksSet )
+			lgCover.roadSidewalks = true;
+	}
+
 	if ( cmd == QLatin1String( "new" ) ) {
 		if ( !initModelLayer() ) { err().flush(); return 1; }
 		const int rc = cmdNew( outFile, wantCube, cubeSize );
+		out().flush();
+		err().flush();
+		return rc;
+	}
+
+	/* lane ARCHLOCK1's CLI refuter. Early, beside `spells`, because it takes
+	 * its file itself (through a QBuffer, which is the whole point) and must
+	 * not fall into the <file> check below. */
+	if ( cmd == QLatin1String( "archlock-probe" ) ) {
+		if ( !initModelLayer() ) { err().flush(); return 1; }
+		const int rc = cmdArchLockProbe( file, lgDataRoot, lgProbe );
 		out().flush();
 		err().flush();
 		return rc;
@@ -5510,7 +8493,12 @@ int nifskopeCliMain( const QStringList & args )
 		&& !( cmd == QLatin1String( "lodgen" )
 			&& ( !lgBtdPath.isEmpty() || !lgProbe.isEmpty() || !lgDumpShapes.isEmpty()
 				|| !lgDumpGeometry.isEmpty() || !lgLodmCheck.isEmpty() || !lgLodvCheck.isEmpty()
-				|| lgPrintSource || lgListFiles > 0 ) ) ) {
+				|| lgPrintSource || lgListFiles > 0
+				/* `--bake-record` reads a file and diffs an OPTIONAL plugin list:
+				 * with none it prints the record and says `diff n/a`, which is
+				 * the useful answer when all you have is the bake's output
+				 * folder (lane BAKEREC1, 2026-09-17). */
+				|| !gLgBakeRecord.isEmpty() ) ) ) {
 		err() << "error: '" << cmd << "' needs a <file>" << Qt::endl;
 		err().flush();
 		return 2;
@@ -5581,6 +8569,11 @@ int nifskopeCliMain( const QStringList & args )
 				file = resolved.join( QChar( ',' ) );
 		}
 		lodgenSetResources( stack );
+		/* The stack the record writes down (lane BAKEREC1, 2026-09-17): what the
+		 * run was actually given, after --mo2 has expanded a profile, in the order
+		 * the bake will search it. Read back from lodgenResources(), never from
+		 * the local that was handed to it. */
+		gLgResourceStack = lodgenResources();
 		if ( lgPrintSource ) {
 			const QStringList set = lodgenResources();
 			out() << "source: " << ( lgMo2 ? "mo2" : "specified" ) << Qt::endl;
@@ -5838,6 +8831,14 @@ int nifskopeCliMain( const QStringList & args )
 		rc = cmdList( file, type );
 	else if ( cmd == QLatin1String( "segments" ) )
 		rc = cmdSegments( file, block );
+	else if ( cmd == QLatin1String( "gltf" ) || cmd == QLatin1String( "gltf-export" ) )	// lane HKX4 / GLTFEXPORT1
+		rc = cmdGltf( file, outFile, gltfClip, gltfBones, gltfRootMotion, gltfOpts );
+	else if ( cmd == QLatin1String( "gltf-import" ) )		// lane BUILD8
+		rc = cmdGltfImport( file, outFile, gltfBones, gltfFps, gltfSourceRate,
+							gltfRootMotion, gltfRoute, gltfTsv, gltfSkeletonName,
+							gltfRootNode );
+	else if ( cmd == QLatin1String( "hkx-tsv" ) )			// lane BUILD8
+		rc = cmdHkxTsv( file, outFile );
 	else if ( cmd == QLatin1String( "check" ) )
 		rc = cmdCheck( file, type );
 	else if ( cmd == QLatin1String( "world" ) )
@@ -5875,17 +8876,92 @@ int nifskopeCliMain( const QStringList & args )
 	else if ( cmd == QLatin1String( "btd" ) )
 		rc = cmdBtd( file, btdInfo, btdHaveRegion,
 			btdRegion[0], btdRegion[1], btdRegion[2], btdRegion[3], btdLod, outFile );
-	else if ( cmd == QLatin1String( "lodl" ) )
-		rc = cmdLodt( file, btdInfo, btdHaveRegion,
-			btdRegion[0], btdRegion[1], btdRegion[2], btdRegion[3], btdLod,
-			lodtPlaneName, outFile );
+	else if ( cmd == QLatin1String( "lodl" ) ) {
+		/* --water-mark-selftest runs the MARKING tool's own gates
+		 * (src/watermark.cpp), which rewrite the file, so it is answered
+		 * here rather than inside the scene builder. */
+		if ( lodtWaterMarkSelfTestOnly ) {
+			QString report, werr;
+			const bool ok = lodtWaterMarkSelfTest( file, &report, &werr );
+			out() << report << Qt::endl;
+			if ( !ok && !werr.isEmpty() )
+				err() << "error: " << werr << Qt::endl;
+			rc = ok ? 0 : 1;
+		} else {
+			rc = cmdLodt( file, btdInfo, btdHaveRegion,
+				btdRegion[0], btdRegion[1], btdRegion[2], btdRegion[3], btdLod,
+				lodtPlaneName, outFile, lodtWaterCensusOnly, lodtWaterSelfTestOnly );
+		}
+	}
 	else if ( cmd == QLatin1String( "lodt" ) ) {
 		err() << "error: the 'lodt' command is retired: the landscape file is .lodl "
 				 "now (.lodt names the terrain texture sheets) -- use "
 				 "'lodl <file.lodl>'" << Qt::endl;
 		rc = 2;
 	}
-	else if ( cmd == QLatin1String( "lodgen" ) )
+	/* THE MODEL LAYER ON N THREADS -- see src/nifparsestress.h and edit 3.
+	 * The positional <file> is the first NIF; --stress-file adds more. */
+	else if ( cmd == QLatin1String( "parsestress" ) ) {
+		NifParseStressOptions so;
+		if ( !file.isEmpty() )
+			so.paths << file;
+		so.paths << stressFiles;
+		so.threads = stressThreads;
+		so.reps = stressReps;
+		so.sabotage = stressSabotage;
+		rc = nifParseStressRun( so, out() ) ? 1 : 0;
+	}
+	else if ( cmd == QLatin1String( "lodgen" ) ) {
+	/* THE .lodl REFUSAL (lane GROUND1), in words, the way --incremental refuses
+	 * --native above.
+	 *
+	 * The .lodl's AO plane is computed by ONE function (lodtComputeAo,
+	 * src/lodtfile.cpp) from the container's own stored height word and nothing
+	 * else, and that same function serves both the writer and --refresh-ao.
+	 * That is what makes a refreshed plane byte-identical to a written one -- it
+	 * is the plane's stated contract, not a coincidence. Putting the placed
+	 * objects into it would make --refresh-ao produce a DIFFERENT plane from the
+	 * one that was written, silently, because the objects are not in the file.
+	 * The two honest alternatives -- a header bit saying "written with objects"
+	 * so refresh can refuse, or a stored object-height plane -- are both .lodl
+	 * format bumps, and this lane does not bump the format.
+	 *
+	 * So the sheets carry the object term and the .lodl keeps the bytes it has.
+	 * A run that asks for both is refused here rather than quietly writing one
+	 * of them without it. */
+		if ( lgCover.terrainObjectAo && !lgLodtDir.isEmpty() ) {
+			err() << "refused: --terrain-object-ao writes the object occlusion into the "
+					 "terrain SHEETS, while the .lodl's own AO plane is computed from the "
+					 "container's stored heights by the one function that also serves "
+					 "--refresh-ao -- putting objects there would make a refreshed plane "
+					 "differ from the written one without saying so." << Qt::endl;
+			err() << "  bake the sheets with --terrain-object-ao and write the .lodl in a "
+					 "separate run without it; the .lodl plane is unchanged either way."
+				  << Qt::endl;
+			err().flush();
+			return 2;
+		}
+		if ( lgVtDensity ) {
+			if ( lgVtFinestGiven || lgVtContentGiven ) {
+				err() << "error: --vt-density names a --vt-finest / --vt-content pair; give "
+						 "one or the other, not both" << Qt::endl;
+				return 2;
+			}
+			if ( lgVtDensity == 32 ) {
+				lgVt.finestDim = 2;
+				lgVt.content = 256;
+			} else if ( lgVtDensity == 16 ) {
+				lgVt.finestDim = 2;
+				lgVt.content = 512;
+			} else if ( lgVtDensity == 8 ) {
+				lgVt.finestDim = 1;
+				lgVt.content = 512;
+			} else {
+				err() << "error: --vt-density must be 32, 16 or 8 (world units a texel at the "
+						 "finest level)" << Qt::endl;
+				return 2;
+			}
+		}
 		rc = cmdLodgen( file, lgListWorldspaces, lgWorldspace,
 			lgHaveCell, lgCell[0], lgCell[1],
 			lgHaveTerrain, lgChunk[0], lgChunk[1], lgDim, outFile,
@@ -5898,7 +8974,12 @@ int nifskopeCliMain( const QStringList & args )
 			lgLodtVerify, lgDumpLand, lgDumpLayers, lgRefreshAo,
 			lgSlotFallback, lgAtlasBc1, lgSimplify, lgCover,
 			lgVt, lgVtDir, lgVtBtr, lgVtEstimate, lgLodmCheck, lgLodvCheck, lgCorpusHash,
-			lgCardAuxDiv );
+			lgCardAuxDiv, lgNativeDir, lgNativeVerifyLodo, lgNativeVerifyLodi, lgNativeFixture,
+			lgNativeMeshReport, lgNativeVerifyCorpus, lgNativeLadder, lgNativeOccluders,
+			lgLibraryNear, lgNativeLadderFoliage, lgNativeSilhouette, lgNativePlacementAo, lgNativeVertexAo, lgLodiV7,
+			lgScrappable, lgIdentityJoinLegacy, lgIdentityJoinGap,
+			lgTreesOnly, lgAggregate, lgAggMin, lgAggTile, lgAggViews );
+	}
 	else if ( cmd == QLatin1String( "anim-setup" ) )
 		rc = cmdAnimSetup( file, block, controllers, sequence, newSequence,
 						   standalone, effectVar, intVar, listOnly, outFile );

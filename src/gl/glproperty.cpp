@@ -31,6 +31,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ***** END LICENCE BLOCK *****/
 
 #include "glproperty.h"
+#include "gl/scenelighting.h"
+#include "gl/lookdevstage.h"
 
 /*! Which vertex-colour channel the viewport previews, or 0 for normal shading.
  *  It lives here because this is where the vertex-colour uniforms are set: the
@@ -44,10 +46,20 @@ int wwLodMaskByTree = 0;
 #include "gl/glscene.h"
 #include "gl/gltex.h"
 #include "io/material.h"
+#include "io/nifxfile.h"
+
+#include <cmath>
+#include <limits>
 #include "gamemanager.h"
 #include "libfo76utils/src/ddstxt16.hpp"
 #include "glview.h"
 #include "renderer.h"
+
+#include <QDir>
+#include <QFile>
+#include <QProcessEnvironment>
+#include <QSet>
+#include <QTextStream>
 
 
 //! @file glproperty.cpp Encapsulation of NiProperty blocks defined in nif.xml
@@ -991,18 +1003,74 @@ void BSShaderLightingProperty::setMaterial( const NifModel * nif, const QModelIn
 	else
 		material = newMaterial;
 
-	resolvePbrm( nif );
+	resolvePbrm( nif, index );
 }
 
-/*! PBRM rendering is UNFINISHED — the PBR programs bind and issue draws but
- * produce no pixels for lighting-shader shapes (WW_CHANGES 2026-07-27e has the
- * RenderDoc findings and the eliminated causes).
+/*! The PBR path's master gate. Off from 2026-07-27 (WW_CHANGES 2026-07-27e: the
+ * PBR program drew nothing); the likely cause, per-program normalMatrix /
+ * modelViewMatrix never uploaded, was fixed by `mesh->setUniforms(prog)` in
+ * setupProgramPBRM, and lane PBRR1 turned it back on with gate R1 (a) --
+ * PBR-mode coverage of the duct fixture >= 99% of Legacy -- as the proof.
  *
- * Gated here rather than only in the UI so that no code path — settings restore,
- * a stale QSettings value, a future caller — can switch it on by accident. Flip
- * this one constant to resume, and re-enable the matching menu entries.
+ * ON does not mean PBR is shown: the DISPLAY default stays Legacy until R3's
+ * gates pass (ruling Q9, 2026-09-23). The menu starts in Legacy every launch;
+ * a harness forces PBR through WW_PBRM_MODE.
  */
-static constexpr bool pbrmFeatureEnabled = false;
+static constexpr bool pbrmFeatureEnabled = true;
+
+/* THE R0 RENDER PINS (lane PBRR0, docs/NIFSKOPE_PBR_RENDERER.md s9).
+ *
+ * The old-vs-new shading harness (tests/spells/pbr_shade_ab.sh) pins every
+ * switch a later PBR stage adds, identically in both arms, so no picture ever
+ * depends on a QSettings value the user last ticked. In R0 they PIN STATE ONLY:
+ * WW_PBRM_MODE and WW_PBRM_AUTOREPLACE override the cached menu values but still
+ * pass through pbrmFeatureEnabled (false), so no pixel can move; the lighting,
+ * lookdev, shadow, contact, AO and SSGI switches have no feature behind them yet
+ * and are only echoed by WW_PBRM_CENSUS. Each is read once per process.
+ * Return: -1 unset, 0/1 (or the mode), -2 set but unusable -- echoed as a
+ * refusal in the census header, never silently treated as unset.
+ */
+static int wwEnvBool( const char * var )
+{
+	const QString s = qEnvironmentVariable( var ).trimmed().toLower();
+	if ( s.isEmpty() )
+		return -1;
+	if ( s == QLatin1StringView( "0" ) || s == QLatin1StringView( "off" ) || s == QLatin1StringView( "false" ) )
+		return 0;
+	if ( s == QLatin1StringView( "1" ) || s == QLatin1StringView( "on" ) || s == QLatin1StringView( "true" ) )
+		return 1;
+	return -2;
+}
+
+static int wwEnvPbrmMode()
+{
+	static const int v = []() {
+		const QString s = qEnvironmentVariable( "WW_PBRM_MODE" ).trimmed().toLower();
+		if ( s.isEmpty() )
+			return -1;
+		if ( s == QLatin1StringView( "legacy" ) || s == QLatin1StringView( "0" ) )
+			return int( PbrmModeLegacy );
+		if ( s == QLatin1StringView( "pbr" ) || s == QLatin1StringView( "1" ) )
+			return int( PbrmModePBR );
+		if ( s == QLatin1StringView( "both" ) || s == QLatin1StringView( "legacyandpbr" ) || s == QLatin1StringView( "2" ) )
+			return int( PbrmModeLegacyAndPBR );
+		return -2;
+	}();
+	return v;
+}
+
+static int wwEnvAutoReplace()
+{
+	static const int v = wwEnvBool( "WW_PBRM_AUTOREPLACE" );
+	return v;
+}
+
+bool wwRenderParticlesPin()
+{
+	// Unset (and unusable) keeps what the shot hook always did: particles ON.
+	static const int v = wwEnvBool( "WW_RENDER_PARTICLES" );
+	return v != 0;
+}
 
 static bool pbrmAutoReplaceCached = true;
 
@@ -1013,10 +1081,14 @@ void setPbrmAutoReplace( bool on )
 
 bool pbrmAutoReplaceEnabled()
 {
-	return pbrmFeatureEnabled && pbrmAutoReplaceCached;
+	// WW_PBRM_AUTOREPLACE pins the menu value for a harness run (lane PBRR0);
+	// the feature gate still has the last word.
+	const int pin = wwEnvAutoReplace();
+	const bool on = ( pin >= 0 ) ? ( pin != 0 ) : pbrmAutoReplaceCached;
+	return pbrmFeatureEnabled && on;
 }
 
-static int pbrmModeCached = PbrmModeLegacy;
+static int pbrmModeCached = PbrmModeLegacyAndPBR;	// Q9 (lane PBRR3): PBR where a .pbrm serves
 
 void setPbrmMode( int mode )
 {
@@ -1025,64 +1097,395 @@ void setPbrmMode( int mode )
 
 int pbrmMode()
 {
-	// Force Legacy while the feature is gated, whatever is stored.
-	return pbrmFeatureEnabled ? pbrmModeCached : int( PbrmModeLegacy );
+	// WW_PBRM_MODE pins the menu value for a harness run (lane PBRR0).
+	// Force Legacy while the feature is gated, whatever is stored or pinned.
+	const int pin = wwEnvPbrmMode();
+	const int m = ( pin >= 0 ) ? pin : pbrmModeCached;
+	return pbrmFeatureEnabled ? m : int( PbrmModeLegacy );
 }
 
-/*! Resolve a PBRM for this property.
- *
- * 1. **Direct link** — the material name itself ends in `.pbrm`. Unconditional:
- *    the asset asked for it explicitly.
- * 2. **Same-name discovery** — a `.bgsm`/`.bgem` with a `foo.pbrm` beside it,
- *    only while `pbrmAutoReplace` is on.
- *
- * Case 2 is deliberately an editor-side preview convenience: it lets an existing
- * FO4 asset be previewed against a new PBRM without editing the NIF. The PBRM
- * spec says a runtime consults no same-name BGSM/BGEM, which case 1 honours —
- * that is why case 2 is opt-in and must not be mistaken for runtime behaviour.
- *
- * Reads through `getResourceFile`, the same VFS path Material::openFile uses, so
- * a PBRM inside a BA2 resolves exactly like a BGSM does.
+/* THE R1 PINS (lane PBRR1). Read once per process, echoed in the census header.
+ *   WW_PBRM_ORDER=<route,route,...>  RED CONTROL ONLY: a permutation of the
+ *       resolve order (gates R1 b / e prove a swapped order FAILS the resolver
+ *       compare). A malformed value is REFUSED and the shipped order used.
+ *   WW_PBRM_F0_LAW=v5                RED CONTROL ONLY: read every .pbrm's RMAOS
+ *       scalar as an F0 (gate R1 c: the v6 file through the v5 law gives 1.0).
+ *   WW_PBRM_SWAP=<orig>><swap>[;...] an active material swap, until the ESP
+ *       reader supplies OMOD/MSWP data: a shape whose material is <orig> takes
+ *       the swap route from <swap>'s diffuse. Legacy drawing is not swapped.
+ *   WW_PBRM_ROUTE_VIEW=0|1           pins the View menu's PBR Route View.
  */
-void BSShaderLightingProperty::resolvePbrm( const NifModel * nif )
+struct WwPbrmOrderPin
+{
+	QList<PbrmRoute> order;
+	QString asked;
+	QString refusal;	// empty = accepted or unset
+	bool set = false;
+};
+
+static const WwPbrmOrderPin & wwPbrmOrderPin()
+{
+	static const WwPbrmOrderPin v = []() {
+		WwPbrmOrderPin p;
+		p.order = pbrmDefaultOrder();
+		p.set = qEnvironmentVariableIsSet( "WW_PBRM_ORDER" );
+		p.asked = qEnvironmentVariable( "WW_PBRM_ORDER" ).trimmed();
+		if ( p.set && !p.asked.isEmpty() ) {
+			QString why;
+			if ( !pbrmParseOrder( p.asked, p.order, why ) )
+				p.refusal = why;
+		}
+		return p;
+	}();
+	return v;
+}
+
+static int wwEnvF0Law()
+{
+	static const int v = []() {
+		const QString s = qEnvironmentVariable( "WW_PBRM_F0_LAW" ).trimmed().toLower();
+		if ( s.isEmpty() )
+			return -1;
+		if ( s == QLatin1StringView( "auto" ) )
+			return 0;
+		if ( s == QLatin1StringView( "v5" ) )
+			return 1;
+		return -2;
+	}();
+	return v;
+}
+
+PbrmF0Law wwPbrmF0Law()
+{
+	return wwEnvF0Law() == 1 ? PbrmF0Law::V5 : PbrmF0Law::Auto;
+}
+
+//! WW_PBRM_SWAP pairs, keys and values normalised to `Materials\...` lower-case.
+static const QHash<QString, QString> & wwPbrmSwapPin()
+{
+	static const QHash<QString, QString> v = []() {
+		QHash<QString, QString> h;
+		for ( const QString & pair : qEnvironmentVariable( "WW_PBRM_SWAP" ).split( QLatin1Char( ';' ), Qt::SkipEmptyParts ) ) {
+			const int gt = pair.indexOf( QLatin1Char( '>' ) );
+			if ( gt <= 0 )
+				continue;
+			QString from, to;
+			const QStringList ext { QStringLiteral( ".bgsm" ), QStringLiteral( ".bgem" ) };
+			if ( pbrmNormaliseMaterialPath( pair.left( gt ), ext, from )
+				&& pbrmNormaliseMaterialPath( pair.mid( gt + 1 ), ext, to ) )
+				h.insert( from.toLower(), to );
+		}
+		return h;
+	}();
+	return v;
+}
+
+static bool pbrmRouteViewCached = false;
+
+void setPbrmRouteView( bool on )
+{
+	pbrmRouteViewCached = on;
+}
+
+bool pbrmRouteView()
+{
+	static const int pin = wwEnvBool( "WW_PBRM_ROUTE_VIEW" );
+	return ( pin >= 0 ) ? ( pin != 0 ) : pbrmRouteViewCached;
+}
+
+void pbrmRouteColor( PbrmRoute r, float rgb[3] )
+{
+	// One distinct hue per route; legacy is grey so every PBR route stands out.
+	float c[3];
+	switch ( r ) {
+	case PbrmRoute::Swap:    c[0] = 1.00f; c[1] = 0.00f; c[2] = 1.00f; break;	// magenta
+	case PbrmRoute::Nifx:    c[0] = 0.00f; c[1] = 1.00f; c[2] = 1.00f; break;	// cyan
+	case PbrmRoute::Direct:  c[0] = 1.00f; c[1] = 1.00f; c[2] = 0.00f; break;	// yellow
+	case PbrmRoute::Sibling: c[0] = 0.00f; c[1] = 1.00f; c[2] = 0.00f; break;	// green
+	case PbrmRoute::Fo76:    c[0] = 1.00f; c[1] = 0.50f; c[2] = 0.00f; break;	// orange
+	case PbrmRoute::Stem:    c[0] = 0.00f; c[1] = 0.25f; c[2] = 1.00f; break;	// blue
+	default:                 c[0] = 0.50f; c[1] = 0.50f; c[2] = 0.50f; break;	// legacy grey
+	}
+	rgb[0] = c[0];
+	rgb[1] = c[1];
+	rgb[2] = c[2];
+}
+
+/*! Resolve a PBRM for this property (lane PBRR1).
+ *
+ * Walks THE ONE candidate function, pbrmResolve() in src/io/pbrmresolve.h --
+ * swap > .nifx > (direct .pbrm name | same-name sibling) > FO76 BGSM > legacy
+ * -- the function lodgen's material mask and `-no-gui pbrm-resolve` also call,
+ * so the viewport, a LOD card and the command line cannot disagree.
+ *
+ * Inputs gathered here: the property name; the geometry node owning the
+ * property (the .nifx key, docs s2.4 / ruling Q4); the `material` entry of the
+ * .nifx beside the NIF on disk; the WW_PBRM_SWAP pin as the active swap until
+ * the ESP reader supplies OMOD/MSWP data; Auto-replace for the sibling step;
+ * the FO76 step for FO4 NIFs (bsver 130-139) only.
+ *
+ * Reads through `getResourceFile`, the same VFS path Material::openFile uses,
+ * probing quietly with findResourceFile first: a miss is the NORMAL case and
+ * getResourceFile logs one.
+ */
+void BSShaderLightingProperty::resolvePbrm( const NifModel * nif, const QModelIndex & index )
 {
 	pbrm = PbrmMaterial();
 	pbrmValid = false;
 	pbrmUnsupported = false;
 	pbrmPath.clear();
+	pbrmRoute = PbrmRoute::Legacy;
+	pbrmEnvelope = QStringLiteral( "none" );
+	pbrmShapeName.clear();
+	pbrmRefusal.clear();
+	pbrmBindRefusal.clear();
 
-	if ( !nif || name.isEmpty() )
+	if ( !nif )
 		return;
 
-	QString candidate;
-	if ( name.endsWith( QLatin1StringView( ".pbrm" ), Qt::CaseInsensitive ) ) {
-		candidate = name;
-	} else if ( pbrmAutoReplaceEnabled()
-		&& ( name.endsWith( QLatin1StringView( ".bgsm" ), Qt::CaseInsensitive )
-			|| name.endsWith( QLatin1StringView( ".bgem" ), Qt::CaseInsensitive ) ) ) {
-		candidate = name.left( name.length() - 5 ) + QLatin1StringView( ".pbrm" );
+	auto reader = [nif]( const QString & path, QByteArray & out ) -> bool {
+		out.clear();
+		if ( nif->findResourceFile( path, "materials", "" ).isEmpty() )
+			return false;
+		nif->getResourceFile( out, path, "materials", "" );
+		return !out.isEmpty();
+	};
+
+	PbrmResolveInput in;
+	in.material = name;
+	if ( index.isValid() ) {
+		const int parent = nif->getParent( nif->getBlockNumber( index ) );
+		if ( parent >= 0 )
+			in.shapeName = nif->get<QString>( nif->getBlockIndex( parent ), "Name" );
 	}
-	if ( candidate.isEmpty() )
+	pbrmShapeName = in.shapeName;
+
+	if ( !in.shapeName.isEmpty() && !nif->getFilename().isEmpty() )
+		in.nifxPbrm = nifxMaterialFor( nif->getFileInfo().absoluteFilePath(), in.shapeName, &in.nifxNote );
+
+	const QHash<QString, QString> & swaps = wwPbrmSwapPin();
+	if ( !swaps.isEmpty() && !name.isEmpty() ) {
+		QString key;
+		if ( pbrmNormaliseMaterialPath( name, { QStringLiteral( ".bgsm" ), QStringLiteral( ".bgem" ) }, key ) ) {
+			const auto it = swaps.constFind( key.toLower() );
+			if ( it != swaps.constEnd() ) {
+				QByteArray b;
+				if ( !reader( it.value(), b ) ) {
+					in.swapNote = QStringLiteral( "swap material %1 not found" ).arg( it.value() );
+				} else {
+					const ShaderMaterial sm( b );
+					if ( sm.isValid() && !sm.textures().isEmpty() && !sm.textures().at( 0 ).isEmpty() )
+						in.swapDiffuse = sm.textures().at( 0 );
+					else
+						in.swapNote = QStringLiteral( "swap material %1 has no diffuse" ).arg( it.value() );
+				}
+			}
+		}
+	}
+
+	in.sibling = pbrmAutoReplaceEnabled();
+	in.fo76 = ( bsVersion >= 130 && bsVersion < 140 );
+	in.order = wwPbrmOrderPin().order;
+
+	const PbrmResolveResult r = pbrmResolve( in, reader );
+	pbrmRoute = r.route;
+	pbrmEnvelope = r.envelope;
+	pbrmRefusal = r.refusal;
+	if ( r.route != PbrmRoute::Legacy ) {
+		pbrm = r.material;
+		pbrmValid = true;
+		pbrmPath = r.path;
+	} else {
+		pbrmUnsupported = r.refusal.contains( QLatin1StringView( ": unsupported (" ) );
+	}
+}
+
+/* WW_PBRM_CENSUS=<ABSOLUTE path> (lane PBRR0, docs/NIFSKOPE_PBR_RENDERER.md s9).
+ *
+ * One line per shape, written the first time the shape is drawn: which route
+ * SERVED it (legacy / direct / sibling; nifx, swap and fo76 join in R1), the
+ * file serving it, the .pbrm envelope version if one resolved, and why PBR did
+ * not serve it. It echoes RESOLVED state -- the program the renderer actually
+ * bound and the fields resolvePbrm() actually wrote -- never the intent. The
+ * header line echoes every harness pin as asked AND as served.
+ *
+ * R1 (lane PBRR1): the header reads stage=R1 and echoes the R1 pins; a row
+ * served by pbrm_default.prog names its real route (swap / nifx / direct /
+ * sibling / fo76), the file, the envelope and f0= -- the dielectric F0 LEVEL
+ * the upload carries (pbrmDielectricF0). A legacy row names the first gate that
+ * refused PBR, then the resolver's own answer (every candidate it declined).
+ * Armed only by an absolute path; renders nothing and touches no uniform.
+ */
+static int wwPbrmCensusArmedState = -1;
+static QString wwPbrmCensusPath;
+
+bool wwPbrmCensusArmed()
+{
+	if ( wwPbrmCensusArmedState < 0 ) {
+		const QString p = qEnvironmentVariable( "WW_PBRM_CENSUS" ).trimmed();
+		wwPbrmCensusArmedState = ( !p.isEmpty() && QDir::isAbsolutePath( p ) ) ? 1 : 0;
+		wwPbrmCensusPath = p;
+	}
+	return wwPbrmCensusArmedState == 1;
+}
+
+static QString wwPinAsked( const char * var )
+{
+	return qEnvironmentVariableIsSet( var ) ? qEnvironmentVariable( var ) : QStringLiteral( "unset" );
+}
+
+static QString wwPinEcho( const char * key, const char * var, const QString & served, int parsed,
+	const char * note )
+{
+	QString s = QStringLiteral( " %1=%2(asked=%3" ).arg( QLatin1StringView( key ), served, wwPinAsked( var ) );
+	if ( parsed == -2 )
+		s += QStringLiteral( " REFUSED: unusable value" );
+	if ( note && *note )
+		s += QStringLiteral( "; " ) + QLatin1StringView( note );
+	return s + QLatin1Char( ')' );
+}
+
+static QString wwPbrmCensusHeader()
+{
+	static const char * const modeNames[] = { "legacy", "pbr", "both" };
+	const int mode = pbrmMode();
+	QString h = QStringLiteral( "# WW_PBRM_CENSUS stage=R2b pbr=%1" )
+		.arg( pbrmFeatureEnabled ? QStringLiteral( "on" )
+			: QStringLiteral( "off(pbrmFeatureEnabled=false src/gl/glproperty.cpp)" ) );
+	h += wwPinEcho( "mode", "WW_PBRM_MODE",
+		QLatin1StringView( modeNames[( mode >= 0 && mode <= 2 ) ? mode : 0] ), wwEnvPbrmMode(), "" );
+	h += wwPinEcho( "autoreplace", "WW_PBRM_AUTOREPLACE",
+		pbrmAutoReplaceEnabled() ? QStringLiteral( "on" ) : QStringLiteral( "off" ), wwEnvAutoReplace(), "" );
+	{
+		const WwPbrmOrderPin & op = wwPbrmOrderPin();
+		QStringList names;
+		for ( PbrmRoute r : op.order )
+			names << QLatin1StringView( pbrmRouteName( r ) );
+		const QByteArray note = op.refusal.isEmpty() ? QByteArray() : ( "REFUSED: " + op.refusal.toUtf8() );
+		h += wwPinEcho( "order", "WW_PBRM_ORDER", names.join( QLatin1Char( ',' ) ), -1, note.constData() );
+	}
+	h += wwPinEcho( "f0law", "WW_PBRM_F0_LAW",
+		wwPbrmF0Law() == PbrmF0Law::V5 ? QStringLiteral( "v5" ) : QStringLiteral( "auto" ), wwEnvF0Law(), "" );
+	h += wwPinEcho( "swap", "WW_PBRM_SWAP", QString::number( wwPbrmSwapPin().size() ) + QStringLiteral( "pairs" ),
+		-1, "" );
+	h += wwPinEcho( "routeview", "WW_PBRM_ROUTE_VIEW",
+		pbrmRouteView() ? QStringLiteral( "on" ) : QStringLiteral( "off" ), wwEnvBool( "WW_PBRM_ROUTE_VIEW" ), "" );
+	h += QLatin1Char( ' ' ) + wwSceneEcho();
+	QStringList lookdev;
+	for ( const QString & k : QProcessEnvironment::systemEnvironment().keys() )
+		if ( k.startsWith( QLatin1StringView( "WW_LOOKDEV" ) ) )
+			lookdev << k + QLatin1Char( '=' ) + qEnvironmentVariable( k.toLatin1().constData() );
+	lookdev.sort();
+	// lane PBRR2B: the lookdev stage is real; the echo names every WW_LOOKDEV* pin
+	// as asked and the stage as served (weather, keys, sun, cube source, ground)
+	h += QStringLiteral( " lookdevpins=%1 " )
+		.arg( lookdev.isEmpty() ? QStringLiteral( "unset" ) : lookdev.join( QLatin1Char( ',' ) ) );
+	h += wwLookdevEcho();
+	h += wwPinEcho( "particles", "WW_RENDER_PARTICLES",
+		wwRenderParticlesPin() ? QStringLiteral( "on" ) : QStringLiteral( "off" ),
+		wwEnvBool( "WW_RENDER_PARTICLES" ), "" );
+	h += wwPinEcho( "shadows", "WW_RENDER_SHADOWS", QStringLiteral( "off" ), -1, "not built" );
+	h += wwPinEcho( "contact", "WW_RENDER_CONTACT", QStringLiteral( "off" ), -1, "not built" );
+	h += wwPinEcho( "ao", "WW_RENDER_AO", QStringLiteral( "off" ), -1, "not built" );
+	h += wwPinEcho( "ssgi", "WW_RENDER_SSGI", QStringLiteral( "off" ), -1, "not built" );
+	return h;
+}
+
+/* The F0 the PBR program actually HOLDS for the draw being censused: the
+ * renderer reads the `pbrF0` uniform back with glGetUniformfv after the upload
+ * and notes it here just before it writes the row (telemetry echoes the
+ * uploaded value, not the intent). NaN = nothing was read back. Declared at the
+ * one caller in src/gl/renderer.cpp, not in the header. */
+static float wwPbrmNotedF0 = std::numeric_limits<float>::quiet_NaN();
+void wwPbrmCensusNoteUploadF0( float f0 )
+{
+	wwPbrmNotedF0 = f0;
+}
+
+QString BSShaderLightingProperty::wwPbrmCensusFields( const QString & servedProgram ) const
+{
+	const bool	pbrServed = ( servedProgram == QLatin1StringView( "pbrm_default.prog" ) );
+	const QString	envelope = pbrmEnvelope.isEmpty() ? QStringLiteral( "none" ) : pbrmEnvelope;
+
+	QString	route, path, refusal, f0;
+	if ( pbrServed && pbrmValid ) {
+		// The resolved route, and the F0 level the upload actually carries.
+		route = QLatin1StringView( pbrmRouteName( pbrmRoute ) );
+		path = pbrmPath;
+		refusal = QStringLiteral( "none" );
+		f0 = std::isnan( wwPbrmNotedF0 ) ? QStringLiteral( "unread" )
+			: QString::number( double( wwPbrmNotedF0 ), 'f', 3 );
+	} else {
+		route = QStringLiteral( "legacy" );
+		f0 = QStringLiteral( "none" );
+		if ( name.isEmpty() )
+			path = QStringLiteral( "(embedded)" );
+		else if ( material )
+			path = name;
+		else
+			path = QStringLiteral( "(embedded; material not loaded)" );
+
+		// Why PBR did not serve it: the first gate that said no ...
+		if ( pbrServed )
+			refusal = QStringLiteral( "no pbrm resolved: the PBR program drew the legacy material (mode pbr)" );
+		else if ( !pbrmFeatureEnabled )
+			refusal = QStringLiteral( "pbr display off: pbrmFeatureEnabled=false" );
+		else if ( wwLodChannelView != 0 )
+			refusal = QStringLiteral( "lod channel preview is a data view" );
+		else if ( pbrmRouteView() )
+			refusal = QStringLiteral( "pbr route view is a data view" );
+		else if ( !pbrmBindRefusal.isEmpty() )
+			refusal = pbrmBindRefusal;
+		else if ( pbrmMode() == PbrmModeLegacy )
+			refusal = QStringLiteral( "mode legacy" );
+		else if ( pbrmMode() == PbrmModeLegacyAndPBR && !pbrmValid )
+			refusal = QStringLiteral( "mode both, no pbrm resolved" );
+		else
+			refusal = QStringLiteral( "pbr program refused the shape" );
+
+		// ... and what the resolver found.
+		if ( pbrmValid )
+			refusal += QStringLiteral( "; resolved %1 %2 not served" )
+				.arg( QLatin1StringView( pbrmRouteName( pbrmRoute ) ), pbrmPath );
+		else if ( !pbrmRefusal.isEmpty() )
+			refusal += QStringLiteral( "; " ) + pbrmRefusal;
+	}
+	// The row format quotes these fields; a quote inside one would end it early.
+	refusal.replace( QLatin1Char( '"' ), QLatin1Char( '\'' ) );
+	path.replace( QLatin1Char( '"' ), QLatin1Char( '\'' ) );
+
+	return QStringLiteral( "material=\"%1\" route=%2 path=\"%3\" envelope=%4 f0=%5 refusal=\"%6\"" )
+		.arg( name, route, path, envelope, f0, refusal );
+}
+
+void wwPbrmCensus( const QString & shapeName, const char * kind, const BSShaderLightingProperty * sp,
+	const QString & servedProgram )
+{
+	if ( !wwPbrmCensusArmed() )
 		return;
 
-	// Probe quietly first. getResourceFile() logs "not found in archives" on a
-	// miss, and for same-name discovery a miss is the NORMAL case — every BGSM in
-	// every scene would emit a warning on every load.
-	if ( nif->findResourceFile( candidate, "materials", "" ).isEmpty() )
+	// prog = the program that SERVED the draw (s8: particles must name particles.prog).
+	QString	row = QStringLiteral( "shape=\"%1\" kind=%2 prog=\"%3\" " )
+		.arg( shapeName, QLatin1StringView( kind ), servedProgram );
+	if ( sp )
+		row += sp->wwPbrmCensusFields( servedProgram );
+	else
+		row += QStringLiteral( "material=\"\" route=legacy path=\"(none)\" envelope=none f0=none "
+			"refusal=\"no shader property\"" );
+
+	static QSet<QString>	seen;
+	if ( seen.contains( row ) )
 		return;
+	const bool	first = seen.isEmpty();
+	seen.insert( row );
 
-	QByteArray data;
-	nif->getResourceFile( data, candidate, "materials", "" );
-	if ( data.isEmpty() )
-		return;
-
-	pbrm = pbrmParse( data );
-	if ( !pbrm.error.isEmpty() )
-		return;			// malformed: leave the BGSM in charge
-
-	pbrmValid = pbrm.ok;
-	pbrmUnsupported = pbrm.unsupported;
-	pbrmPath = candidate;
+	QFile	f( wwPbrmCensusPath );
+	if ( f.open( QIODevice::Append | QIODevice::Text ) ) {
+		QTextStream	s( &f );
+		if ( first )
+			s << wwPbrmCensusHeader() << "\n";
+		s << row << "\n";
+	}
 }
 
 void BSShaderLightingProperty::setSFMaterial( const QString & mat_name )

@@ -47,6 +47,7 @@ extern int wwLodMaskByTree;
 #include "model/nifmodel.h"
 #include "gl/glcontext.hpp"
 #include "io/pbrmfile.h"
+#include "io/pbrmresolve.h"
 
 //! Settings/Render/PBRM Auto Replace, cached like Scene::collisionOnlySetting so
 //! material resolution never reads QSettings per shader property. Governs
@@ -73,6 +74,30 @@ enum PbrmLightingMode
 
 void setPbrmMode( int mode );
 int pbrmMode();
+
+/*! Harness pins and census of lane PBRR0 (docs/NIFSKOPE_PBR_RENDERER.md s9).
+ *  WW_PBRM_MODE / WW_PBRM_AUTOREPLACE override the cached menu values above and
+ *  still pass through the feature gate; WW_RENDER_PARTICLES is read by the shot
+ *  hook (unset = the old forced-on). WW_PBRM_CENSUS=<absolute path> writes one
+ *  line per drawn shape: the route that SERVED it, the file, the .pbrm envelope
+ *  and the refusal reason, with every pin echoed in the header. */
+class BSShaderLightingProperty;
+
+/*! R1 (lane PBRR1). View menu ▸ "PBR Route View" (or WW_PBRM_ROUTE_VIEW=1):
+ *  every FO4 lighting/effect shape is drawn flat in its route's colour by
+ *  pbr_route.prog. A data view; off by default. */
+void setPbrmRouteView( bool on );
+bool pbrmRouteView();
+//! The route view's colour for a route (sRGB 0..1).
+void pbrmRouteColor( PbrmRoute r, float rgb[3] );
+//! The F0 law the renderer applies: Auto, or V5 under the WW_PBRM_F0_LAW=v5
+//! red-control pin (gate R1 c). Never V5 without the pin.
+PbrmF0Law wwPbrmF0Law();
+
+bool wwRenderParticlesPin();
+bool wwPbrmCensusArmed();
+void wwPbrmCensus( const QString & shapeName, const char * kind, const BSShaderLightingProperty * sp,
+	const QString & servedProgram );
 
 #include <QHash>
 #include <QPersistentModelIndex>
@@ -759,12 +784,27 @@ public:
 	bool pbrmUnsupported = false;
 	//! the material path the PBRM came from (may differ from `name`)
 	QString pbrmPath;
+	//! R1: the route that resolved it (pbrmResolve, src/io/pbrmresolve.h), the
+	//! envelope ("v6", "bgsm-v22", "none"), the geometry node it was keyed by
+	//! and why no earlier step served (the census refusal).
+	PbrmRoute pbrmRoute = PbrmRoute::Legacy;
+	QString pbrmEnvelope;
+	QString pbrmShapeName;
+	QString pbrmRefusal;
+	//! Set by the renderer when a texture of the resolved PBRM failed to bind:
+	//! the whole PBR binding was aborted and the shape drew legacy. Empty = no
+	//! abort. Mutable because the draw path holds a const view of the property.
+	mutable QString pbrmBindRefusal;
 
 	/*! Texture slots retargeted for a bake, consulted before every other
 	 * source by fileName(). The impostor bake sets these from a source .lodm
 	 * (docs/LODGEN_IMPOSTOR_SPEC.md) so the photograph is of the textures the
 	 * LOD material names, not the vanilla set's; empty in every other use. */
 	QHash<int, QString> wwTextureOverride;
+
+	//! The resolved-state fields of one WW_PBRM_CENSUS row (lane PBRR0): the
+	//! route that served the shape, its file, the .pbrm envelope, the refusal.
+	QString wwPbrmCensusFields( const QString & servedProgram ) const;
 
 protected:
 	ShaderFlags::SF1 flags1 = ShaderFlags::SLSF1_ZBuffer_Test;
@@ -781,8 +821,9 @@ protected:
 	QString	materialPath;
 	AllocBuffers	sfMatDataBuf;
 	void setMaterial( const NifModel * nif, const QModelIndex & index, bool isEffect );
-	//! Resolve a direct-linked or same-name .pbrm for this property.
-	void resolvePbrm( const NifModel * nif );
+	//! Resolve this property's .pbrm through the ONE candidate function
+	//! (swap > .nifx > direct | sibling > FO76 BGSM > legacy).
+	void resolvePbrm( const NifModel * nif, const QModelIndex & index );
 	void setSFMaterial( const QString & mat_name );
 	void loadSFMaterial();
 	const CE2Material * createDefaultSFMaterial();

@@ -6,6 +6,7 @@ BSD License - see nifskope.h
 
 #include "lodtfile.h"
 #include "esmdata.h"
+#include "lodgenlayout.h"
 
 /* Only for LODTEX_MAGIC: this reader must be able to NAME a terrain
  * TEXTURE file when it is handed one, because `.lodt` meant THIS format
@@ -14,8 +15,16 @@ BSD License - see nifskope.h
 
 #include "btdfile.hpp"
 
+/* Only for the WATR `NAM0` linear velocities the water module falls back on.
+ * EsmWorld exposes no WATR accessor and this lane does not own esmdata.*, so
+ * the plugin is opened here, ON DEMAND, and only when the module is switched on
+ * with a plugin to read (see scratchpad/water2_20260909/ESMDATA_CHANGE_NEEDED.md
+ * for the accessor that would retire this). */
+#include "esmfile.hpp"
+
 #include <QDir>
 #include <QFileInfo>
+#include <QPair>
 #include <QSet>
 #include <QElapsedTimer>
 #include <QFile>
@@ -45,15 +54,50 @@ namespace
  * section offsets, so 0x00..0x97 is unchanged and every offset a version 1
  * reader uses still sits where it did; only the first section moved, and it is
  * addressed by an offset in the header. The writer emits 2; both are read. */
-constexpr quint32 LODL_VERSION = 2;
+constexpr quint32 LODL_VERSION = 3;
 constexpr quint32 LODL_VERSION_MIN = 1;
 constexpr qsizetype LODL_HEADER_V1 = 0x98;
 constexpr qsizetype LODL_HEADER_V2 = 0xA0;
+/* Version 3 appends the water-body fields from 0xA0 and its SECTIONS after the
+ * block data, so 0x00..0x9F is byte-for-byte what version 2 writes and every
+ * version-2 offset still sits where it did. */
+constexpr qsizetype LODL_HEADER_V3 = 0xF8;
 
-constexpr quint32 SECT_COLOUR = 1u << 0;
-constexpr quint32 SECT_GROUNDCOVER = 1u << 1;
-constexpr quint32 SECT_AO = 1u << 2;
-constexpr quint32 SECT_WATER = 1u << 3;
+/*! Header size by version -- a TABLE, not a ternary.
+ *
+ *  It used to be `ver >= 2 ? V2 : V1`, evaluated BEFORE the version check, so
+ *  the moment a third version existed a version-3 file was measured against a
+ *  160-byte floor by the very reader that was about to refuse it. Harmless
+ *  while the refusal stands and a misparse the day someone relaxes it, which is
+ *  why the spec called this out as a thing to fix WITH the bump rather than
+ *  after it. An unknown version answers 0, and 0 makes every offset check fail
+ *  closed. */
+static inline qsizetype lodtHeaderBytes( int version )
+{
+	switch ( version ) {
+	case 1:  return LODL_HEADER_V1;
+	case 2:  return LODL_HEADER_V2;
+	case 3:  return LODL_HEADER_V3;
+	default: return 0;
+	}
+}
+
+constexpr quint32 SECT_COLOUR = LODL_SECT_COLOUR;
+constexpr quint32 SECT_GROUNDCOVER = LODL_SECT_GROUNDCOVER;
+constexpr quint32 SECT_AO = LODL_SECT_AO;
+constexpr quint32 SECT_WATER = LODL_SECT_WATER;
+constexpr quint32 SECT_BODIES = LODL_SECT_BODIES;
+constexpr quint32 SECT_FLOW = LODL_SECT_FLOW;
+constexpr quint32 SECT_SHORE = LODL_SECT_SHORE;
+constexpr quint32 SECT_STROKE = LODL_SECT_STROKE;
+
+//! Two pi, spelled out: M_PI is not standard C++ and is absent under /std:c++.
+constexpr double kTwoPi = 6.283185307179586476925286766559;
+
+//! Bytes of one body-table record as THIS build writes it (spec §3.3).
+constexpr int LODL_BODY_RECORD = 48;
+//! World units per stored shore step.
+constexpr float LODL_SHORE_QUANTUM = 32.0f;
 
 constexpr quint16 WATER_TYPE_DEFAULT = 0xFFFFU;
 constexpr quint16 CELL_HAS_WATER = 1u << 0;
@@ -81,6 +125,14 @@ struct Buf
 	void f32( float v ) { quint32 t; std::memcpy( &t, &v, 4 ); u32( t ); }
 	qsizetype size() const { return b.size(); }
 };
+
+//! The same for a u32 -- the section-flag word is patched, because whether the
+//! water sections are really THERE is only known after they have been built.
+void patch32( QByteArray & b, qsizetype at, quint32 v )
+{
+	for ( int i = 0; i < 4; i++ )
+		b[at + i] = char( ( v >> ( i * 8 ) ) & 0xFF );
+}
 
 //! Patch a u64 already written at a known offset, once its target is known.
 void patch64( QByteArray & b, qsizetype at, quint64 v )
@@ -177,6 +229,1176 @@ static QByteArray lodtComputeAo( const std::vector<quint16> & grid, int aw, int 
 			return QByteArray();
 	}
 	return out;
+}
+
+/* =========================================================================
+ *  WATER BODIES  (version 3)
+ *
+ *  scratchpad/specs_20260909/spec_water.md is the contract; this is its rule D
+ *  and its §4 algorithms, and the comments here say only what the code cannot.
+ *
+ *  Two things in it are NOT what that page says, and both are measured
+ *  corrections rather than preferences (lane WATER2, 2026-09-10 --
+ *  scratchpad/water2_20260909/bridge_exact.py, bridge_effect.py,
+ *  bridge_variants.py):
+ *
+ *   1. THE SHORE TEST IS EXACT. Lane WATER1's Python compared DECIMATED point
+ *      clouds (every `area/4000`-th texel), which can only ever OVERESTIMATE a
+ *      distance: it found 218 of the 545 pairs that are actually within two
+ *      texels, and its 590 bodies are that shortfall. Scanning the disc of
+ *      radius `gap` around every texel is exact and costs one pass.
+ *   2. A BRIDGE IN WHICH EXACTLY ONE SIDE INHERITS the worldspace type is
+ *      accepted only when the INHERITING side is the SMALLER of the two.
+ *      Without that clause the exact test hands the Commonwealth's ocean --
+ *      21,587,443 texels -- to `ExtMarshScumWater`, because a painted marsh
+ *      passes within two texels of it. Rule C's merge already states the
+ *      direction ("an INHERITING component is merged INTO the painted one");
+ *      this is the same direction applied to a gap instead of a touch.
+ *
+ *  The known-answer control below (`lodl --water-selftest`) then found the same
+ *  missing direction in rule C's ADJACENT merge -- the synthetic sea TOUCHES a
+ *  painted river reach at its own height -- so the clause is in both merges.
+ *
+ *  Measured on the Commonwealth: 805 components -> 793 rule-C bodies -> 346
+ *  bodies, 528 bridge merges accepted, 13 refused, and thirteen of the fifteen
+ *  per-form texel totals identical to the read-only census's to the texel.
+ * ========================================================================= */
+
+//! Everything the water pass reads. It never sees a plugin or a LAND record.
+struct WaterInput
+{
+	int cellsX = 0, cellsY = 0, spc = 32, minX = 0, minY = 0;
+	float quantum = 8.0f;
+	const std::vector<quint16> * cellFlags = nullptr;
+	const std::vector<float> * cellWaterH = nullptr;
+	const std::vector<quint16> * cellWaterT = nullptr;
+	const QVector<quint32> * watrForms = nullptr;
+	quint32 defaultWaterType = 0;
+	float defaultWaterHeight = 0.0f;
+	//! Fills `cellsX * spc` stored height words for one global row, row 0 south.
+	std::function<void( int gy, quint16 * row )> heightRow;
+	//! WATR NAM0 linear velocity, X and Y. False = this arm is unavailable.
+	std::function<bool( quint32 form, float &, float & )> velocity;
+	LodtWaterOptions opt;
+};
+
+//! What the pass produces: the sections, already packed, and its own census.
+struct WaterOut
+{
+	QByteArray bodyTable, nameBlob, strokeStore;
+	//! Packed at a known base offset, so their directories are absolute.
+	QByteArray idPlane, flowPlane, shorePlane;
+	int bodyCount = 0;
+	int bodySamples = 0, flowSamples = 0, shoreSamples = 0;
+	QString census;      //!< the table --water-census prints
+	QString summary;     //!< one line for the writer's own census
+};
+
+/*! One maximal run of wet texels with one (height, type) key, in one row. */
+struct WaterRun
+{
+	qint32 x0 = 0, x1 = 0;       //!< inclusive
+	float wh = 0.0f;             //!< the cell's resolved water height
+	qint32 hq = 0;               //!< round(wh * 8) -- the height half of the key
+	quint16 tq = 0;              //!< the water TYPE index, 0xFFFF = inherited
+	qint32 comp = 0;             //!< component id, filled after the union
+};
+
+//! Union-find whose root is always the SMALLEST index in the set, so component
+//! numbering is a property of the grid and not of the order of the unions.
+struct WaterUf
+{
+	std::vector<qint32> p;
+	void reset( size_t n )
+	{
+		p.resize( n );
+		for ( size_t i = 0; i < n; i++ )
+			p[i] = qint32( i );
+	}
+	qint32 find( qint32 a )
+	{
+		while ( p[size_t( a )] != a ) {
+			p[size_t( a )] = p[size_t( p[size_t( a )] )];
+			a = p[size_t( a )];
+		}
+		return a;
+	}
+	void join( qint32 a, qint32 b )
+	{
+		a = find( a );
+		b = find( b );
+		if ( a == b )
+			return;
+		if ( a < b )
+			p[size_t( b )] = a;
+		else
+			p[size_t( a )] = b;
+	}
+};
+
+//! A component of rule C, before any merge.
+struct WaterComp
+{
+	qint64 area = 0;
+	qint32 x0 = 0, x1 = 0, y0 = 0, y1 = 0;
+	float wh = 0.0f;
+	quint16 tq = 0;
+	bool edge = false;
+	qint32 body = 0;             //!< the rule-C body it ends up in
+};
+
+//! A rule-C body: components merged by adjacency; the bridge works on these.
+struct WaterCBody
+{
+	qint64 area = 0;
+	qint32 x0 = 0, x1 = 0, y0 = 0, y1 = 0;
+	float wh = 0.0f;
+	quint16 tq = 0;              //!< majority type by area, INCLUDING the default
+	bool edge = false;
+	int parts = 0;
+	bool ambiguous = false;
+	QHash<quint16, qint64> types;
+	qint32 out = 0;              //!< the final body id
+};
+
+//! The finished thing: what one record of the body table describes.
+struct WaterBody
+{
+	qint64 area = 0;
+	qint32 x0 = 0, x1 = 0, y0 = 0, y1 = 0;
+	float wh = 0.0f;
+	quint16 tq = 0xFFFFU;        //!< the PAINTED majority; 0xFFFF = inherited
+	quint32 form = 0;
+	bool edge = false, ambiguous = false;
+	int parts = 0;
+	int cls = 2;                 //!< 0 sea, 1 river, 2 lake
+	double axX = 1.0, axY = 0.0, aniso = 0.0, elong = 0.0;
+	double bedR = 0.0, bedDrop = 0.0;
+	double flowX = 0.0, flowY = 0.0;
+	int flowSource = 0;
+	int outlet = 0;
+	double nam0X = 0.0, nam0Y = 0.0;
+	bool hasNam0 = false;
+	// accumulators
+	double n = 0, sx = 0, sy = 0, sxx = 0, syy = 0, sxy = 0;
+	double sb = 0, sbb = 0, sxb = 0, syb = 0;
+	double tMin = 0, tMax = 0;
+};
+
+/*! The principal axis of a point set from its second moments, and the
+ *  anisotropy `1 - l1/l0` the classification and the flow rule both gate on.
+ *  Closed form rather than an eigen solver: a symmetric 2x2 is a quadratic. */
+static void lodtPrincipalAxis( double n, double sx, double sy, double sxx,
+	double syy, double sxy, double & ax, double & ay, double & aniso )
+{
+	ax = 1.0;
+	ay = 0.0;
+	aniso = 0.0;
+	if ( n < 3.0 )
+		return;
+	const double mx = sx / n, my = sy / n;
+	const double cxx = sxx / n - mx * mx;
+	const double cyy = syy / n - my * my;
+	const double cxy = sxy / n - mx * my;
+	const double tr = cxx + cyy;
+	const double det = cxx * cyy - cxy * cxy;
+	const double d = qMax( tr * tr / 4.0 - det, 0.0 );
+	const double l0 = tr / 2.0 + std::sqrt( d );
+	const double l1 = tr / 2.0 - std::sqrt( d );
+	double vx, vy;
+	if ( std::fabs( cxy ) > 1e-12 ) {
+		vx = l0 - cyy;
+		vy = cxy;
+	} else if ( cxx >= cyy ) {
+		vx = 1.0;
+		vy = 0.0;
+	} else {
+		vx = 0.0;
+		vy = 1.0;
+	}
+	const double m = std::sqrt( vx * vx + vy * vy );
+	if ( m > 0.0 ) {
+		ax = vx / m;
+		ay = vy / m;
+	}
+	if ( l0 > 0.0 )
+		aniso = 1.0 - l1 / l0;
+}
+
+/*! ONE tiled, zlib-compressed plane, packed at a known file offset.
+ *
+ *  Three planes share this container so there is one implementation and one
+ *  gate. A tile whose compressed size is 0 is UNIFORM and its uncompressed-size
+ *  field holds the repeated sample instead -- 99.2% of the Commonwealth's wet
+ *  area is one body, so most tiles cost sixteen bytes rather than an inflate. */
+static QByteArray lodtPackPlane( int tilesX, int tilesY, int tileEdge,
+	int bytesPerSample, quint64 base,
+	const std::function<void( int tx, int ty, quint8 * out )> & fill,
+	qint64 * uniformTiles )
+{
+	const qint64 nTiles = qint64( tilesX ) * tilesY;
+	const qint64 hdr = 32;
+	const qint64 dirBytes = nTiles * 16;
+	Buf head;
+	head.u32( quint32( tilesX ) );
+	head.u32( quint32( tilesY ) );
+	head.u32( quint32( tileEdge ) );
+	head.u32( quint32( bytesPerSample ) );
+	head.u64( base + quint64( hdr ) );
+	head.u64( base + quint64( hdr + dirBytes ) );
+
+	Buf dir, data;
+	quint64 pos = base + quint64( hdr + dirBytes );
+	const qsizetype tileBytes = qsizetype( tileEdge ) * tileEdge * bytesPerSample;
+	std::vector<quint8> raw( size_t( tileBytes ), quint8( 0 ) );
+	qint64 uniform = 0;
+	for ( int ty = 0; ty < tilesY; ty++ ) {
+		for ( int tx = 0; tx < tilesX; tx++ ) {
+			fill( tx, ty, raw.data() );
+			bool same = true;
+			for ( qsizetype k = bytesPerSample; k < tileBytes && same; k += bytesPerSample )
+				for ( int c = 0; c < bytesPerSample; c++ )
+					if ( raw[size_t( k + c )] != raw[size_t( c )] ) {
+						same = false;
+						break;
+					}
+			if ( same ) {
+				quint32 v = 0;
+				for ( int c = 0; c < bytesPerSample; c++ )
+					v |= quint32( raw[size_t( c )] ) << ( 8 * c );
+				dir.u64( 0 );
+				dir.u32( 0 );          // csize 0 = uniform
+				dir.u32( v );          // and the repeated sample lives here
+				uniform++;
+				continue;
+			}
+			QByteArray z = qCompress( QByteArray( reinterpret_cast<const char *>( raw.data() ),
+				int( tileBytes ) ), 9 );
+			z.remove( 0, 4 );          // a plain zlib stream, as the blocks are
+			dir.u64( pos );
+			dir.u32( quint32( z.size() ) );
+			dir.u32( quint32( tileBytes ) );
+			data.b.append( z );
+			pos += quint64( z.size() );
+		}
+	}
+	if ( uniformTiles )
+		*uniformTiles = uniform;
+	QByteArray out = head.b;
+	out.append( dir.b );
+	out.append( data.b );
+	return out;
+}
+
+/*! Build every water section. Returns false with a NAMED reason.
+ *
+ *  `baseOffset` is where the first section will land in the file, because the
+ *  plane directories store absolute offsets exactly as the block directory
+ *  does. */
+static bool lodtBuildWater( const WaterInput & in, quint64 baseOffset,
+	WaterOut & out, QString * error )
+{
+	auto fail = [error]( const QString & m ) {
+		if ( error )
+			*error = m;
+		return false;
+	};
+	const int spc = in.spc, cellsX = in.cellsX, cellsY = in.cellsY;
+	const qint64 gw = qint64( cellsX ) * spc;
+	const qint64 gh = qint64( cellsY ) * spc;
+	const qint64 samples = gw * gh;
+	/* The classification needs the whole wet mask resident, which is 2 bytes a
+	 * sample for the id grid and 2 for the shore sweep. That is 150 MB for the
+	 * Commonwealth and 2.6 GB for an 804-cell Fallout 76 port, so the module
+	 * REFUSES rather than thrashing -- and its fallback is itself: the file is
+	 * written at version 2, which is what every consumer reads today. */
+	if ( samples > ( qint64( 1 ) << 28 ) )
+		return fail( QString( "water bodies need the whole %1 x %2 sample grid resident "
+			"(%3 million samples, about %4 MB); this build refuses above 268 million. "
+			"Write without --water-bodies, or raise the body sample rate" )
+			.arg( gw ).arg( gh ).arg( samples / 1000000 ).arg( samples * 4 / ( 1 << 20 ) ) );
+	if ( gw <= 0 || gh <= 0 )
+		return fail( QStringLiteral( "the worldspace has no samples to classify" ) );
+
+	const int gap = qBound( 0, in.opt.bridgeGap, 32 );
+	const int near = qBound( 1, in.opt.nearTexels, 4096 );
+
+	// ---- pass A: the wet mask, as runs -----------------------------------
+	std::vector<WaterRun> runs;
+	std::vector<qint64> rowAt( size_t( gh ) + 1, 0 );
+	{
+		std::vector<quint16> row( size_t( gw ), quint16( 0 ) );
+		for ( qint64 gy = 0; gy < gh; gy++ ) {
+			rowAt[size_t( gy )] = qint64( runs.size() );
+			in.heightRow( int( gy ), row.data() );
+			const int cy = int( gy / spc );
+			const size_t cellRow = size_t( cy ) * size_t( cellsX );
+			bool open = false;
+			for ( qint64 gx = 0; gx < gw; gx++ ) {
+				const int cx = int( gx / spc );
+				const size_t s = cellRow + size_t( cx );
+				const bool has = ( ( *in.cellFlags )[s] & CELL_HAS_WATER ) != 0;
+				bool wet = false;
+				float wh = 0.0f;
+				quint16 tq = WATER_TYPE_DEFAULT;
+				if ( has ) {
+					wh = ( *in.cellWaterH )[s];
+					tq = ( *in.cellWaterT )[s];
+					const float h = ( float( row[size_t( gx )] ) - 32767.0f ) * in.quantum;
+					wet = h < wh;
+				}
+				if ( !wet ) {
+					open = false;
+					continue;
+				}
+				const qint32 hq = qint32( std::floor( double( wh ) * 8.0 + 0.5 ) );
+				if ( open && runs.back().hq == hq && runs.back().tq == tq
+					&& runs.back().x1 == qint32( gx ) - 1 ) {
+					runs.back().x1 = qint32( gx );
+					continue;
+				}
+				WaterRun r;
+				r.x0 = r.x1 = qint32( gx );
+				r.wh = wh;
+				r.hq = hq;
+				r.tq = tq;
+				runs.push_back( r );
+				open = true;
+			}
+		}
+		rowAt[size_t( gh )] = qint64( runs.size() );
+	}
+	if ( runs.empty() )
+		return fail( QStringLiteral( "no wet texel anywhere: every cell's terrain is at or "
+			"above its own water plane, so there is no body to classify" ) );
+
+	// ---- components: 4-connected, equal (height, type) --------------------
+	WaterUf uf;
+	uf.reset( runs.size() );
+	/* Pairs of runs that TOUCH but did not join, which is where rule C's
+	 * "merge an inheriting component into the painted one it touches" comes
+	 * from. Collected as run pairs and reduced to component pairs once the
+	 * roots are known. */
+	std::vector<std::pair<qint32, qint32>> touch;
+	for ( qint64 y = 0; y < gh; y++ ) {
+		const qint64 a0 = rowAt[size_t( y )], a1 = rowAt[size_t( y ) + 1];
+		for ( qint64 i = a0 + 1; i < a1; i++ )
+			if ( runs[size_t( i - 1 )].x1 + 1 == runs[size_t( i )].x0 )
+				touch.emplace_back( qint32( i - 1 ), qint32( i ) );
+		if ( y == 0 )
+			continue;
+		qint64 i = rowAt[size_t( y ) - 1], iEnd = a0;
+		qint64 j = a0, jEnd = a1;
+		while ( i < iEnd && j < jEnd ) {
+			const WaterRun & A = runs[size_t( i )];
+			const WaterRun & B = runs[size_t( j )];
+			if ( A.x1 < B.x0 ) {
+				i++;
+			} else if ( B.x1 < A.x0 ) {
+				j++;
+			} else {
+				if ( A.hq == B.hq && A.tq == B.tq )
+					uf.join( qint32( i ), qint32( j ) );
+				else
+					touch.emplace_back( qint32( i ), qint32( j ) );
+				if ( A.x1 < B.x1 )
+					i++;
+				else
+					j++;
+			}
+		}
+	}
+	// number components by ascending root, which is ascending first run
+	std::vector<qint32> compOf( runs.size(), 0 );
+	std::vector<WaterComp> comps;
+	{
+		QHash<qint32, qint32> byRoot;
+		for ( size_t i = 0; i < runs.size(); i++ ) {
+			const qint32 r = uf.find( qint32( i ) );
+			auto it = byRoot.constFind( r );
+			qint32 c;
+			if ( it == byRoot.constEnd() ) {
+				c = qint32( comps.size() );
+				byRoot.insert( r, c );
+				comps.push_back( WaterComp() );
+				comps.back().x0 = comps.back().x1 = runs[i].x0;
+				comps.back().y0 = comps.back().y1 = 0;
+				comps.back().wh = runs[i].wh;
+				comps.back().tq = runs[i].tq;
+				comps.back().y0 = 1 << 30;
+				comps.back().y1 = -1;
+				comps.back().x0 = 1 << 30;
+				comps.back().x1 = -1;
+			} else {
+				c = it.value();
+			}
+			compOf[i] = c;
+			runs[i].comp = c;
+		}
+		for ( qint64 y = 0; y < gh; y++ ) {
+			for ( qint64 k = rowAt[size_t( y )]; k < rowAt[size_t( y ) + 1]; k++ ) {
+				WaterComp & c = comps[size_t( compOf[size_t( k )] )];
+				const WaterRun & r = runs[size_t( k )];
+				c.area += r.x1 - r.x0 + 1;
+				c.x0 = qMin( c.x0, r.x0 );
+				c.x1 = qMax( c.x1, r.x1 );
+				c.y0 = qMin( c.y0, qint32( y ) );
+				c.y1 = qMax( c.y1, qint32( y ) );
+				if ( r.x0 == 0 || r.x1 == qint32( gw ) - 1 || y == 0 || y == gh - 1 )
+					c.edge = true;
+			}
+		}
+	}
+	const qint64 nComp = qint64( comps.size() );
+
+	// component adjacency, from the run pairs
+	std::vector<std::vector<qint32>> adj;
+	adj.resize( size_t( nComp ) );
+	{
+		QSet<qint64> seen;
+		for ( const auto & t : touch ) {
+			const qint32 a = compOf[size_t( t.first )], b = compOf[size_t( t.second )];
+			if ( a == b )
+				continue;
+			const qint64 key = ( qint64( qMin( a, b ) ) << 32 ) | quint32( qMax( a, b ) );
+			if ( seen.contains( key ) )
+				continue;
+			seen.insert( key );
+			adj[size_t( a )].push_back( b );
+			adj[size_t( b )].push_back( a );
+		}
+	}
+
+	// ---- rule C: an inheriting component joins the painted one it touches --
+	WaterUf cuf;
+	cuf.reset( size_t( nComp ) );
+	int ambiguousMerges = 0, refusedMerges = 0;
+	for ( qint64 c = 0; c < nComp; c++ ) {
+		if ( comps[size_t( c )].tq != WATER_TYPE_DEFAULT )
+			continue;
+		qint32 best = -1;
+		int candidates = 0;
+		for ( qint32 nb : adj[size_t( c )] ) {
+			const WaterComp & o = comps[size_t( nb )];
+			if ( o.tq == WATER_TYPE_DEFAULT )
+				continue;
+			if ( std::fabs( double( o.wh ) - double( comps[size_t( c )].wh ) ) >= 0.01 )
+				continue;
+			candidates++;
+			if ( best < 0 || o.area > comps[size_t( best )].area
+				|| ( o.area == comps[size_t( best )].area && nb < best ) )
+				best = nb;
+		}
+		if ( candidates == 0 )
+			continue;
+		/* THE DIRECTION, and the one clause that makes it safe. The rule reads
+		 * "an INHERITING component is merged INTO the painted one it touches",
+		 * so the inheriting side is the one absorbed -- and it may only be
+		 * absorbed when it is the SMALLER of the two, or the merge renames the
+		 * larger water after the smaller. Without this the synthetic control's
+		 * 73,728-texel sea, which touches the tidal reach of a 512-texel
+		 * painted river at exactly the sea's own height, comes out carrying the
+		 * river's form. On the Commonwealth it costs one merge of thirteen and
+		 * leaves NO body where the two readings of the form rule disagree,
+		 * where without it there are two (measured:
+		 * scratchpad/water2_20260909/merge_guard_variants.py). */
+		if ( comps[size_t( c )].area >= comps[size_t( best )].area ) {
+			refusedMerges++;
+			continue;
+		}
+		if ( candidates > 1 )
+			ambiguousMerges++;
+		cuf.join( qint32( c ), best );
+	}
+	std::vector<WaterCBody> cb;
+	{
+		QHash<qint32, qint32> byRoot;
+		for ( qint64 c = 0; c < nComp; c++ ) {
+			const qint32 r = cuf.find( qint32( c ) );
+			auto it = byRoot.constFind( r );
+			qint32 b;
+			if ( it == byRoot.constEnd() ) {
+				b = qint32( cb.size() );
+				byRoot.insert( r, b );
+				cb.push_back( WaterCBody() );
+				cb.back().x0 = cb.back().y0 = 1 << 30;
+				cb.back().x1 = cb.back().y1 = -1;
+				cb.back().wh = comps[size_t( c )].wh;
+			} else {
+				b = it.value();
+			}
+			WaterComp & cc = comps[size_t( c )];
+			cc.body = b;
+			WaterCBody & B = cb[size_t( b )];
+			B.area += cc.area;
+			B.x0 = qMin( B.x0, cc.x0 );
+			B.x1 = qMax( B.x1, cc.x1 );
+			B.y0 = qMin( B.y0, cc.y0 );
+			B.y1 = qMax( B.y1, cc.y1 );
+			B.edge = B.edge || cc.edge;
+			B.parts++;
+			B.types[cc.tq] += cc.area;
+		}
+		for ( WaterCBody & B : cb ) {
+			qint64 bestArea = -1;
+			quint16 bestT = WATER_TYPE_DEFAULT;
+			for ( auto it = B.types.constBegin(); it != B.types.constEnd(); ++it )
+				if ( it.value() > bestArea || ( it.value() == bestArea && it.key() < bestT ) ) {
+					bestArea = it.value();
+					bestT = it.key();
+				}
+			B.tq = bestT;
+		}
+	}
+	const qint64 nCb = qint64( cb.size() );
+	if ( nCb > 65534 )
+		return fail( QString( "%1 water components before bridging; the body-ID plane is "
+			"16-bit and cannot name more than 65534" ).arg( nCb ) );
+
+	// ---- the rule-C label grid, which the exact shore test scans ----------
+	std::vector<quint16> grid( size_t( samples ), 0 );
+	for ( qint64 y = 0; y < gh; y++ ) {
+		for ( qint64 k = rowAt[size_t( y )]; k < rowAt[size_t( y ) + 1]; k++ ) {
+			const WaterRun & r = runs[size_t( k )];
+			const qint32 b = comps[size_t( r.comp )].body + 1;
+			quint16 * p = grid.data() + size_t( y * gw + r.x0 );
+			for ( qint32 x = r.x0; x <= r.x1; x++ )
+				*p++ = quint16( b );
+		}
+	}
+
+	// ---- rule D: bridge components whose SHORES are within `gap` ----------
+	WaterUf duf;
+	duf.reset( size_t( nCb ) );
+	qint64 accepted = 0, refused = 0;
+	{
+		QSet<qint64> pairSeen;
+		for ( int dy = 0; dy <= gap; dy++ ) {
+			for ( int dx = -gap; dx <= gap; dx++ ) {
+				if ( dy == 0 && dx <= 0 )
+					continue;
+				if ( dy * dy + dx * dx > gap * gap )
+					continue;
+				const qint64 y0 = 0, y1 = gh - dy;
+				const qint64 x0 = dx >= 0 ? 0 : -dx;
+				const qint64 x1 = dx >= 0 ? gw - dx : gw;
+				for ( qint64 y = y0; y < y1; y++ ) {
+					const quint16 * a = grid.data() + size_t( y * gw );
+					const quint16 * b = grid.data() + size_t( ( y + dy ) * gw + dx );
+					for ( qint64 x = x0; x < x1; x++ ) {
+						const quint16 u = a[x], v = b[x];
+						if ( !u || !v || u == v )
+							continue;
+						const quint16 lo = qMin( u, v ), hi = qMax( u, v );
+						const qint64 key = ( qint64( lo ) << 20 ) | hi;
+						if ( pairSeen.contains( key ) )
+							continue;
+						pairSeen.insert( key );
+						const WaterCBody & A = cb[size_t( lo ) - 1];
+						const WaterCBody & B = cb[size_t( hi ) - 1];
+						if ( std::fabs( double( A.wh ) - double( B.wh ) ) > 0.01 )
+							continue;
+						const bool inhA = A.tq == WATER_TYPE_DEFAULT;
+						const bool inhB = B.tq == WATER_TYPE_DEFAULT;
+						bool join = false;
+						if ( A.tq == B.tq ) {
+							join = true;
+						} else if ( inhA && inhB ) {
+							join = true;
+						} else if ( inhA || inhB ) {
+							/* The inheriting side is the one absorbed, and only
+							 * when it is the smaller: an unpainted REACH joins
+							 * its river, an ocean does not swallow a marsh. */
+							const WaterCBody & small = inhA ? A : B;
+							const WaterCBody & big = inhA ? B : A;
+							join = small.area < big.area;
+						}
+						if ( join ) {
+							duf.join( qint32( lo ) - 1, qint32( hi ) - 1 );
+							accepted++;
+						} else {
+							refused++;
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// ---- final bodies, numbered by DESCENDING AREA (spec §4.1 step 6) -----
+	std::vector<WaterBody> bodies;
+	{
+		QHash<qint32, qint32> byRoot;
+		std::vector<std::vector<qint32>> group;
+		for ( qint64 b = 0; b < nCb; b++ ) {
+			const qint32 r = duf.find( qint32( b ) );
+			auto it = byRoot.constFind( r );
+			qint32 g;
+			if ( it == byRoot.constEnd() ) {
+				g = qint32( group.size() );
+				byRoot.insert( r, g );
+				group.push_back( std::vector<qint32>() );
+			} else {
+				g = it.value();
+			}
+			group[size_t( g )].push_back( qint32( b ) );
+		}
+		std::vector<qint32> order( group.size() );
+		for ( size_t i = 0; i < group.size(); i++ )
+			order[i] = qint32( i );
+		std::vector<qint64> gArea( group.size(), 0 );
+		for ( size_t i = 0; i < group.size(); i++ )
+			for ( qint32 b : group[i] )
+				gArea[i] += cb[size_t( b )].area;
+		std::sort( order.begin(), order.end(), [&]( qint32 a, qint32 b ) {
+			if ( gArea[size_t( a )] != gArea[size_t( b )] )
+				return gArea[size_t( a )] > gArea[size_t( b )];
+			return group[size_t( a )][0] < group[size_t( b )][0];
+		} );
+		bodies.resize( order.size() );
+		for ( size_t k = 0; k < order.size(); k++ ) {
+			WaterBody & W = bodies[k];
+			W.x0 = W.y0 = 1 << 30;
+			W.x1 = W.y1 = -1;
+			QHash<quint16, qint64> types;
+			for ( qint32 b : group[size_t( order[k] )] ) {
+				WaterCBody & B = cb[size_t( b )];
+				B.out = qint32( k ) + 1;
+				W.area += B.area;
+				W.x0 = qMin( W.x0, B.x0 );
+				W.x1 = qMax( W.x1, B.x1 );
+				W.y0 = qMin( W.y0, B.y0 );
+				W.y1 = qMax( W.y1, B.y1 );
+				W.edge = W.edge || B.edge;
+				W.parts += B.parts;
+				W.ambiguous = W.ambiguous || B.ambiguous;
+				for ( auto it = B.types.constBegin(); it != B.types.constEnd(); ++it )
+					types[it.key()] += it.value();
+			}
+			W.wh = cb[size_t( group[size_t( order[k] )][0] )].wh;
+			/* The body's WATR form is the PAINTED type with the most area; the
+			 * worldspace default only when nothing in it was painted. Measured
+			 * on the Commonwealth: with the bridge clause above, there is not
+			 * one body where this disagrees with "the majority type counting
+			 * the default", so the two readings of the rule now coincide. */
+			qint64 bestArea = -1;
+			quint16 bestT = WATER_TYPE_DEFAULT;
+			for ( auto it = types.constBegin(); it != types.constEnd(); ++it ) {
+				if ( it.key() == WATER_TYPE_DEFAULT )
+					continue;
+				if ( it.value() > bestArea || ( it.value() == bestArea && it.key() < bestT ) ) {
+					bestArea = it.value();
+					bestT = it.key();
+				}
+			}
+			W.tq = bestT;
+			W.form = ( bestT == WATER_TYPE_DEFAULT )
+				? in.defaultWaterType
+				: quint32( in.watrForms->value( int( bestT ), 0 ) );
+			if ( !W.form )
+				W.form = in.defaultWaterType;
+		}
+	}
+	const qint64 nBodies = qint64( bodies.size() );
+	if ( nBodies > 65534 )
+		return fail( QString( "%1 water bodies; the body-ID plane is 16-bit" ).arg( nBodies ) );
+
+	// remap the grid from rule-C ids to final ids
+	{
+		std::vector<quint16> lut( size_t( nCb ) + 1, 0 );
+		for ( qint64 b = 0; b < nCb; b++ )
+			lut[size_t( b ) + 1] = quint16( cb[size_t( b )].out );
+		for ( size_t i = 0; i < grid.size(); i++ )
+			grid[i] = lut[grid[i]];
+	}
+
+	// ---- pass B: the moments the axis, the elongation and the bed need ----
+	{
+		std::vector<quint16> row( size_t( gw ), quint16( 0 ) );
+		for ( qint64 gy = 0; gy < gh; gy++ ) {
+			in.heightRow( int( gy ), row.data() );
+			const quint16 * g = grid.data() + size_t( gy * gw );
+			for ( qint64 gx = 0; gx < gw; gx++ ) {
+				const quint16 b = g[gx];
+				if ( !b )
+					continue;
+				WaterBody & W = bodies[size_t( b ) - 1];
+				const double x = double( gx ), y = double( gy );
+				const double bed = ( double( row[size_t( gx )] ) - 32767.0 ) * double( in.quantum );
+				W.n += 1.0;
+				W.sx += x;
+				W.sy += y;
+				W.sxx += x * x;
+				W.syy += y * y;
+				W.sxy += x * y;
+				W.sb += bed;
+				W.sbb += bed * bed;
+				W.sxb += x * bed;
+				W.syb += y * bed;
+			}
+		}
+	}
+	for ( WaterBody & W : bodies ) {
+		lodtPrincipalAxis( W.n, W.sx, W.sy, W.sxx, W.syy, W.sxy, W.axX, W.axY, W.aniso );
+		const double w = double( W.x1 - W.x0 + 1 ), h = double( W.y1 - W.y0 + 1 );
+		W.elong = qMax( w, h ) * qMax( w, h ) / qMax( 1.0, double( W.area ) );
+		/* r and the slope of `bed` against the position along the axis, from
+		 * the raw moments: t = ax*x + ay*y is linear, so every sum it needs is
+		 * one of the nine already counted and the pass never runs twice. */
+		const double n = W.n;
+		const double st = W.axX * W.sx + W.axY * W.sy;
+		const double stt = W.axX * W.axX * W.sxx + 2.0 * W.axX * W.axY * W.sxy
+			+ W.axY * W.axY * W.syy;
+		const double stb = W.axX * W.sxb + W.axY * W.syb;
+		const double varT = stt / n - ( st / n ) * ( st / n );
+		const double varB = W.sbb / n - ( W.sb / n ) * ( W.sb / n );
+		const double cov = stb / n - ( st / n ) * ( W.sb / n );
+		W.bedR = ( varT > 1e-12 && varB > 1e-12 ) ? cov / std::sqrt( varT * varB ) : 0.0;
+		const double slope = varT > 1e-12 ? cov / varT : 0.0;
+		W.tMin = 1e30;
+		W.tMax = -1e30;
+		W.bedDrop = slope;      // scaled by the t range once that is measured
+	}
+	for ( qint64 y = 0; y < gh; y++ ) {
+		for ( qint64 k = rowAt[size_t( y )]; k < rowAt[size_t( y ) + 1]; k++ ) {
+			const WaterRun & r = runs[size_t( k )];
+			const qint32 id = cb[size_t( comps[size_t( r.comp )].body )].out;
+			WaterBody & W = bodies[size_t( id ) - 1];
+			const double ta = W.axX * double( r.x0 ) + W.axY * double( y );
+			const double tb = W.axX * double( r.x1 ) + W.axY * double( y );
+			W.tMin = qMin( W.tMin, qMin( ta, tb ) );
+			W.tMax = qMax( W.tMax, qMax( ta, tb ) );
+		}
+	}
+	for ( WaterBody & W : bodies )
+		W.bedDrop = W.bedDrop * ( W.tMax - W.tMin );
+
+	// ---- the drainage relation: exact, bucketed at `near` -----------------
+	/* Two texels more than one bucket apart are at least `near`+1 apart, so the
+	 * 3x3 neighbourhood of buckets is the whole search. Only BOUNDARY texels
+	 * can carry the minimum between two disjoint sets, which is what keeps the
+	 * sea's 21.5 M texels out of the comparison. */
+	struct NearHit { double d; double cx, cy; };
+	QHash<qint64, NearHit> nearest;
+	{
+		struct BPt { qint32 x, y; quint16 b; };
+		std::vector<BPt> pts;
+		for ( qint64 y = 0; y < gh; y++ ) {
+			const quint16 * g = grid.data() + size_t( y * gw );
+			for ( qint64 x = 0; x < gw; x++ ) {
+				const quint16 b = g[x];
+				if ( !b || bodies[size_t( b ) - 1].area < 16 )
+					continue;
+				const bool edgeOfGrid = ( x == 0 || y == 0 || x == gw - 1 || y == gh - 1 );
+				if ( edgeOfGrid
+					|| g[x - 1] != b || g[x + 1] != b
+					|| grid[size_t( ( y - 1 ) * gw + x )] != b
+					|| grid[size_t( ( y + 1 ) * gw + x )] != b ) {
+					BPt p;
+					p.x = qint32( x );
+					p.y = qint32( y );
+					p.b = b;
+					pts.push_back( p );
+				}
+			}
+		}
+		const int bx = int( ( gw + near - 1 ) / near );
+		const int by = int( ( gh + near - 1 ) / near );
+		std::vector<std::vector<qint32>> bucket;
+		bucket.resize( size_t( bx ) * size_t( by ) );
+		for ( size_t i = 0; i < pts.size(); i++ )
+			bucket[size_t( pts[i].y / near ) * size_t( bx ) + size_t( pts[i].x / near )]
+				.push_back( qint32( i ) );
+		auto consider = [&]( const std::vector<qint32> & A, const std::vector<qint32> & B ) {
+			for ( qint32 ia : A ) {
+				const BPt & a = pts[size_t( ia )];
+				for ( qint32 ib : B ) {
+					const BPt & b = pts[size_t( ib )];
+					if ( a.b == b.b )
+						continue;
+					const double dx = double( a.x - b.x ), dy = double( a.y - b.y );
+					const double dd = dx * dx + dy * dy;
+					if ( dd > double( near ) * double( near ) )
+						continue;
+					const quint16 lo = qMin( a.b, b.b ), hi = qMax( a.b, b.b );
+					const qint64 key = ( qint64( lo ) << 20 ) | hi;
+					const double d = std::sqrt( dd );
+					auto it = nearest.find( key );
+					if ( it == nearest.end() || d < it.value().d ) {
+						NearHit h;
+						h.d = d;
+						h.cx = 0.5 * ( double( a.x ) + double( b.x ) );
+						h.cy = 0.5 * ( double( a.y ) + double( b.y ) );
+						nearest.insert( key, h );
+					}
+				}
+			}
+		};
+		for ( int j = 0; j < by; j++ ) {
+			for ( int i = 0; i < bx; i++ ) {
+				const std::vector<qint32> & A = bucket[size_t( j ) * size_t( bx ) + size_t( i )];
+				if ( A.empty() )
+					continue;
+				for ( int dj = 0; dj <= 1; dj++ ) {
+					for ( int di = -1; di <= 1; di++ ) {
+						if ( dj == 0 && di < 0 )
+							continue;
+						const int ni = i + di, nj = j + dj;
+						if ( ni < 0 || ni >= bx || nj >= by )
+							continue;
+						consider( A, bucket[size_t( nj ) * size_t( bx ) + size_t( ni )] );
+					}
+				}
+			}
+		}
+	}
+
+	// ---- class and flow ---------------------------------------------------
+	struct Lower { int body; double d, cx, cy; };
+	std::vector<std::vector<Lower>> lower;
+	lower.resize( size_t( nBodies ) );
+	for ( auto it = nearest.constBegin(); it != nearest.constEnd(); ++it ) {
+		const int a = int( it.key() >> 20 ), b = int( it.key() & 0xFFFFF );
+		const WaterBody & A = bodies[size_t( a ) - 1];
+		const WaterBody & B = bodies[size_t( b ) - 1];
+		if ( double( B.wh ) < double( A.wh ) - 0.01 )
+			lower[size_t( a ) - 1].push_back( { b, it.value().d, it.value().cx, it.value().cy } );
+		if ( double( A.wh ) < double( B.wh ) - 0.01 )
+			lower[size_t( b ) - 1].push_back( { a, it.value().d, it.value().cx, it.value().cy } );
+	}
+	for ( auto & v : lower )
+		std::sort( v.begin(), v.end(), []( const Lower & a, const Lower & b ) {
+			return a.d != b.d ? a.d < b.d : a.body < b.body;
+		} );
+
+	int noVelocity = 0, directionNoSpeed = 0;
+	for ( qint64 i = 0; i < nBodies; i++ ) {
+		WaterBody & W = bodies[size_t( i )];
+		const std::vector<Lower> & lo = lower[size_t( i )];
+		W.cls = W.edge ? 0 : ( ( W.elong >= 6.0 || !lo.empty() ) ? 1 : 2 );
+		float vx = 0.0f, vy = 0.0f;
+		W.hasNam0 = in.velocity && in.velocity( W.form, vx, vy );
+		if ( !W.hasNam0 )
+			noVelocity++;
+		W.nam0X = double( vx );
+		W.nam0Y = double( vy );
+		const double speed = std::sqrt( W.nam0X * W.nam0X + W.nam0Y * W.nam0Y );
+		const double mx = W.n > 0 ? W.sx / W.n : 0.0;
+		const double my = W.n > 0 ? W.sy / W.n : 0.0;
+		if ( W.cls == 0 ) {
+			W.flowSource = 0;                       // the sea, unless a stroke says otherwise
+		} else if ( !lo.empty() && W.aniso >= 0.5 ) {
+			const double sgn = ( ( lo[0].cx - mx ) * W.axX + ( lo[0].cy - my ) * W.axY ) >= 0.0
+				? 1.0 : -1.0;
+			W.flowSource = 3;
+			W.outlet = lo[0].body;
+			W.flowX = W.axX * sgn * speed;
+			W.flowY = W.axY * sgn * speed;
+		} else if ( std::fabs( W.bedR ) >= 0.7 && std::fabs( W.bedDrop ) >= 64.0
+			&& W.aniso >= 0.5 ) {
+			const double sgn = W.bedR > 0.0 ? -1.0 : 1.0;   // downhill
+			W.flowSource = 2;
+			W.flowX = W.axX * sgn * speed;
+			W.flowY = W.axY * sgn * speed;
+		} else if ( W.aniso < 0.5 && lo.empty() ) {
+			W.flowSource = 0;                       // a round lake with no outlet
+		} else if ( speed > 0.0 ) {
+			W.flowSource = 1;
+			W.flowX = W.nam0X;
+			W.flowY = W.nam0Y;
+		} else {
+			W.flowSource = 0;
+		}
+		if ( W.flowSource && W.flowX == 0.0 && W.flowY == 0.0 )
+			directionNoSpeed++;
+	}
+
+	// ---- the sections -----------------------------------------------------
+	const int bodyS = in.opt.bodySamples > 0 ? qMin( in.opt.bodySamples, spc ) : spc;
+	const int flowS = in.opt.flowSamples > 0 ? qMin( in.opt.flowSamples, spc ) : spc;
+	if ( spc % bodyS || spc % flowS )
+		return fail( QString( "a plane rate must divide the file's own %1 samples a cell; "
+			"%2 and %3 do not" ).arg( spc ).arg( bodyS ).arg( flowS ) );
+	out.bodySamples = bodyS;
+	out.flowSamples = flowS;
+	out.shoreSamples = in.opt.shore ? bodyS : 0;
+
+	Buf table;
+	for ( qint64 i = 0; i < nBodies; i++ ) {
+		const WaterBody & W = bodies[size_t( i )];
+		quint8 flags = 0;
+		if ( W.ambiguous )
+			flags |= 1u << 3;
+		if ( W.area < 4 )
+			flags |= 1u << 4;
+		table.u16( quint16( i + 1 ) );
+		table.u8( quint8( W.cls ) );
+		table.u8( flags );
+		table.f32( W.wh );
+		table.u32( W.form );
+		table.u32( quint32( W.area ) );
+		table.u16( quint16( qint16( in.minX + W.x0 / spc ) ) );
+		table.u16( quint16( qint16( in.minY + W.y0 / spc ) ) );
+		table.u16( quint16( qint16( in.minX + W.x1 / spc ) ) );
+		table.u16( quint16( qint16( in.minY + W.y1 / spc ) ) );
+		table.u16( 0 );                       // source: no stroke graph yet
+		table.u16( quint16( W.outlet ) );
+		table.f32( float( W.flowX ) );
+		table.f32( float( W.flowY ) );
+		table.u8( 0 ); table.u8( 0 ); table.u8( 0 ); table.u8( 0 );   // colour, A=0 = none
+		table.u8( 0 );                        // confidence: nothing constrains it yet
+		table.u8( quint8( W.flowSource ) );
+		table.u16( 0 );                       // reserved
+		table.u32( 0 );                       // name offset: unnamed
+	}
+	if ( table.size() != qsizetype( nBodies ) * LODL_BODY_RECORD )
+		return fail( QString( "the body table assembled to %1 bytes, not %2 x %3" )
+			.arg( table.size() ).arg( nBodies ).arg( LODL_BODY_RECORD ) );
+	out.bodyTable = table.b;
+	out.bodyCount = int( nBodies );
+
+	/* The stroke store is written EMPTY and present: a count of zero. The
+	 * planes above are derived from the .lodl plus this store, so a file that
+	 * has one -- even an empty one -- is a file a panel can write into without
+	 * a version bump, and a consumer can tell "nobody has marked anything" from
+	 * "this file predates marking". */
+	{
+		Buf s;
+		s.u32( 0 );
+		out.strokeStore = s.b;
+	}
+
+	// the shore sweep, on the full grid, before any subsampling
+	std::vector<quint16> shore;
+	if ( in.opt.shore ) {
+		/* A 3-4 chamfer, and the ONE thing that makes it per-body: a neighbour
+		 * belonging to a different body counts as a shore at distance zero, so
+		 * two bodies that touch each have their own shore along the seam. */
+		const quint16 BIG = 60000;
+		shore.assign( size_t( samples ), 0 );
+		for ( size_t i = 0; i < grid.size(); i++ )
+			shore[i] = grid[i] ? BIG : 0;
+		auto step = [&]( qint64 y, qint64 x, qint64 ny, qint64 nx, int w ) {
+			if ( ny < 0 || ny >= gh || nx < 0 || nx >= gw )
+				return;
+			const size_t at = size_t( y * gw + x ), nat = size_t( ny * gw + nx );
+			if ( !grid[at] )
+				return;
+			const quint16 cand = ( grid[nat] == grid[at] )
+				? quint16( qMin( int( shore[nat] ) + w, int( BIG ) ) )
+				: quint16( w );
+			if ( cand < shore[at] )
+				shore[at] = cand;
+		};
+		for ( qint64 y = 0; y < gh; y++ )
+			for ( qint64 x = 0; x < gw; x++ ) {
+				step( y, x, y - 1, x, 3 );
+				step( y, x, y - 1, x - 1, 4 );
+				step( y, x, y - 1, x + 1, 4 );
+				step( y, x, y, x - 1, 3 );
+			}
+		for ( qint64 y = gh - 1; y >= 0; y-- )
+			for ( qint64 x = gw - 1; x >= 0; x-- ) {
+				step( y, x, y + 1, x, 3 );
+				step( y, x, y + 1, x - 1, 4 );
+				step( y, x, y + 1, x + 1, 4 );
+				step( y, x, y, x + 1, 3 );
+			}
+	}
+
+	quint64 pos = baseOffset + quint64( out.bodyTable.size() ) + quint64( out.strokeStore.size() );
+	qint64 uniformId = 0, uniformFlow = 0, uniformShore = 0;
+	const int stepB = spc / bodyS;
+	out.idPlane = lodtPackPlane( cellsX, cellsY, bodyS, 2, pos,
+		[&]( int tx, int ty, quint8 * dst ) {
+			for ( int j = 0; j < bodyS; j++ ) {
+				const qint64 gy = qint64( ty ) * spc + qint64( j ) * stepB;
+				for ( int i = 0; i < bodyS; i++ ) {
+					const qint64 gx = qint64( tx ) * spc + qint64( i ) * stepB;
+					const quint16 v = grid[size_t( gy * gw + gx )];
+					dst[( j * bodyS + i ) * 2] = quint8( v & 0xFF );
+					dst[( j * bodyS + i ) * 2 + 1] = quint8( v >> 8 );
+				}
+			}
+		}, &uniformId );
+	pos += quint64( out.idPlane.size() );
+
+	const int stepF = spc / flowS;
+	out.flowPlane = lodtPackPlane( cellsX, cellsY, flowS, 2, pos,
+		[&]( int tx, int ty, quint8 * dst ) {
+			for ( int j = 0; j < flowS; j++ ) {
+				const qint64 gy = qint64( ty ) * spc + qint64( j ) * stepF;
+				for ( int i = 0; i < flowS; i++ ) {
+					const qint64 gx = qint64( tx ) * spc + qint64( i ) * stepF;
+					const quint16 b = grid[size_t( gy * gw + gx )];
+					quint16 word = 0;
+					if ( b ) {
+						const WaterBody & W = bodies[size_t( b ) - 1];
+						const double m = std::sqrt( W.flowX * W.flowX + W.flowY * W.flowY );
+						if ( m > 0.0 ) {
+							double a = std::atan2( W.flowY, W.flowX );
+							if ( a < 0.0 )
+								a += kTwoPi;
+							const int dir = int( a / kTwoPi * 256.0 + 0.5 ) & 0xFF;
+							/* With no stroke the field is CONSTANT over the
+							 * body and equal to its mean, so speed is exactly
+							 * the mid step 8 and confidence 0 -- the value that
+							 * tells a consumer to cross-fade to `meanFlow`. */
+							word = quint16( dir | ( 8 << 8 ) );
+						}
+					}
+					dst[( j * flowS + i ) * 2] = quint8( word & 0xFF );
+					dst[( j * flowS + i ) * 2 + 1] = quint8( word >> 8 );
+				}
+			}
+		}, &uniformFlow );
+	pos += quint64( out.flowPlane.size() );
+
+	if ( in.opt.shore ) {
+		out.shorePlane = lodtPackPlane( cellsX, cellsY, bodyS, 1, pos,
+			[&]( int tx, int ty, quint8 * dst ) {
+				for ( int j = 0; j < bodyS; j++ ) {
+					const qint64 gy = qint64( ty ) * spc + qint64( j ) * stepB;
+					for ( int i = 0; i < bodyS; i++ ) {
+						const qint64 gx = qint64( tx ) * spc + qint64( i ) * stepB;
+						const size_t at = size_t( gy * gw + gx );
+						/* chamfer units are thirds of a texel; a texel is
+						 * 4096/spc world units and a step is 32 of them. */
+						const double texels = double( shore[at] ) / 3.0;
+						const double units = texels * ( 4096.0 / double( spc ) );
+						const int v = grid[at]
+							? int( qMin( 255.0, units / double( LODL_SHORE_QUANTUM ) + 0.5 ) )
+							: 255;
+						dst[j * bodyS + i] = quint8( v );
+					}
+				}
+			}, &uniformShore );
+	}
+
+	// ---- the census -------------------------------------------------------
+	{
+		qint64 hist[7] = { 0, 0, 0, 0, 0, 0, 0 };
+		const qint64 gate[7] = { 1, 4, 16, 64, 256, 1024, 65536 };
+		int cls[3] = { 0, 0, 0 }, clsBig[3] = { 0, 0, 0 };
+		int fsrc[5] = { 0, 0, 0, 0, 0 }, fsrcBig[5] = { 0, 0, 0, 0, 0 };
+		int multi = 0, tiny = 0;
+		QHash<quint32, QPair<int, qint64>> perForm;
+		for ( const WaterBody & W : bodies ) {
+			for ( int k = 0; k < 7; k++ )
+				if ( W.area >= gate[k] )
+					hist[k]++;
+			cls[W.cls]++;
+			fsrc[W.flowSource]++;
+			if ( W.area >= 64 ) {
+				clsBig[W.cls]++;
+				fsrcBig[W.flowSource]++;
+			}
+			if ( W.parts > 1 )
+				multi++;
+			if ( W.area < 4 )
+				tiny++;
+			auto & e = perForm[W.form];
+			e.first++;
+			e.second += W.area;
+		}
+		QStringList L;
+		L << QStringLiteral( "== INPUT ==" );
+		L << QString( "  cells %1..%2 x %3..%4 = %5  spc %6  wet texels %7" )
+			.arg( in.minX ).arg( in.minX + cellsX - 1 ).arg( in.minY )
+			.arg( in.minY + cellsY - 1 ).arg( qint64( cellsX ) * cellsY ).arg( spc )
+			.arg( [&] { qint64 t = 0; for ( const WaterBody & W : bodies ) t += W.area; return t; }() );
+		L << QString( "  worldspace default water height %1 type %2" )
+			.arg( double( in.defaultWaterHeight ), 0, 'f', 1 )
+			.arg( in.defaultWaterType, 8, 16, QChar( '0' ) );
+		L << QString( "  bridge gap %1 texels: %2 merges accepted, %3 refused" )
+			.arg( gap ).arg( accepted ).arg( refused );
+		L << QString( "  rule C: %1 components, %2 merged into a painted neighbour, "
+				"%3 refused (the inheriting side was not the smaller), "
+				"%4 had more than one candidate" )
+			.arg( nComp ).arg( nComp - nCb ).arg( refusedMerges ).arg( ambiguousMerges );
+		L << QString();
+		L << QStringLiteral( "== BODIES ==" );
+		L << QString( "  total %1" ).arg( nBodies );
+		for ( int k = 0; k < 7; k++ )
+			L << QString( "    area >= %1 texels : %2" )
+				.arg( gate[k], 6 ).arg( hist[k], 4 );
+		L << QString( "  class: sea %1  river %2  lake %3" ).arg( cls[0] ).arg( cls[1] ).arg( cls[2] );
+		L << QString( "  class (area >= 64): sea %1  river %2  lake %3" )
+			.arg( clsBig[0] ).arg( clsBig[1] ).arg( clsBig[2] );
+		L << QString( "  bodies assembled from more than one component: %1" ).arg( multi );
+		L << QString( "  TINY (< 4 texels): %1" ).arg( tiny );
+		L << QString();
+		L << QStringLiteral( "== PER WATR FORM ==" );
+		{
+			QList<quint32> forms = perForm.keys();
+			std::sort( forms.begin(), forms.end(), [&]( quint32 a, quint32 b ) {
+				return perForm[a].second > perForm[b].second;
+			} );
+			for ( quint32 f : forms )
+				L << QString( "  %1 bodies %2  texels %3" )
+					.arg( QString::number( f, 16 ).rightJustified( 8, QChar( '0' ) ), -28 )
+					.arg( perForm[f].first, 4 ).arg( perForm[f].second, 9 );
+		}
+		L << QString();
+		L << QStringLiteral( "== FLOW SOURCE ==" );
+		static const char * const fname[5] = { "none", "form NAM0", "bed", "drain", "stroke" };
+		{
+			QStringList a, b;
+			for ( int k = 0; k < 5; k++ ) {
+				if ( fsrc[k] )
+					a << QString( "%1 %2" ).arg( QLatin1String( fname[k] ) ).arg( fsrc[k] );
+				if ( fsrcBig[k] )
+					b << QString( "%1 %2" ).arg( QLatin1String( fname[k] ) ).arg( fsrcBig[k] );
+			}
+			L << QString( "  all bodies : %1" ).arg( a.join( QStringLiteral( "  " ) ) );
+			L << QString( "  area >= 64 : %1" ).arg( b.join( QStringLiteral( "  " ) ) );
+		}
+		if ( noVelocity )
+			L << QString( "  REFUSED ARM: %1 bodies have no WATR NAM0 to fall back on "
+					"(%2), so their flow is `none` rather than a made-up number" )
+				.arg( noVelocity )
+				.arg( in.velocity ? QStringLiteral( "the form carries no NAM0" )
+					: QStringLiteral( "no plugin was supplied to read velocities from" ) );
+		if ( directionNoSpeed )
+			L << QString( "  %1 bodies have a DIRECTION but no speed: the rule that set the "
+					"direction carries none and NAM0 was unavailable" ).arg( directionNoSpeed );
+		L << QString();
+		L << QStringLiteral( "== THE 20 BIGGEST BODIES ==" );
+		L << QStringLiteral( "  id   form     class      area   height parts  elong  aniso flow      cells" );
+		{
+			std::vector<qint64> ord( size_t( nBodies ), qint64( 0 ) );
+			for ( qint64 i = 0; i < nBodies; i++ )
+				ord[size_t( i )] = i;
+			std::sort( ord.begin(), ord.end(), [&]( qint64 a, qint64 b ) {
+				return bodies[size_t( a )].area > bodies[size_t( b )].area;
+			} );
+			static const char * const cname[3] = { "sea", "river", "lake" };
+			for ( size_t k = 0; k < ord.size() && k < 20; k++ ) {
+				const WaterBody & W = bodies[size_t( ord[k] )];
+				L << QString( "  %1 %2 %3 %4 %5 %6 %7 %8 %9 (%10..%11, %12..%13)" )
+					.arg( ord[k] + 1, -4 )
+					.arg( QString::number( W.form, 16 ).rightJustified( 8, QChar( '0' ) ) )
+					.arg( QLatin1String( cname[W.cls] ), -6 )
+					.arg( W.area, 9 ).arg( double( W.wh ), 8, 'f', 1 ).arg( W.parts, 5 )
+					.arg( W.elong, 6, 'f', 1 ).arg( W.aniso, 6, 'f', 2 )
+					.arg( QLatin1String( fname[W.flowSource] ), -9 )
+					.arg( in.minX + W.x0 / spc ).arg( in.minX + W.x1 / spc )
+					.arg( in.minY + W.y0 / spc ).arg( in.minY + W.y1 / spc );
+			}
+		}
+		out.census = L.join( QStringLiteral( "\n" ) );
+		out.summary = QString( "water: %1 bodies (sea %2, river %3, lake %4), "
+			"%5 bridge merges accepted / %6 refused, planes id %7 + flow %8 + shore %9 bytes, "
+			"uniform tiles %10/%11/%12 of %13" )
+			.arg( nBodies ).arg( cls[0] ).arg( cls[1] ).arg( cls[2] )
+			.arg( accepted ).arg( refused )
+			.arg( out.idPlane.size() ).arg( out.flowPlane.size() ).arg( out.shorePlane.size() )
+			.arg( uniformId ).arg( uniformFlow ).arg( uniformShore )
+			.arg( qint64( cellsX ) * cellsY );
+	}
+	if ( error )
+		error->clear();
+	return true;
 }
 
 } // namespace
@@ -478,6 +1700,12 @@ static bool lodtWriteSource( const LodtSource & src, const QString & outDir,
 	 * downgrade -- a wrong version number is exactly the field that makes a
 	 * reader misparse instead of refuse. */
 	quint32 version = quint32( opts.headerVersion );
+	/* The water module RAISES the version and nothing else does. A caller who
+	 * did not ask for bodies gets the same bytes it got before this section
+	 * existed, which is gate G1 and also the module's own fallback floor. */
+	const bool wantWater = opts.water.enabled;
+	if ( wantWater && version < 3 )
+		version = 3;
 	/* The old spelling is REFUSED, not ignored. A run that still says
 	 * WW_LODT_VERSION was written for the format this file used to be called,
 	 * and silently writing version 2 bytes for it is the failure the rename
@@ -507,6 +1735,7 @@ static bool lodtWriteSource( const LodtSource & src, const QString & outDir,
 	h.u32( quint32( gcvrForms.size() ) );
 	h.u32( quint32( aoS ) );
 	h.u32( quint32( ov ) );
+	const qsizetype offSectAt = h.size();
 	h.u32( ( waterCells ? SECT_WATER : 0u )
 		| ( colourCells ? SECT_COLOUR : 0u )
 		| ( gcvrForms.isEmpty() ? 0u : SECT_GROUNDCOVER )
@@ -533,11 +1762,34 @@ static bool lodtWriteSource( const LodtSource & src, const QString & outDir,
 		h.f32( src.defaultWaterHeight );
 		h.u32( src.defaultWaterType );
 	}
+	/* Version 3's water fields, from 0xA0. They are written as zeroes and
+	 * patched at the end, because the sections they point at are appended AFTER
+	 * the block data -- which is what keeps every version-2 offset at the byte
+	 * it was. A section bit stays clear until its section really exists. */
+	qsizetype offBodyAt = 0, offBodyCountAt = 0, offNameAt = 0, offNameLenAt = 0;
+	qsizetype offIdRateAt = 0, offIdAt = 0, offFlowRateAt = 0, offFlowAt = 0;
+	qsizetype offShoreRateAt = 0, offShoreAt = 0, offStrokeAt = 0, offStrokeLenAt = 0;
+	if ( version >= 3 ) {
+		offBodyAt = h.size();       h.u64( 0 );
+		offBodyCountAt = h.size();  h.u32( 0 ); h.u32( quint32( LODL_BODY_RECORD ) );
+		offNameAt = h.size();       h.u64( 0 );
+		offNameLenAt = h.size();    h.u32( 0 );
+		offIdRateAt = h.size();     h.u32( 0 );
+		offIdAt = h.size();         h.u64( 0 );
+		offFlowRateAt = h.size();   h.u32( 0 ); h.u32( 0 );   // rate, encoding 0
+		offFlowAt = h.size();       h.u64( 0 );
+		offShoreRateAt = h.size();  h.u32( 0 );
+		h.u32( quint32( LODL_SHORE_QUANTUM ) );
+		offShoreAt = h.size();      h.u64( 0 );
+		offStrokeAt = h.size();     h.u64( 0 );
+		offStrokeLenAt = h.size();  h.u32( 0 );
+		h.u32( 0 );                                            // reserved
+	}
 	/* The header size is what every section offset is measured against, so it
 	 * is checked here rather than asserted in a debug build nobody runs. */
-	if ( h.size() != ( version >= 2 ? LODL_HEADER_V2 : LODL_HEADER_V1 ) )
+	if ( h.size() != lodtHeaderBytes( int( version ) ) )
 		return fail( QStringLiteral( "header assembled to %1 bytes, not the %2 version %3 declares" )
-			.arg( h.size() ).arg( version >= 2 ? LODL_HEADER_V2 : LODL_HEADER_V1 ).arg( version ) );
+			.arg( h.size() ).arg( lodtHeaderBytes( int( version ) ) ).arg( version ) );
 
 	/* Streamed to disk section by section. An earlier draft assembled the
 	 * whole file in one QByteArray and wrote it at the end: 2.5 GB resident
@@ -549,9 +1801,14 @@ static bool lodtWriteSource( const LodtSource & src, const QString & outDir,
 	 * ahead of the payloads and filled by a seek at the end, so the bytes on
 	 * disk are identical to what the in-memory draft produced -- checked by
 	 * hash, not assumed. */
-	const QString dir = outDir + QStringLiteral( "/Terrain" );
+	/* ONE ROOT (lane LAYOUT1, 2026-09-16, bungo's 19:3x ruling): the landscape
+	 * file used to go to `Terrain\<ws>.lodl`, an engine folder that no engine
+	 * reader ever opens it from. It is `FO4CSLOD\<ws>\<ws>.lodl` now, composed
+	 * by lodgenFo4csWorldDir() like every other FO4CS-target file. */
+	const QString dir = lodgenFo4csWorldDir( outDir, edid );
 	QDir().mkpath( dir );
 	const QString path = dir + QStringLiteral( "/" ) + edid + QStringLiteral( ".lodl" );
+	lodgenNoteLayoutFile( path );
 	QFile f( path );
 	if ( !f.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
 		return fail( QStringLiteral( "could not open %1" ).arg( path ) );
@@ -775,6 +2032,128 @@ static bool lodtWriteSource( const LodtSource & src, const QString & outDir,
 		return fail( QStringLiteral( "cancelled" ) );
 	}
 
+	/* ---- version 3: the water sections, APPENDED ------------------------
+	 *
+	 * They go after the block data, which is why nothing a version-2 reader
+	 * addresses moves by a byte. Every one is optional and its bit in the
+	 * section word is only set once the bytes exist. */
+	QString waterSummary;
+	if ( version >= 3 && wantWater ) {
+		WaterInput wi;
+		wi.cellsX = cellsX;
+		wi.cellsY = cellsY;
+		wi.spc = spc;
+		wi.minX = minX;
+		wi.minY = minY;
+		wi.quantum = quantum;
+		wi.cellFlags = &cellFlags;
+		wi.cellWaterH = &cellWaterH;
+		wi.cellWaterT = &cellWaterT;
+		wi.watrForms = &watrForms;
+		wi.defaultWaterType = src.defaultWaterType;
+		wi.defaultWaterHeight = src.defaultWaterHeight;
+		wi.opt = opts.water;
+		/* One decoded cell per cell per row, out of the same cache the pyramid
+		 * used, so the two passes over the world cost cache hits and not LAND
+		 * parses. */
+		wi.heightRow = [&]( int gy, quint16 * row ) {
+			const int cy = minY + gy / spc;
+			const int ly = gy % spc;
+			for ( int cx = minX; cx <= maxX; cx++ ) {
+				quint16 * dst = row + qsizetype( cx - minX ) * spc;
+				const CellPlanes * cp = planesFor( cx, cy );
+				if ( !cp || cp->h.empty() ) {
+					const quint16 dflt = lodtHeightWord( src.defaultLand, quantum );
+					for ( int i = 0; i < spc; i++ )
+						dst[i] = dflt;
+				} else {
+					std::memcpy( dst, cp->h.data() + size_t( ly ) * size_t( spc ),
+						size_t( spc ) * 2 );
+				}
+			}
+		};
+		QHash<quint32, QPair<float, float>> nam0;
+		if ( !opts.water.velocityPlugin.isEmpty() ) {
+			QSet<quint32> want;
+			for ( quint32 wf : watrForms )
+				want.insert( wf );
+			if ( src.defaultWaterType )
+				want.insert( src.defaultWaterType );
+			try {
+				ESMFile esmv( opts.water.velocityPlugin.toLocal8Bit().constData() );
+				for ( quint32 wf : want ) {
+					const ESMFile::ESMRecord * r = esmv.findRecord( wf );
+					if ( !r || !( *r == "WATR" ) )
+						continue;
+					ESMFile::ESMField fld( esmv, *r );
+					while ( fld.next() ) {
+						if ( fld == "NAM0" && fld.size() >= 12 ) {
+							const float vx = fld.readFloat();
+							const float vy = fld.readFloat();
+							nam0.insert( wf, qMakePair( vx, vy ) );
+							break;
+						}
+					}
+				}
+			} catch ( ... ) {
+				nam0.clear();   // a plugin we cannot read is a MISSING arm, not a crash
+			}
+		}
+		if ( !nam0.isEmpty() ) {
+			wi.velocity = [nam0]( quint32 form, float & vx, float & vy ) {
+				auto it = nam0.constFind( form );
+				if ( it == nam0.constEnd() )
+					return false;
+				vx = it.value().first;
+				vy = it.value().second;
+				return true;
+			};
+		}
+		WaterOut wo;
+		QString werr;
+		if ( !lodtBuildWater( wi, pos, wo, &werr ) ) {
+			f.close();
+			QFile::remove( path );
+			return fail( QStringLiteral( "water bodies: %1" ).arg( werr ) );
+		}
+		quint32 sect = ( waterCells ? SECT_WATER : 0u )
+			| ( colourCells ? SECT_COLOUR : 0u )
+			| ( gcvrForms.isEmpty() ? 0u : SECT_GROUNDCOVER )
+			| ( opts.aoSamples > 0 ? SECT_AO : 0u );
+
+		patch64( hdr, offBodyAt, pos );
+		patch32( hdr, offBodyCountAt, quint32( wo.bodyCount ) );
+		wr( wo.bodyTable );
+		patch64( hdr, offStrokeAt, pos );
+		patch32( hdr, offStrokeLenAt, quint32( wo.strokeStore.size() ) );
+		wr( wo.strokeStore );
+		sect |= SECT_STROKE;
+		patch32( hdr, offIdRateAt, quint32( wo.bodySamples ) );
+		patch64( hdr, offIdAt, pos );
+		wr( wo.idPlane );
+		sect |= SECT_BODIES;
+		patch32( hdr, offFlowRateAt, quint32( wo.flowSamples ) );
+		patch64( hdr, offFlowAt, pos );
+		wr( wo.flowPlane );
+		sect |= SECT_FLOW;
+		if ( !wo.shorePlane.isEmpty() ) {
+			patch32( hdr, offShoreRateAt, quint32( wo.shoreSamples ) );
+			patch64( hdr, offShoreAt, pos );
+			wr( wo.shorePlane );
+			sect |= SECT_SHORE;
+		}
+		// the name blob stays empty until something names a body
+		patch64( hdr, offNameAt, 0 );
+		patch32( hdr, offNameLenAt, 0 );
+		patch32( hdr, offSectAt, sect );
+		waterSummary = wo.summary;
+		if ( !opts.water.reportPath.isEmpty() ) {
+			QFile rf( opts.water.reportPath );
+			if ( rf.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
+				rf.write( ( wo.census + QStringLiteral( "\n" ) ).toUtf8() );
+		}
+	}
+
 	patch64( hdr, offSizeAt, pos );
 	if ( !f.seek( qint64( dirStart ) ) || f.write( dirBuf.b ) != dirBuf.b.size()
 		|| !f.seek( 0 ) || f.write( hdr ) != hdr.size() )
@@ -802,6 +2181,8 @@ static bool lodtWriteSource( const LodtSource & src, const QString & outDir,
 			.arg( nullPlanes )
 			.arg( version ).arg( double( src.defaultWaterHeight ) )
 			.arg( src.defaultWaterType, 8, 16, QChar( '0' ) );
+	if ( error && !waterSummary.isEmpty() )
+		*error += QStringLiteral( "\n  " ) + waterSummary;
 	return true;
 }
 
@@ -1403,7 +2784,18 @@ bool LodtFile::open( const QString & path, QString * error )
 	}
 	ver = int( rd<quint32>( buf, 4 ) );
 	{
-		const qsizetype hdrBytes = ver >= 2 ? LODL_HEADER_V2 : LODL_HEADER_V1;
+		/* A TABLE, and it runs before the version refusal on purpose: an
+		 * unknown version answers 0, which makes the offset check below fail
+		 * closed instead of measuring a version-3 file against version 2's
+		 * 160-byte floor. That ternary was harmless only while no third
+		 * version existed. */
+		const qsizetype hdrBytes = lodtHeaderBytes( ver );
+		/* And the version refusal comes FIRST now, not after the prefix read:
+		 * an unknown version has no header size, so there is nothing honest to
+		 * measure the offsets against. */
+		if ( !hdrBytes || quint32( ver ) < LODL_VERSION_MIN || quint32( ver ) > LODL_VERSION )
+			return fail( QStringLiteral( "unsupported version %1 (this reader knows %2..%3)" )
+				.arg( ver ).arg( LODL_VERSION_MIN ).arg( LODL_VERSION ) );
 		const quint64 dataAt = rd<quint64>( buf, 0x88 );
 		const quint64 total = rd<quint64>( buf, 0x90 );
 		if ( dataAt < quint64( hdrBytes ) || dataAt > total || total != quint64( file.size() ) )
@@ -1413,9 +2805,10 @@ bool LodtFile::open( const QString & path, QString * error )
 		if ( quint64( buf.size() ) != dataAt )
 			return fail( QStringLiteral( "short read of the file prefix" ) );
 	}
-	if ( quint32( ver ) < LODL_VERSION_MIN || quint32( ver ) > LODL_VERSION )
-		return fail( QStringLiteral( "unsupported version %1 (this reader knows %2..%3)" )
-			.arg( ver ).arg( LODL_VERSION_MIN ).arg( LODL_VERSION ) );
+	/* (The version refusal used to be HERE, after the prefix read. It moved up,
+	 * beside the header-size table, because an unknown version cannot be given
+	 * an honest floor to measure `blockDataOffset` against. Leaving a second
+	 * copy behind would be dead code that reads like a second gate.) */
 	if ( ver >= 2 ) {
 		defWaterH = rd<float>( buf, 0x98 );
 		defWaterType = rd<quint32>( buf, 0x9C );
@@ -1474,9 +2867,265 @@ bool LodtFile::open( const QString & path, QString * error )
 		gcvr[i] = rd<quint32>( buf, qsizetype( oGcvr ) + i * 4 );
 
 	nBlocks = int( ( oData - oDir ) / 16 );
+
+	/* ---- version 3: water bodies -----------------------------------------
+	 *
+	 * These sections sit AFTER the block data, so they are not in `buf`. Each
+	 * is read on its own, and each way of being wrong REFUSES BY NAME: a bit
+	 * set over an empty offset, a record stride this build cannot read, an id
+	 * past the table, an id that is not its own index. A silent zero here would
+	 * be a body that draws as "no water". */
+	if ( ver >= 3 && ( sect & LODL_SECT_BODIES ) ) {
+		const quint64 oBody = rd<quint64>( buf, 0xA0 );
+		const int count = int( rd<quint32>( buf, 0xA8 ) );
+		bodyStride = int( rd<quint32>( buf, 0xAC ) );
+		bodyS = int( rd<quint32>( buf, 0xBC ) );
+		const quint64 oId = rd<quint64>( buf, 0xC0 );
+		if ( !oBody || count <= 0 )
+			return fail( QStringLiteral( "section bodies is declared present but its "
+				"offset or count is empty" ) );
+		if ( !bodyS || !oId )
+			return fail( QStringLiteral( "section bodies is declared present but the "
+				"body-ID plane's rate or offset is empty" ) );
+		if ( bodyStride < LODL_BODY_RECORD )
+			return fail( QStringLiteral( "the body table's records are %1 bytes; this "
+				"reader knows %2" ).arg( bodyStride ).arg( LODL_BODY_RECORD ) );
+		const qint64 need = qint64( count ) * bodyStride;
+		if ( qint64( oBody ) + need > file.size() )
+			return fail( QStringLiteral( "the body table runs past the end of the file" ) );
+		if ( !file.seek( qint64( oBody ) ) )
+			return fail( QStringLiteral( "cannot seek to the body table" ) );
+		const QByteArray tb = file.read( need );
+		if ( tb.size() != need )
+			return fail( QStringLiteral( "short read of the body table" ) );
+		bodies.resize( count );
+		for ( int i = 0; i < count; i++ ) {
+			const qsizetype at = qsizetype( i ) * bodyStride;
+			LodtWaterBody & b = bodies[i];
+			b.id = rd<quint16>( tb, at );
+			if ( int( b.id ) != i + 1 )
+				return fail( QStringLiteral( "body table record %1 says it is body %2; "
+					"record i is body i + 1" ).arg( i ).arg( b.id ) );
+			b.cls = rd<quint8>( tb, at + 0x02 );
+			b.flags = rd<quint8>( tb, at + 0x03 );
+			b.waterHeight = rd<float>( tb, at + 0x04 );
+			b.watrForm = rd<quint32>( tb, at + 0x08 );
+			b.area = rd<quint32>( tb, at + 0x0C );
+			b.x0 = rd<qint16>( tb, at + 0x10 );
+			b.y0 = rd<qint16>( tb, at + 0x12 );
+			b.x1 = rd<qint16>( tb, at + 0x14 );
+			b.y1 = rd<qint16>( tb, at + 0x16 );
+			b.source = rd<quint16>( tb, at + 0x18 );
+			b.outlet = rd<quint16>( tb, at + 0x1A );
+			b.flowX = rd<float>( tb, at + 0x1C );
+			b.flowY = rd<float>( tb, at + 0x20 );
+			for ( int k = 0; k < 4; k++ )
+				b.colour[k] = rd<quint8>( tb, at + 0x24 + k );
+			b.confidence = rd<quint8>( tb, at + 0x28 );
+			b.flowSource = rd<quint8>( tb, at + 0x29 );
+			b.nameOffset = rd<quint32>( tb, at + 0x2C );
+		}
+		const quint64 oName = rd<quint64>( buf, 0xB0 );
+		const quint32 nameLen = rd<quint32>( buf, 0xB8 );
+		if ( oName && nameLen ) {
+			file.seek( qint64( oName ) );
+			nameBlob = file.read( nameLen );
+		}
+		if ( !readPlaneStore( oId, 2, idStore, error ) )
+			return false;
+		/* An id past the table is REFUSED, not clamped. Every UNIFORM tile's
+		 * value is in the directory, so this costs a directory scan and catches
+		 * the whole of the sea; a compressed tile's ids are checked by the
+		 * census sweep (lodtWaterCensus), which is what the harness runs,
+		 * because inflating 36,864 tiles at open would make every File > Open
+		 * pay for a verification. */
+		for ( qint64 t = 0; t < qint64( idStore.tilesX ) * idStore.tilesY; t++ ) {
+			const qsizetype e = qsizetype( t ) * 16;
+			if ( rd<quint32>( idStore.dir, e + 8 ) )
+				continue;                       // not uniform
+			const quint32 v = rd<quint32>( idStore.dir, e + 12 );
+			if ( v > quint32( count ) )
+				return fail( QStringLiteral( "the body-ID plane names body %1 and the table "
+					"holds %2" ).arg( v ).arg( count ) );
+		}
+	}
+	if ( ver >= 3 && ( sect & LODL_SECT_FLOW ) ) {
+		flowS = int( rd<quint32>( buf, 0xC8 ) );
+		flowEnc = rd<quint32>( buf, 0xCC );
+		const quint64 oFlow = rd<quint64>( buf, 0xD0 );
+		if ( !flowS || !oFlow )
+			return fail( QStringLiteral( "section flow is declared present but its rate "
+				"or offset is empty" ) );
+		if ( !readPlaneStore( oFlow, 2, flowStore, error ) )
+			return false;
+	}
+	if ( ver >= 3 && ( sect & LODL_SECT_SHORE ) ) {
+		shoreS = int( rd<quint32>( buf, 0xD8 ) );
+		shoreQ = float( rd<quint32>( buf, 0xDC ) );
+		const quint64 oShore = rd<quint64>( buf, 0xE0 );
+		if ( !shoreS || !oShore )
+			return fail( QStringLiteral( "section shore is declared present but its rate "
+				"or offset is empty" ) );
+		if ( !( shoreQ > 0.0f ) )
+			return fail( QStringLiteral( "the shore quantum must be positive" ) );
+		if ( !readPlaneStore( oShore, 1, shoreStore, error ) )
+			return false;
+	}
+	if ( ver >= 3 && ( sect & LODL_SECT_STROKE ) ) {
+		const quint64 oStroke = rd<quint64>( buf, 0xE8 );
+		const quint32 len = rd<quint32>( buf, 0xF0 );
+		if ( !oStroke || len < 4 )
+			return fail( QStringLiteral( "section strokes is declared present but its "
+				"offset or length is empty" ) );
+		file.seek( qint64( oStroke ) );
+		strokes = file.read( len );
+		if ( quint32( strokes.size() ) != len )
+			return fail( QStringLiteral( "short read of the stroke store" ) );
+		nStrokes = int( rd<quint32>( strokes, 0 ) );
+	}
+	if ( ver >= 3 && ( sect & LODL_SECT_DYE ) ) {
+		/* The dye plane's offset is the version-3 header's reserved word at
+		 * 0xF4, 32 bits wide; the container it points at carries its own
+		 * rate and sample size, which is why one word is enough. */
+		dyeAt = quint64( rd<quint32>( buf, 0xF4 ) );
+		if ( !dyeAt )
+			return fail( QStringLiteral( "section dye is declared present but its offset "
+				"is empty" ) );
+		if ( !readPlaneStore( dyeAt, 4, dyeStore, error ) )
+			return false;
+		dyeS = dyeStore.tileEdge;
+		if ( !dyeS )
+			return fail( QStringLiteral( "the dye plane declares 0 samples a cell" ) );
+	}
+
 	if ( error )
 		error->clear();
 	return true;
+}
+
+/*! One plane container's fixed head and directory. The payloads stay on disk;
+ *  a uniform tile has no payload at all. */
+bool LodtFile::readPlaneStore( quint64 at, int bytesPerSample, PlaneStore & s,
+	QString * error ) const
+{
+	auto fail = [error]( const QString & m ) {
+		if ( error ) *error = m;
+		return false;
+	};
+	if ( !file.seek( qint64( at ) ) )
+		return fail( QStringLiteral( "cannot seek to a plane store" ) );
+	const QByteArray head = file.read( 32 );
+	if ( head.size() != 32 )
+		return fail( QStringLiteral( "short read of a plane store header" ) );
+	s.tilesX = int( rd<quint32>( head, 0 ) );
+	s.tilesY = int( rd<quint32>( head, 4 ) );
+	s.tileEdge = int( rd<quint32>( head, 8 ) );
+	s.bytesPerSample = int( rd<quint32>( head, 12 ) );
+	s.dirOffset = rd<quint64>( head, 16 );
+	s.dataOffset = rd<quint64>( head, 24 );
+	if ( s.tilesX != cellsX() || s.tilesY != cellsY() )
+		return fail( QStringLiteral( "a plane store tiles %1x%2 where the worldspace is "
+			"%3x%4 cells" ).arg( s.tilesX ).arg( s.tilesY ).arg( cellsX() ).arg( cellsY() ) );
+	if ( s.tileEdge <= 0 || s.bytesPerSample != bytesPerSample )
+		return fail( QStringLiteral( "a plane store declares %1 bytes a sample where this "
+			"plane is %2" ).arg( s.bytesPerSample ).arg( bytesPerSample ) );
+	const qint64 dirBytes = qint64( s.tilesX ) * s.tilesY * 16;
+	if ( qint64( s.dirOffset ) + dirBytes > file.size() || s.dataOffset < s.dirOffset + quint64( dirBytes ) )
+		return fail( QStringLiteral( "a plane store's directory does not fit the file" ) );
+	if ( !file.seek( qint64( s.dirOffset ) ) )
+		return fail( QStringLiteral( "cannot seek to a plane store's directory" ) );
+	s.dir = file.read( dirBytes );
+	if ( s.dir.size() != dirBytes )
+		return fail( QStringLiteral( "short read of a plane store's directory" ) );
+	s.ok = true;
+	return true;
+}
+
+quint32 LodtFile::planeSampleOf( const PlaneStore & s, int x, int y, quint32 absent ) const
+{
+	if ( !s.ok || s.tileEdge <= 0 )
+		return absent;
+	const int tx = x / s.tileEdge, ty = y / s.tileEdge;
+	if ( x < 0 || y < 0 || tx >= s.tilesX || ty >= s.tilesY )
+		return absent;
+	const qsizetype e = ( qsizetype( ty ) * s.tilesX + tx ) * 16;
+	const quint64 off = rd<quint64>( s.dir, e );
+	const quint32 csz = rd<quint32>( s.dir, e + 8 );
+	const quint32 usz = rd<quint32>( s.dir, e + 12 );
+	const int lx = x % s.tileEdge, ly = y % s.tileEdge;
+	const qsizetype k = ( qsizetype( ly ) * s.tileEdge + lx ) * s.bytesPerSample;
+	if ( !csz )
+		return usz;                       // UNIFORM: the sample itself lives here
+	const quint64 key = ( quint64( quintptr( &s ) ) << 1 ) ^ ( quint64( ty ) << 20 ) ^ quint64( tx );
+	QByteArray raw = tileCache.value( key );
+	if ( raw.isEmpty() ) {
+		if ( !file.seek( qint64( off ) ) )
+			return absent;
+		QByteArray z = file.read( csz );
+		if ( quint32( z.size() ) != csz )
+			return absent;
+		QByteArray withLen;
+		withLen.resize( 4 );
+		withLen[0] = char( ( usz >> 24 ) & 0xFF );
+		withLen[1] = char( ( usz >> 16 ) & 0xFF );
+		withLen[2] = char( ( usz >> 8 ) & 0xFF );
+		withLen[3] = char( usz & 0xFF );
+		withLen.append( z );
+		raw = qUncompress( withLen );
+		if ( raw.isEmpty() )
+			return absent;
+		if ( tileOrder.size() >= 32 ) {
+			tileCache.remove( tileOrder.first() );
+			tileOrder.removeFirst();
+		}
+		tileCache.insert( key, raw );
+		tileOrder.append( key );
+	}
+	if ( k + s.bytesPerSample > raw.size() )
+		return absent;
+	quint32 v = 0;
+	for ( int c = 0; c < s.bytesPerSample; c++ )
+		v |= quint32( quint8( raw.at( k + c ) ) ) << ( 8 * c );
+	return v;
+}
+
+bool LodtFile::waterBody( int id, LodtWaterBody & out ) const
+{
+	if ( id < 1 || id > bodies.size() )
+		return false;
+	out = bodies[id - 1];
+	return true;
+}
+
+QString LodtFile::bodyName( const LodtWaterBody & b ) const
+{
+	if ( !b.nameOffset || qsizetype( b.nameOffset ) >= nameBlob.size() )
+		return QString();
+	return QString::fromUtf8( nameBlob.constData() + b.nameOffset );
+}
+
+quint16 LodtFile::bodyIdAt( int bx, int by ) const
+{
+	/* 0 = no water here, which is also what an absent plane answers -- the same
+	 * discipline as AO's 255: the neutral value is the one that draws nothing
+	 * rather than the one that draws garbage. */
+	return quint16( planeSampleOf( idStore, bx, by, 0 ) );
+}
+
+quint16 LodtFile::flowWordAt( int fx, int fy ) const
+{
+	return quint16( planeSampleOf( flowStore, fx, fy, 0 ) );
+}
+
+quint8 LodtFile::shoreAt( int sx, int sy ) const
+{
+	return quint8( planeSampleOf( shoreStore, sx, sy, 255 ) );
+}
+
+quint32 LodtFile::dyeWordAt( int dx, int dy ) const
+{
+	// 0 = no dye, which is also what an absent plane answers
+	return planeSampleOf( dyeStore, dx, dy, 0 );
 }
 
 bool LodtFile::cell( int cx, int cy, float & lo, float & hi,
@@ -1703,4 +3352,313 @@ quint16 LodtFile::overviewWord( int ox, int oy ) const
 	if ( at < 0 || at + 1 >= buf.size() )
 		return 32767;
 	return rd<quint16>( buf, at );
+}
+
+/* =========================================================================
+ *  --water-census: the body table, read back OUT OF THE FILE
+ *
+ *  It never consults the writer's own tables. A census printed from what the
+ *  writer meant to write would echo intent; this echoes the bytes, which is the
+ *  only thing a consumer will ever see. The sweep over the body-ID plane is
+ *  also where an id past the table is caught in a COMPRESSED tile -- open()
+ *  only checks the uniform ones, because it must not make File > Open pay for
+ *  a verification.
+ * ========================================================================= */
+bool lodtWaterCensus( const QString & path, QString * text, QString * error )
+{
+	LodtFile f;
+	if ( !f.open( path, error ) )
+		return false;
+	auto fail = [error]( const QString & m ) {
+		if ( error ) *error = m;
+		return false;
+	};
+	if ( !( f.sectionFlags() & LODL_SECT_BODIES ) || f.bodyCount() <= 0 )
+		return fail( QString( "%1 carries no water body table (version %2, section flags "
+			"0x%3). Write it with --water-bodies" )
+			.arg( QFileInfo( path ).fileName() ).arg( f.headerVersion() )
+			.arg( f.sectionFlags(), 0, 16 ) );
+
+	const int n = f.bodyCount();
+	const int rate = f.bodyIdSamples();
+	const qint64 pw = qint64( f.cellsX() ) * rate, ph = qint64( f.cellsY() ) * rate;
+	std::vector<qint64> seen( size_t( n ) + 1, 0 );
+	qint64 wetPlane = 0;
+	for ( qint64 y = 0; y < ph; y++ ) {
+		for ( qint64 x = 0; x < pw; x++ ) {
+			const quint16 b = f.bodyIdAt( int( x ), int( y ) );
+			if ( !b )
+				continue;
+			if ( int( b ) > n )
+				return fail( QString( "the body-ID plane names body %1 at (%2, %3) and the "
+					"table holds %4" ).arg( b ).arg( x ).arg( y ).arg( n ) );
+			seen[b]++;
+			wetPlane++;
+		}
+	}
+
+	QStringList L;
+	static const char * const cname[3] = { "sea", "river", "lake" };
+	static const char * const fname[5] = { "none", "form NAM0", "bed", "drain", "stroke" };
+	int cls[3] = { 0, 0, 0 }, fsrc[5] = { 0, 0, 0, 0, 0 };
+	qint64 mismatched = 0, tiny = 0;
+	QHash<quint32, QPair<int, qint64>> perForm;
+	for ( int i = 1; i <= n; i++ ) {
+		LodtWaterBody b;
+		f.waterBody( i, b );
+		if ( b.cls < 3 )
+			cls[b.cls]++;
+		if ( b.flowSource < 5 )
+			fsrc[b.flowSource]++;
+		if ( b.flags & ( 1u << 4 ) )
+			tiny++;
+		/* The table's area and the plane's own count are two measurements of
+		 * the same thing, and a field that is written but never checked against
+		 * the thing it describes is exactly the counter this tree has a rule
+		 * about. They agree only when the plane is at the file's full rate. */
+		if ( rate == f.samplesPerCell() && qint64( b.area ) != seen[i] )
+			mismatched++;
+		auto & e = perForm[b.watrForm];
+		e.first++;
+		e.second += b.area;
+	}
+	L << QString( "file %1  version %2  sections 0x%3" )
+		.arg( QFileInfo( path ).fileName() ).arg( f.headerVersion() )
+		.arg( f.sectionFlags(), 0, 16 );
+	L << QString( "bodies %1  record %2 bytes  planes: id %3/cell, flow %4/cell, "
+			"shore %5/cell (quantum %6 units)  strokes %7" )
+		.arg( n ).arg( f.bodyRecordBytes() ).arg( f.bodyIdSamples() )
+		.arg( f.flowPlaneSamples() ).arg( f.shorePlaneSamples() )
+		.arg( double( f.shoreQuantum() ), 0, 'f', 0 ).arg( f.strokeCount() );
+	L << QString( "body-ID plane %1 x %2, %3 texels name a body" ).arg( pw ).arg( ph ).arg( wetPlane );
+	L << QString( "table area vs plane count: %1 of %2 bodies disagree%3" )
+		.arg( mismatched ).arg( n )
+		.arg( rate == f.samplesPerCell() ? QString()
+			: QStringLiteral( " (not checked: the plane is coarser than the file)" ) );
+	L << QString( "class: sea %1  river %2  lake %3" ).arg( cls[0] ).arg( cls[1] ).arg( cls[2] );
+	{
+		QStringList a;
+		for ( int k = 0; k < 5; k++ )
+			if ( fsrc[k] )
+				a << QString( "%1 %2" ).arg( QLatin1String( fname[k] ) ).arg( fsrc[k] );
+		L << QString( "flow source: %1" ).arg( a.join( QStringLiteral( "  " ) ) );
+	}
+	L << QString( "TINY (< 4 texels): %1" ).arg( tiny );
+	L << QString();
+	L << QStringLiteral( "per WATR form:" );
+	{
+		QList<quint32> forms = perForm.keys();
+		std::sort( forms.begin(), forms.end(), [&]( quint32 a, quint32 b ) {
+			return perForm[a].second > perForm[b].second;
+		} );
+		for ( quint32 fm : forms )
+			L << QString( "  %1  bodies %2  texels %3" )
+				.arg( QString::number( fm, 16 ).rightJustified( 8, QChar( '0' ) ) )
+				.arg( perForm[fm].first, 4 ).arg( perForm[fm].second, 9 );
+	}
+	L << QString();
+	L << QStringLiteral( "  id   form     class      area   height flow      outlet  flow x, y            cells" );
+	{
+		std::vector<int> ord( size_t( n ), 0 );
+		for ( int i = 0; i < n; i++ )
+			ord[size_t( i )] = i + 1;
+		std::sort( ord.begin(), ord.end(), [&]( int a, int b ) {
+			LodtWaterBody x, y;
+			f.waterBody( a, x );
+			f.waterBody( b, y );
+			return x.area > y.area;
+		} );
+		for ( size_t k = 0; k < ord.size() && k < 40; k++ ) {
+			LodtWaterBody b;
+			f.waterBody( ord[k], b );
+			L << QString( "  %1 %2 %3 %4 %5 %6 %7 %8 (%9..%10, %11..%12)" )
+				.arg( b.id, -4 )
+				.arg( QString::number( b.watrForm, 16 ).rightJustified( 8, QChar( '0' ) ) )
+				.arg( QLatin1String( b.cls < 3 ? cname[b.cls] : "?" ), -6 )
+				.arg( b.area, 9 ).arg( double( b.waterHeight ), 8, 'f', 1 )
+				.arg( QLatin1String( b.flowSource < 5 ? fname[b.flowSource] : "?" ), -9 )
+				.arg( b.outlet, 6 )
+				.arg( QString( "%1, %2" ).arg( double( b.flowX ), 0, 'f', 3 )
+					.arg( double( b.flowY ), 0, 'f', 3 ), -18 )
+				.arg( b.x0 ).arg( b.x1 ).arg( b.y0 ).arg( b.y1 );
+		}
+	}
+	if ( text )
+		*text = L.join( QStringLiteral( "\n" ) );
+	if ( error )
+		error->clear();
+	return true;
+}
+
+/* =========================================================================
+ *  THE KNOWN-ANSWER CONTROL  (`lodl --water-selftest`)
+ *
+ *  ww-control-calibration step 1, and CONSTITUTION rule 4: run the metric on
+ *  an input whose answer was written down before the code, and show the check
+ *  FAILING on the other side of the floor.
+ *
+ *  The worldspace is lane WATER1's `scratchpad/water_20260909/control_synth.py`
+ *  built here in C++ instead of numpy, so the CLASSIFIER under test is the one
+ *  that writes real files -- not a second implementation of it:
+ *
+ *    24 x 24 cells at 32 samples an edge, dry ground +1000, default water 450.
+ *    SEA     texel columns 0..95 cut to -100, inheriting -- reaches the edge.
+ *    RIVER   a 16-texel channel at y 400..415, x 96..607, cut to -50, water
+ *            type 1, its plane stepping +50 a cell from 450 to 1200.
+ *    LAKE    cells 14..17 square, floor +800, plane 1000, type 2.
+ *    PUDDLE  a 4x4 dip at (200, 600), floor 0, plane 450, type 3.
+ *
+ *  Expected, before the run: FOUR bodies, classed sea / river / lake / lake.
+ *  The REFUTER is the measurement that earns keying bodies on water TYPE at
+ *  all: with the type ignored, the tidal river reach sits at exactly the sea's
+ *  height and touches it, and the two fuse.
+ * ========================================================================= */
+bool lodtWaterSelfTest( QString * text, QString * error )
+{
+	const int SPC = 32, CELLS = 24;
+	const int N = CELLS * SPC;
+	std::vector<float> terrain( size_t( N ) * N, 1000.0f );
+	std::vector<float> wh( size_t( CELLS ) * CELLS, 450.0f );
+	std::vector<quint16> wt( size_t( CELLS ) * CELLS, WATER_TYPE_DEFAULT );
+	std::vector<quint16> fl( size_t( CELLS ) * CELLS, CELL_HAS_WATER | CELL_HAS_LAND );
+	auto T = [&]( int y, int x ) -> float & { return terrain[size_t( y ) * N + x]; };
+	for ( int y = 0; y < N; y++ )
+		for ( int x = 0; x < 96; x++ )
+			T( y, x ) = -100.0f;
+	for ( int y = 400; y < 416; y++ )
+		for ( int x = 96; x < 608; x++ )
+			T( y, x ) = -50.0f;
+	for ( int cx = 3; cx < 19; cx++ ) {
+		wt[size_t( 12 ) * CELLS + cx] = 1;
+		wh[size_t( 12 ) * CELLS + cx] = 450.0f + 50.0f * float( cx - 3 );
+	}
+	for ( int y = 14 * SPC; y < 18 * SPC; y++ )
+		for ( int x = 14 * SPC; x < 18 * SPC; x++ )
+			T( y, x ) = 800.0f;
+	for ( int cy = 14; cy < 18; cy++ )
+		for ( int cx = 14; cx < 18; cx++ ) {
+			wh[size_t( cy ) * CELLS + cx] = 1000.0f;
+			wt[size_t( cy ) * CELLS + cx] = 2;
+		}
+	for ( int y = 600; y < 604; y++ )
+		for ( int x = 200; x < 204; x++ )
+			T( y, x ) = 0.0f;
+	wt[size_t( 600 / SPC ) * CELLS + ( 200 / SPC )] = 3;
+
+	QVector<quint32> forms;
+	forms << 0x11111111u << 0x22222222u << 0x33333333u << 0x44444444u;
+
+	auto run = [&]( bool typeBlind, WaterOut & wo, QString * err ) {
+		std::vector<quint16> wtUse = wt;
+		if ( typeBlind )
+			std::fill( wtUse.begin(), wtUse.end(), quint16( WATER_TYPE_DEFAULT ) );
+		WaterInput in;
+		in.cellsX = in.cellsY = CELLS;
+		in.spc = SPC;
+		in.minX = in.minY = 0;
+		in.quantum = 8.0f;
+		in.cellFlags = &fl;
+		in.cellWaterH = &wh;
+		in.cellWaterT = &wtUse;
+		in.watrForms = &forms;
+		in.defaultWaterType = 0x11111111u;
+		in.defaultWaterHeight = 450.0f;
+		in.opt.enabled = true;
+		in.heightRow = [&]( int gy, quint16 * row ) {
+			for ( int x = 0; x < N; x++ )
+				row[x] = lodtHeightWord( double( terrain[size_t( gy ) * N + x] ), 8.0 );
+		};
+		return lodtBuildWater( in, 0, wo, err );
+	};
+
+	QStringList L;
+	WaterOut real, blind;
+	QString e1, e2;
+	if ( !run( false, real, &e1 ) )
+		{ if ( error ) *error = e1; return false; }
+	if ( !run( true, blind, &e2 ) )
+		{ if ( error ) *error = e2; return false; }
+
+	/* The census text carries the counts; the assertions read the table it was
+	 * built from, so the control tests the BYTES the writer would emit. */
+	auto rec = []( const QByteArray & t, int i, int off ) {
+		return quint8( t.at( i * LODL_BODY_RECORD + off ) );
+	};
+	auto area = []( const QByteArray & t, int i ) {
+		quint32 v = 0;
+		for ( int k = 0; k < 4; k++ )
+			v |= quint32( quint8( t.at( i * LODL_BODY_RECORD + 0x0C + k ) ) ) << ( 8 * k );
+		return v;
+	};
+	auto form = []( const QByteArray & t, int i ) {
+		quint32 v = 0;
+		for ( int k = 0; k < 4; k++ )
+			v |= quint32( quint8( t.at( i * LODL_BODY_RECORD + 0x08 + k ) ) ) << ( 8 * k );
+		return v;
+	};
+	int fails = 0;
+	auto check = [&]( const QString & what, bool ok ) {
+		L << QString( "  %1 %2" ).arg( ok ? QStringLiteral( "ok  " )
+			: QStringLiteral( "FAIL" ) ).arg( what );
+		if ( !ok )
+			fails++;
+	};
+	/* THE EXPECTED ANSWER IS RULE D'S, NOT RULE A'S. The spec's gate G6 asked
+	 * for "4 bodies, the river with 16 surfaces", which is what lane WATER1's
+	 * read-only census measured under a rule that keyed bodies on water TYPE
+	 * alone. Rule D keys on (height, type) and a body carries ONE plane by
+	 * construction -- 803 of the Commonwealth's 804 do -- so a river that steps
+	 * sixteen times IS sixteen bodies, and "a body with 16 surfaces" is not a
+	 * thing rule D can produce. The geometry below is unchanged from
+	 * scratchpad/water_20260909/control_synth.py; only the arithmetic that
+	 * turns it into an expected answer is rule D's:
+	 *
+	 *   1 sea + 16 river steps + 1 lake + 1 puddle = 19 bodies.
+	 *
+	 * CLASS is asserted only for the sea, because that is the one this control
+	 * exists to pin; the others depend on which body is nearest and lower, and
+	 * a number that has to be measured before it can be written down is not a
+	 * known answer. They are printed. */
+	L << QStringLiteral( "EXPECTED  19 bodies: 1 sea, 16 river steps, 1 lake, 1 puddle" );
+	L << QString( "MEASURED  %1 bodies" ).arg( real.bodyCount );
+	static const char * const cname[3] = { "sea", "river", "lake" };
+	QHash<quint32, int> countOf, areaOf, seaCls;
+	for ( int i = 0; i < real.bodyCount; i++ ) {
+		const quint32 fm = form( real.bodyTable, i );
+		countOf[fm]++;
+		areaOf[fm] += int( area( real.bodyTable, i ) );
+		if ( i < 6 || real.bodyCount <= 20 )
+			L << QString( "  body %1  form %2  class %3  area %4" )
+				.arg( i + 1 ).arg( fm, 8, 16, QChar( '0' ) )
+				.arg( QLatin1String( rec( real.bodyTable, i, 2 ) < 3
+					? cname[rec( real.bodyTable, i, 2 )] : "?" ) )
+				.arg( area( real.bodyTable, i ) );
+		if ( fm == 0x11111111u )
+			seaCls.insert( fm, rec( real.bodyTable, i, 2 ) );
+	}
+	check( QStringLiteral( "nineteen bodies" ), real.bodyCount == 19 );
+	check( QStringLiteral( "the sea is ONE body, and it keeps the WORLDSPACE's own "
+		"form -- the defect this control exists for gave it the river's" ),
+		countOf.value( 0x11111111u, 0 ) == 1 );
+	check( QStringLiteral( "the sea is class sea (it reaches the worldspace edge)" ),
+		seaCls.value( 0x11111111u, -1 ) == 0 );
+	check( QStringLiteral( "the sea is 73,728 texels -- 96 columns of 768, and not one "
+		"texel of the river" ), areaOf.value( 0x11111111u, 0 ) == 73728 );
+	check( QStringLiteral( "the stepped river is SIXTEEN bodies, one a plane" ),
+		countOf.value( 0x22222222u, 0 ) == 16 );
+	check( QStringLiteral( "the lake is one body of 16,384 texels" ),
+		countOf.value( 0x33333333u, 0 ) == 1 && areaOf.value( 0x33333333u, 0 ) == 16384 );
+	check( QStringLiteral( "the puddle is one body of 16 texels" ),
+		countOf.value( 0x44444444u, 0 ) == 1 && areaOf.value( 0x44444444u, 0 ) == 16 );
+	L << QString( "REFUTER   type-blind: %1 bodies (the sea and the river's tidal "
+			"step sit at the same height and touch, so they fuse)" )
+		.arg( blind.bodyCount );
+	check( QStringLiteral( "the refuter FIRES: ignoring water type changes the answer" ),
+		blind.bodyCount != real.bodyCount );
+	L << QString( "control %1" ).arg( fails ? QStringLiteral( "FAIL" ) : QStringLiteral( "PASS" ) );
+	if ( text )
+		*text = L.join( QStringLiteral( "\n" ) );
+	if ( error )
+		error->clear();
+	return fails == 0;
 }

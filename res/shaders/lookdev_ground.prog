@@ -1,0 +1,4 @@
+# Lookdev ground plane (lane PBRR2B). Never enabled on models: selected by
+# name from gl/lookdevstage.cpp.
+
+shaders lookdev_ground.vert lookdev_ground.frag

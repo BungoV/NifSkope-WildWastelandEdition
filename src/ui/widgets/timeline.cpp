@@ -39,6 +39,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "model/nifmodel.h"
 #include "data/niftypes.h"
 
+
 #include <QAction>
 #include <QComboBox>
 #include <QDoubleSpinBox>
@@ -1104,9 +1105,14 @@ TimelineWidget::TimelineWidget( QWidget * parent ) : QWidget( parent )
 	};
 
 	seqBox = new QComboBox( this );
+	seqBox->setObjectName( QStringLiteral( "TimelineSeqBox" ) );
 	seqBox->setSizeAdjustPolicy( QComboBox::AdjustToContents );
 	seqBox->setMinimumWidth( 100 );
 	seqBox->setToolTip( tr( "Animation sequence shown in the Animation Manager (synced with the Animation toolbar)" ) );
+	// A selector is a value you PICK where a number field is a value you type;
+	// they belong to the same field family and this is the one call that says
+	// so (nifskope-ww-panel-style). It also installs the wheel guard.
+	wwMatchFieldStyle( seqBox );
 	connect( seqBox, qOverload<int>( &QComboBox::activated ), this, &TimelineWidget::sequenceChosen );
 
 	filterBox = new QLineEdit( this );
@@ -1234,6 +1240,7 @@ TimelineWidget::TimelineWidget( QWidget * parent ) : QWidget( parent )
 	btnInspector->setChecked( true );
 
 	infoLabel = new QLabel( this );
+
 
 	lanesView = new TimelineLanesView( this );
 	graphView = new TimelineGraphView( this );
@@ -1436,6 +1443,7 @@ void TimelineWidget::updateViews()
 	else
 		timeField->setText( QString::number( curTime, 'f', 3 ) );
 
+
 	lanesView->update();
 	graphView->update();
 }
@@ -1599,7 +1607,11 @@ QString TimelineWidget::controllerLabel( const QModelIndex & iController ) const
 
 void TimelineWidget::sequenceChosen( int comboRow )
 {
-	if ( comboRow >= 2 && comboRow - 2 < sequences.count() && sequences[comboRow - 2].isValid() ) {
+	bool handled = false;
+
+
+	if ( !handled && comboRow >= 2 && comboRow - 2 < sequences.count()
+		 && sequences[comboRow - 2].isValid() ) {
 		// switching the displayed animation must NOT change the block-list /
 		// viewport selection (only switch which sequence drives the timeline)
 		if ( !syncingSequence )
@@ -1619,7 +1631,10 @@ void TimelineWidget::sequenceChosen( int comboRow )
 void TimelineWidget::setSequenceByName( const QString & name )
 {
 	for ( int i = 2; i < seqBox->count(); i++ ) {
-		if ( seqBox->itemText( i ) == name ) {
+		// A clip row's TEXT carries its frame count and rate, so the row is
+		// found by the name stored on it, not by what is painted in it.
+		if ( seqBox->itemText( i ) == name
+			 || seqBox->itemData( i ).toString() == name ) {
 			if ( seqBox->currentIndex() != i ) {
 				seqBox->setCurrentIndex( i );
 				syncingSequence = true;
@@ -1630,6 +1645,7 @@ void TimelineWidget::setSequenceByName( const QString & name )
 		}
 	}
 }
+
 
 void TimelineWidget::buildLanes()
 {
@@ -1655,8 +1671,10 @@ void TimelineWidget::buildLanes()
 	markers.clear();
 	markerChannel = TimelineChannel();
 
-	// Combo rows: 0 = all controllers, 1 = loose interpolators, 2+ = sequences
+	// Combo rows: 0 = all controllers, 1 = loose interpolators, 2+ = sequences,
+	// then (lane HKX3) one row per loaded .hkx clip.
 	int view = seqBox->currentIndex();
+
 
 	// interpolators referenced by sequences / attached to controllers
 	QSet<int> seqInterps;

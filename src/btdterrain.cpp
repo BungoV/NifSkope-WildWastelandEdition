@@ -10,7 +10,10 @@ BSD License - see nifskope.h
 #include "spells/blocks.h"
 
 #include "btdfile.hpp"
+#include "io/lodvfile.h"
+#include "lodinative.h"
 #include "lodtfile.h"
+#include "lodtsheets.h"
 
 #include <QCoreApplication>
 #include <QDebug>
@@ -23,6 +26,7 @@ BSD License - see nifskope.h
 #include <QGridLayout>
 #include <QLabel>
 #include <QPushButton>
+#include <QSet>
 #include <QSpinBox>
 #include <QVBoxLayout>
 
@@ -81,16 +85,16 @@ int cellsPerTileForRate( int n )
 	return qMax( 1, MAX_TILE_VERTS_PER_SIDE / qMax( 1, n ) );
 }
 
-int cellsPerTile( int lod )
-{
-	return cellsPerTileForRate( samplesPerCell( lod ) );
-}
+/* `cellsPerTile( lod )` was the terrain horizon channel's only caller and went
+ * with it (lane HORIZONOUT, 2026-09-19); `cellsPerTileForRate` above is the one
+ * every other caller uses, with the sample rate it already has in hand. */
 
 //! Shapes and vertices a cellsX x cellsY region meshes to at n samples a cell.
 //! Shared by both formats' estimators so a dialog and its build cannot disagree.
-void tileCounts( int cellsX, int cellsY, int n, qint64 & shapeCount, qint64 & vertCount )
+void tileCounts( int cellsX, int cellsY, int n, qint64 & shapeCount, qint64 & vertCount,
+	int kOverride = 0 )
 {
-	const int k = cellsPerTileForRate( n );
+	const int k = kOverride > 0 ? kOverride : cellsPerTileForRate( n );
 	const int tilesX = ( cellsX + k - 1 ) / k;
 	const int tilesY = ( cellsY + k - 1 ) / k;
 	vertCount = 0;
@@ -133,6 +137,28 @@ struct TerrainSurface
 	std::vector<quint32> rgba;
 	//! Slot 0 of the texture set, in the renderer's inline-colour syntax.
 	QString diffuse = QStringLiteral( "#FF808080" );
+
+	/* ---- the `.lodt` sheets, when a pyramid was found (NATIVEVIEW1) ----
+	 *
+	 *  All of this is inert at its defaults, and a surface built without
+	 *  sheets goes through exactly the arithmetic it always did: `uvBias +
+	 *  u * uvScale` with bias 0 and scale 1 returns u's own bits, and an empty
+	 *  `tileDiffuse` leaves the inline-colour slots alone. That is what makes
+	 *  the data view byte-identical before and after this round.
+	 *
+	 *  `sheetDim` is how many CELLS one sheet tile covers. A mesh tile covers
+	 *  `k` cells with `k` a divisor of `sheetDim`, so every mesh tile lies
+	 *  inside exactly one sheet tile and takes a sub-rectangle of its UV. The
+	 *  sheet tile grid is NORTH-UP (row 0 is the north row) while cells count
+	 *  northward, which is why the row index is flipped where it is read.
+	 */
+	int sheetDim = 0;
+	int sheetTilesX = 0, sheetTilesY = 0;
+	float uvBias = 0.0f;
+	float uvScale = 1.0f;
+	//! Indexed `sty * sheetTilesX + stx`, `sty` = 0 the NORTH row. Empty = no sheets.
+	std::vector<QString> tileDiffuse;
+	std::vector<QString> tileNormal;
 };
 
 bool buildTerrainSurface( NifModel * nif, TerrainSurface & s, QString * error )
@@ -146,7 +172,20 @@ bool buildTerrainSurface( NifModel * nif, TerrainSurface & s, QString * error )
 		return fail( QStringLiteral( "no model" ) );
 
 	const int n = s.n;
-	const int k = cellsPerTileForRate( n );
+	/* With sheets the mesh tile has to nest inside a sheet tile, so `k` drops
+	 * to the largest DIVISOR of `sheetDim` that still fits under 255 vertices
+	 * a side. At LOD2 (32 samples a cell) the cap is 7 cells and `sheetDim` is
+	 * 4, so k = 4 and one mesh tile is one sheet tile; at LOD0 (128 a cell)
+	 * the cap is 1 and k = 1, so four mesh tiles share a sheet tile and each
+	 * takes a quarter of its UV. */
+	int k = cellsPerTileForRate( n );
+	if ( s.sheetDim > 0 ) {
+		int best = 1;
+		for ( int d = 1; d <= s.sheetDim; d++ )
+			if ( s.sheetDim % d == 0 && d <= k )
+				best = d;
+		k = best;
+	}
 	const int gridW = s.cellsX * n + 1;
 	const int gridH = s.cellsY * n + 1;
 	if ( s.z.size() != size_t( gridW ) * size_t( gridH ) )
@@ -210,6 +249,23 @@ bool buildTerrainSurface( NifModel * nif, TerrainSurface & s, QString * error )
 			const int gx0 = tx * k * n;
 			const int gy0 = ty * k * n;
 
+			/* Which sheet tile this mesh tile sits in, and where inside it.
+			 * `sty` is flipped because the sheet grid's row 0 is the NORTH
+			 * row while cells count northward. sheetIndex < 0 means no sheets,
+			 * and then every line below takes the path it always took. */
+			int sheetIndex = -1;
+			int sxCells = 0, syCellsFromSouth = 0;
+			if ( s.sheetDim > 0 && !s.tileDiffuse.empty() ) {
+				const int stx = ( tx * k ) / s.sheetDim;
+				const int styFromSouth = ( ty * k ) / s.sheetDim;
+				const int sty = s.sheetTilesY - 1 - styFromSouth;
+				if ( stx >= 0 && stx < s.sheetTilesX && sty >= 0 && sty < s.sheetTilesY ) {
+					sheetIndex = sty * s.sheetTilesX + stx;
+					sxCells = ( tx * k ) % s.sheetDim;
+					syCellsFromSouth = ( ty * k ) % s.sheetDim;
+				}
+			}
+
 			verts.clear();
 			verts.reserve( wV * hV );
 			float zMin = 3.4e38f, zMax = -3.4e38f;
@@ -219,7 +275,21 @@ bool buildTerrainSurface( NifModel * nif, TerrainSurface & s, QString * error )
 					const float z = height( gx0 + i, gy0 + j );
 					v.pos = Vector3( float( i ) * spacing, float( j ) * spacing, z );
 					v.nrm = normalAt( gx0 + i, gy0 + j );
-					v.uv = Vector2( float( i ) / float( wV - 1 ), 1.0f - float( j ) / float( hV - 1 ) );
+					if ( sheetIndex >= 0 ) {
+						/* Into the sheet tile's CONTENT square, then inset past
+						 * the border: a stored sheet is content + 2*border
+						 * texels wide, so 0..1 over the content is
+						 * uvBias..uvBias+uvScale over the stored image. */
+						const float fu = ( float( sxCells )
+							+ float( wCells ) * ( float( i ) / float( wV - 1 ) ) )
+							/ float( s.sheetDim );
+						const float fv = ( float( s.sheetDim - syCellsFromSouth )
+							- float( hCells ) * ( float( j ) / float( hV - 1 ) ) )
+							/ float( s.sheetDim );
+						v.uv = Vector2( s.uvBias + fu * s.uvScale, s.uvBias + fv * s.uvScale );
+					} else {
+						v.uv = Vector2( float( i ) / float( wV - 1 ), 1.0f - float( j ) / float( hV - 1 ) );
+					}
 					verts.append( v );
 					zMin = qMin( zMin, z );
 					zMax = qMax( zMax, z );
@@ -305,8 +375,36 @@ bool buildTerrainSurface( NifModel * nif, TerrainSurface & s, QString * error )
 			nif->set<uint>( iTextures, "Num Textures", 10 );
 			nif->updateArraySize( iTextures, "Textures" );
 			QModelIndex iTexArray = nif->getIndex( iTextures, "Textures" );
-			nif->set<QString>( nif->getIndex( iTexArray, 0 ), s.diffuse );
-			nif->set<QString>( nif->getIndex( iTexArray, 1 ), QStringLiteral( "#FFFF8080" ) );
+			QString diffuse = s.diffuse;
+			QString normal = QStringLiteral( "#FFFF8080" );
+			bool sheetNormal = false;
+			if ( sheetIndex >= 0 && sheetIndex < int( s.tileDiffuse.size() )
+				&& !s.tileDiffuse[size_t( sheetIndex )].isEmpty() ) {
+				// the bake's own colour sheet and its _msn, by name, through
+				// the resource stack -- not a second copy of the colours
+				diffuse = s.tileDiffuse[size_t( sheetIndex )];
+				if ( sheetIndex < int( s.tileNormal.size() )
+					&& !s.tileNormal[size_t( sheetIndex )].isEmpty() ) {
+					normal = s.tileNormal[size_t( sheetIndex )];
+					sheetNormal = true;
+				}
+			}
+			nif->set<QString>( nif->getIndex( iTexArray, 0 ), diffuse );
+			nif->set<QString>( nif->getIndex( iTexArray, 1 ), normal );
+			if ( sheetNormal ) {
+				/* The sheet's normal map is an `_msn`, a MODEL-SPACE map. Read
+				 * as a tangent-space one it lights the land far too dark (mean
+				 * luma 70.6 against the .BTR's 121.1). The .BTR of the same
+				 * bake says so with bit 12 of Shader Flags 1, with the specular
+				 * bit clear (the two are documented as incompatible), and marks
+				 * itself LOD landscape in Shader Flags 2. A sheet-lit tile
+				 * takes those three bits and leaves the rest alone. */
+				quint32 sf1 = nif->get<quint32>( iShader, "Shader Flags 1" );
+				sf1 = ( sf1 | 0x1000u ) & ~0x1u;
+				nif->set<quint32>( iShader, "Shader Flags 1", sf1 );
+				const quint32 sf2 = nif->get<quint32>( iShader, "Shader Flags 2" );
+				nif->set<quint32>( iShader, "Shader Flags 2", sf2 | 0x2u );
+			}
 			if ( haveColour ) {
 				/* FO4's own path always applies vertex colours when the vertex
 				 * has them, but the legacy program path still reads the flag,
@@ -655,6 +753,9 @@ const char * lodtPlaneKey( LodtPlane plane )
 	case LodtPlane::CellFlags:         return "cellflags";
 	case LodtPlane::CellHeightRange:   return "cellrange";
 	case LodtPlane::CoarseOverview:    return "overview";
+	case LodtPlane::WaterBodyId:       return "bodyid";
+	case LodtPlane::WaterFlow:         return "flow";
+	case LodtPlane::WaterShore:        return "shore";
 	default:                           return "height";
 	}
 }
@@ -672,6 +773,9 @@ QString lodtPlaneLabel( LodtPlane plane )
 	case LodtPlane::CellFlags:         return QStringLiteral( "Cell flags — has land, has water" );
 	case LodtPlane::CellHeightRange:   return QStringLiteral( "Cell height range — per-cell relief" );
 	case LodtPlane::CoarseOverview:    return QStringLiteral( "Coarse overview — the always-resident grid" );
+	case LodtPlane::WaterBodyId:       return QStringLiteral( "Water body — which sheet of water a texel belongs to" );
+	case LodtPlane::WaterFlow:         return QStringLiteral( "Water flow — direction, speed and confidence" );
+	case LodtPlane::WaterShore:        return QStringLiteral( "Shore distance — how far a texel is from dry land" );
 	default:                           return QStringLiteral( "Heights" );
 	}
 }
@@ -710,6 +814,11 @@ static void lodtInfoFrom( const LodtFile & f, LodtWorldInfo & info )
 	info.gcvrCount = f.gcvrCount();
 	info.blockCount = f.blockCount();
 	info.sectionFlags = f.sectionFlags();
+	info.headerVersion = f.headerVersion();
+	info.bodyCount = f.bodyCount();
+	info.bodySamples = f.bodyIdSamples();
+	info.flowSamples = f.flowPlaneSamples();
+	info.shoreSamples = f.shorePlaneSamples();
 }
 
 bool lodtReadWorldInfo( const QString & path, LodtWorldInfo & info, QString * error )
@@ -744,6 +853,14 @@ QList<LodtPlane> lodtAvailablePlanes( const LodtWorldInfo & info )
 	out << LodtPlane::CellHeightRange;
 	if ( info.overviewSamples > 0 )
 		out << LodtPlane::CoarseOverview;
+	/* The BIT, then the rate: a section bit set over a zero rate is a refusal
+	 * in the reader, so by the time a plane is offered here both agree. */
+	if ( ( info.sectionFlags & LODL_SECT_BODIES ) && info.bodySamples > 0 && info.bodyCount > 0 )
+		out << LodtPlane::WaterBodyId;
+	if ( ( info.sectionFlags & LODL_SECT_FLOW ) && info.flowSamples > 0 )
+		out << LodtPlane::WaterFlow;
+	if ( ( info.sectionFlags & LODL_SECT_SHORE ) && info.shoreSamples > 0 )
+		out << LodtPlane::WaterShore;
 	return out;
 }
 
@@ -882,8 +999,12 @@ bool lodtRegionFromEnv( LodtRegionSpec & spec )
 }
 
 bool nifCreateLodtTerrainScene( NifModel * nif, const QString & lodtPath,
-	const LodtRegionSpec & spec, QString * error, QString * notes )
+	const LodtRegionSpec & specIn, QString * error, QString * notes )
 {
+	/* The region can widen here, and only here: a lit view snaps outward to
+	 * whole sheet tiles so that no mesh tile straddles two sheets. Every other
+	 * route sees the caller's own rectangle. */
+	LodtRegionSpec spec = specIn;
 	auto fail = [error]( const QString & message ) {
 		if ( error )
 			*error = message;
@@ -901,6 +1022,65 @@ bool nifCreateLodtTerrainScene( NifModel * nif, const QString & lodtPath,
 
 	LodtWorldInfo info;
 	lodtInfoFrom( f, info );
+
+	/* ---- the `.lodt` sheet pyramid, when one is beside the file ----------
+	 *
+	 *  A HEIGHT view of a worldspace whose sheets were baked is drawn LIT:
+	 *  the bake's own colour sheet in slot 0 and its `_msn` in slot 1, per
+	 *  sheet tile. Any other plane, or no pyramid, and this whole block does
+	 *  nothing and the inline-colour data view is exactly what it was.
+	 */
+	LodtSheets sheets;
+	QStringList sheetNote;
+	/* WW_LODL_CHANNEL=<name>, the terrain half (lane CHANVIEW1). Read once, here,
+	 * so the tile binding below and the vertex-colour block further down cannot
+	 * disagree about which channel this run is. */
+	QString sheetChanGiven;
+	int sheetChanBin = 0;
+	const LodlChannel sheetChan = lodlChannelFromEnv( &sheetChanGiven, &sheetChanBin );
+	bool haveSheets = false;
+	int sheetTilesX = 0, sheetTilesY = 0, sheetDim = 0, sheetTilesFound = 0;
+	if ( spec.plane == LodtPlane::Height ) {
+		QString why;
+		if ( sheets.open( lodtPath, &why ) ) {
+			sheetDim = qMax( 1, sheets.levelDim() );
+			auto floorDiv = []( int a, int b ) {
+				return ( a >= 0 ) ? a / b : -( ( -a + b - 1 ) / b );
+			};
+			const int w = sheets.west(), sth = sheets.south();
+			const int sx0 = w + floorDiv( spec.x0 - w, sheetDim ) * sheetDim;
+			const int sx1 = w + ( floorDiv( spec.x1 - w, sheetDim ) + 1 ) * sheetDim - 1;
+			const int sy0 = sth + floorDiv( spec.y0 - sth, sheetDim ) * sheetDim;
+			const int sy1 = sth + ( floorDiv( spec.y1 - sth, sheetDim ) + 1 ) * sheetDim - 1;
+			// never past what the sheets hold, nor past what the .lodl holds
+			if ( sx0 >= sheets.west() && sx1 <= sheets.east()
+				&& sy0 >= sheets.south() && sy1 <= sheets.north()
+				&& sx0 >= info.cellMinX && sx1 <= info.cellMaxX
+				&& sy0 >= info.cellMinY && sy1 <= info.cellMaxY ) {
+				if ( sx0 != spec.x0 || sy0 != spec.y0 || sx1 != spec.x1 || sy1 != spec.y1 )
+					sheetNote << QString( "region widened from [%1,%2]..[%3,%4] to whole "
+							"sheet tiles of %5 cells" )
+						.arg( spec.x0 ).arg( spec.y0 ).arg( spec.x1 ).arg( spec.y1 )
+						.arg( sheetDim );
+				spec.x0 = sx0;
+				spec.y0 = sy0;
+				spec.x1 = sx1;
+				spec.y1 = sy1;
+				sheetTilesX = ( sx1 - sx0 + 1 ) / sheetDim;
+				sheetTilesY = ( sy1 - sy0 + 1 ) / sheetDim;
+				haveSheets = true;
+			} else {
+				sheetNote << QString( "sheets cover cells [%1,%2]..[%3,%4] and this region "
+						"snaps outside that, so the data view is drawn instead" )
+					.arg( sheets.west() ).arg( sheets.south() )
+					.arg( sheets.east() ).arg( sheets.north() );
+			}
+		} else {
+			sheetNote << QString( "no .lodt sheets (%1); drawing the inline-colour data view" )
+				.arg( why );
+		}
+	}
+
 	if ( !lodtEstimateRegion( info, spec, nullptr, nullptr, error ) )
 		return false;
 
@@ -955,6 +1135,70 @@ bool nifCreateLodtTerrainScene( NifModel * nif, const QString & lodtPath,
 	s.n = n;
 	s.spacing = 4096.0f / float( n );
 	s.z.swap( z );
+
+	if ( haveSheets ) {
+		s.sheetDim = sheetDim;
+		s.sheetTilesX = sheetTilesX;
+		s.sheetTilesY = sheetTilesY;
+		s.uvBias = sheets.uvBias();
+		s.uvScale = sheets.uvScale();
+		s.tileDiffuse.assign( size_t( sheetTilesX ) * size_t( sheetTilesY ), QString() );
+		s.tileNormal.assign( s.tileDiffuse.size(), QString() );
+		QStringList missing;
+		for ( int sty = 0; sty < sheetTilesY; sty++ ) {
+			// sty 0 is the NORTH row of the region, the sheets' own order
+			const int cellY = spec.y1 - sty * sheetDim;
+			for ( int stx = 0; stx < sheetTilesX; stx++ ) {
+				const int cellX = spec.x0 + stx * sheetDim;
+				int gx = 0, gy = 0;
+				if ( !sheets.tileOfCell( cellX, cellY, &gx, &gy ) )
+					continue;
+				LodtSheetTile t;
+				QString why;
+				if ( !sheets.tile( gx, gy, t, &why ) ) {
+					if ( missing.size() < 4 )
+						missing << QString( "(%1,%2) %3" ).arg( gx ).arg( gy ).arg( why );
+					continue;
+				}
+				const size_t at = size_t( sty ) * size_t( sheetTilesX ) + size_t( stx );
+				/* WW_LODL_CHANNEL=normal / =emissive: the sheet BEING ASKED ABOUT is
+				 * bound where the colour sheet goes, so what is photographed is that
+				 * sheet's own texels and not a re-encoding of them. Unlit is the
+				 * caller's WW_LOD_CHANNEL=12 (raw base colour), the same way the
+				 * stock `.bto` channel views do it. */
+				s.tileDiffuse[at] = ( sheetChan == LodlChannel::Normal && !t.msn.isEmpty() )
+					? t.msn
+					: ( sheetChan == LodlChannel::Emissive && !t.emissive.isEmpty() )
+						? t.emissive : t.colour;
+				s.tileNormal[at] = t.msn;
+				sheetTilesFound++;
+			}
+		}
+		if ( sheetTilesFound == 0 ) {
+			// nothing to draw with: fall all the way back rather than render black
+			s.sheetDim = 0;
+			s.tileDiffuse.clear();
+			s.tileNormal.clear();
+			s.uvBias = 0.0f;
+			s.uvScale = 1.0f;
+			haveSheets = false;
+			sheetNote << QStringLiteral( "no sheet tile of this region unpacked; "
+				"drawing the inline-colour data view" );
+		}
+		if ( !missing.isEmpty() )
+			sheetNote << QString( "%1 sheet tiles could not be unpacked: %2" )
+				.arg( missing.size() ).arg( missing.join( QStringLiteral( "; " ) ) );
+		if ( haveSheets ) {
+			sheetNote << QString( "lit from %1: level dim %2, %3x%4 tiles over this region, "
+					"%5 unpacked; UV inset %6 + t x %7 (border %8 of %9 texels)" )
+				.arg( QFileInfo( sheets.containerPath() ).fileName() )
+				.arg( sheetDim ).arg( sheetTilesX ).arg( sheetTilesY ).arg( sheetTilesFound )
+				.arg( double( s.uvBias ), 0, 'f', 5 ).arg( double( s.uvScale ), 0, 'f', 5 )
+				.arg( sheets.borderTexels() ).arg( sheets.storedTexels() );
+			sheetNote << sheets.notes();
+		}
+	}
+	note << sheetNote;
 
 	if ( spec.plane != LodtPlane::Height ) {
 		/* Every plane view forces the diffuse WHITE, so the picture is the
@@ -1192,6 +1436,104 @@ bool nifCreateLodtTerrainScene( NifModel * nif, const QString & lodtPath,
 			break;
 		}
 
+		case LodtPlane::WaterBodyId:
+		case LodtPlane::WaterFlow:
+		case LodtPlane::WaterShore: {
+			/* The three version-3 water planes. Each has its OWN sample rate in
+			 * the header, which need not be the file's, so the grid position is
+			 * mapped into the plane's grid rather than assumed equal to it.
+			 *
+			 * Body ID is drawn as a categorical hue -- the picture that answers
+			 * "or at least an ID for them" on sight -- and NEAREST, never
+			 * blended: an id is a name, not a quantity, and an average of two
+			 * names is a third body that does not exist. */
+			const int rate = qMax( 1, spec.plane == LodtPlane::WaterFlow
+				? info.flowSamples
+				: ( spec.plane == LodtPlane::WaterShore ? info.shoreSamples : info.bodySamples ) );
+			const int idRate = qMax( 1, info.bodySamples );
+			qint64 wetSamples = 0, flowing = 0;
+			quint16 maxId = 0;
+			QSet<quint16> distinct;
+			int shoreMin = 255, shoreMax = 0;
+			for ( int j = 0; j < gridH; j++ ) {
+				const int gy = gyOf( j );
+				for ( int i = 0; i < gridW; i++ ) {
+					const int gx = gxOf( i );
+					const int px = int( qint64( gx ) * rate / spc );
+					const int py = int( qint64( gy ) * rate / spc );
+					const quint16 id = f.bodyIdAt( int( qint64( gx ) * idRate / spc ),
+						int( qint64( gy ) * idRate / spc ) );
+					quint32 c = packRgba( 0.06f, 0.06f, 0.09f );
+					if ( id ) {
+						wetSamples++;
+						maxId = qMax( maxId, id );
+						if ( distinct.size() < 4096 )
+							distinct.insert( id );
+					}
+					if ( spec.plane == LodtPlane::WaterBodyId ) {
+						if ( id ) {
+							float r, g, b;
+							hashColour( quint32( id ) * 2654435761u, r, g, b );
+							c = packRgba( r, g, b );
+						}
+					} else if ( spec.plane == LodtPlane::WaterFlow ) {
+						const quint16 w = f.flowWordAt( px, py );
+						if ( w ) {
+							flowing++;
+							const float ang = float( w & 0xFF ) / 256.0f;
+							const float spd = float( ( w >> 8 ) & 0xF ) / 15.0f;
+							/* direction as a hue round the wheel, speed as its
+							 * brightness -- so still water inside a body reads
+							 * as dark and a fast reach as bright. */
+							const float h6 = ang * 6.0f;
+							const int sector = int( h6 ) % 6;
+							const float frac = h6 - float( int( h6 ) );
+							float rr = 0, gg = 0, bb = 0;
+							switch ( sector ) {
+							case 0: rr = 1; gg = frac; break;
+							case 1: rr = 1 - frac; gg = 1; break;
+							case 2: gg = 1; bb = frac; break;
+							case 3: gg = 1 - frac; bb = 1; break;
+							case 4: rr = frac; bb = 1; break;
+							default: rr = 1; bb = 1 - frac; break;
+							}
+							const float k = 0.35f + 0.65f * spd;
+							c = packRgba( rr * k, gg * k, bb * k );
+						} else if ( id ) {
+							c = packRgba( 0.12f, 0.16f, 0.22f );   // in a body, still
+						}
+					} else {
+						const quint8 sv = f.shoreAt( px, py );
+						if ( id ) {
+							shoreMin = qMin( shoreMin, int( sv ) );
+							shoreMax = qMax( shoreMax, int( sv ) );
+							const float t = float( sv ) / 255.0f;
+							c = packRgba( 0.05f + 0.20f * t, 0.25f + 0.55f * t, 0.45f + 0.50f * t );
+						}
+					}
+					s.rgba[size_t( j ) * gridW + i] = c;
+				}
+			}
+			const qint64 total = qint64( gridW ) * gridH;
+			if ( spec.plane == LodtPlane::WaterBodyId )
+				note << QString( "water bodies: %1 in the table, %2 of %3 samples name one, "
+						"%4 distinct here, highest id %5 (nearest sampling: an id is a name, "
+						"never an average)" )
+					.arg( info.bodyCount ).arg( wetSamples ).arg( total )
+					.arg( distinct.size() ).arg( maxId );
+			else if ( spec.plane == LodtPlane::WaterFlow )
+				note << QString( "water flow: %1 of %2 wet samples carry a direction "
+						"(%3 of the region); the rest are still water, which is the same "
+						"word as dry on purpose" )
+					.arg( flowing ).arg( wetSamples ).arg( total );
+			else
+				note << QString( "shore distance: %1 wet samples, stored steps %2..%3 "
+						"(x %4 world units, 255 saturates)" )
+					.arg( wetSamples ).arg( wetSamples ? shoreMin : 0 ).arg( shoreMax )
+					.arg( double( f.shoreQuantum() ), 0, 'f', 0 );
+			break;
+		}
+
 		case LodtPlane::CoarseOverview: {
 			const int ovS = f.overviewSamples();
 			float lo = 3.4e38f, hi = -3.4e38f, maxDelta = 0.0f;
@@ -1240,9 +1582,278 @@ bool nifCreateLodtTerrainScene( NifModel * nif, const QString & lodtPath,
 		}
 	}
 
+	/* WW_LODL_AO=1: the LIT view with the file's AO plane multiplied in as a
+	 * per-vertex grey (bungo 2026-09-18, "show me the same area on the map,
+	 * with AO overlaid on the terrain and objects / trees"). The lit view has
+	 * never shown the plane -- the sheets carry colour and normal, the AO
+	 * rides in the mask sheet's B the viewer does not bind -- so a picture
+	 * of "the bake" was a picture without its occlusion. The same sampling
+	 * as the AmbientOcclusion plane view, into the same vertex colour the
+	 * plane views use; the object half does its own in src/lodinative.cpp.
+	 * Unset, not a byte of the document changes. */
+	/* WW_LODL_CHANNEL widens exactly this block (lane CHANVIEW1): `ao` IS
+	 * WW_LODL_AO, `mask-b` is the same texel read under its own name, and
+	 * `mask-r` / `mask-g` / `mask-a` are the other three channels of the SAME
+	 * sampler -- one decoder, `LodtSheets::sheetChannel`. `ground` draws the
+	 * terrain at the ramp's value AT THE SURFACE so the placements' per-placement
+	 * blend can be read against the thing they blend into. */
+	if ( !sheetChanGiven.isEmpty() && sheetChan == LodlChannel::None )
+		note << QString( "WW_LODL_CHANNEL: REFUSED \"%1\" -- no such channel; the terrain is "
+				"the default one. Known names: %2" )
+			.arg( sheetChanGiven ).arg( lodlChannelNames() );
+	/* `normal` and `emissive` are PICTURES OF A SHEET, bound above in place of
+	 * the colour sheet. Their note line still has to carry numbers, and they come
+	 * out of the SAME sampler the mask channels use -- the same container bytes
+	 * the bound DDS was unpacked from, decoded once here for the census. */
+	if ( sheetChan == LodlChannel::Normal || sheetChan == LodlChannel::Emissive ) {
+		const int role = ( sheetChan == LodlChannel::Normal )
+			? LODV_ROLE_MSN : LODV_ROLE_EMISSIVE;
+		if ( !sheets.isOpen() ) {
+			note << QString( "WW_LODL_CHANNEL=%1: no sheet container is open for this .lodl; "
+					"nothing drawn differently" ).arg( lodlChannelName( sheetChan ) );
+		} else if ( !sheets.hasRole( role ) ) {
+			note << QString( "WW_LODL_CHANNEL=%1: %2 sheet ABSENT -- %3 carries no sheet with "
+					"role %4; nothing drawn differently" )
+				.arg( lodlChannelName( sheetChan ) )
+				.arg( lodlChannelName( sheetChan ) )
+				.arg( QFileInfo( sheets.containerPath() ).fileName() ).arg( role );
+		} else {
+			static const char * const CH = "RGB";
+			QStringList per;
+			qint64 texels = 0;
+			int tiles = 0;
+			for ( int ch = 0; ch < 3; ch++ ) {
+				int lo = 255, hi = 0;
+				double sum = 0.0;
+				qint64 n = 0;
+				int seen = 0;
+				for ( int sty = 0; sty < sheetTilesY; sty++ ) {
+					const int cellY = spec.y1 - sty * sheetDim;
+					for ( int stx = 0; stx < sheetTilesX; stx++ ) {
+						const int cellX = spec.x0 + stx * sheetDim;
+						int gx = 0, gy = 0;
+						if ( !sheets.tileOfCell( cellX, cellY, &gx, &gy ) )
+							continue;
+						std::vector<quint8> bytes;
+						QString why;
+						if ( !sheets.sheetChannel( role, gx, gy, ch, bytes, &why ) )
+							continue;
+						seen++;
+						const int dim = sheets.storedTexels(), b = sheets.borderTexels();
+						for ( int y = b; y < dim - b; y++ )
+							for ( int x = b; x < dim - b; x++ ) {
+								const int v = bytes[size_t( y ) * size_t( dim ) + size_t( x )];
+								lo = qMin( lo, v );
+								hi = qMax( hi, v );
+								sum += v;
+								n++;
+							}
+					}
+				}
+				tiles = qMax( tiles, seen );
+				texels = qMax( texels, n );
+				per << ( n == 0 ? QString( "%1 none" ).arg( QChar( QLatin1Char( CH[ch] ) ) )
+					: lo == hi ? QString( "%1 constant %2" ).arg( QChar( QLatin1Char( CH[ch] ) ) ).arg( lo )
+					: QString( "%1 %2..%3 mean %4" ).arg( QChar( QLatin1Char( CH[ch] ) ) )
+						.arg( lo ).arg( hi ).arg( sum / double( n ), 0, 'f', 3 ) );
+			}
+			note << QString( "WW_LODL_CHANNEL=%1: the role-%2 sheet of %3 bound as the terrain's "
+					"base colour, %4 tiles, %L5 content texels a channel; %6" )
+				.arg( lodlChannelName( sheetChan ) ).arg( role )
+				.arg( QFileInfo( sheets.containerPath() ).fileName() )
+				.arg( tiles ).arg( texels ).arg( per.join( QStringLiteral( ", " ) ) );
+		}
+	}
+	const bool wantAoT = qEnvironmentVariableIntValue( "WW_LODL_AO" ) != 0
+		|| sheetChan == LodlChannel::Ao;
+	int maskCh = -1;
+	switch ( sheetChan ) {
+	case LodlChannel::MaskR: maskCh = 0; break;
+	case LodlChannel::MaskG: maskCh = 1; break;
+	case LodlChannel::MaskB: maskCh = 2; break;
+	case LodlChannel::MaskA: maskCh = 3; break;
+	default: break;
+	}
+	const bool maskNamed = maskCh >= 0;
+	if ( !maskNamed && wantAoT )
+		maskCh = 2;                          // the AO read: the mask sheet's B
+	const QString chanLabel = maskNamed
+		? QString( "WW_LODL_CHANNEL=%1" ).arg( lodlChannelName( sheetChan ) )
+		: QStringLiteral( "WW_LODL_AO" );
+	if ( spec.plane == LodtPlane::Height && s.rgba.empty()
+		&& sheetChan == LodlChannel::Ground ) {
+		/* The ramp is 1 at or below the surface falling to 0 over 256 world units
+		 * above it (src/lodgen.cpp ~4008), so the surface's own value is 255. The
+		 * terrain is drawn at that value -- the top of the same grey ramp the
+		 * placements are drawn in -- and a placement reads as its distance off
+		 * the ground against a white floor. */
+		s.rgba.assign( s.z.size(), packRgba( 1.0f, 1.0f, 1.0f ) );
+		note << QString( "WW_LODL_CHANNEL=ground: the terrain drawn at the contact ramp's value "
+				"AT THE SURFACE (constant 255) in the same grey ramp as the placements, "
+				"%L1 vertices; the per-placement bytes are in the objects' note line" )
+			.arg( qint64( s.z.size() ) );
+	}
+	if ( spec.plane == LodtPlane::Height && s.rgba.empty()
+		&& ( wantAoT || maskNamed ) ) {
+		const int aoS = f.aoSamples();
+		/* The TEXTURE is the terrain's AO: the mask sheet's B, per texel, with
+		 * the placed objects' occlusion folded in by the bake. The 8-a-cell
+		 * .lodl plane below is the coarse ring-0 source and read as vertex
+		 * colour it lands as 512-unit squares (bungo 2026-09-18, "why is the
+		 * terrain AO so low res? You can see the pixels there"). With sheets
+		 * open, every terrain vertex samples the mask B bilinearly instead;
+		 * the plane is the fallback when there are no sheets or no mask. */
+		bool fromMask = false;
+		if ( sheets.isOpen() && sheetDim > 0 ) {
+			QHash<int, std::vector<quint8>> maskTiles;
+			const int dim = sheets.storedTexels();
+			const float bias = sheets.uvBias() * float( dim ), scale = sheets.uvScale() * float( dim );
+			int lo = 255, hi = 0, missing = 0;
+			QString maskWhy;
+			double sum = 0.0;
+			std::vector<quint32> rgba( s.z.size(), packRgba( 1.0f, 1.0f, 1.0f ) );
+			for ( int j = 0; j < gridH; j++ ) {
+				const int gy = gyOf( j );
+				const int cellY = info.cellMinY + gy / spc;
+				const float fy = float( gy % spc ) / float( spc );
+				for ( int i = 0; i < gridW; i++ ) {
+					const int gx = gxOf( i );
+					const int cellX = info.cellMinX + gx / spc;
+					const float fx = float( gx % spc ) / float( spc );
+					int tx, ty;
+					if ( !sheets.tileOfCell( cellX, cellY, &tx, &ty ) ) {
+						missing++;
+						continue;
+					}
+					const int key = ty * 65536 + tx;
+					auto it = maskTiles.find( key );
+					if ( it == maskTiles.end() ) {
+						std::vector<quint8> bytes;
+						QString why;
+						if ( !sheets.sheetChannel( LODV_ROLE_MASK, tx, ty, maskCh, bytes, &why )
+							&& maskWhy.isEmpty() )
+							maskWhy = why;
+						it = maskTiles.insert( key, bytes );
+					}
+					if ( it.value().empty() ) {
+						missing++;
+						continue;
+					}
+					// the same content-square mapping the mesh builder gives the colour sheet
+					const int westCell = sheets.west() + tx * sheetDim;
+					const int southCell = sheets.north() - ( ty + 1 ) * sheetDim + 1;
+					const float u = ( float( cellX - westCell ) + fx ) / float( sheetDim );
+					const float v = ( float( sheetDim ) - float( cellY - southCell ) - fy ) / float( sheetDim );
+					const float px = bias + u * scale - 0.5f, py = bias + v * scale - 0.5f;
+					const int x0 = qBound( 0, int( std::floor( px ) ), dim - 1 ), y0 = qBound( 0, int( std::floor( py ) ), dim - 1 );
+					const int x1 = qMin( x0 + 1, dim - 1 ), y1 = qMin( y0 + 1, dim - 1 );
+					const float ax = qBound( 0.0f, px - float( x0 ), 1.0f ), ay = qBound( 0.0f, py - float( y0 ), 1.0f );
+					const std::vector<quint8> & m = it.value();
+					const float top = float( m[size_t( y0 ) * dim + x0] ) * ( 1.0f - ax ) + float( m[size_t( y0 ) * dim + x1] ) * ax;
+					const float bot = float( m[size_t( y1 ) * dim + x0] ) * ( 1.0f - ax ) + float( m[size_t( y1 ) * dim + x1] ) * ax;
+					const float val = top * ( 1.0f - ay ) + bot * ay;
+					const int vi = int( val + 0.5f );
+					lo = qMin( lo, vi );
+					hi = qMax( hi, vi );
+					sum += val;
+					const float g = val / 255.0f;
+					rgba[size_t( j ) * gridW + i] = packRgba( g, g, g );
+				}
+			}
+			if ( !maskTiles.isEmpty() && missing < int( s.z.size() ) ) {
+				s.rgba.swap( rgba );
+				fromMask = true;
+				static const char * const CH = "RGBA";
+				const qint64 got = qint64( s.z.size() ) - missing;
+				note << QString( "%1: terrain %2 from the MASK SHEET'S %3 (the texture, %4), %5 texels a cell, "
+						"bilinear a vertex; %6 tiles read, %7 vertices without a tile (drawn open); values %8..%9, mean %10" )
+					.arg( chanLabel )
+					.arg( maskNamed ? lodlChannelName( sheetChan ) : QStringLiteral( "AO" ) )
+					.arg( QChar( QLatin1Char( CH[maskCh] ) ) )
+					.arg( QFileInfo( sheets.containerPath() ).fileName() )
+					.arg( sheets.contentTexels() / qMax( 1, sheetDim ) ).arg( maskTiles.size() ).arg( missing )
+					.arg( lo ).arg( hi ).arg( sum / double( qMax( qint64( 1 ), got ) ), 0, 'f', 1 );
+				if ( lo == hi )
+					note << QString( "%1: constant %2 over this chunk" ).arg( chanLabel ).arg( lo );
+				/* The second number: the same decoded tiles censused over their
+				 * CONTENT texels (borders out), which is what an independent
+				 * reader of the container counts. The line above is the vertex
+				 * resample and is deliberately not the same number -- 129x129
+				 * grid vertices are not 4,194,304 texels -- and printing both is
+				 * what lets the two decoders be compared instead of argued about. */
+				const int sdim = sheets.storedTexels(), sb = sheets.borderTexels();
+				int tlo = 255, thi = 0;
+				double tsum = 0.0;
+				qint64 tn = 0;
+				for ( auto tit = maskTiles.constBegin(); tit != maskTiles.constEnd(); ++tit ) {
+					if ( int( tit.value().size() ) < sdim * sdim )
+						continue;
+					for ( int y = sb; y < sdim - sb; y++ )
+						for ( int x = sb; x < sdim - sb; x++ ) {
+							const int v = tit.value()[size_t( y ) * size_t( sdim ) + size_t( x )];
+							tlo = qMin( tlo, v );
+							thi = qMax( thi, v );
+							tsum += v;
+							tn++;
+						}
+				}
+				if ( tn )
+					note << QString( "%1: over the sheet's own CONTENT texels, %L2 texels of %3 tiles, "
+							"values %4..%5, mean %6" )
+						.arg( chanLabel ).arg( tn ).arg( maskTiles.size() )
+						.arg( tlo ).arg( thi ).arg( tsum / double( tn ), 0, 'f', 3 );
+			} else if ( maskNamed ) {
+				note << QString( "%1: ABSENT on this bake -- %2; the lit view is unchanged" )
+					.arg( chanLabel )
+					.arg( maskWhy.isEmpty() ? QStringLiteral( "no tile of this region could be read" )
+						: maskWhy );
+			}
+		}
+		if ( fromMask || maskNamed ) {
+			/* A NAMED mask channel never falls back to the 8-a-cell `.lodl` AO
+			 * plane: that plane is the AO and nothing else, and drawing it under
+			 * the name `mask-r` would be a proxy shown as the channel
+			 * (root MISTAKES 05:0x). Absent is said in words instead. */
+		} else if ( aoS > 0 ) {
+			s.rgba.assign( s.z.size(), packRgba( 1.0f, 1.0f, 1.0f ) );
+			int lo = 255, hi = 0;
+			double sum = 0.0;
+			for ( int j = 0; j < gridH; j++ ) {
+				const int ay = gyOf( j ) * aoS / spc;
+				for ( int i = 0; i < gridW; i++ ) {
+					const int v = f.aoSample( gxOf( i ) * aoS / spc, ay );
+					lo = qMin( lo, v );
+					hi = qMax( hi, v );
+					sum += v;
+					const float g = float( v ) / 255.0f;
+					s.rgba[size_t( j ) * gridW + i] = packRgba( g, g, g );
+				}
+			}
+			note << QString( "WW_LODL_AO: terrain AO plane multiplied into the lit view "
+					"as vertex colour, %1 a cell, values %2..%3, mean %4" )
+				.arg( aoS ).arg( lo ).arg( hi )
+				.arg( sum / double( qint64( gridW ) * gridH ), 0, 'f', 1 );
+		} else {
+			note << QStringLiteral( "WW_LODL_AO: this file carries no AO plane; lit view unchanged" );
+		}
+	}
+
 	const qint64 msPlane = timer.elapsed();
 	qint64 shapeCount = 0, vertCount = 0;
-	tileCounts( cellsXr, cellsYr, n, shapeCount, vertCount );
+	/* With sheets the mesh tile shrinks to a divisor of the sheet tile, so the
+	 * counts have to be taken at the size the mesher will actually use -- a
+	 * reported number that does not match what was built is worse than none. */
+	int kBuilt = 0;
+	if ( haveSheets ) {
+		const int cap = cellsPerTileForRate( n );
+		for ( int d = 1; d <= sheetDim; d++ )
+			if ( sheetDim % d == 0 && d <= cap )
+				kBuilt = d;
+	}
+	tileCounts( cellsXr, cellsYr, n, shapeCount, vertCount, kBuilt );
+	if ( kBuilt > 0 )
+		note << QString( "mesh tile forced to %1 cells (the sheet tile is %2, the rate's own "
+				"cap is %3)" ).arg( kBuilt ).arg( sheetDim ).arg( cellsPerTileForRate( n ) );
 	const qint64 gridBytes = qint64( gridW ) * gridH
 		* ( spec.plane == LodtPlane::Height ? 4 : 8 );
 	note << QString( "%1 shapes, %L2 vertices; sample grids %L3 bytes; "

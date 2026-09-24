@@ -126,6 +126,17 @@ DEFINES += NIFSKOPE_VERSION=\\\"$${VER}\\\"
 WW_VER = 0.3.3
 DEFINES += WW_EDITION_VERSION=\\\"$${WW_VER}\\\"
 
+# Loaded Havok animation clips in the Animation Manager dock (lane HKX3).
+# src/ui/widgets/timeline.{cpp,h} guard every clip-shaped line with this,
+# so the dock builds and behaves as before when it is not defined.
+DEFINES += WW_HKXANIM_UI
+# (lane HKXEDIT2) the animation workspace's Save goes through the canonical
+# packfile layout (src/hkxfile, lane HKXEDIT1), so HKXPACK reads its annotation
+# names; without the define the writer's own bytes are kept.
+DEFINES += WW_HKXCLIP_CANON
+# (lane HKXEDIT2) the Blocks-tab .hkx document (HkxModel) and the workspace edit one clip
+DEFINES += WW_ANIMWS_HKXMODEL
+
 
 ###############################
 ## OUTPUT DIRECTORIES
@@ -184,13 +195,42 @@ HEADERS += \
 	src/gl/gltex.h \
 	src/gl/gltools.h \
 	src/gl/hknpdecode.h \
+	src/hkxanim.h \
+	src/gltfexport.h \
+	src/gltfexportnif.h \
+	src/gltfexportopts.h \
+	src/gltfexportchar.h \
+	src/gltfexportdialog.h \
+	src/bodybuild.h \
+	src/bodybuildpanel.h \
+	src/gltfimport.h \
+	src/hkxplayback.h \
+	src/hkxanimui.h \
+	src/filestab.h \
+	src/harnesswindow.h \
+	src/hkxwrite.h \
+	src/hkxclipedit.h \
+	src/animdopesheet.h \
+	src/animworkspace.h \
+	src/hkxfile.h \
+	src/hkxmodel.h \
 	src/physics/physicspreview.h \
 	src/physics/ragdollsim.h \
 	src/gl/hknpencode.h \
 	src/gl/icontrollable.h \
 	src/gl/renderer.h \
+	src/gl/scenelighting.h \
+	src/gl/lookdevstage.h \
+	src/ui/scenewindow.h \
+	src/gl/impostordraw.h \
+	src/impostoroct.h \
+	src/impostorcard.h \
+	src/impostorchunk.h \
+	src/impostorpreviewtest.h \
 	src/io/material.h \
 	src/io/pbrmfile.h \
+	src/io/pbrmresolve.h \
+	src/io/nifxfile.h \
 	src/io/lodmfile.h \
 	src/io/lodvfile.h \
 	src/io/MeshFile.h \
@@ -259,8 +299,35 @@ HEADERS += \
 	src/starterscene.h \
 	src/btdterrain.h \
 	src/esmdata.h \
+	src/esmweather.h \
 	src/lodgen.h \
+	src/lodgenao.h \
+	src/lodgenchunkpass.h \
+	src/lodbfile.h \
+	src/lodgenlayout.h \
+	src/lodgenparallel.h \
+	src/nifparsestress.h \
 	src/lodtfile.h \
+	src/lodofile.h \
+	src/lodifile.h \
+	src/cellpick.h \
+	src/cellclick.h \
+	src/cellground.h \
+	src/cellsplat.h \
+	src/cellidentity.h \
+	src/cellpanel.h \
+	src/cellpicktest.h \
+	src/cellview.h \
+	src/cellrefs.h \
+	src/cellworkspace.h \
+	src/lodinative.h \
+	src/lodtsheets.h \
+	src/lodgenaggregate.h \
+	src/nativeemit.h \
+	src/watermark.h \
+	src/watermarkpanel.h \
+	src/watercurves.h \
+	src/waterwindow.h \
 	src/rdccapture.h \
 	src/nifsnapshot.h \
 	src/qt5compat.hpp \
@@ -302,12 +369,54 @@ SOURCES += \
 	src/gl/gltexloaders.cpp \
 	src/gl/gltools.cpp \
 	src/gl/hknpdecode.cpp \
+	src/hkxanim.cpp \
+	src/gltfexport.cpp \
+	src/gltfexportnif.cpp \
+	src/gltfexportopts.cpp \
+	src/gltfexportchar.cpp \
+	src/gltfexportdialog.cpp \
+	src/gltfexportdialogtest.cpp \
+	src/bodybuild.cpp \
+	src/bodybuildpanel.cpp \
+	src/gltfimport.cpp \
+	src/hkxplayback.cpp \
+	src/hkxwrite.cpp \
+	src/hkxfile.cpp \
+	src/hkxmodel.cpp \
+	src/hkxmodeltest.cpp \
+	src/hkxplaybacktest.cpp \
+	src/skeloverlaytest.cpp \
+	src/hkxanimui.cpp \
+	src/hkxanimuitest.cpp \
+	src/hkxclipedit.cpp \
+	src/animdopesheet.cpp \
+	src/animworkspace.cpp \
+	src/animworkspacetest.cpp \
+	src/filestab.cpp \
+	src/filestabtest.cpp \
+	src/archlocktest.cpp \
+	src/harnesswindow.cpp \
+	src/uialigntest.cpp \
+	src/wateruitest.cpp \
+	src/wateruitest_lod.cpp \
 	src/physics/physicspreview.cpp \
 	src/physics/ragdollsim.cpp \
 	src/gl/hknpencode.cpp \
 	src/gl/renderer.cpp \
+	src/gl/impostordraw.cpp \
+	src/impostoroct.cpp \
+	src/impostorcard.cpp \
+	src/impostorchunk.cpp \
+	src/impostorpreviewtest.cpp \
+	src/lightanglestest.cpp \
+	src/scenetest.cpp \
+	src/gl/scenelighting.cpp \
+	src/gl/lookdevstage.cpp \
+	src/ui/scenewindow.cpp \
 	src/io/materialfile.cpp \
 	src/io/pbrmfile.cpp \
+	src/io/pbrmresolve.cpp \
+	src/io/nifxfile.cpp \
 	src/io/lodmfile.cpp \
 	src/io/lodvfile.cpp \
 	src/io/MeshFile.cpp \
@@ -317,6 +426,7 @@ SOURCES += \
 	src/lib/importex/obj.cpp \
 	src/lib/importex/col.cpp \
 	src/lib/importex/gltf.cpp \
+	src/lib/importex/gltfanim.cpp \
 	src/lib/nvtristripwrapper.cpp \
 	src/lib/qhull.cpp \
 	src/model/basemodel.cpp \
@@ -410,7 +520,34 @@ SOURCES += \
 	src/starterscene.cpp \
 	src/btdterrain.cpp \
 	src/esmdata.cpp \
+	src/esmweather.cpp \
 	src/lodgen.cpp 	src/lodgenmanager.cpp 	src/lodtfile.cpp \
+	src/lodgenchunkpass.cpp \
+	src/lodbfile.cpp \
+	src/lodgenlayout.cpp \
+	src/lodgenparallel.cpp \
+	src/nifparsestress.cpp \
+	src/lodofile.cpp \
+	src/lodifile.cpp \
+	src/cellpick.cpp \
+	src/cellclick.cpp \
+	src/cellground.cpp \
+	src/cellsplat.cpp \
+	src/cellidentity.cpp \
+	src/cellpanel.cpp \
+	src/cellpicktest.cpp \
+	src/cellview.cpp \
+	src/cellrefs.cpp \
+	src/cellworkspace.cpp \
+	src/cellworkspacetest.cpp \
+	src/lodinative.cpp \
+	src/lodtsheets.cpp \
+	src/lodgenaggregate.cpp \
+	src/nativeemit.cpp \
+	src/watermark.cpp \
+	src/watermarkpanel.cpp \
+	src/watercurves.cpp \
+	src/waterwindow.cpp \
 	src/rdccapture.cpp \
 	src/skeletonops.cpp \
 	src/uvtools.cpp \
@@ -423,6 +560,9 @@ SOURCES += \
 	lib/meshoptimizer/src/spatialorder.cpp \
 	lib/meshoptimizer/src/stripifier.cpp \
 	lib/meshoptimizer/src/vcacheoptimizer.cpp \
+	lib/meshoptimizer/src/vfetchoptimizer.cpp \
+	lib/meshoptimizer/src/indexanalyzer.cpp \
+	lib/meshoptimizer/src/partition.cpp \
 	lib/coacd.cpp
 
 RESOURCES += \
@@ -578,7 +718,9 @@ win32 {
 win32 {
     # GL libs for Qt 5.5+; GDI supplies desktop pixel sampling for the
     # cross-application color eyedropper.
-    LIBS += -lopengl32 -lgdi32
+    # -lpsapi: GetProcessMemoryInfo, behind the bake census line's peak
+    # working set (lane BAKEPERF1, 2026-09-11)
+    LIBS += -lopengl32 -lgdi32 -lpsapi
 }
 
 macx {
@@ -619,7 +761,9 @@ build_pass|!debug_and_release {
 
 	XML += \
 		build/nif.xml \
-		build/docsys/kfmxml/kfm.xml
+		build/docsys/kfmxml/kfm.xml \
+		res/hkclasses_fo4.json \
+		res/hkx_annotation_vocabulary.txt
 
 	QSS += \
 		res/style.qss

@@ -575,9 +575,13 @@ void BA2File::loadArchivesFromDir(const char *pathName, size_t prefixLen)
         case 0x28932000000000ULL:       // "hdr"
         case 0x29B33D32A6E9F3ULL:       // "ilstrings"
         case 0x2B980000000000ULL:       // "kf"
+        // WW: the NifSkope Wild Wasteland material sidecars, so a loose
+        // --resource dir can serve them the way a .ba2 already does.
+        case 0x2CBE4B40000000ULL:       // "lodm"
         case 0x2D874000000000ULL:       // "mat"
         case 0x2D973A00000000ULL:       // "mesh"
         case 0x2EA66000000000ULL:       // "nif"
+        case 0x308B2B40000000ULL:       // "pbrm"    (WW)
         case 0x33D32A6E9F3000ULL:       // "strings"
         case 0x349E1000000000ULL:       // "tga"
           fileList.insert(f);

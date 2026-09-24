@@ -302,6 +302,12 @@ public:
 	 */
 	bool texSaveNIF( class NifModel * nif, const QString & filepath, QModelIndex & iData );
 
+	/*! Studio lighting (lane PBRR2A): prefilter a cube file's bytes through the
+	 *  SFCubeMapCache (texLoadPBRCubeMap) without its bsver >= 151 gate. The caller
+	 *  normalises the header first (src/gl/scenelighting.cpp). id[0] = the GGX
+	 *  prefiltered cube, id[1] = the 32 px irradiance cube; returns the mip count. */
+	GLuint loadStudioCube( const NifModel * nif, const QString & name, QByteArray & data, GLuint * id );
+
 protected:
 	GLuint texLoadDDS( const QString & filepath, GLenum & target, QByteArray & data, GLuint * id );
 	GLuint texLoadPBRCubeMap( const NifModel * nif, const QString & filepath,

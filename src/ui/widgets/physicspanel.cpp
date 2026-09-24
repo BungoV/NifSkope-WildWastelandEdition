@@ -389,7 +389,7 @@ PhysicsSimPanel::PhysicsSimPanel( GLView * ogl, NifModel * nif, Mode mode,
 	QPushButton * recBtn = new QPushButton( tr( "Record" ), this );
 	recBtn->setCheckable( true );
 	recBtn->setToolTip( tr( "Keep every frame as it is simulated. Scrub it on the "
-							"Animation Manager's timeline. Capped at 20 seconds, "
+							"Animation dock's timeline. Capped at 20 seconds, "
 							"oldest dropped." ) );
 	QLabel * recHint = new QLabel( this );
 	recHint->setToolTip( tr( "The recording is scrubbed from the timeline, which has the "

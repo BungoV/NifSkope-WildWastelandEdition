@@ -37,6 +37,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/glscene.h"
 #include "gl/glmarker.h"
 #include "gl/hknpdecode.h"
+#include "hkxplayback.h"
 #include "model/nifmodel.h"
 #include "ui/settingsdialog.h"
 #include "glview.h"
@@ -501,6 +502,20 @@ bool Node::isGhosted() const
 void Node::transform()
 {
 	IControllable::transform();
+
+	/* THE LOADED HAVOK CLIP POSES THIS NODE (lane HKX2).
+	 *
+	 * Exactly here, and not in Scene::transform, for two reasons. The
+	 * controllers have just run, so a clip WINS over a NiTransformController
+	 * that names the same node instead of losing to it; and nothing has read a
+	 * world transform yet -- parents are transformed before children, and this
+	 * node's collision body below is the first thing in the frame to ask for
+	 * one -- so no cached world transform can be built from a local that is
+	 * about to change. It writes the same member the controllers write, so
+	 * skinning, bounds, node markers and picking follow with no changes.
+	 */
+	if ( scene->hkx && scene->hkx->posing() )
+		scene->hkx->applyLocal( this );
 
 	// if there's a rigid body attached, then calculate and cache the body's transform
 	// (need this later in the drawing stage for the constraints)

@@ -50,10 +50,19 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "version.h"
 #include "wwlibrary.h"
 #include "wwskin.h"
+#include "filestab.h"	// lane FILESTAB: the Files tab's extensions and .hkx route
+#include "hkxplayback.h"
+#include "impostorchunk.h"	// lane IMPOSTORSHOW: cards a chunk manifest places
+#include "lodinative.h"	// lane NATIVEVIEW1: the .lodi/.lodo built document
+#include "cellview.h"	// lane CELLVIEW1: a whole exterior cell, built
+#include "cellworkspace.h"	// lane CELLWORK1
 
 #include <QPainterPath>
 #include "gl/glscene.h"
 #include "model/kfmmodel.h"
+#include "hkxmodel.h"	// lane HKXEDIT1
+#include "animworkspace.h"	// (lane BUILD11) HKXEDIT2's select() edit calls animws->setCurrentIndex; nifskope.h only forward-declares it
+#include "filestab.h"	// lane HKXEDIT1: the clip route beside the block route
 #include "model/nifmodel.h"
 #include "model/nifproxymodel.h"
 #include "model/undocommands.h"
@@ -66,6 +75,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "ui/about_dialog.h"
 #include "ui/settingsdialog.h"
 #include "qt5compat.hpp"
+#include "watermarkpanel.h"
 
 #include <QAction>
 #include <QActionGroup>
@@ -162,6 +172,17 @@ const QList<QPair<QString, QString>> NifSkope::filetypes = {
 	// nor is our own whole-worldspace landscape file (docs/LODGEN_BTD_FORMAT.md):
 	// it stores planes, not meshes, so it opens the same way and MESHES the same way
 	{ "Landscape Terrain", "lodl" },
+	// nor is the native object LOD: a .lodi is a PLACEMENT table and its
+	// geometry is in the .lodo beside it, so it is built here too (lodinative.cpp)
+	{ "Native Object LOD", "lodi" },
+	// nor is a cell view: a `.wwcell` is a one-line SPEC (plugins, worldspace,
+	// cell, block size) and the scene is built out of the plugin and the
+	// models it names -- src/cellview.h. Read-only, like every route here.
+	{ "Fallout 4 Cell View", "wwcell" },
+	// nor is a baked octahedral impostor set: an `<id>_oct.lodm` is a JSON
+	// envelope naming four sheets, and opening one shows THE CARD -- see
+	// impostorchunk.cpp. A material `.lodm` opened this way says so and refuses.
+	{ "Impostor Card Set", "lodm" },
 	// KF types
 	{ "Keyframe", "kf" }, { "Keyframe Animation", "kfa" }, { "Keyframe Motion", "kfm" },
 	// Miscellaneous NIF types
@@ -183,6 +204,8 @@ constexpr int NifBrowserConfiguredResource = 2;
 constexpr int NifBrowserGameRole = Qt::UserRole + 40;
 constexpr int NifBrowserFolderPathRole = Qt::UserRole + 41;
 constexpr int NifBrowserFavouriteRole = Qt::UserRole + 42;
+//! lane FILESTAB: a Loaded-files row that is a loaded ANIMATION, by name.
+constexpr int NifBrowserClipRole = Qt::UserRole + 43;
 
 /*! Block List-only header labels.
  *
@@ -539,7 +562,7 @@ protected:
 		const QModelIndexList rows = selectionModel()->selectedRows( 0 );
 		if ( rows.size() != 1 ) {
 			QToolTip::showText( QCursor::pos(),
-				tr( "Drag one Loaded NIF at a time to save it" ), this );
+				tr( "Drag one loaded file at a time to save it" ), this );
 			return;
 		}
 		draggedRow = QPersistentModelIndex( rows.first() );
@@ -917,7 +940,7 @@ static QIcon faceDonorMarkIcon()
 /*! ---- What the ROW STRIP's glyphs say on hover ------------------------------
  *
  *  One short sentence per (glyph, state), in the vocabulary of the row menu that
- *  offers the same marks — "Use as Skeleton for Loaded NIFs" and this are two
+ *  offers the same marks — "Use as Skeleton for Loaded files" and this are two
  *  ways to reach one flag, and a reader should not have to notice they are.
  *
  *  The INERT wordings matter most and are the reason this is state-aware rather
@@ -942,8 +965,8 @@ static QString loadedNifSkeletonTip( bool marked, bool inert )
 			? QObject::tr( "The marked skeleton; unmark it from the row menu" )
 			: QObject::tr( "The primary is the skeleton unless another row is marked" );
 	return marked
-		? QObject::tr( "The skeleton for Loaded NIFs — click to unmark it" )
-		: QObject::tr( "Use as the skeleton for Loaded NIFs — only one at a time" );
+		? QObject::tr( "The skeleton for Loaded files — click to unmark it" )
+		: QObject::tr( "Use as the skeleton for Loaded files — only one at a time" );
 }
 
 static QString loadedNifWeaponTip( bool marked, bool inert )
@@ -1630,6 +1653,8 @@ NifSkope::NifSkope( bool background )
 
 	kfm = new KfmModel( this );
 	kfmEmpty = new KfmModel( this );
+	hkx = new HkxModel( this );	// (lane HKXEDIT1)
+	hkxEmpty = new HkxModel( this );
 
 	book = SpellBookPtr( new SpellBook( nif, QModelIndex(), this, SLOT( select( const QModelIndex & ) ) ) );
 
@@ -2254,7 +2279,7 @@ NifSkope::NifSkope( bool background )
 	ui->horizontalLayout_2->setSpacing( 2 );
 	ui->bsaFilter->setClearButtonEnabled( true );
 	ui->bsaFilter->setMinimumWidth( 48 );
-	ui->bsaFilter->setPlaceholderText( tr( "Search NIFs..." ) );
+	ui->bsaFilter->setPlaceholderText( tr( "Search files..." ) );
 	ui->bsaFilenameOnly->hide();
 	auto compactTool = [this]( const QString & name, const QString & tip ) {
 		auto * button = new QToolButton( ui->frame );
@@ -2266,19 +2291,19 @@ NifSkope::NifSkope( bool background )
 		return button;
 	};
 	nifBrowserFavouritesOnly = compactTool( QStringLiteral( "NifBrowserFavouritesOnly" ),
-		tr( "Show favorite NIFs only" ) );
+		tr( "Show favorite files only" ) );
 	nifBrowserFavouritesOnly->setCheckable( true );
 	nifBrowserFavouritesOnly->setText( QString::fromUtf8( "\xE2\x98\x85" ) );
 
 	auto * sourcesButton = compactTool( QStringLiteral( "NifBrowserSources" ),
-		tr( "Choose which NIF sources are shown" ) );
+		tr( "Choose which file sources are shown" ) );
 	sourcesButton->setIcon( style()->standardIcon( QStyle::SP_DriveHDIcon ) );
 	sourcesButton->setPopupMode( QToolButton::InstantPopup );
 	auto * sourcesMenu = new QMenu( sourcesButton );
 	nifBrowserArchivesToggle = sourcesMenu->addAction( tr( "Archives" ) );
 	nifBrowserArchivesToggle->setCheckable( true );
 	nifBrowserArchivesToggle->setChecked( true );
-	nifBrowserLooseToggle = sourcesMenu->addAction( tr( "Loose NIFs" ) );
+	nifBrowserLooseToggle = sourcesMenu->addAction( tr( "Loose files" ) );
 	nifBrowserLooseToggle->setCheckable( true );
 	nifBrowserLooseToggle->setChecked( true );
 	QAction * filenameOnly = sourcesMenu->addAction( tr( "Search filenames only" ) );
@@ -2286,15 +2311,15 @@ NifSkope::NifSkope( bool background )
 	sourcesButton->setMenu( sourcesMenu );
 
 	auto * loadBrowserSelection = compactTool( QStringLiteral( "NifBrowserLoadSelected" ),
-		tr( "Load every selected NIF as a document" ) );
+		tr( "Load every selected file as a document" ) );
 	loadBrowserSelection->setIcon( QIcon( QStringLiteral( ":/btn/load" ) ) );
-	loadBrowserSelection->setToolTip( tr( "Load every selected NIF as a document" ) );
+	loadBrowserSelection->setToolTip( tr( "Load every selected file as a document" ) );
 	connect( loadBrowserSelection, &QToolButton::clicked,
 		this, &NifSkope::openNifBrowserSelection );
 	auto * refreshBrowser = compactTool( QStringLiteral( "NifBrowserRefresh" ),
-		tr( "Reload available NIFs from the resource paths configured in Settings" ) );
+		tr( "Reload available files from the resource paths configured in Settings" ) );
 	refreshBrowser->setIcon( QIcon( QStringLiteral( ":/img/update" ) ) );
-	refreshBrowser->setToolTip( tr( "Reload available NIFs from the resource paths configured in Settings" ) );
+	refreshBrowser->setToolTip( tr( "Reload available files from the resource paths configured in Settings" ) );
 	connect( refreshBrowser, &QToolButton::clicked, this, [this]() {
 		// Refresh means "re-read the disk" — drop the cached signatures so the
 		// populate below cannot take the unchanged-resources fast path.
@@ -2315,7 +2340,7 @@ NifSkope::NifSkope( bool background )
 	connect( nifBrowserFavouritesOnly, &QToolButton::toggled,
 		bsaProxyModel, &BSAProxyModel::setFavouritesOnly );
 	loadedNifsModel = new QStandardItemModel( this );
-	loadedNifsModel->setHorizontalHeaderLabels( { tr( "Loaded NIFs · 0" ) } );
+	loadedNifsModel->setHorizontalHeaderLabels( { tr( "Loaded files · 0" ) } );
 	loadedNifsPane = new QWidget( this );
 	loadedNifsPane->setObjectName( QStringLiteral( "LoadedNifsPane" ) );
 	auto * loadedLayout = new QVBoxLayout( loadedNifsPane );
@@ -2526,7 +2551,7 @@ NifSkope::NifSkope( bool background )
 	// mode switch never reparents the live model/view or risks dropping a row.
 	loadedNifsFilter = new QLineEdit( loadedNifsPane );
 	loadedNifsFilter->setObjectName( QStringLiteral( "LoadedNifsFilter" ) );
-	loadedNifsFilter->setPlaceholderText( tr( "Search loaded NIFs…" ) );
+	loadedNifsFilter->setPlaceholderText( tr( "Search loaded files…" ) );
 	loadedNifsFilter->setClearButtonEnabled( true );
 	loadedNifsFilter->setMinimumWidth( 48 );
 	loadedLayout->addWidget( loadedNifsFilter );
@@ -2584,11 +2609,11 @@ NifSkope::NifSkope( bool background )
 			const bool useSelection = selectedRows.size() > 1
 				&& selectedRows.contains( index.sibling( index.row(), 0 ) );
 			QMenu menu( this );
-			QAction * open = menu.addAction( tr( "Open NIF" ) );
-			QAction * openNew = menu.addAction( tr( "Open NIF in New Window" ) );
+			QAction * open = menu.addAction( tr( "Open" ) );
+			QAction * openNew = menu.addAction( tr( "Open in New Window" ) );
 			QAction * add = menu.addAction( useSelection
-				? tr( "Add %1 Selected to Loaded NIFs" ).arg( selectedRows.size() )
-				: tr( "Add to Loaded NIFs" ) );
+				? tr( "Add %1 Selected to Loaded files" ).arg( selectedRows.size() )
+				: tr( "Add to Loaded files" ) );
 			QAction * favourite = nullptr;
 			if ( path.endsWith( QStringLiteral( ".nif" ), Qt::CaseInsensitive ) ) {
 				const bool starred = isNifBrowserFavourite( index );
@@ -2628,6 +2653,11 @@ NifSkope::NifSkope( bool background )
 				showDocumentMenu( document, loadedNifsView->viewport()->mapToGlobal( pos ) );
 			else if ( BackgroundNifDocument * background = backgroundDocumentFromBrowserIndex( index ) )
 				showBackgroundDocumentMenu( background, loadedNifsView->viewport()->mapToGlobal( pos ) );
+			// lane FILESTAB: a loaded ANIMATION row. Not a document, so neither of
+			// the two lookups above finds it, and it gets its own two-item menu.
+			else if ( !index.data( NifBrowserClipRole ).toString().isEmpty() )
+				showLoadedClipMenu( index.data( NifBrowserClipRole ).toString(),
+					loadedNifsView->viewport()->mapToGlobal( pos ) );
 			else {
 				/* NO EARLY RETURN ON EMPTY SPACE. Adding a file is the first thing
 				 * you want from this panel and an empty panel is exactly when there
@@ -2636,8 +2666,8 @@ NifSkope::NifSkope( bool background )
 				 * needs it. Same mistake the Collision Manager's row menu made.
 				 */
 				QMenu menu( this );
-				QAction * add = menu.addAction( tr( "Add NIF to Loaded NIFs…" ) );
-				add->setToolTip( tr( "Load any NIF from disk as a workspace document" ) );
+				QAction * add = menu.addAction( tr( "Add file to Loaded files…" ) );
+				add->setToolTip( tr( "Load any file from disk as a workspace document" ) );
 				menu.setToolTipsVisible( true );
 				if ( menu.exec( loadedNifsView->viewport()->mapToGlobal( pos ) ) == add )
 					addWorkspaceDocumentsFromDialog();
@@ -2733,7 +2763,7 @@ NifSkope::NifSkope( bool background )
 
 	// Create Progress Bar
 	/* ********************** */
-	progress = new QProgressBar( ui->statusbar );
+	progress = new QProgressBar( this );	// re-parented into the viewport message line
 	progress->setMaximumSize( 200, 18 );
 	progress->setVisible( false );
 
@@ -2808,6 +2838,14 @@ NifSkope::NifSkope( bool background )
 
 	// Connections (that are required to load after all other inits)
 	initConnections();
+
+	/* The Water Marking dock (src/watermarkpanel.cpp): marking water
+	 * direction by hand on a .lodl, which bungo asked for on 2026-09-09.
+	 * One call, because the dock, its entry in the Workspaces dropdown, its
+	 * canvas and its self-test are all built in that file -- the other
+	 * manager docks are created in nifskope_ui.cpp, which another lane held
+	 * open when this was written, and this turned out to be the better seam. */
+	waterMarkInstall( this );
 
 	connect( options, &SettingsDialog::saveSettings, this, &NifSkope::updateSettings );
 	connect( options, &SettingsDialog::saveSettings, this, [this]() {
@@ -3078,6 +3116,100 @@ void NifSkope::rebuildDocumentTabs()
 	rebuildLoadedNifsBrowserGroup();
 }
 
+/*! The row menu of a loaded ANIMATION in the Loaded-files list.
+ *
+ *  Lane FILESTAB. Two items and no more: play it, or drop it. Unload is the
+ *  only caller of HkxPlayback::unload() in the program -- the restore it does
+ *  is byte-exact, and tests/spells/files_tab.sh gate (4) is that claim.
+ */
+void NifSkope::showLoadedClipMenu( const QString & clipName, const QPoint & globalPos )
+{
+	if ( !ogl ) return;
+	Scene * sc = ogl->getScene();
+	if ( !sc || !sc->hkx || !sc->hkx->has( clipName ) ) return;
+
+	QMenu menu( this );
+	QAction * play = menu.addAction( tr( "Play This Animation" ) );
+	play->setEnabled( sc->hkx->activeName() != clipName );
+	play->setToolTip( tr( "Make it the sequence the transport plays" ) );
+	menu.addSeparator();
+	QAction * drop = menu.addAction( tr( "Unload Animation" ) );
+	drop->setToolTip( tr( "Drop this clip and put every bone it posed back "
+		"exactly as it was" ) );
+	menu.setToolTipsVisible( true );
+
+	QAction * chosen = menu.exec( globalPos );
+	if ( chosen == play ) {
+		ogl->setSceneSequence( clipName );
+		rebuildLoadedNifsBrowserGroup();
+	} else if ( chosen == drop ) {
+		if ( wwFilesTabUnloadAnimation( ogl, clipName ) )
+			rebuildLoadedNifsBrowserGroup();
+	}
+}
+
+/*! WW_FILESTAB_TEST seam: show the Files page and rebuild its tree NOW.
+ *
+ *  A harness forces the state it measures. The populate is otherwise deferred
+ *  while the left editor is on another page, so a harness that only set the
+ *  resource roots would census an empty tree and pass nothing.
+ */
+void NifSkope::wwFilesTabShowAndRebuild()
+{
+	setLeftColumnMode( LeftNifs );
+	if ( dLeft ) dLeft->show();
+	nifBrowserIndexSignature.clear();
+	nifBrowserTreeSignature.clear();
+	populateConfiguredNifBrowserNow();
+}
+
+/*! WW_FILESTAB_TEST seam: put one row in the Files tree and open it exactly
+ *  as a double-click on that row does -- a real row with the real role data,
+ *  through the view's own doubleClicked signal, so the gate exercises the
+ *  route the user takes and not a private back door. */
+void NifSkope::wwFilesTabOpenRow( const QString & diskPath )
+{
+	if ( !bsaModel || !bsaProxyModel || !bsaView ) return;
+	auto * name = new QStandardItem( QFileInfo( diskPath ).fileName() );
+	name->setData( NifBrowserLooseFile, NifBrowserSourceRole );
+	auto * path = new QStandardItem( diskPath );
+	path->setData( NifBrowserLooseFile, NifBrowserSourceRole );
+	bsaModel->appendRow( { name, path, new QStandardItem() } );
+	const QModelIndex proxy = bsaProxyModel->mapFromSource( name->index() );
+	if ( proxy.isValid() )
+		emit bsaView->doubleClicked( proxy );
+}
+
+/*! WW_ARCHLOCK_TEST seam (lane ARCHLOCK1, 2026-09-17): put one CONFIGURED-
+ *  RESOURCE row in the Files tree and open it exactly as a double-click on
+ *  that row does.
+ *
+ *  wwFilesTabOpenRow above makes a LOOSE row, and a loose row opens through
+ *  openFile(): the document gets a real file name, NifModel::load derives a
+ *  data path from it, and its own GameResources::init_archives() builds the
+ *  shared index with no lock held. That route never hung, which is why the
+ *  first probe of this bug could not reproduce it.
+ *
+ *  A CONFIGURED row goes to openConfiguredNif() -> loadConfiguredNifIntoDocument(),
+ *  which loads the bytes out of the configured archive through a QBuffer. The
+ *  model never sees a file name, so its data path is EMPTY, so it never builds
+ *  an index of its own and every lookup falls through to the parent -- which is
+ *  bungo's route, and the one that deadlocked. */
+void NifSkope::wwFilesTabOpenConfiguredRow( int game, const QString & virtualPath )
+{
+	if ( !bsaModel || !bsaProxyModel || !bsaView ) return;
+	auto * name = new QStandardItem( virtualPath.section( QChar( '/' ), -1 ) );
+	name->setData( NifBrowserConfiguredResource, NifBrowserSourceRole );
+	name->setData( game, NifBrowserGameRole );
+	auto * path = new QStandardItem( virtualPath );
+	path->setData( NifBrowserConfiguredResource, NifBrowserSourceRole );
+	path->setData( game, NifBrowserGameRole );
+	bsaModel->appendRow( { name, path, new QStandardItem() } );
+	const QModelIndex proxy = bsaProxyModel->mapFromSource( name->index() );
+	if ( proxy.isValid() )
+		emit bsaView->doubleClicked( proxy );
+}
+
 void NifSkope::rebuildLoadedNifsBrowserGroup()
 {
 	if ( !loadedNifsModel ) return;
@@ -3158,6 +3290,39 @@ void NifSkope::rebuildLoadedNifsBrowserGroup()
 		name->setToolTip( tooltip.join( QLatin1Char( '\n' ) ) );
 		loadedNifsModel->appendRow( name );
 	}
+	/* LOADED ANIMATIONS SIT BESIDE THE MODELS (lane FILESTAB, bungo 2026-09-10:
+	 * "rename Loaded NIFs to Loaded Files").
+	 *
+	 * A clip is not a document -- it has no NifModel and no window -- so it
+	 * carries neither of the document roles and the row delegate finds no marks
+	 * to draw on it. What tells it apart at a glance is its own icon, a play
+	 * triangle in the skin's toggle colour, and its row menu is the one place
+	 * HkxPlayback::unload() is reachable from.
+	 */
+	if ( ogl ) {
+		Scene * clipScene = ogl->getScene();
+		if ( clipScene && clipScene->hkx ) {
+			const QString playing = clipScene->hkx->activeName();
+			const QStringList clipNames = clipScene->hkx->names();
+			for ( const QString & clipName : clipNames ) {
+				auto * row = new QStandardItem( clipName );
+				row->setEditable( false );
+				row->setDragEnabled( false );
+				row->setDropEnabled( false );
+				row->setIcon( wwFilesTabClipIcon() );
+				row->setData( clipName, NifBrowserClipRole );
+				QStringList clipTip;
+				clipTip << ( clipName == playing
+					? tr( "Loaded animation \xE2\x80\x94 playing" )
+					: tr( "Loaded animation \xE2\x80\x94 right-click to play or unload it" ) );
+				if ( const HkxClipEntry * e = clipScene->hkx->find( clipName );
+					 e && !e->path.isEmpty() )
+					clipTip << QDir::toNativeSeparators( e->path );
+				row->setToolTip( clipTip.join( QLatin1Char( '\n' ) ) );
+				loadedNifsModel->appendRow( row );
+			}
+		}
+	}
 	if ( loadedNifsView ) {
 		loadedNifsView->header()->setStretchLastSection( true );
 		loadedNifsView->viewport()->update();
@@ -3196,18 +3361,18 @@ void NifSkope::updateLoadedNifsPresentation()
 		&& !loadedNifsFilter->text().trimmed().isEmpty();
 	QString title;
 	if ( filtering )
-		title = tr( "Loaded NIFs · %1 of %2" ).arg( shown ).arg( total );
+		title = tr( "Loaded files · %1 of %2" ).arg( shown ).arg( total );
 	else if ( total == 1 )
-		title = tr( "Loaded NIF · 1" );
+		title = tr( "Loaded file · 1" );
 	else
-		title = tr( "Loaded NIFs · %1" ).arg( total );
+		title = tr( "Loaded files · %1" ).arg( total );
 	loadedNifsModel->setHeaderData( 0, Qt::Horizontal, title, Qt::DisplayRole );
 
 	auto * view = static_cast<LoadedNifsTreeView *>( loadedNifsView );
 	if ( total == 0 )
-		view->setEmptyMessage( tr( "Drag a NIF here, or right-click to add files." ) );
+		view->setEmptyMessage( tr( "Drag a file here, or right-click to add files." ) );
 	else if ( filtering && shown == 0 )
-		view->setEmptyMessage( tr( "No loaded NIFs match “%1”." )
+		view->setEmptyMessage( tr( "No loaded files match “%1”." )
 			.arg( loadedNifsFilter->text().trimmed() ) );
 	else
 		view->setEmptyMessage( QString() );
@@ -3310,11 +3475,11 @@ void NifSkope::showDocumentMenu( NifSkope * document, const QPoint & globalPos )
 	QAction * makePrimary = menu.addAction( tr( "Make Primary / Edit" ) );
 	makePrimary->setEnabled( document != this );
 	menu.addSeparator();
-	QAction * asSkeleton = menu.addAction( tr( "Use as Skeleton for Loaded NIFs" ) );
+	QAction * asSkeleton = menu.addAction( tr( "Use as Skeleton for Loaded files" ) );
 	asSkeleton->setIcon( skeletonMarkIcon() );
 	asSkeleton->setCheckable( true );
 	asSkeleton->setChecked( ogl && document->nif && ogl->workspaceSkeleton() == document->nif );
-	asSkeleton->setToolTip( tr( "Every other loaded NIF evaluates its bones against this file, "
+	asSkeleton->setToolTip( tr( "Every other loaded file evaluates its bones against this file, "
 		"by name, so skinned pieces snap onto it instead of sitting at bind pose. Nothing snaps "
 		"until a skeleton is marked; unmark to put everything back." ) );
 	QAction * asFaceDonor = menu.addAction( tr( "Use as Face Donor for faceBones" ) );
@@ -3349,15 +3514,15 @@ void NifSkope::showDocumentMenu( NifSkope * document, const QPoint & globalPos )
 	ghost->setEnabled( true );
 	QAction * isolate = menu.addAction( tr( "Isolate with Primary" ) );
 	isolate->setEnabled( document != this );
-	QAction * showAll = menu.addAction( tr( "Show All Secondary NIFs" ) );
-	QAction * hideAll = menu.addAction( tr( "Hide All Secondary NIFs" ) );
+	QAction * showAll = menu.addAction( tr( "Show All Secondary Files" ) );
+	QAction * hideAll = menu.addAction( tr( "Hide All Secondary Files" ) );
 	menu.addSeparator();
 	QAction * freeze = menu.addAction( tr( "Freeze Animation…" ) );
 	freeze->setEnabled( document->nif && !AnimSetup::sequenceNames( document->nif ).isEmpty() );
 	freeze->setToolTip( tr( "Bake one instant of a sequence into the fields it drives" ) );
 	menu.setToolTipsVisible( true );
 	menu.addSeparator();
-	QAction * unload = menu.addAction( tr( "Remove from Loaded NIFs" ) );
+	QAction * unload = menu.addAction( tr( "Remove from Loaded files" ) );
 	// The primary's automatic row cannot be removed from its own workspace.
 	unload->setEnabled( document != this );
 	QAction * close = menu.addAction( tr( "Close Document" ) );
@@ -3618,7 +3783,7 @@ void NifSkope::showSelectionMenu( const QModelIndex & clicked, const QPoint & gl
 	doMerge->setToolTip( tr( "Splice these together, in place or into a new file" ) );
 	menu.setToolTipsVisible( true );
 	menu.addSeparator();
-	QAction * remove = menu.addAction( tr( "Remove %1 from Loaded NIFs\tX" ).arg( targets.size() ) );
+	QAction * remove = menu.addAction( tr( "Remove %1 from Loaded files\tX" ).arg( targets.size() ) );
 
 	QAction * chosen = menu.exec( globalPos );
 	if ( !chosen )
@@ -4083,14 +4248,14 @@ void NifSkope::showBackgroundDocumentMenu( BackgroundNifDocument * document, con
 	QMenu menu( this );
 	QAction * makePrimary = menu.addAction( tr( "Make Primary / Edit" ) );
 	QAction * saveAs = menu.addAction( tr( "Save As…" ) );
-	saveAs->setToolTip( tr( "Write this loaded NIF to a file" ) );
-	QAction * addFiles = menu.addAction( tr( "Add NIF to Loaded NIFs…" ) );
+	saveAs->setToolTip( tr( "Write this loaded file to disk" ) );
+	QAction * addFiles = menu.addAction( tr( "Add file to Loaded files…" ) );
 	menu.addSeparator();
-	QAction * asSkeleton = menu.addAction( tr( "Use as Skeleton for Loaded NIFs" ) );
+	QAction * asSkeleton = menu.addAction( tr( "Use as Skeleton for Loaded files" ) );
 	asSkeleton->setIcon( skeletonMarkIcon() );
 	asSkeleton->setCheckable( true );
 	asSkeleton->setChecked( ogl && document->nif && ogl->workspaceSkeleton() == document->nif );
-	asSkeleton->setToolTip( tr( "Every other loaded NIF evaluates its bones against this file, "
+	asSkeleton->setToolTip( tr( "Every other loaded file evaluates its bones against this file, "
 		"by name, so skinned pieces snap onto it instead of sitting at bind pose. Nothing snaps "
 		"until a skeleton is marked; unmark to put everything back." ) );
 	QAction * asFaceDonor = menu.addAction( tr( "Use as Face Donor for faceBones" ) );
@@ -4117,7 +4282,7 @@ void NifSkope::showBackgroundDocumentMenu( BackgroundNifDocument * document, con
 		&& NifSkope::workspaceFaceDonor() != document->nif );
 	makeFaceBones->setToolTip( NifSkope::workspaceFaceDonor()
 		? tr( "Build a faceBones NIF from this file using the marked donor. It appears in "
-			"Loaded NIFs unsaved, to be saved wherever you want it." )
+			"Loaded files unsaved, to be saved wherever you want it." )
 		: tr( "Mark a file as the face donor first" ) );
 	menu.addSeparator();
 	QAction * visible = menu.addAction( tr( "Visible in Workspace" ) );
@@ -4127,8 +4292,8 @@ void NifSkope::showBackgroundDocumentMenu( BackgroundNifDocument * document, con
 	ghost->setCheckable( true );
 	ghost->setChecked( document->sessionPreviewGhost );
 	QAction * isolate = menu.addAction( tr( "Isolate with Primary" ) );
-	QAction * showAll = menu.addAction( tr( "Show All Secondary NIFs" ) );
-	QAction * hideAll = menu.addAction( tr( "Hide All Secondary NIFs" ) );
+	QAction * showAll = menu.addAction( tr( "Show All Secondary Files" ) );
+	QAction * hideAll = menu.addAction( tr( "Hide All Secondary Files" ) );
 	menu.addSeparator();
 	// Per file, per limb: this is what makes "freeze each part at its own moment,
 	// then merge" a thing you can actually do.
@@ -4148,11 +4313,11 @@ void NifSkope::showBackgroundDocumentMenu( BackgroundNifDocument * document, con
 	menu.addSeparator();
 	// A data-only document exists solely as a workspace member, so "Close" would
 	// duplicate this exact operation. Offer the one name that says where it goes.
-	QAction * unload = menu.addAction( tr( "Remove from Loaded NIFs" ) );
+	QAction * unload = menu.addAction( tr( "Remove from Loaded files" ) );
 	QAction * chosen = menu.exec( globalPos );
 	if ( chosen == revert ) {
-		if ( modified && QMessageBox::warning( this, tr( "Revert Loaded NIF" ),
-			tr( "Reverting %1 discards every unsaved change in that loaded NIF.\n\n"
+		if ( modified && QMessageBox::warning( this, tr( "Revert Loaded File" ),
+			tr( "Reverting %1 discards every unsaved change in that loaded file.\n\n"
 				"This cannot be undone. Continue?" ).arg( document->displayName() ),
 			QMessageBox::Discard | QMessageBox::Cancel,
 			QMessageBox::Cancel ) != QMessageBox::Discard )
@@ -4195,7 +4360,7 @@ void NifSkope::showBackgroundDocumentMenu( BackgroundNifDocument * document, con
 		if ( !trouble.isEmpty() )
 			QMessageBox::warning( this, tr( "Generate faceBones NIF" ), trouble );
 		else
-			statusBar()->showMessage(
+			showTransientMessage(
 				tr( "Generated a faceBones NIF from %1 — unsaved, save it where you want it." )
 					.arg( document->displayName() ), 8000 );
 	}
@@ -4446,7 +4611,7 @@ QString NifSkope::generateFaceBonesInto( BackgroundNifDocument * source )
 int NifSkope::addWorkspaceDocumentsFromDialog()
 {
 	const QStringList paths = QFileDialog::getOpenFileNames( this,
-		tr( "Add NIFs to Loaded NIFs" ), nif ? nif->getFolder() : QString(),
+		tr( "Add files to Loaded files" ), nif ? nif->getFolder() : QString(),
 		tr( "NIF files (*.nif);;All files (*)" ) );
 	if ( paths.isEmpty() )
 		return 0;
@@ -4459,10 +4624,10 @@ int NifSkope::addWorkspaceDocumentsFromDialog()
 			failed << QFileInfo( path ).fileName();
 	}
 	if ( !failed.isEmpty() )
-		QMessageBox::warning( this, tr( "Add NIFs" ),
+		QMessageBox::warning( this, tr( "Add files" ),
 			tr( "Could not read %1." ).arg( failed.join( QStringLiteral( ", " ) ) ) );
 	if ( added )
-		statusBar()->showMessage( tr( "Added %1 NIF(s) to Loaded NIFs" ).arg( added ), 5000 );
+		showTransientMessage( tr( "Added %1 file(s) to Loaded files" ).arg( added ), 5000 );
 	return added;
 }
 
@@ -4514,7 +4679,7 @@ bool NifSkope::saveBackgroundDocumentTo( BackgroundNifDocument * document, const
 	document->currentFile = path;
 	document->markSaved();
 	refreshAllDocumentSessions();
-	statusBar()->showMessage( tr( "Saved %1" ).arg( path ), 5000 );
+	showTransientMessage( tr( "Saved %1" ).arg( path ), 5000 );
 	return true;
 }
 
@@ -4611,8 +4776,8 @@ bool NifSkope::confirmBackgroundDocumentRemoval( BackgroundNifDocument * documen
 	if ( !document ) return false;
 	if ( !document->isModified() ) return true;
 	const QMessageBox::StandardButton answer = QMessageBox::warning( this,
-		tr( "Unsaved Loaded NIF" ),
-		tr( "%1 has unsaved changes. Removing it from Loaded NIFs permanently "
+		tr( "Unsaved loaded file" ),
+		tr( "%1 has unsaved changes. Removing it from Loaded files permanently "
 			"discards its in-memory copy.\n\nSave it first?" ).arg( document->displayName() ),
 		QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel,
 		QMessageBox::Cancel );
@@ -5548,7 +5713,7 @@ void NifSkope::wwPasteFieldToBlocks( const QList<qint32> & blocks )
 			vi, item->value(), wwFieldClip.value, item->name(), nif ) );
 		applied++;
 	}
-	statusBar()->showMessage(
+	showTransientMessage(
 		tr( "Pasted %1 onto %2 of %3 selected blocks" )
 			.arg( wwFieldClipboardLabel() ).arg( applied ).arg( blocks.size() ), 4000 );
 }
@@ -5883,7 +6048,7 @@ void NifSkope::goToBlock()
 		}
 	}
 	if ( block < 0 ) {
-		ui->statusbar->showMessage( tr( "No block matches \"%1\"." ).arg( query ), 3500 );
+		showTransientMessage( tr( "No block matches \"%1\"." ).arg( query ), 3500 );
 		return;
 	}
 	blockListSearch->clear();
@@ -6078,8 +6243,8 @@ void NifSkope::renameBlockListIndex( const QModelIndex & index, bool notifyIfUna
 	const bool renameable = block.isValid() && nif->blockInherits( block, "NiAVObject" )
 		&& nif->getIndex( block, "Name" ).isValid();
 	if ( !renameable ) {
-		if ( notifyIfUnavailable && ui && ui->statusbar )
-			ui->statusbar->showMessage( tr( "This block has no unique scene-object Name to rename." ), 3000 );
+		if ( notifyIfUnavailable )
+			showTransientMessage( tr( "This block has no unique scene-object Name to rename." ), 3000 );
 		return;
 	}
 
@@ -6119,8 +6284,8 @@ void NifSkope::renameBlockListIndex( const QModelIndex & index, bool notifyIfUna
 			QMessageBox::warning( this, tr( "Rename" ), error );
 			return false;
 		}
-		if ( updatedReferences > 0 && ui && ui->statusbar )
-			ui->statusbar->showMessage(
+		if ( updatedReferences > 0 )
+			showTransientMessage(
 				tr( "Renamed node and updated %1 palette/sequence reference(s)." )
 					.arg( updatedReferences ), 4000 );
 		QTimer::singleShot( 0, this, [this]() { applyBlockListFilter(); } );
@@ -6630,8 +6795,8 @@ bool NifSkope::blockListCollisionDrop( QDropEvent * e, qint32 shape )
 
 	if ( e->type() != QEvent::Drop ) {
 		setBlockListDropTarget( legal ? over : -1 );
-		if ( ui && ui->statusbar && legal )
-			ui->statusbar->showMessage( tr( "Drop to make a mesh from this collision, under %1." )
+		if ( legal )
+			showTransientMessage( tr( "Drop to make a mesh from this collision, under %1." )
 				.arg( nif->itemName( iOver ) ), 2000 );
 		e->setDropAction( legal ? Qt::CopyAction : Qt::IgnoreAction );
 		e->accept();
@@ -6650,8 +6815,7 @@ bool NifSkope::blockListCollisionDrop( QDropEvent * e, qint32 shape )
 		e->accept();
 	else
 		e->ignore();
-	if ( ui && ui->statusbar )
-		ui->statusbar->showMessage( trouble.isEmpty()
+	showTransientMessage( trouble.isEmpty()
 			? tr( "Made a mesh from that collision, under %1." ).arg( nif->itemName( iOver ) )
 			: trouble, 5000 );
 	return true;
@@ -7313,9 +7477,9 @@ bool NifSkope::blockListDragEvent( QEvent * event )
 	else
 		e->ignore();
 
-	if ( ui && ui->statusbar ) {
+	{
 		if ( moved == 0 ) {
-			ui->statusbar->showMessage( refusals.value( 0, tr( "Nothing was moved." ) ), 5000 );
+			showTransientMessage( refusals.value( 0, tr( "Nothing was moved." ) ), 5000 );
 		} else {
 			/* The unparent message carries no %1 — there is no block it went into
 			 * — so it must not be arg()'d. QString::arg on a string with no
@@ -7331,7 +7495,7 @@ bool NifSkope::blockListDragEvent( QEvent * event )
 					: mode == WwReparentMode::KeepLocal
 					? tr( "Moved %n block(s) into block %1, keeping the local transform.", nullptr, moved )
 					: tr( "Moved %n block(s) into block %1.", nullptr, moved ) ).arg( target );
-			ui->statusbar->showMessage( what
+			showTransientMessage( what
 				+ ( refusals.isEmpty() ? QString() : QStringLiteral( "  " ) + refusals.first() ), 5000 );
 		}
 	}
@@ -7685,6 +7849,8 @@ void NifSkope::select( const QModelIndex & index )
 
 	if ( timeline && sender() != timeline )
 		timeline->setCurrentIndex( idx );
+	if ( animws && sender() != animws )
+		animws->setCurrentIndex( idx );	// (lane HKXEDIT2) viewport -> the dope sheet's bone row
 	perfMark( "timeline setCurrentIndex" );
 
 	// selecting a block from the tree/list/timeline updates the object-mode
@@ -8075,7 +8241,17 @@ void NifSkope::setCurrentFile( const QString & filename )
 	QStringList files = settings.value( "File/Recent File List" ).toStringList();
 	::updateRecentFiles( files, currentFile );
 
-	settings.setValue( "File/Recent File List", files );
+	// A HARNESS RUN DOES NOT TOUCH HIS RECENT FILES (lane HARNESSWIN2,
+	// 2026-09-19). saveUi() has refused to persist from a WW_* run since
+	// 2026-07-27 and restoreUi() was given the same refusal on 2026-09-19,
+	// but this writer sits outside both, so every gate that opens a .nif
+	// rewrote the user's recent-file list. Found by tests/spells/
+	// harness_window.sh row (c), which passed at 14:47 and failed at 14:58
+	// on the same two binaries: the exported key only differs when the
+	// list ORDER changes, so the damage was real and intermittent at once.
+	// The READ above is left alone -- the menu still shows his files.
+	if ( !NifSkope::wwHeadlessRun() )
+		settings.setValue( "File/Recent File List", files );
 
 	updateAllRecentFileActions();
 	refreshAllDocumentSessions();
@@ -8115,7 +8291,12 @@ void NifSkope::clearCurrentFile()
 	QSettings settings;
 	QStringList files = settings.value( "File/Recent File List" ).toStringList();
 	files.removeAll( currentFile );
-	settings.setValue( "File/Recent File List", files );
+	// The same writer in its other spelling (lane HARNESSWIN2, 2026-09-19):
+	// clearCurrentFile() REMOVES an entry, and a harness run that closes a
+	// document reaches it. Guarding only setCurrentFile() would have left
+	// the list still being edited, in the other direction.
+	if ( !NifSkope::wwHeadlessRun() )
+		settings.setValue( "File/Recent File List", files );
 
 	updateAllRecentFileActions();
 }
@@ -8238,7 +8419,7 @@ void NifSkope::checkFile( QFileInfo fInfo, QByteArray hash )
 
 static bool archiveFilterFunction( [[maybe_unused]] void * p, const std::string_view & s )
 {
-	return ( s.ends_with( ".nif" ) || s.ends_with( ".bto" ) || s.ends_with( ".btr" ) );
+	return wwFilesTabAccepts( s );	// lane FILESTAB: one list, in src/filestab.cpp
 }
 
 void NifSkope::populateConfiguredNifBrowser()
@@ -8333,7 +8514,7 @@ void NifSkope::populateConfiguredNifBrowserNow()
 		bsaModel->removeRows( 0, bsaModel->rowCount() );
 	if ( bsaModel->columnCount() < 3 ) bsaModel->init();
 
-	auto * available = new QStandardItem( tr( "Available NIFs" ) );
+	auto * available = new QStandardItem( tr( "Available files" ) );
 	available->setToolTip( tr( "Merged archive and loose files from the configured %1 resource paths" )
 		.arg( Game::StringForMode( game ) ) );
 	QHash<QString, QStandardItem *> folders;
@@ -8413,7 +8594,7 @@ void NifSkope::populateConfiguredNifBrowserNow()
 		}
 
 		auto * name = new QStandardItem( relativePath.section( '/', -1 ) );
-		name->setToolTip( isLooseFile ? tr( "Loose NIF" ) : tr( "Archive NIF" ) );
+		name->setToolTip( isLooseFile ? tr( "Loose file" ) : tr( "Archive file" ) );
 		name->setData( NifBrowserConfiguredResource, NifBrowserSourceRole );
 		name->setData( int( game ), NifBrowserGameRole );
 		auto * path = new QStandardItem( fullPath );
@@ -8424,7 +8605,7 @@ void NifSkope::populateConfiguredNifBrowserNow()
 	}
 
 	if ( fileCount == 0 ) {
-		auto * empty = new QStandardItem( tr( "No configured NIF resources for %1" )
+		auto * empty = new QStandardItem( tr( "No configured file resources for %1" )
 			.arg( Game::StringForMode( game ) ) );
 		empty->setEnabled( false );
 		available->appendRow( { empty, new QStandardItem(), new QStandardItem() } );
@@ -8485,7 +8666,10 @@ bool NifSkope::extractConfiguredNifBytes( int gameID, const QString & path,
 	const std::string virtualPath = path.toLower().toStdString();
 	const BA2File::FileInfo * file = currentArchive->findFile( virtualPath );
 	if ( !file ) {
-		if ( ui && ui->statusbar ) ui->statusbar->showMessage(
+		/* This reader is const; the transient line is window furniture, not
+		   document state (the old code reached the status bar through the
+		   const statusBar() accessor, which is why it compiled before). */
+		const_cast<NifSkope *>( this )->showTransientMessage(
 			tr( "Could not load %1 from configured resources." ).arg( path ), 5000 );
 		return false;
 	}
@@ -8768,7 +8952,7 @@ void NifSkope::toggleNifBrowserFavourite( const QModelIndex & index )
 	bool valid = false;
 	QStringList favourites = readNifBrowserFavorites( &valid );
 	if ( !valid ) {
-		QMessageBox::warning( this, tr( "NIF Browser Favorites" ),
+		QMessageBox::warning( this, tr( "File Browser Favorites" ),
 			tr( "Could not read %1. It was left untouched." )
 				.arg( nifBrowserFavoritesPath() ) );
 		return;
@@ -8776,7 +8960,7 @@ void NifSkope::toggleNifBrowserFavourite( const QModelIndex & index )
 	if ( favourites.contains( id ) ) favourites.removeAll( id );
 	else favourites.append( id );
 	if ( !writeNifBrowserFavorites( favourites ) ) {
-		QMessageBox::warning( this, tr( "NIF Browser Favorites" ),
+		QMessageBox::warning( this, tr( "File Browser Favorites" ),
 			tr( "Could not write %1." ).arg( nifBrowserFavoritesPath() ) );
 		return;
 	}
@@ -9138,7 +9322,7 @@ bool NifSkope::renderMarkIconSheet( const QString & path ) const
 	title.setPointSize( title.pointSize() + 3 );
 	p.setFont( title );
 	p.setPen( ink );
-	p.drawText( left, 34, tr( "Loaded NIFs row marks — 1x as drawn, 8x as inspected" ) );
+	p.drawText( left, 34, tr( "Loaded files row marks — 1x as drawn, 8x as inspected" ) );
 	p.setFont( QFont() );
 	p.setPen( dim );
 	p.drawText( left, 56, tr( "left column LIT (marked) · right column DIM (not marked)" ) );
@@ -9339,6 +9523,42 @@ bool NifSkope::openArchiveFile( const QModelIndex & index, bool newWindow )
 	if ( filepath.isEmpty() ) return true;
 	QModelIndex nameIndex = index.sibling( index.row(), 0 );
 	const int source = nameIndex.data( NifBrowserSourceRole ).toInt();
+
+	/* AN .hkx IS AN ANIMATION, NOT A DOCUMENT (lane FILESTAB, bungo 2026-09-10).
+	 *
+	 * Opening it the way a .nif is opened would REPLACE the model it is meant
+	 * to play on, which is the one thing it must not do. It goes instead to the
+	 * same HkxPlayback::load() the render toolbar's "Load Animation (.hkx)..."
+	 * button calls, and answers with the same summary sentence.
+	 *
+	 * A row inside a .ba2 has no disk path, so its bytes are extracted here and
+	 * staged to a temporary file; a LOOSE row keeps its real path, which is what
+	 * lets the skeleton search look beside the clip and in CharacterAssets above
+	 * it. With nothing open to play it on, wwFilesTabOpenAnimation refuses in
+	 * words and loads nothing.
+	 */
+	if ( wwFilesTabIsAnimation( filepath ) ) {
+		QString clipDisk;
+		QByteArray clipBytes;
+		if ( source == NifBrowserLooseFile ) {
+			clipDisk = filepath;
+		} else if ( currentArchive ) {
+			const std::string key( filepath.toLower().toStdString() );
+			if ( currentArchive->findFile( key ) ) {
+				BA2File::UCharArray store;
+				const unsigned char * ptr = nullptr;
+				const size_t n = currentArchive->extractFile( ptr, store, key );
+				clipBytes = QByteArray( reinterpret_cast<const char *>( ptr ), qsizetype( n ) );
+			}
+		}
+		const WwAnimOpen r = wwFilesTabOpenAnimation( ogl, clipDisk, clipBytes, filepath );
+		showTransientMessage( r.sentence, 12000 );
+		if ( r.loaded )
+			rebuildLoadedNifsBrowserGroup();
+		else
+			QMessageBox::information( this, tr( "Load Animation" ), r.sentence );
+		return r.loaded;
+	}
 	if ( source == NifBrowserConfiguredResource )
 		return openConfiguredNif( nameIndex.data( NifBrowserGameRole ).toInt(), filepath, newWindow );
 	if ( source == NifBrowserLooseFile ) {
@@ -9552,8 +9772,8 @@ void NifSkope::addNifBrowserIndexToLoaded( const QModelIndex & index )
 	}
 	if ( !loaded ) {
 		delete document;
-		if ( ui && ui->statusbar ) ui->statusbar->showMessage(
-			tr( "Could not load %1 into the Loaded NIFs workspace." ).arg( path ), 5000 );
+		showTransientMessage(
+			tr( "Could not load %1 into the Loaded files workspace." ).arg( path ), 5000 );
 		return;
 	}
 	document->captureLoadedState();
@@ -9597,12 +9817,12 @@ void NifSkope::processNextNifBrowserLoad()
 {
 	if ( pendingWorkspaceLoads.isEmpty() ) {
 		processingWorkspaceLoad = false;
-		statusBar()->showMessage( tr( "Finished loading background NIFs" ), 3000 );
+		showTransientMessage( tr( "Finished loading background files" ), 3000 );
 		return;
 	}
 
 	const QPersistentModelIndex index = pendingWorkspaceLoads.takeFirst();
-	statusBar()->showMessage( tr( "Loading background NIFs... %1 remaining" )
+	showTransientMessage( tr( "Loading background files... %1 remaining" )
 		.arg( pendingWorkspaceLoads.size() + 1 ) );
 	if ( index.isValid() ) addNifBrowserIndexToLoaded( index );
 
@@ -9815,8 +10035,53 @@ int NifSkope::performExternalNifDrop( const QStringList & files, int choice )
 	QStringList valid = validExternalNifPaths( files );
 	if ( valid.isEmpty() || choice == ExternalDropCancel )
 		return 0;
-	if ( choice != ExternalDropAdaptive && choice != ExternalDropNewWindows )
+	if ( choice != ExternalDropAdaptive && choice != ExternalDropNewWindows
+		 && choice != ExternalDropOpenHere )
 		return 0;
+
+	if ( choice == ExternalDropOpenHere ) {
+		/* OPENHERE1 (bungo 2026-09-17: "add a third option, 'open here', it
+		 * replaces the already loaded nif / nifs / files in the window"). The
+		 * first dropped file becomes THIS document through openFile, the one
+		 * normal load path, so its Save/Discard/Cancel prompt guards unsaved
+		 * work; every Loaded-files member is then let go exactly the way the
+		 * list's Remove does (a window member leaves the group, a data-only
+		 * one is deleted); the rest of the drop goes into Loaded files.
+		 * Every question is asked BEFORE anything changes: a Cancel on the
+		 * third one leaves the window as it was, not half emptied. */
+		const QList<BackgroundNifDocument *> dataOnly = workspaceBackgroundDocuments();
+		for ( BackgroundNifDocument * document : dataOnly )
+			if ( document && !confirmBackgroundDocumentRemoval( document ) )
+				return 0;
+		QString first = valid.takeFirst();
+		if ( !openFile( first ) )
+			return 0;
+		int handled = 1;
+		for ( NifSkope * document : std::as_const( sessionDocumentWindows ) ) {
+			if ( !document || document == this || !sharesWorkspaceGroup( document ) )
+				continue;
+			document->sessionCollectionMember = false;
+			document->sessionPreviewUnloaded = true;
+			document->sessionPreviewVisible = false;
+		}
+		for ( BackgroundNifDocument * document : dataOnly ) {
+			if ( !document )
+				continue;
+			if ( ogl && ogl->workspaceSkeleton() == document->nif )
+				ogl->setWorkspaceSkeleton( nullptr );
+			sessionBackgroundDocuments.removeOne( document );
+			delete document;
+		}
+		for ( const QString & file : std::as_const( valid ) )
+			if ( addWorkspaceDocumentFromFile( file ) )
+				handled++;
+		refreshAllDocumentSessions();
+		showTransientMessage( valid.isEmpty()
+			? tr( "Opened here; the loaded files were replaced." )
+			: tr( "Opened here; %1 more in Loaded files, the previous ones replaced." )
+				.arg( valid.size() ), 5000 );
+		return handled;
+	}
 
 	if ( choice == ExternalDropNewWindows ) {
 		for ( const QString & file : std::as_const( valid ) )
@@ -9868,9 +10133,8 @@ int NifSkope::performExternalNifDrop( const QStringList & files, int choice )
 	}
 	if ( handled ) {
 		refreshAllDocumentSessions();
-		if ( ui && ui->statusbar )
-			ui->statusbar->showMessage(
-				tr( "%1 dropped NIF(s) ready in this workspace." ).arg( handled ), 5000 );
+		showTransientMessage(
+			tr( "%1 dropped file(s) ready in this workspace." ).arg( handled ), 5000 );
 	}
 	return handled;
 }
@@ -9894,19 +10158,21 @@ void NifSkope::showExternalNifDropMenu( const QStringList & files, const QPoint 
 
 	QMenu menu( this );
 	const bool replaceStarter = canReplaceStarterFromDrop();
-	QString adaptiveText;
-	if ( replaceStarter && valid.size() > 1 )
-		adaptiveText = tr( "Open First Here; Add Rest to Loaded NIFs" );
-	else if ( replaceStarter )
-		adaptiveText = tr( "Open Here" );
-	else
-		adaptiveText = tr( "Add to Loaded NIFs" );
-	QAction * adaptive = menu.addAction( adaptiveText );
-	adaptive->setToolTip( replaceStarter
-		? tr( "The current document is the clean starter. Open the first NIF here; "
-			"additional NIFs stay in Loaded NIFs." )
-		: tr( "Keep the current document and all unsaved work; add every dropped NIF "
-			"to this workspace." ) );
+	/* OPENHERE1: "Open Here" is the FIRST option (bungo 2026-09-17) and it is
+	 * always offered: it replaces the document and every Loaded file with the
+	 * drop. Over the clean starter the adaptive entry used to say "Open Here"
+	 * too and do the same thing, so there it is not offered twice. */
+	QAction * openHere = menu.addAction( valid.size() == 1
+		? tr( "Open Here" ) : tr( "Open Here; Rest to Loaded files" ) );
+	openHere->setToolTip( tr( "Replace what this window holds: the first file becomes the "
+		"document (you are asked about unsaved changes first), every Loaded file is let go, "
+		"and the rest of the drop goes into Loaded files." ) );
+	QAction * adaptive = nullptr;
+	if ( !replaceStarter ) {
+		adaptive = menu.addAction( tr( "Add to Loaded files" ) );
+		adaptive->setToolTip( tr( "Keep the current document and all unsaved work; add every "
+			"dropped file to this workspace." ) );
+	}
 	QAction * newWindows = menu.addAction(
 		style()->standardIcon( QStyle::SP_TitleBarNormalButton ),
 		valid.size() == 1 ? tr( "Open in New Window" ) : tr( "Open Each in a New Window" ) );
@@ -9916,7 +10182,9 @@ void NifSkope::showExternalNifDropMenu( const QStringList & files, const QPoint 
 	menu.setToolTipsVisible( true );
 
 	QAction * chosen = menu.exec( globalPos );
-	if ( chosen == adaptive )
+	if ( chosen == openHere )
+		performExternalNifDrop( valid, ExternalDropOpenHere );
+	else if ( adaptive && chosen == adaptive )
 		performExternalNifDrop( valid, ExternalDropAdaptive );
 	else if ( chosen == newWindows )
 		performExternalNifDrop( valid, ExternalDropNewWindows );
@@ -9932,6 +10200,8 @@ bool NifSkope::saveFile( const QString & filename )
 	bool saved = false;
 	if ( fname.endsWith( ".KFM", Qt::CaseInsensitive ) ) {
 		saved = kfm->saveToFile( fname );
+	} else if ( fname.endsWith( ".hkx", Qt::CaseInsensitive ) && tree->model() == hkx ) {
+		saved = hkx->saveToFile( fname );	// (lane HKXEDIT1) the packfile writer; byte-identical when unedited
 	} else {
 		if ( aSanitize->isChecked() ) {
 			QModelIndex idx = SpellBook::sanitize( nif );
@@ -9968,6 +10238,23 @@ void NifSkope::reload()
 
 void NifSkope::load()
 {
+	/* LEAVING THE CELL WORKSPACE (lane CELLWORK1). Opening anything that is not
+	 * a `.wwcell` puts the window back in the workspace it was in before the
+	 * cell -- not in Default, which would silently discard a layout the person
+	 * chose. setWorkspace replays the bytes it took on the way in, so the NIF
+	 * editor comes back as it was rather than as a re-derived approximation.
+	 *
+	 * It is done HERE, at the top of the load, and not in the NIF branch below,
+	 * because there are many branches down there and only one of them is the
+	 * cell. One place to leave from, one place to enter from. */
+	if ( wsCellIndex >= 0 && currentWorkspace() == wsCellIndex
+		&& QFileInfo( currentFile ).suffix().compare(
+			QLatin1String( "wwcell" ), Qt::CaseInsensitive ) != 0 )
+	{
+		setWorkspace( workspaceBeforeCell );
+		cellWorkspaceForget();
+	}
+
 	if ( configuredResourceGame >= 0 && !configuredResourcePath.isEmpty() ) {
 		loadConfiguredNifIntoDocument(
 			this, configuredResourceGame, configuredResourcePath );
@@ -10020,6 +10307,36 @@ void NifSkope::load()
 		f.setFile( kfm->getFolder(), kfm->get<QString>( kfm->getKFMroot(), "NIF File Name" ) );
 
 		return;
+	}
+	/* AN .hkx OPENED AS A DOCUMENT IS A BLOCK TREE (lane HKXEDIT1, bungo
+	 * 2026-09-10: "Just make hkx fully editable in our nifskope"). The same
+	 * route as a .kfm: the packfile's objects become the Blocks tab, the NIF
+	 * already in the viewport stays there, and the clip is ALSO handed to
+	 * the Files-tab animation route so it plays on that NIF. A refusal is
+	 * the model's own sentence (field and value), never silence. */
+	if ( f.suffix().compare( "hkx", Qt::CaseInsensitive ) == 0 ) {
+		const bool ok = hkx->loadFromFile( fname );
+		if ( ok ) {
+			wwReleaseBlockListColumns();
+			list->setModel( hkx );
+			tree->setModel( hkx );
+			wwApplyBlockListColumns();
+			wireBlockListSelection();
+			if ( ogl )
+				wwFilesTabOpenAnimation( ogl, fname, hkx->toBytes(), fname );
+		} else {
+			showTransientMessage( hkx->loadError(), 12000 );
+		}
+		emit completeLoading( ok, fname );
+		return;
+	}
+	// a NIF replacing an .hkx document takes the block views back (lane HKXEDIT1)
+	if ( tree->model() == hkx ) {
+		wwReleaseBlockListColumns();
+		list->setModel( proxy );
+		tree->setModel( nif );
+		wwApplyBlockListColumns();
+		wireBlockListSelection();
 	}
 
 	/* A load is a new scene, so drop whatever mode the last file was being worked
@@ -10115,14 +10432,132 @@ void NifSkope::load()
 			loaded = nifCreateLodtTerrainScene( nif, fname, spec, &terr, &notes );
 			if ( loaded )
 				lodtPendingRegion = spec;
+
+			/* One document carrying both halves of the native bake: the terrain
+			 * from this `.lodl` and the objects from a `.lodi`, which is what a
+			 * picture of the region needs. The terrain builder owns createNew(),
+			 * so the objects go under the root it has just made. Unset, none of
+			 * this runs and the document is exactly the terrain document. */
+			const QString lodlObjects = qEnvironmentVariable( "WW_LODL_OBJECTS" );
+			if ( loaded && !lodlObjects.isEmpty() ) {
+				LodiSceneSpec ospec;
+				lodiSpecFromEnv( ospec );
+				if ( !ospec.haveRegion ) {
+					// the terrain's own region, so the two halves cannot disagree
+					ospec.x0 = spec.x0;
+					ospec.y0 = spec.y0;
+					ospec.x1 = spec.x1;
+					ospec.y1 = spec.y1;
+					ospec.haveRegion = true;
+				}
+				QString oerr, onotes;
+				nif->holdUpdates( true );
+				const bool ook = nifAppendLodiObjects( nif, nif->getBlockIndex( 0 ),
+					lodlObjects, ospec, &oerr, &onotes );
+				nif->holdUpdates( false );
+				nif->updateModel();
+				if ( ook && !onotes.isEmpty() )
+					qInfo().noquote() << "lodl objects:\n" << onotes;
+				if ( !ook )
+					qWarning() << "lodl objects:" << oerr;
+			}
 		}
 		if ( loaded && !notes.isEmpty() )
 			qInfo().noquote() << "lodt terrain:\n" << notes;
 		if ( !loaded && !terr.isEmpty() )
 			qWarning() << "lodt terrain:" << terr;
+	} else if ( f.suffix().compare( QLatin1String( "lodi" ), Qt::CaseInsensitive ) == 0 ) {
+		/* Native object LOD: the placements are in this file, the geometry is
+		 * in the `.lodo` beside it, and the scene is BUILT out of the two the
+		 * same way the landscape routes above build theirs. The notes say how
+		 * many placements were read and how many were drawn, so a picture is
+		 * never the only evidence that the file was understood. */
+		QString oerr, onotes;
+		LodiSceneSpec ospec;
+		lodiSpecFromEnv( ospec );
+		loaded = nifCreateLodiObjectScene( nif, fname, ospec, &oerr, &onotes );
+		if ( loaded && !onotes.isEmpty() )
+			qInfo().noquote() << "lodi objects:\n" << onotes;
+		if ( !loaded && !oerr.isEmpty() )
+			qWarning() << "lodi objects:" << oerr;
+	} else if ( f.suffix().compare( QLatin1String( "wwcell" ), Qt::CaseInsensitive ) == 0 ) {
+		/* A WHOLE EXTERIOR CELL, the way the Creation Kit shows one (bungo,
+		 * 2026-09-19). The file is a spec, not geometry; WW_CELL_OPEN overrides
+		 * it for the harness and the notes say which of the two was used. */
+		QString cverr, cvnotes;
+		CellSceneSpec cvspec;
+		bool fromEnv = cellSpecFromEnv( cvspec, &cverr );
+		if ( !fromEnv ) {
+			cverr.clear();
+			if ( cellSpecFromFile( fname, cvspec, &cverr ) )
+				cellApplyEnvModifiers( cvspec );
+		}
+		/* THE WORKSPACE'S VIEW ROWS, APPLIED ON THE WAY IN (lane CELLWORK1).
+		 * Flipping a Show row re-opens this very file, because the overlay
+		 * colours are welded into vertex colours when the scene is built -- so
+		 * the rows cannot be a repaint and are not pretending to be one. The
+		 * override block carries ONLY view state: never the worldspace, the
+		 * cell, the plugins or the data root, because those came from the file
+		 * and a view row must not be able to change which cell you are in. */
+		cellWorkspaceApplyOverrides( cvspec );
+		loaded = cvspec.valid && nifCreateCellScene( nif, cvspec, &cverr, &cvnotes );
+		if ( loaded && !cvnotes.isEmpty() )
+			qInfo().noquote() << "cell view:\n" << cvnotes;
+		if ( !loaded && !cverr.isEmpty() )
+			qWarning() << "cell view:" << cverr;
+		if ( loaded ) {
+			cellWorkspaceNoteOpened( fname, cvspec, cvnotes );
+			/* OPENING A CELL OPENS THE CELL WORKSPACE (bungo 2026-09-19 20:40:
+			 * "Cell viewing will be a new workspace btw"). Through the one door,
+			 * so the docks, the NIF column and the pick master all move together
+			 * and the way back is the saved bytes. */
+			if ( wsCellIndex >= 0 )
+				setWorkspace( wsCellIndex );
+		}
+	} else if ( f.suffix().compare( QLatin1String( "lodm" ), Qt::CaseInsensitive ) == 0 ) {
+		/* A BAKED OCTAHEDRAL IMPOSTOR SET, opened on its own (lane IMPOSTORSHOW
+		 * 2026-09-19). The `.lodm` is a JSON envelope naming four sheets, not
+		 * geometry, so the document is the empty starter root and the CARD is what
+		 * is drawn into it -- the same draw path a chunk uses, armed with one
+		 * placement at the origin and NOT behind the chunk master: a person who
+		 * opened this file has already made every choice a master is for.
+		 *
+		 * The extension is also the MATERIAL format. A material `.lodm` opened here
+		 * is refused by name rather than opening an empty window. */
+		QString cerr;
+		loaded = nifCreateStarterScene( nif, &cerr );
+		if ( loaded && !ImpostorChunk::armSingle( nif, fname, &cerr ) ) {
+			loaded = false;
+			cerr = QStringLiteral( "not an impostor card set: %1" ).arg( cerr );
+		}
+		if ( !loaded && !cerr.isEmpty() )
+			qWarning() << "impostor card:" << cerr;
+		else if ( loaded )
+			qInfo().noquote() << ImpostorChunk::report().join( QLatin1Char( 0x0a ) );
 	} else {
 		loaded = nif->loadFromFile( fname );
 	}
+
+	/* lane IMPOSTORSHOW 2026-09-19: if what was just opened is a native LOD
+	 * chunk with a lodgen manifest beside it, read the `C` lines that place
+	 * octahedral impostor cards in it. Arming is not drawing -- the master
+	 * ships OFF and lives in the LOD menu -- but the manifest is read either
+	 * way so the viewer can answer "why do I see no cards" with a number
+	 * instead of a shrug. A file with no `<name>.manifest.txt` beside it does
+	 * nothing here and says nothing, which is every ordinary NIF. */
+	if ( loaded && nif
+			&& f.suffix().compare( QLatin1String( "lodm" ), Qt::CaseInsensitive ) != 0 ) {
+		ImpostorChunk::arm( nif, fname );
+		const QStringList cardNotes = ImpostorChunk::report();
+		if ( !cardNotes.isEmpty() )
+			qInfo().noquote() << cardNotes.join( QLatin1Char( '\n' ) );
+	} else if ( !loaded ) {
+		// Only a FAILED open forgets. A `.lodm` took the branch above and is
+		// already armed with its one card; forgetting here wiped it, and the
+		// window opened empty with no message to say why.
+		ImpostorChunk::forget();
+	}
+
 	/* A GENERATED DOCUMENT IS NOT A MODIFIED ONE (2026-09-09).
 	 *
 	 * The .btd and .lodl routes above do not PARSE a document, they BUILD one, and
@@ -10140,7 +10575,8 @@ void NifSkope::load()
 	 */
 	if ( loaded && nif && nif->undoStack
 		&& ( f.suffix().compare( QLatin1String( "btd" ), Qt::CaseInsensitive ) == 0
-			|| f.suffix().compare( QLatin1String( "lodl" ), Qt::CaseInsensitive ) == 0 ) ) {
+			|| f.suffix().compare( QLatin1String( "lodl" ), Qt::CaseInsensitive ) == 0
+			|| f.suffix().compare( QLatin1String( "lodi" ), Qt::CaseInsensitive ) == 0 ) ) {
 		nif->undoStack->clear();
 		nif->undoStack->setClean();
 		setWindowModified( false );
@@ -10172,7 +10608,8 @@ bool NifSkope::save()
 	// A document generated FROM a .btd is a NIF; writing it over the terrain
 	// database it came from would destroy a game file with foreign bytes.
 	if ( curFile.suffix().compare( QLatin1String( "btd" ), Qt::CaseInsensitive ) == 0
-		|| curFile.suffix().compare( QLatin1String( "lodl" ), Qt::CaseInsensitive ) == 0 )
+		|| curFile.suffix().compare( QLatin1String( "lodl" ), Qt::CaseInsensitive ) == 0
+		|| curFile.suffix().compare( QLatin1String( "lodi" ), Qt::CaseInsensitive ) == 0 )
 		return saveAsDlg();
 
 	return saveFile( currentFile );

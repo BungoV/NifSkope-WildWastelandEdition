@@ -1473,7 +1473,7 @@ public:
 		lay->addWidget( grpSeq );
 
 		lay->addWidget( new QLabel( Spell::tr( "New interpolators start with 2 default keys.\n"
-			"Use the Animation Manager to edit them, or its channel copy/paste to clone keys from another lane." ), &dlg ) );
+			"Edit them in the Blocks tab: the Animation Manager that used to edit them was retired on 2026-09-11 (lane UI6) and the Animation dock shows a NIF sequence read-only." ), &dlg ) );
 
 		auto buttons = new QDialogButtonBox( QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg );
 		QObject::connect( buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept );

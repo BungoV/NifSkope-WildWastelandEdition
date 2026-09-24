@@ -146,7 +146,7 @@ PbrmMaterial pbrmParse( const QByteArray & bytes )
 	};
 
 	m.envelopeVersion = int( le32( 4 ) );
-	if ( m.envelopeVersion != 5 && m.envelopeVersion != 4 ) {
+	if ( m.envelopeVersion < 4 || m.envelopeVersion > 6 ) {
 		m.error = QStringLiteral( "unsupported envelope version %1" ).arg( m.envelopeVersion );
 		return m;
 	}
@@ -176,10 +176,13 @@ PbrmMaterial pbrmParse( const QByteArray & bytes )
 		return m;
 	}
 	const QJsonValue sver = root.value( QStringLiteral( "schemaVersion" ) );
-	if ( !sver.isDouble() || ( sver.toInt() != 5 && sver.toInt() != 4 ) ) {
-		m.error = QStringLiteral( "unsupported schemaVersion" );
+	// schemaVersion must equal the envelope version (PBRM-v6.md; FO4CS
+	// PBRM.cpp:1199) -- a v5 payload in a v6 envelope is not a v6 material.
+	if ( !sver.isDouble() || sver.toDouble() != double( m.envelopeVersion ) ) {
+		m.error = QStringLiteral( "schemaVersion does not match envelope version %1" ).arg( m.envelopeVersion );
 		return m;
 	}
+	m.specularV6 = ( m.envelopeVersion >= 6 );
 	m.shader = root.value( QStringLiteral( "shader" ) ).toString();
 	if ( m.shader.trimmed().isEmpty() ) {
 		m.error = QStringLiteral( "empty shader name" );
@@ -234,6 +237,7 @@ PbrmMaterial pbrmParse( const QByteArray & bytes )
 	pbrmColor( vBase, "color", m.baseColorRGB );
 	m.overrideOpacity = pbrmBool( vBase, "overrideOpacity", true ) || !samplable( m.baseColor );
 	m.opacity = pbrmNumber( vBase, "opacity", 1.0f );
+	m.diffuseRoughness = qBound( 0.0f, pbrmNumber( vBase, "diffuseRoughness", 0.0f ), 1.0f );
 
 	m.overrideNormal = pbrmBool( vNorm, "overrideNormal", true ) || !samplable( m.normal );
 	m.normalStrength = pbrmNumber( vNorm, "strength", 1.0f );
@@ -247,20 +251,121 @@ PbrmMaterial pbrmParse( const QByteArray & bytes )
 	m.metallic = pbrmNumber( vRmaos, "metallic", 0.0f );
 	m.overrideAo = pbrmBool( vRmaos, "overrideAo", true ) || !samplable( m.rmaos );
 	m.ao = pbrmNumber( vRmaos, "ao", 1.0f );
-	m.alphaCarries = vRmaos.value( QStringLiteral( "alphaCarries" ) ).toString( QStringLiteral( "Dielectric F0" ) );
-	m.f0 = pbrmNumber( vRmaos, "f0", 0.04f );
-	const bool alphaIsF0 = ( m.alphaCarries.compare( QLatin1String( "Dielectric F0" ), Qt::CaseInsensitive ) == 0 );
-	// RMAOS alpha is F0 only while alphaCarries says so; under Porosity, F0
-	// always takes its constant.
-	m.overrideF0 = pbrmBool( vRmaos, "overrideF0", true ) || !samplable( m.rmaos ) || !alphaIsF0;
+	// RMAOS alpha. v4/v5: the dielectric F0 itself, clamped to [0, 0.16] like
+	// the FO4CS reader. v6: the OpenPBR specular WEIGHT, [0,1], default 1,
+	// sampled only while alphaCarries is "Specular Weight" (the v6 default)
+	// and overrideSpecularWeight is false.
+	const QLatin1String alphaDefault = m.specularV6 ? QLatin1String( "Specular Weight" ) : QLatin1String( "Dielectric F0" );
+	m.alphaCarries = vRmaos.value( QStringLiteral( "alphaCarries" ) ).toString( alphaDefault );
+	const bool alphaIsWeight = m.specularV6
+		&& m.alphaCarries.compare( QLatin1String( "Specular Weight" ), Qt::CaseInsensitive ) == 0;
+	const bool alphaIsF0 = !m.specularV6
+		&& m.alphaCarries.compare( QLatin1String( "Dielectric F0" ), Qt::CaseInsensitive ) == 0;
+	const bool alphaIsPorosity = m.alphaCarries.compare( QLatin1String( "Porosity" ), Qt::CaseInsensitive ) == 0
+		|| ( !m.specularV6 && !alphaIsF0 );
+	if ( m.specularV6 ) {
+		m.specularWeight = qBound( 0.0f, pbrmNumber( vRmaos, "specularWeight", 1.0f ), 1.0f );
+		m.overrideSpecularWeight = pbrmBool( vRmaos, "overrideSpecularWeight", true )
+			|| !samplable( m.rmaos ) || !alphaIsWeight;
+		m.overrideF0 = true;		// no authored F0 in v6
+	} else {
+		m.f0 = qBound( 0.0f, pbrmNumber( vRmaos, "f0", 0.04f ), 0.16f );
+		// RMAOS alpha is F0 only while alphaCarries says so; under Porosity, F0
+		// always takes its constant.
+		m.overrideF0 = pbrmBool( vRmaos, "overrideF0", true ) || !samplable( m.rmaos ) || !alphaIsF0;
+	}
 	m.overridePorosity = pbrmBool( vRmaos, "overridePorosity", false );
 	m.porosity = pbrmNumber( vRmaos, "porosity", 0.5f );
 
+	// v6 Pattern B: primarySpecularColor carries the specular parameters in its
+	// sparse `values`. ior / iorMax are read whether or not the slot is enabled;
+	// the colour only when it is (a disabled slot is white).
+	{
+		QJsonObject vSpec;
+		m.specularColor = pbrmSlot( uv, "primarySpecularColor", vSpec, m.diagnostics );
+		if ( m.specularV6 ) {
+			m.specularIor = qBound( 0.0f, pbrmNumber( vSpec, "ior", 1.5f ), 1000.0f );
+			m.specularIorMax = qBound( 0.0f, pbrmNumber( vSpec, "iorMax", 4.25f ), 1000.0f );
+			m.overrideSpecularColor = pbrmBool( vSpec, "overrideColor", true );
+			m.overrideSpecularIor = pbrmBool( vSpec, "overrideIor", true );
+			if ( m.specularColor.enabled )
+				pbrmColor( vSpec, "color", m.specularTint );
+			if ( m.specularColor.enabled ) {
+				const bool hasMap = m.specularColor.pathValid;
+				if ( hasMap && !m.overrideSpecularColor )
+					m.features |= PbrmMaterial::SpecularColorTexture;
+				if ( hasMap && !m.overrideSpecularIor )
+					m.features |= PbrmMaterial::SpecularIorTexture;
+				// overrideIor=false with no map: the editor preview packs the
+				// constant as a texel over the ceiling, so it renders
+				// min(ior, iorMax) (FO4CS PBRM.cpp:1002-1006).
+				if ( !m.overrideSpecularIor && !hasMap )
+					m.specularIor = qMin( m.specularIor, m.specularIorMax );
+			}
+		}
+	}
+
+	// Emission (lane PBRR4): OpenPBR emission_luminance in nits; 100 nits is linear 1.0
+	// before exposure. A pre-2026-09-17 `intensity` IS luminance/100 (the editor loads it
+	// as luminance = intensity x 100, materialdocument.cpp:211-216). With a map the
+	// overrides default false: the map's RGB replaces the constant (ED:542-543).
 	pbrmColor( vEmis, "color", m.emissiveRGB );
-	m.emissiveIntensity = pbrmNumber( vEmis, "intensity", 0.0f );
+	if ( vEmis.contains( QStringLiteral( "luminance" ) ) )
+		m.emissiveIntensity = qMax( 0.0f, pbrmNumber( vEmis, "luminance", 0.0f ) ) / 100.0f;
+	else
+		m.emissiveIntensity = qMax( 0.0f, pbrmNumber( vEmis, "intensity", 0.0f ) );
+	m.emissiveMask = qBound( 0.0f, pbrmNumber( vEmis, "mask", 1.0f ), 1.0f );
+	m.overrideEmissiveColor = pbrmBool( vEmis, "overrideColor", !samplable( m.emissive ) ) || !samplable( m.emissive );
+	m.overrideEmissiveMask = pbrmBool( vEmis, "overrideMask", !samplable( m.emissive ) ) || !samplable( m.emissive );
+
+	// Tint masks (lane PBRR4, special layer 0 of the editor). The slot's enable is the
+	// switch; a channel samples the map only with a valid path and its override off
+	// (the legacy `use<c>` spelling migrates as override = !use).
+	{
+		QJsonObject vTint;
+		m.tintMask = pbrmSlot( uv, "primaryTintMask", vTint, m.diagnostics );
+		m.tintEnabled = m.tintMask.enabled;
+		static const char * const ch[4] = { "R", "G", "B", "A" };
+		for ( int c = 0; c < 4; c++ ) {
+			const QByteArray ov = QByteArray( "overrideMask" ) + ch[c];
+			const QByteArray use = QByteArray( "use" ) + ch[c];
+			bool over = true;
+			if ( vTint.contains( QLatin1StringView( ov ) ) )
+				over = pbrmBool( vTint, ov.constData(), true );
+			else if ( vTint.contains( QLatin1StringView( use ) ) )
+				over = !pbrmBool( vTint, use.constData(), false );
+			m.tintUseTexture[c] = m.tintEnabled && samplable( m.tintMask ) && !over;
+			m.tintMaskConst[c] = qBound( 0.0f, pbrmNumber( vTint, ( QByteArray( "mask" ) + ch[c] ).constData(), 0.0f ), 1.0f );
+			pbrmColor( vTint, ( QByteArray( "color" ) + ch[c] ).constData(), m.tintColor[c] );
+		}
+		const QString ov = vTint.value( QStringLiteral( "overlap" ) ).toString( QStringLiteral( "Normalize" ) );
+		m.tintOverlap = ov == QLatin1StringView( "Add" ) ? 1 : ov == QLatin1StringView( "Priority RGBA" ) ? 2 : 0;
+	}
+
+	// Composition (lane PBRR4; FO4CS PBRM.cpp:654-664 + 747-757). Unknown mode names fall
+	// back to the family default rather than refusing the binding.
+	{
+		const QJsonObject settings = root.value( QStringLiteral( "settings" ) ).toObject();
+		const QJsonObject comp = settings.value( QStringLiteral( "Transparency/Composition" ) ).toObject();
+		const QString mode = comp.value( QStringLiteral( "mode" ) ).toString().trimmed();
+		static const char * const modes[8] = { "Opaque", "Alpha Test", "Alpha Blend", "Premultiplied",
+			"Additive", "Multiply", "Physical Transmission", "Dedicated Water Pass" };
+		m.composition = 0;
+		for ( int k = 0; k < 8; k++ )
+			if ( mode.compare( QLatin1StringView( modes[k] ), Qt::CaseInsensitive ) == 0 )
+				m.composition = k;
+		m.globalOpacity = qBound( 0.0f, pbrmNumber( comp, "alpha", 1.0f ), 1.0f );
+		m.alphaThreshold = qBound( 0.0f, pbrmNumber( comp, "threshold", 0.5f ), 1.0f );
+		m.alphaSourceConstant = comp.value( QStringLiteral( "alphaSource" ) ).toString()
+			.compare( QLatin1StringView( "Constant" ), Qt::CaseInsensitive ) == 0;
+		const QJsonObject depth = settings.value( QStringLiteral( "Transparency/Depth" ) ).toObject();
+		m.depthWrite = pbrmBool( depth, "depthWrite", m.composition <= 1 );
+		m.twoSided = pbrmBool( settings.value( QStringLiteral( "Shading/Core" ) ).toObject(), "twoSided", false );
+	}
 
 	// Derived feature mask (parser/cache bits, not the old BGSM CB2 sentinel).
-	quint32 f = 0;
+	// The v6 specular-colour bits were set above.
+	quint32 f = m.features;
 	if ( samplable( m.baseColor ) ) {
 		f |= PbrmMaterial::BaseColorTexture;
 		if ( !m.overrideOpacity )
@@ -283,15 +388,41 @@ PbrmMaterial pbrmParse( const QByteArray & bytes )
 			f |= PbrmMaterial::RmaosAo;
 		if ( !m.overrideF0 && alphaIsF0 )
 			f |= PbrmMaterial::RmaosF0;
-		if ( !alphaIsF0 )
+		if ( m.specularV6 && !m.overrideSpecularWeight )
+			f |= PbrmMaterial::RmaosSpecularWeight;
+		if ( alphaIsPorosity )
 			f |= PbrmMaterial::RmaosPorosity;
 	}
-	if ( samplable( m.emissive ) )
+	// the map is SAMPLED only when a channel is not overridden (FO4CS PBRM.cpp:896-897);
+	// an unsampled map must not abort the binding when it fails to load
+	if ( samplable( m.emissive ) && ( !m.overrideEmissiveColor || !m.overrideEmissiveMask ) )
 		f |= PbrmMaterial::EmissiveTexture;
 	m.features = f;
 
 	m.ok = !m.unsupported;
 	return m;
+}
+
+
+float pbrmIorF0( float ior )
+{
+	const float eta = ior > 0.0f ? ior : 0.0f;
+	const float r = ( eta - 1.0f ) / ( eta + 1.0f );
+	return r * r;
+}
+
+
+float pbrmDielectricF0( const PbrmMaterial & m, PbrmF0Law law )
+{
+	if ( law == PbrmF0Law::V5 ) {
+		// The red control: the document's RMAOS scalar taken as an F0, the
+		// reading a v5-only consumer makes of a v6 file. No cap, on purpose.
+		return m.specularV6 ? m.specularWeight : m.f0;
+	}
+	if ( m.specularV6 )
+		return qMin( m.specularWeight * pbrmIorF0( m.specularIor ), 1.0f );
+	// v4/v5: IOR 0 uploads iorF0 = 1 and cap 0.16, so min(f0 x 1, 0.16).
+	return qMin( m.f0, 0.16f );
 }
 
 

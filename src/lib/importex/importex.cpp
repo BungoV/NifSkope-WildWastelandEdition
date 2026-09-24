@@ -61,6 +61,12 @@ void import3ds( NifModel * nif, const QModelIndex & index );
 void exportGltf( const NifModel* nif, const Scene* scene, const QModelIndex& index );
 void importGltf( NifModel* nif, const QModelIndex& index );
 
+// src/lib/importex/gltfanim.cpp -- the animated export (lane HKX4). It writes
+// the node tree, the skinned meshes AND the clip loaded in the Animation
+// workspace; exportGltf above stays the exporter for a static scene, with its
+// embedded textures, LODs and Starfield. docs/GLTF_INTERCHANGE.md.
+void exportGltfAnimated( const NifModel* nif, const Scene* scene, const QModelIndex& index );
+
 
 struct ImportExportOption
 {
@@ -78,6 +84,7 @@ QVector<ImportExportOption> impexOptions{
 	ImportExportOption{ ".OBJ", importObj, exportObj, 0, 169 },
 	ImportExportOption{ ".OBJ as Collision", importObjAsCollision, nullptr, 0, 169 },
 	ImportExportOption{ ".glTF", importGltf, exportGltf, 83 },
+	ImportExportOption{ ".glTF (skeleton, skin, animation)", nullptr, exportGltfAnimated, 130, 130 },	// lane HKX4
 };
 
 

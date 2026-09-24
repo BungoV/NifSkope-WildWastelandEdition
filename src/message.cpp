@@ -5,6 +5,34 @@
 #include <QMap>
 #include <QCloseEvent>
 #include <QScreen>
+#include <QThread>
+#include <cstdio>
+
+/* A MESSAGE BOX IS A WIDGET, AND A WIDGET OFF THE GUI THREAD IS UNDEFINED.
+ * (lane NIFPARSE1, 2026-09-11.)
+ *
+ * Every entry point below builds a QMessageBox and parents it to
+ * qApp->activeWindow(), which splices it into a main-thread widget's child
+ * list, and appends it to the unguarded static `messageBoxes`. The LOD
+ * generator's chunk pass reaches here from a worker by six paths -- the
+ * commonest being qWarning() on EVERY missing texture in
+ * GameResources::get_file, through the installed message handler.
+ *
+ * The message is not dropped: it goes where a headless run's diagnostics
+ * already go. What is dropped is the window, which a worker had no business
+ * creating and which -- on the main thread -- is unchanged.
+ */
+static bool wwMessageOffGuiThread( const QString & str, const QString & err )
+{
+	if ( !qApp || QThread::currentThread() == qApp->thread() )
+		return false;
+	const QByteArray s = str.toLocal8Bit();
+	const QByteArray e = err.toLocal8Bit();
+	fprintf( stderr, "%s%s%s\n", s.constData(),
+		e.isEmpty() ? "" : ": ", e.constData() );
+	fflush( stderr );
+	return true;
+}
 
 
 Q_LOGGING_CATEGORY( ns, "nifskope" )
@@ -27,6 +55,8 @@ Message::~Message()
 //! Static helper for message box without detail text
 QMessageBox* Message::message( QWidget * parent, const QString & str, QMessageBox::Icon icon )
 {
+	if ( wwMessageOffGuiThread( str, QString() ) )
+		return nullptr;
 	auto msgBox = new QMessageBox( parent );
 	msgBox->setWindowFlags( msgBox->windowFlags() | Qt::Tool );
 	msgBox->setAttribute( Qt::WA_DeleteOnClose );
@@ -45,6 +75,8 @@ QMessageBox* Message::message( QWidget * parent, const QString & str, QMessageBo
 //! Static helper for message box with detail text
 QMessageBox* Message::message( QWidget * parent, const QString & str, const QString & err, QMessageBox::Icon icon )
 {
+	if ( wwMessageOffGuiThread( str, err ) )
+		return nullptr;
 	if ( !parent )
 		parent = qApp->activeWindow();
 
@@ -67,6 +99,8 @@ QMessageBox* Message::message( QWidget * parent, const QString & str, const QStr
 //! Static helper for installed message handler
 void Message::message( QWidget * parent, const QString & str, const QMessageLogContext * context, QMessageBox::Icon icon )
 {
+	if ( wwMessageOffGuiThread( str, QString() ) )
+		return;
 
 #ifdef QT_NO_DEBUG
 	if ( !QString( context->category ).startsWith( "nifskope", Qt::CaseInsensitive ) ) {
@@ -166,6 +200,8 @@ void unregisterMessageBox( DetailsMessageBox * msgBox )
 
 void Message::append( QWidget * parent, const QString & str, const QString & err, QMessageBox::Icon icon )
 {
+	if ( wwMessageOffGuiThread( str, err ) )
+		return;
 	if ( !parent )
 		parent = qApp->activeWindow();
 

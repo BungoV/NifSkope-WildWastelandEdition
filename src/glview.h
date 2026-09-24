@@ -40,6 +40,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QOpenGLWindow> // Inherited
 #include <QByteArray>
 #include <QHash>
+#include <QPair>
 #include <QPersistentModelIndex>
 #include <QPointer>
 #include <QSet>
@@ -162,6 +163,166 @@ public:
 	//! Restrict the drawn armature to these bones (Blender's Isolate). Empty
 	//! means draw everything.
 	void setSkeletonIsolated( const QSet<int> & bones );
+
+	// ---- Overlays > Show Skeleton (lane SKELOVERLAY, bungo 2026-09-10) ----
+	/*! The rig drawn over the model from the Overlays menu, reading through the
+	 *  mesh, following whatever pose the frame is in.
+	 *
+	 *  Deliberately NOT `skeletonView` reached a second way. That flag belongs to
+	 *  the Skeleton Manager dock and is driven by the dock's visibility, so an
+	 *  Overlays tick that wrote it would be switched back off the next time the
+	 *  dock was shown or hidden. This is its own flag with its own bone list, and
+	 *  the list is built from `skeletonAnalyse()` -- the dock's OWN analysis --
+	 *  so the two views cannot describe different skeletons.
+	 */
+	void setSkeletonOverlay( bool on );
+	bool skeletonOverlayActive() const { return skeletonOverlay; }
+	//! The Skeleton Manager's three classes, in its own words.
+	enum SkelOverlayClass { SkelDeforming = 0, SkelUnused = 1, SkelNotABone = 2 };
+	/*! What the last overlay draw actually put on the screen.
+	 *
+	 *  Written inside `drawSkeletonOverlay()` at the point each thing is drawn,
+	 *  never by `setSkeletonOverlay()` or by the rebuild: a count here is a count
+	 *  of draw calls that happened, not of intentions (CONSTITUTION rule 4,
+	 *  telemetry echoes truth).
+	 */
+	struct SkeletonOverlayCensus
+	{
+		int nodes = 0;        //!< joint markers drawn
+		int bones = 0;        //!< of those, nodes a skin lists (deforming + unused)
+		int deforming = 0;    //!< a vertex is weighted to it
+		int unused = 0;       //!< a skin lists it, no vertex uses it
+		int notABone = 0;     //!< no skin references it
+		int segments = 0;     //!< parent -> child bone bodies drawn
+		int stubs = 0;        //!< bones with no drawn child, drawn down their own axis
+		int skipped = 0;      //!< bodies the ARMATURE rule refused (lane SKELFIX):
+		                      //!< a pair with an end outside the armature in pass 1,
+		                      //!< plus a non-armature bone's stub in pass 2. Those
+		                      //!< nodes still get their joint marker in pass 3, so
+		                      //!< `nodes` is unaffected by this count.
+		int names = 0;        //!< bone name labels painted
+		int filtered = 0;     //!< lane SKEL2: rows the Skeleton Manager's chip and
+		                      //!< search text removed from the list before drawing.
+		                      //!< Written in refreshSkeletonOverlay(), so it is the
+		                      //!< count of nodes the analysis offered minus the
+		                      //!< nodes the dock would list -- and it MOVES with the
+		                      //!< chip (0 on All with no search, 37 on Bones for the
+		                      //!< human fixture).
+		int missingNodes = 0; //!< blocks the analysis lists that the scene has no Node for
+		quint64 draws = 0;    //!< overlay draws since the flag went on
+	};
+	SkeletonOverlayCensus skeletonOverlayCensus() const { return skelOverlayCensus; }
+	//! The world position each joint marker was drawn AT, keyed by block number.
+	//! Read back to prove the overlay follows the animated pose.
+	QHash<int, Vector3> skeletonOverlayJoints() const { return skelOverlayDrawnAt; }
+	//! Every bone body actually drawn, head -> tail in world space, in draw
+	//! order. The pixel-difference gate rasterises these into its mask, so the
+	//! mask is what was drawn rather than a guess at where it went.
+	QVector<QPair<Vector3, Vector3>> skeletonOverlaySegments() const { return skelOverlayDrawnSegs; }
+	//! SkelOverlayClass for a block, or -1 when the overlay does not draw it.
+	int skeletonOverlayClassOf( int block ) const { return skelOverlayClass.value( block, -1 ); }
+	/*! Is this block one of the nodes a BODY may be drawn to (lane SKELFIX)?
+	 *
+	 *  The armature: every node a skin lists, closed upwards through the parent
+	 *  chain, cut at the deepest node that has all of them beneath it. A node
+	 *  outside it is still drawn -- as a joint marker -- but never joined to
+	 *  anything, which is what stops a camera or anim-object node parked at the
+	 *  world origin from being tied to a character that has moved.
+	 */
+	bool skeletonOverlayInArmature( int block ) const { return skelOverlayArm.contains( block ); }
+	//! The rule the overlay is applying, in words, INCLUDING which arm served
+	//! when there is no skin to close over. The Overlays entry's tooltip.
+	QString skeletonOverlayRule() const { return skelOverlayRule; }
+
+	/* ---- ONE armature renderer (lane SKEL2, bungo 2026-09-11) -------------
+	 *
+	 * His words: "for that bone view toggle, shouldn't it mirror the skeleton
+	 * manager view?", "shouldn't we improve both views (that will now be
+	 * shared)?", "what about the bone shape? Shouldn't it be something like in
+	 * Blender?", "Just keep the color of the bones blue".
+	 *
+	 * Pose Mode and the Overlays armature were two renderers drawing the same
+	 * rig with two different colour laws. They are now ONE -- drawArmature()
+	 * below -- fed a bone list plus per-bone state by each caller (CONSTITUTION
+	 * rule 10, what is shared lives in the shared code).
+	 */
+
+	/*! Blender's Armature > Viewport Display > Display As.
+	 *
+	 * `Wire` is the EXACT way back (CONSTITUTION rule 7): it is the 12-line
+	 * wireframe octahedron both views drew before this lane, collar at the same
+	 * 15% of the length, so at its value the framebuffer is the old one.
+	 * B-Bone and Envelope are REFUSED, with the reason in the report: both need
+	 * per-bone authored data (segment count, head/tail envelope radii) that a
+	 * NIF node does not carry, and inventing it would break zero-authoring.
+	 */
+	enum ArmatureDisplay { ArmOctahedral = 0, ArmStick = 1, ArmWire = 2 };
+	void setArmatureDisplay( int mode );
+	int armatureDisplay() const { return armDisplay; }
+	//! Draw the bones through the mesh (Blender's Armature > In Front / X-Ray).
+	void setArmatureXray( bool on );
+	bool armatureXray() const { return armXray; }
+	//! 0 = name the hovered and selected bones only, 1 = name every drawn bone.
+	void setArmatureNames( int mode );
+	int armatureNames() const { return armNames; }
+
+	/*! The Skeleton Manager's chip and its search text, pushed here by the dock
+	 * so the overlay draws EXACTLY the rows the dock lists.
+	 *
+	 * chip: 0 All, 1 Bones, 2 Deforming, 3 Unused -- the dock's own
+	 * `SkelFilter` order, and the same four predicates are applied here, in
+	 * `refreshSkeletonOverlay()`, against the same `skeletonAnalyse()` report.
+	 */
+	void setSkeletonOverlayFilter( int chip, const QString & search );
+	int skeletonOverlayChip() const { return skelOverlayChip; }
+	QString skeletonOverlaySearch() const { return skelOverlaySearch; }
+	//! The blocks the overlay is listing under the chip and search, in draw
+	//! order. Read back by the gate against the dock's own rows.
+	QVector<int> skeletonOverlayListed() const { return skelOverlayBones; }
+	//! The bone under the cursor while the overlay is on, or -1.
+	int skeletonOverlayHover() const { return skelOverlayHover; }
+	void setSkeletonOverlayHover( int block );
+	/*! Pick an overlay bone at a viewport position -- the viewport half of the
+	 * two-way selection. -1 when nothing is within the pick radius. */
+	int skeletonOverlayBoneAt( const QPointF & pos ) const;
+
+	/*! One bone, as the shared renderer wants it. Each caller fills this in its
+	 * own terms; nothing below the renderer knows which view asked. */
+	struct ArmatureBone
+	{
+		int block = -1;
+		Vector3 head;
+		Vector3 tail;
+		int kind = 0;          //!< SkelOverlayClass: deforming / unused / not a bone
+		bool body = true;      //!< false = a joint marker and nothing else
+		bool ball = true;      //!< draw the joint ball at `head`. A node can carry a
+		                       //!< body AND a stub (a leaf does), so the ball is a
+		                       //!< separate entry: one per NODE, never one per shape,
+		                       //!< or a leaf's dot is blended twice and is brighter
+		                       //!< than every other dot in the frame.
+		bool stub = false;     //!< a leaf's own-axis stub rather than a parent->child
+		                       //!< body. Kept apart because the old overlay drew
+		                       //!< every body before every stub, and the blended,
+		                       //!< depth-less armature is order-dependent where two
+		                       //!< bones cross -- so `Wire` has to keep that order.
+		bool selected = false;
+		bool active = false;
+		bool hovered = false;
+		bool pinned = false;
+		float fade = 1.0f;     //!< 1 near, 0 far (Pose Mode's depth ramp); 1 = flat
+	};
+	//! What the two callers differ in, and nothing else.
+	struct ArmatureStyle
+	{
+		int display = ArmOctahedral;
+		bool xray = true;       //!< depth test off, so the rig reads through the mesh
+		float lineWidth = 1.6f; //!< logical px, taken through the device ratio inside
+		float pointSize = 5.0f;
+		bool depthFade = false; //!< honour ArmatureBone::fade
+	};
+	//! The ONE drawing routine. Public so a gate can call it with a known list.
+	void drawArmature( const QVector<ArmatureBone> & bones, const ArmatureStyle & style );
+
 	//! Show bone names beside the bones (toggle).
 	void setPoseShowBoneNames( bool on ) { poseShowBoneNames = on; update(); }
 	//! Show dashed parent-relationship lines (toggle).
@@ -375,6 +536,76 @@ public:
 	ViewState axisAlignedViewState() const;
 	inline bool isPerspectiveProjection() const { return perspectiveMode || view == ViewWalk; }
 	inline float orthographicHalfHeight() const { return float( Dist / Zoom ); }
+
+	/*! THE PINNED CAMERA -- WW_RENDER_CENTER / _DIST / _VIEW / _FOV / _ORTHO.
+	 *
+	 *  A headless capture is only worth a number if it is a METRIC camera: a
+	 *  known object, at a known distance, spanning a computable count of
+	 *  pixels. It was not one, and the reason is here rather than in the hook.
+	 *
+	 *  `setOrientation( state, true )` ends in center(), and center() does not
+	 *  centre anything -- it sets `doCenter` and asks for a repaint, so the
+	 *  auto-fit (`setCenter()`: Pos = -bounds.centre, Dist = radius * 1.2,
+	 *  Zoom = 1) runs inside the NEXT paintGL, which is AFTER the caller has
+	 *  set its own Pos and Dist. Two consequences, both measured on the
+	 *  512-unit cube fixture with the exe of 2026-09-09 22:04:
+	 *
+	 *   * the look-at was thrown away every time. WW_RENDER_CENTER=0,0,256 and
+	 *     =400,0,256 produced BYTE-IDENTICAL PNGs on an axis view (md5
+	 *     fff710bd...), and took effect on ViewUser only because
+	 *     `setOrientation` returns early when the requested state is already
+	 *     the current one and so never queued the auto-fit at all;
+	 *   * the distance came back as `want * want / autofit`. The hook reads
+	 *     Dist/Zoom after a pump, finds the auto-fit value, and "corrects" it,
+	 *     which turns a 1/D law into 1/D^2: 539 / 273 / 169 / 117 / 95 / 87 /
+	 *     67 / 53 / 23 / 11 px at DIST 400 / 500 / 600 / 700 / 768 / 800 /
+	 *     900 / 1000 / 1500 / 2000, which is `want^2 / 532` to +-1% with 532 =
+	 *     the fixture's own auto-fit distance (bound radius 443.4 * 1.2).
+	 *
+	 *  So a pin CANCELS the queued auto-fit and RE-ASSERTS ITSELF at the top of
+	 *  every paint. Re-asserting is what makes it hold on a generated document
+	 *  (.lodl / .btd), which rebuilds its scene and reframes after the hook has
+	 *  run, and on any later compile or load.
+	 *
+	 *  It is a module with its own switch: `active` is false unless one of
+	 *  CENTER / DIST / FOV / ORTHO is set, and then nothing below runs and a
+	 *  VIEW-only capture keeps exactly the old auto-fit framing. Every refusal
+	 *  is named in `arm` rather than silently ignored.
+	 */
+	struct WwCameraPin
+	{
+		bool active = false;
+		bool haveView = false;
+		ViewState view = ViewFront;
+		bool haveCenter = false;
+		Vector3 center;					//!< world look-at point
+		bool haveDist = false;
+		float dist = 0.0f;				//!< EYE-to-look-at distance, world units
+		bool haveFov = false;
+		float fov = 0.0f;				//!< full vertical field of view, degrees
+		bool haveOrtho = false;
+		float orthoHalfWidth = 0.0f;	//!< orthographic half-WIDTH, world units
+		QString arm;					//!< which arm served, and every refusal
+	};
+	//! Read a pin out of the WW_RENDER_* environment. active=false when none is set.
+	static WwCameraPin wwCameraPinFromEnvironment();
+	//! Arm the pin and apply it now. It then survives every later repaint.
+	void wwApplyCameraPin( const WwCameraPin & pin );
+	//! Disarm. The camera goes back to whatever the ordinary paths leave.
+	void wwClearCameraPin();
+	//! Whether a pin is holding the camera right now.
+	bool wwCameraPinned() const { return wwPin.active; }
+	/*! Units per pixel AT THE LOOK-AT PLANE -- the number a span prediction
+	 *  uses, in both projections. An extent of E world units lying in that
+	 *  plane spans E / wwUnitsPerPixel() pixels. */
+	double wwUnitsPerPixel() const;
+	//! One line of camera census: what the projection ACTUALLY is, not what was asked.
+	QString wwCameraCensus( const char * stage ) const;
+	/*! Append that line to $WW_CAMERA_CENSUS, else to
+	 *  release/ww_camera_pin.log. NOT $WW_CAMERA_LOG, which is the older
+	 *  rotation-only trace and shares nothing with this. The first record of
+	 *  each process truncates, so a reader can never quote the last run. */
+	void wwLogCameraCensus( const char * stage ) const;
 
 	void setDebugMode( DebugMode );
 	static bool selectPBRCubeMapForGame( quint32 bsVersion );
@@ -601,6 +832,9 @@ signals:
 	void poseModeChanged( bool enabled );
 	//! A bone was picked in the viewport (block number), so the dock can sync.
 	void poseBonePicked( int blockNumber );
+	//! The bone under the cursor while the Overlays armature is on, or -1, so
+	//! the Skeleton Manager can light the same row (lane SKEL2).
+	void skeletonOverlayHoverChanged( int blockNumber );
 	void segmentPaintStrokeBegan();
 	void segmentPaintBrushSample( int targetBlock, const QVector<int> & triangles );
 	void segmentPaintStrokeEnded( bool commit );
@@ -991,7 +1225,7 @@ public:
 	bool wireEdgeCacheValid = false;
 	//! Drop both overlay caches — call after anything that changes topology,
 	//! hidden triangles, or quad marks outside the size fingerprints' reach
-	void invalidateOverlayCaches() { editOverlaySetsValid = false; wireEdgeCacheValid = false; }
+	void invalidateOverlayCaches() { editOverlaySetsValid = false; wireEdgeCacheValid = false; skelOverlayDirty = true; }
 
 	// ---- X-mirror editing (Blender's Mirror X) ----
 	//! Modal transforms also move the unselected mirror partner of each
@@ -1404,13 +1638,60 @@ public:
 	//! Draw the skeleton (bones + parenting) — called from paintGL in pose mode.
 	void drawPoseSkeleton();
 	//! Blender's octahedral bone as a 12-segment wireframe, head to tail. The
-	//! taper is what makes the bone's direction visible.
-	void drawOctahedralBone( const Vector3 & head, const Vector3 & tail );
+	//! taper is what makes the bone's direction visible. \a ringAt is the
+	//! collar's position along the bone as a fraction of its length: 0.15 is
+	//! what both views drew before lane SKEL2 and is what `Wire` keeps, 0.10 is
+	//! Blender's own and is what the solid octahedron uses.
+	void drawOctahedralBone( const Vector3 & head, const Vector3 & tail, float ringAt = 0.15f );
+	/*! The solid Blender octahedron: eight facets, back faces dropped on the
+	 * CPU, each lit flat against a fixed camera-space light so the four faces
+	 * read. Appends into a triangle soup with per-vertex colours so the whole
+	 * armature is ONE draw call. */
+	void armatureOctahedronFaces( const Vector3 & head, const Vector3 & tail, float ringAt,
+		FloatVector4 base, QVector<Vector3> & tri, QVector<FloatVector4> & col ) const;
+
+	// ---- Overlays > Show Skeleton ----
+	// lane SKEL2: the display law, shared by BOTH views
+	int armDisplay = ArmOctahedral;
+	bool armXray = true;
+	int armNames = 0;
+	// lane SKEL2: the Skeleton Manager's chip and search, mirrored
+	int skelOverlayChip = 0;
+	QString skelOverlaySearch;
+	int skelOverlayHover = -1;
+	bool skeletonOverlay = false;
+	//! The bone list is rebuilt lazily; anything that can change the block
+	//! numbering sets this (see invalidateOverlayCaches()).
+	bool skelOverlayDirty = true;
+	QVector<int> skelOverlayBones;         //!< every node skeletonAnalyse() lists
+	QHash<int, int> skelOverlayClass;      //!< block -> SkelOverlayClass
+	QSet<int> skelOverlayArm;              //!< lane SKELFIX: blocks a body may join
+	QVector<int> skelOverlayArmList;       //!< the same set, in draw order, for boneTailIn()
+	QString skelOverlayRule;               //!< the rule in words (tooltip / summary)
+	float skelOverlaySize = 4.0f;          //!< characteristic bone length
+	int skelOverlayMissing = 0;            //!< analysis rows with no scene Node
+	int skelOverlayFiltered = 0;           //!< lane SKEL2: rows the dock's chip and
+	                                       //!< search removed before drawing
+	SkeletonOverlayCensus skelOverlayCensus;
+	QHash<int, Vector3> skelOverlayDrawnAt;
+	QVector<QPair<Vector3, Vector3>> skelOverlayDrawnSegs;
+	//! Rebuild the overlay's bone list and classes from skeletonAnalyse().
+	void refreshSkeletonOverlay();
+	//! Draw it. Depth test off, fixed pixel widths, class colours.
+	void drawSkeletonOverlay();
+	//! Bone name labels for the overlay, in the QPainter pass.
+	void paintSkeletonOverlayNames( class QPainter & painter );
 	//! Screen-space nearest bone to a viewport point; -1 if none within range.
 	int poseBoneAt( const QPointF & pos ) const;
 	//! A bone's tail in world space: its sole child's origin, the mean of several
 	//! children, or a short stub down the local axis for a leaf.
 	Vector3 poseBoneTail( int boneBlock ) const;
+	//! The same law against an arbitrary drawn set and cap, so the pose armature
+	//! and the Overlays armature cannot drift apart (CONSTITUTION rule 10, what
+	//! is shared lives in the shared code).
+	Vector3 boneTailIn( int boneBlock, const QVector<int> & drawn, float cap ) const;
+	//! Median nearest-neighbour spacing of a drawn set, * 0.6. < 2 bones = -1.
+	float characteristicBoneSize( const QVector<int> & drawn ) const;
 	//! Local transforms captured on entering pose mode = the "rest" a reset
 	//! restores to. Keyed by block number.
 	QHash<int, Transform> poseRestPose;
@@ -1688,6 +1969,12 @@ private:
 	bool isDisabled = false;
 	unsigned char doCompile = 0;
 	bool doCenter = false;
+	//! The armed pin, and the one place that writes the camera from it. It is
+	//! called from wwApplyCameraPin() and again from paintGL() after the
+	//! doCenter block, which is what keeps a later reframe from taking the
+	//! camera back -- see WwCameraPin above.
+	WwCameraPin wwPin;
+	void wwApplyCameraPinNow();
 	unsigned char updatePending = 0;
 	//! Extra repaints scheduled after a scene compile: the first frame after
 	//! a compile renders the streaming line geometry (grid / origin axes)

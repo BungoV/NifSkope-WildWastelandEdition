@@ -984,6 +984,12 @@ GLuint TexCache::texLoadPBRCubeMap(
 	return texLoadDDS( filepath, target, data, id );
 }
 
+GLuint TexCache::loadStudioCube( const NifModel * nif, const QString & name, QByteArray & data, GLuint * id )
+{
+	GLenum target = 0;
+	return texLoadPBRCubeMap( nif, name, target, data, id );
+}
+
 GLuint TexCache::texLoadColor( const NifModel * nif, const QString & filepath,
 								GLenum & target, GLuint & width, GLuint & height, QByteArray & data, GLuint * id )
 {

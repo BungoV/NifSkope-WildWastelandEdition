@@ -76,6 +76,9 @@ protected:
 class Node : public IControllable
 {
 	friend class ControllerManager;
+	// HKX2: a loaded Havok clip poses a node by writing Node::local, the same
+	// member the transform controllers below write, from Node::transform().
+	friend class HkxPlayback;
 	friend class KeyframeController;
 	friend class MultiTargetTransformController;
 	friend class TransformController;

@@ -7,7 +7,9 @@ BSD License - see nifskope.h
 #ifndef SKELETONTOOLS_H
 #define SKELETONTOOLS_H
 
+#include <QColor>
 #include <QList>
+#include <QSet>
 #include <QString>
 #include <QStringList>
 
@@ -76,6 +78,51 @@ struct SkeletonReport
  * \param threshold weights at or below this do not count as influence
  */
 SkeletonReport skeletonAnalyse( const NifModel * nif, float threshold = 0.0001f );
+
+// ---------------------------------------------------------------------------
+// THE TWO THINGS THE DOCK AND THE VIEWPORT NOW SHARE (lane SKEL2, 2026-09-11)
+//
+// bungo: "for that bone view toggle, shouldn't it mirror the skeleton manager
+// view?" and "shouldn't we improve both views (that will now be shared)?".
+//
+// The Skeleton Manager's tree and the Overlays armature used to decide, each in
+// its own file, which nodes to show and what colour to draw them. They now ask
+// these two functions, and nothing else does the deciding, so the two views
+// cannot disagree by drifting (CONSTITUTION rule 10: what is shared lives in
+// the shared code).
+// ---------------------------------------------------------------------------
+
+/*! The blocks the Skeleton Manager lists, in report order (parents first).
+ *
+ * \param chip     0 All, 1 Bones, 2 Deforming, 3 Unused -- the dock's own
+ *                 filter-button order, and its own three predicates
+ * \param search   the dock's search text; empty matches everything
+ * \param isolated the dock's Isolate set; empty means no isolation
+ *
+ * A SEARCH KEEPS THE ANCESTORS of every match visible, the way the Block List
+ * already does. Without that, searching for `Finger` in a 130-node rig produced
+ * thirty rows at the top level with no indication of which hand they were on.
+ * A chip on its own does NOT add ancestors -- the dock promotes a filtered row
+ * to the top level instead, which is what makes its Bones count equal the
+ * analysis's bone count.
+ */
+QList<int> skeletonListedBlocks( const SkeletonReport & report, int chip,
+	const QString & search, const QSet<int> & isolated = QSet<int>() );
+
+/*! The colour a bone is drawn in AND its Skeleton Manager row is written in.
+ *
+ * bungo, 2026-09-11, verbatim: "Just keep the color of the bones blue" -- so a
+ * bone is the palette's blue (`toggle`, #4772b3: Blender's own option blue, the
+ * one entry in skinVars[] that is blue and the only one that is the same value
+ * in both themes), and selected / active / hovered are BRIGHTNESS STEPS of that
+ * blue rather than three new hues. A node no skin references stays the muted
+ * grey it already was.
+ *
+ * \param kind  0 a deforming bone, 1 a bone a skin lists but no vertex uses,
+ *              2 not a bone at all (camera, attach point, anim object)
+ * \param state 0 normal, 1 selected, 2 active, 3 hovered
+ */
+QColor skeletonKindColor( int kind, int state = 0 );
 
 // ---------------------------------------------------------------------------
 // bone operations (src/skeletonops.cpp)

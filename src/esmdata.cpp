@@ -11,9 +11,11 @@ BSD License - see nifskope.h
 #include "esmfile.hpp"
 
 #include <climits>
+#include <cmath>
 #include <cstring>
 #include <functional>
 #include <algorithm>
+#include <QFileInfo>
 #include <QSet>
 
 /* Group-tree conventions, measured against Fallout4.esm (2026-08-31):
@@ -58,6 +60,7 @@ bool EsmWorld::load( const QString & esmPath, quint32 worldspaceFormID, QString 
 			std::fflush( stderr );
 		}
 	};
+	srcPath = esmPath;
 	try {
 		tr( "load: opening the plugin" );
 		esm = std::make_unique<ESMFile>( esmPath.toLocal8Bit().constData() );
@@ -120,6 +123,7 @@ void EsmWorld::indexWorldspace()
 			if ( r->type != GRUP && *r == "CELL" ) {
 				int cx = 0, cy = 0;
 				bool haveGrid = false;
+				QString cellEdid;
 				{
 					ESMFile::ESMField f( *esm, *r );
 					while ( f.next() ) {
@@ -127,6 +131,19 @@ void EsmWorld::indexWorldspace()
 							cx = int( f.readInt32() );
 							cy = int( f.readInt32() );
 							haveGrid = true;
+						} else if ( f == "EDID" ) {
+							/* THE CELL'S OWN NAME (lane CELLWORK1, bungo: "the
+							 * viewed cells should include their names too if
+							 * they have them"). EDID is a literal string in
+							 * every plugin. The DISPLAY name, FULL, is NOT
+							 * read here and deliberately not guessed at:
+							 * Fallout4.esm is a LOCALISED plugin, so its FULL
+							 * is a four-byte index into the STRINGS/ILSTRINGS
+							 * tables, and this reader has no string-table
+							 * reader at all. Printing the raw index as a name
+							 * would be a number pretending to be "Sanctuary
+							 * Hills". */
+							cellEdid = fieldString( f );
 						}
 					}
 				}
@@ -144,6 +161,7 @@ void EsmWorld::indexWorldspace()
 					CellEntry e;
 					e.cellForm = r->formID;
 					e.childGroup = group;
+					e.edid = cellEdid;
 					cellIndex.insert( qMakePair( cx, cy ), e );
 				}
 			}
@@ -313,6 +331,12 @@ bool EsmWorld::land( int cx, int cy, EsmLand & out ) const
 			if ( quadrant >= 0 && quadrant < 4 ) {
 				EsmLandLayer layer;
 				layer.ltex = ltex;
+				/* The two fields after the quadrant byte (lane CELLVIEW4): one
+				 * unknown byte, then the int16 LAYER INDEX at offset 6. The
+				 * field is at least 8 bytes (tested above) and 4 + 1 + 1 + 2
+				 * is exactly 8, so this consumes the payload and no more. */
+				(void) f.readUInt8();
+				layer.index = int( f.readInt16() );
 				std::memset( layer.opacity, 0, sizeof( layer.opacity ) );
 				out.layers[quadrant].append( layer );
 				pendingQuadrant = quadrant;
@@ -388,6 +412,14 @@ QVector<EsmRefr> EsmWorld::refrsInGroup( quint32 groupID ) const
 							ref.rot[i] = f.readFloat();
 					} else if ( f == "XSCL" && f.size() >= 4 ) {
 						ref.scale = f.readFloat();
+					} else if ( f == "XESP" && f.size() >= 8 ) {
+						/* Enable parent: the ref form, then a flag word whose bit 0
+						 * is "opposite of parent". Read, never simulated -- the
+						 * parent's runtime state is not in the plugin. */
+						ref.enableParent = esm->mapFormID( *r, f.readUInt32() );
+						ref.enableParentOpposite = ( f.readUInt32() & 1 ) != 0;
+					} else if ( f == "XLYR" && f.size() >= 4 ) {
+						ref.layer = esm->mapFormID( *r, f.readUInt32() );
 					}
 				}
 				if ( ref.base ) {
@@ -414,6 +446,18 @@ QVector<EsmRefr> EsmWorld::refrs( int cx, int cy ) const
 	if ( it == cellIndex.constEnd() )
 		return {};
 	return refrsInGroup( it->childGroup );
+}
+
+QString EsmWorld::cellEditorId( int cx, int cy ) const
+{
+	auto it = cellIndex.constFind( qMakePair( cx, cy ) );
+	return it == cellIndex.constEnd() ? QString() : it->edid;
+}
+
+quint32 EsmWorld::cellForm( int cx, int cy ) const
+{
+	auto it = cellIndex.constFind( qMakePair( cx, cy ) );
+	return it == cellIndex.constEnd() ? 0u : it->cellForm;
 }
 
 const QVector<EsmRefr> & EsmWorld::persistentRefrs() const
@@ -479,6 +523,16 @@ const EsmLodBase & EsmWorld::lodBase( quint32 baseFormID ) const
 					(void) f.readFloat();
 				b.leafAmplitude = f.readFloat();
 				b.leafFrequency = f.readFloat();
+			} else if ( f == "EDID" ) {
+				b.edid = fieldString( f );
+			} else if ( f == "MODL" && !( *br == "TREE" || *br == "STAT" )
+				&& b.model.isEmpty() ) {
+				/* CELLVIEW1: every record type the cell view draws -- MSTT,
+				 * FURN, CONT, DOOR, ACTI, FLOR, LIGH -- carries its near model
+				 * in MODL exactly as STAT does. The LOD bake never asked, so
+				 * the reader never answered; nothing about the STAT/TREE route
+				 * below changes, and `models[]` is still filled only there. */
+				b.model = fieldString( f );
 			} else if ( f == "MODL" && ( *br == "TREE" || *br == "STAT" ) ) {
 				/* The base's own near model: what the impostor bake photographs
 				 * (bungo, 2026-09-06: "the base is more detailed"). A TREE has
@@ -496,16 +550,12 @@ const EsmLodBase & EsmWorld::lodBase( quint32 baseFormID ) const
 	return *ins;
 }
 
-void EsmWorld::ltexTextures( quint32 ltexForm, QString & diffuse, QString & normal ) const
+const EsmLtexTextureSet & EsmWorld::ltexTextureSet( quint32 ltexForm ) const
 {
 	auto it = ltexCache.constFind( ltexForm );
-	if ( it != ltexCache.constEnd() ) {
-		diffuse = it->first;
-		normal = it->second;
-		return;
-	}
-	diffuse.clear();
-	normal.clear();
+	if ( it != ltexCache.constEnd() )
+		return *it;
+	EsmLtexTextureSet s;
 	const ESMFile::ESMRecord * lr = esm->findRecord( ltexForm );
 	if ( lr && *lr == "LTEX" ) {
 		quint32 txst = 0;
@@ -517,24 +567,36 @@ void EsmWorld::ltexTextures( quint32 ltexForm, QString & diffuse, QString & norm
 		}
 		const ESMFile::ESMRecord * tr = txst ? esm->findRecord( txst ) : nullptr;
 		if ( tr && *tr == "TXST" ) {
-			QString material;
+			s.exists = true;
 			ESMFile::ESMField f( *esm, *tr );
 			while ( f.next() ) {
 				if ( f == "TX00" )
-					diffuse = fieldString( f );
+					s.diffuse = fieldString( f );
 				else if ( f == "TX01" )
-					normal = fieldString( f );
+					s.normal = fieldString( f );
+				else if ( f == "TX07" )
+					s.specular = fieldString( f );
 				else if ( f == "MNAM" )
-					material = fieldString( f );
+					s.material = fieldString( f );
 			}
 			/* Material-backed TXSTs (common on landscape sets) carry no TX00
 			 * — the textures live inside the referenced .bgsm. Hand the
 			 * material path through; the texture loader resolves it. */
-			if ( diffuse.isEmpty() && !material.isEmpty() )
-				diffuse = material;
+			if ( s.diffuse.isEmpty() && !s.material.isEmpty() )
+				s.diffuse = s.material;
 		}
 	}
-	ltexCache.insert( ltexForm, qMakePair( diffuse, normal ) );
+	return *ltexCache.insert( ltexForm, s );
+}
+
+/*! The two slots the colour bake needs, unchanged: a thin read of the set
+ *  above, so the paths it answers with are the same strings, resolved by the
+ *  same code, that it answered with before the set existed. */
+void EsmWorld::ltexTextures( quint32 ltexForm, QString & diffuse, QString & normal ) const
+{
+	const EsmLtexTextureSet & s = ltexTextureSet( ltexForm );
+	diffuse = s.diffuse;
+	normal = s.normal;
 }
 
 static void esmFnvBytes( quint64 & h, const unsigned char * p, size_t n )
@@ -866,6 +928,282 @@ const QVector<EsmScolPart> & EsmWorld::scolParts( quint32 formID ) const
 		}
 	}
 	return *scolCache.insert( formID, parts );
+}
+
+quint64 EsmWorld::loadOrderHash() const
+{
+	/* The law is stated once, in the header, and the independent decoder
+	 * (tests/spells/lodgen_native_decode.py, load_order_hash) reproduces it
+	 * from the same list without linking any of this. */
+	quint64 h = Q_UINT64_C( 0xCBF29CE484222325 );
+	auto fold = [&h]( const unsigned char * p, size_t n ) {
+		for ( size_t i = 0; i < n; i++ ) {
+			h ^= quint64( p[i] );
+			h *= Q_UINT64_C( 0x100000001B3 );
+		}
+	};
+	const QStringList parts = srcPath.split( QChar( ',' ), Qt::SkipEmptyParts );
+	for ( const QString & one : parts ) {
+		const QFileInfo fi( one.trimmed() );
+		const QByteArray name = fi.fileName().toLower().toUtf8();
+		fold( reinterpret_cast<const unsigned char *>( name.constData() ), size_t( name.size() ) );
+		const quint64 bytes = quint64( fi.size() );
+		unsigned char le[8];
+		for ( int i = 0; i < 8; i++ )
+			le[i] = (unsigned char) ( ( bytes >> ( 8 * i ) ) & 0xFF );
+		fold( le, 8 );
+	}
+	return h;
+}
+
+/* ---- v9, THE WORKSHOP-SCRAPPABLE INDEX (lane HORIZON3, 2026-09-19) -------
+ *
+ * A port of `scratchpad/horizon3_20260919/scrap_rule.py`, which measured the
+ * rule against Fallout4.esm and counted 14 scrappable placements of the urban
+ * region's 33,123. The port is deliberately literal -- same three clauses,
+ * same yaw-only box test, same FormList expansion -- so that when the two
+ * disagree the disagreement is a BUG and not a design difference nobody wrote
+ * down. `tests/spells/lodgen_scrappable.sh` re-derives the count from the
+ * written `.lodi` without calling any of this. */
+
+//! The three keywords the rule is written in, and the one place they live.
+constexpr quint32 ESM_KW_SCRAP_FILTER = 0x00106D8FU;    //!< WorkshopRecipeFilterScrap
+constexpr quint32 ESM_KW_UNSCRAPPABLE = 0x001CC46AU;    //!< UnscrappableObject
+constexpr quint32 ESM_KW_LINKED_PRIM = 0x000B91E6U;     //!< WorkshopLinkedPrimitive
+constexpr quint32 ESM_XPRM_TYPE_BOX = 1U;
+
+void EsmWorld::buildScrapIndex() const
+{
+	EsmScrapIndex & ix = scrapIdx;
+	if ( ix.built || !esm )
+		return;
+	ix.built = true;      // set FIRST: a throw below leaves an empty index, never a rebuild loop
+
+	/* One walk of the whole plugin set. Four things are collected, and the
+	 * reason they share a walk is that the file is large and the alternative
+	 * is four of them. */
+	QHash<quint32, quint32> cobjTarget;         //!< COBJ form -> its CNAM, when the recipe scraps
+	QSet<quint32> flstScrap;                    //!< CNAM targets that turned out to be FormLists
+	QHash<quint32, QVector<quint32>> flstMembers;
+	QSet<quint32> workshopBases;                //!< bases whose EDID names a workshop workbench
+	struct RawPrim
+	{
+		quint32 refr = 0;
+		float centre[3] = { 0.0f, 0.0f, 0.0f };
+		float rot[3] = { 0.0f, 0.0f, 0.0f };
+		float half[3] = { 0.0f, 0.0f, 0.0f };
+		quint32 type = 0;
+		QVector<QPair<quint32, quint32>> links;     //!< XLKR (keyword, target)
+		bool hasData = false;
+	};
+	QVector<RawPrim> prims;
+	QHash<quint32, quint32> refrBase;           //!< REFR form -> its NAME base
+
+	try {
+		const ESMFile::ESMRecord * r0 = esm->findRecord( 0U );
+		std::function<void( unsigned int )> walk = [&]( unsigned int id ) {
+			while ( id ) {
+				const ESMFile::ESMRecord * r = esm->findRecord( id );
+				if ( !r )
+					return;
+				if ( r->type != GRUP ) {
+					if ( *r == "COBJ" ) {
+						ix.cobjRecords++;
+						quint32 cnam = 0;
+						bool scraps = false;
+						ESMFile::ESMField f( *r, *esm );
+						while ( f.next() ) {
+							if ( f == "CNAM" && f.size() >= 4 ) {
+								cnam = esm->mapFormID( *r, esmLeUInt32( f.getDataPtr() ) );
+							} else if ( f == "FNAM" ) {
+								const unsigned char * p = f.getDataPtr();
+								for ( size_t k = 0; k + 4 <= f.size(); k += 4 )
+									if ( esm->mapFormID( *r, esmLeUInt32( p + k ) ) == ESM_KW_SCRAP_FILTER )
+										scraps = true;
+							}
+						}
+						if ( scraps && cnam ) {
+							ix.cobjScrapRecipes++;
+							cobjTarget.insert( r->formID, cnam );
+						}
+					} else if ( *r == "FLST" ) {
+						QVector<quint32> mem;
+						ESMFile::ESMField f( *r, *esm );
+						while ( f.next() )
+							if ( f == "LNAM" && f.size() >= 4 )
+								mem.append( esm->mapFormID( *r, esmLeUInt32( f.getDataPtr() ) ) );
+						if ( !mem.isEmpty() )
+							flstMembers.insert( r->formID, mem );
+					} else if ( *r == "REFR" ) {
+						RawPrim pr;
+						pr.refr = r->formID;
+						bool anyPrim = false;
+						quint32 base = 0;
+						ESMFile::ESMField f( *r, *esm );
+						while ( f.next() ) {
+							if ( f == "NAME" && f.size() >= 4 ) {
+								base = esm->mapFormID( *r, esmLeUInt32( f.getDataPtr() ) );
+							} else if ( f == "DATA" && f.size() >= 24 ) {
+								const unsigned char * p = f.getDataPtr();
+								for ( int k = 0; k < 3; k++ )
+									std::memcpy( &pr.centre[k], p + 4 * k, 4 );
+								for ( int k = 0; k < 3; k++ )
+									std::memcpy( &pr.rot[k], p + 12 + 4 * k, 4 );
+								pr.hasData = true;
+							} else if ( f == "XPRM" && f.size() >= 32 ) {
+								/* XPRM (wbDefinitionsFO4.pas): Bounds 3 floats,
+								 * Color 3 floats, Unknown float, Type u32. The
+								 * bounds are HALF extents. */
+								const unsigned char * p = f.getDataPtr();
+								for ( int k = 0; k < 3; k++ )
+									std::memcpy( &pr.half[k], p + 4 * k, 4 );
+								pr.type = esmLeUInt32( p + 28 );
+								anyPrim = true;
+							} else if ( f == "XLKR" && f.size() >= 8 ) {
+								const unsigned char * p = f.getDataPtr();
+								pr.links.append( qMakePair( esm->mapFormID( *r, esmLeUInt32( p ) ),
+									esm->mapFormID( *r, esmLeUInt32( p + 4 ) ) ) );
+							}
+						}
+						if ( base )
+							refrBase.insert( r->formID, base );
+						if ( anyPrim ) {
+							ix.primitivesSeen++;
+							prims.append( pr );
+						}
+					} else {
+						/* THE WORKBENCH BASES, by EDID, which is the one clause
+						 * of this rule that is a HEURISTIC and is labelled as
+						 * one: a base whose editor id contains both "workshop"
+						 * and "workbench". There is no keyword on the workbench
+						 * side to read instead -- the link goes the other way,
+						 * from the primitive to the bench -- and the oracle
+						 * this ports matched the same way, so the two agree. */
+						ESMFile::ESMField f( *r, *esm );
+						while ( f.next() ) {
+							if ( !( f == "EDID" ) )
+								continue;
+							const QString ed = fieldString( f ).toLower();
+							if ( ed.contains( QLatin1String( "workshop" ) )
+								&& ed.contains( QLatin1String( "workbench" ) ) )
+								workshopBases.insert( r->formID );
+							break;
+						}
+					}
+				}
+				if ( r->children )
+					walk( r->children );
+				id = r->next;
+			}
+		};
+		if ( r0 )
+			walk( r0->next );
+
+		// ---- clause 1, with the FormLists expanded transitively
+		std::function<void( quint32, int )> expand = [&]( quint32 f, int depth ) {
+			if ( depth > 8 )
+				return;             // a FormList cycle is a plugin bug, not a reason to hang
+			auto it = flstMembers.find( f );
+			if ( it == flstMembers.end() ) {
+				ix.scrapBases.insert( f );
+				return;
+			}
+			ix.formListsExpanded++;
+			for ( quint32 m : it.value() )
+				expand( m, depth + 1 );
+		};
+		for ( auto it = cobjTarget.begin(); it != cobjTarget.end(); ++it )
+			expand( it.value(), 0 );
+
+		// ---- clause 3: the bases that refuse to be scrapped
+		for ( quint32 b : ix.scrapBases ) {
+			const ESMFile::ESMRecord * br = esm->findRecord( b );
+			if ( !br || br->type == GRUP )
+				continue;
+			ESMFile::ESMField f( *br, *esm );
+			while ( f.next() ) {
+				if ( !( f == "KWDA" ) )
+					continue;
+				const unsigned char * p = f.getDataPtr();
+				for ( size_t k = 0; k + 4 <= f.size(); k += 4 )
+					if ( esm->mapFormID( *br, esmLeUInt32( p + k ) ) == ESM_KW_UNSCRAPPABLE )
+						ix.unscrappable.insert( b );
+			}
+		}
+		for ( quint32 b : ix.unscrappable )
+			if ( ix.scrapBases.contains( b ) )
+				ix.clause1And3++;
+
+		// ---- clause 2: the build areas
+		QSet<quint32> workshopRefrs;
+		for ( auto it = refrBase.begin(); it != refrBase.end(); ++it )
+			if ( workshopBases.contains( it.value() ) )
+				workshopRefrs.insert( it.key() );
+		ix.workshopRefrs = workshopRefrs.size();
+		for ( const RawPrim & pr : prims ) {
+			if ( pr.type != ESM_XPRM_TYPE_BOX || !pr.hasData ) {
+				ix.primitivesNotBox++;
+				continue;
+			}
+			quint32 ws = 0;
+			for ( const QPair<quint32, quint32> & l : pr.links )
+				if ( l.first == ESM_KW_LINKED_PRIM && workshopRefrs.contains( l.second ) )
+					ws = l.second;
+			if ( !ws ) {
+				ix.primitivesUnlinked++;
+				continue;
+			}
+			EsmScrapBox b;
+			for ( int k = 0; k < 3; k++ ) {
+				b.centre[k] = pr.centre[k];
+				b.half[k] = std::fabs( pr.half[k] );
+			}
+			b.yaw = pr.rot[2];
+			b.refr = pr.refr;
+			b.workshop = ws;
+			if ( std::fabs( pr.rot[0] ) > 1.0e-3f || std::fabs( pr.rot[1] ) > 1.0e-3f )
+				ix.tiltedAreas++;
+			ix.buildAreas.append( b );
+		}
+	} catch ( std::exception & ) {
+		// a malformed plugin leaves the index EMPTY, which means "nothing is
+		// scrappable" -- the conservative answer, and never a crash mid-bake
+	}
+}
+
+const EsmScrapIndex & EsmWorld::scrapIndex() const
+{
+	buildScrapIndex();
+	return scrapIdx;
+}
+
+bool EsmWorld::scrappable( quint32 baseForm, const float worldPos[3], quint32 * areaRefr ) const
+{
+	if ( areaRefr )
+		*areaRefr = 0;
+	buildScrapIndex();
+	if ( !scrapIdx.scrapBases.contains( baseForm ) )
+		return false;                       // clause 1
+	if ( scrapIdx.unscrappable.contains( baseForm ) )
+		return false;                       // clause 3
+	for ( const EsmScrapBox & b : scrapIdx.buildAreas ) {
+		const float dx = worldPos[0] - b.centre[0];
+		const float dy = worldPos[1] - b.centre[1];
+		const float dz = worldPos[2] - b.centre[2];
+		/* Into the box's own frame, and the sign is the one the oracle uses:
+		 * the primitive is written in the REFR's rotated frame, so the point
+		 * is turned by MINUS the yaw to get there. */
+		const float c = std::cos( -b.yaw ), s = std::sin( -b.yaw );
+		const float ux = dx * c - dy * s;
+		const float uy = dx * s + dy * c;
+		if ( std::fabs( ux ) <= b.half[0] && std::fabs( uy ) <= b.half[1]
+			&& std::fabs( dz ) <= b.half[2] ) {
+			if ( areaRefr )
+				*areaRefr = b.refr;
+			return true;                    // clause 2
+		}
+	}
+	return false;
 }
 
 QVector<QPair<quint32, QString>> EsmWorld::listWorldspaces( const QString & esmPath, QString * error )

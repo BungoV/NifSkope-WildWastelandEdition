@@ -75,10 +75,22 @@ LightingWidget::LightingWidget( GLView * ogl, QWidget * parent ) : QWidget(paren
 	ui->sldToneMapping->setValue( std::clamp< int >( tmp, 0, BRIGHT ) );
 	ui->btnFrontal->setChecked( settings.value( "Settings/Render/Lighting/Frontal Light", true ).toBool() );
 
-	tmp = settings.value( "Lighting/Declination", 0 ).toInt();
-	ogl->declination = float( tmp % int(POS) ) * ( 180.0f / float(POS) );
-	tmp = settings.value( "Lighting/Planar Angle", 0 ).toInt();
-	ogl->planarAngle = float( tmp % int(POS) ) * ( 180.0f / float(POS) );
+	/* The light's two angles, stored by saveSettings() as quarter-degree
+	 * integers (POS = 180 degrees) under Settings/Render/Lighting/, and read
+	 * back from the SAME keys. The load used to read "Lighting/Declination" and
+	 * "Lighting/Planar Angle", which nothing writes, so the angles never came
+	 * back after a restart (lane LIGHTANGLES1, 2026-09-24). It also folded the
+	 * value with % POS, turning a legal +-180 degrees (+-POS stored, the light
+	 * from the opposite side) into 0. The wrap is now GLView::rotateLight's own,
+	 * so the loaded range is exactly the range the view can hold: [-180, 180],
+	 * both ends kept (roundFloat rounds half to even).
+	 */
+	auto loadAngle = [&settings]( const char * key ) {
+		const float a = float( settings.value( key, 0 ).toInt() ) * ( 180.0f / float(POS) );
+		return a - float( roundFloat( a / 360.0f ) ) * 360.0f;
+	};
+	ogl->declination = loadAngle( "Settings/Render/Lighting/Declination" );
+	ogl->planarAngle = loadAngle( "Settings/Render/Lighting/Planar Angle" );
 }
 
 LightingWidget::~LightingWidget()

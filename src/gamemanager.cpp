@@ -173,6 +173,7 @@ GameManager::GameResources::~GameResources()
 
 void GameManager::GameResources::init_archives()
 {
+	QWriteLocker	archiveWriteLock( &archiveLock() );
 	if ( sfMaterialDB_ID )
 		close_materials();
 	if ( ba2File ) {
@@ -253,6 +254,7 @@ CE2MaterialDB * GameManager::GameResources::init_materials()
 
 void GameManager::GameResources::close_archives()
 {
+	QWriteLocker	archiveWriteLock( &archiveLock() );
 	if ( sfMaterialDB_ID )
 		close_materials();
 	if ( ba2File ) {
@@ -263,6 +265,8 @@ void GameManager::GameResources::close_archives()
 
 void GameManager::GameResources::close_materials()
 {
+	QWriteLocker	archiveWriteLock( &archiveLock() );
+	QMutexLocker	resourceLock( &nifResourceMutex() );
 	if ( sfMaterialDB_ID && !parent ) {
 		for ( auto i = GameManager::nifResourceMap.begin(); i != GameManager::nifResourceMap.end(); i++ ) {
 			if ( i->second->parent == this )
@@ -279,10 +283,19 @@ QString GameManager::GameResources::find_file( const std::string_view & fullPath
 {
 	if ( !ba2File && !dataPaths.isEmpty() )
 		init_archives();
+	// the index may not be torn down under us while it is read (NIFPARSE1)
+	QReadLocker	archiveReadLock( &archiveLock() );
 	if ( ba2File && ba2File->findFile( fullPath ) )
 		return QString::fromUtf8( fullPath.data(), qsizetype(fullPath.length()) );
-	if ( parent )
+	if ( parent ) {
+		/* ARCHLOCK1 (2026-09-17): the parent's lazy init_archives() takes the WRITE
+		 * lock on this same QReadWriteLock; a read lock held here is an upgrade,
+		 * which Qt never grants, and the GUI thread waited on itself forever
+		 * (bungo: "When I click on anything from 'files', it freezes nifskope").
+		 * Nothing from the index is referenced past this point, so let go first. */
+		archiveReadLock.unlock();
 		return parent->find_file( fullPath );
+	}
 	return QString();
 }
 
@@ -297,12 +310,19 @@ bool GameManager::GameResources::get_file( QByteArray & data, const std::string_
 {
 	if ( !ba2File && !dataPaths.isEmpty() )
 		init_archives();
+	/* The read lock covers findFile AND extractFile AND the interior
+	 * string_views of the FileInfo between them. It is released before the
+	 * retry below, which takes the WRITE lock through close_archives(). */
+	QReadLocker	archiveReadLock( &archiveLock() );
 	const BA2File::FileInfo *	fd = nullptr;
 	if ( ba2File )
 		fd = ba2File->findFile( fullPath );
 	if ( !fd ) {
-		if ( parent )
+		if ( parent ) {
+			// ARCHLOCK1: same as find_file, the parent may build its index (write lock)
+			archiveReadLock.unlock();
 			return parent->get_file( data, fullPath );
+		}
 		qWarning() << "File '" << QLatin1String( fullPath.data(), qsizetype(fullPath.length()) ) << "' not found in archives";
 		data.resize( 0 );
 		return false;
@@ -311,6 +331,8 @@ bool GameManager::GameResources::get_file( QByteArray & data, const std::string_
 		ba2File->extractFile( &data, &byteArrayAllocFunc, *fd );
 	} catch ( NifSkopeError & e ) {
 		if ( std::string_view(e.what()).starts_with( "BA2File: unexpected change to size of loose file" ) ) {
+			// drop the READ lock before close_archives() takes the write one
+			archiveReadLock.unlock();
 			close_archives();
 			return get_file( data, fullPath );
 		}
@@ -516,11 +538,29 @@ bool GameManager::status( const GameMode game )
 	return false;
 }
 
+/*! One process-wide map, three call sites, and now worker threads building
+ *  NifModels for the LOD generator (lodgenchunkpass.h). RECURSIVE because
+ *  addNIFResourcePath calls removeNIFResourcePath while it holds it.
+ *  (lane BAKEPERF1, 2026-09-11) */
+QRecursiveMutex & GameManager::nifResourceMutex()
+{
+	static QRecursiveMutex	m;
+	return m;
+}
+
+//! See gamemanager.h. One lock for every GameResources' archive state.
+QReadWriteLock & GameManager::archiveLock()
+{
+	static QReadWriteLock	l( QReadWriteLock::Recursive );
+	return l;
+}
+
 GameManager::GameResources * GameManager::addNIFResourcePath( const NifModel * nif, const QString & dataPath )
 {
 	if ( !nif ) [[unlikely]]
 		return &(GameManager::archives[OTHER]);
 
+	QMutexLocker	resourceLock( &nifResourceMutex() );
 	GameMode	game = get_game( nif );
 	auto	i = nifResourceMap.find( nif );
 	if ( i != nifResourceMap.end() ) {
@@ -554,6 +594,7 @@ GameManager::GameResources * GameManager::addNIFResourcePath( const NifModel * n
 
 void GameManager::removeNIFResourcePath( const NifModel * nif )
 {
+	QMutexLocker	resourceLock( &nifResourceMutex() );
 	auto	i = nifResourceMap.find( nif );
 	if ( i == nifResourceMap.end() )
 		return;

@@ -55,6 +55,14 @@ uniform bool hasEnvMask;
 uniform bool hasSpecularMap;
 uniform bool greyscaleColor;
 
+// Shader Flags 1 bit 12 (SLSF1_Model_Space_Normals): the bound normal map is an
+// `_msn`, a MODEL-space map, not a tangent-space one.
+uniform bool hasModelSpaceNormals;
+// model -> view rotation, the same row-major uniform the vertex stage uses for
+// the normal, tangent and bitangent.  Declared here because the model-space
+// path has no tangent frame to ride on.
+uniform mat3 normalMatrix;
+
 uniform float subsurfaceRolloff;
 uniform float rimPower;
 uniform float backlightPower;
@@ -365,10 +373,34 @@ void main()
 	vec4 specMap = texture( SpecularMap, offset );
 	vec4 glowMap = texture( GlowMap, offset );
 
-	vec3 normal = normalMap.rgb * 2.0 - 1.0;
-	// Calculate missing blue channel
-	normal.b = sqrt(max(1.0 - dot(normal.rg, normal.rg), 0.0));
-	normal = normalize( btnMatrix_norm * normal );
+	vec3 normal;
+	if ( hasModelSpaceNormals ) {
+		/* A model-space map carries all three components already, in the
+		 * model's own axes, so it needs model -> view and NOTHING else.  The
+		 * tangent-space path below would instead read the map's two stored
+		 * channels as offsets along the mesh's tangent and bitangent -- and a
+		 * terrain LOD tile's tangent frame is arbitrary (btdterrain.cpp builds
+		 * T = n x worldUp, B = n x T), so the sheet's "up" lands sideways and
+		 * the surface shades in blotches.
+		 *
+		 * Channel order MEASURED on Bethesda's own shipped sheets
+		 * (Data/Textures/Terrain/Commonwealth/Commonwealth.16.*_msn.DDS, six
+		 * 512x512 tiles, correlated against the heights of the same cells):
+		 *   R = EAST  (+x)   corr 0.364 with -dh/dx, 0.001 with -dh/dy
+		 *   B = NORTH (+y)   corr 0.422 with -dh/dy, 0.002 with -dh/dx
+		 *   G = UP    (+z)   mean 238.6 of 255
+		 * Alpha is a constant 255 on every tile and carries nothing.
+		 * sk_msn.frag's `.rbg` swizzle is this same order.
+		 *
+		 * The blue channel is NOT recomputed here: it is real data. */
+		vec3 msn = normalMap.rgb * 2.0 - 1.0;
+		normal = normalize( vec3( msn.r, msn.b, msn.g ) * normalMatrix );
+	} else {
+		normal = normalMap.rgb * 2.0 - 1.0;
+		// Calculate missing blue channel
+		normal.b = sqrt(max(1.0 - dot(normal.rg, normal.rg), 0.0));
+		normal = normalize( btnMatrix_norm * normal );
+	}
 	if ( !gl_FrontFacing )
 		normal *= -1.0;
 
@@ -378,6 +410,15 @@ void main()
 	vec3 H = normalize( L + V );
 
 	float NdotL = dot(normal, L);
+	if ( hasModelSpaceNormals ) {
+		/* A terrain LOD sheet stores steep banks the coarse LOD mesh does not
+		 * have, so a texel can face away from the light on a surface that is
+		 * plainly in view, and with the camera light it fell to near-black in
+		 * hard-edged patches (bungo 2026-09-18). Squared half-Lambert: 1 at
+		 * N.L = 1, 0.25 at the terminator, 0 only when facing straight away. */
+		float hl = NdotL * 0.5 + 0.5;
+		NdotL = hl * hl;
+	}
 	float NdotL0 = max( NdotL, FLT_EPSILON );
 	float NdotH = max( dot(normal, H), FLT_EPSILON );
 	float NdotV = max( dot(normal, V), FLT_EPSILON );

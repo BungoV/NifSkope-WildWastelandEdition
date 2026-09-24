@@ -32,6 +32,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "glscene.h"
 
+#include "hkxplayback.h"
+
 #include "gl/renderer.h"
 #include "gl/gltex.h"
 #include "gl/glcontroller.h"
@@ -60,6 +62,8 @@ Scene::Scene( TexCache * texcache, QObject * parent ) :
 	QObject( parent )
 {
 	refreshCollisionOnlySetting();
+	// HKX2: the loaded-animation list lives as long as the scene does.
+	hkx = new HkxPlayback( this );
 	currentBlock = currentIndex = QModelIndex();
 	selecting = 0;
 	animate = true;
@@ -120,6 +124,8 @@ Scene::~Scene()
 	// the primary's shader state down with this document
 	if ( renderer && !rendererBorrowed )
 		delete renderer;
+	delete hkx;
+	hkx = nullptr;
 }
 
 void Scene::setOpenGLContext( QOpenGLContext * context )
@@ -178,6 +184,11 @@ void Scene::clear( [[maybe_unused]] bool flushTextures )
 	animGroups.clear();
 	animTags.clear();
 	animCycle.clear();
+
+	// HKX2: the nodes are about to be deleted, so every clip's binding goes with
+	// them. The clips themselves are kept and re-bound by Scene::make().
+	if ( hkx )
+		hkx->onSceneCleared();
 
 	// Viewport state keyed by BLOCK NUMBER. Nothing else resets it, so without
 	// this the previous document's hide / solo / rest-pose set is re-applied to
@@ -291,6 +302,11 @@ void Scene::make( NifModel * nif, bool flushTextures )
 
 	update( nif, QModelIndex() );
 
+	// HKX2: a different NIF is open, so every loaded clip goes back into the
+	// animations list and the active one is re-bound against THESE nodes.
+	if ( hkx )
+		hkx->onSceneRebuilt();
+
 	if ( !animGroups.contains( animGroup ) ) {
 		if ( animGroups.isEmpty() )
 			animGroup = QString();
@@ -299,6 +315,13 @@ void Scene::make( NifModel * nif, bool flushTextures )
 	}
 
 	setSequence( animGroup );
+}
+
+Node * Scene::findNode( const NifModel * nif, const QModelIndex & iNode ) const
+{
+	if ( !nif || !iNode.isValid() )
+		return nullptr;
+	return nodes.get( iNode );
 }
 
 Node * Scene::getNode( const NifModel * nif, const QModelIndex & iNode )
@@ -372,6 +395,12 @@ void Scene::setSequence( const QString & seqname )
 {
 	animGroup = seqname;
 	transformDirty = true;
+
+	// HKX2: a loaded clip is an entry in the same list as the NIF's own
+	// sequences, so choosing one binds it and choosing anything else unbinds it
+	// and restores the pose the rig was in.
+	if ( hkx )
+		hkx->setActive( seqname );
 
 	for ( Node * node : nodes.list() ) {
 		node->setSequence( seqname );

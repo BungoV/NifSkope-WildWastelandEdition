@@ -213,6 +213,7 @@ public:
 	//! Mirror the render toolbar's loop / switch-animation actions on the timeline toolbar
 	void addAnimActions( QAction * loop, QAction * sw );
 
+
 	QSize sizeHint() const override;
 
 signals:
@@ -250,6 +251,7 @@ protected slots:
 	void filterEdited( const QString & text );
 	void runLint();
 
+
 protected:
 	//! Deferred-refresh flag: a refresh requested while the dock is hidden is
 	//! remembered and replayed by showEvent instead of scanning invisibly.
@@ -272,6 +274,7 @@ protected:
 	QString controllerLabel( const QModelIndex & iController ) const;
 	static QString shortTypeName( QString type );
 	int findAVObjectByName( const QString & name ) const;
+
 
 	// ---- view state helpers (timeline.cpp)
 	float timeToX( float t, int width ) const;
@@ -411,6 +414,7 @@ protected:
 
 	bool scanning = false;
 	bool syncingSequence = false;
+
 };
 
 //! The upper pane: time ruler, summary row and one row per interpolator

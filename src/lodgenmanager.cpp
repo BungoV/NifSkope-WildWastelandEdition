@@ -5,6 +5,10 @@ BSD License - see nifskope.h
 ***** END LICENCE BLOCK *****/
 
 #include "lodgen.h"
+#include "lodgenchunkpass.h"
+#include "lodgenparallel.h"
+#include "lodgenlayout.h"
+#include "nativeemit.h"
 #include "io/lodmfile.h"
 #include "gl/glproperty.h"
 #include "glview.h"
@@ -40,6 +44,7 @@ BSD License - see nifskope.h
 #include <QTimer>
 #include <QVBoxLayout>
 #include <QButtonGroup>
+#include <QDebug>
 #include <QDockWidget>
 #include <QHBoxLayout>
 #include <QMainWindow>
@@ -50,9 +55,14 @@ BSD License - see nifskope.h
 #include <QScrollArea>
 #include <QSettings>
 #include <QSplitter>
+#include <QStackedWidget>
+#include <QTabBar>
 #include <QToolButton>
 
+#include <QElapsedTimer>
+
 #include <atomic>
+#include <functional>
 #include <thread>
 
 #include "lodtfile.h"
@@ -311,6 +321,7 @@ public:
 		arrow->setToolTip( tr( "Show or hide this output's settings" ) );
 		header->addWidget( arrow, 0 );
 		header->addWidget( check, 1 );
+		headerRow = header;
 		v->addLayout( header );
 		bodyWidget = new QWidget( this );
 		bodyWidget->setObjectName( QStringLiteral( "Lodgen" ) + key + QStringLiteral( "Body" ) );
@@ -326,12 +337,27 @@ public:
 	QWidget * body() const { return bodyWidget; }
 	bool isOpen() const { return open; }
 
+	/*! A SECOND check in the header row, of which exactly one is shown at a
+	 *  time (lane LODUI1). The object settings below are the same settings
+	 *  whichever reader the run is for -- the same placements, channels,
+	 *  cull, simplification and cards -- and only the FILE they end up in
+	 *  differs: `.bto` chunks for the stock engine, the `.lodo`/`.lodi` pair
+	 *  for FO4 Community Shaders. One section with two faces keeps every
+	 *  setting reachable under both targets; two sections would have split
+	 *  them and doubled the rows. */
+	void addHeaderCheck( QCheckBox * alt )
+	{
+		if ( headerRow && alt )
+			headerRow->addWidget( alt, 1 );
+	}
+
 private:
 	void apply()
 	{
 		bodyWidget->setVisible( open );
 		arrow->setArrowType( open ? Qt::DownArrow : Qt::RightArrow );
 	}
+	QHBoxLayout * headerRow = nullptr;
 	QToolButton * arrow = nullptr;
 	QWidget * bodyWidget = nullptr;
 	QString settingsKey;
@@ -400,6 +426,42 @@ public:
 		splitter->addWidget( scroll );
 		QSettings settings;
 
+		/* THE 2026-09-12 RULINGS REACH A PANEL THAT HAS ALREADY BEEN SAVED
+		 * (lane DEFAULTS1). Five rows had their defaults moved by bungo's
+		 * rulings of that day, but a panel that has been used once holds the
+		 * OLD numbers in QSettings and would keep baking the old look while
+		 * the command line baked the new one. This runs once, and it only
+		 * touches a key that is still EXACTLY the old default -- a number he
+		 * chose himself is not the old default and is left alone. The marker
+		 * is what makes it once; delete it and the sweep runs again. */
+		if ( !settings.value( QStringLiteral( "LodGeneration/defaults1Applied" ), false ).toBool() ) {
+			struct Moved { const char * key; double was, now; };
+			static const Moved moved[] = {
+				{ "landHex",         0.0, 256.0 },	// bungo's pick, panel (c)
+				{ "landWarp",        0.0, 341.0 },
+				{ "landMipBias",     0.0,  -0.22 },
+				{ "landGuide",       0.0,   5.0 },	// off -> flat warp
+				{ "roadGroundPaint", 1.0,   0.0 },	// the verge is not road
+			};
+			int moveds = 0, kept = 0;
+			for ( const Moved & m : moved ) {
+				const QString k = QStringLiteral( "LodGeneration/" ) + QLatin1String( m.key );
+				if ( !settings.contains( k ) )
+					continue;			// absent: the row's own new default is what it reads
+				const double v = settings.value( k ).toDouble();
+				if ( qAbs( v - m.was ) <= 1.0e-6 ) {
+					settings.setValue( k, m.now );
+					moveds++;
+				} else {
+					kept++;			// his own number, untouched
+				}
+			}
+			settings.setValue( QStringLiteral( "LodGeneration/defaults1Applied" ), true );
+			if ( moveds || kept )
+				qDebug() << "LOD Generation: 2026-09-12 defaults applied to" << moveds
+					<< "saved rows," << kept << "left as they were set";
+		}
+
 		/* One label | field grid per section, the field column stretching so
 		 * every value is the same width; `indent` sets a sub-form under its
 		 * parent check box. The label column is one width for the whole panel
@@ -440,6 +502,83 @@ public:
 			h->addWidget( edit, 1 );
 			h->addWidget( browseDirButton( host, edit, title ), 0 );
 			return host;
+		};
+
+		/* ---- THE EXTRA ROWS' FIVE MAKERS (lane PANEL1, 2026-09-12) --------
+		 * bungo: "They should all be configurable in the gen menu". Fifty-odd
+		 * rows written out one at a time is fifty-odd chances to forget the
+		 * scrub field, the tooltip, the save or the load, so each kind of row
+		 * is made ONCE here and every row is registered under its settings key
+		 * in `extras`. The save, the load, the run and the self-test all walk
+		 * that one registry, so they cannot drift from each other.
+		 *
+		 * The DEFAULT handed to each maker is the command line's own default,
+		 * unchanged (bungo's call, not this lane's), and it is kept beside the
+		 * row: a row the target has HIDDEN reads back as its default, which is
+		 * the panel's tick-AND-VISIBLE rule applied to a value. */
+		auto xReg = [this]( const QString & key, QWidget * field, const QVariant & dflt, QLabel * label ) {
+			extras.insert( key, WwExtraRow{ field, dflt } );
+			if ( label )
+				extraLabels.insert( key, label );
+		};
+		// a fractional number: drag to scrub, click to type (wwMakeScrubField
+		// also guards the wheel, so a scroll over it does not change it)
+		auto xD = [this, page, &settings, &xReg]( Form & f, const char * name, const QString & key,
+				const QString & label, double dflt, double lo, double hi, int dec, double step,
+				const QString & tip ) {
+			auto * w = new QDoubleSpinBox( page );
+			w->setObjectName( QLatin1String( name ) );
+			w->setRange( lo, hi );
+			w->setDecimals( dec );
+			w->setSingleStep( step );
+			w->setValue( settings.value( QStringLiteral( "LodGeneration/" ) + key, dflt ).toDouble() );
+			w->setToolTip( tip );
+			wwMakeScrubField( w );
+			xReg( key, w, dflt, f.add( page, label, w ) );
+		};
+		// a whole number
+		auto xI = [this, page, &settings, &xReg]( Form & f, const char * name, const QString & key,
+				const QString & label, int dflt, int lo, int hi, const QString & tip ) {
+			auto * w = new QSpinBox( page );
+			w->setObjectName( QLatin1String( name ) );
+			w->setRange( lo, hi );
+			w->setValue( settings.value( QStringLiteral( "LodGeneration/" ) + key, dflt ).toInt() );
+			w->setToolTip( tip );
+			wwMakeScrubField( w );
+			xReg( key, w, dflt, f.add( page, label, w ) );
+		};
+		// a one-of-several selector; the item DATA is what the run reads
+		auto xC = [this, page, &settings, &xReg]( Form & f, const char * name, const QString & key,
+				const QString & label, int dflt, const QList<QPair<QString, int>> & items,
+				const QString & tip ) {
+			auto * w = new QComboBox( page );
+			w->setObjectName( QLatin1String( name ) );
+			for ( const QPair<QString, int> & it : items )
+				w->addItem( it.first, it.second );
+			const int idx = w->findData( settings.value( QStringLiteral( "LodGeneration/" ) + key, dflt ).toInt() );
+			w->setCurrentIndex( idx < 0 ? qMax( 0, w->findData( dflt ) ) : idx );
+			w->setToolTip( tip );
+			wwMatchFieldStyle( w );
+			xReg( key, w, dflt, f.add( page, label, w ) );
+		};
+		// a ticked box, Blender's kind: the whole row is the box and its words
+		auto xB = [this, page, &settings, &xReg]( Form & f, const char * name, const QString & key,
+				const QString & label, bool dflt, const QString & tip ) {
+			auto * w = new QCheckBox( label, page );
+			w->setObjectName( QLatin1String( name ) );
+			w->setChecked( settings.value( QStringLiteral( "LodGeneration/" ) + key, dflt ).toBool() );
+			w->setToolTip( tip );
+			xReg( key, w, dflt, nullptr );
+			f.span( w );
+		};
+		// a folder, with the same browse button every other folder row has
+		auto xP = [this, page, &settings, &xReg, &browseHost]( Form & f, const char * name, const QString & key,
+				const QString & label, const QString & dflt, const QString & tip, bool folder ) {
+			auto * w = new QLineEdit( settings.value( QStringLiteral( "LodGeneration/" ) + key, dflt ).toString(), page );
+			w->setObjectName( QLatin1String( name ) );
+			w->setPlaceholderText( dflt.isEmpty() ? tr( "optional" ) : dflt );
+			w->setToolTip( tip );
+			xReg( key, w, dflt, f.add( page, label, folder ? browseHost( w, label ) : static_cast<QWidget *>( w ) ) );
 		};
 
 		// ---- Source ---------------------------------------------------------
@@ -595,8 +734,12 @@ public:
 		 * first cut wanted a Data path, the second split it into a mods root
 		 * and a name. In Mod Organizer a mod folder IS a Data folder, so this
 		 * one field is the place a person thinks in: pick a mod, or make a new
-		 * folder in the picker and that is the new mod. The files land inside
-		 * it under Terrain\, Textures\Terrain\ and meshes\terrain\. */
+		 * folder in the picker and that is the new mod. Under FO4 Community
+		 * Shaders every file this panel writes lands inside it under ONE root,
+		 * FO4CSLOD\ (bungo, 2026-09-16; lane LAYOUT1) -- the far shadow
+		 * heightmap under Textures\Terrain\ is the one exception, because that
+		 * path is the game's. Under the stock engine nothing moved: chunks go
+		 * to meshes\terrain\ and their sheets to textures\terrain\. */
 		outEdit = new QLineEdit( page );
 		outEdit->setObjectName( QStringLiteral( "LodgenOutputEdit" ) );
 		{
@@ -607,10 +750,23 @@ public:
 		}
 		outEdit->setPlaceholderText( tr( "the mod folder the files land in" ) );
 		outEdit->setToolTip( tr( "A mod folder - in Mod Organizer, a folder under its mods folder; it is a Data\n"
-			"folder. The landscape file goes to Terrain\\, the heightmap to Textures\\Terrain\\,\n"
-			"chunks to meshes\\terrain\\. A folder that does not exist yet is created when you\n"
-			"generate; enable it in Mod Organizer afterwards." ) );
+			"folder. Under FO4 Community Shaders everything lands under one root,\n"
+			"%1\\<worldspace>\\, with the shared impostor cards in %1\\Cards\\ and the\n"
+			"far shadow heightmap in Textures\\Terrain\\. Under the stock engine chunks go to\n"
+			"meshes\\terrain\\ and their sheets to textures\\terrain\\. A folder that does not\n"
+			"exist yet is created when you generate; enable it in Mod Organizer afterwards." )
+			.arg( lodgenFo4csFolderName() ) );
 		src.add( page, tr( "Output mod" ), browseHost( outEdit, tr( "Output mod folder" ) ) );
+		/* THE ROOT, on the panel (lane LAYOUT1, 2026-09-16). One line under the
+		 * output field saying where this bake's files land inside that mod
+		 * folder, because the answer changed today and a person cannot see a
+		 * layout from a folder picker. A label, not a sentence: it reads
+		 * `FO4CSLOD\Commonwealth\`. Hidden under the stock engine, whose files
+		 * did not move. */
+		outRootLabel = new QLabel( page );
+		outRootLabel->setObjectName( QStringLiteral( "LodgenOutputRootLabel" ) );
+		outRootLabel->setTextInteractionFlags( Qt::TextSelectableByMouse );
+		outRootName = src.add( page, tr( "LOD root" ), outRootLabel );
 		layout->addLayout( src.g );
 
 		// ---- What to generate -----------------------------------------------
@@ -638,7 +794,8 @@ public:
 		lodtCheck->setObjectName( QStringLiteral( "LodgenLodtCheck" ) );
 		lodtCheck->setChecked( settings.value( QStringLiteral( "LodGeneration/lodt" ), true ).toBool() );
 		lodtCheck->setToolTip( tr( "Heights, land textures, water, colour, ground cover and ambient occlusion for\n"
-			"the whole worldspace in one file: Terrain\\<worldspace>.lodl." ) );
+			"the whole worldspace in one file: %1\\<worldspace>\\<worldspace>.lodl." )
+			.arg( lodgenFo4csFolderName() ) );
 		lodtSection = new LodgenSection( lodtCheck, QStringLiteral( "Lodt" ), true, page );
 		layout->addWidget( lodtSection );
 		{
@@ -712,14 +869,32 @@ public:
 		objectsCheck->setToolTip( tr( "Distant buildings, trees and rocks: one mesh per chunk under\n"
 			"meshes\\terrain\\<worldspace>\\, for the cells in the chunk range below." ) );
 		objectsSection = new LodgenSection( objectsCheck, QStringLiteral( "Objects" ), true, page );
+		/* THE NATIVE PAIR, the FO4CS face of the same section (bungo
+		 * 2026-09-11 06:4x: "we should only have those 5 .lod types in fo4
+		 * community shaders target"). The settings below belong to the OBJECT
+		 * PASS, not to the .bto container, so the section keeps them and only
+		 * its head changes with the target. */
+		nativeCheck = new QCheckBox( tr( "Native object files (.lodo/.lodi)" ), page );
+		nativeCheck->setObjectName( QStringLiteral( "LodgenNativeCheck" ) );
+		nativeCheck->setChecked( settings.value( QStringLiteral( "LodGeneration/native" ), true ).toBool() );
+		nativeCheck->setToolTip( tr( "The object library and its instance table for FO4 Community Shaders, written to\n"
+			"%1\\<worldspace>\\<worldspace>.lodo and .lodi: every LOD mesh once, a cluster\n"
+			"ladder with screen error, and one 24-byte record per placement." )
+			.arg( lodgenFo4csFolderName() ) );
+		objectsSection->addHeaderCheck( nativeCheck );
 		layout->addWidget( objectsSection );
 		{
 			Form f = form( 24 );
-			identityCheck = new QCheckBox( tr( "Identity channels and manifests" ), page );
+			/* OFF since 2026-09-12 (lane DEFAULTS1, bungo's 15:56 ruling), and
+			 * the manifest is no longer part of what this row controls: the
+			 * sidecar is written either way, so the row names only what goes
+			 * inside the chunk. */
+			identityCheck = new QCheckBox( tr( "Identity channels" ), page );
 			identityCheck->setObjectName( QStringLiteral( "LodgenIdentityCheck" ) );
-			identityCheck->setChecked( true );
-			identityCheck->setToolTip( tr( "A per-vertex object identity in the chunk and a manifest beside it, which FO4CS\n"
-				"reads to treat each distant object as itself. The stock engine ignores both." ) );
+			identityCheck->setChecked( false );
+			identityCheck->setToolTip( tr( "A per-vertex object identity inside the chunk, which FO4CS reads to treat each\n"
+				"distant object as itself. Off, the chunk carries vanilla's vertex layout.\n"
+				"The manifest beside the chunk is written either way.\nCommand line: --identity" ) );
 			aoCheck = new QCheckBox( tr( "Bake vertex AO" ), page );
 			aoCheck->setChecked( true );
 			atlasCheck = new QCheckBox( tr( "Pack an object texture atlas" ), page );
@@ -832,9 +1007,24 @@ public:
 			impostorEdit = new QLineEdit( settings.value( QStringLiteral( "LodGeneration/impostors" ) ).toString(), page );
 			impostorEdit->setPlaceholderText( tr( "optional" ) );
 			impostorEdit->setToolTip( tr( "A directory of cards from bake_impostor_cards.sh. A card stands in for a model\n"
-				"that has no far LOD of its own." ) );
+				"that has no far LOD of its own.\n"
+				"Empty under FO4 Community Shaders means the standard place, %1\\Cards\n"
+				"under the output folder, when that folder is there; a folder typed here wins." )
+				.arg( lodgenFo4csFolderName() ) );
 			QWidget * impostorHost = browseHost( impostorEdit, tr( "Impostor card directory" ) );
 			QLabel * impostorLabel = f.add( page, tr( "Impostor cards" ), impostorHost );
+			/* TREES ONLY. bungo, 2026-09-11 07:0x: "I've only wanted trees for
+			 * the impostors", then 07:1x "Make trees only a toggle" and 07:2x
+			 * "let's keep it simple like that for now". ON is the tree set --
+			 * TREE records, a model under a trees folder, a model file named
+			 * tree... Off is the old rule and nothing else: any base whose ring
+			 * slot is empty. A per-object picker is parked on his word. */
+			treesOnlyCheck = new QCheckBox( tr( "Trees only" ), page );
+			treesOnlyCheck->setObjectName( QStringLiteral( "LodgenTreesOnlyCheck" ) );
+			treesOnlyCheck->setChecked(
+				settings.value( QStringLiteral( "LodGeneration/treesOnly" ), true ).toBool() );
+			treesOnlyCheck->setToolTip( tr( "On, only trees stand on cards; off, any object whose ring has no model of its own does." ) );
+			f.span( treesOnlyCheck );
 			impostorLevelBox = new QComboBox( page );
 			impostorLevelBox->setObjectName( QStringLiteral( "LodgenImpostorLevelBox" ) );
 			impostorLevelBox->addItem( tr( "Only where a ring has no model" ), -1 );
@@ -844,11 +1034,10 @@ public:
 			impostorLevelBox->addItem( tr( "Ring 3 (dim 32)" ), 3 );
 			impostorLevelBox->setCurrentIndex( qBound( 0,
 				settings.value( QStringLiteral( "LodGeneration/impostorFromLevel" ), -1 ).toInt() + 1, 4 ) );
-			impostorLevelBox->setToolTip( tr( "From this ring on, an object with a card stands on the card even where the ring\n"
-				"has a mesh: one quad per tree, for FO4 Community Shaders, which draws the octahedral\n"
-				"sheets. The stock engine would show the crossed quads there." ) );
+			impostorLevelBox->setToolTip( tr( "From this ring on a tree stands on its card even where the ring has a mesh; no other object is touched." ) );
 			wwMatchFieldStyle( impostorLevelBox );
-			impostorLevelLabel = f.add( page, tr( "Cards from ring" ), impostorLevelBox );
+			// trees only in effect since 2026-09-11, and the label says so
+			impostorLevelLabel = f.add( page, tr( "Tree cards from ring" ), impostorLevelBox );
 
 			/* The octahedral grid, in FRAMES PER SIDE - the bake's own convention
 			 * (WW_IMPOSTOR_OCT=4 writes a sheet four frames wide, not five). Costs
@@ -889,10 +1078,14 @@ public:
 			cardResBox->addItem( tr( "64 px" ), 64 );
 			cardResBox->addItem( tr( "128 px" ), 128 );
 			cardResBox->addItem( tr( "256 px" ), 256 );
+			// bungo, 2026-09-11 07:3x, asked for 512: "Add it, why not". The
+			// bake hook already clamps to 32..512; only this list stopped at 256.
+			cardResBox->addItem( tr( "512 px" ), 512 );
 			{
-				const int saved = settings.value( QStringLiteral( "LodGeneration/cardRes" ), 128 ).toInt();
+				// 256 px since 2026-09-23 (bungo: tree cards "8x8 at 2k", lane DEFAULTS2)
+				const int saved = settings.value( QStringLiteral( "LodGeneration/cardRes" ), 256 ).toInt();
 				const int idx = cardResBox->findData( saved );
-				cardResBox->setCurrentIndex( idx >= 0 ? idx : 1 );
+				cardResBox->setCurrentIndex( idx >= 0 ? idx : 2 );
 			}
 			cardResBox->setToolTip( tr( "The long side of one view, in texels, for the LARGEST base in the run.\n"
 				"Every smaller base comes down a halving ladder by its own world size - half the\n"
@@ -949,12 +1142,14 @@ public:
 			objectsSection->body()->setLayout( f.g );
 			objectsSub = { identityCheck, swayCheck, channelsCheck, arraysCheck, aoCheck, aoSkirtSpin, aoSkirtLabel, cullCheck,
 				cullMarginSpin, cullMarginLabel, slotFallbackCheck, atlasCheck, impostorHost, impostorLabel,
-				impostorLevelBox, impostorLevelLabel, cardFramesBox, cardFramesLabel,
+				treesOnlyCheck, impostorLevelBox, impostorLevelLabel, cardFramesBox, cardFramesLabel,
 				cardResBox, cardResLabel, cardHalfAuxCheck, cardCostLabel,
 				simplifyCheck, simplify8Spin, s8Label,
 				simplify16Spin, s16Label, simplify32Spin, s32Label, simplifyErrorSpin, sErrLabel };
 			auto sync = [this, aoSkirtLabel, cullMarginLabel, s8Label, s16Label, s32Label, sErrLabel]() {
-				const bool on = objectsCheck->isChecked();
+				// EITHER head runs the object pass: .bto under the stock engine,
+				// the .lodo/.lodi pair under FO4CS. The rows below are its.
+				const bool on = objectPassOn();
 				for ( QWidget * w : objectsSub )
 					w->setEnabled( on );
 				const bool ident = on && identityCheck->isChecked();
@@ -973,10 +1168,12 @@ public:
 					w->setEnabled( simp );
 			};
 			connect( objectsCheck, &QCheckBox::toggled, this, sync );
+			connect( nativeCheck, &QCheckBox::toggled, this, sync );
 			connect( identityCheck, &QCheckBox::toggled, this, sync );
 			connect( aoCheck, &QCheckBox::toggled, this, sync );
 			connect( cullCheck, &QCheckBox::toggled, this, sync );
 			connect( simplifyCheck, &QCheckBox::toggled, this, sync );
+			syncObjectRows = sync;		// the target runs it again after it hides a head
 			sync();
 		}
 
@@ -1002,8 +1199,10 @@ public:
 			texCheck->setChecked( true );
 			terrainIdCheck = new QCheckBox( tr( "Terrain identity channels" ), page );
 			terrainIdCheck->setObjectName( QStringLiteral( "LodgenTerrainIdentityCheck" ) );
-			terrainIdCheck->setChecked( true );
-			terrainIdCheck->setToolTip( tr( "Material class, wetness and water depth in the chunk's vertex colours, for FO4CS.\nThe stock engine ignores them." ) );
+			// OFF since 2026-09-12 (lane DEFAULTS1, bungo's 15:53 ruling)
+			terrainIdCheck->setChecked( false );
+			terrainIdCheck->setToolTip( tr( "Material class, wetness and water depth in the chunk's vertex colours, for FO4CS.\n"
+				"Off, the .BTR carries vanilla's vertex layout.\nCommand line: --terrain-identity" ) );
 			geomorphCheck = new QCheckBox( tr( "Geomorph weights" ), page );
 			geomorphCheck->setChecked( false );
 			shoreCheck = new QCheckBox( tr( "Denser geometry at shorelines" ), page );
@@ -1071,15 +1270,56 @@ public:
 			Form f = form( 24 );
 			vtFinestBox = new QComboBox( page );
 			vtFinestBox->setObjectName( QStringLiteral( "LodgenVtFinestBox" ) );
-			vtFinestBox->addItem( tr( "2 cells per tile (32 units a texel)" ), 2 );
-			vtFinestBox->addItem( tr( "1 cell per tile (16 units a texel, full)" ), 1 );
-			vtFinestBox->setCurrentIndex(
-				settings.value( QStringLiteral( "LodGeneration/vtFinest" ), 2 ).toInt() == 1 ? 1 : 0 );
-			vtFinestBox->setToolTip( tr( "The densest level the pyramid carries. Two cells a tile is exactly\n"
-				"the density of vanilla's finest terrain ring; one cell is twice that\n"
-				"and four times the files." ) );
+			/* THE FINEST TEXEL DENSITY, ONE ROW (lane VTNORMAL1, bungo's ruling
+			 * 2026-09-23 09:4x: three values, 16 the default). The item data is
+			 * world units a texel; vtOptions() turns it into the finest level
+			 * and the tile content, the same pairs `--vt-density` names. The
+			 * old "Tile content" row is gone: it is decided here now. */
+			vtFinestBox->addItem( tr( "32 units a texel" ), 32 );
+			vtFinestBox->addItem( tr( "16 units a texel" ), 16 );
+			vtFinestBox->addItem( tr( "8 units a texel" ), 8 );
+			{
+				const int d = settings.value( QStringLiteral( "LodGeneration/vtDensity" ), 16 ).toInt();
+				vtFinestBox->setCurrentIndex( d == 32 ? 0 : ( d == 8 ? 2 : 1 ) );
+			}
+			vtFinestBox->setToolTip( tr( "How fine the pyramid's densest level is, in world units a texel.\n"
+				"32 is vanilla's finest terrain ring (about 1.7 GB for the Commonwealth),\n"
+				"16 is twice that on each side (about 6.4 GB), 8 is the upscaled normal\n"
+				"sheets' own density (about 26 GB).\n"
+				"Command line: --vt-density" ) );
 			wwMatchFieldStyle( vtFinestBox );
-			vtFinestLabel = f.add( page, tr( "Finest level" ), vtFinestBox );
+			vtFinestLabel = f.add( page, tr( "Finest texel size" ), vtFinestBox );
+			/* The rest of the pyramid's own numbers (lane PANEL1): they were
+			 * command-line switches with no row, and they live here rather
+			 * than in a section of their own because they only mean anything
+			 * while the pyramid is being written. */
+			xI( f, "LodgenVtBorderSpin", QStringLiteral( "vtBorder" ),
+				tr( "Tile border" ), 8, 0, 64,
+				tr( "How many texels of the neighbouring tile are copied around each tile so a\n"
+					"filtered read never crosses the seam.\nCommand line: --vt-border" ) );
+			xI( f, "LodgenVtMipsSpin", QStringLiteral( "vtMips" ),
+				tr( "Tile mips" ), 2, 1, 8,
+				tr( "How many mips each tile carries.\nCommand line: --vt-mips" ) );
+			xC( f, "LodgenVtCompressBox", QStringLiteral( "vtCompress" ),
+				tr( "Tile compression" ), 0,
+				{ { tr( "None" ), 0 }, { tr( "Zlib" ), 1 } },
+				tr( "How the tile payload is stored in the pyramid file.\n"
+					"Command line: --vt-compress" ) );
+			xB( f, "LodgenVtHeightCheck", QStringLiteral( "vtHeight" ),
+				tr( "Carry a height layer" ), false,
+				tr( "Each tile also carries the ground height, so a consumer can displace the\n"
+					"far terrain from the pyramid instead of from a mesh.\n"
+					"Command line: --vt-height" ) );
+			xB( f, "LodgenVtCoverInColorCheck", QStringLiteral( "vtCoverInColor" ),
+				tr( "Ground cover in the colour layer" ), false,
+				tr( "The ground cover is tinted into the colour tiles instead of being left in\n"
+					"the mask layer for the consumer to apply.\n"
+					"Command line: --vt-cover-in-color / --vt-cover-in-mask" ) );
+			xB( f, "LodgenVtHalfAuxCheck", QStringLiteral( "vtHalfAux" ),
+				tr( "Half-resolution normal, mask, height and emissive tiles" ), false,
+				tr( "Keeps the colour at the finest texel size and halves each side of the\n"
+					"other layers, which is most of the pyramid's size.\n"
+					"Command line: --vt-half-aux" ) );
 			vtBtrCheck = new QCheckBox( tr( "Chunk textures from the pyramid" ), page );
 			vtBtrCheck->setObjectName( QStringLiteral( "LodgenVtBtrCheck" ) );
 			vtBtrCheck->setChecked(
@@ -1095,6 +1335,17 @@ public:
 			f.span( vtSummary );
 			vtSection->body()->setLayout( f.g );
 			vtSub = { vtFinestBox, vtFinestLabel, vtBtrCheck, vtSummary };
+			// the pyramid's own numbers grey with it too
+			for ( const char * k : { "vtBorder", "vtMips", "vtCompress",
+					"vtHeight", "vtCoverInColor", "vtHalfAux" } ) {
+				if ( QWidget * w = extras.value( QLatin1String( k ) ).field )
+					vtSub << w;
+				if ( QLabel * l = extraLabels.value( QLatin1String( k ) ) )
+					vtSub << l;
+			}
+			// the half-resolution row moves the pyramid's size, so its summary
+			if ( auto * ha = qobject_cast<QCheckBox *>( extras.value( QStringLiteral( "vtHalfAux" ) ).field ) )
+				connect( ha, &QCheckBox::toggled, this, [this]( bool ) { refreshSummary(); } );
 			auto sync = [this]() {
 				const bool on = vtCheck->isChecked();
 				for ( QWidget * w : vtSub )
@@ -1106,6 +1357,465 @@ public:
 			connect( vtCheck, &QCheckBox::toggled, this, sync );
 			connect( btrCheck, &QCheckBox::toggled, this, sync );
 			connect( texCheck, &QCheckBox::toggled, this, sync );
+			sync();
+		}
+
+		/* ==== EVERY OTHER BAKE SETTING THE COMMAND LINE HAS =================
+		 * bungo, 2026-09-12 15:4x: "Erosion is a knob in the menu, corret?" --
+		 * it was not -- then "They should all be configurable in the gen menu,
+		 * anything else we're missing in that menu?". The audit of `lodgen`'s
+		 * own option parser (src/nifcli.cpp) is in the lane report; every bake
+		 * setting it found without a row is a row here, grouped under the
+		 * family its switches belong to.
+		 *
+		 * EVERY DEFAULT IS THE COMMAND LINE'S, unchanged: with nothing touched
+		 * the panel writes the bytes a switch-free command line writes, and
+		 * that is gate (a) of this lane. */
+
+		// ---- Terrain --------------------------------------------------------
+		layout->addWidget( wwHeading( tr( "Terrain" ), page ) );
+		{
+			Form f = form( 0 );
+			xI( f, "LodgenWaterSubdivSpin", QStringLiteral( "waterSubdiv" ),
+				tr( "Water subdivision" ), 3, 0, 8,
+				tr( "How many times a water cell's quad is split before it is written, so a\n"
+					"shoreline can follow the land instead of cutting across it.\n"
+					"Command line: --water-subdiv" ) );
+			layout->addLayout( f.g );
+		}
+
+		// ---- Land detail ----------------------------------------------------
+		/* How the landscape TEXTURE is read into the far sheets: the repeat,
+		 * the sample rule, the geometry that breaks the repeat, the guide that
+		 * steers it, where the fine detail comes from, and the two colour
+		 * terms. Every one of these is a texture decision, not a mesh one. */
+		layout->addWidget( wwHeading( tr( "Land detail" ), page ) );
+		{
+			Form f = form( 0 );
+			xD( f, "LodgenLandTilingSpin", QStringLiteral( "landTiling" ),
+				tr( "Texture repeat" ), 341.3333, 16.0, 8192.0, 4, 16.0,
+				tr( "How many world units one repeat of a landscape texture covers. 341.3333 is\n"
+					"the engine's own number out of Fallout4.exe 1.10.155; 2048 is the way back\n"
+					"to the bake before 2026-09-11.\nCommand line: --land-tiling" ) );
+			xC( f, "LodgenLandSampleBox", QStringLiteral( "landSample" ),
+				tr( "Sample rule" ), 0,
+				{ { tr( "Footprint (one texel of the matching mip)" ), 0 },
+				  { tr( "Average (the texture's mean, no repeat)" ), 1 },
+				  { tr( "Stochastic (hex tiling)" ), 2 },
+				  { tr( "Stochastic (warp)" ), 3 } },
+				tr( "How a bake texel reads the landscape texture. Footprint is the plain\n"
+					"sample and the default. Average reads the texture's 1x1 mip, so no\n"
+					"periodic pattern can reach the sheet. The two stochastic modes each set\n"
+					"the numbers below for you and hide them.\nCommand line: --land-sample" ) );
+			xD( f, "LodgenLandDetailSpin", QStringLiteral( "landDetail" ),
+				tr( "Detail over the average" ), 0.0, 0.0, 1.0, 2, 0.05,
+				tr( "With the average rule, how much of the footprint sample's departure from\n"
+					"that average is added back. 1 is the footprint bake exactly.\n"
+					"Command line: --land-detail" ) );
+			xD( f, "LodgenLandHexSpin", QStringLiteral( "landHex" ),
+				tr( "Hex tile size" ), 256.0, 0.0, 4096.0, 1, 16.0,
+				tr( "The size of one hexagonal tile of the stochastic tiling, in world units.\n"
+					"0 turns it off; 256 is the default (bungo 2026-09-12). One repeat is\n"
+					"341.3333.\nCommand line: --land-hex" ) );
+			xD( f, "LodgenLandWarpSpin", QStringLiteral( "landWarp" ),
+				tr( "Warp amplitude" ), 341.0, 0.0, 4096.0, 1, 16.0,
+				tr( "How far the sample point is pushed around before it reads the texture, in\n"
+					"world units. 0 turns it off; 341 is the default (bungo 2026-09-12).\n"
+					"Command line: --land-warp" ) );
+			xD( f, "LodgenLandWarpLatticeSpin", QStringLiteral( "landWarpLattice" ),
+				tr( "Warp lattice" ), 1024.0, 16.0, 8192.0, 1, 64.0,
+				tr( "The world size of one cell of the noise that does the pushing.\n"
+					"Command line: --land-warp-lattice" ) );
+			xI( f, "LodgenLandWarpOctavesSpin", QStringLiteral( "landWarpOctaves" ),
+				tr( "Warp octaves" ), 1, 1, 8,
+				tr( "How many halvings of that noise are summed.\n"
+					"Command line: --land-warp-octaves" ) );
+			xD( f, "LodgenLandMipBiasSpin", QStringLiteral( "landMipBias" ),
+				tr( "Mip bias" ), -0.22, -4.0, 4.0, 2, 0.10,
+				tr( "Shifts which mip of the landscape texture the sample comes from; negative\n"
+					"is sharper. 0 turns it off; -0.22 is the default (bungo 2026-09-12).\n"
+					"Command line: --land-mip-bias" ) );
+			xC( f, "LodgenLandGuideBox", QStringLiteral( "landGuide" ),
+				tr( "Guide rule" ), 5,
+				{ { tr( "Off" ), 0 },
+				  { tr( "Drag" ), 1 },
+				  { tr( "Aspect" ), 2 },
+				  { tr( "Aspect, hex" ), 3 },
+				  { tr( "Slope warp" ), 4 },
+				  { tr( "Flat warp" ), 5 } },
+				tr( "Steers the land sample by the ground's own shape instead of by the grid:\n"
+					"drag follows the downhill direction, aspect follows which way the slope\n"
+					"faces, the two warps push the sample along it. Flat warp at strength 1 is\n"
+					"the default (bungo 2026-09-12); Off turns it off.\nCommand line: --land-guide" ) );
+			xD( f, "LodgenLandGuideStrengthSpin", QStringLiteral( "landGuideStrength" ),
+				tr( "Guide strength" ), 1.0, 0.0, 4.0, 2, 0.05,
+				tr( "How hard the guide rule pulls. 1 is the rule as written.\n"
+					"Command line: --land-guide <rule>:<strength>" ) );
+			xD( f, "LodgenLandGuideScaleSpin", QStringLiteral( "landGuideScale" ),
+				tr( "Guide scale" ), 1024.0, 128.0, 2048.0, 1, 64.0,
+				tr( "Over how many world units the guide reads the ground's shape.\n"
+					"Command line: --land-guide-scale" ) );
+			xD( f, "LodgenLandGuideSlopeSpin", QStringLiteral( "landGuideSlope" ),
+				tr( "Guide slope reference" ), 0.5, 0.01, 4.0, 3, 0.05,
+				tr( "The slope, as a tangent, the guide calls a full slope; gentler ground is\n"
+					"steered proportionally less.\nCommand line: --land-guide-slope" ) );
+			xC( f, "LodgenLandDetailSourceBox", QStringLiteral( "landDetailSource" ),
+				tr( "Fine detail from" ), 1,
+				{ { tr( "Nothing (our own normals only)" ), 0 },
+				  { tr( "Vanilla's far terrain normals" ), 1 },
+				  { tr( "Vanilla's normals, blended" ), 2 },
+				  { tr( "Erosion (the grown pass)" ), 3 } },
+				tr( "Where the fine relief in the far terrain's normal map comes from.\n"
+					"Command line: --land-detail-source" ) );
+			xP( f, "LodgenVanillaLodRootEdit", QStringLiteral( "vanillaLodRoot" ),
+				tr( "Vanilla LOD root" ), QStringLiteral( "E:/Tools/Fallout 4/DataUnpacked/Data" ),
+				tr( "The unpacked Data folder the vanilla far-terrain normals are read from.\n"
+					"Command line: --vanilla-lod-root" ), true );
+			xD( f, "LodgenLandShadeSpin", QStringLiteral( "landShade" ),
+				tr( "Crevice shading" ), -3.242, -16.0, 16.0, 3, 0.1,
+				tr( "How much the creases in the land darken the baked colour. 0 turns the\n"
+					"crevice term off.\nCommand line: --land-shade" ) );
+			xD( f, "LodgenLandGradeSpin", QStringLiteral( "landGrade" ),
+				tr( "Colour grade" ), 1.0, 0.1, 4.0, 3, 0.01,
+				tr( "Every baked colour texel is multiplied by this before it is written.\n"
+					"1 is off and skips the branch, so the bake is unchanged.\n"
+					"Command line: --grade" ) );
+			xC( f, "LodgenBlendEdgesBox", QStringLiteral( "blendEdges" ),
+				tr( "Quadrant edges" ), 1,
+				{ { tr( "Hard" ), 0 }, { tr( "Cross-faded" ), 1 } },
+				tr( "Cross-fades the neighbouring quadrant's composite over the margin below,\n"
+					"either side of every 2,048-unit quadrant line. Cross-faded is the default;\n"
+					"Hard is the bake without it.\nCommand line: --blend-edges" ) );
+			xD( f, "LodgenBlendMarginSpin", QStringLiteral( "blendMargin" ),
+				tr( "Quadrant margin" ), 128.0, 0.0, 1024.0, 1, 16.0,
+				tr( "How wide that cross-fade is, in world units.\n"
+					"Command line: --blend-margin" ) );
+			layout->addLayout( f.g );
+		}
+
+		// ---- Erosion --------------------------------------------------------
+		/* bungo asked for this one by name. Strength 0 is off and is the bake
+		 * without it, byte for byte, so the section can sit at its defaults
+		 * without moving anything. */
+		layout->addWidget( wwHeading( tr( "Erosion" ), page ) );
+		{
+			Form f = form( 0 );
+			xD( f, "LodgenErosionSpin", QStringLiteral( "erosion" ),
+				tr( "Strength" ), 0.0, 0.0, 4.0, 3, 0.05,
+				tr( "How far the grown erosion pass moves the far terrain's relief. 0 is off and\n"
+					"is the bake without it, byte for byte.\nCommand line: --erosion" ) );
+			xI( f, "LodgenErosionIterationsSpin", QStringLiteral( "erosionIterations" ),
+				tr( "Rounds" ), 1, 1, 8,
+				tr( "How many feedback rounds the pass runs.\n"
+					"Command line: --erosion-iterations" ) );
+			xI( f, "LodgenErosionSeedSpin", QStringLiteral( "erosionSeed" ),
+				tr( "Seed" ), 1, 0, 2000000000,
+				tr( "The number the pass's randomness starts from; the same seed gives the same\n"
+					"erosion every time.\nCommand line: --erosion-seed" ) );
+			layout->addLayout( f.g );
+		}
+
+		// ---- Sheets and cache -----------------------------------------------
+		layout->addWidget( wwHeading( tr( "Sheets and cache" ), page ) );
+		{
+			Form f = form( 0 );
+			xC( f, "LodgenSheetFormatBox", QStringLiteral( "sheetFormat" ),
+				tr( "Sheet format" ), 0,
+				{ { tr( "Legacy (BC1, eight mips)" ), 0 },
+				  { tr( "Vanilla (BC3, mips to 1x1)" ), 1 } },
+				tr( "How a chunk's texture sheets are compressed and how far their mip chain\n"
+					"goes. Legacy is what this fork has always written.\n"
+					"Command line: --sheet-format" ) );
+			/* The tooltip described a decode cache this folder never was (lane
+			 * VTNORMAL1): it names the cleaned or upscaled normal sheets, and
+			 * since 2026-09-23 they are the pyramid's normal as well as the
+			 * chunk sheets'. The row is remembered like every other one. */
+			xP( f, "LodgenMsnCacheEdit", QStringLiteral( "msnCache" ),
+				tr( "Normal sheets folder" ), QString(),
+				tr( "A folder of cleaned or upscaled terrain normal sheets, one\n"
+					"<world>.4.<x>.<y>_msn.DDS per chunk: the sheets' own folder, or the\n"
+					"mod folder that holds them under Textures\\Terrain\\<world>. They are\n"
+					"the chunk sheets' normal and the terrain pyramid's, reduced to its\n"
+					"texel size; a chunk with no sheet keeps the normal from the heights.\n"
+					"Empty: the last resource folder holding an upscaled set is used, if\n"
+					"any. none: never.\n"
+					"Command line: --msn-cache DIR|auto" ), true );
+			layout->addLayout( f.g );
+		}
+
+		// ---- Ground cover ---------------------------------------------------
+		layout->addWidget( wwHeading( tr( "Ground cover" ), page ) );
+		{
+			Form f = form( 0 );
+			xD( f, "LodgenCoverFullSpin", QStringLiteral( "coverFull" ),
+				tr( "Full cover at" ), 96.0, 0.0, 255.0, 1, 4.0,
+				tr( "The ground-cover density, on the record's own 0..255 scale, that counts as\n"
+					"fully covered; anything denser paints the same.\n"
+					"Command line: --cover-full" ) );
+			layout->addLayout( f.g );
+		}
+
+		// ---- Roads ----------------------------------------------------------
+		/* A folding section whose header check IS `--roads`: roads on is the
+		 * default, and the rows under it only mean anything while it is on.
+		 * There is no opacity row -- bungo, 2026-09-12 16:0x, "we don't use
+		 * that opacity at all, we render roads at their full diffuse" -- and no
+		 * legacy row; both stay on the command line. */
+		roadsCheck = new QCheckBox( tr( "Roads painted into the far terrain" ), page );
+		roadsCheck->setObjectName( QStringLiteral( "LodgenRoadsCheck" ) );
+		roadsCheck->setChecked( settings.value( QStringLiteral( "LodGeneration/roads" ), true ).toBool() );
+		roadsCheck->setToolTip( tr( "Paints the road models' own diffuse into the far terrain sheets.\n"
+			"Command line: --roads / --no-roads" ) );
+		extras.insert( QStringLiteral( "roads" ), WwExtraRow{ roadsCheck, true } );
+		roadsSection = new LodgenSection( roadsCheck, QStringLiteral( "Roads" ), false, page );
+		layout->addWidget( roadsSection );
+		{
+			Form f = form( 24 );
+			xD( f, "LodgenRoadDetailSpin", QStringLiteral( "roadDetail" ),
+				tr( "Diffuse detail kept" ), 1.0, 0.0, 1.0, 2, 0.05,
+				tr( "How much of the road texture's own pattern is printed into the sheet;\n"
+					"0 paints its average colour instead.\nCommand line: --road-detail" ) );
+			xD( f, "LodgenRoadGroundPaintSpin", QStringLiteral( "roadGroundPaint" ),
+				tr( "Verge painted as road" ), 0.0, 0.0, 1.0, 2, 0.05,
+				tr( "How strongly the ground-material shapes inside a road model are painted as\n"
+					"road; 0 -- the default since 2026-09-12 -- leaves the landscape's own\n"
+					"colour on the verge.\n"
+					"Command line: --road-ground-paint" ) );
+			xD( f, "LodgenRoadCoverSuppressSpin", QStringLiteral( "roadCoverSuppress" ),
+				tr( "Cover suppressed under" ), 1.0, 0.0, 4.0, 2, 0.05,
+				tr( "How much of the ground cover the road geometry removes from under itself.\n"
+					"Command line: --road-cover-suppress" ) );
+			xC( f, "LodgenRoadCompositeBox", QStringLiteral( "roadComposite" ),
+				tr( "Pieces combine by" ), 0,
+				{ { tr( "Highest piece wins" ), 0 }, { tr( "Blended together" ), 1 } },
+				tr( "Where two road pieces overlap, whether the higher one overwrites the other\n"
+					"or the two are blended.\nCommand line: --road-composite" ) );
+			xB( f, "LodgenRoadRaisedCheck", QStringLiteral( "roadRaised" ),
+				tr( "Paint raised road families" ), false,
+				tr( "Bridges, overpasses and the other raised families are painted onto the\n"
+					"ground they pass over as well.\n"
+					"Command line: --road-raised / --no-road-raised" ) );
+			xB( f, "LodgenRoadSidewalksCheck", QStringLiteral( "roadSidewalks" ),
+				tr( "Paint sidewalks" ), false,
+				tr( "Sidewalk models are painted like roads.\n"
+					"Command line: --road-sidewalks / --no-road-sidewalks" ) );
+			roadsSection->body()->setLayout( f.g );
+			auto sync = [this]() {
+				const bool on = roadsCheck->isChecked();
+				for ( const char * k : { "roadDetail", "roadGroundPaint", "roadCoverSuppress",
+						"roadComposite", "roadRaised", "roadSidewalks" } )
+					enableExtra( k, on );
+			};
+			connect( roadsCheck, &QCheckBox::toggled, this, sync );
+			sync();
+		}
+
+		// ---- Object occlusion on the terrain --------------------------------
+		/* OFF is the default and off is the rung's BYTES: the object term is
+		 * its own horizon march and returns exactly 1 where nothing occludes,
+		 * so the multiply cannot move a byte while the box is clear. */
+		terrainObjAoCheck = new QCheckBox( tr( "Far terrain shaded by the objects on it" ), page );
+		terrainObjAoCheck->setObjectName( QStringLiteral( "LodgenTerrainObjectAoCheck" ) );
+		terrainObjAoCheck->setChecked(
+			settings.value( QStringLiteral( "LodGeneration/terrainObjectAo" ), false ).toBool() );
+		terrainObjAoCheck->setToolTip( tr( "The placed objects cast their ambient occlusion onto the far terrain\n"
+			"under them.\nCommand line: --terrain-object-ao / --no-terrain-object-ao" ) );
+		extras.insert( QStringLiteral( "terrainObjectAo" ), WwExtraRow{ terrainObjAoCheck, false } );
+		terrainObjAoSection = new LodgenSection( terrainObjAoCheck, QStringLiteral( "TerrainObjectAo" ), false, page );
+		layout->addWidget( terrainObjAoSection );
+		{
+			Form f = form( 24 );
+			xD( f, "LodgenTerrainObjectAoStrengthSpin", QStringLiteral( "terrainObjectAoStrength" ),
+				tr( "Strength" ), 0.5, 0.0, 4.0, 2, 0.05,
+				tr( "How dark that shading goes.\n"
+					"Command line: --terrain-object-ao-strength" ) );
+			terrainObjAoSection->body()->setLayout( f.g );
+			auto sync = [this]() { enableExtra( "terrainObjectAoStrength", terrainObjAoCheck->isChecked() ); };
+			connect( terrainObjAoCheck, &QCheckBox::toggled, this, sync );
+			sync();
+		}
+
+		// ---- Water bodies in the landscape file -----------------------------
+		/* A module of the `.lodl` writer, off by default: unarmed, the file is
+		 * the one the same bake wrote before the module existed. */
+		waterBodiesCheck = new QCheckBox( tr( "Water bodies in the landscape file" ), page );
+		waterBodiesCheck->setObjectName( QStringLiteral( "LodgenWaterBodiesCheck" ) );
+		waterBodiesCheck->setChecked(
+			settings.value( QStringLiteral( "LodGeneration/waterBodies" ), false ).toBool() );
+		waterBodiesCheck->setToolTip( tr( "Writes each connected body of water, its shore and its flow into the\n"
+			".lodl beside the landscape.\nCommand line: --water-bodies" ) );
+		extras.insert( QStringLiteral( "waterBodies" ), WwExtraRow{ waterBodiesCheck, false } );
+		waterBodiesSection = new LodgenSection( waterBodiesCheck, QStringLiteral( "WaterBodies" ), false, page );
+		layout->addWidget( waterBodiesSection );
+		{
+			Form f = form( 24 );
+			xI( f, "LodgenWaterBridgeSpin", QStringLiteral( "waterBridge" ),
+				tr( "Bridge gap" ), 2, 0, 16,
+				tr( "How many empty cells two patches of water may be apart and still count as\n"
+					"one body.\nCommand line: --water-bridge" ) );
+			xI( f, "LodgenWaterNearSpin", QStringLiteral( "waterNear" ),
+				tr( "Near texels" ), 64, 0, 512,
+				tr( "The texel width of the near band a body carries for the shore.\n"
+					"Command line: --water-near" ) );
+			xI( f, "LodgenWaterBodySamplesSpin", QStringLiteral( "waterBodySamples" ),
+				tr( "Body samples" ), 0, 0, 4096,
+				tr( "How many points inside each body are sampled; 0 lets the writer choose.\n"
+					"Command line: --water-body-samples" ) );
+			xI( f, "LodgenWaterFlowSamplesSpin", QStringLiteral( "waterFlowSamples" ),
+				tr( "Flow samples" ), 0, 0, 4096,
+				tr( "How many points the flow direction is measured at; 0 lets the writer\n"
+					"choose.\nCommand line: --water-flow-samples" ) );
+			xB( f, "LodgenWaterShoreCheck", QStringLiteral( "waterShore" ),
+				tr( "Write the shore line" ), true,
+				tr( "The outline where each body meets the land.\n"
+					"Command line: --water-no-shore" ) );
+			xP( f, "LodgenWaterVelocitiesEdit", QStringLiteral( "waterVelocities" ),
+				tr( "Velocity plugin" ), QString(),
+				tr( "A plugin that supplies measured water velocities instead of the writer's\n"
+					"own estimate.\nCommand line: --water-velocities" ), false );
+			waterBodiesSection->body()->setLayout( f.g );
+			auto sync = [this]() {
+				const bool on = waterBodiesCheck->isChecked();
+				for ( const char * k : { "waterBridge", "waterNear", "waterBodySamples",
+						"waterFlowSamples", "waterShore", "waterVelocities" } )
+					enableExtra( k, on );
+			};
+			connect( waterBodiesCheck, &QCheckBox::toggled, this, sync );
+			sync();
+		}
+
+		// ---- Aggregate impostors --------------------------------------------
+		/* Ring 3's forested cells stand on one composited sheet instead of one
+		 * card each. Off by default, and it REFUSES IN WORDS without a card
+		 * directory rather than writing an empty table. */
+		aggregateCheck = new QCheckBox( tr( "Aggregate impostors for forested cells" ), page );
+		aggregateCheck->setObjectName( QStringLiteral( "LodgenAggregateCheck" ) );
+		aggregateCheck->setChecked(
+			settings.value( QStringLiteral( "LodGeneration/aggregate" ), false ).toBool() );
+		aggregateCheck->setToolTip( tr( "In ring 3, a forested cell's trees are photographed together onto one\n"
+			"sheet, composited from their own cards. Needs the impostor card folder.\n"
+			"Command line: --aggregate / --no-aggregate" ) );
+		extras.insert( QStringLiteral( "aggregate" ), WwExtraRow{ aggregateCheck, false } );
+		aggregateSection = new LodgenSection( aggregateCheck, QStringLiteral( "Aggregate" ), false, page );
+		layout->addWidget( aggregateSection );
+		{
+			Form f = form( 24 );
+			xI( f, "LodgenAggregateMinSpin", QStringLiteral( "aggregateMin" ),
+				tr( "Forested at" ), 8, 1, 256,
+				tr( "How many tree placements make a cell forested enough to aggregate.\n"
+					"Command line: --aggregate-min" ) );
+			xI( f, "LodgenAggregateTileSpin", QStringLiteral( "aggregateTile" ),
+				tr( "Frame size" ), 64, 8, 512,
+				tr( "The long side of one aggregate frame, in texels.\n"
+					"Command line: --aggregate-tile" ) );
+			xI( f, "LodgenAggregateViewsSpin", QStringLiteral( "aggregateViews" ),
+				tr( "Views" ), 8, 1, 32,
+				tr( "How many directions around the cell are photographed.\n"
+					"Command line: --aggregate-views" ) );
+			aggregateSection->body()->setLayout( f.g );
+			auto sync = [this]() {
+				const bool on = aggregateCheck->isChecked();
+				for ( const char * k : { "aggregateMin", "aggregateTile", "aggregateViews" } )
+					enableExtra( k, on );
+			};
+			connect( aggregateCheck, &QCheckBox::toggled, this, sync );
+			sync();
+		}
+
+		// ---- Objects --------------------------------------------------------
+		/* The two native-pair modules and the two legacy chunk steps. Which
+		 * pair is shown follows the target, in applyTarget below. */
+		layout->addWidget( wwHeading( tr( "Object modules" ), page ) );
+		{
+			Form f = form( 0 );
+			xB( f, "LodgenNativeLadderCheck", QStringLiteral( "nativeLadder" ),
+				tr( "Build the distance ladder" ), false,
+				tr( "The object library carries several levels per mesh with a measured error\n"
+					"for each, so the runtime can pick one by distance. Off, it is one level\n"
+					"per mesh, the authored LOD model as is (the default).\n"
+					"Command line: --native-ladder / --native-no-ladder" ) );
+			xB( f, "LodgenNativeOccludersCheck", QStringLiteral( "nativeOccluders" ),
+				tr( "Build the occluder boxes" ), true,
+				tr( "The .lodi carries a box per large object so the runtime can skip what is\n"
+					"behind it. Off, the box table is empty.\n"
+					"Command line: --native-no-occluders" ) );
+			xB( f, "LodgenMergeCheck", QStringLiteral( "merge" ),
+				tr( "Merge the chunk shapes" ), true,
+				tr( "After the chunks are written, the shapes in each are merged down to one per\n"
+					"material the engine can tell apart.\n"
+					"Command line: --merge / --no-merge" ) );
+			xB( f, "LodgenKeepBtoCheck", QStringLiteral( "keepBto" ),
+				tr( "Keep legacy .BTO chunks" ), false,
+				tr( "The FO4CS target builds the .BTO chunk files in a scratch folder and\n"
+					"removes them once the texture arrays, the card arrays, the shape merge\n"
+					"and the far-ring cut have read them: nothing after the bake reads them.\n"
+					"On, they are left in the mod folder as bakes before 2026-09-16 left\n"
+					"them, byte for byte. The manifest sidecar is kept either way, and the\n"
+					"stock engine target is not affected.\nCommand line: --keep-bto" ) );
+			xC( f, "LodgenAtlasFormatBox", QStringLiteral( "atlasFormat" ),
+				tr( "Atlas format" ), -1,
+				{ { tr( "Match the target" ), -1 },
+				  { tr( "BC1 (one-bit alpha)" ), 1 },
+				  { tr( "BC3 (eight-bit alpha)" ), 0 } },
+				tr( "How the packed object atlas is compressed. Matching the target is what the\n"
+					"panel has always done: BC1 for the stock engine, which is what vanilla\n"
+					"ships, BC3 for FO4 Community Shaders.\nCommand line: --atlas-bc1" ) );
+			layout->addLayout( f.g );
+		}
+
+		// ---- Run ------------------------------------------------------------
+		layout->addWidget( wwHeading( tr( "Run" ), page ) );
+		{
+			Form f = form( 0 );
+			xI( f, "LodgenThreadsSpin", QStringLiteral( "threads" ),
+				tr( "Model threads" ), 0, 0, 64,
+				tr( "How many threads read and build models. 0 is one per core; 1 is the exact\n"
+					"way back to a serial run.\nCommand line: --threads" ) );
+			xI( f, "LodgenChunkThreadsSpin", QStringLiteral( "chunkThreads" ),
+				tr( "Chunk threads" ), 1, 1, 64,
+				tr( "How many chunks are baked at once. More is slower and much hungrier here\n"
+					"-- each worker owns its own plugin reader and texture cache -- which is\n"
+					"why one is the default.\nCommand line: --chunk-threads" ) );
+			layout->addLayout( f.g );
+		}
+
+		/* The stochastic sample's own numbers belong to the SELECTOR when a
+		 * stochastic mode is chosen: those rows go away rather than sit there
+		 * disagreeing with the mode above them. The command line composes by
+		 * the order the switches are typed in, which a panel has no way to
+		 * say, so the panel says it by hiding what the mode owns. */
+		{
+			auto sync = [this]() {
+				const int mode = xi( "landSample" );
+				const bool own = mode < 2;
+				for ( const char * k : { "landHex", "landWarp", "landMipBias" } )
+					showExtra( k, own );
+				enableExtra( "landDetail", mode == 1 );
+			};
+			connect( qobject_cast<QComboBox *>( extras.value( QStringLiteral( "landSample" ) ).field ),
+				&QComboBox::currentIndexChanged, this, [sync]( int ) { sync(); } );
+			sync();
+		}
+		// the guide's three numbers mean nothing while the rule is off
+		{
+			auto sync = [this]() {
+				const bool on = xi( "landGuide" ) != 0;
+				for ( const char * k : { "landGuideStrength", "landGuideScale", "landGuideSlope" } )
+					enableExtra( k, on );
+			};
+			connect( qobject_cast<QComboBox *>( extras.value( QStringLiteral( "landGuide" ) ).field ),
+				&QComboBox::currentIndexChanged, this, [sync]( int ) { sync(); } );
+			sync();
+		}
+		// erosion's rounds and seed mean nothing at strength 0
+		{
+			auto sync = [this]() {
+				const bool on = xf( "erosion" ) > 0.0f;
+				enableExtra( "erosionIterations", on );
+				enableExtra( "erosionSeed", on );
+			};
+			connect( qobject_cast<QDoubleSpinBox *>( extras.value( QStringLiteral( "erosion" ) ).field ),
+				&QDoubleSpinBox::valueChanged, this, [sync]( double ) { sync(); } );
 			sync();
 		}
 
@@ -1155,9 +1865,11 @@ public:
 		}
 		layout->addWidget( rangeBox );
 		layout->addStretch( 1 );
-		auto syncRange = [this]() { rangeBox->setEnabled( objectsCheck->isChecked() || btrCheck->isChecked() ); };
+		auto syncRange = [this]() { rangeBox->setEnabled( objectPassOn() || btrCheck->isChecked() ); };
 		connect( objectsCheck, &QCheckBox::toggled, this, syncRange );
+		connect( nativeCheck, &QCheckBox::toggled, this, syncRange );
 		connect( btrCheck, &QCheckBox::toggled, this, syncRange );
+		syncRangeRows = syncRange;
 		syncRange();
 
 		// ---- Progress: the map and the bar, on the splitter's lower pane ----
@@ -1233,7 +1945,25 @@ public:
 		summary->setObjectName( QStringLiteral( "LodgenSummaryLabel" ) );
 		summary->setWordWrap( true );
 		summary->setTextInteractionFlags( Qt::TextSelectableByMouse );
-		ab->addWidget( summary, 1 );
+		/* THE RESULT LINE, under the summary in the pinned bar: what the last
+		 * run cost, by stage. bungo asked for the four stage times of a GUI
+		 * bake (2026-09-11 10:0x, the end-to-end item), and a number that only
+		 * exists in a log is a number he has to go and find. Empty until a run
+		 * finishes, so the bar does not carry a sentence about nothing. */
+		resultLabel = new QLabel( actionBar );
+		resultLabel->setObjectName( QStringLiteral( "LodgenResultLabel" ) );
+		resultLabel->setWordWrap( true );
+		resultLabel->setTextInteractionFlags( Qt::TextSelectableByMouse );
+		resultLabel->setStyleSheet( QStringLiteral( "color: %1;" ).arg( wwSkinColor( "textMuted" ) ) );
+		resultLabel->setVisible( false );
+		{
+			auto * col = new QVBoxLayout();
+			col->setContentsMargins( 0, 0, 0, 0 );
+			col->setSpacing( 2 );
+			col->addWidget( summary );
+			col->addWidget( resultLabel );
+			ab->addLayout( col, 1 );
+		}
 		startButton = new QPushButton( tr( "Generate" ), actionBar );
 		startButton->setObjectName( QStringLiteral( "LodgenGenerateButton" ) );
 		startButton->setDefault( true );
@@ -1252,6 +1982,16 @@ public:
 		/* The target hides what its reader cannot use and, when CHOSEN, ticks
 		 * what it needs. Restoring a saved target only hides; the ticks come
 		 * back from their own settings. */
+		/* THE FIVE .lod TYPES (bungo, 2026-09-11 06:4x, verbatim: "we should
+		 * only have those 5 .lod types in fo4 community shaders target").
+		 * Under FO4 Community Shaders the panel offers `.lodl`, `.lodt`, the
+		 * `.lodo`/`.lodi` pair and the `.lodm` sidecars that ride with them,
+		 * and every legacy row goes: the `.btr` section whole (with its
+		 * terrain-texture bake, its cover rows and its identity channels), the
+		 * `.bto` head, the object ATLAS (a stock draw-call optimisation --
+		 * FO4CS binds the texture arrays instead) and "Chunk textures from the
+		 * pyramid", which exists only to fill legacy chunk sheets. The stock
+		 * engine keeps all of them and loses the native head instead. */
 		auto applyTarget = [this]( bool chosen ) {
 			const bool cs = fo4cs();
 			lodtSection->setVisible( cs );
@@ -1263,16 +2003,46 @@ public:
 			impostorLevelBox->setVisible( cs );
 			impostorLevelLabel->setVisible( cs );
 			terrainIdCheck->setVisible( cs );
+			// the object pass has two heads and exactly one is offered
+			objectsCheck->setVisible( !cs );
+			nativeCheck->setVisible( cs );
+			// legacy, and hidden whole under FO4CS
+			btrSection->setVisible( !cs );
+			atlasCheck->setVisible( !cs );
+			vtBtrCheck->setVisible( !cs );
 			// the stock engine has no .lodt texture-pyramid reader and no VT sampler
 			vtSection->setVisible( cs );
+			// the one root is the FO4CS target's; the stock tree did not move
+			if ( outRootLabel ) outRootLabel->setVisible( cs );
+			if ( outRootName ) outRootName->setVisible( cs );
+			/* The two native-pair modules belong to the FO4CS head and the two
+			 * legacy chunk steps to the stock one; each pair is hidden under
+			 * the other target, and a hidden row reads as its default. */
+			showExtra( "keepBto", cs );
+			showExtra( "nativeLadder", cs );
+			showExtra( "nativeOccluders", cs );
+			showExtra( "merge", !cs );
+			showExtra( "atlasFormat", !cs );
 			if ( chosen ) {
 				lodtCheck->setChecked( cs );
 				heightmapCheck->setChecked( cs );
-				identityCheck->setChecked( cs );
-				terrainIdCheck->setChecked( cs );
+				/* NOT ticked by the FO4CS target any more (lane DEFAULTS1,
+				 * 2026-09-12): bungo's 15:56 ruling is that the LEGACY files
+				 * carry no FO4CS data even under that target -- the .lod*
+				 * files above are where it lives. */
+				identityCheck->setChecked( false );
+				terrainIdCheck->setChecked( false );
 				objectsCheck->setChecked( true );
+				nativeCheck->setChecked( cs );
 				btrCheck->setChecked( !cs );
 			}
+			/* The rows below the head grey against whichever head is OFFERED,
+			 * so hiding one has to re-run them; and the chunk range follows the
+			 * same answer. */
+			if ( syncObjectRows )
+				syncObjectRows();
+			if ( syncRangeRows )
+				syncRangeRows();
 			refreshSummary();
 		};
 		connect( targetBox, QOverload<int>::of( &QComboBox::currentIndexChanged ), this,
@@ -1284,8 +2054,8 @@ public:
 		applySource( false );
 
 		// the summary follows every setting it reads
-		for ( QCheckBox * c : { lodtCheck, heightmapCheck, objectsCheck, btrCheck, texCheck,
-				coverCheck, vtCheck, vtBtrCheck } )
+		for ( QCheckBox * c : { lodtCheck, heightmapCheck, objectsCheck, nativeCheck, btrCheck, texCheck,
+				coverCheck, vtCheck, vtBtrCheck, arraysCheck, identityCheck } )
 			connect( c, &QCheckBox::toggled, this, [this]( bool ) { refreshSummary(); } );
 		connect( lodtAoOnlyRadio, &QRadioButton::toggled, this, [this]( bool ) { refreshSummary(); } );
 		for ( QSpinBox * s : { x0Spin, x1Spin, y0Spin, y1Spin } )
@@ -1311,6 +2081,10 @@ public:
 		cancelFlag = true;
 		if ( worker.joinable() )
 			worker.join();
+		// the emitter is process-wide: a panel that goes away mid-run must not
+		// leave it armed for whatever arms it next
+		if ( lodgenNativeActive() )
+			lodgenNativeEnd();
 		restoreManagerFolders();
 	}
 
@@ -1621,6 +2395,55 @@ private:
 	bool wantLodt() const { return lodtCheck->isChecked() && !lodtSection->isHidden(); }
 	bool wantHeightmap() const { return heightmapCheck->isChecked() && !heightmapSection->isHidden(); }
 	bool wantIdentity() const { return identityCheck->isChecked() && !identityCheck->isHidden(); }
+	//! the `.bto` chunk files, offered under the stock engine only
+	bool wantObjects() const { return objectsCheck->isChecked() && !objectsCheck->isHidden(); }
+	//! the `.lodo`/`.lodi` pair, offered under FO4 Community Shaders only
+	bool wantNative() const { return nativeCheck && nativeCheck->isChecked() && !nativeCheck->isHidden(); }
+	/*! Whether the OBJECT PASS runs at all. Both heads drive the same walk of
+	 *  the placements; they differ only in what is written at the end of it. */
+	bool objectPassOn() const { return wantObjects() || wantNative(); }
+	/*! WHERE THE OBJECT TEXTURE SETS GO (lane LAYOUT1, 2026-09-16).
+	 *
+	 *  The mesh arrays, the object atlas and the card arrays are the one group
+	 *  the ruling table does not name, because they are written by the object
+	 *  pass rather than by a terrain writer. Gate (a) settles it all the same:
+	 *  NOTHING of ours lands outside `FO4CSLOD/` under the FO4CS target, and
+	 *  the "stays where it is" clause is explicitly about the STOCK target's
+	 *  `textures/terrain/<ws>/`. So under FO4CS they follow the rest into
+	 *  `FO4CSLOD/<ws>/Objects/` and their game-relative strings say so; under
+	 *  the stock engine not one byte moves. The command line composes the same
+	 *  two strings from the same function (nifcli.cpp). */
+	QString objectsDir() const
+	{
+		return wantNative()
+			? lodgenFo4csWorldDir( outputDir(), world->worldspaceEdid() ) + QStringLiteral( "/Objects" )
+			: texDir + QStringLiteral( "/Objects" );
+	}
+	/*! THE IMPOSTOR CARD FOLDER, and its default (lane LAYOUT1, 2026-09-16).
+	 *
+	 *  Cards are per TREE, not per worldspace, so bungo's one root gives them
+	 *  one home: `<out>/FO4CSLOD/Cards`. Under the FO4CS target an EMPTY field
+	 *  now MEANS that folder -- but only when it is there, so "empty = no
+	 *  impostor cards" still means exactly that on a tree that has none, and
+	 *  no bake starts compositing (or refusing) where it used to say nothing.
+	 *  A typed folder always wins; the tooltip says so. */
+	QString cardSourceDir() const
+	{
+		const QString typed = impostorEdit ? impostorEdit->text().trimmed() : QString();
+		if ( !typed.isEmpty() || !fo4cs() || !outEdit )
+			return typed;
+		const QString dflt = lodgenFo4csCardDir( outputDir() );
+		return ( !outputDir().isEmpty() && QDir( dflt ).exists() ) ? dflt : QString();
+	}
+	//! the game-relative string a consumer opens that set by
+	QString objectsGame( const QString & stem ) const
+	{
+		const QString ws = world->worldspaceEdid();
+		return wantNative()
+			? QStringLiteral( "data\\" ) + lodgenFo4csGameWorldPath( ws )
+				+ QChar( 92 ) + QStringLiteral( "Objects" ) + QChar( 92 ) + ws + QChar( '.' ) + stem
+			: QString( "data\\Textures\\Terrain\\%1\\Objects\\%1.%2" ).arg( ws ).arg( stem );
+	}
 	bool wantTerrainId() const { return terrainIdCheck->isChecked() && !terrainIdCheck->isHidden(); }
 	/*! Ground cover is available on BOTH targets - the tint is FOR the stock
 	 *  engine, which reads no data sheet at all, and the alpha plane costs a
@@ -1664,10 +2487,133 @@ private:
 			.arg( double( e.btrBytes ) / 1073741824.0, 0, 'f', 2 )
 			.arg( double( e.deliveredBytes ) / 1073741824.0, 0, 'f', 2 ) );
 	}
+	/* ---- THE EXTRA ROWS: read, show, enable (lane PANEL1, 2026-09-12) -----
+	 *
+	 *  `xraw` is what the widget says. `xvar` is what the RUN reads, and the
+	 *  difference is the panel's tick-AND-VISIBLE rule applied to a value: a
+	 *  row the target has hidden reads back as the command line's default, so
+	 *  a setting the target cannot use cannot reach the bake either. The save
+	 *  uses `xraw`, so hiding a row never overwrites what is in it. */
+	QVariant xraw( const QString & key ) const
+	{
+		const WwExtraRow r = extras.value( key );
+		if ( !r.field )
+			return r.dflt;
+		if ( auto * d = qobject_cast<QDoubleSpinBox *>( r.field ) )
+			return d->value();
+		if ( auto * s = qobject_cast<QSpinBox *>( r.field ) )
+			return s->value();
+		if ( auto * c = qobject_cast<QCheckBox *>( r.field ) )
+			return c->isChecked();
+		if ( auto * b = qobject_cast<QComboBox *>( r.field ) )
+			return b->currentData();
+		if ( auto * e = qobject_cast<QLineEdit *>( r.field ) )
+			return e->text();
+		return r.dflt;
+	}
+	QVariant xvar( const QString & key ) const
+	{
+		const WwExtraRow r = extras.value( key );
+		if ( !r.field || r.field->isHidden() )
+			return r.dflt;
+		return xraw( key );
+	}
+	float xf( const char * k ) const { return float( xvar( QLatin1String( k ) ).toDouble() ); }
+	int xi( const char * k ) const { return xvar( QLatin1String( k ) ).toInt(); }
+	bool xb( const char * k ) const { return xvar( QLatin1String( k ) ).toBool(); }
+	QString xs( const char * k ) const { return xvar( QLatin1String( k ) ).toString(); }
+	//! hide a row AND its label: hidden means the run reads the default
+	void showExtra( const char * key, bool on )
+	{
+		const QString k = QLatin1String( key );
+		if ( QWidget * w = extras.value( k ).field )
+			w->setVisible( on );
+		if ( QLabel * l = extraLabels.value( k ) )
+			l->setVisible( on );
+	}
+	//! grey a row and its label: it still reads, it just cannot be typed into
+	void enableExtra( const char * key, bool on )
+	{
+		const QString k = QLatin1String( key );
+		if ( QWidget * w = extras.value( k ).field )
+			w->setEnabled( on );
+		if ( QLabel * l = extraLabels.value( k ) )
+			l->setEnabled( on );
+	}
+
+	/*! THE PROCESS-WIDE GENERATOR SETTINGS, written from the rows at the top
+	 *  of every run.
+	 *
+	 *  They are file statics inside lodgen.cpp reached only through these
+	 *  setters, so they are written EVERY run and not only when a row moves:
+	 *  otherwise the LAST run's value would still be standing. Every row is at
+	 *  the command line's default until somebody moves it, so a default run
+	 *  writes the defaults and no byte moves -- which is gate (a). */
+	void applyGeneratorSettings()
+	{
+		lodgenSetThreadCount( xi( "threads" ) );
+		lodgenSetChunkThreadCount( xi( "chunkThreads" ) );
+		lodgenSetLandTiling( xf( "landTiling" ) );
+		const int sample = xi( "landSample" );
+		lodgenSetLandSampleAverage( sample == 1 );
+		if ( sample == 2 ) {
+			// `--land-sample stochastic`: the hex tiling, the four numbers it sets
+			lodgenSetLandHexSize( 256.0f );
+			lodgenSetLandWarpAmp( 0.0f );
+			lodgenSetLandMipBias( -0.22f );
+			lodgenSetLandWarpLattice( xf( "landWarpLattice" ) );
+			lodgenSetLandWarpOctaves( xi( "landWarpOctaves" ) );
+		} else if ( sample == 3 ) {
+			// `--land-sample warp`: the older four, kept so the measurement can be repeated
+			lodgenSetLandHexSize( 0.0f );
+			lodgenSetLandWarpAmp( 683.0f );
+			lodgenSetLandWarpLattice( 1024.0f );
+			lodgenSetLandWarpOctaves( 1 );
+			lodgenSetLandMipBias( -1.0f );
+		} else {
+			lodgenSetLandHexSize( xf( "landHex" ) );
+			lodgenSetLandWarpAmp( xf( "landWarp" ) );
+			lodgenSetLandWarpLattice( xf( "landWarpLattice" ) );
+			lodgenSetLandWarpOctaves( xi( "landWarpOctaves" ) );
+			lodgenSetLandMipBias( xf( "landMipBias" ) );
+		}
+		lodgenSetLandDetail( xf( "landDetail" ) );
+		lodgenSetLandGuideRule( xi( "landGuide" ) );
+		lodgenSetLandGuideStrength( xf( "landGuideStrength" ) );
+		lodgenSetLandGuideScale( xf( "landGuideScale" ) );
+		lodgenSetLandGuideSlopeRef( xf( "landGuideSlope" ) );
+		lodgenSetLandDetailSource( xi( "landDetailSource" ) );
+		lodgenSetVanillaLodRoot( xs( "vanillaLodRoot" ) );
+		lodgenSetLandShade( xf( "landShade" ) );
+		lodgenSetLandGrade( xf( "landGrade" ) );
+		lodgenSetBlendEdges( xi( "blendEdges" ) );
+		lodgenSetBlendMargin( xf( "blendMargin" ) );
+		lodgenSetErosion( xf( "erosion" ) );
+		lodgenSetErosionIterations( xi( "erosionIterations" ) );
+		lodgenSetErosionSeed( quint32( xvar( QStringLiteral( "erosionSeed" ) ).toUInt() ) );
+		lodgenSetSheetFormat( xi( "sheetFormat" ) );
+		{
+			// bungo 2026-09-24: an empty row means FIND his upscaled set in the
+			// resources (the generator's "auto"); "none" turns the sheets off
+			const QString mc = xs( "msnCache" ).trimmed();
+			lodgenSetMsnCacheDir( mc.isEmpty() ? QStringLiteral( "auto" )
+				: mc.compare( QStringLiteral( "none" ), Qt::CaseInsensitive ) == 0 ? QString() : mc );
+		}
+	}
+
 	LodgenVtOptions vtOptions() const
 	{
 		LodgenVtOptions o;
-		o.finestDim = vtFinestBox->currentData().toInt() == 1 ? 1 : 2;
+		// the density row names a finest-level / content pair (--vt-density)
+		const int density = vtFinestBox->currentData().toInt();
+		o.finestDim = density == 8 ? 1 : 2;
+		o.content = density == 32 ? 256 : 512;
+		o.halfAux = xb( "vtHalfAux" );
+		o.border = xi( "vtBorder" );
+		o.mips = xi( "vtMips" );
+		o.compression = xi( "vtCompress" );
+		o.height = xb( "vtHeight" );
+		o.coverInColor = xb( "vtCoverInColor" );
 		o.cover = coverOptions();
 		return o;
 	}
@@ -1677,6 +2623,20 @@ private:
 		o.cover = coverCheck->isChecked() && !coverCheck->isHidden()
 			&& texCheck->isChecked() && btrCheck->isChecked();
 		o.tintStrength = float( tintSpin->value() ) / 100.0f;
+		o.coverFull = xf( "coverFull" );
+		o.roads = xb( "roads" );
+		o.roadCoverSuppress = xf( "roadCoverSuppress" );
+		o.roadComposite = xi( "roadComposite" ) == 1
+			? LodgenCoverOptions::RoadBlend : LodgenCoverOptions::RoadMaxZ;
+		o.roadDetail = xf( "roadDetail" );
+		o.roadGroundPaint = xf( "roadGroundPaint" );
+		o.roadRaised = xb( "roadRaised" );
+		o.roadSidewalks = xb( "roadSidewalks" );
+		o.terrainObjectAo = xb( "terrainObjectAo" );
+		o.terrainObjectAoStrength = xf( "terrainObjectAoStrength" );
+		// roadOpacity is left at its own default: bungo, 2026-09-12 16:0x,
+		// "we don't use that opacity at all, we render roads at their full
+		// diffuse", so there is no row for it and the panel never moves it.
 		return o;
 	}
 
@@ -1690,13 +2650,20 @@ private:
 		if ( !summary || running )
 			return;
 		const QString ws = wsBox->currentText().section( QLatin1String( "  (" ), 0, 0 );
+		/* The root line, kept current with the worldspace box and set BEFORE
+		 * the refusal chain can return: it is a fact about the layout, not
+		 * about whether this run can start. */
+		if ( outRootLabel )
+			outRootLabel->setText( ws.isEmpty()
+				? lodgenFo4csFolderName() + QChar( 92 ) + tr( "<worldspace>" ) + QChar( 92 )
+				: lodgenFo4csGameWorldPath( ws ) + QChar( 92 ) );
 		/* The pyramid's line is computed BEFORE the refusal chain can return.
 		 * It describes what the pyramid would cost, which is a fact about the
 		 * settings and not about whether the run can start; hiding it behind
 		 * "choose an output folder" would make the one live number in the
 		 * section look like a fixed sentence. */
 		refreshVtSummary();
-		const bool chunks = objectsCheck->isChecked() || btrCheck->isChecked();
+		const bool chunks = objectPassOn() || btrCheck->isChecked();
 		QString why;
 		/* The source comes first: with MO2 chosen and no MO2 around it, every
 		 * other reason is beside the point - nothing would be read. */
@@ -1712,10 +2679,10 @@ private:
 			why = tr( "The chunk range is empty: west must not pass east, nor south pass north." );
 		else if ( btrCheck->isChecked() && coverCheck->isChecked() && !texCheck->isChecked() )
 			why = tr( "Ground cover needs the terrain textures ticked." );
-		else if ( ( objectsCheck->isChecked() || ( btrCheck->isChecked() && texCheck->isChecked() ) )
+		else if ( ( objectPassOn() || ( btrCheck->isChecked() && texCheck->isChecked() ) )
 			&& !Game::GameManager::status( Game::FALLOUT_4 ) )
 			why = tr( "Fallout 4 is not enabled under Settings > Resources; meshes and textures are read from its archives." );
-		else if ( objectsCheck->isChecked() ) {
+		else if ( objectPassOn() ) {
 			// the cards on disk against the two rows: a mismatch is otherwise silent
 			const QPair<int, int> have = cardsOnDisk();
 			const int wantN = cardFramesBox->currentData().toInt();
@@ -1738,9 +2705,11 @@ private:
 		const int cellsY = haveBounds ? bMaxY - bMinY + 1 : 0;
 		if ( wantLodt() ) {
 			if ( lodtAoOnlyRadio->isChecked() )
-				parts << tr( "refresh the AO plane of Terrain\\%1.lodl" ).arg( ws );
+				parts << tr( "refresh the AO plane of %1\\%2.lodl" )
+					.arg( lodgenFo4csGameWorldPath( ws ) ).arg( ws );
 			else
-				parts << tr( "Terrain\\%1.lodl (about %2 MB)" ).arg( ws )
+				parts << tr( "%1\\%2.lodl (about %3 MB)" )
+					.arg( lodgenFo4csGameWorldPath( ws ) ).arg( ws )
 					.arg( qMax( qint64( 1 ), ( qint64( cellsX ) * cellsY ) / 1024 ) );
 		}
 		if ( wantHeightmap() ) {
@@ -1753,19 +2722,55 @@ private:
 		if ( wantVt() ) {
 			LodgenVtEstimateOut e;
 			if ( vtEstimateNow( &e ) )
-				parts << tr( "Terrain\\%1.VT.*.lodt (%2 levels, %3 tiles, about %4 GB)" ).arg( ws )
+				parts << tr( "%1\\%2.VT.*.lodt (%3 levels, %4 tiles, about %5 GB)" )
+					.arg( lodgenFo4csGameWorldPath( ws ) ).arg( ws )
 					.arg( e.levels ).arg( e.tiles )
 					.arg( double( e.pyramidBytes ) / 1073741824.0, 0, 'f', 2 );
 		}
+		/* THE NATIVE PAIR, named by extension like everything else. It is the
+		 * FO4CS object output and it sits beside the landscape file. */
+		if ( wantNative() )
+			parts << tr( "%1\\%2.lodo and %1\\%2.lodi" )
+				.arg( lodgenFo4csGameWorldPath( ws ) ).arg( ws );
 		if ( chunks ) {
 			QStringList kinds;
-			if ( objectsCheck->isChecked() )
-				kinds << tr( "object" );
-			if ( btrCheck->isChecked() )
-				kinds << tr( "terrain" );
-			parts << tr( "%1 chunks (%2) under meshes\\terrain\\%3" ).arg( buildQueue().size() )
-				.arg( kinds.join( tr( " and " ) ) ).arg( ws );
+			if ( wantObjects() )
+				kinds << tr( "object .bto" );
+			if ( btrCheck->isChecked() && !btrSection->isHidden() )
+				kinds << tr( "terrain .btr" );
+			if ( !kinds.isEmpty() ) {
+				parts << tr( "%1 chunks (%2) under meshes\\terrain\\%3" ).arg( buildQueue().size() )
+					.arg( kinds.join( tr( " and " ) ) ).arg( ws );
+			} else if ( xb( "keepBto" ) ) {
+				/* The way back, ticked. The chunks land in the mod folder as
+				 * every bake before 2026-09-16 left them. */
+				parts << tr( "%1 object chunks under meshes\\terrain\\%2, kept because "
+					"\"Keep legacy .BTO chunks\" is on" )
+					.arg( buildQueue().size() ).arg( ws );
+			} else {
+				/* RULED 2026-09-16 (bungo, 2026-09-12 18:3x: "essentially, no
+				 * legacy vanilla file types are now used by us or baked in the
+				 * FO4CS lod bake"). The object pass still walks the chunk queue
+				 * and still builds a `.bto` per chunk, because five passes read
+				 * them back -- but it builds them in a scratch folder and drops
+				 * them, so the mod folder gets our types and nothing else. The
+				 * manifest sidecar stays. Said out loud, because a folder that
+				 * loses files at the end of a run should not be a surprise. */
+				/* WHERE THE SIDECAR LANDS (lane LAYOUT1, 2026-09-16): under the
+				 * one root with the files it describes, so the sentence asks
+				 * the composer rather than naming the folder it used to be
+				 * in.  A summary that names a path nothing writes is the
+				 * census rule broken in the one place bungo reads. */
+				parts << tr( "%1 object chunks, built in a scratch folder and dropped "
+					"(the manifest sidecars stay under %2)" )
+					.arg( buildQueue().size() ).arg( lodgenFo4csGameWorldPath( ws ) );
+			}
 		}
+		/* NOT on wantIdentity() since 2026-09-12 (lane DEFAULTS1): the arrays
+		 * are their own module and the identity flag is not their master
+		 * switch -- gating them on it emptied the far rings. */
+		if ( objectPassOn() && arraysCheck->isChecked() )
+			parts << tr( "the object texture arrays and their .lodm" );
 		summary->setStyleSheet( QStringLiteral( "color: %1;" ).arg( wwSkinColor( "textMuted" ) ) );
 		// the folder's own name stands for the mod; the whole path is the tooltip
 		const QString mod = QFileInfo( outputDir() ).fileName();
@@ -1775,6 +2780,22 @@ private:
 			+ parts.join( QLatin1String( "; " ) ) + QChar( '.' ) );
 	}
 
+
+	/*! A SETTINGS SAVE THE SELF-TEST CAN ASK FOR (lane PANEL1, 2026-09-12).
+	 *
+	 *  WW_LODGEN_TEST checks that every row round-trips through its own
+	 *  QSettings key, which means it has to make the panel save between moving
+	 *  a row and reading the key. This class has no Q_OBJECT and so no slot to
+	 *  call; a dynamic property does the same job with no moc: setting
+	 *  `wwSaveSettings` on the panel raises DynamicPropertyChange here and the
+	 *  rows are written. It changes nothing about a normal run. */
+	bool event( QEvent * e ) override
+	{
+		if ( e->type() == QEvent::DynamicPropertyChange
+			&& static_cast<QDynamicPropertyChangeEvent *>( e )->propertyName() == "wwSaveSettings" )
+			saveSettings();
+		return QWidget::event( e );
+	}
 	void saveSettings()
 	{
 		QSettings s;
@@ -1792,11 +2813,13 @@ private:
 		s.setValue( QStringLiteral( "LodGeneration/aoSamples" ), aoSpin->value() );
 		s.setValue( QStringLiteral( "LodGeneration/overviewSamples" ), ovSpin->value() );
 		s.setValue( QStringLiteral( "LodGeneration/objects" ), objectsCheck->isChecked() );
+		s.setValue( QStringLiteral( "LodGeneration/native" ), nativeCheck->isChecked() );
+		s.setValue( QStringLiteral( "LodGeneration/treesOnly" ), treesOnlyCheck->isChecked() );
 		s.setValue( QStringLiteral( "LodGeneration/btr" ), btrCheck->isChecked() );
 		s.setValue( QStringLiteral( "LodGeneration/cover" ), coverCheck->isChecked() );
 		s.setValue( QStringLiteral( "LodGeneration/grassTint" ), tintSpin->value() );
 		s.setValue( QStringLiteral( "LodGeneration/vt" ), vtCheck->isChecked() );
-		s.setValue( QStringLiteral( "LodGeneration/vtFinest" ), vtFinestBox->currentData().toInt() );
+		s.setValue( QStringLiteral( "LodGeneration/vtDensity" ), vtFinestBox->currentData().toInt() );
 		s.setValue( QStringLiteral( "LodGeneration/vtBtr" ), vtBtrCheck->isChecked() );
 		s.setValue( QStringLiteral( "LodGeneration/impostors" ), impostorEdit->text() );
 		s.setValue( QStringLiteral( "LodGeneration/impostorFromLevel" ), impostorLevelBox->currentData().toInt() );
@@ -1822,6 +2845,11 @@ private:
 		s.setValue( QStringLiteral( "LodGeneration/East" ), x1Spin->value() );
 		s.setValue( QStringLiteral( "LodGeneration/South" ), y0Spin->value() );
 		s.setValue( QStringLiteral( "LodGeneration/North" ), y1Spin->value() );
+		/* Every row lane PANEL1 added, from the one registry they were built
+		 * from -- xraw, not xvar, so a row the target has hidden keeps what is
+		 * in it instead of being written back as the default. */
+		for ( auto it = extras.constBegin(); it != extras.constEnd(); ++it )
+			s.setValue( QStringLiteral( "LodGeneration/" ) + it.key(), xraw( it.key() ) );
 	}
 
 	//! everything the worker needs, copied out of the widgets on the GUI thread
@@ -1850,6 +2878,18 @@ private:
 			return;
 		}
 		saveSettings();
+		// the process-wide generator settings, from their rows, before any
+		// stage reads one of them (lane PANEL1)
+		applyGeneratorSettings();
+		// the four stage times start at zero for every run, so a stage that
+		// does not run this time reads 0 and not the last run's number
+		msLandscape = msMeshes = msTextures = msImpostors = 0;
+		msLandscapeWorker.store( 0 );
+		/* The layout clause starts blank for every run and is filled by the
+		 * writers themselves (lane LAYOUT1, 2026-09-16). It is cleared HERE and
+		 * not in startChunks(): the landscape file is written by the world job,
+		 * which runs first, and clearing later would throw its note away. */
+		lodgenClearLayoutCensus();
 		/* The stack goes in before anything reads an asset, and stays for the
 		 * session so the viewport shows the same worldspace the bake sees. */
 		installResources();
@@ -1901,10 +2941,17 @@ private:
 			post( [this, err]() { finishWorld( false, tr( "plugins: %1" ).arg( err ) ); } );
 			return;
 		}
+		/* THE LANDSCAPE STAGE, timed on this thread and handed over as an
+		 * atomic: the plugin load belongs to it too, because a .lodl run pays
+		 * for it and a chunk-only run does not. */
+		QElapsedTimer landscapeTimer;
+		landscapeTimer.start();
 		QString report;
 		if ( job.lodt ) {
 			if ( job.aoOnly ) {
-				const QString path = job.outDir + QStringLiteral( "/Terrain/" ) + w.worldspaceEdid() + QStringLiteral( ".lodl" );
+				// the landscape file moved to FO4CSLOD\<ws>\ (lane LAYOUT1, 2026-09-16)
+				const QString path = lodgenFo4csWorldDir( job.outDir, w.worldspaceEdid() )
+					+ QChar( '/' ) + w.worldspaceEdid() + QStringLiteral( ".lodl" );
 				post( [this]() { progress->setFormat( tr( "refreshing the AO plane\u2026 %p%" ) ); } );
 				if ( !lodtRefreshAo( path, &err, [this, post]( int done, int total ) {
 						post( [this, done, total]() { progress->setValue( total ? done * 1000 / total : 0 ); } );
@@ -1918,6 +2965,16 @@ private:
 				LodtOptions o;
 				o.aoSamples = job.aoSamples;
 				o.overviewSamples = job.overviewSamples;
+				/* The water-body module of the .lodl writer, off by default:
+				 * unarmed, the file is the one this bake wrote before the
+				 * module existed. */
+				o.water.enabled = xb( "waterBodies" );
+				o.water.bridgeGap = xi( "waterBridge" );
+				o.water.nearTexels = xi( "waterNear" );
+				o.water.bodySamples = xi( "waterBodySamples" );
+				o.water.flowSamples = xi( "waterFlowSamples" );
+				o.water.shore = xb( "waterShore" );
+				o.water.velocityPlugin = xs( "waterVelocities" );
 				o.progress = [this, post]( int phase, int done, int total, int level, int i, int j ) {
 					post( [this, phase, done, total, level, i, j]() {
 						if ( phase == 0 ) {
@@ -1949,6 +3006,7 @@ private:
 			}
 			report += QStringLiteral( "heightmap: " ) + QFileInfo( written ).fileName() + QChar( '\n' );
 		}
+		msLandscapeWorker.store( landscapeTimer.elapsed() );
 		post( [this, report]() { finishWorld( true, report ); } );
 	}
 
@@ -1957,6 +3015,7 @@ private:
 	{
 		if ( worker.joinable() )
 			worker.join();
+		msLandscape = msLandscapeWorker.load();		// joined: the worker is done writing it
 		lastReport = report;
 		if ( !ok || cancelFlag ) {
 			finishAll( ok ? tr( "cancelled" ) : report );
@@ -1986,7 +3045,7 @@ private:
 
 	void startChunks()
 	{
-		if ( !( objectsCheck->isChecked() || btrCheck->isChecked() || wantVt() ) ) {
+		if ( !( objectPassOn() || btrCheck->isChecked() || wantVt() ) ) {
 			finishAll( tr( "done" ) );
 			return;
 		}
@@ -2004,9 +3063,93 @@ private:
 		progress->setValue( 0 );
 		meshDir = outputDir() + QStringLiteral( "/meshes/terrain/" ) + world->worldspaceEdid();
 		texDir = outputDir() + QStringLiteral( "/textures/terrain/" ) + world->worldspaceEdid();
-		QDir().mkpath( meshDir );
+		/* EMPTY-FOLDER HYGIENE (lane LAYOUT1, 2026-09-16): the legacy chunk
+		 * folder is created only when a legacy chunk is going to be written
+		 * into it. Under the FO4CS target nothing does. */
+		if ( wantObjects() || ( btrCheck->isChecked() && !btrSection->isHidden() ) || xb( "keepBto" ) )
+			QDir().mkpath( meshDir );
 		if ( texCheck->isChecked() && btrCheck->isChecked() )
 			QDir().mkpath( texDir );
+		/* ===== THE .BTO SCRATCH FOLDER (lane BTOFREE1, 2026-09-16) =========
+		 *
+		 * bungo, 2026-09-12 18:3x: "essentially, no legacy vanilla file types
+		 * are now used by us or baked in the FO4CS lod bake". The `.BTO` was
+		 * the last one, and it was last because five passes read it BACK --
+		 * not because anything downstream of the bake wants it. So under the
+		 * FO4CS target it is built here instead, every read-back works on it
+		 * here, and the teardown after the card arrays removes it.
+		 *
+		 * The folder sits inside the mod folder rather than in %TEMP% so an
+		 * interrupted bake leaves its scaffolding where the operator can see
+		 * it; a run that finds one left by a dead bake removes it first, which
+		 * makes that self-healing instead of a second failure. Same path, same
+		 * name and the same teardown function as the command line, because
+		 * lodgen_byte_gate.sh compares what the two leave on disk. */
+		btoScratch.clear();
+		lodgenClearBtoDisposition();
+		if ( wantNative() && objectPassOn() && !xb( "keepBto" ) ) {
+			btoScratch = outputDir() + QStringLiteral( "/lodgen_bto_scratch" );
+			QDir( btoScratch ).removeRecursively();
+			if ( !QDir().mkpath( btoScratch ) ) {
+				finishAll( tr( "cannot create the .BTO scratch folder %1 \u2014 tick "
+					"\"Keep legacy .BTO chunks\" to write the chunks into the mod "
+					"folder instead" ).arg( btoScratch ) );
+				return;
+			}
+		}
+		/* THE NATIVE PAIR. Armed here and disarmed in step()'s tail, around the
+		 * same chunk loop the CLI's region driver wraps (nifcli.cpp) -- the
+		 * emitter is a process-wide accumulator, so the hook inside the chunk
+		 * builder is a no-op until this call and the stock path is untouched
+		 * when the row is off. The files land in FO4CSLOD\<ws>\ beside the
+		 * .lodl (lane LAYOUT1, 2026-09-16: one root for every FO4CS-target
+		 * output), because the output mod folder IS a Data folder. One
+		 * function composes that root -- lodgenFo4csWorldDir() in
+		 * src/lodgenlayout.cpp -- and every writer here calls it. The loader takes an
+		 * EMPTY data root, which means the session's own resource stack -- the
+		 * same assets the chunk pass and the viewport read. */
+		nativeDataRoot.clear();
+		if ( wantNative() ) {
+			const QString nativeDir = lodgenFo4csWorldDir( outputDir(), world->worldspaceEdid() );
+			QDir().mkpath( nativeDir );
+			/* The two modules of the pair, from their rows (lane PANEL1): the
+			 * ladder is the several-levels-per-mesh library and the occluders
+			 * are the .lodi's box table. The ladder defaults OFF (bungo
+			 * 2026-09-17, authored LODs only), the occluders ON. */
+			lodgenNativeBegin( world.get(), nativeDir, lodgenNativeLoadModel, &nativeDataRoot,
+				QString(), xb( "nativeLadder" ), xb( "nativeOccluders" ) );
+			/* AGGREGATE RING-3 IMPOSTORS, armed the same way the command line
+			 * arms them and refusing in the same words: a set is composited
+			 * from the cell's own trees' card sheets, so there is nothing to
+			 * photograph without a card tree. The refusal is carried to the
+			 * result line rather than thrown away. */
+			aggRefusal.clear();
+			if ( xb( "aggregate" ) ) {
+				const QString cardDir = cardSourceDir();
+				if ( cardDir.isEmpty() ) {
+					aggRefusal = tr( "aggregate impostors need the impostor card folder: a set is "
+						"composited from the cell's own trees' cards" );
+				} else {
+					const int region[4] = { qMin( x0Spin->value(), x1Spin->value() ),
+						qMin( y0Spin->value(), y1Spin->value() ),
+						qMax( x0Spin->value(), x1Spin->value() ),
+						qMax( y0Spin->value(), y1Spin->value() ) };
+					QStringList notes;
+					const QHash<quint32, LodgenAggCard> cards = lodgenAggregateCards( *world, region,
+						cardDir, cardHalfAuxCheck->isChecked() ? 2 : 1, &notes );
+					if ( cards.isEmpty() ) {
+						aggRefusal = tr( "aggregate impostors found no usable card set in %1" ).arg( cardDir );
+					} else {
+						LodgenAggOptions ao;
+						ao.minTrees = xi( "aggregateMin" );
+						ao.tile = xi( "aggregateTile" );
+						ao.views = xi( "aggregateViews" );
+						ao.auxDiv = cardHalfAuxCheck->isChecked() ? 2 : 1;
+						lodgenNativeSetAggregate( ao, cards );
+					}
+				}
+			}
+		}
 		/* ONE texture/LTEX/GRAS cache for the whole queue. Per chunk it would
 		 * decode every landscape diffuse again, and the grass tint would reread
 		 * seventy meshes for every chunk in the range. */
@@ -2020,8 +3163,11 @@ private:
 		if ( wantVt() ) {
 			progress->setFormat( tr( "the terrain virtual texture\u2026" ) );
 			QCoreApplication::processEvents();
+			QElapsedTimer vtTimer;
+			vtTimer.start();
 			LodgenVtOptions vo = vtOptions();
-			if ( vtBtrCheck->isChecked() && btrCheck->isChecked() && texCheck->isChecked() ) {
+			if ( vtBtrCheck->isChecked() && !vtBtrCheck->isHidden()
+				&& btrCheck->isChecked() && texCheck->isChecked() ) {
 				vo.btrTexDir = texDir;
 				vo.btrDims = QVector<int>{ 4, 8, 16, 32 };
 				vtSuppliesTex = true;
@@ -2033,7 +3179,9 @@ private:
 				lastReport = rep;
 			else
 				lastReport = tr( "terrain virtual texture: %1" ).arg( verr );
+			msTextures += vtTimer.elapsed();		// the pyramid is a TEXTURE stage
 		}
+		runChunkQueue();
 		QTimer::singleShot( 0, this, [this]() { step(); } );
 	}
 
@@ -2052,61 +3200,180 @@ private:
 		return !self->cancelFlag;
 	}
 
+	/*! THE CHUNK QUEUE, over the machine.
+	 *
+	 *  The panel used to build ONE chunk per event-loop tick, so a 3,060-chunk
+	 *  Commonwealth ran on one core with fifteen idle. The loop is now
+	 *  lodgenRunChunkPass (lodgenchunkpass.h), shared with the command line and
+	 *  fanned over lodgenThreadCount() workers.
+	 *
+	 *  The window stays live because the pass calls `retire` on THIS thread,
+	 *  once per chunk, in QUEUE ORDER, and `retire` pumps the event loop -- the
+	 *  same thing the pyramid pass already does through vtProgressThunk.
+	 *  Cancel still lands between chunks: the workers poll cancelFlag before
+	 *  they pick a job up.
+	 *
+	 *  The live preview is spliced from `retire` too, so the documents arrive
+	 *  in chunk order however the workers finish. No NifModel crosses a thread:
+	 *  a worker writes the preview copy as a file, translation already applied,
+	 *  and the main thread only opens it. */
+	void runChunkQueue()
+	{
+		if ( queue.isEmpty() )
+			return;
+		QVector<LodgenChunkJob> jobs;
+		jobs.reserve( queue.size() );
+		for ( const ChunkJob & j : queue )
+			jobs.append( LodgenChunkJob{ j.dim, j.cx, j.cy } );
+
+		LodgenChunkPassOptions pass;
+		pass.plugins = pluginString();
+		pass.worldspace = wsBox->currentData().toUInt();
+		pass.worldEdid = world->worldspaceEdid();
+		pass.wantBtr = btrCheck->isChecked();
+		pass.wantBto = objectPassOn();
+		pass.wantTex = btrCheck->isChecked() && texCheck->isChecked() && !vtSuppliesTex;
+		pass.meshDir = meshDir;
+		pass.btoScratchDir = btoScratch;
+		pass.texDir = texDir;
+		pass.texDataRoot.clear();          // the game's own folders and archives
+		pass.cover = coverOptions();
+		if ( previewCheck->isChecked() && skope )
+			pass.previewDir = QDir::tempPath();
+
+		LodgenTerrainOptions topts;
+		topts.water = waterCheck->isChecked();
+		topts.targetTrisPerCell = trisSpin->value();
+		topts.terrainIdentity = wantTerrainId();
+		topts.geomorph = geomorphCheck->isChecked();
+		topts.shoreDenser = shoreCheck->isChecked();
+		topts.shoreDensity = shoreDensitySpin->value();
+		topts.waterSubdiv = xi( "waterSubdiv" );
+		pass.terrain = topts;
+
+		LodgenObjectOptions oopts;
+		oopts.identity = wantIdentity();
+		oopts.treeSway = oopts.identity && swayCheck->isChecked();
+		oopts.objectChannels = oopts.identity && channelsCheck->isChecked();
+		oopts.aoSkirtCells = aoSkirtSpin->value();
+		oopts.cullBuried = cullCheck->isChecked();
+		oopts.cullMargin = float( cullMarginSpin->value() );
+		oopts.slotFallback = slotFallbackCheck->isChecked();
+		oopts.bakeAO = aoCheck->isChecked();
+		oopts.dataRoot.clear();            // the game's own folders and archives
+		oopts.impostorDir = cardSourceDir();
+		oopts.impostorFromLevel = impostorLevelBox->currentData().toInt();
+		oopts.cardAuxDiv = cardHalfAuxCheck->isChecked() ? 2 : 1;
+		oopts.treesOnly = treesOnlyCheck->isChecked();
+		pass.object = oopts;
+
+		QString perr;
+		lodgenRunChunkPass( jobs, pass,
+			[this]( const LodgenChunkOutcome & r ) {
+				progress->setFormat( tr( "chunk %1 at (%2,%3) — %v of %m" )
+					.arg( r.dim ).arg( r.cx ).arg( r.cy ) );
+				const bool okChunk = ( !btrCheck->isChecked() || r.btrBuilt )
+					&& ( !objectPassOn() || r.btoBuilt );
+				if ( r.btoSaved )
+					writtenBto.append( r.btoPath );
+				bool added = false;
+				if ( skope && previewCheck->isChecked() ) {
+					if ( !r.btrPreviewPath.isEmpty() )
+						added = skope->addWorkspaceDocumentFromFile( r.btrPreviewPath ) || added;
+					if ( !r.btoPreviewPath.isEmpty() )
+						added = skope->addWorkspaceDocumentFromFile( r.btoPreviewPath ) || added;
+					if ( added && skope->getGLView() && framePending )
+						skope->getGLView()->frameAll();
+				}
+				map->markChunk( r.dim, r.cx, r.cy,
+					okChunk ? LodgenProgressMap::Chunk : LodgenProgressMap::Failed );
+				done++;
+				progress->setValue( done );
+				// the window must stay live: this is the only place that pumps
+				QCoreApplication::processEvents();
+			},
+			[this]() { return cancelFlag.load(); },
+			&msMeshes, &msTextures, &perr );
+		if ( !perr.isEmpty() )
+			lastReport = perr;
+	}
+
+
 	void step()
 	{
 		if ( cancelFlag || done >= queue.size() ) {
 			QString tail;
-			if ( !cancelFlag && !writtenBto.isEmpty() && objectsCheck->isChecked() && wantIdentity()
+			// not on wantIdentity() since 2026-09-12 (lane DEFAULTS1)
+			if ( !cancelFlag && !writtenBto.isEmpty() && objectPassOn()
 				&& arraysCheck->isChecked() ) {
 				// before the atlas: the arrays key on the shapes' own diffuse paths
 				const QString ws = world->worldspaceEdid();
-				const QString arrDir = texDir + QStringLiteral( "/Objects" );
+				const QString arrDir = objectsDir();
 				QDir().mkpath( arrDir );
 				progress->setFormat( tr( "writing the texture arrays\u2026" ) );
 				QCoreApplication::processEvents();
+				QElapsedTimer t;
+				t.start();
 				QString rep, aerr;
 				if ( lodgenBuildTextureArrays( writtenBto, QString(),
 					arrDir + "/" + ws + QStringLiteral( ".LodgenArrays" ),
-					QString( "data\\Textures\\Terrain\\%1\\Objects\\%1.LodgenArrays" ).arg( ws ), &rep, &aerr ) )
+					objectsGame( QStringLiteral( "LodgenArrays" ) ), &rep, &aerr ) ) {
 					tail += tr( ", arrays: %1" ).arg( rep );
-				else
+					if ( wantNative() )
+						lodgenNoteLayoutDir( arrDir );
+				} else
 					tail += tr( ", arrays: %1" ).arg( aerr );
+				msTextures += t.elapsed();
 			}
-			if ( !cancelFlag && !writtenBto.isEmpty() && atlasCheck->isChecked() && objectsCheck->isChecked() ) {
+			if ( !cancelFlag && !writtenBto.isEmpty() && atlasCheck->isChecked()
+				&& !atlasCheck->isHidden() && objectPassOn() ) {
 				const QString ws = world->worldspaceEdid();
-				const QString atlasDir = texDir + QStringLiteral( "/Objects" );
+				const QString atlasDir = objectsDir();
 				QDir().mkpath( atlasDir );
 				progress->setFormat( tr( "packing the object atlas\u2026" ) );
 				QCoreApplication::processEvents();
+				QElapsedTimer t;
+				t.start();
 				QString aerr;
 				/* Vanilla's own sheet is DXT1 (measured), so the stock target gets
 				 * BC1 with one-bit alpha for the cut-outs - parity and half the
 				 * memory - and FO4CS keeps BC3's eight-bit alpha, which only a
 				 * consumer that soft-blends card edges can spend. */
-				const bool atlasBc1 = !fo4cs();
+				/* The row picks it; "Match the target" is what the panel has
+				 * always done and is its default (lane PANEL1). */
+				const int atlasFmt = xi( "atlasFormat" );
+				const bool atlasBc1 = atlasFmt < 0 ? !fo4cs() : ( atlasFmt == 1 );
 				if ( lodgenBuildAtlas( writtenBto, QString(),
 					atlasDir + "/" + ws + QStringLiteral( ".LodgenObjects" ),
-					QString( "data\\Textures\\Terrain\\%1\\Objects\\%1.LodgenObjects" ).arg( ws ),
-					outputDir(), atlasBc1, &aerr ) )
+					objectsGame( QStringLiteral( "LodgenObjects" ) ),
+					outputDir(), atlasBc1, &aerr ) ) {
 					tail = tr( ", atlas %1" ).arg( atlasBc1 ? tr( "written (BC1)" ) : tr( "written (BC3)" ) );
-				else
+					if ( wantNative() )
+						lodgenNoteLayoutDir( atlasDir );
+				} else
 					tail = tr( ", atlas: %1" ).arg( aerr );
+				msTextures += t.elapsed();
 			}
-			if ( !cancelFlag && !writtenBto.isEmpty() && objectsCheck->isChecked() ) {
+			if ( !cancelFlag && !writtenBto.isEmpty() && objectPassOn() && xb( "merge" ) ) {
 				// last: one shape per material the engine can tell apart
 				progress->setFormat( tr( "merging the chunk shapes\u2026" ) );
 				QCoreApplication::processEvents();
+				QElapsedTimer t;
+				t.start();
 				QString rep, merr;
 				if ( lodgenMergeChunkShapes( writtenBto, &rep, &merr ) )
 					tail += tr( ", merged %1" ).arg( rep );
 				else
 					tail += tr( ", merge: %1" ).arg( merr );
+				msMeshes += t.elapsed();
 			}
-			if ( !cancelFlag && !writtenBto.isEmpty() && objectsCheck->isChecked()
+			if ( !cancelFlag && !writtenBto.isEmpty() && objectPassOn()
 				&& simplifyCheck->isChecked() ) {
 				// the far rings, on the MERGED shapes: one proxy per cluster
 				progress->setFormat( tr( "simplifying the far rings\u2026" ) );
 				QCoreApplication::processEvents();
+				QElapsedTimer t;
+				t.start();
 				LodgenSimplifyOptions sopts;
 				sopts.ratio8 = float( simplify8Spin->value() );
 				sopts.ratio16 = float( simplify16Spin->value() );
@@ -2117,23 +3384,96 @@ private:
 					tail += tr( ", far rings: %1" ).arg( rep2 );
 				else
 					tail += tr( ", far rings: %1" ).arg( serr );
+				msMeshes += t.elapsed();
 			}
-			if ( !cancelFlag && !writtenBto.isEmpty() && objectsCheck->isChecked() && wantIdentity()
-				&& arraysCheck->isChecked() && !impostorEdit->text().trimmed().isEmpty() ) {
+			// not on wantIdentity() since 2026-09-12 (lane DEFAULTS1)
+			if ( !cancelFlag && !writtenBto.isEmpty() && objectPassOn()
+				&& arraysCheck->isChecked() && !cardSourceDir().isEmpty() ) {
 				// the card sets the chunks stand on, as arrays beside the mesh arrays
 				const QString ws = world->worldspaceEdid();
-				const QString arrDir = texDir + QStringLiteral( "/Objects" );
+				const QString arrDir = objectsDir();
 				QDir().mkpath( arrDir );
 				progress->setFormat( tr( "writing the card arrays\u2026" ) );
 				QCoreApplication::processEvents();
+				QElapsedTimer t;
+				t.start();
 				QString rep, cerr2;
-				if ( lodgenBuildCardArrays( writtenBto, impostorEdit->text().trimmed(),
+				if ( lodgenBuildCardArrays( writtenBto, cardSourceDir(),
 					arrDir + "/" + ws + QStringLiteral( ".LodgenCards" ),
-					QString( "data\\Textures\\Terrain\\%1\\Objects\\%1.LodgenCards" ).arg( ws ),
-					cardHalfAuxCheck->isChecked() ? 2 : 1, &rep, &cerr2 ) )
+					objectsGame( QStringLiteral( "LodgenCards" ) ),
+					cardHalfAuxCheck->isChecked() ? 2 : 1, &rep, &cerr2 ) ) {
 					tail += tr( ", card arrays: %1" ).arg( rep );
-				else
+					if ( wantNative() )
+						lodgenNoteLayoutDir( arrDir );
+				} else
 					tail += tr( ", card arrays: %1" ).arg( cerr2 );
+				msImpostors += t.elapsed();		// the IMPOSTOR stage
+			}
+			/* ===== THE SCRATCH TEARDOWN (lane BTOFREE1, 2026-09-16) ========
+			 *
+			 * LAST of the object passes: the texture arrays, the atlas, the
+			 * shape merge, the far-ring cut and the card arrays above have all
+			 * had the chunks and their manifests side by side, exactly as they
+			 * did when the chunks lived in the mod folder. Now the sidecars
+			 * move into the mod folder and the chunks go. Before the pair,
+			 * because the pair is written from the emitter and not from the
+			 * files, and after a CANCEL as well -- a cancelled run must not
+			 * leave a scratch folder behind either. */
+			if ( !btoScratch.isEmpty() ) {
+				/* The sidecars BTOFREE1 keeps land beside the files they
+				 * describe, which since lane LAYOUT1 (2026-09-16) means
+				 * FO4CSLOD\<ws>\ and no longer meshes\terrain\<ws>\. The
+				 * scratch folder only ever exists under the FO4CS target. */
+				const QString manifestDir = lodgenFo4csWorldDir( outputDir(), world->worldspaceEdid() );
+				QDir().mkpath( manifestDir );
+				const LodgenBtoScratchResult r =
+					lodgenDropBtoScratch( writtenBto, btoScratch, manifestDir );
+				tail += tr( ", %1 .bto chunk(s) dropped from the mod folder (%2 bytes)" )
+					.arg( r.dropped ).arg( r.freed );
+				for ( const QString & w : r.warnings )
+					tail += tr( ", %1" ).arg( w );
+				writtenBto.clear();
+				btoScratch.clear();
+			}
+			/* The native pair, written once the chunk queue has handed the
+			 * emitter every placement -- the same order the CLI's region
+			 * driver uses. Disarmed on every path, including a cancel, so a
+			 * cancelled run cannot leave the accumulator armed for the next. */
+			if ( lodgenNativeActive() ) {
+				if ( !cancelFlag ) {
+					progress->setFormat( tr( "writing the native object files…" ) );
+					QCoreApplication::processEvents();
+					QElapsedTimer t;
+					t.start();
+					QString nrep, nerr;
+					if ( lodgenNativeWrite( &nrep, &nerr ) )
+						tail += tr( ", %1" ).arg( nrep.section( QChar( '\n' ), 0, 0 ) );
+					else
+						tail += tr( ", native: %1" ).arg( nerr );
+					msMeshes += t.elapsed();
+					/* The aggregate SHEETS, written after the pair because the
+					 * compositor runs inside the .lodi write. They go into the
+					 * output Data tree, never the card bake tree: a set is per
+					 * worldspace CELL and the card tree is per base. */
+					if ( !lodgenNativeAggregateSets().isEmpty() ) {
+						QStringList aggWritten;
+						QString aggErr;
+						bool aggOk = true;
+						for ( const LodgenAggSet & a : lodgenNativeAggregateSets() )
+							if ( !lodgenAggregateWrite( outputDir(), world->worldspaceEdid(),
+									a, &aggWritten, &aggErr ) ) {
+								aggOk = false;
+								break;
+							}
+						tail += aggOk
+							? tr( ", %1 aggregate set(s), %2 file(s)" )
+								.arg( lodgenNativeAggregateSets().size() ).arg( aggWritten.size() )
+							: tr( ", aggregate: %1" ).arg( aggErr );
+					}
+					if ( !aggRefusal.isEmpty() )
+						tail += tr( ", aggregate: %1" ).arg( aggRefusal );
+				}
+				lodgenNativeEnd();
 			}
 			world.reset();
 			lodgenDestroyBakeCaches( bakeCaches );
@@ -2143,67 +3483,23 @@ private:
 				: tr( "done \u2014 %1 chunk(s)%2" ).arg( done ).arg( tail ) );
 			return;
 		}
-		const int dim = queue[done].dim;
-		const int cx = queue[done].cx, cy = queue[done].cy;
-		progress->setFormat( tr( "chunk %1 at (%2,%3) \u2014 %v of %m" ).arg( dim ).arg( cx ).arg( cy ) );
-		const QString stem = QString( "%1.%2.%3.%4" ).arg( world->worldspaceEdid() ).arg( dim ).arg( cx ).arg( cy );
-		bool okChunk = true;
-		if ( btrCheck->isChecked() ) {
-			NifModel nif;
-			LodgenTerrainOptions opts;
-			opts.dim = dim;
-			opts.water = waterCheck->isChecked();
-			opts.targetTrisPerCell = trisSpin->value();
-			opts.terrainIdentity = wantTerrainId();
-			opts.geomorph = geomorphCheck->isChecked();
-			opts.shoreDenser = shoreCheck->isChecked();
-			opts.shoreDensity = shoreDensitySpin->value();
-			QString cerr;
-			if ( lodgenBuildTerrainChunk( &nif, *world, cx, cy, opts, &cerr ) ) {
-				nif.saveToFile( meshDir + "/" + stem + QStringLiteral( ".BTR" ) );
-				preview( nif, cx, cy, stem + QStringLiteral( "_btr" ) );
-				if ( texCheck->isChecked() && !vtSuppliesTex )
-					lodgenBakeTerrainTextures( *world, cx, cy, dim, QString(), texDir,
-						coverOptions(), bakeCaches, &cerr );
-			} else {
-				okChunk = false;
-			}
-		}
-		if ( objectsCheck->isChecked() ) {
-			NifModel nif;
-			LodgenObjectOptions opts;
-			opts.dim = dim;
-			opts.identity = wantIdentity();
-			opts.treeSway = opts.identity && swayCheck->isChecked();
-			opts.objectChannels = opts.identity && channelsCheck->isChecked();
-			opts.aoSkirtCells = aoSkirtSpin->value();
-			opts.cullBuried = cullCheck->isChecked();
-			opts.cullMargin = float( cullMarginSpin->value() );
-			opts.slotFallback = slotFallbackCheck->isChecked();
-			opts.bakeAO = aoCheck->isChecked();
-			opts.dataRoot.clear();		// the game's own folders and archives
-			opts.impostorDir = impostorEdit->text();
-			opts.impostorFromLevel = impostorLevelBox->currentData().toInt();
-			opts.cardAuxDiv = cardHalfAuxCheck->isChecked() ? 2 : 1;
-			QString manifest, cerr;
-			if ( lodgenBuildObjectChunk( &nif, *world, cx, cy, opts, &manifest, &cerr ) ) {
-				const QString path = meshDir + "/" + stem + QStringLiteral( ".BTO" );
-				if ( nif.saveToFile( path ) )
-					writtenBto.append( path );
-				if ( opts.identity ) {
-					QFile mf( path + QStringLiteral( ".manifest.txt" ) );
-					if ( mf.open( QIODevice::WriteOnly | QIODevice::Text ) )
-						mf.write( manifest.toUtf8() );
-				}
-				preview( nif, cx, cy, stem + QStringLiteral( "_bto" ) );
-			} else {
-				okChunk = false;
-			}
-		}
-		map->markChunk( dim, cx, cy, okChunk ? LodgenProgressMap::Chunk : LodgenProgressMap::Failed );
-		done++;
-		progress->setValue( done );
-		QTimer::singleShot( 0, this, [this]() { step(); } );
+	}
+
+	/*! The four stage times, in one line, in the order the work happens.
+	 *
+	 *  Each is accumulated from the calls that belong to that stage and from
+	 *  nothing else, so a stage that did not run reads exactly 0.0 s -- which
+	 *  is what makes the line a measurement rather than a decoration (the
+	 *  three rules of 2026-09-04: a status line ships with a test that it is
+	 *  written AND that it moves). Seconds to one decimal: the numbers a
+	 *  person compares are tens of seconds and minutes, and milliseconds in a
+	 *  pinned bar read as noise. */
+	QString stageTimeLine() const
+	{
+		// the words live in lodgen.cpp, so the panel and the command line
+		// cannot drift apart on them
+		return lodgenStageTimeLine( msLandscape, msMeshes, msTextures, msImpostors,
+			lodgenNativeLibrarySplit() );
 	}
 
 	void finishAll( const QString & message )
@@ -2215,6 +3511,15 @@ private:
 		if ( progress->maximum() > 0 && !cancelFlag )
 			progress->setValue( progress->maximum() );
 		map->setLabel( message.section( QChar( '\n' ), 0, 0 ) );
+		if ( resultLabel ) {
+			/* The four stage times, then the bake census -- how many threads the
+			 * run was allowed, how many chunk jobs it had, how many workers the
+			 * queue could actually use, and what it cost the machine. One
+			 * formatter with the command line (lodgenBakeCensusLine). */
+			resultLabel->setText( stageTimeLine() + QStringLiteral( "\n" ) + lodgenBakeCensusLine() );
+			resultLabel->setToolTip( message );
+			resultLabel->setVisible( true );
+		}
 		cancelFlag = false;
 	}
 
@@ -2276,7 +3581,7 @@ private:
 	 *  into separate arrays and separate binds. */
 	QPair<int, int> cardsOnDisk() const
 	{
-		const QString dir = impostorEdit ? impostorEdit->text().trimmed() : QString();
+		const QString dir = cardSourceDir();
 		if ( dir.isEmpty() )
 			return { 0, 0 };
 		QDir d( dir );
@@ -2305,6 +3610,17 @@ private:
 		* simplify32Spin = nullptr, * simplifyErrorSpin = nullptr;
 	QCheckBox * arraysCheck = nullptr;
 	QCheckBox * lodtCheck, * heightmapCheck, * objectsCheck, * btrCheck;
+	QCheckBox * nativeCheck = nullptr;			//!< the FO4CS head of the object section
+	QCheckBox * treesOnlyCheck = nullptr;		//!< impostor cards are trees only
+	std::function<void()> syncObjectRows, syncRangeRows;
+	/*! The four stage times of the last run, in milliseconds, in the order the
+	 *  result line prints them. Each is accumulated from the calls that belong
+	 *  to that stage and NOTHING else, so a stage that did not run reads 0 --
+	 *  which is what makes the line testable (the three rules of 2026-09-04:
+	 *  written AND moving). */
+	qint64 msLandscape = 0, msMeshes = 0, msTextures = 0, msImpostors = 0;
+	//! atomics: the landscape stage is accumulated on the worker thread
+	std::atomic<qint64> msLandscapeWorker { 0 };
 	QRadioButton * lodtFullRadio, * lodtAoOnlyRadio;
 	QCheckBox * texCheck, * identityCheck, * terrainIdCheck, * aoCheck, * waterCheck,
 		* geomorphCheck, * atlasCheck, * shoreCheck, * previewCheck;
@@ -2315,6 +3631,25 @@ private:
 	QComboBox * vtFinestBox = nullptr;
 	QLabel * vtSummary = nullptr, * vtFinestLabel = nullptr;
 	QList<QWidget *> vtSub;
+	/*! ONE REGISTRY FOR THE ROWS LANE PANEL1 ADDED (2026-09-12).
+	 *
+	 *  Key = the `LodGeneration/` settings key without its group. `dflt` is the
+	 *  COMMAND LINE'S default for that switch, kept beside the widget so a
+	 *  hidden row reads back as the default and so the self-test can check
+	 *  every row round-trips. The save, the load, the run and the self-test
+	 *  all walk this one hash. */
+	struct WwExtraRow
+	{
+		QWidget * field = nullptr;
+		QVariant dflt;
+	};
+	QHash<QString, WwExtraRow> extras;
+	QHash<QString, QLabel *> extraLabels;
+	QCheckBox * roadsCheck = nullptr, * terrainObjAoCheck = nullptr,
+		* waterBodiesCheck = nullptr, * aggregateCheck = nullptr;
+	LodgenSection * roadsSection = nullptr, * terrainObjAoSection = nullptr,
+		* waterBodiesSection = nullptr, * aggregateSection = nullptr;
+	QString aggRefusal;			//!< why the aggregate module did not arm, in words
 	bool vtSuppliesTex = false;
 	QList<QWidget *> objectsSub, btrSub;
 	QWidget * rangeBox;
@@ -2324,6 +3659,10 @@ private:
 	LodgenSection * lodtSection = nullptr, * heightmapSection = nullptr, * objectsSection = nullptr, * btrSection = nullptr;
 	LodgenSection * vtSection = nullptr;
 	QLabel * summary = nullptr;
+	//! the FO4CS root line under the output field, and its name cell (lane LAYOUT1)
+	QLabel * outRootLabel = nullptr, * outRootName = nullptr;
+	QLabel * resultLabel = nullptr;		//!< the four stage times of the last run
+	QString nativeDataRoot;				//!< empty = the session's own resource stack
 	bool haveBounds = false;
 	int bMinX = 0, bMinY = 0, bMaxX = -1, bMaxY = -1;
 	QPushButton * wholeButton, * startButton, * cancelButton;
@@ -2333,7 +3672,7 @@ private:
 	LodgenBakeCaches * bakeCaches = nullptr;
 	QVector<ChunkJob> queue;
 	QStringList writtenBto;
-	QString meshDir, texDir, lastReport;
+	QString meshDir, texDir, btoScratch, lastReport;
 	int done = 0;
 	bool running = false;
 	bool framePending = false;
@@ -2384,7 +3723,73 @@ QDockWidget * tlCreateLodGenerationDock( NifModel *, QMainWindow * mw, GLView * 
 	dock->setObjectName( QStringLiteral( "LodGenerationDock" ) );
 	// the panel scrolls its own settings and pins its action bar: no wrapper
 	auto * panel = new LodgenPanel( qobject_cast<NifSkope *>( mw ) );
-	dock->setWidget( panel );
+
+	/* THE PANEL'S OWN SEGMENTED STRIP: LOD | Water (lane WATER8, 2026-09-10).
+	 *
+	 * bungo, on seeing lane WATER7 put the Water tab in the LEFT strip:
+	 * *"What? I wanted it in that right panel though"*. Read with what he had
+	 * said an hour earlier -- *"They should be in the LOD gen workspace"*, then,
+	 * over a screenshot of Header | Blocks | Files, *"You'd access them like
+	 * this"* -- the strip was the STYLE and THIS panel is the PLACE. WATER7
+	 * took it for the place; the left strip goes back to its three tabs.
+	 *
+	 * So this dock stops holding the settings page directly and holds a strip
+	 * above a stack instead. The strip is built exactly as the left editor's is
+	 * (src/nifskope_ui.cpp:24402-24429): a QTabBar in document mode with no
+	 * base, expanding, no scroll buttons, wwSegmentedTabBarQss(), tabData
+	 * carrying the STACK PAGE INDEX in both directions, over a QStackedWidget
+	 * in a zero-margin column. Same helper, same skin, so the two strips cannot
+	 * drift apart -- gate L5 of tests/spells/water_ui.sh compares the two
+	 * sheets byte for byte.
+	 *
+	 * The tab index means nothing outside this widget: everything asks through
+	 * tabData, which is what makes adding the water page (src/watermarkpanel.cpp,
+	 * which finds this strip by object name) a one-call change rather than a
+	 * renumbering.
+	 *
+	 * The row height is NOT set here. `wwAlignBarRow` states it once, after
+	 * restoreState, for every bar at the top of the window at once
+	 * (src/nifskope_ui.cpp, restoreUi) -- three setFixedHeight calls at three
+	 * call sites is exactly how the bars came to disagree in the first place.
+	 * Until then this strip carries the compact default, which is also what it
+	 * keeps if the row never gets a height.
+	 *
+	 * FALLBACK FLOOR (CONSTITUTION 10): with no second page ever added the
+	 * strip is a single `LOD` tab over the settings the dock always held, so
+	 * the workspace works exactly as it did before this lane. */
+	auto * host = new QWidget( dock );
+	host->setObjectName( QStringLiteral( "LodPanelHost" ) );
+	auto * hostLayout = new QVBoxLayout( host );
+	hostLayout->setContentsMargins( 0, 0, 0, 0 );
+	hostLayout->setSpacing( 0 );
+
+	auto * tabs = new QTabBar( host );
+	tabs->setObjectName( QStringLiteral( "LodPanelModeSelector" ) );
+	tabs->setDocumentMode( true );
+	tabs->setDrawBase( false );
+	tabs->setExpanding( true );
+	tabs->setUsesScrollButtons( false );
+	tabs->setStyleSheet( wwSegmentedTabBarQss() );
+	tabs->setAccessibleName( QObject::tr( "LOD Generation panel mode" ) );
+
+	auto * stack = new QStackedWidget( host );
+	stack->setObjectName( QStringLiteral( "LodPanelStack" ) );
+	const int lodPage = stack->addWidget( panel );
+	const int lodTab = tabs->addTab( QObject::tr( "LOD" ) );
+	tabs->setTabData( lodTab, lodPage );
+	tabs->setTabToolTip( lodTab, QObject::tr( "Generate terrain, object and impostor LOD" ) );
+
+	QObject::connect( tabs, &QTabBar::currentChanged, stack, [tabs, stack]( int index ) {
+		if ( index < 0 )
+			return;
+		const int page = tabs->tabData( index ).toInt();
+		if ( page >= 0 && page < stack->count() )
+			stack->setCurrentIndex( page );
+	} );
+
+	hostLayout->addWidget( tabs, 0 );
+	hostLayout->addWidget( stack, 1 );
+	dock->setWidget( host );
 	dock->setAllowedAreas( Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea | Qt::BottomDockWidgetArea );
 	mw->addDockWidget( Qt::RightDockWidgetArea, dock );
 	dock->hide();

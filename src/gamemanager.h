@@ -4,6 +4,11 @@
 #include "libfo76utils/src/common.hpp"
 
 #include <unordered_map>
+#include <QMutex>
+#include <QMutexLocker>
+#include <QReadWriteLock>
+#include <QReadLocker>
+#include <QWriteLocker>
 #include <QString>
 #include <QStringList>
 
@@ -80,6 +85,45 @@ public:
 	static GameResources * addNIFResourcePath( const NifModel * nif, const QString & dataPath );
 	static void removeNIFResourcePath( const NifModel * nif );
 	static inline GameResources & getNIFResources( const NifModel * nif );
+	/*! `nifResourceMap` is one process-wide map that EVERY NifModel constructor
+	 *  reads and every destructor erases from. The LOD generator builds NifModels
+	 *  on worker threads (lodgenchunkpass.h), so the three functions that touch
+	 *  the map take this lock. Three call sites in one class, none of them hot --
+	 *  the renderer does not come through here. (lane BAKEPERF1, 2026-09-11) */
+	static QRecursiveMutex & nifResourceMutex();
+	/*! THE SHARED ARCHIVE INDEX'S LOCK (lane NIFPARSE1, 2026-09-11).
+	 *
+	 *  Every NIF-local GameResources has `parent = &archives[game]`, so all
+	 *  sixteen chunk workers funnel into ONE object, and `init_archives()` /
+	 *  `close_archives()` delete and rebuild its `BA2File` with nothing held.
+	 *  `lodgenWarmSharedIndices()` covers FIRST use and only first use; the
+	 *  self-healing retry in `get_file` (a loose file whose size changed under
+	 *  a running bake) calls `close_archives()` at any moment, and `findFile`
+	 *  hands out `std::string_view`s into buffers that `delete` frees.
+	 *
+	 *  READ/WRITE, not a mutex: `extractFile` is where the texture stage's
+	 *  time is and serialising it would cost the bake exactly what the
+	 *  fan-out buys. Readers share; only the build and the teardown exclude.
+	 *
+	 *  THE RULE (lane ARCHLOCK1, 2026-09-17): NEVER RECURSE TO `parent` UNDER
+	 *  THE READ LOCK; THE PARENT'S LAZY INIT TAKES THE WRITE LOCK. The lock is
+	 *  `QReadWriteLock::Recursive`, which grants read-after-read and
+	 *  write-after-write to the same thread but NEVER a read -> write UPGRADE:
+	 *  `lockForWrite` waits for the reader count to reach zero, and the reader
+	 *  it waits for is the calling thread itself. `find_file` and `get_file`
+	 *  did exactly that -- read lock held across `return parent->...`, the
+	 *  parent's `init_archives()` then taking the write lock -- and the GUI
+	 *  thread slept on itself forever the first time a document with an EMPTY
+	 *  data path looked a material up before anything had built the shared
+	 *  index (bungo 2026-09-17: "When I click on anything from 'files', it
+	 *  freezes nifskope"). Release the read lock first: at that point the
+	 *  `FileInfo *` is null, so no `std::string_view` into the index is still
+	 *  alive and nothing is lost by letting go. The same rule covers
+	 *  `close_archives()` -- `get_file`'s self-healing retry already unlocks
+	 *  before it -- and any future caller that reaches a write-taking function
+	 *  from inside the read section.
+	 */
+	static QReadWriteLock & archiveLock();
 	static inline GameResources & getGameResources( const GameMode game );
 
 	//! Convert 'name' to lower case, replace backslashes with forward slashes, and make sure that the path
@@ -161,6 +205,7 @@ private:
 
 inline GameManager::GameResources & GameManager::getNIFResources( const NifModel * nif )
 {
+	QMutexLocker	resourceLock( &nifResourceMutex() );
 	auto	i = nifResourceMap.find( nif );
 	if ( i != nifResourceMap.end() ) [[likely]]
 		return *(i->second);

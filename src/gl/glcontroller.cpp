@@ -256,8 +256,8 @@ bool Controller::update( const NifModel * nif, const QModelIndex & index )
 		playBackwards = flags & 0x10;
 		computeScaledTime = flags & 0x40;
 
-		/* The whole word, decoded out of the 1.10.155 PDB from named accessors
-		 * on NiTimeController's flags at +0x10 (see WW_PDB_COMPARISON.md §5):
+		/* The whole word, decoded out of Todd's treat (1.10.155) from named accessors
+		 * on NiTimeController's flags at +0x10 (see WW_ENGINE_COMPARISON.md §5):
 		 *
 		 *   bit 0    AnimType         GetAnimType        0x1ba7100
 		 *   bits 1-2 CycleType        GetCycleType       0x1ba7110   -> extrapolation

@@ -1,0 +1,4 @@
+# Lookdev weather cloud layers (lane PBRWX1): Meshes\Sky\Clouds.nif, one shape per
+# WTHR layer. Never enabled on models: selected by name from gl/lookdevstage.cpp.
+
+shaders lookdev_clouds.vert lookdev_clouds.frag

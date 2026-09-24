@@ -48,6 +48,11 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <data/nifvalue.h>
 #include "btdterrain.h"
 
+/* lane FILESTAB (2026-09-10): the Files tab. Defined by the hook-up so that
+ * src/filestabtest.cpp compiles both BEFORE the hook-up (its two seam calls
+ * are skipped BY NAME in the log) and after it (they run). */
+#define WW_FILESTAB_HOOKUP 1
+
 #include <memory>
 
 #if QT_NO_DEBUG
@@ -69,6 +74,7 @@ class BackgroundNifDocument;
 class GLView;
 class InspectView;
 class KfmModel;
+class HkxModel;	// lane HKXEDIT1: a Havok packfile as a block tree
 class NifModel;
 class NifProxyModel;
 class NifTreeView;
@@ -77,6 +83,7 @@ class SettingsDialog;
 class Spell;
 class SpellBook;
 class TimelineWidget;
+class AnimWorkspace;	// lane HKXEDIT2: the animation workspace dock
 class BA2File;
 class BSAModel;
 class BSAProxyModel;
@@ -294,6 +301,19 @@ public:
 	{
 		return ogl;
 	}
+	/*! The WIDGET the GL view lives in.
+	 *
+	 *  GLView is a QOpenGLWindow, not a widget, so it is embedded through
+	 *  QWidget::createWindowContainer() and its container is the only thing in
+	 *  the widget tree that knows where the viewport IS. A full-window picture
+	 *  has to paste the view's framebuffer at the container's position, because
+	 *  QWidget::grab() walks the widget tree and a native window is not in it.
+	 *  Lane CELLWORK1.
+	 */
+	inline QWidget * getGraphicsView() const
+	{
+		return graphicsView;
+	}
 	inline NifModel * getNifModel() const
 	{
 		return nif;
@@ -311,7 +331,9 @@ public:
 	enum ExternalNifDropChoice {
 		ExternalDropCancel = 0,
 		ExternalDropAdaptive = 1,
-		ExternalDropNewWindows = 2
+		ExternalDropNewWindows = 2,
+		//! OPENHERE1 (bungo 2026-09-17): the drop REPLACES what this window holds.
+		ExternalDropOpenHere = 3
 	};
 	//! Show the choice menu after the native drag loop has released the pointer.
 	void showExternalNifDropMenu( const QStringList & files, const QPoint & globalPos );
@@ -493,6 +515,21 @@ protected:
 private:
 	void initActions();
 	void initDockWidgets();
+	/* THREE MODES, AND THE WATER PAGE IS NOT ONE OF THEM (lane WATER8).
+	 *
+	 * Lane WATER7 added LeftWater = 3 and a fourth page to LeftColumnStack,
+	 * reading bungo's "You'd access them like this" over the
+	 * Header | Blocks | Files strip as naming the PLACE. He saw the result
+	 * and said, verbatim: "What? I wanted it in that right panel though".
+	 * The strip was the STYLE; the LOD Generation panel is the place, and
+	 * the water rows are a tab of THAT strip now
+	 * (src/lodgenmanager.cpp, tlCreateLodGenerationDock -> LodPanelModeSelector
+	 * over LodPanelStack; the page is added by src/watermarkpanel.cpp).
+	 *
+	 * So this enum is back to what it was before WATER7, and there is no
+	 * unreachable fourth mode left behind: the mode number IS the stack page
+	 * index (setLeftColumnMode does setCurrentIndex( int( mode ) )), so a
+	 * mode with no page would be a tab that bounces. */
 	enum LeftColumnMode { LeftBlocks = 0, LeftNifs = 1, LeftHeader = 2 };
 	void setLeftColumnMode( LeftColumnMode mode );
 	bool leftColumnIs( LeftColumnMode mode ) const { return leftColumnMode == mode; }
@@ -533,6 +570,20 @@ public:
 	//! Add a loose NIF to Loaded NIFs by path (the browser route needs a
 	//! QModelIndex, which a script has no way to produce).
 	bool addWorkspaceDocumentFromFile( const QString & path );
+	//! lane FILESTAB: the row menu of a loaded ANIMATION in the Loaded-files
+	//! list -- play it, or unload it and restore every bone it posed.
+	void showLoadedClipMenu( const QString & clipName, const QPoint & globalPos );
+	//! WW_FILESTAB_TEST seam: show the Files page and rebuild its tree now.
+	void wwFilesTabShowAndRebuild();
+	//! WW_FILESTAB_TEST seam: add one row to the Files tree and open it the
+	//! way a double-click does.
+	void wwFilesTabOpenRow( const QString & diskPath );
+	//! WW_ARCHLOCK_TEST seam (lane ARCHLOCK1): the same, for a CONFIGURED
+	//! RESOURCE row -- a virtual archive path, opened through the view's own
+	//! doubleClicked signal. That is the route that loads the bytes from a
+	//! QBuffer, so the document ends up with an EMPTY data path, which is the
+	//! condition the archive-lock deadlock needed.
+	void wwFilesTabOpenConfiguredRow( int game, const QString & virtualPath );
 	//! The same for a NIF that exists only in memory — a generated one. It lands
 	//! unsaved, under the name it would take if it were written, and its bytes
 	//! are parsed rather than trusted. False when they do not parse.
@@ -798,6 +849,51 @@ private:
 
 	QWidget * filePathWidget( QWidget * );
 
+public:
+	/*! THE BOTTOM BAR IS GONE; ITS MESSAGES LIVE HERE (lane UINOTES1,
+	 *  2026-09-12, bungo's ruling 1, verbatim: "pic rel needs to be removed,
+	 *  that entire bottom bar that shows you the loaded nif, waste of space").
+	 *
+	 *  The window had a 24 px QStatusBar whose resting content was the loaded
+	 *  file's path. It also carried every transient sentence the program says
+	 *  -- "Saved X", "Added 3 file(s)", "Loading background files... 7
+	 *  remaining", a spell's refusal -- and the load progress bar. Deleting the
+	 *  bar and the path display without giving those a home would have thrown
+	 *  the sentences away.
+	 *
+	 *  WHAT REPLACES IT, AND WHY IT IS NOT A BAR. `showTransientMessage` paints
+	 *  one line over the BOTTOM-LEFT OF THE VIEWPORT for `ms` milliseconds and
+	 *  then disappears completely, taking no window height at rest -- which is
+	 *  the whole point of the ruling. It is a frameless `Qt::Tool` frame
+	 *  positioned in global coordinates, exactly as the four operator redo
+	 *  panels already are (`positionRedoPanel`), because the viewport is a
+	 *  native `createWindowContainer` window and a CHILD widget overlay paints
+	 *  UNDER it. When a redo panel is showing, the line stacks above it rather
+	 *  than over it.
+	 *
+	 *  `transientMessage()` reads back what is on screen, "" when nothing is --
+	 *  it is the source the two harnesses that used to read
+	 *  `statusBar()->currentMessage()` now read (their checks are unchanged;
+	 *  only the source moved, which is what the ruling asks). A message still
+	 *  on screen reads back; an expired one reads back empty, which is the
+	 *  floor that tells a live line from a dead one.
+	 *
+	 *  `ms` <= 0 shows the line until the next message or `clearTransientMessage`.
+	 */
+	void showTransientMessage( const QString & text, int ms = 5000 );
+	void clearTransientMessage();
+	QString transientMessage() const;
+	//! The load progress bar, hosted by the transient line (was the status bar).
+	QProgressBar * loadProgressBar() const { return progress; }
+
+private:
+	//! Build `transientLine` on first use, and keep it over the viewport.
+	void ensureTransientLine();
+	void positionTransientLine();
+	QFrame * transientLine = nullptr;
+	QLabel * transientLabel = nullptr;
+	QTimer * transientTimer = nullptr;
+
 	void setViewFont( const QFont & );
 
 	//! Load the theme
@@ -848,6 +944,9 @@ private:
 	NifModel * nifEmpty;
 	NifProxyModel * proxyEmpty;
 	KfmModel * kfmEmpty;
+	//! Stores an .hkx packfile in memory as blocks (lane HKXEDIT1).
+	HkxModel * hkx;
+	HkxModel * hkxEmpty;
 
 	//! Guard: true while we are pushing the viewport object selection into the
 	//! block list, so the list's selectionChanged handler doesn't echo back.
@@ -959,8 +1058,13 @@ private:
 	//! Transform inspect view
 	InspectView * inspect;
 
-	//! Animation timeline
+	/*! The old Animation Manager's widget. NEVER CONSTRUCTED since lane UI6
+	 *  (2026-09-11) retired that dock; it stays declared and null so the
+	 *  guarded call sites keep compiling, and two retired harnesses say so in
+	 *  their own logs. Deleting TimelineWidget is a separate lane. */
 	TimelineWidget * timeline = nullptr;
+	//! The animation workspace (lane HKXEDIT2), replacing the Animation Manager
+	AnimWorkspace * animws = nullptr;
 
 	//! The main window
 	GLView * ogl;
@@ -1046,8 +1150,71 @@ private:
 	//! dialog). Not nifSnapshotOp: some spells snapshot themselves, and a run
 	//! that changes nothing must not dirty the document. See the definition.
 
-	QDockWidget * dTimeline;
+	QDockWidget * dAnimWs = nullptr;	// (lane HKXEDIT2)
 
+	/* ---- THE WORKSPACES (lane CELLWORK1, 2026-09-19) -----------------------
+	 *
+	 * These were locals inside initDockWidgets() and the switcher was a LAMBDA,
+	 * reachable only from the lambdas that captured it. Nothing outside that
+	 * function could open a workspace -- which is why every harness that ever
+	 * wanted one reached past the mechanism and poked a dock by object name
+	 * instead. Opening a `.wwcell` has to switch workspace, so the mechanism is
+	 * now a member function with its table beside it, and the menu, the open
+	 * path and the gate all come through the same door.
+	 *
+	 * The table is APPENDED TO, never inserted into: the persisted
+	 * `UI/Workspace` index is positional. */
+	struct WorkspaceDef
+	{
+		//! The one dock this workspace shows. Never null in a built table.
+		QDockWidget * dock = nullptr;
+		Qt::DockWidgetArea area = Qt::RightDockWidgetArea;
+		/*! Docks that come up WITH it and go away with it. The Cell workspace's
+		 *  reference inspector is a companion: it is not the workspace, but a
+		 *  cell workspace without it is not the workspace either. */
+		QVector<QDockWidget *> companions;
+		/*! THE ONE ADDED CAPABILITY. The existing workspaces all live beside the
+		 *  NIF editor column; the Cell workspace replaces it. Setting this hides
+		 *  `dLeft` on the way in and restores the SAVED BYTES on the way out --
+		 *  see workspaceLayoutBefore. Everything else about the switch is
+		 *  unchanged, so this is the same mechanism with one flag, not a second
+		 *  mechanism. */
+		bool hideNifDocks = false;
+	};
+	QVector<WorkspaceDef> workspaceDefs;
+	QList<QAction *> workspaceActions;
+	int workspaceIndex = 0;
+	//! Where `Cell` sits in the Workspaces menu, or -1 before the docks exist.
+	int wsCellIndex = -1;
+	/*! The workspace that was active when a cell was opened, so leaving the cell
+	 *  by opening a NIF goes BACK there rather than to Default. */
+	int workspaceBeforeCell = 0;
+	/*! THE WAY BACK IS THE BYTES. A workspace that hides the NIF-only editor
+	 *  takes `saveState()` on the way in and replays it on the way out, so the
+	 *  layout a person left is the layout they get -- not a re-derived
+	 *  approximation of it. Empty and false while no such workspace is active. */
+	QByteArray workspaceLayoutBefore;
+	bool workspaceLayoutSaved = false;
+	//! Cell picking as it was before the Cell workspace switched it on.
+	bool cellPickBeforeWorkspace = false;
+	//! ... and whether that snapshot has been taken, so a second entry does not
+	//! record "on" as the state to go back to.
+	bool cellPickBeforeWorkspaceValid = false;
+
+public:
+	/*! Open a workspace by its position in the Workspaces menu. THE ONE DOOR:
+	 *  the menu actions, the `.wwcell` open path, the harness and the gate all
+	 *  call this, so a workspace cannot be entered by a route that skips half
+	 *  the switch. Out-of-range indices are ignored. */
+	void setWorkspace( int index );
+	int currentWorkspace() const { return workspaceIndex; }
+	int workspaceCount() const { return workspaceDefs.size(); }
+	//! Where the Cell workspace sits, or -1 before the docks are built.
+	int cellWorkspaceIndex() const { return wsCellIndex; }
+	//! The names in the Workspaces menu, in menu order -- for gates.
+	QStringList workspaceNamesInOrder() const;
+
+private:
 	QToolBar * tool;
 
 	QAction * aSanitize;
