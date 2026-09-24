@@ -15,3 +15,5 @@
 01:24:11 octahedral s6b PASS (fix27); GIF run 2 OK (run 1 blank: no textures\ tree beside the .lodm, fixed in wind_gif.sh); pbr_shade_ab s6b 10 cases 11 fail = OLD arm missing DLLs (my copy, rc 127), fixed, s6c running
 01:28:37 pbr_shade_ab s6c 10/0 PASS; director relays bungo 2026-09-25 RULING 'Yes, 8x8 is the default choice for a bake' -> fix29 (driver RING=0 default, docs, ring gate R7); ring gate s6n run
 01:34:06 ring s6n 17/0 (R7 green, red = step-5 driver ring 16); step 6 committed 24e7835; DONE 6b + sections 5/6 written; committing 6b
+01:36:05 DIRECTOR DECISION G4 (a): bar = codec floor of the sheet's other channels x1.25 (fix31), red = next frame + 4-bit sway; preview on existing elm set: 3.573/13 vs bar 4.083/15, 4-bit 6.702 fails; wind gate run4 start
+2026-09-25 01:38 step 6c: wind gate run4 28/0 PASS (G4 3.573/13 <= 4.082/15; next frame 51.099, 4-bit 6.702 fail the bar); DONE 6c + DELIVERABLE written (fix32); committing

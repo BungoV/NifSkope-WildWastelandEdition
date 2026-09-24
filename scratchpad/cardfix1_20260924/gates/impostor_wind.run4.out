@@ -1,0 +1,56 @@
+exe  /e/Projects/NifskopeWWE-cardfix1/release/NifSkope.exe (309f3aa9)
+prev /e/Projects/NifskopeWWE-cardfix1/release/NifSkope.s5_eaa4b0b6.exe (eaa4b0b6)
+bake elm: sway model; 7 files
+bake maple: sway model; 7 files
+bake pine: sway model; 7 files
+bake mapleprev: no sway line; 7 files
+bake hero: sway synthetic; 7 files
+bake heroprev: no sway line; 7 files
+bake rock: sway synthetic; 7 files
+bake rockprev: no sway line; 7 files
+G1 elm: mask0 0 texels, share A=0 -1.0000, max A -1 | crown 93533 texels, distinct 250, share 255 0.0000, mean A 67.2
+  n/a   G1a elm: no mask-0 texels -- every shape of this model carries the tree-animation flag (not counted)
+  ok    G1b elm: the crown has 250 distinct weights, 0.0000 at 255 (>= 8, < 0.5)
+G1 maple: mask0 29127 texels, share A=0 0.9562, max A 86 | crown 35997 texels, distinct 256, share 255 0.0007, mean A 131.3
+  ok    G1a maple: mask-0 texels carry A = 0 on 0.9562 (>= 0.95)
+  ok    G1b maple: the crown has 256 distinct weights, 0.0007 at 255 (>= 8, < 0.5)
+G1 pine: mask0 11377 texels, share A=0 0.9735, max A 51 | crown 153062 texels, distinct 247, share 255 0.0000, mean A 8.4
+  ok    G1a pine: mask-0 texels carry A = 0 on 0.9735 (>= 0.95)
+  ok    G1b pine: the crown has 247 distinct weights, 0.0000 at 255 (>= 8, < 0.5)
+G1 maple, previous exe: mask0 29127 texels, share A=0 0.1188, max A 119 | crown 35997 texels, distinct 220, share 255 0.0001, mean A 109.2
+  ok    G1a red control: the previous exe's synthetic maple has A = 0 on only 0.1188 of its trunk
+G1c maple frame 0: 2861 crown texels compared (bbox width bake 111, reprojection 118): bake err 19.72 r 0.8873 | C.a law err 67.45 r 0.7321 | W mean 168.4
+  ok    G1c maple frame 0 matches the W x h reprojection: r 0.8873 >= 0.75, error 19.72 <= 33.73 (half the C.a law's 67.45)
+  ok    G1c red control: the C.a law (255 x h) fails the same bars (r 0.7321, error 67.45)
+  ok    G1c red control: the previous exe's synthetic maple fails the same bars (r 0.5758, error 55.01)
+G1c maple frame 4: 1257 crown texels compared (bbox width bake 80, reprojection 83): bake err 21.69 r 0.9086 | C.a law err 71.51 r 0.5391 | W mean 166.0
+  ok    G1c maple frame 4 matches the W x h reprojection: r 0.9086 >= 0.75, error 21.69 <= 35.76 (half the C.a law's 71.51)
+  ok    G1c red control: the C.a law (255 x h) fails the same bars (r 0.5391, error 71.51)
+  ok    G1c red control: the previous exe's synthetic maple fails the same bars (r 0.5008, error 48.89)
+M  elm   frame 0: 5551 crown texels compared (bbox width bake 104, reprojection 104): bake err 24.96 r 0.8173 | C.a law err 61.61 r 0.7850 | W mean 119.4
+M  pine  frame 0: 9233 crown texels compared (bbox width bake 104, reprojection 107): bake err 7.61 r 0.6082 | C.a law err 106.94 r 0.2315 | W mean 22.9
+  ok    G2 hero: 6 files compared, 0 differ; sidecar without its sway line identical
+  ok    G2 rock: 6 files compared, 0 differ; sidecar without its sway line identical
+  ok    G2 Hero is named synthetic in its sidecar
+  ok    G2 floor: the maple's sheets differ across the exes (6 files compared, 1 differ (000531b3_oct_normal.png); sidecar without its sway line identical)
+compress elm: lodgen rc 0; lodm 2 kind card sway model leafAmplitude 1 leafFrequency 1 | array sway None
+arrays elm: lodgen rc 1; card arrays written: 1 card sets in 4 arrays (1 groups), 407 C lines carry a layer, 0 sets unreadable
+compress hero: lodgen rc 0; lodm 1 kind card sway None leafAmplitude None leafFrequency None | array sway None
+compress heroprev: lodgen rc 0; lodm 1 kind card sway None leafAmplitude None leafFrequency None | array sway None
+  ok    G2 Hero's compressed .lodm and sheets are byte-identical to the previous exe's:       5 same 
+  ok    G3 the elm card is lodm 2 kind card sway model leafAmplitude 1 leafFrequency 1 | array sway None
+  ok    G3 its card array: lodm 2 kind cardArray sway None leafAmplitude None leafFrequency None | array sway ['model']
+  ok    G3 Hero stays lodm 1 kind card sway None leafAmplitude None leafFrequency None | array sway None
+  ok    G3 the previous exe refuses the v2 card by name: lodm ok 0 lodm error payload is not a lodm 1 object 
+  ok    G3 floor: the previous exe reads Hero's v1 card: lodm ok 1 lodm version 1 lodm family legacy lodm kind card lodm fileBytes 1276 lodm payloadBytes 1264 
+  ok    G3 this exe reads the v2 card: lodm ok 1 lodm version 1 lodm family legacy lodm kind card l
+  ok    G3 this exe refuses a SOURCE claiming lodm 2, by name: lodm ok 0 lodm error lodm 2 is the card family's version (card, cardArray, aggregate: the model sway); a "source" .lodm is lodm 1 
+  ok    G3 this exe loads the v2 set for drawing: grid: RING of 16 views at 360/16 degrees, one row = 16 frames
+G4 elm: BC7 2304x256: 93533 covered texels, sway error mean 3.573 p95 13.0 max 88 | against the next frame: mean 51.099 p95 170.0 | normal R/G error mean 3.266 p95 12.0 | 4-bit sway: mean 6.702 p95 15.0
+G4 bar = codec floor of the sheet's other channels, measured: normal R/G mean 3.266 p95 12.0, x 1.25 -> 4.082 / 15
+  ok    G4 BC7 on the real weight: mean 3.573 <= 4.082, p95 13.0 <= 15 (bar = codec floor of the sheet's other channels, measured)
+  ok    G4 red control: against the next frame's picture the same metric reads 51.099 > 4.082
+  ok    G4 red control: the sway channel corrupted to 4 bits fails the same bar (mean 6.702, p95 15.0)
+M  G4 synthetic (Hero) for comparison: BC7 4096x256: 190675 covered texels, sway error mean 1.281 p95 4.0 max 10 | against the next frame: mean 17.988 p95 89.0 | normal R/G error mean 4.992 p95 16.0 | 4-bit sway: mean 4.535 p95 9.0
+28 checks, 0 failures
+PASS

@@ -32,9 +32,14 @@
 #       card array is `lodm` 2 with a `sway` list; Hero's stays 1 with no sway key. The previous exe's reader
 #       REFUSES the v2 card naming `lodm`; FLOOR: it reads Hero's v1 card. This exe reads the v2 card and
 #       loads it for drawing; it refuses a SOURCE .lodm claiming 2, by name.
-#   G4  BC7 on the real weight: the compressed _n alpha against the bake's own PNG, covered texels, elm:
-#       mean <= 3.0 levels, p95 <= 12 (the synthetic law measured 1.34 / 4; real W has hard 0/255 steps).
-#       RED: the same metric against the NEXT frame's PNG must exceed it.
+#   G4  BC7 on the real weight: the compressed _n alpha against the bake's own PNG, covered texels, elm.
+#       BAR = CODEC FLOOR OF THE SHEET'S OTHER CHANNELS, MEASURED: the same sheet's normal R/G error in the
+#       same run, x 1.25 (mean) and x 1.25 rounded up (p95) -- the margin of the skill
+#       ww-preregister-bar-from-the-subject. DIRECTOR DECISION 2026-09-25 (option a): the first bar, 3.0 / 12,
+#       was copied from the synthetic law's 1.34 / 4 and failed correct code at 3.573 / 13 against an R/G
+#       floor of 3.266 / 12 (gates/impostor_wind.run3.out). The BC7 weights were NOT raised: that would move
+#       every card's normals for a sway error of about 1.4 % of full scale.
+#       RED (both must fail the same bar): the NEXT frame's picture; the sway channel corrupted to 4 bits.
 set -u
 here=$( cd "$( dirname "$0" )" && pwd )
 root=$( cd "$here/../.." && pwd )
@@ -188,10 +193,17 @@ grep -q "grid: RING of 16" "$WORK/g3_load.log" && ok "G3 this exe loads the v2 s
 v=$( "$PY" "$here/impostor_wind.py" g4 "$WORK/elm/cards" "$FID" "$WORK/elm/cards/${FID}_oct_n.DDS" 2>&1 | tail -1 )
 say "G4 elm: $v"
 m=$( num "$v" "sway error mean" ); p=$( num "${v#*sway error mean}" "p95" ); ms=$( num "${v#*next frame:}" "mean" )
-if le "${m:-99}" 3.0 && le "${p:-99}" 12; then ok "G4 BC7 on the real weight: mean $m <= 3.0, p95 $p <= 12"
-else bad "G4 BC7 on the real weight: mean ${m:-?}, p95 ${p:-?} (bar 3.0 / 12)"; fi
-if ! le "${ms:-0}" 3.0; then ok "G4 red control: against the next frame's picture the same metric reads $ms > 3.0"
+fm=$( num "${v#*normal R/G error}" "mean" ); fp=$( num "${v#*normal R/G error}" "p95" )
+qm=$( num "${v#*4-bit sway:}" "mean" ); qp=$( num "${v#*4-bit sway:}" "p95" )
+bm=$( "$PY" -c "print('%.3f' % (1.25 * float('${fm:-0}')))" ); bp=$( "$PY" -c "import math; print(math.ceil(1.25 * float('${fp:-0}')))" )
+say "G4 bar = codec floor of the sheet's other channels, measured: normal R/G mean ${fm:-?} p95 ${fp:-?}, x 1.25 -> $bm / $bp"
+if [ -z "$fm" ] || ! ge "$fm" 0.5; then bad "G4 the codec floor was not measured (normal R/G mean '${fm:-}'): no bar"
+elif le "${m:-99}" "$bm" && le "${p:-99}" "$bp"; then ok "G4 BC7 on the real weight: mean $m <= $bm, p95 $p <= $bp (bar = codec floor of the sheet's other channels, measured)"
+else bad "G4 BC7 on the real weight: mean ${m:-?}, p95 ${p:-?} (bar = codec floor of the sheet's other channels, measured: $bm / $bp)"; fi
+if ! le "${ms:-0}" "$bm"; then ok "G4 red control: against the next frame's picture the same metric reads $ms > $bm"
 else bad "G4 red control did not bite: the next frame reads ${ms:-?}"; fi
+if ! { le "${qm:-0}" "$bm" && le "${qp:-0}" "$bp"; }; then ok "G4 red control: the sway channel corrupted to 4 bits fails the same bar (mean $qm, p95 $qp)"
+else bad "G4 red control did not bite: the 4-bit sway reads mean ${qm:-?}, p95 ${qp:-?} within $bm / $bp"; fi
 v=$( "$PY" "$here/impostor_wind.py" g4 "$WORK/hero/cards" "$FID" "$WORK/hero/cards/${FID}_oct_n.DDS" 2>&1 | tail -1 )
 say "M  G4 synthetic (Hero) for comparison: $v"
 

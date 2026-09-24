@@ -1,9 +1,9 @@
 ## HANDOFF text
 
-**Lane CARDFIX1 (LOD-D), 2026-09-24/25: PARTIAL. Steps 1-5 landed; step 6 built and gated, RED on G4 only; step 7 not started.**
+**Lane CARDFIX1 (LOD-D), 2026-09-24/25: PARTIAL. Steps 1-6 landed (G4 decided by the director, (a)); step 7 in progress.**
 Branch `cardfix1-20260924` in `E:\Projects\NifskopeWWE-cardfix1` (from 71f96c1). Commits: step 1 19c0347,
-step 2 91ddd41, step 3 d8302c9, step 4 7896ad1, step 5 1303334 + 6c5f5f8, step 6 24e7835, step 6b = the branch
-head (the N8 default). Exe 309f3aa9a09897da12c94db644ff70f57f33dc7b. Report: `scratchpad/cardfix1_20260924/DONE.md`.
+step 2 91ddd41, step 3 d8302c9, step 4 7896ad1, step 5 1303334 + 6c5f5f8, step 6 24e7835, step 6b 6430dff
+(the N8 default), step 6c = the G4 re-pin commit. Exe 309f3aa9a09897da12c94db644ff70f57f33dc7b. Report: `scratchpad/cardfix1_20260924/DONE.md`.
 
 * **Step 5 (IMPOSTORRING1), a horizon ring card set** (`WW_IMPOSTOR_RING=16`, 16 views x 1 row): baked, carried
   in the `.lodm` as `views`/`grid`, drawn by nearest azimuth; an old exe refuses it by name. **Finding for bungo:
@@ -18,10 +18,11 @@ head (the N8 default). Exe 309f3aa9a09897da12c94db644ff70f57f33dc7b. Report: `sc
   G1-G3 green. **G4 RED against its pre-registered bar**: BC7 error on the new sway channel (elm) is mean 3.573,
   p95 13 against a bar of 3.0 / 12. The bar was copied from the smooth synthetic sway (1.34 / 4) without
   measuring a real weight. The same sheet's normal R/G channels read 3.266 / 12, the same order.
-  **Decision owed (director/bungo):** (a) accept at the measured level, or (b) raise the BC7 alpha weight for
-  model-sway sets (`kCardNormalBc7Weights {1,1,32,1}`, src/lodgen.cpp ~4764), which costs normal/height
-  precision and must be measured first.
-* **Step 7 (IMPOSTORPBRM1)** not started: the brief forbids starting a step on a red one, and it is a lane's
+  **Director decision (a), 2026-09-25 (not bungo's ruling):** G4's bar is now the same sheet's measured codec
+  floor x 1.25 (4.082 / 15); the BC7 weights stay `{1,1,32,1}`, because (b) would move every card's normals
+  for a sway error of about 1.4 %. Red controls: the next frame (51.1) and the sway cut to 4 bits (6.702)
+  both fail. Wind gate 28 / 0 (gates/impostor_wind.run4.out).
+* **Step 7 (IMPOSTORPBRM1)** in progress after step 6c; it is a lane's
   worth of work (v6 `.pbrm` fixture, family pbr design, `_s` vs folded F0, TintMask law, per-reference tint).
 * A step-5 defect found and fixed in step 6: a ring card ARRAY's file name contained `|` and could not be
   written on Windows. No gate had put a ring set through `--arrays`; the wind gate now does.

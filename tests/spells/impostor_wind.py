@@ -111,9 +111,12 @@ def g4(cards, fid, dds):
     es = np.abs(Ad - Ash)[cov]
     Rd = np.rint(img[..., 0] * 255.0); Gd = np.rint(img[..., 1] * 255.0)
     erg = np.concatenate([np.abs(Rd - nrm[..., 0])[cov], np.abs(Gd - nrm[..., 1])[cov]])
+    Aq = np.floor(Ad / 16.0) * 16.0 + 8.0              # RED: the sway channel corrupted to 4 bits
+    eq = np.abs(Aq - A)[cov]
     print('%s %dx%d: %d covered texels, sway error mean %.3f p95 %.1f max %d | against the next frame: mean %.3f p95 %.1f'
           % (four.decode().strip(), w, hgt, cov.sum(), e.mean(), np.percentile(e, 95), e.max(), es.mean(), np.percentile(es, 95))
-          + ' | normal R/G error mean %.3f p95 %.1f' % (erg.mean(), np.percentile(erg, 95)))
+          + ' | normal R/G error mean %.3f p95 %.1f' % (erg.mean(), np.percentile(erg, 95))
+          + ' | 4-bit sway: mean %.3f p95 %.1f' % (eq.mean(), np.percentile(eq, 95)))
 
 
 def same(a, b, fid):

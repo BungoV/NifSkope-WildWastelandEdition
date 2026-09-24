@@ -1,7 +1,7 @@
-PARTIAL -- lane CARDFIX1 (LOD-D), chain of seven steps. Steps 1-5 landed; step 6 (sway A) built, committed and
-gated, RED on G4 only (the BC7 error bar, pre-registered from the synthetic; decision owed, section 3). NEXT:
-step 7, IMPOSTORPBRM1 (brief_impostorpbrm1.md), not started: the brief forbids a step on a red one.
-Step 6b (the director's relay of bungo's 2026-09-25 ruling, the N8 grid as the bake default) landed after 6.
+PARTIAL -- lane CARDFIX1 (LOD-D), chain of seven steps. Steps 1-6 landed. Step 6 (sway A) went red on G4 only;
+the director decided (a) on 2026-09-25 (step 6c: G4's bar re-pinned to the sheet's measured codec floor),
+and the wind gate is now 28 / 0. Step 6b (the director's relay of bungo's 2026-09-25 ruling, the N8 grid as
+the bake default) landed after 6. NEXT / IN PROGRESS: step 7, IMPOSTORPBRM1 (brief_impostorpbrm1.md).
 
 # 1. Skills loaded
 nifskope-ww-worktree-build, nifskope-ww-build-verify, nifskope-ww-lodgen, nifskope-ww-render-shot,
@@ -106,6 +106,20 @@ ww-test-harness-add, search-lean (the common rules' list, loaded with the Skill 
   docs/LODGEN_CARD_SHEETS.md say the ring is an option. No exe change (script and docs only).
 - New gate row R7 in tests/spells/impostor_ring.sh: it runs the driver itself with MAX=0 (nothing is
   photographed) and reads its library.txt.
+
+## Step 6c -- G4 re-pinned: DIRECTOR DECISION (a), 2026-09-25 (not a ruling by bungo)
+- The director's decision, with its reasoning: re-pin G4's bar to the codec floor measured on the SAME
+  sheet (its normal R/G channels, 3.266 / 12 on the elm), plus the margin of the skill
+  ww-preregister-bar-from-the-subject, and state it in the gate as "bar = codec floor of the sheet's other
+  channels, measured". The BC7 weights are NOT changed: option (b) would move every card's normals for a
+  sway error of about 1.4 % of full scale, which nobody can see. A red must still fail.
+- tests/spells/impostor_wind.py/.sh (fix31_g4_repin.py): the bar is computed in the run from that run's
+  normal R/G error, x 1.25 on the mean and x 1.25 rounded up on the p95. If the floor was not measured
+  (empty, or a mean under 0.5), G4 fails by name; it never falls back to a constant. Two red controls must
+  fail the same bar: the next frame's picture, and the sway channel corrupted to 4 bits
+  (floor(A/16)*16+8, a codec about twice as coarse as BC7's own error here).
+- Which check the first bar skipped (skill check 3): 3.0 / 12 was copied from the synthetic input
+  (1.34 / 4) onto the real one. Red run kept: gates/impostor_wind.run3.out.
 
 # 3. Gates (numbers; red runs)
 
@@ -229,6 +243,12 @@ Output: gates/cardres_test.out (pictures under cardres/, not committed).
   run with no RING writes `ring 0`; RING=16 writes `ring 16`; RING=5 exits 2 naming the rule. RED: the
   step-5 driver (git 1303334, pulled out beside the real one and removed afterwards) wrote `ring 16`.
 
+## Step 6c (exe 309f3aa9, unchanged; gates/impostor_wind.run4.out = 28 checks, 0 failures, PASS)
+- G4 elm: sway error mean 3.573 p95 13 (max 88), 93533 covered texels. Floor (normal R/G) 3.266 / 12 ->
+  bar 4.082 / 15: ok. RED 1, the next frame: 51.099 > 4.082. RED 2, the 4-bit sway: mean 6.702 fails.
+  The synthetic Hero set for comparison: 1.281 / 4 against its own R/G floor 4.992 / 16.
+- G1-G3 unchanged from run 3 (same exe, same bake).
+
 # 4. Exe sha1 + commits
 - rung / first build: release/NifSkope.exe 97716e4988e493f7b0eab6952780ac18aca0a609 (21:43:55),
   kept as release/NifSkope.before_cardfix1.exe.
@@ -237,8 +257,8 @@ Output: gates/cardres_test.out (pictures under cardres/, not committed).
 - step 5 build: eaa4b0b60e9ff6796df846f54ebf292a94cc0aca (23:00:20), 24,729,600 B; kept as
   release/NifSkope.s5_eaa4b0b6.exe (the step-6 gates' previous exe).
 - commits: step 1 19c0347; step 2 91ddd41 (evidence only); step 3 d8302c9; step 4 7896ad1;
-  step 5 1303334 (code) + 6c5f5f8 (DONE); step 6 24e7835 (code, gate, DONE); step 6b = the commit carrying
-  this text.
+  step 5 1303334 (code) + 6c5f5f8 (DONE); step 6 24e7835 (code, gate, DONE); step 6b 6430dff; step 6c = the
+  commit carrying this text (G4 re-pin + run4).
 - step 6 builds: 0eeade3a (23:59:42, first); 309f3aa9a09897da12c94db644ff70f57f33dc7b (2026-09-25 00:22:33,
   24,737,280 B; + the ring array file name, fix24) = the exe every step-6 number is from.
 
