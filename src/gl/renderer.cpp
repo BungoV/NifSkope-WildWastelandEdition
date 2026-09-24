@@ -325,8 +325,25 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 	 * either of those programs is stale. */
 	const bool stalePbrmHint = hint
 		&& ( ( pbrmProgramSeen && hint == pbrmProgramSeen ) || ( routeProgramSeen && hint == routeProgramSeen ) );
+	/* Weather fog (lane FOG1) has its own program, fo4_fog.prog: the same
+	 * fo4_default.frag with WW_FOG defined. With the fog code merely present and
+	 * fogOn false, the driver compiled fo4_default differently -- 783 px of the
+	 * legacy zero set moved (GRailCurveR01, alpha-test edges, up to 56 levels).
+	 * So fo4_default.prog stays the pre-fog shader, and the fog program is swapped
+	 * in by name only while this draw fogs (a hint is swapped either way). */
+	auto fogVariant = [&]( Program * p ) -> Program * {
+		const bool isFog = p->name == std::string_view( "fo4_fog.prog" );
+		if ( !isFog && p->name != std::string_view( "fo4_default.prog" ) )
+			return p;
+		// red fognoswap: never swap, so the legacy path cannot fog
+		const bool want = wwLookdevFogWanted( mesh->scene ) && !wwLookdevRed( "fognoswap" );
+		if ( want == isFog )
+			return p;
+		Program * q = useProgram( want ? "fo4_fog.prog" : "fo4_default.prog" );
+		return q ? q : p;
+	};
 	if ( hint && hint->status && !stalePbrmHint ) [[likely]] {
-		Program * program = hint;
+		Program * program = fogVariant( hint );
 		fn->glUseProgram( program->id );
 		currentProgram = program;
 		bool	setupStatus;
@@ -354,8 +371,9 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 		}
 	}
 
-	for ( Program * program = programsLinked; program; program = program->nextProgram ) {
-		if ( !program->conditions.isEmpty() && program->conditions.eval( nif, iBlocks ) ) {
+	for ( Program * scanned = programsLinked; scanned; scanned = scanned->nextProgram ) {
+		if ( !scanned->conditions.isEmpty() && scanned->conditions.eval( nif, iBlocks ) ) {
+			Program * program = fogVariant( scanned );
 			fn->glUseProgram( program->id );
 			currentProgram = program;
 			bool	setupStatus;

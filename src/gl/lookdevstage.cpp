@@ -368,6 +368,24 @@ QString fogSummary()
 
 } // namespace
 
+bool wwLookdevFogWanted( Scene * scene )
+{
+	if ( !scene || !scene->renderer )
+		return false;
+	LdState & s = st();
+	const bool leak = !s.fog && wwLookdevRed( "fogleak" );
+	const bool perspective = scene->renderer->globalUniforms->projectionMatrix[3][3] != 1.0f;
+	bool on = ( s.fog || leak ) && wwLookdevActive() && perspective && !scene->selecting;
+	if ( on ) {
+		resolve();
+		if ( !s.haveWeather ) {
+			on = false;
+			s.fogLast = QStringLiteral( "refused(no weather)" );
+		}
+	}
+	return on;
+}
+
 void wwLookdevFogUniforms( Scene * scene )
 {
 	if ( !scene || !scene->renderer )
@@ -377,16 +395,7 @@ void wwLookdevFogUniforms( Scene * scene )
 	if ( !prog || prog->uniLocation( "fogOn" ) < 0 )
 		return;
 	LdState & s = st();
-	const bool leak = !s.fog && wwLookdevRed( "fogleak" );
-	const bool perspective = r->globalUniforms->projectionMatrix[3][3] != 1.0f;
-	bool on = ( s.fog || leak ) && wwLookdevActive() && perspective && !scene->selecting;
-	if ( on ) {
-		resolve();
-		if ( !s.haveWeather ) {
-			on = false;
-			s.fogLast = QStringLiteral( "refused(no weather)" );
-		}
-	}
+	const bool on = wwLookdevFogWanted( scene );
 	prog->uni1b( "fogOn", on );
 	if ( !on )
 		return;
@@ -419,7 +428,7 @@ void wwLookdevFogUniforms( Scene * scene )
 	prog->uni1i( "fogRed", ( wwLookdevRed( "fogmaxclamp" ) ? 1 : 0 ) | ( wwLookdevRed( "fognoescape" ) ? 2 : 0 )
 		| ( wwLookdevRed( "fogheight0" ) ? 4 : 0 ) );
 	s.fogLast = QString( "on(groundz=%1 scale=%2%3)" ).arg( double( s.groundZ ), 0, 'f', 2 ).arg( double( sc ), 0, 'g', 6 )
-		.arg( leak ? QStringLiteral( " leak" ) : QString() );
+		.arg( !s.fog ? QStringLiteral( " leak" ) : QString() );	// on with the row off = the fogleak red
 }
 
 bool wwLookdevActive()

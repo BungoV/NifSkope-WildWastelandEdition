@@ -284,6 +284,13 @@ static QByteArray loadShaderFile( const QString & filepath, int includeDepth = 0
 		throw QString( "couldn't open %1 for read access" ).arg( filepath );
 
 	QByteArray	data = file.readAll();
+	/* An INCLUDED file loses its own #version line (lane FOG1), so a variant can
+	 * be `#version`, a `#define`, then `#include` of a whole shader: fo4_fog.frag
+	 * is fo4_default.frag with WW_FOG defined. No shipped include starts with one. */
+	if ( includeDepth > 0 && data.startsWith( "#version" ) ) {
+		const qsizetype	eol = data.indexOf( '\n' );
+		data.remove( 0, eol < 0 ? data.size() : eol + 1 );
+	}
 	qsizetype	n = 0;
 	while ( n < data.size() && ( n = data.indexOf( '#', n ) ) >= 0 ) {
 		qsizetype	includePos = n;

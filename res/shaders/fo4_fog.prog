@@ -1,0 +1,5 @@
+# fo4_default with the Lookdev weather fog compiled in (lane FOG1). No conditions:
+# the condition scan never picks it; Renderer::setupProgram swaps it in by name
+# for fo4_default.prog while the draw fogs.
+
+shaders fo4_default.vert fo4_fog.frag
