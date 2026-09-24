@@ -31,6 +31,14 @@ ww-test-harness-add, search-lean (the common rules' list, loaded with the Skill 
   (main release/NifSkope.before_impostorshrub1.exe, 09-23 03:01, copied as release/NifSkope.pre_shrub1.exe).
 - No code change in this step. Evidence script: step2.sh (impostor_shrubs.sh with MATCH per model).
 
+## Step 3 -- IMPOSTORFIX5's owed re-runs
+- impostor_draw.sh: re-run in step 1 on this lane's exe, 33 steps / 1 failure (row 5, the known red).
+- cardres_test.sh (FIX5's frame-resolution discriminator, re-pointed at this worktree): run on exe ff86b488.
+  A measurement, not a gate (FIX5 set no bar; the ruling on card resolution is bungo's).
+- SHRUB1's "texel islands at el 20" (cedar01/02, hollyshrub01prewar): NOT measured -- not cheap (needs a new
+  picture-based instrument). Step 4 below takes the stipple out of the DEFAULT draw by name, which is the
+  class SHRUB1 suspected; if islands remain at the crisp end they are the frame's own coverage.
+
 # 3. Gates (numbers; red runs)
 
 ## Step 1 (exe 97716e49, the worktree's first build = the rung, before the comment rebuild)
@@ -56,6 +64,18 @@ Outputs: gates/*.new.out, gates/lodgen_defaults_d_maincards.out.
 | shrubgrouplarge05 | 212,521 (halfW 405.21), S3 ok | 0, S3 FAIL |
 The full 54-model impostor_shrubs.sh run of step 1 (RESULT PASS, 0 empty) covers the same three.
 Outputs: gates/step2_<model>.<new|red>.out.
+
+## Step 3 (exe ff86b488; orbit IoU vs the mesh, 16 bake directions, WW_IMPOSTOR_BLEND=0)
+| subject | FIX5 (exe c529e3c1) | this exe |
+|---|---|---|
+| maple (TreeMapleForest2) at the full 128 long side, no ladder | 0.5022 (64x128 frames) | 0.4651 |
+| maple, FIX5's ladder-rung fixture (32x64) | 0.4673 | 0.4072 |
+| blast (TreeMapleblasted05) re-baked full size | 0.8701 | 0.9074 |
+| blast, FIX5's fixture | 0.8701 | 0.8847 |
+Same exe, full size vs ladder: maple +0.058, blast +0.023 -- FIX5's finding holds (the ladder rung is a real
+part of the maple's gap, not all of it). The FIX5-era fixtures read differently on this exe (maple -0.060,
+blast +0.015): the drawer moved since c529e3c1 (AA4, DEPTH2 crisp end), so only same-exe pairs compare.
+Output: gates/cardres_test.out (pictures under cardres/, not committed).
 
 # 4. Exe sha1 + commits
 - rung / first build: release/NifSkope.exe 97716e4988e493f7b0eab6952780ac18aca0a609 (21:43:55),

@@ -3,3 +3,5 @@
 22:24:55 step1 build ff86b488 BUILD-RC=0; committing
 22:25:01 step1 COMMITTED 19c0347; step2 start
 22:27:14 step2 new 3/3 covered (43531/40952/212521), red pre-SHRUB1 0/0/0
+22:27:20 step3 cardres_test start
+22:29:36 step3 cardres: maple_full 0.4651 blast_full 0.9074 | same-exe ladder fixtures maple_n4 0.4072 blast_n4 0.8847; step4 patch applied, building

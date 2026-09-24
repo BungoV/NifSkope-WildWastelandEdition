@@ -1,0 +1,17 @@
+== maple at the FULL 128 long side (no ladder)
+  bake rc=0 tile=128
+  sidecar: oct 4 64 128 440.283 880.567 93.1789 66.2978 886.405 3072 legacy 128 spec1
+  lodgen rc=0
+lodgen: card 0004a074: oct height repaired: 2415 whole kept, 14901 partial filled from the nearest whole texel, 50173 outside inside the 16-ring ramp carried the object's height faded towards the card plane, 63583 outside set to the card plane; self-check PASS (no covered texel decodes outside its frame's depth)
+  sheets: 5
+== blast re-baked the same way, the route control (it was already full size)
+  bake rc=0 tile=128
+  sidecar: oct 4 48 128 135.228 360.608 -70.6223 -38.6729 342.457 3072 legacy 128 spec1
+  lodgen rc=0
+lodgen: card 000531b3: oct height repaired: 7103 whole kept, 3896 partial filled from the nearest whole texel, 62790 outside inside the 16-ring ramp carried the object's height faded towards the card plane, 24515 outside set to the card plane; self-check PASS (no covered texel decodes outside its frame's depth)
+  sheets: 5
+== the same 16-direction known-answer control
+maple_full             coverage cut: vanilla's LOD alpha test 128/255 = 0.5020 (the set's floor would be 16/255 = 0.0627) orbit iou mean 0.4651 orbit counted 16 of 16 rc=0
+blast_full             coverage cut: vanilla's LOD alpha test 128/255 = 0.5020 (the set's floor would be 16/255 = 0.0627) orbit iou mean 0.9074 orbit counted 16 of 16 rc=0
+maple_n4_fixture       coverage cut: vanilla's LOD alpha test 128/255 = 0.5020 (the set's floor would be 16/255 = 0.0627) orbit iou mean 0.4072 orbit counted 16 of 16 rc=0
+blast_n4_fixture       coverage cut: vanilla's LOD alpha test 128/255 = 0.5020 (the set's floor would be 16/255 = 0.0627) orbit iou mean 0.8847 orbit counted 16 of 16 rc=0
