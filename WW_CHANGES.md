@@ -1,5 +1,24 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## LOD gates that were already red, now green (GATEFIX1)
+
+- **2026-09-25 GATEFIX1 (lane, Opus 5.5): three LOD gates green again, no code changed.**
+  - `tests/baselines/stock_baseline.sha256` is regenerated on dca43d83. It had moved twice, and both
+    moves are rulings: the NiAlphaProperty threshold now follows the BGSM alpha ref (bungo 2026-09-18,
+    "Alpha test 80 looks better"), and CELLVIEW2b resolves absolute build-path BGSMs.
+  - `tests/spells/native_open.sh` runs every window in its own wiped `WW_SETTINGS_SCOPE`. It had been
+    measuring the operator's saved view, not the exe.
+  - `tests/spells/lodgen_btofree.sh` is re-pinned to `before_gatefix1`. The old pin predated nine ruled
+    moves (EditorMarker exclusion, .lodi v6/v7, the horizon stream in and out, CELLVIEW2b, the alpha
+    ref, DEFAULTS2 blend edges, BLENDSEAM1).
+  - A rung that writes the native cache now has it compared byte for byte, no longer excluded.
+  - The ledger's drop mode works; it had crashed since 09-17 without anyone seeing. It checks the
+    bto clause, the layout count and the end line against the moved manifest.
+  - Census rows are compared through `lodb_read.normalise()`.
+  - `--generators-differ` checks that the VTFIX1 generator word moved every chunk's inputs.
+  - Refuters: `scratchpad/gatefix1_20260924/ledger_refute.py` 8/0. The gate is 30/0 on the pin and
+    30/0 against a byte-padded exe.
+
 ## Native LOD files link the tree cards (CARDLINK1)
 
 **2026-09-24, lane CARDLINK1: the native pair carries its cards (NOT FLOWN).**

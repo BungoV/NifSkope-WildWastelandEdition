@@ -5,6 +5,18 @@ Written the moment a mistake is recognised, unprompted (CONSTITUTION rule 2).
 Format: date -- what was done -- what was true -- how it was found -- the rule.
 Newest at the top.
 
+## 2026-09-25 -- lane GATEFIX1 (lane text)
+
+- **2026-09-24 GATEFIX1: a harness leg that had never run was counted as a guard.** The btofree ledger
+  drop mode had crashed with an AttributeError on every call since AUDIT1 (09-17): shape() was changed to
+  return text, and drop mode still handed that text to a function that expects a dict. Nobody saw it,
+  because the old rung wrote a version 1 record and the leg printed SKIP before reaching the call.
+  **Rule:** when a pin moves, or a skip condition stops holding, run the newly reachable legs against
+  mutated inputs before trusting their verdict. A leg that has only ever skipped has proved nothing.
+- **2026-09-24 GATEFIX1: one settings-scope wipe per run is not isolation.** The first native_open fix
+  wiped the scope once. The first window then saved its layout into the scope, and the second window
+  opened 2 rows shorter, which refused leg (c) on a size mismatch. Wipe before every window.
+
 ## 2026-09-24 -- lane CARDLINK1 (lane text)
 
 **2026-09-24, CARDLINK1: a gate helper looked for the wrong card-set file.** It globbed `<formid>_oct.lodm` in the card bake driver's output. That file is only written beside a chunk that places the card. The driver writes `<formid>_oct_albedo.png` and its siblings. It was caught before the first run, by listing the output by suffix. Rule: list what a producer actually wrote before a gate names its files.

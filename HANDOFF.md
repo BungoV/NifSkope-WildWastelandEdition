@@ -60,6 +60,25 @@ committed" or names an exe, this block overrides it.
 - Re-run the command-line bakes since 09-19 that used --data-root.
 
 ### Lane and director lines, 2026-09-24, newest first
+- 2026-09-25 01:22 GATEFIX1:
+  **2026-09-25 01:0x GATEFIX1 (lane, Opus 5.5) -- DONE.** Branch gatefix1-20260924 (from b2f3073): 3e343a8,
+  d0a8e55, 1d2c769. Not merged. Exe dca43d83 = b2f3073 unmodified; no source code changed.
+  - Three LOD gates that were red are green again: stock_baseline.sha256, native_open.sh and lodgen_btofree.sh.
+    None of the reds was a generator defect.
+    - The baseline and the btofree pin were stale. Nine ruled moves are named rung by rung in
+      scratchpad/gatefix1_20260924/DONE.md.
+    - native_open inherited bungo's saved settings (water drew white).
+    - The new btofree pin exposed three harness defects: a stale .lodj exclusion, a ledger drop mode that
+      had crashed since 09-17 unseen, and census rows compared without the record's own volatile mask.
+  - **Overseer action:** copy E:\Projects\NifskopeWWE-gatefix1\release\NifSkope.before_gatefix1.exe (sha1
+    dca43d83) into main's release/. lodgen_btofree's new default pin needs it; without it the byte legs skip.
+  - Kept green on dca43d83:
+    - lodgen_native 32/0
+    - lodgen_cardlink PASS (with the cardlink1 RUNG/CARDS)
+    - lodgen_incremental 0 failures
+    - lodgen_loadorder 24/0
+    - lod_generation 128 checks
+  - Trap: lodgen_incremental rewrites the tracked scratchpad/incr_gate_work/* when it runs. Never commit those.
 - 2026-09-24 22:55 CARDLINK1:
   **Lane CARDLINK1 (LOD-C), 2026-09-24, branch cardlink1-20260924. Not merged, NOT FLOWN.**
   A `--native --impostors <cards> --arrays` bake now links its card arrays into the pair:
