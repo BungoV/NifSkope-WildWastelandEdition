@@ -1,6 +1,6 @@
 ---
 name: nifskope-ww-pbr-shade-ab
-description: Prove a NifSkope Wild Wasteland Edition renderer change leaves the legacy picture untouched, or aim a PBR gate, with the two PBR harnesses -- tests/spells/pbr_shade_ab.sh (OLD rung folder vs NEW release/, pixel zero set + program/camera/PBRM census) and tests/spells/pbr_r1_gates.sh (the loose PBR test folder: coverage, route vs an independent Python resolver, read-back F0, .nifx round trip, direct link, texture failure, route view). Also the weather preview gates (tests/spells/pbr_wx1_gates.sh: sky dome, sun, clouds, moon). Use for every PBR renderer lane (PBRR*), for any change to shaders/, glproperty.cpp, renderer.cpp or the PBRM resolver, and whenever a new toggle must be shown pixel-identical in its OFF state.
+description: Prove a NifSkope Wild Wasteland Edition renderer change leaves the legacy picture untouched, or aim a PBR gate, with the two PBR harnesses -- tests/spells/pbr_shade_ab.sh (OLD rung folder vs NEW release/, pixel zero set + program/camera/PBRM census) and tests/spells/pbr_r1_gates.sh (the loose PBR test folder: coverage, route vs an independent Python resolver, read-back F0, .nifx round trip, direct link, texture failure, route view). Also the weather preview gates (tests/spells/pbr_wx1_gates.sh: sky dome, sun, clouds, moon) and pbr_fog1_gates.sh (the weather fog: CLI, shader probes, distance scale). Use for every PBR renderer lane (PBRR*), for any change to shaders/, glproperty.cpp, renderer.cpp or the PBRM resolver, and whenever a new toggle must be shown pixel-identical in its OFF state.
 ---
 
 # NifSkope WW: the PBR shade A/B and the R1 gates
@@ -131,6 +131,29 @@ bash tests/spells/pbr_wx1_gates.sh --out ... --only sky,skypx,probe,lit,off,pers
 * `( : >> release/NifSkope.exe )` succeeding does NOT mean the exe is free to link: the
   link still died "Permission denied" with a harness on it. Rename it aside whenever any
   NifSkope runs from `release/`.
+
+## 2d. The FOG1 gates: `pbr_fog1_gates.sh` + `pbr_fog1_gates.py` (lane FOG1)
+The WTHR fog in the Scene popup (the Fog row). The judge re-derives every number from the
+plugin bytes with the WX1 judge's decoder, CIELab and clock (imported, never the app).
+```bash
+bash tests/spells/pbr_fog1_gates.sh --out "$PWD/scratchpad/<lane>/fog1"           # 59 checks
+bash tests/spells/pbr_fog1_gates.sh --out ".../fog1_red_<n>" --red <n>            # must FAIL
+```
+* Sections: `fog` (`weather --fog --fog-probe "d,z;..."`: FNAM/NAM4 as read, day weight,
+  blended FNAM, the 4 colours, cb12[41..46], every probed fragment), `alpha`/`colour`/
+  `height` (`WW_LOOKDEV_FOGPROBE=d,z,mode`: every fogged fragment writes the value RAW,
+  mode 1 alpha, 2 colour/2, 3 height blend; the judge reads the bottom quarter's dominant
+  colour), `geo` (mode 5 writes R = d/4096, G = 0.5 + z/2000: ground at G 127/128, and
+  straight down at x 2000 from 1000 then 2000 units R moves 63 -> 126 = the distance
+  scale), `sky`, `near`, `seen`, `off` (vs `release/before_fog1`, pinned + unpinned),
+  `live` (`WW_SCENE_TEST_FOG=1`), `pics` (not judged).
+* Reds: `WW_LOOKDEV_RED=fogext05 fogpower1 fognoblend fognogamma fognonam4 fognear0
+  fogmaxclamp fognoescape fogheight0 fogleak fogsky`, `WW_R2A_RED=nolive nosave`.
+* The lookdev ground is an ~8192-unit quad (`kGroundHalf` 4096). A top-down framing
+  centred beyond it shows the Lookdev cube, not ground -- keep geometry probes inside
+  x,y < ~3000. Axis views (VIEW 1..6) are perspective under the pin.
+* Vanilla day fog starts at 3000 units, so at view 8 the fog barely shows on the preview
+  ground (noon: 0 px differ; night: 1 level). Look at it from `WW_RENDER_DIST=20000`.
 
 ## 3. Known gaps
 * `-no-gui pbrm-resolve` finds no resources at all (not even vanilla BGSMs) even with
