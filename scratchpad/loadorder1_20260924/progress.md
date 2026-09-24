@@ -40,3 +40,6 @@
 - G5 therefore bakes a COPY of his profile with exactly the refused plugins unticked (checker `untick`):
   bake rc 0 in 6 s, Commonwealth.lodb lists 46 plugins, BNS Trees.esp and TrueGrass.esp by full mod path,
   plugin 0 Data/Fallout4.esm. Rung red: `error opening input file "HUDFramework.esm"`. 6 checks, 0 failures.
+- 21:30 kept-green: resources 4/0 PASS; bakerec FAIL only (f) 2 of 12 stock files vs the OLD rung before_bakerec1 -- (f) vs this lane's rung PASS 12 identical (pre-existing drift, not mine); defaults 31/1, the (d) C-line floor, same FAIL on this lane's rung (pre-existing).
+- 21:30 SCOPE CHANGE from the director: panel MO2-profile input REQUIRED + output/R2 questions + panel gates.
+- 21:36 panel leg built 21:36:07 BUILD-RC=0 (nifskope_ui.o + lodgenmanager.o), exe sha1 c7a96c2fcbb7b5ff86d616c45e424da45fcf11b3. Source row: 3rd choice 'Mod Organizer 2 profile' + Profile / Mods folder rows + read-only 'Mod order' list; self-test leg WW_LODGEN_MO2DISK; spell lodgen_panel_mo2.sh.
