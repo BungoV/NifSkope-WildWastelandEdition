@@ -1,4 +1,6 @@
-PARTIAL -- lane CARDFIX1 (LOD-D), chain of seven steps; this file grows one section per landed step.
+PARTIAL -- lane CARDFIX1 (LOD-D), chain of seven steps. Steps 1-5 landed; step 6 (sway A) built, committed and
+gated, RED on G4 only (the BC7 error bar, pre-registered from the synthetic; decision owed, section 3). NEXT:
+step 7, IMPOSTORPBRM1 (brief_impostorpbrm1.md), not started: the brief forbids a step on a red one.
 
 # 1. Skills loaded
 nifskope-ww-worktree-build, nifskope-ww-build-verify, nifskope-ww-lodgen, nifskope-ww-render-shot,
@@ -68,6 +70,30 @@ ww-test-harness-add, search-lean (the common rules' list, loaded with the Skill 
   N8 grid, the empty-slot run keeps the grid); the numbers above argue for his second look.
 - Owed: lodgenaggregate learning the ring (refused by name today); the panel's Card frames row and
   cardsOnDisk ignore ring sets; the FO4CS reader.
+
+## Step 6 -- IMPOSTORWIND1 job 3: sway A (the tree's OWN wind weights in the card)
+- The bake reads the model's raw vertex alpha (the only wind input the game's tree shader reads) through
+  channel 11 G, only on shapes with the tree-animation flag (0 elsewhere): res/shaders/fo4_default.vert/.frag,
+  the raw vertex alpha pass only. The card hook writes `_n.A = W x h` (W that weight, h linear from the
+  view's own coverage bottom row) on a model with a tree-animation shape, else the synthetic
+  h^2 x (0.35 + 0.65 r) byte for byte; the sidecar says `sway model|synthetic` (src/nifskope_ui.cpp).
+- lodgen writes `lodm` 2 on a card / card array carrying model sway, with `sway` "model" and the base's own
+  `leafAmplitude` / `leafFrequency` (arrays: parallel lists); everything else stays 1 (src/lodgen.cpp card
+  regions). The reader accepts 2 on the card family only and refuses a source claiming 2 by name
+  (src/io/lodmfile.cpp). Contract: docs/LODGEN_LODM_FORMAT.md 3.3, LODGEN_IMPOSTOR_SPEC.md (owed item 6),
+  LODGEN_CARD_SHEETS.md.
+- The preview harness takes WW_IMPOSTOR_SWAY_AMP / WW_IMPOSTOR_SWAY_PHASE (src/impostorpreviewtest.cpp).
+- A STEP-5 DEFECT found here and fixed (fix24): a ring card array's file name took the group key's `|`
+  ("could not write ...legacy.2304x256|ring_d.DDS"); now `...2304x256.ring_d.DDS`. No step-5 gate had put a
+  ring set through --arrays; the wind gate's G3 does.
+- New gate tests/spells/impostor_wind.sh (+ impostor_wind.py, and impostor_wind_nif.py: an independent
+  rasteriser of the NIF's own per-vertex wind weights, sharing no code with the bake).
+- The GIF (brief): scratchpad/cardfix1_20260924/wind/gif/elm_sway.gif, "3D model" | "Octahedral impostor",
+  12 phases. NifSkope does not animate tree wind on the mesh, so the left panel is STATIC; the right panel is
+  the drawer's sway shear driven by the baked weight. It shows the weight is where the tree moves, not how the
+  game animates it. (untracked: binaries stay out of the public repo)
+- lodgen_octahedral.sh's "lodm 1 card" check was stale (its fixture is a tree, so its card is now lodm 2): it
+  now ties the version to the sidecar's sway line (fix27).
 
 # 3. Gates (numbers; red runs)
 
@@ -144,6 +170,48 @@ Output: gates/cardres_test.out (pictures under cardres/, not committed).
   cheaply in step 1 (19c0347): the gate now fails BY NAME ("the card directory holds no card image ...
   set CARDS=") instead of reporting 0 C lines. Gate dir restored with git checkout afterwards.
 
+## Step 6 (exe 309f3aa9; gates/impostor_wind.run3.out = 27 checks, 1 failure)
+- G1 (the weight is the model's): elm G1a n/a (one shape, all tree-animated: no mask-0 texels; not counted),
+  crown 250 distinct weights, 0.0000 at 255. Maple: A = 0 on 0.9562 of the mask-0 (trunk) texels, 256
+  distinct; pine 0.9735, 247 distinct. RED: the previous exe's synthetic maple has A = 0 on only 0.1188.
+  G1c, against impostor_wind_nif.py's independent W x h reprojection of the NIF: maple frame 0 r 0.8873,
+  error 19.72 <= 33.73; frame 4 r 0.9086, error 21.69 <= 35.76. REDS fail the same bars: the C.a law
+  (255 x h) r 0.7321 / 0.5391, error 67.45 / 71.51; the previous exe's bake r 0.5758 / 0.5008, error
+  55.01 / 48.89. Measured only: elm r 0.8173 err 24.96 (C.a 61.61), pine r 0.6082 err 7.61 (C.a 106.94).
+- G2 (no tree-animation shape = byte-identical): Hero and a rock, 6 files each, 0 differ, the sidecars
+  identical minus the new sway line; Hero says synthetic; its compressed .lodm + DDS byte-identical to the
+  previous exe's (5 same). FLOOR: the maple's normal sheet differs across the exes.
+- G3 (lodm 2, refused by old readers): the elm card is lodm 2, sway model, leafAmplitude 1, leafFrequency 1;
+  its card array is lodm 2 with array.sway ['model']; Hero stays lodm 1. The previous exe refuses the v2
+  card by name ("payload is not a lodm 1 object"); FLOOR: it reads Hero's v1. This exe reads v2, refuses a
+  SOURCE claiming 2 by name, and the preview loads the v2 set.
+- **G4 RED** (BC7 keeps the weight): elm mean 3.573, p95 13 against the pre-registered bar 3.0 / 12. Red
+  control: the next frame's picture reads 51.099. The same sheet's untouched normal R/G read 3.266 / p95 12
+  (Hero's synthetic sway 1.281 / 4, its R/G 4.992 / 16). The bar came from the synthetic sway's 1.34 / 4,
+  never measured on a real weight (MISTAKES text). NOT re-pinned. **Decision owed:** (a) accept at the
+  measured level (the sway channel then costs what BC7 already costs the normal), or (b) raise the BC7 alpha
+  weight for model-sway sets (kCardNormalBc7Weights {1,1,32,1}, src/lodgen.cpp ~4764; plumbed through
+  lodgenWriteDds), which costs normal/height precision and must be measured first.
+- Runs 1-2 (gates/impostor_wind.run1/run2.out): run 1 died at the first compress (`$1` after `shift 2`,
+  set -u) and counted G1a elm as a failure; run 2 found the ring array's `|` file name (fixed, fix24).
+- The arrays route in G3 returns rc 1 ("2 chunk(s) written ..., 1 failed"): the chunk TEXTURE-array stage
+  looks for the stock front/side card (`materials/fo4cslod/cards/000531b3_fs.lodm`) in the resource stack,
+  and the gate's card folder is not a data folder. The card arrays themselves are written ("1 card sets in
+  4 arrays, 0 unreadable") and G3 reads them. A fixture limit of the route, not the sway path; not chased.
+- Kept green on 309f3aa9 (gates/*.s6*.out): impostor_ring 13 / 0; impostor_trunk 38 / 3, the three named;
+  impostor_draw row 5 only (the known red); impostor_aa 7 / 0; impostor_defaults 7 / 0 with RUNG (D7
+  byte-identical at 16 views); impostor_shrubs PASS (0 empty); lodgen_card_arrays PASS 37 ok;
+  lodgen_impostor_cards PASS 12 ok; lodgen_octahedral 115 / 1 on the stale "lodm 1 card" premise (its
+  fixture is a tree), PASS after fix27 (s6b).
+- pbr_shade_ab (fo4_default.vert/.frag changed): **10 cases, 0 failures, PASS** (s6c; census moves effect,
+  lit, particles; 3 particle cases empty by the viewer, as the harness classifies them). OLD arm =
+  release/before_pbrr0 built from the step-5 exe + the pre-step-6 shaders (git HEAD). Two refused runs
+  before it: s6 had no OLD arm; s6b's OLD arm lacked its DLLs (my copy, rc 127 on every OLD picture).
+- The GIF: wind/gif/elm_sway.gif, 12 frames 1020 x 1030, "3D model" | "Octahedral impostor", amplitude 0.08,
+  az 30 el 5. Card coverage moves 0.0370 .. 0.0422 across the phases (the shear is live); IoU vs the static
+  mesh 0.42 .. 0.46. Run 1 drew the card blank: the sheets need a `textures\` tree beside the .lodm for the
+  preview's texture cache (the log said so by name); wind_gif.sh now builds one.
+
 # 4. Exe sha1 + commits
 - rung / first build: release/NifSkope.exe 97716e4988e493f7b0eab6952780ac18aca0a609 (21:43:55),
   kept as release/NifSkope.before_cardfix1.exe.
@@ -152,7 +220,9 @@ Output: gates/cardres_test.out (pictures under cardres/, not committed).
 - step 5 build: eaa4b0b60e9ff6796df846f54ebf292a94cc0aca (23:00:20), 24,729,600 B; kept as
   release/NifSkope.s5_eaa4b0b6.exe (the step-6 gates' previous exe).
 - commits: step 1 19c0347; step 2 91ddd41 (evidence only); step 3 d8302c9; step 4 7896ad1;
-  step 5 1303334 (code) + this DONE commit.
+  step 5 1303334 (code) + 6c5f5f8 (DONE); step 6 = the commit carrying this text (code, gate, DONE together).
+- step 6 builds: 0eeade3a (23:59:42, first); 309f3aa9a09897da12c94db644ff70f57f33dc7b (2026-09-25 00:22:33,
+  24,737,280 B; + the ring array file name, fix24) = the exe every step-6 number is from.
 
 # 5. What the final bake needs
 (filled at the end)

@@ -580,7 +580,12 @@ check('the .lodm envelope is LODM v1 with an exact payload size', b[:4] == b'LOD
 lm = json.loads(b[12:])
 print('  lodm: %s' % json.dumps(lm, separators=(',', ':'))[:200])
 game = 'Data\\FO4CSLOD\\Cards\\' + ident + '_oct'
-check('the .lodm is a lodm 1 %s card' % fam, lm.get('lodm') == 1 and lm.get('family') == fam and lm.get('kind') == 'card')
+swayLine = [l.split() for l in open(f'{d}/{ident}.txt').read().splitlines() if l.startswith('sway ')]
+swayWord = swayLine[0][1] if swayLine else 'synthetic'
+wantVer = 2 if swayWord == 'model' else 1
+check('the .lodm is a lodm %d %s card (the sidecar says sway %s; lodm 2 = model sway)' % (wantVer, fam, swayWord),
+      lm.get('lodm') == wantVer and lm.get('family') == fam and lm.get('kind') == 'card'
+      and ( lm.get('sway') == 'model' if wantVer == 2 else 'sway' not in lm ))
 tex = lm.get('textures', {})
 check('the .lodm names the four sheets under the family\'s keys', tex.get(colorKey) == game + colorSfx + '.DDS' and tex.get('normal') == game + '_n.DDS' and tex.get(maskKey) == game + maskSfx + '.DDS' and tex.get('emissive') == game + emiSfx + '.DDS')
 oct = [l.split() for l in open(f'{d}/{ident}.txt').read().splitlines() if l.startswith('oct ')][0]

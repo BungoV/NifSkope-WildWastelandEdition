@@ -481,7 +481,7 @@ Formats and channel roles are the `.lodm` family contract
 | colour A | **coverage**, from a two-pass matte over black and white: `coverage = 1 − (passes' difference)` |
 | normal R, G | the geometric normal in the **VIEW's** space, back faces flipped, half-packed. Opposite views differ; top and horizon agree |
 | normal B (height) | window depth of the orthographic bake. **0.5 is the card plane**; `units = (B − 0.5) × depthSpan`, with `depthSpan = 3 × max(boundRadius, 1024)`. Drives pixel depth offset, ghost-free frame blending, shadows and the model-to-card transition. Stored **BC7** since 2026-09-23 (§6.1) |
-| normal A (sway) | `h² × (0.35 + 0.65·r)`, `h` up from the view's own bottom row, `r` the radius from the silhouette's axis; **explicit 0 for rigid objects** |
+| normal A (sway) | a model with a tree-animation shape: **`W × h`**, `W` its own vertex-alpha wind weight (channel 11 G; 0 on a shape the game never moves), `h` linear up from the view's own bottom row -- sway A, `lodm` 2 (CARDFIX1 step 6). Otherwise `h² × (0.35 + 0.65·r)`, `r` the radius from the silhouette's axis; **explicit 0 for rigid objects** |
 | mask R, G | legacy: gloss = smoothness × the `_s` map's G, specular = the `_s` map's R × specular strength, **never inverted**. pbr: the source `.lodm`'s third texture **raw** |
 | mask B (AO) | from the height neighbourhood — the share of neighbours nearer the camera by more than a step, eight directions, four rings — multiplied by the third texture's own B when a `.lodm` supplied one |
 | mask A (subsurface) | a material **label**. 1 where any shape of the model carries the engine's tree-animation flag, else 1 where the shape is alpha-tested and 0 where opaque. The sidecar says which rule ran (`mask tree` \| `mask alpha`) |

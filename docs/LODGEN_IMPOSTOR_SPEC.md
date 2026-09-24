@@ -223,7 +223,11 @@ change, in order: (1) layout from `views`/`grid` when `oct` is absent, frame
 `φ = 2πv/V`, right `(−sin φ, cos φ, 0)`, up `(0, 0, 1)`; (3) selection = the two
 frames bracketing the camera azimuth, weights `1 − t`, `t` by angle, no
 elevation term; the crisp end draws the stronger alone; (4) `frameOffset` is
-`2·V` long, view `v` at `[2v]`; (5) a `cardArray` carries the same keys.
+`2·V` long, view `v` at `[2v]`; (5) a `cardArray` carries the same keys;
+(6) a card or card array at `lodm` 2 (`sway` "model", CARDFIX1 step 6) holds
+the model's own weight × h in `_n.A`, not the synthetic law: FO4CS refuses it
+by name until its reader drives the card's wind from that weight and the
+`leafAmplitude` / `leafFrequency` beside it.
 NifSkope's drawer (`src/gl/impostordraw.cpp`, `selectFrames` ring branch) is
 the reference.
 
@@ -349,9 +353,12 @@ tests low still gets the neighbours' colour there.
   units = (value − 0.5) × depthspan, with depthspan = 3 × max(bound radius,
   1024). Used for pixel depth offset, ghost-free frame blending, shadows and
   the model-to-card transition.
-- sway: h² × (0.35 + 0.65 × r), h up from the view's own bottom row, r the
-  radius from the silhouette's axis; 0 for rigid objects. The chunk builder's
-  law, applied to the picture.
+- sway: **sway A** (bungo 2026-09-24 21:1x) on a model with a tree-animation
+  shape: W × h, W the model's own vertex-alpha wind weight (0 on a shape the
+  game never moves), h linear up from the view's own bottom row; the `.lodm`
+  says `lodm` 2, `sway` "model" (`docs/LODGEN_LODM_FORMAT.md` §3.3). Otherwise
+  h² × (0.35 + 0.65 × r), r the radius from the silhouette's axis; 0 for rigid
+  objects. The chunk builder's law, applied to the picture.
 - R, G of the third sheet: shader channel 10 — the legacy pair composed
   from the vanilla material (above), or a source `.lodm`'s third texture raw.
 - AO: from the height neighbourhood — the share of neighbours nearer the

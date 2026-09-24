@@ -1,0 +1,23 @@
+## Step 6 -- IMPOSTORWIND1 job 3: sway A (the tree's OWN wind weights in the card)
+- The bake reads the model's raw vertex alpha (the only wind input the game's tree shader reads) through
+  channel 11 G, only on shapes with the tree-animation flag (0 elsewhere): res/shaders/fo4_default.vert/.frag,
+  the raw vertex alpha pass only. The card hook writes `_n.A = W x h` (W that weight, h linear from the
+  view's own coverage bottom row) on a model with a tree-animation shape, else the synthetic
+  h^2 x (0.35 + 0.65 r) byte for byte; the sidecar says `sway model|synthetic` (src/nifskope_ui.cpp).
+- lodgen writes `lodm` 2 on a card / card array carrying model sway, with `sway` "model" and the base's own
+  `leafAmplitude` / `leafFrequency` (arrays: parallel lists); everything else stays 1 (src/lodgen.cpp card
+  regions). The reader accepts 2 on the card family only and refuses a source claiming 2 by name
+  (src/io/lodmfile.cpp). Contract: docs/LODGEN_LODM_FORMAT.md 3.3, LODGEN_IMPOSTOR_SPEC.md (owed item 6),
+  LODGEN_CARD_SHEETS.md.
+- The preview harness takes WW_IMPOSTOR_SWAY_AMP / WW_IMPOSTOR_SWAY_PHASE (src/impostorpreviewtest.cpp).
+- A STEP-5 DEFECT found here and fixed (fix24): a ring card array's file name took the group key's `|`
+  ("could not write ...legacy.2304x256|ring_d.DDS"); now `...2304x256.ring_d.DDS`. No step-5 gate had put a
+  ring set through --arrays; the wind gate's G3 does.
+- New gate tests/spells/impostor_wind.sh (+ impostor_wind.py, and impostor_wind_nif.py: an independent
+  rasteriser of the NIF's own per-vertex wind weights, sharing no code with the bake).
+- The GIF (brief): scratchpad/cardfix1_20260924/wind/gif/elm_sway.gif, "3D model" | "Octahedral impostor",
+  12 phases. NifSkope does not animate tree wind on the mesh, so the left panel is STATIC; the right panel is
+  the drawer's sway shear driven by the baked weight. It shows the weight is where the tree moves, not how the
+  game animates it. (untracked: binaries stay out of the public repo)
+- lodgen_octahedral.sh's "lodm 1 card" check was stale (its fixture is a tree, so its card is now lodm 2): it
+  now ties the version to the sidecar's sway line (fix27).

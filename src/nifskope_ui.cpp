@@ -22764,6 +22764,11 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						}
 						wwLodMaskByTree = anyTree ? 1 : 0;
 						ms << "mask " << ( anyTree ? "tree" : "alpha" ) << "\n";
+						/* THE SWAY SOURCE (IMPOSTORWIND1 sway A, bungo 2026-09-24 21:1x): a
+						 * model with a tree-animation shape sways by its OWN wind weight, read
+						 * off channel 11 G; one without keeps the synthetic law. The same test
+						 * the mask rule uses, so the two can never disagree about a model. */
+						ms << "sway " << ( anyTree ? "model" : "synthetic" ) << "\n";
 					}
 
 					/* THE SET'S EMISSIVE MULTIPLE (docs/LODGEN_IMPOSTOR_SPEC.md).
@@ -23661,10 +23666,20 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 													occl++;
 											}
 										const int ao = tested ? 255 - 255 * occl / tested : 255;
-										// sway: h^2 * (0.35 + 0.65 r), h up from the coverage's bottom row
+										/* sway, h up from the coverage's bottom row. SWAY A (IMPOSTORWIND1): a
+										 * model with a tree-animation shape writes W x h, W its own vertex-alpha
+										 * wind weight (channel 11 G, un-premultiplied like the mask; 0 on a shape
+										 * the game never moves). Else the synthetic h^2 * (0.35 + 0.65 r), unchanged
+										 * to the byte. */
 										const float h = float( bottom - y ) / rows;
-										const float rr = qMin( 1.0f, std::fabs( float( x ) - cxCol ) / halfSpan );
-										const int sway = qBound( 0, int( h * h * ( 0.35f + 0.65f * rr ) * 255.0f + 0.5f ), 255 );
+										int sway;
+										if ( wwLodMaskByTree ) {
+											const int w = unp( qGreen( tM.pixel( x, y ) ) );
+											sway = qBound( 0, int( float( w ) * h + 0.5f ), 255 );
+										} else {
+											const float rr = qMin( 1.0f, std::fabs( float( x ) - cxCol ) / halfSpan );
+											sway = qBound( 0, int( h * h * ( 0.35f + 0.65f * rr ) * 255.0f + 0.5f ), 255 );
+										}
 										const QRgb pn = tN.pixel( x, y );
 										normal.setPixel( i * tw + x, j * th + y, qRgba( unp( qRed( pn ) ), unp( qGreen( pn ) ), z, sway ) );
 										/* R, G as the material channel gives them: gloss and

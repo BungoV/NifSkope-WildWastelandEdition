@@ -42,7 +42,8 @@ A reader refuses — naming the field — on:
 4. declared payload > 4,194,304;
 5. declared payload != `fileSize − 12`;
 6. the payload is not well-formed JSON, or is not a JSON **object**;
-7. `lodm` != 1;
+7. `lodm` is neither 1 nor 2; and `lodm` 2 on a kind outside the card family (card, cardArray,
+   aggregate), refused naming the version and the kind (§3.3);
 8. `family` is neither `"legacy"` nor `"pbr"` — **a third family word is a hard
    refusal, not a fallback.** The terrain-VT index used to say `legacy` for that
    reason alone; since 2026-09-11 it says `pbr` and means it (see §5).
@@ -256,14 +257,48 @@ tile would not load (nothing enforces this yet; the driver's TILE default is 256
 At one tile it holds a quarter of an N8 sheet's pixels.
 
 **Card arrays** (section 4) carry the same keys on the array object: a ring set
-groups only with ring sets of its own sheet size (the group key gains `|ring`).
+groups only with ring sets of its own sheet size (the group key gains `|ring`,
+and the file name gains `.ring` after its `WxH`:
+`<ws>.LodgenCards.legacy.2304x256.ring_d.DDS`; until 2026-09-25 the name took the
+key's `|` and the array could not be written at all).
 **The aggregate** (section 3a) composites from grid cards only; a ring set given
 to it is refused by name and counted (`aggregate cards: refused N horizon-ring
 set(s) by name`). Teaching the aggregate the ring is owed.
 
-**The `.lodm` stays version 1.** A reader that does not know `views` on a card
-refuses the set; nothing is misread. Version 2 is reserved for the sway channel's
-model-authored amplitude (lane CARDFIX1 step 6).
+**A ring alone does not move the version.** A reader that does not know `views` on a card
+refuses the set; nothing is misread. Version 2 is the model sway (§3.3).
+
+### 3.3 `lodm` 2 -- the model's OWN sway (2026-09-24, lane CARDFIX1 step 6)
+
+bungo, 2026-09-23: *"sway from the tree's model's own wind weights would be neat"*; RULED 2026-09-24
+21:1x as **sway A**. A card baked from a model that has at least one tree-animation shape (a
+`BSLightingShaderProperty` with the vertex-alpha-animation flag -- the same test that makes the mask
+"tree") writes, per texel,
+
+    _n.A = W x h
+
+`W` the model's own vertex-alpha wind weight at that texel (the only wind input the game's tree vertex
+shader reads; 0 on a shape without the flag, which the game never moves), `h` the linear height up from
+the view's own coverage bottom row. A model with NO tree-animation shape keeps the synthetic
+`h^2 x (0.35 + 0.65 r)`, byte for byte. The bake's sidecar says which: `sway model` or `sway synthetic`.
+
+Because `_n.A` then MEANS something else, the payload version moves, on the card family only:
+
+| key | on | type | meaning |
+|---|---|---|---|
+| `lodm` | card, cardArray | int | **2** when the set (any layer of an array) carries model sway; 1 otherwise, with none of the keys below |
+| `sway` | card | string | `"model"` -- `_n.A` is `W x h` |
+| `leafAmplitude`, `leafFrequency` | card | number | the placed base's own leaf numbers (STAT DNAM / TREE CNAM); both 0 in the record reads as 1 / 1 |
+| `array.sway`, `array.leafAmplitude`, `array.leafFrequency` | cardArray | list | one per layer, parallel to `layers`; a synthetic layer says `"synthetic"` and 1 / 1 |
+
+* **An old reader refuses a v2 card by name** (`payload is not a lodm 1 object`), which is the point:
+  it would otherwise draw a real wind weight under the synthetic law's assumptions.
+* **A SOURCE (or any kind outside card, cardArray, aggregate) claiming 2 is refused by name**:
+  `lodm 2 is the card family's version (...); a "<kind>" .lodm is lodm 1`.
+* The envelope version stays 1.
+* **Owed:** the aggregate (§3a) composites the model weight texel by texel already (§3a.3), but writes
+  no `sway` key and stays 1; teaching it v2 is owed with the ring (lodgenaggregate.cpp is not this
+  lane's). FO4CS's reader is owed (`docs/LODGEN_IMPOSTOR_SPEC.md`, the owed paragraph).
 
 ## 3a. `kind: "aggregate"` — one forested CELL's whole tree cluster on one card set
 
@@ -361,6 +396,7 @@ from, which is the same rule applied where the rule means something.
 | `layers` | `array` | string[] | one entry per layer: the **source colour texture path** that layer was built from |
 | `layers` | `cardArray` | object[] | one per layer: `{ id, half[2], center[3], depthSpan, frameOffset?, projection?, conv?, coverage?, source }` — `id` is the base's form ID, and the geometry is per layer because two trees of one sheet size are not the same size in the world. `frameOffset` is per layer for the same reason: two sets in one array have different per-frame shifts, and a layer from a set baked before the law carries no key at all. `projection` is per layer for the same reason again: an array can hold a metric set beside a foreshortened one, and only the layer knows which it is. `conv` (§3) is per layer for the same reason: a library part-way through the re-bake holds both vintages in one size class |
 | `emissiveScale` | both | number[] | one per layer, **parallel to `layers`** |
+| `sway`, `leafAmplitude`, `leafFrequency` | `cardArray`, only when a layer carries model sway (the file is then `lodm` 2) | string[], number[], number[] | one per layer, parallel to `layers` (§3.3) |
 | `oct` | `cardArray` | int | frames per side, shared by every layer of the array |
 | `frame` | `cardArray` | int[2] | frame size, shared by every layer |
 | `pad` | `cardArray` | int[2] | the margin in texels on each side of a frame, per axis, shared. An array is built from the same PNGs and the same dilation as the per-card sets, so it inherits their spacing and their clean mip depth |
@@ -525,7 +561,7 @@ before trusting a number here.**
 |---|---|---|
 | magic, envelope version, 4 MiB cap | `lodmfile.cpp:10` | `static const qsizetype LODM_PAYLOAD_CAP` |
 | 12-byte envelope, exact payload size | `lodmfile.cpp:16-38` | `bytes.size() < 12`, `declared != bytes.size() - 12` |
-| `lodm != 1` refusal | `lodmfile.cpp:47` | `payload is not a lodm 1 object` |
+| `lodm` 1 or 2 refusals | `lodmfile.cpp:46-63` | `payload is not a lodm 1 object`, `lodm 2 is the card family's version` |
 | family hard refusal | `lodmfile.cpp:52-54` | `family must be legacy or pbr` |
 | `kind` defaults to `source` | `lodmfile.cpp:56` | `.toString( QStringLiteral( "source" ) )` |
 | `emissiveScale` defaults to 1 | `lodmfile.cpp:63` | `.toDouble( 1.0 )` |

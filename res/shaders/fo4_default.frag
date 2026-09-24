@@ -85,6 +85,7 @@ in vec2 texCoord;
 flat in vec4 A;
 in vec4 C;
 flat in vec4 D;
+in float rawVertexAlpha;	// the vertex colour's own alpha (channel 11 G only)
 
 in mat3 btnMatrix;
 flat in mat3 reflMatrix;
@@ -341,7 +342,11 @@ void main()
 			 * the branch cards are the ones that carry the tree-animation
 			 * flag; the bake picks the rule for the model. */
 			float leaf = lodMaskByTree ? ( lodTreeAnim ? 1.0 : 0.0 ) : ( alphaFlags > 0 ? 1.0 : 0.0 );
-			v = vec3( leaf );
+			/* G: the WIND WEIGHT W (IMPOSTORWIND1, sway A): the raw vertex alpha on a
+			 * tree-animation shape -- the only wind input the game's tree vertex
+			 * shader reads -- and 0 on any other shape, which the game never moves.
+			 * The mask reads only R. */
+			v = vec3( leaf, lodTreeAnim ? rawVertexAlpha : 0.0, 0.0 );
 		} else if ( lodChannelView == 13 ) {
 			/* The impostor bake's emissive sheet (docs/LODGEN_IMPOSTOR_SPEC.md).
 			 * A shape whose GLOW SLOT a source .lodm retargeted reads that

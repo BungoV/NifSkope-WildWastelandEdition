@@ -668,6 +668,13 @@ bool wwImpostorPreviewStart( NifSkope * skope, GLView * ogl, QWidget * viewportH
 	if ( s.opt.shuffleFrames )
 		s.log << QStringLiteral( "SHUFFLED: the frame choice is deliberately wrong (red control)" );
 
+	/* THE SWAY, on request (CARDFIX1 step 6): the drawer's wind shear at a fixed
+	 * amplitude and phase, so a run of phases makes a moving picture. 0 = still. */
+	s.opt.swayAmplitude = float( qEnvironmentVariable( "WW_IMPOSTOR_SWAY_AMP" ).toDouble() );
+	s.opt.swayPhase = float( qEnvironmentVariable( "WW_IMPOSTOR_SWAY_PHASE" ).toDouble() );
+	if ( s.opt.swayAmplitude != 0.0f )
+		s.log << QStringLiteral( "sway: amplitude %1, phase %2 rad" ).arg( s.opt.swayAmplitude ).arg( s.opt.swayPhase );
+
 	/* THE SECOND SET. Loaded for every mode, not just `pair`, so a `show` run
 	 * can put two grids on the screen for a picture; only `pair` measures it. */
 	const QString lodm2 = qEnvironmentVariable( "WW_IMPOSTOR_LODM2" );
