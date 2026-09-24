@@ -1,0 +1,5 @@
+# pbrm_default with the Lookdev cascaded sun shadows compiled in (lane CSM1). No
+# conditions: the condition scan never picks it; Renderer::setupProgram swaps it in
+# by name for pbrm_default.prog while the draw receives shadows.
+
+shaders fo4_default.vert pbrm_csm.frag

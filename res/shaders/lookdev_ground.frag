@@ -28,6 +28,9 @@ out vec4 fragColor;
 
 #include "lookdev_output.glsl"
 #include "lookdev_fog.glsl"
+#ifdef WW_SUNSHADOW
+#include "ww_sunshadow.glsl"
+#endif
 
 vec3 dalcAmbient( vec3 n )
 {
@@ -54,7 +57,12 @@ void main()
 		n = normalize( vec3( g.x, -g.y, sqrt( max( 1.0 - dot( g, g ), 0.0 ) ) ) );
 	}
 	float NdotL = max( dot( n, sunDirWorld ), 0.0 );
+#ifdef WW_SUNSHADOW
+	// lane CSM1 (spec 2.8): the cascade factor on the sun term only
+	vec3 color = base * sunLinear * NdotL * wwSunShadow( viewPos ) + base * dalcAmbient( n );
+#else
 	vec3 color = base * sunLinear * NdotL + base * dalcAmbient( n );
+#endif
 	color = wwFog( color, viewPos );	// lane FOG1: linear, before the exposure
 	if ( groundLeak >= 0.0 )
 		color = mix( vec3( 0.0 ), color, groundLeak );
@@ -64,4 +72,9 @@ void main()
 	vec3 probe;
 	if ( wwFogProbe( viewPos, probe ) )
 		fragColor = vec4( probe, 1.0 );
+#ifdef WW_SUNSHADOW
+	vec3 csmProbeOut;
+	if ( wwSunShadowProbe( viewPos, fragColor.rgb, csmProbeOut ) )
+		fragColor = vec4( csmProbeOut, 1.0 );
+#endif
 }

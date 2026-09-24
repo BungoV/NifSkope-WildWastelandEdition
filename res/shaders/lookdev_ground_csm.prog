@@ -1,0 +1,4 @@
+# The Lookdev ground with the cascaded sun shadows compiled in (lane CSM1). Selected
+# by name from gl/lookdevstage.cpp while the ground receives.
+
+shaders lookdev_ground.vert lookdev_ground_csm.frag

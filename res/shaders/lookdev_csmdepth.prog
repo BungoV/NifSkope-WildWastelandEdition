@@ -1,0 +1,4 @@
+# The cascade caster pass (lane CSM1): depth only, one layer of the D16 array per
+# draw. Selected by name from gl/sunshadow.cpp.
+
+shaders lookdev_csmdepth.vert lookdev_csmdepth.frag

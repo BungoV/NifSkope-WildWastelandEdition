@@ -2,6 +2,9 @@
 
 #include "uniforms.glsl"
 #include "lookdev_fog.glsl"
+#ifdef WW_SUNSHADOW
+#include "ww_sunshadow.glsl"
+#endif
 
 // PBRM (PBR Material Editor) metallic/roughness path.
 //
@@ -503,6 +506,13 @@ void main()
 	directLight( s, normalize( LightDir ), V, ms, dDiff, dSpec );
 	vec3 outDiff = dDiff * sunE;
 	vec3 outSpec = dSpec * sunE;
+#ifdef WW_SUNSHADOW
+	// lane CSM1 (spec 2.8): the cascade factor on the SUN's diffuse and specular only
+	float csmF = wwSunShadow( -ViewDir );
+	outDiff *= csmF;
+	if ( ( csmRed & 4 ) == 0 )
+		outSpec *= csmF;
+#endif
 
 	// --- ambient + environment ---
 	// AO belongs on ambient, not on direct light: occlusion describes what the
@@ -584,4 +594,9 @@ void main()
 	vec3 fogProbeOut;
 	if ( wwFogProbe( -ViewDir, fogProbeOut ) )
 		fragColor = vec4( fogProbeOut, 1.0 );
+#ifdef WW_SUNSHADOW
+	vec3 csmProbeOut;
+	if ( wwSunShadowProbe( -ViewDir, fragColor.rgb, csmProbeOut ) )
+		fragColor = vec4( csmProbeOut, 1.0 );
+#endif
 }
