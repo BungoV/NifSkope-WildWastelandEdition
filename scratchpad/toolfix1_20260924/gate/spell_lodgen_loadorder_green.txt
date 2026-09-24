@@ -1,0 +1,68 @@
+exe   : /e/Projects/NifskopeWWE-toolfix1/release/NifSkope.exe (24801280 bytes, 2026-09-24 22:11:57)
+work  : C:/Users/bungo/AppData/Local/Temp/claude/E--Projects-Claude/b560e4ec-6e66-4c21-9572-1ad4acca0043/scratchpad/g5_green
+
+== G1 the plugin list and the stack ==
+  rc=0
+  | mo2-profile: E:/Projects/Fallout 4 Mods/profiles/Default
+  | mo2-mods: E:/Projects/Fallout 4 Mods/mods
+  | mo2-data: X:/Programs/Steam/steamapps/common/Fallout 4/Data (from C:/Users/bungo/AppData/Local/ModOrganizer/Fallout 4/ModOrganizer.ini)
+  | mo2-overwrite: E:/Projects/Fallout 4 Mods/overwrite
+  | mo2-mods-enabled: 47
+  | mo2-mods-disabled: 29
+  | mo2-separators: 0
+  | mo2-mods-missing: 0
+  | mo2-archives-without-plugin: 0
+  | mo2-masters: 17
+  | plugins: 47
+  | source: mo2-profile
+  | resources: 49 (last wins)
+    expected 47 plugins (17 masters + 30 plugins.txt stars), exe printed 47
+  ok   G1 plugin 0 is Fallout4.esm as a full path (X:/Programs/Steam/steamapps/common/Fallout 4/Data/Fallout4.esm)
+  ok   G1 the DLC masters come next, in the engine order: DLCRobot.esm DLCworkshop01.esm DLCCoast.esm DLCworkshop02.esm DLCworkshop03.esm DLCNukaWorld.esm DLCUltraHighResolution.esm
+  ok   G1 all 30 enabled plugins follow, in plugins.txt order, as existing full paths
+  ok   G1 the whole plugin list equals the independent re-derivation, path for path (47)
+  ok   G1 the stack is Data, then the 47 enabled mods bottom-up, then overwrite (49 entries)
+  ok   G4 no disabled mod (29 of them) is in the stack
+  ok   --plugins-txt on his profile refuses by name and points at --mo2-profile (plugin 'HUDFramework.esm')
+
+== G2 the tree and grass mods' archives ==
+  ok   G2 meshes/bns/lod/landscape/trees/aspen/treeaspen01_lod_0.nif comes from BNS Trees - Main.ba2 (path: E:/Projects/Fallout 4 Mods/mods/Boston Natural Surroundings/BNS Trees - Main.ba2)
+  ok   G2 ... through the Boston Natural Surroundings entry (entry: E:/Projects/Fallout 4 Mods/mods/Boston Natural Surroundings)
+  ok   G2 meshes/landscape/grass/tg_bushycane.nif comes from TrueGrass - Main.ba2 (path: E:/Projects/Fallout 4 Mods/mods/True Grass/TrueGrass - Main.ba2)
+
+== G3 priority between two enabled mods, and the swap ==
+  swapped lines 44 and 45 into C:/Users/bungo/AppData/Local/Temp/claude/E--Projects-Claude/b560e4ec-6e66-4c21-9572-1ad4acca0043/scratchpad/g5_green/prof_b/modlist.txt
+  Ultra Exterior Lighting ships it loose (51101 bytes)
+  Ultra Interior Lighting ships it loose (51101 bytes)
+  ok   G3 his order: the higher mod (Ultra Exterior Lighting) wins (entry: E:/Projects/Fallout 4 Mods/mods/Ultra Exterior Lighting)
+  ok   G3 the unswapped copy agrees (entry: E:/Projects/Fallout 4 Mods/mods/Ultra Exterior Lighting)
+  ok   G3 the swapped copy flips it to Ultra Interior Lighting (entry: E:/Projects/Fallout 4 Mods/mods/Ultra Interior Lighting)
+  bytes: unswapped sha1: 4fd8fc70639fa0a10aa5e3dc1de13874187577a9 / swapped sha1: 4fd8fc70639fa0a10aa5e3dc1de13874187577a9
+
+== G4 a disabled mod never resolves ==
+  X03 is disabled in modlist.txt
+  ok   G4 materials/actors/msmechanic/msmechanicarmor.bgsm (only in -X03) is not found (found: no)
+  ok   G4 control: named with --resource the same path IS found (entry: E:/Projects/Fallout 4 Mods/mods/X03)
+  ok   G4 meshes/actors/powerarmor/x01/x01_torso.nif resolves to the enabled +X01Tesla, never the disabled mod (entry: E:/Projects/Fallout 4 Mods/mods/X01Tesla)
+
+== G5 a one-chunk Sanctuary bake from his load order ==
+  g5: bake rc=0 in 24 s; 187 log lines; roads placements=32 meshes=13 shapes=0 decalshapes=0 triangles=0 texels=0 decaltexels=0 alpharejected=0 refused_noload=0 refused_notexture=0 refused_raised=0 raised_bases=0 blend_texels=0 refused_side native-ladder: OFF (--native-no-ladder) (group 4, exact-error budget 512 tris); levels 0..0; meshes 0 with a ladder, 2982 without (1789 of those are <= 16 triangles); groups 0 formed, refused 0 too sm 
+  | bake-record plugin 0 fallout4.esm 330776576 f1433cd4cadce243 X:/Programs/Steam/steamapps/common/Fallout 4/Data/Fallout4.esm
+  | bake-record plugin 28 testworldspace.esp 98935 450d27442194be9d E:/Projects/Fallout 4 Mods/mods/AnotherOne's Test World/TestWorldspace.esp
+  | bake-record plugin 29 truegrass.esp 38019 933072fcbc3ae107 E:/Projects/Fallout 4 Mods/mods/True Grass/TrueGrass.esp
+  | bake-record plugin 44 bns trees.esp 2261482 64657379617238b8 E:/Projects/Fallout 4 Mods/mods/Boston Natural Surroundings/BNS Trees.esp
+  ok   G5 the bake of his live profile ran (rc 0) and wrote Commonwealth.lodb
+  ok   G5 the record lists 47 plugins (the load order has 47)
+  ok   G5 the record carries the whole load order, path for path (47)
+  ok   G5 the record carries TestWorldspace.esp by full path E:/Projects/Fallout 4 Mods/mods/AnotherOne's Test World/TestWorldspace.esp (483 records with form IDs above 0x0FFFFFFF, 1 master(s))
+  ok   G5 the record carries BNS Trees.esp by full path E:/Projects/Fallout 4 Mods/mods/Boston Natural Surroundings/BNS Trees.esp
+  ok   G5 the record carries TrueGrass.esp by full path E:/Projects/Fallout 4 Mods/mods/True Grass/TrueGrass.esp
+  ok   G5 record plugin 0 is Data/Fallout4.esm
+  red rung: E:/Projects/NifskopeWWE-esmfix1/release/NifSkope.before_esmfix1.exe
+  g5red: bake rc=1 in 1 s; 155 log lines; error: E:/Projects/Fallout 4 Mods/mods/AnotherOne's Test World/TestWorldspace.esp: invalid form ID 
+    red| FAIL G5 the bake of his live profile: rc=1, record ''
+    red| FAIL G5 no record, so TestWorldspace.esp is not in it
+  ok   RED G5 (the pre-ESMFIX1 exe on his live profile): the rung fails 2 check(s), as it must
+
+24 checks, 0 failures
+RESULT PASS
