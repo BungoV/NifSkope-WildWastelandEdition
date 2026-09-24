@@ -4,6 +4,7 @@ BSD License - see nifskope.h
 
 ***** END LICENCE BLOCK *****/
 
+#include "lodbfile.h"
 #include "lodgen.h"
 #include "lodgenchunkpass.h"
 #include "lodgenparallel.h"
@@ -1776,6 +1777,28 @@ public:
 				tr( "How many chunks are baked at once. More is slower and much hungrier here\n"
 					"-- each worker owns its own plugin reader and texture cache -- which is\n"
 					"why one is the default.\nCommand line: --chunk-threads" ) );
+			/* REBAKE ONLY WHAT CHANGED (lane INCRGATE1, 2026-09-24): INCR1's
+			 * `--incremental` as a standing row, OFF by default -- with it off the
+			 * bake is byte for byte what it was. On, every run writes the bake
+			 * record and the per-chunk native caches, and a run that finds a
+			 * record beside it rebuilds only the chunks whose inputs moved. A run
+			 * the record cannot vouch for (another range or chunk size, a setting
+			 * moved, a region-wide product ticked) bakes whole, rewrites the record
+			 * and says why: the command line refuses there, but a standing row
+			 * that refused would have no way back short of deleting the record.
+			 * WW_LODGEN_INCREMENTAL=0|1 forces it for a harness. */
+			xB( f, "LodgenIncrementalCheck", QStringLiteral( "incremental" ),
+				tr( "Rebake only what changed" ), false,
+				tr( "Keep a bake record in the output folder and, on the next run, rebuild only\n"
+					"the chunks whose plugins, models or textures changed. The first run bakes\n"
+					"everything and writes the record. Another range or chunk size, a changed\n"
+					"setting, or texture arrays, the object atlas or card arrays ticked: the\n"
+					"run bakes everything again and says why. One chunk size at a time. A model\n"
+					"or texture edited while NifSkope stays open is seen after a restart.\n"
+					"Command line: --incremental" ) );
+			if ( qEnvironmentVariableIsSet( "WW_LODGEN_INCREMENTAL" ) )
+				if ( auto * c = qobject_cast<QCheckBox *>( extras.value( QStringLiteral( "incremental" ) ).field ) )
+					c->setChecked( qEnvironmentVariableIntValue( "WW_LODGEN_INCREMENTAL" ) != 0 );
 			layout->addLayout( f.g );
 		}
 
@@ -3070,6 +3093,128 @@ private:
 			QDir().mkpath( meshDir );
 		if ( texCheck->isChecked() && btrCheck->isChecked() )
 			QDir().mkpath( texDir );
+		/* ===== REBAKE ONLY WHAT CHANGED (lane INCRGATE1, 2026-09-24) =======
+		 *
+		 * The command line's ledger, verbatim: lodgenIncrementalBegin() in
+		 * src/lodgenchunkpass.cpp diffs this run against the record and
+		 * filters the job list, and the queue below is rebuilt from what it
+		 * kept, in job order. Two differences, both because a row is a
+		 * standing setting and a flag is a request:
+		 *   - no record yet is not a refusal: the whole range bakes and the
+		 *     record is written, so the next run can diff;
+		 *   - a run the record cannot vouch for bakes whole and says why,
+		 *     instead of refusing -- a refusing row would have no way back.
+		 * The switches are "--panel" and the IDENTITY WORD, which hashes every
+		 * setting the bake reads: the pass's own options, the post passes, and
+		 * every extra row the RUN reads (xvar, so a hidden row counts as its
+		 * default). Threads, folders and this row itself are not settings of
+		 * the bytes and stay out. */
+		incOn = false;
+		incCensus.clear();
+		incNotes.clear();
+		incRun = LodgenIncrementalRun();
+		if ( xb( "incremental" ) && !queue.isEmpty() ) {
+			bool oneDim = true;
+			for ( const ChunkJob & j : queue )
+				oneDim = oneDim && j.dim == queue.first().dim;
+			if ( !oneDim ) {
+				incCensus = tr( "rebake only what changed: off for this run, it works on one chunk size" );
+			} else {
+				incOn = true;
+				lodbClearCensus();
+				LodgenChunkPassOptions idPass = chunkPassOptions();
+				const bool vtTex = wantVt() && vtBtrCheck->isChecked() && !vtBtrCheck->isHidden()
+					&& btrCheck->isChecked() && texCheck->isChecked();
+				LodgenIdentityExtras idx;
+				idx.atlas = atlasCheck->isChecked() && !atlasCheck->isHidden();
+				idx.arrays = arraysCheck->isChecked();
+				idx.merge = xb( "merge" );
+				const int atlasFmt = xi( "atlasFormat" );
+				idx.atlasBc1 = atlasFmt < 0 ? !fo4cs() : ( atlasFmt == 1 );
+				idx.keepBto = xb( "keepBto" );
+				idx.texFromVt = vtTex;
+				idx.simplify.enabled = simplifyCheck->isChecked();
+				idx.simplify.ratio8 = float( simplify8Spin->value() );
+				idx.simplify.ratio16 = float( simplify16Spin->value() );
+				idx.simplify.ratio32 = float( simplify32Spin->value() );
+				idx.simplify.errorWorld = float( simplifyErrorSpin->value() );
+				if ( wantVt() )
+					idx.vt = vtOptions();
+				idx.vtBtr = vtTex ? 1 : 0;
+				idx.nativeLadder = xb( "nativeLadder" );
+				idx.nativeOccluders = xb( "nativeOccluders" );
+				for ( auto it = extras.constBegin(); it != extras.constEnd(); ++it ) {
+					const QString & k = it.key();
+					if ( k == QLatin1String( "threads" ) || k == QLatin1String( "chunkThreads" )
+						|| k == QLatin1String( "incremental" ) || qobject_cast<QLineEdit *>( it.value().field ) )
+						continue;
+					idx.more << QStringLiteral( "panel." ) + k + QChar( '=' ) + xvar( k ).toString();
+				}
+				auto yn = []( bool v ) { return v ? QStringLiteral( "1" ) : QStringLiteral( "0" ); };
+				idx.more << QStringLiteral( "panel.target=" ) + yn( fo4cs() )
+					<< QStringLiteral( "panel.objects=" ) + yn( wantObjects() )
+					<< QStringLiteral( "panel.native=" ) + yn( wantNative() )
+					<< QStringLiteral( "panel.btr=" ) + yn( btrCheck->isChecked() )
+					<< QStringLiteral( "panel.tex=" ) + yn( btrCheck->isChecked() && texCheck->isChecked() && !vtTex )
+					<< QStringLiteral( "panel.cards=" ) + yn( !cardSourceDir().isEmpty() );
+				const QString word = lodgenIdentityWord( lodgenIdentityDump( idPass, idx ) );
+
+				incRun.fromDir = outputDir();
+				incRun.requireRecord = false;
+				incRun.outDir = outputDir();
+				incRun.nativeDir = wantNative() ? outputDir() : QString();
+				incRun.digestRoot.clear();		// the game's own folders and archives, as the pass reads
+				incRun.worldspace = wsBox->currentData().toUInt();
+				incRun.dim = queue.first().dim;
+				incRun.region[0] = x0Spin->value();
+				incRun.region[1] = y0Spin->value();
+				incRun.region[2] = x1Spin->value();
+				incRun.region[3] = y1Spin->value();
+				incRun.switches = lodgenSwitchesWithIdentity(
+					lodgenSwitchDigestOf( { QStringLiteral( "--panel" ) } ), word );
+				incRun.regionProducts = objectPassOn()
+					&& ( arraysCheck->isChecked() || idx.atlas || !cardSourceDir().isEmpty() );
+				incRun.nativeCache = true;
+				incRun.warn = [this]( const QString & w ) { incNotes << w; };
+				QVector<LodgenChunkJob> jobs;
+				for ( const ChunkJob & j : queue )
+					jobs.append( LodgenChunkJob{ j.dim, j.cx, j.cy } );
+				QStringList reasons;
+				QString detail;
+				const LodgenIncrementalVerdict v =
+					lodgenIncrementalBegin( incRun, *world, jobs, &incCensus, &reasons, &detail );
+				if ( v != LodgenIncrementalVerdict::Go ) {
+					QString why;
+					switch ( v ) {
+					case LodgenIncrementalVerdict::Shape:
+						why = QStringLiteral( "the record covers another worldspace, chunk size or range" );
+						break;
+					case LodgenIncrementalVerdict::Switches:
+						why = QStringLiteral( "a setting moved since the record (or a default of the exe did)" );
+						break;
+					case LodgenIncrementalVerdict::RegionProducts:
+						why = QStringLiteral( "texture arrays, the object atlas and card arrays are built "
+							"from the whole range" );
+						break;
+					default:
+						why = QStringLiteral( "the record cannot vouch for this run" );
+						break;
+					}
+					incNotes += lodgenIncrementalRefusal( v, incRun, detail );
+					incRun.fromDir.clear();
+					lodgenIncrementalBegin( incRun, *world, jobs, nullptr, nullptr, nullptr );
+					incCensus = QString( "incremental: every chunk baked because %1; all %2 chunk(s) "
+						"baked and the record rewritten" ).arg( why ).arg( jobs.size() );
+				}
+				incNotes += reasons;
+				lodbNoteCensus( incCensus );
+				QVector<ChunkJob> kept;
+				for ( const LodgenChunkJob & j : jobs )
+					kept.append( ChunkJob{ j.dim, j.cx, j.cy } );
+				queue = kept;
+				progress->setRange( 0, qMax( 1, queue.size() ) );
+			}
+		}
 		/* ===== THE .BTO SCRATCH FOLDER (lane BTOFREE1, 2026-09-16) =========
 		 *
 		 * bungo, 2026-09-12 18:3x: "essentially, no legacy vanilla file types
@@ -3200,32 +3345,11 @@ private:
 		return !self->cancelFlag;
 	}
 
-	/*! THE CHUNK QUEUE, over the machine.
-	 *
-	 *  The panel used to build ONE chunk per event-loop tick, so a 3,060-chunk
-	 *  Commonwealth ran on one core with fifteen idle. The loop is now
-	 *  lodgenRunChunkPass (lodgenchunkpass.h), shared with the command line and
-	 *  fanned over lodgenThreadCount() workers.
-	 *
-	 *  The window stays live because the pass calls `retire` on THIS thread,
-	 *  once per chunk, in QUEUE ORDER, and `retire` pumps the event loop -- the
-	 *  same thing the pyramid pass already does through vtProgressThunk.
-	 *  Cancel still lands between chunks: the workers poll cancelFlag before
-	 *  they pick a job up.
-	 *
-	 *  The live preview is spliced from `retire` too, so the documents arrive
-	 *  in chunk order however the workers finish. No NifModel crosses a thread:
-	 *  a worker writes the preview copy as a file, translation already applied,
-	 *  and the main thread only opens it. */
-	void runChunkQueue()
+	/*! The chunk pass's options, from the rows. One function, because the
+	 *  identity word of "Rebake only what changed" is read off the same
+	 *  options the pass bakes with (lane INCRGATE1, 2026-09-24). */
+	LodgenChunkPassOptions chunkPassOptions()
 	{
-		if ( queue.isEmpty() )
-			return;
-		QVector<LodgenChunkJob> jobs;
-		jobs.reserve( queue.size() );
-		for ( const ChunkJob & j : queue )
-			jobs.append( LodgenChunkJob{ j.dim, j.cx, j.cy } );
-
 		LodgenChunkPassOptions pass;
 		pass.plugins = pluginString();
 		pass.worldspace = wsBox->currentData().toUInt();
@@ -3266,10 +3390,45 @@ private:
 		oopts.cardAuxDiv = cardHalfAuxCheck->isChecked() ? 2 : 1;
 		oopts.treesOnly = treesOnlyCheck->isChecked();
 		pass.object = oopts;
+		return pass;
+	}
+
+	/*! THE CHUNK QUEUE, over the machine.
+	 *
+	 *  The panel used to build ONE chunk per event-loop tick, so a 3,060-chunk
+	 *  Commonwealth ran on one core with fifteen idle. The loop is now
+	 *  lodgenRunChunkPass (lodgenchunkpass.h), shared with the command line and
+	 *  fanned over lodgenThreadCount() workers.
+	 *
+	 *  The window stays live because the pass calls `retire` on THIS thread,
+	 *  once per chunk, in QUEUE ORDER, and `retire` pumps the event loop -- the
+	 *  same thing the pyramid pass already does through vtProgressThunk.
+	 *  Cancel still lands between chunks: the workers poll cancelFlag before
+	 *  they pick a job up.
+	 *
+	 *  The live preview is spliced from `retire` too, so the documents arrive
+	 *  in chunk order however the workers finish. No NifModel crosses a thread:
+	 *  a worker writes the preview copy as a file, translation already applied,
+	 *  and the main thread only opens it. */
+	void runChunkQueue()
+	{
+		// an incremental run with nothing dirty still runs: every chunk replays its cache
+		if ( queue.isEmpty() && !( incOn && incRun.incremental ) )
+			return;
+		QVector<LodgenChunkJob> jobs;
+		jobs.reserve( queue.size() );
+		for ( const ChunkJob & j : queue )
+			jobs.append( LodgenChunkJob{ j.dim, j.cx, j.cy } );
+
+		LodgenChunkPassOptions pass = chunkPassOptions();
+		if ( incOn )
+			lodgenIncrementalArmCache( incRun, world->worldspaceEdid(), pass );
 
 		QString perr;
 		lodgenRunChunkPass( jobs, pass,
-			[this]( const LodgenChunkOutcome & r ) {
+			[this, &pass]( const LodgenChunkOutcome & r ) {
+				if ( incOn )
+					lodgenIncrementalNoteRetired( incRun, pass, r );
 				progress->setFormat( tr( "chunk %1 at (%2,%3) — %v of %m" )
 					.arg( r.dim ).arg( r.cx ).arg( r.cy ) );
 				const bool okChunk = ( !btrCheck->isChecked() || r.btrBuilt )
@@ -3439,8 +3598,28 @@ private:
 			 * emitter every placement -- the same order the CLI's region
 			 * driver uses. Disarmed on every path, including a cancel, so a
 			 * cancelled run cannot leave the accumulator armed for the next. */
+			/* REBAKE ONLY WHAT CHANGED: the pair is written from the rebuilt
+			 * chunks AND the replayed caches, so INCR1's two cache refusals
+			 * hold here as on the command line. A refused pair is not written
+			 * and neither is the record, so the next run diffs against the old
+			 * one and rebuilds what this run touched. */
+			bool incPairRefused = false;
+			if ( incOn && !cancelFlag && lodgenNativeActive() ) {
+				const QString cc = lodgenIncrementalCacheCensus( incRun );
+				if ( !cc.isEmpty() )
+					lodbNoteCensus( cc );
+				const QStringList refused = lodgenIncrementalCacheRefusal( incRun );
+				if ( !refused.isEmpty() ) {
+					incPairRefused = true;
+					incNotes += refused;
+					tail += tr( ", the native pair was NOT rewritten — untick \"Rebake only what "
+						"changed\" for one whole bake" );
+				} else {
+					lodgenIncrementalOfferReuse( incRun );
+				}
+			}
 			if ( lodgenNativeActive() ) {
-				if ( !cancelFlag ) {
+				if ( !cancelFlag && !incPairRefused ) {
 					progress->setFormat( tr( "writing the native object files…" ) );
 					QCoreApplication::processEvents();
 					QElapsedTimer t;
@@ -3475,12 +3654,40 @@ private:
 				}
 				lodgenNativeEnd();
 			}
+			/* REBAKE ONLY WHAT CHANGED: the record, LAST, after every file it
+			 * lists is on disk -- the command line's order. Not after a cancel
+			 * and not after a refused pair: a record must only ever describe a
+			 * finished bake. */
+			if ( incOn ) {
+				if ( !cancelFlag && !incPairRefused ) {
+					lodbNoteCensus( stageTimeLine() );
+					lodbNoteCensus( lodgenBakeCensusLine() );
+					QStringList recWarn;
+					QString recLine;
+					const bool recOk = lodgenIncrementalWriteRecord( incRun, *world,
+						{ QStringLiteral( "--panel" ) }, QStringList(), &recWarn, &recLine );
+					incNotes += recWarn;
+					if ( !recLine.isEmpty() )
+						incNotes << recLine;
+					tail += recOk ? QStringLiteral( ", " ) + incCensus + tr( ", bake record written" )
+						: QStringLiteral( ", " ) + incCensus + tr( ", the bake record was NOT written" );
+				}
+				incOn = false;
+			} else if ( !incCensus.isEmpty() ) {
+				tail += QStringLiteral( ", " ) + incCensus;
+			}
+			incCensus.clear();
 			world.reset();
 			lodgenDestroyBakeCaches( bakeCaches );
 			bakeCaches = nullptr;
 			writtenBto.clear();
-			finishAll( cancelFlag ? tr( "cancelled after %1 chunk(s)" ).arg( done )
-				: tr( "done \u2014 %1 chunk(s)%2" ).arg( done ).arg( tail ) );
+			/* the notes (refusals, warnings, the record's read-back) go under the
+			 * first line, so they reach the result's tooltip and not the bar */
+			const QString incTail = incNotes.isEmpty() ? QString()
+				: QStringLiteral( "\n" ) + incNotes.join( QChar( '\n' ) );
+			incNotes.clear();
+			finishAll( ( cancelFlag ? tr( "cancelled after %1 chunk(s)" ).arg( done )
+				: tr( "done \u2014 %1 chunk(s)%2" ).arg( done ).arg( tail ) ) + incTail );
 			return;
 		}
 	}
@@ -3673,6 +3880,14 @@ private:
 	QVector<ChunkJob> queue;
 	QStringList writtenBto;
 	QString meshDir, texDir, btoScratch, lastReport;
+	/*! "Rebake only what changed" (lane INCRGATE1, 2026-09-24): the ledger
+	 *  run the command line's `--incremental` uses, armed once per bake in
+	 *  startChunks() and closed in step(). `incOn` is false for every bake
+	 *  with the row off, and then nothing below touches the run. */
+	LodgenIncrementalRun incRun;
+	bool incOn = false;
+	QString incCensus;			//!< the one census line: what was dirty, or why all of it was
+	QStringList incNotes;		//!< refusal words, warnings, the record's read-back: the tooltip
 	int done = 0;
 	bool running = false;
 	bool framePending = false;

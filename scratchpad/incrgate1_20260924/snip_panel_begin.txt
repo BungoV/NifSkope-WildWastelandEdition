@@ -1,0 +1,122 @@
+		/* ===== REBAKE ONLY WHAT CHANGED (lane INCRGATE1, 2026-09-24) =======
+		 *
+		 * The command line's ledger, verbatim: lodgenIncrementalBegin() in
+		 * src/lodgenchunkpass.cpp diffs this run against the record and
+		 * filters the job list, and the queue below is rebuilt from what it
+		 * kept, in job order. Two differences, both because a row is a
+		 * standing setting and a flag is a request:
+		 *   - no record yet is not a refusal: the whole range bakes and the
+		 *     record is written, so the next run can diff;
+		 *   - a run the record cannot vouch for bakes whole and says why,
+		 *     instead of refusing -- a refusing row would have no way back.
+		 * The switches are "--panel" and the IDENTITY WORD, which hashes every
+		 * setting the bake reads: the pass's own options, the post passes, and
+		 * every extra row the RUN reads (xvar, so a hidden row counts as its
+		 * default). Threads, folders and this row itself are not settings of
+		 * the bytes and stay out. */
+		incOn = false;
+		incCensus.clear();
+		incNotes.clear();
+		incRun = LodgenIncrementalRun();
+		if ( xb( "incremental" ) && !queue.isEmpty() ) {
+			bool oneDim = true;
+			for ( const ChunkJob & j : queue )
+				oneDim = oneDim && j.dim == queue.first().dim;
+			if ( !oneDim ) {
+				incCensus = tr( "rebake only what changed: off for this run, it works on one chunk size" );
+			} else {
+				incOn = true;
+				lodbClearCensus();
+				LodgenChunkPassOptions idPass = chunkPassOptions();
+				const bool vtTex = wantVt() && vtBtrCheck->isChecked() && !vtBtrCheck->isHidden()
+					&& btrCheck->isChecked() && texCheck->isChecked();
+				LodgenIdentityExtras idx;
+				idx.atlas = atlasCheck->isChecked() && !atlasCheck->isHidden();
+				idx.arrays = arraysCheck->isChecked();
+				idx.merge = xb( "merge" );
+				const int atlasFmt = xi( "atlasFormat" );
+				idx.atlasBc1 = atlasFmt < 0 ? !fo4cs() : ( atlasFmt == 1 );
+				idx.keepBto = xb( "keepBto" );
+				idx.texFromVt = vtTex;
+				idx.simplify.enabled = simplifyCheck->isChecked();
+				idx.simplify.ratio8 = float( simplify8Spin->value() );
+				idx.simplify.ratio16 = float( simplify16Spin->value() );
+				idx.simplify.ratio32 = float( simplify32Spin->value() );
+				idx.simplify.errorWorld = float( simplifyErrorSpin->value() );
+				if ( wantVt() )
+					idx.vt = vtOptions();
+				idx.vtBtr = vtTex ? 1 : 0;
+				idx.nativeLadder = xb( "nativeLadder" );
+				idx.nativeOccluders = xb( "nativeOccluders" );
+				for ( auto it = extras.constBegin(); it != extras.constEnd(); ++it ) {
+					const QString & k = it.key();
+					if ( k == QLatin1String( "threads" ) || k == QLatin1String( "chunkThreads" )
+						|| k == QLatin1String( "incremental" ) || qobject_cast<QLineEdit *>( it.value().field ) )
+						continue;
+					idx.more << QStringLiteral( "panel." ) + k + QChar( '=' ) + xvar( k ).toString();
+				}
+				auto yn = []( bool v ) { return v ? QStringLiteral( "1" ) : QStringLiteral( "0" ); };
+				idx.more << QStringLiteral( "panel.target=" ) + yn( fo4cs() )
+					<< QStringLiteral( "panel.objects=" ) + yn( wantObjects() )
+					<< QStringLiteral( "panel.native=" ) + yn( wantNative() )
+					<< QStringLiteral( "panel.btr=" ) + yn( btrCheck->isChecked() )
+					<< QStringLiteral( "panel.tex=" ) + yn( btrCheck->isChecked() && texCheck->isChecked() && !vtTex )
+					<< QStringLiteral( "panel.cards=" ) + yn( !cardSourceDir().isEmpty() );
+				const QString word = lodgenIdentityWord( lodgenIdentityDump( idPass, idx ) );
+
+				incRun.fromDir = outputDir();
+				incRun.requireRecord = false;
+				incRun.outDir = outputDir();
+				incRun.nativeDir = wantNative() ? outputDir() : QString();
+				incRun.digestRoot.clear();		// the game's own folders and archives, as the pass reads
+				incRun.worldspace = wsBox->currentData().toUInt();
+				incRun.dim = queue.first().dim;
+				incRun.region[0] = x0Spin->value();
+				incRun.region[1] = y0Spin->value();
+				incRun.region[2] = x1Spin->value();
+				incRun.region[3] = y1Spin->value();
+				incRun.switches = lodgenSwitchesWithIdentity(
+					lodgenSwitchDigestOf( { QStringLiteral( "--panel" ) } ), word );
+				incRun.regionProducts = objectPassOn()
+					&& ( arraysCheck->isChecked() || idx.atlas || !cardSourceDir().isEmpty() );
+				incRun.nativeCache = true;
+				incRun.warn = [this]( const QString & w ) { incNotes << w; };
+				QVector<LodgenChunkJob> jobs;
+				for ( const ChunkJob & j : queue )
+					jobs.append( LodgenChunkJob{ j.dim, j.cx, j.cy } );
+				QStringList reasons;
+				QString detail;
+				const LodgenIncrementalVerdict v =
+					lodgenIncrementalBegin( incRun, *world, jobs, &incCensus, &reasons, &detail );
+				if ( v != LodgenIncrementalVerdict::Go ) {
+					QString why;
+					switch ( v ) {
+					case LodgenIncrementalVerdict::Shape:
+						why = QStringLiteral( "the record covers another worldspace, chunk size or range" );
+						break;
+					case LodgenIncrementalVerdict::Switches:
+						why = QStringLiteral( "a setting moved since the record (or a default of the exe did)" );
+						break;
+					case LodgenIncrementalVerdict::RegionProducts:
+						why = QStringLiteral( "texture arrays, the object atlas and card arrays are built "
+							"from the whole range" );
+						break;
+					default:
+						why = QStringLiteral( "the record cannot vouch for this run" );
+						break;
+					}
+					incNotes += lodgenIncrementalRefusal( v, incRun, detail );
+					incRun.fromDir.clear();
+					lodgenIncrementalBegin( incRun, *world, jobs, nullptr, nullptr, nullptr );
+					incCensus = QString( "incremental: every chunk baked because %1; all %2 chunk(s) "
+						"baked and the record rewritten" ).arg( why ).arg( jobs.size() );
+				}
+				incNotes += reasons;
+				lodbNoteCensus( incCensus );
+				QVector<ChunkJob> kept;
+				for ( const LodgenChunkJob & j : jobs )
+					kept.append( ChunkJob{ j.dim, j.cx, j.cy } );
+				queue = kept;
+				progress->setRange( 0, qMax( 1, queue.size() ) );
+			}
+		}

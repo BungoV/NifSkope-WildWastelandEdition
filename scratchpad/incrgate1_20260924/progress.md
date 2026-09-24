@@ -39,3 +39,18 @@
   refused (switches); forged record refused after a 0-dirty null run; digest replica reproduces the record.
 - G1 RED on the rung: 11 checks, 6 failures (work/g1_rung.log) -- no identity line; the before_defaults2 record
   ACCEPTED with "0 of 1 chunks dirty" (the defect: a moved default kept yesterday's chunks); forged == real.
+
+## Step 4 -- the panel row (b2, 2026-09-24 21:45, exe sha1 3b3808fd60c8e961b6a34e2aa54b702335e3faa4)
+- src/lodgenmanager.cpp: Run-section row "Rebake only what changed" (LodgenIncrementalCheck, key
+  `incremental`, default OFF, env hook WW_LODGEN_INCREMENTAL=0|1). Row ON = INCR1's ledger through
+  lodgenIncrementalBegin/ArmCache/NoteRetired/CacheRefusal/OfferReuse/WriteRecord, switches `--panel`
+  + the identity word. No record = full bake + record; any refusal verdict = full bake + record
+  rewritten, census says why (a refusing standing row would have no way back). Mixed chunk sizes =
+  row off for that run, said in the census. Cancel or a refused native pair = no record.
+- Default consequence: panel arrays are ON by default, so regionProducts holds and the row full-bakes
+  every run until arrays/atlas/cards are unticked. Stated in the census.
+- G2 tests/spells/lodgen_panel_incremental.sh: rung 137/0, OFF 137/0, ON 137/0; (a) rung == OFF,
+  10 files 45,582,390 bytes sha1 1b16fc05; (b) ON = OFF + 1 record + 1 .lodj, record 1 chunk,
+  `--panel`, first-run census; RED: the rung tree as ON fails b2 and b3. RESULT PASS.
+- lod_generation.sh b2 128/0 (rung 128/0; check boxes 39 -> 40, dash 0, untipped 0).
+- lodgen_panel_run.sh b2 137/0 (floor 130).
