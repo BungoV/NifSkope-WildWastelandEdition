@@ -346,9 +346,9 @@ struct LodoHeader
 	/*! v4, 0xD0: how many bases in this library carry a CARD (`cardLayer` is
 	 *  not LODO_NO_CARD). The `.lodi` reader pairs it with the aggregate table
 	 *  and a consumer sizes its card draw list from the header alone. It is
-	 *  0 on a bake that assigns no card, which is still every bake the emitter
-	 *  makes today (docs 11, deviation 5) -- and the field is proved to MOVE
-	 *  on a synthetic library that assigns some, not on the region alone. */
+	 *  0 on a bake that links no card arrays; a `--native --impostors --arrays`
+	 *  bake links them (lane CARDLINK1, `lodgenNativeLinkCards`). The reader
+	 *  RECOUNTS it from the base rows and refuses a mismatch by name. */
 	quint32 cardCount = 0;
 	quint32 indexCrc32 = 0;
 	quint64 fileBytes = 0;

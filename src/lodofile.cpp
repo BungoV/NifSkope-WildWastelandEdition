@@ -1748,11 +1748,11 @@ bool lodoRead( const QString & path, LodoHeader * header, LodoLibrary * lib,
 	h.version = getLE<quint32>( p + H_VERSION );
 	if ( h.version == 1 )
 		return refuse( QStringLiteral( "version 1: the v1 vertex blob is in SOURCE order and carries no "
-			"loadOrderHash (header 0xB8 was reserved). Re-bake; this reader knows version 3 only" ) );
+			"loadOrderHash (header 0xB8 was reserved). Re-bake; this reader knows version 4 only" ) );
 	if ( h.version == 2 )
 		return refuse( QStringLiteral( "version 2: a v2 library has NO cluster ladder table (header 0xC0 was "
 			"reserved), so every cluster would read geometricError 0 and parentError 0 and a consumer would "
-			"draw the whole library at full detail at every distance. Re-bake; this reader knows version 3" ) );
+			"draw the whole library at full detail at every distance. Re-bake; this reader knows version 4" ) );
 	/* v4 (lane NATIVE1c) refuses v3 BY NAME for the same kind of reason: the
 	 * base row is REINTERPRETED, not extended. A v3 base's `crossPx16[0..1]`
 	 * are two screen-size steps in 1/16 px and a v4 reader takes those same
@@ -1907,6 +1907,24 @@ bool lodoRead( const QString & path, LodoHeader * header, LodoLibrary * lib,
 	L.localIndices.resize( size_t( h.clusterCount ) * LODO_LOCAL_INDEX_BYTES );
 	L.vertices.resize( h.vertexCount );
 	if ( h.baseCount ) std::memcpy( L.bases.data(), p + h.offBases, tabs[0].bytes );
+	/* CARDLINK1 (2026-09-24): `cardCount` is REDUNDANT on purpose, like
+	 * `fullTriangles`, so the reader RECOUNTS it from the base rows instead of
+	 * believing it -- with or without the payload check, because a consumer
+	 * sizes its card pass from this word. And a card needs a provenance: a
+	 * base that names a card layer in a file whose `cardCorpusHash` is 0 says
+	 * which arrays it indexes into nowhere. */
+	{
+		quint32 cardsInRows = 0;
+		for ( const LodoBase & b : L.bases )
+			if ( b.cardLayer != LODO_NO_CARD )
+				cardsInRows++;
+		if ( cardsInRows != h.cardCount )
+			return refuse( QString( "cardCount %1 but %2 base row(s) name a card layer" )
+				.arg( h.cardCount ).arg( cardsInRows ) );
+		if ( cardsInRows > 0 && h.cardCorpusHash == 0 )
+			return refuse( QString( "%1 base row(s) name a card layer but cardCorpusHash is 0: no card "
+				"arrays are named for them" ).arg( cardsInRows ) );
+	}
 	if ( h.meshCount ) std::memcpy( L.meshes.data(), p + h.offMeshes, tabs[1].bytes );
 	if ( h.clusterCount ) std::memcpy( L.clusters.data(), p + h.offClusters, tabs[2].bytes );
 	if ( h.clusterCount ) std::memcpy( L.clusterLods.data(), p + h.offClusterLods, tabs[3].bytes );

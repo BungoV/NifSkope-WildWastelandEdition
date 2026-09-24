@@ -3708,6 +3708,17 @@ private:
 					tail += tr( ", card arrays: %1" ).arg( rep );
 					if ( wantNative() )
 						lodgenNoteLayoutDir( arrDir );
+					/* CARDLINK1: the emitter links the arrays just written, while the
+					 * manifests still sit beside the chunks (the teardown below
+					 * removes them before the pair is written). */
+					if ( lodgenNativeActive() ) {
+						QString lerr;
+						if ( !lodgenNativeLinkCards( writtenBto,
+							arrDir + "/" + ws + QStringLiteral( ".LodgenCards" ), &lerr ) ) {
+							tail += tr( ", native: not written, %1" ).arg( lerr );
+							lodgenNativeEnd();
+						}
+					}
 				} else
 					tail += tr( ", card arrays: %1" ).arg( cerr2 );
 				msImpostors += t.elapsed();		// the IMPOSTOR stage

@@ -1,0 +1,17 @@
+void lodgenNativeOfferLibraryReuse( const NativeReuseOffer & offer );
+
+/*! THE CARD LINK (lane CARDLINK1, 2026-09-24). Call after the card-arrays
+ *  pass (`lodgenBuildCardArrays`, which appends `<array .lodm> <layer>` to
+ *  every `C` line) and before `lodgenNativeWrite`, with the same chunk list
+ *  and the same array file base (`<Objects dir>/<ws>.LodgenCards`). The write
+ *  then gives every base in an array its `cardLayer` (set << 11 | layer),
+ *  writes `cardCount` and `cardCorpusHash` (the proposed R19 contract, docs
+ *  LODGEN_NATIVE_LODO_LODI.md 4.13) and sets `LODI_INST_FORCE_CARD` on each
+ *  placement whose ring has no mesh or whose chunk stood it on its card.
+ *
+ *  Refuses, by name: a missing manifest or array file, a malformed `C` line,
+ *  more than 32 arrays, a layer id that is not a formID, a base in two layers,
+ *  a `C` line whose layer is not its base's. No `C` line naming an array is
+ *  not a refusal: nothing is linked and the bake writes no card. Never
+ *  calling this is the exact way back. */
+bool lodgenNativeLinkCards( const QStringList & btoPaths, const QString & cardArrayBase, QString * error );

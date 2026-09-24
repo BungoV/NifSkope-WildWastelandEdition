@@ -1,0 +1,16 @@
+			| ( p.emits ? LODI_INST_EMITS : 0 ) | ( p.scolPart >= 0 ? LODI_INST_SCOL_PART : 0 ) );
+		/* FORCE_CARD (lane CARDLINK1, 2026-09-24): the base has a card layer AND
+		 * this placement's own ring -- the MNAM slot of the arrival the record
+		 * keeps -- either has no mesh, or its chunk's `C` line stood it on its
+		 * card (`--impostors-from-level`). Never set without a card layer, so a
+		 * bake that linked no cards writes the bit nowhere. */
+		if ( lib.bases[r.baseId].cardLayer != LODO_NO_CARD ) {
+			const bool emptySlot = lib.bases[r.baseId].rep[r.mnamSlot] == LODO_NO_MESH;
+			const bool byLine = s.cardPlaced.count( std::make_tuple( p.chunkX, p.chunkY, p.dim, p.objectIndex ) ) > 0;
+			if ( emptySlot || byLine ) {
+				r.flags |= LODI_INST_FORCE_CARD;
+				forcedCard++;
+				forcedEmptySlot += emptySlot ? 1 : 0;
+				forcedByLine += byLine ? 1 : 0;
+			}
+		}

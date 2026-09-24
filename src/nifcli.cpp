@@ -4154,69 +4154,6 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 			out().flush();
 		}
 
-		if ( lodgenNativeActive() ) {
-			{
-				const QString cc = lodgenIncrementalCacheCensus( inc );
-				if ( !cc.isEmpty() ) {
-					censusOut( cc );
-					out().flush();
-				}
-				const QStringList refused = lodgenIncrementalCacheRefusal( inc );
-				if ( !refused.isEmpty() ) {
-					for ( const QString & l : refused )
-						err() << l << Qt::endl;
-					lodgenNativeEnd();
-					return 1;
-				}
-				lodgenIncrementalOfferReuse( inc );
-			}
-			QString nrep, nerr;
-			bool nativeOk = false;
-			{
-				StageTimer st( &msMeshes );
-				nativeOk = lodgenNativeWrite( &nrep, &nerr );
-			}
-			if ( !nativeOk ) {
-				err() << "error: " << nerr << Qt::endl;
-				lodgenNativeEnd();
-				return 1;
-			}
-			censusOut( nrep );
-			/* The aggregate SHEETS, written after the pair because the compositor
-			 * runs inside the .lodi write and the DDS writer lives in lodgen.cpp.
-			 * They go into the output DATA tree, never the card bake tree: a set is
-			 * per WORLDSPACE CELL and the card tree is per base. */
-			if ( !lodgenNativeAggregateSets().isEmpty() ) {
-				QString aggRoot = outDir;
-				{
-					const QString norm = QDir( outDir ).absolutePath();
-					const QString suffix = QString( "/meshes/terrain/%1" ).arg( world.worldspaceEdid() );
-					if ( norm.endsWith( suffix, Qt::CaseInsensitive ) )
-						aggRoot = norm.left( norm.size() - suffix.size() );
-				}
-				QStringList aggWritten;
-				QString aggErr;
-				bool aggOk = true;
-				{
-					StageTimer st2( &msImpostors );
-					for ( const LodgenAggSet & a : lodgenNativeAggregateSets() )
-						if ( !lodgenAggregateWrite( aggRoot, world.worldspaceEdid(), a, &aggWritten, &aggErr ) ) {
-							aggOk = false;
-							break;
-						}
-				}
-				if ( !aggOk ) {
-					err() << "error: " << aggErr << Qt::endl;
-					lodgenNativeEnd();
-					return 1;
-				}
-				out() << "native-aggregate: " << lodgenNativeAggregateSets().size()
-					<< " card set(s), " << aggWritten.size() << " files under "
-					<< lodgenFo4csWorldDir( aggRoot, world.worldspaceEdid() ) << "/Aggregate"
-					<< Qt::endl;
-			}
-			lodgenNativeEnd();
-		}
 		/* WHERE THE OBJECT SHEETS GO, once, for the arrays, the atlas and the
 		 * card arrays (lane LAYOUT1, 2026-09-16). There is no `--target` flag
 		 * on the command line: `--native` IS the FO4CS target. Under it every
@@ -4334,6 +4271,84 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 			} else {
 				err() << "card arrays: " << cerr2 << Qt::endl;
 			}
+		}
+		if ( lodgenNativeActive() ) {
+			{
+				const QString cc = lodgenIncrementalCacheCensus( inc );
+				if ( !cc.isEmpty() ) {
+					censusOut( cc );
+					out().flush();
+				}
+				const QStringList refused = lodgenIncrementalCacheRefusal( inc );
+				if ( !refused.isEmpty() ) {
+					for ( const QString & l : refused )
+						err() << l << Qt::endl;
+					lodgenNativeEnd();
+					return 1;
+				}
+				lodgenIncrementalOfferReuse( inc );
+			}
+			/* THE CARD LINK (lane CARDLINK1, 2026-09-24). The card-arrays pass
+			 * above has appended `<array .lodm> <layer>` to every C line it
+			 * placed; the emitter reads them so the `.lodo` carries cardLayer,
+			 * cardCount and cardCorpusHash and the `.lodi` FORCE_CARD. That is
+			 * the one reason this whole native block now runs AFTER the object
+			 * passes rather than straight after the chunk pass. */
+			if ( arrays && !impostors.isEmpty() && !writtenBto.isEmpty() ) {
+				QString lerr;
+				if ( !lodgenNativeLinkCards( writtenBto,
+					objectsDir() + "/" + world.worldspaceEdid() + QStringLiteral( ".LodgenCards" ), &lerr ) ) {
+					err() << "error: " << lerr << Qt::endl;
+					lodgenNativeEnd();
+					return 1;
+				}
+			}
+			QString nrep, nerr;
+			bool nativeOk = false;
+			{
+				StageTimer st( &msMeshes );
+				nativeOk = lodgenNativeWrite( &nrep, &nerr );
+			}
+			if ( !nativeOk ) {
+				err() << "error: " << nerr << Qt::endl;
+				lodgenNativeEnd();
+				return 1;
+			}
+			censusOut( nrep );
+			/* The aggregate SHEETS, written after the pair because the compositor
+			 * runs inside the .lodi write and the DDS writer lives in lodgen.cpp.
+			 * They go into the output DATA tree, never the card bake tree: a set is
+			 * per WORLDSPACE CELL and the card tree is per base. */
+			if ( !lodgenNativeAggregateSets().isEmpty() ) {
+				QString aggRoot = outDir;
+				{
+					const QString norm = QDir( outDir ).absolutePath();
+					const QString suffix = QString( "/meshes/terrain/%1" ).arg( world.worldspaceEdid() );
+					if ( norm.endsWith( suffix, Qt::CaseInsensitive ) )
+						aggRoot = norm.left( norm.size() - suffix.size() );
+				}
+				QStringList aggWritten;
+				QString aggErr;
+				bool aggOk = true;
+				{
+					StageTimer st2( &msImpostors );
+					for ( const LodgenAggSet & a : lodgenNativeAggregateSets() )
+						if ( !lodgenAggregateWrite( aggRoot, world.worldspaceEdid(), a, &aggWritten, &aggErr ) ) {
+							aggOk = false;
+							break;
+						}
+				}
+				if ( !aggOk ) {
+					err() << "error: " << aggErr << Qt::endl;
+					lodgenNativeEnd();
+					return 1;
+				}
+				out() << "native-aggregate: " << lodgenNativeAggregateSets().size()
+					<< " card set(s), " << aggWritten.size() << " files under "
+					<< lodgenFo4csWorldDir( aggRoot, world.worldspaceEdid() ) << "/Aggregate"
+					<< Qt::endl;
+			}
+			lodgenNativeEnd();
 		}
 		/* ===== THE SCRATCH TEARDOWN (lane BTOFREE1, 2026-09-16) ============
 		 *

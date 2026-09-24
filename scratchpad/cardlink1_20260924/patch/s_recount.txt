@@ -1,0 +1,19 @@
+	if ( h.baseCount ) std::memcpy( L.bases.data(), p + h.offBases, tabs[0].bytes );
+	/* CARDLINK1 (2026-09-24): `cardCount` is REDUNDANT on purpose, like
+	 * `fullTriangles`, so the reader RECOUNTS it from the base rows instead of
+	 * believing it -- with or without the payload check, because a consumer
+	 * sizes its card pass from this word. And a card needs a provenance: a
+	 * base that names a card layer in a file whose `cardCorpusHash` is 0 says
+	 * which arrays it indexes into nowhere. */
+	{
+		quint32 cardsInRows = 0;
+		for ( const LodoBase & b : L.bases )
+			if ( b.cardLayer != LODO_NO_CARD )
+				cardsInRows++;
+		if ( cardsInRows != h.cardCount )
+			return refuse( QString( "cardCount %1 but %2 base row(s) name a card layer" )
+				.arg( h.cardCount ).arg( cardsInRows ) );
+		if ( cardsInRows > 0 && h.cardCorpusHash == 0 )
+			return refuse( QString( "%1 base row(s) name a card layer but cardCorpusHash is 0: no card "
+				"arrays are named for them" ).arg( cardsInRows ) );
+	}
