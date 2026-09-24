@@ -228,7 +228,11 @@ if want pics && [ -z "$RED" ]; then
 			shot "$ARM" pic_${h}_$s "$CUBE" $V8 WW_LOOKDEV_HOUR=$h $SKY WW_LOOKDEV_SHADOWS=$v
 		done
 	done
-	shot "$ARM" pic_cascades "$CUBE" $V8 WW_RENDER_DIST=2400 WW_LOOKDEV_HOUR=16.5 WW_CSM_PROBE=2 $ON
+	# cascade tint (probe 2: red A, green B, blue C, untinted past D). The camera's near/far
+	# planes follow the scene bounds (dist +-1536 on the cube), so no one framing holds all
+	# three: dist 1000 shows A|B (near 1, far 2536); dist 4000 with D=8000 shows B|C.
+	shot "$ARM" pic_cascades "$CUBE" $V8 WW_RENDER_DIST=1000 WW_LOOKDEV_HOUR=16.5 WW_CSM_PROBE=2 $ON
+	shot "$ARM" pic_cascades_far "$CUBE" $V8 WW_RENDER_DIST=4000 WW_CSM_DISTANCE=8000 WW_LOOKDEV_HOUR=16.5 WW_CSM_PROBE=2 $ON
 	shot "$ARM" pic_duct_on "$DUCT" $V8 WW_LOOKDEV_HOUR=16 $SKY $ON
 fi
 
