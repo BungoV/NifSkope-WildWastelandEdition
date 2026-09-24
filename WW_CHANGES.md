@@ -1,5 +1,36 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Plugin reader accepts self-indexed form IDs (ESMFIX1)
+
+- LOD generation now loads plugins whose form IDs point past their own master list, for example TestWorldspace.esp. Those form IDs resolve to the plugin itself, as they do in game. Before, the whole plugin was refused with "invalid form ID".
+
+## Terrain pyramid fixes (VTFIX1)
+
+**LOD generator: terrain pyramid fixes before the whole bake (lane VTFIX1, 2026-09-24).**
+- **The mask-rule census in a `.VT.lodm` now adds up.** The null land texture (form 0) is counted under
+  `noneDefault`, so `pbrm + legacyInverted + noneDefault == distinctLtex`. On the whole Commonwealth it reads
+  101 = 101. No sheet byte changes.
+- **`--land-detail-source vanilla-blend` now puts vanilla's fine relief on the right axes.** The blend had
+  swapped east and north when it unpacked the terrain normal word. The default (`vanilla`, a straight copy)
+  and `none` are unchanged.
+- **`--incremental` now notices a new generator.** Every chunk's input digest begins with the sha1 of the
+  running NifSkope. A changed default or a code change that moves bytes dirties the chunk, where before the
+  old bytes were kept as clean. The first incremental run on a new build rebakes everything once.
+- **Docs:** LODGEN_PARITY now matches the code on the two identity switches (both off by default; the
+  manifest is written either way). LODGEN_TERRAIN_VT's source anchors are refreshed.
+- **New gate:** `tests/spells/lodgen_vtfix.sh` (G1 census, G2 known-answer blend orientation, G3 default flip
+  vs `--incremental`). Each check was shown failing on the previous exe.
+
+## Lodgen reads the MO2 load order (LOADORDER1)
+
+- LOD generation reads a Mod Organizer 2 profile straight off disk. There is no need to launch NifSkope from MO2.
+  - Command line: `lodgen --mo2-profile <profile folder>` (optionally `--mo2-mods <mods folder>`). It replaces the plugin list and the --resource lines.
+  - Panel: Source > "Mod Organizer 2 profile", with Profile and Mods folder rows and a read-only Mod order list.
+  - Plugins resolve to the mod folder that supplies them.
+  - A plugin found nowhere is refused by name.
+  - The bake record lists the resolved paths.
+- `--plugins-txt` now keeps Fallout4.esm and the DLC masters, or refuses by name.
+
 ## Cascaded sun shadows (lane CSM1, 2026-09-24)
 
 The lookdev sun and the night light now cast shadows in the PBR renderer. There are three

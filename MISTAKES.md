@@ -5,6 +5,33 @@ Written the moment a mistake is recognised, unprompted (CONSTITUTION rule 2).
 Format: date -- what was done -- what was true -- how it was found -- the rule.
 Newest at the top.
 
+## 2026-09-24 -- lane ESMFIX1 (lane text)
+
+(none)
+
+## 2026-09-24 -- lane VTFIX1 (lane text)
+
+- **2026-09-24, VTFIX1: blend east/north swap.** `lodgenBlendVanillaDetail` unpacked east from bits 0-7 and
+  north from 16-23, the opposite of `lodgenTerrainMsnPixel`, and wrote them back into the same wrong slots.
+  - Why it hid: nothing looked transposed, the unit-length recompute is symmetric in the two, and no gate fed
+    it an asymmetric input.
+  - The lesson: a pack/unpack pair needs a known-answer test with a one-axis input.
+- **2026-09-24, VTFIX1: null LTEX never counted.** The mask cache stored form 0 without counting it, so a
+  census advertised as an identity (`sum == distinctLtex`) was false on the one bake large enough to hit
+  form 0.
+  - The lesson: an identity written into a doc gets a gate on the largest input, not only the Sanctuary slice.
+- **2026-09-24, VTFIX1: ledger never recorded the generator.** The incremental ledger digested inputs and
+  argv but not the generator, so a default flip left every chunk "clean".
+  - The lesson: a cache key must include the code that turns inputs into bytes.
+- **2026-09-24, VTFIX1: stale gate reference.** The lane brief listed `lodt_write.sh` among the gates, but the
+  spell is gone and `--lodt` is retired for `--lodl`.
+  - The lesson: check a gate list against `tests/spells/` before the sweep.
+
+## 2026-09-24 -- lane LOADORDER1 (lane text)
+
+- 2026-09-24 LOADORDER1: I added a third item to the LOD panel's Source box without searching the self-test for checks on that box. The structural check `source->count() == 2` failed on the first panel run and cost a rebuild. Rule: before adding an item to an existing selector, grep WW_LODGEN_TEST for the widget's objectName and update its structural count in the same patch.
+- 2026-09-24 LOADORDER1: the harness compared the GUI list with `lodgen --mo2-profile <copied profile> --print-source` and got 0 plugins. A copied profile has no ModOrganizer.ini beside it, so Data could not be found. Rule: a copied or fixture profile always passes `--data-root`.
+
 ## 2026-09-24 -- lane CSM1 (lane text)
 
 **2026-09-24, lane CSM1.**

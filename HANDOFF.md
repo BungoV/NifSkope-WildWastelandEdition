@@ -60,6 +60,74 @@ committed" or names an exe, this block overrides it.
 - Re-run the command-line bakes since 09-19 that used --data-root.
 
 ### Lane and director lines, 2026-09-24, newest first
+- 2026-09-24 22:03 ESMFIX1:
+  ESMFIX1 (2026-09-24, branch esmfix1-20260924 from 541bbe5; commit ab12bf3 + report; exe sha1 ec5959c4) -- DONE, not merged.
+
+  The ESM reader now loads TestWorldspace.esp ("AnotherOne's Test World"), which blocked his live profile.
+  - Cause: all 483 records carry file index FF, and the plugin has 1 master. The game and xEdit read an index at or beyond the master count as the plugin itself.
+  - Fix: lib/libfo76utils/src/esmfile.cpp now maps it that way for form versions below 0xC0 (up to Fallout 4). FO76 and Starfield are unchanged.
+
+  Gates:
+  - G1: his Default profile. All 47 plugins load and a Sanctuary bake runs (rc 0). Red: the rung refuses with "invalid form ID".
+  - G2: WRLD FF000F99 "TestDebugWorld" reads back as 1C000F99 (plugin 28), as xEdit's rule predicts. Red: the record is absent on the rung.
+  - G3: a 9-chunk Sanctuary bake on the 17 vanilla masters is byte-identical to the rung: 56 of 57 files match, and the .lodb differs only in its path, exe and time lines. lodgen_loadorder 24/0, lodgen_resources 4/0.
+
+  The final bake no longer needs TestWorldspace.esp unticked. lodgen_loadorder.sh G5 still unticks it in its profile copy. That text is stale, but the gate passes.
+- 2026-09-24 22:03 VTFIX1:
+  **VTFIX1 (LOD-B), 2026-09-24: DONE.**
+  - Branch vtfix1-20260924, commits 25a36ed and c29547d.
+  - Exe sha1 0518d243; rung sha1 bb60a7ea.
+
+  What the lane changed:
+  - **maskRules census closes.** The null LTEX (form 0) now counts under noneDefault, so the whole Commonwealth
+    reads 101 = 101; it was 100 vs 101.
+  - **vanilla-blend adds detail on the right axes.** East detail had been landing in north. This changes only
+    `--land-detail-source vanilla-blend` bakes; the default does not move.
+  - **Chunk input digest starts with the generator's identity** (sha1 of the running exe). `--incremental` now
+    rebakes after a default flip or a code change. The first incremental run on any new exe rebakes everything
+    once.
+
+  Gates (tests/spells/lodgen_vtfix.sh), rung vs lane exe:
+  - **G1:** 100 != 101 vs 101 = 101
+  - **G2:** north 77.15 vs east 78.74
+  - **G3:** 0 of 2 dirty vs 2 of 2 dirty
+
+  Kept green:
+  - terrain_vt 45/0
+  - terrain 26/0
+  - slab 16/0
+  - terrain_pbrm 14/0
+  - incremental
+  - bakerec
+  - lod_generation 128
+  - .lodl and the heightmap byte-identical
+
+  Open items:
+  - lodgen_defaults (d) "no C lines with identity off" is red on the rung too: 0 card lines. It predates this
+    lane and belongs to the card region.
+  - The docs/LODGEN_LEDGER_FORMAT.md row 8a is parked in scratchpad/vtfix1_20260924/fix03_ledgerdoc.py for after
+    INCRGATE1.
+  - INCRGATE1 may want a "generator changed" dirty reason in nifcli.cpp's comparison.
+  - Owed rulings, not done: VTNORMAL1's BC1 normal fix, sparse empty VT tiles, 2K vs 1K sheets.
+- 2026-09-24 22:03 LOADORDER1:
+  LOADORDER1 (2026-09-24, branch loadorder1-20260924; commits 27e5dfc 91f6fce 5ab1b5c d050be2 45dc72f; exe sha1 5ff25b1b) -- DONE, not merged.
+
+  `lodgen --mo2-profile <profile> [--mo2-mods <dir>]` reads his MO2 load order off disk, with no usvfs.
+  - Plugins come out as full paths, looked for in overwrite, then the enabled mods top-down, then Data.
+  - The resource stack is Data, then the enabled mods bottom-up, then overwrite.
+  - The .lodb carries the resolved paths.
+  - `--plugins-txt` keeps the masters.
+
+  The LOD panel's Source row has a third choice, "Mod Organizer 2 profile". It shows the resolved plugin list and the mod order.
+
+  Gates:
+  - G1-G5: 24/0.
+  - Panel spell: 4/0 (MO2DISK leg 14/0, suite 142/0, GUI list == CLI list for 46 plugins).
+  - Reds shown on the rung.
+
+  Final bake blocker: TestWorldspace.esp ("AnotherOne's Test World") carries FF form IDs that libfo76utils refuses ("invalid form ID"). Untick it in MO2, or fix esmfile.cpp:309 in a follow-up lane.
+
+  Panel output = mods\FO4CSLOD, which gives mods\FO4CSLOD\FO4CSLOD\Commonwealth on disk (Data\FO4CSLOD\Commonwealth in game, correct). The FO4CS target writes no stock .BTO/.BTR. The panel writes no .lodb (CLI only).
 - 2026-09-24 21:55 CSM1:
   **CSM1 (2026-09-24): cascaded sun shadows in the PBR renderer. LANDED, bungo has not seen it yet.**
   Exe `release/NifSkope.exe` 20:36:11, sha1 `53637ec69b804e34e635ce6f2b371f678ec47a8d`.
