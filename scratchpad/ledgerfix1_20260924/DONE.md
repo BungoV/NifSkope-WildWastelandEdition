@@ -55,3 +55,27 @@
 - 5e4f069 docs, skills: contracts, plans, the constitution and this repo's own skills (103 files)
 - 92c068f scratchpad: lane reports, briefs, measurement scripts and pictures (10,414 text files; +3 ignore rules)
 - then: ledger note with these hashes + this report (next commit), push, read-back below.
+- fe57aea ledgers: name the six commits of the recovery in HANDOFF and WW_CHANGES
+- PUSH 17:0x: `git push origin main` 720762a..fe57aea; `git status -sb` = "## main...origin/main" (in sync);
+  `git rev-parse HEAD` = `git ls-remote origin main` = fe57aea85db2ea0bbc6f50611d79262a63076120.
+  `git status --porcelain -uall` empty after 92c068f (nothing untracked-not-ignored).
+- One more commit follows with this report's last sections + the skill amendment (read-back in the final message).
+
+## 6 Not done / for the director
+- Ledger gap stays: HANDOFF 09-12..09-23, WW_CHANGES 09-10..09-23, MISTAKES 09-09..09-23 (minimal path, by ruling).
+- PBRR0 and DOCFIX2 (09-24) also have DELIVERABLE_TEXT.md; not in the brief's list, not re-added (named in the top block).
+- HELD by ignore, awaiting bungo: skill copies from other projects; five notes naming an outside RE source; the
+  pre-existing `scratchpad/**/nomad_*` ignore line still names that source (its files all sit in an ignored folder).
+- Public history already held the engine comparison doc's old name/wording (pdbscrub1: no history rewrite); a4c2069
+  carries the rename with the old content, 5e4f069 the reworded content.
+- The <10 kB refusal of the hardened splice scripts was proven by reading, not by a live run (the empty-anchor
+  refusal was run live).
+
+## 7 Skill review
+- Loaded: nifskope-ww-commit, search-lean. ww-contract-provenance not needed (no contract page touched).
+- Wished for: a "ledger recovery from editor snapshots" skill -- declined: the file-history search already exists as
+  the director's find_ledgers.py and the hardened splice scripts stop the cause; a second wipe should not happen.
+- Written: nifskope-ww-commit amended with section 7 "A public backlog of weeks" (ledgers-first order, the three
+  staging gates with the regex script kept outside the repo, reading numstat binary rows, held-for-ruling ignores,
+  fixture generators vs generated folders, timings, CRLF regenerated logs, attribution line, ledger-write rule) --
+  applied to BOTH trees (E:\Projects\Claude\.claude\skills and the repo copy), identical bytes.

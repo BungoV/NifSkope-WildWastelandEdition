@@ -160,3 +160,45 @@ tree must be clean apart from ignored paths — check with
 `git status --porcelain -uall` and confirm the only untracked output is empty,
 and `git status --ignored=matching --porcelain` names what you meant to
 exclude. Report the read-back, not the intent.
+
+## 7. A public backlog of weeks (LEDGERFIX1, 2026-09-24)
+
+The 09-24 commit landed 15 days of lanes: 18,727 untracked paths / 8 GB became
+10,805 text paths / ~118 MB in seven commits. What it added to sections 1-6:
+
+- **Order when the brief says "ledgers first"**: ledgers, then `.gitignore`,
+  then src/res, tests/tools, docs/skills, scratchpad; a last small commit puts
+  the hashes into HANDOFF + WW_CHANGES. An interruption then loses nothing.
+- **Three gates over every path a commit would stage**, read from
+  `git status --porcelain -uall -z` saved to a file: no game-data extension
+  (`.esm .esp .esl .ba2 .bsa`) anywhere, nothing over 5 MB, and the public
+  wording regex from the scrub report (the symbol-source names) with every
+  remaining hit named as allowed. The script that carries that regex lives in
+  the SESSION scratchpad, never in the repo -- it would publish the strings.
+  A new ignore pattern can trip the gate itself (`*.p` + `db` did): check
+  `.gitignore` too.
+- **After every `git add`, read the numstat's `-` rows**: they are the files git
+  thinks are binary. Pictures a document names stay; generated binaries with
+  odd extensions (`wb_rt.bin.4`, binary `.pbrm` bakes, crash scratch) get an
+  ignore rule and `git restore --staged --pathspec-from-file=<list>`. Also flag
+  any tracked file whose staged deletions exceed half its HEAD lines (a
+  whole-file rewrite = a line-ending flip). Script:
+  `scratchpad/ledgerfix1_20260924/cached_check.py`; inventory by dir/ext:
+  `inventory.py` beside it.
+- **Open questions for bungo are held by ignore, not published**: a
+  `# HELD for bungo's ruling` block in `.gitignore` (skill copies from other
+  projects, notes naming an outside RE source). Public history cannot be
+  taken back; an ignore line can.
+- Vanilla-derived test fixtures: ignore the generated folder, commit the
+  generator script (`tests/fixtures/pbr_*_data/` vs `pbr_r*_fixtures.py`).
+- Timing on this tree: first `git status -uall` 80 s, then ~2 s; `git add --
+  scratchpad` for 10k files 3 m 40 s; its commit 54 s. Foreground with a
+  600 s timeout is fine.
+- A tracked log that is now CRLF can be a real regeneration: compare
+  `git diff --numstat` with `--ignore-cr-at-eol`; equal counts = new content,
+  commit it as captured.
+- Attribution: end messages with the co-author line the SESSION gives (Opus 5.5
+  on 09-24), not the one in section 4.
+- **Ledger writes** (the 13:57 wipe): read into a variable and close before
+  opening for write; assert the new ledger is LONGER and its CR count
+  unchanged; refuse a target under 10 kB; read back after writing.
