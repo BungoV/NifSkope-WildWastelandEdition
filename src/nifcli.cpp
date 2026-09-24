@@ -2623,7 +2623,9 @@ static LodtWaterOptions gLodlWater;
  *  empty when the flag was not given.
  *
  *  `gLgSwitchDigest` is sha1 over the ARGUMENT VECTOR, in order, with the
- *  tokens in gLgSwitchSkip and their values dropped. It is deliberately
+ *  tokens in gLgSwitchSkip (src/lodgenchunkpass.cpp) and their values dropped;
+ *  the record's `switches` line folds the IDENTITY WORD into it as well
+ *  (lodgenSwitchesWithIdentity, lane INCRGATE1). It is deliberately
  *  CONSERVATIVE: reordering flags, or spelling a default explicitly, changes
  *  the digest and forces a full bake. That costs time and can never cost
  *  correctness, which is the right way round -- a switch digest that missed a
@@ -2664,43 +2666,9 @@ static void censusOut( const QString & line )
 	out() << line << Qt::endl;
 }
 
-/*! WHERE THE RECORD GOES, composed in ONE place (lane BAKEREC1, 2026-09-17).
- *
- *  Under the FO4CS target it sits with the files it describes, at
- *  `<mod>/FO4CSLOD/<ws>/<ws>.lodb` -- lane LAYOUT1's ruling, written down in
- *  `docs/LODGEN_LEDGER_FORMAT.md` section 1 and in `src/lodgenlayout.h`.
- *  Without that target there is no FO4CSLOD root at all, so it keeps its
- *  version-1 home beside the `.BTR`/`.BTO` files it is a record OF.
- *
- *  THE STOCK TARGET STILL WRITES ONE, and that is a deliberate divergence from
- *  this lane's brief. `--incremental` has refused without a record since lane
- *  INCR1 shipped it; making the record FO4CS-only would have retired the
- *  incremental path for every stock bake, silently, on the way to adding a
- *  feature. The stock ENGINE output -- `.BTR`, `.BTO`, the chunk sheets -- is
- *  untouched either way, which is what the byte-identity gates actually pin;
- *  each of them already excuses the `.lodb` by name and compares it field by
- *  field instead. */
-static QString lodbRecordPath( const QString & outDir, const QString & ws, bool fo4csTarget )
-{
-	return fo4csTarget
-		? ( lodgenFo4csWorldDir( outDir, ws ) + QChar( '/' ) + ws + QStringLiteral( ".lodb" ) )
-		: ( outDir + QChar( '/' ) + ws + QStringLiteral( ".lodb" ) );
-}
-
-/*! The record an `--incremental` run must diff against, FOUND rather than
- *  assumed: the previous bake may have been a stock one or an FO4CS one, and
- *  this run has no way to know which. Both spots are looked at, the FO4CS one
- *  first. Empty when neither holds a file, which is the `NO_LEDGER` refusal. */
-static QString lodbFindRecord( const QString & dir, const QString & ws )
-{
-	const QString a = lodbRecordPath( dir, ws, true );
-	if ( QFileInfo( a ).isFile() )
-		return a;
-	const QString b = lodbRecordPath( dir, ws, false );
-	if ( QFileInfo( b ).isFile() )
-		return b;
-	return QString();
-}
+/* lodbRecordPath(), lodbFindRecord(), the switch-digest skip lists and
+ * lodgenSwitchDigestOf() moved to src/lodgenchunkpass.cpp with the rest of the
+ * ledger (lane INCRGATE1, 2026-09-24), so the panel writes the same record. */
 
 /*! `--keep-bto` (lane BTOFREE1, 2026-09-16), a global for the same reason the
  *  two above are: cmdLodgen already carries forty-five parameters.
@@ -2713,86 +2681,6 @@ static QString lodbFindRecord( const QString & dir, const QString & ws )
  *  exactly as they did, byte for byte, which is what the gate pins. It is NOT
  *  in the switch-digest skip list, because it decides what is on disk. */
 static bool gLgKeepBto = false;
-
-/*! Flags whose TOKEN AND VALUE are both dropped from the digest, because
- *  neither can make a TRACKED CHUNK OUTPUT stale. That is the whole test, and
- *  it is narrower than "cannot reach an output byte": the ledger tracks the
- *  per-chunk .BTO/.BTR/.DDS files it lists and nothing else, so a flag that
- *  writes a SEPARATE product into a SEPARATE directory is not its business.
- *
- *  A flag is here if it names WHERE files go, or HOW MANY threads carry them,
- *  or WHICH FILE an asset is read from -- and in that last case only because
- *  the ledger digests the asset's BYTES through the same lodgenReadAsset() the
- *  bake uses, so moving a mod folder still dirties every chunk whose assets
- *  changed under it.
- *
- *  --native and --native-mesh-report are here, and they were taken OFF for one
- *  afternoon on the reasoning that a flag changing what a run WRITES belongs in
- *  the digest. That reasoning cost tests/spells/lodgen_native.sh check 5 -- the
- *  stock bake is byte-identical with and without --native -- because the only
- *  file that then differed was the ledger recording the flag. The pair goes to
- *  its own --native directory and cannot touch a chunk; the run that WOULD be
- *  wrong (an incremental one) is refused outright a few lines below, which is a
- *  better answer than a switch digest that fires on the honest case too.
- *
- *  --threads is on the list, and that is a claim: BAKEPERF1's pass retires
- *  every job on the calling thread IN JOB ORDER, so the worker count cannot
- *  reach a byte. If that ever stops being true this line is the bug. */
-static const char * const gLgSwitchSkip[] = {
-	"--out-dir", "--tex-dir", "--data-root", "--incremental",
-	"--threads", "--chunk-threads", "--preview-dir",
-	"--resource", "--plugins-txt", "--mo2-profile", "--mo2-mods",
-	"--native", "--native-mesh-report",
-	nullptr
-};
-
-/*! Flags whose TOKEN stays in the digest and whose VALUE is dropped. The list
- *  exists because a flag can be both things at once: --vt makes the chunk
- *  sheets come from the virtual-texture pyramid instead of the stock per-chunk
- *  composite -- a different picture from the same inputs, so the flag must be
- *  digested -- while its argument is only a place to put the pyramid, exactly
- *  like --out-dir's.
- *
- *  Digesting that path made two identical commands write two different ledgers
- *  whenever they were pointed at different directories, which is what
- *  tests/spells/lodgen_roads.sh R1 does on purpose: it bakes --no-roads twice
- *  into roadOff/ and roadOff2/ and compares every byte. One of the two kinds of
- *  list would have been enough for either flag; neither was enough for both. */
-static const char * const gLgSwitchSkipValue[] = {
-	"--vt",
-	nullptr
-};
-
-static QString lodgenSwitchDigestOf( const QStringList & a )
-{
-	QCryptographicHash h( QCryptographicHash::Sha1 );
-	for ( int i = 0; i < a.size(); i++ ) {
-		bool skip = false;
-		for ( const char * const * s = gLgSwitchSkip; *s; s++ ) {
-			if ( a.at( i ) == QLatin1String( *s ) ) {
-				skip = true;
-				i++;                    /* and its value */
-				break;
-			}
-		}
-		if ( skip )
-			continue;
-		for ( const char * const * s = gLgSwitchSkipValue; *s; s++ ) {
-			if ( a.at( i ) == QLatin1String( *s ) ) {
-				h.addData( a.at( i ).toUtf8() );   /* the flag, never its path */
-				h.addData( QByteArray( "\x1f", 1 ) );
-				skip = true;
-				i++;
-				break;
-			}
-		}
-		if ( skip )
-			continue;
-		h.addData( a.at( i ).toUtf8() );
-		h.addData( QByteArray( "\x1f", 1 ) );
-	}
-	return QString::fromLatin1( h.result().toHex() );
-}
 
 //! `lodgen <file.esm>` — the LOD generation campaign's ESM record layer
 //! (docs/LODGEN_PLAN.md rung 0). --list-worldspaces enumerates WRLD records;
@@ -4066,274 +3954,121 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 			for ( int cx = x0; cx <= region[2]; cx += d )
 				jobs.append( LodgenChunkJob{ d, cx, cy } );
 
-		/* ===== INCREMENTAL REGENERATION (lane INCR1, 2026-09-12) ==========
+		/* ===== INCREMENTAL REGENERATION AND THE BAKE RECORD ===============
 		 *
-		 * The filter goes HERE, on the job list, and nowhere else. Everything
-		 * downstream -- the retire callback, `writtenBto`, the `[n]` lines,
-		 * the native accumulator -- consumes the pass IN JOB ORDER, so a
-		 * filtered list is still in job order and the bytes of the chunks that
-		 * DO run cannot depend on which of their neighbours ran beside them.
-		 * That is the whole reason the byte-identity gate can pass, and it is
-		 * a property of BAKEPERF1's queue, not of this lane's code.
+		 * Lane INCR1 (2026-09-12) put the filter HERE, on the job list, and
+		 * nowhere else: everything downstream -- the retire callback,
+		 * `writtenBto`, the `[n]` lines, the native accumulator -- consumes
+		 * the pass IN JOB ORDER, so a filtered list is still in job order and
+		 * the bytes of the chunks that DO run cannot depend on which of their
+		 * neighbours ran beside them.
 		 *
-		 * The ledger lives at <out-dir>/<WorldspaceEdid>.lodb. The brief
-		 * suggested <out>/Terrain/<WS>.lodb; --out-dir has no Terrain/
-		 * subfolder in this generator (that folder belongs to the --vt mod
-		 * tree, which this ledger does not describe), so the ledger sits
-		 * beside the .BTR/.BTO files it is a ledger OF. Stated as a
-		 * divergence rather than done quietly; bungo can move it with a word.
+		 * Lane INCRGATE1 (2026-09-24) moved the ledger itself -- the diff, the
+		 * refusals, the `.lodj` cache hooks and the record -- into
+		 * `src/lodgenchunkpass.cpp`, so the LOD Generation panel runs the same
+		 * code. The words printed here did not change.
 		 *
-		 * Lane LAYOUT1 (2026-09-16) did NOT move it: the ledger's new home,
-		 * `FO4CSLOD/<ws>/<ws>.lodb`, belongs to lane BAKEREC1 and this lane
-		 * writes NOTHING there. The layout gate names this file as an
-		 * exemption rather than sweeping it.
-		 *
-		 * LANE BAKEREC1 (2026-09-17) MOVED IT AND GREW IT. The ledger and the
-		 * BAKE RECORD bungo asked for on 2026-09-16 are one file: same name,
-		 * version 2, plain text, and it now carries the plugins, the corpus
-		 * hashes, the argument vector and the census as well as the digests.
-		 * `lodbRecordPath()` is the only spelling of where it goes.
-		 */
-		const QString ledgerPath =
-			lodbRecordPath( outDir, world.worldspaceEdid(), !nativeDir.isEmpty() );
-		LodgenLedger prevLedger;
-		QVector<LodgenChunkJob> allJobs = jobs;
-		bool incremental = false;
-		/* The directory the PREVIOUS record's relative output paths resolve
-		 * against: the record's own folder, which is the law the format states
-		 * (`docs/LODGEN_BAKE_RECORD.md`) and which lets a mod folder be moved.
-		 * It is the record's folder, not `--incremental`'s argument, because
-		 * the two stopped being the same directory when the record moved under
-		 * `FO4CSLOD/<ws>/`. */
-		QString prevRecordDir;
-		if ( !gLgIncremental.isEmpty() ) {
-			const QString found = lodbFindRecord( gLgIncremental, world.worldspaceEdid() );
-			const QString srcLedger = found.isEmpty()
-				? lodbRecordPath( gLgIncremental, world.worldspaceEdid(), !nativeDir.isEmpty() )
-				: found;
-			prevRecordDir = QFileInfo( srcLedger ).absolutePath();
-			QString lerr;
-			/* THE REFUSALS. Each prints the reason AND the way forward, then
-			 * exits non-zero WITHOUT baking. An --incremental that silently
-			 * promoted itself to a full bake would have lied to an operator
-			 * who is watching a clock; one that silently did half the work
-			 * would have lied worse. */
-			if ( !lodgenReadLedger( srcLedger, &prevLedger, &lerr ) ) {
-				err() << "refused: --incremental has nothing to diff against -- " << lerr << Qt::endl;
-				err() << "  run the same command once WITHOUT --incremental; every bake writes "
-						 "the ledger, so the next run can be incremental." << Qt::endl;
+		 * The pass is built FIRST because the IDENTITY WORD is read off it: the
+		 * record's `switches` is now the argv digest AND every effective
+		 * setting, so a default that moved between two builds refuses an
+		 * incremental run instead of keeping yesterday's chunks. */
+		LodgenChunkPassOptions pass;
+		pass.plugins = file;
+		pass.worldspace = worldspace ? worldspace : 0x3CU;
+		pass.worldEdid = world.worldspaceEdid();
+		pass.wantBtr = true;
+		pass.wantBto = true;
+		pass.wantTex = !texDir.isEmpty() && !texFromVt;
+		pass.terrain = opts;
+		pass.cover = coverOpts;
+		pass.texDataRoot = dataRoot.isEmpty()
+			? QStringLiteral( "E:/Tools/Fallout 4/DataUnpacked/Data" ) : dataRoot;
+		pass.meshDir = outDir;
+		pass.texDir = texDir;
+		{
+			LodgenObjectOptions oopts;
+			oopts.dim = d;
+			oopts.identity = identity;
+			oopts.bakeAO = bakeAO;
+			oopts.cullBuried = cullBuried;
+			oopts.cullMargin = cullMargin;
+			oopts.aoGrey = aoGrey;
+			oopts.aoSkirtCells = aoSkirt;
+			oopts.impostorDir = impostors;
+			oopts.impostorFromLevel = impostorFromLevel;
+			oopts.cardAuxDiv = cardAuxDiv;
+			oopts.treesOnly = treesOnly;
+			oopts.slotFallback = slotFallback;
+			oopts.dataRoot = dataRoot.isEmpty()
+				? QStringLiteral( "E:/Tools/Fallout 4/DataUnpacked/Data" ) : dataRoot;
+			pass.object = oopts;
+		}
+		LodgenIdentityExtras idx;
+		idx.atlas = atlas;
+		idx.arrays = arrays;
+		idx.merge = merge;
+		idx.atlasBc1 = atlasBc1;
+		idx.keepBto = gLgKeepBto;
+		idx.texFromVt = texFromVt;
+		idx.simplify = simplify;
+		idx.vt = vtOpts;
+		idx.vtBtr = vtBtr;
+		idx.nativeLadder = nativeLadder;
+		idx.nativeOccluders = nativeOccluders;
+		idx.libraryNear = libraryNear;
+		idx.ladderFoliage = ladderFoliage;
+		idx.silhouetteMin = silhouetteMin;
+		idx.placementAo = placementAo;
+		idx.vertexAo = vertexAo;
+		idx.lodiV7 = lodiV7;
+		idx.scrappable = scrappable;
+		idx.identityJoinLegacy = identityJoinLegacy;
+		idx.identityJoinGap = identityJoinGap;
+		idx.aggregate = aggregate;
+		idx.aggMin = aggMin;
+		idx.aggTile = aggTile;
+		idx.aggViews = aggViews;
+		const QStringList idDump = lodgenIdentityDump( pass, idx );
+		const QString idWord = lodgenIdentityWord( idDump );
+		out() << "identity: " << idWord << ", " << idDump.size() << " setting(s)" << Qt::endl;
+		{
+			// WW_LODGEN_IDENTITY_DUMP=<file>: the lines the word is hashed from, for a gate to diff
+			const QString dumpTo = qEnvironmentVariable( "WW_LODGEN_IDENTITY_DUMP" );
+			QFile df( dumpTo );
+			if ( !dumpTo.isEmpty() && df.open( QIODevice::WriteOnly ) )
+				df.write( ( idDump.join( QChar( '\n' ) ) + QChar( '\n' ) ).toUtf8() );
+		}
+
+		LodgenIncrementalRun inc;
+		inc.fromDir = gLgIncremental;
+		inc.requireRecord = true;
+		inc.outDir = outDir;
+		inc.nativeDir = nativeDir;
+		inc.digestRoot = pass.texDataRoot;
+		inc.worldspace = pass.worldspace;
+		inc.dim = d;
+		for ( int k = 0; k < 4; k++ )
+			inc.region[k] = region[k];
+		inc.switches = lodgenSwitchesWithIdentity( gLgSwitchDigest, idWord );
+		inc.regionProducts = atlas || arrays || !impostors.isEmpty();
+		inc.nativeCache = gLgNativeCache;
+		inc.warn = []( const QString & w ) { err() << w << Qt::endl; };
+		{
+			QString incCensus, incDetail;
+			QStringList incReasons;
+			const LodgenIncrementalVerdict v =
+				lodgenIncrementalBegin( inc, world, jobs, &incCensus, &incReasons, &incDetail );
+			if ( v != LodgenIncrementalVerdict::Go ) {
+				for ( const QString & l : lodgenIncrementalRefusal( v, inc, incDetail ) )
+					err() << l << Qt::endl;
 				return 1;
 			}
-			if ( prevLedger.worldspace != ( worldspace ? worldspace : 0x3CU )
-				 || prevLedger.dim != d
-				 || prevLedger.region[0] != region[0] || prevLedger.region[1] != region[1]
-				 || prevLedger.region[2] != region[2] || prevLedger.region[3] != region[3] ) {
-				err() << "refused: " << srcLedger << " describes worldspace "
-					  << QString::number( prevLedger.worldspace, 16 ) << " dim " << prevLedger.dim
-					  << " region " << prevLedger.region[0] << " " << prevLedger.region[1] << " "
-					  << prevLedger.region[2] << " " << prevLedger.region[3]
-					  << ", and this run is a different shape." << Qt::endl;
-				err() << "  an incremental run must cover exactly the region its ledger covers; "
-						 "bake this region once without --incremental." << Qt::endl;
-				return 1;
+			if ( !incCensus.isEmpty() ) {
+				censusOut( incCensus );
+				for ( const QString & r : incReasons )
+					out() << r << Qt::endl;
+				out().flush();
 			}
-			if ( prevLedger.switches != gLgSwitchDigest ) {
-				err() << "refused: the switches differ from the ones the ledger was written with, "
-						 "so EVERY chunk is dirty and an incremental run would be a full run with "
-						 "extra bookkeeping." << Qt::endl;
-				err() << "  bake without --incremental. (The digest covers the argument vector in "
-						 "order; even reordering flags fires it, which is deliberate -- it can "
-						 "only over-rebake, never under-rebake.)" << Qt::endl;
-				return 1;
-			}
-			/* WHICH POST-PASSES ARE ACTUALLY WHOLE-REGION. The dependency map
-			 * was written before the code and named four; MEASURING them cut
-			 * the list to three, and the correction is worth more than the
-			 * original guess. lodgenMergeChunkShapes and lodgenSimplifyFarRings
-			 * are `for ( path : btoPaths )` loops that open one .BTO, rewrite
-			 * it and save it with NO state carried between files -- a filtered
-			 * list gives each rebaked chunk exactly the treatment a full run
-			 * would, and the chunks that were skipped were merged and cut by
-			 * the bake that wrote them. --atlas and --arrays are different:
-			 * they build ONE sheet, ONE array set for the whole region out of
-			 * every written .BTO, so a filtered list would build them from a
-			 * fraction of it and look like an atlas. --impostors is on this
-			 * list with them because the card sets are aggregated per region
-			 * the same way.
-			 *
-			 * Keeping the merge on the refusal list would have been the safe
-			 * reading and the wrong one: it is ON BY DEFAULT, so it would have
-			 * made --incremental refuse every command anybody would type. */
-			if ( atlas || arrays || !impostors.isEmpty() ) {
-				err() << "refused: --atlas, --arrays and --impostors each build ONE region-wide "
-						 "product out of the whole written .BTO list, so a filtered chunk list "
-						 "would build them from a FRACTION of the region and not say so."
-					  << Qt::endl;
-				err() << "  bake without --incremental, or drop those flags from this run and do "
-						 "them in a separate full pass over the finished chunks. (The merge and "
-						 "the far-ring simplify are NOT on this list: both rewrite one .BTO at a "
-						 "time with nothing carried between files.)" << Qt::endl;
-				return 1;
-			}
-			/* --native IS the same case, and it is NOT visible in the output
-			 * tree the way an atlas is. lodgenNativeActive() collects one
-			 * NativePlacement per drawn reference and one lighting sample per
-			 * vertex INSIDE the chunk pass (lodgen.cpp:3784 and :4069), so a
-			 * filtered chunk list writes a .lodo/.lodi holding only the chunks
-			 * that happened to be dirty -- a pair that loads, verifies its own
-			 * hashes, and is missing most of the worldspace. It refuses here
-			 * rather than in the switch digest so the message names the reason:
-			 * the digest would fire on a stock bake that merely wrote a pair
-			 * beside it, which cost lodgen_native.sh check 5. */
-			/* ...and that refusal is what lane INCR1 was opened to remove, because
-			 * it made `--incremental` refuse the RULED pipeline: bungo's FO4CS
-			 * command is `--native <dir>`, so "refuse --native" read "refuse the
-			 * only target anybody bakes". A skipped chunk now speaks from its
-			 * `.lodj` cache instead of being silently missing from the pair; the
-			 * chunk pass replays it in that chunk's own queue position, so the
-			 * arrival order -- which the library's mesh ids depend on -- is the
-			 * order a full bake would have produced.
-			 *
-			 * With the cache turned OFF there is nothing to read back, so the
-			 * refusal is exactly the one that was here before. */
-			if ( !nativeDir.isEmpty() && !gLgNativeCache ) {
-				err() << "refused: --native builds ONE .lodo/.lodi pair for the whole region out of "
-						 "the placements the chunk pass hands it, so an incremental run would write "
-						 "a pair covering only the chunks it rebaked and say nothing about the rest."
-					  << Qt::endl;
-				err() << "  --no-native-cache is what turned the per-chunk cache off; drop it and "
-						 "the skipped chunks speak from their .lodj files. Or bake without "
-						 "--incremental." << Qt::endl;
-				return 1;
-			}
-			/* Now the diff. A chunk is dirty when its input digest moved, when
-			 * the ledger has never heard of it, or when an output it claims is
-			 * missing or has been edited under us. */
-			QSet<QString> dirty;
-			/* THE LIST THE WIDENING IS SEEDED FROM (lane INCR1, 2026-09-17),
-			 * which is NOT the same list. The widening exists because the
-			 * terrain ring and the AO skirt each reach one cell, so a chunk
-			 * whose INPUTS moved changes what its neighbours draw. A chunk
-			 * that is dirty only because its own `.lodj` cache went missing
-			 * changes nothing for anybody: the cache is this tree's record of
-			 * what that chunk once emitted, not an input to it, and rebaking
-			 * the chunk writes the same bytes again. Seeding the widening
-			 * from it made deleting ONE cache file rebake the whole region,
-			 * measured in `scratchpad/incr1_20260917/s2_proof.txt` leg C. */
-			QSet<QString> dirtyWide;
-			QHash<QString, const LodgenLedgerEntry *> byKey;
-			for ( const LodgenLedgerEntry & e : prevLedger.chunks )
-				byKey.insert( QString( "%1,%2" ).arg( e.cx ).arg( e.cy ), &e );
-			int movedInputs = 0, unknown = 0, lostOutput = 0;
-			QStringList reasons;
-			for ( const LodgenChunkJob & j : allJobs ) {
-				const QString key = QString( "%1,%2" ).arg( j.cx ).arg( j.cy );
-				const LodgenLedgerEntry * pe = byKey.value( key, nullptr );
-				if ( !pe ) {
-					dirty.insert( key );
-					dirtyWide.insert( key );
-					unknown++;
-					continue;
-				}
-				const LodgenLedgerEntry & e = *pe;
-				const QString now = lodgenChunkInputDigest( world, d, j.cx, j.cy,
-					dataRoot.isEmpty()
-						? QStringLiteral( "E:/Tools/Fallout 4/DataUnpacked/Data" ) : dataRoot );
-				if ( now != e.inputs ) {
-					dirty.insert( key );
-					dirtyWide.insert( key );
-					movedInputs++;
-					if ( reasons.size() < 8 )
-						reasons.append( QString( "  (%1,%2) inputs %3 -> %4" )
-							.arg( j.cx ).arg( j.cy ).arg( e.inputs.left( 12 ), now.left( 12 ) ) );
-					continue;
-				}
-				/* EVERY output, not the first lost one, because WHICH output was
-				 * lost decides whether the neighbours are dragged in with it. */
-				bool lostAny = false, lostReal = false;
-				for ( int k = 0; k < e.outFiles.size(); k++ ) {
-					const QString fp = prevRecordDir + "/" + e.outFiles[k];
-					if ( lodgenFileDigest( fp ) == e.outDigests[k] )
-						continue;
-					const bool isCache = e.outFiles[k].endsWith( QLatin1String( ".lodj" ) );
-					if ( !lostAny && reasons.size() < 8 )
-						reasons.append( QString( "  (%1,%2) output %3 is missing or edited%4" )
-							.arg( j.cx ).arg( j.cy ).arg( e.outFiles[k] )
-							.arg( isCache ? QStringLiteral( " (a chunk cache: this chunk only)" )
-								: QString() ) );
-					lostAny = true;
-					if ( !isCache )
-						lostReal = true;
-				}
-				if ( lostAny ) {
-					dirty.insert( key );
-					lostOutput++;
-					if ( lostReal )
-						dirtyWide.insert( key );
-				}
-			}
-			/* THE WIDENING. A chunk is also dirty when a chunk within ONE CELL
-			 * of it is: the terrain ring and the AO skirt each reach exactly
-			 * one cell (docs/LODGEN_LEDGER_FORMAT.md section 2). The input
-			 * digest already covers the ring, so this second pass is belt AND
-			 * braces -- it fires on a neighbour whose OUTPUT was lost, which
-			 * no input digest can see. */
-			QSet<QString> widened = dirty;
-			for ( const LodgenChunkJob & j : allJobs ) {
-				if ( widened.contains( QString( "%1,%2" ).arg( j.cx ).arg( j.cy ) ) )
-					continue;
-				for ( const QString & dk : dirtyWide ) {
-					const int dx = dk.section( QLatin1Char( ',' ), 0, 0 ).toInt();
-					const int dy = dk.section( QLatin1Char( ',' ), 1, 1 ).toInt();
-					if ( j.cx <= dx + d && dx <= j.cx + d && j.cy <= dy + d && dy <= j.cy + d ) {
-						widened.insert( QString( "%1,%2" ).arg( j.cx ).arg( j.cy ) );
-						break;
-					}
-				}
-			}
-			const int spread = widened.size() - dirty.size();
-			/* THE CACHE HAS TO BE THERE FOR EVERY CHUNK THIS RUN WILL SKIP
-			 * (lane INCR1). Two cases, one check. A cache file deleted by hand
-			 * self-heals: its chunk is rebaked and writes it again. And a
-			 * record written BEFORE this lane existed lists no `.lodj` at all,
-			 * so every chunk would look clean, nothing would be replayed, and
-			 * the run would write a valid, self-consistent, EMPTY pair. That is
-			 * the worst shape this bug has, so it is checked against the DISK
-			 * and not against the ledger. */
-			int lostCache = 0;
-			if ( !nativeDir.isEmpty() ) {
-				const QString cdir = lodgenFo4csWorldDir( nativeDir, world.worldspaceEdid() );
-				for ( const LodgenChunkJob & j : allJobs ) {
-					const QString key = QString( "%1,%2" ).arg( j.cx ).arg( j.cy );
-					if ( widened.contains( key ) )
-						continue;
-					const QString cp = QString( "%1/%2.%3.%4.%5.lodj" )
-						.arg( cdir, world.worldspaceEdid() )
-						.arg( j.dim ).arg( j.cx ).arg( j.cy );
-					if ( !QFileInfo::exists( cp ) ) {
-						widened.insert( key );
-						lostCache++;
-						if ( reasons.size() < 8 )
-							reasons.append( QString( "  (%1,%2) has no native chunk cache" )
-								.arg( j.cx ).arg( j.cy ) );
-					}
-				}
-			}
-			QVector<LodgenChunkJob> kept;
-			for ( const LodgenChunkJob & j : allJobs )
-				if ( widened.contains( QString( "%1,%2" ).arg( j.cx ).arg( j.cy ) ) )
-					kept.append( j );
-			censusOut( QString( "incremental: %1 of %2 chunks dirty "
-							  "(%3 inputs moved, %4 not in the ledger, %5 output lost, "
-							  "%6 by neighbour, %7 with no native chunk cache)" )
-				.arg( kept.size() ).arg( allJobs.size() )
-				.arg( movedInputs ).arg( unknown ).arg( lostOutput ).arg( spread )
-				.arg( lostCache ) );
-			for ( const QString & r : reasons )
-				out() << r << Qt::endl;
-			out().flush();
-			jobs = kept;
-			incremental = true;
 		}
 
 		/* ===== THE .BTO SCRATCH FOLDER (lane BTOFREE1, 2026-09-16) =========
@@ -4362,153 +4097,18 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 			}
 		}
 
-		LodgenChunkPassOptions pass;
-		pass.plugins = file;
-		pass.worldspace = worldspace ? worldspace : 0x3CU;
-		pass.worldEdid = world.worldspaceEdid();
-		pass.wantBtr = true;
-		pass.wantBto = true;
 		pass.btoScratchDir = btoScratch;
-		pass.wantTex = !texDir.isEmpty() && !texFromVt;
-		pass.terrain = opts;
-		pass.cover = coverOpts;
-		pass.texDataRoot = dataRoot.isEmpty()
-			? QStringLiteral( "E:/Tools/Fallout 4/DataUnpacked/Data" ) : dataRoot;
-		pass.meshDir = outDir;
-		pass.texDir = texDir;
-		{
-			LodgenObjectOptions oopts;
-			oopts.dim = d;
-			oopts.identity = identity;
-			oopts.bakeAO = bakeAO;
-			oopts.cullBuried = cullBuried;
-			oopts.cullMargin = cullMargin;
-			oopts.aoGrey = aoGrey;
-			oopts.aoSkirtCells = aoSkirt;
-			oopts.impostorDir = impostors;
-			oopts.impostorFromLevel = impostorFromLevel;
-			oopts.cardAuxDiv = cardAuxDiv;
-			oopts.treesOnly = treesOnly;
-			oopts.slotFallback = slotFallback;
-			oopts.dataRoot = dataRoot.isEmpty()
-				? QStringLiteral( "E:/Tools/Fallout 4/DataUnpacked/Data" ) : dataRoot;
-			pass.object = oopts;
-		}
 
-		/* What each retired job actually put on disk, for the ledger. Filled in
-		 * the retire callback, which runs on THIS thread in job order, so the
-		 * list is deterministic without a sort. */
-		QHash<QString, QStringList> producedFiles;
-
-		/* ---- THE PER-CHUNK NATIVE CACHE (lane INCR1, 2026-09-17) --------
-		 *
-		 * Written on every `--native` bake, full or incremental, because a
-		 * cache only helps the run AFTER the one that made it. It is listed
-		 * in the record's `out` rows below like every other output, so the
-		 * layout census counts it and editing one by hand makes its chunk
-		 * dirty by the ordinary output check. */
-		const QString lodjDir = nativeDir.isEmpty() ? QString()
-			: lodgenFo4csWorldDir( nativeDir, world.worldspaceEdid() );
-		auto lodjPath = [&]( int dm, int cx, int cy ) {
-			return QString( "%1/%2.%3.%4.%5.lodj" )
-				.arg( lodjDir, world.worldspaceEdid() ).arg( dm ).arg( cx ).arg( cy );
-		};
-		int lodjWritten = 0, lodjReplayed = 0, lodjFailed = 0;
-		qint64 lodjPlacements = 0;
-		if ( !nativeDir.isEmpty() && gLgNativeCache ) {
-			pass.nativeJournalSink = [&]( const LodgenChunkOutcome & r,
-				LodgenNativeJournal * jr ) {
-				const QString cp = lodjPath( r.dim, r.cx, r.cy );
-				QString jerr;
-				if ( !lodgenNativeJournalWriteCache( jr, cp, world.worldspaceEdid(),
-						r.dim, r.cx, r.cy, &jerr ) ) {
-					err() << "native cache (" << r.cx << "," << r.cy << "): "
-						  << jerr << Qt::endl;
-					lodjFailed++;
-					return;
-				}
-				lodjWritten++;
-				/* the retire callback for this same job appends to this very
-				 * list a moment later, and it runs on this thread too. */
-				producedFiles[QString( "%1,%2" ).arg( r.cx ).arg( r.cy )].append( cp );
-			};
-			if ( incremental ) {
-				pass.nativeAllJobs = allJobs;
-				pass.nativeReplayCached = [&]( const LodgenChunkJob & j ) {
-					QString jerr;
-					if ( !lodgenNativeReplayCache( lodjPath( j.dim, j.cx, j.cy ), &jerr ) ) {
-						err() << "native cache: " << jerr << Qt::endl;
-						lodjFailed++;
-						return;
-					}
-					lodjReplayed++;
-					lodjPlacements += lodgenNativeCacheLastPlacements();
-				};
-			}
-		}
+		/* THE PER-CHUNK NATIVE CACHE (lane INCR1, 2026-09-17): written on every
+		 * `--native` bake unless `--no-native-cache`, replayed for the chunks an
+		 * incremental run skips. The hooks live in lodgenchunkpass.cpp. */
+		lodgenIncrementalArmCache( inc, world.worldspaceEdid(), pass );
 
 		{
 			QString passErr;
 			const bool passOk = lodgenRunChunkPass( jobs, pass,
 				[&]( const LodgenChunkOutcome & r ) {
-					{
-						QStringList & pf = producedFiles[QString( "%1,%2" ).arg( r.cx ).arg( r.cy )];
-						/* WITH A SCRATCH FOLDER the `.BTO` will not survive this
-						 * run, so it is not a tracked output and does not go in
-						 * the ledger: digesting a file we are about to delete is
-						 * exactly the defect the ledger's own comment below
-						 * records, and it made every later --incremental run
-						 * rebake the whole region. Its manifest DOES survive,
-						 * at its final path in the output folder, and the
-						 * digest is taken at ledger-write time, after the move.
-						 * `.BTR` is unaffected either way. */
-						for ( const QString & p : { r.btrPath, r.btoPath, r.manifestPath } ) {
-							if ( p.isEmpty() )
-								continue;
-							if ( !btoScratch.isEmpty() && p == r.btoPath )
-								continue;
-							if ( !btoScratch.isEmpty() && p == r.manifestPath ) {
-								/* WHERE THE SIDECAR WILL BE (lane LAYOUT1, 2026-09-16):
-								 * the teardown below drops it under the one root, so
-								 * the ledger is told that path and not the mod
-								 * folder's root. Naming a path nothing will ever write
-								 * cost the entry its digest -- the ledger recorded an
-								 * EMPTY hash, which no later run could ever match --
-								 * and the layout gate's ledger leg is what caught it. */
-								pf.append( lodgenFo4csWorldDir( outDir, world.worldspaceEdid() )
-									+ QStringLiteral( "/" )
-									+ QFileInfo( r.btoPath ).fileName()
-									+ QStringLiteral( ".manifest.txt" ) );
-								continue;
-							}
-							/* NO EXISTENCE CHECK HERE (2026-09-18): at more than one
-							 * chunk thread the bytes sit in the writer's queue when
-							 * the job retires, so the file may not be on disk yet;
-							 * an `exists` test dropped the last chunks' `.BTR` rows
-							 * from a parallel bake's record while the serial one
-							 * kept them (lodgen_perf leg (a), 13 rows against 16).
-							 * A path is set only when its write was accepted, the
-							 * queue's failures fail the pass at finish(), and the
-							 * digest is taken at ledger-write time, after the drain. */
-							pf.append( p );
-						}
-						/* The colour/normal/data sheets. LodgenChunkOutcome does
-						 * not carry their paths -- only an error string -- so
-						 * they are named here from the same format string
-						 * lodgenBakeTerrainTextures builds them with. Without
-						 * this the ledger would describe the meshes of a chunk
-						 * and be blind to its sheets, and deleting a sheet by
-						 * hand would not make its chunk dirty. */
-						if ( pass.wantTex && !pass.texDir.isEmpty() ) {
-							const QString sheetBase = QString( "%1/%2.%3.%4.%5" )
-								.arg( pass.texDir ).arg( pass.worldEdid )
-								.arg( r.dim ).arg( r.cx ).arg( r.cy );
-							for ( const QString & sfx : { QStringLiteral( ".DDS" ),
-								QStringLiteral( "_msn.DDS" ), QStringLiteral( "_data.DDS" ) } )
-								if ( QFileInfo::exists( sheetBase + sfx ) )
-									pf.append( sheetBase + sfx );
-						}
-					}
+					lodgenIncrementalNoteRetired( inc, pass, r );
 					if ( pass.wantBtr ) {
 						if ( !r.btrBuilt ) {
 							if ( r.btrNoLand )
@@ -4555,59 +4155,20 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 		}
 
 		if ( lodgenNativeActive() ) {
-			if ( !nativeDir.isEmpty() && gLgNativeCache ) {
-				censusOut( QString( "native cache: %1 chunk(s) written to .lodj, "
-								  "%2 replayed from cache (%3 placement(s)), %4 failure(s), "
-								  "%5 arrival(s) lit by more than one chunk" )
-					.arg( lodjWritten ).arg( lodjReplayed ).arg( lodjPlacements )
-					.arg( lodjFailed ).arg( lodgenNativeSharedArrivals() ) );
-				out().flush();
-			}
-			if ( lodjFailed > 0 ) {
-				err() << "error: " << lodjFailed << " native chunk cache failure(s); the pair "
-						 "this run would write is missing whole chunks. Bake without "
-						 "--incremental." << Qt::endl;
-				lodgenNativeEnd();
-				return 1;
-			}
-			/* THE ONE CASE THE CACHE CANNOT REPRODUCE BIT FOR BIT, refused
-			 * rather than hoped through. An arrival is keyed `(refForm,
-			 * scolPart)` ACROSS chunks, so a placement two chunks both light
-			 * has sums built from both, and `(prev + a1) + a2` is not
-			 * `prev + (a1 + a2)` in floating point. Zero is the ordinary
-			 * answer -- lighting is keyed on the chunk's own identity index --
-			 * and anything else means the pair would be NEARLY right, which is
-			 * the one thing a bake may not be. */
-			if ( lodjReplayed > 0 && lodgenNativeSharedArrivals() > 0 ) {
-				err() << "refused: " << lodgenNativeSharedArrivals()
-					  << " placement(s) were lit by more than one chunk, so a rebuilt "
-						 "chunk and a cached one would have to have their lighting sums "
-						 "added in an order this run cannot reproduce." << Qt::endl;
-				err() << "  bake without --incremental: a full bake adds them in the one "
-						 "order there is." << Qt::endl;
-				lodgenNativeEnd();
-				return 1;
-			}
-			/* THE LIBRARY-REUSE OFFER (lane PERF1, step 5). Only an incremental
-			 * bake offers, and it offers the three hashes the PREVIOUS record
-			 * wrote. `lodgenNativeWrite` recomputes each from the world this run
-			 * is about to bake and keeps the previous `.lodo` only when all three
-			 * agree and the file reads back whole; otherwise it rebuilds and the
-			 * census says which test refused. The switch digest is NOT passed:
-			 * a run whose digest moved never reaches here, because the
-			 * incremental path refuses it outright further up.
-			 *
-			 * No default moves. A bake without --incremental never arms this and
-			 * is the bake this tree always did, to the byte. */
-			if ( incremental && !prevLedger.loadOrderHashHex.isEmpty()
-				&& !prevLedger.pluginCorpusHashHex.isEmpty()
-				&& !prevLedger.objectCorpusHashHex.isEmpty() ) {
-				NativeReuseOffer offer;
-				offer.armed = true;
-				offer.loadOrderHex    = prevLedger.loadOrderHashHex;
-				offer.pluginCorpusHex = prevLedger.pluginCorpusHashHex;
-				offer.objectCorpusHex = prevLedger.objectCorpusHashHex;
-				lodgenNativeOfferLibraryReuse( offer );
+			{
+				const QString cc = lodgenIncrementalCacheCensus( inc );
+				if ( !cc.isEmpty() ) {
+					censusOut( cc );
+					out().flush();
+				}
+				const QStringList refused = lodgenIncrementalCacheRefusal( inc );
+				if ( !refused.isEmpty() ) {
+					for ( const QString & l : refused )
+						err() << l << Qt::endl;
+					lodgenNativeEnd();
+					return 1;
+				}
+				lodgenIncrementalOfferReuse( inc );
 			}
 			QString nrep, nerr;
 			bool nativeOk = false;
@@ -4849,166 +4410,13 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 		 * Gate B4 and `tests/spells/lodgen_bakerec.sh` leg (h) check exactly
 		 * that. */
 		{
-			LodgenLedger led;
-			led.worldspace = worldspace ? worldspace : 0x3CU;
-			led.worldEdid  = world.worldspaceEdid();
-			led.dim        = d;
-			for ( int k = 0; k < 4; k++ )
-				led.region[k] = region[k];
-			led.switches  = gLgSwitchDigest;
-			led.loadOrder = QString::number( world.loadOrderHash(), 16 );
-			/* THE RELATIVE ROOT IS THE RECORD'S OWN FOLDER, not --out-dir. They
-			 * were the same directory until the record moved under FO4CSLOD/<ws>/;
-			 * keeping the law ("paths are relative to the directory holding the
-			 * record, so a mod folder can be moved") means composing them against
-			 * the record, and the incremental reader resolves them the same way. */
-			const QString ledgerRoot = QFileInfo( ledgerPath ).absolutePath();
-			const QString digestRoot = dataRoot.isEmpty()
-				? QStringLiteral( "E:/Tools/Fallout 4/DataUnpacked/Data" ) : dataRoot;
-			QHash<QString, const LodgenLedgerEntry *> oldByKey;
-			for ( const LodgenLedgerEntry & e : prevLedger.chunks )
-				oldByKey.insert( QString( "%1,%2" ).arg( e.cx ).arg( e.cy ), &e );
-			for ( const LodgenChunkJob & j : allJobs ) {
-				const QString key = QString( "%1,%2" ).arg( j.cx ).arg( j.cy );
-				const bool rebaked = producedFiles.contains( key );
-				if ( !rebaked && incremental ) {
-					/* A chunk this run SKIPPED: carry its row forward unchanged.
-					 * Recomputing it would be honest too, but carrying it forward is
-					 * what makes the record a record of what is on disk rather than
-					 * of what was asked for. */
-					if ( const LodgenLedgerEntry * pe = oldByKey.value( key, nullptr ) )
-						led.chunks.append( *pe );
-					continue;
-				}
-				LodgenLedgerEntry e;
-				e.dim = d; e.cx = j.cx; e.cy = j.cy;
-				e.inputs = lodgenChunkInputDigest( world, d, j.cx, j.cy, digestRoot );
-				for ( const QString & p : producedFiles.value( key ) ) {
-					QString rel = QDir( ledgerRoot ).relativeFilePath( QDir( p ).absolutePath() );
-					e.outFiles.append( rel );
-					e.outDigests.append( lodgenFileDigest( p ) );
-				}
-				led.chunks.append( e );
-			}
-
-			/* ---- v2: everything the RECORD adds to the ledger --------------- */
-			led.fo4csTarget = !nativeDir.isEmpty();
-			led.exeStamp    = lodbExeStamp();
-			led.exeBytes    = lodbExeSize();
-			led.bakedUtc    = QDateTime::currentDateTimeUtc().toString( Qt::ISODate );
-
-			/* THE FIVE CORPUS HASHES, taken from the pair that was just written so
-			 * the record can never disagree with it. A bake that wrote no pair
-			 * writes no hash line rather than five zeros a reader could mistake
-			 * for an answer. `loadOrderHash` is stated whatever the target is,
-			 * because the plugin lines below are only meaningful beside it. */
-			auto hex16 = []( quint64 v ) {
-				return QString( "%1" ).arg( v, 16, 16, QChar( '0' ) );
-			};
-			led.loadOrderHashHex = hex16( world.loadOrderHash() );
-			if ( led.fo4csTarget ) {
-				const QString lodoPath = lodgenFo4csWorldDir( nativeDir, world.worldspaceEdid() )
-					+ QChar( '/' ) + world.worldspaceEdid() + QStringLiteral( ".lodo" );
-				LodoHeader lh;
-				QString rerr;
-				if ( lodoRead( lodoPath, &lh, nullptr, false, &rerr ) ) {
-					led.pluginCorpusHashHex = hex16( lh.pluginCorpusHash );
-					led.objectCorpusHashHex = hex16( lh.objectCorpusHash );
-					led.modelCorpusHashHex  = hex16( lh.modelCorpusHash );
-					led.cardCorpusHashHex   = hex16( lh.cardCorpusHash );
-					led.loadOrderHashHex    = hex16( lh.loadOrderHash );
-				} else {
-					err() << "warning: the bake record cannot read back " << lodoPath
-						  << " for its corpus hashes (" << rerr << ") -- the record will "
-							 "carry loadOrderHash only" << Qt::endl;
-				}
-			}
-
-			/* THE PLUGINS, one a line, IN LOAD ORDER -- bungo 2026-09-16: "each
-			 * bake needs to know plugins used or what's different, to even attempt
-			 * a partial rebake". The list is `EsmWorld::pluginList()`, which IS the
-			 * list `loadOrderHash()` walks, so the hash and the lines can never
-			 * describe two different load orders. The per-file FNV-1a 64 over the
-			 * BYTES is the new thing: `loadOrderHash` folds the name and the size,
-			 * so a plugin edited in place to the same size passes it. */
-			{
-				const QStringList paths =
-					world.pluginList().split( QChar( ',' ), Qt::SkipEmptyParts );
-				for ( int i = 0; i < paths.size(); i++ ) {
-					const QFileInfo fi( paths.at( i ).trimmed() );
-					LodbPlugin p;
-					p.index = i;
-					p.name  = fi.fileName().toLower();
-					p.bytes = fi.size();
-					p.path  = QDir::fromNativeSeparators( fi.absoluteFilePath() );
-					if ( !lodbFileFnv1a64( p.path, &p.hash ) ) {
-						p.hash = 0;
-						err() << "warning: the bake record cannot read " << p.path
-							  << " to hash it -- that plugin line carries a zero hash and "
-								 "cannot detect an edit" << Qt::endl;
-					}
-					led.plugins.append( p );
-				}
-			}
-
-			/* THE RESOURCE STACK, in the order it was given (last wins). An
-			 * archive carries its size and mtime; a folder carries neither,
-			 * because a folder has no bytes of its own to state. The whole line is
-			 * INFORMATIONAL -- nothing here is part of any hash -- and
-			 * `lodbNormalise()` MASKS it (the `kind` and the order stay, so a
-			 * reordered stack still shows; masked, never dropped), which is what
-			 * makes "the mod folder was renamed" a no-op for the record. */
-			for ( const QString & r : gLgResourceStack ) {
-				const QFileInfo fi( r );
-				LodbResource e;
-				e.path = QDir::fromNativeSeparators( fi.absoluteFilePath() );
-				if ( fi.isDir() ) {
-					e.kind = QStringLiteral( "folder" );
-				} else {
-					e.kind = fi.suffix().toLower() == QLatin1String( "bsa" )
-						? QStringLiteral( "bsa" ) : QStringLiteral( "ba2" );
-					e.bytes = fi.size();
-					e.mtimeIso = fi.lastModified().toUTC().toString( Qt::ISODate );
-				}
-				led.resources.append( e );
-			}
-
-			/* THE SWITCHES: the argument vector verbatim, which is the only form
-			 * of "what was the command" an operator can retype, beside the digest
-			 * the incremental path already compares. */
-			led.switchTokens = gLgArgv;
-			/* THE CENSUS, verbatim, as the bake printed it. */
-			led.census = lodbCensusLines();
-
-			QDir().mkpath( QFileInfo( ledgerPath ).absolutePath() );
-			QString lwerr;
-			if ( !lodgenWriteLedger( ledgerPath, led, &lwerr ) ) {
-				err() << "warning: " << lwerr << " -- the bake is fine, but the next "
-						 "--incremental run will refuse" << Qt::endl;
-			} else {
-				if ( led.fo4csTarget )
-					lodgenNoteLayoutFile( ledgerPath );
-				/* THE CENSUS LINE, READ BACK OFF THE FILE (CONSTITUTION 4): every
-				 * number below is parsed out of the record that was just written,
-				 * never out of the structure that wrote it, so a writer that
-				 * dropped a section says so here instead of being believed. It is
-				 * NOT itself a recorded census line -- it describes the record and
-				 * the record is already closed. */
-				LodgenLedger back;
-				QString rerr;
-				if ( !lodgenReadLedger( ledgerPath, &back, &rerr ) ) {
-					out() << QString( "bake-record: %1 REFUSED ON READ-BACK -- %2" )
-						.arg( ledgerPath, rerr ) << Qt::endl;
-				} else {
-					out() << QString( "bake-record: %1, %2 plugin(s), %3 resource(s), "
-									  "%4 switch token(s), %5 chunk(s), %6 census line(s), "
-									  "end %7 file(s) %8 bytes, record %9 bytes" )
-						.arg( ledgerPath ).arg( back.plugins.size() ).arg( back.resources.size() )
-						.arg( back.switchTokens.size() ).arg( back.chunks.size() )
-						.arg( back.census.size() ).arg( back.endFiles ).arg( back.endBytes )
-						.arg( QFileInfo( ledgerPath ).size() ) << Qt::endl;
-				}
-			}
+			QStringList recWarn;
+			QString recLine;
+			lodgenIncrementalWriteRecord( inc, world, gLgArgv, gLgResourceStack, &recWarn, &recLine );
+			for ( const QString & w : recWarn )
+				err() << w << Qt::endl;
+			if ( !recLine.isEmpty() )
+				out() << recLine << Qt::endl;
 			out().flush();
 		}
 

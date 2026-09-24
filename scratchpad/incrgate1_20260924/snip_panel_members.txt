@@ -1,0 +1,8 @@
+	/*! "Rebake only what changed" (lane INCRGATE1, 2026-09-24): the ledger
+	 *  run the command line's `--incremental` uses, armed once per bake in
+	 *  startChunks() and closed in step(). `incOn` is false for every bake
+	 *  with the row off, and then nothing below touches the run. */
+	LodgenIncrementalRun incRun;
+	bool incOn = false;
+	QString incCensus;			//!< the one census line: what was dirty, or why all of it was
+	QStringList incNotes;		//!< refusal words, warnings, the record's read-back: the tooltip

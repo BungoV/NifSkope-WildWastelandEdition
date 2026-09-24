@@ -1,0 +1,23 @@
+			/* REBAKE ONLY WHAT CHANGED: the record, LAST, after every file it
+			 * lists is on disk -- the command line's order. Not after a cancel
+			 * and not after a refused pair: a record must only ever describe a
+			 * finished bake. */
+			if ( incOn ) {
+				if ( !cancelFlag && !incPairRefused ) {
+					lodbNoteCensus( stageTimeLine() );
+					lodbNoteCensus( lodgenBakeCensusLine() );
+					QStringList recWarn;
+					QString recLine;
+					const bool recOk = lodgenIncrementalWriteRecord( incRun, *world,
+						{ QStringLiteral( "--panel" ) }, QStringList(), &recWarn, &recLine );
+					incNotes += recWarn;
+					if ( !recLine.isEmpty() )
+						incNotes << recLine;
+					tail += recOk ? QStringLiteral( ", " ) + incCensus + tr( ", bake record written" )
+						: QStringLiteral( ", " ) + incCensus + tr( ", the bake record was NOT written" );
+				}
+				incOn = false;
+			} else if ( !incCensus.isEmpty() ) {
+				tail += QStringLiteral( ", " ) + incCensus;
+			}
+			incCensus.clear();

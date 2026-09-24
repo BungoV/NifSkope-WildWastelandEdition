@@ -1,0 +1,20 @@
+			/* REBAKE ONLY WHAT CHANGED: the pair is written from the rebuilt
+			 * chunks AND the replayed caches, so INCR1's two cache refusals
+			 * hold here as on the command line. A refused pair is not written
+			 * and neither is the record, so the next run diffs against the old
+			 * one and rebuilds what this run touched. */
+			bool incPairRefused = false;
+			if ( incOn && !cancelFlag && lodgenNativeActive() ) {
+				const QString cc = lodgenIncrementalCacheCensus( incRun );
+				if ( !cc.isEmpty() )
+					lodbNoteCensus( cc );
+				const QStringList refused = lodgenIncrementalCacheRefusal( incRun );
+				if ( !refused.isEmpty() ) {
+					incPairRefused = true;
+					incNotes += refused;
+					tail += tr( ", the native pair was NOT rewritten — untick \"Rebake only what "
+						"changed\" for one whole bake" );
+				} else {
+					lodgenIncrementalOfferReuse( incRun );
+				}
+			}

@@ -351,6 +351,40 @@ else bad "the occluder region's boxes are inside their meshes, and a grown box l
 cp "$W/last.log" "$W/cut_occ.log"
 grep -E "^  (ok|FAIL)   D|FLOOR a grown box" "$W/cut_occ.log"
 
+echo "== 13b. the decoder's cell rule on the downtown-Boston pair (plan 5 row 6)"
+# Lane INCRGATE1, 2026-09-24. The independent decoder once REFUSED this pair --
+# the only one with occluder boxes -- at instance 3359: the writer sorts on the
+# FLOAT position's cell, the decoder sees the u16-quantised one, and a neighbour
+# 2.999985 cells from its chunk origin crossed the line. The decoder now accepts
+# a stored cell that differs from the derived one by one step on one axis, and
+# only inside the band the quantiser can move a point (CELL_QUANT_TOL, half a
+# step plus float slack). This leg decodes the pair leg 13 baked and prints how
+# many instances sat in that band.
+# RED CONTROL: the same decoder with the band set to 0 must REFUSE this pair by
+# name -- or the pair never exercised the rule and the green says nothing. The
+# control can only fire when at least one instance is ambiguous; a pair with none
+# fails the leg, because then it no longer tests what row 6 is about.
+OCCPAIR="$(pairdir "$WA/occ/Native")"
+if run "$PY" "$ROOT/tests/spells/lodgen_native_decode.py" "$OCCPAIR/Commonwealth.lodo" "$OCCPAIR/Commonwealth.lodi"; then
+	note "(13b) the independent decoder reads the downtown-Boston pair"
+else bad "(13b) the independent decoder reads the downtown-Boston pair"; grep -E "REFUSED|FAIL" "$W/last.log" | head -3; fi
+cp "$W/last.log" "$W/decode_occ.log"
+grep -E "^lodi\.(instanceCount|occluderCount|cellQuantAmbiguous|cellQuantWorstU)" "$W/decode_occ.log" | sed 's/^/    /'
+AMB="$(sed -n 's/^lodi.cellQuantAmbiguous \([0-9]*\).*/\1/p' "$W/decode_occ.log")"
+if [ "${AMB:-0}" -gt 0 ]; then
+	note "(13b) $AMB instance(s) sit inside the cell-line band, so the pair exercises the rule"
+	if run "$PY" -c "import sys; sys.path.insert(0, sys.argv[1]); import lodgen_native_decode as d; d.CELL_QUANT_TOL = 0.0; sys.argv = ['decode'] + sys.argv[2:]; sys.exit(d.main())" \
+		"$ROOT/tests/spells" "$OCCPAIR/Commonwealth.lodo" "$OCCPAIR/Commonwealth.lodi"; then
+		bad "(13b red control) with the band at 0 the decoder still ACCEPTED the pair"
+	elif grep -q "past the 0.000000 u the quantiser" "$W/last.log"; then
+		note "(13b red control) band 0 refuses by name: $(grep -m1 REFUSED "$W/last.log" | cut -c1-140)"
+	else
+		bad "(13b red control) band 0 failed, but not with the cell-line refusal"; tail -2 "$W/last.log"
+	fi
+else
+	bad "(13b) no instance sits in the cell-line band (${AMB:-?}): the pair no longer tests plan 5 row 6"
+fi
+
 echo "== 14. the C++ reader's own rules: the payload bounds and the aggregates"
 # WHY THIS IS NOT leg 3. Leg 3 runs lodgen_native_mutate.py, and that tool asks
 # the INDEPENDENT PYTHON DECODER to refuse. These four cases are aimed at rules

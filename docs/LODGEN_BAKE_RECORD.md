@@ -137,6 +137,11 @@ The tokens are the only form of *what was the command* an operator can retype.
 The digest is the existing one: a SHA-1 over the argument vector with the two
 skip lists (`gLgSwitchSkip`, `gLgSwitchSkipValue`) described in
 `docs/LODGEN_LEDGER_FORMAT.md` §3.
+**Since lane INCRGATE1 (2026-09-24)** the `switches` value folds in the
+**identity word** too, a hash of every effective setting, so a default that
+moves inside the exe moves `switches` (ledger §3, "The identity word"). The
+panel row "Rebake only what changed" writes `switch --panel` and the same
+word.
 
 ### 6. The chunks
 

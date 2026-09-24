@@ -1,0 +1,138 @@
+
+/* ===== THE BAKE RECORD AND INCREMENTAL REGENERATION ========================
+ *
+ * Lane INCR1 (2026-09-12, cache 2026-09-17) wrote this inside `cmdLodgen`;
+ * lane INCRGATE1 (2026-09-24) moved it here, unchanged in behaviour, so the
+ * LOD Generation panel's "Rebake only what changed" row runs the SAME diff,
+ * the SAME refusals, the SAME per-chunk `.lodj` cache and writes the SAME
+ * record as `-no-gui lodgen --incremental`. The command line keeps its words
+ * byte for byte: `tests/spells/lodgen_incremental.sh` greps them.
+ *
+ * The contract is `docs/LODGEN_LEDGER_FORMAT.md`; the record's own text format
+ * is `docs/LODGEN_BAKE_RECORD.md` (the reader and writer live in lodgen.cpp). */
+
+//! `<out>/FO4CSLOD/<ws>/<ws>.lodb` under the FO4CS target, `<out>/<ws>.lodb` without it.
+QString lodbRecordPath( const QString & outDir, const QString & ws, bool fo4csTarget );
+//! the record an incremental run diffs against: the FO4CS spot first, then the stock one; empty = none
+QString lodbFindRecord( const QString & dir, const QString & ws );
+//! sha1 over the argument vector minus the flags that cannot reach a tracked output (the format doc, section 3)
+QString lodgenSwitchDigestOf( const QStringList & argv );
+
+/*! THE IDENTITY WORD (lane INCRGATE1, 2026-09-24).
+ *
+ *  The switch digest is the TYPED argument vector, so a bare bake on two exes
+ *  whose DEFAULTS differ carries one digest, and `--incremental` could not see
+ *  the flip: lanes DEFAULTS1 (2026-09-12) and DEFAULTS2 (2026-09-23) both
+ *  moved a default under an unchanged digest and recorded it as an open
+ *  finding. The identity word closes it. It is `gen<N>:<sha1>` over one
+ *  `key=value` line per EFFECTIVE setting -- the value the bake actually used,
+ *  whether it was typed or defaulted -- plus the generator revision below.
+ *  The record's `switches` line is then sha1( argv digest, identity word ), so
+ *  a default that flips moves the word, moves `switches`, and the incremental
+ *  run refuses with the switches reason instead of keeping yesterday's chunks.
+ *
+ *  Paths, thread counts and progress hooks are NOT in the dump, for the reason
+ *  they are not in the argv digest: none of them can reach a tracked byte.
+ *
+ *  The REVISION is the manual half: bump it when a change moves output bytes
+ *  with no setting moving (a new rule, a bug fix in a writer). The dump cannot
+ *  see a constant that lives inside lodgen.cpp, and this number is how a lane
+ *  says so. */
+constexpr int kLodgenGeneratorRevision = 1;
+
+/*! What the front end adds to the pass's own options: the whole-region steps,
+ *  the far-ring cut, the pyramid and the native modules. Every field is set by
+ *  the caller; the initialisers only keep a forgotten one deterministic. */
+struct LodgenIdentityExtras
+{
+	bool atlas = false, arrays = false, merge = true, atlasBc1 = false;
+	bool keepBto = false, texFromVt = false;
+	LodgenSimplifyOptions simplify;
+	LodgenVtOptions vt;
+	int vtBtr = 0;
+	bool nativeLadder = false, nativeOccluders = true, libraryNear = false, ladderFoliage = false;
+	float silhouetteMin = 0.0f;
+	bool placementAo = false, vertexAo = false, lodiV7 = false, scrappable = false;
+	bool identityJoinLegacy = false;
+	float identityJoinGap = 0.0f;
+	bool aggregate = false;
+	int aggMin = 0, aggTile = 0, aggViews = 0;
+	QStringList more;           //!< further `key=value` lines a front end owns (sorted before use)
+};
+
+//! one `key=value` line per effective setting, in a fixed order; the first line is `generator=<N>`
+QStringList lodgenIdentityDump( const LodgenChunkPassOptions & pass, const LodgenIdentityExtras & x );
+//! `gen<N>:<sha1 hex>` over the dump
+QString lodgenIdentityWord( const QStringList & dump );
+//! the record's `switches`: sha1 over the argv digest and the identity word
+QString lodgenSwitchesWithIdentity( const QString & argvDigest, const QString & identityWord );
+
+//! Why an incremental run did not start.
+enum class LodgenIncrementalVerdict
+{
+	Go,                 //!< run `jobs` (filtered when `incremental` is set)
+	NoRecord,           //!< nothing to diff against (the command line refuses; the panel bakes whole)
+	Shape,              //!< the record covers another worldspace, chunk size or region
+	Switches,           //!< the switches or the identity word moved
+	RegionProducts,     //!< atlas / arrays / impostors: one product out of the whole region
+	NativeNoCache,      //!< the FO4CS pair without the per-chunk cache
+};
+
+/*! One bake's ledger state, from the diff to the record. The caller fills the
+ *  first block; everything after it is the ledger's. It must outlive the chunk
+ *  pass: the cache hooks armed on the pass capture it by reference. */
+struct LodgenIncrementalRun
+{
+	// ---- the caller's ----
+	QString fromDir;            //!< where the previous record is; empty = a full bake (the record is still written)
+	bool    requireRecord = true; //!< false = no record yet is a whole bake, not a refusal (the panel)
+	QString outDir;             //!< where this bake's outputs and record go
+	QString nativeDir;          //!< the FO4CS target's root; empty = the stock target
+	QString digestRoot;         //!< the loose root the per-chunk input digest reads
+	quint32 worldspace = 0x3CU;
+	int     dim = 4;
+	int     region[4] = { 0, 0, 0, 0 };
+	QString switches;           //!< lodgenSwitchesWithIdentity(...)
+	bool    regionProducts = false;
+	bool    nativeCache = true; //!< false = `--no-native-cache`: no `.lodj`, and `--native` refuses as before INCR1
+	std::function<void( const QString & )> warn;  //!< a cache failure, as it happens
+	// ---- the ledger's ----
+	QString ledgerPath, prevRecordDir, lodjDir;
+	LodgenLedger prev;
+	QVector<LodgenChunkJob> allJobs;
+	bool    incremental = false;
+	QHash<QString, QStringList> producedFiles;
+	int     lodjWritten = 0, lodjReplayed = 0, lodjFailed = 0;
+	qint64  lodjPlacements = 0;
+};
+
+/*! THE DIFF. Sets `ledgerPath` and `allJobs`; with `fromDir` set it reads the
+ *  previous record, runs the refusals in INCR1's order, and on Go replaces
+ *  `jobs` with the dirty ones (widened by one cell, and every chunk with no
+ *  `.lodj` added back) and puts the `incremental:` census line in `census`
+ *  and up to eight per-chunk reasons in `reasons`. `detail` carries the read
+ *  error of a NoRecord and the record path of a Shape refusal. */
+LodgenIncrementalVerdict lodgenIncrementalBegin( LodgenIncrementalRun & run, const EsmWorld & world,
+	QVector<LodgenChunkJob> & jobs, QString * census, QStringList * reasons, QString * detail );
+//! the refusal, as the two lines the command line has always printed (reason, way forward)
+QStringList lodgenIncrementalRefusal( LodgenIncrementalVerdict v, const LodgenIncrementalRun & run,
+	const QString & detail );
+
+//! arm the per-chunk `.lodj` cache on the pass (the FO4CS target with the cache on only)
+void lodgenIncrementalArmCache( LodgenIncrementalRun & run, const QString & worldEdid,
+	LodgenChunkPassOptions & pass );
+//! the retire hook: what one retired chunk put on disk, for the record
+void lodgenIncrementalNoteRetired( LodgenIncrementalRun & run, const LodgenChunkPassOptions & pass,
+	const LodgenChunkOutcome & r );
+//! the `native cache:` census line; empty when the cache was not armed
+QString lodgenIncrementalCacheCensus( const LodgenIncrementalRun & run );
+//! empty to go on; otherwise the refusal lines (a cache failure, or an arrival lit by two chunks)
+QStringList lodgenIncrementalCacheRefusal( const LodgenIncrementalRun & run );
+//! PERF1's library-reuse offer from the previous record's hashes (incremental runs only)
+void lodgenIncrementalOfferReuse( const LodgenIncrementalRun & run );
+/*! THE RECORD, written LAST (after every file is closed and every census line
+ *  printed). `warnings` gets what could not be read; `readBack` the
+ *  `bake-record:` line, parsed off the file that was just written. */
+bool lodgenIncrementalWriteRecord( const LodgenIncrementalRun & run, const EsmWorld & world,
+	const QStringList & switchTokens, const QStringList & resourceStack,
+	QStringList * warnings, QString * readBack );

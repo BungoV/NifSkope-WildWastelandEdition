@@ -1,0 +1,22 @@
+			/* REBAKE ONLY WHAT CHANGED (lane INCRGATE1, 2026-09-24): INCR1's
+			 * `--incremental` as a standing row, OFF by default -- with it off the
+			 * bake is byte for byte what it was. On, every run writes the bake
+			 * record and the per-chunk native caches, and a run that finds a
+			 * record beside it rebuilds only the chunks whose inputs moved. A run
+			 * the record cannot vouch for (another range or chunk size, a setting
+			 * moved, a region-wide product ticked) bakes whole, rewrites the record
+			 * and says why: the command line refuses there, but a standing row
+			 * that refused would have no way back short of deleting the record.
+			 * WW_LODGEN_INCREMENTAL=0|1 forces it for a harness. */
+			xB( f, "LodgenIncrementalCheck", QStringLiteral( "incremental" ),
+				tr( "Rebake only what changed" ), false,
+				tr( "Keep a bake record in the output folder and, on the next run, rebuild only\n"
+					"the chunks whose plugins, models or textures changed. The first run bakes\n"
+					"everything and writes the record. Another range or chunk size, a changed\n"
+					"setting, or texture arrays, the object atlas or card arrays ticked: the\n"
+					"run bakes everything again and says why. One chunk size at a time. A model\n"
+					"or texture edited while NifSkope stays open is seen after a restart.\n"
+					"Command line: --incremental" ) );
+			if ( qEnvironmentVariableIsSet( "WW_LODGEN_INCREMENTAL" ) )
+				if ( auto * c = qobject_cast<QCheckBox *>( extras.value( QStringLiteral( "incremental" ) ).field ) )
+					c->setChecked( qEnvironmentVariableIntValue( "WW_LODGEN_INCREMENTAL" ) != 0 );

@@ -760,6 +760,16 @@ case, and it is why the independent decoder was refusing a file the writer had
 written correctly. A consumer that bins placements by cell uses the stated cell,
 never `floor(position / 4096)`.
 
+**Measured on the downtown-Boston pair** (lane INCRGATE1, 2026-09-24,
+`tests/spells/lodgen_native.sh` leg 13b, region (0,−12)..(11,−1) dim 4, 33,123
+placements, 280 occluder boxes). The independent decoder reads the pair,
+6 checks, 0 failures. **14** instances sit in the band, worst **0.062501 u** from their
+cell line, all in chunk 6, the first at instance 3358. With the band set to 0 the
+decoder refuses at that instance by name, which is the leg's red control. The
+decoder's band is `step/2 + 16384 · 2^-23` ≈ 0.126955 u, one float ulp
+narrower than the reader's constant above. Both hold the measured worst with
+room to spare.
+
 #### 4.1a The placed REFR, and why the record did NOT grow to 32 bytes
 
 bungo, 2026-09-11 10:3x: *"the instance table must be joinable to the engine's
@@ -1836,9 +1846,13 @@ the model**.
 **On this region the census gate is exact rather than vacuous:**
 `instanceCount` = 3,526 = the stock manifests' placement row count, with
 **0 dropped for a base outside the table** and **0 instances with neither
-geometry nor a card** (`--native-verify`). The asymmetric drop proof on
-(−32,0) dim 32 is **still owed** — it needs a `--slot-fallback --native` bake of
-that one chunk and has not been run by NATIVE1a or NATIVE1b.
+geometry nor a card** (`--native-verify`). **The asymmetric drop proof on
+(−32,0) dim 32 has been run** (lane INCRGATE1, 2026-09-24,
+`tests/spells/lodgen_native_baseline.sh --drop-proof`). One bake of that chunk with
+`--slot-fallback --identity --keep-bto --native` gives both halves. The stock `.BTO`
+has no geometry for **2,628 of 42,560** placements (6.17 %, the figure above).
+The `.lodi` holds **all 42,560**: every manifest row is in its table, and
+`--native-verify` reads `instancesWithNeitherGeometryNorCard 0`.
 
 ---
 
