@@ -167,6 +167,38 @@ void selectFrames( const Scene * scene, const ImpostorCardSet & set,
 
 	camDir[0] = d[0]; camDir[1] = d[1]; camDir[2] = d[2];
 
+	if ( set.ring() ) {
+		/* THE HORIZON RING (lane CARDFIX1 step 5, IMPOSTORRING1). Frame v was
+		 * photographed from azimuth 360*v/V at elevation 0, so the two frames that
+		 * bracket the camera's azimuth are the neighbours, and each weighs by how
+		 * near it is: t = the fraction of a step past the lower one. Elevation
+		 * picks nothing -- a ring has no top frames, and a view from above reads
+		 * the horizon frames as they are (the error that costs is measured, not
+		 * hidden). The stronger frame goes first, which is the one the crisp end
+		 * draws alone. Slot 2 repeats it at weight 0: a ring blends TWO. */
+		const int V = set.views;
+		const float twoPi = 6.28318530718f;
+		float phi = std::atan2( d[1], d[0] );
+		if ( phi < 0.0f )
+			phi += twoPi;
+		const float f = phi / twoPi * float( V );
+		const float fl = std::floor( f );
+		const float t = f - fl;
+		const int i0 = ( ( int( fl ) % V ) + V ) % V, i1 = ( i0 + 1 ) % V;
+		if ( t <= 0.5f ) {
+			idx[0] = i0; w[0] = 1.0f - t; idx[1] = i1; w[1] = t;
+		} else {
+			idx[0] = i1; w[0] = t; idx[1] = i0; w[1] = 1.0f - t;
+		}
+		idx[2] = idx[0]; w[2] = 0.0f;
+		// THE RED CONTROL, the ring's form of the grid's quarter turn: every frame
+		// becomes the view from 90 degrees round.
+		if ( opt.shuffleFrames )
+			for ( int k = 0; k < 3; k++ )
+				idx[k] = ( idx[k] + V / 4 ) % V;
+		return;
+	}
+
 	int gi[3] = { 0, 0, 0 }, gj[3] = { 0, 0, 0 };
 	const ImpostorOct::Convention saved = ImpostorOct::g_convention;
 	ImpostorOct::g_convention = effectiveConvention( set, opt );
@@ -275,7 +307,8 @@ QStringList ImpostorDraw::describeSelection( Scene * scene, const ImpostorCardSe
 		ImpostorOct::g_convention = saved;
 	}
 	float fi = 0.0f, fj = 0.0f;
-	ImpostorOct::dirToGrid( look, set.oct, &fi, &fj );
+	if ( !set.ring() )
+		ImpostorOct::dirToGrid( look, set.oct, &fi, &fj );
 
 	out << QStringLiteral( "convention %1 (%2, set token \"%3\")" ).arg(
 			effectiveConvention( set, opt ) == ImpostorOct::Convention::AsBaked
@@ -287,11 +320,15 @@ QStringList ImpostorDraw::describeSelection( Scene * scene, const ImpostorCardSe
 			.arg( double( camDir[0] ) ).arg( double( camDir[1] ) ).arg( double( camDir[2] ) );
 	out << QStringLiteral( "lookdir %1 %2 %3" )
 			.arg( double( look[0] ) ).arg( double( look[1] ) ).arg( double( look[2] ) );
-	out << QStringLiteral( "cell %1 %2 of %3" ).arg( double( fi ) ).arg( double( fj ) ).arg( set.oct );
+	if ( set.ring() )
+		out << QStringLiteral( "ring of %1 views, camera azimuth %2 deg" ).arg( set.views )
+				.arg( double( std::atan2( camDir[1], camDir[0] ) * 57.2957795f ) );
+	else
+		out << QStringLiteral( "cell %1 %2 of %3" ).arg( double( fi ) ).arg( double( fj ) ).arg( set.oct );
 	for ( int k = 0; k < 3; k++ ) {
 		out << QStringLiteral( "frame %1 index %2 (i %3 j %4) weight %5" )
 				.arg( k ).arg( idx[k] )
-				.arg( idx[k] % set.oct ).arg( idx[k] / set.oct )
+				.arg( idx[k] % set.cols() ).arg( idx[k] / set.cols() )
 				.arg( double( w[k] ) );
 	}
 	if ( opt.shuffleFrames )
@@ -321,6 +358,10 @@ ImpostorDraw::Resolved ImpostorDraw::resolve( const Options & opt )
 			: opt.depthSearchSteps >= 0 ? qBound( 0, opt.depthSearchSteps, 64 )
 			: r.snap ? kCrispSearchSteps : kSmoothSearchSteps;
 	r.sharpen = ( r.snap || r.slider >= 1.0f ) ? 1.0f : 1.0f / r.slider;
+	/* THE CRISP CUT (R5, bungo 2026-09-24 21:1x). One frame at weight 1 under
+	 * the stipple rule already cut exactly where that frame's coverage does;
+	 * naming rule 2 here makes it so by construction, not by arithmetic. */
+	r.cutRule = ( r.frameCount == 1 ) ? 2 : opt.cutRule;
 	return r;
 }
 
@@ -358,10 +399,6 @@ bool ImpostorDraw::drawCard( Scene * scene, const ImpostorCardSet & set,
 		return refuse( QStringLiteral( "the colour sheet did not bind: %1"
 				"  (a loose set outside a data folder is unreachable by the texture cache --"
 				" see ImpostorDraw::registerLooseSheets)" ).arg( set.colour.resolved ) );
-	/* THE CRISP CUT (R5, bungo 2026-09-24 21:1x). One frame at weight 1 under
-	 * the stipple rule already cut exactly where that frame's coverage does;
-	 * naming rule 2 here makes it so by construction, not by arithmetic. */
-	r.cutRule = ( r.frameCount == 1 ) ? 2 : opt.cutRule;
 	}
 	if ( !haveNormal ) {
 		scene->renderer->stopProgram();
@@ -389,8 +426,9 @@ bool ImpostorDraw::drawCard( Scene * scene, const ImpostorCardSet & set,
 	 * here and not by the caller, like WW_IMPOSTOR_CUT, so every path that
 	 * draws a card has them. */
 	const Resolved rs = resolve( opt );
-	const int frameCount = rs.frameCount;
-	if ( frameCount == 3 && rs.sharpen != 1.0f ) {
+	// a RING set blends its two neighbouring azimuths, never three (CARDFIX1 step 5)
+	const int frameCount = set.ring() ? qMin( rs.frameCount, 2 ) : rs.frameCount;
+	if ( frameCount > 1 && rs.sharpen != 1.0f ) {
 		float sum = 0.0f;
 		for ( int k = 0; k < 3; k++ ) {
 			w[k] = std::pow( qMax( 0.0f, w[k] ), rs.sharpen );
@@ -418,7 +456,7 @@ bool ImpostorDraw::drawCard( Scene * scene, const ImpostorCardSet & set,
 	 * above the frame loop because the loop needs it too. */
 	const float sc = ( opt.worldScale > 0.0f ) ? opt.worldScale : 1.0f;
 
-	const float du = 1.0f / float( set.oct );
+	const float du = 1.0f / float( set.cols() );
 	const GLint locRect   = prog->uniLocation( "frameRect" );
 	const GLint locWeight = prog->uniLocation( "frameWeight" );
 	const GLint locRight  = prog->uniLocation( "frameRight" );
@@ -427,8 +465,8 @@ bool ImpostorDraw::drawCard( Scene * scene, const ImpostorCardSet & set,
 	const GLint locOffset = prog->uniLocation( "frameOffset" );
 
 	for ( int k = 0; k < frameCount; k++ ) {
-		const int i = idx[k] % set.oct;
-		const int j = idx[k] / set.oct;
+		const int i = idx[k] % set.cols();
+		const int j = idx[k] / set.cols();
 
 		/* The frame's rectangle in the sheet, from the ONE function that knows
 		 * it (`ImpostorOct::frameRect`, checked offline against the Python
@@ -440,7 +478,12 @@ bool ImpostorDraw::drawCard( Scene * scene, const ImpostorCardSet & set,
 		 * silhouette -- neither alone would catch it. */
 		if ( locRect >= 0 ) {
 			float u0 = 0.0f, v0 = 0.0f, dU = du, dV = du;
-			ImpostorOct::frameRect( i, j, set.oct, &u0, &v0, &dU, &dV );
+			if ( set.ring() ) {
+				// the ring's one row: frame v at [v/V, (v+1)/V) x [0, 1)
+				u0 = float( i ) * du; v0 = 0.0f; dU = du; dV = 1.0f;
+			} else {
+				ImpostorOct::frameRect( i, j, set.oct, &u0, &v0, &dU, &dV );
+			}
 			const float rect[4] = { u0, v0, dU, dV };
 			scene->renderer->fn->glUniform4fv( locRect + k, 1, rect );
 		}
@@ -457,7 +500,17 @@ bool ImpostorDraw::drawCard( Scene * scene, const ImpostorCardSet & set,
 		{
 			const ImpostorOct::Convention saved = ImpostorOct::g_convention;
 			ImpostorOct::g_convention = effectiveConvention( set, opt );
-			ImpostorOct::frameDir( i, j, set.oct, dir );
+			if ( set.ring() ) {
+				/* The ring's own eye (docs/LODGEN_LODM_FORMAT.md 3a): ( cos p, sin p, 0 ),
+				 * p = 2 pi v / V; frameBasis then gives right ( -sin p, cos p, 0 ) and up
+				 * ( 0, 0, 1 ) -- the bake's camera for that frame, under the spec law
+				 * (a ring set is only ever baked under it). */
+				const float p = 6.28318530718f * float( i ) / float( set.views );
+				dir[0] = std::cos( p ); dir[1] = std::sin( p ); dir[2] = 0.0f;
+				ImpostorOct::g_convention = ImpostorOct::Convention::SpecLiteral;
+			} else {
+				ImpostorOct::frameDir( i, j, set.oct, dir );
+			}
 			ImpostorOct::frameBasis( dir, right, up, fwd );
 			ImpostorOct::g_convention = saved;
 		}

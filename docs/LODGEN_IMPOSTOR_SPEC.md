@@ -213,6 +213,20 @@ the format from the header (DirectXTex `LoadFromDDSMemory` does) reads both.
 Channel meaning is unchanged and the `.lodm` names files, not formats, so no
 version moved.
 
+**The tree ring, and what FO4CS's card reader must learn (2026-09-24, owed;
+FO4CS is built last).** Tree cards are now 16 azimuths at elevation 0, one
+row (`docs/LODGEN_LODM_FORMAT.md` §3.2). The `.lodm` says `views` 16 and
+`grid` [16,1] and has **no `oct`**. Until FO4CS reads that, a reader that
+requires `oct` must refuse the set by name -- never take `views` for N. The
+change, in order: (1) layout from `views`/`grid` when `oct` is absent, frame
+`v` at u `[v/V, (v+1)/V)`, v `[0, 1)`; (2) frame eye `(cos φ, sin φ, 0)`,
+`φ = 2πv/V`, right `(−sin φ, cos φ, 0)`, up `(0, 0, 1)`; (3) selection = the two
+frames bracketing the camera azimuth, weights `1 − t`, `t` by angle, no
+elevation term; the crisp end draws the stronger alone; (4) `frameOffset` is
+`2·V` long, view `v` at `[2v]`; (5) a `cardArray` carries the same keys.
+NifSkope's drawer (`src/gl/impostordraw.cpp`, `selectFrames` ring branch) is
+the reference.
+
 **Source.** The base's own near model (the record's MODL), not a LOD
 derivative: the candidate listing (`--list-impostor-candidates`, driver
 `tools/bake_impostor_cards.sh`) prints it, falling back to the first filled

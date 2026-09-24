@@ -139,14 +139,37 @@ bool readFloats( const QJsonValue & v, float * out, int n )
  *  have would silently mix the two laws inside one sheet, and a card wrong
  *  that way is wrong in a manner no reader could attribute. All or none.
  */
+/* THE HORIZON RING (CARDFIX1 step 5): `views` V and `grid` [V,1], together or
+ * not at all, and never beside `oct` -- a set that declares both layouts
+ * declares neither. False = refused, with the reason in set.error. */
+bool readRing( const QJsonObject & o, ImpostorCardSet & set, const QString & lodmPath )
+{
+	set.views = o.value( QStringLiteral( "views" ) ).toInt( 0 );
+	if ( set.views <= 0 && !o.contains( QStringLiteral( "grid" ) ) )
+		return true;
+	const QJsonArray g = o.value( QStringLiteral( "grid" ) ).toArray();
+	if ( set.views < 4 || set.views > 64 || g.size() != 2 || g.at( 0 ).toInt() != set.views
+		|| g.at( 1 ).toInt() != 1 ) {
+		set.error = QString( "%1: a ring set needs views 4..64 and grid [views,1];"
+				" it says views %2, grid %3 entries" ).arg( lodmPath ).arg( set.views ).arg( g.size() );
+		return false;
+	}
+	if ( set.oct != 0 ) {
+		set.error = QString( "%1: declares BOTH oct %2 and views %3 -- one layout per set" )
+				.arg( lodmPath ).arg( set.oct ).arg( set.views );
+		return false;
+	}
+	return true;
+}
+
 void readFrameOffsets( const QJsonObject & o, ImpostorCardSet & set )
 {
 	set.frameOffset.clear();
 	const QJsonValue v = o.value( QStringLiteral( "frameOffset" ) );
-	if ( !v.isArray() || set.oct <= 0 )
+	if ( !v.isArray() || set.cols() <= 0 )
 		return;
 	const QJsonArray a = v.toArray();
-	const int want = 2 * set.oct * set.oct;
+	const int want = 2 * set.cols() * set.rows();
 	if ( a.size() < want )
 		return;
 	QVector<float> out;
@@ -176,10 +199,10 @@ void ImpostorCardSet::frameOffsetOf( int i, int j, float * right, float * up ) c
 		*right = 0.0f;
 	if ( up )
 		*up = 0.0f;
-	if ( frameOffset.isEmpty() || oct <= 0 || i < 0 || j < 0 || i >= oct || j >= oct )
+	if ( frameOffset.isEmpty() || cols() <= 0 || i < 0 || j < 0 || i >= cols() || j >= rows() )
 		return;
 	// `lodgen.cpp:3000`: frame (i, j) is at j*oct + i, two floats each.
-	const int k = 2 * ( j * oct + i );
+	const int k = 2 * ( j * cols() + i );
 	if ( k + 1 >= frameOffset.size() )
 		return;
 	if ( right )
@@ -200,7 +223,10 @@ QStringList ImpostorCardSet::notes() const
 			pbr ? "mask = RMAOS" : "mask = GSAOS" );
 	out << QString( "kind: %1%2" ).arg( kind,
 			( layer >= 0 ) ? QString( ", layer %1" ).arg( layer ) : QString() );
-	out << QString( "grid: %1x%1 = %2 frames" ).arg( oct ).arg( oct * oct );
+	if ( ring() )
+		out << QString( "grid: RING of %1 views at 360/%1 degrees, one row = %1 frames" ).arg( views );
+	else
+		out << QString( "grid: %1x%1 = %2 frames" ).arg( oct ).arg( oct * oct );
 	out << QString( "frame: %1x%2 px, mips %3, auxDiv %4" )
 			.arg( frameW ).arg( frameH ).arg( mips ).arg( auxDiv );
 	out << QString( "half: %1 x %2, center %3 %4 %5" )
@@ -278,6 +304,8 @@ ImpostorCardSet impostorCardLoad( const QString & lodmPath, int layer )
 			return set;
 		}
 		set.oct  = card.value( "oct" ).toInt( 0 );
+		if ( !readRing( card, set, lodmPath ) )
+			return set;
 		set.mips = card.value( "mips" ).toInt( 0 );
 		set.auxDiv = card.value( "auxDiv" ).toInt( 1 );
 		set.depthSpan = float( card.value( "depthSpan" ).toDouble( 0.0 ) );
@@ -334,6 +362,8 @@ ImpostorCardSet impostorCardLoad( const QString & lodmPath, int layer )
 		set.layer = want;
 
 		set.oct  = arr.value( "oct" ).toInt( 0 );
+		if ( !readRing( arr, set, lodmPath ) )
+			return set;
 		set.mips = arr.value( "mips" ).toInt( 0 );
 		set.auxDiv = arr.value( "auxDiv" ).toInt( 1 );
 
@@ -385,7 +415,7 @@ ImpostorCardSet impostorCardLoad( const QString & lodmPath, int layer )
 	}
 
 	// ---- the refusals, each naming the file --------------------------------
-	if ( set.oct < ImpostorOct::kMinGrid || set.oct > ImpostorOct::kMaxGrid ) {
+	if ( !set.ring() && ( set.oct < ImpostorOct::kMinGrid || set.oct > ImpostorOct::kMaxGrid ) ) {
 		set.error = QString( "%1: oct is %2, outside the bake's own %3..%4" )
 				.arg( lodmPath ).arg( set.oct ).arg( ImpostorOct::kMinGrid ).arg( ImpostorOct::kMaxGrid );
 		return set;

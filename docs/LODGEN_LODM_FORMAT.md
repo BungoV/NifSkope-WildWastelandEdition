@@ -118,7 +118,7 @@ stem with the family's suffixes and `.DDS`.
 
 | key | type | meaning |
 |---|---|---|
-| `oct` | int | **frames per side, N.** The sheet is **N × N frames = N² views** — `OCT=8` is 64 views, **not 81**. The sheet is `N·frameW` by `N·frameH` pixels |
+| `oct` | int | **frames per side, N. ABSENT on a horizon-RING card (§3.2), which says `views` and `grid` instead.** The sheet is **N × N frames = N² views** — `OCT=8` is 64 views, **not 81**. The sheet is `N·frameW` by `N·frameH` pixels |
 | `frame` | int[2] | `[frameW, frameH]` in pixels — the size class, longer side = the run's tile rung, shorter side a multiple of 16 |
 | `base` | int | the run's chosen resolution before the size ladder. `frame` at or below it is a **rung, not a different run** |
 | `half` | float[2] | `[halfW, halfH]`, the quad's half extents in **model units**, spanning the WHOLE frame including its padding |
@@ -127,7 +127,7 @@ stem with the family's suffixes and `.DDS`.
 | `center` | float[3] | **the offset from the object's PIVOT to the card's centre**, in model units. The pivot is the NIF root, i.e. the reference's own placement origin, so a reader places the quad at `pivot + center`. The bake points its camera at this one point in every one of the N-squared views, so it is the projection of the frame's centre in all of them -- which is what makes the model-to-card transition still (3.1 below) |
 | `depthSpan` | float | world units the height channel spans: `units = (B − 0.5) × depthSpan`, 0.5 = the card plane |
 | `mips` | int | stored mips, `max(1, log2(min(gapX,gapY)))`: the chain stops at the last level where **each of the two frames meeting on an interior border still keeps a whole texel of margin**, because at the next level that margin is half a texel and a border tap reaches across (bungo, 2026-09-09 evening: ship one mip fewer -- a 128 frame at gap 8 ships 128/64/32) |
-| `frameOffset` | float[2·oct²] | **per-frame positioning.** Where each frame's quad sits relative to `center`, in model units, along that view's own right and up axes: frame `(i,j)` at index `j·oct + i`, so `[2·(j·oct+i)]` is its right offset and the next its up offset. Every frame shifts its own silhouette to its own centre, so the frame holds the widest SINGLE view rather than the union of all of them; `half` is still ONE size for the whole card. Absent = a set from before 2026-09-09 evening, whose frames were all centred on `center`. A reader that ignores it draws every quad at `center`, and the tree steps sideways by the offset when the mesh hands over |
+| `frameOffset` | float[2·oct²] | (`2·views` on a ring card, §3.2) **per-frame positioning.** Where each frame's quad sits relative to `center`, in model units, along that view's own right and up axes: frame `(i,j)` at index `j·oct + i`, so `[2·(j·oct+i)]` is its right offset and the next its up offset. Every frame shifts its own silhouette to its own centre, so the frame holds the widest SINGLE view rather than the union of all of them; `half` is still ONE size for the whole card. Absent = a set from before 2026-09-09 evening, whose frames were all centred on `center`. A reader that ignores it draws every quad at `center`, and the tree steps sideways by the offset when the mesh hands over |
 | `auxDiv` | int | **present only when > 1.** The normal, mask and emissive sheets were written at `1/auxDiv` of each side; the colour sheet never divides. Sampling is unaffected (normalised UV); a consumer needs this only to size its own allocation |
 | `projection` | string | **the camera the sheet was photographed through**: `ortho`, or `persp` for a set deliberately baked the old way. `half`, `center` and `frameOffset` are world measurements taken off viewport pixels through ONE units-per-pixel constant, which only an orthographic camera makes true; this is what says they describe the sheet beside them. **Absent = the bake did not say, and every bake that did not say drew a 60-degree perspective frustum** -- absence is the older, foreshortened vintage, not "unknown". See `docs/LODGEN_CARD_SHEETS.md` §3.7 |
 | `coverage` | object | **the coverage contract of the base-colour sheet**: `{ floor, test, base }`. `floor` is the coverage at which the bake counted a texel covered and measured `half` and every `frameOffset`; `test` is the alpha a consumer must ALPHA-TEST at to select that same set (`128`, i.e. 0.5, on a sheet written under the contract); `base` is the alpha the floor was written at, so the coverage FRACTION is `floor + (a - base) * (255 - floor) / (255 - base)`. **Absent = the sheet's alpha is the raw fraction and its declared extents describe the silhouette at 16/255, which is what such a set must be tested at** -- reading an older set at 0.5 draws a tree up to 5.41 texels of half-width narrower than `half` declares. See `docs/LODGEN_CARD_SHEETS.md` §4 |
@@ -208,6 +208,62 @@ not say what camera made it cannot be corrected after the fact.
 ---
 
 ---
+
+### 3.2 A horizon-RING card (2026-09-24, lane CARDFIX1 step 5)
+
+bungo, 2026-09-23 04:4x, RULED: *"for fo4cs use the convention was 22.5 degrees
+per take"*. **Tree** cards are photographed at 16 azimuths, 22.5 degrees apart, at
+elevation 0 -- not over the hemi-octahedral grid. The card bake driver makes the
+ring the default for `CANDIDATES=trees` (`RING=16`); the empty-slot run keeps the
+grid (`RING=0`), and either can be forced.
+
+A ring card uses **the aggregate's own layout keys (section 3a)**, not a third
+layout:
+
+| key | ring card | grid card |
+|---|---|---|
+| `oct` | **ABSENT** | N |
+| `views` | V (16) | absent |
+| `grid` | `[V, 1]` | absent |
+| `frameOffset` | `2·V` numbers, view `v` at `[2v]`, `[2v+1]` | `2·N²` |
+
+Every other key (`frame`, `half`, `pad`, `gap`, `mips`, `center`, `depthSpan`,
+`coverage`, `projection`, `conv`, `auxDiv`) means exactly what it means on a grid
+card. Frame `v` occupies pixels `[v·frameW, (v+1)·frameW) × [0, frameH)` and was
+photographed from
+
+```
+eye(v)   = ( cos φ, sin φ, 0 )          φ = 2π·v / V
+right(v) = ( −sin φ, cos φ, 0 )         up(v) = ( 0, 0, 1 )
+```
+
+under the `spec1` convention. **A reader blends the TWO frames that bracket the
+camera's azimuth**, `f = φ_cam / (2π) · V`, `v0 = floor(f) mod V`, `v1 = v0 + 1
+mod V`, weights `1 − t` and `t` with `t = f − floor(f)`; elevation selects
+nothing (there are no frames above the horizon; what that costs is measured in
+`tests/spells/impostor_ring.sh`, row M). At the slider's crisp end the stronger
+of the two is drawn alone.
+
+**Why there is no `oct` key, and why the sheet is one row.** A reader that knows
+only the grid then finds no grid and refuses the set BY THAT KEY'S NAME (the
+NifSkope reader before this change: *"oct is 0, outside the bake's own 2..16"*).
+A 4 × 4 packing of the same 16 frames would carry a square sheet and an `oct 4`
+that every existing reader would accept -- and draw hemisphere views from
+horizon photographs without a word. The one-row sheet cannot be taken for any
+N × N grid. Its width is `V·frameW`: 4096 at a 256 tile, 8192 at 512, 16384 at
+1024, which is the Direct3D 11 texture limit, so a 16-view ring above a 1024
+tile would not load (nothing enforces this yet; the driver's TILE default is 256).
+At one tile it holds a quarter of an N8 sheet's pixels.
+
+**Card arrays** (section 4) carry the same keys on the array object: a ring set
+groups only with ring sets of its own sheet size (the group key gains `|ring`).
+**The aggregate** (section 3a) composites from grid cards only; a ring set given
+to it is refused by name and counted (`aggregate cards: refused N horizon-ring
+set(s) by name`). Teaching the aggregate the ring is owed.
+
+**The `.lodm` stays version 1.** A reader that does not know `views` on a card
+refuses the set; nothing is misread. Version 2 is reserved for the sway channel's
+model-authored amplitude (lane CARDFIX1 step 6).
 
 ## 3a. `kind: "aggregate"` — one forested CELL's whole tree cluster on one card set
 

@@ -133,6 +133,38 @@ passes: the first photographs every view at the bound-sphere fit and takes the
 widest and tallest silhouette extent from the centre over all of them; the second
 bakes at that fit.
 
+### 2.1 The tree RING (2026-09-24)
+
+Tree cards are not on this grid any more: they are 16 azimuths at elevation 0 in
+ONE row, `views × 1` -- the aggregate's ring (§10.2) at 22.5 degrees, by bungo's
+ruling of 2026-09-23. `docs/LODGEN_LODM_FORMAT.md` §3.2 is the contract: `views`
+and `grid` instead of `oct`, frame `v` at `[v·frameW, (v+1)·frameW) × [0, frameH)`,
+two neighbours blended by angle. Everything in §3 onward -- the gap, the padding,
+the size ladders, per-frame positioning, the orthographic camera, the channels --
+is the grid's, frame for frame. The bake: `WW_IMPOSTOR_RING=16` (it wins over
+`WW_IMPOSTOR_OCT`); the driver: `RING=16`, the default for `CANDIDATES=trees`.
+
+Measured against the N8 grid on the same model at the same tile: the grid's
+horizon is 28 frames whose azimuths bunch toward the diagonals (per quadrant 0,
+9.5, 21.8, 36.9, 53.1, 68.2, 80.5, 90 degrees; largest step 16.2), the ring's is
+16 at a uniform 22.5. `tests/spells/impostor_ring.sh` prints both at the
+in-between azimuths and at elevations 0/5/15/30/60.
+
+Measured 2026-09-24 (exe eaa4b0b6, TreeMapleblasted05, 256 tile, the default
+crisp draw, card vs mesh silhouette IoU):
+
+| | ring16 | N8 | ring8 |
+|---|---|---|---|
+| full turn at el 0, 1-degree steps | 0.690 | 0.784 | 0.526 |
+| worst 1-degree popping step (px) | 62,795 | 47,453 | 78,686 |
+| in-between azimuths, el 0 | 0.489 | 0.825 | |
+| el 15 / 30 / 60 | 0.427 / 0.285 / 0.209 | 0.651 / 0.795 / 0.371 | |
+
+The ring draws within 2 percent of what a perfect photograph from its nearest
+frame could score (the mesh against itself 0-11.25 degrees away: 0.701 over the
+full turn). What it gives up against N8 is the frame count -- 16 horizon frames
+to 28 -- and every frame above the horizon; it costs a quarter of the pixels.
+
 ---
 
 ## 3. Frame geometry
@@ -540,6 +572,10 @@ gap <x> <y>                  the distance in texels between two neighbouring
                              margin on each side of a frame is half of it
 emissive <scale> shapes <n>  the largest emissive multiple over the model's shapes
 oct N frameW frameH halfW halfH cx cy cz depthSpan family base
+ring V frameW frameH ...     INSTEAD of the `oct` line on a horizon-ring bake
+                             (§2.1): the same fields, V frames in one row. An
+                             old lodgen finds no `oct` line and makes no set,
+                             rather than reading V as N
 frameoff <i> <j> <ox> <oy>   one per frame: where THAT frame's quad sits relative
                              to `center`, in model units, along that view's own
                              right and up axes (§3.6)
@@ -555,6 +591,10 @@ orthofit <asked> <achieved> <persp 0|1>
                              projection -- both are Dist/Zoom -- so the third is
                              the field that MOVES (§3.7)
 lodm <candidate> <family|none|rejected> <diffuse>    one per textured shape
+ringview <v> <azim> <elev>   ring bakes only, one per frame: the camera the
+                             renderer HELD for frame v, in degrees, read back
+                             from the view at the moment it was drawn -- the
+                             echo impostor_ring.sh R1 checks against v x 360/V
 ```
 
 **The `oct` line's family is NOT the last token any more** — `base` follows it.

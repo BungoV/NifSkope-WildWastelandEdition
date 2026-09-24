@@ -1,0 +1,31 @@
+exe  /e/Projects/NifskopeWWE-cardfix1/release/NifSkope.exe (eaa4b0b6)
+rung /e/Projects/NifskopeWWE-cardfix1/release/NifSkope.before_cardfix1.exe (97716e49)
+bake ring16: 1 layout line(s), 16 ringview line(s)
+bake rungring: 0 layout line(s), 0 ringview line(s)
+bake n8: 1 layout line(s), 0 ringview line(s)
+bake ring8: 1 layout line(s), 8 ringview line(s)
+compress ring16: lodgen rc 0; lodm yes
+compress n8: lodgen rc 0; lodm yes
+compress ring8: lodgen rc 0; lodm yes
+compress runglodgen: lodgen rc 0; lodm NO
+  ok    R1 the ring's camera echo is 16 azimuths at k x 22.5 deg, elevation 0: 16 echoes, worst azimuth error 0.0000 deg, worst elevation 0.0000 deg, steps 22.500..22.500 deg
+  ok    R1 red control: the rung's bake of the same command has no ring: no `ring` layout line (0 ringview lines)
+  ok    R2 the card .lodm declares the ring: views 16 grid [16, 1] oct None frameOffset 32, albedo 1280x256 (frame 80x256)
+  ok    R2 red control: the rung's lodgen on the same bake writes no ring: no .lodm
+  ok    R3 this exe loads the ring set: grid: RING of 16 views at 360/16 degrees, one row = 16 frames
+  ok    R3 the rung's N x N reader refuses the ring set by name: oct is 0, outside the bake's own 2..16
+  ok    R3 floor: the rung loads this exe's N8 set, so its refusal is the ring's
+  FAIL  R4 IoU at the in-between azimuths: mean 0.4886 < 0.60 over 16 views
+  FAIL  R4 red control did not bite: shuffled 0.1047 over 11 views
+  ok    R4a at the ring's own bake directions (22.5k, el 0): mean 0.9131 >= 0.80 over 16 views
+  ok    R6 the ring blends TWO neighbours by angle (0.75 / 0.25 a quarter step past a frame, slot 3 weight 0): 16 quarter-step views checked, 0 wrong
+M  ring16 vs N8, IoU at the 16 in-between azimuths (mean, counted):
+M  el 0: ring16 0.4886 (16)  N8 0.8249 (16)
+M  el 5: ring16 0.4863 (16)  N8 0.8044 (16)
+M  el 15: ring16 0.4266 (16)  N8 0.6511 (16)
+M  el 30: ring16 0.2849 (16)  N8 0.7947 (16)
+M  el 60: ring16 0.2086 (16)  N8 0.3712 (16)
+  ok    R5 popping at el 0, 1 deg steps: ring16 worst 62795, N8 worst 47453 (ratio 1.32, bar 1.50), ring8 worst 78686 (ratio 1.66), mesh worst 5024
+  ok    R5 red control: a ring of 8 pops past the bar
+13 checks, 2 failures
+FAIL

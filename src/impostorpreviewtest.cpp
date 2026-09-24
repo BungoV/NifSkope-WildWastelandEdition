@@ -1087,6 +1087,12 @@ bool wwImpostorPreviewStart( NifSkope * skope, GLView * ogl, QWidget * viewportH
 							.arg( ( wroteMesh && wroteCard ) ? QStringLiteral( "written" )
 									: QStringLiteral( "SAVE FAILED" ) );
 
+					// THE SELECTION, per view, on request (CARDFIX1 step 5): the frames the
+					// drawer chose here and their weights, so a gate can check the rule.
+					if ( qEnvironmentVariableIntValue( "WW_IMPOSTOR_ORBIT_SELECT" ) != 0 )
+						for ( const QString & line : ImpostorDraw::describeSelection( scene, st.set, st.offset, st.opt ) )
+							st.log << QStringLiteral( "  select %1" ).arg( line );
+
 					if ( meshCov == 0 || frac > 0.95 ) {
 						st.log << QStringLiteral( "  EXCLUDED: mesh coverage %1 is degenerate" )
 								.arg( frac, 0, 'f', 4 );

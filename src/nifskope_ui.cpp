@@ -22878,7 +22878,17 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					 * alpha test still cuts. Near and far sit symmetric about the
 					 * bound centre, so window z 0.5 is the card plane. */
 					const int octN = qEnvironmentVariableIntValue( "WW_IMPOSTOR_OCT" );
-					if ( octN >= 2 && octN <= 16 ) {
+					/* THE HORIZON RING (lane CARDFIX1 step 5 = IMPOSTORRING1; bungo 2026-09-23
+					 * 04:4x, RULED: "for fo4cs use the convention was 22.5 degrees per take").
+					 * WW_IMPOSTOR_RING=V photographs V azimuths at elevation 0, frame v at
+					 * 360*v/V, in ONE row: the aggregate's ring layout (docs/LODGEN_LODM_FORMAT.md
+					 * 3a), not a third one. It wins over WW_IMPOSTOR_OCT. Everything else -- the
+					 * matte, the 4x offscreen arm, per-frame offsets, one scale, the size ladder,
+					 * the coverage contract -- is the grid bake's, frame for frame. */
+					const int ringV = qEnvironmentVariableIntValue( "WW_IMPOSTOR_RING" );
+					const bool ringOn = ringV >= 4 && ringV <= 64;
+					const int gCols = ringOn ? ringV : octN, gRows = ringOn ? 1 : octN;
+					if ( ringOn || ( octN >= 2 && octN <= 16 ) ) {
 						int tile = qEnvironmentVariableIntValue( "WW_IMPOSTOR_TILE" );
 						if ( tile < 32 || tile > 512 )
 							tile = 256;	// 8 x 8 at 2k (bungo 2026-09-23, lane DEFAULTS2); was 128
@@ -22913,7 +22923,13 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							}
 							return skope->ogl->grabFramebuffer().convertToFormat( QImage::Format_ARGB32 );
 						};
-						auto viewDir = [octN]( int i, int j, float & rx, float & rz ) {
+						auto viewDir = [octN, ringOn, ringV]( int i, int j, float & rx, float & rz ) {
+							if ( ringOn ) {
+								// the ring: elevation 0, azimuth 360*i/V, the same camera law as below
+								rx = -90.0f;
+								rz = 270.0f - 360.0f * float( i ) / float( ringV );
+								return;
+							}
 							const float u = float( i ) / float( octN - 1 ) * 2.0f - 1.0f;
 							const float v = float( j ) / float( octN - 1 ) * 2.0f - 1.0f;
 							float dx = ( u + v ) * 0.5f, dy = ( u - v ) * 0.5f;
@@ -23144,7 +23160,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						 * at the transition by exactly the shift, which is why the offset
 						 * is part of the format and not an internal detail. */
 						const float halfH0 = skope->ogl->orthographicHalfHeight();
-						QVector<float> frameOffX( octN * octN, 0.0f ), frameOffY( octN * octN, 0.0f );
+						QVector<float> frameOffX( gCols * gRows, 0.0f ), frameOffY( gCols * gRows, 0.0f );
+						// the ring's camera echo: what the renderer held for each frame, in degrees
+						QVector<float> echoAz( gCols * gRows, -999.0f ), echoEl( gCols * gRows, -999.0f );
 						float maxDx = 1.0f, maxDy = 1.0f;			// the widest SINGLE view's half box
 						float maxOffX = 0.0f, maxOffY = 0.0f;		// how far a view's centre sits from the camera's
 						/* The UNION half-extent about the camera centre -- what the frame
@@ -23156,8 +23174,8 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						 * reason that has nothing to do with how big they are. It is also
 						 * the denominator of the fill gain this law is measured by. */
 						float unionDx = 1.0f, unionDy = 1.0f;
-						for ( int j = 0; j < octN; j++ ) {
-							for ( int i = 0; i < octN; i++ ) {
+						for ( int j = 0; j < gRows; j++ ) {
+							for ( int i = 0; i < gCols; i++ ) {
 								float rx, rz;
 								viewDir( i, j, rx, rz );
 								skope->ogl->setRotation( rx, 0.0f, rz );
@@ -23182,7 +23200,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 										}
 								if ( !any )
 									continue;		// an empty view keeps offset 0 and contributes no extent
-								const int v = j * octN + i;
+								const int v = j * gCols + i;
 								// the shift in the PIXEL-DOWN sense here; negated for the sidecar, where up is +
 								frameOffX[v] = 0.5f * ( x0 + x1 );
 								frameOffY[v] = 0.5f * ( y0 + y1 );
@@ -23379,7 +23397,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						 * G, iw and ih are the ones the size class was fitted to. */
 						const float fullHalfW = halfW * float( tw ) / float( iw );
 						const float fullHalfH = halfH * float( th ) / float( ih );
-						const int S_W = octN * tw, S_H = octN * th;
+						const int S_W = gCols * tw, S_H = gRows * th;
 						QImage albedo( S_W, S_H, QImage::Format_ARGB32 ), normal( S_W, S_H, QImage::Format_ARGB32 ),
 							rmaos( S_W, S_H, QImage::Format_ARGB32 ), emissive( S_W, S_H, QImage::Format_ARGB32 );
 						albedo.fill( 0 );
@@ -23490,13 +23508,26 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 								/ ( 255 - covFloor );
 						};
 						// pass two: the sheets
-						for ( int j = 0; j < octN; j++ ) {
-							for ( int i = 0; i < octN; i++ ) {
+						for ( int j = 0; j < gRows; j++ ) {
+							for ( int i = 0; i < gCols; i++ ) {
 								float rx, rz;
 								viewDir( i, j, rx, rz );
 								skope->ogl->setRotation( rx, 0.0f, rz );
 								// this view's own silhouette centre: every channel is cropped around the same point
-								const float ox = frameOffX[j * octN + i], oy = frameOffY[j * octN + i];
+								const float ox = frameOffX[j * gCols + i], oy = frameOffY[j * gCols + i];
+								if ( ringOn ) {
+									/* THE ECHO: the camera paintGL will use, read back from the view, not
+									 * the angle asked for. Its rotation's ROW 2 is where the camera sits
+									 * (the derivation at viewDir above), so azimuth and elevation are that
+									 * vector's own. A wrong rz law shows here as a wrong azimuth. */
+									const Transform vt = skope->ogl->viewTransform();
+									const float ex = vt.rotation( 2, 0 ), ey = vt.rotation( 2, 1 ), ez = vt.rotation( 2, 2 );
+									float az = std::atan2( ey, ex ) * 180.0f / 3.14159265f;
+									if ( az < 0.0f )
+										az += 360.0f;
+									echoAz[j * gCols + i] = az;
+									echoEl[j * gCols + i] = std::asin( qBound( -1.0f, ez, 1.0f ) ) * 180.0f / 3.14159265f;
+								}
 								QImage tA, tN, tD, tS, tM, tE;
 								if ( !aaOn ) {
 									tA = frameOf( matte(), ox, oy );
@@ -23711,7 +23742,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						 * untouched, and its ABSENCE is the statement that the set came
 						 * from the bake whose azimuth was turned by 180 degrees.
 						 * EVERY SET WITHOUT IT MUST BE RE-BAKED. */
-						ms << "oct " << octN << " " << tw << " " << th << " " << fullHalfW << " " << fullHalfH << " "
+						ms << ( ringOn ? "ring " : "oct " ) << ( ringOn ? ringV : octN ) << " " << tw << " " << th << " " << fullHalfW << " " << fullHalfH << " "
 						   << bs.center[0] << " " << bs.center[1] << " " << bs.center[2] << " " << depthSpan << " "
 						   << ( familyPbr ? "pbr" : "legacy" ) << " " << tile << " spec1" << "\n";
 						/* PER-FRAME POSITIONING, one line per frame: `frameoff i j ox oy`,
@@ -23732,12 +23763,18 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						 * pulled back inside the photograph. The fit is sized so it is
 						 * zero; it is written out rather than asserted so a bake that hit
 						 * it says so instead of silently cropping a silhouette. */
-						for ( int j = 0; j < octN; j++ )
-							for ( int i = 0; i < octN; i++ )
+						for ( int j = 0; j < gRows; j++ )
+							for ( int i = 0; i < gCols; i++ )
 								ms << "frameoff " << i << " " << j << " "
-								   << frameOffX[j * octN + i] << " "
-								   << -frameOffY[j * octN + i] << "\n";
+								   << frameOffX[j * gCols + i] << " "
+								   << -frameOffY[j * gCols + i] << "\n";
 						ms << "frameclamped " << clamped << "\n";
+						/* THE RING'S CAMERA ECHO, one line per frame: `ringview v azim elev`, in
+						 * degrees, read back from the view at the moment the frame was drawn.
+						 * Unknown to every reader, which skips lines it does not name. */
+						if ( ringOn )
+							for ( int v = 0; v < gCols; v++ )
+								ms << "ringview " << v << " " << echoAz[v] << " " << echoEl[v] << "\n";
 						/* THE PHOTOGRAPH'S ARM (lane IMPOSTORAA1): `aa 2 <pass-one size>
 						 * <worst centre miss in texels>` for the 2x offscreen bake (`aa 4 ...`
 						 * since IMPOSTORTEAR1: the first number is the factor K), `aa 0
