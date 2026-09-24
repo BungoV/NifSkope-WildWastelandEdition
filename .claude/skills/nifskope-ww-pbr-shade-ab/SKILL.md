@@ -163,6 +163,34 @@ bash tests/spells/pbr_fog1_gates.sh --out ".../fog1_red_<n>" --red <n>          
 * Vanilla day fog starts at 3000 units, so at view 8 the fog barely shows on the preview
   ground (noon: 0 px differ; night: 1 level). Look at it from `WW_RENDER_DIST=20000`.
 
+## 2e. The CSM1 gates: `pbr_csm1_gates.sh` + `pbr_csm1_gates.py` (lane CSM1)
+Cascaded sun shadows. `bash tests/spells/pbr_csm1_gates.sh --out <ABS dir> [--red <r>]`
+(~25 min). Sections: fit (splits + light view-projection vs an independent model at 11:00
+and 17:30), kernel (the 16 Poisson taps vs the spec table), foot (known-answer box
+footprint per cascade: selection, hard edge, Poisson penumbra), seam (blend band at 800),
+acne (3 sun hours, top-down down-sun), fade, place (the factor reaches diffuse AND
+specular), off (Shadows OFF byte-identical to `release/before_csm1`), live (the Scene
+row: toggle, persistence, the hour row moves the map). Reds, each must end FAIL:
+`flipsun nofloor nosnap onecascade wrongsplit noblend nobias bigbias nofade diffonly
+factorhalf kernelmut nolive nosave`.
+* **Read `<tag>.csm.txt`, not the census.** The PBRM census row is written at a shape's
+  FIRST draw, before the render hook's camera pin; its camera is the startup one.
+  `WW_CSM_ECHO=<abs path>` is rewritten each pass, so its last line is the grabbed frame
+  (camera, far plane, the uploaded cascade matrices, casters, probe, force, red).
+* **Judge the bias law, not a hull.** Stored depth = first sun-facing face + 6 x texel x
+  max(|n.r|,|n.u|)/|n.L| + 12 x (far-150)/65536 (D16, `glPolygonOffset(6,12)`, back faces
+  culled); receiver offset 0.275 (cascade A) / 1.0 (B). Walls the sun sees edge-on are
+  pushed behind the ground at their base and a grazing face darkens itself: that is the
+  law. Edge distance is judged on top-face edges only.
+* **The camera's far plane follows the scene** (~3024 at view 8 on the cube). Ground past
+  it is background; the judge drops it by the echoed far.
+* **The duct fixture is convex** and cannot show a shadowed sun-facing pixel. `place`
+  therefore forces the factor (`WW_CSM_FORCE=0`) and compares against the sun-less
+  diffuse/specular pictures where the sun reaches.
+* Probes `WW_CSM_PROBE`: 1 hard, 2 cascade tint, 3 blended, 4 final, 5 selection.
+* The general procedure (echo the grabbed frame, model the bias law, fixtures) is the
+  user skill `ww-shadow-map-judge`.
+
 ## 3. Known gaps
 * `-no-gui pbrm-resolve` finds no resources at all (not even vanilla BGSMs) even with
   `WW_LODGEN_RESOURCES`; the route gates use the viewport census. Do not gate on the CLI
