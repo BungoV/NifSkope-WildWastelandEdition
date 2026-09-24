@@ -217,7 +217,18 @@ ESMFile::ESMFile(const char *fileNames, bool enableZLibCache)
      * own TES4 MAST list, not our input list. Build per-file byte maps
      * (master basename -> position in the input list; identity when a
      * master is absent, preserving the old raw-prefix behaviour). The
-     * file's own records use the byte after its last master. */
+     * file's own records use the byte after its last master.
+     *
+     * ESMFIX1: in the Creation Engine games up to Fallout 4 (form version
+     * below 0xC0) EVERY index at or beyond the master count names the
+     * plugin itself -- the game's rule, and xEdit's
+     * (TwbFile.FileFileIDtoLoadOrderFileID: FullSlot < MasterCount -> that
+     * master, else the file's own slot). A plugin saved with FF-prefixed
+     * IDs over one master (TestWorldspace.esp, 483 records) is legal and
+     * loads in game; it used to be refused whole as "invalid form ID".
+     * Fallout 76 / Starfield files (form version >= 0xC0) keep the old
+     * mapping and the old refusal. */
+    std::vector< unsigned char >  ownBeyondMasters(esmFiles.size(), 0);
     std::vector< std::string > baseNames(tmpFileNames.size());
     for (size_t i = 0; i < tmpFileNames.size(); i++)
     {
@@ -243,6 +254,12 @@ ESMFile::ESMFile(const char *fileNames, bool enableZLibCache)
       if (endPos > buf.size())
         endPos = buf.size();
       size_t  masterCnt = 0;
+      // the file's own form version (the member esmVersion is the LAST
+      // file's); Oblivion's 20-byte header carries none
+      unsigned int  fileFormVersion = 0U;
+      if (recordHdrSize >= 24 && buf.size() >= 24)
+        fileFormVersion = FileBuffer::readUInt16Fast(buf.data() + 20);
+      ownBeyondMasters[i] = (unsigned char) (fileFormVersion < 0xC0U);
       while ((buf.getPosition() + 6) <= endPos)
       {
         unsigned int  tag = buf.readUInt32Fast();
@@ -271,8 +288,15 @@ ESMFile::ESMFile(const char *fileNames, bool enableZLibCache)
         }
         buf.setPosition(dataPos + len);
       }
-      if (masterCnt < 256)
+      if (ownBeyondMasters[i])
+      {
+        for (size_t k = masterCnt; k < 256; k++)
+          m[k] = std::uint32_t(i);
+      }
+      else if (masterCnt < 256)
+      {
         m[masterCnt] = std::uint32_t(i);
+      }
     }
 
     size_t  compressedCnt = 0;
@@ -306,7 +330,10 @@ ESMFile::ESMFile(const char *fileNames, bool enableZLibCache)
         }
         else
         {
-          if (formID > 0x0FFFFFFFU && ((formID + 0x03000000U) & 0xFE000000U))
+          // any top byte is a legal file index under the game's rule (the
+          // map above sends one beyond the masters to this file)
+          if (!ownBeyondMasters[i] &&
+              formID > 0x0FFFFFFFU && ((formID + 0x03000000U) & 0xFE000000U))
           {
             throw NifSkopeError("%s: invalid form ID",
                                 tmpFileNames[i].c_str());

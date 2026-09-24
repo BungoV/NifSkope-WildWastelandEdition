@@ -1,0 +1,19 @@
+ESMFIX1 gates, 2026-09-24 (exe release/NifSkope.exe sha1 ec5959c4, rung release/NifSkope.before_esmfix1.exe sha1 b4f62763)
+G1 his live profile E:/Projects/Fallout 4 Mods/profiles/Default (read only)
+  --print-source: 47 plugins (g1_src.txt), TestWorldspace.esp = plugin 28
+  --list-worldspaces (reader over all 47): rc 0, 14 worldspaces (g1_ws_NifSkope.txt)
+  one-chunk Sanctuary bake (--worldspace 3C --terrain-region -20 24 -20 24 --dim 4 --native): rc 0, 16 s, 9 files,
+  .lodb lists 47 plugins incl. plugin 28 testworldspace.esp (g1_rec.txt)
+  RED rung: --list-worldspaces rc 1 and the bake rc 1, 0 files: "TestWorldspace.esp: invalid form ID"
+  census.py: of 47 plugins only TestWorldspace.esp has record top bytes > its master count (483 of 483)
+G2 known answer (g2_check.py, reads the raw file itself): WRLD raw FF000F99 EDID TestDebugWorld, 1 master,
+  plugin index 28 -> xEdit rule predicts 1C000F99; exe lists 1c000f99 TestDebugWorld. 1 WRLD, 0 failures.
+  --worldspace 1C000F99: 'TestDebugWorld' cells 210 grid [-9,-7]..[6,6].
+  RED rung: TestDebugWorld absent (the rung loads nothing), 1 failure.
+G3 Sanctuary 9-chunk bake, the 17 vanilla masters only (Fallout4.esm, 7 DLC, 9 CC .esl), --resource Data,
+  --worldspace 3C --terrain-region -24 20 -16 28 --dim 4 --native: both exes rc 0, 57 files each, same list,
+  56 byte-identical (9 BTR, 9 lodj, lodo, lodi, textures, manifests); only Commonwealth.lodb differs, in its
+  path / exeBytes / baked time / command out-dir / census timing lines (g3_rec_*.txt diff).
+  SENSITIVITY RED: same exe, same chunk -20,24, his live load order vs vanilla-only:
+  tex/Commonwealth.4.-20.24.DDS differs (and lodo/lodi) -> the comparator sees load-order content.
+  kept green: lodgen_loadorder.sh 24 checks 0 failures PASS (RUNG = before_esmfix1); lodgen_resources.sh 4/0 PASS.
