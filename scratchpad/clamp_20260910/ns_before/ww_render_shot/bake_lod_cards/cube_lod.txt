@@ -1,0 +1,7 @@
+model cube_lod.nif
+hidden Cube_L1
+lodm materials\#FF808080.lodm none #FF808080
+mask alpha
+emissive 0 shapes 0
+front 437.584 145.474 0 0 0
+side 3696.21 1228.8 0 0 0

@@ -1,0 +1,7 @@
+model cube_plain.nif
+projection ortho
+lodm materials\#FF808080.lodm none #FF808080
+mask alpha
+emissive 0 shapes 0
+front 283.744 145.474 6.35783e-07 6.35783e-07 69.9912
+side 283.744 145.474 6.35783e-07 6.35783e-07 69.9912

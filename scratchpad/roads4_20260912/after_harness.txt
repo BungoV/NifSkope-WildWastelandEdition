@@ -1,0 +1,4 @@
+lodgen_roads rc=1 23s : 11 checks, 1 failures
+lodgen_terrain rc=0 15s : 26 checks, 0 failures
+lod_generation rc=0 50s : 116 checks, 0 failures
+HARNESS END 06:43:57

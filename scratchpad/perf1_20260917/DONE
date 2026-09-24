@@ -1,0 +1,30 @@
+perf1 done 2026-09-17 15:4x -- the FO4CS bake uses the machine.
+
+The object library builds in parallel and retires in job order: region A
+82.0 s -> 49.3 s, region B 91.5 s -> 59.4 s at the shipped defaults, peak
+working set unmoved (2.29 and 2.55 GB both sides), every output byte-identical.
+Under `--incremental` the library can be kept rather than rebuilt (null arm
+39.3 s -> 2.5 s) behind a chain of eight refusals, and the record says which
+happened in the new `native-library-build:` census line. The `stage times:`
+line carries the library's seven-stage split, masked by both normalisers.
+
+NO DEFAULT MOVED. `--chunk-threads` stays 1; what 8 is worth, and what it
+costs (2.29 -> 9.32 GB, 2.55 -> 10.48 GB), is divergence row A in report
+section 12, with rows B, C and D beside it.
+
+Exe: release/NifSkope.exe 22,567,424 bytes, 2026-09-17T12:45:27,
+sha1 a843fca68c18c2740efddcb20e9fe715b7732a22.
+Rung: release/NifSkope.before_perf1.exe 22,534,144 bytes, 08:55 -- not deleted.
+
+Gate: tests/spells/lodgen_perf.sh -- 11 ok, 0 RED, PASS
+(logs/gate_perf_final3.log). Three refuters run and red.
+Neighbours: nine gates, both sides, identical gate for gate and red for red;
+6 PASS, 3 FAIL on BOTH sides (lodgen_native section 5 = BAKEREC1 vs BTOFREE1's
+gate; lodgen_btofree legs a,b = INCR1's .lodj and leg c = BAKEREC1's v2 record;
+lodgen_stage_times = LAYOUT1's one root). This lane made no red.
+
+Report: scratchpad/perf1_20260917/lane_perf1_report.md, sections 1-13.
+Pictures: scratchpad/perf1_20260917/images/ (three).
+Skills proposed: scratchpad/perf1_20260917/skills_proposed/ (three).
+Nothing committed, nothing stashed, WW_CHANGES.md and HANDOFF.md untouched --
+the changelog text for the director is report section 11.

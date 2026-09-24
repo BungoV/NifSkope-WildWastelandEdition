@@ -1,0 +1,32 @@
+model RockCliff02_Alt.nif
+projection ortho
+lodm materials\Landscape\rockslab02.lodm none textures\landscape\rocks\commonwealthrockslab02_d.dds
+lodm materials\Landscape\rockslabtrim.lodm none textures\landscape\rocks\commonwealthrockslabtrim_d.dds
+mask alpha
+emissive 0 shapes 0
+front 3938.48 2019.24 -89.0114 -65.5637 -274.135
+side 3938.48 2019.24 -89.0114 -65.5637 -274.135
+class 512 496
+gap 32 32
+coverage 16 128 160
+oct 4 512 496 1727.14 1673.17 -89.0114 -65.5637 -274.135 5048.1 legacy 512 spec1
+frameoff 0 0 11.8315 437.765
+frameoff 1 0 -118.315 441.709
+frameoff 2 0 -177.472 408.186
+frameoff 3 0 -65.0732 392.411
+frameoff 0 1 -124.231 406.214
+frameoff 1 1 -39.4383 246.489
+frameoff 2 1 -59.1574 -39.4383
+frameoff 3 1 67.0451 394.383
+frameoff 0 2 -59.1575 404.242
+frameoff 1 2 59.1574 98.5958
+frameoff 2 2 39.4383 110.427
+frameoff 3 2 128.174 394.383
+frameoff 0 3 61.1294 392.411
+frameoff 1 3 21.6911 394.383
+frameoff 2 3 -7.8877 394.383
+frameoff 3 3 39.4383 394.383
+frameclamped 0
+aa 2 1024 0.75
+framefit 1603.17 1520.35 1626.83 1587.39
+orthofit 2006.93 2006.93 0

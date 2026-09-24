@@ -1,0 +1,6 @@
+[Warning] QObject::connect(QListModel, QWidget): signal not found
+[Warning] QObject::connect(QListModel, QWidget): signal not found
+[Warning] QObject::connect(QListModel, QWidget): signal not found
+[Warning] QObject::connect(QListModel, QWidget): signal not found
+[Warning] QAbstractItemView::setRootIndex failed : index must be from the currently set model
+[Warning] QAbstractItemView::setRootIndex failed : index must be from the currently set model

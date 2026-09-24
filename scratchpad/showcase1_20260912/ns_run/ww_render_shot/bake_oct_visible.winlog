@@ -1,0 +1,6 @@
+shown QWindow geom=0,0,0x0 visible=0 onscreen=0 onprimary=0 opacity=1.00 maximised=0 arm=WW_WINDOW_AT
+shown QWidgetWindow geom=1960,71,1280x800 visible=1 onscreen=1 onprimary=0 opacity=1.00 maximised=0 arm=WW_WINDOW_AT
+bake QWindow geom=0,0,0x0 visible=0 onscreen=0 onprimary=0 opacity=1.00 maximised=0 arm=WW_WINDOW_AT
+bake QWidgetWindow geom=1960,71,1024x560 visible=1 onscreen=1 onprimary=0 opacity=1.00 maximised=0 arm=WW_WINDOW_AT
+sheet QWindow geom=0,0,0x0 visible=0 onscreen=0 onprimary=0 opacity=1.00 maximised=0 arm=WW_WINDOW_AT
+sheet QWidgetWindow geom=1960,71,1024x560 visible=1 onscreen=1 onprimary=0 opacity=1.00 maximised=0 arm=WW_WINDOW_AT

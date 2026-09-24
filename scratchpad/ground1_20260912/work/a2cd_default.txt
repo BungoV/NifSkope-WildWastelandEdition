@@ -1,0 +1,45 @@
+### A2d at the shipped default 0.5 ###
+field 384x384 cell 128 origin (-832,704) occupied 45222
+march: 8 directions x 7 distances 128,192,288,432,648,972,1458
+content texels 1048576
+                    at least one occupied sample    none
+  dark            858981                      2892
+  flat              4127                    181859
+  bright             229                       488
+
+  darkened texels whose 56 samples are ALL empty: 2892
+    (the object term returns 1.0f by early return there, so any such
+     texel is BC1 block spill, never the term itself)
+    the first few:
+      drop   3 world (   -95088,   131056) tile  0 texel (108,  8)
+      drop   3 world (   -95056,   131056) tile  0 texel (109,  8)
+      drop   3 world (   -94864,   131056) tile  0 texel (115,  8)
+      drop   3 world (   -94608,   131056) tile  0 texel (123,  8)
+      drop   5 world (   -94576,   131056) tile  0 texel (124,  8)
+      drop   3 world (   -94544,   131056) tile  0 texel (125,  8)
+      drop   3 world (   -94512,   131056) tile  0 texel (126,  8)
+      drop   3 world (   -94480,   131056) tile  0 texel (127,  8)
+    of those 2892: 2892 share their 4x4 BC1 block with a texel that DOES
+    have an occluder, 0 do not; drops median 4, p95 10, max 25
+
+  A2d, the reach MEASURED: the largest march distance at which a
+  darkened texel found an occluder is 1458.0 u; the loop's longest
+  step is 1458.0 u.
+  darkened texels by their farthest occupied sample:
+      192.0 u         4
+      288.0 u       131
+      432.0 u      1116
+      648.0 u      6764
+      972.0 u     44112
+     1458.0 u    806854
+### A2c at the shipped default 0.5 ###
+== A2c: a building footprint against five displaced controls ==
+  blobs 1031; the subject is the largest of the 258 between 16 and 200 squares:
+    183 squares, top 11663.8, centre world (-75443, 109250)
+  SUBJECT   mean AO drop 133.16 bytes over 2928 texels
+  control 1 at ( -85945, 122126)  mean AO drop    9.22 over 2928 texels
+  control 2 at ( -88678, 119773)  mean AO drop    6.86 over 2928 texels
+  control 3 at ( -86314, 121914)  mean AO drop   10.67 over 2928 texels
+  control 4 at ( -86747, 121632)  mean AO drop   11.49 over 2928 texels
+  control 5 at ( -87132, 121348)  mean AO drop   13.04 over 2928 texels
+  A2c: subject 133.16, worst of 5 controls 13.04, margin 120.12 bytes

@@ -1,0 +1,1318 @@
+0x002863c10  mov rax, rsp
+0x002863c13  mov qword ptr [rax + 0x10], rdx
+0x002863c17  mov qword ptr [rax + 8], rcx
+0x002863c1b  push rbp
+0x002863c1c  push rbx
+0x002863c1d  push rsi
+0x002863c1e  push rdi
+0x002863c1f  push r12
+0x002863c21  push r13
+0x002863c23  push r14
+0x002863c25  push r15
+0x002863c27  lea rbp, [rax - 0x198]
+0x002863c2e  sub rsp, 0x258
+0x002863c35  mov r14, qword ptr [rdx + 0x10]
+0x002863c3f  movaps xmmword ptr [rax - 0x68], xmm7
+0x002863c43  movabs rax, 0x1000000000
+0x002863c4d  xor edi, edi
+0x002863c4f  mov r15d, 0xb20
+0x002863c55  test qword ptr [r14 + 0x30], rax
+0x002863c59  jbe 0x2863c8f
+0x002863c64  mov rax, qword ptr [rax + rsi*8]
+0x002863c68  mov rax, qword ptr [r15 + rax]
+0x002863c6c  test rax, rax
+0x002863c6f  jne 0x2863c78
+0x002863c78  add rax, 0x1b70
+0x002863c7e  cmp dword ptr [rax + 0xbc], edi
+0x002863c84  je 0x2863c8f
+0x002863c86  or dword ptr [rax], 8
+0x002863c89  mov dword ptr [rax + 0xbc], edi
+0x002863c8f  mov rax, qword ptr [rip + 0x3ebdeda] ; rip->BSShaderManager::St
+0x002863c96  mov rbx, qword ptr [rip + 0x3ecf173] ; rip->BSShader::pCurrentVertexShader
+0x002863c9d  movss xmm7, dword ptr [rax + 0x2f8]
+0x002863cb3  mov r12, qword ptr [rax + rsi*8]
+0x002863cb7  mov esi, r15d
+0x002863cba  mov r8d, 2
+0x002863cc0  mov rcx, qword ptr [r15 + r12]
+0x002863cc4  mov rdx, rbx
+0x002863cc7  mov qword ptr [rsp + 0x70], rsi
+0x002863ccc  call 0x1d099d0 ; BSGraphics::Context::GetConstantBuffer
+0x002863cd1  mov r15d, 4
+0x002863cd7  mov rdx, qword ptr [rax]
+0x002863cda  mov rbx, rax
+0x002863cdd  mov qword ptr [rbp + 0x1b0], rax
+0x002863ce4  mov eax, 0xb18
+0x002863ce9  test rdx, rdx
+0x002863cec  je 0x2863d14
+0x002863cee  mov rcx, qword ptr [rax + r12]
+0x002863cf2  lea rax, [rbp + 0x40]
+0x002863cf6  mov r9d, r15d
+0x002863cf9  mov r10, qword ptr [rcx]
+0x002863cfc  mov qword ptr [rsp + 0x28], rax
+0x002863d01  xor r8d, r8d
+0x002863d04  mov dword ptr [rsp + 0x20], edi
+0x002863d08  call qword ptr [r10 + 0x70]
+0x002863d0c  mov rax, qword ptr [rbp + 0x40]
+0x002863d10  mov qword ptr [rbx + 8], rax
+0x002863d14  mov rbx, qword ptr [rip + 0x3ecf10d] ; rip->BSShader::pCurrentPixelShader
+0x002863d20  mov rcx, qword ptr [rsi + r12]
+0x002863d24  mov r8d, 2
+0x002863d2a  mov rdx, rbx
+0x002863d2d  call 0x1d09a60 ; BSGraphics::Context::GetConstantBuffer
+0x002863d32  mov r13, rax
+0x002863d35  mov rdx, qword ptr [rax]
+0x002863d38  test rdx, rdx
+0x002863d3b  je 0x2863d68
+0x002863d3d  mov eax, 0xb18
+0x002863d42  mov r9d, r15d
+0x002863d45  xor r8d, r8d
+0x002863d48  mov rcx, qword ptr [rax + r12]
+0x002863d4c  lea rax, [rbp + 0x40]
+0x002863d50  mov r10, qword ptr [rcx]
+0x002863d53  mov qword ptr [rsp + 0x28], rax
+0x002863d58  mov dword ptr [rsp + 0x20], edi
+0x002863d5c  call qword ptr [r10 + 0x70]
+0x002863d60  mov rax, qword ptr [rbp + 0x40]
+0x002863d64  mov qword ptr [r13 + 8], rax
+0x002863d68  mov rdx, qword ptr [rip + 0x3ecf0a9] ; rip->BSShader::pCurrentHullShader
+0x002863d6f  mov qword ptr [rbp + 0x28], rdi
+0x002863d73  test rdx, rdx
+0x002863d76  je 0x2863d8e
+0x002863d78  lea rcx, [rip + 0x397cb81] ; rip->BSGraphics::gRenderer
+0x002863d7f  mov r8d, 2
+0x002863d85  call 0x28683d0 ; BSGraphics::Renderer::GetShaderConstantGroup
+0x002863d8a  mov qword ptr [rbp + 0x28], rax
+0x002863d8e  mov rdx, qword ptr [rip + 0x3ecf08b] ; rip->BSShader::pCurrentDomainShader
+0x002863d95  mov qword ptr [rbp - 0x30], rdi
+0x002863d99  test rdx, rdx
+0x002863d9c  je 0x2863db4
+0x002863d9e  lea rcx, [rip + 0x397cb5b] ; rip->BSGraphics::gRenderer
+0x002863da5  mov r8d, 2
+0x002863dab  call 0x2868310 ; BSGraphics::Renderer::GetShaderConstantGroup
+0x002863db0  mov qword ptr [rbp - 0x30], rax
+0x002863db4  mov rsi, qword ptr [rbp + 0x1a8]
+0x002863dbb  movaps xmmword ptr [rsp + 0x240], xmm6
+0x002863dc3  movaps xmmword ptr [rsp + 0x220], xmm8
+0x002863dcc  mov rsi, qword ptr [rsi + 0x18]
+0x002863dd0  cmp byte ptr [rsi + 0x158], 0xf
+0x002863dd7  jne 0x2863e79
+0x002863ddd  xorps xmm6, xmm6
+0x002863de0  mov r14d, edi
+0x002863de3  movaps xmm0, xmm6
+0x002863de6  cmp dword ptr [rsi + 0x1f8], edi
+0x002863dec  jbe 0x28665a8
+0x002863df2  movss xmm8, dword ptr [rip + 0x3e4f65] ; rip->_real
+0x002863dfb  nop dword ptr [rax + rax]
+0x002863e00  mov rax, qword ptr [rsi + 0x200]
+0x002863e07  mov ebx, r14d
+0x002863e0a  mov rcx, qword ptr [rax + rbx*8]
+0x002863e0e  test rcx, rcx
+0x002863e11  jne 0x2863e2a
+0x002863e13  comiss xmm7, xmm6
+0x002863e16  jbe 0x2863e2a
+0x002863e18  mov rax, qword ptr [rip + 0x3ebdd51] ; rip->BSShaderManager::St
+0x002863e1f  mov rcx, qword ptr [rax + 0x320]
+0x002863e26  mov rcx, qword ptr [rcx + 0x38]
+0x002863e2a  cmp rdi, rcx
+0x002863e2d  je 0x2863e57
+0x002863e2f  mov rdi, rcx
+0x002863e32  test rcx, rcx
+0x002863e35  je 0x2863e54
+0x002863e37  call 0x289c9e0 ; BSDFCompositeShaderEnvmapAccumulator::AssignUsedTexture
+0x002863e3c  cmp eax, 0xff
+0x002863e41  jae 0x2863e54
+0x002863e43  xorps xmm0, xmm0
+0x002863e46  mov eax, eax
+0x002863e48  cvtsi2ss xmm0, rax
+0x002863e4d  addss xmm0, xmm8
+0x002863e52  jmp 0x2863e57 ; BSDFPrePassShader::SetupGeometry+0x247
+0x002863e54  movaps xmm0, xmm6
+0x002863e57  mov rax, qword ptr [rsi + 0x1d8]
+0x002863e5e  imul rbx, rbx, 0x64
+0x002863e62  inc r14d
+0x002863e65  movss dword ptr [rbx + rax + 0x60], xmm0
+0x002863e6b  cmp r14d, dword ptr [rsi + 0x1f8]
+0x002863e72  jb 0x2863e00
+0x002863e74  jmp 0x28665a8 ; BSDFPrePassShader::SetupGeometry+0x2998
+0x002863e79  mov rax, qword ptr [rbp + 0x1a0]
+0x002863e80  movaps xmmword ptr [rsp + 0x1f0], xmm11
+0x002863e89  movaps xmmword ptr [rsp + 0x1e0], xmm12
+0x002863e92  mov rcx, rsi
+0x002863e95  mov eax, dword ptr [rax + 0x118]
+0x002863e9b  mov dword ptr [rsp + 0x30], eax
+0x002863e9f  mov rax, qword ptr [rsi]
+0x002863ea2  movaps xmmword ptr [rsp + 0x1d0], xmm13
+0x002863eab  movaps xmmword ptr [rsp + 0x1c0], xmm14
+0x002863eb4  movaps xmmword ptr [rsp + 0x1b0], xmm15
+0x002863ebd  call qword ptr [rax + 0x1f8]
+0x002863ec3  test rax, rax
+0x002863ec6  mov qword ptr [rsp + 0x50], rax
+0x002863ecb  setne cl
+0x002863ece  mov byte ptr [rbp + 0x1b8], cl
+0x002863ed4  test cl, cl
+0x002863ed6  je 0x2863fe5
+0x002863edc  mov rbx, qword ptr [rax + 0x148]
+0x002863ee3  lea rcx, [rip + 0x397ca16] ; rip->BSGraphics::gRenderer
+0x002863eea  mov edx, r15d
+0x002863eed  mov r8, qword ptr [rbx + 8]
+0x002863ef1  call 0x1d0d9b0 ; BSGraphics::Renderer::VSSetBufferSR
+0x002863ef6  mov r8, qword ptr [rbx + 0x10]
+0x002863efa  lea rcx, [rip + 0x397c9ff] ; rip->BSGraphics::gRenderer
+0x002863f01  mov edx, 6
+0x002863f06  call 0x1d0d9f0 ; BSGraphics::Renderer::VSSetBufferSR
+0x002863f0b  mov rbx, qword ptr [rsp + 0x50]
+0x002863f10  lea rcx, [rip + 0x397c9e9] ; rip->BSGraphics::gRenderer
+0x002863f17  mov r8, qword ptr [rbx + 0x178]
+0x002863f1e  mov edx, 7
+0x002863f23  call 0x1d0da30 ; BSGraphics::Renderer::VSSetBufferSR
+0x002863f28  mov r8, qword ptr [rbx + 0x170]
+0x002863f2f  lea rcx, [rip + 0x397c9ca] ; rip->BSGraphics::gRenderer
+0x002863f36  mov edx, 8
+0x002863f3b  call 0x1d0e200 ; BSGraphics::Renderer::VSSetStructuredBufferSR
+0x002863f40  mov rax, qword ptr [rip + 0x3eceec9] ; rip->BSShader::pCurrentVertexShader
+0x002863f47  mov rdx, qword ptr [rbp + 0x1b0]
+0x002863f4e  movzx ecx, byte ptr [rax + 0x7e]
+0x002863f52  cmp cl, 0xff
+0x002863f55  je 0x2863f8d
+0x002863f57  mov rax, qword ptr [rdx + 8]
+0x002863f5b  movzx ecx, cl
+0x002863f5e  lea r9, [rbx + 0x180]
+0x002863f65  lea r8, [rax + rcx*4]
+0x002863f69  mov ecx, edi
+0x002863f6b  sub r9, r8
+0x002863f6e  nop
+0x002863f70  cmp ecx, r15d
+0x002863f73  jae 0x2863f86
+0x002863f75  mov eax, dword ptr [r9 + r8]
+0x002863f79  inc ecx
+0x002863f7b  mov dword ptr [r8], eax
+0x002863f7e  add r8, r15
+0x002863f81  cmp ecx, 8
+0x002863f84  jb 0x2863f70
+0x002863f86  mov rax, qword ptr [rip + 0x3ecee83] ; rip->BSShader::pCurrentVertexShader
+0x002863f8d  movzx ecx, byte ptr [rax + 0x7f]
+0x002863f91  cmp cl, 0xff
+0x002863f94  je 0x2863fe5
+0x002863f96  mov rax, qword ptr [rdx + 8]
+0x002863f9a  movzx ecx, cl
+0x002863f9d  lea rdx, [rbx + 0x190]
+0x002863fa4  lea r8, [rax + rcx*4]
+0x002863fa8  mov qword ptr [rsp + 0x50], r8
+0x002863fad  cmp r15d, 8
+0x002863fb1  jae 0x2863fca
+0x002863fb3  mov eax, dword ptr [rdx]
+0x002863fb5  lea ecx, [r15 - 4]
+0x002863fb9  inc r15d
+0x002863fbc  add rdx, 4
+0x002863fc0  mov dword ptr [r8 + rcx*4], eax
+0x002863fc4  cmp r15d, 8
+0x002863fc8  jb 0x2863fb3
+0x002863fca  mov rax, qword ptr [rbp + 0x1a8]
+0x002863fd1  mov rcx, rbx
+0x002863fd4  movzx edx, byte ptr [rax + 0x4e]
+0x002863fd8  call 0x1cd7fa0 ; BSMergeInstancedTriShape::GetStartIndex
+0x002863fdd  mov rcx, qword ptr [rsp + 0x50]
+0x002863fe2  mov dword ptr [rcx + 8], eax
+0x002863fe5  mov rax, qword ptr [rip + 0x3ecee3c] ; rip->BSShader::pCurrentPixelShader
+0x002863fec  movzx ecx, byte ptr [rax + 0x6c]
+0x002863ff0  lea rax, [rip + 0x3ebe249] ; rip->`BSGraphics::Renderer::GetShaderConstantPointer'::`6'::tmp
+0x002863ff7  mov qword ptr [rsp + 0x50], rax
+0x002863ffc  cmp cl, 0xff
+0x002863fff  je 0x286400e
+0x002864001  mov rax, qword ptr [r13 + 8]
+0x002864005  movzx ecx, cl
+0x002864008  lea rbx, [rax + rcx*4]
+0x00286400c  jmp 0x2864011 ; BSDFPrePassShader::SetupGeometry+0x401
+0x00286400e  mov rbx, rax
+0x002864011  mov rax, qword ptr [r14 + 0x30]
+0x002864015  movss xmm14, dword ptr [rip + 0x3e4d42] ; rip->_real
+0x00286401e  xorps xmm12, xmm12
+0x002864022  and eax, 0x80
+0x002864027  ja 0x286403b
+0x002864029  comiss xmm7, xmm12
+0x00286402d  ja 0x286403b
+0x00286402f  mov qword ptr [rbx], rdi
+0x002864032  mov qword ptr [rbx + 8], rdi
+0x002864036  jmp 0x2864100 ; BSDFPrePassShader::SetupGeometry+0x4f0
+0x00286403b  test rax, rax
+0x00286403e  je 0x2864046
+0x002864040  mov r15, qword ptr [r14 + 0x58]
+0x002864044  jmp 0x2864049 ; BSDFPrePassShader::SetupGeometry+0x439
+0x002864046  mov r15, rdi
+0x002864049  mov rdx, qword ptr [r14 + 0x58]
+0x00286404d  mov qword ptr [rsp + 0x38], rdx
+0x002864052  test r15, r15
+0x002864055  je 0x2864069
+0x002864057  mov rcx, qword ptr [r15 + 0xc0]
+0x00286405e  test rcx, rcx
+0x002864061  je 0x2864069
+0x002864063  mov rcx, qword ptr [rcx + 0x38]
+0x002864067  jmp 0x286406c ; BSDFPrePassShader::SetupGeometry+0x45c
+0x002864069  mov rcx, rdi
+0x00286406c  test rcx, rcx
+0x00286406f  jne 0x2864093
+0x002864071  comiss xmm7, xmm12
+0x002864075  jbe 0x28640b9
+0x002864077  mov rax, qword ptr [rip + 0x3ebdaf2] ; rip->BSShaderManager::St
+0x00286407e  mov rcx, qword ptr [rax + 0x320]
+0x002864085  test rcx, rcx
+0x002864088  je 0x28640b9
+0x00286408a  mov rcx, qword ptr [rcx + 0x38]
+0x00286408e  test rcx, rcx
+0x002864091  je 0x28640b9
+0x002864093  call 0x289c9e0 ; BSDFCompositeShaderEnvmapAccumulator::AssignUsedTexture
+0x002864098  mov rdx, qword ptr [rsp + 0x38]
+0x00286409d  cmp eax, 0xff
+0x0028640a2  jae 0x28640b9
+0x0028640a4  xorps xmm0, xmm0
+0x0028640a7  mov eax, eax
+0x0028640a9  cvtsi2ss xmm0, rax
+0x0028640ae  addss xmm0, xmm14
+0x0028640b3  movss dword ptr [rbx], xmm0
+0x0028640b7  jmp 0x28640bb ; BSDFPrePassShader::SetupGeometry+0x4ab
+0x0028640b9  mov dword ptr [rbx], edi
+0x0028640bb  mov eax, dword ptr [r14 + 0x30]
+0x0028640bf  test rax, 0x80
+0x0028640c5  seta al
+0x0028640c8  movzx ecx, al
+0x0028640cb  movd xmm0, ecx
+0x0028640cf  cvtdq2ps xmm0, xmm0
+0x0028640d2  movss dword ptr [rbx + 4], xmm0
+0x0028640d7  mov eax, dword ptr [r14 + 0x30]
+0x0028640db  test rax, 0x80
+0x0028640e1  jbe 0x28640ee
+0x0028640e3  movss xmm0, dword ptr [r15 + 0xd0]
+0x0028640ec  jmp 0x28640f2 ; BSDFPrePassShader::SetupGeometry+0x4e2
+0x0028640ee  movaps xmm0, xmm12
+0x0028640f2  movss dword ptr [rbx + 8], xmm0
+0x0028640f7  mov eax, dword ptr [rdx + 0xa0]
+0x0028640fd  mov dword ptr [rbx + 0xc], eax
+0x002864100  mov rax, qword ptr [r14 + 0x50]
+0x002864104  mov rdx, qword ptr [rip + 0x3eced05] ; rip->BSShader::pCurrentVertexShader
+0x00286410b  mov rbx, qword ptr [rbp + 0x1b0]
+0x002864112  mov r15, qword ptr [rsp + 0x70]
+0x002864117  mov qword ptr [rbp + 0x50], rax
+0x00286411b  movzx eax, byte ptr [rdx + 0x80]
+0x002864122  cmp al, 0xff
+0x002864124  je 0x286426d
+0x00286412a  mov rdx, qword ptr [rbx + 8]
+0x00286412e  movzx ecx, al
+0x002864131  mov rax, qword ptr [r15 + r12]
+0x002864135  test rax, rax
+0x002864138  jne 0x2864141
+0x002864141  movss xmm0, dword ptr [rip + 0x3ebd927] ; rip->BSShaderManager::actorVegetationCollisionsS
+0x002864149  add rax, 0x1b70
+0x00286414f  subss xmm0, dword ptr [rax + 0x6b0]
+0x002864157  movss dword ptr [rdx + rcx*4], xmm0
+0x00286415c  movss xmm1, dword ptr [rip + 0x3ebd910] ; rip->BSShaderManager::actorVegetationCollisionsS+0x4
+0x002864164  subss xmm1, dword ptr [rax + 0x6b4]
+0x00286416c  movss dword ptr [rdx + rcx*4 + 4], xmm1
+0x002864172  movss xmm0, dword ptr [rip + 0x3ebd8fe] ; rip->BSShaderManager::actorVegetationCollisionsS+0x8
+0x00286417a  movss dword ptr [rdx + rcx*4 + 8], xmm0
+0x002864180  movss xmm1, dword ptr [rip + 0x3ebd8f4] ; rip->BSShaderManager::actorVegetationCollisionsS+0xc
+0x002864188  movss dword ptr [rdx + rcx*4 + 0xc], xmm1
+0x00286418e  movss xmm0, dword ptr [rip + 0x3ebd8ea] ; rip->BSShaderManager::actorVegetationCollisionsS+0x10
+0x002864196  subss xmm0, dword ptr [rax + 0x6b0]
+0x00286419e  movss dword ptr [rdx + rcx*4 + 0x10], xmm0
+0x0028641a4  movss xmm1, dword ptr [rip + 0x3ebd8d8] ; rip->BSShaderManager::actorVegetationCollisionsS+0x14
+0x0028641ac  subss xmm1, dword ptr [rax + 0x6b4]
+0x0028641b4  movss dword ptr [rdx + rcx*4 + 0x14], xmm1
+0x0028641ba  movss xmm0, dword ptr [rip + 0x3ebd8c6] ; rip->BSShaderManager::actorVegetationCollisionsS+0x18
+0x0028641c2  movss dword ptr [rdx + rcx*4 + 0x18], xmm0
+0x0028641c8  movss xmm1, dword ptr [rip + 0x3ebd8bc] ; rip->BSShaderManager::actorVegetationCollisionsS+0x1c
+0x0028641d0  movss dword ptr [rdx + rcx*4 + 0x1c], xmm1
+0x0028641d6  movss xmm0, dword ptr [rip + 0x3ebd8b2] ; rip->BSShaderManager::actorVegetationCollisionsS+0x20
+0x0028641de  subss xmm0, dword ptr [rax + 0x6b0]
+0x0028641e6  movss dword ptr [rdx + rcx*4 + 0x20], xmm0
+0x0028641ec  movss xmm1, dword ptr [rip + 0x3ebd8a0] ; rip->BSShaderManager::actorVegetationCollisionsS+0x24
+0x0028641f4  subss xmm1, dword ptr [rax + 0x6b4]
+0x0028641fc  movss dword ptr [rdx + rcx*4 + 0x24], xmm1
+0x002864202  movss xmm0, dword ptr [rip + 0x3ebd88e] ; rip->BSShaderManager::actorVegetationCollisionsS+0x28
+0x00286420a  movss dword ptr [rdx + rcx*4 + 0x28], xmm0
+0x002864210  movss xmm1, dword ptr [rip + 0x3ebd884] ; rip->BSShaderManager::actorVegetationCollisionsS+0x2c
+0x002864218  movss dword ptr [rdx + rcx*4 + 0x2c], xmm1
+0x00286421e  movss xmm0, dword ptr [rip + 0x3ebd87a] ; rip->BSShaderManager::actorVegetationCollisionsS+0x30
+0x002864226  subss xmm0, dword ptr [rax + 0x6b0]
+0x00286422e  movss dword ptr [rdx + rcx*4 + 0x30], xmm0
+0x002864234  movss xmm1, dword ptr [rip + 0x3ebd868] ; rip->BSShaderManager::actorVegetationCollisionsS+0x34
+0x00286423c  subss xmm1, dword ptr [rax + 0x6b4]
+0x002864244  movss dword ptr [rdx + rcx*4 + 0x34], xmm1
+0x00286424a  movss xmm0, dword ptr [rip + 0x3ebd856] ; rip->BSShaderManager::actorVegetationCollisionsS+0x38
+0x002864252  movss dword ptr [rdx + rcx*4 + 0x38], xmm0
+0x002864258  movss xmm1, dword ptr [rip + 0x3ebd84c] ; rip->BSShaderManager::actorVegetationCollisionsS+0x3c
+0x002864260  movss dword ptr [rdx + rcx*4 + 0x3c], xmm1
+0x002864266  mov rdx, qword ptr [rip + 0x3eceba3] ; rip->BSShader::pCurrentVertexShader
+0x00286426d  test byte ptr [rsp + 0x30], 4
+0x002864272  movss xmm13, dword ptr [rip + 0x3e4f15] ; rip->_xmm
+0x00286427b  movaps xmmword ptr [rsp + 0x210], xmm9
+0x002864284  movaps xmmword ptr [rsp + 0x200], xmm10
+0x00286428d  jne 0x286443b
+0x002864293  movaps xmm4, xmmword ptr [rsi + 0xa0]
+0x00286429a  movaps xmm6, xmmword ptr [rsi + 0xf0]
+0x0028642a1  movaps xmm3, xmmword ptr [rsi + 0x70]
+0x0028642a5  mov r10, qword ptr [rbp - 0x30]
+0x0028642a9  lea rax, [rip + 0x3ebdf50] ; rip->`BSGraphics::Renderer::GetShaderConstantPointer'::`6'::tmp
+0x0028642b0  movaps xmm9, xmmword ptr [rsi + 0x80]
+0x0028642b8  movaps xmm7, xmmword ptr [rsi + 0x90]
+0x0028642bf  movaps xmm5, xmmword ptr [rsi + 0xc0]
+0x0028642c6  movaps xmm10, xmmword ptr [rsi + 0xd0]
+0x0028642ce  movaps xmm8, xmmword ptr [rsi + 0xe0]
+0x0028642d6  movaps xmm0, xmm4
+0x0028642d9  shufps xmm0, xmm4, 0xff
+0x0028642dd  andps xmm4, xmmword ptr [rip + 0x3e509c] ; rip->DirectX::g_XMMask3
+0x0028642e4  por xmm4, xmmword ptr [rip + 0x3e4c64] ; rip->DirectX::g_XMIdentityR3
+0x0028642ec  mulps xmm3, xmm0
+0x0028642ef  mulps xmm9, xmm0
+0x0028642f3  mulps xmm7, xmm0
+0x0028642f6  movaps xmm0, xmm6
+0x0028642f9  movaps xmmword ptr [rbp - 0x40], xmm4
+0x0028642fd  movaps xmmword ptr [rbp - 0x70], xmm3
+0x002864301  movaps xmmword ptr [rbp - 0x60], xmm9
+0x002864306  movaps xmmword ptr [rbp - 0x50], xmm7
+0x00286430a  shufps xmm0, xmm6, 0xff
+0x00286430e  andps xmm6, xmmword ptr [rip + 0x3e506b] ; rip->DirectX::g_XMMask3
+0x002864315  por xmm6, xmmword ptr [rip + 0x3e4c33] ; rip->DirectX::g_XMIdentityR3
+0x00286431d  mulps xmm5, xmm0
+0x002864320  mulps xmm10, xmm0
+0x002864324  mulps xmm8, xmm0
+0x002864328  test r10, r10
+0x00286432b  je 0x286434a
+0x00286432d  mov rcx, qword ptr [rip + 0x3eceaec] ; rip->BSShader::pCurrentDomainShader
+0x002864334  mov rdx, qword ptr [r10 + 8]
+0x002864338  movzx eax, byte ptr [rcx + 0x69]
+0x00286433c  lea r8, [rdx + rax*4]
+0x002864340  movzx eax, byte ptr [rcx + 0x6a]
+0x002864344  lea rax, [rdx + rax*4]
+0x002864348  jmp 0x286437e ; BSDFPrePassShader::SetupGeometry+0x76e
+0x00286434a  movzx ecx, byte ptr [rdx + 0x69]
+0x00286434e  cmp cl, 0xff
+0x002864351  je 0x2864367
+0x002864353  mov rax, qword ptr [rbx + 8]
+0x002864357  movzx ecx, cl
+0x00286435a  lea r8, [rax + rcx*4]
+0x00286435e  lea rax, [rip + 0x3ebde9b] ; rip->`BSGraphics::Renderer::GetShaderConstantPointer'::`6'::tmp
+0x002864365  jmp 0x286436a ; BSDFPrePassShader::SetupGeometry+0x75a
+0x002864367  mov r8, rax
+0x00286436a  movzx ecx, byte ptr [rdx + 0x6a]
+0x00286436e  cmp cl, 0xff
+0x002864371  je 0x286437e
+0x002864373  mov rax, qword ptr [rbx + 8]
+0x002864377  movzx ecx, cl
+0x00286437a  lea rax, [rax + rcx*4]
+0x00286437e  movaps xmm2, xmm3
+0x002864381  movaps xmm0, xmm7
+0x002864384  shufps xmm3, xmm9, 0xee
+0x002864389  shufps xmm0, xmm4, 0x44
+0x00286438d  shufps xmm2, xmm9, 0x44
+0x002864392  shufps xmm7, xmm4, 0xee
+0x002864396  movaps xmm1, xmm2
+0x002864399  shufps xmm2, xmm0, 0xdd
+0x00286439d  shufps xmm1, xmm0, 0x88
+0x0028643a1  movaps xmm0, xmm3
+0x0028643a4  movaps xmmword ptr [r8 + 0x10], xmm2
+0x0028643a9  movaps xmmword ptr [r8], xmm1
+0x0028643ad  movaps xmm2, xmm5
+0x0028643b0  shufps xmm0, xmm7, 0x88
+0x0028643b4  shufps xmm2, xmm10, 0x44
+0x0028643b9  shufps xmm5, xmm10, 0xee
+0x0028643be  movaps xmmword ptr [r8 + 0x20], xmm0
+0x0028643c3  movaps xmm0, xmm8
+0x0028643c7  movaps xmm1, xmm2
+0x0028643ca  shufps xmm0, xmm6, 0x44
+0x0028643ce  shufps xmm8, xmm6, 0xee
+0x0028643d3  shufps xmm3, xmm7, 0xdd
+0x0028643d7  movaps xmmword ptr [r8 + 0x30], xmm3
+0x0028643dc  shufps xmm1, xmm0, 0x88
+0x0028643e0  shufps xmm2, xmm0, 0xdd
+0x0028643e4  movaps xmm0, xmm5
+0x0028643e7  movaps xmmword ptr [rax], xmm1
+0x0028643ea  movaps xmmword ptr [rax + 0x10], xmm2
+0x0028643ee  shufps xmm0, xmm8, 0x88
+0x0028643f3  shufps xmm5, xmm8, 0xdd
+0x0028643f8  movaps xmmword ptr [rax + 0x20], xmm0
+0x0028643fc  movaps xmmword ptr [rax + 0x30], xmm5
+0x002864400  mov edx, dword ptr [rsp + 0x30]
+0x002864404  movss xmm8, dword ptr [rip + 0x3fb9a7] ; rip->_real
+0x00286440d  bt edx, 0x12
+0x002864411  jae 0x2865536
+0x002864417  mov rax, qword ptr [rip + 0x3ecea0a] ; rip->BSShader::pCurrentPixelShader
+0x00286441e  movzx ecx, byte ptr [rax + 0x5c]
+0x002864422  cmp cl, 0xff
+0x002864425  je 0x286546b
+0x00286442b  mov rax, qword ptr [r13 + 8]
+0x00286442f  movzx ecx, cl
+0x002864432  lea rdx, [rax + rcx*4]
+0x002864436  jmp 0x2865472 ; BSDFPrePassShader::SetupGeometry+0x1862
+0x00286443b  mov rax, qword ptr [rbp + 0x1a0]
+0x002864442  test dword ptr [rax + 0x118], 0x40000000
+0x00286444c  je 0x2864742
+0x002864452  mov eax, dword ptr [rip + 0x3ebf750] ; rip->$S19
+0x002864458  test al, 1
+0x00286445a  jne 0x2864484
+0x00286445c  or eax, 1
+0x00286445f  lea rdx, [rip + 0x48756a] ; rip->fDefaultFlightAngleGainC+0x4
+0x002864466  lea rcx, [rip + 0x3ebf733] ; rip->spBoneTintingScanTexture+0x8
+0x00286446d  mov dword ptr [rip + 0x3ebf735], eax ; rip->$S19
+0x002864473  call 0x1b41d30 ; BSFixedString::BSFixedString
+0x002864478  lea rcx, [rip + 0x3a5dc1] ; rip->`BSDFPrePassShader::SetupGeometry'::`85'::`dynamic atexit destructor for 'strBoneTin
+0x00286447f  call 0x2936bbc ; atexit
+0x002864484  lea rdx, [rip + 0x3ebf715] ; rip->spBoneTintingScanTexture+0x8
+0x00286448b  mov rcx, rsi
+0x00286448e  call 0x1b97a00 ; NiObjectNET::GetExtraData
+0x002864493  test rax, rax
+0x002864496  je 0x28646fd
+0x00286449c  mov r11d, dword ptr [rax + 0x18]
+0x0028644a0  mov r9, qword ptr [rax + 0x20]
+0x0028644a4  mov rax, qword ptr [rip + 0x3ece965] ; rip->BSShader::pCurrentVertexShader
+0x0028644ab  movzx ecx, byte ptr [rax + 0x7d]
+0x0028644af  cmp cl, 0xff
+0x0028644b2  je 0x28644c1
+0x0028644b4  mov rax, qword ptr [rbx + 8]
+0x0028644b8  movzx ecx, cl
+0x0028644bb  lea r8, [rax + rcx*4]
+0x0028644bf  jmp 0x28644c8 ; BSDFPrePassShader::SetupGeometry+0x8b8
+0x0028644c1  lea r8, [rip + 0x3ebdd38] ; rip->`BSGraphics::Renderer::GetShaderConstantPointer'::`6'::tmp
+0x0028644c8  mov eax, edi
+0x0028644ca  mov ecx, edi
+0x0028644cc  mov edx, edi
+0x0028644ce  mov r10d, edi
+0x0028644d1  mov dword ptr [rsp + 0x4c], edi
+0x0028644d5  mov dword ptr [rsp + 0x40], eax
+0x0028644d9  mov dword ptr [rsp + 0x44], ecx
+0x0028644dd  mov dword ptr [rsp + 0x48], edx
+0x0028644e1  test r11d, r11d
+0x0028644e4  je 0x2864524
+0x0028644e6  mov r10, r11
+0x0028644e9  nop dword ptr [rax]
+0x0028644f0  mov ecx, dword ptr [r9]
+0x0028644f3  mov eax, 1
+0x0028644f8  add r9, 4
+0x0028644fc  mov edx, ecx
+0x0028644fe  and ecx, 0x1f
+0x002864501  sar rdx, 5
+0x002864505  shl eax, cl
+0x002864507  and edx, 3
+0x00286450a  or dword ptr [rsp + rdx*4 + 0x40], eax
+0x00286450e  dec r10
+0x002864511  jne 0x28644f0
+0x002864513  mov r10d, dword ptr [rsp + 0x4c]
+0x002864518  mov edx, dword ptr [rsp + 0x48]
+0x00286451c  mov ecx, dword ptr [rsp + 0x44]
+0x002864520  mov eax, dword ptr [rsp + 0x40]
+0x002864524  mov dword ptr [r8 + 0xc], eax
+0x002864528  mov dword ptr [r8 + 8], eax
+0x00286452c  mov dword ptr [r8 + 4], eax
+0x002864530  mov dword ptr [r8], eax
+0x002864533  mov dword ptr [r8 + 0x1c], ecx
+0x002864537  mov dword ptr [r8 + 0x18], ecx
+0x00286453b  mov dword ptr [r8 + 0x14], ecx
+0x00286453f  mov dword ptr [r8 + 0x10], ecx
+0x002864543  mov dword ptr [r8 + 0x2c], edx
+0x002864547  mov dword ptr [r8 + 0x28], edx
+0x00286454b  mov dword ptr [r8 + 0x24], edx
+0x00286454f  mov dword ptr [r8 + 0x20], edx
+0x002864553  mov dword ptr [r8 + 0x3c], r10d
+0x002864557  mov dword ptr [r8 + 0x38], r10d
+0x00286455b  mov dword ptr [r8 + 0x34], r10d
+0x00286455f  mov dword ptr [r8 + 0x30], r10d
+0x002864563  mov rax, qword ptr [rip + 0x3ece8be] ; rip->BSShader::pCurrentPixelShader
+0x00286456a  movzx ecx, byte ptr [rax + 0x6b]
+0x00286456e  cmp cl, 0xff
+0x002864571  je 0x2864580
+0x002864573  mov rax, qword ptr [r13 + 8]
+0x002864577  movzx ecx, cl
+0x00286457a  lea rdx, [rax + rcx*4]
+0x00286457e  jmp 0x2864587 ; BSDFPrePassShader::SetupGeometry+0x977
+0x002864580  lea rdx, [rip + 0x3ebdcb9] ; rip->`BSGraphics::Renderer::GetShaderConstantPointer'::`6'::tmp
+0x002864587  movss xmm0, dword ptr [rip + 0x3ebd76d] ; rip->BSShaderManager::St+0x18c
+0x00286458f  divss xmm0, dword ptr [rip + 0x1065069] ; rip->fCharGenBoneTintScanTime+0x8
+0x002864597  movss dword ptr [rdx], xmm0
+0x00286459b  mov rax, qword ptr [rip + 0x3ebf5ee] ; rip->spBoneTintingMaskTexture
+0x0028645a2  test rax, rax
+0x0028645a5  je 0x28645b5
+0x0028645a7  mov rcx, qword ptr [rax + 0x38]
+0x0028645ab  test rcx, rcx
+0x0028645ae  je 0x28645b8
+0x0028645b0  mov rdx, qword ptr [rcx]
+0x0028645b3  jmp 0x28645bb ; BSDFPrePassShader::SetupGeometry+0x9ab
+0x0028645b5  mov rcx, rdi
+0x0028645b8  mov rdx, rdi
+0x0028645bb  mov rax, qword ptr [r15 + r12]
+0x0028645bf  test rax, rax
+0x0028645c2  jne 0x28645cb
+0x0028645cb  add rax, 0x1b70
+0x0028645d1  cmp qword ptr [rax + 0x448], rdx
+0x0028645d8  je 0x2864606
+0x0028645da  or dword ptr [rax + 0x14], 0x2000
+0x0028645e1  mov qword ptr [rax + 0x448], rdx
+0x0028645e8  test rcx, rcx
+0x0028645eb  je 0x2864606
+0x0028645ed  movzx edx, byte ptr [rcx + 0x3c]
+0x0028645f1  cmp dword ptr [rax + 0x494], edx
+0x0028645f7  je 0x2864606
+0x0028645f9  mov dword ptr [rax + 0x494], edx
+0x0028645ff  or dword ptr [rax + 0x18], 0x2000
+0x002864606  mov rax, qword ptr [r15 + r12]
+0x00286460a  test rax, rax
+0x00286460d  jne 0x2864616
+0x002864616  add rax, 0x1b70
+0x00286461c  cmp dword ptr [rax + 0x394], edi
+0x002864622  je 0x2864631
+0x002864624  or dword ptr [rax + 0x18], 0x2000
+0x00286462b  mov dword ptr [rax + 0x394], edi
+0x002864631  cmp dword ptr [rax + 0x3d4], 3
+0x002864638  je 0x286464b
+0x00286463a  or dword ptr [rax + 0x18], 0x2000
+0x002864641  mov dword ptr [rax + 0x3d4], 3
+0x00286464b  mov rax, qword ptr [rip + 0x3ebf546] ; rip->spBoneTintingScanTexture
+0x002864652  test rax, rax
+0x002864655  je 0x2864665
+0x002864657  mov rcx, qword ptr [rax + 0x38]
+0x00286465b  test rcx, rcx
+0x00286465e  je 0x2864668
+0x002864660  mov rdx, qword ptr [rcx]
+0x002864663  jmp 0x286466b ; BSDFPrePassShader::SetupGeometry+0xa5b
+0x002864665  mov rcx, rdi
+0x002864668  mov rdx, rdi
+0x00286466b  mov rax, qword ptr [r15 + r12]
+0x00286466f  test rax, rax
+0x002864672  jne 0x286467b
+0x00286467b  add rax, 0x1b70
+0x002864681  cmp qword ptr [rax + 0x450], rdx
+0x002864688  je 0x28646b6
+0x00286468a  or dword ptr [rax + 0x14], 0x4000
+0x002864691  mov qword ptr [rax + 0x450], rdx
+0x002864698  test rcx, rcx
+0x00286469b  je 0x28646b6
+0x00286469d  movzx edx, byte ptr [rcx + 0x3c]
+0x0028646a1  cmp dword ptr [rax + 0x498], edx
+0x0028646a7  je 0x28646b6
+0x0028646a9  mov dword ptr [rax + 0x498], edx
+0x0028646af  or dword ptr [rax + 0x18], 0x4000
+0x0028646b6  mov rax, qword ptr [r15 + r12]
+0x0028646ba  test rax, rax
+0x0028646bd  jne 0x28646c6
+0x0028646c6  add rax, 0x1b70
+0x0028646cc  cmp dword ptr [rax + 0x398], edi
+0x0028646d2  je 0x28646e1
+0x0028646d4  or dword ptr [rax + 0x18], 0x4000
+0x0028646db  mov dword ptr [rax + 0x398], edi
+0x0028646e1  cmp dword ptr [rax + 0x3d8], 3
+0x0028646e8  je 0x2864742
+0x0028646ea  or dword ptr [rax + 0x18], 0x4000
+0x0028646f1  mov dword ptr [rax + 0x3d8], 3
+0x0028646fb  jmp 0x2864742 ; BSDFPrePassShader::SetupGeometry+0xb32
+0x0028646fd  mov rax, qword ptr [rip + 0x3ece70c] ; rip->BSShader::pCurrentVertexShader
+0x002864704  movzx ecx, byte ptr [rax + 0x7d]
+0x002864708  cmp cl, 0xff
+0x00286470b  je 0x286471a
+0x00286470d  mov rax, qword ptr [rbx + 8]
+0x002864711  movzx ecx, cl
+0x002864714  lea rdx, [rax + rcx*4]
+0x002864718  jmp 0x2864721 ; BSDFPrePassShader::SetupGeometry+0xb11
+0x00286471a  lea rdx, [rip + 0x3ebdadf] ; rip->`BSGraphics::Renderer::GetShaderConstantPointer'::`6'::tmp
+0x002864721  xor eax, eax
+0x002864723  mov qword ptr [rdx], rax
+0x002864726  mov qword ptr [rdx + 8], rax
+0x00286472a  mov qword ptr [rdx + 0x10], rax
+0x00286472e  mov qword ptr [rdx + 0x18], rax
+0x002864732  mov qword ptr [rdx + 0x20], rax
+0x002864736  mov qword ptr [rdx + 0x28], rax
+0x00286473a  mov qword ptr [rdx + 0x30], rax
+0x00286473e  mov qword ptr [rdx + 0x38], rax
+0x002864742  lea rdx, [rip + 0x3ebe9cf] ; rip->BSDismember::BSShaderDismembermentExtraData::sTag
+0x002864749  mov rcx, rsi
+0x00286474c  call 0x1b97a00 ; NiObjectNET::GetExtraData
+0x002864751  mov r11, rax
+0x002864754  test rax, rax
+0x002864757  je 0x2864400
+0x00286475d  cmp dword ptr [rax + 0x28], edi
+0x002864760  jbe 0x2864400
+0x002864766  mov r9, qword ptr [r15 + r12]
+0x00286476a  test r9, r9
+0x00286476d  jne 0x2864776
+0x002864776  mov rax, qword ptr [rsi + 0x140]
+0x00286477d  mov rcx, qword ptr [r11 + 0x18]
+0x002864781  add r9, 0x1b70
+0x002864788  movaps xmm4, xmmword ptr [rcx]
+0x00286478b  movaps xmm3, xmmword ptr [rcx + 0x10]
+0x00286478f  movss xmm1, dword ptr [rax + 0x64]
+0x002864794  movss xmm0, dword ptr [rax + 0x60]
+0x002864799  movss dword ptr [rbp - 0x6c], xmm1
+0x00286479e  movss xmm1, dword ptr [rax + 0x6c]
+0x0028647a3  movaps xmm6, xmmword ptr [rcx + 0x20]
+0x0028647a7  movaps xmm8, xmmword ptr [rcx + 0x30]
+0x0028647ac  movss dword ptr [rbp - 0x70], xmm0
+0x0028647b1  movss xmm0, dword ptr [rax + 0x68]
+0x0028647b6  movss dword ptr [rbp - 0x64], xmm1
+0x0028647bb  movss xmm1, dword ptr [rax + 0x74]
+0x0028647c0  movss dword ptr [rbp - 0x68], xmm0
+0x0028647c5  movss xmm0, dword ptr [rax + 0x70]
+0x0028647ca  movss dword ptr [rbp - 0x60], xmm0
+0x0028647cf  movss xmm0, dword ptr [rax + 0x78]
+0x0028647d4  movss dword ptr [rbp - 0x5c], xmm1
+0x0028647d9  movss xmm1, dword ptr [rax + 0x7c]
+0x0028647de  movss dword ptr [rbp - 0x58], xmm0
+0x0028647e3  movss xmm0, dword ptr [rax + 0x80]
+0x0028647eb  movss dword ptr [rbp - 0x50], xmm0
+0x0028647f0  movss xmm0, dword ptr [rax + 0x88]
+0x0028647f8  movss dword ptr [rbp - 0x54], xmm1
+0x0028647fd  movaps xmm2, xmmword ptr [rbp - 0x60]
+0x002864801  movaps xmm9, xmm2
+0x002864805  movss xmm1, dword ptr [rax + 0x84]
+0x00286480d  movss dword ptr [rbp - 0x48], xmm0
+0x002864812  movss xmm0, dword ptr [rax + 0x90]
+0x00286481a  shufps xmm9, xmm2, 0x55
+0x00286481f  mulps xmm9, xmm3
+0x002864823  movss dword ptr [rbp - 0x40], xmm0
+0x002864828  movss xmm0, dword ptr [rax + 0x98]
+0x002864830  movss dword ptr [rbp - 0x4c], xmm1
+0x002864835  movss xmm1, dword ptr [rax + 0x8c]
+0x00286483d  movss dword ptr [rbp - 0x38], xmm0
+0x002864842  movss dword ptr [rbp - 0x44], xmm1
+0x002864847  movss xmm1, dword ptr [rax + 0x94]
+0x00286484f  movss dword ptr [rbp - 0x3c], xmm1
+0x002864854  movss xmm1, dword ptr [rax + 0x9c]
+0x00286485c  movss dword ptr [rbp - 0x34], xmm1
+0x002864861  movaps xmm1, xmmword ptr [rbp - 0x70]
+0x002864865  movaps xmm0, xmm1
+0x002864868  movaps xmm10, xmm1
+0x00286486c  shufps xmm0, xmm1, 0
+0x002864870  shufps xmm10, xmm1, 0x55
+0x002864875  shufps xmm1, xmm1, 0xaa
+0x002864879  mulps xmm0, xmm4
+0x00286487c  mulps xmm1, xmm6
+0x00286487f  mulps xmm10, xmm3
+0x002864883  addps xmm10, xmm0
+0x002864887  movaps xmm0, xmm2
+0x00286488a  addps xmm10, xmm1
+0x00286488e  movaps xmm1, xmmword ptr [rbp - 0x50]
+0x002864892  movaps xmm7, xmm1
+0x002864895  shufps xmm0, xmm2, 0
+0x002864899  shufps xmm2, xmm2, 0xaa
+0x00286489d  mulps xmm0, xmm4
+0x0028648a0  shufps xmm7, xmm1, 0x55
+0x0028648a4  mulps xmm2, xmm6
+0x0028648a7  addps xmm9, xmm0
+0x0028648ab  movaps xmm0, xmm1
+0x0028648ae  addps xmm9, xmm2
+0x0028648b2  movaps xmm2, xmmword ptr [rbp - 0x40]
+0x0028648b6  shufps xmm0, xmm1, 0
+0x0028648ba  mulps xmm7, xmm3
+0x0028648bd  shufps xmm1, xmm1, 0xaa
+0x0028648c1  movaps xmm5, xmm2
+0x0028648c4  mulps xmm0, xmm4
+0x0028648c7  shufps xmm5, xmm2, 0x55
+0x0028648cb  mulps xmm1, xmm6
+0x0028648ce  addps xmm7, xmm0
+0x0028648d1  movaps xmm0, xmm2
+0x0028648d4  addps xmm7, xmm1
+0x0028648d7  movaps xmm1, xmm2
+0x0028648da  shufps xmm0, xmm2, 0
+0x0028648de  mulps xmm5, xmm3
+0x0028648e1  mulps xmm0, xmm4
+0x0028648e4  addps xmm5, xmm0
+0x0028648e7  mov rax, qword ptr [rcx + 0xc0]
+0x0028648ee  movaps xmm15, xmmword ptr [rip + 0x3e4a8a] ; rip->DirectX::g_XMMask3
+0x0028648f6  shufps xmm1, xmm2, 0xaa
+0x0028648fa  andps xmm2, xmmword ptr [rip + 0x3e4a8f] ; rip->DirectX::g_XMMaskW
+0x002864901  mulps xmm1, xmm6
+0x002864904  movss dword ptr [rbp - 0x50], xmm7
+0x002864909  movaps xmm0, xmm8
+0x00286490d  movss dword ptr [rbp - 0x70], xmm10
+0x002864913  movss dword ptr [rbp - 0x60], xmm9
+0x002864919  mov dword ptr [rbp + 0xac], 0x3f800000
+0x002864923  movaps xmm4, xmmword ptr [rax + 0x70]
+0x002864927  movaps xmm3, xmmword ptr [rax + 0x80]
+0x00286492e  movaps xmm6, xmmword ptr [rax + 0xa0]
+0x002864935  addps xmm5, xmm1
+0x002864938  shufps xmm0, xmm8, 0xff
+0x00286493d  andps xmm5, xmm15
+0x002864941  andps xmm8, xmm15
+0x002864945  movaps xmm1, xmm10
+0x002864949  shufps xmm1, xmm10, 0xaa
+0x00286494e  orps xmm5, xmm2
+0x002864951  mulps xmm5, xmm0
+0x002864954  movss dword ptr [rbp - 0x68], xmm1
+0x002864959  movaps xmm1, xmm9
+0x00286495d  movaps xmm0, xmm10
+0x002864961  shufps xmm0, xmm10, 0x55
+0x002864966  shufps xmm1, xmm9, 0xaa
+0x00286496b  shufps xmm10, xmm10, 0xff
+0x002864970  addps xmm5, xmm8
+0x002864974  movss dword ptr [rbp - 0x6c], xmm0
+0x002864979  movss dword ptr [rbp - 0x58], xmm1
+0x00286497e  movss dword ptr [rbp - 0x40], xmm5
+0x002864983  movaps xmm1, xmm7
+0x002864986  movaps xmm0, xmm9
+0x00286498a  shufps xmm1, xmm7, 0xaa
+0x00286498e  shufps xmm0, xmm9, 0x55
+0x002864993  movss dword ptr [rbp - 0x64], xmm10
+0x002864999  movss dword ptr [rbp - 0x5c], xmm0
+0x00286499e  movaps xmm0, xmm7
+0x0028649a1  movss dword ptr [rbp - 0x48], xmm1
+0x0028649a6  shufps xmm0, xmm7, 0x55
+0x0028649aa  shufps xmm7, xmm7, 0xff
+0x0028649ae  movaps xmm1, xmm5
+0x0028649b1  movss dword ptr [rbp - 0x4c], xmm0
+0x0028649b6  movss dword ptr [rbp - 0x44], xmm7
+0x0028649bb  movaps xmm0, xmm5
+0x0028649be  shufps xmm0, xmm5, 0x55
+0x0028649c2  shufps xmm1, xmm5, 0xaa
+0x0028649c6  shufps xmm5, xmm5, 0xff
+0x0028649ca  movss dword ptr [rbp - 0x3c], xmm0
+0x0028649cf  movss dword ptr [rbp - 0x38], xmm1
+0x0028649d4  movaps xmm1, xmmword ptr [rbp - 0x70]
+0x0028649d8  movaps xmm0, xmm1
+0x0028649db  movaps xmm7, xmm1
+0x0028649de  movss dword ptr [rbp - 0x34], xmm5
+0x0028649e3  shufps xmm0, xmm1, 0
+0x0028649e7  shufps xmm7, xmm1, 0x55
+0x0028649eb  shufps xmm1, xmm1, 0xaa
+0x0028649ef  movaps xmm5, xmmword ptr [rax + 0x90]
+0x0028649f6  mulps xmm0, xmm4
+0x0028649f9  mulps xmm7, xmm3
+0x0028649fc  shufps xmm9, xmm9, 0xff
+0x002864a01  movss dword ptr [rbp - 0x54], xmm9
+0x002864a07  movaps xmm2, xmmword ptr [rbp - 0x60]
+0x002864a0b  addps xmm7, xmm0
+0x002864a0e  movaps xmm0, xmm5
+0x002864a11  mulps xmm0, xmm1
+0x002864a14  movaps xmm1, xmmword ptr [rbp - 0x50]
+0x002864a18  addps xmm7, xmm0
+0x002864a1b  movaps xmm0, xmm2
+0x002864a1e  shufps xmm0, xmm2, 0
+0x002864a22  mulps xmm0, xmm4
+0x002864a25  movaps xmmword ptr [rbp - 0x10], xmm7
+0x002864a29  movaps xmm7, xmm2
+0x002864a2c  shufps xmm7, xmm2, 0x55
+0x002864a30  shufps xmm2, xmm2, 0xaa
+0x002864a34  mulps xmm7, xmm3
+0x002864a37  addps xmm7, xmm0
+0x002864a3a  movaps xmm0, xmm5
+0x002864a3d  mulps xmm0, xmm2
+0x002864a40  addps xmm7, xmm0
+0x002864a43  movaps xmmword ptr [rbp + 0x60], xmm7
+0x002864a47  movaps xmm2, xmmword ptr [rbp - 0x40]
+0x002864a4b  movaps xmm10, xmmword ptr [rcx + 0x40]
+0x002864a50  movss xmm11, dword ptr [rcx + 0x98]
+0x002864a59  mov dword ptr [rbp + 0xac], 0x3f800000
+0x002864a63  mov dword ptr [rbp + 0xac], 0x3f800000
+0x002864a6d  movaps xmm0, xmm1
+0x002864a70  movaps xmm7, xmm1
+0x002864a73  movaps xmm9, xmm10
+0x002864a77  shufps xmm10, xmmword ptr [rcx + 0x50], 0xee
+0x002864a7d  shufps xmm9, xmmword ptr [rcx + 0x50], 0x44
+0x002864a83  shufps xmm0, xmm1, 0
+0x002864a87  shufps xmm7, xmm1, 0x55
+0x002864a8b  movaps xmm8, xmm9
+0x002864a8f  mulps xmm0, xmm4
+0x002864a92  mulps xmm7, xmm3
+0x002864a95  shufps xmm1, xmm1, 0xaa
+0x002864a99  addps xmm7, xmm0
+0x002864a9c  movaps xmm0, xmm5
+0x002864a9f  mulps xmm0, xmm1
+0x002864aa2  movaps xmm1, xmm2
+0x002864aa5  shufps xmm1, xmm2, 0xaa
+0x002864aa9  addps xmm7, xmm0
+0x002864aac  movaps xmm0, xmm2
+0x002864aaf  shufps xmm0, xmm2, 0
+0x002864ab3  mulps xmm1, xmm5
+0x002864ab6  movaps xmmword ptr [rbp + 0x40], xmm7
+0x002864aba  movaps xmm7, xmm2
+0x002864abd  mulps xmm0, xmm4
+0x002864ac0  shufps xmm7, xmm2, 0x55
+0x002864ac4  andps xmm2, xmmword ptr [rip + 0x3e48c5] ; rip->DirectX::g_XMMaskW
+0x002864acb  mulps xmm7, xmm3
+0x002864ace  movaps xmm3, xmmword ptr [rcx + 0x60]
+0x002864ad2  addps xmm7, xmm0
+0x002864ad5  movaps xmm0, xmm6
+0x002864ad8  addps xmm7, xmm1
+0x002864adb  movss xmm1, dword ptr [rcx + 0x84]
+0x002864ae3  shufps xmm0, xmm6, 0xff
+0x002864ae7  andps xmm6, xmm15
+0x002864aeb  andps xmm7, xmm15
+0x002864aef  movss xmm15, dword ptr [rcx + 0x9c]
+0x002864af8  orps xmm7, xmm2
+0x002864afb  movss xmm2, dword ptr [rcx + 0x88]
+0x002864b03  mulps xmm7, xmm0
+0x002864b06  movss xmm0, dword ptr [rcx + 0x80]
+0x002864b0e  movss dword ptr [rbp + 0x34], xmm1
+0x002864b13  movss dword ptr [rbp + 0x14], xmm1
+0x002864b18  xorps xmm1, xmm1
+0x002864b1b  movss dword ptr [rbp + 0x1b0], xmm0
+0x002864b23  movss dword ptr [rbp + 0x10], xmm0
+0x002864b28  movss xmm0, dword ptr [rcx + 0xa0]
+0x002864b30  movss dword ptr [rbp + 8], xmm0
+0x002864b35  movss xmm0, dword ptr [rcx + 0xa4]
+0x002864b3d  addps xmm7, xmm6
+0x002864b40  movaps xmmword ptr [rsp + 0x40], xmm7
+0x002864b45  movss dword ptr [rbp + 0x30], xmm0
+0x002864b4a  movss xmm0, dword ptr [rcx + 0xa8]
+0x002864b52  movss dword ptr [rbp + 0x20], xmm2
+0x002864b57  movss dword ptr [rbp], xmm0
+0x002864b5c  movss xmm0, dword ptr [rcx + 0xac]
+0x002864b64  movss dword ptr [rbp + 0x18], xmm2
+0x002864b69  movaps xmm2, xmmword ptr [rcx + 0x70]
+0x002864b6d  movss dword ptr [rsp + 0x78], xmm0
+0x002864b73  movss xmm0, dword ptr [rcx + 0xb0]
+0x002864b7b  subps xmm1, xmm2
+0x002864b7e  movaps xmm7, xmm1
+0x002864b81  movss dword ptr [rbp - 0x80], xmm0
+0x002864b86  movss xmm0, dword ptr [rcx + 0xb4]
+0x002864b8e  shufps xmm7, xmm1, 0
+0x002864b92  movss dword ptr [rsp + 0x70], xmm0
+0x002864b98  movss xmm0, dword ptr [rcx + 0xb8]
+0x002864ba0  movss dword ptr [rsp + 0x38], xmm0
+0x002864ba6  movaps xmm0, xmm3
+0x002864ba9  shufps xmm3, xmmword ptr [rip + 0x3e439f], 0xee ; rip->DirectX::g_XMIdentityR3
+0x002864bb1  shufps xmm0, xmmword ptr [rip + 0x3e4397], 0x44 ; rip->DirectX::g_XMIdentityR3
+0x002864bb9  shufps xmm10, xmm3, 0x88
+0x002864bbe  movaps xmm3, xmmword ptr [rip + 0x3e439b] ; rip->DirectX::g_XMOne
+0x002864bc5  shufps xmm8, xmm0, 0x88
+0x002864bca  shufps xmm9, xmm0, 0xdd
+0x002864bcf  movaps xmm0, xmm2
+0x002864bd2  shufps xmm0, xmm2, 0xff
+0x002864bd6  divps xmm3, xmm0
+0x002864bd9  movss xmm6, dword ptr [rcx + 0x8c]
+0x002864be1  movss xmm4, dword ptr [rcx + 0x90]
+0x002864be9  movss xmm5, dword ptr [rcx + 0x94]
+0x002864bf1  mulps xmm7, xmm8
+0x002864bf5  movaps xmm0, xmm1
+0x002864bf8  movaps xmm2, xmm6
+0x002864bfb  shufps xmm0, xmm1, 0x55
+0x002864bff  shufps xmm1, xmm1, 0xaa
+0x002864c03  mulss xmm2, xmm8
+0x002864c08  mulps xmm0, xmm9
+0x002864c0c  mulps xmm1, xmm10
+0x002864c10  addps xmm7, xmm0
+0x002864c13  addps xmm7, xmm1
+0x002864c16  mulps xmm7, xmm3
+0x002864c19  shufps xmm7, xmm7, 0x27
+0x002864c1d  movss xmm7, xmm3
+0x002864c21  movaps xmm3, xmm6
+0x002864c24  shufps xmm7, xmm7, 0x27
+0x002864c28  movaps xmm0, xmm7
+0x002864c2b  movaps xmm1, xmm7
+0x002864c2e  movss dword ptr [rbp - 0x20], xmm7
+0x002864c33  shufps xmm0, xmm7, 0x55
+0x002864c37  shufps xmm1, xmm7, 0xaa
+0x002864c3b  shufps xmm7, xmm7, 0xff
+0x002864c3f  movss dword ptr [rbp - 0x1c], xmm0
+0x002864c44  movss dword ptr [rbp - 0x18], xmm1
+0x002864c49  movaps xmm0, xmm4
+0x002864c4c  movaps xmm1, xmm5
+0x002864c4f  mulss xmm0, xmm9
+0x002864c54  mulss xmm1, xmm10
+0x002864c59  addss xmm2, xmm0
+0x002864c5d  movaps xmm0, xmm8
+0x002864c61  addss xmm2, xmm1
+0x002864c65  shufps xmm0, xmm8, 0x55
+0x002864c6a  shufps xmm8, xmm8, 0xaa
+0x002864c6f  movaps xmm1, xmm9
+0x002864c73  movss dword ptr [rsp + 0x60], xmm2
+0x002864c79  movaps xmm2, xmm4
+0x002864c7c  mulss xmm3, xmm0
+0x002864c80  shufps xmm1, xmm9, 0x55
+0x002864c85  mulss xmm6, xmm8
+0x002864c8a  movaps xmm8, xmmword ptr [rax + 0x80]
+0x002864c92  movaps xmm0, xmm10
+0x002864c96  shufps xmm0, xmm10, 0x55
+0x002864c9b  mulss xmm2, xmm1
+0x002864c9f  shufps xmm9, xmm9, 0xaa
+0x002864ca4  movaps xmm1, xmm5
+0x002864ca7  addss xmm3, xmm2
+0x002864cab  movaps xmm2, xmmword ptr [rbp - 0x20]
+0x002864caf  mulss xmm1, xmm0
+0x002864cb3  mulss xmm4, xmm9
+0x002864cb8  shufps xmm10, xmm10, 0xaa
+0x002864cbd  movaps xmm9, xmmword ptr [rax + 0x90]
+0x002864cc5  movss xmm0, xmm7
+0x002864cc9  addss xmm3, xmm1
+0x002864ccd  addss xmm6, xmm4
+0x002864cd1  shufps xmm0, xmm0, 0
+0x002864cd5  mulss xmm5, xmm10
+0x002864cda  movss dword ptr [rsp + 0x64], xmm3
+0x002864ce0  movaps xmm10, xmmword ptr [rbp - 0x10]
+0x002864ce5  movaps xmm3, xmmword ptr [rax + 0x70]
+0x002864ce9  addss xmm6, xmm5
+0x002864ced  movss dword ptr [rsp + 0x68], xmm6
+0x002864cf3  movaps xmm1, xmmword ptr [rsp + 0x60]
+0x002864cf8  mulps xmm1, xmm0
+0x002864cfb  addps xmm2, xmm1
+0x002864cfe  movaps xmm0, xmm2
+0x002864d01  movaps xmm7, xmm2
+0x002864d04  shufps xmm7, xmm2, 0
+0x002864d08  shufps xmm0, xmm2, 0x55
+0x002864d0c  shufps xmm2, xmm2, 0xaa
+0x002864d10  mulps xmm0, xmmword ptr [rbp + 0x60]
+0x002864d14  mulps xmm2, xmmword ptr [rbp + 0x40]
+0x002864d18  mulps xmm7, xmm10
+0x002864d1c  addps xmm7, xmm0
+0x002864d1f  addps xmm7, xmm2
+0x002864d22  movaps xmm2, xmmword ptr [rsp + 0x40]
+0x002864d27  movaps xmm0, xmm2
+0x002864d2a  shufps xmm0, xmm2, 0xff
+0x002864d2e  mulps xmm7, xmm0
+0x002864d31  addps xmm7, xmm2
+0x002864d34  movss xmm0, dword ptr [rip + 0xfe3a64] ; rip->NiPoint3::UNIT_X
+0x002864d3c  movss xmm1, dword ptr [rip + 0xfe3a60] ; rip->NiPoint3::UNIT_X+0x4
+0x002864d44  lea rax, [rsp + 0x40]
+0x002864d49  cmp byte ptr [rcx + 0xd4], dil
+0x002864d50  je 0x2864d6e
+0x002864d52  xorps xmm0, xmm13
+0x002864d56  xorps xmm1, xmm13
+0x002864d5a  movss dword ptr [rsp + 0x40], xmm0
+0x002864d60  movss xmm0, dword ptr [rip + 0xfe3a40] ; rip->NiPoint3::UNIT_X+0x8
+0x002864d68  xorps xmm0, xmm13
+0x002864d6c  jmp 0x2864d7c ; BSDFPrePassShader::SetupGeometry+0x116c
+0x002864d6e  movss dword ptr [rsp + 0x40], xmm0
+0x002864d74  movss xmm0, dword ptr [rip + 0xfe3a2c] ; rip->NiPoint3::UNIT_X+0x8
+0x002864d7c  movss dword ptr [rsp + 0x48], xmm0
+0x002864d82  movss dword ptr [rsp + 0x44], xmm1
+0x002864d88  movss xmm0, dword ptr [rax]
+0x002864d8c  movss xmm1, dword ptr [rax + 4]
+0x002864d91  movss dword ptr [rsp + 0x60], xmm0
+0x002864d97  movss xmm0, dword ptr [rax + 8]
+0x002864d9c  movss dword ptr [rsp + 0x68], xmm0
+0x002864da2  movss dword ptr [rsp + 0x64], xmm1
+0x002864da8  movaps xmm1, xmmword ptr [rsp + 0x60]
+0x002864dad  movaps xmm4, xmm1
+0x002864db0  movaps xmm0, xmm1
+0x002864db3  shufps xmm0, xmm1, 0x55
+0x002864db7  shufps xmm4, xmm1, 0
+0x002864dbb  shufps xmm1, xmm1, 0xaa
+0x002864dbf  mulps xmm0, xmm8
+0x002864dc3  mulps xmm1, xmm9
+0x002864dc7  mulps xmm4, xmm3
+0x002864dca  addps xmm4, xmm0
+0x002864dcd  movss xmm0, dword ptr [rip + 0xfe39db] ; rip->NiPoint3::UNIT_Y
+0x002864dd5  movss dword ptr [rsp + 0x60], xmm0
+0x002864ddb  movss xmm0, dword ptr [rip + 0xfe39d5] ; rip->NiPoint3::UNIT_Y+0x8
+0x002864de3  addps xmm4, xmm1
+0x002864de6  movaps xmmword ptr [rbp - 0x20], xmm4
+0x002864dea  movss xmm1, dword ptr [rip + 0xfe39c2] ; rip->NiPoint3::UNIT_Y+0x4
+0x002864df2  movss dword ptr [rsp + 0x68], xmm0
+0x002864df8  movss dword ptr [rsp + 0x64], xmm1
+0x002864dfe  movaps xmm1, xmmword ptr [rsp + 0x60]
+0x002864e03  movaps xmm5, xmm1
+0x002864e06  movaps xmm0, xmm1
+0x002864e09  shufps xmm0, xmm1, 0x55
+0x002864e0d  shufps xmm5, xmm1, 0
+0x002864e11  shufps xmm1, xmm1, 0xaa
+0x002864e15  mulps xmm0, xmm8
+0x002864e19  mulps xmm1, xmm9
+0x002864e1d  mulps xmm5, xmm3
+0x002864e20  addps xmm5, xmm0
+0x002864e23  movss xmm0, dword ptr [rip + 0xfe3995] ; rip->NiPoint3::UNIT_Z
+0x002864e2b  movss dword ptr [rsp + 0x60], xmm0
+0x002864e31  movss xmm0, dword ptr [rip + 0xfe398f] ; rip->NiPoint3::UNIT_Z+0x8
+0x002864e39  addps xmm5, xmm1
+0x002864e3c  movaps xmmword ptr [rbp - 0x10], xmm5
+0x002864e40  movss xmm1, dword ptr [rip + 0xfe397c] ; rip->NiPoint3::UNIT_Z+0x4
+0x002864e48  movss dword ptr [rsp + 0x68], xmm0
+0x002864e4e  movss dword ptr [rsp + 0x64], xmm1
+0x002864e54  movaps xmm1, xmmword ptr [rsp + 0x60]
+0x002864e59  movaps xmm6, xmm1
+0x002864e5c  movaps xmm0, xmm1
+0x002864e5f  shufps xmm0, xmm1, 0x55
+0x002864e63  shufps xmm6, xmm1, 0
+0x002864e67  shufps xmm1, xmm1, 0xaa
+0x002864e6b  mulps xmm6, xmm3
+0x002864e6e  mulps xmm0, xmm8
+0x002864e72  mulps xmm1, xmm9
+0x002864e76  addps xmm6, xmm0
+0x002864e79  addps xmm6, xmm1
+0x002864e7c  movaps xmm1, xmmword ptr [rbp + 0x10]
+0x002864e80  movaps xmm0, xmm1
+0x002864e83  movaps xmm3, xmm1
+0x002864e86  movaps xmmword ptr [rsp + 0x60], xmm6
+0x002864e8b  shufps xmm0, xmm1, 0x55
+0x002864e8f  shufps xmm3, xmm1, 0
+0x002864e93  shufps xmm1, xmm1, 0xaa
+0x002864e97  mulps xmm0, xmmword ptr [rbp + 0x60]
+0x002864e9b  mulps xmm1, xmmword ptr [rbp + 0x40]
+0x002864e9f  mulps xmm3, xmm10
+0x002864ea3  addps xmm3, xmm0
+0x002864ea6  movaps xmm0, xmm2
+0x002864ea9  addps xmm3, xmm1
+0x002864eac  shufps xmm0, xmm2, 0xff
+0x002864eb0  mulps xmm3, xmm0
+0x002864eb3  addps xmm3, xmm2
+0x002864eb6  movaps xmm2, xmm7
+0x002864eb9  subps xmm2, xmm3
+0x002864ebc  movaps xmmword ptr [rbp + 0x10], xmm3
+0x002864ec0  mulps xmm2, xmm4
+0x002864ec3  movaps xmm1, xmm2
+0x002864ec6  shufps xmm1, xmm2, 0x99
+0x002864eca  movaps xmm0, xmm1
+0x002864ecd  addss xmm2, xmm1
+0x002864ed1  shufps xmm0, xmm1, 0x55
+0x002864ed5  addss xmm2, xmm0
+0x002864ed9  mov rax, qword ptr [rip + 0x3ecdf30] ; rip->BSShader::pCurrentVertexShader
+0x002864ee0  movaps xmm0, xmm2
+0x002864ee3  shufps xmm0, xmm0, 0
+0x002864ee7  mulps xmm0, xmm4
+0x002864eea  movzx ecx, byte ptr [rax + 0x71]
+0x002864eee  subps xmm7, xmm0
+0x002864ef1  movaps xmmword ptr [rsp + 0x40], xmm7
+0x002864ef6  cmp cl, 0xff
+0x002864ef9  je 0x2864f25
+0x002864efb  mov rax, qword ptr [rbx + 8]
+0x002864eff  movss xmm0, dword ptr [rbp + 0x1b0]
+0x002864f07  movss xmm1, dword ptr [rbp + 0x34]
+0x002864f0c  movzx ecx, cl
+0x002864f0f  movss xmm2, dword ptr [rbp + 0x20]
+0x002864f14  movss dword ptr [rax + rcx*4], xmm0
+0x002864f19  movss dword ptr [rax + rcx*4 + 4], xmm1
+0x002864f1f  movss dword ptr [rax + rcx*4 + 8], xmm2
+0x002864f25  mov rax, qword ptr [rip + 0x3ecdee4] ; rip->BSShader::pCurrentVertexShader
+0x002864f2c  movzx ecx, byte ptr [rax + 0x72]
+0x002864f30  cmp cl, 0xff
+0x002864f33  je 0x2864f81
+0x002864f35  mov rdx, qword ptr [rbx + 8]
+0x002864f39  movss xmm0, dword ptr [rbp + 8]
+0x002864f3e  movzx ecx, cl
+0x002864f41  xorps xmm11, xmm13
+0x002864f45  xorps xmm15, xmm13
+0x002864f49  xorps xmm0, xmm13
+0x002864f4d  movss dword ptr [rdx + rcx*4], xmm11
+0x002864f53  movss dword ptr [rdx + rcx*4 + 4], xmm15
+0x002864f5a  movss dword ptr [rdx + rcx*4 + 8], xmm0
+0x002864f60  mov rax, qword ptr [r11 + 0x18]
+0x002864f64  cmp byte ptr [rax + 0xd4], dil
+0x002864f6b  je 0x2864f77
+0x002864f6d  movss xmm0, dword ptr [rip + 0x3e627b] ; rip->_realbf800000
+0x002864f75  jmp 0x2864f7b ; BSDFPrePassShader::SetupGeometry+0x136b
+0x002864f77  movaps xmm0, xmm14
+0x002864f7b  movss dword ptr [rdx + rcx*4 + 0xc], xmm0
+0x002864f81  mov rdx, qword ptr [rbp + 0x28]
+0x002864f85  movss xmm11, dword ptr [rbp - 0x18]
+0x002864f8b  movss xmm15, dword ptr [rbp - 0x1c]
+0x002864f91  movss xmm2, dword ptr [rbp - 0x20]
+0x002864f96  movss xmm8, dword ptr [rbp + 0x18]
+0x002864f9c  movss xmm9, dword ptr [rbp + 0x14]
+0x002864fa2  movss xmm10, dword ptr [rbp + 0x10]
+0x002864fa8  movss xmm3, dword ptr [rsp + 0x48]
+0x002864fae  movss xmm1, dword ptr [rsp + 0x44]
+0x002864fb4  movss xmm0, dword ptr [rsp + 0x40]
+0x002864fba  test rdx, rdx
+0x002864fbd  je 0x2865198
+0x002864fc3  mov rax, qword ptr [rip + 0x3ecde4e] ; rip->BSShader::pCurrentHullShader
+0x002864fca  movzx ecx, byte ptr [rax + 0x71]
+0x002864fce  cmp cl, 0xff
+0x002864fd1  je 0x28650fb
+0x002864fd7  mov rax, qword ptr [r11 + 0x18]
+0x002864fdb  movss xmm7, dword ptr [rax + 0xd0]
+0x002864fe3  mov rax, qword ptr [r14 + 0x48]
+0x002864fe7  cmp rax, qword ptr [rip + 0x3ebca3a] ; rip->BSFadeNode::spNullFadeNode
+0x002864fee  je 0x28650a3
+0x002864ff4  test rax, rax
+0x002864ff7  je 0x28650a3
+0x002864ffd  mov rax, qword ptr [rip + 0x3ebcadc] ; rip->BSShaderManager::spCamera
+0x002865004  test rax, rax
+0x002865007  je 0x28650a3
+0x00286500d  movss xmm1, dword ptr [rsi + 0xa0]
+0x002865015  movss xmm2, dword ptr [rsi + 0xa4]
+0x00286501d  movss xmm0, dword ptr [rsi + 0xa8]
+0x002865025  subss xmm2, dword ptr [rax + 0xa4]
+0x00286502d  subss xmm1, dword ptr [rax + 0xa0]
+0x002865035  subss xmm0, dword ptr [rax + 0xa8]
+0x00286503d  mulss xmm2, xmm2
+0x002865041  mulss xmm1, xmm1
+0x002865045  mulss xmm0, xmm0
+0x002865049  addss xmm2, xmm1
+0x00286504d  movss xmm1, dword ptr [rip + 0x1060193] ; rip->fTessFactorMaxDistanceScale+0x8
+0x002865055  subss xmm1, dword ptr [rip + 0x1060173] ; rip->fTessFactorMinDistanceScale+0x8
+0x00286505d  addss xmm2, xmm0
+0x002865061  movaps xmm0, xmm14
+0x002865065  sqrtps xmm3, xmm2
+0x002865068  subss xmm0, xmm7
+0x00286506c  subss xmm3, dword ptr [rip + 0x106015c] ; rip->fTessFactorMinDistanceScale+0x8
+0x002865074  divss xmm3, xmm1
+0x002865078  mulss xmm3, xmm0
+0x00286507c  addss xmm3, xmm7
+0x002865080  comiss xmm7, xmm3
+0x002865083  jae 0x2865088
+0x002865085  movaps xmm3, xmm7
+0x002865088  movss xmm7, dword ptr [rip + 0x51e7a4] ; rip->_real
+0x002865090  movss xmm2, dword ptr [rbp - 0x20]
+0x002865095  comiss xmm3, xmm7
+0x002865098  jb 0x286509d
+0x00286509a  movaps xmm7, xmm3
+0x00286509d  movss xmm3, dword ptr [rsp + 0x48]
+0x0028650a3  mov rax, qword ptr [rdx + 8]
+0x0028650a7  movzx ecx, cl
+0x0028650aa  movaps xmm0, xmm10
+0x0028650ae  movaps xmm1, xmm9
+0x0028650b2  subss xmm0, dword ptr [r9 + 0x6b0]
+0x0028650bb  movss dword ptr [rax + rcx*4], xmm0
+0x0028650c0  subss xmm1, dword ptr [r9 + 0x6b4]
+0x0028650c9  movaps xmm0, xmm8
+0x0028650cd  movss dword ptr [rax + rcx*4 + 4], xmm1
+0x0028650d3  subss xmm0, dword ptr [r9 + 0x6b8]
+0x0028650dc  movss xmm1, dword ptr [rsp + 0x44]
+0x0028650e2  movss dword ptr [rax + rcx*4 + 8], xmm0
+0x0028650e8  movss xmm0, dword ptr [rsp + 0x40]
+0x0028650ee  movss dword ptr [rax + rcx*4 + 0xc], xmm7
+0x0028650f4  mov rax, qword ptr [rip + 0x3ecdd1d] ; rip->BSShader::pCurrentHullShader
+0x0028650fb  movzx ecx, byte ptr [rax + 0x76]
+0x0028650ff  cmp cl, 0xff
+0x002865102  je 0x2865141
+0x002865104  subss xmm0, dword ptr [r9 + 0x6b0]
+0x00286510d  mov rax, qword ptr [rdx + 8]
+0x002865111  movzx ecx, cl
+0x002865114  movss dword ptr [rax + rcx*4], xmm0
+0x002865119  subss xmm1, dword ptr [r9 + 0x6b4]
+0x002865122  movaps xmm0, xmm3
+0x002865125  movss dword ptr [rax + rcx*4 + 4], xmm1
+0x00286512b  subss xmm0, dword ptr [r9 + 0x6b8]
+0x002865134  movss dword ptr [rax + rcx*4 + 8], xmm0
+0x00286513a  mov rax, qword ptr [rip + 0x3ecdcd7] ; rip->BSShader::pCurrentHullShader
+0x002865141  movzx ecx, byte ptr [rax + 0x73]
+0x002865145  cmp cl, 0xff
+0x002865148  je 0x286518c
+0x00286514a  mov rdx, qword ptr [rdx + 8]
+0x00286514e  movzx r8d, cl
+0x002865152  movaps xmm0, xmm2
+0x002865155  movaps xmm1, xmm15
+0x002865159  xorps xmm0, xmm13
+0x00286515d  xorps xmm1, xmm13
+0x002865161  movss dword ptr [rdx + r8*4], xmm0
+0x002865167  movaps xmm0, xmm11
+0x00286516b  xorps xmm0, xmm13
+0x00286516f  movss dword ptr [rdx + r8*4 + 4], xmm1
+0x002865176  movss dword ptr [rdx + r8*4 + 8], xmm0
+0x00286517d  mov rax, qword ptr [r11 + 0x18]
+0x002865181  mov ecx, dword ptr [rax + 0xcc]
+0x002865187  mov dword ptr [rdx + r8*4 + 0xc], ecx
+0x00286518c  movss xmm0, dword ptr [rsp + 0x40]
+0x002865192  movss xmm1, dword ptr [rsp + 0x44]
+0x002865198  mov r10, qword ptr [rbp - 0x30]
+0x00286519c  movss xmm7, dword ptr [rsp + 0x68]
+0x0028651a2  test r10, r10
+0x0028651a5  je 0x28652f6
+0x0028651ab  mov rax, qword ptr [rip + 0x3ecdc6e] ; rip->BSShader::pCurrentDomainShader
+0x0028651b2  movzx ecx, byte ptr [rax + 0x71]
+0x0028651b6  cmp cl, 0xff
+0x0028651b9  je 0x2865208
+0x0028651bb  subss xmm10, dword ptr [r9 + 0x6b0]
+0x0028651c4  mov rdx, qword ptr [r10 + 8]
+0x0028651c8  movzx r8d, cl
+0x0028651cc  movss dword ptr [rdx + r8*4], xmm10
+0x0028651d2  subss xmm9, dword ptr [r9 + 0x6b4]
+0x0028651db  movss dword ptr [rdx + r8*4 + 4], xmm9
+0x0028651e2  subss xmm8, dword ptr [r9 + 0x6b8]
+0x0028651eb  movss dword ptr [rdx + r8*4 + 8], xmm8
+0x0028651f2  mov rax, qword ptr [r11 + 0x18]
+0x0028651f6  mov ecx, dword ptr [rax + 0xc8]
+0x0028651fc  mov dword ptr [rdx + r8*4 + 0xc], ecx
+0x002865201  mov rax, qword ptr [rip + 0x3ecdc18] ; rip->BSShader::pCurrentDomainShader
+0x002865208  movzx ecx, byte ptr [rax + 0x73]
+0x00286520c  cmp cl, 0xff
+0x00286520f  je 0x286524f
+0x002865211  mov rdx, qword ptr [r10 + 8]
+0x002865215  movzx r8d, cl
+0x002865219  xorps xmm2, xmm13
+0x00286521d  xorps xmm15, xmm13
+0x002865221  xorps xmm11, xmm13
+0x002865225  movss dword ptr [rdx + r8*4], xmm2
+0x00286522b  movss dword ptr [rdx + r8*4 + 4], xmm15
+0x002865232  movss dword ptr [rdx + r8*4 + 8], xmm11
+0x002865239  mov rax, qword ptr [r11 + 0x18]
+0x00286523d  mov ecx, dword ptr [rax + 0xcc]
+0x002865243  mov dword ptr [rdx + r8*4 + 0xc], ecx
+0x002865248  mov rax, qword ptr [rip + 0x3ecdbd1] ; rip->BSShader::pCurrentDomainShader
+0x00286524f  movzx ecx, byte ptr [rax + 0x74]
+0x002865253  cmp cl, 0xff
+0x002865256  je 0x2865283
+0x002865258  mov rax, qword ptr [r10 + 8]
+0x00286525c  movss xmm2, dword ptr [rsp + 0x60]
+0x002865262  movzx ecx, cl
+0x002865265  movss dword ptr [rax + rcx*4], xmm2
+0x00286526a  movss xmm2, dword ptr [rsp + 0x64]
+0x002865270  movss dword ptr [rax + rcx*4 + 8], xmm7
+0x002865276  movss dword ptr [rax + rcx*4 + 4], xmm2
+0x00286527c  mov rax, qword ptr [rip + 0x3ecdb9d] ; rip->BSShader::pCurrentDomainShader
+0x002865283  movzx ecx, byte ptr [rax + 0x75]
+0x002865287  cmp cl, 0xff
+0x00286528a  je 0x28652ba
+0x00286528c  mov rax, qword ptr [r10 + 8]
+0x002865290  movss xmm2, dword ptr [rbp - 0x10]
+0x002865295  movzx ecx, cl
+0x002865298  movss dword ptr [rax + rcx*4], xmm2
+0x00286529d  movss xmm2, dword ptr [rbp - 0xc]
+0x0028652a2  movss dword ptr [rax + rcx*4 + 4], xmm2
+0x0028652a8  movss xmm2, dword ptr [rbp - 8]
+0x0028652ad  movss dword ptr [rax + rcx*4 + 8], xmm2
+0x0028652b3  mov rax, qword ptr [rip + 0x3ecdb66] ; rip->BSShader::pCurrentDomainShader
+0x0028652ba  movzx ecx, byte ptr [rax + 0x76]
+0x0028652be  cmp cl, 0xff
+0x0028652c1  je 0x28652f6
+0x0028652c3  subss xmm0, dword ptr [r9 + 0x6b0]
+0x0028652cc  mov rax, qword ptr [r10 + 8]
+0x0028652d0  movzx ecx, cl
+0x0028652d3  movss dword ptr [rax + rcx*4], xmm0
+0x0028652d8  subss xmm1, dword ptr [r9 + 0x6b4]
+0x0028652e1  movss dword ptr [rax + rcx*4 + 4], xmm1
+0x0028652e7  subss xmm3, dword ptr [r9 + 0x6b8]
+0x0028652f0  movss dword ptr [rax + rcx*4 + 8], xmm3
+0x0028652f6  mov rax, qword ptr [rip + 0x3ecdb2b] ; rip->BSShader::pCurrentPixelShader
+0x0028652fd  movzx eax, byte ptr [rax + 0x65]
+0x002865301  mov byte ptr [rbp + 0x1b0], al
+0x002865307  cmp al, 0xff
+0x002865309  je 0x28653a2
+0x00286530f  movaps xmm15, xmmword ptr [rip + 0x3e4069] ; rip->DirectX::g_XMMask3
+0x002865317  mov r8, qword ptr [r15 + r12]
+0x00286531b  mov rcx, qword ptr [r13 + 8]
+0x00286531f  movaps xmm0, xmmword ptr [rip + 0x3e3c2a] ; rip->DirectX::g_XMIdentityR3
+0x002865326  mov qword ptr [rbp + 8], rcx
+0x00286532a  andps xmm5, xmm15
+0x00286532e  andps xmm6, xmm15
+0x002865332  andps xmm4, xmm15
+0x002865336  movaps xmmword ptr [rbp - 0x70], xmm5
+0x00286533a  movaps xmmword ptr [rbp - 0x60], xmm6
+0x00286533e  movaps xmmword ptr [rbp - 0x50], xmm4
+0x002865342  movaps xmmword ptr [rbp - 0x40], xmm0
+0x002865346  test r8, r8
+0x002865349  jne 0x2865352
+0x002865352  add r8, 0x1b70
+0x002865359  lea rdx, [rbp - 0x70]
+0x00286535d  lea rcx, [rbp + 0x70]
+0x002865361  add r8, 0x720
+0x002865368  call 0x64baf0 ; DirectX::XMMatrixMultiplyTranspose
+0x00286536d  movzx r8d, byte ptr [rbp + 0x1b0]
+0x002865375  mov rdx, qword ptr [rbp + 8]
+0x002865379  movaps xmm0, xmmword ptr [rax]
+0x00286537c  mov ecx, r8d
+0x00286537f  movaps xmmword ptr [rdx + r8*4], xmm0
+0x002865384  movaps xmm1, xmmword ptr [rax + 0x10]
+0x002865388  movaps xmmword ptr [rdx + r8*4 + 0x10], xmm1
+0x00286538e  movaps xmm0, xmmword ptr [rax + 0x20]
+0x002865392  movaps xmmword ptr [rdx + r8*4 + 0x20], xmm0
+0x002865398  movaps xmm1, xmmword ptr [rax + 0x30]
+0x00286539c  movaps xmmword ptr [rdx + r8*4 + 0x30], xmm1
+0x0028653a2  mov rax, qword ptr [rip + 0x3ecda7f] ; rip->BSShader::pCurrentPixelShader
+0x0028653a9  movzx ecx, byte ptr [rax + 0x66]
+0x0028653ad  cmp cl, 0xff
+0x0028653b0  je 0x2864400
+0x0028653b6  mov r8, qword ptr [r13 + 8]
+0x0028653ba  movzx r9d, cl
+0x0028653be  movzx ecx, byte ptr [rax + 0x67]
+0x0028653c2  cmp cl, 0xff
+0x0028653c5  je 0x28653d0
+0x0028653c7  movzx eax, cl
+0x0028653ca  lea rcx, [r8 + rax*4]
+0x0028653ce  jmp 0x28653d7 ; BSDFPrePassShader::SetupGeometry+0x17c7
+0x0028653d0  lea rcx, [rip + 0x3ebce69] ; rip->`BSGraphics::Renderer::GetShaderConstantPointer'::`6'::tmp
+0x0028653d7  mov edx, dword ptr [rsp + 0x30]
+0x0028653db  bt edx, 0xd
+0x0028653df  jae 0x2865429
+0x0028653e1  movss xmm0, dword ptr [rbp + 0x30]
+0x0028653e6  movss xmm1, dword ptr [rbp]
+0x0028653eb  movss xmm2, dword ptr [rsp + 0x78]
+0x0028653f1  movss dword ptr [r8 + r9*4], xmm0
+0x0028653f7  movss xmm0, dword ptr [rbp - 0x80]
+0x0028653fc  movss dword ptr [r8 + r9*4 + 4], xmm1
+0x002865403  movss xmm1, dword ptr [rsp + 0x70]
+0x002865409  movss dword ptr [r8 + r9*4 + 8], xmm2

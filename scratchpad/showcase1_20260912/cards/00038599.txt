@@ -1,0 +1,80 @@
+model TreeBlasted01.nif
+projection ortho
+ranges TreeBlasted01_Temp:0 - L2_TreeBlasted005:0 0+365
+lodm Materials\Landscape\Trees\MapleAtlas01.lodm none textures\Landscape\Trees\MapleAtlas01_d.dds
+lodm Materials\Landscape\Trees\MapleAtlas02.lodm none textures\Landscape\Trees\MapleAtlas02_d.dds
+mask alpha
+emissive 0 shapes 0
+front 1101.92 563.132 9.31081 -24.2518 452.221
+side 1101.92 563.132 9.31081 -24.2518 452.221
+class 32 128
+gap 2 8
+coverage 16 128 160
+oct 8 32 128 124.571 498.282 9.31081 -24.2518 452.221 3072 legacy 512
+frameoff 0 0 17.04 -3.24571
+frameoff 1 0 16.2286 -2.4343
+frameoff 2 0 13.7943 -2.4343
+frameoff 3 0 10.5486 -1.62286
+frameoff 4 0 7.30286 -2.4343
+frameoff 5 0 1.62286 -2.4343
+frameoff 6 0 -1.62286 0.811432
+frameoff 7 0 -4.05715 -2.4343
+frameoff 0 1 18.6629 -2.4343
+frameoff 1 1 17.04 -5.68001
+frameoff 2 1 15.4172 -3.24573
+frameoff 3 1 11.36 -2.43428
+frameoff 4 1 5.68 0
+frameoff 5 1 0 -4.05714
+frameoff 6 1 -4.05715 -4.86858
+frameoff 7 1 -7.30286 -2.4343
+frameoff 0 2 18.6629 0.811432
+frameoff 1 2 19.4743 -9.73715
+frameoff 2 2 17.04 -8.11429
+frameoff 3 2 12.9829 -0.811417
+frameoff 4 2 3.24572 0
+frameoff 5 2 -4.05715 -8.11429
+frameoff 6 2 -8.92572 -8.1143
+frameoff 7 2 -10.5486 -3.24571
+frameoff 0 3 17.04 -3.24571
+frameoff 1 3 17.04 -10.5486
+frameoff 2 3 18.6629 -21.0972
+frameoff 3 3 17.04 -7.30286
+frameoff 4 3 -4.05715 -3.24572
+frameoff 5 3 -11.36 -17.04
+frameoff 6 3 -13.7943 -13.7943
+frameoff 7 3 -13.7943 -2.4343
+frameoff 0 4 14.6057 -2.4343
+frameoff 1 4 13.7943 -20.2857
+frameoff 2 4 12.1714 -38.1372
+frameoff 3 4 4.05715 -54.3658
+frameoff 4 4 -17.04 -47.8743
+frameoff 5 4 -18.6629 -34.8915
+frameoff 6 4 -17.04 -17.8514
+frameoff 7 4 -17.04 -3.24571
+frameoff 0 5 10.5486 -3.24571
+frameoff 1 5 8.92572 -23.5314
+frameoff 2 5 4.05715 -45.44
+frameoff 3 5 -4.05715 -56.8
+frameoff 4 5 -12.9829 -55.1772
+frameoff 5 5 -17.04 -44.6286
+frameoff 6 5 -18.6629 -24.3429
+frameoff 7 5 -18.6629 0.811432
+frameoff 0 6 7.30286 -2.4343
+frameoff 1 6 4.05715 -22.72
+frameoff 2 6 0 -28.4
+frameoff 3 6 -5.68 -32.4572
+frameoff 4 6 -11.36 -34.08
+frameoff 5 6 -15.4172 -26.7772
+frameoff 6 6 -17.04 -22.72
+frameoff 7 6 -18.6629 -3.24571
+frameoff 0 7 4.86858 -2.4343
+frameoff 1 7 1.62286 0.811432
+frameoff 2 7 -1.62286 -2.4343
+frameoff 3 7 -6.49143 -2.4343
+frameoff 4 7 -10.5486 -1.62286
+frameoff 5 7 -13.7943 -2.4343
+frameoff 6 7 -16.2286 -2.4343
+frameoff 7 7 -17.04 -3.24571
+frameclamped 0
+framefit 66.5372 462.515 85.2001 463.326
+orthofit 523.94 523.94 0

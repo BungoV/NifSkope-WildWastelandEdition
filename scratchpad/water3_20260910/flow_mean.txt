@@ -1,0 +1,2 @@
+Commonwealth.lodl                  body 3    25114 samples  mean   115.31 deg  R 1.000  distinct directions    1  table   115.91 deg (source 3)  strokes 0
+charles_marked.lodl                body 3    25114 samples  mean   111.31 deg  R 0.807  distinct directions   99  table   111.26 deg (source 4)  strokes 1

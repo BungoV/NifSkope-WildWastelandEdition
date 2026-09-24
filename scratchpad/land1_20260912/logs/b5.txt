@@ -1,0 +1,11 @@
+arm                full s    incr s    chunks      seconds saved
+A/base             29.3      -         25 rows     (the full bake)
+A/border           24.0      19.1      16 of 25    +4.9 s  (20 %)
+A/land             24.7      12.7      9 of 25     +12.0 s  (49 %)
+A/lost             24.3      9.5       6 of 25     +14.8 s  (61 %)
+A/null             24.5      0.0       0 of 25     +24.5 s  (100 %)
+A/refs             29.2      11.0      9 of 25     +18.2 s  (62 %)
+B/base             78.4      -         25 rows     (the full bake)
+B/land             46.7      15.9      9 of 25     +30.8 s  (66 %)
+B/null             45.2      0.0       0 of 25     +45.2 s  (100 %)
+B/refs             54.8      18.6      9 of 25     +36.2 s  (66 %)

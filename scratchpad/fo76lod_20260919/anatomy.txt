@@ -1,0 +1,157 @@
+=== EVERY SHAPE IN THE FIVE FO76 CHUNKS ===
+
+-- appalachia.4.-10.-25.bto   (55 measured shapes, 115086 tris)
+   GlobalAtlasShape_NotAlphaTested                                nt=1794   nv=2785   comp=81    val=4.95 yawbox= 20.9% slivAR10= 24.4% uvisl=218
+   GlobalAtlasShape_AlphaTested                                   nt=1876   nv=2634   comp=407   val=3.20 yawbox=  2.2% slivAR10=  0.4% uvisl=409
+   GlobalAtlasShape_Translucent                                   nt=882    nv=1217   comp=202   val=3.17 yawbox=  4.1% slivAR10=  0.0% uvisl=220
+   GlobalAtlasShape_NotAlphaTested                                nt=2728   nv=4467   comp=137   val=4.93 yawbox= 26.7% slivAR10= 28.1% uvisl=339
+   GlobalAtlasShape_AlphaTested                                   nt=2832   nv=4137   comp=662   val=3.13 yawbox=  2.2% slivAR10=  0.1% uvisl=662
+   GlobalAtlasShape_Translucent                                   nt=902    nv=1367   comp=254   val=2.99 yawbox=  4.8% slivAR10=  0.0% uvisl=272
+   GlobalAtlasShape_NotAlphaTested                                nt=1933   nv=3145   comp=92    val=4.95 yawbox= 25.8% slivAR10= 27.3% uvisl=229
+   GlobalAtlasShape_AlphaTested                                   nt=2736   nv=3745   comp=562   val=3.24 yawbox=  3.3% slivAR10=  0.4% uvisl=565
+   GlobalAtlasShape_Translucent                                   nt=756    nv=1056   comp=173   val=3.16 yawbox=  4.2% slivAR10=  0.0% uvisl=191
+   RemeshedShape_UncannyCaverns_Hardscape_01d_LOD_0_sg_processed_ nt=150    nv=145    comp=1     val=5.84 yawbox=  5.3% slivAR10=  8.0% uvisl=5
+   RemeshedShape_LooseComponents_Appalachia_cell_-10_-23_LOD_0_sg nt=531    nv=522    comp=1     val=5.79 yawbox= 72.7% slivAR10= 32.3% uvisl=20
+   GlobalAtlasShape_NotAlphaTested                                nt=2532   nv=4261   comp=105   val=4.97 yawbox= 21.6% slivAR10= 19.9% uvisl=408
+   GlobalAtlasShape_AlphaTested                                   nt=2918   nv=3924   comp=594   val=3.26 yawbox=  3.1% slivAR10=  0.4% uvisl=596
+   GlobalAtlasShape_Translucent                                   nt=556    nv=846    comp=173   val=2.91 yawbox=  5.2% slivAR10=  0.0% uvisl=174
+   RemeshedShape_UncannyCaverns_Hardscape_01c_LOD_0_sg_processed_ nt=236    nv=251    comp=1     val=5.90 yawbox=  6.4% slivAR10=  9.3% uvisl=8
+   RemeshedShape_UncannyCaverns_Hardscape_01b_LOD_0_sg_processed_ nt=182    nv=227    comp=1     val=5.87 yawbox= 16.5% slivAR10= 23.1% uvisl=15
+   RemeshedShape_UncannyCaverns_Hardscape_01_LOD_0_sg_processed_s nt=66     nv=73     comp=1     val=5.66 yawbox= 12.1% slivAR10= 22.7% uvisl=4
+   RemeshedShape_UncannyCaverns_BldgShell_01_LOD_0_sg_processed_s nt=92     nv=102    comp=1     val=5.75 yawbox= 52.2% slivAR10= 15.2% uvisl=3
+   RemeshedShape_LooseComponents_Appalachia_cell_-10_-22_LOD_0_sg nt=8379   nv=8983   comp=2     val=6.07 yawbox= 58.7% slivAR10= 11.6% uvisl=356
+   GlobalAtlasShape_NotAlphaTested                                nt=1852   nv=2953   comp=101   val=4.87 yawbox= 24.3% slivAR10= 27.9% uvisl=237
+   GlobalAtlasShape_AlphaTested                                   nt=2565   nv=3611   comp=576   val=3.16 yawbox=  2.1% slivAR10=  0.2% uvisl=578
+   GlobalAtlasShape_Translucent                                   nt=136    nv=236    comp=54    val=2.70 yawbox=  7.4% slivAR10=  0.0% uvisl=54
+   GlobalAtlasShape_NotAlphaTested                                nt=4082   nv=6677   comp=221   val=4.87 yawbox= 27.4% slivAR10= 23.5% uvisl=522
+   GlobalAtlasShape_AlphaTested                                   nt=4698   nv=6766   comp=1063  val=3.16 yawbox=  2.3% slivAR10=  0.2% uvisl=1067
+   GlobalAtlasShape_Translucent                                   nt=572    nv=852    comp=144   val=3.08 yawbox=  3.8% slivAR10=  0.0% uvisl=163
+   GlobalAtlasShape_NotAlphaTested                                nt=2744   nv=4676   comp=109   val=5.19 yawbox= 24.1% slivAR10= 19.1% uvisl=420
+   GlobalAtlasShape_AlphaTested                                   nt=2791   nv=3940   comp=603   val=3.20 yawbox=  3.4% slivAR10=  0.3% uvisl=606
+   GlobalAtlasShape_Translucent                                   nt=388    nv=558    comp=110   val=3.00 yawbox=  7.2% slivAR10=  0.0% uvisl=110
+   GlobalAtlasShape_NotAlphaTested                                nt=2922   nv=4529   comp=141   val=4.95 yawbox= 26.5% slivAR10= 19.9% uvisl=331
+   GlobalAtlasShape_AlphaTested                                   nt=5173   nv=6883   comp=1028  val=3.26 yawbox=  2.8% slivAR10=  0.4% uvisl=1031
+   GlobalAtlasShape_Translucent                                   nt=704    nv=984    comp=181   val=3.07 yawbox=  5.4% slivAR10=  0.0% uvisl=185
+   GlobalAtlasShape_NotAlphaTested                                nt=2476   nv=3981   comp=122   val=4.94 yawbox= 22.8% slivAR10= 25.6% uvisl=333
+   GlobalAtlasShape_AlphaTested                                   nt=2773   nv=3880   comp=616   val=3.18 yawbox=  2.3% slivAR10=  0.3% uvisl=617
+   GlobalAtlasShape_Translucent                                   nt=950    nv=1335   comp=228   val=3.13 yawbox=  4.1% slivAR10=  0.0% uvisl=247
+   GlobalAtlasShape_NotAlphaTested                                nt=1994   nv=3168   comp=102   val=4.82 yawbox= 31.0% slivAR10= 23.3% uvisl=245
+   GlobalAtlasShape_AlphaTested                                   nt=2460   nv=3413   comp=530   val=3.20 yawbox=  3.3% slivAR10=  0.2% uvisl=536
+   GlobalAtlasShape_Translucent                                   nt=766    nv=1131   comp=199   val=3.06 yawbox=  4.3% slivAR10=  0.0% uvisl=218
+   GlobalAtlasShape_NotAlphaTested                                nt=3332   nv=5401   comp=115   val=5.05 yawbox= 22.4% slivAR10= 10.1% uvisl=573
+   GlobalAtlasShape_AlphaTested                                   nt=4133   nv=5418   comp=779   val=3.31 yawbox=  2.5% slivAR10=  0.5% uvisl=790
+   GlobalAtlasShape_Translucent                                   nt=262    nv=397    comp=80    val=2.93 yawbox=  7.3% slivAR10=  0.0% uvisl=81
+   GlobalAtlasShape_NotAlphaTested                                nt=1686   nv=2633   comp=87    val=4.76 yawbox= 34.5% slivAR10= 14.8% uvisl=208
+   GlobalAtlasShape_AlphaTested                                   nt=2288   nv=3186   comp=494   val=3.19 yawbox=  2.0% slivAR10=  0.1% uvisl=496
+   GlobalAtlasShape_Translucent                                   nt=736    nv=996    comp=127   val=3.36 yawbox=  3.0% slivAR10=  0.0% uvisl=164
+   GlobalAtlasShape_NotAlphaTested                                nt=9037   nv=15801  comp=88    val=5.79 yawbox=  7.1% slivAR10=  4.0% uvisl=2232
+   GlobalAtlasShape_AlphaTested                                   nt=1905   nv=2528   comp=384   val=3.27 yawbox=  3.9% slivAR10=  0.8% uvisl=386
+   GlobalAtlasShape_Translucent                                   nt=68     nv=118    comp=26    val=2.72 yawbox=  5.9% slivAR10=  0.0% uvisl=26
+   GlobalAtlasShape_NotAlphaTested                                nt=1859   nv=2909   comp=93    val=4.91 yawbox= 29.5% slivAR10= 21.7% uvisl=225
+   GlobalAtlasShape_AlphaTested                                   nt=4852   nv=6015   comp=851   val=3.38 yawbox=  3.2% slivAR10=  0.5% uvisl=862
+   GlobalAtlasShape_Translucent                                   nt=940    nv=1350   comp=208   val=3.18 yawbox=  3.8% slivAR10=  0.0% uvisl=245
+   GlobalAtlasShape_NotAlphaTested                                nt=2863   nv=4835   comp=66    val=5.15 yawbox= 16.9% slivAR10=  7.3% uvisl=578
+   GlobalAtlasShape_AlphaTested                                   nt=2480   nv=3398   comp=503   val=3.23 yawbox=  2.4% slivAR10=  0.3% uvisl=512
+   GlobalAtlasShape_Translucent                                   nt=930    nv=1275   comp=180   val=3.28 yawbox=  3.4% slivAR10=  0.0% uvisl=218
+   GlobalAtlasShape_NotAlphaTested                                nt=2102   nv=3189   comp=93    val=4.92 yawbox= 26.7% slivAR10= 13.0% uvisl=232
+   GlobalAtlasShape_AlphaTested                                   nt=1898   nv=2761   comp=444   val=3.13 yawbox=  2.6% slivAR10=  0.2% uvisl=447
+   GlobalAtlasShape_Translucent                                   nt=1588   nv=2168   comp=264   val=3.38 yawbox=  2.0% slivAR10=  0.0% uvisl=354
+
+-- appalachia.4.-14.-29.bto   (52 measured shapes, 139230 tris)
+   GlobalAtlasShape_NotAlphaTested                                nt=1476   nv=2439   comp=78    val=4.87 yawbox= 20.4% slivAR10= 28.8% uvisl=178
+   GlobalAtlasShape_AlphaTested                                   nt=1562   nv=2329   comp=388   val=3.08 yawbox=  2.0% slivAR10=  0.1% uvisl=388
+   RemeshedShape_LooseComponents_Appalachia_cell_-14_-29_LOD_0_sg nt=4454   nv=3737   comp=1     val=6.00 yawbox= 48.6% slivAR10= 10.4% uvisl=130
+   GlobalAtlasShape_NotAlphaTested                                nt=2087   nv=3523   comp=110   val=4.90 yawbox= 22.7% slivAR10= 29.0% uvisl=221
+   GlobalAtlasShape_AlphaTested                                   nt=3599   nv=4767   comp=692   val=3.31 yawbox=  2.9% slivAR10=  0.3% uvisl=694
+   RemeshedShape_WaterTowerMedium_LOD_0_sg_processed_scene        nt=2102   nv=2796   comp=1     val=6.85 yawbox= 14.3% slivAR10= 18.2% uvisl=140
+   RemeshedShape_BLD_A_Siding_HouseShotgun_OneStory_01_1442880893 nt=922    nv=1092   comp=1     val=6.03 yawbox= 20.8% slivAR10=  4.9% uvisl=50
+   RemeshedShape_BLD_A_Siding_HouseShotgun_Garage_01_LOD_0_sg_pro nt=200    nv=225    comp=1     val=5.88 yawbox= 23.0% slivAR10= 27.5% uvisl=14
+   RemeshedShape_BLD_A_Siding_HouseShotgun_TwoStory_03_2200131224 nt=1384   nv=1532   comp=1     val=6.18 yawbox= 22.5% slivAR10=  6.2% uvisl=77
+   GlobalAtlasShape_NotAlphaTested                                nt=4535   nv=7705   comp=152   val=5.82 yawbox= 18.6% slivAR10= 18.4% uvisl=537
+   GlobalAtlasShape_AlphaTested                                   nt=2264   nv=3665   comp=604   val=3.02 yawbox=  2.9% slivAR10=  0.9% uvisl=605
+   GlobalAtlasShape_Translucent                                   nt=68     nv=118    comp=27    val=2.70 yawbox=  4.4% slivAR10=  0.0% uvisl=27
+   RemeshedShape_ResidentialStreetLamp01_LOD_0_sg_processed_scene nt=60     nv=69     comp=1     val=5.62 yawbox= 25.0% slivAR10= 10.0% uvisl=4
+   RemeshedShape_CITPillar02_2357496411_LOD_0_sg_processed_scene  nt=68     nv=79     comp=1     val=5.67 yawbox= 23.5% slivAR10= 10.3% uvisl=4
+   RemeshedShape_CITPillar02_2357496411_LOD_0_sg_processed_scene  nt=68     nv=79     comp=1     val=5.67 yawbox= 23.5% slivAR10= 10.3% uvisl=4
+   RemeshedShape_Lewisburg_CH_patiowall_SC_LOD_0_sg_processed_sce nt=206    nv=247    comp=2     val=5.78 yawbox= 45.1% slivAR10=  6.3% uvisl=9
+   GlobalAtlasShape_NotAlphaTested                                nt=4285   nv=6771   comp=121   val=6.24 yawbox= 16.3% slivAR10= 16.6% uvisl=446
+   GlobalAtlasShape_AlphaTested                                   nt=2652   nv=3808   comp=625   val=3.13 yawbox=  2.5% slivAR10=  0.3% uvisl=626
+   RemeshedShape_LooseComponents_Appalachia_cell_-14_-26_LOD_0_sg nt=6682   nv=7101   comp=2     val=6.28 yawbox= 69.9% slivAR10= 13.3% uvisl=299
+   GlobalAtlasShape_NotAlphaTested                                nt=2722   nv=4456   comp=149   val=4.86 yawbox= 25.0% slivAR10= 28.1% uvisl=323
+   GlobalAtlasShape_AlphaTested                                   nt=3322   nv=4822   comp=771   val=3.13 yawbox=  2.6% slivAR10=  0.1% uvisl=771
+   GlobalAtlasShape_NotAlphaTested                                nt=3404   nv=5867   comp=195   val=4.80 yawbox= 26.6% slivAR10= 25.2% uvisl=394
+   GlobalAtlasShape_AlphaTested                                   nt=2859   nv=4672   comp=821   val=2.96 yawbox=  3.0% slivAR10=  0.6% uvisl=821
+   GlobalAtlasShape_NotAlphaTested                                nt=6519   nv=11328  comp=226   val=5.98 yawbox= 19.7% slivAR10= 13.8% uvisl=896
+   GlobalAtlasShape_AlphaTested                                   nt=3957   nv=6051   comp=1017  val=3.05 yawbox=  2.3% slivAR10=  0.1% uvisl=1021
+   GlobalAtlasShape_NotAlphaTested                                nt=5303   nv=8622   comp=170   val=6.01 yawbox= 18.6% slivAR10= 14.5% uvisl=528
+   GlobalAtlasShape_AlphaTested                                   nt=3415   nv=5088   comp=823   val=3.11 yawbox=  2.3% slivAR10=  0.2% uvisl=825
+   GlobalAtlasShape_Translucent                                   nt=242    nv=337    comp=36    val=3.44 yawbox=  2.5% slivAR10=  0.0% uvisl=54
+   GlobalAtlasShape_NotAlphaTested                                nt=3124   nv=5319   comp=173   val=4.84 yawbox= 25.1% slivAR10= 31.8% uvisl=371
+   GlobalAtlasShape_AlphaTested                                   nt=4430   nv=6311   comp=986   val=3.17 yawbox=  2.4% slivAR10=  0.2% uvisl=989
+   GlobalAtlasShape_Translucent                                   nt=68     nv=118    comp=27    val=2.70 yawbox= 10.3% slivAR10=  0.0% uvisl=27
+   GlobalAtlasShape_NotAlphaTested                                nt=4483   nv=7352   comp=255   val=4.73 yawbox= 30.6% slivAR10= 25.9% uvisl=578
+   GlobalAtlasShape_AlphaTested                                   nt=5394   nv=7775   comp=1280  val=3.13 yawbox=  2.8% slivAR10=  0.2% uvisl=1281
+   GlobalAtlasShape_Translucent                                   nt=378    nv=573    comp=89    val=3.11 yawbox=  4.5% slivAR10=  0.3% uvisl=107
+   GlobalAtlasShape_NotAlphaTested                                nt=2619   nv=4264   comp=141   val=4.73 yawbox= 34.5% slivAR10= 15.9% uvisl=320
+   GlobalAtlasShape_AlphaTested                                   nt=3207   nv=4554   comp=717   val=3.17 yawbox=  2.4% slivAR10=  0.4% uvisl=726
+   GlobalAtlasShape_Translucent                                   nt=504    nv=734    comp=114   val=3.15 yawbox=  4.0% slivAR10=  0.0% uvisl=135
+   GlobalAtlasShape_NotAlphaTested                                nt=7104   nv=11586  comp=264   val=5.65 yawbox= 22.9% slivAR10= 10.1% uvisl=730
+   GlobalAtlasShape_AlphaTested                                   nt=4227   nv=6570   comp=1058  val=3.07 yawbox=  2.2% slivAR10=  0.0% uvisl=1063
+   GlobalAtlasShape_Translucent                                   nt=514    nv=809    comp=144   val=2.98 yawbox=  5.3% slivAR10=  0.0% uvisl=162
+   GlobalAtlasShape_NotAlphaTested                                nt=4582   nv=7444   comp=145   val=5.19 yawbox= 18.8% slivAR10= 15.4% uvisl=827
+   GlobalAtlasShape_AlphaTested                                   nt=5001   nv=6575   comp=993   val=3.27 yawbox=  3.0% slivAR10=  0.4% uvisl=995
+   GlobalAtlasShape_Translucent                                   nt=436    nv=616    comp=91    val=3.22 yawbox=  2.3% slivAR10=  0.0% uvisl=109
+   GlobalAtlasShape_NotAlphaTested                                nt=3332   nv=5319   comp=176   val=4.85 yawbox= 28.0% slivAR10= 24.2% uvisl=406
+   GlobalAtlasShape_AlphaTested                                   nt=6238   nv=8361   comp=1269  val=3.25 yawbox=  2.2% slivAR10=  0.4% uvisl=1277
+   GlobalAtlasShape_Translucent                                   nt=204    nv=354    comp=81    val=2.70 yawbox=  5.9% slivAR10=  0.0% uvisl=81
+   GlobalAtlasShape_NotAlphaTested                                nt=3354   nv=5345   comp=125   val=5.55 yawbox= 23.0% slivAR10= 11.0% uvisl=376
+   GlobalAtlasShape_AlphaTested                                   nt=2771   nv=4027   comp=640   val=3.14 yawbox=  2.4% slivAR10=  0.1% uvisl=642
+   GlobalAtlasShape_Translucent                                   nt=736    nv=996    comp=127   val=3.36 yawbox=  2.7% slivAR10=  0.0% uvisl=164
+   GlobalAtlasShape_NotAlphaTested                                nt=2194   nv=3484   comp=111   val=4.77 yawbox= 31.9% slivAR10= 16.8% uvisl=263
+   GlobalAtlasShape_AlphaTested                                   nt=3283   nv=4566   comp=710   val=3.19 yawbox=  2.9% slivAR10=  0.3% uvisl=714
+   GlobalAtlasShape_Translucent                                   nt=630    nv=895    comp=145   val=3.15 yawbox=  4.0% slivAR10=  0.0% uvisl=164
+
+-- appalachia.8.-14.-29.bto   (3 measured shapes, 62213 tris)
+   GlobalAtlasShape_NotAlphaTested                                nt=24488  nv=49258  comp=261   val=6.65 yawbox=  6.5% slivAR10=  0.9% uvisl=6899
+   GlobalAtlasShape_AlphaTested                                   nt=598    nv=1176   comp=105   val=3.47 yawbox= 21.9% slivAR10= 28.9% uvisl=196
+   RemeshedShape_NotAlphaTested_Merged                            nt=37127  nv=41328  comp=40    val=6.29 yawbox= 45.0% slivAR10=  7.0% uvisl=1822
+
+-- appalachia.16.-14.-29.bto   (6 measured shapes, 84405 tris)
+   GlobalAtlasShape_NotAlphaTested                                nt=29301  nv=65472  comp=693   val=5.68 yawbox=  7.0% slivAR10=  0.9% uvisl=11557
+   GlobalAtlasShape_NotAlphaTested                                nt=29284  nv=65465  comp=599   val=5.69 yawbox=  5.3% slivAR10=  0.4% uvisl=11444
+   GlobalAtlasShape_NotAlphaTested                                nt=7518   nv=13255  comp=90    val=5.40 yawbox=  4.0% slivAR10=  0.1% uvisl=1828
+   GlobalAtlasShape_AlphaTested                                   nt=918    nv=2079   comp=408   val=2.58 yawbox= 14.8% slivAR10= 20.8% uvisl=479
+   GlobalAtlasShape_Translucent                                   nt=201    nv=567    comp=8     val=5.77 yawbox=  2.0% slivAR10=  1.0% uvisl=100
+   RemeshedShape_NotAlphaTested_Merged                            nt=17183  nv=20883  comp=141   val=5.86 yawbox= 16.4% slivAR10=  3.6% uvisl=1104
+
+-- appalachia.32.-30.-29.bto   (12 measured shapes, 165915 tris)
+   GlobalAtlasShape_NotAlphaTested                                nt=25756  nv=64729  comp=602   val=6.38 yawbox= 11.0% slivAR10=  1.3% uvisl=8158
+   GlobalAtlasShape_NotAlphaTested                                nt=27719  nv=65513  comp=314   val=7.64 yawbox= 11.2% slivAR10=  1.5% uvisl=3959
+   GlobalAtlasShape_NotAlphaTested                                nt=25186  nv=65518  comp=1043  val=5.03 yawbox=  6.5% slivAR10=  0.4% uvisl=15030
+   GlobalAtlasShape_NotAlphaTested                                nt=24700  nv=65465  comp=936   val=5.69 yawbox=  9.3% slivAR10=  1.2% uvisl=10901
+   GlobalAtlasShape_NotAlphaTested                                nt=15312  nv=39735  comp=525   val=5.91 yawbox= 10.0% slivAR10=  0.9% uvisl=6468
+   GlobalAtlasShape_AlphaTested                                   nt=5317   nv=10319  comp=501   val=3.85 yawbox= 57.3% slivAR10= 54.7% uvisl=1722
+   GlobalAtlasShape_Translucent                                   nt=840    nv=2464   comp=168   val=4.11 yawbox= 23.9% slivAR10=  3.0% uvisl=560
+   (unnamed)                                                      nt=30     nv=60     comp=1     val=3.93 yawbox=100.0% slivAR10=  0.0% uvisl=-
+   (unnamed)                                                      nt=10     nv=20     comp=1     val=3.64 yawbox=100.0% slivAR10=  0.0% uvisl=-
+   (unnamed)                                                      nt=36     nv=72     comp=1     val=4.12 yawbox=100.0% slivAR10=  0.0% uvisl=-
+   (unnamed)                                                      nt=40     nv=80     comp=1     val=4.23 yawbox=100.0% slivAR10=  0.0% uvisl=-
+   RemeshedShape_NotAlphaTested_Merged                            nt=40969  nv=51255  comp=239   val=5.75 yawbox= 21.7% slivAR10=  2.9% uvisl=2736
+
+=== GlobalAtlasShape split by class ===
+ NotAlphaTested   n=41   tris=316323  comp=141    val=4.97 yawbox_tris=22.7% yawbox_area=11.2% slivAR10=16.56% compverts=10
+ AlphaTested      n=76   tris=429715  comp=398    val=4.77 yawbox_tris=8.2% yawbox_area=5.7% slivAR10=1.05% compverts=9
+ Translucent      n=28   tris=15957   comp=136    val=3.12 yawbox_tris=4.3% yawbox_area=28.8% slivAR10=0.00% compverts=5
+
+=== FO4 .bto control split by level ===
+ Commonwealth.4.-16.-16.BTO#2 obj               nt=16068  comp=1255  val=4.61 yawbox= 15.5% slivAR10= 13.2%
+ Commonwealth.4.-16.-16.BTO#8 obj-at            nt=7032   comp=1930  val=2.80 yawbox= 14.6% slivAR10=  3.8%
+ Commonwealth.8.-16.-16.BTO#2 obj               nt=6193   comp=173   val=4.81 yawbox= 22.9% slivAR10=  9.7%
+ Commonwealth.8.-16.-16.BTO#8 obj-at            nt=8498   comp=2557  val=2.94 yawbox= 32.8% slivAR10=  6.0%
+ Commonwealth.16.-16.-16.BTO#2 obj              nt=4048   comp=159   val=4.62 yawbox= 81.0% slivAR10=  1.7%
+ Commonwealth.16.-16.-16.BTO#8 obj-at           nt=6865   comp=188   val=4.95 yawbox= 74.2% slivAR10=  8.2%
+ Commonwealth.16.-16.-16.BTO#14 obj             nt=72     comp=3     val=5.09 yawbox= 77.8% slivAR10=  0.0%
+ Commonwealth.32.-32.-32.BTO#2 obj              nt=534    comp=25    val=4.17 yawbox= 77.9% slivAR10=  0.6%
+ Commonwealth.4.0.0.BTO#2 obj                   nt=21844  comp=785   val=4.63 yawbox= 64.0% slivAR10=  7.3%
+ Commonwealth.4.0.0.BTO#8 obj                   nt=132    comp=14    val=3.82 yawbox= 69.7% slivAR10=  0.8%
+ Commonwealth.4.0.0.BTO#13 obj-at               nt=7932   comp=759   val=3.93 yawbox= 57.5% slivAR10=  5.2%

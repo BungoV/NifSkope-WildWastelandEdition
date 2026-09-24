@@ -1,0 +1,12 @@
+pbr_shade_ab bgsm_duct gate=zero no picture: bgsm_duct_old_a.png,bgsm_duct_old_b.png,bgsm_duct_new.png -> FAIL
+pbr_shade_ab bgem_plane gate=zero no picture: bgem_plane_old_b.png,bgem_plane_new.png -> FAIL
+pbr_shade_ab embedded_lit gate=zero no picture: embedded_lit_old_a.png,embedded_lit_old_b.png,embedded_lit_new.png -> FAIL
+pbr_shade_ab embedded_effect gate=zero no picture: embedded_effect_old_a.png,embedded_effect_old_b.png,embedded_effect_new.png -> FAIL
+pbr_shade_ab particles_fire gate=zero no picture: particles_fire_old_a.png,particles_fire_old_b.png,particles_fire_new.png -> FAIL
+pbr_shade_ab particles_smoke gate=zero no picture: particles_smoke_old_a.png -> FAIL
+pbr_shade_ab particles_mist gate=zero no picture: particles_mist_old_a.png,particles_mist_old_b.png,particles_mist_new.png -> FAIL
+pbr_shade_ab particles_shock gate=zero no picture: particles_shock_old_a.png,particles_shock_old_b.png,particles_shock_new.png -> FAIL
+pbr_shade_ab particles_cryo gate=zero no picture: particles_cryo_old_a.png,particles_cryo_old_b.png,particles_cryo_new.png -> FAIL
+pbr_shade_ab pistol_10mm gate=zero no picture: pistol_10mm_old_a.png,pistol_10mm_old_b.png,pistol_10mm_new.png -> FAIL
+pbr_shade_ab census-moves kinds=none distinct_refusals=0 -> FAIL
+pbr_shade_ab SUMMARY 10 cases, 11 failures, 0 empty by the viewer (none) -> FAIL

@@ -1,0 +1,4 @@
+BAKE def r:-24,24,-21,27 rc=0  4s  texfiles=3  args=[]
+BAKE def r:-16,24,-13,27 rc=0  5s  texfiles=3  args=[]
+BAKE def r:-20,28,-17,31 rc=0  3s  texfiles=3  args=[]
+BAKE def r:-16,20,-13,23 rc=0  4s  texfiles=3  args=[]

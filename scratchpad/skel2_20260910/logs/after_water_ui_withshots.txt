@@ -1,0 +1,197 @@
+  ok   the document loaded
+--- R: the bars, in main-window coordinates ---
+  UI/CompactTopBars = true
+  wwBarRowHeight() = 35
+  menu bar                    : x    0  top    0  w   250  h  35  bottom   34
+  tFile (workspaces row)      : x    0  top    0  w   374  h  35  bottom   34
+  tLOD                        : <absent or hidden>
+  tView (anim/collision)      : x  374  top    0  w  1150  h  35  bottom   34
+  viewport header             : x  167  top   35  w   857  h  35  bottom   69
+  dock tab strip              : x    0  top   35  w   164  h  35  bottom   69
+  dock search row             : x    5  top   70  w   154  h  23  bottom   92
+  ok   (R floor) the row height is a real number (35 > 0)
+  R1: 5 visible bars, 5 at the row height
+  ok   (R floor) at least 4 of the row's bars are real rectangles (found 5)
+  ok   (R1) every visible bar at the top of the window is the row height within 1 px
+  ok   (R2) the menu bar and the dock tab strip are the same height (35 vs 35)
+  R2 floor: same height now yes; with the menu bar 4 px taller no
+  ok   (R2 floor) a 4 px difference FAILS the same test
+  R3 button tFile/ViewWorkspacesButton: 35 px, y 0 (row 35)
+  R3 button tView/ViewLodButton: 35 px, y 0 (row 35)
+  R3 button tView/ViewAnimationButton: 35 px, y 0 (row 35)
+  R3 button tView/ViewCollisionButton: 35 px, y 0 (row 35)
+  R3: 4 bar buttons, 4 at the row height, heights 35..35, row 35, worst offset 0
+  R3: the skin calibrated content 26 with a measured style overhead of 9
+  ok   (R3 floor) the row carries at least 4 buttons to measure (found 4)
+  ok   (R3) every button in the row is the row's own height within 1 px (4 of 4, heights 35..35 against 35)
+  ok   (R3) ...and they agree with each other within 1 px (35..35)
+  ok   (R3) ...and the calibration measured a real overhead (9) instead of falling back
+  R3 floor: with BUILD12's own arithmetic put back (min-height 31, padding 8) the buttons read 49..49 against a row of 35, worst offset 14
+  ok   (R3 floor) the SAME test goes red on the sheet that shipped at 39 px (0 of 4 buttons at the row height)
+  R3 floor: restored, the buttons read 35..35 again
+  ok   (R3 floor) ...and taking it away puts every button back on the row (4 of 4), so the picture below is the shipped state
+  R4: the skin's button sheet is 294 chars, 4 selectors, 2 min-heights, 2/2 vertical paddings; its bar-box sheet is "QToolBar { border: 0px; padding: 0px; margin: 0px; }"
+  ok   (R4) the skin states the height and the air once per box selector (4 selectors, 2 min-heights, 2 top / 2 bottom paddings)
+  ok   (R4) ...and the menu arrow is centred with the row, so it does not drop to the corner of a taller button
+  ok   (R4) ...and the only horizontal rule is the menu arrow's own column (1 padding-right, 1 [wwHasMenu] selector, 0 padding-left, 0 shorthand padding)
+  ok   (R4) the bar's own box is taken away, which is what puts a button at y 0 instead of y 4
+  ok   (R4) ...and the bars actually carry it
+  ok   (R4 floor) and no sheet at all for an empty row
+  R5: search row top 70, viewport content top 70
+  ok   (R5) the search row still starts where the viewport's content starts (<= 1 px)
+--- S: the strip's air (bungo's 4 px) ---
+  wwSegmentedStripAir() = 4
+  S: device pixel ratio 1, strip bar 164x35 at x 0 top 35, toolbar beside it at x 167
+  S segment 0 "Header" painted: x 4 y 4 w 60 h 27 (right 63 bottom 30)
+  S segment 1 "Blocks" painted: x 64 y 4 w 55 h 27 (right 118 bottom 30)
+  S segment 2 "Files" painted: x 119 y 4 w 44 h 27 (right 162 bottom 30)
+  S THE FIVE: top 4  bottom 4  left 4  right-to-toolbar 4  between 0..0   (want 4, +/-1)
+  ok   (S floor) every segment of the strip was found as a real painted box (3 of 3 visible tabs, first 60x27)
+  ok   (S floor) ...and the SAME scan finds nothing at all for a colour the strip does not carry, so it is a real search
+  ok   (S1) the strip starts 4 px below the row's top edge (want 4)
+  ok   (S2) ...and ends 4 px above the row's bottom edge, where the search row begins (want 4)
+  ok   (S3) the first segment is 4 px from the window's content edge (want 4)
+  ok   (S4) the last segment is 4 px from the toolbar beside it (want 4; the dock separator already paints 3 of them)
+  ok   (S5) the segments TOUCH: every pair is 0..0 px apart (want 0)
+  ok   (S6) and the ROW did not move: the strip's bar is still 35 px, the segments 27 -- shorter by twice the air inside the same row
+  S floor: with the 18:25:20 flush strip put back, the five read top 0 bottom 0 left 5 right 3 between 0..0
+  ok   (S floor) the SAME five go red on the strip that shipped at 18:25:20 (top 0, between 0)
+  S floor: restored, the five read top 4 bottom 4 left 4 right 4 between 0..0 again
+  ok   (S floor) ...and taking it away puts all five back at 4, so the pictures below are the shipped state
+  S floor: with UI4's SEPARATED strip put back, the gap reads 4..4 (top 4, left 4)
+  ok   (S5 floor) the SAME gap test goes red on the strip bungo asked about (4..4 apart, want 0)
+  S floor: restored, the gap reads 0..0 again
+  ok   (S5 floor) ...and taking it away joins the segments again (0..0)
+  strip crop 354x55 -> 4x 1416x220 -> E:/Projects/NifskopeWildWastelandEdition/scratchpad/skel2_20260910/images/wui_strip.png (written)
+  ok   (shot) the zoomed strip crop was written
+--- M: the menu bar's titles in the row ---
+  M: the menu bar's font: ascent 13, descent 3, height 16, capHeight 8 -- the verdict reads the CAP BAND (ink top .. ink top + capHeight), not the whole ink band, which also holds the mnemonic underline and the descender of Spells / Options
+  M: menu bar 250x35 at y 0, row 35, centre line 17.0; the skin measured item content 16 -> padding-top 9 / padding-bottom 10
+  M: 5 titles read: File[ink y 13..23, cap c 17.0] View[ink y 13..23, cap c 17.0] Spells[ink y 13..24, cap c 17.0] Options[ink y 13..24, cap c 17.0] Help[ink y 13..24, cap c 17.0]  worst 0.0, spread 0.0
+  ok   (M floor) every painted title in the menu bar was found as real text ink (5 of 5), and the font reports a real cap height (8)
+  ok   (M floor) ...and the SAME scan finds nothing for a brightness the bar does not carry (0 titles)
+  ok   (M1) the menu bar is still exactly the row's height (35 px at y 0, row 35) -- centring the titles did not grow it
+  ok   (M2) every title's text is on the row's centre line within 1 px (worst cap-band offset 0.0)
+  ok   (M2) ...and the five agree with each other within 1 px (cap-band spread 0.0)
+  M3: the menu bar's own hint is 35 against a row of 35
+  ok   (M3) the menu bar's own size hint does not exceed the row (35 <= 35), so aligning the row again cannot grow it
+  ok   (M3) ...and every other bar in the row is still the row's height (4 of 4)
+  ok   (M4) the row's menu-item rule is the one the skin states, and the menu bar actually carries it ("QMenuBar::item { padding-top: 9px; padding-bottom: 10px; }")
+  ok   (M4 floor) ...and the skin states no rule at all for a row of 0 or a content of 0
+  M4: the declaration the menu bar falls back to, read out of the live application stylesheet: "QMenuBar::item { padding: 4px 8px; background: transparent; }"
+  M4: with the row's rule overridden by the sheet's own (the off value of UI/CompactTopBars) the titles read: File[ink y 8..18, cap c 12.0] View[ink y 8..18, cap c 12.0] Spells[ink y 8..19, cap c 12.0] Options[ink y 8..19, cap c 12.0] Help[ink y 8..19, cap c 12.0]  worst -5.0; the item is 24 px
+  ok   (M4) the way back puts the titles back high in the row, where they were before this lane (worst -5.0, against 0.0 with the row's sheet on)
+  M5 floor: with the 20:45:47 arithmetic put back (padding 2 / 2) the titles read: File[ink y 6..16, cap c 10.0] View[ink y 6..16, cap c 10.0] Spells[ink y 6..17, cap c 10.0] Options[ink y 6..17, cap c 10.0] Help[ink y 6..17, cap c 10.0]  worst -7.0
+  ok   (M5 floor) the SAME test goes red on the sheet that shipped with the titles six pixels high (worst -7.0)
+  M5 floor: restored, the titles read: File[ink y 13..23, cap c 17.0] View[ink y 13..23, cap c 17.0] Spells[ink y 13..24, cap c 17.0] Options[ink y 13..24, cap c 17.0] Help[ink y 13..24, cap c 17.0]  worst 0.0
+  ok   (M5 floor) ...and taking it away puts every title back on the centre line (worst 0.0), so the picture below is the shipped state
+  M6: the skin's menu-item rule is "QMenuBar::item { padding-top: 9px; padding-bottom: 10px; }"
+  ok   (M6) the skin states one top and one bottom padding for the menu item, derived from the row (9 + 16 + 10 = 35)
+  ok   (M6) ...and nothing horizontal, so a title keeps the 8 px res/style.qss gives it on either side
+  top-strip grab 1534x107 -> E:/Projects/NifskopeWildWastelandEdition/scratchpad/skel2_20260910/images/wui_topbar.png (written)
+  ok   (shot) the top-strip grab was written
+  ok   (shot floor) ...and it is not an empty strip
+  the window holds: LodGenerationDock yes, LeftColumnDock yes, LeftColumnStack 3 pages, ViewWorkspacesMenu 11 actions
+--- L: the Water tab, in the LOD Generation panel ---
+  ok   (L floor) the LOD Generation panel's strip and page stack exist
+  the LOD panel's strip carries 2 tabs; tab -> page: LOD=0 Water=1
+  ok   (L1) the LOD panel's strip carries exactly 2 tabs (2)
+  ok   (L1) they are "LOD" at 0 then "Water" at 1
+  ok   (L1 floor) ...and the same search finds no "Watre", so it is a real search
+  the stack holds 2 pages: LodgenPanel at 0, WaterMarkPanel at 1
+  ok   (L2) the stack carries the generator's page at 0 and the water page at 1, and nothing else
+  ok   (L2) each tab's data is its page index (0 -> 0, 1 -> 1)
+  ok   (L2 floor) the SAME predicate asked against the wrong index (water page at 0) is false, so it is reading the index and not merely existing
+  L3: Water selected -> page 1 (want 1); rows on screen yes, the flow-window button yes
+  ok   (L3) selecting Water shows the water page (1, wanted 1)
+  ok   (L3) ...and the marking rows are on screen -- the tool box, Solve and Save all visible
+  ok   (L3) ...and the full-screen flow window's button with them
+  ok   (L3 floor) selecting LOD puts the generator's page back (0, wanted 0) with its Generate button on screen -- the same assertion, on the tab that has always been there
+  LOD-dock grab, LOD selected -> E:/Projects/NifskopeWildWastelandEdition/scratchpad/skel2_20260910/images/wui_lodtab.png (written)
+  ok   (shot) the LOD-tab grab of the LOD panel was written
+  wwBarRowHeight() = 35
+  LodPanelModeSelector        : x 1037  top   59  w   497  h  35  bottom   93
+  LeftColumnModeSelector      : x    0  top   35  w   174  h  35  bottom   69
+  ok   (L4) the LOD panel's strip is the shared row's height (35 vs 35)
+  ok   (L4) ...the same height as the left strip (35 vs 35)
+  ok   (L4 floor) both rectangles are non-degenerate
+  sheets: LOD 613 chars / 814f7612, left 613 chars / 814f7612, the compact default 504 chars / bbaa22a6
+  ok   (L5) the two strips carry the SAME stylesheet, byte for byte
+  ok   (L5 floor) ...and the compact default (504 chars) is a DIFFERENT string from the row sheet (613 chars), so the comparison is able to differ
+  the left strip: Header Blocks Files -- 3 visible with the LOD workspace open, 3 with it closed; LeftColumnStack has 3 pages
+  ok   (L6) the left strip has exactly 3 tabs with the LOD workspace OPEN (3)
+  ok   (L6) ...and exactly 3 with it CLOSED (3) -- both states in one run, so a strip that is 3 only in one of them goes red
+  ok   (L6) no tab named "Water" is left in the left strip
+  ok   (L6) LeftColumnStack is back to 3 pages (3)
+  ok   (L6 floor) ...and the three it still has are Header, Blocks and Files
+  the Workspaces menu holds 11 actions: Water Marking 0, Water window 0, LOD Generation 1
+  ok   (L7 floor) the scan finds "LOD Generation" (1), so it is able to find something
+  ok   (L7) the Workspaces menu offers no "Water Marking" (0)
+  ok   (L7) ...and no "Water window" (0)
+  ok   (L7) there is no Water Marking dock left in the window
+  ok   (L7 floor) ...and the same search DOES find the LOD Generation dock
+  wwSegmentedStripAir() = 4; painted segment 0: LOD strip top 4 bottom 30 (h 27), left strip top 4 bottom 30 (h 27), both in a row of 35
+  ok   (L8) the LOD strip's first segment is 4 px clear of the row's top (4) and bottom (4)
+  ok   (L8 floor) ...and the LEFT strip reads the same two numbers, so this is the air the whole window agreed on and not one strip's accident
+  the LOD strip's two segments: 0 painted x 4 w 245, 1 painted x 249 w 247 -> 0 px apart (want 0)
+  ok   (L8) the LOD strip's two segments TOUCH (0 px apart, want 0)
+  L8 floor: with UI4's separated strip put back, the two segments read 4 px apart
+  ok   (L8 floor) the SAME gap test goes red on a separated strip (4 px apart)
+  L8 floor: restored, the two segments read 0 px apart again
+  ok   (L8 floor) ...and taking it away joins them again (0 px apart)
+--- A: the menu arrows' air ---
+  A ViewportModeButton        : 125x35; arrow 9 col(s) from 113; glyph last ink 95; GAP 17
+  A ViewportMenuSelect        : 56x35; arrow 9 col(s) from 44; glyph last ink 41; GAP 2
+  A ViewportMenuAdd           : 47x35; arrow 9 col(s) from 35; glyph last ink 32; GAP 2
+  A ViewportMenuObject        : 60x35; arrow 9 col(s) from 48; glyph last ink 45; GAP 2
+  A btnRender                 : 77x35; arrow 9 col(s) from 65; glyph last ink 56; GAP 8
+  A btnRender                 : 33x35; arrow 9 col(s) from 21; glyph last ink 17; GAP 3
+  A btnRender                 : 33x35; arrow 9 col(s) from 21; glyph last ink 17; GAP 3
+  A ViewportOverlaysButton    : 90x35; arrow 9 col(s) from 78; glyph last ink 72; GAP 5
+  A btnRender                 : 33x35; arrow 9 col(s) from 21; glyph last ink 18; GAP 2
+  A ViewWorkspacesButton      : 108x35; arrow 9 col(s) from 96; glyph last ink 89; GAP 6
+  A ViewLodButton             : 59x35; arrow 9 col(s) from 47; glyph last ink 44; GAP 2
+  A ViewAnimationButton       : 99x35; arrow 9 col(s) from 87; glyph last ink 81; GAP 5
+  A ViewCollisionButton       : 91x35; arrow 9 col(s) from 79; glyph last ink 72; GAP 6
+  A: 13 menu button(s) in the row, 13 readable; the skin states padding-right for them and nothing else horizontal
+  ok   (A floor) the row carries menu buttons to measure and both renders differed on them (13 found, 13 readable)
+  ok   (A1) every menu button's arrow is at least 2 px clear of its glyph (worst 2 on "ViewportMenuSelect", of 13 read)
+  A ViewportModeButton        : 125x35; arrow 9 col(s) from 113; glyph last ink 95; GAP 17
+  A ViewportMenuSelect        : 52x35; arrow 9 col(s) from 40; glyph last ink 41; GAP -2
+  A ViewportMenuAdd           : 43x35; arrow 9 col(s) from 31; glyph last ink 32; GAP -2
+  A ViewportMenuObject        : 56x35; arrow 9 col(s) from 44; glyph last ink 45; GAP -2
+  A btnRender                 : 71x35; arrow 9 col(s) from 59; glyph last ink 56; GAP 2
+  A btnRender                 : 27x35; arrow 9 col(s) from 15; glyph last ink 16; GAP -2
+  A btnRender                 : 27x35; arrow 9 col(s) from 15; glyph last ink 16; GAP -2
+  A ViewportOverlaysButton    : 87x35; arrow 9 col(s) from 75; glyph last ink 72; GAP 2
+  A btnRender                 : 27x35; arrow 9 col(s) from 15; glyph last ink 17; GAP -3
+  A ViewWorkspacesButton      : 104x35; arrow 9 col(s) from 92; glyph last ink 89; GAP 2
+  A ViewLodButton             : 55x35; arrow 9 col(s) from 43; glyph last ink 44; GAP -2
+  A ViewAnimationButton       : 97x35; arrow 9 col(s) from 85; glyph last ink 81; GAP 3
+  A ViewCollisionButton       : 87x35; arrow 9 col(s) from 75; glyph last ink 72; GAP 2
+  A floor: with res/style.qss's own 4 px put back (the 05:58:21 window) the worst is -3 px on "btnRender", of 13 read
+  ok   (A1 floor) the SAME test goes red on the sheet that shipped at 05:58:21 (worst -3 on "btnRender")
+  A ViewportModeButton        : 125x35; arrow 9 col(s) from 113; glyph last ink 95; GAP 17
+  A ViewportMenuSelect        : 56x35; arrow 9 col(s) from 44; glyph last ink 41; GAP 2
+  A ViewportMenuAdd           : 47x35; arrow 9 col(s) from 35; glyph last ink 32; GAP 2
+  A ViewportMenuObject        : 60x35; arrow 9 col(s) from 48; glyph last ink 45; GAP 2
+  A btnRender                 : 75x35; arrow 9 col(s) from 63; glyph last ink 56; GAP 6
+  A btnRender                 : 31x35; arrow 9 col(s) from 19; glyph last ink 16; GAP 2
+  A btnRender                 : 31x35; arrow 9 col(s) from 19; glyph last ink 16; GAP 2
+  A ViewportOverlaysButton    : 91x35; arrow 9 col(s) from 79; glyph last ink 72; GAP 6
+  A btnRender                 : 31x35; arrow 9 col(s) from 19; glyph last ink 17; GAP 1
+  A ViewWorkspacesButton      : 108x35; arrow 9 col(s) from 96; glyph last ink 89; GAP 6
+  A ViewLodButton             : 59x35; arrow 9 col(s) from 47; glyph last ink 44; GAP 2
+  A ViewAnimationButton       : 99x35; arrow 9 col(s) from 87; glyph last ink 81; GAP 5
+  A ViewCollisionButton       : 91x35; arrow 9 col(s) from 79; glyph last ink 72; GAP 6
+  A floor: shipped worst 2, sabotaged -3, restored 1 (the restored sweep re-measures buttons this harness pinned, and three narrow ones come back 2 px smaller)
+  ok   (A1 floor) ...and taking it away moves every arrow back off its glyph (-3 -> 1, shipped 2)
+  A2: 19 buttons in the row, 13 with a menu, 13 of those stamped wwHasMenu, 0 stamped without one
+  ok   (A2) every button with a menu carries wwHasMenu (13 of 13)
+  ok   (A2 floor) ...and no button WITHOUT a menu carries it (0 of 6), so the stamp is a measurement and not a blanket
+86 checks, 0 failures, 0 skips
+PASS
+done
+checks run: 86 (floor 72)
+
+water_ui.sh PASS

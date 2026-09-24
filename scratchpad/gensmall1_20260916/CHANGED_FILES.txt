@@ -1,0 +1,111 @@
+CHANGED_FILES -- lane GENSMALL1, 2026-09-16
+===========================================
+
+Every path this lane wrote to, with bytes / CR / LF before and after.
+
+HOW THE NUMBERS WERE TAKEN. Byte counts only, with Python
+(`len(d)`, `d.count(b'\r')`, `d.count(b'\n')`), never `wc` and never `grep`:
+`grep -c` counts LINES, not line terminators, and it disagrees with the byte
+count on a file with no trailing newline. Every file below is LF-only and
+stayed LF-only; the one new file this lane created is LF-only by construction.
+CR is 0 on every row, before and after, so no CRLF was introduced anywhere.
+
+WHERE THE "BEFORE" COLUMN COMES FROM, per row, because that matters more than
+the number:
+  HEAD    read with `git show HEAD:<path>` -- read-only, no git state touched
+  MINE    measured by this lane with Python before it made its first edit
+  CALC    reconstructed by reverse-applying this lane's own edits and CHECKED
+          by arithmetic against a second, independently recorded figure
+  NONE    NOT CAPTURED. See "THE HONEST GAP" at the bottom.
+
+  A = added by this lane   M = modified by this lane
+
+
+  bytes                 CR            LF
+  before  -> after      before->after before->after   source  path
+  ------------------------------------------------------------------------
+
+M   24358 ->   25720    0 -> 0        494 ->  515     MINE    src/lodifile.h
+M    ?    ->   82309    ? -> 0         ?  -> 1541     NONE    src/lodifile.cpp
+M   57196 ->   60555    0 -> 0       1352 -> 1419     CALC    src/nativeemit.cpp
+M   33486 ->   33737    0 -> 0       1115 -> 1119     HEAD    lib/libfo76utils/src/ba2file.cpp
+
+M    ?    ->   53178    ? -> 0         ?  ->  998     NONE    tests/spells/lodgen_native_decode.py
+M    ?    ->   24321    ? -> 0         ?  ->  453     NONE    tests/spells/lodgen_native_fields.py
+M   13883 ->   15024    0 -> 0        261 ->  278     MINE    tests/spells/lodgen_native.sh
+A       0 ->    8189    - -> 0          - ->  175     NEW     tests/spells/resource_ext.sh
+M   34070 ->   39736    0 -> 0        654 ->  750     MINE    tests/spells/lodgen_terrain_vt.sh
+M   20158 ->   24473    0 -> 0        428 ->  495     MINE    tests/spells/lodgen_defaults.sh
+A       0 ->    2651    - -> 0          - ->   43     NEW     tests/spells/lodgen_ground_cover.sha256
+
+M  189400 ->  190103    0 -> 0       2905 -> 2906     MINE    docs/LODGEN_TERRAIN_VT.md
+M   99478 ->  100130    0 -> 0       1576 -> 1585     MINE    docs/LODGEN_NATIVE_LODO_LODI.md
+M   35284 ->   37851    0 -> 0        448 ->  454     MINE    docs/LODGEN_CENSUS.md
+
+M  437794 ->  445580    0 -> 0       7413 -> 7539     MINE    MISTAKES.md
+
+
+WHAT EACH ROW IS, one line each
+------------------------------
+
+src/lodifile.h                    LODI_POS_QUANT_STEP, LODI_CELL_QUANT_TOL and
+                                  the declaration of lodiCellAgrees().
+src/lodifile.cpp                  lodiCellAgrees() and the cellOfIndex check in
+                                  lodiVerify. The WRITER is untouched.
+src/nativeemit.cpp                the per-source caster counting block (47
+                                  lines), the sidecar bump to v4 / 26 columns,
+                                  and the `native-casters:` line.
+lib/libfo76utils/src/ba2file.cpp  two `case` values and two lines of comment:
+                                  "lodm" and "pbrm" in the loose-file whitelist.
+tests/spells/lodgen_native_decode.py  the cell rule, decoded and checked.
+tests/spells/lodgen_native_fields.py  the h11 / h11b / h11c field checks.
+tests/spells/lodgen_native.sh     the four `native-casters:` gates.
+MISTAKES.md                       eight lane entries spliced at the top, above
+                                  the `## 2026-09-16 13:0x -- lane VT1` block.
+tests/spells/resource_ext.sh      NEW. The whitelist gate, five legs.
+tests/spells/lodgen_terrain_vt.sh V9c rewritten with a BC3 decoder and re-pinned
+                                  bars (director ROW A), plus V23, the
+                                  --vt-height default-off pin (brief item 3).
+tests/spells/lodgen_defaults.sh   rewritten rung-free (director ROW B).
+tests/spells/lodgen_ground_cover.sha256  NEW. The frozen --no-cover reference
+                                  (director ROW C).
+docs/LODGEN_TERRAIN_VT.md         the --vt-height row in the CLI table of 5, and
+                                  one curly apostrophe normalised to ASCII.
+docs/LODGEN_NATIVE_LODO_LODI.md   3.4 corrected to report version 4 / 26
+                                  columns, with refSilhouette and
+                                  casterInstances named and attributed.
+docs/LODGEN_CENSUS.md             5.3 gains shadowCasters[src], shadowMarchMs
+                                  and shadowMapMs; 6.1 gains the
+                                  `native-casters:` line; 6.2 gains the
+                                  caster cross-check rows.
+
+
+THE HONEST GAP
+--------------
+
+Three rows above say NONE in the source column: `src/lodifile.cpp`,
+`tests/spells/lodgen_native_decode.py` and `tests/spells/lodgen_native_fields.py`.
+Their BEFORE byte counts were never captured and CANNOT now be reconstructed.
+
+Why not, precisely, so the next lane can avoid it rather than just be warned:
+
+  * all three are UNTRACKED in git -- they are earlier uncommitted lanes' work
+    sitting in the tree -- so `git show HEAD:<path>` has nothing to return and
+    the trick that produced the exact BEFORE for `ba2file.cpp` does not apply;
+  * each received at least one REPLACEMENT edit, not only additions, so the
+    reverse-arithmetic that recovered `src/nativeemit.cpp` (57,196 + 2,008 =
+    59,204, which matched a figure recorded independently) has no fixed point
+    to work from here: subtracting what was added does not give back what was
+    removed.
+
+The brief asked for before AND after per path. Two of the fourteen paths cannot
+be given one, and this is stated rather than filled in with a plausible number.
+It is written up as a mistake in MISTAKES_ENTRIES.md with the rule that
+prevents it: measure a file the moment you decide to edit it, before the first
+edit, and put the three numbers in the report immediately -- not at the end,
+when the only copy of the old bytes is gone.
+
+What IS known about all three: CR is 0 now, they are LF-only now, and nothing
+this lane did could have introduced a CR, because every edit went in through
+Python in binary mode or through the Edit tool on an LF-only file. The
+uncertainty is the SIZE of the before, not its line endings.

@@ -1,0 +1,55 @@
+# WW_PROGRAM_CENSUS  light(view) = 0 0 1
+shape="Terrain -20,24" bsver=130 msn=1 lodland=0 prog=fo4_default.prog
+shape="Terrain -18,24" bsver=130 msn=1 lodland=0 prog=fo4_default.prog
+shape="Terrain -20,26" bsver=130 msn=1 lodland=0 prog=fo4_default.prog
+shape="Terrain -18,26" bsver=130 msn=1 lodland=0 prog=fo4_default.prog
+shape="0001f0fc RockCliff01 m95" bsver=130 msn=0 lodland=0 prog=fo4_default.prog
+shape="0001f0fc RockCliff01 m96" bsver=130 msn=0 lodland=0 prog=fo4_default.prog
+shape="0001f785 RockCliff02 m95" bsver=130 msn=0 lodland=0 prog=fo4_default.prog
+shape="0001f785 RockCliff02 m96" bsver=130 msn=0 lodland=0 prog=fo4_default.prog
+shape="00028baf ShackMidRoof01 m45" bsver=130 msn=0 lodland=0 prog=fo4_default.prog
+shape="000329a7 RockCliff04 m123" bsver=130 msn=0 lodland=0 prog=fo4_default.prog
+shape="000329a7 RockCliff04 m124" bsver=130 msn=0 lodland=0 prog=fo4_default.prog
+shape="00032b23 ShackWallHalfR01 m45" bsver=130 msn=0 lodland=0 prog=fo4_default.prog
+shape="00032b24 ShackWallHalfL01 m45" bsver=130 msn=0 lodland=0 prog=fo4_default.prog
+shape="00033794 ShackBalconyFloor03 m45" bsver=130 msn=0 lodland=0 prog=fo4_default.prog
+shape="00034702 ShackBalconyFloor01 m45" bsver=130 msn=0 lodland=0 prog=fo4_default.prog
+shape="00034fc8 ShackWallOuterSupports01 m45" bsver=130 msn=0 lodland=0 prog=fo4_default.prog
+shape="00038593 RockCliff05 m123" bsver=130 msn=0 lodland=0 prog=fo4_default.prog
+shape="00038593 RockCliff05 m124" bsver=130 msn=0 lodland=0 prog=fo4_default.prog
+shape="00038599 TreeBlasted01 m113" bsver=130 msn=0 lodland=0 prog=fo4_default.prog
+shape="000393cd TreeBlasted02 m110" bsver=130 msn=0 lodland=0 prog=fo4_default.prog
+shape="000393cd TreeBlasted02 m113" bsver=130 msn=0 lodland=0 prog=fo4_default.prog
+shape="0003a28b TreeHero01 m110" bsver=130 msn=0 lodland=0 prog=fo4_default.prog
+shape="0003a28b TreeHero01 m113" bsver=130 msn=0 lodland=0 prog=fo4_default.prog
+shape="0003e08d TreeBlasted05 m113" bsver=130 msn=0 lodland=0 prog=fo4_default.prog
+shape="0003e08f TreeMapleblasted07 m113" bsver=130 msn=0 lodland=0 prog=fo4_default.prog
+shape="0003e0d1 TreeMapleForest7 m113" bsver=130 msn=0 lodland=0 prog=fo4_default.prog
+shape="000430c4 ShackWallOuterCap01B m45" bsver=130 msn=0 lodland=0 prog=fo4_default.prog
+shape="00049532 TreeBlasted04 m113" bsver=130 msn=0 lodland=0 prog=fo4_default.prog
+shape="0004a073 TreeMapleForest1 m110" bsver=130 msn=0 lodland=0 prog=fo4_default.prog
+shape="0004a073 TreeMapleForest1 m113" bsver=130 msn=0 lodland=0 prog=fo4_default.prog
+shape="0004a074 TreeMapleForest2 m110" bsver=130 msn=0 lodland=0 prog=fo4_default.prog
+shape="0004a074 TreeMapleForest2 m113" bsver=130 msn=0 lodland=0 prog=fo4_default.prog
+shape="0004a075 TreeMapleForest3 m110" bsver=130 msn=0 lodland=0 prog=fo4_default.prog
+shape="0004a075 TreeMapleForest3 m113" bsver=130 msn=0 lodland=0 prog=fo4_default.prog
+shape="0004d93b TreeMapleblasted01 m110" bsver=130 msn=0 lodland=0 prog=fo4_default.prog
+shape="0004d93b TreeMapleblasted01 m113" bsver=130 msn=0 lodland=0 prog=fo4_default.prog
+shape="000503b6 TreeMapleblasted02 m110" bsver=130 msn=0 lodland=0 prog=fo4_default.prog
+shape="000503b6 TreeMapleblasted02 m113" bsver=130 msn=0 lodland=0 prog=fo4_default.prog
+shape="000531ae TreeMapleblasted04 m110" bsver=130 msn=0 lodland=0 prog=fo4_default.prog
+shape="000531ae TreeMapleblasted04 m113" bsver=130 msn=0 lodland=0 prog=fo4_default.prog
+shape="000531b3 TreeMapleblasted05 m113" bsver=130 msn=0 lodland=0 prog=fo4_default.prog
+shape="000a7206 TreeBlasted01Lichen m113" bsver=130 msn=0 lodland=0 prog=fo4_default.prog
+shape="000ba558 RockCliff05 m123" bsver=130 msn=0 lodland=0 prog=fo4_default.prog
+shape="000ba558 RockCliff05 m124" bsver=130 msn=0 lodland=0 prog=fo4_default.prog
+shape="000c16fd RockCliff01 m95" bsver=130 msn=0 lodland=0 prog=fo4_default.prog
+shape="000c16fd RockCliff01 m96" bsver=130 msn=0 lodland=0 prog=fo4_default.prog
+shape="000c8d79 RockCliff04 m123" bsver=130 msn=0 lodland=0 prog=fo4_default.prog
+shape="000c8d79 RockCliff04 m124" bsver=130 msn=0 lodland=0 prog=fo4_default.prog
+shape="000d9ca8 TreeElmForest01 m105" bsver=130 msn=0 lodland=0 prog=fo4_default.prog
+shape="000d9ca8 TreeElmForest01 m108" bsver=130 msn=0 lodland=0 prog=fo4_default.prog
+shape="000d9ca9 TreeElmForest02 m105" bsver=130 msn=0 lodland=0 prog=fo4_default.prog
+shape="000d9ca9 TreeElmForest02 m108" bsver=130 msn=0 lodland=0 prog=fo4_default.prog
+shape="0012154f BlastedForestBurntTreeUpright03 m104" bsver=130 msn=0 lodland=0 prog=fo4_default.prog
+shape="00121550 BlastedForestBurntTreeUpright02 m104" bsver=130 msn=0 lodland=0 prog=fo4_default.prog

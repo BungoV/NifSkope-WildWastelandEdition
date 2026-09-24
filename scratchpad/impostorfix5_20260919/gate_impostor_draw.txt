@@ -1,0 +1,31 @@
+impostor_draw gate  2026-09-19 20:02:06
+root /e/Projects/NifskopeWildWastelandEdition
+PASS  0 python is '/c/Users/bungo/AppData/Local/Programs/Python/Python39/python'
+PASS  1 reference selftest (11 property families, grids 2 3 4 5 8 12 16)
+PASS  2 src/impostoroct.cpp compiles standalone (-Wall -Wextra -Werror, no Qt, no GL)
+PASS  3 N=2  C++ mapping == Python reference (20 probe directions)
+PASS  3 N=3  C++ mapping == Python reference (20 probe directions)
+PASS  3 N=4  C++ mapping == Python reference (20 probe directions)
+PASS  3 N=5  C++ mapping == Python reference (20 probe directions)
+PASS  3 N=8  C++ mapping == Python reference (20 probe directions)
+PASS  3 N=12  C++ mapping == Python reference (20 probe directions)
+PASS  3 N=16  C++ mapping == Python reference (20 probe directions)
+PASS  4 WW_IMPOSTOR_PREVIEW=map ran
+PASS  4b the viewport is the size that was asked for (1024x1024)
+PASS  5 silhouette IoU mean 0.5576 >= floor 0.50 (16 views)
+PASS  6 red control: shuffled 0.1469 vs honest 0.5576, collapse >= 0.03
+PASS  7 azimuth: same 0.5821 vs opposite 0.0385, mean margin 0.5436 > 0.03, 8 of 8 azimuths positive (worst 0.4206)
+PASS  8 red control: forced AsBaked gives same 0.0385 < opposite 0.5821 -- the old formula fails row 7
+SKIP  9 variable N: set IMPOSTOR_LODM_MORE to the same subject baked at other N
+PASS  10 non-square frame 48x128 keeps its aspect: frame 0.3750 vs extents 0.3750
+SKIP  11 two grids in one scene: set IMPOSTOR_LODM_B to a set of a DIFFERENT N
+SKIP  12 chunk placement: set IMPOSTOR_CHUNK to a .bto with a .manifest.txt beside it
+PASS  13 the .lodm opened as a document and drew its one card, with the chunk master OFF
+      [Warning] impostor card: "not an impostor card set: E:/Projects/NifskopeWildWastelandEdition/release/impostor_draw_tmp/material_not_a_card.lodm: kind is \"source\" -- this preview draws \"card\" and \"cardArray\" only (a \"source\" .lodm is a material, not a baked set)"
+PASS  13b a material .lodm is refused by name, not by an empty window
+PASS  14 height channel: sheet check: 16 frames measured, 0 fail, worst excursion 0 world units (card half 135.3 x 360.8, depthSpan 3072)
+PASS  14a BC3 alpha decoder: known-answer: 0 of 16 ramp entries wrong
+PASS  14b outside-band reach: 16 frames, mean 13.7% of the 8-ring band off the card plane (floor 10%), worst frame 0.0%, best 61.4%
+PASS  14c oct height decode: 0.011% of 98304 texels more than 12 levels from the encoder's input (max 0.5%, mean err 2.74, worst 22, mean 4x4 block range 1.55, fill = 16-ring ramp)
+PASS  15 photograph: 16 bake directions, parallax off 0.8701, on 0.8700 (no-op, as the algebra requires)
+done  24 steps, 0 failures

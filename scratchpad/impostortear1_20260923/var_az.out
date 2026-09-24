@@ -1,0 +1,95 @@
+  run_var  blast_n4  az   rc=0 cards=360 26s orbit counted 344 of 360
+  run_var  maple_n4  az   rc=0 cards=360 27s orbit counted 329 of 360
+  run_var  rock_n4   az   rc=0 cards=360 37s orbit counted 360 of 360
+  run_var  blast_n4  az   rc=0 cards=360 55s orbit counted 0 of 360
+  run_var  maple_n4  az   rc=0 cards=360 33s orbit counted 360 of 360
+  run_var  rock_n4   az   rc=0 cards=360 45s orbit counted 360 of 360
+m8_step_mean   blast_n4  az:      0 vs  27180 x1.5 =  40770.0  ratio 0.00  PASS
+m8_step_mean   maple_n4  az:  18435 vs  15890 x1.5 =  23835.0  ratio 1.16  PASS
+m8_step_mean   rock_n4   az:  71523 vs  90847 x1.5 = 136270.5  ratio 0.79  PASS
+m8_step_mean   VERDICT PASS
+m8_step_mean   blast_n4  az030 run_ship IoU 0.4664  card  17922 mesh  38190  torn share 44.9% (14398 of 32060 mesh&nearest px)
+m8_step_mean   blast_n4  az030 m8_step_mean IoU 0.0000  card      0 mesh      0  torn share 0.0% (0 of 0 mesh&nearest px)
+m8_step_mean   maple_n4  az210 run_ship IoU 0.1910  card  10075 mesh  43508  torn share 68.3% (13986 of 20482 mesh&nearest px)
+m8_step_mean   maple_n4  az210 m8_step_mean IoU 0.1262  card   6872 mesh  43508  torn share 79.7% (16317 of 20482 mesh&nearest px)
+m8_step_mean   rock_n4   az030 run_ship IoU 0.6213  card 208460 mesh 334905  torn share 27.3% (74872 of 274649 mesh&nearest px)
+m8_step_mean   rock_n4   az030 m8_step_mean IoU 0.7042  card 239224 mesh 334905  torn share 25.4% (69648 of 274649 mesh&nearest px)
+  run_var  blast_n4  az   rc=0 cards=360 26s orbit counted 360 of 360
+  run_var  maple_n4  az   rc=0 cards=360 27s orbit counted 360 of 360
+  run_var  rock_n4   az   rc=0 cards=360 37s orbit counted 360 of 360
+m16_step_mean   blast_n4  az:  28629 vs  27180 x1.5 =  40770.0  ratio 1.05  PASS
+m16_step_mean   maple_n4  az:  16535 vs  15890 x1.5 =  23835.0  ratio 1.04  PASS
+m16_step_mean   rock_n4   az:  86663 vs  90847 x1.5 = 136270.5  ratio 0.95  PASS
+m16_step_mean   VERDICT PASS
+m16_step_mean   blast_n4  az030 run_ship IoU 0.4664  card  17922 mesh  38190  torn share 44.9% (14398 of 32060 mesh&nearest px)
+m16_step_mean   blast_n4  az030 m16_step_mean IoU 0.4909  card  20171 mesh  38190  torn share 42.7% (13688 of 32060 mesh&nearest px)
+m16_step_mean   maple_n4  az210 run_ship IoU 0.1910  card  10075 mesh  43508  torn share 68.3% (13986 of 20482 mesh&nearest px)
+m16_step_mean   maple_n4  az210 m16_step_mean IoU 0.2602  card  13705 mesh  43508  torn share 57.6% (11799 of 20482 mesh&nearest px)
+m16_step_mean   rock_n4   az030 run_ship IoU 0.6213  card 208460 mesh 334905  torn share 27.3% (74872 of 274649 mesh&nearest px)
+m16_step_mean   rock_n4   az030 m16_step_mean IoU 0.6959  card 235232 mesh 334905  torn share 27.4% (75357 of 274649 mesh&nearest px)
+  run_var  blast_n4  az   rc=0 cards=360 25s orbit counted 360 of 360
+  run_var  maple_n4  az   rc=0 cards=360 27s orbit counted 360 of 360
+  run_var  rock_n4   az   rc=0 cards=360 37s orbit counted 360 of 360
+m32_step_mean   blast_n4  az:  32189 vs  27180 x1.5 =  40770.0  ratio 1.18  PASS
+m32_step_mean   maple_n4  az:  12286 vs  15890 x1.5 =  23835.0  ratio 0.77  PASS
+m32_step_mean   rock_n4   az: 100669 vs  90847 x1.5 = 136270.5  ratio 1.11  PASS
+m32_step_mean   VERDICT PASS
+m32_step_mean   blast_n4  az030 run_ship IoU 0.4664  card  17922 mesh  38190  torn share 44.9% (14398 of 32060 mesh&nearest px)
+m32_step_mean   blast_n4  az030 m32_step_mean IoU 0.6170  card  26126 mesh  38190  torn share 29.5% (9458 of 32060 mesh&nearest px)
+m32_step_mean   maple_n4  az210 run_ship IoU 0.1910  card  10075 mesh  43508  torn share 68.3% (13986 of 20482 mesh&nearest px)
+m32_step_mean   maple_n4  az210 m32_step_mean IoU 0.3048  card  15027 mesh  43508  torn share 47.6% (9748 of 20482 mesh&nearest px)
+m32_step_mean   rock_n4   az030 run_ship IoU 0.6213  card 208460 mesh 334905  torn share 27.3% (74872 of 274649 mesh&nearest px)
+m32_step_mean   rock_n4   az030 m32_step_mean IoU 0.6469  card 218166 mesh 334905  torn share 34.1% (93566 of 274649 mesh&nearest px)
+  run_var  blast_n4  az   rc=0 cards=360 25s orbit counted 360 of 360
+  run_var  maple_n4  az   rc=0 cards=360 30s orbit counted 360 of 360
+  run_var  rock_n4   az   rc=0 cards=360 40s orbit counted 360 of 360
+m4_step_strong   blast_n4  az:  72239 vs  27180 x1.5 =  40770.0  ratio 2.66  FAIL
+m4_step_strong   maple_n4  az:  60925 vs  15890 x1.5 =  23835.0  ratio 3.83  FAIL
+m4_step_strong   rock_n4   az: 188584 vs  90847 x1.5 = 136270.5  ratio 2.08  FAIL
+m4_step_strong   VERDICT FAIL
+m4_step_strong   blast_n4  az030 run_ship IoU 0.4664  card  17922 mesh  38190  torn share 44.9% (14398 of 32060 mesh&nearest px)
+m4_step_strong   blast_n4  az030 m4_step_strong IoU 0.5570  card  34603 mesh  38190  torn share 23.4% (7504 of 32060 mesh&nearest px)
+m4_step_strong   maple_n4  az210 run_ship IoU 0.1910  card  10075 mesh  43508  torn share 68.3% (13986 of 20482 mesh&nearest px)
+m4_step_strong   maple_n4  az210 m4_step_strong IoU 0.2415  card  30094 mesh  43508  torn share 53.6% (10984 of 20482 mesh&nearest px)
+m4_step_strong   rock_n4   az030 run_ship IoU 0.6213  card 208460 mesh 334905  torn share 27.3% (74872 of 274649 mesh&nearest px)
+m4_step_strong   rock_n4   az030 m4_step_strong IoU 0.6957  card 266045 mesh 334905  torn share 23.3% (64006 of 274649 mesh&nearest px)
+  run_var  blast_n4  az   rc=0 cards=360 27s orbit counted 360 of 360
+  run_var  maple_n4  az   rc=0 cards=360 31s orbit counted 360 of 360
+  run_var  rock_n4   az   rc=0 cards=360 37s orbit counted 360 of 360
+m8_step_strong   blast_n4  az:  57204 vs  27180 x1.5 =  40770.0  ratio 2.10  FAIL
+m8_step_strong   maple_n4  az:  51023 vs  15890 x1.5 =  23835.0  ratio 3.21  FAIL
+m8_step_strong   rock_n4   az: 129145 vs  90847 x1.5 = 136270.5  ratio 1.42  PASS
+m8_step_strong   VERDICT FAIL
+m8_step_strong   blast_n4  az030 run_ship IoU 0.4664  card  17922 mesh  38190  torn share 44.9% (14398 of 32060 mesh&nearest px)
+m8_step_strong   blast_n4  az030 m8_step_strong IoU 0.7115  card  30616 mesh  38190  torn share 18.3% (5875 of 32060 mesh&nearest px)
+m8_step_strong   maple_n4  az210 run_ship IoU 0.1910  card  10075 mesh  43508  torn share 68.3% (13986 of 20482 mesh&nearest px)
+m8_step_strong   maple_n4  az210 m8_step_strong IoU 0.3267  card  27048 mesh  43508  torn share 36.9% (7566 of 20482 mesh&nearest px)
+m8_step_strong   rock_n4   az030 run_ship IoU 0.6213  card 208460 mesh 334905  torn share 27.3% (74872 of 274649 mesh&nearest px)
+m8_step_strong   rock_n4   az030 m8_step_strong IoU 0.7368  card 266003 mesh 334905  torn share 21.1% (58013 of 274649 mesh&nearest px)
+  run_var  blast_n4  az   rc=0 cards=360 31s orbit counted 360 of 360
+  run_var  maple_n4  az   rc=0 cards=360 30s orbit counted 360 of 360
+  run_var  rock_n4   az   rc=0 cards=360 42s orbit counted 360 of 360
+m16_step_strong   blast_n4  az:  45932 vs  27180 x1.5 =  40770.0  ratio 1.69  FAIL
+m16_step_strong   maple_n4  az:  42151 vs  15890 x1.5 =  23835.0  ratio 2.65  FAIL
+m16_step_strong   rock_n4   az: 156749 vs  90847 x1.5 = 136270.5  ratio 1.73  FAIL
+m16_step_strong   VERDICT FAIL
+m16_step_strong   blast_n4  az030 run_ship IoU 0.4664  card  17922 mesh  38190  torn share 44.9% (14398 of 32060 mesh&nearest px)
+m16_step_strong   blast_n4  az030 m16_step_strong IoU 0.7353  card  31646 mesh  38190  torn share 15.3% (4906 of 32060 mesh&nearest px)
+m16_step_strong   maple_n4  az210 run_ship IoU 0.1910  card  10075 mesh  43508  torn share 68.3% (13986 of 20482 mesh&nearest px)
+m16_step_strong   maple_n4  az210 m16_step_strong IoU 0.4263  card  26851 mesh  43508  torn share 27.0% (5535 of 20482 mesh&nearest px)
+m16_step_strong   rock_n4   az030 run_ship IoU 0.6213  card 208460 mesh 334905  torn share 27.3% (74872 of 274649 mesh&nearest px)
+m16_step_strong   rock_n4   az030 m16_step_strong IoU 0.7555  card 258235 mesh 334905  torn share 21.9% (60076 of 274649 mesh&nearest px)
+  run_var  blast_n4  az   rc=0 cards=360 27s orbit counted 360 of 360
+  run_var  maple_n4  az   rc=0 cards=360 27s orbit counted 360 of 360
+  run_var  rock_n4   az   rc=0 cards=360 39s orbit counted 360 of 360
+m32_step_strong   blast_n4  az:  54140 vs  27180 x1.5 =  40770.0  ratio 1.99  FAIL
+m32_step_strong   maple_n4  az:  34724 vs  15890 x1.5 =  23835.0  ratio 2.19  FAIL
+m32_step_strong   rock_n4   az: 172014 vs  90847 x1.5 = 136270.5  ratio 1.89  FAIL
+m32_step_strong   VERDICT FAIL
+m32_step_strong   blast_n4  az030 run_ship IoU 0.4664  card  17922 mesh  38190  torn share 44.9% (14398 of 32060 mesh&nearest px)
+m32_step_strong   blast_n4  az030 m32_step_strong IoU 0.7779  card  34598 mesh  38190  torn share 10.2% (3256 of 32060 mesh&nearest px)
+m32_step_strong   maple_n4  az210 run_ship IoU 0.1910  card  10075 mesh  43508  torn share 68.3% (13986 of 20482 mesh&nearest px)
+m32_step_strong   maple_n4  az210 m32_step_strong IoU 0.4273  card  25797 mesh  43508  torn share 26.3% (5382 of 20482 mesh&nearest px)
+m32_step_strong   rock_n4   az030 run_ship IoU 0.6213  card 208460 mesh 334905  torn share 27.3% (74872 of 274649 mesh&nearest px)
+m32_step_strong   rock_n4   az030 m32_step_strong IoU 0.7472  card 252904 mesh 334905  torn share 25.2% (69218 of 274649 mesh&nearest px)
+VARDONE

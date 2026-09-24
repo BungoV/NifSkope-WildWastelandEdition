@@ -1,0 +1,5 @@
+GATE g7: PASS  noon vs midnight 89.3% px differ, luma 79.0 -> 20.5; keys Day / Night; cube cube=textures/shared/cubemaps/mipblur_defaultoutside1.dds(default)
+  noon summary: lookdev=on(asked=1) weather=CommonwealthClear [0002B52A] src=Fallout4.esm hour=12.00 keys=Day sun=0.759,0.759,0.759 dir=0.190,0.095,0.977 ambient=dalc dalcZ-=0.130,0.239,0.405 cube=textures/shared/cubemaps/mipblur_defaultoutside1.dds(default) ground=on particles=on(asked=1) shadows=off(asked=0; not built) contact=off(asked=0; not built) ao=off(asked=0; not built) ssgi=off(asked=0; not built)
+GATE ground: PASS  OFF vs reference (pass never runs) max|d|=0 differing px=0; ground ON vs reference 76.4% px differ (not vacuous: >= 1%)
+GATE live: PASS  14 checks, 0 failures
+R2B GATES: PASS (g7=True, ground=True, live=True)

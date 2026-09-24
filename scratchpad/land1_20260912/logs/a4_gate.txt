@@ -1,0 +1,26 @@
+LAND1 gate A4 -- every new switch OFF == the rung, all fourteen sheets
+rung  release/NifSkope.before_land1.exe (2026-09-12 06:31:05)
+test  release/NifSkope.exe with --road-detail 1 and NO new switch
+
+  -20,24      9 files  identical
+  -20,20      9 files  identical
+  -36,-20     9 files  identical
+  -4,-20      9 files  identical
+  28,-20      7 files  identical
+  -4,16       9 files  identical
+  24,16      10 files  identical
+  -24,-24    10 files  identical
+  -12,-20     9 files  identical
+  4,-24       9 files  identical
+  20,-24      9 files  identical
+  -20,4       9 files  identical
+  -8,4        9 files  identical
+  12,8        9 files  identical
+
+arm A: 14 tiles, 126 files compared, 0 tiles RED
+
+arm B, the floor: the comparator on a deliberately broken pair
+  one flipped byte in tex/Commonwealth.4.-20.24.DDS      -> 1 differing   RED as it must be
+  that file removed                                   -> 1 only in rung  RED as it must be
+
+A4 GREEN

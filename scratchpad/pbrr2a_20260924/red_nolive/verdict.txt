@@ -1,0 +1,3 @@
+GATE window (window1): FAIL  FAIL |   FAIL (live) the Lighting row reached the state (Studio)
+pictures: 
+RED CONTROL nolive -> gate window BITES

@@ -1,0 +1,34 @@
+lodo.worldspace Commonwealth
+lodo.baseCount 2970
+lodo.meshCount 2982
+lodo.clusterCount 20678
+lodo.materialCount 136
+lodo.vertexCount 419204
+lodo.stringBytes 351204
+lodo.fileBytes 9657316
+lodo.triangles 252268
+lodi.worldspace Commonwealth
+lodi.chunkCount 20
+lodi.presentChunks 12
+lodi.instanceCount 33123
+lodi.maxInstancesPerChunk 10692
+lodi.occluderCount 280
+lodi.fileBytes 1091072
+lodi.cellQuantAmbiguous 14
+lodi.cellQuantWorstU 0.062501 (band 0.126955)
+lodi.cellQuant instance 3358 chunk 6 stored-cell 0 derived-cell 4 0.062501 u from the line
+lodi.cellQuant instance 3361 chunk 6 stored-cell 0 derived-cell 4 0.062501 u from the line
+lodi.cellQuant instance 3576 chunk 6 stored-cell 1 derived-cell 5 0.062501 u from the line
+lodi.cellQuant instance 3585 chunk 6 stored-cell 1 derived-cell 5 0.062501 u from the line
+lodi.cellQuant instance 23559 chunk 10 stored-cell 3 derived-cell 7 0.062501 u from the line
+lodi.cellQuant instance 26388 chunk 10 stored-cell 8 derived-cell 9 0.062501 u from the line
+lodi.cellQuant instance 26397 chunk 10 stored-cell 8 derived-cell 9 0.062501 u from the line
+lodi.cellQuant instance 26399 chunk 10 stored-cell 8 derived-cell 9 0.062501 u from the line
+  ok   pair: worldspace names agree
+  ok   pair: corpus hashes agree
+  ok   pair: lodoIdentity names this .lodo (or NOLIB)
+  ok   every baseId < baseCount
+  ok   pair: loadOrderHash agrees
+  ok   every drawKey is its base's (mesh, material) rank
+6 checks, 0 failures
+RESULT PASS

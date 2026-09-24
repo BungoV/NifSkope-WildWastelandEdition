@@ -1,0 +1,5 @@
+TILING3 done 23:57
+exe release/NifSkope.exe 2026-09-11 23:26:29, 21,484,032 B -- one build, no relinks
+rung release/NifSkope.before_tiling3.exe 21,466,624 B
+report scratchpad/lane_tiling3_report.md
+nothing committed; no NifSkope running; bungo must restart his window

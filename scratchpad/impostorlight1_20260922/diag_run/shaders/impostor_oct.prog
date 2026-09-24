@@ -1,0 +1,13 @@
+# The octahedral impostor card preview (lane IMPOSTORSHOW, 2026-09-19).
+#
+# Never enabled on models: there is no .prog condition here on purpose. A card
+# is not a shape in the scene graph -- it is drawn by src/gl/impostordraw.cpp
+# as its own pass, the way skybox.prog is drawn by Renderer::drawSkyBox, and it
+# is selected BY NAME through useProgram( "impostor_oct.prog" ).
+#
+# It is a feature master and it ships OFF (house rule): the chunk path draws
+# vanilla tree LOD until the menu row or WW_IMPOSTOR_OCT=1 turns it on. The
+# preview of an opened <id>_oct.lodm is that file's own viewer and is not a
+# master, because there is nothing else such a file could be shown as.
+
+shaders impostor_oct.vert impostor_oct.frag

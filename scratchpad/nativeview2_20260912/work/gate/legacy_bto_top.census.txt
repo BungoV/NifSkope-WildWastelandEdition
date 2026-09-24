@@ -1,0 +1,3 @@
+# WW_PROGRAM_CENSUS  light(view) = 0 0 1
+shape="obj-at" bsver=130 msn=0 lodland=0 prog=fo4_default.prog
+shape="obj" bsver=130 msn=0 lodland=0 prog=fo4_default.prog

@@ -1,0 +1,9 @@
+GRADE1 DONE 2026-09-12 03:2x
+exe release/NifSkope.exe 03:06:21 21,489,152 B md5 6af74b4b4667ce50c4506a2d42a04fdf
+rung release/NifSkope.before_grade1.exe 02:08:57 21,487,616 B intact
+report scratchpad/lane_grade1_report.md (sections 0-8)
+deliverables WW_CHANGES_ENTRY.md HANDOFF_BLOCK.md MISTAKES_ENTRIES.md
+pictures images/cmp_tone.png images/curve.png
+contract docs/LODGEN_TERRAIN_VT.md 2.5f + 2.5 step 8 + 5 --grade + GRADE1 provenance
+gates G1 24/0, ship S1-S5 8/0, harnesses at ROADS2 baselines
+nothing left running; nothing committed

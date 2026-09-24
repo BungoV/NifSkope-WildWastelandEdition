@@ -1,0 +1,15 @@
+TILING4 -- hex tiling: src/lodgen.cpp vs the prototype
+
+fifteen world positions x five settings; the C++ side is
+hex_parity.cpp (lodgenLandHexCell and lodgenLandHexOffset copied
+verbatim), the prototype side is h_cand.py`s own tri_grid and hash01.
+Both run in double: this checks the geometry, the hash, the vertex
+triple and the blend formula, not the product`s last float bit.
+
+OFF: 0 of 15 positions disagree (floor 0).
+size 256       0 of 15 positions disagree (floor 0); the sampler moved 15 of 15 off the plain tap (floor 8)
+size 341.333   0 of 15 positions disagree (floor 0); the sampler moved 15 of 15 off the plain tap (floor 8)
+size 512       0 of 15 positions disagree (floor 0); the sampler moved 15 of 15 off the plain tap (floor 8)
+size 682.667   0 of 15 positions disagree (floor 0); the sampler moved 15 of 15 off the plain tap (floor 8)
+
+PARITY: PASS -- 0 disagreements over 75 comparisons, and every setting moves the sample.

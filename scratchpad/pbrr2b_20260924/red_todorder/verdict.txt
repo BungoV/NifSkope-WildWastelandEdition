@@ -1,0 +1,2 @@
+GATE g3: FAIL  10 hours; judge-vs-printed mismatches 5 (4.5: got Night->Sunrise 0.000 want Night->EarlySunrise 0.000; 5.625: got Sunrise->Sunrise 0.000 want EarlySunrise->Sunrise 0.000; 6.75: got Sunrise->Day 0.000 want Sunrise->LateSunrise 0.000); doc answers missed [4.5, 6.75]
+RED CONTROL todorder -> gate g3 BITES

@@ -1,0 +1,175 @@
+[New Thread 52968.0x82e0]
+[New Thread 52968.0xd5cc]
+[New Thread 52968.0x7c8c]
+[New Thread 52968.0x857c]
+[New Thread 52968.0x84e8]
+[New Thread 52968.0xb6cc]
+[New Thread 52968.0xcc74]
+[New Thread 52968.0xd0d0]
+[New Thread 52968.0xd09c]
+[New Thread 52968.0x30fc]
+[New Thread 52968.0xcefc]
+[New Thread 52968.0xa1d4]
+[New Thread 52968.0xb67c]
+roads placements=0 meshes=0 shapes=0 decalshapes=0 triangles=0 texels=0 decaltexels=0 alpharejected=0 refused_noload=0 refused_notexture=0 refusals=none chunk=-20,32 dim=4
+bake -20,32: 0 px no land, 262144 px no base tex, 0 samples unresolvable LTEX []
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltroaddetails01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphalt01.bgsm" ' not found in archives
+roads placements=0 meshes=0 shapes=0 decalshapes=0 triangles=0 texels=0 decaltexels=0 alpharejected=0 refused_noload=0 refused_notexture=0 refusals=none chunk=-16,32 dim=4
+bake -16,32: 0 px no land, 262144 px no base tex, 0 samples unresolvable LTEX []
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltroaddetails01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphalt01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltroaddetails01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphalt01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltcrackdecal01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltroaddetails01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphalt01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltcrackdecal01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltroaddetails01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphalt01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltcrackdecal01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltroaddetails01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphalt01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltcrackdecal01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltroaddetails01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphalt01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltcrackdecal01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltroaddetails01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphalt01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltcrackdecal01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltroaddetails01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphalt01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltroaddetails01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphalt01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltcrackdecal01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltroaddetails01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphalt01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltroaddetails01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphalt01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltroaddetails01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphalt01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltroaddetails01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphalt01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltroaddetails01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphalt01.bgsm" ' not found in archives
+[Thread 52968.0xcefc exited with code 0]
+roads placements=4 meshes=3 shapes=0 decalshapes=0 triangles=0 texels=0 decaltexels=0 alpharejected=0 refused_noload=0 refused_notexture=0 refusals=none chunk=-20,28 dim=4
+[Thread 52968.0xa1d4 exited with code 0]
+roads placements=25 meshes=15 shapes=4 decalshapes=1 triangles=1964 texels=191 decaltexels=8 alpharejected=33 refused_noload=0 refused_notexture=0 refusals=none chunk=-16,28 dim=4
+bake -16,28: 0 px no land, 262144 px no base tex, 0 samples unresolvable LTEX []
+roads placements=32 meshes=13 shapes=0 decalshapes=0 triangles=0 texels=0 decaltexels=0 alpharejected=0 refused_noload=0 refused_notexture=0 refusals=none chunk=-20,24 dim=4
+roads placements=59 meshes=23 shapes=0 decalshapes=0 triangles=0 texels=0 decaltexels=0 alpharejected=0 refused_noload=0 refused_notexture=0 refusals=none chunk=-12,24 dim=4
+roads placements=4 meshes=2 shapes=14 decalshapes=4 triangles=64951 texels=10227 decaltexels=398 alpharejected=246 refused_noload=0 refused_notexture=0 refusals=none chunk=-12,32 dim=4
+bake -12,32: 0 px no land, 262144 px no base tex, 0 samples unresolvable LTEX []
+[Thread 52968.0xd09c exited with code 0]
+[Thread 52968.0x30fc exited with code 0]
+roads placements=25 meshes=14 shapes=0 decalshapes=0 triangles=0 texels=0 decaltexels=0 alpharejected=0 refused_noload=0 refused_notexture=0 refusals=none chunk=-12,28 dim=4
+bake -12,28: 0 px no land, 262144 px no base tex, 0 samples unresolvable LTEX []
+roads placements=63 meshes=23 shapes=187 decalshapes=64 triangles=43084 texels=12406 decaltexels=2499 alpharejected=1738 refused_noload=0 refused_notexture=18 refusals=[no-diffuse (shape names none)] chunk=-16,24 dim=4
+[Thread 52968.0xb67c exited with code 0]
+[Thread 52968.0x84e8 exited with code 0]
+[1] Commonwealth.4.-20.24.BTR
+[2] Commonwealth.4.-20.24.BTO
+[Thread 52968.0xd0d0 exited with code 0]
+[Thread 52968.0xcc74 exited with code 0]
+[Thread 52968.0xb6cc exited with code 0]
+[3] Commonwealth.4.-16.24.BTR
+[4] Commonwealth.4.-16.24.BTO
+[5] Commonwealth.4.-12.24.BTR
+[6] Commonwealth.4.-12.24.BTO
+[7] Commonwealth.4.-20.28.BTR
+[8] Commonwealth.4.-20.28.BTO
+[9] Commonwealth.4.-16.28.BTR
+[10] Commonwealth.4.-16.28.BTO
+[11] Commonwealth.4.-12.28.BTR
+[12] Commonwealth.4.-12.28.BTO
+[13] Commonwealth.4.-20.32.BTR
+[14] Commonwealth.4.-16.32.BTR
+[15] Commonwealth.4.-16.32.BTO
+[16] Commonwealth.4.-12.32.BTR
+[17] Commonwealth.4.-12.32.BTO
+[Thread 52968.0x857c exited with code 0]
+chunk pass: 9 job(s) over 9 worker(s)
+lodgen: model meshes/LOD/Architecture/Warehouse/WrhsLeanToL01_LOD.nif: loaded, 1 blocks, no BSTriShape with vertex data and triangles
+lodgen: model meshes/LOD/Architecture/Warehouse/WrhsLeanToMid01_LOD.nif: loaded, 1 blocks, no BSTriShape with vertex data and triangles
+lodgen: model meshes/LOD/Architecture/Warehouse/WrhsLeanToMid02_LOD.nif: loaded, 1 blocks, no BSTriShape with vertex data and triangles
+lodgen: model meshes/LOD/Architecture/Warehouse/WrhsLeanToR01_LOD.nif: loaded, 1 blocks, no BSTriShape with vertex data and triangles
+native: Commonwealth.lodo 9657316 bytes (bases 2970 of 2974 in the census, 4 without a loadable model; models 2982 loaded 4 failed; meshes 2982 clusters 20678 triangles 252268 vertices 419204 materials 136); Commonwealth.lodi 128256 bytes (instances 3526 from 3526 arrivals over 701131 census refs, 0 dropped for a base outside the table, 0 unlit, 0 without a stock identity; chunks 10 present of 12 dense, max 693 a chunk, max scale 1.9600, max baseId 2019, PARTIAL); 2775.3 B a placement; cacheOrder acmr 1.8600 -> 1.8585, overfetch 1.0097 -> 1.0097, verts 263876 -> 419204; silhouette 2982 meshes, 0 opened, 0 read worse after the reorder; failed models: LOD\Architecture\Warehouse\WrhsLeanToL01_LOD.nif, LOD\Architecture\Warehouse\WrhsLeanToMid01_LOD.nif, LOD\Architecture\Warehouse\WrhsLeanToMid02_LOD.nif, LOD\Architecture\Warehouse\WrhsLeanToR01_LOD.nif
+native-ladder: ON (group 4, exact-error budget 512 tris); levels 0..7; meshes 1900 with a ladder, 1082 without (1065 of those are <= 16 triangles); groups 6235 formed, refused 2476 too small, 34 no triangle removed, 742 error did not grow, 57 opened a silhouette; errors 6973 measured against full detail, 4 chain-bounded; welded verts 103534, uv conflicts 117722; maxError 6965.2764; coneOpen 14604 clusters; roots 4715 covering 142138 full-detail triangles; coarsest level opened a silhouette on 18 meshes; level 0 clusters 10634 triangles 142138 meanError 0.0000; level 1 clusters 5676 triangles 68448 meanError 165.6236; level 2 clusters 2781 triangles 29699 meanError 497.1602; level 3 clusters 1029 triangles 8750 meanError 726.3054; level 4 clusters 414 triangles 2503 meanError 921.8641; level 5 clusters 123 triangles 626 meanError 1192.5151; level 6 clusters 19 triangles 98 meanError 1527.2040; level 7 clusters 2 triangles 6 meanError 3328.4733
+native-occluders: ON; boxes 0 written from 0 offered, 0 dropped (cap 4 a cell); cells 0 of 105 populated have one (0.0 percent), 105 with none; models fitted 99, refused 2617 not watertight, 100 too small (< 256 u diagonal), 123 no interior voxel, 43 too thin (< 2 percent of the box), 0 failed the 100-point probe
+native-aggregate: OFF (--aggregate turns it on; off is byte-identical); cells 0 seen with trees, 0 forested at >= 8, 0 aggregated, 0 refused because every one of their trees was; trees 0 photographed, refused 0 with no card set, 0 baked through a perspective camera, 0 whose sheet would not load; views 8 azimuths, tile 64 px; sheet texels 0; height channel span min 0 max 0 mean 0.0 of 255; count identity photographed 0 == file covered 0 == AGREE; .lodi version 3, rows 0, switchPx 0.0, band x0.00
+[New Thread 52968.0xcc3c]
+[New Thread 52968.0xd198]
+[New Thread 52968.0xd044]
+[New Thread 52968.0xd780]
+[New Thread 52968.0x7c50]
+[New Thread 52968.0xd04c]
+[New Thread 52968.0x8be8]
+[New Thread 52968.0x83c4]
+[New Thread 52968.0xbda8]
+[New Thread 52968.0x870]
+[New Thread 52968.0xd144]
+[New Thread 52968.0xbe68]
+[New Thread 52968.0xd290]
+[New Thread 52968.0xcce8]
+[New Thread 52968.0xcccc]
+[New Thread 52968.0x76d8]
+arrays written: 12 textures in 4 arrays (1 legacy + 0 pbr size classes, 0 layers from a .lodm, 0 sources own-emit with a lit colour); 50 shapes carry a layer, 0 without UV2, 0 textures unreadable
+merged: 50 shapes -> 50 across 8 chunks
+far rings: 0 shapes cut in 0 chunks: 0 -> 0 triangles, 0 -> 0 vertices (0 shapes and 0 groups kept whole, 0 restored; worst error 0.0 units)
+17 chunk(s) written to E:/Projects/NifskopeWildWastelandEdition/scratchpad/resume3_20260911/gdbrun1, 0 empty, 0 failed
+stage times: landscape 0.0 s, meshes 5.3 s, textures 3.8 s, impostors 0.0 s
+bake census: threads 16, chunk threads 16, chunk jobs 9, chunk workers 9, peak working set: 5.70 GB (6120476672 bytes)
+[Thread 52968.0xbe68 exited with code 0]
+[Thread 52968.0x76d8 exited with code 0]
+[Thread 52968.0x8be8 exited with code 0]
+[Thread 52968.0xbda8 exited with code 0]
+[Thread 52968.0xd044 exited with code 0]
+[Thread 52968.0xcc3c exited with code 0]
+[Thread 52968.0x7c50 exited with code 0]
+[Thread 52968.0xd780 exited with code 0]
+[Thread 52968.0xd04c exited with code 0]
+[Thread 52968.0xcccc exited with code 0]
+[Thread 52968.0x83c4 exited with code 0]
+[Thread 52968.0xd198 exited with code 0]
+[Thread 52968.0xcce8 exited with code 0]
+[Thread 52968.0x870 exited with code 0]
+[Thread 52968.0xd144 exited with code 0]
+[Thread 52968.0xd290 exited with code 0]
+[Thread 52968.0x82e0 exited with code 0]
+[Thread 52968.0x7c8c exited with code 0]
+[Thread 52968.0xd5cc exited with code 0]
+[Inferior 1 (process 52968) exited normally]
+No threads.

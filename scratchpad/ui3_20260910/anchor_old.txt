@@ -1,0 +1,69 @@
+/* ...AND THE BUTTONS IN THE ROW TAKE THE ROW'S HEIGHT AND PADDING TOO
+ * (lane WATER7; bungo, 2026-09-10, on a screenshot of the aligned strip:
+ * "compact these vertically like this, the top bar and the buttons").
+ *
+ * wwAlignBarRow made the BARS agree with one another. What is inside them
+ * was still set by whatever res/style.qss says for the widget class --
+ * QMenuBar::item at 4px 8px, QToolBar QToolButton at 2px 4px -- neither of
+ * which knows the row height, so the buttons sat in the middle of a band
+ * they did not fill. This is the one place that arithmetic is done.
+ *
+ * The vertical padding is HALF the slack the row has over a button's text
+ * line, floored at 2, so the number follows the row rather than being typed
+ * beside it; the horizontal paddings keep the sheet's own values, because
+ * the complaint was vertical. min-height is the row minus twice the padding
+ * and the 2 px of border and margin the sheet already spends.
+ *
+ * wwAlignBarRow appends the result to each BAR, not to the application, so
+ * a rule here reaches that bar's own children and nothing else in the
+ * window. */
+bool wwCompactTopBars()
+{
+	/* THE WAY BACK, exact at its off value (CONSTITUTION 7). ONE reader, so
+	 * the sheet below and the call site that decides whether the menu bar
+	 * joins the row can never disagree about it. */
+	return QSettings().value( QStringLiteral( "UI/CompactTopBars" ), true ).toBool();
+}
+
+QString wwBarRowButtonQss( int rowHeight )
+{
+	if ( rowHeight <= 0 || !wwCompactTopBars() )
+		return QString();
+	const int inner = qMax( 12, rowHeight - 4 );
+	const int pad = qMax( 2, ( rowHeight - 18 ) / 2 );
+	return QStringLiteral(
+		"QMenuBar::item { min-height: %1px; padding: %2px 8px; }"
+		"QToolButton { min-height: %1px; padding: %2px 4px; }" )
+		.arg( inner ).arg( pad );
+}
+
+void wwAlignBarRow( const QList<QWidget *> & bars )
+{
+	int h = 0;
+	for ( QWidget * w : bars ) {
+		if ( w )
+			h = qMax( h, qMax( w->sizeHint().height(), w->minimumSizeHint().height() ) );
+	}
+	if ( h <= 0 )
+		return;
+	wwBarRow = h;
+	// lane WATER7: computed ONCE, outside the loop, so every bar in the row
+	// is given the same string and no second number can appear at a call site
+	// (empty when UI/CompactTopBars is off -- that is the way back, and it
+	// is exact: nothing is appended and no bar's own sheet is touched)
+	const QString childSheet = wwBarRowButtonQss( h );
+	for ( QWidget * w : bars ) {
+		if ( !w )
+			continue;
+		// the property is what a sheet or a gate can find the family by
+		w->setProperty( "wwBarRow", true );
+		w->setMinimumHeight( h );
+		w->setMaximumHeight( h );
+		/* APPENDED, never assigned: a bar may already carry a per-widget sheet
+		 * (the viewport header does), and replacing it would take that look
+		 * away while fixing the height. */
+		if ( !childSheet.isEmpty() )
+			w->setStyleSheet( w->styleSheet() + childSheet );
+	}
+}
+

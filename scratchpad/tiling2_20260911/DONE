@@ -1,0 +1,4 @@
+TILING2 DONE 22:22 2026-09-11
+exe release/NifSkope.exe 21:52:22, 21,466,624 B, sha1 9492e5a60deaf9aab19bf6269c14bf6caed01989
+rung release/NifSkope.before_tiling2.exe 21:20:07, 21,458,944 B, sha1 955b0952a5f7ab62d4dcfef7852a923c5a6d3f22
+no default changed; four opt-in flags; chain at ROADS2 baseline; F4 refused with the table

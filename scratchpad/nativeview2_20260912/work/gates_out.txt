@@ -1,0 +1,98 @@
+====================================================================================================
+FRAME STATISTICS        (R = rung / before,  N = new exe / after)
+====================================================================================================
+ R t_own_top                   1024x989  cov 1012736  mean  88.66  sd  22.89  blockSD 16.64 (960 blocks)  dark<40   5.08%
+ N t_own_top                   1024x989  cov 1012736  mean 108.58  sd  19.64  blockSD 17.56 (960 blocks)  dark<40   0.00%
+
+ R t_own_obl                   1024x989  cov  311795  mean  85.77  sd  35.96  blockSD 31.66 (266 blocks)  dark<40  20.01%
+ N t_own_obl                   1024x989  cov  311795  mean  92.83  sd  18.86  blockSD 13.52 (266 blocks)  dark<40   0.58%
+
+ R t_flat_top                  1024x989  cov 1012736  mean  37.10  sd   6.88  blockSD  6.14 (960 blocks)  dark<40  64.64%
+ N t_flat_top                  1024x989  cov 1012736  mean 109.26  sd  19.63  blockSD 17.57 (960 blocks)  dark<40   0.00%
+
+ R t_flat_obl                  1024x989  cov  311795  mean  85.31  sd  35.44  blockSD 31.91 (266 blocks)  dark<40  20.07%
+ N t_flat_obl                  1024x989  cov  311795  mean  95.88  sd  18.47  blockSD 15.04 (266 blocks)  dark<40   0.00%
+
+ R t_tilt_top                  1024x989  cov 1012736  mean  38.91  sd  10.35  blockSD  8.35 (960 blocks)  dark<40  60.62%
+ N t_tilt_top                  1024x989  cov 1012736  mean 108.06  sd  19.43  blockSD 17.39 (960 blocks)  dark<40   0.00%
+
+ R t_tilt_obl                  1024x989  cov  311795  mean  76.61  sd  34.68  blockSD 30.19 (266 blocks)  dark<40  25.14%
+ N t_tilt_obl                  1024x989  cov  311795  mean  80.39  sd  15.60  blockSD 12.71 (266 blocks)  dark<40   0.01%
+
+ R t_tiltw_top                 1024x989  cov 1012736  mean  85.96  sd  15.76  blockSD 14.10 (960 blocks)  dark<40   0.00%
+ N t_tiltw_top                 1024x989  cov 1012736  mean 108.06  sd  19.43  blockSD 17.39 (960 blocks)  dark<40   0.00%
+
+ R t_tiltw_obl                 1024x989  cov  311795  mean  90.65  sd  35.65  blockSD 32.62 (266 blocks)  dark<40  17.78%
+ N t_tiltw_obl                 1024x989  cov  311795  mean 104.01  sd  19.93  blockSD 16.23 (266 blocks)  dark<40   0.00%
+
+ R i_native_both_top           1024x989  cov 1012736  mean  93.66  sd  25.46  blockSD 18.17 (960 blocks)  dark<40   4.43%
+ N i_native_both_top           1024x989  cov 1012736  mean 111.12  sd  19.98  blockSD 16.70 (960 blocks)  dark<40   0.00%
+
+ R i_native_both_obl           1024x989  cov  330479  mean  96.83  sd  36.01  blockSD 27.61 (270 blocks)  dark<40  14.18%
+ N i_native_both_obl           1024x989  cov  330479  mean 102.21  sd  23.28  blockSD 13.25 (270 blocks)  dark<40   0.35%
+
+ R legacy_btr_top              1024x989  cov 1012736  mean 112.83  sd  41.28  blockSD 38.33 (960 blocks)  dark<40   9.57%
+ N legacy_btr_top              1024x989  cov 1012736  mean 112.83  sd  41.28  blockSD 38.33 (960 blocks)  dark<40   9.57%
+
+ R legacy_btr_obl              1024x989  cov  368640  mean  68.87  sd  30.76  blockSD 23.74 (319 blocks)  dark<40  16.44%
+ N legacy_btr_obl              1024x989  cov  368640  mean  68.87  sd  30.76  blockSD 23.74 (319 blocks)  dark<40  16.44%
+
+ R legacy_bto_top              1024x989  cov  186840  mean 125.31  sd  23.53  blockSD  3.98 (65 blocks)  dark<40   0.07%
+ N legacy_bto_top              1024x989  cov  186840  mean 125.31  sd  23.53  blockSD  3.98 (65 blocks)  dark<40   0.07%
+
+ R legacy_bto_obl              1024x989  cov  143120  mean 113.37  sd  28.38  blockSD  4.37 (14 blocks)  dark<40   0.54%
+ N legacy_bto_obl              1024x989  cov  143120  mean 113.37  sd  28.38  blockSD  4.37 (14 blocks)  dark<40   0.54%
+
+====================================================================================================
+GATE (a)  every shape WITHOUT Shader Flags 1 bit 12 renders byte-identical
+====================================================================================================
+  t_own_top                differs
+  t_own_obl                differs
+  t_flat_top               differs
+  t_flat_obl               differs
+  t_tilt_top               differs
+  t_tilt_obl               differs
+  t_tiltw_top              differs
+  t_tiltw_obl              differs
+  i_native_both_top        differs
+  i_native_both_obl        differs
+  legacy_btr_top           IDENTICAL
+  legacy_btr_obl           IDENTICAL
+  legacy_bto_top           IDENTICAL
+  legacy_bto_obl           IDENTICAL
+  -> 4 identical, 10 differ
+====================================================================================================
+GATE (b)  own tiles vs FLAT tiles must now DIFFER; flat must be lit evenly
+====================================================================================================
+  R oblique own vs flat: dark-mask IoU 0.861 over 311795 px, mean|dY| 3.69, |dY|>8 on 9.00%, darkest-fifth IoU 0.858
+     own-minus-flat difference: pixel SD 9.49, blockSD 2.63 over 266 blocks
+     flat-tile oblique blockSD 31.91   (own 31.66)   FLOOR: the same flat tiles at the TOP view, where N.L is provably the same at every texel, give blockSD 6.14
+  N oblique own vs flat: dark-mask IoU 0.000 over 311795 px, mean|dY| 6.14, |dY|>8 on 26.02%, darkest-fifth IoU 0.705
+     own-minus-flat difference: pixel SD 8.78, blockSD 4.56 over 266 blocks
+     flat-tile oblique blockSD 15.04   (own 13.52)   FLOOR: the same flat tiles at the TOP view, where N.L is provably the same at every texel, give blockSD 17.57
+====================================================================================================
+GATE (c)  dark fraction (luma < 40) of the native oblique terrain
+====================================================================================================
+  t_own_obl               before  20.01%   after   0.58%   (-19.44)
+  i_native_both_obl       before  14.18%   after   0.35%   (-13.83)
+  legacy_btr_obl          before  16.44%   after  16.44%   (+0.00)
+  legacy_btr_top          before   9.57%   after   9.57%   (+0.00)
+  legacy_bto_obl          before   0.54%   after   0.54%   (+0.00)
+====================================================================================================
+GATE (d)  the slope test with a known answer
+====================================================================================================
+  headlight, view space (0,0,1); the census read it back as 0 0 1
+  top view    rotation (0,0,0)             -> light in world axes (+0.0000, +0.0000, +1.0000)
+  oblique     rotation (-63.5593,0,133.3081) -> light in world axes (-0.6516, +0.6142, +0.4453)
+    flat   normal (E +0.0353, N +0.0353, U 0.9988)  N.L top 0.9988  oblique 0.4434
+    tilt   normal (E +0.4827, N +0.0353, U 0.8751)  N.L top 0.8751  oblique 0.0968
+    tiltw  normal (E -0.4827, N +0.0353, U 0.8751)  N.L top 0.8751  oblique 0.7258
+  d1 TOP CONTROL: east tilt and west tilt have the SAME N.L, so the two
+     frames must be the same picture.
+     R byte-identical: False   max|dY| 81.18  mean|dY| 47.0553
+     N byte-identical: True    max|dY| 0.00  mean|dY| 0.0000
+  d2 OBLIQUE ORDER: N.L is west 0.7258 > flat 0.4434 > east 0.0968, and
+     nothing else in the pixel changes, so per-pixel luma must order the
+     same way under any monotone tone map.
+     R west>flat>east on  46.23% of 311795 covered px   (means west 90.65 flat 85.31 east 76.61)
+     N west>flat>east on 100.00% of 311795 covered px   (means west 104.01 flat 95.88 east 80.39)

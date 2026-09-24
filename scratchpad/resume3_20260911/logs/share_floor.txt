@@ -1,0 +1,9 @@
+== reference pass, one thread ==
+  human_male_vanilla.nif                    loaded=yes blocks=215 items=195880 digest=5c59dcb58c34527f
+  barn.nif                                  loaded=yes blocks=4 items=4339 digest=d329f544c0d18e80
+  refraction_fixture.nif                    loaded=yes blocks=11 items=13440 digest=07d5f3b9d1ba8760
+  cube_lod.nif                              loaded=yes blocks=4 items=1736 digest=162e4d8dcf304795
+SABOTAGE share: every worker on ONE NifModel - expected to go red
+== parallel pass: 8 threads x 2 reps x 4 files ==
+beginResetModel called on NifModel(0x23dec55bd20) without calling endResetModel first
+beginResetModel called on NifModel(0x23dec55bd20) without calling endResetModel first

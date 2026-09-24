@@ -1,0 +1,6 @@
+subject    views  8-ring better   worst LOSS               worst WIN                ink r3   ink 8r
+blast_n4    24   21 of 24       az 300 el 15 -0.0675      az   0 el 15 +0.2041     1.489x   1.425x
+blast_n8    24   24 of 24       az 180 el 15 +0.0067      az 150 el 45 +0.1423     1.250x   1.224x
+maple_n4    24   18 of 24       az  90 el 15 -0.0673      az 180 el 45 +0.0831     1.857x   1.876x
+dead_n4     24   19 of 24       az 300 el 15 -0.0327      az 330 el 45 +0.1055     1.126x   1.109x
+rock_n4     24   21 of 24       az 210 el 45 -0.0086      az 180 el 15 +0.2029     1.052x   1.110x

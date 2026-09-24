@@ -1,0 +1,16 @@
+TILING3 -- C++ warp vs the prototype it was picked on
+
+OFF              worst |C++ - prototype| = 0 world units  (one float32 ulp here = 0.125, one bake texel = 32)
+   FLOOR 1 -- OFF returns the coordinate untouched to the probe`s nine digits: YES
+              (bit-identity of OFF is structural -- an early return -- and is proved on the exe by gate F2)
+A=683 L=1024 o1  worst |C++ - prototype| = 0 world units  (one float32 ulp here = 0.125, one bake texel = 32)
+   FLOOR 2 -- this setting actually moves the coordinate: max shift 683.000 world units YES
+A=683 L=1024 o2  worst |C++ - prototype| = 0 world units  (one float32 ulp here = 0.125, one bake texel = 32)
+   FLOOR 2 -- this setting actually moves the coordinate: max shift 830.344 world units YES
+A=1365 L=2048 o3 worst |C++ - prototype| = 0 world units  (one float32 ulp here = 0.125, one bake texel = 32)
+   FLOOR 2 -- this setting actually moves the coordinate: max shift 1554.961 world units YES
+A=341 L=2048 o1  worst |C++ - prototype| = 0 world units  (one float32 ulp here = 0.125, one bake texel = 32)
+   FLOOR 2 -- this setting actually moves the coordinate: max shift 341.000 world units YES
+
+worst disagreement anywhere: 0 world units over 15 positions x 5 settings
+VERDICT: PARITY -- the exe computes the warp the numbers were picked on

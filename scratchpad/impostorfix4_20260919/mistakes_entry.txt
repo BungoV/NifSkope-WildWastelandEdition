@@ -1,0 +1,73 @@
+## 2026-09-19 -- IMPOSTORFIX4 -- measured "compression error" against a file the compressor never saw
+
+What was done: to decide whether the 4x4 chips at the trunk were BC1 endpoint
+error, the lane re-encoded `<id>_oct_normal.png` -- the PNG that sits beside the
+`_n` DDS in the bake output -- and compared the result with the shipped DDS. It
+reported a mean height error of 5.06 to 7.49 levels, a 95th percentile of 18.32
+to 36.52, and worst blocks of 69 to 206, and it was about to name the encoder's
+min/max-LUMINANCE endpoint rule as the defect on that evidence.
+
+What was true: that PNG is the BAKE's output, not the ENCODER's input. Between
+the two, `src/lodgen.cpp:3079-3088` runs `lodgenDilateFrames` three times and
+then `lodgenRepairOctHeight`, and the comment at 3102 says the sheets are
+"converted once from the bake's PNGs" -- converted FROM, after the tail has run.
+Most of what was being called compression error was the dilate and the height
+repair doing exactly their job.
+
+How it was found: the known-answer control the lane had written for its own
+model of `lodgenEncodeBC1Block` FAILED -- it reproduced 0.88 to 17.38 per cent
+of the shipped endpoint bytes. A model that reproduces one byte in a hundred is
+not a model with a bug in it; it is a model of a different input. Rebuilding the
+input by re-running the source's own tail took the control to 100.00 per cent of
+endpoints and 99.90 to 99.98 per cent of indices on all five subjects, and on
+THAT input the endpoint rule costs 0.04 to 0.12 levels -- refuted, not convicted.
+
+The rule: an intermediate file in a pipeline's output folder is not the next
+stage's input until the source says it is. Before measuring stage N's error,
+find the line that CALLS stage N and read what it is handed. And when a
+known-answer control fails by an order of magnitude rather than a little, the
+first hypothesis is that the wrong thing is being measured, not that the model
+is slightly wrong.
+
+## 2026-09-19 -- IMPOSTORFIX4 -- a refuter that could not have fired
+
+What was done: to test whether the colour dilate bleeds coverage outward, the
+lane counted `_d` alpha values strictly between 0 and 16 outside the silhouette,
+found none on any of the five subjects, and wrote that down as the measurement
+proving the stage contributes zero.
+
+What was true: `lodgenDilateFrames` fills from the frame MEAN, and a frame mean
+alpha is normally at or above 16. A dilate that bled would therefore have
+written values the test classified as "covered" and never counted. The test
+could only have fired on a bleed of a kind the function does not perform. The
+positive control chosen beside it was no better: `_n` alpha is sway, which is
+mostly zero, so it had nothing to detect either.
+
+How it was found: by asking, before quoting the number, what value a bleeding
+dilate would actually write -- which is in the same function, eight lines above
+the loop that was being tested.
+
+The rule (CONSTITUTION 4): an invariant counts only when it is shown to FAIL on
+the broken case. Write the broken case down explicitly -- "if it bled it would
+write X" -- and check that the test sees X. The stage's verdict now rests on the
+source (`isCoverage` makes `put` preserve `qAlpha`, src/lodgen.cpp:2494-2500,
+called as `lodgenDilateFrames( alb, alb, ... )` at 3083), with the count
+demoted to corroboration and its blind spot stated in the report.
+
+## 2026-09-19 -- IMPOSTORFIX4 -- a texel page whose headline contradicted its own crop
+
+What was done: the first `ww-texel-picture` page for the chips carried the
+headline "the chip is a 4x4 block whose own height range is large, not a
+silhouette edge" -- the sheet-wide finding -- above a crop chosen, correctly, as
+the sheet's single worst block. On rock_n4 that worst block sits ON the
+silhouette, so the page's picture argued against the page's sentence.
+
+How it was found: by opening the PNG and looking at it, which is section 5 of
+the skill. The script's own printout was right and said nothing about this.
+
+The rule: when a page's headline is a DISTRIBUTION and its crop is an EXTREME,
+the headline must carry the distribution's numbers for that subject and the page
+must say the crop is not typical. The page now prints the subject's own
+"blocks over 12 levels that straddle the silhouette, against the base rate for
+any block" and a line saying the crop is the worst one, chosen by the metric.
+

@@ -1,0 +1,17 @@
+slab LANDED 2026-09-18 08:01. The object term of --terrain-object-ao no longer reads an
+elevated deck as a solid block: the lattice carries a MIN plane, a square whose whole span
+stands above the sample is a CEILING and blocks from its nearest escape up to the zenith,
+and the two laws cross at sqrt(128*1458) = 432 units of clearance. Under the elevated
+highway on chunk 4.4.-12 the mask sheet's B goes 57.316 -> 83.948 (+46.5 %); the whole
+chunk 134.689 -> 158.619; open ground with nothing over it moves 0.000; a rectangle whose
+every marched square is a wall moves +0.060, inside the measured BC1 noise floor of 2.5.
+--terrain-object-ao stays OFF by default and its strength semantics are unchanged;
+--no-terrain-object-ao-slab reproduces the pre-lane bake BYTE FOR BYTE on all ten output
+files. exe release/NifSkope.exe 2026-09-18 07:31:05, 22,686,720 B, sha1
+a63e26b9e7e7bbf7cb4ebd2676ac552bb0fd812c, rung release/NifSkope.before_slab1.exe
+05:18:11 22,663,680 B. NOT COMMITTED. Gate tests/spells/lodgen_slab.sh 16 checks 0
+failures; neighbours lodgen_terrain_vt 45/0, lodgen_terrain 26/0, lodgen_defaults 31/0,
+lodgen_identity PASS, lod_generation 128/0; two red and both proved pre-existing on the
+rung (lodgen_ground_cover 4 grass, lodgen_native_baseline 5 object-path files against a
+2026-09-10 baseline). Report scratchpad/slab1_20260918/lane_slab1_report.md, sections
+0-13. His open NifSkope window needs a RESTART.

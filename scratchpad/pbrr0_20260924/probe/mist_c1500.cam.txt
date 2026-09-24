@@ -1,0 +1,1 @@
+grab arm=center/dist/view view=8 rot=-63.5593,0.0000,133.3081 lookat=0.0000,0.0000,0.0000 eye=1500.0000 dist=750.0000 zoom=1.0000 persp=1 fov=60.0000 halfW=1342.0248 halfH=866.0254 vp=1280x826 upp=2.096914

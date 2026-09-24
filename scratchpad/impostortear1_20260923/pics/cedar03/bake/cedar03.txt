@@ -1,0 +1,32 @@
+model Cedar03.nif
+projection ortho
+ranges Cedar03:0 - L2_Cedar03:0 0+51
+lodm Materials\Landscape\Plants\CedarShrub.lodm none textures\landscape\trees\cedarbranches_d.dds
+mask tree
+emissive 0 shapes 0
+front 304.829 156.284 -15.9219 1.1875 68.1914
+side 304.829 156.284 -15.9219 1.1875 68.1914
+class 512 448
+gap 32 28
+coverage 16 128 160
+oct 4 512 448 101.943 89.2001 -15.9219 1.1875 68.1914 3072 legacy 512 spec1
+frameoff 0 0 6.71535 5.34175
+frameoff 1 0 -2.1367 5.03651
+frameoff 2 0 -1.22097 5.647
+frameoff 3 0 0.91573 5.647
+frameoff 0 1 1.06835 5.647
+frameoff 1 1 6.71534 17.3989
+frameoff 2 1 1.22097 7.32583
+frameoff 3 1 0.457863 5.647
+frameoff 0 2 -0.457863 5.647
+frameoff 1 2 -0.763107 0.152622
+frameoff 2 2 -6.86797 5.647
+frameoff 3 2 -1.06835 5.647
+frameoff 0 3 -0.91573 5.647
+frameoff 1 3 1.22097 5.647
+frameoff 2 3 2.1367 5.03651
+frameoff 3 3 -6.71535 5.34175
+frameclamped 0
+aa 4 1024 3
+framefit 94.6253 80.1263 95.0832 97.5251
+orthofit 101.024 101.024 0

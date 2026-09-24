@@ -1,0 +1,167 @@
+
+=== R0 byte identity: --legacy-defaults == the exe this lane started from ===
+  PASS  the .gltf is identical (buffer name normalised)
+  PASS  the .bin is byte-identical, raw
+  PASS  FLOOR: one non-default flag does change the bytes
+
+=== R1 --skeleton: the hierarchy the body has none of ===
+  PASS  skeleton none contributes no nodes  (0)
+  PASS  skeleton PATH contributes 129 NiNode  (129)
+  PASS  58 of the body's 59 bones were already in it  (58)
+  nodes in the file: none 61 -> skeleton 132
+
+=== R2 --joints whole: ONE joint list, so Blender builds ONE armature ===
+  PASS  every skin shares one list  (yes)
+  weighted-only lists: 38,58   whole: 131
+  PASS  the whole list (131) is larger than the weighted one (58)
+  skins_unified=2 inverse_binds_derived=166 (weighted run: 0)
+
+=== R3 --units game: the same bone, measured, 64/0.9144 longer ===
+  LLeg_Calf_skin: metres 0.005002795   game units 0.350151862
+  ratio 69.991247, expected 69.991251, error 3.8e-06
+  PASS  the units row is the measured ratio
+  PASS  the metre file declares its scale to a reader  (0.0142875)
+  PASS  the game-unit file declares scale 1  (1)
+  asset.extras.metresPerUnit: metres 0.0142874997  game 1
+
+=== R4 --part: several NIFs onto one skeleton, in one file ===
+  PASS  two extra NIFs merged  (2)
+  PASS  three skinned shapes, one per part  (3)
+  PASS  and still one joint list  (yes)
+
+=== R5 --bones-only body: the helper rule, counted ===
+  PASS  all: nothing dropped  (0)
+  PASS  body: the 15 measured helpers dropped  (15)
+  nodes: all 132 -> body 117
+
+=== R6 --textures copy: the .dds beside the file, referenced relatively ===
+  copied=1 missing=0
+  PASS  at least one texture was copied
+  PASS  the .dds files are on disk beside the .gltf  (1)
+  image URIs: ['basemalebody_d.dds']
+  PASS  no image URI is absolute
+
+=== R7 --root-motion-mode: read off the Root channel, not off the log ===
+  strip: Root travels 0.000000
+  root: Root travels 2.362491
+  object: Root travels 0.000000
+  PASS  strip is still, root travels, object leaves the bone still
+    root motion was baked onto the object node 'BaseMaleBody:0'
+
+=== R8 the clip the viewer is playing, and how many tracks it drives ===
+  tracks driven: body alone 13 of 95   body + skeleton.nif 78 of 95
+  PASS  today's number, unchanged  (13)
+  PASS  with the skeleton: every character track  (78)
+  PASS  the 17 that are left are the weapon's  (17)
+  PASS  the file carries an animation  (1)
+  scale channels in the clip export: 78
+
+=== R9 RED CONTROL: the WRONG skeleton must name the bones it does not carry ===
+  PASS  the RIGHT skeleton leaves nothing unnamed  (0)
+  PASS  the WRONG skeleton names 52 bones it lacks
+    52 skin bone(s) the skeleton did not carry (they kept the part's own node): Belly_skin, Chest_Rear_Skin, Chest_Upper_skin, L_RibHelper, LArm_Collarbone, LArm_ForeArm1_skin, LArm_ForeArm2_skin, LArm_
+
+=== R10 the structural validator (tests/spells/gltf_check.py) ===
+  PASS  r1_skel.gltf  (0)
+  PASS  r2_whole.gltf  (0)
+  PASS  r3_g.gltf  (0)
+  PASS  r4.gltf  (0)
+  PASS  r5_body.gltf  (0)
+  PASS  r8_skel.gltf  (0)
+  (no Khronos glTF-Validator is installed on this machine; see the header)
+
+=== R11 HEADLESS BLENDER: one armature, zero loose empties, a vertex moves ===
+    BLENDER file E:\Projects\NifskopeWildWastelandEdition\scratchpad\gltfexport1_20260919\gate\r8_skel.gltf
+    BLENDER objects 3 armatures 1 empties 0 meshes 2
+    BLENDER armature NifSkope_Y_up bones 130
+    BLENDER action jog frames 0.000..17.600
+    BLENDER mesh BaseMaleBody:0 verts 1523
+    BLENDER move_floor_same_frame 0.000000000
+    BLENDER move_max 0.001076 on vertex 27 (frame 0 -> 20)
+    BLENDER move_mean 0.000120
+    BLENDER result PASS
+  PASS  R11 the character arrives as ONE armature and deforms
+    BLENDER objects 29 armatures 1 empties 25 meshes 3
+    BLENDER armature COM bones 106
+    FAIL: 25 loose empty object(s), at most 0 allowed: AnimObjectA, AnimObjectB, AnimObjectL1, AnimObjectL2, AnimObjectL3, AnimObjectR1, AnimObjectR2, AnimObjectR3, BASE meshes\Actors\Character\CharacterAssets\MaleBody.nif, BASE meshes\Actors\Character\CharacterAssets\MaleHands.nif, Camera, Camera Control
+  PASS  FLOOR: the weighted-only export does NOT satisfy the same assertion
+
+=== R12 the round trip: gltf -> gltf-import -> hkx, against the clip we started from ===
+    units: the file states 1 m/unit (1.000000 units per metre)
+    RT orig_bones 95
+    RT round_bones 78
+    RT bones_only_in_orig 17
+    RT worst_translation 0.000001 at frame 14 bone 1
+    RT worst_rotation 0.000000 at frame 19 bone 4
+    RT result PASS
+  PASS  R12 game: the clip survives the round trip
+    units: the file states 0.0142874997 m/unit (69.991253 units per metre)
+    RT orig_bones 95
+    RT round_bones 78
+    RT bones_only_in_orig 17
+    RT worst_translation 0.000008 at frame 0 bone 78
+    RT worst_rotation 0.000000 at frame 19 bone 4
+    RT result PASS
+  PASS  R12 metres: the clip survives the round trip
+    RT worst_translation 11245.563653 at frame 0 bone 78
+    RT result FAIL translation moved by 11245.563653 (tol 0.001000)
+  PASS  FLOOR: with metresPerUnit deleted the round trip FAILS
+
+=== R13 SCALE tracks: written non-uniform, and read back ===
+  scale channels: 45     animations: 1
+  PASS  R13 the cycle is written as scale channels (45)
+    M scale_Belly_skin_keys 181
+    M scale_Belly_skin_span 1.437995
+    M scale_Belly_skin_nonuniform 1.158992
+    M scale_Belly_skin_first 1.000000,0.737542,0.800000
+    M scale_Belly_skin_max 2.158992
+  PASS  R13 the scale is NON-UNIFORM on the wire (Belly_skin, worst axis gap 1.158992)
+    the imported cycle: 23711 rows, scale 0.616238 .. 2.267143, worst non-uniformity 1.267143
+    FLOOR, the jog clip through the same reader: scale 1.000000 .. 1.000000, non-uniformity 0.000000
+    SCALEROW PASS
+  PASS  R13 gltf-import reads the scale channels back, and the floor has none
+
+=== R14 THE RULED DEFAULTS: no option flag at all ===
+    skeleton: auto
+    joints: the whole skeleton, one list
+    units: game units -- 1 glTF unit = 1 NIF unit (scale 1, 69.9912511 game units to the metre), PyNifly-compatible
+    bones: body bones only
+    textures: copied beside the file
+    skeleton auto-found: E:/Tools/Fallout 4/DataUnpacked/Data/Meshes/Actors/Character/CharacterAssets/skeleton.nif
+  PASS  it is NOT the pre-ruling export  (0)
+  PASS  the skeleton was auto-found  (129)
+  PASS  auto did not have to fall back  (0)
+  PASS  one joint list for every skin  (yes)
+  PASS  game units: 1 glTF unit = 1 NIF unit  (1)
+  PASS  the helper rig is gone  (15)
+  PASS  117 nodes, the body and its bones  (117)
+  PASS  the clip is carried  (1)
+  PASS  78 of 95 tracks driven (the 17 are the weapon's)  (78)
+  PASS  the .dds is copied beside the file (1)
+    BLENDER objects 3 armatures 1 empties 0 meshes 2
+    BLENDER armature NifSkope_Y_up bones 115
+    BLENDER move_floor_same_frame 0.000000000
+    BLENDER move_max 0.075331 on vertex 27 (frame 0 -> 20)
+    BLENDER move_mean 0.008391
+  PASS  R14 Blender opens it as ONE armature, no empties, and it deforms
+
+=== R15 a STATIC: auto finds nothing, falls back, says so, and does not fail ===
+      skeleton: auto
+      skeleton: auto found no skeleton.nif, so the file's own nodes were used (this is the pre-ruling export). Looked in E:/Tools/Fallout 4/DataUnpacked/Data/Meshes
+  PASS  R15 the export succeeded
+  PASS  it says the fallback happened  (1)
+  PASS  no skeleton was hung on it  (0)
+  PASS  R15 the static kept its own nodes (3), not a human rig
+  PASS  FLOOR: the body on the same machine DOES find one  (0)
+
+=== R16 skeleton + bones body + a clip: the helper's tracks go with the helper ===
+      --bones-only body: 13 clip track(s) lost their bone and were dropped with it: WeaponLeft, WEAPON, Camera, Camera Control, AnimObjectA, AnimObjectB, AnimObjectL1, AnimObjectL2, AnimObjectL3, AnimObje
+  PASS  R16 the export succeeded
+  PASS  R16 the dropped tracks are NAMED, not silent
+  PASS  R16 the helper rig is still gone  (15)
+  PASS  R16 nothing drives a node that is not there  (117)
+  PASS  R16 the clip is still carried  (1)
+    gltf: animation 0 channel 27 drives node -1, outside 0..115
+  PASS  FLOOR: the rung before the repair refuses it (rc=1)
+
+==== 0 row(s) not as registered ====

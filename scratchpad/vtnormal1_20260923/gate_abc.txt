@@ -1,0 +1,32 @@
+BAKE new_nocache exe=new rc=0 22s bytes=945123 args=[]
+FAIL (a) no cache: every output file byte-identical to the rung: Files /e/Projects/NifskopeWildWastelandEdition/scratchpad/vtnormal1_20260923/out/rung_nocache/obj/Commonwealth.lodb and /e/Projects/NifskopeWildWastelandEdition/scratchpad/vtnormal1_20260923/out/new_nocache/obj/Commonwealth.lodb differ
+     census: normalMsnCache 0 normalHeights 4 normalMixed 0 msnSheetsRead 0 msnSheetsMissing 0
+BAKE new_cache exe=new rc=0 8s bytes=945304 args=[--msn-cache E:/Projects/Fallout 4 Mods/mods/Upscaled Terrain Normals/Textures/Terrain/Commonwealth]
+     census: normalMsnCache 4 normalHeights 0 normalMixed 0 msnSheetsRead 9 msnSheetsMissing 0
+FAIL (b) with cache: the chunk sheets are byte-identical to the rung's with the same cache: Files /e/Projects/NifskopeWildWastelandEdition/scratchpad/vtnormal1_20260923/out/rung_cache/tex/Commonwealth.4.-20.24_msn.DDS and /e/Projects/NifskopeWildWastelandEdition/scratchpad/vtnormal1_20260923/out/new_cache/tex/Commonwealth.4.-20.24_msn.DDS differ
+FAIL (b) with cache: the chunk objects are byte-identical: Files /e/Projects/NifskopeWildWastelandEdition/scratchpad/vtnormal1_20260923/out/rung_cache/obj/Commonwealth.lodb and /e/Projects/NifskopeWildWastelandEdition/scratchpad/vtnormal1_20260923/out/new_cache/obj/Commonwealth.lodb differ
+     cmp sheet 0 color    skipA 0 skipB 0: 4 of 4 tiles identical
+     cmp sheet 1 msn      skipA 0 skipB 0: 0 of 4 tiles identical
+     cmp sheet 2 mask     skipA 0 skipB 0: 4 of 4 tiles identical
+ok   (b) VT.2: every non-normal sheet byte-identical to the rung
+ok   (b) VT.2: every tile's normal sheet changed
+     cmp sheet 0 color    skipA 0 skipB 0: 1 of 1 tiles identical
+     cmp sheet 1 msn      skipA 0 skipB 0: 0 of 1 tiles identical
+     cmp sheet 2 mask     skipA 0 skipB 0: 1 of 1 tiles identical
+ok   (b) VT.4: every non-normal sheet byte-identical to the rung
+ok   (b) VT.4: every tile's normal sheet changed
+ok   (b) --lodt-check accepts the cache bake
+     grid newL02: level dim 2 content 256 -> 512 px, his box 4x4 (32 u/texel)
+     his downsampled SD east 0.2988 north 0.2701; vanilla msn 512x512 dxgi 77
+     r newL02 vs his(row0=north)  east 0.9449 north 0.8624
+     r newL02 vs his(row0=south)  east 0.1212 north 0.1196
+     r newL02 vs vanilla          east 0.9311 north 0.8958
+     r vanilla vs his(row0=north) east 0.9704 north 0.9101; vs his(row0=south) east 0.1272 north 0.1249
+     ceiling: his downsampled through a simulated BC1 vs itself east 0.9695 north 0.9248
+FAIL (c) r east 0.9449 north 0.8624 below 0.88
+  File "<string>", line 2
+    0.1272 < 0.88 or 0.7453
+    ^
+SyntaxError: invalid syntax
+FAIL (c) the rung passes the bar: it measures nothing
+RESULT oks 5 fails 5

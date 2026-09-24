@@ -1,0 +1,6 @@
+  RETRY: mesh did not open
+  RETRY: mesh did not open
+  n4_512 n4_512 rc=0 cards=360 199s orbit iou mean 0.6350 orbit counted 360 of 360 
+  n4_512 n4_512 rc=0 cards=360 41s orbit iou mean 0.7811 orbit counted 360 of 360 
+  n4_512 n4_512 rc=0 cards=360 41s orbit iou mean 0.6727 orbit counted 360 of 360 
+N4-DONE

@@ -1,0 +1,24 @@
+[rawS32] el20 360 views (sw/az20/cf_raw_n32S/n8_2k)
+  T1 ratio card/mesh: median 1.039 min 0.926 (az 90) max 1.194 (az 113); outside 0.85..1.15 at 8 of 360 -> FAIL
+  T2 runs (median over band B): card > mesh at 0 of 360; worst card 2.0 vs mesh 1.0 at az 6 -> ok
+  T3 centre step: card worst 1.33 px (az 45) mean 0.61; mesh worst 1.07 mean 0.61; ratio 1.25 (bar 2); missing-centre views 0 -> ok
+  whole tree: IoU 0.8424 (min 0.8138); missing 0.0389 (max 0.0594); pop worst 0.1120 mean 0.0879 [mesh 0.1893/0.1639]; tear worst 0.63% az165 top5 0.56% mean 0.10%
+  TRUNK FAIL
+[rawS24] el20 360 views (sw/az20/cf_raw_n24S/n8_2k)
+  T1 ratio card/mesh: median 1.021 min 0.926 (az 90) max 1.180 (az 113); outside 0.85..1.15 at 4 of 360 -> FAIL
+  T2 runs (median over band B): card > mesh at 2 of 360; worst card 2.0 vs mesh 1.0 at az 15 -> FAIL
+  T3 centre step: card worst 1.28 px (az 62) mean 0.61; mesh worst 1.07 mean 0.61; ratio 1.19 (bar 2); missing-centre views 0 -> ok
+  whole tree: IoU 0.8407 (min 0.8106); missing 0.0411 (max 0.0622); pop worst 0.1113 mean 0.0883 [mesh 0.1893/0.1639]; tear worst 0.67% az165 top5 0.58% mean 0.10%
+  TRUNK FAIL
+[rawS32] el00 360 views (sw/az/cf_raw_n32S/n8_2k)
+  T1 ratio card/mesh: median 0.992 min 0.921 (az 261) max 1.109 (az 59); outside 0.85..1.15 at 0 of 360 -> ok
+  T2 runs (median over band B): card > mesh at 0 of 360; worst card 1.0 vs mesh 1.0 at az 0 -> ok
+  T3 centre step: card worst 1.17 px (az 80) mean 0.60; mesh worst 0.96 mean 0.60; ratio 1.22 (bar 2); missing-centre views 0 -> ok
+  whole tree: IoU 0.8767 (min 0.8559); missing 0.0293 (max 0.0410); pop worst 0.0901 mean 0.0591 [mesh 0.1441/0.1258]; tear worst 0.54% az352 top5 0.53% mean 0.22%
+  TRUNK PASS
+[rawS24] el00 360 views (sw/az/cf_raw_n24S/n8_2k)
+  T1 ratio card/mesh: median 0.986 min 0.914 (az 261) max 1.126 (az 60); outside 0.85..1.15 at 0 of 360 -> ok
+  T2 runs (median over band B): card > mesh at 0 of 360; worst card 1.0 vs mesh 1.0 at az 0 -> ok
+  T3 centre step: card worst 1.16 px (az 240) mean 0.60; mesh worst 0.96 mean 0.60; ratio 1.21 (bar 2); missing-centre views 0 -> ok
+  whole tree: IoU 0.8770 (min 0.8539); missing 0.0300 (max 0.0415); pop worst 0.0899 mean 0.0600 [mesh 0.1441/0.1258]; tear worst 0.55% az352 top5 0.53% mean 0.21%
+  TRUNK PASS

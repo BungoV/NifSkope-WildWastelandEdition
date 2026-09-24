@@ -1,0 +1,39 @@
+Picture provenance (renderer: render.py, driver: pics.py; numpy z-buffer + wireframe,
+no NifSkope, no OpenGL, no game launch).  Every panel is framed on the mesh's own
+projected extent and then pasted at an identical panel size, so meshes with very
+different world scales appear at the same on-screen size.
+
+images/01_fo76_chunk16_remesh_two_angles.png
+  FO76  scratchpad/fo76lod_20260919/bto/appalachia.16.-14.-29.bto
+  block 30, BSSubIndexTriShape "RemeshedShape_NotAlphaTested_Merged" (17183 tris,
+  20883 verts, 141 separate pieces inside the one shape).
+  Shown: one building group cut out of that sheet (triangles whose 3 verts lie
+  within 620 units of x=3150 y=4000) = 1986 tris, vertex valence 5.56.
+  Two angles: az 40 / el 22, and az 220 / el 14.
+
+images/01b_fo76_chunk16_whole.png
+  The same shape, whole chunk, az 40 / el 38 (context: how sparse a 16-cell
+  square is, and that the pieces are separate objects in one draw).
+
+images/02_fo76_remesh_vs_fo4_authored.png   (the side-by-side the brief asked for)
+  left   FO76 GENERATED: bto/appalachia.4.-14.-29.bto block 36,
+         "RemeshedShape_BLD_A_Siding_HouseShotgun_TwoStory_03_2200131224_LOD_0_sg_processed_scene"
+         1384 tris | 1 piece | slivers AR>10 6.2% | valence 6.18 | boxy 50% of area
+  middle FO4 HAND-AUTHORED kit piece:
+         Fallout 4/DataUnpacked/Data/Meshes/LOD/Buildings/Bld02FrontBrickCom01_LOD.nif
+         22 tris | 3 pieces | slivers AR>10 0.0% | valence 3.73 | boxy 90% of area
+  right  FO4 HAND-AUTHORED whole building:
+         .../Meshes/LOD/Neighborhoods/Cambridge/Cambridge46_Bld01LOD.nif
+         225 tris | 1 piece | slivers AR>10 1.8% | valence 5.49 | boxy 98% of area
+  All three at az 35 / el 22, fov 26.
+
+images/03_fo76_globalatlas_merge.png
+  The OTHER path in the same .bto: block 8 "GlobalAtlasShape_NotAlphaTested"
+  (7518 tris, 13255 verts, 197 separate pieces) - a merge of per-object authored
+  LOD drawn against 256x256 texture-array slices, not a remesh.  Cut-out view.
+
+Caption statistics come from meshstats.stats() on the exact vertices/triangles
+rendered, so the picture and the number are the same mesh.  "boxy % of area" is
+the yaw-invariant boxiness (face normal within 2 deg of horizontal or vertical),
+which survives placement rotation about Z; group medians for the whole corpora are
+in verdict_table.txt.

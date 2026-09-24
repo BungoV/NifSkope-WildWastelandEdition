@@ -1,0 +1,7 @@
+pbr_r4 plane 355216 px; uv origin (400.5, 163.5) u-axis (598.0, 0.0) v-axis (0.0, 598.0)
+pbr_r4 emission p_emit100: 100 nits white -> linear 1.00; got [231.0, 231.0, 231.0] (linear pre-exposure [0.9989, 0.9989, 0.9989]) want [231.1, 231.1, 231.1] |d| 0.11 -> PASS
+pbr_r4 emission p_emit050: 50 nits white -> linear 0.50; got [170.0, 170.0, 170.0] (linear pre-exposure [0.5025, 0.5025, 0.5025]) want [169.6, 169.6, 169.6] |d| 0.38 -> PASS
+pbr_r4 emission p_emittex: green map, red constant, no override -> the map (green); got [0.0, 0.0, 0.0] (linear pre-exposure [0.0, 0.0, 0.0]) want [0.0, 231.1, 0.0] |d| 231.11 -> FAIL
+pbr_r4 emission p_emittov: green map, overrideColor/Mask -> the constant (red); got [231.0, 0.0, 0.0] (linear pre-exposure [0.9989, 0.0, 0.0]) want [231.1, 0.0, 0.0] |d| 0.11 -> PASS
+pbr_r4 emission p_emitmsk: green map A = 128 -> mask 0.502; got [0.0, 0.0, 0.0] (linear pre-exposure [0.0, 0.0, 0.0]) want [0.0, 169.9, 0.0] |d| 169.92 -> FAIL
+RED emitmul aims at emission_map: FAILED -> OK

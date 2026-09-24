@@ -1,0 +1,28 @@
+== lane WATER6's gates, inside the marking tool's harness, on a copy of Commonwealth.lodl ==
+-- lane WATER6: weights, one-point pins, raster authority, DirectX green --
+  ok   X1a FLOOR: a per-point weight of exactly 1 reproduces the unweighted solve word for word (hash 4fcec45d675860cd against 4fcec45d675860cd over 29312 texels)
+  ok   X1b SIGNAL: weights ramped 1 -> 3 along the stroke change the solve (hash 892add8859f33dee against the unweighted 4fcec45d675860cd)
+the mean speed nibble under the stroke's first third / last third: unweighted 0.90 / 2.00 (difference 1.10), weighted 0.80 / 2.08 (difference 1.28)
+  ok   X1b it reads faster where the weight is: the weighted solve's last-third minus first-third nibble (1.28) is greater than the unweighted one's (1.10)
+  ok   X1c the weight is LOCAL: 22438 of 29312 texels of body 2 changed (76.5 percent, gate above 0 and below 100)
+  ok   X2a REFUTER: with the pin removed, 0 of body 2's texels move off the automatic word (measured 0) -- so the gate below can fail
+  ok   X2 the pin lands on the river: stroke on body 2 (1 points)
+the one-point pin: 1 stroke(s) on 1 body(ies): 0 texels under them, 29310 changed, 2352 iterations, residual 9.8e-10, 0.91 s
+  ok   X2a a ONE-POINT curve is consumed by the solve (1 stroke(s) counted, 29310 of 29312 texels moved)
+  ok   X2b it acts as a SOURCE: the mean cosine between the solved direction and the outward radial from the pin is 0.742 over 13759 texels within 4 widths (gate > 0.5; a sink would be below -0.5)
+  ok   X3 the raster layer is stored (190 painted wet texels, raster layer stored (198 bytes))
+  ok   X3a the raster is the AUTHORITY where painted: 190 of 190 painted texels read the layer's word
+  ok   X3b the solve fills the REST: 0 texels outside the layer moved from the layer-free solve (gate 0) and 29122 did not (floor > 0)
+  ok   X3c the raster is not baked in: with the layer removed the body's words are the layer-free solve's again (0 of 29312 differ)
+  ok   X5a the DirectX cardinals (R = +X, G = +Y toward the image BOTTOM, centred on 128): east R255 G128  north R128 G1  west R1 G128  south R128 G255
+  ok   X5b the codec round-trips every word: 65536 of 65536
+  ok   X5c the checked-in test image is readable (E:/Projects/NifskopeWildWastelandEdition/release/../tests/fixtures/flowmap_directx_4x4.png)
+  ok   X5c the checked-in test image decodes to the documented directions: 0 of 16 wrong
+63 checks, 8 failures
+water mark selftest FAIL
+
+WATER6 gates green: 16 (floor 15)
+63 checks, 8 failures
+the selftest exited 1 (2 of its checks are WATER4's pre-registered reds: F2 island bank, F5 p99)
+
+water_weights.sh PASS

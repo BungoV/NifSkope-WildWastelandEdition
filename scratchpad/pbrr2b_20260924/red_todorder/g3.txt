@@ -1,0 +1,22 @@
+# WW_WEATHER data=x:/Programs/Steam/steamapps/common/Fallout 4/Data red=todorder
+tod hour=12.0000 a=Day b=Day t=0.0000 keys=Day
+sun hour=12.0000 disc=50.000,25.000,350.000 light=0.18996,0.09498,0.97719
+tod hour=2.0000 a=Night b=Night t=0.0000 keys=Night
+sun hour=2.0000 disc=550.000,25.000,-150.000 light=0.87801,0.03991,0.47697
+tod hour=4.5000 a=Night b=Sunrise t=0.0000 keys=Night->Sunrise 0%
+sun hour=4.5000 disc=425.000,25.000,-25.000 light=0.88405,0.05200,0.46449
+tod hour=6.7500 a=Sunrise b=Day t=0.0000 keys=Sunrise->Day 0%
+sun hour=6.7500 disc=312.500,25.000,87.500 light=0.87578,0.07006,0.47760
+tod hour=21.5000 a=Night b=Night t=0.0000 keys=Night
+sun hour=21.5000 disc=-425.000,25.000,-25.000 light=-0.88405,0.05200,0.46449
+tod hour=5.6250 a=Sunrise b=Sunrise t=0.0000 keys=Sunrise
+sun hour=5.6250 disc=368.750,25.000,31.250 light=0.88320,0.05988,0.46516
+tod hour=9.0000 a=Day b=Day t=0.0000 keys=Day
+sun hour=9.0000 disc=200.000,25.000,200.000 light=0.79854,0.09982,0.59361
+tod hour=17.0000 a=Day b=Day t=0.0000 keys=Day
+sun hour=17.0000 disc=-200.000,25.000,200.000 light=-0.79854,0.09982,0.59361
+tod hour=19.2500 a=Sunset b=Night t=0.0000 keys=Sunset->Night 0%
+sun hour=19.2500 disc=-312.500,25.000,87.500 light=-0.87578,0.07006,0.47760
+tod hour=21.4900 a=Night b=Night t=0.9911 keys=Night
+sun hour=21.4900 disc=-424.500,25.000,-24.500 light=-0.88406,0.05206,0.46446
+rc=0

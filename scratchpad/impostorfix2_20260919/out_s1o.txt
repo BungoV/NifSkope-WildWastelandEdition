@@ -1,0 +1,23 @@
+== blast_n4, its own frames halved (ratio 2). shipped full-res 0.5089 / crown 0.4042
+   A_box                0.4607   0.3602
+   B_maxcov             0.4333   0.3225
+   C_nearest            0.4613   0.3602
+E:\Projects\NifskopeWildWastelandEdition\scratchpad\impostorfix2_20260919\s1_downsample.py:52: RuntimeWarning: All-NaN slice encountered
+  h = np.nanmedian(m, axis=2)
+   D_median             0.4603   0.3587
+   E_max_nearest        0.4430   0.3446
+   F_maxcov_height      0.4602   0.3603
+== dead_n4, its own frames halved (ratio 2). shipped full-res 0.5822 / crown 0.5586
+   A_box                0.5198   0.4861
+   B_maxcov             0.5014   0.4525
+   C_nearest            0.5223   0.4929
+   D_median             0.5202   0.4885
+   E_max_nearest        0.5087   0.4649
+   F_maxcov_height      0.5223   0.4929
+== rock_n4, its own frames halved (ratio 2). shipped full-res 0.7767 / crown 0.7881
+   A_box                0.7675   0.7819
+   B_maxcov             0.7781   0.7879
+   C_nearest            0.7603   0.7722
+   D_median             0.7678   0.7820
+   E_max_nearest        0.7708   0.7770
+   F_maxcov_height      0.7674   0.7822

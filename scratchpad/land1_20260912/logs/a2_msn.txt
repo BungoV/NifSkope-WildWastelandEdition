@@ -1,0 +1,42 @@
+LAND1 gate A2 -- does vanilla`s _msn add anything the heightmap cannot?
+slope-weighted mean |angle| between the two macro azimuths, degrees,
+over texels where BOTH macro slopes read tan >= 0.05
+
+   chunk      scale | _msn vs hm | hm L vs 2L | verdict
+   -20,24       256 |      13.39 |       5.72 | ADDS something
+   -20,24       512 |      10.94 |       7.83 | ADDS something
+   -20,24      1024 |      10.38 |       9.63 | ADDS something
+   -20,24      2048 |      11.40 |      15.02 | adds nothing
+   -20,20       256 |      14.15 |       7.07 | ADDS something
+   -20,20       512 |      10.72 |       8.54 | ADDS something
+   -20,20      1024 |      10.57 |      10.83 | adds nothing
+   -20,20      2048 |      13.58 |      12.78 | ADDS something
+   -36,-20      256 |       9.95 |       6.34 | ADDS something
+   -36,-20      512 |       8.03 |       6.46 | ADDS something
+   -36,-20     1024 |       7.94 |       7.67 | ADDS something
+   -36,-20     2048 |       8.77 |       9.26 | adds nothing
+   -4,-20       256 |      17.22 |       5.77 | ADDS something
+   -4,-20       512 |      14.89 |       8.34 | ADDS something
+   -4,-20      1024 |      15.14 |      10.72 | ADDS something
+   -4,-20      2048 |      17.18 |      11.01 | ADDS something
+   28,-20       256 |      10.56 |       3.09 | ADDS something
+   28,-20       512 |      10.02 |       6.33 | ADDS something
+   28,-20      1024 |      11.56 |      15.77 | adds nothing
+   28,-20      2048 |      17.85 |      34.54 | adds nothing
+   -4,16        256 |       9.96 |       6.62 | ADDS something
+   -4,16        512 |       7.64 |      10.07 | adds nothing
+   -4,16       1024 |       7.41 |      15.05 | adds nothing
+   -4,16       2048 |       9.30 |      22.05 | adds nothing
+   24,16        256 |       9.79 |       7.57 | ADDS something
+   24,16        512 |       7.46 |      11.61 | adds nothing
+   24,16       1024 |       7.01 |      15.44 | adds nothing
+   24,16       2048 |       8.46 |      20.24 | adds nothing
+
+   MEDIAN over the seven _msn vs hm hm L vs 2L  verdict
+   scale 256             10.56       6.34  ADDS something
+   scale 512             10.02       8.34  ADDS something
+   scale 1024            10.38      10.83  adds nothing
+   scale 2048            11.40      15.02  adds nothing
+
+ANSWER: the `_msn` DOES add macro information the heightmap does not carry,
+at 2 of 4 scales tested.

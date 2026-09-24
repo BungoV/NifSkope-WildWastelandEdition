@@ -1,0 +1,102 @@
+impostor_trunk gate 2026-09-23 12:45:11
+exe /e/Projects/NifskopeWildWastelandEdition/release/NifSkope.before_impostordepth2.exe  23834624 2026-09-23_10:27:11  sha1 e294ae80
+set /e/Projects/NifskopeWildWastelandEdition/scratchpad/impostordepth2_20260923/n8_2k_bc7/cards/000531b3_oct.lodm
+SHEET: the depth sheet
+    SHEET PASS DX10 dxgi 98: height |err| vs the repaired input mean 0.57 levels p95 2 max 19, heights surviving 57 of 58 | vs the raw bake PNG mean 1.00 p95 4, 58 of 59 | repair census 576668/461097/926172/1968223 matches the bake | file 5222548 B
+  ok    the set's _n is BC7 and holds the height (mean < 1 level, p95 <= 3, >= 90% of heights survive)
+    red control: SHEET FAIL DXT5: height |err| vs the repaired input mean 2.64 levels p95 7 max 38, heights surviving 27 of 58 | vs the raw bake PNG mean 2.81 p95 8, 27 of 59 | repair census 576668/461097/926172/1968223 matches the bake | file 5222528 B
+  ok    FLOOR: the DXT5 sheet of the same bake FAILS the sheet bar, so the bar can fail
+KNOBS: 6 views OFF the frame grid
+  orbit k_default: 6 cards, 15s
+  orbit k_snap: 6 cards, 5s
+  orbit k_slider0: 6 cards, 5s
+  orbit k_smooth: 6 cards, 4s
+  orbit k_smooth16: 6 cards, 5s
+  orbit k_smooth0: 6 cards, 5s
+  orbit k_mid: 6 cards, 5s
+  orbit k_covf0: 6 cards, 4s
+  orbit k_covf1: 6 cards, 5s
+  orbit k_blend0: 6 cards, 5s
+  FAIL  the default draw is the slider's crisp end and says so -- 'slider: 0.00 -- the CRISP end, snap (the default)' not in k_default.log
+  FAIL  the default draws ONE frame, the nearest, with its parallax -- 'frames: ONE, the nearest, with height parallax (the slider's crisp end)' not in k_default.log
+  FAIL  the crisp end does not search -- 'depth search: off -- the one-step parallax (the slider's)' not in k_default.log
+  FAIL  the log says the coverage filter is always decoded -- 'coverage filter: DECODED per texel, then bilinear -- always' not in k_default.log
+  FAIL  WW_IMPOSTOR_SLIDER=1 is named as the smooth end -- 'slider: 1.00 -- the SMOOTH end, stipple + search (WW_IMPOSTOR_SLIDER)' not in k_smooth.log
+  ok    the smooth end blends three frames
+  FAIL  the smooth end searches 16 steps of its own accord -- 'depth search: 16 steps + 1 refinement (the slider's)' not in k_smooth.log
+  ok    the smooth end cuts with the stipple
+  FAIL  WW_IMPOSTOR_SLIDER=0.5 sharpens the weights (power 1/0.5) -- 'between the ends, weights sharpened to the power 2.000' not in k_mid.log
+  FAIL  WW_IMPOSTOR_SEARCH=0 is named as the override -- 'depth search: off -- the one-step parallax (WW_IMPOSTOR_SEARCH)' not in k_smooth0.log
+  ok    WW_IMPOSTOR_SNAP=1 is named in the log
+  ok    WW_IMPOSTOR_BLEND=0 is named in the log
+  FAIL  WW_IMPOSTOR_COVFILTER is reported as retired -- '(WW_IMPOSTOR_COVFILTER retired)' not in k_covf1.log
+  FAIL  WW_IMPOSTOR_SNAP=1 IS the default (the crisp end is snap) -- differs by 504663 px (-1 = views missing)
+  ok    WW_IMPOSTOR_SLIDER=0 IS the default (byte-identical on 6 views)
+  FAIL  the smooth end IS search 16 (SLIDER=1 == SLIDER=1 SEARCH=16) -- differs by 697238 px (-1 = views missing)
+  ok    WW_IMPOSTOR_COVFILTER=0 cannot turn the decoded filter off (retired) (byte-identical on 6 views)
+  ok    WW_IMPOSTOR_COVFILTER=1 changes nothing (retired) (byte-identical on 6 views)
+  FAIL  FLOOR: the smooth end is not the crisp end -- only 0 px
+  FAIL  FLOOR: the search reaches the shader (the smooth end with SEARCH=0 differs) -- only 0 px
+  FAIL  FLOOR: slider 0.5 is not the smooth end -- only 0 px
+  FAIL  FLOOR: slider 0.5 is not the crisp end -- only 0 px
+  ok    FLOOR: the snap is not the flat single frame (it keeps its parallax) (1105089 px)
+TRUNK: 1-degree orbits
+  orbit crisp_el0: 360 cards, 48s
+  orbit crisp_el20: 360 cards, 55s
+  orbit smooth_el0: 360 cards, 43s
+  orbit smooth_el20: 360 cards, 45s
+  orbit old_el0: 360 cards, 44s
+  orbit old_el20: 360 cards, 48s
+  ok    FLOOR: the mesh scored against itself passes the trunk bar
+    [old] el00 360 views (E:/Projects/NifskopeWildWastelandEdition/release/impostor_trunk_tmp/old_el0)
+      T1 ratio card/mesh: median 0.973 min 0.866 (az 257) max 1.135 (az 119); outside 0.85..1.15 at 0 of 360 -> ok
+      T2 runs (median over band B): card > mesh at 1 of 360; worst card 1.5 vs mesh 1.0 at az 215 -> FAIL
+      T3 centre step: card worst 1.93 px (az 214) mean 0.60; mesh worst 0.96 mean 0.60; ratio 2.01 (bar 2); missing-centre views 0 -> FAIL
+      whole tree: IoU 0.8669 (min 0.8285); missing 0.0350 (max 0.0500); pop worst 0.0863 mean 0.0600 [mesh 0.1441/0.1258]; tear worst 0.54% az352 top5 0.54% mean 0.21%
+      TRUNK FAIL | TEAR BAR PASS (pop 0.0863 <= 0.1755; tear 0.54% <= 1.92%)
+  ok    FLOOR: the old drawer (stipple, no search) FAILS the trunk bar at el 0, so the bar can fail
+    [old] el20 360 views (E:/Projects/NifskopeWildWastelandEdition/release/impostor_trunk_tmp/old_el20)
+      T1 ratio card/mesh: median 1.052 min 0.823 (az 321) max 1.381 (az 47); outside 0.85..1.15 at 88 of 360 -> FAIL
+      T2 runs (median over band B): card > mesh at 84 of 360; worst card 2.0 vs mesh 1.0 at az 6 -> FAIL
+      T3 centre step: card worst 3.18 px (az 54) mean 0.66; mesh worst 1.07 mean 0.61; ratio 2.97 (bar 2); missing-centre views 0 -> FAIL
+      whole tree: IoU 0.8109 (min 0.7612); missing 0.0596 (max 0.0946); pop worst 0.1104 mean 0.0890 [mesh 0.1893/0.1639]; tear worst 1.10% az159 top5 0.97% mean 0.24%
+      TRUNK FAIL | TEAR BAR PASS (pop 0.1104 <= 0.1985; tear 1.10% <= 2.78%)
+  ok    FLOOR: the old drawer (stipple, no search) FAILS the trunk bar at el 20, so the bar can fail
+    [crisp] el00 360 views (E:/Projects/NifskopeWildWastelandEdition/release/impostor_trunk_tmp/crisp_el0)
+      T1 ratio card/mesh: median 0.973 min 0.866 (az 257) max 1.135 (az 119); outside 0.85..1.15 at 0 of 360 -> ok
+      T2 runs (median over band B): card > mesh at 1 of 360; worst card 1.5 vs mesh 1.0 at az 215 -> FAIL
+      T3 centre step: card worst 1.93 px (az 214) mean 0.60; mesh worst 0.96 mean 0.60; ratio 2.01 (bar 2); missing-centre views 0 -> FAIL
+      whole tree: IoU 0.8669 (min 0.8285); missing 0.0350 (max 0.0500); pop worst 0.0863 mean 0.0600 [mesh 0.1441/0.1258]; tear worst 0.54% az352 top5 0.54% mean 0.21%
+      TRUNK FAIL | TEAR BAR PASS (pop 0.0863 <= 0.1755; tear 0.54% <= 1.92%)
+  ok    crisp end (snap) el 0: T1 trunk width inside 0.85..1.15 at every azimuth
+  FAIL  crisp end (snap) el 0: T2 doubled trunk
+  ok    crisp end (snap) el 0: the tear share is within the bar (tear 0.54% <= 1.92%)
+    REPORTED, not gated: T3 centre step: card worst 1.93 px (az 214) | mesh worst 0.96 mean | ratio 2.01 (bar 2) | pop worst 0.0863
+    [smooth] el00 360 views (E:/Projects/NifskopeWildWastelandEdition/release/impostor_trunk_tmp/smooth_el0)
+      T1 ratio card/mesh: median 0.973 min 0.866 (az 257) max 1.135 (az 119); outside 0.85..1.15 at 0 of 360 -> ok
+      T2 runs (median over band B): card > mesh at 1 of 360; worst card 1.5 vs mesh 1.0 at az 215 -> FAIL
+      T3 centre step: card worst 1.93 px (az 214) mean 0.60; mesh worst 0.96 mean 0.60; ratio 2.01 (bar 2); missing-centre views 0 -> FAIL
+      whole tree: IoU 0.8669 (min 0.8285); missing 0.0350 (max 0.0500); pop worst 0.0863 mean 0.0600 [mesh 0.1441/0.1258]; tear worst 0.54% az352 top5 0.54% mean 0.21%
+      TRUNK FAIL | TEAR BAR PASS (pop 0.0863 <= 0.1755; tear 0.54% <= 1.92%)
+  FAIL  smooth end el 0 fails the trunk bar (see the T1/T2/T3 lines above)
+  ok    smooth end el 0 passes the tear bar
+    [crisp] el20 360 views (E:/Projects/NifskopeWildWastelandEdition/release/impostor_trunk_tmp/crisp_el20)
+      T1 ratio card/mesh: median 1.052 min 0.823 (az 321) max 1.381 (az 47); outside 0.85..1.15 at 88 of 360 -> FAIL
+      T2 runs (median over band B): card > mesh at 84 of 360; worst card 2.0 vs mesh 1.0 at az 6 -> FAIL
+      T3 centre step: card worst 3.18 px (az 54) mean 0.66; mesh worst 1.07 mean 0.61; ratio 2.97 (bar 2); missing-centre views 0 -> FAIL
+      whole tree: IoU 0.8109 (min 0.7612); missing 0.0596 (max 0.0946); pop worst 0.1104 mean 0.0890 [mesh 0.1893/0.1639]; tear worst 1.10% az159 top5 0.97% mean 0.24%
+      TRUNK FAIL | TEAR BAR PASS (pop 0.1104 <= 0.1985; tear 1.10% <= 2.78%)
+  FAIL  crisp end (snap) el 20: T1 trunk width fails
+  FAIL  crisp end (snap) el 20: T2 doubled trunk
+  ok    crisp end (snap) el 20: the tear share is within the bar (tear 1.10% <= 2.78%)
+    REPORTED, not gated: T3 centre step: card worst 3.18 px (az 54) | mesh worst 1.07 mean | ratio 2.97 (bar 2) | pop worst 0.1104
+    [smooth] el20 360 views (E:/Projects/NifskopeWildWastelandEdition/release/impostor_trunk_tmp/smooth_el20)
+      T1 ratio card/mesh: median 1.052 min 0.823 (az 321) max 1.381 (az 47); outside 0.85..1.15 at 88 of 360 -> FAIL
+      T2 runs (median over band B): card > mesh at 84 of 360; worst card 2.0 vs mesh 1.0 at az 6 -> FAIL
+      T3 centre step: card worst 3.18 px (az 54) mean 0.66; mesh worst 1.07 mean 0.61; ratio 2.97 (bar 2); missing-centre views 0 -> FAIL
+      whole tree: IoU 0.8109 (min 0.7612); missing 0.0596 (max 0.0946); pop worst 0.1104 mean 0.0890 [mesh 0.1893/0.1639]; tear worst 1.10% az159 top5 0.97% mean 0.24%
+      TRUNK FAIL | TEAR BAR PASS (pop 0.1104 <= 0.1985; tear 1.10% <= 2.78%)
+  FAIL  smooth end el 20 fails the trunk bar (see the T1/T2/T3 lines above)
+  ok    smooth end el 20 passes the tear bar
+38 checks, 20 failures
+FAIL

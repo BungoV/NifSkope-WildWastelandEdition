@@ -1,0 +1,4 @@
+CARDS-AGG DONE 2026-09-11 16:42:28
+exe release/NifSkope.exe 2026-09-11 16:20:02, 21,419,520 B, md5 3ebf175826feee6c6545cf0873635acc
+one build (15:49:39) + one counted relink (16:20:02)
+report scratchpad/lane_cards_agg_report.md

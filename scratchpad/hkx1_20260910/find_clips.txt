@@ -1,0 +1,6 @@
+lossless files: 856
+[('Character', 853), ('PowerArmor', 2), ('Animations', 1)]
+['Meshes\\Pipboy\\Animations\\RadMeterIdle.hkx', 'Meshes\\Actors\\Character\\_1stPerson\\Animations\\Furniture\\BarStool\\PoseA_Idle1.hkx', 'Meshes\\Actors\\Character\\_1stPerson\\Animations\\1HM\\LookUpAdd.hkx', 'Meshes\\Actors\\Character\\_1stPerson\\Animations\\1HM\\LookDownAdd.hkx', 'Meshes\\Actors\\Character\\_1stPerson\\Animations\\1HM\\TurnRightAdd.hkx']
+THREECOMP48 character clips: 2
+   (65456, 'Meshes\\Actors\\Character\\Animations\\Weapon\\Rifle\\Confident\\PoseB_Idle1.hkx', [2])
+   (68496, 'Meshes\\Actors\\Character\\Animations\\Weapon\\Rifle\\Confident\\PoseA_Idle1.hkx', [2])

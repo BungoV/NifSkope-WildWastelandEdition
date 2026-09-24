@@ -1,0 +1,8 @@
+[Warning] QObject::connect(QListModel, QWidget): signal not found
+[Warning] QObject::connect(QListModel, QWidget): signal not found
+[Warning] QObject::connect(QListModel, QWidget): signal not found
+[Warning] QObject::connect(QListModel, QWidget): signal not found
+[Warning] File ' "textures/e:/projects/nifskopewildwastelandedition/scratchpad/impostorshow_20260919/fixture/maple_n4/cards/0004a074_oct_d.dds" ' not found in archives
+[Warning] File ' "textures/e:/projects/nifskopewildwastelandedition/scratchpad/impostorshow_20260919/fixture/maple_n4/cards/0004a074_oct_n.dds" ' not found in archives
+[Warning] File ' "textures/e:/projects/nifskopewildwastelandedition/scratchpad/impostorshow_20260919/fixture/maple_n4/cards/0004a074_oct_gsaos.dds" ' not found in archives
+[Warning] File ' "textures/e:/projects/nifskopewildwastelandedition/scratchpad/impostorshow_20260919/fixture/maple_n4/cards/0004a074_oct_g.dds" ' not found in archives

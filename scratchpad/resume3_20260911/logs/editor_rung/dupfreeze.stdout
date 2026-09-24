@@ -1,0 +1,19 @@
+[Warning] QObject::connect(QListModel, QWidget): signal not found
+[Warning] QObject::connect(QListModel, QWidget): signal not found
+[Warning] QObject::connect(QListModel, QWidget): signal not found
+[Warning] QObject::connect(QListModel, QWidget): signal not found
+[Warning] File ' "materials/f76/actors/powerarmor/x01tesla/x01tesla_extra_glow_blue.bgsm" ' not found in archives
+[Warning] File ' "materials/f76/actors/powerarmor/x01tesla/x01tesla_extra_glow_blue_trans.bgsm" ' not found in archives
+[Warning] File ' "materials/f76/actors/powerarmor/x01tesla/x01tesla_torso.bgsm" ' not found in archives
+[Warning] File ' "materials/f76/actors/powerarmor/x01tesla/x01tesla_extra.bgsm" ' not found in archives
+[Warning] File ' "textures/f76/actors/powerarmor/x01tesla/x01tesla_extra_d.dds" ' not found in archives
+[Warning] File ' "textures/f76/actors/powerarmor/x01tesla/x01tesla_extra_n.dds" ' not found in archives
+[Warning] File ' "textures/f76/actors/powerarmor/x01tesla/x01tesla_extra_s.dds" ' not found in archives
+[Warning] File ' "materials/f76/actors/powerarmor/x01tesla/x01tesla_extra_glow_blue.bgsm" ' not found in archives
+[Warning] File ' "materials/f76/actors/powerarmor/x01tesla/x01tesla_extra_glow_blue_trans.bgsm" ' not found in archives
+[Warning] File ' "materials/f76/actors/powerarmor/x01tesla/x01tesla_torso.bgsm" ' not found in archives
+[Warning] File ' "materials/f76/actors/powerarmor/x01tesla/x01tesla_extra.bgsm" ' not found in archives
+[Warning] File ' "textures/f76/actors/powerarmor/x01tesla/x01tesla_extra_d.dds" ' not found in archives
+[Warning] File ' "textures/f76/actors/powerarmor/x01tesla/x01tesla_extra_n.dds" ' not found in archives
+[Warning] File ' "textures/f76/actors/powerarmor/x01tesla/x01tesla_extra_s.dds" ' not found in archives
+[Info] headless close: discarded unsaved changes to x01tesla_torso

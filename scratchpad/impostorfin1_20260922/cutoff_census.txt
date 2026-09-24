@@ -1,0 +1,258 @@
+corpus E:/Tools/Fallout 4/DataUnpacked/Data
+files: 3997 LOD NIFs under Meshes/LOD, 497 BTO chunks under Meshes/Terrain
+unparsed files: 0
+
+== BTO / other : 980 shapes -- NiAlphaProperty
+     519  no NiAlphaProperty
+            e.g. Meshes/Terrain/Commonwealth/Objects/Commonwealth.16.-16.-16.BTO [- | data\Textures\Terrain\Commonwealth\Objects\Commonwealth.Objects.DDS]
+            e.g. Meshes/Terrain/Commonwealth/Objects/Commonwealth.16.-16.-32.BTO [- | data\Textures\Terrain\Commonwealth\Objects\Commonwealth.Objects.DDS]
+            e.g. Meshes/Terrain/Commonwealth/Objects/Commonwealth.16.-16.0.BTO [- | data\Textures\Terrain\Commonwealth\Objects\Commonwealth.Objects.DDS]
+     461  flags 0x12EC (blend 0, test 1 GREATER) threshold 128
+            e.g. Meshes/Terrain/Commonwealth/Objects/Commonwealth.16.-16.-16.BTO [- | data\Textures\Terrain\Commonwealth\Objects\Commonwealth.Objects.DDS]
+            e.g. Meshes/Terrain/Commonwealth/Objects/Commonwealth.16.-16.-32.BTO [- | data\Textures\Terrain\Commonwealth\Objects\Commonwealth.Objects.DDS]
+            e.g. Meshes/Terrain/Commonwealth/Objects/Commonwealth.16.-16.0.BTO [- | data\Textures\Terrain\Commonwealth\Objects\Commonwealth.Objects.DDS]
+
+== LOD nif / other : 3871 shapes -- NiAlphaProperty
+    3390  no NiAlphaProperty
+            e.g. Meshes/LOD/Architecture/Airport/AirportTerminalDestroyed01_LOD.nif [Materials\LOD\Airport01_LOD.BGSM | textures\LOD\Airport01_LOD_d.dds]
+            e.g. Meshes/LOD/Architecture/Airport/AirportTerminalEnd01_LOD.nif [Materials\LOD\Airport01_LOD.BGSM | textures\LOD\Airport01_LOD_d.dds]
+            e.g. Meshes/LOD/Architecture/Airport/AirportTerminalEnd02_LOD.nif [Materials\LOD\Airport01_LOD.BGSM | textures\LOD\Airport01_LOD_d.dds]
+     127  flags 0x92EC (blend 0, test 1 GREATER) threshold 90
+            e.g. Meshes/LOD/Architecture/Warehouse/WrhsDoorMed01_LOD.nif [Materials\LOD\Wrhs01LOD.BGSM | textures\lod\wrhs01lod_d.dds]
+            e.g. Meshes/LOD/Architecture/Warehouse/WrhsDoorMed01static_LOD.nif [Materials\LOD\Wrhs01LOD.BGSM | textures\lod\wrhs01lod_d.dds]
+            e.g. Meshes/LOD/Architecture/Warehouse/WrhsDoorMed02_LOD.nif [Materials\LOD\Wrhs01LOD.BGSM | textures\lod\wrhs01lod_d.dds]
+     120  flags 0x12EC (blend 0, test 1 GREATER) threshold 127
+            e.g. Meshes/LOD/Architecture/Airport/LibertyPrimeGantry01_LOD_0.nif [materials\LOD\Architecture\PrimeGantry01LOD.BGSM | textures\LOD\Architecture\PrimeGantry01LOD_d.dds]
+            e.g. Meshes/LOD/Architecture/Airport/LibertyPrimeGantry01_LOD_1.nif [materials\LOD\Architecture\PrimeGantry01LOD.BGSM | textures\LOD\Architecture\PrimeGantry01LOD_d.dds]
+            e.g. Meshes/LOD/Architecture/Dam/DamConcrete01LOD.nif [materials\LOD\Architecture\Dam\DamConcrete01LOD.BGSM | textures\LOD\Architecture\Dam\DamConcrete01LOD_d.dds]
+     120  flags 0x12EC (blend 0, test 1 GREATER) threshold 128
+            e.g. Meshes/LOD/Architecture/Bunkers/Animated/RadioTower01/BunExtMidTowerUp01_LOD_0.nif [materials\LOD\Architecture\Bunkers\RadioTowerMetal01_LOD.BGSM | textures\LOD\Architecture\Bunkers\RadioTowerMetal01_LOD_d.dds]
+            e.g. Meshes/LOD/Interiors/Building/Concrete/Custom/BldSentinelBunkerExhaust01_LOD_0.nif [materials\LOD\Interiors\Building\Concrete\Custom\SentinelSite02LOD.BGSM | textures\LOD\Interiors\Building\Concrete\Custom\SentinelSite02LOD_d.dds]
+            e.g. Meshes/LOD/Interiors/Building/Concrete/Custom/BldSentinelBunkerExhaust02_LOD_0.nif [materials\LOD\Interiors\Building\Concrete\Custom\SentinelSite02LOD.BGSM | textures\LOD\Interiors\Building\Concrete\Custom\SentinelSite02LOD_d.dds]
+      37  flags 0x12EC (blend 0, test 1 GREATER) threshold 4
+            e.g. Meshes/LOD/Landscape/RetainingWall/River/RWBridgeRive01_L0_LOD.nif [Materials\LOD\RWRiverLOD.BGSM | textures\LOD\RWRiverLOD_d.dds]
+            e.g. Meshes/LOD/Landscape/RetainingWall/River/RWBridgeRive01_L1_LOD.nif [Materials\LOD\RWRiverLOD.BGSM | textures\LOD\RWRiverLOD_d.dds]
+            e.g. Meshes/LOD/Landscape/RetainingWall/River/RWRivACurveIn512_LOD.nif [Materials\LOD\RWRiverLOD.BGSM | textures\LOD\RWRiverLOD_d.dds]
+      36  flags 0x10ED (blend 1, test 0 GREATER) threshold 128
+            e.g. Meshes/LOD/Landscape/FHWDCurve30L01_LOD.nif [- | textures\lod\Bldg04LOD.dds]
+            e.g. Meshes/LOD/Landscape/FHWDCurve30L02_LOD.nif [- | textures\lod\Bldg04LOD.dds]
+            e.g. Meshes/LOD/Landscape/FHWDCurve30LLink01_LOD.nif [- | textures\lod\Bldg04LOD.dds]
+      20  flags 0x10ED (blend 1, test 0 GREATER) threshold 134
+            e.g. Meshes/LOD/Architecture/Buildings/Hightech/HitExtAStainsCornerC1x1_LOD.nif [materials\LOD\HitTechStain_LOD.BGSM | textures\LOD\HitTechStreaks01_LOD_d.dds]
+            e.g. Meshes/LOD/Architecture/Buildings/Hightech/HitExtAStainsCornerD1x1B_LOD.nif [materials\LOD\HitTechStain_LOD.BGSM | textures\LOD\HitTechStreaks01_LOD_d.dds]
+            e.g. Meshes/LOD/Architecture/Buildings/Hightech/HitExtAStainsCornerD1x1C_LOD.nif [materials\LOD\HitTechStain_LOD.BGSM | textures\LOD\HitTechStreaks01_LOD_d.dds]
+       9  flags 0x12ED (blend 1, test 1 GREATER) threshold 127
+            e.g. Meshes/LOD/Architecture/SkyBridge/HitSkyBridgeDamageEndAngle01_LOD_0.nif [Materials\LOD\Architecture\SkyBridge\SkyBrigde_LOD_01.BGSM | textures\LOD\Architecture\SkyBridge\SkyBrigde_LOD_01_d.dds]
+            e.g. Meshes/LOD/Architecture/SkyBridge/HitSkyBridgeDmgEndAngle01_LOD_0.nif [Materials\LOD\Architecture\SkyBridge\SkyBrigde_LOD_01.BGSM | textures\LOD\Architecture\SkyBridge\SkyBrigde_LOD_01_d.dds]
+            e.g. Meshes/LOD/Architecture/SkyBridge/HitSkyBridgeDmgEndL01_LOD_0.nif [Materials\LOD\Architecture\SkyBridge\SkyBrigde_LOD_01.BGSM | textures\LOD\Architecture\SkyBridge\SkyBrigde_LOD_01_d.dds]
+       5  flags 0x12ED (blend 1, test 1 GREATER) threshold 128
+            e.g. Meshes/LOD/SetDressing/Signage/Billboard01R_LOD.nif [- | textures\LOD\Billboard01LOD_d.dds]
+            e.g. Meshes/LOD/SetDressing/Signage/Billboard01TallR_LOD.nif [- | textures\LOD\Billboard01LOD_d.dds]
+            e.g. Meshes/LOD/SetDressing/Signage/Billboard02R_LOD.nif [- | textures\LOD\Billboard01LOD_d.dds]
+       4  flags 0x12EC (blend 0, test 1 GREATER) threshold 45
+            e.g. Meshes/LOD/SetDressing/ElectricalTower/ElectricalTower01L01_LOD.nif [materials\LOD\ElectricalTowerLOD.BGSM | textures\LOD\ElectricalTowerLOD_d.dds]
+            e.g. Meshes/LOD/SetDressing/ElectricalTower/ElectricalTower01L02_LOD.nif [materials\LOD\ElectricalTowerLOD.BGSM | textures\LOD\ElectricalTowerLOD_d.dds]
+            e.g. Meshes/LOD/SetDressing/ElectricalTower/ElectricalTowerSmallL01_LOD.nif [materials\LOD\ElectricalTowerLOD.BGSM | textures\LOD\ElectricalTowerLOD_d.dds]
+       1  flags 0x12EC (blend 0, test 1 GREATER) threshold 144
+            e.g. Meshes/LOD/Interiors/RedRocket/RedRExtAll01_LOD.nif [- | textures\lod\RedRocket_LOD_d.dds]
+       1  flags 0x12EC (blend 0, test 1 GREATER) threshold 91
+            e.g. Meshes/LOD/Neighborhoods/Lexington/Corvega_Bld01LOD.nif [Materials\LOD\CorvegaLargeLOD.BGSM | textures\LOD\CorvegaLargeLOD_d.dds]
+       1  flags 0x12EC (blend 0, test 1 GREATER) threshold 20
+            e.g. Meshes/LOD/SetDressing/Signage/BillboardBldgVerticalSm02_LOD001.nif [Materials\LOD\Billboard02LOD.BGSM | textures\LOD\Billboard02LOD_d.dds]
+  -- the BGSM each of those shapes names:
+    2128  BGSM missing
+            e.g. Meshes/LOD/Architecture/Buildings/Hightech/FinancialBuilding13_TopUSS_LOD.nif [C:\projects\Fallout4\Build\PC\Data\materials\LOD\HitTechExtALOD07.BGSM]
+            e.g. Meshes/LOD/Architecture/Buildings/Hightech/FinancialBuilding13_TopUSS_LOD.nif [C:\projects\Fallout4\Build\PC\Data\materials\LOD\HitTechExtALOD03.BGSM]
+            e.g. Meshes/LOD/Architecture/Buildings/Hightech/FinancialBuilding13_TopUSS_Structure_LOD.nif [C:\projects\Fallout4\Build\PC\Data\materials\LOD\HitTechStructureLargeLOD.BGSM]
+     655  BGSM alphaTest 0 ref 128 | blend 0 src 6 dst 7 | alpha 1.0
+            e.g. Meshes/LOD/Architecture/DiamondCity/DExt/DiamondPower01_Low_LOD.nif [materials\LOD\CorrugatedMetalLOD02.bgsm]
+            e.g. Meshes/LOD/Architecture/DiamondCity/Stadium_Ext/DCShackLow_Main01_LOD.nif [materials\LOD\CorrugatedMetalLOD02.bgsm]
+            e.g. Meshes/LOD/Architecture/DiamondCity/Stadium_Ext/DCShackLow_Rich01_LOD.nif [materials\LOD\CorrugatedMetalLOD02.bgsm]
+     268  BGSM alphaTest 0 ref 127 | blend 0 src 6 dst 7 | alpha 1.0
+            e.g. Meshes/LOD/Architecture/Airport/AirportTerminalDestroyed01_LOD.nif [Materials\LOD\Airport01_LOD.BGSM]
+            e.g. Meshes/LOD/Architecture/Airport/AirportTerminalEnd01_LOD.nif [Materials\LOD\Airport01_LOD.BGSM]
+            e.g. Meshes/LOD/Architecture/Airport/AirportTerminalEnd02_LOD.nif [Materials\LOD\Airport01_LOD.BGSM]
+     130  BGSM alphaTest 1 ref 127 | blend 0 src 6 dst 7 | alpha 1.0
+            e.g. Meshes/LOD/Architecture/Airport/LibertyPrimeGantry01_LOD_0.nif [materials\LOD\Architecture\PrimeGantry01LOD.BGSM]
+            e.g. Meshes/LOD/Architecture/Airport/LibertyPrimeGantry01_LOD_1.nif [materials\LOD\Architecture\PrimeGantry01LOD.BGSM]
+            e.g. Meshes/LOD/Architecture/Dam/DamConcrete01LOD.nif [materials\LOD\Architecture\Dam\DamConcrete01LOD.BGSM]
+     117  BGSM alphaTest 1 ref 128 | blend 0 src 6 dst 7 | alpha 1.0
+            e.g. Meshes/LOD/Architecture/Bunkers/Animated/RadioTower01/BunExtMidTowerUp01_LOD_0.nif [materials\LOD\Architecture\Bunkers\RadioTowerMetal01_LOD.BGSM]
+            e.g. Meshes/LOD/Interiors/Building/Concrete/Custom/BldSentinelBunkerExhaust01_LOD_0.nif [materials\LOD\Interiors\Building\Concrete\Custom\SentinelSite02LOD.BGSM]
+            e.g. Meshes/LOD/Interiors/Building/Concrete/Custom/BldSentinelBunkerExhaust02_LOD_0.nif [materials\LOD\Interiors\Building\Concrete\Custom\SentinelSite02LOD.BGSM]
+      81  BGSM alphaTest 1 ref 90 | blend 0 src 6 dst 7 | alpha 1.0
+            e.g. Meshes/LOD/Architecture/Warehouse/WrhsDoorMed01_LOD.nif [Materials\LOD\Wrhs01LOD.BGSM]
+            e.g. Meshes/LOD/Architecture/Warehouse/WrhsDoorMed01static_LOD.nif [Materials\LOD\Wrhs01LOD.BGSM]
+            e.g. Meshes/LOD/Architecture/Warehouse/WrhsDoorMed02_LOD.nif [Materials\LOD\Wrhs01LOD.BGSM]
+      37  BGSM alphaTest 1 ref 4 | blend 0 src 6 dst 7 | alpha 1.0
+            e.g. Meshes/LOD/Landscape/RetainingWall/River/RWBridgeRive01_L0_LOD.nif [Materials\LOD\RWRiverLOD.BGSM]
+            e.g. Meshes/LOD/Landscape/RetainingWall/River/RWBridgeRive01_L1_LOD.nif [Materials\LOD\RWRiverLOD.BGSM]
+            e.g. Meshes/LOD/Landscape/RetainingWall/River/RWRivACurveIn512_LOD.nif [Materials\LOD\RWRiverLOD.BGSM]
+      20  BGSM alphaTest 1 ref 134 | blend 1 src 6 dst 7 | alpha 1.0
+            e.g. Meshes/LOD/Architecture/Buildings/Hightech/HitExtAStainsCornerC1x1_LOD.nif [materials\LOD\HitTechStain_LOD.BGSM]
+            e.g. Meshes/LOD/Architecture/Buildings/Hightech/HitExtAStainsCornerD1x1B_LOD.nif [materials\LOD\HitTechStain_LOD.BGSM]
+            e.g. Meshes/LOD/Architecture/Buildings/Hightech/HitExtAStainsCornerD1x1C_LOD.nif [materials\LOD\HitTechStain_LOD.BGSM]
+       9  BGSM alphaTest 1 ref 127 | blend 1 src 6 dst 7 | alpha 1.0
+            e.g. Meshes/LOD/Architecture/SkyBridge/HitSkyBridgeDamageEndAngle01_LOD_0.nif [Materials\LOD\Architecture\SkyBridge\SkyBrigde_LOD_01.BGSM]
+            e.g. Meshes/LOD/Architecture/SkyBridge/HitSkyBridgeDmgEndAngle01_LOD_0.nif [Materials\LOD\Architecture\SkyBridge\SkyBrigde_LOD_01.BGSM]
+            e.g. Meshes/LOD/Architecture/SkyBridge/HitSkyBridgeDmgEndL01_LOD_0.nif [Materials\LOD\Architecture\SkyBridge\SkyBrigde_LOD_01.BGSM]
+       8  BGSM alphaTest 0 ref 0 | blend 0 src 6 dst 7 | alpha 1.0
+            e.g. Meshes/LOD/Landscape/Rocks/RockCliff01_LOD_0.nif [Materials\LOD\RockSlab02LOD.BGSM]
+            e.g. Meshes/LOD/Landscape/Rocks/RockCliff01_LOD_1.nif [Materials\LOD\RockSlab02LOD.BGSM]
+            e.g. Meshes/LOD/Landscape/Rocks/RockCliff02_LOD_0.nif [Materials\LOD\RockSlab02LOD.BGSM]
+       4  BGSM alphaTest 1 ref 45 | blend 0 src 6 dst 7 | alpha 1.0
+            e.g. Meshes/LOD/SetDressing/ElectricalTower/ElectricalTower01L01_LOD.nif [materials\LOD\ElectricalTowerLOD.BGSM]
+            e.g. Meshes/LOD/SetDressing/ElectricalTower/ElectricalTower01L02_LOD.nif [materials\LOD\ElectricalTowerLOD.BGSM]
+            e.g. Meshes/LOD/SetDressing/ElectricalTower/ElectricalTowerSmallL01_LOD.nif [materials\LOD\ElectricalTowerLOD.BGSM]
+       1  BGSM alphaTest 1 ref 60 | blend 0 src 6 dst 7 | alpha 1.0
+            e.g. Meshes/LOD/Neighborhoods/Lexington/Corvega_Bld01LOD.nif [Materials\LOD\CorvegaLargeLOD.BGSM]
+
+== LOD nif / tree : 257 shapes -- NiAlphaProperty
+     111  no NiAlphaProperty
+            e.g. Meshes/LOD/Landscape/Trees/Blasted/BlastedForestBurntTreeUpright01_LOD_0.nif [Materials\LOD\Trees\BlastedForestTrunksLOD.BGSM | textures\LOD\Trees\BlastedForestTrunksLOD_d.dds]
+            e.g. Meshes/LOD/Landscape/Trees/Blasted/BlastedForestBurntTreeUpright01_LOD_1.nif [Materials\LOD\Trees\BlastedForestTrunksLOD.BGSM | textures\LOD\Trees\BlastedForestTrunksLOD_d.dds]
+            e.g. Meshes/LOD/Landscape/Trees/Blasted/BlastedForestBurntTreeUpright02_LOD_0.nif [Materials\LOD\Trees\BlastedForestTrunksLOD.BGSM | textures\LOD\Trees\BlastedForestTrunksLOD_d.dds]
+      27  flags 0x12EC (blend 0, test 1 GREATER) threshold 128
+            e.g. Meshes/LOD/Landscape/Trees/TreeBlasted01_LOD.nif [- | textures\lod\tree01lod_d.dds]
+            e.g. Meshes/LOD/Landscape/Trees/TreeBlasted02_LOD.nif [- | textures\lod\tree01lod_d.dds]
+            e.g. Meshes/LOD/Landscape/Trees/TreeBlasted03_LOD.nif [- | textures\lod\tree01lod_d.dds]
+      24  flags 0x12EC (blend 0, test 1 GREATER) threshold 105
+            e.g. Meshes/LOD/Landscape/Trees/Chargen/TreeMaplePW01Gr_LOD_0.nif [Materials\LOD\PreWarMapleGrLOD.BGSM | textures\LOD\PreWarMapleGrLOD_d.dds]
+            e.g. Meshes/LOD/Landscape/Trees/Chargen/TreeMaplePW01Gr_LOD_1.nif [Materials\LOD\PreWarMapleGrLOD.BGSM | textures\LOD\PreWarMapleGrLOD_d.dds]
+            e.g. Meshes/LOD/Landscape/Trees/Chargen/TreeMaplePW01Or_LOD_0.nif [Materials\LOD\PreWarMapleOrLOD.BGSM | textures\LOD\PreWarMapleOrLOD_d.dds]
+      22  flags 0x12EC (blend 0, test 1 GREATER) threshold 80
+            e.g. Meshes/LOD/Landscape/Trees/Hero/TreeHero01_LOD_0.nif [Materials\LOD\Trees\MapleBranchesLOD.BGSM | textures\LOD\Trees\MapleBranchesLOD_d.dds]
+            e.g. Meshes/LOD/Landscape/Trees/Hero/TreeHero01_LOD_1.nif [Materials\LOD\Trees\MapleBranchesLOD.BGSM | textures\LOD\Trees\MapleBranchesLOD_d.dds]
+            e.g. Meshes/LOD/Landscape/Trees/Maple/TreeBlasted02_LOD_0.nif [Materials\LOD\Trees\MapleBranchesLOD.BGSM | textures\LOD\Trees\MapleBranchesLOD_d.dds]
+      19  flags 0x12EC (blend 0, test 1 GREATER) threshold 82
+            e.g. Meshes/LOD/Landscape/Trees/Maple/TreeBlasted01_LOD_2.nif [Materials\LOD\Trees\MaplePostWarSet01LODlv2.BGSM | textures\LOD\Trees\MaplePostWarSet01LODlv2_d.dds]
+            e.g. Meshes/LOD/Landscape/Trees/Maple/TreeBlasted02_LOD_2.nif [Materials\LOD\Trees\MaplePostWarSet01LODlv2.BGSM | textures\LOD\Trees\MaplePostWarSet01LODlv2_d.dds]
+            e.g. Meshes/LOD/Landscape/Trees/Maple/TreeBlasted04_LOD_2.nif [Materials\LOD\Trees\MaplePostWarSet01LODlv2.BGSM | textures\LOD\Trees\MaplePostWarSet01LODlv2_d.dds]
+      18  flags 0x12EC (blend 0, test 1 GREATER) threshold 127
+            e.g. Meshes/LOD/Landscape/Trees/Blasted/BlastedForestBurntTreeUpright01_LOD_2.nif [Materials\LOD\Trees\BlastedForestSet01LODlv2.BGSM | textures\LOD\Trees\BlastedForestSet01LODlv2_d.dds]
+            e.g. Meshes/LOD/Landscape/Trees/Blasted/BlastedForestBurntTreeUpright02_LOD_2.nif [Materials\LOD\Trees\BlastedForestSet01LODlv2.BGSM | textures\LOD\Trees\BlastedForestSet01LODlv2_d.dds]
+            e.g. Meshes/LOD/Landscape/Trees/Blasted/BlastedForestBurntTreeUpright03_LOD_2.nif [Materials\LOD\Trees\BlastedForestSet01LODlv2.BGSM | textures\LOD\Trees\BlastedForestSet01LODlv2_d.dds]
+      13  flags 0x12EC (blend 0, test 1 GREATER) threshold 90
+            e.g. Meshes/LOD/Landscape/Trees/Chargen/TreeElmFreePW01Gr_LOD_0.nif [Materials\LOD\PreWarElmGrLOD.BGSM | textures\LOD\PreWarElmGrLOD_d.dds]
+            e.g. Meshes/LOD/Landscape/Trees/Chargen/TreeElmFreePW01Gr_LOD_1.nif [Materials\LOD\PreWarElmGrLOD.BGSM | textures\LOD\PreWarElmGrLOD_d.dds]
+            e.g. Meshes/LOD/Landscape/Trees/Chargen/TreeElmFreePW01Yw_LOD_0.nif [Materials\LOD\PreWarElmYwLOD.BGSM | textures\LOD\PreWarElmYwLOD_d.dds]
+      12  flags 0x12EC (blend 0, test 1 GREATER) threshold 100
+            e.g. Meshes/LOD/Landscape/Trees/Chargen/TreeElmFrstPW01Gr_LOD_2.nif [Materials\LOD\Chargen\ElmForestGrLODlv2.BGSM | textures\LOD\Chargen\ElmForestGrLODlv2_d.dds]
+            e.g. Meshes/LOD/Landscape/Trees/Chargen/TreeElmFrstPW01Yw_LOD_2.nif [Materials\LOD\Chargen\ElmForestGrLODlv2.BGSM | textures\LOD\Chargen\ElmForestGrLODlv2_d.dds]
+            e.g. Meshes/LOD/Landscape/Trees/Chargen/TreeElmFrstPW02Gr_LOD_2.nif [Materials\LOD\Chargen\ElmForestGrLODlv2.BGSM | textures\LOD\Chargen\ElmForestGrLODlv2_d.dds]
+       7  flags 0x12EC (blend 0, test 1 GREATER) threshold 65
+            e.g. Meshes/LOD/Landscape/Trees/Elm/TreeElmForest01_LOD_0.nif [Materials\LOD\Trees\ElmBranchesLOD.BGSM | textures\LOD\Trees\ElmBranchesLOD_d.dds]
+            e.g. Meshes/LOD/Landscape/Trees/Elm/TreeElmForest01_LOD_1.nif [Materials\LOD\Trees\ElmBranchesLOD.BGSM | textures\LOD\Trees\ElmBranchesLOD_d.dds]
+            e.g. Meshes/LOD/Landscape/Trees/Elm/TreeElmForest02_LOD_0.nif [Materials\LOD\Trees\ElmBranchesLOD.BGSM | textures\LOD\Trees\ElmBranchesLOD_d.dds]
+       2  flags 0x12EC (blend 0, test 1 GREATER) threshold 110
+            e.g. Meshes/LOD/Landscape/Trees/Chargen/TreeElmFreePW01Gr_LOD_2.nif [Materials\LOD\Chargen\ElmFreeGrLODlv2.BGSM | textures\LOD\Chargen\ElmFreeGrLODlv2_d.dds]
+            e.g. Meshes/LOD/Landscape/Trees/Chargen/TreeElmFreePW01Yw_LOD_2.nif [Materials\LOD\Chargen\ElmFreeGrLODlv2.BGSM | textures\LOD\Chargen\ElmFreeGrLODlv2_d.dds]
+       2  flags 0x12EC (blend 0, test 1 GREATER) threshold 45
+            e.g. Meshes/LOD/Landscape/Trees/Elm/TreeElmForest01_LOD_2.nif [Materials\LOD\Trees\ElmSet01LODlv2.BGSM | textures\LOD\Trees\ElmSet01LODlv2_d.dds]
+            e.g. Meshes/LOD/Landscape/Trees/Elm/TreeElmForest02_LOD_2.nif [Materials\LOD\Trees\ElmSet01LODlv2.BGSM | textures\LOD\Trees\ElmSet01LODlv2_d.dds]
+  -- the BGSM each of those shapes names:
+     111  BGSM alphaTest 0 ref 127 | blend 0 src 6 dst 7 | alpha 1.0
+            e.g. Meshes/LOD/Landscape/Trees/Blasted/BlastedForestBurntTreeUpright01_LOD_0.nif [Materials\LOD\Trees\BlastedForestTrunksLOD.BGSM]
+            e.g. Meshes/LOD/Landscape/Trees/Blasted/BlastedForestBurntTreeUpright01_LOD_1.nif [Materials\LOD\Trees\BlastedForestTrunksLOD.BGSM]
+            e.g. Meshes/LOD/Landscape/Trees/Blasted/BlastedForestBurntTreeUpright02_LOD_0.nif [Materials\LOD\Trees\BlastedForestTrunksLOD.BGSM]
+      30  BGSM alphaTest 1 ref 80 | blend 0 src 6 dst 7 | alpha 1.0
+            e.g. Meshes/LOD/Landscape/Trees/Hero/TreeHero01_LOD_0.nif [Materials\LOD\Trees\MapleBranchesLOD.BGSM]
+            e.g. Meshes/LOD/Landscape/Trees/Hero/TreeHero01_LOD_1.nif [Materials\LOD\Trees\MapleBranchesLOD.BGSM]
+            e.g. Meshes/LOD/Landscape/Trees/Maple/TreeBlasted02_LOD_0.nif [Materials\LOD\Trees\MapleBranchesLOD.BGSM]
+      24  BGSM alphaTest 1 ref 105 | blend 0 src 6 dst 7 | alpha 1.0
+            e.g. Meshes/LOD/Landscape/Trees/Chargen/TreeMaplePW01Gr_LOD_0.nif [Materials\LOD\PreWarMapleGrLOD.BGSM]
+            e.g. Meshes/LOD/Landscape/Trees/Chargen/TreeMaplePW01Gr_LOD_1.nif [Materials\LOD\PreWarMapleGrLOD.BGSM]
+            e.g. Meshes/LOD/Landscape/Trees/Chargen/TreeMaplePW01Or_LOD_0.nif [Materials\LOD\PreWarMapleOrLOD.BGSM]
+      19  BGSM alphaTest 1 ref 82 | blend 0 src 6 dst 7 | alpha 1.0
+            e.g. Meshes/LOD/Landscape/Trees/Maple/TreeBlasted01_LOD_2.nif [Materials\LOD\Trees\MaplePostWarSet01LODlv2.BGSM]
+            e.g. Meshes/LOD/Landscape/Trees/Maple/TreeBlasted02_LOD_2.nif [Materials\LOD\Trees\MaplePostWarSet01LODlv2.BGSM]
+            e.g. Meshes/LOD/Landscape/Trees/Maple/TreeBlasted04_LOD_2.nif [Materials\LOD\Trees\MaplePostWarSet01LODlv2.BGSM]
+      18  BGSM alphaTest 1 ref 127 | blend 0 src 6 dst 7 | alpha 1.0
+            e.g. Meshes/LOD/Landscape/Trees/Blasted/BlastedForestBurntTreeUpright01_LOD_2.nif [Materials\LOD\Trees\BlastedForestSet01LODlv2.BGSM]
+            e.g. Meshes/LOD/Landscape/Trees/Blasted/BlastedForestBurntTreeUpright02_LOD_2.nif [Materials\LOD\Trees\BlastedForestSet01LODlv2.BGSM]
+            e.g. Meshes/LOD/Landscape/Trees/Blasted/BlastedForestBurntTreeUpright03_LOD_2.nif [Materials\LOD\Trees\BlastedForestSet01LODlv2.BGSM]
+      13  BGSM alphaTest 1 ref 90 | blend 0 src 6 dst 7 | alpha 1.0
+            e.g. Meshes/LOD/Landscape/Trees/Chargen/TreeElmFreePW01Gr_LOD_0.nif [Materials\LOD\PreWarElmGrLOD.BGSM]
+            e.g. Meshes/LOD/Landscape/Trees/Chargen/TreeElmFreePW01Gr_LOD_1.nif [Materials\LOD\PreWarElmGrLOD.BGSM]
+            e.g. Meshes/LOD/Landscape/Trees/Chargen/TreeElmFreePW01Yw_LOD_0.nif [Materials\LOD\PreWarElmYwLOD.BGSM]
+       7  BGSM alphaTest 1 ref 65 | blend 0 src 6 dst 7 | alpha 1.0
+            e.g. Meshes/LOD/Landscape/Trees/Elm/TreeElmForest01_LOD_0.nif [Materials\LOD\Trees\ElmBranchesLOD.BGSM]
+            e.g. Meshes/LOD/Landscape/Trees/Elm/TreeElmForest01_LOD_1.nif [Materials\LOD\Trees\ElmBranchesLOD.BGSM]
+            e.g. Meshes/LOD/Landscape/Trees/Elm/TreeElmForest02_LOD_0.nif [Materials\LOD\Trees\ElmBranchesLOD.BGSM]
+       4  BGSM alphaTest 1 ref 100 | blend 0 src 6 dst 7 | alpha 1.0
+            e.g. Meshes/LOD/Landscape/Trees/Chargen/TreeElmFrstPW01Gr_LOD_2.nif [Materials\LOD\Chargen\ElmForestGrLODlv2.BGSM]
+            e.g. Meshes/LOD/Landscape/Trees/Chargen/TreeElmFrstPW01Yw_LOD_2.nif [Materials\LOD\Chargen\ElmForestGrLODlv2.BGSM]
+            e.g. Meshes/LOD/Landscape/Trees/Chargen/TreeElmFrstPW02Gr_LOD_2.nif [Materials\LOD\Chargen\ElmForestGrLODlv2.BGSM]
+       2  BGSM alphaTest 1 ref 110 | blend 0 src 6 dst 7 | alpha 1.0
+            e.g. Meshes/LOD/Landscape/Trees/Chargen/TreeElmFreePW01Gr_LOD_2.nif [Materials\LOD\Chargen\ElmFreeGrLODlv2.BGSM]
+            e.g. Meshes/LOD/Landscape/Trees/Chargen/TreeElmFreePW01Yw_LOD_2.nif [Materials\LOD\Chargen\ElmFreeGrLODlv2.BGSM]
+       2  BGSM alphaTest 1 ref 45 | blend 0 src 6 dst 7 | alpha 1.0
+            e.g. Meshes/LOD/Landscape/Trees/Elm/TreeElmForest01_LOD_2.nif [Materials\LOD\Trees\ElmSet01LODlv2.BGSM]
+            e.g. Meshes/LOD/Landscape/Trees/Elm/TreeElmForest02_LOD_2.nif [Materials\LOD\Trees\ElmSet01LODlv2.BGSM]
+
+== every BGSM under Materials/LOD: 160 files
+    57  other: alphaTest 0 ref 128 | blend 0
+          e.g. Materials/LOD/Bldg01LOD.BGSM
+          e.g. Materials/LOD/Bldg02LOD.BGSM
+          e.g. Materials/LOD/ConcreteWallLOD01.BGSM
+    43  other: alphaTest 0 ref 127 | blend 0
+          e.g. Materials/LOD/Airport01_LOD.BGSM
+          e.g. Materials/LOD/Architecture/CustomeHouse01LOD.BGSM
+          e.g. Materials/LOD/Architecture/Unique/TheCastle/TheCastleLOD01.BGSM
+    26  other: alphaTest 1 ref 127 | blend 0
+          e.g. Materials/LOD/Amphitheater01LOD.BGSM
+          e.g. Materials/LOD/Architecture/Dam/DamConcrete01LOD.BGSM
+          e.g. Materials/LOD/Architecture/LighthouseLOD01.BGSM
+     4  other: alphaTest 1 ref 128 | blend 0
+          e.g. Materials/LOD/Architecture/Bunkers/RadioTowerMetal01_LOD.BGSM
+          e.g. Materials/LOD/HWOverpassLOD.BGSM
+          e.g. Materials/LOD/Interiors/Building/Concrete/Custom/SentinelSite02LOD.BGSM
+     3  other: alphaTest 1 ref 90 | blend 0
+          e.g. Materials/LOD/PreWarElmGrLOD.BGSM
+          e.g. Materials/LOD/PreWarElmYwLOD.BGSM
+          e.g. Materials/LOD/Wrhs01LOD.BGSM
+     3  other: alphaTest 1 ref 105 | blend 0
+          e.g. Materials/LOD/PreWarMapleGrLOD.BGSM
+          e.g. Materials/LOD/PreWarMapleOrLOD.BGSM
+          e.g. Materials/LOD/PreWarMapleRdLOD.BGSM
+     2  other: alphaTest 1 ref 100 | blend 0
+          e.g. Materials/LOD/Chargen/ElmForestGrLODlv2.BGSM
+          e.g. Materials/LOD/Chargen/ElmForestYwLODlv2.BGSM
+     2  other: alphaTest 1 ref 110 | blend 0
+          e.g. Materials/LOD/Chargen/ElmFreeGrLODlv2.BGSM
+          e.g. Materials/LOD/Chargen/ElmFreeYwLODlv2.BGSM
+     2  other: alphaTest 0 ref 0 | blend 0
+          e.g. Materials/LOD/HitTechExt03LOD.BGSM
+          e.g. Materials/LOD/RockSlab02LOD.BGSM
+     1  other: alphaTest 1 ref 127 | blend 1
+          e.g. Materials/LOD/Architecture/SkyBridge/SkyBrigde_LOD_01.BGSM
+     1  other: alphaTest 1 ref 60 | blend 0
+          e.g. Materials/LOD/CorvegaLargeLOD.BGSM
+     1  other: alphaTest 1 ref 45 | blend 0
+          e.g. Materials/LOD/ElectricalTowerLOD.BGSM
+     1  other: alphaTest 1 ref 134 | blend 1
+          e.g. Materials/LOD/HitTechStain_LOD.BGSM
+     1  other: alphaTest 0 ref 128 | blend 1
+          e.g. Materials/LOD/NeoClassicalWindowsLOD.BGSM
+     1  other: alphaTest 1 ref 4 | blend 0
+          e.g. Materials/LOD/RWRiverLOD.BGSM
+     1  other: alphaTest 1 ref 144 | blend 0
+          e.g. Materials/LOD/RedR01.BGSM
+     3  tree: alphaTest 0 ref 127 | blend 0
+          e.g. Materials/LOD/Trees/BlastedForestTrunksLOD.BGSM
+          e.g. Materials/LOD/Trees/ElmTrunksLOD.BGSM
+          e.g. Materials/LOD/Trees/MapleTrunksLOD.BGSM
+     2  tree: alphaTest 1 ref 65 | blend 0
+          e.g. Materials/LOD/Trees/ElmBranchesLOD.BGSM
+          e.g. Materials/LOD/Trees/ElmSet02LODlv2.BGSM
+     2  tree: alphaTest 1 ref 82 | blend 0
+          e.g. Materials/LOD/Trees/MaplePostWarSet01LODlv2.BGSM
+          e.g. Materials/LOD/Trees/MaplePostWarSet02LODlv2.BGSM
+     1  tree: alphaTest 1 ref 127 | blend 0
+          e.g. Materials/LOD/Trees/BlastedForestSet01LODlv2.BGSM
+     1  tree: alphaTest 1 ref 45 | blend 0
+          e.g. Materials/LOD/Trees/ElmSet01LODlv2.BGSM
+     1  tree: alphaTest 1 ref 90 | blend 0
+          e.g. Materials/LOD/Trees/HeroLODlv2.BGSM
+     1  tree: alphaTest 1 ref 80 | blend 0
+          e.g. Materials/LOD/Trees/MapleBranchesLOD.BGSM

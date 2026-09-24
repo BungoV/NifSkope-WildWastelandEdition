@@ -1,0 +1,66 @@
+[
+ {
+  "title": "FO4CS bake stage times, region A -- 9 chunks, --terrain-region -24 16 -13 27 --dim 4",
+  "sub": "shipped defaults both sides (--threads 0 --chunk-threads 1 --road-detail 1); before = release/NifSkope.before_perf1.exe, after = this lane; measured in s8_bars.txt, seconds",
+  "rows": [
+   [
+    "landscape",
+    0.0,
+    0.0
+   ],
+   [
+    "meshes",
+    69.5,
+    36.8
+   ],
+   [
+    "textures",
+    9.4,
+    9.4
+   ],
+   [
+    "impostors",
+    0.0,
+    0.0
+   ],
+   [
+    "WALL",
+    81.973,
+    49.266
+   ]
+  ],
+  "file": "stage_times_region_A.png"
+ },
+ {
+  "title": "FO4CS bake stage times, region B -- 16 chunks, --terrain-region -24 16 -9 31 --dim 4",
+  "sub": "shipped defaults both sides (--threads 0 --chunk-threads 1 --road-detail 1); before = release/NifSkope.before_perf1.exe, after = this lane; measured in s8_bars.txt, seconds",
+  "rows": [
+   [
+    "landscape",
+    0.0,
+    0.0
+   ],
+   [
+    "meshes",
+    72.8,
+    40.3
+   ],
+   [
+    "textures",
+    14.3,
+    14.7
+   ],
+   [
+    "impostors",
+    0.0,
+    0.0
+   ],
+   [
+    "WALL",
+    91.494,
+    59.416
+   ]
+  ],
+  "file": "stage_times_region_B.png"
+ }
+]

@@ -1,0 +1,158 @@
+
+/*! THE HEIGHT CHANNEL'S REPAIR, and the one that stops the card coming apart.
+ *
+ *  THE DEFECT. The `_n` sheet's blue is the frame's height, and the drawer's
+ *  parallax step reads it at the UNPARALLAXED uv and then moves the sample by
+ *  `(want - d) / dot(ray, frameFwd)` world units sideways. So the height of a
+ *  texel the object does not cover decides where a card pixel OUTSIDE the
+ *  silhouette goes looking -- and until this function existed that height was
+ *  whatever `lodgenDilateFrames` had flooded there: the frame's AVERAGE, which
+ *  for a bare tree is nothing like the card plane.
+ *
+ *  Measured on the blast_n4 fixture's shipped `_oct_n.DDS`: texels under the
+ *  coverage floor decode to +264 world units on average and +743 at the 95th
+ *  percentile, against a card half-width of 135. Every one of those is a
+ *  licence to drag a trunk texel several card-widths sideways into empty sky,
+ *  and that is exactly what the picture showed -- with the parallax switched
+ *  off the same card at the same directions is a clean trunk, and with it on
+ *  it is a spray of detached flakes. (Lane IMPOSTORFIX1, 2026-09-19; the pair
+ *  of pictures is scratchpad/impostorfix1_20260919/control/look_blendon.png.)
+ *
+ *  Partially covered texels are the same fault one step in. The composition
+ *  un-premultiplies every channel by the measured coverage, which is right for
+ *  colour and normal, but a partial texel's DEPTH is not a weighted average of
+ *  anything -- half a texel of twig in front of sky has one depth, not a
+ *  blend of the twig's and the sky's -- so the division there manufactures a
+ *  number no surface ever had.
+ *
+ *  THE REPAIR, in the frame's own coordinates and nowhere else:
+ *    coverage >= 250   the texel is whole; its height stands.
+ *    16 <= cov < 250   partial; take the height of the nearest FULLY covered
+ *                      texel, which is a depth some surface actually had.
+ *    coverage < 16     outside the object; the card plane, 128, which makes
+ *                      the parallax step an exact no-op and leaves the pixel
+ *                      where it belongs.
+ *
+ *  WHY THIS ONE AND NOT THE OTHERS. Four candidates were scored in a numpy
+ *  reference card reading these same BC3 bytes, over the 24 orbit views of
+ *  blast_n4, against the N=12 set as the stand-in subject:
+ *      as shipped                                  0.3585
+ *      card plane on every non-full texel          0.4563
+ *      dilate from fully covered, nothing else     0.4288
+ *      THIS ONE (dilate, then card plane outside)  0.4587
+ *      card plane outside coverage only            0.4504
+ *  The same table re-run with the height channel told a depthSpan fitted to
+ *  the object instead of the clip range's 3 x bound tops out at 0.4602 -- but
+ *  `depthSpan` is not a free parameter. It is a CLAIM about the projection:
+ *  `GLView::glProjection` gives the orthographic bake the clip range
+ *  |center.z| +- 1.5 x bound, `gl_FragCoord.z` is linear across exactly that,
+ *  and `3 * max(radius, 1024)` is that range written down. Narrowing it means
+ *  narrowing the bake's clip range, and 0.0015 of IoU does not buy a change to
+ *  the projection. This repair needs no format change, no spec change and no
+ *  new clause: it only stops writing numbers that were never depths.
+ */
+static void lodgenRepairOctHeight( QImage & nrm, const QImage & alb, int frameW, int frameH, QString * report )
+{
+	if ( nrm.isNull() || alb.size() != nrm.size() || frameW <= 0 || frameH <= 0 )
+		return;
+	const int W = nrm.width(), H = nrm.height();
+	const int kFull = 250;		// "the object covers this texel whole"
+	const int kFloor = 16;		// the spec's coverage floor
+	qint64 partial = 0, outside = 0, whole = 0, violations = 0;
+	int worst = 0;
+	for ( int fy = 0; fy + frameH <= H; fy += frameH ) {
+		for ( int fx = 0; fx + frameW <= W; fx += frameW ) {
+			/* seed: the fully covered texels of THIS frame, and the band of
+			 * heights they occupy -- the frame's own idea of the object's depth,
+			 * which is what the self-check below is measured against. */
+			std::vector<quint8> have( size_t( frameW ) * frameH, 0 );
+			std::vector<quint8> hgt( size_t( frameW ) * frameH, 128 );
+			int hMin = 255, hMax = 0, nFull = 0;
+			for ( int y = 0; y < frameH; y++ ) {
+				for ( int x = 0; x < frameW; x++ ) {
+					const QRgb p = nrm.pixel( fx + x, fy + y );
+					hgt[size_t( y ) * frameW + x] = quint8( qBlue( p ) );
+					if ( qAlpha( alb.pixel( fx + x, fy + y ) ) >= kFull ) {
+						have[size_t( y ) * frameW + x] = 1;
+						hMin = qMin( hMin, qBlue( p ) );
+						hMax = qMax( hMax, qBlue( p ) );
+						nFull++;
+					}
+				}
+			}
+			if ( !nFull )
+				continue;		// a frame with no whole texel has no depth to spread
+			whole += nFull;
+			/* spread the fully covered heights outward, one ring per pass, until
+			 * every texel of the frame has one: the nearest whole texel's height,
+			 * ties averaged. The frame is at most a few hundred texels across. */
+			for ( int pass = 0; pass < frameW + frameH; pass++ ) {
+				std::vector<quint8> next( have );
+				bool grew = false;
+				for ( int y = 0; y < frameH; y++ ) {
+					for ( int x = 0; x < frameW; x++ ) {
+						if ( have[size_t( y ) * frameW + x] )
+							continue;
+						int s = 0, k = 0;
+						for ( int dy = -1; dy <= 1; dy++ )
+							for ( int dx = -1; dx <= 1; dx++ ) {
+								const int sx = x + dx, sy = y + dy;
+								if ( ( !dx && !dy ) || sx < 0 || sy < 0 || sx >= frameW || sy >= frameH )
+									continue;
+								if ( !have[size_t( sy ) * frameW + sx] )
+									continue;
+								s += hgt[size_t( sy ) * frameW + sx]; k++;
+							}
+						if ( k ) {
+							hgt[size_t( y ) * frameW + x] = quint8( s / k );
+							next[size_t( y ) * frameW + x] = 1;
+							grew = true;
+						}
+					}
+				}
+				have.swap( next );
+				if ( !grew )
+					break;
+			}
+			for ( int y = 0; y < frameH; y++ ) {
+				for ( int x = 0; x < frameW; x++ ) {
+					const int a = qAlpha( alb.pixel( fx + x, fy + y ) );
+					if ( a >= kFull )
+						continue;
+					const QRgb p = nrm.pixel( fx + x, fy + y );
+					int b;
+					if ( a >= kFloor ) {
+						b = hgt[size_t( y ) * frameW + x];
+						partial++;
+					} else {
+						b = 128;		// the card plane: the parallax step is then an exact no-op
+						outside++;
+					}
+					nrm.setPixel( fx + x, fy + y, qRgba( qRed( p ), qGreen( p ), b, qAlpha( p ) ) );
+				}
+			}
+			/* THE BAKE-TIME SELF-CHECK the repair is allowed to be judged by:
+			 * after it, no texel the object COVERS may decode to a height
+			 * outside the depth band the frame's own whole texels occupy.
+			 * Before it, a partial texel of this fixture reached 255 -- the far
+			 * plane, eleven card half-widths behind the tree. */
+			for ( int y = 0; y < frameH; y++ )
+				for ( int x = 0; x < frameW; x++ ) {
+					if ( qAlpha( alb.pixel( fx + x, fy + y ) ) < kFloor )
+						continue;
+					const int b = qBlue( nrm.pixel( fx + x, fy + y ) );
+					if ( b < hMin || b > hMax ) {
+						violations++;
+						worst = qMax( worst, qMax( hMin - b, b - hMax ) );
+					}
+				}
+		}
+	}
+	if ( report )
+		*report = QStringLiteral( "oct height repaired: %1 whole kept, %2 partial filled from the nearest"
+			" whole texel, %3 outside set to the card plane; self-check %4" )
+			.arg( whole ).arg( partial ).arg( outside )
+			.arg( violations == 0 ? QStringLiteral( "PASS (no covered texel decodes outside its frame's depth)" )
+				: QStringLiteral( "FAIL: %1 covered texels outside the frame's depth, worst by %2 levels" )
+					.arg( violations ).arg( worst ) );
+}

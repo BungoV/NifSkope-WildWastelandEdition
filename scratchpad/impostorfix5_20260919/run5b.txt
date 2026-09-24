@@ -1,0 +1,15 @@
+== A/B the bake-direction known-answer control (blend 0, then 1)
+maple_n4_bake                coverage cut: from the set -- floor 16/255 = 0.0627 viewport 1024x1024 orbit iou mean 0.4673 orbit counted 16 of 16 rc=0
+maple_n4_bake_on             coverage cut: from the set -- floor 16/255 = 0.0627 viewport 1024x1024 orbit iou mean 0.4673 orbit counted 16 of 16 rc=0
+blast_n4_bake_ctl            coverage cut: from the set -- floor 16/255 = 0.0627 viewport 1024x1024 orbit iou mean 0.8701 orbit counted 16 of 16 rc=0
+== C the alpha 0.20 row, 24 views, both sheet sets
+blast_n4_before_a020         coverage cut: 0.2000 (forced by WW_IMPOSTOR_ALPHA) viewport 512x768 orbit iou mean 0.6090 orbit counted 24 of 24 rc=0
+blast_n8_before_a020         coverage cut: 0.2000 (forced by WW_IMPOSTOR_ALPHA) viewport 512x768 orbit iou mean 0.7844 orbit counted 24 of 24 rc=0
+maple_n4_before_a020         coverage cut: 0.2000 (forced by WW_IMPOSTOR_ALPHA) viewport 512x768 orbit iou mean 0.4004 orbit counted 24 of 24 rc=0
+dead_n4_before_a020          coverage cut: 0.2000 (forced by WW_IMPOSTOR_ALPHA) viewport 512x768 orbit iou mean 0.6251 orbit counted 24 of 24 rc=0
+rock_n4_before_a020          coverage cut: 0.2000 (forced by WW_IMPOSTOR_ALPHA) viewport 512x768 orbit iou mean 0.8457 orbit counted 24 of 24 rc=0
+blast_n4_after_a020          coverage cut: 0.2000 (forced by WW_IMPOSTOR_ALPHA) viewport 512x768 orbit iou mean 0.6087 orbit counted 24 of 24 rc=0
+blast_n8_after_a020          coverage cut: 0.2000 (forced by WW_IMPOSTOR_ALPHA) viewport 512x768 orbit iou mean 0.7827 orbit counted 24 of 24 rc=0
+maple_n4_after_a020          coverage cut: 0.2000 (forced by WW_IMPOSTOR_ALPHA) viewport 512x768 orbit iou mean 0.3907 orbit counted 24 of 24 rc=0
+dead_n4_after_a020           coverage cut: 0.2000 (forced by WW_IMPOSTOR_ALPHA) viewport 512x768 orbit iou mean 0.6347 orbit counted 24 of 24 rc=0
+rock_n4_after_a020           coverage cut: 0.2000 (forced by WW_IMPOSTOR_ALPHA) viewport 512x768 orbit iou mean 0.8307 orbit counted 24 of 24 rc=0

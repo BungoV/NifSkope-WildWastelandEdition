@@ -1,0 +1,77 @@
+===== WW_POSEDRAW_TEST =====
+--- WW_POSEDRAW_TEST
+pose mode active: 1
+bones drawn/pickable: 113
+framebuffer pixels changed by the skeleton overlay: 1088
+poseBoneAt(a bone's screen pos) -> 0
+reset: bone moved +50 then reset, delta from rest = 0 (expect ~0)
+mirror: no L/R bone pair in this rig; skipped
+click at bone 0's screen pos selected block 5 (active=5)
+  FAIL: clicking a bone did not make it the active object
+FAILED
+done
+
+===== WW_POSEEXTRAS_TEST =====
+--- WW_POSEEXTRAS_TEST
+weight overlay: bone 0 drives 0 vertex point(s)
+proportional editing: 908 neighbour(s) gathered, falloff decreases with distance: yes
+  FAIL: weight overlay found no influenced vertices
+FAILED
+done
+
+===== WW_SKELETON_TEST =====
+--- WW_SKELETON_TEST
+analyse: 130 nodes, 93 bones, 93 deforming, 0 unused, 9 skinned shape(s)
+All filter rows: 130
+Bones filter rows: 93
+Deforming filter rows: 93
+Unused filter rows: 0
+search 'skel': 1 rows, expected 1
+footer: 130 node(s) shown · 93 bone(s), 93 deforming, 0 unused · 9 skinned shape(s)
+PASS
+
+===== the neighbour spells =====
+-- animws.sh
+     72 checks, 0 failures, 1 skips
+     PASS
+     rc=0
+-- hkxanim_ui.sh
+       ok   (b floor) the wrong frame FAILS the same test
+       FAIL (g floor) and steps it once focused
+     48 checks, 1 failures, 0 skips
+     FAIL
+     rc=1
+-- water_ui.sh
+       ok   (R2 floor) a 4 px difference FAILS the same test
+     82 checks, 0 failures, 0 skips
+     PASS
+     water_ui.sh PASS
+     rc=0
+-- ui_align.sh
+       ok   (floor) a 4 px difference FAILS the same test
+     11 checks, 0 failures
+     PASS
+     rc=0
+-- loaded_nifs.sh
+       FAIL the three editor modes are equal-width joined segments
+       FAIL the rule, the empty marker slot and the name explain nothing
+       FAIL a hover over a glyph shows one, and a hover over the name does not
+     166 checks, 3 failures
+     FAIL
+     rc=1
+-- top_bar.sh
+       FAIL Panels lists the Block List dock
+       FAIL Panels lists the Block Details dock
+       FAIL Panels lists the Header dock
+       FAIL Panels lists the NIF Browser dock
+     43 checks, 5 failures
+     FAIL
+     rc=1
+-- files_tab.sh
+       FAIL (5) every tool button explains itself (0 without)
+       FAIL (4) unload restores the bind pose BYTE-identically
+     28 checks, 2 failures
+     FAIL
+     rc=1
+NEIGHBOURS DONE
+RC=0

@@ -1,0 +1,90 @@
+  ok   skeleton loads: 
+  ok   Mixamo clip loads: 
+Running_To_Slide_And_Back_To_Running: 95 tracks, 93 frames at 60 fps (1.53333 s), 8835 keys, 4 annotation(s).
+  ok   (a') 95 tracks, 93 frames: 95 / 93
+  ok   (a') rate 60 fps: 60
+  ok   (a') a key at every frame on every track: 0 tracks off
+  ok   (a') dense frames == regeneration of the keys (first diff track -1 frame -1)
+  ok   (a') tracks named from the skeleton: LLeg_Thigh=3 COM=1
+Replaced the key on LLeg_Thigh at frame 46.
+  ok   (b) insert accepted
+  ok   (b) frame 46 reads back 30 deg about X within 0.01 deg: 0 deg off
+  ok   (b) ... and 30.00 deg from identity: 30
+  ok   (b floor) frame 46 of LLeg_Thigh differs from the original decode
+  ok   (b) frames 45 and 47 unchanged bit-for-bit (they are keys)
+  ok   (b) every other track and frame byte-identical ()
+  ok   (b) key count on the track unchanged: 93
+  ok   (b) delete keys 45 and 47: Deleted 2 key(s) on 1 track(s).
+  ok   (b) frame 45 = nlerp(key44, key46, 0.5): 0 deg, 0 units off
+  ok   (b) frame 47 = nlerp(key46, key48, 0.5): 5.12264e-06 deg off
+     frame 45 sits 86.8927 deg from key 44 (nlerp at 0.5 predicts 86.8927 for a 173.785 deg arc)
+  ok   (b) 45's arc from key 44 is half the 44->46 arc within 0.05 deg
+  ok   (b) every other track still byte-identical ()
+  ok   (c) delete the key at 46: Deleted 1 key(s) on 1 track(s).
+     (c) after the delete, frame 46 is the interpolation of keys 45 and 47: 0.876925 deg / 0 units from the original decode (exact=no)
+  ok   (c) as stated in the report: the delete yields the 45/47 interpolation, NOT the pre-edit bytes (deviation 0.876925 deg)
+  ok   (c) every other track and frame byte-identical after the delete ()
+  ok   (c) re-inserting the original key returns the clip to its pre-edit decode exactly (first diff frame -1 track -1)
+  ok   (c floor) the last key of a track cannot be deleted
+  ok   (g) save as .hkx: direct packfile, canonical layout: 6 objects, 95 tracks x 93 frames = 424080 transform bytes, 429696 bytes on disk 
+  ok   (g) our reader reads the saved file: 
+  ok   (g) decoded == the edited document, bit for bit (first diff frame -1 track -1)
+  ok   (g) frame 46 of LLeg_Thigh in the saved file is 30 deg about X: 0 deg off
+  ok   (g) the binding survives as an explicit map of 95
+Added annotation 'FootLeft' at frame 30 (0.5 s) on track 0.
+  ok   (d) add 'FootLeft' at frame 30: Added annotation 'FootLeft' at frame 30 (0.5 s) on track 0.
+  ok   (d floor) the count moved 4 -> 5
+  ok   (d) save: 
+  ok   (d) reloaded: 'FootLeft' present at frame 30
+  ok   (d) rename
+  ok   (d) move to frame 40
+  ok   (d) delete
+  ok   (d) jog.hkx loads: 
+     jog.hkx carries 4 annotations
+  ok   (d floor) jog.hkx has annotations to lose
+  ok   (d) jog save: 
+  ok   (d) every jog annotation survives save/reload, name and time ()
+  ok   (d floor) a renamed annotation is reported as a difference
+Trimmed to frames 10..50: 41 of 93 frames kept, 0.666667 s.
+  ok   (e) trim 10..50 -> 41 frames: 41
+  ok   (e) frame 0 equals old frame 10 exactly, every track
+  ok   (e floor) ... and differs from old frame 9
+  ok   (e) duration 0.666667 s = 40/60
+  ok   (e) trimmed document consistent
+Retimed 60 -> 30 fps: 47 frames (47 coincident with the old grid, copied exactly; the rest interpolated); keys at every frame again.
+  ok   (e) retime 60->30 -> 47 frames: 47
+  ok   (e) frame i at 30 fps == frame 2i at 60 fps, bit-identical: 0 differ
+  ok   (e) frameDuration 1/30: 0.0333333
+  ok   (e) root motion resampled to 47 samples
+Retimed 30 -> 60 fps: 93 frames (47 coincident with the old grid, copied exactly; the rest interpolated); keys at every frame again.
+  ok   (e) and back 30->60 -> 93 frames: 93
+  ok   (e) even frames bit-identical to the original: 0 differ; odd frames are interpolations: 2701 differ (informational)
+     COM travel before bake 487.643 units; extracted motion travel 0
+  ok   (f floor) the COM track travels ~487 before the bake: 487.643
+Baked COM's translation into the extracted motion: the track now holds (0.286699, -0.665384, 62.3565), the motion travels 487.643 units.
+  ok   (f) bake accepted
+  ok   (f) COM travel after bake is 0: 0
+  ok   (f) extracted motion carries ~487 units: 487.643
+  ok   (f) 93 samples
+  ok   (f) baked document consistent
+Unbaked track 1: restored the bytes the bake removed.
+  ok   (f) unbake accepted
+  ok   (f) unbake reverses the frames byte-identically (first diff frame -1 track -1)
+  ok   (f) ... and the extracted motion byte-identically
+  ok   (f) keys of COM back to their original translations
+Renamed track 3 'LLeg_Thigh' -> 'LLeg_ThighX'; skeleton Root has no bone of that name, so the binding index 3 is kept.
+  ok   (t) rename refuses a duplicate
+Removed track 3 (LLeg_ThighX); 94 tracks remain.
+  ok   (t) remove track -> 94 tracks, 94
+  ok   (t) float track add
+  ok   (t) float key
+  ok   (t) save refuses while a float track exists: The document carries 1 float track(s), which the .hkx writer does not carry yet (CHANGE_NEEDED: hkxwrite floats + binding slots). Remove them to save.
+  ok   (t) remove float track
+  ok   (t) then it saves
+Reduced 8742 keys to 3923 (tolerance 0.01 units, 0.05 deg, 0.001 scale).
+  ok   (t) reduce removed 4819 keys
+  ok   (t) regeneration of the reduced keys within tolerance: 0.00859742 units, 0.0499367 deg
+Copied 30 key(s) by 1 frame(s) on 1 track(s).
+  ok   (t) copy keys by +1: 32 -> 59 keys
+72 checks, 0 failures
+PASS

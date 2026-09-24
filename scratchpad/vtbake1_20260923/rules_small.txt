@@ -1,0 +1,4 @@
+rules Commonwealth.VT.32.lodt: dim 32 tiles 36 present 36 cover 0 file 11796576 B, 36 tile CRCs checked, bad 0, indexCrc 0x5081e5ac
+rules Commonwealth.VT.16.lodt: dim 16 tiles 144 present 144 cover 0 file 47186016 B, 144 tile CRCs checked, bad 0, indexCrc 0x1548bd1e
+rules Commonwealth.VT.8.lodt: dim 8 tiles 576 present 576 cover 0 file 188756064 B, 576 tile CRCs checked, bad 0, indexCrc 0x33dd2db8
+RESULT PASS (0 failures)

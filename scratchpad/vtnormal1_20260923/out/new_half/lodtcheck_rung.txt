@@ -1,0 +1,2 @@
+lodt ok 0
+lodt refused: tile 0 rawBytes 110976, the header implies 369920

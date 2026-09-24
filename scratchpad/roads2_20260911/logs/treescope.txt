@@ -1,0 +1,25 @@
+placed bases in the census: 14195
+
+classification of every placed base
+   old tree / new tree : 137
+   old tree / new NOT  : 7   <- the flip
+   old NOT  / new tree : 0   (must be zero: the clause only narrows)
+   neither             : 13744
+
+THE FLIP, every row (ww-spec-gate-audit: the table, not the count)
+formid   sig   bit15   mnam  direct  viaSCOL   model
+0008407B STAT  False   0     45      0         SetDressing\TreeSwing_RopePile01.nif
+0016A076 MSTT  False   0     13      0         SetDressing\TreeSwing01.nif
+0016ADB8 MSTT  False   0     8       0         SetDressing\TreeNoose01_HangingMannequin.nif
+0016A07A MSTT  False   0     5       0         SetDressing\TreeSwing02.nif
+0016ADBB STAT  False   0     4       0         SetDressing\TreeNoose01_Branch.nif
+00084080 STAT  False   0     4       0         SetDressing\TreeSwing_Grounded01.nif
+0008407F STAT  False   0     3       0         SetDressing\TreeSwing03_NoSwing.nif
+   placements affected: 82 direct + 0 viaSCOL
+   of the flipped bases, how many carry a distant LOD mesh: 0
+
+THE INVARIANT THAT MUST NOT MOVE: bases the clause exists for
+   landscape/trees              135 bases
+   landscape/plants             2 bases
+   total kept: 137 bases, 57523 direct placements
+   of those, carrying a distant LOD mesh (the only ones any consumer of the test can reach): 36 bases

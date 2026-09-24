@@ -1,0 +1,7 @@
+  ok   channel 0 rendered (116578 bytes)
+  ok   channel 3 rendered (65471 bytes)
+  ok   channel 6 rendered (75969 bytes)
+  ok   AO (3) and wetness (6) render differently on terrain
+  ok   the AO channel differs from normal shading
+  ok   channel 7 differs from wetness (6)
+RESULT PASS

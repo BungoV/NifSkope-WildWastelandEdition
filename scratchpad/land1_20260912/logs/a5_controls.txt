@@ -1,0 +1,11 @@
+LAND1 gate A5 -- the frozen swirl instrument, four known answers
+instrument: tiling4_20260912/t4_lib.py, imported unchanged
+
+A5.1 pure sinusoid grating                  1.0000   want >= 0.90   ok
+A5.2 isotropic noise 0.3041 vs its own twin 0.3021  within 25%   ok
+A5.3 swirl vs injected strain (texels):     0.00->0.1468  0.25->0.1530  0.50->0.1609  0.75->0.1676   monotone   ok
+A5.4 a 16x 10.667-texel repeat injected:
+     WITH the notch    clean 0.1468  injected 0.1468  moved +0.0000  ok
+     WITHOUT the notch clean 0.1470  injected 0.1710  moved +0.0241  (this is what the notch is for)
+
+A5: 4 of 4 known answers met

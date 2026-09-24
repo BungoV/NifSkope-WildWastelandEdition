@@ -1,0 +1,14 @@
+expect version 4
+expect instanceCount 6
+expect aggregateCount 2
+expect coveredCount 6
+expect aggregateViews 8
+expect aggregateStride 48
+expect agg0.cell 1 1
+expect agg0.identity 80000000
+expect agg0.coveredCount 4
+expect agg1.cell 2 1
+expect agg1.identity 80000001
+expect agg1.coveredCount 2
+expect agg0.flags 3
+expect agg1.flags 1

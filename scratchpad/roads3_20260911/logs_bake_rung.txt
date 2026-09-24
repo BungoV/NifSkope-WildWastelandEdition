@@ -1,0 +1,8 @@
+BAKE rung_roads t2020 rc=0  4s  texfiles=3  args=[]
+BAKE rung_noroads t2020 rc=0  3s  texfiles=3  args=[--no-roads]
+BAKE rung_roads t0808 rc=0  6s  texfiles=3  args=[]
+BAKE rung_noroads t0808 rc=0  6s  texfiles=3  args=[--no-roads]
+BAKE rung_detail1 t2020 rc=0  5s  texfiles=3  args=[--road-detail 1]
+BAKE rung_detail1 t0808 rc=0  6s  texfiles=3  args=[--road-detail 1]
+BAKE rung_legacy t2020 rc=0  5s  texfiles=3  args=[--roads-legacy]
+BAKE rung_legacy t0808 rc=0  10s  texfiles=3  args=[--roads-legacy]

@@ -1,0 +1,6 @@
+  n4_512 n4_512 rc=0 cards=360 50s orbit iou mean 0.7894 orbit counted 360 of 360 
+  n16_2k n16_2k rc=0 cards=360 46s orbit iou mean 0.8389 orbit counted 360 of 360 
+  n16_1k n16_1k rc=0 cards=360 43s orbit iou mean 0.7802 orbit counted 360 of 360 
+  n16_2k n16_2k rc=0 cards=180 30s orbit light: world-fixed, declination 45.0 planar 45.0 (WW_IMPOSTOR_LIGHT) orbit iou mean 0.8374 orbit counted 180 of 180 
+  n4_512 n4_512 rc=0 cards=180 28s orbit light: world-fixed, declination 45.0 planar 45.0 (WW_IMPOSTOR_LIGHT) orbit iou mean 0.7874 orbit counted 180 of 180 
+  n16_1k n16_1k rc=0 cards=180 31s orbit light: world-fixed, declination 45.0 planar 45.0 (WW_IMPOSTOR_LIGHT) orbit iou mean 0.7785 orbit counted 180 of 180 

@@ -1,0 +1,7 @@
+lane UINOTES2 rulings 07:3x + 08:2x done 2026-09-12 09:24
+exe release/NifSkope.exe 08:47:03 21867008 B md5 1b41b4f9407732f00fd9d02399dac5e3
+animws 236 checks / 0 failures / 2 skips PASS  (was 224/0/2)
+07:3x lit ink textBright #f2f3f5 on, text #e6e8eb off, Disabled/On text; NOT the accent
+08:2x keys outside Start..End dimmed with animOutOfRange #17191c at alpha 155/255: #bfbfbf -> #595a5c
+six files changed, all pure LF: src/animworkspace.cpp src/animworkspacetest.cpp src/animdopesheet.cpp src/animdopesheet.h tests/spells/animws.sh .claude/skills/ww-toggle-lit-gate/SKILL.md
+DONE from the first delivery is left in place beside this marker

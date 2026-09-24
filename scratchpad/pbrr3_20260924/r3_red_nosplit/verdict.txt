@@ -1,0 +1,6 @@
+pbr_r3 mask disk centre (699.5, 462.5) radius 298.1 px (279128 px)
+pbr_r3 furnace metal_r10 centre 0.9989 (rgb 0.999 0.999 0.999, n=1788); 60deg 0.9989 (rgb 0.999 0.999 0.999, n=19292) -> PASS
+pbr_r3 furnace metal_r50 centre 0.9989 (rgb 0.999 0.999 0.999, n=1788); 60deg 0.9989 (rgb 0.999 0.999 0.999, n=19292) -> PASS
+pbr_r3 furnace metal_r99 centre 0.9989 (rgb 0.999 0.999 0.999, n=1788); 60deg 0.9989 (rgb 0.999 0.999 0.999, n=19292) -> PASS
+pbr_r3 furnace diel_f004 centre 1.0285 (rgb 1.028 1.028 1.028, n=1788); 60deg 1.0507 (rgb 1.051 1.051 1.051, n=19292) -> FAIL
+RED nosplit aims at furnace_diel: FAILED -> OK

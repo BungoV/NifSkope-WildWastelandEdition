@@ -1,0 +1,28 @@
+
+Section 7a and the two new rows in section 5 were written on **2026-09-12** by
+lane TERRAINFMT1. Every line number below was found again from its own ANCHOR
+TEXT against the sources stamped here, never shifted by a delta
+(`ww-contract-provenance` step 3); each anchor was found EXACTLY ONCE, and the
+count was asserted rather than eyeballed. Every measured number in 7a was
+re-derived from the artefact it describes -- the 6,120 shipped sheets, the
+bakes under `scratchpad/terrainfmt1_20260912/bake/`, and the renders under
+`scratchpad/terrainfmt1_20260912/images/` -- not copied forward from a brief.
+
+| file | sha256 (16) | bytes | lines |
+|---|---|---|---|
+| `src/lodgen.cpp` | `3b15ed9e8ed9b805` | 591,582 | 13,612 |
+| `src/lodgen.h` | `0e512da98c08b8a0` | 86,565 | 1,550 |
+| `src/nifcli.cpp` | `11002abc4072c060` | 351,366 | 7,586 |
+
+| claim | where | anchor |
+|---|---|---|
+| 7a.2 the two sheet formats are an enum, so `legacy` is a value and not an absence | `lodgen.h:376` | `enum LodgenSheetFormat` |
+| 7a.2 the accessor pair the writer reads | `lodgen.h:382` | `int lodgenSheetFormat();` |
+| 7a.3 the cache directory accessor | `lodgen.h:406` | `QString lodgenMsnCacheDir();` |
+| 7a.2 the default is LEGACY, which is why no flag is the previous bytes | `lodgen.cpp:6581` | `static int g_sheetFormat = LODGEN_SHEETFMT_LEGACY;` |
+| 7a.3 the uncompressed B8G8R8A8 writer, DX10 header, chain to 1x1 | `lodgen.cpp:6830` | `static bool lodgenWriteDdsBgra8(` |
+| 7a.3 the cache reader, its channel law, the derived UP and the renormalisation | `lodgen.cpp:6906` | `static bool lodgenMsnFromCache(` |
+| 7a.4 the terrain vertex colour that carries the identity channels | `lodgen.cpp:952` | `nif->set<ByteColor4>( row, "Vertex Colors", ByteColor4( FloatVector4(` |
+| 7a.4 the CLI default for the terrain identity channels is ON | `nifcli.cpp:6442` | `bool lgTerrainIdentity = true;` |
+| §5 `--sheet-format` parsing | `nifcli.cpp:6738` | `"--sheet-format"` |
+| §5 `--msn-cache` parsing | `nifcli.cpp:6761` | `"--msn-cache"` |

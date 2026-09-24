@@ -1,0 +1,80 @@
+model hollyshrub01prewar.nif
+projection ortho
+ranges HollyShrubSmall01PreWar:0 - L2_HollyShrubSmall01PreWar:0 0+155
+lodm Materials\Landscape\Plants\PreWarHolly01.lodm none textures\Landscape\Plants\PreWarHolly01_d.dds
+mask tree
+emissive 0 shapes 0
+front 340.105 174.37 -4.93696 7.47734 34.5793
+side 340.105 174.37 -4.93696 7.47734 34.5793
+class 64 64
+gap 4 4
+coverage 16 128 160
+oct 8 64 64 139.974 139.974 -4.93696 7.47734 34.5793 3072 legacy 512 spec1
+frameoff 0 0 8.51418 6.81134
+frameoff 1 0 3.40567 6.81134
+frameoff 2 0 0.681137 6.81134
+frameoff 3 0 -0.510857 6.81134
+frameoff 4 0 -0.340565 6.81134
+frameoff 5 0 1.70284 6.81134
+frameoff 6 0 -2.0434 6.81134
+frameoff 7 0 -2.21369 6.81134
+frameoff 0 1 16.1769 6.81134
+frameoff 1 1 8.17361 8.34389
+frameoff 2 1 2.38397 10.217
+frameoff 3 1 -1.0217 13.793
+frameoff 4 1 2.21369 17.3689
+frameoff 5 1 -2.21369 15.1552
+frameoff 6 1 -1.87312 15.6661
+frameoff 7 1 -2.21368 6.81134
+frameoff 0 2 16.0067 6.81134
+frameoff 1 2 17.5392 8.17361
+frameoff 2 2 8.34389 8.17361
+frameoff 3 2 0 11.0684
+frameoff 4 2 1.19199 23.1586
+frameoff 5 2 -1.87312 14.1335
+frameoff 6 2 1.53255 17.3689
+frameoff 7 2 1.53255 6.81134
+frameoff 0 3 6.13021 6.81134
+frameoff 1 3 12.7713 8.17361
+frameoff 2 3 15.3255 0.510849
+frameoff 3 3 8.51418 4.59766
+frameoff 4 3 -1.87312 8.85474
+frameoff 5 3 -0.851418 0
+frameoff 6 3 -3.74624 13.4524
+frameoff 7 3 -4.42737 6.81134
+frameoff 0 4 4.42737 6.81134
+frameoff 1 4 3.91652 8.68446
+frameoff 2 4 0.851418 -0.170284
+frameoff 3 4 1.70284 -9.02502
+frameoff 4 4 -8.51418 1.0217
+frameoff 5 4 -15.3255 2.72453
+frameoff 6 4 -12.4307 10.0467
+frameoff 7 4 -6.13021 6.81134
+frameoff 0 5 -1.53255 6.81134
+frameoff 1 5 -1.53255 12.601
+frameoff 2 5 1.87312 -4.25709
+frameoff 3 5 -1.19199 -3.57595
+frameoff 4 5 -0.17028 9.70616
+frameoff 5 5 -8.51418 8.68446
+frameoff 6 5 -17.5392 14.3038
+frameoff 7 5 -16.0067 6.81134
+frameoff 0 6 2.21368 6.81134
+frameoff 1 6 1.70284 12.7713
+frameoff 2 6 2.21369 11.9198
+frameoff 3 6 -1.87312 11.0684
+frameoff 4 6 0.510849 10.217
+frameoff 5 6 -2.89482 10.7279
+frameoff 6 6 -9.02503 10.217
+frameoff 7 6 -16.1769 6.81134
+frameoff 0 7 2.21369 6.81134
+frameoff 1 7 2.0434 6.81134
+frameoff 2 7 -1.70284 6.81134
+frameoff 3 7 0.340565 6.81134
+frameoff 4 7 0.510857 6.81134
+frameoff 5 7 -0.681137 6.81134
+frameoff 6 7 -3.40567 6.81134
+frameoff 7 7 -8.51418 6.81134
+frameclamped 0
+aa 4 1024 0.875
+framefit 129.926 125.84 135.716 128.905
+orthofit 154.384 154.384 0

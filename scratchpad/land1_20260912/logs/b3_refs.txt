@@ -1,0 +1,26 @@
+LAND1 gate B3 -- byte identity, dirty rebake == full bake
+08:58
+   -rwxr-xr-x 1 bungo 197609 21935616 Sep 12 08:42 /e/Projects/NifskopeWildWastelandEdition/release/NifSkope.exe
+
+[A] base cached
+
+[A/refs] 08:58
+    incremental: 9 of 25 chunks dirty (1 inputs moved, 0 not in the ledger, 0 output lost, 8 by neighbour)
+    files: base 149, full 149, incr 149
+    floor: the edit moved 3 file(s) of the full bake
+           obj/Commonwealth.4.-16.24.BTO  63d99b4a8a -> f120c6ea43
+           obj/Commonwealth.4.-16.24.BTO.manifest.txt  15bbc83d19 -> 9065abbf9e
+           obj/Commonwealth.lodb  96add47929 -> e459d361cf
+    B3 A/refs           PASS
+[B] base cached
+
+[B/refs] 08:59
+    incremental: 9 of 25 chunks dirty (1 inputs moved, 0 not in the ledger, 0 output lost, 8 by neighbour)
+    files: base 151, full 151, incr 151
+    floor: the edit moved 3 file(s) of the full bake
+           obj/Commonwealth.4.-8.8.BTO  7891d13f0a -> 5f9cf9c223
+           obj/Commonwealth.4.-8.8.BTO.manifest.txt  360e7a0ec4 -> 194dee92bf
+           obj/Commonwealth.lodb  fe945d7cac -> 1593932967
+    B3 B/refs           PASS
+
+09:00

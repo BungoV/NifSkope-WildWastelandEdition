@@ -1,0 +1,8 @@
+road_elevated    meshes   343  triangles   432216  texels  72264 (27.57%)
+road_ground      meshes   729  triangles    80500  texels  27988 (10.68%)
+nonroad          meshes 14652  triangles  4218226  texels 145001 (55.31%)
+
+road_elevated    texels  72264  AUCbr 0.547  floor 0.442..0.554  twin 0.518..0.560   AUCgrey 0.419  floor 0.410..0.509  twin 0.467..0.524
+road_ground      texels  27988  AUCbr 0.629  floor 0.475..0.618  twin 0.494..0.530   AUCgrey 0.716  floor 0.385..0.629  twin 0.477..0.524
+nonroad          texels 145001  AUCbr 0.506  floor 0.482..0.534  twin 0.501..0.512   AUCgrey 0.539  floor 0.443..0.510  twin 0.498..0.526
+wrote hw_m8_8.npz

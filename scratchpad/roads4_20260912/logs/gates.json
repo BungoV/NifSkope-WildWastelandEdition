@@ -1,0 +1,44 @@
+{
+ "t2020": {
+  "G1": {
+   "texels": 23116,
+   "alpha_mean": 0.9886565488514016,
+   "alpha_min": 0.0,
+   "alpha_below_099": 440,
+   "corr_ours": -0.034534043052028986,
+   "corr_vanilla": -0.03590916950660705,
+   "corr_ground": -0.2709675005937298
+  },
+  "G2": {
+   "ours": 5.190963104457595,
+   "vanilla": 0.9642673949044394
+  },
+  "G4": {
+   "painted_width": 9.803382938224606,
+   "projected_width": 10.236858006042295,
+   "painted_texels": 23116,
+   "projected_texels": 23170
+  }
+ },
+ "t0808": {
+  "G1": {
+   "texels": 11069,
+   "alpha_mean": 0.9756432237875685,
+   "alpha_min": 0.0,
+   "alpha_below_099": 516,
+   "corr_ours": 0.04037870409282622,
+   "corr_vanilla": 0.07655104163591847,
+   "corr_ground": 0.0649287826279779
+  },
+  "G2": {
+   "ours": 3.6296531507400402,
+   "vanilla": 1.0261378424440721
+  },
+  "G4": {
+   "painted_width": 4.155659951215105,
+   "projected_width": 5.6395348837209305,
+   "painted_texels": 11069,
+   "projected_texels": 11266
+  }
+ }
+}

@@ -1,0 +1,99 @@
+== the flow gates, inside the marking tool's harness, on a copy of Commonwealth.lodl ==
+file flow.lodl  bodies 346  strokes 0  flow rate 32
+  ok   the body table re-encodes to the bytes the writer wrote
+  ok   the flow plane re-derives to the bytes the writer wrote (0 bytes differ)
+  ok   the file was read whole for the undo gate (38612038 bytes)
+-- the flow gates on synthetic masks --
+  ok   F1 continuity: a channel that narrows to half its width doubles its speed (x=64 0.03125, x=192 0.0625, ratio 2.0000, needs 1.90..2.10; 460 iterations, residual 9.3e-10)
+  ok   F1 flux is the same through 10 cross-sections within 3 percent (max deviation 1.63e-10)
+  ok   F2 the flow parts round the island and rejoins: north 0.5000 + south 0.5000 = 1.0000 of the inflow 1 (within 1 percent, halves within 2 percent; 526 iterations, residual 9.6e-10)
+  ok   F2 mass balance at every wet cell to 1e-6 of the inflow (worst 3.05e-12)
+  ok   F2 straight-bank tangency: the normal component is below sin(1 deg) at every bank texel (worst 0.000393 over 416 texels)
+  FAIL F2 island bank direction against the analytic cylinder: mean 12.01, max 22.40 degrees over 48 bank texels (needs mean < 5, max < 15; 0 stagnation texels skipped)
+  ok   F3 a lake with no outlet and no mark: max speed = 0 exactly (0, 0 iterations)
+  ok   F4 a lake with one outlet: 0 texels point away from it (0 of 3225 do; mean cosine 0.914; 252 iterations, residual 9e-10)
+  ok   F4 every streamline reaches the outlet (40 of 40 seeds, within 4 diameters)
+  ok   F7 a dye pin's weight one half-distance downstream is 1/2 (0.5000)
+  ok   F7 upstream of the pin the weight is 0 (max 0)
+  ok   F7 three half-distances downstream it is 1/8 (0.1250)
+F6 predicted from the flow before the dye: plume direction 0.0 degrees, 1/8 length 96 texels
+  ok   F6 the plume's 1/8 length measured after the dye is within 10 percent of the prediction (98.2 against 96 texels; 455 iterations, residual 9.6e-10)
+  ok   F6 the plume's direction (its weight centroid, 0.0 degrees) is within 9 degrees of the prediction (0.0)
+WW_WATER_MARK_BODY=3: marking that body instead of the largest river
+  ok   the file offers a river and a second body to mark
+river  = body 3, 25114 texels, cells (-16..-6, -21..-4)
+neighbour = body 2, 29312 texels
+  ok   the refuter's stroke lands on the neighbour: 21 of 48 points fell outside body 2 and will be ignored by the solve; the stroke is stored as drawn
+  ok   RED FIRST: a stroke on body 2 moves 29312 of its own texels
+  ok   RED FIRST: and moves 0 texels of body 3 (measured 0) -- so the isolation check below can fail
+the river drains into body 1; its mouth is at (-57664, -14272) and its centroid at (-41773, -52323)
+  ok   a mouth was found in the file, not assumed
+  ok   the stroke lands on the river: 4 of 47 points fell outside body 3 and will be ignored by the solve; the stroke is stored as drawn
+solve: 1 stroke(s) on 1 body(ies): 19043 texels under them, 25112 changed, 1493 iterations, residual 9.26e-10, 0.32 s
+  ok   P1 isolation: 0 texels outside body 3 changed (measured 0)
+  ok   P1 floor: at least 60 per cent of body 3's own texels changed (measured 25112 of 25114 = 100.0 per cent)
+  ok   the body's flow source moved 3 -> 4 (a stroke)
+the flow plane's MEAN direction over body 3: 112.50 degrees before, 112.58 degrees after
+the direction from the river's centroid to its mouth is 112.67 degrees; the plane's mean agrees to 0.09 degrees
+  ok   "rivers end up at sea": the marked plane's mean direction points at the mouth (cos = 1.000, needs > 0)
+  ok   F5 the mean direction still points at the mouth (cos = 1.000, needs > 0.9; R = 0.794)
+F5 structure over body 3: 25114 wet texels, 48574 adjacent pairs, p99 8.44 degrees, seam fraction 0.422 percent, 0 seam-bounded patches (largest r_eq 0.0 texels)
+  ok   F5 no seam-bounded constant-direction patches (measured 0; the disc fill had 39)
+  FAIL F5 the 99th percentile of the adjacent angle difference is below 5 degrees (8.44; the disc fill had 40.78)
+  ok   F5 seams are below 0.5 percent of adjacent pairs (0.422 percent; the disc fill had 2.97)
+F8 the solve: 0.322 s, 1493 iterations, residual 9.26e-10, stroke agreement 0.819
+  ok   F8 the solve of body 3 runs under 1.0 s with a residual below 1e-8 (0.322 s, 9.26e-10)
+  ok   the stroke and the solved flow under it agree (mean cosine 0.819, needs > 0.5)
+P4: body 3 carries 25112 of 25114 flow samples at 32, and 1565 of 1565 at 8; the whole-body mean is 112.58 then 112.67 degrees
+  ok   P4 floor: the file was really re-written at 8 samples a cell (header says 8, was 32) and body 3 still has samples in it (25112 at 32, 1565 at 8)
+  ok   P4 re-bake: body 3 marked at 32 samples a cell and re-written at 8 still points the same way (mean 112.58 -> 112.67 degrees, moved 0.09, tolerance 5)
+the dry point is at (-305152, -313344) -> (-304128, -313344), and body 1 sits at the worldspace corner
+  ok   a dry point was found in the file, not assumed
+  ok   a stroke on dry land is refused, in words: "that stroke touches no water anywhere along it -- it is on dry land, so it names no body of water; nothing was stored"
+dye solve: 1 stroke(s) on 1 body(ies): 19043 texels under them, 25112 changed, 1493 iterations, residual 9.26e-10, 0.53 s; dye on 17218 texels
+  ok   the river's dye reaches the body it drains into (17218 texels on 1 receiving field(s))
+dye near the mouth at (2621, 2960): 17218 dyed texels within 322 texels, mean weight 230.7 within L/2 (623 texels), max 34 beyond 3 L
+  ok   near the mouth the weight is above 128 (mean 230.7 over 623 texels)
+  ok   beyond three half-distances the weight has fallen to 1/8 or less (max 34, 1/8 of 255 = 32, slack to 48)
+  ok   every dyed texel names the river as its source (0 of 17218 do not)
+  ok   the dyed file re-opens through the .lodl reader with the dye section (bit 1, 32 samples a cell = the flow rate 32): 
+  ok   the dye words read back out of the file agree with the document (8649 of 8649 sampled texels)
+  ok   the marked file saves and re-opens with its 2 stroke(s)
+  ok   the marked file differs from the unmarked one (39235147 vs 38612038 bytes)
+  ok   P8 round trip: save, reopen, save is byte-identical (39235147 vs 39235147 bytes)
+  ok   P3 undo: removing the stroke reproduces the file it started from, byte for byte (0 bytes differ)
+-- lane WATER6: weights, one-point pins, raster authority, DirectX green --
+  ok   X1a FLOOR: a per-point weight of exactly 1 reproduces the unweighted solve word for word (hash bde9c55d1c01424a against bde9c55d1c01424a over 25114 texels)
+  ok   X1b SIGNAL: weights ramped 1 -> 3 along the stroke change the solve (hash 977ef502be17331d against the unweighted bde9c55d1c01424a)
+the mean speed nibble under the stroke's first third / last third: unweighted 7.15 / 7.69 (difference 0.54), weighted 6.85 / 7.92 (difference 1.08)
+  ok   X1b it reads faster where the weight is: the weighted solve's last-third minus first-third nibble (1.08) is greater than the unweighted one's (0.54)
+  ok   X1c the weight is LOCAL: 15671 of 25114 texels of body 3 changed (62.4 percent, gate above 0 and below 100)
+  ok   X2a REFUTER: with the pin removed, 0 of body 3's texels move off the automatic word (measured 0) -- so the gate below can fail
+  ok   X2 the pin lands on the river: stroke on body 3 (1 points)
+the one-point pin: 1 stroke(s) on 1 body(ies): 0 texels under them, 25112 changed, 1543 iterations, residual 9.78e-10, 0.43 s
+  ok   X2a a ONE-POINT curve is consumed by the solve (1 stroke(s) counted, 25112 of 25114 texels moved)
+  FAIL X2b it acts as a SOURCE: the mean cosine between the solved direction and the outward radial from the pin is 0.371 over 9706 texels within 4 widths (gate > 0.5; a sink would be below -0.5)
+  ok   X3 the raster layer is stored (1473 painted wet texels, raster layer stored (310 bytes))
+  ok   X3a the raster is the AUTHORITY where painted: 1473 of 1473 painted texels read the layer's word
+  ok   X3b the solve fills the REST: 0 texels outside the layer moved from the layer-free solve (gate 0) and 23641 did not (floor > 0)
+  ok   X3c the raster is not baked in: with the layer removed the body's words are the layer-free solve's again (0 of 25114 differ)
+  ok   X5a the DirectX cardinals (R = +X, G = +Y toward the image BOTTOM, centred on 128): east R255 G128  north R128 G1  west R1 G128  south R128 G255
+  ok   X5b the codec round-trips every word: 65536 of 65536
+  ok   X5c the checked-in test image is readable (E:/Projects/NifskopeWildWastelandEdition/release/../tests/fixtures/flowmap_directx_4x4.png)
+  ok   X5c the checked-in test image decodes to the documented directions: 0 of 16 wrong
+63 checks, 3 failures
+water mark selftest FAIL
+
+FAIL: the selftest exited 1
+FAIL: gate 'F2 island bank' is red
+FAIL: gate 'F5 the 99th' is red
+FAIL: gate 'F8 the solve' is red
+flow gates green: 17 (floor 18)
+FAIL: only 17 flow gates ran green, floor is 18
+
+== the independent decoder on the marked file ==
+charles_marked_v4.lodl body 3: 25114 wet texels, 173 distinct directions, 48574 adjacent pairs
+  adjacent angle difference p50 1.41  p90 4.22  p99 8.44 deg; seam fraction (> 10 deg) 0.422%
+  seam-bounded constant-direction patches (>= 64 texels): 0
+
+water_flow.sh FAIL (5)

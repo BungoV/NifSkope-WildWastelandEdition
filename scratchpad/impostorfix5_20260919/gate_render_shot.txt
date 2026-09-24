@@ -1,0 +1,105 @@
+deriving fixtures through the app's own CLI
+  ok   the plain fixture has nothing the bake edits shape [1] named 'Cube'
+  ok   the dirty fixture really carries a _L1 shape shape [1] named 'Cube_L1'
+
+0. the desktop's own noise floor, with no NifSkope running at all
+  ok   the pixel sampler produced samples at all    74 samples of 200x200 at 2120,200
+  ..   desktop noise range 0.141 -> hidden runs must stay under 15.000
+
+1. a plain render exits on its own
+  ok   WW_RENDER_SHOT exits 0                       rc=0 after 6s (cap 90s)
+  ok   and promptly                                 6s < 45s
+  ok   and wrote its framebuffer                    20194 bytes
+  ok   and discarded nothing                        0 lines in ww_headless_close.log
+
+2. the card bake, with nothing in the file for it to edit
+  ok   WW_IMPOSTOR_BAKE exits 0                     rc=0 after 5s (cap 90s)
+  ok   and promptly                                 5s < 45s
+  ok   and wrote its sidecar                        cube_plain.txt
+  ok   and a card IMAGE, not just a sidecar         2 png(s) in bake_plain_cards
+  ok   and still discarded nothing                  0 lines in ww_headless_close.log
+
+3. the card bake on a document it EDITS - bungo's case
+  ok   the bake exits 0 instead of asking           rc=0 after 5s (cap 90s; rc=124 is the dialog)
+  ok   and promptly                                 5s < 45s
+  ok   the bake really edited the document          1 'hidden' line(s) in cube_lod.txt
+  ok   and the close path says what it discarded    discarded cube_lod
+
+4. nothing is left running
+  ok   no harness NifSkope survived                 0 running with --port
+
+5. bungo's two rules: nothing on his main monitor, and nothing an eye can see
+  the hidden runs, including one 4x4 octahedral bake (148 matte repaints)
+  ok   the octahedral bake exits 0                  rc=0 after 6s (cap 90s)
+  ok   and wrote its sheets                         6 png(s) in bake_oct_cards
+  ok   render_plain: the run recorded a window it really had 2 mapped of 4 record(s), arm=WW_WINDOW_AT
+  ok   render_plain: no window of it was on the primary 0 of 4 records onprimary=1
+  ok   render_plain: and none from outside either   0 of 13 sample(s) on the primary
+  ok   render_plain: every window it had was invisible or absent 0 of 2 mapped records at opacity > 0
+  ok   render_plain: and Windows agrees its layered alpha was 0 0 of 13 sample(s) with alpha > 0
+  ok   render_plain: and the screen itself did not change luminance range 0.141 over 64 samples (bar 15.000, desktop noise 0.141)
+  ok   bake_plain: the run recorded a window it really had 2 mapped of 4 record(s), arm=WW_WINDOW_AT
+  ok   bake_plain: no window of it was on the primary 0 of 4 records onprimary=1
+  ok   bake_plain: and none from outside either     0 of 9 sample(s) on the primary
+  ok   bake_plain: every window it had was invisible or absent 0 of 2 mapped records at opacity > 0
+  ok   bake_plain: and Windows agrees its layered alpha was 0 0 of 9 sample(s) with alpha > 0
+  ok   bake_plain: and the screen itself did not change luminance range 0.141 over 60 samples (bar 15.000, desktop noise 0.141)
+  ok   bake_lod: the run recorded a window it really had 2 mapped of 4 record(s), arm=WW_WINDOW_AT
+  ok   bake_lod: no window of it was on the primary 0 of 4 records onprimary=1
+  ok   bake_lod: and none from outside either       0 of 11 sample(s) on the primary
+  ok   bake_lod: every window it had was invisible or absent 0 of 2 mapped records at opacity > 0
+  ok   bake_lod: and Windows agrees its layered alpha was 0 0 of 11 sample(s) with alpha > 0
+  ok   bake_lod: and the screen itself did not change luminance range 0.141 over 64 samples (bar 15.000, desktop noise 0.141)
+  ok   bake_oct: the run recorded a window it really had 3 mapped of 6 record(s), arm=WW_WINDOW_AT
+  ok   bake_oct: no window of it was on the primary 0 of 6 records onprimary=1
+  ok   bake_oct: and none from outside either       0 of 14 sample(s) on the primary
+  ok   bake_oct: every window it had was invisible or absent 0 of 3 mapped records at opacity > 0
+  ok   bake_oct: and Windows agrees its layered alpha was 0 0 of 14 sample(s) with alpha > 0
+  ok   bake_oct: and the screen itself did not change luminance range 0.141 over 77 samples (bar 15.000, desktop noise 0.141)
+
+6. the controls: the way back, the floors, and the pixels that must not move
+  ok   the visible control run exits 0              rc=0 after 5s
+  ok   the control is on the second monitor, not the primary 0 of 4 onprimary=1, arm=WW_WINDOW_AT
+  ok   the process CAN report an opaque window      2 of 2 mapped records at opacity > 0
+  ok   and the window sampler CAN see one           10 of 10 sample(s) with alpha > 0
+  ok   and the pixel sampler CAN see a window's pixels luminance range 237.282 over 64 samples (bar 15.000)
+  ok   the visible octahedral bake exits 0          rc=0 after 6s
+  ok   and the pixel sampler catches the black/white matte luminance range 237.282 over 79 samples (bar 30)
+  ok   even the strobe control stayed off the primary 0 of 6 onprimary=1
+  ok   precondition: the hidden render really was hidden 0 opaque of 2 mapped records
+  ok   hidden and visible photograph the same pixels hidden 10dbad8dd8070fee / visible 10dbad8dd8070fee
+  ok   precondition: the hidden card bake really was hidden 0 opaque of 3 mapped records
+  ok   hidden and visible bake the same cards       hidden de507fdba2c85714 / visible de507fdba2c85714 over 6 sheet(s)
+
+7. THE PINNED CAMERA: a picture with a world-unit scale, or none
+  ok   the 512-unit cube fixture was written        1350 bytes from -no-gui new --cube --size 512
+  ok   the control run photographed the cube        rc=0, 857x445 px
+  ok   and no pin was armed                         arm=unpinned
+  ok   and framed it the way it always did          span 244.50077054980352 px, auto-fit predicts 244.15
+  ..   orthographic half-width 1024 -> the cube must span 214.25 px at every distance
+  ok   ortho view 5 at eye 500 spans what the projection says 214.6607504726959 px vs 214.25 (persp=0, upp=2.389732)
+  ok   ortho view 5 at eye 1000 spans what the projection says 214.6607504726959 px vs 214.25 (persp=0, upp=2.389732)
+  ok   ortho view 5 at eye 2000 spans what the projection says 214.6607504726959 px vs 214.25 (persp=0, upp=2.389732)
+  ok   ortho view 4 at eye 500 spans what the projection says 214.6607504726959 px vs 214.25 (persp=0, upp=2.389732)
+  ok   ortho view 4 at eye 1000 spans what the projection says 214.6607504726959 px vs 214.25 (persp=0, upp=2.389732)
+  ok   ortho view 4 at eye 2000 spans what the projection says 214.6607504726959 px vs 214.25 (persp=0, upp=2.389732)
+  ok   the census agrees with the arithmetic        census upp=2.389732, computed 2.389732
+  ok   and reports the viewport the PNG actually has census vp=857x445, png 857x445
+  ok   ortho half-width 2048 gives the span it should 107.0 px vs 107.12
+  ok   ortho half-width 4096 gives the span it should 53.74454757845547 px vs 53.56
+  ok   perspective at eye 500 spans what the projection says 808.8307121938008 px vs 808.67 (persp=1, eye=500.0000)
+  ok   perspective at eye 1000 spans what the projection says 265.0 px vs 265.21 (persp=1, eye=1000.0000)
+  ok   perspective at eye 2000 spans what the projection says 113.0 px vs 113.14 (persp=1, eye=2000.0000)
+  ok   and the census moved with the distance       upp 1.297416 / 2.594833 / 5.189665
+  ok   while an orthographic scale did NOT          upp 2.389732 at eye 500 and 2.389732 at 2000
+  ok   a look-at 400 units across moves it 400 units silhouette centre moved 167.39 px, 400 units is 167.38 px
+  ok   and the two files are not the same file      27ea7cbcfebb17ea / bce1c90dd805134f
+  ok   a bad half-width is refused BY NAME          arm=center/dist/fov/refused-WW_RENDER_ORTHO-not-positive/view
+  ok   and the perspective arm served instead       persp=1, fov=60.0000
+  ok   two runs of one pinned camera are byte-identical 27ea7cbcfebb17ea / 27ea7cbcfebb17ea
+  ok   a generated document photographed at all     2182 bytes
+  ok   and the pin held on it too                   upp 93.348891 at half-width 40000, 186.697783 at 80000
+  ok   two half-widths on it are two different pictures 7834a2b7fa9327f6 / 138e88169d6a14fe
+
+render_shot.sh: 82 checks, 0 failures
+PASS

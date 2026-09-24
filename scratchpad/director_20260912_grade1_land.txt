@@ -1,0 +1,28 @@
+  LANDED 03:2x: GRADE1 DONE 03:23, verified (exe 03:06:21 21,489,152 B
+  newer than every changed source, stale sweep 0; rung before_grade1
+  02:08:57 21,487,616 B intact; no NifSkope/Fallout4 at 03:23; skills
+  mirror clean), spliced 03:23 (WW_CHANGES CR 19020, MISTAKES +4,
+  HANDOFF block below), pictures cmp_tone.png + curve.png sent 03:26.
+  RESULT: no tone curve; best gain differs per cell (0.699..1.388, mean
+  1.004); `--grade K` shipped, default 1.0 == rung bytes; RED: ground-
+  cover plane empty on all 25 tiles (tint never fires), road materials
+  do not resolve from the unpacked root, saturation above vanilla on
+  every tile, two near-grey tiles (-12,28) (-16,28).
+  PC RESTART 03:2x (his, announced 03:24): this session and the
+  in-session UINOTES1 agent die with it. NOTHING LAUNCHED after GRADE1.
+  RESUME AFTER RESTART, in this order: (1) UINOTES1 in the copy
+  E:/Projects/NifskopeWWE_ui -- read scratchpad/uinotes1_20260912/
+  PENDING.md + CHANGED_FILES.txt + the report there (it was at work
+  step 6 of 9, Animations list, at 03:18; steps 1-5 written up, the
+  lane was told 03:26 to write PENDING now); relaunch it (Opus,
+  background) with scratchpad/brief_uinotes1.md + "resume from
+  PENDING.md", liveness Monitor armed; (2) ROADS3 in the main tree
+  (brief scratchpad/brief_roads3.md, exe line refilled 03:2x to
+  03:06:21 21,489,152 B + the GRADE1 findings), Opus, background,
+  Monitor; then INCR1 -> TERRAIN-AO1 -> TERRAINFMT1 -> EROSION1 ->
+  director's Sanctuary bake -> one final message. Owed to bungo:
+  answer on 6b (Material Manager picture) and the hard line
+  (`--blend-edges quadrant` default vs a bake switch). His window:
+  none at 03:23; next launch of release/NifSkope.exe = 03:06:21.
+  LIVE NOW: nothing (restart pending).
+  (superseded LIVE NOW follows for the record)

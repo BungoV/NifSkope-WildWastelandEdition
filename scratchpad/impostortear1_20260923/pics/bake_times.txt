@@ -1,0 +1,15 @@
+cedar01 8692
+cedar03 6868
+maple1 5878
+mapleinst06g 7820
+elmforest01 5636
+hero01 7194
+burnt01 5186
+destroyed02 4883
+blasted02 5607
+smarsh01 6230
+sapling01 7002
+undergrowth01 7407
+shrub05 6181
+foothills01 6637
+evergreen01 7658

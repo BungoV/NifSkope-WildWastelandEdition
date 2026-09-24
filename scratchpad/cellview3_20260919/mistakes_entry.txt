@@ -1,0 +1,60 @@
+## 2026-09-19 -- CELLVIEW3 -- a join table grouped by a column that lies for SCOLs
+
+What was done: the first cross-tab of "which Sanctuary placements joined to the
+`.lodi`" was grouped by the `type` column of the viewer's own `WW_CELL_DUMP`,
+and it printed "STAT, no LOD model, 48 joined" -- 48 references that were in the
+bake although nothing on their base could have put them there. That table was
+about to go in a report as evidence of a join defect.
+
+What was true: `src/cellview.cpp`'s Placement sets `out.base = part.base` for a
+SCOL, so a collection's rows carry each PART's base and type, while `out.ref` is
+the collection's one reference. Grouping by that column asks a question about
+parts and answers it with a count of references. There was no join defect at
+all: recomputed at REFR level off the plugin, "drawn, base has a LOD model, not
+in the `.lodi`" is ZERO.
+
+How it was found: the number was impossible -- a STAT with no MNAM cannot be
+baked -- so the column was checked against the code that writes it.
+
+The rule: before grouping a dump by one of its columns, read the line that
+WRITES that column. A fold (SCOL parts under one reference) makes a per-row
+attribute mean something different from the per-reference question being asked,
+and the count comes out plausible rather than obviously wrong.
+
+## 2026-09-19 -- CELLVIEW3 -- a paragraph added after the `*/` that closed the comment
+
+What was done: an Edit extended an existing block comment in
+`src/cellview.cpp` by matching the last line of it and appending a new
+paragraph -- but the anchor ended before the `*/`, so the new prose landed
+AFTER the comment closed. `error: 'A' was not declared in this scope`, one
+build spent, four minutes.
+
+What was true: the compiler was reading English as C++ from the first word of
+the new paragraph.
+
+How it was found: the build log, immediately.
+
+The rule: when extending a block comment, the Edit's old_string must include
+the closing `*/`, and the new_string must put it back at the end. A comment
+edit that does not name the terminator is a code edit that does not know where
+the code starts.
+
+## 2026-09-19 -- CELLVIEW3 -- a byte-scan used as evidence about a format that has a reader
+
+What was done: to find out what texture `Materials\Vehicles\Automotive\
+Car_Glass01.BGEM` names, a crude Python scan looked for printable runs ending
+in `.dds` in the file's 271 bytes, found none, and was one step from the
+conclusion "the BGEM names no texture, so the magenta is unavoidable".
+
+What was true: a BGEM v2 stores its paths as length-prefixed strings, and this
+tree already contains the reader that knows that -- `Material::openData` in
+`src/io/materialfile.cpp` accepts the BGEM magic and has since before this
+lane. The scan proved nothing about the file; it proved the scan could not read
+it.
+
+How it was found: the reader was there in the same directory as the guess.
+
+The rule: a format this tree can already parse is never diagnosed by a byte
+scan. Use the reader, or say the question is unanswered -- a negative from a
+tool that does not understand the layout is not a negative.
+

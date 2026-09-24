@@ -1,0 +1,67 @@
+# lane UINOTES1 -- MERGE LIST (final for this lane, 2026-09-12 04:05, after
+# work step 12. The lane is code-complete and BUILD PENDING; see PENDING.md.)
+# tree: E:/Projects/NifskopeWWE_ui (robocopy of the main tree, 2026-09-12 01:53)
+# from: find src tests res tools docs -newer scratchpad/uinotes1_20260912/BUILDING
+# A = added by this lane, M = modified by this lane. One relative path per line.
+# Counts are Python byte counts (never grep). "before" = the file as the
+# robocopy carried it; see the note at the bottom where that baseline is not
+# recoverable in this tree.
+
+M src/animdopesheet.cpp        CR 0 -> 0    LF 999 -> 1240     bytes 39012
+M src/animdopesheet.h          CR 0 -> 0    LF 210 -> 253      bytes 11337
+M src/animworkspace.cpp        CR 0 -> 0    LF 2059 -> 3034    bytes 114439
+M src/animworkspace.h          CR 0 -> 0    LF 312 -> 415      bytes 17357
+M src/animworkspacetest.cpp    CR 0 -> 0    LF 1105 -> 2333    bytes 125744
+M src/hkxanimui.cpp            CR 0 -> 0    LF ? -> 480        bytes 13923
+M src/hkxanimui.h              CR 0 -> 0    LF ? -> 191        bytes 8794
+M src/hkxanimuitest.cpp        CR 0 -> 0    LF ? -> 794        bytes 32450
+M src/hkxclipedit.cpp          CR 0 -> 0    LF 1125 -> 1203    bytes 42780
+M src/hkxclipedit.h            CR 0 -> 0    LF 214 -> 238      bytes 11748
+M src/hkxplayback.cpp          CR 0 -> 0    LF ? -> 1016       bytes 30809
+M src/hkxplayback.h            CR 0 -> 0    LF ? -> 260        bytes 12466
+M src/nifskope.cpp             CR 9559 -> 9560   LF 10708 -> 10708   bytes 442507   (MIXED file: spliced in binary, never normalised)
+M src/nifskope.h               CR 0 -> 0    LF ? -> 1241       bytes 52335
+M src/nifskope_ui.cpp          CR 0 -> 0    LF ? -> 32865      bytes 1545096
+M src/ui/nifskope.ui           CR 0 -> 0    LF ? -> 2154       bytes 57760
+M src/uialigntest.cpp          CR 0 -> 0    LF ? -> 314        bytes 13604
+M src/wwskin.h                 CR 0 -> 0    LF ? -> 261        bytes 14269
+M tests/spells/animws.sh       CR 0 -> 0    LF 98 -> 169       bytes 9994
+
+# lane papers (not source; the director may or may not want them merged)
+A scratchpad/lane_uinotes1_report.md
+A scratchpad/uinotes1_20260912/BUILDING
+A scratchpad/uinotes1_20260912/MISTAKES_ENTRIES.md
+A scratchpad/uinotes1_20260912/PENDING.md
+A scratchpad/uinotes1_20260912/CHANGED_FILES.txt
+A scratchpad/uinotes1_20260912/WW_CHANGES_ENTRY.md
+A scratchpad/uinotes1_20260912/HANDOFF_BLOCK.md
+A scratchpad/flags.rsp                            (the release compile flags, so a resumed lane can syntax-check)
+A scratchpad/uinotes1_20260912/images/            (empty so far -- step 10 not started)
+
+# NOT FOR MERGE, but do not delete either:
+#   release/NifSkope.before_uinotes1.exe -- the 2026-09-11 23:26:29 baseline,
+#   21,484,032 B, sha256 a77ede97ff487ec766a53ea79c8b848b1552d5ab0413d3221ee627a8f137496d.
+#   Every "before" picture must come from it.
+#   Makefile, Makefile.Debug, Makefile.Release, Makefile.Rigging* -- regenerated
+#   by `qmake NifSkope.pro` at 04:00 because the robocopied ones still pointed at
+#   E:/Projects/NifskopeWildWastelandEdition. They are generated files; the
+#   merger should regenerate them in the target tree, not carry these across.
+#
+# WHAT IS RED IN THIS LIST, stated plainly:
+# 1. Every file above is LF-only and measures CR 0 now, except src/nifskope.cpp,
+#    which is a MIXED file and was only ever edited by binary splice.
+# 2. The "before" LF counts marked ? are not recoverable IN THIS TREE: this
+#    tree's HEAD (720762a) does not contain the animation-workspace files at
+#    all (they were uncommitted work in the main tree when the robocopy was
+#    taken), and for the files HEAD does carry, HEAD is NOT the robocopy
+#    baseline either (other lanes' uncommitted work came across with it).
+#    HEAD reads, for the record: nifskope.cpp CR 9370 LF 10517; nifskope.h
+#    LF 1158; nifskope_ui.cpp LF 31133; nifskope.ui LF 2241; wwskin.h LF 84.
+#    The counts with numbers on both sides come from my own per-item
+#    measurements in scratchpad/lane_uinotes1_report.md.
+# 3. src/nifskope.cpp's arithmetic does not close: section 1 recorded
+#    CR 9559 -> 9557 and LF 10708 -> 10705 for the status-bar removal, and the
+#    one later splice (section 5) added a single CRLF line. The file now reads
+#    CR 9560 LF 10708. One of those recorded numbers is wrong; the file itself
+#    is what counts and it is measured above. To be re-derived against the
+#    main tree's copy by whoever merges -- this lane cannot open that tree.

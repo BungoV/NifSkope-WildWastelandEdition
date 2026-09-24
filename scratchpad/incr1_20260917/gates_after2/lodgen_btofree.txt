@@ -1,0 +1,79 @@
+Thu Sep 17 08:00:20 CEDT 2026
+exe   : /e/Projects/NifskopeWildWastelandEdition/release/NifSkope.exe (22534144 bytes, 2026-09-17 07:33:21)
+rung  : /e/Projects/NifskopeWildWastelandEdition/release/NifSkope.before_btofree1.exe (22341632 bytes, 2026-09-16 15:53:30)
+region: -20 24 -19 25 dim 4
+
+== 0. the bakes ==
+  rung_native: rc=0, 15 file(s)
+  rung_stock: rc=0, 13 file(s)
+  drop: rc=0, 15 file(s)
+  keep: rc=0, 16 file(s)
+  stock: rc=0, 13 file(s)
+
+== (a) the FO4CS default: our types and nothing else ==
+    .BTO files under the mod folder: 0
+  ok   (a) the FO4CS default bake leaves ZERO .BTO chunks in the mod folder
+  ok   (a) and no lodgen_bto_scratch folder behind it
+    manifest sidecars kept: 1
+  ok   (a) the manifest sidecars are kept (1), which is bungo's open call
+    extensions under the mod folder: btr dds lodb lodi lodj lodm lodo txt 
+  ok   (a) no .BTO extension appears anywhere under the mod folder
+    the RUNG's same bake wrote 1 .BTO chunk(s)
+  ok   (a) the refuter fires: the rung DID write .BTO chunks here (1)
+    everything except the chunks and the ledger, against the rung:
+    10 identical, 3 path-rewrite only, 0 differ, 0 only in rung_native, 1 only in drop
+
+    path-rewrite only: Commonwealth.4.-20.24.BTO.manifest.txt -> FO4CSLOD/Commonwealth/Commonwealth.4.-20.24.BTO.manifest.txt
+    path-rewrite only: tex/Objects/Commonwealth.LodgenArrays.256x256.lodm -> FO4CSLOD/Commonwealth/Objects/Commonwealth.LodgenArrays.256x256.lodm
+    path-rewrite only: tex/Objects/Commonwealth.LodgenArrays.txt -> FO4CSLOD/Commonwealth/Objects/Commonwealth.LodgenArrays.txt
+    only in drop: nat/FO4CSLOD/Commonwealth/Commonwealth.4.-20.24.lodj
+  FAIL (a) every other file is byte-identical to the rung's (0 differ, 0/1 only on one side)
+  ok   (a) Commonwealth.lodo is byte-identical to the rung's (225399755 bytes)
+  ok   (a) Commonwealth.lodi is byte-identical to the rung's (41638 bytes)
+    the ledger, row by row:
+      rung record: /tmp/tmp.QQppHsTbgp/rung_native/Commonwealth.lodb
+      this record: /tmp/tmp.QQppHsTbgp/drop/FO4CSLOD/Commonwealth/Commonwealth.lodb
+  SKIP (a) the ledger row-by-row leg: the rung writes the version 1 BINARY record and this exe writes version 2 plain text -- no reader reads both, by design
+
+== (b) --keep-bto is the exact way back ==
+    .BTO files with --keep-bto: 1
+  ok   (b) --keep-bto leaves the chunks in the mod folder (1)
+  ok   (b) and creates no scratch folder at all
+    11 identical, 3 path-rewrite only, 0 differ, 0 only in rung_native, 1 only in keep
+
+    path-rewrite only: Commonwealth.4.-20.24.BTO.manifest.txt -> Commonwealth.4.-20.24.BTO.manifest.txt
+    path-rewrite only: tex/Objects/Commonwealth.LodgenArrays.256x256.lodm -> FO4CSLOD/Commonwealth/Objects/Commonwealth.LodgenArrays.256x256.lodm
+    path-rewrite only: tex/Objects/Commonwealth.LodgenArrays.txt -> FO4CSLOD/Commonwealth/Objects/Commonwealth.LodgenArrays.txt
+    only in keep: nat/FO4CSLOD/Commonwealth/Commonwealth.4.-20.24.lodj
+  FAIL (b) every output file is byte-identical to the rung's (0 differ, 0/1 only on one side)
+    the ledger, row by row:
+      rung record: /tmp/tmp.QQppHsTbgp/rung_native/Commonwealth.lodb
+      this record: /tmp/tmp.QQppHsTbgp/keep/FO4CSLOD/Commonwealth/Commonwealth.lodb
+  SKIP (b) the ledger row-by-row leg: the rung writes the version 1 BINARY record and this exe writes version 2 plain text -- no reader reads both, by design
+
+== (c) the stock target does not move at all ==
+    .BTO files from the stock target: 1
+  ok   (c) the stock target still writes its .BTO chunks (1)
+  ok   (c) and never creates a scratch folder
+    12 identical, 0 path-rewrite only, 1 differ, 0 only in rung_stock, 0 only in stock
+
+    DIFFERS: Commonwealth.lodb -> Commonwealth.lodb (716 vs 2161)
+  FAIL (c) the whole stock output is byte-identical to the rung's (1 differ, 0/0 only on one side)
+
+== (d) the census clause is written AND it moves ==
+    default   : bto built in scratch C:/Users/bungo/AppData/Local/Temp/tmp.QQppHsTbgp/drop/lodgen_bto_scratch, 1 chunk(s), 1 dropped, 860743 bytes freed, layout C:/Users/bungo/AppData/Local/Temp/tmp.QQppHsTbgp/drop/nat/FO4CSLOD, 10 file(s), 0 outside (a SECOND root: C:/Users/bungo/AppData/Local/Temp/tmp.QQppHsTbgp/drop/FO4CSLOD)
+    --keep-bto: bto built in the mod folder, 1 chunk(s), 0 dropped, 0 bytes freed, layout C:/Users/bungo/AppData/Local/Temp/tmp.QQppHsTbgp/keep/nat/FO4CSLOD, 9 file(s), 0 outside (a SECOND root: C:/Users/bungo/AppData/Local/Temp/tmp.QQppHsTbgp/keep/FO4CSLOD)
+    stock     : bto built in the mod folder, 1 chunk(s), 0 dropped, 0 bytes freed, layout n/a (no FO4CS-target file written)
+  ok   (d) the default bake says its chunks were built in a scratch folder
+  ok   (d) --keep-bto reads 0 dropped, 0 bytes freed
+    dropped: 1 chunk(s), freed: 860743 bytes
+  ok   (d) the dropped count MOVES off zero (1)
+  ok   (d) the bytes-freed count MOVES off zero (860743)
+    bto scratch: 1 chunk(s) built in C:/Users/bungo/AppData/Local/Temp/tmp.QQppHsTbgp/drop/lodgen_bto_scratch, 1 removed, 1 manifest sidecar(s) kept, 860743 bytes freed
+  ok   (d) the CLI prints its own bto scratch: line
+  ok   (d) --keep-bto prints no bto scratch: line
+  ok   (d) the stock target's clause says the mod folder, unchanged
+
+Thu Sep 17 08:03:32 CEDT 2026
+21 checks, 3 failures
+FAIL

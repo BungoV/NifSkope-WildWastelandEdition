@@ -1,0 +1,9 @@
+
+== (e) --native-verify names the plugin that went stale ==
+      bake record 1 plugin(s), 0 moved since the bake
+      pair identity ok
+  ok   (e) the pair verifies clean against the plugin it was baked from
+      native REFUSED E:/Projects/NifskopeWildWastelandEdition/scratchpad/archlock1_20260917/gates_0117/bakerec_work/one/FO4CSLOD/Commonwealth/Commonwealth.lodo is STALE: objectCorpusHash 0x6324ed6a35cde4ea in the file, 0x9e97ef9d6f906cda from E:/Projects/NifskopeWildWastelandEdition/scratchpad/archlock1_20260917/gates_0117/bakerec_work/moved.esm -- a placement, a base's MNAM or a SCOL part changed since the bake
+  ok   (e) the pair is REFUSED against an edited plugin (rc=1)
+  FAIL (e) and the refusal NAMES the plugin (Fallout4.esm)
+  FAIL (e) and says WHICH WAY it moved (edited / added / removed / reordered / resized)

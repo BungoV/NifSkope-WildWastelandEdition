@@ -1,0 +1,5 @@
+e5320fddb24f85885835af3f03b46a4e0ee6d885 release/before_pbrlodfix1/NifSkope.exe
+4d30baa941da526b4a7c835e6924e19c595d9dec /e/Projects/NifskopeWildWastelandEdition/release/NifSkope.exe
+old=release/before_pbrlodfix1
+new=/e/Projects/NifskopeWildWastelandEdition/release
+red=none

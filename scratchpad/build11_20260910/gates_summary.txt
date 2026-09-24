@@ -1,0 +1,20 @@
+### files_tab start 17:30:58
+### files_tab rc=1  17:31:04
+28 checks, 2 failures
+FAIL
+    ok-lines: 26
+
+### hkxanim_ui start 17:31:04
+### hkxanim_ui rc=1  17:31:11
+48 checks, 1 failures, 0 skips
+FAIL
+    ok-lines: 47
+    --- skips (a SKIP is never a pass) ---
+
+### hkxanim_play start 17:31:11
+### hkxanim_play rc=0  17:31:18
+27 checks, 0 failures
+PASS
+    ok-lines: 27
+
+CHAIN COMPLETE 17:31:19

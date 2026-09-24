@@ -1,0 +1,144 @@
+CHANGED FILES - lane UINOTES2, 2026-09-12, tree E:/Projects/NifskopeWWE_ui (the copy)
+
+Nothing committed, nothing stashed. Line endings measured with PYTHON BYTE
+COUNTS, never with grep. Every file below is pure LF and was pure LF before this
+lane touched it; every patch asserted its CR count before writing and refused to
+write if any anchor did not match exactly once.
+
+A/M path                                                  bytes    CR      LF
+M   src/animworkspace.cpp                                122142     0    3166
+M   src/animworkspacetest.cpp                            162827     0    2940
+M   src/animdopesheet.cpp                                 40890     0    1271
+M   src/animdopesheet.h                                   12302     0     269
+M   tests/spells/animws.sh                                13928     0     221
+M   .claude/skills/nifskope-ww-build-verify/SKILL.md      17832     0     270
+A   .claude/skills/ww-toggle-lit-gate/SKILL.md             6646     0     125
+
+    All seven are untracked or unstaged in this copy's git index, which is an old
+    checkout; the A/M column says what this lane did to the file on disk.
+
+    THE TWO OUTSIDE THE FIRST DELIVERY'S FIVE are src/animdopesheet.cpp and
+    src/animdopesheet.h, both added by ruling 08:2x (2026-09-12 08:2x, "grey out
+    diamond keyframes out of animations start and end range"): the greying is a
+    decision the sheet's painter makes, and the header carries one new public
+    static, AnimDopeSheet::dimOutOfRange( QColor ), so the harness measures the
+    painted pixels against the painter's own arithmetic rather than re-deriving
+    the 155/255 constant on its own. Both were pure LF before and after; the
+    counts above were taken in Python after the last write, and the counts they
+    replace (121358/3155, 153971/2811, 12251/199, 5202/107) were this lane's
+    first delivery.
+
+NOT TOUCHED, checked rather than assumed:
+    src/nifskope_ui.cpp        1545096 B  CR      0  LF   32865  mtime 2026-09-12 02:08:14
+    res/style.qss                11097 B  CR      0  LF     278  mtime 2026-09-06 01:35:14
+    src/nifskope.cpp            442507 B  CR   9560  LF   10708  mtime 2026-09-12 03:02:13
+    src/lodgen.h                 67267 B  CR      0  LF    1185  mtime 2026-09-12 06:07:04
+    src/nifcli.cpp              312750 B  CR      0  LF    6922  mtime 2026-09-12 06:07:16
+    src/lodgen.cpp              506272 B  CR      0  LF   11621  mtime 2026-09-12 03:57:07
+    src/lodgenmanager.cpp       125470 B  CR      0  LF    2727  mtime 2026-09-11 13:57:13
+
+    src/nifskope.cpp is the mixed-CRLF file the brief names and its CR count above
+    is the proof this lane never opened it. src/nifskope_ui.cpp is LF-only and was
+    last written at 02:08, before this lane began. src/lodgen.h and src/nifcli.cpp
+    carry lane ROADS4's 06:07 edits; they were never opened for writing here and
+    are listed only because my build compiled them (report, section 2b).
+
+LANE ARTEFACTS (new, all under scratchpad/, none of it product code), re-measured
+after the DONE2 round; the patch scripts fix7..fix10, measure_lit_core.py, the
+build_main3/4 and animws_done2* logs and the re-taken pictures are this round's:
+A   scratchpad/lane_uinotes2_report.md                                     32879
+A   scratchpad/uinotes2_20260912/CHANGED_FILES.txt                         10994
+A   scratchpad/uinotes2_20260912/DONE                                        254
+A   scratchpad/uinotes2_20260912/DONE2                                       644
+A   scratchpad/uinotes2_20260912/HANDOFF_BLOCK.md                           5544
+A   scratchpad/uinotes2_20260912/MISTAKES_ENTRIES.md                        7579
+A   scratchpad/uinotes2_20260912/WW_CHANGES_ENTRY.md                        4283
+A   scratchpad/uinotes2_20260912/animws_after.log                          27228
+A   scratchpad/uinotes2_20260912/animws_before.log                         24334
+A   scratchpad/uinotes2_20260912/animws_done2.log                          28866
+A   scratchpad/uinotes2_20260912/animws_done2b.log                           101
+A   scratchpad/uinotes2_20260912/animws_done2c.log                           101
+A   scratchpad/uinotes2_20260912/animws_done2d.log                         28970
+A   scratchpad/uinotes2_20260912/animws_final.log                          27396
+A   scratchpad/uinotes2_20260912/build_main.log                            24831
+A   scratchpad/uinotes2_20260912/build_main2.log                            8885
+A   scratchpad/uinotes2_20260912/build_main3.log                           23329
+A   scratchpad/uinotes2_20260912/build_main4.log                            7707
+A   scratchpad/uinotes2_20260912/compose_icons.py                           7039
+A   scratchpad/uinotes2_20260912/docs2.py                                  21874
+A   scratchpad/uinotes2_20260912/files_tab_after.log                          83
+A   scratchpad/uinotes2_20260912/fix10_compose_white.py                     2986
+A   scratchpad/uinotes2_20260912/fix1_icons.py                              9088
+A   scratchpad/uinotes2_20260912/fix2_ctrla.py                              5979
+A   scratchpad/uinotes2_20260912/fix3_gate.py                              23299
+A   scratchpad/uinotes2_20260912/fix4_loop_claim.py                         4880
+A   scratchpad/uinotes2_20260912/fix5_loop_gate.py                          2431
+A   scratchpad/uinotes2_20260912/fix6_skill.py                              2935
+A   scratchpad/uinotes2_20260912/fix7_white_lit.py                         14110
+A   scratchpad/uinotes2_20260912/fix8_range_dim.py                         19479
+A   scratchpad/uinotes2_20260912/fix9_percent_channel.py                    9495
+A   scratchpad/uinotes2_20260912/from_main/RESUME_BY_ROADS4.md              5213
+A   scratchpad/uinotes2_20260912/hkxanim_ui_after.log                         96
+A   scratchpad/uinotes2_20260912/images/after/animws_list_menu.png          4264
+A   scratchpad/uinotes2_20260912/images/after/dock_frame46.png             22880
+A   scratchpad/uinotes2_20260912/images/after/dock_overview.png            23651
+A   scratchpad/uinotes2_20260912/images/after/inapp_axisstrip.hkx         429728
+A   scratchpad/uinotes2_20260912/images/after/inapp_edited.hkx            429728
+A   scratchpad/uinotes2_20260912/images/after/inapp_range.hkx             283216
+A   scratchpad/uinotes2_20260912/images/after/inapp_range_whole.hkx       429728
+A   scratchpad/uinotes2_20260912/images/after/r3_axis_dialog.png            4971
+A   scratchpad/uinotes2_20260912/images/after/r6_header_bar.png             1848
+A   scratchpad/uinotes2_20260912/images/after/r6_menu_clip.png              2398
+A   scratchpad/uinotes2_20260912/images/after/r6a_panel_annotation.png      3004
+A   scratchpad/uinotes2_20260912/images/after/r6a_panel_track.png           3202
+A   scratchpad/uinotes2_20260912/images/after/r7_sheet_menu_frame37.png      2564
+A   scratchpad/uinotes2_20260912/images/after/r7a_annotation_menu.png       3883
+A   scratchpad/uinotes2_20260912/images/after/r7a_zoom_after_drag.png       7929
+A   scratchpad/uinotes2_20260912/images/after/r9_range_grips.png            9963
+A   scratchpad/uinotes2_20260912/images/after/sheet_colours.png            10158
+A   scratchpad/uinotes2_20260912/images/after/sheet_range_dim.png          10173
+A   scratchpad/uinotes2_20260912/images/after/transport_1x.png              4909
+A   scratchpad/uinotes2_20260912/images/after/transport_2x.png              6172
+A   scratchpad/uinotes2_20260912/images/after/transport_2x_off.png          6172
+A   scratchpad/uinotes2_20260912/images/after/transport_2x_on.png           6242
+A   scratchpad/uinotes2_20260912/images/after/viewport_gizmo.png           56507
+A   scratchpad/uinotes2_20260912/images/before/animws_list_menu.png         4264
+A   scratchpad/uinotes2_20260912/images/before/dock_frame46.png            29123
+A   scratchpad/uinotes2_20260912/images/before/inapp_axisstrip.hkx        429728
+A   scratchpad/uinotes2_20260912/images/before/inapp_edited.hkx           429728
+A   scratchpad/uinotes2_20260912/images/before/inapp_range.hkx            283216
+A   scratchpad/uinotes2_20260912/images/before/inapp_range_whole.hkx      429728
+A   scratchpad/uinotes2_20260912/images/before/sheet_colours.png           18132
+A   scratchpad/uinotes2_20260912/images/before/transport_1x.png             4614
+A   scratchpad/uinotes2_20260912/images/before/transport_2x.png             5782
+A   scratchpad/uinotes2_20260912/images/before/viewport_gizmo.png          37878
+A   scratchpad/uinotes2_20260912/images/icons_before_after.png             33883
+A   scratchpad/uinotes2_20260912/images/icons_zoom_4x.png                  13235
+A   scratchpad/uinotes2_20260912/lodl/big.nif                            2651953
+A   scratchpad/uinotes2_20260912/lodl/bigshot.png                          24632
+A   scratchpad/uinotes2_20260912/lodl/n.png                                22896
+A   scratchpad/uinotes2_20260912/lodl/new_probe.log                          538
+A   scratchpad/uinotes2_20260912/lodl/nifshot.png                          14609
+A   scratchpad/uinotes2_20260912/lodl/p.png                                22896
+A   scratchpad/uinotes2_20260912/lodl/probe.png                            22896
+A   scratchpad/uinotes2_20260912/lodl/probe_NifSkope.before_uinotes2.exe.log       538
+A   scratchpad/uinotes2_20260912/lodl/probe_NifSkope.exe.log                 538
+A   scratchpad/uinotes2_20260912/lodl/whole.png                            88019
+A   scratchpad/uinotes2_20260912/lodl_open_after.log                        4456
+A   scratchpad/uinotes2_20260912/lodl_open_final.log                        4346
+A   scratchpad/uinotes2_20260912/lodl_open_rung.log                         7135
+A   scratchpad/uinotes2_20260912/logs_animws_before.txt                    24974
+A   scratchpad/uinotes2_20260912/measure_dot.py                             1836
+A   scratchpad/uinotes2_20260912/measure_lit_core.py                        2586
+A   scratchpad/uinotes2_20260912/qmake.log                                   402
+A   scratchpad/uinotes2_20260912/refresh_changed.py                         2651
+A   scratchpad/uinotes2_20260912/skeleton_overlay_after.log                11272
+A   scratchpad/uinotes2_20260912/skeleton_overlay_final.log                11252
+A   scratchpad/uinotes2_20260912/top_bar_after.log                          3111
+A   scratchpad/uinotes2_20260912/top_bar_final.log                          3111
+A   scratchpad/uinotes2_20260912/ui_align_after.log                         1940
+A   scratchpad/uinotes2_20260912/ui_align_final.log                         1940
+A   scratchpad/uinotes2_20260912/water_ui_after.log                        17073
+A   scratchpad/uinotes2_20260912/water_ui_before.log                       17073
+A   scratchpad/uinotes2_20260912/water_ui_final.log                        17073
+A   scratchpad/uinotes2_20260912/ws_direct.txt                                90

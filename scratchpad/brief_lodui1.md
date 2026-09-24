@@ -1,0 +1,41 @@
+# Lane LODUI1 -- the LOD Generation panel under the FO4CS target offers exactly the five .lod outputs; Trees-only toggle; 512 px; Cards-from-ring for trees; the native row and the four stage times
+
+## Header
+- Tree: `E:\Projects\NifskopeWildWastelandEdition`, branch `main`, working tree. Nothing is committed. Exe at launch: `release/NifSkope.exe` 2026-09-11 12:19:06, 21,180,928 B (ROADS1). Lanes NATIVE1a/1b (native `.lodo`/`.lodi` v3, `--native`, `--native-no-ladder`), TERRAIN-R (`.lodt` mask/emissive, `--vt-cover-in-color`) and ROADS1 (`--roads` / `--no-roads`, `--road-cover-suppress`) have ALL landed since this brief was drafted: read their blocks in HANDOFF.md for the CLI switches the panel now has to reach, and treat `--roads` as a row under BOTH targets (vanilla does it) and `--vt-cover-in-color` as INI-only (no row) until bungo rules on cover's home. Rollback rung, ONCE: `release/NifSkope.before_lodui1.exe`.
+- Read first: `CONSTITUTION.md`; `HANDOFF.md` top block -- RESUME, the newest lane block, and the rulings of 2026-09-11 06:4x ("we should only have those 5 .lod types in fo4 community shaders target"), 07:0x-07:2x (impostors trees only; "Make trees only a toggle"; "keep it simple like that for now"), 07:3x-07:5x (512 px; "Cards from ring" = the existing override, tree-only now), the NATIVE1a block ("the LOD panel has no native row at all -- the four stage times are not delivered"), and bungo's owed item "the GUI bake with the four stage times"; `src/lodgenmanager.cpp` in full (the panel: `LodgenPanel` ~355, `targetBox` ~626, `applyTarget` ~1257, `objectsCheck` ~711, `btrCheck` ~985, `texCheck` ~1002, `vtBtrCheck` ~1085, `impostorLevelBox` ~840, `cardResBox` ~889, `fo4cs()` ~1620, the settings save ~1820, the run ~2158); `docs/LODGEN_NATIVE_LODO_LODI.md` section 6 (region bakes) and the CLI switches NATIVE1a/1b added (`--native`, `--native-verify`, ...); `docs/LODGEN_IMPOSTOR_SPEC.md` "Cards" (the `--candidates` switch, `--impostors-from-level`), `src/lodgen.cpp` `lodgenIsTreeModel` (~1868) and the `isTree` block (~3318); `.claude/skills/nifskope-ww-panel-style/SKILL.md` (this IS a panel lane); `MISTAKES.md` root from 2026-09-10 on.
+- Skills you MUST invoke: `nifskope-ww-panel-style` (every control through the shared helpers; rows only, no text; the self-test counts with floors), `ww-test-harness-add`, `ww-anchored-hookup` (edits to `src/lodgen.cpp` / `src/nifcli.cpp` / `NifSkope.pro`), `fo4cs-census-field` (the stage times are census words: WRITTEN and MOVE), `nifskope-ww-lodgen`, `nifskope-ww-build-verify`, `ww-retire-a-surface` for the rows that go away under a target (the seven reachability places apply to rows too: settings keys, tooltips, the summary line, the CLI switch, harness expectations).
+- Build rules: ONE build (+ counted relinks). Markers `scratchpad/lodui1_20260911/BUILDING` / `DONE`. Game check before the link; bungo's window renamed aside. `ls scratchpad/*/BUILDING` empty at launch. Small regions only, own out-dir.
+
+## bungo's rulings (verbatim in HANDOFF.md)
+1. Under target = FO4 Community Shaders the panel offers ONLY: `.lodl` landscape, `.lodt` terrain textures, `.lodo` object library, `.lodi` instances, `.lodm` material sidecars. Every legacy row hides under that target: `.btr`, `.bto`, bake terrain textures, chunk textures from the pyramid, their sub-rows. The Stock engine target keeps them all.
+2. Impostor cards are trees only: panel row "Trees only", ON by default; off = the plugin's own LOD set with an empty far slot (the old "missing" rule), nothing else; `--candidates all` retired. Future per-object picker is parked; do not build it.
+3. Card resolution list gains 512 px, with the cost shown (8x8 views -> 4096 sheet per channel, ~12 MB per tree type).
+4. "Cards from ring" (`--impostors-from-level`) stays; it applies to the tree set only now and its label/tooltip say so.
+
+## The work
+1. **Target gating** (`applyTarget`): under FO4CS, hide `btrCheck` + its sub-rows, `objectsCheck` (`.bto`) + its sub-rows, `texCheck`, `vtBtrCheck`, the atlas/manifest rows, and SHOW the native row (item 5). Under Stock, the reverse (native row hidden). The summary line names the outputs the run will write, by extension, and is asserted per target. Settings saved under one target must not tick a hidden row under the other (the existing "restoring a saved target only hides" law -- keep it and test it).
+2. **Trees only** row (`LodgenTreesOnlyCheck`, default ON, QSettings key `LodGeneration/treesOnly`): ON -> the CLI gets the tree-only candidate mode; OFF -> the empty-far-slot mode. `--candidates all` and its enum value retired in `nifcli.cpp` (refuses with the reason in words if passed). The bake driver `tools/bake_impostor_cards.sh` and `--list-impostor-candidates` follow the same two modes.
+3. **512 px** in `cardResBox`, with the cost line reading the sheet size and MB for the chosen value (the bake hook's 32..512 clamp in `nifskope_ui.cpp` ~22540 is already there; prove the panel's 512 reaches it).
+4. **Cards from ring**: tree-only in effect (the substitution touches non-tree bases nowhere -- gate on a region with a non-tree empty slot), label "Tree cards from ring", tooltip one sentence.
+5. **Native row**: `LodgenNativeCheck` ("Native object files (.lodo/.lodi)"), FO4CS only, default ON under FO4CS; wires `--native <out-dir>` into the run the same way the other outputs are wired; the census line after a run names the pair's sizes.
+6. **Four stage times** in the panel's result line and the census (`landscape / meshes / textures / impostors`, seconds, printed after every run, GUI and CLI): each WRITTEN and MOVING (a run with a stage off prints 0 for it and nonzero for the rest).
+7. **Self-test** (panel-style): rows visible per target counted with a floor both ways (FO4CS: N legacy rows hidden, native shown; Stock: the reverse), the summary line's extension list per target asserted, Trees-only default ON asserted, 512 present, the cost line moves with the combo, the stage times present in the result line after a headless region run through the manager (`WW_LODGEN_*` harness pattern, `SHOT=` for the panel grab).
+8. Build, then the chain: the lodgen manager harness(es) (`lodgen_manager*.sh` or whatever drives `LodgenPanel` -- find them), `lodgen_native.sh`, `lodgen_terrain.sh`, `lodgen_card*`, `ui_align.sh`, `water_ui.sh` at their baselines from the newest lane block; every moved count explained by name.
+9. Pictures: `panel_fo4cs.png` and `panel_stock.png` (in-app grabs, `SHOT=`), described; `result_line.png` with the four times.
+10. Documents: `scratchpad/lodui1_20260911/WW_CHANGES_ENTRY.md`, `HANDOFF_BLOCK.md`, `MISTAKES_ENTRIES.md` (entries start with `## `); report `scratchpad/lane_lodui1_report.md`; and a ONE-PAGE bake instruction for bungo at `scratchpad/lodui1_20260911/BAKE_INSTRUCTION.md`: how to run the full Commonwealth bake from the panel under the FO4CS target, what it writes where, how long each stage took on the Sanctuary region (extrapolated honestly, labelled as an estimate), and what to send back (the census line, the four times, the file sizes).
+
+## Gates
+- L1 row visibility per target with floors both ways; summary extensions per target.
+- L2 Trees-only ON/OFF -> candidate list on Sanctuary: ON has zero non-tree bases (a named empty-slot non-tree shown absent), OFF has that base present.
+- L3 512 reaches the bake hook (a bake at 512 writes a 4096-wide sheet).
+- L4 Cards-from-ring touches no non-tree base.
+- L5 native row wires `--native`; the pair is written by a GUI-driven region run.
+- L6 four stage times written and moving.
+- L7 exe newer than every changed file; drivers rebuilt; rung == launch bytes.
+- L8 no NifSkope left running; game down at every launch.
+
+## Rules
+- One build (+ counted relinks). Rows only, no text (bungo's no-blurb rule; tooltips one sentence). No format changes (NATIVE1b / TERRAIN-R own those files). Never his installed files. Never `git stash`, never commit. Plain language.
+
+## Report
+`scratchpad/lane_lodui1_report.md`, incremental: `## 0. Pre-registered gates`, `## 1. The rows per target`, `## 2. Trees only / 512 / Cards from ring`, `## 3. The native row and the stage times`, `## 4. Build and gates`, `## 5. Pictures`, `## 6. Owed / red / bungo's calls`, `## 7. Mistakes`, `## 8. Finished-work skill review`.

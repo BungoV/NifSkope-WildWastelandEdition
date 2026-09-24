@@ -1,0 +1,18 @@
+== A_land.esm
+VHGT gradient byte at data+3327: 3 -> 43 (cell -19,21, compressed)
+record data 6601 -> 6602 bytes, 6 GRUP size(s) fixed up
+wrote E:/Projects/NifskopeWildWastelandEdition/scratchpad/land1_20260912/out/b3/esm/A_land.esm (330776577 bytes)
+== A_refs.esm
+REFR 0x00248402 DATA x: -76277.250 -> -76187.250 (cell -19,21)
+wrote E:/Projects/NifskopeWildWastelandEdition/scratchpad/land1_20260912/out/b3/esm/A_refs.esm (330776576 bytes)
+== A_border.esm
+VHGT gradient byte at data+3327: 244 -> 28 (cell -17,23, compressed)
+record data 8609 -> 8609 bytes, 0 GRUP size(s) fixed up
+wrote E:/Projects/NifskopeWildWastelandEdition/scratchpad/land1_20260912/out/b3/esm/A_border.esm (330776576 bytes)
+== B_land.esm
+VHGT gradient byte at data+3327: 1 -> 41 (cell -7,9, compressed)
+record data 8168 -> 8168 bytes, 0 GRUP size(s) fixed up
+wrote E:/Projects/NifskopeWildWastelandEdition/scratchpad/land1_20260912/out/b3/esm/B_land.esm (330776576 bytes)
+== B_refs.esm
+REFR 0x00248CD6 DATA x: -28269.090 -> -28179.090 (cell -7,9)
+wrote E:/Projects/NifskopeWildWastelandEdition/scratchpad/land1_20260912/out/b3/esm/B_refs.esm (330776576 bytes)

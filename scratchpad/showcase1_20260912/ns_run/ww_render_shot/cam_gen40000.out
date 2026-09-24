@@ -1,0 +1,10 @@
+[Warning] QObject::connect(QListModel, QWidget): signal not found
+[Warning] QObject::connect(QListModel, QWidget): signal not found
+[Warning] QObject::connect(QListModel, QWidget): signal not found
+[Warning] QObject::connect(QListModel, QWidget): signal not found
+[Info] lodt terrain:
+ lodl DiamondCity.lodl: cells [-4,-4]..[9,7], 8 samples a cell (file 32), spacing 512.0 units, grid 113x97
+heights read in 0 ms
+no .lodt sheets (no DiamondCity.VT.*.lodt beside E:/Projects/Fallout 4 Mods/mods/FO4CS/Terrain); drawing the inline-colour data view
+1 shapes, 10961 vertices; sample grids 43844 bytes; plane read at 0 ms
+meshed and built at 45 ms

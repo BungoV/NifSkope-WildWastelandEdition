@@ -1,0 +1,47 @@
+TILING4 -- choosing the readout, and the C4 notch control done properly
+
+Each readout scored on the SAME known answers.  "abs ceil" and "rat ceil"
+are the worst of vanilla`s 22 on that readout, absolute and over the
+sheet`s own phase twin.  "warp over" = how many of the seven selection
+sheets the WARP-ONLY bake (the defect) puts over the ratio ceiling;
+"rung over" = how many the rung does, which must be 0 or near it.
+
+readout    abs ceil  rat ceil | warp over rung over | prop over       sep
+mean         0.3363    3.2846 |      4 of 7      0 of 7 |      0 of 7     2.174
+p75          0.4920    3.9453 |      0 of 7      0 of 7 |      0 of 7     1.950
+p90          0.6100    3.9180 |      1 of 7      0 of 7 |      0 of 7     2.415
+p95          0.6767    3.8883 |      1 of 7      0 of 7 |      1 of 7     2.152
+area50       0.2387 238660723.4974 |      4 of 7      0 of 7 |      0 of 7 252131744.522
+
+REFUSED: no readout both clears the warp and acquits the rung.
+Closest: mean (warp 4 of 7 over, rung 0 of 7 over).  This is a LIMIT
+of the instrument and it goes in the report as one.
+
+   sheet          vanilla      rung warp only  proposal   (ratio over the sheet`s own twin)
+   ( -20,  24)    1.9940    1.4558    3.5319    2.7754
+   ( -20,  20)    1.6841    1.1546    2.5904    2.1740
+   ( -36, -20)    1.6342    1.0153    3.4623    3.0012
+   (  -4, -20)    1.8136    1.1616    3.0540    2.8332
+   (  28, -20)    2.1193    1.1341    2.6082    2.4080
+   (  -4,  16)    1.9135    2.1651    3.3518    3.0455
+   (  24,  16)    3.1973    1.0654    3.3286    2.7634
+   ratio ceiling 3.2846 (worst of vanilla`s 22)
+
+C4 (redone) the notch, against an INJECTED repeat of known amplitude.
+   A repeat is coherent and axis-aligned, so it would inflate any
+   orientation statistic.  Injected into a real vanilla sheet at
+   amplitudes spanning TILING2`s whole range (its ceiling is 0.264 and
+   the rung reads about 2.0), the NOTCHED reading must not move.
+   amp (8-bit)  un-notched     notched
+   0.0             0.1714      0.1712
+   0.5             0.1714      0.1712
+   2.0             0.1709      0.1712
+   8.0             0.1722      0.1712
+   the notched reading drifts 0.0000 over a 16x range of injected repeat
+   (the un-notched one moves 0.0008).  The notch does separate the grid from the swirl.
+   (s1c`s C4 used the `average` bake as the no-repeat control and read
+   it ABOVE the rung, 0.28..0.70 against 0.15..0.32.  That bake replaces
+   every land texture by one flat colour, so its fine band is only
+   alpha-blend edges and VCLR ramps -- highly oriented and almost
+   energy-free.  It is a valid no-repeat control for a PERIODICITY, which
+   is what TILING3 used it for, and a useless one for an ORIENTATION.)

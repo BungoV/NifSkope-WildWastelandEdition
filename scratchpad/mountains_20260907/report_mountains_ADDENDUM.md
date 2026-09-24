@@ -229,4 +229,4 @@ re-run `lens2\scan.py` — it takes 24 seconds.
 
 *Provenance: everything above was measured by the IDENTITY lane on 2026-09-07
 using `dds.py`, `msn_updecide.py`, `nifpeek.py`, `pestr.py` and
-`tools/exere/f4pdb.py`. No file in any repo or game folder was modified.*
+the Todd's treat tooling (kept outside this repo). No file in any repo or game folder was modified.*

@@ -1,0 +1,12 @@
+RT orig_rows 2185
+RT round_rows 1794
+RT orig_bones 95
+RT round_bones 78
+RT bones_only_in_orig 17
+RT bones_only_in_round 0
+RT compared_rows 1794
+RT worst_translation 0.000008 at frame 0 bone 78
+RT worst_rotation 0.000000 at frame 19 bone 4
+RT worst_scale 0.000000
+RT round_scale_departure_from_1 0.000000
+RT result PASS

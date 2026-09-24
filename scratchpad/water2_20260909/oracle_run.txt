@@ -1,0 +1,64 @@
+rule C: 805 components -> 793 bodies (12 merged, 1 refused, 1 ambiguous)
+== INPUT ==
+  cells -96..95 x -96..95 = 36864  spc 32  wet texels 21754958
+  worldspace default water height 450.0 type 00000018 ExtOceanWater
+  bridge gap 2 texels: 528 merges accepted, 13 refused
+  rule C: 805 components -> 793 bodies
+
+== BODIES ==
+  total 346
+    area >=      1 texels :  346
+    area >=      4 texels :  231
+    area >=     16 texels :  183
+    area >=     64 texels :   89
+    area >=    256 texels :   49
+    area >=   1024 texels :   20
+    area >=  65536 texels :    1
+  class: sea 1  river 115  lake 230
+  class (area >= 64): sea 1  river 42  lake 46
+  bodies assembled from more than one component: 62
+  TINY (< 4 texels): 115
+
+== PER WATR FORM ==
+  ExtOceanWater                bodies  176  texels  21583510
+  ExtMarshDarkWater            bodies   34  texels     44040
+  ExtMarshScumWater            bodies   49  texels     26410
+  ExtRiverCharlesUpper         bodies   11  texels     25214
+  ExtLakeWater                 bodies   15  texels     24003
+  ExtLakeForestWater           bodies    6  texels     23662
+  ExtCreekSanctuaryWater       bodies    2  texels     10666
+  ExtRiverNFoothillsWaterSE    bodies   13  texels      8426
+  ExtLakeQuannapowittWater     bodies    1  texels      3696
+  ExtMurkyWater                bodies   17  texels      1427
+  ExtLakeIrradiatedWater       bodies    3  texels      1400
+  ExtGlowingSeaWater01         bodies   12  texels      1203
+  ExtRiverNFoothillsWaterSW    bodies    1  texels       677
+  ExtPuddleWater               bodies    5  texels       373
+  ExtCreekSanctuaryWaterE      bodies    1  texels       251
+
+== FLOW SOURCE ==
+  all bodies : none 132  form NAM0 182  bed 2  drain 30
+  area >= 64 : none 12  form NAM0 47  bed 1  drain 29
+
+== THE 20 BIGGEST BODIES ==
+  id   edid                       class       area   height parts  elong  aniso flow      cells
+  1    ExtOceanWater              sea     21575619    450.0   323    1.8   0.05 none      (-96..95, -96..95)
+  2    ExtMarshDarkWater          river      29312   1300.0     9    9.5   0.90 drain     (-9..2, -38..-22)
+  3    ExtRiverCharlesUpper       river      25114   1300.0    11   13.2   0.98 drain     (-16..-6, -21..-4)
+  4    ExtLakeForestWater         lake       15429   1800.0     4    4.2   0.90 form NAM0 (-22..-17, -16..-8)
+  5    ExtMarshScumWater          river      14639    450.0    13    5.9   0.75 drain     (-3..5, -26..-17)
+  6    ExtLakeWater               river      11045    450.0     3    9.3   0.94 form NAM0 (6..14, 14..23)
+  7    ExtCreekSanctuaryWater     river      10665   7250.0     4    6.8   0.91 drain     (-23..-15, 17..24)
+  8    ExtMarshDarkWater          river       7586    800.0     3    5.4   0.91 drain     (-3..2, -29..-23)
+  9    ExtLakeForestWater         river       7466   5490.0     1    3.0   0.68 drain     (-24..-20, 11..14)
+  10   ExtLakeWater               river       6147    750.0     3    4.0   0.91 drain     (-5..-3, 9..13)
+  11   ExtRiverNFoothillsWaterSE  river       4657   2400.0     2   17.8   0.95 drain     (-4..4, 26..28)
+  12   ExtMarshScumWater          river       4248    600.0     5    6.0   0.85 drain     (6..10, -27..-24)
+  13   ExtLakeQuannapowittWater   lake        3696   1250.0     1    2.6   0.76 form NAM0 (0..2, 21..24)
+  14   ExtMarshScumWater          lake        2771    450.0     4    4.0   0.76 form NAM0 (10..13, -24..-22)
+  15   ExtOceanWater              lake        2735    450.0     3    1.5   0.33 none      (9..11, -14..-12)
+  16   ExtLakeWater               lake        2277    750.0     1    3.6   0.89 form NAM0 (1..2, 16..18)
+  17   ExtRiverNFoothillsWaterSE  river       2277  10000.0     1    5.6   0.92 drain     (-20..-17, 27..28)
+  18   ExtLakeWater               river       2152    850.0     6    1.9   0.29 form NAM0 (-9..-7, -7..-6)
+  19   ExtMarshDarkWater          river       1515    800.0     3    2.4   0.65 drain     (-4..-3, -23..-22)
+  20   ExtMarshDarkWater          river       1478    600.0     2    3.0   0.66 drain     (4..6, -27..-26)

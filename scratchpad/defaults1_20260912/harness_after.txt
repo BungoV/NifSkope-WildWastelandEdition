@@ -1,0 +1,10 @@
+lodgen_terrain             rc=1     12s  26 checks, 3 failures FAIL 
+lodgen_identity            rc=0      2s  RESULT PASS 
+lodgen_farring             rc=1     24s  RESULT FAIL 
+lodgen_tree_sway           rc=1      5s  4 checks, 3 failures FAIL 
+lodgen_ground_cover        rc=1     20s  29 checks, 5 failures RESULT FAIL 
+lodgen_roads               rc=1     18s  11 checks, 1 failures RESULT FAIL 
+lodgen_card_arrays         rc=0      4s  RESULT PASS 
+lodgen_texture_arrays      rc=1      6s  RESULT FAIL 
+lodgen_terrain_vt          rc=1     37s  41 checks, 3 failures RESULT FAIL 
+lodgen_native              rc=0     52s  18 checks, 0 failures RESULT PASS 

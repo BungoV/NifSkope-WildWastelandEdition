@@ -1,0 +1,76 @@
+LANE LAND1 -- files changed, 2026-09-12
+Parts: A = TILING5 (terrain-guided land sampling), B = INCR1 (incremental regeneration)
+
+NOTHING IS COMMITTED. The tree carries other lanes' work; this list is only mine.
+Sizes/hashes RE-MEASURED at 09:36 against the shipping exe of 09:32:37
+(21,951,488 B, sha1 3e1914a0637b66f438d873e0230b1e8c04d7c806). The earlier
+08:42:33 measurement is superseded, not amended: four of the eight files moved
+after it.
+All eight files are LF-only: CR count 0, measured with Python byte counts.
+
+IN THE TREE (tracked, modified)
+  part  path                                          bytes    CR  LF     sha1(12)
+  A B   src/lodgen.cpp                               535632     0  12320  c96556114038
+          A: the --land-guide sampler (off|drag|aspect|aspecthex|slopewarp|
+             flatwarp), --land-guide-scale (refused outside 128..2048),
+             --land-guide-slope, and the macro-normal field read from the
+             global heightmap.
+          B: lodgenChunkInputDigest (the per-chunk input fingerprint, one-cell
+             ring), lodgenLedgerAssetDigest generalised to any asset folder,
+             the LTEX texture-set + material rows, and the .lodb reader/writer.
+  A B   src/lodgen.h                                  75006     0   1342  35eeb65ca806
+          the flag enums, LodgenIncrRefusal, the ledger structs.
+    B   src/nifcli.cpp                               338407     0   7405  b893c4c6a2f6
+          --incremental: the diff, the one-cell neighbour widening, the FIVE
+          refusals, the census line, and the ledger write -- which goes LAST,
+          after the merge has rewritten every .BTO. The retire lambda also
+          names the three per-chunk tex sheets among a chunk's outputs.
+          The switch digest has TWO skip lists: gLgSwitchSkip (token and value
+          dropped, --native and --native-mesh-report now on it) and
+          gLgSwitchSkipValue (token kept, value dropped: --vt). --native joins
+          --atlas/--arrays/--impostors on the whole-region refusal.
+  A B   docs/LODGEN_TERRAIN_VT.md                    164170     0   2498  88e898ee1923
+          four new rows in the §5 flag table; the LAND1 section under §8, now
+          naming all FOUR exes this lane built and which numbers came off which.
+    -   tests/spells/lodgen_roads.sh                   8399     0    171  6182df63d716
+          INHERITED RED, cleared: the R5 road-colour margin 0.8 -> 0.72, with
+          the derivation written into the file. Suite 11 checks / 0 failures.
+          (R1 also went red mid-lane and is NOT a change to this file: it was
+          the switch digest eating --vt's path, fixed in nifcli.cpp.)
+    B   tests/spells/lodgen_native_baseline.sh         9139     0    199  075312319ece
+          *.LODB added to the excluded set beside *.BTR, with the reasoning in
+          the header: the ledger is bookkeeping, not a stock object-bake output,
+          and it has its own gates. The FROZEN BASELINE FILE
+          (tests/baselines/stock_baseline.sha256) is deliberately NOT rewritten
+          and the exclude=BTR profile string is deliberately unchanged, or every
+          checked-in baseline is refused. Reads 25 of 25, 0 differ.
+
+IN THE TREE (untracked, new)
+    B   docs/LODGEN_LEDGER_FORMAT.md                  13582     0    268  1cde529801ab
+          the .lodb contract, the dependency map (written before the code, with
+          its own correction kept visible), the switch-digest skip list, the
+          refusal table, the census line, the gate, and how to make a genuinely
+          edited plugin to test against.
+
+OUTSIDE THE TREE (another lane's scratchpad, one paragraph appended by agreement)
+    B   scratchpad/lodui1_20260911/BAKE_INSTRUCTION.md 21612    0    404  0d474efa7ae0
+          how to use --incremental after an edit, in the operator's language.
+
+NOT TOUCHED, DELIBERATELY
+  - every UI file (src/nifskope*.cpp/.h, src/ui/**, res/**) -- the brief's rule.
+  - E:/Projects/NifskopeWWE_ui -- the copy tree another lane is building in.
+  - bungo's installed Data\Terrain.
+  - WW_CHANGES.md and MISTAKES.md: the text is delivered as
+    scratchpad/land1_20260912/WW_CHANGES_ENTRY.md and MISTAKES_ENTRIES.md for
+    the overseer to splice, per the harness-orchestration rule.
+
+LANE WORKING FILES (scratchpad/land1_20260912/, not for the tree)
+  Part A: a2_msn.py a3_bake.sh a3_gate.py a4_bake.sh a4_gate.py a5_controls.py
+          a6_score.py a6_stage1.sh a6_stage2.sh a6_sweep.sh a6_val.sh
+          a8_chain.sh a9_r5.sh a_patch.py a_pics.py a_pics_bake.sh
+          a6_score_sel.json a6_score_val.json a_slopes.json
+  Part B: b_esmedit.py b_pickref.py b2_refusals.sh b3_identity.sh b3_compare.py
+          b4_ledger.py b5_times.py b_pics.py b8_chain.sh b8b_chain.sh
+          b8c_chain.sh b8d_chain.sh b_digestfix.py b_docfix.py b_prov2.py
+          b_prov3.py b_baseline.py b_handoff2.py b_wwchg2.py m_add.py m_add2.py
+  Rollback rung: NifSkope.partA_prerelink.exe (07:42:22, Part A only).

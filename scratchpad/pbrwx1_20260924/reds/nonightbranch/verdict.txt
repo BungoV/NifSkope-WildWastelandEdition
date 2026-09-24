@@ -1,0 +1,65 @@
+pbr_wx1_gates judge, red=nonightbranch, CommonwealthClear fv=131 tods=8, climate TNAM=30,54,102,126,175,68
+  judge GMST: X=600 Y=-325 T=0.15 ext=2 shadowScale=-15 secunda=75 fades=5/10; A..D=6.9250 7.0750 18.9250 19.0750
+cli
+  ok   the app's sky GMSTs = the judge's read of Fallout4.esm -- fSunXExtreme=600(esm) fSunYExtreme=-325(esm) fSunAlphaTransTime=0.15(esm) fDaytimeColorExtension=2(esm) fSunShadowScale=-15(esm) iSecundaSize=75(esm)
+  ok   the climate = DefaultClimate with the judge's TNAM -- climate2 edid=DefaultClimate tnam=30,54,102,126,175,68 moons=0x44
+  ok   IMGS Sky Scale per slot = the judge's IMSP -> HNAM[7] -- app (3.5, 2.4, 2.5, 3.0, 3.4, 3.4, 3.0, 4.2) judge (3.5, 2.4, 2.5, 3.0, 3.4, 3.4, 3.0, 4.2)
+  ok   the disabled cloud mask = NAM1 | ~present (0xFFFF2FC0) -- FFFF2FC0
+skycol
+  ok   sky colours at 12.00 (Day->Day t=0.000) = the CIELab blend, +-2/255 -- worst 0.000/255; Lab vs byte lerp differ by up to 0.01/255 here
+  ok   sky colours at 07.00 (Sunrise->LateSunrise t=0.667) = the CIELab blend, +-2/255 -- worst 0.000/255; Lab vs byte lerp differ by up to 5.25/255 here
+  ok   (floor) 07.00 is between two different keys and Lab != byte lerp by > 2/255 -- margin 5.25
+  ok   sky colours at 19.50 (EarlySunset->Sunset t=0.667) = the CIELab blend, +-2/255 -- worst 0.000/255; Lab vs byte lerp differ by up to 11.03/255 here
+  ok   (floor) 19.50 is between two different keys and Lab != byte lerp by > 2/255 -- margin 11.03
+sundir
+  ok   light direction at 09.00 = the arc, +-0.5 deg -- off by 0.0000 deg; disc 0.0000 deg; app 0.672637,-0.553349,0.491288 judge 0.6726,-0.5533,0.4913
+  ok   light direction at 12.00 = the arc, +-0.5 deg -- off by 0.0000 deg; disc 0.0001 deg; app 0.204682,-0.673533,0.710252 judge 0.2047,-0.6735,0.7103
+  ok   light direction at 16.00 = the arc, +-0.5 deg -- off by 0.0000 deg; disc 0.0000 deg; app -0.568405,-0.623469,0.536845 judge -0.5684,-0.6235,0.5368
+  FAIL light direction at 01.00 = the arc, +-0.5 deg -- off by 57.5233 deg; disc 105.3256 deg; app 0.834260,-0.228770,0.501672 judge 0.0000,-0.6107,0.7918
+  ok   the spec's noon SunPos (98.77, -325, 501.23) -- (98.765, -325.0, 501.235)
+  FAIL the spec's 01:00 light (0, -0.6107, 0.7918) -- (0.83426, -0.22877, 0.501672)
+edges
+  ok   disc alpha at 06.90 = 0.0000 -- app 0.0000
+  ok   disc alpha at 06.95 = 0.1667 -- app 0.1667
+  ok   disc alpha at 07.00 = 0.5000 -- app 0.5000
+  ok   disc alpha at 07.10 = 1.0000 -- app 1.0000
+  ok   disc alpha at 18.95 = 0.8333 -- app 0.8333
+  ok   disc alpha at 19.10 = 0.0000 -- app 0.0000
+  ok   colour keys at 02.99 = Night->Night t=0.0000 -- app Night,Night,0.000000
+  ok   colour keys at 03.01 = Night->EarlySunrise t=0.0067 -- app Night,EarlySunrise,0.006667
+  ok   colour keys at 22.99 = LateSunset->Night t=0.9933 -- app LateSunset,Night,0.993333
+  ok   colour keys at 23.01 = Night->Night t=0.0000 -- app Night,Night,0.000000
+cloud
+  ok   drawn layers = [0, 1, 2, 3, 4, 5, 12, 14, 15] -- app [0, 1, 2, 3, 4, 5, 12, 14, 15]
+  ok   (spec) drawn layers = {0,1,2,3,4,5,12,14,15}
+  ok   cloud colours at 12.00 = the CIELab blend of PNAM, +-2/255 -- worst 0.000
+  ok   cloud alphas at 12.00 = the JNAM blend, +-0.002 -- worst 0.00000
+  ok   cloud speeds and 100 s offsets at 12.00 = QNAM/RNAM
+  ok   cloud colours at 07.00 = the CIELab blend of PNAM, +-2/255 -- worst 0.000
+  ok   cloud alphas at 07.00 = the JNAM blend, +-0.002 -- worst 0.00000
+  ok   cloud speeds and 100 s offsets at 07.00 = QNAM/RNAM
+  ok   (spec) layer 3 alpha at noon = 0.7
+  ok   (spec) layer 14 offset after 100 s = 0.2126
+moon
+  FAIL moon at 01.00 day  4: phase 1 three_wan alpha 1.000 shadow 1.000 elev 61.56 az 180.00 -- app phase=1 three_wan alpha=1.000000 shadow=1.000000 elev=-25.4625 az=105.3346
+  FAIL moon at 01.00 day 17: phase 4 new alpha 1.000 shadow 1.000 elev 61.56 az 180.00 -- app phase=4 new alpha=1.000000 shadow=1.000000 elev=-25.4625 az=105.3346
+  FAIL moon at 01.00 day 32: phase 0 full alpha 1.000 shadow 1.000 elev 61.56 az 180.00 -- app phase=0 full alpha=1.000000 shadow=1.000000 elev=-25.4625 az=105.3346
+  FAIL moon at 22.00 day  4: phase 1 three_wan alpha 1.000 shadow 0.667 elev 33.66 az 223.07 -- app phase=1 three_wan alpha=1.000000 shadow=0.666667 elev=-16.9742 az=249.9163
+  FAIL moon at 22.00 day 17: phase 4 new alpha 1.000 shadow 0.667 elev 33.66 az 223.07 -- app phase=4 new alpha=1.000000 shadow=0.666667 elev=-16.9742 az=249.9163
+  FAIL moon at 22.00 day 32: phase 0 full alpha 1.000 shadow 0.667 elev 33.66 az 223.07 -- app phase=0 full alpha=1.000000 shadow=0.666667 elev=-16.9742 az=249.9163
+  FAIL moon at 19.50 day  4: phase 1 three_wan alpha 0.133 shadow 0.000 elev 3.82 az 239.74 -- app phase=1 three_wan alpha=0.133333 shadow=0.000000 elev=-3.3386 az=243.1492
+  FAIL moon at 19.50 day 17: phase 4 new alpha 0.133 shadow 0.000 elev 3.82 az 239.74 -- app phase=4 new alpha=0.133333 shadow=0.000000 elev=-3.3386 az=243.1492
+  FAIL moon at 19.50 day 32: phase 0 full alpha 0.133 shadow 0.000 elev 3.82 az 239.74 -- app phase=0 full alpha=0.133333 shadow=0.000000 elev=-3.3386 az=243.1492
+  FAIL moon at 06.30 day  4: phase 1 three_wan alpha 0.667 shadow 0.000 elev 5.76 az 121.20 -- app phase=1 three_wan alpha=0.666667 shadow=0.000000 elev=-4.7862 az=116.1574
+  FAIL moon at 06.30 day 17: phase 4 new alpha 0.667 shadow 0.000 elev 5.76 az 121.20 -- app phase=4 new alpha=0.666667 shadow=0.000000 elev=-4.7862 az=116.1574
+  FAIL moon at 06.30 day 32: phase 0 full alpha 0.667 shadow 0.000 elev 5.76 az 121.20 -- app phase=0 full alpha=0.666667 shadow=0.000000 elev=-4.7862 az=116.1574
+  FAIL (spec) the moon at 01:00 = elev 61.56 az 180.00; at 22:00 = elev 33.66 az 223.07
+  ok   (spec) phases: day 4 three_wan, day 17 new, day 32 full
+  ok   (spec) moon alpha at 19:30 = 0.133
+  ok   only Secunda is printed (moons byte 0x44)
+lit
+  ok   with Sun on the lookdev light at 16.00 = the arc's light, +-0.5 deg -- off by 0.0266 deg (echo -0.568,-0.623,0.537)
+  ok   (floor) with Sun off the light is W1's, not the arc (> 2 deg away) -- off by 45.093 deg (echo -0.650,0.108,0.752)
+  ok   (floor) the echo names the preview and the sun pass
+54 checks, 15 failures
+FAIL

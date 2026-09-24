@@ -1,0 +1,64 @@
+gamecheck rc=1 (must be 1)
+-rwxr-xr-x 1 bungo 197609 18517504 2026-09-10 03:38:56.767492800 +0200 release/NifSkope.exe
+### g1_ringcontrol start 03:52:17
+### g1_ringcontrol rc=0  03:52:19
+       ring:   ok   CONTROL the old south-to-north order gives 1096.000 north and 1096.000 east on the inner boundary, which the bar above REFUSES
+       ring: self-test 9 checks, 0 failures, RESULT PASS
+  ok   CONTROL the OLD fill order fails the bar above (it is discriminating)
+13 checks, 0 failures
+RESULT PASS
+
+### g2_terrain_vt start 03:52:20
+### g2_terrain_vt rc=1  03:52:55
+35 checks, 1 failures
+RESULT FAIL
+
+### g5_terrain start 03:52:55
+### g5_terrain rc=0  03:53:07
+  ok   CONTROL: the shifted comparison degrades
+  ok   CONTROL: the same statistic reads high on vanilla's own sheet
+26 checks, 0 failures
+PASS
+
+### g6_identity start 03:53:07
+### g6_identity rc=0  03:53:09
+RESULT PASS
+
+### g7_bake_cover start 03:53:09
+### g7_bake_cover rc=0  03:53:13
+
+### g7_bake_nocover start 03:53:13
+### g7_bake_nocover rc=0  03:53:17
+
+12
+12
+edgeband cover rc=1
+edgeband nocover rc=1
+edgeband vs build4 cover rc=1
+edgeband vs build4 nocover rc=1
+### byte identity y=24 chunks vs BUILD4 after/
+  IDENTICAL cover Commonwealth.4.-20.24.DDS
+  IDENTICAL cover Commonwealth.4.-20.24_data.DDS
+  IDENTICAL cover Commonwealth.4.-20.24_msn.DDS
+  IDENTICAL cover Commonwealth.4.-20.28.DDS
+  DIFFERS   cover Commonwealth.4.-20.28_data.DDS
+  DIFFERS   cover Commonwealth.4.-20.28_msn.DDS
+  IDENTICAL cover Commonwealth.4.-24.24.DDS
+  IDENTICAL cover Commonwealth.4.-24.24_data.DDS
+  IDENTICAL cover Commonwealth.4.-24.24_msn.DDS
+  IDENTICAL cover Commonwealth.4.-24.28.DDS
+  DIFFERS   cover Commonwealth.4.-24.28_data.DDS
+  DIFFERS   cover Commonwealth.4.-24.28_msn.DDS
+  IDENTICAL nocover Commonwealth.4.-20.24.DDS
+  IDENTICAL nocover Commonwealth.4.-20.24_data.DDS
+  IDENTICAL nocover Commonwealth.4.-20.24_msn.DDS
+  IDENTICAL nocover Commonwealth.4.-20.28.DDS
+  DIFFERS   nocover Commonwealth.4.-20.28_data.DDS
+  DIFFERS   nocover Commonwealth.4.-20.28_msn.DDS
+  IDENTICAL nocover Commonwealth.4.-24.24.DDS
+  IDENTICAL nocover Commonwealth.4.-24.24_data.DDS
+  IDENTICAL nocover Commonwealth.4.-24.24_msn.DDS
+  IDENTICAL nocover Commonwealth.4.-24.28.DDS
+  DIFFERS   nocover Commonwealth.4.-24.28_data.DDS
+  DIFFERS   nocover Commonwealth.4.-24.28_msn.DDS
+### CHAIN DONE 03:53:23

@@ -1,0 +1,24 @@
+TAG=b8_A_before REGION=A(-24 16 -13 27) CHUNKTHREADS=1 THREADS=0 rc=0 WALL_MS=81973
+    stage times: landscape 0.0 s, meshes 69.5 s, textures 9.4 s, impostors 0.0 s
+    peak working set: 2.29 GB (2458927104 bytes)
+    bound by asked
+    census: bake census: threads 16, chunk threads 1 bound by asked, chunk jobs 9, chunk workers 1, peak working set: 2.29 GB (2458927104 bytes), bto built in scratch E:/Projects/NifskopeWildWastelandEdition/scratchpad/perf1_20260917/work/s1/b8_A_before/obj/lodgen_bto_scratch, 9 chunk(s), 9 dropped, 7800025 bytes freed, layout E:/Projects/NifskopeWildWastelandEdition/scratchpad/perf1_20260917/work/s1/b8_A_before/nat/FO4CSLOD, 20 file(s), 0 outside (a SECOND root: E:/Projects/NifskopeWildWastelandEdition/scratchpad/perf1_20260917/work/s1/b8_A_before/obj/FO4CSLOD)
+    exe=/e/Projects/NifskopeWildWastelandEdition/release/NifSkope.before_perf1.exe
+TAG=b8_A_after REGION=A(-24 16 -13 27) CHUNKTHREADS=1 THREADS=0 rc=0 WALL_MS=49266
+    stage times: landscape 0.0 s, meshes 36.8 s, textures 9.4 s, impostors 0.0 s (library: census 0.1 s, models 19.0 s, ladder 8.2 s, bases 0.0 s, lodo write 3.1 s, instances 0.0 s, lodi write 0.0 s, model workers 4, ladder workers 16)
+    peak working set: 2.29 GB (2458312704 bytes)
+    bound by asked
+    census: bake census: threads 16, chunk threads 1 bound by asked, chunk jobs 9, chunk workers 1, peak working set: 2.29 GB (2458312704 bytes), bto built in scratch E:/Projects/NifskopeWildWastelandEdition/scratchpad/perf1_20260917/work/s1/b8_A_after/obj/lodgen_bto_scratch, 9 chunk(s), 9 dropped, 7800025 bytes freed, layout E:/Projects/NifskopeWildWastelandEdition/scratchpad/perf1_20260917/work/s1/b8_A_after/nat/FO4CSLOD, 20 file(s), 0 outside (a SECOND root: E:/Projects/NifskopeWildWastelandEdition/scratchpad/perf1_20260917/work/s1/b8_A_after/obj/FO4CSLOD)
+    exe=/e/Projects/NifskopeWildWastelandEdition/release/NifSkope.exe
+TAG=b8_B_before REGION=B(-24 16 -9 31) CHUNKTHREADS=1 THREADS=0 rc=0 WALL_MS=91494
+    stage times: landscape 0.0 s, meshes 72.8 s, textures 14.3 s, impostors 0.0 s
+    peak working set: 2.55 GB (2740023296 bytes)
+    bound by asked
+    census: bake census: threads 16, chunk threads 1 bound by asked, chunk jobs 16, chunk workers 1, peak working set: 2.55 GB (2740023296 bytes), bto built in scratch E:/Projects/NifskopeWildWastelandEdition/scratchpad/perf1_20260917/work/s1/b8_B_before/obj/lodgen_bto_scratch, 16 chunk(s), 16 dropped, 12581096 bytes freed, layout E:/Projects/NifskopeWildWastelandEdition/scratchpad/perf1_20260917/work/s1/b8_B_before/nat/FO4CSLOD, 34 file(s), 0 outside (a SECOND root: E:/Projects/NifskopeWildWastelandEdition/scratchpad/perf1_20260917/work/s1/b8_B_before/obj/FO4CSLOD)
+    exe=/e/Projects/NifskopeWildWastelandEdition/release/NifSkope.before_perf1.exe
+TAG=b8_B_after REGION=B(-24 16 -9 31) CHUNKTHREADS=1 THREADS=0 rc=0 WALL_MS=59416
+    stage times: landscape 0.0 s, meshes 40.3 s, textures 14.7 s, impostors 0.0 s (library: census 0.1 s, models 18.7 s, ladder 8.3 s, bases 0.0 s, lodo write 2.8 s, instances 0.0 s, lodi write 0.1 s, model workers 4, ladder workers 16)
+    peak working set: 2.55 GB (2738593792 bytes)
+    bound by asked
+    census: bake census: threads 16, chunk threads 1 bound by asked, chunk jobs 16, chunk workers 1, peak working set: 2.55 GB (2738593792 bytes), bto built in scratch E:/Projects/NifskopeWildWastelandEdition/scratchpad/perf1_20260917/work/s1/b8_B_after/obj/lodgen_bto_scratch, 16 chunk(s), 16 dropped, 12581096 bytes freed, layout E:/Projects/NifskopeWildWastelandEdition/scratchpad/perf1_20260917/work/s1/b8_B_after/nat/FO4CSLOD, 34 file(s), 0 outside (a SECOND root: E:/Projects/NifskopeWildWastelandEdition/scratchpad/perf1_20260917/work/s1/b8_B_after/obj/FO4CSLOD)
+    exe=/e/Projects/NifskopeWildWastelandEdition/release/NifSkope.exe

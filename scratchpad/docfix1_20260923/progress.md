@@ -1,0 +1,27 @@
+# DOCFIX1 progress
+
+- 22:23 started; brief read; defects list read (27 items, 22 in scope, 5 VT owed)
+- BTD 1: fixed (bit 8 dye added to flags paragraph; src/lodtfile.h:51 LODL_SECT_DYE)
+- LODM 1: fixed (conv row in §3 + conv? in §4 cardArray layer list; src/lodgen.cpp:3328-3336, 14305)
+- CARDS 1: fixed (§1.1 + §10.1 blocks + anchor row -> Data\FO4CSLOD\Cards / <ws>\Aggregate; also LODM §3/§3a and IMPOSTOR_SPEC Cards para same path; src/lodgenlayout.cpp:39, lodgen.cpp:3257, lodgenaggregate.cpp:184)
+- CARDS 2: fixed (§2 centre = frame only for odd N; also LODM §3 same sentence; src/impostoroct.h:139-145 SPEC GAP #3)
+- CARDS 3: fixed (§2 diagonal (i+1,j)-(i,j+1) + weights table; src/impostoroct.h:117-137, impostoroct.cpp:211-216)
+- SPEC 1: fixed (frame law: multiple-of-16 aspect, ladder retired; 42.9%; aux para gap-even/16; src/nifskope_ui.cpp:23251)
+- CENSUS 1: fixed (version quad lodo4/lodi7/lodl2/lodt2 + per-file refusals; BTD page key added) -- slot spelling is my proposal, flag
+- CENSUS 2: fixed (unmeasured = 6th default, §1.2 rule 5)
+- CENSUS 3: fixed (§7 marked historical: gated pairs measured LODO/LODI v3, decoders refuse v3 lodo)
+- NATIVE 1: fixed (title v4 + v7 (v3..v9); VERSIONS TODAY banner above the 09-11 status block)
+- NATIVE 2: fixed (§3.2 base row = fullTriangles + crossPx16[2]; also mesh flags bit2 WATERTIGHT added; lodofile.h:294-312, :189)
+- NATIVE 6: fixed, item partly wrong: crossPx16[2] still exists and is written 0 (nativeemit.cpp:1672-1673 memset); §4.4 now says so
+- NATIVE 3: fixed (§3.5.7 REVERSED banner; nifcli.cpp:7465, 7497)
+- NATIVE 4: fixed (§4.1 flags: bit6 scrappable v9-only, refused below; bits 7-15 reserved; lodifile.h:364-366, lodifile.cpp:1596-1607)
+- NATIVE 5: fixed (§4.4 far shadow keys on GROUP v7)
+- NATIVE 7: fixed (§4.6.1 Deviation 12). New: src/lodifile.h:93 and lodifile.cpp:725,982 comments also say 'Deviation 6' (source lane)
+- NATIVE 8: fixed (§4.9 proximity default 64 u mesh measure + legacy relabelled; 167 vs 588 read from .lodi 0x108 bytes)
+- NATIVE 9: fixed (§6: today 6,204,388 B md5 89407121f640 in 3 bakes of different regions, measured; old 9,710,564 kept as history w/ the 9,657,316 disagreement noted)
+- NATIVE 10: fixed (§12 free-room table: 0xF1-0xF3 on v6, 512 B v7+, 0x11C-0x1FF 228 B; aggregate + near-model rows updated). New: 0x10E-0x10F not swept by lodiRead (lodifile.cpp:1232-1238) -- source lane
+- NATIVE 11: fixed (anchor moved AGAIN: now nifcli.cpp:8107, not 8059; also --native 8101, lodgenNativeBegin 3859). Rest of that table's line numbers are older still -- not re-derived (out of scope)
+- NATIVE 12: fixed, item wording inverted: §4 row 0x90 already called a between-file loadOrderHash mismatch a HARD pairing refusal; the defect was §5 listing it only as soft. §5 now has hard: both files / pairing / .lodo / .lodi rows + soft = live data only, and says lodoRead/lodiRead are the full list (lodofile.cpp:1727+, lodifile.cpp:949+, 1068-1071, 1232-1238; nativeemit.cpp:2976-2989, 3023-3037)
+- NATIVE 13: fixed (§4.1 cell band paragraph: lodiCellAgrees, LODI_CELL_QUANT_TOL ~0.1289 u). New: Python decoder CELL_QUANT_TOL uses 2^-23 vs C++ 2^-22 (~0.002 u apart) -- source lane
+- 22:35 NATIVE 12/13 logged; byte check all LF; DELIVERABLE_TEXT.md + DONE.md written
+- 22:36 LODM 2 (director): fixed, §2.1 normal row BC7 (lodgen.cpp:3238-3248); colour BC3 / mask BC3 / emissive BC1 unchanged

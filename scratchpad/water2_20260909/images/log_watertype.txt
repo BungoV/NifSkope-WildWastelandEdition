@@ -1,0 +1,10 @@
+[Warning] QObject::connect(QListModel, QWidget): signal not found
+[Warning] QObject::connect(QListModel, QWidget): signal not found
+[Warning] QObject::connect(QListModel, QWidget): signal not found
+[Warning] QObject::connect(QListModel, QWidget): signal not found
+[Info] lodt terrain:
+ lodl Commonwealth.lodl: cells [-16,-21]..[-6,-4], 32 samples a cell (file 32), spacing 128.0 units, grid 353x577
+heights read in 23 ms
+water type: 15 WATR records; 198 of 198 cells have water (cyan = the worldspace default, 0xFFFF)
+6 shapes, 204966 vertices; sample grids 1629448 bytes; plane read at 25 ms
+meshed and built at 933 ms

@@ -1,0 +1,14 @@
+TILING4 done 02:34:40
+exe release/NifSkope.exe 2026-09-12 02:08:57, 21,487,616 B -- one build, no relinks, BUILD-RC=0
+rung release/NifSkope.before_tiling4.exe 21,484,032 B, untouched
+report scratchpad/lane_tiling4_report.md (960 lines, sections 0-9, appended never rewritten)
+gates F1 PASS, parity 0/75 disagree, F2 PASS (byte identity, 6 arms), F4 PASS (11/11 at baseline)
+gate F3 NOT MET on the product: hex repeat 4/7 and 5/7 (warp 5/7 and 6/7, rung 0/7 and 0/7)
+  -> the DEFAULT DID NOT CHANGE; what changed is what --land-sample stochastic MEANS
+  -> swirl 6/7 and 7/7 (warp 3/7 and 4/7), grain vs the previous build 7/7 and 7/7 (warp 0/7 and 1/7)
+docs/LODGEN_TERRAIN_VT.md amended in-tree (2.5e + two CLI rows + provenance), 116,939 B
+splice text: WW_CHANGES_ENTRY.md, MISTAKES_ENTRIES.md, HANDOFF_BLOCK.md
+pictures images/cmp_tiling4.png, images/sheet_tiling4.png
+nothing committed, nothing stashed, no installed file touched
+a GUI release/NifSkope.exe pid 59040 (02:24:09, no args) was NOT this lane's; it was left alone and had closed by itself at 02:35 -- no NifSkope and no Fallout4.exe is running now
+bungo must restart any NifSkope window older than 02:08:57

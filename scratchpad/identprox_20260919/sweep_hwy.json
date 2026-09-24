@@ -1,0 +1,819 @@
+[
+ {
+  "who": "arch",
+  "measure": "aabb",
+  "gap": 16.0,
+  "deck_ids": 10,
+  "hw_ids": 20,
+  "others": 0,
+  "swallowed": []
+ },
+ {
+  "who": "arch",
+  "measure": "aabb",
+  "gap": 32.0,
+  "deck_ids": 10,
+  "hw_ids": 20,
+  "others": 0,
+  "swallowed": []
+ },
+ {
+  "who": "arch",
+  "measure": "aabb",
+  "gap": 64.0,
+  "deck_ids": 10,
+  "hw_ids": 20,
+  "others": 0,
+  "swallowed": []
+ },
+ {
+  "who": "arch",
+  "measure": "aabb",
+  "gap": 128.0,
+  "deck_ids": 10,
+  "hw_ids": 20,
+  "others": 0,
+  "swallowed": []
+ },
+ {
+  "who": "arch",
+  "measure": "aabb",
+  "gap": 256.0,
+  "deck_ids": 10,
+  "hw_ids": 20,
+  "others": 0,
+  "swallowed": []
+ },
+ {
+  "who": "arch",
+  "measure": "obb",
+  "gap": 16.0,
+  "deck_ids": 10,
+  "hw_ids": 20,
+  "others": 0,
+  "swallowed": []
+ },
+ {
+  "who": "arch",
+  "measure": "obb",
+  "gap": 32.0,
+  "deck_ids": 10,
+  "hw_ids": 20,
+  "others": 0,
+  "swallowed": []
+ },
+ {
+  "who": "arch",
+  "measure": "obb",
+  "gap": 64.0,
+  "deck_ids": 10,
+  "hw_ids": 20,
+  "others": 0,
+  "swallowed": []
+ },
+ {
+  "who": "arch",
+  "measure": "obb",
+  "gap": 128.0,
+  "deck_ids": 10,
+  "hw_ids": 20,
+  "others": 0,
+  "swallowed": []
+ },
+ {
+  "who": "arch",
+  "measure": "obb",
+  "gap": 256.0,
+  "deck_ids": 10,
+  "hw_ids": 20,
+  "others": 0,
+  "swallowed": []
+ },
+ {
+  "who": "arch",
+  "measure": "mesh",
+  "gap": 16.0,
+  "deck_ids": 10,
+  "hw_ids": 20,
+  "others": 0,
+  "swallowed": []
+ },
+ {
+  "who": "arch",
+  "measure": "mesh",
+  "gap": 32.0,
+  "deck_ids": 10,
+  "hw_ids": 20,
+  "others": 0,
+  "swallowed": []
+ },
+ {
+  "who": "arch",
+  "measure": "mesh",
+  "gap": 64.0,
+  "deck_ids": 10,
+  "hw_ids": 20,
+  "others": 0,
+  "swallowed": []
+ },
+ {
+  "who": "arch",
+  "measure": "mesh",
+  "gap": 128.0,
+  "deck_ids": 10,
+  "hw_ids": 20,
+  "others": 0,
+  "swallowed": []
+ },
+ {
+  "who": "arch",
+  "measure": "mesh",
+  "gap": 256.0,
+  "deck_ids": 10,
+  "hw_ids": 20,
+  "others": 0,
+  "swallowed": []
+ },
+ {
+  "who": "arch",
+  "measure": "meshv",
+  "gap": 16.0,
+  "deck_ids": 10,
+  "hw_ids": 20,
+  "others": 0,
+  "swallowed": []
+ },
+ {
+  "who": "arch",
+  "measure": "meshv",
+  "gap": 32.0,
+  "deck_ids": 10,
+  "hw_ids": 20,
+  "others": 0,
+  "swallowed": []
+ },
+ {
+  "who": "arch",
+  "measure": "meshv",
+  "gap": 64.0,
+  "deck_ids": 10,
+  "hw_ids": 20,
+  "others": 0,
+  "swallowed": []
+ },
+ {
+  "who": "arch",
+  "measure": "meshv",
+  "gap": 128.0,
+  "deck_ids": 10,
+  "hw_ids": 20,
+  "others": 0,
+  "swallowed": []
+ },
+ {
+  "who": "arch",
+  "measure": "meshv",
+  "gap": 256.0,
+  "deck_ids": 10,
+  "hw_ids": 20,
+  "others": 0,
+  "swallowed": []
+ },
+ {
+  "who": "kit",
+  "measure": "aabb",
+  "gap": 16.0,
+  "deck_ids": 1,
+  "hw_ids": 2,
+  "others": 22,
+  "swallowed": [
+   "Theater_Buildings"
+  ]
+ },
+ {
+  "who": "kit",
+  "measure": "aabb",
+  "gap": 32.0,
+  "deck_ids": 1,
+  "hw_ids": 2,
+  "others": 77,
+  "swallowed": [
+   "Theater_Buildings"
+  ]
+ },
+ {
+  "who": "kit",
+  "measure": "aabb",
+  "gap": 64.0,
+  "deck_ids": 1,
+  "hw_ids": 2,
+  "others": 77,
+  "swallowed": [
+   "Theater_Buildings"
+  ]
+ },
+ {
+  "who": "kit",
+  "measure": "aabb",
+  "gap": 128.0,
+  "deck_ids": 1,
+  "hw_ids": 1,
+  "others": 354,
+  "swallowed": [
+   "Theater_Buildings",
+   "AndrewStation"
+  ]
+ },
+ {
+  "who": "kit",
+  "measure": "aabb",
+  "gap": 256.0,
+  "deck_ids": 1,
+  "hw_ids": 1,
+  "others": 679,
+  "swallowed": [
+   "Theater_Buildings",
+   "AndrewStation",
+   "Theater47_Bld01"
+  ]
+ },
+ {
+  "who": "kit",
+  "measure": "obb",
+  "gap": 16.0,
+  "deck_ids": 1,
+  "hw_ids": 2,
+  "others": 22,
+  "swallowed": [
+   "Theater_Buildings"
+  ]
+ },
+ {
+  "who": "kit",
+  "measure": "obb",
+  "gap": 32.0,
+  "deck_ids": 1,
+  "hw_ids": 2,
+  "others": 22,
+  "swallowed": [
+   "Theater_Buildings"
+  ]
+ },
+ {
+  "who": "kit",
+  "measure": "obb",
+  "gap": 64.0,
+  "deck_ids": 1,
+  "hw_ids": 2,
+  "others": 57,
+  "swallowed": [
+   "Theater_Buildings"
+  ]
+ },
+ {
+  "who": "kit",
+  "measure": "obb",
+  "gap": 128.0,
+  "deck_ids": 1,
+  "hw_ids": 2,
+  "others": 105,
+  "swallowed": [
+   "Theater_Buildings"
+  ]
+ },
+ {
+  "who": "kit",
+  "measure": "obb",
+  "gap": 256.0,
+  "deck_ids": 1,
+  "hw_ids": 1,
+  "others": 621,
+  "swallowed": [
+   "Theater_Buildings",
+   "AndrewStation"
+  ]
+ },
+ {
+  "who": "kit",
+  "measure": "mesh",
+  "gap": 16.0,
+  "deck_ids": 4,
+  "hw_ids": 11,
+  "others": 0,
+  "swallowed": []
+ },
+ {
+  "who": "kit",
+  "measure": "mesh",
+  "gap": 32.0,
+  "deck_ids": 4,
+  "hw_ids": 11,
+  "others": 1,
+  "swallowed": []
+ },
+ {
+  "who": "kit",
+  "measure": "mesh",
+  "gap": 64.0,
+  "deck_ids": 3,
+  "hw_ids": 8,
+  "others": 5,
+  "swallowed": []
+ },
+ {
+  "who": "kit",
+  "measure": "mesh",
+  "gap": 128.0,
+  "deck_ids": 2,
+  "hw_ids": 7,
+  "others": 6,
+  "swallowed": [
+   "Theater_Buildings"
+  ]
+ },
+ {
+  "who": "kit",
+  "measure": "mesh",
+  "gap": 256.0,
+  "deck_ids": 1,
+  "hw_ids": 2,
+  "others": 351,
+  "swallowed": [
+   "Theater_Buildings",
+   "AndrewStation"
+  ]
+ },
+ {
+  "who": "kit",
+  "measure": "meshv",
+  "gap": 16.0,
+  "deck_ids": 5,
+  "hw_ids": 12,
+  "others": 0,
+  "swallowed": []
+ },
+ {
+  "who": "kit",
+  "measure": "meshv",
+  "gap": 32.0,
+  "deck_ids": 5,
+  "hw_ids": 12,
+  "others": 0,
+  "swallowed": []
+ },
+ {
+  "who": "kit",
+  "measure": "meshv",
+  "gap": 64.0,
+  "deck_ids": 5,
+  "hw_ids": 12,
+  "others": 2,
+  "swallowed": []
+ },
+ {
+  "who": "kit",
+  "measure": "meshv",
+  "gap": 128.0,
+  "deck_ids": 3,
+  "hw_ids": 10,
+  "others": 2,
+  "swallowed": []
+ },
+ {
+  "who": "kit",
+  "measure": "meshv",
+  "gap": 256.0,
+  "deck_ids": 1,
+  "hw_ids": 4,
+  "others": 63,
+  "swallowed": [
+   "Theater_Buildings"
+  ]
+ },
+ {
+  "who": "all",
+  "measure": "aabb",
+  "gap": 16.0,
+  "deck_ids": 1,
+  "hw_ids": 2,
+  "others": 267,
+  "swallowed": [
+   "Theater_Buildings"
+  ]
+ },
+ {
+  "who": "all",
+  "measure": "aabb",
+  "gap": 32.0,
+  "deck_ids": 1,
+  "hw_ids": 2,
+  "others": 325,
+  "swallowed": [
+   "Theater_Buildings"
+  ]
+ },
+ {
+  "who": "all",
+  "measure": "aabb",
+  "gap": 64.0,
+  "deck_ids": 1,
+  "hw_ids": 2,
+  "others": 327,
+  "swallowed": [
+   "Theater_Buildings"
+  ]
+ },
+ {
+  "who": "all",
+  "measure": "aabb",
+  "gap": 128.0,
+  "deck_ids": 1,
+  "hw_ids": 1,
+  "others": 755,
+  "swallowed": [
+   "Theater_Buildings",
+   "AndrewStation",
+   "Theater47_Bld01"
+  ]
+ },
+ {
+  "who": "all",
+  "measure": "aabb",
+  "gap": 256.0,
+  "deck_ids": 1,
+  "hw_ids": 1,
+  "others": 910,
+  "swallowed": [
+   "Theater_Buildings",
+   "AndrewStation",
+   "Theater46_Bld01",
+   "Theater47_Bld01"
+  ]
+ },
+ {
+  "who": "all",
+  "measure": "obb",
+  "gap": 16.0,
+  "deck_ids": 1,
+  "hw_ids": 2,
+  "others": 154,
+  "swallowed": [
+   "Theater_Buildings"
+  ]
+ },
+ {
+  "who": "all",
+  "measure": "obb",
+  "gap": 32.0,
+  "deck_ids": 1,
+  "hw_ids": 2,
+  "others": 155,
+  "swallowed": [
+   "Theater_Buildings"
+  ]
+ },
+ {
+  "who": "all",
+  "measure": "obb",
+  "gap": 64.0,
+  "deck_ids": 1,
+  "hw_ids": 2,
+  "others": 289,
+  "swallowed": [
+   "Theater_Buildings"
+  ]
+ },
+ {
+  "who": "all",
+  "measure": "obb",
+  "gap": 128.0,
+  "deck_ids": 1,
+  "hw_ids": 2,
+  "others": 431,
+  "swallowed": [
+   "Theater_Buildings"
+  ]
+ },
+ {
+  "who": "all",
+  "measure": "obb",
+  "gap": 256.0,
+  "deck_ids": 1,
+  "hw_ids": 1,
+  "others": 811,
+  "swallowed": [
+   "Theater_Buildings",
+   "AndrewStation"
+  ]
+ },
+ {
+  "who": "all",
+  "measure": "mesh",
+  "gap": 16.0,
+  "deck_ids": 4,
+  "hw_ids": 11,
+  "others": 1,
+  "swallowed": []
+ },
+ {
+  "who": "all",
+  "measure": "mesh",
+  "gap": 32.0,
+  "deck_ids": 4,
+  "hw_ids": 10,
+  "others": 5,
+  "swallowed": []
+ },
+ {
+  "who": "all",
+  "measure": "mesh",
+  "gap": 64.0,
+  "deck_ids": 3,
+  "hw_ids": 5,
+  "others": 10,
+  "swallowed": []
+ },
+ {
+  "who": "all",
+  "measure": "mesh",
+  "gap": 128.0,
+  "deck_ids": 2,
+  "hw_ids": 4,
+  "others": 13,
+  "swallowed": [
+   "Theater_Buildings"
+  ]
+ },
+ {
+  "who": "all",
+  "measure": "mesh",
+  "gap": 256.0,
+  "deck_ids": 1,
+  "hw_ids": 2,
+  "others": 570,
+  "swallowed": [
+   "Theater_Buildings",
+   "AndrewStation"
+  ]
+ },
+ {
+  "who": "all",
+  "measure": "meshv",
+  "gap": 16.0,
+  "deck_ids": 5,
+  "hw_ids": 12,
+  "others": 1,
+  "swallowed": []
+ },
+ {
+  "who": "all",
+  "measure": "meshv",
+  "gap": 32.0,
+  "deck_ids": 5,
+  "hw_ids": 12,
+  "others": 2,
+  "swallowed": []
+ },
+ {
+  "who": "all",
+  "measure": "meshv",
+  "gap": 64.0,
+  "deck_ids": 5,
+  "hw_ids": 12,
+  "others": 4,
+  "swallowed": []
+ },
+ {
+  "who": "all",
+  "measure": "meshv",
+  "gap": 128.0,
+  "deck_ids": 3,
+  "hw_ids": 8,
+  "others": 6,
+  "swallowed": []
+ },
+ {
+  "who": "all",
+  "measure": "meshv",
+  "gap": 256.0,
+  "deck_ids": 1,
+  "hw_ids": 2,
+  "others": 279,
+  "swallowed": [
+   "Theater_Buildings"
+  ]
+ },
+ {
+  "who": "attach",
+  "measure": "aabb",
+  "gap": 16.0,
+  "deck_ids": 1,
+  "hw_ids": 2,
+  "others": 267,
+  "swallowed": [
+   "Theater_Buildings"
+  ]
+ },
+ {
+  "who": "attach",
+  "measure": "aabb",
+  "gap": 32.0,
+  "deck_ids": 1,
+  "hw_ids": 2,
+  "others": 325,
+  "swallowed": [
+   "Theater_Buildings"
+  ]
+ },
+ {
+  "who": "attach",
+  "measure": "aabb",
+  "gap": 64.0,
+  "deck_ids": 1,
+  "hw_ids": 2,
+  "others": 327,
+  "swallowed": [
+   "Theater_Buildings"
+  ]
+ },
+ {
+  "who": "attach",
+  "measure": "aabb",
+  "gap": 128.0,
+  "deck_ids": 1,
+  "hw_ids": 1,
+  "others": 755,
+  "swallowed": [
+   "Theater_Buildings",
+   "AndrewStation",
+   "Theater47_Bld01"
+  ]
+ },
+ {
+  "who": "attach",
+  "measure": "aabb",
+  "gap": 256.0,
+  "deck_ids": 1,
+  "hw_ids": 1,
+  "others": 910,
+  "swallowed": [
+   "Theater_Buildings",
+   "AndrewStation",
+   "Theater46_Bld01",
+   "Theater47_Bld01"
+  ]
+ },
+ {
+  "who": "attach",
+  "measure": "obb",
+  "gap": 16.0,
+  "deck_ids": 1,
+  "hw_ids": 2,
+  "others": 155,
+  "swallowed": [
+   "Theater_Buildings"
+  ]
+ },
+ {
+  "who": "attach",
+  "measure": "obb",
+  "gap": 32.0,
+  "deck_ids": 1,
+  "hw_ids": 2,
+  "others": 155,
+  "swallowed": [
+   "Theater_Buildings"
+  ]
+ },
+ {
+  "who": "attach",
+  "measure": "obb",
+  "gap": 64.0,
+  "deck_ids": 1,
+  "hw_ids": 2,
+  "others": 290,
+  "swallowed": [
+   "Theater_Buildings"
+  ]
+ },
+ {
+  "who": "attach",
+  "measure": "obb",
+  "gap": 128.0,
+  "deck_ids": 1,
+  "hw_ids": 2,
+  "others": 432,
+  "swallowed": [
+   "Theater_Buildings"
+  ]
+ },
+ {
+  "who": "attach",
+  "measure": "obb",
+  "gap": 256.0,
+  "deck_ids": 1,
+  "hw_ids": 1,
+  "others": 811,
+  "swallowed": [
+   "Theater_Buildings",
+   "AndrewStation"
+  ]
+ },
+ {
+  "who": "attach",
+  "measure": "mesh",
+  "gap": 16.0,
+  "deck_ids": 4,
+  "hw_ids": 11,
+  "others": 5,
+  "swallowed": []
+ },
+ {
+  "who": "attach",
+  "measure": "mesh",
+  "gap": 32.0,
+  "deck_ids": 4,
+  "hw_ids": 10,
+  "others": 6,
+  "swallowed": []
+ },
+ {
+  "who": "attach",
+  "measure": "mesh",
+  "gap": 64.0,
+  "deck_ids": 3,
+  "hw_ids": 5,
+  "others": 10,
+  "swallowed": []
+ },
+ {
+  "who": "attach",
+  "measure": "mesh",
+  "gap": 128.0,
+  "deck_ids": 2,
+  "hw_ids": 4,
+  "others": 14,
+  "swallowed": [
+   "Theater_Buildings"
+  ]
+ },
+ {
+  "who": "attach",
+  "measure": "mesh",
+  "gap": 256.0,
+  "deck_ids": 1,
+  "hw_ids": 2,
+  "others": 570,
+  "swallowed": [
+   "Theater_Buildings",
+   "AndrewStation"
+  ]
+ },
+ {
+  "who": "attach",
+  "measure": "meshv",
+  "gap": 16.0,
+  "deck_ids": 5,
+  "hw_ids": 12,
+  "others": 3,
+  "swallowed": []
+ },
+ {
+  "who": "attach",
+  "measure": "meshv",
+  "gap": 32.0,
+  "deck_ids": 5,
+  "hw_ids": 12,
+  "others": 4,
+  "swallowed": []
+ },
+ {
+  "who": "attach",
+  "measure": "meshv",
+  "gap": 64.0,
+  "deck_ids": 5,
+  "hw_ids": 12,
+  "others": 4,
+  "swallowed": []
+ },
+ {
+  "who": "attach",
+  "measure": "meshv",
+  "gap": 128.0,
+  "deck_ids": 3,
+  "hw_ids": 8,
+  "others": 6,
+  "swallowed": []
+ },
+ {
+  "who": "attach",
+  "measure": "meshv",
+  "gap": 256.0,
+  "deck_ids": 1,
+  "hw_ids": 2,
+  "others": 279,
+  "swallowed": [
+   "Theater_Buildings"
+  ]
+ }
+]

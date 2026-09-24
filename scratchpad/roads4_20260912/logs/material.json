@@ -1,0 +1,324 @@
+{
+ "t2020": {
+  "materials": [
+   {
+    "name": "CommonwealthDefault01.bgsm",
+    "texels": 7558,
+    "cls": "terrain",
+    "ours": 84.2585653090087,
+    "ground": 58.88624532739962,
+    "vanilla": 90.27011844567983
+   },
+   {
+    "name": "ConcreteRoads01.BGSM",
+    "texels": 7177,
+    "cls": "road",
+    "ours": 113.39072589791988,
+    "ground": 53.98832535781318,
+    "vanilla": 93.83224555725697
+   },
+   {
+    "name": "SancSW01.BGSM",
+    "texels": 5317,
+    "cls": "road",
+    "ours": 108.41468108136758,
+    "ground": 54.54978866926548,
+    "vanilla": 91.29169308922528
+   },
+   {
+    "name": "Asphalt01.BGSM",
+    "texels": 1308,
+    "cls": "road",
+    "ours": 111.06347469060354,
+    "ground": 90.07948439833149,
+    "vanilla": 98.81105008481109
+   },
+   {
+    "name": "DirtGravel01.BGSM",
+    "texels": 779,
+    "cls": "terrain",
+    "ours": 97.91285982957088,
+    "ground": 88.96117779869597,
+    "vanilla": 98.15469610711271
+   },
+   {
+    "name": "AsphaltCrackDecal01.BGSM",
+    "texels": 360,
+    "cls": "road",
+    "ours": 105.63134584515889,
+    "ground": 95.69872366760042,
+    "vanilla": 95.27703919838798
+   },
+   {
+    "name": "AsphaltRoadDetails01.BGSM",
+    "texels": 287,
+    "cls": "road",
+    "ours": 103.20777942205554,
+    "ground": 90.81107379191594,
+    "vanilla": 96.53173846012874
+   },
+   {
+    "name": "AsphaltAndSWEdgeDecals01.BGSM",
+    "texels": 257,
+    "cls": "road",
+    "ours": 103.8426359817861,
+    "ground": 92.55819200646366,
+    "vanilla": 98.18233012200143
+   },
+   {
+    "name": "(none)",
+    "texels": 70,
+    "cls": "no-material",
+    "ours": 107.39104030216761,
+    "ground": 93.11250052893502,
+    "vanilla": 97.27490504052298
+   },
+   {
+    "name": "SancSW01Prewar.BGSM",
+    "texels": 3,
+    "cls": "road",
+    "ours": 123.87971085103352,
+    "ground": 58.600789188385,
+    "vanilla": 95.47436442311603
+   }
+  ],
+  "split": [
+   {
+    "set": "road surface",
+    "texels": 14709,
+    "ours": 110.83175183578565,
+    "ground": 59.81487384950505,
+    "vanilla": 93.52100326431962,
+    "ours_minus_ground": 51.016877986280605,
+    "ours_minus_vanilla": 17.310748571466036,
+    "van_minus_ground": 33.70612941481457
+   },
+   {
+    "set": "TERRAIN-LIKE",
+    "texels": 8337,
+    "ours": 85.5344073902751,
+    "ground": 61.69641354080252,
+    "vanilla": 91.00684460596004,
+    "ours_minus_ground": 23.83799384947259,
+    "ours_minus_vanilla": -5.472437215684934,
+    "van_minus_ground": 29.310431065157523
+   },
+   {
+    "set": "other/no material",
+    "texels": 70,
+    "ours": 107.39104030216761,
+    "ground": 93.11250052893502,
+    "vanilla": 97.27490504052298,
+    "ours_minus_ground": 14.278539773232595,
+    "ours_minus_vanilla": 10.11613526164463,
+    "van_minus_ground": 4.162404511587965
+   },
+   {
+    "set": "all classified road",
+    "texels": 23116,
+    "ours": 101.69761052891704,
+    "ground": 60.594300665299606,
+    "vanilla": 92.62561618998109,
+    "ours_minus_ground": 41.10330986361743,
+    "ours_minus_vanilla": 9.071994338935951,
+    "van_minus_ground": 32.03131552468148
+   },
+   {
+    "set": "off-road ground (control)",
+    "texels": 236697,
+    "ours": 69.2727859600576,
+    "ground": 69.2727859600709,
+    "vanilla": 83.71699684322662,
+    "ours_minus_ground": -1.3301360013429075e-11,
+    "ours_minus_vanilla": -14.44421088316902,
+    "van_minus_ground": 14.44421088315572
+   }
+  ],
+  "edge": {
+   "texels": 2847,
+   "ours": 15.38725775037126,
+   "ground": 3.125121647057611,
+   "vanilla": 5.362199405136469,
+   "floor": [
+    [
+     5.69946536024925,
+     3.408398332444365,
+     5.473274819356588
+    ],
+    [
+     6.291305806993228,
+     4.330345042719526,
+     5.404495649504381
+    ],
+    [
+     6.855940420744464,
+     4.559290709960073,
+     5.004586475797362
+    ],
+    [
+     5.834760766517429,
+     3.487684980352586,
+     4.821041218522966
+    ],
+    [
+     5.701826148472257,
+     4.1330606012985855,
+     4.980145778074252
+    ]
+   ]
+  }
+ },
+ "t0808": {
+  "materials": [
+   {
+    "name": "Asphalt01.BGSM",
+    "texels": 5417,
+    "cls": "road",
+    "ours": 110.45388264529977,
+    "ground": 102.89724652047497,
+    "vanilla": 95.9882793386571
+   },
+   {
+    "name": "DirtGravel01.BGSM",
+    "texels": 2756,
+    "cls": "terrain",
+    "ours": 98.26135179658898,
+    "ground": 101.3048108036141,
+    "vanilla": 93.66186868385238
+   },
+   {
+    "name": "AsphaltAndSWEdgeDecals01.BGSM",
+    "texels": 936,
+    "cls": "road",
+    "ours": 104.55373258387738,
+    "ground": 102.11540686592689,
+    "vanilla": 93.86618196077428
+   },
+   {
+    "name": "ConcreteSW01.BGSM",
+    "texels": 687,
+    "cls": "road",
+    "ours": 138.1526595063522,
+    "ground": 103.69173483923811,
+    "vanilla": 95.53094462720932
+   },
+   {
+    "name": "AsphaltRoadDetails01.BGSM",
+    "texels": 575,
+    "cls": "road",
+    "ours": 103.06830108657174,
+    "ground": 102.3658967970873,
+    "vanilla": 96.77636210991899
+   },
+   {
+    "name": "AsphaltCrackDecal01.BGSM",
+    "texels": 513,
+    "cls": "road",
+    "ours": 105.6113905426531,
+    "ground": 100.28412276936135,
+    "vanilla": 91.06959690305177
+   },
+   {
+    "name": "(none)",
+    "texels": 99,
+    "cls": "no-material",
+    "ours": 107.6569955613878,
+    "ground": 103.12524024377689,
+    "vanilla": 94.0527894002741
+   },
+   {
+    "name": "StoneSWCurbUnique.BGSM",
+    "texels": 86,
+    "cls": "road",
+    "ours": 125.867406344569,
+    "ground": 104.12879687136272,
+    "vanilla": 94.13003555732551
+   }
+  ],
+  "split": [
+   {
+    "set": "road surface",
+    "texels": 8214,
+    "ours": 111.44014688187907,
+    "ground": 102.68710119703213,
+    "vanilla": 95.43673106088168,
+    "ours_minus_ground": 8.753045684846938,
+    "ours_minus_vanilla": 16.00341582099739,
+    "van_minus_ground": -7.250370136150451
+   },
+   {
+    "set": "TERRAIN-LIKE",
+    "texels": 2756,
+    "ours": 98.26135179658898,
+    "ground": 101.3048108036141,
+    "vanilla": 93.66186868385238,
+    "ours_minus_ground": -3.0434590070251204,
+    "ours_minus_vanilla": 4.599483112736607,
+    "van_minus_ground": -7.642942119761727
+   },
+   {
+    "set": "other/no material",
+    "texels": 99,
+    "ours": 107.6569955613878,
+    "ground": 103.12524024377689,
+    "vanilla": 94.0527894002741,
+    "ours_minus_ground": 4.531755317610916,
+    "ours_minus_vanilla": 13.604206161113709,
+    "van_minus_ground": -9.072450843502793
+   },
+   {
+    "set": "all classified road",
+    "texels": 11069,
+    "ours": 108.12500628780661,
+    "ground": 102.34685216291591,
+    "vanilla": 94.98244151932481,
+    "ours_minus_ground": 5.778154124890705,
+    "ours_minus_vanilla": 13.142564768481805,
+    "van_minus_ground": -7.3644106435911
+   },
+   {
+    "set": "off-road ground (control)",
+    "texels": 249155,
+    "ours": 98.92021936647232,
+    "ground": 98.92021936645531,
+    "vanilla": 85.25379964099682,
+    "ours_minus_ground": 1.70103930940968e-11,
+    "ours_minus_vanilla": 13.666419725475507,
+    "van_minus_ground": -13.666419725458496
+   }
+  ],
+  "edge": {
+   "texels": 1563,
+   "ours": 8.010413850757576,
+   "ground": 4.650001511808518,
+   "vanilla": 5.137981828940366,
+   "floor": [
+    [
+     5.620893629393184,
+     4.420507753380246,
+     5.2510024227515775
+    ],
+    [
+     4.467335191001275,
+     4.370307570451662,
+     5.794871951521155
+    ],
+    [
+     4.608861231043147,
+     4.482266118045676,
+     4.995009353147807
+    ],
+    [
+     4.8656676624573825,
+     4.498607743731269,
+     5.084762101894383
+    ],
+    [
+     4.4639598019857125,
+     4.462530164686617,
+     5.438502267212547
+    ]
+   ]
+  }
+ }
+}

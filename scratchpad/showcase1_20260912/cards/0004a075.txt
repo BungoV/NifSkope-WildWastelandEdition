@@ -1,0 +1,80 @@
+model TreeMapleForest3.nif
+projection ortho
+ranges TreeMapleForest3:1 - L2_TreeMapleForest3:1 - L1_TreeMapleForest3:1 13+21
+lodm Materials\Landscape\Trees\MapleAtlas02_Tree.lodm none textures\Landscape\Trees\MapleAtlas02_d.dds
+lodm Materials\Landscape\Trees\MapleAtlas01.lodm none textures\Landscape\Trees\MapleAtlas01_d.dds
+mask tree
+emissive 0 shapes 0
+front 2162.29 1105.03 39.3442 -27.7117 906.622
+side 2162.29 1105.03 39.3442 -27.7117 906.622
+class 64 256
+gap 4 16
+coverage 16 128 160
+oct 8 64 256 238.869 955.477 39.3442 -27.7117 906.622 3072 legacy 512
+frameoff 0 0 -71.6518 -65.2828
+frameoff 1 0 -65.2828 -65.2828
+frameoff 2 0 -50.9524 -66.875
+frameoff 3 0 -31.8453 -35.0298
+frameoff 4 0 -9.55358 -33.4375
+frameoff 5 0 0 -28.6607
+frameoff 6 0 -6.36905 -28.6607
+frameoff 7 0 0 -28.6607
+frameoff 0 1 -66.875 -35.0298
+frameoff 1 1 -70.0596 -35.0298
+frameoff 2 1 -60.506 -71.6518
+frameoff 3 1 -35.0298 -42.9911
+frameoff 4 1 -4.77679 -49.3602
+frameoff 5 1 -6.36905 -46.1756
+frameoff 6 1 0 -46.1756
+frameoff 7 1 7.96131 -33.4375
+frameoff 0 2 -62.0983 -35.0298
+frameoff 1 2 -65.2828 -31.8453
+frameoff 2 2 -70.0596 -27.0685
+frameoff 3 2 -36.622 -55.7292
+frameoff 4 2 4.77679 -46.1756
+frameoff 5 2 0 -60.506
+frameoff 6 2 12.7381 -54.137
+frameoff 7 2 19.1072 -33.4375
+frameoff 0 3 -49.3601 -33.4375
+frameoff 1 3 -50.9524 -17.5149
+frameoff 2 3 -46.1756 -1.59225
+frameoff 3 3 -95.5358 17.5149
+frameoff 4 3 -1.59226 -28.6607
+frameoff 5 3 22.2917 -50.9524
+frameoff 6 3 28.6607 -57.3214
+frameoff 7 3 31.8453 -31.8452
+frameoff 0 4 -31.8453 -31.8452
+frameoff 1 4 -27.0685 -22.2917
+frameoff 2 4 -7.96131 -11.1458
+frameoff 3 4 6.36905 12.7381
+frameoff 4 4 68.4673 -20.6994
+frameoff 5 4 57.3215 -39.8066
+frameoff 6 4 50.9524 -55.7292
+frameoff 7 4 49.3601 -33.4375
+frameoff 0 5 -19.1072 -33.4375
+frameoff 1 5 -7.96131 -28.6607
+frameoff 2 5 3.18452 -20.6994
+frameoff 3 5 -6.36905 -28.6607
+frameoff 4 5 44.5834 -41.3988
+frameoff 5 5 70.0596 -52.5447
+frameoff 6 5 65.2828 -50.9524
+frameoff 7 5 60.506 -35.0298
+frameoff 0 6 -9.55358 -33.4375
+frameoff 1 6 3.18452 -30.253
+frameoff 2 6 6.36905 -28.6607
+frameoff 3 6 3.18452 -36.622
+frameoff 4 6 35.0298 -41.3988
+frameoff 5 6 60.506 -66.8751
+frameoff 6 6 71.6518 -66.875
+frameoff 7 6 66.875 -35.0298
+frameoff 0 7 0 -28.6607
+frameoff 1 7 6.36905 -28.6607
+frameoff 2 7 -1.59227 -28.6607
+frameoff 3 7 9.55358 -33.4375
+frameoff 4 7 31.8453 -35.0298
+frameoff 5 7 50.9524 -66.875
+frameoff 6 7 65.2828 -65.2828
+frameoff 7 7 71.6518 -65.2828
+frameclamped 0
+framefit 170.372 886.89 265.908 915.551
+orthofit 967.411 967.411 0

@@ -1,0 +1,34 @@
+== the fixture ==
+       pbrm files: 5
+         C:/Users/bungo/AppData/Local/Temp/tmp.WyPVhwfUFT/ovl\materials\Landscape\Ground\NF_Dirt01_d.pbrm
+         C:/Users/bungo/AppData/Local/Temp/tmp.WyPVhwfUFT/ovl\materials\Landscape\Ground\NF_ScrubGrass_d.pbrm
+         C:/Users/bungo/AppData/Local/Temp/tmp.WyPVhwfUFT/ovl\materials\Landscape\Ground\DriedGrass01_d.pbrm
+         C:/Users/bungo/AppData/Local/Temp/tmp.WyPVhwfUFT/ovl\materials\Landscape\Ground\ForestFloor01_d.pbrm
+         C:/Users/bungo/AppData/Local/Temp/tmp.WyPVhwfUFT/ovl\materials\Landscape\Ground\RubbleRock01_d.pbrm
+       expect roughness 65 metallic 190 ao 156 (8-bit, after BC1 5:6:5)
+       expect emissive 230 48 98
+== the two bakes: PBRM present, and PBRM absent ==
+       with    vt: levels 2 tiles 3 present 3 coverTiles 3 bytes 1258304 cover 1 coverIn mask sheets 5 emissive present maskPbrm 6 maskLegacyInverted 8 maskNoneDefault 0 maskRoughMaps 14 maskMetalMaps 6 maskEmissiveMaps 6 maskDistinctLtex 14 maskLayerRefs 150 finest 2 coarsest 4 content 256 border 8 mips 2 compression 0 landDetail 1 vanillaRoot E:/Tools/Fallout 4/DataUnpacked/Data msnCopied 0 msnOurs 0 colCopied 0 colOurs 0 chunksLayered 0 chunksLayerless 0 chunksLayerlessNoVanilla 0 chunksShaded 0 landShade -3.242 vhgtCorpusHash 0xD8337D022F637F22 paintCorpusHash 0x3C79201598FEF809 vhgtCorpusHashSorted 0x3D5967B82969D23E roads 1 roadPlacements 28 roadMeshes 10 roadShapeTiles 0 roadDecalShapeTiles 0 roadTriangles 0 roadTexels 0 roadDecalTexels 0 roadAlphaRejected 0 roadRefusedNoLoad 0 roadRefusedNoTexture 0 roadComposite max-z roadDetail 0.000 roadOpacity 1.000 landGrade 1.0000 roadRaisedIncluded 0 roadRefusedRaised 0 roadRaisedBases 0 roadBlendTexels 0 roadSidewalksIncluded 0 roadRefusedSidewalk 0 roadSidewalkBases 0 roadRefusals none
+       without vt: levels 2 tiles 3 present 3 coverTiles 3 bytes 1120768 cover 1 coverIn mask sheets 4 emissive none maskPbrm 0 maskLegacyInverted 14 maskNoneDefault 0 maskRoughMaps 14 maskMetalMaps 0 maskEmissiveMaps 0 maskDistinctLtex 14 maskLayerRefs 150 finest 2 coarsest 4 content 256 border 8 mips 2 compression 0 landDetail 1 vanillaRoot E:/Tools/Fallout 4/DataUnpacked/Data msnCopied 0 msnOurs 0 colCopied 0 colOurs 0 chunksLayered 0 chunksLayerless 0 chunksLayerlessNoVanilla 0 chunksShaded 0 landShade -3.242 vhgtCorpusHash 0xD8337D022F637F22 paintCorpusHash 0x3C79201598FEF809 vhgtCorpusHashSorted 0x3D5967B82969D23E roads 1 roadPlacements 28 roadMeshes 10 roadShapeTiles 0 roadDecalShapeTiles 0 roadTriangles 0 roadTexels 0 roadDecalTexels 0 roadAlphaRejected 0 roadRefusedNoLoad 0 roadRefusedNoTexture 0 roadComposite max-z roadDetail 0.000 roadOpacity 1.000 landGrade 1.0000 roadRaisedIncluded 0 roadRefusedRaised 0 roadRaisedBases 0 roadBlendTexels 0 roadSidewalksIncluded 0 roadRefusedSidewalk 0 roadSidewalkBases 0 roadRefusals none
+  ok   T2a the PBRM arm fires at all (6 layers served by pbrm)
+  ok   T2a FLOOR the same region with no PBRM has zero pbrm layers
+  ok   T2 a PBRM layer contributes a METALLIC map (6)
+  ok   T2 FLOOR a legacy-only region contributes NO metallic map
+  ok   T3a the emissive sheet is WRITTEN when a layer supplies one
+  ok   T3b and ABSENT when none does, named as absent in the index
+  ok   T3 the sheet COUNT moves with it (5 with, 4 without)
+== the containers validate, both ways ==
+  ok   the with-PBRM container passes every rule of the contract
+  ok   the without-PBRM container passes every rule of the contract
+== the mask texels carry the PBRM's own numbers ==
+       roles [1, 2, 5, 4, 6]
+  ok   T3 the container carries an EMISSIVE sheet (role 6)
+       distinct mask R 97, G 182; emissive colours 666
+       texels reading the PBRM constants: roughness 18112/73984, metallic 16236/73984, emissive 17349/73984
+  ok   T2 metallic 190 (the PBRM map) reaches 21.9% of the tile
+  ok   T2 metallic is NOT everywhere zero where a PBRM layer paints (max 190)
+  ok   T1p roughness 65 (the PBRM RMAOS red, NOT 1-gloss) reaches 24.5% of the tile
+  ok   T3 the emissive sheet carries the fixture colour (230, 48, 98) on 23.4% of the tile
+
+14 checks, 0 failures
+RESULT PASS

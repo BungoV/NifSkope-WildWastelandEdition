@@ -1,0 +1,29 @@
+run_ship blast_n4  az: card step worst  27180 at az003 el20, mean  3841.0 | mesh step worst   5120 mean  3585.2 | card area   30968 | IoU mean 0.6114 min 0.2166
+run_ship blast_n4  el: card step worst  14750 at az030 el19, mean  1656.6 | mesh step worst   2977 mean  2364.7 | card area   15550 | IoU mean 0.3938 min 0.1581
+run_ship maple_n4  az: card step worst  15890 at az183 el20, mean  5950.7 | mesh step worst  21363 mean 18534.7 | card area   17870 | IoU mean 0.3241 min 0.1564
+run_ship maple_n4  el: card step worst  12319 at az210 el19, mean  4460.2 | mesh step worst  27023 mean 23653.2 | card area   10462 | IoU mean 0.1786 min 0.0525
+run_ship rock_n4   az: card step worst  90847 at az003 el20, mean  6744.0 | mesh step worst   6435 mean  4294.5 | card area  136601 | IoU mean 0.5282 min 0.1422
+run_ship rock_n4   el: card step worst 125698 at az030 el34, mean  6824.5 | mesh step worst   4332 mean  3185.2 | card area  318952 | IoU mean 0.8530 min 0.5140
+run_fix  blast_n4  az: card step worst  49967 at az000 el20, mean  4605.1 | mesh step worst   5120 mean  3585.2 | card area   35263 | IoU mean 0.6343 min 0.2134
+run_fix  blast_n4  el: card step worst  33791 at az030 el26, mean  2111.7 | mesh step worst   2977 mean  2364.7 | card area   18130 | IoU mean 0.4089 min 0.1023
+run_fix  maple_n4  az: card step worst  40126 at az180 el20, mean  9761.3 | mesh step worst  21363 mean 18534.7 | card area   25822 | IoU mean 0.3751 min 0.1323
+run_fix  maple_n4  el: card step worst  32199 at az210 el26, mean  8235.6 | mesh step worst  27023 mean 23653.2 | card area   15592 | IoU mean 0.2231 min 0.0895
+run_fix  rock_n4   az: card step worst 182127 at az000 el20, mean  8798.0 | mesh step worst   6435 mean  4294.5 | card area  132863 | IoU mean 0.5009 min 0.0869
+run_fix  rock_n4   el: card step worst 148296 at az030 el26, mean  6854.0 | mesh step worst   4332 mean  3185.2 | card area  326585 | IoU mean 0.8639 min 0.6410
+
+POPPING BAR (run_fix worst <= run_ship worst x 1.5):
+  blast_n4  az:  49967 vs  27180 x1.5 =  40770.0  ratio 1.84  FAIL
+  blast_n4  el:  33791 vs  14750 x1.5 =  22125.0  ratio 2.29  FAIL
+  maple_n4  az:  40126 vs  15890 x1.5 =  23835.0  ratio 2.53  FAIL
+  maple_n4  el:  32199 vs  12319 x1.5 =  18478.5  ratio 2.61  FAIL
+  rock_n4   az: 182127 vs  90847 x1.5 = 136270.5  ratio 2.00  FAIL
+  rock_n4   el: 148296 vs 125698 x1.5 = 188547.0  ratio 1.18  PASS
+  VERDICT FAIL
+
+TEAR at the torn views (el 20):
+  blast_n4  az030 run_ship IoU 0.4664  card  17922 mesh  38190  torn share 44.9% (14398 of 32060 mesh&nearest px)
+  blast_n4  az030 run_fix  IoU 0.8446  card  34328 mesh  38190  torn share 7.1% (2286 of 32060 mesh&nearest px)
+  maple_n4  az210 run_ship IoU 0.1910  card  10075 mesh  43508  torn share 68.3% (13986 of 20482 mesh&nearest px)
+  maple_n4  az210 run_fix  IoU 0.4284  card  25864 mesh  43508  torn share 22.9% (4690 of 20482 mesh&nearest px)
+  rock_n4   az030 run_ship IoU 0.6213  card 208460 mesh 334905  torn share 27.3% (74872 of 274649 mesh&nearest px)
+  rock_n4   az030 run_fix  IoU 0.7537  card 253476 mesh 334905  torn share 13.8% (37782 of 274649 mesh&nearest px)

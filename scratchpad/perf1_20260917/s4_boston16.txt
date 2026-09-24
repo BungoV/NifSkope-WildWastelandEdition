@@ -1,0 +1,22 @@
+reference (ct1 t1) wall_ms=109855
+run 1 rc=0 wall_ms=48571 COMPARED 99 file(s); 99 identical; 0 difference(s) VERDICT IDENTICAL 
+run 2 rc=0 wall_ms=45867 COMPARED 99 file(s); 99 identical; 0 difference(s) VERDICT IDENTICAL 
+run 3 rc=0 wall_ms=46540 COMPARED 99 file(s); 99 identical; 0 difference(s) VERDICT IDENTICAL 
+run 4 rc=0 wall_ms=47198 COMPARED 99 file(s); 99 identical; 0 difference(s) VERDICT IDENTICAL 
+run 5 rc=0 wall_ms=46909 COMPARED 99 file(s); 99 identical; 0 difference(s) VERDICT IDENTICAL 
+run 6 rc=0 wall_ms=46842 COMPARED 99 file(s); 99 identical; 0 difference(s) VERDICT IDENTICAL 
+run 7 rc=0 wall_ms=79020 COMPARED 99 file(s); 99 identical; 0 difference(s) VERDICT IDENTICAL 
+run 8 rc=0 wall_ms=46722 COMPARED 99 file(s); 99 identical; 0 difference(s) VERDICT IDENTICAL 
+run 9 rc=0 wall_ms=47283 COMPARED 99 file(s); 99 identical; 0 difference(s) VERDICT IDENTICAL 
+run 10 rc=0 wall_ms=47212 COMPARED 99 file(s); 99 identical; 0 difference(s) VERDICT IDENTICAL 
+run 11 rc=0 wall_ms=46061 COMPARED 99 file(s); 99 identical; 0 difference(s) VERDICT IDENTICAL 
+run 12 rc=0 wall_ms=46231 COMPARED 99 file(s); 99 identical; 0 difference(s) VERDICT IDENTICAL 
+run 13 rc=0 wall_ms=46855 COMPARED 99 file(s); 99 identical; 0 difference(s) VERDICT IDENTICAL 
+run 14 rc=0 wall_ms=47458 COMPARED 99 file(s); 99 identical; 0 difference(s) VERDICT IDENTICAL 
+run 15 rc=0 wall_ms=46622 COMPARED 99 file(s); 99 identical; 0 difference(s) VERDICT IDENTICAL 
+run 16 rc=0 wall_ms=45501 COMPARED 99 file(s); 99 identical; 0 difference(s) VERDICT IDENTICAL 
+run 17 rc=0 wall_ms=46407 COMPARED 99 file(s); 99 identical; 0 difference(s) VERDICT IDENTICAL 
+run 18 rc=0 wall_ms=47265 COMPARED 99 file(s); 99 identical; 0 difference(s) VERDICT IDENTICAL 
+run 19 rc=0 wall_ms=46341 COMPARED 99 file(s); 99 identical; 0 difference(s) VERDICT IDENTICAL 
+run 20 rc=0 wall_ms=46968 COMPARED 99 file(s); 99 identical; 0 difference(s) VERDICT IDENTICAL 
+SOAK boston16: 20 run(s) at --chunk-threads 8, 0 fault(s)

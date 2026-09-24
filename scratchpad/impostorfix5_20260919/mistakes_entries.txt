@@ -1,0 +1,64 @@
+## 2026-09-19 -- "there is no CLI switch for it" was a search, not a fact (IMPOSTORFIX5)
+
+Lane IMPOSTORFIX5 traced the impostor card's frame resolution to
+`LodGeneration/cardRes` in `src/lodgenmanager.cpp`, grepped the `lodgen`
+argument parser in `src/nifcli.cpp`, found only `--card-half-aux`, and wrote
+into its own report that **the decisive experiment -- re-bake at four times the
+texels and re-run the known-answer control -- could not be run from a script.**
+
+It could. The resolution is not a `lodgen` argument because `lodgen --impostors`
+is only the COMPRESSION half: it reads the frame size out of the bake's `.txt`
+sidecar (`oct N tileW tileH ... base`) and never chooses it. The PHOTOGRAPHY
+half is the GUI hook, and it has taken `WW_IMPOSTOR_TILE` and `WW_IMPOSTOR_REF`
+since it was written (`src/nifskope_ui.cpp:22766`), with
+`tools/bake_impostor_cards.sh` exposing both as `TILE=` and `REF=`. Unsetting
+`WW_IMPOSTOR_REF` switches the size ladder off entirely. The lane found this
+twenty minutes later while reading the driver for an unrelated reason, ran the
+experiment, and corrected the report in place rather than deleting the wrong
+sentence.
+
+The general shape: **a grep of ONE half of a two-process pipeline answers a
+question about that half only.** The bake and the compression are different
+programs in this tree -- one is a GUI hook driven by environment variables, the
+other is a `-no-gui` command line -- and a switch missing from one says nothing
+about the other. Before writing "there is no way to do X", name every process
+that could do X and grep each one, and grep the DRIVER SCRIPT too: `tools/` is
+where this project's knobs are actually exposed.
+
+## 2026-09-19 -- a census line that describes code that was deleted (IMPOSTORFIX5)
+
+`hookup_ramp.py` replaced the height fill's 8-ring snap with a 16-ring ramp and
+left `lodgenRepairOctHeight`'s report string saying `%3 outside within 8 rings`.
+The exe built from it printed that sentence over numbers produced by a sixteen-
+ring fade, so every log, every bake record and the gate's own census parser
+described an algorithm the binary no longer contained.
+
+Nothing failed. The four integers were still correct and still added up, the
+self-check still passed, and the gate still went green -- which is exactly why
+it is worth an entry: **a stale message is invisible to every check that reads
+the numbers.** It was caught by reading the diff, not by running anything.
+
+The rule: when a hook-up script changes a constant or an algorithm, the same
+script's `--check` must also name every STRING that describes it. `grep -n
+"<the old constant's story>" <the file>` after any such change, and treat a
+number's prose the way this project treats a telemetry echo -- it must report
+what the code did, never what the code was once going to do.
+
+## 2026-09-19 -- a re-bake that did nothing, and a log that said so in one line (IMPOSTORFIX5, about IMPOSTORFIX3)
+
+IMPOSTORFIX3's `rebake_all.sh` re-baked five fixture subjects and did not pass
+`--no-trees-only` for the rock. The rock's `lodgen_repair.log` is a single line
+-- `error: no LOD-bearing refs in chunk (-32,16)x16 (0 placed, 7630 without a
+usable LOD model)` -- so its sheets were never rewritten, and the lane's rock
+row was published as if it had been.
+
+The bytes happened to be fine (the rock's "before" sheets really were the
+8-ring ones, proven here by the other four sheets coming back byte-identical
+from an honest re-bake), so nothing downstream was wrong. That is luck, not
+process.
+
+The rule, now in `rebake5.sh`: **a bake is not "done" because the exe exited 0.**
+`lodgenRepairOctHeight` prints a census line on every card it repairs, so the
+script greps every subject's log for it and shouts when it is missing. Any
+batch step that can succeed while producing nothing needs a positive artefact
+to check for, named in the script, not a return code.

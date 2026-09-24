@@ -1,0 +1,57 @@
+
+## What lane IMPOSTORFIX4 had to re-derive (2026-09-19)
+
+**The bake's PNG is not the encoder's input, and a control tells you so.** The
+`<id>_oct_{albedo,normal}.png` beside the DDS are written BEFORE the bake tail:
+`src/lodgen.cpp:3079-3088` dilates three images and then runs
+`lodgenRepairOctHeight`, and only after that does the writer convert "from the
+bake's PNGs". Encode the PNG and you are measuring the dilate and the height
+repair, not the compressor -- IMPOSTORFIX4 got a mean height error of 5-7
+levels and worst blocks of 206 that way, and every one of those numbers was
+withdrawn. Rebuild the encoder's real input by re-running that tail
+(`dilate(nrm, alb, deep)`, `dilate(alb, alb, deep)` -- which preserves alpha
+because `isCoverage` -- then the height repair, `deep = max(8, max(w,h)/8)`),
+and CONTROL IT ON THE SHIPPED BYTES: a correct model reproduces 100 per cent of
+the BC1 endpoint words and 99.9 per cent of the index words. Below that, do not
+quote a compression number.
+
+**Reproduce the previous lane's in-application numbers first, and let the worst
+delta BE the bar.** An offline instrument that scores the shipped sheets over
+24 views will sit a few thousandths off the harness. Score every subject and
+every sheet set the lane before published, take the worst signed delta (here
++0.0113 on dead_n4, mean +0.0044), and write into the report that no simulated
+gain smaller than that is a gain. It kills arguments before they start, and it
+killed three of this lane's own candidate repairs.
+
+**One mesh-free number explains most of a subject's fat ink: `texels painted /
+summed coverage`.** Coverage is a fraction; the honest area of a frame is the
+SUM of the fractions; what the card paints is the COUNT over the threshold. The
+ratio needs no mesh, no registration and no render. blast 1.21, dead 1.26, rock
+1.04 -- and the leafy maple 2.36, which is its whole defect. Compute it before
+building any view-based ablation, because if it is large the answer is the
+sheet plus the threshold and no drawing change can reach it.
+
+**For an apparent-size curve, RENDER at the size; never downsample a big
+render.** The defect below the knee IS the aliasing, so a card rendered at 1024
+and shrunk to 16 does not have it. Two confounds come with it and both belong
+in the report: an integer registration offset scaled down carries up to half a
+pixel, which at 16 px is three per cent of the card (it shows as a
+non-monotonic dip -- IMPOSTORFIX4's 32 px rows read below its own 24 px rows);
+and a mesh mask area-averaged and cut at half coverage is biased THIN for a
+bare tree. Comparisons between two arms carrying the SAME reference and the
+SAME offset are safe from both; absolute values below about 48 px are not.
+
+**A mip is not automatically the repair for a card that is too small.** Box mip
+plus a coverage-floor cut deletes every branch narrower than the new texel:
+measured, it took blast_n4 from 0.3615 to 0.2124 at 16 px with ink collapsing
+to 0.255, while HELPING the over-covered crown (0.1526 to 0.2798). A repair
+that swaps one subject's failure for another's is not ranked. The version that
+could win on both -- a chain whose every level's alpha is rescaled so the
+level's covered AREA matches mip 0's -- is unmeasured, and naming it is
+cheaper than proposing it.
+
+**Raising N does not move the apparent-size knee.** N divides the same sheet
+into more and therefore smaller frames, so texels-per-screen-pixel is unchanged
+at best. Measured, N=8 beat N=4 by roughly the same margin at 16 px as at 256,
+and both collapsed below about 48 px. N is worth having above the knee and is
+never the answer below it.

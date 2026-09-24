@@ -1,0 +1,11 @@
+sheet before/vt/FO4CSLOD/Commonwealth/Commonwealth.VT.1.lodt
+  levelDim 1 tiles 4x4 present 16 content 512 border 8 stored 528 cells x 4..7 y -12..-9  -> 8.0 world units a texel
+  mask sheet index 2 role 5 dxgi 71 (BC1: B carries 5 bits, so a single texel is one of 32 steps)
+  (b) WHOLE CHUNK, every content texel: n 4194304 mean 134.689 min 16 max 255
+  a-deck         rect x 19712..20992 y -41856..-40576 (1280 x 1280 units): n 25600 mean 57.316 min 49 max 65
+  a2-brief       rect x 24644..25156 y -41556..-41044 (512 x 512 units): n 4225 mean 122.528 min 65 max 172
+  a3-catwalk     rect x 31616..32640 y -41472..-40576 (1024 x 896 units): n 14336 mean 74.640 min 65 max 123
+  c-open         rect x 23936..24192 y -34816..-34560 (256 x 256 units): n 1024 mean 234.488 min 213 max 255
+  d-pierfoot     rect x 31232..31616 y -45568..-44160 (384 x 1408 units): n 8448 mean 139.295 min 90 max 189
+  GEOREF CONTROL: object top vs mask B over 7562 occupied squares, r = -0.6611; shifted one CELL east, 6908 squares, r = +0.1937
+  lattice OBJH: origin 64,-448 grid 256x256 cell 128.0 minZ plane absent (v1 dump)

@@ -1,0 +1,11 @@
+maple_n4_t256 -> 32x64 (ratio 4), scored on maple_n4's own mesh grabs
+rule                    IoU crownIoU   (the SHIPPED 32x64 bake: 0.3584 / crown 0.3153)
+(t256, no cut)       0.3384   0.3201   <- the 128x256 sheet itself, the ceiling
+A_box                0.3417   0.3043
+B_maxcov             0.3096   0.2813
+C_nearest            0.3453   0.3062
+E:\Projects\NifskopeWildWastelandEdition\scratchpad\impostorfix2_20260919\s1_downsample.py:52: RuntimeWarning: All-NaN slice encountered
+  h = np.nanmedian(m, axis=2)
+D_median             0.3413   0.3028
+E_max_nearest        0.3194   0.2889
+F_maxcov_height      0.3416   0.3023

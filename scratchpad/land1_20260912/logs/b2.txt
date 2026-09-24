@@ -1,0 +1,22 @@
+LAND1 gate B2 -- the refusals
+09:03
+   -rwxr-xr-x 1 bungo 197609 21935616 Sep 12 08:42 /e/Projects/NifskopeWildWastelandEdition/release/NifSkope.exe
+
+no-ledger      rc=1   files-written=0   PASS
+               refused: --incremental has nothing to diff against -- no ledger at E:/Projects/NifskopeWildWasteland
+                 run the same command once WITHOUT --incremental; every bake writes the ledger, so the next run can
+wrong-shape    rc=1   files-written=0   PASS
+               refused: E:/Projects/NifskopeWildWastelandEdition/scratchpad/land1_20260912/out/b3/A/base/obj/Common
+                 an incremental run must cover exactly the region its ledger covers; bake this region once without 
+switches       rc=1   files-written=0   PASS
+               refused: the switches differ from the ones the ledger was written with, so EVERY chunk is dirty and 
+                 bake without --incremental. (The digest covers the argument vector in order; even reordering flags
+   (baking a ledger WITH --atlas so the whole-region arm is reachable)
+whole-region   rc=1   files-written=0   PASS
+               refused: --atlas, --arrays and --impostors each build ONE region-wide product out of the whole writt
+                 bake without --incremental, or drop those flags from this run and do them in a separate full pass 
+merge-ok       rc=0   the default merge does NOT refuse           PASS
+               incremental: 0 of 25 chunks dirty (0 inputs moved, 0 not in the ledger, 0 output lost, 0 by neighbour)
+
+B2: 5 arms, 0 failure(s)
+RESULT PASS

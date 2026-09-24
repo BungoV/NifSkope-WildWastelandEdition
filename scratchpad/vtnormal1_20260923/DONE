@@ -1,0 +1,10 @@
+PARTIAL -- VTNORMAL1, 2026-09-24 01:38. Built (release/NifSkope.exe 01:35:28, sha1 97d2b3a2), not committed.
+Everything asked is in and gated, including the director's 2026-09-24 addition, except one row: the pre-set
+bar (L02 normal vs his downsampled sheet, r >= 0.88) FAILS on north, 0.8624 (east 0.9449). Cause proven:
+the transfer is exact (100 % of texels within 1/64 of this tree's own BC1 of his sheet); the loss is
+lodgenEncodeBC1Block's luminance endpoints. Fixing it moves the no-folder bytes, so it is bungo's call.
+Gates: gate.sh 27/1 (the bar), gate_auto.sh 7/0, lodgen_terrain_vt.sh 45/0, lod_generation.sh 128/0,
+lodgen_perf.sh green except leg (c) = harness switch mismatch (equal-switch rerun waybk.sh: 56 files, 0 differ).
+His profile: LodGeneration/msnCache set to "E:/Projects/Fallout 4 Mods/mods/Upscaled Terrain Normals"
+(no NifSkope was running; the panel writes keys only on Generate, not on close).
+Text to splice: DELIVERABLE_TEXT.md. Record: progress.md.

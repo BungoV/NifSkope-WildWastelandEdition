@@ -1,0 +1,10 @@
+== b0_el20 (bc7, el 20, WW_IMPOSTOR_BLEND=0)
+== rawsnap_el20 (raw, el 20, default)
+  T1 ratio card/mesh: median 0.535 min 0.104 (az 26) max 0.957 (az 284); outside 0.85..1.15 at 309 of 360 -> FAIL
+  T2 runs (median over band B): card > mesh at 10 of 360; worst card 2.0 vs mesh 1.0 at az 151 -> FAIL
+  T3 centre step: card worst 77.85 px (az 47) mean 3.75; mesh worst 1.07 mean 0.61; ratio 72.81 (bar 2); missing-centre views 0 -> FAIL
+  whole tree: IoU 0.7777 (min 0.6701); missing 0.1418 (max 0.2434); pop worst 0.3535 mean 0.1220 [mesh 0.1893/0.1639]; tear worst 9.46% az313 top5 8.78% mean 2.94%
+  TRUNK FAIL | TEAR BAR FAIL (pop 0.3535 <= 0.1755; tear 9.46% <= 1.92%)
+== s16snap_el20 (bc7, el 20, WW_IMPOSTOR_SEARCH=16)
+== b0_el0 (bc7, el 0, WW_IMPOSTOR_BLEND=0)
+DIAG-DONE

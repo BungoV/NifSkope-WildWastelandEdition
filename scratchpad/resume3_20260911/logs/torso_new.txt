@@ -1,0 +1,3 @@
+TORSO new  torso 277 303 292 280 291 291 292  median 291 ms
+TORSO new  cube  362 269 260 285 281 263 263  median 269 ms
+TORSO new  PARSE = 22 ms   (median torso - median cube, 7 reps each, alternating)

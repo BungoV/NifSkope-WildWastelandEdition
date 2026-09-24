@@ -1,0 +1,29 @@
+g1
+  g1 load ok files=Fallout4.esm wthr=71 weather id=0002B52A edid=CommonwealthClear src=Fallout4.esm owner=Fallout4.esm fv=131 nam0=608 rows=19 tods=8 dalc=8 
+g2
+  g2 load ok files=Fallout4.esm wthr=71 census wthr=71 parsed=71 refused=0 nam0=272:4,544:2,608:65 dalc=4:4,8:67 
+g3
+  g3 
+g4
+  g4 load ok files=Fallout4.esm,DLCCoast.esm,DLCNukaWorld.esm,FO4CSPhysicalWeathers.esp wthr=105 weather id=0002B52A edid=CommonwealthClear src=FO4CSPhysicalWeathers.esp owner=Fallout4.esm fv=131 nam0=608 rows=19 tods=8 dalc=8 
+g5
+  g5 load refused reason="FO4CSPhysicalWeathers.esp needs master DLCNukaWorld.esm, which is not loaded" records=0 
+g7
+  g7_noon rc=0 1251051 B
+  g7_midnight rc=0 852480 B
+ground
+  ground_ref rc=0 518086 B
+  ground_off rc=0 518086 B
+  ground_on rc=0 1251051 B
+live
+  live rc=0 done
+GATE g1: PASS  id=0002B52A fv=131 printed SunDay=(225, 225, 225) AmbDay=(93, 93, 93) SunNight=(53, 70, 87) DalcDayZ-=(101, 133, 169); decoder agrees on the doc values=True; rows differing 0/152 (), dalc differing 0/56, nam0hex equal
+GATE g2: PASS  printed census wthr=71 parsed=71 refused=0 nam0=272:4,544:2,608:65 dalc=4:4,8:67; decoder wthr=71 nam0=272:4,544:2,608:65 dalc=4:4,8:67; listed ids match=True
+GATE g3: PASS  10 hours; judge-vs-printed mismatches 0; doc answers missed none
+GATE g4: PASS  .esp masters=Fallout4.esm,DLCCoast.esm,DLCNukaWorld.esm; the .esp's NAM0 differs from vanilla=True; winner src=FO4CSPhysicalWeathers.esp owner=Fallout4.esm; NAM0 = the .esp's bytes=True
+GATE g5: PASS  load refused reason="FO4CSPhysicalWeathers.esp needs master DLCNukaWorld.esm, which is not loaded" records=0 rc=3
+GATE g7: PASS  noon vs midnight 89.3% px differ, luma 79.2 -> 20.9; keys Day / Night; cube cube=textures/shared/cubemaps/mipblur_defaultoutside1.dds(default)
+  noon summary: lookdev=on(asked=1) weather=CommonwealthClear [0002B52A] src=Fallout4.esm hour=12.00 keys=Day sun=0.759,0.759,0.759 dir=0.190,0.095,0.977 ambient=dalc dalcZ-=0.130,0.239,0.405 cube=textures/shared/cubemaps/mipblur_defaultoutside1.dds(default) ground=on particles=on(asked=1) shadows=off(asked=0; not built) contact=off(asked=0; not built) ao=off(asked=0; not built) ssgi=off(asked=0; not built)
+GATE ground: PASS  OFF vs reference (pass never runs) max|d|=0 differing px=0; ground ON vs reference 76.4% px differ (not vacuous: >= 1%)
+GATE live: PASS  14 checks, 0 failures
+R2B GATES: PASS (g1=True, g2=True, g3=True, g4=True, g5=True, g7=True, ground=True, live=True)

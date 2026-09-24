@@ -1,0 +1,4 @@
+GATE srgbtag: FAIL  max|d|=67 differing=0.12578 flat-vs-twin mean=78.7
+GATE srgbtag_legacy: FAIL  max|d|=70 differing=0.12578
+pictures: 
+RED CONTROL srgbtag -> gate srgbtag BITES

@@ -1,0 +1,7 @@
+TREE 0 NONTREE 0 RISING 0 FALLING 0 BRANCHFULL 0 TRUNKPARTIAL 0
+  FAIL the fixture has both trees and non-trees
+  ok   non-trees carry an explicit ZERO
+  FAIL sway RISES with height on every tree shape (none inverted)
+  FAIL BRANCH shapes are wholly non-zero, TRUNK shapes are not (shared scale)
+4 checks, 3 failures
+FAIL

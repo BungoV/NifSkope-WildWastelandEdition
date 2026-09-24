@@ -1,0 +1,92 @@
+reading Fallout4.esm for VCLR and VHGT ...
+  cells with VCLR 2362, with VHGT 36864
+
+=== (-20,24)  road texels 0 (0.00%), cover>0 0 (0.00%)  [NO cover plane in this sheet], ground 262144 (100.00%)
+    BC1 codec floor on this sheet: RMS 0.497 MAE 0.176
+    lum  ours mean  87.606  vanilla mean  80.819
+        identity     rms  19.937  mae  16.205  bias   +6.787  
+        gain         rms  17.439  mae  13.755  bias   -2.709  k=0.8916
+        affine       rms   9.472  mae   7.371  bias   +0.000  c=79.1308 k=0.0193
+        gamma        rms   9.483  mae   7.332  bias   -0.532  a=0.3281 g=0.0379
+        slip_encode  rms  78.511  mae  76.720  bias  +76.718  
+        slip_decode  rms  56.635  mae  55.085  bias  -55.085  
+    R    ours mean  97.731  vanilla mean  88.234
+        identity     rms  23.381  mae  18.694  bias   +9.498  
+        gain         rms  19.450  mae  15.728  bias   -3.233  k=0.8697
+        affine       rms   9.909  mae   7.850  bias   +0.000  c=86.6436 k=0.0163
+        gamma        rms   9.920  mae   7.817  bias   -0.539  a=0.3545 g=0.0309
+        slip_encode  rms  79.269  mae  77.270  bias  +77.269  
+        slip_decode  rms  58.044  mae  55.727  bias  -55.727  
+    G    ours mean  86.016  vanilla mean  79.830
+        identity     rms  19.440  mae  15.800  bias   +6.186  
+        gain         rms  17.234  mae  13.501  bias   -2.653  k=0.8972
+        affine       rms   9.486  mae   7.343  bias   -0.000  c=78.0465 k=0.0207
+        gamma        rms   9.496  mae   7.304  bias   -0.539  a=0.3249 g=0.0398
+        slip_encode  rms  78.188  mae  76.401  bias  +76.398  
+        slip_decode  rms  56.538  mae  55.067  bias  -55.067  
+    B    ours mean  73.543  vanilla mean  68.787
+        identity     rms  17.051  mae  13.660  bias   +4.756  
+        gain         rms  15.492  mae  11.734  bias   -2.248  k=0.9048
+        affine       rms   9.381  mae   7.041  bias   -0.000  c=67.6081 k=0.0160
+        gamma        rms   9.398  mae   6.971  bias   -0.593  a=0.2817 g=0.0411
+        slip_encode  rms  78.330  mae  76.694  bias  +76.672  
+        slip_decode  rms  52.049  mae  50.853  bias  -50.853  
+    saturation on ground:  ours 0.2453  vanilla 0.2215   gain-predicted 0.2453   gamma-predicted 0.0107
+    winning global model: affine; residual map correlations on ground (r beside its phase-twin floor)
+        height       r -0.1247   twin floor -0.0495
+        slope        r -0.2962   twin floor -0.0736
+        AO(_data R)  r +0.1467   twin floor +0.0862
+        VCLR lum     r +0.0054   twin floor +0.0054
+        VCLR R       r +0.0297   twin floor -0.0319
+        VCLR G       r +0.0040   twin floor +0.0279
+        VCLR B       r +0.0297   twin floor -0.0093
+        ours lum     r -0.0000   twin floor -0.0283
+    VCLR coverage: 68.8% of texels sit in a cell WITH a VCLR record
+        with VCLR  n=180224  k=0.9242  rms 18.503
+        no VCLR    n=81920   k=0.8339  rms 13.120
+
+=== (-20,20)  road texels 25189 (9.61%), cover>0 0 (0.00%)  [NO cover plane in this sheet], ground 236955 (90.39%)
+    BC1 codec floor on this sheet: RMS 0.527 MAE 0.197
+    lum  ours mean  68.767  vanilla mean  83.464
+        identity     rms  22.652  mae  18.533  bias  -14.697  
+        gain         rms  19.587  mae  15.783  bias   -3.612  k=1.1612
+        affine       rms  11.317  mae   9.025  bias   -0.000  c=70.7563 k=0.1848
+        gamma        rms  11.361  mae   9.042  bias   -0.763  a=0.3995 g=0.1565
+        slip_encode  rms  59.645  mae  57.372  bias  +57.364  
+        slip_decode  rms  68.545  mae  67.436  bias  -67.436  
+    R    ours mean  78.169  vanilla mean  91.005
+        identity     rms  21.854  mae  17.826  bias  -12.837  
+        gain         rms  19.508  mae  15.466  bias   -3.195  k=1.1233
+        affine       rms  11.730  mae   9.458  bias   -0.000  c=76.0536 k=0.1913
+        gamma        rms  11.762  mae   9.475  bias   -0.752  a=0.4373 g=0.1763
+        slip_encode  rms  60.640  mae  58.532  bias  +58.521  
+        slip_decode  rms  71.689  mae  70.439  bias  -70.439  
+    G    ours mean  67.155  vanilla mean  82.476
+        identity     rms  23.175  mae  18.944  bias  -15.321  
+        gain         rms  19.918  mae  16.109  bias   -3.798  k=1.1716
+        affine       rms  11.391  mae   9.040  bias   -0.000  c=70.2884 k=0.1815
+        gamma        rms  11.440  mae   9.056  bias   -0.782  a=0.3927 g=0.1499
+        slip_encode  rms  59.162  mae  56.774  bias  +56.764  
+        slip_decode  rms  68.252  mae  67.139  bias  -67.139  
+    B    ours mean  57.051  vanilla mean  71.049
+        identity     rms  21.319  mae  17.415  bias  -13.998  
+        gain         rms  18.540  mae  15.071  bias   -3.810  k=1.1786
+        affine       rms  10.590  mae   8.394  bias   +0.000  c=60.7933 k=0.1798
+        gamma        rms  10.642  mae   8.398  bias   -0.778  a=0.3422 g=0.1420
+        slip_encode  rms  60.256  mae  57.951  bias  +57.950  
+        slip_decode  rms  60.834  mae  59.831  bias  -59.831  
+    saturation on ground:  ours 0.2763  vanilla 0.2206   gain-predicted 0.2763   gamma-predicted 0.0498
+    winning global model: affine; residual map correlations on ground (r beside its phase-twin floor)
+        height       r -0.3948   twin floor +0.1005
+        slope        r -0.0932   twin floor +0.0611
+        AO(_data R)  r -0.2081   twin floor -0.0427
+        VCLR lum     r -0.0048   twin floor +0.0370
+        VCLR R       r +0.0042   twin floor +0.0740
+        VCLR G       r -0.0091   twin floor +0.0257
+        VCLR B       r +0.0090   twin floor +0.0181
+        ours lum     r +0.0000   twin floor -0.0250
+    VCLR coverage: 100.0% of texels sit in a cell WITH a VCLR record
+        with VCLR  n=236955  k=1.1612  rms 19.587
+        no VCLR    n=0 -- too few to fit
+
+wrote g1_curve.json

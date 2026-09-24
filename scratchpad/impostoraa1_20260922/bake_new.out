@@ -1,0 +1,22 @@
+exe E:/Projects/NifskopeWildWastelandEdition/release/NifSkope.exe sha1 74e317f9
+== bake blast_n4 512
+  blast_n4 tile 512 bake rc=0 18s  sidecar: oct 4 160 512 112.69 360.608 -70.6223 -38.6729 342.457 3072 legacy 512 spec1
+  lodgen rc=0 sheets=5 lodm=1 lodgen: card 000531b3: oct height repaired: 139128 whole kept, 10355 partial filled from the nearest whole texel, 301713 outside inside the 16-ring ramp carried the object's height faded towards the card plane, 859524 outside set to the card plane; self-check PASS (no covered texel decodes outside its frame's depth)
+  aa line: aa 2 1024 0.5
+== bake blast_n8 512
+  blast_n8 tile 512 bake rc=0 9s  sidecar: oct 8 160 512 116.211 371.877 -70.6223 -38.6729 342.457 3072 legacy 512 spec1
+  lodgen rc=0 sheets=5 lodm=1 lodgen: card 000531b3: oct height repaired: 509856 whole kept, 39160 partial filled from the nearest whole texel, 1151359 outside inside the 16-ring ramp carried the object's height faded towards the card plane, 3542505 outside set to the card plane; self-check PASS (no covered texel decodes outside its frame's depth)
+  aa line: aa 2 1024 0.5
+== bake maple_n4 512
+  maple_n4 tile 512 bake rc=0 6s  sidecar: oct 4 256 512 440.283 880.567 93.1789 66.2978 886.405 3072 legacy 512 spec1
+  lodgen rc=0 sheets=5 lodm=1 lodgen: card 0004a074: oct height repaired: 78429 whole kept, 110821 partial filled from the nearest whole texel, 417659 outside inside the 16-ring ramp carried the object's height faded towards the card plane, 1490243 outside set to the card plane; self-check PASS (no covered texel decodes outside its frame's depth)
+  aa line: aa 2 1024 1.25
+== bake dead_n4 512
+  dead_n4 tile 512 bake rc=0 6s  sidecar: oct 4 96 512 166.545 888.238 -10.7451 96.6602 741.875 3072 legacy 512 spec1
+  lodgen rc=0 sheets=5 lodm=1 lodgen: card 001236b4: oct height repaired: 103225 whole kept, 11077 partial filled from the nearest whole texel, 285341 outside inside the 16-ring ramp carried the object's height faded towards the card plane, 386789 outside set to the card plane; self-check PASS (no covered texel decodes outside its frame's depth)
+  aa line: aa 2 1024 0.25
+== bake rock_n4 512
+  rock_n4 tile 512 bake rc=0 7s  sidecar: oct 4 512 496 1727.14 1673.17 -89.0114 -65.5637 -274.135 5048.1 legacy 512 spec1
+  lodgen rc=0 sheets=5 lodm=1 lodgen: card 000211a3: oct height repaired: 852891 whole kept, 12679 partial filled from the nearest whole texel, 352664 outside inside the 16-ring ramp carried the object's height faded towards the card plane, 2844998 outside set to the card plane; self-check PASS (no covered texel decodes outside its frame's depth)
+  aa line: aa 2 1024 0.75
+RC=0

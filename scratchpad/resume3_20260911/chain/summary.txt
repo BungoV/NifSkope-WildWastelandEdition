@@ -1,0 +1,96 @@
+chain start 19:13:30
+-rwxr-xr-x 1 bungo 197609 21435904 2026-09-11 19:08:42.006167200 +0200 release/NifSkope.exe
+### lodgen_terrain start 19:13:30
+### lodgen_terrain rc=0  19:13:44
+26 checks, 0 failures
+PASS
+
+### lodgen_terrain_vt start 19:13:44
+### lodgen_terrain_vt rc=1  19:14:28
+41 checks, 1 failures
+RESULT FAIL
+
+### lodgen_roads start 19:14:28
+### lodgen_roads rc=1  19:14:48
+11 checks, 1 failures
+RESULT FAIL
+
+### lodgen_ground_cover start 19:14:48
+### lodgen_ground_cover rc=1  19:15:18
+  21 checks, 4 failures
+29 checks, 5 failures
+RESULT FAIL
+
+### lodgen_terrain_pbrm start 19:15:18
+### lodgen_terrain_pbrm rc=0  19:15:51
+14 checks, 0 failures
+RESULT PASS
+
+### lodgen_native start 19:15:51
+### lodgen_native rc=0  19:16:48
+15 checks, 0 failures, 1 skips
+RESULT PASS
+18 checks, 0 failures
+RESULT PASS
+
+### lodgen_stage_times start 19:16:48
+### lodgen_stage_times rc=0  19:16:59
+16 checks, 0 failures
+PASS
+
+### lodgen_identity start 19:16:59
+### lodgen_identity rc=0  19:17:01
+RESULT PASS
+   ok-lines: 8   FAIL-lines: 0
+
+### lodgen_merge start 19:17:01
+### lodgen_merge rc=0  19:17:22
+RESULT PASS
+   ok-lines: 10   FAIL-lines: 0
+
+### lodgen_card_arrays start 19:17:22
+### lodgen_card_arrays rc=0  19:17:26
+RESULT PASS
+   ok-lines: 35   FAIL-lines: 0
+
+### lodgen_texture_arrays start 19:17:26
+### lodgen_texture_arrays rc=0  19:17:32
+RESULT PASS
+   ok-lines: 40   FAIL-lines: 0
+
+### lodgen_impostor_cards start 19:17:33
+### lodgen_impostor_cards rc=0  19:17:36
+RESULT PASS
+   ok-lines: 12   FAIL-lines: 0
+
+### lodgen_octahedral start 19:17:36
+### lodgen_octahedral rc=1  19:18:44
+RESULT FAIL
+   ok-lines: 110   FAIL-lines: 1
+
+### lodgen_panel_run start 19:18:45
+### lodgen_panel_run rc=0  19:18:59
+125 checks, 0 failures
+PASS
+
+### lod_generation start 19:18:59
+### lod_generation rc=0  19:19:07
+116 checks, 0 failures
+PASS
+
+### lodl_open start 19:19:07
+### lodl_open rc=0  19:20:33
+23 checks, 0 failures
+PASS
+
+### ui_align start 19:20:34
+### ui_align rc=0  19:20:40
+11 checks, 0 failures
+PASS
+
+### water_ui start 19:20:40
+### water_ui rc=0  19:20:52
+82 checks, 0 failures, 0 skips
+PASS
+
+chain end 19:20:52

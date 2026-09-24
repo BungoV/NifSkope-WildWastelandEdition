@@ -1,0 +1,29 @@
+src/io/lodvfile.h|91|constexpr quint32 LODTEX_VERSION = 2;
+src/io/lodvfile.h|101|LODV_ROLE_MASK = 5,
+src/io/lodvfile.h|102|LODV_ROLE_EMISSIVE = 6
+src/io/lodvfile.h|107|constexpr int LODV_MAX_SHEETS = 6;
+src/io/lodvfile.h|163|LodvSheetDesc sheets[LODV_MAX_SHEETS];
+src/io/lodvfile.cpp|29|constexpr quint32 LODV_VERSION = LODTEX_VERSION;
+AMBIGUOUS src/io/lodvfile.cpp  unsigned char * s = h + 0xA0 + i * 8; -> [148, 197]
+src/io/lodvfile.cpp|220|const quint16 fmt = ( cover && sd.dxgiFormatCover != sd.dxgiFormat )
+src/io/lodvfile.cpp|468|return fail( QStringLiteral( "refused: version 1 container -- four sheets whose "
+src/io/lodvfile.cpp|555|return fail( QString( "refused: sheet %1 has role 3 `data` (R AO, G wetness, "
+src/io/lodvfile.cpp|591|return fail( QStringLiteral( "refused: a version 2 container must carry the colour "
+src/io/lodvfile.cpp|581|return fail( QString( "refused: sheets %1 and %2 both declare a "
+src/lodgen.h|376|enum LodgenMaskRule
+src/lodgen.h|392|float lodgenLegacyGloss( float smoothness, float specGreen );
+src/lodgen.h|426|void lodgenResolveMaterialMask( const QString & dataRoot, const QString & matName,
+src/lodgen.h|483|bool coverInColor = false;
+src/lodgen.cpp|1782|float lodgenLegacyGloss( float smoothness, float specGreen )
+src/lodgen.cpp|1787|void lodgenResolveMaterialMask( const QString & dataRoot, const QString & matName,
+src/lodgen.cpp|4657|r = b8( lodgenLegacyGloss( smooth, sG ) );
+src/lodgen.cpp|6768|struct LodgenVtMaskCache
+src/lodgen.cpp|7200|out.mask[size_t( j ) * S + i] =
+src/lodgen.cpp|7318|out.mask[o] = ( ( ( acc[3][3] + 2 ) >> 2 ) << 24 )
+src/lodgen.cpp|7532|wantEmissive = maskCache.withEmissive > 0;
+src/lodgen.cpp|7580|h.sheets[2] = { LODV_DXGI_BC1_UNORM, maskCoverFmt, LODV_ROLE_MASK, 0 };
+src/lodgen.cpp|7776|root.insert( QStringLiteral( "family" ), QStringLiteral( "pbr" ) );
+src/lodgen.cpp|7865|t.insert( QStringLiteral( "maskRules" ), rules );
+src/lodgen.cpp|7846|t.insert( QStringLiteral( "dropped" ), dropped );
+src/esmdata.h|138|struct EsmLtexTextureSet
+src/esmdata.cpp|501|const EsmLtexTextureSet & EsmWorld::ltexTextureSet( quint32 ltexForm ) const

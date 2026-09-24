@@ -1,0 +1,79 @@
+model TreeElmFree01.nif
+projection ortho
+ranges TreeElmFree01:0 - L1_TreeElmFree01:0 246+0
+lodm materials\Landscape\TreeElmAtlas.lodm none textures\landscape\trees\elmatlas_d.dds
+mask tree
+emissive 0 shapes 0
+front 2929.68 1497.2 24.4005 -74.9069 1038.69
+side 2929.68 1497.2 24.4005 -74.9069 1038.69
+class 512 496
+gap 32 32
+coverage 16 128 160
+oct 8 512 496 1287.6 1247.36 24.4005 -74.9069 1038.69 3743 legacy 512
+frameoff 0 0 49.619 -45.3043
+frameoff 1 0 51.7764 -51.7764
+frameoff 2 0 131.598 -79.8219
+frameoff 3 0 66.8778 -79.8219
+frameoff 4 0 -21.5735 -51.7764
+frameoff 5 0 -21.5735 -43.147
+frameoff 6 0 -21.5735 -43.147
+frameoff 7 0 -21.5735 -43.147
+frameoff 0 1 34.5176 -43.147
+frameoff 1 1 51.7764 -56.0911
+frameoff 2 1 99.2381 -28.0456
+frameoff 3 1 90.6087 15.1015
+frameoff 4 1 -19.4161 32.3602
+frameoff 5 1 -47.4617 28.0455
+frameoff 6 1 -25.8882 19.4161
+frameoff 7 1 34.5176 -43.147
+frameoff 0 2 15.1014 -43.147
+frameoff 1 2 30.2029 -75.5073
+frameoff 2 2 43.147 -56.0911
+frameoff 3 2 120.812 -2.15735
+frameoff 4 2 -47.4617 36.675
+frameoff 5 2 -19.4162 73.3499
+frameoff 6 2 69.0352 28.0455
+frameoff 7 2 73.3499 -43.147
+frameoff 0 3 -6.47205 -43.147
+frameoff 1 3 -4.3147 -92.7661
+frameoff 2 3 10.7867 -73.3499
+frameoff 3 3 47.4617 -25.8882
+frameoff 4 3 -10.7867 38.8323
+frameoff 5 3 64.7205 23.7308
+frameoff 6 3 56.0911 23.7308
+frameoff 7 3 47.4617 -43.147
+frameoff 0 4 -47.4617 -43.147
+frameoff 1 4 -53.9337 -118.654
+frameoff 2 4 -64.7205 -94.9234
+frameoff 3 4 2.15735 -28.0455
+frameoff 4 4 -17.2588 -25.8882
+frameoff 5 4 28.0455 -8.62939
+frameoff 6 4 30.2029 -4.3147
+frameoff 7 4 34.5176 -43.147
+frameoff 0 5 -73.3499 -43.147
+frameoff 1 5 -88.4514 -118.654
+frameoff 2 5 2.15735 30.2029
+frameoff 3 5 34.5176 32.3602
+frameoff 4 5 -107.867 99.2381
+frameoff 5 5 -2.15735 25.8882
+frameoff 6 5 -2.15741 -36.675
+frameoff 7 5 -15.1014 -43.147
+frameoff 0 6 -34.5176 -43.147
+frameoff 1 6 4.3147 -129.441
+frameoff 2 6 28.0455 -107.867
+frameoff 3 6 32.3602 -103.553
+frameoff 4 6 -88.4513 -114.34
+frameoff 5 6 -90.6087 -90.6087
+frameoff 6 6 -40.9896 -64.7205
+frameoff 7 6 -34.5176 -43.147
+frameoff 0 7 21.5735 -43.147
+frameoff 1 7 38.8323 -43.147
+frameoff 2 7 21.5735 -43.147
+frameoff 3 7 15.1014 -51.7764
+frameoff 4 7 -66.8778 -79.8219
+frameoff 5 7 -116.497 -79.8219
+frameoff 6 7 -51.7764 -51.7764
+frameoff 7 7 -49.619 -45.3043
+frameclamped 0
+framefit 1195.17 1143.4 1214.59 1175.76
+orthofit 1296.33 1296.33 0

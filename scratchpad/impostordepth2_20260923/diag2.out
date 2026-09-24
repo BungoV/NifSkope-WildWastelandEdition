@@ -1,0 +1,19 @@
+== b0_el20 (bc7, el 20, WW_IMPOSTOR_BLEND=0)
+  T1 ratio card/mesh: median 0.968 min 0.874 (az 9) max 1.091 (az 47); outside 0.85..1.15 at 0 of 360 -> ok
+  T2 runs (median over band B): card > mesh at 0 of 360; worst card 2.0 vs mesh 1.0 at az 6 -> ok
+  T3 centre step: card worst 64.36 px (az 47) mean 3.98; mesh worst 1.07 mean 0.61; ratio 60.19 (bar 2); missing-centre views 0 -> FAIL
+  whole tree: IoU 0.7203 (min 0.6341); missing 0.1542 (max 0.2230); pop worst 0.4957 mean 0.1027 [mesh 0.1893/0.1639]; tear worst 10.14% az313 top5 9.65% mean 4.20%
+  TRUNK FAIL | TEAR BAR FAIL (pop 0.4957 <= 0.1985; tear 10.14% <= 2.78%)
+== s16snap_el20 (bc7, el 20, WW_IMPOSTOR_SEARCH=16)
+  T1 ratio card/mesh: median 0.918 min 0.611 (az 313) max 1.004 (az 71); outside 0.85..1.15 at 45 of 360 -> FAIL
+  T2 runs (median over band B): card > mesh at 4 of 360; worst card 2.0 vs mesh 1.0 at az 353 -> FAIL
+  T3 centre step: card worst 4.09 px (az 27) mean 0.69; mesh worst 1.07 mean 0.61; ratio 3.83 (bar 2); missing-centre views 0 -> FAIL
+  whole tree: IoU 0.8259 (min 0.7521); missing 0.0915 (max 0.1703); pop worst 0.2781 mean 0.1072 [mesh 0.1893/0.1639]; tear worst 3.87% az333 top5 3.02% mean 0.79%
+  TRUNK FAIL | TEAR BAR FAIL (pop 0.2781 <= 0.1985; tear 3.87% <= 2.78%)
+== b0_el0 (bc7, el 0, WW_IMPOSTOR_BLEND=0)
+  T1 ratio card/mesh: median 0.944 min 0.882 (az 45) max 1.011 (az 122); outside 0.85..1.15 at 0 of 360 -> ok
+  T2 runs (median over band B): card > mesh at 0 of 360; worst card 1.0 vs mesh 1.0 at az 0 -> ok
+  T3 centre step: card worst 15.25 px (az 225) mean 0.64; mesh worst 0.96 mean 0.60; ratio 15.86 (bar 2); missing-centre views 0 -> FAIL
+  whole tree: IoU 0.8157 (min 0.7217); missing 0.0889 (max 0.1804); pop worst 0.4053 mean 0.0313 [mesh 0.1441/0.1258]; tear worst 4.68% az135 top5 4.26% mean 0.85%
+  TRUNK FAIL | TEAR BAR FAIL (pop 0.4053 <= 0.1755; tear 4.68% <= 1.92%)
+DIAG-DONE

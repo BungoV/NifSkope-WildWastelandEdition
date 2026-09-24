@@ -1,0 +1,76 @@
+arrays written: 10 textures in 4 arrays (1 legacy + 0 pbr size classes, 0 layers from a .lodm, 0 sources own-emit with a lit colour); 10 shapes carry a layer, 0 without UV2, 0 textures unreadable
+  --dump-shapes over /tmp/tmp.4BWoZQhpSO/obj: 10 shapes
+  ok   the chunks' shader constants were dumped
+  ok   the array sidecar was written
+  M lines (source materials) across the chunk manifests: 8
+  ok   the chunk manifests name their shapes' source materials
+  ok   every sidecar row has the ten columns of version 5
+  ok   the sidecar header names version 5 and the emissiveScale column
+  chunk shapes probed: 18 distinct sources, 0 own-emit with a lit colour, 0 disagree between shapes
+  ok   the probe found the chunks' sources
+  sidecar: 10 layers in 1 sets: legacy 256x256 x10
+  ok   the sidecar lists layers in at least one set
+  ok   a set is legacy or pbr
+  Commonwealth.LodgenArrays.256x256.lodm: family legacy, 10 layers listed, class [256, 256], emissiveScale [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  Commonwealth.LodgenArrays.256x256_d.DDS: 256x256 dxgi 77 layers 10 mips 7 size 873908 (expected 873908)
+  Commonwealth.LodgenArrays.256x256_n.DDS: 256x256 dxgi 77 layers 10 mips 7 size 873908 (expected 873908)
+  Commonwealth.LodgenArrays.256x256_gsaos.DDS: 256x256 dxgi 77 layers 10 mips 7 size 873908 (expected 873908)
+  Commonwealth.LodgenArrays.256x256_g.DDS: 256x256 dxgi 71 layers 10 mips 7 size 437028 (expected 437028)
+  layer 1 (CommonwealthRockSlab01LOD_d.dds): emissive colour black, layer decodes black; the same layer's diffuse x alpha means 113.1 (the old law would have lit it)
+  layer 2 (CommonwealthRockSlab02LOD_d.dds): emissive colour black, layer decodes black; the same layer's diffuse x alpha means 110.7 (the old law would have lit it)
+  ok   every set's .lodm says its family, names its four arrays and lists a source per layer
+  ok   every array carries a DX10 header (BC3, BC1 for the emissive) with the sidecar's layer count and an exact size
+  ok   layers differ within an array
+  ok   a layer the sidecar says emits nothing decodes black (10 layers)
+  ok   an OPAQUE source whose emissive colour is black decodes black although its diffuse x alpha does not (2 layers)
+  ok   the emissive was measured on at least one layer either way (10 black, 2 opaque-and-muted, 0 by the glow rule)
+  ok   a layer composed by the glow rule decodes to its diffuse times that diffuse's alpha times the source's emissive colour, and not to the plain diffuse
+  ok   every layer's emissiveScale is the source's own-emit multiple (10 layers checked)
+  2 chunks, 20 A lines (0 naming a PBR set), 20 shapes checked, 0 with a vertex not carrying its layer, 0 naming an unknown layer
+  ok   every A line names a listed set and layer
+  ok   every chunk shape named in an A line carries its layer in UV2.y on every vertex
+  fixture materials\Architecture\Shacks\ShackLOD01.lodm: rmaos = emissive = LOD/Architecture/Shacks/ShackLOD01_d.dds, emissiveScale 2.5
+  ok   a pbr source .lodm written beside materials\Architecture\Shacks\ShackLOD01.BGSM
+arrays written: 10 textures in 8 arrays (1 legacy + 1 pbr size classes, 1 layers from a .lodm, 0 sources own-emit with a lit colour); 10 shapes carry a layer, 0 without UV2, 0 textures unreadable
+  --dump-shapes over /tmp/tmp.4BWoZQhpSO/obj2: 10 shapes
+  ok   every sidecar row has the ten columns of version 5
+  ok   the sidecar header names version 5 and the emissiveScale column
+  chunk shapes probed: 18 distinct sources, 0 own-emit with a lit colour, 0 disagree between shapes
+  ok   the probe found the chunks' sources
+  sidecar: 10 layers in 2 sets: legacy 256x256 x9, pbr 256x256 x1
+  ok   the sidecar lists layers in at least one set
+  ok   a set is legacy or pbr
+  ok   run 2 has a pbr set
+  Commonwealth.LodgenArrays.256x256.lodm: family legacy, 9 layers listed, class [256, 256], emissiveScale [0, 0, 0, 0, 0, 0, 0, 0, 0]
+  Commonwealth.LodgenArrays.256x256_d.DDS: 256x256 dxgi 77 layers 9 mips 7 size 786532 (expected 786532)
+  Commonwealth.LodgenArrays.256x256_n.DDS: 256x256 dxgi 77 layers 9 mips 7 size 786532 (expected 786532)
+  Commonwealth.LodgenArrays.256x256_gsaos.DDS: 256x256 dxgi 77 layers 9 mips 7 size 786532 (expected 786532)
+  Commonwealth.LodgenArrays.256x256_g.DDS: 256x256 dxgi 71 layers 9 mips 7 size 393340 (expected 393340)
+  layer 0 (CommonwealthRockSlab01LOD_d.dds): emissive colour black, layer decodes black; the same layer's diffuse x alpha means 113.1 (the old law would have lit it)
+  layer 1 (CommonwealthRockSlab02LOD_d.dds): emissive colour black, layer decodes black; the same layer's diffuse x alpha means 110.7 (the old law would have lit it)
+  Commonwealth.LodgenArraysPBR.256x256.lodm: family pbr, 1 layers listed, class [256, 256], emissiveScale [2.5]
+  Commonwealth.LodgenArraysPBR.256x256_bc.DDS: 256x256 dxgi 77 layers 1 mips 7 size 87524 (expected 87524)
+  Commonwealth.LodgenArraysPBR.256x256_n.DDS: 256x256 dxgi 77 layers 1 mips 7 size 87524 (expected 87524)
+  Commonwealth.LodgenArraysPBR.256x256_rmaos.DDS: 256x256 dxgi 77 layers 1 mips 7 size 87524 (expected 87524)
+  Commonwealth.LodgenArraysPBR.256x256_e.DDS: 256x256 dxgi 71 layers 1 mips 7 size 43836 (expected 43836)
+  ok   every set's .lodm says its family, names its four arrays and lists a source per layer
+  ok   every array carries a DX10 header (BC3, BC1 for the emissive) with the sidecar's layer count and an exact size
+  ok   layers differ within an array
+  ok   a layer the sidecar says emits nothing decodes black (9 layers)
+  ok   an OPAQUE source whose emissive colour is black decodes black although its diffuse x alpha does not (2 layers)
+  ok   the emissive was measured on at least one layer either way (9 black, 2 opaque-and-muted, 0 by the glow rule)
+  ok   a layer composed by the glow rule decodes to its diffuse times that diffuse's alpha times the source's emissive colour, and not to the plain diffuse
+  ok   every layer's emissiveScale is the source's own-emit multiple (9 layers checked)
+  2 chunks, 20 A lines (2 naming a PBR set), 20 shapes checked, 0 with a vertex not carrying its layer, 0 naming an unknown layer
+  ok   every A line names a listed set and layer
+  ok   every chunk shape named in an A line carries its layer in UV2.y on every vertex
+  ok   the fixture's shapes name the PBR set
+  pbr 256x256: 4096 of 4096 mip-0 colour blocks identical between _bc and _rmaos
+  ok   the pbr set's _rmaos layer is the source .lodm's mask texture (here the diffuse), block for block
+  ok   the pbr set names an emissive that is its own colour texture
+  pbr layers (sidecar, lodm) emissiveScale: [(2.5, 2.5)]
+  ok   the pbr layer carries the source .lodm's own emissiveScale of 2.5, in the sidecar and the .lodm
+  pbr emissive read RAW: |_e - _bc| 0.00 over 65536 texels, mean level 79.6, 4096 of 4096 colour blocks byte-identical
+  ok   the pbr set's _e layer is its source .lodm's emissive texture, decoded (BC1 against BC3)
+RESULT PASS
+  a junction under /tmp/tmp.4BWoZQhpSO/root would not go; leaving the directory

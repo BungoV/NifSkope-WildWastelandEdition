@@ -1,0 +1,1 @@
+2026-09-11 05:58 local -- lane UI5 landed. release/NifSkope.exe 2026-09-11 05:58:21, 20,855,296 B; water_ui.sh 76 checks, 0 failures, 0 skips, PASS (floor 62, group M 14/14 green); ui_align 11/0, top_bar 43/5, files_tab 28/2, animws 57/0 -- all at baseline. The five menu titles' cap band is centred at 17.0 in the 35-px row (was 10.0); the row did not move. RESTART: yes.

@@ -1,0 +1,36 @@
+[S] el00 360 views (../impostor16_20260923/n8/cuts/az/S/n8_2k)
+  T1 ratio card/mesh: median 1.147 min 0.844 (az 90) max 1.738 (az 299); outside 0.85..1.15 at 179 of 360 -> FAIL
+  T2 runs (median over band B): card > mesh at 112 of 360; worst card 2.0 vs mesh 1.0 at az 1 -> FAIL
+  T3 centre step: card worst 3.20 px (az 337) mean 0.74; mesh worst 0.96 mean 0.60; ratio 3.33 (bar 2); missing-centre views 0 -> FAIL
+  whole tree: IoU 0.8393 (min 0.7772); missing 0.0519 (max 0.0770); pop worst 0.1170 mean 0.0757 [mesh 0.1441/0.1258]; tear worst 0.96% az314 top5 0.87% mean 0.25%
+  TRUNK FAIL
+[A] el00 360 views (../impostor16_20260923/n8/cuts/az/A/n8_2k)
+  T1 ratio card/mesh: median 0.829 min 0.000 (az 315) max 0.918 (az 140); outside 0.85..1.15 at 240 of 360 -> FAIL
+  T2 runs (median over band B): card > mesh at 0 of 360; worst card 1.0 vs mesh 1.0 at az 0 -> ok
+  T3 centre step: card worst 11.13 px (az 299) mean 1.24; mesh worst 0.96 mean 0.60; ratio 11.57 (bar 2); missing-centre views 1 -> FAIL
+  whole tree: IoU 0.8404 (min 0.7400); missing 0.0847 (max 0.1787); pop worst 0.1216 mean 0.0724 [mesh 0.1441/0.1258]; tear worst 4.29% az315 top5 3.36% mean 0.63%
+  TRUNK FAIL
+[snap] el00 360 views (../impostor16_20260923/n8/cuts/az/near/n8_2k)
+  T1 ratio card/mesh: median 0.869 min 0.803 (az 287) max 0.964 (az 241); outside 0.85..1.15 at 84 of 360 -> FAIL
+  T2 runs (median over band B): card > mesh at 0 of 360; worst card 1.0 vs mesh 1.0 at az 0 -> ok
+  T3 centre step: card worst 15.18 px (az 225) mean 0.64; mesh worst 0.96 mean 0.60; ratio 15.78 (bar 2); missing-centre views 0 -> FAIL
+  whole tree: IoU 0.8125 (min 0.7196); missing 0.0984 (max 0.1906); pop worst 0.4063 mean 0.0314 [mesh 0.1441/0.1258]; tear worst 5.14% az135 top5 4.62% mean 0.99%
+  TRUNK FAIL
+[S] el20 360 views (../impostor16_20260923/n8/cuts/az20/S/n8_2k)
+  T1 ratio card/mesh: median 1.020 min 0.691 (az 6) max 1.444 (az 168); outside 0.85..1.15 at 111 of 360 -> FAIL
+  T2 runs (median over band B): card > mesh at 156 of 360; worst card 3.0 vs mesh 1.0 at az 333 -> FAIL
+  T3 centre step: card worst 5.50 px (az 181) mean 0.78; mesh worst 1.07 mean 0.61; ratio 5.14 (bar 2); missing-centre views 0 -> FAIL
+  whole tree: IoU 0.7789 (min 0.7210); missing 0.0822 (max 0.1254); pop worst 0.1323 mean 0.0993 [mesh 0.1893/0.1639]; tear worst 1.39% az160 top5 1.29% mean 0.38%
+  TRUNK FAIL
+[A] el20 360 views (../impostor16_20260923/n8/cuts/az20/A/n8_2k)
+  T1 ratio card/mesh: median 0.717 min 0.109 (az 315) max 0.902 (az 76); outside 0.85..1.15 at 321 of 360 -> FAIL
+  T2 runs (median over band B): card > mesh at 10 of 360; worst card 2.0 vs mesh 1.0 at az 13 -> FAIL
+  T3 centre step: card worst 6.71 px (az 349) mean 0.88; mesh worst 1.07 mean 0.61; ratio 6.28 (bar 2); missing-centre views 0 -> FAIL
+  whole tree: IoU 0.7748 (min 0.6962); missing 0.1362 (max 0.2130); pop worst 0.1224 mean 0.0990 [mesh 0.1893/0.1639]; tear worst 5.99% az335 top5 5.58% mean 1.85%
+  TRUNK FAIL
+[snap] el20 360 views (../impostor16_20260923/n8/cuts/az20/near/n8_2k)
+  T1 ratio card/mesh: median 0.883 min 0.798 (az 9) max 1.019 (az 47); outside 0.85..1.15 at 63 of 360 -> FAIL
+  T2 runs (median over band B): card > mesh at 0 of 360; worst card 2.0 vs mesh 1.0 at az 6 -> ok
+  T3 centre step: card worst 64.39 px (az 47) mean 3.99; mesh worst 1.07 mean 0.61; ratio 60.22 (bar 2); missing-centre views 0 -> FAIL
+  whole tree: IoU 0.7177 (min 0.6309); missing 0.1629 (max 0.2328); pop worst 0.4937 mean 0.1022 [mesh 0.1893/0.1639]; tear worst 10.54% az313 top5 10.18% mean 4.63%
+  TRUNK FAIL

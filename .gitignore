@@ -161,3 +161,7 @@ scratchpad/RESUME_20260924.md
 scratchpad/brief_pbrwx1.md
 scratchpad/pbrrender0_20260923/research_legacy_audit.md
 scratchpad/pbrrender0_20260923/research_screen_effects.md
+# Generated binary outputs inside scratchpad (write-back dumps, crash scratch, binary .pbrm bakes).
+scratchpad/**/*.bin.*
+scratchpad/**/gdbx/
+scratchpad/**/*.pbrm

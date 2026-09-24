@@ -1,0 +1,100 @@
+== (a) the rung: the panel's own run, before and after ==
+  another --port NifSkope is up; waiting (1)
+  another --port NifSkope is up; waiting (2)
+  another --port NifSkope is up; waiting (3)
+  another --port NifSkope is up; waiting (4)
+  another --port NifSkope is up; waiting (5)
+  rung: 125 checks, 0 failures
+  new: 130 checks, 0 failures
+f77f8410b893a2ba514d2baa34e27f36f25d81da  C:\Users\bungo\AppData\Local\Temp/Lodgen_PANEL1_rung  11 files  47645750 bytes
+f77f8410b893a2ba514d2baa34e27f36f25d81da  C:\Users\bungo\AppData\Local\Temp/Lodgen_PANEL1_new  11 files  47645750 bytes
+IDENTICAL: 11 files, 47645750 bytes, sha1 f77f8410b893a2ba514d2baa34e27f36f25d81da
+== (b) per row: does the bake move when the row moves? ==
+gate base bake: 15 files, 50975596 bytes, 11392 ms, digest 9527aa275abd88908620aa112cd86365ab7a9a04
+gate base result line: 'stage times: landscape 5.0 s, meshes 4.6 s, textures 1.1 s, impostors 0.0 s
+gate base tree kept at C:/Users/bungo/AppData/Local/Temp/Lodgen_PANEL1_base
+  row waterSubdiv 4 -> 5: bytes MOVED (15 files, 50998708 bytes, 9387 ms)
+  row landTiling 341.3333 -> 357.3333: bytes MOVED (15 files, 50975596 bytes, 10319 ms)
+  row landSample 0 -> 1: bytes MOVED (15 files, 50975596 bytes, 10120 ms)
+  row landDetail 0 -> 0.05: SAME bytes -- this row reaches nothing in this bake
+  row landHex 0 -> 16: bytes MOVED (15 files, 50975596 bytes, 10393 ms)
+  row landWarp 0 -> 16: bytes MOVED (15 files, 50975596 bytes, 10127 ms)
+  row landWarpLattice 1024 -> 1088: SAME bytes -- this row reaches nothing in this bake
+  row landWarpOctaves 1 -> 2: SAME bytes -- this row reaches nothing in this bake
+  row landMipBias 0 -> 0.1: bytes MOVED (15 files, 50975596 bytes, 10256 ms)
+  row landGuide 0 -> 1: bytes MOVED (15 files, 50975596 bytes, 10397 ms)
+  row landGuideStrength 1 -> 1.05: SAME bytes -- this row reaches nothing in this bake
+  row landGuideScale 1024 -> 1088: SAME bytes -- this row reaches nothing in this bake
+  row landGuideSlope 0.5 -> 0.55: SAME bytes -- this row reaches nothing in this bake
+  row landDetailSource 1 -> 0: bytes MOVED (15 files, 50800804 bytes, 10344 ms)
+  row vanillaLodRoot: skipped, it carries a path
+  row landShade -3.242 -> -3.142: bytes MOVED (15 files, 50975596 bytes, 10200 ms)
+  row landGrade 1 -> 1.01: bytes MOVED (15 files, 50975596 bytes, 10239 ms)
+  row blendEdges 0 -> 1: bytes MOVED (15 files, 50975596 bytes, 10426 ms)
+  row blendMargin 128 -> 144: SAME bytes -- this row reaches nothing in this bake
+  row erosion 0 -> 0.05: bytes MOVED (15 files, 50975596 bytes, 10523 ms)
+  row erosionIterations 1 -> 2: SAME bytes -- this row reaches nothing in this bake
+  row erosionSeed 1 -> 2: SAME bytes -- this row reaches nothing in this bake
+  row sheetFormat 0 -> 1: bytes MOVED (15 files, 51150388 bytes, 10617 ms)
+  row msnCache: skipped, it carries a path
+  row coverFull 96 -> 100: bytes MOVED (15 files, 50975596 bytes, 10569 ms)
+  row roads true -> false: SAME bytes -- this row reaches nothing in this bake
+  row roadDetail 1 -> 0.95: SAME bytes -- this row reaches nothing in this bake
+  row roadGroundPaint 1 -> 0.95: SAME bytes -- this row reaches nothing in this bake
+  row roadCoverSuppress 1 -> 1.05: SAME bytes -- this row reaches nothing in this bake
+  row roadComposite 0 -> 1: SAME bytes -- this row reaches nothing in this bake
+  row roadRaised false -> true: SAME bytes -- this row reaches nothing in this bake
+  row roadSidewalks false -> true: SAME bytes -- this row reaches nothing in this bake
+  row terrainObjectAo false -> true: bytes MOVED (15 files, 50975596 bytes, 10494 ms)
+  row terrainObjectAoStrength 0.5 -> 0.55: SAME bytes -- this row reaches nothing in this bake
+  row waterBodies false -> true: bytes MOVED (15 files, 53595446 bytes, 11211 ms)
+  row waterBridge 2 -> 3: SAME bytes -- this row reaches nothing in this bake
+  row waterNear 64 -> 65: SAME bytes -- this row reaches nothing in this bake
+  row waterBodySamples 0 -> 1: SAME bytes -- this row reaches nothing in this bake
+  row waterFlowSamples 0 -> 1: SAME bytes -- this row reaches nothing in this bake
+  row waterShore true -> false: SAME bytes -- this row reaches nothing in this bake
+  row waterVelocities: skipped, it carries a path
+  row aggregate false -> true: SAME bytes -- this row reaches nothing in this bake
+  row aggregateMin 8 -> 9: SAME bytes -- this row reaches nothing in this bake
+  row aggregateTile 64 -> 65: SAME bytes -- this row reaches nothing in this bake
+  row aggregateViews 8 -> 9: SAME bytes -- this row reaches nothing in this bake
+  row nativeLadder true -> false: bytes MOVED (15 files, 47522668 bytes, 10517 ms)
+  row nativeOccluders true -> false: SAME bytes -- this row reaches nothing in this bake
+  row merge true -> false: SAME bytes -- this row reaches nothing in this bake
+  row atlasFormat -1 -> 1: SAME bytes -- this row reaches nothing in this bake
+  row threads 0 -> 1: SAME bytes -- this row reaches nothing in this bake
+  row chunkThreads 1 -> 2: SAME bytes -- this row reaches nothing in this bake
+  row vtContent 256 -> 257: SAME bytes -- this row reaches nothing in this bake
+  row vtBorder 8 -> 9: SAME bytes -- this row reaches nothing in this bake
+  row vtMips 2 -> 3: SAME bytes -- this row reaches nothing in this bake
+  row vtCompress 0 -> 1: SAME bytes -- this row reaches nothing in this bake
+  row vtHeight false -> true: SAME bytes -- this row reaches nothing in this bake
+  row vtCoverInColor false -> true: SAME bytes -- this row reaches nothing in this bake
+gate rows bumped: 54, bytes moved: 17, same bytes: 37, could not be moved: 0, refused: 0
+  same bytes: landDetail, landWarpLattice, landWarpOctaves, landGuideStrength, landGuideScale, landGuideSlope, blendMargin, erosionIterations, erosionSeed, roads, roadDetail, roadGroundPaint, roadCoverSuppress, roadComposite, roadRaised, roadSidewalks, terrainObjectAoStrength, waterBridge, waterNear, waterBodySamples, waterFlowSamples, waterShore, aggregate, aggregateMin, aggregateTile, aggregateViews, nativeOccluders, merge, atlasFormat, threads, chunkThreads, vtContent, vtBorder, vtMips, vtCompress, vtHeight, vtCoverInColor
+gate control (threads, chunk threads) leave the bytes alone: yes
+checks run: 125 (floor 125), failures: 1
+== (c) the command line's own bake of the same chunk ==
+  CLI rc=2
+error: --cover needs --tex-dir; the cover plane lives in the terrain data sheet
+9527aa275abd88908620aa112cd86365ab7a9a04  C:\Users\bungo\AppData\Local\Temp/Lodgen_PANEL1_base  15 files  50975596 bytes
+da39a3ee5e6b4b0d3255bfef95601890afd80709  C:\Users\bungo\AppData\Local\Temp/Lodgen_PANEL1_cli  0 files  0 bytes
+  only in C:\Users\bungo\AppData\Local\Temp/Lodgen_PANEL1_base: Terrain/Commonwealth.lodi
+  only in C:\Users\bungo\AppData\Local\Temp/Lodgen_PANEL1_base: Terrain/Commonwealth.lodl
+  only in C:\Users\bungo\AppData\Local\Temp/Lodgen_PANEL1_base: Terrain/Commonwealth.lodo
+  only in C:\Users\bungo\AppData\Local\Temp/Lodgen_PANEL1_base: meshes/terrain/Commonwealth/Commonwealth.4.-20.24.BTO
+  only in C:\Users\bungo\AppData\Local\Temp/Lodgen_PANEL1_base: meshes/terrain/Commonwealth/Commonwealth.4.-20.24.BTO.manifest.txt
+  only in C:\Users\bungo\AppData\Local\Temp/Lodgen_PANEL1_base: meshes/terrain/Commonwealth/Commonwealth.4.-20.24.BTR
+  only in C:\Users\bungo\AppData\Local\Temp/Lodgen_PANEL1_base: textures/terrain/Commonwealth/Commonwealth.4.-20.24.DDS
+  only in C:\Users\bungo\AppData\Local\Temp/Lodgen_PANEL1_base: textures/terrain/Commonwealth/Commonwealth.4.-20.24_data.DDS
+  only in C:\Users\bungo\AppData\Local\Temp/Lodgen_PANEL1_base: textures/terrain/Commonwealth/Commonwealth.4.-20.24_msn.DDS
+  only in C:\Users\bungo\AppData\Local\Temp/Lodgen_PANEL1_base: textures/terrain/Commonwealth/Objects/Commonwealth.LodgenArrays.256x256.lodm
+  only in C:\Users\bungo\AppData\Local\Temp/Lodgen_PANEL1_base: textures/terrain/Commonwealth/Objects/Commonwealth.LodgenArrays.256x256_d.DDS
+  only in C:\Users\bungo\AppData\Local\Temp/Lodgen_PANEL1_base: textures/terrain/Commonwealth/Objects/Commonwealth.LodgenArrays.256x256_g.DDS
+  only in C:\Users\bungo\AppData\Local\Temp/Lodgen_PANEL1_base: textures/terrain/Commonwealth/Objects/Commonwealth.LodgenArrays.256x256_gsaos.DDS
+  only in C:\Users\bungo\AppData\Local\Temp/Lodgen_PANEL1_base: textures/terrain/Commonwealth/Objects/Commonwealth.LodgenArrays.256x256_n.DDS
+  only in C:\Users\bungo\AppData\Local\Temp/Lodgen_PANEL1_base: textures/terrain/Commonwealth/Objects/Commonwealth.LodgenArrays.txt
+DIFFERENT: 15 files
+  (a difference here is panel-vs-command-line, which predates this lane where
+   the two disagree on a default; the per-row table in (b) is the lane's own gate)
+byte gate failures: 1

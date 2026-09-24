@@ -1,0 +1,15 @@
+# PBRR3 progress
+- 11:29 start. Precheck: E: free 98 GB (>= 2 GB OK). release/NifSkope.exe sha1 b6c79569.
+- 11:29 rung release/before_pbrr3 made from release/NifSkope.exe b6c79569 + shaders + runtime DLLs (same file set as before_pbrr2b).
+- 11:30 read CONSTITUTION, HANDOFF PBR entries, design doc in full. Launched 2 research subagents (v6 spec/FO4CS BRDF formulas; Todd's treat DALC axis).
+- 11:31 side job: pbr_r2a_gates.sh --out made absolute after mkdir (same fix as pbr_r2b_gates.sh:62). Verified in a later run.
+- 11:45 DALC verdict (Todd's treat subagent, 1.10.155): up-facing normal leans to Z- -- the PBRR2B direction was RIGHT; engine blend is linear in n (gamma space), ours is an n^2 pick -> comment updated, weighting owed (not a direction fix, no gate needed). Code: pbrm_default.frag R3 rewrite (evalSurface, v6 F0/weight/tint/IOR map, F82, Lazarov DFG+ms, split, Burley/EON, normal decode, back-face flip, floor 0.035), renderer uniforms + SpecColorMap, Q14 vertex colour flag, reader diffuseRoughness, pins WW_STUDIO_SUN/WW_R3_TERM/WW_R3_RED, Q9 default LegacyAndPBR. Fixtures pbr_r3_fixtures.py + gates pbr_r3_gates.sh/.py written. Next: build.
+- 11:50 side job: docs/CLI.md `weather` section added (commands table + section before Scope), from cmdWeather in src/esmweather.cpp (options, output lines, exit codes 0/2/3/4). LF-only. Build running.
+- 11:53 build RC 0, exe db5ccaf4 (MZ, shader + sheet in step); all 47 includers of pbrmfile.h/glproperty.h/pbrmresolve.h/renderer.h/glscene.h have fresh .o.
+- (between 11:53 and 12:13) R3 gates: judge fixes (mask value = probe x exposure = sRGB 170; numpy bool is never `is False`). furnace PASS (all four 0.9989 centre + 60deg), twins PASS (max|d| 0), s1 PASS, s2 PASS (f0 0.04/0.111, ratio 2.745 vs law 2.748), s3 PASS. Reds all OK: noms (metal r1 0.452), nosplit (diel 1.029/1.051), f0law (twins + s2), fo4csweight (s1 w0 d=31), notint (s3 grey).
+- EON picture reads flat white at EV0: diagnosed (eondiag/) as the EON retro-reflective edge (stinv=(1-mu^2)/mu with the sun near the view), ambient alone 0.11 -> not a bug, just overexposed.
+- running: zero set vs before_pbrr3, then R1, R2a (relative --out = the fix check), R2b.
+- 12:13 zero set vs before_pbrr3: 10 cases 0 failures (3 empty by the viewer, as before) PASS. Neighbours: R1 48/48 PASS, R2a PASS (run with a RELATIVE --out: 11 pictures landed in scratchpad/pbrr3_20260924/r2a -> the side-job fix verified), R2b PASS (8 gates).
+- Q9 gate added (pbr_r3 q9: no WW_PBRM_MODE pin -> census mode both, sphere pbrm_default.prog) PASS; red q9legacy (WW_PBRM_MODE=legacy) -> fo4_default.prog, FAIL -> OK.
+- final full R3 run -> r3_final/ running.
+- 12:16 final R3 run r3_final/: all PASS incl. q9. Skill nifskope-ww-pbr-shade-ab updated (2b R3 gates + Q9 note). DELIVERABLE_TEXT.md + DONE.md written. bungo window pid 7644 still open -> release/NifSkope_inuse_7644.exe left in place.

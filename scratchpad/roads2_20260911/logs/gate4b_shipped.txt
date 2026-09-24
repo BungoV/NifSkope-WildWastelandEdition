@@ -1,0 +1,27 @@
+
+AUC BRIGHTNESS, tie-averaged (brighter = higher)
+family            texels                vanilla                 legacy                shipped
+road_elevated      72264  0.546 [0.442..0.554]  0.883 [0.438..0.569]  0.574 [0.449..0.574]
+road_ground        27988  0.628 [0.475..0.618]  0.715 [0.479..0.591]  0.635 [0.479..0.567]
+nonroad           145001  0.506 [0.483..0.534]  0.541 [0.507..0.545]  0.454 [0.479..0.548]
+twins (ground)                     0.494..0.530           0.475..0.533           0.517..0.530
+
+AUC GREYNESS, tie-averaged (greyer = higher)
+family            texels                vanilla                 legacy                shipped
+road_elevated      72264  0.437 [0.445..0.531]  0.355 [0.447..0.489]  0.478 [0.411..0.512]
+road_ground        27988  0.731 [0.396..0.616]  0.534 [0.445..0.571]  0.642 [0.448..0.576]
+nonroad           145001  0.545 [0.448..0.519]  0.521 [0.477..0.506]  0.567 [0.492..0.519]
+twins (ground)                     0.480..0.518           0.495..0.521           0.477..0.534
+
+AUC GREYNESS, argsort as hw_tile.py wrote it
+family            texels                vanilla                 legacy                shipped
+road_elevated      72264  0.481 [0.414..0.576]  0.360 [0.456..0.491]  0.497 [0.420..0.532]
+road_ground        27988  0.757 [0.417..0.624]  0.532 [0.445..0.574]  0.647 [0.461..0.580]
+nonroad           145001  0.566 [0.465..0.508]  0.524 [0.481..0.505]  0.578 [0.500..0.516]
+twins (ground)                     0.473..0.521           0.494..0.517           0.469..0.534
+
+CLEARANCE above the top of the displaced floor (tie-averaged brightness); positive = the family is visible in the sheet (ranked apart from an unregistered mask of its own shape)
+family               vanilla      legacy     shipped
+road_elevated         -0.009      +0.314      +0.001
+road_ground           +0.011      +0.124      +0.068
+nonroad               -0.028      -0.005      -0.094

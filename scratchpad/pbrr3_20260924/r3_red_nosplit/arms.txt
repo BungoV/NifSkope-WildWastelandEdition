@@ -1,0 +1,2 @@
+red=nosplit
+db5ccaf449fc82a5e4998dd674738b47f4721ed6 */e/Projects/NifskopeWildWastelandEdition/release/NifSkope.exe

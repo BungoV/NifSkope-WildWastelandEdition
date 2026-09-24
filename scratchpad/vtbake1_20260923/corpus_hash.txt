@@ -1,0 +1,5 @@
+corpus worldspace Commonwealth cells 36864 west -96 south -96 east 95 north 95
+corpus vhgtCorpusHash 0xD8337D022F637F22 lands 36864
+corpus vhgtCorpusHashSorted 0x3D5967B82969D23E lands 36864
+corpus paintCorpusHash 0x3C79201598FEF809
+corpus ltexTotal 105 grasTotal 82 gnamLinks 122 ltexWithGnam 52 grasDataMin 32 grasDataMax 32 grasWithoutData 0

@@ -1,0 +1,41 @@
+lodb	2	Commonwealth	0.3.3+720762a	22579712
+baked	<volatile>
+alg	chunk=sha1	file=sha1	plugin=fnv1a64	switches=sha1
+shape	60	4	-24,16,-17,23	fo4cs
+hash	loadOrderHash	a056a596e2bb16e7
+hash	pluginCorpusHash	d8337d022f637f22
+hash	objectCorpusHash	6324ed6a35cde4ea
+hash	modelCorpusHash	0e0a4958838f7fc9
+hash	cardCorpusHash	0000000000000000
+loadorder	a056a596e2bb16e7
+plugin	0	fallout4.esm	330776576	f1433cd4cadce243	<volatile>
+switches	a32ac07144caac5b5ed5e76b54102330e5aa6a1b
+chunk	-24	16	4	172c458cdc037259d38cbd83891c5a7b649caf26
+out	-24	16	../../../nat/FO4CSLOD/Commonwealth/Commonwealth.4.-24.16.lodj	000000000000
+out	-24	16	../../Commonwealth.4.-24.16.BTR	b83d4fef03e37e06c57c0cc02b7fa0536078042d
+out	-24	16	Commonwealth.4.-24.16.BTO.manifest.txt	826723228d1763da34fab6b5aaebfa79e400457f
+out	-24	16	../../../tex/Commonwealth.4.-24.16.DDS	deeedf8e167b8815f8218284b8592c7993691dbe
+out	-24	16	../../../tex/Commonwealth.4.-24.16_msn.DDS	c0dbf1f04f31a505e0c3dd3223cd9e2c8791ac02
+out	-24	16	../../../tex/Commonwealth.4.-24.16_data.DDS	5c8615d40acf7f08737a3e8829d8b353b60043c0
+chunk	-20	16	4	e3b6022044620bdfda95b43e54aa3734d9c2f1d5
+out	-20	16	../../../nat/FO4CSLOD/Commonwealth/Commonwealth.4.-20.16.lodj	e165af868050c6ea0f26cd1c41a3ffae91f5a1c3
+out	-20	16	../../Commonwealth.4.-20.16.BTR	9a6136b35eb935f05bd710575b96b0a4908618a9
+out	-20	16	Commonwealth.4.-20.16.BTO.manifest.txt	706158c4684ffe9d667b3cfcf34f85c89df7ac92
+out	-20	16	../../../tex/Commonwealth.4.-20.16.DDS	33b7828b019e840d5f47a19c8411166fa3616650
+out	-20	16	../../../tex/Commonwealth.4.-20.16_msn.DDS	df433e2fda5648bedeec13fd0759cf826d89b67b
+out	-20	16	../../../tex/Commonwealth.4.-20.16_data.DDS	eed00a01f0d1ab30e749d4059b57462d8c799968
+chunk	-24	20	4	a593f61310f38a8160dfdc9de55b23726f7a2be3
+out	-24	20	../../../nat/FO4CSLOD/Commonwealth/Commonwealth.4.-24.20.lodj	921821aa663372cae191bb844affeb5f20fdfcde
+out	-24	20	../../Commonwealth.4.-24.20.BTR	c2473fb655ac46f9f61bb4d37f3f51df0eeabf8b
+out	-24	20	Commonwealth.4.-24.20.BTO.manifest.txt	3fdf9af0384b098d2ef635999c3316fa74a30848
+out	-24	20	../../../tex/Commonwealth.4.-24.20.DDS	9e063e509efa57b02b1e274ffcda6b6eaf8177d8
+out	-24	20	../../../tex/Commonwealth.4.-24.20_msn.DDS	dc1abbeaa1ec3aa5dd62bb4a0f4b61d32628fc48
+out	-24	20	../../../tex/Commonwealth.4.-24.20_data.DDS	bffd3b52b0e62c5d3a651ad9ade0622c2aad0147
+chunk	-20	20	4	0f0440cde7676181bd0dbec2f3b2e48dfb32e794
+out	-20	20	../../../nat/FO4CSLOD/Commonwealth/Commonwealth.4.-20.20.lodj	2f1c77c7195fcc8b0e3da6b7e7e7f4a2dcf1ac08
+out	-20	20	../../Commonwealth.4.-20.20.BTR	99f35bfe9bb0be29738404a29563cebc0c9cd2e4
+out	-20	20	Commonwealth.4.-20.20.BTO.manifest.txt	c5c1166cd98e37204b382bc0411398f156292cd1
+out	-20	20	../../../tex/Commonwealth.4.-20.20.DDS	84af5ef13ccc30cb07fd45d80475ba51de42036f
+out	-20	20	../../../tex/Commonwealth.4.-20.20_msn.DDS	bcfb546123936cccc3534b1966d0a236075dcfc6
+out	-20	20	../../../tex/Commonwealth.4.-20.20_data.DDS	7341309946204f1e25a1f13245681f15600221e3
+end	4	177391

@@ -1,0 +1,75 @@
+sabotaged fo4_default.frag
+sabotaged fo4_effectshader.frag
+sabotaged particles.frag
+case bgsm_duct (zero) /e/Tools/Fallout 4/DataUnpacked/Data/Meshes/SetDressing/ACDucts/ACDuctConnector01.nif
+  bgsm_duct_old_a rc=0 169726 B
+  bgsm_duct_old_b rc=0 169726 B
+  bgsm_duct_old_c rc=0 169726 B
+  bgsm_duct_new rc=0 163567 B
+case bgem_plane (zero) /e/Tools/Fallout 4/DataUnpacked/Data/Meshes/Effects/GlowFlatPlaneOneSided01.nif
+  bgem_plane_old_a rc=0 8166 B
+  bgem_plane_old_b rc=0 8166 B
+  bgem_plane_old_c rc=0 8166 B
+  bgem_plane_new rc=0 8116 B
+case embedded_lit (zero) /e/Tools/Fallout 4/DataUnpacked/Data/Meshes/Landscape/GuardRails/GRailCurveR01.nif
+  embedded_lit_old_a rc=0 67978 B
+  embedded_lit_old_b rc=0 67978 B
+  embedded_lit_old_c rc=0 67978 B
+  embedded_lit_new rc=0 66147 B
+case embedded_effect (zero) /e/Tools/Fallout 4/DataUnpacked/Data/Meshes/Effects/GlassShader01.nif
+  embedded_effect_old_a rc=0 22030 B
+  embedded_effect_old_b rc=0 22030 B
+  embedded_effect_old_c rc=0 22030 B
+  embedded_effect_new rc=0 20276 B
+case particles_fire (zero) /e/Tools/Fallout 4/DataUnpacked/Data/Meshes/Effects/MPSFireSmall01.nif @empty=multitarget-emitter-not-simulated
+  particles_fire_old_a rc=0 4962 B
+  particles_fire_old_b rc=0 4962 B
+  particles_fire_old_c rc=0 4962 B
+  particles_fire_new rc=0 4962 B
+case particles_smoke (zero) /e/Tools/Fallout 4/DataUnpacked/Data/Meshes/Effects/MPSSmokeFireMed01.nif @empty=multitarget-emitter-not-simulated
+  particles_smoke_old_a rc=0 4962 B
+  particles_smoke_old_b rc=0 4962 B
+  particles_smoke_old_c rc=0 4962 B
+  particles_smoke_new rc=0 4962 B
+case particles_mist (zero) /e/Tools/Fallout 4/DataUnpacked/Data/Meshes/Effects/AttachFXMist01.nif @empty=draws-but-no-visible-pixel
+  particles_mist_old_a rc=0 4962 B
+  particles_mist_old_b rc=0 4962 B
+  particles_mist_old_c rc=0 4962 B
+  particles_mist_new rc=0 4962 B
+case particles_shock (zero) /e/Tools/Fallout 4/DataUnpacked/Data/meshes/Actors/CreateABot/CharacterAssets/ShockHAndLeft.nif
+  particles_shock_old_a rc=0 18645 B
+  particles_shock_old_b rc=0 NO PICTURE
+tests/spells/pbr_shade_ab.sh: line 113: /e/Projects/NifskopeWildWastelandEdition/scratchpad/pbrr2a_20260924/ab_red/particles_shock_old_c.log: No space left on device
+  particles_shock_old_c rc=1 NO PICTURE
+tests/spells/pbr_shade_ab.sh: line 113: /e/Projects/NifskopeWildWastelandEdition/scratchpad/pbrr2a_20260924/ab_red/particles_shock_new.log: No space left on device
+  particles_shock_new rc=1 NO PICTURE
+case particles_cryo (zero) /e/Tools/Fallout 4/DataUnpacked/Data/Meshes/Effects/CryoJet01.nif
+  particles_cryo_old_a rc=0 NO PICTURE
+  particles_cryo_old_b rc=0 NO PICTURE
+  particles_cryo_old_c rc=0 NO PICTURE
+  particles_cryo_new rc=0 NO PICTURE
+case pistol_10mm (zero) /e/Tools/Fallout 4/DataUnpacked/Data/Meshes/Weapons/10mmPistol/10MMPistol.nif
+  pistol_10mm_old_a rc=0 NO PICTURE
+  pistol_10mm_old_b rc=0 NO PICTURE
+  pistol_10mm_old_c rc=0 NO PICTURE
+  pistol_10mm_new rc=0 NO PICTURE
+ran 10 cases -> /e/Projects/NifskopeWildWastelandEdition/scratchpad/pbrr2a_20260924/ab_red
+pbr_shade_ab bgsm_duct gate=zero old=d38fa7ae new=1972775a size=1280x826 px=132984 frac=0.125779 max=17 mean=1.26359 bar=0/0 noise=0/0|0/0 content=0.126 progs=fo4_default.prog -> FAIL
+pbr_shade_ab bgsm_duct census prog=same(2) cam=same(1) pbrm=same-projection(1; R1->R2a shape/kind/prog/route) -> PASS
+pbr_shade_ab bgem_plane gate=zero old=c2470e55 new=61013be9 size=1280x826 px=92002 frac=0.087018 max=1 mean=0.08702 bar=0/0 noise=0/0|0/0 content=0.087 progs=fo4_effectshader.prog -> FAIL
+pbr_shade_ab bgem_plane census prog=same(2) cam=same(1) pbrm=same-projection(1; R1->R2a shape/kind/prog/route) -> PASS
+pbr_shade_ab embedded_lit gate=zero old=dcbde7fd new=eacad3f1 size=1280x826 px=26364 frac=0.024936 max=22 mean=0.30246 bar=0/0 noise=0/0|0/0 content=0.025 progs=fo4_default.prog -> FAIL
+pbr_shade_ab embedded_lit census prog=same(2) cam=same(1) pbrm=same-projection(1; R1->R2a shape/kind/prog/route) -> PASS
+pbr_shade_ab embedded_effect gate=zero old=6e371fd3 new=f9853970 size=1280x826 px=305580 frac=0.289025 max=6 mean=1.40133 bar=0/0 noise=0/0|0/0 content=0.289 progs=fo4_effectshader.prog -> FAIL
+pbr_shade_ab embedded_effect census prog=same(2) cam=same(1) pbrm=same-projection(1; R1->R2a shape/kind/prog/route) -> PASS
+pbr_shade_ab particles_fire gate=zero old=53d72021 new=53d72021 size=1280x826 px=0 frac=0.000000 max=0 mean=0.00000 bar=0/0 noise=0/0|0/0 content=0.000 progs=none -> EMPTY BY THE VIEWER (multitarget-emitter-not-simulated; guards no particle pixel) PASS-EMPTY
+pbr_shade_ab particles_fire census prog=none(all runs) cam=same(1) particles=0 drawn/1 not pbrm=same-projection(1; R1->R2a shape/kind/prog/route) -> PASS
+pbr_shade_ab particles_smoke gate=zero old=53d72021 new=53d72021 size=1280x826 px=0 frac=0.000000 max=0 mean=0.00000 bar=0/0 noise=0/0|0/0 content=0.000 progs=none -> EMPTY BY THE VIEWER (multitarget-emitter-not-simulated; guards no particle pixel) PASS-EMPTY
+pbr_shade_ab particles_smoke census prog=none(all runs) cam=same(1) particles=0 drawn/1 not pbrm=same-projection(1; R1->R2a shape/kind/prog/route) -> PASS
+pbr_shade_ab particles_mist gate=zero old=53d72021 new=53d72021 size=1280x826 px=0 frac=0.000000 max=0 mean=0.00000 bar=0/0 noise=0/0|0/0 content=0.000 progs=none -> EMPTY BY THE VIEWER (draws-but-no-visible-pixel; guards no particle pixel) PASS-EMPTY
+pbr_shade_ab particles_mist census prog=none(all runs) cam=same(1) particles=2 drawn/0 not pbrm=same-projection(2; R1->R2a shape/kind/prog/route) -> PASS
+pbr_shade_ab particles_shock gate=zero no picture: particles_shock_new.png -> FAIL
+pbr_shade_ab particles_cryo gate=zero no picture: particles_cryo_new.png -> FAIL
+pbr_shade_ab pistol_10mm gate=zero no picture: pistol_10mm_new.png -> FAIL
+pbr_shade_ab census-moves kinds=effect,lit,particles distinct_refusals=3 -> PASS
+pbr_shade_ab RED CONTROL shader: 4 of 4 aimed cases FAILED the aimed gate (bgem_plane,bgsm_duct,embedded_effect,embedded_lit), 0 failed the other -> BITES (control PASS)

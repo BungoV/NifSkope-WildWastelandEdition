@@ -1,0 +1,30 @@
+model cube_plain.nif
+projection ortho
+lodm materials\#FF808080.lodm none #FF808080
+mask alpha
+emissive 0 shapes 0
+front 283.744 145.474 6.35783e-07 6.35783e-07 69.9912
+side 283.744 145.474 6.35783e-07 6.35783e-07 69.9912
+class 64 64
+gap 4 4
+coverage 16 128 160
+oct 4 64 64 101.199 101.199 6.35783e-07 6.35783e-07 69.9912 3072 legacy 64
+frameoff 0 0 0 0
+frameoff 1 0 0 0
+frameoff 2 0 0 0
+frameoff 3 0 0 0
+frameoff 0 1 0 0
+frameoff 1 1 0 0
+frameoff 2 1 0 0
+frameoff 3 1 0 0
+frameoff 0 2 0 0
+frameoff 1 2 0 0
+frameoff 2 2 0 0
+frameoff 3 2 0 0
+frameoff 0 3 0 0
+frameoff 1 3 0 0
+frameoff 2 3 0 0
+frameoff 3 3 0 0
+frameclamped 0
+framefit 93.9347 93.6576 93.9347 93.6576
+orthofit 94.874 94.874 0

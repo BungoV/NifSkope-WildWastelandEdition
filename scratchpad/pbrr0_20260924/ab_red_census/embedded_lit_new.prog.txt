@@ -1,0 +1,2 @@
+# WW_PROGRAM_CENSUS  light(view) = 0 0 1
+shape="GRailCurveR01:19" bsver=130 msn=0 lodland=0 prog=default.prog

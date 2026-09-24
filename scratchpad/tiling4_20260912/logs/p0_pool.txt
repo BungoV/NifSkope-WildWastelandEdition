@@ -1,0 +1,24 @@
+TILING4 step 0 -- the pool and the frozen split
+
+shipped dim-4 colour sheets: 2304
+P2 mip-3 SD >= 5.25 (TILING2 population rule): 1113
+ESM LAND records walked: 36864 cells
+P3 all 16 cells have a LAND record with a quadrant base texture: 139
+P1-P3 outside the selection: 138 chunks, bbox cx -32..28 cy -40..24
+P4 is applied lazily, per lattice pick, and every refusal is named.
+   lattice (  -24.5,  -24.0) -> (-24,-24)  offline SD 9.28  stand-in 0.0%
+   lattice (   -9.5,  -24.0) -> (-12,-20)  offline SD 14.73  stand-in 0.0%
+   lattice (    5.5,  -24.0) -> (4,-24)  offline SD 25.98  stand-in 0.0%
+   lattice (   20.5,  -24.0) -> (20,-24)  offline SD 10.20  stand-in 0.0%
+   lattice (  -24.5,    8.0) -> (-20,4)  offline SD 8.35  stand-in 0.0%
+   lattice (   -9.5,    8.0) -> (-8,4)  offline SD 7.65  stand-in 0.0%
+   lattice (    5.5,    8.0) -> (12,8)  offline SD 18.26  stand-in 0.0%
+   REFUSED (4,8): P5 flat 127.5 stand-in 23.0% > 2.0%
+   REFUSED (4,4): P5 flat 127.5 stand-in 10.7% > 2.0%
+   REFUSED (4,12): P5 flat 127.5 stand-in 6.6% > 2.0%
+   REFUSED (8,12): P5 flat 127.5 stand-in 3.2% > 2.0%
+   REFUSED (0,8): P5 flat 127.5 stand-in 26.4% > 2.0%
+
+SELECTION  (TILING3`s, frozen): (-20,24) (-20,20) (-36,-20) (-4,-20) (28,-20) (-4,16) (24,16)
+VALIDATION (this lane`s, frozen here): (-24,-24) (-12,-20) (4,-24) (20,-24) (-20,4) (-8,4) (12,8)
+disjoint: yes (0 shared)

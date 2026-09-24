@@ -1,0 +1,8 @@
+incr1 DONE 2026-09-17 08:30 -- --incremental now accepts THE ruled FO4CS target (--native), replays clean chunks from a new per-chunk .lodj cache, and proves it with a 6-arm gate (tests/spells/lodgen_incremental.sh, 10 checks, 0 failures, 301 s).
+
+exe: release/NifSkope.exe 2026-09-17 07:33:21, 22,534,144 B. Rung: release/NifSkope.before_incr1.exe (05:42:44, 22,484,992 B).
+report: scratchpad/incr1_20260917/lane_incr1_report.md (sections 1-14)
+pictures: scratchpad/incr1_20260917/images/native_full_vs_incremental.png, .../incremental_census.png
+green: lod_generation 128/0, lodgen_defaults 28/0, lodgen_bakerec 21/0 (was 21/3), lodgen_layout 23/0 (was 22/5), lodgen_incremental 10/0
+red: lodgen_native section 5 (2 rows, pre-existing, widened by me), lodgen_btofree 21/3 (1 pre-existing v1-vs-v2 record, 2 mine: the .lodj exists on this exe's side and not the rung's)
+FOR BUNGO, section 12: TWO divergence rows, neither decided by me -- (1) .lodj is a NEW FILE written by default into Data/FO4CSLOD/, alternative stated (cache only under --incremental, or a switch that ships off, at the price of one wasted full bake ever); (2) --native came off --incremental's whole-region refusal list.

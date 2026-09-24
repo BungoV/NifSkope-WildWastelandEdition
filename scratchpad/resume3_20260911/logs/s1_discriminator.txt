@@ -1,0 +1,22 @@
+WHY S1 IS RED ON CHUNK (-20,20): the offline prediction did not draw the roads
+
+variant                             localVar    errRGB
+full bake, 2048                        74.06     20.43
+full bake, 341.3333                    25.83     18.92
+--no-roads, 2048                       68.59     22.00
+--no-roads, 341.3333                   17.00     20.40
+--no-roads --grass-tint 0, 2048        68.59     22.00
+--no-roads --grass-tint 0, 341         17.00     20.40
+VANILLA                                29.39        --
+
+SPLAT1 offline prediction (no roads, no tint in the model): 2048 = 61.71, 341.3333 = 14.60
+  the model omits the road raster, so compare it with the --no-roads bake:
+    2048      real --no-roads 68.59  vs predicted 61.71   +11.2%
+    341.3333  real --no-roads 17.00  vs predicted 14.60   +16.4%
+    2048      real --no-roads --grass-tint 0 68.59
+    341.3333  real --no-roads --grass-tint 0 17.00
+
+THE TILING'S OWN EFFECT, which is what the change is:
+  full bake      2048 -> 341.3333 : 74.06 -> 25.83, a drop of 48.23
+  the prediction 2048 -> 341.3333 : 61.71 -> 14.60, a drop of 47.11
+  the two drops agree to 2.4%

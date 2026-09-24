@@ -1,0 +1,14 @@
+lane PANEL1, the two quiet rows on the command line, 2026-09-12 17:16
+exe: 2026-09-12 17:01:39, 22137856 bytes
+
+1. Guide slope reference, under a rule that reads it (--land-guide slopewarp)
+  slopewarp 0.5 vs 0.55, colour: MOVED (174888 vs 174888 bytes)
+   (and the control: drag, the rule the panel gate used, same two values)
+  drag 0.5 vs 0.55, colour: SAME bytes (174888 bytes)
+
+2. Water drainage proximity (--water-near), in the landscape file
+  64 vs 65: SAME bytes (38612038 bytes)
+  64 vs 512: MOVED (38612038 vs 38613632 bytes)
+  64 vs 4: MOVED (38612038 vs 38610892 bytes)
+
+done 17:16:41

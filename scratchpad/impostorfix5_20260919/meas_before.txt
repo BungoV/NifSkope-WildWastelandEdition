@@ -1,0 +1,5 @@
+blast_n4   before  viewport 512x768 orbit iou mean 0.5736 orbit counted 24 of 24 rc=0
+blast_n8   before  viewport 512x768 orbit iou mean 0.7483 orbit counted 24 of 24 rc=0
+maple_n4   before  viewport 512x768 orbit iou mean 0.3674 orbit counted 24 of 24 rc=0
+dead_n4    before  viewport 512x768 orbit iou mean 0.6073 orbit counted 24 of 24 rc=0
+rock_n4    before  viewport 512x768 orbit iou mean 0.8305 orbit counted 24 of 24 rc=0

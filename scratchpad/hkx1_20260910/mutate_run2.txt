@@ -1,0 +1,23 @@
+  ok   (e) hkx 00 magic byte 0                                     py rc=2 c++ rc=2 | py: REFUSED: not a Havok binary packfile (magic) | c++: REFUSED: not a Havok binary packfile (magic)
+  ok   (e) hkx 01 numSections 3 -> 0x83                            py rc=2 c++ rc=2 | py: REFUSED: packfile: 131 sections | c++: REFUSED: packfile: 131 sections
+  ok   (e) hkx 02 __data__ section tag 'd' -> 'x'                  py rc=2 c++ rc=2 | py: REFUSED: packfile: missing __classnames__ / __data__ section | c++: REFUSED: packfile: missing __classnames__ / __data__ section
+  ok   (e) hkx 03 __data__ absoluteDataStart high byte             py rc=2 c++ rc=2 | py: REFUSED: packfile: __data__ fixup tables are truncated or out of order | c++: REFUSED: packfile: __data__ fixup tables are truncated or out of order
+  ok   (e) hkx 04 __data__ localFixupsOffset high byte             py rc=2 c++ rc=2 | py: REFUSED: packfile: __data__ fixup tables are truncated or out of order | c++: REFUSED: packfile: __data__ fixup tables are truncated or out of order
+  ok   (e) hkx 05 class name 'hkaSplineCompressedAnimation' last letter py rc=2 c++ rc=2 | py: REFUSED: E:\Projects\NifskopeWildWastelandEdition\scratchpad\hkx1_2026 | c++: REFUSED: animation 0 is a hkaSplineCompressedAnimatioX, not decoded by
+  ok   (e) hkx 06 numFrames byte 1 (23 -> 23 + 256*0x40)           py rc=2 c++ rc=2 | py: REFUSED: 16407 frames need 65 blocks of 256, the file has 1 | c++: REFUSED: 16407 frames need 65 blocks of 256, the file has 1
+  ok   (e) hkx 07 numBlocks 1 -> 0                                 py rc=2 c++ rc=2 | py: REFUSED: numFrames 23 / numBlocks 0 | c++: REFUSED: numFrames 23 / numBlocks 0
+  ok   (e) hkx 08 maskAndQuantizationSize low byte                 py rc=2 c++ rc=2 | py: REFUSED: maskAndQuantizationSize 511 is not 4 * (95 + 0) | c++: REFUSED: maskAndQuantizationSize 511 is not 4 * (95 + 0)
+  ok   (e) hkx 09 blockOffsets[0] high byte                        py rc=2 c++ rc=2 | py: REFUSED: block 0: offset 2130706432 / float offset 5388 against 5392 d | c++: REFUSED: block 0: offset 2130706432 / float offset 5388 against 5392 d
+  ok   (e) xml 00 class hkaSplineCompressedAnimation -> hkaSplineCompressedAnimatioX py rc=2 c++ rc=2 | py: REFUSED: E:\Projects\NifskopeWildWastelandEdition\scratchpad\hkx1_2026 | c++: REFUSED: animation #92 is a hkaSplineCompressedAnimatioX, not decoded 
+  ok   (e) xml 01 type enum text altered                           py rc=2 c++ rc=2 | py: REFUSED: animation type HK_SPLINE_COMPRESSED_ANIMATIOX is not HK_SPLIN | c++: REFUSED: animation type -1 is not HK_SPLINE_COMPRESSED_ANIMATION (3)
+  ok   (e) xml 02 numFrames 23 -> 2300                             py rc=2 c++ rc=2 | py: REFUSED: 2300 frames need 10 blocks of 256, the file has 1 | c++: REFUSED: 2300 frames need 10 blocks of 256, the file has 1
+  ok   (e) xml 03 numBlocks 1 -> 0                                 py rc=2 c++ rc=2 | py: REFUSED: numFrames 23 / numBlocks 0 | c++: REFUSED: numFrames 23 / numBlocks 0
+  ok   (e) xml 04 maskAndQuantizationSize 380 -> 381               py rc=2 c++ rc=2 | py: REFUSED: maskAndQuantizationSize 381 is not 4 * (95 + 0) | c++: REFUSED: maskAndQuantizationSize 381 is not 4 * (95 + 0)
+  ok   (e) xml 05 blockOffsets 0 -> 99999                          py rc=2 c++ rc=2 | py: REFUSED: block 0: offset 99999 / float offset 5388 against 5392 data b | c++: REFUSED: block 0: offset 99999 / float offset 5388 against 5392 data b
+  ok   (e) xml 06 data numelements 5392 -> 5391                    py rc=2 c++ rc=2 | py: REFUSED: E:\Projects\NifskopeWildWastelandEdition\scratchpad\hkx1_2026 | c++: REFUSED: data holds 5392 bytes, numelements says 5391
+  ok   (e) xml 07 a data byte -> 999                               py rc=2 c++ rc=2 | py: REFUSED: E:\Projects\NifskopeWildWastelandEdition\scratchpad\hkx1_2026 | c++: REFUSED: data byte 999 out of range
+  ok   (e) xml 08 endian 0 -> 1                                    py rc=2 c++ rc=2 | py: REFUSED: endian 1: only little-endian data is decoded | c++: REFUSED: endian 1: only little-endian data is decoded
+  ok   (e) xml 09 a closing tag broken (malformed XML)             py rc=2 c++ rc=2 | py: REFUSED: E:\Projects\NifskopeWildWastelandEdition\scratchpad\hkx1_2026 | c++: REFUSED: not well-formed XML: Opening and ending tag mismatch. at line
+  note payload byte flip (not a gate): py rc=0 c++ rc=0 -- a well-formed but different pose; Havok packfiles carry no checksum
+20 checks, 0 failures
+PASS

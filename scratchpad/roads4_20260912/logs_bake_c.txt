@@ -1,0 +1,6 @@
+BAKE r4_op0326 t2020 rc=0  4s  texfiles=3  args=[--road-opacity 0.326]
+BAKE r4_op05 t2020 rc=0  4s  texfiles=3  args=[--road-opacity 0.5]
+BAKE r4_op083 t2020 rc=0  4s  texfiles=3  args=[--road-opacity 0.83]
+BAKE r4_op0326 t0808 rc=0  13s  texfiles=3  args=[--road-opacity 0.326]
+BAKE r4_op05 t0808 rc=0  6s  texfiles=3  args=[--road-opacity 0.5]
+BAKE r4_op083 t0808 rc=0  7s  texfiles=3  args=[--road-opacity 0.83]

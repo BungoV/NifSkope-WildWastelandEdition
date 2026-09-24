@@ -1,0 +1,21 @@
+== payload
+lodt ok 0
+lodt refused: tile 7 crc32 2a1e0423, recomputed 30e862e2
+exe rc=1
+FAIL rule crc: 1 tile CRC mismatches
+RESULT FAIL (1 failures)
+== table
+lodt ok 0
+lodt refused: indexCrc32 5081e5ac, recomputed 5be730d2
+exe rc=1
+FAIL rule 16: stored != raw uncompressed
+FAIL rule 20: indexCrc32 0x5081e5ac recomputed 0x5be730d2
+FAIL rule crc: 1 tile CRC mismatches
+RESULT FAIL (3 failures)
+== rowbit
+lodt ok 0
+lodt refused: flags bit 0 ROW_ORDER_NORTH_UP is clear and no other row order is defined
+exe rc=1
+FAIL rule 19: flags 0x0
+FAIL rule 20: indexCrc32 0x5081e5ac recomputed 0x6359a5eb
+RESULT FAIL (2 failures)

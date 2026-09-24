@@ -1,0 +1,11 @@
+  ok   S0 4 fixtures
+== S1 sabotage floor ==
+  ok   S1 one flipped byte is seen - the digest reaches the parse
+== S2 16 threads x 8 reps ==
+  ok   S2 exit 0 at 16 threads
+  ok   S2b no worker's digest differed from the one-thread reference
+  ok   S3 loads 512 == threads x reps x files
+  ok   S4 every fixture loaded and was walked
+log: /e/Projects/NifskopeWildWastelandEdition/release/ww_parse_stress.log
+checks 5, failures 0
+RESULT PASS

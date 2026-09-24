@@ -1,0 +1,75 @@
+[A] base full bake ...
+    chunk pass: 25 job(s) over 1 worker(s)
+    ledger: 25 chunk row(s) -> Commonwealth.lodb
+
+[A/null] 08:45
+    incremental: 0 of 25 chunks dirty (0 inputs moved, 0 not in the ledger, 0 output lost, 0 by neighbour)
+    files: base 149, full 149, incr 149
+    floor: the edit moved 0 file(s) of the full bake
+    B3 A/null           PASS
+
+[A/land] 08:46
+    incremental: 9 of 25 chunks dirty (1 inputs moved, 0 not in the ledger, 0 output lost, 8 by neighbour)
+    files: base 149, full 149, incr 149
+    floor: the edit moved 5 file(s) of the full bake
+           obj/Commonwealth.4.-20.20.BTO  6fe99bba0e -> feae5ece19
+           obj/Commonwealth.4.-20.20.BTR  e9e395423c -> a2eb9cdf5b
+           obj/Commonwealth.lodb  96add47929 -> d32f7ba3bc
+           tex/Commonwealth.4.-20.20.DDS  54201bfe79 -> 217cc48bfe
+           tex/Commonwealth.4.-20.20_data.DDS  626d638231 -> c0eb1ec6e4
+    B3 A/land           PASS
+
+[A/refs] 08:47
+    incremental: 9 of 25 chunks dirty (1 inputs moved, 0 not in the ledger, 0 output lost, 8 by neighbour)
+    files: base 149, full 149, incr 149
+    floor: the edit moved 1 file(s) of the full bake
+           obj/Commonwealth.lodb  96add47929 -> 5a46d6e6bb
+    B3 A/refs           PASS
+
+[A/border] 08:47
+    incremental: 16 of 25 chunks dirty (4 inputs moved, 0 not in the ledger, 0 output lost, 12 by neighbour)
+    files: base 149, full 149, incr 149
+    floor: the edit moved 6 file(s) of the full bake
+           obj/Commonwealth.4.-20.20.BTO  6fe99bba0e -> bd9a2db08e
+           obj/Commonwealth.4.-20.20.BTR  e9e395423c -> 13b57b8df2
+           obj/Commonwealth.lodb  96add47929 -> c4e4ce500d
+           tex/Commonwealth.4.-16.20_data.DDS  9305203645 -> f6f488effb
+           tex/Commonwealth.4.-20.20.DDS  54201bfe79 -> 12b12fc52f
+           tex/Commonwealth.4.-20.20_data.DDS  626d638231 -> 9ace23538a
+    B3 A/border         PASS
+
+[A/lost] 08:48
+    deleted Commonwealth.4.-12.16.BTO
+    incremental: 6 of 25 chunks dirty (0 inputs moved, 0 not in the ledger, 1 output lost, 5 by neighbour)
+    files: base 149, full 149, incr 149
+    floor: the edit moved 0 file(s) of the full bake
+    B3 A/lost           PASS
+[B] base full bake ...
+    chunk pass: 25 job(s) over 1 worker(s)
+    ledger: 25 chunk row(s) -> Commonwealth.lodb
+
+[B/null] 08:50
+    incremental: 0 of 25 chunks dirty (0 inputs moved, 0 not in the ledger, 0 output lost, 0 by neighbour)
+    files: base 151, full 151, incr 151
+    floor: the edit moved 0 file(s) of the full bake
+    B3 B/null           PASS
+
+[B/land] 08:51
+    incremental: 9 of 25 chunks dirty (1 inputs moved, 0 not in the ledger, 0 output lost, 8 by neighbour)
+    files: base 151, full 151, incr 151
+    floor: the edit moved 5 file(s) of the full bake
+           obj/Commonwealth.4.-8.8.BTO  7891d13f0a -> e54edd3364
+           obj/Commonwealth.4.-8.8.BTR  55e8e05b0d -> 73dea98978
+           obj/Commonwealth.lodb  fe945d7cac -> 65ecb819c0
+           tex/Commonwealth.4.-8.8.DDS  527833bac3 -> 3c1eb66db6
+           tex/Commonwealth.4.-8.8_data.DDS  adbcb12347 -> e8ef3ccb03
+    B3 B/land           PASS
+
+[B/refs] 08:52
+    incremental: 9 of 25 chunks dirty (1 inputs moved, 0 not in the ledger, 0 output lost, 8 by neighbour)
+    files: base 151, full 151, incr 151
+    floor: the edit moved 1 file(s) of the full bake
+           obj/Commonwealth.lodb  fe945d7cac -> ce5406035b
+    B3 B/refs           PASS
+
+08:54

@@ -1,0 +1,28 @@
+ok   C0 shapes (-20,24)                             ours (512, 512, 3) vanilla (512, 512, 3)
+ok   C1a identity beats every flip (-20,24)         identity 16.205, next flipud 16.232
+ok   C1b cross-correlation peak at (0,0) (-20,24)   peak (0,0) r=0.0335
+ok   C4 codec floor measured (-20,24)               BC1 re-encode of our own sheet: RMS 0.497 MAE 0.176
+ok   C2 gamma 1.250 recovered (-20,24)              g=1.250000 a=1.000000 dropped=0
+ok   C2 gamma 0.800 recovered (-20,24)              g=0.800000 a=1.000000 dropped=0
+ok   C2 gamma 1.350 recovered (-20,24)              g=1.350000 a=1.000000 dropped=0
+ok   C3 gain 0.820 recovered (-20,24)               k=0.820000  (affine k=0.820000 c=0.000000)
+ok   C3 gain 1.200 recovered (-20,24)               k=1.200000  (affine k=1.200000 c=-0.000000)
+ok   C3 gain 0.950 recovered (-20,24)               k=0.950000  (affine k=0.950000 c=0.000001)
+ok   C5a gain fitter cannot absorb a gamma (-20,24) gain residual RMS 3.591 vs gamma 0.0000 (codec floor 0.497)
+ok   C5b gamma fitter returns g=1.000 on a pure gain (-20,24) g=1.000000 a=0.820000
+     slip sizes on (-20,24): encode moves the sheet by MAE 69.93, decode by 61.87
+ok   C0 shapes (-20,20)                             ours (512, 512, 3) vanilla (512, 512, 3)
+ok   C1a identity beats every flip (-20,20)         identity 18.215, next flipud 20.649
+ok   C1b cross-correlation peak at (0,0) (-20,20)   peak (0,0) r=0.3140
+ok   C4 codec floor measured (-20,20)               BC1 re-encode of our own sheet: RMS 0.527 MAE 0.197
+ok   C2 gamma 1.250 recovered (-20,20)              g=1.250000 a=1.000000 dropped=0
+ok   C2 gamma 0.800 recovered (-20,20)              g=0.800000 a=1.000000 dropped=0
+ok   C2 gamma 1.350 recovered (-20,20)              g=1.350000 a=1.000000 dropped=0
+ok   C3 gain 0.820 recovered (-20,20)               k=0.820000  (affine k=0.820000 c=0.000001)
+ok   C3 gain 1.200 recovered (-20,20)               k=1.200000  (affine k=1.200000 c=-0.000000)
+ok   C3 gain 0.950 recovered (-20,20)               k=0.950000  (affine k=0.950000 c=-0.000001)
+ok   C5a gain fitter cannot absorb a gamma (-20,20) gain residual RMS 4.205 vs gamma 0.0000 (codec floor 0.527)
+ok   C5b gamma fitter returns g=1.000 on a pure gain (-20,20) g=1.000000 a=0.820000
+     slip sizes on (-20,20): encode moves the sheet by MAE 71.65, decode by 54.02
+
+G1 CONTROLS: 24 checks, 0 failures -> PASS

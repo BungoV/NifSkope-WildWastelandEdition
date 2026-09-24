@@ -1,0 +1,85 @@
+model shrubgrouplarge04.nif
+projection ortho
+rangekept LOD1 (no shape fills the LOD0 slot)
+ranges L1_ShrubGroupLarge04:0 - L1_ShrubGroupLarge04-A:0 428+0
+ranges L1_ShrubGroupLarge04-A:1 - L1_ShrubGroupLarge04:1 4872+0
+ranges L1_ShrubGroupLarge04-A:2 - L1_ShrubGroupLarge04:2 1032+0
+lodm Materials\Landscape\Plants\HedgeRow.lodm none textures\landscape\plants\hedgerow01_d.dds
+lodm Materials\Landscape\Plants\Bramble.lodm none textures\landscape\plants\bramble01_d.dds
+lodm Materials\Landscape\Plants\Holly.lodm none textures\landscape\plants\hollyshrub01_d.dds
+mask tree
+emissive 0 shapes 0
+front 1178.19 604.055 -30.7974 -70.3321 48.1574
+side 1178.19 604.055 -30.7974 -70.3321 48.1574
+class 256 256
+gap 16 16
+coverage 16 128 160
+oct 8 256 256 499.516 499.516 -30.7974 -70.3321 48.1574 3072 legacy 512 spec1
+frameoff 0 0 -68.4281 8.25856
+frameoff 1 0 -37.1635 7.66867
+frameoff 2 0 2.35959 7.66867
+frameoff 3 0 31.8544 8.25856
+frameoff 4 0 -5.89897 8.25856
+frameoff 5 0 -33.0343 8.25856
+frameoff 6 0 -31.8544 8.25856
+frameoff 7 0 -30.6747 7.66867
+frameoff 0 1 -67.8382 7.66867
+frameoff 1 1 -68.4281 -13.5676
+frameoff 2 1 -20.6464 -17.107
+frameoff 3 1 33.0342 -27.7252
+frameoff 4 1 -12.9777 -35.3938
+frameoff 5 1 -33.6241 -35.3938
+frameoff 6 1 -30.0848 -22.4161
+frameoff 7 1 -18.2868 8.25856
+frameoff 0 2 -64.8887 7.66867
+frameoff 1 2 -67.8382 -4.71918
+frameoff 2 2 -71.9675 18.2868
+frameoff 3 2 10.0283 -5.89897
+frameoff 4 2 -29.4949 -46.6019
+frameoff 5 2 -30.6747 -51.911
+frameoff 6 2 -11.208 -9.43836
+frameoff 7 2 -1.17979 7.66867
+frameoff 0 3 -55.4503 8.25856
+frameoff 1 3 -57.8099 1.17979
+frameoff 2 3 -69.6079 23.5959
+frameoff 3 3 -66.0685 28.3151
+frameoff 4 3 -28.905 -65.4786
+frameoff 5 3 5.89897 10.6181
+frameoff 6 3 22.4161 2.94949
+frameoff 7 3 31.2646 7.66867
+frameoff 0 4 -31.2646 7.66867
+frameoff 1 4 -23.006 -9.43835
+frameoff 2 4 -6.48888 -12.9777
+frameoff 3 4 28.905 70.7877
+frameoff 4 4 70.1978 -30.0848
+frameoff 5 4 63.119 -28.3151
+frameoff 6 4 57.8099 -7.66866
+frameoff 7 4 55.4503 8.25856
+frameoff 0 5 1.17979 7.66867
+frameoff 1 5 11.208 21.2363
+frameoff 2 5 24.1858 64.8887
+frameoff 3 5 24.7757 61.3493
+frameoff 4 5 -20.0565 10.6181
+frameoff 5 5 68.4281 -28.905
+frameoff 6 5 67.2483 -7.66866
+frameoff 7 5 64.8887 7.66867
+frameoff 0 6 18.2868 8.25856
+frameoff 1 6 33.0342 37.1635
+frameoff 2 6 30.6747 38.3433
+frameoff 3 6 12.3878 37.1635
+frameoff 4 6 -33.0342 24.7757
+frameoff 5 6 17.107 -1.76969
+frameoff 6 6 68.4281 0
+frameoff 7 6 67.8382 7.66867
+frameoff 0 7 30.6747 7.66867
+frameoff 1 7 31.8544 8.25856
+frameoff 2 7 33.0343 8.25856
+frameoff 3 7 5.89897 8.25856
+frameoff 4 7 -31.8544 8.25856
+frameoff 5 7 -2.35959 7.66867
+frameoff 6 7 37.1635 7.66867
+frameoff 7 7 68.4281 8.25856
+frameclamped 0
+aa 4 1024 1.25
+framefit 463.659 438.884 489.025 468.968
+orthofit 539.083 539.083 0

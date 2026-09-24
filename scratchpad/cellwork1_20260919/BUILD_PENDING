@@ -1,0 +1,13 @@
+BUILD PENDING -- lane CELLWORK1, 2026-09-19 22:31 (read from `date`).
+
+Fallout4.exe was running (pid 40988) when the second build was due, so the lane
+stopped at the guard: no build and no GUI run after 22:16.
+
+NOT "DONE". The workspace is built and was measured at 20 PASS / 3 FAIL / 1 SKIP
+on the exe of 22:13:53; the three failures were wrong claims in the gate, are
+repaired in source, and are UNBUILT. The three pictures are owed and have never
+been taken.
+
+Resume instructions: PENDING.md, section RESUME.
+Full account: report.md, sections s5 (the build), s6 (gate counts) and s7 (the
+pictures, and which grab they use).

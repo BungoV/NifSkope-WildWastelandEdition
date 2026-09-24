@@ -1,0 +1,1 @@
+grab arm=unpinned view=8 rot=-63.5593,0.0000,133.3081 lookat=0.0000,0.0000,0.0000 eye=868.8928 dist=434.4464 zoom=1.0000 persp=1 fov=60.0000 halfW=777.3838 halfH=501.6555 vp=1280x826 upp=1.214662

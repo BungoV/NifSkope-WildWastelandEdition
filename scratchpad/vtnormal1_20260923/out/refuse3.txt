@@ -1,0 +1,1 @@
+error: --vt-half-aux drops each aux sheet's top mip and keeps the rest, so it needs --vt-mips 2 or more

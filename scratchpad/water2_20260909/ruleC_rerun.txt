@@ -1,0 +1,62 @@
+rule A  type-keyed           804 bodies
+rule B  height-keyed         781 bodies
+rule C  (height,type)        805 components before the merge
+rule C  after merging inheriting components into a same-height painted neighbour:    792 bodies  (2 of the merges had more than one candidate)
+
+== rule C bodies: class from the plateau graph ==
+  lake       785
+  pond         5
+  sea          1
+  river        1
+
+  id   edid                       class        area   height parts   lo   hi elong cells
+  1    ExtOceanWater              sea      21585117    450.0     2    0    2   1.8 (-96..95, -96..95)
+  200  ExtMarshDarkWater          lake        29304   1300.0     6    0    0   9.5 (-9..2, -38..-22)
+  336  ExtRiverCharlesUpper       lake        15895   1300.0     4    0    0   7.7 (-12..-6, -21..-11)
+  408  ExtLakeForestWater         lake        15425   1800.0     1    0    0   4.2 (-22..-17, -16..-8)
+  255  ExtMarshScumWater          lake        14549    450.0     1    0    0   6.0 (-3..5, -26..-17)
+  600  ExtCreekSanctuaryWater     lake        10661   7250.0     2    0    0   6.8 (-23..-15, 17..24)
+  446  ExtRiverCharlesUpper       river        9195   1300.0     1    1    0   9.0 (-16..-12, -12..-4)
+  215  ExtMarshDarkWater          lake         7584    800.0     1    0    0   5.4 (-3..2, -29..-23)
+  582  ExtLakeForestWater         lake         7466   5490.0     2    0    0   3.0 (-24..-20, 11..14)
+  573  ExtLakeWater               pond         6143    750.0     1    1    0   4.0 (-5..-3, 9..13)
+  627  ExtRiverNFoothillsWaterSE  lake         4656   2400.0     1    0    0  17.8 (-4..4, 26..28)
+  236  ExtMarshScumWater          lake         3989    600.0     1    0    0   6.3 (6..10, -27..-25)
+  617  ExtLakeQuannapowittWater   lake         3696   1250.0     1    0    0   2.6 (0..2, 21..24)
+  279  ExtMarshScumWater          lake         2768    450.0     2    0    0   4.0 (10..13, -24..-22)
+  435  ExtOceanWater              lake         2733    450.0     1    0    0   1.6 (9..11, -14..-12)
+  592  ExtLakeWater               lake         2277    750.0     1    0    0   3.6 (1..2, 16..18)
+  631  ExtRiverNFoothillsWaterSE  lake         2277  10000.0     1    0    0   5.6 (-20..-17, 27..28)
+  461  ExtLakeWater               lake         2128    850.0     1    0    0   1.6 (-9..-7, -7..-6)
+  300  ExtMarshDarkWater          lake         1513    800.0     1    0    0   2.4 (-4..-3, -23..-22)
+  234  ExtMarshDarkWater          lake         1477    600.0     1    0    0   3.0 (4..6, -27..-26)
+  280  ExtMarshScumWater          lake          889    800.0     1    0    0   2.4 (7..8, -24..-23)
+  77   ExtOceanWater              lake          764    450.0     1    0    0   2.6 (43..44, -67..-66)
+  293  ExtMarshDarkWater          lake          722   1300.0     1    0    0   6.6 (-7..-5, -24..-22)
+  348  ExtLakeIrradiatedWater     lake          722      0.0     1    0    0   3.9 (2..4, -21..-20)
+  620  ExtRiverNFoothillsWaterSW  lake          677   1250.0     1    0    0   8.3 (2..3, 23..25)
+  210  ExtMarshDarkWater          lake          674   1300.0     1    0    0   2.1 (-9..-8, -30..-29)
+  581  ExtLakeWater               lake          667   3600.0     1    0    0   2.3 (-18..-17, 10..11)
+  380  ExtMarshScumWater          lake          646    450.0     1    0    0   3.0 (-1..0, -19..-17)
+  219  ExtMarshDarkWater          lake          635    600.0     1    0    0   4.3 (2..3, -28..-28)
+  364  ExtMarshScumWater          lake          617    450.0     1    0    0   6.8 (2..4, -19..-19)
+
+== areas ==
+  bodies 792  >=64 texels 95  >=1024 texels 20  <4 texels 446
+
+== per WATR form (rule C) ==
+  ExtOceanWater                bodies   523  texels   21594573
+  ExtMarshDarkWater            bodies    55  texels      44040
+  ExtMarshScumWater            bodies    81  texels      26390
+  ExtRiverCharlesUpper         bodies    24  texels      25214
+  ExtLakeForestWater           bodies    10  texels      23662
+  ExtLakeWater                 bodies    25  texels      12960
+  ExtCreekSanctuaryWater       bodies     5  texels      10666
+  ExtRiverNFoothillsWaterSE    bodies    15  texels       8426
+  ExtLakeQuannapowittWater     bodies     1  texels       3696
+  ExtMurkyWater                bodies    24  texels       1427
+  ExtLakeIrradiatedWater       bodies     3  texels       1400
+  ExtGlowingSeaWater01         bodies    17  texels       1203
+  ExtRiverNFoothillsWaterSW    bodies     1  texels        677
+  ExtPuddleWater               bodies     6  texels        373
+  ExtCreekSanctuaryWaterE      bodies     2  texels        251

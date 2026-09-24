@@ -1,0 +1,68 @@
+
+## 9. THE SHADING ARM: a card can be the right SHAPE and still look wrong
+
+Everything above scores COVERAGE. Lane IMPOSTORLOOK1 (2026-09-19) was sent at
+"impostors look off" and found that the silhouette work had never touched the
+half of the complaint that is about colour and light. Run this arm before
+accepting that a card's problem is its shape.
+
+**The measurement is a TRANSFER CURVE, not a mean.** Inside the INTERSECTION of
+the two silhouettes (so a coverage difference cannot masquerade as a brightness
+one), bucket the mesh's linear luma and print the card's mean luma per bucket.
+A mean hides the finding; the curve is the finding. Measured on the shipped
+cards, 24 orbit views, blast_n4, 190,708 texels:
+
+    mesh luma   0.02  0.06  0.10  0.14  0.18  0.22  0.27  0.35  0.47  0.78
+    card luma  0.130 0.130 0.135 0.144 0.154 0.164 0.171 0.178 0.168 0.127
+
+The mesh spans a factor of thirty-nine and the card a factor of 1.4, and the
+card is DARKEST where the mesh is brightest. "Flat and dull" is that row.
+
+**Read the light terms out of BOTH shaders before blaming the sheet.** The two
+paths can disagree about the colour space itself, and the divergence is short
+enough to tabulate. In this tree, `fo4_default.vert:61,63` hands its fragment
+stage `sqrt(lightSourceAmbient.rgb) * 0.375` and `sqrt(lightSourceDiffuse[0].rgb)`
+and ends at `fo4_default.frag:538` with `tonemap(...)`; `impostor_oct.frag` used
+both uniforms RAW and was the only shader in the tree with no tonemap at all.
+Make that three-row table -- ambient, diffuse, output -- for any two paths that
+share a framebuffer.
+
+**Four questions, each with the line that answers it:**
+
+* *Is the card lit at all, or lit from a frozen direction?* Look for the light
+  uniform in the card's shader. A HEADLIGHT (`lightSourcePosition[0] =
+  (0,0,1)` in view space, `glview.cpp:3780`) means neither mesh nor card has a
+  turning lit side, so "the card looks evenly lit" is not evidence of a frozen
+  bake until the light setup is read.
+* *Are the normals stored in frame space and used as world space?* Here they
+  are stored in frame space and correctly rotated
+  (`frameNormalModel`), so the frame is right -- but `z = sqrt(max(0, 1-|xy|^2))`
+  is ALWAYS non-negative, so a baked normal can never face away from its own
+  bake camera, and `abs(dot(normal, L))` makes the shading two-sided on top of
+  that. Two independent reasons a card cannot have a dark side.
+* *Is lighting already baked into the albedo (double lighting)?* Test it on the
+  sheet, offline: bucket the covered texels by decoded coverage and print the
+  mean albedo luma per bucket. Premultiplied or light-baked albedo goes DARK as
+  coverage falls. Measured here it goes BRIGHTER (0.475 at coverage < 0.15
+  against 0.402 at full), which is the dilate/flood bringing neighbours in --
+  the hypothesis was refuted in one command and never reached a build.
+* *Is the specular missing?* A card with no specular lobe cannot have the
+  highlight that turns with azimuth, and in this tree that is not a bug to fix
+  but bungo's standing ruling (material sheets stay debug-only until the
+  FO4/PBRM renderer exists). Name the ruling, do not propose the lobe.
+
+**The lit-side number that does NOT work, so nobody re-derives it:** left-half
+minus right-half luma of the trunk band, spread over the orbit. It came out at
+sd 0.023 for the card against 0.030 for the mesh -- close enough to prove
+nothing, because a silhouette that is asymmetric moves that number as much as
+shading does. The transfer curve is the instrument; this one is a confound.
+
+**The outline question is a PERIOD, not a size.** "Is the lumpy edge BC blocks
+or texels" is answered by the run lengths of the edge's x position, converted
+to sheet texels with the object's own height in texels -- not by its standard
+deviation, which mixes amplitude and frequency. Measured: the card's trunk edge
+steps every 1.8 to 2.1 texels on blast_n4 and about 1.0 on the maple, nowhere
+near the 4 a BC block boundary would give. The edge is texel-shaped, so it is
+frame RESOLUTION and not compression, and the deviation figure would have said
+the opposite on blast_n4 (card 1.84 texels against the mesh's 2.33 -- the
+card's edge is SMOOTHER by that measure, because the mesh's edge is real bark).

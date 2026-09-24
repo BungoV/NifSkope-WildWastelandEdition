@@ -1,0 +1,29 @@
+road_elevated    meshes   343  triangles   432216  texels  72264 (27.57%)
+road_ground      meshes   729  triangles    80500  texels  27988 (10.68%)
+nonroad          meshes 14652  triangles  4218226  texels 145001 (55.31%)
+
+AUC brightness (darker = higher)
+family            texels                vanilla                   rung                 raised                  blend
+road_elevated      72264  0.547 [0.442..0.555]  0.883 [0.438..0.569]  0.934 [0.435..0.570]  0.572 [0.426..0.571]
+road_ground        27988  0.628 [0.475..0.617]  0.715 [0.479..0.591]  0.748 [0.475..0.598]  0.820 [0.466..0.577]
+nonroad           145001  0.506 [0.482..0.534]  0.541 [0.507..0.545]  0.553 [0.510..0.547]  0.468 [0.484..0.554]
+(phase twins)            gnd 0.493..0.530 gnd 0.475..0.533 gnd 0.471..0.534 gnd 0.522..0.528
+
+AUC greyness (greyer = higher)
+family            texels                vanilla                   rung                 raised                  blend
+road_elevated      72264  0.481 [0.414..0.576]  0.360 [0.456..0.491]  0.486 [0.465..0.507]  0.488 [0.448..0.526]
+road_ground        27988  0.757 [0.417..0.624]  0.532 [0.445..0.574]  0.432 [0.460..0.564]  0.410 [0.476..0.559]
+nonroad           145001  0.566 [0.465..0.508]  0.524 [0.481..0.505]  0.535 [0.484..0.515]  0.551 [0.496..0.505]
+(phase twins)            gnd 0.473..0.521 gnd 0.494..0.517 gnd 0.495..0.496 gnd 0.482..0.516
+
+MEAN LUMINANCE per family (the raw field, no ranking)
+family               vanilla        rung      raised       blend
+road_elevated           0.34        0.51        0.50        0.41
+road_ground             0.35        0.48        0.48        0.47
+nonroad                 0.34        0.43        0.43        0.40
+elev MINUS gnd         -0.01        0.03        0.03       -0.07
+
+MEAN ABSOLUTE LUMINANCE ERROR AGAINST VANILLA
+road_elevated      72264       0.000       0.172       0.162       0.077
+road_ground        27988       0.000       0.131       0.127       0.125
+nonroad           145001       0.000       0.105       0.102       0.071

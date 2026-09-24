@@ -1,0 +1,52 @@
+
+=== variant 0  (as shipped)
+    layout margins 4/4  PM_ToolBarItemMargin 2  PM_ToolBarFrameWidth 2  bar h 35
+    content 18  hint 27  y 4  height 27
+    content 19  hint 28  y 4  height 27
+    content 20  hint 29  y 4  height 27
+    content 21  hint 30  y 4  height 27
+    content 22  hint 31  y 4  height 28
+    content 23  hint 32  y 4  height 29
+    content 24  hint 33  y 4  height 30
+    content 25  hint 34  y 4  height 31
+    content 26  hint 35  y 4  height 32
+    content 27  hint 36  y 4  height 33
+    content 28  hint 37  y 4  height 34
+    content 29  hint 38  y 4  height 35
+    content 30  hint 39  y 4  height 36
+    content 31  hint 40  y 4  height 37
+    content 32  hint 41  y 4  height 38
+    content 33  hint 42  y 4  height 39
+    content 34  hint 43  y 4  height 40
+    content 35  hint 44  y 4  height 41
+    content 36  hint 45  y 4  height 42
+    content 37  hint 46  y 4  height 43
+    content 38  hint 47  y 4  height 44
+    content 39  hint 48  y 4  height 45
+    content 40  hint 49  y 4  height 46
+
+=== variant 1  (the sheet zeroes the bar's box)
+    layout margins 0/0  PM_ToolBarItemMargin 0  PM_ToolBarFrameWidth 0  bar h 35
+    content 18  hint 27  y 4  height 27
+    content 19  hint 28  y 3  height 28
+    content 20  hint 29  y 3  height 29
+    content 21  hint 30  y 2  height 30
+    content 22  hint 31  y 2  height 31
+    content 23  hint 32  y 1  height 32
+    content 24  hint 33  y 1  height 33
+    content 25  hint 34  y 0  height 34
+    content 26  hint 35  y 0  height 35   <== fills the row
+    content 27  hint 36  y 0  height 35   <== fills the row
+    content 28  hint 37  y 0  height 35   <== fills the row
+    content 29  hint 38  y 0  height 35   <== fills the row
+    content 30  hint 39  y 0  height 36
+    content 31  hint 40  y 0  height 37
+    content 32  hint 41  y 0  height 38
+    content 33  hint 42  y 0  height 39
+    content 34  hint 43  y 0  height 40
+    content 35  hint 44  y 0  height 41
+    content 36  hint 45  y 0  height 42
+    content 37  hint 46  y 0  height 43
+    content 38  hint 47  y 0  height 44
+    content 39  hint 48  y 0  height 45
+    content 40  hint 49  y 0  height 46

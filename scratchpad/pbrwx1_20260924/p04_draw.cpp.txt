@@ -1,0 +1,473 @@
+/* ------------------------------------------------------------------------
+ * The weather preview passes (lane PBRWX1): dome, moon, sun disc, clouds,
+ * glare, in that order (INFERRED from the RenderDoc sequence, spec_clouds.md
+ * s5). Every pass: view rotation only, depth off, out through studioOutput.
+ * ---------------------------------------------------------------------- */
+namespace
+{
+
+bool drawCube( Scene * scene, bool glow );
+
+struct SkyFrame
+{
+	WwSkyClock c;
+	float skyScale = 1.0f;
+	float up[3] = {}, lo[3] = {}, hz[3] = {}, sun[3] = {}, glare[3] = {}, moonGlare[3] = {};	// linear
+	float glareAlpha = 0.0f;
+};
+
+SkyFrame skyFrame()
+{
+	LdState & s = st();
+	SkyFrame f;
+	f.c = wwSkyClock( s.hour, s.tnam, s.gmst );
+	if ( !s.haveWeather )
+		return f;
+	f.skyScale = wwLookdevRed( "skyscale" ) ? 1.0f : EsmWeather::blendSkyScale( s.w, f.c.keys );
+	const bool gammaRed = wwLookdevRed( "skygamma" );
+	auto row = [&]( int r, float out[3] ) {
+		float rgb[3];
+		EsmWeather::blendRowLab( s.w, r, f.c.keys, rgb );
+		for ( int c = 0; c < 3; c++ )
+			out[c] = gammaRed ? std::clamp( rgb[c] / 255.0f, 0.0f, 1.0f ) : lin( rgb[c] );
+	};
+	row( WwRowSkyUpper, f.up );
+	row( WwRowSkyLower, f.lo );
+	row( WwRowHorizon, f.hz );
+	row( WwRowSun, f.sun );
+	row( WwRowSunGlare, f.glare );
+	row( WwRowMoonGlare, f.moonGlare );
+	if ( wwLookdevRed( "skyswap" ) )
+		for ( int c = 0; c < 3; c++ )
+			std::swap( f.up[c], f.hz[c] );
+	f.glareAlpha = f.c.sunAlpha * float( s.w.sunGlare ) / 255.0f;
+	return f;
+}
+
+struct SkyMesh
+{
+	QVector<float> pos, col, uv;
+	QVector<std::uint16_t> idx;
+	quint32 nv = 0;
+};
+
+struct SkyMeshes
+{
+	const void * domeTriedWith = nullptr, * cloudsTriedWith = nullptr;
+	bool domeTried = false, cloudsTried = false, domeOk = false, cloudsOk = false;
+	SkyMesh dome;
+	QVector<SkyMesh> clouds;
+	QString domeWhy, cloudsWhy;
+};
+
+SkyMeshes & skyMeshes()
+{
+	static SkyMeshes m;
+	return m;
+}
+
+//! a sky NIF through the resource manager (mod folders + archives), then the game manager
+bool loadSkyNif( Scene * scene, const QString & path, NifModel & src, QString * why )
+{
+	QByteArray bytes;
+	bool found = false;
+	if ( scene->nifModel )
+		found = scene->nifModel->getResourceFile( bytes, path, "meshes", ".nif" );
+	if ( !found )
+		found = Game::GameManager::get_file( bytes, Game::FALLOUT_4, path, "meshes", ".nif" );
+	if ( !found ) {
+		*why = QString( "%1 not found in the data folders or archives" ).arg( path );
+		return false;
+	}
+	QBuffer dev( &bytes );
+	const bool ok = dev.open( QIODevice::ReadOnly ) && src.load( dev, path.toLocal8Bit().constData() );
+	src.resetState();
+	if ( !ok ) {
+		*why = QString( "%1 read (%2 bytes) but did not load" ).arg( path ).arg( bytes.size() );
+		return false;
+	}
+	return true;
+}
+
+Transform skyWorldOf( const NifModel & src, const QModelIndex & iShape )
+{
+	Transform t( &src, iShape );
+	QModelIndex p = src.getBlockIndex( src.getParent( src.getBlockNumber( iShape ) ) );
+	for ( int hop = 0; hop < 64 && p.isValid() && src.blockInherits( p, "NiAVObject" ); hop++ ) {
+		t = Transform( &src, p ) * t;
+		p = src.getBlockIndex( src.getParent( src.getBlockNumber( p ) ) );
+	}
+	return t;
+}
+
+bool readSkyShape( const NifModel & src, const QModelIndex & iShape, SkyMesh & m )
+{
+	const quint32 nv = src.get<quint32>( iShape, "Num Vertices" );
+	if ( !nv || nv > 65535 )
+		return false;
+	const BSVertexDesc desc = src.get<BSVertexDesc>( iShape, "Vertex Desc" );
+	const quint16 flags = quint16( ( desc.Value() >> 44 ) & 0xFFFF );
+	const bool fullPrec = ( flags & 0x400 ) != 0;
+	const bool hasColors = ( flags & 0x20 ) != 0;
+	const QModelIndex iVD = src.getIndex( iShape, "Vertex Data" );
+	if ( !iVD.isValid() )
+		return false;
+	const Transform xf = skyWorldOf( src, iShape );
+	for ( quint32 v = 0; v < nv; v++ ) {
+		const QModelIndex row = src.index( int( v ), 0, iVD );
+		Vector3 p = fullPrec ? src.get<Vector3>( row, "Vertex" ) : Vector3( src.get<HalfVector3>( row, "Vertex" ) );
+		p = xf * p;
+		m.pos << p[0] << p[1] << p[2];
+		const Vector2 uv( src.get<HalfVector2>( row, "UV" ) );
+		m.uv << uv[0] << uv[1];
+		const Color4 c = hasColors ? Color4( src.get<ByteColor4>( row, "Vertex Colors" ) ) : Color4( 1, 1, 1, 1 );
+		m.col << c[0] << c[1] << c[2] << c[3];
+	}
+	const QModelIndex iTris = src.getIndex( iShape, "Triangles" );
+	if ( iTris.isValid() )
+		for ( const Triangle & t : src.getArray<Triangle>( iTris ) )
+			if ( t[0] < nv && t[1] < nv && t[2] < nv )
+				m.idx << t[0] << t[1] << t[2];
+	m.nv = nv;
+	return !m.idx.isEmpty();
+}
+
+const SkyMesh * domeMesh( Scene * scene, QString * why )
+{
+	SkyMeshes & m = skyMeshes();
+	if ( !m.domeOk && ( !m.domeTried || m.domeTriedWith != scene->nifModel ) ) {
+		m.domeTried = true;
+		m.domeTriedWith = scene->nifModel;
+		m.dome = SkyMesh();
+		NifModel src;
+		QString w;
+		if ( loadSkyNif( scene, QStringLiteral( "meshes/sky/atmosphere.nif" ), src, &w ) ) {
+			for ( int b = 0; b < src.getBlockCount() && !m.domeOk; b++ ) {
+				const QModelIndex i = src.getBlockIndex( b );
+				if ( src.blockInherits( i, "BSTriShape" ) )
+					m.domeOk = readSkyShape( src, i, m.dome );
+			}
+			if ( !m.domeOk )
+				w = QStringLiteral( "meshes/sky/atmosphere.nif has no readable BSTriShape" );
+		}
+		m.domeWhy = w;
+	}
+	if ( why )
+		*why = m.domeWhy;
+	return m.domeOk ? &m.dome : nullptr;
+}
+
+//! Clouds.nif: root child k that is a shape = layer k (Clouds::Init), capped at 32
+const QVector<SkyMesh> * cloudMeshes( Scene * scene, QString * why )
+{
+	SkyMeshes & m = skyMeshes();
+	if ( !m.cloudsOk && ( !m.cloudsTried || m.cloudsTriedWith != scene->nifModel ) ) {
+		m.cloudsTried = true;
+		m.cloudsTriedWith = scene->nifModel;
+		m.clouds.clear();
+		NifModel src;
+		QString w;
+		if ( loadSkyNif( scene, QStringLiteral( "meshes/sky/clouds.nif" ), src, &w ) ) {
+			const QModelIndex iRoot = src.getBlockIndex( 0 );
+			for ( qint32 l : src.getLinkArray( iRoot, QStringLiteral( "Children" ) ) ) {
+				const QModelIndex i = src.getBlockIndex( l );
+				if ( !i.isValid() || !src.blockInherits( i, "BSTriShape" ) || m.clouds.size() >= 32 )
+					continue;
+				SkyMesh sm;
+				readSkyShape( src, i, sm );
+				m.clouds << sm;
+			}
+			m.cloudsOk = !m.clouds.isEmpty();
+			if ( !m.cloudsOk )
+				w = QStringLiteral( "meshes/sky/clouds.nif has no layer shapes under its root" );
+		}
+		m.cloudsWhy = w;
+	}
+	if ( why )
+		*why = m.cloudsWhy;
+	return m.cloudsOk ? &m.clouds : nullptr;
+}
+
+//! a record's texture path ("Sky\X.dds", relative to Textures) as the texture cache takes it
+QString skyTexPath( QString t )
+{
+	t.replace( QChar( '\\' ), QChar( '/' ) );
+	if ( !t.startsWith( QStringLiteral( "textures/" ), Qt::CaseInsensitive ) )
+		t.prepend( QStringLiteral( "textures/" ) );
+	return t;
+}
+
+void skyState( Renderer * r, bool blend, bool additive )
+{
+	glDisable( GL_FRAMEBUFFER_SRGB );
+	glDisable( GL_POLYGON_OFFSET_FILL );
+	glDisable( GL_DEPTH_TEST );
+	glDepthMask( GL_FALSE );
+	glDisable( GL_CULL_FACE );
+	glPolygonMode( GL_FRONT_AND_BACK, GL_FILL );
+	if ( blend ) {
+		glEnable( GL_BLEND );
+		r->fn->glBlendFuncSeparate( GL_SRC_ALPHA, additive ? GL_ONE : GL_ONE_MINUS_SRC_ALPHA, GL_ZERO, GL_ONE );
+	} else {
+		glDisable( GL_BLEND );
+	}
+}
+
+QString f3( float v )
+{
+	return QString::number( double( v ), 'f', 3 );
+}
+
+bool drawDome( Scene * scene, const SkyFrame & f, float mul, QStringList & drew )
+{
+	LdState & s = st();
+	if ( !s.haveWeather ) {
+		drew << QString( "sky:refused(%1)" ).arg( s.weatherRefusal );
+		return false;
+	}
+	QString why;
+	const SkyMesh * m = domeMesh( scene, &why );
+	if ( !m ) {
+		drew << QString( "sky:refused(%1)" ).arg( why );
+		return false;
+	}
+	Renderer * r = scene->renderer;
+	NifSkopeOpenGLContext::Program * prog = r->useProgram( "lookdev_dome.prog" );
+	if ( !prog ) {
+		drew << QStringLiteral( "sky:refused(lookdev_dome.prog did not link)" );
+		return false;
+	}
+	const bool full = mul >= 1.0f;
+	if ( full )
+		glClear( GL_COLOR_BUFFER_BIT );	// below the dome's -0.5 deg rim: the clear colour, as in the engine
+	skyState( r, !full, false );
+	prog->uni3f( "skyH", f.hz[0], f.hz[1], f.hz[2] );
+	prog->uni3f( "skyL", f.lo[0], f.lo[1], f.lo[2] );
+	prog->uni3f( "skyU", f.up[0], f.up[1], f.up[2] );
+	prog->uni1f( "skyScale", f.skyScale );
+	prog->uni1f( "alphaMul", full ? 1.0f : mul );
+	prog->uni1f( "sceneExposure", wwSceneExposureScale() );
+	prog->uni1i( "viewTransform", wwSceneViewTransform() );
+	const float * attrs[2] = { m->pos.constData(), m->col.constData() };
+	r->drawShape( m->nv, 0x43, unsigned( m->idx.size() ), GL_TRIANGLES, GL_UNSIGNED_SHORT, attrs, m->idx.constData() );
+	r->stopProgram();
+	drew << QString( "sky:dome(scale=%1)" ).arg( f3( f.skyScale ) );
+	return full;
+}
+
+//! one camera-facing quad at a world direction, half-size = tan(half-angle)
+bool drawBill( Scene * scene, const float dirWorld[3], float half, const QString & tex, const float tint[3], float alpha,
+	bool additive )
+{
+	Renderer * r = scene->renderer;
+	NifSkopeOpenGLContext::Program * prog = r->useProgram( "lookdev_bill.prog" );
+	if ( !prog )
+		return false;
+	r->fn->glActiveTexture( GL_TEXTURE0 );
+	if ( scene->bindTexture( QStringView( tex ), true ) <= 0 ) {
+		r->stopProgram();
+		return false;
+	}
+	glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+	glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+	float d[3] = { dirWorld[0], dirWorld[1], dirWorld[2] };
+	const float l = std::sqrt( d[0] * d[0] + d[1] * d[1] + d[2] * d[2] );
+	for ( float & c : d )
+		c = l > 1e-9f ? c / l : 0.0f;
+	skyState( r, true, additive );
+	prog->uni1i( "Tex", 0 );
+	prog->uni3f( "centerWorld", d[0], d[1], d[2] );
+	prog->uni1f( "halfSize", half );
+	prog->uni3f( "tint", tint[0], tint[1], tint[2] );
+	prog->uni1f( "alpha", alpha );
+	prog->uni1f( "sceneExposure", wwSceneExposureScale() );
+	prog->uni1i( "viewTransform", wwSceneViewTransform() );
+	static const float quad[12] = { -1, -1, 0, 1, -1, 0, -1, 1, 0, 1, 1, 0 };
+	static const std::uint16_t idx[6] = { 0, 1, 2, 2, 1, 3 };
+	const float * attrs = quad;
+	r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
+	r->stopProgram();
+	return true;
+}
+
+void drawSunQuad( Scene * scene, const SkyFrame & f, bool glare, float mul, QStringList & drew )
+{
+	LdState & s = st();
+	const char * what = glare ? "glare" : "sun";
+	if ( !s.haveWeather ) {
+		drew << QString( "%1:refused(%2)" ).arg( QString::fromLatin1( what ), s.weatherRefusal );
+		return;
+	}
+	const float a0 = glare ? f.glareAlpha : f.c.sunAlpha;
+	const bool full = mul >= 1.0f;
+	if ( full && a0 <= 0.0f ) {
+		drew << QString( "%1:hidden(alpha=0)" ).arg( QString::fromLatin1( what ) );
+		return;
+	}
+	const QString rec = glare ? s.clim.glareTex : s.clim.sunTex;
+	if ( rec.isEmpty() ) {
+		drew << QString( "%1:refused(the climate %2 has no %3)" ).arg( QString::fromLatin1( what ), s.clim.edid,
+			glare ? QStringLiteral( "GNAM" ) : QStringLiteral( "FNAM" ) );
+		return;
+	}
+	const float * p = f.c.sunPos;
+	const float len = std::max( 1e-6f, std::sqrt( p[0] * p[0] + p[1] * p[1] + p[2] * p[2] ) );
+	const float half = ( glare ? s.gmst.sunGlare : s.gmst.sunBase ) / len;
+	float tint[3];
+	for ( int c = 0; c < 3; c++ )
+		tint[c] = glare ? f.glare[c] : f.sun[c] * f.skyScale;	// the glare takes no Sky Scale (type 1)
+	const QString tex = skyTexPath( rec );
+	if ( drawBill( scene, p, half, tex, tint, full ? a0 : mul, glare ) )
+		drew << QString( "%1:%2(alpha=%3)" ).arg( QString::fromLatin1( what ), tex, f3( full ? a0 : mul ) );
+	else
+		drew << QString( "%1:refused(%2 did not resolve)" ).arg( QString::fromLatin1( what ), tex );
+}
+
+void drawMoon( Scene * scene, const SkyFrame & f, float mul, QStringList & drew )
+{
+	LdState & s = st();
+	if ( !s.haveWeather ) {
+		drew << QString( "moon:refused(%1)" ).arg( s.weatherRefusal );
+		return;
+	}
+	const unsigned char moons = s.clim.tnam[5];
+	const int phase = wwMoonPhase( s.gameDay, moons );
+	const bool full = mul >= 1.0f;
+	struct M { unsigned char bit; const char * name; float size, fs, fe; };
+	const M list[2] = { { 0x80, "masser", s.gmst.masserSize, s.gmst.masserFadeStart, s.gmst.masserFadeEnd },
+		{ 0x40, "secunda", s.gmst.secundaSize, s.gmst.secundaFadeStart, s.gmst.secundaFadeEnd } };
+	bool any = false;
+	for ( const M & m : list ) {
+		if ( !( moons & m.bit ) )
+			continue;
+		any = true;
+		const float alpha = wwMoonAlpha( f.c, s.gmst, m.fs, m.fe );
+		const float shadowA = std::min( alpha, f.c.starsAlpha );
+		const bool black = f.moonGlare[0] <= 0.0f && f.moonGlare[1] <= 0.0f && f.moonGlare[2] <= 0.0f;
+		if ( full && ( black || ( alpha <= 0.0f && shadowA <= 0.0f ) ) ) {
+			drew << QString( "moon:%1:hidden(alpha=%2%3)" ).arg( QString::fromLatin1( m.name ), f3( alpha ),
+				black ? QStringLiteral( ",moonglare black" ) : QString() );
+			continue;
+		}
+		const float half = m.size / std::max( 1e-6f, std::fabs( s.gmst.sunX ) );
+		float shadowTint[3];
+		for ( int c = 0; c < 3; c++ )
+			shadowTint[c] = f.up[c] * f.skyScale;
+		const QString sh = QStringLiteral( "textures/sky/moonshadow.dds" );
+		const bool shOk = drawBill( scene, f.c.sunPos, half, sh, shadowTint, full ? shadowA : mul, false );
+		const QString tex = QString( "textures/sky/%1_%2.dds" ).arg( QString::fromLatin1( m.name ),
+			QString::fromLatin1( wwMoonPhaseSuffix( phase ) ) );
+		if ( drawBill( scene, f.c.sunPos, half, tex, f.moonGlare, full ? alpha : mul, false ) )
+			drew << QString( "moon:%1(alpha=%2,shadow=%3%4)" ).arg( tex, f3( full ? alpha : mul ), f3( full ? shadowA : mul ),
+				shOk ? QString() : QStringLiteral( ",no moonshadow.dds" ) );
+		else
+			drew << QString( "moon:refused(%1 did not resolve)" ).arg( tex );
+	}
+	if ( !any )
+		drew << QString( "moon:none(the climate's moons byte 0x%1 names neither moon)" ).arg( moons, 2, 16, QChar( '0' ) );
+}
+
+void drawClouds( Scene * scene, const SkyFrame & f, float mul, QStringList & drew )
+{
+	LdState & s = st();
+	if ( !s.haveWeather ) {
+		drew << QString( "clouds:refused(%1)" ).arg( s.weatherRefusal );
+		return;
+	}
+	QString why;
+	const QVector<SkyMesh> * ms = cloudMeshes( scene, &why );
+	if ( !ms && !s.probe ) {
+		drew << QString( "clouds:refused(%1)" ).arg( why );
+		return;
+	}
+	Renderer * r = scene->renderer;
+	const double secs = wwLookdevCloudSeconds();
+	const bool full = mul >= 1.0f;
+	QStringList drawn, skipped;
+	auto layerUniforms = [&]( NifSkopeOpenGLContext::Program * prog, int i, float alpha ) {
+		float rgb[3], a = 0.0f;
+		EsmWeather::blendCloud( s.w, i, f.c.keys, rgb, &a );
+		const int li = ( quint32( i ) >= s.w.cloudLayers ) ? 0 : i;
+		const float sx = EsmWeather::cloudSpeed( s.w.cloudSpeedX[li], s.gmst );
+		const float sy = EsmWeather::cloudSpeed( s.w.cloudSpeedY[li], s.gmst );
+		prog->uni3f( "colLin", lin( rgb[0] ), lin( rgb[1] ), lin( rgb[2] ) );
+		prog->uni1f( "alpha", alpha < 0.0f ? a : alpha );
+		prog->uni2f( "uvOffset", wwCloudOffset( sx, secs ), wwCloudOffset( sy, secs ) );
+		prog->uni1f( "skyScale", f.skyScale );
+		prog->uni1f( "sceneExposure", wwSceneExposureScale() );
+		prog->uni1i( "viewTransform", wwSceneViewTransform() );
+		return a;
+	};
+	auto bindLayer = [&]( int i ) {
+		if ( i < 0 || i >= 32 || s.w.cloudTex[i].isEmpty() )
+			return false;
+		r->fn->glActiveTexture( GL_TEXTURE0 );
+		if ( scene->bindTexture( QStringView( skyTexPath( s.w.cloudTex[i] ) ), true ) <= 0 )
+			return false;
+		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT );
+		glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT );
+		return true;
+	};
+
+	if ( s.probe ) {
+		// the texel probe: one full-screen quad samples layer probeLayer at probeUV + the scroll offset
+		NifSkopeOpenGLContext::Program * prog = r->useProgram( "lookdev_clouds.prog" );
+		if ( !prog || !bindLayer( s.probeLayer ) ) {
+			if ( prog )
+				r->stopProgram();
+			drew << QString( "cloudprobe:refused(layer %1 texture %2)" ).arg( s.probeLayer ).arg( s.w.cloudTex[s.probeLayer & 31] );
+			return;
+		}
+		skyState( r, false, false );
+		prog->uni1i( "Tex", 0 );
+		prog->uni1b( "probe", true );
+		prog->uni2f( "probeUV", s.probeUV[0], s.probeUV[1] );
+		const float a = layerUniforms( prog, s.probeLayer, -1.0f );
+		static const float quad[12] = { -1, -1, 0, 1, -1, 0, -1, 1, 0, 1, 1, 0 };
+		static const std::uint16_t idx[6] = { 0, 1, 2, 2, 1, 3 };
+		const float * attrs = quad;
+		r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
+		r->stopProgram();
+		drew << QString( "cloudprobe:layer=%1,alpha=%2,t=%3" ).arg( s.probeLayer ).arg( f3( a ) ).arg( secs, 0, 'f', 3 );
+		return;
+	}
+
+	for ( int i = 0; i < ms->size() && i < 32; i++ ) {
+		const SkyMesh & m = ms->at( i );
+		if ( s.w.cloudDisabled & ( 1u << i ) )
+			continue;
+		float rgb[3], a = 0.0f;
+		EsmWeather::blendCloud( s.w, i, f.c.keys, rgb, &a );
+		if ( full && a <= 0.0f )
+			continue;
+		if ( m.idx.isEmpty() ) {
+			skipped << QString( "%1(no mesh)" ).arg( i );
+			continue;
+		}
+		NifSkopeOpenGLContext::Program * prog = r->useProgram( "lookdev_clouds.prog" );
+		if ( !prog ) {
+			drew << QStringLiteral( "clouds:refused(lookdev_clouds.prog did not link)" );
+			return;
+		}
+		if ( !bindLayer( i ) ) {
+			r->stopProgram();
+			skipped << QString( "%1(%2 did not resolve)" ).arg( i ).arg( skyTexPath( s.w.cloudTex[i] ) );
+			continue;
+		}
+		skyState( r, true, false );
+		prog->uni1i( "Tex", 0 );
+		prog->uni1b( "probe", false );
+		layerUniforms( prog, i, full ? a : mul );
+		const float * attrs[8] = { m.pos.constData(), m.col.constData(), nullptr, nullptr, nullptr, nullptr, nullptr,
+			m.uv.constData() };
+		r->drawShape( m.nv, 0x20000043ULL, unsigned( m.idx.size() ), GL_TRIANGLES, GL_UNSIGNED_SHORT, attrs,
+			m.idx.constData() );
+		r->stopProgram();
+		drawn << QString::number( i );
+	}
+	drew << QString( "clouds:drawn=%1%2 t=%3" ).arg( drawn.isEmpty() ? QStringLiteral( "none" ) : drawn.join( QChar( ',' ) ),
+		skipped.isEmpty() ? QString() : QStringLiteral( " skipped=" ) + skipped.join( QChar( ',' ) ) )
+		.arg( secs, 0, 'f', 3 );
+}
+
+} // namespace

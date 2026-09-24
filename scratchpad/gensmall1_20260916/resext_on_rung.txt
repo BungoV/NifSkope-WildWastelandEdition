@@ -1,0 +1,20 @@
+== 1. every whitelisted extension is served
+  FAIL all 19 whitelisted extensions are served (missing: lodm pbrm)
+  FAIL the new extension .lodm is served from a loose --resource dir
+  FAIL the new extension .pbrm is served from a loose --resource dir
+== 2. an extension that is NOT whitelisted is still refused
+  ok   .zzz is refused, so the switch is still a whitelist
+== 3. the case fold
+  FAIL PROBE2.PBRM is served by the same constant as probe.pbrm
+  FAIL the index holds exactly 20 files (19 extensions + the uppercase probe); it holds 17
+== 4. the refuter: the rung ignores both, in silence
+  ok   the rung serves NEITHER .pbrm nor .lodm (so this gate can fail)
+  ok   the rung's index holds 17 files, this exe's holds 17 (+3)
+  ok   the rung drops them in SILENCE -- no warning, which is the defect
+== 5. every other extension byte-identical: a stock bake under both exes
+  ok   both exes baked (-20,24) dim 4
+  ok   the bake wrote 4 files to compare
+  ok   4 of 4 files byte-identical: the filter moved no other extension
+
+12 checks, 5 failures, 0 skipped
+RESULT FAIL

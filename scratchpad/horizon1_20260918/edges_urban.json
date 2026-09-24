@@ -1,0 +1,230 @@
+{
+ "lodo": "Commonwealth.lodo",
+ "lodi": "Commonwealth.lodi",
+ "lodi_version": 6,
+ "instances_header": 33123,
+ "instances_walked": 33123,
+ "slot0_walked": 33123,
+ "slotInstances": [
+  33123,
+  0,
+  0,
+  0
+ ],
+ "drawn_triangles": 250320,
+ "drawn_edges": 750960,
+ "edge_p50": 239.6875,
+ "edge_p90": 512.0,
+ "edge_p99": 1158.7136136167985,
+ "edge_max": 5476.134280784038,
+ "edges_over_512": 71465,
+ "edges_over_1024": 15022,
+ "edges_over_2048": 1085,
+ "tris_over_512": 41042,
+ "tris_over_1024": 7926,
+ "tris_over_2048": 664,
+ "scale_min": 0.260009765625,
+ "scale_max": 2.0,
+ "top": [
+  {
+   "model": "LOD\\Buildings\\BldgBrick4Story1x1BlockA_LOD.nif",
+   "placements": 91,
+   "edges": 2730,
+   "max": 1331.1220718961888,
+   "over512": 728,
+   "over1024": 728,
+   "over2048": 0,
+   "tris": 910
+  },
+  {
+   "model": "LOD\\Architecture\\Buildings\\Hightech\\HitExtAWallTall01_LOD.nif",
+   "placements": 344,
+   "edges": 2064,
+   "max": 572.4334568314501,
+   "over512": 688,
+   "over1024": 0,
+   "over2048": 0,
+   "tris": 688
+  },
+  {
+   "model": "LOD\\Architecture\\Buildings\\Hightech\\HitExtAFloorCornerA03_LOD.nif",
+   "placements": 270,
+   "edges": 1620,
+   "max": 724.0773439350247,
+   "over512": 540,
+   "over1024": 0,
+   "over2048": 0,
+   "tris": 540
+  },
+  {
+   "model": "LOD\\SetDressing\\Signage\\BillboardBldgVerticalSm03_LOD.nif",
+   "placements": 42,
+   "edges": 3528,
+   "max": 686.524325328648,
+   "over512": 532,
+   "over1024": 0,
+   "over2048": 0,
+   "tris": 1176
+  },
+  {
+   "model": "LOD\\Architecture\\Buildings\\Hightech\\HitExtAFloorCornerA02_LOD.nif",
+   "placements": 258,
+   "edges": 1548,
+   "max": 572.4334022399462,
+   "over512": 516,
+   "over1024": 0,
+   "over2048": 0,
+   "tris": 516
+  },
+  {
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWDoubleCurveL01_LOD_0.nif",
+   "placements": 1,
+   "edges": 2289,
+   "max": 2507.037747943014,
+   "over512": 479,
+   "over1024": 265,
+   "over2048": 10,
+   "tris": 763
+  },
+  {
+   "model": "LOD\\Landscape\\Pier\\ParkPierStr01_LOD_0.nif",
+   "placements": 238,
+   "edges": 2856,
+   "max": 561.7640165460756,
+   "over512": 476,
+   "over1024": 0,
+   "over2048": 0,
+   "tris": 952
+  },
+  {
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWDoubleStrExit01_LOD_0.nif",
+   "placements": 2,
+   "edges": 2448,
+   "max": 2547.486210416785,
+   "over512": 460,
+   "over1024": 296,
+   "over2048": 256,
+   "tris": 816
+  },
+  {
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWDoubleEndCapL02_LOD_0.nif",
+   "placements": 2,
+   "edges": 2280,
+   "max": 1985.0565718463017,
+   "over512": 452,
+   "over1024": 280,
+   "over2048": 0,
+   "tris": 760
+  },
+  {
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWDoubleTransRampDown01_LOD_0.nif",
+   "placements": 2,
+   "edges": 2112,
+   "max": 1932.4307452405972,
+   "over512": 452,
+   "over1024": 354,
+   "over2048": 0,
+   "tris": 704
+  },
+  {
+   "model": "LOD\\Architecture\\Buildings\\Hightech\\HitExtAWallTallLongDmg02_LOD.nif",
+   "placements": 112,
+   "edges": 1344,
+   "max": 572.4352037967105,
+   "over512": 448,
+   "over1024": 0,
+   "over2048": 0,
+   "tris": 448
+  },
+  {
+   "model": "LOD\\Architecture\\Buildings\\Hightech\\HitExtAColumnTall02_LOD.nif",
+   "placements": 54,
+   "edges": 1944,
+   "max": 1031.969355165227,
+   "over512": 432,
+   "over1024": 24,
+   "over2048": 0,
+   "tris": 648
+  },
+  {
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWDoubleCurveR01_LOD_0.nif",
+   "placements": 1,
+   "edges": 2289,
+   "max": 2507.383575397536,
+   "over512": 423,
+   "over1024": 197,
+   "over2048": 23,
+   "tris": 763
+  },
+  {
+   "model": "LOD\\Buildings\\DecoKit\\DecoMainA1x2Wall01_LOD_0.nif",
+   "placements": 180,
+   "edges": 1080,
+   "max": 572.4334022399462,
+   "over512": 360,
+   "over1024": 0,
+   "over2048": 0,
+   "tris": 360
+  },
+  {
+   "model": "LOD\\Buildings\\DecoKit\\DecoRoof2x2Str01_LOD_0.nif",
+   "placements": 177,
+   "edges": 1062,
+   "max": 724.0773439350247,
+   "over512": 354,
+   "over1024": 0,
+   "over2048": 0,
+   "tris": 354
+  },
+  {
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWDoubleEndCapL03_LOD_0.nif",
+   "placements": 1,
+   "edges": 1686,
+   "max": 2503.7416633592043,
+   "over512": 334,
+   "over1024": 143,
+   "over2048": 22,
+   "tris": 562
+  },
+  {
+   "model": "LOD\\Landscape\\RetainingWall\\River\\RWRiverPieceWallTop01_LOD.nif",
+   "placements": 54,
+   "edges": 1620,
+   "max": 1011.9558802511481,
+   "over512": 328,
+   "over1024": 0,
+   "over2048": 0,
+   "tris": 540
+  },
+  {
+   "model": "LOD\\Landscape\\Trees\\Maple\\TreeMapleForest02_LOD_1.nif",
+   "placements": 70,
+   "edges": 11970,
+   "max": 692.4550406199478,
+   "over512": 314,
+   "over1024": 0,
+   "over2048": 0,
+   "tris": 3990
+  },
+  {
+   "model": "LOD\\Architecture\\Buildings\\Hightech\\HitExtCColumnTall01_LOD.nif",
+   "placements": 39,
+   "edges": 1404,
+   "max": 527.7560027517706,
+   "over512": 312,
+   "over1024": 0,
+   "over2048": 0,
+   "tris": 468
+  },
+  {
+   "model": "LOD\\Architecture\\Buildings\\Hightech\\HitExtAWallLongDmgPanels02_LOD.nif",
+   "placements": 153,
+   "edges": 918,
+   "max": 542.544245581304,
+   "over512": 306,
+   "over1024": 0,
+   "over2048": 0,
+   "tris": 306
+  }
+ ]
+}

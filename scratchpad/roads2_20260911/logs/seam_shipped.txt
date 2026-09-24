@@ -1,0 +1,30 @@
+vanilla (512, 512)  ours (512, 512)  no-roads (512, 512)
+projection loaded from E:\Projects\NifskopeWildWastelandEdition\scratchpad\roads2_20260911\proj_m20_20.npz
+
+set                                            texels   vanilla   shipped  no-roads
+all piece boundaries                             2940     5.271     5.718     3.275
+FEATHERED boundaries                               54     4.242     3.988     4.788
+SOLID boundaries (control)                       2886     5.291     5.750     3.247
+all road texels                                 23321     5.533     4.369     3.361
+off-road ground                                238823     4.547     4.302     4.230
+floor: feathered displaced +37+0                   54     3.116     4.064     4.064
+floor: feathered displaced +0+37                   54     4.225     4.754     5.725
+floor: feathered displaced -29+23                  54     3.351     4.876     4.876
+floor: feathered displaced +23-29                  54     3.714     3.396     3.396
+floor: feathered displaced +53+53                  54     3.270     3.215     3.215
+
+SKIRT-COVERED TEXELS BINNED BY THE MESH VERTEX ALPHA
+skirt-covered road texels: 676
+alpha bin        texels   vanilla   shipped  no-roads  van norm
+0.00-0.10            81     96.74    104.41     93.86     1.471
+0.10-0.25            75     97.25    104.81     94.53     1.528
+0.25-0.40            79     95.67    104.22     95.84     1.352
+0.40-0.55            69     94.27    103.74     95.01     1.196
+0.55-0.70            59     93.56    104.51     98.33     1.117
+0.70-0.85            44     95.22    103.04     93.95     1.302
+0.85-1.01           269     98.74    100.68     90.05     1.693
+reference: vanilla off-road ground luminance 83.52, vanilla unramped road core 92.51
+correlation of vanilla luminance with the mesh alpha: 0.001
+correlation of OURS    luminance with the mesh alpha: -0.791
+correlation of no-roads luminance with the mesh alpha: -0.325 (the floor: the ground knows nothing of the mesh)
+wrote E:\Projects\NifskopeWildWastelandEdition\scratchpad\roads2_20260911\seam_shipped.json

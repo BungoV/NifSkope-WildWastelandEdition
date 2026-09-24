@@ -1,0 +1,12 @@
+sidewalk 17801  pure (>2 texels from any flat road) 15696
+
+set                                 vanilla                 rung              maxz_d0                blend
+sidewalk all brightness  0.540 (clr -0.071)  0.770 (clr +0.198)  0.867 (clr +0.293)  0.858 (clr +0.283)
+sidewalk all greyness   0.640 (clr +0.076)  0.392 (clr -0.147)  0.250 (clr -0.288)  0.256 (clr -0.282)
+sidewalk all lum/|err|   87.21 /   0.00  128.63 /  42.14  128.81 /  42.18  128.22 /  41.64
+sidewalk PURE brightness  0.518 (clr -0.102)  0.764 (clr +0.187)  0.857 (clr +0.284)  0.849 (clr +0.274)
+sidewalk PURE greyness  0.620 (clr +0.037)  0.386 (clr -0.144)  0.248 (clr -0.293)  0.252 (clr -0.289)
+sidewalk PURE lum/|err|   86.51 /   0.00  128.37 /  42.52  128.36 /  42.37  127.83 /  41.89
+road_flat brightness    0.761 (clr +0.100)  0.611 (clr -0.045)  0.708 (clr +0.101)  0.724 (clr +0.115)
+road_flat greyness      0.852 (clr +0.124)  0.741 (clr +0.127)  0.655 (clr +0.055)  0.673 (clr +0.070)
+road_flat lum/|err|      95.23 /   0.00  112.92 /  20.01  109.67 /  16.69  109.93 /  16.68

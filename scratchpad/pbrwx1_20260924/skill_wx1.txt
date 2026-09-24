@@ -1,0 +1,40 @@
+## 2c. The WX1 gates: `pbr_wx1_gates.sh` + `pbr_wx1_gates.py` (lane PBRWX1)
+The weather preview in the Scene popup (Sky dome, Sun disc + light, Clouds, Moon, Game
+Day). The judge has its OWN plugin decoder (WTHR/CLMT/IMSP/IMGS/GMST), textbook CIELab
+and a DXT5 decode; it never calls the code under test.
+```bash
+bash tests/spells/pbr_wx1_gates.sh --out "$PWD/scratchpad/<lane>/wx1"            # 71 checks
+bash tests/spells/pbr_wx1_gates.sh --out ".../wx1_red_<n>" --red <n>              # must FAIL
+bash tests/spells/pbr_wx1_gates.sh --out ... --only sky,skypx,probe,lit,off,persist,live
+```
+* Sections: `sky` (one `weather --sky` CLI run: colours at hours, sun direction, the
+  disc-fade and colour-extension edges, cloud rows, moon at days 4/17/32), `skypx` (the
+  dome's zenith looking straight up), `probe` (`WW_LOOKDEV_CLOUDPROBE=layer,u,v`: left
+  half colour, right half alpha; texel picked by `pbr_wx1_gates.py --pick 14`, which
+  demands a V-flip twin that differs so a flipped V fails), `lit` (Sun on = the arc,
+  Sun off = W1's light), `off` (every part OFF = `release/before_<lane>` byte for byte,
+  pinned and unpinned), `persist`, `live` (`WW_SCENE_TEST_WEATHER=1`).
+* Reds: CLI `WW_LOOKDEV_RED=exegmst rgbblend nonightbranch sunfade2h sunalpha1
+  colorext05 phasestuck moonalpha1 nam1ignore speedswap cloudalphaone hourstuck
+  cloudgametime todorder`; stage `skyscale skygamma skyswap skyleak sunleak cloudleak
+  moonleak`; UI `WW_R2A_RED=nolive nosave`. A red runs only the sections aimed at it.
+* **The lookdev echo lives in the PBRM census (`WW_PBRM_CENSUS`), not the program
+  census.** `drew=sky:dome(...)` or `drew=sky:refused(<why>)` is the first thing to read
+  when a sky picture looks wrong: a refused dome still photographs as the lookdev cube.
+* **A fresh settings scope has no archive index.** `GameManager` builds it only while
+  Fallout 4 is enabled in Resources, so `get_file` fails on meshes while textures still
+  resolve through the resource stack, and `GameManager::folders()` returns EMPTY too.
+  Sky meshes therefore fall back to `lodgenResourceSearchPaths()`, whose loose entries
+  are `<entry>/Meshes`, `<entry>/Textures` -- join the relative path to the PARENT.
+* Moon azimuth = `atan2(x, y) mod 360` (north 0, east 90). The 01:00 moon is el 61.56
+  az 180.00; 22:00 is 33.66 / 223.07.
+* The probe's measured texel (layer 14, uv 0.52197266 0.13415527) reads colour
+  (172,188,195) and alpha 140 = 156 x 0.9; after 100 s it has moved by 0.2125984 in U
+  and it wraps at 470.37 s.
+* **Never edit a driver while bash runs it.** bash reads the script as it goes; an edit
+  mid-run gave `FR: command not found` and a syntax error, and the run died with no
+  verdict. Copy the script aside first if it must change during a run.
+* `( : >> release/NifSkope.exe )` succeeding does NOT mean the exe is free to link: the
+  link still died "Permission denied" with a harness on it. Rename it aside whenever any
+  NifSkope runs from `release/`.
+

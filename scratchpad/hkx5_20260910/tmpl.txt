@@ -1,0 +1,99 @@
+file ../hkxclass_20260910/interleaved.hkx  2160 bytes
+magic          57e0e05710c0c010
+userTag 0 fileVersion 11 layout 08010001 numSections 3
+contentsSection 2 off 0  contentsClassNameSection 0 off 75
+contentsVersion b'hk_2014.1.0-r1\x00\xff' flags 0 maxpredicate 0x15 predicateArraySizePlusPadding 0x10
+section headers start 0x50
+  [0] __classnames__   abs=0x110    local=272    global=272    virtual=272    exports=272    imports=272    end=272    pad=ffffffffffffffffffffffffffffffff
+  [1] __types__        abs=0x220    local=0      global=0      virtual=0      exports=0      imports=0      end=0      pad=ffffffffffffffffffffffffffffffff
+  [2] __data__         abs=0x220    local=1360   global=1456   virtual=1536   exports=1616   imports=1616   end=1616   pad=ffffffffffffffffffffffffffffffff
+
+__classnames__ (abs 0x110 .. 0x220):
+  rel 0x5    sig 0x33d42383  hkClass
+  rel 0x12   sig 0xb0efa719  hkClassMember
+  rel 0x25   sig 0x8a3609cf  hkClassEnum
+  rel 0x36   sig 0xce6f8a6c  hkClassEnumItem
+  rel 0x4b   sig 0x2772c11e  hkRootLevelContainer
+  rel 0x65   sig 0x26859f4c  hkaAnimationContainer
+  rel 0x80   sig 0xa5eff3f2  hkaInterleavedUncompressedAnimation
+  rel 0xa9   sig 0x60f8e0b8  hkaDefaultAnimatedReferenceFrame
+  rel 0xcf   sig 0x0faf9150  hkaAnimationBinding
+  rel 0xe8   sig 0x1de13a73  hkMemoryResourceContainer
+  stop at 0x212 (no 0x09)
+  tail 14 bytes: ffffffffffffffffffffffffffff
+
+__data__ abs 0x220, payload 0 .. 1360, local 1360, global 1456, virtual 1536, end 1616
+local fixups (src -> dst, both relative to the section):
+  0x0      -> 0x10    
+  0x10     -> 0x40    
+  0x18     -> 0x60    
+  0x28     -> 0x80    
+  0x30     -> 0x90    
+  0xd0     -> 0x110   
+  0xe0     -> 0x120   
+  0x158    -> 0x190   
+  0x168    -> 0x1b0   
+  0x3d8    -> 0x3f0   
+  0x4a0    -> 0x4f0   
+  0x4b0    -> 0x500   
+global fixups (src, sectionIndex, dst):
+  0x20     sec 2 -> 0xb0    
+  0x38     sec 2 -> 0x510   
+  0x110    sec 2 -> 0x130   
+  0x120    sec 2 -> 0x490   
+  0x150    sec 2 -> 0x390   
+  0x4a8    sec 2 -> 0x130   
+virtual fixups (objOffset, sectionIndex, classNameOffset):
+  0x0      sec 0 class rel 0x4b    hkRootLevelContainer
+  0xb0     sec 0 class rel 0x65    hkaAnimationContainer
+  0x130    sec 0 class rel 0x80    hkaInterleavedUncompressedAnimation
+  0x390    sec 0 class rel 0xa9    hkaDefaultAnimatedReferenceFrame
+  0x490    sec 0 class rel 0xcf    hkaAnimationBinding
+  0x510    sec 0 class rel 0xe8    hkMemoryResourceContainer
+
+object bytes:
+  hkRootLevelContainer @0x0 (size to next 0xb0)
+    +0x000 00 00 00 00 00 00 00 00 02 00 00 00 02 00 00 80
+    +0x010 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+    +0x020 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+    +0x030 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+    +0x040 4d 65 72 67 65 64 20 41 6e 69 6d 61 74 69 6f 6e
+    +0x050 20 43 6f 6e 74 61 69 6e 65 72 00 00 00 00 00 00
+    +0x060 68 6b 61 41 6e 69 6d 61 74 69 6f 6e 43 6f 6e 74
+  hkaAnimationContainer @0xb0 (size to next 0x80)
+    +0x000 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+    +0x010 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 80
+    +0x020 00 00 00 00 00 00 00 00 01 00 00 00 01 00 00 80
+    +0x030 00 00 00 00 00 00 00 00 01 00 00 00 01 00 00 80
+    +0x040 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 80
+    +0x050 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 80
+    +0x060 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  hkaInterleavedUncompressedAnimation @0x130 (size to next 0x260)
+    +0x000 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+    +0x010 01 00 00 00 9a 99 99 3e 01 00 00 00 00 00 00 00
+    +0x020 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+    +0x030 01 00 00 00 01 00 00 80 00 00 00 00 00 00 00 00
+    +0x040 0a 00 00 00 0a 00 00 80 00 00 00 00 00 00 00 00
+    +0x050 00 00 00 00 00 00 00 80 00 00 00 00 00 00 00 00
+    +0x060 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  hkaDefaultAnimatedReferenceFrame @0x390 (size to next 0x100)
+    +0x000 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+    +0x010 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+    +0x020 00 00 00 00 00 00 00 00 00 00 80 3f 00 00 00 00
+    +0x030 00 00 00 00 00 00 80 3f 00 00 00 00 00 00 00 00
+    +0x040 9a 99 99 3e 00 00 00 00 00 00 00 00 00 00 00 00
+    +0x050 0a 00 00 00 0a 00 00 80 00 00 00 00 00 00 00 00
+    +0x060 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  hkaAnimationBinding @0x490 (size to next 0x80)
+    +0x000 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+    +0x010 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+    +0x020 00 00 00 00 00 00 00 00 01 00 00 00 01 00 00 80
+    +0x030 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 80
+    +0x040 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 80
+    +0x050 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+    +0x060 52 6f 6f 74 00 00 00 00 00 00 00 00 00 00 00 00
+  hkMemoryResourceContainer @0x510 (size to next 0x40)
+    +0x000 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+    +0x010 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+    +0x020 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 80
+    +0x030 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 80

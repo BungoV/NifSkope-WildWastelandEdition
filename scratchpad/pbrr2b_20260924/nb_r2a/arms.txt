@@ -1,0 +1,2 @@
+red=none
+b6c795691639e9fe81fcfe2a7404f011db4c2080 */e/Projects/NifskopeWildWastelandEdition/release/NifSkope.exe

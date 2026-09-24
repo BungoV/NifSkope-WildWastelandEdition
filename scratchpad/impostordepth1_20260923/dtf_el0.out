@@ -1,0 +1,18 @@
+[dtfSnap] el00 360 views (sw/az/dtf_n0snap/n8_2k)
+  T1 ratio card/mesh: median 0.944 min 0.882 (az 45) max 1.011 (az 122); outside 0.85..1.15 at 0 of 360 -> ok
+  T2 runs (median over band B): card > mesh at 0 of 360; worst card 1.0 vs mesh 1.0 at az 0 -> ok
+  T3 centre step: card worst 15.25 px (az 225) mean 0.64; mesh worst 0.96 mean 0.60; ratio 15.86 (bar 2); missing-centre views 0 -> FAIL
+  whole tree: IoU 0.8157 (min 0.7217); missing 0.0889 (max 0.1804); pop worst 0.4053 mean 0.0313 [mesh 0.1441/0.1258]; tear worst 4.68% az135 top5 4.26% mean 0.85%
+  TRUNK FAIL
+[dtfS16] el00 360 views (sw/az/dtf_n16S/n8_2k)
+  T1 ratio card/mesh: median 0.983 min 0.910 (az 261) max 1.116 (az 60); outside 0.85..1.15 at 0 of 360 -> ok
+  T2 runs (median over band B): card > mesh at 0 of 360; worst card 1.0 vs mesh 1.0 at az 0 -> ok
+  T3 centre step: card worst 1.14 px (az 46) mean 0.60; mesh worst 0.96 mean 0.60; ratio 1.19 (bar 2); missing-centre views 0 -> ok
+  whole tree: IoU 0.8764 (min 0.8494); missing 0.0310 (max 0.0419); pop worst 0.0889 mean 0.0608 [mesh 0.1441/0.1258]; tear worst 0.54% az351 top5 0.53% mean 0.21%
+  TRUNK PASS
+[dtfA16] el00 360 views (sw/az/dtf_n16A/n8_2k)
+  T1 ratio card/mesh: median 0.929 min 0.804 (az 317) max 0.992 (az 59); outside 0.85..1.15 at 4 of 360 -> FAIL
+  T2 runs (median over band B): card > mesh at 0 of 360; worst card 1.0 vs mesh 1.0 at az 0 -> ok
+  T3 centre step: card worst 1.16 px (az 57) mean 0.61; mesh worst 0.96 mean 0.60; ratio 1.21 (bar 2); missing-centre views 0 -> ok
+  whole tree: IoU 0.8786 (min 0.8454); missing 0.0468 (max 0.0764); pop worst 0.0863 mean 0.0663 [mesh 0.1441/0.1258]; tear worst 0.57% az355 top5 0.56% mean 0.24%
+  TRUNK FAIL

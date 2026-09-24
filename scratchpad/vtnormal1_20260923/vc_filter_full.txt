@@ -1,0 +1,19 @@
+  ok   V8 the two levels share one origin (a coarse tile covers exactly four fine)
+  V8 content  height violations 0 (bar 0); colour outside its children's range widened by both sides' BC1 blocks 0 (bar 0); colour vs box median 2 max 13, for information
+  ok   V8 content obeys (a+b+c+d+2)>>2 exactly on the R16 height sheet
+  ok   V8 content colour stays inside the range of the four texels it averaged
+  V8 north    height violations 0 (bar 0); colour outside its children's range widened by both sides' BC1 blocks 0 (bar 0); colour vs box median 1 max 9, for information
+  ok   V8 north obeys (a+b+c+d+2)>>2 exactly on the R16 height sheet
+  ok   V8 north colour stays inside the range of the four texels it averaged
+  V8 south    height violations 0 (bar 0); colour outside its children's range widened by both sides' BC1 blocks 0 (bar 0); colour vs box median 2 max 9, for information
+  ok   V8 south obeys (a+b+c+d+2)>>2 exactly on the R16 height sheet
+  ok   V8 south colour stays inside the range of the four texels it averaged
+  V8 west     height violations 0 (bar 0); colour outside its children's range widened by both sides' BC1 blocks 0 (bar 0); colour vs box median 2 max 9, for information
+  ok   V8 west obeys (a+b+c+d+2)>>2 exactly on the R16 height sheet
+  ok   V8 west colour stays inside the range of the four texels it averaged
+  V8 east     height violations 0 (bar 0); colour outside its children's range widened by both sides' BC1 blocks 0 (bar 0); colour vs box median 2 max 9, for information
+  ok   V8 east obeys (a+b+c+d+2)>>2 exactly on the R16 height sheet
+  ok   V8 east colour stays inside the range of the four texels it averaged
+  V10 best parent tile 0: 1257 texels can tell box from nearest; the file matches box on 1257 of them and nearest on 615
+  ok   V10 the region has texels that can discriminate at all (bar 20)
+  ok   V10 the coarse level is a box filter, not a nearest resample

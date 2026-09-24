@@ -1,0 +1,22 @@
+﻿=== sanctuary  18:39:43 ===
+serial KEEP   rc=0 wall=22520 ms peak=1754.7 MB files=60 meshes=10.5 tex=7.2
+  serial  run 1  wall=17870 ms peak=1754.9 MB meshes=9.9 tex=5.8 rc=0
+  16thr   run 1  wall=35972 ms peak=5799.5 MB meshes=7.8 tex=27.5 rc=0
+  serial  run 2  wall=17947 ms peak=1754.3 MB meshes=9.9 tex=5.6 rc=0
+  16thr   run 2  wall=43494 ms peak=5801.4 MB meshes=7.5 tex=35.2 rc=0
+  serial  run 3  wall=18332 ms peak=1755.2 MB meshes=10 tex=6 rc=0
+  16thr   run 3  wall=40484 ms peak=5799.2 MB meshes=7.9 tex=31.9 rc=0
+MEDIAN sanctuary serial : wall 17947 ms  meshes 9.9 s  textures 5.8 s  peak 1754.9 MB
+MEDIAN sanctuary 16thr  : wall 40484 ms  meshes 7.8 s  textures 31.9 s  peak 5799.5 MB
+=== boston  18:43:00 ===
+serial KEEP   rc=0 wall=123372 ms peak=3756.4 MB files=163 meshes=54.7 tex=62.3
+  serial  run 1  wall=122248 ms peak=3756.3 MB meshes=54.9 tex=61.2 rc=0
+  16thr   run 1  wall=227006 ms peak=25136.3 MB meshes=119.9 tex=104.1 rc=0
+  serial  run 2  wall=132988 ms peak=3754.2 MB meshes=54.6 tex=71 rc=0
+  16thr   run 2  wall=156043 ms peak=24628.2 MB meshes=63.4 tex=89.4 rc=0
+  serial  run 3  wall=128118 ms peak=3758.3 MB meshes=55.2 tex=66.1 rc=0
+  16thr   run 3  wall=122305 ms peak=26038 MB meshes=46.5 tex=73.9 rc=0
+MEDIAN boston serial : wall 128118 ms  meshes 54.9 s  textures 66.1 s  peak 3756.3 MB
+MEDIAN boston 16thr  : wall 156043 ms  meshes 63.4 s  textures 89.4 s  peak 25136.3 MB
+18:59:53
+R3-REST-DONE

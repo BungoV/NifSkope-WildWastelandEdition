@@ -1,0 +1,19 @@
+## 2026-09-19 -- CELLVIEW3: a wait condition that matched its own prose freed the exe slot early
+
+The tree allows exactly ONE NifSkope at a time, so a lane that queues a render
+behind a running gate batch has to wait for the batch to END. The wait was armed
+as "the batch output contains `native_open` and no NifSkope is in `tasklist`".
+Both went true within seconds -- because `cell_open.sh`'s own last line of prose
+is `neighbours are run separately: native_open.sh, lodl_open.sh,
+render_shot.sh`, and `tasklist` is empty in the gap BETWEEN two gates. The
+monitor fired while the batch was three gates from done; a render started on
+that signal would have been the second instance.
+
+The rule: **a wait condition must match a token the watched process only emits
+when it is finished, and a process check is a sample, not a state.** Anchor on
+the batch's own step marker (`=== native_open` at the start of a line, plus that
+gate's `N checks, M failures` summary), never on a substring that can appear in
+any gate's explanatory text. If the watcher is checking for absence (no process
+running), require the positive end-marker as well -- absence between two steps
+of a loop looks exactly like absence after the loop.
+

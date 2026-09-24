@@ -1,0 +1,63 @@
+LANE CLAMP -- built and gated by lane BUILD4, 2026-09-10.
+
+BUILD
+  qmake NifSkope.pro          QMAKE-RC=0
+  make -j2                    BUILD-RC=0  ("Nothing to be done": the 01:01:04
+                              link already carried this lane's code)
+  release/NifSkope.exe        2026-09-10 01:01:04, newer than every one of the
+                              15 changed files under src/ res/ tools/ tests/
+  release/style.qss           in step with res/style.qss (cmp clean)
+
+GATES -- 9 of 12 rows at their pre-registered bar, 3 missed
+  lodgen_terrain_vt.sh   35 checks, 0 failures, RESULT PASS   (32 -> 35 as predicted)
+      V9a tint OFF   byte-identical, 4 chunks
+      V9a tint ON    byte-identical, 4 chunks (tightened to cmp)
+      V9b _msn       byte-identical, 4 chunks
+      FLOOR          8 of 8 sheet pairs differ
+      V9c            E/W 2.75 (bar <=3.20), interior 1.803; N/S 2.87 (bar <=3.30),
+                     interior 1.603; edge step 1.961 (bar <=2.60) -- every one of
+                     these is the pre-registered number to 3 significant figures
+  lodgen_terrain.sh      26 checks, 0 failures, PASS
+      pyramid msn UP=G D0=76 D1=32 D2=51 D3=32
+      direct  msn UP=G D0=76 D1=32 D2=51 D3=32   (unchanged, as pre-registered)
+      vanilla     UP=G D0=99 D1=67 D2=67 D3=67   (the control)
+  lodgen_identity.sh     8 ok, RESULT PASS, baseline unmoved
+
+  edgeband.py, cover run (rc=1)
+      colour  127 texels over 4 chunks, maxd 3, 0 beyond the 4-texel band   PASS
+      _msn    25,537 texels, 0 beyond on the two y=24 chunks (maxd 3),
+              1,014 and 1,405 beyond on the two y=28 chunks (maxd 7)        MISS
+      _data   65,872 texels, 0 beyond on three chunks (maxd 47),
+              16 beyond on Commonwealth.4.-20.28 (maxd 79)                  MISS
+      FLOOR   did not fire (colour moved: 127) -- correct
+  edgeband.py, cover-free control (rc=1)
+      colour  BYTE-IDENTICAL on all four chunks, as pre-registered
+      _msn / _data  identical readings to the cover run
+      the "ring is inert" line fires here BY CONSTRUCTION: the floor asks the
+      colour sheets to move, and the second control asks them not to. It is the
+      cover run that the floor guards, and there it stayed silent.
+
+THE THREE MISSES, CAUSE MEASURED (not re-pinned -- resume-pending SS6)
+  Localised: 994 of 1,014 and 1,405 of 1,405 beyond-band _msn texels sit on the
+  NORTH border; distances 4,5,6,7 only; every other border reaches exactly 3.
+  --dump-land over cells x=-24..-17 says Bethesda's own landscape disagrees
+  across exactly ONE shared vertex row in this neighbourhood -- y=31 | y=32, by
+  1..9 VHGT units (8..72 world units). Seams y=23|24, y=27|28, y=32|33 and both
+  east seams read 0, i.e. exact agreement.
+  So lodgenTerrainFillRing's documented south->north order lets the y=32 cell
+  overwrite the shared row, changing the chunk's OWN boundary grid row where the
+  clamp did not. Reach follows arithmetically: a texel at distance t reads
+  heights at t+-4 texels through a bilinear tap, so grid index -1 is read out to
+  t=3 (the passing borders) and grid index 0 out to t=7 (the north border).
+  The pre-registered band of 4 counted the central difference's 128-unit step
+  but not the bilinear tap's own 128-unit footprint, and assumed the ring could
+  only touch points OUTSIDE the chunk.
+  The 16 _data texels are exactly one 4x4 BC block at d=76..79: chgt copies the
+  ring's middle, whose north boundary row moved, and wetness is a flow
+  accumulation over that whole grid -- a global operator. That is owed item 2 of
+  the lane's own report, not a new finding.
+
+  NOT FIXED and NOT RE-PINNED. The band is the lane's to re-derive or the
+  director's to accept; BUILD4 only measured it.
+
+NOT COMMITTED (CONSTITUTION 8). bungo's open NifSkope window needs a restart.

@@ -1,0 +1,29 @@
+S3  --land-tiling 2048 vs the RUNG exe, every file
+  rung vs back, chunk (-20, 24)                  PASS 6 file(s), 1904522 bytes, byte-identical
+  rung vs back, chunk (-20, 20)                  PASS 6 file(s), 1403974 bytes, byte-identical
+
+S4  _msn byte-identical at BOTH tiling values
+  2048 vs 341.3333, _msn only, chunk (-20, 24)   PASS 1 file(s), 174888 bytes, byte-identical
+  2048 vs 341.3333, _msn only, chunk (-20, 20)   PASS 1 file(s), 174888 bytes, byte-identical
+    (the REFUTER: the same comparison over the COLOUR sheet must go RED)
+  refuter: colour sheet, chunk (-20, 24)         RED  1 of 1 files differ: ['tex/Commonwealth.4.-20.24.DDS']
+  refuter: colour sheet, chunk (-20, 20)         RED  1 of 1 files differ: ['tex/Commonwealth.4.-20.20.DDS']
+
+S1/S2  the real bake vs SPLAT1's offline prediction vs vanilla
+chunk      tiling    localVar     pred  vanilla     errRGB     pred
+(-20,24)   2048         76.22    71.95    19.81      16.33    16.89
+(-20,24)   341.3333     12.34    12.93    19.81      14.33    15.02
+           VANILLA      19.81       --    19.81         --       --
+(-20,20)   2048         74.06    61.71    29.39      20.43    21.73
+(-20,20)   341.3333     25.83    14.60    29.39      18.92    20.16
+           VANILLA      29.39       --    29.39         --       --
+
+S1 verdict: PASS = the real 341.3333 local variance is within 20% of the prediction
+  chunk (-20, 24) real  12.34  predicted  12.93    4.6%  PASS   (vanilla 19.81 -> ours is SMOOTHER than vanilla)
+  chunk (-20, 20) real  25.83  predicted  14.60   77.0%  RED   (vanilla 29.39 -> ours is SMOOTHER than vanilla)
+
+S2 verdict: NOT an improvement gate. PASS = it does not get WORSE by more than 1.0
+  chunk (-20,24)  2048 16.33 -> 341.3333 14.33   delta -2.00   PASS
+  chunk (-20,20)  2048 20.43 -> 341.3333 18.92   delta -1.50   PASS
+
+RESULT RED

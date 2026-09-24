@@ -1,0 +1,8 @@
+horizon maps for far LOD shadows are in: .lodi v8 carries a per-vertex skyline
+(16 bytes a drawn vertex, bin 0 = NORTH clockwise, u8 = deg/90x255, reach
+127,561 u) and .lodt gains role 7, four bins an uncompressed RGBA sheet.
+Exe release/NifSkope.exe 2026-09-18 21:59:46, 22,952,448 B,
+sha1 e578b76f9d7a2d011363e4300a2c94967e14d605.
+Gate tests/spells/lodgen_horizon.sh: 22 ok, 1 failed (G3's terrain floor,
+reported and not re-derived), G5 neighbours all at their standing counts.
+Report: lane_horizon1_report.md. His open NifSkope window needs a restart.

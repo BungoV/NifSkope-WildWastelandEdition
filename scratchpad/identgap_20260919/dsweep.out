@@ -1,0 +1,76 @@
+================================================================================================================
+IDENTGAP dsweep  2026-09-19 07:10:24
+
+VIEW hwydeck  az 180 el 10   |  the acne zone texel/sin(el):  16 u -> 92 u,  64 u -> 369 u
+  map16  D      8 | obj false-DARK   0.74%  false-LIT   4.84%  | ALL   7.85%
+  map16  D     16 | obj false-DARK   0.74%  false-LIT   4.84%  | ALL   7.85%
+  map16  D     32 | obj false-DARK   0.74%  false-LIT   4.84%  | ALL   7.84%
+  map16  D     48 | obj false-DARK   0.74%  false-LIT   4.85%  | ALL   7.85%
+  map16  D     64 | obj false-DARK   0.73%  false-LIT   4.86%  | ALL   7.85%
+  map16  D     92 | obj false-DARK   0.73%  false-LIT   4.87%  | ALL   7.86%
+  map16  D    128 | obj false-DARK   0.73%  false-LIT   4.90%  | ALL   7.87%
+  map16  D    184 | obj false-DARK   0.73%  false-LIT   4.93%  | ALL   7.88%
+  map16  D    256 | obj false-DARK   0.73%  false-LIT   4.98%  | ALL   7.90%
+  map16  D    512 | obj false-DARK   0.71%  false-LIT   5.19%  | ALL   7.98%
+  map16  D    inf | obj false-DARK   0.66%  false-LIT   6.32%  | ALL   8.43%
+  map64  D      8 | obj false-DARK   2.55%  false-LIT   4.38%  | ALL   8.41%
+  map64  D     16 | obj false-DARK   2.55%  false-LIT   4.38%  | ALL   8.41%
+  map64  D     32 | obj false-DARK   2.55%  false-LIT   4.38%  | ALL   8.41%
+  map64  D     48 | obj false-DARK   2.55%  false-LIT   4.38%  | ALL   8.41%
+  map64  D     64 | obj false-DARK   2.55%  false-LIT   4.38%  | ALL   8.41%
+  map64  D     92 | obj false-DARK   2.55%  false-LIT   4.39%  | ALL   8.42%
+  map64  D    128 | obj false-DARK   2.54%  false-LIT   4.41%  | ALL   8.43%
+  map64  D    184 | obj false-DARK   2.52%  false-LIT   4.43%  | ALL   8.43%
+  map64  D    256 | obj false-DARK   2.52%  false-LIT   4.47%  | ALL   8.44%
+  map64  D    512 | obj false-DARK   2.52%  false-LIT   4.60%  | ALL   8.50%
+  map64  D    inf | obj false-DARK   2.48%  false-LIT   5.34%  | ALL   8.78%
+
+VIEW east  az 120 el 15   |  the acne zone texel/sin(el):  16 u -> 62 u,  64 u -> 247 u
+  map16  D      8 | obj false-DARK   1.15%  false-LIT   3.03%  | ALL   7.98%
+  map16  D     16 | obj false-DARK   1.15%  false-LIT   3.03%  | ALL   7.98%
+  map16  D     32 | obj false-DARK   1.15%  false-LIT   3.03%  | ALL   7.98%
+  map16  D     48 | obj false-DARK   1.14%  false-LIT   3.05%  | ALL   7.99%
+  map16  D     64 | obj false-DARK   1.14%  false-LIT   3.06%  | ALL   8.00%
+  map16  D     92 | obj false-DARK   1.13%  false-LIT   3.10%  | ALL   8.02%
+  map16  D    128 | obj false-DARK   1.13%  false-LIT   3.17%  | ALL   8.07%
+  map16  D    184 | obj false-DARK   1.11%  false-LIT   3.36%  | ALL   8.19%
+  map16  D    256 | obj false-DARK   1.09%  false-LIT   3.82%  | ALL   8.49%
+  map16  D    512 | obj false-DARK   0.94%  false-LIT   6.95%  | ALL  10.58%
+  map16  D    inf | obj false-DARK   0.88%  false-LIT   7.17%  | ALL  10.68%
+  map64  D      8 | obj false-DARK   3.67%  false-LIT   2.86%  | ALL  10.02%
+  map64  D     16 | obj false-DARK   3.67%  false-LIT   2.86%  | ALL  10.02%
+  map64  D     32 | obj false-DARK   3.67%  false-LIT   2.86%  | ALL  10.02%
+  map64  D     48 | obj false-DARK   3.67%  false-LIT   2.86%  | ALL  10.02%
+  map64  D     64 | obj false-DARK   3.67%  false-LIT   2.86%  | ALL  10.02%
+  map64  D     92 | obj false-DARK   3.67%  false-LIT   2.86%  | ALL  10.02%
+  map64  D    128 | obj false-DARK   3.67%  false-LIT   2.86%  | ALL  10.02%
+  map64  D    184 | obj false-DARK   3.60%  false-LIT   3.04%  | ALL  10.10%
+  map64  D    256 | obj false-DARK   3.48%  false-LIT   3.56%  | ALL  10.38%
+  map64  D    512 | obj false-DARK   2.98%  false-LIT   6.65%  | ALL  12.19%
+  map64  D    inf | obj false-DARK   2.80%  false-LIT   6.92%  | ALL  12.24%
+
+VIEW street  az 120 el 5   |  the acne zone texel/sin(el):  16 u -> 184 u,  64 u -> 734 u
+  map16  D      8 | obj false-DARK   4.18%  false-LIT   3.98%  | ALL   9.71%
+  map16  D     16 | obj false-DARK   4.18%  false-LIT   3.98%  | ALL   9.71%
+  map16  D     32 | obj false-DARK   4.18%  false-LIT   3.98%  | ALL   9.71%
+  map16  D     48 | obj false-DARK   4.18%  false-LIT   4.00%  | ALL   9.72%
+  map16  D     64 | obj false-DARK   4.18%  false-LIT   4.01%  | ALL   9.73%
+  map16  D     92 | obj false-DARK   4.18%  false-LIT   4.05%  | ALL   9.75%
+  map16  D    128 | obj false-DARK   4.18%  false-LIT   4.12%  | ALL   9.78%
+  map16  D    184 | obj false-DARK   4.18%  false-LIT   4.22%  | ALL   9.83%
+  map16  D    256 | obj false-DARK   4.18%  false-LIT   4.30%  | ALL   9.86%
+  map16  D    512 | obj false-DARK   4.18%  false-LIT   4.36%  | ALL   9.89%
+  map16  D    inf | obj false-DARK   4.18%  false-LIT   4.70%  | ALL  10.05%
+  map64  D      8 | obj false-DARK   7.68%  false-LIT   3.56%  | ALL  12.34%
+  map64  D     16 | obj false-DARK   7.68%  false-LIT   3.56%  | ALL  12.34%
+  map64  D     32 | obj false-DARK   7.68%  false-LIT   3.56%  | ALL  12.34%
+  map64  D     48 | obj false-DARK   7.68%  false-LIT   3.56%  | ALL  12.34%
+  map64  D     64 | obj false-DARK   7.68%  false-LIT   3.56%  | ALL  12.34%
+  map64  D     92 | obj false-DARK   7.68%  false-LIT   3.56%  | ALL  12.34%
+  map64  D    128 | obj false-DARK   7.68%  false-LIT   3.56%  | ALL  12.34%
+  map64  D    184 | obj false-DARK   7.68%  false-LIT   3.61%  | ALL  12.37%
+  map64  D    256 | obj false-DARK   7.68%  false-LIT   3.67%  | ALL  12.40%
+  map64  D    512 | obj false-DARK   7.68%  false-LIT   3.72%  | ALL  12.42%
+  map64  D    inf | obj false-DARK   7.68%  false-LIT   4.00%  | ALL  12.55%
+
+dsweep TOTAL 0.7 min

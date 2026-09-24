@@ -1,0 +1,15 @@
+2026-09-12 09:38:17
+LAND1 lane DONE -- Part A TILING5 and Part B INCR1 both delivered.
+
+Shipping exe  release/NifSkope.exe  09:32:37  21,951,488 B
+              sha1 3e1914a0637b66f438d873e0230b1e8c04d7c806
+Objects       nifcli.o 09:20:58   lodgen.o 08:32:06   (make -n: nothing left)
+Defaults      --land-guide off, --incremental opt-in. Nothing switched on.
+Reds          Part A: gate F3 NOT MET (5/7 repeat both sets), which is why the
+              switch ships off. Part B gates: B2 5/5, B3 8/8, B4 0 failures.
+              Two reds this lane INTRODUCED and CLEARED: lodgen_roads R1 and
+              lodgen_native check 5, both the switch digest eating a path.
+              Inherited and still red: lodgen_terrain_vt 41/1,
+              lodgen_ground_cover 29/5 (identical failing lines to Part A's run).
+NOTHING COMMITTED. git stash never run. Fallout4.exe down for every build.
+bungo's open NifSkope window needs a RESTART.

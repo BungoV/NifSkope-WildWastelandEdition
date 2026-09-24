@@ -1,0 +1,120 @@
+(d) the class database
+  ok   908 registered classes (908)
+  ok   self-check problems: 0
+  ok   computed signature == HKXPACK's on 908, differs on 0
+  ok   classes HKXPACK has and the exe lacks: 0
+  ok   hkaSplineCompressedAnimation is in the database
+  ok   hkaSplineCompressedAnimation objectSize 0xb0 (measured 0xb0)
+  ok   hkaSplineCompressedAnimation: 13 member offsets equal the measured ones
+  ok   hkaInterleavedUncompressedAnimation is in the database
+  ok   hkaInterleavedUncompressedAnimation objectSize 0x58 (measured 0x58)
+  ok   hkaInterleavedUncompressedAnimation: 2 member offsets equal the measured ones
+  ok   hkaLosslessCompressedAnimation is in the database
+  ok   hkaLosslessCompressedAnimation objectSize 0xe0 (measured 0xe0)
+  ok   hkaLosslessCompressedAnimation: 0 member offsets equal the measured ones
+  ok   hkaPredictiveCompressedAnimation is in the database
+  ok   hkaPredictiveCompressedAnimation objectSize 0xc0 (measured 0xc0)
+  ok   hkaPredictiveCompressedAnimation: 0 member offsets equal the measured ones
+  ok   hkaQuantizedAnimation is in the database
+  ok   hkaQuantizedAnimation objectSize 0x58 (measured 0x58)
+  ok   hkaQuantizedAnimation: 0 member offsets equal the measured ones
+  ok   hkaReferencePoseAnimation is in the database
+  ok   hkaReferencePoseAnimation objectSize 0x40 (measured 0x40)
+  ok   hkaReferencePoseAnimation: 0 member offsets equal the measured ones
+  ok   hkaAnimation is in the database
+  ok   hkaAnimation: 6 member offsets equal the measured ones
+  ok   hkaSkeleton is in the database
+  ok   hkaSkeleton objectSize 0x88 (measured 0x88)
+  ok   hkaSkeleton: 8 member offsets equal the measured ones
+  ok   hkaAnimationBinding is in the database
+  ok   hkaAnimationBinding objectSize 0x58 (measured 0x58)
+  ok   hkaAnimationBinding: 6 member offsets equal the measured ones
+  ok   hkaDefaultAnimatedReferenceFrame is in the database
+  ok   hkaDefaultAnimatedReferenceFrame: 4 member offsets equal the measured ones
+  ok   hkaAnnotationTrack is in the database
+  ok   hkaAnnotationTrack objectSize 0x18 (measured 0x18)
+  ok   hkaAnnotationTrack: 2 member offsets equal the measured ones
+  ok   hkRootLevelContainer signature 0x2772c11e (files carry 0x2772c11e)
+  ok   hkaAnimationContainer signature 0x26859f4c (files carry 0x26859f4c)
+  ok   hkaSplineCompressedAnimation signature 0x8c3b5f7e (files carry 0x8c3b5f7e)
+  ok   hkaInterleavedUncompressedAnimation signature 0xa5eff3f2 (files carry 0xa5eff3f2)
+  ok   hkaDefaultAnimatedReferenceFrame signature 0x60f8e0b8 (files carry 0x60f8e0b8)
+  ok   hkaAnimationBinding signature 0x0faf9150 (files carry 0x0faf9150)
+  ok   hkMemoryResourceContainer signature 0x1de13a73 (files carry 0x1de13a73)
+  ok   hkaLosslessCompressedAnimation signature 0x278bffe8 (files carry 0x278bffe8)
+  ok   hkClass signature 0x33d42383 (files carry 0x33d42383)
+  ok   hkClassMember signature 0xb0efa719 (files carry 0xb0efa719)
+  ok   hkClassEnum signature 0x8a3609cf (files carry 0x8a3609cf)
+  ok   hkClassEnumItem signature 0xce6f8a6c (files carry 0xce6f8a6c)
+  ok   every member fits inside its class size (0 violations)
+(a) byte-identical round trip
+  ok   oracle round trip jog.hkx identical (12288 bytes)
+  ok   C++ round trip jog.hkx: IDENTICAL 12288 bytes, 6 objects, 6 classes
+  ok   oracle round trip tpose_idle.hkx identical (7792 bytes)
+  ok   C++ round trip tpose_idle.hkx: IDENTICAL 7792 bytes, 6 objects, 6 classes
+  ok   oracle round trip twoblock.hkx identical (79600 bytes)
+  ok   C++ round trip twoblock.hkx: IDENTICAL 79600 bytes, 6 objects, 6 classes
+  ok   oracle round trip q48.hkx identical (65456 bytes)
+  ok   C++ round trip q48.hkx: IDENTICAL 65456 bytes, 6 objects, 6 classes
+  ok   oracle round trip skeleton.hkx identical (43296 bytes)
+  ok   C++ round trip skeleton.hkx: IDENTICAL 43296 bytes, 83 objects, 12 classes
+  ok   oracle round trip lossless.hkx identical (11536 bytes)
+  ok   C++ round trip lossless.hkx: IDENTICAL 11536 bytes, 6 objects, 6 classes
+  ok   oracle round trip turn.hkx identical (14192 bytes)
+  ok   C++ round trip turn.hkx: IDENTICAL 14192 bytes, 6 objects, 6 classes
+  census scratchpad/hkxedit1_20260910/census_hkx: 15320 files, 15278 byte-identical, 0 mismatched, 42 refused (3.0 s)
+  ok   C++ census: every parsed file byte-identical
+census E:\Projects\NifskopeWildWastelandEdition\scratchpad\hkxedit1_20260910\census_hkx: 15320 files, 15278 parsed, 15278 byte-identical, 0 mismatched, 42 refused, 29.8 s
+  refused    42  class hclClothSetupContainer is not in the class database (943 classes)
+  classes seen: 105 distinct
+  oracle census 29.8 s
+  ok   oracle census: every parsed file byte-identical (15278 of 15320, 42 refused)
+  ok   both readers refuse the same 42 files
+  ok   both readers give the same refusal reason on all 42 (42 agree)
+(b) edit -> save -> reload on a copy of jog.hkx
+  ok   jog.hkx object 2 is the animation and 4 the binding
+  ok   C++ edit wrote scratchpad/hkxedit1_20260910/gates_out/jog_edit_cpp.hkx: wrote scratchpad/hkxedit1_20260910/gates_out/jog_edit_cpp.hkx 12288 bytes
+  ok   the two writers produced the same bytes (12288 / 12288)
+  ok   C++ file read by the oracle: exactly the five edits changed (#2.blockOffsets.n, #2.blockOffsets.vals, #2.frameDuration, #2.numFrames, #4.blendHint, #4.originalSkeletonName)
+  ok   numFrames reads back 24
+  ok   blendHint reads back 2 (ADDITIVE)
+  ok   originalSkeletonName reads back 'EditedRoot'
+  ok   blockOffsets has 3 elements
+  ok   frameDuration reads back 0.0416667 (float32: 0.041666701436042786)
+  ok   oracle file read by the oracle: exactly the five edits changed (#2.blockOffsets.n, #2.blockOffsets.vals, #2.frameDuration, #2.numFrames, #4.blendHint, #4.originalSkeletonName)
+  ok   numFrames reads back 24
+  ok   blendHint reads back 2 (ADDITIVE)
+  ok   originalSkeletonName reads back 'EditedRoot'
+  ok   blockOffsets has 3 elements
+  ok   frameDuration reads back 0.0416667 (float32: 0.041666701436042786)
+  ok   C++ reader reads the five values back from the oracle-checked file
+  ok   floor: a nudged duration is the ONLY field the diff reports (['#2.duration'])
+(c) HKXPACK unpacks what we wrote
+  ok   HKXPACK unpack jog_edit_py.hkx -> jog_edit_py.hkx.xml (rc 0)
+  ok   HKXPACK's XML of jog_edit_py.hkx shows the edited values
+  ok   HKXPACK unpack jog_edit_cpp.hkx -> jog_edit_cpp.hkx.xml (rc 0)
+  ok   HKXPACK's XML of jog_edit_cpp.hkx shows the edited values
+  ok   HKXPACK unpack jog.hkx -> jog.hkx.xml (rc 0)
+(e) mutations refused by name
+  ok   magic byte 0                                                     | py: not a Havok packfile: magic a8e0e05710c0c010 | c++: REFUSED: not a Havok packfile: magic a8e0e05710c0c010
+  ok   fileVersion -> 12                                                | py: fileVersion 12, this reader knows 11 | c++: REFUSED: fileVersion 12, this reader knows 11
+  ok   bytesInPointer -> 4                                              | py: layout 04010001: bytesInPointer 4 littleEndian 1, this reade | c++: REFUSED: layout: bytesInPointer 4 littleEndian 1, this reader knows 8/
+  ok   numSections -> 4                                                 | py: sections ['__classnames__', '__types__', '__data__', '\x83#Ô | c++: REFUSED: section order is not __classnames__ / __types__ / __data__
+  ok   contentsSectionIndex -> 1                                        | py: contents object (section 1 offset 0) is not an object | c++: REFUSED: contents object (section 1 offset 0) is not an object
+  ok   predicate padding 0x10 -> 0x30 (section headers move)            | py: sections ['', '', '\xa0-']: no __classnames__ / __data__ | c++: REFUSED: no __classnames__ / __data__ section among 3
+  ok   __data__ tag first byte                                          | py: sections ['__classnames__', '__types__', 'X_data__']: no __c | c++: REFUSED: no __classnames__ / __data__ section among 3
+  ok   __data__ absoluteDataStart low byte                              | py: __data__ end 0x30e0 past the file (12288 bytes) | c++: REFUSED: __data__ end 0x30e0 past the file (12288 bytes)
+  ok   __data__ localFixupsOffset low byte                              | py: hkaAnimationBinding#4.transformTrackToBoneIndices: 95 elemen | c++: REFUSED: local fixup 0x490048 -> 0x4b004a is outside the payload
+  ok   __data__ virtualFixupsOffset low byte                            | py: global fixup at src 0x0 points into section 75, only __data_ | c++: REFUSED: global fixup at src 0x0 points into section 75, only __data__
+  ok   class-name separator 0x09 -> 0x0A                                | py: virtual fixup at 0x0 names class-name offset 75, which is no | c++: REFUSED: virtual fixup at 0x0 names class-name offset 75, which is not
+  ok   root class-name first byte                                       | py: class XkRootLevelContainer is not in the class database (943 | c++: REFUSED: class XkRootLevelContainer is not in the class database (943 
+  ok   first local fixup dst byte (root namedVariants -> 0x50)          | py: hkRootLevelContainer#0.namedVariants[0].name: string pointer | c++: REFUSED: hkRootLevelContainer#0.namedVariants[0].name: string pointer 
+  ok   first global fixup dst -> a non-object                           | py: hkRootLevelContainer#0.namedVariants[0].variant: pointer to  | c++: REFUSED: hkRootLevelContainer#0.namedVariants[0].variant: pointer to 0
+  ok   first virtual fixup class-name offset -> junk                    | py: virtual fixup at 0x0 names class-name offset 76, which is no | c++: REFUSED: virtual fixup at 0x0 names class-name offset 76, which is not
+  ok   global fixup section index 2 -> 1                                | py: global fixup at src 0x20 points into section 1, only __data_ | c++: REFUSED: global fixup at src 0x20 points into section 1, only __data__
+  ok   animations array size 1 -> 65                                    | py: hkaAnimationContainer#1.animations[6]: pointer bytes are not | c++: REFUSED: hkaAnimationContainer#1.animations[6]: pointer bytes are not 
+  ok   first local fixup src 0x0 -> 0x8 (no member there: fixup unconsumed) | py: hkRootLevelContainer#0.namedVariants: array size 2 with no p | c++: REFUSED: hkRootLevelContainer#0.namedVariants: array size 2 with no pa
+  ok   blockOffsets size high byte -> 0x7f (payload past the end)       | py: hkaSplineCompressedAnimation#2.blockOffsets: 2130706433 elem | c++: REFUSED: hkaSplineCompressedAnimation#2.blockOffsets: array size 21307
+  ok   a null pointer's bytes non-zero (hkaAnimationContainer.skeletons data) | py: hkaAnimationContainer#1.skeletons: array pointer bytes are n | c++: REFUSED: hkaAnimationContainer#1.skeletons: array pointer bytes are no
+  ok   stated limit: a payload byte flip (duration) is ACCEPTED as a value, not refused
+109 checks, 0 failures, 38.9 s

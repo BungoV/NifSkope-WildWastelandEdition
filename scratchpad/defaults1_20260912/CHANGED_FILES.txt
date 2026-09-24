@@ -1,0 +1,54 @@
+DEFAULTS1 (2026-09-12) -- the files this lane changed. Nothing is committed.
+
+A = created by THIS lane. M = modified by this lane. The tree is shared and
+other lanes' work is uncommitted in it, so git would call several of these
+files new; only lodgen_defaults.sh is mine.
+
+Counts are bytes / LF / CR, from Python.
+
+   path                                           before (this lane)                  after
+M  src/nifcli.cpp                                    not snapshotted      354267 / 7622 / 0
+M  src/lodgen.h                                      not snapshotted       87468 / 1567 / 0
+M  src/lodgen.cpp                                    not snapshotted     594075 / 13651 / 0
+M  src/lodgenchunkpass.cpp                           not snapshotted        14058 / 409 / 0
+M  src/lodgenmanager.cpp                             not snapshotted      169509 / 3585 / 0
+M  src/nifskope_ui.cpp                           1591162 / 33649 / 0    1591829 / 33663 / 0
+A  tests/spells/lodgen_defaults.sh                   not snapshotted        20158 / 428 / 0
+M  tests/spells/lodgen_terrain.sh                    20499 / 451 / 0        20624 / 453 / 0
+M  tests/spells/lodgen_tree_sway.sh                    4380 / 97 / 0          4519 / 99 / 0
+M  tests/spells/lodgen_farring.sh                    13890 / 325 / 0        14056 / 328 / 0
+M  tests/spells/lodgen_texture_arrays.sh             28800 / 513 / 0        28957 / 515 / 0
+M  tests/spells/lodgen_terrain_vt.sh                 30459 / 591 / 0        30529 / 593 / 0
+M  tests/spells/lodgen_roads.sh                       8399 / 171 / 0         8425 / 172 / 0
+M  tests/spells/lodgen_native_baseline.sh             9139 / 199 / 0         9340 / 202 / 0
+M  docs/LODGEN_TERRAIN_VT.md                         not snapshotted      186608 / 2859 / 0
+M  docs/LODGEN_IMPOSTOR_SPEC.md                      36444 / 615 / 0        37499 / 630 / 0
+M  .claude/skills/nifskope-ww-lodgen/SKILL.md        36753 / 494 / 0        38639 / 517 / 0
+M  MISTAKES.md                                     425233 / 7236 / 0      431794 / 7319 / 0
+
+CR is 0 on every line above, before and after: every source, spell, doc and
+skill file in this list is LF-only and stayed LF-only.
+
+For the files with no snapshot, git HEAD is printed below ONLY as a landmark.
+HEAD is many lanes behind this tree, so the difference between these two
+columns is not this lane's diff and must not be read as one.
+
+   path                                                     git HEAD                    now
+M  src/nifcli.cpp                                  257510 / 5913 / 0      354267 / 7622 / 0
+M  src/lodgen.h                                      30436 / 558 / 0       87468 / 1567 / 0
+M  src/lodgen.cpp                                  364264 / 8394 / 0     594075 / 13651 / 0
+M  src/lodgenchunkpass.cpp                               not in HEAD        14058 / 409 / 0
+M  src/lodgenmanager.cpp                           108923 / 2392 / 0      169509 / 3585 / 0
+M  src/nifskope_ui.cpp                           1455805 / 31133 / 0    1591829 / 33663 / 0
+A  tests/spells/lodgen_defaults.sh                       not in HEAD        20158 / 428 / 0
+M  tests/spells/lodgen_terrain.sh                    20499 / 451 / 0        20624 / 453 / 0
+M  tests/spells/lodgen_tree_sway.sh                    4380 / 97 / 0          4519 / 99 / 0
+M  tests/spells/lodgen_farring.sh                    13890 / 325 / 0        14056 / 328 / 0
+M  tests/spells/lodgen_texture_arrays.sh             28800 / 513 / 0        28957 / 515 / 0
+M  tests/spells/lodgen_terrain_vt.sh                 21440 / 442 / 0        30529 / 593 / 0
+M  tests/spells/lodgen_roads.sh                          not in HEAD         8425 / 172 / 0
+M  tests/spells/lodgen_native_baseline.sh                not in HEAD         9340 / 202 / 0
+M  docs/LODGEN_TERRAIN_VT.md                         46736 / 761 / 0      186608 / 2859 / 0
+M  docs/LODGEN_IMPOSTOR_SPEC.md                      36444 / 615 / 0        37499 / 630 / 0
+M  .claude/skills/nifskope-ww-lodgen/SKILL.md            not in HEAD        38639 / 517 / 0
+M  MISTAKES.md                                      68834 / 1067 / 0      431794 / 7319 / 0

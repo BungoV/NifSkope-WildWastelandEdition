@@ -1,0 +1,18 @@
+[Warning] QObject::connect(QListModel, QWidget): signal not found
+[Warning] QObject::connect(QListModel, QWidget): signal not found
+[Warning] QObject::connect(QListModel, QWidget): signal not found
+[Warning] QObject::connect(QListModel, QWidget): signal not found
+[Warning] File ' "textures/data/fo4cslod/cards/000531b3_oct_d.dds" ' not found in archives
+[Warning] File ' "textures/e:/projects/nifskopewildwastelandedition/scratchpad/impostor16_20260923/bakes/n16_2k/cards/000531b3_oct_d.dds" ' not found in archives
+[Warning] File ' "textures/data/fo4cslod/cards/000531b3_oct_n.dds" ' not found in archives
+[Warning] File ' "textures/e:/projects/nifskopewildwastelandedition/scratchpad/impostor16_20260923/bakes/n16_2k/cards/000531b3_oct_n.dds" ' not found in archives
+[Warning] File ' "textures/data/fo4cslod/cards/000531b3_oct_gsaos.dds" ' not found in archives
+[Warning] File ' "textures/e:/projects/nifskopewildwastelandedition/scratchpad/impostor16_20260923/bakes/n16_2k/cards/000531b3_oct_gsaos.dds" ' not found in archives
+[Warning] File ' "textures/data/fo4cslod/cards/000531b3_oct_g.dds" ' not found in archives
+[Warning] File ' "textures/e:/projects/nifskopewildwastelandedition/scratchpad/impostor16_20260923/bakes/n16_2k/cards/000531b3_oct_g.dds" ' not found in archives
+[Warning] setGeometry: Unable to set geometry 1100x1194+1960+71 (frame: 1116x1233+1952+40) on QWidgetWindow/"MainWindowWindow" on "S24D330". Resulting geometry: 1100x1126+1960+71 (frame: 1116x1165+1952+40) margins: 8, 31, 8, 8 minimum size: 857x120 MINMAXINFO(maxSize=POINT(x=0, y=0), maxpos=POINT(x=0, y=0), maxtrack=POINT(x=0, y=0), mintrack=POINT(x=873, y=159)))
+[Warning] QThreadStorage: entry 5 destroyed before end of thread 0x133154288e0
+[Warning] QThreadStorage: entry 4 destroyed before end of thread 0x133154288e0
+[Warning] QThreadStorage: entry 3 destroyed before end of thread 0x133154288e0
+[Warning] QThreadStorage: entry 2 destroyed before end of thread 0x133154288e0
+[Warning] QThreadStorage: entry 1 destroyed before end of thread 0x133154288e0

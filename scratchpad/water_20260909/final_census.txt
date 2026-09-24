@@ -1,0 +1,119 @@
+== INPUT ==
+  Commonwealth.lodl v2  cells -96..95 x -96..95 = 36864  spc 32  texel 128 units
+  worldspace default water height 450.0  type 00000018 ExtOceanWater (WRLD DNAM/NAM3/NAM4)
+  cells with Has Water 36864 of 36864 (100.00%)
+  cells inheriting the default water TYPE  36357 (98.62%)
+  cells inheriting the default water HEIGHT 36319 (98.52%)
+  distinct water heights 51   WATR forms interned 15
+  wet texels 21754958 of 37748736 (57.6%)
+  bridge merges accepted 215, refused (two painted types) 3
+
+== BODIES (rule D) ==
+  total 590
+    area >=      1 texels :  590
+    area >=      4 texels :  302
+    area >=     16 texels :  206
+    area >=     64 texels :   93
+    area >=    256 texels :   48
+    area >=   1024 texels :   19
+    area >=  65536 texels :    1
+  class: lake 458  river 131  sea 1
+  class (area >= 64): lake 52  river 40  sea 1
+  bodies assembled from more than one component: 102
+
+== PER WATR FORM ==
+  ExtOceanWater                bodies  405  texels  21594553
+  ExtMarshDarkWater            bodies   40  texels     44040
+  ExtMarshScumWater            bodies   53  texels     26410
+  ExtRiverCharlesUpper         bodies   13  texels     25214
+  ExtLakeForestWater           bodies    7  texels     23662
+  ExtLakeWater                 bodies   16  texels     12960
+  ExtCreekSanctuaryWater       bodies    3  texels     10666
+  ExtRiverNFoothillsWaterSE    bodies   13  texels      8426
+  ExtLakeQuannapowittWater     bodies    1  texels      3696
+  ExtMurkyWater                bodies   17  texels      1427
+  ExtLakeIrradiatedWater       bodies    3  texels      1400
+  ExtGlowingSeaWater01         bodies   12  texels      1203
+  ExtRiverNFoothillsWaterSW    bodies    1  texels       677
+  ExtPuddleWater               bodies    5  texels       373
+  ExtCreekSanctuaryWaterE      bodies    1  texels       251
+
+== FLOW RULE ==
+  all bodies : zero 309  stroke 252  drain 27  bed 2
+  area >= 64 : stroke 54  drain 26  zero 12  bed 1
+
+== THE BODIES A HUMAN MUST STROKE (area >= 64, flow = stroke) ==
+  id   edid                            area   height  aniso  bed_r bed_drop cells
+  282  ExtLakeForestWater             15427   1800.0   0.90  -0.12   -158.6 (-22..-17, -16..-8)
+  411  ExtLakeWater                    6147    750.0   0.91  +0.13     86.1 (-5..-3, 9..13)
+  447  ExtLakeQuannapowittWater        3696   1250.0   0.76  -0.20   -297.3 (0..2, 21..24)
+  193  ExtMarshScumWater               2771    450.0   0.76  -0.09     -7.6 (10..13, -24..-22)
+  428  ExtLakeWater                    2277    750.0   0.89  -0.41   -316.1 (1..2, 16..18)
+  320  ExtLakeWater                    2152    850.0   0.29  +0.05     55.1 (-9..-7, -7..-6)
+  194  ExtMarshScumWater                893    800.0   0.49  -0.25     -9.8 (7..8, -24..-23)
+  242  ExtLakeIrradiatedWater           722      0.0   0.88  -0.42    -38.1 (2..4, -21..-20)
+  449  ExtRiverNFoothillsWaterSW        677   1250.0   0.67  -0.27    -45.5 (2..3, 23..25)
+  144  ExtMarshDarkWater                674   1300.0   0.72  +0.10     32.4 (-9..-8, -30..-29)
+  40   ExtOceanWater                    600    450.0   0.53  +0.68    337.5 (-24..-24, -70..-70)
+  281  ExtLakeIrradiatedWater           433    450.0   0.82  +0.25     22.7 (0..0, -16..-15)
+  450  ExtLakeWater                     427   7550.0   0.81  -0.42    -40.4 (-27..-26, 23..23)
+  404  ExtMurkyWater                    410   4424.0   0.62  -0.18    -43.5 (-10..-10, 7..7)
+  432  ExtRiverNFoothillsWaterSE        347   8750.0   0.91  -0.27    -76.7 (-27..-26, 17..17)
+  453  ExtLakeForestWater               317   1212.0   0.88  +0.05      7.2 (12..13, 25..25)
+  163  ExtOceanWater                    313    450.0   0.61  +0.01      1.7 (7..8, -27..-27)
+  209  ExtMarshScumWater                294    800.0   0.45  -0.23     -9.9 (8..8, -23..-23)
+  254  ExtMarshScumWater                262    600.0   0.42  +0.09      7.8 (-2..-2, -19..-19)
+  429  ExtCreekSanctuaryWaterE          251   7000.0   0.98  -0.10     -6.8 (-22..-21, 16..16)
+  52   ExtOceanWater                    247    450.0   0.65  +0.02     19.1 (-2..-1, -68..-67)
+  197  ExtMarshScumWater                245    600.0   0.45  +0.00      0.1 (9..9, -24..-23)
+  301  ExtLakeIrradiatedWater           245   1800.0   0.64  -0.02     -1.8 (-17..-17, -14..-14)
+  452  ExtRiverNFoothillsWaterSE        233    450.0   0.94  -0.07     -4.8 (6..7, 24..25)
+  195  ExtMarshDarkWater                224    800.0   0.60  +0.06      3.5 (-4..-3, -24..-24)
+  380  ExtMurkyWater                    221    450.0   0.50  +0.63     77.5 (1..2, 2..3)
+  369  ExtPuddleWater                   218   1250.0   0.95  -0.33    -33.1 (-17..-16, 1..2)
+  138  ExtGlowingSeaWater01             209   5608.0   0.75  -0.09    -16.2 (-22..-22, -35..-35)
+  158  ExtMarshDarkWater                204   1300.0   0.87  -0.02     -1.0 (-5..-4, -28..-27)
+  275  ExtOceanWater                    198    450.0   0.91  -0.17    -18.2 (5..6, -17..-16)
+  151  ExtMarshDarkWater                190    800.0   0.94  -0.14     -6.1 (-1..-1, -28..-27)
+  142  ExtMarshDarkWater                184   1300.0   0.86  -0.39    -30.4 (-5..-5, -30..-30)
+  436  ExtMurkyWater                    182   4397.0   0.96  +0.10      2.7 (-11..-11, 18..18)
+  147  ExtGlowingSeaWater01             175  12470.0   0.73  +0.34     19.1 (-31..-31, -29..-28)
+  259  ExtOceanWater                    168    450.0   0.86  -0.35    -36.5 (6..7, -19..-18)
+  457  ExtRiverNFoothillsWaterSE        134   1165.0   0.88  +0.60    164.0 (17..17, 27..27)
+  227  ExtMarshScumWater                123    450.0   0.70  -0.46     -8.5 (0..0, -22..-21)
+  223  ExtMarshScumWater                115    600.0   0.28  -0.11     -6.0 (3..3, -22..-22)
+  146  ExtMarshDarkWater                108   1300.0   0.70  -0.33    -36.7 (-6..-6, -29..-29)
+  384  ExtMurkyWater                    108    450.0   0.95  +0.22     30.5 (0..1, 2..3)
+  53   ExtOceanWater                    103    450.0   0.97  +0.07     61.4 (43..44, -68..-68)
+  460  ExtRiverNFoothillsWaterSE        100   9545.0   0.66  +0.04      5.5 (-16..-16, 27..27)
+  425  ExtPuddleWater                    99   4235.0   0.87  -0.31    -23.3 (-12..-12, 13..13)
+  187  ExtOceanWater                     92    450.0   0.88  +0.14      5.5 (11..11, -25..-25)
+  172  ExtMarshDarkWater                 87    600.0   0.32  +0.05      3.8 (4..5, -27..-27)
+  246  ExtGlowingSeaWater01              86   4270.0   0.82  +0.03      1.8 (-23..-22, -20..-20)
+  371  ExtMurkyWater                     80    450.0   0.53  +0.27     39.7 (10..10, 1..1)
+  208  ExtMarshScumWater                 78    450.0   0.90  +0.54     20.0 (12..13, -23..-23)
+  168  ExtOceanWater                     76    450.0   0.75  +0.53     18.0 (32..32, -27..-27)
+  264  ExtRiverCharlesUpper              74   1300.0   0.82  +0.44     22.6 (-7..-6, -18..-18)
+  170  ExtOceanWater                     68    450.0   0.83  -0.24    -17.8 (7..7, -27..-27)
+  82   ExtOceanWater                     67    450.0   0.99  -0.12    -13.8 (52..52, -65..-65)
+  316  ExtLakeForestWater                67   1800.0   0.58  -0.13    -13.9 (-20..-20, -9..-9)
+  51   ExtOceanWater                     65    450.0   0.56  +0.34     59.7 (-2..-2, -68..-68)
+
+== THE 20 BIGGEST BODIES ==
+  id   edid                       class       area   height parts  elong  aniso   depth flow    cells
+  1    ExtOceanWater              sea     21585117    450.0     1    1.8   0.05   907.9 zero    (-96..95, -96..95)
+  136  ExtMarshDarkWater          river      29305   1300.0     2    9.5   0.90   295.0 drain   (-9..2, -38..-22)
+  233  ExtRiverCharlesUpper       river      25112   1300.0     9   13.2   0.98   312.5 drain   (-16..-6, -21..-4)
+  282  ExtLakeForestWater         lake       15427   1800.0     3    4.2   0.90   499.6 stroke  (-22..-17, -16..-8)
+  177  ExtMarshScumWater          river      14592    450.0     9    6.0   0.75    33.5 drain   (-3..5, -26..-17)
+  434  ExtCreekSanctuaryWater     river      10664   7250.0     3    6.8   0.91   246.3 drain   (-23..-15, 17..24)
+  149  ExtMarshDarkWater          river       7586    800.0     3    5.4   0.91    22.9 drain   (-3..2, -29..-23)
+  419  ExtLakeForestWater         river       7466   5490.0     1    3.0   0.68   582.9 drain   (-24..-20, 11..14)
+  411  ExtLakeWater               lake        6147    750.0     3    4.0   0.91   264.7 stroke  (-5..-3, 9..13)
+  454  ExtRiverNFoothillsWaterSE  river       4657   2400.0     2   17.8   0.95   139.3 drain   (-4..4, 26..28)
+  162  ExtMarshScumWater          river       4248    600.0     5    6.0   0.85    61.7 drain   (6..10, -27..-24)
+  447  ExtLakeQuannapowittWater   lake        3696   1250.0     1    2.6   0.76   489.4 stroke  (0..2, 21..24)
+  193  ExtMarshScumWater          lake        2771    450.0     4    4.0   0.76    27.0 stroke  (10..13, -24..-22)
+  305  ExtOceanWater              lake        2735    450.0     3    1.5   0.33   214.6 zero    (9..11, -14..-12)
+  428  ExtLakeWater               lake        2277    750.0     1    3.6   0.89   272.6 stroke  (1..2, 16..18)
+  458  ExtRiverNFoothillsWaterSE  river       2277  10000.0     1    5.6   0.

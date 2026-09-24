@@ -1,0 +1,18 @@
+ok   A0 a cosine of known amplitude reads its own amplitude worst error 2.8% over 9 cases; e.g. x A=1->1.03  y A=1->1.03  xy A=1->1.00
+ok   A1 smooth field has no repeat at 10.667              visibility 0.00007   null floor 1.88422
+ok   A2 injected repeat: visibility rises with amplitude  0.5:0.514  1.0:1.028  2.0:2.057  4.0:4.113  8.0:8.226
+ok   A3 the instrument DETECTS an injected repeat         first amplitude above its own floor: 2.0 of 255 (field SD 20.0)
+ok   A4 notching the repeat out kills the reading         with 4.1132 (floor 1.8842) -> notched 0.0001 (floor 1.8842)
+ok   A5 THE PHASE TWIN IS NOT A FLOOR FOR THIS STATISTIC  subject 4.113   twin 4.113   = 100% of it. The twin keeps the amplitude spectrum, so it keeps the repeat.
+ok   B1 a 1-texel linear ramp reads 0.8x its width        expected 1.00 (0.8w, floored at the instrument`s 1-texel resolution)   measured p50 2.00 over 3382 edges
+ok   B2 a 2-texel linear ramp reads 0.8x its width        expected 1.60 (0.8w, floored at the instrument`s 1-texel resolution)   measured p50 2.00 over 3399 edges
+ok   B3 a 4-texel linear ramp reads 0.8x its width        expected 3.20 (0.8w, floored at the instrument`s 1-texel resolution)   measured p50 3.50 over 5060 edges
+ok   B4 a 8-texel linear ramp reads 0.8x its width        expected 6.40 (0.8w, floored at the instrument`s 1-texel resolution)   measured p50 6.50 over 6000 edges
+ok   B5 a HARD step reads at or under one texel           p50 1.00 over 347 edges
+ok   B6 quadrant-hit chance baseline is right             random texels 374 of 4000 = 0.093   chance 0.092
+ok   B7 and it sees a border-locked set                   4000 of 4000 on a quadrant border, chance 0.092
+ok   C1 a sheet against itself has zero spectrum distance 0.00e+00
+ok   C2 blur raises the spectrum distance, monotonically  r1:3.395  r2:5.482  r3:6.972
+ok   C3 local variance reads white noise at its ANALYTIC value SD 6 noise must add sigma^2*8/9 = 32.0; measured 32.14 (smooth 4.88 -> 37.03)
+
+16 checks, 0 failures -- PASS

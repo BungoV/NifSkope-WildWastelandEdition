@@ -1,0 +1,14 @@
+impostor_draw gate  2026-09-23 00:28:00
+root /e/Projects/NifskopeWildWastelandEdition
+PASS  0 python is '/c/Users/bungo/AppData/Local/Programs/Python/Python39/python'
+PASS  1 reference selftest (11 property families, grids 2 3 4 5 8 12 16)
+PASS  2 src/impostoroct.cpp compiles standalone (-Wall -Wextra -Werror, no Qt, no GL)
+PASS  3 N=2  C++ mapping == Python reference (20 probe directions)
+PASS  3 N=3  C++ mapping == Python reference (20 probe directions)
+PASS  3 N=4  C++ mapping == Python reference (20 probe directions)
+PASS  3 N=5  C++ mapping == Python reference (20 probe directions)
+PASS  3 N=8  C++ mapping == Python reference (20 probe directions)
+PASS  3 N=12  C++ mapping == Python reference (20 probe directions)
+PASS  3 N=16  C++ mapping == Python reference (20 probe directions)
+FAIL  4 IMPOSTOR_LODM is not set to a baked <id>_oct.lodm -- REFUSED rather than passing with no subject
+done  11 steps, 1 failures

@@ -1,0 +1,5 @@
+  n8_2k_bc7 bc7_blend0 rc=0 cards=120 25s orbit light: world-fixed, declination 45.0 planar 45.0 (WW_IMPOSTOR_LIGHT) orbit iou mean 0.8142 orbit counted 120 of 120 
+  n8_2k_bc7 bc7_crisp rc=0 cards=120 18s orbit light: world-fixed, declination 45.0 planar 45.0 (WW_IMPOSTOR_LIGHT) orbit iou mean 0.8654 orbit counted 120 of 120 
+  n8_2k_bc7 bc7_smooth rc=0 cards=120 18s orbit light: world-fixed, declination 45.0 planar 45.0 (WW_IMPOSTOR_LIGHT) orbit iou mean 0.8710 orbit counted 120 of 120 
+  n8_2k rung_shipped rc=0 cards=120 26s orbit light: world-fixed, declination 45.0 planar 45.0 (WW_IMPOSTOR_LIGHT) orbit iou mean 0.8378 orbit counted 120 of 120 
+PICS-DONE

@@ -1,0 +1,5 @@
+level dim 2 content 512, 2048 texels a side, 16.0 world units a texel
+on vs off angle: mean 16.03 deg, median 14.68, p95 32.75, max 113.4; share > 5 deg 91.9%, > 15 deg 48.5%
+ON  vs his sheets: r east 0.9388, r north 0.8358, mean angle 8.78 deg
+OFF vs his sheets: r east 0.5756, r north 0.6326, mean angle 17.48 deg
+mean slope from vertical: ON 20.97 deg, OFF 12.54 deg, his 22.60 deg

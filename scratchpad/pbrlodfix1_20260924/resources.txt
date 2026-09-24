@@ -1,0 +1,19 @@
+fixtures written under C:/Users/bungo/AppData/Local/Temp/tmp.keuYaELT5H
+  modA sha1 70e79c0362f9638db3ab0a8044e5f89ae614e401
+  modB sha1 c5aac7128249a9cbd278c8cb576eb79f5ad94f72
+  modA then modB -> C:/Users/bungo/AppData/Local/Temp/tmp.keuYaELT5H/modB|loose|c5aac7128249a9cbd278c8cb576eb79f5ad94f72|yes
+  modB then modA -> C:/Users/bungo/AppData/Local/Temp/tmp.keuYaELT5H/modA|loose|70e79c0362f9638db3ab0a8044e5f89ae614e401|yes
+  ok   a. the LAST resource in the order wins, both ways round
+  archive Fallout4 - Textures1.ba2, path textures/actors/assaultron/assaultronarms_d.dds
+  with the archive: found=yes kind=archive; without it: exit 1
+  ok   b. an archive entry resolves a path only that archive has, and nothing does without it
+  loose sha1 0abdd5b2929d51b8096735b731c7d18ba219ee72
+  archive last : kind: loose sha1: 0abdd5b2929d51b8096735b731c7d18ba219ee72 
+  archive first: kind: loose sha1: 0abdd5b2929d51b8096735b731c7d18ba219ee72 
+  ok   c. a loose file beats the same path inside an archive, in either order
+  plugins: 2
+  plugin 0: C:/Users/bungo/AppData/Local/Temp/tmp.keuYaELT5H/data/Fallout4.esm
+  plugin 1: C:/Users/bungo/AppData/Local/Temp/tmp.keuYaELT5H/data/Test.esp
+  ok   d. plugins.txt yields the enabled plugins in load order and drops the unstarred one
+4 checks, 0 failures
+RESULT PASS

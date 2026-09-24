@@ -1,0 +1,137 @@
+=== 2a  ROAD bases carrying bit 15 (Has Distant LOD): 83 of 470
+   HWOnRampCol01                      Landscape\Roads\HighwayOverpass\HWOnRampCol01.nif       60  MNAM=\HighwayOverpass\HWOnRampCol01_LOD_0.nif
+   HWSingleChunkLarge02               Landscape\Roads\HighwayOverpass\HWSingleChunkLarge02    34  MNAM=yOverpass\HWSingleChunkLarge02_LOD_0.nif
+   HWDoubleChunkLargeTop03            Landscape\Roads\HighwayOverpass\HWDoubleChunkLargeTo    22  MNAM=erpass\HWDoubleChunkLargeTop03_LOD_0.nif
+   HWSingleChunkLarge01               Landscape\Roads\HighwayOverpass\HWSingleChunkLarge01    22  MNAM=yOverpass\HWSingleChunkLarge01_LOD_0.nif
+   HWOnRampEndCap01                   Landscape\Roads\HighwayOverpass\HWOnRampEndCap01.nif    21  MNAM=ghwayOverpass\HWOnRampEndCap01_LOD_0.nif
+   HWDoubleEndCapL03                  Landscape\Roads\HighwayOverpass\HWDoubleEndCapL03.ni    18  MNAM=hwayOverpass\HWDoubleEndCapL03_LOD_0.nif
+   SWFullParkCurve01_HasLOD           Landscape\Sidewalks\Park\SWFullParkCurve01.nif          18  MNAM=dewalks\Park\SWFullParkCurve01_LOD_0.nif
+   HWDoubleEndCapR01                  Landscape\Roads\HighwayOverpass\HWDoubleEndCapR01.ni    16  MNAM=hwayOverpass\HWDoubleEndCapR01_LOD_0.nif
+   HWDoubleCurveL01                   Landscape\Roads\HighwayOverpass\HWDoubleCurveL01.nif    16  MNAM=ghwayOverpass\HWDoubleCurveL01_LOD_0.nif
+   HWOnRampCurveFree02                Landscape\Roads\HighwayOverpass\HWOnRampCurveFree02.    15  MNAM=ayOverpass\HWOnRampCurveFree02_LOD_0.nif
+   HWDoubleEndCapR02                  Landscape\Roads\HighwayOverpass\HWDoubleEndCapR02.ni    14  MNAM=hwayOverpass\HWDoubleEndCapR02_LOD_0.nif
+   HWDoubleEndCapL01                  Landscape\Roads\HighwayOverpass\HWDoubleEndCapL01.ni    12  MNAM=hwayOverpass\HWDoubleEndCapL01_LOD_0.nif
+   HWDoubleStr01                      Landscape\Roads\HighwayOverpass\HWDoubleStr01.nif       12  MNAM=\HighwayOverpass\HWDoubleStr01_LOD_0.nif
+   HWDoubleStr02                      Landscape\Roads\HighwayOverpass\HWDoubleStr02.nif       12  MNAM=\HighwayOverpass\HWDoubleStr02_LOD_0.nif
+   HWOnRampEndCapRampDownL01          Landscape\Roads\HighwayOverpass\HWOnRampEndCapRampDo    12  MNAM=pass\HWOnRampEndCapRampDownL01_LOD_0.nif
+   RoadStrBridgeEnd01                 Landscape\Roads\Bridge\RoadStrBridgeEnd01.nif           10  MNAM=oads\Bridge\RoadStrBridgeEnd01_LOD_0.nif
+   HWSingleEndCap02                   Landscape\Roads\HighwayOverpass\HWSingleEndCap02.nif    10  MNAM=ghwayOverpass\HWSingleEndCap02_LOD_0.nif
+   HWSingleEndCap03                   Landscape\Roads\HighwayOverpass\HWSingleEndCap03.nif    10  MNAM=ghwayOverpass\HWSingleEndCap03_LOD_0.nif
+   HWDoubleTransRampDown01            Landscape\Roads\HighwayOverpass\HWDoubleTransRampDow    10  MNAM=erpass\HWDoubleTransRampDown01_LOD_0.nif
+   HWDoubleChunkLargeTop02            Landscape\Roads\HighwayOverpass\HWDoubleChunkLargeTo    10  MNAM=erpass\HWDoubleChunkLargeTop02_LOD_0.nif
+   HWOnRampCurveFree01                Landscape\Roads\HighwayOverpass\HWOnRampCurveFree01.     9  MNAM=ayOverpass\HWOnRampCurveFree01_LOD_0.nif
+   HWDoubleRamp01Free01               Landscape\Roads\HighwayOverpass\HWDoubleRamp01Free01     9  MNAM=yOverpass\HWDoubleRamp01Free01_LOD_0.nif
+   RoadStrBridgeEnd02                 Landscape\Roads\Bridge\RoadStrBridgeEnd02.nif            8  MNAM=oads\Bridge\RoadStrBridgeEnd02_LOD_0.nif
+   HWOnRampEndCapRampDownR01          Landscape\Roads\HighwayOverpass\HWOnRampEndCapRampDo     8  MNAM=pass\HWOnRampEndCapRampDownR01_LOD_0.nif
+   HWDoubleChunkBoth01                Landscape\Roads\HighwayOverpass\HWDoubleChunkBoth01.     8  MNAM=ayOverpass\HWDoubleChunkBoth01_LOD_0.nif
+   HWDoubleCurveR02                   Landscape\Roads\HighwayOverpass\HWDoubleCurveR02.nif     8  MNAM=ghwayOverpass\HWDoubleCurveR02_LOD_0.nif
+   HWSingleRampDown01                 Landscape\Roads\HighwayOverpass\HWSingleRampDown01.n     8  MNAM=wayOverpass\HWSingleRampDown01_LOD_0.nif
+   HWOnRampEndCapCurveL01             Landscape\Roads\HighwayOverpass\HWOnRampEndCapCurveL     8  MNAM=verpass\HWOnRampEndCapCurveL01_LOD_0.nif
+   HWDoubleEndCapL02                  Landscape\Roads\HighwayOverpass\HWDoubleEndCapL02.ni     7  MNAM=hwayOverpass\HWDoubleEndCapL02_LOD_0.nif
+   HWOnRampEndCapCurveR01             Landscape\Roads\HighwayOverpass\HWOnRampEndCapCurveR     7  MNAM=verpass\HWOnRampEndCapCurveR01_LOD_0.nif
+   HWOnRampCurveL01End01              Landscape\Roads\HighwayOverpass\HWOnRampCurveL01End0     7  MNAM=Overpass\HWOnRampCurveL01End01_LOD_0.nif
+   HWSingleStr02Free                  Landscape\Roads\HighwayOverpass\HWSingleStr02Free.ni     6  MNAM=hwayOverpass\HWSingleStr02Free_LOD_0.nif
+   HWOnRampStrFree01                  Landscape\Roads\HighwayOverpass\HWOnRampStrFree01.ni     6  MNAM=hwayOverpass\HWOnRampStrFree01_LOD_0.nif
+   HWDoubleStrExit01                  Landscape\Roads\HighwayOverpass\HWDoubleStrExit01.ni     6  MNAM=hwayOverpass\HWDoubleStrExit01_LOD_0.nif
+   SWParkStr02_HasLOD                 Landscape\Sidewalks\Park\SWParkStr02.nif                 6  MNAM=ape\Sidewalks\Park\SWParkStr02_LOD_0.nif
+   RoadStrBridgeMidEnd01              Landscape\Roads\Bridge\RoadStrBridgeMidEnd01.nif         5  MNAM=s\Bridge\RoadStrBridgeMidEnd01_LOD_0.nif
+   RoadStrBridgeMidEnd02              Landscape\Roads\Bridge\RoadStrBridgeMidEnd02.nif         5  MNAM=s\Bridge\RoadStrBridgeMidEnd02_LOD_0.nif
+   RoadStrBridgeMid02                 Landscape\Roads\Bridge\RoadStrBridgeMid02.nif            5  MNAM=oads\Bridge\RoadStrBridgeMid02_LOD_0.nif
+   HWSingleCurveR01                   Landscape\Roads\HighwayOverpass\HWSingleCurveR01.nif     5  MNAM=ghwayOverpass\HWSingleCurveR01_LOD_0.nif
+   HWSingleCurveL01                   Landscape\Roads\HighwayOverpass\HWSingleCurveL01.nif     5  MNAM=ghwayOverpass\HWSingleCurveL01_LOD_0.nif
+
+    the same, NOT carrying it, top 12 by placements:
+   SWEndCap01b                        Landscape\Sidewalks\SWEndCap01b.nif                    962
+   SWEndCap01a                        Landscape\Sidewalks\SWEndCap01a.nif                    954
+   RoadChunk04                        Landscape\Roads\RoadAChunk04.nif                       696
+   RuralRoadEnd02                     Landscape\Roads\Country\RoadASkirtEnd02.nif            586
+   RoadChunk02                        Landscape\Roads\RoadAChunk02.nif                       585
+   RoadChunk03                        Landscape\Roads\RoadAChunk03.nif                       576
+   RoadChunk01                        Landscape\Roads\RoadAChunk01.nif                       534
+   RoadChunk05                        Landscape\Roads\RoadAChunk05.nif                       477
+   SWCurb1x1Cor01                     Landscape\Sidewalks\SWCurb1x1Cor01.nif                 475
+   RoadChunk06                        Landscape\Roads\RoadAChunk06.nif                       450
+   SWCurb2x1Str01                     Landscape\Sidewalks\SWCurb2x1Str01.nif                 424
+   SWflat2x4_01                       Landscape\Sidewalks\SWflat2x4_01.nif                   422
+
+=== 2b  NON-road bases carrying bit 15: 2927 bases, 164512 placements
+    by model folder (top 30 by placements):
+      architecture/buildings                    1417 bases    67831 placements
+      landscape/trees                             36 bases    64700 placements
+      interiors/industrial                       288 bases     8167 placements
+      architecture/warehouse                     167 bases     4206 placements
+      architecture/shacks                         74 bases     3825 placements
+      landscape/rocks                             22 bases     3450 placements
+      architecture/parkinggarage                  33 bases     2142 placements
+      architecture/quarry                        122 bases     1410 placements
+      landscape/pier                              29 bases     1187 placements
+      architecture/unique                        103 bases     1122 placements
+      setdressing/signage                         43 bases     1071 placements
+      setdressing/greebs                          25 bases     1047 placements
+      landscape/retainingwall                     54 bases      849 placements
+      architecture/residential                    26 bases      675 placements
+      interiors/building                           5 bases      624 placements
+      setdressing/habitat                          2 bases      587 placements
+      landscape/coastcliffs                        2 bases      367 placements
+      lod/neighborhoods                          310 bases      310 placements
+      setdressing/boats                           15 bases      215 placements
+      architecture/diamondcity                    59 bases      170 placements
+      setdressing/machinekit                       4 bases      109 placements
+      setdressing/streetlamps                      1 bases       87 placements
+      architecture/covenantsettlement             13 bases       75 placements
+      setdressing/vehicles                        10 bases       62 placements
+      architecture/skybridge                       7 bases       49 placements
+      landscape/rrtracks                           4 bases       40 placements
+      setdressing/electricaltower                  2 bases       35 placements
+      architecture/satellite                       3 bases       20 placements
+      architecture/dam                             8 bases       17 placements
+      architecture/airport                        12 bases       14 placements
+
+    top 25 individual bases by placements:
+      TreeMapleForest3                       Landscape\Trees\TreeMapleForest3.nif            12681
+      TreeMapleForest2                       Landscape\Trees\TreeMapleForest2.nif             5647
+      TreeMapleForest1                       Landscape\Trees\TreeMapleForest1.nif             5501
+      DecoMainA1x1Wall01                     Architecture\Buildings\DecoKit\DecoMainA1x1Wal   5162
+      TreeBlasted02                          Landscape\Trees\TreeBlasted02.nif                3983
+      DecoRoof1x1Str01                       Architecture\Buildings\DecoKit\DecoRoof1x1Str0   3876
+      TreeMapleblasted05                     Landscape\Trees\TreeMapleblasted05.nif           3490
+      TreeMapleblasted04                     Landscape\Trees\TreeMapleblasted04.nif           2859
+      TreeMapleForest7                       Landscape\Trees\TreeMapleForest7.nif             2319
+      TreeBlasted01                          Landscape\Trees\TreeBlasted01.nif                2221
+      TreeBlastedForestBurntUpright02        Landscape\Trees\BlastedForestBurntTreeUpright0   2195
+      TreeElmForest02Static                  Landscape\Trees\TreeElmForest02.nif              2143
+      TreeBlastedForestBurntUpright03        Landscape\Trees\BlastedForestBurntTreeUpright0   2132
+      TreeBlasted05                          Landscape\Trees\TreeBlasted05.nif                2088
+      TreeMapleblasted01                     Landscape\Trees\TreeMapleblasted01.nif           1916
+      TreeBlastedForestBurntUpright01        Landscape\Trees\BlastedForestBurntTreeUpright0   1895
+      TreeMapleblasted07                     Landscape\Trees\TreeMapleblasted07.nif           1800
+      TreeMapleblasted02                     Landscape\Trees\TreeMapleblasted02.nif           1700
+      TreeGS01                               Landscape\Trees\TreeGS01.nif                     1512
+      DecoMainA1x1Win07                      Architecture\Buildings\DecoKit\DecoMainA1x1Win   1507
+      TreeElmForest01Static                  Landscape\Trees\TreeElmForest01.nif              1490
+      TreeGS02                               Landscape\Trees\TreeGS02.nif                     1464
+      DecoMainA1x1Wall01Full01               Architecture\Buildings\DecoKit\DecoMainA1x1Wal   1254
+      NCA1x1Wall01                           Architecture\Buildings\NeoClassical\NCA1x1Wall   1096
+      DecoMainA1x1Wall01Half01               Architecture\Buildings\DecoKit\DecoMainA1x1Wal   1076
+
+=== 2c  the road models ROADS1 projected into chunk (-20,20), flags
+    71 of the 71 window road models found in the census; 1 have ANY header flag set at all
+      Road1Way01                               flags 0x40000000 ['NavMesh - Ground']
+
+=== 4  tree flags against lodgenIsTreeModel()
+    bases the heuristic calls a tree: 139 (164005 placements)
+    bases it does not:                10801 (638190 placements)
+    bit 6  Has Tree LOD       tree-set   0.0% (0/139)   non-tree   0.0% (0/10801)
+    bit 15 Has Distant LOD    tree-set  25.9% (36/139)   non-tree  27.5% (2974/10801)
+    placed TREE-signature bases: 0
+       bit 6  on TREE records: 0/0
+       bit 15 on TREE records: 0/0
+    tree-set model folders (top 15 by bases):
+      landscape/trees                          133
+      landscape/plants                         2
+      setdressing/treeswing_ropepile01.nif     1
+      setdressing/treenoose01_branch.nif       1
+      setdressing/treeswing_grounded01.nif     1
+      setdressing/treeswing03_noswing.nif      1
+    tree-set members NOT under a */trees folder: 3
+      Fern01                                 L

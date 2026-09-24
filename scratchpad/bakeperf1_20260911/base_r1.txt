@@ -1,0 +1,7 @@
+﻿RUN exe=E:\Projects\NifskopeWildWastelandEdition\release\NifSkope.before_bakeperf1.exe region=-20 24 -9 35 threads=0
+RC=0
+WALL_MS=15317
+PEAK_WS_BYTES=1598242816
+PEAK_WS_MB=1524.2
+STAGES stage times: landscape 0.0 s, meshes 8.3 s, textures 5.2 s, impostors 0.0 s
+FILES=60

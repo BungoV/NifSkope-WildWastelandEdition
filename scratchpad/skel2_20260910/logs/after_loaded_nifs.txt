@@ -1,0 +1,191 @@
+seeded: the Block List starts in hierarchy mode (was 'hierarchy')
+fixture: loose Data/meshes tree with primary, secondary, and browser NIFs
+primary: primary.nif, adding: secondary.nif
+  ok   a NIF can be added to Loaded NIFs from a path
+  ok   the NIF Browser uses one compact header row
+  ok   the compact header controls are icon tools with tooltips
+  ok   the compact NIF Browser renders
+  ok   both panes expose the two-way copy-drag contract
+  ok   a Loaded NIF row is draggable
+  ok   the top selector orders Header, Blocks and NIFs without remapping modes
+  FAIL the three editor modes are equal-width joined segments
+  ok   the active editor segment uses selection blue
+  ok   each reordered selector button opens its named stable mode
+  ok   NIF Browser is above Loaded NIFs in its own mode
+  ok   all three left-editor modes render
+  ok   inactive left-editor pages cannot paint through
+  ok   advanced Block List search groups every filter in one menu
+  ok   Block List columns are labelled for what this view displays
+  ok   Block List columns can fold, with a floor the glyph strip fits in
+  ok   Match all terms excludes blocks whose terms are split across rows
+  ok   Match any term includes each row containing either term
+  ok   Search In scopes narrow the actual fields inspected
+  ok   Reset Search and Filters restores the complete default search
+  ok   breadcrumb ancestors are live navigation targets
+  ok   the selected Block List body renders with its live breadcrumb
+  ok   an empty search explains the blank Block List and reports zero shown
+  ok   clearing search removes the empty explanation and fixes count grammar
+  ok   Block Details uses one compact search, pin and overflow toolbar
+  ok   Block Details columns retain user widths but can fold narrow
+  ok   a valid Header index is still no Block Details selection
+  ok   the no-selection Block Details state renders
+  ok   the selected Block Details state renders
+  ok   an empty field search explains itself without replacing the block
+  ok   the no-match Block Details state renders
+  ok   clearing field search restores the live Details rows
+  ok   Header mode identifies the source and its three version values
+  ok   Header mode uses one compact searchable action strip
+  ok   Header columns retain user widths but can fold narrow
+  ok   the Header inspector overview renders
+  ok   Header search finds nested technical fields and keeps their path
+  ok   an empty Header search explains itself without replacing the file
+  ok   the no-match Header state renders
+  ok   clearing Header search restores the live Header rows
+  ok   Copy Header Summary includes identity and NIF version
+  ok   advanced Block List search menu renders
+  ok   Loaded NIFs has its own search field
+  ok   Loaded NIFs exposes an as-needed vertical scrollbar
+  ok   Loaded NIFs reports total workspace membership and explains its glyphs
+  ok   the NIF workspace splitter cannot collapse either pane
+  ok   the NIF workspace splitter has a grabbable explained handle
+  ok   resizing the NIF workspace keeps both viewports reachable
+  ok   the populated NIF workspace renders
+  ok   switching modes preserves every Loaded NIF and its live model
+  ok   Blocks and Header remain accessible after returning from NIF mode
+  ok   refreshing available NIFs preserves every exact Loaded document
+  ok   Loaded NIF search finds the named row and reports shown/total
+  ok   an empty Loaded search explains itself without remapping its row
+  ok   the no-match Loaded workspace renders
+  ok   clearing Loaded NIF search restores every row and its identity
+  ok   many Loaded NIFs produce a working vertical scroll range
+  ok   clicking the skeleton mark toggles it
+  ok   ...and clicking the skeleton mark never selects its row
+  ok   ...and clicking the skeleton mark again puts it back
+  ok   ...and dragging off the skeleton mark toggles nothing
+  ok   ...and dragging off the skeleton mark selects nothing either
+  ok   clicking the weapon mark toggles it
+  ok   ...and clicking the weapon mark never selects its row
+  ok   ...and clicking the weapon mark again puts it back
+  ok   ...and dragging off the weapon mark toggles nothing
+  ok   ...and dragging off the weapon mark selects nothing either
+  ok   clicking the pose-follow mark toggles it
+  ok   ...and clicking the pose-follow mark never selects its row
+  ok   ...and clicking the pose-follow mark again puts it back
+  ok   ...and dragging off the pose-follow mark toggles nothing
+  ok   ...and dragging off the pose-follow mark selects nothing either
+  ok   clicking the eye toggles it
+  ok   ...and clicking the eye never selects its row
+  ok   ...and clicking the eye again puts it back
+  ok   ...and dragging off the eye toggles nothing
+  ok   ...and dragging off the eye selects nothing either
+  ok   clicking the see-through disc toggles it
+  ok   ...and clicking the see-through disc never selects its row
+  ok   ...and clicking the see-through disc again puts it back
+  ok   ...and dragging off the see-through disc toggles nothing
+  ok   ...and dragging off the see-through disc selects nothing either
+  ok   the row strip renders with every mark lit
+  E:/Projects/NifskopeWildWastelandEdition/release/ww_loadednifs_toggles.png
+  ok   the mark icon sheet renders
+  E:/Projects/NifskopeWildWastelandEdition/release/ww_icon_sheet.png
+  ok   the list holds the primary row and a second document
+  ok   every Loaded NIF row paints an arrow in its gutter
+  ok   ...the primary's in the accent, every other in the panel's text ink
+  ok   ...and none of them is the platform's black triangle
+  ok   the primary row paints all five toggle glyphs
+  ok   ...its ROLE marks in the disabled ink, which is not the enabled OFF ink
+  ok   ...and its lit EYE in the same accent a live row's wears
+  ok   pressing the primary's role marks and its own arrow moves no state
+  ok   ...and repaints the row not one pixel differently
+  ok   ...and never selects the row it refused to act on
+  ok   ...and offers no cursor feedback over the dead glyphs
+framebuffer vs the empty frame: primary 38610, loaded 6199, both 38610
+  ok   the primary draws geometry, and its eye takes it back out
+  ok   ...while a loaded document goes on drawing without it
+  ok   ...and hiding both leaves a frame with no document in it
+three-way vs hidden: solid 38610, ghost 38610, solid vs ghost 38008
+  ok   solid, see-through and hidden are three different pictures
+  ok   ...the see-through one is the X-ray blend, not an empty frame
+  ok   ...and both toggles come back the way they went
+  ok   the Block List still works on a hidden primary
+  ok   the primary's eye toggles on a click
+  ok   ...and clicking it never selects the primary row
+  ok   ...and clicking it again puts it back
+  ok   ...and sliding off it cancels, silently
+  ok   the primary's see-through disc toggles on a click
+  ok   ...and clicking it never selects the primary row
+  ok   ...and clicking it again puts it back
+  ok   ...and sliding off it cancels, silently
+  ok   a live row's arrow offers to make it primary
+  ok   ...its skull, pistol and bone say what marking them would do
+  ok   ...and its eye and disc report the state they are in
+  ok   the primary's arrow says it is the primary, not that it can become one
+  ok   ...its INERT marks explain why they are inert, one sentence each
+  ok   ...and its LIVE eye and disc say exactly what a live row's say
+  ok   hiding the primary changes what its eye says
+  ok   ...and its disc admits the setting is waiting rather than applied
+  ok   marking the skeleton changes what its skull says
+  FAIL the rule, the empty marker slot and the name explain nothing
+  FAIL a hover over a glyph shows one, and a hover over the name does not
+  ok   the Block List's eye and disc say exactly what the strip's do
+  tooltips — primary row | live row
+    arrow : The primary document — the one being edited | Make this the primary document
+    face  :  | 
+    skull : The primary is the skeleton unless another row is marked | Use as the skeleton for Loaded files — only one at a time
+    pistol: Weapon parts merge onto a target, so this does not apply here | Use as a weapon part, to merge onto a target's WEAPON bone
+    bone  : The primary is what the others follow, so this does not apply here | Follow the skeleton's pose
+    eye   : Visible — click to hide | Visible — click to hide
+    disc  : Solid — click to draw it see-through (X-ray) | Solid — click to draw it see-through (X-ray)
+  ok   the primary row renders
+  E:/Projects/NifskopeWildWastelandEdition/release/ww_loadednifs_primary_row.png
+  ok   the skeleton and face-donor menu actions use their row icons
+  ok   the data-only row menu has no duplicate Close action
+  ok   rigging actions precede workspace display actions
+  ok   independent windows own independent Loaded NIF lists
+  ok   the same path in two workspaces is two distinct live models
+  ok   a browser NIF is draggable and its folder is not
+  ok   browser -> Loaded NIFs adds the exact dragged file
+  ok   dropping the same browser NIF twice does not duplicate it
+  ok   a folder cannot be favorited
+  ok   favoriting stores a stable ID and marks the row with a star
+  ok   favorites live in the configured NifSkope Library
+  ok   the star button finds only favorite NIFs and keeps their folders
+  ok   favorites-only composes with search as AND
+  ok   a full browser rebuild restores the favorite star
+  ok   Loaded NIFs -> browser writes the dragged in-memory NIF
+  ok   ...beside the binary, never in the machine's temp
+  ok   Save As retains the row and clears its unsaved state
+  ok   removing the only unsaved copy warns and Cancel keeps it
+  ok   Reload warns about unsaved work and Cancel preserves it
+  ok   reloading the primary preserves every Loaded NIF
+  ok   a freshly opened NIF is not marked modified
+  ok   ...and it has a Scene
+scene builds: 3 -> 3 across ghosting
+  ok   GHOSTING KEEPS ITS SCENE, so meshes posed against it do not move
+  ok   a row can be marked unsaved, so saving it can be seen to help
+saved row to E:/Projects/NifskopeWildWastelandEdition/release/ww_loadednifs_saved.nif: 1350 bytes
+  ok   Save As writes the file
+  ok   ...into release/, not the machine's temp
+  ok   ...and the row stops being unsaved
+  ok   ...and it now knows where it lives
+generate with no donor marked: "No face donor is marked. Right-click the vanilla head's _fac"
+  ok   generating faceBones with no donor marked is refused, with a reason
+  ok   a row can be marked as the face donor
+generate from the donor itself: "That row IS the marked face donor. Pick the base head instea"
+  ok   ...and generating from the donor ITSELF is refused
+opened ww_loadednifs_saved.nif here: 2 row(s) -> 2 [ww_browser_dragged.nif, primary.nif]
+  ok   opening a row in this window is a swap, not a loss
+  ok   Make Primary reloads only the scene, never the NifSkope window or its UI
+  ok   ...and skeleton/face-donor roles follow the promoted mesh
+  ok   ...the row that was opened has left the list
+  ok   ...and the document it displaced is in the list
+  ok   a promotable row and a primary row are both in the list
+  ok   clicking a row's arrow makes that document the primary
+  ok   ...through the in-place swap: same window, model and viewport
+  ok   ...and the two arrows swap inks with the two rows
+  ok   ...and the document it displaced is a live row with a working eye
+  ok   the promoted list renders
+  E:/Projects/NifskopeWildWastelandEdition/release/ww_loadednifs_arrow_promoted.png
+  ok   ...and clicking the old primary's arrow swaps it back
+166 checks, 3 failures
+FAIL
+done

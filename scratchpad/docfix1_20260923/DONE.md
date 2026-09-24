@@ -1,0 +1,1 @@
+DONE 2026-09-23 22:36 DOCFIX1: 23/23 fixed in six docs (LODM _n = BC7 added by the director), LF preserved, uncommitted; 5 VT items owed after VTNORMAL1; ruling: census version quad spelling. See DELIVERABLE_TEXT.md

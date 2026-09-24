@@ -1,0 +1,48 @@
+impostor_draw gate  2026-09-23 01:04:48
+root /e/Projects/NifskopeWildWastelandEdition
+PASS  0 python is '/c/Users/bungo/AppData/Local/Programs/Python/Python39/python'
+PASS  1 reference selftest (11 property families, grids 2 3 4 5 8 12 16)
+PASS  2 src/impostoroct.cpp compiles standalone (-Wall -Wextra -Werror, no Qt, no GL)
+PASS  3 N=2  C++ mapping == Python reference (20 probe directions)
+PASS  3 N=3  C++ mapping == Python reference (20 probe directions)
+PASS  3 N=4  C++ mapping == Python reference (20 probe directions)
+PASS  3 N=5  C++ mapping == Python reference (20 probe directions)
+PASS  3 N=8  C++ mapping == Python reference (20 probe directions)
+PASS  3 N=12  C++ mapping == Python reference (20 probe directions)
+PASS  3 N=16  C++ mapping == Python reference (20 probe directions)
+PASS  4 WW_IMPOSTOR_PREVIEW=map ran
+PASS  4b the viewport is the size that was asked for (1024x1024)
+FAIL  5 silhouette IoU mean 0.4699 < floor 0.50 (16 views)
+PASS  6 red control: shuffled 0.0416 vs honest 0.4699, collapse >= 0.03
+PASS  7 azimuth: same 0.5560 vs opposite 0.0142, mean margin 0.5418 > 0.03, 8 of 8 azimuths positive (worst 0.3119)
+PASS  8 red control: forced AsBaked gives same 0.0142 < opposite 0.5560 -- the old formula fails row 7
+SKIP  9 variable N: set IMPOSTOR_LODM_MORE to the same subject baked at other N
+PASS  10 non-square frame 160x512 keeps its aspect: frame 0.3125 vs extents 0.3125
+SKIP  11 two grids in one scene: set IMPOSTOR_LODM_B to a set of a DIFFERENT N
+SKIP  12 chunk placement: set IMPOSTOR_CHUNK to a .bto with a .manifest.txt beside it
+PASS  13 the .lodm opened as a document and drew its one card, with the chunk master OFF
+      [Warning] impostor card: "not an impostor card set: E:/Projects/NifskopeWildWastelandEdition/release/impostor_draw_tmp/material_not_a_card.lodm: kind is \"source\" -- this preview draws \"card\" and \"cardArray\" only (a \"source\" .lodm is a material, not a baked set)"
+PASS  13b a material .lodm is refused by name, not by an empty window
+PASS  14 height channel: sheet check: 16 frames measured, 0 fail, worst excursion 0 world units (card half 112.7 x 360.6, depthSpan 3072)
+PASS  14a BC3 alpha decoder: known-answer: 0 of 16 ramp entries wrong
+PASS  14b outside-band reach: 16 frames, mean 14.1% of the 8-ring band off the card plane (floor 10%), worst frame 0.0%, best 62.6%
+PASS  14c oct height decode: 0.001% of 1310720 texels more than 12 levels from the encoder's input (max 0.5%, mean err 3.39, worst 19, mean 4x4 block range 0.38, fill = 16-ring ramp)
+PASS  15 photograph: 16 bake directions, parallax off 0.8966, on 0.8966 (no-op, as the algebra requires)
+  ok   the view count: 16 lit pairs and 16 normal pairs, 16 asked for
+  ok   the mesh NORMAL grab is not its lit grab: 100.0 % of 605237 covered pixels differ (floor 50 %; an exe that ignores WW_IMPOSTOR_MESH_CHANNEL reads ~0)
+  ok   the mesh normals face the camera: mean view-space z 0.692 (floor 0.30)
+  ok   NORMAL sign agreement card vs mesh: x 98.7 % y 98.5 % z 96.7 %, mean angle 6.1 deg (bar >= 80 % every axis, <= 25 deg; bf6aa749 read 40.6..50.8 % on x/y)
+  ok   BRIGHTNESS card/mesh 0.946 (mesh 122.1, card 115.5 luma over 544465 px; bar 0.90..1.10; bf6aa749 read 0.475)
+  ok   TRANSFER rises: Spearman rho 0.234, upper-half minus lower-half 10.5 luma (bar rho >= the colour sheet rho 0.091 - 0.10 = -0.009, and rho, rise > 0; bf6aa749 read 0.145 and 2.1 on blast_n4)
+  info colour sheet (unlit) card luma by mesh decile: 100 99 101 102 103 103 105 105 104 101 (rise 2.7)
+  info card luma by mesh decile: 102 106 111 115 118 119 121 122 122 120
+  info dark card pixels the harness background rule drops: 0.84 % of 544473
+light check: 0 failure(s)
+PASS  16 the view count: 16 lit pairs and 16 normal pairs, 16 asked for
+PASS  16d the mesh NORMAL grab is not its lit grab: 100.0 % of 605237 covered pixels differ (floor 50 %; an exe that ignores WW_IMPOSTOR_MESH_CHANNEL reads ~0)
+PASS  16e the mesh normals face the camera: mean view-space z 0.692 (floor 0.30)
+PASS  16a NORMAL sign agreement card vs mesh: x 98.7 % y 98.5 % z 96.7 %, mean angle 6.1 deg (bar >= 80 % every axis, <= 25 deg; bf6aa749 read 40.6..50.8 % on x/y)
+PASS  16b BRIGHTNESS card/mesh 0.946 (mesh 122.1, card 115.5 luma over 544465 px; bar 0.90..1.10; bf6aa749 read 0.475)
+PASS  16c TRANSFER rises: Spearman rho 0.234, upper-half minus lower-half 10.5 luma (bar rho >= the colour sheet rho 0.091 - 0.10 = -0.009, and rho, rise > 0; bf6aa749 read 0.145 and 2.1 on blast_n4)
+done  30 steps, 1 failures
+RC=1

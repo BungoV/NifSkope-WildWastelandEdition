@@ -1,0 +1,123 @@
+{
+ "rung_msn": {
+  "bytes": 349680,
+  "w": 512,
+  "h": 512,
+  "declared_mips": 10,
+  "present_mips": 10,
+  "fourcc": "DXT5",
+  "alpha_min": 255,
+  "alpha_max": 255,
+  "alpha_distinct": 1,
+  "unit_len_mean": 1.0214801282359292,
+  "unit_len_maxdev_levels": 77.6651773571724,
+  "chan_mean": [
+   123.2454948425293,
+   242.63995742797852,
+   99.63846588134766
+  ],
+  "dxgi_name": ""
+ },
+ "cache_msn": {
+  "bytes": 22369768,
+  "w": 2048,
+  "h": 2048,
+  "declared_mips": 12,
+  "present_mips": 12,
+  "fourcc": "DX10",
+  "alpha_min": 255,
+  "alpha_max": 255,
+  "alpha_distinct": 1,
+  "unit_len_mean": 1.0000103918260272,
+  "unit_len_maxdev_levels": 0.68248710334811,
+  "chan_mean": [
+   122.58529090881348,
+   234.59188628196716,
+   104.54166531562805
+  ],
+  "dxgi_name": "B8G8R8A8_UNORM"
+ },
+ "van_msn": {
+  "bytes": 349680,
+  "w": 512,
+  "h": 512,
+  "declared_mips": 10,
+  "present_mips": 10,
+  "fourcc": "DXT5",
+  "alpha_min": 255,
+  "alpha_max": 255,
+  "alpha_distinct": 1,
+  "unit_len_mean": 1.0214801282359292,
+  "unit_len_maxdev_levels": 77.6651773571724,
+  "chan_mean": [
+   123.2454948425293,
+   242.63995742797852,
+   99.63846588134766
+  ],
+  "dxgi_name": ""
+ },
+ "rung_col": {
+  "bytes": 174888,
+  "w": 512,
+  "h": 512,
+  "declared_mips": 8,
+  "present_mips": 8,
+  "fourcc": "DXT1",
+  "alpha_min": 255,
+  "alpha_max": 255,
+  "alpha_distinct": 1,
+  "unit_len_mean": 0.5925004312104558,
+  "unit_len_maxdev_levels": 104.03193659459734,
+  "chan_mean": [
+   97.66719818115234,
+   85.99853515625,
+   73.45392227172852
+  ],
+  "dxgi_name": ""
+ },
+ "vanfmt_col": {
+  "bytes": 349680,
+  "w": 512,
+  "h": 512,
+  "declared_mips": 10,
+  "present_mips": 10,
+  "fourcc": "DXT5",
+  "alpha_min": 255,
+  "alpha_max": 255,
+  "alpha_distinct": 1,
+  "unit_len_mean": 0.5925004312104558,
+  "unit_len_maxdev_levels": 104.03193659459734,
+  "chan_mean": [
+   97.66719818115234,
+   85.99853515625,
+   73.45392227172852
+  ],
+  "dxgi_name": ""
+ },
+ "van_col": {
+  "bytes": 349680,
+  "w": 512,
+  "h": 512,
+  "declared_mips": 10,
+  "present_mips": 10,
+  "fourcc": "DXT5",
+  "alpha_min": 255,
+  "alpha_max": 255,
+  "alpha_distinct": 1,
+  "unit_len_mean": 0.66927612789247,
+  "unit_len_maxdev_levels": 124.221280737849,
+  "chan_mean": [
+   88.0880126953125,
+   79.89241790771484,
+   68.8982925415039
+  ],
+  "dxgi_name": ""
+ },
+ "grid": {
+  "rung_msn_p4": 1.121048599084631,
+  "van_msn_p4": 1.121048599084631,
+  "cache_msn_p16": 1.0028596288121487,
+  "cache_msn_p4": 1.0028880261943176,
+  "cache_reencoded_p4": 1.9849250840096462
+ }
+}

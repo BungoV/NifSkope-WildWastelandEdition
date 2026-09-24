@@ -1,0 +1,48 @@
+TILING4 gate F2 -- the bytes the switch must not move
+
+rung = release/NifSkope.before_tiling4.exe (2026-09-12 00:06:03, 21,484,032 B)
+new  = release/NifSkope.exe (this lane's build)
+
+--- the comparator, shown red first ---
+CONTROL one flipped byte (must FAIL)                        9 files both, 1 differ, 0 only-A, 0 only-B  FAIL
+      DIFFERS and should not: obj/Commonwealth.4.-20.24.BTO.manifest.txt
+CONTROL a missing file (must FAIL)                          8 files both, 1 differ, 1 only-A, 0 only-B  FAIL
+      DIFFERS and should not: obj/Commonwealth.4.-20.24.BTO.manifest.txt
+      ONLY in one tree: mod/Terrain/Commonwealth.VT.2.lodt
+
+--- A: the new exe with no switch IS the rung ---
+A  t2024  rung vs new-exe default                           9 files both, 0 differ, 0 only-A, 0 only-B  ok
+A  t2020  rung vs new-exe default                           9 files both, 0 differ, 0 only-A, 0 only-B  ok
+
+--- B: the exact way back (stochastic then --land-hex 0 --land-mip-bias 0) IS the rung ---
+B  t2024  rung vs the way back                              9 files both, 0 differ, 0 only-A, 0 only-B  ok
+B  t2020  rung vs the way back                              9 files both, 0 differ, 0 only-A, 0 only-B  ok
+
+--- C: stochastic moves the colour sheet AND the VT pyramid, and nothing else ---
+C  t2024  rung vs stochastic                                9 files both, 3 differ, 0 only-A, 0 only-B  ok
+C  t2020  rung vs stochastic                                9 files both, 3 differ, 0 only-A, 0 only-B  ok
+   the two .lodt files differing is the SECOND sampling site: the
+   pyramid is written by the other sampleLtex call, and a change that
+   reached only one of them (TILING2) would leave them at the rung.
+
+--- D: every _msn we write is vanilla's own file, at every setting ---
+D  rung   t2024  _msn == vanilla: ok  (349680 B)
+D  rung   t2020  _msn == vanilla: ok  (349680 B)
+D  def    t2024  _msn == vanilla: ok  (349680 B)
+D  def    t2020  _msn == vanilla: ok  (349680 B)
+D  back   t2024  _msn == vanilla: ok  (349680 B)
+D  back   t2020  _msn == vanilla: ok  (349680 B)
+D  stoch  t2024  _msn == vanilla: ok  (349680 B)
+D  stoch  t2020  _msn == vanilla: ok  (349680 B)
+D  warp   t2024  _msn == vanilla: ok  (349680 B)
+D  warp   t2020  _msn == vanilla: ok  (349680 B)
+   10 of 10 sheets checked (floor 10 -- five settings x two tiles)
+
+--- E: --land-sample warp is TILING3's bake, byte for byte ---
+E  t2024  TILING3 stoch vs new-exe warp                     9 files both, 0 differ, 0 only-A, 0 only-B  ok
+E  t2020  TILING3 stoch vs new-exe warp                     9 files both, 0 differ, 0 only-A, 0 only-B  ok
+
+--- F: 1 vs 16 chunk threads, the hex tiling ON, 16 chunks ---
+F  edgeN  --chunk-threads 1 vs 16, stochastic              97 files both, 0 differ, 0 only-A, 0 only-B  ok
+
+GATE F2: PASS

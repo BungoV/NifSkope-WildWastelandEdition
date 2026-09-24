@@ -1,0 +1,2 @@
+BAKE census r:-48,-24,-1,23 rc=0  245s  texfiles=540  args=[]
+landDetail 1 vanillaRoot E:/Tools/Fallout 4/DataUnpacked/Data msnCopied 180 msnOurs 0 colCopied 59 colOurs 121 chunksLayered 121 chunksLayerless 59 chunksLayerlessNoVanilla 0 chunksShaded 121

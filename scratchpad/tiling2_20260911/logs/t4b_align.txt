@@ -1,0 +1,15 @@
+TILING2 -- 1c`s alignment control: the offline composite vs OUR OWN bake
+
+r(shift) = correlation of the offline land@code high-pass residual with
+the high-pass residual of the sheet named, at a whole-texel shift.
+
+chunk (-20,24)
+  OURS rung    r(0,0) = +0.7948   best +0.7948 at shift (+0,+0)
+  vanilla      r(0,0) = -0.0030   best +0.0042 at shift (-1,+1)
+  flip check   r = +0.0501  (row-flipped offline sheet; a model that had V upside down would read HERE instead)
+
+chunk (-20,20)
+  OURS rung    r(0,0) = +0.7040   best +0.7040 at shift (+0,+0)
+  vanilla      r(0,0) = +0.0017   best -0.0040 at shift (+2,+2)
+  flip check   r = +0.0137  (row-flipped offline sheet; a model that had V upside down would read HERE instead)
+

@@ -1,0 +1,18 @@
+lane UINOTES1 -- 2026-09-12 04:05
+CODE COMPLETE for all nine rulings, BUILD PENDING.
+
+Fallout4.exe (pid 22908, up since 03:48:37) was running from the build step to
+the end of the lane, and no build runs while the game runs. qmake has been run
+in this tree; the baseline exe is rung aside as release/NifSkope.before_uinotes1.exe.
+No gate has produced a number and no picture has been taken: nothing here is
+proven beyond `g++ -fsyntax-only` with a refuter proved able to fail.
+
+Resume: scratchpad/uinotes1_20260912/PENDING.md
+Report: scratchpad/lane_uinotes1_report.md (sections 0-15)
+Merge list: scratchpad/uinotes1_20260912/CHANGED_FILES.txt
+Handoff: scratchpad/uinotes1_20260912/HANDOFF_BLOCK.md
+Changelog: scratchpad/uinotes1_20260912/WW_CHANGES_ENTRY.md
+
+The BUILDING marker is left in place on purpose: CHANGED_FILES.txt is derived
+with `find src tests res tools docs -newer scratchpad/uinotes1_20260912/BUILDING`,
+so deleting it would make the merge list impossible to re-derive.

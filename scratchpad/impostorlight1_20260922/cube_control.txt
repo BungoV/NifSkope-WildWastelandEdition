@@ -1,0 +1,49 @@
+bake rc=0 cube512.txt cube512_front.png cube512_oct_albedo.png cube512_oct_g.png cube512_oct_gsaos.png cube512_oct_normal.png cube512_side.png 
+lodgen rc=0
+000531b3.txt
+000531b3_front.png
+000531b3_fs.DDS
+000531b3_oct.lodm
+000531b3_oct_albedo.png
+000531b3_oct_d.DDS
+000531b3_oct_g.DDS
+000531b3_oct_g.png
+000531b3_oct_gsaos.DDS
+000531b3_oct_gsaos.png
+000531b3_oct_n.DDS
+000531b3_oct_normal.png
+000531b3_side.png
+oct 4 512 512 370.145 370.145 0 0 256 3072 legacy 512 spec1
+stage 1 written (card normal variant mv): CR mesh 0 card 0
+  stage 1 blast_n4  rc=0 mesh=16 card=16 orbit iou mean 0.9953
+stage 1 written (card normal variant model): CR mesh 0 card 0
+  stage 1 blast_n4  rc=0 mesh=16 card=16 orbit iou mean 0.9953
+stage 2 written (card normal variant mv): CR mesh 0 card 0
+  stage 2 blast_n4  rc=0 mesh=16 card=16 orbit iou mean 0.9953
+stage 0: pristine copy
+  stage 0 blast_n4  rc=0 mesh=16 card=16 orbit iou mean 0.9915
+stage 0: pristine copy
+  stage 0 blast_n4  rc=0 mesh=16 card=16 orbit iou mean 0.9953
+== cube, bf6aa749 lighting (normal it lit with = model space)
+  ok   the view count: 16 lit pairs and 16 normal pairs, 16 asked for
+  ok   the mesh NORMAL grab is not its lit grab: 100.0 % of 9721712 covered pixels differ (floor 50 %; an exe that ignores WW_IMPOSTOR_MESH_CHANNEL reads ~0)
+  ok   the mesh normals face the camera: mean view-space z 0.796 (floor 0.30)
+  FAIL NORMAL sign agreement card vs mesh: x 50.0 % y 58.2 % z 91.2 %, mean angle 77.8 deg (bar >= 80 % every axis, <= 25 deg; bf6aa749 read 40.6..50.8 % on x/y)
+  FAIL BRIGHTNESS card/mesh 0.516 (mesh 158.5, card 81.8 luma over 9682664 px; bar 0.90..1.10; bf6aa749 read 0.475)
+  FAIL TRANSFER rises: Spearman rho -0.175, upper-half minus lower-half -5.9 luma (bar rho >= the colour sheet rho 0.975 - 0.10 = 0.875, and rho, rise > 0; bf6aa749 read 0.145 and 2.1 on blast_n4)
+  info colour sheet (unlit) card luma by mesh decile: 147 nan nan nan nan nan nan nan nan 131 (rise -16.8)
+  info card luma by mesh decile: 58 nan 59 nan 124 nan nan nan 91 58
+  info dark card pixels the harness background rule drops: 0.51 % of 9688200
+light check: 3 failure(s)
+== cube, the fix (normal it lits with = view space)
+  ok   the view count: 16 lit pairs and 16 normal pairs, 16 asked for
+  ok   the mesh NORMAL grab is not its lit grab: 100.0 % of 9721712 covered pixels differ (floor 50 %; an exe that ignores WW_IMPOSTOR_MESH_CHANNEL reads ~0)
+  ok   the mesh normals face the camera: mean view-space z 0.796 (floor 0.30)
+  ok   NORMAL sign agreement card vs mesh: x 99.8 % y 99.8 % z 100.0 %, mean angle 3.1 deg (bar >= 80 % every axis, <= 25 deg; bf6aa749 read 40.6..50.8 % on x/y)
+  ok   BRIGHTNESS card/mesh 0.961 (mesh 158.5, card 152.2 luma over 9682664 px; bar 0.90..1.10; bf6aa749 read 0.475)
+  FAIL TRANSFER rises: Spearman rho 0.820, upper-half minus lower-half 13.9 luma (bar rho >= the colour sheet rho 0.975 - 0.10 = 0.875, and rho, rise > 0; bf6aa749 read 0.145 and 2.1 on blast_n4)
+  info colour sheet (unlit) card luma by mesh decile: 147 nan nan nan nan nan nan nan nan 131 (rise -16.8)
+  info card luma by mesh decile: 136 nan 138 nan 157 nan nan nan 157 159
+  info dark card pixels the harness background rule drops: 0.00 % of 9688200
+light check: 1 failure(s)
+CUBE-DONE

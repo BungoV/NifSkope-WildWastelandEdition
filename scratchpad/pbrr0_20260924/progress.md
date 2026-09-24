@@ -1,0 +1,11 @@
+# PBRR0 progress
+- 01:39 started; release exe sha1 97d2b3a2; Fallout4/NifSkope not running per tasklist (see below)
+- 01:4x rung release/before_pbrr0/ = exe 97d2b3a2 + shaders/ (== res/shaders) + Qt runtime (46 entries), self-contained OLD arm
+- 01:5x fix01.py applied (glproperty.h/.cpp, renderer.cpp, glparticles.cpp, nifskope_ui.cpp); CR counts unchanged (all LF)
+- 02:0x build chain started in background (glproperty.h touched -> wide rebuild); harness files written: tests/spells/pbr_shade_ab.sh/.py/_cases.txt
+- 01:53:16 BUILD-RC=0 release/NifSkope.exe d718fbf1 24,133,120 B (newer than changed sources). Dry run found settings-scope drift (first run 826 px high, later 824) -> harness now deletes its own scope key before every run
+- 02:05 particle diagnosis: MPSFireSmall01/MPSSmokeFireMed01 use BSPSysMultiTargetEmitterCtlr, which controllers.cpp:1232 does not simulate (exact NiPSysEmitterCtlr match) -> 0 live particles at any time, frame empty in BOTH arms; AttachFXMist01 draws 2 systems but nothing visible at t=0.5..6, any camera, flat. s8 forbids glparticles.cpp edits -> reverted my census line there; particle rows now written from the shot hook at the grab (liveCount/isHidden/showParticles), rows carry prog="served". Adding drawing particle fixtures ShockHAndLeft + CryoJet01. Rebuilding.
+- 02:07 rebuilt: release/NifSkope.exe 02:06:44 sha1 8485154d BUILD-RC=0 (objs glparticles[reverted to HEAD], glproperty, nifskope_ui). Judge patched (fix02.py): @empty directive, particle prog check, aimed red sets. Full run ab_main2 started.
+- 02:11 ab_main2: SUMMARY 10 cases, 0 failures, 3 empty by the viewer -> PASS (all noise bars 0/0, all byte-identical). Starting red controls.
+- 02:20 red shader run 1: 6 of 7 aimed FAILED zero; bgem_plane stayed byte-identical -- the *0.9 sabotage leaves the saturated glow (>1.11) clamped at 1. Sabotage changed to clamp(0,1)*0.9, rerunning red shader. red census: see ab_red_census.txt
+- 02:2x red shader rerun (clamp*0.9): 7 of 7 aimed FAILED zero, 0 census failed -> BITES. red census: 3 of 3 aimed (fo4_default.prog cases) FAILED census -> BITES. No NifSkope running, red dirs removed, pbrshadeab scope key deleted. DONE.

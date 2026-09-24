@@ -1,0 +1,80 @@
+model rosebush01.nif
+projection ortho
+ranges RoseBush01:0 - L2_RoseBush01:0 0+50
+lodm Materials\Landscape\Plants\RoseBush01.lodm none textures\Landscape\Plants\RoseBush01_d.dds
+mask tree
+emissive 0 shapes 0
+front 151.971 77.915 6.98126 5.02743 40.5251
+side 151.971 77.915 6.98126 5.02743 40.5251
+class 64 64
+gap 4 4
+coverage 16 128 160
+oct 8 64 64 56.9713 56.9713 6.98126 5.02743 40.5251 3072 legacy 512 spec1
+frameoff 0 0 -3.424 0.456533
+frameoff 1 0 -3.65226 0.456533
+frameoff 2 0 -3.72835 0.152178
+frameoff 3 0 -3.72835 0.456533
+frameoff 4 0 -3.34791 0.532621
+frameoff 5 0 -2.13049 0.532621
+frameoff 6 0 -1.06524 0.532621
+frameoff 7 0 -0.228266 0.532621
+frameoff 0 1 -3.88053 0.532621
+frameoff 1 1 -3.424 0.836977
+frameoff 2 1 -3.65227 0.608711
+frameoff 3 1 -3.72836 0.456533
+frameoff 4 1 -3.27182 0.228266
+frameoff 5 1 -1.52178 -0.076088
+frameoff 6 1 -0.152178 -0.304356
+frameoff 7 1 1.06524 0.532621
+frameoff 0 2 -2.96747 0.532621
+frameoff 1 2 -3.80444 2.43484
+frameoff 2 2 -3.424 1.59787
+frameoff 3 2 -3.72835 1.67396
+frameoff 4 2 -2.96746 0.532621
+frameoff 5 2 -0.304356 -0.456533
+frameoff 6 2 1.90222 -0.760889
+frameoff 7 2 3.34791 0.532621
+frameoff 0 3 -3.11964 0.532621
+frameoff 1 3 -3.11964 4.18489
+frameoff 2 3 -2.81529 7.98933
+frameoff 3 3 -3.57618 0.380445
+frameoff 4 3 -1.82613 -0.989156
+frameoff 5 3 3.50009 3.95662
+frameoff 6 3 3.50009 1.75004
+frameoff 7 3 3.50009 0.532621
+frameoff 0 4 -3.50009 0.532621
+frameoff 1 4 -3.57618 5.55449
+frameoff 2 4 -3.50009 10.8807
+frameoff 3 4 -1.97831 5.85884
+frameoff 4 4 2.96747 0.989155
+frameoff 5 4 2.7392 3.11964
+frameoff 6 4 3.04355 1.44569
+frameoff 7 4 3.11964 0.532621
+frameoff 0 5 -3.34791 0.532621
+frameoff 1 5 -1.90222 4.48924
+frameoff 2 5 0.228266 5.78275
+frameoff 3 5 2.66311 6.61973
+frameoff 4 5 3.72835 3.88053
+frameoff 5 5 3.424 1.67396
+frameoff 6 5 3.80444 0.913067
+frameoff 7 5 2.96747 0.532621
+frameoff 0 6 -1.06524 0.532621
+frameoff 1 6 0.152178 2.58702
+frameoff 2 6 1.44569 3.04355
+frameoff 3 6 3.27182 3.34791
+frameoff 4 6 3.72836 1.82613
+frameoff 5 6 3.65227 0.532621
+frameoff 6 6 3.424 0.456533
+frameoff 7 6 3.88053 0.532621
+frameoff 0 7 0.228266 0.532621
+frameoff 1 7 1.06524 0.532621
+frameoff 2 7 2.13049 0.532621
+frameoff 3 7 3.34791 0.532621
+frameoff 4 7 3.72835 0.456533
+frameoff 5 7 3.72835 0.152178
+frameoff 6 7 3.65226 0.456533
+frameoff 7 7 3.424 0.456533
+frameclamped 0
+aa 4 1024 1.125
+framefit 46.7946 52.8818 48.0121 57.5993
+orthofit 64.2913 64.2913 0

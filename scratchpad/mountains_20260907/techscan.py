@@ -1,8 +1,9 @@
 """Does the Fallout 4 exe contain a static list of valid BSLightingShader
-technique ids, and is 0x0D01 (Vc + LODObj) in it? Read-only. Lane IDENTITY."""
+technique ids, and is 0x0D01 (Vc + LODObj) in it? Read-only. Lane IDENTITY.
+Usage: python techscan.py <path to Fallout4.exe>"""
 import struct, sys
 
-b = open(r'E:/Projects/Fo4CommunityShaders/Fo4PDB/Fallout4.exe', 'rb').read()
+b = open(sys.argv[1], 'rb').read()
 
 def scan(target):
     pat = struct.pack('<I', target)

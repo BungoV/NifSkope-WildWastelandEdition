@@ -1,0 +1,2 @@
+GATE g1: FAIL  id=0002B52A fv=131 printed SunDay=(0, 0, 0) AmbDay=(136, 183, 241) SunNight=(0, 0, 0) DalcDayZ-=(101, 133, 169); decoder agrees on the doc values=True; rows differing 143/152 (FogNear/Sunrise,Unused/Sunrise,Ambient/Sunrise), dalc differing 0/56, nam0hex equal
+RED CONTROL stride -> gate g1 BITES

@@ -1,0 +1,19 @@
+eight-level (a0 > a1)  a0=255 a1=0
+   index 0  decoded  255.00  D3D  255.00
+   index 1  decoded    0.00  D3D    0.00
+   index 2  decoded  182.14  D3D  218.57   <-- WRONG
+   index 3  decoded  145.71  D3D  182.14   <-- WRONG
+   index 4  decoded  109.29  D3D  145.71   <-- WRONG
+   index 5  decoded   72.86  D3D  109.29   <-- WRONG
+   index 6  decoded   36.43  D3D   72.86   <-- WRONG
+   index 7  decoded    0.00  D3D   36.43   <-- WRONG
+six-level (a0 <= a1)  a0=40 a1=200
+   index 0  decoded   40.00  D3D   40.00
+   index 1  decoded  200.00  D3D  200.00
+   index 2  decoded   64.00  D3D   72.00   <-- WRONG
+   index 3  decoded   96.00  D3D  104.00   <-- WRONG
+   index 4  decoded  128.00  D3D  136.00   <-- WRONG
+   index 5  decoded    0.00  D3D  168.00   <-- WRONG
+   index 6  decoded    0.00  D3D    0.00
+   index 7  decoded  255.00  D3D  255.00
+known-answer: 10 of 16 ramp entries wrong

@@ -1,0 +1,34 @@
+[1] Commonwealth.4.-20.24.BTR
+[2] Commonwealth.4.-20.24.BTO
+chunk pass: 1 job(s) over 1 worker(s)
+merged: 10 shapes -> 10 across 1 chunks
+far rings: 0 shapes cut in 0 chunks: 0 -> 0 triangles, 0 -> 0 vertices (0 shapes and 0 groups kept whole, 0 restored; worst error 0.0 units)
+2 chunk(s) written to E:/Projects/NifskopeWildWastelandEdition/scratchpad/archlock1_20260917/gates_new/archlock_work/bake_rung, 0 empty, 0 failed
+stage times: landscape 0.0 s, meshes 0.2 s, textures 0.0 s, impostors 0.0 s
+bake census: threads 16, chunk threads 1 bound by default, chunk jobs 1, chunk workers 1, peak working set: 0.67 GB (723865600 bytes), bto built in the mod folder, 1 chunk(s), 0 dropped, 0 bytes freed, layout n/a (no FO4CS-target file written)
+File ' "textures/landscape/ground/rubblerock01_d.dds" ' not found in archives
+File ' "textures/landscape/ground/rubblerock01_n.dds" ' not found in archives
+File ' "textures/landscape/ground/rubblerock01_s.dds" ' not found in archives
+File ' "textures/landscape/ground/driedgrass01_d.dds" ' not found in archives
+File ' "textures/landscape/ground/driedgrass01_n.dds" ' not found in archives
+File ' "textures/landscape/ground/driedgrass01_s.dds" ' not found in archives
+File ' "textures/landscape/ground/rootseroded01_d.dds" ' not found in archives
+File ' "textures/landscape/ground/rootseroded01_n.dds" ' not found in archives
+File ' "textures/landscape/ground/rootseroded01_s.dds" ' not found in archives
+File ' "textures/landscape/ground/riverbedrocks02wet_d.dds" ' not found in archives
+File ' "textures/landscape/ground/riverbedrocks02wet_n.dds" ' not found in archives
+File ' "textures/landscape/ground/riverbedrocks02wet_s.dds" ' not found in archives
+File ' "textures/landscape/ground/forestfloor01_d.dds" ' not found in archives
+File ' "textures/landscape/ground/forestfloor01_n.dds" ' not found in archives
+File ' "textures/landscape/ground/forestfloor01_s.dds" ' not found in archives
+File ' "textures/landscape/ground/fallenleaves01_d.dds" ' not found in archives
+File ' "textures/landscape/ground/fallenleaves01_n.dds" ' not found in archives
+File ' "textures/landscape/ground/fallenleaves01_s.dds" ' not found in archives
+File ' "textures/landscape/ground/riverbedsilt01_d.dds" ' not found in archives
+File ' "textures/landscape/ground/riverbedsilt01_n.dds" ' not found in archives
+File ' "textures/landscape/ground/riverbedsilt01_s.dds" ' not found in archives
+File ' "textures/landscape/ground/nf_scrubgrass01.dds" ' not found in archives
+File ' "materials/landscape/ground/nf_scrubgrass01.bgsm" ' not found in archives
+File ' "textures/landscape/ground/nf_dirt01.dds" ' not found in archives
+File ' "materials/landscape/ground/nf_dirt01.bgsm" ' not found in archives
+bake-record: E:/Projects/NifskopeWildWastelandEdition/scratchpad/archlock1_20260917/gates_new/archlock_work/bake_rung/Commonwealth.lodb, 1 plugin(s), 0 resource(s), 14 switch token(s), 1 chunk(s), 4 census line(s), end 3 file(s) 950786 bytes, record 1605 bytes

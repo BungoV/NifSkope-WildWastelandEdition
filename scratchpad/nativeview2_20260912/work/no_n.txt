@@ -1,0 +1,23 @@
+NEW    SKIP byte-identity against /e/Projects/NifskopeWildWastelandEdition/release/NifSkope.before_nativeview1.exe (the rung is not on disk)
+NEW    ok   WW_LODL_SHEETS pointed at an EMPTY directory builds the same bytes
+NEW    ok   a non-height plane ignores the sheets entirely (byte-identical with them present)
+NEW      23 checks, 0 failures
+NEW    ok   lodl_open.sh still runs 23 checks with 0 failures (ran 23, failed 0)
+NEW    ok   the viewer's census count equals the .lodi's own chunk count (676 == 676)
+NEW    ok   every placement's world position is within 1 unit of the file's own
+NEW    SKIP the manifest leg of (b): no <chunk>.manifest.txt under GBAKE=<unset>
+NEW    ok   the floor fires: an empty region yields 0 placements and the harness sees 0
+NEW    IOU 0.8179
+NEW    FAIL the .lodi scene covers the same pixels as the .BTO (IoU 0.8179 >= 0.95)
+NEW    IOU 0.0001
+NEW    ok   the refuter fires: a DIFFERENT chunk's .BTO does not match (IoU 0.0001 < 0.95)
+NEW    MAD 21.132
+NEW    NCC 0.8583
+NEW    NCCFLIP -0.0477
+NEW    ok   the lit terrain looks like the .BTR of the SAME cells (NCC 0.8583 >= 0.45)
+NEW    ok   the refuter fires: a DIFFERENT chunk's .BTR correlates less (NCC 0.2303 < 0.8583)
+NEW    ok   the floor fires: the same .BTR mirrored in Y does NOT correlate (NCC -0.0477 < 0.10)
+NEW    ok   the lit terrain and the .BTR of the same cells agree (mean |dColour| 21.132 < 48)
+NEW    ok   a render with WW_LODL_SHEETS pointed at an EMPTY directory IS the data view
+NEW    ok   the lit render is NOT the data view (mean |dColour| 67.922 > 8), so (d) is not vacuous
+NEW  14 checks, 1 failures, 2 skipped

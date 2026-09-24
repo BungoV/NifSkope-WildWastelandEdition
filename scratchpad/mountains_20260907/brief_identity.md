@@ -89,8 +89,8 @@ shader path actually honours `SLSF2_Vertex_Colors`. If it does, the fallback is
 broken today and every LOD object multiplies toward black. If it does not, this is
 a documentation defect only. Evidence routes, in order of strength:
 
-* The leaked 1.10.155 exe + PDB at `E:\Projects\Fo4CommunityShaders\Fo4PDB`, with
-  the query tools `tools\exere\f4pdb.py` and `f4re.py` in that repo. Quote the RVA.
+* Todd's treat (1.10.155), with
+  the Todd's treat tooling (kept outside this repo). Quote the RVA.
 * `Fallout4 - Shaders.ba2` in `X:\Programs\Steam\steamapps\common\Fallout 4\Data`.
   BSLightingShader permutations are selected by a technique-ID bitfield. If a
   vertex-colour bit selects a different compiled permutation, the engine honours it.

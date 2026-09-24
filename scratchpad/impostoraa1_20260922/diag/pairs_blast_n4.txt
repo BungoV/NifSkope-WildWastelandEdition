@@ -1,0 +1,39 @@
+  A(0,0) el   0.0 az  180.0  B(1,0) el  -0.0 az  153.4  IoU 0.465  A px 5862 B px 4834
+  A(0,0) el   0.0 az  180.0  B(0,1) el  -0.0 az -153.4  IoU 0.335  A px 5862 B px 4720
+  A(1,0) el  -0.0 az  153.4  B(2,0) el   0.0 az  116.6  IoU 0.185  A px 5754 B px 9373
+  A(1,0) el  -0.0 az  153.4  B(1,1) el  63.4 az  180.0  IoU 0.080  A px 5754 B px 1377
+  A(2,0) el   0.0 az  116.6  B(3,0) el   0.0 az   90.0  IoU 0.521  A px 6242 B px 6926
+  A(2,0) el   0.0 az  116.6  B(2,1) el  63.4 az   90.0  IoU 0.167  A px 6242 B px 2737
+  A(3,0) el   0.0 az   90.0  B(3,1) el   0.0 az   63.4  IoU 0.453  A px 6182 B px 5623
+  A(0,1) el  -0.0 az -153.4  B(1,1) el  63.4 az  180.0  IoU 0.048  A px 5371 B px 799
+  A(0,1) el  -0.0 az -153.4  B(0,2) el   0.0 az -116.6  IoU 0.358  A px 5371 B px 4609
+  A(0,1) el  -0.0 az -153.4  B(1,0) el  -0.0 az  153.4  IoU 0.285  A px 5371 B px 3320
+  A(1,1) el  63.4 az  180.0  B(2,1) el  63.4 az   90.0  IoU 0.043  A px 3162 B px 1957
+  A(1,1) el  63.4 az  180.0  B(1,2) el  63.4 az  -90.0  IoU 0.027  A px 3162 B px 1999
+  A(1,1) el  63.4 az  180.0  B(2,0) el   0.0 az  116.6  IoU 0.006  A px 3162 B px 1268
+  A(2,1) el  63.4 az   90.0  B(3,1) el   0.0 az   63.4  IoU 0.317  A px 3300 B px 2391
+  A(2,1) el  63.4 az   90.0  B(2,2) el  63.4 az    0.0  IoU 0.051  A px 3300 B px 1625
+  A(2,1) el  63.4 az   90.0  B(3,0) el   0.0 az   90.0  IoU 0.574  A px 3300 B px 2873
+  A(3,1) el   0.0 az   63.4  B(3,2) el   0.0 az   26.6  IoU 0.158  A px 5941 B px 2522
+  A(0,2) el   0.0 az -116.6  B(1,2) el  63.4 az  -90.0  IoU 0.047  A px 5923 B px 962
+  A(0,2) el   0.0 az -116.6  B(0,3) el   0.0 az  -90.0  IoU 0.701  A px 5923 B px 5478
+  A(0,2) el   0.0 az -116.6  B(1,1) el  63.4 az  180.0  IoU 0.022  A px 5923 B px 473
+  A(1,2) el  63.4 az  -90.0  B(2,2) el  63.4 az    0.0  IoU 0.069  A px 3745 B px 2549
+  A(1,2) el  63.4 az  -90.0  B(1,3) el   0.0 az  -63.4  IoU 0.221  A px 3745 B px 2497
+  A(1,2) el  63.4 az  -90.0  B(2,1) el  63.4 az   90.0  IoU 0.074  A px 3745 B px 1025
+  A(2,2) el  63.4 az    0.0  B(3,2) el   0.0 az   26.6  IoU 0.074  A px 3399 B px 2250
+  A(2,2) el  63.4 az    0.0  B(2,3) el   0.0 az  -26.6  IoU 0.200  A px 3399 B px 2349
+  A(2,2) el  63.4 az    0.0  B(3,1) el   0.0 az   63.4  IoU 0.000  A px 3399 B px 1206
+  A(3,2) el   0.0 az   26.6  B(3,3) el   0.0 az    0.0  IoU 0.373  A px 5377 B px 3354
+  A(0,3) el   0.0 az  -90.0  B(1,3) el   0.0 az  -63.4  IoU 0.346  A px 6154 B px 7422
+  A(0,3) el   0.0 az  -90.0  B(1,2) el  63.4 az  -90.0  IoU 0.268  A px 6154 B px 2901
+  A(1,3) el   0.0 az  -63.4  B(2,3) el   0.0 az  -26.6  IoU 0.264  A px 6230 B px 8343
+  A(1,3) el   0.0 az  -63.4  B(2,2) el  63.4 az    0.0  IoU 0.047  A px 6230 B px 747
+  A(2,3) el   0.0 az  -26.6  B(3,3) el   0.0 az    0.0  IoU 0.449  A px 5753 B px 5995
+  A(2,3) el   0.0 az  -26.6  B(3,2) el   0.0 az   26.6  IoU 0.059  A px 5753 B px 3893
+blast_n4 frameOffset as shipped   steps 0: neighbour-vs-self IoU mean 0.134  min 0.008  (33 pairs)
+blast_n4 frameOffset as shipped   steps 1: neighbour-vs-self IoU mean 0.221  min 0.000  (33 pairs)
+blast_n4 frameOffset as shipped   steps 8: neighbour-vs-self IoU mean 0.203  min 0.000  (33 pairs)
+blast_n4 frameOffset TRANSPOSED   steps 0: neighbour-vs-self IoU mean 0.201  min 0.007  (33 pairs)
+blast_n4 frameOffset TRANSPOSED   steps 1: neighbour-vs-self IoU mean 0.164  min 0.007  (33 pairs)
+blast_n4 frameOffset TRANSPOSED   steps 8: neighbour-vs-self IoU mean 0.144  min 0.003  (33 pairs)

@@ -1,0 +1,15 @@
+Lane CARDFINAL: build and gates DONE, 2026-09-09/10.
+
+release/NifSkope.exe 2026-09-09 23:41:00 carries this lane's src/lodgen.cpp and
+src/nifskope_ui.cpp changes (mips = log2(gap); per-frame positioning). Gates
+green on it: lodgen_octahedral 85/0, lodgen_card_arrays 33/0,
+lodgen_impostor_cards 12/0, lodgen_identity 8/0, plus the per-frame transition
+gate (scratchpad/cardfinal_20260909/transition_bounds.py) PASS on 3 bases.
+
+NOTE FOR HOOKCAM: src/nifskope_ui.cpp already carries YOUR render-hook camera-pin
+edits (written 23:44:06, after this build), beside this lane's bake changes. The
+next build of that file compiles both. Nothing of this lane's is unbuilt: the
+23:41:00 exe is what every number in scratchpad/lane_cardfinal_report.md was
+measured on.
+
+Report: scratchpad/lane_cardfinal_report.md

@@ -1,0 +1,1 @@
+gltfexport1 BUILDING Sat Sep 19 08:19:26 CEDT 2026

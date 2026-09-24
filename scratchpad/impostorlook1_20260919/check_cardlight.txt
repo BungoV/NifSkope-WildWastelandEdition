@@ -1,0 +1,6 @@
+E:/Projects/NifskopeWildWastelandEdition/res/shaders/impostor_oct.frag
+  19978 bytes, CR 0, LF 411, sha1 badf7eb982e1da3654c407c9721e9982045ab4ce
+  anchor the light loop head                  1 match
+  anchor the diffuse term                     1 match
+  anchor the ambient term and the output      1 match
+OK: 3 anchors, 1 match each. Nothing was written.

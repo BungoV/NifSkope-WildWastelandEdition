@@ -1,0 +1,11 @@
+index: worldspace Commonwealth extent {'east': 95, 'north': 95, 'south': -96, 'west': -96} partial None rowOrder northUp compression none emissive none
+FAIL rule 4: maskRules sum {'distinctLtex': 101, 'legacyInverted': 99, 'metallicDefault': 0, 'noneDefault': 1, 'pbrm': 0, 'roughnessDefault': 1, 'withEmissiveMap': 0, 'withMetallicMap': 0, 'withRoughnessMap': 99}
+index: maskRules {'distinctLtex': 101, 'legacyInverted': 99, 'metallicDefault': 0, 'noneDefault': 1, 'pbrm': 0, 'roughnessDefault': 1, 'withEmissiveMap': 0, 'withMetallicMap': 0, 'withRoughnessMap': 99}
+index: cover {'linearInComposition': True, 'normalisation': 96, 'ordinal': True, 'present': False, 'tintStrength': 0.3499999940395355}
+index level dim  2: 24 fields vs container, 0 differ; FO4CSLOD\Commonwealth\Commonwealth.VT.2.lodt
+index level dim  4: 24 fields vs container, 0 differ; FO4CSLOD\Commonwealth\Commonwealth.VT.4.lodt
+index level dim  8: 24 fields vs container, 0 differ; FO4CSLOD\Commonwealth\Commonwealth.VT.8.lodt
+index level dim 16: 24 fields vs container, 0 differ; FO4CSLOD\Commonwealth\Commonwealth.VT.16.lodt
+index level dim 32: 24 fields vs container, 0 differ; FO4CSLOD\Commonwealth\Commonwealth.VT.32.lodt
+index sheets: [('color', 71, 71, 'sRGB'), ('msn', 71, 71, 'linear'), ('mask', 71, 77, 'linear'), ('height', 56, 56, 'linear')]
+RESULT FAIL (1 failures)

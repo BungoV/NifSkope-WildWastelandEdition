@@ -1,0 +1,21 @@
+[Warning] QObject::connect(QListModel, QWidget): signal not found
+[Warning] QObject::connect(QListModel, QWidget): signal not found
+[Warning] QObject::connect(QListModel, QWidget): signal not found
+[Warning] QObject::connect(QListModel, QWidget): signal not found
+[Warning] File ' "materials/c:/projects/fallout4/build/pc/data/materials/setdressing/tires/tires01.bgsm" ' not found in archives
+[Info] cell view:
+ cell view Commonwealth -30,-30 block 1x1 (cells -30,-30 .. -30,-30)
+  plugins: X:/Programs/Steam/steamapps/common/Fallout 4/Data/Fallout4.esm
+  data root: E:/Tools/Fallout 4/DataUnpacked/Data -- from the spec
+  cells with data: 1 of 1
+  refrs read 74, placements 74, drawn 74
+  hidden: disabled 0, markers 0, deleted 0, no base 0
+  distinct models loaded 23, failed to load 0
+  source triangles 77072, welded shapes 25, vertices 82970, triangles 79130
+  ground: 1 LAND cells, vertex colour only (the splat layers are NOT sampled -- that is the terrain bake's compositor)
+  water: 1 cells
+  overlay: none
+  pick table 74 entries
+  built in 9285 ms
+
+[Warning] File ' "textures/landscape/trees/tree01_s.dds" ' not found in archives

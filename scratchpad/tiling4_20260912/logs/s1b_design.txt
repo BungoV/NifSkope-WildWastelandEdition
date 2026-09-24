@@ -1,0 +1,51 @@
+TILING4 -- redesigning the swirl instrument against its known answers
+
+The first design (s1_controls.txt) passed C1/C2 and FAILED C5/C7: it could
+not tell TILING3`s warped sheet from its own unwarped rung.  Diagnosis: it
+band-passed away the 1..4 texel grain that a warp actually stretches.
+Swept here: the fine band (box radii lo..hi) and the tensor window.
+
+lo..hi  win          C1     C2 |   vanSD    ceil |  C5 rise  C7 pair   C7 sig | prop over ceil
+0..2  w8          1.000  0.090 |  0.0512  0.3363 |     3.71   0.0559     1.09 | 0 of 7
+0..2  w16         1.000  0.048 |  0.0537  0.3046 |     2.50   0.0228     0.42 | 0 of 7
+0..2  w24         1.000  0.033 |  0.0529  0.2876 |     1.54  -0.0292    -0.55 | 0 of 7
+0..2  w32         1.000  0.025 |  0.0513  0.2723 |     1.07  -0.0672    -1.31 | 0 of 7
+0..4  w8          1.000  0.088 |  0.0525  0.3524 |     3.95   0.0188     0.36 | 0 of 7
+0..4  w16         1.000  0.047 |  0.0553  0.3221 |     2.65   0.0047     0.09 | 0 of 7
+0..4  w24         1.000  0.032 |  0.0550  0.3059 |     1.66  -0.0153    -0.28 | 0 of 7
+0..4  w32         1.000  0.024 |  0.0536  0.2911 |     1.16  -0.0267    -0.50 | 0 of 7
+1..4  w8          1.000  0.146 |  0.0703  0.5139 |     2.84  -0.0088    -0.13 | 0 of 7
+1..4  w16         1.000  0.080 |  0.0798  0.4806 |     1.80  -0.0070    -0.09 | 0 of 7
+1..4  w24         1.000  0.058 |  0.0832  0.4678 |     1.01  -0.0083    -0.10 | 0 of 7
+1..4  w32         1.000  0.046 |  0.0844  0.4603 |     0.61  -0.0089    -0.11 | 0 of 7
+1..6  w8          1.000  0.135 |  0.0684  0.5201 |     2.91  -0.0187    -0.27 | 0 of 7
+1..6  w16         1.000  0.074 |  0.0779  0.4846 |     1.87  -0.0158    -0.20 | 0 of 7
+1..6  w24         1.000  0.052 |  0.0814  0.4713 |     1.07  -0.0154    -0.19 | 0 of 7
+1..6  w32         1.000  0.041 |  0.0831  0.4647 |     0.66  -0.0139    -0.17 | 0 of 7
+0..8  w8          1.000  0.088 |  0.0525  0.3567 |     4.03  -0.0022    -0.04 | 0 of 7
+0..8  w16         1.000  0.047 |  0.0552  0.3260 |     2.74  -0.0196    -0.36 | 0 of 7
+0..8  w24         1.000  0.032 |  0.0548  0.3094 |     1.74  -0.0316    -0.58 | 0 of 7
+0..8  w32         1.000  0.024 |  0.0535  0.2952 |     1.23  -0.0383    -0.72 | 0 of 7
+2..8  w8          1.000  0.141 |  0.0594  0.5387 |     2.82  -0.0243    -0.41 | 0 of 7
+2..8  w16         1.000  0.080 |  0.0685  0.4849 |     1.85  -0.0173    -0.25 | 0 of 7
+2..8  w24         1.000  0.057 |  0.0729  0.4627 |     1.03  -0.0148    -0.20 | 0 of 7
+2..8  w32         1.000  0.044 |  0.0761  0.4558 |     0.64  -0.0154    -0.20 | 0 of 7
+
+C5 rise  = (swirl at strain 0.733) - (swirl at strain 0) in vanilla SDs
+C7 pair  = median over the seven selection sheets of (proposal - its own rung)
+C7 sig   = that paired difference in vanilla SDs
+
+CHOSEN: lo=0 hi=2 win=8 -- it maximises the SMALLER of the two
+   sensitivities (C5 rise 3.71 SD, C7 paired 1.09 SD), so it is not
+   chosen by one answer at the other`s expense.  C1 1.000, C2 0.090.
+   vanilla ceiling 0.3363, population SD 0.0512, proposal over the
+   ceiling on 0 of 7 selection sheets.
+
+   sheet             rung  proposal   vanilla
+   ( -20,  24)    0.1872    0.2431    0.1712
+   ( -20,  20)    0.1507    0.1877    0.1468
+   ( -36, -20)    0.1847    0.2661    0.1412
+   (  -4, -20)    0.2126    0.2693    0.1748
+   (  28, -20)    0.2223    0.2615    0.2059
+   (  -4,  16)    0.3244    0.2992    0.1594
+   (  24,  16)    0.1853    0.2638    0.2979

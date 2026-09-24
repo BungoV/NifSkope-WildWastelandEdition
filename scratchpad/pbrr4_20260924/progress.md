@@ -1,0 +1,14 @@
+# PBRR4 progress
+- 12:21 precheck: E: 98G free, Fallout4.exe not running, bungo NifSkope pid 7644 left alone. rung release/before_pbrr4 from NifSkope.exe db5ccaf4 + shaders + DLLs (before_pbrr3 file set).
+- 12:31 read briefs, doc R4 row/s3.2/RULINGS, editor ED:2310-2316/5267-5268/2519-2520/2921/5444-5449, FO4CS PBRM.cpp composition + emissive, truepbr_brdf.hlsli:57-83 (Burley already in frag since PBRR3). Scope additions from director: (1) OpenPBR weight = IOR remap, s1b gate; (2) Burley d1 gate.
+- 12:43 code: pbrmfile (emission luminance/100 + overrides, tint slot, composition settings; EmissiveTexture bit only when a channel samples), frag (OpenPBR weight F0'=w F0, F90'=sat(50F0'), metals x weight; fresnel term view; tint law verbatim; emission replace; composition), renderer (TintMaskMap bind, uniforms, .pbrm blend/depth), scenelighting (WW_R3_TERM=fresnel, reds f90scaled/lambert, WW_R4_RED). New tests/spells/pbr_r4_{fixtures.py,gates.sh,gates.py}. Build started (make direct; release/NifSkope.exe not held: 7644 runs NifSkope_inuse_7644.exe).
+- 12:44 build RC 0, exe b6d37f73, shaders in step, no stale pbrmfile.h objects. Running R4 gates.
+- 12:48 comp judge fixed (background = uv outside [-0.05,1.05], clear of the filtered rim); re-judge r4_a: tint/emission/comp/s1b/d1 all PASS
+- 12:54 R4 reds: 7/7 OK (nodiv notintmask emitraw emitmul nocomp f90scaled lambert). Starting R3+reds, R1, R2a, R2b, zero set.
+- 12:57 R3 gates on the new exe: furnace/twins/s1/s2/s3/q9 PASS
+- 12:59 R3 reds 6/6 OK (noms nosplit f0law fo4csweight notint q9legacy). R1 running.
+- 13:02 R1 SUMMARY 48 checks, 0 failures -> PASS
+- 13:05 R1 red f0law -> (c) FAIL as aimed. R2A GATES: PASS (ev grey srgbtag cube window)
+- 13:05 R2B GATES: PASS (g1 g2 g3 g4 g5 g7 ground live). Zero set running.
+- 13:11 zero set vs before_pbrr4: SUMMARY 10 cases, 0 failures -> PASS. Shader red running.
+- 13:21 zero-set shader red: 7/7 aimed cases FAIL -> BITES. All gates done; DONE.md + DELIVERABLE_TEXT.md written.

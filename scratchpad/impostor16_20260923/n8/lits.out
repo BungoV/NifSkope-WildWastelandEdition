@@ -1,0 +1,10 @@
+  n8_2k n8_2k rc=0 cards=120 23s orbit light: world-fixed, declination 45.0 planar 45.0 (WW_IMPOSTOR_LIGHT) orbit iou mean 0.8378 orbit counted 120 of 120 
+  n8_2k n8_2k rc=0 cards=120 18s orbit light: world-fixed, declination 45.0 planar 45.0 (WW_IMPOSTOR_LIGHT) orbit iou mean 0.8357 orbit counted 120 of 120 
+  n16_2k n16_2k rc=0 cards=120 23s orbit light: world-fixed, declination 45.0 planar 45.0 (WW_IMPOSTOR_LIGHT) orbit iou mean 0.8308 orbit counted 120 of 120 
+  n8_2k n8_2k rc=0 cards=120 18s orbit light: world-fixed, declination 45.0 planar 45.0 (WW_IMPOSTOR_LIGHT) orbit iou mean 0.8388 orbit counted 120 of 120 
+  n16_2k n16_2k rc=0 cards=120 22s orbit light: world-fixed, declination 45.0 planar 45.0 (WW_IMPOSTOR_LIGHT) orbit iou mean 0.8318 orbit counted 120 of 120 
+  n8_2k n8_2k rc=0 cards=180 25s orbit light: world-fixed, declination 45.0 planar 45.0 (WW_IMPOSTOR_LIGHT) orbit iou mean 0.8375 orbit counted 180 of 180 
+  n8_2k n8_2k rc=0 cards=180 28s orbit light: world-fixed, declination 45.0 planar 45.0 (WW_IMPOSTOR_LIGHT) orbit iou mean 0.8376 orbit counted 180 of 180 
+  n4_512 n4_512 rc=0 cards=180 25s orbit light: world-fixed, declination 45.0 planar 45.0 (WW_IMPOSTOR_LIGHT) orbit iou mean 0.7876 orbit counted 180 of 180 
+  n16_1k n16_1k rc=0 cards=180 27s orbit light: world-fixed, declination 45.0 planar 45.0 (WW_IMPOSTOR_LIGHT) orbit iou mean 0.7785 orbit counted 180 of 180 
+LITS-DONE

@@ -1,0 +1,41 @@
+Lane BUILD3: build and gates DONE, 2026-09-10 00:26.
+
+release/NifSkope.exe 2026-09-10 00:13:19 (qmake + make -j2, BUILD-RC=0, zero
+errors) carries, in one link:
+
+  * lane HOOKCAM's pinned render camera  -- src/glview.h, src/glview.cpp,
+    src/nifskope_ui.cpp (the render hook);
+  * lane CARDFINAL's bake changes        -- src/lodgen.cpp, src/nifskope_ui.cpp.
+    src/nifskope_ui.cpp now carries BOTH edit sets; the 23:41:00 exe had only
+    CARDFINAL's;
+  * lane WATER2's src/lodtfile.h (00:09:52) and src/lodtfile.cpp (00:10:06),
+    which compiled clean and rode along. WATER2's src/nifcli.cpp (lodl
+    subcommand) and src/btdterrain.cpp (plane list) were NOT yet written at
+    00:13 and are NOT in this exe.
+
+NOTE FOR WATER2 -- THIS EXE IS ALREADY STALE FOR YOU. Measured at 00:29:43,
+after this build: src/lodgen.cpp 00:20:47, src/btdterrain.cpp 00:23:51,
+src/lodtfile.cpp 00:25:38, src/lodtfile.h 00:26:04, src/nifcli.cpp 00:29:43 --
+all newer than the 00:13:19 exe. You need your own build; what rode along here
+was only the 00:09:52 / 00:10:06 version of your two lodtfile files, and it
+proves those compiled, nothing more. Nothing of yours was edited by this lane.
+
+GATES on the 00:13:19 exe:
+  render_shot.sh          82 checks, 1 failure  -- section 7 (the camera) 27 of
+                          27 green; the one red is section 6's desktop-noise
+                          floor, cause measured, not the pin. See below.
+  lodgen_octahedral       85 ok, 0 fail
+  lodgen_impostor_cards   12 ok, 0 fail
+  lod_generation          97 checks, 0 failures
+  lodl_open               23 checks, 0 failures
+  btd_terrain             13 checks, 0 failures
+  lodgen_identity          8 ok, 0 fail
+
+THE ONE RED: "the pixel sampler CAN see a window's pixels" -- the visible
+control's luminance range was 169.847 against a bar of 295.737. The bar is
+3x the desktop noise floor measured in section 0, and that measurement caught a
+transient: 98.579 at 00:14:24, where the same region with the same sampler at
+00:17 measured 0.111. Every fixed-bar check in the same run passed and every
+hidden run measured 0.111-0.233. Not re-pinned, not fixed.
+
+Report: scratchpad/lane_hookcam_report.md, section "## Build (BUILD3)".

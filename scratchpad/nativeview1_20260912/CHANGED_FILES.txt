@@ -1,0 +1,47 @@
+# Lane NATIVEVIEW1 -- files added (A) and modified (M), with byte counts.
+# Counts taken with Python on the raw bytes (grep and wc lie about CR).
+# "before" is the state this lane found on disk, NOT the state at HEAD: this is
+# a shared worktree and several of these files were already dirty from other
+# lanes when this one started.
+
+A  src/lodinative.h              after  3,586 B   CR 0   LF    80
+A  src/lodinative.cpp            after 28,742 B   CR 0   LF   761
+A  src/lodtsheets.h              after  4,041 B   CR 0   LF   110
+A  src/lodtsheets.cpp            after 10,859 B   CR 0   LF   296
+A  tests/spells/native_open.sh   after 17,125 B   CR 0   LF   348
+A  tests/spells/native_open_authority.py
+                                 after 10,997 B   CR 0   LF   311
+
+M  NifSkope.pro                  before 20,693 B  CR 0   LF   778
+                                 after  20,777 B  CR 0   LF   782
+M  src/nifskope.cpp              before 442,507 B CR 9,560  LF 10,708
+                                 after  444,889 B CR 9,609  LF 10,757
+     MIXED line endings; edited through an anchored script that matches each
+     newline as \r?\n and replaces the text actually found, so both counts GREW
+     and neither was normalised.
+M  src/btdterrain.cpp            before  (not snapshotted -- see note)
+                                 after  66,366 B  CR 0   LF 1,706
+     LF-only before and after; CR is 0 on both sides, so no ending changed.
+     The before-count was not taken because the file was already modified by an
+     earlier lane when this one opened it; the edits were made with the Edit
+     tool, seven of them, each an exact-string replacement; an eighth edit,
+     applied later by an anchored patch script, sets the model-space-normal and
+     LOD-landscape shader flags inside the SHEET branch only (the no-sheets arm
+     is untouched, which is what keeps the module-off identity).
+M  docs/LODGEN_BTD_FORMAT.md     before 75,795 B  CR 0   LF 1,358
+                                 after  79,865 B  CR 0   LF 1,417
+M  docs/LODGEN_NATIVE_LODO_LODI.md
+                                 before 92,702 B  CR 0   LF 1,473
+                                 after  96,596 B  CR 0   LF 1,533
+M  MISTAKES.md                   before 418,234 B CR 0   LF 7,130
+                                 after  425,233 B CR 0   LF 7,236
+
+# Scratchpad only, not part of the tree's source:
+#   scratchpad/nativeview1_20260912/hookup.py            the anchored hook-up
+#   scratchpad/nativeview1_20260912/sx_nativeview1.sh    the syntax-only pass
+#   scratchpad/nativeview1_20260912/resroot/             the LEGACY shim root (45 files, 233 MB)
+#   scratchpad/nativeview1_20260912/work/                renders and censuses
+#   scratchpad/nativeview1_20260912/shots.sh             the ten picture frames
+#   scratchpad/nativeview1_20260912/compose.py           the three labelled panels
+#   scratchpad/nativeview1_20260912/bake_identity.sh     the ONE-CHUNK identity bake
+#   scratchpad/nativeview1_20260912/images/              the three delivered pictures

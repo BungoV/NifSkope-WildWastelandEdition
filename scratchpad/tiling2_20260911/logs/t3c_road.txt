@@ -1,0 +1,36 @@
+TILING2 work item 1b addendum -- the ROAD edge, chunk (-20,20), dim 4
+
+road mask = the texels the road pass changed on the launch exe
+            (|dL| > 1.5 of 255 between the normal bake and --no-roads),
+            25113 texels = 9.58% of the sheet. The SAME mask is used on
+            vanilla`s shipped sheet -- the road is a world fact from the ESM.
+width     = 10-90%% transition across the road edge, texels, along the
+            mask boundary`s own normal: the same profile machinery as the
+            blend-edge rows above, so the numbers sit on one scale.
+
+A width is only a ROAD width when there is a road-sized step to measure:
+the `range` column is the median height of the profile the width was read
+off. Vanilla`s road barely exists in its own sheet, so vanilla`s width is
+the terrain`s own texture under the mask, not a road edge -- read the
+contrast rows at the bottom, not the width row, for vanilla.
+
+                                       w10     w50     w90  nEdges    meanL    range
+----------------------------------------------------------------------------
+vanilla (-20,20) road edge            2.00    6.00   11.00    1492    92.50    23.26
+ours rung (-20,20) road edge          2.00    6.00   12.00    1491    98.86    43.76
+ours --no-roads (control)             2.75    5.75   10.73    1492    60.31    26.60
+
+cross-road luminance profile, mean over 1492 boundary texels
+(t < 0 = outside the road, 0 = its edge, t > 0 = towards the centre)
+
+  t (texels)                         -6     -5     -4     -3     -2     -1      0      1      2      3      4      5      6
+  vanilla (-20,20) road edge       89.8   89.8   90.1   90.8   90.8   90.8   90.8   90.8   91.1   91.0   91.5   91.7   92.0
+  ours rung (-20,20) road edge     68.7   69.1   69.7   69.7   69.5   69.0   72.4   77.2   82.9   88.3   91.2   92.6   93.5
+  ours --no-roads (control)        68.3   68.8   69.5   69.7   69.5   68.8   68.1   66.8   65.4   63.9   62.7   61.6   60.9
+
+  ours minus vanilla              -21.1  -20.7  -20.4  -21.0  -21.3  -21.8  -18.4  -13.6   -8.2   -2.7   -0.3   +0.9   +1.5
+
+road body vs its surround (mean luminance of 255):
+  vanilla (-20,20) road edge     road  92.50   surround  88.57   contrast  +3.92
+  ours rung (-20,20) road edge   road  98.86   surround  69.41   contrast +29.45
+  ours --no-roads (control)      road  60.31   surround  69.41   contrast  -9.10

@@ -1,0 +1,17 @@
+IMPOSTORFIX2 -- offline simulation lane -- finished Sat Sep 19 15:29 CEDT 2026
+(started Sat Sep 19 14:32 CEDT 2026; both times from `date`).
+
+Deliverable: report.md (sections 0-9, ranked list in section 7).
+Handover:    PENDING.md
+Pictures:    images/02_height_fill_R3_vs_R2d8.png
+             images/03_rock_worst_before_after.png
+             images/04_ghost_minor_frames.png
+
+No build, no exe, no test that starts the exe, no src/ or res/ edit, no commit,
+no git stash, no WW_CHANGES.md or HANDOFF.md edit. Files written outside this
+folder: root MISTAKES.md (three entries, CRLF byte splice, CR 9716 -> 9757 with
+LF matching) and .claude/skills/ww-reference-card-diagnose/SKILL.md (sections
+7-10 appended, file stays LF-only, CR 0).
+
+Nothing here is fixed. Every number is a simulation, controlled against the
+application to within 0.0101 on five subjects and never run by it.

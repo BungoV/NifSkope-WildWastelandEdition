@@ -1,0 +1,8 @@
+road_elevated    meshes   171  triangles   205649  texels  38453 (14.67%)
+road_ground      meshes     0  triangles        0  texels      0 ( 0.00%)
+nonroad          meshes  6955  triangles  2928657  texels 129175 (49.28%)
+
+road_elevated    texels  38453  AUCbr 0.739  floor 0.389..0.657  twin 0.483..0.582   AUCgrey 0.471  floor 0.469..0.559  twin 0.465..0.506
+road_ground      absent from this chunk
+nonroad          texels 129175  AUCbr 0.571  floor 0.463..0.545  twin 0.501..0.532   AUCgrey 0.472  floor 0.465..0.530  twin 0.481..0.506
+wrote hw_m20_m12.npz

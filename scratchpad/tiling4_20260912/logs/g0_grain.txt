@@ -1,0 +1,44 @@
+TILING4 -- can any sampler match vanilla`s grain sheet by sheet?
+
+Each row is one selection sheet.  "vs van" columns are the percentage
+difference from the SAME CHUNK`s vanilla sheet; the brief`s gate is +-20 %.
+"B/6" counts the six radial bands whose share is inside 20 % of vanilla`s
+(TILING3`s a5_tune.py required 5 of 6).
+
+sheet        |  van hp    rung    prop |  van lv    rung    prop |  B/6  B/6
+             |   value  vs van  vs van |   value  vs van  vs van | rung prop
+( -20,  24) |   4.476    -24%    +10% |   19.81    -35%    +26% |    1    2
+( -20,  20) |   5.459    -41%    -16% |   29.39    -50%    -17% |    0    0
+( -36, -20) |   3.485    -17%    +23% |   12.13    -41%    +37% |    1    1
+(  -4, -20) |   5.523    -33%     -4% |   29.83    -46%     -2% |    1    1
+(  28, -20) |   1.371   +152%   +279% |    1.97   +427%  +1179% |    1    1
+(  -4,  16) |   6.933    -53%    -38% |   46.84    -68%    -53% |    1    2
+(  24,  16) |   4.076    -28%     +4% |   16.11    -41%    +14% |    0    1
+
+INSIDE the brief`s +-20 %% of the same chunk`s vanilla, of 7 sheets:
+   hp SD        rung 1 of 7,  TILING3 proposal 4 of 7
+   local var    rung 0 of 7,  TILING3 proposal 3 of 7
+   bands 5 of 6 rung 0 of 7,  TILING3 proposal 0 of 7
+
+WHY.  Vanilla`s own grain across these seven sheets runs 1.37 to 6.93 on
+hp SD (a factor of 5.1) and 2.0 to 46.8 on local variance (a factor of
+23.8), because it is set by what terrain is there.  Our composite`s runs
+2.88 to 3.73 and 7.2 to 16.0 -- it is set by which land textures are
+painted, and a change to the SAMPLER cannot move one sheet`s grain to
+its own chunk`s vanilla value.  The gate as written is not a gate on the
+sampler.
+
+THE TWO ATTAINABLE GATES, registered here before any candidate is ranked:
+  G1 the MEDIAN grain over the seven within 20 %% of vanilla`s median over
+     the same seven.  This is TILING3`s own reported criterion ("mip bias
+     -1.00 puts median grain at +2 %% of vanilla`s").
+       vanilla median hp 4.476, lv 19.81
+       rung     median hp 3.281 (-27%), lv 12.93 (-35%)
+       proposal median hp 4.565 (+2%), lv 24.51 (+24%)
+  G2 PER SHEET, within 20 %% of THE RUNG`s grain on that same sheet -- no
+     grain regression from the sampler change, a per-sheet gate with a
+     per-sheet floor. The rung passes it by construction (it IS the floor);
+     TILING3`s proposal scores:
+       hp SD 0 of 7, local variance 0 of 7
+  Both are reported for every candidate, and the brief`s literal per-sheet-
+  vs-vanilla number is reported beside them so nothing is hidden.

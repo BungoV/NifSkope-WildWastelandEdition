@@ -1,0 +1,22 @@
+{
+  "format": "ww-water-curves",
+  "version": 1,
+  "worldspace": "window",
+  "landFile": "window.lodl",
+  "cells": [-96, -96, 95, 95],
+  "bodySamples": 32,
+  "units": "world",
+  "dye": { "halfDistance": 8192 },
+  "curves": [
+    { "kind": "curve", "body": 2, "enabled": true, "speed": 0.5, "width": 4096,
+      "points": [[8669.53809, -153024, 1], [-8128, -136640, 0.5], [-17019.1992, -119744, 2], [-28096, -103360, 0.75], [-25600, -86464, 1.25]] },
+    { "kind": "sourcePin", "body": 2, "enabled": true, "speed": 0.25, "width": 4096,
+      "points": [[8669.53809, -153024, 1]] },
+    { "kind": "dyePin", "body": 2, "enabled": true, "speed": 1, "width": 2048, "colour": [200, 40, 40, 255],
+      "points": [[-17019.1992, -119744, 2]] }
+  ],
+  "bodies": [
+    { "id": 2, "name": "harness river", "class": "auto", "form": null, "colour": [10, 20, 30], "still": false, "dyeMouth": false, "dyeStrength": 1 }
+  ],
+  "rasters": []
+}

@@ -1,0 +1,54 @@
+placed STAT bases: 10940  (road 470, non-road 10470)
+placements: road direct 16988 + viaSCOL 2556 ; non-road direct 567292 + viaSCOL 215359
+
+bit  name                         road %    other %      other n  lift
+------------------------------------------------------------------------------------
+2    Heading Marker                 0.0%       0.1%            8  0.0x
+4    Non Occluder                   0.0%       6.7%          698  0.0x
+7    Add-On LOD Object              0.0%       0.0%            1  0.0x
+9    Hidden From Local Map          0.0%       2.5%          261  0.0x
+10   Headtrack Marker               0.0%       0.0%            1  0.0x
+11   Used as Platform               0.0%       0.0%            5  0.0x
+13   Pack-In Use Only               0.0%       0.0%            2  0.0x
+15   Has Distant LOD               17.7%      28.0%         2927  0.6x
+23   Is Marker                      0.0%       3.4%          358  0.0x
+25   Obstacle                       0.0%       0.0%            1  0.0x
+26   NavMesh - Filter               0.0%       0.3%           29  0.0x
+27   NavMesh - Bounding Box         0.0%       2.7%          284  0.0x
+30   NavMesh - Ground               0.2%       0.0%            5  4.5x
+
+by PLACEMENT (direct+viaSCOL): road total 19544, other total 782651
+bit  name                         road %    other %
+------------------------------------------------------
+2    Heading Marker                 0.0%       0.6%
+4    Non Occluder                   0.0%      18.3%
+7    Add-On LOD Object              0.0%       0.0%
+9    Hidden From Local Map          0.0%       7.4%
+10   Headtrack Marker               0.0%       0.0%
+11   Used as Platform               0.0%       0.0%
+13   Pack-In Use Only               0.0%       0.0%
+15   Has Distant LOD                3.0%      21.0%
+23   Is Marker                      0.0%       1.0%
+25   Obstacle                       0.0%       0.1%
+26   NavMesh - Filter               0.0%       2.0%
+27   NavMesh - Bounding Box         0.0%      10.7%
+30   NavMesh - Ground               0.3%       0.3%
+
+MNAM present on road     : 83 / 470  (17.7%)
+MNAM present on non-road : 2922 / 10470  (27.9%)
+
+REFR header flags, fraction of DIRECT placements
+bit  name(ACTI/STAT/SCOL/TREE)        road %    other %
+----------------------------------------------------------
+4                                      2.55%      0.09%
+6                                      0.00%      0.00%
+8    LOD Respects Enable State         0.00%      0.00%
+9    Hidden From Local Map             0.00%      0.00%
+10   Persistent                        0.04%      1.46%
+11   Initially Disabled                0.00%      0.06%
+13                                     0.00%      0.01%
+15   Visible When Distant              2.57%     12.12%
+16   Is Full LOD                       0.00%      0.07%
+27                                     0.00%      0.04%
+29                                     0.00%      0.01%
+30                                     0.00%      0.00%

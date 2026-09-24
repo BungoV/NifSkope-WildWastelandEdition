@@ -1,0 +1,25 @@
+blast_n4: worst view az 30 el 20 (torn 12966 px)   [app grabs: stage/def + stage/nearest; sets impostorfin1 res512]
+  registration scale x 0.597 y 0.661; nearest-only IoU vs mesh as the registration check: 0.705
+  variant                       IoU  recall top / mid / bottom
+  steps 0 mean                0.436  0.002 / 0.002 / 0.897
+  steps 0 max                 0.266  0.384 / 0.815 / 1.000
+  steps 0 nearest             0.599  0.358 / 0.815 / 0.997
+  steps 1 mean                0.462  0.003 / 0.323 / 0.752 <- SHIPPED
+  steps 1 max                 0.426  0.680 / 0.881 / 0.984
+  steps 1 nearest             0.705  0.649 / 0.869 / 0.969
+  steps 4 mean                0.457  0.006 / 0.319 / 0.729
+  steps 4 nearest             0.705  0.620 / 0.869 / 0.950
+  steps 8 mean                0.457  0.005 / 0.319 / 0.729
+  steps 8 nearest             0.705  0.616 / 0.869 / 0.946
+  march th 1e+09 mean          0.505  0.711 / 0.834 / 0.987
+  march th 1e+09 max           0.052  0.990 / 1.000 / 1.000
+  march th 1e+09 nearest       0.413  0.772 / 0.905 / 0.987
+  march th 48    mean          0.650  0.636 / 0.814 / 0.969
+  march th 48    max           0.297  0.974 / 0.999 / 1.000
+  march th 48    nearest       0.644  0.684 / 0.882 / 0.983
+  march th 24    mean          0.648  0.595 / 0.739 / 0.896
+  march th 24    max           0.392  0.961 / 0.996 / 0.995
+  march th 24    nearest       0.662  0.677 / 0.877 / 0.953
+  march th 12    mean          0.604  0.525 / 0.630 / 0.789
+  march th 12    max           0.463  0.932 / 0.995 / 0.976
+  march th 12    nearest       0.663  0.663 / 0.876 / 0.905

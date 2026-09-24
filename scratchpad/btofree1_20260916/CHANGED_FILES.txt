@@ -1,0 +1,54 @@
+CHANGED_FILES -- lane BTOFREE1, 2026-09-16
+Every count below is a PYTHON BYTE COUNT (b.count(b'\r') / b.count(b'\n')), not grep, and
+every "after" was re-measured off disk when this file was written.
+Every file in this tree was LF-only before this lane and is LF-only after it; no file's CR
+count moved, and every patch script asserted that before it wrote.  A = added, M = modified.
+
+                                                     bytes before     bytes after    CR b -> a      LF b -> a
+--- source ---------------------------------------------------------------------------------------------
+M src/lodgenchunkpass.h                                     5,990 ->        9,057      0 ->   0            142 -> 197
+M src/lodgenchunkpass.cpp                                  14,058 ->       17,650      0 ->   0            409 -> 495
+M src/nifcli.cpp                                          357,893 ->      362,900      0 ->   0          7,683 -> 7,780
+M src/lodgenmanager.cpp                                   169,509 ->      173,002      0 ->   0          3,585 -> 3,650
+M src/nifskope_ui.cpp                                   1,591,829 ->    1,593,510      0 ->   0         33,663 -> 33,688
+--- gates ----------------------------------------------------------------------------------------------
+A tests/spells/lodgen_btofree.sh                                - ->       13,839      - ->   0              - -> 277
+A tests/spells/lodgen_btofree_ledger.py                         - ->        4,504      - ->   0              - -> 100
+M tests/spells/native_open.sh                              17,125 ->       19,863      0 ->   0            348 -> 392
+M tests/spells/native_open_authority.py                    10,997 ->       13,316      0 ->   0            311 -> 367
+M tests/spells/lodgen_native.sh                            15,024 ->       17,155      0 ->   0            278 -> 310
+M tests/spells/lodgen_byte_gate.sh                          8,362 ->        9,488      0 ->   0            190 -> 213
+--- documents ------------------------------------------------------------------------------------------
+M docs/FO4CS_IMPROVED_LOD_PLAN.md                          81,688 ->       86,754      0 ->   0          1,322 -> 1,391
+M .claude/skills/nifskope-ww-lodgen/SKILL.md               38,639 ->       40,786      0 ->   0            517 -> 546
+M MISTAKES.md                                             455,055 ->      460,316      0 ->   0          7,680 -> 7,759
+--- outside the repo (the same skill, the session's own copy) ------------------------------------------
+M E:/Projects/Claude/.claude/skills/nifskope-ww-lodgen/SKILL.md
+                                                           38,639 ->       40,786      0 ->   0            517 -> 546
+
+--- NOT TOUCHED, and why --------------------------------------------------------------------------
+- WW_CHANGES.md is MIXED (19020 CR / 29707 LF) and belongs to the director, who splices
+  scratchpad/btofree1_20260916/WW_CHANGES_ENTRY.md. The entries at the head of that file are
+  LF-only, so the entry file is LF-only and matches its neighbours; a splice near an older CRLF
+  entry would need the CR back.
+- tests/spells/lodgen_defaults.sh and tests/spells/lodgen_ladder.sh were READ and need nothing.
+  defaults phases (b) and (c) bake WITHOUT --native, so their .BTO files are still on disk; phase
+  (e) compares only files under the native directory; ladder's only chunk reference is a
+  .BTO.manifest.txt, which is kept either way.
+- git state: nothing committed, nothing stashed, no branch touched, no index entry.
+
+--- FIXTURE RE-BAKED (data, not source; the old pair is preserved) ----------------------------------
+M scratchpad/showcase1_20260912/out/look/native/Commonwealth.lodo
+                                                         9657316 ->   225399755   (LODO v3, refused by name -> v4)
+M scratchpad/showcase1_20260912/out/look/native/Commonwealth.lodi
+                                                          128256 ->      134598   (v3 -> v5)
+M scratchpad/showcase1_20260912/out/look/mesh_report.txt  435204 ->      911262
+  the pre-re-bake pair is kept at scratchpad/btofree1_20260916/fixture_backup/
+
+--- BUILT -------------------------------------------------------------------------------------------
+  release/NifSkope.exe      22341632 B, 2026-09-16 15:53:30  ->  22356992 B, 2026-09-16 17:11:17
+  release/NifSkope.before_btofree1.exe  is the rung copy of the 15:53:30 exe
+  release/NifSkope_inuse_2000.exe  is the 15:53:30 exe, renamed aside because a NifSkope window
+    (pid 2000, launched 16:53:38 with no arguments -- not this lane's) was holding it. It was NOT
+    killed. That window had closed by 18:34, so the file is deletable, but deleting an exe is not
+    this lane's call and it is left where it is.

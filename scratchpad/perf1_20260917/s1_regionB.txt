@@ -1,0 +1,20 @@
+TAG=B_ct1_a REGION=boston16(-24 16 -9 31) CHUNKTHREADS=1 THREADS=0 rc=0 WALL_MS=92206
+    stage times: landscape 0.0 s, meshes 72.7 s, textures 15.4 s, impostors 0.0 s
+    peak working set: 2.55 GB (2739036160 bytes)
+    bound by asked
+    census: bake census: threads 16, chunk threads 1 bound by asked, chunk jobs 16, chunk workers 1, peak working set: 2.55 GB (2739036160 bytes), bto built in scratch E:/Projects/NifskopeWildWastelandEdition/scratchpad/perf1_20260917/work/s1/B_ct1_a/obj/lodgen_bto_scratch, 16 chunk(s), 16 dropped, 12581096 bytes freed, layout E:/Projects/NifskopeWildWastelandEdition/scratchpad/perf1_20260917/work/s1/B_ct1_a/nat/FO4CSLOD, 34 file(s), 0 outside (a SECOND root: E:/Projects/NifskopeWildWastelandEdition/scratchpad/perf1_20260917/work/s1/B_ct1_a/obj/FO4CSLOD)
+TAG=B_ct1_b REGION=boston16(-24 16 -9 31) CHUNKTHREADS=1 THREADS=0 rc=0 WALL_MS=92839
+    stage times: landscape 0.0 s, meshes 74.1 s, textures 14.7 s, impostors 0.0 s
+    peak working set: 2.55 GB (2740654080 bytes)
+    bound by asked
+    census: bake census: threads 16, chunk threads 1 bound by asked, chunk jobs 16, chunk workers 1, peak working set: 2.55 GB (2740654080 bytes), bto built in scratch E:/Projects/NifskopeWildWastelandEdition/scratchpad/perf1_20260917/work/s1/B_ct1_b/obj/lodgen_bto_scratch, 16 chunk(s), 16 dropped, 12581096 bytes freed, layout E:/Projects/NifskopeWildWastelandEdition/scratchpad/perf1_20260917/work/s1/B_ct1_b/nat/FO4CSLOD, 34 file(s), 0 outside (a SECOND root: E:/Projects/NifskopeWildWastelandEdition/scratchpad/perf1_20260917/work/s1/B_ct1_b/obj/FO4CSLOD)
+TAG=B_ct8_a REGION=boston16(-24 16 -9 31) CHUNKTHREADS=8 THREADS=0 rc=0 WALL_MS=92185
+    stage times: landscape 0.0 s, meshes 76.4 s, textures 13.9 s, impostors 0.0 s
+    peak working set: 10.75 GB (11547389952 bytes)
+    bound by asked
+    census: bake census: threads 16, chunk threads 8 bound by asked, chunk jobs 16, chunk workers 8, peak working set: 10.75 GB (11547389952 bytes), bto built in scratch E:/Projects/NifskopeWildWastelandEdition/scratchpad/perf1_20260917/work/s1/B_ct8_a/obj/lodgen_bto_scratch, 16 chunk(s), 16 dropped, 12581096 bytes freed, layout E:/Projects/NifskopeWildWastelandEdition/scratchpad/perf1_20260917/work/s1/B_ct8_a/nat/FO4CSLOD, 34 file(s), 0 outside (a SECOND root: E:/Projects/NifskopeWildWastelandEdition/scratchpad/perf1_20260917/work/s1/B_ct8_a/obj/FO4CSLOD)
+TAG=B_ct8_b REGION=boston16(-24 16 -9 31) CHUNKTHREADS=8 THREADS=0 rc=0 WALL_MS=92534
+    stage times: landscape 0.0 s, meshes 69.9 s, textures 21.0 s, impostors 0.0 s
+    peak working set: 10.83 GB (11633782784 bytes)
+    bound by asked
+    census: bake census: threads 16, chunk threads 8 bound by asked, chunk jobs 16, chunk workers 8, peak working set: 10.83 GB (11633782784 bytes), bto built in scratch E:/Projects/NifskopeWildWastelandEdition/scratchpad/perf1_20260917/work/s1/B_ct8_b/obj/lodgen_bto_scratch, 16 chunk(s), 16 dropped, 12581096 bytes freed, layout E:/Projects/NifskopeWildWastelandEdition/scratchpad/perf1_20260917/work/s1/B_ct8_b/nat/FO4CSLOD, 34 file(s), 0 outside (a SECOND root: E:/Projects/NifskopeWildWastelandEdition/scratchpad/perf1_20260917/work/s1/B_ct8_b/obj/FO4CSLOD)

@@ -1,0 +1,8 @@
+BAKE r4_default t2020 rc=0  5s  texfiles=3  args=[]
+BAKE r4_d1 t2020 rc=0  5s  texfiles=3  args=[--road-detail 1]
+BAKE r4_d0 t2020 rc=0  4s  texfiles=3  args=[--road-detail 0]
+BAKE r4_noroads t2020 rc=0  4s  texfiles=3  args=[--no-roads]
+BAKE r4_default t0808 rc=0  6s  texfiles=3  args=[]
+BAKE r4_d1 t0808 rc=0  7s  texfiles=3  args=[--road-detail 1]
+BAKE r4_d0 t0808 rc=0  6s  texfiles=3  args=[--road-detail 0]
+BAKE r4_noroads t0808 rc=0  6s  texfiles=3  args=[--no-roads]

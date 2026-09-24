@@ -1,0 +1,21 @@
+wrote images\L02_colour.png  upt 32  shown 512  mean 124.45  sd 20.39
+wrote images\L02_normal.png  upt 32  shown 512  mean 170.39  sd 19.43
+wrote images\L02_mask.png  upt 32  shown 512  mean 160.17  sd 17.09
+wrote images\L04_colour.png  upt 64  shown 512  mean 124.46  sd 20.37
+wrote images\L04_normal.png  upt 64  shown 512  mean 170.44  sd 19.47
+wrote images\L04_mask.png  upt 64  shown 512  mean 160.18  sd 17.09
+wrote images\L08_colour.png  upt 128  shown 512  mean 124.46  sd 20.37
+wrote images\L08_normal.png  upt 128  shown 512  mean 170.50  sd 19.27
+wrote images\L08_mask.png  upt 128  shown 512  mean 160.23  sd 17.02
+wrote images\L16_colour.png  upt 256  shown 512  mean 124.47  sd 20.37
+wrote images\L16_normal.png  upt 256  shown 512  mean 170.55  sd 18.96
+wrote images\L16_mask.png  upt 256  shown 512  mean 160.26  sd 17.00
+wrote images\L32_colour.png  upt 512  shown 512  mean 124.47  sd 20.37
+wrote images\L32_normal.png  upt 512  shown 512  mean 170.59  sd 18.99
+wrote images\L32_mask.png  upt 512  shown 512  mean 160.26  sd 17.00
+SANCTUARY tiles tx 38..39 ty 34..35
+SANCTUARY decoder control: our BC3 decode vs PIL, max abs diff colour 1 normal 1 (DXT5/DXT5)
+SANCTUARY colour lum corr as-is 0.0113, vanilla flipped N-S 0.0233, flipped E-W -0.0161
+SANCTUARY normal R(east) corr as-is 0.6594, vanilla flipped N-S 0.1572
+SANCTUARY mean |diff| 14.33; mean RGB ours [91.2 79.3 65.8] vanilla [87.8 79.7 68.7]
+wrote images\sanctuary_L02_vs_vanilla_chunk.png

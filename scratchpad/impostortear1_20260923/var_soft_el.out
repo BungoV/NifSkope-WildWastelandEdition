@@ -1,0 +1,17 @@
+  run_var  blast_n4  el   rc=0 cards=90 16s orbit counted 90 of 90
+  run_var  maple_n4  el   rc=0 cards=90 9s orbit counted 90 of 90
+  run_var  rock_n4   el   rc=0 cards=90 15s orbit counted 90 of 90
+soft2   blast_n4  az:  34446 vs  27180 x1.5 =  40770.0  ratio 1.27  PASS
+soft2   blast_n4  el:  25364 vs  14750 x1.5 =  22125.0  ratio 1.72  FAIL
+soft2   maple_n4  az:  21498 vs  15890 x1.5 =  23835.0  ratio 1.35  PASS
+soft2   maple_n4  el:  18765 vs  12319 x1.5 =  18478.5  ratio 1.52  FAIL
+soft2   rock_n4   az: 109173 vs  90847 x1.5 = 136270.5  ratio 1.20  PASS
+soft2   rock_n4   el:  58976 vs 125698 x1.5 = 188547.0  ratio 0.47  PASS
+soft2   VERDICT FAIL
+soft2   blast_n4  az030 run_ship IoU 0.4664  card  17922 mesh  38190  torn share 44.9% (14398 of 32060 mesh&nearest px)
+soft2   blast_n4  az030 soft2    IoU 0.6996  card  44159 mesh  38190  torn share 5.7% (1833 of 32060 mesh&nearest px)
+soft2   maple_n4  az210 run_ship IoU 0.1910  card  10075 mesh  43508  torn share 68.3% (13986 of 20482 mesh&nearest px)
+soft2   maple_n4  az210 soft2    IoU 0.3962  card  33764 mesh  43508  torn share 20.8% (4259 of 20482 mesh&nearest px)
+soft2   rock_n4   az030 run_ship IoU 0.6213  card 208460 mesh 334905  torn share 27.3% (74872 of 274649 mesh&nearest px)
+soft2   rock_n4   az030 soft2    IoU 0.8078  card 323447 mesh 334905  torn share 1.0% (2740 of 274649 mesh&nearest px)
+VARDONE

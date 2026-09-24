@@ -1,0 +1,27 @@
+cell_open.sh  2026-09-19 19:57:37
+exe: /e/Projects/NifskopeWildWastelandEdition/release/NifSkope.exe  (2026-09-19 19:49:03)
+esm: X:/Programs/Steam/steamapps/common/Fallout 4/Data/Fallout4.esm
+  PASS  the exe is newer than every source this gate covers
+  PASS  wild -30,-30 1x1: every placement's world box matches the plugin
+  wild: 74 placements dumped, shot /e/Projects/NifskopeWildWastelandEdition/scratchpad/cellview1_20260919/images/wild.png
+  PASS  sanctuary -20,7 1x1: every placement's world box matches the plugin
+  sanctuary: 240 placements dumped, shot /e/Projects/NifskopeWildWastelandEdition/scratchpad/cellview1_20260919/images/sanctuary.png
+  PASS  downtown 5,-11 1x1: every placement's world box matches the plugin
+  downtown: 1578 placements dumped, shot /e/Projects/NifskopeWildWastelandEdition/scratchpad/cellview1_20260919/images/downtown.png
+  ok       STAT 0x000272B4 DirtSlope01_RubbleRocks
+  ok       SCOL 0x000272C3 TreeCluster05  (3 collection parts)
+  ok       MSTT 0x001EC5B9 ShackBalconyRailingDbl01Dest
+  ok       FURN 0x001EC5C1 NpcBedMilitaryCotMattressLay01
+  ok       CONT 0x001EC5C3 Loot_Raider_TrunkMilitary_Boss
+  five named references: 5 ok, 0 wrong
+  PASS  five named references picked back by form id, at the plugin's positions
+  overlay type: 4 buckets
+  PASS  overlay type produces at least two distinct colours
+  overlay has-lod: 4 buckets
+  PASS  overlay has-lod produces at least two distinct colours
+  overlay layer: 2 buckets
+  PASS  overlay layer produces at least two distinct colours
+  neighbours are run separately: native_open.sh, lodl_open.sh, render_shot.sh
+
+PASS
+done

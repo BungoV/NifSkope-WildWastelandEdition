@@ -1,0 +1,67 @@
+=== lodgen_roads  (NifSkope.exe instances before: 0) ===
+  rc=0  21s
+11 checks, 0 failures
+RESULT PASS
+  ok   R5 the road-presence metric passes its pre-registered bars
+11 checks, 0 failures
+RESULT PASS
+=== lodgen_native  (NifSkope.exe instances before: 0) ===
+  rc=0  82s
+15 checks, 0 failures, 1 skips
+RESULT PASS
+18 checks, 0 failures
+RESULT PASS
+
+18 checks, 0 failures
+RESULT PASS
+=== lodgen_native_baseline  (NifSkope.exe instances before: 0) ===
+  rc=0  11s
+RESULT PASS
+  baseline exe 664e0de4483792b5b7fa4a0d89cb9a9a3d5b76dfd17e29b2b85e2ed594fb8d1b 2026-09-10T03:57:46; this exe 144501ebcb14569adf340aa63f4c9d735d31aee853c96c901b12bd9c5720361d 2026-09-12T11:51:35
+0 failures
+RESULT PASS
+=== lodgen_terrain_vt  (NifSkope.exe instances before: 0) ===
+  rc=1  43s
+41 checks, 1 failures
+RESULT FAIL
+
+41 checks, 1 failures
+RESULT FAIL
+=== lodgen_ground_cover  (NifSkope.exe instances before: 0) ===
+  rc=1  32s
+  21 checks, 4 failures
+29 checks, 5 failures
+RESULT FAIL
+
+29 checks, 5 failures
+RESULT FAIL
+=== lod_generation  (NifSkope.exe instances before: 0) ===
+  rc=0  6s
+116 checks, 0 failures
+PASS
+116 checks, 0 failures
+PASS
+checks run: 116 (floor 116)
+=== lodl_open  (NifSkope.exe instances before: 0) ===
+  rc=0  83s
+  ok   a one-sample-shifted decode does NOT match, so the comparison can fail
+23 checks, 0 failures
+PASS
+  ok   the whole worldspace renders non-blank (coverage > 0.05, contrast SD > 2)
+23 checks, 0 failures
+PASS
+=== lodgen_terrain_pbrm  (NifSkope.exe instances before: 0) ===
+  rc=0  46s
+14 checks, 0 failures
+RESULT PASS
+
+14 checks, 0 failures
+RESULT PASS
+=== animws  (NifSkope.exe instances before: 0) ===
+  rc=0  9s
+236 checks, 0 failures, 1 skips
+PASS
+-rw-r--r-- 1 bungo 197609 23784 Sep 12 12:24 /e/Projects/NifskopeWildWastelandEdition/scratchpad/hkxedit2_20260910/dock_frame46.png
+-rw-r--r-- 1 bungo 197609 10158 Sep 12 12:24 /e/Projects/NifskopeWildWastelandEdition/scratchpad/hkxedit2_20260910/sheet_colours.png
+-rw-r--r-- 1 bungo 197609 56507 Sep 12 12:24 /e/Projects/NifskopeWildWastelandEdition/scratchpad/hkxedit2_20260910/viewport_gizmo.png
+=== F4 chain done ===

@@ -1,0 +1,58 @@
+## 12. Divergence rows for bungo
+
+Both rows are written BEFORE the thing they describe is allowed to stand, per
+the standing rule. Neither is mine to decide.
+
+### 12.1 A NEW FILE in the default output set: `<ws>.<dim>.<cx>.<cy>.lodj`
+
+**What changed.** Every bake that emits the FO4CS aggregate now also writes one
+small plain-text file per chunk next to the pair, under `Data/FO4CSLOD/<ws>/`.
+It holds that chunk's REDUCTION -- its placements in emission order and its
+per-objectIndex lighting and AO sums as exact IEEE hex bit patterns -- so a
+later `--incremental` run can replay a clean chunk instead of re-baking it. A
+9-chunk Sanctuary region writes 9 of them; measured, a placement costs 294
+bytes, so four chunks cost about 640 KB against a 215 MB `.lodo`.
+
+**Why it is a divergence.** The ruled default pipeline's output set is what
+ships. `.lodj` is written BY DEFAULT, on every bake, whether or not anybody
+ever passes `--incremental`. A new file in the shipped folder is your call, not
+a lane's.
+
+**What it costs if it stays.** Nothing at run time -- the game never reads it
+and `--native-verify` ignores it. It costs disk (a fraction of a percent of the
+pair), and it costs two harness rows: `lodgen_btofree.sh` legs (a) and (b)
+compare the whole output tree against a rung exe that predates the file, so
+they read `0/1 only on one side` and stay red until that rung is retaken.
+
+**The alternative, stated plainly.** Write the cache only when the run was
+asked to be incremental -- only under `--incremental`, or behind a
+`--native-cache` switch that ships OFF like every other master. The price is
+exact and one-time: the FIRST `--incremental` run after a full bake would find
+no cache, every chunk would count as "not in the ledger", and that one run
+would rebuild the whole region. From the second run on the behaviour is
+identical. So the choice is "one wasted full bake, ever" against "a new file in
+the shipped folder, always".
+
+**What exists today either way.** `--no-native-cache` turns the writing off and
+makes `--incremental` refuse rather than silently do a full bake under an
+incremental's name, so the escape hatch is already in the exe, in `lodgen
+--help` and in `docs/LODGEN_LEDGER_FORMAT.md` 4.1.
+
+### 12.2 `--native` came OFF `--incremental`'s whole-region refusal list
+
+**What changed.** `--incremental` used to refuse the `--native` target outright,
+so it refused THE ruled default pipeline: the one target anybody bakes was the
+one target it would not touch. It now accepts it, and refuses only when
+`--no-native-cache` is also given (no cache to replay from).
+
+**Why it is a divergence.** It changes what a switch does to the ruled
+pipeline rather than adding a switch. No default MOVED -- `--incremental` is
+still opt-in and still off -- but the set of runs it accepts grew, and the
+census prints two more lines (`incremental:` and `native cache:`) on those
+runs.
+
+**The refuter that keeps it honest.** `tests/spells/lodgen_incremental.sh` arm
+(d): a null incremental over an untouched tree must reproduce the full bake's
+own bake record under the five-volatile mask, and arm (f) cross-checks that
+normalisation against a second implementation in Python. If replay ever drifts
+from a real bake, those two go red before anything ships.

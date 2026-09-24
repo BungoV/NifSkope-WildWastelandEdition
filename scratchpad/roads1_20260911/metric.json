@@ -1,0 +1,22 @@
+{
+ "centrelineTexels": 9777,
+ "roadishTexels": 27055,
+ "extractorInsideGeometry": 0.5109951927994272,
+ "extractorControl": [
+  0.16272885343152296,
+  0.0808018819678838,
+  0.06791449319832259,
+  0.11087245576352664,
+  0.0353891786846681
+ ],
+ "ceiling_vanilla": 1.0,
+ "floor_ours": 0.12744195561010535,
+ "after_ours": 0.30653574716170606,
+ "reference_background_noroads": 0.34494304640562556,
+ "reference_background_roads": 0.34508350475292926,
+ "pass": true,
+ "wholeTile_--no-roads": 24.38722688603633,
+ "wholeTile_--roads": 22.807456894038094,
+ "centreline_--no-roads": 38.85462951310382,
+ "centreline_--roads": 24.356231258655317
+}

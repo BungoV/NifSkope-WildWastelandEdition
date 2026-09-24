@@ -1,0 +1,36 @@
+## 2026-09-19 -- "the disagreement is the SHEET's", published without ever putting the sheet's own frame beside the draw
+
+Lane IMPOSTORFIX5 measured the fine-twig maple's card against its mesh at the
+sixteen directions its own bake used, found IoU 0.4673 at blend 0 and 0.4673 at
+blend 1, and reasoned: parallax is a provable no-op at a bake direction, the two
+numbers are identical, therefore the view ray is right and what is left is the
+SHEET's. The reasoning is sound and the conclusion does not follow. It rules out
+the parallax step; it says nothing about what happens to the sheet's value after
+it is read.
+
+Lane IMPOSTORLOOK1 drew the third picture nobody had drawn: the raw frame cut
+out of `0004a074_oct_d.DDS` and composited with its coverage as a fraction, in
+the same cell as the mesh grab and the card grab
+(`images/A_maple_n4_every_bake_angle.png`). The baked frame is a recognisable
+thin twiggy tree. The card is blobs. The detail is IN the sheet and the draw
+throws it away: `res/shaders/impostor_oct.frag` tests `colour.a < alphaThreshold`
+and then writes `vec4( ..., 1.0 )`, so a texel with 7 per cent coverage draws
+fully opaque, and 94 per cent of that subject's silhouette is partial coverage.
+
+How it was found: by making the picture the brief asked for, not by a new
+measurement. THE RULE: a claim of the form "the defect is in stage X" ships with
+stage X's OWN output beside the final one. Two numbers that agree with each
+other rule out what sits between them and nothing else.
+
+## 2026-09-19 -- the brief named the fallback filename and the lane used the refused one first
+
+IMPOSTORLOOK1's brief says, in its header, `report.md` incremental, "fallback
+name `DELIVERABLE_TEXT.md`". The harness refuses to let an agent write
+`report.md`; lane IMPOSTORFIX5 hit the same refusal the same day and wrote it
+into its own report. This lane wrote `report.md` anyway, was refused, and then
+used the fallback -- one wasted tool call and a paragraph of explanation that a
+reader of the brief did not need.
+
+How it was found: the tool refused. THE RULE: when a brief names a fallback for
+a path, the fallback is not a recovery route, it is the instruction. Read the
+header's parenthetical before the first write, not after it.

@@ -1,0 +1,31 @@
+model BlastedForestDestroyedTreeUpright01.nif
+projection ortho
+ranges BlastedForestDestroyedTreeUpright01:0 - L1_BlastedForestDestroyedTreeUpright01:0 - L2_BlastedForestDestroyedTreeUpright01:0 139+480
+lodm materials\Landscape\Trees\BlastedForestDestroyedTreeAtlas.lodm none textures\Landscape\Trees\BlastedForestDestroyedTreeAtlas_d.dds
+mask alpha
+emissive 0 shapes 0
+front 3630.74 1046.18 -10.7451 96.6602 741.875
+side 3630.74 1046.18 -10.7451 96.6602 741.875
+class 32 128
+gap 2 8
+coverage 16 128 160
+oct 4 32 128 222.196 888.785 -10.7451 96.6602 741.875 3072 legacy 128 spec1
+frameoff 0 0 91.6651 39.8544
+frameoff 1 0 75.7234 39.8544
+frameoff 2 0 19.9272 39.8544
+frameoff 3 0 -33.8762 39.8544
+frameoff 0 1 93.6579 39.8544
+frameoff 1 1 91.6651 -7.97087
+frameoff 2 1 -33.8762 67.7525
+frameoff 3 1 -59.7816 41.8471
+frameoff 0 2 59.7816 39.8544
+frameoff 1 2 33.8762 -81.7015
+frameoff 2 2 -91.6651 -9.96361
+frameoff 3 2 -93.6579 39.8544
+frameoff 0 3 33.8762 39.8544
+frameoff 1 3 -17.9345 39.8544
+frameoff 2 3 -77.7161 39.8544
+frameoff 3 3 -91.6651 39.8544
+frameclamped 0
+framefit 137.498 824.986 217.207 864.841
+orthofit 914.938 914.938 0

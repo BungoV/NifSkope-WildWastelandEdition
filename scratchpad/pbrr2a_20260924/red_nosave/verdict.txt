@@ -1,0 +1,4 @@
+GATE window (window1): PASS  PASS
+GATE window (window2): FAIL  FAIL |   FAIL (floor) the previous launch's geometry is in the store
+pictures: 
+RED CONTROL nosave -> gate window BITES

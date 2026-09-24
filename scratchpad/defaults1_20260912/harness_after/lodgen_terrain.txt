@@ -1,0 +1,43 @@
+  ok   the chunk generates
+  vanilla anatomy:   BSMultiBoundNode BSTriShape BSLightingShaderProperty BSShaderTextureSet BSMultiBoundNode BSSubIndexTriShape BSEffectShaderProperty BSSubIndexTriShape BSEffectShaderProperty 
+  generated anatomy: BSMultiBoundNode BSTriShape BSLightingShaderProperty BSShaderTextureSet BSMultiBoundNode BSSubIndexTriShape BSEffectShaderProperty BSSubIndexTriShape BSEffectShaderProperty 
+  ok   block anatomy matches vanilla
+  Land desc: vanilla 52776558133763 | CS profile 52776558133763 | profile off 52776558133763
+  ok   with the CS profile OFF the Land descriptor equals vanilla's (52776558133763)
+  FAIL with the CS profile ON it is WIDER (the channels are actually there)
+  tris: vanilla 2066 generated 2288
+  ok   decimated density is vanilla-scale
+  surface: median 0.0 p95 72.0 max 344.0 (control 240.0)
+  ok   vanilla's vertices lie on the generated surface
+  skirt verts 104, off-invariant 0
+  ok   every skirt vertex is exactly 1000 world units below its top
+  ok   CONTROL: the shifted comparison degrades
+  ok   same water shape count as vanilla (2)
+  water b5: vanilla [X 2048.000000 Y 512.000000 Z 1812.500000] generated [X 2048.000000 Y 512.000000 Z 1812.500000]
+  water b7: vanilla [X 2048.000000 Y 3584.000000 Z 2500.000000] generated [X 2048.000000 Y 3584.000000 Z 2500.000000]
+  ok   water bound centres equal vanilla's
+  ok   the object chunk generates
+  ok   ...with its manifest
+  objects: 700 manifest lines, max id 55573, 10 shapes, 256 distinct AO values
+  FAIL every triangle carries ONE object id (no cross-weld)
+  FAIL manifest covers the id range
+  ok   the AO bake VARIES (not a constant channel)
+  ok   the texture bake writes diffuse + msn
+  msn up-channel: G (Fallout 4 ships G)
+  ok   the msn writes UP in GREEN, as Fallout 4 does
+  ok   the bake writes the packed data map (_data.DDS)
+  data map fourCC DXT1
+  ok   the data map is BC1 (no alpha until something needs it)
+  ok   the bake is BC1 with mips
+  bake: 8 mips, 1790 distinct block endpoints
+  ok   the bake has a mip chain
+  ok   the bake is not a constant colour
+  ok   the --vt run assembles the chunk _msn from the pyramid
+  pyramid-assembled msn: UP=G D0=99 D1=67 D2=67 D3=67
+  direct-bake msn:       UP=G D0=99 D1=67 D2=67 D3=67
+  vanilla's own sheet:   UP=G D0=99 D1=67 D2=67 D3=67   (the control)
+  ok   the pyramid's msn writes UP in GREEN too
+  ok   the pyramid's msn is not block-flat (D1..D3 > 20%, nearest gave 0)
+  ok   CONTROL: the same statistic reads high on vanilla's own sheet
+26 checks, 3 failures
+FAIL

@@ -1,0 +1,95 @@
+== appalachia.4.-14.-29.bto
+  GlobalAtlasShape_NotAlphaTested                                 shaderblk=5  inlineStrings=940  first=textures\lod\generated\textureArrays\NotAlphaTested\NotAlphaTested_0_d.DDS
+  GlobalAtlasShape_AlphaTested                                    shaderblk=8  inlineStrings=360  first=textures\lod\generated\textureArrays\AlphaTested\AlphaTested_0_d.DDS
+  RemeshedShape_LooseComponents_Appalachia_cell_-14_-29_LOD_0_sg  shaderblk=12  inlineStrings=0  first=-
+  GlobalAtlasShape_NotAlphaTested                                 shaderblk=19  inlineStrings=940  first=textures\lod\generated\textureArrays\NotAlphaTested\NotAlphaTested_0_d.DDS
+  GlobalAtlasShape_AlphaTested                                    shaderblk=22  inlineStrings=360  first=textures\lod\generated\textureArrays\AlphaTested\AlphaTested_0_d.DDS
+  RemeshedShape_WaterTowerMedium_LOD_0_sg_processed_scene         shaderblk=26  inlineStrings=0  first=-
+  RemeshedShape_BLD_A_Siding_HouseShotgun_OneStory_01_1442880893  shaderblk=30  inlineStrings=0  first=-
+  RemeshedShape_BLD_A_Siding_HouseShotgun_Garage_01_LOD_0_sg_pro  shaderblk=34  inlineStrings=0  first=-
+  RemeshedShape_BLD_A_Siding_HouseShotgun_TwoStory_03_2200131224  shaderblk=38  inlineStrings=0  first=-
+  GlobalAtlasShape_NotAlphaTested                                 shaderblk=45  inlineStrings=940  first=textures\lod\generated\textureArrays\NotAlphaTested\NotAlphaTested_0_d.DDS
+  GlobalAtlasShape_AlphaTested                                    shaderblk=48  inlineStrings=360  first=textures\lod\generated\textureArrays\AlphaTested\AlphaTested_0_d.DDS
+  GlobalAtlasShape_Translucent                                    shaderblk=52  inlineStrings=280  first=textures\lod\generated\textureArrays\Translucent\Translucent_0_d.DDS
+  RemeshedShape_ResidentialStreetLamp01_LOD_0_sg_processed_scene  shaderblk=56  inlineStrings=0  first=-
+  RemeshedShape_CITPillar02_2357496411_LOD_0_sg_processed_scene   shaderblk=60  inlineStrings=0  first=-
+  RemeshedShape_CITPillar02_2357496411_LOD_0_sg_processed_scene   shaderblk=64  inlineStrings=0  first=-
+  RemeshedShape_Lewisburg_CH_patiowall_SC_LOD_0_sg_processed_sce  shaderblk=67  inlineStrings=0  first=-
+  GlobalAtlasShape_NotAlphaTested                                 shaderblk=74  inlineStrings=940  first=textures\lod\generated\textureArrays\NotAlphaTested\NotAlphaTested_0_d.DDS
+  GlobalAtlasShape_AlphaTested                                    shaderblk=77  inlineStrings=360  first=textures\lod\generated\textureArrays\AlphaTested\AlphaTested_0_d.DDS
+  RemeshedShape_LooseComponents_Appalachia_cell_-14_-26_LOD_0_sg  shaderblk=81  inlineStrings=0  first=-
+  GlobalAtlasShape_NotAlphaTested                                 shaderblk=88  inlineStrings=940  first=textures\lod\generated\textureArrays\NotAlphaTested\NotAlphaTested_0_d.DDS
+  GlobalAtlasShape_AlphaTested                                    shaderblk=91  inlineStrings=360  first=textures\lod\generated\textureArrays\AlphaTested\AlphaTested_0_d.DDS
+  GlobalAtlasShape_NotAlphaTested                                 shaderblk=98  inlineStrings=940  first=textures\lod\generated\textureArrays\NotAlphaTested\NotAlphaTested_0_d.DDS
+  GlobalAtlasShape_AlphaTested                                    shaderblk=101  inlineStrings=360  first=textures\lod\generated\textureArrays\AlphaTested\AlphaTested_0_d.DDS
+  GlobalAtlasShape_NotAlphaTested                                 shaderblk=108  inlineStrings=940  first=textures\lod\generated\textureArrays\NotAlphaTested\NotAlphaTested_0_d.DDS
+  GlobalAtlasShape_AlphaTested                                    shaderblk=111  inlineStrings=360  first=textures\lod\generated\textureArrays\AlphaTested\AlphaTested_0_d.DDS
+  GlobalAtlasShape_NotAlphaTested                                 shaderblk=118  inlineStrings=940  first=textures\lod\generated\textureArrays\NotAlphaTested\NotAlphaTested_0_d.DDS
+  GlobalAtlasShape_AlphaTested                                    shaderblk=121  inlineStrings=360  first=textures\lod\generated\textureArrays\AlphaTested\AlphaTested_0_d.DDS
+  GlobalAtlasShape_Translucent                                    shaderblk=125  inlineStrings=280  first=textures\lod\generated\textureArrays\Translucent\Translucent_0_d.DDS
+  GlobalAtlasShape_NotAlphaTested                                 shaderblk=132  inlineStrings=940  first=textures\lod\generated\textureArrays\NotAlphaTested\NotAlphaTested_0_d.DDS
+  GlobalAtlasShape_AlphaTested                                    shaderblk=135  inlineStrings=360  first=textures\lod\generated\textureArrays\AlphaTested\AlphaTested_0_d.DDS
+  GlobalAtlasShape_Translucent                                    shaderblk=139  inlineStrings=280  first=textures\lod\generated\textureArrays\Translucent\Translucent_0_d.DDS
+  GlobalAtlasShape_NotAlphaTested                                 shaderblk=146  inlineStrings=940  first=textures\lod\generated\textureArrays\NotAlphaTested\NotAlphaTested_0_d.DDS
+  GlobalAtlasShape_AlphaTested                                    shaderblk=149  inlineStrings=360  first=textures\lod\generated\textureArrays\AlphaTested\AlphaTested_0_d.DDS
+  GlobalAtlasShape_Translucent                                    shaderblk=153  inlineStrings=280  first=textures\lod\generated\textureArrays\Translucent\Translucent_0_d.DDS
+  GlobalAtlasShape_NotAlphaTested                                 shaderblk=160  inlineStrings=940  first=textures\lod\generated\textureArrays\NotAlphaTested\NotAlphaTested_0_d.DDS
+  GlobalAtlasShape_AlphaTested                                    shaderblk=163  inlineStrings=360  first=textures\lod\generated\textureArrays\AlphaTested\AlphaTested_0_d.DDS
+  GlobalAtlasShape_Translucent                                    shaderblk=167  inlineStrings=280  first=textures\lod\generated\textureArrays\Translucent\Translucent_0_d.DDS
+  GlobalAtlasShape_NotAlphaTested                                 shaderblk=174  inlineStrings=940  first=textures\lod\generated\textureArrays\NotAlphaTested\NotAlphaTested_0_d.DDS
+  GlobalAtlasShape_AlphaTested                                    shaderblk=177  inlineStrings=360  first=textures\lod\generated\textureArrays\AlphaTested\AlphaTested_0_d.DDS
+  GlobalAtlasShape_Translucent                                    shaderblk=181  inlineStrings=280  first=textures\lod\generated\textureArrays\Translucent\Translucent_0_d.DDS
+  GlobalAtlasShape_NotAlphaTested                                 shaderblk=188  inlineStrings=940  first=textures\lod\generated\textureArrays\NotAlphaTested\NotAlphaTested_0_d.DDS
+  GlobalAtlasShape_AlphaTested                                    shaderblk=191  inlineStrings=360  first=textures\lod\generated\textureArrays\AlphaTested\AlphaTested_0_d.DDS
+  GlobalAtlasShape_Translucent                                    shaderblk=195  inlineStrings=280  first=textures\lod\generated\textureArrays\Translucent\Translucent_0_d.DDS
+  GlobalAtlasShape_NotAlphaTested                                 shaderblk=202  inlineStrings=940  first=textures\lod\generated\textureArrays\NotAlphaTested\NotAlphaTested_0_d.DDS
+  GlobalAtlasShape_AlphaTested                                    shaderblk=205  inlineStrings=360  first=textures\lod\generated\textureArrays\AlphaTested\AlphaTested_0_d.DDS
+  GlobalAtlasShape_Translucent                                    shaderblk=209  inlineStrings=280  first=textures\lod\generated\textureArrays\Translucent\Translucent_0_d.DDS
+  GlobalAtlasShape_NotAlphaTested                                 shaderblk=216  inlineStrings=940  first=textures\lod\generated\textureArrays\NotAlphaTested\NotAlphaTested_0_d.DDS
+  GlobalAtlasShape_AlphaTested                                    shaderblk=219  inlineStrings=360  first=textures\lod\generated\textureArrays\AlphaTested\AlphaTested_0_d.DDS
+  GlobalAtlasShape_Translucent                                    shaderblk=223  inlineStrings=280  first=textures\lod\generated\textureArrays\Translucent\Translucent_0_d.DDS
+  GlobalAtlasShape_NotAlphaTested                                 shaderblk=230  inlineStrings=940  first=textures\lod\generated\textureArrays\NotAlphaTested\NotAlphaTested_0_d.DDS
+  GlobalAtlasShape_AlphaTested                                    shaderblk=233  inlineStrings=360  first=textures\lod\generated\textureArrays\AlphaTested\AlphaTested_0_d.DDS
+  GlobalAtlasShape_Translucent                                    shaderblk=237  inlineStrings=280  first=textures\lod\generated\textureArrays\Translucent\Translucent_0_d.DDS
+   TEXSET blk 13: ['Data\\Textures\\LOD\\Generated\\LooseComponents_Appalachia_cell_-14_-29_LOD_0\\LooseComponents_Appalachia_cell_-14_-29_LOD_0_d.dds', 'Data\\Textures\\LOD\\Generated\\LooseComponents_Appalachia_cell_-14_-29_LOD_0\\LooseComponents_Appalachia_cell_-14_-29_LOD_0_n.dds']
+   TEXSET blk 27: ['Data\\Textures\\LOD\\Generated\\SetDressing\\WaterTower\\WaterTowerMedium\\WaterTowerMedium_LOD_0_d.dds', 'Data\\Textures\\LOD\\Generated\\SetDressing\\WaterTower\\WaterTowerMedium\\WaterTowerMedium_LOD_0_n.dds']
+   TEXSET blk 31: ['Data\\Textures\\LOD\\Generated\\SCOL\\SeventySix.esm\\BLD_A_Siding_HouseShotgun_OneStory_01_1442880893\\BLD_A_Siding_HouseShotgun_OneStory_01_1442880893_LOD_0_d.dds', 'Data\\Textures\\LOD\\Generated\\SCOL\\SeventySix.esm\\BLD_A_Siding_HouseShotgun_OneStory_01_1442880893\\BLD_A_Siding_HouseShotgun_OneStory_01_1442880893_LOD_0_n.dds']
+   TEXSET blk 35: ['Data\\Textures\\LOD\\Generated\\SCOL\\SeventySix.esm\\BLD_A_Siding_HouseShotgun_Garage_01\\BLD_A_Siding_HouseShotgun_Garage_01_LOD_0_d.dds', 'Data\\Textures\\LOD\\Generated\\SCOL\\SeventySix.esm\\BLD_A_Siding_HouseShotgun_Garage_01\\BLD_A_Siding_HouseShotgun_Garage_01_LOD_0_n.dds']
+   TEXSET blk 39: ['Data\\Textures\\LOD\\Generated\\SCOL\\SeventySix.esm\\BLD_A_Siding_HouseShotgun_TwoStory_03_2200131224\\BLD_A_Siding_HouseShotgun_TwoStory_03_2200131224_LOD_0_d.dds', 'Data\\Textures\\LOD\\Generated\\SCOL\\SeventySix.esm\\BLD_A_Siding_HouseShotgun_TwoStory_03_2200131224\\BLD_A_Siding_HouseShotgun_TwoStory_03_2200131224_LOD_0_n.dds']
+   TEXSET blk 57: ['Data\\Textures\\LOD\\Generated\\SetDressing\\StreetLamps\\ResidentialStreetLamp01\\ResidentialStreetLamp01_LOD_0_d.dds', 'Data\\Textures\\LOD\\Generated\\SetDressing\\StreetLamps\\ResidentialStreetLamp01\\ResidentialStreetLamp01_LOD_0_n.dds']
+   TEXSET blk 61: ['Data\\Textures\\LOD\\Generated\\Architecture\\Unique\\CIT\\CITPillar02_2357496411\\CITPillar02_2357496411_LOD_0_d.dds', 'Data\\Textures\\LOD\\Generated\\Architecture\\Unique\\CIT\\CITPillar02_2357496411\\CITPillar02_2357496411_LOD_0_n.dds']
+   TEXSET blk 68: ['Data\\Textures\\LOD\\Generated\\SCOL\\SeventySix.esm\\Lewisburg_CH_patiowall_SC\\Lewisburg_CH_patiowall_SC_LOD_0_d.dds', 'Data\\Textures\\LOD\\Generated\\SCOL\\SeventySix.esm\\Lewisburg_CH_patiowall_SC\\Lewisburg_CH_patiowall_SC_LOD_0_n.dds']
+   TEXSET blk 82: ['Data\\Textures\\LOD\\Generated\\LooseComponents_Appalachia_cell_-14_-26_LOD_0\\LooseComponents_Appalachia_cell_-14_-26_LOD_0_d.dds', 'Data\\Textures\\LOD\\Generated\\LooseComponents_Appalachia_cell_-14_-26_LOD_0\\LooseComponents_Appalachia_cell_-14_-26_LOD_0_n.dds']
+== appalachia.8.-14.-29.bto
+  GlobalAtlasShape_NotAlphaTested                                 shaderblk=4  inlineStrings=940  first=textures\lod\generated\textureArrays\NotAlphaTested\NotAlphaTested_0_d.DDS
+  GlobalAtlasShape_AlphaTested                                    shaderblk=7  inlineStrings=360  first=textures\lod\generated\textureArrays\AlphaTested\AlphaTested_0_d.DDS
+  RemeshedShape_NotAlphaTested_Merged                             shaderblk=15  inlineStrings=0  first=-
+   TEXSET blk 16: ['Data\\Textures\\LOD\\Generated\\Merged\\Appalachia\\cell_-14_-29_dim8\\cell_-14_-29_dim8.NotAlphaTested.DDS', 'Data\\Textures\\LOD\\Generated\\Merged\\Appalachia\\cell_-14_-29_dim8\\cell_-14_-29_dim8.NotAlphaTested_n.DDS']
+== appalachia.16.-14.-29.bto
+  GlobalAtlasShape_NotAlphaTested                                 shaderblk=4  inlineStrings=940  first=textures\lod\generated\textureArrays\NotAlphaTested\NotAlphaTested_0_d.DDS
+  GlobalAtlasShape_NotAlphaTested                                 shaderblk=7  inlineStrings=940  first=textures\lod\generated\textureArrays\NotAlphaTested\NotAlphaTested_0_d.DDS
+  GlobalAtlasShape_NotAlphaTested                                 shaderblk=10  inlineStrings=940  first=textures\lod\generated\textureArrays\NotAlphaTested\NotAlphaTested_0_d.DDS
+  GlobalAtlasShape_AlphaTested                                    shaderblk=13  inlineStrings=360  first=textures\lod\generated\textureArrays\AlphaTested\AlphaTested_0_d.DDS
+  GlobalAtlasShape_Translucent                                    shaderblk=17  inlineStrings=280  first=textures\lod\generated\textureArrays\Translucent\Translucent_0_d.DDS
+  (unnamed)                                                       shaderblk=23  inlineStrings=0  first=-
+  RemeshedShape_NotAlphaTested_Merged                             shaderblk=32  inlineStrings=0  first=-
+   TEXSET blk 33: ['Data\\Textures\\LOD\\Generated\\Merged\\Appalachia\\cell_-14_-29_dim16\\cell_-14_-29_dim16.NotAlphaTested.DDS', 'Data\\Textures\\LOD\\Generated\\Merged\\Appalachia\\cell_-14_-29_dim16\\cell_-14_-29_dim16.NotAlphaTested_n.DDS']
+== appalachia.32.-30.-29.bto
+  GlobalAtlasShape_NotAlphaTested                                 shaderblk=4  inlineStrings=940  first=textures\lod\generated\textureArrays\NotAlphaTested\NotAlphaTested_0_d.DDS
+  GlobalAtlasShape_NotAlphaTested                                 shaderblk=7  inlineStrings=940  first=textures\lod\generated\textureArrays\NotAlphaTested\NotAlphaTested_0_d.DDS
+  GlobalAtlasShape_NotAlphaTested                                 shaderblk=10  inlineStrings=940  first=textures\lod\generated\textureArrays\NotAlphaTested\NotAlphaTested_0_d.DDS
+  GlobalAtlasShape_NotAlphaTested                                 shaderblk=13  inlineStrings=940  first=textures\lod\generated\textureArrays\NotAlphaTested\NotAlphaTested_0_d.DDS
+  GlobalAtlasShape_NotAlphaTested                                 shaderblk=16  inlineStrings=940  first=textures\lod\generated\textureArrays\NotAlphaTested\NotAlphaTested_0_d.DDS
+  GlobalAtlasShape_AlphaTested                                    shaderblk=19  inlineStrings=360  first=textures\lod\generated\textureArrays\AlphaTested\AlphaTested_0_d.DDS
+  GlobalAtlasShape_Translucent                                    shaderblk=23  inlineStrings=280  first=textures\lod\generated\textureArrays\Translucent\Translucent_0_d.DDS
+  (unnamed)                                                       shaderblk=29  inlineStrings=0  first=-
+  (unnamed)                                                       shaderblk=36  inlineStrings=0  first=-
+  (unnamed)                                                       shaderblk=43  inlineStrings=0  first=-
+  (unnamed)                                                       shaderblk=50  inlineStrings=0  first=-
+  (unnamed)                                                       shaderblk=57  inlineStrings=0  first=-
+  (unnamed)                                                       shaderblk=64  inlineStrings=0  first=-
+  (unnamed)                                                       shaderblk=71  inlineStrings=0  first=-
+  (unnamed)                                                       shaderblk=78  inlineStrings=0  first=-
+  (unnamed)                                                       shaderblk=85  inlineStrings=0  first=-
+  RemeshedShape_NotAlphaTested_Merged                             shaderblk=94  inlineStrings=0  first=-
+   TEXSET blk 95: ['Data\\Textures\\LOD\\Generated\\Merged\\Appalachia\\cell_-30_-29_dim32\\cell_-30_-29_dim32.NotAlphaTested.DDS', 'Data\\Textures\\LOD\\Generated\\Merged\\Appalachia\\cell_-30_-29_dim32\\cell_-30_-29_dim32.NotAlphaTested_n.DDS']

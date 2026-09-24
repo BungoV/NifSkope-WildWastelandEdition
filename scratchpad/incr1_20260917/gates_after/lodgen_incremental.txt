@@ -1,0 +1,40 @@
+lodgen_incremental: /e/Projects/NifskopeWildWastelandEdition/release/NifSkope.exe
+   -rwxr-xr-x 1 bungo 197609 22534144 Sep 17 06:34 /e/Projects/NifskopeWildWastelandEdition/release/NifSkope.exe
+   region -24 16 -17 23 dim 4
+
+(a)(b) THE FO4CS TARGET -- the ruled pipeline, and the one --incremental refused
+   [fo_full] rc=0  72690 ms
+      full: 4 .lodj, pair 094b818c6aa5c971a36fff3986a95a947cfd40b9 48f037cbfcae66f03e7739bbb0c1d0924a2f8011 
+   [fo_null] rc=0  80995 ms
+      null incremental: rc=0, dirty=0, replayed=4
+  ok      (a) a null incremental rewrites the SAME .lodo/.lodi (4 chunk(s) cached)
+   [fo_mixed] rc=0  67593 ms
+      mixed: rc=0, dirty=1, rebaked=1, replayed=3
+  ok      (b) 1 chunk(s) rebuilt beside 3 cached -> the SAME pair
+  ok      (b) the deleted cache healed itself
+
+(c) THE STOCK TARGET -- the chunks and the sheets on disk
+   [st_full] rc=0  7305 ms
+   [st_null] rc=0  865 ms
+      24 file(s) compared, rc=0
+  ok      (c) every one of 24 stock file(s) is byte for byte what the full bake wrote
+
+(d) THE RECORD'S SUBSTANCE -- what an incremental run may NOT change
+      substance: 41 line(s), 4 chunk row(s), 24 out row(s)
+  ok      (d) the incremental record says exactly what the full one says about the disk
+  ok      (d) and it notices a deleted chunk row and a changed out digest
+
+(e) --no-native-cache: the exact way back (CONSTITUTION 10)
+   [wb_full] rc=0  72865 ms
+      full with --no-native-cache: 0 .lodj on disk
+  ok      (e) with the flag, not one .lodj is written
+   [wb_incr] rc=1  415 ms
+  ok      (e) it refuses (rc=1)
+  ok      (e) and the refusal names the flag that caused it
+
+(f) THE TWO NORMALISERS -- C++ and Python on the same file
+      C++  lines=77 sha1=a484afe142b8dcdaf9b40a04910ff1c19d1a3570
+      py   lines=77 sha1=a484afe142b8dcdaf9b40a04910ff1c19d1a3570
+  ok      (f) the two normalisers agree on the TEXT, not merely on the rule
+
+FAILURES: 0

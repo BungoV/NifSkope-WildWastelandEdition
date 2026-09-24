@@ -1,0 +1,54 @@
+fixture: loose /e/Projects/NifskopeWildWastelandEdition/scratchpad/filestab_20260910/fixture_tree/Data/meshes/ww with probe.nif, probe.bto, probe.btr
+fixture: archive Fallout4 - Animations.ba2
+  ok   the rigged NIF loaded
+--- (1) the Files page's user-visible text ---
+  0 string(s) in the page still say NIF
+  ok   (1) 0 "NIF" strings in the Files page
+  with one offender seeded: 1 hit(s)
+  ok   (1 floor) the scan FINDS a seeded "NIF" string
+  ok   (1 floor) and the seed is gone again
+--- (2) what the Files tree lists ---
+  .nif 1 | .bto 1 | .btr 1 | .hkx 14939 | .gltf 0 | .lodl 0 | .lodt 0
+  first .hkx: meshes/actors/_testcharacter/behaviors/_testcharacter.hkx
+  ok   (2 floor) the walk reaches leaves at all (.nif > 0)
+  ok   (2) at least one .hkx is listed
+  ok   (2) at least one .btr is listed
+--- (5) panel style (nifskope-ww-panel-style) ---
+  ok   (5) no QGroupBox on the page (0)
+  6 tool buttons, 2 without a tooltip or accessible name
+  untipped: QLineEditIconButton/<unnamed>, QLineEditIconButton/<unnamed>
+  ok   (5) at least 4 tool buttons on the row
+  FAIL (5) every tool button explains itself (0 without)
+  ok   (5 floor) blanking one tooltip is COUNTED
+  ok   (5) no check-box label explains itself after a dash (0)
+  2 search fields, 0 without a placeholder
+  ok   (5) both search fields carry a placeholder
+  browser bottom 516, loaded top 549
+  ok   (5) the loaded-files list is BELOW the browser
+--- (3) opening an .hkx from the tree, (4) unloading it ---
+  the model offers 139 nodes
+  ok   (3) a model is open to play it on
+  summary: jog: 78 of 95 bones play, 4 matched only by ignoring case (Spine1, Spine2, Head, Weapon); 17 have no node in this NIF: WeaponBolt, WeaponExtra1, WeaponExtra2, WeaponExtra3, WeaponMagazine, WeaponMagazineChild1, WeaponMagazineChild2, WeaponMagazineChild3, WeaponMagazineChild4, WeaponMagazineChild5, WeaponOptics1, WeaponOptics2, WeaponTrigger, WeaponIKTargetL, WeaponIKTargetR, WeaponIKTargetLMirror, WeaponIKTargetRMirror.
+  ok   (3) the tree row added a clip
+  active clip: "jog"
+  ok   (3) and it became the playing sequence
+  ok   (3) the summary says 78 bones play
+  ok   (3) ...17 have no node, NAMED
+  ok   (3) ...4 matched only by case
+  at t=0.367: 78 of 139 nodes differ from the bind pose
+  ok   (4 floor) the clip actually posed the rig
+  ok   (4) the Loaded-files unload action removed it
+  ok   (4) ...and the animations list is back to 0
+  after unload: 1 of 139 nodes differ
+  nodes that did NOT restore: PipboyBone
+  FAIL (4) unload restores the bind pose BYTE-identically
+--- (6) with nothing open, an .hkx refuses in words ---
+  the scene now offers 0 named nodes
+  ok   (6 floor) the scene really is empty
+  refusal: jog.hkx is an animation, not a model: there is nothing open for it to play on. Open the rigged NIF first, then open the animation.
+  ok   (6) it refuses
+  ok   (6) the refusal is IN WORDS and names the reason
+  ok   (6) and loads nothing
+28 checks, 2 failures
+FAIL
+done

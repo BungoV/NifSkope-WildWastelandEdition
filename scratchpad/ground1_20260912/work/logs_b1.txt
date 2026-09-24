@@ -1,0 +1,43 @@
+ -20,  24  fine 0.3828  A 2.582 (twin 1.339 white 1.324)  spacing 3.50 tx  width 0.75  slopeR +0.471 (twin -0.007)
+ -20,  20  fine 0.5856  A 1.787 (twin 1.212 white 1.203)  spacing 3.50 tx  width 0.75  slopeR +0.236 (twin -0.027)
+ -64, -60  fine 0.4045  A 2.169 (twin 0.921 white 0.927)  spacing 5.00 tx  width 1.00  slopeR +0.694 (twin -0.036)
+ -36, -60  fine 0.4059  A 1.743 (twin 1.118 white 1.123)  spacing 3.50 tx  width 0.75  slopeR +0.529 (twin -0.062)
+  -4, -60  fine 0.6048  A 1.453 (twin 0.923 white 0.929)  spacing 3.50 tx  width 0.75  slopeR +0.100 (twin -0.030)
+  28, -60  fine 0.5798  A 2.247 (twin 1.044 white 1.051)  spacing 4.00 tx  width 0.75  slopeR -0.034 (twin -0.037)
+  52, -64  fine 0.3656  A 1.176 (twin 0.942 white 0.944)  spacing 3.00 tx  width 0.75  slopeR +0.884 (twin -0.007)
+ -64, -20  fine 0.3856  A 1.334 (twin 0.787 white 0.781)  spacing 3.75 tx  width 0.75  slopeR +0.794 (twin +0.013)
+ -36, -20  fine 0.4635  A 2.415 (twin 1.058 white 1.054)  spacing 5.00 tx  width 0.88  slopeR +0.597 (twin -0.014)
+  -4, -20  fine 0.7321  A 1.371 (twin 0.962 white 0.965)  spacing 3.50 tx  width 0.75  slopeR +0.382 (twin -0.022)
+  28, -20  fine 0.2674  A 1.396 (twin 1.369 white 1.358)  spacing 3.00 tx  width 0.75  slopeR +0.322 (twin -0.014)
+  60, -32  fine 0.9367  A 0.904 (twin 0.914 white 0.911)  spacing 3.00 tx  width 0.75  slopeR -0.135 (twin -0.036)
+ -64,  16  fine 0.2608  A 1.264 (twin 0.916 white 0.915)  spacing 4.00 tx  width 0.75  slopeR +0.773 (twin +0.017)
+ -36,  16  fine 0.4068  A 1.894 (twin 1.075 white 1.077)  spacing 4.00 tx  width 0.75  slopeR +0.681 (twin +0.038)
+  -4,  16  fine 0.3357  A 1.611 (twin 1.038 white 1.043)  spacing 3.75 tx  width 0.75  slopeR +0.327 (twin +0.056)
+  24,  16  fine 0.1897  A 1.453 (twin 1.109 white 1.108)  spacing 3.50 tx  width 0.75  slopeR +0.132 (twin -0.014)
+  44,  32  fine 0.5292  A 1.145 (twin 1.000 white 1.008)  spacing 3.00 tx  width 0.75  slopeR +0.717 (twin -0.007)
+ -64,  56  fine 0.4081  A 1.568 (twin 1.083 white 1.082)  spacing 5.50 tx  width 1.00  slopeR +0.788 (twin -0.084)
+ -36,  56  fine 0.7886  A 1.275 (twin 1.013 white 1.005)  spacing 5.00 tx  width 0.75  slopeR +0.248 (twin -0.036)
+  -4,  56  fine 0.2930  A 1.585 (twin 0.900 white 0.902)  spacing 3.75 tx  width 0.75  slopeR +0.657 (twin -0.036)
+  20,  56  fine 0.7178  A 1.505 (twin 1.214 white 1.218)  spacing 3.50 tx  width 0.75  slopeR +0.364 (twin +0.002)
+  44,  36  fine 0.2862  A 1.120 (twin 0.944 white 0.939)  spacing 3.00 tx  width 0.75  slopeR +0.636 (twin -0.009)
+
+--- median of 22 vanilla sheets ---
+  A                1.4792235771821214
+  A_twin           1.0254058641537913
+  A_white          1.0252474708586428
+  ceilingA         0.16724448632516642
+  ceilingFine      0.2489734218134999
+  ceilingPairs     22
+  ceilingSd        0.0712687535637272
+  ceilingSpacing   0.06458333333333333
+  fineSd           0.27623569004585524
+  fineShare        0.40636919227202895
+  gradMean         0.39565807029835137
+  n                22
+  slopeK           0.09798557419720211
+  slopeR           0.5003201521177237
+  slopeR_twin      -0.014264429120985564
+  spacingTx        3.5
+  spacing_twin     3.5
+  widthTx          0.75
+  width_twin       0.75

@@ -1,0 +1,65 @@
+pbr_wx1_gates judge, red=exegmst, CommonwealthClear fv=131 tods=8, climate TNAM=30,54,102,126,175,68
+  judge GMST: X=600 Y=-325 T=0.15 ext=2 shadowScale=-15 secunda=75 fades=5/10; A..D=6.9250 7.0750 18.9250 19.0750
+cli
+  FAIL the app's sky GMSTs = the judge's read of Fallout4.esm -- fSunXExtreme=400(exe) fSunYExtreme=25(exe) fSunAlphaTransTime=2(exe) fDaytimeColorExtension=0.5(exe) fSunShadowScale=0(exe) iSecundaSize=40(exe)
+  ok   the climate = DefaultClimate with the judge's TNAM -- climate2 edid=DefaultClimate tnam=30,54,102,126,175,68 moons=0x44
+  ok   IMGS Sky Scale per slot = the judge's IMSP -> HNAM[7] -- app (3.5, 2.4, 2.5, 3.0, 3.4, 3.4, 3.0, 4.2) judge (3.5, 2.4, 2.5, 3.0, 3.4, 3.4, 3.0, 4.2)
+  ok   the disabled cloud mask = NAM1 | ~present (0xFFFF2FC0) -- FFFF2FC0
+skycol
+  ok   sky colours at 12.00 (Day->Day t=0.000) = the CIELab blend, +-2/255 -- worst 0.000/255; Lab vs byte lerp differ by up to 0.01/255 here
+  FAIL sky colours at 07.00 (Sunrise->LateSunrise t=0.667) = the CIELab blend, +-2/255 -- worst 91.351/255; Lab vs byte lerp differ by up to 5.25/255 here
+  ok   (floor) 07.00 is between two different keys and Lab != byte lerp by > 2/255 -- margin 5.25
+  FAIL sky colours at 19.50 (EarlySunset->Sunset t=0.667) = the CIELab blend, +-2/255 -- worst 54.703/255; Lab vs byte lerp differ by up to 11.03/255 here
+  ok   (floor) 19.50 is between two different keys and Lab != byte lerp by > 2/255 -- margin 11.03
+sundir
+  FAIL light direction at 09.00 = the arc, +-0.5 deg -- off by 38.6039 deg; disc 42.0818 deg; app 0.796955,0.087167,0.597716 judge 0.6726,-0.5533,0.4913
+  FAIL light direction at 12.00 = the arc, +-0.5 deg -- off by 46.8408 deg; disc 36.6120 deg; app 0.163975,0.071739,0.983852 judge 0.2047,-0.6735,0.7103
+  FAIL light direction at 16.00 = the arc, +-0.5 deg -- off by 44.5008 deg; disc 43.0114 deg; app -0.597716,0.087167,0.796955 judge -0.5684,-0.6235,0.5368
+  FAIL light direction at 01.00 = the arc, +-0.5 deg -- off by 41.2200 deg; disc 32.0193 deg; app 0.000000,0.062378,0.998053 judge 0.0000,-0.6107,0.7918
+  FAIL the spec's noon SunPos (98.77, -325, 501.23) -- (57.143, 25.0, 342.857)
+  FAIL the spec's 01:00 light (0, -0.6107, 0.7918) -- (0.0, 0.062378, 0.998053)
+edges
+  FAIL disc alpha at 06.90 = 0.0000 -- app 0.4500
+  FAIL disc alpha at 06.95 = 0.1667 -- app 0.4750
+  ok   disc alpha at 07.00 = 0.5000 -- app 0.5000
+  FAIL disc alpha at 07.10 = 1.0000 -- app 0.5500
+  FAIL disc alpha at 18.95 = 0.8333 -- app 0.5250
+  FAIL disc alpha at 19.10 = 0.0000 -- app 0.4500
+  ok   colour keys at 02.99 = Night->Night t=0.0000 -- app Night,Night,0.000000
+  FAIL colour keys at 03.01 = Night->EarlySunrise t=0.0067 -- app Night,Night,0.000000
+  FAIL colour keys at 22.99 = LateSunset->Night t=0.9933 -- app Night,Night,0.000000
+  ok   colour keys at 23.01 = Night->Night t=0.0000 -- app Night,Night,0.000000
+cloud
+  ok   drawn layers = [0, 1, 2, 3, 4, 5, 12, 14, 15] -- app [0, 1, 2, 3, 4, 5, 12, 14, 15]
+  ok   (spec) drawn layers = {0,1,2,3,4,5,12,14,15}
+  ok   cloud colours at 12.00 = the CIELab blend of PNAM, +-2/255 -- worst 0.000
+  ok   cloud alphas at 12.00 = the JNAM blend, +-0.002 -- worst 0.00000
+  ok   cloud speeds and 100 s offsets at 12.00 = QNAM/RNAM
+  FAIL cloud colours at 07.00 = the CIELab blend of PNAM, +-2/255 -- worst 60.962
+  FAIL cloud alphas at 07.00 = the JNAM blend, +-0.002 -- worst 0.13333
+  ok   cloud speeds and 100 s offsets at 07.00 = QNAM/RNAM
+  ok   (spec) layer 3 alpha at noon = 0.7
+  ok   (spec) layer 14 offset after 100 s = 0.2126
+moon
+  FAIL moon at 01.00 day  4: phase 1 three_wan alpha 1.000 shadow 1.000 elev 61.56 az 180.00 -- app phase=1 three_wan alpha=0.000000 shadow=0.000000 elev=86.4237 az=0.0000
+  FAIL moon at 01.00 day 17: phase 4 new alpha 1.000 shadow 1.000 elev 61.56 az 180.00 -- app phase=4 new alpha=0.000000 shadow=0.000000 elev=86.4237 az=0.0000
+  FAIL moon at 01.00 day 32: phase 0 full alpha 1.000 shadow 1.000 elev 61.56 az 180.00 -- app phase=0 full alpha=0.000000 shadow=0.000000 elev=86.4237 az=0.0000
+  FAIL moon at 22.00 day  4: phase 1 three_wan alpha 1.000 shadow 0.667 elev 33.66 az 223.07 -- app phase=1 three_wan alpha=0.000000 shadow=0.000000 elev=33.5475 az=275.9469
+  FAIL moon at 22.00 day 17: phase 4 new alpha 1.000 shadow 0.667 elev 33.66 az 223.07 -- app phase=4 new alpha=0.000000 shadow=0.000000 elev=33.5475 az=275.9469
+  FAIL moon at 22.00 day 32: phase 0 full alpha 1.000 shadow 0.667 elev 33.66 az 223.07 -- app phase=0 full alpha=0.000000 shadow=0.000000 elev=33.5475 az=275.9469
+  FAIL moon at 19.50 day  4: phase 1 three_wan alpha 0.133 shadow 0.000 elev 3.82 az 239.74 -- app phase=1 three_wan alpha=0.000000 shadow=0.000000 elev=4.3888 az=273.8506
+  FAIL moon at 19.50 day 17: phase 4 new alpha 0.133 shadow 0.000 elev 3.82 az 239.74 -- app phase=4 new alpha=0.000000 shadow=0.000000 elev=4.3888 az=273.8506
+  FAIL moon at 19.50 day 32: phase 0 full alpha 0.133 shadow 0.000 elev 3.82 az 239.74 -- app phase=0 full alpha=0.000000 shadow=0.000000 elev=4.3888 az=273.8506
+  FAIL moon at 06.30 day  4: phase 1 three_wan alpha 0.667 shadow 0.000 elev 5.76 az 121.20 -- app phase=1 three_wan alpha=0.000000 shadow=0.000000 elev=2.5583 az=86.2640
+  FAIL moon at 06.30 day 17: phase 4 new alpha 0.667 shadow 0.000 elev 5.76 az 121.20 -- app phase=4 new alpha=0.000000 shadow=0.000000 elev=2.5583 az=86.2640
+  FAIL moon at 06.30 day 32: phase 0 full alpha 0.667 shadow 0.000 elev 5.76 az 121.20 -- app phase=0 full alpha=0.000000 shadow=0.000000 elev=2.5583 az=86.2640
+  FAIL (spec) the moon at 01:00 = elev 61.56 az 180.00; at 22:00 = elev 33.66 az 223.07
+  ok   (spec) phases: day 4 three_wan, day 17 new, day 32 full
+  ok   (spec) moon alpha at 19:30 = 0.133
+  ok   only Secunda is printed (moons byte 0x44)
+lit
+  FAIL with Sun on the lookdev light at 16.00 = the arc's light, +-0.5 deg -- off by 44.4883 deg (echo -0.598,0.087,0.797)
+  ok   (floor) with Sun off the light is W1's, not the arc (> 2 deg away) -- off by 45.093 deg (echo -0.650,0.108,0.752)
+  ok   (floor) the echo names the preview and the sun pass
+54 checks, 32 failures
+FAIL

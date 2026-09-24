@@ -1,0 +1,39 @@
+lodt ok 1
+lodt magic LDTX
+lodt version 2
+lodt headerBytes 256
+lodt flags 1
+lodt worldspace Commonwealth
+lodt south 24
+lodt west -20
+lodt north 27
+lodt east -17
+lodt worldSouth 24
+lodt worldWest -20
+lodt worldNorth 27
+lodt worldEast -17
+lodt levelDim 2
+lodt levelIndex 0
+lodt levelCount 2
+lodt tilesX 2
+lodt tilesY 2
+lodt contentTexels 256
+lodt borderTexels 8
+lodt storedTexels 272
+lodt mipCount 2
+lodt sheetCount 4
+lodt anisoSupported 8
+lodt compression 0
+lodt tileCount 4
+lodt coverNormalisation 96.0
+lodt tintStrength 0.350
+lodt levelDims 2,4,0,0,0,0,0,0
+lodt vhgtCorpusHash 0xD8337D022F637F22
+lodt paintCorpusHash 0x3C79201598FEF809
+lodt sheet 0 role 1 dxgi 71 dxgiWithCover 71 colorSpace 1
+lodt sheet 1 role 2 dxgi 71 dxgiWithCover 71 colorSpace 0 mipSkip 1
+lodt sheet 2 role 5 dxgi 71 dxgiWithCover 77 colorSpace 0 mipSkip 1
+lodt sheet 3 role 4 dxgi 56 dxgiWithCover 56 colorSpace 0 mipSkip 1
+lodt present 4
+lodt coverTiles 4
+lodt storedBytesTotal 443904

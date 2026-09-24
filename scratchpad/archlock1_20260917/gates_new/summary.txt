@@ -1,0 +1,31 @@
+=== lodgen_bakerec start 04:00:42
+lodgen_bakerec rc=1 secs=478 18 ok-rows 3 fail-rows
+    
+    == lodgen_bakerec: 21 check(s), 3 failure(s) ==
+    RESULT FAIL
+=== lodgen_layout start 04:08:41
+lodgen_layout rc=1 secs=966 17 ok-rows 5 fail-rows
+    
+    layout checks: 22, failures: 5
+    RESULT FAIL
+=== lodgen_defaults start 04:24:47
+lodgen_defaults rc=0 secs=937 28 ok-rows 0 fail-rows
+      ok   (e) refuter: a switch that reaches the native files makes the comparator say so (2 files)
+    28 checks, 0 failures
+    RESULT PASS
+=== lodgen_native start 04:40:24
+lodgen_native rc=1 secs=221 123 ok-rows 2 fail-rows
+    
+    25 checks, 1 failures
+    RESULT FAIL
+=== lodgen_btofree start 04:44:06
+lodgen_btofree rc=1 secs=195 20 ok-rows 1 fail-rows
+    Thu Sep 17 04:47:21 CEDT 2026
+    21 checks, 1 failures
+    FAIL
+=== lod_generation start 04:47:21
+lod_generation rc=0 secs=14 128 ok-rows 0 fail-rows
+    128 checks, 0 failures
+    PASS
+    checks run: 128 (floor 121)
+ALL GATES DONE 04:47:35

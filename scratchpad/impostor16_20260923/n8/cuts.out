@@ -1,0 +1,18 @@
+  RETRY: mesh did not open
+  RETRY: mesh did not open
+  n8_2k n8_2k rc=0 cards=360 195s orbit iou mean 0.8393 orbit counted 360 of 360 
+  n8_2k n8_2k rc=0 cards=360 42s orbit iou mean 0.8404 orbit counted 360 of 360 
+  n8_2k n8_2k rc=0 cards=360 41s orbit iou mean 0.8370 orbit counted 360 of 360 
+  n8_2k n8_2k rc=0 cards=360 41s orbit iou mean 0.8125 orbit counted 360 of 360 
+  n16_2k n16_2k rc=0 cards=360 44s orbit iou mean 0.8332 orbit counted 360 of 360 
+  n16_2k n16_2k rc=0 cards=360 42s orbit iou mean 0.8325 orbit counted 360 of 360 
+  n16_2k n16_2k rc=0 cards=360 41s orbit iou mean 0.8263 orbit counted 360 of 360 
+  n8_2k n8_2k rc=0 cards=360 45s orbit iou mean 0.7789 orbit counted 360 of 360 
+  n8_2k n8_2k rc=0 cards=360 45s orbit iou mean 0.7748 orbit counted 360 of 360 
+  n8_2k n8_2k rc=0 cards=360 42s orbit iou mean 0.7650 orbit counted 360 of 360 
+  n8_2k n8_2k rc=0 cards=360 48s orbit iou mean 0.7177 orbit counted 360 of 360 
+  n16_2k n16_2k rc=0 cards=360 53s orbit iou mean 0.8071 orbit counted 360 of 360 
+  n16_2k n16_2k rc=0 cards=360 45s orbit iou mean 0.7967 orbit counted 360 of 360 
+  n16_2k n16_2k rc=0 cards=360 41s orbit iou mean 0.7890 orbit counted 360 of 360 
+  n16_2k n16_2k rc=0 cards=360 44s orbit iou mean 0.7579 orbit counted 360 of 360 
+CUTS-DONE

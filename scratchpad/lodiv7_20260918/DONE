@@ -1,0 +1,64 @@
+lodiv7 DONE -- 2026-09-18 19:25 (date, read in the same command)
+
+WHAT SHIPPED
+  .lodi v7: a u16 group id per placement (512-byte header, 0x100 offGroup / 0x108 groupCount /
+  0x10C groupStride) and a per-vertex sky stream (0x110 offVertexSky / 0x118 vertexSkyBytes),
+  both readers, the census clauses, and the viewer's identity / placement / sky channels --
+  identity draws the GROUP, the new placement channel draws the unique per-placement identity,
+  and sky's note line names which stream served it. --lodi-v6 is the way back and it is BYTE
+  identity: same sha1 from the new exe and the rung exe, .lodi and .lodo both.
+  Docs: docs/LODGEN_NATIVE_LODO_LODI.md s4.1c, s4.6.6, s4.9, s4.10, s5, s8; docs/LODGEN_CENSUS.md 6.1.
+  Gate: tests/spells/lodi_v7.sh (G1..G5), tests/spells/lodi_v7_refuters.py, lodi_v7_numbers.py.
+
+THE EXE
+  release/NifSkope.exe  19:05:11  22,764,544 B  sha1 28ac412c6da96e0707e492c175822d2076016dc5
+  kept: release/NifSkope.before_btdterrain_rebuild.exe  sha1 d7261c9a7b3f9491c9ec47e50e87d4fe25d55e4e
+  Nothing named NifSkope.before_*.exe, NifSkope.archlock1_rung.exe, NifSkope.at_0117.exe or
+  NifSkope_inuse_*.exe was deleted. No process was killed at any point in this lane.
+  BUNGO'S OPEN WINDOW NEEDS A RESTART to be running these bytes.
+
+PROVED
+  lodi_v7: 12 ok, 0 failed, 0 skipped -- twice (gate_g1g4.log, gate_g5.log).
+  G1 byte identity; G2 12 refuters green + 7 controls red, closure 5705 touching pairs inside one
+  chunk and 0 of those in different groups; G3 median 0.38, r 0.9854 vs AO 0.9878, flat-slice 90.72%,
+  per-building variation 95.15%; G4 six checks.
+  Neighbours on the rebuilt exe: lodl_channels.sh 54/0, render_shot.sh 82/0 (19:19:24..19:21:45,
+  game up during run), native_open.sh, lodl_open.sh, lodgen_slab.sh at their standing counts.
+  Seven pictures in images/ with captions.md, every note line quoted in the report.
+
+FOUND AND FIXED MID-GATE
+  The 10:38 exe linked a stale GeneratedFiles/.obj/btdterrain.o, compiled before a value was
+  inserted into the MIDDLE of enum class LodlChannel, so the terrain viewer read every channel from
+  mask-r on ONE LATE and G1..G4 were green on a wrong binary. Rebuilt 19:05, re-proved.
+  Three rules in root MISTAKES.md; the object-against-header check added to the
+  nifskope-ww-build-verify skill. find src -newer release/NifSkope.exe is EMPTY in that state.
+
+OWED -- ONE COMMAND, WHEN THE GAME IS DOWN
+  NEIGHBOURS=1 bash tests/spells/lodi_v7.sh
+  on the 19:05 exe. It re-runs G1..G3 and carries lodgen_native.sh, which is a BAKE and reads the
+  archives the running game holds. Its two failures are already repaired test-side
+  (lodgen_native_fields.py j0 accepts version 7; lodgen_native_mutate.py signs a 512-byte v7 header
+  so the lodi-wrap control goes red for its own reason again) but the bake has NOT been taken again.
+  Attempt at 19:11:54: "SKIP: Fallout4 is up -- no exe runs while the game holds the files".
+  Game check at 19:25:11: Fallout4.exe PID 4464 still up, no NifSkope.
+  I tried to give my own gate an ALLOW_GAME=1 opt-in; the permission classifier refused it
+  ([Security Weaken]) and I left it refused rather than routing around it.
+
+AWAITING BUNGO'S RULING
+  The grouping rule is a PROPOSAL, not a decision: SCOL parts follow their reference; an
+  architecture base joins a connected component over world boxes touching within 16 u; everything
+  else is alone. At tolerance ZERO the largest group is still 126 placements because row houses
+  share walls, so "one row house per caster" needs the reference or the base, not a smaller
+  tolerance. A house cut by a chunk border is two groups (one SCOL, ref 0x000FB3F6, on this bake).
+  Aggregate tree cards keep 0x80000000|aggregateIndex and do NOT become groups -- reasons in
+  report s11 row 6.
+
+NOT TOUCHED BY THIS LANE
+  No commit, no git stash (the one stash in the tree is "wip-tooltips", 2026-08-11, not mine).
+  WW_CHANGES.md and HANDOFF.md were not edited by this lane: their text is in report s13 for the
+  director to splice. Read honestly for the next reader: WW_CHANGES.md mtime is 09:32:30, BEFORE
+  this lane opened at 09:45:41; HANDOFF.md mtime is 18:06:18, which is inside the lane's window but
+  is the director's own session writing its own file -- this lane issued no write to either path.
+
+REPORT
+  E:/Projects/NifskopeWildWastelandEdition/scratchpad/lodiv7_20260918/lane_lodiv7_report.md

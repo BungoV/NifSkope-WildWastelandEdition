@@ -1,0 +1,20 @@
+== C:/Users/bungo/AppData/Local/Temp/tmp.QiH7inXBpa/v3/FO4CSLOD/Commonwealth/Commonwealth.lodl : version 3, sections 0xfd ==
+  ok   the file declares version 3
+  ok   section bits 4..7 (bodies, flow, shore, strokes) are set
+  ok   the body record stride is 48
+  bodies 346  planes id 32/cell flow 32/cell shore 32/cell  strokes 0
+  ok   every record says id == index + 1 (0 wrong)
+  ok   every body has a RESOLVED WATR form (0 are 0 or 0xFFFF)
+  ok   every class is 0..2 (0 out of range)
+  ok   every flow source is 0..4 (0 out of range)
+  ok   every cell bbox lies inside the worldspace (0 do not)
+  ok   the body-ID plane names no id past the table (0 do)
+  plane 6144x6144, 21754958 texels name a body, 34958 uniform tiles of 36864
+  ok   every body's `area` field equals its texel count in the plane (0 disagree)
+  ok   the flow word decodes to the body's own direction and mid speed (0 of 214 wrong)
+  ok   there were flowing bodies to check, so this could fail
+  5800 of 10000 random texels are wet; shore steps 4..255
+  ok   the random sample found wet texels
+  ok   the shore plane VARIES (a constant plane would pass a range check that only looked at one end)
+  ok   the stroke store is present and empty (a panel writes into it)
+RESULT PASS

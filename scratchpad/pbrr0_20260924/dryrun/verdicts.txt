@@ -1,0 +1,2 @@
+pbr_shade_ab bgsm_duct gate=zero OLD runs differ in SIZE (the machine, not the code) -> FAIL
+pbr_shade_ab SUMMARY 1 cases, 1 failures -> FAIL

@@ -1,0 +1,5 @@
+worst-speckle 128x128 crop of the 2048 bake at (216,128), local var 89.70
+wrote E:\Projects\NifskopeWildWastelandEdition\scratchpad\resume3_20260911\images\cmp_tiling_fixed.png  (1078 x 1346)
+  crop local variance: vanilla 18.58  2048 89.21  341.3333 14.58
+  whole tile local variance: vanilla 19.81  2048 76.22  341.3333 12.34
+  whole tile mean |RGB| vs vanilla: 2048 16.33  341.3333 14.33

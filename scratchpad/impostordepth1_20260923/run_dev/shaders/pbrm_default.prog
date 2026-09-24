@@ -1,0 +1,13 @@
+# PBRM metallic/roughness shader.
+#
+# No conditions: whether a shape uses this depends on whether a .pbrm RESOLVED
+# for its material and whether the PBR workflow is on, and neither is expressible
+# as a .prog check (those evaluate NIF data only). Renderer::setupProgram selects
+# it explicitly by name, so leaving the condition list empty keeps it out of the
+# automatic scan — an empty list never matches there.
+#
+# The vertex stage is fo4_default.vert as-is: it already supplies every varying
+# this pass needs (LightDir, ViewDir, texCoord, A/C/D, btnMatrix, reflMatrix), so
+# there is nothing for a private copy to do except drift out of step with it.
+
+shaders fo4_default.vert pbrm_default.frag

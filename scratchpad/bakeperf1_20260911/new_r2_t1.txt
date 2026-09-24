@@ -1,0 +1,7 @@
+﻿RUN exe=E:\Projects\NifskopeWildWastelandEdition\release\NifSkope.exe region=0 -12 19 7 threads=0 chunkThreads=1
+RC=0
+WALL_MS=110186
+PEAK_WS_BYTES=3935715328
+PEAK_WS_MB=3753.4
+STAGES stage times: landscape 0.0 s, meshes 45.0 s, textures 57.7 s, impostors 0.0 s
+FILES=163

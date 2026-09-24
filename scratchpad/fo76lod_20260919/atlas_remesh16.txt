@@ -1,0 +1,14 @@
+appalachia.16.-14.-29.bto block 30 'RemeshedShape_NotAlphaTested_Merged'
+  nv=20883 nt=17183  components=141
+  UV range u[0.0002 0.9980] v[0.0023 0.9995]
+  UV bbox overlap among the 141 largest components: 487 of 9870 pairs (4.93%)
+  distinct u edges 77, distinct v edges 101  (a strict grid would be a small number)
+  u edges (first 24): ['0.0003', '0.0310', '0.1203', '0.1232', '0.1252', '0.2449', '0.2481', '0.2502', '0.3533', '0.3665', '0.3726', '0.3752', '0.3796', '0.4958', '0.4982', '0.5004', '0.5562', '0.5596', '0.5605', '0.5630', '0.6157', '0.6211', '0.6227', '0.6254']
+  v edges (first 24): ['0.0026', '0.0150', '0.0799', '0.0851', '0.0866', '0.0943', '0.1246', '0.1277', '0.1287', '0.2496', '0.2527', '0.2788', '0.3042', '0.3744', '0.3780', '0.3809', '0.3818', '0.4397', '0.4670', '0.4827', '0.4994', '0.5032', '0.5093', '0.5618']
+  horizontal gap to the next cell: min 0.00000  p10 0.00439  median 0.13037
+  log-log correlation of cell area with:  3D surface area 0.903   bbox diag^2 0.842   footprint 0.814   vert count 0.811
+  per-component texel density sqrt(uvArea)/sqrt(3dArea): p10 0.0006488 median 0.000903 p90 0.002028  (p90/p10 = 3.13)
+  largest component: 277 verts, 268 tris, cell 0.9977 x 0.9960, 12 UV islands inside, texdens p90/p10 1.97
+  component with 1925 verts: cell u[0.1251 0.2482] v[0.2524 0.4995]  (0.1230 x 0.2471)
+  component with 2029 verts: cell u[0.0002 0.2482] v[0.0023 0.2496]  (0.2480 x 0.2474)
+  component with 1034 verts: cell u[0.2502 0.4958] v[0.2524 0.4995]  (0.2456 x 0.2471)

@@ -1,0 +1,33 @@
+{
+ "stats": {
+  "road": {
+   "meshes": 95,
+   "triangles": 57910,
+   "texels": 23321
+  },
+  "trees": {
+   "meshes": 1402,
+   "triangles": 607316,
+   "texels": 51462
+  },
+  "rocks": {
+   "meshes": 437,
+   "triangles": 419285,
+   "texels": 42599
+  },
+  "buildings": {
+   "meshes": 101,
+   "triangles": 253928,
+   "texels": 18313
+  },
+  "setdressing": {
+   "meshes": 1081,
+   "triangles": 639594,
+   "texels": 6491
+  }
+ },
+ "chunk": [
+  -20,
+  20
+ ]
+}

@@ -1,0 +1,34 @@
+ROADS3 gate F3 -- the baked sheets, and the simulation checked
+
+========================================================================================
+TILE (-20,20)   25249 road texels
+
+  field                 road L    rise    local SD   step (at d)   b_y      r_g
+  vanilla                92.52    +4.29     6.59     1.31 (8)   -12.63   +5.28
+  rung (a = 1)           99.05   +29.96     7.26     3.88 (3)   -12.47   +8.09
+  BAKED   a = 0.326      73.09    +4.01     4.20     1.69 (3)   -14.18  +10.41
+  SIMULATED a = 0.326    73.38    +4.28     4.20     1.85 (3)   -14.15  +10.24
+
+  BAKED vs SIMULATED, per road texel: mean 1.583, p99 7.341, max 15.279 levels
+  road mean luminance gap between them: -0.286 levels
+  so the simulation is right on the AGGREGATE (road mean and rise
+  within 0.29 of a level) and NOT right per texel (1.58 levels on
+  average, 15.3 at worst): the bake goes through 8-bit quantisation
+  and BC1 block compression and the simulation does not.
+
+========================================================================================
+TILE (-8,8)   12182 road texels
+
+  field                 road L    rise    local SD   step (at d)   b_y      r_g
+  vanilla                94.59    +4.40     6.44     4.43 (9)    -6.28   +0.48
+  rung (a = 1)          106.68    +3.84     5.42     1.25 (8)   -12.95   +5.54
+  BAKED   a = 0.326     103.39    +0.55     4.29     1.04 (2)   -12.90   +4.87
+  SIMULATED a = 0.326   103.61    +0.77     4.24     0.94 (8)   -12.86   +4.84
+
+  BAKED vs SIMULATED, per road texel: mean 1.527, p99 5.745, max 13.802 levels
+  road mean luminance gap between them: -0.221 levels
+  so the simulation is right on the AGGREGATE (road mean and rise
+  within 0.22 of a level) and NOT right per texel (1.53 levels on
+  average, 13.8 at worst): the bake goes through 8-bit quantisation
+  and BC1 block compression and the simulation does not.
+

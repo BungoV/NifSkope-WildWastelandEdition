@@ -1,0 +1,16 @@
+pbr_wx1_gates judge, red=skyscale, CommonwealthClear fv=131 tods=8, climate TNAM=30,54,102,126,175,68
+  judge GMST: X=600 Y=-325 T=0.15 ext=2 shadowScale=-15 secunda=75 fades=5/10; A..D=6.9250 7.0750 18.9250 19.0750
+skypx
+  FAIL zenith pixel at 12.00 = Standard(2.40 x Upper^2.2) = (53.6, 95.1, 148.7), +-2 -- picture (33.0, 62.0, 99.0), off by 49.74, patch spread 0, 1280x826
+  FAIL zenith pixel at 07.00 = Standard(3.43 x Upper^2.2) = (71.3, 100.3, 143.5), +-2 -- picture (37.0, 54.0, 80.0), off by 63.48, patch spread 0, 1280x826
+  FAIL zenith pixel at 19.50 = Standard(2.67 x Upper^2.2) = (42.9, 60.6, 91.1), +-2 -- picture (24.0, 36.0, 56.0), off by 35.11, patch spread 0, 1280x826
+texel
+  FAIL layer 14 texel (534,549) colour = DXT5 (222, 227, 222) x layer colour x SkyScale 2.40 -> (171.9, 187.4, 195.1), +-2 -- picture (115.0, 126.0, 131.0), off by 64.06
+  ok   layer 14 texel alpha = 156/255 x 0.900 = 140.4, +-2 -- picture 140.0
+  ok   (floor) the texel's alpha is mid-range (156) and its colour is not flat grey
+scroll
+  ok   after 100 real s the probe at uv = the probe at uv + the judge's offset, +-1 -- off by 0.00
+  ok   (floor) after 100 s the probe at uv moved (differs from t=0 by > 4) -- differs by 140.00
+  ok   after 470.37 s (one wrap) the probe at uv = t=0, +-1 -- off by 0.00
+9 checks, 4 failures
+FAIL

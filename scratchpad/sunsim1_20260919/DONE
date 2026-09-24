@@ -1,0 +1,21 @@
+sunsim1 complete -- Sat Sep 19 03:41 CEDT 2026
+
+Offline (CPU NumPy, no GPU, one process, no build, nothing run from release/)
+side-by-side pictures of the sun over LOD chunk 4.4.-12: LEFT a ray cast against
+the real geometry, RIGHT the same view lit only from the baked horizon data.
+
+Read scratchpad/sunsim1_20260919/report.md -- section 1 first (what is and is
+not in the truth cast), then section 5 (the numbers and which picture each one
+belongs to).
+
+25 deliverable images in images/ (anything beginning with "_" is scratch):
+  20 perspective pairs   persp_{close,east,full,street}_az{120,240}_el{05,15,30,50}.png
+   1 sanity control      control_east_az120_el15_RIGHT_ROT180.png
+   2 top-down pairs      top_{full,crop}_az120_el15.png
+   2 sweep               sweep_close.gif, sweep_close_filmstrip.png
+
+Data: disagreement.json, sweep.json, times.json, controls.json.
+Scripts: scene.py, render.py, shade.py, cams.py, run.py, control.py (+ _*.py scratch).
+
+Nothing outside scratchpad/sunsim1_20260919/ was written. No commit, no stash,
+HANDOFF.md and WW_CHANGES.md untouched, src/ and tests/ untouched.

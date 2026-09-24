@@ -1,0 +1,19 @@
+eight-level (a0 > a1): worst error 0.00 levels of 255
+   index 0  decoded  255.00  D3D  255.00
+   index 1  decoded    0.00  D3D    0.00
+   index 2  decoded  218.57  D3D  218.57
+   index 3  decoded  182.14  D3D  182.14
+   index 4  decoded  145.71  D3D  145.71
+   index 5  decoded  109.29  D3D  109.29
+   index 6  decoded   72.86  D3D   72.86
+   index 7  decoded   36.43  D3D   36.43
+six-level (a0 <= a1): worst error 0.00 levels of 255
+   index 0  decoded   40.00  D3D   40.00
+   index 1  decoded  200.00  D3D  200.00
+   index 2  decoded   72.00  D3D   72.00
+   index 3  decoded  104.00  D3D  104.00
+   index 4  decoded  136.00  D3D  136.00
+   index 5  decoded  168.00  D3D  168.00
+   index 6  decoded    0.00  D3D    0.00
+   index 7  decoded  255.00  D3D  255.00
+known-answer: 0 of 16 ramp entries wrong

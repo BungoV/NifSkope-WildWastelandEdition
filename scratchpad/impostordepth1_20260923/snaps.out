@@ -1,0 +1,5 @@
+  RETRY: mesh did not open
+  RETRY: mesh did not open
+  n8_2k n8_2k rc=0 cards=120 138s orbit light: world-fixed, declination 45.0 planar 45.0 (WW_IMPOSTOR_LIGHT) orbit iou mean 0.8111 orbit counted 120 of 120 
+  n16_2k n16_2k rc=0 cards=120 25s orbit light: world-fixed, declination 45.0 planar 45.0 (WW_IMPOSTOR_LIGHT) orbit iou mean 0.8248 orbit counted 120 of 120 
+SNAPS-DONE

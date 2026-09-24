@@ -1,0 +1,80 @@
+model cedar02.nif
+projection ortho
+ranges Cedar02:0 - L2_Cedar02:0 0+34
+lodm Materials\Landscape\Plants\CedarShrub.lodm none textures\landscape\trees\cedarbranches_d.dds
+mask tree
+emissive 0 shapes 0
+front 259.643 133.118 0.473737 1.57727 54.9217
+side 259.643 133.118 0.473737 1.57727 54.9217
+class 64 64
+gap 4 4
+coverage 16 128 160
+oct 8 64 64 99.296 99.296 0.473737 1.57727 54.9217 3072 legacy 512 spec1
+frameoff 0 0 -3.37994 1.94996
+frameoff 1 0 2.72995 1.81997
+frameoff 2 0 8.31985 1.68997
+frameoff 3 0 6.62988 1.55997
+frameoff 4 0 3.76993 1.94996
+frameoff 5 0 3.24994 1.94996
+frameoff 6 0 0.909985 1.94996
+frameoff 7 0 -6.36988 1.94996
+frameoff 0 1 -4.80991 1.81997
+frameoff 1 1 -3.24994 5.06991
+frameoff 2 1 4.67991 0.519993
+frameoff 3 1 7.27987 -4.15993
+frameoff 4 1 2.72995 -4.28992
+frameoff 5 1 -1.03998 0.259996
+frameoff 6 1 -8.70984 3.11994
+frameoff 7 1 -12.3498 1.94996
+frameoff 0 2 -3.76993 1.94996
+frameoff 1 2 -3.24994 6.88988
+frameoff 2 2 -3.37994 2.07996
+frameoff 3 2 9.61982 -0.259995
+frameoff 4 2 1.29998 -7.27987
+frameoff 5 2 -10.9198 -4.41992
+frameoff 6 2 -12.2198 4.80991
+frameoff 7 2 -10.7898 1.94996
+frameoff 0 3 -1.03998 1.94996
+frameoff 1 3 -0.389992 5.5899
+frameoff 2 3 -1.42997 1.68997
+frameoff 3 3 -3.76993 10.1398
+frameoff 4 3 -9.22983 -6.88987
+frameoff 5 3 -8.96983 9.48982
+frameoff 6 3 -7.40986 9.61982
+frameoff 7 3 -7.14987 1.94996
+frameoff 0 4 7.14987 1.94996
+frameoff 1 4 6.62988 6.10989
+frameoff 2 4 8.96983 -8.18985
+frameoff 3 4 8.31985 1.16998
+frameoff 4 4 3.63993 -7.01987
+frameoff 5 4 1.42997 5.84989
+frameoff 6 4 -5.84989 7.40986
+frameoff 7 4 1.03998 1.94996
+frameoff 0 5 10.7898 1.94996
+frameoff 1 5 11.5698 8.18985
+frameoff 2 5 8.05985 6.36988
+frameoff 3 5 -2.07996 2.85995
+frameoff 4 5 -9.74982 -10.5298
+frameoff 5 5 2.85995 -0.909981
+frameoff 6 5 2.98994 10.0098
+frameoff 7 5 3.76993 1.94996
+frameoff 0 6 12.3498 1.94996
+frameoff 1 6 7.79986 8.44984
+frameoff 2 6 0.389992 10.6598
+frameoff 3 6 -3.37994 11.8298
+frameoff 4 6 -7.14987 10.0098
+frameoff 5 6 -5.84989 7.01987
+frameoff 6 6 3.37994 6.88987
+frameoff 7 6 4.80991 1.81997
+frameoff 0 7 6.36988 1.94996
+frameoff 1 7 -0.909985 1.94996
+frameoff 2 7 -3.24994 1.94996
+frameoff 3 7 -3.76993 1.94996
+frameoff 4 7 -6.62988 1.55997
+frameoff 5 7 -8.31985 1.68997
+frameoff 6 7 -2.72995 1.81997
+frameoff 7 7 3.37994 1.94996
+frameclamped 0
+aa 4 1024 1.625
+framefit 92.1683 88.7884 100.748 95.2882
+orthofit 104.92 104.92 0

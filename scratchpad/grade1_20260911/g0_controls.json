@@ -1,0 +1,170 @@
+{
+ "checks": 24,
+ "fails": 0,
+ "rows": [
+  {
+   "name": "C0 shapes (-20,24)",
+   "pass": true,
+   "detail": "ours (512, 512, 3) vanilla (512, 512, 3)"
+  },
+  {
+   "name": "C1a identity beats every flip (-20,24)",
+   "pass": true,
+   "detail": "identity 16.205, next flipud 16.232"
+  },
+  {
+   "name": "C1b cross-correlation peak at (0,0) (-20,24)",
+   "pass": true,
+   "detail": "peak (0,0) r=0.0335"
+  },
+  {
+   "name": "C4 codec floor measured (-20,24)",
+   "pass": true,
+   "detail": "BC1 re-encode of our own sheet: RMS 0.497 MAE 0.176"
+  },
+  {
+   "name": "C2 gamma 1.250 recovered (-20,24)",
+   "pass": true,
+   "detail": "g=1.250000 a=1.000000 dropped=0"
+  },
+  {
+   "name": "C2 gamma 0.800 recovered (-20,24)",
+   "pass": true,
+   "detail": "g=0.800000 a=1.000000 dropped=0"
+  },
+  {
+   "name": "C2 gamma 1.350 recovered (-20,24)",
+   "pass": true,
+   "detail": "g=1.350000 a=1.000000 dropped=0"
+  },
+  {
+   "name": "C3 gain 0.820 recovered (-20,24)",
+   "pass": true,
+   "detail": "k=0.820000  (affine k=0.820000 c=0.000000)"
+  },
+  {
+   "name": "C3 gain 1.200 recovered (-20,24)",
+   "pass": true,
+   "detail": "k=1.200000  (affine k=1.200000 c=-0.000000)"
+  },
+  {
+   "name": "C3 gain 0.950 recovered (-20,24)",
+   "pass": true,
+   "detail": "k=0.950000  (affine k=0.950000 c=0.000001)"
+  },
+  {
+   "name": "C5a gain fitter cannot absorb a gamma (-20,24)",
+   "pass": true,
+   "detail": "gain residual RMS 3.591 vs gamma 0.0000 (codec floor 0.497)"
+  },
+  {
+   "name": "C5b gamma fitter returns g=1.000 on a pure gain (-20,24)",
+   "pass": true,
+   "detail": "g=1.000000 a=0.820000"
+  },
+  {
+   "name": "C0 shapes (-20,20)",
+   "pass": true,
+   "detail": "ours (512, 512, 3) vanilla (512, 512, 3)"
+  },
+  {
+   "name": "C1a identity beats every flip (-20,20)",
+   "pass": true,
+   "detail": "identity 18.215, next flipud 20.649"
+  },
+  {
+   "name": "C1b cross-correlation peak at (0,0) (-20,20)",
+   "pass": true,
+   "detail": "peak (0,0) r=0.3140"
+  },
+  {
+   "name": "C4 codec floor measured (-20,20)",
+   "pass": true,
+   "detail": "BC1 re-encode of our own sheet: RMS 0.527 MAE 0.197"
+  },
+  {
+   "name": "C2 gamma 1.250 recovered (-20,20)",
+   "pass": true,
+   "detail": "g=1.250000 a=1.000000 dropped=0"
+  },
+  {
+   "name": "C2 gamma 0.800 recovered (-20,20)",
+   "pass": true,
+   "detail": "g=0.800000 a=1.000000 dropped=0"
+  },
+  {
+   "name": "C2 gamma 1.350 recovered (-20,20)",
+   "pass": true,
+   "detail": "g=1.350000 a=1.000000 dropped=0"
+  },
+  {
+   "name": "C3 gain 0.820 recovered (-20,20)",
+   "pass": true,
+   "detail": "k=0.820000  (affine k=0.820000 c=0.000001)"
+  },
+  {
+   "name": "C3 gain 1.200 recovered (-20,20)",
+   "pass": true,
+   "detail": "k=1.200000  (affine k=1.200000 c=-0.000000)"
+  },
+  {
+   "name": "C3 gain 0.950 recovered (-20,20)",
+   "pass": true,
+   "detail": "k=0.950000  (affine k=0.950000 c=-0.000001)"
+  },
+  {
+   "name": "C5a gain fitter cannot absorb a gamma (-20,20)",
+   "pass": true,
+   "detail": "gain residual RMS 4.205 vs gamma 0.0000 (codec floor 0.527)"
+  },
+  {
+   "name": "C5b gamma fitter returns g=1.000 on a pure gain (-20,20)",
+   "pass": true,
+   "detail": "g=1.000000 a=0.820000"
+  }
+ ],
+ "slipsize": {
+  "(-20,24)": {
+   "encode": {
+    "rms": 69.98007723821566,
+    "mae": 69.9304840585654,
+    "bias": 69.9304840585654,
+    "n": 262144
+   },
+   "decode": {
+    "rms": 62.31621347042734,
+    "mae": 61.87235527698555,
+    "bias": -61.87235527698555,
+    "n": 262144
+   }
+  },
+  "(-20,20)": {
+   "encode": {
+    "rms": 71.67985508723436,
+    "mae": 71.64582080832209,
+    "bias": 71.64582080832209,
+    "n": 262144
+   },
+   "decode": {
+    "rms": 54.78027317732618,
+    "mae": 54.02154648713167,
+    "bias": -54.02154648713167,
+    "n": 262144
+   }
+  }
+ },
+ "floor": {
+  "(-20,24)": {
+   "rms": 0.49693366737513767,
+   "mae": 0.17557670554379,
+   "bias": 0.05314842573716305,
+   "n": 262144
+  },
+  "(-20,20)": {
+   "rms": 0.5266463476328167,
+   "mae": 0.19687671939027496,
+   "bias": 0.10725211186218075,
+   "n": 262144
+  }
+ }
+}

@@ -1,0 +1,9 @@
+  ok   V8 the two levels share one origin (a coarse tile covers exactly four fine)
+Traceback (most recent call last):
+  File "E:\Projects\NifskopeWildWastelandEdition\tests\spells\lodgen_vt_check.py", line 555, in <module>
+    cmd_filter(sys.argv[2], sys.argv[3])
+  File "E:\Projects\NifskopeWildWastelandEdition\tests\spells\lodgen_vt_check.py", line 388, in cmd_filter
+    acc = (fineTexel(u0, v0, 'h') + fineTexel(u0 + 1, v0, 'h')
+  File "E:\Projects\NifskopeWildWastelandEdition\tests\spells\lodgen_vt_check.py", line 335, in fineTexel
+    return img[B + v_ % C][B + u % C]
+IndexError: list index out of range

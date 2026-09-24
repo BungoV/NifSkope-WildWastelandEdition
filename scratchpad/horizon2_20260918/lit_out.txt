@@ -1,0 +1,14 @@
+576 texels, 14s
+
+sun                TRUE    SHEET      REF   agreement of SHEET / REF with the third witness
+az 120 el  5        3.8%     0.0%     0.0%   sheet  50.0%   ref  50.0%
+az 120 el 15       10.8%     1.2%     5.6%   sheet  55.6%   ref  68.6%
+az 120 el 30       22.7%    12.3%    17.7%   sheet  70.2%   ref  75.6%
+az 120 el 60       52.6%    36.1%    38.7%   sheet  75.3%   ref  75.7%
+az 240 el  5        2.8%     0.0%     0.0%   sheet  50.0%   ref  50.0%
+az 240 el 15       10.2%     0.0%     3.8%   sheet  50.0%   ref  62.0%
+az 240 el 30       23.6%     7.3%    15.5%   sheet  63.5%   ref  70.7%
+az 240 el 60       52.4%    35.6%    37.7%   sheet  71.8%   ref  71.3%
+
+azimuth 120  elevation deg: TRUE mean  54.5  SHEET mean  63.7 (err mean 16.55 max 83.29)  REF mean  60.6 (err mean 15.90 max 82.07)
+azimuth 240  elevation deg: TRUE mean  53.5  SHEET mean  64.9 (err mean 17.07 max 81.00)  REF mean  61.6 (err mean 16.43 max 80.06)

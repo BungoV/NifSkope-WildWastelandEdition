@@ -1,0 +1,16 @@
+blast_n4 done
+blast_n8 done
+maple_n4 done
+dead_n4 done
+rock_n4 done
+
+DEFECT 1 -- ink ratio (card ink / mesh ink) and IoU, 24 views, frozen registration
+stage                             blast_n4          blast_n8          maple_n4           dead_n4           rock_n4
+                                 ink / IoU         ink / IoU         ink / IoU         ink / IoU         ink / IoU
+today (shipping)             1.441 /0.5763     1.237 /0.7479     1.894 /0.3713     1.168 /0.6165     1.120 /0.8325
+thr 0.20 (ruling A)          1.133 /0.6179     1.096 /0.7885     1.059 /0.4044     0.932 /0.6395     1.053 /0.8499
+thr 0.50 (spec crowns)       0.632 /0.5380     0.841 /0.7778     0.258 /0.2089     0.582 /0.5331     0.830 /0.7966
+pre-BC3 alpha                1.437 /0.5765     1.233 /0.7493     1.876 /0.3736     1.163 /0.6175     1.120 /0.8327
+1 frame (no union)           0.903 /0.6133     1.040 /0.7788     1.414 /0.3659     0.832 /0.5865     0.847 /0.7893
+no parallax                  2.387 /0.2952     1.749 /0.4896     3.191 /0.2219     2.056 /0.3425     2.254 /0.4988
+mip 1 (counterfactual)       1.222 /0.5933     1.054 /0.7818     1.180 /0.3381     0.960 /0.6193     1.089 /0.8366

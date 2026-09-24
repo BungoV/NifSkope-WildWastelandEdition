@@ -1,0 +1,17 @@
+== lodgen_farring ==
+RESULT PASS
+   lodb mentions: 0
+   rc=0  segfaults=0
+== lodgen_texture_arrays ==
+RESULT PASS
+   lodb mentions: 0
+   rc=0  segfaults=0
+== lodgen_native_baseline ==
+RESULT FAIL
+   lodb mentions: 1
+   rc=1  segfaults=0
+== lod_channel_preview ==
+RESULT PASS
+   lodb mentions: 0
+   rc=0  segfaults=0
+sweep done 09:28:07

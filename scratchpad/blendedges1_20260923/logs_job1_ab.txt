@@ -1,0 +1,42 @@
+== a chunk  (out/a_current/tex/Commonwealth.4.-20.24.DDS, 512x512)
+  x (vertical lines): quadrant boundaries 1.24 1.30 1.38 1.30 1.38 1.39 1.36  max 1.386 mean 1.336
+    fold P=2    peak phase 0    peak/mean 1.027  (min/mean 0.973)
+    fold P=4    peak phase 0    peak/mean 1.088  (min/mean 0.967)
+    fold P=8    peak phase 0    peak/mean 1.111  (min/mean 0.967)
+    fold P=16   peak phase 0    peak/mean 1.151  (min/mean 0.963)
+    fold P=32   peak phase 0    peak/mean 1.210  (min/mean 0.947)
+    fold P=64   peak phase 0    peak/mean 1.335  (min/mean 0.932)
+    fold P=128  peak phase 64   peak/mean 1.341  (min/mean 0.879)
+    12 strongest boundaries (b+1, ratio, mod64, mod4): 384:1.39(0,0), 192:1.38(0,0), 320:1.38(0,0), 448:1.36(0,0), 256:1.30(0,0), 128:1.30(0,0), 64:1.24(0,0), 336:1.22(16,0), 488:1.22(40,0), 364:1.20(44,0), 365:1.19(45,1), 432:1.18(48,0)
+  y (horizontal lines): quadrant boundaries 1.54 1.69 2.40 1.75 1.52 1.31 1.12  max 2.403 mean 1.618
+    fold P=2    peak phase 0    peak/mean 1.030  (min/mean 0.970)
+    fold P=4    peak phase 0    peak/mean 1.102  (min/mean 0.958)
+    fold P=8    peak phase 0    peak/mean 1.131  (min/mean 0.949)
+    fold P=16   peak phase 0    peak/mean 1.185  (min/mean 0.943)
+    fold P=32   peak phase 0    peak/mean 1.326  (min/mean 0.930)
+    fold P=64   peak phase 0    peak/mean 1.616  (min/mean 0.891)
+    fold P=128  peak phase 64   peak/mean 1.642  (min/mean 0.865)
+    12 strongest boundaries (b+1, ratio, mod64, mod4): 192:2.40(0,0), 256:1.75(0,0), 128:1.69(0,0), 64:1.54(0,0), 320:1.52(0,0), 384:1.31(0,0), 468:1.27(20,0), 312:1.27(56,0), 476:1.26(28,0), 308:1.25(52,0), 292:1.23(36,0), 248:1.23(56,0)
+  top-2% x steps: 5318; on quadrant line 0.041 (chance 0.016); on 4-grid phase0 0.251; 4-phase split 0.251 0.249 0.249 0.251
+  top-2% y steps: 5317; on quadrant line 0.065 (chance 0.016); on 4-grid phase0 0.282; 4-phase split 0.282 0.242 0.240 0.237
+== b chunk  (out/b_blend/tex/Commonwealth.4.-20.24.DDS, 512x512)
+  x (vertical lines): quadrant boundaries 1.02 1.17 1.09 1.09 1.09 1.13 1.13  max 1.173 mean 1.103
+    fold P=2    peak phase 0    peak/mean 1.026  (min/mean 0.974)
+    fold P=4    peak phase 0    peak/mean 1.078  (min/mean 0.972)
+    fold P=8    peak phase 0    peak/mean 1.089  (min/mean 0.967)
+    fold P=16   peak phase 0    peak/mean 1.100  (min/mean 0.964)
+    fold P=32   peak phase 0    peak/mean 1.101  (min/mean 0.936)
+    fold P=64   peak phase 0    peak/mean 1.103  (min/mean 0.903)
+    fold P=128  peak phase 104  peak/mean 1.153  (min/mean 0.889)
+    12 strongest boundaries (b+1, ratio, mod64, mod4): 488:1.23(40,0), 336:1.22(16,0), 450:1.20(2,2), 432:1.20(48,0), 364:1.20(44,0), 365:1.19(45,1), 332:1.18(12,0), 330:1.18(10,2), 492:1.18(44,0), 329:1.17(9,1), 128:1.17(0,0), 328:1.17(8,0)
+  y (horizontal lines): quadrant boundaries 0.93 1.09 1.17 1.39 1.22 1.22 1.08  max 1.390 mean 1.157
+    fold P=2    peak phase 0    peak/mean 1.025  (min/mean 0.975)
+    fold P=4    peak phase 0    peak/mean 1.081  (min/mean 0.970)
+    fold P=8    peak phase 0    peak/mean 1.083  (min/mean 0.953)
+    fold P=16   peak phase 4    peak/mean 1.088  (min/mean 0.941)
+    fold P=32   peak phase 24   peak/mean 1.120  (min/mean 0.923)
+    fold P=64   peak phase 0    peak/mean 1.157  (min/mean 0.874)
+    fold P=128  peak phase 0    peak/mean 1.234  (min/mean 0.826)
+    12 strongest boundaries (b+1, ratio, mod64, mod4): 256:1.39(0,0), 312:1.28(56,0), 476:1.27(28,0), 468:1.26(20,0), 308:1.24(52,0), 292:1.24(36,0), 248:1.23(56,0), 317:1.23(61,1), 408:1.23(24,0), 322:1.22(2,2), 412:1.22(28,0), 320:1.22(0,0)
+  top-2% x steps: 5233; on quadrant line 0.013 (chance 0.016); on 4-grid phase0 0.227; 4-phase split 0.227 0.251 0.262 0.260
+  top-2% y steps: 5233; on quadrant line 0.018 (chance 0.016); on 4-grid phase0 0.238; 4-phase split 0.238 0.256 0.256 0.249

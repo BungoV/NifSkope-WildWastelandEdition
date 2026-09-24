@@ -1,0 +1,94 @@
+== lodgen_defaults: the exe under test ==
+       -rwxr-xr-x 1 bungo 197609 22300160 2026-09-16_13:52:56 /e/Projects/NifskopeWildWastelandEdition/release/NifSkope.exe
+== (a) the DEFAULT bake == the same bake with the switches SPELLED OUT ==
+       a_new: rc=0, 1 s, 7 files
+       a_spelled: rc=0, 1 s, 7 files
+       f11943091e92d51bc3f781aed5c556acdf008eb3  E:/Projects/NifskopeWildWastelandEdition/scratchpad/defaults1_20260912/gate/a_spelled  7 files  1650958 bytes
+       0a0f652a6a70ebd1161254bdf305f6c8c7f7e4d0  E:/Projects/NifskopeWildWastelandEdition/scratchpad/defaults1_20260912/gate/a_new  7 files  1650958 bytes
+         differs: Commonwealth.lodb (716 vs 716 bytes)
+       DIFFERENT: 1 files
+       the only differences are the excused ones ([.]lodb)
+  ok   (a) default bake == the switches spelled out, only the switch-list ledger excused
+       ledger: 5 files each side, 0 listed only on one side, 0 with a different hash
+       ledger: input hashes equal: True; switch hashes equal: False (they must NOT be)
+  ok   (a) the ledger agrees: same files, same hashes, only the switch hash and the sidecar move
+       the new default bake's sidecar: Commonwealth.4.-20.24.BTO.manifest.txt, 678 object rows
+  ok   (a) the manifest sidecar is written with identity OFF (floor 50 rows)
+       a_wrong: rc=0, 2 s, 7 files
+  ok   (a) refuter: ONE wrong explicit switch (--land-hex 0) breaks the same comparison
+== (a2) a road-bearing region, where the verge default is visible ==
+       a2_new: rc=0, 2 s, 7 files
+       a2_spelled: rc=0, 2 s, 7 files
+       4e2c150e3bd05e99ff382ed0f81951ab919b1e29  E:/Projects/NifskopeWildWastelandEdition/scratchpad/defaults1_20260912/gate/a2_spelled  7 files  1485598 bytes
+       17dc44455638ad696e25639a4cbe245528d4a013  E:/Projects/NifskopeWildWastelandEdition/scratchpad/defaults1_20260912/gate/a2_new  7 files  1485598 bytes
+         differs: Commonwealth.lodb (716 vs 716 bytes)
+       DIFFERENT: 1 files
+       the only differences are the excused ones ([.]lodb)
+  ok   (a2) roads: default bake == the switches spelled out
+       ledger: 5 files each side, 0 listed only on one side, 0 with a different hash
+       ledger: input hashes equal: True; switch hashes equal: False (they must NOT be)
+  ok   (a2) roads: the ledger agrees, file for file and hash for hash
+       a2_old: rc=0, 1 s, 7 files
+  ok   (a2) refuter: --road-ground-paint 1 bakes DIFFERENT bytes from the ruled 0
+== (b) the OLD values spelled out are a DIFFERENT bake, file by file ==
+       b_old: rc=0, 2 s, 7 files
+       b_def: rc=0, 2 s, 7 files
+         differs: Commonwealth.4.-20.24.BTO (1280239 vs 860743 bytes)
+         differs: Commonwealth.4.-20.24.BTR (46518 vs 36942 bytes)
+         differs: Commonwealth.lodb (716 vs 716 bytes)
+         differs: tex/Commonwealth.4.-20.24.DDS (174888 vs 174888 bytes)
+  ok   (b) the OLD values spelled out are a DIFFERENT bake from the default
+       files that moved: 1 .BTR, 1 .BTO
+  ok   (b) both a .BTR and a .BTO moved, so both identity switches reach their file
+== (c) .BTR and .BTO descriptors at dim 4, 8, 16, 32 ==
+       c_new_4: rc=0, 2 s, 7 files
+       dim 4: BTR desc 52776558133763 (vanilla 52776558133763)
+  ok   (c) dim 4 .BTR is vanilla's land descriptor
+       dim 4: BTO desc 474989027590661 (plain 474989027590661)
+  ok   (c) dim 4 .BTO has no colour and no UV 2
+       c_new_8: rc=0, 2 s, 7 files
+       dim 8: BTR desc 52776558133763 (vanilla 52776558133763)
+  ok   (c) dim 8 .BTR is vanilla's land descriptor
+       dim 8: BTO desc 474989027590661 (plain 474989027590661)
+  ok   (c) dim 8 .BTO has no colour and no UV 2
+       c_new_16: rc=0, 2 s, 5 files
+       dim 16: BTR desc 52776558133763 (vanilla 52776558133763)
+  ok   (c) dim 16 .BTR is vanilla's land descriptor
+       c_wide_16: rc=0, 2 s, 5 files
+       dim 16: no .BTO by default; with identity spelled ON it wrote none
+  ok   (c) dim 16 writes no .BTO with identity either way (nothing was lost)
+       c_new_32: rc=0, 5 s, 7 files
+       dim 32: BTR desc 52776558133763 (vanilla 52776558133763)
+  ok   (c) dim 32 .BTR is vanilla's land descriptor
+       dim 32: BTO desc 474989027590661 (plain 474989027590661)
+  ok   (c) dim 32 .BTO has no colour and no UV 2
+       c_wide_4: rc=0, 1 s, 7 files
+       refuter, identity spelled ON at dim 4: BTR desc 686095322853893 | BTO desc 5612388490686984
+  ok   (c) refuter: --terrain-identity gives the WIDE land descriptor, so the read can differ
+  ok   (c) refuter: --identity gives the wide object descriptor (colour + UV 2)
+== (d) arrays and impostor cards with identity OFF ==
+       d_new: rc=0, 306 s, 93 files
+       d_on: rc=0, 316 s, 93 files
+       rows lines: default (identity off) 7626 | identity spelled on 7626
+  ok   (d) rows line count is unchanged with identity off (7626)
+       C lines: default (identity off) 7210 | identity spelled on 7210
+  ok   (d) C line count is unchanged with identity off (7210)
+       I lines: default (identity off) 35 | identity spelled on 35
+  ok   (d) I line count is unchanged with identity off (35)
+       M lines: default (identity off) 12 | identity spelled on 12
+  ok   (d) M line count is unchanged with identity off (12)
+       A lines: default (identity off) 21 | identity spelled on 21
+  ok   (d) A line count is unchanged with identity off (21)
+       texture-array files: identity off 11 | identity on 11
+  ok   (d) the texture arrays are still written with identity off (11 files)
+== (e) the native .lodo / .lodi / .lodt / .lodl with identity OFF ==
+       e_new: rc=0, 2 native files
+       e_on: rc=0, 2 native files
+       native files: 2 identical, 0 differ, 0 only on the identity-off side
+  ok   (e) the native data is byte-identical with identity off (2 files)
+  ok   (e) --native-verify is clean on the identity-off pair
+       --native-no-ladder: 2 of the native files differ from the default
+  ok   (e) refuter: a switch that reaches the native files makes the comparator say so (2 files)
+28 checks, 0 failures
+RESULT PASS
+RC=0

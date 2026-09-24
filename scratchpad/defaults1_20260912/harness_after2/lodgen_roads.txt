@@ -1,0 +1,32 @@
+== lodgen_roads: the exe ==
+       -rwxr-xr-x 1 bungo 197609 22279680 Sep 12 20:42 E:/Projects/NifskopeWildWastelandEdition/release/NifSkope.exe
+== the bakes ==
+== R1 the OFF value is exact ==
+  ok   R1 two --no-roads runs are byte-identical, 10 files
+== R2 roads reach the colour and not the normal ==
+  ok   R2 --roads changed the colour sheet
+  ok   R2 --roads left the _msn normal sheet byte-identical
+== R3 the census is written and moves ==
+       road-bearing: roadTexels=27509 roadTriangles=87363 roadDecalTexels=906 roadAlphaRejected=577
+       road-free:    roadTexels=0 ; switch off: roadTexels=0
+  ok   R3 the road-bearing region paints roads (roadTexels 27509 > 5000)
+  ok   R3 the road-free region reads roadTexels 0 -- the counter is not a constant
+  ok   R3 with the switch off every road field is 0
+  ok   R3 decal shapes inside the road family are painted (roadDecalTexels 906)
+  ok   R3 alpha-tested road shapes refuse texels (roadAlphaRejected 577)
+  ok   R3 the refusal list is written, whether or not it is empty
+== R4 THE FLOOR: no road means no change ==
+  ok   R4 on ground with no roads, --roads and --no-roads are byte-identical
+== R5 the road-presence metric against vanilla ==
+       centreline texels 9777 of 262144 (road-coloured 27055)
+       ceiling  vanilla vs vanilla     1.0000
+       floor    ours --no-roads        0.1227
+       after    ours --roads           0.3033
+       reference the ground around it  0.3972
+       mean |colour error| vs vanilla, --no-roads  whole tile 22.57  on the centreline 38.32
+       mean |colour error| vs vanilla, --roads     whole tile 21.07  on the centreline 23.77
+       bar 1  after >= 2 x floor       0.3033 >= 0.2455  ok
+       bar 2  after >= 0.72 x reference 0.3033 >= 0.2860  ok
+  ok   R5 the road-presence metric passes its pre-registered bars
+11 checks, 0 failures
+RESULT PASS

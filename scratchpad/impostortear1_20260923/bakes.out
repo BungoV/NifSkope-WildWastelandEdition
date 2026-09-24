@@ -1,0 +1,20 @@
+  blast_n4 bake rc=0 7944 ms  oct 4 160 512 112.69  aa 2 1024 0.5
+    lodgen rc=0 sheets=5 lodm=1
+  blast_n8 bake rc=0 6732 ms  oct 8 160 512 116.211  aa 2 1024 0.5
+    lodgen rc=0 sheets=5 lodm=1
+  maple_n4 bake rc=0 5433 ms  oct 4 256 512 440.283  aa 2 1024 1.25
+    lodgen rc=0 sheets=5 lodm=1
+  dead_n4 bake rc=0 4946 ms  oct 4 96 512 166.545  aa 2 1024 0.25
+    lodgen rc=0 sheets=5 lodm=1
+  rock_n4 bake rc=0 7837 ms  oct 4 512 496 1727.14  aa 2 1024 0.75
+    lodgen rc=0 sheets=5 lodm=1
+  blast_n4 bake rc=0 4869 ms  oct 4 160 512 112.69  aa 4 1024 0.375
+    lodgen rc=0 sheets=5 lodm=1
+  blast_n8 bake rc=0 8259 ms  oct 8 160 512 116.211  aa 4 1024 0.625
+    lodgen rc=0 sheets=5 lodm=1
+  maple_n4 bake rc=0 5532 ms  oct 4 256 512 440.283  aa 4 1024 4.375
+    lodgen rc=0 sheets=5 lodm=1
+  dead_n4 bake rc=0 4705 ms  oct 4 96 512 166.545  aa 4 1024 0.25
+    lodgen rc=0 sheets=5 lodm=1
+  rock_n4 bake rc=0 6926 ms  oct 4 512 496 1727.14  aa 4 1024 1.25
+    lodgen rc=0 sheets=5 lodm=1

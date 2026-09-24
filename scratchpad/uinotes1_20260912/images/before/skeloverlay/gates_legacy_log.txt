@@ -1,0 +1,94 @@
+nodes in file: 215
+dock: All 130, Bones 93, Deforming 93, Unused 0
+dock footer: 130 node(s) shown · 93 bone(s), 93 deforming, 0 unused · 9 skinned shape(s)
+analyse (record only): 130 nodes, 93 bones, 93 deforming, 0 unused, 9 skinned shape(s)
+overlay OFF census: nodes 0, segments 0, draws 0
+  ok   (a') FLOOR: the census is empty while the overlay is off
+  ok   the off-render is a real image
+render size: 857x706
+overlay ON census: nodes 130, bones 93, deforming 93, unused 0, notABone 37, segments 110, stubs 62, missingNodes 0, draws 3
+  ok   (a) joint markers 130 + blocks with no scene node 0 = the dock's All filter 130
+  ok   (a) every block the dock lists has a node to draw at (missing 0)
+  ok   (a) the overlay drew something
+  ok   (a) the census counts a draw
+  ok   (b) bone-coloured 93 = the Bones filter 93
+  ok   (b) deforming-coloured 93 = the Deforming filter 93
+  ok   (b) unused-coloured 0 = the Unused filter 0
+  ok   (b) muted 37 = All 130 minus Bones 93
+pixels changed by the overlay: 9502 (1.570%)
+  ok   (c') FLOOR: turning the overlay on changes some pixels
+mask sources: 130 joints, 172 segments; 130 joints projected on screen
+changed pixels outside the overlay's own mask: 3  (first at 456,138)
+  ok   (c) the render differs ONLY in the overlay's pixels (3 outside the mask, bar 64)
+  ok   (c') FLOOR: the 64-pixel bar still refuses the overlay itself (9502 pixels changed)
+mask covers 11.94% of the frame
+  ok   (c') FLOOR: the mask is not the whole frame (11.94%)
+pixels differing after toggling back off: 25
+  ok   (e) toggling off restores the off-render (25 pixels differ, bar 64)
+(k) chip All: dock 130 row(s), overlay 130 listed, census filtered 0
+  ok   (k) the All chip: the overlay lists exactly the dock's 130 row(s), by name
+(k) chip Bones: dock 93 row(s), overlay 93 listed, census filtered 37
+  ok   (k) the Bones chip: the overlay lists exactly the dock's 93 row(s), by name
+(k) chip Deforming: dock 93 row(s), overlay 93 listed, census filtered 37
+  ok   (k) the Deforming chip: the overlay lists exactly the dock's 93 row(s), by name
+(k) chip Unused: dock 0 row(s), overlay 0 listed, census filtered 37
+  ok   (k) the Unused chip: the overlay lists exactly the dock's 0 row(s), by name
+(n) census filtered: All 0, Bones 37
+  ok   (n) the census field `filtered` is written and MOVES with the chip (All 0, Bones 37)
+(k) search 'Finger': dock 48 row(s), overlay 48 listed
+  ok   (k) a search: the overlay lists exactly the dock's 48 row(s), by name
+(k') FLOOR: with the Unused chip pushed behind the dock's back, overlay 0 vs dock 48
+  ok   (k') FLOOR: a chip the dock is not showing makes the two disagree (0 vs 48)
+(l) probe bone 53 at screen 498.257,331.547
+  ok   (l) a drawn bone could be found on screen to click
+(l) click at the bone -> viewport active 53, dock current row 53
+  ok   (l) clicking a bone in the viewport selects it (53, wanted 53)
+  ok   (l) and its row is the dock's current row (53, wanted 53)
+(l') FLOOR: click on empty space -> active -1
+  ok   (l') FLOOR: a click away from every bone selects none (-1)
+(l) row -> viewport active 53
+  ok   (l) selecting the row selects the bone in the viewport (53, wanted 53)
+(l) double-click: camera distance 87.6394 -> 5.63014, look-at moved 41.5014
+  ok   (l) double-clicking the row frames the bone (distance 87.64 -> 5.63, moved 41.50)
+(m) dock width 422, tree viewport 394, name column 234, indent 20
+(m) rows at depth >= 6: 95; empty names 0; elided 73; tightest 'RArm_Finger13' at depth 14 with -146 px to spare
+  ok   (m) FLOOR: the fixture actually has deep rows to measure (95 at depth >= 6)
+  FAIL (m) every row at depth 6+ shows its whole name (0 empty, 73 elided)
+(m') FLOOR arithmetic: viewport 394 - numeric 160 - 20*15 - name 80 = -146 px for 'RArm_Finger13'
+  ok   (m') FLOOR: under the shipped column law that row had -146 px, i.e. none
+(o) display modes: Octahedral vs Stick 90570, Octahedral vs Wire 91041, Stick vs Wire 49956
+  ok   (o) Octahedral, Stick and Wire are three different pictures (90570 / 91041 / 49956 px, bar 2000)
+(p) X-ray on vs off: 91080 pixels
+  ok   (p) X-ray off hides the bones inside the mesh (91080 pixels differ, bar 2000)
+clip: Running_To_Slide_And_Back_To_Running.hkx  added 1
+mapping: Running_To_Slide_And_Back_To_Running: 78 of 95 bones play, 4 matched only by ignoring case (Spine1, Spine2, Head, Weapon); 17 have no node in this NIF: WeaponBolt, WeaponExtra1, WeaponExtra2, WeaponExtra3, WeaponMagazine, WeaponMagazineChild1, WeaponMagazineChild2, WeaponMagazineChild3, WeaponMagazineChild4, WeaponMagazineChild5, WeaponOptics1, WeaponOptics2, WeaponTrigger, WeaponIKTargetL, WeaponIKTargetR, WeaponIKTargetLMirror, WeaponIKTargetRMirror. (bone names from meshes/actors/character/characterassets/skeleton.hkx in the game archives)
+  ok   (d) the clip loaded and named a sequence
+scrubbed to frame 46 at 60 fps = t 0.766667
+(d) 130 joints compared against the animated nodes; worst 0 units at block -1
+  ok   (d) every drawn joint is the animated node's world position (worst 0 <= 1e-3)
+(d') 122 joints moved from the bind pose; largest 367.581 units at block 14
+  ok   (d') FLOOR: the clip actually moved the overlay (122 joints, largest 367.6)
+(f) longest BIND-pose bone-to-bone segment 22.403 over 60 pairs; limit 33.6044
+  ok   (f) the limit is a real measurement (60 pairs, longest 22.40)
+(f) 172 segments drawn at frame 46; longest 31.9429
+  ok   (f) no drawn segment is longer than 33.60 (longest 31.94)
+(f') FLOOR: the old rule (every parent -> child pair) would draw 129 segments, longest 300.51
+  ok   (f') FLOOR: the old rule FAILS the same limit (longest 300.51 > 33.60)
+(g) bone box over 93 bones: (-31.1323, 241.302, 4.78132) .. (35.1633, 368.91, 43.0758), margin 7.44068
+(g) segment endpoints outside the box+margin: 0; worst overshoot 0.932327
+  ok   (g) every drawn segment stays on the character (0 outside, worst 0.93)
+(g') FLOOR: the old rule put 19 endpoints outside, worst 241.302
+  ok   (g') FLOOR: the old rule FAILS the box (19 outside, worst 241.30)
+(h) frame census: nodes 130, segments 110, stubs 62, skipped 19
+  ok   (h) the census counts the bodies the rule refused (skipped 19 > 0)
+  ok   (h) segments 110 = the segments reported for the mask 172
+  ok   (h) the joint markers are untouched by the rule (130 = the dock's All 130)
+(i) rule: Bones are drawn between armature nodes only: the 93 node(s) a skin lists, plus every node between them, rooted at COM. The other 19 drawn node(s) -- camera, anim-object, weapon, attach and root nodes, which no skin bone sits beneath -- get a joint marker and no bone.
+  ok   (i) the overlay states its rule in words
+(i) armature nodes 111, joint-marker-only 19
+  ok   (i) some nodes are marker-only, and most are armature (19 / 111)
+images written under e:/Projects/NifskopeWildWastelandEdition/scratchpad/uinotes1_20260912/images/before/skeloverlay/gates_legacy
+dock grab written to e:/Projects/NifskopeWildWastelandEdition/scratchpad/uinotes1_20260912/images/before/skeloverlay/manager_before.png
+46 checks, 1 failures
+FAIL
+done

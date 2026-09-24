@@ -1,0 +1,23 @@
+=== lodl_open  02:12
+   rc=0 :: 23 checks, 0 failures :: 
+=== lodgen_terrain  02:14
+   rc=0 :: 26 checks, 0 failures :: 
+=== lodgen_terrain_vt  02:14
+   rc=1 :: 41 checks, 1 failures :: RESULT FAIL
+=== lodgen_roads  02:15
+   rc=0 :: 11 checks, 0 failures :: RESULT PASS
+=== lodgen_ground_cover  02:15
+   rc=1 :: 29 checks, 5 failures :: RESULT FAIL
+=== lodgen_terrain_pbrm  02:16
+   rc=0 :: 14 checks, 0 failures :: RESULT PASS
+=== lodgen_native  02:16
+   rc=0 :: 18 checks, 0 failures :: RESULT PASS
+=== lodgen_panel_run  02:18
+   rc=0 :: 125 checks, 0 failures :: 
+=== lod_generation  02:18
+   rc=0 :: 116 checks, 0 failures :: 
+=== ui_align  02:18
+   rc=0 :: 11 checks, 0 failures :: 
+=== water_ui  02:18
+   rc=0 :: 82 checks, 0 failures, 0 skips :: 
+=== chain done 02:18

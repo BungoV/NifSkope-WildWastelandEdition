@@ -1,0 +1,5 @@
+BAKEPERF1 DONE 2026-09-11 15:0x
+exe release/NifSkope.exe 14:48:52, 21,261,312 B (one build 13:59:25->14:02:15 + five counted relinks + one discarded diagnostic link)
+rung release/NifSkope.before_bakeperf1.exe 13:24:12, 21,234,176 B, md5 edd2a99ea9fcbeb21b18db05c8b0dbb3
+gates: byte identity P2/P4/P4e GREEN on both regions; 12 harnesses, 11 green, 1 unmoved red (lodgen_terrain_vt V9b, red on the rung too)
+report scratchpad/lane_bakeperf1_report.md

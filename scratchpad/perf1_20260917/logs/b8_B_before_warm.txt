@@ -1,0 +1,5 @@
+TAG=b8_B_before_warm REGION=B(-24 16 -9 31) CHUNKTHREADS=1 THREADS=0 rc=0 WALL_MS=92032
+    stage times: landscape 0.0 s, meshes 73.0 s, textures 14.7 s, impostors 0.0 s
+    peak working set: 2.55 GB (2741522432 bytes)
+    bound by asked
+    census: bake census: threads 16, chunk threads 1 bound by asked, chunk jobs 16, chunk workers 1, peak working set: 2.55 GB (2741522432 bytes), bto built in scratch E:/Projects/NifskopeWildWastelandEdition/scratchpad/perf1_20260917/work/s1/b8_B_before_warm/obj/lodgen_bto_scratch, 16 chunk(s), 16 dropped, 12581096 bytes freed, layout E:/Projects/NifskopeWildWastelandEdition/scratchpad/perf1_20260917/work/s1/b8_B_before_warm/nat/FO4CSLOD, 34 file(s), 0 outside (a SECOND root: E:/Projects/NifskopeWildWastelandEdition/scratchpad/perf1_20260917/work/s1/b8_B_before_warm/obj/FO4CSLOD)

@@ -1,0 +1,46 @@
+ROADS3 gate F1 part 2 -- does vanilla`s road follow the local ground?
+
+==============================================================================
+TILE (-20,20)
+
+  road luminance regressed on the LOCAL GROUND (disc r=8 texels):
+    field                  n      slope   corr    road L   ground L   rise
+    vanilla               10287   +0.714  +0.442    92.02    91.00     +1.02 (sd 9.68)
+    ours (rung)           10287   +0.339  +0.300    88.30    71.45    +16.85 (sd 18.87)
+    our ground            10287   +0.637  +0.562    66.06    71.45     -5.39 (sd 14.98)
+    KNOWN fixed paint 100  10287   +0.000  +nan   100.00    91.00     +9.00 (sd 6.55)
+    KNOWN ground + 4        159   +1.000  +1.000    88.46    84.46     +4.00 (sd 0.00)
+    FLOOR (local ground translated, 5 draws): slope mean -0.009, worst |slope| 0.298
+
+  ROAD minus SURROUND (surround = 1..8 texels outside the mask):
+    vanilla      road  92.52  surround  88.24  rise  +4.29
+    ours         road  99.05  surround  69.10  rise +29.96
+    our ground   road  60.96  surround  69.10  rise  -8.13
+
+  WHAT A GLOBAL OPACITY WOULD HAVE TO BE
+    our paint on the road 99.05, our ground under it 60.96 (the whole interval a can reach)
+    to hit vanilla`s ABSOLUTE road 92.52:  a = 0.829
+    to hit vanilla`s RISE over OUR surround (73.38):  a = 0.326
+
+==============================================================================
+TILE (-8,8)
+
+  road luminance regressed on the LOCAL GROUND (disc r=8 texels):
+    field                  n      slope   corr    road L   ground L   rise
+    vanilla               10592   +0.755  +0.472    94.17    92.26     +1.91 (sd 9.07)
+    ours (rung)           10592   +0.209  +0.088   106.09   103.80     +2.29 (sd 10.69)
+    our ground            10592   +0.565  +0.338   102.13   103.80     -1.67 (sd 7.00)
+    KNOWN fixed paint 100  10592   +0.000  +nan   100.00    92.26     +7.74 (sd 6.34)
+    KNOWN ground + 4        802   +1.000  +1.000    96.24    92.24     +4.00 (sd 0.00)
+    FLOOR (local ground translated, 5 draws): slope mean -0.011, worst |slope| 0.300
+
+  ROAD minus SURROUND (surround = 1..8 texels outside the mask):
+    vanilla      road  94.59  surround  90.19  rise  +4.40
+    ours         road 106.68  surround 102.84  rise  +3.84
+    our ground   road 102.12  surround 102.84  rise  -0.72
+
+  WHAT A GLOBAL OPACITY WOULD HAVE TO BE
+    our paint on the road 106.68, our ground under it 102.12 (the whole interval a can reach)
+    to hit vanilla`s ABSOLUTE road 94.59:  a = -1.651
+    to hit vanilla`s RISE over OUR surround (107.24):  a = 1.124
+

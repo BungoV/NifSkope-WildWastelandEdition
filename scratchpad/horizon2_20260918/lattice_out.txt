@@ -1,0 +1,11 @@
+object field 256x256 cell 128, occupied 24729; MIN plane present True
+object span (max-min) over occupied squares: p25 0 p50 150 p75 616 p95 1601 u
+
+one-degree pencil, one square per sample -- the CEILING on any march over that field
+----------------------------------------------------------------------------------------------------
+W_sky    the bake's own lattice (LAND + objfield MAX)      mean   7.33  max  48.29  >2deg  65.0%
+W_boxlat LAND lattice + the .lodi boxes rasterised at 128 u mean   6.49  max  78.19  >2deg  56.2%
+W_slab   the bake's lattice, SLAB wall/ceiling law on the objects mean  10.90  max  60.83  >2deg  81.2%
+W_land   LAND only, no objects at all                      mean  41.10  max  82.66  >2deg  99.4%
+----------------------------------------------------------------------------------------------------
+for reference, the SHIPPED sheet against the same truth: mean   8.51  max  67.77

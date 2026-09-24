@@ -1,0 +1,85 @@
+TILING3 -- hypotheses A, B and C on the ~97 % of vanilla`s residual that
+hypothesis D`s ceiling basis does NOT explain.
+
+==============================================================================
+KNOWN-ANSWER CONTROLS
+==============================================================================
+   shape distance, a field against ITSELF          0.0000   (must be 0)
+   shape distance, vanilla residual vs WHITE NOISE 0.2732   (must be large)
+   moments of Gaussian noise: skew +0.002 kurtosis 3.007  (must be 0 / 3)
+   band shares of white noise: [0.0485, 0.145, 0.5973, 0.2092]  (the flat reference)
+
+==============================================================================
+chunk (-20,24)
+==============================================================================
+   band names (share of the residual`s variance): ['8..32 tx  (256..1k u)', '4..8 tx   (128..256u)', '2..4 tx   (64..128 u)', '<=2 tx    (<=64 u)']
+   field                             SD    skew    kurt   band shares
+   --------------------------------------------------------------------------
+   VANILLA residual               4.476   1.007   7.373   [0.033, 0.198, 0.561, 0.208]
+   white noise, same SD           4.476  -0.004   2.995   [0.047, 0.143, 0.602, 0.207]   <- FLOOR
+   composite @ code mip           3.409   0.174   8.052   [0.076, 0.417, 0.48, 0.027]  repeat 1.152/1.789
+   composite @ code-1             5.408   0.285   4.369   [0.032, 0.225, 0.621, 0.122]  repeat 1.313/1.793
+   composite @ code-2             7.814   0.531   4.930   [0.017, 0.163, 0.649, 0.17]  repeat 1.414/1.788
+   composite @ code-3             8.564   0.629   5.529   [0.016, 0.152, 0.65, 0.182]  repeat 1.419/1.781
+   composite @ code-4            10.814   0.670   5.508   [0.012, 0.14, 0.653, 0.195]  repeat 1.265/1.777
+   composite @ mip 0             20.682   0.674   4.220   [0.006, 0.122, 0.638, 0.235]  repeat 1.349/2.065
+   shape distance of each to vanilla`s residual (0 = same spectral shape):
+      composite @ code mip         1.3594
+      composite @ code-1           0.2879
+      composite @ code-2           0.4266
+      composite @ code-3           0.4690
+      composite @ code-4           0.5793
+      composite @ mip 0            0.8894
+      white noise                  0.2733   <- FLOOR
+   B  Noise.dds 1024x1024, luminance SD 38.13
+      noise repeat =   0.5 cells   r +0.0006   twin +0.0035
+      noise repeat =   1.0 cells   r -0.0015   twin +0.0005
+      noise repeat =   2.0 cells   r +0.0010   twin -0.0022
+      noise repeat =   4.0 cells   r -0.0010   twin -0.0031
+      noise repeat =   8.0 cells   r +0.0015   twin -0.0020
+      noise repeat =  16.0 cells   r -0.0001   twin +0.0008
+      noise repeat =  32.0 cells   r +0.0018   twin -0.0007
+      noise at the LANDSCAPE repeat 341.3333 u   r +0.0036   twin +0.0016
+      Noise.dds own residual: SD 31.525 skew -2.191 kurt 10.915 bands [0.021, 0.234, 0.61, 0.134]
+      its shape distance to vanilla`s residual 0.4118
+   C 4x box-downsampled           4.463   0.182   4.902   [0.045, 0.282, 0.603, 0.07]  repeat 1.353/1.776  shape 0.6530
+   (vanilla`s periodicity law: visibility <= 0.264 absolute, <= 0.448 over
+    the sheet`s own null floor -- TILING2 section 1a)
+
+==============================================================================
+chunk (-20,20)
+==============================================================================
+   band names (share of the residual`s variance): ['8..32 tx  (256..1k u)', '4..8 tx   (128..256u)', '2..4 tx   (64..128 u)', '<=2 tx    (<=64 u)']
+   field                             SD    skew    kurt   band shares
+   --------------------------------------------------------------------------
+   VANILLA residual               5.459   1.123   6.539   [0.037, 0.197, 0.55, 0.216]
+   white noise, same SD           5.450   0.002   3.006   [0.048, 0.144, 0.6, 0.208]   <- FLOOR
+   composite @ code mip           3.203   0.760   5.558   [0.265, 0.413, 0.302, 0.021]  repeat 1.364/1.201
+   composite @ code-1             4.946   0.897   5.836   [0.122, 0.249, 0.512, 0.117]  repeat 1.588/1.209
+   composite @ code-2             7.211   1.389  10.379   [0.061, 0.179, 0.591, 0.169]  repeat 1.581/1.219
+   composite @ code-3             7.837   1.653  13.433   [0.052, 0.168, 0.605, 0.175]  repeat 1.614/1.227
+   composite @ code-4             9.491   1.816  15.671   [0.038, 0.153, 0.622, 0.187]  repeat 1.668/1.209
+   composite @ mip 0             15.879   1.265   7.840   [0.016, 0.127, 0.636, 0.222]  repeat 1.597/1.247
+   shape distance of each to vanilla`s residual (0 = same spectral shape):
+      composite @ code mip         2.0365
+      composite @ code-1           0.7588
+      composite @ code-2           0.3231
+      composite @ code-3           0.2888
+      composite @ code-4           0.1868
+      composite @ mip 0            0.5349
+      white noise                  0.2435   <- FLOOR
+   B  Noise.dds 1024x1024, luminance SD 38.13
+      noise repeat =   0.5 cells   r +0.0007   twin -0.0018
+      noise repeat =   1.0 cells   r -0.0009   twin -0.0037
+      noise repeat =   2.0 cells   r +0.0020   twin -0.0051
+      noise repeat =   4.0 cells   r -0.0019   twin -0.0001
+      noise repeat =   8.0 cells   r -0.0002   twin +0.0023
+      noise repeat =  16.0 cells   r +0.0018   twin +0.0007
+      noise repeat =  32.0 cells   r +0.0021   twin -0.0006
+      noise at the LANDSCAPE repeat 341.3333 u   r -0.0026   twin -0.0012
+      Noise.dds own residual: SD 31.525 skew -2.191 kurt 10.915 bands [0.021, 0.234, 0.61, 0.134]
+      its shape distance to vanilla`s residual 0.4774
+   C 4x box-downsampled           4.113   0.682   4.569   [0.17, 0.319, 0.44, 0.071]  repeat 1.562/1.206  shape 1.2044
+   (vanilla`s periodicity law: visibility <= 0.264 absolute, <= 0.448 over
+    the sheet`s own null floor -- TILING2 section 1a)
+

@@ -1,0 +1,29 @@
+  ok   the document loaded
+--- the bars, in main-window coordinates ---
+  dock tab strip              : x    0  top   35  w   164  h  35  bottom   69
+  viewport toolbar (header)   : x  167  top   35  w   857  h  35  bottom   69
+  dock search field           : x    5  top   70  w    48  h  22  bottom   91
+  dock search row             : x    5  top   70  w   154  h  23  bottom   92
+  toolbar tFile               : x    0  top    0  w   374  h  35  bottom   34
+  toolbar tView               : x  374  top    0  w  1150  h  35  bottom   34
+  toolbar tMode               : x  167  top   35  w   322  h  35  bottom   69
+  toolbar tRender             : x  489  top   35  w   535  h  35  bottom   69
+  dock LeftColumnDock         : x    0  top   35  w   164  h 741  bottom  775
+  dock LodGenerationDock      : x 1027  top   35  w   497  h 741  bottom  775
+  ok   (floor) the tab strip is a real rectangle
+  ok   (floor) the viewport toolbar is a real rectangle
+  ok   (floor) the search row is a real rectangle
+  ok   (floor) the two row-1 bars are different widgets
+  row 1: tabs top 35 h 35  |  toolbar top 35 h 35
+  ok   (1) the tab strip and the viewport toolbar share a top edge (<= 1 px)
+  ok   (1) ...and one height (<= 1 px)
+  row 2: search row top 70 h 23  |  viewport content top 70
+  ok   (2) the search row starts where the viewport's content starts (<= 1 px)
+  floor: same row now yes; with the strip 4 px taller no
+  ok   (floor) a 4 px difference FAILS the same test
+  seam grab 488x82 -> e:/Projects/NifskopeWildWastelandEdition/scratchpad/build9_20260910/seam_after.png (written)
+  ok   (shot) the seam grab was written
+  ok   (shot floor) ...and it is not an empty strip
+11 checks, 0 failures
+PASS
+done

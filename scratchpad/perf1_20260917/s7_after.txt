@@ -1,0 +1,15 @@
+side after exe /e/Projects/NifskopeWildWastelandEdition/release/NifSkope.exe
+-rwxr-xr-x 1 bungo 197609 22567424 Sep 17 12:45 /e/Projects/NifskopeWildWastelandEdition/release/NifSkope.exe
+lod_generation	rc=0	ok=129	redlines=0	vacuous=0	14s	PASS
+lodgen_defaults	rc=0	ok=28	redlines=13	vacuous=0	859s	RESULT PASS
+STOPPED: Fallout4.exe came up before lodgen_native
+resumed 15:08:41 on lodgen_identity lodgen_stage_times lodgen_btofree lodgen_native lodgen_incremental lodgen_bakerec lodgen_layout
+side after exe /e/Projects/NifskopeWildWastelandEdition/release/NifSkope.exe
+-rwxr-xr-x 1 bungo 197609 22567424 Sep 17 12:45 /e/Projects/NifskopeWildWastelandEdition/release/NifSkope.exe
+lodgen_identity	rc=0	ok=8	redlines=0	vacuous=0	8s	RESULT PASS
+lodgen_stage_times	rc=1	ok=15	redlines=2	vacuous=0	75s	FAIL
+lodgen_btofree	rc=1	ok=18	redlines=7	vacuous=0	180s	FAIL
+lodgen_native	rc=1	ok=123	redlines=6	vacuous=0	169s	RESULT FAIL
+lodgen_incremental	rc=0	ok=10	redlines=1	vacuous=0	167s	FAILURES: 0
+lodgen_bakerec	rc=0	ok=69	redlines=4	vacuous=0	269s	RESULT PASS
+lodgen_layout	rc=0	ok=23	redlines=4	vacuous=0	872s	RESULT PASS

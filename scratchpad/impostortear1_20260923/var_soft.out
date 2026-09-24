@@ -1,0 +1,27 @@
+  run_var  blast_n4  az   rc=0 cards=360 25s orbit counted 360 of 360
+  run_var  maple_n4  az   rc=0 cards=360 27s orbit counted 360 of 360
+  run_var  rock_n4   az   rc=0 cards=360 37s orbit counted 360 of 360
+soft2   blast_n4  az:  34446 vs  27180 x1.5 =  40770.0  ratio 1.27  PASS
+soft2   maple_n4  az:  21498 vs  15890 x1.5 =  23835.0  ratio 1.35  PASS
+soft2   rock_n4   az: 109173 vs  90847 x1.5 = 136270.5  ratio 1.20  PASS
+soft2   VERDICT PASS
+soft2   blast_n4  az030 run_ship IoU 0.4664  card  17922 mesh  38190  torn share 44.9% (14398 of 32060 mesh&nearest px)
+soft2   blast_n4  az030 soft2    IoU 0.6996  card  44159 mesh  38190  torn share 5.7% (1833 of 32060 mesh&nearest px)
+soft2   maple_n4  az210 run_ship IoU 0.1910  card  10075 mesh  43508  torn share 68.3% (13986 of 20482 mesh&nearest px)
+soft2   maple_n4  az210 soft2    IoU 0.3962  card  33764 mesh  43508  torn share 20.8% (4259 of 20482 mesh&nearest px)
+soft2   rock_n4   az030 run_ship IoU 0.6213  card 208460 mesh 334905  torn share 27.3% (74872 of 274649 mesh&nearest px)
+soft2   rock_n4   az030 soft2    IoU 0.8078  card 323447 mesh 334905  torn share 1.0% (2740 of 274649 mesh&nearest px)
+  run_var  blast_n4  az   rc=0 cards=360 27s orbit counted 360 of 360
+  run_var  maple_n4  az   rc=0 cards=360 29s orbit counted 360 of 360
+  run_var  rock_n4   az   rc=0 cards=360 39s orbit counted 360 of 360
+soft3   blast_n4  az:  36303 vs  27180 x1.5 =  40770.0  ratio 1.34  PASS
+soft3   maple_n4  az:  25010 vs  15890 x1.5 =  23835.0  ratio 1.57  FAIL
+soft3   rock_n4   az: 102908 vs  90847 x1.5 = 136270.5  ratio 1.13  PASS
+soft3   VERDICT FAIL
+soft3   blast_n4  az030 run_ship IoU 0.4664  card  17922 mesh  38190  torn share 44.9% (14398 of 32060 mesh&nearest px)
+soft3   blast_n4  az030 soft3    IoU 0.5496  card  58843 mesh  38190  torn share 5.0% (1610 of 32060 mesh&nearest px)
+soft3   maple_n4  az210 run_ship IoU 0.1910  card  10075 mesh  43508  torn share 68.3% (13986 of 20482 mesh&nearest px)
+soft3   maple_n4  az210 soft3    IoU 0.3712  card  45867 mesh  43508  torn share 17.0% (3476 of 20482 mesh&nearest px)
+soft3   rock_n4   az030 run_ship IoU 0.6213  card 208460 mesh 334905  torn share 27.3% (74872 of 274649 mesh&nearest px)
+soft3   rock_n4   az030 soft3    IoU 0.8115  card 325305 mesh 334905  torn share 0.8% (2281 of 274649 mesh&nearest px)
+VARDONE

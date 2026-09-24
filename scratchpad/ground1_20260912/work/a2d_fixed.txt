@@ -1,0 +1,33 @@
+field 384x384 cell 128 origin (-832,704) occupied 45222
+march: 8 directions x 7 distances 128,192,288,432,648,972,1458
+content texels 1048576
+                    at least one occupied sample    none
+  dark            860624                      2962
+  flat              2524                    181459
+  bright             189                       818
+
+  darkened texels whose 56 samples are ALL empty: 2962
+    (the object term returns 1.0f by early return there, so any such
+     texel is BC1 block spill, never the term itself)
+    the first few:
+      drop   2 world (   -95024,   131056) tile  0 texel (110,  8)
+      drop   2 world (   -94992,   131056) tile  0 texel (111,  8)
+      drop   2 world (   -94704,   131056) tile  0 texel (120,  8)
+      drop   2 world (   -94672,   131056) tile  0 texel (121,  8)
+      drop   2 world (   -94640,   131056) tile  0 texel (122,  8)
+      drop   5 world (   -94576,   131056) tile  0 texel (124,  8)
+      drop   6 world (   -96752,   131024) tile  0 texel ( 56,  9)
+      drop   3 world (   -96496,   131024) tile  0 texel ( 64,  9)
+    of those 2962: 2962 share their 4x4 BC1 block with a texel that DOES
+    have an occluder, 0 do not; drops median 6, p95 16, max 30
+
+  A2d, the reach MEASURED: the largest march distance at which a
+  darkened texel found an occluder is 1458.0 u; the loop's longest
+  step is 1458.0 u.
+  darkened texels by their farthest occupied sample:
+      192.0 u         4
+      288.0 u       129
+      432.0 u      1112
+      648.0 u      6793
+      972.0 u     44377
+     1458.0 u    808209

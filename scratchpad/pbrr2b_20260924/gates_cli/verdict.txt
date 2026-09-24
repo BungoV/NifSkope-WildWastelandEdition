@@ -1,0 +1,6 @@
+GATE g1: PASS  id=0002B52A fv=131 printed SunDay=(225, 225, 225) AmbDay=(93, 93, 93) SunNight=(53, 70, 87) DalcDayZ-=(101, 133, 169); decoder agrees on the doc values=True; rows differing 0/152 (), dalc differing 0/56, nam0hex equal
+GATE g2: PASS  printed census wthr=71 parsed=71 refused=0 nam0=272:4,544:2,608:65 dalc=4:4,8:67; decoder wthr=71 nam0=272:4,544:2,608:65 dalc=4:4,8:67; listed ids match=True
+GATE g3: PASS  10 hours; judge-vs-printed mismatches 0; doc answers missed none
+GATE g4: PASS  .esp masters=Fallout4.esm,DLCCoast.esm,DLCNukaWorld.esm; the .esp's NAM0 differs from vanilla=True; winner src=FO4CSPhysicalWeathers.esp owner=Fallout4.esm; NAM0 = the .esp's bytes=True
+GATE g5: PASS  load refused reason="FO4CSPhysicalWeathers.esp needs master DLCNukaWorld.esm, which is not loaded" records=0 rc=3
+R2B GATES: PASS (g1=True, g2=True, g3=True, g4=True, g5=True)

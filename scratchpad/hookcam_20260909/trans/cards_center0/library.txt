@@ -1,0 +1,5 @@
+oct 8
+tile 128
+ref 1183.3
+half_aux 0
+candidates trees

@@ -1,0 +1,19 @@
+THE ROCK CARD, as its own .lodm records it
+  oct N            4   frame 128x128   sheet 512x512
+  half extents     [1727.89, 1727.89]
+  centre           [-89.01139831542969, -65.5636978149414, -274.135009765625]
+  depthSpan        5048.10 world units  (1 height level = 19.796 units)
+  frameOffset      16 pairs, max |dx| 180.7700 max |dy| 438.4640  (fraction of the frame)
+  pixel scale      1 px = 6.881 world units at the harness 512x768 grab
+  a 1-level height error therefore moves the silhouette by 0.7446 px at elevation 15 (x sin 15 deg)
+
+variant                                 IoU  IoU@shift   dy el15   dy el45
+shipped heights, ray on              0.7894     0.8134      9.92      7.75
+shipped heights, ray off             0.4988     0.5122    -41.42     -7.67
+R3 plane-outside, ray on             0.7767     0.8328     20.08      9.58
+8-ring dilation (this bake), ray on   0.8325     0.8566      7.33      8.50
+8-ring dilation, ray off             0.4988     0.5122    -41.42     -7.67
+
+R3 -> 8-ring : IoU +0.0558, shape@shift +0.0238, el15 dy -12.75 px, el45 dy -1.08 px
+shipped -> 8-ring: IoU +0.0431, el15 dy -2.58 px
+the ray itself on this bake: IoU +0.3337, el15 dy +48.75 px

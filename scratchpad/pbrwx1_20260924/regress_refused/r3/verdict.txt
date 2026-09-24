@@ -1,0 +1,8 @@
+pbr_r3 mask disk centre (699.5, 462.5) radius 298.1 px (279128 px)
+pbr_r3 furnace metal_r10 centre 0.9989 (rgb 0.999 0.999 0.999, n=1788); 60deg 0.9989 (rgb 0.999 0.999 0.999, n=19292) -> PASS
+pbr_r3 furnace metal_r50 centre 0.9989 (rgb 0.999 0.999 0.999, n=1788); 60deg 0.9989 (rgb 0.999 0.999 0.999, n=19292) -> PASS
+pbr_r3 furnace metal_r99 centre 0.9989 (rgb 0.999 0.999 0.999, n=1788); 60deg 0.9989 (rgb 0.999 0.999 0.999, n=19292) -> PASS
+pbr_r3 furnace diel_f004 centre 0.9989 (rgb 0.999 0.999 0.999, n=1788); 60deg 0.9989 (rgb 0.999 0.999 0.999, n=19292) -> PASS
+pbr_r3 twins v5 f0 0.04 vs v6 w1 ior1.5: max |d| 0, 0 px differ, 280464 lit px, census f0 0.04 / 0.04 -> PASS
+pbr_r3 furnace -> PASS
+pbr_r3 twins -> PASS

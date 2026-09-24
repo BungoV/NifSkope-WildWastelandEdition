@@ -1,0 +1,11 @@
+pbr_wx1_gates judge, red=nosave, CommonwealthClear fv=131 tods=8, climate TNAM=30,54,102,126,175,68
+  judge GMST: X=600 Y=-325 T=0.15 ext=2 shadowScale=-15 secunda=75 fades=5/10; A..D=6.9250 7.0750 18.9250 19.0750
+live
+    FAIL (save) the Sky row wrote ON to its setting
+    FAIL (save) the Sun row wrote ON to its setting
+    FAIL (save) the Clouds row wrote ON to its setting
+    FAIL (save) the Moon row and Game Day 32 wrote their settings
+    FAIL
+  FAIL the in-app weather leg passes -- 37 checks, 4 failures
+1 checks, 1 failures
+FAIL

@@ -1,0 +1,58 @@
+TILING4 -- the mip-bias window, then H3 (the capped warp over H1)
+
+Gates: the DECIDED ones (t4_gates.py).  ALL = repeat 7/7 and swirl 7/7
+and G1 and G2 7/7 and G2-band 7/7.  G1-band is reported in its own
+column and is NOT in ALL -- stage C measures why: the rung itself reads
+2 of 6 and no sampler can move the three finest bands.
+litG / litB are the brief`s literal per-sheet-vs-vanilla counts.
+
+THE RUNG, for the floor (it passes G2 and G2-band by construction):
+   variant                     bias |  rep  swl |      G1   G2 | G1bnd G2bd | litG litB |  ALL
+   rung (footprint)            0.00 |  0/7  7/7 |  -26.7%  7/7 |   2/6  7/7 |  1/7  0/7 |    -
+
+STAGE A -- the mip-bias window G1 and G2 leave open, never sampled
+           before: G2 allows at most +20 % of the rung`s grain, G1
+           needs at least +9.1 % of it.
+   variant                     bias |  rep  swl |      G1   G2 | G1bnd G2bd | litG litB |  ALL
+   H1 hex 256                 -0.20 |  6/7  7/7 |  -20.5%  7/7 |   2/6  5/7 |  3/7  0/7 |    -
+   H1 hex 256                 -0.30 |  6/7  7/7 |  -17.6%  5/7 |   2/6  5/7 |  3/7  0/7 |    -
+   H1 hex 256                 -0.40 |  6/7  7/7 |  -13.9%  1/7 |   2/6  5/7 |  4/7  0/7 |    -
+   H1 hex 341                 -0.20 |  5/7  7/7 |  -20.9%  7/7 |   2/6  4/7 |  3/7  0/7 |    -
+   H1 hex 341                 -0.30 |  5/7  7/7 |  -17.8%  5/7 |   2/6  6/7 |  3/7  0/7 |    -
+   H1 hex 341                 -0.40 |  5/7  7/7 |  -14.0%  1/7 |   2/6  5/7 |  4/7  0/7 |    -
+
+NO row is inside G1 and G2 at once; H3 runs at bias -0.30, the
+middle of the window the two gates leave, and the report says so.
+
+STAGE B -- H3: TILING3`s warp, capped at strain 0.5 (the brief`s cap,
+           and a5_tune`s own visible-wobble line), applied BEFORE
+           H1`s hex tiling.  amp = strain / 0.001051 (measured, lattice
+           1024, 1 octave); TILING3 shipped strain 0.718.
+   variant                     bias |  rep  swl |      G1   G2 | G1bnd G2bd | litG litB |  ALL
+   H1 256 + warp s0.10        -0.30 |  5/7  7/7 |  -17.5%  5/7 |   2/6  5/7 |  3/7  0/7 |    -
+   H1 341 + warp s0.10        -0.30 |  6/7  7/7 |  -17.8%  5/7 |   2/6  6/7 |  3/7  0/7 |    -
+   H1 256 + warp s0.20        -0.30 |  6/7  6/7 |  -17.8%  6/7 |   2/6  5/7 |  3/7  0/7 |    -
+   H1 341 + warp s0.20        -0.30 |  6/7  6/7 |  -18.0%  6/7 |   2/6  5/7 |  3/7  0/7 |    -
+   H1 256 + warp s0.30        -0.30 |  5/7  6/7 |  -17.9%  6/7 |   2/6  5/7 |  3/7  0/7 |    -
+   H1 341 + warp s0.30        -0.30 |  6/7  6/7 |  -18.1%  6/7 |   2/6  5/7 |  3/7  0/7 |    -
+   H1 256 + warp s0.50        -0.30 |  5/7  2/7 |  -18.5%  7/7 |   2/6  4/7 |  3/7  0/7 |    -
+   H1 341 + warp s0.50        -0.30 |  6/7  2/7 |  -18.6%  7/7 |   2/6  4/7 |  3/7  0/7 |    -
+
+STAGE C -- what closing G1-band would cost.  The three finest bands
+           are short by -46 %, -75 % and -97 % on THE RUNG; only a
+           much sharper mip can move them, and this prices it.
+   variant                     bias |  rep  swl |      G1   G2 | G1bnd G2bd | litG litB |  ALL
+   H1 hex 256                 -1.50 |  5/7  7/7 |  +27.2%  0/7 |   5/6  5/7 |  2/7  0/7 |    -
+   H1 hex 256                 -2.00 |  5/7  7/7 |  +44.9%  0/7 |   5/6  5/7 |  2/7  0/7 |    -
+
+NOTHING GATES 7 OF 7.  Closest: H1 hex 256 at bias -0.20.
+
+THE BEST ROW, SHEET BY SHEET (every number beside its own ceiling):
+   sheet         repeat    ceil   ratio ratCeil |   grain    rung  G2 err |   swirl    ceil | verdict
+   ( -20,  24)   0.259   0.264   0.144   0.448 |   3.814   3.409  +11.9% |  1.4829  2.3927 | PASS
+   ( -20,  20)   0.350   0.366   0.281   0.448 |   3.531   3.203  +10.2% |  1.2594  2.0209 | PASS
+   ( -36, -20)   0.056   0.264   0.392   0.448 |   3.287   2.881  +14.1% |  0.8100  1.9610 | PASS
+   (  -4, -20)   0.308   0.264   0.155   0.448 |   4.167   3.727  +11.8% |  1.2435  2.1764 | RED: repeat
+   (  28, -20)   0.211   0.264   0.204   0.448 |   3.985   3.456  +15.3% |  0.9792  2.5432 | PASS
+   (  -4,  16)   0.224   0.264   0.123   0.448 |   3.559   3.281   +8.5% |  2.1967  2.2962 | PASS
+   (  24,  16)   0.143   0.264   0.123   0.448 |   3.320   2.943  +12.8% |  1.1083  3.2846 | PASS

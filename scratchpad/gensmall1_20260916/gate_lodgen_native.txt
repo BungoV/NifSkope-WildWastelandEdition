@@ -1,0 +1,174 @@
+== 1. the synthetic known-answer pair
+  ok   the fixture was written
+  ok   the independent decoder passes the known answers
+69 checks, 0 failures
+== 2. two writes are byte-identical
+  ok   two writes of the fixture are byte-identical
+== 3. the refusal set
+  ok   control: the unmutated pair passes
+  ok   lodo headerCrc32 flip -- refused, naming "headerCrc32"
+  ok   lodo a vertex byte, header re-signed -- refused, naming "indexCrc32"
+  ok   lodi headerCrc32 flip -- refused, naming "headerCrc32"
+  ok   lodi a chunk crc32 flip -- refused, naming "crc32"
+  ok   lodo base table out of formId order -- refused, naming "sorted by formId"
+  ok   lodo base boundRadius 0 -- refused, naming "boundRadius"
+  ok   lodo cluster reserved flag bit -- refused, naming "reserved flags"
+  ok   lodo material family 2 -- refused, naming "family"
+  ok   lodi ROW_ORDER_NORTH_UP clear -- refused, naming "NORTH_UP"
+  ok   lodi instance reserved flag bit -- refused, naming "reserved flags"
+  ok   lodi NOLIB with a non-zero identity -- refused, naming "NOLIB"
+  ok   lodi lodoIdentity does not name the .lodo -- refused, naming "lodoIdentity"
+  ok   v2 lodo version back to 1 -- refused, naming "version 1"
+  ok   v2 lodi version back to 1 -- refused, naming "version 1"
+  ok   v3 lodo reserved byte at 0xCE -- refused, naming "0xCE"
+  ok   v3 lodi reserved byte at 0xB0 -- refused, naming "0xB0"
+  ok   v3 lodo unknown header flag bit -- refused, naming "reserved flag"
+  ok   v2 loadOrderHash in the .lodo only -- refused, naming "loadOrderHash"
+  ok   v2 loadOrderHash in the .lodi only -- refused, naming "loadOrderHash"
+  ok   v2 instance scale 0 (the bound radius rule) -- refused, naming "scale is 0"
+  ok   v2 drawKey out of order inside a cell -- refused, naming "drawKey"
+  ok   v2 drawKey is not the base rank -- refused, naming "drawKey"
+  ok   v2 stock identity changed -- refused, naming "identities"
+  ok   v3 lodo version back to 2 -- refused, naming "version 2"
+  ok   v3 lodi version back to 2 -- refused, naming "version 2"
+  ok   v3 lodo clusterLodStride not 48 -- refused, naming "clusterLodStride"
+  ok   v3 lodo levelMax above the table -- refused, naming "levelMax"
+  ok   v3 lodo LADDER flag set with ladderGroup 0 -- refused, naming "ladderGroup"
+  ok   v3 lodo ladder row reserved field -- refused, naming "reserved"
+  ok   v3 lodo level-0 cluster given an error -- refused, naming "level 0"
+  ok   v3 lodo level-0 sourceTriangles not its own triangleCount -- refused, naming "sourceTriangles"
+  ok   v3 lodo bounding-sphere radius 0 -- refused, naming "radius"
+  ok   v3 lodo mesh clusterCountL0 wrong -- refused, naming "clusterCountL0"
+  ok   v3 lodo mesh levelCount wrong -- refused, naming "levelCount"
+  ok   v3 lodo CONE_OPEN cleared on a cluster with no cone -- refused, naming "cone"
+  ok   v3 lodo CONE_OPEN set but an axis is stored -- refused, naming "CONE_OPEN"
+  ok   v3 lodo a child deviates more than its parent -- refused, naming "monotone"
+  ok   v3 lodi occluderStride not 40 -- refused, naming "occluderStride"
+  ok   v3 lodi maxOccludersPerCell 0 -- refused, naming "maxOccludersPerCell"
+  ok   v3 lodi occluder reserved word -- refused, naming "reserved"
+  ok   v3 lodi occluder flag bit0 clear -- refused, naming "flags"
+  ok   v3 lodi occluder half extent 0 -- refused, naming "half extent"
+  ok   v3 lodi occluder names an instance outside its cell -- refused, naming "cell"
+44 checks, 0 failures
+  ok   every mutation is refused by name
+== 4. the real region bake (9-chunk Sanctuary, dim 4)
+  ok   the region baked with --native
+native: Commonwealth.lodo 9657316 bytes (bases 2970 of 2974 in the census, 4 without a loadable model; models 2982 loaded 4 failed; meshes 2982 clusters 20678 triangles 252268 vertices 419204 materials 136); Commonwealth.lodi 128256 bytes (instances 3526 from 3526 arrivals over 701131 census refs, 0 dropped for a base outside the table, 0 unlit, 0 without a stock identity; chunks 10 present of 12 dense, max 693 a chunk, max scale 1.9600, max baseId 2019, PARTIAL); 2775.3 B a placement; cacheOrder acmr 1.8600 -> 1.8585, overfetch 1.0097 -> 1.0097, verts 263876 -> 419204; silhouette 2982 meshes, 0 opened, 0 read worse after the reorder; failed models: LOD\Architecture\Warehouse\WrhsLeanToL01_LOD.nif, LOD\Architecture\Warehouse\WrhsLeanToMid01_LOD.nif, LOD\Architecture\Warehouse\WrhsLeanToMid02_LOD.nif, LOD\Architecture\Warehouse\WrhsLeanToR01_LOD.nif
+native-ladder: ON (group 4, exact-error budget 512 tris); levels 0..7; meshes 1900 with a ladder, 1082 without (1065 of those are <= 16 triangles); groups 6235 formed, refused 2476 too small, 34 no triangle removed, 742 error did not grow, 57 opened a silhouette; errors 6973 measured against full detail, 4 chain-bounded; welded verts 103534, uv conflicts 117722; maxError 6965.2764; coneOpen 14604 clusters; roots 4715 covering 142138 full-detail triangles; coarsest level opened a silhouette on 18 meshes; level 0 clusters 10634 triangles 142138 meanError 0.0000; level 1 clusters 5676 triangles 68448 meanError 165.6236; level 2 clusters 2781 triangles 29699 meanError 497.1602; level 3 clusters 1029 triangles 8750 meanError 726.3054; level 4 clusters 414 triangles 2503 meanError 921.8641; level 5 clusters 123 triangles 626 meanError 1192.5151; level 6 clusters 19 triangles 98 meanError 1527.2040; level 7 clusters 2 triangles 6 meanError 3328.4733
+native-occluders: ON; boxes 0 written from 0 offered, 0 dropped (cap 4 a cell); cells 0 of 105 populated have one (0.0 percent), 105 with none; models fitted 99, refused 2617 not watertight, 100 too small (< 256 u diagonal), 123 no interior voxel, 43 too thin (< 2 percent of the box), 0 failed the 100-point probe
+native-casters: per source, of 3526 instances: tree 3446, card 0, mesh 80, none 0; sum 3526 == instances 3526 == AGREE; mesh-slot casters 5958 over 2982 meshes (each instance once per distinct mesh its base names); terrain march: runtime, FO4CS measures it
+  ok   the native-casters: line was printed
+  ok   the four caster bins sum to the instance count (the line says AGREE)
+  ok   tree casters MOVE off zero on a region that has trees (3446)
+  ok   mesh casters MOVE off zero, so the census is not all in one bin (80)
+  ok   a .lodo was written
+  ok   a .lodi was written
+  ok   the per-mesh report was written
+== 5. the stock path is untouched with --native off
+    26 stock files compared, 0 differ
+  ok   the stock bake is byte-identical with and without --native
+== 6. the decoder on the real pair
+  ok   the decoder passes the real pair (ESM leg and manifest leg)
+87 checks, 0 failures
+== 7. --native-verify with the corpus re-check
+  ok   the pair verifies and its three staleness hashes still match the plugin
+lodi distinctDrawKeys 41
+recomputed objectCorpusHash 0x6324ed6a35cde4ea
+recomputed pluginCorpusHash 0xd8337d022f637f22
+recomputed loadOrderHash 0xa056a596e2bb16e7
+recomputed over 701131 census refs of X:/Programs/Steam/steamapps/common/Fallout 4/Data/Fallout4.esm
+pair identity ok
+distinctStockIdentities 696
+drawKeyRanksChecked 3526
+== 8. the v2 fields, one subsection a field
+a. loadOrderHash
+  ok   a1 written and non-zero in the .lodo
+  ok   a2 the .lodi carries the same value
+  ok   a3 the law moves when the load order does (floor)
+b. the placed REFR form id, per instance, in the cold record
+  ok   b1 every instance names a REFR
+  ok   b2 the (ref, part) key is unique
+  ok   b3 the key set equals the stock manifests' (3526)
+c. the bound radius rule: base.boundRadius x scale
+  ok   c1 no record has scale 0
+  ok   c2 no base has boundRadius 0
+  ok   c3 every product is inside its chunk's maxBoundRadius (worst 4270.8 u)
+d. the sort law: chunk, cell, drawKey, ref, part
+  ok   d1 drawKey is the base's (mesh, material) rank
+  ok   d2 the field MOVES: more than one drawKey in the file (41)
+  ok   d3 the drawKey decides the order where the ref would not (787 pairs)
+e. GPU cache order (meshopt), 2982 meshes
+   ACMR 1.8600 -> 1.8585, overfetch 1.0097 -> 1.0097, 45 of 2982 meshes moved
+  ok   e1 the corpus ACMR improves (1.8600 -> 1.8585)
+  ok   e2 no single mesh reads worse
+  ok   e3 the field MOVES: the pass changed at least one mesh (45 of 2982)
+  ok   e4 FLOOR: the metric can fail -- a shuffled triangle order on AirportTower01_LOD.nif reads 2.990 against the emitted 1.633
+  ok   e5 overfetch does not get worse
+f. the stock identity index survives
+  ok   f1 the field MOVES: more than one identity in the file (696 distinct)
+  ok   f2 the instance index is unique per placement by construction (3526)
+  ok   f2b identity is unique inside every STOCK chunk
+   7 identities collide inside a .lodi chunk (boundary spill from a neighbouring stock chunk); the contract states the law
+  ok   f3 identity equals the stock manifest's index (3526 rows)
+g. the silhouette (shadow-caster) rule
+   2982 meshes, 365 watertight, 0 opened, 0 closed; worst delta 0
+  ok   g1 no mesh opens its silhouette
+  ok   g2 the counts are real, not all zero (2617 meshes with a boundary)
+  ok   g3 FLOOR: a hole-punched AirportTower01_LOD.nif (430 -> 433 boundary edges) is RED
+  ok   g4 the emitted count equals the source count on every mesh (the emit is a permutation, never a decimation)
+h. the cluster ladder (v3)
+  ok   h1 the LADDER flag is set and levelMax agrees with the table
+  ok   h2 geometricError MOVES: more than one distinct value (5429)
+  ok   h3 every level-0 row has error 0 and every deeper row has error > 0
+  ok   h4 the errors are monotone up every chain
+  ok   h4b FLOOR the monotone test is not vacuous: 15963 of 15963 non-root rows have a STRICTLY larger parent, so the same table with the two fields swapped would be red
+  ok   h5 sourceTriangles partitions each mesh: the roots sum to level 0
+  ok   h6 every bounding sphere has a positive radius
+  ok   h7 the cone MOVES: some clusters are open and some are not (14604 open of 20678)
+  ok   h8 every mesh above 16 triangles either laddered or named its refusal (1900 laddered, 1065 are <= 16 tris, 17 could not be cut)
+  ok   h9 the per-step silhouette rule is LIVE: 57 groups were refused for raising the boundary-edge count of the surface they replaced
+  ok   h9b every mesh whose coarsest level counts more boundary edges than level 0 (18 of 1900 laddered) has a REFUSED group, so its coarsest level is a fragment and not a hole
+  ok   h10 the error columns MOVE: some meshes carry a non-zero maxError (1886)
+  ok   h11 casterInstances is WRITTEN: 67 of 2982 meshes cast for at least one instance (total 5958)
+  ok   h11b casterInstances MOVES: 26 distinct values across the corpus, max 920 on one mesh
+  ok   h11c no mesh casts for more instances than the file holds (3526)
+i. the occluder boxes (v3)
+  SKIP i1..i4 this region wrote no occluder box; nothing here can be asked of it
+40 checks, 0 failures, 1 skips
+RESULT PASS
+  ok   every v2 field is written and moves
+== 9. the staleness floor: a doctored corpus hash MUST be refused
+objectCorpusHash flipped, lodoIdentity re-derived, header CRCs re-signed
+  ok   a stale pair is refused, naming the file and the field
+native REFUSED C:/Users/bungo/AppData/Local/Temp/tmp.5j0rfoYmFT/stale.lodo is STALE: objectCorpusHash 0x6324ed6a35cde4eb in the file, 0x6324ed6a35cde4ea from X:/Programs/Steam/steamapps/common/Fallout 4/Data/Fallout4.esm -- a placement, a base's MNAM or a SCOL part changed since the bake
+== 10. v3: the geometry gate on the fixture (bounds, cones, the cut, the occluder)
+  ok   the fixture's spheres, cones, cut and occluder box all hold, with every floor red
+levels 0..2, clusters 5, level-0 clusters 3, coneOpen sampled 3 of 5
+17 checks, 0 failures, 0 skips
+== 11. v3: the same geometry gate on the REAL pair
+  ok   the real pair's spheres, cones, cut and occluder boxes hold, with every floor red
+the cut, per case:
+  tol px     distance   clusters   triangles
+  0.5        2000       10429      124205
+  0.5        8000       10429      124181
+  0.5        32000      10405      121898
+  1.0        2000       10429      124205
+  1.0        8000       10429      124121
+  1.0        32000      10116      115583
+  4.0        2000       10429      124121
+  4.0        8000       10116      115583
+  4.0        32000      9246       104090
+15 checks, 0 failures, 1 skips
+RESULT PASS
+== 12. v3: the two exact ways back
+way-back .lodo 6204388 bytes, .lodi 128256 bytes, flags 0x5, levelMax 0, occluders 0
+  ok   --native-no-ladder / --native-no-occluders write one level and no boxes
+== 13. v3: the occluders, on a region that HAS a watertight building
+  ok   the occluder region baked
+native-occluders: ON; boxes 280 written from 599 offered, 319 dropped (cap 4 a cell); cells 87 of 147 populated have one (59.2 percent), 60 with none; models fitted 99, refused 2617 not watertight, 100 too small (< 256 u diagonal), 123 no interior voxel, 43 too thin (< 2 percent of the box), 0 failed the 100-point probe
+  ok   the occluder region's boxes are inside their meshes, and a grown box leaks
+  ok   D every occluder box is inside its own mesh (100 points each) 280 of 280 boxes hold all 100 points
+  ok   FLOOR a grown box leaves its mesh (must go red) 280 of 280 leak, worst factor needed 1.5
+
+22 checks, 0 failures
+RESULT PASS

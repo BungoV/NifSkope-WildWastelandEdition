@@ -1,0 +1,32 @@
+model TreeElmForest01.nif
+projection ortho
+ranges TreeElmForest01:0 - L1_TreeElmForest01:0 104+0
+lodm materials\Landscape\TreeElmAtlas.lodm none textures\landscape\trees\elmatlas_d.dds
+mask tree
+emissive 0 shapes 0
+front 2600.44 1333.23 10.6919 -23.0774 1007.74
+side 2600.44 1333.23 10.6919 -23.0774 1007.74
+class 288 512
+gap 18 32
+coverage 16 128 160
+oct 4 288 512 650.927 1157.2 10.6919 -23.0774 1007.74 3333.08 legacy 512 spec1
+frameoff 0 0 -45.5694 -13.0198
+frameoff 1 0 -33.8516 -29.9456
+frameoff 2 0 -48.1734 -11.7178
+frameoff 3 0 -44.2675 -10.4159
+frameoff 0 1 -42.9655 -11.7178
+frameoff 1 1 -50.7774 130.198
+frameoff 2 1 -58.5893 71.6091
+frameoff 3 1 -48.1734 -11.7178
+frameoff 0 2 48.1734 -11.7178
+frameoff 1 2 63.7972 9.11389
+frameoff 2 2 48.1734 59.8913
+frameoff 3 2 42.9655 -11.7178
+frameoff 0 3 44.2675 -10.4159
+frameoff 1 3 48.1734 -11.7178
+frameoff 2 3 33.8516 -29.9456
+frameoff 3 3 45.5694 -13.0198
+frameclamped 0
+aa 4 1024 1.5
+framefit 585.893 1074.14 644.482 1084.55
+orthofit 1215.08 1215.08 0

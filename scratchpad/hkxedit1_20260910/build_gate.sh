@@ -1,0 +1,14 @@
+#!/bin/bash
+# Lane HKXEDIT1: build the standalone gate binary release/hkxfile_gate.exe
+# (src/hkxfile.cpp + tests/hkxfile_gate.cpp, Qt6Core only). Run inside MSYS2 UCRT64:
+#   MSYSTEM=UCRT64 CHERE_INVOKING=1 /c/msys64/usr/bin/bash -lc 'cd /e/Projects/NifskopeWildWastelandEdition && bash scratchpad/hkxedit1_20260910/build_gate.sh'
+# The flag list is lane HKX1's build_dump.sh verbatim (the real Makefile.Release flags).
+set -u
+cd /e/Projects/NifskopeWildWastelandEdition || exit 9
+FLAGS="-march=nocona -msahf -mtune=generic -Wa,-mbig-obj -Ilib/qhull/src -isystem lib/gli/gli -isystem lib/gli/external -Ilib/libfo76utils/src -std=gnu++2a -Wall -Wextra -fexceptions -mthreads -DUNICODE -D_UNICODE -DWIN32 -DMINGW_HAS_SECURE_API=1 -DQT_NO_DEBUG -DQT_DISABLE_DEPRECATED_BEFORE=0x060400 -DQT_NO_DEBUG_OUTPUT -D_USE_MATH_DEFINES -DQT_NO_CAST_FROM_BYTEARRAY -DQT_NO_URL_CAST_FROM_STRING -DEDIT_ON_ACTIVATE -DNIFSKOPE_VERSION='\"x\"' -DNIFSKOPE_REVISION='\"x\"' -DWW_EDITION_VERSION='\"x\"' -DQT_CORE_LIB -DQT_NEEDS_QMAIN -I. -Isrc -Ilib -IC:/msys64/ucrt64/include/qt6 -IC:/msys64/ucrt64/include/qt6/QtCore -IGeneratedFiles/.moc -IGeneratedFiles/.ui -IC:/msys64/ucrt64/share/qt6/mkspecs/win32-g++"
+echo "== build release/hkxfile_gate.exe"
+eval g++ -O1 $FLAGS -Wno-unused-parameter tests/hkxfile_gate.cpp src/hkxfile.cpp -o release/hkxfile_gate.exe -LC:/msys64/ucrt64/lib -lQt6Core 2>&1 | grep -v "sfinae-incomplete\|qchar.h" | head -60
+r=${PIPESTATUS[0]}
+echo "BUILD-RC=$r"
+ls -l --time-style=+%H:%M:%S release/hkxfile_gate.exe 2>/dev/null
+exit $r

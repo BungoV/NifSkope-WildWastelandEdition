@@ -1,0 +1,15 @@
+rule                             blast_n4   blast_n8   maple_n4    dead_n4    rock_n4
+as baked (flood = frame mean)      0.3599     0.3794     0.3569     0.4187     0.7894
+R1_plane_all                       0.4550     0.5943     0.3232     0.5391     0.7596
+R3_shipped                         0.4978     0.6639     0.3609     0.5826     0.7777
+R2d8                               0.5646     0.7200     0.3685     0.6153     0.8331
+R2d16                              0.5515     0.7165     0.3690     0.5907     0.8416
+R2_dilate_all                      0.5302     0.7163     0.3694     0.5898     0.8380
+
+rock_n4, per view, shipped repair minus as-baked (numpy instrument):
+   az  60 el 15   as-baked 0.7906  shipped 0.6815  -0.1091
+   az  90 el 15   as-baked 0.7383  shipped 0.6292  -0.1091
+   az 180 el 15   as-baked 0.6131  shipped 0.5205  -0.0926
+   az 270 el 15   as-baked 0.7898  shipped 0.7149  -0.0749
+   az 240 el 15   as-baked 0.6974  shipped 0.6315  -0.0659
+   az 120 el 15   as-baked 0.6565  shipped 0.5926  -0.0639

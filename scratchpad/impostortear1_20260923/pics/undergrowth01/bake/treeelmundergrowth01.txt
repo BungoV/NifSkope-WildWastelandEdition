@@ -1,0 +1,32 @@
+model TreeElmUndergrowth01.nif
+projection ortho
+ranges L1_TreeElmUndergrowth01:0 18+0
+lodm Materials\Landscape\TreeElmAtlasShurbs.lodm none textures\landscape\trees\elmatlas_d.dds
+mask tree
+emissive 0 shapes 0
+front 401.915 206.06 -20.8151 -27.7197 129.297
+side 401.915 206.06 -20.8151 -27.7197 129.297
+class 512 512
+gap 32 32
+coverage 16 128 160
+oct 4 512 512 1.07733 1.07733 -20.8151 -27.7197 129.297 3072 legacy 512 spec1
+frameoff 0 0 0 0
+frameoff 1 0 0 0
+frameoff 2 0 0 0
+frameoff 3 0 0 0
+frameoff 0 1 0 0
+frameoff 1 1 0 0
+frameoff 2 1 0 0
+frameoff 3 1 0 0
+frameoff 0 2 0 0
+frameoff 1 2 0 0
+frameoff 2 2 0 0
+frameoff 3 2 0 0
+frameoff 0 3 0 0
+frameoff 1 3 0 0
+frameoff 2 3 0 0
+frameoff 3 3 0 0
+frameclamped 0
+aa 4 1024 0
+framefit 1 1 1 1
+orthofit 1.01 1.01 0

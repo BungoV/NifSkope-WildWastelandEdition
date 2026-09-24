@@ -1,0 +1,31 @@
+{
+ "chunk": [
+  -20,
+  20
+ ],
+ "dim": 4,
+ "coverStamped": true,
+ "coverStamp": "0x56435757",
+ "dataFourCC": "DXT5",
+ "coverTexels": 137399,
+ "texels": 262144,
+ "coverMax": 73,
+ "coverMeanOverCovered": 22.843594203742384,
+ "errWhole_vanilla_vs_default": 20.970502776240174,
+ "errWhole_vanilla_vs_tint0": 21.917561005154333,
+ "errCover_vanilla_vs_default": 19.31178963251085,
+ "errCover_vanilla_vs_tint0": 21.118571080394062,
+ "tintWhole_mean": 3.3385411861671654,
+ "tintWhole_max": 27.419354838709694,
+ "tintCover_mean": 6.311707613506073,
+ "tintCover_p95": 16.451612903225808,
+ "tintOutsideCover_max": 22.936507936507937,
+ "identicalOutsideCover": false,
+ "zoom": [
+  280,
+  64,
+  408,
+  192
+ ],
+ "zoomCoverTexels": 14914
+}

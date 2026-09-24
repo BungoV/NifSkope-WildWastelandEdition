@@ -1,0 +1,11 @@
+== fixture blast_n4
+  lodgen rc=0 sheets=5 lodm=1 lodgen: card 000531b3: oct height repaired: 6879 whole kept, 4271 partial filled from the nearest whole texel, 62169 outside inside the 16-ring ramp carried the object's height faded towards the card plane, 24985 outside set to the card plane; self-check PASS (no covered texel decodes outside its frame's depth)
+== fixture blast_n8
+  lodgen rc=0 sheets=5 lodm=1 lodgen: card 000531b3: oct height repaired: 24799 whole kept, 16114 partial filled from the nearest whole texel, 249445 outside inside the 16-ring ramp carried the object's height faded towards the card plane, 102858 outside set to the card plane; self-check PASS (no covered texel decodes outside its frame's depth)
+== fixture maple_n4
+  lodgen rc=0 sheets=5 lodm=1 lodgen: card 0004a074: oct height repaired: 297 whole kept, 4762 partial filled from the nearest whole texel, 22053 outside inside the 16-ring ramp carried the object's height faded towards the card plane, 5656 outside set to the card plane; self-check PASS (no covered texel decodes outside its frame's depth)
+== fixture dead_n4
+  lodgen rc=0 sheets=5 lodm=1 lodgen: card 001236b4: oct height repaired: 4919 whole kept, 3901 partial filled from the nearest whole texel, 46886 outside inside the 16-ring ramp carried the object's height faded towards the card plane, 9830 outside set to the card plane; self-check PASS (no covered texel decodes outside its frame's depth)
+== fixture rock_n4
+  lodgen rc=0 sheets=5 lodm=1 lodgen: card 000211a3: oct height repaired: 51389 whole kept, 4692 partial filled from the nearest whole texel, 81093 outside inside the 16-ring ramp carried the object's height faded towards the card plane, 124970 outside set to the card plane; self-check PASS (no covered texel decodes outside its frame's depth)
+EXIT=0

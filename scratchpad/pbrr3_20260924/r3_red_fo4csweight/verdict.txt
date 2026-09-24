@@ -1,0 +1,3 @@
+pbr_r3 mask disk centre (699.5, 462.5) radius 298.1 px (279128 px)
+pbr_r3 s1 weight 0: full vs diffuse-only max |d| 31 (107212 px); weight 1: max |d| 32 (202621 px) -> FAIL
+RED fo4csweight aims at s1: FAILED -> OK

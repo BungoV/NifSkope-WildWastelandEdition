@@ -1,0 +1,76 @@
+P = r"E:\Projects\NifskopeWildWastelandEdition\MISTAKES.md"
+b = open(P, "rb").read()
+cr0, n0 = b.count(b"\r"), len(b)
+assert cr0 == 0, "MISTAKES.md is LF-only, found %d CR" % cr0
+
+anchor = b"## 2026-09-10 -- lane HOOKCAM wrote into a file another lane owned\n"
+assert b.count(anchor) == 1
+
+new = (
+    b"## 2026-09-10 -- a one-sided control: the floor failed, and proved nothing\n"
+    b"\n"
+    b"- **What was done:** lane HOOKCAM's one-texel transition test\n"
+    b"  (`scratchpad/hookcam_20260909/transition.py`) shipped ONE floor: the\n"
+    b"  centre-zeroed control must FAIL, *\"a passing control means the measurement\n"
+    b"  is not sensitive to the offset and the numbers are worthless\"*. Lane BUILD3\n"
+    b"  ran it on the built exe. The control failed on all six rows. The floor was\n"
+    b"  therefore satisfied.\n"
+    b"- **What was true instead:** the numbers were worthless anyway. The card arm\n"
+    b"  failed all six rows too, and on one row the CONTROL was twenty times closer\n"
+    b"  than the card (`00038599` mid: control 12.50 px, card 565.00 px). The\n"
+    b"  silhouette being measured was not the subject tree at all -- the frames are\n"
+    b"  a thicket, and the flood fill at frame centre took a neighbouring card or\n"
+    b"  the ground.\n"
+    b"- **How it was found:** by opening the pictures (CONSTITUTION 5), which the\n"
+    b"  script's own output could not show. The table alone read as \"the cards are\n"
+    b"  badly misplaced\"; the pictures read as \"there is no single tree in any of\n"
+    b"  these frames\".\n"
+    b"- **The rule:** a control that can only fail is not a control. Every gate\n"
+    b"  needs a floor on BOTH sides -- the control must fail AND a positive must\n"
+    b"  pass -- or a run in which everything fails is indistinguishable from a run\n"
+    b"  in which the instrument is broken. Here the missing positive is trivial and\n"
+    b"  costs one extra frame: the mesh arm shot against ITSELF must come out at\n"
+    b"  zero displacement.\n"
+    b"- **The second half, which no floor would have caught either:** the test's\n"
+    b"  premise -- \"pick the most isolated instance out of the bake's own\n"
+    b"  manifest\" -- was never checked against a number. Measured after the fact:\n"
+    b"  the most isolated instance of each of the three trees has a neighbour\n"
+    b"  644-892 units away, while the ring distances the test must use are 767-1874\n"
+    b"  units, so the neighbour stands 25.5-40.0 degrees off axis. Fitting the\n"
+    b"  subject needs a vertical field of view of 58.8-61.3 degrees and excluding\n"
+    b"  the neighbour allows at most 15.1-26.4. No field of view does both. A test\n"
+    b"  whose premise is a geometric condition asserts that condition as its first\n"
+    b"  check, and refuses by name when it does not hold, rather than reporting a\n"
+    b"  number that means nothing.\n"
+    b"\n"
+    b"## 2026-09-10 -- a floor that a noisy desktop can defeat\n"
+    b"\n"
+    b"- **What was done:** `tests/spells/render_shot.sh` derives one bar from the\n"
+    b"  desktop noise floor it measures in section 0 --\n"
+    b"  `NOISE_BAR = max(3 * noise, 15)` -- and uses it BOTH for the hidden runs\n"
+    b"  (which must stay under it) and for section 6's visible control (which must\n"
+    b"  clear it).\n"
+    b"- **What was true instead:** those two uses want opposite things from noise.\n"
+    b"  On lane BUILD3's run, section 0 caught a transient and measured 98.579,\n"
+    b"  which put the bar at 295.737; the visible control's genuine signal of\n"
+    b"  169.847 could not clear it, and the check went red on a build in which\n"
+    b"  nothing about the window handling had changed. 82 checks, 1 failure.\n"
+    b"- **How it was found:** by re-measuring the same region with the same sampler\n"
+    b"  three minutes later, with nothing running: range **0.111**, against the\n"
+    b"  98.579 section 0 recorded. The skill's own table gives 0.2 for an untouched\n"
+    b"  region, so section 0's sample was 500x the resting value.\n"
+    b"- **The rule:** a floor and a ceiling must not share a threshold derived from\n"
+    b"  one measurement, because noise moves them the same way and it should move\n"
+    b"  them opposite ways. The visible control belongs on a FIXED bar, the way the\n"
+    b"  strobe control beside it already is (bar 30, measured 251.314, green in the\n"
+    b"  same run). NOT FIXED by lane BUILD3: a resuming lane measures the cause and\n"
+    b"  stops (`nifskope-ww-resume-pending` section 6); it is the harness owner's\n"
+    b"  change to make.\n"
+    b"\n"
+)
+
+open(P, "wb").write(b.replace(anchor, new + anchor))
+b2 = open(P, "rb").read()
+print("CR %d -> %d, bytes %d -> %d" % (cr0, b2.count(b"\r"), n0, len(b2)))
+assert b2.count(b"\r") == 0
+print("ok")

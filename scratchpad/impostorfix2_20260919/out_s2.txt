@@ -1,0 +1,46 @@
+variant                        subject        IoU 2deg mean 2deg max 30deg card 30deg MESH
+spec: 3 frames, barycentric    blast_n4    0.5086    0.1943   0.4242     0.7459     0.7999
+weights^2                      blast_n4    0.5241    0.1905   0.4139     0.7683     0.7999
+weights^4                      blast_n4    0.5369    0.1778   0.4381     0.7837     0.7999
+nearest frame only             blast_n4    0.5335    0.1818   0.8640     0.7976     0.7999
+height reject 0.25 span-step   blast_n4    0.5608    0.2006   0.7606     0.7889     0.7999
+height reject 1 span-step      blast_n4    0.5305    0.1912   0.4194     0.7545     0.7999
+height reject 4 span-step      blast_n4    0.5086    0.1943   0.4242     0.7459     0.7999
+spec: 3 frames, barycentric    maple_n4    0.3584    0.1172   0.1885     0.5856     0.7861
+weights^2                      maple_n4    0.3596    0.1022   0.1697     0.5774     0.7861
+weights^4                      maple_n4    0.3597    0.0895   0.2021     0.5627     0.7861
+nearest frame only             maple_n4    0.3462    0.0912   0.5368     0.5866     0.7861
+height reject 0.25 span-step   maple_n4    0.3666    0.1031   0.2411     0.5828     0.7861
+height reject 1 span-step      maple_n4    0.3658    0.1006   0.1680     0.5730     0.7861
+height reject 4 span-step      maple_n4    0.3585    0.1170   0.1885     0.5855     0.7861
+spec: 3 frames, barycentric    dead_n4     0.5804    0.1188   0.2912     0.5855     0.6073
+weights^2                      dead_n4     0.5876    0.1109   0.2678     0.5949     0.6073
+weights^4                      dead_n4     0.5733    0.0884   0.2892     0.6031     0.6073
+nearest frame only             dead_n4     0.5303    0.0841   0.4207     0.5900     0.6073
+height reject 0.25 span-step   dead_n4     0.5978    0.0901   0.2180     0.5914     0.6073
+height reject 1 span-step      dead_n4     0.6080    0.0892   0.2728     0.5777     0.6073
+height reject 4 span-step      dead_n4     0.5805    0.1188   0.2912     0.5856     0.6073
+spec: 3 frames, barycentric    rock_n4     0.7767    0.0361   0.1059     0.4294     0.4072
+weights^2                      rock_n4     0.7737    0.0471   0.2842     0.5261     0.4072
+weights^4                      rock_n4     0.7540    0.0627   0.4837     0.5413     0.4072
+nearest frame only             rock_n4     0.7048    0.0646   0.5361     0.5392     0.4072
+height reject 0.25 span-step   rock_n4     0.7042    0.0807   0.5068     0.5382     0.4072
+height reject 1 span-step      rock_n4     0.7115    0.0829   0.3798     0.5375     0.4072
+height reject 4 span-step      rock_n4     0.7746    0.0384   0.1063     0.4393     0.4072
+spec: 3 frames, barycentric    blast_n8    0.6719    0.2179   0.3809     0.7517     0.8002
+weights^2                      blast_n8    0.6784    0.2171   0.4361     0.7623     0.8002
+weights^4                      blast_n8    0.6948    0.2290   0.4925     0.7808     0.8002
+nearest frame only             blast_n8    0.6913    0.2524   0.7210     0.8004     0.8002
+height reject 0.25 span-step   blast_n8    0.6952    0.2563   0.5940     0.7915     0.8002
+height reject 1 span-step      blast_n8    0.6766    0.2164   0.3737     0.7507     0.8002
+height reject 4 span-step      blast_n8    0.6719    0.2179   0.3809     0.7517     0.8002
+
+=== N LADDER, blasted tree, same mesh grabs, same registration ===
+   blast_n4   half match True  span 3072.0
+spec: 3 frames, barycentric    blast_n4    0.5086    0.1943   0.4242     0.7459     0.7999
+   blast_n5   half match True  span 3072.0
+spec: 3 frames, barycentric    blast_n5    0.3656    0.3917   0.5633     0.7733     0.7999
+   blast_n8   half match False  span 3072.0
+spec: 3 frames, barycentric    blast_n8    0.6101    0.2179   0.3809     0.7512     0.7999
+   blast_n12  half match False  span 3072.0
+spec: 3 frames, barycentric    blast_n12   0.5875    0.1860   0.3236     0.7587     0.7999

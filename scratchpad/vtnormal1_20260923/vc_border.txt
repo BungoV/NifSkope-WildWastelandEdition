@@ -1,0 +1,8 @@
+Traceback (most recent call last):
+  File "E:\Projects\NifskopeWildWastelandEdition\tests\spells\lodgen_vt_check.py", line 557, in <module>
+    cmd_border(sys.argv[2])
+  File "E:\Projects\NifskopeWildWastelandEdition\tests\spells\lodgen_vt_check.py", line 458, in cmd_border
+    east = v.heights(ty * v.tilesX + tx + 1)
+  File "E:\Projects\NifskopeWildWastelandEdition\tests\spells\lodgen_vt_check.py", line 118, in heights
+    e = self.table[index]
+IndexError: list index out of range

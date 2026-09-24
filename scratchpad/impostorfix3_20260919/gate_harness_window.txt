@@ -1,0 +1,50 @@
+harness_window: a harness forces its own window (NOT RUN -- see the head comment)
+  exe    /e/Projects/NifskopeWildWastelandEdition/release/NifSkope.exe
+  scope  HKCU\Software\NifTools\NifSkope 2.0 harnesswin1gate
+
+=== (a) a planted MAXIMIZED geometry does not reach the window ===========
+  plant: PLANTED max=1
+  harness-window settled asked=1024x1024 window=1024x1024 viewport=1024x989 origin=1960,40 maximised=0 settings=not-restored
+  ok   the harness wrote release/ww_harness_window.log
+  ok   the window is NOT maximized (maximised=0)
+  ok   the persisted geometry was not restored (settings=not-restored)
+  ok   the window came out at the size asked for (window=1024x1024, asked=1024x1024)
+  ok   and the line does not say FLOORED
+
+=== (b) the settings are byte-identical after the run ====================
+  ok   the planted Window Geometry is byte-identical after the run
+  (the gate's own scope did change elsewhere, which is allowed:
+   -- none of these is Window Geometry)
+  ok   and bungo's own key is byte-identical after the run (it was never reached)
+
+=== (c) the RED CONTROL: the old path floors =============================
+  his key exported: 807988 bytes
+  ok   the control run left his window geometry and state untouched
+  the rung exe DID write to his key. What moved:
+     < "Recent File List"=hex(7):45,00,3a,00,2f,00,50,00,72,00,6f,00,6a,00,65,00,63,\
+     <   00,74,00,73,00,2f,00,46,00,61,00,6c,00,6c,00,6f,00,75,00,74,00,20,00,34,00,\
+     <   20,00,4d,00,6f,00,64,00,73,00,2f,00,6d,00,6f,00,64,00,73,00,2f,00,46,00,4f,\
+     <   00,34,00,43,00,53,00,2f,00,54,00,65,00,72,00,72,00,61,00,69,00,6e,00,2f,00,\
+     (src/nifskope.cpp:8238 File/Recent File List, no WW_ guard -- CHANGE_NEEDED 3)
+  before-exe: grab QWidgetWindow geom=1960,71,1822x1024 visible=1 onscreen=1 onprimary=0 opacity=0.00 maximised=0 arm=WW_WINDOW_AT
+  ok   the rung exe FLOORS a 1024x1024 request from his real settings (window=1822x1024 maximised=0)
+
+=== (d) native_open.sh (c) re-measured ===================================
+  SKIP (d) native_open.sh (RUN_NATIVE_OPEN=0)
+
+=== (e) the SECOND candidate: is the resize also floored by the docks? ===
+  harness-window settled asked=640x480 window=1024x480 viewport=1024x445 origin=1960,40 maximised=0 settings=not-restored FLOORED
+  measured layout minimum for this build: 1024x480 (asked 640x480)
+  ok   the floor is NOT silent: the line says FLOORED (window=1024x480, asked 640x480)
+  ok   and the log carries the refusal with BOTH numbers
+
+=== (f) a harness run does not edit the recent-file list ==================
+  FAIL the repaired exe left the recent-file list exactly as seeded
+     seeded: Z:\harnesswin2\seed_one.nif|Z:\harnesswin2\seed_two.nif
+     after : e:/Projects/NifskopeWildWastelandEdition/tests/render/refraction_fixture.nif|Z:\harnesswin2\seed_one.nif|Z:\harnesswin2\seed_two.nif
+  ok   the floor fires: the rung exe DOES add the fixture to that list
+     rung (NifSkope.before_impostorfix3.exe) left: e:/Projects/NifskopeWildWastelandEdition/tests/render/refraction_fixture.nif|Z:\harnesswin2\seed_one.nif|Z:\harnesswin2\seed_two.nif
+
+13 checks, 1 failures, 1 skips
+--- a SKIP is never a pass ---
+exit 1

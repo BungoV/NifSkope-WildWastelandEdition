@@ -1,0 +1,18 @@
+rock_n4: worst view az 30 el 20 (torn 70929 px)
+  registration scale x 0.674 y 0.628 (ref px per app px); nearest-only IoU vs mesh as the registration check: 0.778
+  variant                       IoU  recall top / mid / bottom
+  steps 0 mean                0.680  1.000 / 0.993 / 0.295
+  steps 0 max                 0.470  1.000 / 1.000 / 0.992
+  steps 0 nearest             0.654  1.000 / 0.993 / 0.294
+  steps 1 mean                0.646  0.906 / 0.832 / 0.207 <- SHIPPED
+  steps 1 max                 0.671  1.000 / 0.996 / 0.450
+  steps 1 nearest             0.778  0.928 / 0.995 / 0.433
+  steps 4 mean                0.749  0.998 / 0.992 / 0.473
+  steps 4 max                 0.812  1.000 / 0.997 / 0.951
+  steps 4 nearest             0.749  0.999 / 0.993 / 0.477
+  steps 8 mean                0.749  0.996 / 0.992 / 0.473
+  steps 8 max                 0.815  1.000 / 0.996 / 0.952
+  steps 8 nearest             0.749  0.999 / 0.993 / 0.478
+  march th 48    mean          0.794  0.900 / 0.926 / 0.787
+  march th 48    max           0.809  0.999 / 0.997 / 0.901
+  march th 48    nearest       0.822  0.921 / 0.950 / 0.839

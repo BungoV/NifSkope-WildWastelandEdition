@@ -1,0 +1,488 @@
+[
+ {
+  "view": "hwydeck",
+  "row": "G0/map16",
+  "wall": 170083,
+  "patch": 1644,
+  "patch_pct": 0.9665869016891753,
+  "lost": 9920,
+  "lost_pct": 5.8324465114091355
+ },
+ {
+  "view": "hwydeck",
+  "row": "G0strict/map16",
+  "wall": 170083,
+  "patch": 1728,
+  "patch_pct": 1.015974553600301,
+  "lost": 10768,
+  "lost_pct": 6.331026616416691
+ },
+ {
+  "view": "hwydeck",
+  "row": "G1/A/map16",
+  "wall": 170083,
+  "patch": 1625,
+  "patch_pct": 0.9554158851854683,
+  "lost": 13376,
+  "lost_pct": 7.864395618609738
+ },
+ {
+  "view": "hwydeck",
+  "row": "G1/B/map16",
+  "wall": 170083,
+  "patch": 1528,
+  "patch_pct": 0.8983849061928588,
+  "lost": 14897,
+  "lost_pct": 8.758664887143336
+ },
+ {
+  "view": "hwydeck",
+  "row": "G2/A/D64/map16",
+  "wall": 170083,
+  "patch": 1756,
+  "patch_pct": 1.032437104237343,
+  "lost": 10727,
+  "lost_pct": 6.306920738698165
+ },
+ {
+  "view": "hwydeck",
+  "row": "G2/B/D64/map16",
+  "wall": 170083,
+  "patch": 1753,
+  "patch_pct": 1.0306732595262313,
+  "lost": 10728,
+  "lost_pct": 6.307508686935202
+ },
+ {
+  "view": "hwydeck",
+  "row": "G4/A/map16",
+  "wall": 170083,
+  "patch": 1612,
+  "patch_pct": 0.9477725581039845,
+  "lost": 9997,
+  "lost_pct": 5.877718525661001
+ },
+ {
+  "view": "hwydeck",
+  "row": "G4/B/map16",
+  "wall": 170083,
+  "patch": 1612,
+  "patch_pct": 0.9477725581039845,
+  "lost": 10001,
+  "lost_pct": 5.88007031860915
+ },
+ {
+  "view": "hwydeck",
+  "row": "G3/map16",
+  "wall": 170083,
+  "patch": 1193,
+  "patch_pct": 0.701422246785393,
+  "lost": 12474,
+  "lost_pct": 7.334066308802173
+ },
+ {
+  "view": "hwydeck",
+  "row": "G0/map64",
+  "wall": 170083,
+  "patch": 6640,
+  "patch_pct": 3.903976293927083,
+  "lost": 7903,
+  "lost_pct": 4.646554917305081
+ },
+ {
+  "view": "hwydeck",
+  "row": "G1/A/map64",
+  "wall": 170083,
+  "patch": 5755,
+  "patch_pct": 3.3836421041491507,
+  "lost": 10689,
+  "lost_pct": 6.284578705690751
+ },
+ {
+  "view": "hwydeck",
+  "row": "G1/B/map64",
+  "wall": 170083,
+  "patch": 5493,
+  "patch_pct": 3.2295996660454014,
+  "lost": 12282,
+  "lost_pct": 7.221180247291029
+ },
+ {
+  "view": "hwydeck",
+  "row": "G2/A/D64/map64",
+  "wall": 170083,
+  "patch": 5925,
+  "patch_pct": 3.4835933044454768,
+  "lost": 8811,
+  "lost_pct": 5.180411916534868
+ },
+ {
+  "view": "hwydeck",
+  "row": "G2/B/D64/map64",
+  "wall": 170083,
+  "patch": 5925,
+  "patch_pct": 3.4835933044454768,
+  "lost": 8811,
+  "lost_pct": 5.180411916534868
+ },
+ {
+  "view": "hwydeck",
+  "row": "G0/cast",
+  "wall": 170083,
+  "patch": 4,
+  "patch_pct": 0.002351792948148845,
+  "lost": 1,
+  "lost_pct": 0.0005879482370372113
+ },
+ {
+  "view": "hwydeck",
+  "row": "G1/A/cast",
+  "wall": 170083,
+  "patch": 4,
+  "patch_pct": 0.002351792948148845,
+  "lost": 2251,
+  "lost_pct": 1.3234714815707624
+ },
+ {
+  "view": "hwydeck",
+  "row": "G2/A/D64/cast",
+  "wall": 170083,
+  "patch": 4,
+  "patch_pct": 0.002351792948148845,
+  "lost": 293,
+  "lost_pct": 0.1722688334519029
+ },
+ {
+  "view": "hwydeck",
+  "row": "G3/cast",
+  "wall": 170083,
+  "patch": 1,
+  "patch_pct": 0.0005879482370372113,
+  "lost": 3939,
+  "lost_pct": 2.3159281056895753
+ },
+ {
+  "view": "east",
+  "row": "G0/map16",
+  "wall": 476193,
+  "patch": 5746,
+  "patch_pct": 1.206653604735895,
+  "lost": 12801,
+  "lost_pct": 2.6881957525625113
+ },
+ {
+  "view": "east",
+  "row": "G0strict/map16",
+  "wall": 476193,
+  "patch": 5561,
+  "patch_pct": 1.1678038106398037,
+  "lost": 13336,
+  "lost_pct": 2.800545157110667
+ },
+ {
+  "view": "east",
+  "row": "G1/A/map16",
+  "wall": 476193,
+  "patch": 6567,
+  "patch_pct": 1.379062690967738,
+  "lost": 37539,
+  "lost_pct": 7.883148219314438
+ },
+ {
+  "view": "east",
+  "row": "G1/B/map16",
+  "wall": 476193,
+  "patch": 6481,
+  "patch_pct": 1.3610027866852306,
+  "lost": 39625,
+  "lost_pct": 8.321205897608742
+ },
+ {
+  "view": "east",
+  "row": "G2/A/D64/map16",
+  "wall": 476193,
+  "patch": 7165,
+  "patch_pct": 1.5046420253972654,
+  "lost": 15387,
+  "lost_pct": 3.231252874359766
+ },
+ {
+  "view": "east",
+  "row": "G2/B/D64/map16",
+  "wall": 476193,
+  "patch": 7162,
+  "patch_pct": 1.5040120287362477,
+  "lost": 15415,
+  "lost_pct": 3.237132843195931
+ },
+ {
+  "view": "east",
+  "row": "G4/A/map16",
+  "wall": 476193,
+  "patch": 5728,
+  "patch_pct": 1.2028736247697887,
+  "lost": 12944,
+  "lost_pct": 2.718225593404355
+ },
+ {
+  "view": "east",
+  "row": "G4/B/map16",
+  "wall": 476193,
+  "patch": 5727,
+  "patch_pct": 1.2026636258827827,
+  "lost": 13008,
+  "lost_pct": 2.7316655221727326
+ },
+ {
+  "view": "east",
+  "row": "G3/map16",
+  "wall": 476193,
+  "patch": 5304,
+  "patch_pct": 1.1138340966792877,
+  "lost": 17166,
+  "lost_pct": 3.60484089434326
+ },
+ {
+  "view": "east",
+  "row": "G0/map64",
+  "wall": 476193,
+  "patch": 17613,
+  "patch_pct": 3.6987103968348967,
+  "lost": 13377,
+  "lost_pct": 2.809155111477909
+ },
+ {
+  "view": "east",
+  "row": "G1/A/map64",
+  "wall": 476193,
+  "patch": 21496,
+  "patch_pct": 4.514136075078802,
+  "lost": 37034,
+  "lost_pct": 7.777098781376458
+ },
+ {
+  "view": "east",
+  "row": "G1/B/map64",
+  "wall": 476193,
+  "patch": 21202,
+  "patch_pct": 4.452396402299068,
+  "lost": 39063,
+  "lost_pct": 8.203186523111427
+ },
+ {
+  "view": "east",
+  "row": "G2/A/D64/map64",
+  "wall": 476193,
+  "patch": 23408,
+  "patch_pct": 4.91565394703408,
+  "lost": 17640,
+  "lost_pct": 3.704380366784056
+ },
+ {
+  "view": "east",
+  "row": "G2/B/D64/map64",
+  "wall": 476193,
+  "patch": 23408,
+  "patch_pct": 4.91565394703408,
+  "lost": 17640,
+  "lost_pct": 3.704380366784056
+ },
+ {
+  "view": "east",
+  "row": "G0/cast",
+  "wall": 476193,
+  "patch": 4,
+  "patch_pct": 0.0008399955480235954,
+  "lost": 10,
+  "lost_pct": 0.0020999888700589885
+ },
+ {
+  "view": "east",
+  "row": "G1/A/cast",
+  "wall": 476193,
+  "patch": 4,
+  "patch_pct": 0.0008399955480235954,
+  "lost": 26099,
+  "lost_pct": 5.480760951966954
+ },
+ {
+  "view": "east",
+  "row": "G2/A/D64/cast",
+  "wall": 476193,
+  "patch": 4,
+  "patch_pct": 0.0008399955480235954,
+  "lost": 1124,
+  "lost_pct": 0.23603874899463032
+ },
+ {
+  "view": "east",
+  "row": "G3/cast",
+  "wall": 476193,
+  "patch": 4,
+  "patch_pct": 0.0008399955480235954,
+  "lost": 24763,
+  "lost_pct": 5.200202438927073
+ },
+ {
+  "view": "street",
+  "row": "G0/map16",
+  "wall": 412490,
+  "patch": 17905,
+  "patch_pct": 4.340711289970666,
+  "lost": 13484,
+  "lost_pct": 3.2689277315813716
+ },
+ {
+  "view": "street",
+  "row": "G0strict/map16",
+  "wall": 412490,
+  "patch": 16905,
+  "patch_pct": 4.098281170452617,
+  "lost": 15392,
+  "lost_pct": 3.731484399621809
+ },
+ {
+  "view": "street",
+  "row": "G1/A/map16",
+  "wall": 412490,
+  "patch": 18335,
+  "patch_pct": 4.444956241363427,
+  "lost": 14034,
+  "lost_pct": 3.4022642973162984
+ },
+ {
+  "view": "street",
+  "row": "G1/B/map16",
+  "wall": 412490,
+  "patch": 18335,
+  "patch_pct": 4.444956241363427,
+  "lost": 14042,
+  "lost_pct": 3.404203738272443
+ },
+ {
+  "view": "street",
+  "row": "G2/A/D64/map16",
+  "wall": 412490,
+  "patch": 18335,
+  "patch_pct": 4.444956241363427,
+  "lost": 13306,
+  "lost_pct": 3.225775170307159
+ },
+ {
+  "view": "street",
+  "row": "G2/B/D64/map16",
+  "wall": 412490,
+  "patch": 18335,
+  "patch_pct": 4.444956241363427,
+  "lost": 13306,
+  "lost_pct": 3.225775170307159
+ },
+ {
+  "view": "street",
+  "row": "G4/A/map16",
+  "wall": 412490,
+  "patch": 17905,
+  "patch_pct": 4.340711289970666,
+  "lost": 13518,
+  "lost_pct": 3.2771703556449854
+ },
+ {
+  "view": "street",
+  "row": "G4/B/map16",
+  "wall": 412490,
+  "patch": 17905,
+  "patch_pct": 4.340711289970666,
+  "lost": 13518,
+  "lost_pct": 3.2771703556449854
+ },
+ {
+  "view": "street",
+  "row": "G3/map16",
+  "wall": 412490,
+  "patch": 17846,
+  "patch_pct": 4.326407912919101,
+  "lost": 14204,
+  "lost_pct": 3.4434774176343668
+ },
+ {
+  "view": "street",
+  "row": "G0/map64",
+  "wall": 412490,
+  "patch": 34538,
+  "patch_pct": 8.373051467914374,
+  "lost": 9629,
+  "lost_pct": 2.334359620839293
+ },
+ {
+  "view": "street",
+  "row": "G1/A/map64",
+  "wall": 412490,
+  "patch": 34545,
+  "patch_pct": 8.374748478751,
+  "lost": 10436,
+  "lost_pct": 2.5300007272903584
+ },
+ {
+  "view": "street",
+  "row": "G1/B/map64",
+  "wall": 412490,
+  "patch": 34545,
+  "patch_pct": 8.374748478751,
+  "lost": 10451,
+  "lost_pct": 2.5336371790831294
+ },
+ {
+  "view": "street",
+  "row": "G2/A/D64/map64",
+  "wall": 412490,
+  "patch": 34545,
+  "patch_pct": 8.374748478751,
+  "lost": 9738,
+  "lost_pct": 2.3607845038667605
+ },
+ {
+  "view": "street",
+  "row": "G2/B/D64/map64",
+  "wall": 412490,
+  "patch": 34545,
+  "patch_pct": 8.374748478751,
+  "lost": 9738,
+  "lost_pct": 2.3607845038667605
+ },
+ {
+  "view": "street",
+  "row": "G0/cast",
+  "wall": 412490,
+  "patch": 9,
+  "patch_pct": 0.0021818710756624404,
+  "lost": 3,
+  "lost_pct": 0.0007272903585541468
+ },
+ {
+  "view": "street",
+  "row": "G1/A/cast",
+  "wall": 412490,
+  "patch": 9,
+  "patch_pct": 0.0021818710756624404,
+  "lost": 5880,
+  "lost_pct": 1.4254891027661276
+ },
+ {
+  "view": "street",
+  "row": "G2/A/D64/cast",
+  "wall": 412490,
+  "patch": 9,
+  "patch_pct": 0.0021818710756624404,
+  "lost": 5085,
+  "lost_pct": 1.2327571577492789
+ },
+ {
+  "view": "street",
+  "row": "G3/cast",
+  "wall": 412490,
+  "patch": 7,
+  "patch_pct": 0.0016970108366263425,
+  "lost": 10957,
+  "lost_pct": 2.656306819559262
+ }
+]

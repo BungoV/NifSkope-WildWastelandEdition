@@ -1,0 +1,28 @@
+chanview DONE -- lane CHANVIEW1, 2026-09-18 09:28 -- every baked channel of chunk 4.4.-12 is now viewable
+through one switch, WW_LODL_CHANNEL=<name>, fourteen names, on the same seam WW_LODL_AO
+uses; WW_LODL_AO=1 is byte-for-byte what it always was. Exe
+release/NifSkope.exe 2026-09-18 08:40:07, 22,718,976 B, sha1
+62efc25c3871610519f48523aae501b728ddd7e4. Gate tests/spells/lodl_channels.sh, 48 checks,
+0 failures. 31 pictures in scratchpad/chanview1_20260918/images/. Report
+scratchpad/chanview1_20260918/lane_chanview1_report.md, sections 0-12.
+
+For bungo:
+
+You can now look at any one baked channel of the far field on its own -- leaf sway, the
+identity, sky visibility, ground-contact blend, the tree seed, the per-vertex self-AO, the
+roughness, the metallic, the sky-AO sheet and the terrain normal sheet -- and the AO view you
+already use has not moved a single pixel.
+
+Two of the things you asked for are simply not in this bake and the pictures say so rather
+than pretending: ground cover, because the mask sheet was written as BC1 and BC1 carries no
+alpha channel at all, and the emissive sheet, because the bake wrote none.
+
+Metallic is flat zero everywhere on this chunk, and that is the correct answer rather than a
+missing bake: all seventeen ground layers here are old-style materials, which have no
+metallic to read, and your ruling is that metallic comes from a PBRM or not at all.
+
+The roughness picture has the vanilla gloss map beside it so you can read the flip directly
+-- the two are exact complements, 69 and 186 out of 255, because for ground layers the bake
+does nothing to the gloss but subtract it from one.
+
+His open window needs a restart.

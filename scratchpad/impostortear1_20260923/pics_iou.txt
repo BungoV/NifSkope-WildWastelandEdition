@@ -1,0 +1,7 @@
+cedar01       old: IoU 0.264 outside 0.40   new: IoU 0.338 outside 0.53
+cedar03       old: IoU 0.317 outside 0.25   new: IoU 0.416 outside 0.36
+mapleinst06g  old: IoU 0.655 outside 0.15   new: IoU 0.691 outside 0.21
+hero01        old: IoU 0.378 outside 0.20   new: IoU 0.438 outside 0.36
+burnt01       old: IoU 0.660 outside 0.04   new: IoU 0.682 outside 0.16
+foothills01   old: IoU 0.314 outside 0.25   new: IoU 0.412 outside 0.37
+evergreen01   old: IoU 0.791 outside 0.07   new: IoU 0.784 outside 0.15

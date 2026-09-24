@@ -1,0 +1,4 @@
+impostor_draw rc=1 1s
+lodgen_octahedral rc=1 35s
+native_lighting rc=1 72s
+ALLDONE

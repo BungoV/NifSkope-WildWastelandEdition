@@ -1,0 +1,32 @@
+== 1. bytes per placement, sample set (0,0) region, today's emitter
+  dim  4:    2058014 B /   3812 rows =   539.9 B a placement
+  dim  8:    4807296 B /   8486 rows =   566.5 B a placement
+  dim 16:   11294220 B /  17709 rows =   637.8 B a placement
+  dim 32:   24704237 B /  30941 rows =   798.4 B a placement
+  four rings: 42863767 B / 60948 rows = 703.3 B a placement; spec anchor 682 B
+  manifest scale range 0.1700 .. 3.5100 (spec [pri] corpus 0.010 .. 4.970; u16/8192 ceiling 7.99988)
+  distinct bases in the four samples: 1541 (spec: 3,400 worldspace; u16 ceiling 65,535)
+  SCOL parts 12130, plain refs 48818 (19.9% SCOL)
+== 2. identity drop: distinct ids in vertex colours vs manifest rows
+  dim 16 (0,0): 69 shapes, 321730 verts, 159864 tris; 17709 ids in colours, 17709 rows, 0 rows with no geometry (0.00%)
+  dim 32 (0,0): 80 shapes, 700723 verts, 372513 tris; 30854 ids in colours, 30941 rows, 87 rows with no geometry (0.28%)
+    first missing index 26249, last 29368
+  (spec: (-32,0) dim 32 = 2,628 of 42,560 = 6.17%; (0,-32) = 882 of 42,641 = 2.07%; this sample is (0,0))
+== 3. record precision, Monte Carlo, seed 20260910
+  quaternion 2+3x15: worst 0.0073 deg, mean 0.00257 deg (spec worst 0.0146 deg)
+  quaternion 2+3x10: worst 0.2184 deg, mean 0.08234 deg (spec worst 0.471 deg)
+  oct 12:12: worst 0.0582 deg, mean 0.0209 deg (spec 0.0591 / 0.0209)
+  oct  8:8 : worst 0.9453 deg, mean 0.3359 deg (spec 0.946 / 0.335)
+  position: 16384 / 65535 = 0.25000 u step (spec 0.250); scale 1/8192 = 1.2207e-04 (spec 1.221e-4)
+  seed: treeHash % 360 needs 9 bits, mirror 1 bit; the u8 seed holds 8
+== 4. spec anchors in src/lodgen.cpp today
+  spec :3144       bucket full                      -> 3466
+  spec :2955-2964  treeHash                         -> 3279
+  spec :~2981      localMaxDist                     -> 3314
+  spec :2915       slot fallback                    -> 3238,3578
+  spec :3027       manifest row                     -> 3349
+  spec :3033       column 9 = localMaxDist * scale  -> 3357
+  spec :3481       manifest header                  -> 3803
+  spec :2881       buckets map                      -> 3203
+  spec :4237       UV2.y layer write                -> 4590
+  src/lodgen.cpp lines today: 8849 (spec read 8286 on 2026-09-09)

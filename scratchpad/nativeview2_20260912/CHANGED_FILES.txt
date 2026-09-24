@@ -1,0 +1,27 @@
+CHANGED FILES -- lane NATIVEVIEW2, 2026-09-16
+
+A = added, M = modified.  Byte counts are PYTHON byte counts, read from
+the file's own bytes; CR is the count of CRLF pairs and LF the count of
+bare LF.  Every file in this lane is LF-only and stayed LF-only.
+Binary files (PNG baselines) have no line counts and say so.
+
+  path                                                   B before    CR     LF      B after    CR     LF
+--------------------------------------------------------------------------------------------------------------------
+M res/shaders/fo4_default.frag                              20045     0    547        21646     0    579
+M src/gl/renderer.cpp                                       73636     0   1731        77189     0   1812
+M docs/LODGEN_NATIVE_LODO_LODI.md                           96596     0   1533        99478     0   1576
+M .claude/skills/nifskope-ww-render-shot/SKILL.md           30000     0    501        32422     0    538
+M MISTAKES.md                                              432964     0   7337       435190     0   7371
+
+A tests/spells/native_lighting.sh                               0     0      0         6143     0    151
+A tests/spells/native_lighting_check.py                         0     0      0         8606     0    215
+A tests/baselines/native_lighting/legacy_btr_top.png            -     -      -      1583241   bin    bin
+A tests/baselines/native_lighting/legacy_btr_obl.png            -     -      -       559234   bin    bin
+A tests/baselines/native_lighting/legacy_bto_top.png            -     -      -       537794   bin    bin
+A tests/baselines/native_lighting/legacy_bto_obl.png            -     -      -       428058   bin    bin
+
+NOT CHANGED, though the lane read them closely: src/btdterrain.cpp (the
+bit-12 flag it already sets turned out to be correct), every writer, every
+default, res/shaders/sk_msn.prog and res/shaders/fo4_default.prog.
+
+Nothing is committed.  Committing is bungo's word, by explicit path list.

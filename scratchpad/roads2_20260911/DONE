@@ -1,0 +1,7 @@
+ROADS2 done 2026-09-11 21:05
+exe release/NifSkope.exe 20:46:44 21458944 B
+rung release/NifSkope.before_roads2.exe 19:08:42 21435904 B sha1 89065512abfd1fed11ab4f934c943f5972bd106d
+gates S1 green S2 green (3 ways, 9/9 files) S3 green S4 refused-as-written + substitute green S5 green S6 green
+lodgen_roads.sh 11/0 -- the inherited red is closed
+harness chain 383 checks 6 failures, all six red on the rung too
+nothing committed, nothing stashed, no GUI launched, his Data\Terrain untouched

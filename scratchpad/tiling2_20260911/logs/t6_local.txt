@@ -1,0 +1,16 @@
+TILING2 -- the repeat inside the largest ROAD-FREE window of (-20,20)
+
+window 256x256 at (x=256, y=0), 0 road texels in it (0.000% of it);
+the whole sheet is 9.58%% road. 256 texels = exactly 24 repeats, so
+the repeat still sits on an integer FFT bin and nothing leaks.
+
+  variant           vis    floor   vis/fl    locVar
+  --------------------------------------------------
+  VANILLA         0.245    0.962    0.255     25.36
+  rung            1.159    2.837    0.409     13.59
+  t2048           0.728    3.271    0.222     60.84
+  avg             0.376    2.872    0.131      9.03
+  avgblend        0.393    2.915    0.135      9.18
+  k0.25           0.410    2.982    0.137      9.43
+  rungnorod       1.159    2.837    0.409     13.59
+  avgnorod        0.376    2.872    0.131      9.03

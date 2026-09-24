@@ -1,0 +1,36 @@
+FILE src/lodgen.cpp  450162 bytes  10275 lines  sha1 d81bfcc94016956a185867ca5f594fee46f7313c  mtime 2026-09-11 15:44:38
+CR 0  LF 10274
+
+ANCHORS (re-derived, never typed). Every line number SPLAT1 quotes, with
+the text that is actually on it, so a later edit is visible as a mismatch.
+
+ 6335  	constexpr float TILE = 2048.0f;
+ 7623  	constexpr float TILE = 2048.0f;
+
+ 6688  					const float texelWorld = TILE / float( tex->getWidth() );
+ 7802  					const float texelWorld = TILE / float( tex->getWidth() );
+ 7840  					const float texelWorld = TILE / float( tex->getWidth() );
+ 7859  					const float texelWorld = TILE / float( tex->getWidth() );
+
+ 6680  					float u = std::fmod( wx / TILE, 1.0f );
+ 7798  					float u = std::fmod( wx / TILE, 1.0f );
+ 7836  					float u = std::fmod( wx / TILE, 1.0f );
+ 7855  					float u = std::fmod( wx / TILE, 1.0f );
+
+ 6681  					float v = std::fmod( wy / TILE, 1.0f );
+ 7799  					float v = std::fmod( wy / TILE, 1.0f );
+ 7837  					float v = std::fmod( wy / TILE, 1.0f );
+ 7856  					float v = std::fmod( wy / TILE, 1.0f );
+
+ 6689  					const float footprint = span / float( RES );
+
+ 6149  							float( tex->getMaxMipLevel() ) );
+ 6692  						float( tex->getMaxMipLevel() ) );
+ 7805  						float( tex->getMaxMipLevel() ) );
+ 7843  						float( tex->getMaxMipLevel() ) );
+ 7862  						float( tex->getMaxMipLevel() ) );
+
+ 7070  					 * _data.DDS is a cover sheet only if the header's dwReserved1
+
+ 7095  		const quint32 coverStamp0 = coverMax > 0 ? 0x56435757U : 0U;   // 'WWCV'
+

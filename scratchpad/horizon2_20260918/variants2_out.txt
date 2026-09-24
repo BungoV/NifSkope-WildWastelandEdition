@@ -1,0 +1,47 @@
+score = |march - third witness| over 10 receivers x 16 bins, degrees
+----------------------------------------------------------------------------------------------------------------------
+V0 shipped rule (CONTROL: must match STORED)   mean   8.50  max  67.73  >2deg  80.6%  >10deg  24.4%  |v-shipped|   0.14
+----------------------------------------------------------------------------------------------------------------------
+V1  mip off, always level 0                    mean   8.56  max  67.73  >2deg  79.4%  >10deg  25.0%  |v-shipped|   0.80
+V2  tap 1x1 instead of 2x2                     mean  10.13  max  47.24  >2deg  83.1%  >10deg  37.5%  |v-shipped|   6.44
+V3  tap 1x1, addressed by low corner           mean   9.47  max  55.22  >2deg  78.1%  >10deg  30.0%  |v-shipped|   6.41
+V4  elevation at the FAR end of the segment    mean  11.07  max  61.88  >2deg  88.8%  >10deg  40.6%  |v-shipped|   9.05
+V5  growth 1.5 -> 1.10                         mean   8.60  max  66.24  >2deg  77.5%  >10deg  28.7%  |v-shipped|   5.39
+V6  growth 1.5 -> 1.02                         mean   8.46  max  65.53  >2deg  76.2%  >10deg  28.7%  |v-shipped|   5.46
+V7  near-skip 1.0 -> 0.0                       mean   8.63  max  71.79  >2deg  78.1%  >10deg  24.4%  |v-shipped|   1.56
+V8  near-skip 1.0 -> 4.0                       mean   8.78  max  55.22  >2deg  81.2%  >10deg  27.5%  |v-shipped|   2.91
+V9  foot invariant (skip until 2c < bin width) mean  10.25  max  45.28  >2deg  86.2%  >10deg  36.2%  |v-shipped|   6.73
+V10 reach 127,561 -> 16,384 u                  mean   8.50  max  67.73  >2deg  80.6%  >10deg  24.4%  |v-shipped|   0.14
+V11 reach 127,561 -> 4,096 u                   mean   8.47  max  67.73  >2deg  80.0%  >10deg  25.0%  |v-shipped|   0.40
+----------------------------------------------------------------------------------------------------------------------
+V12 tap 1x1 + growth 1.02                      mean  11.18  max  58.59  >2deg  82.5%  >10deg  41.9%  |v-shipped|   9.90
+V13 tap 1x1 + growth 1.02 + mip off            mean  12.05  max  58.59  >2deg  85.6%  >10deg  47.5%  |v-shipped|  10.78
+V14 tap 1x1 + growth 1.10 + mip off            mean  12.09  max  58.41  >2deg  83.1%  >10deg  45.0%  |v-shipped|  10.65
+V15 V13 + first step 8 u                       mean  12.04  max  58.59  >2deg  85.6%  >10deg  47.5%  |v-shipped|  10.76
+----------------------------------------------------------------------------------------------------------------------
+azimuth alignment -- mean |STORED - TRUE| with the stored bins rotated by k:
+    rotate -2  mean  14.22    rotate -1  mean  11.39    rotate +0  mean   8.51    rotate +1  mean  11.76    rotate +2  mean  14.35
+   and mirrored (bin -> -bin): mean  15.75
+terrain-only march vs terrain-only third witness: mean   5.94  max  49.50
+   (third witness terrain mean 10.86, march terrain mean 10.09)
+object field top vs box top over the ten receivers' own squares:
+third witness, ten receivers x 16 bins:
+  directional (pencil at the bin azimuth) mean 43.34 deg
+  sector maximum over the bin             mean 50.31 deg
+  the sector convention alone costs       mean  6.97 deg, max 50.87
+
+score = |march - DIRECTIONAL third witness|, degrees
+----------------------------------------------------------------------------------------------------------------
+V0 shipped rule                                mean  11.83  max  74.22  >2deg  95.0%  bias  +8.52  |v-shipped|   0.14
+V1  mip off (wantCell 1, always level 0)       mean  11.23  max  74.22  >2deg  91.9%  bias  +7.85  |v-shipped|   0.80
+V2  tap 1x1                                    mean   9.93  max  57.54  >2deg  86.2%  bias  +2.17  |v-shipped|   6.44
+V3  tap 1x1 by low corner                      mean   8.67  max  63.23  >2deg  87.5%  bias  +2.21  |v-shipped|   6.41
+V4  mip off + tap 1x1                          mean   9.77  max  57.54  >2deg  82.5%  bias  +1.83  |v-shipped|   6.77
+V5  mip off + tap 1x1 + growth 1.10            mean  10.00  max  64.90  >2deg  76.9%  bias  -1.22  |v-shipped|  10.65
+V6  mip off + tap 1x1 + growth 1.02            mean   9.96  max  65.07  >2deg  78.8%  bias  -1.25  |v-shipped|  10.78
+V7  mip off + tap 1x1 + growth 1.02 + far end  mean  10.07  max  64.68  >2deg  80.0%  bias  -1.68  |v-shipped|  11.12
+V8  mip off + tap 1x1 + growth 1.02 + skip 0   mean  10.67  max  65.07  >2deg  80.6%  bias  -0.24  |v-shipped|  10.78
+V9  growth 1.02 only                           mean  10.47  max  72.02  >2deg  82.5%  bias  +5.98  |v-shipped|   5.46
+V10 mip off + growth 1.02                      mean   9.85  max  72.02  >2deg  80.0%  bias  +4.74  |v-shipped|   6.42
+----------------------------------------------------------------------------------------------------------------
+for reference, the SHIPPED sheet against the directional truth: mean  11.90  max  74.26  bias  +8.59

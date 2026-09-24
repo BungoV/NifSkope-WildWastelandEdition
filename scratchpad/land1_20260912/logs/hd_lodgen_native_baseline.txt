@@ -1,0 +1,9 @@
+  bake wall-clock 8 s (AO=1)
+  ok   26 output files hashed (floor 8: 4 chunks + 4 manifests)
+  ok   profile matches the baseline (ao=1 identity=1 arrays=1 atlas=1 slot-fallback=dim16 exclude=BTR)
+  NEW      region/Commonwealth.lodb
+25 files in the baseline, 26 baked, 1 differ
+  FAIL the stock bake differs from the baseline (files named above)
+  baseline exe 664e0de4483792b5b7fa4a0d89cb9a9a3d5b76dfd17e29b2b85e2ed594fb8d1b 2026-09-10T03:57:46; this exe 943b52db6c7413e7d950e7f69b21938d01170cd4ecc834ea30a79722a9414d19 2026-09-12T09:21:04
+1 failures
+RESULT FAIL

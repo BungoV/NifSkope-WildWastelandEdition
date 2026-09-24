@@ -1,0 +1,8 @@
+pbr_wx1_gates judge, red=skygamma, CommonwealthClear fv=131 tods=8, climate TNAM=30,54,102,126,175,68
+  judge GMST: X=600 Y=-325 T=0.15 ext=2 shadowScale=-15 secunda=75 fades=5/10; A..D=6.9250 7.0750 18.9250 19.0750
+skypx
+  FAIL zenith pixel at 12.00 = Standard(2.40 x Upper^2.2) = (53.6, 95.1, 148.7), +-2 -- picture (161.0, 204.0, 247.0), off by 108.91, patch spread 0, 1280x826
+  FAIL zenith pixel at 07.00 = Standard(3.43 x Upper^2.2) = (71.3, 100.3, 143.5), +-2 -- picture (197.0, 227.0, 255.0), off by 126.74, patch spread 0, 1280x826
+  FAIL zenith pixel at 19.50 = Standard(2.67 x Upper^2.2) = (42.9, 60.6, 91.1), +-2 -- picture (152.0, 174.0, 205.0), off by 113.89, patch spread 0, 1280x826
+3 checks, 3 failures
+FAIL

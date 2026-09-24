@@ -1,0 +1,29 @@
+ev
+  ev0 rc=0 149338 B
+  ev1 rc=0 165699 B
+grey
+  grey rc=0 8476 B
+srgbtag
+  tag_srgbtag rc=0 149338 B
+  tag_unormtag rc=0 149338 B
+  tag_flatbase rc=0 75204 B
+  tagL_srgbtag rc=0 148944 B
+  tagL_unormtag rc=0 148944 B
+cube
+  cube rc=0 done
+window
+  window1 rc=0 done
+  window2 rc=0 done
+pictures
+  pic_legacy rc=0 148944 B
+  pic_studio rc=0 159922 B
+  pic_studio_agx rc=0 154057 B
+GATE ev: PASS  samples=346706 median=1.9943 inside[1.9,2.1]=0.997
+GATE grey: PASS  covered=132984 within188+-1=0.9925 mode=188
+GATE srgbtag: PASS  max|d|=0 differing=0.00000 flat-vs-twin mean=34.3
+GATE srgbtag_legacy: PASS  max|d|=0 differing=0.00000
+GATE cube (cube): PASS  PASS
+GATE window (window1): PASS  PASS
+GATE window (window2): PASS  PASS
+pictures: pic_legacy pic_studio pic_studio_agx
+R2A GATES: PASS (ev=True, grey=True, srgbtag=True, cube=True, window=True)

@@ -1,0 +1,526 @@
+{
+ "t2020": {
+  "c1": {
+   "painted": 25393,
+   "paintedOld": 25249,
+   "proj": 23170,
+   "both": 23116,
+   "genOnly": 2277,
+   "projOnly": 54
+  },
+  "tris": {
+   "trunk": 214100,
+   "skirt": 6874,
+   "byMaterial": {
+    "materials\\landscape\\roads\\concreteroads01.bgsm": {
+     "trunk": 8498,
+     "skirt": 0,
+     "shapes": 60,
+     "alphaTest": false,
+     "alphaBlend": false
+    },
+    "materials\\landscape\\roads\\sancsw01.bgsm": {
+     "trunk": 31228,
+     "skirt": 0,
+     "shapes": 121,
+     "alphaTest": false,
+     "alphaBlend": false
+    },
+    "materials\\landscape\\ground\\commonwealthdefault01.bgsm": {
+     "trunk": 8086,
+     "skirt": 0,
+     "shapes": 27,
+     "alphaTest": false,
+     "alphaBlend": false
+    },
+    "materials\\landscape\\roads\\sancsw01prewar.bgsm": {
+     "trunk": 132,
+     "skirt": 0,
+     "shapes": 1,
+     "alphaTest": false,
+     "alphaBlend": false
+    },
+    "c:\\projects\\fallout4\\build\\pc\\data\\materials\\landscape\\roads\\asphaltandswedgedecals01.bgsm": {
+     "trunk": 54417,
+     "skirt": 60,
+     "shapes": 159,
+     "alphaTest": true,
+     "alphaBlend": false
+    },
+    "c:\\projects\\fallout4\\build\\pc\\data\\materials\\landscape\\ground\\dirtgravel01.bgsm": {
+     "trunk": 42383,
+     "skirt": 84,
+     "shapes": 159,
+     "alphaTest": false,
+     "alphaBlend": false
+    },
+    "": {
+     "trunk": 3596,
+     "skirt": 82,
+     "shapes": 80,
+     "alphaTest": false,
+     "alphaBlend": false
+    },
+    "c:\\projects\\fallout4\\build\\pc\\data\\materials\\landscape\\roads\\asphaltroaddetails01.bgsm": {
+     "trunk": 34136,
+     "skirt": 2525,
+     "shapes": 159,
+     "alphaTest": true,
+     "alphaBlend": false
+    },
+    "c:\\projects\\fallout4\\build\\pc\\data\\materials\\landscape\\roads\\asphalt01.bgsm": {
+     "trunk": 21624,
+     "skirt": 31,
+     "shapes": 159,
+     "alphaTest": false,
+     "alphaBlend": false
+    },
+    "c:\\projects\\fallout4\\build\\pc\\data\\materials\\landscape\\roads\\asphaltcrackdecal01.bgsm": {
+     "trunk": 134,
+     "skirt": 3681,
+     "shapes": 93,
+     "alphaTest": true,
+     "alphaBlend": false
+    },
+    "data\\materials\\landscape\\roads\\asphaltandswedgedecals01.bgsm": {
+     "trunk": 2553,
+     "skirt": 0,
+     "shapes": 4,
+     "alphaTest": true,
+     "alphaBlend": false
+    },
+    "data\\materials\\landscape\\ground\\dirtgravel01.bgsm": {
+     "trunk": 2032,
+     "skirt": 16,
+     "shapes": 4,
+     "alphaTest": false,
+     "alphaBlend": false
+    },
+    "data\\materials\\landscape\\roads\\asphaltroaddetails01.bgsm": {
+     "trunk": 1525,
+     "skirt": 154,
+     "shapes": 4,
+     "alphaTest": true,
+     "alphaBlend": false
+    },
+    "data\\materials\\landscape\\roads\\asphalt01.bgsm": {
+     "trunk": 1002,
+     "skirt": 4,
+     "shapes": 4,
+     "alphaTest": false,
+     "alphaBlend": false
+    },
+    "data\\materials\\landscape\\roads\\asphaltcrackdecal01.bgsm": {
+     "trunk": 8,
+     "skirt": 211,
+     "shapes": 4,
+     "alphaTest": true,
+     "alphaBlend": true
+    },
+    "materials\\landscape\\roads\\asphaltandswedgedecals01.bgsm": {
+     "trunk": 1250,
+     "skirt": 0,
+     "shapes": 2,
+     "alphaTest": true,
+     "alphaBlend": false
+    },
+    "materials\\landscape\\ground\\dirtgravel01.bgsm": {
+     "trunk": 928,
+     "skirt": 0,
+     "shapes": 2,
+     "alphaTest": false,
+     "alphaBlend": false
+    },
+    "materials\\landscape\\roads\\asphalt01.bgsm": {
+     "trunk": 568,
+     "skirt": 0,
+     "shapes": 2,
+     "alphaTest": false,
+     "alphaBlend": false
+    },
+    "materials\\landscape\\roads\\asphaltcrackdecal01.bgsm": {
+     "trunk": 0,
+     "skirt": 26,
+     "shapes": 2,
+     "alphaTest": true,
+     "alphaBlend": true
+    }
+   }
+  },
+  "rows": [
+   {
+    "set": "all road texels",
+    "texels": 23116,
+    "ours(d1)": 101.69761052891704,
+    "ours(d0)": 102.33365405719628,
+    "ground": 60.594300665299606,
+    "vanilla": 92.62561618998109
+   },
+   {
+    "set": "TRUNK only (no skirt triangle covers)",
+    "texels": 22485,
+    "ours(d1)": 101.54424019427375,
+    "ours(d0)": 102.25664753023011,
+    "ground": 59.737377391934615,
+    "vanilla": 92.49724362726668
+   },
+   {
+    "set": "both trunk and skirt cover",
+    "texels": 631,
+    "ours(d1)": 107.16279590840045,
+    "ours(d0)": 105.07769804901025,
+    "ground": 91.12983125422458,
+    "vanilla": 97.20003310382197
+   },
+   {
+    "set": "SKIRT ONLY -- the defect",
+    "texels": 0,
+    "ours(d1)": NaN,
+    "ours(d0)": NaN,
+    "ground": NaN,
+    "vanilla": NaN
+   },
+   {
+    "set": "neither (bookkeeping, must be 0)",
+    "texels": 0,
+    "ours(d1)": NaN,
+    "ours(d0)": NaN,
+    "ground": NaN,
+    "vanilla": NaN
+   },
+   {
+    "set": "max-z winner IS a skirt triangle",
+    "texels": 455,
+    "ours(d1)": 105.99241891964084,
+    "ours(d0)": 104.124224396976,
+    "ground": 94.91081275892992,
+    "vanilla": 95.27707078667943
+   },
+   {
+    "set": "off-road ground (control)",
+    "texels": 236697,
+    "ours(d1)": 69.2727859600576,
+    "ours(d0)": 69.2728053808079,
+    "ground": 69.2727859600709,
+    "vanilla": 83.71699684322662
+   }
+  ],
+  "bins": [
+   {
+    "lo": 0.0,
+    "hi": 0.1,
+    "texels": 0
+   },
+   {
+    "lo": 0.1,
+    "hi": 0.25,
+    "texels": 0
+   },
+   {
+    "lo": 0.25,
+    "hi": 0.4,
+    "texels": 0
+   },
+   {
+    "lo": 0.4,
+    "hi": 0.55,
+    "texels": 0
+   },
+   {
+    "lo": 0.55,
+    "hi": 0.7,
+    "texels": 0
+   },
+   {
+    "lo": 0.7,
+    "hi": 0.85,
+    "texels": 0
+   },
+   {
+    "lo": 0.85,
+    "hi": 1.0,
+    "texels": 0
+   }
+  ],
+  "skirtOnly": 0,
+  "trunkOnly": 22485,
+  "bothCover": 631,
+  "winSkirt": 455
+ },
+ "t0808": {
+  "c1": {
+   "painted": 12792,
+   "paintedOld": 12182,
+   "proj": 11266,
+   "both": 11069,
+   "genOnly": 1723,
+   "projOnly": 197
+  },
+  "tris": {
+   "trunk": 804192,
+   "skirt": 30100,
+   "byMaterial": {
+    "c:\\projects\\fallout4\\build\\pc\\data\\materials\\landscape\\roads\\asphaltandswedgedecals01.bgsm": {
+     "trunk": 257039,
+     "skirt": 1800,
+     "shapes": 854,
+     "alphaTest": true,
+     "alphaBlend": false
+    },
+    "c:\\projects\\fallout4\\build\\pc\\data\\materials\\landscape\\ground\\dirtgravel01.bgsm": {
+     "trunk": 214004,
+     "skirt": 224,
+     "shapes": 867,
+     "alphaTest": false,
+     "alphaBlend": false
+    },
+    "c:\\projects\\fallout4\\build\\pc\\data\\materials\\landscape\\roads\\asphaltroaddetails01.bgsm": {
+     "trunk": 156247,
+     "skirt": 8251,
+     "shapes": 867,
+     "alphaTest": true,
+     "alphaBlend": false
+    },
+    "c:\\projects\\fallout4\\build\\pc\\data\\materials\\landscape\\roads\\asphalt01.bgsm": {
+     "trunk": 101235,
+     "skirt": 0,
+     "shapes": 867,
+     "alphaTest": false,
+     "alphaBlend": false
+    },
+    "c:\\projects\\fallout4\\build\\pc\\data\\materials\\landscape\\roads\\asphaltcrackdecal01.bgsm": {
+     "trunk": 553,
+     "skirt": 16557,
+     "shapes": 463,
+     "alphaTest": true,
+     "alphaBlend": false
+    },
+    "": {
+     "trunk": 10514,
+     "skirt": 196,
+     "shapes": 261,
+     "alphaTest": false,
+     "alphaBlend": false
+    },
+    "materials\\landscape\\ground\\dirtpath01.bgsm": {
+     "trunk": 628,
+     "skirt": 0,
+     "shapes": 2,
+     "alphaTest": false,
+     "alphaBlend": false
+    },
+    "materials\\landscape\\ground\\forestfloor01alpha.bgsm": {
+     "trunk": 175,
+     "skirt": 453,
+     "shapes": 2,
+     "alphaTest": false,
+     "alphaBlend": true
+    },
+    "materials\\landscape\\puddles\\puddletowndecal01.bgsm": {
+     "trunk": 57,
+     "skirt": 161,
+     "shapes": 2,
+     "alphaTest": false,
+     "alphaBlend": true
+    },
+    "materials\\landscape\\tiretracks01.bgsm": {
+     "trunk": 49,
+     "skirt": 83,
+     "shapes": 2,
+     "alphaTest": true,
+     "alphaBlend": false
+    },
+    "data\\materials\\landscape\\roads\\asphaltandswedgedecals01.bgsm": {
+     "trunk": 17046,
+     "skirt": 0,
+     "shapes": 22,
+     "alphaTest": true,
+     "alphaBlend": false
+    },
+    "data\\materials\\landscape\\ground\\dirtgravel01.bgsm": {
+     "trunk": 13186,
+     "skirt": 0,
+     "shapes": 22,
+     "alphaTest": false,
+     "alphaBlend": false
+    },
+    "data\\materials\\landscape\\roads\\asphaltroaddetails01.bgsm": {
+     "trunk": 10190,
+     "skirt": 858,
+     "shapes": 22,
+     "alphaTest": true,
+     "alphaBlend": false
+    },
+    "data\\materials\\landscape\\roads\\asphalt01.bgsm": {
+     "trunk": 6662,
+     "skirt": 0,
+     "shapes": 22,
+     "alphaTest": false,
+     "alphaBlend": false
+    },
+    "data\\materials\\landscape\\roads\\asphaltcrackdecal01.bgsm": {
+     "trunk": 54,
+     "skirt": 1141,
+     "shapes": 22,
+     "alphaTest": true,
+     "alphaBlend": true
+    },
+    "materials\\landscape\\roads\\concreteroadrubble.bgsm": {
+     "trunk": 503,
+     "skirt": 0,
+     "shapes": 3,
+     "alphaTest": false,
+     "alphaBlend": false
+    },
+    "materials\\landscape\\roads\\asphaltandswedgedecals01.bgsm": {
+     "trunk": 4643,
+     "skirt": 0,
+     "shapes": 7,
+     "alphaTest": true,
+     "alphaBlend": false
+    },
+    "materials\\landscape\\ground\\dirtgravel01.bgsm": {
+     "trunk": 3253,
+     "skirt": 0,
+     "shapes": 7,
+     "alphaTest": false,
+     "alphaBlend": false
+    },
+    "materials\\landscape\\roads\\asphalt01.bgsm": {
+     "trunk": 1884,
+     "skirt": 0,
+     "shapes": 7,
+     "alphaTest": false,
+     "alphaBlend": false
+    },
+    "materials\\landscape\\roads\\asphaltcrackdecal01.bgsm": {
+     "trunk": 18,
+     "skirt": 252,
+     "shapes": 7,
+     "alphaTest": true,
+     "alphaBlend": true
+    },
+    "c:\\projects\\fallout4\\build\\pc\\data\\materials\\landscape\\roads\\concretesw01.bgsm": {
+     "trunk": 936,
+     "skirt": 0,
+     "shapes": 18,
+     "alphaTest": false,
+     "alphaBlend": false
+    },
+    "c:\\projects\\fallout4\\build\\pc\\data\\materials\\landscape\\roads\\stoneswcurbunique.bgsm": {
+     "trunk": 4434,
+     "skirt": 0,
+     "shapes": 20,
+     "alphaTest": false,
+     "alphaBlend": false
+    },
+    "materials\\landscape\\roads\\asphaltroaddetails01.bgsm": {
+     "trunk": 882,
+     "skirt": 124,
+     "shapes": 1,
+     "alphaTest": true,
+     "alphaBlend": false
+    }
+   }
+  },
+  "rows": [
+   {
+    "set": "all road texels",
+    "texels": 11069,
+    "ours(d1)": 108.12500628780661,
+    "ours(d0)": 107.40836586151758,
+    "ground": 102.34685216291591,
+    "vanilla": 94.98244151932481
+   },
+   {
+    "set": "TRUNK only (no skirt triangle covers)",
+    "texels": 10214,
+    "ours(d1)": 108.2671848838101,
+    "ours(d0)": 107.58528160969078,
+    "ground": 102.49615630885704,
+    "vanilla": 95.17464991438315
+   },
+   {
+    "set": "both trunk and skirt cover",
+    "texels": 855,
+    "ours(d1)": 106.42651251052051,
+    "ours(d0)": 105.29489515760991,
+    "ground": 100.56323514929878,
+    "vanilla": 92.68628181508383
+   },
+   {
+    "set": "SKIRT ONLY -- the defect",
+    "texels": 0,
+    "ours(d1)": NaN,
+    "ours(d0)": NaN,
+    "ground": NaN,
+    "vanilla": NaN
+   },
+   {
+    "set": "neither (bookkeeping, must be 0)",
+    "texels": 0,
+    "ours(d1)": NaN,
+    "ours(d0)": NaN,
+    "ground": NaN,
+    "vanilla": NaN
+   },
+   {
+    "set": "max-z winner IS a skirt triangle",
+    "texels": 556,
+    "ours(d1)": 105.75199574218037,
+    "ours(d0)": 104.57381147243308,
+    "ground": 100.12876247309951,
+    "vanilla": 91.21911330148984
+   },
+   {
+    "set": "off-road ground (control)",
+    "texels": 249155,
+    "ours(d1)": 98.92021936647232,
+    "ours(d0)": 98.92012547842853,
+    "ground": 98.92021936645531,
+    "vanilla": 85.25379964099682
+   }
+  ],
+  "bins": [
+   {
+    "lo": 0.0,
+    "hi": 0.1,
+    "texels": 0
+   },
+   {
+    "lo": 0.1,
+    "hi": 0.25,
+    "texels": 0
+   },
+   {
+    "lo": 0.25,
+    "hi": 0.4,
+    "texels": 0
+   },
+   {
+    "lo": 0.4,
+    "hi": 0.55,
+    "texels": 0
+   },
+   {
+    "lo": 0.55,
+    "hi": 0.7,
+    "texels": 0
+   },
+   {
+    "lo": 0.7,
+    "hi": 0.85,
+    "texels": 0
+   },
+   {
+    "lo": 0.85,
+    "hi": 1.0,
+    "texels": 0
+   }
+  ],
+  "skirtOnly": 0,
+  "trunkOnly": 10214,
+  "bothCover": 855,
+  "winSkirt": 556
+ }
+}

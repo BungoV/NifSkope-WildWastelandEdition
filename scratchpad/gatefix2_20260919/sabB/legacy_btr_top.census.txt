@@ -1,0 +1,3 @@
+# WW_PROGRAM_CENSUS  light(view) = 0 0 1
+shape="Land" bsver=130 msn=1 lodland=1 prog=sk_msn.prog
+shape="" bsver=130 msn=0 lodland=0 prog=fo4_effectshader.prog

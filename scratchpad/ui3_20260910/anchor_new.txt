@@ -1,0 +1,182 @@
+/* ...AND THE BUTTONS IN THE ROW ARE THE ROW (lane WATER7, corrected by lane
+ * UI3; bungo, 2026-09-10, on a screenshot of the aligned strip: "compact these
+ * vertically like this, the top bar and the buttons").
+ *
+ * WATER7 stated the rule and missed it by four pixels: BUILD12 measured the
+ * row at 35 px and the buttons inside it at 39, and its gate passed only
+ * because it allowed 8 px where its own header promised 1.
+ *
+ * Lane UI3 measured WHY outside the application -- scratchpad/ui3_20260910/
+ * probe.cpp and probe2.cpp, a QToolBar carrying the same four QToolButtons
+ * with the same res/style.qss and the same appended sheet -- and reproduced
+ * 39 exactly. Three things made it, and none of them was the row height:
+ *
+ *   1. A WIDGET'S OWN STYLESHEET OUTRANKS EVERY ANCESTOR'S, whatever the
+ *      selectors say. These buttons carry one: wwBoxedButtonQss above, set on
+ *      the Workspaces button and on the LOD / Animation / Collision group, so
+ *      its `padding: 3px 6px` beat the row's padding before the row ever saw
+ *      the button. A rule appended to the BAR can only reach a property the
+ *      button's own sheet does not mention -- which is why WATER7's
+ *      `min-height` did arrive and its `padding` did not.
+ *   2. QSS `min-height` ON A QToolButton IS A MINIMUM ON THE CONTENTS, not on
+ *      the widget. Qt expands the contents to it, adds 3 px of its own for
+ *      CT_ToolButton, then the padding and the border: 31 + 3 + (3 + 3) + 2 =
+ *      42 asked for, 39 laid out. `max-height` is not consulted on this path
+ *      at all -- measured, not read: the probe set it and nothing moved.
+ *   3. THE BAR'S OWN LAYOUT MARGIN. A QToolBar starts its items
+ *      PM_ToolBarItemMargin + PM_ToolBarFrameWidth = 2 + 2 = 4 px below its
+ *      top, so even a button of exactly the row's height would hang 4 px past
+ *      the bottom of a bar of exactly the row's height, and be clipped there.
+ *
+ * So the row STATES three things and MEASURES the fourth:
+ *
+ *   - wwBarRowBoxQss() takes the bar's own box away, which puts its items at
+ *     y = 0 with the whole row to sit in. With that gone the layout CLAMPS a
+ *     button to the bar instead of letting it overflow, so any hint from the
+ *     row's height up to 3 px over lands on exactly the row -- a basin, not a
+ *     knife edge (probe2.cpp: content 26..29 all measured 35 px at y 0).
+ *   - wwBarRowButtonQss( content ) states the glyph line and the air above and
+ *     below it, and nothing horizontal, so the row has ONE vertical box and
+ *     every button keeps its own width.
+ *   - wwAlignBarRow appends them to the bars AND to every tool button in them,
+ *     because of (1).
+ *   - and it CALIBRATES `content` rather than typing Qt's 3: it asks for a
+ *     content height certainly taller than any glyph line in the row, reads
+ *     what the style added to it, and takes that much back out of the row. No
+ *     number here moves with a Qt version.
+ */
+bool wwCompactTopBars()
+{
+	/* THE WAY BACK, exact at its off value (CONSTITUTION 7). ONE reader, so
+	 * the sheet below and the call site that decides whether the menu bar
+	 * joins the row can never disagree about it. */
+	return QSettings().value( QStringLiteral( "UI/CompactTopBars" ), true ).toBool();
+}
+
+//! The air above and below the glyph line, the same for every button in the row.
+static const int wwBarRowPad = 2;
+//! What wwAlignBarRow calibrated, so a gate reads back the numbers it used.
+static int wwBarRowContent = 0;
+static int wwBarRowOverhead = -1;
+
+QString wwBarRowBoxQss()
+{
+	if ( !wwCompactTopBars() )
+		return QString();
+	/* The border is already transparent in res/style.qss; what it costs is the
+	 * 4 px of item margin the style derives from it, which is the whole point
+	 * of taking it away here. */
+	return QStringLiteral( "QToolBar { border: 0px; padding: 0px; margin: 0px; }" );
+}
+
+QString wwBarRowButtonQss( int contentHeight )
+{
+	if ( contentHeight <= 0 || !wwCompactTopBars() )
+		return QString();
+	/* The menu arrow comes with the height. A QToolButton's default
+	 * menu-indicator sits in the BOTTOM-RIGHT corner of the button, which is
+	 * invisible while the button is only as tall as its own text and obvious
+	 * the moment it is the row's height: the first build of this lane put the
+	 * arrows of the viewport header's Global / snap / grid buttons a row-height
+	 * below their glyphs. wwBoxedButtonQss already centres it, which is why the
+	 * four boxed buttons in the top row never showed it; stating the same rule
+	 * here means the row does not depend on which sheet a button happens to
+	 * carry. Identical to the boxed rule, so appending it to a boxed button
+	 * changes nothing. */
+	return QStringLiteral(
+		"QMenuBar::item { min-height: %1px; padding-top: %2px; padding-bottom: %2px; }"
+		"QToolButton { min-height: %1px; padding-top: %2px; padding-bottom: %2px; }"
+		"QToolButton::menu-indicator { subcontrol-position: right center;"
+		" subcontrol-origin: padding; }" )
+		.arg( contentHeight ).arg( wwBarRowPad );
+}
+
+int wwBarRowButtonContent()
+{
+	return wwBarRowContent;
+}
+
+int wwBarRowButtonOverhead()
+{
+	return wwBarRowOverhead;
+}
+
+void wwAlignBarRow( const QList<QWidget *> & bars )
+{
+	int h = 0;
+	for ( QWidget * w : bars ) {
+		if ( w )
+			h = qMax( h, qMax( w->sizeHint().height(), w->minimumSizeHint().height() ) );
+	}
+	if ( h <= 0 )
+		return;
+	wwBarRow = h;
+
+	/* Everything the row's sheet has to reach: the bars, and every tool button
+	 * inside them -- a button carrying its own stylesheet cannot be reached
+	 * from its bar's, see (1) above. Qt's extension chevron is not one of ours.
+	 *
+	 * The sheets are saved BEFORE anything is appended, because the row's sheet
+	 * is applied TWICE (once to measure, once for real) and appending twice
+	 * would state the rule twice. Appended, never assigned: a bar or a button
+	 * may already carry a per-widget sheet, and replacing it would take that
+	 * look away while fixing the height. */
+	QList<QWidget *> barTargets;
+	QStringList barSaved;
+	QList<QToolButton *> buttons;
+	QStringList btnSaved;
+	for ( QWidget * w : bars ) {
+		if ( !w )
+			continue;
+		// the property is what a sheet or a gate can find the family by
+		w->setProperty( "wwBarRow", true );
+		w->setMinimumHeight( h );
+		w->setMaximumHeight( h );
+		barTargets.append( w );
+		barSaved.append( w->styleSheet() );
+		const QList<QToolButton *> kids = w->findChildren<QToolButton *>();
+		for ( QToolButton * b : kids ) {
+			if ( b->objectName() == QLatin1String( "qt_toolbar_ext_button" ) )
+				continue;
+			buttons.append( b );
+			btnSaved.append( b->styleSheet() );
+		}
+	}
+
+	if ( !wwCompactTopBars() ) {
+		/* The way back, exact: nothing is appended and no widget's own sheet is
+		 * touched, so the top of the window is BUILD9's, to the pixel. */
+		wwBarRowContent = 0;
+		wwBarRowOverhead = -1;
+		return;
+	}
+
+	auto applyRow = [&]( int content ) {
+		const QString btn = wwBarRowButtonQss( content );
+		const QString bar = wwBarRowBoxQss() + btn;
+		for ( int i = 0; i < barTargets.size(); i++ )
+			barTargets.at( i )->setStyleSheet( barSaved.at( i ) + bar );
+		for ( int i = 0; i < buttons.size(); i++ )
+			buttons.at( i )->setStyleSheet( btnSaved.at( i ) + btn );
+	};
+
+	/* THE CALIBRATION. `h` is the tallest bar's own natural height, so it is
+	 * certainly at least as tall as any glyph line in the row: asking for it as
+	 * a content height makes what comes back the style's additions and nothing
+	 * else. */
+	applyRow( h );
+	int overhead = -1;
+	for ( QToolButton * b : buttons ) {
+		b->ensurePolished();
+		overhead = qMax( overhead, b->sizeHint().height() - h );
+	}
+	wwBarRowOverhead = overhead;
+	/* FALLBACK, named in the output (CONSTITUTION 10): with no button to
+	 * measure, or a measurement that would leave no room for a glyph, the row
+	 * keeps the arithmetic the probe measured on this Qt -- 3 for CT_ToolButton,
+	 * two paddings, two borders -- rather than shipping no rule at all. */
+	const int fallback = qMax( 8, h - ( 3 + 2 * wwBarRowPad + 2 ) );
+	wwBarRowContent = ( overhead >= 0 && h - overhead >= 8 ) ? h - overhead : fallback;
+	applyRow( wwBarRowContent );
+}
+

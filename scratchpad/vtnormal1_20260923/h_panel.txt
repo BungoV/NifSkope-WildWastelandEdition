@@ -1,0 +1,174 @@
+  ok   Workspaces offers LOD Generation
+  ok   the LOD Generation workspace opens its dock
+  ok   no modal dialog was raised
+  ok   panel has LodgenPluginList
+  ok   panel has LodgenSourceBox
+  ok   panel has LodgenResourceList
+  ok   panel has LodgenSourceStatus
+  ok   panel has LodgenWorldspaceBox
+  ok   panel has LodgenOutputEdit
+  ok   panel has LodgenLodtCheck
+  ok   panel has LodgenLodtFullRadio
+  ok   panel has LodgenLodtAoOnlyRadio
+  ok   panel has LodgenAoSpin
+  ok   panel has LodgenHeightmapCheck
+  ok   panel has LodgenHeightmapSizeBox
+  ok   panel has LodgenObjectsCheck
+  ok   panel has LodgenBtrCheck
+  ok   panel has LodgenWholeWorldButton
+  ok   panel has LodgenSwayCheck
+  ok   panel has LodgenObjectChannelsCheck
+  ok   panel has LodgenArraysCheck
+  ok   panel has LodgenAoSkirtSpin
+  ok   panel has LodgenCullCheck
+  ok   panel has LodgenCullMarginSpin
+  ok   panel has LodgenSlotFallbackCheck
+  ok   panel has LodgenSimplifyCheck
+  ok   panel has LodgenSimplify8Spin
+  ok   panel has LodgenSimplify16Spin
+  ok   panel has LodgenSimplify32Spin
+  ok   panel has LodgenSimplifyErrorSpin
+  ok   panel has LodgenImpostorLevelBox
+  ok   panel has LodgenCardFramesBox
+  ok   panel has LodgenCardResBox
+  ok   panel has LodgenCardHalfAuxCheck
+  ok   panel has LodgenCardCostLabel
+  ok   panel has LodgenNativeCheck
+  ok   panel has LodgenTreesOnlyCheck
+  ok   panel has LodgenResultLabel
+  ok   panel has LodgenTexCheck
+  ok   panel has LodgenCoverCheck
+  ok   panel has LodgenTintSpin
+  ok   panel has LodgenVtCheck
+  ok   panel has LodgenVtFinestBox
+  ok   panel has LodgenVtBtrCheck
+  ok   panel has LodgenVtSummary
+  ok   panel has LodgenOutputRootLabel
+  ok   panel has LodgenProgressMap
+  ok   panel has LodgenProgressBar
+  ok   panel has LodgenGenerateButton
+  ok   panel has LodgenCancelButton
+  ok   the card rows offer 4, 6 and 8 frames and 64, 128, 256 and 512 px
+  card cost at 8x8/128: 1024 x 1024 sheets at 128 x 128 a frame: 4.67 MB for the largest base, and less for every smaller one.
+  with half-aux: 1024 x 1024 sheets at 128 x 128 a frame: 2.17 MB for the largest base, and less for every smaller one.
+  at 4x4/128 with half-aux: 512 x 512 sheets at 128 x 128 a frame: 0.54 MB for the largest base, and less for every smaller one.
+  ok   the cost line names the sheet 8 x 8 frames of 128 px makes
+  ok   and prices it at 4.67 MB
+  ok   half-resolution aux sheets reprice it at 2.17 MB
+  ok   and dropping to 4 x 4 frames reprices it again
+  ok   the worldspace list is filled from the default plugin
+  ok   the heightmap size follows its checkbox
+  ok   AO-only greys the AO resolution (it is read from the file)
+  ok   the chunk range is greyed while no chunk output is selected
+  the object head this target offers: Native object files (.lodo/.lodi)
+  ok   ticking the target's own object output enables the chunk range
+  ok   tree sway greys with the identity profile
+  ok   the buried margin greys with its cull box
+  ok   Whole worldspace fills the Commonwealth's -96..95
+  ok   the progress map shows the worldspace before a run
+  ok   the panel widget is found
+number fields: 48, left as plain spin boxes: 0
+  ok   the numbers are scrub fields, like every other number
+group boxes: 0, headings: 11
+  ok   sections are headings, not group-box frames
+selectors: 18, in default chrome: 0
+  ok   every selector takes the matched field chrome
+check boxes: 39, with a dash explanation: 0, outputs without a tooltip: 0
+  ok   labels are names; the explanation is the tooltip
+range cells on distinct rows: 4
+  ok   range cells sit one to a row
+  ok   Generate sits outside the scrolling settings
+  ok   the map sits outside the scrolling settings
+  ok   the settings themselves do scroll
+new rows checked: 58, missing: 0, outside the scroll area: 0, taking the wheel unfocused: 0, not round-tripping through QSettings: 0, without a tooltip: 0
+  ok   every row lane PANEL1 added is in the panel
+  ok   and in the scrolling settings, where it can be reached
+  ok   and takes the wheel only when focused
+  ok   and round-trips through its own settings key
+  ok   and says what it does and its command-line switch
+  ok   a target selector exists with its two readers
+  ok   the stock engine hides the FO4CS-only outputs and unticks them
+  ok   and ticks the legacy terrain chunks it needs
+  ok   FO4 Community Shaders brings them back, ticked, and drops the legacy chunks
+  ok   the FO4CS target shows the LOD root under the output field
+  root label: 'FO4CSLOD\Commonwealth\'
+  ok   and the stock engine hides it, its files having not moved
+  FO4CS: the .btr section hidden: yes
+  FO4CS: the .bto head hidden: yes
+  FO4CS: the object atlas hidden: yes
+  FO4CS: chunk textures from the pyramid hidden: yes
+  ok   FO4 Community Shaders hides all four legacy object rows
+  ok   and shows the native .lodo/.lodi row instead
+  FO4CS: Keep legacy .BTO chunks hidden: no, ticked: no
+  ok   FO4 Community Shaders offers 'Keep legacy .BTO chunks' and ships it OFF
+  FO4CS summary: 'Will write to Lodgen_LODUI1 (a new folder): refresh the AO plane of FO4CSLOD\Commonwealth\Commonwealth.lodl; Textures\Terrain\Commonwealth\Commonwealth.HeightMap.dds (6144 x 6144, 72 MB); FO4CSLOD\Commonwealth\Commonwealth.VT.*.lodt (5 levels, 12276 tiles, about 5.99 GB); FO4CSLOD\Commonwealth\Commonwealth.lodo and FO4CSLOD\Commonwealth\Commonwealth.lodi; 3060 object chunks, built in a scratch folder and dropped (the manifest sidecars stay under FO4CSLOD\Commonwealth); the object texture arrays and their .lodm.'
+  ok   the FO4CS summary names .lodl, .lodt, .lodo and .lodi
+  ok   and never the legacy .btr chunks
+  ok   and says the object chunks are built in a scratch folder and dropped
+  ok   and names the root those sidecars land under
+  Stock: the .btr section hidden: no
+  Stock: the .bto head hidden: no
+  Stock: the object atlas hidden: no
+  Stock: chunk textures from the pyramid hidden: no
+  ok   the stock engine shows all four of them again
+  ok   and hides the native row, which it cannot read
+  Stock: Keep legacy .BTO chunks hidden: yes
+  ok   the stock engine hides 'Keep legacy .BTO chunks', which it never needs
+  Stock summary: 'Will write to Lodgen_LODUI1 (a new folder): 3060 chunks (object .bto and terrain .btr) under meshes\terrain\Commonwealth; the object texture arrays and their .lodm.'
+  ok   the stock summary names .btr and .bto
+  ok   and none of the four .lod types its reader has no use for
+  ok   a native tick under the stock target does not reach the run
+  Trees only default: on
+  ok   Trees only is ON by default
+  ok   its label is a name and its tooltip is one sentence
+  labels reading 'Tree cards from ring': 1
+  ok   the ring override says it is trees only
+  ok   and its tooltip is one sentence
+  cost at 8x8/256: 2048 x 2048 sheets at 256 x 256 a frame: 18.67 MB for the largest base, and less for every smaller one.
+  cost at 8x8/512: 4096 x 4096 sheets at 512 x 512 a frame: 74.67 MB for the largest base, and less for every smaller one.
+  ok   512 px is offered and reaches the sheet arithmetic
+  ok   and the cost line moves when the row moves
+  result line before a run: ''
+  ok   the result line carries nothing until something has run
+grass tint default: 35 %
+  ok   the grass tint greys with the ground-cover box
+  ok   the grass tint defaults to the stock-engine setting
+  ok   ground cover greys without the terrain textures it lives in
+  ok   the pyramid's rows grey with its own box
+pyramid summary at 16 units a texel: 5 levels, 12276 tiles. Pyramid about 7.70 GB, chunk sheets about 1.99 GB, about 9.69 GB on disk. Bake time is unmeasured.
+pyramid summary at 8 units a texel: 6 levels, 49140 tiles. Pyramid about 27.67 GB, chunk sheets about 1.99 GB, about 29.66 GB on disk. Bake time is unmeasured.
+  ok   the pyramid's summary is computed, not a fixed sentence
+  ok   the pyramid is FO4CS-only and comes back with it
+far-ring defaults: ring 2 0.35, ring 3 0.2, error 32
+  ok   the far rings default to fewer triangles the further out they are
+  ok   the ratios grey with the far-ring box
+  ok   far-ring simplification is offered to BOTH targets
+  ok   a source selector offers Specified and Mod Organizer 2
+  ok   Specified shows the Resources list you order yourself
+under Mod Organizer 2: 'not launched from Mod Organizer 2: add NifSkope to its executable list (like FO4Edit), or use Specified'
+the summary then says: 'not launched from Mod Organizer 2: add NifSkope to its executable list (like FO4Edit), or use Specified'
+  ok   Mod Organizer 2 mode hides the Resources list (the order is MO2's)
+  ok   off Mod Organizer 2 it says so and Generate refuses, with that sentence
+  ok   the legacy section starts folded
+  ok   the expander unfolds a section's settings
+with no output folder: 'Choose an output mod folder.'
+  ok   no output folder greys Generate and says so
+with one: 'Will write to Lodgen_Harness_Out (a new folder): refresh the AO plane of FO4CSLOD\Commonwealth\Commonwealth.lodl; Textures\Terrain\Commonwealth\Commonwealth.HeightMap.dds (6144 x 6144, 72 MB); FO4CSLOD\Commonwealth\Commonwealth.VT.*.lodt (5 levels, 12276 tiles, about 5.99 GB); FO4CSLOD\Commonwealth\Commonwealth.lodo and FO4CSLOD\Commonwealth\Commonwealth.lodi; 3060 object chunks, built in a scratch folder and dropped (the manifest sidecars stay under FO4CSLOD\Commonwealth); the object texture arrays and their .lodm.'
+  ok   with one, the panel says what it will write
+as a folder that does not exist: 'Will write to Harness LOD (a new folder): refresh the AO plane of FO4CSLOD\Commonwealth\Commonwealth.lodl; Textures\Terrain\Commonwealth\Commonwealth.HeightMap.dds (6144 x 6144, 72 MB); FO4CSLOD\Commonwealth\Commonwealth.VT.*.lodt (5 levels, 12276 tiles, about 5.99 GB); FO4CSLOD\Commonwealth\Commonwealth.lodo and FO4CSLOD\Commonwealth\Commonwealth.lodi; 3060 object chunks, built in a scratch folder and dropped (the manifest sidecars stay under FO4CSLOD\Commonwealth); the object texture arrays and their .lodm.'
+  ok   a mod folder that does not exist yet is named and called new
+unticked box (LodgenIdentityCheck): ground #303236, strongest contrast inside the box 32 levels
+  ok   an unticked box can be seen (24+ levels against the ground)
+ticked box: 16 white mark pixels, 204 blue field pixels of 225
+  ok   a ticked box is a white mark on Blender's blue
+  ok   the unpacked Game data row is gone
+Fallout 4 resources enabled: yes
+near chunk (-20,24) dim 4: 1280239 bytes from the unpacked folder, 1280239 bytes from the archives
+build time: unpacked folder 265 ms; archives 530 ms (index built on this pass); archives again 241 ms
+  ok   a chunk built from the archives is byte-identical to one built from the unpacked folder
+wheel over AO samples: 8 -> 8 unfocused, 9 focused (focus taken: yes)
+  ok   the wheel over an unfocused number leaves it alone
+  ok   and still steps it once the field has focus
+128 checks, 0 failures
+PASS
+checks run: 128 (floor 121)

@@ -1,0 +1,46 @@
+  own-arm container: Commonwealth.VT.2.lodt 5948032 B, 2026-09-16 16:44:04.432848900 sha1 dff7786718969f38
+FIXTURES: container Commonwealth.VT.2.lodt mtime 1789569844; own-cache tiles older than it: 0
+FIXTURES: flat  4 normal tiles <- RGB (128, 255, 128), 565 word 0x87F0, read back (132, 255, 132); unit normal east +0.0353 north +0.0353 up 0.9988 (2.86 deg from vertical)
+FIXTURES: tilt  4 normal tiles <- RGB (191, 238, 128), 565 word 0xBF70, read back (189, 239, 132); unit normal east +0.4827 north +0.0353 up 0.8751 (28.94 deg from vertical)
+FIXTURES: tiltw 4 normal tiles <- RGB (64, 238, 128), 565 word 0x4770, read back (66, 239, 132); unit normal east -0.4827 north +0.0353 up 0.8751 (28.94 deg from vertical)
+FIXTURES: scram 4 normal tiles <- the own tiles' own BC1 blocks, permuted within each tile, seed 20260919 (same words, same histogram, wrong places)
+FIXTURES: normal-sheet sha1 own=ad7f8084e3fb  flat=b139651a0ccc  tilt=70d9124bb027  tiltw=688b8dca388d  scram=cb6b7492adfd
+FIXTURES: colour-sheet sha1 own=fd2436e7670e  flat=fd2436e7670e  tilt=fd2436e7670e  tiltw=fd2436e7670e  scram=fd2436e7670e
+  fixture builder rc=0
+  fixture normal sheets: own=ad7f8084e3fb  flat=b139651a0ccc  tilt=70d9124bb027  tiltw=688b8dca388d
+  fixture colour sheets: own=fd2436e7670e  flat=fd2436e7670e  tilt=fd2436e7670e  tiltw=fd2436e7670e
+  ok   gate (e): the four arms' normal sheets are pairwise distinct (4 distinct sha1 of 4; 1 of 4 on 2026-09-18, which is the collapse this row exists to catch)
+  ok   gate (e) (control): the four arms' COLOUR sheets are identical (1 distinct sha1 of 4), so the fixture builder moved the normal sheet and nothing else
+  twin sheet: scram normal=cb6b7492adfd colour=fd2436e7670e (own normal=ad7f8084e3fb)
+  ok   gate (f): the twin's normal sheet differs from own's and its COLOUR sheet is own's own, so the shuffle moved the positions and nothing else
+  oblique frames: own=b39e407cc0a7  flat=af3f9436d2d4  tilt=98e420ebe3e0  tiltw=6007e64e8172
+  ok   gate (e): the four OBLIQUE frames are pairwise distinct (4 distinct sha1 of 4; all four were b39e407cc0a7 on 2026-09-18)
+    mean|dY| own   vs flat     3.10 over 311795 px
+    mean|dY| own   vs tilt     6.62 over 311795 px
+    mean|dY| own   vs tiltw    6.27 over 311795 px
+    mean|dY| flat  vs tilt     7.75 over 311795 px
+    mean|dY| flat  vs tiltw    4.91 over 311795 px
+    mean|dY| tilt  vs tiltw   12.66 over 311795 px
+  ok   gate (e): the weakest oblique pair (own vs flat) still differs by mean|dY| 3.10 luma levels, floor 2.00 pre-registered (0.00 on 2026-09-18)
+  ok   gate (d) (floor): at the TOP view flat (N.L 0.9988) and an east tilt (0.8751) are NOT the same picture (mean|dY| 1.00), so the row below that asks east == west at the top is a row that can fail
+  ok   gate (a): legacy_bto_top is byte-identical to its baseline
+  ok   gate (a): legacy_bto_obl is byte-identical to its baseline
+  ok   gate (a): legacy_btr_top is byte-identical to its baseline
+  ok   gate (a): legacy_btr_obl is byte-identical to its baseline
+  ok   gate (c): native oblique terrain dark<40 is 0.00%, bar 3.00% (measured 0.58 here, 20.01 on the rung)
+  ok   gate (c): FLAT-tile oblique terrain dark<40 is 0.00%, bar 1.00% (measured 0.00 here, 20.07 on the rung)
+  ok   gate (b): own-minus-flat blockSD is 2.28 over 266 blocks, floor 0.50 (2.28 on 2026-09-19; 0.00 when the sheet is not read at all).  The old floor of 3.50 was pinned on 2026-09-16 11:54:47 against a .lodt container that was re-baked at 16:44:04 the same day and no longer exists; a bar that only one generation of an untracked artefact can clear is not a bar
+  ok   gate (f): the container's own normals make 2.29x as much block-scale shading as the SAME normals shuffled into the wrong places (own 2.28 vs twin 1.00 over 266 blocks), bar 1.60 pre-registered.  Measured 2026-09-19: 2.28 against 1.00 / 1.07 / 1.04 on three shuffle seeds, i.e. 2.13x at the worst seed; 1.54x for a sheet whose UP and NORTH channels are swapped
+  ok   gate (b): flat tiles at the oblique have blockSD 15.75, no more than the 17.66 the SAME tiles give at the top view where N.L is provably equal at every texel (measured 15.04 vs 17.57 here; 31.91 vs 6.14 on the rung)
+  the light: headlight (0,0,1) in VIEW space; the oblique view rotation (-63.5593, 0, 133.3081) through Matrix::fromEuler puts it along (-0.6516, +0.6142, +0.4453) in world axes
+  so N.L is  west 0.7258  >  flat 0.4434  >  east 0.0968  at the oblique, and east == west (0.8751) at the top
+  ok   gate (d): at the TOP view an east tilt and a west tilt have the same N.L, so the two frames are the same picture (max|dY| 0.00; the rung gave max 81.18, mean 47.06)
+  ok   gate (d): at the oblique, luma orders west > flat > east on 100.00% of 311795 covered pixels, bar 99.00% (measured 100.00 here, 46.23 on the rung -- chance)
+  the top view: light straight down, so N.L is the normal's UP; the two known arms give 8.10 luma per unit up (flat 109.319 at up 0.9988, tilt 108.316 at up 0.8751)
+  ok   gate (g): the container's own normals (mean up 0.9185 over the content texels of 4 sheet tiles) predict a top-view mean luma of 108.667 and the frame reads 108.762 -- 0.094 apart, bar 3.00 (0.09 on 2026-09-19; 23.99 for the same sheet with UP and NORTH swapped)
+  ok   census: all 4 .lodl terrain shapes carry Shader Flags 1 bit 12 and are lit by fo4_default.prog
+  ok   census: all 2 .BTO object shapes are msn=0, so the model-space branch is switched off for them
+  ok   census: the legacy .BTR 'Land' shape is msn=1, Shader Type 18, and is lit by sk_msn.prog -- NOT by the FO4 program this lane changed, which is why its pictures do not move
+21 checks, 0 failures, 0 skips
+PASS
+done

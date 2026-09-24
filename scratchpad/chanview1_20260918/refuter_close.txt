@@ -1,0 +1,17 @@
+channel        px differ      note mean    reader mean  verdict
+identity         1109710       1224.894       1224.894  ok
+identityraw      1109585        124.282        124.282  ok
+sky              1081487        129.305        129.305  ok
+ground           1109361         61.299         61.299  ok
+seed             1109710          7.419          7.419  ok
+sway             1109710          8.889          8.889  ok
+selfao            251518        234.764        234.764  ok
+ao               1015816        175.800        175.850  ok
+mask-r            380174        180.413        180.413  ok (1 texel channel(s))
+mask-g            380174          0.000          0.000  ok (1 texel channel(s))
+mask-b            380084        159.214        159.214  ok (1 texel channel(s))
+mask-a                 0              -              -  ABSENT ok
+emissive               0              -              -  ABSENT ok
+normal            397352        130.597        130.597  ok (3 texel channel(s))
+unknown         bytes ==   identical to default.png
+ao_way_back     bytes ==   identical to ao.png

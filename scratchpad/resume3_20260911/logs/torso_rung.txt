@@ -1,0 +1,3 @@
+TORSO rung  torso 275 279 264 278 280 275 281  median 278 ms
+TORSO rung  cube  263 263 266 263 265 249 267  median 263 ms
+TORSO rung  PARSE = 15 ms   (median torso - median cube, 7 reps each, alternating)

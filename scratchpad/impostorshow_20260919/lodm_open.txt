@@ -1,0 +1,20 @@
+[Warning] QObject::connect(QListModel, QWidget): signal not found
+[Warning] QObject::connect(QListModel, QWidget): signal not found
+[Warning] QObject::connect(QListModel, QWidget): signal not found
+[Warning] QObject::connect(QListModel, QWidget): signal not found
+[Info] impostor card document: E:/Projects/NifskopeWildWastelandEdition/scratchpad/impostorshow_20260919/fixture/blast_n4/cards/000531b3_oct.lodm
+lodm: E:/Projects/NifskopeWildWastelandEdition/scratchpad/impostorshow_20260919/fixture/blast_n4/cards/000531b3_oct.lodm
+family: legacy (mask = GSAOS)
+kind: card
+grid: 4x4 = 16 frames
+frame: 48x128 px, mips 2, auxDiv 1
+half: 135.314 x 360.837, center -70.6223 -38.6729 342.457
+depthSpan: 3072 (height 0.5 = the card plane; units = (h-0.5)*depthSpan)
+emissiveScale: 0
+coverage: floor 16 test 128 base 160 -- the sheet's alpha is ENCODED; the fraction is floor + (a-base)*(255-floor)/(255-base)
+convention: spec1 -- frame (i,j) is the view from direction (i,j)
+colour: E:\Projects\NifskopeWildWastelandEdition\scratchpad\impostorshow_20260919\fixture\blast_n4\cards\000531b3_oct_d.DDS (loose, beside the .lodm)
+normal: E:\Projects\NifskopeWildWastelandEdition\scratchpad\impostorshow_20260919\fixture\blast_n4\cards\000531b3_oct_n.DDS (loose, beside the .lodm)
+gsaos: E:\Projects\NifskopeWildWastelandEdition\scratchpad\impostorshow_20260919\fixture\blast_n4\cards\000531b3_oct_gsaos.DDS (loose, beside the .lodm)
+emissive: E:\Projects\NifskopeWildWastelandEdition\scratchpad\impostorshow_20260919\fixture\blast_n4\cards\000531b3_oct_g.DDS (loose, beside the .lodm)
+[Info] impostor chunk: drew 1 cards of 1 placed

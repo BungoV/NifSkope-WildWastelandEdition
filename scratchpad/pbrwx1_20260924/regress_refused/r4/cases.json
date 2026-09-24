@@ -1,0 +1,337 @@
+{
+ "cases": {
+  "p_orient0": {
+   "base_tex": "WWPbrTest04/Orient.dds",
+   "mesh": "plane",
+   "nif": "Meshes/WWPbrTest04/p_orient0.nif",
+   "material": "Materials\\WWPbrTest04\\p_orient0.BGSM"
+  },
+  "p_notint0": {
+   "mesh": "plane",
+   "nif": "Meshes/WWPbrTest04/p_notint0.nif",
+   "material": "Materials\\WWPbrTest04\\p_notint0.BGSM"
+  },
+  "p_tintnrm": {
+   "tint": "Normalize",
+   "mesh": "plane",
+   "nif": "Meshes/WWPbrTest04/p_tintnrm.nif",
+   "material": "Materials\\WWPbrTest04\\p_tintnrm.BGSM"
+  },
+  "p_tintadd": {
+   "tint": "Add",
+   "mesh": "plane",
+   "nif": "Meshes/WWPbrTest04/p_tintadd.nif",
+   "material": "Materials\\WWPbrTest04\\p_tintadd.BGSM"
+  },
+  "p_tintpri": {
+   "tint": "Priority RGBA",
+   "mesh": "plane",
+   "nif": "Meshes/WWPbrTest04/p_tintpri.nif",
+   "material": "Materials\\WWPbrTest04\\p_tintpri.BGSM"
+  },
+  "p_emit100": {
+   "base": "#000000",
+   "emis": [
+    "",
+    {
+     "color": "#FFFFFF",
+     "luminance": 100.0
+    }
+   ],
+   "mesh": "plane",
+   "nif": "Meshes/WWPbrTest04/p_emit100.nif",
+   "material": "Materials\\WWPbrTest04\\p_emit100.BGSM"
+  },
+  "p_emit050": {
+   "base": "#000000",
+   "emis": [
+    "",
+    {
+     "color": "#FFFFFF",
+     "luminance": 50.0
+    }
+   ],
+   "mesh": "plane",
+   "nif": "Meshes/WWPbrTest04/p_emit050.nif",
+   "material": "Materials\\WWPbrTest04\\p_emit050.BGSM"
+  },
+  "p_emittex": {
+   "base": "#000000",
+   "emis": [
+    "WWPbrTest04/EmitGreen.dds",
+    {
+     "color": "#FF0000",
+     "luminance": 100.0
+    }
+   ],
+   "mesh": "plane",
+   "nif": "Meshes/WWPbrTest04/p_emittex.nif",
+   "material": "Materials\\WWPbrTest04\\p_emittex.BGSM"
+  },
+  "p_emittov": {
+   "base": "#000000",
+   "emis": [
+    "WWPbrTest04/EmitGreen.dds",
+    {
+     "color": "#FF0000",
+     "luminance": 100.0,
+     "overrideColor": true,
+     "overrideMask": true
+    }
+   ],
+   "mesh": "plane",
+   "nif": "Meshes/WWPbrTest04/p_emittov.nif",
+   "material": "Materials\\WWPbrTest04\\p_emittov.BGSM"
+  },
+  "p_emitmsk": {
+   "base": "#000000",
+   "emis": [
+    "WWPbrTest04/EmitGreenHalf.dds",
+    {
+     "color": "#FF0000",
+     "luminance": 100.0
+    }
+   ],
+   "mesh": "plane",
+   "nif": "Meshes/WWPbrTest04/p_emitmsk.nif",
+   "material": "Materials\\WWPbrTest04\\p_emitmsk.BGSM"
+  },
+  "p_cmpopaq": {
+   "base": "#FF8040",
+   "opacity": 0.3,
+   "comp": {
+    "mode": "Opaque"
+   },
+   "mesh": "plane",
+   "nif": "Meshes/WWPbrTest04/p_cmpopaq.nif",
+   "material": "Materials\\WWPbrTest04\\p_cmpopaq.BGSM"
+  },
+  "p_cmptslo": {
+   "base": "#FF8040",
+   "opacity": 0.3,
+   "comp": {
+    "mode": "Alpha Test",
+    "threshold": 0.5
+   },
+   "mesh": "plane",
+   "nif": "Meshes/WWPbrTest04/p_cmptslo.nif",
+   "material": "Materials\\WWPbrTest04\\p_cmptslo.BGSM"
+  },
+  "p_cmptshi": {
+   "base": "#FF8040",
+   "opacity": 0.7,
+   "comp": {
+    "mode": "Alpha Test",
+    "threshold": 0.5
+   },
+   "mesh": "plane",
+   "nif": "Meshes/WWPbrTest04/p_cmptshi.nif",
+   "material": "Materials\\WWPbrTest04\\p_cmptshi.BGSM"
+  },
+  "p_cmpblnd": {
+   "base": "#FF8040",
+   "opacity": 0.3,
+   "comp": {
+    "mode": "Alpha Blend"
+   },
+   "mesh": "plane",
+   "nif": "Meshes/WWPbrTest04/p_cmpblnd.nif",
+   "material": "Materials\\WWPbrTest04\\p_cmpblnd.BGSM"
+  },
+  "p_cmpprem": {
+   "base": "#FF8040",
+   "opacity": 0.3,
+   "comp": {
+    "mode": "Premultiplied"
+   },
+   "mesh": "plane",
+   "nif": "Meshes/WWPbrTest04/p_cmpprem.nif",
+   "material": "Materials\\WWPbrTest04\\p_cmpprem.BGSM"
+  },
+  "p_cmpaddv": {
+   "base": "#FF8040",
+   "opacity": 0.3,
+   "comp": {
+    "mode": "Additive"
+   },
+   "mesh": "plane",
+   "nif": "Meshes/WWPbrTest04/p_cmpaddv.nif",
+   "material": "Materials\\WWPbrTest04\\p_cmpaddv.BGSM"
+  },
+  "p_cmpmult": {
+   "base": "#FF8040",
+   "opacity": 0.3,
+   "comp": {
+    "mode": "Multiply"
+   },
+   "mesh": "plane",
+   "nif": "Meshes/WWPbrTest04/p_cmpmult.nif",
+   "material": "Materials\\WWPbrTest04\\p_cmpmult.BGSM"
+  },
+  "s_w050aaa": {
+   "weight": 0.5,
+   "rough": 0.3,
+   "mesh": "sphere",
+   "nif": "Meshes/WWPbrTest04/s_w050aaa.nif",
+   "material": "Materials\\WWPbrTest04\\s_w050aaa.BGSM"
+  },
+  "s_w100aaa": {
+   "weight": 1.0,
+   "rough": 0.3,
+   "mesh": "sphere",
+   "nif": "Meshes/WWPbrTest04/s_w100aaa.nif",
+   "material": "Materials\\WWPbrTest04\\s_w100aaa.BGSM"
+  },
+  "d_r000aaa": {
+   "base": "#404040",
+   "rough": 0.0,
+   "mesh": "sphere",
+   "nif": "Meshes/WWPbrTest04/d_r000aaa.nif",
+   "material": "Materials\\WWPbrTest04\\d_r000aaa.BGSM"
+  },
+  "d_r025aaa": {
+   "base": "#404040",
+   "rough": 0.25,
+   "mesh": "sphere",
+   "nif": "Meshes/WWPbrTest04/d_r025aaa.nif",
+   "material": "Materials\\WWPbrTest04\\d_r025aaa.BGSM"
+  },
+  "d_r100aaa": {
+   "base": "#404040",
+   "rough": 1.0,
+   "mesh": "sphere",
+   "nif": "Meshes/WWPbrTest04/d_r100aaa.nif",
+   "material": "Materials\\WWPbrTest04\\d_r100aaa.BGSM"
+  }
+ },
+ "tint_regions": {
+  "r": [
+   [
+    0.0,
+    0.25
+   ],
+   [
+    0.0,
+    0.5
+   ],
+   [
+    255,
+    0,
+    0,
+    0
+   ]
+  ],
+  "over": [
+   [
+    0.25,
+    0.5
+   ],
+   [
+    0.0,
+    0.5
+   ],
+   [
+    204,
+    153,
+    102,
+    0
+   ]
+  ],
+  "g": [
+   [
+    0.5,
+    1.0
+   ],
+   [
+    0.0,
+    0.5
+   ],
+   [
+    0,
+    200,
+    0,
+    0
+   ]
+  ],
+  "b": [
+   [
+    0.0,
+    0.5
+   ],
+   [
+    0.5,
+    1.0
+   ],
+   [
+    0,
+    0,
+    255,
+    0
+   ]
+  ],
+  "a": [
+   [
+    0.5,
+    1.0
+   ],
+   [
+    0.5,
+    1.0
+   ],
+   [
+    0,
+    0,
+    0,
+    128
+   ]
+  ]
+ },
+ "tint_colours": {
+  "colorR": "#FF4020",
+  "colorG": "#20C040",
+  "colorB": "#4080FF",
+  "colorA": "#FFFF00"
+ },
+ "orient": {
+  "red": [
+   [
+    0.0,
+    0.5
+   ],
+   [
+    0.0,
+    0.5
+   ]
+  ],
+  "green": [
+   [
+    0.5,
+    1.0
+   ],
+   [
+    0.0,
+    0.5
+   ]
+  ],
+  "blue": [
+   [
+    0.0,
+    0.5
+   ],
+   [
+    0.5,
+    1.0
+   ]
+  ],
+  "white": [
+   [
+    0.5,
+    1.0
+   ],
+   [
+    0.5,
+    1.0
+   ]
+  ]
+ }
+}

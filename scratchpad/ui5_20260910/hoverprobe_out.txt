@@ -1,0 +1,20 @@
+qApp style ""
+calibration: item content 16 px (no event loop), row 35 -> padding-top 9 / bottom 10
+=== BEFORE lane UI5 -- min-height 26, padding 2/2 (item 20 px at the top)
+  sheet on the menu bar: QToolBar { border: 0px; padding: 0px; margin: 0px; }QMenuBar::item { min-height: 26px; padding-top: 2px; padding-bottom: 2px; }QToolButton { min-height: 26px; padding-top: 2px; padding-bottom: 2px; }QToolButton::menu-indicator { subcontrol-position: right center; subcontrol-origin: padding; }
+  grab 1512x35 dpr 1 -> scratchpad/ui5_20260910/images/hover_bar_before.png
+  hovered "Spells" by synthetic QMouseEvent(MouseMove); activeAction = Spells
+  menu bar 1512x35, item rect x 95 y 0 w 48 h 20
+  HOVER BOX (measured from the grab): y 0..19 -> 20 px tall, in a row of 35
+  floor: a colour the bar cannot carry -> none (must be none)
+  floor: the unhovered File title -> none (must be none)
+  CROP-HINT titles x 6..255
+=== AFTER lane UI5 -- + wwBarRowMenuItemQss (item = the whole 35 px row)
+  sheet on the menu bar: QToolBar { border: 0px; padding: 0px; margin: 0px; }QMenuBar::item { min-height: 26px; padding-top: 2px; padding-bottom: 2px; }QToolButton { min-height: 26px; padding-top: 2px; padding-bottom: 2px; }QToolButton::menu-indicator { subcontrol-position: right center; subcontrol-origin: padding; }QMenuBar::item { padding-top: 9px; padding-bottom: 10px; }
+  grab 1512x35 dpr 1 -> scratchpad/ui5_20260910/images/hover_bar_after.png
+  hovered "Spells" by synthetic QMouseEvent(MouseMove); activeAction = Spells
+  menu bar 1512x35, item rect x 95 y 0 w 48 h 35
+  HOVER BOX (measured from the grab): y 0..34 -> 35 px tall, in a row of 35
+  floor: a colour the bar cannot carry -> none (must be none)
+  floor: the unhovered File title -> none (must be none)
+  CROP-HINT titles x 6..255

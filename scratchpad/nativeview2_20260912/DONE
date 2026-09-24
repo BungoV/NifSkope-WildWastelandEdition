@@ -1,0 +1,10 @@
+lighting: the native LOD terrain is lit from its model-space normal sheet.
+
+Lane NATIVEVIEW2, finished 2026-09-16 12:25.
+exe  release/NifSkope.exe  22,288,896 B  2026-09-16 11:54:47  (rung 22,280,192 B)
+gates  native_lighting.sh 14/0 PASS | render_shot.sh 82/0 PASS | lodl_open.sh 23/0 PASS
+       native_open.sh 14 checks / 1 failure / 2 skipped -- count kept, the failure
+       is pre-existing (identical IoU 0.8179 on the rung exe) and is not this lane's
+dark fraction, native terrain oblique, luma < 40:  20.01% -> 0.58%
+report  scratchpad/nativeview2_20260912/lane_nativeview2_report.md
+NOT COMMITTED.  No mutex was created and none was left behind.

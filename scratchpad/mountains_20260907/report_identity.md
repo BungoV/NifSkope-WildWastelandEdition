@@ -260,14 +260,14 @@ descriptor byte-identical to vanilla's. Until a consumer exists, default
 
 ### SETTLED — YES. Fallout 4 honours `SLSF2_Vertex_Colors`, and it honours it on the LOD-object path.
 
-Measured in the leaked 1.10.155 binary
-(`E:\Projects\Fo4CommunityShaders\Fo4PDB\Fallout4.exe` + `.pdb`) through
-`tools/exere/f4pdb.py` and a from-scratch PE string reader (`pestr.py` in this
+Measured in Todd's treat (1.10.155)
+through the Todd's treat tooling (kept outside this repo)
+and a from-scratch PE string reader (`pestr.py` in this
 lane's temp dir). Two independent halves, both quoted below.
 
 #### 3.1 The technique-ID bit layout, from `BSLightingShader::GetTechniqueName`
 
-`f4pdb.py disasm --name BSLightingShader::GetTechniqueName` (RVA **0x0289e6e0**).
+Disassembly of `BSLightingShader::GetTechniqueName` (RVA **0x0289e6e0**).
 The function `BSsprintf`s a base string and then `strcat_s`es one literal per set
 bit of the technique ID's low byte, then switches on `(id >> 8) & 0x3F`. Reading
 each `lea r8, [rip+disp]` target out of the PE with `pestr.py`:
@@ -296,7 +296,7 @@ compiled shaders.
 
 #### 3.2 The flag that sets it, from `BSLightingShaderProperty::GetRenderPasses_Forward`
 
-`f4pdb.py disasm --name BSLightingShaderProperty::GetRenderPasses_Forward`
+Disassembly of `BSLightingShaderProperty::GetRenderPasses_Forward`
 (RVA **0x0027ce4d0**). `rbp` holds the property's flags as one 64-bit word,
 `flags1 | (flags2 << 32)` — proved by two independent landmarks in the same
 function, not assumed:

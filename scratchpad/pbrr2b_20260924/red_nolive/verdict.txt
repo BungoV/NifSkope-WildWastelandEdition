@@ -1,0 +1,8 @@
+GATE live: FAIL  14 checks, 8 failures
+  FAIL (live) the Mode row reached the state (Lookdev)
+  FAIL (live) the Hour row reached the state (12)
+  FAIL (live) Hour 12 -> 0 changes the viewport (0 px >= 500)
+  FAIL (live) Hour 12 -> 0 changes the Status line
+  FAIL (live) the Ground row reached the state (off)
+  FAIL (live) Ground off changes the viewport (0 px >= 500)
+RED CONTROL nolive -> gate live BITES

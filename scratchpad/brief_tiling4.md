@@ -1,0 +1,42 @@
+# Lane TILING4 -- the repeat fix, made shippable: no visible warp signature, 7 of 7 sheets, grain inside vanilla's law, then the default
+
+## Header
+- Tree: `E:\Projects\NifskopeWildWastelandEdition`, branch `main`. Nothing is committed. Exe at launch: `release/NifSkope.exe` 2026-09-11 23:26:29, 21,484,032 B (TILING3's DONE exe; chain baseline = TILING2's: lodl_open 23/0, terrain 26/0, terrain_vt 41/1, roads 11/0, ground_cover 29/5, pbrm 14/0, native 18/0, panel_run 125/0, lod_generation 116/0, ui_align 11/0, water_ui 82/0). Rung ONCE: `release/NifSkope.before_tiling4.exe`. Markers `scratchpad/tiling4_20260912/BUILDING` / `DONE`. Every timestamp from `date +%H:%M` in the same step. One NifSkope instance ever; game check before the link; bungo's window renamed aside. Region bakes only, own out-dir. Never his installed files.
+- Read first: `CONSTITUTION.md`; `HANDOFF.md` top block -- CLOCK CORRECTION, the RULING 00:0x paragraph (this lane's words), the TILING3 block and `scratchpad/lane_tiling3_report.md` IN FULL (section 3: the warp, `a4_warp.py` / `a5_tune.py` / `a6_pick.py`, the strain table -- A=683 L=1024 o1 = strain 0.718, 6 of 7, the red chunk (-36,-20) repeat 0.095 ratio 0.698 against ceiling 0.448; `a5_tune.py`'s own note that strain over 0.5 is a visible wobble; the mip bias -1.00 = grain +2 %; the pick turning on one sheet), its `images/cmp_tiling3.png` (bungo judged the PROPOSAL panel: "looks pretty good, but maybe it could use some improvement" -- the swirls are the warp), the TILING2 block and its instruments (`t1_lib.py`, `t3_laws.py`; the periodicity law, ceilings 0.264 absolute / 0.448 ratio; the band table; the vanilla-vs-vanilla ceiling 0.670); `docs/LODGEN_TERRAIN_VT.md` (the colour law as TILING3 left it); `src/lodgen.cpp` `sampleLtex`, the warp, the `--land-sample` switch; `MISTAKES.md` root from 2026-09-11 (TILING3's four entries: a per-sheet gate needs a per-sheet floor; a log line claimed a fallback the code lacked).
+- Skills: `ww-control-calibration`, `ww-explained-variance-ceiling`, `nifskope-ww-vanilla-compare`, `ww-sheet-diff`, `ww-texel-picture`, `ww-spec-gate-audit`, `nifskope-ww-lodgen`, `ww-anchored-hookup`, `nifskope-ww-build-verify`, `ww-contract-provenance`, `ww-module-off-is-identical`.
+
+## bungo's words (verbatim, 2026-09-12 00:0x, over cmp_tiling3.png's PROPOSAL panel "--land-sample stochastic")
+"the proposal looks pretty good, but maybe it could use some improvement"
+
+## The ruling this lane serves
+The stochastic sample is the direction. It is not shippable yet: the warp reads as swirls (strain 0.718, over the lane's own 0.5 wobble line), one sheet of seven fails the repeat ceiling, and the pick moves when one sheet is dropped. Fix those three, then it becomes the default for painted ground.
+
+## What is known going in
+- A single smooth domain warp removes the repeat only by straining the texture enough to be seen. The strain IS the swirl. Lower strain gates fewer sheets (the table). So the answer is probably not "a better warp constant" but a sample whose phase is broken WITHOUT continuous strain.
+- Candidates to test, all deterministic in world position (seamless across chunks and cells, 1 vs 16 threads byte-identical), all at the footprint mip with the -1.00 bias unless the fit says otherwise:
+  - **H1 histogram-preserving hex tiling** (Heitz & Neyret 2018, "High-Performance By-Example Noise using a Histogram-Preserving Blending Operator"): the texture is sampled at three random per-hex-tile offsets and blended with weights that preserve variance (Gaussianise, blend, un-Gaussianise, or the cheaper variance-normalised blend). No strain anywhere; the repeat is gone by construction; the grain is the texture's own. Tile size = of the order of one repeat (341.3333 u) to a few.
+  - **H2 per-cell rotation + offset** (Wang-tile style): each 128-u or 341-u cell samples the texture rotated by a random multiple of 90 degrees (or any angle) and offset, with a blended border of a few texels. Cheap; the border blend is where it can fail (a soft grid).
+  - **H3 the warp with strain capped at 0.5** plus H1 or H2 for what the capped warp leaves -- only if H1/H2 alone do not gate 7 of 7.
+- Instruments already exist: TILING2's periodicity (repeat amplitude at 10.667 texels, the ratio law), the band table and local variance, the spectrum distance; TILING3's `a6_pick.py` selection. ADD ONE: a **warp-signature instrument** -- the structure-tensor orientation coherence of the colour residual at 8-32 texel scales (swirls = coherent curved orientation fields), calibrated on vanilla's 22 sheets (the ceiling) and on TILING3's proposal (must read the swirl) and the rung (must read the repeat's grid, which is also coherent -- the instrument must separate the two: the repeat has a fixed lattice period, the swirl does not).
+- The pick must not turn on one sheet: select on 7, then VALIDATE on a disjoint 7 of TILING2's 22 (frozen before the pick), and report both.
+
+## The work
+1. Known-answer controls for the new instrument first (vanilla ceiling, proposal reads the swirl, rung reads the grid, a synthetic swirl of known amplitude reads its amplitude).
+2. Prototype H1 and H2 offline on the seven selection sheets (reuse TILING3's scripts and TILING2's instruments; do not rewrite them); the table: repeat / ratio / grain vs vanilla / band table / swirl reading, per sheet, floors and ceilings beside. Then the disjoint validation seven.
+3. Transcribe the winner into `sampleLtex` behind `--land-sample stochastic` (the SAME switch value, replacing the warp as its meaning; keep the warp reachable as `--land-sample warp` for the record, `--land-warp*` untouched), parity-check C++ vs prototype at fifteen positions x five settings as TILING3 did.
+4. Gates for the DEFAULT: repeat inside vanilla's law on 7 of 7 selection sheets AND 7 of 7 validation sheets; grain within 20 % of vanilla's on every sheet; the swirl reading inside vanilla's ceiling on every sheet; band table within 20 %; `none`/`footprint` == rung bytes; the vanilla-copied `_msn` and layerless colour untouched (cmp == vanilla) at every setting; `.lodl`, `_data`, BTR/BTO untouched; 1 vs 16 threads byte-identical. If every gate passes, `stochastic` becomes the default for painted ground and `BAKE_INSTRUCTION.md` says so; if not, the default stays and the report says which sheet and by how much.
+5. Build (one build + counted relinks), the chain at TILING3's baselines; `lodgen_ground_cover.sh` stays 29/5 line for line (it pins the switch off).
+6. Pictures: `cmp_tiling4.png` = vanilla | TILING3's proposal | this lane's winner, same crop (224,96) x4 as cmp_tiling3.png, numbers burned in; plus a whole-sheet triptych at 1:1 so the swirls (or their absence) can be seen at the scale bungo sees them.
+7. Documents: `scratchpad/tiling4_20260912/WW_CHANGES_ENTRY.md` (must begin with a `## 2026-09-12 — <title>` heading line, em dash), `HANDOFF_BLOCK.md`, `MISTAKES_ENTRIES.md` (entries start with `## `); report `scratchpad/lane_tiling4_report.md`; `docs/LODGEN_TERRAIN_VT.md` amendment with provenance; `scratchpad/lodui1_20260911/BAKE_INSTRUCTION.md` if the default changed.
+
+## Gates
+- F1 the swirl instrument calibrated with known answers before any candidate is scored; the selection/validation split frozen before the pick.
+- F2 switches off == rung bytes; copied vanilla sheets == vanilla at every setting; `.lodl`/`_data`/BTR/BTO untouched; 1 vs 16 threads byte-identical; C++ == prototype at fifteen positions.
+- F3 7 of 7 AND 7 of 7 on repeat, grain, swirl, band table -- all on the same bake. A green on one by losing another is a red.
+- F4 chain at baseline; exe newer than every changed file; drivers rebuilt; rung == launch bytes; no NifSkope left running.
+
+## Rules
+- One build (+ counted relinks). No tone changes (GRADE1's, next), no tiling-constant change, no road changes, no change to TILING3's vanilla-copy path or the crevice term. Never his installed files. Never `git stash`, never commit. Plain language. Every number with its floor beside it.
+
+## Report
+`scratchpad/lane_tiling4_report.md`, incremental (PENDING.md first past half context): `## 0. Pre-registered gates and the frozen split`, `## 1. The swirl instrument and its controls`, `## 2. H1 / H2 / H3 on selection and validation`, `## 3. The change and its parity`, `## 4. Build and gates`, `## 5. Pictures`, `## 6. Owed / red / bungo's calls`, `## 7. Mistakes`, `## 8. Finished-work skill review`.

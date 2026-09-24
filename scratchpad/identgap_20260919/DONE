@@ -1,0 +1,33 @@
+identgap 2026-09-19 07:1x CEDT -- lane complete.
+
+VERDICT: the identity-gated distance IS better than pure identity, on every camera, both
+identity tables and every lookup. 16 u texel 3x3 PCF, identity table A, object pixels:
+false-LIT 6.84% -> 5.34% (hwydeck), 7.29% -> 3.48% (east), 4.65% -> 4.02% (street), for
+false-DARK +0.09 / +0.15 / +0.00 points. In the exact per-pixel cast, 1.41% -> 0.12%,
+5.07% -> 0.45%, 2.64% -> 1.25% -- 91%, 91%, 53% of the lost self-shadow returned.
+
+The gate makes the ruled proximity join FREE: pure identity on table B loses 12.89% of
+hwydeck's object pixels to false-LIT (97.2% of the chunk's self-shadow); under the gate
+table B and table A give the same answer, 5.35% vs 5.34%.
+
+RECOMMENDED D = texel / sin(sun elevation), floor 64 u (about 92 u for today's 16 u far
+cascade at a 10-degree sun). Fixed D = 64 u is a good fallback and won the pre-stated rule
+on all three cameras. Never 512 u or more -- that collapses back into pure identity.
+
+SHADER COST: one subtract, one compare, one AND, on the depth and the GROUP id the far tap
+already fetched. No new texture, no second tap, no .lodi change.
+
+HONEST CAVEAT (fair.py, wallart.py, dsweep.py): at a 16 u cascade a properly tuned
+slope + normal-offset bias matches the gate (object total 5.58 vs 5.59, 4.17 vs 4.19,
+8.15 vs 8.19) and beats pure identity outright; object false-DARK is flat from D = 8 u to
+D = 256 u. The mid-wall patch is a shadow-map resolution artefact, not a geometric one.
+
+G3 back-face casting is UNAVAILABLE to this content: 26,999 of 29,587 LOD triangles (91.3%)
+belong to open shells, 1,282 placements are two-triangle cards.
+
+SSS (director's addendum): recovers 9-27% of the false-LIT and invents 0.55-2.30 points of
+new false-dark -- net +0.10 / -1.61 / +0.38 points across the three cameras. NOT a
+replacement for the gate; it composes with it (hwydeck 6.84% -> 5.34% -> 4.10%).
+
+report.md, run.log, dsweep.log, fair.log, wallart.log, pics.log, images/ -- all in this
+folder. Nothing was committed, stashed, built or edited outside this folder.

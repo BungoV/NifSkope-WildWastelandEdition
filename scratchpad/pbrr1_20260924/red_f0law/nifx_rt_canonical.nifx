@@ -1,0 +1,24 @@
+{
+    "aaa_later": null,
+    "material": {
+        "ACDuctConnector01:0": {
+            "note": "odd order",
+            "pbrm": "Materials\\WWPbrTest01\\NifxTarget.pbrm"
+        },
+        "OtherNode": {
+            "pbrm": "materials/x/y.pbrm"
+        }
+    },
+    "version": 1,
+    "zUnknownTool": {
+        "keep": [
+            1,
+            2.5,
+            "x"
+        ],
+        "nested": {
+            "a": 2,
+            "b": 1
+        }
+    }
+}

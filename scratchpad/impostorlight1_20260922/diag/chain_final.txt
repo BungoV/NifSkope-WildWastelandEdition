@@ -1,0 +1,12 @@
+stage 6 written (card normal variant mv): CR mesh 0 card 0
+  stage 6 blast_n4  rc=0 mesh=16 card=16 orbit iou mean 0.8939
+  stage 6 blast_n8  rc=0 mesh=64 card=64 orbit iou mean 0.8848
+  stage 6 maple_n4  rc=0 mesh=16 card=16 orbit iou mean 0.4860
+  stage 6 dead_n4   rc=0 mesh=16 card=16 orbit iou mean 0.7692
+  stage 6 rock_n4   rc=0 mesh=16 card=16 orbit iou mean 0.9531
+stage 1 written (card normal variant lit): CR mesh 0 card 0
+  stage 1 blast_n4  rc=0 mesh=16 card=16 orbit iou mean 0.9010
+  stage 1 blast_n8  rc=0 mesh=64 card=64 orbit iou mean 0.8925
+  stage 1 maple_n4  rc=0 mesh=16 card=16 orbit iou mean 0.4894
+  stage 1 dead_n4   rc=0 mesh=16 card=16 orbit iou mean 0.7768
+  stage 1 rock_n4   rc=0 mesh=16 card=16 orbit iou mean 0.9741

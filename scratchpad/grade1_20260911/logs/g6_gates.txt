@@ -1,0 +1,20 @@
+--- S2/S3 the binary against the prediction
+tile       k          before predicted    binary       gap
+(-20,24)   0.8916     20.127    17.524    17.555    +0.031
+ok   S2 binary matches prediction (-20,24) k=0.8916 gap +0.031 levels (tolerance 1.0)
+ok   S3 own-optimum k reduces the error (-20,24)  20.127 -> 17.555 (-12.8%)
+(-20,20)   1.1180     21.897    20.410    20.544    +0.134
+ok   S2 binary matches prediction (-20,20) k=1.1180 gap +0.134 levels (tolerance 1.0)
+ok   S3 own-optimum k reduces the error (-20,20)  21.897 -> 20.544 (-6.2%)
+(-20,24)   0.8403     20.127    18.000    18.108    +0.108
+ok   S2 binary matches prediction (-20,24) k=0.8403 gap +0.108 levels (tolerance 1.0)
+(-20,20)   0.8403     21.897    28.316    28.488    +0.173
+ok   S2 binary matches prediction (-20,20) k=0.8403 gap +0.173 levels (tolerance 1.0)
+
+--- S4 the refusal, checked against the binary
+ok   S4 one k cannot reduce both (pooled k=0.8403) (-20,24) 20.127->18.108, (-20,20) 21.897->28.488
+
+--- S5 the flag is new
+ok   S5 rung exe refuses --grade                  error: unknown option --grade
+
+GATES: 8 checks, 0 failures -> PASS

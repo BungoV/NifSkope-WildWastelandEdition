@@ -1,0 +1,11 @@
+BAKE p_plain r:-20,20,-17,23 rc=0  7s  texfiles=3  args=[--road-detail 1]
+BAKE p_drag r:-20,20,-17,23 rc=0  7s  texfiles=3  args=[--road-detail 1 --land-guide drag:341]
+BAKE p_asp r:-20,20,-17,23 rc=0  7s  texfiles=3  args=[--road-detail 1 --land-sample stochastic --land-hex 256 --land-mip-bias -0.22 --land-guide aspecthex:1.0 --land-guide-scale 256]
+BAKE p_warp r:-20,20,-17,23 rc=0  7s  texfiles=3  args=[--road-detail 1 --land-sample stochastic --land-hex 256 --land-mip-bias -0.22 --land-guide flatwarp:1.0 --land-warp 341]
+BAKE p_683 r:-20,20,-17,23 rc=0  7s  texfiles=3  args=[--road-detail 1 --land-sample warp]
+BAKE p_plain r:20,-24,23,-21 rc=0  5s  texfiles=3  args=[--road-detail 1]
+BAKE p_drag r:20,-24,23,-21 rc=0  4s  texfiles=3  args=[--road-detail 1 --land-guide drag:341]
+BAKE p_asp r:20,-24,23,-21 rc=0  5s  texfiles=3  args=[--road-detail 1 --land-sample stochastic --land-hex 256 --land-mip-bias -0.22 --land-guide aspecthex:1.0 --land-guide-scale 256]
+BAKE p_warp r:20,-24,23,-21 rc=0  5s  texfiles=3  args=[--road-detail 1 --land-sample stochastic --land-hex 256 --land-mip-bias -0.22 --land-guide flatwarp:1.0 --land-warp 341]
+BAKE p_683 r:20,-24,23,-21 rc=0  5s  texfiles=3  args=[--road-detail 1 --land-sample warp]
+pics bake done 07:41:51

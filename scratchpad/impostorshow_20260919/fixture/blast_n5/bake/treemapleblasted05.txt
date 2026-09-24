@@ -1,0 +1,42 @@
+model TreeMapleblasted05.nif
+projection ortho
+ranges L2_TreeMapleBlasted008:1 - L1_TreeMapleBlasted007:1 75+5
+ranges TreeMapleBlasted05_Temp:0 - L2_TreeMapleBlasted008:0 0+42
+lodm Materials\Landscape\Trees\MapleAtlas02.lodm none textures\Landscape\Trees\MapleAtlas02_d.dds
+lodm Materials\Landscape\Trees\MapleAtlas01.lodm none textures\Landscape\Trees\MapleAtlas01_d.dds
+mask alpha
+emissive 0 shapes 0
+front 1548.86 446.297 -70.6223 -38.6729 342.457
+side 1548.86 446.297 -70.6223 -38.6729 342.457
+class 48 128
+gap 4 8
+coverage 16 128 160
+oct 5 48 128 135.314 360.837 -70.6223 -38.6729 342.457 3072 legacy 128 spec1
+frameoff 0 0 -36.5538 -1.70016
+frameoff 1 0 -35.7037 -1.70016
+frameoff 2 0 -27.2028 -1.70016
+frameoff 3 0 -15.3016 -1.70016
+frameoff 4 0 -12.7513 -1.70016
+frameoff 0 1 -13.6014 -1.70016
+frameoff 1 1 -36.5538 41.6543
+frameoff 2 1 -27.2028 -4.25044
+frameoff 3 1 -11.9012 -21.2522
+frameoff 4 1 -7.6508 -1.70016
+frameoff 0 2 3.40035 -1.70016
+frameoff 1 2 3.40035 61.2064
+frameoff 2 2 36.5538 -12.7513
+frameoff 3 2 -3.40035 -17.8519
+frameoff 4 2 -3.40035 -1.70016
+frameoff 0 3 7.6508 -1.70016
+frameoff 1 3 11.9012 26.3527
+frameoff 2 3 27.2028 -5.10053
+frameoff 3 3 36.5538 -10.2011
+frameoff 4 3 13.6014 -1.70016
+frameoff 0 4 11.9012 -1.70016
+frameoff 1 4 15.3016 -1.70016
+frameoff 2 4 27.2028 -1.70016
+frameoff 3 4 35.7037 -2.55026
+frameoff 4 4 36.5538 -1.70016
+frameclamped 0
+framefit 96.06 334.935 119.862 336.635
+orthofit 399.491 399.491 0

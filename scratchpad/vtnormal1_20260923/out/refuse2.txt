@@ -1,0 +1,1 @@
+error: --vt-density must be 32, 16 or 8 (world units a texel at the finest level)

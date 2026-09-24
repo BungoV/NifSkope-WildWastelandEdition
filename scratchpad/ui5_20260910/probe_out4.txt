@@ -1,0 +1,286 @@
+qApp style ""
+=== case 0 -- SHIPPED (content 26, pad 2) -- want ink centre 11.0
+  menu bar 1512x35   PM_MenuBarPanelWidth 0  PM_MenuBarVMargin 0  PM_MenuBarHMargin 0
+  REFUTER: menu bar sizeHint h  20, minimumSizeHint h  20 (row 35) -> row unchanged
+  item 0: rect x   6 y   0 w  34 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  item 1: rect x  46 y   0 w  43 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  item 2: rect x  95 y   0 w  48 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  item 3: rect x 149 y   0 w  60 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  item 4: rect x 215 y   0 w  41 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  ROW centre 17.0 -- worst painted-box offset -7.5, worst ink offset -6.5   (the marker sheet moved no rect)
+=== case 1 -- no row sheet (the item's natural height)
+  menu bar 1512x35   PM_MenuBarPanelWidth 0  PM_MenuBarVMargin 0  PM_MenuBarHMargin 0
+  REFUTER: menu bar sizeHint h  24, minimumSizeHint h  24 (row 35) -> row unchanged
+  item 0: rect x   6 y   0 w  34 h  24 | painted y   0.. 23 (c  11.5,  -5.5) | ink y   8.. 17 (c  12.5,  -4.5)
+  item 1: rect x  46 y   0 w  43 h  24 | painted y   0.. 23 (c  11.5,  -5.5) | ink y   8.. 17 (c  12.5,  -4.5)
+  item 2: rect x  95 y   0 w  48 h  24 | painted y   0.. 23 (c  11.5,  -5.5) | ink y   8.. 17 (c  12.5,  -4.5)
+  item 3: rect x 149 y   0 w  60 h  24 | painted y   0.. 23 (c  11.5,  -5.5) | ink y   8.. 17 (c  12.5,  -4.5)
+  item 4: rect x 215 y   0 w  41 h  24 | painted y   0.. 23 (c  11.5,  -5.5) | ink y   8.. 17 (c  12.5,  -4.5)
+  ROW centre 17.0 -- worst painted-box offset -5.5, worst ink offset -4.5   (the marker sheet moved no rect)
+=== case A22 -- QMenuBar::item min-height 22, pad 2
+  menu bar 1512x35   PM_MenuBarPanelWidth 0  PM_MenuBarVMargin 0  PM_MenuBarHMargin 0
+  REFUTER: menu bar sizeHint h  20, minimumSizeHint h  20 (row 35) -> row unchanged
+  item 0: rect x   6 y   0 w  34 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  item 1: rect x  46 y   0 w  43 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  item 2: rect x  95 y   0 w  48 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  item 3: rect x 149 y   0 w  60 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  item 4: rect x 215 y   0 w  41 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  ROW centre 17.0 -- worst painted-box offset -7.5, worst ink offset -6.5   (the marker sheet moved no rect)
+=== case A24 -- QMenuBar::item min-height 24, pad 2
+  menu bar 1512x35   PM_MenuBarPanelWidth 0  PM_MenuBarVMargin 0  PM_MenuBarHMargin 0
+  REFUTER: menu bar sizeHint h  20, minimumSizeHint h  20 (row 35) -> row unchanged
+  item 0: rect x   6 y   0 w  34 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  item 1: rect x  46 y   0 w  43 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  item 2: rect x  95 y   0 w  48 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  item 3: rect x 149 y   0 w  60 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  item 4: rect x 215 y   0 w  41 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  ROW centre 17.0 -- worst painted-box offset -7.5, worst ink offset -6.5   (the marker sheet moved no rect)
+=== case A26 -- QMenuBar::item min-height 26, pad 2
+  menu bar 1512x35   PM_MenuBarPanelWidth 0  PM_MenuBarVMargin 0  PM_MenuBarHMargin 0
+  REFUTER: menu bar sizeHint h  20, minimumSizeHint h  20 (row 35) -> row unchanged
+  item 0: rect x   6 y   0 w  34 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  item 1: rect x  46 y   0 w  43 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  item 2: rect x  95 y   0 w  48 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  item 3: rect x 149 y   0 w  60 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  item 4: rect x 215 y   0 w  41 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  ROW centre 17.0 -- worst painted-box offset -7.5, worst ink offset -6.5   (the marker sheet moved no rect)
+=== case A28 -- QMenuBar::item min-height 28, pad 2
+  menu bar 1512x35   PM_MenuBarPanelWidth 0  PM_MenuBarVMargin 0  PM_MenuBarHMargin 0
+  REFUTER: menu bar sizeHint h  20, minimumSizeHint h  20 (row 35) -> row unchanged
+  item 0: rect x   6 y   0 w  34 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  item 1: rect x  46 y   0 w  43 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  item 2: rect x  95 y   0 w  48 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  item 3: rect x 149 y   0 w  60 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  item 4: rect x 215 y   0 w  41 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  ROW centre 17.0 -- worst painted-box offset -7.5, worst ink offset -6.5   (the marker sheet moved no rect)
+=== case A30 -- QMenuBar::item min-height 30, pad 2
+  menu bar 1512x35   PM_MenuBarPanelWidth 0  PM_MenuBarVMargin 0  PM_MenuBarHMargin 0
+  REFUTER: menu bar sizeHint h  20, minimumSizeHint h  20 (row 35) -> row unchanged
+  item 0: rect x   6 y   0 w  34 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  item 1: rect x  46 y   0 w  43 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  item 2: rect x  95 y   0 w  48 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  item 3: rect x 149 y   0 w  60 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  item 4: rect x 215 y   0 w  41 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  ROW centre 17.0 -- worst painted-box offset -7.5, worst ink offset -6.5   (the marker sheet moved no rect)
+=== case A32 -- QMenuBar::item min-height 32, pad 2
+  menu bar 1512x35   PM_MenuBarPanelWidth 0  PM_MenuBarVMargin 0  PM_MenuBarHMargin 0
+  REFUTER: menu bar sizeHint h  20, minimumSizeHint h  20 (row 35) -> row unchanged
+  item 0: rect x   6 y   0 w  34 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  item 1: rect x  46 y   0 w  43 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  item 2: rect x  95 y   0 w  48 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  item 3: rect x 149 y   0 w  60 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  item 4: rect x 215 y   0 w  41 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  ROW centre 17.0 -- worst painted-box offset -7.5, worst ink offset -6.5   (the marker sheet moved no rect)
+=== case A34 -- QMenuBar::item min-height 34, pad 2
+  menu bar 1512x35   PM_MenuBarPanelWidth 0  PM_MenuBarVMargin 0  PM_MenuBarHMargin 0
+  REFUTER: menu bar sizeHint h  20, minimumSizeHint h  20 (row 35) -> row unchanged
+  item 0: rect x   6 y   0 w  34 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  item 1: rect x  46 y   0 w  43 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  item 2: rect x  95 y   0 w  48 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  item 3: rect x 149 y   0 w  60 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  item 4: rect x 215 y   0 w  41 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  ROW centre 17.0 -- worst painted-box offset -7.5, worst ink offset -6.5   (the marker sheet moved no rect)
+=== case A36 -- QMenuBar::item min-height 36, pad 2
+  menu bar 1512x35   PM_MenuBarPanelWidth 0  PM_MenuBarVMargin 0  PM_MenuBarHMargin 0
+  REFUTER: menu bar sizeHint h  20, minimumSizeHint h  20 (row 35) -> row unchanged
+  item 0: rect x   6 y   0 w  34 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  item 1: rect x  46 y   0 w  43 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  item 2: rect x  95 y   0 w  48 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  item 3: rect x 149 y   0 w  60 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  item 4: rect x 215 y   0 w  41 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  ROW centre 17.0 -- worst painted-box offset -7.5, worst ink offset -6.5   (the marker sheet moved no rect)
+=== case B28 -- min-height 28 + QMenuBar box zeroed
+  menu bar 1512x35   PM_MenuBarPanelWidth 0  PM_MenuBarVMargin 0  PM_MenuBarHMargin 0
+  REFUTER: menu bar sizeHint h  20, minimumSizeHint h  20 (row 35) -> row unchanged
+  item 0: rect x   6 y   0 w  34 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  item 1: rect x  46 y   0 w  43 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  item 2: rect x  95 y   0 w  48 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  item 3: rect x 149 y   0 w  60 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  item 4: rect x 215 y   0 w  41 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  ROW centre 17.0 -- worst painted-box offset -7.5, worst ink offset -6.5   (the marker sheet moved no rect)
+=== case B30 -- min-height 30 + QMenuBar box zeroed
+  menu bar 1512x35   PM_MenuBarPanelWidth 0  PM_MenuBarVMargin 0  PM_MenuBarHMargin 0
+  REFUTER: menu bar sizeHint h  20, minimumSizeHint h  20 (row 35) -> row unchanged
+  item 0: rect x   6 y   0 w  34 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  item 1: rect x  46 y   0 w  43 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  item 2: rect x  95 y   0 w  48 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  item 3: rect x 149 y   0 w  60 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  item 4: rect x 215 y   0 w  41 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  ROW centre 17.0 -- worst painted-box offset -7.5, worst ink offset -6.5   (the marker sheet moved no rect)
+=== case B32 -- min-height 32 + QMenuBar box zeroed
+  menu bar 1512x35   PM_MenuBarPanelWidth 0  PM_MenuBarVMargin 0  PM_MenuBarHMargin 0
+  REFUTER: menu bar sizeHint h  20, minimumSizeHint h  20 (row 35) -> row unchanged
+  item 0: rect x   6 y   0 w  34 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  item 1: rect x  46 y   0 w  43 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  item 2: rect x  95 y   0 w  48 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  item 3: rect x 149 y   0 w  60 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  item 4: rect x 215 y   0 w  41 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  ROW centre 17.0 -- worst painted-box offset -7.5, worst ink offset -6.5   (the marker sheet moved no rect)
+=== case B34 -- min-height 34 + QMenuBar box zeroed
+  menu bar 1512x35   PM_MenuBarPanelWidth 0  PM_MenuBarVMargin 0  PM_MenuBarHMargin 0
+  REFUTER: menu bar sizeHint h  20, minimumSizeHint h  20 (row 35) -> row unchanged
+  item 0: rect x   6 y   0 w  34 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  item 1: rect x  46 y   0 w  43 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  item 2: rect x  95 y   0 w  48 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  item 3: rect x 149 y   0 w  60 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  item 4: rect x 215 y   0 w  41 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  ROW centre 17.0 -- worst painted-box offset -7.5, worst ink offset -6.5   (the marker sheet moved no rect)
+=== case B36 -- min-height 36 + QMenuBar box zeroed
+  menu bar 1512x35   PM_MenuBarPanelWidth 0  PM_MenuBarVMargin 0  PM_MenuBarHMargin 0
+  REFUTER: menu bar sizeHint h  20, minimumSizeHint h  20 (row 35) -> row unchanged
+  item 0: rect x   6 y   0 w  34 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  item 1: rect x  46 y   0 w  43 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  item 2: rect x  95 y   0 w  48 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  item 3: rect x 149 y   0 w  60 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  item 4: rect x 215 y   0 w  41 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  ROW centre 17.0 -- worst painted-box offset -7.5, worst ink offset -6.5   (the marker sheet moved no rect)
+=== case C0 -- ::item margin-top 0 (rect vs paint)
+  menu bar 1512x35   PM_MenuBarPanelWidth 0  PM_MenuBarVMargin 0  PM_MenuBarHMargin 0
+  REFUTER: menu bar sizeHint h  20, minimumSizeHint h  20 (row 35) -> row unchanged
+  item 0: rect x   6 y   0 w  34 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  item 1: rect x  46 y   0 w  43 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  item 2: rect x  95 y   0 w  48 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  item 3: rect x 149 y   0 w  60 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  item 4: rect x 215 y   0 w  41 h  20 | painted y   0.. 19 (c   9.5,  -7.5) | ink y   6.. 15 (c  10.5,  -6.5)
+  ROW centre 17.0 -- worst painted-box offset -7.5, worst ink offset -6.5   (the marker sheet moved no rect)
+=== case C2 -- ::item margin-top 2 (rect vs paint)
+  menu bar 1512x35   PM_MenuBarPanelWidth 0  PM_MenuBarVMargin 0  PM_MenuBarHMargin 0
+  REFUTER: menu bar sizeHint h  22, minimumSizeHint h  22 (row 35) -> row unchanged
+  item 0: rect x   6 y   0 w  34 h  22 | painted y   2.. 21 (c  11.5,  -5.5) | ink y   8.. 17 (c  12.5,  -4.5)
+  item 1: rect x  46 y   0 w  43 h  22 | painted y   2.. 21 (c  11.5,  -5.5) | ink y   8.. 17 (c  12.5,  -4.5)
+  item 2: rect x  95 y   0 w  48 h  22 | painted y   2.. 21 (c  11.5,  -5.5) | ink y   8.. 17 (c  12.5,  -4.5)
+  item 3: rect x 149 y   0 w  60 h  22 | painted y   2.. 21 (c  11.5,  -5.5) | ink y   8.. 17 (c  12.5,  -4.5)
+  item 4: rect x 215 y   0 w  41 h  22 | painted y   2.. 21 (c  11.5,  -5.5) | ink y   8.. 17 (c  12.5,  -4.5)
+  ROW centre 17.0 -- worst painted-box offset -5.5, worst ink offset -4.5   (the marker sheet moved no rect)
+=== case C4 -- ::item margin-top 4 (rect vs paint)
+  menu bar 1512x35   PM_MenuBarPanelWidth 0  PM_MenuBarVMargin 0  PM_MenuBarHMargin 0
+  REFUTER: menu bar sizeHint h  24, minimumSizeHint h  24 (row 35) -> row unchanged
+  item 0: rect x   6 y   0 w  34 h  24 | painted y   4.. 23 (c  13.5,  -3.5) | ink y  10.. 19 (c  14.5,  -2.5)
+  item 1: rect x  46 y   0 w  43 h  24 | painted y   4.. 23 (c  13.5,  -3.5) | ink y  10.. 19 (c  14.5,  -2.5)
+  item 2: rect x  95 y   0 w  48 h  24 | painted y   4.. 23 (c  13.5,  -3.5) | ink y  10.. 19 (c  14.5,  -2.5)
+  item 3: rect x 149 y   0 w  60 h  24 | painted y   4.. 23 (c  13.5,  -3.5) | ink y  10.. 19 (c  14.5,  -2.5)
+  item 4: rect x 215 y   0 w  41 h  24 | painted y   4.. 23 (c  13.5,  -3.5) | ink y  10.. 19 (c  14.5,  -2.5)
+  ROW centre 17.0 -- worst painted-box offset -3.5, worst ink offset -2.5   (the marker sheet moved no rect)
+=== case C6 -- ::item margin-top 6 (rect vs paint)
+  menu bar 1512x35   PM_MenuBarPanelWidth 0  PM_MenuBarVMargin 0  PM_MenuBarHMargin 0
+  REFUTER: menu bar sizeHint h  26, minimumSizeHint h  26 (row 35) -> row unchanged
+  item 0: rect x   6 y   0 w  34 h  26 | painted y   6.. 25 (c  15.5,  -1.5) | ink y  12.. 21 (c  16.5,  -0.5)
+  item 1: rect x  46 y   0 w  43 h  26 | painted y   6.. 25 (c  15.5,  -1.5) | ink y  12.. 21 (c  16.5,  -0.5)
+  item 2: rect x  95 y   0 w  48 h  26 | painted y   6.. 25 (c  15.5,  -1.5) | ink y  12.. 21 (c  16.5,  -0.5)
+  item 3: rect x 149 y   0 w  60 h  26 | painted y   6.. 25 (c  15.5,  -1.5) | ink y  12.. 21 (c  16.5,  -0.5)
+  item 4: rect x 215 y   0 w  41 h  26 | painted y   6.. 25 (c  15.5,  -1.5) | ink y  12.. 21 (c  16.5,  -0.5)
+  ROW centre 17.0 -- worst painted-box offset -1.5, worst ink offset -0.5   (the marker sheet moved no rect)
+=== case C8 -- ::item margin-top 8 (rect vs paint)
+  menu bar 1512x35   PM_MenuBarPanelWidth 0  PM_MenuBarVMargin 0  PM_MenuBarHMargin 0
+  REFUTER: menu bar sizeHint h  28, minimumSizeHint h  28 (row 35) -> row unchanged
+  item 0: rect x   6 y   0 w  34 h  28 | painted y   8.. 27 (c  17.5,   0.5) | ink y  14.. 23 (c  18.5,   1.5)
+  item 1: rect x  46 y   0 w  43 h  28 | painted y   8.. 27 (c  17.5,   0.5) | ink y  14.. 23 (c  18.5,   1.5)
+  item 2: rect x  95 y   0 w  48 h  28 | painted y   8.. 27 (c  17.5,   0.5) | ink y  14.. 23 (c  18.5,   1.5)
+  item 3: rect x 149 y   0 w  60 h  28 | painted y   8.. 27 (c  17.5,   0.5) | ink y  14.. 23 (c  18.5,   1.5)
+  item 4: rect x 215 y   0 w  41 h  28 | painted y   8.. 27 (c  17.5,   0.5) | ink y  14.. 23 (c  18.5,   1.5)
+  ROW centre 17.0 -- worst painted-box offset 0.5, worst ink offset 1.5   (the marker sheet moved no rect)
+=== case D0 -- ::item padding-top 0 / bottom 0
+  menu bar 1512x35   PM_MenuBarPanelWidth 0  PM_MenuBarVMargin 0  PM_MenuBarHMargin 0
+  REFUTER: menu bar sizeHint h  16, minimumSizeHint h  16 (row 35) -> row unchanged
+  item 0: rect x   6 y   0 w  34 h  16 | painted y   0.. 15 (c   7.5,  -9.5) | ink y   4.. 13 (c   8.5,  -8.5)
+  item 1: rect x  46 y   0 w  43 h  16 | painted y   0.. 15 (c   7.5,  -9.5) | ink y   4.. 13 (c   8.5,  -8.5)
+  item 2: rect x  95 y   0 w  48 h  16 | painted y   0.. 15 (c   7.5,  -9.5) | ink y   4.. 13 (c   8.5,  -8.5)
+  item 3: rect x 149 y   0 w  60 h  16 | painted y   0.. 15 (c   7.5,  -9.5) | ink y   4.. 13 (c   8.5,  -8.5)
+  item 4: rect x 215 y   0 w  41 h  16 | painted y   0.. 15 (c   7.5,  -9.5) | ink y   4.. 13 (c   8.5,  -8.5)
+  ROW centre 17.0 -- worst painted-box offset -9.5, worst ink offset -8.5   (the marker sheet moved no rect)
+=== case D2 -- ::item padding-top 2 / bottom 17
+  menu bar 1512x35   PM_MenuBarPanelWidth 0  PM_MenuBarVMargin 0  PM_MenuBarHMargin 0
+  REFUTER: menu bar sizeHint h  35, minimumSizeHint h  35 (row 35) -> row unchanged
+  item 0: rect x   6 y   0 w  34 h  35 | painted y   0.. 34 (c  17.0,   0.0) | ink y   6.. 15 (c  10.5,  -6.5)
+  item 1: rect x  46 y   0 w  43 h  35 | painted y   0.. 34 (c  17.0,   0.0) | ink y   6.. 15 (c  10.5,  -6.5)
+  item 2: rect x  95 y   0 w  48 h  35 | painted y   0.. 34 (c  17.0,   0.0) | ink y   6.. 15 (c  10.5,  -6.5)
+  item 3: rect x 149 y   0 w  60 h  35 | painted y   0.. 34 (c  17.0,   0.0) | ink y   6.. 15 (c  10.5,  -6.5)
+  item 4: rect x 215 y   0 w  41 h  35 | painted y   0.. 34 (c  17.0,   0.0) | ink y   6.. 15 (c  10.5,  -6.5)
+  ROW centre 17.0 -- worst painted-box offset 0.0, worst ink offset -6.5   (the marker sheet moved no rect)
+=== case D4 -- ::item padding-top 4 / bottom 15
+  menu bar 1512x35   PM_MenuBarPanelWidth 0  PM_MenuBarVMargin 0  PM_MenuBarHMargin 0
+  REFUTER: menu bar sizeHint h  35, minimumSizeHint h  35 (row 35) -> row unchanged
+  item 0: rect x   6 y   0 w  34 h  35 | painted y   0.. 34 (c  17.0,   0.0) | ink y   8.. 17 (c  12.5,  -4.5)
+  item 1: rect x  46 y   0 w  43 h  35 | painted y   0.. 34 (c  17.0,   0.0) | ink y   8.. 17 (c  12.5,  -4.5)
+  item 2: rect x  95 y   0 w  48 h  35 | painted y   0.. 34 (c  17.0,   0.0) | ink y   8.. 17 (c  12.5,  -4.5)
+  item 3: rect x 149 y   0 w  60 h  35 | painted y   0.. 34 (c  17.0,   0.0) | ink y   8.. 17 (c  12.5,  -4.5)
+  item 4: rect x 215 y   0 w  41 h  35 | painted y   0.. 34 (c  17.0,   0.0) | ink y   8.. 17 (c  12.5,  -4.5)
+  ROW centre 17.0 -- worst painted-box offset 0.0, worst ink offset -4.5   (the marker sheet moved no rect)
+=== case D6 -- ::item padding-top 6 / bottom 13
+  menu bar 1512x35   PM_MenuBarPanelWidth 0  PM_MenuBarVMargin 0  PM_MenuBarHMargin 0
+  REFUTER: menu bar sizeHint h  35, minimumSizeHint h  35 (row 35) -> row unchanged
+  item 0: rect x   6 y   0 w  34 h  35 | painted y   0.. 34 (c  17.0,   0.0) | ink y  10.. 19 (c  14.5,  -2.5)
+  item 1: rect x  46 y   0 w  43 h  35 | painted y   0.. 34 (c  17.0,   0.0) | ink y  10.. 19 (c  14.5,  -2.5)
+  item 2: rect x  95 y   0 w  48 h  35 | painted y   0.. 34 (c  17.0,   0.0) | ink y  10.. 19 (c  14.5,  -2.5)
+  item 3: rect x 149 y   0 w  60 h  35 | painted y   0.. 34 (c  17.0,   0.0) | ink y  10.. 19 (c  14.5,  -2.5)
+  item 4: rect x 215 y   0 w  41 h  35 | painted y   0.. 34 (c  17.0,   0.0) | ink y  10.. 19 (c  14.5,  -2.5)
+  ROW centre 17.0 -- worst painted-box offset 0.0, worst ink offset -2.5   (the marker sheet moved no rect)
+=== case D8 -- ::item padding-top 8 / bottom 11
+  menu bar 1512x35   PM_MenuBarPanelWidth 0  PM_MenuBarVMargin 0  PM_MenuBarHMargin 0
+  REFUTER: menu bar sizeHint h  35, minimumSizeHint h  35 (row 35) -> row unchanged
+  item 0: rect x   6 y   0 w  34 h  35 | painted y   0.. 34 (c  17.0,   0.0) | ink y  12.. 21 (c  16.5,  -0.5)
+  item 1: rect x  46 y   0 w  43 h  35 | painted y   0.. 34 (c  17.0,   0.0) | ink y  12.. 21 (c  16.5,  -0.5)
+  item 2: rect x  95 y   0 w  48 h  35 | painted y   0.. 34 (c  17.0,   0.0) | ink y  12.. 21 (c  16.5,  -0.5)
+  item 3: rect x 149 y   0 w  60 h  35 | painted y   0.. 34 (c  17.0,   0.0) | ink y  12.. 21 (c  16.5,  -0.5)
+  item 4: rect x 215 y   0 w  41 h  35 | painted y   0.. 34 (c  17.0,   0.0) | ink y  12.. 21 (c  16.5,  -0.5)
+  ROW centre 17.0 -- worst painted-box offset 0.0, worst ink offset -0.5   (the marker sheet moved no rect)
+=== case D10 -- ::item padding-top 10 / bottom 9
+  menu bar 1512x35   PM_MenuBarPanelWidth 0  PM_MenuBarVMargin 0  PM_MenuBarHMargin 0
+  REFUTER: menu bar sizeHint h  35, minimumSizeHint h  35 (row 35) -> row unchanged
+  item 0: rect x   6 y   0 w  34 h  35 | painted y   0.. 34 (c  17.0,   0.0) | ink y  14.. 23 (c  18.5,   1.5)
+  item 1: rect x  46 y   0 w  43 h  35 | painted y   0.. 34 (c  17.0,   0.0) | ink y  14.. 23 (c  18.5,   1.5)
+  item 2: rect x  95 y   0 w  48 h  35 | painted y   0.. 34 (c  17.0,   0.0) | ink y  14.. 23 (c  18.5,   1.5)
+  item 3: rect x 149 y   0 w  60 h  35 | painted y   0.. 34 (c  17.0,   0.0) | ink y  14.. 23 (c  18.5,   1.5)
+  item 4: rect x 215 y   0 w  41 h  35 | painted y   0.. 34 (c  17.0,   0.0) | ink y  14.. 23 (c  18.5,   1.5)
+  ROW centre 17.0 -- worst painted-box offset 0.0, worst ink offset 1.5   (the marker sheet moved no rect)
+=== case D12 -- ::item padding-top 12 / bottom 7
+  menu bar 1512x35   PM_MenuBarPanelWidth 0  PM_MenuBarVMargin 0  PM_MenuBarHMargin 0
+  REFUTER: menu bar sizeHint h  35, minimumSizeHint h  35 (row 35) -> row unchanged
+  item 0: rect x   6 y   0 w  34 h  35 | painted y   0.. 34 (c  17.0,   0.0) | ink y  16.. 25 (c  20.5,   3.5)
+  item 1: rect x  46 y   0 w  43 h  35 | painted y   0.. 34 (c  17.0,   0.0) | ink y  16.. 25 (c  20.5,   3.5)
+  item 2: rect x  95 y   0 w  48 h  35 | painted y   0.. 34 (c  17.0,   0.0) | ink y  16.. 25 (c  20.5,   3.5)
+  item 3: rect x 149 y   0 w  60 h  35 | painted y   0.. 34 (c  17.0,   0.0) | ink y  16.. 25 (c  20.5,   3.5)
+  item 4: rect x 215 y   0 w  41 h  35 | painted y   0.. 34 (c  17.0,   0.0) | ink y  16.. 25 (c  20.5,   3.5)
+  ROW centre 17.0 -- worst painted-box offset 0.0, worst ink offset 3.5   (the marker sheet moved no rect)
+=== case D* -- THE CANDIDATE: content 16 -> padding 9 / 10
+  menu bar 1512x35   PM_MenuBarPanelWidth 0  PM_MenuBarVMargin 0  PM_MenuBarHMargin 0
+  REFUTER: menu bar sizeHint h  35, minimumSizeHint h  35 (row 35) -> row unchanged
+  item 0: rect x   6 y   0 w  34 h  35 | painted y   0.. 34 (c  17.0,   0.0) | ink y  13.. 22 (c  17.5,   0.5)
+  item 1: rect x  46 y   0 w  43 h  35 | painted y   0.. 34 (c  17.0,   0.0) | ink y  13.. 22 (c  17.5,   0.5)
+  item 2: rect x  95 y   0 w  48 h  35 | painted y   0.. 34 (c  17.0,   0.0) | ink y  13.. 22 (c  17.5,   0.5)
+  item 3: rect x 149 y   0 w  60 h  35 | painted y   0.. 34 (c  17.0,   0.0) | ink y  13.. 22 (c  17.5,   0.5)
+  item 4: rect x 215 y   0 w  41 h  35 | painted y   0.. 34 (c  17.0,   0.0) | ink y  13.. 22 (c  17.5,   0.5)
+  ROW centre 17.0 -- worst painted-box offset 0.0, worst ink offset 0.5   (the marker sheet moved no rect)
+=== case E -- the item's content height with no vertical padding: 16 without an event loop, 16 with one
+=== case F -- the live flow: calibrated content 16 (no event loop) -> padding-top 9 / bottom 10
+=== case F (measured after the derived sheet)
+  menu bar 1512x35   PM_MenuBarPanelWidth 0  PM_MenuBarVMargin 0  PM_MenuBarHMargin 0
+  REFUTER: menu bar sizeHint h  35, minimumSizeHint h  35 (row 35) -> row unchanged
+  item 0: rect x   6 y   0 w  34 h  35 | painted y   0.. 34 (c  17.0,   0.0) | ink y  13.. 22 (c  17.5,   0.5)
+  item 1: rect x  46 y   0 w  43 h  35 | painted y   0.. 34 (c  17.0,   0.0) | ink y  13.. 22 (c  17.5,   0.5)
+  item 2: rect x  95 y   0 w  48 h  35 | painted y   0.. 34 (c  17.0,   0.0) | ink y  13.. 22 (c  17.5,   0.5)
+  item 3: rect x 149 y   0 w  60 h  35 | painted y   0.. 34 (c  17.0,   0.0) | ink y  13.. 22 (c  17.5,   0.5)
+  item 4: rect x 215 y   0 w  41 h  35 | painted y   0.. 34 (c  17.0,   0.0) | ink y  13.. 22 (c  17.5,   0.5)
+  ROW centre 17.0 -- worst painted-box offset 0.0, worst ink offset 0.5   (the marker sheet moved no rect)
+=== case G -- the way back (no row sheet, = case 1)
+  menu bar 1512x35   PM_MenuBarPanelWidth 0  PM_MenuBarVMargin 0  PM_MenuBarHMargin 0
+  REFUTER: menu bar sizeHint h  24, minimumSizeHint h  24 (row 35) -> row unchanged
+  item 0: rect x   6 y   0 w  34 h  24 | painted y   0.. 23 (c  11.5,  -5.5) | ink y   8.. 17 (c  12.5,  -4.5)
+  item 1: rect x  46 y   0 w  43 h  24 | painted y   0.. 23 (c  11.5,  -5.5) | ink y   8.. 17 (c  12.5,  -4.5)
+  item 2: rect x  95 y   0 w  48 h  24 | painted y   0.. 23 (c  11.5,  -5.5) | ink y   8.. 17 (c  12.5,  -4.5)
+  item 3: rect x 149 y   0 w  60 h  24 | painted y   0.. 23 (c  11.5,  -5.5) | ink y   8.. 17 (c  12.5,  -4.5)
+  item 4: rect x 215 y   0 w  41 h  24 | painted y   0.. 23 (c  11.5,  -5.5) | ink y   8.. 17 (c  12.5,  -4.5)
+  ROW centre 17.0 -- worst painted-box offset -5.5, worst ink offset -4.5   (the marker sheet moved no rect)
+=== case H -- the font, content 16: ascent 12 descent 4 height 16 leading 0 capHeight 8 xHeight 6
+  File    : tight y  -8.. -1  bounding y -12..  3  baseline  12.0  predicted ink centre in content   7.5
+  View    : tight y  -8.. -1  bounding y -12..  3  baseline  12.0  predicted ink centre in content   7.5
+  Spells  : tight y  -8..  1  bounding y -12..  3  baseline  12.0  predicted ink centre in content   8.5
+  Options : tight y  -8..  1  bounding y -12..  3  baseline  12.0  predicted ink centre in content   8.5
+  Help    : tight y  -8..  1  bounding y -12..  3  baseline  12.0  predicted ink centre in content   8.5
+  predicted ink midpoint in content 8.00 (extremes 7.5..8.5); even split would be 9; padding-top to centre the INK = 9.00 -> 9
+=== case I -- taking the sheet off again
+  with the row sheet:            item h  35, ink top  13
+  after setStyleSheet(QString()): item h  24, ink top   8
+  after unpolish/polish:         item h  24, ink top   8
+  row sheet put back:            item h  35, ink top  13
+  explicit "padding: 4px 8px":   item h  24, ink top   8   (case 1 reads item h 24, ink top 8)

@@ -1,0 +1,3 @@
+BAKE a_current rc=0 60s texfiles=3 bytes=2780013 args=[]
+BAKE b_blend rc=0 5s texfiles=3 bytes=2780032 args=[--blend-edges quadrant]
+BAKE c_blend_msn rc=0 15s texfiles=3 bytes=40140912 args=[--blend-edges quadrant --msn-cache E:/Projects/Fallout 4 Mods/mods/Upscaled Terrain Normals/Textures/Terrain/Commonwealth --vt-finest 1 --vt-content 512]

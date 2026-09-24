@@ -1,0 +1,48 @@
+# IMPOSTORFIX2 -- simulate the next impostor repairs, offline. Report.
+
+Lane IMPOSTORFIX2, 2026-09-19, started 14:32 CEDT (`date`). OFFLINE ONLY: no
+build, no exe, no src/ or res/ edit, no commit. numpy/PIL/scipy on files on disk.
+
+## 0. What is on disk, what is not, and the instrument
+
+Read in order: CONSTITUTION.md; HANDOFF.md top block; the skill
+.claude/skills/ww-reference-card-diagnose/SKILL.md (IMPOSTORFIX1's numpy
+reference card is REUSED, not rewritten); impostorfix1_20260919/PENDING.md and
+DELIVER.md; docs/LODGEN_IMPOSTOR_SPEC.md; skills ww-control-calibration,
+ww-simulate-before-build, ww-texel-picture.
+
+USABLE ON DISK
+* impostorfix1_20260919/fixture/<tag>/cards/ -- the REPAIRED sheets (DDS +
+  .lodm + the pre-compression PNGs) and cards_before/ with the SHIPPED DDS.
+  Tags: blast_n4 blast_n5 blast_n8 blast_n12 dead_n4 maple_n4 maple_n4_t256
+  rock_n4.
+* impostorfix1_20260919/control/<tag>_{before,after}_b1/v_az%03d_el%02d_{card,mesh}.png
+  -- the harness's own 512x768 grabs, 12 azimuths x elev 15 and 45 = the 24
+  orbit views, for all five subjects. THESE ARE THE MESH GRABS.
+* tests/spells/impostor_bc_decode.py, impostor_bake_views.py,
+  impostor_sheet_check.py.
+
+SHEET CENSUS (measured, not quoted)
+
+| tag | N | frame px | sheet px | half | depthSpan | a>=250 | any cov | texels |
+|---|---|---|---|---|---|---|---|---|
+| maple_n4      | 4 | 32x64   | 128x256  | 439.5 x 879.0   | 3072 | 401    | 2907  | 32768  |
+| maple_n4_t256 | 4 | 128x256 | 512x1024 | 439.5 x 879.0   | 3072 | 21532  | 35259 | 524288 |
+| rock_n4       | 4 | 128x128 | 512x512  | 1727.9 x 1727.9 | 5048 | 51869  | 54308 | 262144 |
+| blast_n4      | 4 | 48x128  | 192x512  | 135.3 x 360.8   | 3072 | 7315   | 9733  | 98304  |
+
+The maple's frame is 32 x 64 TEXELS. Its "401 of 32,768 fully covered" is 1.22
+per cent of the sheet; maple_n4_t256, the same subject at 4x the linear frame
+resolution, is 4.11 per cent. That ratio is section 1's whole subject.
+
+NOT ON DISK -- named so a build lane can produce it
+* THE PRE-DOWNSAMPLE PHOTOGRAPHS. frameOf (src/nifskope_ui.cpp:23102) crops the
+  live viewport render and calls QImage::scaled( iw, ih, IgnoreAspectRatio,
+  SmoothTransformation ). Its input -- matte(), channel(8), channel(9) (window
+  depth), channel(10), channel(11), channel(13) at viewport size -- is never
+  written to a file. Every *_oct_*.png in bake/ and cards/ is AFTER the
+  downsample. What a build lane must dump, exactly: `inner` at
+  src/nifskope_ui.cpp:23115 BEFORE `.scaled(...)`, as PNG, per view, for
+  matte() and channel(9), on blast_n4 and maple_n4. Until then section 1 is
+  measured at ratio 4 (maple_n4_t256 -> maple_n4) instead of the real ~7x, and
+  says so on every row.

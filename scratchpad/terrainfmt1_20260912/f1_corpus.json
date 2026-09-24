@@ -1,0 +1,867 @@
+{
+ "law": [
+  {
+   "kind": "_msn",
+   "fourcc": "DXT5",
+   "mips": 10,
+   "w": 512,
+   "h": 512,
+   "count": 3060
+  },
+  {
+   "kind": "colour",
+   "fourcc": "DXT5",
+   "mips": 10,
+   "w": 512,
+   "h": 512,
+   "count": 3060
+  }
+ ],
+ "dims": {
+  "_msn": {
+   "16": 144,
+   "32": 36,
+   "4": 2304,
+   "8": 576
+  },
+  "colour": {
+   "16": 144,
+   "32": 36,
+   "4": 2304,
+   "8": 576
+  }
+ },
+ "nonzero_reserved1": 0,
+ "declared_vs_present_mismatch": 0,
+ "alpha": {
+  "_msn": {
+   "rows": [
+    {
+     "file": "Commonwealth.4.76.80_msn.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.-80.12_msn.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.20.68_msn.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.28.72_msn.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.56.-88_msn.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.56.-8_msn.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.-12.-16_msn.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.92.-60_msn.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.-12.-40_msn.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.-4.-4_msn.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.40.-8_msn.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.-40.-12_msn.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.92.-64_msn.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.-40.72_msn.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.-40.52_msn.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.68.64_msn.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.20.20_msn.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.28.-8_msn.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.0.-44_msn.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.-16.-32_msn.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.40.52_msn.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.56.16_msn.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.56.4_msn.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.-76.-28_msn.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.76.-24_msn.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.48.-88_msn.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.-24.-28_msn.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.-52.12_msn.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.-12.-68_msn.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.-84.-24_msn.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.-32.40_msn.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.-52.-24_msn.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.28.-24_msn.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.68.-96_msn.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.-88.48_msn.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.-28.-8_msn.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.-64.-60_msn.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.-12.32_msn.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.-48.28_msn.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.32.84_msn.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.-84.80_msn.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.-20.-36_msn.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.88.88_msn.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.72.80_msn.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.-24.8_msn.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.-80.88_msn.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.-56.-92_msn.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.12.44_msn.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.76.-12_msn.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.8.-16_msn.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    }
+   ],
+   "min": 255,
+   "max": 255,
+   "frac255": 1.0,
+   "distinct": 1,
+   "hist_nonzero": [
+    [
+     255,
+     13107200
+    ]
+   ]
+  },
+  "colour": {
+   "rows": [
+    {
+     "file": "Commonwealth.4.36.92.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.52.-88.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.28.60.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.-84.40.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.72.64.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.8.-72.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.24.72.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.-4.-76.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.84.84.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.4.0.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.-52.-8.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.-12.16.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.-32.-44.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.28.-76.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.68.16.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.-28.-48.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.8.-92.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.84.-60.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.44.-28.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.-68.-80.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.44.-96.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.52.24.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.88.-72.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.-48.24.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.20.-40.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.-56.48.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.-52.12.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.-84.28.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.-12.-28.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.88.52.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.-88.-68.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.-20.-64.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.60.24.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.24.36.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.-24.-88.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.60.-16.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.76.-96.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.56.-28.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.-40.-60.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.-52.80.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.-24.80.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.56.-88.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.36.-96.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.-44.-48.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.-80.36.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.-16.-28.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.-92.-76.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.48.-56.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.24.76.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    },
+    {
+     "file": "Commonwealth.4.-28.56.DDS",
+     "min": 255,
+     "max": 255,
+     "mean": 255.0,
+     "std": 0.0,
+     "frac255": 1.0
+    }
+   ],
+   "min": 255,
+   "max": 255,
+   "frac255": 1.0,
+   "distinct": 1,
+   "hist_nonzero": [
+    [
+     255,
+     13107200
+    ]
+   ]
+  }
+ },
+ "nfiles": 6120
+}

@@ -1,0 +1,15 @@
+src/wwskin.h               after    anchor x1  already x0  CR 0  -- wwBarRowMenuItemQss declared
+src/nifskope_ui.cpp        after    anchor x1  already x0  CR 0  -- wwBarRowMenuItemQss defined
+src/nifskope_ui.cpp        replace  anchor x1  already x0  CR 0  -- applyRow takes the menu rule
+src/nifskope_ui.cpp        replace  anchor x1  already x0  CR 0  -- wwAlignBarRow calibrates the item
+src/wateruitest.cpp        replace  anchor x1  already x0  CR 0  -- QHash for the ink histogram
+src/wateruitest.cpp        after    anchor x1  already x0  CR 0  -- menuInk() helper
+src/wateruitest.cpp        replace  anchor x1  already x0  CR 0  -- group M
+tests/spells/water_ui.sh   replace  anchor x1  already x0  CR 0  -- group M gate names
+tests/spells/water_ui.sh   replace  anchor x1  already x0  CR 0  -- floor 48 -> 62
+
+9 of 9 edits match once
+wrote src/wwskin.h               14041 bytes, CR 0
+wrote src/nifskope_ui.cpp        1507501 bytes, CR 0
+wrote src/wateruitest.cpp        49431 bytes, CR 0
+wrote tests/spells/water_ui.sh   12736 bytes, CR 0

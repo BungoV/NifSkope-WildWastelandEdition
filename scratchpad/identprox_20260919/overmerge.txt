@@ -1,0 +1,54 @@
+
+=== arch aabb 16 u -- 588 identities
+   widest identity:  3200 u,  129 placements, 1 CK layers ['SouthBostonBlock09']
+      commonest bases: DecoMainA1x1Win07.nif x21, DecoMainA1x1Win06.nif x18, DecoRoof1x1Str01.nif x17, DecoMainA1x1Wall01.nif x14
+   widest identity:  3075 u,   58 placements, 1 CK layers ['SouthBostonBlock35']
+      commonest bases: DecoMainA1x1Win07.nif x28, DecoMainA1x1Wall01.nif x17, PGarageInFloor2x2Str01.nif x6, DecoMainA1x1Wall01Vent01.nif x5
+   widest identity:  2874 u,   73 placements, 1 CK layers ['SouthBostonBlock14']
+      commonest bases: DecoMainA1x1Wall01Full01.nif x17, DecoMainA1x1WinC01Full01.nif x5, DecoMainBDam1x1WallTrim03.nif x5, DecoMainBDam1x1WallTrimHalf02.nif x5
+   no identity holds two reference buildings
+
+=== all obb 16 u -- 195 identities
+   widest identity: 18121 u,  173 placements, 8 CK layers ['Roads_FlyingHighway', 'SouthBostonBlock02', 'SouthBostonBlock06', 'SouthBostonBlock07']   OVER (> 6110 u)
+      commonest bases: DecoMainC1x1WinA01.nif x20, DecoMainC1x1WinA01Full01.nif x8, MetalIntCeilingA1x1Mid01.nif x8, WrhsFloor01.nif x8
+   widest identity:  5301 u,  205 placements, 1 CK layers ['DN135_GwinnettExt']
+      commonest bases: IndSmPipe2Way01.nif x29, IndSmPipe1Way01.nif x14, ParkPierStr01.nif x11, IndCat1WaySide02.nif x10
+   widest identity:  4707 u,  189 placements, 2 CK layers ['SouthBostonBlock16', 'SouthBostonBlock19']
+      commonest bases: DecoMainA1x1WinC01.nif x42, DecoRoofDTrimA1x1Str01.nif x18, DecoMainA1x1Wall01Half01.nif x10, DecoMainA1x1WinC01Full01.nif x10
+   no identity holds two reference buildings
+
+=== all mesh 32 u -- 232 identities
+   widest identity: 15913 u,   15 placements, 1 CK layers ['Roads_FlyingHighway']   OVER (> 6110 u)
+      commonest bases: HWOnRampCol01.nif x2, HWDoubleStr01Damaged01.nif x2, HWDoubleEndCapR01.nif x1, HWDoubleStr01.nif x1
+   widest identity:  5301 u,  203 placements, 1 CK layers ['DN135_GwinnettExt']
+      commonest bases: IndSmPipe2Way01.nif x28, IndSmPipe1Way01.nif x14, ParkPierStr01.nif x11, IndCat1WaySide02.nif x10
+   widest identity:  4707 u,  188 placements, 2 CK layers ['SouthBostonBlock16', 'SouthBostonBlock19']
+      commonest bases: DecoMainA1x1WinC01.nif x42, DecoRoofDTrimA1x1Str01.nif x18, DecoMainA1x1Wall01Half01.nif x10, DecoMainA1x1WinC01Full01.nif x10
+   no identity holds two reference buildings
+
+=== all mesh 64 u -- 167 identities
+   widest identity: 16280 u,   26 placements, 1 CK layers ['Roads_FlyingHighway']   OVER (> 6110 u)
+      commonest bases: HWOnRampCol01.nif x4, ShackBridgeFree01.nif x3, RockCliff05.nif x2, HWDoubleChunkLargeTop03.nif x2
+   widest identity:  5301 u,  205 placements, 1 CK layers ['DN135_GwinnettExt']
+      commonest bases: IndSmPipe2Way01.nif x29, IndSmPipe1Way01.nif x14, ParkPierStr01.nif x11, IndCat1WaySide02.nif x10
+   widest identity:  5094 u,    3 placements, 1 CK layers ['SouthBostonBlock35']
+      commonest bases: RockCliff01.nif x3
+   no identity holds two reference buildings
+
+=== attach mesh 32 u -- 222 identities
+   widest identity: 15913 u,   16 placements, 1 CK layers ['Roads_FlyingHighway']   OVER (> 6110 u)
+      commonest bases: HWOnRampCol01.nif x2, HWDoubleStr01Damaged01.nif x2, HWDoubleEndCapR01.nif x1, HWDoubleStr01.nif x1
+   widest identity:  5301 u,  203 placements, 1 CK layers ['DN135_GwinnettExt']
+      commonest bases: IndSmPipe2Way01.nif x28, IndSmPipe1Way01.nif x14, ParkPierStr01.nif x11, IndCat1WaySide02.nif x10
+   widest identity:  4707 u,  189 placements, 2 CK layers ['SouthBostonBlock16', 'SouthBostonBlock19']
+      commonest bases: DecoMainA1x1WinC01.nif x42, DecoRoofDTrimA1x1Str01.nif x18, DecoMainA1x1Wall01Half01.nif x10, DecoMainA1x1WinC01Full01.nif x10
+   no identity holds two reference buildings
+
+=== all aabb 16 u -- 158 identities
+   widest identity: 18121 u,  286 placements, 9 CK layers ['Roads_FlyingHighway', 'SouthBostonBlock02', 'SouthBostonBlock06', 'SouthBostonBlock07']   OVER (> 6110 u)
+      commonest bases: DecoRoof1x1Str01.nif x29, DecoMainA1x1Win07.nif x28, DecoMainC1x1WinA01.nif x20, DecoMainA1x1Wall01.nif x18
+   widest identity:  5301 u,  205 placements, 1 CK layers ['DN135_GwinnettExt']
+      commonest bases: IndSmPipe2Way01.nif x29, IndSmPipe1Way01.nif x14, ParkPierStr01.nif x11, IndCat1WaySide02.nif x10
+   widest identity:  4707 u,  189 placements, 2 CK layers ['SouthBostonBlock16', 'SouthBostonBlock19']
+      commonest bases: DecoMainA1x1WinC01.nif x42, DecoRoofDTrimA1x1Str01.nif x18, DecoMainA1x1Wall01Half01.nif x10, DecoMainA1x1WinC01Full01.nif x10
+   no identity holds two reference buildings

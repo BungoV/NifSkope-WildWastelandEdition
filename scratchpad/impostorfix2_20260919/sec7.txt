@@ -1,0 +1,166 @@
+
+## 7. THE RANKED LIST
+
+Ranked by measured gain per unit of risk. "Gain" is always against the sheets
+and shader AS THEY ARE TODAY, measured by this lane's instrument over the same
+24 orbit views; this instrument's own +0.0043 mean bias against the harness is
+in section 0b, so anything under 0.011 is marked NOT PROVEN.
+
+### 1. BAKE AT N=8 INSTEAD OF N=4 (no code at all)
+
+| subject | today (N=4) | N=8 | gain |
+|---|---|---|---|
+| blasted tree | 0.5038 (harness) | 0.6754 (harness) | +0.1716 |
+| the other four | no N=8 bake exists | -- | -- |
+
+COST: 4x the sheet texels and 4x the VRAM per card (192x512 -> 384x1024), 4x
+the bake time. Temporal: the mean 2-degree change WORSENS 0.1943 -> 0.2179, the
+worst 2-degree step IMPROVES 0.4242 -> 0.3809.
+SPEC IMPACT: none. Line 232-233 already describes any N.
+WHERE: N is a parameter of the card set, not a source constant; a build lane
+changes the lodgen invocation.
+GATE ROW THAT WOULD FAIL TODAY: "every shipped impostor card set has N >= 8".
+blast_n4, maple_n4, dead_n4, rock_n4 -- 4 of 4 fail.
+CAVEAT: measured on ONE subject. Bake N=8 for the maple, the dead tree and the
+rock before this is ranked first on evidence rather than on one tree.
+
+### 2. REPLACE THE OUTSIDE-COVERAGE HEIGHT FILL WITH AN 8-TEXEL DILATION (R2d8)
+
+| subject | today (R3) | R2d8 | gain |
+|---|---|---|---|
+| blast_n4 | 0.4978 | 0.5646 | +0.0668 |
+| blast_n8 | 0.6639 | 0.7200 | +0.0561 |
+| rock_n4  | 0.7777 | 0.8331 | +0.0554 |
+| dead_n4  | 0.5826 | 0.6153 | +0.0327 |
+| maple_n4 | 0.3609 | 0.3685 | +0.0076 NOT PROVEN |
+
+COST: a rebake of every card set. One extra dilation pass over the height
+channel per frame. No runtime cost at all.
+SPEC IMPACT: NONE. The spec never says what the height is outside coverage.
+WHERE: src/lodgen.cpp:2659-2660, inside lodgenRepairOctHeight
+(src/lodgen.cpp:2585). Today that branch is
+
+    b = 128;   // the card plane: the parallax step is then an exact no-op
+    outside++;
+
+It becomes: for the first 8 texels beyond the coverage floor take the height of
+the nearest covered texel -- the same dilation the 16..250 band already gets --
+and the card plane only beyond 8 texels. The doc comment at
+src/lodgen.cpp:2560-2571 must be rewritten with it: its candidate table was
+scored on ONE subject against the N=12 set and it never tested a dilation that
+reached OUTSIDE the coverage.
+GATE ROW THAT WOULD FAIL TODAY: "in every frame, no texel within 8 texels of a
+covered texel decodes to the card plane while its nearest covered neighbour is
+more than 2 levels off the plane." rock_n4 has 207,836 outside texels, 97.4 per
+cent of them at the plane, with the covered surface at h = 92.6 -- the row fails
+on every frame of every subject.
+THIS ALSO UNDOES THE ROCK REGRESSION: 0.8331 is +0.039 above the pre-repair
+0.7944, so the rock is not being traded away to buy it.
+
+### 3. RAISE THE DEFAULT ALPHA THRESHOLD FROM 0.0627 TO 0.20
+
+| subject | 0.063 today | 0.200 | gain |
+|---|---|---|---|
+| blast_n8 | 0.6737 | 0.7194 | +0.0457 |
+| blast_n4 | 0.5090 | 0.5437 | +0.0347 |
+| maple_n4 | 0.3586 | 0.3775 | +0.0189 |
+| dead_n4  | 0.5824 | 0.6010 | +0.0186 |
+| rock_n4  | 0.7767 | 0.7842 | +0.0075 NOT PROVEN |
+
+COST: one float. No rebake, no memory, no bake time. The risk, named and
+measured: ZERO of the 24 views on ANY of the five subjects loses its card at
+any threshold up to 0.45.
+SPEC IMPACT: WORDING. Line 348 already says a consumer "alpha-tests at 0.5 for
+full crowns and tests lower, or blends, for bare trees"; 0.20 is inside that
+sentence, and it would be honest to write the measured number into it.
+WHERE: src/gl/impostordraw.cpp:477-478. The fallback
+set.covOk() ? float( set.covFloor ) / 255.0f : 0.5f is what makes the default
+0.0627. covFloor is the sheet's ENCODING floor and was never a display cut.
+GATE ROW THAT WOULD FAIL TODAY: "card ink is within 25 per cent of mesh ink,
+per view, on every subject." At 0.0627 the maple paints 188 per cent of the
+mesh's ink and blast_n4 151 per cent: 2 of 5 fail today, 0 of 5 at 0.20.
+
+### 4. THE HEIGHT-CONSISTENCY REJECTION BETWEEN FRAMES, TOLERANCE 1 SPAN-STEP
+
+| subject | spec blend | reject k=1 | gain |
+|---|---|---|---|
+| dead_n4  | 0.5804 | 0.6080 | +0.0276 |
+| blast_n4 | 0.5086 | 0.5305 | +0.0219 |
+| maple_n4 | 0.3584 | 0.3658 | +0.0074 NOT PROVEN |
+| blast_n8 | 0.6719 | 0.6766 | +0.0047 NOT PROVEN |
+| rock_n4  | 0.7767 | 0.7115 | -0.0652 REGRESSION |
+
+COST: up to three extra normal-sheet taps in the blend loop. TEMPORAL COST:
+none measured -- the worst 2-degree step is unchanged or better on every tree
+(blast_n4 0.4242 -> 0.4194, blast_n8 0.3809 -> 0.3737, maple 0.1885 -> 0.1680,
+dead 0.2912 -> 0.2728). It MUST NOT be applied to fat solid LOD: the rock
+loses 0.065, so this is per subject-class or not at all.
+SPEC IMPACT: WORDING. Lines 313-315 already list "ghost-free frame blending" as
+a use of the height channel; the spec must be given the rejection RULE, its
+tolerance in span-steps, and a sentence saying which subjects get it.
+WHERE: res/shaders/impostor_oct.frag, the useHeightBlend branch at :214-232;
+the uniform is set at src/gl/impostordraw.cpp:480.
+GATE ROW THAT WOULD FAIL TODAY: "no more than 20 per cent of a card's ink is
+painted by frames other than the nearest, in the bottom quarter of the card."
+Today blast_n4 45.0 per cent, maple 45.7, dead 45.5, rock 28.1, blast_n8 21.7
+-- 5 of 5 fail.
+
+### 5. SWAP THE _n HEIGHT AND SWAY CHANNELS
+
+| subject | height in blue | height in alpha | gain |
+|---|---|---|---|
+| blast_n4 | 0.4978 | 0.5362 | +0.0383 |
+| blast_n8 | 0.6639 | 0.7010 | +0.0372 |
+| rock_n4  | 0.7777 | 0.7823 | +0.0046 NOT PROVEN |
+| dead_n4  | 0.5826 | 0.5870 | +0.0044 NOT PROVEN |
+| maple_n4 | 0.3609 | 0.3629 | +0.0020 NOT PROVEN |
+
+The number that is not the IoU: mean height error falls from 2.3-3.4 levels to
+0.06-0.22, worst case from 95 levels to 5; on the rock that is 1,881 world
+units of worst-case depth error down to 99.
+COST: sway's mean error 4-8x worse (1.5 -> 6.9 levels), normal X about 1.5
+levels worse. Every baked sheet is invalidated.
+SPEC IMPACT: FORMAT CONTRACT = A RULING. docs/LODGEN_IMPOSTOR_SPEC.md:45
+changes and the .lodm needs a version bump so an old sheet is refused rather
+than read backwards.
+WHERE: the write at src/nifskope_ui.cpp:23272, the sheet writer in
+src/lodgen.cpp, and the reads in res/shaders/impostor_oct.frag at :217, :292
+and :293 (n.b and n.a exchanged).
+GATE ROW THAT WOULD FAIL TODAY: "the height channel round-trips through the
+sheet's own compression to within 1 level at the 95th percentile." Today
+blast_n4 6.06, blast_n8 6.49, maple 6.13, dead 7.87, rock 9.90 -- 5 of 5 fail.
+Swapped, all five are at 1.00 or below.
+
+### 6. FIX THE BC3 ALPHA DECODER IN THE GATE ITSELF (a repair to the RULER)
+
+No IoU. tests/spells/impostor_bc_decode.py:26-28 decodes the eight-level alpha
+ramp one step short, worst error 36.4 of 255, always LOW, so gate row 14
+silently skips covered texels whose true encoded alpha is 160..196.
+COST: three lines. SPEC IMPACT: none.
+WHERE: tests/spells/impostor_bc_decode.py:26-28; corrected copy at
+scratchpad/impostorfix2_20260919/bcdec2.py.
+GATE ROW THAT WOULD FAIL TODAY: a known-answer row -- decode a synthetic BC3
+block with a0=255, a1=0, indices 0..7, and compare with the D3D ramp. Today 6
+of 8 entries are wrong. NOTHING IN THE TREE TESTS THE DECODER, which is why
+this survived a day of use by two lanes.
+
+### NOT A REPAIR: THE FRAME DOWNSAMPLE
+
+Six rules measured (section 1). Best minus box is +0.0036 on the maple and
++0.0006 / +0.0025 on the bare trees, all inside this instrument's own
+uncertainty, and the max-coverage variants the brief asked about are WORSE on
+three of the four trees. The 128x256 maple sheet with NO downsample scores
+0.3384, BELOW the box average of itself at 32x64. Resolution is not what the
+maple is short of. Do not spend a lane on it.
+
+### WHAT A BUILD LANE MUST PRODUCE BEFORE THE NEXT SIMULATION
+
+1. inner dumped at src/nifskope_ui.cpp:23115 BEFORE the .scaled(...) call, as
+   PNG, per view, for matte() and channel(9), on blast_n4 and maple_n4 -- to
+   settle section 1 at the real ratio instead of ratio 4.
+2. N=8 bakes for maple_n4, dead_n4 and rock_n4; ranked repair 1 rests on one
+   subject.
+3. Harness card AND mesh grabs for blast_n12 and blast_n5 over the same 24
+   views. Without a card grab there is no ruler to register an N=12 IoU
+   against, and N=5's temporal number (2-degree mean 0.3917, WORSE than N=4's
+   0.1943) is an unexplained defect that needs its own lane.

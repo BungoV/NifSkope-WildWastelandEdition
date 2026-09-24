@@ -1,0 +1,2382 @@
+[
+ {
+  "model": "Landscape\\Roads\\Sanctuary\\SancRoadLoop01End.nif",
+  "shape": "Circle007:0",
+  "world_per_repeat": 441.9129638491276
+ },
+ {
+  "model": "Landscape\\Roads\\Sanctuary\\SancRoadLoop01End.nif",
+  "shape": "Circle007:1",
+  "world_per_repeat": 325.7865092014362
+ },
+ {
+  "model": "Landscape\\Roads\\Sanctuary\\SancRoadLoop01End.nif",
+  "shape": "Circle007:3",
+  "world_per_repeat": 491.54660809155524
+ },
+ {
+  "model": "Landscape\\Roads\\Sanctuary\\SancRoadLoop01End.nif",
+  "shape": "wedge:1",
+  "world_per_repeat": 351.2340602469187
+ },
+ {
+  "model": "Landscape\\Roads\\Sanctuary\\SancRoadLoop01End.nif",
+  "shape": "wedge:3",
+  "world_per_repeat": 513.6966415070322
+ },
+ {
+  "model": "Landscape\\Roads\\Sanctuary\\SancStairs01.nif",
+  "shape": "Line004:1",
+  "world_per_repeat": 445.0257709024429
+ },
+ {
+  "model": "Landscape\\Roads\\Sanctuary\\SancRoadLoop01.nif",
+  "shape": "Object002:0",
+  "world_per_repeat": 420.52147264148715
+ },
+ {
+  "model": "Landscape\\Roads\\Sanctuary\\SancRoadLoop01.nif",
+  "shape": "Object002:1",
+  "world_per_repeat": 341.6148106824655
+ },
+ {
+  "model": "Landscape\\Roads\\Sanctuary\\SancRoadLoop01.nif",
+  "shape": "Object002:3",
+  "world_per_repeat": 472.3340100130938
+ },
+ {
+  "model": "Landscape\\Roads\\Sanctuary\\SancRoadLoopBrkn01.nif",
+  "shape": "Object013:3",
+  "world_per_repeat": 476.3124792734223
+ },
+ {
+  "model": "Landscape\\Roads\\Sanctuary\\SancRoadLoopBrkn01.nif",
+  "shape": "Object014:0",
+  "world_per_repeat": 439.02260908477996
+ },
+ {
+  "model": "Landscape\\Roads\\Sanctuary\\SancRoadLoopBrkn01.nif",
+  "shape": "Object014:1",
+  "world_per_repeat": 117.68392162230631
+ },
+ {
+  "model": "Landscape\\Roads\\Sanctuary\\SancRoadLoopBrkn01.nif",
+  "shape": "Object015:0",
+  "world_per_repeat": 452.340405873323
+ },
+ {
+  "model": "Landscape\\Roads\\Sanctuary\\SancRoadLoopBrkn01.nif",
+  "shape": "Object015:1",
+  "world_per_repeat": 262.6290758246166
+ },
+ {
+  "model": "Landscape\\Roads\\Sanctuary\\SancRoadLoopBrkn01.nif",
+  "shape": "Object016:0",
+  "world_per_repeat": 429.08768362886747
+ },
+ {
+  "model": "Landscape\\Roads\\Sanctuary\\SancRoadLoopBrkn01.nif",
+  "shape": "Object016:1",
+  "world_per_repeat": 213.89293991952448
+ },
+ {
+  "model": "Landscape\\Roads\\Sanctuary\\SancRoadLoopBrkn01.nif",
+  "shape": "Road:0",
+  "world_per_repeat": 421.38798454407413
+ },
+ {
+  "model": "Landscape\\Roads\\Sanctuary\\SancRoadLoopBrkn01.nif",
+  "shape": "Road:1",
+  "world_per_repeat": 275.5824884452501
+ },
+ {
+  "model": "Landscape\\Roads\\Sanctuary\\SancRoadLoopBrkn01.nif",
+  "shape": "Object020:1",
+  "world_per_repeat": 277.23691900926235
+ },
+ {
+  "model": "Landscape\\Roads\\Sanctuary\\SancRoadLoopBrkn01.nif",
+  "shape": "Object018:1",
+  "world_per_repeat": 285.59634244890617
+ },
+ {
+  "model": "Landscape\\Roads\\Sanctuary\\SancRoadLoopBrkn01.nif",
+  "shape": "Object019:1",
+  "world_per_repeat": 252.32335781296172
+ },
+ {
+  "model": "Landscape\\Roads\\Sanctuary\\SancRoadLoopBrkn01.nif",
+  "shape": "Object017:1",
+  "world_per_repeat": 281.37404277127087
+ },
+ {
+  "model": "Landscape\\Roads\\Sanctuary\\SancRoadLoopBrkn01.nif",
+  "shape": "Object021:1",
+  "world_per_repeat": 271.5578036280499
+ },
+ {
+  "model": "Landscape\\Roads\\Sanctuary\\SancRoadLoopBrkn01.nif",
+  "shape": "Object022:1",
+  "world_per_repeat": 381.95192830564343
+ },
+ {
+  "model": "Landscape\\Roads\\Sanctuary\\SancRoadLoopBrkn01.nif",
+  "shape": "Object025:1",
+  "world_per_repeat": 371.84329442932096
+ },
+ {
+  "model": "Landscape\\Roads\\Sanctuary\\SancRoadLoopBrkn01.nif",
+  "shape": "Object024:1",
+  "world_per_repeat": 357.712783899975
+ },
+ {
+  "model": "Landscape\\Roads\\Sanctuary\\SancRoadLoopBrkn01.nif",
+  "shape": "Object023:1",
+  "world_per_repeat": 371.51289869628806
+ },
+ {
+  "model": "Landscape\\Roads\\Sanctuary\\SancRoadLoopBrkn01.nif",
+  "shape": "Object027:1",
+  "world_per_repeat": 319.19508056063256
+ },
+ {
+  "model": "Landscape\\Roads\\Sanctuary\\SancRoadLoopBrkn01.nif",
+  "shape": "Object026:1",
+  "world_per_repeat": 349.02023056546454
+ },
+ {
+  "model": "Landscape\\Roads\\Sanctuary\\SancRoadCrvCustom01.nif",
+  "shape": "Line002:0",
+  "world_per_repeat": 448.5387670575894
+ },
+ {
+  "model": "Landscape\\Roads\\Sanctuary\\SancRoadCrvCustom01.nif",
+  "shape": "Line002:1",
+  "world_per_repeat": 323.05640514471236
+ },
+ {
+  "model": "Landscape\\Roads\\Sanctuary\\SancRoadCrvCustom01.nif",
+  "shape": "Line002:3",
+  "world_per_repeat": 606.7116959344855
+ },
+ {
+  "model": "Landscape\\Roads\\Sanctuary\\SancSidewalkSt02.nif",
+  "shape": "SW008:1",
+  "world_per_repeat": 337.03309851500313
+ },
+ {
+  "model": "Landscape\\Roads\\Sanctuary\\SancRoadStr01.nif",
+  "shape": "Plane006:0",
+  "world_per_repeat": 462.1857420814251
+ },
+ {
+  "model": "Landscape\\Roads\\Sanctuary\\SancRoadStr01.nif",
+  "shape": "Plane006:1",
+  "world_per_repeat": 309.2917506499408
+ },
+ {
+  "model": "Landscape\\Roads\\Sanctuary\\SancRoadStr01.nif",
+  "shape": "Plane006:3",
+  "world_per_repeat": 518.9627601964295
+ },
+ {
+  "model": "Landscape\\Roads\\Sanctuary\\SancRoadStr01DW.nif",
+  "shape": "Plane002:0",
+  "world_per_repeat": 423.87045466521243
+ },
+ {
+  "model": "Landscape\\Roads\\Sanctuary\\SancRoadStr01DW.nif",
+  "shape": "Plane002:1",
+  "world_per_repeat": 307.8398552750678
+ },
+ {
+  "model": "Landscape\\Roads\\Sanctuary\\SancRoadStr01DW.nif",
+  "shape": "Plane002:3",
+  "world_per_repeat": 516.9448078864235
+ },
+ {
+  "model": "Landscape\\Roads\\Sanctuary\\SancRoadDriveway03.nif",
+  "shape": "Box003:0",
+  "world_per_repeat": 343.9667691060997
+ },
+ {
+  "model": "Landscape\\Roads\\Sanctuary\\SancRoadDriveway01.nif",
+  "shape": "Box002:0",
+  "world_per_repeat": 335.79723426790486
+ },
+ {
+  "model": "Landscape\\Roads\\Sanctuary\\SancRoadBlock03.nif",
+  "shape": "Object037:0",
+  "world_per_repeat": 461.62259262718885
+ },
+ {
+  "model": "Landscape\\Roads\\Sanctuary\\SancRoadBlock03.nif",
+  "shape": "Object037:1",
+  "world_per_repeat": 255.94748451158296
+ },
+ {
+  "model": "Landscape\\Roads\\Sanctuary\\SancRoadBlock02.nif",
+  "shape": "Object031:0",
+  "world_per_repeat": 461.7313631851034
+ },
+ {
+  "model": "Landscape\\Roads\\Sanctuary\\SancRoadBlock02.nif",
+  "shape": "Object031:1",
+  "world_per_repeat": 259.0618367528433
+ },
+ {
+  "model": "Landscape\\Roads\\Sanctuary\\SancRoadBlock01.nif",
+  "shape": "Object035:0",
+  "world_per_repeat": 461.84774289502735
+ },
+ {
+  "model": "Landscape\\Roads\\Sanctuary\\SancRoadBlock01.nif",
+  "shape": "Object035:1",
+  "world_per_repeat": 250.58173897078117
+ },
+ {
+  "model": "Landscape\\Roads\\Sanctuary\\SancRoadDriveway02.nif",
+  "shape": "Box004:0",
+  "world_per_repeat": 347.4693469273185
+ },
+ {
+  "model": "Landscape\\Roads\\Sanctuary\\SancRoadCrvCustom02.nif",
+  "shape": "Line003:0",
+  "world_per_repeat": 465.15806868507855
+ },
+ {
+  "model": "Landscape\\Roads\\Sanctuary\\SancRoadCrvCustom02.nif",
+  "shape": "Line003:1",
+  "world_per_repeat": 272.83640009498464
+ },
+ {
+  "model": "Landscape\\Roads\\Sanctuary\\SancRoadCrvCustom02.nif",
+  "shape": "Line003:3",
+  "world_per_repeat": 603.8605679951999
+ },
+ {
+  "model": "Landscape\\Roads\\Sanctuary\\SancSidewalkSt02PreWar.nif",
+  "shape": "SW008:1",
+  "world_per_repeat": 323.27665806462346
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtEnd02.nif",
+  "shape": "L2_RoadASkirtEnd02:3",
+  "world_per_repeat": 192.58916694567156
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtEnd02.nif",
+  "shape": "RoadASkirtEnd02:6 - L2_RoadASkirtEnd02:6",
+  "world_per_repeat": 209.708341588162
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtEnd02.nif",
+  "shape": "RoadASkirtEnd02:8 - L2_RoadASkirtEnd02:8",
+  "world_per_repeat": 304.537856693382
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtEnd02.nif",
+  "shape": "RoadASkirtEnd02:11 - L2_RoadASkirtEnd02:11",
+  "world_per_repeat": 254.087777783089
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtEnd02.nif",
+  "shape": "L2_RoadASkirtEnd02:13",
+  "world_per_repeat": 254.46448936808056
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtCurveR01.nif",
+  "shape": "L2_RoadASkirtCurveR01:3",
+  "world_per_repeat": 281.8921950950077
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtCurveR01.nif",
+  "shape": "RoadASkirtCurveR01:6 - L2_RoadASkirtCurveR01:6",
+  "world_per_repeat": 268.2193882488759
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtCurveR01.nif",
+  "shape": "RoadASkirtCurveR01:8 - L2_RoadASkirtCurveR01:8",
+  "world_per_repeat": 243.32405636367812
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtCurveR01.nif",
+  "shape": "RoadASkirtCurveR01:11 - L2_RoadASkirtCurveR01:11",
+  "world_per_repeat": 257.0138639550814
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtCurveR01.nif",
+  "shape": "L2_RoadASkirtCurveR01:13",
+  "world_per_repeat": 257.143436279739
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtIntTRamp01.nif",
+  "shape": "L2_RoadASkirtIntTRamp01:3",
+  "world_per_repeat": 193.43729737257806
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtIntTRamp01.nif",
+  "shape": "RoadASkirtIntTRamp01:6 - L2_RoadASkirtIntTRamp01:6",
+  "world_per_repeat": 268.84513649241745
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtIntTRamp01.nif",
+  "shape": "RoadASkirtIntTRamp01:8 - L2_RoadASkirtIntTRamp01:8",
+  "world_per_repeat": 375.1376545150177
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtIntTRamp01.nif",
+  "shape": "RoadASkirtIntTRamp01:11 - L2_RoadASkirtIntTRamp01:11",
+  "world_per_repeat": 257.8451790989486
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtIntTRamp01.nif",
+  "shape": "L2_RoadASkirtIntTRamp01:13",
+  "world_per_repeat": 255.23837556717243
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtCurveL01.nif",
+  "shape": "RoadASkirtCurveL01:3 - L2_RoadASkirtCurveL01:3",
+  "world_per_repeat": 308.4941529958195
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtCurveL01.nif",
+  "shape": "RoadASkirtCurveL01:8 - L2_RoadASkirtCurveL01:8",
+  "world_per_repeat": 306.18070872186644
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtCurveL01.nif",
+  "shape": "RoadASkirtCurveL01:6 - L2_RoadASkirtCurveL01:6",
+  "world_per_repeat": 266.50054111941944
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtCurveL01.nif",
+  "shape": "RoadASkirtCurveL01:11 - L2_RoadASkirtCurveL01:11",
+  "world_per_repeat": 256.74603423550127
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtCurveL01.nif",
+  "shape": "L2_RoadASkirtCurveL01:13",
+  "world_per_repeat": 258.1220898038313
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb2x2Cor01.nif",
+  "shape": "L2_SWCurb2x2Cor01:3",
+  "world_per_repeat": 134.23952438401187
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb2x2Cor01.nif",
+  "shape": "SWCurb2x2Cor01:0",
+  "world_per_repeat": 265.27666383440345
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb2x2Cor01.nif",
+  "shape": "L2_SWCurb2x2Cor01:4",
+  "world_per_repeat": 145.18611363023962
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb4x1Str04.nif",
+  "shape": "SWCurb4x1Str04:0 - L2_SWCurb4x1Str04:0",
+  "world_per_repeat": 287.336519718425
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb4x1Str04.nif",
+  "shape": "SWCurb4x1Str04:6",
+  "world_per_repeat": 129.85819829780766
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb4x1Str04.nif",
+  "shape": "L2_SWCurb4x1Str04:3",
+  "world_per_repeat": 108.91205896613835
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb4x1Str04.nif",
+  "shape": "L2_SWCurb4x1Str04:4",
+  "world_per_repeat": 144.02881794194448
+ },
+ {
+  "model": "Landscape\\Roads\\Sanctuary\\SancRoadCrv01.nif",
+  "shape": "Circle001Pre:0",
+  "world_per_repeat": 471.832401327136
+ },
+ {
+  "model": "Landscape\\Roads\\Sanctuary\\SancRoadCrv01.nif",
+  "shape": "Circle001Pre:1",
+  "world_per_repeat": 334.00173772323916
+ },
+ {
+  "model": "Landscape\\Roads\\Sanctuary\\SancRoadCrv01.nif",
+  "shape": "Circle001Pre:3",
+  "world_per_repeat": 468.90945268169014
+ },
+ {
+  "model": "Landscape\\Roads\\Sanctuary\\SancRoadEnd01.nif",
+  "shape": "Plane007:0",
+  "world_per_repeat": 462.1857420814251
+ },
+ {
+  "model": "Landscape\\Roads\\Sanctuary\\SancRoadEnd01.nif",
+  "shape": "Plane007:1",
+  "world_per_repeat": 327.0614713258906
+ },
+ {
+  "model": "Landscape\\Roads\\Sanctuary\\SancRoadEnd01.nif",
+  "shape": "Plane007:3",
+  "world_per_repeat": 537.3333796756219
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb4x1Str01.nif",
+  "shape": "L2_SWCurb4x1Str01:3",
+  "world_per_repeat": 259.0151795327557
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb4x1Str01.nif",
+  "shape": "SWCurb4x1Str01:0",
+  "world_per_repeat": 279.45399665383707
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb4x1Str01.nif",
+  "shape": "L2_SWCurb4x1Str01:4",
+  "world_per_repeat": 143.76220261829593
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb1x1Cor01.nif",
+  "shape": "L2_SWCurb1x1Cor01:4",
+  "world_per_repeat": 147.41257500411302
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb1x1Cor01.nif",
+  "shape": "SWCurb1x1Cor01:0",
+  "world_per_repeat": 311.3433850535259
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb4x1Str03.nif",
+  "shape": "SWCurb4x1Str03:0 - L2_SWCurb4x1Str03:0",
+  "world_per_repeat": 273.3814352698418
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb4x1Str03.nif",
+  "shape": "SWCurb4x1Str03:6",
+  "world_per_repeat": 272.21713588091774
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb4x1Str03.nif",
+  "shape": "L2_SWCurb4x1Str03:3",
+  "world_per_repeat": 110.4736533953817
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb4x1Str03.nif",
+  "shape": "L2_SWCurb4x1Str03:4",
+  "world_per_repeat": 143.23760266285072
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SW4x1Str01.nif",
+  "shape": "SW4x1Str01:0",
+  "world_per_repeat": 256.4461884356579
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtEndRamp01.nif",
+  "shape": "L2_RoadASkirtEndRamp01:3",
+  "world_per_repeat": 257.4516851812529
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtEndRamp01.nif",
+  "shape": "RoadASkirtEndRamp01:6 - L2_RoadASkirtEndRamp01:6",
+  "world_per_repeat": 239.4329483731525
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtEndRamp01.nif",
+  "shape": "RoadASkirtEndRamp01:8 - L2_RoadASkirtEndRamp01:8",
+  "world_per_repeat": 241.523228728859
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtEndRamp01.nif",
+  "shape": "RoadASkirtEndRamp01:11 - L2_RoadASkirtEndRamp01:11",
+  "world_per_repeat": 260.60073518790955
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtEndRamp01.nif",
+  "shape": "L2_RoadASkirtEndRamp01:13",
+  "world_per_repeat": 260.13438850198463
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtEndRamp02.nif",
+  "shape": "L2_RoadASkirtEndRamp02:3",
+  "world_per_repeat": 195.67535006321023
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtEndRamp02.nif",
+  "shape": "RoadASkirtEndRamp02:6 - L2_RoadASkirtEndRamp02:6",
+  "world_per_repeat": 210.1105945033066
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtEndRamp02.nif",
+  "shape": "RoadASkirtEndRamp02:8 - L2_RoadASkirtEndRamp02:8",
+  "world_per_repeat": 328.9733381863555
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtEndRamp02.nif",
+  "shape": "RoadASkirtEndRamp02:11 - L2_RoadASkirtEndRamp02:11",
+  "world_per_repeat": 256.0944343438627
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtEndRamp02.nif",
+  "shape": "L2_RoadASkirtEndRamp02:13",
+  "world_per_repeat": 255.4784869744245
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtCurveRampL01.nif",
+  "shape": "L2_RoadASkirtCurveRampL01:3",
+  "world_per_repeat": 234.0942307645657
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtCurveRampL01.nif",
+  "shape": "RoadASkirtCurveRampL01:6 - L2_RoadASkirtCurveRampL01:6",
+  "world_per_repeat": 267.9916736056569
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtCurveRampL01.nif",
+  "shape": "RoadASkirtCurveRampL01:8 - L2_RoadASkirtCurveRampL01:8",
+  "world_per_repeat": 262.83567712265307
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtCurveRampL01.nif",
+  "shape": "RoadASkirtCurveRampL01:11 - L2_RoadASkirtCurveRampL01:11",
+  "world_per_repeat": 258.30098576241596
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtCurveRampL01.nif",
+  "shape": "L2_RoadASkirtCurveRampL01:13",
+  "world_per_repeat": 257.2783795779538
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtCurveRampR01.nif",
+  "shape": "L2_RoadASkirtCurveRampR01:3",
+  "world_per_repeat": 255.72678067562032
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtCurveRampR01.nif",
+  "shape": "RoadASkirtCurveRampR01:6 - L2_RoadASkirtCurveRampR01:6",
+  "world_per_repeat": 270.1011399983149
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtCurveRampR01.nif",
+  "shape": "RoadASkirtCurveRampR01:8 - L2_RoadASkirtCurveRampR01:8",
+  "world_per_repeat": 247.13648714864564
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtCurveRampR01.nif",
+  "shape": "RoadASkirtCurveRampR01:11 - L2_RoadASkirtCurveRampR01:11",
+  "world_per_repeat": 258.3452878512798
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtCurveRampR01.nif",
+  "shape": "L2_RoadASkirtCurveRampR01:13",
+  "world_per_repeat": 257.2922735575121
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWIsland9x1Str01.nif",
+  "shape": "L2_SWIsland9x1Str01:4",
+  "world_per_repeat": 141.39325844061761
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWIsland9x1Str01.nif",
+  "shape": "SWIsland9x1Str01:0",
+  "world_per_repeat": 256.7258898765647
+ },
+ {
+  "model": "Landscape\\Roads\\RoadAChunk04.nif",
+  "shape": "L2_RoadAChunk04:3",
+  "world_per_repeat": 231.8739661276514
+ },
+ {
+  "model": "Landscape\\Roads\\RoadAChunk04.nif",
+  "shape": "L2_RoadAChunk04:6",
+  "world_per_repeat": 145.31718506905364
+ },
+ {
+  "model": "Landscape\\Roads\\RoadAChunk04.nif",
+  "shape": "L2_RoadAChunk04:8",
+  "world_per_repeat": 204.29397895808904
+ },
+ {
+  "model": "Landscape\\Roads\\RoadAChunk04.nif",
+  "shape": "L2_RoadAChunk04:11",
+  "world_per_repeat": 255.90460448903085
+ },
+ {
+  "model": "Landscape\\Roads\\RoadAChunk03.nif",
+  "shape": "L2_RoadAChunk03:3",
+  "world_per_repeat": 228.92495802832502
+ },
+ {
+  "model": "Landscape\\Roads\\RoadAChunk03.nif",
+  "shape": "L2_RoadAChunk03:6",
+  "world_per_repeat": 143.69998644229563
+ },
+ {
+  "model": "Landscape\\Roads\\RoadAChunk03.nif",
+  "shape": "L2_RoadAChunk03:8",
+  "world_per_repeat": 225.15468453413462
+ },
+ {
+  "model": "Landscape\\Roads\\RoadAChunk03.nif",
+  "shape": "L2_RoadAChunk03:11",
+  "world_per_repeat": 255.9717150305243
+ },
+ {
+  "model": "Landscape\\Roads\\RoadAChunk02.nif",
+  "shape": "L2_RoadAChunk02:3",
+  "world_per_repeat": 273.8787707702813
+ },
+ {
+  "model": "Landscape\\Roads\\RoadAChunk02.nif",
+  "shape": "L2_RoadAChunk02:6",
+  "world_per_repeat": 310.5749984379218
+ },
+ {
+  "model": "Landscape\\Roads\\RoadAChunk02.nif",
+  "shape": "L2_RoadAChunk02:8",
+  "world_per_repeat": 217.40608418206455
+ },
+ {
+  "model": "Landscape\\Roads\\RoadAChunk02.nif",
+  "shape": "L2_RoadAChunk02:11",
+  "world_per_repeat": 268.5087122441406
+ },
+ {
+  "model": "Landscape\\Roads\\RoadAChunk02.nif",
+  "shape": "L2_RoadAChunk02:13",
+  "world_per_repeat": 269.7190955767417
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtEnd01.nif",
+  "shape": "L2_RoadASkirtEnd01:3",
+  "world_per_repeat": 253.64425600483347
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtEnd01.nif",
+  "shape": "RoadASkirtEnd01:6 - L2_RoadASkirtEnd01:6",
+  "world_per_repeat": 236.42849543444174
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtEnd01.nif",
+  "shape": "RoadASkirtEnd01:8 - L2_RoadASkirtEnd01:8",
+  "world_per_repeat": 238.5661755522493
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtEnd01.nif",
+  "shape": "RoadASkirtEnd01:11 - L2_RoadASkirtEnd01:11",
+  "world_per_repeat": 256.944947884533
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtEnd01.nif",
+  "shape": "L2_RoadASkirtEnd01:13",
+  "world_per_repeat": 255.99953050307707
+ },
+ {
+  "model": "Landscape\\Roads\\RoadAChunk01.nif",
+  "shape": "L2_RoadAChunk01:3",
+  "world_per_repeat": 238.7806572724265
+ },
+ {
+  "model": "Landscape\\Roads\\RoadAChunk01.nif",
+  "shape": "L2_RoadAChunk01:6",
+  "world_per_repeat": 146.858265000548
+ },
+ {
+  "model": "Landscape\\Roads\\RoadAChunk01.nif",
+  "shape": "L2_RoadAChunk01:8",
+  "world_per_repeat": 213.92055044843048
+ },
+ {
+  "model": "Landscape\\Roads\\RoadAChunk01.nif",
+  "shape": "L2_RoadAChunk01:11",
+  "world_per_repeat": 246.53853139983786
+ },
+ {
+  "model": "Landscape\\Roads\\RoadAChunk01.nif",
+  "shape": "L2_RoadAChunk01:13",
+  "world_per_repeat": 252.7628984964881
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtCurveL02.nif",
+  "shape": "L2_RoadASkirtCurveL02:3",
+  "world_per_repeat": 229.71195511461613
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtCurveL02.nif",
+  "shape": "RoadASkirtCurveL02:6 - L2_RoadASkirtCurveL02:6",
+  "world_per_repeat": 264.22292409137697
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtCurveL02.nif",
+  "shape": "RoadASkirtCurveL02:8 - L2_RoadASkirtCurveL02:8",
+  "world_per_repeat": 312.65378658216144
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtCurveL02.nif",
+  "shape": "RoadASkirtCurveL02:11 - L2_RoadASkirtCurveL02:11",
+  "world_per_repeat": 256.30887774323895
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtCurveL02.nif",
+  "shape": "L2_RoadASkirtCurveL02:13",
+  "world_per_repeat": 255.59181393707087
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb1x1Str02.nif",
+  "shape": "L2_SWCurb1x1Str02:4",
+  "world_per_repeat": 144.9675878824371
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb1x1Str02.nif",
+  "shape": "SWCurb1x1Str02:0",
+  "world_per_repeat": 271.61329314333346
+ },
+ {
+  "model": "Landscape\\Roads\\RoadASkirtRampUpOpen01.nif",
+  "shape": "L2_RoadASkirtRampUpOpen01:3",
+  "world_per_repeat": 232.81619997875225
+ },
+ {
+  "model": "Landscape\\Roads\\RoadASkirtRampUpOpen01.nif",
+  "shape": "RoadASkirtRampUpOpen01:6 - L2_RoadASkirtRampUpOpen01:6",
+  "world_per_repeat": 253.7783004618218
+ },
+ {
+  "model": "Landscape\\Roads\\RoadASkirtRampUpOpen01.nif",
+  "shape": "RoadASkirtRampUpOpen01:8 - L2_RoadASkirtRampUpOpen01:8",
+  "world_per_repeat": 398.5210469935213
+ },
+ {
+  "model": "Landscape\\Roads\\RoadASkirtRampUpOpen01.nif",
+  "shape": "RoadASkirtRampUpOpen01:11 - L2_RoadASkirtRampUpOpen01:11",
+  "world_per_repeat": 260.40431858367896
+ },
+ {
+  "model": "Landscape\\Roads\\RoadASkirtRampUpOpen01.nif",
+  "shape": "L2_RoadASkirtRampUpOpen01:13",
+  "world_per_repeat": 262.0814800916847
+ },
+ {
+  "model": "Landscape\\Roads\\City\\RoadCurve02a.nif",
+  "shape": "L2_RoadCurve02a:3",
+  "world_per_repeat": 218.85676627303437
+ },
+ {
+  "model": "Landscape\\Roads\\City\\RoadCurve02a.nif",
+  "shape": "RoadCurve02a:6 - L2_RoadCurve02a:6",
+  "world_per_repeat": 270.44823529333735
+ },
+ {
+  "model": "Landscape\\Roads\\City\\RoadCurve02a.nif",
+  "shape": "RoadCurve02a:8 - L2_RoadCurve02a:8",
+  "world_per_repeat": 319.1315857939133
+ },
+ {
+  "model": "Landscape\\Roads\\City\\RoadCurve02a.nif",
+  "shape": "RoadCurve02a:11 - L2_RoadCurve02a:11",
+  "world_per_repeat": 256.27459494559616
+ },
+ {
+  "model": "Landscape\\Roads\\City\\RoadCurve02a.nif",
+  "shape": "L2_RoadCurve02a:13",
+  "world_per_repeat": 254.0139574332104
+ },
+ {
+  "model": "Landscape\\Roads\\City\\RoadCurve01b.nif",
+  "shape": "l2_RoadCurve01b:3",
+  "world_per_repeat": 215.44707547383004
+ },
+ {
+  "model": "Landscape\\Roads\\City\\RoadCurve01b.nif",
+  "shape": "RoadCurve01b:6 - l2_RoadCurve01b:6",
+  "world_per_repeat": 253.8705328128471
+ },
+ {
+  "model": "Landscape\\Roads\\City\\RoadCurve01b.nif",
+  "shape": "RoadCurve01b:8 - l2_RoadCurve01b:8",
+  "world_per_repeat": 297.760929362994
+ },
+ {
+  "model": "Landscape\\Roads\\City\\RoadCurve01b.nif",
+  "shape": "RoadCurve01b:11 - l2_RoadCurve01b:11",
+  "world_per_repeat": 256.100802071325
+ },
+ {
+  "model": "Landscape\\Roads\\City\\RoadCurve01b.nif",
+  "shape": "l2_RoadCurve01b:13",
+  "world_per_repeat": 257.5500847021294
+ },
+ {
+  "model": "Landscape\\Roads\\RoadAChunk05.nif",
+  "shape": "L2_RoadAChunk05:3",
+  "world_per_repeat": 232.58416709457404
+ },
+ {
+  "model": "Landscape\\Roads\\RoadAChunk05.nif",
+  "shape": "L2_RoadAChunk05:6",
+  "world_per_repeat": 263.9599149595038
+ },
+ {
+  "model": "Landscape\\Roads\\RoadAChunk05.nif",
+  "shape": "L2_RoadAChunk05:8",
+  "world_per_repeat": 168.5626808966695
+ },
+ {
+  "model": "Landscape\\Roads\\RoadAChunk05.nif",
+  "shape": "L2_RoadAChunk05:11",
+  "world_per_repeat": 257.1691541655775
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtStr03.nif",
+  "shape": "L2_RoadASkirtStr03:3",
+  "world_per_repeat": 253.01423742061147
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtStr03.nif",
+  "shape": "RoadASkirtStr03:6 - L2_RoadASkirtStr03:6",
+  "world_per_repeat": 246.01168279574622
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtStr03.nif",
+  "shape": "RoadASkirtStr03:8 - L2_RoadASkirtStr03:8",
+  "world_per_repeat": 246.8784629946118
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtStr03.nif",
+  "shape": "RoadASkirtStr03:11 - L2_RoadASkirtStr03:11",
+  "world_per_repeat": 256.6538357333798
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtStr03.nif",
+  "shape": "L2_RoadASkirtStr03:13",
+  "world_per_repeat": 256.36650303202
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtShiftR01.nif",
+  "shape": "L2_RoadASkirtShiftR01:3",
+  "world_per_repeat": 286.0975144768755
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtShiftR01.nif",
+  "shape": "RoadASkirtShiftR01:6 - L2_RoadASkirtShiftR01:6",
+  "world_per_repeat": 259.48700400783747
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtShiftR01.nif",
+  "shape": "RoadASkirtShiftR01:8 - L2_RoadASkirtShiftR01:8",
+  "world_per_repeat": 291.2922043457398
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtShiftR01.nif",
+  "shape": "RoadASkirtShiftR01:11 - L2_RoadASkirtShiftR01:11",
+  "world_per_repeat": 257.28092526726573
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtShiftR01.nif",
+  "shape": "L2_RoadASkirtShiftR01:13",
+  "world_per_repeat": 258.835081561074
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtStr04.nif",
+  "shape": "L2_RoadASkirtStr04:3",
+  "world_per_repeat": 248.63983254188352
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtStr04.nif",
+  "shape": "RoadASkirtStr04:6 - L2_RoadASkirtStr04:6",
+  "world_per_repeat": 243.8989092345625
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtStr04.nif",
+  "shape": "RoadASkirtStr04:8 - L2_RoadASkirtStr04:8",
+  "world_per_repeat": 275.28150426442295
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtStr04.nif",
+  "shape": "RoadASkirtStr04:11 - L2_RoadASkirtStr04:11",
+  "world_per_repeat": 256.86751446185497
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtStr04.nif",
+  "shape": "L2_RoadASkirtStr04:13",
+  "world_per_repeat": 255.59518211815137
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb2x1Str01.nif",
+  "shape": "L2_SWCurb2x1Str01:4",
+  "world_per_repeat": 143.27329122443092
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb2x1Str01.nif",
+  "shape": "SWCurb2x1Str01:0",
+  "world_per_repeat": 273.7685777820953
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtStrShort01.nif",
+  "shape": "L2_RoadASkirtStrShort01:3",
+  "world_per_repeat": 205.0764151717963
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtStrShort01.nif",
+  "shape": "RoadASkirtStrShort01:6 - L2_RoadASkirtStrShort01:6",
+  "world_per_repeat": 224.93543347917011
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtStrShort01.nif",
+  "shape": "RoadASkirtStrShort01:8 - L2_RoadASkirtStrShort01:8",
+  "world_per_repeat": 245.73096604008109
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtStrShort01.nif",
+  "shape": "RoadASkirtStrShort01:11 - L2_RoadASkirtStrShort01:11",
+  "world_per_repeat": 256.71113706290555
+ },
+ {
+  "model": "Landscape\\Roads\\City\\Road3Way01.nif",
+  "shape": "L2_Road3Way01:3",
+  "world_per_repeat": 232.3991825854502
+ },
+ {
+  "model": "Landscape\\Roads\\City\\Road3Way01.nif",
+  "shape": "Road3Way01:6 - L2_Road3Way01:6",
+  "world_per_repeat": 241.9471326341205
+ },
+ {
+  "model": "Landscape\\Roads\\City\\Road3Way01.nif",
+  "shape": "Road3Way01:8 - L2_Road3Way01:8",
+  "world_per_repeat": 291.163353587472
+ },
+ {
+  "model": "Landscape\\Roads\\City\\Road3Way01.nif",
+  "shape": "Road3Way01:11 - L2_Road3Way01:11",
+  "world_per_repeat": 256.76207780527864
+ },
+ {
+  "model": "Landscape\\Roads\\City\\Road3Way01.nif",
+  "shape": "L2_Road3Way01:13",
+  "world_per_repeat": 255.7720308697584
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurbCor01Grass.nif",
+  "shape": "SWCurbCor01Grass:0 - L2_SWCurbCor01Grass:0",
+  "world_per_repeat": 278.0918178680387
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurbCor01Grass.nif",
+  "shape": "SWCurbCor01Grass:6",
+  "world_per_repeat": 266.54719243189663
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurbCor01Grass.nif",
+  "shape": "SWCurbCor01Grass:16",
+  "world_per_repeat": 257.15710632510303
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurbCor01Grass.nif",
+  "shape": "L2_SWCurbCor01Grass:3",
+  "world_per_repeat": 124.39865631033018
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurbCor01Grass.nif",
+  "shape": "L2_SWCurbCor01Grass:4",
+  "world_per_repeat": 144.4633096694394
+ },
+ {
+  "model": "Landscape\\Roads\\RoadASkirtCurveSharpR01.nif",
+  "shape": "RoadASkirtCurveSharpR01:3",
+  "world_per_repeat": 228.7856148707189
+ },
+ {
+  "model": "Landscape\\Roads\\RoadASkirtCurveSharpR01.nif",
+  "shape": "RoadASkirtCurveSharpR01:6",
+  "world_per_repeat": 246.93989257569464
+ },
+ {
+  "model": "Landscape\\Roads\\RoadASkirtCurveSharpR01.nif",
+  "shape": "RoadASkirtCurveSharpR01:8",
+  "world_per_repeat": 322.1037505061852
+ },
+ {
+  "model": "Landscape\\Roads\\RoadASkirtCurveSharpR01.nif",
+  "shape": "RoadASkirtCurveSharpR01:11",
+  "world_per_repeat": 266.7527782189759
+ },
+ {
+  "model": "Landscape\\Roads\\RoadASkirtCurveSharpR01.nif",
+  "shape": "RoadASkirtCurveSharpR01:13",
+  "world_per_repeat": 254.59959477497176
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurbCorSlope02RGrass.nif",
+  "shape": "SWCurbCorSlope02RGrass:0 - L2_SWCurbCorSlope02RGrass:0",
+  "world_per_repeat": 279.4284107568813
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurbCorSlope02RGrass.nif",
+  "shape": "SWCurbCorSlope02RGrass:6",
+  "world_per_repeat": 270.23404156518626
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurbCorSlope02RGrass.nif",
+  "shape": "SWCurbCorSlope02RGrass:16",
+  "world_per_repeat": 262.32546935871
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurbCorSlope02RGrass.nif",
+  "shape": "L2_SWCurbCorSlope02RGrass:3",
+  "world_per_repeat": 137.17738380224705
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurbCorSlope02RGrass.nif",
+  "shape": "L2_SWCurbCorSlope02RGrass:4",
+  "world_per_repeat": 144.90408289432065
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtRamp01.nif",
+  "shape": "L2_RoadASkirtRamp01:3",
+  "world_per_repeat": 287.4697766255636
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtRamp01.nif",
+  "shape": "RoadASkirtRamp01:6 - L2_RoadASkirtRamp01:6",
+  "world_per_repeat": 270.2988707763968
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtRamp01.nif",
+  "shape": "RoadASkirtRamp01:8 - L2_RoadASkirtRamp01:8",
+  "world_per_repeat": 293.9557751021074
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtRamp01.nif",
+  "shape": "RoadASkirtRamp01:11 - L2_RoadASkirtRamp01:11",
+  "world_per_repeat": 258.8572910182764
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtRamp01.nif",
+  "shape": "L2_RoadASkirtRamp01:13",
+  "world_per_repeat": 258.37377128919604
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtCurveR02.nif",
+  "shape": "L2_RoadASkirtCurveR02:3",
+  "world_per_repeat": 232.53006989032195
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtCurveR02.nif",
+  "shape": "RoadASkirtCurveR02:6 - L2_RoadASkirtCurveR02:6",
+  "world_per_repeat": 266.42517742347115
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtCurveR02.nif",
+  "shape": "RoadASkirtCurveR02:8 - L2_RoadASkirtCurveR02:8",
+  "world_per_repeat": 315.5235399451393
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtCurveR02.nif",
+  "shape": "RoadASkirtCurveR02:11 - L2_RoadASkirtCurveR02:11",
+  "world_per_repeat": 256.4187311848577
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtCurveR02.nif",
+  "shape": "L2_RoadASkirtCurveR02:13",
+  "world_per_repeat": 257.56929436744906
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtRampShiftR01.nif",
+  "shape": "L2_RoadASkirtRampShiftR01:3",
+  "world_per_repeat": 250.1393277461569
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtRampShiftR01.nif",
+  "shape": "RoadASkirtRampShiftR01:6 - L2_RoadASkirtRampShiftR01:6",
+  "world_per_repeat": 244.62135886531996
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtRampShiftR01.nif",
+  "shape": "RoadASkirtRampShiftR01:8 - L2_RoadASkirtRampShiftR01:8",
+  "world_per_repeat": 277.47062640777636
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtRampShiftR01.nif",
+  "shape": "RoadASkirtRampShiftR01:11 - L2_RoadASkirtRampShiftR01:11",
+  "world_per_repeat": 258.3883985285004
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtRampShiftR01.nif",
+  "shape": "L2_RoadASkirtRampShiftR01:13",
+  "world_per_repeat": 257.43608752293335
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtStr01.nif",
+  "shape": "L2_RoadASkirtStr01:3",
+  "world_per_repeat": 229.55889611349758
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtStr01.nif",
+  "shape": "RoadASkirtStr01:6 - L2_RoadASkirtStr01:6",
+  "world_per_repeat": 250.72900836784171
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtStr01.nif",
+  "shape": "RoadASkirtStr01:8 - L2_RoadASkirtStr01:8",
+  "world_per_repeat": 394.4342841599602
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtStr01.nif",
+  "shape": "RoadASkirtStr01:11 - L2_RoadASkirtStr01:11",
+  "world_per_repeat": 256.0556944321372
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtStr01.nif",
+  "shape": "L2_RoadASkirtStr01:13",
+  "world_per_repeat": 255.91614737306588
+ },
+ {
+  "model": "Landscape\\Roads\\RoadAChunk06.nif",
+  "shape": "L2_RoadAChunk06:3",
+  "world_per_repeat": 167.0789383010028
+ },
+ {
+  "model": "Landscape\\Roads\\RoadAChunk06.nif",
+  "shape": "L2_RoadAChunk06:6",
+  "world_per_repeat": 230.98800666130768
+ },
+ {
+  "model": "Landscape\\Roads\\RoadAChunk06.nif",
+  "shape": "L2_RoadAChunk06:8",
+  "world_per_repeat": 179.63196425716302
+ },
+ {
+  "model": "Landscape\\Roads\\RoadAChunk06.nif",
+  "shape": "L2_RoadAChunk06:11",
+  "world_per_repeat": 270.3143061425104
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtIntT01.nif",
+  "shape": "L2_RoadASkirtIntT01:3",
+  "world_per_repeat": 192.57259157470284
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtIntT01.nif",
+  "shape": "RoadASkirtIntT01:6 - L2_RoadASkirtIntT01:6",
+  "world_per_repeat": 266.81368427624056
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtIntT01.nif",
+  "shape": "RoadASkirtIntT01:8 - L2_RoadASkirtIntT01:8",
+  "world_per_repeat": 332.40734804339985
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtIntT01.nif",
+  "shape": "RoadASkirtIntT01:11 - L2_RoadASkirtIntT01:11",
+  "world_per_repeat": 257.97044504977475
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtIntT01.nif",
+  "shape": "L2_RoadASkirtIntT01:13",
+  "world_per_repeat": 255.8020510561119
+ },
+ {
+  "model": "Landscape\\Roads\\City\\RoadEnd02a.nif",
+  "shape": "L2_RoadEnd02a:3",
+  "world_per_repeat": 215.23397112474564
+ },
+ {
+  "model": "Landscape\\Roads\\City\\RoadEnd02a.nif",
+  "shape": "RoadEnd02a:6 - L2_RoadEnd02a:6",
+  "world_per_repeat": 230.1430548092515
+ },
+ {
+  "model": "Landscape\\Roads\\City\\RoadEnd02a.nif",
+  "shape": "RoadEnd02a:8 - L2_RoadEnd02a:8",
+  "world_per_repeat": 238.83551699573647
+ },
+ {
+  "model": "Landscape\\Roads\\City\\RoadEnd02a.nif",
+  "shape": "RoadEnd02a:11 - L2_RoadEnd02a:11",
+  "world_per_repeat": 255.87704292672979
+ },
+ {
+  "model": "Landscape\\Roads\\RoadAIntYCurveTransAlley02.nif",
+  "shape": "L2_RoadAIntYCurveTransAlley02:3",
+  "world_per_repeat": 228.9158360250515
+ },
+ {
+  "model": "Landscape\\Roads\\RoadAIntYCurveTransAlley02.nif",
+  "shape": "RoadAIntYCurveTransAlley02:6 - L2_RoadAIntYCurveTransAlley02:6",
+  "world_per_repeat": 254.6940399107488
+ },
+ {
+  "model": "Landscape\\Roads\\RoadAIntYCurveTransAlley02.nif",
+  "shape": "RoadAIntYCurveTransAlley02:8 - L2_RoadAIntYCurveTransAlley02:8",
+  "world_per_repeat": 259.09118675567146
+ },
+ {
+  "model": "Landscape\\Roads\\RoadAIntYCurveTransAlley02.nif",
+  "shape": "RoadAIntYCurveTransAlley02:11 - L2_RoadAIntYCurveTransAlley02:11",
+  "world_per_repeat": 269.93525988448437
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb2x2StrTree01.nif",
+  "shape": "SWCurb2x2StrTree01:0 - L2_SWCurb2x2StrTree01:0",
+  "world_per_repeat": 262.66019259779483
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb2x2StrTree01.nif",
+  "shape": "SWCurb2x2StrTree01:6",
+  "world_per_repeat": 128.217214704484
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb2x2StrTree01.nif",
+  "shape": "L2_SWCurb2x2StrTree01:3",
+  "world_per_repeat": 104.88767105699488
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb2x2StrTree01.nif",
+  "shape": "L2_SWCurb2x2StrTree01:4",
+  "world_per_repeat": 143.46538607400825
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SW4x2Str02.nif",
+  "shape": "SW4x2Str02:0 - L2_SW4x2Str02:0",
+  "world_per_repeat": 254.30915749072932
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SW4x2Str02.nif",
+  "shape": "SW4x2Str02:6",
+  "world_per_repeat": 257.2117671033401
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SW4x2Str02.nif",
+  "shape": "L2_SW4x2Str02:3",
+  "world_per_repeat": 105.12847179384302
+ },
+ {
+  "model": "Landscape\\Roads\\Alley\\RoadAlleyEnd01a.nif",
+  "shape": "L2_RoadAlleyEnd01a:3",
+  "world_per_repeat": 202.73406653608544
+ },
+ {
+  "model": "Landscape\\Roads\\Alley\\RoadAlleyEnd01a.nif",
+  "shape": "RoadAlleyEnd01a:6 - L2_RoadAlleyEnd01a:6",
+  "world_per_repeat": 238.43724823491587
+ },
+ {
+  "model": "Landscape\\Roads\\Alley\\RoadAlleyEnd01a.nif",
+  "shape": "RoadAlleyEnd01a:8 - L2_RoadAlleyEnd01a:8",
+  "world_per_repeat": 231.01921966391123
+ },
+ {
+  "model": "Landscape\\Roads\\Alley\\RoadAlleyEnd01a.nif",
+  "shape": "RoadAlleyEnd01a:11 - L2_RoadAlleyEnd01a:11",
+  "world_per_repeat": 255.9601843245083
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb4x2CorAngle01Free.nif",
+  "shape": "SWCurb4x2CorAngle01Free:0 - L2_SWCurb4x2CorAngle01Free:0",
+  "world_per_repeat": 270.02422063776453
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb4x2CorAngle01Free.nif",
+  "shape": "SWCurb4x2CorAngle01Free:6",
+  "world_per_repeat": 128.96042964599786
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb4x2CorAngle01Free.nif",
+  "shape": "L2_SWCurb4x2CorAngle01Free:3",
+  "world_per_repeat": 109.06461041123322
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb4x2CorAngle01Free.nif",
+  "shape": "L2_SWCurb4x2CorAngle01Free:4",
+  "world_per_repeat": 144.98036155361098
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb8x1ShiftR02.nif",
+  "shape": "SWCurb8x1ShiftR02:0 - L2_SWCurb8x1ShiftR02:0",
+  "world_per_repeat": 270.265367971068
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb8x1ShiftR02.nif",
+  "shape": "SWCurb8x1ShiftR02:6",
+  "world_per_repeat": 186.79102511466482
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb8x1ShiftR02.nif",
+  "shape": "L2_SWCurb8x1ShiftR02:3",
+  "world_per_repeat": 120.79006482047603
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb8x1ShiftR02.nif",
+  "shape": "L2_SWCurb8x1ShiftR02:4",
+  "world_per_repeat": 143.54088927703202
+ },
+ {
+  "model": "Landscape\\Roads\\City\\RoadStr01ShiftR01.nif",
+  "shape": "L2_RoadStr01ShiftR01:3",
+  "world_per_repeat": 217.6754978592694
+ },
+ {
+  "model": "Landscape\\Roads\\City\\RoadStr01ShiftR01.nif",
+  "shape": "RoadStr01ShiftR01:6 - L2_RoadStr01ShiftR01:6",
+  "world_per_repeat": 229.3333154457776
+ },
+ {
+  "model": "Landscape\\Roads\\City\\RoadStr01ShiftR01.nif",
+  "shape": "RoadStr01ShiftR01:8 - L2_RoadStr01ShiftR01:8",
+  "world_per_repeat": 241.92602945454243
+ },
+ {
+  "model": "Landscape\\Roads\\City\\RoadStr01ShiftR01.nif",
+  "shape": "RoadStr01ShiftR01:11 - L2_RoadStr01ShiftR01:11",
+  "world_per_repeat": 256.378974049882
+ },
+ {
+  "model": "Landscape\\Roads\\City\\RoadStr01ShiftR01.nif",
+  "shape": "L2_RoadStr01ShiftR01:13",
+  "world_per_repeat": 254.06728330962065
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb8x1ShiftR01.nif",
+  "shape": "SWCurb8x1ShiftR01:0 - L2_SWCurb8x1ShiftR01:0",
+  "world_per_repeat": 269.68631804474563
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb8x1ShiftR01.nif",
+  "shape": "SWCurb8x1ShiftR01:6",
+  "world_per_repeat": 271.2814327178594
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb8x1ShiftR01.nif",
+  "shape": "L2_SWCurb8x1ShiftR01:3",
+  "world_per_repeat": 149.83843007307013
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb8x1ShiftR01.nif",
+  "shape": "L2_SWCurb8x1ShiftR01:4",
+  "world_per_repeat": 143.98204278403009
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb4x1EndL01Grass.nif",
+  "shape": "SWCurb4x1EndL01Grass:0 - L2_SWCurb4x1EndL01Grass:0",
+  "world_per_repeat": 291.38597115759507
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb4x1EndL01Grass.nif",
+  "shape": "SWCurb4x1EndL01Grass:6",
+  "world_per_repeat": 128.68010606315718
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb4x1EndL01Grass.nif",
+  "shape": "SWCurb4x1EndL01Grass:16",
+  "world_per_repeat": 264.32052896704164
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb4x1EndL01Grass.nif",
+  "shape": "L2_SWCurb4x1EndL01Grass:3",
+  "world_per_repeat": 110.15595307217585
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb4x1EndL01Grass.nif",
+  "shape": "L2_SWCurb4x1EndL01Grass:4",
+  "world_per_repeat": 144.61278327890201
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb8x1Str02.nif",
+  "shape": "SWCurb8x1Str02:0 - L2_SWCurb8x1Str02:0",
+  "world_per_repeat": 274.9428024637001
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb8x1Str02.nif",
+  "shape": "SWCurb8x1Str02:6",
+  "world_per_repeat": 272.2225303037254
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb8x1Str02.nif",
+  "shape": "L2_SWCurb8x1Str02:3",
+  "world_per_repeat": 126.47082389176246
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb8x1Str02.nif",
+  "shape": "L2_SWCurb8x1Str02:4",
+  "world_per_repeat": 145.46261396534547
+ },
+ {
+  "model": "Landscape\\Roads\\Alley\\RoadAlley1Way01.nif",
+  "shape": "L2_RoadAlley1Way01:3",
+  "world_per_repeat": 248.3025637954681
+ },
+ {
+  "model": "Landscape\\Roads\\Alley\\RoadAlley1Way01.nif",
+  "shape": "RoadAlley1Way01:6 - L2_RoadAlley1Way01:6",
+  "world_per_repeat": 229.3471913118527
+ },
+ {
+  "model": "Landscape\\Roads\\Alley\\RoadAlley1Way01.nif",
+  "shape": "RoadAlley1Way01:8 - L2_RoadAlley1Way01:8",
+  "world_per_repeat": 326.68336463307975
+ },
+ {
+  "model": "Landscape\\Roads\\Alley\\RoadAlley1Way01.nif",
+  "shape": "RoadAlley1Way01:11 - L2_RoadAlley1Way01:11",
+  "world_per_repeat": 255.43967069518894
+ },
+ {
+  "model": "Landscape\\Roads\\Alley\\RoadAlley1Way01.nif",
+  "shape": "L2_RoadAlley1Way01:13",
+  "world_per_repeat": 255.20459826239653
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb8x1Str03.nif",
+  "shape": "SWCurb8x1Str03:0 - L2_SWCurb8x1Str03:0",
+  "world_per_repeat": 275.450525094011
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb8x1Str03.nif",
+  "shape": "SWCurb8x1Str03:6",
+  "world_per_repeat": 270.35122750043627
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb8x1Str03.nif",
+  "shape": "L2_SWCurb8x1Str03:3",
+  "world_per_repeat": 159.50254426170417
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb8x1Str03.nif",
+  "shape": "L2_SWCurb8x1Str03:4",
+  "world_per_repeat": 145.53718335575047
+ },
+ {
+  "model": "Landscape\\Roads\\City\\RoadEnd02b.nif",
+  "shape": "L2_RoadEnd02b:3",
+  "world_per_repeat": 229.2261464273237
+ },
+ {
+  "model": "Landscape\\Roads\\City\\RoadEnd02b.nif",
+  "shape": "RoadEnd02b:6 - L2_RoadEnd02b:6",
+  "world_per_repeat": 219.32004062783793
+ },
+ {
+  "model": "Landscape\\Roads\\City\\RoadEnd02b.nif",
+  "shape": "RoadEnd02b:8 - L2_RoadEnd02b:8",
+  "world_per_repeat": 246.83441462398656
+ },
+ {
+  "model": "Landscape\\Roads\\City\\RoadEnd02b.nif",
+  "shape": "RoadEnd02b:11 - L2_RoadEnd02b:11",
+  "world_per_repeat": 256.0668886534117
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb8x1Ramp01.nif",
+  "shape": "SWCurb8x1Ramp01:0 - L2_SWCurb8x1Ramp01:0",
+  "world_per_repeat": 276.41549087719966
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb8x1Ramp01.nif",
+  "shape": "SWCurb8x1Ramp01:6",
+  "world_per_repeat": 271.74477541386597
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb8x1Ramp01.nif",
+  "shape": "L2_SWCurb8x1Ramp01:3",
+  "world_per_repeat": 159.89068825345058
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb8x1Ramp01.nif",
+  "shape": "L2_SWCurb8x1Ramp01:4",
+  "world_per_repeat": 145.965372661194
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb2x1EndR01.nif",
+  "shape": "SWCurb2x1EndR01:0",
+  "world_per_repeat": 271.9746900182027
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb2x1EndR01.nif",
+  "shape": "SWCurb2x1EndR01:6",
+  "world_per_repeat": 183.60820346137498
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb2x1CurveR01.nif",
+  "shape": "L2_SWCurb2x1CurveR01:3",
+  "world_per_repeat": 137.19611922132577
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb2x1CurveR01.nif",
+  "shape": "SWCurb2x1CurveR01:0 - L2_SWCurb2x1CurveR002:0",
+  "world_per_repeat": 269.68570152261304
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb2x1CurveR01.nif",
+  "shape": "SWCurb2x1CurveR01:6",
+  "world_per_repeat": 278.5786866917001
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb2x1CurveR01.nif",
+  "shape": "L2_SWCurb2x1CurveR002:4",
+  "world_per_repeat": 133.11766305145886
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb4x2EndR01.nif",
+  "shape": "SWCurb4x2EndR01:0 - L2_SWCurb4x2EndR01:0",
+  "world_per_repeat": 265.8299844993336
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb4x2EndR01.nif",
+  "shape": "SWCurb4x2EndR01:6",
+  "world_per_repeat": 153.61456885007686
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb4x2EndR01.nif",
+  "shape": "L2_SWCurb4x2EndR01:3",
+  "world_per_repeat": 104.32219690466711
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb4x2EndR01.nif",
+  "shape": "L2_SWCurb4x2EndR01:4",
+  "world_per_repeat": 143.23760266285072
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb4x2EndL01.nif",
+  "shape": "SWCurb4x2EndL01:0 - L2_SWCurb4x2EndL01:0",
+  "world_per_repeat": 272.1836712258314
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb4x2EndL01.nif",
+  "shape": "SWCurb4x2EndL01:6",
+  "world_per_repeat": 129.75430831914517
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb4x2EndL01.nif",
+  "shape": "L2_SWCurb4x2EndL01:3",
+  "world_per_repeat": 101.09943312256178
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb4x2EndL01.nif",
+  "shape": "L2_SWCurb4x2EndL01:4",
+  "world_per_repeat": 144.61278327890201
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb4x2CurveR01.nif",
+  "shape": "SWCurb4x2CurveR01:0 - L2_SWCurb4x2CurveR01:0",
+  "world_per_repeat": 274.3638163596624
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb4x2CurveR01.nif",
+  "shape": "SWCurb4x2CurveR01:6",
+  "world_per_repeat": 154.13831409176842
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb4x2CurveR01.nif",
+  "shape": "L2_SWCurb4x2CurveR01:3",
+  "world_per_repeat": 103.59648463311616
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb4x2CurveR01.nif",
+  "shape": "L2_SWCurb4x2CurveR01:4",
+  "world_per_repeat": 133.3578015915675
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb4x2CurveL01.nif",
+  "shape": "SWCurb4x2CurveL01:0 - L2_SWCurb4x2CurveL01:0",
+  "world_per_repeat": 270.77479790961786
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb4x2CurveL01.nif",
+  "shape": "SWCurb4x2CurveL01:6",
+  "world_per_repeat": 161.6882242544381
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb4x2CurveL01.nif",
+  "shape": "L2_SWCurb4x2CurveL01:3",
+  "world_per_repeat": 109.16848159464735
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb4x2CurveL01.nif",
+  "shape": "L2_SWCurb4x2CurveL01:4",
+  "world_per_repeat": 159.35174513953
+ },
+ {
+  "model": "Landscape\\Roads\\RoadSCurve01.nif",
+  "shape": "L2_RoadSCurve01:3",
+  "world_per_repeat": 233.858074195368
+ },
+ {
+  "model": "Landscape\\Roads\\RoadSCurve01.nif",
+  "shape": "RoadSCurve01:6 - L2_RoadSCurve01:6",
+  "world_per_repeat": 251.1247626495559
+ },
+ {
+  "model": "Landscape\\Roads\\RoadSCurve01.nif",
+  "shape": "RoadSCurve01:8 - L2_RoadSCurve01:8",
+  "world_per_repeat": 377.5599851326069
+ },
+ {
+  "model": "Landscape\\Roads\\RoadSCurve01.nif",
+  "shape": "RoadSCurve01:11 - L2_RoadSCurve01:11",
+  "world_per_repeat": 260.08766888224824
+ },
+ {
+  "model": "Landscape\\Roads\\RoadSCurve01.nif",
+  "shape": "L2_RoadSCurve01:13",
+  "world_per_repeat": 251.97320563787298
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb4x2CurveR02.nif",
+  "shape": "SWCurb4x2CurveR02:0 - L2_SWCurb4x2CurveR02:0",
+  "world_per_repeat": 281.7861072497138
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb4x2CurveR02.nif",
+  "shape": "SWCurb4x2CurveR02:6",
+  "world_per_repeat": 129.1602072469503
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb4x2CurveR02.nif",
+  "shape": "L2_SWCurb4x2CurveR02:3",
+  "world_per_repeat": 102.14538500449277
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb4x2CurveR02.nif",
+  "shape": "L2_SWCurb4x2CurveR02:4",
+  "world_per_repeat": 135.48511727068492
+ },
+ {
+  "model": "Landscape\\Roads\\Alley\\RoadAlley3Way01Free.nif",
+  "shape": "L2_RoadAlley3Way01Free:3",
+  "world_per_repeat": 192.7061939129135
+ },
+ {
+  "model": "Landscape\\Roads\\Alley\\RoadAlley3Way01Free.nif",
+  "shape": "RoadAlley3Way01Free:0",
+  "world_per_repeat": 263.27645844643513
+ },
+ {
+  "model": "Landscape\\Roads\\Alley\\RoadAlley3Way01Free.nif",
+  "shape": "RoadAlley3Way01Free:6 - L2_RoadAlley3Way01Free:6",
+  "world_per_repeat": 265.70571559032
+ },
+ {
+  "model": "Landscape\\Roads\\Alley\\RoadAlley3Way01Free.nif",
+  "shape": "RoadAlley3Way01Free:8 - L2_RoadAlley3Way01Free:8",
+  "world_per_repeat": 252.42942504552624
+ },
+ {
+  "model": "Landscape\\Roads\\Alley\\RoadAlley3Way01Free.nif",
+  "shape": "RoadAlley3Way01Free:11 - L2_RoadAlley3Way01Free:11",
+  "world_per_repeat": 256.6861098449866
+ },
+ {
+  "model": "Landscape\\Roads\\Alley\\RoadAlley1Way01Free03.nif",
+  "shape": "L2_RoadAlley1Way01Free03:3",
+  "world_per_repeat": 200.76396766218718
+ },
+ {
+  "model": "Landscape\\Roads\\Alley\\RoadAlley1Way01Free03.nif",
+  "shape": "RoadAlley1Way01Free03:6 - L2_RoadAlley1Way01Free03:6",
+  "world_per_repeat": 261.85330542778047
+ },
+ {
+  "model": "Landscape\\Roads\\Alley\\RoadAlley1Way01Free03.nif",
+  "shape": "RoadAlley1Way01Free03:8 - L2_RoadAlley1Way01Free03:8",
+  "world_per_repeat": 238.0369391985162
+ },
+ {
+  "model": "Landscape\\Roads\\Alley\\RoadAlley1Way01Free03.nif",
+  "shape": "RoadAlley1Way01Free03:11 - L2_RoadAlley1Way01Free03:11",
+  "world_per_repeat": 253.36581678171112
+ },
+ {
+  "model": "Landscape\\Roads\\Alley\\RoadAlley1Way01Free03.nif",
+  "shape": "L2_RoadAlley1Way01Free03:13",
+  "world_per_repeat": 209.9611162238137
+ },
+ {
+  "model": "Landscape\\Roads\\Alley\\RoadAlley1Way01Free02.nif",
+  "shape": "L2_RoadAlley1Way01Free02:3",
+  "world_per_repeat": 204.77738369917438
+ },
+ {
+  "model": "Landscape\\Roads\\Alley\\RoadAlley1Way01Free02.nif",
+  "shape": "RoadAlley1Way01Free02:6 - L2_RoadAlley1Way01Free02:6",
+  "world_per_repeat": 267.9926013074353
+ },
+ {
+  "model": "Landscape\\Roads\\Alley\\RoadAlley1Way01Free02.nif",
+  "shape": "RoadAlley1Way01Free02:8 - L2_RoadAlley1Way01Free02:8",
+  "world_per_repeat": 239.06809796867512
+ },
+ {
+  "model": "Landscape\\Roads\\Alley\\RoadAlley1Way01Free02.nif",
+  "shape": "RoadAlley1Way01Free02:11 - L2_RoadAlley1Way01Free02:11",
+  "world_per_repeat": 256.89943030918437
+ },
+ {
+  "model": "Landscape\\Roads\\Alley\\RoadAlley1Way01Free02.nif",
+  "shape": "L2_RoadAlley1Way01Free02:13",
+  "world_per_repeat": 256.2798718124023
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb4x1Str01Grass.nif",
+  "shape": "SWCurb4x1Str01Grass:0 - L2_SWCurb4x1Str01Grass:0",
+  "world_per_repeat": 277.65311209166333
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb4x1Str01Grass.nif",
+  "shape": "SWCurb4x1Str01Grass:3 - L2_SWCurb4x1Str01Grass:3",
+  "world_per_repeat": 133.4547061794144
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb4x1Str01Grass.nif",
+  "shape": "SWCurb4x1Str01Grass:16",
+  "world_per_repeat": 345.84308815853507
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb4x1Str01Grass.nif",
+  "shape": "L2_SWCurb4x1Str01Grass:4",
+  "world_per_repeat": 143.76220261829593
+ },
+ {
+  "model": "Landscape\\Roads\\City\\RoadStrShort01.nif",
+  "shape": "L2_RoadStrShort01:3",
+  "world_per_repeat": 230.96398729229506
+ },
+ {
+  "model": "Landscape\\Roads\\City\\RoadStrShort01.nif",
+  "shape": "RoadStrShort01:6 - L2_RoadStrShort01:6",
+  "world_per_repeat": 229.9197781871616
+ },
+ {
+  "model": "Landscape\\Roads\\City\\RoadStrShort01.nif",
+  "shape": "RoadStrShort01:8 - L2_RoadStrShort01:8",
+  "world_per_repeat": 299.8232890793796
+ },
+ {
+  "model": "Landscape\\Roads\\City\\RoadStrShort01.nif",
+  "shape": "RoadStrShort01:11 - L2_RoadStrShort01:11",
+  "world_per_repeat": 256.8027462103475
+ },
+ {
+  "model": "Landscape\\Roads\\City\\RoadStrShort01.nif",
+  "shape": "L2_RoadStrShort01:13",
+  "world_per_repeat": 271.969259392438
+ },
+ {
+  "model": "Landscape\\Roads\\City\\Road3Way01Alley01.nif",
+  "shape": "L2_Road3Way01Alley01:3",
+  "world_per_repeat": 256.1432899631559
+ },
+ {
+  "model": "Landscape\\Roads\\City\\Road3Way01Alley01.nif",
+  "shape": "Road3Way01Alley01:6 - L2_Road3Way01Alley01:6",
+  "world_per_repeat": 237.11092239691305
+ },
+ {
+  "model": "Landscape\\Roads\\City\\Road3Way01Alley01.nif",
+  "shape": "Road3Way01Alley01:8 - L2_Road3Way01Alley01:8",
+  "world_per_repeat": 387.2338839489206
+ },
+ {
+  "model": "Landscape\\Roads\\City\\Road3Way01Alley01.nif",
+  "shape": "Road3Way01Alley01:11 - L2_Road3Way01Alley01:11",
+  "world_per_repeat": 245.1437384022259
+ },
+ {
+  "model": "Landscape\\Roads\\City\\Road3Way01Alley01.nif",
+  "shape": "L2_Road3Way01Alley01:13",
+  "world_per_repeat": 268.2870495434998
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb8x1RampShiftL02.nif",
+  "shape": "SWCurb8x1RampShiftL02:0 - L2_SWCurb8x1RampShiftL02:0",
+  "world_per_repeat": 275.50208937177456
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb8x1RampShiftL02.nif",
+  "shape": "SWCurb8x1RampShiftL02:6",
+  "world_per_repeat": 130.27924200407983
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb8x1RampShiftL02.nif",
+  "shape": "L2_SWCurb8x1RampShiftL02:3",
+  "world_per_repeat": 125.02897429400775
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb8x1RampShiftL02.nif",
+  "shape": "L2_SWCurb8x1RampShiftL02:4",
+  "world_per_repeat": 146.45126493740008
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb4x1Str03Grass.nif",
+  "shape": "SWCurb4x1Str03Grass:0 - L2_SWCurb4x1Str03Grass:0",
+  "world_per_repeat": 275.2921611640761
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb4x1Str03Grass.nif",
+  "shape": "SWCurb4x1Str03Grass:6",
+  "world_per_repeat": 272.21713588091774
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb4x1Str03Grass.nif",
+  "shape": "SWCurb4x1Str03Grass:16",
+  "world_per_repeat": 348.51175782024944
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb4x1Str03Grass.nif",
+  "shape": "L2_SWCurb4x1Str03Grass:3",
+  "world_per_repeat": 115.10393388819192
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb4x1Str03Grass.nif",
+  "shape": "L2_SWCurb4x1Str03Grass:4",
+  "world_per_repeat": 143.23760266285072
+ },
+ {
+  "model": "Landscape\\Roads\\Alley\\RoadAlleyEnd01b.nif",
+  "shape": "L2_RoadAlleyEnd01b:3",
+  "world_per_repeat": 208.41794174501243
+ },
+ {
+  "model": "Landscape\\Roads\\Alley\\RoadAlleyEnd01b.nif",
+  "shape": "RoadAlleyEnd01b:6 - L2_RoadAlleyEnd01b:6",
+  "world_per_repeat": 230.02585104362203
+ },
+ {
+  "model": "Landscape\\Roads\\Alley\\RoadAlleyEnd01b.nif",
+  "shape": "RoadAlleyEnd01b:8 - L2_RoadAlleyEnd01b:8",
+  "world_per_repeat": 235.6377388795043
+ },
+ {
+  "model": "Landscape\\Roads\\Alley\\RoadAlleyEnd01b.nif",
+  "shape": "RoadAlleyEnd01b:11 - L2_RoadAlleyEnd01b:11",
+  "world_per_repeat": 256.13736879620643
+ },
+ {
+  "model": "Landscape\\Roads\\Alley\\RoadAlleyStr01ShiftR01.nif",
+  "shape": "L2_RoadAlleyStr01ShiftR01:3",
+  "world_per_repeat": 248.61487432412076
+ },
+ {
+  "model": "Landscape\\Roads\\Alley\\RoadAlleyStr01ShiftR01.nif",
+  "shape": "RoadAlleyStr01ShiftR01:6 - L2_RoadAlleyStr01ShiftR01:6",
+  "world_per_repeat": 229.85257272027218
+ },
+ {
+  "model": "Landscape\\Roads\\Alley\\RoadAlleyStr01ShiftR01.nif",
+  "shape": "RoadAlleyStr01ShiftR01:8 - L2_RoadAlleyStr01ShiftR01:8",
+  "world_per_repeat": 326.04625564987913
+ },
+ {
+  "model": "Landscape\\Roads\\Alley\\RoadAlleyStr01ShiftR01.nif",
+  "shape": "RoadAlleyStr01ShiftR01:11 - L2_RoadAlleyStr01ShiftR01:11",
+  "world_per_repeat": 255.23118219609032
+ },
+ {
+  "model": "Landscape\\Roads\\Alley\\RoadAlleyStr01ShiftR01.nif",
+  "shape": "L2_RoadAlleyStr01ShiftR01:13",
+  "world_per_repeat": 255.16373864074288
+ },
+ {
+  "model": "Landscape\\Roads\\RoadAPark01R.nif",
+  "shape": "L2_RoadAPark01R:3",
+  "world_per_repeat": 241.95621296398798
+ },
+ {
+  "model": "Landscape\\Roads\\RoadAPark01R.nif",
+  "shape": "RoadAPark01R:6 - L2_RoadAPark01R:6",
+  "world_per_repeat": 219.80729235781985
+ },
+ {
+  "model": "Landscape\\Roads\\RoadAPark01R.nif",
+  "shape": "RoadAPark01R:8 - L2_RoadAPark01R:8",
+  "world_per_repeat": 227.0643032884198
+ },
+ {
+  "model": "Landscape\\Roads\\RoadAPark01R.nif",
+  "shape": "RoadAPark01R:11 - L2_RoadAPark01R:11",
+  "world_per_repeat": 256.710196506718
+ },
+ {
+  "model": "Landscape\\Roads\\RoadAPark01R.nif",
+  "shape": "L2_RoadAPark01R:13",
+  "world_per_repeat": 262.39567421421737
+ },
+ {
+  "model": "Landscape\\Roads\\City\\RoadStr01.nif",
+  "shape": "L2_RoadStr01:3",
+  "world_per_repeat": 217.3646529531209
+ },
+ {
+  "model": "Landscape\\Roads\\City\\RoadStr01.nif",
+  "shape": "RoadStr01:6 - L2_RoadStr01:6",
+  "world_per_repeat": 229.18337017869052
+ },
+ {
+  "model": "Landscape\\Roads\\City\\RoadStr01.nif",
+  "shape": "RoadStr01:8 - L2_RoadStr01:8",
+  "world_per_repeat": 241.10105835834563
+ },
+ {
+  "model": "Landscape\\Roads\\City\\RoadStr01.nif",
+  "shape": "RoadStr01:11 - L2_RoadStr01:11",
+  "world_per_repeat": 256.2996755733792
+ },
+ {
+  "model": "Landscape\\Roads\\City\\RoadStr01.nif",
+  "shape": "L2_RoadStr01:13",
+  "world_per_repeat": 254.0251010480953
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb4x1Str02.nif",
+  "shape": "SWCurb4x1Str02:0 - L2_SWCurb4x1Str02:0",
+  "world_per_repeat": 271.413631389608
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb4x1Str02.nif",
+  "shape": "SWCurb4x1Str02:6",
+  "world_per_repeat": 263.5846345971023
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb4x1Str02.nif",
+  "shape": "L2_SWCurb4x1Str02:3",
+  "world_per_repeat": 130.96458067018514
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb4x1Str02.nif",
+  "shape": "L2_SWCurb4x1Str02:4",
+  "world_per_repeat": 143.77576725748497
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb8x1RampShiftL01.nif",
+  "shape": "SWCurb8x1RampShiftL01:0 - L2_SWCurb8x1RampShiftL01:0",
+  "world_per_repeat": 275.22384588141193
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb8x1RampShiftL01.nif",
+  "shape": "SWCurb8x1RampShiftL01:6",
+  "world_per_repeat": 130.6033419497646
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb8x1RampShiftL01.nif",
+  "shape": "L2_SWCurb8x1RampShiftL01:3",
+  "world_per_repeat": 124.71932013668794
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb8x1RampShiftL01.nif",
+  "shape": "L2_SWCurb8x1RampShiftL01:4",
+  "world_per_repeat": 146.6463103223651
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SW4x1Str01Brick.nif",
+  "shape": "SW4x1Str01Brick:7",
+  "world_per_repeat": 256.8728671798484
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWIslandConcordCustom01.nif",
+  "shape": "SWIslandConcordCustom01:2 - L2_mesh:2",
+  "world_per_repeat": 299.1520943257064
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWIslandConcordCustom01.nif",
+  "shape": "SWIslandConcordCustom01:0",
+  "world_per_repeat": 260.37633574696855
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWIslandConcordCustom01.nif",
+  "shape": "L2_mesh:4",
+  "world_per_repeat": 146.3276671234909
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWIslandConcordCustom01.nif",
+  "shape": "SWIslandConcordCustom01:6",
+  "world_per_repeat": 276.8903564552279
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWIslandConcordCustom01.nif",
+  "shape": "SWIslandConcordCustom01:7",
+  "world_per_repeat": 282.3973671534313
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWIslandConcordCustom01.nif",
+  "shape": "L2_mesh:3",
+  "world_per_repeat": 259.50571842576613
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurbCorSlope01LGrass.nif",
+  "shape": "SWCurbCorSlope01LGrass:0 - L2_SWCurbCorSlope01LGrass:0",
+  "world_per_repeat": 282.1035409954346
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurbCorSlope01LGrass.nif",
+  "shape": "SWCurbCorSlope01LGrass:6",
+  "world_per_repeat": 281.5697854563019
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurbCorSlope01LGrass.nif",
+  "shape": "SWCurbCorSlope01LGrass:16",
+  "world_per_repeat": 264.1396063902305
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurbCorSlope01LGrass.nif",
+  "shape": "L2_SWCurbCorSlope01LGrass:3",
+  "world_per_repeat": 125.5148283744967
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurbCorSlope01LGrass.nif",
+  "shape": "L2_SWCurbCorSlope01LGrass:4",
+  "world_per_repeat": 148.69006655254768
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurbCorSlope01RGrass.nif",
+  "shape": "SWCurbCorSlope01RGrass:0 - L2_SWCurbCorSlope01RGrass:0",
+  "world_per_repeat": 282.10926644407294
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurbCorSlope01RGrass.nif",
+  "shape": "SWCurbCorSlope01RGrass:6",
+  "world_per_repeat": 281.56978599770036
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurbCorSlope01RGrass.nif",
+  "shape": "SWCurbCorSlope01RGrass:16",
+  "world_per_repeat": 264.139607951655
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurbCorSlope01RGrass.nif",
+  "shape": "L2_SWCurbCorSlope01RGrass:3",
+  "world_per_repeat": 125.50442676877141
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurbCorSlope01RGrass.nif",
+  "shape": "L2_SWCurbCorSlope01RGrass:4",
+  "world_per_repeat": 148.6900717714929
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb4x1Str01Brick.nif",
+  "shape": "SWCurb4x1Str01Brick:2 - L2_SWCurb4x1Str01Brick:2",
+  "world_per_repeat": 282.9281272758607
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb4x1Str01Brick.nif",
+  "shape": "L2_SWCurb4x1Str01Brick:4",
+  "world_per_repeat": 143.76220261829593
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SW4x2Str01.nif",
+  "shape": "SW4x2Str01:0 - L2_SW4x2Str01:0",
+  "world_per_repeat": 259.2939643681104
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SW4x2Str01.nif",
+  "shape": "SW4x2Str01:6",
+  "world_per_repeat": 139.29692639053633
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SW4x2Str01.nif",
+  "shape": "L2_SW4x2Str01:3",
+  "world_per_repeat": 94.956154387835
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb8x1StrPark01Brick.nif",
+  "shape": "L2_Mesh046:4",
+  "world_per_repeat": 149.61831708246024
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb8x1StrPark01Brick.nif",
+  "shape": "SWCurb8x1StrPark01Brick:0",
+  "world_per_repeat": 255.79320385320497
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb8x1StrPark01Brick.nif",
+  "shape": "SWCurb8x1StrPark01Brick:2",
+  "world_per_repeat": 291.33010982692633
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SW4x3Str01.nif",
+  "shape": "SW4x3Str01:0 - L2_SW4x3Str01:0",
+  "world_per_repeat": 256.98007057549484
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SW4x3Str01.nif",
+  "shape": "SW4x3Str01:6",
+  "world_per_repeat": 256.89332855564726
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SW4x3Str01.nif",
+  "shape": "L2_SW4x3Str01:3",
+  "world_per_repeat": 94.37965300545434
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb4x1Str05.nif",
+  "shape": "SWCurb4x1Str05:0 - L2_SWCurb4x1Str05:0",
+  "world_per_repeat": 274.12648276231124
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb4x1Str05.nif",
+  "shape": "SWCurb4x1Str05:6",
+  "world_per_repeat": 270.32014971277886
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb4x1Str05.nif",
+  "shape": "L2_SWCurb4x1Str05:3",
+  "world_per_repeat": 138.51228959613007
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb4x1Str05.nif",
+  "shape": "L2_SWCurb4x1Str05:4",
+  "world_per_repeat": 143.31269890681452
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb1x1Cor01Brick.nif",
+  "shape": "L2_SWCurb1x1Cor01Brick:4",
+  "world_per_repeat": 147.13528756260635
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb1x1Cor01Brick.nif",
+  "shape": "SWCurb1x1Cor01Brick:2",
+  "world_per_repeat": 290.65803366719894
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb1x2Str01.nif",
+  "shape": "L2_SWCurb1x2Str01:4",
+  "world_per_repeat": 145.2672968103278
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb1x2Str01.nif",
+  "shape": "SWCurb1x2Str01:0",
+  "world_per_repeat": 264.6515213601101
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SW2x1Str01Brick01.nif",
+  "shape": "L2_mesh:4",
+  "world_per_repeat": 144.4266961521671
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SW2x1Str01Brick01.nif",
+  "shape": "SW2x1Str01Brick01:0",
+  "world_per_repeat": 280.28373779556483
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb1x1Str01.nif",
+  "shape": "L2_SWCurb1x1Str01:4",
+  "world_per_repeat": 145.0033100071898
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb1x1Str01.nif",
+  "shape": "SWCurb1x1Str01:0",
+  "world_per_repeat": 270.958849185131
+ },
+ {
+  "model": "Landscape\\Roads\\RoadAIntYCurveTransAlley01.nif",
+  "shape": "L2_RoadAIntYCurveTransAlley01:3",
+  "world_per_repeat": 228.90969846677612
+ },
+ {
+  "model": "Landscape\\Roads\\RoadAIntYCurveTransAlley01.nif",
+  "shape": "RoadAIntYCurveTransAlley01:6 - L2_RoadAIntYCurveTransAlley01:6",
+  "world_per_repeat": 254.69381700010007
+ },
+ {
+  "model": "Landscape\\Roads\\RoadAIntYCurveTransAlley01.nif",
+  "shape": "RoadAIntYCurveTransAlley01:8 - L2_RoadAIntYCurveTransAlley01:8",
+  "world_per_repeat": 259.09139255078657
+ },
+ {
+  "model": "Landscape\\Roads\\RoadAIntYCurveTransAlley01.nif",
+  "shape": "RoadAIntYCurveTransAlley01:11 - L2_RoadAIntYCurveTransAlley01:11",
+  "world_per_repeat": 270.5609243627082
+ },
+ {
+  "model": "Landscape\\Roads\\Alley\\RoadAlleyY01.nif",
+  "shape": "L2_RoadAlleyY01:3",
+  "world_per_repeat": 214.10531592445875
+ },
+ {
+  "model": "Landscape\\Roads\\Alley\\RoadAlleyY01.nif",
+  "shape": "RoadAlleyY01:6 - L2_RoadAlleyY01:6",
+  "world_per_repeat": 230.85816038732204
+ },
+ {
+  "model": "Landscape\\Roads\\Alley\\RoadAlleyY01.nif",
+  "shape": "RoadAlleyY01:8 - L2_RoadAlleyY01:8",
+  "world_per_repeat": 331.8820450830051
+ },
+ {
+  "model": "Landscape\\Roads\\Alley\\RoadAlleyY01.nif",
+  "shape": "RoadAlleyY01:11 - L2_RoadAlleyY01:11",
+  "world_per_repeat": 256.11635237067446
+ },
+ {
+  "model": "Landscape\\Roads\\RoadAFree01.nif",
+  "shape": "RoadAFree01:3",
+  "world_per_repeat": 244.23935902145195
+ },
+ {
+  "model": "Landscape\\Roads\\RoadAFree01.nif",
+  "shape": "RoadAFree01:6",
+  "world_per_repeat": 273.90787460899173
+ },
+ {
+  "model": "Landscape\\Roads\\RoadAFree01.nif",
+  "shape": "RoadAFree01:8",
+  "world_per_repeat": 175.1755065746379
+ },
+ {
+  "model": "Landscape\\Roads\\RoadAFree01.nif",
+  "shape": "RoadAFree01:11",
+  "world_per_repeat": 235.7635965795182
+ },
+ {
+  "model": "Landscape\\Roads\\RoadAFree01.nif",
+  "shape": "RoadAFree01:13",
+  "world_per_repeat": 259.4387697261332
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SW4x1Str01Grass.nif",
+  "shape": "SW4x1Str01Grass:0 - L2_SW4x1Str01Grass:0",
+  "world_per_repeat": 277.55223928461885
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SW4x1Str01Grass.nif",
+  "shape": "SW4x1Str01Grass:3 - L2_SW4x1Str01Grass:3",
+  "world_per_repeat": 116.34190886139393
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SW4x1Str01Grass.nif",
+  "shape": "SW4x1Str01Grass:16",
+  "world_per_repeat": 345.84308815853507
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb8x1StrPark01.nif",
+  "shape": "L2_Mesh045:4",
+  "world_per_repeat": 149.61846160645408
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb8x1StrPark01.nif",
+  "shape": "SWCurb8x1StrPark01:0",
+  "world_per_repeat": 277.6487032923902
+ },
+ {
+  "model": "Landscape\\Roads\\RoadAIntTTransAlleyRampL01.nif",
+  "shape": "L2_RoadAIntTTransAlleyRampL01:3",
+  "world_per_repeat": 252.45809956293164
+ },
+ {
+  "model": "Landscape\\Roads\\RoadAIntTTransAlleyRampL01.nif",
+  "shape": "RoadAIntTTransAlleyRampL01:6 - L2_RoadAIntTTransAlleyRampL01:6",
+  "world_per_repeat": 247.72170457023978
+ },
+ {
+  "model": "Landscape\\Roads\\RoadAIntTTransAlleyRampL01.nif",
+  "shape": "RoadAIntTTransAlleyRampL01:8 - L2_RoadAIntTTransAlleyRampL01:8",
+  "world_per_repeat": 420.09289159167224
+ },
+ {
+  "model": "Landscape\\Roads\\RoadAIntTTransAlleyRampL01.nif",
+  "shape": "RoadAIntTTransAlleyRampL01:11 - L2_RoadAIntTTransAlleyRampL01:11",
+  "world_per_repeat": 249.04644806723107
+ },
+ {
+  "model": "Landscape\\Roads\\RoadAIntTTransAlleyRampL01.nif",
+  "shape": "L2_RoadAIntTTransAlleyRampL01:13",
+  "world_per_repeat": 261.3855907631246
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb4x1StrSlant01Grass.nif",
+  "shape": "SWCurb4x1StrSlant01Grass:0 - L2_SWCurb4x1StrSlant01Grass:0",
+  "world_per_repeat": 263.20368247329446
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb4x1StrSlant01Grass.nif",
+  "shape": "SWCurb4x1StrSlant01Grass:6",
+  "world_per_repeat": 261.6919555848472
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb4x1StrSlant01Grass.nif",
+  "shape": "SWCurb4x1StrSlant01Grass:16",
+  "world_per_repeat": 345.7414890809426
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb4x1StrSlant01Grass.nif",
+  "shape": "L2_SWCurb4x1StrSlant01Grass:3",
+  "world_per_repeat": 135.39889256198077
+ },
+ {
+  "model": "Landscape\\Sidewalks\\SWCurb4x1StrSlant01Grass.nif",
+  "shape": "L2_SWCurb4x1StrSlant01Grass:4",
+  "world_per_repeat": 144.1000731134666
+ },
+ {
+  "model": "Landscape\\Roads\\City\\RoadStr01Free01.nif",
+  "shape": "L2_RoadStr01Free01:3",
+  "world_per_repeat": 234.38013693976038
+ },
+ {
+  "model": "Landscape\\Roads\\City\\RoadStr01Free01.nif",
+  "shape": "RoadStr01Free01:6 - L2_RoadStr01Free01:6",
+  "world_per_repeat": 240.76855057160404
+ },
+ {
+  "model": "Landscape\\Roads\\City\\RoadStr01Free01.nif",
+  "shape": "RoadStr01Free01:8 - L2_RoadStr01Free01:8",
+  "world_per_repeat": 249.91193337812726
+ },
+ {
+  "model": "Landscape\\Roads\\City\\RoadStr01Free01.nif",
+  "shape": "RoadStr01Free01:11 - L2_RoadStr01Free01:11",
+  "world_per_repeat": 256.8804089235487
+ },
+ {
+  "model": "Landscape\\Roads\\RoadASkirtCurveOpenR01.nif",
+  "shape": "L2_RoadASkirtCurveOpenR01:3",
+  "world_per_repeat": 246.68349340549358
+ },
+ {
+  "model": "Landscape\\Roads\\RoadASkirtCurveOpenR01.nif",
+  "shape": "RoadASkirtCurveOpenR01:6 - L2_RoadASkirtCurveOpenR01:6",
+  "world_per_repeat": 246.08057277724214
+ },
+ {
+  "model": "Landscape\\Roads\\RoadASkirtCurveOpenR01.nif",
+  "shape": "RoadASkirtCurveOpenR01:8 - L2_RoadASkirtCurveOpenR01:8",
+  "world_per_repeat": 278.470722622885
+ },
+ {
+  "model": "Landscape\\Roads\\RoadASkirtCurveOpenR01.nif",
+  "shape": "RoadASkirtCurveOpenR01:11 - L2_RoadASkirtCurveOpenR01:11",
+  "world_per_repeat": 257.32976468920344
+ },
+ {
+  "model": "Landscape\\Roads\\RoadASkirtCurveOpenR01.nif",
+  "shape": "L2_RoadASkirtCurveOpenR01:13",
+  "world_per_repeat": 247.07341077314132
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtStr02.nif",
+  "shape": "L2_RoadASkirtStr02:3",
+  "world_per_repeat": 286.0602629874309
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtStr02.nif",
+  "shape": "RoadASkirtStr02:6 - L2_RoadASkirtStr02:6",
+  "world_per_repeat": 259.2378661344302
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtStr02.nif",
+  "shape": "RoadASkirtStr02:8 - L2_RoadASkirtStr02:8",
+  "world_per_repeat": 290.99016660847485
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtStr02.nif",
+  "shape": "RoadASkirtStr02:11 - L2_RoadASkirtStr02:11",
+  "world_per_repeat": 257.1832007968841
+ },
+ {
+  "model": "Landscape\\Roads\\Country\\RoadASkirtStr02.nif",
+  "shape": "L2_RoadASkirtStr02:13",
+  "world_per_repeat": 258.8697611614435
+ }
+]

@@ -1,0 +1,115 @@
+gamecheck rc=1 (must be 1)
+-rwxr-xr-x 1 bungo 197609 18526720 2026-09-10 03:57:46.921436900 +0200 release/NifSkope.exe
+### c1_fixture start 03:59:19
+### c1_fixture rc=2  03:59:19
+
+total 0
+drwxr-xr-x 1 bungo 197609 0 Sep 10 03:59 .
+drwxr-xr-x 1 bungo 197609 0 Sep 10 03:59 ..
+### c1_decode start 03:59:19
+### c1_decode rc=1  03:59:19
+
+### c1_verify start 03:59:19
+### c1_verify rc=2  03:59:20
+
+cmp: scratchpad/build6_20260910/native/fixture/Synthetic.lodo: No such file or directory
+fixture .lodo DIFFERS from the standalone tool's
+cmp: scratchpad/build6_20260910/native/fixture/Synthetic.lodi: No such file or directory
+fixture .lodi DIFFERS from the standalone tool's
+
+### c2_bake_d4 start 03:59:20
+### c2_bake_d4 rc=0  03:59:38
+native: Commonwealth.lodo 5696484 bytes (bases 2970 of 2974 in the census, 4 without a loadable model; models 2982 loaded 4 failed; meshes 2982 clusters 10634 triangles 142138 vertices 273969 materials 136); Commonwealth.lodi 136992 bytes (instances 3812 from 3812 arrivals over 701131 census refs, 0 dropped for a base outside the table, 3812 unlit; chunks 1 present of 1 dense, max 3812 a chunk, max scale 1.7334, max baseId 2939, PARTIAL); 1530.3 B a placement; failed models: LOD\Architecture\Warehouse\WrhsLeanToL01_LOD.nif, LOD\Architecture\Warehouse\WrhsLeanToMid01_LOD.nif, LOD\Architecture\Warehouse\WrhsLeanToMid02_LOD.nif, LOD\Architecture\Warehouse\WrhsLeanToR01_LOD.nif
+
+    136992 Commonwealth.lodi
+    5696484 Commonwealth.lodo
+    2058014 Commonwealth.4.0.0.BTO
+    305056 Commonwealth.4.0.0.BTO.manifest.txt
+### c3_verify_d4 start 03:59:38
+### c3_verify_d4 rc=2  03:59:38
+
+### c3_decode_d4 start 03:59:38
+### c3_decode_d4 rc=1  03:59:41
+12 checks, 1 failures
+RESULT FAIL
+
+### c2_bake_d8 start 03:59:41
+### c2_bake_d8 rc=0  03:59:47
+native: Commonwealth.lodo 5696484 bytes (bases 2970 of 2974 in the census, 4 without a loadable model; models 2982 loaded 4 failed; meshes 2982 clusters 10634 triangles 142138 vertices 273969 materials 136); Commonwealth.lodi 279624 bytes (instances 8329 from 8329 arrivals over 701131 census refs, 0 dropped for a base outside the table, 8329 unlit; chunks 4 present of 4 dense, max 3577 a chunk, max scale 1.7334, max baseId 2939, PARTIAL); 717.5 B a placement; failed models: LOD\Architecture\Warehouse\WrhsLeanToL01_LOD.nif, LOD\Architecture\Warehouse\WrhsLeanToMid01_LOD.nif, LOD\Architecture\Warehouse\WrhsLeanToMid02_LOD.nif, LOD\Architecture\Warehouse\WrhsLeanToR01_LOD.nif
+
+    279624 Commonwealth.lodi
+    5696484 Commonwealth.lodo
+    4762238 Commonwealth.8.0.0.BTO
+    663971 Commonwealth.8.0.0.BTO.manifest.txt
+### c3_verify_d8 start 03:59:47
+### c3_verify_d8 rc=2  03:59:48
+
+### c3_decode_d8 start 03:59:48
+### c3_decode_d8 rc=1  03:59:51
+12 checks, 1 failures
+RESULT FAIL
+
+### c2_bake_d16 start 03:59:51
+### c2_bake_d16 rc=0  03:59:55
+native: Commonwealth.lodo 5696484 bytes (bases 2970 of 2974 in the census, 4 without a loadable model; models 2982 loaded 4 failed; meshes 2982 clusters 10634 triangles 142138 vertices 273969 materials 136); Commonwealth.lodi 33064 bytes (instances 549 from 549 arrivals over 701131 census refs, 0 dropped for a base outside the table, 549 unlit; chunks 13 present of 16 dense, max 196 a chunk, max scale 1.1100, max baseId 2957, PARTIAL); 10436.3 B a placement; failed models: LOD\Architecture\Warehouse\WrhsLeanToL01_LOD.nif, LOD\Architecture\Warehouse\WrhsLeanToMid01_LOD.nif, LOD\Architecture\Warehouse\WrhsLeanToMid02_LOD.nif, LOD\Architecture\Warehouse\WrhsLeanToR01_LOD.nif
+
+    33064 Commonwealth.lodi
+    5696484 Commonwealth.lodo
+    606382 Commonwealth.16.0.0.BTO
+    41124 Commonwealth.16.0.0.BTO.manifest.txt
+### c3_verify_d16 start 03:59:55
+### c3_verify_d16 rc=2  03:59:56
+
+### c3_decode_d16 start 03:59:56
+### c3_decode_d16 rc=1  03:59:58
+12 checks, 1 failures
+RESULT FAIL
+
+### c2_bake_d32 start 03:59:58
+### c2_bake_d32 rc=0  04:00:04
+native: Commonwealth.lodo 5696484 bytes (bases 2970 of 2974 in the census, 4 without a loadable model; models 2982 loaded 4 failed; meshes 2982 clusters 10634 triangles 142138 vertices 273969 materials 136); Commonwealth.lodi 16392 bytes (instances 1 from 1 arrivals over 701131 census refs, 0 dropped for a base outside the table, 1 unlit; chunks 1 present of 1 dense, max 1 a chunk, max scale 1.0000, max baseId 2957, PARTIAL); 5712876.0 B a placement; failed models: LOD\Architecture\Warehouse\WrhsLeanToL01_LOD.nif, LOD\Architecture\Warehouse\WrhsLeanToMid01_LOD.nif, LOD\Architecture\Warehouse\WrhsLeanToMid02_LOD.nif, LOD\Architecture\Warehouse\WrhsLeanToR01_LOD.nif
+
+    16392 Commonwealth.lodi
+    5696484 Commonwealth.lodo
+    5078 Commonwealth.32.0.0.BTO
+    215 Commonwealth.32.0.0.BTO.manifest.txt
+### c3_verify_d32 start 04:00:04
+### c3_verify_d32 rc=2  04:00:04
+
+### c3_decode_d32 start 04:00:04
+### c3_decode_d32 rc=0  04:00:07
+12 checks, 0 failures
+RESULT PASS
+
+### baseline --write start 04:00:07
+### baseline --write rc=0  wall 8 s  04:00:15
+  bake wall-clock 8 s (AO=1)
+  ok   25 output files hashed (floor 8: 4 chunks + 4 manifests)
+  ok   wrote /e/Projects/NifskopeWildWastelandEdition/tests/baselines/stock_baseline.sha256 (25 files, exe 664e0de4483792b5b7fa4a0d89cb9a9a3d5b76dfd17e29b2b85e2ed594fb8d1b)
+RESULT PASS
+# stock_baseline 1  (tests/spells/lodgen_native_baseline.sh --write)
+# exe 664e0de4483792b5b7fa4a0d89cb9a9a3d5b76dfd17e29b2b85e2ed594fb8d1b 2026-09-10T03:57:46 /e/Projects/NifskopeWildWastelandEdition/release/NifSkope.exe
+# git v0.3.3-68-g720762a-dirty
+# profile ao=1 identity=1 arrays=1 atlas=1 slot-fallback=dim16 exclude=BTR
+# bake-seconds 8
+# region (-20,24)d4 (-24,24)d8 (-32,16)d16+slot-fallback (-32,0)d32 region(-20,24..-19,25)d4+arrays+atlas
+2b1f9d70b59fc19ea06e53cfc0d83217042fe633d7baf9e86613ac8ca24f3721  chunks/Commonwealth.16.-32.16.bto
+31 tests/baselines/stock_baseline.sha256
+
+### l0_selftest start 04:00:15
+### l0_selftest rc=0  04:00:16
+  CHANGED  chunks/Commonwealth.16.-32.16.bto
+25 files in the baseline, 25 baked, 1 differ
+  ok   the baseline compared to itself: 0 differ
+0 failures
+RESULT PASS
+
+### baseline --check start 04:00:16
+### baseline --check rc=0  wall 8 s  04:00:24
+  ok   25 output files hashed (floor 8: 4 chunks + 4 manifests)
+  ok   profile matches the baseline (ao=1 identity=1 arrays=1 atlas=1 slot-fallback=dim16 exclude=BTR)
+25 files in the baseline, 25 baked, 0 differ
+  ok   every stock file byte-identical to the baseline
+  baseline exe 664e0de4483792b5b7fa4a0d89cb9a9a3d5b76dfd17e29b2b85e2ed594fb8d1b 2026-09-10T03:57:46; this exe 664e0de4483792b5b7fa4a0d89cb9a9a3d5b76dfd17e29b2b85e2ed594fb8d1b 2026-09-10T03:57:46
+RESULT PASS
+### NATIVE CHAIN DONE 04:00:24

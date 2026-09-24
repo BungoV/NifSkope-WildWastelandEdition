@@ -1,0 +1,5 @@
+blast_n4 7944
+blast_n8 6732
+maple_n4 5433
+dead_n4 4946
+rock_n4 7837

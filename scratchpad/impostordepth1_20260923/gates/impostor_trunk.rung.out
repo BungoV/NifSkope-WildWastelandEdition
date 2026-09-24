@@ -1,0 +1,67 @@
+impostor_trunk gate 2026-09-23 11:13:52
+exe /e/Projects/NifskopeWildWastelandEdition/release/NifSkope.before_impostordepth1.exe  23831552 2026-09-23_07:54:35  sha1 8d87c155
+set /e/Projects/NifskopeWildWastelandEdition/scratchpad/impostor16_20260923/n8/bakes/n8_2k/cards/000531b3_oct.lodm
+KNOBS: 6 views, el 0
+  orbit k_default: 6 cards, 7s
+  orbit k_search0: 6 cards, 4s
+  orbit k_search16: 6 cards, 4s
+  orbit k_snap: 6 cards, 5s
+  orbit k_blend0: 6 cards, 4s
+  orbit k_covf: 6 cards, 5s
+  FAIL  the default draw's log does not say 'depth search: off'
+  FAIL  WW_IMPOSTOR_SEARCH=16 is not named in the log
+  FAIL  WW_IMPOSTOR_SNAP=1 is not named in the log
+  FAIL  WW_IMPOSTOR_BLEND=0 is not named in the log
+  ok    WW_IMPOSTOR_SEARCH=0 is byte-identical to no knob on 6 views (the default picture is untouched)
+  FAIL  FLOOR: WW_IMPOSTOR_SEARCH=16 does not change the picture (0 px)
+  FAIL  the coverage filter is not named in the log both ways
+  FAIL  FLOOR: WW_IMPOSTOR_COVFILTER=1 does not change the picture (0 px)
+  FAIL  FLOOR: SNAP is not its own picture (vs BLEND=0 362357 px, vs default 0 px)
+TRUNK: 1-degree orbits
+  orbit s_el0: 360 cards, 40s
+  orbit s_el20: 360 cards, 41s
+  orbit a16_el0: 360 cards, 45s
+  orbit s16cf_el0: 360 cards, 42s
+  orbit s16cf_el20: 360 cards, 40s
+  ok    FLOOR: the mesh scored against itself passes the trunk bar
+    [shipped] el00 360 views (E:/Projects/NifskopeWildWastelandEdition/release/impostor_trunk_tmp/s_el0)
+      T1 ratio card/mesh: median 1.147 min 0.844 (az 90) max 1.738 (az 299); outside 0.85..1.15 at 179 of 360 -> FAIL
+      T2 runs (median over band B): card > mesh at 112 of 360; worst card 2.0 vs mesh 1.0 at az 1 -> FAIL
+      T3 centre step: card worst 3.20 px (az 337) mean 0.74; mesh worst 0.96 mean 0.60; ratio 3.33 (bar 2); missing-centre views 0 -> FAIL
+      whole tree: IoU 0.8393 (min 0.7772); missing 0.0519 (max 0.0770); pop worst 0.1170 mean 0.0757 [mesh 0.1441/0.1258]; tear worst 0.96% az314 top5 0.87% mean 0.25%
+      TRUNK FAIL
+    [shipped] el20 360 views (E:/Projects/NifskopeWildWastelandEdition/release/impostor_trunk_tmp/s_el20)
+      T1 ratio card/mesh: median 1.020 min 0.691 (az 6) max 1.444 (az 168); outside 0.85..1.15 at 111 of 360 -> FAIL
+      T2 runs (median over band B): card > mesh at 156 of 360; worst card 3.0 vs mesh 1.0 at az 333 -> FAIL
+      T3 centre step: card worst 5.50 px (az 181) mean 0.78; mesh worst 1.07 mean 0.61; ratio 5.14 (bar 2); missing-centre views 0 -> FAIL
+      whole tree: IoU 0.7789 (min 0.7210); missing 0.0822 (max 0.1254); pop worst 0.1323 mean 0.0993 [mesh 0.1893/0.1639]; tear worst 1.39% az160 top5 1.29% mean 0.38%
+      TRUNK FAIL
+  ok    FLOOR: the shipped drawer (stipple, no search) FAILS the trunk bar at el 0 and el 20, so the bar can fail
+    [a16_el0] el00 360 views (E:/Projects/NifskopeWildWastelandEdition/release/impostor_trunk_tmp/a16_el0)
+      T1 ratio card/mesh: median 0.829 min 0.000 (az 315) max 0.918 (az 140); outside 0.85..1.15 at 240 of 360 -> FAIL
+      T2 runs (median over band B): card > mesh at 0 of 360; worst card 1.0 vs mesh 1.0 at az 0 -> ok
+      T3 centre step: card worst 11.13 px (az 299) mean 1.24; mesh worst 0.96 mean 0.60; ratio 11.57 (bar 2); missing-centre views 1 -> FAIL
+      whole tree: IoU 0.8404 (min 0.7400); missing 0.0847 (max 0.1787); pop worst 0.1216 mean 0.0724 [mesh 0.1441/0.1258]; tear worst 4.29% az315 top5 3.36% mean 0.63%
+      TRUNK FAIL | TEAR BAR FAIL (pop 0.1216 <= 0.1755; tear 4.29% <= 1.92%)
+  FAIL  a16_el0 fails the trunk bar (see the T1/T2/T3 lines above)
+  FAIL  a16_el0 fails the tear bar
+    [s16cf_el0] el00 360 views (E:/Projects/NifskopeWildWastelandEdition/release/impostor_trunk_tmp/s16cf_el0)
+      T1 ratio card/mesh: median 1.147 min 0.844 (az 90) max 1.738 (az 299); outside 0.85..1.15 at 179 of 360 -> FAIL
+      T2 runs (median over band B): card > mesh at 112 of 360; worst card 2.0 vs mesh 1.0 at az 1 -> FAIL
+      T3 centre step: card worst 3.20 px (az 337) mean 0.74; mesh worst 0.96 mean 0.60; ratio 3.33 (bar 2); missing-centre views 0 -> FAIL
+      whole tree: IoU 0.8393 (min 0.7772); missing 0.0519 (max 0.0770); pop worst 0.1170 mean 0.0757 [mesh 0.1441/0.1258]; tear worst 0.96% az314 top5 0.87% mean 0.25%
+      TRUNK FAIL | TEAR BAR PASS (pop 0.1170 <= 0.1755; tear 0.96% <= 1.92%)
+  FAIL  s16cf_el0 fails the trunk bar (see the T1/T2/T3 lines above)
+  ok    s16cf_el0 passes the tear bar
+    [s16cf_el20] el20 360 views (E:/Projects/NifskopeWildWastelandEdition/release/impostor_trunk_tmp/s16cf_el20)
+      T1 ratio card/mesh: median 1.020 min 0.691 (az 6) max 1.444 (az 168); outside 0.85..1.15 at 111 of 360 -> FAIL
+      T2 runs (median over band B): card > mesh at 156 of 360; worst card 3.0 vs mesh 1.0 at az 333 -> FAIL
+      T3 centre step: card worst 5.50 px (az 181) mean 0.78; mesh worst 1.07 mean 0.61; ratio 5.14 (bar 2); missing-centre views 0 -> FAIL
+      whole tree: IoU 0.7789 (min 0.7210); missing 0.0822 (max 0.1254); pop worst 0.1323 mean 0.0993 [mesh 0.1893/0.1639]; tear worst 1.39% az160 top5 1.29% mean 0.38%
+      TRUNK FAIL | TEAR BAR PASS (pop 0.1323 <= 0.1985; tear 1.39% <= 2.78%)
+  FAIL  s16cf_el20 fails the trunk bar (see the T1/T2/T3 lines above)
+  ok    s16cf_el20 passes the tear bar
+  FAIL  the shipped drawer fails the trunk bar at el 0 (the defect this gate names)
+  FAIL  the shipped drawer fails the trunk bar at el 20 (the defect this gate names)
+19 checks, 14 failures
+FAIL

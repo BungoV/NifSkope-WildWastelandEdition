@@ -1,0 +1,6 @@
+exe not held by a window
+BUILD-RC=0
+-rwxr-xr-x 1 bungo 197609 24283136 03:48:01 release/NifSkope.exe
+exe newer than the sources
+copies in step
+CHAIN-RC=0

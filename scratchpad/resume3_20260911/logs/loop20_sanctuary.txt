@@ -1,0 +1,22 @@
+﻿run  1/20  rc=0          wall=  41328 ms  peakWS=  5801.4 MB  files=  60  ok
+run  2/20  rc=0          wall=  47224 ms  peakWS=    5801 MB  files=  60  ok
+run  3/20  rc=0          wall=  43765 ms  peakWS=  5791.5 MB  files=  60  ok
+run  4/20  rc=0          wall=  40903 ms  peakWS=  5796.4 MB  files=  60  ok
+run  5/20  rc=0          wall=  38066 ms  peakWS=  5799.6 MB  files=  60  ok
+run  6/20  rc=0          wall=  34593 ms  peakWS=  5791.8 MB  files=  60  ok
+run  7/20  rc=0          wall=  34323 ms  peakWS=  5795.5 MB  files=  60  ok
+run  8/20  rc=0          wall=  35420 ms  peakWS=  5792.5 MB  files=  60  ok
+run  9/20  rc=0          wall=  37901 ms  peakWS=  5795.4 MB  files=  60  ok
+run 10/20  rc=0          wall=  39122 ms  peakWS=    5805 MB  files=  60  ok
+run 11/20  rc=0          wall=  37054 ms  peakWS=  5797.6 MB  files=  60  ok
+run 12/20  rc=0          wall=  38937 ms  peakWS=  5796.2 MB  files=  60  ok
+run 13/20  rc=0          wall=  36332 ms  peakWS=  5796.6 MB  files=  60  ok
+run 14/20  rc=0          wall=  40369 ms  peakWS=  5797.9 MB  files=  60  ok
+run 15/20  rc=0          wall=  38193 ms  peakWS=  5799.6 MB  files=  60  ok
+run 16/20  rc=0          wall=  30781 ms  peakWS=  5794.4 MB  files=  60  ok
+run 17/20  rc=0          wall=  34636 ms  peakWS=  5798.9 MB  files=  60  ok
+run 18/20  rc=0          wall=  33954 ms  peakWS=  5797.4 MB  files=  60  ok
+run 19/20  rc=0          wall=  36406 ms  peakWS=  5798.8 MB  files=  60  ok
+run 20/20  rc=0          wall=  33679 ms  peakWS=  5800.6 MB  files=  60  ok
+
+GATE N2 r1 : GREEN - 20 of 20 clean at --chunk-threads 16

@@ -1,0 +1,80 @@
+model foothillsshrubsmall01.nif
+projection ortho
+ranges FoothillsShrubSmall01:0 - L1_FoothillsShrubSmall01:0 273+0
+lodm Materials\Landscape\Plants\Creosote01.lodm none textures\Landscape\Plants\Creosote01_d.dds
+mask tree
+emissive 0 shapes 0
+front 848.59 435.068 -33.9028 0.348518 8.23687
+side 848.59 435.068 -33.9028 0.348518 8.23687
+class 128 128
+gap 8 8
+coverage 16 128 160
+oct 8 128 128 366.182 366.182 -33.9028 0.348518 8.23687 3072 legacy 512 spec1
+frameoff 0 0 0 81.5753
+frameoff 1 0 -10.1969 81.5753
+frameoff 2 0 -17.4197 81.5753
+frameoff 3 0 -23.7928 79.451
+frameoff 4 0 -43.7617 72.653
+frameoff 5 0 -54.3835 80.7256
+frameoff 6 0 -42.912 80.7256
+frameoff 7 0 -34.8394 81.1504
+frameoff 0 1 -2.54924 82.8499
+frameoff 1 1 -7.22281 67.1297
+frameoff 2 1 -13.5959 51.4094
+frameoff 3 1 -21.2436 37.3887
+frameoff 4 1 -48.4353 25.4923
+frameoff 5 1 -45.0364 30.1659
+frameoff 6 1 -35.2643 35.6892
+frameoff 7 1 -44.6115 81.1504
+frameoff 0 2 -4.2487 82.8499
+frameoff 1 2 -2.97411 74.7774
+frameoff 2 2 0.849747 56.9328
+frameoff 3 2 -22.0933 14.0208
+frameoff 4 2 -52.2592 21.6684
+frameoff 5 2 -33.9897 0
+frameoff 6 2 -44.1866 31.8653
+frameoff 7 2 -31.0156 81.1504
+frameoff 0 3 -5.94821 82.0002
+frameoff 1 3 -2.97411 75.2022
+frameoff 2 3 3.39897 51.8343
+frameoff 3 3 0.849747 36.9638
+frameoff 4 3 -33.9897 0.849731
+frameoff 5 3 -25.9172 -16.1451
+frameoff 6 3 -13.171 25.9172
+frameoff 7 3 -6.79794 81.5753
+frameoff 0 4 6.79794 81.5753
+frameoff 1 4 7.64768 54.8084
+frameoff 2 4 25.0674 21.6684
+frameoff 3 4 33.9897 -1.69949
+frameoff 4 4 -0.849747 -35.2643
+frameoff 5 4 -3.39897 -30.1659
+frameoff 6 4 -1.69948 22.0933
+frameoff 7 4 5.94821 82.0002
+frameoff 0 5 31.0156 81.1504
+frameoff 1 5 42.912 40.7877
+frameoff 2 5 33.5648 -2.54924
+frameoff 3 5 41.2125 -19.5441
+frameoff 4 5 22.0933 -31.0156
+frameoff 5 5 -1.27461 -21.2436
+frameoff 6 5 -4.67358 36.1141
+frameoff 7 5 4.2487 82.8499
+frameoff 0 6 44.6115 81.1504
+frameoff 1 6 33.14 40.3628
+frameoff 2 6 44.6115 28.0415
+frameoff 3 6 54.8084 20.8187
+frameoff 4 6 25.9172 10.6218
+frameoff 5 6 4.67358 19.1192
+frameoff 6 6 -6.79794 36.5389
+frameoff 7 6 2.54924 82.8499
+frameoff 0 7 34.8394 81.1504
+frameoff 1 7 42.912 80.7256
+frameoff 2 7 54.3835 80.7256
+frameoff 3 7 43.7617 72.653
+frameoff 4 7 23.7928 79.451
+frameoff 5 7 17.4197 81.5753
+frameoff 6 7 10.1969 81.5753
+frameoff 7 7 0 81.5753
+frameclamped 0
+aa 4 1024 3.125
+framefit 339.897 331.825 344.571 333.524
+orthofit 426.146 426.146 0

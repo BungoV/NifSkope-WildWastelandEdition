@@ -1,0 +1,73 @@
+TILING3 -- MICRO-STEEPNESS vs the crevice term, on vanilla`s own sheets
+
+driver A  dTheta = acos(up fine) - acos(up coarse), radians, from
+          vanilla`s `_msn`; coarse = mip 2 = 128 world units = our
+          height grid`s step. bungo`s 23:5x refinement.
+driver A` the same in COS space: up_fine - up_coarse (the `dUp`
+          column d3_shade.py already fitted).
+driver B  the DIVERGENCE of the detail normal -- the crevice term
+          d3_shade.py shipped at kDiv -3.242.
+floor     each driver`s own phase twin (same spectrum, no structure).
+y         the colour sheet`s high-pass residual, everything finer than
+          5 texels, in 8-bit luminance levels.
+
+   sheet             r(A)   twin(A)  r(A cos)      r(B)   twin(B)    kSteep
+   ( -20,  24)   -0.0005   +0.0018   -0.0019   -0.1222   -0.0055    -0.018
+   ( -20,  20)   +0.0022   -0.0018   -0.0046   -0.1353   +0.0023    +0.086
+   ( -36, -20)   +0.0039   +0.0003   -0.0081   -0.0770   -0.0009    +0.102
+   (  -4, -20)   -0.0031   -0.0018   +0.0036   -0.1046   +0.0024    -0.123
+   (  28, -20)   +0.0063   -0.0010   -0.0168   -0.0136   +0.0006    +0.083
+   (  -4,  16)   -0.0042   +0.0013   +0.0031   -0.1342   +0.0004    -0.210
+   (  24,  16)   +0.0052   -0.0031   -0.0120   -0.0949   +0.0010    +0.189
+   MEDIAN       +0.0022   -0.0010   -0.0046   -0.1046   +0.0006    +0.083
+
+   driver A  sign agreement 4 of 7, beats its twin on 6 of 7
+   driver B  sign agreement 7 of 7, beats its twin on 7 of 7
+   A beats B in |r| on 0 of 7 sheets
+
+THE LITERAL READING -- coarse = OUR OWN baked `_msn`, where this lane
+has one on disk (the two brief tiles):
+   ( -20,  24)  r +0.0012   against the mip-2 reading -0.0005
+   ( -20,  20)  r +0.0040   against the mip-2 reading +0.0022
+   The two agree to within 0.0019, so the shipping code`s use of
+   vanilla`s own mip 2 as the coarse reference costs nothing --
+   which matters, because on a chunk whose `_msn` IS vanilla`s file
+   there is no our-normal left to subtract when the colour is written.
+
+IS THE COLOUR TERM A DARKENING, A TINT SHIFT, OR BOTH? The ruling asks
+to "darken and shift toward the rock tint". Darkening is a luminance
+claim and is measured above. The tint is a CHROMA claim and has to be
+measured separately or it is decoration:
+
+   sheet          r(R hp)   r(G hp)   r(B hp) r(sat hp)
+   ( -20,  24)   -0.0014   -0.0005   +0.0019   -0.0049
+   ( -20,  20)   +0.0015   +0.0023   +0.0021   -0.0019
+   ( -36, -20)   +0.0022   +0.0040   +0.0056   -0.0042
+   (  -4, -20)   -0.0019   -0.0034   -0.0030   +0.0027
+   (  28, -20)   +0.0123   +0.0037   +0.0069   -0.0016
+   (  -4,  16)   -0.0047   -0.0039   -0.0049   +0.0003
+   (  24,  16)   +0.0040   +0.0056   +0.0039   +0.0013
+   MEDIAN       +0.0015   +0.0023   +0.0021   -0.0016
+   The three channels move TOGETHER to within 0.0018 of each other
+   (median spread), and the saturation term is -0.0016.
+
+THE ENVELOPE FORM -- |dTheta| blurred against |colour residual| blurred,
+which asks "is the ground more DETAILED where it is micro-steep?" rather
+than "is it DARKER there?". This is D2`s instrument, the one that read.
+
+   sheet           r(|A|)      twin    r(|B|)
+   ( -20,  24)   +0.1320   +0.0091   +0.1269
+   ( -20,  20)   +0.2171   +0.0479   +0.1352
+   ( -36, -20)   +0.1269   +0.0040   +0.2403
+   (  -4, -20)   +0.0529   +0.0475   +0.1209
+   (  28, -20)   +0.2155   -0.0687   +0.0388
+   (  -4,  16)   +0.1036   -0.0629   +0.0863
+   (  24,  16)   -0.2177   -0.0334   -0.2096
+   MEDIAN       +0.1269   +0.0040   +0.1209
+   |A| beats its twin on 7 of 7 sheets; |A| beats |B| on 5 of 7.
+
+THE VERDICT, on the instruction`s own rule ("keep the better one"):
+
+   micro-steepness (A) median |r| 0.0039, twin 0.0018
+   crevice/divergence (B) median |r| 0.1046, twin 0.0010
+   ==> driver B matches vanilla`s colour residual better.

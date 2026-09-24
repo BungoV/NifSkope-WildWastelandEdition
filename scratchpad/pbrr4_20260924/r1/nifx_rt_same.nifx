@@ -1,0 +1,6 @@
+{ "zUnknownTool" : {"keep": [1, 2.50, "x"], "nested": {"b":1,"a":2}},
+	"material":{
+  "ACDuctConnector01:0" :  { "note":"odd order", "pbrm" : "Materials\\WWPbrTest01\\NifxTarget.pbrm" },
+  "OtherNode":{"pbrm":"materials/x/y.pbrm"}
+ },
+"version":1 ,"aaa_later":null}

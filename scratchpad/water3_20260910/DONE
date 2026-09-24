@@ -1,0 +1,24 @@
+lane WATER3 / BUILD5 / BUILD5b -- DONE 2026-09-10 03:5x
+
+Built: release/NifSkope.exe 2026-09-10 03:38:56, newer than every source in
+NifSkope.pro; make exit code 0; res/style.qss == release/style.qss.
+
+Gates, all on that exe:
+  tests/spells/water_mark.sh    PASS  21 model + 20 dock checks, 0 failures
+  tests/spells/lodl_water.sh    PASS
+  tests/spells/lodl_open.sh     PASS  23 checks, 0 failures
+  tests/spells/lodgen_terrain.sh PASS 26 checks, 0 failures
+  tests/spells/lodgen_identity.sh PASS
+  tests/spells/render_shot.sh   PASS  82 checks, 0 failures (section 7 green)
+
+P0 identity 0 bytes differ; P1 isolation 0 outside / 25,110 of 25,114 inside;
+P2 refuter red first; P3 undo 0 bytes differ; P4 re-bake moved 0.21 deg,
+tolerance 5; P5 twenty house-style checks; P6 images/charles_flow_pair.png +
+dock.png; P7 dry point found in the file; P8 round trip byte-identical.
+"rivers end up at sea": cos = 1.000 on body 3.
+
+Documents: WW_CHANGES.md spliced (CR 19,020 unchanged), MISTAKES.md +5 entries
+(CR 0), scratchpad/lane_water3_report.md has its Build (BUILD5/BUILD5b) section,
+nifskope-ww-render-shot amended in BOTH skill trees.
+
+NOTHING COMMITTED. His open NifSkope window needs a restart.

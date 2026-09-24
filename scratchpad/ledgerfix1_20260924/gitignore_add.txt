@@ -1,0 +1,57 @@
+# --- 2026-09-24 LEDGERFIX1: game data, third-party files and binaries never go public -------
+# Game data anywhere in the tree (copies of Fallout4.esm etc. sit in lane work folders).
+*.esm
+*.esp
+*.esl
+*.ba2
+*.bsa
+# Vanilla extracts and third-party animation: the loose fixtures and the PBR test data folders
+# are built from vanilla files by their generator scripts (tests/spells/pbr_r*_fixtures.py), which ARE tracked.
+fixtures/*.hkx
+fixtures/*.nif
+tests/fixtures/pbr_*_data/
+scratchpad/**/*.hkx
+scratchpad/**/*mixamo*
+scratchpad/**/Running_To_Slide*
+scratchpad/**/*.bgsm
+scratchpad/**/*.bgem
+scratchpad/**/*.gltf
+scratchpad/**/*.glb
+scratchpad/**/*.fbx
+scratchpad/**/*.xml
+scratchpad/**/*.swf
+scratchpad/**/*.wav
+scratchpad/**/*.xwm
+scratchpad/**/*.tri
+# Scratchpad binaries, logs, arrays and backups: scratchpad keeps TEXT only (reports, briefs, scripts).
+scratchpad/**/*.exe
+scratchpad/**/*.dll
+scratchpad/**/*.o
+scratchpad/**/*.a
+scratchpad/**/*.npz
+scratchpad/**/*.npy
+scratchpad/**/*.pkl
+scratchpad/**/*.log
+scratchpad/**/*.err
+scratchpad/**/*.pre
+scratchpad/**/*.bak*
+scratchpad/**/*.lodj
+scratchpad/**/*.lodb
+scratchpad/**/*.lodm
+scratchpad/**/*.gif
+scratchpad/**/*.mp4
+scratchpad/**/*.tsv
+scratchpad/**/*.zip
+scratchpad/**/*.7z
+scratchpad/**/*.pyc
+# Generic skill copies from other projects: HELD for bungo's ruling (TODDSTREAT1 open question);
+# this repo publishes only its own nif / nifskope-ww-* / ww-* skills until he says otherwise.
+.claude/skills/xse-plugin/
+.claude/skills/fo4cs-*/
+.claude/skills/core-*/
+.claude/skills/fo4-*/
+.claude/skills/behaivor-graph/
+.claude/skills/hudframework/
+.claude/skills/prismaui/
+.claude/skills/rdc-cli/
+.claude/skills/swf/

@@ -1,0 +1,33 @@
+== lodgen_terrain ==
+26 checks, 0 failures
+   rc=0  segfaults=0
+== lod_generation ==
+116 checks, 0 failures
+checks run: 116 (floor 116)
+   rc=0  segfaults=0
+== lodgen_terrain_vt ==
+41 checks, 1 failures
+RESULT FAIL
+   rc=1  segfaults=0
+== lodgen_ground_cover ==
+29 checks, 5 failures
+RESULT FAIL
+   rc=1  segfaults=0
+== lodgen_terrain_pbrm ==
+14 checks, 0 failures
+RESULT PASS
+   rc=0  segfaults=0
+== lodgen_native ==
+18 checks, 0 failures
+RESULT PASS
+   rc=0  segfaults=0
+== lodgen_roads ==
+11 checks, 1 failures
+RESULT FAIL
+   rc=1  segfaults=0
+== lodl_open ==
+23 checks, 0 failures
+   rc=0  segfaults=0
+== animws ==
+   rc=0  segfaults=0
+chain done 07:51:15

@@ -1,0 +1,78 @@
+{
+ "chunk_vs_vanilla.png": {
+  "ours": {
+   "fmt": "BC1",
+   "bytes": 174888,
+   "w": 512,
+   "h": 512,
+   "mips": 8,
+   "path": "E:/Projects/NifskopeWildWastelandEdition/scratchpad/roads1_20260911/out/after/tex/Commonwealth.4.-20.20.DDS"
+  },
+  "vanilla": {
+   "fmt": "BC3",
+   "bytes": 349680,
+   "w": 512,
+   "h": 512,
+   "mips": 10,
+   "path": "E:/Tools/Fallout 4/DataUnpacked/Data/Textures/Terrain/Commonwealth/Commonwealth.4.-20.20.DDS"
+  },
+  "mean_ours": [
+   80.61719512939453,
+   69.8889274597168,
+   60.2744140625
+  ],
+  "mean_vanilla": [
+   91.55081176757812,
+   83.41810607910156,
+   72.16645431518555
+  ],
+  "mean_abs_diff": 19.46752166748047,
+  "mean_abs_diff_ch": [
+   19.27739715576172,
+   20.280651092529297,
+   18.84451675415039
+  ],
+  "page": [
+   1102,
+   739
+  ]
+ },
+ "chunk_vs_vanilla_msn.png": {
+  "ours": {
+   "fmt": "BC1",
+   "bytes": 174888,
+   "w": 512,
+   "h": 512,
+   "mips": 8,
+   "path": "E:/Projects/NifskopeWildWastelandEdition/scratchpad/roads1_20260911/out/after/tex/Commonwealth.4.-20.20_msn.DDS"
+  },
+  "vanilla": {
+   "fmt": "BC3",
+   "bytes": 349680,
+   "w": 512,
+   "h": 512,
+   "mips": 10,
+   "path": "E:/Tools/Fallout 4/DataUnpacked/Data/Textures/Terrain/Commonwealth/Commonwealth.4.-20.20_msn.DDS"
+  },
+  "mean_ours": [
+   131.1539306640625,
+   252.45775604248047,
+   126.84943389892578
+  ],
+  "mean_vanilla": [
+   127.2932243347168,
+   247.03091430664062,
+   121.78302001953125
+  ],
+  "mean_abs_diff": 15.14186986287435,
+  "mean_abs_diff_ch": [
+   24.43825912475586,
+   6.0384063720703125,
+   14.948944091796875
+  ],
+  "page": [
+   1102,
+   758
+  ]
+ }
+}

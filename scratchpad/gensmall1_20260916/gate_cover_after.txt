@@ -1,0 +1,105 @@
+== C0 preflight ==
+       exe: 2026-09-16 13:52:56
+  ok   C0 the exe is newer than every source this answer depends on
+       ESM: 330776576 bytes
+       corpus worldspace Commonwealth cells 36864 west -96 south -96 east 95 north 95
+       corpus vhgtCorpusHash 0xD8337D022F637F22 lands 36864
+       corpus vhgtCorpusHashSorted 0x3D5967B82969D23E lands 36864
+       corpus paintCorpusHash 0x3C79201598FEF809
+       corpus ltexTotal 105 grasTotal 82 gnamLinks 122 ltexWithGnam 52 grasDataMin 32 grasDataMax 32 grasWithoutData 0
+  ok   C0 the corpus is the shipped Commonwealth (VHGT hash 0xD8337D022F637F22)
+       census (python): {"ltexTotal": 105, "grasTotal": 82, "gnamLinks": 122, "ltexWithGnam": 52, "grasDataMin": 32, "grasDataMax": 32, "grasWithoutData": 0, "leftover": 0, "noGrassEdids": ["LBlastedForestGrass01_NoGrass", "
+== bakes ==
+== C1 the feature off moves nothing ==
+  ok   C1 two --no-cover bakes are byte-identical
+       Commonwealth.4.-20.24.DDS: 174888 bytes
+       Commonwealth.4.-20.24_msn.DDS: 174888 bytes
+       Commonwealth.4.-20.24_data.DDS: 174888 bytes
+  ok   C1 every --no-cover sheet is 174,888 bytes
+       05ee9489e68d03bf0c3f41df841c53661faec4324d70f5b4bfaeeddf4658a0b2  Commonwealth.4.-20.24.DDS
+       5b5e55e3279c0fc78169490c363ef46f1a0651247dde2e3b0977b3b40fff674b  Commonwealth.4.-20.24_msn.DDS
+       6a91bdfd9bf5b9bc03e43d68ccfd7d7a57fb806fedd1343824b3f87a63bb413a  Commonwealth.4.-20.24_data.DDS
+  ok   C1 the --no-cover bake matches the frozen baseline
+  ok   C1 the --cover bake does NOT match it (the comparison can fail)
+  ok   C1 --grass-tint 0 keeps the albedo byte-identical
+  ok   C1 and still writes the cover plane (DXT5)
+== C2 the feature on over grass-free ground moves nothing ==
+       census: cover cx=0 cy=0 dim=4 texels=262144 coverMax=69 paintedPts=18496 alphaLayerPts=11106 renorm=173 maxDtexPainted=26.0 maxDtexBase=0.0 clipPainted=0 clipBase=0 danglingLtex=0 danglingLtexIds=[] danglingGnam=0 danglingGnamIds=[] ltexNoGnam=11/105 grasNoTint=16/82 ltexTotal=105 grasTotal=82 gnamLinks=122 ltexWithGnam=52 grasDataMin=32 grasDataMax=32 grasWithoutData=0 grasReads=18 nifReads=17 texLoads=25 ltexResolves=369 quadrants=64 coverFull=96.0 tintStrength=0.350 landGrade=1.0000 pxNoLand=0 pxNoBase=0 pxUnresolvableLtex=0 unresolvableLtexIds=[]
+  ok   C2 the cover pass ran at all (its census line is present)
+  ok   C2 the census counted the whole 512x512
+  FAIL C2 this ground has no cover (coverMax=69)
+  ok   C2 and the LTEX set it resolved is not empty
+  FAIL C2 all three grass-free sheets are byte-identical with --cover
+  FAIL C2 a grass-free chunk stays DXT1 (fourCC DXT5)
+== C12 the renormalising texels ==
+       worldspace scan: {"cell": [-18, -24], "points": 197, "totalPoints": 43312, "cells": 36864}
+       the paint sums past 1 on 197 grid points in cell (-18,-24); baking chunk (-20,-24)
+  ok   C12 the cover-side renormalisation does not reach the colour composite
+  ok   C12 and that fixture really does carry cover (DXT5)
+== C13 the census accuses itself ==
+       cover cx=-20 cy=24 dim=4 texels=262144 coverMax=74 paintedPts=18496 alphaLayerPts=14825 renorm=838 maxDtexPainted=28.0 maxDtexBase=0.0 clipPainted=0 clipBase=0 danglingLtex=0 danglingLtexIds=[] danglingGnam=0 danglingGnamIds=[] ltexNoGnam=7/105 grasNoTint=0/82 ltexTotal=105 grasTotal=82 gnamLinks=122 ltexWithGnam=52 grasDataMin=32 grasDataMax=32 grasWithoutData=0 grasReads=14 nifReads=12 texLoads=15 ltexResolves=314 quadrants=64 coverFull=96.0 tintStrength=0.350 landGrade=1.0000 pxNoLand=0 pxNoBase=0 pxUnresolvableLtex=0 unresolvableLtexIds=[]
+  ok   C13 the cover census line is present under --cover
+       danglingLtex=0
+       danglingGnam=0
+       clipPainted=0
+       clipBase=0
+  ok   C13 every ERROR counter is zero on vanilla
+  ok   C13 ltexNoGnam is printed with its denominator, not gated
+  ok   C13 grasNoTint is printed with its denominator, not gated
+       grasReads=14 nifReads=12 texLoads=15 ltexResolves=314/512
+  ok   C15 the resolves are per quadrant and per form, not per texel
+       corpus (bake): ltexTotal=105 grasTotal=82 gnamLinks=122 ltexWithGnam=52 grasData=32..32
+  ok   C14 ltexTotal agrees across two independent readers (105)
+  ok   C14 grasTotal agrees across two independent readers (82)
+  ok   C14 gnamLinks agrees across two independent readers (122)
+  ok   C14 ltexWithGnam agrees across two independent readers (52)
+  ok   C14 grasDataMin agrees across two independent readers (32)
+  ok   C14 grasDataMax agrees across two independent readers (32)
+== the model, and the measurements on the files ==
+       fixture: 16 of 16 cells carry LAND; LTEX LDriedGrass01,LDriedGrass01NoGrass,LDriedGrass02Weeds,LFallenLeaves01,LForestFloor01,LNFoothillsDirt01,LNFoothillsDriedGrass01,LNFoothillsDriedGrass01NoGrass,LRiverbedRocks02Wet,LRiverbedSilt01,LRootsEroded01,LRootsEroded01Grass01,LRubbleRock01,LRubbleRock01Grass; NULL layers 12 of 250; dominant base 1F78C
+       dangling LTEX in the fixture: none
+  ok   C0 the fixture's premises hold (16/16 cells, a real alpha-layer paint)
+  C3 cover sheet: fourCC DXT5, dwReserved1[0] 0x56435757, law 1, COVER_FULL 96
+  ok   C3 the cover sheet is DXT5 and carries the WWCV stamp -- a DXT5 sheet with no stamp would decode as FULL cover on every texel
+  ok   C3 the stamp records the normalisation the bake used -- stamp 96, model 96
+  ok   C3 the no-cover sheet stays DXT1 -- fourcc DXT1
+  C4 sizes: cover 349648, no-cover 174888 (bars 349648 / 174888)
+  ok   C4 a cover data sheet is 349,648 bytes
+  ok   C4 a no-cover data sheet is 174,888 bytes
+  C3b all-cover-0 blocks compared: 3358, texels whose RGB moved: 0 (bar 0)
+  ok   C3b the BC1 to BC3 switch leaves AO, wetness and shore alone
+  C6a model vs the raw plane on 209297 saturated texels: max 74 (bar 1), over-bar 199975; transition band 63 texels
+  FAIL C6a the model and the bake agree on the composite -- the band is reported, not gated
+  C6b raw vs decoded BC3, per block bar range/14 + 1: violations 0 (bar 0), worst excess 0.00
+  ok   C6b BC3 carries the plane within its own block range
+  C6c CONTROL, the model shifted one cell: max abs diff 70 (bar > 32)
+  ok   C6c the comparison can fail: a shifted model does not match
+  C5 nonzero fraction: file 0.780, model (ungated) 0.784; distinct values 75; mean over nonzero 36.4
+  ok   C5 the plane is neither empty nor saturated
+  C7 r(cover, AO) 0.190  r(cover, wetness) -0.026  r(cover, shore) -0.198 (bar |r| < 0.5)
+  ok   C7 cover is not a copy of a channel already shipped
+  C8 r(AO,wet) -0.384  r(AO,shore) -0.015  r(wet,shore) 0.043 (bar |r| < 0.9) [sampled]
+  ok   C8 the existing channels have not collapsed into one another
+  C17 r(cover, msn B) -0.050  r(cover, theta) 0.103  unexplained variance 0.989 (bars |r| < 0.5, residual > 0.5)
+  ok   C17 cover is not recoverable from the slope it consumes
+  C9 gated-off texels 209297 (max cover 74, bar <= 2), gated-on 0 (mean 0.0, bar > 8)
+  FAIL C9 the slope gate is there and it bites
+  C16 mip 1 vs the box filter of mip 0: violations 2 (bar 0); last mip distinct alphas 6
+  FAIL C16 the cover survives the mip chain
+  C10 diffuse blocks that moved: 12833 [sampled, bar > 250]; moved with no cover in them: 0 (bar 0)
+  ok   C10 the tint moved only blocks that carry cover
+  C11 mean tint delta over the 256 highest-cover texels: 27.14/255 (bar > 3)
+  ok   C11 the tint actually moves the albedo where cover is high
+  C11b implied grass colour, dark half (230,239,240) vs bright half (274,266,267), spread 58.2 (bar < 60)
+  ok   C11b one grass colour explains both halves (the tint is after VCLR)
+  C7 second chunk (0,0) model loaded: dominant base 21336
+  C14 python walk: LTEX 105, GRAS 82, GNAM links 122, LTEX with GNAM 52, GRAS DATA 32..32, bytes left over 0
+  ok   C14 the python walk consumed every byte it read
+  ok   C14 every GRAS carries a 32-byte DATA and no DNAM
+  ok   C14 the artists own NoGrass records exist and are the reason ltexNoGnam is informational -- 14 EDIDs end in NoGrass
+  21 checks, 3 failures
+  FAIL C3..C17 the measurements on the files
+
+29 checks, 4 failures
+RESULT FAIL
+RC=1

@@ -1,0 +1,16 @@
+pbr_r3 mask disk centre (699.5, 462.5) radius 298.1 px (279128 px)
+pbr_r3 furnace metal_r10 centre 0.9989 (rgb 0.999 0.999 0.999, n=1788); 60deg 0.9989 (rgb 0.999 0.999 0.999, n=19292) -> PASS
+pbr_r3 furnace metal_r50 centre 0.9989 (rgb 0.999 0.999 0.999, n=1788); 60deg 0.9989 (rgb 0.999 0.999 0.999, n=19292) -> PASS
+pbr_r3 furnace metal_r99 centre 0.9989 (rgb 0.999 0.999 0.999, n=1788); 60deg 0.9989 (rgb 0.999 0.999 0.999, n=19292) -> PASS
+pbr_r3 furnace diel_f004 centre 0.9989 (rgb 0.999 0.999 0.999, n=1788); 60deg 0.9989 (rgb 0.999 0.999 0.999, n=19292) -> PASS
+pbr_r3 twins v5 f0 0.04 vs v6 w1 ior1.5: max |d| 0, 0 px differ, 280464 lit px, census f0 0.04 / 0.04 -> PASS
+pbr_r3 s1 weight 0: full vs diffuse-only max |d| 0 (0 px); weight 1: max |d| 32 (202621 px) -> PASS
+pbr_r3 s2 census f0 0.04 / 0.111 (want 0.0400 / 0.1111); env-spec centre 0.0313 / 0.0858 ratio 2.745 (want 2.778 +-3%, split-sum law 2.748) -> PASS
+pbr_r3 s3 specular centre rgb 0.2961 0.0273 0.0273 (red: R >= 3G, 3B True); diffuse centre rgb 0.7682 0.7991 0.7991 (not red: R <= 1.02 G, B True) -> PASS
+pbr_r3 q9 no mode pin: census mode both(asked=), sphere program pbrm_default.prog (want both(..), pbrm_default.prog) -> PASS
+pbr_r3 furnace -> PASS
+pbr_r3 twins -> PASS
+pbr_r3 s1 -> PASS
+pbr_r3 s2 -> PASS
+pbr_r3 s3 -> PASS
+pbr_r3 q9 -> PASS

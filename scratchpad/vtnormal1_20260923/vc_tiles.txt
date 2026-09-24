@@ -1,0 +1,9 @@
+  Commonwealth.VT.2.lodt: 4 present, 0 absent
+  ok   V5 an absent tile is 24 ZERO bytes, not just a zero offset
+  V5 distinct rawBytes: [110976] (the header implies 101728 without cover, 110976 with)
+  ok   V5 every payload is exactly the size the header implies
+  ok   V5 the payloads really are that long when read -- first 64 present tiles
+  ok   V6 payloads are 4,096-aligned
+  ok   V6 payloads do not overlap and are in table-index order
+  ok   V6 every alignment pad byte is zero (this is what makes two runs match)
+  ok   V7 every tile CRC recomputes

@@ -1,0 +1,19 @@
+  ok   gate (a): legacy_bto_top is byte-identical to its baseline
+  ok   gate (a): legacy_bto_obl is byte-identical to its baseline
+  ok   gate (a): legacy_btr_top is byte-identical to its baseline
+  ok   gate (a): legacy_btr_obl is byte-identical to its baseline
+  ok   gate (c): native oblique terrain dark<40 is 0.00%, bar 3.00% (measured 0.58 here, 20.01 on the rung)
+  ok   gate (c): FLAT-tile oblique terrain dark<40 is 0.00%, bar 1.00% (measured 0.00 here, 20.07 on the rung)
+  FAIL gate (b): darkest-fifth IoU own vs flat is 1.000, bar 0.800 (measured 0.705 here, 0.858 on the rung)
+  FAIL gate (b): own-minus-flat blockSD is 0.00 over 266 blocks, floor 3.50 (measured 4.56 here, 2.63 on the rung -- a real slope signal survives block averaging, uncorrelated noise does not)
+  ok   gate (b): flat tiles at the oblique have blockSD 14.83, no more than the 17.64 the SAME tiles give at the top view where N.L is provably equal at every texel (measured 15.04 vs 17.57 here; 31.91 vs 6.14 on the rung)
+  the light: headlight (0,0,1) in VIEW space; the oblique view rotation (-63.5593, 0, 133.3081) through Matrix::fromEuler puts it along (-0.6516, +0.6142, +0.4453) in world axes
+  so N.L is  west 0.7258  >  flat 0.4434  >  east 0.0968  at the oblique, and east == west (0.8751) at the top
+  ok   gate (d): at the TOP view an east tilt and a west tilt have the same N.L, so the two frames are the same picture (max|dY| 0.00; the rung gave max 81.18, mean 47.06)
+  FAIL gate (d): at the oblique, luma orders west > flat > east on 0.00% of 311795 covered pixels, bar 99.00% (measured 100.00 here, 46.23 on the rung -- chance)
+  ok   census: all 4 .lodl terrain shapes carry Shader Flags 1 bit 12 and are lit by fo4_default.prog
+  ok   census: all 2 .BTO object shapes are msn=0, so the model-space branch is switched off for them
+  ok   census: the legacy .BTR 'Land' shape is msn=1, Shader Type 18, and is lit by sk_msn.prog -- NOT by the FO4 program this lane changed, which is why its pictures do not move
+14 checks, 3 failures, 0 skips
+FAIL
+done

@@ -1,0 +1,2 @@
+pbr_r1 (d) nifx round trip nifx_rt_canonical.nifx: 272 bytes in, 457 out, identical=False -> FAIL
+pbr_r1 RED CONTROL nifx: gate (d) 1 of 1 checks FAILED -> BITES (control PASS)

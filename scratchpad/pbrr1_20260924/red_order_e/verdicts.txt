@@ -1,0 +1,10 @@
+pbr_r1 sibling_v6 (b) census=sibling Materials\WWPbrTest01\SiblingV6Duct.pbrm python=sibling Materials\WWPbrTest01\SiblingV6Duct.pbrm -> PASS
+pbr_r1 sibling_v5 (b) census=sibling Materials\WWPbrTest01\SiblingV5Duct.pbrm python=sibling Materials\WWPbrTest01\SiblingV5Duct.pbrm -> PASS
+pbr_r1 direct (b) census=direct Materials\WWPbrTest01\DirectV6Ducts.PBRM python=direct Materials\WWPbrTest01\DirectV6Ducts.PBRM -> PASS
+pbr_r1 nifx (b) census=nifx Materials\WWPbrTest01\NifxTarget.pbrm python=nifx Materials\WWPbrTest01\NifxTarget.pbrm -> PASS
+pbr_r1 direct_nifx (b) census=direct Materials\WWPbrTest01\DirectNifxDct.PBRM python=nifx Materials\WWPbrTest01\NifxTarget.pbrm -> FAIL
+pbr_r1 swap (b) census=swap Materials\WWPbrTest01\SwapDuct.pbrm python=swap Materials\WWPbrTest01\SwapDuct.pbrm -> PASS
+pbr_r1 fo76 (b) census=fo76 Materials\WWPbrTest01\Fo76BgsmDucts.BGSM python=fo76 Materials\WWPbrTest01\Fo76BgsmDucts.BGSM -> PASS
+pbr_r1 texfail (b) census=sibling Materials\WWPbrTest01\TexFailDucts1.pbrm python=sibling Materials\WWPbrTest01\TexFailDucts1.pbrm -> PASS
+pbr_r1 legacy (b) census=legacy - python=legacy - -> PASS
+pbr_r1 RED CONTROL order_e: gate (b) 1 of 9 checks FAILED -> BITES (control PASS)

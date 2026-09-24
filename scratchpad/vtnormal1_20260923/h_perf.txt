@@ -1,0 +1,30 @@
+lodgen_perf: /e/Projects/NifskopeWildWastelandEdition/release/NifSkope.exe
+   -rwxr-xr-x 1 bungo 197609 24106496 Sep 23 22:49 /e/Projects/NifskopeWildWastelandEdition/release/NifSkope.exe
+   parallel arm: --threads 0 --chunk-threads 8
+
+(a) IDENTITY -- the whole output tree, every file, serial vs parallel
+  ok      (a) region A: 57 file(s), every byte identical
+  ok      (a) region B: 99 file(s), every byte identical
+
+(b) NON-VACUITY -- the census must prove the fan-out RAN
+      measured: model workers 4, ladder workers 16
+  ok      (b) 4 model worker(s) and 16 ladder worker(s) actually ran
+
+(c) THE WAY BACK -- --threads 1 --chunk-threads 1 against the rung exe
+  RED     (c) --threads 1 no longer reproduces the rung exe: COMPARED 57 file(s); 54 identical; 3 difference(s) VERDICT DIFFER 
+  ok      (c) the one new census line reads: native-library-build: rebuilt (not offered: this is not an incremental bake)
+
+(d) REUSE -- the library is not rebuilt for nothing (--incremental only)
+      noocc null: native-library-build: reused (previous .lodo kept; base census, load order, plugin corpus and object corpus unmoved, payload checked)
+  ok      (d) noocc: the census says reused, as it must
+  ok      (d) noocc: null and mixed (3 replayed from cache) both write the byte-identical pair
+      occ null: native-library-build: rebuilt (occluders are on and the per-model box is in neither file)
+  ok      (d) occ: the census says rebuilt, as it must
+  ok      (d) occ: null and mixed (3 replayed from cache) both write the byte-identical pair
+
+(e) THE SPLIT -- present in the census, masked in the record
+  ok      (e) the stage-time line carries the library's split
+  ok      (e) the record masks the whole line, split included
+
+lodgen_perf: 1 FAIL
+perf rc=1

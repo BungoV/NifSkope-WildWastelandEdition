@@ -1,0 +1,11 @@
+subject    sheets     frames      worst       mean
+blast_n4   af457755       16       0.0%       2.0%
+blast_n4   this bake      16       0.0%      19.8%
+blast_n8   af457755       64       0.0%       2.4%
+blast_n8   this bake      64       0.0%      25.8%
+maple_n4   af457755       16       0.0%       3.4%
+maple_n4   this bake      16       0.0%      27.7%
+dead_n4    af457755       16       0.0%       4.3%
+dead_n4    this bake      16       0.0%      28.5%
+rock_n4    af457755       16       2.9%       5.7%
+rock_n4    this bake      16      46.7%      72.9%

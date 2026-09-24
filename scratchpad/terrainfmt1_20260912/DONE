@@ -1,0 +1,6 @@
+LANE TERRAINFMT1 done 2026-09-12 13:45.
+exe release/NifSkope.exe 2026-09-12 12:58:48  22,007,808 B  sha1 ba7585cba389c8b38f0e07c6c11063e0cec1124c
+rung release/NifSkope.before_terrainfmt1.exe  11:51:35  22,000,128 B  sha1 ecf5ecab537f70a3409f2df3da4f4bbda2b08708
+F1 measured  F2 landed  item3 settled (refutes the brief)  F3 REFUSED  F4 passed  F5 landed
+both switches off == rung bytes: 10 files, 0 differ
+0 Fallout4.exe, 0 NifSkope.exe left running

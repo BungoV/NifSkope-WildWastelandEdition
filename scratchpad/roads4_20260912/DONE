@@ -1,0 +1,3 @@
+lane ROADS4 DONE at 06:57:44 2026-09-12
+exe release/NifSkope.exe 06:31:05 21,819,904 B, one build, zero relinks
+report scratchpad/lane_roads4_report.md

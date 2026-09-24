@@ -1,0 +1,12 @@
+exe: /e/Projects/NifskopeWildWastelandEdition/release/NifSkope.exe (2026-09-23 07:54:35.054703500 +0200 23831552)
+census: 55 models named by the plugin, 54 on disk
+  ok   S1 (floor): the census found 54 models on disk (>= 50)
+  fewest covered: marshshrub02                   13899 texels  halfW 138.52
+  fewest covered: deadshrubgs01                  22463 texels  halfW 211.45
+  fewest covered: deadshrubgs03                  26241 texels  halfW 140.25
+  fewest covered: marshshrub01                   39121 texels  halfW 111.47
+  fewest covered: deadshrub04                    39866 texels  halfW 204.34
+  ok   S2: every model baked (54 of 54)
+  ok   S3: no model bakes an EMPTY card (0 empty)
+  ok   S4: every model with no LOD0 part names the level that served (27 of 27), none with one does (0)
+RESULT PASS

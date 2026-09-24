@@ -1,0 +1,11 @@
+### cell_pick2 start 18:18:10
+### cell_pick2 rc=1  18:18:56
+skips: 2
+FAIL (1)
+
+### cell_pick_lodi start 18:18:56
+### cell_pick_lodi rc=1  18:19:58
+skips: 0
+FAIL (1)
+
+CHAIN DONE 18:19:58

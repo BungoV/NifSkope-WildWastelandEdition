@@ -1,0 +1,22 @@
+  chunk                            [-20, 20]
+  coverMax                         73
+  coverMeanOverCovered             22.843594203742384
+  coverStamp                       0x56435757
+  coverStamped                     True
+  coverTexels                      137399
+  dataFourCC                       DXT5
+  dim                              4
+  errCover_vanilla_vs_default      19.31178963251085
+  errCover_vanilla_vs_tint0        21.118571080394062
+  errWhole_vanilla_vs_default      20.970502776240174
+  errWhole_vanilla_vs_tint0        21.917561005154333
+  identicalOutsideCover            False
+  texels                           262144
+  tintCover_mean                   6.311707613506073
+  tintCover_p95                    16.451612903225808
+  tintOutsideCover_max             22.936507936507937
+  tintWhole_max                    27.419354838709694
+  tintWhole_mean                   3.3385411861671654
+  zoom                             [280, 64, 408, 192]
+  zoomCoverTexels                  14914
+wrote E:/Projects/NifskopeWildWastelandEdition/scratchpad/pic_grass_20260911/images\cmp_grass_tint.png  2148x1294

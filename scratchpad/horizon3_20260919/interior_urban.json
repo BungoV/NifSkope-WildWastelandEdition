@@ -1,0 +1,1237 @@
+{
+ "faces": [
+  {
+   "rank": 1,
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWDoubleCurveL01_LOD_0.nif",
+   "area": 8015246.961549813,
+   "instance": 22028,
+   "samples": 1999,
+   "grid": [
+    88,
+    48
+   ],
+   "copies": 1,
+   "normal": [
+    5.748782104415222e-05,
+    -2.0510195286041734e-05,
+    0.9999999981372412
+   ],
+   "suns": {
+    "e05_a120": {
+     "components": 3,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 309,
+     "samples": 1999
+    },
+    "e05_a240": {
+     "components": 5,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 1006,
+     "samples": 1999
+    },
+    "e15_a120": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 495,
+     "samples": 1999
+    },
+    "e15_a240": {
+     "components": 5,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 1230,
+     "samples": 1999
+    },
+    "e30_a120": {
+     "components": 3,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 714,
+     "samples": 1999
+    },
+    "e30_a240": {
+     "components": 5,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 1452,
+     "samples": 1999
+    }
+   }
+  },
+  {
+   "rank": 2,
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWDoubleCurveL01_LOD_0.nif",
+   "area": 7882863.749076827,
+   "instance": 22028,
+   "samples": 1928,
+   "grid": [
+    88,
+    47
+   ],
+   "copies": 1,
+   "normal": [
+    -5.748782104415222e-05,
+    2.0510195286041734e-05,
+    -0.9999999981372412
+   ],
+   "suns": {
+    "e05_a120": {
+     "components": 3,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 283,
+     "samples": 1928
+    },
+    "e05_a240": {
+     "components": 4,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 956,
+     "samples": 1928
+    },
+    "e15_a120": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 441,
+     "samples": 1928
+    },
+    "e15_a240": {
+     "components": 5,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 1178,
+     "samples": 1928
+    },
+    "e30_a120": {
+     "components": 3,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 670,
+     "samples": 1928
+    },
+    "e30_a240": {
+     "components": 5,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 1383,
+     "samples": 1928
+    }
+   }
+  },
+  {
+   "rank": 3,
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWDoubleCurveL01_LOD_0.nif",
+   "area": 7690949.349854619,
+   "instance": 22028,
+   "samples": 1906,
+   "grid": [
+    83,
+    48
+   ],
+   "copies": 1,
+   "normal": [
+    5.748782104415222e-05,
+    -2.0510195286041734e-05,
+    0.9999999981372412
+   ],
+   "suns": {
+    "e05_a120": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 190,
+     "samples": 1906
+    },
+    "e05_a240": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 358,
+     "samples": 1906
+    },
+    "e15_a120": {
+     "components": 3,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 256,
+     "samples": 1906
+    },
+    "e15_a240": {
+     "components": 4,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 1103,
+     "samples": 1906
+    },
+    "e30_a120": {
+     "components": 3,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 457,
+     "samples": 1906
+    },
+    "e30_a240": {
+     "components": 4,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 1249,
+     "samples": 1906
+    }
+   }
+  },
+  {
+   "rank": 4,
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWDoubleCurveR01_LOD_0.nif",
+   "area": 7689271.921935745,
+   "instance": 4291,
+   "samples": 1919,
+   "grid": [
+    82,
+    54
+   ],
+   "copies": 1,
+   "normal": [
+    5.639064921774229e-05,
+    2.335834668544804e-05,
+    0.9999999981372412
+   ],
+   "suns": {
+    "e05_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 119,
+     "samples": 1919
+    },
+    "e05_a240": {
+     "components": 3,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 1143,
+     "samples": 1919
+    },
+    "e15_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 119,
+     "samples": 1919
+    },
+    "e15_a240": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 1288,
+     "samples": 1919
+    },
+    "e30_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 119,
+     "samples": 1919
+    },
+    "e30_a240": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 1288,
+     "samples": 1919
+    }
+   }
+  },
+  {
+   "rank": 5,
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWDoubleStrExit01_LOD_0.nif",
+   "area": 6205479.188097964,
+   "instance": 27018,
+   "samples": 1560,
+   "grid": [
+    65,
+    24
+   ],
+   "copies": 2,
+   "normal": [
+    -2.7957457742130987e-06,
+    -0.09979283082971388,
+    0.9950082366026806
+   ],
+   "suns": {
+    "e05_a120": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 976,
+     "samples": 1560
+    },
+    "e05_a240": {
+     "components": 4,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 539,
+     "samples": 1560
+    },
+    "e15_a120": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 976,
+     "samples": 1560
+    },
+    "e15_a240": {
+     "components": 5,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 877,
+     "samples": 1560
+    },
+    "e30_a120": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 1015,
+     "samples": 1560
+    },
+    "e30_a240": {
+     "components": 4,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 996,
+     "samples": 1560
+    }
+   }
+  },
+  {
+   "rank": 6,
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWDoubleStrExit01_LOD_0.nif",
+   "area": 6057986.937544823,
+   "instance": 27018,
+   "samples": 1560,
+   "grid": [
+    65,
+    24
+   ],
+   "copies": 2,
+   "normal": [
+    -2.7957457742130987e-06,
+    -0.09979283082971388,
+    0.9950082366026806
+   ],
+   "suns": {
+    "e05_a120": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 1000,
+     "samples": 1560
+    },
+    "e05_a240": {
+     "components": 3,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 949,
+     "samples": 1560
+    },
+    "e15_a120": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 1043,
+     "samples": 1560
+    },
+    "e15_a240": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 1042,
+     "samples": 1560
+    },
+    "e30_a120": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 1088,
+     "samples": 1560
+    },
+    "e30_a240": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 1088,
+     "samples": 1560
+    }
+   }
+  },
+  {
+   "rank": 7,
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWDoubleStrExit01_LOD_0.nif",
+   "area": 6021285.377523461,
+   "instance": 27018,
+   "samples": 1495,
+   "grid": [
+    65,
+    23
+   ],
+   "copies": 2,
+   "normal": [
+    2.7957457742130987e-06,
+    0.09979283082971388,
+    -0.9950082366026806
+   ],
+   "suns": {
+    "e05_a120": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 960,
+     "samples": 1495
+    },
+    "e05_a240": {
+     "components": 3,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 904,
+     "samples": 1495
+    },
+    "e15_a120": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 990,
+     "samples": 1495
+    },
+    "e15_a240": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 988,
+     "samples": 1495
+    },
+    "e30_a120": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 1044,
+     "samples": 1495
+    },
+    "e30_a240": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 1043,
+     "samples": 1495
+    }
+   }
+  },
+  {
+   "rank": 8,
+   "model": "LOD\\Architecture\\Airport\\AirportTerminalDestroyed01_LOD.nif",
+   "area": 5304257.348756995,
+   "instance": 14062,
+   "samples": 1340,
+   "grid": [
+    52,
+    52
+   ],
+   "copies": 1,
+   "normal": [
+    5.639064921774229e-05,
+    2.335834668544804e-05,
+    0.9999999981372412
+   ],
+   "suns": {
+    "e05_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 1340
+    },
+    "e05_a240": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 1340
+    },
+    "e15_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 2,
+     "samples": 1340
+    },
+    "e15_a240": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 1340
+    },
+    "e30_a120": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 221,
+     "samples": 1340
+    },
+    "e30_a240": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 432,
+     "samples": 1340
+    }
+   }
+  },
+  {
+   "rank": 9,
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWDoubleCurveR01_LOD_0.nif",
+   "area": 5035599.568290644,
+   "instance": 4291,
+   "samples": 1244,
+   "grid": [
+    59,
+    36
+   ],
+   "copies": 1,
+   "normal": [
+    -5.639064921774229e-05,
+    -2.335834668544804e-05,
+    -0.9999999981372412
+   ],
+   "suns": {
+    "e05_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 1244
+    },
+    "e05_a240": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 528,
+     "samples": 1244
+    },
+    "e15_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 1244
+    },
+    "e15_a240": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 528,
+     "samples": 1244
+    },
+    "e30_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 1244
+    },
+    "e30_a240": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 528,
+     "samples": 1244
+    }
+   }
+  },
+  {
+   "rank": 10,
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWDoubleCurveR01_LOD_0.nif",
+   "area": 5003381.640254479,
+   "instance": 4291,
+   "samples": 1267,
+   "grid": [
+    59,
+    37
+   ],
+   "copies": 1,
+   "normal": [
+    5.639064921774229e-05,
+    2.335834668544804e-05,
+    0.9999999981372412
+   ],
+   "suns": {
+    "e05_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 1267
+    },
+    "e05_a240": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 531,
+     "samples": 1267
+    },
+    "e15_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 1267
+    },
+    "e15_a240": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 531,
+     "samples": 1267
+    },
+    "e30_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 1267
+    },
+    "e30_a240": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 531,
+     "samples": 1267
+    }
+   }
+  },
+  {
+   "rank": 11,
+   "model": "LOD\\Architecture\\Unique\\BostonCommons\\BostonCommonsPond01_LOD_0.nif",
+   "area": 3762037.3357285177,
+   "instance": 15927,
+   "samples": 948,
+   "grid": [
+    50,
+    33
+   ],
+   "copies": 1,
+   "normal": [
+    4.132370781419122e-05,
+    -4.4920695136689405e-05,
+    0.9999999981372412
+   ],
+   "suns": {
+    "e05_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 948
+    },
+    "e05_a240": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 948
+    },
+    "e15_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 948
+    },
+    "e15_a240": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 948
+    },
+    "e30_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 948
+    },
+    "e30_a240": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 948
+    }
+   }
+  },
+  {
+   "rank": 12,
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWDoubleStr01Damaged01_LOD_0.nif",
+   "area": 3102700.9372091247,
+   "instance": 24932,
+   "samples": 792,
+   "grid": [
+    33,
+    24
+   ],
+   "copies": 3,
+   "normal": [
+    2.7957457741020764e-06,
+    -0.09979283082971398,
+    0.9950082366026806
+   ],
+   "suns": {
+    "e05_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 792
+    },
+    "e05_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 91,
+     "samples": 792
+    },
+    "e15_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 4,
+     "samples": 792
+    },
+    "e15_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 91,
+     "samples": 792
+    },
+    "e30_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 4,
+     "samples": 792
+    },
+    "e30_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 91,
+     "samples": 792
+    }
+   }
+  },
+  {
+   "rank": 13,
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWDoubleStr01_LOD_0.nif",
+   "area": 3102663.342885481,
+   "instance": 29067,
+   "samples": 792,
+   "grid": [
+    33,
+    24
+   ],
+   "copies": 1,
+   "normal": [
+    6.103701892356834e-05,
+    2.842431829188155e-14,
+    0.9999999981372412
+   ],
+   "suns": {
+    "e05_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 619,
+     "samples": 792
+    },
+    "e05_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 49,
+     "samples": 792
+    },
+    "e15_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 619,
+     "samples": 792
+    },
+    "e15_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 619,
+     "samples": 792
+    },
+    "e30_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 652,
+     "samples": 792
+    },
+    "e30_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 652,
+     "samples": 792
+    }
+   }
+  },
+  {
+   "rank": 14,
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWDoubleStr01_LOD_0.nif",
+   "area": 3028918.21762417,
+   "instance": 29067,
+   "samples": 792,
+   "grid": [
+    33,
+    24
+   ],
+   "copies": 1,
+   "normal": [
+    6.103701892356834e-05,
+    2.842431829188155e-14,
+    0.9999999981372412
+   ],
+   "suns": {
+    "e05_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 675,
+     "samples": 792
+    },
+    "e05_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 675,
+     "samples": 792
+    },
+    "e15_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 746,
+     "samples": 792
+    },
+    "e15_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 746,
+     "samples": 792
+    },
+    "e30_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 768,
+     "samples": 792
+    },
+    "e30_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 768,
+     "samples": 792
+    }
+   }
+  },
+  {
+   "rank": 15,
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWDoubleStr01_LOD_0.nif",
+   "area": 3010613.938323033,
+   "instance": 29067,
+   "samples": 759,
+   "grid": [
+    33,
+    23
+   ],
+   "copies": 1,
+   "normal": [
+    -6.103701892356834e-05,
+    -2.842431829188155e-14,
+    -0.9999999981372412
+   ],
+   "suns": {
+    "e05_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 624,
+     "samples": 759
+    },
+    "e05_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 624,
+     "samples": 759
+    },
+    "e15_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 696,
+     "samples": 759
+    },
+    "e15_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 696,
+     "samples": 759
+    },
+    "e30_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 736,
+     "samples": 759
+    },
+    "e30_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 736,
+     "samples": 759
+    }
+   }
+  },
+  {
+   "rank": 16,
+   "model": "LOD\\Buildings\\BldgBrick7Story3x5FreeComEntA_LOD.nif",
+   "area": 2487817.4186167093,
+   "instance": 26701,
+   "samples": 640,
+   "grid": [
+    32,
+    20
+   ],
+   "copies": 1,
+   "normal": [
+    -3.725505322357683e-08,
+    -0.9999998042951466,
+    -0.0006256274189897908
+   ],
+   "suns": {
+    "e05_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 640
+    },
+    "e05_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 28,
+     "samples": 640
+    },
+    "e15_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 14,
+     "samples": 640
+    },
+    "e15_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 59,
+     "samples": 640
+    },
+    "e30_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 88,
+     "samples": 640
+    },
+    "e30_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 73,
+     "samples": 640
+    }
+   }
+  },
+  {
+   "rank": 17,
+   "model": "LOD\\Architecture\\Unique\\TheCastle\\CastleWallOutWedge02_LOD_0.nif",
+   "area": 2301462.523781186,
+   "instance": 33113,
+   "samples": 592,
+   "grid": [
+    16,
+    37
+   ],
+   "copies": 1,
+   "normal": [
+    -0.9510450444584014,
+    0.309052292948606,
+    6.0285374729586557e-05
+   ],
+   "suns": {
+    "e05_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 41,
+     "samples": 592
+    },
+    "e05_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 1,
+     "samples": 592
+    },
+    "e15_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 44,
+     "samples": 592
+    },
+    "e15_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 23,
+     "samples": 592
+    },
+    "e30_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 50,
+     "samples": 592
+    },
+    "e30_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 46,
+     "samples": 592
+    }
+   }
+  },
+  {
+   "rank": 18,
+   "model": "LOD\\Architecture\\Unique\\TheCastle\\CastleWallOutWedge03_LOD_0.nif",
+   "area": 2301462.523781186,
+   "instance": 33114,
+   "samples": 592,
+   "grid": [
+    16,
+    37
+   ],
+   "copies": 1,
+   "normal": [
+    -0.5877594016083003,
+    -0.8090357735375118,
+    5.438393938618384e-05
+   ],
+   "suns": {
+    "e05_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 592
+    },
+    "e05_a240": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 592
+    },
+    "e15_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 2,
+     "samples": 592
+    },
+    "e15_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 2,
+     "samples": 592
+    },
+    "e30_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 4,
+     "samples": 592
+    },
+    "e30_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 4,
+     "samples": 592
+    }
+   }
+  },
+  {
+   "rank": 19,
+   "model": "LOD\\Architecture\\Unique\\TheCastle\\CastleWallOutWedge01_LOD_0.nif",
+   "area": 2207164.3439604267,
+   "instance": 33112,
+   "samples": 568,
+   "grid": [
+    16,
+    37
+   ],
+   "copies": 1,
+   "normal": [
+    -4.315875859479665e-05,
+    0.9999999981372412,
+    4.316062135363792e-05
+   ],
+   "suns": {
+    "e05_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 30,
+     "samples": 568
+    },
+    "e05_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 40,
+     "samples": 568
+    },
+    "e15_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 115,
+     "samples": 568
+    },
+    "e15_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 122,
+     "samples": 568
+    },
+    "e30_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 169,
+     "samples": 568
+    },
+    "e30_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 173,
+     "samples": 568
+    }
+   }
+  },
+  {
+   "rank": 20,
+   "model": "LOD\\Architecture\\Unique\\TheCastle\\CastleWallOutWedge02_LOD_0.nif",
+   "area": 2097126.7808651866,
+   "instance": 33113,
+   "samples": 544,
+   "grid": [
+    16,
+    34
+   ],
+   "copies": 1,
+   "normal": [
+    0.9510450444584014,
+    -0.309052292948606,
+    -6.0285374729586557e-05
+   ],
+   "suns": {
+    "e05_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 112,
+     "samples": 544
+    },
+    "e05_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 8,
+     "samples": 544
+    },
+    "e15_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 112,
+     "samples": 544
+    },
+    "e15_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 25,
+     "samples": 544
+    },
+    "e30_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 112,
+     "samples": 544
+    },
+    "e30_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 53,
+     "samples": 544
+    }
+   }
+  }
+ ],
+ "faces_with_interior": 0,
+ "faces_with_interior_3plus": 0,
+ "total": 20,
+ "sample_u": 64.0,
+ "elevations": [
+  5.0,
+  15.0,
+  30.0
+ ],
+ "azimuths": [
+  120.0,
+  240.0
+ ]
+}

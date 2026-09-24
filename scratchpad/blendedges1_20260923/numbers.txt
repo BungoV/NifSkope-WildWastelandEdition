@@ -1,0 +1,16 @@
+SEAM (max / mean over the 14 interior 2,048-unit lines; 1.0 = no line)
+  (a) current defaults                                               chunk sheet  512px  1.784 / 1.236   |  pyramid dim2  512px  1.792 / 1.250
+      chunk per-line: 1.11 1.13 1.18 1.09 1.22 1.21 1.23 1.21 1.36 1.78 1.41 1.31 1.12 0.96
+  (b) + blend-edges quadrant                                         chunk sheet  512px  1.099 / 0.977   |  pyramid dim2  512px  1.106 / 0.992
+      chunk per-line: 0.91 1.00 0.98 0.94 0.96 1.05 1.00 0.82 0.93 0.98 1.10 1.05 1.04 0.93
+  (c) + blend-edges + msn-cache + vt-finest 1 + vt-content 512       chunk sheet 1024px  1.155 / 1.036   |  pyramid dim2 1024px  1.155 / 1.037
+      chunk per-line: 0.95 1.09 1.03 1.05 1.04 1.09 1.08 0.89 0.97 0.96 1.16 1.08 1.06 1.04
+                                                                     pyramid dim1 2048px  1.111 / 1.048
+  (d) vanilla                                                        chunk sheet  512px  1.626 / 1.105
+      vanilla per-line: 1.47 1.09 1.03 1.12 1.03 0.98 1.04 1.63 1.10 1.04 0.76 0.95 1.37 0.87
+
+PYRAMID NORMAL SOURCE, (c) VT.1 finest level (2048px, 8 u/texel) east channel:
+  r vs his upscaled cache sheet (2048px, 8 u/texel)       0.580
+  r vs (b) pyramid VT.2 normal, height-derived, upsampled 0.991
+  r vs the cache flipped north-south (orientation control) 0.132
+  control: (c) CHUNK _msn east vs the cache                0.996  (identical bytes: False)

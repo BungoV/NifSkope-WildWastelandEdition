@@ -1,0 +1,64 @@
+pin: centre -73728,106496,0 (legacy chunk-local centre 8192,8192,0), ortho half-width 8192, window 1024x1024 (the frame is read back below)
+
+=== (a) module-off identity: no sheets, nothing changes ===================
+  SKIP byte-identity against /e/Projects/NifskopeWildWastelandEdition/release/NifSkope.before_nativeview1.exe (the rung is not on disk)
+  ok   WW_LODL_SHEETS pointed at an EMPTY directory builds the same bytes
+  ok   a non-height plane ignores the sheets entirely (byte-identical with them present)
+      ok   the whole worldspace renders non-blank (coverage > 0.05, contrast SD > 2)
+    23 checks, 0 failures
+    PASS
+  ok   lodl_open.sh still runs 23 checks with 0 failures (ran 23, failed 0)
+
+=== (b) the instance census: three counts that must agree =================
+  the .lodi's own chunk table puts 676 instances in cells (-20,24) dim 4
+  the viewer placed 676 instances and wrote them down
+  ok   the viewer's census count equals the .lodi's own chunk count (676 == 676)
+    census 676 rows, authority 676 rows
+    worst position difference 0.0046 u (00145951/1), 0 past 1.000 u
+  ok   every placement's world position is within 1 unit of the file's own
+  SKIP the manifest leg of (b): no <chunk>.manifest.txt under GBAKE=<unset>
+       (the look bake passes --no-identity and src/lodgen.cpp writes placement
+        rows only under opts.identity; re-bake THIS ONE CHUNK with identity on)
+  floor: cells (-20,32) dim 4 — file says 0, viewer placed 0
+  ok   the floor fires: an empty region yields 0 placements and the harness sees 0
+
+=== (c) the .lodi scene against the chunk's own .BTO, one camera ==========
+    note: the four corners are not one colour; background taken as (43, 45, 49)
+    note: the four corners are not one colour; background taken as (43, 45, 49)
+    A covers 224437 px, B covers 183734 px, intersection 171439, union 236732
+  COVER 0.9331
+  FAT 1.2215
+  COVERFLIP 0.1163
+  IOU 0.7242
+  ok   the .lodi scene draws everything the .BTO draws (covered 0.9331 >= 0.90)
+  ok   and it draws no more than the chunk plus its edges (area 1.2215 x the .BTO <= 2.00)
+  ok   the floor fires: the same .BTO mirrored in Y is NOT covered (0.1163 < 0.50)
+  a solid frame in place of the .lodi scene: covered 1.0000, area 5.5119 x
+  ok   the refuter fires: a frame covering EVERYTHING passes coverage (1.0000) and the area bar catches it (5.5119 > 2.00)
+    note: the four corners are not one colour; background taken as (43, 45, 49)
+    A covers 224437 px, B covers 48 px, intersection 18, union 224467
+  COVER 0.3750
+  FAT 4675.7708
+  COVERFLIP 0.2917
+  IOU 0.0001
+  ok   the refuter fires: a DIFFERENT chunk's .BTO is not covered (0.3750 < 0.90)
+
+=== (d) the lit .lodl against the .BTR of the same cells ==================
+    note: the four corners are not one colour; background taken as (103, 90, 72)
+    note: the four corners are not one colour; background taken as (112, 97, 78)
+    compared over 968795 px (the union of the two footprints)
+  MAD 20.808
+    compared over 1024 x 989 px
+  NCC 0.8411
+  NCCFLIP -0.0469
+  ok   the lit terrain looks like the .BTR of the SAME cells (NCC 0.8411 >= 0.45)
+  ok   the refuter fires: a DIFFERENT chunk's .BTR correlates less (NCC 0.2288 < 0.8411)
+  ok   the floor fires: the same .BTR mirrored in Y does NOT correlate (NCC -0.0469 < 0.10)
+  ok   the lit terrain and the .BTR of the same cells agree (mean |dColour| 20.808 < 48)
+  ok   a render with WW_LODL_SHEETS pointed at an EMPTY directory IS the data view
+  ok   the lit render is NOT the data view (mean |dColour| 69.340 > 8), so (d) is not vacuous
+
+camera pin (last grab): grab arm=center/ortho/view view=1 rot=0.0000,0.0000,0.0000 lookat=-73728.0000,106496.0000,0.0000 eye=31648.0000 dist=15824.0000 zoom=2.0000 persp=0 fov=60.0000 halfW=8192.0000 halfH=7912.0000 vp=1024x989 upp=16.000000
+
+17 checks, 0 failures, 2 skipped
+PASS

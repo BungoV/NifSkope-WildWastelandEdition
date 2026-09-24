@@ -1,0 +1,92 @@
+TILING4 -- the frozen SWIRL LAW and the controls it passes
+
+law:  r = swirl / swirl(own phase twin);  PASS iff r <= 1.20 x r(the same
+      chunk`s vanilla sheet)  AND  r <= 3.2846 (worst of vanilla`s 22).
+instrument: t4_lib.swirl, grain band 1..5 texels, 17-texel tensor window,
+      the land repeat`s frequency family notched out first.
+
+KNOWN ANSWERS (each registered before it was run; the two that came out
+wrong are named as wrong, and the design that failed them is on disk):
+  A1 a pure sinusoid reads 1.0000          (registered: near 1.0)  PASS
+  A2 isotropic noise reads 0.0905, its twin 0.0909, ratio 0.995
+     (registered: at its own floor, ratio near 1)  PASS
+  A3 a synthetic warp of KNOWN strain, TILING3`s own field verbatim, on
+     a real vanilla sheet (-20,24).  ceiling for this sheet = 2.3927
+     amp(tx)     strain     swirl     ratio  verdict
+     0.00         0.000    0.1712    1.9940  inside
+     2.00         0.069    0.2043    2.0981  inside
+     5.00         0.172    0.2161    2.2154  inside
+     10.00        0.344    0.2658    2.7007  OVER
+     21.34        0.733    0.3614    3.7805  OVER
+     42.70        1.467    0.3444    3.6975  OVER
+     monotone from strain 0 to 0.733, which spans TILING3`s own 0.718: YES
+     at strain 1.467 it turns over (3.6975, down from 3.7805): past about one
+     texel of stretch per texel the resample blurs the grain it is
+     stretching, so the instrument SATURATES. Registered as monotone with
+     no limit, and that was wrong -- it is monotone up to strain ~0.75 and
+     flat above. Every candidate of this lane is measured well below that.
+     The first strain over the sheet`s ceiling is between 0.172 and 0.344.
+  A4 the notch, against an INJECTED repeat of known amplitude (a repeat is
+     coherent and axis-aligned and would inflate any orientation number):
+     amp (8-bit)   un-notched     notched
+     0.0               0.1714      0.1712
+     0.5               0.1714      0.1712
+     2.0               0.1709      0.1712
+     8.0               0.1722      0.1712
+     the notched reading moves 0.0000 over a 16x range of injected repeat;
+     TILING2`s whole repeat law lives inside that range (ceiling 0.264,
+     the rung reads about 2.0).  The grid is not counted as a swirl.  PASS
+
+VANILLA`S OWN SHEETS -- each sheet`s ratio is its own ceiling (x1.20).
+   sheet           swirl     twin    ratio  set
+   ( -64, -60)   0.1540   0.0957   1.6094  TILING2 22
+   ( -64, -20)   0.1845   0.0965   1.9126  TILING2 22
+   ( -64,  16)   0.1659   0.0942   1.7602  TILING2 22
+   ( -64,  56)   0.1829   0.0979   1.8682  TILING2 22
+   ( -36, -60)   0.1810   0.1079   1.6778  TILING2 22
+   ( -36, -20)   0.1412   0.0864   1.6342  selection
+   ( -36,  16)   0.1454   0.0846   1.7191  TILING2 22
+   ( -36,  56)   0.1831   0.0862   2.1240  TILING2 22
+   ( -24, -24)   0.1632   0.0854   1.9114  validation
+   ( -20,   4)   0.1447   0.0822   1.7607  validation
+   ( -20,  20)   0.1468   0.0872   1.6841  selection
+   ( -20,  24)   0.1712   0.0858   1.9940  selection
+   ( -12, -20)   0.2064   0.0869   2.3766  validation
+   (  -8,   4)   0.1579   0.0887   1.7809  validation
+   (  -4, -60)   0.1592   0.0853   1.8666  TILING2 22
+   (  -4, -20)   0.1748   0.0964   1.8136  selection
+   (  -4,  16)   0.1594   0.0833   1.9135  selection
+   (  -4,  56)   0.1610   0.0923   1.7441  TILING2 22
+   (   4, -24)   0.1478   0.0860   1.7183  validation
+   (  12,   8)   0.2762   0.1051   2.6292  validation
+   (  20, -24)   0.2208   0.0921   2.3967  validation
+   (  20,  56)   0.2031   0.1135   1.7888  TILING2 22
+   (  24,  16)   0.2979   0.0932   3.1973  selection
+   (  28, -60)   0.1691   0.0826   2.0482  TILING2 22
+   (  28, -20)   0.2059   0.0971   2.1193  selection
+   (  44,  32)   0.2801   0.0853   3.2846  TILING2 22
+   (  44,  36)   0.2515   0.0842   2.9872  TILING2 22
+   (  52, -64)   0.3363   0.1476   2.2787  TILING2 22
+   (  60, -32)   0.2166   0.0835   2.5924  TILING2 22
+   vanilla`s 22: median 1.8904, 90th pct 2.9478, worst 3.2846 (= the backstop)
+
+WHAT THE LAW SEES ON THE KNOWN DEFECT (the selection seven).  "warp only"
+is amp 683 with NO mip bias -- the defect isolated; "proposal" is what
+TILING3 shipped behind the switch, warp AND -1.00 bias together.
+   sheet         ceiling |  vanilla     rung     warp proposal | convicts
+   ( -20,  24)   2.3927 |   1.9940   1.4558   3.5319   2.7754 | warp proposal
+   ( -20,  20)   2.0209 |   1.6841   1.1546   2.5904   2.1740 | warp proposal
+   ( -36, -20)   1.9610 |   1.6342   1.0153   3.4623   3.0012 | warp proposal
+   (  -4, -20)   2.1764 |   1.8136   1.1616   3.0540   2.8332 | warp proposal
+   (  28, -20)   2.5432 |   2.1193   1.1341   2.6082   2.4080 | warp 
+   (  -4,  16)   2.2962 |   1.9135   2.1651   3.3518   3.0455 | warp proposal
+   (  24,  16)   3.2846 |   3.1973   1.0654   3.3286   2.7634 | warp 
+   ACQUITS the rung on 7 of 7 (0 over is the requirement).
+   CONVICTS the isolated warp on 7 of 7 and TILING3`s shipped proposal
+   on 5 of 7.
+   The two it cannot convict are (28,-20), TILING3`s own declared outlier,
+   and (24,16), whose vanilla sheet is the most oriented of all 22 at
+   r 3.20. On ground whose vanilla is already streaky this instrument
+   cannot separate a warp from the terrain. That is its stated blind spot.
+
+INSTRUMENT ACCEPTED for this lane, with the blind spot above.

@@ -1,0 +1,63 @@
+SeventySix.esm 963231887 bytes
+first record signature=b'TES4' size=22418 flags=0x00000001
+HEDR version=293.0000 (payload 12 bytes)
+  TES4 subrecord b'MMSB' 4 bytes
+  TES4 subrecord b'CNAM' 10 bytes
+  TES4 subrecord b'TNAM' 3100 bytes
+  TES4 subrecord b'TNAM' 19252 bytes
+  TES4 subrecord b'INTV' 4 bytes
+
+walked 5819252 top-level records total across whole file
+record-type census (top 15 by count): [('REFR', 5275995), ('INFO', 66459), ('CELL', 53249), ('STAT', 41511), ('DIAL', 40888), ('RFGP', 31610), ('NAVM', 25659), ('SCOL', 18115), ('ACHR', 16533), ('SNDR', 15874), ('COBJ', 15238), ('OMOD', 13207), ('LAYR', 12091), ('LVLI', 11288), ('MSWP', 11190)]
+
+STAT total: 41511
+STAT subrecord-signature census (signature: #STATs carrying it):
+  OBND   41511
+  DNAM   41511
+  EDID   41507
+  MODL   41419
+  MODT   41419
+  ENLM   40700
+  ENLT   19788
+  ENLS   18662
+  NAM1   17777
+  LODP   16534
+  AUUV   15134
+  NVNM   11444
+  FULL   7558
+  XALG   5951
+  PTRN   5931
+  DEST   4260
+  DSTF   4251
+  DSTD   4251
+  HGLB   4130
+  MODS   3947
+  PRPS   3659
+  MNAM   3481
+  SNTP   3250
+  XFLG   2334
+  DEFL   1819
+  OPDS   951
+  FTYP   383
+  MODC   272
+  DMDL   211
+  DMDT   211
+  ANLD   168
+  FTAG   50
+  DSCF   5
+  CTDA   5
+  DOFA   4
+  DSTA   3
+  STXF   3
+  SNAM   2
+  PHST   2
+  VMAD   2
+
+MNAM PRESENT on 3481 STATs
+MNAM byte-size distribution: [(1040, 3481)]
+MNAM examples:
+  008B2410 RTSV_RockCliff07             MNAM=1040B slots=['', '', '', '']
+  008A835A Storm_WS_Dome_Bttm_01        MNAM=1040B slots=['LOD\\Architecture\\Storm\\WeatherStation\\Storm_WS_Dome_Bttm_01_LOD0.nif', 'LOD\\Architecture\\Storm\\WeatherStation\\Storm_WS_Dome_Bttm_01_LOD1.nif', 'LOD\\Architecture\\Storm\\WeatherStation\\Storm_WS_Dome_Bttm_01_LOD2.nif', '']
+  008A835D Storm_WS_CeilingGridLaser_01 MNAM=1040B slots=['LOD\\Architecture\\Storm\\WeatherStation\\Storm_WS_CeilingGridLaser_01_LOD0.nif', 'LOD\\Architecture\\Storm\\WeatherStation\\Storm_WS_CeilingGridLaser_01_LOD1.nif', 'LOD\\Architecture\\Storm\\WeatherStation\\Storm_WS_CeilingGridLaser_01_LOD2.nif', '']
+  008A835C Storm_WS_DomeExt_Top_01      MNAM=1040B slots=['LOD\\Architecture\\Storm\\WeatherStation\\Storm_WS_DomeExt_Top_01_LOD0.nif', 'LOD\\Architecture\\Storm\\WeatherStation\\Storm_WS_DomeExt_Top_01_LOD1.nif', 'LOD\\Architecture\\Storm\\WeatherStation\\Storm_WS_DomeExt_Top_01_LOD2.nif', '']
+  00847DB7 Burn_HWT_Generator_LODMarker MNAM=1040B slots=['LOD\\Setdressing\\Burn_Assets\\Burn_HWT_Generator_L01.nif', 'LOD\\Setdressing\\Burn_Assets\\Burn_HWT_Generator_L02.nif', 'LOD\\Setdressing\\Burn_Assets\\Burn_HWT_Generator_L03.nif', '']

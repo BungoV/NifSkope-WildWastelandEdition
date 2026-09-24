@@ -1,0 +1,2 @@
+GATE g5: FAIL  load ok files=Fallout4.esm,DLCCoast.esm,FO4CSPhysicalWeathers.esp wthr=105 rc=0
+RED CONTROL nomaster -> gate g5 BITES

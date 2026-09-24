@@ -1,0 +1,24 @@
+pbr_r1 sibling_v6 resolver-self route=sibling path=Materials\WWPbrTest01\SiblingV6Duct.pbrm intent=sibling -> PASS
+pbr_r1 sibling_v6 (b) census=sibling Materials\WWPbrTest01\SiblingV6Duct.pbrm python=sibling Materials\WWPbrTest01\SiblingV6Duct.pbrm -> PASS
+pbr_r1 sibling_v6 (c) f0(read back)=0.040 want 0.040 -> PASS
+pbr_r1 sibling_v6 served-by prog=pbrm_default.prog route=sibling -> PASS
+pbr_r1 sibling_v6 (a) legacy_px=132984 (0.1258 of frame) pbr_px=132984 kept=1.0000 floor 0.99 -> PASS
+pbr_r1 sibling_v6 route-view colour=(0.00,1.00,0.00) want sibling=(0, 1, 0) prog=pbr_route.prog -> PASS
+pbr_r1 sibling_v5 resolver-self route=sibling path=Materials\WWPbrTest01\SiblingV5Duct.pbrm intent=sibling -> PASS
+pbr_r1 sibling_v5 census ABSENT -> FAIL
+pbr_r1 direct resolver-self route=direct path=Materials\WWPbrTest01\DirectV6Ducts.PBRM intent=direct -> PASS
+pbr_r1 direct census ABSENT -> FAIL
+pbr_r1 nifx resolver-self route=nifx path=Materials\WWPbrTest01\NifxTarget.pbrm intent=nifx -> PASS
+pbr_r1 nifx census ABSENT -> FAIL
+pbr_r1 direct_nifx resolver-self route=nifx path=Materials\WWPbrTest01\NifxTarget.pbrm intent=nifx -> PASS
+pbr_r1 direct_nifx census ABSENT -> FAIL
+pbr_r1 swap resolver-self route=swap path=Materials\WWPbrTest01\SwapDuct.pbrm intent=swap -> PASS
+pbr_r1 swap census ABSENT -> FAIL
+pbr_r1 fo76 resolver-self route=fo76 path=Materials\WWPbrTest01\Fo76BgsmDucts.BGSM intent=fo76 -> PASS
+pbr_r1 fo76 census ABSENT -> FAIL
+pbr_r1 texfail resolver-self route=sibling path=Materials\WWPbrTest01\TexFailDucts1.pbrm intent=sibling -> PASS
+pbr_r1 texfail census ABSENT -> FAIL
+pbr_r1 legacy resolver-self route=legacy path=- intent=legacy -> PASS
+pbr_r1 legacy census ABSENT -> FAIL
+pbr_r1 (d) nifx round trip nifx_rt_same.nifx: 272 bytes in, absent out, identical=False -> FAIL
+pbr_r1 SUMMARY 23 checks, 9 failures (a=1/1 b=1/9 c=1/1 d=0/1 resolver=9/9 routeview=1/1 served=1/1) -> FAIL

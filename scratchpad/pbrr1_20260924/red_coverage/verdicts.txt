@@ -1,0 +1,10 @@
+pbr_r1 sibling_v6 (a) legacy_px=132984 (0.1258 of frame) pbr_px=0 kept=0.0000 floor 0.99 -> FAIL
+pbr_r1 sibling_v5 (a) legacy_px=132984 (0.1258 of frame) pbr_px=0 kept=0.0000 floor 0.99 -> FAIL
+pbr_r1 direct (a) legacy_px=132984 (0.1258 of frame) pbr_px=0 kept=0.0000 floor 0.99 -> FAIL
+pbr_r1 nifx (a) legacy_px=132984 (0.1258 of frame) pbr_px=0 kept=0.0000 floor 0.99 -> FAIL
+pbr_r1 direct_nifx (a) legacy_px=132984 (0.1258 of frame) pbr_px=0 kept=0.0000 floor 0.99 -> FAIL
+pbr_r1 swap (a) legacy_px=132984 (0.1258 of frame) pbr_px=0 kept=0.0000 floor 0.99 -> FAIL
+pbr_r1 fo76 (a) legacy_px=132984 (0.1258 of frame) pbr_px=0 kept=0.0000 floor 0.99 -> FAIL
+pbr_r1 texfail (a) legacy_px=132984 (0.1258 of frame) pbr_px=132984 kept=1.0000 floor 0.99 -> PASS
+pbr_r1 legacy (a) legacy_px=132984 (0.1258 of frame) pbr_px=0 kept=0.0000 floor 0.99 -> FAIL
+pbr_r1 RED CONTROL coverage: gate (a) 8 of 9 checks FAILED -> BITES (control PASS)

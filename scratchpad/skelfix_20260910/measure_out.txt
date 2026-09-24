@@ -1,0 +1,41 @@
+CONTROLS (the built exe's own measured numbers)
+  dock All           model 130  exe 130  ok
+  dock Bones         model 93   exe 93   ok
+  dock Deforming     model 93   exe 93   ok
+  dock Unused        model 0    exe 0    ok
+  clip matched       model 78   exe 78   ok
+  clip unmatched     model 17   exe 17   ok
+  clip case-folded   model 4    exe 4    ok
+  verdict: the model reproduces the application
+
+frame 46: COM at (-13.6, 299.2, 24.9); character height over the 93 deforming bones = 38.3 units; far = > 2x height = 76.6
+
+longest BONE-to-BONE segment in the bind pose: 22.40 units (x1.5 = 33.60)
+
+SEGMENTS WHOSE ENDPOINT IS FAR FROM THE CHARACTER (7 of 129 drawn)
+child                  class       track    parent                 p.track         len   |c-COM|   child world pos
+CharacterBumper        not-a-bone  NO       skeleton.nif           NO             25.3     275.3   (-0.6, 25.3, 0.0)
+EyeLeftDummy001        not-a-bone  NO       skeleton.nif           NO              7.1     294.1   (-2.1, 6.1, 2.8)
+Root                   not-a-bone  yes      skeleton.nif           NO              0.0     300.5   (0.0, 0.0, 0.0)
+Camera Control         not-a-bone  yes      Root                   yes             0.0     300.5   (0.0, 0.0, 0.0)
+AnimObjectA            not-a-bone  yes      Root                   yes             0.0     300.5   (0.0, 0.0, 0.0)
+AnimObjectB            not-a-bone  yes      Root                   yes             0.0     300.5   (0.0, 0.0, 0.0)
+CamTargetParent        not-a-bone  NO       Root                   yes             0.0     300.5   (0.0, 0.0, 0.0)
+
+SEGMENTS LONGER THAN 1.5x THE LONGEST BIND BONE (3 of 129)
+  COM                    not-a-bone  track yes  parent Root                   len     300.5
+  CamTarget              not-a-bone  track yes  parent CamTargetParent        len     289.6
+  Camera                 not-a-bone  track yes  parent Root                   len     288.1
+
+ARMATURE SET: common root = COM (depth 2); 111 of 130 nodes.
+  excluded: AnimObjectA, AnimObjectB, AnimObjectL1, AnimObjectL2, AnimObjectL3, AnimObjectR1, AnimObjectR2, AnimObjectR3, CamTarget, CamTargetParent, Camera, Camera Control, CharacterBumper, EyeLeftDummy001, PipboyBone, Root, WEAPON, WeaponLeft, skeleton.nif
+
+rule                                            segs     maxLen max|c-COM|  maxScreen
+R0 the shipped rule (every parent->child pair)   129      300.5      300.5       63.0
+R1 the brief, literal: Bones filter both ends     60       22.4       73.0       22.4
+R1+track clause                                   40       22.4       73.0       22.4
+R2 armature closure (SHIPPED)                    110       31.9       73.0       31.6
+R2+track clause                                   62       31.9       73.0       31.6
+
+GATE LIMITS: segment length <= 33.6 (1.5x the longest bind bone-to-bone segment 22.4); endpoint <= 76.6 from COM (2x height 38.3)
+wrote scratchpad/skelfix_20260910/segments_frame46.tsv

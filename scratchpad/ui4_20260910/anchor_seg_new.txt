@@ -1,0 +1,110 @@
+int wwSegmentedStripAir()
+{
+	/* THE WAY BACK, exact at its off value (CONSTITUTION 7): 0 puts the
+	 * segments back flush against the row's edges and against one another,
+	 * which is the 18:25:20 strip to the pixel. ONE reader, so the sheet, the
+	 * call site and the gate can never disagree about the number. */
+	const int air = QSettings().value( QStringLiteral( "UI/SegmentedStripAir" ), 4 ).toInt();
+	return qBound( 0, air, 12 );
+}
+
+namespace
+{
+QString wwSegmentedQss( const QString & base, const QString & first,
+	const QString & last, int rowHeight = 0, int neighbourGap = 0 )
+{
+	/* FOUR PIXELS FROM EVERY NEIGHBOUR (bungo, 2026-09-10, on a screenshot of
+	 * the top rows, verbatim: "just do what is on my screenshot, 4 pixels from
+	 * each nearby element of separation for the header / blocks / files").
+	 *
+	 * The air is MARGIN, and nothing else moves: wwAlignBarRow still pins the
+	 * strip to the shared row (35 px, measured), so the row's own top and
+	 * bottom edges, the toolbars, their buttons and the search row underneath
+	 * stay exactly where lane UI3 left them. The SEGMENTS get shorter by twice
+	 * the air inside the same row.
+	 *
+	 * MEASURED, NOT REASONED -- scratchpad/ui4_20260910/probe.cpp builds this
+	 * strip in a QMainWindow of its own and reproduced the shipped 18:25:20
+	 * geometry exactly (segments 128/127/128 filling a 383x35 bar, 3 px to the
+	 * toolbar beside it) before anything here changed. Three things it settled,
+	 * none of which reading Qt's documentation would have given:
+	 *
+	 *   1. QSS margins on QTabBar::tab ARE honoured, but tabRect() RETURNS THE
+	 *      RECT INCLUDING THE MARGIN. Rect arithmetic cannot see this air at
+	 *      all, which is why the gate reads the PAINTED box out of a grab.
+	 *   2. the segment's box is min-height + 3+3 padding + 1+1 border, so a
+	 *      segment sitting in a row of H with A px of air is min-height
+	 *      H - 8 - 2A: 35 - 8 - 8 = 19 puts its painted box at y 4, 27 px
+	 *      tall, 4 px clear of the row's bottom. One either way moves that
+	 *      bottom edge by one, so it is arithmetic here and never a constant.
+	 *   3. what stands to the RIGHT of the strip is not the toolbar but
+	 *      QMainWindow::separator (res/style.qss:66, 3 px, painted), so the
+	 *      last segment adds only the air the separator does not already give
+	 *      -- `neighbourGap`, which the caller reads off the style because
+	 *      that metric only answers correctly for a widget.
+	 *
+	 * A separated segment also has to CLOSE ITS OWN BOX: with a gap beside it,
+	 * the joined strip's `border-left: 0` would leave an open-sided rectangle.
+	 * The shared seam and the square inner corners are the JOINED look only,
+	 * and they come back exactly at air 0.
+	 */
+	const int air = rowHeight > 0 ? wwSegmentedStripAir() : 0;
+	/* The segment's own box is min-height + 3+3 padding + 1+1 border, so a
+	 * segment asked to fill a bar row of H is min-height H-8, less the air
+	 * above and below it. Kept as the ONE piece of arithmetic that knows this
+	 * sheet's padding, rather than a second number typed at the call site that
+	 * would drift from it. */
+	const int minH = rowHeight > 0 ? qMax( 10, rowHeight - 8 - 2 * air ) : 18;
+	const int rightAir = qMax( 0, air - neighbourGap );
+	/* MINH is a token, not a numbered arg: "%10" would be read by QString::arg
+	 * as marker ten, not as marker one followed by a zero, and this sheet
+	 * already uses %1 to %9. SEAM, BRAD and the two MARGIN tokens are tokens
+	 * for the same reason. */
+	QString sheet = QStringLiteral(
+		"%1 { min-height: MINHpx; padding: 3px 10px; color: %4; background: %5;"
+		" border: 1px solid %6; SEAM border-radius: BRADpx; MARGINALL }"
+		"%2 { border-left: 1px solid %6; border-top-left-radius: 3px;"
+		" border-bottom-left-radius: 3px; }"
+		"%3 { border-top-right-radius: 3px; border-bottom-right-radius: 3px;"
+		" MARGINLAST }"
+		"%1:hover { background: %7; }"
+		"%1:checked, %1:selected { border-color: %8; color: %9; background: %8; }" )
+		.arg( base, first, last, wwSkinColor( "text" ), wwSkinColor( "bgBtn" ),
+			wwSkinColor( "border" ), wwSkinColor( "bgBtnHover" ),
+			wwSkinColor( "selBgActive" ), wwSkinColor( "textBright" ) );
+	sheet.replace( QLatin1String( "MINH" ), QString::number( minH ) );
+	sheet.replace( QLatin1String( "BRAD" ), QString::number( air > 0 ? 3 : 0 ) );
+	sheet.replace( QLatin1String( "SEAM" ),
+		air > 0 ? QString() : QStringLiteral( "border-left: 0;" ) );
+	sheet.replace( QLatin1String( "MARGINALL" ), air > 0
+		? QStringLiteral( "margin-top: %1px; margin-bottom: %1px; margin-left: %1px;"
+			" margin-right: 0px;" ).arg( air )
+		: QString() );
+	sheet.replace( QLatin1String( "MARGINLAST" ), air > 0
+		? QStringLiteral( "margin-right: %1px;" ).arg( rightAir ) : QString() );
+	return sheet;
+}
+}
+
+QString wwSegmentedToolButtonQss()
+{
+	return wwSegmentedQss( QStringLiteral( "QToolButton" ),
+		QStringLiteral( "QToolButton[wwSegmentFirst=\"true\"]" ),
+		QStringLiteral( "QToolButton[wwSegmentLast=\"true\"]" ) );
+}
+
+QString wwSegmentedTabBarQss( int rowHeight, const QWidget * inWindow )
+{
+	/* The dock separator is the only part of the air that already exists, and
+	 * it is a STYLE METRIC: asked with the window it answers res/style.qss's
+	 * 3 px, asked with nullptr it answers the base style's 6 -- measured, both
+	 * of them, in scratchpad/ui4_20260910/probe.cpp. No widget means no claim,
+	 * and the last segment then takes the full air on that side. */
+	const int gap = inWindow
+		? inWindow->style()->pixelMetric( QStyle::PM_DockWidgetSeparatorExtent,
+			nullptr, inWindow )
+		: 0;
+	return wwSegmentedQss( QStringLiteral( "QTabBar::tab" ),
+		QStringLiteral( "QTabBar::tab:first" ),
+		QStringLiteral( "QTabBar::tab:last" ), rowHeight, gap );
+}

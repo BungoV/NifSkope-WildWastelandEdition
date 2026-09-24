@@ -1,0 +1,18 @@
+LAND1 B4 -- ledger determinism
+  out\b3\A\base\obj\Commonwealth.lodb (13402 bytes)
+    25 chunk row(s), sorted by (cy, cx)
+    148 output row(s), every path relative
+  out\b3\A\null\full\obj\Commonwealth.lodb (13402 bytes)
+    25 chunk row(s), sorted by (cy, cx)
+    148 output row(s), every path relative
+    EQUAL  two independent full bakes, byte for byte (13402 bytes)
+  out\b3\B\base\obj\Commonwealth.lodb (13341 bytes)
+    25 chunk row(s), sorted by (cy, cx)
+    150 output row(s), every path relative
+  out\b3\B\null\full\obj\Commonwealth.lodb (13341 bytes)
+    25 chunk row(s), sorted by (cy, cx)
+    150 output row(s), every path relative
+    EQUAL  two independent full bakes, byte for byte (13341 bytes)
+
+B4: 0 failure(s)
+RESULT PASS

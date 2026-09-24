@@ -1,0 +1,11 @@
+﻿19:09:34
+rung exe : 2026-09-11 16:20:02  21419520 B
+new  exe : 2026-09-11 19:08:42  21435904 B
+BAKE rung  t2024  rc= wall=2452 ms  texfiles=3
+BAKE back  t2024  rc= wall=2561 ms  texfiles=3
+BAKE new   t2024  rc= wall=2522 ms  texfiles=3
+BAKE rung  t2020  rc= wall=2708 ms  texfiles=3
+BAKE back  t2020  rc= wall=3004 ms  texfiles=3
+BAKE new   t2020  rc= wall=3097 ms  texfiles=3
+19:09:50
+BAKES-DONE

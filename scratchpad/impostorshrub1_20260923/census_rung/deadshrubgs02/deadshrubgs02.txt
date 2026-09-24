@@ -1,0 +1,81 @@
+model deadshrubgs02.nif
+projection ortho
+lodm materials\Landscape\Plants\DeadShrubGS.lodm none textures\landscape\plants\DeadShrubGS_d.dds
+lodm materials\Landscape\Plants\DeadShrubGS.lodm none textures\landscape\plants\DeadShrubGS_d.dds
+lodm materials\Landscape\StumpsGlowinsSea.lodm none textures\landscape\trees\treestumpgs_d.dds
+mask tree
+emissive 0 shapes 0
+front 433.424 222.214 -18.7226 4.02716 69.1074
+side 433.424 222.214 -18.7226 4.02716 69.1074
+class 64 64
+gap 4 4
+coverage 16 128 160
+oct 8 64 64 163.184 163.184 -18.7226 4.02716 69.1074 3072 legacy 512 spec1
+frameoff 0 0 10.6333 0.651016
+frameoff 1 0 7.16121 -0.868027
+frameoff 2 0 4.34013 1.08503
+frameoff 3 0 1.95306 1.30204
+frameoff 4 0 1.51904 1.08503
+frameoff 5 0 4.55713 1.08503
+frameoff 6 0 -2.38707 1.08503
+frameoff 7 0 3.90611 0.868027
+frameoff 0 1 8.89725 0.651016
+frameoff 1 1 10.6333 4.34013
+frameoff 2 1 4.77414 1.51905
+frameoff 3 1 2.82108 -8.89726
+frameoff 4 1 0.651016 -16.4925
+frameoff 5 1 1.51904 -3.4721
+frameoff 6 1 3.2551 2.82108
+frameoff 7 1 10.6333 0.868027
+frameoff 0 2 5.20815 0.651016
+frameoff 1 2 4.99114 10.4163
+frameoff 2 2 4.77414 5.64216
+frameoff 3 2 4.34013 -12.8034
+frameoff 4 2 2.82108 -7.81222
+frameoff 5 2 2.60408 8.02923
+frameoff 6 2 12.5864 10.1993
+frameoff 7 2 9.11427 0.65102
+frameoff 0 3 3.25509 1.08503
+frameoff 1 3 3.03809 12.5864
+frameoff 2 3 2.60408 19.0965
+frameoff 3 3 9.33126 -4.77414
+frameoff 4 3 2.60408 9.76528
+frameoff 5 3 3.2551 11.0673
+frameoff 6 3 16.9265 12.8034
+frameoff 7 3 1.51904 1.08503
+frameoff 0 4 -1.51904 1.08503
+frameoff 1 4 -0.21701 13.6714
+frameoff 2 4 0.651016 13.8884
+frameoff 3 4 -2.60407 -5.64217
+frameoff 4 4 -10.6333 -1.08503
+frameoff 5 4 -2.38707 11.7183
+frameoff 6 4 2.38707 12.3694
+frameoff 7 4 -3.25509 1.08503
+frameoff 0 5 -9.11427 0.65102
+frameoff 1 5 -8.46324 9.98228
+frameoff 2 5 0.868027 6.72719
+frameoff 3 5 -6.29318 -13.0204
+frameoff 4 5 -5.85917 -9.76528
+frameoff 5 5 -10.6333 5.64216
+frameoff 6 5 -10.8503 13.2374
+frameoff 7 5 -5.20815 0.651016
+frameoff 0 6 -10.6333 0.868027
+frameoff 1 6 -5.64217 4.55713
+frameoff 2 6 -8.68025 0.217007
+frameoff 3 6 -5.64217 -7.16121
+frameoff 4 6 -6.7272 -3.25509
+frameoff 5 6 -13.2374 5.20815
+frameoff 6 6 -12.1523 11.7183
+frameoff 7 6 -8.89725 0.651016
+frameoff 0 7 -3.90611 0.868027
+frameoff 1 7 2.38707 1.08503
+frameoff 2 7 -4.55713 1.08503
+frameoff 3 7 -1.51904 1.08503
+frameoff 4 7 -1.95306 1.30204
+frameoff 5 7 -4.34013 1.08503
+frameoff 6 7 -7.16121 -0.868027
+frameoff 7 7 -10.6333 0.651016
+frameclamped 0
+aa 4 1024 2.875
+framefit 151.47 143.007 154.725 154.725
+orthofit 172.082 172.082 0

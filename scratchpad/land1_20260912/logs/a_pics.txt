@@ -1,0 +1,16 @@
+wrote E:\Projects\NifskopeWildWastelandEdition\scratchpad\land1_20260912\images\a_land_guide_flat.png  (3156 x 1158)
+wrote E:\Projects\NifskopeWildWastelandEdition\scratchpad\land1_20260912\images\a_land_guide_slope.png  (3156 x 1158)
+
+sheet      arm          repeat    grain  swirl r
+flat       vanilla       0.032    5.459    1.684
+flat       p_plain       1.278    4.790    2.223
+flat       p_drag        1.126    4.815    2.177
+flat       p_asp         0.660    4.921    2.195
+flat       p_warp        0.684    5.017    2.257
+flat       p_683         0.693    5.789    2.285
+slope      vanilla       0.065    2.140    2.397
+slope      p_plain       0.916    2.650    0.977
+slope      p_drag        0.477    2.688    1.039
+slope      p_asp         0.152    2.792    1.571
+slope      p_warp        0.225    2.944    1.247
+slope      p_683         0.280    3.890    2.282

@@ -1,0 +1,37 @@
+===== (c)/(e) spread: five identical runs on the rung =====
+run 1: 27 checks, 2 failures | (c) outside 16 | (e) backdiff 12
+run 2: 27 checks, 2 failures | (c) outside 13 | (e) backdiff 22
+run 3: 27 checks, 2 failures | (c) outside 14 | (e) backdiff 19
+run 4: 27 checks, 2 failures | (c) outside 9 | (e) backdiff 15
+run 5: 27 checks, 2 failures | (c) outside 1 | (e) backdiff 21
+
+===== WW_POSEDRAW_TEST on the rung =====
+pose mode active: 1
+bones drawn/pickable: 113
+framebuffer pixels changed by the skeleton overlay: 970
+poseBoneAt(a bone's screen pos) -> 0
+reset: bone moved +50 then reset, delta from rest = 0 (expect ~0)
+mirror: no L/R bone pair in this rig; skipped
+click at bone 0's screen pos selected block 5 (active=5)
+  FAIL: clicking a bone did not make it the active object
+FAILED
+done
+
+===== WW_POSEEXTRAS_TEST on the rung =====
+weight overlay: bone 0 drives 0 vertex point(s)
+proportional editing: 908 neighbour(s) gathered, falloff decreases with distance: yes
+  FAIL: weight overlay found no influenced vertices
+FAILED
+done
+
+===== WW_SKELETON_TEST on the rung =====
+analyse: 130 nodes, 93 bones, 93 deforming, 0 unused, 9 skinned shape(s)
+All filter rows: 130
+Bones filter rows: 93
+Deforming filter rows: 93
+Unused filter rows: 0
+search 'skel': 1 rows, expected 1
+footer: 130 node(s) shown · 93 bone(s), 93 deforming, 0 unused · 9 skinned shape(s)
+PASS
+
+BASELINES DONE

@@ -1,0 +1,22 @@
+[Warning] QObject::connect(QListModel, QWidget): signal not found
+[Warning] QObject::connect(QListModel, QWidget): signal not found
+[Warning] QObject::connect(QListModel, QWidget): signal not found
+[Warning] QObject::connect(QListModel, QWidget): signal not found
+lodgen: model meshes/Markers/StaticCollectionPivotDummy.nif: loaded, 5 blocks, no BSTriShape with vertex data and triangles
+[Info] cell view:
+ cell view Commonwealth 5,-11 block 1x1 (cells 5,-11 .. 5,-11)
+  plugins: X:/Programs/Steam/steamapps/common/Fallout 4/Data/Fallout4.esm
+  data root: E:/Tools/Fallout 4/DataUnpacked/Data -- from the spec
+  cells with data: 1 of 1
+  refrs read 1505, placements 1583, drawn 1575
+  hidden: disabled 0, markers 12, deleted 0, no base 0
+  skipped, no model on the base: ACTI 5, ASPC 1, BNDS 15, IDLM 10, LIGH 36
+  distinct models loaded 392, failed to load 1
+  source triangles 748138, welded shapes 298, vertices 784770, triangles 748148
+  materials: 9 shapes textured from a `.bgem` effect material, 0 drawn neutral grey because a named material resolved to nothing
+  ground: 0 LAND cells, vertex colour only (the splat layers are NOT sampled -- that is the terrain bake's compositor)
+  water: 1 cells
+  overlay: none
+  pick table 1575 entries
+  built in 5287 ms
+

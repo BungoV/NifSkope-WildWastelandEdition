@@ -1,0 +1,48 @@
+small generator items -- lane GENSMALL1 -- 2026-09-16 14:41:35
+
+All five brief rows and all three director rows (A, B, C) are done as written.
+Nothing was approximated and nothing is owed inside the lane.
+
+EXE
+  at launch   release/NifSkope.exe   22,293,504 B   2026-09-16 12:49:19 (VT1's)
+  rung copy   release/NifSkope.before_gensmall1.exe  22,293,504 B, cp -p, taken
+              before any build of mine
+  now         release/NifSkope.exe   22,300,160 B   2026-09-16 13:52:56
+              sha256 4ad6ee0c4c844600cf361149c6b00fcdb6aaeeebd8bfec2905f596912a692ee0
+  BUILD-RC=0, six objects rebuilt, no Fallout4.exe and no NifSkope window up at
+  build time.
+
+GATES, all on the 13:52:56 exe
+  lodgen_native.sh                 108 checks   0 failures   2 skips
+  lodgen_native_baseline --check     4 checks   0 failures   25 files, 0 differ
+  lodgen_native_decode.py (Boston)   6 checks   0 failures   14 ambiguous
+  lodgen_native_decode.py (-32,0)   12 checks   0 failures
+  resource_ext.sh (NEW)             12 checks   0 failures   (12/5 on the rung)
+  lod_generation.sh                121 checks   0 failures
+  lodgen_terrain_vt.sh              45 checks   0 failures   (was 44/1)
+  lodgen_defaults.sh                28 checks   0 failures   (was exit 2)
+  lodgen_ground_cover.sh            29 checks   4 failures   (was 29/5)
+  lodgen_identity.sh                RESULT PASS
+
+RED, AND WHOSE
+  lodgen_ground_cover.sh C2 x3, C6a, C9, C16 -- pre-existing, about the grass
+  feature, not the frozen baseline, not this lane's.
+  native_open.sh one object-coverage failure -- the director's named known red,
+  not touched.
+  Nothing else is red. V9c and lodgen_defaults.sh are no longer on this list.
+
+DELIVERABLES, all in this folder
+  lane_gensmall1_report.md   47,276 B   sections 0..11
+  WW_CHANGES_ENTRY.md         7,811 B
+  HANDOFF_BLOCK.md            2,257 B   plain language, for bungo
+  MISTAKES_ENTRIES.md         7,782 B   eight entries, spliced into root MISTAKES.md
+  CHANGED_FILES.txt           6,529 B   15 paths, before/after bytes CR LF
+  v9c_dxt1_vs_bc3.png       1352x522    labels burned in
+  drop_order_dependence.png 1112x384    labels burned in
+
+GIT
+  Untouched. No commit, no stash, no add, no checkout. Only `git show HEAD:` and
+  `git status --porcelain`, both read-only. Branch is still main and the one
+  stash in the list is not mine.
+
+No build mutex was taken and none is left behind. Nothing was sent to bungo.

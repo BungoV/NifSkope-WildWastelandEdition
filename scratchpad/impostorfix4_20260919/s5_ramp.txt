@@ -1,0 +1,70 @@
+blast_n4 done
+blast_n8 done
+maple_n4 done
+dead_n4 done
+rock_n4 done
+
+KNOWN-ANSWER CONTROL: my model of lodgenEncodeBC1Block vs the SHIPPED `_n` bytes
+tag        endpoints identical indices identical
+blast_n4                3.73%         21.52%
+blast_n8                2.51%         22.81%
+maple_n4                0.88%         21.58%
+dead_n4                 2.03%         16.63%
+rock_n4                17.38%         59.11%
+
+HEIGHT (`_n` blue) round-trip error in levels -- SIMULATED repair
+tag          mean L mean PCA |    p95 L  p95 PCA |  worst L worst PCA |     nXY L   nXY PCA
+blast_n4       4.51     4.60 |     6.00     7.33 |       81       97 |      4.51      4.20
+blast_n8       4.52     4.60 |     6.33     7.33 |       86       72 |      4.68      4.35
+maple_n4       4.62     4.58 |     8.00     8.00 |       80       80 |      5.30      4.84
+dead_n4        5.20     5.19 |    12.00    13.00 |       96      102 |      5.60      5.10
+rock_n4        4.25     4.17 |     5.00     5.00 |      156      149 |      4.33      4.07
+blast_n4 done  endpoints 100.00%  indices 99.97%
+blast_n8 done  endpoints 100.00%  indices 99.98%
+maple_n4 done  endpoints 100.00%  indices 99.90%
+dead_n4 done  endpoints 100.00%  indices 99.98%
+rock_n4 done  endpoints 100.00%  indices 99.92%
+
+CONTROL: the RECONSTRUCTED input encoded by my model of lodgenEncodeBC1Block,
+against the SHIPPED `_n` DDS bytes
+tag         endpoints identical    indices identical
+blast_n4                100.00%               99.97%
+blast_n8                100.00%               99.98%
+maple_n4                100.00%               99.90%
+dead_n4                 100.00%               99.98%
+rock_n4                 100.00%               99.92%
+
+HEIGHT round-trip on the TRUE input, levels: luminance endpoints vs PCA endpoints
+tag          mean L   mean P |   p95 L   p95 P |  wrst L  wrst P |    nXY L    nXY P
+blast_n4       3.16     3.12 |    4.00    4.00 |      33      33 |     4.32     3.89
+blast_n8       3.28     3.24 |    4.00    4.00 |      49      38 |     4.29     3.90
+maple_n4       3.71     3.59 |    5.00    5.00 |      70      70 |     5.23     4.72
+dead_n4        3.43     3.38 |    5.00    5.00 |      54      54 |     6.74     6.00
+rock_n4        3.78     3.72 |    5.67    5.00 |      87      84 |     3.32     3.13
+blast_n4   today     IoU 0.5709 (worst 0.3825) ink 1.445  >12lv 0.69%  blkrange 1.77
+blast_n4   ramp8_24  IoU 0.5688 (worst 0.4015) ink 1.484  >12lv 0.05%  blkrange 1.93
+blast_n4   ramp1_16  IoU 0.5706 (worst 0.3647) ink 1.421  >12lv 0.01%  blkrange 1.55
+maple_n4   today     IoU 0.3699 (worst 0.2643) ink 1.894  >12lv 2.26%  blkrange 3.91
+maple_n4   ramp8_24  IoU 0.3690 (worst 0.2721) ink 1.915  >12lv 1.07%  blkrange 3.06
+maple_n4   ramp1_16  IoU 0.3678 (worst 0.2759) ink 1.867  >12lv 1.15%  blkrange 3.27
+dead_n4    today     IoU 0.6139 (worst 0.4868) ink 1.170  >12lv 1.62%  blkrange 3.36
+dead_n4    ramp8_24  IoU 0.6032 (worst 0.5258) ink 1.217  >12lv 0.40%  blkrange 2.83
+dead_n4    ramp1_16  IoU 0.6273 (worst 0.5470) ink 1.141  >12lv 0.38%  blkrange 2.65
+rock_n4    today     IoU 0.8318 (worst 0.6763) ink 1.121  >12lv 1.41%  blkrange 4.31
+rock_n4    ramp8_24  IoU 0.8361 (worst 0.6833) ink 1.132  >12lv 0.81%  blkrange 4.93
+rock_n4    ramp1_16  IoU 0.8255 (worst 0.6654) ink 1.091  >12lv 0.72%  blkrange 3.98
+
+DEFECT 2 -- SIMULATED: the outside-coverage fill as a RAMP, 24 views
+tag        fill            IoU    worst     ink     >12lv  blk range
+blast_n4   today        0.5709   0.3825   1.445     0.69%       1.77
+blast_n4   ramp8_24     0.5688   0.4015   1.484     0.05%       1.93
+blast_n4   ramp1_16     0.5706   0.3647   1.421     0.01%       1.55
+maple_n4   today        0.3699   0.2643   1.894     2.26%       3.91
+maple_n4   ramp8_24     0.3690   0.2721   1.915     1.07%       3.06
+maple_n4   ramp1_16     0.3678   0.2759   1.867     1.15%       3.27
+dead_n4    today        0.6139   0.4868   1.170     1.62%       3.36
+dead_n4    ramp8_24     0.6032   0.5258   1.217     0.40%       2.83
+dead_n4    ramp1_16     0.6273   0.5470   1.141     0.38%       2.65
+rock_n4    today        0.8318   0.6763   1.121     1.41%       4.31
+rock_n4    ramp8_24     0.8361   0.6833   1.132     0.81%       4.93
+rock_n4    ramp1_16     0.8255   0.6654   1.091     0.72%       3.98

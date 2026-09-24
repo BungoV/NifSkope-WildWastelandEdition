@@ -1,0 +1,18 @@
+== lodgen_identity ==
+RESULT PASS
+   rc=0  segfaults=0
+== lodgen_roads ==
+11 checks, 0 failures
+RESULT PASS
+   rc=0  segfaults=0
+== lodgen_native ==
+18 checks, 0 failures
+RESULT PASS
+   rc=0  segfaults=0
+== lodgen_native_baseline ==
+0 failures
+RESULT PASS
+   rc=0  segfaults=0
+== animws ==
+   rc=0  segfaults=0
+final sweep done 09:35:16

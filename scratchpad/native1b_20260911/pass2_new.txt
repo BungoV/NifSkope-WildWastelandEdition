@@ -1,0 +1,417 @@
+	/* pass 2: LEVEL 0 per material, then that material's LADDER (v3).
+	 *
+	 * The material is the outer run because a simplification group may never
+	 * cross one: two materials are two textures, and an edge collapse across
+	 * them drags one texture's geometry onto the other's. `order` is already
+	 * material-sorted and stable, so walking it in runs gives the v3 cluster
+	 * sort law -- (meshId, materialId, level, first triangle) -- by
+	 * construction, with no index remap afterwards.
+	 *
+	 * LEVEL 0 IS EMITTED EXACTLY AS v2 EMITTED IT: the same per-shape greedy
+	 * walk, the same caps, the same flush between shapes, the same attributes
+	 * straight off the source shape. The ladder is appended after it. */
+	const quint32 vertsBeforeMesh = quint32( lib.vertices.size() );
+	const bool wantLadder = ( lib.flags & LODO_FLAG_LADDER ) != 0;
+	std::vector<int> local;          // source vertex -> local index in the open cluster
+	std::vector<quint32> members;    // local index -> source vertex
+	std::vector<quint8> idx;         // 3 per triangle, local
+	quint32 clustersL0 = 0, clustersLadder = 0;
+	quint8 levelsMax = 0;
+	float maxErr = 0.0f;
+	quint32 weldedTotal = 0, uvConflicts = 0;
+	quint32 groupsFormed = 0, refSmall = 0, refNoCut = 0, refFlat = 0, errExact = 0, errBounded = 0;
+
+	size_t oiRun = 0;
+	while ( oiRun < order.size() ) {
+		const quint16 matId = work[order[oiRun]].materialId;
+		size_t oiEnd = oiRun;
+		while ( oiEnd < order.size() && work[order[oiEnd]].materialId == matId )
+			oiEnd++;
+
+		/* THE WELD, for this material only: one entry per distinct QUANTISED
+		 * library position over every shape the material covers. The ladder
+		 * simplifies on it because an edge collapse cannot cross a split
+		 * vertex, and the library stores two vertices at one quantised position
+		 * as the same three numbers anyway. Attributes come from the FIRST
+		 * contributor; a weld that merged two different UVs is COUNTED
+		 * (`weldUvConflicts`) rather than assumed harmless, and it reaches only
+		 * levels 1 and up -- level 0 never uses this array. */
+		std::vector<float> wpos;
+		std::vector<LodoEmitVert> wv;
+		std::unordered_map<quint64, quint32> wmap;
+		std::vector<std::vector<quint32>> weldOf( oiEnd - oiRun );
+		for ( size_t k = oiRun; k < oiEnd; k++ ) {
+			const LodoSrcShape & s = work[order[k]];
+			const size_t nv = s.pos.size() / 3;
+			weldOf[k - oiRun].assign( nv, 0 );
+			for ( size_t v = 0; v < nv; v++ ) {
+				const quint64 key = lodoWeldKey(
+					lodoQuantU16( s.pos[v * 3], mesh.aabbMin[0], mesh.aabbExtent[0] ),
+					lodoQuantU16( s.pos[v * 3 + 1], mesh.aabbMin[1], mesh.aabbExtent[1] ),
+					lodoQuantU16( s.pos[v * 3 + 2], mesh.aabbMin[2], mesh.aabbExtent[2] ) );
+				auto it = wmap.find( key );
+				if ( it != wmap.end() ) {
+					const quint32 w = it->second;
+					if ( std::fabs( wv[w].uv[0] - s.uv[v * 2] ) > ( 1.0f / 256.0f )
+						|| std::fabs( wv[w].uv[1] - s.uv[v * 2 + 1] ) > ( 1.0f / 256.0f ) )
+						uvConflicts++;
+					weldOf[k - oiRun][v] = w;
+					continue;
+				}
+				LodoEmitVert e;
+				for ( int c2 = 0; c2 < 3; c2++ ) {
+					e.pos[c2] = s.pos[v * 3 + c2];
+					e.nrm[c2] = s.nrm[v * 3 + c2];
+					e.tan[c2] = s.tan[v * 3 + c2];
+				}
+				e.uv[0] = s.uv[v * 2];
+				e.uv[1] = s.uv[v * 2 + 1];
+				e.sway = s.sway.empty() ? 0 : s.sway[v];
+				const quint32 w = quint32( wv.size() );
+				wv.push_back( e );
+				for ( int c2 = 0; c2 < 3; c2++ )
+					wpos.push_back( e.pos[c2] );
+				wmap.emplace( key, w );
+				weldOf[k - oiRun][v] = w;
+			}
+		}
+		weldedTotal += quint32( wv.size() );
+
+		// the current level: cluster indices, their triangles (welded), and the
+		// FULL-DETAIL triangles each of them stands for
+		std::vector<quint32> curClusters;
+		std::vector<std::vector<quint32>> curTris;
+		std::vector<std::vector<quint32>> curCover;
+		std::vector<quint32> l0Tris;         // this material's level-0 triangles, welded triples
+		{
+			size_t shapeLocal = 0;
+			auto flush = [&]( const LodoSrcShape & s ) {
+				if ( idx.empty() )
+					return;
+				std::vector<LodoEmitVert> cv;
+				cv.reserve( members.size() );
+				for ( quint32 v : members ) {
+					LodoEmitVert e;
+					for ( int c2 = 0; c2 < 3; c2++ ) {
+						e.pos[c2] = s.pos[v * 3 + c2];
+						e.nrm[c2] = s.nrm[v * 3 + c2];
+						e.tan[c2] = s.tan[v * 3 + c2];
+					}
+					e.uv[0] = s.uv[v * 2];
+					e.uv[1] = s.uv[v * 2 + 1];
+					e.sway = s.sway.empty() ? 0 : s.sway[v];
+					cv.push_back( e );
+				}
+				std::vector<quint32> tris, cover;
+				for ( size_t t = 0; t + 2 < idx.size(); t += 3 ) {
+					cover.push_back( quint32( l0Tris.size() / 3 ) );
+					for ( int k = 0; k < 3; k++ ) {
+						const quint32 w = weldOf[shapeLocal][members[idx[t + k]]];
+						l0Tris.push_back( w );
+						tris.push_back( w );
+					}
+				}
+				const quint32 ci = lodoEmitCluster( lib, mesh, meshRadius, id, s.materialId, 0, cv, idx );
+				curClusters.push_back( ci );
+				curTris.push_back( tris );
+				curCover.push_back( cover );
+				clustersL0++;
+				for ( quint32 v : members )
+					local[v] = -1;
+				members.clear();
+				idx.clear();
+			};
+			for ( size_t k = oiRun; k < oiEnd; k++ ) {
+				shapeLocal = k - oiRun;
+				const LodoSrcShape & s = work[order[k]];
+				local.assign( s.pos.size() / 3, -1 );
+				for ( size_t t = 0; t < s.tris.size(); t += 3 ) {
+					const quint32 tri[3] = { s.tris[t], s.tris[t + 1], s.tris[t + 2] };
+					int fresh = 0;
+					for ( int k2 = 0; k2 < 3; k2++ ) {
+						bool seen = local[tri[k2]] >= 0;
+						for ( int j = 0; j < k2 && !seen; j++ )
+							seen = tri[j] == tri[k2];
+						if ( !seen )
+							fresh++;
+					}
+					if ( idx.size() / 3 >= LODO_CLUSTER_MAX_TRIS || members.size() + size_t( fresh ) > LODO_CLUSTER_MAX_VERTS )
+						flush( s );
+					for ( int k2 = 0; k2 < 3; k2++ ) {
+						if ( local[tri[k2]] < 0 ) {
+							local[tri[k2]] = int( members.size() );
+							members.push_back( tri[k2] );
+						}
+						idx.push_back( quint8( local[tri[k2]] ) );
+					}
+				}
+				flush( s );
+			}
+		}
+
+		/* THE LADDER. Group the level's clusters, simplify each group as one
+		 * mesh with its border LOCKED, re-split the result under the same caps,
+		 * and repeat. A group that cannot be formed is not an error: its
+		 * clusters simply stay ROOTS, and the reason is counted by name. */
+		if ( wantLadder ) {
+			auto splitClusters = [&]( const std::vector<quint32> & tris, quint16 mat2, quint8 lvl,
+				std::vector<quint32> * outIdxs, std::vector<std::vector<quint32>> * outTris )
+			{
+				std::vector<int> lc( wv.size(), -1 );
+				std::vector<quint32> mem2, tri2;
+				std::vector<quint8> idx2;
+				auto flush2 = [&]() {
+					if ( idx2.empty() )
+						return;
+					std::vector<LodoEmitVert> cv;
+					cv.reserve( mem2.size() );
+					for ( quint32 v : mem2 )
+						cv.push_back( wv[v] );
+					outIdxs->push_back( lodoEmitCluster( lib, mesh, meshRadius, id, mat2, lvl, cv, idx2 ) );
+					outTris->push_back( tri2 );
+					for ( quint32 v : mem2 )
+						lc[v] = -1;
+					mem2.clear();
+					idx2.clear();
+					tri2.clear();
+				};
+				for ( size_t t = 0; t + 2 < tris.size(); t += 3 ) {
+					const quint32 tri[3] = { tris[t], tris[t + 1], tris[t + 2] };
+					int fresh = 0;
+					for ( int k2 = 0; k2 < 3; k2++ ) {
+						bool seen = lc[tri[k2]] >= 0;
+						for ( int j = 0; j < k2 && !seen; j++ )
+							seen = tri[j] == tri[k2];
+						if ( !seen )
+							fresh++;
+					}
+					if ( idx2.size() / 3 >= LODO_CLUSTER_MAX_TRIS || mem2.size() + size_t( fresh ) > LODO_CLUSTER_MAX_VERTS )
+						flush2();
+					for ( int k2 = 0; k2 < 3; k2++ ) {
+						if ( lc[tri[k2]] < 0 ) {
+							lc[tri[k2]] = int( mem2.size() );
+							mem2.push_back( tri[k2] );
+						}
+						idx2.push_back( quint8( lc[tri[k2]] ) );
+						tri2.push_back( tri[k2] );
+					}
+				}
+				flush2();
+			};
+
+			quint8 level = 0;
+			while ( level < quint8( LODO_LADDER_MAX_LEVEL ) && !curClusters.empty() ) {
+				size_t levelTris = 0;
+				for ( const std::vector<quint32> & t : curTris )
+					levelTris += t.size() / 3;
+				if ( levelTris <= size_t( LODO_LADDER_MIN_TRIS ) ) {
+					refSmall++;
+					break;
+				}
+				std::vector<unsigned int> part( curClusters.size(), 0u );
+				size_t nParts = 1;
+				if ( curClusters.size() > 1 ) {
+					std::vector<unsigned int> flat, counts;
+					for ( const std::vector<quint32> & t : curTris ) {
+						counts.push_back( (unsigned int) t.size() );
+						flat.insert( flat.end(), t.begin(), t.end() );
+					}
+					nParts = meshopt_partitionClusters( part.data(), flat.data(), flat.size(),
+						counts.data(), counts.size(), wpos.data(), wv.size(), sizeof( float ) * 3,
+						size_t( LODO_LADDER_GROUP ) );
+				}
+				std::vector<quint32> nextClusters;
+				std::vector<std::vector<quint32>> nextTris, nextCover;
+				bool anyFormed = false;
+				for ( size_t g = 0; g < nParts; g++ ) {
+					std::vector<size_t> mem;
+					for ( size_t i = 0; i < curClusters.size(); i++ )
+						if ( size_t( part[i] ) == g )
+							mem.push_back( i );
+					if ( mem.empty() )
+						continue;
+					std::vector<quint32> gTris, gCover;
+					float childErr = 0.0f;
+					for ( size_t i : mem ) {
+						gTris.insert( gTris.end(), curTris[i].begin(), curTris[i].end() );
+						gCover.insert( gCover.end(), curCover[i].begin(), curCover[i].end() );
+						childErr = std::max( childErr, lib.clusterLods[curClusters[i]].geometricError );
+					}
+					if ( gTris.size() / 3 <= size_t( LODO_LADDER_MIN_TRIS ) ) {
+						refSmall++;
+						continue;
+					}
+					/* LOCK the group's border with the REST OF THIS LEVEL. A
+					 * vertex another group still uses may not move: if it did,
+					 * a consumer that replaced this group and kept the
+					 * neighbour would see a crack along the shared edge. This
+					 * is the whole reason a ladder is built on GROUPS and not
+					 * on clusters. */
+					std::vector<unsigned char> lockv( wv.size(), 0 );
+					for ( size_t i = 0; i < curClusters.size(); i++ ) {
+						if ( size_t( part[i] ) == g )
+							continue;
+						for ( quint32 v : curTris[i] )
+							lockv[v] = 1;
+					}
+					const size_t target = std::max( size_t( LODO_LADDER_MIN_TRIS ) * 3,
+						( gTris.size() / 2 / 3 ) * 3 );
+					std::vector<unsigned int> dst( gTris.size(), 0u );
+					float rel = 0.0f;
+					const size_t n = meshopt_simplifyWithAttributes( dst.data(), gTris.data(), gTris.size(),
+						wpos.data(), wv.size(), sizeof( float ) * 3, nullptr, 0, nullptr, 0,
+						lockv.data(), target, 1.0f, 0, &rel );
+					if ( n < 3 || n >= gTris.size() ) {
+						refNoCut++;
+						continue;
+					}
+					dst.resize( n );
+					const std::vector<quint32> outSoup( dst.begin(), dst.end() );
+					/* THE ERROR, against FULL detail and never against the
+					 * parent, so one stored number meets one tolerance. Under
+					 * LODO_ERROR_EXACT_TRIS full-detail triangles it is measured
+					 * directly; above it the chain bound (child + this step)
+					 * serves, which the triangle inequality makes an upper
+					 * bound. Which rule served is counted. */
+					float E = 0.0f;
+					if ( gCover.size() <= size_t( LODO_ERROR_EXACT_TRIS ) ) {
+						std::vector<quint32> fullSoup;
+						fullSoup.reserve( gCover.size() * 3 );
+						for ( quint32 t : gCover )
+							for ( int k2 = 0; k2 < 3; k2++ )
+								fullSoup.push_back( l0Tris[size_t( t ) * 3 + k2] );
+						E = lodoSoupDeviation( fullSoup, outSoup, wpos );
+						errExact++;
+					} else {
+						E = childErr + lodoSoupDeviation( gTris, outSoup, wpos );
+						errBounded++;
+					}
+					E = std::max( E, childErr );
+					if ( !( E > childErr ) ) {
+						// the error did not grow: the brief's own stopping rule,
+						// and what keeps every chain STRICTLY increasing
+						refFlat++;
+						continue;
+					}
+					std::vector<quint32> outIdxs;
+					std::vector<std::vector<quint32>> outTris;
+					splitClusters( outSoup, matId, quint8( level + 1 ), &outIdxs, &outTris );
+					if ( outIdxs.empty() ) {
+						refNoCut++;
+						continue;
+					}
+					/* COVERAGE. Every full-detail triangle under the group goes
+					 * to the ONE output cluster whose sphere centre is nearest
+					 * its centroid, so `sourceTriangles` over any cut sums to
+					 * the mesh's own level-0 triangle count exactly -- the
+					 * partition invariant a reader can check without
+					 * reconstructing a single vertex. */
+					std::vector<std::vector<quint32>> outCover( outIdxs.size() );
+					for ( quint32 t : gCover ) {
+						float cen[3] = { 0.0f, 0.0f, 0.0f };
+						for ( int k2 = 0; k2 < 3; k2++ ) {
+							const quint32 v = l0Tris[size_t( t ) * 3 + k2];
+							for ( int c2 = 0; c2 < 3; c2++ )
+								cen[c2] += wpos[size_t( v ) * 3 + c2] / 3.0f;
+						}
+						size_t best = 0;
+						float bestD = 3.4e38f;
+						for ( size_t j = 0; j < outIdxs.size(); j++ ) {
+							const LodoClusterLod & Lo = lib.clusterLods[outIdxs[j]];
+							float d2 = 0.0f;
+							for ( int c2 = 0; c2 < 3; c2++ ) {
+								const float d = cen[c2] - Lo.centre[c2];
+								d2 += d * d;
+							}
+							if ( d2 < bestD ) {
+								bestD = d2;
+								best = j;
+							}
+						}
+						outCover[best].push_back( t );
+					}
+					for ( size_t j = 0; j < outIdxs.size(); j++ ) {
+						LodoClusterLod & Lo = lib.clusterLods[outIdxs[j]];
+						Lo.geometricError = E;
+						Lo.sourceTriangles = quint32( outCover[j].size() );
+					}
+					for ( size_t i : mem ) {
+						LodoClusterLod & Lc = lib.clusterLods[curClusters[i]];
+						Lc.parentError = E;
+						Lc.parentFirst = outIdxs.front();
+						Lc.parentCount = quint16( outIdxs.size() );
+					}
+					maxErr = std::max( maxErr, E );
+					clustersLadder += quint32( outIdxs.size() );
+					groupsFormed++;
+					anyFormed = true;
+					for ( size_t j = 0; j < outIdxs.size(); j++ ) {
+						nextClusters.push_back( outIdxs[j] );
+						nextTris.push_back( outTris[j] );
+						nextCover.push_back( outCover[j] );
+					}
+				}
+				if ( !anyFormed )
+					break;
+				level = quint8( level + 1 );
+				levelsMax = std::max( levelsMax, level );
+				curClusters.swap( nextClusters );
+				curTris.swap( nextTris );
+				curCover.swap( nextCover );
+			}
+		}
+		oiRun = oiEnd;
+	}
+	if ( lib.clusters.size() - mesh.clusterFirst > 0xFFFF )
+		return fail( QStringLiteral( "more than 65,535 clusters in one mesh" ) );
+	mesh.clusterCount = quint16( lib.clusters.size() - mesh.clusterFirst );
+	mesh.clusterCountL0 = quint16( clustersL0 );
+	mesh.levelCount = quint8( levelsMax + 1 );
+	mesh.reserved = 0;
+
+	/* The EMITTED silhouette, at LEVEL 0 and at the coarsest level: the same
+	 * welded topology, rebuilt from the clusters exactly as a consumer will
+	 * draw them. A cluster copies its vertices, so this count is only
+	 * comparable because both sides weld by the quantised position. Level 0 is
+	 * the one the shadow-caster refusal reads -- it must equal the source's,
+	 * because level 0 is a permutation and not a decimation. The coarsest
+	 * level's count is REPORTED beside it: a simplified level may close a hole
+	 * but must never open one. */
+	if ( stats ) {
+		stats->emittedVertices = quint32( lib.vertices.size() ) - vertsBeforeMesh;
+		auto boundaryAtLevel = [&]( quint8 lvl ) {
+			std::vector<quint32> allTris;
+			std::vector<quint64> keys;
+			std::unordered_map<quint64, quint32> weld;
+			for ( size_t c = mesh.clusterFirst; c < lib.clusters.size(); c++ ) {
+				if ( lib.clusterLods[c].level != lvl )
+					continue;
+				const LodoCluster & cl = lib.clusters[c];
+				const quint32 base = quint32( keys.size() );
+				for ( quint32 v = 0; v < cl.vertexCount; v++ ) {
+					const LodoVertex & lv = lib.vertices[cl.vertexBase + v];
+					const quint64 k = lodoWeldKey( lv.pos[0], lv.pos[1], lv.pos[2] );
+					keys.push_back( k );
+					weld.emplace( k, quint32( weld.size() ) );
+				}
+				const quint8 * li = &lib.localIndices[c * LODO_LOCAL_INDEX_BYTES];
+				for ( quint32 t = 0; t < quint32( cl.triangleCount ) * 3; t++ )
+					allTris.push_back( base + li[t] );
+			}
+			return lodoBoundaryEdges( allTris, [&]( quint32 v ) { return weld[keys[v]]; } );
+		};
+		stats->boundaryEmitted = boundaryAtLevel( 0 );
+		stats->boundaryCoarsest = levelsMax ? boundaryAtLevel( levelsMax ) : stats->boundaryEmitted;
+		stats->clustersL0 = clustersL0;
+		stats->clustersLadder = clustersLadder;
+		stats->levelCount = quint8( levelsMax + 1 );
+		stats->groupsFormed = groupsFormed;
+		stats->groupsRefusedSmall = refSmall;
+		stats->groupsRefusedNoCut = refNoCut;
+		stats->groupsRefusedFlatErr = refFlat;
+		stats->errorsExact = errExact;
+		stats->errorsBounded = errBounded;
+		stats->maxError = maxErr;
+		stats->weldedVertices = weldedTotal;
+		stats->weldUvConflicts = uvConflicts;
+	}

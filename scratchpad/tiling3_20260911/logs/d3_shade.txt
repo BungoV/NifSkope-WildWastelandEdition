@@ -1,0 +1,66 @@
+TILING3 -- the shading of vanilla`s own `_msn` fine detail
+
+Model: dL = kE*dEast + kN*dNorth + kU*dUp, on the colour`s high-pass
+residual (everything finer than 5 texels), fitted per sheet.
+
+KNOWN ANSWER -- the real residual plus exactly 0.5*dUp injected:
+   recovered kE +0.0615 kN +0.0539 kU +0.3392  (kU must read ~0.5 plus the
+   sheet`s own kU below); R^2 0.0000
+
+   sheet              kE       kN       kU       R2    twinR2     ourR2       |k|
+   ( -20,  24)   0.0615   0.0539  -0.1608   0.0000   0.00000   0.00001    0.1804
+   ( -20,  20)  -0.0751   0.1564  -0.5448   0.0000   0.00001       n/a    0.5717
+   ( -36, -20)   0.0620   0.0304  -0.4346   0.0001   0.00002       n/a    0.4401
+   (  -4, -20)   0.0306   0.0454   0.4461   0.0000   0.00001       n/a    0.4495
+   (  28, -20)   0.0014   0.0652  -0.7482   0.0003   0.00001       n/a    0.7510
+   (  -4,  16)  -0.1257  -0.1237   0.3639   0.0000   0.00000       n/a    0.4044
+   (  24,  16)  -0.0443   0.1179  -1.3376   0.0002   0.00000       n/a    1.3435
+
+THE CURVATURE (crevice) TERM -- the divergence of the same detail normal,
+with its own phase twin as the floor at every sheet:
+   sheet                r   r(twin)        R2  R2(twin)      kDiv
+   ( -20,  24)   -0.1222   -0.0055   0.01493   0.00003    -3.242
+   ( -20,  20)   -0.1353   +0.0023   0.01830   0.00001    -4.392
+   ( -36, -20)   -0.0770   -0.0009   0.00593   0.00000    -1.597
+   (  -4, -20)   -0.1046   +0.0024   0.01095   0.00001    -3.486
+   (  28, -20)   -0.0136   +0.0006   0.00019   0.00000    -0.135
+   (  -4,  16)   -0.1342   +0.0004   0.01800   0.00000    -5.655
+   (  24,  16)   -0.0949   +0.0010   0.00901   0.00000    -2.836
+   MEDIAN       -0.1046   +0.0006   0.01095   0.00000    -3.242
+   SIGN AGREEMENT 7 of 7 sheets carry the median`s sign; the twin floor
+   is beaten on 7 of 7 (|r| > |r twin|).
+
+MEDIAN over 7 sheets: kE +0.0014  kN +0.0539  kU -0.4346   |k| 0.4380
+median R^2 0.0000, median twin floor 0.00001, median our-own floor 0.00001
+
+THE VERDICT, and it is not the one the ruling assumed.
+
+A LAMBERT SHADING OF THAT DETAIL READS ZERO. The three coefficients sit
+at the phase-twin floor on every sheet (median R^2 0.0000 against a twin
+floor of 0.00001) and their SIGNS FLIP sheet to sheet -- kU runs -1.3376 to
++0.4461 -- which is what a fit to noise looks like. The fit machinery is
+not at fault: the known-answer control recovers an injected 0.5 as
+0.5000. A Lambert dot simply cannot SEE a rill -- a rill`s two walls
+tilt opposite ways and their dots cancel.
+
+THE CURVATURE OF THAT SAME DETAIL DOES NOT READ ZERO. Its divergence --
+a crevice-darkening term, dark in the channel, light on the ridge --
+reads r -0.1046 median, the SAME SIGN on 7 of 7 sheets, beating its own
+phase twin on 7 of 7. It is the same column TILING3 section 2 found at
+the top of a 22-column basis, and it is the term this lane ships.
+
+So the ruling`s INTENT is delivered -- vanilla`s own fine geology reaches
+the diffuse, rills and drainage where vanilla has them -- by the term
+that measures rather than the term that was named. What it recovers is
+about 1.1 % of the colour`s fine variance (median R^2 0.01095), not most
+of it, and this lane does not claim otherwise. TILING3 section 2 already
+showed why no per-texel law can do better: vanilla`s colour grain SHARES
+ITS ORIENTATION with the `_msn` (agreement +0.27..+0.32 against twin
+floors near +0.03) but is not a per-texel FUNCTION of it (22-column
+ceiling R^2 0.018..0.023).
+
+SHIPPED DEFAULT: --land-shade -3.242  -- the median kDiv, in 8-bit
+luminance levels per unit of detail-normal divergence at the vanilla
+sheet`s own texel spacing. THE LAMBERT COEFFICIENTS ARE NOT SHIPPED:
+kE +0.0014 kN +0.0539 kU -0.4346 is printed above as a refutation, not as a
+setting.

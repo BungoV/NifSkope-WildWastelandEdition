@@ -1,0 +1,139 @@
+Lane GROUND1, 2026-09-12. Files created (A) or changed (M) under
+src/ tests/ docs/ tools/ .claude/skills/ .
+
+"before" is this lane's LAUNCH state, not git HEAD: the tree carries uncommitted
+work from many earlier lanes, so HEAD is not this lane's baseline. Byte counts
+and line endings are Python byte counts (len, count of CRLF, count of LF), never
+grep.
+
+PART A -- TERRAIN-AO1
+
+M  src/lodgen.h
+     before     75,006 B   CRLF 0   LF  1,349
+     after      81,208 B   CRLF 0   LF  1,453
+     LodgenCoverOptions gains terrainObjectAo, terrainObjectAoStrength,
+     dumpObjectAoPath; new struct LodgenObjectAoCensus.
+
+M  src/lodgen.cpp
+     before    535,632 B   CRLF 0   LF 12,343
+     after     551,690 B   CRLF 0   LF 12,700
+     LodgenObjectHeightField (gather, topAt, dump), lodgenObjectSkyVis(), the
+     term applied in the stock aoTex loop and in the pyramid tile baker, the
+     census, the report fields.
+
+M  src/nifcli.cpp
+     before    338,407 B   CRLF 0   LF  7,331
+     after     343,691 B   CRLF 0   LF  7,483
+     --terrain-object-ao / --no-terrain-object-ao /
+     --terrain-object-ao-strength / --dump-object-ao, the --lodl refusal, help.
+
+M  docs/LODGEN_TERRAIN_VT.md
+     before    164,170 B   CRLF 0   LF  2,561
+     after     170,656 B   CRLF 0   LF  2,614
+     section 2.2's mask-B provenance corrected (the two different reaches), and
+     a new section 2.5h: the law, the height field, the measured reach, the
+     strength table, the --lodl refusal, and where the term sits among the
+     others.
+
+M  docs/LODGEN_LEDGER_FORMAT.md
+     before     13,583 B   CRLF 0   LF    268
+     after      15,968 B   CRLF 0   LF    300
+     section 2's dependency map gains row 9 (object AO, reach 1,458 u, inside
+     the one-cell widening) with how the reach was measured, and the 2-cell
+     gather margin is named in the list of reaches that do NOT widen the map.
+
+No file under tests/, tools/ or .claude/skills/ was changed by Part A. The
+analysis scripts live in scratchpad/ground1_20260912/work/ because they are this
+lane's instruments, not harness gates:
+  maskdec.py        the codec-correct .lodt mask reader (MISTAKES_ENTRIES.md)
+  a2d_samples.py    gate A2d by the march's own 56 sample points
+  a2cd.py           gate A2c, the footprint against five displaced controls
+  aostat.py         the AO byte's distribution for a pair of bakes
+  estimator_control.py  gate A2f, the closed-form estimator-vs-truth table
+  bake.sh gateA2.sh gateA2cd.sh gateA2g.sh gateA2h.sh gateA3.sh  the gate runs
+  pics_a.py         the two sheet pictures
+
+M  .claude/skills/nifskope-ww-lodgen/SKILL.md
+     before     32,972 B   CRLF 0   LF    427
+     after      36,753 B   CRLF 0   LF    494
+     two procedures this lane had to discover the hard way: reading a .lodt mask
+     sheet with the PER-TILE codec (BC1 on a cover-free tile, BC3 on a cover
+     tile) and the refuter that catches a wrong stride in one run; and measuring
+     the reach of a horizon march by its own 56 sample points instead of by a
+     distance transform, with the block-spill residue proof and the note that
+     the loop's bound (2,048) is not a distance it samples (1,458 is).
+
+
+PART B -- EROSION1
+
+The three source files below were already changed by Part A, so their "before"
+here is Part A's "after", not the lane launch state. The lane-launch-to-now
+totals are: src/lodgen.h 75,006 -> 83,313 B; src/lodgen.cpp 535,632 -> 581,408
+B; src/nifcli.cpp 338,407 -> 347,250 B.
+
+M  src/lodgen.h
+     before     81,208 B   CRLF 0   LF  1,453
+     after      83,313 B   CRLF 0   LF  1,495
+     LodgenCoverOptions gains erosionStrength, erosionIterations, erosionSeed;
+     LandDetailSource gains the Erosion value; new struct LodgenErosionCensus
+     and the LodgenErosionField declaration.
+
+M  src/lodgen.cpp
+     before    551,690 B   CRLF 0   LF 12,700
+     after     581,408 B   CRLF 0   LF 13,370
+     the droplet lattice (cell-normalised height, h / cell), the feedback rounds
+     with their separate accumulator, the 8-cell high pass, the border
+     rounds * MAX_STEPS + HP_RADIUS, the gradient add at both _msn writers, the
+     crevice-form colour shading before the grade, the census, the report and
+     ledger fields. Every physics constant carries its measurement in a comment.
+
+M  src/nifcli.cpp
+     before    343,691 B   CRLF 0   LF  7,483
+     after     347,250 B   CRLF 0   LF  7,528
+     --erosion / --erosion-iterations (clamped 1..8) / --erosion-seed, the fifth
+     --land-detail-source value "erosion", help text.
+
+M  docs/LODGEN_TERRAIN_VT.md
+     before    170,656 B   CRLF 0   LF  2,614
+     after     176,501 B   CRLF 0   LF  2,715
+     new section 2.5i, spliced immediately before section 3: what the pass is,
+     the switches, the lattice, the feedback rounds and the border they buy, the
+     high pass and the LOD-drift reason it exists, the no-palette refusal and
+     the TILING3 measurement behind it, where the two GROUND1 terms sit relative
+     to each other and why that is a one-way independence rather than an
+     ordering, the four-row fit table with the RED row, the cost, and what the
+     pass does not touch.
+
+M  .claude/skills/nifskope-ww-render-shot/SKILL.md
+     before     22,286 B   CRLF 0   LF    353
+     after      25,428 B   CRLF 0   LF    408
+     a new final section, "Photographing a terrain chunk against YOUR OWN baked
+     sheets": the WW_LODGEN_RESOURCES route, the <root>/Textures/... versus
+     <root>/Data/Textures/... trap whose only tell is a byte-identical
+     before/after pair, the origin-based chunk framing (8192,8192,z and not the
+     world cell), the two floors under such a picture (a byte-identical .BTR,
+     and a mix-and-match third bake proving each sheet is sampled) with the
+     measured three-way split, the wrong-palette warning, and the measured
+     900x900 -> 1358x865 frame size on this build.
+
+No file under tests/ or tools/ was changed by Part B either: the nine harnesses
+of gate F4 were run unmodified, which is the point of running them.
+
+Part B's instruments, also in scratchpad/ground1_20260912/work/:
+  b1_vanilla.py     gate F1, vanilla's erosion statistics over 22 sheets
+  b1_selftest.py    the refuter for b1_vanilla.py (it must fail on a flat field)
+  b3_fit.py         gate F3, our eight sheets against vanilla's medians
+  b4_extras.py      the seam, repeat-law and flow-coherence checks
+  gateF2.sh         gate F2, the switch-off and determinism identities
+  gateF3.sh gateF3b.sh   the F3 bakes
+  gateF4.sh         gate F4, the nine harnesses run sequentially with the
+                    NifSkope instance count printed before each
+  pics_b.py         the three sheet pictures
+  pics_b_render.py  the viewport contact sheet
+  b_render.sh b_render2.sh   the GUI render drivers (b_render2.sh is the pinned
+                    orthographic one that produced the shipped frame)
+
+Outside those directories, one more file was amended and is named here only so
+it is not lost: scratchpad/lodui1_20260911/BAKE_INSTRUCTION.md, 21,612 B / 404
+LF -> 26,071 B / 487 LF, a new section describing --terrain-object-ao and
+--erosion in the terms bungo uses to run a bake.

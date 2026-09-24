@@ -1,0 +1,2 @@
+GATE ground: FAIL  OFF vs reference (pass never runs) max|d|=4 differing px=812199
+RED CONTROL groundleak -> gate ground BITES

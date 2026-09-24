@@ -1,0 +1,57 @@
+=== ROADS4 running UINOTES1b's owed chains, start 2026-09-12_06:10:16
+exe: 2026-09-12_05:48:33 21817856
+start 06:10:16
+lodgen_roads rc=0 24s : 
+lodgen_terrain rc=0 13s : 
+lodgen_terrain_vt rc=1 46s :        FAIL a sheet's own edge step is 14.348, over 2.60: its last column   FAIL V9c the direct sheets are continuous ACROSS a chunk seam (the block above) 
+lodgen_ground_cover rc=1 64s :   FAIL C11b one grass colour explains both halves (the tint is after VCLR)   FAIL C3..C17 the measurements on the files 
+lodgen_terrain_pbrm rc=0 230s :        texels reading the PBRM constants: roughness 18112/73984, metallic 16236/73984, emissive 17349/73984 
+lodgen_native rc=0 178s :   ok   e3 the field MOVES: the pass changed at least one mesh (45 of 2982)   ok   e4 FLOOR: the metric can fail -- a shuffled triangle order on AirportTower01_LOD.nif reads 2.990 against the emitted 1.633 
+lodl_open rc=1 52s :   FAIL all 0 planes render, 0 distinct pictures, and no two differ only by accident   FAIL the whole worldspace renders non-blank 
+lod_generation rc=0 6s :   cost at 8x8/256: 2048 x 2048 sheets at 256 x 256 a frame: 18.67 MB for the largest base, and less for every smaller one.   cost at 8x8/512: 4096 x 4096 sheets at 512 x 512 a frame: 74.67 MB for the largest base, and less for every smaller one. 
+end 06:20:35
+left running: 0 NifSkope process(es)
+
+=== UI CHAIN
+chain=after exe=2026-09-12_05:48:33 21817856
+start 06:20:35
+### animws start 06:20:36
+### animws rc=1  06:20:47
+210 checks, 1 failures, 1 skips
+FAIL
+
+### hkxanim_ui start 06:20:47
+### hkxanim_ui rc=1  06:20:52
+48 checks, 1 failures, 0 skips
+FAIL
+
+### ui_align start 06:20:53
+### ui_align rc=0  06:21:00
+15 checks, 0 failures
+PASS
+
+### water_ui start 06:21:01
+### water_ui rc=0  06:21:13
+84 checks, 0 failures, 0 skips
+PASS
+
+### files_tab start 06:21:14
+### files_tab rc=1  06:21:19
+29 checks, 1 failures
+FAIL
+
+### top_bar start 06:21:19
+### top_bar rc=1  06:21:23
+43 checks, 5 failures
+FAIL
+
+### skeleton_overlay start 06:21:24
+### skeleton_overlay rc=1  06:22:32
+5 checks, 1 failures
+FAIL
+PASS
+FAIL: the four renders are not the same size: [(941, 1524, 3), (941, 1524, 3), (965, 1024, 3), (965, 1024, 3)]
+
+end 06:22:32
+left running: 0 NifSkope process(es)
+=== end 06:22:33

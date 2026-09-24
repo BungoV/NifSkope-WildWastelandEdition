@@ -1,0 +1,19 @@
+== bake blast_n4 512
+  blast_n4 tile 512 bake rc=0 8s  sidecar: oct 4 160 512 112.761 360.837 -70.6223 -38.6729 342.457 3072 legacy 512 spec1
+  lodgen rc=0 sheets=5 lodm=1 lodgen: card 000531b3: oct height repaired: 129464 whole kept, 28723 partial filled from the nearest whole texel, 280268 outside inside the 16-ring ramp carried the object's height faded towards the card plane, 872265 outside set to the card plane; self-check PASS (no covered texel decodes outside its frame's depth)
+== bake blast_n8 512
+  blast_n8 tile 512 bake rc=0 16s  sidecar: oct 8 160 512 116.196 371.827 -70.6223 -38.6729 342.457 3072 legacy 512 spec1
+  lodgen rc=0 sheets=5 lodm=1 lodgen: card 000531b3: oct height repaired: 472501 whole kept, 113111 partial filled from the nearest whole texel, 1065810 outside inside the 16-ring ramp carried the object's height faded towards the card plane, 3591458 outside set to the card plane; self-check PASS (no covered texel decodes outside its frame's depth)
+== bake maple_n4 512
+  maple_n4 tile 512 bake rc=0 7s  sidecar: oct 4 240 512 412.054 879.048 93.1789 66.2978 886.405 3072 legacy 512 spec1
+  lodgen rc=0 sheets=5 lodm=1 lodgen: card 0004a074: oct height repaired: 74512 whole kept, 109886 partial filled from the nearest whole texel, 421036 outside inside the 16-ring ramp carried the object's height faded towards the card plane, 1360646 outside set to the card plane; self-check PASS (no covered texel decodes outside its frame's depth)
+== bake dead_n4 512
+  dead_n4 tile 512 bake rc=0 7s  sidecar: oct 4 96 512 166.647 888.785 -10.7451 96.6602 741.875 3072 legacy 512 spec1
+  lodgen rc=0 sheets=5 lodm=1 lodgen: card 001236b4: oct height repaired: 99609 whole kept, 17349 partial filled from the nearest whole texel, 267918 outside inside the 16-ring ramp carried the object's height faded towards the card plane, 401556 outside set to the card plane; self-check PASS (no covered texel decodes outside its frame's depth)
+== bake rock_n4 512
+  rock_n4 tile 512 bake rc=0 8s  sidecar: oct 4 512 496 1727.89 1673.89 -89.0114 -65.5637 -274.135 5048.1 legacy 512 spec1
+  lodgen rc=0 sheets=5 lodm=1 lodgen: card 000211a3: oct height repaired: 842376 whole kept, 34999 partial filled from the nearest whole texel, 314942 outside inside the 16-ring ramp carried the object's height faded towards the card plane, 2870915 outside set to the card plane; self-check PASS (no covered texel decodes outside its frame's depth)
+== bake maple_n4 256
+  maple_n4 tile 256 bake rc=0 7s  sidecar: oct 4 128 256 439.524 879.048 93.1789 66.2978 886.405 3072 legacy 256 spec1
+  lodgen rc=0 sheets=5 lodm=1 lodgen: card 0004a074: oct height repaired: 18544 whole kept, 27667 partial filled from the nearest whole texel, 182290 outside inside the 16-ring ramp carried the object's height faded towards the card plane, 295787 outside set to the card plane; self-check PASS (no covered texel decodes outside its frame's depth)
+EXIT=0

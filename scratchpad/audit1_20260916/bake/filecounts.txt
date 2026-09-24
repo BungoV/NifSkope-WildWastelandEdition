@@ -1,0 +1,11 @@
+coast_fo4cs        files=57   bytes=233465449
+coast_keepbto      files=66   bytes=236636028
+coast_stock        files=55   bytes=10127763
+sanctuary_fo4cs    files=56   bytes=233955347
+sanctuary_incr     files=56   bytes=233955362
+sanctuary_keepbto  files=64   bytes=238095780
+sanctuary_mnam     files=56   bytes=17319729
+sanctuary_stock    files=53   bytes=11518632
+urban_fo4cs        files=57   bytes=245548296
+urban_keepbto      files=66   bytes=256856282
+urban_stock        files=55   bytes=20542011

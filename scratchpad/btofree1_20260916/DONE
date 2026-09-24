@@ -1,0 +1,35 @@
+btofree lane BTOFREE1 finished 2026-09-16 19:48 -- the FO4CS object pass builds every .BTO in a scratch
+folder inside the mod folder, reads it back there through all five post-passes, and removes
+the chunks and the folder before the native pair is written; the manifest sidecars are kept
+and land at their final path. Way back: --keep-bto, panel row "Keep legacy .BTO chunks"
+(FO4CS only, ships OFF), byte-for-byte the old tree. The stock target is untouched and
+byte-identical.
+
+exe  release/NifSkope.exe  22,356,992 B  2026-09-16 17:11:17  (rung was 22,341,632 B, 15:53:30,
+     kept as release/NifSkope.before_btofree1.exe)
+
+gates, every count read out of the run's own log under scratchpad/btofree1_20260916/chain/
+
+  lodgen_btofree.sh                  23 checks, 0 failures            NEW (legs a b c d)
+  native_open.sh                     17 checks, 0 failures, 2 skipped floor 14 -> raised to 17
+  lodgen_native.sh                  125 checks, 0 failures, 2 skips   floor 120/0/2
+  lodgen_ladder.sh                   22 checks, 0 failures, 0 skips   floor 22/0
+  lodgen_native_baseline.sh --check  25 files, 25 baked, 0 differ     floor 25/0
+  lodgen_defaults.sh                 28 checks, 0 failures            floor 28/0
+  lod_generation.sh (panel)         124 checks, 0 failures            +3 new checks
+  lodgen_byte_gate.sh (b)           128 checks, 0 failures            floor 125
+  lodgen_native_decode.py             6 pairs, 36 checks, 0 failures  floor 6/36/0
+
+red that is NOT this lane's, named and not absorbed
+  lodgen_ground_cover.sh  4 grass-feature failures (C2 x3, C6a, C9, C16)
+  the stock .BTO silent ~6 percent drop on dense chunks -- bungo's call, GENSMALL1's measurement
+  lodgen_byte_gate.sh phase (c): Commonwealth.4.-20.24.DDS and Commonwealth.lodi differ between
+    the panel and the command line at identical sizes. The RUNG exe reads the same two files
+    (14 identical / 3 differ there, 15 / 2 here), and the panel tree is byte-identical across the
+    two exes on all fourteen surviving files, so this lane removed one of three and touched
+    neither other. Report section 2 has the numbers.
+
+mistakes: 5, in MISTAKES_ENTRIES.md and spliced at the top of the root MISTAKES.md.
+pictures: scratchpad/btofree1_20260916/pictures/ (check_c_libraries.png,
+          check_c_refuter_solid.png, mod_folder_before_after.png), labels burned in.
+git untouched; no build mutex left; no NifSkope running; Fallout4.exe never up.

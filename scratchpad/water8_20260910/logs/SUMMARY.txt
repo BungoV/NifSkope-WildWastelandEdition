@@ -1,0 +1,57 @@
+### water_ui start 05:25:20
+### water_ui rc=0  05:25:29
+59 checks, 0 failures, 0 skips
+PASS
+water_ui.sh PASS
+
+### ui_align start 05:25:29
+### ui_align rc=0  05:25:36
+11 checks, 0 failures
+PASS
+
+### top_bar start 05:25:36
+### top_bar rc=1  05:25:41
+43 checks, 5 failures
+FAIL
+
+### files_tab start 05:25:42
+### files_tab rc=1  05:25:47
+  FAIL (5) every tool button explains itself (0 without)
+  FAIL (4) unload restores the bind pose BYTE-identically
+28 checks, 2 failures
+FAIL
+
+### animws start 05:25:48
+### animws rc=0  05:25:55
+57 checks, 0 failures, 1 skips
+PASS
+
+### water_mark start 05:25:56
+### water_mark rc=1  05:26:15
+FAIL: the model self-test exited 1
+20 checks, 0 failures
+PASS
+FAIL: the model self-test did not pass
+water_mark.sh FAIL (2)
+
+### water_window start 05:26:15
+### water_window rc=0  05:26:31
+46 checks, 0 failures
+PASS
+water_window.sh PASS
+
+### lodl_water start 05:26:32
+### lodl_water rc=0  05:26:58
+  control PASS
+RESULT PASS
+  RESULT PASS
+RESULT PASS
+PASS
+
+### loaded_nifs start 05:26:59
+### loaded_nifs rc=0  05:27:11
+166 checks, 0 failures
+PASS
+
+=== chain finished 05:27:11 ===
+leftover-processes-rc=0

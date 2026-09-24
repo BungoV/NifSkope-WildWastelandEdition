@@ -1,0 +1,1 @@
+error: --vt-density names a --vt-finest / --vt-content pair; give one or the other, not both

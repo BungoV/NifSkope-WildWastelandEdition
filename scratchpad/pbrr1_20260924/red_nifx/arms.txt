@@ -1,0 +1,2 @@
+red=nifx
+ae1013257a2fd8df051d3feec5fa9b91e7926756 */e/Projects/NifskopeWildWastelandEdition/release/NifSkope.exe

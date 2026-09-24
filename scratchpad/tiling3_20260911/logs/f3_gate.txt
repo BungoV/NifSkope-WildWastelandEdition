@@ -1,0 +1,57 @@
+TILING3 gate F3 -- repeat AND grain, on the same bake, both tiles
+
+repeat = amplitude at 10.667 texels (8-bit luminance levels), lower better
+null   = the instrument`s own 12-period floor on that same sheet
+grain  = SD of everything finer than 5 texels; VANILLA IS THE TARGET
+
+chunk (-20,24)
+   variant       repeat      null     grain grain/van  localVar
+   VANILLA        0.201     0.449     4.476     1.000     19.81
+   rung           1.037     1.424     3.342     0.747     12.29
+   off            1.037     1.424     3.342     0.747     12.29
+   ship           1.042     1.408     3.403     0.760     12.66
+   stoch          0.183     1.390     4.981     1.113     25.12
+
+chunk (-20,20)
+   variant       repeat      null     grain grain/van  localVar
+   VANILLA        0.032     0.783     5.459     1.000     29.39
+   rung           1.261     1.443     4.290     0.786     24.41
+   off            1.261     1.443     4.290     0.786     24.41
+   ship           1.242     1.427     4.336     0.794     24.76
+   stoch          0.593     1.515     5.417     0.992     34.57
+
+THE GATE, stated as the brief states it -- both on the same bake:
+
+   variant    tile        repeat   vanilla    grain%     ratio  verdict
+   rung       t2024        1.037     0.201       75%     5.165  REPEAT RED, GRAIN RED
+   rung       t2020        1.261     0.032       79%    39.123  REPEAT RED, grain OK
+   off        t2024        1.037     0.201       75%     5.165  REPEAT RED, GRAIN RED
+   off        t2020        1.261     0.032       79%    39.123  REPEAT RED, grain OK
+   ship       t2024        1.042     0.201       76%     5.188  REPEAT RED, grain OK
+   ship       t2020        1.242     0.032       79%    38.540  REPEAT RED, grain OK
+   stoch      t2024        0.183     0.201      111%     0.911  repeat OK, grain OK
+   stoch      t2020        0.593     0.032       99%    18.411  REPEAT RED, grain OK
+
+   rung       does not pass both halves
+   off        does not pass both halves
+   ship       does not pass both halves
+   stoch      does not pass both halves
+
+A CAVEAT THE NUMBERS THEMSELVES FORCE, and it is not a small one.
+On both of these sheets the reading sits BELOW the instrument`s own
+12-period null sweep -- vanilla`s included (0.201 against a null of
+0.449). A null sweep`s maximum over twelve wrong periods is a
+significance floor for ONE sheet in isolation, and at 512 texels on a
+single chunk it is simply too coarse to separate these readings. The
+threshold that IS usable is the one a6_pick.py froze on the 22 shipped
+vanilla sheets -- absolute 0.264, the worst of them -- and that is what
+the verdicts above are graded against. Stated here rather than left for
+someone to find in the table.
+
+WHAT THE SHIPPED DEFAULT DOES AND DOES NOT DO. `ship` is the ruling:
+vanilla`s `_msn` byte for byte and the crevice term on our colour. It
+does NOT touch the repeat -- the warp is OFF by default, because the
+7-sheet selection in a6_pick.py did NOT meet its own gate (6 of 7) and
+this lane refuses to ship a proposal as a pass. `stoch` is that
+proposal, one flag away, and its two numbers are printed above so
+bungo can decide on the numbers rather than on a recommendation.

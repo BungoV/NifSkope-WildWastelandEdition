@@ -1,0 +1,15 @@
+own n Commonwealth.VT.2.0.4.n.DDS ad7f8084e3fb36535e2292706f100cd0a1d0968c 4
+own c Commonwealth.VT.2.0.4.c.DDS fd2436e7670e1fc1b3751d3db2a19e5ebafb681e 4
+flat n Commonwealth.VT.2.0.4.n.DDS b139651a0cccc951e1c5d6bc9e35da595fdcb4d2 4
+flat c Commonwealth.VT.2.0.4.c.DDS fd2436e7670e1fc1b3751d3db2a19e5ebafb681e 4
+tilt n Commonwealth.VT.2.0.4.n.DDS 70d9124bb027ba4a22c3d35203037933f911304d 4
+tilt c Commonwealth.VT.2.0.4.c.DDS fd2436e7670e1fc1b3751d3db2a19e5ebafb681e 4
+tiltw n Commonwealth.VT.2.0.4.n.DDS 688b8dca388d6905e35c67641553ee1dd80f195e 4
+tiltw c Commonwealth.VT.2.0.4.c.DDS fd2436e7670e1fc1b3751d3db2a19e5ebafb681e 4
+scram n Commonwealth.VT.2.0.4.n.DDS cb6b7492adfd0916710b64dd875af128a3a3a657 4
+scram c Commonwealth.VT.2.0.4.c.DDS fd2436e7670e1fc1b3751d3db2a19e5ebafb681e 4
+# FIXTURES: container Commonwealth.VT.2.lodt mtime 1789569844; own-cache tiles older than it: 0
+# FIXTURES: flat  4 normal tiles <- RGB (128, 255, 128), 565 word 0x87F0, read back (132, 255, 132); unit normal east +0.0353 north +0.0353 up 0.9988 (2.86 deg from vertical)
+# FIXTURES: tilt  4 normal tiles <- RGB (191, 238, 128), 565 word 0xBF70, read back (189, 239, 132); unit normal east +0.4827 north +0.0353 up 0.8751 (28.94 deg from vertical)
+# FIXTURES: tiltw 4 normal tiles <- RGB (64, 238, 128), 565 word 0x4770, read back (66, 239, 132); unit normal east -0.4827 north +0.0353 up 0.8751 (28.94 deg from vertical)
+# FIXTURES: scram 4 normal tiles <- the own tiles' own BC1 blocks, permuted within each tile, seed 20260919 (same words, same histogram, wrong places)

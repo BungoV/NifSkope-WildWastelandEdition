@@ -1,0 +1,19 @@
+## 0a. The ship thresholds, pre-registered
+
+Section 0 registered the lane's gates before any measurement. These five are the
+SHIP gates for whatever change came out of section 2, and they were written into
+`g6_gates.py`'s docstring before the first graded bake was read back -- that file
+is the record, and the thresholds below are copied from it, not fitted to it.
+
+| id | the threshold, as registered | why that number |
+|---|---|---|
+| S1 | with no flag, and with the switch's off value stated explicitly, EVERY file of both test tiles is byte-identical to the rung's bake | the brief's "off == the rung's bytes". Byte equality has no tolerance to fit, which is why it is the first gate |
+| S2 | the binary reproduces the Python prediction for a given k to within **1.0 level** of RGB RMS | two gap sources are named IN ADVANCE and neither is a bug: the sheet is re-encoded to BC1 after grading (measured floor 0.497 and 0.527) and the crevice term runs after the grade in the binary but is already inside the sheet Python scales, so the two differ by `crevice*(1-k)`. 1.0 is about twice the codec floor and an order below the effect being measured (~2.5 levels) |
+| S3 | `--grade k_opt` strictly reduces the whole-tile RGB RMS on the tile whose optimum it is, on BOTH tiles, each with its OWN k | the weakest claim that still discriminates: if the knob cannot help a tile with that tile's own best number, it does nothing at all |
+| S4 | the REFUSED gate, as an assertion and not as prose: **no single k reduces the error on both tiles**, checked against the binary's own output with the pooled k = 0.8403 | `gate-refused-with-numbers` step 5. A later lane that wants to claim a global grade has to delete an assertion that says why it is not there |
+| S5 | the flag is new: the rung exe exits 2 with `unknown option --grade` | proves the old binary could not have produced the graded arms, so S2/S3 are not measuring the same exe twice |
+
+S3 and S4 are deliberately in tension, and that tension IS the finding: S3 says
+the mechanism works, S4 says no constant can be shipped on. Both are asserted
+against the compiled binary in `g6_gates.py`.
+

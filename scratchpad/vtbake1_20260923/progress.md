@@ -1,0 +1,13 @@
+# VTBAKE1 progress
+- 2026-09-23 08:04 started; read CONSTITUTION + nifskope-ww-lodgen skill
+- 2026-09-23 08:08 exe copied to ns_run (release/NifSkope.exe 2026-09-23 07:54, 23,831,552 B, sha1 8d87c155); --vt-estimate: 5 levels, 12,276 tiles, 4,022,914,784 B predicted; launching full bake
+- 2026-09-23 08:09 bake running (started 08:08); level-2 container growing; writing reader/picture/check scripts meanwhile
+- 2026-09-23 08:13 decoder known-answer: our BC1/BC3 decode vs PIL max diff 1 level on 3 DXT1 + 3 DXT5 vanilla files; refuter (DXT5 read with DXT1 stride) mean diff 94.19
+- 2026-09-23 08:18 BAKE DONE rc=0 wall 569 s (08:08:35-08:18:04); 5 containers + Commonwealth.VT.lodm (2,505 B) under bake/FO4CSLOD/Commonwealth/; census: tiles 12276 present 12276 coverTiles 0 bytes 4,022,886,880; maskLegacyInverted 99 maskNoneDefault 1 distinctLtex 101; roads 8232 placements; 99 '.pbrm not found' lines = PBRM discovery misses (vanilla ships none)
+- 2026-09-23 08:28 index check: 5 levels x 24 fields vs container headers, 0 differ; FINDING maskRules sum 0+99+1=100 != distinctLtex 101 (src/lodgen.cpp LodgenVtMaskCache::resolve inserts form 0 into byForm without counting a rule; VT s4 invariant red on the whole worldspace, green on Sanctuary 14=14)
+- 2026-09-23 08:29 lodgen --lodt-check: see lodt_check.txt; refuter: 3 corrupted copies of dim 32 (payload bit, table bit, row-order bit) each refused by name by BOTH the exe and vtcheck.py (refuter.txt); copies deleted
+- 2026-09-23 08:34 vtcheck.py rules: all 5 containers PASS, 12,276 tile CRCs, 0 bad (rules_small/rules_big.txt). rule 18: every header's two hashes == lodgen --corpus-hash (rule18.txt)
+- 2026-09-23 08:50 pictures: 15 north-up overviews (L02..L32 x colour/normal/mask, 512 u/px each) + Sanctuary crop vs vanilla chunk 4.-20.24 in images/ (pics.txt); orientation proven by normal R(east) corr 0.659 vs 0.157 flipped
+- 2026-09-23 08:57 job 4: r2numbers.md written (texel size per level, one-ring + N=1..5 stack cost at W 1024/2048 per sheet set, window reach, fill-cache tiles); no ring count chosen
+- 2026-09-23 08:57 void census (flat grey world outside the land) running -> void_census.txt
+- 2026-09-23 08:59 void census: dim 2 4,561/9,216 tiles (49.5%, 1,476,304,480 B) flat height + uniform colour; dim 8 258/576 (44.8%); DELIVERABLE_TEXT.md written; skill nifskope-ww-lodgen gained a whole-worldspace VT section; LANE DONE, nothing running

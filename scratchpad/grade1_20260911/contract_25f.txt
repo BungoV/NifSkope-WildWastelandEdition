@@ -1,0 +1,77 @@
+### 2.5f The colour grade, and the tone that is NOT a grade (lane GRADE1, 2026-09-12)
+
+`--grade <k>` multiplies every baked colour texel by `k` immediately before
+quantisation, in BOTH writers -- after the road composite and the grass tint,
+before the crevice term. **The default is 1.0 and at 1.0 the multiply is not
+performed at all** (`if ( g_landGrade != 1.0f )`), so a bake without the flag is
+the previous bake's bytes by construction. The bake's own census line carries
+`landGrade <k>` on both paths, so a sheet can never be read against the wrong
+value.
+
+The knob exists to answer a question, **not because a value was found**. What
+the lane measured, and what it refuses:
+
+**The transfer curve ours -> vanilla is not a curve.** On the two reference
+chunks, on matched texels, with road texels excluded by differencing a
+`--no-roads` bake and with no cover texels existing to exclude:
+
+| model | (-20,24) RMS | (-20,20) RMS | verdict |
+|---|---|---|---|
+| identity | 19.94 | 22.65 | the error to beat |
+| constant gain | 17.44 (k = 0.892) | 19.59 (k = 1.161) | **signs disagree** |
+| affine | 9.47 (slope 0.019) | 11.32 (slope 0.185) | degenerate: predicts the mean |
+| gamma | 9.48 (g = 0.038) | 11.36 (g = 0.157) | degenerate, same reason |
+| sRGB slip, linear -> sRGB | 78.51 | 59.65 | refuted |
+| sRGB slip, sRGB -> linear | 56.64 | 68.55 | refuted |
+| BC1 codec floor | 0.497 | 0.527 | the floor all of it sits on |
+
+Both degenerate fits "win" only by ignoring their input -- their RMS is
+vanilla's own standard deviation on those texels (9.478 and 11.899) -- because
+our sheet and vanilla's barely correlate texel to texel at all (r = 0.034 on
+(-20,24), 0.314 on (-20,20)).
+
+**The gain has no single value.** Over a 25-tile census (cells -24..-8 by
+12..28, dim 4, shipped defaults) the per-tile optimum runs **0.615 .. 1.241**,
+mean 0.892, sd 0.144; over the 96 land cells of six of those tiles it runs
+**0.699 .. 1.388** with mean **1.004**. The pooled optimum is 0.8403 and cuts
+the pooled RGB RMS from 24.724 to 19.644 (-20.5 %) while making 6 of 25 tiles
+worse -- including (-20,20), 21.897 -> 28.488, measured through the binary.
+
+**The gate "error reduced on BOTH reference tiles" is therefore unreachable for
+any constant, and this is arithmetic and not a tuning failure.** The RGB error
+of a gain `k` on a tile is a parabola in `k` with its vertex at that tile's own
+`k_opt = <o,v>/<o,o>`; error rises strictly away from the vertex in both
+directions. (-20,24) has `k_opt` = 0.8916 and (-20,20) has 1.1180, one either
+side of 1. So every `k < 1` raises the error on (-20,20) and every `k > 1`
+raises it on (-20,24), and `k = 1` is the switch's off value. Measured, whole
+tile, RGB RMS:
+
+| k | (-20,24) | (-20,20) |
+|---|---|---|
+| 0.8403 (pooled) | 18.11 | 28.49 |
+| 0.8916 | **17.56** | (raises) |
+| 1.0000 (default) | 20.13 | 21.90 |
+| 1.1180 | (raises) | **20.54** |
+
+**What the difference actually is.** The residual's only sign-consistent partner
+is our own brightness (r = +0.835 and +0.827, phase twins -0.056 and +0.012):
+after the best gain we are still too bright where we are bright. Height sits AT
+its phase-twin floor on both tiles; slope and AO clear their floors on one tile
+each with opposite signs; VCLR is ruled out by its own value (the per-texel
+multiplier's mean luminance is 254.9 of 255 on six tiles, and dividing it back
+out moves the fitted gain by 0.0003). The per-cell gains are blocky and straddle
+one. That is a per-cell **content** difference -- which textures we blend where
+-- and it belongs to the lane that owns the composite, not to a grade.
+
+**Saturation.** Ours is more saturated than vanilla on every tile measured
+(0.2453 vs 0.2215 and 0.2763 vs 0.2206; census means 0.2428 vs 0.2189). A gain
+leaves HSV S exactly unchanged and the fitted gammas would crush it to 0.01 --
+neither model is the mechanism. A chroma pull `c' = L + s(c - L)` fitted per
+tile scatters from -0.256 to 1.301, and its best global value moves the error by
+at most 0.15 levels, a fifth of the codec floor; it is not shipped.
+
+**The grass tint stands at 0.35 unfitted**, because the ground-cover plane is
+empty on all 25 census tiles: every `_data` sheet carries `dwReserved1 = 0`,
+which the writer sets exactly when `coverMax == 0`, and the decoded alpha is
+zero on 100 % of texels. At cover 0 the tint branch is not taken, so there is no
+texel on which a strength could be fitted.

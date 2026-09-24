@@ -1,0 +1,1733 @@
+{
+ "lodo": "Commonwealth.lodo",
+ "lodi": "Commonwealth.lodi",
+ "lodi_version": 6,
+ "control": {
+  "instances_header": 33123,
+  "instances_walked": 33123,
+  "slot0_walked": 33123,
+  "drawn_triangles": 250320,
+  "drawn_edges": 750960,
+  "edge_p50": 239.6875,
+  "edge_p90": 512.0,
+  "edge_p99": 1158.7136136167985,
+  "edge_max": 5476.134280784038,
+  "edges_over_512": 71465,
+  "edges_over_1024": 15022,
+  "edges_over_2048": 1085,
+  "tris_over_512": 41042,
+  "tris_over_1024": 7926,
+  "tris_over_2048": 664
+ },
+ "meshes_walked": 1681,
+ "rule": "A: t = T / max(scale) per mesh",
+ "edge_rows": [
+  {
+   "threshold": 256.0,
+   "edges_over": 279527,
+   "tris_with_edge_over": 155197,
+   "lib_welded_vertices": 43376,
+   "lib_stored_vertices": 61993,
+   "lib_triangles_added": 80535,
+   "lib_clusters_added": 5493,
+   "placement_vertices_added": 359338,
+   "placement_triangles_added": 461929,
+   "ruleB_placement_vertices": 313928,
+   "lodo_bytes": 1343440,
+   "lodi_bytes": 6468084,
+   "total_bytes": 7811524
+  },
+  {
+   "threshold": 384.0,
+   "edges_over": 124825,
+   "tris_with_edge_over": 62956,
+   "lib_welded_vertices": 20573,
+   "lib_stored_vertices": 29699,
+   "lib_triangles_added": 38479,
+   "lib_clusters_added": 2839,
+   "placement_vertices_added": 150076,
+   "placement_triangles_added": 190353,
+   "ruleB_placement_vertices": 129525,
+   "lodo_bytes": 656880,
+   "lodi_bytes": 2701368,
+   "total_bytes": 3358248
+  },
+  {
+   "threshold": 512.0,
+   "edges_over": 71465,
+   "tris_with_edge_over": 41042,
+   "lib_welded_vertices": 12976,
+   "lib_stored_vertices": 18754,
+   "lib_triangles_added": 24496,
+   "lib_clusters_added": 1894,
+   "placement_vertices_added": 89603,
+   "placement_triangles_added": 115379,
+   "ruleB_placement_vertices": 72699,
+   "lodo_bytes": 421280,
+   "lodi_bytes": 1612854,
+   "total_bytes": 2034134
+  },
+  {
+   "threshold": 768.0,
+   "edges_over": 23460,
+   "tris_with_edge_over": 12351,
+   "lib_welded_vertices": 5157,
+   "lib_stored_vertices": 7565,
+   "lib_triangles_added": 9919,
+   "lib_clusters_added": 845,
+   "placement_vertices_added": 24899,
+   "placement_triangles_added": 31040,
+   "ruleB_placement_vertices": 22129,
+   "lodo_bytes": 175120,
+   "lodi_bytes": 448182,
+   "total_bytes": 623302
+  },
+  {
+   "threshold": 1024.0,
+   "edges_over": 15022,
+   "tris_with_edge_over": 7926,
+   "lib_welded_vertices": 2994,
+   "lib_stored_vertices": 4296,
+   "lib_triangles_added": 5788,
+   "lib_clusters_added": 512,
+   "placement_vertices_added": 15066,
+   "placement_triangles_added": 18737,
+   "ruleB_placement_vertices": 13405,
+   "lodo_bytes": 101504,
+   "lodi_bytes": 271188,
+   "total_bytes": 372692
+  }
+ ],
+ "face_rows": [
+  {
+   "area_threshold": 65536.0,
+   "side": 256.0,
+   "faces_over": 22733,
+   "texels_64": 1364689,
+   "texels_128": 388829,
+   "bytes_64": 21835024,
+   "bytes_128": 6221264
+  },
+  {
+   "area_threshold": 262144.0,
+   "side": 512.0,
+   "faces_over": 3188,
+   "texels_64": 519142,
+   "texels_128": 141628,
+   "bytes_64": 8306272,
+   "bytes_128": 2266048
+  },
+  {
+   "area_threshold": 1048576.0,
+   "side": 1024.0,
+   "faces_over": 117,
+   "texels_64": 92355,
+   "texels_128": 23823,
+   "bytes_64": 1477680,
+   "bytes_128": 381168
+  }
+ ],
+ "face_population": {
+  "faces": 135966,
+  "area_p50": 15392.005409236048,
+  "area_p90": 98982.2790595532,
+  "area_p99": 360497.8284406243,
+  "area_max": 8015246.961549813,
+  "single_tri_faces": 53857
+ },
+ "top_faces": [
+  {
+   "area": 8015246.961549813,
+   "instance": 22028,
+   "mesh": 2318,
+   "face": 56,
+   "scale": 1.0,
+   "copies": 1,
+   "tris": 10,
+   "du": 5339.990722514687,
+   "dv": 3271.516083009079,
+   "normal": [
+    0.0,
+    -0.0,
+    1.0
+   ],
+   "members": [
+    144,
+    145,
+    146,
+    147,
+    451,
+    452,
+    453,
+    454,
+    603,
+    602
+   ],
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWDoubleCurveL01_LOD_0.nif"
+  },
+  {
+   "area": 7882863.749076827,
+   "instance": 22028,
+   "mesh": 2318,
+   "face": 72,
+   "scale": 1.0,
+   "copies": 1,
+   "tris": 9,
+   "du": 5339.990722514687,
+   "dv": 3263.026741435874,
+   "normal": [
+    -0.0,
+    0.0,
+    -1.0
+   ],
+   "members": [
+    184,
+    185,
+    186,
+    187,
+    505,
+    506,
+    507,
+    709,
+    710
+   ],
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWDoubleCurveL01_LOD_0.nif"
+  },
+  {
+   "area": 7690949.349854619,
+   "instance": 22028,
+   "mesh": 2318,
+   "face": 69,
+   "scale": 1.0,
+   "copies": 1,
+   "tris": 11,
+   "du": 5276.008361943999,
+   "dv": 2997.5046845197226,
+   "normal": [
+    0.0,
+    -0.0,
+    1.0
+   ],
+   "members": [
+    176,
+    177,
+    178,
+    179,
+    478,
+    479,
+    480,
+    481,
+    614,
+    613,
+    612
+   ],
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWDoubleCurveL01_LOD_0.nif"
+  },
+  {
+   "area": 7689271.921935745,
+   "instance": 4291,
+   "mesh": 2320,
+   "face": 59,
+   "scale": 1.0,
+   "copies": 1,
+   "tris": 11,
+   "du": 5167.960265506981,
+   "dv": 3091.494644083314,
+   "normal": [
+    0.0,
+    -0.0,
+    1.0
+   ],
+   "members": [
+    148,
+    149,
+    150,
+    151,
+    478,
+    479,
+    480,
+    481,
+    614,
+    613,
+    612
+   ],
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWDoubleCurveR01_LOD_0.nif"
+  },
+  {
+   "area": 6205479.188097964,
+   "instance": 27018,
+   "mesh": 2346,
+   "face": 8,
+   "scale": 1.0,
+   "copies": 2,
+   "tris": 4,
+   "du": 4096.0,
+   "dv": 1515.0095674067295,
+   "normal": [
+    0.0,
+    0.0,
+    1.0
+   ],
+   "members": [
+    16,
+    181,
+    180,
+    17
+   ],
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWDoubleStrExit01_LOD_0.nif"
+  },
+  {
+   "area": 6057986.937544823,
+   "instance": 27018,
+   "mesh": 2346,
+   "face": 0,
+   "scale": 1.0,
+   "copies": 2,
+   "tris": 4,
+   "du": 4096.0,
+   "dv": 1479.000717174029,
+   "normal": [
+    0.0,
+    0.0,
+    1.0
+   ],
+   "members": [
+    0,
+    165,
+    164,
+    1
+   ],
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWDoubleStrExit01_LOD_0.nif"
+  },
+  {
+   "area": 6021285.377523461,
+   "instance": 27018,
+   "mesh": 2346,
+   "face": 17,
+   "scale": 1.0,
+   "copies": 2,
+   "tris": 4,
+   "du": 4096.0,
+   "dv": 1470.0403753719388,
+   "normal": [
+    0.0,
+    0.0,
+    -1.0
+   ],
+   "members": [
+    34,
+    35,
+    198,
+    199
+   ],
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWDoubleStrExit01_LOD_0.nif"
+  },
+  {
+   "area": 5304257.348756995,
+   "instance": 14062,
+   "mesh": 0,
+   "face": 211,
+   "scale": 1.0,
+   "copies": 1,
+   "tris": 2,
+   "du": 2559.974853131914,
+   "dv": 2071.995880064088,
+   "normal": [
+    0.0,
+    0.0,
+    1.0
+   ],
+   "members": [
+    630,
+    631
+   ],
+   "model": "LOD\\Architecture\\Airport\\AirportTerminalDestroyed01_LOD.nif"
+  },
+  {
+   "area": 5035599.568290644,
+   "instance": 4291,
+   "mesh": 2320,
+   "face": 277,
+   "scale": 1.0,
+   "copies": 1,
+   "tris": 5,
+   "du": 3763.995147631037,
+   "dv": 2795.991622796979,
+   "normal": [
+    0.0,
+    0.0,
+    -1.0
+   ],
+   "members": [
+    505,
+    506,
+    507,
+    709,
+    710
+   ],
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWDoubleCurveR01_LOD_0.nif"
+  },
+  {
+   "area": 5003381.640254479,
+   "instance": 4291,
+   "mesh": 2320,
+   "face": 251,
+   "scale": 1.0,
+   "copies": 1,
+   "tris": 6,
+   "du": 3767.004074158847,
+   "dv": 2802.011398489357,
+   "normal": [
+    0.0,
+    -0.0,
+    1.0
+   ],
+   "members": [
+    451,
+    452,
+    453,
+    454,
+    603,
+    602
+   ],
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWDoubleCurveR01_LOD_0.nif"
+  },
+  {
+   "area": 3762037.3357285177,
+   "instance": 15927,
+   "mesh": 1031,
+   "face": 155,
+   "scale": 1.0,
+   "copies": 1,
+   "tris": 75,
+   "du": 2104.01625085832,
+   "dv": 3197.0175326161593,
+   "normal": [
+    0.0,
+    0.0,
+    1.0
+   ],
+   "members": [
+    216,
+    217,
+    221,
+    223,
+    222,
+    224,
+    225,
+    247,
+    246,
+    245,
+    244,
+    239,
+    231,
+    230,
+    229,
+    232,
+    263,
+    273,
+    274,
+    275,
+    276,
+    227,
+    228,
+    278,
+    279,
+    280,
+    283,
+    282,
+    281,
+    277,
+    289,
+    290,
+    267,
+    268,
+    269,
+    270,
+    271,
+    236,
+    237,
+    235,
+    234,
+    233,
+    288,
+    287,
+    286,
+    285,
+    284,
+    226,
+    265,
+    272,
+    264,
+    261,
+    262,
+    260,
+    259,
+    258,
+    266,
+    238,
+    243,
+    242,
+    241,
+    240,
+    257,
+    256,
+    255,
+    254,
+    253,
+    252,
+    251,
+    250,
+    249,
+    248,
+    220,
+    219,
+    218
+   ],
+   "model": "LOD\\Architecture\\Unique\\BostonCommons\\BostonCommonsPond01_LOD_0.nif"
+  },
+  {
+   "area": 3102700.9372091247,
+   "instance": 24932,
+   "mesh": 2342,
+   "face": 1,
+   "scale": 1.0,
+   "copies": 3,
+   "tris": 4,
+   "du": 2048.0,
+   "dv": 1514.9906919966431,
+   "normal": [
+    0.0,
+    -0.0,
+    1.0
+   ],
+   "members": [
+    4,
+    5,
+    6,
+    7
+   ],
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWDoubleStr01Damaged01_LOD_0.nif"
+  },
+  {
+   "area": 3102663.342885481,
+   "instance": 29067,
+   "mesh": 2340,
+   "face": 126,
+   "scale": 1.0,
+   "copies": 1,
+   "tris": 2,
+   "du": 2048.0,
+   "dv": 1514.9723353933014,
+   "normal": [
+    0.0,
+    0.0,
+    1.0
+   ],
+   "members": [
+    186,
+    187
+   ],
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWDoubleStr01_LOD_0.nif"
+  },
+  {
+   "area": 3028918.21762417,
+   "instance": 29067,
+   "mesh": 2340,
+   "face": 118,
+   "scale": 1.0,
+   "copies": 1,
+   "tris": 2,
+   "du": 2048.0,
+   "dv": 1478.9639734493016,
+   "normal": [
+    0.0,
+    0.0,
+    1.0
+   ],
+   "members": [
+    170,
+    171
+   ],
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWDoubleStr01_LOD_0.nif"
+  },
+  {
+   "area": 3010613.938323033,
+   "instance": 29067,
+   "mesh": 2340,
+   "face": 135,
+   "scale": 1.0,
+   "copies": 1,
+   "tris": 2,
+   "du": 2048.0,
+   "dv": 1470.0263370717935,
+   "normal": [
+    0.0,
+    0.0,
+    -1.0
+   ],
+   "members": [
+    204,
+    205
+   ],
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWDoubleStr01_LOD_0.nif"
+  },
+  {
+   "area": 2487817.4186167093,
+   "instance": 26701,
+   "mesh": 1238,
+   "face": 0,
+   "scale": 1.0,
+   "copies": 1,
+   "tris": 4,
+   "du": 1247.5625,
+   "dv": 1996.000390626964,
+   "normal": [
+    -0.9999998042951463,
+    0.0,
+    -0.0006256274201267592
+   ],
+   "members": [
+    0,
+    1,
+    9,
+    8
+   ],
+   "model": "LOD\\Buildings\\BldgBrick7Story3x5FreeComEntA_LOD.nif"
+  },
+  {
+   "area": 2301462.523781186,
+   "instance": 33113,
+   "mesh": 1038,
+   "face": 0,
+   "scale": 1.0,
+   "copies": 1,
+   "tris": 2,
+   "du": 2320.0227054245825,
+   "dv": 992.0,
+   "normal": [
+    -0.0,
+    1.0,
+    0.0
+   ],
+   "members": [
+    0,
+    1
+   ],
+   "model": "LOD\\Architecture\\Unique\\TheCastle\\CastleWallOutWedge02_LOD_0.nif"
+  },
+  {
+   "area": 2301462.523781186,
+   "instance": 33114,
+   "mesh": 1039,
+   "face": 0,
+   "scale": 1.0,
+   "copies": 1,
+   "tris": 2,
+   "du": 2320.0227054245825,
+   "dv": 992.0,
+   "normal": [
+    -0.0,
+    1.0,
+    0.0
+   ],
+   "members": [
+    0,
+    1
+   ],
+   "model": "LOD\\Architecture\\Unique\\TheCastle\\CastleWallOutWedge03_LOD_0.nif"
+  },
+  {
+   "area": 2207164.3439604267,
+   "instance": 33112,
+   "mesh": 1037,
+   "face": 0,
+   "scale": 1.0,
+   "copies": 1,
+   "tris": 7,
+   "du": 2320.0227054245825,
+   "dv": 992.0,
+   "normal": [
+    0.0,
+    1.0,
+    0.0
+   ],
+   "members": [
+    0,
+    43,
+    1,
+    45,
+    44,
+    35,
+    36
+   ],
+   "model": "LOD\\Architecture\\Unique\\TheCastle\\CastleWallOutWedge01_LOD_0.nif"
+  },
+  {
+   "area": 2097126.7808651866,
+   "instance": 33113,
+   "mesh": 1038,
+   "face": 1,
+   "scale": 1.0,
+   "copies": 1,
+   "tris": 2,
+   "du": 2114.0390936140993,
+   "dv": 992.0,
+   "normal": [
+    0.0,
+    -1.0,
+    0.0
+   ],
+   "members": [
+    2,
+    3
+   ],
+   "model": "LOD\\Architecture\\Unique\\TheCastle\\CastleWallOutWedge02_LOD_0.nif"
+  },
+  {
+   "area": 2097126.7808651866,
+   "instance": 33114,
+   "mesh": 1039,
+   "face": 1,
+   "scale": 1.0,
+   "copies": 1,
+   "tris": 2,
+   "du": 2114.0390936140993,
+   "dv": 992.0,
+   "normal": [
+    0.0,
+    -1.0,
+    0.0
+   ],
+   "members": [
+    2,
+    3
+   ],
+   "model": "LOD\\Architecture\\Unique\\TheCastle\\CastleWallOutWedge03_LOD_0.nif"
+  },
+  {
+   "area": 2062840.0863210992,
+   "instance": 33113,
+   "mesh": 1038,
+   "face": 6,
+   "scale": 1.0,
+   "copies": 1,
+   "tris": 6,
+   "du": 4032.0,
+   "dv": 1186.0,
+   "normal": [
+    0.0,
+    0.0,
+    1.0
+   ],
+   "members": [
+    12,
+    14,
+    15,
+    13,
+    16,
+    17
+   ],
+   "model": "LOD\\Architecture\\Unique\\TheCastle\\CastleWallOutWedge02_LOD_0.nif"
+  },
+  {
+   "area": 2062840.0863210992,
+   "instance": 33114,
+   "mesh": 1039,
+   "face": 6,
+   "scale": 1.0,
+   "copies": 1,
+   "tris": 6,
+   "du": 4032.0,
+   "dv": 1186.0,
+   "normal": [
+    0.0,
+    0.0,
+    1.0
+   ],
+   "members": [
+    12,
+    14,
+    15,
+    13,
+    16,
+    17
+   ],
+   "model": "LOD\\Architecture\\Unique\\TheCastle\\CastleWallOutWedge03_LOD_0.nif"
+  },
+  {
+   "area": 2028869.5142715054,
+   "instance": 7311,
+   "mesh": 2332,
+   "face": 37,
+   "scale": 1.0,
+   "copies": 2,
+   "tris": 2,
+   "du": 1482.1962507473047,
+   "dv": 1514.9906919966431,
+   "normal": [
+    0.0,
+    0.0,
+    1.0
+   ],
+   "members": [
+    108,
+    109
+   ],
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWDoubleEndCapR01_LOD_0.nif"
+  },
+  {
+   "area": 2017250.973919795,
+   "instance": 33112,
+   "mesh": 1037,
+   "face": 1,
+   "scale": 1.0,
+   "copies": 1,
+   "tris": 7,
+   "du": 2114.0390936140993,
+   "dv": 992.0,
+   "normal": [
+    0.0,
+    -1.0,
+    0.0
+   ],
+   "members": [
+    2,
+    3,
+    4,
+    7,
+    8,
+    5,
+    6
+   ],
+   "model": "LOD\\Architecture\\Unique\\TheCastle\\CastleWallOutWedge01_LOD_0.nif"
+  },
+  {
+   "area": 1993721.4837814195,
+   "instance": 30633,
+   "mesh": 2326,
+   "face": 0,
+   "scale": 1.0,
+   "copies": 1,
+   "tris": 2,
+   "du": 1504.991958447031,
+   "dv": 1479.022003509575,
+   "normal": [
+    0.0,
+    0.0,
+    1.0
+   ],
+   "members": [
+    0,
+    1
+   ],
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWDoubleEndCapL01_LOD_0.nif"
+  },
+  {
+   "area": 1982995.1876365421,
+   "instance": 30633,
+   "mesh": 2326,
+   "face": 40,
+   "scale": 1.0,
+   "copies": 1,
+   "tris": 2,
+   "du": 1504.991958447031,
+   "dv": 1469.9822537575342,
+   "normal": [
+    0.0,
+    0.0,
+    -1.0
+   ],
+   "members": [
+    107,
+    108
+   ],
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWDoubleEndCapL01_LOD_0.nif"
+  },
+  {
+   "area": 1903785.0,
+   "instance": 1254,
+   "mesh": 1023,
+   "face": 41,
+   "scale": 1.0,
+   "copies": 1,
+   "tris": 2,
+   "du": 1690.0,
+   "dv": 1126.5,
+   "normal": [
+    0.0,
+    -1.0,
+    0.0
+   ],
+   "members": [
+    76,
+    77
+   ],
+   "model": "LOD\\Architecture\\Unique\\Amphitheater_LOD_0.nif"
+  },
+  {
+   "area": 1903785.0,
+   "instance": 1254,
+   "mesh": 1023,
+   "face": 42,
+   "scale": 1.0,
+   "copies": 1,
+   "tris": 2,
+   "du": 1690.0,
+   "dv": 1126.5,
+   "normal": [
+    0.0,
+    1.0,
+    0.0
+   ],
+   "members": [
+    78,
+    79
+   ],
+   "model": "LOD\\Architecture\\Unique\\Amphitheater_LOD_0.nif"
+  },
+  {
+   "area": 1900095.2606296062,
+   "instance": 33116,
+   "mesh": 1041,
+   "face": 0,
+   "scale": 1.0,
+   "copies": 1,
+   "tris": 7,
+   "du": 2320.0227054245825,
+   "dv": 992.0,
+   "normal": [
+    -0.0,
+    1.0,
+    0.0
+   ],
+   "members": [
+    0,
+    1,
+    37,
+    41,
+    40,
+    39,
+    38
+   ],
+   "model": "LOD\\Architecture\\Unique\\TheCastle\\CastleWallOutWedge05_LOD_0.nif"
+  },
+  {
+   "area": 1889389.4986655328,
+   "instance": 4079,
+   "mesh": 1055,
+   "face": 224,
+   "scale": 1.0,
+   "copies": 1,
+   "tris": 28,
+   "du": 2980.985244525826,
+   "dv": 693.0043335622186,
+   "normal": [
+    0.0,
+    0.0,
+    1.0
+   ],
+   "members": [
+    302,
+    303,
+    330,
+    430,
+    429,
+    428,
+    427,
+    437,
+    438,
+    338,
+    339,
+    329,
+    328,
+    401,
+    331,
+    334,
+    335,
+    332,
+    333,
+    311,
+    310,
+    410,
+    409,
+    431,
+    432,
+    433,
+    434,
+    402
+   ],
+   "model": "LOD\\Architecture\\USSConstitution\\Constitution01_LOD_0.nif"
+  },
+  {
+   "area": 1874678.6417561984,
+   "instance": 14062,
+   "mesh": 0,
+   "face": 212,
+   "scale": 1.0,
+   "copies": 1,
+   "tris": 11,
+   "du": 1028.0239871824215,
+   "dv": 2189.9649042496376,
+   "normal": [
+    0.0,
+    -0.0,
+    1.0
+   ],
+   "members": [
+    632,
+    637,
+    638,
+    639,
+    640,
+    641,
+    642,
+    633,
+    634,
+    635,
+    636
+   ],
+   "model": "LOD\\Architecture\\Airport\\AirportTerminalDestroyed01_LOD.nif"
+  },
+  {
+   "area": 1831858.4953994045,
+   "instance": 29080,
+   "mesh": 2376,
+   "face": 4,
+   "scale": 1.0,
+   "copies": 1,
+   "tris": 6,
+   "du": 3424.0,
+   "dv": 535.0054016937513,
+   "normal": [
+    0.0,
+    0.0,
+    -1.0
+   ],
+   "members": [
+    8,
+    9,
+    20,
+    21,
+    33,
+    32
+   ],
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWOnRampStrFree01_LOD_0.nif"
+  },
+  {
+   "area": 1820028.3363932818,
+   "instance": 33115,
+   "mesh": 1040,
+   "face": 0,
+   "scale": 1.0,
+   "copies": 1,
+   "tris": 8,
+   "du": 2320.0227054245825,
+   "dv": 992.0,
+   "normal": [
+    -0.0,
+    1.0,
+    0.0
+   ],
+   "members": [
+    0,
+    38,
+    37,
+    45,
+    44,
+    43,
+    41,
+    40
+   ],
+   "model": "LOD\\Architecture\\Unique\\TheCastle\\CastleWallOutWedge04_LOD_0.nif"
+  },
+  {
+   "area": 1805086.379594774,
+   "instance": 14573,
+   "mesh": 1227,
+   "face": 1,
+   "scale": 1.0,
+   "copies": 5,
+   "tris": 6,
+   "du": 1278.0,
+   "dv": 1596.0,
+   "normal": [
+    1.0,
+    0.0,
+    0.0
+   ],
+   "members": [
+    2,
+    3,
+    10,
+    11,
+    15,
+    14
+   ],
+   "model": "LOD\\Buildings\\BldgBrick5Story1x3EndComA_LOD.nif"
+  },
+  {
+   "area": 1805086.379594774,
+   "instance": 14573,
+   "mesh": 1227,
+   "face": 2,
+   "scale": 1.0,
+   "copies": 5,
+   "tris": 6,
+   "du": 1278.0,
+   "dv": 1596.0,
+   "normal": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "members": [
+    4,
+    5,
+    8,
+    9,
+    16,
+    17
+   ],
+   "model": "LOD\\Buildings\\BldgBrick5Story1x3EndComA_LOD.nif"
+  },
+  {
+   "area": 1805072.2560769054,
+   "instance": 14575,
+   "mesh": 1231,
+   "face": 2,
+   "scale": 1.0,
+   "copies": 1,
+   "tris": 4,
+   "du": 1282.0,
+   "dv": 1408.0126802471962,
+   "normal": [
+    1.0,
+    0.0,
+    -0.0
+   ],
+   "members": [
+    4,
+    5,
+    25,
+    24
+   ],
+   "model": "LOD\\Buildings\\BldgBrick5StoryCustom01_LOD.nif"
+  },
+  {
+   "area": 1805072.2560769054,
+   "instance": 14575,
+   "mesh": 1231,
+   "face": 4,
+   "scale": 1.0,
+   "copies": 1,
+   "tris": 4,
+   "du": 1282.0,
+   "dv": 1408.0126802471962,
+   "normal": [
+    -1.0,
+    0.0,
+    0.0
+   ],
+   "members": [
+    8,
+    27,
+    26,
+    9
+   ],
+   "model": "LOD\\Buildings\\BldgBrick5StoryCustom01_LOD.nif"
+  },
+  {
+   "area": 1713711.5268671256,
+   "instance": 33116,
+   "mesh": 1041,
+   "face": 1,
+   "scale": 1.0,
+   "copies": 1,
+   "tris": 8,
+   "du": 2114.0390936140993,
+   "dv": 992.0,
+   "normal": [
+    0.0,
+    -1.0,
+    0.0
+   ],
+   "members": [
+    2,
+    3,
+    4,
+    6,
+    7,
+    8,
+    9,
+    5
+   ],
+   "model": "LOD\\Architecture\\Unique\\TheCastle\\CastleWallOutWedge05_LOD_0.nif"
+  },
+  {
+   "area": 1691386.2439028954,
+   "instance": 14062,
+   "mesh": 0,
+   "face": 213,
+   "scale": 1.0,
+   "copies": 1,
+   "tris": 9,
+   "du": 2361.001144426642,
+   "dv": 918.9889982452124,
+   "normal": [
+    1.0,
+    0.0,
+    0.0
+   ],
+   "members": [
+    643,
+    644,
+    645,
+    646,
+    647,
+    648,
+    649,
+    650,
+    651
+   ],
+   "model": "LOD\\Architecture\\Airport\\AirportTerminalDestroyed01_LOD.nif"
+  },
+  {
+   "area": 1672599.9403067064,
+   "instance": 29080,
+   "mesh": 2376,
+   "face": 1,
+   "scale": 1.0,
+   "copies": 1,
+   "tris": 6,
+   "du": 3424.0,
+   "dv": 488.4929732204166,
+   "normal": [
+    0.0,
+    0.0,
+    1.0
+   ],
+   "members": [
+    2,
+    14,
+    15,
+    3,
+    27,
+    26
+   ],
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWOnRampStrFree01_LOD_0.nif"
+  },
+  {
+   "area": 1619330.8434764354,
+   "instance": 33115,
+   "mesh": 1040,
+   "face": 1,
+   "scale": 1.0,
+   "copies": 1,
+   "tris": 8,
+   "du": 2114.0390936140993,
+   "dv": 992.0,
+   "normal": [
+    -0.0,
+    -1.0,
+    0.0
+   ],
+   "members": [
+    1,
+    2,
+    39,
+    3,
+    4,
+    5,
+    42,
+    6
+   ],
+   "model": "LOD\\Architecture\\Unique\\TheCastle\\CastleWallOutWedge04_LOD_0.nif"
+  },
+  {
+   "area": 1559663.413588774,
+   "instance": 24933,
+   "mesh": 2352,
+   "face": 13,
+   "scale": 1.0,
+   "copies": 2,
+   "tris": 2,
+   "du": 1029.4871261111548,
+   "dv": 1514.9906919966431,
+   "normal": [
+    -0.10321126935975246,
+    0.0,
+    0.9946594562347199
+   ],
+   "members": [
+    32,
+    33
+   ],
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWDoubleTransRampDown01_LOD_0.nif"
+  },
+  {
+   "area": 1553313.7104052808,
+   "instance": 24933,
+   "mesh": 2352,
+   "face": 14,
+   "scale": 1.0,
+   "copies": 2,
+   "tris": 2,
+   "du": 1025.2958771371266,
+   "dv": 1514.9906919966431,
+   "normal": [
+    -0.050472159978018634,
+    0.0,
+    0.9987254683180725
+   ],
+   "members": [
+    34,
+    35
+   ],
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWDoubleTransRampDown01_LOD_0.nif"
+  },
+  {
+   "area": 1550570.5607695174,
+   "instance": 24933,
+   "mesh": 2352,
+   "face": 19,
+   "scale": 1.0,
+   "copies": 2,
+   "tris": 18,
+   "du": 3534.0,
+   "dv": 742.3755550469215,
+   "normal": [
+    0.0,
+    1.0,
+    0.0
+   ],
+   "members": [
+    48,
+    316,
+    317,
+    49,
+    70,
+    71,
+    55,
+    231,
+    230,
+    54,
+    53,
+    52,
+    194,
+    308,
+    309,
+    195,
+    51,
+    50
+   ],
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWDoubleTransRampDown01_LOD_0.nif"
+  },
+  {
+   "area": 1548747.1042373409,
+   "instance": 30634,
+   "mesh": 2330,
+   "face": 294,
+   "scale": 1.0,
+   "copies": 1,
+   "tris": 2,
+   "du": 1022.2939838932909,
+   "dv": 1518.9684901197834,
+   "normal": [
+    -0.0222490401489391,
+    0.0,
+    0.999752459468068
+   ],
+   "members": [
+    475,
+    476
+   ],
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWDoubleEndCapL03_LOD_0.nif"
+  },
+  {
+   "area": 1540446.89074161,
+   "instance": 30634,
+   "mesh": 2330,
+   "face": 295,
+   "scale": 1.0,
+   "copies": 1,
+   "tris": 2,
+   "du": 1016.8007752294748,
+   "dv": 1542.9883878843366,
+   "normal": [
+    -0.11579024674047714,
+    0.0,
+    0.9932736877415909
+   ],
+   "members": [
+    477,
+    478
+   ],
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWDoubleEndCapL03_LOD_0.nif"
+  },
+  {
+   "area": 1519303.683070535,
+   "instance": 30634,
+   "mesh": 2330,
+   "face": 276,
+   "scale": 1.0,
+   "copies": 1,
+   "tris": 2,
+   "du": 1027.5742025369816,
+   "dv": 1508.5269245441364,
+   "normal": [
+    -0.00809664495872425,
+    0.0,
+    0.9999672216329955
+   ],
+   "members": [
+    450,
+    451
+   ],
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWDoubleEndCapL03_LOD_0.nif"
+  },
+  {
+   "area": 1511030.3221885609,
+   "instance": 30633,
+   "mesh": 2326,
+   "face": 5,
+   "scale": 1.0,
+   "copies": 1,
+   "tris": 3,
+   "du": 1100.0081785712368,
+   "dv": 1514.9906919966431,
+   "normal": [
+    0.0,
+    0.0,
+    1.0
+   ],
+   "members": [
+    10,
+    11,
+    12
+   ],
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWDoubleEndCapL01_LOD_0.nif"
+  },
+  {
+   "area": 1508730.5614811976,
+   "instance": 26701,
+   "mesh": 1238,
+   "face": 2,
+   "scale": 1.0,
+   "copies": 1,
+   "tris": 4,
+   "du": 756.5012474250401,
+   "dv": 1996.0004322008515,
+   "normal": [
+    0.0,
+    -0.999999783466554,
+    -0.000658078145001445
+   ],
+   "members": [
+    4,
+    14,
+    13,
+    5
+   ],
+   "model": "LOD\\Buildings\\BldgBrick7Story3x5FreeComEntA_LOD.nif"
+  },
+  {
+   "area": 1508730.427538735,
+   "instance": 26701,
+   "mesh": 1238,
+   "face": 1,
+   "scale": 1.0,
+   "copies": 1,
+   "tris": 2,
+   "du": 756.5012474250401,
+   "dv": 1996.0002549994215,
+   "normal": [
+    0.0,
+    0.999999872244795,
+    -0.0005054803591521165
+   ],
+   "members": [
+    2,
+    3
+   ],
+   "model": "LOD\\Buildings\\BldgBrick7Story3x5FreeComEntA_LOD.nif"
+  },
+  {
+   "area": 1282370.9515966652,
+   "instance": 29070,
+   "mesh": 2360,
+   "face": 7,
+   "scale": 1.0,
+   "copies": 1,
+   "tris": 12,
+   "du": 2502.033569848173,
+   "dv": 668.2513733119706,
+   "normal": [
+    0.0,
+    0.0,
+    -1.0
+   ],
+   "members": [
+    16,
+    43,
+    42,
+    41,
+    40,
+    17,
+    18,
+    19,
+    64,
+    65,
+    66,
+    67
+   ],
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWOnRampCurveFree01_LOD_0.nif"
+  },
+  {
+   "area": 1247153.1243814128,
+   "instance": 33112,
+   "mesh": 1037,
+   "face": 16,
+   "scale": 1.0,
+   "copies": 1,
+   "tris": 4,
+   "du": 2438.764751659419,
+   "dv": 1186.009300373846,
+   "normal": [
+    0.0,
+    0.0,
+    1.0
+   ],
+   "members": [
+    37,
+    38,
+    41,
+    42
+   ],
+   "model": "LOD\\Architecture\\Unique\\TheCastle\\CastleWallOutWedge01_LOD_0.nif"
+  },
+  {
+   "area": 1170962.167692712,
+   "instance": 29070,
+   "mesh": 2360,
+   "face": 2,
+   "scale": 1.0,
+   "copies": 1,
+   "tris": 12,
+   "du": 2491.9989318684675,
+   "dv": 622.2527008468758,
+   "normal": [
+    0.0,
+    -0.0,
+    1.0
+   ],
+   "members": [
+    3,
+    5,
+    6,
+    8,
+    51,
+    53,
+    54,
+    56,
+    32,
+    30,
+    29,
+    27
+   ],
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWOnRampCurveFree01_LOD_0.nif"
+  },
+  {
+   "area": 1146755.2308189715,
+   "instance": 3550,
+   "mesh": 1183,
+   "face": 1,
+   "scale": 1.0,
+   "copies": 1,
+   "tris": 11,
+   "du": 1289.0055161364157,
+   "dv": 898.9977977728535,
+   "normal": [
+    0.0,
+    0.9999996490408904,
+    0.0008378055237585579
+   ],
+   "members": [
+    2,
+    63,
+    62,
+    44,
+    43,
+    8,
+    36,
+    35,
+    3,
+    10,
+    9
+   ],
+   "model": "LOD\\Buildings\\BldgBrick3Story6x2CornerComEntA_LOD.nif"
+  },
+  {
+   "area": 1143491.8557075842,
+   "instance": 191,
+   "mesh": 1272,
+   "face": 7,
+   "scale": 1.0,
+   "copies": 2,
+   "tris": 6,
+   "du": 1538.0,
+   "dv": 744.2463593076457,
+   "normal": [
+    0.0,
+    0.0,
+    1.0
+   ],
+   "members": [
+    10,
+    11,
+    98,
+    99,
+    82,
+    81
+   ],
+   "model": "LOD\\Buildings\\Bridge01Mid01_LOD.nif"
+  },
+  {
+   "area": 1143491.8557075842,
+   "instance": 192,
+   "mesh": 1273,
+   "face": 7,
+   "scale": 1.0,
+   "copies": 1,
+   "tris": 6,
+   "du": 1538.0,
+   "dv": 744.2463593076457,
+   "normal": [
+    0.0,
+    0.0,
+    1.0
+   ],
+   "members": [
+    10,
+    11,
+    98,
+    99,
+    82,
+    81
+   ],
+   "model": "LOD\\Buildings\\Bridge01Mid01RR_LOD.nif"
+  },
+  {
+   "area": 1138858.5764658337,
+   "instance": 28619,
+   "mesh": 2224,
+   "face": 181,
+   "scale": 1.0,
+   "copies": 1,
+   "tris": 12,
+   "du": 1118.9893186846723,
+   "dv": 1030.491279468986,
+   "normal": [
+    0.0,
+    -0.0,
+    1.0
+   ],
+   "members": [
+    304,
+    305,
+    307,
+    311,
+    312,
+    313,
+    314,
+    308,
+    309,
+    310,
+    315,
+    306
+   ],
+   "model": "LOD\\Interiors\\RedRocket\\RedRExtAll01_LOD.nif"
+  },
+  {
+   "area": 1129493.1949590705,
+   "instance": 28058,
+   "mesh": 1882,
+   "face": 0,
+   "scale": 1.0,
+   "copies": 2,
+   "tris": 30,
+   "du": 987.25,
+   "dv": 1183.0,
+   "normal": [
+    0.0,
+    -1.0,
+    0.0
+   ],
+   "members": [
+    0,
+    1,
+    60,
+    61,
+    63,
+    62,
+    18,
+    19,
+    12,
+    13,
+    56,
+    57,
+    11,
+    10,
+    14,
+    15,
+    21,
+    20,
+    64,
+    65,
+    16,
+    58,
+    59,
+    32,
+    33,
+    17,
+    9,
+    40,
+    2,
+    41
+   ],
+   "model": "LOD\\Buildings\\SmallTown\\Bld04FrontBrickACom01_LOD.nif"
+  },
+  {
+   "area": 1120224.3638701173,
+   "instance": 7311,
+   "mesh": 2332,
+   "face": 10,
+   "scale": 1.0,
+   "copies": 2,
+   "tris": 4,
+   "du": 777.1914138497082,
+   "dv": 1469.9822537575342,
+   "normal": [
+    0.0,
+    0.0,
+    -1.0
+   ],
+   "members": [
+    20,
+    21,
+    22,
+    23
+   ],
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWDoubleEndCapR01_LOD_0.nif"
+  }
+ ],
+ "constants": {
+  "horizon_bins": 16,
+  "lodo_vertex_bytes": 16,
+  "lodi_per_vertex_bytes": 18,
+  "cluster_bytes": 64,
+  "weld": 100.0,
+  "coplanar_deg": 1.0,
+  "coplanar_dist": 0.5
+ }
+}

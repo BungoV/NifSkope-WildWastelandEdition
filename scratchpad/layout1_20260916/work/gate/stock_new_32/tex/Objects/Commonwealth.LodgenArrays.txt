@@ -1,0 +1,2 @@
+# lodgen texture arrays 5: family class layer lodm color normal mask emissive source emissiveScale (docs/LODGEN_IMPOSTOR_SPEC.md)
+legacy 256x256 0 data\Textures\Terrain\Commonwealth\Objects\Commonwealth.LodgenArrays.256x256.lodm LOD/HitTechExtALargeLOD_d.dds LOD/HitTechExtALargeLOD_n.dds LOD/HitTechExtALargeLOD_s.dds - materials\lod\hittechextalargelod.bgsm 0

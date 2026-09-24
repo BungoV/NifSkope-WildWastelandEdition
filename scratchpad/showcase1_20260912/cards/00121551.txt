@@ -1,0 +1,79 @@
+model BlastedForestBurntTreeUpright01.nif
+projection ortho
+ranges BlastedForestBurntTreeUpright01:0 - L1_BlastedForestBurntTreeUpright01:0 - L2_BlastedForestBurntTreeUpright01:0 405+501
+lodm materials\Landscape\Trees\BlastedForestBurntTreeAtlas.lodm none textures\Landscape\Trees\BlastedForestBurntTreeAtlas_d.dds
+mask alpha
+emissive 0 shapes 0
+front 1473.9 753.23 11.4141 42.9863 551.688
+side 1473.9 753.23 11.4141 42.9863 551.688
+class 80 256
+gap 6 16
+coverage 16 128 160
+oct 8 80 256 209.009 668.828 11.4141 42.9863 551.688 3072 legacy 512
+frameoff 0 0 -45.5845 6.51208
+frameoff 1 0 -45.5845 5.42673
+frameoff 2 0 -42.3285 6.51208
+frameoff 3 0 -55.3526 13.0241
+frameoff 4 0 -71.6328 5.42673
+frameoff 5 0 -72.7182 5.42673
+frameoff 6 0 -67.2914 5.42673
+frameoff 7 0 -61.8647 5.42673
+frameoff 0 1 -45.5845 5.42673
+frameoff 1 1 -46.6699 -9.76813
+frameoff 2 1 -44.4992 -11.9388
+frameoff 3 1 -52.0966 4.34137
+frameoff 4 1 -73.8035 -31.475
+frameoff 5 1 -69.4621 -23.8776
+frameoff 6 1 -61.8647 -16.2802
+frameoff 7 1 -40.1578 6.51208
+frameoff 0 2 -42.3285 5.42673
+frameoff 1 2 -45.5845 -14.1095
+frameoff 2 2 -46.6699 -30.3897
+frameoff 3 2 -43.4138 -57.5233
+frameoff 4 2 -72.7182 -28.219
+frameoff 5 2 -61.8647 -17.3655
+frameoff 6 2 -49.9259 3.25604
+frameoff 7 2 -33.6457 5.42673
+frameoff 0 3 -36.9018 5.42673
+frameoff 1 3 -37.9871 -14.1095
+frameoff 2 3 -41.2431 10.8535
+frameoff 3 3 -46.6699 4.34138
+frameoff 4 3 -61.8647 -37.9871
+frameoff 5 3 -20.6216 -24.963
+frameoff 6 3 2.17069 1.08536
+frameoff 7 3 14.1095 5.42673
+frameoff 0 4 -32.5604 5.42673
+frameoff 1 4 -2.17069 -8.68277
+frameoff 2 4 21.7069 22.7923
+frameoff 3 4 61.8647 56.438
+frameoff 4 4 46.6699 -46.6699
+frameoff 5 4 41.2431 -17.3655
+frameoff 6 4 37.9871 2.17068
+frameoff 7 4 37.9871 5.42673
+frameoff 0 5 7.59742 5.42673
+frameoff 1 5 28.219 -2.17068
+frameoff 2 5 64.0354 28.219
+frameoff 3 5 72.7182 15.1948
+frameoff 4 5 42.3285 -2.17068
+frameoff 5 5 45.5845 -10.8535
+frameoff 6 5 45.5845 6.51208
+frameoff 7 5 43.4138 5.42673
+frameoff 0 6 40.1578 5.42673
+frameoff 1 6 61.8647 2.17068
+frameoff 2 6 69.4621 6.51208
+frameoff 3 6 73.8035 14.1095
+frameoff 4 6 52.0966 14.1095
+frameoff 5 6 44.4992 8.68277
+frameoff 6 6 46.6699 8.68277
+frameoff 7 6 45.5845 5.42673
+frameoff 0 7 61.8647 5.42673
+frameoff 1 7 67.2914 5.42673
+frameoff 2 7 72.7182 5.42673
+frameoff 3 7 71.6328 13.0241
+frameoff 4 7 55.3526 13.0241
+frameoff 5 7 43.4138 13.0241
+frameoff 6 7 45.5845 5.42673
+frameoff 7 7 46.6699 5.42673
+frameclamped 0
+framefit 179.082 620.818 246.374 626.245
+orthofit 684.549 684.549 0

@@ -1,0 +1,22 @@
+TILING4 -- the decided gates on the REAL bakes (two chunks only)
+
+instruments and floors are h1_sweep.score, imported unchanged; the
+sheets are the DDS release/NifSkope.exe wrote in gate F2.
+
+arm    chunk     repeat     ceil    ratio   grain%  swirl r swirlCeil verdict
+vanilla (-- the floors for this chunk --)          hp SD 4.476  swirl r 1.9940
+rung   t2024      1.042    0.264    0.740   -24.0%   0.9384    2.3927     RED
+def    t2024      1.042    0.264    0.740   -24.0%   0.9384    2.3927     RED
+stoch  t2024      0.148    0.264    0.101   -14.3%   1.1128    2.3927      ok
+warp   t2024      0.183    0.264    0.132   +11.3%   2.2206    2.3927      ok
+vanilla (-- the floors for this chunk --)          hp SD 5.459  swirl r 1.6841
+rung   t2020      1.242    0.366    0.870   -20.6%   2.1858    2.0209     RED
+def    t2020      1.242    0.366    0.870   -20.6%   2.1858    2.0209     RED
+stoch  t2020      0.623    0.366    0.439   -15.9%   2.0845    2.0209     RED
+warp   t2020      0.593    0.366    0.392    -0.8%   2.2790    2.0209     RED
+
+def reads the rung EXACTLY on every instrument, both chunks: yes
+
+Read this table as a cross-check of the prototype against the
+product, on the two chunks a bake of this size can reach. The
+7-of-7 verdicts stay with section 2, which had fourteen sheets.

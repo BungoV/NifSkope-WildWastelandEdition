@@ -1,0 +1,266 @@
+  ok   the fixture NIF loaded
+  ok   the animation workspace exists (hook-up applied)
+  ok   the list and the dope sheet are there
+  ok   the scene has a playback
+loader: Running_To_Slide_And_Back_To_Running: 78 of 95 bones play, 4 matched only by ignoring case (Spine1, Spine2, Head, Weapon); 17 have no node in this NIF: WeaponBolt, WeaponExtra1, WeaponExtra2, WeaponExtra3, WeaponMagazine, WeaponMagazineChild1, WeaponMagazineChild2, WeaponMagazineChild3, WeaponMagazineChild4, WeaponMagazineChild5, WeaponOptics1, WeaponOptics2, WeaponTrigger, WeaponIKTargetL, WeaponIKTargetR, WeaponIKTargetLMirror, WeaponIKTargetRMirror.
+  ok   (a) the clip loaded and bound
+  (k) the label says "78 of 95 bones" (14 chars); its tooltip carries 456 chars
+  ok   (k) the binding line the dock SHOWS is a few words: 14 chars (<= 40) carrying 2 numbers (>= 2)
+  ok   (k) ...and the whole sentence is still there, in the tooltip (456 chars), naming the bones that did not bind
+  ok   (k floor) the two are not the same string, so the label really was folded and not merely renamed
+  ok   (a) the list shows 'Running_To_Slide_And_Back_To_Running' (row 0 of 2)
+  ok   (a floor) a name never loaded has no row
+  ok   (a) selecting it makes it the scene's sequence: 'Running_To_Slide_And_Back_To_Running'
+  ok   (a) 78 bone rows: 78
+  ok   (a floor) 17 tracks with no node, under the folded group: 17
+  ok   (a) 93 keys on every bone row: 0 rows off
+  ok   (a) the ruler runs at 60 fps: 60
+  ok   (a) the rate row says 60: '60 fps'
+  ok   (a) the workspace holds the clip's document
+  ok   (a) the readout says frame 46: 'frame 46 / 92 · 0.767 s'
+  ok   (a) the sheet's playhead is at 46: 46
+  ok   (b) LLeg_Thigh is track 3, row 4
+  ok   (b) selecting the row selected the bone in the viewport: block 10, scene index block 10
+  ok   (b) selecting COM's node in the window selects its row: row 2 (COM row 2)
+  ok   (b) the Insert key action is enabled with a bone row selected
+  ok   (b) the document's frame 46 reads back 30 deg about X within 0.01: 0 deg off
+  ok   (b floor) frame 46 differs from the original decode
+  ok   (b) every other bone and frame byte-identical 
+  ok   (b) the viewport node's local rotation at frame 46 is the keyed one: 0 deg off
+  ok   (b floor) at frame 0 the node is NOT the keyed pose: 164.109 deg off
+  ok   picture: the dock at frame 46, 1280x320 -> e:/Projects/NifskopeWildWastelandEdition/scratchpad/hkxedit2_20260910/dock_frame46.png
+  ok   picture: the viewport with the posed bone selected, 857x383
+  ok   (c) the key at 46 is gone: 92 keys on the track
+     (c) after the delete frame 46 is the 45/47 interpolation, 0.876925 deg from the original decode (pre-registered: not the pre-edit bytes)
+  ok   (h) the workspace's stack is in the shared undo group
+  ok   (c) Undo x2 -> the pre-edit decode exactly (first diff frame -1 track -1)
+  ok   (c) ... and 93 keys on the track again: 93
+  ok   (h) Redo x2 -> the deleted state again: 92 keys
+  ok   (h) one more Undo -> the inserted key is back
+  ok   (d) the Name row offers the graph vocabulary: 400 names, first 'FootLeft'
+  ok   (d) 'FootLeft' at frame 30 in the document (4 -> 5 annotations)
+  ok   (d) the marker row counts it: 5
+  ok   (h) Undo the annotation: 4
+  ok   (h) Redo the annotation: 5
+  ok   (k) the thigh row is on screen to be sampled: centre y 125, sheet 976x246
+  ok   (k) the sheet's active key is 20 of 2 selected: track 3 frame 20
+  (k) the whole 93 frames in view: active #ffbe33, other #ff8c00, plain #bfbfbf | in-range bg #4a7ab0, out-of-range bg #2b3f56 | ruler box #4772b3, line #4772b3 (playhead parked on frame 46)
+  ok   (k2) the whole 93 frames in view: the ACTIVE selected key is animKeySel #ffbe33, got #ffbe33
+  ok   (k7b) the whole 93 frames in view: the OTHER selected key is animKeySelOther #ff8c00, got #ff8c00
+  ok   (k2) the whole 93 frames in view: an unselected key is plain animKey #bfbfbf, got #bfbfbf
+  ok   (k2) the whole 93 frames in view: the three states are three DIFFERENT colours
+  ok   (k2) the whole 93 frames in view: the selected key stands off the selected row under it: 374 apart in R+G+B (>= 60)
+  ok   (k8) the whole 93 frames in view: the ruler carries a BLUE playhead box, animPlayhead #4772b3, got #4772b3
+  ok   (k8) the whole 93 frames in view: the playhead LINE below the ruler is the same blue: #4772b3
+  ok   (k8) the whole 93 frames in view: INSIDE the range 10..50 the row is untouched, #4a7ab0 == selBgActive #4a7ab0
+  ok   (k8) the whole 93 frames in view: OUTSIDE the range it is darkened: #2b3f56 vs #4a7ab0, 180 apart and darker
+  (k) zoomed to frames 15..45: active #ffbe33, other #ff8c00, plain #bfbfbf | in-range bg #4a7ab0, out-of-range bg #2b3f56 | ruler box #4772b3, line #4772b3 (playhead parked on frame 23)
+  ok   (k2) zoomed to frames 15..45: the ACTIVE selected key is animKeySel #ffbe33, got #ffbe33
+  ok   (k7b) zoomed to frames 15..45: the OTHER selected key is animKeySelOther #ff8c00, got #ff8c00
+  ok   (k2) zoomed to frames 15..45: an unselected key is plain animKey #bfbfbf, got #bfbfbf
+  ok   (k2) zoomed to frames 15..45: the three states are three DIFFERENT colours
+  ok   (k2) zoomed to frames 15..45: the selected key stands off the selected row under it: 374 apart in R+G+B (>= 60)
+  ok   (k8) zoomed to frames 15..45: the ruler carries a BLUE playhead box, animPlayhead #4772b3, got #4772b3
+  ok   (k8) zoomed to frames 15..45: the playhead LINE below the ruler is the same blue: #4772b3
+  ok   (k8) zoomed to frames 15..45: INSIDE the range 25..40 the row is untouched, #4a7ab0 == selBgActive #4a7ab0
+  ok   (k8) zoomed to frames 15..45: OUTSIDE the range it is darkened: #2b3f56 vs #4a7ab0, 180 apart and darker
+  (k floor) the colours as they were: selected key #4772b3 over current row #4a7ab0, 14 apart in R+G+B
+  ok   (k floor) the SAME contrast test calls the old pair indistinguishable: 14 < 60
+  ok   (k8 floor) range 0..92: frame 5 and frame 40 are the SAME colour #4a7ab0 / #4a7ab0 -- nothing darkened
+  ok   (k7b) two annotations to colour: index 4 at frame 30, index 5 at frame 60
+  ok   (k7b) frame 60's marker is the ACTIVE one of 2 selected: index 5 of 2
+  (k7b) annotation at 60 (active) #ffbe33, at 30 (also selected) #ff8c00
+  ok   (k7b) the active annotation is orange animKeySel #ffbe33, got #ffbe33
+  ok   (k7b) the other selected annotation is orange-red animKeySelOther #ff8c00, got #ff8c00
+  ok   (k7b) deselected, the same annotation is plain animKey #bfbfbf, got #bfbfbf
+  ok   (k7b) the extra annotation is undone: 5 annotations
+  ok   picture: the sheet's colours, 976x246 -> e:/Projects/NifskopeWildWastelandEdition/scratchpad/hkxedit2_20260910/sheet_colours.png
+  ok   (l) the clip starts with its whole length in range: 0..92 of 93 frames
+  ok   (l) and nothing is darkened while that holds: rangeIsPartial 0
+  (l) start grip +10: 8.10753 px per frame, 204 -> 285 px
+  ok   (l) after dragging the start grip +10 frames: document 10..92, sheet 10..92, boxes 10..92, 83 frames in range
+  ok   (l) after dragging the start grip +10 frames: the clip itself is untouched, still 93 frames
+  (l) end grip -10: 8.10753 px per frame, 958 -> 877 px
+  ok   (l) after dragging the end grip -10 frames: document 10..82, sheet 10..82, boxes 10..82, 73 frames in range
+  ok   (l) after dragging the end grip -10 frames: the clip itself is untouched, still 93 frames
+  ok   (l) after typing End = 70: document 10..70, sheet 10..70, boxes 10..70, 61 frames in range
+  ok   (l) after typing End = 70: the clip itself is untouched, still 93 frames
+  (l) the stack after the three gestures: 5 applied of 5 kept -- 0:Insert key at frame 46 | 1:Add annotation 'FootLeft' at frame 30 | 2:Play range 10..92 | 3:Play range 10..82 | 4:Play range 10..70
+  ok   picture: (9) the ruler with both grips, range 10..70, 976x246 -> e:/Projects/NifskopeWildWastelandEdition/scratchpad/hkxedit2_20260910/r9_range_grips.png
+  ok   (l) three gestures put three commands on the stack: 2 -> 5
+  (l) range 10..70, the row at frames 5 / 15 / 65 / 80: #2b3f56 #4a7ab0 #4a7ab0 #2b3f56
+  ok   (l) the darkened zone starts and ends at the grips: 5 and 80 darkened, 15 and 65 not
+  ok   (l) save with the range 10..70: direct packfile, canonical layout: 6 objects, 95 tracks x 61 frames = 278160 transform bytes, 283216 bytes on disk 
+  ok   (l) the .hkx holds the RANGE: 61 frames, 1 s (wanted 61 and 1)
+  ok   (l) its frame 0 is the clip's frame 10, bit for bit
+  ok   (l) and the open document still has every frame: 93
+  ok   (l) one Undo: document 10..82, sheet 10..82, boxes 10..82, 73 frames in range
+  ok   (l) one Undo: the clip itself is untouched, still 93 frames
+  ok   (l) three Undos: document 0..92, sheet 0..92, boxes 0..92, 93 frames in range
+  ok   (l) three Undos: the clip itself is untouched, still 93 frames
+  ok   (l floor) the SAME save with nothing out of range writes the whole clip: 93 frames
+  (m) right-click on a bone row at frame 12 offers: Add annotation at frame 12 | Insert key at frame 12 | Select all keys on this track | Rename track… | Remove track | Remove transform axes… | Isolate in the viewport | Put the playhead on frame 12 | Play range starts at frame 12 | Play range ends at frame 12
+  ok   (m) the bone row's menu names the CLICKED frame 12, not the playhead 75
+  (m) right-click on the ruler at frame 37 offers: Add annotation at frame 37 | Put the playhead on frame 37 | Play range starts at frame 37 | Play range ends at frame 37
+  ok   (m) the RULER now answers a right-click, at frame 37: 4 entries
+  ok   (m) and at frame 70 it says 70 (the floor for a playhead-built menu)
+  ok   (m) the fixture's 'FootLeft' annotation is at frame 30 (index 4)
+  (m) right-click on the 'FootLeft' marker offers: Rename annotation 'FootLeft'… | Remove annotation 'FootLeft' | Add annotation at frame 30 | Put the playhead on frame 30 | Play range starts at frame 30 | Play range ends at frame 30
+  ok   (m7a) the marker's menu has Rename and Remove by name
+  ok   (m) triggering 'Add annotation at frame 37' opens the inline editor on the marker row: visible 1, ghost at frame 37
+  ok   (m) and NOTHING is in the document yet: 5 annotations, 2 commands
+  ok   (m) the name is typed and committed with Return
+  ok   (m) 'SlideStart' is at frame 37 and it cost ONE command (2 -> 3)
+  ok   (m) the new annotation is the ACTIVE one (ruling 7b's orange lands on it): index 5
+  ok   (m) M opens the editor at the playhead: frame 50
+  ok   (m) Escape closes it
+  ok   (m) and Escape added NOTHING: 6 annotations, 3 commands
+  ok   (m) Ctrl+M opens the editor on the active annotation with its name in it: 'SlideStart'
+  ok   (m) renamed in place: 'SlideGo' at frame 37, 'SlideStart' gone (-1)
+  ok   (m7a) 'Remove annotation 'SlideGo'' took it back out: 5 annotations (started at 5)
+  (m7a) zoomed to 20..60, dragged the marker at frame 30 by 5 frames (18.85 px per frame)
+  ok   (m7a) the annotation moved exactly 5 frames: 30 -> 35
+  ok   (m7a) AND THE ZOOM STAYED: 20..60 (was 20..60)
+  ok   (m7a) the dragged annotation is still the selected one: index 4 of 1
+  ok   (m7a) and the clip is untouched otherwise: 93 frames, 5 annotations
+  ok   picture: (7a) the sheet still at 20..60 after the marker drag, 976x246 -> e:/Projects/NifskopeWildWastelandEdition/scratchpad/hkxedit2_20260910/r7a_zoom_after_drag.png
+  ok   picture: (7) and (7a) the two context menus: e:/Projects/NifskopeWildWastelandEdition/scratchpad/hkxedit2_20260910/r7_sheet_menu_frame37.png (218x107) | e:/Projects/NifskopeWildWastelandEdition/scratchpad/hkxedit2_20260910/r7a_annotation_menu.png (266x164)
+  ok   (m7a floor) frameAll() DOES change the window (-0.5..92.5), so the check above can catch a reset
+  ok   (m) undone back to where the gate started: 2 commands, 5 annotations, 'FootLeft' at frame 30
+  ok   (g) save as e:/Projects/NifskopeWildWastelandEdition/scratchpad/hkxedit2_20260910/inapp_edited.hkx: direct packfile, canonical layout: 6 objects, 95 tracks x 93 frames = 424080 transform bytes, 429728 bytes on disk 
+  ok   (g) our reader reads it: 
+  ok   (g) decoded == the edited document bit for bit (first diff frame -1 track -1)
+  ok   (d) reloaded: 'FootLeft' present at frame 30
+  ok   (d) the saved file loads through the loader as an entry
+  ok   (e) trim 10..50 -> 41 frames: 41
+  ok   (e) frame 0 equals old frame 10 exactly
+  ok   (e) the scene's range followed: end 0.666667 s
+  ok   (e) the sheet has 41 frames: 41
+  ok   (h) Undo the trim -> 93 frames: 93
+  ok   (e) retime 60->30 -> 47 frames: 47, ruler 30 fps
+  ok   (e) coincident frames bit-identical: 0 differ
+  ok   (h) Undo the retime -> 93 frames at 60: 93 / 60
+  ok   (f) the root-motion row defaults to COM: 'COM'
+  ok   (f floor) COM travels ~487 before: 487.643
+  ok   (f) after bake COM travel 0: 0; motion 487.643
+  ok   (f) Unbake is the enabled action now
+  ok   (f) unbake reverses byte-identically (first diff frame -1 track -1)
+  ok   (f) ... and the extracted motion byte-identically
+  ok   (n floor) COM has 93 keys and moves in all three before the strip: 93 keys, X 16.12, Y 487.64, Z 49.38
+  ok   (n) the COM row is the selected track: row 2, track 1 (COM 1)
+  ok   (n) the right-click menu carries 'Remove transform axes...' directly under 'Remove track' (4 then 5 of 10 entries)
+  ok   (n) the dialog opened with six axis boxes and the line naming the rotation convention
+  ok   picture: (3) the Remove transform axes dialog with translation X and Y ticked: e:/Projects/NifskopeWildWastelandEdition/scratchpad/hkxedit2_20260910/r3_axis_dialog.png (255x145)
+  ok   (n) COM's X and Y are one number over all 93 keys (spans 0.000000 and 0.000000), and it is frame 0's (0.286699, -0.665384)
+  ok   (n) COM still moves downward: Z span 49.38 (was 49.38)
+  ok   (n) Z is byte-identical on every key (first differing key -1)
+  ok   (n) the rotations were not touched at all, byte for byte (first differing key -1)
+  ok   (n) the summary line says what was held: 'Held translation X, translation Y at their frame-0 value on track 1 (COM): 92 of 93 keys changed, by up to 487.643 units and 0.00 deg.  Running_To_Slide_And_Back_To_Running: 95 tracks, 93 frames at 60 fps (1.53333 s), 8835 keys, 5 annotation(s).  Play range 10..50 (41 frames); a save writes the range.'
+  ok   (n) it is one undo step: 6 commands, was 5
+  ok   (n) the dense frames agree with the keys the strip left (track -1 frame -1)
+  (n) the whole clip put back in range before the save: 0..92, still partial=no (Play range 0..92: 93 frames, 1.53333 s of the clip's 1.53333 s.)
+  ok   (n) save the stripped clip as e:/Projects/NifskopeWildWastelandEdition/scratchpad/hkxedit2_20260910/inapp_axisstrip.hkx: direct packfile, canonical layout: 6 objects, 95 tracks x 93 frames = 424080 transform bytes, 429728 bytes on disk 
+  ok   (n) it reads back bit for bit (first diff frame -1 track -1): 
+  ok   (n) Undo restores the clip byte for byte (first diff frame -1 track -1)
+  ok   (p) the dock has a header with a menu bar, and the bottom action bar is gone
+  (p) fixed chrome now 74 px (header 25 + transport 29 + note 20); the bar that went was 31 px of buttons; 0 QPushButton(s) left in the dock
+  ok   (p) the header is slimmer than the button row it replaced: 25 px vs 31 px
+  ok   (p) no push buttons are left in the dock: 0
+  ok   picture: (6) the Clip menu open on the header menu bar: e:/Projects/NifskopeWildWastelandEdition/scratchpad/hkxedit2_20260910/r6_menu_clip.png (120x164)
+  (p) menus: Clip / Key / Channel / Marker / View; 19 entries in them
+  ok   (p) all 16 former buttons are in a menu by text (missing: none)
+  ok   (p floor) a text that never was a button is NOT found by the same search
+  ok   (p) Save and Save as are under Clip, not at the bottom
+  ok   (p) the five sections exist in the right-side panel
+  ok   (p) a bone row selected shows Clip and Track only: Clip+Track
+  ok   (p) the Track section's Bone field reads the selected track: 'COM'
+  ok   picture: (6a) the side panel with a bone row selected (Clip+Track), 240x246 -> e:/Projects/NifskopeWildWastelandEdition/scratchpad/hkxedit2_20260910/r6a_panel_track.png
+  ok   (p) keys selected show Clip and Key only: Clip+Key
+  ok   picture: (6a) the side panel with an annotation selected (Clip+Annotation), 240x246 -> e:/Projects/NifskopeWildWastelandEdition/scratchpad/hkxedit2_20260910/r6a_panel_annotation.png
+  ok   (p) an annotation selected shows Clip and Annotation only: Clip+Annotation
+  ok   (p) Add float track asked for the name in a modal dialog
+  ok   (p) a float row selected shows Clip and Float track only: Clip+Float track
+  ok   (p) the panel closes and reopens at the width it was dragged to: 240 px -> closed yes -> 240 px
+  ok   (p) the N key is on the sheet: key 'N'
+  ok   (p) N toggles the panel: open 1 -> 0
+  (q) icon sizes: ToStart=16 PrevKey=16 PlayBack=16 Play=16 Stop=16 NextKey=16 ToEnd=16 AutoKey=16 Pose=16 Loop=16 (one size = 16 px)
+  ok   (q) every transport button carries a drawn icon (0 without one)
+  ok   (q) no transport button is a text glyph any more (0 still are)
+  ok   (q) all the icons are ONE size, 16 px (0 the odd one out)
+  ok   (q) every tooltip is the sentence it should be, with its shortcut in it (0 wrong:)
+  (q) the gizmo toggles' ink: Pose off=#e6e8eb on=#f0a549 moved=239 fromAccent=1 AutoKey off=#e5e8eb on=#efa44a moved=239 fromAccent=2 (accent #f0a54a)
+  ok   (q) both gizmo toggles are drawings with no text (0 are not)
+  ok   (q) both are the PLAY button's icon size, 16 px (0 the odd one out)
+  ok   (q) both LIGHT UP when the mode is on (0 did not move)
+  ok   (q) and the lit ink is the palette's accent, not some other colour (0 off it)
+  (q) Loop, whose icon the render toolbar owns: off=#e6e8eb on=#e6e8eb moved=0 checked=1 (not a gate -- a lit Loop would mean changing the render toolbar's own glyph)
+  ok   (q floor) the same arithmetic calls Stop, which has no lit state, unchanged: moved 0
+  ok   (q floor) a sentence no button carries is NOT matched by the same comparison
+  (q) transport keys: PlayKey='Space' PlayBackKey='Ctrl+Shift+Space' ToStartKey='Shift+Left' ToEndKey='Shift+Right' NextKeyKey='Up' PrevKeyKey='Down'
+  ok   (q) the six keys the tooltips name are on the sheet (0 wrong)
+  ok   (q) Shift+Right then Shift+Left walk the playhead to the ends: 92 -> 10
+  ok   (q) the speed reads as one says it, '1.50x'
+  (q) the Animations header: column 300 px, its minimum 227 px
+  ok   (q) nothing in the 'Load... / root' header row is clipped (0 clipped)
+  ok   (q) the column cannot be squeezed under what its header needs: minimum 227 px
+  (q floor) the splitter was handed 40 px for the column; it settled at 219 px (its layout's minimum is 219)
+  ok   (q floor) with one button squeezed to 8 px the SAME test calls the header clipped (1 clipped: LoadAnim(8<58))
+  ok   (q) and at its real width nothing is clipped again (0)
+  ok   picture: (q) the transport bar 1280x29 at 1:1 -> e:/Projects/NifskopeWildWastelandEdition/scratchpad/hkxedit2_20260910/transport_1x.png, and at 2:1 -> e:/Projects/NifskopeWildWastelandEdition/scratchpad/hkxedit2_20260910/transport_2x.png
+  ok   picture: (q) the two toggles off -> e:/Projects/NifskopeWildWastelandEdition/scratchpad/hkxedit2_20260910/transport_2x_off.png and on -> e:/Projects/NifskopeWildWastelandEdition/scratchpad/hkxedit2_20260910/transport_2x_on.png, and both switches put back (1, 1)
+  ok   (o) the list can be worked in: extended selection 3, internal move 4, drop line 1, own menu 3
+  ok   (o) the keys are the ones he asked for: Del Del, X X, copy Ctrl+C, paste Ctrl+V, cut Ctrl+X, duplicate Shift+D, rename F2, all Ctrl+A, up Ctrl+Up, down Ctrl+Down
+  ok   (o) Shift+D twice makes three clips, each copy right under its source: Running_To_Slide_And_Back_To_Running | Running_To_Slide_And_Back_To_Running (3) | Running_To_Slide_And_Back_To_Running (2) | skeleton
+  ok   (o) a copy is a whole clip, not a reference: Running_To_Slide_And_Back_To_Running (3) has 93 frames
+  ok   (o) the scene's own animations list carries the same three, in the same order: Running_To_Slide_And_Back_To_Running | Running_To_Slide_And_Back_To_Running (3) | Running_To_Slide_And_Back_To_Running (2) (the rows with a clip behind them: Running_To_Slide_And_Back_To_Running | Running_To_Slide_And_Back_To_Running (3) | Running_To_Slide_And_Back_To_Running (2))
+  ok   (o) Ctrl+A selects every row: 4 of 4 (one pump later 4, once the list rebuilds 4)
+  (o) Ctrl+A with the list's signals blocked: 4 of 4 selected, current row 1, selection mode 3
+  ok   (o) Ctrl+Down moves it one row down: Running_To_Slide_And_Back_To_Running (3) | Running_To_Slide_And_Back_To_Running | Running_To_Slide_And_Back_To_Running (2) | skeleton
+  ok   (o) Ctrl+Up puts it back: Running_To_Slide_And_Back_To_Running | Running_To_Slide_And_Back_To_Running (3) | Running_To_Slide_And_Back_To_Running (2) | skeleton
+  ok   (o) the scene's list followed the move as well: Running_To_Slide_And_Back_To_Running | Running_To_Slide_And_Back_To_Running (3) | Running_To_Slide_And_Back_To_Running (2) (the rows with a clip behind them: Running_To_Slide_And_Back_To_Running | Running_To_Slide_And_Back_To_Running (3) | Running_To_Slide_And_Back_To_Running (2))
+  ok   (o) Ctrl+C then Ctrl+V adds one, right after the selected row: Running_To_Slide_And_Back_To_Running | Running_To_Slide_And_Back_To_Running (4) | Running_To_Slide_And_Back_To_Running (3) | Running_To_Slide_And_Back_To_Running (2) | skeleton
+  ok   (o) Ctrl+X removes the row: Running_To_Slide_And_Back_To_Running | Running_To_Slide_And_Back_To_Running (3) | Running_To_Slide_And_Back_To_Running (2) | skeleton
+  ok   (o) ...and Ctrl+V puts what was cut back: Running_To_Slide_And_Back_To_Running | Running_To_Slide_And_Back_To_Running (4) | Running_To_Slide_And_Back_To_Running (3) | Running_To_Slide_And_Back_To_Running (2) | skeleton
+  ok   (o) Del removes the selected row and nothing else: Running_To_Slide_And_Back_To_Running | Running_To_Slide_And_Back_To_Running (3) | Running_To_Slide_And_Back_To_Running (2) | skeleton
+  ok   (o) F2 opens an editor on the row, holding its name: 'Running_To_Slide_And_Back_To_Running (2)'
+  ok   (o) the row, the clip and the scene all carry the new name: Running_To_Slide_And_Back_To_Running | Running_To_Slide_And_Back_To_Running (3) | SlideTest | skeleton
+  ok   (o) the renamed row still opens its clip: 93 frames (was 93)
+  ok   (o) a double-click opens the same rename editor: 'SlideTest'
+  ok   (o) Escape leaves the name alone: Running_To_Slide_And_Back_To_Running | Running_To_Slide_And_Back_To_Running (3) | SlideTest | skeleton
+  ok   (o) the right-click menu offers every action by name (9 entries; missing: none)
+  ok   (o) a picture of the menu was taken: e:/Projects/NifskopeWildWastelandEdition/scratchpad/hkxedit2_20260910/animws_list_menu.png
+  ok   (o) 'Move down' chosen in the menu moves the row: Running_To_Slide_And_Back_To_Running | Running_To_Slide_And_Back_To_Running (3) | SlideTest | skeleton -> Running_To_Slide_And_Back_To_Running (3) | Running_To_Slide_And_Back_To_Running | SlideTest | skeleton
+  ok   (o floor) the rows are draggable and the view is in internal-move mode: flags 53
+  (o) the drop, step 1 -- the rows after the fake move: Running_To_Slide_And_Back_To_Running (3) | SlideTest | Running_To_Slide_And_Back_To_Running | skeleton  |  playback: Running_To_Slide_And_Back_To_Running | Running_To_Slide_And_Back_To_Running (3) | SlideTest
+  (o) the drop, step 2 -- straight after the Drop event (the gate's own filter saw 0 Drop event(s), and the event was ignored): Running_To_Slide_And_Back_To_Running (3) | SlideTest | Running_To_Slide_And_Back_To_Running | skeleton  |  playback: Running_To_Slide_And_Back_To_Running | Running_To_Slide_And_Back_To_Running (3) | SlideTest
+  (o) the drop, step 3 -- after one pump (the queued commit runs here): Running_To_Slide_And_Back_To_Running (3) | SlideTest | Running_To_Slide_And_Back_To_Running | skeleton  |  playback: Running_To_Slide_And_Back_To_Running | Running_To_Slide_And_Back_To_Running (3) | SlideTest
+  (o) the drop, step 4 -- after the list rebuilds: Running_To_Slide_And_Back_To_Running | Running_To_Slide_And_Back_To_Running (3) | SlideTest | skeleton  |  playback: Running_To_Slide_And_Back_To_Running | Running_To_Slide_And_Back_To_Running (3) | SlideTest
+  (o) the Drop event itself cannot be delivered from inside the application (the gate's own filter saw 0); the half below is the dock's own, driven through the slot that filter queues
+  ok   (o) a row moved and the drop's own commit run: the clips themselves are in the new order: Running_To_Slide_And_Back_To_Running | Running_To_Slide_And_Back_To_Running (3) | SlideTest | skeleton -> Running_To_Slide_And_Back_To_Running (3) | SlideTest | Running_To_Slide_And_Back_To_Running | skeleton (the rows with a clip behind them: Running_To_Slide_And_Back_To_Running (3) | SlideTest | Running_To_Slide_And_Back_To_Running; the dock says '93 frames @ 60 fps')
+  ok   (o) ...and the scene's own list with it: Running_To_Slide_And_Back_To_Running (3) | SlideTest | Running_To_Slide_And_Back_To_Running (the rows with a clip behind them: Running_To_Slide_And_Back_To_Running (3) | SlideTest | Running_To_Slide_And_Back_To_Running)
+  ok   (o) the list is back to what it was: Running_To_Slide_And_Back_To_Running | skeleton
+  SKIP (i) E:/Tools/Fallout 4/DataUnpacked/Data/Meshes/Weapons/10mmPistol/10mmPistol.nif has no NiControllerSequence to test with
+  ok   picture: the finished dock at 1:1, 1280x320 -> e:/Projects/NifskopeWildWastelandEdition/scratchpad/hkxedit2_20260910/dock_overview.png
+  ok   (j) number fields carry the scrub stamp: 0 unstamped of 11 (>= 6)
+  ok   (j floor) one un-stamped field IS seen: 1 unstamped of 12
+  (j) 11 number field(s): 11 are scrub fields with no Qt stepper to clip, 0 clipped
+  ok   (j) no number field has a stepper clipped to a sliver (0 clipped of 11)
+  (j floor) a bare 26x9 spin box's up-arrow reads 14x4 at 14,0 inside 26x9
+  ok   (j floor) the SAME test calls a squeezed bare spin box clipped
+  ok   (j) no QGroupBox: 0
+  ok   (j) selectors matched to the fields: 0 unstyled of 3 (>= 3)
+  ok   (j) every button tipped: 0 untipped of 14 of ours (Qt's own qt_* buttons are not ours to tip) ()
+  ok   (j floor) blanking one tip is seen: 1
+  ok   (j) the note and the header menu bar are pinned outside the splitter
+  ok   (j) the settings live in a scroll area
+  ok   (j) the wheel over the unfocused Speed field leaves it: 1 -> 1
+     (the focused half cannot fire in an inactive harness window: hasFocus 0, window active 1)
+  ok   (j) the summary line is not empty and not a refusal
+224 checks, 0 failures, 1 skips
+PASS
+done
+--- skips (a SKIP is never a pass) ---
+  SKIP (i) E:/Tools/Fallout 4/DataUnpacked/Data/Meshes/Weapons/10mmPistol/10mmPistol.nif has no NiControllerSequence to test with
+-rw-r--r-- 1 bungo bungo 30139 Sep 12 07:51 /e/Projects/NifskopeWildWastelandEdition/scratchpad/hkxedit2_20260910/dock_frame46.png
+-rw-r--r-- 1 bungo bungo 18132 Sep 12 07:51 /e/Projects/NifskopeWildWastelandEdition/scratchpad/hkxedit2_20260910/sheet_colours.png
+-rw-r--r-- 1 bungo bungo 37878 Sep 12 07:51 /e/Projects/NifskopeWildWastelandEdition/scratchpad/hkxedit2_20260910/viewport_gizmo.png

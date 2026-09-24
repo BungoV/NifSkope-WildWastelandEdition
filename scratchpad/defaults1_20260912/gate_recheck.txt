@@ -1,0 +1,84 @@
+== lodgen_defaults: the two exes ==
+       -rwxr-xr-x 1 bungo 197609 22275072 2026-09-12_19:45:31 /e/Projects/NifskopeWildWastelandEdition/release/NifSkope.before_defaults1.exe
+       -rwxr-xr-x 1 bungo 197609 22280192 2026-09-12_21:52:25 /e/Projects/NifskopeWildWastelandEdition/release/NifSkope.exe
+== (a) the new exe's DEFAULT bake == the rung's bake with the switches spelled ==
+       a_new: rc=0, 1 s, 7 files
+       a_rung: rc=0, 2 s, 6 files
+       b2e95158238c1c95809d2e17ef294410b9639b96  E:/Projects/NifskopeWildWastelandEdition/scratchpad/defaults1_20260912/gate_recheck/a_rung  6 files  1597775 bytes
+       0a0f652a6a70ebd1161254bdf305f6c8c7f7e4d0  E:/Projects/NifskopeWildWastelandEdition/scratchpad/defaults1_20260912/gate_recheck/a_new  7 files  1650958 bytes
+         only in E:/Projects/NifskopeWildWastelandEdition/scratchpad/defaults1_20260912/gate_recheck/a_new: Commonwealth.4.-20.24.BTO.manifest.txt
+         differs: Commonwealth.lodb (634 vs 716 bytes)
+       DIFFERENT: 2 files
+       the only differences are the excused ones (manifest|[.]lodb)
+  ok   (a) default bake == rung with the switches spelled, sidecar and ledger excused
+       ledger: 5 files each side, 0 listed only on one side, 0 with a different hash
+       ledger: input hashes equal: True; switch hashes equal: False (they must NOT be)
+       ledger: the sidecar is listed as an output of the new bake: Commonwealth.4.-20.24.BTO.manifest.txt
+  ok   (a) the ledger agrees: same files, same hashes, only the switch hash and the sidecar move
+       the new default bake's sidecar: Commonwealth.4.-20.24.BTO.manifest.txt, 678 object rows
+  ok   (a) the manifest sidecar is written with identity OFF (floor 50 rows)
+  ok   (a) refuter: the rung with --no-identity wrote NO manifest (that is what changed)
+== (a2) a road-bearing region, where the verge default is visible ==
+       a2_new: rc=0, 2 s, 7 files
+       a2_rung: rc=0, 2 s, 6 files
+       c777f106c4181ac01342fd44e9df60c884e9f2fe  E:/Projects/NifskopeWildWastelandEdition/scratchpad/defaults1_20260912/gate_recheck/a2_rung  6 files  1456015 bytes
+       17dc44455638ad696e25639a4cbe245528d4a013  E:/Projects/NifskopeWildWastelandEdition/scratchpad/defaults1_20260912/gate_recheck/a2_new  7 files  1485598 bytes
+         only in E:/Projects/NifskopeWildWastelandEdition/scratchpad/defaults1_20260912/gate_recheck/a2_new: Commonwealth.4.-20.20.BTO.manifest.txt
+         differs: Commonwealth.lodb (634 vs 716 bytes)
+       DIFFERENT: 2 files
+       the only differences are the excused ones (manifest|[.]lodb)
+  ok   (a2) roads: default bake == rung with the switches spelled
+       ledger: 5 files each side, 0 listed only on one side, 0 with a different hash
+       ledger: input hashes equal: True; switch hashes equal: False (they must NOT be)
+       ledger: the sidecar is listed as an output of the new bake: Commonwealth.4.-20.20.BTO.manifest.txt
+  ok   (a2) roads: the ledger agrees, file for file and hash for hash
+       a2_old: rc=0, 2 s, 6 files
+  ok   (a2) refuter: the rung at road-ground-paint 1 bakes DIFFERENT bytes
+== (b) the new exe with the OLD switches spelled == the rung's DEFAULT bake ==
+       b_new: rc=0, 2 s, 7 files
+       b_rung: rc=0, 2 s, 7 files
+       c71523ac48e81da3f9a88917240bc1beb33022ac  E:/Projects/NifskopeWildWastelandEdition/scratchpad/defaults1_20260912/gate_recheck/b_rung  7 files  2080030 bytes
+       5433fc4ccd36a60cd06b2ac7ab527cb1800c793c  E:/Projects/NifskopeWildWastelandEdition/scratchpad/defaults1_20260912/gate_recheck/b_new  7 files  2080030 bytes
+         differs: Commonwealth.lodb (716 vs 716 bytes)
+       DIFFERENT: 1 files
+       the only differences are the excused ones ([.]lodb)
+  ok   (b) the way back is byte-exact, only the switch-list ledger excused
+       ledger: 5 files each side, 0 listed only on one side, 0 with a different hash
+       ledger: input hashes equal: True; switch hashes equal: False (they must NOT be)
+  ok   (b) the ledger agrees: same files, same hashes, on the way back
+== (c) .BTR and .BTO descriptors at dim 4, 8, 16, 32 ==
+       c_new_4: rc=0, 2 s, 7 files
+       dim 4: BTR desc 52776558133763 (vanilla 52776558133763)
+  ok   (c) dim 4 .BTR is vanilla's land descriptor
+       dim 4: BTO desc 474989027590661 (plain 474989027590661)
+  ok   (c) dim 4 .BTO has no colour and no UV 2
+       c_new_8: rc=0, 1 s, 7 files
+       dim 8: BTR desc 52776558133763 (vanilla 52776558133763)
+  ok   (c) dim 8 .BTR is vanilla's land descriptor
+       dim 8: BTO desc 474989027590661 (plain 474989027590661)
+  ok   (c) dim 8 .BTO has no colour and no UV 2
+       c_new_16: rc=0, 2 s, 5 files
+       dim 16: BTR desc 52776558133763 (vanilla 52776558133763)
+  ok   (c) dim 16 .BTR is vanilla's land descriptor
+       c_rung_16: rc=0, 2 s, 5 files
+       dim 16: no .BTO from the new exe; the rung wrote none
+  ok   (c) dim 16 writes no .BTO on EITHER exe (nothing was lost)
+       c_new_32: rc=0, 6 s, 7 files
+       dim 32: BTR desc 52776558133763 (vanilla 52776558133763)
+  ok   (c) dim 32 .BTR is vanilla's land descriptor
+       dim 32: BTO desc 474989027590661 (plain 474989027590661)
+  ok   (c) dim 32 .BTO has no colour and no UV 2
+       c_rung_4: rc=0, 2 s, 7 files
+       refuter, rung default dim 4: BTR desc 686095322853893 | BTO desc 5612388490686984
+  ok   (c) refuter: the rung's .BTR carries the WIDE terrain-identity descriptor
+  ok   (c) refuter: the rung's .BTO carries the identity descriptor (colour + UV 2)
+== (e) the native .lodo / .lodi / .lodt / .lodl with identity OFF ==
+       e_new: rc=0, 2 native files
+       e_rung: rc=0, 2 native files
+       native files: 2 identical, 0 differ, 0 only on the new side
+  ok   (e) the native data is byte-identical with identity off (2 files)
+  ok   (e) --native-verify is clean on the identity-off pair
+       the rung asked for --no-identity: 1 of the native files differ from the new default
+  ok   (e) refuter: on the OLD code the flag DID thin the native data (1 files)
+22 checks, 0 failures
+RESULT PASS

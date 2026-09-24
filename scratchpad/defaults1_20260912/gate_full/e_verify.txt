@@ -1,0 +1,111 @@
+lodo magic LODO
+lodo version 3
+lodo flags 0xd
+lodo headerCrc32 0x2f627617
+lodo pluginCorpusHash 0xd8337d022f637f22
+lodo objectCorpusHash 0x6324ed6a35cde4ea
+lodo modelCorpusHash 0x0e0a4958838f7fc9
+lodo cardCorpusHash 0x0000000000000000
+lodo loadOrderHash 0xa056a596e2bb16e7
+lodo lodoIdentity 0xd86a822e4c63968e
+lodo worldspace Commonwealth
+lodo bases 2970
+lodo meshes 2982
+lodo clusters 20678
+lodo materials 136
+lodo vertices 419204
+lodo maxClustersPerMesh 287
+lodo clusterMaxTris 16
+lodo vertexStride 16
+lodo stringBytes 351204
+lodo offBases 4096
+lodo offMeshes 102400
+lodo offClusters 270336
+lodo offMaterials 1597440
+lodo offLocalIndices 1601536
+lodo offVertices 2596864
+lodo offStrings 9306112
+lodo offClusterLods 602112
+lodo clusterLodStride 48
+lodo levelMax 7
+lodo ladderGroup 4
+lodo indexCrc32 0xcb828dee
+lodo fileBytes 9657316
+lodo triangles 252268
+lodo indexPadding 1.311
+lodo level0Triangles 142138
+lodo coneOpenClusters 14604
+lodo rootClusters 4715
+lodo meanGeometricError 175.7450
+lodo maxGeometricError 6965.2764
+lodo level 0 clusters 10634 triangles 142138
+lodo level 1 clusters 5676 triangles 68448
+lodo level 2 clusters 2781 triangles 29699
+lodo level 3 clusters 1029 triangles 8750
+lodo level 4 clusters 414 triangles 2503
+lodo level 5 clusters 123 triangles 626
+lodo level 6 clusters 19 triangles 98
+lodo level 7 clusters 2 triangles 6
+lodi magic LODI
+lodi version 3
+lodi flags 0x3
+lodi headerCrc32 0x5aa13a88
+lodi pluginCorpusHash 0xd8337d022f637f22
+lodi objectCorpusHash 0x6324ed6a35cde4ea
+lodi lodoIdentity 0xd86a822e4c63968e
+lodi loadOrderHash 0xa056a596e2bb16e7
+lodi worldspace Commonwealth
+lodi chunkWest -5
+lodi chunkSouth 6
+lodi chunkEast -4
+lodi chunkNorth 7
+lodi chunkCells 4
+lodi instanceStride 24
+lodi chunkCount 4
+lodi instanceCount 678
+lodi presentChunks 3
+lodi maxInstancesPerChunk 676
+lodi indexCrc32 0x68b118ec
+lodi offChunks 4096
+lodi offCellRanges 8192
+lodi offInstances 12288
+lodi offCold 28672
+lodi offOccluders 36864
+lodi offOccluderRanges 36864
+lodi occluderCount 0
+lodi occluderStride 40
+lodi maxOccludersPerCell 4
+lodi offAggregates 0
+lodi offCovered 0
+lodi aggregateCount 0
+lodi coveredCount 0
+lodi aggregateStride 0
+lodi aggregateViews 0
+lodi aggSwitchPx 0.000
+lodi aggBandRatio 0.000
+lodi fileBytes 37248
+lodi scolParts 471
+lodi mirrored 323
+lodi distinctDrawKeys 29
+lodi maxDrawKey 2377
+lodi distinctIdentities 678
+lodi cellsPopulated 18
+lodi cellsWithOccluder 0
+lodi occludersPerPopulatedCell 0.000
+lodi meanOccluderVolume 0.0
+lodi aggregates 0
+lodi aggregateCovered 0
+lodi aggregateCoveredMin 0
+lodi aggregateCoveredMax 0
+lodi aggregateCoveredMean 0.00
+lodi aggregateMeanHalfW 0.0
+pair identity ok
+instancesWithGeometry 678
+instancesWithNeitherGeometryNorCard 0
+distinctStockIdentities 678
+drawKeyRanksChecked 678
+ladderMeshes 1900 of 2982
+ladderRootTriangles 142138
+ladderLevel0Triangles 142138
+occluderBoxes 0
+occluderCells 0

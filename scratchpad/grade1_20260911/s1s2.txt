@@ -1,0 +1,261 @@
+## 1. The curve
+
+### 1.0 Gate G1 -- the known-answer controls, green before any verdict
+
+`g0_controls.py`, log `logs/g0_controls.txt`, **24 checks, 0 failures**, both
+tiles.
+
+| control | (-20,24) | (-20,20) |
+|---|---|---|
+| C0 shapes | 512x512x3 both sides | same |
+| C1a identity beats all six flips/rotations (MAE) | 16.205, next best flipud 16.232 | 18.215, next 20.649 |
+| C1b cross-correlation peak within one texel of (0,0) | peak (0,0), **r = 0.0335** | peak (0,0), r = 0.3140 |
+| C4 BC1 codec floor (our own sheet re-encoded) | RMS 0.497, MAE 0.176 | RMS 0.527, MAE 0.197 |
+| C2 synthetic gamma 1.250 / 0.800 / 1.350 recovered | 1.250000 / 0.800000 / 1.350000, a = 1.000000, 0 dropped | same to six decimals |
+| C3 synthetic gain 0.820 / 1.200 / 0.950 recovered | exact to six decimals, affine agrees (c = 0.000) | same |
+| C5a a gamma fed to the GAIN fitter must not be absorbed | gain residual RMS 3.591 vs gamma 0.0000, floor 0.497 | 4.205 vs 0.0000, floor 0.527 |
+| C5b a pure gain fed to the GAMMA fitter returns g = 1 | g = 1.000000, a = 0.820000 | same |
+
+The gate asked for three decimals; the fitters return six. Two numbers in that
+table are reported as caveats and not as passes:
+
+* **C1a's margin on (-20,24) is 0.027 MAE** (16.205 against 16.232). The
+  registration is right -- the two sheets are the same chunk on the same grid by
+  construction, and the cross-correlation peak is at (0,0) -- but on that tile
+  the test barely discriminates, because
+* **C1b's peak correlation is r = 0.0335.** Our sheet and vanilla's agree on
+  almost nothing texel to texel on (-20,24). On (-20,20) it is r = 0.3140.
+  That single number turns out to be the whole finding, and 1.3 makes it
+  quantitative.
+
+### 1.1 The three models, ground texels only
+
+Road texels are excluded (mask = the shipped default bake differenced against a
+`--no-roads` bake of the same command line; see section 7 -- the first road mask
+was wrong). Cover>0 texels would be excluded too, but **there are none**: the
+ground-cover plane is empty on every tile in this lane's census (1.6).
+
+`g1_curve.py`, log `logs/g1_curve.txt`. Residuals in 8-bit levels on luminance,
+beside each sheet's own BC1 codec floor.
+
+**(-20,24)** -- ours mean 87.606, vanilla mean 80.819, n = 262,144 (no roads on
+this tile at all)
+
+| model | parameters | RMS | MAE | bias |
+|---|---|---|---|---|
+| identity (do nothing) | -- | 19.937 | 16.205 | +6.787 |
+| constant gain | k = 0.8916 | 17.439 | 13.755 | -2.709 |
+| affine | k = 0.0193, c = 79.131 | 9.472 | 7.371 | 0.000 |
+| gamma | a = 0.3281, g = 0.0379 | 9.483 | 7.332 | -0.532 |
+| sRGB slip, ours read linear -> written sRGB | fixed | 78.511 | 76.720 | +76.718 |
+| sRGB slip, ours read sRGB -> written linear | fixed | 56.635 | 55.085 | -55.085 |
+| *BC1 codec floor* | -- | *0.497* | *0.176* | -- |
+
+**(-20,20)** -- ours mean 68.767, vanilla mean 83.464, n = 236,955 ground texels
+(25,189 road texels, 9.61 %, excluded)
+
+| model | parameters | RMS | MAE | bias |
+|---|---|---|---|---|
+| identity | -- | 22.652 | 18.533 | -14.697 |
+| constant gain | k = 1.1612 | 19.587 | 15.783 | -3.612 |
+| affine | k = 0.1848, c = 70.756 | 11.317 | 9.025 | 0.000 |
+| gamma | a = 0.3995, g = 0.1565 | 11.361 | 9.042 | -0.763 |
+| sRGB slip (linear -> sRGB) | fixed | 59.645 | 57.372 | +57.364 |
+| sRGB slip (sRGB -> linear) | fixed | 68.545 | 67.436 | -67.436 |
+| *BC1 codec floor* | -- | *0.527* | *0.197* | -- |
+
+Per channel the shape is the same; R/G/B gains are 0.8697 / 0.8972 / 0.9048 on
+(-20,24) and 1.1233 / 1.1716 / 1.1786 on (-20,20).
+
+Three things are already settled by that pair of tables.
+
+1. **Both sRGB slips are refuted by two orders of magnitude.** 56 to 78 levels
+   of error against an identity of 20 to 23. Not a near miss to be tuned: the
+   colour path has no conversion in it to slip (contract 2.5, and
+   `src/lodgen.cpp` 7952-7975 / 9258-9270 -- bytes in, bytes out), and the
+   measurement agrees with the code.
+2. **The gain's sign flips between the two tiles.** (-20,24) wants k = 0.892 (we
+   are too BRIGHT), (-20,20) wants k = 1.161 (we are too DARK).
+3. **The affine and gamma "wins" are degenerate and must not be quoted as
+   models.** The affine slope is 0.019 and 0.185; the gamma exponent 0.038 and
+   0.157. Both collapsed onto "predict vanilla's mean, ignore ours" -- their RMS
+   of 9.5 / 11.3 is vanilla's own standard deviation on those texels (9.478 and
+   11.899). A model that ignores its input is not a transfer curve, and the
+   reason it wins is C1b: there is almost nothing to transfer.
+
+### 1.2 Saturation, the discriminator meant to separate gain from gamma
+
+Measured on the same texels (HSV S):
+
+| tile | ours | vanilla | a gain predicts | the fitted gamma predicts |
+|---|---|---|---|---|
+| (-20,24) | 0.2453 | 0.2215 | 0.2453 (unchanged, exactly) | 0.0107 |
+| (-20,20) | 0.2763 | 0.2206 | 0.2763 (unchanged, exactly) | 0.0498 |
+
+Ours is more saturated than vanilla on both tiles and on all 25 of the census,
+by a ratio of about 1.11. A scalar gain leaves S untouched, so it explains none
+of it; the fitted gamma would destroy it, overshooting by a factor of twenty.
+Neither model is the mechanism. 1.5 asks whether a chroma pull on its own is
+worth shipping; the answer is no, by number.
+
+### 1.3 The position-dependent term, and a mistake in how it was first read
+
+The brief asks for the best global model's residual mapped and correlated. The
+best global model BY RMS is the affine one -- and its residual is, by
+construction, `constant - vanilla`, because its slope is ~0. Correlating that
+against height or slope measures **vanilla's** structure, not ours. The first
+run of `g1_curve.py` reported exactly that; section 7 records it as a mistake
+caught by its own control -- the `ours lum` row read r = -0.0000, which is the
+tell.
+
+The honest version correlates the residual of the constant-gain model, and the
+raw difference `ours - vanilla`, against each field, each beside a phase twin
+(`g2_position.py`, log `logs/g2_position.txt`, all texels):
+
+| field | (-20,24) r (twin) | (-20,20) r (twin) |
+|---|---|---|
+| height (VHGT, parsed in this lane) | -0.287 (-0.325) | +0.005 (+0.092) |
+| slope (from the `_msn` UP channel) | -0.166 (-0.001) | -0.050 (+0.002) |
+| AO (our `_data` R) | +0.218 (-0.080) | -0.045 (+0.025) |
+| VCLR luminance | +0.011 (+0.048) | -0.018 (-0.021) |
+| **our own luminance** | **+0.835** (-0.056) | **+0.827** (+0.012) |
+| vanilla's luminance | -0.522 (+0.022) | -0.274 (-0.026) |
+
+* **height is AT its phase-twin floor** on both tiles. It is not a hill-shading
+  term.
+* slope and AO clear their floors on (-20,24) and do not on (-20,20), with
+  opposite signs. Nothing consistent.
+* the residual's one strong, sign-consistent partner on both tiles is **our own
+  brightness**, r = +0.83: after the best gain we are still too bright where we
+  are bright and too dark where we are dark. Our sheet's dynamic range differs
+  from vanilla's. That is a content statistic, not a tone one.
+
+### 1.4 VCLR is ruled out for tone, by its own value
+
+We multiply the composite by `VCLR/255` (`src/lodgen.cpp` 7877-7893, 9187-9199).
+Earlier lanes ruled it out for local variance and left it open for tone. It is
+now closed, because the multiplier itself was measured rather than the record:
+
+* the per-texel VCLR field's mean luminance is **254.96, 254.88, 254.89, 254.97,
+  254.97, 254.97** on the six first tiles -- the multiply is 0.9998 of unity;
+* dividing it back out of our sheet and refitting moves the gain by **0.0003**
+  (0.8916 -> 0.8915 and 1.1180 -> 1.1173) and the RMS by 0.01 levels;
+* saturation over the census is 0.2428 with the multiply and 0.2429 without;
+* the natural experiment on (-20,24), where 31 % of texels sit in cells with no
+  VCLR record at all, gives k = 0.9242 with a record and 0.8339 without -- a
+  difference in the direction OPPOSITE to the one the multiply could cause,
+  which is another way of saying those are simply different cells.
+
+VCLR is not the grading it looks like, and that is now a measured statement
+about the multiplier rather than an inference from the records.
+
+### 1.5 The census: 25 tiles, and what one global constant can do
+
+Two tiles cannot carry a verdict about a map, so the lane baked a 5x5 grid of
+dim-4 chunks at cells (-24..-8, 12..28) with the launch exe at the shipped
+defaults -- 25 tiles, `g4_census.py` / `g5_decide.py`, logs `logs/g4_census.txt`
+and `logs/g5_decide.txt`.
+
+| statistic | value |
+|---|---|
+| per-tile optimum gain k | **0.615 .. 1.241**, mean 0.892, sd 0.144 |
+| tiles wanting k < 1 (we are too bright) | 21 of 25 |
+| tiles wanting k > 1 (we are too dark) | 4 of 25 |
+| per-CELL optimum k over the 96 cells of the first six tiles | 0.699 .. 1.388, mean **1.004**, sd 0.149 |
+| chroma pull s fitted per tile (`c' = L + s(c-L)`) | -0.256 .. 1.301, mean 0.885, sd 0.314 |
+| one global chroma pull s = 0.9156 | reduces RGB RMS on 16 of 27 rows, by at most 0.15 levels |
+| one global gain k = 0.8403 (the pooled optimum) | pooled RGB RMS 24.724 -> 19.644 (-20.5 %), better on **19 of 25**, worse on 6 |
+
+The chroma pull is not shippable: its per-tile scatter includes a negative value
+(a tile whose best "desaturation" is a hue inversion), and its best global
+setting moves the error by a tenth of a level -- a fifth of the BC1 codec floor.
+
+The exposure is a real effect in the aggregate -- 20.5 % off the pooled error --
+and still cannot pass this lane's own gate G3. Section 2 and 3 are why.
+
+### 1.6 The grass tint (gate G4), answered by a number that is zero
+
+The cover plane is **empty on all 25 tiles**. Every `_data` sheet carries the
+writer's own honest stamp: `dwReserved1 = 0`, which `src/lodgen.cpp` 8196 and
+9749 set exactly when `coverMax == 0`, and the decoded DXT5 alpha confirms it
+(`cover>0` on 0.000 % of texels, mean byte 0.00, on every tile).
+
+So the tint term `colour += (tint - colour) * cover/255 * tintStrength` never
+fires anywhere in the census: at cover = 0 the branch is not taken at all. There
+is no texel on which to fit a strength, and any number this lane "fitted" would
+be fitted to nothing. **0.35 stands, unchanged, and the reason is that the term
+is inert on every sheet measured, not that 0.35 won a comparison.** That the
+cover plane is empty across a 5x5 chunk grid that includes Sanctuary is a red
+handed on in section 6; it invalidates nothing above, since a zero cover byte
+also means zero tint in the bytes being compared.
+
+---
+
+## 2. The cause, named
+
+**The fingerprint is: no global tone transfer exists. The far-terrain colour
+error against vanilla is a per-cell CONTENT difference with a near-zero mean --
+not an exposure, a gamma, a colour-space slip, or a lighting term.**
+
+The evidence, in the order that kills each candidate:
+
+1. **Colour-space slip -- refuted by the code and by 56 levels of measurement.**
+   The whole colour path is bytes/255, blended in that space and quantised back
+   (`src/lodgen.cpp` 7952-7975 and 9258-9270): there is no conversion to slip.
+   Both fixed slip candidates score 56 to 78 levels of RMS against an identity
+   of 20. The skill `fo4-engine-constant-from-ini-setting` was NOT invoked,
+   because its own precondition -- "the fingerprint says position-independent
+   gain AND our code shows no slip" -- fails on its first clause.
+2. **Constant gain -- refuted by its own sign.** k = 0.892 on (-20,24) and 1.161
+   on (-20,20) (ground texels; 0.892 / 1.118 whole-tile). Over 25 tiles k runs
+   0.615..1.241 with sd 0.144, and over 96 individual land cells 0.699..1.388
+   with **mean 1.004**. On average our exposure is already vanilla's; the error
+   is that individual cells are wrong in both directions.
+3. **Gamma -- refuted by degeneracy and by saturation.** The fitted exponents
+   (0.038, 0.157) are not gammas, they are the regression collapsing onto
+   vanilla's mean; and a gamma that size would drop saturation from 0.25 to 0.01
+   where the measured difference is 0.25 -> 0.22.
+4. **VCLR -- refuted by its own value**, 254.9 of 255 (1.4).
+5. **A lighting term -- refuted at its floor.** The residual's correlation with
+   height sits AT its phase twin on both tiles; slope and AO clear their floors
+   on one tile each, with opposite signs.
+6. **What is left, and what it points at.** The residual's only consistent
+   partner is our own brightness (r = +0.83 on both tiles); the per-cell gains
+   scatter with sd 0.15 about 1.00; and the per-cell pattern is blocky -- on
+   (-20,24) one row of four cells fits k = 1.04..1.24 while the other twelve fit
+   0.80..0.93, and four of those fit 0.813..0.824 within 1 %. Cell-quantised
+   structure with a mean of one is the signature of **which textures we blend in
+   which cell**, not of how the result is graded. The multi-scale table makes
+   the same point from the other side: on (-20,20) the correlation with vanilla
+   climbs 0.31 -> 0.80 as the box average grows from 1 to 128 texels (coarse
+   structure agrees, fine detail does not), while on (-20,24) it never rises
+   above 0.041 at any scale -- that tile's composite disagrees with vanilla's at
+   every scale, which is a splat/base-selection question and belongs to the lane
+   that owns the composite.
+
+So there is no code line of ours to name as the bug and no engine constant to
+read out of `Fallout4.exe`. The line the brief expected to find -- an sRGB
+conversion on our side -- does not exist, and this lane's contribution is to
+close that door with numbers.
+
+### 2.1 The correction this lane owes the project
+
+The belief on record (ROADS2, ROADS3, and the 16:3x ruling) is that "the
+off-road ground is ~16 luminance units too dark" and that ~19 levels of the
+road's over-contrast is a whole-sheet tone offset that GRADE1 would remove. On
+the FIXED tiling and composite that is true only of the Sanctuary tile:
+
+| region | ours | vanilla | ours - vanilla |
+|---|---|---|---|
+| (-20,20) ground -- the tile that observation came from | 68.767 | 83.464 | **-14.70** |
+| (-20,20) road footprint (25,189 texels) | 98.753 | 92.485 | **+6.27** |
+| (-20,24) ground | 87.606 | 80.819 | **+6.79** |
+| census, 25 tiles, mean per-tile optimum k | -- | -- | **0.892 -- we are too BRIGHT on 21 of 25** |
+
+The road does stand ~30 levels over its surround in ours against ~9 in vanilla
+on (-20,20) -- but of that 21-level discrepancy, **6.3 levels are the road being
+too bright and 14.7 are the ground being too dark**, and the ground half
+reverses sign one chunk to the north. A whole-sheet grade was the wrong owner
+for it. The road pass needs no separate treatment from this lane: the grade
+below is applied after the road composite, so a road is graded with the ground
+it sits in, by construction.

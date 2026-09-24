@@ -1,0 +1,36 @@
+subject    layout    channel                  mean lv  p95 lv  max lv    mean u
+blast_n4   as shipped height (blue, BC1 palette)    2.29    6.06      21        28
+blast_n4   as shipped sway   (alpha, BC4 ramp)    1.51    8.00      18        18
+blast_n4   as shipped normal X                   12.49   43.35     156       150
+blast_n4   swapped   height (alpha, BC4 ramp)    0.06    1.00       2         1
+blast_n4   swapped   sway   (blue, BC1 palette)    6.89   29.77     149        83
+blast_n4   swapped   normal X                   14.62   56.31     169       176
+blast_n4   IoU  as shipped 0.4978   swapped 0.5362   delta +0.0383
+blast_n8   as shipped height (blue, BC1 palette)    2.48    6.49      30        30
+blast_n8   as shipped sway   (alpha, BC4 ramp)    1.54    7.00      18        19
+blast_n8   as shipped normal X                   13.05   45.19     200       157
+blast_n8   swapped   height (alpha, BC4 ramp)    0.09    1.00       3         1
+blast_n8   swapped   sway   (blue, BC1 palette)    6.80   28.98     151        82
+blast_n8   swapped   normal X                   14.85   55.46     214       179
+blast_n8   IoU  as shipped 0.6639   swapped 0.7010   delta +0.0372
+maple_n4   as shipped height (blue, BC1 palette)    2.83    6.13      57        34
+maple_n4   as shipped sway   (alpha, BC4 ramp)    2.87   10.00      16        35
+maple_n4   as shipped normal X                   13.14   48.40     150       158
+maple_n4   swapped   height (alpha, BC4 ramp)    0.07    0.00       5         1
+maple_n4   swapped   sway   (blue, BC1 palette)   10.02   31.20     119       121
+maple_n4   swapped   normal X                   13.68   50.71     150       165
+maple_n4   IoU  as shipped 0.3609   swapped 0.3629   delta +0.0020
+dead_n4    as shipped height (blue, BC1 palette)    2.95    7.87      36        36
+dead_n4    as shipped sway   (alpha, BC4 ramp)    0.94    4.00      13        11
+dead_n4    as shipped normal X                   15.31   55.01     173       184
+dead_n4    swapped   height (alpha, BC4 ramp)    0.16    1.00       4         2
+dead_n4    swapped   sway   (blue, BC1 palette)    6.39   27.30     120        77
+dead_n4    swapped   normal X                   16.46   58.43     173       198
+dead_n4    IoU  as shipped 0.5826   swapped 0.5870   delta +0.0044
+rock_n4    as shipped height (blue, BC1 palette)    3.36    9.90      95        66
+rock_n4    as shipped sway   (alpha, BC4 ramp)    0.54    3.00      14        11
+rock_n4    as shipped normal X                    9.37   36.52     168       185
+rock_n4    swapped   height (alpha, BC4 ramp)    0.22    1.00       5         4
+rock_n4    swapped   sway   (blue, BC1 palette)    4.27   11.52      94        85
+rock_n4    swapped   normal X                    9.59   37.55     168       190
+rock_n4    IoU  as shipped 0.7777   swapped 0.7823   delta +0.0046

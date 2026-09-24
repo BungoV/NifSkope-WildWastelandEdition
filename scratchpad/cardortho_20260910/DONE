@@ -1,0 +1,78 @@
+LANE CARDORTHO -- built and gated by lane BUILD4, 2026-09-10, after lane CLAMP.
+
+BUILD
+  qmake NifSkope.pro          QMAKE-RC=0
+  make -j2                    BUILD-RC=0  ("Nothing to be done": lane WATER2's
+                              01:01:04 link already carried this lane's code)
+  release/NifSkope.exe        2026-09-10 01:01:04, newer than all 15 changed
+                              files; nifskope_ui.o 00:44:24 vs source 00:38:50
+  release/style.qss           in step with res/style.qss
+
+GATES -- every pre-registered bar met except the transition table
+  lodgen_octahedral.sh    100 ok, 0 FAIL, RESULT PASS
+  lodgen_card_arrays.sh    35 ok, 0 FAIL, RESULT PASS
+  lodgen_impostor_cards.sh 12 ok, 0 FAIL   (floor: unmoved)
+  lodgen_identity.sh        8 ok, 0 FAIL   (floor: unmoved)
+
+  THE CAMERA REACHES THE FORMAT
+    bake 1 sidecar          says photographed orthographically
+    bake 1 read-back        orthofit 972.833 972.833 0 -- asked and achieved
+                            agree EXACTLY, projection field 0 (bar: 0.1%)
+    perspective control     says persp on the same line, so both move
+    card array layers       {'0004a074': 'ortho', '0004a075': None} -- the layer
+                            whose sidecar named no camera carries NO key
+
+  THE CUBE PROOF -- passes against the pre-registration AS PRE-REGISTERED
+    64 frames, run-time predicted table   worst 1.78 texels   (bar 2)
+    64 frames, FROZEN prereg_cube.md      worst 1.87 texels   (bar 2)
+    the two tables differ by at most      0.10 texels
+    central asymmetry                     0.000               (bar 0.05)
+    near-edge vs far-edge width           0.000               (bar 0.05)
+    WW_IMPOSTOR_PERSP=1 control           18.70 texels (23.19 frozen),
+                                          0.495, 0.850 -- exceeds all three
+    the fixture's own size, measured through a DIFFERENT path (WW_RENDER_ORTHO)
+                                          256.5097 units      (bar 256 +- 3)
+
+  THE RE-BAKE AND THE SAMPLE SET
+    19 baked, 0 failed
+    19 of 19 card sidecars say projection ortho
+       (run.sh prints "19 of 20": its denominator counts cards/library.txt, the
+        run manifest, which has no camera and correctly no line)
+    0 of 19 orthofit lines read through a perspective camera
+    18 of 18 card .lodm carry projection: "ortho", 0 absent
+    FO4CS sample set: 38 card entries, all ortho, no (absent) count at all
+
+  THE TRANSITION TABLE -- MISS
+    card rows passing centre <=1 card texel AND both extents <=2%:  1 of 12
+    ZEROED-OFFSET CONTROL passing (must be 0):                      0 of 12
+    the passing row is 0004a074 front at ring: centre 0.81 texels, 0.92%, 0.43%
+    four more meet the centre bar and are turned away by an extent, the sharpest
+    being 00038599 right mid at 0.15 texels off centre with 18.70% on dx
+
+    Trunk widths against the model's own dimensions:
+      HEIGHT matches to 0.00% on all three trees -- the vertical world scale,
+      which is what the orthographic camera was changed to fix, is right.
+      WIDTHS are 18.14 / 65.62 / 44.94% wider at the trunk and
+      90.03 / 120.54 / 37.88% wider at the crown. The three pictures show a
+      filled blob where the mesh is lacy: the shape of coverage-threshold
+      dilation at a 128-texel frame, NOT of a projection error. Named as a
+      CANDIDATE with its discriminator -- re-measure at two frame sizes, since
+      dilation scales with the texel and a projection error does not.
+
+    Instrument finding (CONSTITUTION 4 rule 1): comparing each card row with its
+    own control, the centre column differs on 12 of 12 rows, dy extent on 4 of
+    12, and dx extent on 0 of 12. The control fails only through the centre; the
+    2% extent bars have no floor under them yet.
+
+  NOT FIXED and NOT RE-PINNED.
+
+PICTURES (CONSTITUTION 5), all three opened before being reported
+  cardortho_transition_0003a28b.png  48,403 bytes
+  cardortho_transition_0004a074.png  18,186 bytes
+  cardortho_transition_00038599.png  11,892 bytes
+  Defect in the pictures themselves: the three panel titles overlap into one
+  illegible line and the bottom caption is clipped at the right edge, so the
+  numbers had to be read from transition.log rather than from the picture --
+  the coupling ww-texel-picture's caption rule exists to prevent.
+
+NOT COMMITTED (CONSTITUTION 8). bungo's open NifSkope window needs a restart.

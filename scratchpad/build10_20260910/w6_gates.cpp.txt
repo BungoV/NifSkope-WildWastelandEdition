@@ -1,0 +1,394 @@
+/*! Lane WATER6's gates (X1 .. X5), pre-registered in
+ *  `scratchpad/lane_water6_report.md` section 0 before this function existed.
+ *
+ *  X1  a per-point weight of exactly 1 reproduces the unweighted solve byte
+ *      for byte (the FLOOR), a ramped weight does not, and it reads faster
+ *      where the weight is;
+ *  X2  a ONE-POINT curve is consumed as a source (it was skipped before), and
+ *      the water round it points away from it;
+ *  X3  an imported raster layer is the authority where painted, the solve
+ *      fills the rest, and removing the layer puts every word back;
+ *  X5  the flow PNG's DirectX convention: the four cardinals by hand, the
+ *      65,536-word round trip, and a CHECKED-IN test image. */
+void waterWeightGates( WaterMarkDoc & doc, int river, const WaterStroke & axis,
+	const std::function<void( const QString &, bool )> & check,
+	const std::function<void( const QString & )> & say )
+{
+	QString err;
+	auto hashBody = [&]( qint64 & moved, qint64 & texels ) {
+		quint64 h = 1469598103934665603ull;
+		moved = 0;
+		texels = 0;
+		doc.sweep( [&]( int, int, quint16 id, quint16 a, quint16 n ) {
+			if ( int( id ) != river )
+				return;
+			texels++;
+			if ( a != n )
+				moved++;
+			h ^= n;
+			h *= 1099511628211ull;
+		}, &err );
+		return h;
+	};
+	auto weighted = [&]( const WaterStroke & in, const QVector<float> & w ) {
+		WaterStroke s = in;
+		if ( !w.isEmpty() ) {
+			QByteArray e;
+			e.resize( qsizetype( w.size() ) * 4 );
+			for ( int i = 0; i < w.size(); i++ ) {
+				const float v = w[i];
+				memcpy( e.data() + qsizetype( i ) * 4, &v, 4 );
+			}
+			s.extra = e;
+		} else {
+			s.extra.clear();
+		}
+		return s;
+	};
+	/* the mean speed nibble under the first third and the last third of the
+	 * stroke -- the instrument X1b reads */
+	auto thirds = [&]( double & firstThird, double & lastThird ) {
+		const int n = axis.pts.size();
+		const int a = std::max( 1, n / 3 );
+		double s0 = 0.0, s1 = 0.0;
+		qint64 c0 = 0, c1 = 0;
+		for ( int i = 0; i < n; i++ ) {
+			const bool early = i < a, late = i >= n - a;
+			if ( !early && !late )
+				continue;
+			int px = 0, py = 0;
+			doc.worldToTexel( double( axis.pts[i].x ), double( axis.pts[i].y ), px, py );
+			const quint16 word = doc.flowWordAt( px, py );
+			if ( !word )
+				continue;
+			const double nib = double( ( word >> 8 ) & 0xF );
+			if ( early ) {
+				s0 += nib;
+				c0++;
+			} else {
+				s1 += nib;
+				c1++;
+			}
+		}
+		firstThird = c0 ? s0 / double( c0 ) : 0.0;
+		lastThird = c1 ? s1 / double( c1 ) : 0.0;
+	};
+
+	say( QStringLiteral( "-- lane WATER6: weights, one-point pins, raster authority, DirectX green --" ) );
+
+	// ---- X1: the per-point weight ------------------------------------------
+	WaterMarkSolve st;
+	QVector<float> ones, ramp;
+	for ( int i = 0; i < axis.pts.size(); i++ ) {
+		ones.append( 1.0f );
+		ramp.append( float( 1.0 + 2.0 * double( i ) / double( qMax<qsizetype>( 1, axis.pts.size() - 1 ) ) ) );
+	}
+	doc.clearStrokes();
+	doc.solve( &st, &err );
+	QString msg;
+	doc.addStroke( weighted( axis, QVector<float>() ), &msg );
+	doc.solve( &st, &err );
+	qint64 moved0 = 0, texels0 = 0;
+	const quint64 hUnweighted = hashBody( moved0, texels0 );
+	double u0 = 0.0, u1 = 0.0;
+	thirds( u0, u1 );
+
+	doc.clearStrokes();
+	doc.addStroke( weighted( axis, ones ), &msg );
+	doc.solve( &st, &err );
+	qint64 moved1 = 0, texels1 = 0;
+	const quint64 hOnes = hashBody( moved1, texels1 );
+	check( QStringLiteral( "X1a FLOOR: a per-point weight of exactly 1 reproduces the unweighted "
+		"solve word for word (hash %1 against %2 over %3 texels)" )
+		.arg( hUnweighted, 16, 16, QLatin1Char( '0' ) ).arg( hOnes, 16, 16, QLatin1Char( '0' ) )
+		.arg( texels1 ), hUnweighted == hOnes && texels1 > 0 );
+
+	doc.clearStrokes();
+	doc.addStroke( weighted( axis, ramp ), &msg );
+	doc.solve( &st, &err );
+	qint64 moved2 = 0, texels2 = 0;
+	const quint64 hRamp = hashBody( moved2, texels2 );
+	double w0 = 0.0, w1 = 0.0;
+	thirds( w0, w1 );
+	check( QStringLiteral( "X1b SIGNAL: weights ramped 1 -> 3 along the stroke change the solve "
+		"(hash %1 against the unweighted %2)" ).arg( hRamp, 16, 16, QLatin1Char( '0' ) )
+		.arg( hUnweighted, 16, 16, QLatin1Char( '0' ) ), hRamp != hUnweighted );
+	say( QStringLiteral( "the mean speed nibble under the stroke's first third / last third: "
+		"unweighted %1 / %2 (difference %3), weighted %4 / %5 (difference %6)" )
+		.arg( u0, 0, 'f', 2 ).arg( u1, 0, 'f', 2 ).arg( u1 - u0, 0, 'f', 2 )
+		.arg( w0, 0, 'f', 2 ).arg( w1, 0, 'f', 2 ).arg( w1 - w0, 0, 'f', 2 ) );
+	check( QStringLiteral( "X1b it reads faster where the weight is: the weighted solve's "
+		"last-third minus first-third nibble (%1) is greater than the unweighted one's (%2)" )
+		.arg( w1 - w0, 0, 'f', 2 ).arg( u1 - u0, 0, 'f', 2 ), ( w1 - w0 ) > ( u1 - u0 ) );
+
+	// X1c: it is LOCAL -- some texels move, not all of them
+	{
+		qint64 diff = 0, tot = 0;
+		std::vector<quint16> before;
+		doc.clearStrokes();
+		doc.addStroke( weighted( axis, ones ), &msg );
+		doc.solve( &st, &err );
+		doc.sweep( [&]( int, int, quint16 id, quint16, quint16 n ) {
+			if ( int( id ) == river )
+				before.push_back( n );
+		}, &err );
+		doc.clearStrokes();
+		doc.addStroke( weighted( axis, ramp ), &msg );
+		doc.solve( &st, &err );
+		size_t at = 0;
+		doc.sweep( [&]( int, int, quint16 id, quint16, quint16 n ) {
+			if ( int( id ) != river )
+				return;
+			if ( at < before.size() && before[at] != n )
+				diff++;
+			tot++;
+			at++;
+		}, &err );
+		const double pct = tot ? 100.0 * double( diff ) / double( tot ) : 0.0;
+		check( QStringLiteral( "X1c the weight is LOCAL: %1 of %2 texels of body %3 changed "
+			"(%4 percent, gate above 0 and below 100)" ).arg( diff ).arg( tot ).arg( river )
+			.arg( pct, 0, 'f', 1 ), diff > 0 && diff < tot );
+	}
+
+	// ---- X2: a ONE-POINT curve is a pin -------------------------------------
+	{
+		// the refuter FIRST: with no strokes at all nothing moves
+		doc.clearStrokes();
+		doc.solve( &st, &err );
+		qint64 movedNone = 0, texelsNone = 0;
+		hashBody( movedNone, texelsNone );
+		check( QStringLiteral( "X2a REFUTER: with the pin removed, 0 of body %1's texels move off "
+			"the automatic word (measured %2) -- so the gate below can fail" )
+			.arg( river ).arg( movedNone ), movedNone == 0 );
+
+		WaterStroke pin;
+		pin.kind = WaterStroke::Pin;
+		pin.flags = WaterStroke::SetsDirection | WaterStroke::SetsSpeed;
+		pin.speed = 0.5f;
+		pin.width = 4096.0f;
+		/* THE MID-MOST point of the centreline that is actually ON the river.
+		 * The centreline is the mean position of each slice's wet texels, and on
+		 * a winding reach that mean lands on the bank often enough that the
+		 * harness's own stroke reports a fifth of its points outside the body.
+		 * A pin on dry land is refused in words, which is correct and is not
+		 * what this gate is about. */
+		WaterStrokePoint p = axis.pts[axis.pts.size() / 2];
+		bool wet = false;
+		for ( int step = 0; step < axis.pts.size() && !wet; step++ )
+			for ( int sgn = -1; sgn <= 1 && !wet; sgn += 2 ) {
+				const int i = axis.pts.size() / 2 + sgn * step;
+				if ( i < 0 || i >= axis.pts.size() )
+					continue;
+				if ( int( doc.bodyAtWorld( double( axis.pts[i].x ), double( axis.pts[i].y ) ) ) == river ) {
+					p = axis.pts[i];
+					wet = true;
+				}
+			}
+		pin.pts.append( p );
+		WaterMarkSolve stp;
+		const bool pinned = doc.addStroke( pin, &msg );
+		check( QStringLiteral( "X2 the pin lands on the river: %1" ).arg( msg ), pinned && wet );
+		doc.solve( &stp, &err );
+		qint64 movedPin = 0, texelsPin = 0;
+		hashBody( movedPin, texelsPin );
+		say( QStringLiteral( "the one-point pin: %1" ).arg( stp.note ) );
+		check( QStringLiteral( "X2a a ONE-POINT curve is consumed by the solve (%1 stroke(s) "
+			"counted, %2 of %3 texels moved)" ).arg( stp.strokes ).arg( movedPin ).arg( texelsPin ),
+			stp.strokes >= 1 && movedPin > 0 );
+
+		// X2b: the flow points AWAY from it -- it is a source
+		double sum = 0.0;
+		qint64 cnt = 0;
+		const double reach = 4.0 * double( pin.width );
+		doc.sweep( [&]( int px, int py, quint16 id, quint16, quint16 n ) {
+			if ( int( id ) != river || !n )
+				return;
+			double wx = 0.0, wy = 0.0;
+			doc.texelToWorld( px, py, wx, wy );
+			const double rx = wx - double( p.x ), ry = wy - double( p.y );
+			const double r = std::hypot( rx, ry );
+			if ( r < 1.0 || r > reach )
+				return;
+			const double ang = double( n & 0xFF ) / 256.0 * kTwoPi;
+			sum += ( std::cos( ang ) * rx + std::sin( ang ) * ry ) / r;
+			cnt++;
+		}, &err );
+		const double mean = cnt ? sum / double( cnt ) : 0.0;
+		check( QStringLiteral( "X2b it acts as a SOURCE: the mean cosine between the solved "
+			"direction and the outward radial from the pin is %1 over %2 texels within 4 widths "
+			"(gate > 0.5; a sink would be below -0.5)" ).arg( mean, 0, 'f', 3 ).arg( cnt ),
+			cnt > 0 && mean > 0.5 );
+	}
+
+	// ---- X3: an imported raster is the authority where painted ---------------
+	{
+		doc.clearStrokes();
+		doc.addStroke( weighted( axis, QVector<float>() ), &msg );
+		doc.solve( &st, &err );
+		// the body's words WITHOUT any layer: the thing X3b and X3c compare with
+		std::vector<quint16> plain;
+		doc.sweep( [&]( int, int, quint16 id, quint16, quint16 n ) {
+			if ( int( id ) == river )
+				plain.push_back( n );
+		}, &err );
+		// the window round the stroke's middle point, in body-plane texels
+		const WaterStrokePoint mid = axis.pts[axis.pts.size() / 2];
+		int mx = 0, my = 0;
+		doc.worldToTexel( double( mid.x ), double( mid.y ), mx, my );
+		const int R = 24;
+		WaterRasterLayer layer;
+		layer.px0 = mx - R;
+		layer.py0 = my - R;
+		layer.w = 2 * R;
+		layer.h = 2 * R;
+		layer.words.fill( 0, qsizetype( layer.w ) * layer.h );
+		layer.painted.fill( 0, qsizetype( layer.w ) * layer.h );
+		const quint16 kMagic = quint16( 0xFF40 );   // dir 64 (north), speed 15, confidence 15
+		qint64 paintedWet = 0;
+		for ( int y = 0; y < layer.h; y++ )
+			for ( int x = 0; x < layer.w; x++ ) {
+				const qsizetype i = qsizetype( y ) * layer.w + x;
+				double wx = 0.0, wy = 0.0;
+				doc.texelToWorld( layer.px0 + x, layer.py0 + y, wx, wy );
+				if ( int( doc.bodyAtWorld( wx, wy ) ) != river )
+					continue;
+				layer.words[i] = kMagic;
+				layer.painted[i] = 1;
+				paintedWet++;
+			}
+		WaterStroke rec;
+		rec.kind = 10;
+		rec.flags = WaterStroke::SetsDirection | WaterStroke::SetsSpeed;
+		rec.extra = layer.payload();
+		const bool stored = doc.addStroke( rec, &msg );
+		check( QStringLiteral( "X3 the raster layer is stored (%1 painted wet texels, %2)" )
+			.arg( paintedWet ).arg( msg ), stored && paintedWet > 0 );
+
+		/* The comparison is against the LAYER-FREE SOLVE, texel by texel, and not
+		 * against the layer's constant: exactly one of this river's 29,121
+		 * texels outside the window solves to 0xFF40 on its own, and counting
+		 * equality with a constant called that coincidence an authority leak on
+		 * the first run of these gates. */
+		qint64 magicIn = 0, wetIn = 0, changedOut = 0, sameOut = 0;
+		size_t at = 0;
+		doc.sweep( [&]( int px, int py, quint16 id, quint16, quint16 n ) {
+			if ( int( id ) != river )
+				return;
+			const bool inside = px >= layer.px0 && py >= layer.py0
+				&& px < layer.px0 + layer.w && py < layer.py0 + layer.h;
+			if ( inside ) {
+				wetIn++;
+				if ( n == kMagic )
+					magicIn++;
+			} else if ( at < plain.size() ) {
+				if ( n != plain[at] )
+					changedOut++;
+				else
+					sameOut++;
+			}
+			at++;
+		}, &err );
+		check( QStringLiteral( "X3a the raster is the AUTHORITY where painted: %1 of %2 painted "
+			"texels read the layer's word" ).arg( magicIn ).arg( wetIn ),
+			wetIn > 0 && magicIn == wetIn );
+		check( QStringLiteral( "X3b the solve fills the REST: %1 texels outside the layer moved "
+			"from the layer-free solve (gate 0) and %2 did not (floor > 0)" )
+			.arg( changedOut ).arg( sameOut ), changedOut == 0 && sameOut > 0 );
+
+		// X3c: it is an authority, not a bake -- removing it puts every word back
+		for ( int i = doc.strokes().size() - 1; i >= 0; i-- )
+			if ( doc.strokes()[i].kind == 10 )
+				doc.removeStroke( i );
+		qint64 differ = 0, same = 0;
+		at = 0;
+		doc.sweep( [&]( int, int, quint16 id, quint16, quint16 n ) {
+			if ( int( id ) != river )
+				return;
+			if ( at < plain.size() ) {
+				if ( n != plain[at] )
+					differ++;
+				else
+					same++;
+			}
+			at++;
+		}, &err );
+		check( QStringLiteral( "X3c the raster is not baked in: with the layer removed the body's "
+			"words are the layer-free solve's again (%1 of %2 differ)" )
+			.arg( differ ).arg( differ + same ), differ == 0 && same > 0 );
+		doc.clearStrokes();
+		doc.solve( &st, &err );
+	}
+
+	// ---- X5: the DirectX convention -----------------------------------------
+	{
+		struct Card { int dir; int r; int g; const char * name; };
+		const Card cards[4] = { { 0, 255, 128, "east" }, { 64, 128, 1, "north" },
+			{ 128, 1, 128, "west" }, { 192, 128, 255, "south" } };
+		bool ok = true;
+		QString detail;
+		for ( const Card & c : cards ) {
+			quint8 r = 0, g = 0, b = 0, a = 0;
+			WaterCurveDoc::rgbaFromWord( quint16( c.dir ), r, g, b, a );
+			if ( int( r ) != c.r || int( g ) != c.g )
+				ok = false;
+			detail += QStringLiteral( "%1 R%2 G%3  " ).arg( QLatin1String( c.name ) )
+				.arg( int( r ) ).arg( int( g ) );
+		}
+		check( QStringLiteral( "X5a the DirectX cardinals (R = +X, G = +Y toward the image "
+			"BOTTOM, centred on 128): %1" ).arg( detail.trimmed() ), ok );
+
+		qint64 same = 0, total = 0;
+		for ( int d = 0; d < 256; d++ )
+			for ( int s = 0; s < 16; s++ )
+				for ( int c = 0; c < 16; c++ ) {
+					const quint16 word = quint16( d | ( s << 8 ) | ( c << 12 ) );
+					quint8 r = 0, g = 0, b = 0, a = 0;
+					WaterCurveDoc::rgbaFromWord( word, r, g, b, a );
+					if ( !a )
+						a = 1;
+					total++;
+					if ( WaterCurveDoc::wordFromRgba( r, g, b, a ) == word )
+						same++;
+				}
+		check( QStringLiteral( "X5b the codec round-trips every word: %1 of %2" )
+			.arg( same ).arg( total ), same == total );
+
+		const QString fixture = QStringLiteral( "tests/fixtures/flowmap_directx_4x4.png" );
+		QString found = fixture;
+		if ( !QFile::exists( found ) ) {
+			found = QCoreApplication::applicationDirPath() + QStringLiteral( "/../" ) + fixture;
+			if ( !QFile::exists( found ) )
+				found = qEnvironmentVariable( "WW_WATER_DIRECTX_FIXTURE" );
+		}
+		QImage img;
+		const bool loaded = !found.isEmpty() && img.load( found ) && !img.isNull();
+		check( QStringLiteral( "X5c the checked-in test image is readable (%1)" )
+			.arg( loaded ? found : QStringLiteral( "not found: set WW_WATER_DIRECTX_FIXTURE" ) ),
+			loaded && img.width() == 4 && img.height() == 4 );
+		if ( loaded && img.width() == 4 && img.height() == 4 ) {
+			if ( img.format() != QImage::Format_RGBA8888 )
+				img = img.convertToFormat( QImage::Format_RGBA8888 );
+			/* Row 0 of the IMAGE is its TOP row. The 16 texels carry the 16
+			 * directions 0, 16, ... 240 in reading order, and the PNG was
+			 * written from the CONVENTION by a script that shares no code with
+			 * this program (see the lane report's section 0), so this gate can
+			 * fail while the codec round-trips itself perfectly. */
+			int wrong = 0;
+			QString first;
+			for ( int row = 0; row < 4; row++ )
+				for ( int col = 0; col < 4; col++ ) {
+					const uchar * q = img.constScanLine( row ) + qsizetype( col ) * 4;
+					const quint16 w = WaterCurveDoc::wordFromRgba( q[0], q[1], q[2], q[3] );
+					const int want = kDirectXFixtureDirs[row * 4 + col];
+					if ( int( w & 0xFF ) != want ) {
+						wrong++;
+						if ( first.isEmpty() )
+							first = QStringLiteral( " (first: row %1 col %2 read %3, wanted %4)" )
+								.arg( row ).arg( col ).arg( int( w & 0xFF ) ).arg( want );
+					}
+				}
+			check( QStringLiteral( "X5c the checked-in test image decodes to the documented "
+				"directions: %1 of 16 wrong%2" ).arg( wrong ).arg( first ), wrong == 0 );
+		}
+	}
+}

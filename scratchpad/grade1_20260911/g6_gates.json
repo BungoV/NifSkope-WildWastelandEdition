@@ -1,0 +1,58 @@
+{
+ "checks": 8,
+ "fails": 0,
+ "rows": [
+  {
+   "name": "S2 binary matches prediction (-20,24) k=0.8916",
+   "pass": true,
+   "detail": "gap +0.031 levels (tolerance 1.0)",
+   "before": 20.12714020450607,
+   "pred": 17.524101314666584,
+   "binary": 17.55523667403881
+  },
+  {
+   "name": "S3 own-optimum k reduces the error (-20,24)",
+   "pass": true,
+   "detail": "20.127 -> 17.555 (-12.8%)"
+  },
+  {
+   "name": "S2 binary matches prediction (-20,20) k=1.1180",
+   "pass": true,
+   "detail": "gap +0.134 levels (tolerance 1.0)",
+   "before": 21.897183996728074,
+   "pred": 20.41017543868702,
+   "binary": 20.544183820013906
+  },
+  {
+   "name": "S3 own-optimum k reduces the error (-20,20)",
+   "pass": true,
+   "detail": "21.897 -> 20.544 (-6.2%)"
+  },
+  {
+   "name": "S2 binary matches prediction (-20,24) k=0.8403",
+   "pass": true,
+   "detail": "gap +0.108 levels (tolerance 1.0)",
+   "before": 20.12714020450607,
+   "pred": 18.000038657701776,
+   "binary": 18.107902255610426
+  },
+  {
+   "name": "S2 binary matches prediction (-20,20) k=0.8403",
+   "pass": true,
+   "detail": "gap +0.173 levels (tolerance 1.0)",
+   "before": 21.897183996728074,
+   "pred": 28.315654688532888,
+   "binary": 28.48845048978008
+  },
+  {
+   "name": "S4 one k cannot reduce both (pooled k=0.8403)",
+   "pass": true,
+   "detail": "(-20,24) 20.127->18.108, (-20,20) 21.897->28.488"
+  },
+  {
+   "name": "S5 rung exe refuses --grade",
+   "pass": true,
+   "detail": "error: unknown option --grade"
+  }
+ ]
+}

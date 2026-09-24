@@ -1,0 +1,95 @@
+TILING4 -- every candidate re-scored under the DECIDED grain/band gates
+
+rep/swl: per sheet, ceilings frozen 00:11 and 00:27, unchanged.
+G1  : median hp SD over the seven vs vanilla`s median over the same
+      seven; the printed number is the error, the ceiling is +-20 %.
+G2  : per sheet within 20 % of THE RUNG`s hp SD on that sheet.
+G1bnd: of the six bands, how many have their median share over the seven
+      inside 20 % of vanilla`s median share (pass = 6 of 6).
+G2bd: per sheet, mean |band error| no worse than the rung`s on that sheet.
+litG/litB: the brief`s LITERAL per-sheet-vs-vanilla counts, reported so
+      the change of gate hides nothing.  Neither the rung nor TILING3`s
+      proposal can meet them (1 of 7 and 4 of 7 on the grain).
+
+THE RUNG AND TILING3`S PROPOSAL:
+   variant                   bias |  rep  swl |      G1   G2 | G1bnd G2bd | litG litB |   ALL
+   rung (footprint)          0.00 |  0/7  7/7 |  -26.7%  7/7 |   2/6  7/7 |  1/7  0/7 |     -
+   TILING3 proposal         -1.00 |  6/7  2/7 |   +2.0%  0/7 |   2/6  5/7 |  4/7  0/7 |     -
+
+STAGE 1 -- the geometry at bias -1.00, and STAGE 2 -- the bias sweep:
+   variant                   bias |  rep  swl |      G1   G2 | G1bnd G2bd | litG litB |   ALL
+   H1 hex 256               -1.00 |  5/7  7/7 |   +3.6%  0/7 |   2/6  5/7 |  4/7  0/7 |     -
+   H1 hex 341               -1.00 |  5/7  7/7 |   +3.7%  0/7 |   2/6  5/7 |  4/7  0/7 |     -
+   H1 hex 512               -1.00 |  5/7  7/7 |   +3.5%  0/7 |   2/6  5/7 |  4/7  0/7 |     -
+   H1 hex 683               -1.00 |  2/7  7/7 |   +3.3%  0/7 |   2/6  5/7 |  4/7  0/7 |     -
+   H1 hex 341 no-varnorm    -1.00 |  5/7  7/7 |  -19.4%  7/7 |   2/6  4/7 |  2/7  0/7 |     -
+   H2 341 b1.0 none         -1.00 |  3/7  7/7 |   +3.4%  0/7 |   2/6  5/7 |  4/7  0/7 |     -
+   H2 341 b1.0 quad         -1.00 |  5/7  7/7 |   +3.5%  0/7 |   2/6  5/7 |  4/7  0/7 |     -
+   H2 341 b1.0 free         -1.00 |  5/7  7/7 |   +2.9%  0/7 |   2/6  5/7 |  4/7  0/7 |     -
+   H2 683 b1.0 none         -1.00 |  0/7  7/7 |   +3.3%  0/7 |   2/6  5/7 |  4/7  0/7 |     -
+   H2 683 b1.0 quad         -1.00 |  2/7  7/7 |   +3.2%  0/7 |   2/6  5/7 |  4/7  0/7 |     -
+   H2 683 b1.0 free         -1.00 |  4/7  7/7 |   +3.1%  0/7 |   2/6  5/7 |  4/7  0/7 |     -
+   H2 341 b0.25 none        -1.00 |  3/7  7/7 |   +3.8%  0/7 |   2/6  5/7 |  4/7  0/7 |     -
+   H2 341 b0.50 none        -1.00 |  3/7  7/7 |   +3.6%  0/7 |   2/6  5/7 |  4/7  0/7 |     -
+   H1 hex 256                0.00 |  6/7  7/7 |  -25.4%  7/7 |   1/6  3/7 |  1/7  0/7 |     -
+   H1 hex 256               -0.50 |  6/7  7/7 |   -9.9%  0/7 |   2/6  5/7 |  4/7  0/7 |     -
+   H1 hex 256               -0.75 |  5/7  7/7 |   -3.7%  0/7 |   2/6  5/7 |  3/7  0/7 |     -
+   H1 hex 256               -1.25 |  5/7  7/7 |  +14.2%  0/7 |   3/6  5/7 |  3/7  0/7 |     -
+   H1 hex 341                0.00 |  5/7  7/7 |  -25.8%  7/7 |   1/6  3/7 |  1/7  0/7 |     -
+   H1 hex 341               -0.50 |  5/7  7/7 |  -10.0%  0/7 |   2/6  5/7 |  4/7  0/7 |     -
+   H1 hex 341               -0.75 |  5/7  7/7 |   -3.8%  0/7 |   2/6  5/7 |  3/7  0/7 |     -
+   H1 hex 341               -1.25 |  5/7  7/7 |  +14.4%  0/7 |   3/6  5/7 |  3/7  0/7 |     -
+   H1 hex 341 no-varnorm     0.00 |  5/7  6/7 |  -38.8%  3/7 |   1/6  2/7 |  0/7  0/7 |     -
+   H1 hex 341 no-varnorm    -0.50 |  5/7  7/7 |  -28.1%  7/7 |   2/6  2/7 |  0/7  0/7 |     -
+   H1 hex 341 no-varnorm    -0.75 |  5/7  7/7 |  -24.2%  7/7 |   2/6  3/7 |  1/7  0/7 |     -
+   H1 hex 341 no-varnorm    -1.25 |  5/7  7/7 |  -12.5%  5/7 |   2/6  4/7 |  3/7  0/7 |     -
+
+NOTHING GATES 7 OF 7 UNDER THE DECIDED GATES EITHER.
+What is binding, counted over all 25 variants:
+   repeat  (per sheet)           0 of 25 variants pass
+   swirl   (per sheet)          24 of 25 variants pass
+   G1      (median grain)       20 of 25 variants pass
+   G2      (per sheet vs rung)   5 of 25 variants pass
+   G1-band (six medians)         0 of 25 variants pass
+   G2-band (per sheet vs rung)   0 of 25 variants pass
+   closest: H1 hex 341 no-varnorm @ -1.00
+
+THE REPEAT, SHEET BY SHEET, on the variants with the best repeat count:
+   (every number beside the ceiling it is judged against)
+   H1 hex 256 @ bias 0.00  (repeat 6 of 7)
+      sheet            amp absCeil   ratio ratCeil verdict
+      (    -20,24)   0.256   0.264   0.143   0.448 ok
+      (    -20,20)   0.346   0.264   0.279   0.448 ok
+      (   -36,-20)   0.058   0.264   0.420   0.448 ok
+      (    -4,-20)   0.303   0.264   0.152   0.448 REPEAT RED
+      (    28,-20)   0.200   0.264   0.192   0.448 ok
+      (     -4,16)   0.225   0.264   0.123   0.448 ok
+      (     24,16)   0.141   0.264   0.121   0.448 ok
+   H1 hex 256 @ bias -0.50  (repeat 6 of 7)
+      sheet            amp absCeil   ratio ratCeil verdict
+      (    -20,24)   0.262   0.264   0.146   0.448 ok
+      (    -20,20)   0.356   0.264   0.283   0.448 ok
+      (   -36,-20)   0.054   0.264   0.357   0.448 ok
+      (    -4,-20)   0.316   0.264   0.160   0.448 REPEAT RED
+      (    28,-20)   0.228   0.264   0.220   0.448 ok
+      (     -4,16)   0.222   0.264   0.122   0.448 ok
+      (     24,16)   0.148   0.264   0.127   0.448 ok
+   H1 hex 256 @ bias -1.00  (repeat 5 of 7)
+      sheet            amp absCeil   ratio ratCeil verdict
+      (    -20,24)   0.270   0.264   0.151   0.448 REPEAT RED
+      (    -20,20)   0.348   0.264   0.276   0.448 ok
+      (   -36,-20)   0.050   0.264   0.328   0.448 ok
+      (    -4,-20)   0.320   0.264   0.163   0.448 REPEAT RED
+      (    28,-20)   0.232   0.264   0.224   0.448 ok
+      (     -4,16)   0.222   0.264   0.123   0.448 ok
+      (     24,16)   0.146   0.264   0.126   0.448 ok
+   H1 hex 341 @ bias -1.00  (repeat 5 of 7)
+      sheet            amp absCeil   ratio ratCeil verdict
+      (    -20,24)   0.255   0.264   0.141   0.448 ok
+      (    -20,20)   0.337   0.264   0.274   0.448 ok
+      (   -36,-20)   0.108   0.264   0.681   0.448 REPEAT RED
+      (    -4,-20)   0.317   0.264   0.159   0.448 REPEAT RED
+      (    28,-20)   0.154   0.264   0.147   0.448 ok
+      (     -4,16)   0.183   0.264   0.103   0.448 ok
+      (     24,16)   0.151   0.264   0.129   0.448 ok
+

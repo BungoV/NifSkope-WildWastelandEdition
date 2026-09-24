@@ -1,0 +1,5 @@
+blast_n4   cards     viewport 512x768 orbit iou mean 0.5736 orbit counted 24 of 24 
+blast_n8   cards     viewport 512x768 orbit iou mean 0.7483 orbit counted 24 of 24 
+maple_n4   cards     viewport 512x768 orbit iou mean 0.3674 orbit counted 24 of 24 
+dead_n4    cards     viewport 512x768 orbit iou mean 0.6073 orbit counted 24 of 24 
+rock_n4    cards     viewport 512x768 orbit iou mean 0.8305 orbit counted 24 of 24 

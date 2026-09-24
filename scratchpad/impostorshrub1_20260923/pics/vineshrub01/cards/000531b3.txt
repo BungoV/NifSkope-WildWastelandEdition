@@ -1,0 +1,81 @@
+model vineshrub01.nif
+projection ortho
+rangekept LOD1 (no shape fills the LOD0 slot)
+ranges L2_VineShrub01:0 - L1_VineShrub01:0 425+212
+lodm Materials\Landscape\Plants\Vine.lodm none textures\landscape\plants\vines01_d.dds
+mask alpha
+emissive 0 shapes 0
+front 785.477 402.71 -9.28992 60.8678 91.9978
+side 785.477 402.71 -9.28992 60.8678 91.9978
+class 128 128
+gap 8 8
+coverage 16 128 160
+oct 8 128 128 326.661 326.661 -9.28992 60.8678 91.9978 3072 legacy 512 spec1
+frameoff 0 0 30.2819 39.3272
+frameoff 1 0 29.8887 38.5406
+frameoff 2 0 28.3156 37.3608
+frameoff 3 0 14.9443 37.7541
+frameoff 4 0 0.39328 37.7541
+frameoff 5 0 -3.53946 37.7541
+frameoff 6 0 10.6183 37.3608
+frameoff 7 0 7.47217 37.3608
+frameoff 0 1 23.5963 53.0917
+frameoff 1 1 30.2819 11.4049
+frameoff 2 1 29.4954 5.89908
+frameoff 3 1 18.877 -4.32599
+frameoff 4 1 12.978 1.57309
+frameoff 5 1 -5.11253 13.3712
+frameoff 6 1 -2.7529 23.5963
+frameoff 7 1 12.5847 37.7541
+frameoff 0 2 11.0116 45.2263
+frameoff 1 2 17.304 14.1578
+frameoff 2 2 30.6752 3.53944
+frameoff 3 2 27.1358 -7.0789
+frameoff 4 2 0 -9.83179
+frameoff 5 2 4.71927 29.1021
+frameoff 6 2 17.304 30.6752
+frameoff 7 2 21.63 37.3608
+frameoff 0 3 2.35963 38.1474
+frameoff 1 3 2.35963 21.63
+frameoff 2 3 7.86544 10.6183
+frameoff 3 3 30.6752 -6.68562
+frameoff 4 3 6.29236 40.1137
+frameoff 5 3 14.5511 35.3945
+frameoff 6 3 3.93272 33.0348
+frameoff 7 3 10.6183 37.3608
+frameoff 0 4 -10.6183 37.3608
+frameoff 1 4 -20.0569 24.3829
+frameoff 2 4 -14.9443 7.0789
+frameoff 3 4 -6.29236 -19.6636
+frameoff 4 4 -30.2819 5.89908
+frameoff 5 4 -7.86544 8.2587
+frameoff 6 4 -3.53945 20.8434
+frameoff 7 4 -2.35963 38.1474
+frameoff 0 5 -21.63 37.3608
+frameoff 1 5 -18.4838 17.6972
+frameoff 2 5 -6.29236 -3.93272
+frameoff 3 5 0.786545 -5.89908
+frameoff 4 5 -24.7761 12.978
+frameoff 5 5 -35.7877 3.93272
+frameoff 6 5 -18.4838 22.0232
+frameoff 7 5 -11.0116 45.2263
+frameoff 0 6 -12.5847 37.7541
+frameoff 1 6 -9.83179 20.8434
+frameoff 2 6 5.50581 14.1578
+frameoff 3 6 -0.786545 6.29235
+frameoff 4 6 -17.6972 12.1914
+frameoff 5 6 -27.1358 25.9559
+frameoff 6 6 -30.2819 31.855
+frameoff 7 6 -23.5963 53.0917
+frameoff 0 7 -7.47217 37.3608
+frameoff 1 7 -10.6183 37.3608
+frameoff 2 7 3.53946 37.7541
+frameoff 3 7 -0.39328 37.7541
+frameoff 4 7 -14.9443 37.7541
+frameoff 5 7 -28.3156 37.3608
+frameoff 6 7 -29.8887 38.5406
+frameoff 7 7 -30.2819 39.3272
+frameclamped 0
+aa 4 1024 4.875
+framefit 303.213 298.887 308.718 305.572
+orthofit 359.336 359.336 0

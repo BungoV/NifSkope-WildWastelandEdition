@@ -1,1 +1,79 @@
-REFUSED: Fallout4.exe is running
+=== dim 4  cells 0,0..3,3  extra: 
+File ' "materials/lod/commonwealthrockslab01lod_d.lodm" ' not found in archives
+File ' "materials/lod/commonwealthrockslab02lod_d.lodm" ' not found in archives
+File ' "materials/lod/plutoniumwell_lod_d.lodm" ' not found in archives
+File ' "materials/lod/residentialstreetlamp01lod_d.lodm" ' not found in archives
+File ' "materials/lod/rwstone01lod_d.lodm" ' not found in archives
+File ' "materials/lod/sidingahouselod_d.lodm" ' not found in archives
+File ' "materials/lod/wrhs01lod_d.lodm" ' not found in archives
+arrays written: 32 textures in 8 arrays (2 legacy + 0 pbr size classes, 0 layers from a .lodm, 0 sources own-emit with a lit colour); 32 shapes carry a layer, 0 without UV2, 0 textures unreadable
+merged: 50 shapes -> 33 across 1 chunks
+far rings: 0 shapes cut in 0 chunks: 0 -> 0 triangles, 0 -> 0 vertices (0 shapes and 0 groups kept whole, 0 restored; worst error 0.0 units)
+card arrays: no placement in the chunks stands on an octahedral card
+2 chunk(s) written to E:/Projects/NifskopeWildWastelandEdition/scratchpad/handoff_fo4cs/samples/L4, 0 empty, 0 failed
+rc=0
+=== dim 8  cells 0,0..3,3  extra: 
+File ' "materials/lod/brickahouselod_d.lodm" ' not found in archives
+File ' "materials/lod/brickbhouselod_d.lodm" ' not found in archives
+File ' "materials/lod/churchlod_d.lodm" ' not found in archives
+File ' "materials/lod/plutoniumwell_lod_d.lodm" ' not found in archives
+File ' "materials/lod/rwstone01lod_d.lodm" ' not found in archives
+File ' "materials/lod/sidingahouselod_d.lodm" ' not found in archives
+File ' "materials/lod/wrhs01lod_d.lodm" ' not found in archives
+arrays written: 36 textures in 8 arrays (2 legacy + 0 pbr size classes, 0 layers from a .lodm, 0 sources own-emit with a lit colour); 36 shapes carry a layer, 0 without UV2, 2 textures unreadable
+merged: 63 shapes -> 40 across 1 chunks
+far rings: 0 shapes cut in 0 chunks: 0 -> 0 triangles, 0 -> 0 vertices (0 shapes and 0 groups kept whole, 0 restored; worst error 0.0 units)
+card arrays written: 2 card sets in 8 arrays (2 groups), 157 C lines carry a layer, 0 sets unreadable
+2 chunk(s) written to E:/Projects/NifskopeWildWastelandEdition/scratchpad/handoff_fo4cs/samples/L8, 0 empty, 0 failed
+rc=0
+=== dim 16  cells 0,0..3,3  extra: --slot-fallback
+File ' "materials/lod/modernhouse02lod_d.lodm" ' not found in archives
+File ' "materials/lod/plutoniumwell_lod_d.lodm" ' not found in archives
+File ' "materials/lod/residentialstreetlamp01lod_d.lodm" ' not found in archives
+File ' "materials/lod/rwstone01lod_d.lodm" ' not found in archives
+File ' "materials/lod/sidingahouselod_d.lodm" ' not found in archives
+File ' "materials/lod/watertowerlod_d.lodm" ' not found in archives
+File ' "materials/lod/wrhs01lod_d.lodm" ' not found in archives
+arrays written: 48 textures in 8 arrays (2 legacy + 0 pbr size classes, 0 layers from a .lodm, 0 sources own-emit with a lit colour); 48 shapes carry a layer, 0 without UV2, 18 textures unreadable
+merged: 99 shapes -> 69 across 1 chunks
+far rings: 34 shapes cut in 1 chunks: 150688 -> 118967 triangles, 290249 -> 244697 vertices (35 shapes and 9715 groups kept whole, 1 restored; worst error 512.0 units)
+card arrays written: 18 card sets in 32 arrays (8 groups), 2662 C lines carry a layer, 0 sets unreadable
+2 chunk(s) written to E:/Projects/NifskopeWildWastelandEdition/scratchpad/handoff_fo4cs/samples/L16, 0 empty, 0 failed
+rc=0
+=== dim 32  cells 0,0..3,3  extra: --slot-fallback
+File ' "materials/lod/modernhouse02lod_d.lodm" ' not found in archives
+File ' "materials/lod/plutoniumwell_lod_d.lodm" ' not found in archives
+File ' "materials/lod/residentialstreetlamp01lod_d.lodm" ' not found in archives
+File ' "materials/lod/rwstone01lod_d.lodm" ' not found in archives
+File ' "materials/lod/sidingahouselod_d.lodm" ' not found in archives
+File ' "materials/lod/watertowerlod_d.lodm" ' not found in archives
+File ' "materials/lod/wrhs01lod_d.lodm" ' not found in archives
+arrays written: 56 textures in 8 arrays (2 legacy + 0 pbr size classes, 0 layers from a .lodm, 0 sources own-emit with a lit colour); 57 shapes carry a layer, 0 without UV2, 18 textures unreadable
+merged: 109 shapes -> 80 across 1 chunks
+far rings: 43 shapes cut in 1 chunks: 376426 -> 289648 triangles, 656866 -> 543559 vertices (37 shapes and 13099 groups kept whole, 57 restored; worst error 1024.0 units)
+card arrays written: 18 card sets in 32 arrays (8 groups), 8316 C lines carry a layer, 0 sets unreadable
+2 chunk(s) written to E:/Projects/NifskopeWildWastelandEdition/scratchpad/handoff_fo4cs/samples/L32, 0 empty, 0 failed
+rc=0
+=== VT pyramid  cells 0,0..3,3
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/lod/decomainlod.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/lod/sidingkitalod.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/lod/sidingkitalod.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/lod/sidingkitalod.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/lod/pgaragelod01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/lod/sidingkitalod.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/lod/sidingkitalod.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/lod/decomainlod.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/lod/decomainlod.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/lod/decomainlod.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/lod/decomainlod.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/lod/decolobbylod.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/lod/sidingkitalod.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/lod/decomainlod.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/lod/decolobbylod.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/lod/sidingkitalod.bgsm" ' not found in archives
+[2] Commonwealth.4.0.0.BTO
+merged: 50 shapes -> 33 across 1 chunks
+far rings: 0 shapes cut in 0 chunks: 0 -> 0 triangles, 0 -> 0 vertices (0 shapes and 0 groups kept whole, 0 restored; worst error 0.0 units)
+2 chunk(s) written to E:/Projects/NifskopeWildWastelandEdition/scratchpad/handoff_fo4cs/samples/vt/tex, 0 empty, 0 failed
+rc=0
+SAMPLES-DONE

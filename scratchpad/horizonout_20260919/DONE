@@ -1,0 +1,49 @@
+horizonout 2026-09-19 08:53 CEDT -- lane complete.
+
+EXE  release/NifSkope.exe  22,837,760 B  2026-09-19 07:53:57
+     sha1 251ecc6fdc7991d2b64e4a8e3fbc3baa3b1e6ac2
+     `find src tests res lib -newer release/NifSkope.exe` prints nothing.
+RUNG release/NifSkope.before_horizonout.exe 22,949,376 B 2026-09-18 23:47 -- untouched,
+     still bakes and draws the retired route.
+
+WHAT LANDED
+  - the baked far-shadow horizon route is REMOVED (object v8 per-vertex stream,
+    .lodt role-7 sheets, the march, the switches, the census words, the
+    `horizon` / `horizonbin` viewer channels and WW_SUN);
+  - readers stay TOLERANT: a v8 file opens, the retired stream is named
+    (`vertexHorizonBytes 864136`) and skipped;
+  - a default bake stamps .lodi v7; `--scrappable` stamps v9 (= v7 + instance
+    flag LODI_INST_SCRAPPABLE 64). .lodo stays v4;
+  - the ruled proximity identity join is the DEFAULT (non-tree, mesh-to-mesh
+    64 u); `--identity-join legacy` is the byte-for-byte way back;
+  - docs: the retired sections became history paragraphs; FO4CS plan s9 rewritten
+    to the identity route + director addenda 2, 3 and 4 (addendum 4 = bungo's
+    07:3x distance ruling, now s9.2a).
+
+GATES on this exe (logs: <session scratchpad>/gates2/)
+  lodi_v7 12/0 | lodl_channels 54/0 | lodgen_slab 16/0 | lodl_open 23/0
+  lodgen_native 29/0 | lodgen_defaults 31/0 | render_shot 82/0
+  lodgen_scrappable 9/0 | lodgen_identjoin 10/0
+  native_open 17/1/2 RED -- `covered 0.8978 >= 0.90`. NOT this lane: the exe from
+  BEFORE the lane gives 0.8978 / FAT 1.2225 / FLIP 0.1421, identical to four
+  decimals. Cause is the harness window (persisted geometry is MAXIMIZED now, so
+  WW_RENDER_SIZE 1024x1024 is floored and the viewport came back 1822x989,
+  upp 8.99 instead of 16.0). Left RED and unowned.
+  render_shot.sh carried NO horizon row, so nothing was re-based; the list is empty.
+
+PICTURES  scratchpad/horizonout_20260919/images/ -- eight, all through the render
+  hook, all looked at. 8_scrappable_yes.png (cell 10,-1, mean 0.063 of 63 = the
+  four TreeCluster03) shows the bit SET and CLEAR in one frame.
+
+SKILLS  nifskope-ww-lodgen + nifskope-ww-render-shot rewritten; NEW ww-anchored-cut
+  and ww-retire-a-bake-route. All four in BOTH trees, identical by sha256 (report s8/s11).
+
+MISTAKES.md  five entries this lane (575,461 -> 575,593 B, CR 9,228 -> 9,278).
+  The big one: my own cut lost the region-origin subtraction in src/lodinative.cpp
+  and every count, mean and CRC stayed green while the picture was empty.
+
+NOT COMMITTED, NOT STASHED. WW_CHANGES.md and HANDOFF.md untouched -- their text is
+in report s9 for the director to splice.
+
+REPORT  scratchpad/horizonout_20260919/lane_horizonout_report.md (47,923 B, LF).
+HIS OPEN WINDOW NEEDS A RESTART.

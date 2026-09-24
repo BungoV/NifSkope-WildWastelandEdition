@@ -1,0 +1,61 @@
+TILING4 -- H1 and H2 on the selection seven
+
+ceilings: repeat 0.264 absolute (or the sheet`s own no-repeat control where
+          that is higher) and 0.448 over the sheet`s own null floor;
+          grain and every one of the six bands within 20 % of the SAME
+          CHUNK`s vanilla sheet; swirl by this lane`s frozen law.
+the columns after the gate counts are the WORST sheet of the seven.
+
+THE RUNG AND TILING3`S PROPOSAL, scored the same way, for reference:
+   variant                   bias |  rep  grn  swl  bnd |   ALL   repMax  ratMax grainMax swirlMx
+   rung (footprint)          0.00 |  0/7  1/7  7/7  0/7 |   0/7    1.707  69.306  +152.1%  2.1651
+   TILING3 proposal         -1.00 |  6/7  4/7  2/7  0/7 |   0/7    0.340   0.698  +279.2%  3.0455
+
+STAGE 1 -- the geometry, at a fixed mip bias of -1.00
+   variant                   bias |  rep  grn  swl  bnd |   ALL   repMax  ratMax grainMax swirlMx
+   H1 hex 256               -1.00 |  5/7  4/7  7/7  0/7 |   0/7    0.348   0.328  +299.3%  1.9546
+   H1 hex 341               -1.00 |  5/7  4/7  7/7  0/7 |   0/7    0.337   0.681  +298.5%  1.9319
+   H1 hex 512               -1.00 |  5/7  4/7  7/7  0/7 |   0/7    0.348   0.828  +300.5%  1.9300
+   H1 hex 683               -1.00 |  2/7  4/7  7/7  0/7 |   0/7    0.531   0.971  +300.8%  1.8740
+   H1 hex 341 no-varnorm    -1.00 |  5/7  2/7  7/7  0/7 |   0/7    0.340   0.707  +182.3%  2.2435
+   H2 341 b1.0 none         -1.00 |  3/7  4/7  7/7  0/7 |   0/7    0.512   3.213  +300.0%  1.9657
+   H2 341 b1.0 quad         -1.00 |  5/7  4/7  7/7  0/7 |   0/7    0.454   1.926  +299.3%  1.6459
+   H2 341 b1.0 free         -1.00 |  5/7  4/7  7/7  0/7 |   0/7    0.485   3.066  +291.1%  1.6773
+   H2 683 b1.0 none         -1.00 |  0/7  4/7  7/7  0/7 |   0/7    0.544   0.952  +299.3%  1.8668
+   H2 683 b1.0 quad         -1.00 |  2/7  4/7  7/7  0/7 |   0/7    0.368   0.950  +301.1%  1.6349
+   H2 683 b1.0 free         -1.00 |  4/7  4/7  7/7  0/7 |   0/7    0.379   1.160  +291.8%  1.7475
+   H2 341 b0.25 none        -1.00 |  3/7  4/7  7/7  0/7 |   0/7    0.434   1.962  +298.9%  1.9131
+   H2 341 b0.50 none        -1.00 |  3/7  4/7  7/7  0/7 |   0/7    0.471   2.929  +299.5%  1.9355
+
+STAGE 2 -- the mip bias, on the three geometries with the best repeat +
+           swirl out of stage 1: H1 hex 256, H1 hex 341, H1 hex 341 no-varnorm
+   variant                   bias |  rep  grn  swl  bnd |   ALL   repMax  ratMax grainMax swirlMx
+   H1 hex 256                0.00 |  6/7  1/7  7/7  0/7 |   0/7    0.346   0.420  +156.7%  2.2613
+   H1 hex 256               -0.50 |  6/7  4/7  7/7  0/7 |   0/7    0.356   0.357  +249.3%  2.0764
+   H1 hex 256               -0.75 |  5/7  3/7  7/7  0/7 |   0/7    0.353   0.335  +277.3%  2.0208
+   H1 hex 256               -1.00 |  5/7  4/7  7/7  0/7 |   0/7  (from stage 1)
+   H1 hex 256               -1.25 |  5/7  3/7  7/7  0/7 |   0/7    0.342   0.342  +327.8%  1.8593
+   H1 hex 341                0.00 |  5/7  1/7  7/7  0/7 |   0/7    0.344   0.727  +156.5%  2.2323
+   H1 hex 341               -0.50 |  5/7  4/7  7/7  0/7 |   0/7    0.345   0.778  +249.1%  2.0359
+   H1 hex 341               -0.75 |  5/7  3/7  7/7  0/7 |   0/7    0.342   0.746  +276.9%  1.9888
+   H1 hex 341               -1.00 |  5/7  4/7  7/7  0/7 |   0/7  (from stage 1)
+   H1 hex 341               -1.25 |  5/7  3/7  7/7  0/7 |   0/7    0.332   0.621  +326.8%  1.8386
+   H1 hex 341 no-varnorm     0.00 |  5/7  0/7  6/7  0/7 |   0/7    0.346   0.737   +82.2%  2.4264
+   H1 hex 341 no-varnorm    -0.50 |  5/7  0/7  7/7  0/7 |   0/7    0.347   0.820  +147.4%  2.2927
+   H1 hex 341 no-varnorm    -0.75 |  5/7  1/7  7/7  0/7 |   0/7    0.344   0.782  +167.0%  2.2697
+   H1 hex 341 no-varnorm    -1.00 |  5/7  2/7  7/7  0/7 |   0/7  (from stage 1)
+   H1 hex 341 no-varnorm    -1.25 |  5/7  3/7  7/7  0/7 |   0/7    0.337   0.641  +202.2%  2.1785
+
+NOTHING GATED 7 OF 7 ON THE SELECTION SEVEN.  Best: H1 hex 256 at bias 0.00,
+0 of 7.  H3 (the warp capped at strain 0.5 plus H1/H2) is the brief`s
+next rung and it is what happens next.
+
+THE WINNER, SHEET BY SHEET (every number beside its own ceiling):
+   sheet         repeat    ceil   ratio |   grain vanilla |   swirl    ceil |  bands verdict
+   ( -20,  24)   0.256   0.264   0.143 |   3.491   4.476 |  1.5475  2.3927 | 173.5% RED: grain bands
+   ( -20,  20)   0.346   0.366   0.279 |   3.261   5.459 |  1.3007  2.0209 | 122.2% RED: grain bands
+   ( -36, -20)   0.058   0.264   0.420 |   2.952   3.485 |  0.8420  1.9610 | 564.8% RED: bands
+   (  -4, -20)   0.303   0.264   0.152 |   3.853   5.523 |  1.2262  2.1764 |  98.2% RED: repeat grain bands
+   (  28, -20)   0.200   0.264   0.192 |   3.520   1.371 |  0.9743  2.5432 | 230.5% RED: grain bands
+   (  -4,  16)   0.225   0.264   0.123 |   3.339   6.933 |  2.2613  2.2962 | 101.3% RED: grain bands
+   (  24,  16)   0.141   0.264   0.121 |   3.004   4.076 |  1.1243  3.2846 | 368.5% RED: grain bands

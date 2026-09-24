@@ -1,0 +1,32 @@
+wrote E:\Projects\NifskopeWildWastelandEdition\scratchpad\hkx1_20260910\synthetic.xml (76 bytes of data in the clip)
+  ok   HKXPACK packed the synthetic XML (rc=0) 
+  ok   python xml: 10 frames decoded
+  ok   python xml: first frame yaw 0.0000 deg (expected 0.00 +- 0.05)
+  ok   python xml: last frame yaw 90.0000 deg (expected 90.00 +- 0.05)
+  ok   python xml: worst yaw error over 10 frames 0.0214 deg <= 0.05
+  ok   python xml: translation (1.5, 0, 0) on every frame
+  ok   python xml: scale (1, 1, 1) on every frame
+  ok   python xml: no x/y component beyond quantization
+  ok   python hkx: 10 frames decoded
+  ok   python hkx: first frame yaw 0.0000 deg (expected 0.00 +- 0.05)
+  ok   python hkx: last frame yaw 90.0000 deg (expected 90.00 +- 0.05)
+  ok   python hkx: worst yaw error over 10 frames 0.0214 deg <= 0.05
+  ok   python hkx: translation (1.5, 0, 0) on every frame
+  ok   python hkx: scale (1, 1, 1) on every frame
+  ok   python hkx: no x/y component beyond quantization
+  ok   c++ xml: 10 frames decoded
+  ok   c++ xml: first frame yaw 0.0000 deg (expected 0.00 +- 0.05)
+  ok   c++ xml: last frame yaw 90.0000 deg (expected 90.00 +- 0.05)
+  ok   c++ xml: worst yaw error over 10 frames 0.0214 deg <= 0.05
+  ok   c++ xml: translation (1.5, 0, 0) on every frame
+  ok   c++ xml: scale (1, 1, 1) on every frame
+  ok   c++ xml: no x/y component beyond quantization
+  ok   c++ hkx: 10 frames decoded
+  ok   c++ hkx: first frame yaw 0.0000 deg (expected 0.00 +- 0.05)
+  ok   c++ hkx: last frame yaw 90.0000 deg (expected 90.00 +- 0.05)
+  ok   c++ hkx: worst yaw error over 10 frames 0.0214 deg <= 0.05
+  ok   c++ hkx: translation (1.5, 0, 0) on every frame
+  ok   c++ hkx: scale (1, 1, 1) on every frame
+  ok   c++ hkx: no x/y component beyond quantization
+29 checks, 0 failures
+PASS

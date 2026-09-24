@@ -1,0 +1,26 @@
+LAND1 gate A9 -- R5 recalibration, measured on this exe
+   -rwxr-xr-x 1 bungo 197609 21861376 Sep 12 07:42 /e/Projects/NifskopeWildWastelandEdition/release/NifSkope.exe
+
+== --road-detail 0 ==
+   centreline texels 9777 of 262144 (road-coloured 27055)
+   ceiling  vanilla vs vanilla     1.0000
+   floor    ours --no-roads        0.1354
+   after    ours --roads           0.3435
+   reference the ground around it  0.4039
+   mean |colour error| vs vanilla, --no-roads  whole tile 22.44  on the centreline 38.04
+   mean |colour error| vs vanilla, --roads     whole tile 20.80  on the centreline 22.34
+   bar 1  after >= 2 x floor       0.3435 >= 0.2708  ok
+   bar 2  after >= 0.8 x reference 0.3435 >= 0.3231  ok
+
+== --road-detail 1 ==
+   centreline texels 9777 of 262144 (road-coloured 27055)
+   ceiling  vanilla vs vanilla     1.0000
+   floor    ours --no-roads        0.1354
+   after    ours --roads           0.3078
+   reference the ground around it  0.4029
+   mean |colour error| vs vanilla, --no-roads  whole tile 22.44  on the centreline 38.04
+   mean |colour error| vs vanilla, --roads     whole tile 20.95  on the centreline 23.64
+   bar 1  after >= 2 x floor       0.3078 >= 0.2708  ok
+   bar 2  after >= 0.8 x reference 0.3078 >= 0.3223  FAIL
+
+(exit 1 above on a bar not met is the POINT of the measurement, not a failure of it)

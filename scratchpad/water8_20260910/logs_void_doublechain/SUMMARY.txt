@@ -1,0 +1,52 @@
+### water_ui start 05:23:53
+### files_tab rc=1  05:23:55
+  FAIL (5) every tool button explains itself (0 without)
+  FAIL (4) unload restores the bind pose BYTE-identically
+28 checks, 2 failures
+FAIL
+
+### animws start 05:23:55
+### animws rc=1  05:23:57
+FAIL: the harness wrote no log (did the app exit before it ran, or is port 42317 bound?)
+
+### water_mark start 05:23:57
+### water_ui rc=0  05:24:07
+59 checks, 0 failures, 0 skips
+PASS
+water_ui.sh PASS
+
+### ui_align start 05:24:07
+### water_mark rc=1  05:24:11
+64 checks, 3 failures
+FAIL: the model self-test exited 1
+FAIL: no dock log -- did the app exit before the harness ran?
+
+### water_window start 05:24:12
+### ui_align rc=0  05:24:17
+11 checks, 0 failures
+PASS
+
+### top_bar start 05:24:17
+### top_bar rc=1  05:24:23
+43 checks, 5 failures
+FAIL
+
+### files_tab start 05:24:23
+### files_tab rc=1  05:24:29
+  FAIL (5) every tool button explains itself (0 without)
+  FAIL (4) unload restores the bind pose BYTE-identically
+28 checks, 2 failures
+FAIL
+
+### water_window rc=0  05:24:29
+46 checks, 0 failures
+PASS
+water_window.sh PASS
+
+### animws start 05:24:29
+### lodl_water start 05:24:29
+### animws rc=0  05:24:37
+57 checks, 0 failures, 1 skips
+PASS
+
+### water_mark start 05:24:37

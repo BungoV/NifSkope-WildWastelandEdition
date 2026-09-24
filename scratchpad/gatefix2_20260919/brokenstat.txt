@@ -1,0 +1,8 @@
+--- ts ---
+ALL TEXELS  n=295936  tilt deg: mean 98.13 median 97.37 p90 118.19 p99 135.35 max 155.81
+ALL TEXELS  |d(N.L)| own vs flat: mean 0.1594  sd 0.1926
+PREDICTED own vs flat: mean|dY| 3.18 luma  (gate measured 3.10)
+--- scram ---
+ALL TEXELS  n=295936  tilt deg: mean 20.83 median 19.53 p90 36.11 p99 51.30 max 67.95
+ALL TEXELS  |d(N.L)| own vs flat: mean 0.1930  sd 0.1984
+PREDICTED own vs flat: mean|dY| 3.85 luma  (gate measured 3.10)

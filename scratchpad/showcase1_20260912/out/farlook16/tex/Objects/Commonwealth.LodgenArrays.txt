@@ -1,0 +1,5 @@
+# lodgen texture arrays 5: family class layer lodm color normal mask emissive source emissiveScale (docs/LODGEN_IMPOSTOR_SPEC.md)
+legacy 256x256 0 data\Textures\Terrain\Commonwealth\Objects\Commonwealth.LodgenArrays.256x256.lodm lod/concretewalllod01_d.dds lod/concretewalllod01_n.dds lod/concretewalllod01_s.dds - lod/concretewalllod01_d.dds 0
+legacy 256x256 1 data\Textures\Terrain\Commonwealth\Objects\Commonwealth.LodgenArrays.256x256.lodm LOD/HWOverpassLOD_d.dds LOD/HWOverpassLOD_n.dds LOD/HWOverpassLOD_s.dds - lod/hwoverpasslod_d.dds 0
+legacy 256x256 2 data\Textures\Terrain\Commonwealth\Objects\Commonwealth.LodgenArrays.256x256.lodm lod/metalsiloplateslod01_d.dds lod/metalsiloplateslod01_n.dds lod/metalsiloplateslod01_s.dds - lod/metalsiloplateslod01_d.dds 0
+legacy 256x256 3 data\Textures\Terrain\Commonwealth\Objects\Commonwealth.LodgenArrays.256x256.lodm LOD/QryLargeLOD_d.dds LOD/QryLargeLOD_n.dds LOD/QryLargeLOD_s.dds - lod/qrylargelod_d.dds 0

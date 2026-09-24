@@ -1,0 +1,257 @@
+[New Thread 50892.0x7e60]
+[New Thread 50892.0xd618]
+[New Thread 50892.0xcb44]
+[New Thread 50892.0xb554]
+[New Thread 50892.0xc608]
+[New Thread 50892.0x84a0]
+[New Thread 50892.0xd484]
+[New Thread 50892.0xb0e4]
+[New Thread 50892.0xd290]
+[New Thread 50892.0xd5cc]
+[New Thread 50892.0xd5b4]
+[New Thread 50892.0xd144]
+[New Thread 50892.0xd21c]
+roads placements=0 meshes=0 shapes=0 decalshapes=0 triangles=0 texels=0 decaltexels=0 alpharejected=0 refused_noload=0 refused_notexture=0 refusals=none chunk=-16,32 dim=4
+bake -16,32: 0 px no land, 262144 px no base tex, 0 samples unresolvable LTEX []
+roads placements=0 meshes=0 shapes=0 decalshapes=0 triangles=0 texels=0 decaltexels=0 alpharejected=0 refused_noload=0 refused_notexture=0 refusals=none chunk=-20,32 dim=4
+bake -20,32: 0 px no land, 262144 px no base tex, 0 samples unresolvable LTEX []
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+
+Thread 8 "QThread" received signal SIGSEGV, Segmentation fault.
+[Switching to Thread 50892.0xd484]
+0x00007ffd7c818b5e in ucrtbase!memcmp () from C:\Windows\System32\ucrtbase.dll
+  Id   Target Id                     Frame 
+  1    Thread 50892.0xcd88           0x00007ffd7efcdc94 in ntdll!ZwDelayExecution () from C:\Windows\SYSTEM32\ntdll.dll
+  2    Thread 50892.0x7e60           0x00007ffd7efd10a4 in ntdll!ZwWaitForWorkViaWorkerFactory () from C:\Windows\SYSTEM32\ntdll.dll
+  3    Thread 50892.0xd618           0x00007ffd7efd10a4 in ntdll!ZwWaitForWorkViaWorkerFactory () from C:\Windows\SYSTEM32\ntdll.dll
+  4    Thread 50892.0xcb44           0x00007ffd7efd10a4 in ntdll!ZwWaitForWorkViaWorkerFactory () from C:\Windows\SYSTEM32\ntdll.dll
+  5    Thread 50892.0xb554 "QThread" 0x00007ffd7efcdf74 in ntdll!ZwFlushBuffersFile () from C:\Windows\SYSTEM32\ntdll.dll
+  6    Thread 50892.0xc608 "QThread" 0x00007ffd7efd75b3 in ntdll!memset () from C:\Windows\SYSTEM32\ntdll.dll
+  7    Thread 50892.0x84a0 "QThread" 0x00007ffd7efd1044 in ntdll!ZwWaitForAlertByThreadId () from C:\Windows\SYSTEM32\ntdll.dll
+* 8    Thread 50892.0xd484 "QThread" 0x00007ffd7c818b5e in ucrtbase!memcmp () from C:\Windows\System32\ucrtbase.dll
+  9    Thread 50892.0xb0e4 "QThread" 0x00007ffca5487f73 in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+  10   Thread 50892.0xd290 "QThread" 0x00007ffd7efd1044 in ntdll!ZwWaitForAlertByThreadId () from C:\Windows\SYSTEM32\ntdll.dll
+  11   Thread 50892.0xd5cc "QThread" 0x00007ffd7efcd714 in ntdll!ZwWriteFile () from C:\Windows\SYSTEM32\ntdll.dll
+  12   Thread 50892.0xd5b4 "QThread" 0x00007ffd7efce0b4 in ntdll!ZwCreateFile () from C:\Windows\SYSTEM32\ntdll.dll
+  13   Thread 50892.0xd144 "QThread" 0x00007ffd7efcdaf4 in ntdll!ZwSetInformationFile () from C:\Windows\SYSTEM32\ntdll.dll
+  14   Thread 50892.0xd21c "QThread" 0x00007ffd30bf3891 in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\libwinpthread-1.dll
+
+Thread 14 (Thread 50892.0xd21c "QThread"):
+#0  0x00007ffd30bf3891 in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\libwinpthread-1.dll
+#1  0x00007ff6adc51571 in NifItem::operator new(unsigned long long) ()
+#2  0x00007ff6ae0269aa in NifModel::insertType(NifItem*, NifData const&, int) ()
+#3  0x00007ff6ae026da2 in NifModel::insertType(NifItem*, NifData const&, int) ()
+#4  0x00007ff6ae029f04 in NifModel::updateArraySizeImpl(NifItem*) ()
+#5  0x00007ff6ae02a4ab in NifModel::loadItem(NifItem*, NifIStream&) ()
+#6  0x00007ff6ae034c37 in NifModel::load(QIODevice&, char const*) ()
+#7  0x00007ff6ae818351 in (anonymous namespace)::lodgenLoadModel(QString const&, QString const&, QHash<QString, QList<(anonymous namespace)::LodSrcShape> >&) ()
+#8  0x00007ff6ae81cb1f in (anonymous namespace)::LodgenRoadSet::addPlacement(EsmWorld const&, QString const&, QSet<QString>&, unsigned int, Vector3 const&, Matrix const&, float) ()
+#9  0x00007ff6ae8202c9 in (anonymous namespace)::LodgenRoadSet::gather(EsmWorld const&, QString const&, int, int, int, int) ()
+#10 0x00007ff6ae825a6a in lodgenBakeTerrainTextures(EsmWorld const&, int, int, int, QString const&, QString const&, LodgenCoverOptions const&, LodgenBakeCaches*, QString*) ()
+#11 0x00007ff6ae8daf74 in (anonymous namespace)::runJob(LodgenChunkJob const&, int, LodgenChunkPassOptions const&, (anonymous namespace)::Worker&, LodgenWriter*, bool, LodgenChunkOutcome&) ()
+#12 0x00007ff6ae8ddcb4 in (anonymous namespace)::ChunkThread::run() ()
+#13 0x00007ffca5592303 in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#14 0x00007ffd7d617374 in KERNEL32!BaseThreadInitThunk () from C:\Windows\System32\kernel32.dll
+#15 0x00007ffd7ef7cc91 in ntdll!RtlUserThreadStart () from C:\Windows\SYSTEM32\ntdll.dll
+#16 0x0000000000000000 in ?? ()
+
+Thread 13 (Thread 50892.0xd144 "QThread"):
+#0  0x00007ffd7efcdaf4 in ntdll!ZwSetInformationFile () from C:\Windows\SYSTEM32\ntdll.dll
+#1  0x00007ffd7cbb9412 in SetEndOfFile () from C:\Windows\System32\KernelBase.dll
+#2  0x00007ffca556c661 in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#3  0x00007ffca5568c4b in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#4  0x00007ffca53339b4 in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#5  0x00007ffca531f60e in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#6  0x00007ff6ae811cfe in (anonymous namespace)::lodgenWriteDds(QString const&, int, int, std::vector<unsigned int, std::allocator<unsigned int> > const&, bool, int, bool, unsigned int, unsigned int) [clone .constprop.0] ()
+#7  0x00007ff6ae824ccd in lodgenBakeTerrainTextures(EsmWorld const&, int, int, int, QString const&, QString const&, LodgenCoverOptions const&, LodgenBakeCaches*, QString*) ()
+#8  0x00007ff6ae8daf74 in (anonymous namespace)::runJob(LodgenChunkJob const&, int, LodgenChunkPassOptions const&, (anonymous namespace)::Worker&, LodgenWriter*, bool, LodgenChunkOutcome&) ()
+#9  0x00007ff6ae8ddcb4 in (anonymous namespace)::ChunkThread::run() ()
+#10 0x00007ffca5592303 in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#11 0x00007ffd7d617374 in KERNEL32!BaseThreadInitThunk () from C:\Windows\System32\kernel32.dll
+#12 0x00007ffd7ef7cc91 in ntdll!RtlUserThreadStart () from C:\Windows\SYSTEM32\ntdll.dll
+#13 0x0000000000000000 in ?? ()
+
+Thread 12 (Thread 50892.0xd5b4 "QThread"):
+#0  0x00007ffd7efce0b4 in ntdll!ZwCreateFile () from C:\Windows\SYSTEM32\ntdll.dll
+#1  0x00007ffd7cb7ea39 in KERNELBASE!CreateFileW () from C:\Windows\System32\KernelBase.dll
+#2  0x00007ffd7cb7e4a6 in KERNELBASE!CreateFileW () from C:\Windows\System32\KernelBase.dll
+#3  0x00007ffca5568c0f in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#4  0x00007ffca53339b4 in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#5  0x00007ffca531f60e in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#6  0x00007ff6ae811cfe in (anonymous namespace)::lodgenWriteDds(QString const&, int, int, std::vector<unsigned int, std::allocator<unsigned int> > const&, bool, int, bool, unsigned int, unsigned int) [clone .constprop.0] ()
+#7  0x00007ff6ae8241d0 in lodgenBakeTerrainTextures(EsmWorld const&, int, int, int, QString const&, QString const&, LodgenCoverOptions const&, LodgenBakeCaches*, QString*) ()
+#8  0x00007ff6ae8daf74 in (anonymous namespace)::runJob(LodgenChunkJob const&, int, LodgenChunkPassOptions const&, (anonymous namespace)::Worker&, LodgenWriter*, bool, LodgenChunkOutcome&) ()
+#9  0x00007ff6ae8ddcb4 in (anonymous namespace)::ChunkThread::run() ()
+#10 0x00007ffca5592303 in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#11 0x00007ffd7d617374 in KERNEL32!BaseThreadInitThunk () from C:\Windows\System32\kernel32.dll
+#12 0x00007ffd7ef7cc91 in ntdll!RtlUserThreadStart () from C:\Windows\SYSTEM32\ntdll.dll
+#13 0x0000000000000000 in ?? ()
+
+Thread 11 (Thread 50892.0xd5cc "QThread"):
+#0  0x00007ffd7efcd714 in ntdll!ZwWriteFile () from C:\Windows\SYSTEM32\ntdll.dll
+#1  0x00007ffd7cb7d7e6 in WriteFile () from C:\Windows\System32\KernelBase.dll
+#2  0x00007ffd7c7e9bdc in ucrtbase!_wfsopen () from C:\Windows\System32\ucrtbase.dll
+#3  0x00007ffd7c7e7da7 in ucrtbase!_write () from C:\Windows\System32\ucrtbase.dll
+#4  0x00007ffd7c7e7c2f in ucrtbase!_write () from C:\Windows\System32\ucrtbase.dll
+#5  0x00007ffd7c7e8e7f in ucrtbase!_fwrite_nolock () from C:\Windows\System32\ucrtbase.dll
+#6  0x00007ffd7c7e8cbb in ucrtbase!fwrite () from C:\Windows\System32\ucrtbase.dll
+#7  0x00007ffd7c7e8c53 in ucrtbase!fwrite () from C:\Windows\System32\ucrtbase.dll
+#8  0x00007ffd7c7e8c17 in ucrtbase!fwrite () from C:\Windows\System32\ucrtbase.dll
+#9  0x00007ffca5333175 in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#10 0x00007ffca53200c0 in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#11 0x00007ffca543a025 in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#12 0x00007ffca52ee429 in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#13 0x00007ffca530459f in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#14 0x00007ff6ae373832 in Game::GameManager::GameResources::get_file(QByteArray&, std::basic_string_view<char, std::char_traits<char> > const&) ()
+#15 0x00007ff6ae373ad4 in Game::GameManager::get_file(QByteArray&, Game::GameMode, QString const&, char const*, char const*) ()
+#16 0x00007ff6ae800c9b in (anonymous namespace)::lodgenReadAsset(QString const&, QString const&, char const*, char const*, QByteArray&) ()
+#17 0x00007ff6ae81a629 in (anonymous namespace)::lodgenLoadModel(QString const&, QString const&, QHash<QString, QList<(anonymous namespace)::LodSrcShape> >&) ()
+#18 0x00007ff6ae81cb1f in (anonymous namespace)::LodgenRoadSet::addPlacement(EsmWorld const&, QString const&, QSet<QString>&, unsigned int, Vector3 const&, Matrix const&, float) ()
+#19 0x00007ff6ae8202c9 in (anonymous namespace)::LodgenRoadSet::gather(EsmWorld const&, QString const&, int, int, int, int) ()
+
+Thread 10 (Thread 50892.0xd290 "QThread"):
+#0  0x00007ffd7efd1044 in ntdll!ZwWaitForAlertByThreadId () from C:\Windows\SYSTEM32\ntdll.dll
+#1  0x00007ffd7ef94d9d in ntdll!RtlWaitOnAddress () from C:\Windows\SYSTEM32\ntdll.dll
+#2  0x00007ffd7ef94c52 in ntdll!RtlWaitOnAddress () from C:\Windows\SYSTEM32\ntdll.dll
+#3  0x00007ffd7ef94a6d in ntdll!RtlWaitOnAddress () from C:\Windows\SYSTEM32\ntdll.dll
+#4  0x00007ffd7ef5fcb4 in ntdll!RtlEnterCriticalSection () from C:\Windows\SYSTEM32\ntdll.dll
+#5  0x00007ffd7ef5fae2 in ntdll!RtlEnterCriticalSection () from C:\Windows\SYSTEM32\ntdll.dll
+#6  0x00007ffd7c7e8c4a in ucrtbase!fwrite () from C:\Windows\System32\ucrtbase.dll
+#7  0x00007ffd7c7e8c17 in ucrtbase!fwrite () from C:\Windows\System32\ucrtbase.dll
+#8  0x00007ffca5333175 in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#9  0x00007ffca53200c0 in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#10 0x00007ffca543a025 in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#11 0x00007ffca52ee429 in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#12 0x00007ffca530459f in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#13 0x00007ff6ae373832 in Game::GameManager::GameResources::get_file(QByteArray&, std::basic_string_view<char, std::char_traits<char> > const&) ()
+#14 0x00007ff6ae373ad4 in Game::GameManager::get_file(QByteArray&, Game::GameMode, QString const&, char const*, char const*) ()
+#15 0x00007ff6ae800c9b in (anonymous namespace)::lodgenReadAsset(QString const&, QString const&, char const*, char const*, QByteArray&) ()
+#16 0x00007ff6ae81a629 in (anonymous namespace)::lodgenLoadModel(QString const&, QString const&, QHash<QString, QList<(anonymous namespace)::LodSrcShape> >&) ()
+#17 0x00007ff6ae81cb1f in (anonymous namespace)::LodgenRoadSet::addPlacement(EsmWorld const&, QString const&, QSet<QString>&, unsigned int, Vector3 const&, Matrix const&, float) ()
+#18 0x00007ff6ae8202c9 in (anonymous namespace)::LodgenRoadSet::gather(EsmWorld const&, QString const&, int, int, int, int) ()
+#19 0x00007ff6ae825a6a in lodgenBakeTerrainTextures(EsmWorld const&, int, int, int, QString const&, QString const&, LodgenCoverOptions const&, LodgenBakeCaches*, QString*) ()
+
+Thread 9 (Thread 50892.0xb0e4 "QThread"):
+#0  0x00007ffca5487f73 in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#1  0x00007ffca5438589 in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#2  0x00007ff6ae4c5f8e in (anonymous namespace)::cliMessageHandler(QtMsgType, QMessageLogContext const&, QString const&) ()
+#3  0x00007ffca52ee429 in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#4  0x00007ffca530459f in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#5  0x00007ff6ae373832 in Game::GameManager::GameResources::get_file(QByteArray&, std::basic_string_view<char, std::char_traits<char> > const&) ()
+#6  0x00007ff6ae373ad4 in Game::GameManager::get_file(QByteArray&, Game::GameMode, QString const&, char const*, char const*) ()
+#7  0x00007ff6ae800c9b in (anonymous namespace)::lodgenReadAsset(QString const&, QString const&, char const*, char const*, QByteArray&) ()
+#8  0x00007ff6ae81a629 in (anonymous namespace)::lodgenLoadModel(QString const&, QString const&, QHash<QString, QList<(anonymous namespace)::LodSrcShape> >&) ()
+#9  0x00007ff6ae81cb1f in (anonymous namespace)::LodgenRoadSet::addPlacement(EsmWorld const&, QString const&, QSet<QString>&, unsigned int, Vector3 const&, Matrix const&, float) ()
+#10 0x00007ff6ae8202c9 in (anonymous namespace)::LodgenRoadSet::gather(EsmWorld const&, QString const&, int, int, int, int) ()
+#11 0x00007ff6ae825a6a in lodgenBakeTerrainTextures(EsmWorld const&, int, int, int, QString const&, QString const&, LodgenCoverOptions const&, LodgenBakeCaches*, QString*) ()
+#12 0x00007ff6ae8daf74 in (anonymous namespace)::runJob(LodgenChunkJob const&, int, LodgenChunkPassOptions const&, (anonymous namespace)::Worker&, LodgenWriter*, bool, LodgenChunkOutcome&) ()
+#13 0x00007ff6ae8ddcb4 in (anonymous namespace)::ChunkThread::run() ()
+#14 0x00007ffca5592303 in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#15 0x00007ffd7d617374 in KERNEL32!BaseThreadInitThunk () from C:\Windows\System32\kernel32.dll
+#16 0x00007ffd7ef7cc91 in ntdll!RtlUserThreadStart () from C:\Windows\SYSTEM32\ntdll.dll
+#17 0x0000000000000000 in ?? ()
+
+Thread 8 (Thread 50892.0xd484 "QThread"):
+#0  0x00007ffd7c818b5e in ucrtbase!memcmp () from C:\Windows\System32\ucrtbase.dll
+#1  0x00007ffca5714829 in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#2  0x00007ffca5487f11 in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#3  0x00007ffca5438589 in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#4  0x00007ff6ae4c5f8e in (anonymous namespace)::cliMessageHandler(QtMsgType, QMessageLogContext const&, QString const&) ()
+#5  0x00007ffca52ee429 in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#6  0x00007ffca530459f in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#7  0x00007ff6ae373832 in Game::GameManager::GameResources::get_file(QByteArray&, std::basic_string_view<char, std::char_traits<char> > const&) ()
+#8  0x00007ff6ae373ad4 in Game::GameManager::get_file(QByteArray&, Game::GameMode, QString const&, char const*, char const*) ()
+#9  0x00007ff6ae800c9b in (anonymous namespace)::lodgenReadAsset(QString const&, QString const&, char const*, char const*, QByteArray&) ()
+#10 0x00007ff6ae81a629 in (anonymous namespace)::lodgenLoadModel(QString const&, QString const&, QHash<QString, QList<(anonymous namespace)::LodSrcShape> >&) ()
+#11 0x00007ff6ae81cb1f in (anonymous namespace)::LodgenRoadSet::addPlacement(EsmWorld const&, QString const&, QSet<QString>&, unsigned int, Vector3 const&, Matrix const&, float) ()
+#12 0x00007ff6ae8202c9 in (anonymous namespace)::LodgenRoadSet::gather(EsmWorld const&, QString const&, int, int, int, int) ()
+#13 0x00007ff6ae825a6a in lodgenBakeTerrainTextures(EsmWorld const&, int, int, int, QString const&, QString const&, LodgenCoverOptions const&, LodgenBakeCaches*, QString*) ()
+#14 0x00007ff6ae8daf74 in (anonymous namespace)::runJob(LodgenChunkJob const&, int, LodgenChunkPassOptions const&, (anonymous namespace)::Worker&, LodgenWriter*, bool, LodgenChunkOutcome&) ()
+#15 0x00007ff6ae8ddcb4 in (anonymous namespace)::ChunkThread::run() ()
+#16 0x00007ffca5592303 in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#17 0x00007ffd7d617374 in KERNEL32!BaseThreadInitThunk () from C:\Windows\System32\kernel32.dll
+#18 0x00007ffd7ef7cc91 in ntdll!RtlUserThreadStart () from C:\Windows\SYSTEM32\ntdll.dll
+#19 0x0000000000000000 in ?? ()
+
+Thread 7 (Thread 50892.0x84a0 "QThread"):
+#0  0x00007ffd7efd1044 in ntdll!ZwWaitForAlertByThreadId () from C:\Windows\SYSTEM32\ntdll.dll
+#1  0x00007ffd7ef94d9d in ntdll!RtlWaitOnAddress () from C:\Windows\SYSTEM32\ntdll.dll
+#2  0x00007ffd7ef94c52 in ntdll!RtlWaitOnAddress () from C:\Windows\SYSTEM32\ntdll.dll
+#3  0x00007ffd7ef94a6d in ntdll!RtlWaitOnAddress () from C:\Windows\SYSTEM32\ntdll.dll
+#4  0x00007ffd7ef5fcb4 in ntdll!RtlEnterCriticalSection () from C:\Windows\SYSTEM32\ntdll.dll
+#5  0x00007ffd7ef5fae2 in ntdll!RtlEnterCriticalSection () from C:\Windows\SYSTEM32\ntdll.dll
+#6  0x00007ffd7c7e8c4a in ucrtbase!fwrite () from C:\Windows\System32\ucrtbase.dll
+#7  0x00007ffd7c7e8c17 in ucrtbase!fwrite () from C:\Windows\System32\ucrtbase.dll
+#8  0x00007ffca5333175 in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#9  0x00007ffca53200c0 in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#10 0x00007ffca543a025 in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#11 0x00007ffca52ee429 in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#12 0x00007ffca530459f in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#13 0x00007ff6ae373832 in Game::GameManager::GameResources::get_file(QByteArray&, std::basic_string_view<char, std::char_traits<char> > const&) ()
+#14 0x00007ff6ae373ad4 in Game::GameManager::get_file(QByteArray&, Game::GameMode, QString const&, char const*, char const*) ()
+#15 0x00007ff6ae800c9b in (anonymous namespace)::lodgenReadAsset(QString const&, QString const&, char const*, char const*, QByteArray&) ()
+#16 0x00007ff6ae81a629 in (anonymous namespace)::lodgenLoadModel(QString const&, QString const&, QHash<QString, QList<(anonymous namespace)::LodSrcShape> >&) ()
+#17 0x00007ff6ae81cb1f in (anonymous namespace)::LodgenRoadSet::addPlacement(EsmWorld const&, QString const&, QSet<QString>&, unsigned int, Vector3 const&, Matrix const&, float) ()
+#18 0x00007ff6ae8202c9 in (anonymous namespace)::LodgenRoadSet::gather(EsmWorld const&, QString const&, int, int, int, int) ()
+#19 0x00007ff6ae825a6a in lodgenBakeTerrainTextures(EsmWorld const&, int, int, int, QString const&, QString const&, LodgenCoverOptions const&, LodgenBakeCaches*, QString*) ()
+
+Thread 6 (Thread 50892.0xc608 "QThread"):
+#0  0x00007ffd7efd75b3 in ntdll!memset () from C:\Windows\SYSTEM32\ntdll.dll
+#1  0x00007ffd7ef547b1 in ntdll!RtlFreeHeap () from C:\Windows\SYSTEM32\ntdll.dll
+#2  0x00007ffd7c7df05b in ucrtbase!_free_base () from C:\Windows\System32\ucrtbase.dll
+#3  0x00007ff6adffb7f4 in BaseModel::getItemInternal(NifItem const*, QLatin1String const&, bool) const ()
+#4  0x00007ff6ae818ac7 in (anonymous namespace)::lodgenLoadModel(QString const&, QString const&, QHash<QString, QList<(anonymous namespace)::LodSrcShape> >&) ()
+#5  0x00007ff6ae81cb1f in (anonymous namespace)::LodgenRoadSet::addPlacement(EsmWorld const&, QString const&, QSet<QString>&, unsigned int, Vector3 const&, Matrix const&, float) ()
+#6  0x00007ff6ae8202c9 in (anonymous namespace)::LodgenRoadSet::gather(EsmWorld const&, QString const&, int, int, int, int) ()
+#7  0x00007ff6ae825a6a in lodgenBakeTerrainTextures(EsmWorld const&, int, int, int, QString const&, QString const&, LodgenCoverOptions const&, LodgenBakeCaches*, QString*) ()
+#8  0x00007ff6ae8daf74 in (anonymous namespace)::runJob(LodgenChunkJob const&, int, LodgenChunkPassOptions const&, (anonymous namespace)::Worker&, LodgenWriter*, bool, LodgenChunkOutcome&) ()
+#9  0x00007ff6ae8ddcb4 in (anonymous namespace)::ChunkThread::run() ()
+#10 0x00007ffca5592303 in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#11 0x00007ffd7d617374 in KERNEL32!BaseThreadInitThunk () from C:\Windows\System32\kernel32.dll
+#12 0x00007ffd7ef7cc91 in ntdll!RtlUserThreadStart () from C:\Windows\SYSTEM32\ntdll.dll
+#13 0x0000000000000000 in ?? ()
+
+Thread 5 (Thread 50892.0xb554 "QThread"):
+#0  0x00007ffd7efcdf74 in ntdll!ZwFlushBuffersFile () from C:\Windows\SYSTEM32\ntdll.dll
+#1  0x00007ffd7cbc539d in KERNELBASE!FlushFileBuffers () from C:\Windows\System32\KernelBase.dll
+#2  0x00007ffca5568776 in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#3  0x00007ffca535247a in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#4  0x00007ff6aeafff06 in LodgenWriter::Impl::Thread::run() ()
+#5  0x00007ffca5592303 in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#6  0x00007ffd7d617374 in KERNEL32!BaseThreadInitThunk () from C:\Windows\System32\kernel32.dll
+#7  0x00007ffd7ef7cc91 in ntdll!RtlUserThreadStart () from C:\Windows\SYSTEM32\ntdll.dll
+#8  0x0000000000000000 in ?? ()
+
+Thread 4 (Thread 50892.0xcb44):
+#0  0x00007ffd7efd10a4 in ntdll!ZwWaitForWorkViaWorkerFactory () from C:\Windows\SYSTEM32\ntdll.dll
+#1  0x00007ffd7ef7d407 in ntdll!TpReleaseCleanupGroupMembers () from C:\Windows\SYSTEM32\ntdll.dll
+#2  0x00007ffd7d617374 in KERNEL32!BaseThreadInitThunk () from C:\Windows\System32\kernel32.dll
+#3  0x00007ffd7ef7cc91 in ntdll!RtlUserThreadStart () from C:\Windows\SYSTEM32\ntdll.dll
+#4  0x0000000000000000 in ?? ()
+
+Thread 3 (Thread 50892.0xd618):
+#0  0x00007ffd7efd10a4 in ntdll!ZwWaitForWorkViaWorkerFactory () from C:\Windows\SYSTEM32\ntdll.dll
+#1  0x00007ffd7ef7d407 in ntdll!TpReleaseCleanupGroupMembers () from C:\Windows\SYSTEM32\ntdll.dll
+#2  0x00007ffd7d617374 in KERNEL32!BaseThreadInitThunk () from C:\Windows\System32\kernel32.dll
+#3  0x00007ffd7ef7cc91 in ntdll!RtlUserThreadStart () from C:\Windows\SYSTEM32\ntdll.dll
+#4  0x0000000000000000 in ?? ()
+
+Thread 2 (Thread 50892.0x7e60):
+#0  0x00007ffd7efd10a4 in ntdll!ZwWaitForWorkViaWorkerFactory () from C:\Windows\SYSTEM32\ntdll.dll
+#1  0x00007ffd7ef7d407 in ntdll!TpReleaseCleanupGroupMembers () from C:\Windows\SYSTEM32\ntdll.dll
+#2  0x00007ffd7d617374 in KERNEL32!BaseThreadInitThunk () from C:\Windows\System32\kernel32.dll
+#3  0x00007ffd7ef7cc91 in ntdll!RtlUserThreadStart () from C:\Windows\SYSTEM32\ntdll.dll
+#4  0x0000000000000000 in ?? ()
+
+Thread 1 (Thread 50892.0xcd88):
+#0  0x00007ffd7efcdc94 in ntdll!ZwDelayExecution () from C:\Windows\SYSTEM32\ntdll.dll
+#1  0x00007ffd7cb962de in SleepEx () from C:\Windows\System32\KernelBase.dll
+#2  0x00007ff6ae8dd0ff in lodgenRunChunkPass(QList<LodgenChunkJob> const&, LodgenChunkPassOptions const&, std::function<void (LodgenChunkOutcome const&)> const&, std::function<bool ()> const&, long long*, long long*, QString*) ()
+#3  0x00007ff6ae5028c0 in (anonymous namespace)::cmdLodgen(QString const&, bool, unsigned int, bool, int, int, bool, int, int, int, QString const&, bool, int const*, QString const&, bool, QString const&, bool, QString const&, bool, bool, QString const&, int, QString const&, bool, bool, bool, bool, bool, bool, float, bool, int, int, bool, int, int, QString const&, int, QString const&, QString const&, bool, bool, QString const&, QString const&, bool, bool, bool, LodgenSimplifyOptions const&, LodgenCoverOptions const&, LodgenVtOptions const&, QString const&, int, bool, QString const&, QString const&, bool, int, QString const&, QString const&, QString const&, QString const&, QString const&, bool, bool, bool, bool, bool, int, int, int) ()
+#4  0x00007ff6ae513c23 in nifskopeCliMain(QList<QString> const&) ()
+#5  0x00007ff6ae4bb7fb in qMain(int, char**) ()
+#6  0x00007ff6aead41da in qtEntryPoint() ()
+#7  0x00007ff6adc510fa in __tmainCRTStartup () at D:/W/B/src/mingw-w64/mingw-w64-crt/crt/crtexe.c:276
+#8  0x00007ffd7d617374 in KERNEL32!BaseThreadInitThunk () from C:\Windows\System32\kernel32.dll
+#9  0x00007ffd7ef7cc91 in ntdll!RtlUserThreadStart () from C:\Windows\SYSTEM32\ntdll.dll
+#10 0x0000000000000000 in ?? ()

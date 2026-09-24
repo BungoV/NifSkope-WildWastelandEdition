@@ -1,0 +1,57 @@
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltroaddetails01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphalt01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltcrackdecal01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltroaddetails01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphalt01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltcrackdecal01.bgsm" ' not found in archives
+roads placements=32 meshes=13 shapes=0 decalshapes=0 triangles=0 texels=0 decaltexels=0 alpharejected=0 refused_noload=0 refused_notexture=0 refused_raised=0 raised_bases=0 blend_texels=0 refused_sidewalk=0 sidewalk_bases=0 ground_shapes=18 ground_texels=0 refusals=none chunk=-20,24 dim=4
+[1] Commonwealth.4.-20.24.BTR
+[2] Commonwealth.4.-20.24.BTO
+chunk pass: 1 job(s) over 1 worker(s)
+File ' "materials/architecture/shacks/shacklod01.lodm" ' not found in archives
+File ' "materials/lod/rockslab01lod.lodm" ' not found in archives
+File ' "materials/lod/rockslab02lod.lodm" ' not found in archives
+File ' "materials/lod/trees/blastedforesttrunkslod.lodm" ' not found in archives
+File ' "materials/lod/trees/elmbrancheslod.lodm" ' not found in archives
+File ' "materials/lod/trees/elmtrunkslod.lodm" ' not found in archives
+File ' "materials/lod/trees/maplebrancheslod.lodm" ' not found in archives
+File ' "materials/lod/trees/mapletrunkslod.lodm" ' not found in archives
+File ' "materials/lod/commonwealthrockslab01lod_d.lodm" ' not found in archives
+File ' "materials/lod/commonwealthrockslab02lod_d.lodm" ' not found in archives
+arrays written: 10 textures in 4 arrays (1 legacy + 0 pbr size classes, 0 layers from a .lodm, 0 sources own-emit with a lit colour); 10 shapes carry a layer, 10 without UV2, 0 textures unreadable
+atlas: 8 textures in cells, 8 shapes moved, 2 tiling shapes kept direct (6 source textures copied loose, 0 unavailable), 0 textures past capacity
+atlas written: Commonwealth.LodgenObjects.DDS (+_n, _s)
+far rings: 0 shapes cut in 0 chunks: 0 -> 0 triangles, 0 -> 0 vertices (0 shapes and 0 groups kept whole, 0 restored; worst error 0.0 units)
+2 chunk(s) written to E:/Projects/NifskopeWildWastelandEdition/scratchpad/audit1_20260916/mergedbg/w/raw/obj, 0 empty, 0 failed
+stage times: landscape 0.0 s, meshes 0.2 s, textures 1.8 s, impostors 0.0 s
+bake census: threads 16, chunk threads 1 bound by default, chunk jobs 1, chunk workers 1, peak working set: 1.05 GB (1128767488 bytes), bto built in the mod folder, 1 chunk(s), 0 dropped, 0 bytes freed, layout n/a (no FO4CS-target file written)
+File ' "textures/landscape/ground/rubblerock01_d.dds" ' not found in archives
+File ' "textures/landscape/ground/rubblerock01_n.dds" ' not found in archives
+File ' "textures/landscape/ground/rubblerock01_s.dds" ' not found in archives
+File ' "textures/landscape/ground/driedgrass01_d.dds" ' not found in archives
+File ' "textures/landscape/ground/driedgrass01_n.dds" ' not found in archives
+File ' "textures/landscape/ground/driedgrass01_s.dds" ' not found in archives
+File ' "textures/landscape/ground/rootseroded01_d.dds" ' not found in archives
+File ' "textures/landscape/ground/rootseroded01_n.dds" ' not found in archives
+File ' "textures/landscape/ground/rootseroded01_s.dds" ' not found in archives
+File ' "textures/landscape/ground/riverbedrocks02wet_d.dds" ' not found in archives
+File ' "textures/landscape/ground/riverbedrocks02wet_n.dds" ' not found in archives
+File ' "textures/landscape/ground/riverbedrocks02wet_s.dds" ' not found in archives
+File ' "textures/landscape/ground/forestfloor01_d.dds" ' not found in archives
+File ' "textures/landscape/ground/forestfloor01_n.dds" ' not found in archives
+File ' "textures/landscape/ground/forestfloor01_s.dds" ' not found in archives
+File ' "textures/landscape/ground/fallenleaves01_d.dds" ' not found in archives
+File ' "textures/landscape/ground/fallenleaves01_n.dds" ' not found in archives
+File ' "textures/landscape/ground/fallenleaves01_s.dds" ' not found in archives
+File ' "textures/landscape/ground/riverbedsilt01_d.dds" ' not found in archives
+File ' "textures/landscape/ground/riverbedsilt01_n.dds" ' not found in archives
+File ' "textures/landscape/ground/riverbedsilt01_s.dds" ' not found in archives
+File ' "textures/landscape/ground/nf_scrubgrass01.dds" ' not found in archives
+File ' "materials/landscape/ground/nf_scrubgrass01.bgsm" ' not found in archives
+File ' "textures/landscape/ground/nf_dirt01.dds" ' not found in archives
+File ' "materials/landscape/ground/nf_dirt01.bgsm" ' not found in archives
+bake-record: E:/Projects/NifskopeWildWastelandEdition/scratchpad/audit1_20260916/mergedbg/w/raw/obj/Commonwealth.lodb, 1 plugin(s), 0 resource(s), 20 switch token(s), 1 chunk(s), 4 census line(s), end 9 file(s) 1433464 bytes, record 2185 bytes

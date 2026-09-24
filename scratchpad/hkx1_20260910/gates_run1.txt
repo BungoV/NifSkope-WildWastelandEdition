@@ -1,0 +1,140 @@
+hkxanim gates: dump=E:\Projects\NifskopeWildWastelandEdition\release\hkxanim_dump.exe dir=E:\Projects\NifskopeWildWastelandEdition\scratchpad\hkx1_20260910
+  ok   (a) tpose_idle xml: both decoders ran (py rc=0, c++ rc=0)
+  ok   (a) tpose_idle xml: header lines identical
+  ok   (a) tpose_idle xml: same (frame, track) set, 188 rows
+  ok   (a) tpose_idle xml: track->bone identical on every row
+  ok   (a) tpose_idle xml: worst translation difference 0 <= 1e-4
+  FAIL (a) tpose_idle xml: worst rotation difference 0.0282 deg <= 0.01
+  ok   (a) tpose_idle xml: scale identical (worst 0)
+  ok   (a) tpose_idle xml: root motion 2 frames identical (worst 0)
+  ok   (a) tpose_idle xml: worst spline quaternion length deviation 1.11e-16 <= 0.05
+  ok   (f) tpose_idle xml: block 0 walk ended at 1440, block ends at 1440
+  ok   (a) tpose_idle hkx: both decoders ran (py rc=0, c++ rc=0)
+  ok   (a) tpose_idle hkx: header lines identical
+  ok   (a) tpose_idle hkx: same (frame, track) set, 188 rows
+  ok   (a) tpose_idle hkx: track->bone identical on every row
+  ok   (a) tpose_idle hkx: worst translation difference 0 <= 1e-4
+  FAIL (a) tpose_idle hkx: worst rotation difference 0.0282 deg <= 0.01
+  ok   (a) tpose_idle hkx: scale identical (worst 0)
+  ok   (a) tpose_idle hkx: root motion 2 frames identical (worst 0)
+  ok   (a) tpose_idle hkx: worst spline quaternion length deviation 1.11e-16 <= 0.05
+  ok   (f) tpose_idle hkx: block 0 walk ended at 1440, block ends at 1440
+  ok   (f) tpose_idle: decoded 2 frames, header numFrames 2
+  ok   (f) tpose_idle: duration 0.333333 == (numFrames-1)*frameDuration 0.333333
+  ok   (f) tpose_idle: 2 root-motion samples, motion duration 0.333333
+  ok   (a) jog xml: both decoders ran (py rc=0, c++ rc=0)
+  ok   (a) jog xml: header lines identical
+  ok   (a) jog xml: same (frame, track) set, 2185 rows
+  ok   (a) jog xml: track->bone identical on every row
+  ok   (a) jog xml: worst translation difference 3.6e-06 <= 1e-4
+  FAIL (a) jog xml: worst rotation difference 0.0325 deg <= 0.01
+  ok   (a) jog xml: scale identical (worst 0)
+  ok   (a) jog xml: root motion 23 frames identical (worst 0)
+  ok   (a) jog xml: worst spline quaternion length deviation 2.23e-05 <= 0.05
+  ok   (f) jog xml: block 0 walk ended at 5388, block ends at 5388
+  ok   (a) jog hkx: both decoders ran (py rc=0, c++ rc=0)
+  ok   (a) jog hkx: header lines identical
+  ok   (a) jog hkx: same (frame, track) set, 2185 rows
+  ok   (a) jog hkx: track->bone identical on every row
+  ok   (a) jog hkx: worst translation difference 3.6e-06 <= 1e-4
+  FAIL (a) jog hkx: worst rotation difference 0.0325 deg <= 0.01
+  ok   (a) jog hkx: scale identical (worst 0)
+  ok   (a) jog hkx: root motion 23 frames identical (worst 0)
+  ok   (a) jog hkx: worst spline quaternion length deviation 2.23e-05 <= 0.05
+  ok   (f) jog hkx: block 0 walk ended at 5388, block ends at 5388
+  ok   (f) jog: decoded 23 frames, header numFrames 23
+  ok   (f) jog: duration 0.733333 == (numFrames-1)*frameDuration 0.733333
+  ok   (f) jog: 23 root-motion samples, motion duration 0.733333
+  ok   (a) turn xml: both decoders ran (py rc=0, c++ rc=0)
+  ok   (a) turn xml: header lines identical
+  ok   (a) turn xml: same (frame, track) set, 2945 rows
+  ok   (a) turn xml: track->bone identical on every row
+  ok   (a) turn xml: worst translation difference 3.8e-06 <= 1e-4
+  FAIL (a) turn xml: worst rotation difference 0.0328 deg <= 0.01
+  ok   (a) turn xml: scale identical (worst 0)
+  ok   (a) turn xml: root motion 31 frames identical (worst 0)
+  ok   (a) turn xml: worst spline quaternion length deviation 1.63e-05 <= 0.05
+  ok   (f) turn xml: block 0 walk ended at 7332, block ends at 7332
+  ok   (a) turn hkx: both decoders ran (py rc=0, c++ rc=0)
+  ok   (a) turn hkx: header lines identical
+  ok   (a) turn hkx: same (frame, track) set, 2945 rows
+  ok   (a) turn hkx: track->bone identical on every row
+  ok   (a) turn hkx: worst translation difference 3.8e-06 <= 1e-4
+  FAIL (a) turn hkx: worst rotation difference 0.0328 deg <= 0.01
+  ok   (a) turn hkx: scale identical (worst 0)
+  ok   (a) turn hkx: root motion 31 frames identical (worst 0)
+  ok   (a) turn hkx: worst spline quaternion length deviation 1.63e-05 <= 0.05
+  ok   (f) turn hkx: block 0 walk ended at 7332, block ends at 7332
+  ok   (f) turn: decoded 31 frames, header numFrames 31
+  ok   (f) turn: duration 1.000000 == (numFrames-1)*frameDuration 1.000000
+  ok   (f) turn: 31 root-motion samples, motion duration 1.000000
+  ok   (a) twoblock xml: both decoders ran (py rc=0, c++ rc=0)
+  ok   (a) twoblock xml: header lines identical
+  ok   (a) twoblock xml: same (frame, track) set, 29545 rows
+  ok   (a) twoblock xml: track->bone identical on every row
+  ok   (a) twoblock xml: worst translation difference 3.8e-06 <= 1e-4
+  FAIL (a) twoblock xml: worst rotation difference 0.0325 deg <= 0.01
+  ok   (a) twoblock xml: scale identical (worst 0)
+  ok   (a) twoblock xml: root motion 311 frames identical (worst 0)
+  ok   (g) twoblock xml: 1 block-boundary frames decoded from both blocks, worst component difference 0.000267 <= 1e-3
+  ok   (a) twoblock xml: worst spline quaternion length deviation 1.91e-05 <= 0.05
+  ok   (f) twoblock xml: block 0 walk ended at 56004, block ends at 56004
+  ok   (f) twoblock xml: block 1 walk ended at 68264, block ends at 68264
+  ok   (a) twoblock hkx: both decoders ran (py rc=0, c++ rc=0)
+  ok   (a) twoblock hkx: header lines identical
+  ok   (a) twoblock hkx: same (frame, track) set, 29545 rows
+  ok   (a) twoblock hkx: track->bone identical on every row
+  ok   (a) twoblock hkx: worst translation difference 3.8e-06 <= 1e-4
+  FAIL (a) twoblock hkx: worst rotation difference 0.0325 deg <= 0.01
+  ok   (a) twoblock hkx: scale identical (worst 0)
+  ok   (a) twoblock hkx: root motion 311 frames identical (worst 0)
+  ok   (g) twoblock hkx: 1 block-boundary frames decoded from both blocks, worst component difference 0.000267 <= 1e-3
+  ok   (a) twoblock hkx: worst spline quaternion length deviation 1.91e-05 <= 0.05
+  ok   (f) twoblock hkx: block 0 walk ended at 56004, block ends at 56004
+  ok   (f) twoblock hkx: block 1 walk ended at 68264, block ends at 68264
+  ok   (f) twoblock: decoded 311 frames, header numFrames 311
+  ok   (f) twoblock: duration 10.333333 == (numFrames-1)*frameDuration 10.333333
+  ok   (f) twoblock: 311 root-motion samples, motion duration 10.333333
+  ok   (a) q48 xml: both decoders ran (py rc=0, c++ rc=0)
+  ok   (a) q48 xml: header lines identical
+  ok   (a) q48 xml: same (frame, track) set, 29516 rows
+  ok   (a) q48 xml: track->bone identical on every row
+  ok   (a) q48 xml: worst translation difference 3.7e-06 <= 1e-4
+  FAIL (a) q48 xml: worst rotation difference 0.0321 deg <= 0.01
+  ok   (a) q48 xml: scale identical (worst 0)
+  ok   (a) q48 xml: root motion 314 frames identical (worst 0)
+  ok   (g) q48 xml: 1 block-boundary frames decoded from both blocks, worst component difference 0.000244 <= 1e-3
+  ok   (a) q48 xml: worst spline quaternion length deviation 1.97e-05 <= 0.05
+  ok   (f) q48 xml: block 0 walk ended at 43308, block ends at 43308
+  ok   (f) q48 xml: block 1 walk ended at 54108, block ends at 54108
+  ok   (a) q48 hkx: both decoders ran (py rc=0, c++ rc=0)
+  ok   (a) q48 hkx: header lines identical
+  ok   (a) q48 hkx: same (frame, track) set, 29516 rows
+  ok   (a) q48 hkx: track->bone identical on every row
+  ok   (a) q48 hkx: worst translation difference 3.7e-06 <= 1e-4
+  FAIL (a) q48 hkx: worst rotation difference 0.0321 deg <= 0.01
+  ok   (a) q48 hkx: scale identical (worst 0)
+  ok   (a) q48 hkx: root motion 314 frames identical (worst 0)
+  ok   (g) q48 hkx: 1 block-boundary frames decoded from both blocks, worst component difference 0.000244 <= 1e-3
+  ok   (a) q48 hkx: worst spline quaternion length deviation 1.97e-05 <= 0.05
+  ok   (f) q48 hkx: block 0 walk ended at 43308, block ends at 43308
+  ok   (f) q48 hkx: block 1 walk ended at 54108, block ends at 54108
+  ok   (f) q48: decoded 314 frames, header numFrames 314
+  ok   (f) q48: duration 10.433333 == (numFrames-1)*frameDuration 10.433334
+  ok   (f) q48: 314 root-motion samples, motion duration 10.433333
+  FAIL (b) every hkaSkeleton bone exists as a NiNode in skeleton.nif (missing: ['Head', 'Spine1', 'Spine2', 'Weapon', 'WeaponBolt', 'WeaponExtra1', 'WeaponExtra2', 'WeaponExtra3', 'WeaponIKTargetL', 'WeaponIKTargetLMirror', 'WeaponIKTargetR', 'WeaponIKTargetRMirror', 'WeaponMagazine', 'WeaponMagazineChild1', 'WeaponMagazineChild2', 'WeaponMagazineChild3', 'WeaponMagazineChild4', 'WeaponMagazineChild5', 'WeaponOptics1', 'WeaponOptics2', 'WeaponTrigger'])
+       NiNodes not in the hkaSkeleton: 55 (Belly_skin, CamTargetParent, CharacterBumper, Chest_Rear_Skin, Chest_Upper_skin, Chest_skin, Face_skin, HEAD, ...)
+  FAIL (b) parents agree by name on every shared bone (2 disagree: [('Chest', 'Spine2', 'SPINE2'), ('CamTarget', 'Root', 'CamTargetParent')])
+  FAIL (b) worst reference-pose translation vs NiNode translation 0.00127 <= 1e-3
+  ok   (b) worst rotation-matrix element difference 0.000269 (direct) / 2 (transposed) <= 1e-3; hkx quaternion -> matrix equals the NIF matrix
+  ok   (b) worst scale difference 0.000181 <= 1e-3
+  ok   (c) 94 tracks compared against the reference pose
+       bones equal to the bind pose within 1e-3 (t, q, s): 15 of 94
+       bones that differ: 79 -- COM(t2.3,q0.00035), LLeg_Thigh(t0.00043,q0.061), LLeg_Calf(t2.4e-05,q0.044), LLeg_Foot(t5.1e-05,q0.032), RLeg_Thigh(t0.00043,q0.096), RLeg_Calf(t4.8e-05,q0.11), RLeg_Foot(t3.6e-05,q0.04), Spine1(t8.7e-06,q0.026), Spine2(t3.2e-06,q0.082), Chest(t1.4e-05,q0.04), Neck(t2.1e-05,q0.057), Head(t2.4e-05,q0.031), ...
+  FAIL (c) T-pose clip frame 0 == reference pose on every bone (PRE-REGISTERED; the furniture 'Tpose' clip is not the bind pose on 79 bones, see the report)
+  ok   (c) on the 15 matching bones the worst quaternion component difference is 5.96e-08 (40-bit step 3.5e-4)
+  ok   (b) C++ reader loads skeleton.hkx: skeleton Root bones 95 | skeleton Ragdoll_NPC COM bones 18
+  ok   (refusal) lossless xml: REFUSED: animation #92 is a hkaLosslessCompressedAnimation, not decoded by this reader
+  ok   (refusal) lossless hkx: REFUSED: animation 0 is a hkaLosslessCompressedAnimation, not decoded by this reader
+134 checks, 14 failures
+FAIL

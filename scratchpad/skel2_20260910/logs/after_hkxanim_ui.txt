@@ -1,0 +1,72 @@
+NIF: human_male_vanilla (139 nodes); dock list starts with 0 row(s)
+  ok   the dock's animations list is there
+  ok   the scene has nodes to pose
+load: Running_To_Slide_And_Back_To_Running: 78 of 95 bones play, 4 matched only by ignoring case (Spine1, Spine2, Head, Weapon); 17 have no node in this NIF: WeaponBolt, WeaponExtra1, WeaponExtra2, WeaponExtra3, WeaponMagazine, WeaponMagazineChild1, WeaponMagazineChild2, WeaponMagazineChild3, WeaponMagazineChild4, WeaponMagazineChild5, WeaponOptics1, WeaponOptics2, WeaponTrigger, WeaponIKTargetL, WeaponIKTargetR, WeaponIKTargetLMirror, WeaponIKTargetRMirror.
+  the clip is listed as "Running_To_Slide_And_Back_To_Running" (file stem "Running_To_Slide_And_Back_To_Running")
+  list is now 1 row(s); clip row = 0, text "Running_To_Slide_And_Back_To_Running — 93 frames @ 60 fps"
+  ok   (a) the clip is ONE new row in the dock's list
+  ok   (a) it reports 93 frames (expected 93)
+  ok   (a) at 60 fps (expected 60)
+  ok   (a) and the ROW SAYS SO
+  ok   (a floor) a name that was never loaded has no row
+  ok   (a) selecting the row binds it in the scene
+  ok   (a) and the transport sees its length (1.53333 s)
+  ok   (f floor) a clip that PLAYS is not marked refused
+  frame 46 (t=0.766667, scene t=0.766667): 78 nodes, worst translation 0, rotation 1.72665e-05 deg
+  ok   (b) 78 bound nodes were compared
+  ok   (b) worst translation 0 <= 1e-4
+  ok   (b) worst rotation 1.72665e-05 deg <= 0.01
+  floor: frame 46 held against frame 0 -> 299.83 / 104.964 deg
+  ok   (b floor) the wrong frame FAILS the same test
+  readout: "frame 46 / 92 · 0.767 s"
+  ok   (c) the readout names frame 46 of 92
+  ok   (c) which is the CLIP's rate, not the dock's default
+  ok   (c floor) at t=0 the readout says frame 0
+  speed: 1 -> 2 -> 1
+  ok   (c floor) the speed reads 1 before the row is touched
+  ok   (c) the Speed row writes the playback speed
+  ok   (c) and puts it back
+  ok   (c) the dock's Loop row flips the transport's loop action (1 -> 0)
+  ok   (c) the clip is registered as a looping cycle
+  posed: 78 of 139 nodes differ from the bind pose
+  ok   (d floor) the clip really moved the rig
+  ok   (d) the Unload control is enabled while a clip is loaded
+  after unload: 0 of 139 nodes differ
+  ok   (d) the clip unloads
+  ok   (d) its row leaves the dock's list
+  ok   (d) every transform is byte-identical to the bind pose
+  junk drop: enter accepted 0, drop accepted 0, rows 0 -> 0
+  ok   (e floor) dropping a non-animation adds no row
+  clip drop: enter accepted 1, drop accepted 1, rows 0 -> 1, row 0
+  ok   (e) the drag-enter is accepted for a .hkx
+  ok   (e) the drop is accepted
+  ok   (e) and yields the SAME entry: 93 frames @ 60 fps
+  ok   (e) the dropped clip is what the scene is playing
+  refuse: "skeleton.hkx carries no animation — skeleton.hkx: a skeleton of 95 bones, no animation in this file. Its names will be used for clips that need them."; rows 1 -> 2, row 1, text "skeleton — refused"
+  ok   (f) it lands as a row
+  ok   (f) marked refused
+  ok   (f) the row SAYS refused
+  ok   (f) with the reason in words
+  ok   (f) and the reason reaches the summary line
+  8 number field(s), 0 without the scrub stamp
+  ok   (g) 0 plain number fields, of 8 (floor: >= 3)
+  ok   (g) 0 group boxes
+  3 selector(s), 0 without the drop-down rule
+  ok   (g) 0 unstyled selectors, of 3 (floor: >= 1)
+  ok   (g) all 6 new controls are there (of 6)
+  ok   (g) 0 of them without a tooltip
+  ok   (g) the summary line is outside the splitter
+  ok   (g) the action bar is outside the splitter
+  after setFocus: hasFocus no, focusWidget <none>, window active no
+  Speed under the wheel: 1 -> 1 (unfocused) -> 1 (focused)
+  ok   (g) the wheel over an unfocused number field leaves it
+  FAIL (g floor) and steps it once focused
+  dock grab 1200x320 -> e:/Projects/NifskopeWildWastelandEdition/scratchpad/hkx3_20260910/dock_clip_midclip.png
+  ok   the dock grab was written
+  ok   and it is not an empty strip
+48 checks, 1 failures, 0 skips
+FAIL
+done
+--- skips (a SKIP is never a pass) ---
+(none)
+dock grab: /e/Projects/NifskopeWildWastelandEdition/scratchpad/hkx3_20260910/dock_clip_midclip.png

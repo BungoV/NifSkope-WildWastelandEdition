@@ -1,0 +1,31 @@
+EXPECTED  19 bodies: 1 sea, 16 river steps, 1 lake, 1 puddle
+MEASURED  19 bodies
+  body 1  form 11111111  class sea  area 73728
+  body 2  form 33333333  class river  area 16384
+  body 3  form 22222222  class river  area 1024
+  body 4  form 22222222  class river  area 1024
+  body 5  form 22222222  class river  area 1024
+  body 6  form 22222222  class river  area 1024
+  body 7  form 22222222  class lake  area 512
+  body 8  form 22222222  class river  area 512
+  body 9  form 22222222  class river  area 512
+  body 10  form 22222222  class river  area 512
+  body 11  form 22222222  class river  area 512
+  body 12  form 22222222  class river  area 512
+  body 13  form 22222222  class river  area 512
+  body 14  form 22222222  class river  area 512
+  body 15  form 22222222  class river  area 512
+  body 16  form 22222222  class river  area 512
+  body 17  form 22222222  class river  area 512
+  body 18  form 22222222  class river  area 512
+  body 19  form 44444444  class lake  area 16
+  ok   nineteen bodies
+  ok   the sea is ONE body, and it keeps the WORLDSPACE's own form -- the defect this control exists for gave it the river's
+  ok   the sea is class sea (it reaches the worldspace edge)
+  ok   the sea is 73,728 texels -- 96 columns of 768, and not one texel of the river
+  ok   the stepped river is SIXTEEN bodies, one a plane
+  ok   the lake is one body of 16,384 texels
+  ok   the puddle is one body of 16 texels
+REFUTER   type-blind: 18 bodies (the sea and the river's tidal step sit at the same height and touch, so they fuse)
+  ok   the refuter FIRES: ignoring water type changes the answer
+control PASS

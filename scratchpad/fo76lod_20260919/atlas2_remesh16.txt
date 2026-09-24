@@ -1,0 +1,16 @@
+appalachia.16.-14.-29.bto block 30 'RemeshedShape_NotAlphaTested_Merged'   atlas 512x256
+  components 141; 2 of them span more than half the sheet in both axes
+  excluding those: 280 of 9591 component-pairs have overlapping UV boxes (2.92%)
+   edges within 1/512 of a 1/8 line: u 29.1%  v 29.9%   (median miss u 0.0420 v 0.0312 of a cell)
+   edges within 1/1024 of a 1/16 line: u 33.1%  v 26.3%   (median miss u 0.0312 v 0.0508 of a cell)
+   edges within 1/2048 of a 1/32 line: u 14.4%  v 4.3%   (median miss u 0.0625 v 0.0938 of a cell)
+   edges within 1/4096 of a 1/64 line: u 6.5%  v 3.6%   (median miss u 0.1250 v 0.1562 of a cell)
+  cell size in texels: w median 30.2 (p10 4.0 p90 63.0), h median 27.1 (p10 4.1 p90 31.2)
+   66.9% of cell widths are a multiple of 8 texels
+   70.5% of cell widths are a multiple of 16 texels
+   85.6% of cell widths are a multiple of 32 texels
+   54.0% of cell widths are a multiple of 64 texels
+   74.8% of cell widths are a multiple of 128 texels
+  gap to the next cell to the right, in texels: min 0.00  p10 2.50  p25 34.00  median 67.50
+   of the 278 gaps under 16 texels: median 2.12
+  components with UV box == the whole sheet: [745, 277] verts

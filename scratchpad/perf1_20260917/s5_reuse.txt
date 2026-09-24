@@ -1,0 +1,16 @@
+s5_reuse: /e/Projects/NifskopeWildWastelandEdition/release/NifSkope.exe
+   -rwxr-xr-x 1 bungo 197609 22564352 Sep 17 10:17 /e/Projects/NifskopeWildWastelandEdition/release/NifSkope.exe
+   region -24 16 -17 23 dim 4
+
+=== REFUTER  a plugin's bytes move between two incremental runs
+      E:/Projects/NifskopeWildWastelandEdition/scratchpad/perf1_20260917/work/s5/refute/WWPerf1.esp  84 bytes  author='ww'
+  untouched   native-library: reused (previous .lodo kept; base census, load order, plugin corpus and object corpus unmoved, payload checked)
+      E:/Projects/NifskopeWildWastelandEdition/scratchpad/perf1_20260917/work/s5/refute/WWPerf1.esp  85 bytes  author='www'
+  R1 size+1   native-library: rebuilt (the load order moved)
+      E:/Projects/NifskopeWildWastelandEdition/scratchpad/perf1_20260917/work/s5/refute/WWPerf1.esp  85 bytes  author='xxx'
+  R2 in place native-library: reused (previous .lodo kept; base census, load order, plugin corpus and object corpus unmoved, payload checked)
+  ok   the untouched run REUSED -- the refuter has something to break
+  ok   R1: the resized plugin forced a REBUILD, and the census said why
+  HOLE R2: a same-size plugin edit is NOT seen -- section 12, row C
+
+s5_reuse done

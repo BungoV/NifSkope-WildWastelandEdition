@@ -1,0 +1,11 @@
+flagged_nonroad      meshes   895  triangles   307513  texels  60839 (23.21%)
+unflagged_nonroad    meshes  7538  triangles  2134347  texels 101914 (38.88%)
+road                 meshes   270  triangles    57910  texels  23321 ( 8.90%)
+models that would not load: 1
+
+family                texels    AUCbr displaced floor            twin AUCgrey / floor       
+flagged_nonroad        60839  0.536   0.432 .. 0.533      0.474..0.499   0.504  0.477 .. 0.563  twin 0.485..0.536
+unflagged_nonroad     101914  0.585   0.494 .. 0.526      0.485..0.503   0.500  0.489 .. 0.498  twin 0.500..0.518
+road                   23321  0.716   0.470 .. 0.601      0.472..0.505   0.678  0.448 .. 0.513  twin 0.486..0.546
+ceiling (a mask scored by itself) = 1.000
+wrote tile_m20_20.npz

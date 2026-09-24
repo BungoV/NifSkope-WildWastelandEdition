@@ -1,0 +1,50 @@
+== dim 2
+lodt sheet 3 role 4 dxgi 56 dxgiWithCover 56 colorSpace 0
+lodt present 9216
+lodt coverTiles 0
+lodt storedBytesTotal 2983034880
+
+real	8m14.229s
+user	0m0.000s
+sys	0m0.015s
+rc=0
+== dim 4
+lodt sheet 3 role 4 dxgi 56 dxgiWithCover 56 colorSpace 0
+lodt present 2304
+lodt coverTiles 0
+lodt storedBytesTotal 745758720
+
+real	2m0.008s
+user	0m0.000s
+sys	0m0.015s
+rc=0
+== dim 8
+lodt sheet 3 role 4 dxgi 56 dxgiWithCover 56 colorSpace 0
+lodt present 576
+lodt coverTiles 0
+lodt storedBytesTotal 186439680
+
+real	0m30.975s
+user	0m0.000s
+sys	0m0.015s
+rc=0
+== dim 16
+lodt sheet 3 role 4 dxgi 56 dxgiWithCover 56 colorSpace 0
+lodt present 144
+lodt coverTiles 0
+lodt storedBytesTotal 46609920
+
+real	0m0.316s
+user	0m0.000s
+sys	0m0.015s
+rc=0
+== dim 32
+lodt sheet 3 role 4 dxgi 56 dxgiWithCover 56 colorSpace 0
+lodt present 36
+lodt coverTiles 0
+lodt storedBytesTotal 11652480
+
+real	0m0.270s
+user	0m0.000s
+sys	0m0.015s
+rc=0

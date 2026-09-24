@@ -1,0 +1,30 @@
+library from the near model, foliage refused, a silhouette floor and a per-placement AO byte -- lane NATIVE1c, 2026-09-16 16:3x
+
+Exe: release/NifSkope.exe, 22,341,632 B, 2026-09-16 15:53:30, sha256 1a29376128377db0...
+Rung: release/NifSkope.before_native1c.exe, 22,300,160 B, 2026-09-16 14:43:49.
+
+Gates, all on that exe:
+  tests/spells/lodgen_native.sh              120 checks, 0 failures, 2 skips   (was 108/0/2)
+  tests/spells/lodgen_native_baseline.sh --check  25 files, 25 baked, 0 differ
+  tests/spells/lodgen_ladder.sh (new)         22 checks, 0 failures, 0 skips
+  tests/spells/lodgen_defaults.sh             28 checks, 0 failures
+  tests/spells/lodgen_native_decode.py        6 pairs, 36 checks, 0 failures
+  tests/spells/native_open.sh                 14 checks, 1 failure, 2 skips against a fresh pair
+                                              (that one failure is BTOFREE1's IoU 0.8179; it reads
+                                               0.8179 on the rung exe too, to four places)
+
+Numbers: first ladder step selectable at 4,872 units, was 90,316 (18.5x closer); library
+9,657,316 -> 225,399,755 B (23.3x); bake 13 -> 83 s; foliage refused 2,849 clusters; silhouette
+refused 5,683 levels on 3,266 meshes, worst kept 0.7000; placement AO 3,526 of 3,526 measured,
+min 38, median 254, 9 distinct values.
+
+Way back, one line, gated: --library mnam --native-ladder-foliage --native-silhouette 0
+--native-no-placement-ao. The .lodi payload is then identical to the rung's; 12 of 128,256 bytes
+differ and both are derived words that name the companion .lodo, each recomputed.
+
+Deliverables in this directory: lane_native1c_report.md (sections 0-10), WW_CHANGES_ENTRY.md,
+HANDOFF_BLOCK.md, MISTAKES_ENTRIES.md (spliced at the top of root MISTAKES.md), CHANGED_FILES.txt,
+images/ (three PNGs, sizes read back with PIL), and the gate logs.
+
+No commit, no stash, no index change. No build mutex left behind. bungo's open NifSkope window
+needs a restart.

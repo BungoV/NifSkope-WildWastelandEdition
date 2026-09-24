@@ -1,0 +1,9 @@
+exe: 2026-09-12_04:10:38 21489152
+lodgen_roads rc=0 20s : 
+lodgen_terrain rc=0 13s : 
+lodgen_terrain_vt rc=1 45s :        FAIL a sheet's own edge step is 14.348, over 2.60: its last column   FAIL V9c the direct sheets are continuous ACROSS a chunk seam (the block above) 
+lodgen_ground_cover rc=1 28s :   FAIL C11b one grass colour explains both halves (the tint is after VCLR)   FAIL C3..C17 the measurements on the files 
+lodgen_terrain_pbrm rc=0 22s :        texels reading the PBRM constants: roughness 18112/73984, metallic 16236/73984, emissive 17349/73984 
+lodgen_native rc=0 73s :   ok   e3 the field MOVES: the pass changed at least one mesh (45 of 2982)   ok   e4 FLOOR: the metric can fail -- a shuffled triangle order on AirportTower01_LOD.nif reads 2.990 against the emitted 1.633 
+lodl_open rc=0 85s : 
+lod_generation rc=0 5s :   cost at 8x8/256: 2048 x 2048 sheets at 256 x 256 a frame: 18.67 MB for the largest base, and less for every smaller one.   cost at 8x8/512: 4096 x 4096 sheets at 512 x 512 a frame: 74.67 MB for the largest base, and less for every smaller one. 

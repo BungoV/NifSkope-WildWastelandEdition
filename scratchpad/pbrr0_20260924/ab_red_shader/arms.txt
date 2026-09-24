@@ -1,0 +1,5 @@
+97d2b3a2638a487c4aae34d2b6b544e17dda51b1 /e/Projects/NifskopeWildWastelandEdition/release/before_pbrr0/NifSkope.exe
+8485154d94d1d7909bb457810647f59ed8faa95c /e/Projects/NifskopeWildWastelandEdition/release/pbr_ab_red_shader/NifSkope.exe
+old=/e/Projects/NifskopeWildWastelandEdition/release/before_pbrr0
+new=/e/Projects/NifskopeWildWastelandEdition/release/pbr_ab_red_shader
+red=shader

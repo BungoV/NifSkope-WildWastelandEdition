@@ -1,0 +1,68 @@
+[59] BSSubIndexTriShape 'BaseMaleBody:0'
+  segment 0  tris 0..-1  UI 0  bone none
+  segment 1  tris 0..-1  UI 1  bone none
+  segment 2  tris 0..434  UI 2  bone none
+      sub 0  tris 0..132  UI 1  bone RArm_UpperArm  id 0x020000
+      sub 1  tris 133..237  UI 2  bone RArm_UpperArm  id 0x020100
+      sub 2  tris 238..354  UI 3  bone RArm_UpperArm  id 0x020200
+      sub 3  tris 355..434  UI 4  bone RArm_ForeArm1  id 0x020300
+  segment 3  tris 435..1479  UI 3  bone none
+  segment 4  tris 1480..1917  UI 4  bone none
+      sub 0  tris 1480..1615  UI 1  bone LArm_UpperArm  id 0x040000
+      sub 1  tris 1616..1720  UI 2  bone LArm_UpperArm  id 0x040100
+      sub 2  tris 1721..1837  UI 3  bone LArm_UpperArm  id 0x040200
+      sub 3  tris 1838..1917  UI 4  bone LArm_ForeArm1  id 0x040300
+  segment 5  tris 1918..2307  UI 5  bone none
+      sub 0  tris 1918..1972  UI 1  bone RLeg_Thigh  id 0x050000
+      sub 1  tris 1973..2037  UI 2  bone RLeg_Thigh  id 0x050100
+      sub 2  tris 2038..2105  UI 3  bone RLeg_Calf  id 0x050200
+      sub 3  tris 2106..2177  UI 4  bone RLeg_Calf  id 0x050300
+      sub 4  tris 2178..2307  UI 5  bone RLeg_Foot  id 0x050400
+  segment 6  tris 2308..2697  UI 6  bone none
+      sub 0  tris 2308..2362  UI 1  bone LLeg_Thigh  id 0x060000
+      sub 1  tris 2363..2427  UI 2  bone LLeg_Thigh  id 0x060100
+      sub 2  tris 2428..2495  UI 3  bone LLeg_Calf  id 0x060200
+      sub 3  tris 2496..2567  UI 4  bone LLeg_Calf  id 0x060300
+      sub 4  tris 2568..2697  UI 5  bone LLeg_Foot  id 0x060400
+[39] BSSubIndexTriShape 'BaseMaleHands3rd:0'
+  segment 0  tris 0..-1  UI 0  bone none
+  segment 1  tris 0..-1  UI 1  bone none
+  segment 2  tris 0..2094  UI 2  bone none
+      sub 0  tris 0..2094  UI 1  bone RArm_Hand  id 0x020000
+  segment 3  tris 0..-1  UI 3  bone none
+  segment 4  tris 2095..4189  UI 4  bone none
+      sub 0  tris 2095..4189  UI 1  bone LArm_Hand  id 0x040000
+[11] BSSubIndexTriShape 'BaseMaleHead:0'
+  segment 0  tris 0..-1  UI 0  bone none
+  segment 1  tris 0..3144  UI 1  bone none
+      sub 0  tris 0..3144  UI 32  bone HEAD  id 0x010000
+  segment 2  tris 0..-1  UI 2  bone none
+  segment 3  tris 3145..3230  UI 3  bone none
+      sub 0  tris 3145..3230  UI 33  bone Chest  id 0x030000
+[11] BSSubIndexTriShape 'MaleHeadRear:0'
+  segment 0  tris 0..-1  UI 0  bone none
+  segment 1  tris 0..399  UI 1  bone none
+      sub 0  tris 0..399  UI 32  bone HEAD  id 0x010000
+  segment 2  tris 0..-1  UI 2  bone none
+  segment 3  tris 400..439  UI 3  bone none
+      sub 0  tris 400..439  UI 33  bone Neck  id 0x030000
+[3] BSSubIndexTriShape 'MaleEyes:0'
+  segment 0  tris 0..-1  UI 0  bone none
+  segment 1  tris 0..115  UI 1  bone none
+      sub 0  tris 0..115  UI 32  bone HEAD  id 0x010000
+[3] BSSubIndexTriShape 'MaleEyesAO:0'
+  segment 0  tris 0..-1  UI 0  bone none
+  segment 1  tris 0..29  UI 1  bone none
+      sub 0  tris 0..29  UI 32  bone HEAD  id 0x010000
+[2] BSSubIndexTriShape 'MaleEyesWet:0'
+  segment 0  tris 0..-1  UI 0  bone none
+  segment 1  tris 0..39  UI 1  bone none
+      sub 0  tris 0..39  UI 32  bone HEAD  id 0x010000
+[2] BSSubIndexTriShape 'MouthHuman:0'
+  segment 0  tris 0..-1  UI 0  bone none
+  segment 1  tris 0..457  UI 1  bone none
+      sub 0  tris 0..457  UI 32  bone HEAD  id 0x010000
+[3] BSSubIndexTriShape 'MaleBrows'
+  segment 0  tris 0..-1  UI 0  bone none
+  segment 1  tris 0..171  UI 1  bone none
+      sub 0  tris 0..171  UI 32  bone HEAD  id 0x010000

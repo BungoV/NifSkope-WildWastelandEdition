@@ -1,0 +1,4 @@
+pbr_r4 sphere disk centre (699.5, 462.5) radius 298.1 px
+pbr_r4 d1 normal incidence: rough 0 / Lambert 1.0000, rough 1 / Lambert 1.0000 (want 1 +-1%, centre 137.0/255) -> PASS
+pbr_r4 d1 75 deg ring rough 1: got 71.8 want 95.4 (Lambert 71.8, mu 0.258) mean |d| 23.57 n=6508 -> FAIL
+RED lambert aims at d1_ring: FAILED -> OK

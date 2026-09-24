@@ -1,0 +1,34 @@
+file charles.lodl  bodies 346  strokes 0  flow rate 32
+  ok   the body table re-encodes to the bytes the writer wrote
+  ok   the flow plane re-derives to the bytes the writer wrote (0 bytes differ)
+  ok   the file was read whole for the undo gate (38612038 bytes)
+WW_WATER_MARK_BODY=3: marking that body instead of the largest river
+  ok   the file offers a river and a second body to mark
+river  = body 3, 25114 texels, cells (-16..-6, -21..-4)
+neighbour = body 2, 29312 texels
+  ok   the refuter's stroke lands on the neighbour: 21 of 48 points fell outside body 2 and will be ignored by the solve; the stroke is stored as drawn
+  ok   RED FIRST: a stroke on body 2 moves 29309 of its own texels
+  ok   RED FIRST: and moves 0 texels of body 3 (measured 0) -- so the isolation check below can fail
+the river drains into body 1; its mouth is at (-57664, -14272) and its centroid at (-41773, -52323)
+  ok   a mouth was found in the file, not assumed
+  ok   the stroke lands on the river: 4 of 47 points fell outside body 3 and will be ignored by the solve; the stroke is stored as drawn
+solve: 1 stroke(s) on 1 body(ies): 19043 texels held, 25110 changed, 311 iterations, residual 9.85e-05
+  ok   P1 isolation: 0 texels outside body 3 changed (measured 0)
+  ok   P1 floor: at least 60 per cent of body 3's own texels changed (measured 25110 of 25114 = 100.0 per cent)
+  ok   the body's flow source moved 3 -> 4 (a stroke)
+the flow plane's MEAN direction over body 3: 111.09 degrees before, 111.31 degrees after
+the direction from the river's centroid to its mouth is 112.67 degrees; the plane's mean agrees to 1.36 degrees
+  ok   "rivers end up at sea": the marked plane's mean direction points at the mouth (cos = 1.000, needs > 0)
+P4: body 3 carries 25110 of 25114 flow samples at 32, and 1564 of 1565 at 8; the whole-body mean is 111.31 then 111.42 degrees
+  ok   P4 floor: the file was really re-written at 8 samples a cell (header says 8, was 32) and body 3 still has samples in it (25110 at 32, 1564 at 8)
+  ok   P4 re-bake: body 3 marked at 32 samples a cell and re-written at 8 still points the same way (mean 111.31 -> 111.42 degrees, moved 0.11, tolerance 5)
+the dry point is at (-305152, -313344) -> (-304128, -313344), and body 1 sits at the worldspace corner
+  ok   a dry point was found in the file, not assumed
+  ok   a stroke on dry land is refused, in words: "that stroke touches no water anywhere along it -- it is on dry land, so it names no body of water; nothing was stored"
+  ok   the marked file saves and re-opens with its 1 stroke(s)
+  ok   the marked file differs from the unmarked one (38617680 vs 38612038 bytes)
+  ok   P8 round trip: save, reopen, save is byte-identical (38617680 vs 38617680 bytes)
+  ok   P3 undo: removing the stroke reproduces the file it started from, byte for byte (0 bytes differ)
+21 checks, 0 failures
+water mark selftest PASS
+

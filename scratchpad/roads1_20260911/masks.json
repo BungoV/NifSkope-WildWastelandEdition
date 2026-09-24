@@ -1,0 +1,53 @@
+{
+ "stats": {
+  "road": {
+   "meshes": 0,
+   "triangles": 0,
+   "texels": 0
+  },
+  "trees": {
+   "meshes": 1893,
+   "triangles": 651494,
+   "texels": 71534
+  },
+  "rocks": {
+   "meshes": 212,
+   "triangles": 316699,
+   "texels": 81024
+  },
+  "buildings": {
+   "meshes": 198,
+   "triangles": 106310,
+   "texels": 797
+  }
+ },
+ "families": {
+  "setdressing": 980,
+  "vehicles": 17,
+  "landscape/plants": 1485,
+  "landscape/rocks": 706,
+  "actors": 1,
+  "props": 159,
+  "landscape/trees": 6129,
+  "markerx.nif": 4,
+  "markers": 892,
+  "landscape/dirtcliffs": 87,
+  "nomodel": 21,
+  "architecture": 81,
+  "landscape/erodedcliffs": 58,
+  "effects": 37,
+  "markercocheading.nif": 4,
+  "landscape/grassmounds": 156,
+  "furniture": 1,
+  "landscape/grave_freshcovered01.nif": 2,
+  "landscape/forest": 235,
+  "landscape/grass": 125,
+  "road": 32,
+  "workshop": 1,
+  "test": 1,
+  "critters": 1,
+  "interiors": 9,
+  "landscape/riverbeds": 2,
+  "landscape/campfiremed01_off_norock_noskirt.nif": 1
+ }
+}

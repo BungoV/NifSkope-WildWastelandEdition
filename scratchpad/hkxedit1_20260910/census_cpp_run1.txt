@@ -1,0 +1,6 @@
+census scratchpad/hkxedit1_20260910/census_hkx: 15320 files, 15278 byte-identical, 0 mismatched, 42 refused
+  refused    42  class hclClothSetupContainer is not in the class database (943 classes)
+
+real	0m3.471s
+user	0m0.000s
+sys	0m0.031s

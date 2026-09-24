@@ -1,0 +1,72 @@
+== the water window, on two copies of Commonwealth.lodl ==
+exit 0
+  ok   the water window is a top-level window of its own
+  ok   with no file open the window says so: "No landscape file is open. Choose a version 3 .lodl to mark its water."
+number fields: 4, left as plain spin boxes: 0
+  ok   the numbers are scrub fields (4, plain 0, floor 4)
+group boxes: 0, headings: 5
+  ok   sections are headings, not group-box frames (5 headings, floor 5)
+selectors: 5, in default chrome: 0
+  ok   every selector takes the matched field chrome (5, floor 5)
+check boxes: 3, with a dash explanation: 0, without a tooltip: 0
+  ok   labels are names; the explanation is the tooltip (3 boxes, floor 3)
+settings: 9 on 9 distinct rows
+  ok   settings sit one to a row (9 on 9, floor 8)
+  ok   Save sits outside the scrolling settings
+  ok   the map sits outside the scrolling settings
+  ok   the summary sits outside the scrolling settings
+  ok   the settings themselves do scroll
+settings visible without scrolling: 8 of 8
+  ok   the settings band opens showing its settings (8 of 8, floor 6)
+  ok   the Files section folds (open -> folded)
+  ok   the full-screen toggle fills the screen and leaves it again (0 -> 1 -> 0)
+  ok   the landscape file opens: E:/Projects/NifskopeWildWastelandEdition/scratchpad/water5_20260910/work/window.lodl
+  ok   the whole worldspace fits the map at first open (0.121 px a texel)
+screenshot saved: E:/Projects/NifskopeWildWastelandEdition/scratchpad/water5_20260910/images/water_window_whole.png
+  ok   the file offers a river to mark (body 2, 29312 texels)
+  ok   the river's centreline has enough samples for five points (131)
+  ok   the curve, the two pins and the override are in the document (0 -> 3 curves)
+  ok   the sentence says the edits are unsolved
+the solve says: '2 stroke(s) on 1 body(ies): 10694 texels under them, 29312 changed, 2327 iterations, residual 9.75e-10, 0.62 s; dye on 13095 texels'
+  ok   Solve runs the land file's solver and the body's flow comes from the curve (source 3 -> 4)
+  ok   after Solve the sentence no longer says unsolved
+  ok   the map zooms to texel level (2.00 px a texel at the mouth)
+screenshot saved: E:/Projects/NifskopeWildWastelandEdition/scratchpad/water5_20260910/images/water_window_mouth.png
+  ok   the curves file is written: E:/Projects/NifskopeWildWastelandEdition/scratchpad/water5_20260910/work/window.water.json
+json bytes: 927 written, 927 re-written
+  ok   the json loads back (ok)
+  ok   save -> load -> save is byte-identical (927 bytes)
+  ok   the curves read back equal point for point and weight for weight
+  ok   the file carries the five weighted points (4 '[' per point row)
+  ok   the land file saves with the curves mirrored into its store
+  ok   the land file reopens
+  ok   the curves come back out of the .lodl store point for point
+  FAIL and weight for weight (hook-up H2 applied): curve 3 point 1: weight 2 against 1
+  FAIL the override came back out of the table (name '')
+  ok   the marked file's flow words hash
+marked file: body 2 has 29312 texels, 29312 moved from the automatic word
+  ok   the curve moved at least 60 percent of the river's own texels (29312 of 29312)
+  ok   the unmarked copy opens: E:/Projects/NifskopeWildWastelandEdition/scratchpad/water5_20260910/work/regenerated.lodl
+  ok   before the load the copy's words differ from the marked file's (floor)
+  ok   the json loads onto the copy
+regenerated copy after load + solve: 29312 of 29312 moved; refused 0
+  ok   load onto the copy + Solve re-derives the SAME flow plane words (hash ab5e8fd453afcac3 vs ab5e8fd453afcac3)
+  ok   the flow map exports as PNG with its body mask
+exported 21754958 wet texels to E:/Projects/NifskopeWildWastelandEdition/scratchpad/water5_20260910/work/window.flow.png
+  ok   the export covers at least the river (21754958 wet texels, river 29312)
+  ok   the same PNG imports as a raster layer (0 -> 1 layers)
+raster: 21754958 painted, 0 differ from the document's words
+  ok   export -> import reproduces the flow plane's words exactly (0 differ of 21754958)
+  ok   the control: the green channel mirrored into a second PNG
+on the flipped PNG the window says: 'the green channel of window.flow-flipped.png looks flipped: over 173568 painted texels the map agrees with this file's flow at 0.151 as it is and at 1.000 with green mirrored. This tool writes +green = north; flip the channel and import again'
+  ok   a flipped green channel is refused in words and stored nowhere (1 layers)
+  ok   and the unflipped one right after is accepted (2 layers)
+46 checks, 2 failures
+FAIL
+window checks run: 46 (floor 24)
+FAIL: the window self-test did not pass
+headless windows: 2 records, on the primary: 0, opaque: 0
+picture: E:/Projects/NifskopeWildWastelandEdition/scratchpad/water5_20260910/images/water_window_whole.png (46034 bytes)
+picture: E:/Projects/NifskopeWildWastelandEdition/scratchpad/water5_20260910/images/water_window_mouth.png (48536 bytes)
+
+water_window.sh FAIL (1)

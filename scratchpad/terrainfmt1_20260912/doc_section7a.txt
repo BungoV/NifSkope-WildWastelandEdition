@@ -1,0 +1,96 @@
+## 7a. The far sheet format, and the `_msn` cache
+
+Measured by lane TERRAINFMT1 on 2026-09-12. Every number here came off the
+shipped files or off a bake, and the ones that were NOT measured say so.
+
+### 7a.1 What vanilla ships
+
+All **6,120** Commonwealth far-terrain sheets under
+`Textures/Terrain/Commonwealth` were read (3,060 colour + 3,060 `_msn`; by
+dimension 2,304 / 576 / 144 / 36 in each family):
+
+* fourCC **`DXT5`** on every one, no exceptions, in both families;
+* 512x512, **10 mips** -- the chain run to 1x1, not to the 4x4 block floor;
+* declared mip count equals the number of levels the BYTES hold on all 200
+  files that were checked level by level; no trailing bytes;
+* `dwReserved1` (DDS header offsets 32..75) **zero on every one of the 6,120**;
+* **ALPHA constant 255** in both families -- one distinct value over
+  13,107,200 texels on each side of a 50 + 50 sample. Vanilla's alpha carries
+  nothing.
+
+Because vanilla ships no `_data` sheet at all, the `WWCV` cover stamp in that
+sheet's `dwReserved1` cannot collide with anything vanilla writes. There is no
+reconciliation to make.
+
+What could NOT be established: what the ENGINE does with either alpha. The
+FO4 Community Shaders tree at `wt-fixfirst` carries no terrain-LOD shader
+replacement, so there was no `_msn` sampling to cite and none is guessed at
+here.
+
+### 7a.2 `--sheet-format vanilla`
+
+On chunk `Commonwealth.4.-20.24`, cells -20 24 .. -17 27, dim 4, `--vt --cover
+--road-detail 1`: the colour sheet comes out **DXT5, 10/10 mips, 349,680
+bytes** -- vanilla's exact byte count and format -- with no trailing bytes,
+`dwReserved1` zero and alpha 255 only.
+
+**The switch cannot change a colour.** With alpha constant 255 the BC1
+punch-through mode never triggers, so the colour block a DXT5 sheet stores and
+the colour block a DXT1 sheet stores are the same bytes: mips 0..7 decode
+bit-identically between the two containers (maxdiff 0 on every level), and a
+headless render of the two sheets on the same mesh at the same pinned camera
+differs in **0 pixels**. What the switch buys is the two extra mip levels and
+the container vanilla uses. The `_msn` is untouched by it on any chunk where
+`--land-detail-source vanilla` is in force, because a copied sheet is never
+re-encoded.
+
+### 7a.3 `--msn-cache`
+
+The cache this was written against is a cleaned 2K `_msn` set, 2,304 PNGs at
+2048x2048 RGB named `Commonwealth.4.<x>.<y>.png`, covering exactly the 2,304
+dim-4 vanilla `_msn` sheets, 15.49 GiB. Its layout is NOT vanilla's and was
+measured rather than assumed -- see the `--msn-cache` row in §5 for the channel
+correspondences and the renormalisation, and the lane report for the
+correlations against a phase-randomised twin.
+
+The written sheet, chunk (-20,24): **B8G8R8A8_UNORM, 2048x2048, 12/12 mips,
+22,369,768 bytes**, alpha 255, unit length mean 1.0000 with the worst texel
+**0.68 levels** off unit (vanilla's own sheet: mean 1.0215, worst texel 77.67
+levels off). Block-grid residue at period 4 -- mean |neighbour difference| on
+the lines where the index is a multiple of 4 over the mean elsewhere, 1.0 = no
+grid -- **1.0029** against the rung's **1.1210**.
+
+**Why uncompressed, with the refuter.** Running the same cleaned sheet through
+this tree's own colour-block rule (`lodgenEncodeBC1Block`: min/max luminance
+endpoints, four-colour palette, per 4x4 block -- a BC3 colour block is the same
+block) takes the grid residue to **1.9849**. The blocks come back. That number
+is harsher than vanilla's own 1.1210 because our endpoint rule is min/max
+luminance and not least squares, so the DIRECTION is certain and the MAGNITUDE
+is encoder-specific. **BC7 is not implemented in this tree** -- there is no BC7
+encoder anywhere in it -- so the only alternatives written were uncompressed
+and the existing block formats.
+
+Size, for a decision that is not this document's to make: vanilla's 6,120
+sheets are 2,140,041,600 B = 1.99 GiB in total. Uncompressed 2048 `_msn` for
+the 2,304 dim-4 chunks is 48.00 GiB; uncompressed 1024, 12.00 GiB; BC7 2048
+with a full chain would be 12.00 GiB, BC7 2048 mip 0 only 9.00 GiB, BC7 1024
+3.00 GiB. **Load cost was not measured.**
+
+### 7a.4 What these switches are NOT
+
+Neither switch affects the blue-purple cast on a generated chunk. That cast is
+the terrain `.BTR`'s VERTEX COLOURS: under `opts.terrainIdentity` the generator
+writes the land material class, wetness, ambient occlusion and shore proximity
+into the "Vertex Colors" slot, and a consumer that multiplies the albedo by the
+vertex colour then renders the chunk blue-purple. Measured on chunk (-20,24)
+with vanilla's own sheets on both meshes at one pinned camera: vanilla's `.BTR`
+carries neutral vertex colours (237.3 / 237.3 / 237.3 mean under
+`WW_RENDER_FLAT`), ours carries 50.9 / 49.3 / 202.1, and
+`--no-terrain-identity` puts ours back to 237.2 / 237.2 / 237.2 and its lit
+render 0.48 levels from vanilla's against a before of 137.77.
+`--no-identity` is a DIFFERENT switch (the OBJECT identity channels) and leaves
+the terrain `.BTR` byte-identical. Whether the identity channels should keep
+that slot is not a question a measurement answers.
+
+---
+

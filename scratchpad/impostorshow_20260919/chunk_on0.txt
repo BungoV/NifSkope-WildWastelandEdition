@@ -1,0 +1,5 @@
+[Warning] QObject::connect(QListModel, QWidget): signal not found
+[Warning] QObject::connect(QListModel, QWidget): signal not found
+[Warning] QObject::connect(QListModel, QWidget): signal not found
+[Warning] QObject::connect(QListModel, QWidget): signal not found
+[Info] impostor chunk: 407 C lines, 407 placed, 407 drawable, 1 distinct set, grid 4 -- master OFF (ships off)

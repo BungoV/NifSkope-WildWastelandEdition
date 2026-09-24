@@ -1,0 +1,5280 @@
+{
+ "1": {
+  "area": 21585117,
+  "h": 450.0,
+  "parts": 2,
+  "edid": "ExtOceanWater",
+  "typeIdx": 65535,
+  "inherits": true,
+  "cellx0": -96,
+  "cellx1": 95,
+  "celly0": -96,
+  "celly1": 95,
+  "edge": true,
+  "nlower": 0,
+  "nhigher": 2,
+  "lower": [],
+  "higher": [
+   446,
+   573
+  ],
+  "ndeg": 6,
+  "elong": 1.75,
+  "axis": [
+   -0.784,
+   -0.62
+  ],
+  "aniso": 0.052,
+  "bed_r": 0.005,
+  "bed_drop": 16.0,
+  "depth_mean": 907.9,
+  "depth_max": 8770.0,
+  "length_texels": 8630,
+  "nam0": [
+   -0.46,
+   -0.12
+  ],
+  "near": [
+   [
+    243,
+    43.8,
+    450.0
+   ],
+   [
+    400,
+    58.5,
+    450.0
+   ],
+   [
+    435,
+    41.0,
+    450.0
+   ],
+   [
+    536,
+    58.0,
+    450.0
+   ],
+   [
+    585,
+    45.5,
+    450.0
+   ]
+  ],
+  "lower_near": [],
+  "verdict": "zero"
+ },
+ "47": {
+  "area": 600,
+  "h": 450.0,
+  "parts": 1,
+  "edid": "ExtOceanWater",
+  "typeIdx": 65535,
+  "inherits": true,
+  "cellx0": -24,
+  "cellx1": -24,
+  "celly0": -70,
+  "celly1": -70,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 1.6,
+  "axis": [
+   -0.683,
+   0.73
+  ],
+  "aniso": 0.531,
+  "bed_r": 0.683,
+  "bed_drop": 337.5,
+  "depth_mean": 204.4,
+  "depth_max": 490.0,
+  "length_texels": 40,
+  "nam0": [
+   -0.46,
+   -0.12
+  ],
+  "near": [],
+  "lower_near": [],
+  "verdict": "stroke"
+ },
+ "64": {
+  "area": 65,
+  "h": 450.0,
+  "parts": 1,
+  "edid": "ExtOceanWater",
+  "typeIdx": 65535,
+  "inherits": true,
+  "cellx0": -2,
+  "cellx1": -2,
+  "celly0": -68,
+  "celly1": -68,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 1.86,
+  "axis": [
+   -0.998,
+   -0.055
+  ],
+  "aniso": 0.561,
+  "bed_r": 0.343,
+  "bed_drop": 59.7,
+  "depth_mean": 788.8,
+  "depth_max": 802.0,
+  "length_texels": 11,
+  "nam0": [
+   -0.46,
+   -0.12
+  ],
+  "near": [
+   [
+    65,
+    4.2,
+    450.0
+   ]
+  ],
+  "lower_near": [],
+  "verdict": "stroke"
+ },
+ "65": {
+  "area": 247,
+  "h": 450.0,
+  "parts": 1,
+  "edid": "ExtOceanWater",
+  "typeIdx": 65535,
+  "inherits": true,
+  "cellx0": -2,
+  "cellx1": -1,
+  "celly0": -68,
+  "celly1": -67,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 1.96,
+  "axis": [
+   0.242,
+   0.97
+  ],
+  "aniso": 0.646,
+  "bed_r": 0.022,
+  "bed_drop": 19.1,
+  "depth_mean": 589.0,
+  "depth_max": 802.0,
+  "length_texels": 23,
+  "nam0": [
+   -0.46,
+   -0.12
+  ],
+  "near": [
+   [
+    64,
+    4.2,
+    450.0
+   ]
+  ],
+  "lower_near": [],
+  "verdict": "stroke"
+ },
+ "66": {
+  "area": 103,
+  "h": 450.0,
+  "parts": 1,
+  "edid": "ExtOceanWater",
+  "typeIdx": 65535,
+  "inherits": true,
+  "cellx0": 43,
+  "cellx1": 44,
+  "celly0": -68,
+  "celly1": -68,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 6.56,
+  "axis": [
+   -0.886,
+   -0.463
+  ],
+  "aniso": 0.973,
+  "bed_r": 0.066,
+  "bed_drop": 61.4,
+  "depth_mean": 496.5,
+  "depth_max": 802.0,
+  "length_texels": 29,
+  "nam0": [
+   -0.46,
+   -0.12
+  ],
+  "near": [
+   [
+    77,
+    39.3,
+    450.0
+   ]
+  ],
+  "lower_near": [],
+  "verdict": "stroke"
+ },
+ "77": {
+  "area": 764,
+  "h": 450.0,
+  "parts": 1,
+  "edid": "ExtOceanWater",
+  "typeIdx": 65535,
+  "inherits": true,
+  "cellx0": 43,
+  "cellx1": 44,
+  "celly0": -67,
+  "celly1": -66,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 2.65,
+  "axis": [
+   -0.953,
+   -0.301
+  ],
+  "aniso": 0.779,
+  "bed_r": -0.806,
+  "bed_drop": -1031.7,
+  "depth_mean": 492.0,
+  "depth_max": 858.0,
+  "length_texels": 47,
+  "nam0": [
+   -0.46,
+   -0.12
+  ],
+  "near": [
+   [
+    66,
+    39.3,
+    450.0
+   ]
+  ],
+  "lower_near": [],
+  "verdict": "bed"
+ },
+ "99": {
+  "area": 67,
+  "h": 450.0,
+  "parts": 1,
+  "edid": "ExtOceanWater",
+  "typeIdx": 65535,
+  "inherits": true,
+  "cellx0": 52,
+  "cellx1": 52,
+  "celly0": -65,
+  "celly1": -65,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 13.43,
+  "axis": [
+   -0.993,
+   0.115
+  ],
+  "aniso": 0.991,
+  "bed_r": -0.118,
+  "bed_drop": -13.8,
+  "depth_mean": 796.6,
+  "depth_max": 802.0,
+  "length_texels": 30,
+  "nam0": [
+   -0.46,
+   -0.12
+  ],
+  "near": [],
+  "lower_near": [],
+  "verdict": "stroke"
+ },
+ "200": {
+  "area": 29304,
+  "h": 1300.0,
+  "parts": 6,
+  "edid": "ExtMarshDarkWater",
+  "typeIdx": 1,
+  "inherits": false,
+  "cellx0": -9,
+  "cellx1": 2,
+  "celly0": -38,
+  "celly1": -22,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 1,
+  "elong": 9.48,
+  "axis": [
+   -0.49,
+   0.872
+  ],
+  "aniso": 0.903,
+  "bed_r": 0.368,
+  "bed_drop": 554.9,
+  "depth_mean": 295.0,
+  "depth_max": 2052.0,
+  "length_texels": 601,
+  "nam0": [
+   0.25,
+   -0.05
+  ],
+  "near": [
+   [
+    207,
+    6.1,
+    1300.0
+   ],
+   [
+    210,
+    13.0,
+    1300.0
+   ],
+   [
+    212,
+    12.0,
+    1300.0
+   ],
+   [
+    217,
+    60.1,
+    800.0
+   ],
+   [
+    231,
+    8.6,
+    1300.0
+   ],
+   [
+    261,
+    12.2,
+    1300.0
+   ],
+   [
+    282,
+    58.9,
+    800.0
+   ],
+   [
+    293,
+    7.1,
+    1300.0
+   ],
+   [
+    300,
+    59.4,
+    800.0
+   ],
+   [
+    336,
+    3.2,
+    1300.0
+   ]
+  ],
+  "lower_near": [
+   [
+    217,
+    60.1,
+    800.0
+   ],
+   [
+    282,
+    58.9,
+    800.0
+   ],
+   [
+    300,
+    59.4,
+    800.0
+   ]
+  ],
+  "verdict": "drain"
+ },
+ "201": {
+  "area": 301,
+  "h": 5608.0,
+  "parts": 1,
+  "edid": "ExtGlowingSeaWater01",
+  "typeIdx": 0,
+  "inherits": false,
+  "cellx0": -22,
+  "cellx1": -21,
+  "celly0": -35,
+  "celly1": -35,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 2.08,
+  "axis": [
+   -0.526,
+   0.85
+  ],
+  "aniso": 0.13,
+  "bed_r": -0.141,
+  "bed_drop": -24.0,
+  "depth_mean": 72.9,
+  "depth_max": 152.0,
+  "length_texels": 24,
+  "nam0": [
+   0.21,
+   -0.05
+  ],
+  "near": [
+   [
+    202,
+    3.6,
+    5608.0
+   ]
+  ],
+  "lower_near": [],
+  "verdict": "zero"
+ },
+ "202": {
+  "area": 209,
+  "h": 5608.0,
+  "parts": 1,
+  "edid": "ExtGlowingSeaWater01",
+  "typeIdx": 0,
+  "inherits": false,
+  "cellx0": -22,
+  "cellx1": -22,
+  "celly0": -35,
+  "celly1": -35,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 2.32,
+  "axis": [
+   0.579,
+   0.815
+  ],
+  "aniso": 0.753,
+  "bed_r": -0.089,
+  "bed_drop": -16.2,
+  "depth_mean": 58.8,
+  "depth_max": 288.0,
+  "length_texels": 26,
+  "nam0": [
+   0.21,
+   -0.05
+  ],
+  "near": [
+   [
+    201,
+    3.6,
+    5608.0
+   ]
+  ],
+  "lower_near": [],
+  "verdict": "stroke"
+ },
+ "207": {
+  "area": 184,
+  "h": 1300.0,
+  "parts": 1,
+  "edid": "ExtMarshDarkWater",
+  "typeIdx": 1,
+  "inherits": false,
+  "cellx0": -5,
+  "cellx1": -5,
+  "celly0": -30,
+  "celly1": -30,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 3.4,
+  "axis": [
+   -0.335,
+   0.942
+  ],
+  "aniso": 0.86,
+  "bed_r": -0.385,
+  "bed_drop": -30.4,
+  "depth_mean": 31.2,
+  "depth_max": 68.0,
+  "length_texels": 26,
+  "nam0": [
+   0.25,
+   -0.05
+  ],
+  "near": [
+   [
+    200,
+    6.1,
+    1300.0
+   ],
+   [
+    212,
+    28.4,
+    1300.0
+   ]
+  ],
+  "lower_near": [],
+  "verdict": "stroke"
+ },
+ "210": {
+  "area": 674,
+  "h": 1300.0,
+  "parts": 1,
+  "edid": "ExtMarshDarkWater",
+  "typeIdx": 1,
+  "inherits": false,
+  "cellx0": -9,
+  "cellx1": -8,
+  "celly0": -30,
+  "celly1": -29,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 2.14,
+  "axis": [
+   -0.888,
+   -0.459
+  ],
+  "aniso": 0.721,
+  "bed_r": 0.104,
+  "bed_drop": 32.4,
+  "depth_mean": 126.5,
+  "depth_max": 292.0,
+  "length_texels": 42,
+  "nam0": [
+   0.25,
+   -0.05
+  ],
+  "near": [
+   [
+    200,
+    13.0,
+    1300.0
+   ],
+   [
+    212,
+    49.0,
+    1300.0
+   ]
+  ],
+  "lower_near": [],
+  "verdict": "stroke"
+ },
+ "212": {
+  "area": 108,
+  "h": 1300.0,
+  "parts": 1,
+  "edid": "ExtMarshDarkWater",
+  "typeIdx": 1,
+  "inherits": false,
+  "cellx0": -6,
+  "cellx1": -6,
+  "celly0": -29,
+  "celly1": -29,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 1.81,
+  "axis": [
+   0.645,
+   0.764
+  ],
+  "aniso": 0.699,
+  "bed_r": -0.331,
+  "bed_drop": -36.7,
+  "depth_mean": 52.7,
+  "depth_max": 124.0,
+  "length_texels": 16,
+  "nam0": [
+   0.25,
+   -0.05
+  ],
+  "near": [
+   [
+    200,
+    12.0,
+    1300.0
+   ],
+   [
+    207,
+    28.4,
+    1300.0
+   ],
+   [
+    210,
+    49.0,
+    1300.0
+   ]
+  ],
+  "lower_near": [],
+  "verdict": "stroke"
+ },
+ "213": {
+  "area": 175,
+  "h": 12470.0,
+  "parts": 1,
+  "edid": "ExtGlowingSeaWater01",
+  "typeIdx": 0,
+  "inherits": false,
+  "cellx0": -31,
+  "cellx1": -31,
+  "celly0": -29,
+  "celly1": -28,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 3.02,
+  "axis": [
+   0.448,
+   0.894
+  ],
+  "aniso": 0.729,
+  "bed_r": 0.344,
+  "bed_drop": 19.1,
+  "depth_mean": 29.2,
+  "depth_max": 86.0,
+  "length_texels": 24,
+  "nam0": [
+   0.21,
+   -0.05
+  ],
+  "near": [],
+  "lower_near": [],
+  "verdict": "stroke"
+ },
+ "214": {
+  "area": 238,
+  "h": 7370.0,
+  "parts": 1,
+  "edid": "ExtGlowingSeaWater01",
+  "typeIdx": 0,
+  "inherits": false,
+  "cellx0": -25,
+  "cellx1": -25,
+  "celly0": -29,
+  "celly1": -28,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 1.85,
+  "axis": [
+   -0.326,
+   0.945
+  ],
+  "aniso": 0.337,
+  "bed_r": -0.509,
+  "bed_drop": -31.4,
+  "depth_mean": 23.6,
+  "depth_max": 58.0,
+  "length_texels": 20,
+  "nam0": [
+   0.21,
+   -0.05
+  ],
+  "near": [],
+  "lower_near": [],
+  "verdict": "zero"
+ },
+ "215": {
+  "area": 7584,
+  "h": 800.0,
+  "parts": 1,
+  "edid": "ExtMarshDarkWater",
+  "typeIdx": 1,
+  "inherits": false,
+  "cellx0": -3,
+  "cellx1": 2,
+  "celly0": -29,
+  "celly1": -23,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 5.38,
+  "axis": [
+   -0.516,
+   0.857
+  ],
+  "aniso": 0.906,
+  "bed_r": 0.354,
+  "bed_drop": 18.7,
+  "depth_mean": 22.9,
+  "depth_max": 120.0,
+  "length_texels": 230,
+  "nam0": [
+   0.25,
+   -0.05
+  ],
+  "near": [
+   [
+    217,
+    6.3,
+    800.0
+   ],
+   [
+    219,
+    11.0,
+    600.0
+   ],
+   [
+    223,
+    12.0,
+    800.0
+   ],
+   [
+    255,
+    22.8,
+    450.0
+   ],
+   [
+    282,
+    12.0,
+    800.0
+   ],
+   [
+    300,
+    12.0,
+    800.0
+   ],
+   [
+    325,
+    23.8,
+    450.0
+   ],
+   [
+    328,
+    59.7,
+    450.0
+   ]
+  ],
+  "lower_near": [
+   [
+    219,
+    11.0,
+    600.0
+   ],
+   [
+    255,
+    22.8,
+    450.0
+   ],
+   [
+    325,
+    23.8,
+    450.0
+   ],
+   [
+    328,
+    59.7,
+    450.0
+   ]
+  ],
+  "verdict": "drain"
+ },
+ "217": {
+  "area": 77,
+  "h": 800.0,
+  "parts": 1,
+  "edid": "ExtMarshDarkWater",
+  "typeIdx": 1,
+  "inherits": false,
+  "cellx0": -1,
+  "cellx1": -1,
+  "celly0": -28,
+  "celly1": -28,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 1.87,
+  "axis": [
+   -0.991,
+   -0.137
+  ],
+  "aniso": 0.497,
+  "bed_r": -0.311,
+  "bed_drop": -16.8,
+  "depth_mean": 21.1,
+  "depth_max": 64.0,
+  "length_texels": 12,
+  "nam0": [
+   0.25,
+   -0.05
+  ],
+  "near": [
+   [
+    200,
+    60.1,
+    1300.0
+   ],
+   [
+    215,
+    6.3,
+    800.0
+   ],
+   [
+    223,
+    2.0,
+    800.0
+   ]
+  ],
+  "lower_near": [],
+  "verdict": "zero"
+ },
+ "219": {
+  "area": 635,
+  "h": 600.0,
+  "parts": 1,
+  "edid": "ExtMarshDarkWater",
+  "typeIdx": 1,
+  "inherits": false,
+  "cellx0": 2,
+  "cellx1": 3,
+  "celly0": -28,
+  "celly1": -28,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 4.26,
+  "axis": [
+   -1.0,
+   0.029
+  ],
+  "aniso": 0.895,
+  "bed_r": -0.192,
+  "bed_drop": -16.3,
+  "depth_mean": 46.0,
+  "depth_max": 120.0,
+  "length_texels": 52,
+  "nam0": [
+   0.25,
+   -0.05
+  ],
+  "near": [
+   [
+    215,
+    11.0,
+    800.0
+   ],
+   [
+    233,
+    10.6,
+    600.0
+   ],
+   [
+    234,
+    35.8,
+    600.0
+   ],
+   [
+    247,
+    39.6,
+    600.0
+   ],
+   [
+    255,
+    38.5,
+    450.0
+   ]
+  ],
+  "lower_near": [
+   [
+    255,
+    38.5,
+    450.0
+   ]
+  ],
+  "verdict": "drain"
+ },
+ "223": {
+  "area": 112,
+  "h": 800.0,
+  "parts": 1,
+  "edid": "ExtMarshDarkWater",
+  "typeIdx": 1,
+  "inherits": false,
+  "cellx0": -1,
+  "cellx1": -1,
+  "celly0": -28,
+  "celly1": -27,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 3.94,
+  "axis": [
+   -0.26,
+   0.966
+  ],
+  "aniso": 0.849,
+  "bed_r": -0.237,
+  "bed_drop": -12.0,
+  "depth_mean": 23.8,
+  "depth_max": 56.0,
+  "length_texels": 21,
+  "nam0": [
+   0.25,
+   -0.05
+  ],
+  "near": [
+   [
+    215,
+    12.0,
+    800.0
+   ],
+   [
+    217,
+    2.0,
+    800.0
+   ]
+  ],
+  "lower_near": [],
+  "verdict": "stroke"
+ },
+ "231": {
+  "area": 204,
+  "h": 1300.0,
+  "parts": 1,
+  "edid": "ExtMarshDarkWater",
+  "typeIdx": 1,
+  "inherits": false,
+  "cellx0": -5,
+  "cellx1": -4,
+  "celly0": -28,
+  "celly1": -27,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 2.37,
+  "axis": [
+   -0.812,
+   0.583
+  ],
+  "aniso": 0.871,
+  "bed_r": -0.018,
+  "bed_drop": -1.0,
+  "depth_mean": 31.2,
+  "depth_max": 60.0,
+  "length_texels": 25,
+  "nam0": [
+   0.25,
+   -0.05
+  ],
+  "near": [
+   [
+    200,
+    8.6,
+    1300.0
+   ],
+   [
+    261,
+    52.4,
+    1300.0
+   ]
+  ],
+  "lower_near": [],
+  "verdict": "stroke"
+ },
+ "233": {
+  "area": 450,
+  "h": 600.0,
+  "parts": 1,
+  "edid": "ExtMarshDarkWater",
+  "typeIdx": 1,
+  "inherits": false,
+  "cellx0": 4,
+  "cellx1": 4,
+  "celly0": -28,
+  "celly1": -27,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 2.57,
+  "axis": [
+   0.037,
+   0.999
+  ],
+  "aniso": 0.687,
+  "bed_r": 0.242,
+  "bed_drop": 21.3,
+  "depth_mean": 38.1,
+  "depth_max": 120.0,
+  "length_texels": 34,
+  "nam0": [
+   0.25,
+   -0.05
+  ],
+  "near": [
+   [
+    219,
+    10.6,
+    600.0
+   ],
+   [
+    234,
+    5.0,
+    600.0
+   ],
+   [
+    236,
+    61.4,
+    600.0
+   ],
+   [
+    247,
+    5.0,
+    600.0
+   ],
+   [
+    255,
+    31.4,
+    450.0
+   ]
+  ],
+  "lower_near": [
+   [
+    255,
+    31.4,
+    450.0
+   ]
+  ],
+  "verdict": "drain"
+ },
+ "234": {
+  "area": 1477,
+  "h": 600.0,
+  "parts": 1,
+  "edid": "ExtMarshDarkWater",
+  "typeIdx": 1,
+  "inherits": false,
+  "cellx0": 4,
+  "cellx1": 6,
+  "celly0": -27,
+  "celly1": -26,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 2,
+  "elong": 3.04,
+  "axis": [
+   -0.756,
+   -0.655
+  ],
+  "aniso": 0.654,
+  "bed_r": -0.186,
+  "bed_drop": -18.0,
+  "depth_mean": 33.4,
+  "depth_max": 144.0,
+  "length_texels": 77,
+  "nam0": [
+   0.25,
+   -0.05
+  ],
+  "near": [
+   [
+    219,
+    35.8,
+    600.0
+   ],
+   [
+    233,
+    5.0,
+    600.0
+   ],
+   [
+    236,
+    1.0,
+    600.0
+   ],
+   [
+    237,
+    37.0,
+    450.0
+   ],
+   [
+    245,
+    18.9,
+    450.0
+   ],
+   [
+    247,
+    5.4,
+    600.0
+   ],
+   [
+    255,
+    9.8,
+    450.0
+   ],
+   [
+    280,
+    51.4,
+    800.0
+   ]
+  ],
+  "lower_near": [
+   [
+    237,
+    37.0,
+    450.0
+   ],
+   [
+    245,
+    18.9,
+    450.0
+   ],
+   [
+    255,
+    9.8,
+    450.0
+   ]
+  ],
+  "verdict": "drain"
+ },
+ "236": {
+  "area": 3989,
+  "h": 600.0,
+  "parts": 1,
+  "edid": "ExtMarshScumWater",
+  "typeIdx": 2,
+  "inherits": false,
+  "cellx0": 6,
+  "cellx1": 10,
+  "celly0": -27,
+  "celly1": -25,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 2,
+  "elong": 6.34,
+  "axis": [
+   -0.883,
+   0.469
+  ],
+  "aniso": 0.923,
+  "bed_r": 0.434,
+  "bed_drop": 122.7,
+  "depth_mean": 64.0,
+  "depth_max": 464.0,
+  "length_texels": 166,
+  "nam0": [
+   0.2,
+   0.05
+  ],
+  "near": [
+   [
+    233,
+    61.4,
+    600.0
+   ],
+   [
+    234,
+    1.0,
+    600.0
+   ],
+   [
+    237,
+    8.0,
+    450.0
+   ],
+   [
+    239,
+    10.3,
+    450.0
+   ],
+   [
+    245,
+    16.5,
+    450.0
+   ],
+   [
+    247,
+    50.9,
+    600.0
+   ],
+   [
+    254,
+    2.0,
+    525.0
+   ],
+   [
+    255,
+    19.2,
+    450.0
+   ],
+   [
+    268,
+    24.7,
+    525.0
+   ],
+   [
+    270,
+    47.4,
+    450.0
+   ],
+   [
+    271,
+    2.8,
+    600.0
+   ],
+   [
+    279,
+    52.7,
+    450.0
+   ],
+   [
+    280,
+    13.2,
+    800.0
+   ],
+   [
+    288,
+    41.4,
+    600.0
+   ],
+   [
+    302,
+    48.7,
+    800.0
+   ]
+  ],
+  "lower_near": [
+   [
+    237,
+    8.0,
+    450.0
+   ],
+   [
+    239,
+    10.3,
+    450.0
+   ],
+   [
+    245,
+    16.5,
+    450.0
+   ],
+   [
+    254,
+    2.0,
+    525.0
+   ],
+   [
+    255,
+    19.2,
+    450.0
+   ],
+   [
+    268,
+    24.7,
+    525.0
+   ],
+   [
+    270,
+    47.4,
+    450.0
+   ],
+   [
+    279,
+    52.7,
+    450.0
+   ]
+  ],
+  "verdict": "drain"
+ },
+ "237": {
+  "area": 313,
+  "h": 450.0,
+  "parts": 1,
+  "edid": "ExtOceanWater",
+  "typeIdx": 65535,
+  "inherits": true,
+  "cellx0": 7,
+  "cellx1": 8,
+  "celly0": -27,
+  "celly1": -27,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 3.07,
+  "axis": [
+   -1.0,
+   0.013
+  ],
+  "aniso": 0.613,
+  "bed_r": 0.009,
+  "bed_drop": 1.7,
+  "depth_mean": 81.1,
+  "depth_max": 250.0,
+  "length_texels": 30,
+  "nam0": [
+   -0.46,
+   -0.12
+  ],
+  "near": [
+   [
+    234,
+    37.0,
+    600.0
+   ],
+   [
+    236,
+    8.0,
+    600.0
+   ],
+   [
+    245,
+    8.2,
+    450.0
+   ],
+   [
+    254,
+    47.5,
+    525.0
+   ],
+   [
+    271,
+    51.0,
+    600.0
+   ]
+  ],
+  "lower_near": [],
+  "verdict": "stroke"
+ },
+ "239": {
+  "area": 175,
+  "h": 450.0,
+  "parts": 1,
+  "edid": "ExtOceanWater",
+  "typeIdx": 65535,
+  "inherits": true,
+  "cellx0": 11,
+  "cellx1": 11,
+  "celly0": -27,
+  "celly1": -27,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 1.85,
+  "axis": [
+   0.081,
+   0.997
+  ],
+  "aniso": 0.121,
+  "bed_r": -0.12,
+  "bed_drop": -11.2,
+  "depth_mean": 42.6,
+  "depth_max": 90.0,
+  "length_texels": 17,
+  "nam0": [
+   -0.46,
+   -0.12
+  ],
+  "near": [
+   [
+    236,
+    10.3,
+    600.0
+   ],
+   [
+    254,
+    15.8,
+    525.0
+   ],
+   [
+    268,
+    49.8,
+    525.0
+   ],
+   [
+    270,
+    46.0,
+    450.0
+   ]
+  ],
+  "lower_near": [],
+  "verdict": "zero"
+ },
+ "243": {
+  "area": 76,
+  "h": 450.0,
+  "parts": 1,
+  "edid": "ExtOceanWater",
+  "typeIdx": 65535,
+  "inherits": true,
+  "cellx0": 32,
+  "cellx1": 32,
+  "celly0": -27,
+  "celly1": -27,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 2.58,
+  "axis": [
+   0.24,
+   0.971
+  ],
+  "aniso": 0.747,
+  "bed_r": 0.525,
+  "bed_drop": 18.0,
+  "depth_mean": 12.1,
+  "depth_max": 34.0,
+  "length_texels": 14,
+  "nam0": [
+   -0.46,
+   -0.12
+  ],
+  "near": [
+   [
+    1,
+    43.8,
+    450.0
+   ]
+  ],
+  "lower_near": [],
+  "verdict": "stroke"
+ },
+ "245": {
+  "area": 67,
+  "h": 450.0,
+  "parts": 1,
+  "edid": "ExtOceanWater",
+  "typeIdx": 65535,
+  "inherits": true,
+  "cellx0": 7,
+  "cellx1": 7,
+  "celly0": -27,
+  "celly1": -27,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 3.36,
+  "axis": [
+   -1.0,
+   -0.006
+  ],
+  "aniso": 0.822,
+  "bed_r": -0.205,
+  "bed_drop": -14.1,
+  "depth_mean": 33.0,
+  "depth_max": 74.0,
+  "length_texels": 15,
+  "nam0": [
+   -0.46,
+   -0.12
+  ],
+  "near": [
+   [
+    234,
+    18.9,
+    600.0
+   ],
+   [
+    236,
+    16.5,
+    600.0
+   ],
+   [
+    237,
+    8.2,
+    450.0
+   ]
+  ],
+  "lower_near": [],
+  "verdict": "stroke"
+ },
+ "247": {
+  "area": 84,
+  "h": 600.0,
+  "parts": 1,
+  "edid": "ExtMarshDarkWater",
+  "typeIdx": 1,
+  "inherits": false,
+  "cellx0": 4,
+  "cellx1": 5,
+  "celly0": -27,
+  "celly1": -27,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 1.44,
+  "axis": [
+   -0.976,
+   -0.217
+  ],
+  "aniso": 0.169,
+  "bed_r": 0.14,
+  "bed_drop": 8.3,
+  "depth_mean": 31.3,
+  "depth_max": 64.0,
+  "length_texels": 11,
+  "nam0": [
+   0.25,
+   -0.05
+  ],
+  "near": [
+   [
+    219,
+    39.6,
+    600.0
+   ],
+   [
+    233,
+    5.0,
+    600.0
+   ],
+   [
+    234,
+    5.4,
+    600.0
+   ],
+   [
+    236,
+    50.9,
+    600.0
+   ],
+   [
+    255,
+    39.2,
+    450.0
+   ]
+  ],
+  "lower_near": [
+   [
+    255,
+    39.2,
+    450.0
+   ]
+  ],
+  "verdict": "stroke-all"
+ },
+ "254": {
+  "area": 403,
+  "h": 525.0,
+  "parts": 1,
+  "edid": "ExtMarshScumWater",
+  "typeIdx": 2,
+  "inherits": false,
+  "cellx0": 10,
+  "cellx1": 10,
+  "celly0": -26,
+  "celly1": -26,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 2.23,
+  "axis": [
+   -0.57,
+   0.822
+  ],
+  "aniso": 0.75,
+  "bed_r": 0.133,
+  "bed_drop": 12.4,
+  "depth_mean": 37.6,
+  "depth_max": 141.0,
+  "length_texels": 36,
+  "nam0": [
+   0.2,
+   0.05
+  ],
+  "near": [
+   [
+    236,
+    2.0,
+    600.0
+   ],
+   [
+    237,
+    47.5,
+    450.0
+   ],
+   [
+    239,
+    15.8,
+    450.0
+   ],
+   [
+    268,
+    11.0,
+    525.0
+   ],
+   [
+    270,
+    30.5,
+    450.0
+   ],
+   [
+    271,
+    28.3,
+    600.0
+   ],
+   [
+    279,
+    42.4,
+    450.0
+   ],
+   [
+    288,
+    52.0,
+    600.0
+   ]
+  ],
+  "lower_near": [
+   [
+    237,
+    47.5,
+    450.0
+   ],
+   [
+    239,
+    15.8,
+    450.0
+   ],
+   [
+    270,
+    30.5,
+    450.0
+   ],
+   [
+    279,
+    42.4,
+    450.0
+   ]
+  ],
+  "verdict": "drain"
+ },
+ "255": {
+  "area": 14549,
+  "h": 450.0,
+  "parts": 1,
+  "edid": "ExtMarshScumWater",
+  "typeIdx": 2,
+  "inherits": false,
+  "cellx0": -3,
+  "cellx1": 5,
+  "celly0": -26,
+  "celly1": -17,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 5.98,
+  "axis": [
+   -0.342,
+   0.94
+  ],
+  "aniso": 0.753,
+  "bed_r": -0.319,
+  "bed_drop": -38.0,
+  "depth_mean": 33.5,
+  "depth_max": 178.0,
+  "length_texels": 280,
+  "nam0": [
+   0.2,
+   0.05
+  ],
+  "near": [
+   [
+    215,
+    22.8,
+    800.0
+   ],
+   [
+    219,
+    38.5,
+    600.0
+   ],
+   [
+    233,
+    31.4,
+    600.0
+   ],
+   [
+    234,
+    9.8,
+    600.0
+   ],
+   [
+    236,
+    19.2,
+    600.0
+   ],
+   [
+    247,
+    39.2,
+    600.0
+   ],
+   [
+    296,
+    13.4,
+    600.0
+   ],
+   [
+    300,
+    17.0,
+    800.0
+   ],
+   [
+    324,
+    24.6,
+    600.0
+   ],
+   [
+    325,
+    4.0,
+    450.0
+   ],
+   [
+    328,
+    6.1,
+    450.0
+   ],
+   [
+    348,
+    22.1,
+    0.0
+   ],
+   [
+    364,
+    5.4,
+    450.0
+   ],
+   [
+    365,
+    13.6,
+    600.0
+   ],
+   [
+    369,
+    48.3,
+    450.0
+   ],
+   [
+    380,
+    13.0,
+    450.0
+   ],
+   [
+    407,
+    42.0,
+    450.0
+   ]
+  ],
+  "lower_near": [
+   [
+    348,
+    22.1,
+    0.0
+   ]
+  ],
+  "verdict": "drain"
+ },
+ "261": {
+  "area": 98,
+  "h": 1300.0,
+  "parts": 1,
+  "edid": "ExtMarshDarkWater",
+  "typeIdx": 1,
+  "inherits": false,
+  "cellx0": -6,
+  "cellx1": -6,
+  "celly0": -26,
+  "celly1": -26,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 1.72,
+  "axis": [
+   0.569,
+   0.822
+  ],
+  "aniso": 0.397,
+  "bed_r": 0.362,
+  "bed_drop": 23.8,
+  "depth_mean": 31.0,
+  "depth_max": 60.0,
+  "length_texels": 13,
+  "nam0": [
+   0.25,
+   -0.05
+  ],
+  "near": [
+   [
+    200,
+    12.2,
+    1300.0
+   ],
+   [
+    231,
+    52.4,
+    1300.0
+   ],
+   [
+    293,
+    61.0,
+    1300.0
+   ]
+  ],
+  "lower_near": [],
+  "verdict": "zero"
+ },
+ "268": {
+  "area": 267,
+  "h": 525.0,
+  "parts": 1,
+  "edid": "ExtMarshScumWater",
+  "typeIdx": 2,
+  "inherits": false,
+  "cellx0": 10,
+  "cellx1": 10,
+  "celly0": -25,
+  "celly1": -25,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 1.65,
+  "axis": [
+   -0.138,
+   0.99
+  ],
+  "aniso": 0.469,
+  "bed_r": -0.226,
+  "bed_drop": -14.0,
+  "depth_mean": 25.4,
+  "depth_max": 77.0,
+  "length_texels": 21,
+  "nam0": [
+   0.2,
+   0.05
+  ],
+  "near": [
+   [
+    236,
+    24.7,
+    600.0
+   ],
+   [
+    239,
+    49.8,
+    450.0
+   ],
+   [
+    254,
+    11.0,
+    525.0
+   ],
+   [
+    270,
+    10.0,
+    450.0
+   ],
+   [
+    271,
+    23.3,
+    600.0
+   ],
+   [
+    279,
+    11.2,
+    450.0
+   ],
+   [
+    280,
+    60.1,
+    800.0
+   ],
+   [
+    288,
+    27.6,
+    600.0
+   ]
+  ],
+  "lower_near": [
+   [
+    239,
+    49.8,
+    450.0
+   ],
+   [
+    270,
+    10.0,
+    450.0
+   ],
+   [
+    279,
+    11.2,
+    450.0
+   ]
+  ],
+  "verdict": "stroke-all"
+ },
+ "270": {
+  "area": 92,
+  "h": 450.0,
+  "parts": 1,
+  "edid": "ExtOceanWater",
+  "typeIdx": 65535,
+  "inherits": true,
+  "cellx0": 11,
+  "cellx1": 11,
+  "celly0": -25,
+  "celly1": -25,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 2.78,
+  "axis": [
+   -0.51,
+   0.86
+  ],
+  "aniso": 0.878,
+  "bed_r": 0.143,
+  "bed_drop": 5.5,
+  "depth_mean": 17.3,
+  "depth_max": 42.0,
+  "length_texels": 20,
+  "nam0": [
+   -0.46,
+   -0.12
+  ],
+  "near": [
+   [
+    236,
+    47.4,
+    600.0
+   ],
+   [
+    239,
+    46.0,
+    450.0
+   ],
+   [
+    254,
+    30.5,
+    525.0
+   ],
+   [
+    268,
+    10.0,
+    525.0
+   ],
+   [
+    271,
+    47.5,
+    600.0
+   ],
+   [
+    279,
+    8.5,
+    450.0
+   ],
+   [
+    288,
+    47.5,
+    600.0
+   ]
+  ],
+  "lower_near": [],
+  "verdict": "stroke"
+ },
+ "271": {
+  "area": 246,
+  "h": 600.0,
+  "parts": 1,
+  "edid": "ExtMarshScumWater",
+  "typeIdx": 2,
+  "inherits": false,
+  "cellx0": 9,
+  "cellx1": 9,
+  "celly0": -25,
+  "celly1": -24,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 4.98,
+  "axis": [
+   0.471,
+   0.882
+  ],
+  "aniso": 0.911,
+  "bed_r": -0.093,
+  "bed_drop": -5.3,
+  "depth_mean": 25.3,
+  "depth_max": 64.0,
+  "length_texels": 40,
+  "nam0": [
+   0.2,
+   0.05
+  ],
+  "near": [
+   [
+    236,
+    2.8,
+    600.0
+   ],
+   [
+    237,
+    51.0,
+    450.0
+   ],
+   [
+    254,
+    28.3,
+    525.0
+   ],
+   [
+    268,
+    23.3,
+    525.0
+   ],
+   [
+    270,
+    47.5,
+    450.0
+   ],
+   [
+    279,
+    27.0,
+    450.0
+   ],
+   [
+    280,
+    25.0,
+    800.0
+   ],
+   [
+    288,
+    5.0,
+    600.0
+   ],
+   [
+    302,
+    36.9,
+    800.0
+   ]
+  ],
+  "lower_near": [
+   [
+    237,
+    51.0,
+    450.0
+   ],
+   [
+    254,
+    28.3,
+    525.0
+   ],
+   [
+    268,
+    23.3,
+    525.0
+   ],
+   [
+    270,
+    47.5,
+    450.0
+   ],
+   [
+    279,
+    27.0,
+    450.0
+   ]
+  ],
+  "verdict": "drain"
+ },
+ "279": {
+  "area": 2768,
+  "h": 450.0,
+  "parts": 2,
+  "edid": "ExtMarshScumWater",
+  "typeIdx": 2,
+  "inherits": false,
+  "cellx0": 10,
+  "cellx1": 13,
+  "celly0": -24,
+  "celly1": -22,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 3.98,
+  "axis": [
+   -0.818,
+   -0.575
+  ],
+  "aniso": 0.758,
+  "bed_r": -0.089,
+  "bed_drop": -7.5,
+  "depth_mean": 27.0,
+  "depth_max": 154.0,
+  "length_texels": 119,
+  "nam0": [
+   0.2,
+   0.05
+  ],
+  "near": [
+   [
+    236,
+    52.7,
+    600.0
+   ],
+   [
+    254,
+    42.4,
+    525.0
+   ],
+   [
+    268,
+    11.2,
+    525.0
+   ],
+   [
+    270,
+    8.5,
+    450.0
+   ],
+   [
+    271,
+    27.0,
+    600.0
+   ],
+   [
+    280,
+    60.7,
+    800.0
+   ],
+   [
+    288,
+    18.8,
+    600.0
+   ],
+   [
+    302,
+    50.2,
+    800.0
+   ]
+  ],
+  "lower_near": [],
+  "verdict": "stroke"
+ },
+ "280": {
+  "area": 889,
+  "h": 800.0,
+  "parts": 1,
+  "edid": "ExtMarshScumWater",
+  "typeIdx": 2,
+  "inherits": false,
+  "cellx0": 7,
+  "cellx1": 8,
+  "celly0": -24,
+  "celly1": -23,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 2.38,
+  "axis": [
+   -0.99,
+   -0.142
+  ],
+  "aniso": 0.49,
+  "bed_r": -0.254,
+  "bed_drop": -10.0,
+  "depth_mean": 18.9,
+  "depth_max": 48.0,
+  "length_texels": 47,
+  "nam0": [
+   0.2,
+   0.05
+  ],
+  "near": [
+   [
+    234,
+    51.4,
+    600.0
+   ],
+   [
+    236,
+    13.2,
+    600.0
+   ],
+   [
+    268,
+    60.1,
+    525.0
+   ],
+   [
+    271,
+    25.0,
+    600.0
+   ],
+   [
+    279,
+    60.7,
+    450.0
+   ],
+   [
+    288,
+    22.0,
+    600.0
+   ],
+   [
+    302,
+    3.6,
+    800.0
+   ]
+  ],
+  "lower_near": [
+   [
+    234,
+    51.4,
+    600.0
+   ],
+   [
+    236,
+    13.2,
+    600.0
+   ],
+   [
+    268,
+    60.1,
+    525.0
+   ],
+   [
+    271,
+    25.0,
+    600.0
+   ],
+   [
+    279,
+    60.7,
+    450.0
+   ],
+   [
+    288,
+    22.0,
+    600.0
+   ]
+  ],
+  "verdict": "stroke-all"
+ },
+ "282": {
+  "area": 224,
+  "h": 800.0,
+  "parts": 1,
+  "edid": "ExtMarshDarkWater",
+  "typeIdx": 1,
+  "inherits": false,
+  "cellx0": -4,
+  "cellx1": -3,
+  "celly0": -24,
+  "celly1": -24,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 2.16,
+  "axis": [
+   -0.858,
+   0.514
+  ],
+  "aniso": 0.599,
+  "bed_r": 0.056,
+  "bed_drop": 3.5,
+  "depth_mean": 35.4,
+  "depth_max": 88.0,
+  "length_texels": 22,
+  "nam0": [
+   0.25,
+   -0.05
+  ],
+  "near": [
+   [
+    200,
+    58.9,
+    1300.0
+   ],
+   [
+    215,
+    12.0,
+    800.0
+   ],
+   [
+    293,
+    58.0,
+    1300.0
+   ],
+   [
+    300,
+    10.0,
+    800.0
+   ]
+  ],
+  "lower_near": [],
+  "verdict": "stroke"
+ },
+ "288": {
+  "area": 240,
+  "h": 600.0,
+  "parts": 1,
+  "edid": "ExtMarshScumWater",
+  "typeIdx": 2,
+  "inherits": false,
+  "cellx0": 9,
+  "cellx1": 9,
+  "celly0": -24,
+  "celly1": -23,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 2.6,
+  "axis": [
+   0.03,
+   1.0
+  ],
+  "aniso": 0.45,
+  "bed_r": 0.027,
+  "bed_drop": 1.1,
+  "depth_mean": 20.8,
+  "depth_max": 48.0,
+  "length_texels": 24,
+  "nam0": [
+   0.2,
+   0.05
+  ],
+  "near": [
+   [
+    236,
+    41.4,
+    600.0
+   ],
+   [
+    254,
+    52.0,
+    525.0
+   ],
+   [
+    268,
+    27.6,
+    525.0
+   ],
+   [
+    270,
+    47.5,
+    450.0
+   ],
+   [
+    271,
+    5.0,
+    600.0
+   ],
+   [
+    279,
+    18.8,
+    450.0
+   ],
+   [
+    280,
+    22.0,
+    800.0
+   ],
+   [
+    302,
+    20.5,
+    800.0
+   ]
+  ],
+  "lower_near": [
+   [
+    254,
+    52.0,
+    525.0
+   ],
+   [
+    268,
+    27.6,
+    525.0
+   ],
+   [
+    270,
+    47.5,
+    450.0
+   ],
+   [
+    279,
+    18.8,
+    450.0
+   ]
+  ],
+  "verdict": "stroke-all"
+ },
+ "293": {
+  "area": 722,
+  "h": 1300.0,
+  "parts": 1,
+  "edid": "ExtMarshDarkWater",
+  "typeIdx": 1,
+  "inherits": false,
+  "cellx0": -7,
+  "cellx1": -5,
+  "celly0": -24,
+  "celly1": -22,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 6.59,
+  "axis": [
+   0.01,
+   1.0
+  ],
+  "aniso": 0.548,
+  "bed_r": -0.319,
+  "bed_drop": -30.6,
+  "depth_mean": 28.3,
+  "depth_max": 116.0,
+  "length_texels": 68,
+  "nam0": [
+   0.25,
+   -0.05
+  ],
+  "near": [
+   [
+    200,
+    7.1,
+    1300.0
+   ],
+   [
+    261,
+    61.0,
+    1300.0
+   ],
+   [
+    282,
+    58.0,
+    800.0
+   ],
+   [
+    300,
+    43.7,
+    800.0
+   ],
+   [
+    336,
+    11.3,
+    1300.0
+   ]
+  ],
+  "lower_near": [
+   [
+    282,
+    58.0,
+    800.0
+   ],
+   [
+    300,
+    43.7,
+    800.0
+   ]
+  ],
+  "verdict": "drain"
+ },
+ "296": {
+  "area": 378,
+  "h": 600.0,
+  "parts": 1,
+  "edid": "ExtMarshScumWater",
+  "typeIdx": 2,
+  "inherits": false,
+  "cellx0": 3,
+  "cellx1": 3,
+  "celly0": -23,
+  "celly1": -22,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 4.02,
+  "axis": [
+   -0.024,
+   1.0
+  ],
+  "aniso": 0.898,
+  "bed_r": 0.166,
+  "bed_drop": 9.8,
+  "depth_mean": 31.9,
+  "depth_max": 80.0,
+  "length_texels": 39,
+  "nam0": [
+   0.2,
+   0.05
+  ],
+  "near": [
+   [
+    255,
+    13.4,
+    450.0
+   ],
+   [
+    324,
+    13.0,
+    600.0
+   ],
+   [
+    348,
+    53.3,
+    0.0
+   ]
+  ],
+  "lower_near": [
+   [
+    255,
+    13.4,
+    450.0
+   ],
+   [
+    348,
+    53.3,
+    0.0
+   ]
+  ],
+  "verdict": "drain"
+ },
+ "300": {
+  "area": 1513,
+  "h": 800.0,
+  "parts": 1,
+  "edid": "ExtMarshDarkWater",
+  "typeIdx": 1,
+  "inherits": false,
+  "cellx0": -4,
+  "cellx1": -3,
+  "celly0": -23,
+  "celly1": -22,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 2.38,
+  "axis": [
+   0.596,
+   0.803
+  ],
+  "aniso": 0.645,
+  "bed_r": 0.223,
+  "bed_drop": 11.3,
+  "depth_mean": 23.0,
+  "depth_max": 72.0,
+  "length_texels": 68,
+  "nam0": [
+   0.25,
+   -0.05
+  ],
+  "near": [
+   [
+    200,
+    59.4,
+    1300.0
+   ],
+   [
+    215,
+    12.0,
+    800.0
+   ],
+   [
+    255,
+    17.0,
+    450.0
+   ],
+   [
+    282,
+    10.0,
+    800.0
+   ],
+   [
+    293,
+    43.7,
+    1300.0
+   ],
+   [
+    325,
+    25.6,
+    450.0
+   ]
+  ],
+  "lower_near": [
+   [
+    255,
+    17.0,
+    450.0
+   ],
+   [
+    325,
+    25.6,
+    450.0
+   ]
+  ],
+  "verdict": "drain"
+ },
+ "302": {
+  "area": 294,
+  "h": 800.0,
+  "parts": 1,
+  "edid": "ExtMarshScumWater",
+  "typeIdx": 2,
+  "inherits": false,
+  "cellx0": 8,
+  "cellx1": 8,
+  "celly0": -23,
+  "celly1": -23,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 1.96,
+  "axis": [
+   -0.269,
+   0.963
+  ],
+  "aniso": 0.452,
+  "bed_r": -0.23,
+  "bed_drop": -9.9,
+  "depth_mean": 24.2,
+  "depth_max": 64.0,
+  "length_texels": 24,
+  "nam0": [
+   0.2,
+   0.05
+  ],
+  "near": [
+   [
+    236,
+    48.7,
+    600.0
+   ],
+   [
+    271,
+    36.9,
+    600.0
+   ],
+   [
+    279,
+    50.2,
+    450.0
+   ],
+   [
+    280,
+    3.6,
+    800.0
+   ],
+   [
+    288,
+    20.5,
+    600.0
+   ]
+  ],
+  "lower_near": [
+   [
+    236,
+    48.7,
+    600.0
+   ],
+   [
+    271,
+    36.9,
+    600.0
+   ],
+   [
+    279,
+    50.2,
+    450.0
+   ],
+   [
+    288,
+    20.5,
+    600.0
+   ]
+  ],
+  "verdict": "stroke-all"
+ },
+ "324": {
+  "area": 115,
+  "h": 600.0,
+  "parts": 1,
+  "edid": "ExtMarshScumWater",
+  "typeIdx": 2,
+  "inherits": false,
+  "cellx0": 3,
+  "cellx1": 3,
+  "celly0": -22,
+  "celly1": -22,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 1.47,
+  "axis": [
+   0.553,
+   0.833
+  ],
+  "aniso": 0.283,
+  "bed_r": -0.107,
+  "bed_drop": -6.0,
+  "depth_mean": 34.4,
+  "depth_max": 56.0,
+  "length_texels": 14,
+  "nam0": [
+   0.2,
+   0.05
+  ],
+  "near": [
+   [
+    255,
+    24.6,
+    450.0
+   ],
+   [
+    296,
+    13.0,
+    600.0
+   ],
+   [
+    348,
+    28.3,
+    0.0
+   ]
+  ],
+  "lower_near": [
+   [
+    255,
+    24.6,
+    450.0
+   ],
+   [
+    348,
+    28.3,
+    0.0
+   ]
+  ],
+  "verdict": "stroke-all"
+ },
+ "325": {
+  "area": 112,
+  "h": 450.0,
+  "parts": 1,
+  "edid": "ExtMarshScumWater",
+  "typeIdx": 2,
+  "inherits": false,
+  "cellx0": -2,
+  "cellx1": -1,
+  "celly0": -22,
+  "celly1": -21,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 1.75,
+  "axis": [
+   -0.002,
+   1.0
+  ],
+  "aniso": 0.499,
+  "bed_r": 0.229,
+  "bed_drop": 9.8,
+  "depth_mean": 15.2,
+  "depth_max": 66.0,
+  "length_texels": 14,
+  "nam0": [
+   0.2,
+   0.05
+  ],
+  "near": [
+   [
+    215,
+    23.8,
+    800.0
+   ],
+   [
+    255,
+    4.0,
+    450.0
+   ],
+   [
+    300,
+    25.6,
+    800.0
+   ],
+   [
+    328,
+    36.2,
+    450.0
+   ]
+  ],
+  "lower_near": [],
+  "verdict": "zero"
+ },
+ "328": {
+  "area": 121,
+  "h": 450.0,
+  "parts": 1,
+  "edid": "ExtMarshScumWater",
+  "typeIdx": 2,
+  "inherits": false,
+  "cellx0": 0,
+  "cellx1": 0,
+  "celly0": -22,
+  "celly1": -21,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 2.68,
+  "axis": [
+   -0.317,
+   0.949
+  ],
+  "aniso": 0.703,
+  "bed_r": -0.479,
+  "bed_drop": -8.7,
+  "depth_mean": 5.8,
+  "depth_max": 18.0,
+  "length_texels": 18,
+  "nam0": [
+   0.2,
+   0.05
+  ],
+  "near": [
+   [
+    215,
+    59.7,
+    800.0
+   ],
+   [
+    255,
+    6.1,
+    450.0
+   ],
+   [
+    325,
+    36.2,
+    450.0
+   ]
+  ],
+  "lower_near": [],
+  "verdict": "stroke"
+ },
+ "336": {
+  "area": 15895,
+  "h": 1300.0,
+  "parts": 4,
+  "edid": "ExtRiverCharlesUpper",
+  "typeIdx": 3,
+  "inherits": false,
+  "cellx0": -12,
+  "cellx1": -6,
+  "celly0": -21,
+  "celly1": -11,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 2,
+  "elong": 7.71,
+  "axis": [
+   -0.466,
+   0.885
+  ],
+  "aniso": 0.933,
+  "bed_r": 0.04,
+  "bed_drop": 46.3,
+  "depth_mean": 333.0,
+  "depth_max": 1124.0,
+  "length_texels": 403,
+  "nam0": [
+   0.1,
+   0.42
+  ],
+  "near": [
+   [
+    200,
+    3.2,
+    1300.0
+   ],
+   [
+    293,
+    11.3,
+    1300.0
+   ],
+   [
+    446,
+    1.4,
+    1300.0
+   ]
+  ],
+  "lower_near": [],
+  "verdict": "stroke"
+ },
+ "348": {
+  "area": 722,
+  "h": 0.0,
+  "parts": 1,
+  "edid": "ExtLakeIrradiatedWater",
+  "typeIdx": 4,
+  "inherits": false,
+  "cellx0": 2,
+  "cellx1": 4,
+  "celly0": -21,
+  "celly1": -20,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 3.89,
+  "axis": [
+   -0.929,
+   -0.37
+  ],
+  "aniso": 0.877,
+  "bed_r": -0.417,
+  "bed_drop": -38.1,
+  "depth_mean": 32.5,
+  "depth_max": 136.0,
+  "length_texels": 57,
+  "nam0": [
+   0.32,
+   0.09
+  ],
+  "near": [
+   [
+    255,
+    22.1,
+    450.0
+   ],
+   [
+    296,
+    53.3,
+    600.0
+   ],
+   [
+    324,
+    28.3,
+    600.0
+   ],
+   [
+    364,
+    8.0,
+    450.0
+   ],
+   [
+    369,
+    22.8,
+    450.0
+   ]
+  ],
+  "lower_near": [],
+  "verdict": "stroke"
+ },
+ "350": {
+  "area": 103,
+  "h": 4270.0,
+  "parts": 1,
+  "edid": "ExtGlowingSeaWater01",
+  "typeIdx": 0,
+  "inherits": false,
+  "cellx0": -22,
+  "cellx1": -22,
+  "celly0": -21,
+  "celly1": -20,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 1.64,
+  "axis": [
+   0.43,
+   0.903
+  ],
+  "aniso": 0.405,
+  "bed_r": -0.096,
+  "bed_drop": -6.1,
+  "depth_mean": 26.1,
+  "depth_max": 78.0,
+  "length_texels": 13,
+  "nam0": [
+   0.21,
+   -0.05
+  ],
+  "near": [
+   [
+    352,
+    15.0,
+    4270.0
+   ]
+  ],
+  "lower_near": [],
+  "verdict": "zero"
+ },
+ "352": {
+  "area": 85,
+  "h": 4270.0,
+  "parts": 1,
+  "edid": "ExtGlowingSeaWater01",
+  "typeIdx": 0,
+  "inherits": false,
+  "cellx0": -23,
+  "cellx1": -22,
+  "celly0": -20,
+  "celly1": -20,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 3.4,
+  "axis": [
+   0.275,
+   0.961
+  ],
+  "aniso": 0.835,
+  "bed_r": 0.022,
+  "bed_drop": 1.2,
+  "depth_mean": 25.8,
+  "depth_max": 54.0,
+  "length_texels": 18,
+  "nam0": [
+   0.21,
+   -0.05
+  ],
+  "near": [
+   [
+    350,
+    15.0,
+    4270.0
+   ]
+  ],
+  "lower_near": [],
+  "verdict": "stroke"
+ },
+ "364": {
+  "area": 617,
+  "h": 450.0,
+  "parts": 1,
+  "edid": "ExtMarshScumWater",
+  "typeIdx": 2,
+  "inherits": false,
+  "cellx0": 2,
+  "cellx1": 4,
+  "celly0": -19,
+  "celly1": -19,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 6.85,
+  "axis": [
+   -0.993,
+   -0.122
+  ],
+  "aniso": 0.928,
+  "bed_r": -0.518,
+  "bed_drop": -42.8,
+  "depth_mean": 27.5,
+  "depth_max": 98.0,
+  "length_texels": 66,
+  "nam0": [
+   0.2,
+   0.05
+  ],
+  "near": [
+   [
+    255,
+    5.4,
+    450.0
+   ],
+   [
+    348,
+    8.0,
+    0.0
+   ],
+   [
+    369,
+    2.0,
+    450.0
+   ]
+  ],
+  "lower_near": [
+   [
+    348,
+    8.0,
+    0.0
+   ]
+  ],
+  "verdict": "drain"
+ },
+ "365": {
+  "area": 262,
+  "h": 600.0,
+  "parts": 1,
+  "edid": "ExtMarshScumWater",
+  "typeIdx": 2,
+  "inherits": false,
+  "cellx0": -2,
+  "cellx1": -2,
+  "celly0": -19,
+  "celly1": -19,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 1.68,
+  "axis": [
+   0.227,
+   0.974
+  ],
+  "aniso": 0.424,
+  "bed_r": 0.094,
+  "bed_drop": 7.8,
+  "depth_mean": 39.1,
+  "depth_max": 128.0,
+  "length_texels": 22,
+  "nam0": [
+   0.2,
+   0.05
+  ],
+  "near": [
+   [
+    255,
+    13.6,
+    450.0
+   ],
+   [
+    380,
+    30.5,
+    450.0
+   ]
+  ],
+  "lower_near": [
+   [
+    255,
+    13.6,
+    450.0
+   ],
+   [
+    380,
+    30.5,
+    450.0
+   ]
+  ],
+  "verdict": "stroke-all"
+ },
+ "369": {
+  "area": 154,
+  "h": 450.0,
+  "parts": 1,
+  "edid": "ExtMarshScumWater",
+  "typeIdx": 2,
+  "inherits": false,
+  "cellx0": 4,
+  "cellx1": 4,
+  "celly0": -19,
+  "celly1": -19,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 1,
+  "elong": 1.88,
+  "axis": [
+   -0.128,
+   0.992
+  ],
+  "aniso": 0.237,
+  "bed_r": 0.354,
+  "bed_drop": 24.3,
+  "depth_mean": 22.0,
+  "depth_max": 66.0,
+  "length_texels": 16,
+  "nam0": [
+   0.2,
+   0.05
+  ],
+  "near": [
+   [
+    255,
+    48.3,
+    450.0
+   ],
+   [
+    348,
+    22.8,
+    0.0
+   ],
+   [
+    364,
+    2.0,
+    450.0
+   ],
+   [
+    376,
+    64.0,
+    450.0
+   ],
+   [
+    400,
+    63.6,
+    450.0
+   ]
+  ],
+  "lower_near": [
+   [
+    348,
+    22.8,
+    0.0
+   ]
+  ],
+  "verdict": "stroke-all"
+ },
+ "376": {
+  "area": 168,
+  "h": 450.0,
+  "parts": 1,
+  "edid": "ExtOceanWater",
+  "typeIdx": 65535,
+  "inherits": true,
+  "cellx0": 6,
+  "cellx1": 7,
+  "celly0": -19,
+  "celly1": -18,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 4.02,
+  "axis": [
+   0.083,
+   0.997
+  ],
+  "aniso": 0.864,
+  "bed_r": -0.35,
+  "bed_drop": -36.5,
+  "depth_mean": 32.4,
+  "depth_max": 114.0,
+  "length_texels": 26,
+  "nam0": [
+   -0.46,
+   -0.12
+  ],
+  "near": [
+   [
+    369,
+    64.0,
+    450.0
+   ],
+   [
+    400,
+    37.5,
+    450.0
+   ]
+  ],
+  "lower_near": [],
+  "verdict": "stroke"
+ },
+ "380": {
+  "area": 646,
+  "h": 450.0,
+  "parts": 1,
+  "edid": "ExtMarshScumWater",
+  "typeIdx": 2,
+  "inherits": false,
+  "cellx0": -1,
+  "cellx1": 0,
+  "celly0": -19,
+  "celly1": -17,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 3.0,
+  "axis": [
+   0.63,
+   0.776
+  ],
+  "aniso": 0.37,
+  "bed_r": 0.238,
+  "bed_drop": 13.2,
+  "depth_mean": 22.4,
+  "depth_max": 66.0,
+  "length_texels": 41,
+  "nam0": [
+   0.2,
+   0.05
+  ],
+  "near": [
+   [
+    255,
+    13.0,
+    450.0
+   ],
+   [
+    365,
+    30.5,
+    600.0
+   ],
+   [
+    407,
+    29.1,
+    450.0
+   ]
+  ],
+  "lower_near": [],
+  "verdict": "zero"
+ },
+ "400": {
+  "area": 198,
+  "h": 450.0,
+  "parts": 1,
+  "edid": "ExtOceanWater",
+  "typeIdx": 65535,
+  "inherits": true,
+  "cellx0": 5,
+  "cellx1": 6,
+  "celly0": -17,
+  "celly1": -16,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 4.25,
+  "axis": [
+   0.161,
+   0.987
+  ],
+  "aniso": 0.907,
+  "bed_r": -0.17,
+  "bed_drop": -18.2,
+  "depth_mean": 34.3,
+  "depth_max": 114.0,
+  "length_texels": 29,
+  "nam0": [
+   -0.46,
+   -0.12
+  ],
+  "near": [
+   [
+    1,
+    58.5,
+    450.0
+   ],
+   [
+    369,
+    63.6,
+    450.0
+   ],
+   [
+    376,
+    37.5,
+    450.0
+   ]
+  ],
+  "lower_near": [],
+  "verdict": "stroke"
+ },
+ "407": {
+  "area": 433,
+  "h": 450.0,
+  "parts": 1,
+  "edid": "ExtLakeIrradiatedWater",
+  "typeIdx": 4,
+  "inherits": false,
+  "cellx0": 0,
+  "cellx1": 0,
+  "celly0": -16,
+  "celly1": -15,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 3.51,
+  "axis": [
+   -0.141,
+   0.99
+  ],
+  "aniso": 0.816,
+  "bed_r": 0.25,
+  "bed_drop": 22.7,
+  "depth_mean": 34.4,
+  "depth_max": 106.0,
+  "length_texels": 39,
+  "nam0": [
+   0.32,
+   0.09
+  ],
+  "near": [
+   [
+    255,
+    42.0,
+    450.0
+   ],
+   [
+    380,
+    29.1,
+    450.0
+   ]
+  ],
+  "lower_near": [],
+  "verdict": "stroke"
+ },
+ "408": {
+  "area": 15425,
+  "h": 1800.0,
+  "parts": 1,
+  "edid": "ExtLakeForestWater",
+  "typeIdx": 5,
+  "inherits": false,
+  "cellx0": -22,
+  "cellx1": -17,
+  "celly0": -16,
+  "celly1": -8,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 4.22,
+  "axis": [
+   -0.294,
+   0.956
+  ],
+  "aniso": 0.9,
+  "bed_r": -0.115,
+  "bed_drop": -158.6,
+  "depth_mean": 499.6,
+  "depth_max": 1440.0,
+  "length_texels": 265,
+  "nam0": [
+   0.385,
+   0.1
+  ],
+  "near": [
+   [
+    431,
+    3.6,
+    1800.0
+   ],
+   [
+    453,
+    8.1,
+    1800.0
+   ]
+  ],
+  "lower_near": [],
+  "verdict": "stroke"
+ },
+ "431": {
+  "area": 245,
+  "h": 1800.0,
+  "parts": 1,
+  "edid": "ExtLakeIrradiatedWater",
+  "typeIdx": 4,
+  "inherits": false,
+  "cellx0": -17,
+  "cellx1": -17,
+  "celly0": -14,
+  "celly1": -14,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 2.55,
+  "axis": [
+   0.334,
+   0.942
+  ],
+  "aniso": 0.64,
+  "bed_r": -0.02,
+  "bed_drop": -1.8,
+  "depth_mean": 44.4,
+  "depth_max": 88.0,
+  "length_texels": 27,
+  "nam0": [
+   0.32,
+   0.09
+  ],
+  "near": [
+   [
+    408,
+    3.6,
+    1800.0
+   ]
+  ],
+  "lower_near": [],
+  "verdict": "stroke"
+ },
+ "435": {
+  "area": 2733,
+  "h": 450.0,
+  "parts": 1,
+  "edid": "ExtOceanWater",
+  "typeIdx": 65535,
+  "inherits": true,
+  "cellx0": 9,
+  "cellx1": 11,
+  "celly0": -14,
+  "celly1": -12,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 1.55,
+  "axis": [
+   -0.288,
+   0.958
+  ],
+  "aniso": 0.329,
+  "bed_r": -0.207,
+  "bed_drop": -97.6,
+  "depth_mean": 214.7,
+  "depth_max": 474.0,
+  "length_texels": 66,
+  "nam0": [
+   -0.46,
+   -0.12
+  ],
+  "near": [
+   [
+    1,
+    41.0,
+    450.0
+   ]
+  ],
+  "lower_near": [],
+  "verdict": "zero"
+ },
+ "446": {
+  "area": 9195,
+  "h": 1300.0,
+  "parts": 1,
+  "edid": "ExtRiverCharlesUpper",
+  "typeIdx": 3,
+  "inherits": false,
+  "cellx0": -16,
+  "cellx1": -12,
+  "celly0": -12,
+  "celly1": -4,
+  "edge": false,
+  "nlower": 1,
+  "nhigher": 0,
+  "lower": [
+   1
+  ],
+  "higher": [],
+  "ndeg": 2,
+  "elong": 9.02,
+  "axis": [
+   -0.284,
+   0.959
+  ],
+  "aniso": 0.947,
+  "bed_r": 0.056,
+  "bed_drop": 47.9,
+  "depth_mean": 277.9,
+  "depth_max": 1004.0,
+  "length_texels": 294,
+  "nam0": [
+   0.1,
+   0.42
+  ],
+  "near": [
+   [
+    336,
+    1.4,
+    1300.0
+   ]
+  ],
+  "lower_near": [],
+  "verdict": "stroke"
+ },
+ "453": {
+  "area": 67,
+  "h": 1800.0,
+  "parts": 1,
+  "edid": "ExtLakeForestWater",
+  "typeIdx": 5,
+  "inherits": false,
+  "cellx0": -20,
+  "cellx1": -20,
+  "celly0": -9,
+  "celly1": -9,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 1.81,
+  "axis": [
+   0.497,
+   0.868
+  ],
+  "aniso": 0.578,
+  "bed_r": -0.128,
+  "bed_drop": -13.9,
+  "depth_mean": 42.1,
+  "depth_max": 96.0,
+  "length_texels": 12,
+  "nam0": [
+   0.385,
+   0.1
+  ],
+  "near": [
+   [
+    408,
+    8.1,
+    1800.0
+   ]
+  ],
+  "lower_near": [],
+  "verdict": "stroke"
+ },
+ "461": {
+  "area": 2128,
+  "h": 850.0,
+  "parts": 1,
+  "edid": "ExtLakeWater",
+  "typeIdx": 7,
+  "inherits": false,
+  "cellx0": -9,
+  "cellx1": -7,
+  "celly0": -7,
+  "celly1": -6,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 1.64,
+  "axis": [
+   -0.972,
+   0.234
+  ],
+  "aniso": 0.271,
+  "bed_r": 0.028,
+  "bed_drop": 31.1,
+  "depth_mean": 384.6,
+  "depth_max": 954.0,
+  "length_texels": 58,
+  "nam0": [
+   0.47,
+   0.17
+  ],
+  "near": [
+   [
+    474,
+    50.6,
+    578.0
+   ]
+  ],
+  "lower_near": [
+   [
+    474,
+    50.6,
+    578.0
+   ]
+  ],
+  "verdict": "stroke-all"
+ },
+ "474": {
+  "area": 340,
+  "h": 578.0,
+  "parts": 1,
+  "edid": "ExtMarshDarkWater",
+  "typeIdx": 1,
+  "inherits": false,
+  "cellx0": -5,
+  "cellx1": -4,
+  "celly0": -5,
+  "celly1": -5,
+  "edge": false,
+  "nlower": 1,
+  "nhigher": 0,
+  "lower": [
+   473
+  ],
+  "higher": [],
+  "ndeg": 1,
+  "elong": 5.96,
+  "axis": [
+   -0.986,
+   -0.169
+  ],
+  "aniso": 0.957,
+  "bed_r": -0.548,
+  "bed_drop": -778.2,
+  "depth_mean": 404.7,
+  "depth_max": 1314.0,
+  "length_texels": 46,
+  "nam0": [
+   0.25,
+   -0.05
+  ],
+  "near": [
+   [
+    461,
+    50.6,
+    850.0
+   ]
+  ],
+  "lower_near": [],
+  "verdict": "stroke"
+ },
+ "524": {
+  "area": 217,
+  "h": 1250.0,
+  "parts": 1,
+  "edid": "ExtPuddleWater",
+  "typeIdx": 6,
+  "inherits": false,
+  "cellx0": -17,
+  "cellx1": -16,
+  "celly0": 1,
+  "celly1": 2,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 7.37,
+  "axis": [
+   -0.121,
+   0.993
+  ],
+  "aniso": 0.954,
+  "bed_r": -0.325,
+  "bed_drop": -31.7,
+  "depth_mean": 40.2,
+  "depth_max": 122.0,
+  "length_texels": 40,
+  "nam0": [
+   0.12,
+   -0.07
+  ],
+  "near": [
+   [
+    530,
+    34.5,
+    1600.0
+   ]
+  ],
+  "lower_near": [],
+  "verdict": "stroke"
+ },
+ "526": {
+  "area": 80,
+  "h": 450.0,
+  "parts": 1,
+  "edid": "ExtMurkyWater",
+  "typeIdx": 8,
+  "inherits": false,
+  "cellx0": 10,
+  "cellx1": 10,
+  "celly0": 1,
+  "celly1": 1,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 2.11,
+  "axis": [
+   0.61,
+   0.792
+  ],
+  "aniso": 0.529,
+  "bed_r": 0.271,
+  "bed_drop": 39.7,
+  "depth_mean": 60.0,
+  "depth_max": 138.0,
+  "length_texels": 13,
+  "nam0": [
+   0.25,
+   -0.05
+  ],
+  "near": [],
+  "lower_near": [],
+  "verdict": "stroke"
+ },
+ "527": {
+  "area": 204,
+  "h": 450.0,
+  "parts": 1,
+  "edid": "ExtMurkyWater",
+  "typeIdx": 8,
+  "inherits": false,
+  "cellx0": -1,
+  "cellx1": -1,
+  "celly0": 1,
+  "celly1": 2,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 1.77,
+  "axis": [
+   0.404,
+   0.915
+  ],
+  "aniso": 0.351,
+  "bed_r": -0.096,
+  "bed_drop": -3.7,
+  "depth_mean": 13.1,
+  "depth_max": 58.0,
+  "length_texels": 19,
+  "nam0": [
+   0.25,
+   -0.05
+  ],
+  "near": [
+   [
+    543,
+    47.6,
+    450.0
+   ]
+  ],
+  "lower_near": [],
+  "verdict": "zero"
+ },
+ "530": {
+  "area": 379,
+  "h": 1600.0,
+  "parts": 1,
+  "edid": "ExtLakeForestWater",
+  "typeIdx": 5,
+  "inherits": false,
+  "cellx0": -19,
+  "cellx1": -18,
+  "celly0": 1,
+  "celly1": 2,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 5.58,
+  "axis": [
+   -0.883,
+   -0.469
+  ],
+  "aniso": 0.944,
+  "bed_r": -0.213,
+  "bed_drop": -27.0,
+  "depth_mean": 72.0,
+  "depth_max": 168.0,
+  "length_texels": 51,
+  "nam0": [
+   0.385,
+   0.1
+  ],
+  "near": [
+   [
+    524,
+    34.5,
+    1250.0
+   ],
+   [
+    534,
+    62.1,
+    4050.0
+   ]
+  ],
+  "lower_near": [
+   [
+    524,
+    34.5,
+    1250.0
+   ]
+  ],
+  "verdict": "drain"
+ },
+ "534": {
+  "area": 214,
+  "h": 4050.0,
+  "parts": 1,
+  "edid": "ExtLakeWater",
+  "typeIdx": 7,
+  "inherits": false,
+  "cellx0": -21,
+  "cellx1": -21,
+  "celly0": 2,
+  "celly1": 3,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 3.41,
+  "axis": [
+   -0.239,
+   0.971
+  ],
+  "aniso": 0.778,
+  "bed_r": -0.325,
+  "bed_drop": -39.8,
+  "depth_mean": 47.3,
+  "depth_max": 114.0,
+  "length_texels": 27,
+  "nam0": [
+   0.47,
+   0.17
+  ],
+  "near": [
+   [
+    530,
+    62.1,
+    1600.0
+   ],
+   [
+    550,
+    53.8,
+    5500.0
+   ]
+  ],
+  "lower_near": [
+   [
+    530,
+    62.1,
+    1600.0
+   ]
+  ],
+  "verdict": "drain"
+ },
+ "536": {
+  "area": 221,
+  "h": 450.0,
+  "parts": 1,
+  "edid": "ExtMurkyWater",
+  "typeIdx": 8,
+  "inherits": false,
+  "cellx0": 1,
+  "cellx1": 2,
+  "celly0": 2,
+  "celly1": 3,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 2.19,
+  "axis": [
+   -0.63,
+   0.776
+  ],
+  "aniso": 0.501,
+  "bed_r": 0.63,
+  "bed_drop": 77.5,
+  "depth_mean": 52.9,
+  "depth_max": 154.0,
+  "length_texels": 24,
+  "nam0": [
+   0.25,
+   -0.05
+  ],
+  "near": [
+   [
+    1,
+    58.0,
+    450.0
+   ],
+   [
+    543,
+    25.1,
+    450.0
+   ]
+  ],
+  "lower_near": [],
+  "verdict": "stroke"
+ },
+ "543": {
+  "area": 106,
+  "h": 450.0,
+  "parts": 1,
+  "edid": "ExtMurkyWater",
+  "typeIdx": 8,
+  "inherits": false,
+  "cellx0": 0,
+  "cellx1": 1,
+  "celly0": 3,
+  "celly1": 3,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 4.57,
+  "axis": [
+   -0.829,
+   0.559
+  ],
+  "aniso": 0.952,
+  "bed_r": 0.268,
+  "bed_drop": 36.4,
+  "depth_mean": 53.6,
+  "depth_max": 162.0,
+  "length_texels": 25,
+  "nam0": [
+   0.25,
+   -0.05
+  ],
+  "near": [
+   [
+    527,
+    47.6,
+    450.0
+   ],
+   [
+    536,
+    25.1,
+    450.0
+   ]
+  ],
+  "lower_near": [],
+  "verdict": "stroke"
+ },
+ "550": {
+  "area": 562,
+  "h": 5500.0,
+  "parts": 1,
+  "edid": "ExtLakeWater",
+  "typeIdx": 7,
+  "inherits": false,
+  "cellx0": -24,
+  "cellx1": -23,
+  "celly0": 4,
+  "celly1": 4,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 4.27,
+  "axis": [
+   -0.992,
+   0.126
+  ],
+  "aniso": 0.865,
+  "bed_r": -0.339,
+  "bed_drop": -144.9,
+  "depth_mean": 112.0,
+  "depth_max": 396.0,
+  "length_texels": 50,
+  "nam0": [
+   0.47,
+   0.17
+  ],
+  "near": [
+   [
+    534,
+    53.8,
+    4050.0
+   ]
+  ],
+  "lower_near": [
+   [
+    534,
+    53.8,
+    4050.0
+   ]
+  ],
+  "verdict": "drain"
+ },
+ "566": {
+  "area": 410,
+  "h": 4424.0,
+  "parts": 1,
+  "edid": "ExtMurkyWater",
+  "typeIdx": 8,
+  "inherits": false,
+  "cellx0": -10,
+  "cellx1": -10,
+  "celly0": 7,
+  "celly1": 7,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 2.5,
+  "axis": [
+   -0.742,
+   -0.671
+  ],
+  "aniso": 0.62,
+  "bed_r": -0.177,
+  "bed_drop": -43.5,
+  "depth_mean": 89.6,
+  "depth_max": 216.0,
+  "length_texels": 37,
+  "nam0": [
+   0.25,
+   -0.05
+  ],
+  "near": [],
+  "lower_near": [],
+  "verdict": "stroke"
+ },
+ "573": {
+  "area": 6143,
+  "h": 750.0,
+  "parts": 1,
+  "edid": "ExtLakeWater",
+  "typeIdx": 7,
+  "inherits": false,
+  "cellx0": -5,
+  "cellx1": -3,
+  "celly0": 9,
+  "celly1": 13,
+  "edge": false,
+  "nlower": 1,
+  "nhigher": 0,
+  "lower": [
+   1
+  ],
+  "higher": [],
+  "ndeg": 1,
+  "elong": 3.96,
+  "axis": [
+   -0.294,
+   0.956
+  ],
+  "aniso": 0.905,
+  "bed_r": 0.129,
+  "bed_drop": 85.9,
+  "depth_mean": 264.9,
+  "depth_max": 646.0,
+  "length_texels": 162,
+  "nam0": [
+   0.47,
+   0.17
+  ],
+  "near": [],
+  "lower_near": [],
+  "verdict": "stroke"
+ },
+ "581": {
+  "area": 667,
+  "h": 3600.0,
+  "parts": 1,
+  "edid": "ExtLakeWater",
+  "typeIdx": 7,
+  "inherits": false,
+  "cellx0": -18,
+  "cellx1": -17,
+  "celly0": 10,
+  "celly1": 11,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 2.28,
+  "axis": [
+   -0.789,
+   0.615
+  ],
+  "aniso": 0.363,
+  "bed_r": 0.179,
+  "bed_drop": 21.4,
+  "depth_mean": 52.2,
+  "depth_max": 128.0,
+  "length_texels": 43,
+  "nam0": [
+   0.47,
+   0.17
+  ],
+  "near": [
+   [
+    582,
+    55.6,
+    5490.0
+   ]
+  ],
+  "lower_near": [],
+  "verdict": "zero"
+ },
+ "582": {
+  "area": 7466,
+  "h": 5490.0,
+  "parts": 2,
+  "edid": "ExtLakeForestWater",
+  "typeIdx": 5,
+  "inherits": false,
+  "cellx0": -24,
+  "cellx1": -20,
+  "celly0": 11,
+  "celly1": 14,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 3.05,
+  "axis": [
+   -0.993,
+   -0.119
+  ],
+  "aniso": 0.676,
+  "bed_r": 0.148,
+  "bed_drop": 297.0,
+  "depth_mean": 582.9,
+  "depth_max": 1698.0,
+  "length_texels": 149,
+  "nam0": [
+   0.385,
+   0.1
+  ],
+  "near": [
+   [
+    581,
+    55.6,
+    3600.0
+   ]
+  ],
+  "lower_near": [
+   [
+    581,
+    55.6,
+    3600.0
+   ]
+  ],
+  "verdict": "drain"
+ },
+ "585": {
+  "area": 152,
+  "h": 450.0,
+  "parts": 1,
+  "edid": "ExtOceanWater",
+  "typeIdx": 65535,
+  "inherits": true,
+  "cellx0": 16,
+  "cellx1": 17,
+  "celly0": 12,
+  "celly1": 12,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 1.48,
+  "axis": [
+   -0.937,
+   0.348
+  ],
+  "aniso": 0.479,
+  "bed_r": 0.034,
+  "bed_drop": 4.6,
+  "depth_mean": 71.9,
+  "depth_max": 130.0,
+  "length_texels": 17,
+  "nam0": [
+   -0.46,
+   -0.12
+  ],
+  "near": [
+   [
+    1,
+    45.5,
+    450.0
+   ]
+  ],
+  "lower_near": [],
+  "verdict": "zero"
+ },
+ "589": {
+  "area": 99,
+  "h": 4235.0,
+  "parts": 1,
+  "edid": "ExtPuddleWater",
+  "typeIdx": 6,
+  "inherits": false,
+  "cellx0": -12,
+  "cellx1": -12,
+  "celly0": 13,
+  "celly1": 13,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 3.27,
+  "axis": [
+   0.133,
+   0.991
+  ],
+  "aniso": 0.866,
+  "bed_r": -0.311,
+  "bed_drop": -23.3,
+  "depth_mean": 27.9,
+  "depth_max": 99.0,
+  "length_texels": 18,
+  "nam0": [
+   0.12,
+   -0.07
+  ],
+  "near": [],
+  "lower_near": [],
+  "verdict": "stroke"
+ },
+ "592": {
+  "area": 2277,
+  "h": 750.0,
+  "parts": 1,
+  "edid": "ExtLakeWater",
+  "typeIdx": 7,
+  "inherits": false,
+  "cellx0": 1,
+  "cellx1": 2,
+  "celly0": 16,
+  "celly1": 18,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 3.56,
+  "axis": [
+   0.018,
+   1.0
+  ],
+  "aniso": 0.891,
+  "bed_r": -0.41,
+  "bed_drop": -316.1,
+  "depth_mean": 272.6,
+  "depth_max": 870.0,
+  "length_texels": 90,
+  "nam0": [
+   0.47,
+   0.17
+  ],
+  "near": [],
+  "lower_near": [],
+  "verdict": "stroke"
+ },
+ "593": {
+  "area": 249,
+  "h": 7000.0,
+  "parts": 1,
+  "edid": "ExtCreekSanctuaryWaterE",
+  "typeIdx": 9,
+  "inherits": false,
+  "cellx0": -22,
+  "cellx1": -21,
+  "celly0": 16,
+  "celly1": 16,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 12.15,
+  "axis": [
+   -0.983,
+   0.185
+  ],
+  "aniso": 0.985,
+  "bed_r": -0.113,
+  "bed_drop": -8.0,
+  "depth_mean": 33.5,
+  "depth_max": 96.0,
+  "length_texels": 56,
+  "nam0": [
+   0.83,
+   -0.11
+  ],
+  "near": [
+   [
+    600,
+    18.9,
+    7250.0
+   ]
+  ],
+  "lower_near": [],
+  "verdict": "stroke"
+ },
+ "597": {
+  "area": 347,
+  "h": 8750.0,
+  "parts": 1,
+  "edid": "ExtRiverNFoothillsWaterSE",
+  "typeIdx": 12,
+  "inherits": false,
+  "cellx0": -27,
+  "cellx1": -26,
+  "celly0": 17,
+  "celly1": 17,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 5.08,
+  "axis": [
+   -0.975,
+   0.221
+  ],
+  "aniso": 0.911,
+  "bed_r": -0.267,
+  "bed_drop": -76.7,
+  "depth_mean": 141.8,
+  "depth_max": 270.0,
+  "length_texels": 43,
+  "nam0": [
+   0.32,
+   -0.03
+  ],
+  "near": [
+   [
+    598,
+    15.0,
+    8750.0
+   ],
+   [
+    608,
+    26.0,
+    9400.0
+   ]
+  ],
+  "lower_near": [],
+  "verdict": "stroke"
+ },
+ "598": {
+  "area": 88,
+  "h": 8750.0,
+  "parts": 1,
+  "edid": "ExtMurkyWater",
+  "typeIdx": 8,
+  "inherits": false,
+  "cellx0": -25,
+  "cellx1": -25,
+  "celly0": 17,
+  "celly1": 17,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 2.23,
+  "axis": [
+   -0.928,
+   -0.371
+  ],
+  "aniso": 0.71,
+  "bed_r": -0.381,
+  "bed_drop": -11.6,
+  "depth_mean": 14.9,
+  "depth_max": 38.0,
+  "length_texels": 15,
+  "nam0": [
+   0.25,
+   -0.05
+  ],
+  "near": [
+   [
+    597,
+    15.0,
+    8750.0
+   ],
+   [
+    600,
+    60.7,
+    7250.0
+   ],
+   [
+    608,
+    44.9,
+    9400.0
+   ]
+  ],
+  "lower_near": [
+   [
+    600,
+    60.7,
+    7250.0
+   ]
+  ],
+  "verdict": "drain"
+ },
+ "600": {
+  "area": 10661,
+  "h": 7250.0,
+  "parts": 2,
+  "edid": "ExtCreekSanctuaryWater",
+  "typeIdx": 10,
+  "inherits": false,
+  "cellx0": -23,
+  "cellx1": -15,
+  "celly0": 17,
+  "celly1": 24,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 6.79,
+  "axis": [
+   -0.832,
+   -0.555
+  ],
+  "aniso": 0.905,
+  "bed_r": 0.616,
+  "bed_drop": 718.2,
+  "depth_mean": 246.4,
+  "depth_max": 1258.0,
+  "length_texels": 325,
+  "nam0": [
+   -0.1,
+   -0.85
+  ],
+  "near": [
+   [
+    593,
+    18.9,
+    7000.0
+   ],
+   [
+    598,
+    60.7,
+    8750.0
+   ]
+  ],
+  "lower_near": [
+   [
+    593,
+    18.9,
+    7000.0
+   ]
+  ],
+  "verdict": "drain"
+ },
+ "604": {
+  "area": 181,
+  "h": 4397.0,
+  "parts": 1,
+  "edid": "ExtMurkyWater",
+  "typeIdx": 8,
+  "inherits": false,
+  "cellx0": -11,
+  "cellx1": -11,
+  "celly0": 18,
+  "celly1": 18,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 4.65,
+  "axis": [
+   -0.578,
+   0.816
+  ],
+  "aniso": 0.956,
+  "bed_r": 0.105,
+  "bed_drop": 2.8,
+  "depth_mean": 15.6,
+  "depth_max": 45.0,
+  "length_texels": 33,
+  "nam0": [
+   0.25,
+   -0.05
+  ],
+  "near": [],
+  "lower_near": [],
+  "verdict": "stroke"
+ },
+ "608": {
+  "area": 497,
+  "h": 9400.0,
+  "parts": 1,
+  "edid": "ExtRiverNFoothillsWaterSE",
+  "typeIdx": 12,
+  "inherits": false,
+  "cellx0": -27,
+  "cellx1": -26,
+  "celly0": 18,
+  "celly1": 19,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 7.99,
+  "axis": [
+   -0.972,
+   -0.233
+  ],
+  "aniso": 0.931,
+  "bed_r": -0.515,
+  "bed_drop": -105.8,
+  "depth_mean": 76.1,
+  "depth_max": 240.0,
+  "length_texels": 62,
+  "nam0": [
+   0.32,
+   -0.03
+  ],
+  "near": [
+   [
+    597,
+    26.0,
+    8750.0
+   ],
+   [
+    598,
+    44.9,
+    8750.0
+   ]
+  ],
+  "lower_near": [
+   [
+    597,
+    26.0,
+    8750.0
+   ],
+   [
+    598,
+    44.9,
+    8750.0
+   ]
+  ],
+  "verdict": "drain"
+ },
+ "617": {
+  "area": 3696,
+  "h": 1250.0,
+  "parts": 1,
+  "edid": "ExtLakeQuannapowittWater",
+  "typeIdx": 13,
+  "inherits": false,
+  "cellx0": 0,
+  "cellx1": 2,
+  "celly0": 21,
+  "celly1": 24,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 1,
+  "elong": 2.6,
+  "axis": [
+   -0.44,
+   0.898
+  ],
+  "aniso": 0.756,
+  "bed_r": -0.202,
+  "bed_drop": -297.3,
+  "depth_mean": 489.4,
+  "depth_max": 1410.0,
+  "length_texels": 97,
+  "nam0": [
+   0.32,
+   0.09
+  ],
+  "near": [
+   [
+    620,
+    1.0,
+    1250.0
+   ]
+  ],
+  "lower_near": [],
+  "verdict": "stroke"
+ },
+ "620": {
+  "area": 677,
+  "h": 1250.0,
+  "parts": 1,
+  "edid": "ExtRiverNFoothillsWaterSW",
+  "typeIdx": 14,
+  "inherits": false,
+  "cellx0": 2,
+  "cellx1": 3,
+  "celly0": 23,
+  "celly1": 25,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 1,
+  "elong": 8.31,
+  "axis": [
+   0.612,
+   0.791
+  ],
+  "aniso": 0.671,
+  "bed_r": -0.272,
+  "bed_drop": -45.5,
+  "depth_mean": 56.0,
+  "depth_max": 258.0,
+  "length_texels": 90,
+  "nam0": [
+   -0.32,
+   -0.03
+  ],
+  "near": [
+   [
+    617,
+    1.0,
+    1250.0
+   ],
+   [
+    627,
+    22.2,
+    2400.0
+   ]
+  ],
+  "lower_near": [],
+  "verdict": "stroke"
+ },
+ "621": {
+  "area": 426,
+  "h": 7550.0,
+  "parts": 1,
+  "edid": "ExtLakeWater",
+  "typeIdx": 7,
+  "inherits": false,
+  "cellx0": -27,
+  "cellx1": -26,
+  "celly0": 23,
+  "celly1": 23,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 3.39,
+  "axis": [
+   -0.999,
+   -0.053
+  ],
+  "aniso": 0.814,
+  "bed_r": -0.414,
+  "bed_drop": -40.3,
+  "depth_mean": 32.6,
+  "depth_max": 118.0,
+  "length_texels": 38,
+  "nam0": [
+   0.47,
+   0.17
+  ],
+  "near": [],
+  "lower_near": [],
+  "verdict": "stroke"
+ },
+ "625": {
+  "area": 232,
+  "h": 450.0,
+  "parts": 1,
+  "edid": "ExtRiverNFoothillsWaterSE",
+  "typeIdx": 12,
+  "inherits": false,
+  "cellx0": 6,
+  "cellx1": 7,
+  "celly0": 24,
+  "celly1": 25,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 7.6,
+  "axis": [
+   -0.241,
+   0.97
+  ],
+  "aniso": 0.943,
+  "bed_r": -0.061,
+  "bed_drop": -4.3,
+  "depth_mean": 22.8,
+  "depth_max": 74.0,
+  "length_texels": 42,
+  "nam0": [
+   0.32,
+   -0.03
+  ],
+  "near": [],
+  "lower_near": [],
+  "verdict": "stroke"
+ },
+ "626": {
+  "area": 317,
+  "h": 1212.0,
+  "parts": 1,
+  "edid": "ExtLakeForestWater",
+  "typeIdx": 5,
+  "inherits": false,
+  "cellx0": 12,
+  "cellx1": 13,
+  "celly0": 25,
+  "celly1": 25,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 5.3,
+  "axis": [
+   -1.0,
+   0.021
+  ],
+  "aniso": 0.884,
+  "bed_r": 0.051,
+  "bed_drop": 7.2,
+  "depth_mean": 55.7,
+  "depth_max": 132.0,
+  "length_texels": 41,
+  "nam0": [
+   0.385,
+   0.1
+  ],
+  "near": [],
+  "lower_near": [],
+  "verdict": "stroke"
+ },
+ "627": {
+  "area": 4656,
+  "h": 2400.0,
+  "parts": 1,
+  "edid": "ExtRiverNFoothillsWaterSE",
+  "typeIdx": 12,
+  "inherits": false,
+  "cellx0": -4,
+  "cellx1": 4,
+  "celly0": 26,
+  "celly1": 28,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 17.81,
+  "axis": [
+   -0.998,
+   0.068
+  ],
+  "aniso": 0.949,
+  "bed_r": 0.001,
+  "bed_drop": 0.3,
+  "depth_mean": 139.3,
+  "depth_max": 472.0,
+  "length_texels": 291,
+  "nam0": [
+   0.32,
+   -0.03
+  ],
+  "near": [
+   [
+    620,
+    22.2,
+    1250.0
+   ],
+   [
+    640,
+    33.2,
+    3200.0
+   ]
+  ],
+  "lower_near": [
+   [
+    620,
+    22.2,
+    1250.0
+   ]
+  ],
+  "verdict": "drain"
+ },
+ "630": {
+  "area": 134,
+  "h": 1165.0,
+  "parts": 1,
+  "edid": "ExtRiverNFoothillsWaterSE",
+  "typeIdx": 12,
+  "inherits": false,
+  "cellx0": 17,
+  "cellx1": 17,
+  "celly0": 27,
+  "celly1": 27,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 3.29,
+  "axis": [
+   -0.797,
+   0.604
+  ],
+  "aniso": 0.875,
+  "bed_r": 0.596,
+  "bed_drop": 164.0,
+  "depth_mean": 99.8,
+  "depth_max": 269.0,
+  "length_texels": 25,
+  "nam0": [
+   0.32,
+   -0.03
+  ],
+  "near": [],
+  "lower_near": [],
+  "verdict": "stroke"
+ },
+ "631": {
+  "area": 2277,
+  "h": 10000.0,
+  "parts": 1,
+  "edid": "ExtRiverNFoothillsWaterSE",
+  "typeIdx": 12,
+  "inherits": false,
+  "cellx0": -20,
+  "cellx1": -17,
+  "celly0": 27,
+  "celly1": 28,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 5.61,
+  "axis": [
+   -0.964,
+   -0.265
+  ],
+  "aniso": 0.917,
+  "bed_r": -0.093,
+  "bed_drop": -25.7,
+  "depth_mean": 142.6,
+  "depth_max": 424.0,
+  "length_texels": 111,
+  "nam0": [
+   0.32,
+   -0.03
+  ],
+  "near": [
+   [
+    634,
+    11.2,
+    9545.0
+   ]
+  ],
+  "lower_near": [
+   [
+    634,
+    11.2,
+    9545.0
+   ]
+  ],
+  "verdict": "drain"
+ },
+ "634": {
+  "area": 100,
+  "h": 9545.0,
+  "parts": 1,
+  "edid": "ExtRiverNFoothillsWaterSE",
+  "typeIdx": 12,
+  "inherits": false,
+  "cellx0": -16,
+  "cellx1": -16,
+  "celly0": 27,
+  "celly1": 27,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 1.96,
+  "axis": [
+   -0.55,
+   0.835
+  ],
+  "aniso": 0.663,
+  "bed_r": 0.038,
+  "bed_drop": 5.5,
+  "depth_mean": 56.1,
+  "depth_max": 121.0,
+  "length_texels": 16,
+  "nam0": [
+   0.32,
+   -0.03
+  ],
+  "near": [
+   [
+    631,
+    11.2,
+    10000.0
+   ]
+  ],
+  "lower_near": [],
+  "verdict": "stroke"
+ },
+ "639": {
+  "area": 490,
+  "h": 4048.0,
+  "parts": 1,
+  "edid": "ExtLakeWater",
+  "typeIdx": 7,
+  "inherits": false,
+  "cellx0": -8,
+  "cellx1": -7,
+  "celly0": 28,
+  "celly1": 29,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 2.36,
+  "axis": [
+   -0.929,
+   0.369
+  ],
+  "aniso": 0.694,
+  "bed_r": 0.272,
+  "bed_drop": 38.2,
+  "depth_mean": 63.7,
+  "depth_max": 224.0,
+  "length_texels": 37,
+  "nam0": [
+   0.47,
+   0.17
+  ],
+  "near": [
+   [
+    640,
+    11.0,
+    3200.0
+   ]
+  ],
+  "lower_near": [
+   [
+    640,
+    11.0,
+    3200.0
+   ]
+  ],
+  "verdict": "drain"
+ },
+ "640": {
+  "area": 123,
+  "h": 3200.0,
+  "parts": 1,
+  "edid": "ExtRiverNFoothillsWaterSE",
+  "typeIdx": 12,
+  "inherits": false,
+  "cellx0": -6,
+  "cellx1": -6,
+  "celly0": 28,
+  "celly1": 28,
+  "edge": false,
+  "nlower": 0,
+  "nhigher": 0,
+  "lower": [],
+  "higher": [],
+  "ndeg": 0,
+  "elong": 4.68,
+  "axis": [
+   -0.99,
+   0.138
+  ],
+  "aniso": 0.951,
+  "bed_r": -0.045,
+  "bed_drop": -8.1,
+  "depth_mean": 97.8,
+  "depth_max": 248.0,
+  "length_texels": 24,
+  "nam0": [
+   0.32,
+   -0.03
+  ],
+  "near": [
+   [
+    627,
+    33.2,
+    2400.0
+   ],
+   [
+    639,
+    11.0,
+    4048.0
+   ]
+  ],
+  "lower_near": [
+   [
+    627,
+    33.2,
+    2400.0
+   ]
+  ],
+  "verdict": "drain"
+ }
+}

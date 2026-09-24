@@ -1,0 +1,579 @@
+#version 410 core
+
+#include "uniforms.glsl"
+
+uniform sampler2D BaseMap;
+uniform sampler2D NormalMap;
+uniform sampler2D GlowMap;
+uniform sampler2D BacklightMap;
+uniform sampler2D SpecularMap;
+uniform sampler2D GreyscaleMap;
+uniform sampler2D EnvironmentMap;
+uniform samplerCube CubeMap;
+
+uniform vec3 specColor;
+uniform float specStrength;
+uniform float specGlossiness; // "Smoothness" in FO4; 0-1
+uniform float fresnelPower;
+
+uniform float paletteScale;
+
+uniform vec3 glowColor;
+uniform float glowMult;
+
+uniform float alpha;
+uniform int alphaFlags;			// bits 0 to 2: alpha test mode, bit 3: alpha blending enabled
+uniform float alphaThreshold;
+
+uniform vec3 tintColor;
+
+/* LOD channel preview: 0 off, 1 identity as a hashed colour, 2 raw index bytes,
+ * 3 baked AO, 4 class parameter. Non-zero replaces the whole shading path with
+ * the chosen vertex-colour channel, flat -- no textures, no normals, no light.
+ * A per-vertex payload is otherwise invisible: it is multiplied into an albedo
+ * and then lit, and what reaches the screen says nothing about the number that
+ * is actually stored. */
+uniform int lodChannelView;
+uniform bool lodMaskRaw;		// channel 10: the specular slot raw (a source .lodm's third texture)
+uniform bool lodEmissiveRaw;	// channel 13: the glow slot raw (a source .lodm's emissive texture)
+uniform vec3 lodEmissiveColor;	// channel 13: the source's emissive colour, folded into the legacy sheet
+uniform float lodSpecStrength;	// channel 10: the material's specular strength, lighting or not
+uniform bool lodTreeAnim;		// channel 11: this shape carries the tree-animation flag
+uniform bool lodMaskByTree;		// channel 11: the mask is the tree flag (a near tree), not the alpha test
+
+uniform vec2 uvScale;
+uniform vec2 uvOffset;
+
+uniform bool hasEmit;
+uniform bool hasGlowMap;
+uniform bool hasSoftlight;
+uniform bool hasBacklight;
+uniform bool hasRimlight;
+uniform bool hasTintColor;
+uniform bool hasCubeMap;
+uniform bool hasEnvMask;
+uniform bool hasSpecularMap;
+uniform bool greyscaleColor;
+
+// Shader Flags 1 bit 12 (SLSF1_Model_Space_Normals): the bound normal map is an
+// `_msn`, a MODEL-space map, not a tangent-space one.
+uniform bool hasModelSpaceNormals;
+// model -> view rotation, the same row-major uniform the vertex stage uses for
+// the normal, tangent and bitangent.  Declared here because the model-space
+// path has no tangent frame to ride on.
+uniform mat3 normalMatrix;
+
+uniform float subsurfaceRolloff;
+uniform float rimPower;
+uniform float backlightPower;
+
+uniform float envReflection;
+
+// screen-space refraction preview (SLSF1_Refraction)
+uniform sampler2D RefractionSrc;
+uniform bool doRefraction;
+uniform float refractionStrength;
+
+in vec3 LightDir;
+in vec3 ViewDir;
+
+in vec2 texCoord;
+
+flat in vec4 A;
+in vec4 C;
+flat in vec4 D;
+
+in mat3 btnMatrix;
+flat in mat3 reflMatrix;
+
+out vec4 fragColor;
+
+vec3 ViewDir_norm = normalize( ViewDir );
+mat3 btnMatrix_norm = mat3( normalize( btnMatrix[0] ), normalize( btnMatrix[1] ), normalize( btnMatrix[2] ) );
+
+#ifndef M_PI
+	#define M_PI 3.1415926535897932384626433832795
+#endif
+
+#define FLT_EPSILON 1.192092896e-07F // smallest such that 1.0 + FLT_EPSILON != 1.0
+
+float OrenNayar( vec3 L, vec3 V, vec3 N, float roughness, float NdotL )
+{
+	//float NdotL = dot(N, L);
+	float NdotV = dot(N, V);
+	float LdotV = dot(L, V);
+
+	float rough2 = roughness * roughness;
+
+	float A = 1.0 - 0.5 * (rough2 / (rough2 + 0.57));
+	float B = 0.45 * (rough2 / (rough2 + 0.09));
+
+	float a = min( NdotV, NdotL );
+	float b = max( NdotV, NdotL );
+	b = (sign(b) == 0.0) ? FLT_EPSILON : sign(b) * max( 0.01, abs(b) ); // For fudging the smoothness of C
+	float C = sqrt( (1.0 - a * a) * (1.0 - b * b) ) / b;
+
+	float gamma = LdotV - NdotL * NdotV;
+	float L1 = A + B * max( gamma, FLT_EPSILON ) * C;
+
+	return L1 * max( NdotL, FLT_EPSILON );
+}
+
+float OrenNayarFull(float NdotL, float NdotV, float LdotV, float roughness)
+{
+	float	NdotL0 = clamp(NdotL, FLT_EPSILON, 1.0);
+	float	angleVN = acos(clamp(abs(NdotV), FLT_EPSILON, 1.0));
+	float	angleLN = acos(NdotL0);
+
+	float	alpha = max(angleVN, angleLN);
+	float	beta = min(angleVN, angleLN);
+	float	gamma = (LdotV - NdotL * NdotV) / sqrt(max((1.0 - NdotL * NdotL) * (1.0 - NdotV * NdotV), 0.000025));
+
+	float roughnessSquared = roughness * roughness;
+	float roughnessSquared9 = (roughnessSquared / (roughnessSquared + 0.09));
+
+	// C1, C2, and C3
+	float C1 = 1.0 - 0.5 * (roughnessSquared / (roughnessSquared + 0.33));
+	float C2 = 0.45 * roughnessSquared9;
+
+	if( gamma >= 0.0 ) {
+		C2 *= sin(alpha);
+	} else {
+		C2 *= (sin(alpha) - pow((2.0 * beta) / M_PI, 3.0));
+	}
+
+	float powValue = (4.0 * alpha * beta) / (M_PI * M_PI);
+	float C3 = 0.125 * roughnessSquared9 * powValue * powValue;
+
+	// Avoid asymptote at pi/2
+	float asym = M_PI / 2.0;
+	float lim1 = asym + 0.005;
+	float lim2 = asym - 0.005;
+
+	float ab2 = (alpha + beta) / 2.0;
+
+	if ( beta >= asym && beta < lim1 )
+		beta = lim1;
+	else if ( beta < asym && beta >= lim2 )
+		beta = lim2;
+
+	if ( ab2 >= asym && ab2 < lim1 )
+		ab2 = lim1;
+	else if ( ab2 < asym && ab2 >= lim2 )
+		ab2 = lim2;
+
+	// Reflection
+	float A = gamma * C2 * tan(beta);
+	float B = (1.0 - abs(gamma)) * C3 * tan(ab2);
+
+	float L1 = NdotL0 * (C1 + A + B);
+
+	// Interreflection
+	float twoBetaPi = 2.0 * beta / M_PI;
+	float L2 = 0.17 * NdotL0 * (roughnessSquared / (roughnessSquared + 0.13)) * (1.0 - gamma * twoBetaPi * twoBetaPi);
+
+	return L1 + L2;
+}
+
+// GGX/Trowbridge-Reitz normal distribution. Ported from the PBR Material
+// Editor's shader (D_GGX/G1 there) so the two tools agree on the spec/gloss
+// response instead of NifSkope using a normalized Phong lobe.
+float D_GGX( float NdotH, float alpha )
+{
+	float a2 = alpha * alpha;
+	float d = NdotH * NdotH * ( a2 - 1.0 ) + 1.0;
+	return a2 / max( M_PI * d * d, 0.0001 );
+}
+
+// Smith geometry term, one direction. k = (rough+1)^2/8 (the editor's split).
+float G1( float NdotX, float k )
+{
+	return NdotX / max( NdotX * ( 1.0 - k ) + k, 0.0001 );
+}
+
+// Schlick's Fresnel approximation
+float fresnelSchlick( float VdotH, float F0 )
+{
+	float base = 1.0 - VdotH;
+	float exp = pow( base, fresnelPower );
+	return clamp( exp + F0 * (1.0 - exp), 0.0, 1.0 );
+}
+
+// The Torrance-Sparrow visibility factor, G
+float VisibDiv( float NdotL, float NdotV, float VdotH, float NdotH )
+{
+	float denom = max( VdotH, FLT_EPSILON );
+	float numL = min( NdotV, NdotL );
+	float numR = 2.0 * NdotH;
+	if ( denom >= (numL * numR) ) {
+		numL = (numL == NdotV) ? 1.0 : (NdotL / NdotV);
+		return (numL * numR) / denom;
+	}
+	return 1.0 / NdotV;
+}
+
+// this is a normalized Phong model used in the Torrance-Sparrow model
+vec3 TorranceSparrow(float NdotL, float NdotH, float NdotV, float VdotH, vec3 color, float power, float F0)
+{
+	// D: Normalized phong model
+	float D = ((power + 2.0) / (2.0 * M_PI)) * pow( NdotH, power );
+
+	// G: Torrance-Sparrow visibility term divided by NdotV
+	float G_NdotV = VisibDiv( NdotL, NdotV, VdotH, NdotH );
+
+	// F: Schlick's approximation
+	float F = fresnelSchlick( VdotH, F0 );
+
+	// Torrance-Sparrow:
+	// (F * G * D) / (4 * NdotL * NdotV)
+	// Division by NdotV is done in VisibDiv()
+	// and division by NdotL is removed since
+	// outgoing radiance is determined by:
+	// BRDF * NdotL * L()
+	float spec = (F * G_NdotV * D) / 4.0;
+
+	return color * spec * M_PI;
+}
+
+vec3 tonemap(vec3 x)
+{
+	float a = 0.15;
+	float b = 0.50;
+	float c = 0.10;
+	float d = 0.20;
+	float e = 0.02;
+	float f = 0.30;
+
+	vec3 z = x * x * D.a * (A.a * 4.22978723);
+	z = (z * (a * z + b * c) + d * e) / (z * (a * z + b) + d * f) - e / f;
+	return sqrt(z / (A.a * 0.93333333));
+}
+
+
+void main()
+{
+	vec2 offset = texCoord.st * uvScale + uvOffset;
+
+	vec4 baseMap = texture( BaseMap, offset );
+
+	vec4 color = vec4( baseMap.rgb, 1.0 );
+	if ( alphaFlags > 0 ) {
+		/* The class parameter LIVES in vertex alpha, so the alpha test has to
+		 * run on the real value even when the preview is about to replace the
+		 * colour -- otherwise a tree card previews as a solid quad and its
+		 * silhouette, the thing you are looking at, is gone. Hence the preview
+		 * early-out sits AFTER this and not at the top of main(). */
+		float	a = C.a * baseMap.a * alpha;
+		// 0: always, 1: <, 2: ==, 3: <=, 4: >, 5: !=, 6: >=, 7: never
+		int	m = ( a < alphaThreshold ? 0x2B2B : ( a > alphaThreshold ? 0x7171 : 0x4D4D ) );
+		if ( ( m & ( 1 << alphaFlags ) ) == 0 )
+			discard;
+		if ( ( alphaFlags & 8 ) != 0 )
+			color.a = a;
+	}
+
+	if ( lodChannelView != 0 ) {
+		vec3 v = vec3( 0.0 );
+		if ( lodChannelView == 1 ) {
+			/* The index HASHED to a colour, not the raw bytes: consecutive
+			 * indices differ by one part in 255 of red and are
+			 * indistinguishable, which is exactly the case worth seeing. */
+			float idx = floor( C.r * 255.0 + 0.5 ) + floor( C.g * 255.0 + 0.5 ) * 256.0;
+			v = fract( sin( ( idx + 1.0 ) * vec3( 12.9898, 78.233, 45.164 ) ) * 43758.5453 );
+			v = v * 0.8 + 0.2;
+		} else if ( lodChannelView == 2 ) {
+			v = vec3( C.r, C.g, 0.0 );      // the raw 16-bit index bytes
+		} else if ( lodChannelView == 3 ) {
+			v = C.bbb;                      // ambient occlusion (objects and terrain)
+		} else if ( lodChannelView == 4 ) {
+			v = C.aaa;                      // A: tree sway / terrain shore proximity
+		} else if ( lodChannelView == 5 ) {
+			/* Terrain R is a material CLASS id, not a magnitude -- shown hashed
+			 * for the same reason the object index is: neighbouring classes
+			 * differ by a few parts in 255 and read as one flat grey. */
+			float cls = floor( C.r * 255.0 + 0.5 );
+			v = fract( sin( ( cls + 1.0 ) * vec3( 12.9898, 78.233, 45.164 ) ) * 43758.5453 );
+			v = v * 0.8 + 0.2;
+		} else if ( lodChannelView == 6 ) {
+			v = C.ggg;                      // terrain flow-accumulation wetness
+		} else if ( lodChannelView == 8 ) {
+			/* The impostor bake's normal sheet: the GEOMETRIC normal in the
+			 * view's space, half-packed, flipped for back faces as the lit
+			 * path flips it. After the alpha test above, so a leaf card
+			 * writes its normal only where it has a leaf. */
+			vec3 n = normalize( btnMatrix_norm[2] );
+			if ( !gl_FrontFacing )
+				n = -n;
+			v = n * 0.5 + 0.5;
+		} else if ( lodChannelView == 9 ) {
+			// the impostor bake's height: window z, linear under the ortho projection
+			v = vec3( gl_FragCoord.z );
+		} else if ( lodChannelView == 10 ) {
+			/* The impostor bake's material channel (docs/LODGEN_IMPOSTOR_SPEC.md).
+			 * A shape retargeted to a source .lodm: its third texture, raw --
+			 * roughness/metallic/AO or gloss/specular/AO as the file says.
+			 * Otherwise the LEGACY pair from the vanilla material, the way the
+			 * lit path composes it: R gloss = smoothness x the specular map's
+			 * G, G specular = the map's R (the normal's alpha without a map)
+			 * x the specular strength. */
+			vec4 sm = texture( SpecularMap, offset );
+			if ( lodMaskRaw ) {
+				v = sm.rgb;
+			} else {
+				float gl = clamp( specGlossiness, 0.0, 1.0 ) * ( hasSpecularMap ? sm.g : 1.0 );
+				float sp = ( hasSpecularMap ? sm.r : texture( NormalMap, offset ).a )
+					* ( lodSpecStrength > 0.0 ? lodSpecStrength : 1.0 );
+				v = vec3( gl, clamp( sp, 0.0, 1.0 ), 1.0 );	// B: neutral AO, one per-pixel law for mixed shapes
+			}
+		} else if ( lodChannelView == 12 ) {
+			/* The impostor bake's colour sheet: the base colour as the source
+			 * has it, times the vertex colour, and NOTHING else - the lit path
+			 * below tone-maps before it writes, so an "unlit" render of it is
+			 * a curved albedo. The consumer lights the card. */
+			v = baseMap.rgb * C.rgb;
+		} else if ( lodChannelView == 11 ) {
+			/* The impostor bake's subsurface mask source. A LOD tree: the
+			 * alpha-tested shapes are the leaf cards, the trunk is opaque. A
+			 * near tree: every shape is alpha-tested (the bark card too), and
+			 * the branch cards are the ones that carry the tree-animation
+			 * flag; the bake picks the rule for the model. */
+			float leaf = lodMaskByTree ? ( lodTreeAnim ? 1.0 : 0.0 ) : ( alphaFlags > 0 ? 1.0 : 0.0 );
+			v = vec3( leaf );
+		} else if ( lodChannelView == 13 ) {
+			/* The impostor bake's emissive sheet (docs/LODGEN_IMPOSTOR_SPEC.md).
+			 * A shape whose GLOW SLOT a source .lodm retargeted reads that
+			 * texture raw - and an EMPTY retarget binds black, which is how a
+			 * pbr set that names no emissive says it emits nothing.
+			 * Otherwise the VANILLA LOD GLOW RULE, measured off the shipped
+			 * atlases: a LOD chunk shape carries Own-Emit with a black emissive
+			 * colour and no glow slot, so what lights it is its DIFFUSE'S ALPHA
+			 * on the opaque shapes (Diamond City's DXT5 atlas: 216,521 of
+			 * 262,144 alpha blocks varying, none fully transparent). An
+			 * alpha-tested shape spends its alpha on the cut-out instead and
+			 * emits nothing.
+			 * The EMISSIVE COLOUR is folded in here, because the engine scales
+			 * that alpha by it: a chunk shape own-emits with a black colour and
+			 * therefore emits nothing, which is the whole answer to "an opaque
+			 * source with alpha 255 throughout would light every wall". The
+			 * MULTIPLE is not folded in - it can exceed 1 and this sheet is eight
+			 * bits - and rides in the set's .lodm as `emissiveScale`. A retargeted
+			 * glow slot stays RAW: a source .lodm's emissive is its own picture. */
+			if ( lodEmissiveRaw )
+				v = texture( GlowMap, offset ).rgb;
+			else
+				v = ( alphaFlags == 0 ) ? baseMap.rgb * baseMap.a * lodEmissiveColor : vec3( 0.0 );
+		} else {
+			v = C.rrr;                      // raw red: water depth
+		}
+		fragColor = vec4( v, 1.0 );
+		return;
+	}
+
+	vec4 normalMap = texture( NormalMap, offset );
+	vec4 specMap = texture( SpecularMap, offset );
+	vec4 glowMap = texture( GlowMap, offset );
+
+	vec3 normal;
+	if ( hasModelSpaceNormals ) {
+		/* A model-space map carries all three components already, in the
+		 * model's own axes, so it needs model -> view and NOTHING else.  The
+		 * tangent-space path below would instead read the map's two stored
+		 * channels as offsets along the mesh's tangent and bitangent -- and a
+		 * terrain LOD tile's tangent frame is arbitrary (btdterrain.cpp builds
+		 * T = n x worldUp, B = n x T), so the sheet's "up" lands sideways and
+		 * the surface shades in blotches.
+		 *
+		 * Channel order MEASURED on Bethesda's own shipped sheets
+		 * (Data/Textures/Terrain/Commonwealth/Commonwealth.16.*_msn.DDS, six
+		 * 512x512 tiles, correlated against the heights of the same cells):
+		 *   R = EAST  (+x)   corr 0.364 with -dh/dx, 0.001 with -dh/dy
+		 *   B = NORTH (+y)   corr 0.422 with -dh/dy, 0.002 with -dh/dx
+		 *   G = UP    (+z)   mean 238.6 of 255
+		 * Alpha is a constant 255 on every tile and carries nothing.
+		 * sk_msn.frag's `.rbg` swizzle is this same order.
+		 *
+		 * The blue channel is NOT recomputed here: it is real data. */
+		vec3 msn = normalMap.rgb * 2.0 - 1.0;
+		normal = normalize( vec3( msn.r, msn.b, msn.g ) * normalMatrix );
+	} else {
+		normal = normalMap.rgb * 2.0 - 1.0;
+		// Calculate missing blue channel
+		normal.b = sqrt(max(1.0 - dot(normal.rg, normal.rg), 0.0));
+		normal = normalize( btnMatrix_norm * normal );
+	}
+	if ( !gl_FrontFacing )
+		normal *= -1.0;
+
+	vec3 L = normalize(LightDir);
+	vec3 V = ViewDir_norm;
+	vec3 R = reflect(-V, normal);
+	vec3 H = normalize( L + V );
+
+	float NdotL = dot(normal, L);
+	float NdotL0 = max( NdotL, FLT_EPSILON );
+	float NdotH = max( dot(normal, H), FLT_EPSILON );
+	float NdotV = max( dot(normal, V), FLT_EPSILON );
+	float VdotH = max( dot(V, H), FLT_EPSILON );
+	float NdotNegL = max( dot(normal, -L), FLT_EPSILON );
+
+	vec3 reflectedWS = reflMatrix * R;
+
+	vec3 albedo = baseMap.rgb * C.rgb;
+	vec3 diffuse = A.rgb + D.rgb * NdotL0;
+	if ( greyscaleColor )
+		albedo = textureLod( GreyscaleMap, vec2( baseMap.g, paletteScale * C.r ), 0.0 ).rgb;
+
+	// Emissive
+	vec3 emissive = vec3(0.0);
+	if ( hasEmit ) {
+		emissive += glowColor * glowMult;
+
+		if ( hasGlowMap ) {
+			emissive *= glowMap.rgb;
+		}
+	}
+
+	// Specular — GGX + Smith + Schlick, matching the material editor's BRDF:
+	//   spec = D_GGX(NoH, a) * G1(NoL,k) * G1(NoV,k) * F / (4 NoL NoV)
+	// with a = rough^2 and k = (rough+1)^2/8.
+	float g = 1.0;
+	float s = 1.0;
+	float smoothness = clamp( specGlossiness, 0.0, 1.0 );
+	if ( hasSpecularMap ) {
+		// G is gloss, R is the specular mask (measured, not assumed). A flat
+		// white G correctly falls back to the material's scalar smoothness.
+		g = specMap.g;
+		s = specMap.r;
+		smoothness = g * smoothness;
+	}
+	// Specular is no longer gated on hasSpecularMap: a material with only the
+	// scalar Smoothness/Specular Strength authored used to render completely
+	// matte, which is not what the game does with it.
+	float specMask = s * specStrength;
+
+	// FO4 encodes NO metallicity, so F0 is the dielectric constant and _s.R
+	// stays what it is authored as — a specular MASK, not a metalness channel.
+	// The old hardcoded F0 of 0.2 was ~5x too reflective for a dielectric; the
+	// editor's default is 0.04.
+	float rough = clamp( 1.0 - smoothness, 0.02, 1.0 );
+	float alphaR = rough * rough;
+	float kSmith = ( rough + 1.0 ) * ( rough + 1.0 ) * 0.125;
+	// fresnelSchlick honours the material's authored Fresnel Power rather than
+	// hardwiring ^5 — that field exists in FO4 and the editor has no equivalent.
+	float F = fresnelSchlick( VdotH, 0.04 );
+	vec3 spec = vec3( D_GGX( NdotH, alphaR )
+	                  * G1( NdotL0, kSmith ) * G1( NdotV, kSmith )
+	                  * F / max( 4.0 * NdotL0 * NdotV, 0.001 ) )
+	            * specMask * NdotL0 * D.rgb * specColor;
+
+	// Environment
+	vec4 cube = textureLod( CubeMap, reflectedWS, 8.0 - smoothness * 8.0 );
+	vec4 env = texture( EnvironmentMap, offset );
+	if ( hasCubeMap ) {
+		cube.rgb *= envReflection * specStrength;
+		if ( hasEnvMask ) {
+			cube.rgb *= env.r;
+		} else {
+			cube.rgb *= s;
+		}
+
+		spec += cube.rgb * diffuse;
+	}
+
+	vec3 backlight = vec3(0.0);
+	if ( backlightPower > 0.0 ) {
+		backlight = albedo * NdotNegL * clamp( backlightPower, 0.0, 1.0 );
+
+		emissive += backlight * D.rgb;
+	}
+
+	vec3 rim = vec3(0.0);
+	if ( hasRimlight ) {
+		rim = vec3(pow((1.0 - NdotV), rimPower));
+		rim *= smoothstep( -0.2, 1.0, dot(-L, V) );
+
+		//emissive += rim * D.rgb * specMask;
+	}
+
+	// Diffuse
+	float diff = OrenNayarFull( NdotL, dot(normal, V), dot(L, V), 1.0 - smoothness );
+	diffuse = vec3(diff);
+
+	vec3 soft = vec3(0.0);
+	float wrap = NdotL;
+	if ( hasSoftlight || subsurfaceRolloff > 0.0 ) {
+		wrap = (wrap + subsurfaceRolloff) / (1.0 + subsurfaceRolloff);
+		soft = albedo * max( 0.0, wrap ) * smoothstep( 1.0, 0.0, sqrt(diff) );
+
+		diffuse += soft;
+	}
+
+	if ( hasTintColor ) {
+		albedo *= tintColor;
+	}
+
+	// Diffuse. (1 - F) is the editor's energy conservation: light reflected by
+	// the specular lobe is no longer also counted as diffuse, so glancing angles
+	// stop reading brighter than the material can physically be. The lobe shape
+	// stays Oren-Nayar rather than the editor's Lambert — it is roughness-aware
+	// and is what the rest of the FO4 path is tuned against.
+	color.rgb = diffuse * albedo * D.rgb * ( 1.0 - F );
+	// Ambient
+	color.rgb += A.rgb * albedo;
+	// Specular
+	color.rgb += spec;
+	color.rgb += A.rgb * specMask * fresnelSchlick( VdotH, 0.04 ) * (1.0 - NdotV) * D.rgb;
+	// Emissive
+	color.rgb += emissive * glowScaleSRGB;
+
+	color.rgb = tonemap( color.rgb );
+
+	if ( doRefraction ) {
+		// sample the already-rendered scene behind the shape, displaced by the
+		// (normal-mapped) surface normal - glass / heat-haze preview. The base
+		// texture of a refraction mesh is a distortion/noise map (not a diffuse
+		// colour), so it must NOT tint the result: show the clean refracted
+		// background. (Per-texel alpha blending garbled the render because the
+		// base texture is not opacity, so it is deliberately not applied here.)
+		vec2	suv = ( gl_FragCoord.xy - vec2( viewportDimensions.xy ) ) / vec2( viewportDimensions.zw );
+
+		/* Every route that scales the effect, multiplied together:
+		 *
+		 *  - normal.xy is the eye-space shading normal, so the NORMAL MAP is
+		 *    what decides where each texel of the background is fetched from;
+		 *    a flat-normal region samples straight through and shows the scene
+		 *    unchanged.
+		 *  - refractionStrength is the property's Refraction Strength, static
+		 *    or driven per frame by a BSLightingShaderPropertyFloatController
+		 *    on Controlled Variable 0.
+		 *  - C.a is the effective per-vertex alpha (1.0 when the mesh has no
+		 *    vertex colours, because vertexColorOverride replaces it), so an
+		 *    authored alpha-0 region distorts nothing and alpha-1 distorts
+		 *    fully.
+		 */
+		float	rStrength = clamp( refractionStrength, 0.0, 1.0 ) * clamp( C.a, 0.0, 1.0 );
+
+		/* Maximum displacement is a fraction of the viewport HEIGHT.
+		 *
+		 * Reading Refraction Strength as a fraction of the whole viewport threw
+		 * the source hundreds of pixels into unrelated empty background and drew
+		 * a giant dark silhouette; capping it at 8 screen pixels fixed that and
+		 * then left nothing to see, because 8 px of a mostly flat backdrop is
+		 * invisible and 8 px means something different on every monitor. A
+		 * fraction of the height keeps the distortion LOCAL, and keeps it
+		 * looking the SAME at every resolution — which is what
+		 * resolution-independent has to mean for a screen-space effect.
+		 *
+		 * The x term converts that height fraction into u, so the displacement
+		 * is isotropic instead of being stretched by the aspect ratio.
+		 */
+		const float refractionMaxScreenFraction = 0.05;
+		vec2	roffs = normal.xy * rStrength * refractionMaxScreenFraction
+			* vec2( float( viewportDimensions.w ) / float( max( viewportDimensions.z, 1 ) ), 1.0 );
+		vec3	bg = texture( RefractionSrc, clamp( suv + roffs, vec2( 0.001 ), vec2( 0.999 ) ) ).rgb;
+		color.rgb = bg;
+		color.a = 1.0;
+	}
+
+	fragColor = color;
+}

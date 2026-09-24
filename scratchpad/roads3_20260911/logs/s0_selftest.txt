@@ -1,0 +1,18 @@
+ROADS3 -- instrument self-test, known answers only
+
+  PASS  constant a = 0.35 recovered                     0.3500 (want 0.35)
+  PASS  constant a = 0.35 residual ~ 0                  0.0000 (want < 0.01)
+  PASS  constant a = 0.60 recovered                     0.6000 (want 0.60)
+  PASS  constant a = 0.60 residual ~ 0                  0.0000 (want < 0.01)
+  PASS  constant a = 0.90 recovered                     0.9000 (want 0.90)
+  PASS  constant a = 0.90 residual ~ 0                  0.0000 (want < 0.01)
+  PASS  ramped a recovered per texel                    max err 0.0000 (want < 0.02)
+  PASS  edge profile of a rises with depth              a(1) 0.100 a(8) 0.800 (want a(1) < a(8) ~ 0.80)
+  PASS  off-law sheet leaves a big residual fraction    resid/reach 0.951 (want > 0.5)
+  PASS  shuffled ground destroys the fit                frac true 0.0000 shuffled 0.3268 (want shuffled >> true)
+  PASS  mask == the painted texels exactly              0 differ (want 0)
+  PASS  mask is empty when nothing was painted          0 (want 0)
+  PASS  second difference ~ 0 on a smooth ramp          0.0000 (want < 0.01)
+  PASS  second difference sees a planted 8-level step   8.0000 at d=4 (want > 7)
+
+SELF-TEST 14/14  (0 failures)

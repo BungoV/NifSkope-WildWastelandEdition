@@ -1,0 +1,23 @@
+  Commonwealth.VT.2.lodt
+    magic LDTX version 2 headerBytes 256 flags 1 compression 0
+    worldspace Commonwealth  padded S/W/N/E 24 -20 27 -17  world 24 -20 27 -17
+    levelDim 2 index 0 count 2 tiles 2x2 = 4
+    content 256 border 8 stored 272 mips 2 sheets 4 aniso 8
+    levelDims [2, 4, 0, 0, 0, 0, 0, 0]  coverNorm 96 tint 0.35
+    vhgt 0xD8337D022F637F22  paint 0x3C79201598FEF809
+    sheet 0 role 1 dxgi 71 dxgiCover 71 space 1
+    sheet 1 role 2 dxgi 71 dxgiCover 71 space 0
+    sheet 2 role 5 dxgi 71 dxgiCover 77 space 0
+    sheet 3 role 4 dxgi 56 dxgiCover 56 space 0
+  ok   V1 Commonwealth.VT.2.lodt magic, version and header size -- version 2
+  ok   V1 Commonwealth.VT.2.lodt the geometry is the one the document fixes
+  ok   V1 Commonwealth.VT.2.lodt the object texture family: colour, msn and MASK, in that order -- roles [1, 2, 5, 4]
+  ok   V1 Commonwealth.VT.2.lodt the HEIGHT sheet is role 4 and R16 -- roles [1, 2, 5, 4]
+  ok   V1 Commonwealth.VT.2.lodt exactly one sheet carries the ground-cover alpha -- carriers [2]
+  ok   V1 Commonwealth.VT.2.lodt the reserved tail is zero
+  ok   V1 Commonwealth.VT.2.lodt row order is north-up and it is a refusal to be otherwise
+  ok   V3 Commonwealth.VT.2.lodt fileBytes matches the file -- 459136 vs 459136
+  ok   V4 Commonwealth.VT.2.lodt tilesX/tilesY are EXACT divides of the padded rectangle
+  ok   V4 Commonwealth.VT.2.lodt the padded rectangle contains the world rectangle
+  ok   V18 Commonwealth.VT.2.lodt the file is exactly header + table + aligned payloads -- 459136 vs 459136
+  ok   V7 Commonwealth.VT.2.lodt indexCrc32 covers the header and the whole table -- 0xA7B88C61 vs 0xA7B88C61

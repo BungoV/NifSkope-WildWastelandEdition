@@ -1,0 +1,26 @@
+TILING4 -- the offline model`s coverage of the fourteen sheets
+
+stand-in%% = texels the model left at the flat 127.5 fill (no LAND record,
+or a quadrant with no base texture).  A flat patch is a real term in a
+periodicity and in a variance, so every later number is read beside this.
+
+SELECTION (TILING3 frozen)
+   sheet         stand-in%    bake SD
+   ( -20,  24)       1.1%      16.81
+   ( -20,  20)       0.0%      14.32
+   ( -36, -20)       0.0%       3.46
+   (  -4, -20)       0.0%      23.34
+   (  28, -20)       0.0%       9.16
+   (  -4,  16)       8.5%      19.86
+   (  24,  16)       0.0%      12.12
+
+VALIDATION (TILING4 frozen)
+   sheet         stand-in%    bake SD
+   ( -24, -24)       0.0%       9.28
+   ( -12, -20)       0.0%      14.73
+   (   4, -24)       0.0%      25.98
+   (  20, -24)       0.0%      10.20
+   ( -20,   4)       0.0%       8.35
+   (  -8,   4)       0.0%       7.65
+   (  12,   8)       0.0%      18.26
+

@@ -1,0 +1,32 @@
+chunk                    sheet  differing      pct   maxd   beyond     band
+Commonwealth.4.-24.24    colour        43  0.0164%      3        0        4
+Commonwealth.4.-20.24    colour        84  0.0320%      3        0        4
+Commonwealth.4.-24.28    colour         0        -      -        0        4
+Commonwealth.4.-20.28    colour         0        -      -        0        4
+Commonwealth.4.-24.24    msn         5524  2.1072%      3        0        4
+Commonwealth.4.-20.24    msn         6111  2.3312%      3        0        4
+Commonwealth.4.-24.28    msn         4634  1.7677%      3        0        4
+Commonwealth.4.-20.28    msn         5858  2.2346%      3        0        4
+Commonwealth.4.-24.24    data       17580  6.7062%     47        0       64
+Commonwealth.4.-20.24    data       19217  7.3307%     47        0       64
+Commonwealth.4.-24.28    data       12550  4.7874%     43        0       64
+Commonwealth.4.-20.28    data       12702  4.8454%     79       16       64
+       FAIL Commonwealth.4.-20.28 data: 16 texels moved at or beyond 64 from the border
+
+  colour total moved over the four chunks: 127
+  msn    total moved over the four chunks: 22127
+  data   total moved over the four chunks: 62049
+
+  the new baseline, sha256 of every after sheet:
+    Commonwealth.4.-24.24.DDS        1f39d6aa0c64e83c 174888 bytes
+    Commonwealth.4.-24.24_msn.DDS    594e49b57eadbb0b 174888 bytes
+    Commonwealth.4.-24.24_data.DDS   7f8af632f8e07c96 349648 bytes
+    Commonwealth.4.-20.24.DDS        5478915e2145d15f 174888 bytes
+    Commonwealth.4.-20.24_msn.DDS    5b5e55e3279c0fc7 174888 bytes
+    Commonwealth.4.-20.24_data.DDS   7b58975182a55c6a 349648 bytes
+    Commonwealth.4.-24.28.DDS        ce8a81d375d2cd97 174888 bytes
+    Commonwealth.4.-24.28_msn.DDS    b67baf8ad94a4d2a 174888 bytes
+    Commonwealth.4.-24.28_data.DDS   7b6d3d440408c84b 349648 bytes
+    Commonwealth.4.-20.28.DDS        dbbdeb8d39227021 174888 bytes
+    Commonwealth.4.-20.28_msn.DDS    989dd73e36b9bac1 174888 bytes
+    Commonwealth.4.-20.28_data.DDS   bb9bb9dfc2502496 349648 bytes

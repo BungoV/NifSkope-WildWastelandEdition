@@ -1,0 +1,11 @@
+lane LODUI1 DONE 2026-09-11 13:3x
+exe release/NifSkope.exe 13:24:12, 21,234,176 B
+one build (13:09:49) + three counted relinks (13:13:51, 13:22:11, 13:24:12)
+rung release/NifSkope.before_lodui1.exe 12:42:14, 21,180,928 B, md5 9ca009cb289858c17d87546a216c45a6
+gates: lod_generation 116/0, lodgen_panel_run 125/0, lodgen_stage_times 16/0,
+       lodgen_native 18/0, lodgen_terrain 26/0, lodgen_terrain_vt 41/1 (rung red too),
+       lodgen_roads 11/0, lodgen_ground_cover 29/5, lodgen_terrain_pbrm 14/0,
+       lodl_open 23/0, lodl_write PASS, ui_align 11/0,
+       lodgen_merge / lodgen_identity / lodgen_card_arrays / lodgen_texture_arrays /
+       lodgen_impostor_cards PASS -- all on the 13:24:12 exe
+nothing committed; nothing left running; game down throughout

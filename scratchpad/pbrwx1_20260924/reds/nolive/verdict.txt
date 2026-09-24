@@ -1,0 +1,32 @@
+pbr_wx1_gates judge, red=nolive, CommonwealthClear fv=131 tods=8, climate TNAM=30,54,102,126,175,68
+  judge GMST: X=600 Y=-325 T=0.15 ext=2 shadowScale=-15 secunda=75 fades=5/10; A..D=6.9250 7.0750 18.9250 19.0750
+live
+    FAIL (live) the Mode row reached the state (Lookdev)
+    FAIL (live) the Hour row reached the state (12)
+    FAIL (live) Hour 12 -> 0 changes the viewport (0 px >= 500)
+    FAIL (live) Hour 12 -> 0 changes the Status line
+    FAIL (live) the Ground row reached the state (off)
+    FAIL (live) Ground off changes the viewport (0 px >= 500)
+    FAIL (live) the Weather row reached the state
+    FAIL (live) the Weather row changes the Status line
+    FAIL (live) the Sky row reached the state
+    FAIL (live) Sky on changes the viewport (0 px >= 500)
+    FAIL (live) the drawn echo names the Sky pass
+    FAIL (save) the Sky row wrote ON to its setting
+    FAIL (live) the Sun row reached the state
+    FAIL (live) Sun on changes the viewport (0 px >= 500)
+    FAIL (live) the drawn echo names the Sun pass
+    FAIL (save) the Sun row wrote ON to its setting
+    FAIL (live) the Clouds row reached the state
+    FAIL (live) Clouds on changes the viewport (0 px >= 500)
+    FAIL (live) the drawn echo names the Clouds pass
+    FAIL (save) the Clouds row wrote ON to its setting
+    FAIL (live) the Moon row reached the state
+    FAIL (live) the drawn echo names the moon pass
+    FAIL (live) the Game Day row reached the state (0)
+    FAIL (live) the Game Day row changes the Status line
+    FAIL (save) the Moon row and Game Day 32 wrote their settings
+    FAIL
+  FAIL the in-app weather leg passes -- 37 checks, 25 failures
+1 checks, 1 failures
+FAIL

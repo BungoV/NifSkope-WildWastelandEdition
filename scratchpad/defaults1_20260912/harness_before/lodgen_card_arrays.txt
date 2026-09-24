@@ -1,0 +1,63 @@
+  tree candidates in (-20,24)..(-19,25): 2
+  ok   two candidates: 0004a074 (red) and 0004a075 (blue)
+  synthetic sets: 16x32 sheets, 8 x 16 frames on a 2x2 grid, 2-texel gutter; emissiveScale 1 on 0004a074 and 0 on 0004a075
+  arrays written: 10 textures in 4 arrays (1 legacy + 0 pbr size classes, 0 layers from a .lodm, 0 sources own-emit with a lit colour); 10 shapes carry a layer, 0 without UV2, 2 textures unreadable
+  merged: 12 shapes -> 12 across 1 chunks
+  card arrays written: 2 card sets in 4 arrays (1 groups), 342 C lines carry a layer, 0 sets unreadable
+  ok   the card array pass reported
+  C lines across the chunks: 342
+  Commonwealth.LodgenCards.legacy.16x32_d.DDS: 16x32 DX10 dxgi 77 layers 2 mips 2 (expected 2) size 1428 (expected 1428)
+  ok   Commonwealth.LodgenCards.legacy.16x32_d.DDS is a DX10 BC3 array of 2 layers, 2 mips, exactly 1428 bytes
+  Commonwealth.LodgenCards.legacy.16x32_n.DDS: 16x32 DX10 dxgi 77 layers 2 mips 2 (expected 2) size 1428 (expected 1428)
+  ok   Commonwealth.LodgenCards.legacy.16x32_n.DDS is a DX10 BC3 array of 2 layers, 2 mips, exactly 1428 bytes
+  Commonwealth.LodgenCards.legacy.16x32_gsaos.DDS: 16x32 DX10 dxgi 77 layers 2 mips 2 (expected 2) size 1428 (expected 1428)
+  ok   Commonwealth.LodgenCards.legacy.16x32_gsaos.DDS is a DX10 BC3 array of 2 layers, 2 mips, exactly 1428 bytes
+  Commonwealth.LodgenCards.legacy.16x32_g.DDS: 16x32 DX10 dxgi 71 layers 2 mips 2 (expected 2) size 788 (expected 788)
+  ok   Commonwealth.LodgenCards.legacy.16x32_g.DDS is a DX10 BC1 array of 2 layers, 2 mips, exactly 788 bytes
+  ok   the .lodm envelope is LODM v1 with an exact payload size
+  cardArray lodm: {"array":{"class":[16,32],"emissiveScale":[1,0],"frame":[8,16],"gap":[4,4],"layers":[{"center":[0,0,128],"depthSpan":3072,"half":[64,128],"id":"0004a074","projection":"ortho"},{"center":[0,0,128],"depthSpan":3072,"half":[64,128],"id":"0004a075"}],"mips":2,"oct":2,"pad":[2,2]},"family":"legacy","kind
+  ok   the .lodm is a lodm 1 legacy cardArray naming the four sheets
+  ok   the .lodm carries the size class, the grid, the frame and the mip cap
+  array spacing: pad [2, 2] gap [4, 4], mips 2 (log2 of the gap)
+  ok   the array records the sets' own gap and the per-side padding that is half of it
+  layers: ['0004a074', '0004a075']
+  ok   one layer per card set, in the order the array holds them
+  ok   every layer carries the card geometry of its set (half, centre, depth span)
+  ok   a set baked before per-frame positioning contributes a layer with no frameOffset
+  projection per layer: {'0004a074': 'ortho', '0004a075': None} (expected 0004a074 ortho, 0004a075 absent)
+  ok   the layer whose sidecar named an orthographic camera carries it
+  ok   the layer whose sidecar named none carries no projection key at all
+  emissiveScale per layer: [1, 0] (layers ['0004a074', '0004a075'], expected [1.0, 0.0])
+  ok   the cardArray .lodm lists one emissiveScale per layer, parallel to layers
+  ok   each layer carries ITS OWN set's emissive multiple (1 on the red set, 0 on the blue)
+  C lines: 342, 0 without the array .lodm and a layer 0/1; ids -> layers: {'0004a074': [0], '0004a075': [1]}
+  ok   every C line gained the array .lodm and a layer in range
+  ok   each candidate sits on exactly one layer, and the two differ
+  layer 0 (0004a074): mip-0 centre-block endpoints (255, 0, 0) (255, 0, 0) -> red (expected red)
+  layer 1 (0004a075): mip-0 centre-block endpoints (0, 0, 255) (0, 0, 255) -> blue (expected blue)
+  ok   each layer of the array holds its own set's colour (2 of 2)
+  emissive layer 0 (0004a074): mip-0 centre-block endpoints (0, 255, 0) (0, 255, 0) -> green
+  emissive layer 1 (0004a075): mip-0 centre-block endpoints (0, 255, 0) (0, 255, 0) -> green
+  ok   the emissive array carries each set's own emissive sheet (2 of 2 green)
+  ok   the half-aux array pass reported
+  _d.DDS: 16x32 mips 2, 1428 bytes (wanted 16x32)
+  ok   _d.DDS is 16x32 with --card-half-aux
+  ok   _d.DDS is exactly header + its own blocks (1428)
+  _n.DDS: 8x16 mips 1, 404 bytes (wanted 8x16)
+  ok   _n.DDS is 8x16 with --card-half-aux
+  ok   _n.DDS is exactly header + its own blocks (404)
+  _gsaos.DDS: 8x16 mips 1, 404 bytes (wanted 8x16)
+  ok   _gsaos.DDS is 8x16 with --card-half-aux
+  ok   _gsaos.DDS is exactly header + its own blocks (404)
+  _g.DDS: 8x16 mips 1, 276 bytes (wanted 8x16)
+  ok   _g.DDS is 8x16 with --card-half-aux
+  ok   _g.DDS is exactly header + its own blocks (276)
+  ok   the base colour did not divide
+  half-aux array block: {"auxClass":[8,16],"auxDiv":2,"auxMips":1,"class":[16,32],"emissiveScale":[1,0],"frame":[8,16],"gap":[4,4],"mips":2,"oct":2,"pad":[2,2]}
+  ok   the .lodm records the divisor, the aux size class and the aux mip cap
+  ok   the .lodm still records the FULL class for the base colour
+  four arrays: 5072 bytes full, 2512 bytes half-aux = 49.5% (payload only; a 148-byte header a file)
+  payload alone: 4480 -> 1920 = 42.9% (the law wants 5072 and 2512 bytes with their headers)
+  ok   the four arrays are EXACTLY the bytes the class, the gap and auxDiv account for, both ways
+  ok   --card-half-aux actually halves something (the payload is under two thirds of the full run)
+RESULT PASS

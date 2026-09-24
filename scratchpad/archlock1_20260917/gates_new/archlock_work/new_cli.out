@@ -1,0 +1,14 @@
+archlock-probe roots 3
+archlock-probe dataRoot x:/Programs/Steam/steamapps/common/Fallout 4/Data/Fallout4 - Meshes.ba2
+archlock-probe dataRoot x:/Programs/Steam/steamapps/common/Fallout 4/Data/Fallout4 - Materials.ba2
+archlock-probe dataRoot x:/Programs/Steam/steamapps/common/Fallout 4/Data/Fallout4 - Textures3.ba2
+archlock-probe sharedIndexBuilt 0
+archlock-probe loaded 1
+archlock-probe blocks 21
+archlock-probe documentDataPaths 0
+archlock-probe fallsThroughToShared 1
+archlock-probe material Materials\Armor\Combat\CombatArmor_Arm.BGSM
+archlock-probe getFile found 477 byte(s)
+archlock-probe findFile found textures/armor/combatarmor/combatarmor_arm_d.dds
+archlock-probe sharedIndexBuiltNow 1
+archlock-probe verdict answered

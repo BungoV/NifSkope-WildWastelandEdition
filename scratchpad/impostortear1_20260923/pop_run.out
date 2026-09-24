@@ -1,0 +1,13 @@
+  run_ship blast_n4  az   rc=0 cards=360 25s orbit counted 360 of 360
+  run_ship maple_n4  az   rc=0 cards=360 27s orbit counted 360 of 360
+  run_ship rock_n4   az   rc=0 cards=360 38s orbit counted 360 of 360
+  run_ship blast_n4  el   rc=0 cards=90 10s orbit counted 90 of 90
+  run_ship maple_n4  el   rc=0 cards=90 9s orbit counted 90 of 90
+  run_ship rock_n4   el   rc=0 cards=90 14s orbit counted 90 of 90
+  run_fix  blast_n4  az   rc=0 cards=360 25s orbit counted 360 of 360
+  run_fix  maple_n4  az   rc=0 cards=360 28s orbit counted 360 of 360
+  run_fix  rock_n4   az   rc=0 cards=360 37s orbit counted 360 of 360
+  run_fix  blast_n4  el   rc=0 cards=90 9s orbit counted 90 of 90
+  run_fix  maple_n4  el   rc=0 cards=90 10s orbit counted 90 of 90
+  run_fix  rock_n4   el   rc=0 cards=90 14s orbit counted 90 of 90
+ALLDONE

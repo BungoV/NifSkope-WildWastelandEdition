@@ -1,0 +1,274 @@
+INCR1 step 1(a) -- B3's arms on the STOCK target, exe at launch
+Thu Sep 17 05:05:03 CEDT 2026
+   -rwxr-xr-x 1 bungo 197609 22477824 Sep 17 03:56 /e/Projects/NifskopeWildWastelandEdition/release/NifSkope.exe
+region -24 16 -13 27 dim 4 (9 chunks), plugin copied to /e/Projects/NifskopeWildWastelandEdition/scratchpad/incr1_20260917/work/s1/esm/act.esm
+
+[base] full bake of the unedited plugin ...
+    rc=0  11 s
+
+[pick] drawn reference in chunk (-24,16): -21 19 0007fb53
+
+== arm null (05:05:15) ==
+    no edit (control)
+    incremental: 0 of 9 chunks dirty (0 inputs moved, 0 not in the ledger, 0 output lost, 0 by neighbour)
+    full 11 s, incremental 1 s
+  [null] files: full 56, incr 56
+    DIFFER (2):
+      bake.log (first differing byte 8; 145229 vs 6106 bytes)
+      obj/Commonwealth.lodb (record, NORMALISED)
+      full: switch	E:/Projects/NifskopeWildWastelandEdition/scratchpad/incr1_20260917/work/s1/null/full/obj
+      incr: switch	E:/Projects/NifskopeWildWastelandEdition/scratchpad/incr1_20260917/work/s1/null/incr/obj
+      full: switch	E:/Projects/NifskopeWildWastelandEdition/scratchpad/incr1_20260917/work/s1/null/full/tex
+      incr: switch	E:/Projects/NifskopeWildWastelandEdition/scratchpad/incr1_20260917/work/s1/null/incr/tex
+      full: switches	f613fda236b23169e9865f5f5c6cd2f8fd1271e8
+      incr: switch	--incremental
+      full: chunk	-24	16	4	172c458cdc037259d38cbd83891c5a7b649caf26
+      incr: switch	E:/Projects/NifskopeWildWastelandEdition/scratchpad/incr1_20260917/work/s1/null/incr/obj
+      full: out	-24	16	Commonwealth.4.-24.16.BTR	b83d4fef03e37e06c57c0cc02b7fa0536078042d
+      incr: switches	f613fda236b23169e9865f5f5c6cd2f8fd1271e8
+      full: out	-24	16	Commonwealth.4.-24.16.BTO	2f38fdbbbd7e507509a006cbe05751c12617050d
+      incr: chunk	-24	16	4	172c458cdc037259d38cbd83891c5a7b649caf26
+      full: out	-24	16	Commonwealth.4.-24.16.BTO.manifest.txt	826723228d1763da34fab6b5aaebfa79e400457f
+      incr: out	-24	16	Commonwealth.4.-24.16.BTR	b83d4fef03e37e06c57c0cc02b7fa0536078042d
+      full: out	-24	16	../tex/Commonwealth.4.-24.16.DDS	deeedf8e167b8815f8218284b8592c7993691dbe
+      incr: out	-24	16	Commonwealth.4.-24.16.BTO	2f38fdbbbd7e507509a006cbe05751c12617050d
+      full: out	-24	16	../tex/Commonwealth.4.-24.16_msn.DDS	c0dbf1f04f31a505e0c3dd3223cd9e2c8791ac02
+      incr: out	-24	16	Commonwealth.4.-24.16.BTO.manifest.txt	826723228d1763da34fab6b5aaebfa79e400457f
+      full: out	-24	16	../tex/Commonwealth.4.-24.16_data.DDS	5c8615d40acf7f08737a3e8829d8b353b60043c0
+      incr: out	-24	16	../tex/Commonwealth.4.-24.16.DDS	deeedf8e167b8815f8218284b8592c7993691dbe
+      full: chunk	-20	16	4	e3b6022044620bdfda95b43e54aa3734d9c2f1d5
+      incr: out	-24	16	../tex/Commonwealth.4.-24.16_msn.DDS	c0dbf1f04f31a505e0c3dd3223cd9e2c8791ac02
+      full: out	-20	16	Commonwealth.4.-20.16.BTR	9a6136b35eb935f05bd710575b96b0a4908618a9
+      incr: out	-24	16	../tex/Commonwealth.4.-24.16_data.DDS	5c8615d40acf7f08737a3e8829d8b353b60043c0
+      full: out	-20	16	Commonwealth.4.-20.16.BTO	f2c9bc1a57259ef3ecfa57281930d4a2841d4652
+      incr: chunk	-20	16	4	e3b6022044620bdfda95b43e54aa3734d9c2f1d5
+      full: out	-20	16	Commonwealth.4.-20.16.BTO.manifest.txt	706158c4684ffe9d667b3cfcf34f85c89df7ac92
+      incr: out	-20	16	Commonwealth.4.-20.16.BTR	9a6136b35eb935f05bd710575b96b0a4908618a9
+      full: out	-20	16	../tex/Commonwealth.4.-20.16.DDS	33b7828b019e840d5f47a19c8411166fa3616650
+      incr: out	-20	16	Commonwealth.4.-20.16.BTO	f2c9bc1a57259ef3ecfa57281930d4a2841d4652
+      full: out	-20	16	../tex/Commonwealth.4.-20.16_msn.DDS	df433e2fda5648bedeec13fd0759cf826d89b67b
+      incr: out	-20	16	Commonwealth.4.-20.16.BTO.manifest.txt	706158c4684ffe9d667b3cfcf34f85c89df7ac92
+      full: out	-20	16	../tex/Commonwealth.4.-20.16_data.DDS	eed00a01f0d1ab30e749d4059b57462d8c799968
+      incr: out	-20	16	../tex/Commonwealth.4.-20.16.DDS	33b7828b019e840d5f47a19c8411166fa3616650
+      full: chunk	-16	16	4	8cf60e6989807c3919d7ace0ec0e3ea527501a8a
+      incr: out	-20	16	../tex/Commonwealth.4.-20.16_msn.DDS	df433e2fda5648bedeec13fd0759cf826d89b67b
+      full: out	-16	16	Commonwealth.4.-16.16.BTR	490384cb69d1ec7b5f3949094107ebe94545eb90
+      incr: out	-20	16	../tex/Commonwealth.4.-20.16_data.DDS	eed00a01f0d1ab30e749d4059b57462d8c799968
+      full: out	-16	16	Commonwealth.4.-16.16.BTO	a59e0e9639b2fa150fa601000f4096a09770ee95
+      incr: chunk	-16	16	4	8cf60e6989807c3919d7ace0ec0e3ea527501a8a
+      ... truncated
+    FAIL null
+
+== arm land (05:05:28) ==
+    VHGT gradient byte at data+3327: 255 -> 7 (cell -23,17, compressed)
+    record data 10846 -> 10846 bytes, 0 GRUP size(s) fixed up
+    wrote E:/Projects/NifskopeWildWastelandEdition/scratchpad/incr1_20260917/work/s1/esm/act.esm (330776576 bytes)
+    incremental: 4 of 9 chunks dirty (1 inputs moved, 0 not in the ledger, 0 output lost, 3 by neighbour)
+    full 10 s, incremental 6 s
+  [land] files: full 56, incr 56
+    DIFFER (2):
+      bake.log (first differing byte 8; 145229 vs 70471 bytes)
+      obj/Commonwealth.lodb (record, NORMALISED)
+      full: switch	E:/Projects/NifskopeWildWastelandEdition/scratchpad/incr1_20260917/work/s1/land/full/obj
+      incr: switch	E:/Projects/NifskopeWildWastelandEdition/scratchpad/incr1_20260917/work/s1/land/incr/obj
+      full: switch	E:/Projects/NifskopeWildWastelandEdition/scratchpad/incr1_20260917/work/s1/land/full/tex
+      incr: switch	E:/Projects/NifskopeWildWastelandEdition/scratchpad/incr1_20260917/work/s1/land/incr/tex
+      full: switches	f613fda236b23169e9865f5f5c6cd2f8fd1271e8
+      incr: switch	--incremental
+      full: chunk	-24	16	4	6fd26910947300369f4092fb741bb6b6e20b5339
+      incr: switch	E:/Projects/NifskopeWildWastelandEdition/scratchpad/incr1_20260917/work/s1/land/incr/obj
+      full: out	-24	16	Commonwealth.4.-24.16.BTR	b512b19814cb2c9236d005a6351dac4f6a791fea
+      incr: switches	f613fda236b23169e9865f5f5c6cd2f8fd1271e8
+      full: out	-24	16	Commonwealth.4.-24.16.BTO	2f38fdbbbd7e507509a006cbe05751c12617050d
+      incr: chunk	-24	16	4	6fd26910947300369f4092fb741bb6b6e20b5339
+      full: out	-24	16	Commonwealth.4.-24.16.BTO.manifest.txt	826723228d1763da34fab6b5aaebfa79e400457f
+      incr: out	-24	16	Commonwealth.4.-24.16.BTR	b512b19814cb2c9236d005a6351dac4f6a791fea
+      full: out	-24	16	../tex/Commonwealth.4.-24.16.DDS	7e5f827ea83b3844a015857ea88f4941afe52865
+      incr: out	-24	16	Commonwealth.4.-24.16.BTO	2f38fdbbbd7e507509a006cbe05751c12617050d
+      full: out	-24	16	../tex/Commonwealth.4.-24.16_msn.DDS	c0dbf1f04f31a505e0c3dd3223cd9e2c8791ac02
+      incr: out	-24	16	Commonwealth.4.-24.16.BTO.manifest.txt	826723228d1763da34fab6b5aaebfa79e400457f
+      full: out	-24	16	../tex/Commonwealth.4.-24.16_data.DDS	89e2424251ff6db15e824ad3d7f0e565f04c05d2
+      incr: out	-24	16	../tex/Commonwealth.4.-24.16.DDS	7e5f827ea83b3844a015857ea88f4941afe52865
+      full: chunk	-20	16	4	e3b6022044620bdfda95b43e54aa3734d9c2f1d5
+      incr: out	-24	16	../tex/Commonwealth.4.-24.16_msn.DDS	c0dbf1f04f31a505e0c3dd3223cd9e2c8791ac02
+      full: out	-20	16	Commonwealth.4.-20.16.BTR	9a6136b35eb935f05bd710575b96b0a4908618a9
+      incr: out	-24	16	../tex/Commonwealth.4.-24.16_data.DDS	89e2424251ff6db15e824ad3d7f0e565f04c05d2
+      full: out	-20	16	Commonwealth.4.-20.16.BTO	f2c9bc1a57259ef3ecfa57281930d4a2841d4652
+      incr: chunk	-20	16	4	e3b6022044620bdfda95b43e54aa3734d9c2f1d5
+      full: out	-20	16	Commonwealth.4.-20.16.BTO.manifest.txt	706158c4684ffe9d667b3cfcf34f85c89df7ac92
+      incr: out	-20	16	Commonwealth.4.-20.16.BTR	9a6136b35eb935f05bd710575b96b0a4908618a9
+      full: out	-20	16	../tex/Commonwealth.4.-20.16.DDS	33b7828b019e840d5f47a19c8411166fa3616650
+      incr: out	-20	16	Commonwealth.4.-20.16.BTO	f2c9bc1a57259ef3ecfa57281930d4a2841d4652
+      full: out	-20	16	../tex/Commonwealth.4.-20.16_msn.DDS	df433e2fda5648bedeec13fd0759cf826d89b67b
+      incr: out	-20	16	Commonwealth.4.-20.16.BTO.manifest.txt	706158c4684ffe9d667b3cfcf34f85c89df7ac92
+      full: out	-20	16	../tex/Commonwealth.4.-20.16_data.DDS	eed00a01f0d1ab30e749d4059b57462d8c799968
+      incr: out	-20	16	../tex/Commonwealth.4.-20.16.DDS	33b7828b019e840d5f47a19c8411166fa3616650
+      full: chunk	-16	16	4	8cf60e6989807c3919d7ace0ec0e3ea527501a8a
+      incr: out	-20	16	../tex/Commonwealth.4.-20.16_msn.DDS	df433e2fda5648bedeec13fd0759cf826d89b67b
+      full: out	-16	16	Commonwealth.4.-16.16.BTR	490384cb69d1ec7b5f3949094107ebe94545eb90
+      incr: out	-20	16	../tex/Commonwealth.4.-20.16_data.DDS	eed00a01f0d1ab30e749d4059b57462d8c799968
+      full: out	-16	16	Commonwealth.4.-16.16.BTO	a59e0e9639b2fa150fa601000f4096a09770ee95
+      incr: chunk	-16	16	4	8cf60e6989807c3919d7ace0ec0e3ea527501a8a
+      ... truncated
+    floor: the edit moved 4 file(s) of the full bake: bake.log, obj/Commonwealth.4.-24.16.BTR, tex/Commonwealth.4.-24.16.DDS, tex/Commonwealth.4.-24.16_data.DDS
+    FAIL land
+
+== arm refs (05:05:47) ==
+    REFR 0x0007FB53 DATA x: -82403.258 -> -81891.258 (cell -21,19)
+    wrote E:/Projects/NifskopeWildWastelandEdition/scratchpad/incr1_20260917/work/s1/esm/act.esm (330776576 bytes)
+    incremental: 9 of 9 chunks dirty (4 inputs moved, 0 not in the ledger, 0 output lost, 5 by neighbour)
+    full 10 s, incremental 11 s
+  [refs] files: full 56, incr 56
+    DIFFER (2):
+      bake.log (first differing byte 8; 145229 vs 145524 bytes)
+      obj/Commonwealth.lodb (record, NORMALISED)
+      full: switch	E:/Projects/NifskopeWildWastelandEdition/scratchpad/incr1_20260917/work/s1/refs/full/obj
+      incr: switch	E:/Projects/NifskopeWildWastelandEdition/scratchpad/incr1_20260917/work/s1/refs/incr/obj
+      full: switch	E:/Projects/NifskopeWildWastelandEdition/scratchpad/incr1_20260917/work/s1/refs/full/tex
+      incr: switch	E:/Projects/NifskopeWildWastelandEdition/scratchpad/incr1_20260917/work/s1/refs/incr/tex
+      full: switches	f613fda236b23169e9865f5f5c6cd2f8fd1271e8
+      incr: switch	--incremental
+      full: chunk	-24	16	4	b31dfee41a80ff98b6910305e44d0baafcc67d92
+      incr: switch	E:/Projects/NifskopeWildWastelandEdition/scratchpad/incr1_20260917/work/s1/refs/incr/obj
+      full: out	-24	16	Commonwealth.4.-24.16.BTR	b83d4fef03e37e06c57c0cc02b7fa0536078042d
+      incr: switches	f613fda236b23169e9865f5f5c6cd2f8fd1271e8
+      full: out	-24	16	Commonwealth.4.-24.16.BTO	cb450bd082ae31c67f7d4137ab2d11b8326fcba0
+      incr: chunk	-24	16	4	b31dfee41a80ff98b6910305e44d0baafcc67d92
+      full: out	-24	16	Commonwealth.4.-24.16.BTO.manifest.txt	6f5ddc25869de2deb4db2d131135a11efa95263a
+      incr: out	-24	16	Commonwealth.4.-24.16.BTR	b83d4fef03e37e06c57c0cc02b7fa0536078042d
+      full: out	-24	16	../tex/Commonwealth.4.-24.16.DDS	deeedf8e167b8815f8218284b8592c7993691dbe
+      incr: out	-24	16	Commonwealth.4.-24.16.BTO	cb450bd082ae31c67f7d4137ab2d11b8326fcba0
+      full: out	-24	16	../tex/Commonwealth.4.-24.16_msn.DDS	c0dbf1f04f31a505e0c3dd3223cd9e2c8791ac02
+      incr: out	-24	16	Commonwealth.4.-24.16.BTO.manifest.txt	6f5ddc25869de2deb4db2d131135a11efa95263a
+      full: out	-24	16	../tex/Commonwealth.4.-24.16_data.DDS	5c8615d40acf7f08737a3e8829d8b353b60043c0
+      incr: out	-24	16	../tex/Commonwealth.4.-24.16.DDS	deeedf8e167b8815f8218284b8592c7993691dbe
+      full: chunk	-20	16	4	259c5b3219173f4d1be620c6b89313549ece7732
+      incr: out	-24	16	../tex/Commonwealth.4.-24.16_msn.DDS	c0dbf1f04f31a505e0c3dd3223cd9e2c8791ac02
+      full: out	-20	16	Commonwealth.4.-20.16.BTR	9a6136b35eb935f05bd710575b96b0a4908618a9
+      incr: out	-24	16	../tex/Commonwealth.4.-24.16_data.DDS	5c8615d40acf7f08737a3e8829d8b353b60043c0
+      full: out	-20	16	Commonwealth.4.-20.16.BTO	f2c9bc1a57259ef3ecfa57281930d4a2841d4652
+      incr: chunk	-20	16	4	259c5b3219173f4d1be620c6b89313549ece7732
+      full: out	-20	16	Commonwealth.4.-20.16.BTO.manifest.txt	706158c4684ffe9d667b3cfcf34f85c89df7ac92
+      incr: out	-20	16	Commonwealth.4.-20.16.BTR	9a6136b35eb935f05bd710575b96b0a4908618a9
+      full: out	-20	16	../tex/Commonwealth.4.-20.16.DDS	33b7828b019e840d5f47a19c8411166fa3616650
+      incr: out	-20	16	Commonwealth.4.-20.16.BTO	f2c9bc1a57259ef3ecfa57281930d4a2841d4652
+      full: out	-20	16	../tex/Commonwealth.4.-20.16_msn.DDS	df433e2fda5648bedeec13fd0759cf826d89b67b
+      incr: out	-20	16	Commonwealth.4.-20.16.BTO.manifest.txt	706158c4684ffe9d667b3cfcf34f85c89df7ac92
+      full: out	-20	16	../tex/Commonwealth.4.-20.16_data.DDS	eed00a01f0d1ab30e749d4059b57462d8c799968
+      incr: out	-20	16	../tex/Commonwealth.4.-20.16.DDS	33b7828b019e840d5f47a19c8411166fa3616650
+      full: chunk	-16	16	4	8cf60e6989807c3919d7ace0ec0e3ea527501a8a
+      incr: out	-20	16	../tex/Commonwealth.4.-20.16_msn.DDS	df433e2fda5648bedeec13fd0759cf826d89b67b
+      full: out	-16	16	Commonwealth.4.-16.16.BTR	490384cb69d1ec7b5f3949094107ebe94545eb90
+      incr: out	-20	16	../tex/Commonwealth.4.-20.16_data.DDS	eed00a01f0d1ab30e749d4059b57462d8c799968
+      full: out	-16	16	Commonwealth.4.-16.16.BTO	a59e0e9639b2fa150fa601000f4096a09770ee95
+      incr: chunk	-16	16	4	8cf60e6989807c3919d7ace0ec0e3ea527501a8a
+      ... truncated
+    floor: the edit moved 3 file(s) of the full bake: bake.log, obj/Commonwealth.4.-24.16.BTO, obj/Commonwealth.4.-24.16.BTO.manifest.txt
+    FAIL refs
+
+== arm border (05:06:11) ==
+    VHGT gradient byte at data+3327: 255 -> 7 (cell -24,16, compressed)
+    record data 10747 -> 10747 bytes, 0 GRUP size(s) fixed up
+    wrote E:/Projects/NifskopeWildWastelandEdition/scratchpad/incr1_20260917/work/s1/esm/act.esm (330776576 bytes)
+    incremental: 4 of 9 chunks dirty (1 inputs moved, 0 not in the ledger, 0 output lost, 3 by neighbour)
+    full 10 s, incremental 5 s
+  [border] files: full 56, incr 56
+    DIFFER (2):
+      bake.log (first differing byte 8; 145233 vs 70475 bytes)
+      obj/Commonwealth.lodb (record, NORMALISED)
+      full: switch	E:/Projects/NifskopeWildWastelandEdition/scratchpad/incr1_20260917/work/s1/border/full/obj
+      incr: switch	E:/Projects/NifskopeWildWastelandEdition/scratchpad/incr1_20260917/work/s1/border/incr/obj
+      full: switch	E:/Projects/NifskopeWildWastelandEdition/scratchpad/incr1_20260917/work/s1/border/full/tex
+      incr: switch	E:/Projects/NifskopeWildWastelandEdition/scratchpad/incr1_20260917/work/s1/border/incr/tex
+      full: switches	f613fda236b23169e9865f5f5c6cd2f8fd1271e8
+      incr: switch	--incremental
+      full: chunk	-24	16	4	7d2359285381714ee54d3965586af89e74c9bd2f
+      incr: switch	E:/Projects/NifskopeWildWastelandEdition/scratchpad/incr1_20260917/work/s1/border/incr/obj
+      full: out	-24	16	Commonwealth.4.-24.16.BTR	52b2ec1d5edf03a029d118d1e0750bd6b9374f14
+      incr: switches	f613fda236b23169e9865f5f5c6cd2f8fd1271e8
+      full: out	-24	16	Commonwealth.4.-24.16.BTO	2f38fdbbbd7e507509a006cbe05751c12617050d
+      incr: chunk	-24	16	4	7d2359285381714ee54d3965586af89e74c9bd2f
+      full: out	-24	16	Commonwealth.4.-24.16.BTO.manifest.txt	826723228d1763da34fab6b5aaebfa79e400457f
+      incr: out	-24	16	Commonwealth.4.-24.16.BTR	52b2ec1d5edf03a029d118d1e0750bd6b9374f14
+      full: out	-24	16	../tex/Commonwealth.4.-24.16.DDS	fce1be4021d23ad825af1c77d32cfa11e2254b11
+      incr: out	-24	16	Commonwealth.4.-24.16.BTO	2f38fdbbbd7e507509a006cbe05751c12617050d
+      full: out	-24	16	../tex/Commonwealth.4.-24.16_msn.DDS	c0dbf1f04f31a505e0c3dd3223cd9e2c8791ac02
+      incr: out	-24	16	Commonwealth.4.-24.16.BTO.manifest.txt	826723228d1763da34fab6b5aaebfa79e400457f
+      full: out	-24	16	../tex/Commonwealth.4.-24.16_data.DDS	742e70f82650964fa57efd0cdeb947d0cb73397d
+      incr: out	-24	16	../tex/Commonwealth.4.-24.16.DDS	fce1be4021d23ad825af1c77d32cfa11e2254b11
+      full: chunk	-20	16	4	e3b6022044620bdfda95b43e54aa3734d9c2f1d5
+      incr: out	-24	16	../tex/Commonwealth.4.-24.16_msn.DDS	c0dbf1f04f31a505e0c3dd3223cd9e2c8791ac02
+      full: out	-20	16	Commonwealth.4.-20.16.BTR	9a6136b35eb935f05bd710575b96b0a4908618a9
+      incr: out	-24	16	../tex/Commonwealth.4.-24.16_data.DDS	742e70f82650964fa57efd0cdeb947d0cb73397d
+      full: out	-20	16	Commonwealth.4.-20.16.BTO	f2c9bc1a57259ef3ecfa57281930d4a2841d4652
+      incr: chunk	-20	16	4	e3b6022044620bdfda95b43e54aa3734d9c2f1d5
+      full: out	-20	16	Commonwealth.4.-20.16.BTO.manifest.txt	706158c4684ffe9d667b3cfcf34f85c89df7ac92
+      incr: out	-20	16	Commonwealth.4.-20.16.BTR	9a6136b35eb935f05bd710575b96b0a4908618a9
+      full: out	-20	16	../tex/Commonwealth.4.-20.16.DDS	33b7828b019e840d5f47a19c8411166fa3616650
+      incr: out	-20	16	Commonwealth.4.-20.16.BTO	f2c9bc1a57259ef3ecfa57281930d4a2841d4652
+      full: out	-20	16	../tex/Commonwealth.4.-20.16_msn.DDS	df433e2fda5648bedeec13fd0759cf826d89b67b
+      incr: out	-20	16	Commonwealth.4.-20.16.BTO.manifest.txt	706158c4684ffe9d667b3cfcf34f85c89df7ac92
+      full: out	-20	16	../tex/Commonwealth.4.-20.16_data.DDS	eed00a01f0d1ab30e749d4059b57462d8c799968
+      incr: out	-20	16	../tex/Commonwealth.4.-20.16.DDS	33b7828b019e840d5f47a19c8411166fa3616650
+      full: chunk	-16	16	4	8cf60e6989807c3919d7ace0ec0e3ea527501a8a
+      incr: out	-20	16	../tex/Commonwealth.4.-20.16_msn.DDS	df433e2fda5648bedeec13fd0759cf826d89b67b
+      full: out	-16	16	Commonwealth.4.-16.16.BTR	490384cb69d1ec7b5f3949094107ebe94545eb90
+      incr: out	-20	16	../tex/Commonwealth.4.-20.16_data.DDS	eed00a01f0d1ab30e749d4059b57462d8c799968
+      full: out	-16	16	Commonwealth.4.-16.16.BTO	a59e0e9639b2fa150fa601000f4096a09770ee95
+      incr: chunk	-16	16	4	8cf60e6989807c3919d7ace0ec0e3ea527501a8a
+      ... truncated
+    floor: the edit moved 4 file(s) of the full bake: bake.log, obj/Commonwealth.4.-24.16.BTR, tex/Commonwealth.4.-24.16.DDS, tex/Commonwealth.4.-24.16_data.DDS
+    FAIL border
+
+== arm lost (05:06:30) ==
+    deleted Commonwealth.4.-24.16.BTO from the incremental tree
+    incremental: 4 of 9 chunks dirty (0 inputs moved, 0 not in the ledger, 1 output lost, 3 by neighbour)
+    full 11 s, incremental 5 s
+  [lost] files: full 56, incr 56
+    DIFFER (2):
+      bake.log (first differing byte 8; 145229 vs 70489 bytes)
+      obj/Commonwealth.lodb (record, NORMALISED)
+      full: switch	E:/Projects/NifskopeWildWastelandEdition/scratchpad/incr1_20260917/work/s1/lost/full/obj
+      incr: switch	E:/Projects/NifskopeWildWastelandEdition/scratchpad/incr1_20260917/work/s1/lost/incr/obj
+      full: switch	E:/Projects/NifskopeWildWastelandEdition/scratchpad/incr1_20260917/work/s1/lost/full/tex
+      incr: switch	E:/Projects/NifskopeWildWastelandEdition/scratchpad/incr1_20260917/work/s1/lost/incr/tex
+      full: switches	f613fda236b23169e9865f5f5c6cd2f8fd1271e8
+      incr: switch	--incremental
+      full: chunk	-24	16	4	172c458cdc037259d38cbd83891c5a7b649caf26
+      incr: switch	E:/Projects/NifskopeWildWastelandEdition/scratchpad/incr1_20260917/work/s1/lost/incr/obj
+      full: out	-24	16	Commonwealth.4.-24.16.BTR	b83d4fef03e37e06c57c0cc02b7fa0536078042d
+      incr: switches	f613fda236b23169e9865f5f5c6cd2f8fd1271e8
+      full: out	-24	16	Commonwealth.4.-24.16.BTO	2f38fdbbbd7e507509a006cbe05751c12617050d
+      incr: chunk	-24	16	4	172c458cdc037259d38cbd83891c5a7b649caf26
+      full: out	-24	16	Commonwealth.4.-24.16.BTO.manifest.txt	826723228d1763da34fab6b5aaebfa79e400457f
+      incr: out	-24	16	Commonwealth.4.-24.16.BTR	b83d4fef03e37e06c57c0cc02b7fa0536078042d
+      full: out	-24	16	../tex/Commonwealth.4.-24.16.DDS	deeedf8e167b8815f8218284b8592c7993691dbe
+      incr: out	-24	16	Commonwealth.4.-24.16.BTO	2f38fdbbbd7e507509a006cbe05751c12617050d
+      full: out	-24	16	../tex/Commonwealth.4.-24.16_msn.DDS	c0dbf1f04f31a505e0c3dd3223cd9e2c8791ac02
+      incr: out	-24	16	Commonwealth.4.-24.16.BTO.manifest.txt	826723228d1763da34fab6b5aaebfa79e400457f
+      full: out	-24	16	../tex/Commonwealth.4.-24.16_data.DDS	5c8615d40acf7f08737a3e8829d8b353b60043c0
+      incr: out	-24	16	../tex/Commonwealth.4.-24.16.DDS	deeedf8e167b8815f8218284b8592c7993691dbe
+      full: chunk	-20	16	4	e3b6022044620bdfda95b43e54aa3734d9c2f1d5
+      incr: out	-24	16	../tex/Commonwealth.4.-24.16_msn.DDS	c0dbf1f04f31a505e0c3dd3223cd9e2c8791ac02
+      full: out	-20	16	Commonwealth.4.-20.16.BTR	9a6136b35eb935f05bd710575b96b0a4908618a9
+      incr: out	-24	16	../tex/Commonwealth.4.-24.16_data.DDS	5c8615d40acf7f08737a3e8829d8b353b60043c0
+      full: out	-20	16	Commonwealth.4.-20.16.BTO	f2c9bc1a57259ef3ecfa57281930d4a2841d4652
+      incr: chunk	-20	16	4	e3b6022044620bdfda95b43e54aa3734d9c2f1d5
+      full: out	-20	16	Commonwealth.4.-20.16.BTO.manifest.txt	706158c4684ffe9d667b3cfcf34f85c89df7ac92
+      incr: out	-20	16	Commonwealth.4.-20.16.BTR	9a6136b35eb935f05bd710575b96b0a4908618a9
+      full: out	-20	16	../tex/Commonwealth.4.-20.16.DDS	33b7828b019e840d5f47a19c8411166fa3616650
+      incr: out	-20	16	Commonwealth.4.-20.16.BTO	f2c9bc1a57259ef3ecfa57281930d4a2841d4652
+      full: out	-20	16	../tex/Commonwealth.4.-20.16_msn.DDS	df433e2fda5648bedeec13fd0759cf826d89b67b
+      incr: out	-20	16	Commonwealth.4.-20.16.BTO.manifest.txt	706158c4684ffe9d667b3cfcf34f85c89df7ac92
+      full: out	-20	16	../tex/Commonwealth.4.-20.16_data.DDS	eed00a01f0d1ab30e749d4059b57462d8c799968
+      incr: out	-20	16	../tex/Commonwealth.4.-20.16.DDS	33b7828b019e840d5f47a19c8411166fa3616650
+      full: chunk	-16	16	4	8cf60e6989807c3919d7ace0ec0e3ea527501a8a
+      incr: out	-20	16	../tex/Commonwealth.4.-20.16_msn.DDS	df433e2fda5648bedeec13fd0759cf826d89b67b
+      full: out	-16	16	Commonwealth.4.-16.16.BTR	490384cb69d1ec7b5f3949094107ebe94545eb90
+      incr: out	-20	16	../tex/Commonwealth.4.-20.16_data.DDS	eed00a01f0d1ab30e749d4059b57462d8c799968
+      full: out	-16	16	Commonwealth.4.-16.16.BTO	a59e0e9639b2fa150fa601000f4096a09770ee95
+      incr: chunk	-16	16	4	8cf60e6989807c3919d7ace0ec0e3ea527501a8a
+      ... truncated
+    FAIL lost
+
+Thu Sep 17 05:06:47 CEDT 2026

@@ -1,0 +1,37 @@
+=== GATE DONE ===
+== (d) arrays and impostor cards with identity OFF ==
+       d_new: rc=0, 454 s, 93 files
+       d_rung: rc=0, 418 s, 93 files
+       rows lines: new (identity off) 7626 | rung (identity on) 7626
+  ok   (d) rows line count is unchanged with identity off (7626)
+       C lines: new (identity off) 7210 | rung (identity on) 7210
+  ok   (d) C line count is unchanged with identity off (7210)
+       I lines: new (identity off) 35 | rung (identity on) 35
+  ok   (d) I line count is unchanged with identity off (35)
+       M lines: new (identity off) 12 | rung (identity on) 12
+  ok   (d) M line count is unchanged with identity off (12)
+       A lines: new (identity off) 21 | rung (identity on) 21
+  ok   (d) A line count is unchanged with identity off (21)
+       texture-array files: new 11 | rung 11
+  ok   (d) the texture arrays are still written with identity off (11 files)
+== (e) the native .lodo / .lodi / .lodt / .lodl with identity OFF ==
+       e_new: rc=0, 2 native files
+       e_rung: rc=0, 2 native files
+       native files: 2 identical, 0 differ, 0 only on the new side
+  ok   (e) the native data is byte-identical with identity off (2 files)
+  ok   (e) --native-verify is clean on the identity-off pair
+       the rung asked for --no-identity: 1 of the native files differ from the new default
+  ok   (e) refuter: on the OLD code the flag DID thin the native data (1 files)
+28 checks, 0 failures
+RESULT PASS
+=== PANEL PICS ===
+== new ==
+  rc=1  121 checks, 1 failures
+FAIL
+checks run: 121 (floor 121)
+  -rw-r--r-- 1 bungo 197609 132226 Sep 12 21:48 /e/Projects/NifskopeWildWastelandEdition/scratchpad/defaults1_20260912/pics/panel_new_full.png
+== rung ==
+  rc=0  121 checks, 0 failures
+PASS
+checks run: 121 (floor 121)
+  -rw-r--r-- 1 bungo 197609 130982 Sep 12 21:48 /e/Projects/NifskopeWildWastelandEdition/scratchpad/defaults1_20260912/pics/panel_rung_full.png

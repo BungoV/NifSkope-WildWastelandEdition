@@ -1,0 +1,9 @@
+centreline texels 9777 of 262144 (road-coloured 27055)
+ceiling  vanilla vs vanilla     1.0000
+floor    ours --no-roads        0.1227
+after    ours --roads           0.3033
+reference the ground around it  0.3972
+mean |colour error| vs vanilla, --no-roads  whole tile 22.57  on the centreline 38.32
+mean |colour error| vs vanilla, --roads     whole tile 21.07  on the centreline 23.77
+bar 1  after >= 2 x floor       0.3033 >= 0.2455  ok
+bar 2  after >= 0.72 x reference 0.3033 >= 0.2860  ok

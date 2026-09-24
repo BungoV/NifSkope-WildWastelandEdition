@@ -1,0 +1,76 @@
+model TreeElmForest01.nif
+ranges TreeElmForest01:0 - L1_TreeElmForest01:0 104+0
+lodm materials\Landscape\TreeElmAtlas.lodm none textures\landscape\trees\elmatlas_d.dds
+mask tree
+emissive 0 shapes 0
+front 4010.34 1333.23 0 0 0
+side 4010.34 1333.23 0 0 0
+class 96 128
+gap 6 8
+oct 8 96 128 776.223 1034.96 0 0 0 3333.08 legacy 128
+frameoff 0 0 82.4954 -31.9337
+frameoff 1 0 79.8342 -39.9171
+frameoff 2 0 58.5451 -53.2228
+frameoff 3 0 34.5948 -53.2228
+frameoff 4 0 37.256 -31.9337
+frameoff 5 0 29.2726 -21.2891
+frameoff 6 0 47.9005 -18.628
+frameoff 7 0 50.5617 -18.628
+frameoff 0 1 55.884 -34.5948
+frameoff 1 1 58.5451 106.446
+frameoff 2 1 53.2228 109.107
+frameoff 3 1 7.98344 103.785
+frameoff 4 1 7.9834 146.363
+frameoff 5 1 55.884 135.718
+frameoff 6 1 82.4954 111.768
+frameoff 7 1 29.2726 -18.628
+frameoff 0 2 -7.98341 -31.9337
+frameoff 1 2 31.9337 127.735
+frameoff 2 2 15.9668 199.586
+frameoff 3 2 -2.66116 164.991
+frameoff 4 2 18.628 186.28
+frameoff 5 2 103.785 186.28
+frameoff 6 2 63.8674 130.396
+frameoff 7 2 2.66115 -15.9669
+frameoff 0 3 -34.5948 -29.2726
+frameoff 1 3 -5.32228 146.363
+frameoff 2 3 -15.9669 172.974
+frameoff 3 3 -18.628 -31.9337
+frameoff 4 3 111.768 90.4788
+frameoff 5 3 90.4788 149.024
+frameoff 6 3 31.9337 141.04
+frameoff 7 3 -26.6114 -10.6446
+frameoff 0 4 -47.9005 -29.2726
+frameoff 1 4 -58.5451 138.379
+frameoff 2 4 -101.123 204.908
+frameoff 3 4 -93.1399 127.735
+frameoff 4 4 34.5948 149.024
+frameoff 5 4 -61.2062 162.33
+frameoff 6 4 -31.9337 135.718
+frameoff 7 4 -31.9337 -5.3223
+frameoff 0 5 -42.5782 -26.6114
+frameoff 1 5 -50.5617 119.751
+frameoff 2 5 -63.8674 191.602
+frameoff 3 5 -21.2891 210.23
+frameoff 4 5 34.5948 188.941
+frameoff 5 5 5.32228 151.685
+frameoff 6 5 -37.256 114.429
+frameoff 7 5 -82.4954 -15.9668
+frameoff 0 6 -37.256 -23.9503
+frameoff 1 6 -31.9337 98.4622
+frameoff 2 6 -45.2394 114.429
+frameoff 3 6 -15.9668 119.751
+frameoff 4 6 7.98343 79.8342
+frameoff 5 6 18.628 85.1565
+frameoff 6 6 -7.98343 95.8011
+frameoff 7 6 -53.2228 -21.2891
+frameoff 0 7 -37.256 -21.2891
+frameoff 1 7 -50.5617 -18.628
+frameoff 2 7 -34.5948 -21.2891
+frameoff 3 7 -26.6114 -13.3057
+frameoff 4 7 -15.9669 -39.9171
+frameoff 5 7 -5.32228 -42.5782
+frameoff 6 7 0 -29.2726
+frameoff 7 7 -23.9503 -26.6114
+frameclamped 0
+framefit 609.401 960.672 713.186 1000.59

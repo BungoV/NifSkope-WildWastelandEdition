@@ -1,0 +1,888 @@
+[New Thread 52444.0x9694]
+[New Thread 52444.0x7110]
+[New Thread 52444.0x7af8]
+[New Thread 52444.0xc90c]
+[New Thread 52444.0xd364]
+[New Thread 52444.0xace8]
+[New Thread 52444.0xd258]
+[New Thread 52444.0xcc44]
+[New Thread 52444.0xb9c4]
+[New Thread 52444.0xd7ac]
+[New Thread 52444.0xc8d0]
+[New Thread 52444.0xc04c]
+[New Thread 52444.0xd5cc]
+[New Thread 52444.0xbdec]
+[New Thread 52444.0xca54]
+[New Thread 52444.0x4a4c]
+[New Thread 52444.0x711c]
+[New Thread 52444.0x7d24]
+[New Thread 52444.0xbf20]
+[New Thread 52444.0xd384]
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltroaddetails01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphalt01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/driedgrass01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/driedgrass01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltroaddetails01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphalt01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltcrackdecal01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltroaddetails01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltroaddetails01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltroaddetails01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphalt01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltroaddetails01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphalt01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphalt01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltcrackdecal01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltroaddetails01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphalt01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/brickswunique01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltcrackdecal01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphalt01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltcrackdecal01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/driedgrass01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/driedgrass01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/driedgrass01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concreteroadhw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltroaddetails01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/architecture/buildings/concrete03.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltroaddetails01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/driedgrass01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/driedgrass01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/driedgrass01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphalt01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphalt01.bgsm" ' not found in archives
+File ' "materials/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltcrackdecal01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltcrackdecal01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/driedgrass01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/driedgrass01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/driedgrass01.bgsm" ' not found in archives
+File ' "materials/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltroaddetails01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltroaddetails01.bgsm" ' not found in archives
+File ' "materials/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltroaddetails01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/swgrates01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/driedgrass01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/driedgrass01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphalt01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphalt01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphalt01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltcrackdecal01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltcrackdecal01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/driedgrass01.bgsm" ' not found in archives
+File ' "materials/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltroaddetails01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/swgrates01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphalt01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/driedgrass01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltcrackdecal01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltroaddetails01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltroaddetails01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltroaddetails01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphalt01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphalt01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltcrackdecal01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltcrackdecal01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/driedgrass01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltroaddetails01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphalt01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltroaddetails01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltroaddetails01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltroaddetails01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/data/materials/landscape/roads/asphaltroaddetails01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphalt01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphalt01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphalt01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphalt01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltcrackdecal01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltcrackdecal01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/data/materials/landscape/roads/asphalt01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltroaddetails01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/data/materials/landscape/roads/asphaltcrackdecal01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphalt01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltcrackdecal01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltroaddetails01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphalt01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/driedgrass01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltroaddetails01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphalt01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltroaddetails01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltroaddetails01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltroaddetails01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphalt01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concreteroadhw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltcrackdecal01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/driedgrass01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphalt01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltcrackdecal01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltroaddetails01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphalt01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/architecture/buildings/concrete03.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltroaddetails01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltroaddetails01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphalt01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltcrackdecal01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/driedgrass01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphalt01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltcrackdecal01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltroaddetails01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/driedgrass01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphalt01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltcrackdecal01.bgsm" ' not found in archives
+File ' "materials/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphalt01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltcrackdecal01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltroaddetails01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/swgrates01.bgsm" ' not found in archives
+File ' "materials/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltroaddetails01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltroaddetails01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphalt01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphalt01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltcrackdecal01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphalt01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltroaddetails01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltroaddetails01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltroaddetails01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltandswedgedecals01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphalt01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/stoneswcurbunique.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphalt01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/ground/dirtgravel01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/concretesw01.bgsm" ' not found in archives
+File ' "materials/c:/projects/fallout4/build/pc/data/materials/landscape/roads/asphaltcrackdecal01.bgsm" ' not found in archives
+
+Thread 18 "QThread" received signal SIGSEGV, Segmentation fault.
+[Switching to Thread 52444.0x711c]
+0x00007ff62c032f80 in NifItem::deleteChildItems() ()
+  Id   Target Id                     Frame 
+  1    Thread 52444.0xcb30           0x00007ffd7efcdc94 in ntdll!ZwDelayExecution () from C:\Windows\SYSTEM32\ntdll.dll
+  2    Thread 52444.0x9694           0x00007ffd7efd10a4 in ntdll!ZwWaitForWorkViaWorkerFactory () from C:\Windows\SYSTEM32\ntdll.dll
+  3    Thread 52444.0x7110           0x00007ffd7efd10a4 in ntdll!ZwWaitForWorkViaWorkerFactory () from C:\Windows\SYSTEM32\ntdll.dll
+  4    Thread 52444.0x7af8           0x00007ffd7efd10a4 in ntdll!ZwWaitForWorkViaWorkerFactory () from C:\Windows\SYSTEM32\ntdll.dll
+  5    Thread 52444.0xc90c "QThread" 0x00007ffd7efcd694 in ntdll!ZwWaitForSingleObject () from C:\Windows\SYSTEM32\ntdll.dll
+  6    Thread 52444.0xd364 "QThread" 0x00007ffd7efd1044 in ntdll!ZwWaitForAlertByThreadId () from C:\Windows\SYSTEM32\ntdll.dll
+  7    Thread 52444.0xace8 "QThread" 0x00007ffd7efd1044 in ntdll!ZwWaitForAlertByThreadId () from C:\Windows\SYSTEM32\ntdll.dll
+  8    Thread 52444.0xd258 "QThread" 0x00007ffd7efce404 in ntdll!ZwAlertThreadByThreadId () from C:\Windows\SYSTEM32\ntdll.dll
+  9    Thread 52444.0xcc44 "QThread" 0x00007ffd7efd1044 in ntdll!ZwWaitForAlertByThreadId () from C:\Windows\SYSTEM32\ntdll.dll
+  10   Thread 52444.0xb9c4 "QThread" 0x00007ffd7efd1044 in ntdll!ZwWaitForAlertByThreadId () from C:\Windows\SYSTEM32\ntdll.dll
+  11   Thread 52444.0xd7ac "QThread" 0x00007ffd7efd1044 in ntdll!ZwWaitForAlertByThreadId () from C:\Windows\SYSTEM32\ntdll.dll
+  12   Thread 52444.0xc8d0 "QThread" 0x00007ffd7efd1044 in ntdll!ZwWaitForAlertByThreadId () from C:\Windows\SYSTEM32\ntdll.dll
+  13   Thread 52444.0xc04c "QThread" 0x00007ffd7efd1044 in ntdll!ZwWaitForAlertByThreadId () from C:\Windows\SYSTEM32\ntdll.dll
+  14   Thread 52444.0xd5cc "QThread" 0x00007ff62c3db83f in BaseModel::getItemInternal(NifItem const*, QLatin1String const&, bool) const ()
+  15   Thread 52444.0xbdec "QThread" 0x00007ff62c3db853 in BaseModel::getItemInternal(NifItem const*, QLatin1String const&, bool) const ()
+  16   Thread 52444.0xca54 "QThread" 0x00007ffd7efd1044 in ntdll!ZwWaitForAlertByThreadId () from C:\Windows\SYSTEM32\ntdll.dll
+  17   Thread 52444.0x4a4c "QThread" 0x00007ffd7ef5ddce in ntdll!RtlAllocateHeap () from C:\Windows\SYSTEM32\ntdll.dll
+* 18   Thread 52444.0x711c "QThread" 0x00007ff62c032f80 in NifItem::deleteChildItems() ()
+  19   Thread 52444.0x7d24 "QThread" 0x00007ffd7efd1044 in ntdll!ZwWaitForAlertByThreadId () from C:\Windows\SYSTEM32\ntdll.dll
+  20   Thread 52444.0xbf20 "QThread" 0x00007ffd7efd1044 in ntdll!ZwWaitForAlertByThreadId () from C:\Windows\SYSTEM32\ntdll.dll
+  21   Thread 52444.0xd384 "QThread" 0x00007ffd7efd1044 in ntdll!ZwWaitForAlertByThreadId () from C:\Windows\SYSTEM32\ntdll.dll
+
+Thread 21 (Thread 52444.0xd384 "QThread"):
+#0  0x00007ffd7efd1044 in ntdll!ZwWaitForAlertByThreadId () from C:\Windows\SYSTEM32\ntdll.dll
+#1  0x00007ffd7ef94d9d in ntdll!RtlWaitOnAddress () from C:\Windows\SYSTEM32\ntdll.dll
+#2  0x00007ffd7ef94fb7 in ntdll!RtlWaitOnAddress () from C:\Windows\SYSTEM32\ntdll.dll
+#3  0x00007ffd7ef94c7e in ntdll!RtlWaitOnAddress () from C:\Windows\SYSTEM32\ntdll.dll
+#4  0x00007ffd7ef94a6d in ntdll!RtlWaitOnAddress () from C:\Windows\SYSTEM32\ntdll.dll
+#5  0x00007ffd7ef5fcb4 in ntdll!RtlEnterCriticalSection () from C:\Windows\SYSTEM32\ntdll.dll
+#6  0x00007ffd7ef5fae2 in ntdll!RtlEnterCriticalSection () from C:\Windows\SYSTEM32\ntdll.dll
+#7  0x00007ffd7f028a65 in ntdll!RtlRegisterSecureMemoryCacheCallback () from C:\Windows\SYSTEM32\ntdll.dll
+#8  0x00007ffd7ef5d255 in ntdll!RtlAllocateHeap () from C:\Windows\SYSTEM32\ntdll.dll
+#9  0x00007ffd7ef5b44d in ntdll!RtlAllocateHeap () from C:\Windows\SYSTEM32\ntdll.dll
+#10 0x00007ffd7c7dfde6 in ucrtbase!_malloc_base () from C:\Windows\System32\ucrtbase.dll
+#11 0x00007ffca4efef5c in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#12 0x00007ffca4eb0f8f in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#13 0x00007ff62c3db83b in BaseModel::getItemInternal(NifItem const*, QLatin1String const&, bool) const ()
+#14 0x00007ff62cbf7c21 in (anonymous namespace)::lodgenLoadModel(QString const&, QString const&, QHash<QString, QList<(anonymous namespace)::LodSrcShape> >&) ()
+#15 0x00007ff62cbfbb1f in (anonymous namespace)::LodgenRoadSet::addPlacement(EsmWorld const&, QString const&, QSet<QString>&, unsigned int, Vector3 const&, Matrix const&, float) ()
+#16 0x00007ff62cbff2c9 in (anonymous namespace)::LodgenRoadSet::gather(EsmWorld const&, QString const&, int, int, int, int) ()
+#17 0x00007ff62cc04ee8 in lodgenBakeTerrainTextures(EsmWorld const&, int, int, int, QString const&, QString const&, LodgenCoverOptions const&, LodgenBakeCaches*, QString*) ()
+#18 0x00007ff62ccb6974 in (anonymous namespace)::runJob(LodgenChunkJob const&, int, LodgenChunkPassOptions const&, (anonymous namespace)::Worker&, LodgenWriter*, bool, LodgenChunkOutcome&) ()
+#19 0x00007ff62ccb96b4 in (anonymous namespace)::ChunkThread::run() ()
+#20 0x00007ffca4fc2303 in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#21 0x00007ffd7d617374 in KERNEL32!BaseThreadInitThunk () from C:\Windows\System32\kernel32.dll
+#22 0x00007ffd7ef7cc91 in ntdll!RtlUserThreadStart () from C:\Windows\SYSTEM32\ntdll.dll
+#23 0x0000000000000000 in ?? ()
+
+Thread 20 (Thread 52444.0xbf20 "QThread"):
+#0  0x00007ffd7efd1044 in ntdll!ZwWaitForAlertByThreadId () from C:\Windows\SYSTEM32\ntdll.dll
+#1  0x00007ffd7ef94d9d in ntdll!RtlWaitOnAddress () from C:\Windows\SYSTEM32\ntdll.dll
+#2  0x00007ffd7ef94c52 in ntdll!RtlWaitOnAddress () from C:\Windows\SYSTEM32\ntdll.dll
+#3  0x00007ffd7ef94a6d in ntdll!RtlWaitOnAddress () from C:\Windows\SYSTEM32\ntdll.dll
+#4  0x00007ffd7ef5fcb4 in ntdll!RtlEnterCriticalSection () from C:\Windows\SYSTEM32\ntdll.dll
+#5  0x00007ffd7ef5fae2 in ntdll!RtlEnterCriticalSection () from C:\Windows\SYSTEM32\ntdll.dll
+#6  0x00007ffd7f02942f in ntdll!RtlRegisterSecureMemoryCacheCallback () from C:\Windows\SYSTEM32\ntdll.dll
+#7  0x00007ffd7ef55cc1 in ntdll!RtlGetCurrentServiceSessionId () from C:\Windows\SYSTEM32\ntdll.dll
+#8  0x00007ffd7ef55b74 in ntdll!RtlGetCurrentServiceSessionId () from C:\Windows\SYSTEM32\ntdll.dll
+#9  0x00007ffd7ef547b1 in ntdll!RtlFreeHeap () from C:\Windows\SYSTEM32\ntdll.dll
+#10 0x00007ffd7c7df05b in ucrtbase!_free_base () from C:\Windows\System32\ucrtbase.dll
+#11 0x00007ffca4ff0049 in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#12 0x00007ff62c7256ff in NifExpr::partition(QString const&, int) ()
+#13 0x00007ff62c409c14 in NifModel::updateArraySizeImpl(NifItem*) ()
+#14 0x00007ff62c40a4ab in NifModel::loadItem(NifItem*, NifIStream&) ()
+#15 0x00007ff62c414c37 in NifModel::load(QIODevice&, char const*) ()
+#16 0x00007ff62cbf7351 in (anonymous namespace)::lodgenLoadModel(QString const&, QString const&, QHash<QString, QList<(anonymous namespace)::LodSrcShape> >&) ()
+#17 0x00007ff62cbfbb1f in (anonymous namespace)::LodgenRoadSet::addPlacement(EsmWorld const&, QString const&, QSet<QString>&, unsigned int, Vector3 const&, Matrix const&, float) ()
+#18 0x00007ff62cbff7f7 in (anonymous namespace)::LodgenRoadSet::gather(EsmWorld const&, QString const&, int, int, int, int) ()
+#19 0x00007ff62cc04ee8 in lodgenBakeTerrainTextures(EsmWorld const&, int, int, int, QString const&, QString const&, LodgenCoverOptions const&, LodgenBakeCaches*, QString*) ()
+#20 0x00007ff62ccb6974 in (anonymous namespace)::runJob(LodgenChunkJob const&, int, LodgenChunkPassOptions const&, (anonymous namespace)::Worker&, LodgenWriter*, bool, LodgenChunkOutcome&) ()
+#21 0x00007ff62ccb96b4 in (anonymous namespace)::ChunkThread::run() ()
+#22 0x00007ffca4fc2303 in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#23 0x00007ffd7d617374 in KERNEL32!BaseThreadInitThunk () from C:\Windows\System32\kernel32.dll
+#24 0x00007ffd7ef7cc91 in ntdll!RtlUserThreadStart () from C:\Windows\SYSTEM32\ntdll.dll
+
+Thread 19 (Thread 52444.0x7d24 "QThread"):
+#0  0x00007ffd7efd1044 in ntdll!ZwWaitForAlertByThreadId () from C:\Windows\SYSTEM32\ntdll.dll
+#1  0x00007ffd7ef94d9d in ntdll!RtlWaitOnAddress () from C:\Windows\SYSTEM32\ntdll.dll
+#2  0x00007ffd7ef94c52 in ntdll!RtlWaitOnAddress () from C:\Windows\SYSTEM32\ntdll.dll
+#3  0x00007ffd7ef94a6d in ntdll!RtlWaitOnAddress () from C:\Windows\SYSTEM32\ntdll.dll
+#4  0x00007ffd7ef5fcb4 in ntdll!RtlEnterCriticalSection () from C:\Windows\SYSTEM32\ntdll.dll
+#5  0x00007ffd7ef5fae2 in ntdll!RtlEnterCriticalSection () from C:\Windows\SYSTEM32\ntdll.dll
+#6  0x00007ffd7f028a65 in ntdll!RtlRegisterSecureMemoryCacheCallback () from C:\Windows\SYSTEM32\ntdll.dll
+#7  0x00007ffd7ef5d255 in ntdll!RtlAllocateHeap () from C:\Windows\SYSTEM32\ntdll.dll
+#8  0x00007ffd7ef5b44d in ntdll!RtlAllocateHeap () from C:\Windows\SYSTEM32\ntdll.dll
+#9  0x00007ffd7c7dfde6 in ucrtbase!_malloc_base () from C:\Windows\System32\ucrtbase.dll
+#10 0x00007ffca4efef5c in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#11 0x00007ffca4eb0f8f in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#12 0x00007ff62c3db83b in BaseModel::getItemInternal(NifItem const*, QLatin1String const&, bool) const ()
+#13 0x00007ff62c036402 in Transform::Transform(NifModel const*, QModelIndex const&) ()
+#14 0x00007ff62cbf77c2 in (anonymous namespace)::lodgenLoadModel(QString const&, QString const&, QHash<QString, QList<(anonymous namespace)::LodSrcShape> >&) ()
+#15 0x00007ff62cbfbb1f in (anonymous namespace)::LodgenRoadSet::addPlacement(EsmWorld const&, QString const&, QSet<QString>&, unsigned int, Vector3 const&, Matrix const&, float) ()
+#16 0x00007ff62cbff2c9 in (anonymous namespace)::LodgenRoadSet::gather(EsmWorld const&, QString const&, int, int, int, int) ()
+#17 0x00007ff62cc04ee8 in lodgenBakeTerrainTextures(EsmWorld const&, int, int, int, QString const&, QString const&, LodgenCoverOptions const&, LodgenBakeCaches*, QString*) ()
+#18 0x00007ff62ccb6974 in (anonymous namespace)::runJob(LodgenChunkJob const&, int, LodgenChunkPassOptions const&, (anonymous namespace)::Worker&, LodgenWriter*, bool, LodgenChunkOutcome&) ()
+#19 0x00007ff62ccb96b4 in (anonymous namespace)::ChunkThread::run() ()
+#20 0x00007ffca4fc2303 in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#21 0x00007ffd7d617374 in KERNEL32!BaseThreadInitThunk () from C:\Windows\System32\kernel32.dll
+#22 0x00007ffd7ef7cc91 in ntdll!RtlUserThreadStart () from C:\Windows\SYSTEM32\ntdll.dll
+#23 0x0000000000000000 in ?? ()
+
+Thread 18 (Thread 52444.0x711c "QThread"):
+#0  0x00007ff62c032f80 in NifItem::deleteChildItems() ()
+#1  0x00007ff62c032f97 in NifItem::deleteChildItems() ()
+#2  0x00007ff62c032f97 in NifItem::deleteChildItems() ()
+#3  0x00007ff62c032f97 in NifItem::deleteChildItems() ()
+#4  0x00007ff62c032f97 in NifItem::deleteChildItems() ()
+#5  0x00007ff62c3d7732 in BaseModel::~BaseModel() ()
+#6  0x00007ff62cbf75c6 in (anonymous namespace)::lodgenLoadModel(QString const&, QString const&, QHash<QString, QList<(anonymous namespace)::LodSrcShape> >&) ()
+#7  0x00007ff62cbfbb1f in (anonymous namespace)::LodgenRoadSet::addPlacement(EsmWorld const&, QString const&, QSet<QString>&, unsigned int, Vector3 const&, Matrix const&, float) ()
+#8  0x00007ff62cbff2c9 in (anonymous namespace)::LodgenRoadSet::gather(EsmWorld const&, QString const&, int, int, int, int) ()
+#9  0x00007ff62cc04ee8 in lodgenBakeTerrainTextures(EsmWorld const&, int, int, int, QString const&, QString const&, LodgenCoverOptions const&, LodgenBakeCaches*, QString*) ()
+#10 0x00007ff62ccb6974 in (anonymous namespace)::runJob(LodgenChunkJob const&, int, LodgenChunkPassOptions const&, (anonymous namespace)::Worker&, LodgenWriter*, bool, LodgenChunkOutcome&) ()
+#11 0x00007ff62ccb96b4 in (anonymous namespace)::ChunkThread::run() ()
+#12 0x00007ffca4fc2303 in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#13 0x00007ffd7d617374 in KERNEL32!BaseThreadInitThunk () from C:\Windows\System32\kernel32.dll
+#14 0x00007ffd7ef7cc91 in ntdll!RtlUserThreadStart () from C:\Windows\SYSTEM32\ntdll.dll
+#15 0x0000000000000000 in ?? ()
+
+Thread 17 (Thread 52444.0x4a4c "QThread"):
+#0  0x00007ffd7ef5ddce in ntdll!RtlAllocateHeap () from C:\Windows\SYSTEM32\ntdll.dll
+#1  0x00007ffd7ef5b44d in ntdll!RtlAllocateHeap () from C:\Windows\SYSTEM32\ntdll.dll
+#2  0x00007ffd7f028a88 in ntdll!RtlRegisterSecureMemoryCacheCallback () from C:\Windows\SYSTEM32\ntdll.dll
+#3  0x00007ffd7ef5d255 in ntdll!RtlAllocateHeap () from C:\Windows\SYSTEM32\ntdll.dll
+#4  0x00007ffd7ef5b44d in ntdll!RtlAllocateHeap () from C:\Windows\SYSTEM32\ntdll.dll
+#5  0x00007ffd7c7dfde6 in ucrtbase!_malloc_base () from C:\Windows\System32\ucrtbase.dll
+#6  0x00007ffca4efef5c in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#7  0x00007ffca4eb0f8f in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#8  0x00007ff62c3db83b in BaseModel::getItemInternal(NifItem const*, QLatin1String const&, bool) const ()
+#9  0x00007ff62cbf821c in (anonymous namespace)::lodgenLoadModel(QString const&, QString const&, QHash<QString, QList<(anonymous namespace)::LodSrcShape> >&) ()
+#10 0x00007ff62cbfbb1f in (anonymous namespace)::LodgenRoadSet::addPlacement(EsmWorld const&, QString const&, QSet<QString>&, unsigned int, Vector3 const&, Matrix const&, float) ()
+#11 0x00007ff62cbff2c9 in (anonymous namespace)::LodgenRoadSet::gather(EsmWorld const&, QString const&, int, int, int, int) ()
+#12 0x00007ff62cc04ee8 in lodgenBakeTerrainTextures(EsmWorld const&, int, int, int, QString const&, QString const&, LodgenCoverOptions const&, LodgenBakeCaches*, QString*) ()
+#13 0x00007ff62ccb6974 in (anonymous namespace)::runJob(LodgenChunkJob const&, int, LodgenChunkPassOptions const&, (anonymous namespace)::Worker&, LodgenWriter*, bool, LodgenChunkOutcome&) ()
+#14 0x00007ff62ccb96b4 in (anonymous namespace)::ChunkThread::run() ()
+#15 0x00007ffca4fc2303 in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#16 0x00007ffd7d617374 in KERNEL32!BaseThreadInitThunk () from C:\Windows\System32\kernel32.dll
+#17 0x00007ffd7ef7cc91 in ntdll!RtlUserThreadStart () from C:\Windows\SYSTEM32\ntdll.dll
+#18 0x0000000000000000 in ?? ()
+
+Thread 16 (Thread 52444.0xca54 "QThread"):
+#0  0x00007ffd7efd1044 in ntdll!ZwWaitForAlertByThreadId () from C:\Windows\SYSTEM32\ntdll.dll
+#1  0x00007ffd7ef94d9d in ntdll!RtlWaitOnAddress () from C:\Windows\SYSTEM32\ntdll.dll
+#2  0x00007ffd7ef94c52 in ntdll!RtlWaitOnAddress () from C:\Windows\SYSTEM32\ntdll.dll
+#3  0x00007ffd7ef94a6d in ntdll!RtlWaitOnAddress () from C:\Windows\SYSTEM32\ntdll.dll
+#4  0x00007ffd7ef5fcb4 in ntdll!RtlEnterCriticalSection () from C:\Windows\SYSTEM32\ntdll.dll
+#5  0x00007ffd7ef5fae2 in ntdll!RtlEnterCriticalSection () from C:\Windows\SYSTEM32\ntdll.dll
+#6  0x00007ffd7f02942f in ntdll!RtlRegisterSecureMemoryCacheCallback () from C:\Windows\SYSTEM32\ntdll.dll
+#7  0x00007ffd7ef55cc1 in ntdll!RtlGetCurrentServiceSessionId () from C:\Windows\SYSTEM32\ntdll.dll
+#8  0x00007ffd7ef55b74 in ntdll!RtlGetCurrentServiceSessionId () from C:\Windows\SYSTEM32\ntdll.dll
+#9  0x00007ffd7ef547b1 in ntdll!RtlFreeHeap () from C:\Windows\SYSTEM32\ntdll.dll
+#10 0x00007ffd7c7df05b in ucrtbase!_free_base () from C:\Windows\System32\ucrtbase.dll
+#11 0x00007ff62c3db7f4 in BaseModel::getItemInternal(NifItem const*, QLatin1String const&, bool) const ()
+#12 0x00007ff62cbf7ac7 in (anonymous namespace)::lodgenLoadModel(QString const&, QString const&, QHash<QString, QList<(anonymous namespace)::LodSrcShape> >&) ()
+#13 0x00007ff62cbfbb1f in (anonymous namespace)::LodgenRoadSet::addPlacement(EsmWorld const&, QString const&, QSet<QString>&, unsigned int, Vector3 const&, Matrix const&, float) ()
+#14 0x00007ff62cbff2c9 in (anonymous namespace)::LodgenRoadSet::gather(EsmWorld const&, QString const&, int, int, int, int) ()
+#15 0x00007ff62cc04ee8 in lodgenBakeTerrainTextures(EsmWorld const&, int, int, int, QString const&, QString const&, LodgenCoverOptions const&, LodgenBakeCaches*, QString*) ()
+#16 0x00007ff62ccb6974 in (anonymous namespace)::runJob(LodgenChunkJob const&, int, LodgenChunkPassOptions const&, (anonymous namespace)::Worker&, LodgenWriter*, bool, LodgenChunkOutcome&) ()
+#17 0x00007ff62ccb96b4 in (anonymous namespace)::ChunkThread::run() ()
+#18 0x00007ffca4fc2303 in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#19 0x00007ffd7d617374 in KERNEL32!BaseThreadInitThunk () from C:\Windows\System32\kernel32.dll
+#20 0x00007ffd7ef7cc91 in ntdll!RtlUserThreadStart () from C:\Windows\SYSTEM32\ntdll.dll
+#21 0x0000000000000000 in ?? ()
+
+Thread 15 (Thread 52444.0xbdec "QThread"):
+#0  0x00007ff62c3db853 in BaseModel::getItemInternal(NifItem const*, QLatin1String const&, bool) const ()
+#1  0x00007ff62cbba63b in HalfVector2 NifModel::get<HalfVector2>(QModelIndex const&, char const*) const [clone .constprop.0] ()
+#2  0x00007ff62cbf8423 in (anonymous namespace)::lodgenLoadModel(QString const&, QString const&, QHash<QString, QList<(anonymous namespace)::LodSrcShape> >&) ()
+#3  0x00007ff62cbfbb1f in (anonymous namespace)::LodgenRoadSet::addPlacement(EsmWorld const&, QString const&, QSet<QString>&, unsigned int, Vector3 const&, Matrix const&, float) ()
+#4  0x00007ff62cbff2c9 in (anonymous namespace)::LodgenRoadSet::gather(EsmWorld const&, QString const&, int, int, int, int) ()
+#5  0x00007ff62cc04ee8 in lodgenBakeTerrainTextures(EsmWorld const&, int, int, int, QString const&, QString const&, LodgenCoverOptions const&, LodgenBakeCaches*, QString*) ()
+#6  0x00007ff62ccb6974 in (anonymous namespace)::runJob(LodgenChunkJob const&, int, LodgenChunkPassOptions const&, (anonymous namespace)::Worker&, LodgenWriter*, bool, LodgenChunkOutcome&) ()
+#7  0x00007ff62ccb96b4 in (anonymous namespace)::ChunkThread::run() ()
+#8  0x00007ffca4fc2303 in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#9  0x00007ffd7d617374 in KERNEL32!BaseThreadInitThunk () from C:\Windows\System32\kernel32.dll
+#10 0x00007ffd7ef7cc91 in ntdll!RtlUserThreadStart () from C:\Windows\SYSTEM32\ntdll.dll
+#11 0x0000000000000000 in ?? ()
+
+Thread 14 (Thread 52444.0xd5cc "QThread"):
+#0  0x00007ff62c3db83f in BaseModel::getItemInternal(NifItem const*, QLatin1String const&, bool) const ()
+#1  0x00007ff62cbf7c21 in (anonymous namespace)::lodgenLoadModel(QString const&, QString const&, QHash<QString, QList<(anonymous namespace)::LodSrcShape> >&) ()
+#2  0x00007ff62cbfbb1f in (anonymous namespace)::LodgenRoadSet::addPlacement(EsmWorld const&, QString const&, QSet<QString>&, unsigned int, Vector3 const&, Matrix const&, float) ()
+#3  0x00007ff62cbff2c9 in (anonymous namespace)::LodgenRoadSet::gather(EsmWorld const&, QString const&, int, int, int, int) ()
+#4  0x00007ff62cc04ee8 in lodgenBakeTerrainTextures(EsmWorld const&, int, int, int, QString const&, QString const&, LodgenCoverOptions const&, LodgenBakeCaches*, QString*) ()
+#5  0x00007ff62ccb6974 in (anonymous namespace)::runJob(LodgenChunkJob const&, int, LodgenChunkPassOptions const&, (anonymous namespace)::Worker&, LodgenWriter*, bool, LodgenChunkOutcome&) ()
+#6  0x00007ff62ccb96b4 in (anonymous namespace)::ChunkThread::run() ()
+#7  0x00007ffca4fc2303 in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#8  0x00007ffd7d617374 in KERNEL32!BaseThreadInitThunk () from C:\Windows\System32\kernel32.dll
+#9  0x00007ffd7ef7cc91 in ntdll!RtlUserThreadStart () from C:\Windows\SYSTEM32\ntdll.dll
+#10 0x0000000000000000 in ?? ()
+
+Thread 13 (Thread 52444.0xc04c "QThread"):
+#0  0x00007ffd7efd1044 in ntdll!ZwWaitForAlertByThreadId () from C:\Windows\SYSTEM32\ntdll.dll
+#1  0x00007ffd7ef94d9d in ntdll!RtlWaitOnAddress () from C:\Windows\SYSTEM32\ntdll.dll
+#2  0x00007ffd7ef94c52 in ntdll!RtlWaitOnAddress () from C:\Windows\SYSTEM32\ntdll.dll
+#3  0x00007ffd7ef94a6d in ntdll!RtlWaitOnAddress () from C:\Windows\SYSTEM32\ntdll.dll
+#4  0x00007ffd7ef5fcb4 in ntdll!RtlEnterCriticalSection () from C:\Windows\SYSTEM32\ntdll.dll
+#5  0x00007ffd7ef5fae2 in ntdll!RtlEnterCriticalSection () from C:\Windows\SYSTEM32\ntdll.dll
+#6  0x00007ffd7f028a65 in ntdll!RtlRegisterSecureMemoryCacheCallback () from C:\Windows\SYSTEM32\ntdll.dll
+#7  0x00007ffd7ef5d255 in ntdll!RtlAllocateHeap () from C:\Windows\SYSTEM32\ntdll.dll
+#8  0x00007ffd7ef5b44d in ntdll!RtlAllocateHeap () from C:\Windows\SYSTEM32\ntdll.dll
+#9  0x00007ffd7c7dfde6 in ucrtbase!_malloc_base () from C:\Windows\System32\ucrtbase.dll
+#10 0x00007ffcdc65e82c in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\libstdc++-6.dll
+#11 0x00007ff62c03a7f2 in NifValue::changeType(NifValue::Type) ()
+#12 0x00007ff62c03a94e in NifValue::operator=(NifValue const&) ()
+#13 0x00007ff62c406c38 in NifModel::insertType(NifItem*, NifData const&, int) ()
+#14 0x00007ff62c406da2 in NifModel::insertType(NifItem*, NifData const&, int) ()
+#15 0x00007ff62c406da2 in NifModel::insertType(NifItem*, NifData const&, int) ()
+#16 0x00007ff62c406da2 in NifModel::insertType(NifItem*, NifData const&, int) ()
+#17 0x00007ff62c406da2 in NifModel::insertType(NifItem*, NifData const&, int) ()
+#18 0x00007ff62c406da2 in NifModel::insertType(NifItem*, NifData const&, int) ()
+#19 0x00007ff62c40dbe9 in NifModel::insertNiBlock(QString const&, int) ()
+#20 0x00007ff62c414bff in NifModel::load(QIODevice&, char const*) ()
+#21 0x00007ff62cbf7351 in (anonymous namespace)::lodgenLoadModel(QString const&, QString const&, QHash<QString, QList<(anonymous namespace)::LodSrcShape> >&) ()
+#22 0x00007ff62cbfbb1f in (anonymous namespace)::LodgenRoadSet::addPlacement(EsmWorld const&, QString const&, QSet<QString>&, unsigned int, Vector3 const&, Matrix const&, float) ()
+#23 0x00007ff62cbff7f7 in (anonymous namespace)::LodgenRoadSet::gather(EsmWorld const&, QString const&, int, int, int, int) ()
+#24 0x00007ff62cc04ee8 in lodgenBakeTerrainTextures(EsmWorld const&, int, int, int, QString const&, QString const&, LodgenCoverOptions const&, LodgenBakeCaches*, QString*) ()
+
+Thread 12 (Thread 52444.0xc8d0 "QThread"):
+#0  0x00007ffd7efd1044 in ntdll!ZwWaitForAlertByThreadId () from C:\Windows\SYSTEM32\ntdll.dll
+#1  0x00007ffd7ef94d9d in ntdll!RtlWaitOnAddress () from C:\Windows\SYSTEM32\ntdll.dll
+#2  0x00007ffd7ef94c52 in ntdll!RtlWaitOnAddress () from C:\Windows\SYSTEM32\ntdll.dll
+#3  0x00007ffd7ef94a6d in ntdll!RtlWaitOnAddress () from C:\Windows\SYSTEM32\ntdll.dll
+#4  0x00007ffd7ef5fcb4 in ntdll!RtlEnterCriticalSection () from C:\Windows\SYSTEM32\ntdll.dll
+#5  0x00007ffd7ef5fae2 in ntdll!RtlEnterCriticalSection () from C:\Windows\SYSTEM32\ntdll.dll
+#6  0x00007ffd7f028a65 in ntdll!RtlRegisterSecureMemoryCacheCallback () from C:\Windows\SYSTEM32\ntdll.dll
+#7  0x00007ffd7ef5d255 in ntdll!RtlAllocateHeap () from C:\Windows\SYSTEM32\ntdll.dll
+#8  0x00007ffd7ef5b44d in ntdll!RtlAllocateHeap () from C:\Windows\SYSTEM32\ntdll.dll
+#9  0x00007ffd7c7dfde6 in ucrtbase!_malloc_base () from C:\Windows\System32\ucrtbase.dll
+#10 0x00007ffca4efef5c in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#11 0x00007ffca4eb0f8f in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#12 0x00007ff62c3db83b in BaseModel::getItemInternal(NifItem const*, QLatin1String const&, bool) const ()
+#13 0x00007ff62cbf7d3d in (anonymous namespace)::lodgenLoadModel(QString const&, QString const&, QHash<QString, QList<(anonymous namespace)::LodSrcShape> >&) ()
+#14 0x00007ff62cbfbb1f in (anonymous namespace)::LodgenRoadSet::addPlacement(EsmWorld const&, QString const&, QSet<QString>&, unsigned int, Vector3 const&, Matrix const&, float) ()
+#15 0x00007ff62cbff2c9 in (anonymous namespace)::LodgenRoadSet::gather(EsmWorld const&, QString const&, int, int, int, int) ()
+#16 0x00007ff62cc04ee8 in lodgenBakeTerrainTextures(EsmWorld const&, int, int, int, QString const&, QString const&, LodgenCoverOptions const&, LodgenBakeCaches*, QString*) ()
+#17 0x00007ff62ccb6974 in (anonymous namespace)::runJob(LodgenChunkJob const&, int, LodgenChunkPassOptions const&, (anonymous namespace)::Worker&, LodgenWriter*, bool, LodgenChunkOutcome&) ()
+#18 0x00007ff62ccb96b4 in (anonymous namespace)::ChunkThread::run() ()
+#19 0x00007ffca4fc2303 in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#20 0x00007ffd7d617374 in KERNEL32!BaseThreadInitThunk () from C:\Windows\System32\kernel32.dll
+#21 0x00007ffd7ef7cc91 in ntdll!RtlUserThreadStart () from C:\Windows\SYSTEM32\ntdll.dll
+#22 0x0000000000000000 in ?? ()
+
+Thread 11 (Thread 52444.0xd7ac "QThread"):
+#0  0x00007ffd7efd1044 in ntdll!ZwWaitForAlertByThreadId () from C:\Windows\SYSTEM32\ntdll.dll
+#1  0x00007ffd7ef94d9d in ntdll!RtlWaitOnAddress () from C:\Windows\SYSTEM32\ntdll.dll
+#2  0x00007ffd7ef94c52 in ntdll!RtlWaitOnAddress () from C:\Windows\SYSTEM32\ntdll.dll
+#3  0x00007ffd7ef94a6d in ntdll!RtlWaitOnAddress () from C:\Windows\SYSTEM32\ntdll.dll
+#4  0x00007ffd7ef5fcb4 in ntdll!RtlEnterCriticalSection () from C:\Windows\SYSTEM32\ntdll.dll
+#5  0x00007ffd7ef5fae2 in ntdll!RtlEnterCriticalSection () from C:\Windows\SYSTEM32\ntdll.dll
+#6  0x00007ffd7f02942f in ntdll!RtlRegisterSecureMemoryCacheCallback () from C:\Windows\SYSTEM32\ntdll.dll
+#7  0x00007ffd7ef55cc1 in ntdll!RtlGetCurrentServiceSessionId () from C:\Windows\SYSTEM32\ntdll.dll
+#8  0x00007ffd7ef55b74 in ntdll!RtlGetCurrentServiceSessionId () from C:\Windows\SYSTEM32\ntdll.dll
+#9  0x00007ffd7ef547b1 in ntdll!RtlFreeHeap () from C:\Windows\SYSTEM32\ntdll.dll
+#10 0x00007ffd7c7df05b in ucrtbase!_free_base () from C:\Windows\System32\ucrtbase.dll
+#11 0x00007ff62c3db7f4 in BaseModel::getItemInternal(NifItem const*, QLatin1String const&, bool) const ()
+#12 0x00007ff62cbf7d3d in (anonymous namespace)::lodgenLoadModel(QString const&, QString const&, QHash<QString, QList<(anonymous namespace)::LodSrcShape> >&) ()
+#13 0x00007ff62cbfbb1f in (anonymous namespace)::LodgenRoadSet::addPlacement(EsmWorld const&, QString const&, QSet<QString>&, unsigned int, Vector3 const&, Matrix const&, float) ()
+#14 0x00007ff62cbff2c9 in (anonymous namespace)::LodgenRoadSet::gather(EsmWorld const&, QString const&, int, int, int, int) ()
+#15 0x00007ff62cc04ee8 in lodgenBakeTerrainTextures(EsmWorld const&, int, int, int, QString const&, QString const&, LodgenCoverOptions const&, LodgenBakeCaches*, QString*) ()
+#16 0x00007ff62ccb6974 in (anonymous namespace)::runJob(LodgenChunkJob const&, int, LodgenChunkPassOptions const&, (anonymous namespace)::Worker&, LodgenWriter*, bool, LodgenChunkOutcome&) ()
+#17 0x00007ff62ccb96b4 in (anonymous namespace)::ChunkThread::run() ()
+#18 0x00007ffca4fc2303 in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#19 0x00007ffd7d617374 in KERNEL32!BaseThreadInitThunk () from C:\Windows\System32\kernel32.dll
+#20 0x00007ffd7ef7cc91 in ntdll!RtlUserThreadStart () from C:\Windows\SYSTEM32\ntdll.dll
+#21 0x0000000000000000 in ?? ()
+
+Thread 10 (Thread 52444.0xb9c4 "QThread"):
+#0  0x00007ffd7efd1044 in ntdll!ZwWaitForAlertByThreadId () from C:\Windows\SYSTEM32\ntdll.dll
+#1  0x00007ffd7ef94d9d in ntdll!RtlWaitOnAddress () from C:\Windows\SYSTEM32\ntdll.dll
+#2  0x00007ffd7ef94fb7 in ntdll!RtlWaitOnAddress () from C:\Windows\SYSTEM32\ntdll.dll
+#3  0x00007ffd7ef94c7e in ntdll!RtlWaitOnAddress () from C:\Windows\SYSTEM32\ntdll.dll
+#4  0x00007ffd7ef94a6d in ntdll!RtlWaitOnAddress () from C:\Windows\SYSTEM32\ntdll.dll
+#5  0x00007ffd7ef5fcb4 in ntdll!RtlEnterCriticalSection () from C:\Windows\SYSTEM32\ntdll.dll
+#6  0x00007ffd7ef5fae2 in ntdll!RtlEnterCriticalSection () from C:\Windows\SYSTEM32\ntdll.dll
+#7  0x00007ffd7f02942f in ntdll!RtlRegisterSecureMemoryCacheCallback () from C:\Windows\SYSTEM32\ntdll.dll
+#8  0x00007ffd7ef55cc1 in ntdll!RtlGetCurrentServiceSessionId () from C:\Windows\SYSTEM32\ntdll.dll
+#9  0x00007ffd7ef55b74 in ntdll!RtlGetCurrentServiceSessionId () from C:\Windows\SYSTEM32\ntdll.dll
+#10 0x00007ffd7ef547b1 in ntdll!RtlFreeHeap () from C:\Windows\SYSTEM32\ntdll.dll
+#11 0x00007ffd7c7df05b in ucrtbase!_free_base () from C:\Windows\System32\ucrtbase.dll
+#12 0x00007ff62cbe44ba in lodgenCachedTexture(LodgenBakeCaches&, QString const&, QString const&) ()
+#13 0x00007ff62cc00a32 in lodgenBakeTerrainTextures(EsmWorld const&, int, int, int, QString const&, QString const&, LodgenCoverOptions const&, LodgenBakeCaches*, QString*) ()
+#14 0x00007ff62ccb6974 in (anonymous namespace)::runJob(LodgenChunkJob const&, int, LodgenChunkPassOptions const&, (anonymous namespace)::Worker&, LodgenWriter*, bool, LodgenChunkOutcome&) ()
+#15 0x00007ff62ccb96b4 in (anonymous namespace)::ChunkThread::run() ()
+#16 0x00007ffca4fc2303 in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#17 0x00007ffd7d617374 in KERNEL32!BaseThreadInitThunk () from C:\Windows\System32\kernel32.dll
+#18 0x00007ffd7ef7cc91 in ntdll!RtlUserThreadStart () from C:\Windows\SYSTEM32\ntdll.dll
+#19 0x0000000000000000 in ?? ()
+
+Thread 9 (Thread 52444.0xcc44 "QThread"):
+#0  0x00007ffd7efd1044 in ntdll!ZwWaitForAlertByThreadId () from C:\Windows\SYSTEM32\ntdll.dll
+#1  0x00007ffd7ef94d9d in ntdll!RtlWaitOnAddress () from C:\Windows\SYSTEM32\ntdll.dll
+#2  0x00007ffd7ef94c52 in ntdll!RtlWaitOnAddress () from C:\Windows\SYSTEM32\ntdll.dll
+#3  0x00007ffd7ef94a6d in ntdll!RtlWaitOnAddress () from C:\Windows\SYSTEM32\ntdll.dll
+#4  0x00007ffd7ef5fcb4 in ntdll!RtlEnterCriticalSection () from C:\Windows\SYSTEM32\ntdll.dll
+#5  0x00007ffd7ef5fae2 in ntdll!RtlEnterCriticalSection () from C:\Windows\SYSTEM32\ntdll.dll
+#6  0x00007ffd7f028a65 in ntdll!RtlRegisterSecureMemoryCacheCallback () from C:\Windows\SYSTEM32\ntdll.dll
+#7  0x00007ffd7ef5d255 in ntdll!RtlAllocateHeap () from C:\Windows\SYSTEM32\ntdll.dll
+#8  0x00007ffd7ef5b44d in ntdll!RtlAllocateHeap () from C:\Windows\SYSTEM32\ntdll.dll
+#9  0x00007ffd7c7dfde6 in ucrtbase!_malloc_base () from C:\Windows\System32\ucrtbase.dll
+#10 0x00007ffca4efef5c in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#11 0x00007ffca4eb0f8f in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#12 0x00007ff62c3db83b in BaseModel::getItemInternal(NifItem const*, QLatin1String const&, bool) const ()
+#13 0x00007ff62cbf7d3d in (anonymous namespace)::lodgenLoadModel(QString const&, QString const&, QHash<QString, QList<(anonymous namespace)::LodSrcShape> >&) ()
+#14 0x00007ff62cbfbb1f in (anonymous namespace)::LodgenRoadSet::addPlacement(EsmWorld const&, QString const&, QSet<QString>&, unsigned int, Vector3 const&, Matrix const&, float) ()
+#15 0x00007ff62cbff7f7 in (anonymous namespace)::LodgenRoadSet::gather(EsmWorld const&, QString const&, int, int, int, int) ()
+#16 0x00007ff62cc04ee8 in lodgenBakeTerrainTextures(EsmWorld const&, int, int, int, QString const&, QString const&, LodgenCoverOptions const&, LodgenBakeCaches*, QString*) ()
+#17 0x00007ff62ccb6974 in (anonymous namespace)::runJob(LodgenChunkJob const&, int, LodgenChunkPassOptions const&, (anonymous namespace)::Worker&, LodgenWriter*, bool, LodgenChunkOutcome&) ()
+#18 0x00007ff62ccb96b4 in (anonymous namespace)::ChunkThread::run() ()
+#19 0x00007ffca4fc2303 in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#20 0x00007ffd7d617374 in KERNEL32!BaseThreadInitThunk () from C:\Windows\System32\kernel32.dll
+#21 0x00007ffd7ef7cc91 in ntdll!RtlUserThreadStart () from C:\Windows\SYSTEM32\ntdll.dll
+#22 0x0000000000000000 in ?? ()
+
+Thread 8 (Thread 52444.0xd258 "QThread"):
+#0  0x00007ffd7efce404 in ntdll!ZwAlertThreadByThreadId () from C:\Windows\SYSTEM32\ntdll.dll
+#1  0x00007ffd7ef94841 in ntdll!RtlWakeAddressAll () from C:\Windows\SYSTEM32\ntdll.dll
+#2  0x00007ffd7ef5f2c7 in ntdll!RtlLeaveCriticalSection () from C:\Windows\SYSTEM32\ntdll.dll
+#3  0x00007ffd7f028d06 in ntdll!RtlRegisterSecureMemoryCacheCallback () from C:\Windows\SYSTEM32\ntdll.dll
+#4  0x00007ffd7ef5d255 in ntdll!RtlAllocateHeap () from C:\Windows\SYSTEM32\ntdll.dll
+#5  0x00007ffd7ef5b44d in ntdll!RtlAllocateHeap () from C:\Windows\SYSTEM32\ntdll.dll
+#6  0x00007ffd7c7dfde6 in ucrtbase!_malloc_base () from C:\Windows\System32\ucrtbase.dll
+#7  0x00007ffca4efef5c in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#8  0x00007ffca4eb1316 in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#9  0x00007ffca4eb59d8 in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#10 0x00007ffca4eb5d3c in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#11 0x00007ffca4eb5e26 in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#12 0x00007ff62cbe3ba2 in lodgenCachedTexture(LodgenBakeCaches&, QString const&, QString const&) ()
+#13 0x00007ff62cc00d9a in lodgenBakeTerrainTextures(EsmWorld const&, int, int, int, QString const&, QString const&, LodgenCoverOptions const&, LodgenBakeCaches*, QString*) ()
+#14 0x00007ff62ccb6974 in (anonymous namespace)::runJob(LodgenChunkJob const&, int, LodgenChunkPassOptions const&, (anonymous namespace)::Worker&, LodgenWriter*, bool, LodgenChunkOutcome&) ()
+#15 0x00007ff62ccb96b4 in (anonymous namespace)::ChunkThread::run() ()
+#16 0x00007ffca4fc2303 in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#17 0x00007ffd7d617374 in KERNEL32!BaseThreadInitThunk () from C:\Windows\System32\kernel32.dll
+#18 0x00007ffd7ef7cc91 in ntdll!RtlUserThreadStart () from C:\Windows\SYSTEM32\ntdll.dll
+#19 0x0000000000000000 in ?? ()
+
+Thread 7 (Thread 52444.0xace8 "QThread"):
+#0  0x00007ffd7efd1044 in ntdll!ZwWaitForAlertByThreadId () from C:\Windows\SYSTEM32\ntdll.dll
+#1  0x00007ffd7ef94d9d in ntdll!RtlWaitOnAddress () from C:\Windows\SYSTEM32\ntdll.dll
+#2  0x00007ffd7ef94c52 in ntdll!RtlWaitOnAddress () from C:\Windows\SYSTEM32\ntdll.dll
+#3  0x00007ffd7ef94a6d in ntdll!RtlWaitOnAddress () from C:\Windows\SYSTEM32\ntdll.dll
+#4  0x00007ffd7ef5fcb4 in ntdll!RtlEnterCriticalSection () from C:\Windows\SYSTEM32\ntdll.dll
+#5  0x00007ffd7ef5fae2 in ntdll!RtlEnterCriticalSection () from C:\Windows\SYSTEM32\ntdll.dll
+#6  0x00007ffd7f02942f in ntdll!RtlRegisterSecureMemoryCacheCallback () from C:\Windows\SYSTEM32\ntdll.dll
+#7  0x00007ffd7ef55cc1 in ntdll!RtlGetCurrentServiceSessionId () from C:\Windows\SYSTEM32\ntdll.dll
+#8  0x00007ffd7ef55b74 in ntdll!RtlGetCurrentServiceSessionId () from C:\Windows\SYSTEM32\ntdll.dll
+#9  0x00007ffd7ef547b1 in ntdll!RtlFreeHeap () from C:\Windows\SYSTEM32\ntdll.dll
+#10 0x00007ffd7c7df05b in ucrtbase!_free_base () from C:\Windows\System32\ucrtbase.dll
+#11 0x00007ff62c3db7f4 in BaseModel::getItemInternal(NifItem const*, QLatin1String const&, bool) const ()
+#12 0x00007ff62cbba63b in HalfVector2 NifModel::get<HalfVector2>(QModelIndex const&, char const*) const [clone .constprop.0] ()
+#13 0x00007ff62cbf7e1d in (anonymous namespace)::lodgenLoadModel(QString const&, QString const&, QHash<QString, QList<(anonymous namespace)::LodSrcShape> >&) ()
+#14 0x00007ff62cbfbb1f in (anonymous namespace)::LodgenRoadSet::addPlacement(EsmWorld const&, QString const&, QSet<QString>&, unsigned int, Vector3 const&, Matrix const&, float) ()
+#15 0x00007ff62cbff2c9 in (anonymous namespace)::LodgenRoadSet::gather(EsmWorld const&, QString const&, int, int, int, int) ()
+#16 0x00007ff62cc04ee8 in lodgenBakeTerrainTextures(EsmWorld const&, int, int, int, QString const&, QString const&, LodgenCoverOptions const&, LodgenBakeCaches*, QString*) ()
+#17 0x00007ff62ccb6974 in (anonymous namespace)::runJob(LodgenChunkJob const&, int, LodgenChunkPassOptions const&, (anonymous namespace)::Worker&, LodgenWriter*, bool, LodgenChunkOutcome&) ()
+#18 0x00007ff62ccb96b4 in (anonymous namespace)::ChunkThread::run() ()
+#19 0x00007ffca4fc2303 in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#20 0x00007ffd7d617374 in KERNEL32!BaseThreadInitThunk () from C:\Windows\System32\kernel32.dll
+#21 0x00007ffd7ef7cc91 in ntdll!RtlUserThreadStart () from C:\Windows\SYSTEM32\ntdll.dll
+#22 0x0000000000000000 in ?? ()
+
+Thread 6 (Thread 52444.0xd364 "QThread"):
+#0  0x00007ffd7efd1044 in ntdll!ZwWaitForAlertByThreadId () from C:\Windows\SYSTEM32\ntdll.dll
+#1  0x00007ffd7ef94d9d in ntdll!RtlWaitOnAddress () from C:\Windows\SYSTEM32\ntdll.dll
+#2  0x00007ffd7ef94c52 in ntdll!RtlWaitOnAddress () from C:\Windows\SYSTEM32\ntdll.dll
+#3  0x00007ffd7ef94a6d in ntdll!RtlWaitOnAddress () from C:\Windows\SYSTEM32\ntdll.dll
+#4  0x00007ffd7ef5fcb4 in ntdll!RtlEnterCriticalSection () from C:\Windows\SYSTEM32\ntdll.dll
+#5  0x00007ffd7ef5fae2 in ntdll!RtlEnterCriticalSection () from C:\Windows\SYSTEM32\ntdll.dll
+#6  0x00007ffd7f028a65 in ntdll!RtlRegisterSecureMemoryCacheCallback () from C:\Windows\SYSTEM32\ntdll.dll
+#7  0x00007ffd7ef5d255 in ntdll!RtlAllocateHeap () from C:\Windows\SYSTEM32\ntdll.dll
+#8  0x00007ffd7ef5b44d in ntdll!RtlAllocateHeap () from C:\Windows\SYSTEM32\ntdll.dll
+#9  0x00007ffd7c7dfde6 in ucrtbase!_malloc_base () from C:\Windows\System32\ucrtbase.dll
+#10 0x00007ffca4efef5c in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#11 0x00007ffca4eb0f8f in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#12 0x00007ff62c3db83b in BaseModel::getItemInternal(NifItem const*, QLatin1String const&, bool) const ()
+#13 0x00007ff62cbba63b in HalfVector2 NifModel::get<HalfVector2>(QModelIndex const&, char const*) const [clone .constprop.0] ()
+#14 0x00007ff62cbf7e1d in (anonymous namespace)::lodgenLoadModel(QString const&, QString const&, QHash<QString, QList<(anonymous namespace)::LodSrcShape> >&) ()
+#15 0x00007ff62cbfbb1f in (anonymous namespace)::LodgenRoadSet::addPlacement(EsmWorld const&, QString const&, QSet<QString>&, unsigned int, Vector3 const&, Matrix const&, float) ()
+#16 0x00007ff62cbff2c9 in (anonymous namespace)::LodgenRoadSet::gather(EsmWorld const&, QString const&, int, int, int, int) ()
+#17 0x00007ff62cc04ee8 in lodgenBakeTerrainTextures(EsmWorld const&, int, int, int, QString const&, QString const&, LodgenCoverOptions const&, LodgenBakeCaches*, QString*) ()
+#18 0x00007ff62ccb6974 in (anonymous namespace)::runJob(LodgenChunkJob const&, int, LodgenChunkPassOptions const&, (anonymous namespace)::Worker&, LodgenWriter*, bool, LodgenChunkOutcome&) ()
+#19 0x00007ff62ccb96b4 in (anonymous namespace)::ChunkThread::run() ()
+#20 0x00007ffca4fc2303 in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#21 0x00007ffd7d617374 in KERNEL32!BaseThreadInitThunk () from C:\Windows\System32\kernel32.dll
+#22 0x00007ffd7ef7cc91 in ntdll!RtlUserThreadStart () from C:\Windows\SYSTEM32\ntdll.dll
+#23 0x0000000000000000 in ?? ()
+
+Thread 5 (Thread 52444.0xc90c "QThread"):
+#0  0x00007ffd7efcd694 in ntdll!ZwWaitForSingleObject () from C:\Windows\SYSTEM32\ntdll.dll
+#1  0x00007ffd7cb6b6ae in WaitForSingleObjectEx () from C:\Windows\System32\KernelBase.dll
+#2  0x00007ffca4f8b5e9 in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#3  0x00007ff62cebdbb0 in LodgenWriter::Impl::Thread::run() ()
+#4  0x00007ffca4fc2303 in ?? () from E:\Projects\NifskopeWildWastelandEdition\release\Qt6core.dll
+#5  0x00007ffd7d617374 in KERNEL32!BaseThreadInitThunk () from C:\Windows\System32\kernel32.dll
+#6  0x00007ffd7ef7cc91 in ntdll!RtlUserThreadStart () from C:\Windows\SYSTEM32\ntdll.dll
+#7  0x0000000000000000 in ?? ()
+
+Thread 4 (Thread 52444.0x7af8):
+#0  0x00007ffd7efd10a4 in ntdll!ZwWaitForWorkViaWorkerFactory () from C:\Windows\SYSTEM32\ntdll.dll
+#1  0x00007ffd7ef7d407 in ntdll!TpReleaseCleanupGroupMembers () from C:\Windows\SYSTEM32\ntdll.dll
+#2  0x00007ffd7d617374 in KERNEL32!BaseThreadInitThunk () from C:\Windows\System32\kernel32.dll
+#3  0x00007ffd7ef7cc91 in ntdll!RtlUserThreadStart () from C:\Windows\SYSTEM32\ntdll.dll
+#4  0x0000000000000000 in ?? ()
+
+Thread 3 (Thread 52444.0x7110):
+#0  0x00007ffd7efd10a4 in ntdll!ZwWaitForWorkViaWorkerFactory () from C:\Windows\SYSTEM32\ntdll.dll
+#1  0x00007ffd7ef7d407 in ntdll!TpReleaseCleanupGroupMembers () from C:\Windows\SYSTEM32\ntdll.dll
+#2  0x00007ffd7d617374 in KERNEL32!BaseThreadInitThunk () from C:\Windows\System32\kernel32.dll
+#3  0x00007ffd7ef7cc91 in ntdll!RtlUserThreadStart () from C:\Windows\SYSTEM32\ntdll.dll
+#4  0x0000000000000000 in ?? ()
+
+Thread 2 (Thread 52444.0x9694):
+#0  0x00007ffd7efd10a4 in ntdll!ZwWaitForWorkViaWorkerFactory () from C:\Windows\SYSTEM32\ntdll.dll
+#1  0x00007ffd7ef7d407 in ntdll!TpReleaseCleanupGroupMembers () from C:\Windows\SYSTEM32\ntdll.dll
+#2  0x00007ffd7d617374 in KERNEL32!BaseThreadInitThunk () from C:\Windows\System32\kernel32.dll
+#3  0x00007ffd7ef7cc91 in ntdll!RtlUserThreadStart () from C:\Windows\SYSTEM32\ntdll.dll
+#4  0x0000000000000000 in ?? ()
+
+Thread 1 (Thread 52444.0xcb30):
+#0  0x00007ffd7efcdc94 in ntdll!ZwDelayExecution () from C:\Windows\SYSTEM32\ntdll.dll
+#1  0x00007ffd7cb962de in SleepEx () from C:\Windows\System32\KernelBase.dll
+#2  0x00007ff62ccb8aff in lodgenRunChunkPass(QList<LodgenChunkJob> const&, LodgenChunkPassOptions const&, std::function<void (LodgenChunkOutcome const&)> const&, std::function<bool ()> const&, long long*, long long*, QString*) ()
+#3  0x00007ff62c8e21b9 in (anonymous namespace)::cmdLodgen(QString const&, bool, unsigned int, bool, int, int, bool, int, int, int, QString const&, bool, int const*, QString const&, bool, QString const&, bool, QString const&, bool, bool, QString const&, int, QString const&, bool, bool, bool, bool, bool, bool, float, bool, int, int, bool, int, int, QString const&, int, QString const&, QString const&, bool, bool, QString const&, QString const&, bool, bool, bool, LodgenSimplifyOptions const&, LodgenCoverOptions const&, LodgenVtOptions const&, QString const&, int, bool, QString const&, QString const&, bool, int, QString const&, QString const&, QString const&, QString const&, QString const&, bool, bool, bool, bool) ()
+#4  0x00007ff62c8f2d44 in nifskopeCliMain(QList<QString> const&) ()
+#5  0x00007ff62c89b7fb in qMain(int, char**) ()
+#6  0x00007ff62ce9233a in qtEntryPoint() ()
+#7  0x00007ff62c0310fa in __tmainCRTStartup () at D:/W/B/src/mingw-w64/mingw-w64-crt/crt/crtexe.c:276
+#8  0x00007ffd7d617374 in KERNEL32!BaseThreadInitThunk () from C:\Windows\System32\kernel32.dll
+#9  0x00007ffd7ef7cc91 in ntdll!RtlUserThreadStart () from C:\Windows\SYSTEM32\ntdll.dll
+#10 0x0000000000000000 in ?? ()

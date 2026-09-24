@@ -1,0 +1,32 @@
+--- 1 region split (road mask = default bake vs --no-roads bake)
+tile       region          n      ours   vanilla    k_opt    rgbRMS   lumBias
+(-20,24)   whole      262144    87.606    80.819   0.8916    20.127    +6.787
+(-20,24)   road            0  --
+(-20,24)   ground     262144    87.606    80.819   0.8916    20.127    +6.787
+(-20,24)   cover>0         0  --
+(-20,20)   whole      262144    71.648    84.331   1.1180    21.897   -12.683
+(-20,20)   road        25189    98.753    92.485   0.9153    19.575    +6.268
+(-20,20)   ground     236955    68.767    83.464   1.1612    22.130   -14.697
+(-20,20)   cover>0         0  --
+
+--- 2 the parabola: whole-tile RGB RMS against a constant gain k
+k         (-20,24)  (-20,20)
+0.8000      19.126    30.434
+0.8500      17.824    27.828
+0.8755      17.551    26.595
+0.9000      17.556    25.483
+0.9500      18.367    23.475
+1.0000      20.127    21.897
+1.0500      22.616    20.848
+1.1000      25.622    20.409
+1.1180      26.799    20.410
+1.1500      28.985    20.620
+1.2000      32.595    21.460
+k_opt      0.8916    1.1180
+  k_opt sits on opposite sides of 1 (0.8916 and 1.1180), so any k<1 raises the error on the second tile and any k>1 raises it on the first.
+
+--- 3 the pooled-optimal gain over the census
+Traceback (most recent call last):
+  File "E:\Projects\NifskopeWildWastelandEdition\scratchpad\grade1_20260911\g5_decide.py", line 87, in <module>
+    cx, cy = int(m.group(1)), int(m.group(2))
+AttributeError: 'NoneType' object has no attribute 'group'

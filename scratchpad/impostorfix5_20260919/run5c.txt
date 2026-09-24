@@ -1,0 +1,5 @@
+blast_n4_after_a050    coverage cut: 0.5000 (forced by WW_IMPOSTOR_ALPHA) orbit iou mean 0.5406 orbit counted 24 of 24 rc=0
+blast_n8_after_a050    coverage cut: 0.5000 (forced by WW_IMPOSTOR_ALPHA) orbit iou mean 0.7651 orbit counted 24 of 24 rc=0
+maple_n4_after_a050    coverage cut: 0.5000 (forced by WW_IMPOSTOR_ALPHA) orbit iou mean 0.2138 orbit counted 22 of 24 rc=0
+dead_n4_after_a050     coverage cut: 0.5000 (forced by WW_IMPOSTOR_ALPHA) orbit iou mean 0.5361 orbit counted 24 of 24 rc=0
+rock_n4_after_a050     coverage cut: 0.5000 (forced by WW_IMPOSTOR_ALPHA) orbit iou mean 0.7706 orbit counted 24 of 24 rc=0

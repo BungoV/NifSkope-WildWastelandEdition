@@ -1,0 +1,3 @@
+pbr_r4 sphere disk centre (699.5, 462.5) radius 298.1 px
+pbr_r4 s1b weight 0.5 / 1: head-on 0.4996 (want 0.500 +-2%, n=1788); grazing >= 80 deg 0.5000 (want within 5% of 1, law at 80 deg 0.970, n=8280) -> FAIL
+RED f90scaled aims at s1b: FAILED -> OK

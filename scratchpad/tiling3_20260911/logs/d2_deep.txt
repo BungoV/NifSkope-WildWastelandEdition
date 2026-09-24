@@ -1,0 +1,48 @@
+TILING3 hypothesis D part 2 -- the ceiling of what vanilla`s own _msn explains
+
+==============================================================================
+K0  THE KNOWN-ANSWER CONTROL, FIXED
+==============================================================================
+   UNCLIPPED Lambert (in the span)      share 0.50 -> R^2 0.5005  (+0.1% of truth)
+   UNCLIPPED Lambert (in the span)      share 0.20 -> R^2 0.2004  (+0.2% of truth)
+   UNCLIPPED Lambert (in the span)      share 0.05 -> R^2 0.0508  (+1.6% of truth)
+   clipped Lambert (not in the span)    share 0.50 -> R^2 0.4982  (-0.4% of truth)
+   clipped Lambert (not in the span)    share 0.20 -> R^2 0.1997  (-0.2% of truth)
+   clipped Lambert (not in the span)    share 0.05 -> R^2 0.0499  (-0.2% of truth)
+   => the fit machinery is EXACT on a term inside its span; the shortfall
+      on a clipped term is the clipping, and it means every R^2 below is a
+      LOWER bound on what the surface explains.
+   rich basis: 22 columns over 262144 samples; overfit floor (noise columns) =
+      R^2 = 0.000061
+
+==============================================================================
+D4  chunk (-20,24)   vanilla colour high-pass SD = 4.476
+==============================================================================
+   rich basis on VANILLA _msn   R^2 = 0.01828   (1.8% of the residual`s variance)
+   the same on its PHASE TWIN   R^2 = 0.00018   FLOOR
+   the same on OUR  _msn        R^2 = 0.00017   FLOOR
+   22 noise columns             R^2 = 0.00006   OVERFIT FLOOR
+   strongest single columns: div@0 -0.1247  hgtHP@1 -0.1207  hgtHP@2 -0.1075  hgtHP@8 -0.0999  hgtHP@4 -0.0993  div@1 -0.0606
+   THE SPLIT  total SD 4.476 = explained SD 0.605 + remainder SD 4.435
+   moments    vanilla skew +1.007 kurt 7.373 | remainder skew +0.974 kurt 7.245 | Gaussian 0.000 / 3.000
+
+==============================================================================
+D4  chunk (-20,20)   vanilla colour high-pass SD = 5.459
+==============================================================================
+   rich basis on VANILLA _msn   R^2 = 0.02260   (2.3% of the residual`s variance)
+   the same on its PHASE TWIN   R^2 = 0.00009   FLOOR
+   the same on OUR  _msn        R^2 = 0.00013   FLOOR
+   22 noise columns             R^2 = 0.00006   OVERFIT FLOOR
+   strongest single columns: div@0 -0.1373  hgtHP@1 -0.1183  hgtHP@2 -0.1037  hgtHP@8 -0.0974  hgtHP@4 -0.0967  div@1 -0.0579
+   THE SPLIT  total SD 5.459 = explained SD 0.821 + remainder SD 5.397
+   moments    vanilla skew +1.123 kurt 6.539 | remainder skew +1.078 kurt 6.403 | Gaussian 0.000 / 3.000
+
+==============================================================================
+D5  five more of TILING2`s 22 shipped sheets (vanilla only -- no bake of ours)
+==============================================================================
+   chunk          D1 R^2     twin   D2 env   D3 dir     twin
+   ( -64, -60)  0.00286  0.00010   0.5916   0.2036  -0.0094
+   (  -4, -20)  0.01276  0.00010   0.1699   0.2016   0.0633
+   ( -36,  16)  0.00462  0.00010   0.5449   0.3466   0.0162
+   (  44,  32)  0.01183  0.00010   0.4325   0.1064   0.0299
+   (  -4,  56)  0.01922  0.00010   0.5164   0.3834   0.0440

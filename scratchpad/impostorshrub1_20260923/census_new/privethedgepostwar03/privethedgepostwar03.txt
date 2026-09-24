@@ -1,0 +1,82 @@
+model privethedgepostwar03.nif
+projection ortho
+ranges PrivetHedgePostWar03:0 - L2_PrivetHedgePostWar03:0 - L1_PrivetHedgePostWar03:0 150+997
+ranges L1_HedgeVines03:0 373+0
+lodm Materials\Landscape\Plants\PrivetHedges01PostWar.lodm none textures\Landscape\Plants\PrivetHedges01PostWar_d.dds
+lodm Materials\Landscape\Plants\Vine.lodm none Textures\Landscape\Plants\Vines01_d.dds
+mask alpha
+emissive 0 shapes 0
+front 784.579 402.25 22.1156 34.2024 33.7912
+side 784.579 402.25 22.1156 34.2024 33.7912
+class 128 128
+gap 8 8
+coverage 16 128 160
+oct 8 128 128 184.939 184.939 22.1156 34.2024 33.7912 3072 legacy 512 spec1
+frameoff 0 0 34.9612 93.8846
+frameoff 1 0 38.1038 93.8846
+frameoff 2 0 42.032 93.8846
+frameoff 3 0 40.8535 93.8846
+frameoff 4 0 35.7468 93.8846
+frameoff 5 0 26.3191 93.8846
+frameoff 6 0 16.1057 93.8846
+frameoff 7 0 8.24927 93.8846
+frameoff 0 1 37.711 93.8846
+frameoff 1 1 34.9612 75.4219
+frameoff 2 1 40.8535 77.386
+frameoff 3 1 41.2464 82.8855
+frameoff 4 1 34.5684 88.7779
+frameoff 5 1 20.0339 92.3133
+frameoff 6 1 8.24927 92.7061
+frameoff 7 1 2.35693 93.8846
+frameoff 0 2 31.4258 93.8846
+frameoff 1 2 35.7468 65.2085
+frameoff 2 2 34.5684 39.2822
+frameoff 3 2 42.032 51.0669
+frameoff 4 2 30.2473 67.1726
+frameoff 5 2 8.24927 75.4219
+frameoff 6 2 -1.17847 84.064
+frameoff 7 2 -7.85645 93.8846
+frameoff 0 3 25.1406 93.8846
+frameoff 1 3 26.3191 55.7808
+frameoff 2 3 29.0689 11.3918
+frameoff 3 3 34.9612 0.785645
+frameoff 4 3 8.24927 41.6392
+frameoff 5 3 -11.7847 62.0659
+frameoff 6 3 -16.4985 75.4219
+frameoff 7 3 -18.4627 93.8846
+frameoff 0 4 18.4627 93.8846
+frameoff 1 4 16.4985 53.4238
+frameoff 2 4 11.7847 5.1067
+frameoff 3 4 -8.24927 -26.7119
+frameoff 4 4 -34.9612 14.5344
+frameoff 5 4 -29.0689 49.8884
+frameoff 6 4 -26.3191 67.5655
+frameoff 7 4 -25.1406 93.8846
+frameoff 0 5 7.85645 93.8846
+frameoff 1 5 1.17847 60.4947
+frameoff 2 5 -8.24927 19.6411
+frameoff 3 5 -30.2473 5.89233
+frameoff 4 5 -42.032 14.5344
+frameoff 5 5 -34.5684 38.4966
+frameoff 6 5 -35.7468 62.8516
+frameoff 7 5 -31.4258 93.8846
+frameoff 0 6 -2.35693 93.8846
+frameoff 1 6 -8.24927 67.9583
+frameoff 2 6 -20.0339 58.5305
+frameoff 3 6 -34.5684 50.2813
+frameoff 4 6 -41.2464 51.8526
+frameoff 5 6 -40.8535 59.709
+frameoff 6 6 -34.9612 66.387
+frameoff 7 6 -37.711 93.8846
+frameoff 0 7 -8.24927 93.8846
+frameoff 1 7 -16.1057 93.8846
+frameoff 2 7 -26.3191 93.8846
+frameoff 3 7 -35.7468 93.8846
+frameoff 4 7 -40.8535 93.8846
+frameoff 5 7 -42.032 93.8846
+frameoff 6 7 -38.1038 93.8846
+frameoff 7 7 -34.9612 93.8846
+frameclamped 0
+aa 4 1024 0.125
+framefit 157.915 171.663 185.019 246.3
+orthofit 267.265 267.265 0

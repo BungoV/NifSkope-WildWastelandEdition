@@ -1,0 +1,7460 @@
+{
+ "faces": [
+  {
+   "rank": 1,
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWDoubleCurveL01_LOD_0.nif",
+   "area": 8015246.961549813,
+   "instance": 22028,
+   "samples": 1999,
+   "grid": [
+    88,
+    48
+   ],
+   "copies": 1,
+   "normal": [
+    5.748782104415222e-05,
+    -2.0510195286041734e-05,
+    0.9999999981372412
+   ],
+   "suns": {
+    "e05_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 1999
+    },
+    "e05_a120": {
+     "components": 3,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 309,
+     "samples": 1999
+    },
+    "e05_a180": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 1999
+    },
+    "e05_a240": {
+     "components": 5,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 1006,
+     "samples": 1999
+    },
+    "e05_a300": {
+     "components": 5,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 1198,
+     "samples": 1999
+    },
+    "e15_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 21,
+     "samples": 1999
+    },
+    "e15_a120": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 495,
+     "samples": 1999
+    },
+    "e15_a180": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 838,
+     "samples": 1999
+    },
+    "e15_a240": {
+     "components": 5,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 1230,
+     "samples": 1999
+    },
+    "e15_a300": {
+     "components": 6,
+     "interior": 1,
+     "largest_interior": 20,
+     "lit": 1287,
+     "samples": 1999
+    },
+    "e30_a060": {
+     "components": 4,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 602,
+     "samples": 1999
+    },
+    "e30_a120": {
+     "components": 3,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 714,
+     "samples": 1999
+    },
+    "e30_a180": {
+     "components": 3,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 1265,
+     "samples": 1999
+    },
+    "e30_a240": {
+     "components": 5,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 1452,
+     "samples": 1999
+    },
+    "e30_a300": {
+     "components": 5,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 1399,
+     "samples": 1999
+    }
+   }
+  },
+  {
+   "rank": 2,
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWDoubleCurveL01_LOD_0.nif",
+   "area": 7882863.749076827,
+   "instance": 22028,
+   "samples": 1928,
+   "grid": [
+    88,
+    47
+   ],
+   "copies": 1,
+   "normal": [
+    -5.748782104415222e-05,
+    2.0510195286041734e-05,
+    -0.9999999981372412
+   ],
+   "suns": {
+    "e05_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 1928
+    },
+    "e05_a120": {
+     "components": 3,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 283,
+     "samples": 1928
+    },
+    "e05_a180": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 1928
+    },
+    "e05_a240": {
+     "components": 4,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 956,
+     "samples": 1928
+    },
+    "e05_a300": {
+     "components": 5,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 1138,
+     "samples": 1928
+    },
+    "e15_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 21,
+     "samples": 1928
+    },
+    "e15_a120": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 441,
+     "samples": 1928
+    },
+    "e15_a180": {
+     "components": 3,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 758,
+     "samples": 1928
+    },
+    "e15_a240": {
+     "components": 5,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 1178,
+     "samples": 1928
+    },
+    "e15_a300": {
+     "components": 6,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 1221,
+     "samples": 1928
+    },
+    "e30_a060": {
+     "components": 4,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 544,
+     "samples": 1928
+    },
+    "e30_a120": {
+     "components": 3,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 670,
+     "samples": 1928
+    },
+    "e30_a180": {
+     "components": 5,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 1198,
+     "samples": 1928
+    },
+    "e30_a240": {
+     "components": 5,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 1383,
+     "samples": 1928
+    },
+    "e30_a300": {
+     "components": 5,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 1327,
+     "samples": 1928
+    }
+   }
+  },
+  {
+   "rank": 3,
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWDoubleCurveL01_LOD_0.nif",
+   "area": 7690949.349854619,
+   "instance": 22028,
+   "samples": 1906,
+   "grid": [
+    83,
+    48
+   ],
+   "copies": 1,
+   "normal": [
+    5.748782104415222e-05,
+    -2.0510195286041734e-05,
+    0.9999999981372412
+   ],
+   "suns": {
+    "e05_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 1906
+    },
+    "e05_a120": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 190,
+     "samples": 1906
+    },
+    "e05_a180": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 1906
+    },
+    "e05_a240": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 358,
+     "samples": 1906
+    },
+    "e05_a300": {
+     "components": 4,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 933,
+     "samples": 1906
+    },
+    "e15_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 1906
+    },
+    "e15_a120": {
+     "components": 3,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 256,
+     "samples": 1906
+    },
+    "e15_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 206,
+     "samples": 1906
+    },
+    "e15_a240": {
+     "components": 4,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 1103,
+     "samples": 1906
+    },
+    "e15_a300": {
+     "components": 4,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 1029,
+     "samples": 1906
+    },
+    "e30_a060": {
+     "components": 3,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 366,
+     "samples": 1906
+    },
+    "e30_a120": {
+     "components": 3,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 457,
+     "samples": 1906
+    },
+    "e30_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 852,
+     "samples": 1906
+    },
+    "e30_a240": {
+     "components": 4,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 1249,
+     "samples": 1906
+    },
+    "e30_a300": {
+     "components": 6,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 1144,
+     "samples": 1906
+    }
+   }
+  },
+  {
+   "rank": 4,
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWDoubleCurveR01_LOD_0.nif",
+   "area": 7689271.921935745,
+   "instance": 4291,
+   "samples": 1919,
+   "grid": [
+    82,
+    54
+   ],
+   "copies": 1,
+   "normal": [
+    5.639064921774229e-05,
+    2.335834668544804e-05,
+    0.9999999981372412
+   ],
+   "suns": {
+    "e05_a060": {
+     "components": 3,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 1280,
+     "samples": 1919
+    },
+    "e05_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 119,
+     "samples": 1919
+    },
+    "e05_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 29,
+     "samples": 1919
+    },
+    "e05_a240": {
+     "components": 3,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 1143,
+     "samples": 1919
+    },
+    "e05_a300": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 1605,
+     "samples": 1919
+    },
+    "e15_a060": {
+     "components": 3,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 1280,
+     "samples": 1919
+    },
+    "e15_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 119,
+     "samples": 1919
+    },
+    "e15_a180": {
+     "components": 3,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 833,
+     "samples": 1919
+    },
+    "e15_a240": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 1288,
+     "samples": 1919
+    },
+    "e15_a300": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 1605,
+     "samples": 1919
+    },
+    "e30_a060": {
+     "components": 3,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 1280,
+     "samples": 1919
+    },
+    "e30_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 119,
+     "samples": 1919
+    },
+    "e30_a180": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 1267,
+     "samples": 1919
+    },
+    "e30_a240": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 1288,
+     "samples": 1919
+    },
+    "e30_a300": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 1605,
+     "samples": 1919
+    }
+   }
+  },
+  {
+   "rank": 5,
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWDoubleStrExit01_LOD_0.nif",
+   "area": 6205479.188097964,
+   "instance": 27018,
+   "samples": 1560,
+   "grid": [
+    65,
+    24
+   ],
+   "copies": 2,
+   "normal": [
+    -2.7957457742130987e-06,
+    -0.09979283082971388,
+    0.9950082366026806
+   ],
+   "suns": {
+    "e05_a060": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 485,
+     "samples": 1560
+    },
+    "e05_a120": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 976,
+     "samples": 1560
+    },
+    "e05_a180": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 1560
+    },
+    "e05_a240": {
+     "components": 4,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 539,
+     "samples": 1560
+    },
+    "e05_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 1560
+    },
+    "e15_a060": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 573,
+     "samples": 1560
+    },
+    "e15_a120": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 976,
+     "samples": 1560
+    },
+    "e15_a180": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 312,
+     "samples": 1560
+    },
+    "e15_a240": {
+     "components": 5,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 877,
+     "samples": 1560
+    },
+    "e15_a300": {
+     "components": 5,
+     "interior": 4,
+     "largest_interior": 10,
+     "lit": 249,
+     "samples": 1560
+    },
+    "e30_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 650,
+     "samples": 1560
+    },
+    "e30_a120": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 1015,
+     "samples": 1560
+    },
+    "e30_a180": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 720,
+     "samples": 1560
+    },
+    "e30_a240": {
+     "components": 4,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 996,
+     "samples": 1560
+    },
+    "e30_a300": {
+     "components": 3,
+     "interior": 2,
+     "largest_interior": 10,
+     "lit": 509,
+     "samples": 1560
+    }
+   }
+  },
+  {
+   "rank": 6,
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWDoubleStrExit01_LOD_0.nif",
+   "area": 6057986.937544823,
+   "instance": 27018,
+   "samples": 1560,
+   "grid": [
+    65,
+    24
+   ],
+   "copies": 2,
+   "normal": [
+    -2.7957457742130987e-06,
+    -0.09979283082971388,
+    0.9950082366026806
+   ],
+   "suns": {
+    "e05_a060": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 644,
+     "samples": 1560
+    },
+    "e05_a120": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 1000,
+     "samples": 1560
+    },
+    "e05_a180": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 1560
+    },
+    "e05_a240": {
+     "components": 3,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 949,
+     "samples": 1560
+    },
+    "e05_a300": {
+     "components": 4,
+     "interior": 3,
+     "largest_interior": 10,
+     "lit": 125,
+     "samples": 1560
+    },
+    "e15_a060": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 644,
+     "samples": 1560
+    },
+    "e15_a120": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 1043,
+     "samples": 1560
+    },
+    "e15_a180": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 837,
+     "samples": 1560
+    },
+    "e15_a240": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 1042,
+     "samples": 1560
+    },
+    "e15_a300": {
+     "components": 5,
+     "interior": 2,
+     "largest_interior": 10,
+     "lit": 448,
+     "samples": 1560
+    },
+    "e30_a060": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 644,
+     "samples": 1560
+    },
+    "e30_a120": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 1088,
+     "samples": 1560
+    },
+    "e30_a180": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 1005,
+     "samples": 1560
+    },
+    "e30_a240": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 1088,
+     "samples": 1560
+    },
+    "e30_a300": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 623,
+     "samples": 1560
+    }
+   }
+  },
+  {
+   "rank": 7,
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWDoubleStrExit01_LOD_0.nif",
+   "area": 6021285.377523461,
+   "instance": 27018,
+   "samples": 1495,
+   "grid": [
+    65,
+    23
+   ],
+   "copies": 2,
+   "normal": [
+    2.7957457742130987e-06,
+    0.09979283082971388,
+    -0.9950082366026806
+   ],
+   "suns": {
+    "e05_a060": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 617,
+     "samples": 1495
+    },
+    "e05_a120": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 960,
+     "samples": 1495
+    },
+    "e05_a180": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 1495
+    },
+    "e05_a240": {
+     "components": 3,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 904,
+     "samples": 1495
+    },
+    "e05_a300": {
+     "components": 5,
+     "interior": 4,
+     "largest_interior": 10,
+     "lit": 119,
+     "samples": 1495
+    },
+    "e15_a060": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 617,
+     "samples": 1495
+    },
+    "e15_a120": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 990,
+     "samples": 1495
+    },
+    "e15_a180": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 780,
+     "samples": 1495
+    },
+    "e15_a240": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 988,
+     "samples": 1495
+    },
+    "e15_a300": {
+     "components": 6,
+     "interior": 4,
+     "largest_interior": 10,
+     "lit": 422,
+     "samples": 1495
+    },
+    "e30_a060": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 617,
+     "samples": 1495
+    },
+    "e30_a120": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 1044,
+     "samples": 1495
+    },
+    "e30_a180": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 964,
+     "samples": 1495
+    },
+    "e30_a240": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 1043,
+     "samples": 1495
+    },
+    "e30_a300": {
+     "components": 3,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 595,
+     "samples": 1495
+    }
+   }
+  },
+  {
+   "rank": 8,
+   "model": "LOD\\Architecture\\Airport\\AirportTerminalDestroyed01_LOD.nif",
+   "area": 5304257.348756995,
+   "instance": 14062,
+   "samples": 1340,
+   "grid": [
+    52,
+    52
+   ],
+   "copies": 1,
+   "normal": [
+    5.639064921774229e-05,
+    2.335834668544804e-05,
+    0.9999999981372412
+   ],
+   "suns": {
+    "e05_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 26,
+     "samples": 1340
+    },
+    "e05_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 1340
+    },
+    "e05_a180": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 1340
+    },
+    "e05_a240": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 1340
+    },
+    "e05_a300": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 109,
+     "samples": 1340
+    },
+    "e15_a060": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 80,
+     "samples": 1340
+    },
+    "e15_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 2,
+     "samples": 1340
+    },
+    "e15_a180": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 82,
+     "samples": 1340
+    },
+    "e15_a240": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 1340
+    },
+    "e15_a300": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 327,
+     "samples": 1340
+    },
+    "e30_a060": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 677,
+     "samples": 1340
+    },
+    "e30_a120": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 221,
+     "samples": 1340
+    },
+    "e30_a180": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 388,
+     "samples": 1340
+    },
+    "e30_a240": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 432,
+     "samples": 1340
+    },
+    "e30_a300": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 731,
+     "samples": 1340
+    }
+   }
+  },
+  {
+   "rank": 9,
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWDoubleCurveR01_LOD_0.nif",
+   "area": 5035599.568290644,
+   "instance": 4291,
+   "samples": 1244,
+   "grid": [
+    59,
+    36
+   ],
+   "copies": 1,
+   "normal": [
+    -5.639064921774229e-05,
+    -2.335834668544804e-05,
+    -0.9999999981372412
+   ],
+   "suns": {
+    "e05_a060": {
+     "components": 3,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 553,
+     "samples": 1244
+    },
+    "e05_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 1244
+    },
+    "e05_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 58,
+     "samples": 1244
+    },
+    "e05_a240": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 528,
+     "samples": 1244
+    },
+    "e05_a300": {
+     "components": 3,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 809,
+     "samples": 1244
+    },
+    "e15_a060": {
+     "components": 3,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 553,
+     "samples": 1244
+    },
+    "e15_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 1244
+    },
+    "e15_a180": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 792,
+     "samples": 1244
+    },
+    "e15_a240": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 528,
+     "samples": 1244
+    },
+    "e15_a300": {
+     "components": 3,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 809,
+     "samples": 1244
+    },
+    "e30_a060": {
+     "components": 3,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 556,
+     "samples": 1244
+    },
+    "e30_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 1244
+    },
+    "e30_a180": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 838,
+     "samples": 1244
+    },
+    "e30_a240": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 528,
+     "samples": 1244
+    },
+    "e30_a300": {
+     "components": 3,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 809,
+     "samples": 1244
+    }
+   }
+  },
+  {
+   "rank": 10,
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWDoubleCurveR01_LOD_0.nif",
+   "area": 5003381.640254479,
+   "instance": 4291,
+   "samples": 1267,
+   "grid": [
+    59,
+    37
+   ],
+   "copies": 1,
+   "normal": [
+    5.639064921774229e-05,
+    2.335834668544804e-05,
+    0.9999999981372412
+   ],
+   "suns": {
+    "e05_a060": {
+     "components": 3,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 562,
+     "samples": 1267
+    },
+    "e05_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 1267
+    },
+    "e05_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 49,
+     "samples": 1267
+    },
+    "e05_a240": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 531,
+     "samples": 1267
+    },
+    "e05_a300": {
+     "components": 3,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 818,
+     "samples": 1267
+    },
+    "e15_a060": {
+     "components": 3,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 562,
+     "samples": 1267
+    },
+    "e15_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 1267
+    },
+    "e15_a180": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 828,
+     "samples": 1267
+    },
+    "e15_a240": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 531,
+     "samples": 1267
+    },
+    "e15_a300": {
+     "components": 3,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 818,
+     "samples": 1267
+    },
+    "e30_a060": {
+     "components": 3,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 565,
+     "samples": 1267
+    },
+    "e30_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 1267
+    },
+    "e30_a180": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 851,
+     "samples": 1267
+    },
+    "e30_a240": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 531,
+     "samples": 1267
+    },
+    "e30_a300": {
+     "components": 3,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 818,
+     "samples": 1267
+    }
+   }
+  },
+  {
+   "rank": 11,
+   "model": "LOD\\Architecture\\Unique\\BostonCommons\\BostonCommonsPond01_LOD_0.nif",
+   "area": 3762037.3357285177,
+   "instance": 15927,
+   "samples": 948,
+   "grid": [
+    50,
+    33
+   ],
+   "copies": 1,
+   "normal": [
+    4.132370781419122e-05,
+    -4.4920695136689405e-05,
+    0.9999999981372412
+   ],
+   "suns": {
+    "e05_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 948
+    },
+    "e05_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 948
+    },
+    "e05_a180": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 948
+    },
+    "e05_a240": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 948
+    },
+    "e05_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 948
+    },
+    "e15_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 948
+    },
+    "e15_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 948
+    },
+    "e15_a180": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 948
+    },
+    "e15_a240": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 948
+    },
+    "e15_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 948
+    },
+    "e30_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 948
+    },
+    "e30_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 948
+    },
+    "e30_a180": {
+     "components": 1,
+     "interior": 1,
+     "largest_interior": 24,
+     "lit": 10,
+     "samples": 948
+    },
+    "e30_a240": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 948
+    },
+    "e30_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 948
+    }
+   }
+  },
+  {
+   "rank": 12,
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWDoubleStr01Damaged01_LOD_0.nif",
+   "area": 3102700.9372091247,
+   "instance": 24932,
+   "samples": 792,
+   "grid": [
+    33,
+    24
+   ],
+   "copies": 3,
+   "normal": [
+    2.7957457741020764e-06,
+    -0.09979283082971398,
+    0.9950082366026806
+   ],
+   "suns": {
+    "e05_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 792
+    },
+    "e05_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 792
+    },
+    "e05_a180": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 792
+    },
+    "e05_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 91,
+     "samples": 792
+    },
+    "e05_a300": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 31,
+     "samples": 792
+    },
+    "e15_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 792
+    },
+    "e15_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 4,
+     "samples": 792
+    },
+    "e15_a180": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 792
+    },
+    "e15_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 91,
+     "samples": 792
+    },
+    "e15_a300": {
+     "components": 2,
+     "interior": 1,
+     "largest_interior": 15,
+     "lit": 229,
+     "samples": 792
+    },
+    "e30_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 792
+    },
+    "e30_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 4,
+     "samples": 792
+    },
+    "e30_a180": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 792
+    },
+    "e30_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 91,
+     "samples": 792
+    },
+    "e30_a300": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 280,
+     "samples": 792
+    }
+   }
+  },
+  {
+   "rank": 13,
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWDoubleStr01_LOD_0.nif",
+   "area": 3102663.342885481,
+   "instance": 29067,
+   "samples": 792,
+   "grid": [
+    33,
+    24
+   ],
+   "copies": 1,
+   "normal": [
+    6.103701892356834e-05,
+    2.842431829188155e-14,
+    0.9999999981372412
+   ],
+   "suns": {
+    "e05_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 618,
+     "samples": 792
+    },
+    "e05_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 619,
+     "samples": 792
+    },
+    "e05_a180": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 792
+    },
+    "e05_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 49,
+     "samples": 792
+    },
+    "e05_a300": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 355,
+     "samples": 792
+    },
+    "e15_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 618,
+     "samples": 792
+    },
+    "e15_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 619,
+     "samples": 792
+    },
+    "e15_a180": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 792
+    },
+    "e15_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 619,
+     "samples": 792
+    },
+    "e15_a300": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 448,
+     "samples": 792
+    },
+    "e30_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 651,
+     "samples": 792
+    },
+    "e30_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 652,
+     "samples": 792
+    },
+    "e30_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 408,
+     "samples": 792
+    },
+    "e30_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 652,
+     "samples": 792
+    },
+    "e30_a300": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 651,
+     "samples": 792
+    }
+   }
+  },
+  {
+   "rank": 14,
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWDoubleStr01_LOD_0.nif",
+   "area": 3028918.21762417,
+   "instance": 29067,
+   "samples": 792,
+   "grid": [
+    33,
+    24
+   ],
+   "copies": 1,
+   "normal": [
+    6.103701892356834e-05,
+    2.842431829188155e-14,
+    0.9999999981372412
+   ],
+   "suns": {
+    "e05_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 675,
+     "samples": 792
+    },
+    "e05_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 675,
+     "samples": 792
+    },
+    "e05_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 504,
+     "samples": 792
+    },
+    "e05_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 675,
+     "samples": 792
+    },
+    "e05_a300": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 449,
+     "samples": 792
+    },
+    "e15_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 746,
+     "samples": 792
+    },
+    "e15_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 746,
+     "samples": 792
+    },
+    "e15_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 696,
+     "samples": 792
+    },
+    "e15_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 746,
+     "samples": 792
+    },
+    "e15_a300": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 449,
+     "samples": 792
+    },
+    "e30_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 768,
+     "samples": 792
+    },
+    "e30_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 768,
+     "samples": 792
+    },
+    "e30_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 744,
+     "samples": 792
+    },
+    "e30_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 768,
+     "samples": 792
+    },
+    "e30_a300": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 768,
+     "samples": 792
+    }
+   }
+  },
+  {
+   "rank": 15,
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWDoubleStr01_LOD_0.nif",
+   "area": 3010613.938323033,
+   "instance": 29067,
+   "samples": 759,
+   "grid": [
+    33,
+    23
+   ],
+   "copies": 1,
+   "normal": [
+    -6.103701892356834e-05,
+    -2.842431829188155e-14,
+    -0.9999999981372412
+   ],
+   "suns": {
+    "e05_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 624,
+     "samples": 759
+    },
+    "e05_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 624,
+     "samples": 759
+    },
+    "e05_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 391,
+     "samples": 759
+    },
+    "e05_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 624,
+     "samples": 759
+    },
+    "e05_a300": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 429,
+     "samples": 759
+    },
+    "e15_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 696,
+     "samples": 759
+    },
+    "e15_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 696,
+     "samples": 759
+    },
+    "e15_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 644,
+     "samples": 759
+    },
+    "e15_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 696,
+     "samples": 759
+    },
+    "e15_a300": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 429,
+     "samples": 759
+    },
+    "e30_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 736,
+     "samples": 759
+    },
+    "e30_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 736,
+     "samples": 759
+    },
+    "e30_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 713,
+     "samples": 759
+    },
+    "e30_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 736,
+     "samples": 759
+    },
+    "e30_a300": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 736,
+     "samples": 759
+    }
+   }
+  },
+  {
+   "rank": 16,
+   "model": "LOD\\Buildings\\BldgBrick7Story3x5FreeComEntA_LOD.nif",
+   "area": 2487817.4186167093,
+   "instance": 26701,
+   "samples": 640,
+   "grid": [
+    32,
+    20
+   ],
+   "copies": 1,
+   "normal": [
+    -3.725505322357683e-08,
+    -0.9999998042951466,
+    -0.0006256274189897908
+   ],
+   "suns": {
+    "e05_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 640
+    },
+    "e05_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 640
+    },
+    "e05_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 34,
+     "samples": 640
+    },
+    "e05_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 28,
+     "samples": 640
+    },
+    "e05_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 640
+    },
+    "e15_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 640
+    },
+    "e15_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 14,
+     "samples": 640
+    },
+    "e15_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 68,
+     "samples": 640
+    },
+    "e15_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 59,
+     "samples": 640
+    },
+    "e15_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 640
+    },
+    "e30_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 100,
+     "samples": 640
+    },
+    "e30_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 88,
+     "samples": 640
+    },
+    "e30_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 72,
+     "samples": 640
+    },
+    "e30_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 73,
+     "samples": 640
+    },
+    "e30_a300": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 12,
+     "samples": 640
+    }
+   }
+  },
+  {
+   "rank": 17,
+   "model": "LOD\\Architecture\\Unique\\TheCastle\\CastleWallOutWedge02_LOD_0.nif",
+   "area": 2301462.523781186,
+   "instance": 33113,
+   "samples": 592,
+   "grid": [
+    16,
+    37
+   ],
+   "copies": 1,
+   "normal": [
+    -0.9510450444584014,
+    0.309052292948606,
+    6.0285374729586557e-05
+   ],
+   "suns": {
+    "e05_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 6,
+     "samples": 592
+    },
+    "e05_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 41,
+     "samples": 592
+    },
+    "e05_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 3,
+     "samples": 592
+    },
+    "e05_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 1,
+     "samples": 592
+    },
+    "e05_a300": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 1,
+     "samples": 592
+    },
+    "e15_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 23,
+     "samples": 592
+    },
+    "e15_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 44,
+     "samples": 592
+    },
+    "e15_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 11,
+     "samples": 592
+    },
+    "e15_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 23,
+     "samples": 592
+    },
+    "e15_a300": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 23,
+     "samples": 592
+    },
+    "e30_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 48,
+     "samples": 592
+    },
+    "e30_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 50,
+     "samples": 592
+    },
+    "e30_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 25,
+     "samples": 592
+    },
+    "e30_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 46,
+     "samples": 592
+    },
+    "e30_a300": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 48,
+     "samples": 592
+    }
+   }
+  },
+  {
+   "rank": 18,
+   "model": "LOD\\Architecture\\Unique\\TheCastle\\CastleWallOutWedge03_LOD_0.nif",
+   "area": 2301462.523781186,
+   "instance": 33114,
+   "samples": 592,
+   "grid": [
+    16,
+    37
+   ],
+   "copies": 1,
+   "normal": [
+    -0.5877594016083003,
+    -0.8090357735375118,
+    5.438393938618384e-05
+   ],
+   "suns": {
+    "e05_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 16,
+     "samples": 592
+    },
+    "e05_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 592
+    },
+    "e05_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 12,
+     "samples": 592
+    },
+    "e05_a240": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 592
+    },
+    "e05_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 592
+    },
+    "e15_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 16,
+     "samples": 592
+    },
+    "e15_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 2,
+     "samples": 592
+    },
+    "e15_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 32,
+     "samples": 592
+    },
+    "e15_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 2,
+     "samples": 592
+    },
+    "e15_a300": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 2,
+     "samples": 592
+    },
+    "e30_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 17,
+     "samples": 592
+    },
+    "e30_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 4,
+     "samples": 592
+    },
+    "e30_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 32,
+     "samples": 592
+    },
+    "e30_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 4,
+     "samples": 592
+    },
+    "e30_a300": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 4,
+     "samples": 592
+    }
+   }
+  },
+  {
+   "rank": 19,
+   "model": "LOD\\Architecture\\Unique\\TheCastle\\CastleWallOutWedge01_LOD_0.nif",
+   "area": 2207164.3439604267,
+   "instance": 33112,
+   "samples": 568,
+   "grid": [
+    16,
+    37
+   ],
+   "copies": 1,
+   "normal": [
+    -4.315875859479665e-05,
+    0.9999999981372412,
+    4.316062135363792e-05
+   ],
+   "suns": {
+    "e05_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 30,
+     "samples": 568
+    },
+    "e05_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 30,
+     "samples": 568
+    },
+    "e05_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 219,
+     "samples": 568
+    },
+    "e05_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 40,
+     "samples": 568
+    },
+    "e05_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 568
+    },
+    "e15_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 115,
+     "samples": 568
+    },
+    "e15_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 115,
+     "samples": 568
+    },
+    "e15_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 220,
+     "samples": 568
+    },
+    "e15_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 122,
+     "samples": 568
+    },
+    "e15_a300": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 122,
+     "samples": 568
+    },
+    "e30_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 169,
+     "samples": 568
+    },
+    "e30_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 169,
+     "samples": 568
+    },
+    "e30_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 220,
+     "samples": 568
+    },
+    "e30_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 173,
+     "samples": 568
+    },
+    "e30_a300": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 173,
+     "samples": 568
+    }
+   }
+  },
+  {
+   "rank": 20,
+   "model": "LOD\\Architecture\\Unique\\TheCastle\\CastleWallOutWedge02_LOD_0.nif",
+   "area": 2097126.7808651866,
+   "instance": 33113,
+   "samples": 544,
+   "grid": [
+    16,
+    34
+   ],
+   "copies": 1,
+   "normal": [
+    0.9510450444584014,
+    -0.309052292948606,
+    -6.0285374729586557e-05
+   ],
+   "suns": {
+    "e05_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 28,
+     "samples": 544
+    },
+    "e05_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 112,
+     "samples": 544
+    },
+    "e05_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 112,
+     "samples": 544
+    },
+    "e05_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 8,
+     "samples": 544
+    },
+    "e05_a300": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 6,
+     "samples": 544
+    },
+    "e15_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 52,
+     "samples": 544
+    },
+    "e15_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 112,
+     "samples": 544
+    },
+    "e15_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 112,
+     "samples": 544
+    },
+    "e15_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 25,
+     "samples": 544
+    },
+    "e15_a300": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 30,
+     "samples": 544
+    },
+    "e30_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 82,
+     "samples": 544
+    },
+    "e30_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 112,
+     "samples": 544
+    },
+    "e30_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 113,
+     "samples": 544
+    },
+    "e30_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 53,
+     "samples": 544
+    },
+    "e30_a300": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 58,
+     "samples": 544
+    }
+   }
+  },
+  {
+   "rank": 21,
+   "model": "LOD\\Architecture\\Unique\\TheCastle\\CastleWallOutWedge03_LOD_0.nif",
+   "area": 2097126.7808651866,
+   "instance": 33114,
+   "samples": 544,
+   "grid": [
+    16,
+    34
+   ],
+   "copies": 1,
+   "normal": [
+    0.5877594016083003,
+    0.8090357735375118,
+    -5.438393938618384e-05
+   ],
+   "suns": {
+    "e05_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 221,
+     "samples": 544
+    },
+    "e05_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 19,
+     "samples": 544
+    },
+    "e05_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 21,
+     "samples": 544
+    },
+    "e05_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 8,
+     "samples": 544
+    },
+    "e05_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 544
+    },
+    "e15_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 223,
+     "samples": 544
+    },
+    "e15_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 58,
+     "samples": 544
+    },
+    "e15_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 58,
+     "samples": 544
+    },
+    "e15_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 26,
+     "samples": 544
+    },
+    "e15_a300": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 45,
+     "samples": 544
+    },
+    "e30_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 226,
+     "samples": 544
+    },
+    "e30_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 122,
+     "samples": 544
+    },
+    "e30_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 84,
+     "samples": 544
+    },
+    "e30_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 56,
+     "samples": 544
+    },
+    "e30_a300": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 97,
+     "samples": 544
+    }
+   }
+  },
+  {
+   "rank": 22,
+   "model": "LOD\\Architecture\\Unique\\TheCastle\\CastleWallOutWedge02_LOD_0.nif",
+   "area": 2062840.0863210992,
+   "instance": 33113,
+   "samples": 498,
+   "grid": [
+    60,
+    33
+   ],
+   "copies": 1,
+   "normal": [
+    6.028537472958655e-05,
+    -9.549412169833633e-06,
+    0.9999999981372412
+   ],
+   "suns": {
+    "e05_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 498,
+     "samples": 498
+    },
+    "e05_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 498,
+     "samples": 498
+    },
+    "e05_a180": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 498,
+     "samples": 498
+    },
+    "e05_a240": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 391,
+     "samples": 498
+    },
+    "e05_a300": {
+     "components": 4,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 116,
+     "samples": 498
+    },
+    "e15_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 498,
+     "samples": 498
+    },
+    "e15_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 498,
+     "samples": 498
+    },
+    "e15_a180": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 498,
+     "samples": 498
+    },
+    "e15_a240": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 498,
+     "samples": 498
+    },
+    "e15_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 498,
+     "samples": 498
+    },
+    "e30_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 498,
+     "samples": 498
+    },
+    "e30_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 498,
+     "samples": 498
+    },
+    "e30_a180": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 498,
+     "samples": 498
+    },
+    "e30_a240": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 498,
+     "samples": 498
+    },
+    "e30_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 498,
+     "samples": 498
+    }
+   }
+  },
+  {
+   "rank": 23,
+   "model": "LOD\\Architecture\\Unique\\TheCastle\\CastleWallOutWedge03_LOD_0.nif",
+   "area": 2062840.0863210992,
+   "instance": 33114,
+   "samples": 524,
+   "grid": [
+    45,
+    52
+   ],
+   "copies": 1,
+   "normal": [
+    5.438393938618384e-05,
+    2.771109553799564e-05,
+    0.9999999981372412
+   ],
+   "suns": {
+    "e05_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 524,
+     "samples": 524
+    },
+    "e05_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 524,
+     "samples": 524
+    },
+    "e05_a180": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 524,
+     "samples": 524
+    },
+    "e05_a240": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 456,
+     "samples": 524
+    },
+    "e05_a300": {
+     "components": 3,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 58,
+     "samples": 524
+    },
+    "e15_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 524,
+     "samples": 524
+    },
+    "e15_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 524,
+     "samples": 524
+    },
+    "e15_a180": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 524,
+     "samples": 524
+    },
+    "e15_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 523,
+     "samples": 524
+    },
+    "e15_a300": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 433,
+     "samples": 524
+    },
+    "e30_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 524,
+     "samples": 524
+    },
+    "e30_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 524,
+     "samples": 524
+    },
+    "e30_a180": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 524,
+     "samples": 524
+    },
+    "e30_a240": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 524,
+     "samples": 524
+    },
+    "e30_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 524,
+     "samples": 524
+    }
+   }
+  },
+  {
+   "rank": 24,
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWDoubleEndCapR01_LOD_0.nif",
+   "area": 2028869.5142715054,
+   "instance": 7311,
+   "samples": 523,
+   "grid": [
+    27,
+    27
+   ],
+   "copies": 2,
+   "normal": [
+    0.0025264736729762698,
+    0.049924704068766104,
+    0.9987497889133323
+   ],
+   "suns": {
+    "e05_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 523
+    },
+    "e05_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 523
+    },
+    "e05_a180": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 523
+    },
+    "e05_a240": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 523
+    },
+    "e05_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 523
+    },
+    "e15_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 523
+    },
+    "e15_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 523
+    },
+    "e15_a180": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 523
+    },
+    "e15_a240": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 523
+    },
+    "e15_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 523
+    },
+    "e30_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 523
+    },
+    "e30_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 523
+    },
+    "e30_a180": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 523
+    },
+    "e30_a240": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 523
+    },
+    "e30_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 523
+    }
+   }
+  },
+  {
+   "rank": 25,
+   "model": "LOD\\Architecture\\Unique\\TheCastle\\CastleWallOutWedge01_LOD_0.nif",
+   "area": 2017250.973919795,
+   "instance": 33112,
+   "samples": 524,
+   "grid": [
+    16,
+    34
+   ],
+   "copies": 1,
+   "normal": [
+    4.315875859479665e-05,
+    -0.9999999981372412,
+    -4.316062135363792e-05
+   ],
+   "suns": {
+    "e05_a060": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 24,
+     "samples": 524
+    },
+    "e05_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 69,
+     "samples": 524
+    },
+    "e05_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 192,
+     "samples": 524
+    },
+    "e05_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 94,
+     "samples": 524
+    },
+    "e05_a300": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 1,
+     "samples": 524
+    },
+    "e15_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 104,
+     "samples": 524
+    },
+    "e15_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 107,
+     "samples": 524
+    },
+    "e15_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 199,
+     "samples": 524
+    },
+    "e15_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 125,
+     "samples": 524
+    },
+    "e15_a300": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 116,
+     "samples": 524
+    },
+    "e30_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 158,
+     "samples": 524
+    },
+    "e30_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 157,
+     "samples": 524
+    },
+    "e30_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 201,
+     "samples": 524
+    },
+    "e30_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 167,
+     "samples": 524
+    },
+    "e30_a300": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 168,
+     "samples": 524
+    }
+   }
+  },
+  {
+   "rank": 26,
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWDoubleEndCapL01_LOD_0.nif",
+   "area": 1993721.4837814195,
+   "instance": 30633,
+   "samples": 497,
+   "grid": [
+    32,
+    30
+   ],
+   "copies": 1,
+   "normal": [
+    0.43834357874269547,
+    0.5855763221544379,
+    0.681876292231317
+   ],
+   "suns": {
+    "e05_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 20,
+     "samples": 497
+    },
+    "e05_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 293,
+     "samples": 497
+    },
+    "e05_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 375,
+     "samples": 497
+    },
+    "e05_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 289,
+     "samples": 497
+    },
+    "e05_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 497
+    },
+    "e15_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 27,
+     "samples": 497
+    },
+    "e15_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 303,
+     "samples": 497
+    },
+    "e15_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 376,
+     "samples": 497
+    },
+    "e15_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 322,
+     "samples": 497
+    },
+    "e15_a300": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 142,
+     "samples": 497
+    },
+    "e30_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 125,
+     "samples": 497
+    },
+    "e30_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 327,
+     "samples": 497
+    },
+    "e30_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 377,
+     "samples": 497
+    },
+    "e30_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 363,
+     "samples": 497
+    },
+    "e30_a300": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 222,
+     "samples": 497
+    }
+   }
+  },
+  {
+   "rank": 27,
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWDoubleEndCapL01_LOD_0.nif",
+   "area": 1982995.1876365421,
+   "instance": 30633,
+   "samples": 499,
+   "grid": [
+    32,
+    30
+   ],
+   "copies": 1,
+   "normal": [
+    -0.43834357874269547,
+    -0.5855763221544379,
+    -0.681876292231317
+   ],
+   "suns": {
+    "e05_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 20,
+     "samples": 499
+    },
+    "e05_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 300,
+     "samples": 499
+    },
+    "e05_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 377,
+     "samples": 499
+    },
+    "e05_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 288,
+     "samples": 499
+    },
+    "e05_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 499
+    },
+    "e15_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 26,
+     "samples": 499
+    },
+    "e15_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 306,
+     "samples": 499
+    },
+    "e15_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 378,
+     "samples": 499
+    },
+    "e15_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 322,
+     "samples": 499
+    },
+    "e15_a300": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 151,
+     "samples": 499
+    },
+    "e30_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 125,
+     "samples": 499
+    },
+    "e30_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 329,
+     "samples": 499
+    },
+    "e30_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 379,
+     "samples": 499
+    },
+    "e30_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 362,
+     "samples": 499
+    },
+    "e30_a300": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 222,
+     "samples": 499
+    }
+   }
+  },
+  {
+   "rank": 28,
+   "model": "LOD\\Architecture\\Unique\\Amphitheater_LOD_0.nif",
+   "area": 1903785.0,
+   "instance": 1254,
+   "samples": 486,
+   "grid": [
+    18,
+    27
+   ],
+   "copies": 1,
+   "normal": [
+    -0.7070944731070365,
+    -0.7071190886660254,
+    -2.3358346685448042e-05
+   ],
+   "suns": {
+    "e05_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 486
+    },
+    "e05_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 486
+    },
+    "e05_a180": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 486
+    },
+    "e05_a240": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 486
+    },
+    "e05_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 486
+    },
+    "e15_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 177,
+     "samples": 486
+    },
+    "e15_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 27,
+     "samples": 486
+    },
+    "e15_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 28,
+     "samples": 486
+    },
+    "e15_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 75,
+     "samples": 486
+    },
+    "e15_a300": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 13,
+     "samples": 486
+    },
+    "e30_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 295,
+     "samples": 486
+    },
+    "e30_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 268,
+     "samples": 486
+    },
+    "e30_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 183,
+     "samples": 486
+    },
+    "e30_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 197,
+     "samples": 486
+    },
+    "e30_a300": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 150,
+     "samples": 486
+    }
+   }
+  },
+  {
+   "rank": 29,
+   "model": "LOD\\Architecture\\Unique\\Amphitheater_LOD_0.nif",
+   "area": 1903785.0,
+   "instance": 1254,
+   "samples": 486,
+   "grid": [
+    18,
+    27
+   ],
+   "copies": 1,
+   "normal": [
+    0.7070944731070365,
+    0.7071190886660254,
+    2.3358346685448042e-05
+   ],
+   "suns": {
+    "e05_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 486
+    },
+    "e05_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 486
+    },
+    "e05_a180": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 486
+    },
+    "e05_a240": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 486
+    },
+    "e05_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 486
+    },
+    "e15_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 177,
+     "samples": 486
+    },
+    "e15_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 27,
+     "samples": 486
+    },
+    "e15_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 29,
+     "samples": 486
+    },
+    "e15_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 83,
+     "samples": 486
+    },
+    "e15_a300": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 13,
+     "samples": 486
+    },
+    "e30_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 295,
+     "samples": 486
+    },
+    "e30_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 267,
+     "samples": 486
+    },
+    "e30_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 183,
+     "samples": 486
+    },
+    "e30_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 199,
+     "samples": 486
+    },
+    "e30_a300": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 151,
+     "samples": 486
+    }
+   }
+  },
+  {
+   "rank": 30,
+   "model": "LOD\\Architecture\\Unique\\TheCastle\\CastleWallOutWedge05_LOD_0.nif",
+   "area": 1900095.2606296062,
+   "instance": 33116,
+   "samples": 489,
+   "grid": [
+    16,
+    37
+   ],
+   "copies": 1,
+   "normal": [
+    0.9510450463211604,
+    0.3090522929486057,
+    9.54941216983363e-06
+   ],
+   "suns": {
+    "e05_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 3,
+     "samples": 489
+    },
+    "e05_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 6,
+     "samples": 489
+    },
+    "e05_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 3,
+     "samples": 489
+    },
+    "e05_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 25,
+     "samples": 489
+    },
+    "e05_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 489
+    },
+    "e15_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 17,
+     "samples": 489
+    },
+    "e15_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 21,
+     "samples": 489
+    },
+    "e15_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 10,
+     "samples": 489
+    },
+    "e15_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 26,
+     "samples": 489
+    },
+    "e15_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 489
+    },
+    "e30_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 40,
+     "samples": 489
+    },
+    "e30_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 42,
+     "samples": 489
+    },
+    "e30_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 22,
+     "samples": 489
+    },
+    "e30_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 36,
+     "samples": 489
+    },
+    "e30_a300": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 40,
+     "samples": 489
+    }
+   }
+  },
+  {
+   "rank": 31,
+   "model": "LOD\\Architecture\\USSConstitution\\Constitution01_LOD_0.nif",
+   "area": 1889389.4986655328,
+   "instance": 4079,
+   "samples": 484,
+   "grid": [
+    47,
+    20
+   ],
+   "copies": 1,
+   "normal": [
+    0.007110387250108985,
+    0.08224599842176443,
+    0.9965866937385631
+   ],
+   "suns": {
+    "e05_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 88,
+     "samples": 484
+    },
+    "e05_a120": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 46,
+     "samples": 484
+    },
+    "e05_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 25,
+     "samples": 484
+    },
+    "e05_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 1,
+     "samples": 484
+    },
+    "e05_a300": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 88,
+     "samples": 484
+    },
+    "e15_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 88,
+     "samples": 484
+    },
+    "e15_a120": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 50,
+     "samples": 484
+    },
+    "e15_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 25,
+     "samples": 484
+    },
+    "e15_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 1,
+     "samples": 484
+    },
+    "e15_a300": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 88,
+     "samples": 484
+    },
+    "e30_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 88,
+     "samples": 484
+    },
+    "e30_a120": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 52,
+     "samples": 484
+    },
+    "e30_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 25,
+     "samples": 484
+    },
+    "e30_a240": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 42,
+     "samples": 484
+    },
+    "e30_a300": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 91,
+     "samples": 484
+    }
+   }
+  },
+  {
+   "rank": 32,
+   "model": "LOD\\Architecture\\Airport\\AirportTerminalDestroyed01_LOD.nif",
+   "area": 1874678.6417561984,
+   "instance": 14062,
+   "samples": 470,
+   "grid": [
+    30,
+    30
+   ],
+   "copies": 1,
+   "normal": [
+    5.639064921774229e-05,
+    2.335834668544804e-05,
+    0.9999999981372412
+   ],
+   "suns": {
+    "e05_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 470
+    },
+    "e05_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 10,
+     "samples": 470
+    },
+    "e05_a180": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 470
+    },
+    "e05_a240": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 470
+    },
+    "e05_a300": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 43,
+     "samples": 470
+    },
+    "e15_a060": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 5,
+     "samples": 470
+    },
+    "e15_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 98,
+     "samples": 470
+    },
+    "e15_a180": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 169,
+     "samples": 470
+    },
+    "e15_a240": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 470
+    },
+    "e15_a300": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 189,
+     "samples": 470
+    },
+    "e30_a060": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 335,
+     "samples": 470
+    },
+    "e30_a120": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 410,
+     "samples": 470
+    },
+    "e30_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 250,
+     "samples": 470
+    },
+    "e30_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 166,
+     "samples": 470
+    },
+    "e30_a300": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 384,
+     "samples": 470
+    }
+   }
+  },
+  {
+   "rank": 33,
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWOnRampStrFree01_LOD_0.nif",
+   "area": 1831858.4953994045,
+   "instance": 29080,
+   "samples": 490,
+   "grid": [
+    55,
+    14
+   ],
+   "copies": 1,
+   "normal": [
+    5.735581877629181e-06,
+    -0.11722523598108861,
+    -0.9931053539359664
+   ],
+   "suns": {
+    "e05_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 77,
+     "samples": 490
+    },
+    "e05_a120": {
+     "components": 5,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 187,
+     "samples": 490
+    },
+    "e05_a180": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 490
+    },
+    "e05_a240": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 490
+    },
+    "e05_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 490
+    },
+    "e15_a060": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 277,
+     "samples": 490
+    },
+    "e15_a120": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 300,
+     "samples": 490
+    },
+    "e15_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 181,
+     "samples": 490
+    },
+    "e15_a240": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 490
+    },
+    "e15_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 490
+    },
+    "e30_a060": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 295,
+     "samples": 490
+    },
+    "e30_a120": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 300,
+     "samples": 490
+    },
+    "e30_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 241,
+     "samples": 490
+    },
+    "e30_a240": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 490
+    },
+    "e30_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 490
+    }
+   }
+  },
+  {
+   "rank": 34,
+   "model": "LOD\\Architecture\\Unique\\TheCastle\\CastleWallOutWedge04_LOD_0.nif",
+   "area": 1820028.3363932818,
+   "instance": 33115,
+   "samples": 473,
+   "grid": [
+    16,
+    37
+   ],
+   "copies": 1,
+   "normal": [
+    0.5877594034710591,
+    -0.8090357735375118,
+    2.771109553799564e-05
+   ],
+   "suns": {
+    "e05_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 473
+    },
+    "e05_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 473
+    },
+    "e05_a180": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 473
+    },
+    "e05_a240": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 473
+    },
+    "e05_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 473
+    },
+    "e15_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 473
+    },
+    "e15_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 473
+    },
+    "e15_a180": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 473
+    },
+    "e15_a240": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 473
+    },
+    "e15_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 473
+    },
+    "e30_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 473
+    },
+    "e30_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 473
+    },
+    "e30_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 4,
+     "samples": 473
+    },
+    "e30_a240": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 473
+    },
+    "e30_a300": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 2,
+     "samples": 473
+    }
+   }
+  },
+  {
+   "rank": 35,
+   "model": "LOD\\Buildings\\BldgBrick5Story1x3EndComA_LOD.nif",
+   "area": 1805086.379594774,
+   "instance": 14573,
+   "samples": 444,
+   "grid": [
+    25,
+    20
+   ],
+   "copies": 5,
+   "normal": [
+    0.9659204525843823,
+    0.2588390965418057,
+    -3.7156480265528425e-05
+   ],
+   "suns": {
+    "e05_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 210,
+     "samples": 444
+    },
+    "e05_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 142,
+     "samples": 444
+    },
+    "e05_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 251,
+     "samples": 444
+    },
+    "e05_a240": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 444
+    },
+    "e05_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 444
+    },
+    "e15_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 293,
+     "samples": 444
+    },
+    "e15_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 179,
+     "samples": 444
+    },
+    "e15_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 251,
+     "samples": 444
+    },
+    "e15_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 2,
+     "samples": 444
+    },
+    "e15_a300": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 34,
+     "samples": 444
+    },
+    "e30_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 294,
+     "samples": 444
+    },
+    "e30_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 205,
+     "samples": 444
+    },
+    "e30_a180": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 252,
+     "samples": 444
+    },
+    "e30_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 5,
+     "samples": 444
+    },
+    "e30_a300": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 42,
+     "samples": 444
+    }
+   }
+  },
+  {
+   "rank": 36,
+   "model": "LOD\\Buildings\\BldgBrick5Story1x3EndComA_LOD.nif",
+   "area": 1805086.379594774,
+   "instance": 14573,
+   "samples": 444,
+   "grid": [
+    25,
+    20
+   ],
+   "copies": 5,
+   "normal": [
+    -0.9659204525843823,
+    -0.2588390965418057,
+    3.7156480265528425e-05
+   ],
+   "suns": {
+    "e05_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 444
+    },
+    "e05_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 444
+    },
+    "e05_a180": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 444
+    },
+    "e05_a240": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 444
+    },
+    "e05_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 444
+    },
+    "e15_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 444
+    },
+    "e15_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 444
+    },
+    "e15_a180": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 444
+    },
+    "e15_a240": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 444
+    },
+    "e15_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 444
+    },
+    "e30_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 444
+    },
+    "e30_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 444
+    },
+    "e30_a180": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 444
+    },
+    "e30_a240": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 444
+    },
+    "e30_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 444
+    }
+   }
+  },
+  {
+   "rank": 37,
+   "model": "LOD\\Buildings\\BldgBrick5StoryCustom01_LOD.nif",
+   "area": 1805072.2560769054,
+   "instance": 14575,
+   "samples": 483,
+   "grid": [
+    23,
+    21
+   ],
+   "copies": 1,
+   "normal": [
+    0.9659204525843823,
+    0.2588390965418057,
+    -3.7156480265528425e-05
+   ],
+   "suns": {
+    "e05_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 483
+    },
+    "e05_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 483
+    },
+    "e05_a180": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 483
+    },
+    "e05_a240": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 483
+    },
+    "e05_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 483
+    },
+    "e15_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 483
+    },
+    "e15_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 483
+    },
+    "e15_a180": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 483
+    },
+    "e15_a240": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 483
+    },
+    "e15_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 483
+    },
+    "e30_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 483
+    },
+    "e30_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 483
+    },
+    "e30_a180": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 483
+    },
+    "e30_a240": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 483
+    },
+    "e30_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 483
+    }
+   }
+  },
+  {
+   "rank": 38,
+   "model": "LOD\\Buildings\\BldgBrick5StoryCustom01_LOD.nif",
+   "area": 1805072.2560769054,
+   "instance": 14575,
+   "samples": 483,
+   "grid": [
+    23,
+    21
+   ],
+   "copies": 1,
+   "normal": [
+    -0.9659204525843823,
+    -0.2588390965418057,
+    3.7156480265528425e-05
+   ],
+   "suns": {
+    "e05_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 483
+    },
+    "e05_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 483
+    },
+    "e05_a180": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 483
+    },
+    "e05_a240": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 483
+    },
+    "e05_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 483
+    },
+    "e15_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 483
+    },
+    "e15_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 483
+    },
+    "e15_a180": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 483
+    },
+    "e15_a240": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 483
+    },
+    "e15_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 483
+    },
+    "e30_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 483
+    },
+    "e30_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 483
+    },
+    "e30_a180": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 483
+    },
+    "e30_a240": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 483
+    },
+    "e30_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 483
+    }
+   }
+  },
+  {
+   "rank": 39,
+   "model": "LOD\\Architecture\\Unique\\TheCastle\\CastleWallOutWedge05_LOD_0.nif",
+   "area": 1713711.5268671256,
+   "instance": 33116,
+   "samples": 443,
+   "grid": [
+    16,
+    34
+   ],
+   "copies": 1,
+   "normal": [
+    -0.9510450463211604,
+    -0.3090522929486057,
+    -9.54941216983363e-06
+   ],
+   "suns": {
+    "e05_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 443
+    },
+    "e05_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 3,
+     "samples": 443
+    },
+    "e05_a180": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 443
+    },
+    "e05_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 50,
+     "samples": 443
+    },
+    "e05_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 443
+    },
+    "e15_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 9,
+     "samples": 443
+    },
+    "e15_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 15,
+     "samples": 443
+    },
+    "e15_a180": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 443
+    },
+    "e15_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 51,
+     "samples": 443
+    },
+    "e15_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 443
+    },
+    "e30_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 43,
+     "samples": 443
+    },
+    "e30_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 39,
+     "samples": 443
+    },
+    "e30_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 43,
+     "samples": 443
+    },
+    "e30_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 54,
+     "samples": 443
+    },
+    "e30_a300": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 9,
+     "samples": 443
+    }
+   }
+  },
+  {
+   "rank": 40,
+   "model": "LOD\\Architecture\\Airport\\AirportTerminalDestroyed01_LOD.nif",
+   "area": 1691386.2439028954,
+   "instance": 14062,
+   "samples": 439,
+   "grid": [
+    15,
+    37
+   ],
+   "copies": 1,
+   "normal": [
+    -0.7071190886660255,
+    0.7070944731070364,
+    2.335834668544804e-05
+   ],
+   "suns": {
+    "e05_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 439
+    },
+    "e05_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 439
+    },
+    "e05_a180": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 439
+    },
+    "e05_a240": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 439
+    },
+    "e05_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 439
+    },
+    "e15_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 439
+    },
+    "e15_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 439
+    },
+    "e15_a180": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 439
+    },
+    "e15_a240": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 439
+    },
+    "e15_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 439
+    },
+    "e30_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 439
+    },
+    "e30_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 439
+    },
+    "e30_a180": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 439
+    },
+    "e30_a240": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 439
+    },
+    "e30_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 439
+    }
+   }
+  },
+  {
+   "rank": 41,
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWOnRampStrFree01_LOD_0.nif",
+   "area": 1672599.9403067064,
+   "instance": 29080,
+   "samples": 432,
+   "grid": [
+    54,
+    13
+   ],
+   "copies": 1,
+   "normal": [
+    -5.735581877629181e-06,
+    0.11722523598108861,
+    0.9931053539359664
+   ],
+   "suns": {
+    "e05_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 83,
+     "samples": 432
+    },
+    "e05_a120": {
+     "components": 4,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 239,
+     "samples": 432
+    },
+    "e05_a180": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 432
+    },
+    "e05_a240": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 432
+    },
+    "e05_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 432
+    },
+    "e15_a060": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 263,
+     "samples": 432
+    },
+    "e15_a120": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 278,
+     "samples": 432
+    },
+    "e15_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 217,
+     "samples": 432
+    },
+    "e15_a240": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 432
+    },
+    "e15_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 432
+    },
+    "e30_a060": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 271,
+     "samples": 432
+    },
+    "e30_a120": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 278,
+     "samples": 432
+    },
+    "e30_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 238,
+     "samples": 432
+    },
+    "e30_a240": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 432
+    },
+    "e30_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 432
+    }
+   }
+  },
+  {
+   "rank": 42,
+   "model": "LOD\\Architecture\\Unique\\TheCastle\\CastleWallOutWedge04_LOD_0.nif",
+   "area": 1619330.8434764354,
+   "instance": 33115,
+   "samples": 422,
+   "grid": [
+    16,
+    34
+   ],
+   "copies": 1,
+   "normal": [
+    -0.5877594034710591,
+    0.8090357735375118,
+    -2.771109553799564e-05
+   ],
+   "suns": {
+    "e05_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 422
+    },
+    "e05_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 422
+    },
+    "e05_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 10,
+     "samples": 422
+    },
+    "e05_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 4,
+     "samples": 422
+    },
+    "e05_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 422
+    },
+    "e15_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 422
+    },
+    "e15_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 422
+    },
+    "e15_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 26,
+     "samples": 422
+    },
+    "e15_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 16,
+     "samples": 422
+    },
+    "e15_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 422
+    },
+    "e30_a060": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 3,
+     "samples": 422
+    },
+    "e30_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 1,
+     "samples": 422
+    },
+    "e30_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 26,
+     "samples": 422
+    },
+    "e30_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 31,
+     "samples": 422
+    },
+    "e30_a300": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 8,
+     "samples": 422
+    }
+   }
+  },
+  {
+   "rank": 43,
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWDoubleTransRampDown01_LOD_0.nif",
+   "area": 1559663.413588774,
+   "instance": 24933,
+   "samples": 408,
+   "grid": [
+    17,
+    24
+   ],
+   "copies": 2,
+   "normal": [
+    8.549411266670112e-06,
+    -0.20195594581076817,
+    0.979394606825352
+   ],
+   "suns": {
+    "e05_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 408
+    },
+    "e05_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 408
+    },
+    "e05_a180": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 408
+    },
+    "e05_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 16,
+     "samples": 408
+    },
+    "e05_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 408
+    },
+    "e15_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 408
+    },
+    "e15_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 408
+    },
+    "e15_a180": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 408
+    },
+    "e15_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 158,
+     "samples": 408
+    },
+    "e15_a300": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 33,
+     "samples": 408
+    },
+    "e30_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 5,
+     "samples": 408
+    },
+    "e30_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 9,
+     "samples": 408
+    },
+    "e30_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 99,
+     "samples": 408
+    },
+    "e30_a240": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 319,
+     "samples": 408
+    },
+    "e30_a300": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 310,
+     "samples": 408
+    }
+   }
+  },
+  {
+   "rank": 44,
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWDoubleTransRampDown01_LOD_0.nif",
+   "area": 1553313.7104052808,
+   "instance": 24933,
+   "samples": 408,
+   "grid": [
+    17,
+    24
+   ],
+   "copies": 2,
+   "normal": [
+    5.613129453231608e-06,
+    -0.14988585652341874,
+    0.988703307359055
+   ],
+   "suns": {
+    "e05_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 408
+    },
+    "e05_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 18,
+     "samples": 408
+    },
+    "e05_a180": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 408
+    },
+    "e05_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 103,
+     "samples": 408
+    },
+    "e05_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 408
+    },
+    "e15_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 408
+    },
+    "e15_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 20,
+     "samples": 408
+    },
+    "e15_a180": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 408
+    },
+    "e15_a240": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 104,
+     "samples": 408
+    },
+    "e15_a300": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 10,
+     "samples": 408
+    },
+    "e30_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 14,
+     "samples": 408
+    },
+    "e30_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 104,
+     "samples": 408
+    },
+    "e30_a180": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 408
+    },
+    "e30_a240": {
+     "components": 3,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 169,
+     "samples": 408
+    },
+    "e30_a300": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 184,
+     "samples": 408
+    }
+   }
+  },
+  {
+   "rank": 45,
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWDoubleTransRampDown01_LOD_0.nif",
+   "area": 1550570.5607695174,
+   "instance": 24933,
+   "samples": 385,
+   "grid": [
+    16,
+    56
+   ],
+   "copies": 2,
+   "normal": [
+    -0.9999999984341817,
+    -5.5891147652920026e-05,
+    -2.795745774317182e-06
+   ],
+   "suns": {
+    "e05_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 385
+    },
+    "e05_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 19,
+     "samples": 385
+    },
+    "e05_a180": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 385
+    },
+    "e05_a240": {
+     "components": 4,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 170,
+     "samples": 385
+    },
+    "e05_a300": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 21,
+     "samples": 385
+    },
+    "e15_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 385
+    },
+    "e15_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 62,
+     "samples": 385
+    },
+    "e15_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 5,
+     "samples": 385
+    },
+    "e15_a240": {
+     "components": 4,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 187,
+     "samples": 385
+    },
+    "e15_a300": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 48,
+     "samples": 385
+    },
+    "e30_a060": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 42,
+     "samples": 385
+    },
+    "e30_a120": {
+     "components": 3,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 235,
+     "samples": 385
+    },
+    "e30_a180": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 237,
+     "samples": 385
+    },
+    "e30_a240": {
+     "components": 3,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 245,
+     "samples": 385
+    },
+    "e30_a300": {
+     "components": 3,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 150,
+     "samples": 385
+    }
+   }
+  },
+  {
+   "rank": 46,
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWDoubleEndCapL03_LOD_0.nif",
+   "area": 1548747.1042373409,
+   "instance": 30634,
+   "samples": 384,
+   "grid": [
+    16,
+    24
+   ],
+   "copies": 1,
+   "normal": [
+    6.102193050973946e-05,
+    -0.022249040148910677,
+    0.9997524576057697
+   ],
+   "suns": {
+    "e05_a060": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 196,
+     "samples": 384
+    },
+    "e05_a120": {
+     "components": 3,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 331,
+     "samples": 384
+    },
+    "e05_a180": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 184,
+     "samples": 384
+    },
+    "e05_a240": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 91,
+     "samples": 384
+    },
+    "e05_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 384
+    },
+    "e15_a060": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 196,
+     "samples": 384
+    },
+    "e15_a120": {
+     "components": 3,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 331,
+     "samples": 384
+    },
+    "e15_a180": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 224,
+     "samples": 384
+    },
+    "e15_a240": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 200,
+     "samples": 384
+    },
+    "e15_a300": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 114,
+     "samples": 384
+    },
+    "e30_a060": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 226,
+     "samples": 384
+    },
+    "e30_a120": {
+     "components": 3,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 347,
+     "samples": 384
+    },
+    "e30_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 300,
+     "samples": 384
+    },
+    "e30_a240": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 373,
+     "samples": 384
+    },
+    "e30_a300": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 246,
+     "samples": 384
+    }
+   }
+  },
+  {
+   "rank": 47,
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWDoubleEndCapL03_LOD_0.nif",
+   "area": 1540446.89074161,
+   "instance": 30634,
+   "samples": 400,
+   "grid": [
+    16,
+    25
+   ],
+   "copies": 1,
+   "normal": [
+    6.062657271964433e-05,
+    -0.11579024674044891,
+    0.9932736858913583
+   ],
+   "suns": {
+    "e05_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 264,
+     "samples": 400
+    },
+    "e05_a120": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 237,
+     "samples": 400
+    },
+    "e05_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 166,
+     "samples": 400
+    },
+    "e05_a240": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 33,
+     "samples": 400
+    },
+    "e05_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 400
+    },
+    "e15_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 264,
+     "samples": 400
+    },
+    "e15_a120": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 237,
+     "samples": 400
+    },
+    "e15_a180": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 222,
+     "samples": 400
+    },
+    "e15_a240": {
+     "components": 3,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 225,
+     "samples": 400
+    },
+    "e15_a300": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 144,
+     "samples": 400
+    },
+    "e30_a060": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 279,
+     "samples": 400
+    },
+    "e30_a120": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 237,
+     "samples": 400
+    },
+    "e30_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 276,
+     "samples": 400
+    },
+    "e30_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 262,
+     "samples": 400
+    },
+    "e30_a300": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 236,
+     "samples": 400
+    }
+   }
+  },
+  {
+   "rank": 48,
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWDoubleEndCapL03_LOD_0.nif",
+   "area": 1519303.683070535,
+   "instance": 30634,
+   "samples": 408,
+   "grid": [
+    17,
+    24
+   ],
+   "copies": 1,
+   "normal": [
+    6.103502577081147e-05,
+    -0.008096644958695826,
+    0.9999672197702976
+   ],
+   "suns": {
+    "e05_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 265,
+     "samples": 408
+    },
+    "e05_a120": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 247,
+     "samples": 408
+    },
+    "e05_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 269,
+     "samples": 408
+    },
+    "e05_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 271,
+     "samples": 408
+    },
+    "e05_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 408
+    },
+    "e15_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 303,
+     "samples": 408
+    },
+    "e15_a120": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 282,
+     "samples": 408
+    },
+    "e15_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 289,
+     "samples": 408
+    },
+    "e15_a240": {
+     "components": 1,
+     "interior": 1,
+     "largest_interior": 74,
+     "lit": 311,
+     "samples": 408
+    },
+    "e15_a300": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 290,
+     "samples": 408
+    },
+    "e30_a060": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 328,
+     "samples": 408
+    },
+    "e30_a120": {
+     "components": 2,
+     "interior": 1,
+     "largest_interior": 68,
+     "lit": 324,
+     "samples": 408
+    },
+    "e30_a180": {
+     "components": 1,
+     "interior": 1,
+     "largest_interior": 70,
+     "lit": 330,
+     "samples": 408
+    },
+    "e30_a240": {
+     "components": 1,
+     "interior": 1,
+     "largest_interior": 62,
+     "lit": 336,
+     "samples": 408
+    },
+    "e30_a300": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 327,
+     "samples": 408
+    }
+   }
+  },
+  {
+   "rank": 49,
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWDoubleEndCapL01_LOD_0.nif",
+   "area": 1511030.3221885609,
+   "instance": 30633,
+   "samples": 392,
+   "grid": [
+    26,
+    30
+   ],
+   "copies": 1,
+   "normal": [
+    0.43834357874269547,
+    0.5855763221544379,
+    0.681876292231317
+   ],
+   "suns": {
+    "e05_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 7,
+     "samples": 392
+    },
+    "e05_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 126,
+     "samples": 392
+    },
+    "e05_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 137,
+     "samples": 392
+    },
+    "e05_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 102,
+     "samples": 392
+    },
+    "e05_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 392
+    },
+    "e15_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 18,
+     "samples": 392
+    },
+    "e15_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 141,
+     "samples": 392
+    },
+    "e15_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 140,
+     "samples": 392
+    },
+    "e15_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 104,
+     "samples": 392
+    },
+    "e15_a300": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 4,
+     "samples": 392
+    },
+    "e30_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 29,
+     "samples": 392
+    },
+    "e30_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 144,
+     "samples": 392
+    },
+    "e30_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 144,
+     "samples": 392
+    },
+    "e30_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 119,
+     "samples": 392
+    },
+    "e30_a300": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 82,
+     "samples": 392
+    }
+   }
+  },
+  {
+   "rank": 50,
+   "model": "LOD\\Buildings\\BldgBrick7Story3x5FreeComEntA_LOD.nif",
+   "area": 1508730.5614811976,
+   "instance": 26701,
+   "samples": 384,
+   "grid": [
+    32,
+    12
+   ],
+   "copies": 1,
+   "normal": [
+    0.9999997414366675,
+    9.313794196986788e-10,
+    -0.0007191151494826165
+   ],
+   "suns": {
+    "e05_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 384
+    },
+    "e05_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 384
+    },
+    "e05_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 32,
+     "samples": 384
+    },
+    "e05_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 22,
+     "samples": 384
+    },
+    "e05_a300": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 68,
+     "samples": 384
+    },
+    "e15_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 384
+    },
+    "e15_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 384
+    },
+    "e15_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 54,
+     "samples": 384
+    },
+    "e15_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 54,
+     "samples": 384
+    },
+    "e15_a300": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 141,
+     "samples": 384
+    },
+    "e30_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 146,
+     "samples": 384
+    },
+    "e30_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 384
+    },
+    "e30_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 91,
+     "samples": 384
+    },
+    "e30_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 98,
+     "samples": 384
+    },
+    "e30_a300": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 211,
+     "samples": 384
+    }
+   }
+  },
+  {
+   "rank": 51,
+   "model": "LOD\\Buildings\\BldgBrick7Story3x5FreeComEntA_LOD.nif",
+   "area": 1508730.427538735,
+   "instance": 26701,
+   "samples": 384,
+   "grid": [
+    32,
+    12
+   ],
+   "copies": 1,
+   "normal": [
+    -0.9999999012350508,
+    -9.313795354582823e-10,
+    -0.0004444433470847571
+   ],
+   "suns": {
+    "e05_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 384
+    },
+    "e05_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 384
+    },
+    "e05_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 61,
+     "samples": 384
+    },
+    "e05_a240": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 384
+    },
+    "e05_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 384
+    },
+    "e15_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 384
+    },
+    "e15_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 10,
+     "samples": 384
+    },
+    "e15_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 74,
+     "samples": 384
+    },
+    "e15_a240": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 384
+    },
+    "e15_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 384
+    },
+    "e30_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 152,
+     "samples": 384
+    },
+    "e30_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 119,
+     "samples": 384
+    },
+    "e30_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 96,
+     "samples": 384
+    },
+    "e30_a240": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 384
+    },
+    "e30_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 384
+    }
+   }
+  },
+  {
+   "rank": 52,
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWOnRampCurveFree01_LOD_0.nif",
+   "area": 1282370.9515966652,
+   "instance": 29070,
+   "samples": 332,
+   "grid": [
+    35,
+    30
+   ],
+   "copies": 1,
+   "normal": [
+    0.15646840575867552,
+    -0.15453467877266175,
+    -0.9755186677127039
+   ],
+   "suns": {
+    "e05_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 332
+    },
+    "e05_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 332
+    },
+    "e05_a180": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 332
+    },
+    "e05_a240": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 332
+    },
+    "e05_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 332
+    },
+    "e15_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 332
+    },
+    "e15_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 332
+    },
+    "e15_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 10,
+     "samples": 332
+    },
+    "e15_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 52,
+     "samples": 332
+    },
+    "e15_a300": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 202,
+     "samples": 332
+    },
+    "e30_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 332
+    },
+    "e30_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 5,
+     "samples": 332
+    },
+    "e30_a180": {
+     "components": 2,
+     "interior": 1,
+     "largest_interior": 22,
+     "lit": 255,
+     "samples": 332
+    },
+    "e30_a240": {
+     "components": 2,
+     "interior": 1,
+     "largest_interior": 16,
+     "lit": 320,
+     "samples": 332
+    },
+    "e30_a300": {
+     "components": 1,
+     "interior": 1,
+     "largest_interior": 16,
+     "lit": 326,
+     "samples": 332
+    }
+   }
+  },
+  {
+   "rank": 53,
+   "model": "LOD\\Architecture\\Unique\\TheCastle\\CastleWallOutWedge01_LOD_0.nif",
+   "area": 1247153.1243814128,
+   "instance": 33112,
+   "samples": 331,
+   "grid": [
+    19,
+    39
+   ],
+   "copies": 1,
+   "normal": [
+    4.316062135363792e-05,
+    -4.315875859479665e-05,
+    0.9999999981372412
+   ],
+   "suns": {
+    "e05_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 331,
+     "samples": 331
+    },
+    "e05_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 331,
+     "samples": 331
+    },
+    "e05_a180": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 331,
+     "samples": 331
+    },
+    "e05_a240": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 331,
+     "samples": 331
+    },
+    "e05_a300": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 36,
+     "samples": 331
+    },
+    "e15_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 331,
+     "samples": 331
+    },
+    "e15_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 331,
+     "samples": 331
+    },
+    "e15_a180": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 331,
+     "samples": 331
+    },
+    "e15_a240": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 331,
+     "samples": 331
+    },
+    "e15_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 331,
+     "samples": 331
+    },
+    "e30_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 331,
+     "samples": 331
+    },
+    "e30_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 331,
+     "samples": 331
+    },
+    "e30_a180": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 331,
+     "samples": 331
+    },
+    "e30_a240": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 331,
+     "samples": 331
+    },
+    "e30_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 331,
+     "samples": 331
+    }
+   }
+  },
+  {
+   "rank": 54,
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWOnRampCurveFree01_LOD_0.nif",
+   "area": 1170962.167692712,
+   "instance": 29070,
+   "samples": 291,
+   "grid": [
+    34,
+    29
+   ],
+   "copies": 1,
+   "normal": [
+    -0.15646840575867552,
+    0.15453467877266175,
+    0.9755186677127039
+   ],
+   "suns": {
+    "e05_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 291
+    },
+    "e05_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 291
+    },
+    "e05_a180": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 291
+    },
+    "e05_a240": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 291
+    },
+    "e05_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 291
+    },
+    "e15_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 291
+    },
+    "e15_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 291
+    },
+    "e15_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 7,
+     "samples": 291
+    },
+    "e15_a240": {
+     "components": 3,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 62,
+     "samples": 291
+    },
+    "e15_a300": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 182,
+     "samples": 291
+    },
+    "e30_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 291
+    },
+    "e30_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 10,
+     "samples": 291
+    },
+    "e30_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 236,
+     "samples": 291
+    },
+    "e30_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 289,
+     "samples": 291
+    },
+    "e30_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 291,
+     "samples": 291
+    }
+   }
+  },
+  {
+   "rank": 55,
+   "model": "LOD\\Buildings\\BldgBrick3Story6x2CornerComEntA_LOD.nif",
+   "area": 1146755.2308189715,
+   "instance": 3550,
+   "samples": 315,
+   "grid": [
+    15,
+    21
+   ],
+   "copies": 1,
+   "normal": [
+    -0.22491773504109216,
+    0.9743773541213774,
+    0.0008855729269922279
+   ],
+   "suns": {
+    "e05_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 315
+    },
+    "e05_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 315
+    },
+    "e05_a180": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 315
+    },
+    "e05_a240": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 315
+    },
+    "e05_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 315
+    },
+    "e15_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 315
+    },
+    "e15_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 315
+    },
+    "e15_a180": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 315
+    },
+    "e15_a240": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 315
+    },
+    "e15_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 315
+    },
+    "e30_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 315
+    },
+    "e30_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 315
+    },
+    "e30_a180": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 315
+    },
+    "e30_a240": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 315
+    },
+    "e30_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 315
+    }
+   }
+  },
+  {
+   "rank": 56,
+   "model": "LOD\\Buildings\\Bridge01Mid01_LOD.nif",
+   "area": 1143491.8557075842,
+   "instance": 191,
+   "samples": 298,
+   "grid": [
+    18,
+    27
+   ],
+   "copies": 2,
+   "normal": [
+    3.715648026552842e-05,
+    -4.8424308496388844e-05,
+    0.9999999981372412
+   ],
+   "suns": {
+    "e05_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 298
+    },
+    "e05_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 298
+    },
+    "e05_a180": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 298
+    },
+    "e05_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 9,
+     "samples": 298
+    },
+    "e05_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 298
+    },
+    "e15_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 3,
+     "samples": 298
+    },
+    "e15_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 298
+    },
+    "e15_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 11,
+     "samples": 298
+    },
+    "e15_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 9,
+     "samples": 298
+    },
+    "e15_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 298
+    },
+    "e30_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 7,
+     "samples": 298
+    },
+    "e30_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 7,
+     "samples": 298
+    },
+    "e30_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 11,
+     "samples": 298
+    },
+    "e30_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 9,
+     "samples": 298
+    },
+    "e30_a300": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 6,
+     "samples": 298
+    }
+   }
+  },
+  {
+   "rank": 57,
+   "model": "LOD\\Buildings\\Bridge01Mid01RR_LOD.nif",
+   "area": 1143491.8557075842,
+   "instance": 192,
+   "samples": 298,
+   "grid": [
+    18,
+    27
+   ],
+   "copies": 1,
+   "normal": [
+    3.715648026552842e-05,
+    -4.8424308496388844e-05,
+    0.9999999981372412
+   ],
+   "suns": {
+    "e05_a060": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 27,
+     "samples": 298
+    },
+    "e05_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 298
+    },
+    "e05_a180": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 298
+    },
+    "e05_a240": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 90,
+     "samples": 298
+    },
+    "e05_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 298
+    },
+    "e15_a060": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 114,
+     "samples": 298
+    },
+    "e15_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 298
+    },
+    "e15_a180": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 172,
+     "samples": 298
+    },
+    "e15_a240": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 145,
+     "samples": 298
+    },
+    "e15_a300": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 11,
+     "samples": 298
+    },
+    "e30_a060": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 139,
+     "samples": 298
+    },
+    "e30_a120": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 105,
+     "samples": 298
+    },
+    "e30_a180": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 172,
+     "samples": 298
+    },
+    "e30_a240": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 157,
+     "samples": 298
+    },
+    "e30_a300": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 150,
+     "samples": 298
+    }
+   }
+  },
+  {
+   "rank": 58,
+   "model": "LOD\\Interiors\\RedRocket\\RedRExtAll01_LOD.nif",
+   "area": 1138858.5764658337,
+   "instance": 28619,
+   "samples": 298,
+   "grid": [
+    18,
+    19
+   ],
+   "copies": 1,
+   "normal": [
+    4.1240193991826575e-05,
+    4.499737857467424e-05,
+    0.9999999981372412
+   ],
+   "suns": {
+    "e05_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 298
+    },
+    "e05_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 298
+    },
+    "e05_a180": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 298
+    },
+    "e05_a240": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 298
+    },
+    "e05_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 298
+    },
+    "e15_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 129,
+     "samples": 298
+    },
+    "e15_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 298
+    },
+    "e15_a180": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 298
+    },
+    "e15_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 68,
+     "samples": 298
+    },
+    "e15_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 298
+    },
+    "e30_a060": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 297,
+     "samples": 298
+    },
+    "e30_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 298
+    },
+    "e30_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 14,
+     "samples": 298
+    },
+    "e30_a240": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 298,
+     "samples": 298
+    },
+    "e30_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 298
+    }
+   }
+  },
+  {
+   "rank": 59,
+   "model": "LOD\\Buildings\\SmallTown\\Bld04FrontBrickACom01_LOD.nif",
+   "area": 1129493.1949590705,
+   "instance": 28058,
+   "samples": 294,
+   "grid": [
+    19,
+    16
+   ],
+   "copies": 2,
+   "normal": [
+    0.7442508521896989,
+    0.667900191470094,
+    -5.700104118622963e-05
+   ],
+   "suns": {
+    "e05_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 294
+    },
+    "e05_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 294
+    },
+    "e05_a180": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 1,
+     "samples": 294
+    },
+    "e05_a240": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 294
+    },
+    "e05_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 294
+    },
+    "e15_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 294
+    },
+    "e15_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 294
+    },
+    "e15_a180": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 7,
+     "samples": 294
+    },
+    "e15_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 1,
+     "samples": 294
+    },
+    "e15_a300": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 11,
+     "samples": 294
+    },
+    "e30_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 294
+    },
+    "e30_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 294
+    },
+    "e30_a180": {
+     "components": 2,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 35,
+     "samples": 294
+    },
+    "e30_a240": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 3,
+     "samples": 294
+    },
+    "e30_a300": {
+     "components": 1,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 11,
+     "samples": 294
+    }
+   }
+  },
+  {
+   "rank": 60,
+   "model": "LOD\\Landscape\\Roads\\HighwayOverpass\\HWDoubleEndCapR01_LOD_0.nif",
+   "area": 1120224.3638701173,
+   "instance": 7311,
+   "samples": 296,
+   "grid": [
+    16,
+    25
+   ],
+   "copies": 2,
+   "normal": [
+    -0.0025264736729762698,
+    -0.049924704068766104,
+    -0.9987497889133323
+   ],
+   "suns": {
+    "e05_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 296
+    },
+    "e05_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 296
+    },
+    "e05_a180": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 296
+    },
+    "e05_a240": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 296
+    },
+    "e05_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 296
+    },
+    "e15_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 296
+    },
+    "e15_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 296
+    },
+    "e15_a180": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 296
+    },
+    "e15_a240": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 296
+    },
+    "e15_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 296
+    },
+    "e30_a060": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 296
+    },
+    "e30_a120": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 296
+    },
+    "e30_a180": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 296
+    },
+    "e30_a240": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 296
+    },
+    "e30_a300": {
+     "components": 0,
+     "interior": 0,
+     "largest_interior": 0,
+     "lit": 0,
+     "samples": 296
+    }
+   }
+  }
+ ],
+ "faces_with_interior": 8,
+ "faces_with_interior_3plus": 8,
+ "total": 60,
+ "sample_u": 64.0,
+ "elevations": [
+  5.0,
+  15.0,
+  30.0
+ ],
+ "azimuths": [
+  60.0,
+  120.0,
+  180.0,
+  240.0,
+  300.0
+ ]
+}

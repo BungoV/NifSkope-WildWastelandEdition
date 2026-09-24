@@ -1,0 +1,9 @@
+[Warning] QObject::connect(QListModel, QWidget): signal not found
+[Warning] QObject::connect(QListModel, QWidget): signal not found
+[Warning] QObject::connect(QListModel, QWidget): signal not found
+[Warning] QObject::connect(QListModel, QWidget): signal not found
+[Warning] QThreadStorage: entry 5 destroyed before end of thread 0x2406912aab0
+[Warning] QThreadStorage: entry 4 destroyed before end of thread 0x2406912aab0
+[Warning] QThreadStorage: entry 3 destroyed before end of thread 0x2406912aab0
+[Warning] QThreadStorage: entry 2 destroyed before end of thread 0x2406912aab0
+[Warning] QThreadStorage: entry 1 destroyed before end of thread 0x2406912aab0

@@ -1,0 +1,2004 @@
+/***** BEGIN LICENSE BLOCK *****
+
+BSD License - see nifskope.h
+
+***** END LICENCE BLOCK *****/
+
+#include "watermark.h"
+
+#include <QDateTime>
+#include <QElapsedTimer>
+#include <QFile>
+#include <QFileInfo>
+#include <QSet>
+
+#include <algorithm>
+#include <cmath>
+#include <vector>
+
+/* =========================================================================
+ *  Marking water direction: the strokes are the source, the planes are derived
+ *
+ *  Read watermark.h first; this file is the implementation of what it states.
+ *
+ *  THE ONE THING TO KNOW. Nothing here edits a plane. `solve()` builds a field
+ *  per marked body and `save()` re-derives the whole flow plane from
+ *  (body-ID plane + body table + that field), which is the same function the
+ *  WRITER computes -- so a document nobody has marked re-derives to the
+ *  writer's own bytes, and the harness asserts exactly that before it trusts
+ *  anything else. The body-ID and shore planes are copied through verbatim,
+ *  rebased, because nothing this tool does can move a body's SHAPE.
+ * ========================================================================= */
+
+namespace {
+
+// ---- the version-3 header fields this file reads and patches ---------------
+constexpr qsizetype kHdrV3      = 0xF8;
+constexpr qsizetype kOffSect    = 0x44;
+constexpr qsizetype kOffSize    = 0x90;
+constexpr qsizetype kOffBody    = 0xA0;
+constexpr qsizetype kOffBodyN   = 0xA8;
+constexpr qsizetype kOffStride  = 0xAC;
+constexpr qsizetype kOffName    = 0xB0;
+constexpr qsizetype kOffNameLen = 0xB8;
+constexpr qsizetype kOffIdRate  = 0xBC;
+constexpr qsizetype kOffId      = 0xC0;
+constexpr qsizetype kOffFlowRt  = 0xC8;
+constexpr qsizetype kOffFlowEnc = 0xCC;
+constexpr qsizetype kOffFlow    = 0xD0;
+constexpr qsizetype kOffShoreRt = 0xD8;
+constexpr qsizetype kOffShoreQ  = 0xDC;
+constexpr qsizetype kOffShore   = 0xE0;
+constexpr qsizetype kOffStroke  = 0xE8;
+constexpr qsizetype kOffStrokeL = 0xF0;
+constexpr int kBodyRecord = 48;
+constexpr double kTwoPi = 6.283185307179586;
+//! World units a cell edge. FO4's, and the same constant the writer uses.
+constexpr double kCellUnits = 4096.0;
+
+inline quint16 rd16( const char * p ) { return quint16( quint8( p[0] ) | ( quint8( p[1] ) << 8 ) ); }
+inline quint32 rd32( const char * p )
+{
+	return quint32( quint8( p[0] ) ) | ( quint32( quint8( p[1] ) ) << 8 )
+		| ( quint32( quint8( p[2] ) ) << 16 ) | ( quint32( quint8( p[3] ) ) << 24 );
+}
+inline quint64 rd64( const char * p )
+{
+	return quint64( rd32( p ) ) | ( quint64( rd32( p + 4 ) ) << 32 );
+}
+
+//! Little-endian append, the writer's own order. One place, so a field cannot drift.
+struct Buf
+{
+	QByteArray b;
+	void u8( quint8 v ) { b.append( char( v ) ); }
+	void u16( quint16 v ) { u8( quint8( v & 0xFF ) ); u8( quint8( v >> 8 ) ); }
+	void u32( quint32 v ) { u16( quint16( v & 0xFFFF ) ); u16( quint16( v >> 16 ) ); }
+	void u64( quint64 v ) { u32( quint32( v & 0xFFFFFFFFULL ) ); u32( quint32( v >> 32 ) ); }
+	void f32( float v ) { quint32 t; std::memcpy( &t, &v, 4 ); u32( t ); }
+	qsizetype size() const { return b.size(); }
+};
+
+inline void patch32( QByteArray & h, qsizetype at, quint32 v )
+{
+	for ( int i = 0; i < 4; i++ )
+		h[at + i] = char( ( v >> ( 8 * i ) ) & 0xFF );
+}
+inline void patch64( QByteArray & h, qsizetype at, quint64 v )
+{
+	for ( int i = 0; i < 8; i++ )
+		h[at + i] = char( ( v >> ( 8 * i ) ) & 0xFF );
+}
+inline float rdf32( const char * p )
+{
+	const quint32 t = rd32( p );
+	float f;
+	std::memcpy( &f, &t, 4 );
+	return f;
+}
+
+/*! The plane container's packer -- the TWIN of `lodtPackPlane` in lodtfile.cpp.
+ *
+ *  It is a twin and not a call because lane BUILD4 held that file open while
+ *  this one was written (the brief's file rule), and a twin is only safe if
+ *  something proves the two agree: the harness re-packs an UNMARKED file's flow
+ *  plane and compares it to the bytes the writer put there, byte for byte. If
+ *  the two ever drift, that gate goes red on the next run. Retiring the twin
+ *  into a shared header is listed as owed in the lane report. */
+QByteArray packPlane( int tilesX, int tilesY, int tileEdge, int bytesPerSample,
+	quint64 base, const std::function<void( int tx, int ty, quint8 * out )> & fill,
+	qint64 * uniformTiles )
+{
+	const qint64 nTiles = qint64( tilesX ) * tilesY;
+	const qint64 hdr = 32;
+	const qint64 dirBytes = nTiles * 16;
+	Buf head;
+	head.u32( quint32( tilesX ) );
+	head.u32( quint32( tilesY ) );
+	head.u32( quint32( tileEdge ) );
+	head.u32( quint32( bytesPerSample ) );
+	head.u64( base + quint64( hdr ) );
+	head.u64( base + quint64( hdr + dirBytes ) );
+
+	Buf dir, data;
+	quint64 pos = base + quint64( hdr + dirBytes );
+	const qsizetype tileBytes = qsizetype( tileEdge ) * tileEdge * bytesPerSample;
+	std::vector<quint8> raw( size_t( tileBytes ), quint8( 0 ) );
+	qint64 uniform = 0;
+	for ( int ty = 0; ty < tilesY; ty++ ) {
+		for ( int tx = 0; tx < tilesX; tx++ ) {
+			fill( tx, ty, raw.data() );
+			bool same = true;
+			for ( qsizetype k = bytesPerSample; k < tileBytes && same; k += bytesPerSample )
+				for ( int c = 0; c < bytesPerSample; c++ )
+					if ( raw[size_t( k + c )] != raw[size_t( c )] ) {
+						same = false;
+						break;
+					}
+			if ( same ) {
+				quint32 v = 0;
+				for ( int c = 0; c < bytesPerSample; c++ )
+					v |= quint32( raw[size_t( c )] ) << ( 8 * c );
+				dir.u64( 0 );
+				dir.u32( 0 );
+				dir.u32( v );
+				uniform++;
+				continue;
+			}
+			QByteArray z = qCompress( QByteArray( reinterpret_cast<const char *>( raw.data() ),
+				int( tileBytes ) ), 9 );
+			z.remove( 0, 4 );
+			dir.u64( pos );
+			dir.u32( quint32( z.size() ) );
+			dir.u32( quint32( tileBytes ) );
+			data.b.append( z );
+			pos += quint64( z.size() );
+		}
+	}
+	if ( uniformTiles )
+		*uniformTiles = uniform;
+	QByteArray out = head.b;
+	out.append( dir.b );
+	out.append( data.b );
+	return out;
+}
+
+/*! Copy a plane container's bytes with every ABSOLUTE offset rebased.
+ *
+ *  A plane store carries its directory and data offsets as absolute file
+ *  positions, so moving a section by N bytes is not a memcpy -- it is a memcpy
+ *  plus 2 + tiles patches. A uniform tile's `offset` field is 0 and stays 0:
+ *  it is not an offset, it is the absent one. */
+QByteArray rebasePlane( const QByteArray & bytes, quint64 oldBase, quint64 newBase )
+{
+	QByteArray out = bytes;
+	if ( out.size() < 32 )
+		return out;
+	const qint64 delta = qint64( newBase ) - qint64( oldBase );
+	const quint32 tilesX = rd32( out.constData() );
+	const quint32 tilesY = rd32( out.constData() + 4 );
+	patch64( out, 16, quint64( qint64( rd64( out.constData() + 16 ) ) + delta ) );
+	patch64( out, 24, quint64( qint64( rd64( out.constData() + 24 ) ) + delta ) );
+	const qint64 n = qint64( tilesX ) * tilesY;
+	for ( qint64 i = 0; i < n; i++ ) {
+		const qsizetype at = qsizetype( 32 + i * 16 );
+		if ( at + 16 > out.size() )
+			break;
+		const quint32 csize = rd32( out.constData() + at + 8 );
+		if ( !csize )
+			continue;           // uniform: the offset field is not an offset
+		patch64( out, at, quint64( qint64( rd64( out.constData() + at ) ) + delta ) );
+	}
+	return out;
+}
+
+//! Squared distance from a point to a segment, and the segment's unit tangent.
+double distToSegment( double px, double py, double ax, double ay, double bx, double by,
+	double & tx, double & ty )
+{
+	const double vx = bx - ax, vy = by - ay;
+	const double len2 = vx * vx + vy * vy;
+	double t = 0.0;
+	if ( len2 > 0.0 )
+		t = std::max( 0.0, std::min( 1.0, ( ( px - ax ) * vx + ( py - ay ) * vy ) / len2 ) );
+	const double cx = ax + t * vx, cy = ay + t * vy;
+	const double len = std::sqrt( len2 );
+	if ( len > 0.0 ) {
+		tx = vx / len;
+		ty = vy / len;
+	} else {
+		tx = 0.0;
+		ty = 0.0;
+	}
+	const double dx = px - cx, dy = py - cy;
+	return std::sqrt( dx * dx + dy * dy );
+}
+
+} // namespace
+
+/*! One marked body's solved field, on the BODY plane's own grid.
+ *
+ *  It is stored per body and not as one world-sized array for the reason the
+ *  header states: the Commonwealth's body plane is 75 MB and a person marks one
+ *  river at a time. The Charles is 352 x 576 texels -- 200 KB of direction and
+ *  50 KB of confidence. */
+struct WaterMarkDoc::Field
+{
+	int px0 = 0, py0 = 0, w = 0, h = 0;
+	std::vector<quint8> mask;      //!< 1 = this body
+	std::vector<float> vx, vy;     //!< the solved direction, unit length in the mask
+	std::vector<quint8> conf;      //!< 0..15
+	std::vector<quint8> speed;     //!< 0..15, the flow word's nibble
+	bool zero = false;             //!< locked to still water
+	size_t at( int px, int py ) const { return size_t( py - py0 ) * size_t( w ) + size_t( px - px0 ); }
+	bool holds( int px, int py ) const
+	{ return px >= px0 && py >= py0 && px < px0 + w && py < py0 + h; }
+};
+
+WaterMarkDoc::WaterMarkDoc() = default;
+
+WaterMarkDoc::~WaterMarkDoc()
+{
+	qDeleteAll( fields );
+	fields.clear();
+	delete reader;
+	delete lodl;
+}
+
+// =========================================================================
+//  open
+// =========================================================================
+
+bool WaterMarkDoc::open( const QString & path, QString * error )
+{
+	auto fail = [error]( const QString & m ) {
+		if ( error )
+			*error = m;
+		return false;
+	};
+	qDeleteAll( fields );
+	fields.clear();
+	delete reader;
+	reader = nullptr;
+	delete lodl;
+	lodl = new LodtFile();
+	opened = false;
+	dirty = false;
+	table.clear();
+	names.clear();
+	lockZero.clear();
+	marks.clear();
+	filePath = path;
+
+	QString err;
+	if ( !lodl->open( path, &err ) )
+		return fail( err );
+	if ( lodl->headerVersion() < 3 )
+		return fail( QStringLiteral( "%1 is a version %2 landscape file; marking water needs "
+			"version 3 (write it with --water-bodies)" )
+			.arg( QFileInfo( path ).fileName() ).arg( lodl->headerVersion() ) );
+	if ( lodl->bodyCount() <= 0 )
+		return fail( QStringLiteral( "%1 carries no water body table" )
+			.arg( QFileInfo( path ).fileName() ) );
+	if ( !readTail( error ) )
+		return false;
+
+	table.resize( lodl->bodyCount() );
+	names.resize( lodl->bodyCount() );
+	lockZero.fill( quint8( 0 ), lodl->bodyCount() );
+	for ( int i = 1; i <= lodl->bodyCount(); i++ ) {
+		LodtWaterBody b;
+		if ( !lodl->waterBody( i, b ) )
+			return fail( QStringLiteral( "the body table stops at %1 of %2 records" )
+				.arg( i - 1 ).arg( lodl->bodyCount() ) );
+		table[i - 1] = b;
+		names[i - 1] = lodl->bodyName( b );
+	}
+	if ( !decodeStrokes( lodl->strokeStore(), error ) )
+		return false;
+	syncLocks();      // the store is the source; the locks are read back out of it
+
+	/* The repack gate's left-hand side, kept from the moment of opening: the
+	 * body table exactly as the writer wrote it. encodeTable() must reproduce
+	 * these bytes before a single edit, or the twin has drifted. */
+	{
+		QFile f( path );
+		if ( !f.open( QIODevice::ReadOnly ) )
+			return fail( QStringLiteral( "could not re-open %1" ).arg( path ) );
+		f.seek( qint64( oBody ) );
+		originalTable = f.read( qint64( table.size() ) * bodyStride );
+	}
+
+	reader = new QFile( path );
+	if ( !reader->open( QIODevice::ReadOnly ) )
+		return fail( QStringLiteral( "could not open %1 for the planes" ).arg( path ) );
+	if ( !readPlane( *reader, oId, 2, idPlane, error ) )
+		return false;
+	if ( !readPlane( *reader, oFlow, 2, flowPlane, error ) )
+		return false;
+	if ( oShore && !readPlane( *reader, oShore, 1, shorePlane, error ) )
+		return false;
+	opened = true;
+	return true;
+}
+
+/*! The header fields from 0xA0, and the ORDER the sections must be in.
+ *
+ *  This tool rewrites everything from the body table to the end of the file, so
+ *  it has to know that the body table really is the first of them. A file whose
+ *  sections are in another order is REFUSED BY NAME rather than rearranged --
+ *  no such file exists today, and silently reordering one would be a rewrite
+ *  nobody asked for. */
+bool WaterMarkDoc::readTail( QString * error )
+{
+	auto fail = [error]( const QString & m ) {
+		if ( error )
+			*error = m;
+		return false;
+	};
+	QFile f( filePath );
+	if ( !f.open( QIODevice::ReadOnly ) )
+		return fail( QStringLiteral( "could not open %1" ).arg( filePath ) );
+	const QByteArray h = f.read( kHdrV3 );
+	if ( h.size() < kHdrV3 )
+		return fail( QStringLiteral( "%1 is shorter than a version-3 header" ).arg( filePath ) );
+	const char * p = h.constData();
+	sect = rd32( p + kOffSect );
+	oBody = rd64( p + kOffBody );
+	bodyStride = rd32( p + kOffStride );
+	oName = rd64( p + kOffName );
+	nameLen = rd32( p + kOffNameLen );
+	idRate = rd32( p + kOffIdRate );
+	oId = rd64( p + kOffId );
+	flowRate = rd32( p + kOffFlowRt );
+	flowEnc = rd32( p + kOffFlowEnc );
+	oFlow = rd64( p + kOffFlow );
+	shoreRate = rd32( p + kOffShoreRt );
+	shoreQuantum = rd32( p + kOffShoreQ );
+	oShore = rd64( p + kOffShore );
+	oStroke = rd64( p + kOffStroke );
+	strokeLen = rd32( p + kOffStrokeL );
+
+	if ( bodyStride != kBodyRecord )
+		return fail( QStringLiteral( "the body table's records are %1 bytes; this tool writes %2" )
+			.arg( bodyStride ).arg( kBodyRecord ) );
+	if ( flowEnc != 0 )
+		return fail( QStringLiteral( "the flow plane uses encoding %1; this tool knows 0 "
+			"(direction 8 / speed 4 / confidence 4)" ).arg( flowEnc ) );
+	const quint64 tableEnd = oBody + quint64( lodl->bodyCount() ) * bodyStride;
+	if ( oName && oName != tableEnd )
+		return fail( QStringLiteral( "the body name blob is at 0x%1, not immediately after the "
+			"table at 0x%2; this tool rewrites the tail in the writer's own order" )
+			.arg( oName, 0, 16 ).arg( tableEnd, 0, 16 ) );
+	const quint64 sizeOnDisk = quint64( QFileInfo( filePath ).size() );
+	if ( !( oBody < oStroke && oStroke < oId && oId < oFlow
+		&& ( !oShore || ( oFlow < oShore && oShore < sizeOnDisk ) ) ) )
+		return fail( QStringLiteral( "the water sections are ordered body 0x%1, stroke 0x%2, "
+			"id 0x%3, flow 0x%4, shore 0x%5; this tool rewrites the tail in the writer's own "
+			"order and refuses another" ).arg( oBody, 0, 16 ).arg( oStroke, 0, 16 )
+			.arg( oId, 0, 16 ).arg( oFlow, 0, 16 ).arg( oShore, 0, 16 ) );
+	return true;
+}
+
+// =========================================================================
+//  the stroke store (spec_water.md 3.7)
+// =========================================================================
+
+bool WaterMarkDoc::decodeStrokes( const QByteArray & raw, QString * error )
+{
+	auto fail = [error]( const QString & m ) {
+		if ( error )
+			*error = m;
+		return false;
+	};
+	marks.clear();
+	if ( raw.isEmpty() )
+		return true;                      // no store at all: nobody has marked anything
+	if ( raw.size() < 4 )
+		return fail( QStringLiteral( "the stroke store is %1 bytes; its count alone is 4" )
+			.arg( raw.size() ) );
+	const quint32 count = rd32( raw.constData() );
+	qsizetype at = 4;
+	for ( quint32 i = 0; i < count; i++ ) {
+		if ( at + 4 > raw.size() )
+			return fail( QStringLiteral( "the stroke store ends inside stroke %1 of %2" )
+				.arg( i + 1 ).arg( count ) );
+		const quint32 recBytes = rd32( raw.constData() + at );
+		if ( recBytes < 20 || at + qsizetype( recBytes ) > raw.size() )
+			return fail( QStringLiteral( "stroke %1 of %2 declares %3 bytes, which does not fit "
+				"the %4-byte store" ).arg( i + 1 ).arg( count ).arg( recBytes ).arg( raw.size() ) );
+		const char * p = raw.constData() + at;
+		WaterStroke s;
+		s.body = rd16( p + 4 );
+		s.kind = quint8( p[6] );
+		s.flags = quint8( p[7] );
+		s.speed = rdf32( p + 8 );
+		s.width = rdf32( p + 12 );
+		const quint16 n = rd16( p + 16 );
+		if ( 20 + qsizetype( n ) * 8 > qsizetype( recBytes ) )
+			return fail( QStringLiteral( "stroke %1 says %2 points, which do not fit its %3 bytes" )
+				.arg( i + 1 ).arg( n ).arg( recBytes ) );
+		s.pts.reserve( n );
+		for ( int k = 0; k < n; k++ ) {
+			WaterStrokePoint pt;
+			pt.x = rdf32( p + 20 + k * 8 );
+			pt.y = rdf32( p + 24 + k * 8 );
+			s.pts.append( pt );
+		}
+		marks.append( s );
+		at += qsizetype( recBytes );
+	}
+	return true;
+}
+
+QByteArray WaterMarkDoc::encodeStrokes() const
+{
+	Buf s;
+	s.u32( quint32( marks.size() ) );
+	for ( const WaterStroke & m : marks ) {
+		Buf r;
+		const quint32 recBytes = quint32( 20 + m.pts.size() * 8 );
+		r.u32( recBytes );
+		r.u16( m.body );
+		r.u8( m.kind );
+		r.u8( m.flags );
+		r.f32( m.speed );
+		r.f32( m.width );
+		r.u16( quint16( m.pts.size() ) );
+		r.u16( 0 );                       // reserved
+		for ( const WaterStrokePoint & p : m.pts ) {
+			r.f32( p.x );
+			r.f32( p.y );
+		}
+		s.b.append( r.b );
+	}
+	return s.b;
+}
+
+QByteArray WaterMarkDoc::encodeTable() const
+{
+	/* Byte for byte what lodtBuildWater's table loop writes, which is why the
+	 * harness can compare an unedited document's encode against the file's own
+	 * bytes and call any difference a defect. */
+	Buf t;
+	quint32 nameAt = 0;
+	for ( int i = 0; i < table.size(); i++ ) {
+		const LodtWaterBody & b = table[i];
+		t.u16( quint16( i + 1 ) );
+		t.u8( b.cls );
+		t.u8( b.flags );
+		t.f32( b.waterHeight );
+		t.u32( b.watrForm );
+		t.u32( b.area );
+		t.u16( quint16( b.x0 ) );
+		t.u16( quint16( b.y0 ) );
+		t.u16( quint16( b.x1 ) );
+		t.u16( quint16( b.y1 ) );
+		t.u16( b.source );
+		t.u16( b.outlet );
+		t.f32( b.flowX );
+		t.f32( b.flowY );
+		t.u8( b.colour[0] );
+		t.u8( b.colour[1] );
+		t.u8( b.colour[2] );
+		t.u8( b.colour[3] );
+		t.u8( b.confidence );
+		t.u8( b.flowSource );
+		t.u16( 0 );
+		if ( names[i].isEmpty() ) {
+			t.u32( 0 );
+		} else {
+			t.u32( nameAt );
+			nameAt += quint32( names[i].toUtf8().size() + 1 );
+		}
+	}
+	return t.b;
+}
+
+QByteArray WaterMarkDoc::encodeNames() const
+{
+	QByteArray blob;
+	for ( const QString & n : names ) {
+		if ( n.isEmpty() )
+			continue;
+		blob.append( n.toUtf8() );
+		blob.append( char( 0 ) );
+	}
+	return blob;
+}
+
+// =========================================================================
+//  the plane container, as it sits on disk
+// =========================================================================
+
+bool WaterMarkDoc::readPlane( QFile & f, quint64 at, int bps, Plane & p, QString * error ) const
+{
+	auto fail = [error]( const QString & m ) {
+		if ( error )
+			*error = m;
+		return false;
+	};
+	if ( !at )
+		return fail( QStringLiteral( "a plane section is declared present and its offset is 0" ) );
+	f.seek( qint64( at ) );
+	const QByteArray head = f.read( 32 );
+	if ( head.size() < 32 )
+		return fail( QStringLiteral( "the plane store at 0x%1 has no head" ).arg( at, 0, 16 ) );
+	p.headAt = at;
+	p.tilesX = int( rd32( head.constData() ) );
+	p.tilesY = int( rd32( head.constData() + 4 ) );
+	p.tileEdge = int( rd32( head.constData() + 8 ) );
+	p.bps = int( rd32( head.constData() + 12 ) );
+	p.dirAt = rd64( head.constData() + 16 );
+	p.dataAt = rd64( head.constData() + 24 );
+	if ( p.bps != bps )
+		return fail( QStringLiteral( "the plane store at 0x%1 says %2 bytes a sample, not %3" )
+			.arg( at, 0, 16 ).arg( p.bps ).arg( bps ) );
+	if ( p.tilesX <= 0 || p.tilesY <= 0 || p.tileEdge <= 0 )
+		return fail( QStringLiteral( "the plane store at 0x%1 declares %2 x %3 tiles of %4" )
+			.arg( at, 0, 16 ).arg( p.tilesX ).arg( p.tilesY ).arg( p.tileEdge ) );
+	const qint64 n = qint64( p.tilesX ) * p.tilesY;
+	f.seek( qint64( p.dirAt ) );
+	p.dir = f.read( n * 16 );
+	if ( p.dir.size() != n * 16 )
+		return fail( QStringLiteral( "the plane directory at 0x%1 is short" ).arg( p.dirAt, 0, 16 ) );
+	/* The container's own extent, which is what the verbatim copy needs: the
+	 * head, the directory, and every payload that follows it. */
+	quint64 end = p.dataAt;
+	for ( qint64 i = 0; i < n; i++ ) {
+		const char * e = p.dir.constData() + i * 16;
+		const quint32 csize = rd32( e + 8 );
+		if ( !csize )
+			continue;
+		end = qMax( end, rd64( e ) + csize );
+	}
+	p.bytes = end - at;
+	p.ok = true;
+	return true;
+}
+
+bool WaterMarkDoc::tileOf( QFile & f, const Plane & p, int tx, int ty,
+	QByteArray & raw, quint32 & uniform, bool & isUniform ) const
+{
+	raw.clear();
+	uniform = 0;
+	isUniform = false;
+	if ( tx < 0 || ty < 0 || tx >= p.tilesX || ty >= p.tilesY )
+		return false;
+	const qint64 k = qint64( ty ) * p.tilesX + tx;
+	const char * e = p.dir.constData() + k * 16;
+	const quint64 off = rd64( e );
+	const quint32 csize = rd32( e + 8 );
+	const quint32 usize = rd32( e + 12 );
+	if ( !csize ) {
+		uniform = usize;
+		isUniform = true;
+		return true;
+	}
+	f.seek( qint64( off ) );
+	QByteArray z = f.read( qint64( csize ) );
+	if ( z.size() != qint64( csize ) )
+		return false;
+	/* qUncompress wants the four-byte size prefix qCompress writes; the file
+	 * stores a plain zlib stream so any consumer can inflate it. */
+	QByteArray withLen;
+	withLen.resize( 4 );
+	for ( int i = 0; i < 4; i++ )
+		withLen[i] = char( ( usize >> ( 8 * ( 3 - i ) ) ) & 0xFF );
+	withLen.append( z );
+	raw = qUncompress( withLen );
+	return raw.size() == qint64( usize );
+}
+
+quint16 WaterMarkDoc::idAtTexel( int px, int py ) const
+{
+	if ( !idPlane.ok || !reader )
+		return 0;
+	const int e = idPlane.tileEdge;
+	const int tx = px / e, ty = py / e;
+	if ( px < 0 || py < 0 || tx >= idPlane.tilesX || ty >= idPlane.tilesY )
+		return 0;
+	const quint64 key = ( quint64( ty ) << 32 ) | quint32( tx );
+	auto it = idTiles.constFind( key );
+	if ( it == idTiles.constEnd() ) {
+		QByteArray raw;
+		quint32 uni = 0;
+		bool isUni = false;
+		if ( !tileOf( *reader, idPlane, tx, ty, raw, uni, isUni ) )
+			return 0;
+		if ( isUni ) {
+			raw.resize( 2 );
+			raw[0] = char( uni & 0xFF );
+			raw[1] = char( ( uni >> 8 ) & 0xFF );
+			/* a two-byte tile means "uniform" to the lookup below, which is the
+			 * only place that reads it */
+		}
+		if ( idTiles.size() > 64 ) {
+			for ( int i = 0; i < 32 && !idTileOrder.isEmpty(); i++ )
+				idTiles.remove( idTileOrder.takeFirst() );
+		}
+		idTiles.insert( key, raw );
+		idTileOrder.append( key );
+		it = idTiles.constFind( key );
+	}
+	const QByteArray & raw = it.value();
+	if ( raw.size() == 2 )
+		return rd16( raw.constData() );
+	const qsizetype at = ( qsizetype( py % e ) * e + ( px % e ) ) * 2;
+	if ( at + 2 > raw.size() )
+		return 0;
+	return rd16( raw.constData() + at );
+}
+
+// =========================================================================
+//  the body table
+// =========================================================================
+
+bool WaterMarkDoc::body( int id, LodtWaterBody & out ) const
+{
+	if ( id < 1 || id > table.size() )
+		return false;
+	out = table[id - 1];
+	return true;
+}
+
+QString WaterMarkDoc::bodyName( int id ) const
+{
+	if ( id < 1 || id > names.size() )
+		return QString();
+	return names[id - 1];
+}
+
+QVector<quint32> WaterMarkDoc::waterForms() const
+{
+	QVector<quint32> f;
+	if ( !lodl )
+		return f;
+	/* The forms are the ones the FILE interned, plus the worldspace default --
+	 * which the writer deliberately does not intern, because that is what makes
+	 * "0xFFFF = inherited" distinguishable. Zero-authoring: no list of water
+	 * types is written down anywhere in this tree. */
+	if ( lodl->hasDefaultWater() )
+		f.append( lodl->defaultWaterType() );
+	for ( int i = 0; i < lodl->watrCount(); i++ ) {
+		const quint32 w = lodl->watrForm( i );
+		if ( w && !f.contains( w ) )
+			f.append( w );
+	}
+	return f;
+}
+
+void WaterMarkDoc::setBodyName( int id, const QString & name )
+{
+	if ( id < 1 || id > names.size() || names[id - 1] == name )
+		return;
+	names[id - 1] = name;
+	table[id - 1].flags |= 1u << 0;
+	dirty = true;
+}
+
+void WaterMarkDoc::setBodyClass( int id, int cls )
+{
+	if ( id < 1 || id > table.size() )
+		return;
+	LodtWaterBody & b = table[id - 1];
+	if ( cls < 0 ) {
+		b.flags &= quint8( ~( 1u << 5 ) );      // back to the classifier's own answer
+	} else {
+		b.cls = quint8( qBound( 0, cls, 2 ) );
+		b.flags |= quint8( ( 1u << 5 ) | ( 1u << 0 ) );
+	}
+	dirty = true;
+}
+
+void WaterMarkDoc::setBodyColour( int id, quint8 r, quint8 g, quint8 b, bool on )
+{
+	if ( id < 1 || id > table.size() )
+		return;
+	LodtWaterBody & rec = table[id - 1];
+	rec.colour[0] = r;
+	rec.colour[1] = g;
+	rec.colour[2] = b;
+	rec.colour[3] = on ? quint8( 255 ) : quint8( 0 );
+	if ( on )
+		rec.flags |= quint8( ( 1u << 2 ) | ( 1u << 0 ) );
+	else
+		rec.flags &= quint8( ~( 1u << 2 ) );
+	dirty = true;
+}
+
+void WaterMarkDoc::setBodyForm( int id, quint32 form )
+{
+	if ( id < 1 || id > table.size() || !form || table[id - 1].watrForm == form )
+		return;
+	table[id - 1].watrForm = form;
+	table[id - 1].flags |= 1u << 0;
+	dirty = true;
+}
+
+/*! Locked-to-still is a MARK, not a table bit: it is written into the stroke
+ *  store as a one-point `ZeroFlow`, at the centre of the body's bounding box,
+ *  so it survives every re-derivation the way a stroke does. */
+void WaterMarkDoc::setBodyLockZero( int id, bool on )
+{
+	LodtWaterBody b;
+	if ( !body( id, b ) )
+		return;
+	for ( int i = marks.size() - 1; i >= 0; i-- )
+		if ( marks[i].kind == WaterStroke::ZeroFlow && int( marks[i].body ) == id )
+			marks.removeAt( i );
+	if ( on ) {
+		WaterStroke s;
+		s.body = quint16( id );
+		s.kind = WaterStroke::ZeroFlow;
+		s.flags = WaterStroke::SetsSpeed;
+		s.speed = 0.0f;
+		s.width = 0.0f;
+		WaterStrokePoint p;
+		p.x = float( ( double( b.x0 ) + double( b.x1 ) + 1.0 ) * 0.5 * kCellUnits );
+		p.y = float( ( double( b.y0 ) + double( b.y1 ) + 1.0 ) * 0.5 * kCellUnits );
+		s.pts.append( p );
+		marks.append( s );
+	}
+	syncLocks();
+	dirty = true;
+}
+
+bool WaterMarkDoc::bodyLockZero( int id ) const
+{
+	return id >= 1 && id <= lockZero.size() && lockZero[id - 1];
+}
+
+void WaterMarkDoc::syncLocks()
+{
+	lockZero.fill( quint8( 0 ), table.size() );
+	for ( const WaterStroke & s : marks )
+		if ( s.kind == WaterStroke::ZeroFlow && s.enabled()
+			&& int( s.body ) >= 1 && int( s.body ) <= lockZero.size() )
+			lockZero[int( s.body ) - 1] = 1;
+}
+
+// =========================================================================
+//  geometry
+// =========================================================================
+
+double WaterMarkDoc::worldPerTexel() const
+{
+	return idRate > 0 ? kCellUnits / double( idRate ) : kCellUnits;
+}
+
+void WaterMarkDoc::worldBounds( double & x0, double & y0, double & x1, double & y1 ) const
+{
+	x0 = double( lodl ? lodl->cellMinX() : 0 ) * kCellUnits;
+	y0 = double( lodl ? lodl->cellMinY() : 0 ) * kCellUnits;
+	x1 = double( lodl ? lodl->cellMaxX() + 1 : 0 ) * kCellUnits;
+	y1 = double( lodl ? lodl->cellMaxY() + 1 : 0 ) * kCellUnits;
+}
+
+void WaterMarkDoc::worldToTexel( double wx, double wy, int & px, int & py ) const
+{
+	const double u = worldPerTexel();
+	px = int( std::floor( ( wx - double( lodl->cellMinX() ) * kCellUnits ) / u ) );
+	py = int( std::floor( ( wy - double( lodl->cellMinY() ) * kCellUnits ) / u ) );
+}
+
+void WaterMarkDoc::texelToWorld( int px, int py, double & wx, double & wy ) const
+{
+	const double u = worldPerTexel();
+	wx = double( lodl->cellMinX() ) * kCellUnits + ( double( px ) + 0.5 ) * u;
+	wy = double( lodl->cellMinY() ) * kCellUnits + ( double( py ) + 0.5 ) * u;
+}
+
+quint16 WaterMarkDoc::bodyAtWorld( double wx, double wy ) const
+{
+	if ( !opened )
+		return 0;
+	int px = 0, py = 0;
+	worldToTexel( wx, wy, px, py );
+	return idAtTexel( px, py );
+}
+
+// =========================================================================
+//  the strokes
+// =========================================================================
+
+bool WaterMarkDoc::addStroke( const WaterStroke & in, QString * message )
+{
+	auto say = [message]( const QString & m ) {
+		if ( message )
+			*message = m;
+	};
+	if ( in.pts.isEmpty() ) {
+		say( QStringLiteral( "that stroke has no points" ) );
+		return false;
+	}
+	WaterStroke s = in;
+	if ( !s.body )
+		s.body = bodyAtWorld( double( s.pts.first().x ), double( s.pts.first().y ) );
+	if ( !s.body ) {
+		/* THE CONTROL, and it is a refusal in words on purpose. A constraint
+		 * that names no body constrains nothing, and storing it would leave the
+		 * next reader to work out why the planes did not move. */
+		say( QStringLiteral( "that stroke starts on dry land, so it names no body of water; "
+			"nothing was stored" ) );
+		return false;
+	}
+	int outside = 0;
+	for ( const WaterStrokePoint & p : s.pts )
+		if ( bodyAtWorld( double( p.x ), double( p.y ) ) != s.body )
+			outside++;
+	marks.append( s );
+	dirty = true;
+	LodtWaterBody b;
+	body( int( s.body ), b );
+	if ( outside )
+		say( QStringLiteral( "%1 of %2 points fell outside body %3 and will be ignored by the "
+			"solve; the stroke is stored as drawn" ).arg( outside ).arg( s.pts.size() ).arg( s.body ) );
+	else
+		say( QStringLiteral( "stroke on body %1 (%2 points)" ).arg( s.body ).arg( s.pts.size() ) );
+	return true;
+}
+
+void WaterMarkDoc::removeStroke( int index )
+{
+	if ( index < 0 || index >= marks.size() )
+		return;
+	marks.removeAt( index );
+	dirty = true;
+}
+
+void WaterMarkDoc::clearStrokes()
+{
+	if ( marks.isEmpty() )
+		return;
+	marks.clear();
+	dirty = true;
+}
+
+QVector<int> WaterMarkDoc::strokesOfBody( int id ) const
+{
+	QVector<int> out;
+	for ( int i = 0; i < marks.size(); i++ )
+		if ( int( marks[i].body ) == id )
+			out.append( i );
+	return out;
+}
+
+// =========================================================================
+//  the solve  (spec_water.md 4.3)
+// =========================================================================
+
+/*! The constrained harmonic fill, per marked body.
+ *
+ *  Dirichlet where a stroke passes, Neumann everywhere the mask ends -- and
+ *  the Neumann half is not a choice, it falls out of averaging only the
+ *  neighbours that are IN the body, which is what "tangent to the banks" means
+ *  in practice. Averaging is done on the VECTOR and never on the angle, so two
+ *  strokes meeting at 350 and 10 degrees average to 0 and not to 180.
+ *
+ *  Solved by red-black SOR, not Jacobi: Jacobi needs O(n^2) sweeps on a domain
+ *  352 texels across and the panel re-solves on every stroke. The iteration
+ *  count and the last residual are REPORTED, because a solver that stopped at
+ *  its cap has not converged and the number is the only thing that says so.
+ */
+bool WaterMarkDoc::solve( WaterMarkSolve * out, QString * error )
+{
+	WaterMarkSolve st;
+	if ( error )
+		error->clear();
+	if ( !opened ) {
+		if ( error )
+			*error = QStringLiteral( "no landscape file is open" );
+		return false;
+	}
+	qDeleteAll( fields );
+	fields.clear();
+
+	// which bodies carry a constraint at all
+	QSet<int> want;
+	for ( const WaterStroke & s : marks )
+		if ( s.enabled() && s.body )
+			want.insert( int( s.body ) );
+	for ( int i = 1; i <= lockZero.size(); i++ )
+		if ( lockZero[i - 1] )
+			want.insert( i );
+
+	const double u = worldPerTexel();
+	for ( int id : want ) {
+		LodtWaterBody b;
+		if ( !body( id, b ) )
+			continue;
+		Field * F = new Field();
+		F->px0 = ( int( b.x0 ) - lodl->cellMinX() ) * int( idRate );
+		F->py0 = ( int( b.y0 ) - lodl->cellMinY() ) * int( idRate );
+		F->w = ( int( b.x1 ) - int( b.x0 ) + 1 ) * int( idRate );
+		F->h = ( int( b.y1 ) - int( b.y0 ) + 1 ) * int( idRate );
+		if ( F->w <= 0 || F->h <= 0 ) {
+			delete F;
+			continue;
+		}
+		const size_t n = size_t( F->w ) * size_t( F->h );
+		F->mask.assign( n, 0 );
+		F->vx.assign( n, 0.0f );
+		F->vy.assign( n, 0.0f );
+		F->conf.assign( n, 0 );
+		F->speed.assign( n, 8 );
+		for ( int y = 0; y < F->h; y++ )
+			for ( int x = 0; x < F->w; x++ )
+				if ( idAtTexel( F->px0 + x, F->py0 + y ) == quint16( id ) )
+					F->mask[size_t( y ) * size_t( F->w ) + size_t( x )] = 1;
+
+		if ( lockZero[id - 1] ) {
+			/* bungo's rule, taken literally: a lake nobody connected to a river
+			 * has NO flow, and that beats the form's NAM0 -- which is the only
+			 * reason a still lake had a velocity at all. */
+			F->zero = true;
+			fields.insert( id, F );
+			st.bodiesSolved++;
+			continue;
+		}
+
+		// ---- the constraints -------------------------------------------
+		std::vector<quint8> held( n, 0 );
+		double sumSpeed = 0.0;
+		int nSpeed = 0;
+		double srcX = 0, srcY = 0, dstX = 0, dstY = 0;
+		bool haveSrc = false, haveDst = false;
+		/*! One constraint segment, in world units, carrying the width of the
+		 *  stroke that produced it -- a per-segment field and not a per-body
+		 *  maximum, so a wide sweep down a lake and a narrow line up a creek
+		 *  can be marked in the same body without one widening the other. */
+		struct Seg { double ax, ay, bx, by, halfW; };
+		QVector<Seg> segs;
+		double maxWidth = 0.0;
+		for ( const WaterStroke & s : marks ) {
+			if ( !s.enabled() || int( s.body ) != id )
+				continue;
+			if ( s.kind == WaterStroke::SourcePin && !s.pts.isEmpty() ) {
+				srcX = double( s.pts.first().x );
+				srcY = double( s.pts.first().y );
+				haveSrc = true;
+			}
+			if ( s.kind == WaterStroke::OutletPin && !s.pts.isEmpty() ) {
+				dstX = double( s.pts.first().x );
+				dstY = double( s.pts.first().y );
+				haveDst = true;
+			}
+			if ( s.flags & WaterStroke::SetsSpeed ) {
+				sumSpeed += double( s.speed );
+				nSpeed++;
+			}
+		}
+		for ( const WaterStroke & s : marks ) {
+			if ( !s.enabled() || int( s.body ) != id )
+				continue;
+			const double halfW = double( s.width ) * 0.5 > 0.0 ? double( s.width ) * 0.5 : u;
+			maxWidth = qMax( maxWidth, double( s.width ) );
+			if ( s.kind == WaterStroke::Stroke && s.pts.size() >= 2 ) {
+				for ( int k = 0; k + 1 < s.pts.size(); k++ )
+					segs.append( Seg{ double( s.pts[k].x ), double( s.pts[k].y ),
+						double( s.pts[k + 1].x ), double( s.pts[k + 1].y ), halfW } );
+				st.strokes++;
+			} else if ( s.kind == WaterStroke::Pin && s.pts.size() >= 2 ) {
+				// a pin is one point and one dragged direction: a very short stroke
+				segs.append( Seg{ double( s.pts[0].x ), double( s.pts[0].y ),
+					double( s.pts[1].x ), double( s.pts[1].y ), halfW } );
+				st.strokes++;
+			}
+		}
+		if ( haveSrc && haveDst ) {
+			/* bungo: "a source pin + outlet pin = a path". Two one-point marks
+			 * that only mean anything together, so the pair becomes ONE
+			 * constraint segment from the source to the outlet; the harmonic
+			 * fill then bends it to the banks, which is what makes a straight
+			 * segment an acceptable statement of a bending river. */
+			segs.append( Seg{ srcX, srcY, dstX, dstY,
+				maxWidth > 0.0 ? maxWidth * 0.5 : 2.0 * u } );
+			st.strokes++;
+		}
+		double speedWorld = nSpeed ? sumSpeed / nSpeed : 0.0;
+		const double meanMag = std::sqrt( double( b.flowX ) * b.flowX + double( b.flowY ) * b.flowY );
+		if ( speedWorld <= 0.0 )
+			speedWorld = meanMag > 0.0 ? meanMag : 0.25;
+
+		int heldHere = 0;
+		for ( const Seg & seg : segs ) {
+			const double ax = seg.ax, ay = seg.ay;
+			const double bx = seg.bx, by = seg.by;
+			const double halfW = seg.halfW;
+			int qx0 = 0, qy0 = 0, qx1 = 0, qy1 = 0;
+			worldToTexel( qMin( ax, bx ) - halfW, qMin( ay, by ) - halfW, qx0, qy0 );
+			worldToTexel( qMax( ax, bx ) + halfW, qMax( ay, by ) + halfW, qx1, qy1 );
+			qx0 = qMax( qx0, F->px0 );
+			qy0 = qMax( qy0, F->py0 );
+			qx1 = qMin( qx1, F->px0 + F->w - 1 );
+			qy1 = qMin( qy1, F->py0 + F->h - 1 );
+			for ( int py = qy0; py <= qy1; py++ ) {
+				for ( int px = qx0; px <= qx1; px++ ) {
+					const size_t at = F->at( px, py );
+					if ( !F->mask[at] )
+						continue;
+					double wx = 0, wy = 0;
+					texelToWorld( px, py, wx, wy );
+					double tx = 0, ty = 0;
+					const double d = distToSegment( wx, wy, ax, ay, bx, by, tx, ty );
+					if ( d > halfW || ( tx == 0.0 && ty == 0.0 ) )
+						continue;
+					F->vx[at] = float( tx );
+					F->vy[at] = float( ty );
+					F->conf[at] = 15;
+					held[at] = 1;
+				}
+			}
+		}
+		for ( size_t i = 0; i < n; i++ )
+			if ( held[i] )
+				heldHere++;
+		st.constrained += heldHere;
+		if ( !heldHere && !segs.isEmpty() ) {
+			/* every point of every stroke fell outside the body's own texels:
+			 * say so rather than solving a field with no conditions */
+			st.note = QStringLiteral( "no texel of body %1 lies under its strokes, so its "
+				"direction is unchanged" ).arg( id );
+		}
+
+		// ---- the harmonic fill, red-black SOR --------------------------
+		{
+			const double omega = 1.9;
+			const double tol = 1e-4;
+			const int cap = 4000;
+			int it = 0;
+			double worst = 0.0;
+			for ( ; it < cap; it++ ) {
+				worst = 0.0;
+				for ( int phase = 0; phase < 2; phase++ ) {
+					for ( int y = 0; y < F->h; y++ ) {
+						for ( int x = ( y + phase ) & 1; x < F->w; x += 2 ) {
+							const size_t at = size_t( y ) * size_t( F->w ) + size_t( x );
+							if ( !F->mask[at] || held[at] )
+								continue;
+							double sx = 0.0, sy = 0.0;
+							int k = 0;
+							const int dx[4] = { -1, 1, 0, 0 };
+							const int dy[4] = { 0, 0, -1, 1 };
+							for ( int q = 0; q < 4; q++ ) {
+								const int nx = x + dx[q], ny = y + dy[q];
+								if ( nx < 0 || ny < 0 || nx >= F->w || ny >= F->h )
+									continue;
+								const size_t nat = size_t( ny ) * size_t( F->w ) + size_t( nx );
+								if ( !F->mask[nat] )
+									continue;
+								sx += F->vx[nat];
+								sy += F->vy[nat];
+								k++;
+							}
+							if ( !k )
+								continue;
+							const double tx = sx / k, ty = sy / k;
+							const double ox = F->vx[at], oy = F->vy[at];
+							const double nvx = ox + omega * ( tx - ox );
+							const double nvy = oy + omega * ( ty - oy );
+							worst = qMax( worst, qMax( std::fabs( nvx - ox ), std::fabs( nvy - oy ) ) );
+							F->vx[at] = float( nvx );
+							F->vy[at] = float( nvy );
+						}
+					}
+				}
+				if ( worst < tol )
+					break;
+			}
+			st.iterations = qMax( st.iterations, it );
+			st.residual = qMax( st.residual, worst );
+		}
+		// normalise; a texel the fill never reached keeps zero and reads as "no direction"
+		for ( size_t i = 0; i < n; i++ ) {
+			if ( !F->mask[i] )
+				continue;
+			const double m = std::sqrt( double( F->vx[i] ) * F->vx[i] + double( F->vy[i] ) * F->vy[i] );
+			if ( m > 1e-6 ) {
+				F->vx[i] = float( F->vx[i] / m );
+				F->vy[i] = float( F->vy[i] / m );
+			} else {
+				F->vx[i] = 0.0f;
+				F->vy[i] = 0.0f;
+			}
+		}
+
+		/* CONFIDENCE, and a deliberate departure from spec 4.3, stated. The
+		 * spec asks for "a second harmonic fill with 15 at the constraints and
+		 * 0 nowhere" -- which converges to 15 EVERYWHERE, because a harmonic
+		 * function with one Dirichlet value and no other boundary condition is
+		 * that constant. What the spec WANTS is the sentence beside it: it
+		 * decays with distance, so a consumer fades to the body's mean where
+		 * nobody marked. That is a geodesic distance inside the mask, halving
+		 * every stroke width, which is also what makes it fade where a body
+		 * WIDENS -- the far bank of a lake is many widths from the stroke. */
+		{
+			double halfLife = 0.0;
+			for ( const WaterStroke & s : marks )
+				if ( s.enabled() && int( s.body ) == id )
+					halfLife = qMax( halfLife, double( s.width ) );
+			double hlTexels = ( halfLife > 0.0 ? halfLife : 4.0 * u ) / u;
+			hlTexels = qMax( 2.0, hlTexels );
+			std::vector<float> dist( n, 1e9f );
+			for ( size_t i = 0; i < n; i++ )
+				if ( held[i] )
+					dist[i] = 0.0f;
+			// two chamfer sweeps, 3-4, in units of a third of a texel
+			auto step = [&]( int x, int y, int nx, int ny, float w ) {
+				if ( nx < 0 || ny < 0 || nx >= F->w || ny >= F->h )
+					return;
+				const size_t at = size_t( y ) * size_t( F->w ) + size_t( x );
+				const size_t nat = size_t( ny ) * size_t( F->w ) + size_t( nx );
+				if ( !F->mask[at] || !F->mask[nat] )
+					return;
+				dist[at] = qMin( dist[at], dist[nat] + w );
+			};
+			for ( int y = 0; y < F->h; y++ )
+				for ( int x = 0; x < F->w; x++ ) {
+					step( x, y, x - 1, y, 1.0f );
+					step( x, y, x, y - 1, 1.0f );
+					step( x, y, x - 1, y - 1, 1.41421f );
+					step( x, y, x + 1, y - 1, 1.41421f );
+				}
+			for ( int y = F->h - 1; y >= 0; y-- )
+				for ( int x = F->w - 1; x >= 0; x-- ) {
+					step( x, y, x + 1, y, 1.0f );
+					step( x, y, x, y + 1, 1.0f );
+					step( x, y, x + 1, y + 1, 1.41421f );
+					step( x, y, x - 1, y + 1, 1.41421f );
+				}
+			for ( size_t i = 0; i < n; i++ ) {
+				if ( !F->mask[i] || dist[i] > 1e8f ) {
+					F->conf[i] = 0;
+					continue;
+				}
+				const double c = 15.0 * std::pow( 0.5, double( dist[i] ) / hlTexels );
+				F->conf[i] = quint8( qBound( 0, int( c + 0.5 ), 15 ) );
+			}
+		}
+
+		// ---- the speed nibble, and the body's new mean -----------------
+		double mx = 0.0, my = 0.0;
+		qint64 wet = 0;
+		for ( size_t i = 0; i < n; i++ ) {
+			if ( !F->mask[i] )
+				continue;
+			wet++;
+			mx += F->vx[i];
+			my += F->vy[i];
+		}
+		if ( wet ) {
+			mx /= double( wet );
+			my /= double( wet );
+		}
+		const double mm = std::sqrt( mx * mx + my * my );
+		LodtWaterBody & rec = table[id - 1];
+		if ( mm > 1e-6 ) {
+			rec.flowX = float( mx / mm * speedWorld );
+			rec.flowY = float( my / mm * speedWorld );
+		} else {
+			rec.flowX = 0.0f;
+			rec.flowY = 0.0f;
+		}
+		rec.flowSource = 4;
+		rec.flags |= quint8( ( 1u << 0 ) | ( 1u << 1 ) );
+		{
+			double cs = 0.0;
+			for ( size_t i = 0; i < n; i++ )
+				if ( F->mask[i] )
+					cs += F->conf[i];
+			rec.confidence = quint8( qBound( 0, int( wet ? cs / double( wet ) / 15.0 * 255.0 + 0.5 : 0.0 ), 255 ) );
+		}
+		/* The speed nibble is the body's own quantum: 8 IS the mean, so a
+		 * stroke that sets the body's speed writes 8 and a consumer reading
+		 * only the nibble sees no change -- the change is in the MEAN. */
+		for ( size_t i = 0; i < n; i++ )
+			F->speed[i] = 8;
+
+		// a source/outlet pin that lands on ANOTHER body states the graph
+		for ( const WaterStroke & s : marks ) {
+			if ( !s.enabled() || s.pts.isEmpty() )
+				continue;
+			if ( s.kind == WaterStroke::SourcePin && int( s.body ) == id ) {
+				const quint16 o = bodyAtWorld( double( s.pts.first().x ), double( s.pts.first().y ) );
+				if ( o && int( o ) != id )
+					rec.source = o;
+			}
+			if ( s.kind == WaterStroke::OutletPin && int( s.body ) == id ) {
+				const quint16 o = bodyAtWorld( double( s.pts.last().x ), double( s.pts.last().y ) );
+				if ( o && int( o ) != id )
+					rec.outlet = o;
+			}
+		}
+		fields.insert( id, F );
+		st.bodiesSolved++;
+	}
+
+	// how many texels the field actually moved, over the marked bodies
+	for ( auto it = fields.constBegin(); it != fields.constEnd(); ++it ) {
+		const Field * F = it.value();
+		const quint16 autoWord = automaticWord( quint16( it.key() ) );
+		for ( int y = 0; y < F->h; y++ )
+			for ( int x = 0; x < F->w; x++ ) {
+				const size_t at = size_t( y ) * size_t( F->w ) + size_t( x );
+				if ( !F->mask[at] )
+					continue;
+				if ( flowWordAt( F->px0 + x, F->py0 + y ) != autoWord )
+					st.changedTexels++;
+			}
+	}
+	if ( st.note.isEmpty() ) {
+		st.note = st.bodiesSolved
+			? QStringLiteral( "%1 stroke(s) on %2 body(ies): %3 texels held, %4 changed, "
+				"%5 iterations, residual %6" )
+				.arg( st.strokes ).arg( st.bodiesSolved ).arg( st.constrained )
+				.arg( st.changedTexels ).arg( st.iterations )
+				.arg( st.residual, 0, 'g', 3 )
+			: QStringLiteral( "no strokes: every body keeps the direction the classifier gave it" );
+	}
+	dirty = true;
+	if ( out )
+		*out = st;
+	return true;
+}
+
+/*! The word the WRITER puts on every texel of a body nobody marked.
+ *
+ *  Reproduced here rather than read from the file, so the re-derivation is a
+ *  function of (id plane, body table) exactly as the writer's is -- which is
+ *  what the repack-identity gate measures. */
+quint16 WaterMarkDoc::automaticWord( quint16 id ) const
+{
+	if ( !id || int( id ) > table.size() )
+		return 0;
+	const LodtWaterBody & b = table[id - 1];
+	const double m = std::sqrt( double( b.flowX ) * b.flowX + double( b.flowY ) * b.flowY );
+	if ( m <= 0.0 )
+		return 0;
+	double a = std::atan2( double( b.flowY ), double( b.flowX ) );
+	if ( a < 0.0 )
+		a += kTwoPi;
+	const int dir = int( a / kTwoPi * 256.0 + 0.5 ) & 0xFF;
+	return quint16( dir | ( 8 << 8 ) );
+}
+
+quint16 WaterMarkDoc::flowWordAt( int px, int py ) const
+{
+	return flowWordOf( px, py, idAtTexel( px, py ) );
+}
+
+quint16 WaterMarkDoc::flowWordOf( int px, int py, quint16 id ) const
+{
+	if ( !id )
+		return 0;
+	auto it = fields.constFind( int( id ) );
+	if ( it != fields.constEnd() ) {
+		const Field * F = it.value();
+		if ( F->zero )
+			return 0;
+		if ( F->holds( px, py ) ) {
+			const size_t at = F->at( px, py );
+			if ( F->mask[at] ) {
+				const double vx = F->vx[at], vy = F->vy[at];
+				if ( std::fabs( vx ) < 1e-6 && std::fabs( vy ) < 1e-6 )
+					return automaticWord( id );
+				double a = std::atan2( vy, vx );
+				if ( a < 0.0 )
+					a += kTwoPi;
+				const int dir = int( a / kTwoPi * 256.0 + 0.5 ) & 0xFF;
+				return quint16( dir | ( quint16( F->speed[at] & 0xF ) << 8 )
+					| ( quint16( F->conf[at] & 0xF ) << 12 ) );
+			}
+		}
+	}
+	return automaticWord( id );
+}
+
+bool WaterMarkDoc::sweep( const std::function<void( int, int, quint16, quint16, quint16 )> & cb,
+	QString * error ) const
+{
+	if ( !opened || !reader ) {
+		if ( error )
+			*error = QStringLiteral( "no landscape file is open" );
+		return false;
+	}
+	QFile f( filePath );
+	if ( !f.open( QIODevice::ReadOnly ) ) {
+		if ( error )
+			*error = QStringLiteral( "could not open %1" ).arg( filePath );
+		return false;
+	}
+	const int e = idPlane.tileEdge;
+	QByteArray raw;
+	quint32 uni = 0;
+	bool isUni = false;
+	for ( int ty = 0; ty < idPlane.tilesY; ty++ ) {
+		for ( int tx = 0; tx < idPlane.tilesX; tx++ ) {
+			if ( !tileOf( f, idPlane, tx, ty, raw, uni, isUni ) ) {
+				if ( error )
+					*error = QStringLiteral( "tile %1,%2 of the body plane would not inflate" )
+						.arg( tx ).arg( ty );
+				return false;
+			}
+			for ( int j = 0; j < e; j++ ) {
+				for ( int i = 0; i < e; i++ ) {
+					const quint16 id = isUni ? quint16( uni )
+						: rd16( raw.constData() + ( qsizetype( j ) * e + i ) * 2 );
+					const int px = tx * e + i, py = ty * e + j;
+					cb( px, py, id, automaticWord( id ), flowWordOf( px, py, id ) );
+				}
+			}
+		}
+	}
+	return true;
+}
+
+bool WaterMarkDoc::setFlowRate( int samplesPerCell, QString * error )
+{
+	const int spc = lodl ? lodl->samplesPerCell() : 0;
+	if ( samplesPerCell <= 0 || !spc || spc % samplesPerCell ) {
+		if ( error )
+			*error = QStringLiteral( "a plane rate must divide the file's own %1 samples a cell; "
+				"%2 does not" ).arg( spc ).arg( samplesPerCell );
+		return false;
+	}
+	if ( int( flowRate ) != samplesPerCell ) {
+		flowRate = quint32( samplesPerCell );
+		dirty = true;
+	}
+	return true;
+}
+
+// =========================================================================
+//  save
+// =========================================================================
+
+/*! The flow plane, re-derived, as the bytes that would sit at `base`.
+ *
+ *  ONE function serves the save and the identity gate, which is the whole point:
+ *  the gate compares these bytes with the ones the WRITER put in the file, so a
+ *  drift between this file's packer and lodtfile.cpp's shows up as a byte
+ *  difference and not as a picture nobody looked at. */
+QByteArray WaterMarkDoc::packFlowPlane( quint64 base, QString * error ) const
+{
+	if ( !opened || !idPlane.ok ) {
+		if ( error )
+			*error = QStringLiteral( "no landscape file is open" );
+		return QByteArray();
+	}
+	const int spc = lodl->samplesPerCell();
+	const int fr = int( flowRate );
+	const int idStep = spc / int( idRate );
+	const int flowStep = spc / fr;
+	QFile idf( filePath );
+	if ( !idf.open( QIODevice::ReadOnly ) ) {
+		if ( error )
+			*error = QStringLiteral( "could not re-open %1 for the body plane" ).arg( filePath );
+		return QByteArray();
+	}
+	QByteArray idRaw;
+	quint32 idUni = 0;
+	bool idIsUni = false;
+	int cachedTx = -1, cachedTy = -1;
+	bool bad = false;
+	auto idAt = [&]( int px, int py ) -> quint16 {
+		const int e = idPlane.tileEdge;
+		const int tx = px / e, ty = py / e;
+		if ( px < 0 || py < 0 || tx >= idPlane.tilesX || ty >= idPlane.tilesY )
+			return 0;
+		if ( tx != cachedTx || ty != cachedTy ) {
+			if ( !tileOf( idf, idPlane, tx, ty, idRaw, idUni, idIsUni ) ) {
+				bad = true;
+				return 0;
+			}
+			cachedTx = tx;
+			cachedTy = ty;
+		}
+		if ( idIsUni )
+			return quint16( idUni );
+		return rd16( idRaw.constData() + ( qsizetype( py % e ) * e + ( px % e ) ) * 2 );
+	};
+	qint64 uniform = 0;
+	QByteArray plane = packPlane( idPlane.tilesX, idPlane.tilesY, fr, 2, base,
+		[&]( int tx, int ty, quint8 * dst ) {
+			for ( int j = 0; j < fr; j++ ) {
+				const qint64 gy = qint64( ty ) * spc + qint64( j ) * flowStep;
+				for ( int i = 0; i < fr; i++ ) {
+					const qint64 gx = qint64( tx ) * spc + qint64( i ) * flowStep;
+					const int px = int( gx / idStep ), py = int( gy / idStep );
+					const quint16 id = idAt( px, py );
+					const quint16 word = id ? flowWordOf( px, py, id ) : quint16( 0 );
+					dst[( j * fr + i ) * 2] = quint8( word & 0xFF );
+					dst[( j * fr + i ) * 2 + 1] = quint8( word >> 8 );
+				}
+			}
+		}, &uniform );
+	if ( bad ) {
+		if ( error )
+			*error = QStringLiteral( "a tile of the body-ID plane would not inflate" );
+		return QByteArray();
+	}
+	return plane;
+}
+
+bool WaterMarkDoc::tableRepackMatches() const
+{
+	return !originalTable.isEmpty() && encodeTable() == originalTable;
+}
+
+bool WaterMarkDoc::flowRepackMatches( qint64 * differingBytes, QString * error ) const
+{
+	if ( differingBytes )
+		*differingBytes = -1;
+	if ( !opened || !flowPlane.ok ) {
+		if ( error )
+			*error = QStringLiteral( "no landscape file is open" );
+		return false;
+	}
+	const QByteArray ours = packFlowPlane( oFlow, error );
+	if ( ours.isEmpty() )
+		return false;
+	QFile f( filePath );
+	if ( !f.open( QIODevice::ReadOnly ) ) {
+		if ( error )
+			*error = QStringLiteral( "could not open %1" ).arg( filePath );
+		return false;
+	}
+	f.seek( qint64( oFlow ) );
+	const QByteArray theirs = f.read( qint64( flowPlane.bytes ) );
+	qint64 diff = qAbs( qint64( ours.size() ) - qint64( theirs.size() ) );
+	const qint64 common = qMin( qint64( ours.size() ), qint64( theirs.size() ) );
+	for ( qint64 i = 0; i < common; i++ )
+		if ( ours.at( int( i ) ) != theirs.at( int( i ) ) )
+			diff++;
+	if ( differingBytes )
+		*differingBytes = diff;
+	return diff == 0;
+}
+
+bool WaterMarkDoc::copyRange( QFile & in, QFile & out, quint64 at, quint64 bytes,
+	QString * error ) const
+{
+	in.seek( qint64( at ) );
+	quint64 left = bytes;
+	while ( left ) {
+		const qint64 want = qint64( qMin<quint64>( left, 4u << 20 ) );
+		const QByteArray chunk = in.read( want );
+		if ( chunk.size() != want ) {
+			if ( error )
+				*error = QStringLiteral( "the file ends %1 bytes early at 0x%2" )
+					.arg( left ).arg( at, 0, 16 );
+			return false;
+		}
+		if ( out.write( chunk ) != chunk.size() ) {
+			if ( error )
+				*error = QStringLiteral( "could not write %1 bytes" ).arg( chunk.size() );
+			return false;
+		}
+		left -= quint64( chunk.size() );
+	}
+	return true;
+}
+
+/*! Write the file: everything up to the body table byte for byte, then the tail
+ *  re-derived.
+ *
+ *  The original is renamed aside rather than deleted (`.bak-watermark`), which
+ *  is this feature's zero-effort way back (CONSTITUTION rule 7). */
+bool WaterMarkDoc::save( QString * error )
+{
+	auto fail = [error]( const QString & m ) {
+		if ( error )
+			*error = m;
+		return false;
+	};
+	if ( !opened )
+		return fail( QStringLiteral( "no landscape file is open" ) );
+
+	const QString tmpPath = filePath + QStringLiteral( ".tmp-watermark" );
+	QFile::remove( tmpPath );
+	QFile in( filePath );
+	if ( !in.open( QIODevice::ReadOnly ) )
+		return fail( QStringLiteral( "could not read %1" ).arg( filePath ) );
+	QFile out( tmpPath );
+	if ( !out.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
+		return fail( QStringLiteral( "could not write %1" ).arg( tmpPath ) );
+
+	QByteArray hdr = in.read( kHdrV3 );
+	if ( hdr.size() != kHdrV3 )
+		return fail( QStringLiteral( "%1 has no version-3 header" ).arg( filePath ) );
+	// the header is rewritten at the end; write a placeholder so offsets are real
+	if ( out.write( hdr ) != hdr.size() )
+		return fail( QStringLiteral( "could not write the header" ) );
+	if ( !copyRange( in, out, quint64( kHdrV3 ), oBody - quint64( kHdrV3 ), error ) )
+		return false;
+
+	quint64 pos = oBody;
+	const QByteArray tableBytes = encodeTable();
+	if ( out.write( tableBytes ) != tableBytes.size() )
+		return fail( QStringLiteral( "could not write the body table" ) );
+	patch64( hdr, kOffBody, pos );
+	patch32( hdr, kOffBodyN, quint32( table.size() ) );
+	patch32( hdr, kOffStride, quint32( kBodyRecord ) );
+	pos += quint64( tableBytes.size() );
+
+	const QByteArray nameBytes = encodeNames();
+	patch64( hdr, kOffName, nameBytes.isEmpty() ? quint64( 0 ) : pos );
+	patch32( hdr, kOffNameLen, quint32( nameBytes.size() ) );
+	if ( !nameBytes.isEmpty() ) {
+		if ( out.write( nameBytes ) != nameBytes.size() )
+			return fail( QStringLiteral( "could not write the body name blob" ) );
+		pos += quint64( nameBytes.size() );
+	}
+
+	const QByteArray strokeBytes = encodeStrokes();
+	patch64( hdr, kOffStroke, pos );
+	patch32( hdr, kOffStrokeL, quint32( strokeBytes.size() ) );
+	if ( out.write( strokeBytes ) != strokeBytes.size() )
+		return fail( QStringLiteral( "could not write the stroke store" ) );
+	pos += quint64( strokeBytes.size() );
+
+	// the body-ID plane: verbatim, rebased. Nothing here can move a body's shape.
+	{
+		in.seek( qint64( oId ) );
+		const QByteArray bytes = in.read( qint64( idPlane.bytes ) );
+		if ( bytes.size() != qint64( idPlane.bytes ) )
+			return fail( QStringLiteral( "the body-ID plane is short on disk" ) );
+		const QByteArray moved = rebasePlane( bytes, oId, pos );
+		if ( out.write( moved ) != moved.size() )
+			return fail( QStringLiteral( "could not write the body-ID plane" ) );
+		patch32( hdr, kOffIdRate, idRate );
+		patch64( hdr, kOffId, pos );
+		pos += quint64( moved.size() );
+	}
+
+	// the flow plane: RE-DERIVED, tile by tile, from the id plane and the fields
+	{
+		QString perr;
+		const QByteArray plane = packFlowPlane( pos, &perr );
+		if ( plane.isEmpty() )
+			return fail( perr );
+		if ( out.write( plane ) != plane.size() )
+			return fail( QStringLiteral( "could not write the flow plane" ) );
+		patch32( hdr, kOffFlowRt, flowRate );
+		patch32( hdr, kOffFlowEnc, 0 );
+		patch64( hdr, kOffFlow, pos );
+		pos += quint64( plane.size() );
+	}
+
+	// the shore plane: verbatim, rebased, for the same reason as the id plane
+	if ( oShore && shorePlane.ok ) {
+		in.seek( qint64( oShore ) );
+		const QByteArray bytes = in.read( qint64( shorePlane.bytes ) );
+		if ( bytes.size() != qint64( shorePlane.bytes ) )
+			return fail( QStringLiteral( "the shore plane is short on disk" ) );
+		const QByteArray moved = rebasePlane( bytes, oShore, pos );
+		if ( out.write( moved ) != moved.size() )
+			return fail( QStringLiteral( "could not write the shore plane" ) );
+		patch32( hdr, kOffShoreRt, shoreRate );
+		patch32( hdr, kOffShoreQ, shoreQuantum );
+		patch64( hdr, kOffShore, pos );
+		pos += quint64( moved.size() );
+	}
+
+	patch64( hdr, kOffSize, pos );
+	patch32( hdr, kOffSect, sect );
+	out.seek( 0 );
+	if ( out.write( hdr ) != hdr.size() )
+		return fail( QStringLiteral( "could not rewrite the header" ) );
+	out.close();
+	in.close();
+
+	/* The reader holds the file open, and Windows will not rename over an open
+	 * handle. Close it, move the original aside, put the new file in its place,
+	 * and re-open. The .bak-watermark is the way back. */
+	delete reader;
+	reader = nullptr;
+	delete lodl;
+	lodl = nullptr;
+	opened = false;
+	const QString bak = filePath + QStringLiteral( ".bak-watermark" );
+	QFile::remove( bak );
+	if ( !QFile::rename( filePath, bak ) ) {
+		QFile::remove( tmpPath );
+		return fail( QStringLiteral( "could not move %1 aside" ).arg( filePath ) );
+	}
+	if ( !QFile::rename( tmpPath, filePath ) ) {
+		QFile::rename( bak, filePath );
+		return fail( QStringLiteral( "could not put the new %1 in place" ).arg( filePath ) );
+	}
+	/* Re-open the file we just wrote, and take the strokes and the locks back
+	 * OUT of it rather than out of memory. That is what makes "save then reopen
+	 * gives the same strokes" a property of the file and not of this object. */
+	const QString keep = filePath;
+	const int wrote = marks.size();
+	QString err;
+	if ( !open( keep, &err ) )
+		return fail( QStringLiteral( "the file was written but will not re-open: %1" ).arg( err ) );
+	if ( marks.size() != wrote )
+		return fail( QStringLiteral( "%1 strokes were written and %2 read back" )
+			.arg( wrote ).arg( marks.size() ) );
+	/* Re-solve from the strokes that came back, so what the panel shows after a
+	 * save is what the file now holds. The solve is idempotent on its own
+	 * output -- the strokes and the speeds are unchanged, so it lands on the
+	 * same field -- and the round-trip gate is exactly that claim. */
+	{
+		WaterMarkSolve st;
+		QString serr;
+		solve( &st, &serr );
+	}
+	dirty = false;
+	return true;
+}
+
+QString WaterMarkDoc::describeBody( int id ) const
+{
+	LodtWaterBody b;
+	if ( !body( id, b ) )
+		return QStringLiteral( "no body selected" );
+	static const char * kCls[3] = { "sea", "river", "lake" };
+	static const char * kSrc[5] = { "none", "the water form's own velocity", "the river bed",
+		"a lower body nearby", "a stroke" };
+	const QString nm = bodyName( id );
+	const QString dot = QStringLiteral( "  -  " );
+	QString s = QStringLiteral( "body %1" ).arg( id );
+	if ( !nm.isEmpty() )
+		s += QStringLiteral( " \"%1\"" ).arg( nm );
+	s += dot + QStringLiteral( "%1" ).arg( QLatin1String( kCls[qBound( 0, int( b.cls ), 2 )] ) );
+	s += dot + QStringLiteral( "%L1 texels" ).arg( b.area );
+	s += dot + QStringLiteral( "plane %1" ).arg( double( b.waterHeight ), 0, 'f', 1 );
+	s += dot + QStringLiteral( "water form %1" ).arg( b.watrForm, 8, 16, QLatin1Char( '0' ) );
+	s += dot + QStringLiteral( "flow from %1" )
+		.arg( QLatin1String( kSrc[qBound( 0, int( b.flowSource ), 4 )] ) );
+	if ( b.colour[3] )
+		s += dot + QStringLiteral( "colour override" );
+	return s;
+}
+
+// =========================================================================
+//  the harness (the headless half of WW_WATER_MARK_TEST)
+// =========================================================================
+
+/*! Every case carries the floor that stops an empty implementation passing,
+ *  and the refuter is run BEFORE the check it protects is believed. */
+bool lodtWaterMarkSelfTest( const QString & path, QString * text, QString * error )
+{
+	QString rep;
+	int checks = 0, fails = 0;
+	auto check = [&]( const QString & what, bool pass ) {
+		checks++;
+		if ( !pass )
+			fails++;
+		rep += ( pass ? QStringLiteral( "  ok   " ) : QStringLiteral( "  FAIL " ) ) + what
+			+ QStringLiteral( "\n" );
+	};
+	auto say = [&]( const QString & s ) { rep += s + QStringLiteral( "\n" ); };
+
+	WaterMarkDoc doc;
+	QString err;
+	if ( !doc.open( path, &err ) ) {
+		if ( error )
+			*error = err;
+		return false;
+	}
+	say( QStringLiteral( "file %1  bodies %2  strokes %3  flow rate %4" )
+		.arg( QFileInfo( path ).fileName() ).arg( doc.bodyCount() )
+		.arg( doc.strokes().size() ).arg( doc.flowSamples() ) );
+
+	/* ---- 1. THE TWO IDENTITY GATES -----------------------------------------
+	 * Everything below rests on these: this file re-implements the writer's
+	 * body-table encoder and its plane packer, and the only honest defence of a
+	 * twin is that it reproduces the original's bytes on the original's own
+	 * input. If either goes red, nothing after it means anything. */
+	check( QStringLiteral( "the body table re-encodes to the bytes the writer wrote" ),
+		doc.tableRepackMatches() );
+	{
+		qint64 diff = -1;
+		const bool same = doc.flowRepackMatches( &diff, &err );
+		check( QStringLiteral( "the flow plane re-derives to the bytes the writer wrote "
+			"(%1 bytes differ)" ).arg( diff ), same );
+	}
+	const QByteArray beforeAll = [&]() {
+		QFile f( path );
+		return f.open( QIODevice::ReadOnly ) ? f.readAll() : QByteArray();
+	}();
+	check( QStringLiteral( "the file was read whole for the undo gate (%1 bytes)" )
+		.arg( beforeAll.size() ), beforeAll.size() > 0 );
+
+	/* ---- 2. pick the biggest river and its biggest neighbour --------------
+	 * Nothing here is hard-coded to the Commonwealth: the case is "the largest
+	 * river" and "the largest OTHER body of at least a quarter its area", so
+	 * the same harness runs on any worldspace. On the Commonwealth those are
+	 * body 3 (the Charles) and body 2 (the marsh). */
+	int river = 0, neighbour = 0;
+	quint32 bestArea = 0, bestOther = 0;
+	for ( int i = 1; i <= doc.bodyCount(); i++ ) {
+		LodtWaterBody b;
+		doc.body( i, b );
+		if ( b.cls == 1 && b.area > bestArea ) {
+			bestArea = b.area;
+			river = i;
+		}
+	}
+	for ( int i = 1; i <= doc.bodyCount(); i++ ) {
+		LodtWaterBody b;
+		doc.body( i, b );
+		if ( i != river && b.cls != 0 && b.area > bestOther ) {
+			bestOther = b.area;
+			neighbour = i;
+		}
+	}
+	check( QStringLiteral( "the file offers a river and a second body to mark" ),
+		river > 0 && neighbour > 0 && river != neighbour );
+	if ( !river || !neighbour ) {
+		if ( text )
+			*text = rep;
+		if ( error )
+			*error = QStringLiteral( "no river to mark" );
+		return false;
+	}
+	LodtWaterBody rb, nb;
+	doc.body( river, rb );
+	doc.body( neighbour, nb );
+	say( QStringLiteral( "river  = body %1, %2 texels, cells (%3..%4, %5..%6)" )
+		.arg( river ).arg( rb.area ).arg( rb.x0 ).arg( rb.x1 ).arg( rb.y0 ).arg( rb.y1 ) );
+	say( QStringLiteral( "neighbour = body %1, %2 texels" ).arg( neighbour ).arg( nb.area ) );
+
+	// ---- 3. a stroke down the river's own axis -----------------------------
+	auto axisStroke = [&]( const LodtWaterBody & b ) {
+		/* From one end of the body's bounding box to the other along its longer
+		 * side, sampled every cell, and every point that misses the body is
+		 * dropped -- so the stroke is a real line down the water, not a
+		 * diagonal through the land beside it. */
+		WaterStroke s;
+		s.kind = WaterStroke::Stroke;
+		s.flags = WaterStroke::SetsDirection | WaterStroke::SetsSpeed;
+		s.speed = 0.5f;
+		s.width = 4096.0f;
+		const double x0 = ( double( b.x0 ) + 0.5 ) * kCellUnits;
+		const double x1 = ( double( b.x1 ) + 0.5 ) * kCellUnits;
+		const double y0 = ( double( b.y0 ) + 0.5 ) * kCellUnits;
+		const double y1 = ( double( b.y1 ) + 0.5 ) * kCellUnits;
+		const int steps = 64;
+		for ( int k = 0; k <= steps; k++ ) {
+			const double t = double( k ) / steps;
+			const double wx = x0 + ( x1 - x0 ) * t;
+			const double wy = y0 + ( y1 - y0 ) * t;
+			if ( !doc.bodyAtWorld( wx, wy ) )
+				continue;
+			WaterStrokePoint p;
+			p.x = float( wx );
+			p.y = float( wy );
+			s.pts.append( p );
+		}
+		return s;
+	};
+
+	// ---- 4. THE REFUTER, run FIRST -----------------------------------------
+	{
+		WaterStroke s = axisStroke( nb );
+		QString msg;
+		const bool added = doc.addStroke( s, &msg );
+		check( QStringLiteral( "the refuter's stroke lands on the neighbour: %1" ).arg( msg ),
+			added && !doc.strokesOfBody( neighbour ).isEmpty() );
+		WaterMarkSolve st;
+		doc.solve( &st, &err );
+		qint64 movedRiver = 0, movedOther = 0;
+		doc.sweep( [&]( int, int, quint16 id, quint16 a, quint16 n ) {
+			if ( a == n )
+				return;
+			if ( int( id ) == river )
+				movedRiver++;
+			else
+				movedOther++;
+		}, &err );
+		check( QStringLiteral( "RED FIRST: a stroke on body %1 moves %2 of its own texels" )
+			.arg( neighbour ).arg( movedOther ), movedOther > 0 );
+		check( QStringLiteral( "RED FIRST: and moves 0 texels of body %1 (measured %2) -- so the "
+			"isolation check below can fail" ).arg( river ).arg( movedRiver ), movedRiver == 0 );
+		doc.clearStrokes();
+		doc.solve( &st, &err );
+	}
+
+	/* ---- 5. ONE STROKE SENDS THE RIVER TO THE SEA -------------------------
+	 * bungo's sentence, as a measurement: *"rivers end up at sea"*. The mouth
+	 * is found from the file -- the river texel nearest a texel of the body it
+	 * drains into -- the stroke is oriented to END there, and the gate is that
+	 * the FLOW PLANE's mean direction over the whole body points at the mouth.
+	 * Both the before and after angles are printed, so a reader can see which
+	 * way it pointed before anybody marked it. */
+	double mouthX = 0.0, mouthY = 0.0, cenX = 0.0, cenY = 0.0;
+	bool haveMouth = false;
+	{
+		const int outlet = rb.outlet ? int( rb.outlet ) : 1;   // the sea, when nothing else
+		qint64 nRiver = 0;
+		double best = 1e30;
+		const int pad = 8;
+		int px0 = 0, py0 = 0, px1 = 0, py1 = 0;
+		doc.worldToTexel( ( double( rb.x0 ) ) * kCellUnits, ( double( rb.y0 ) ) * kCellUnits, px0, py0 );
+		doc.worldToTexel( ( double( rb.x1 ) + 1.0 ) * kCellUnits,
+			( double( rb.y1 ) + 1.0 ) * kCellUnits, px1, py1 );
+		// centroid of the river, and the nearest outlet texel to it
+		for ( int py = py0; py <= py1; py++ ) {
+			for ( int px = px0; px <= px1; px++ ) {
+				double wx = 0, wy = 0;
+				doc.texelToWorld( px, py, wx, wy );
+				if ( doc.bodyAtWorld( wx, wy ) != quint16( river ) )
+					continue;
+				nRiver++;
+				cenX += wx;
+				cenY += wy;
+			}
+		}
+		if ( nRiver ) {
+			cenX /= double( nRiver );
+			cenY /= double( nRiver );
+		}
+		for ( int py = py0 - pad; py <= py1 + pad; py++ ) {
+			for ( int px = px0 - pad; px <= px1 + pad; px++ ) {
+				double wx = 0, wy = 0;
+				doc.texelToWorld( px, py, wx, wy );
+				if ( int( doc.bodyAtWorld( wx, wy ) ) != outlet )
+					continue;
+				const double d = ( wx - cenX ) * ( wx - cenX ) + ( wy - cenY ) * ( wy - cenY );
+				if ( d < best ) {
+					best = d;
+					mouthX = wx;
+					mouthY = wy;
+					haveMouth = true;
+				}
+			}
+		}
+		say( QStringLiteral( "the river drains into body %1; its mouth is at (%2, %3) and its "
+			"centroid at (%4, %5)" ).arg( outlet ).arg( mouthX, 0, 'f', 0 ).arg( mouthY, 0, 'f', 0 )
+			.arg( cenX, 0, 'f', 0 ).arg( cenY, 0, 'f', 0 ) );
+		check( QStringLiteral( "a mouth was found in the file, not assumed" ), haveMouth );
+	}
+	{
+		WaterStroke s = axisStroke( rb );
+		if ( haveMouth && s.pts.size() >= 2 ) {
+			const double dA = std::hypot( double( s.pts.first().x ) - mouthX,
+				double( s.pts.first().y ) - mouthY );
+			const double dB = std::hypot( double( s.pts.last().x ) - mouthX,
+				double( s.pts.last().y ) - mouthY );
+			if ( dA < dB ) {
+				QVector<WaterStrokePoint> r;
+				for ( int i = s.pts.size() - 1; i >= 0; i-- )
+					r.append( s.pts[i] );
+				s.pts = r;
+			}
+		}
+		QString msg;
+		const bool added = doc.addStroke( s, &msg );
+		check( QStringLiteral( "the stroke lands on the river: %1" ).arg( msg ), added );
+		WaterMarkSolve st;
+		doc.solve( &st, &err );
+		say( QStringLiteral( "solve: %1" ).arg( st.note ) );
+		qint64 inside = 0, outside = 0, wetRiver = 0;
+		double sx = 0.0, sy = 0.0, bx = 0.0, by = 0.0;
+		doc.sweep( [&]( int, int, quint16 id, quint16 a, quint16 n ) {
+			if ( int( id ) == river ) {
+				wetRiver++;
+				const double ang = double( n & 0xFF ) / 256.0 * kTwoPi;
+				sx += std::cos( ang );
+				sy += std::sin( ang );
+				const double ang0 = double( a & 0xFF ) / 256.0 * kTwoPi;
+				bx += std::cos( ang0 );
+				by += std::sin( ang0 );
+			}
+			if ( a == n )
+				return;
+			if ( int( id ) == river )
+				inside++;
+			else
+				outside++;
+		}, &err );
+		check( QStringLiteral( "P1 isolation: 0 texels outside body %1 changed (measured %2)" )
+			.arg( river ).arg( outside ), outside == 0 );
+		const double frac = wetRiver ? double( inside ) / double( wetRiver ) : 0.0;
+		check( QStringLiteral( "P1 floor: at least 60 per cent of body %1's own texels changed "
+			"(measured %2 of %3 = %4 per cent)" ).arg( river ).arg( inside ).arg( wetRiver )
+			.arg( frac * 100.0, 0, 'f', 1 ), frac >= 0.60 );
+		LodtWaterBody after;
+		doc.body( river, after );
+		check( QStringLiteral( "the body's flow source moved %1 -> 4 (a stroke)" )
+			.arg( rb.flowSource ), after.flowSource == 4 );
+		const double deg = 180.0 / 3.14159265358979;
+		const double meanAng = std::atan2( sy, sx ) * deg;
+		const double beforeAng = std::atan2( by, bx ) * deg;
+		say( QStringLiteral( "the flow plane's MEAN direction over body %1: %2 degrees before, "
+			"%3 degrees after" ).arg( river ).arg( beforeAng, 0, 'f', 2 ).arg( meanAng, 0, 'f', 2 ) );
+		if ( haveMouth ) {
+			const double tx = mouthX - cenX, ty = mouthY - cenY;
+			const double tm = std::hypot( tx, ty );
+			const double sm = std::hypot( sx, sy );
+			const double dot = tm > 0 && sm > 0 ? ( tx * sx + ty * sy ) / ( tm * sm ) : 0.0;
+			const double toMouth = std::atan2( ty, tx ) * deg;
+			say( QStringLiteral( "the direction from the river's centroid to its mouth is %1 "
+				"degrees; the plane's mean agrees to %2 degrees" ).arg( toMouth, 0, 'f', 2 )
+				.arg( std::acos( qBound( -1.0, dot, 1.0 ) ) * deg, 0, 'f', 2 ) );
+			check( QStringLiteral( "\"rivers end up at sea\": the marked plane's mean direction "
+				"points at the mouth (cos = %1, needs > 0)" ).arg( dot, 0, 'f', 3 ), dot > 0.0 );
+		}
+	}
+
+	// ---- 6. a stroke on dry land is refused in words ------------------------
+	{
+		double x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+		doc.worldBounds( x0, y0, x1, y1 );
+		WaterStroke s;
+		s.kind = WaterStroke::Stroke;
+		// the worldspace's own corner: as dry as this file gets
+		WaterStrokePoint a, b;
+		a.x = float( x0 + 8.0 );
+		a.y = float( y0 + 8.0 );
+		b.x = float( x0 + 4096.0 );
+		b.y = float( y0 + 8.0 );
+		s.pts << a << b;
+		const int before = doc.strokes().size();
+		QString msg;
+		const bool ok = doc.addStroke( s, &msg );
+		check( QStringLiteral( "a stroke on dry land is refused, in words: \"%1\"" ).arg( msg ),
+			!ok && !msg.isEmpty() && doc.strokes().size() == before );
+	}
+
+	/* ---- 7. save, reopen, save again, and undo ----------------------------
+	 * THIS REWRITES THE FILE IT WAS GIVEN, which is why the harness runs it on
+	 * a copy and says so. Three properties, in the order they can fail:
+	 *   the strokes come back out of the file;
+	 *   saving the re-opened document reproduces the same bytes;
+	 *   removing the stroke and saving reproduces the file it started from.
+	 * The last is why the flow plane had to be a pure function of the id plane
+	 * and the table: with the stroke gone there is nothing left to remember. */
+	{
+		const int wrote = doc.strokes().size();
+		if ( !doc.save( &err ) ) {
+			check( QStringLiteral( "the marked file saves: %1" ).arg( err ), false );
+		} else {
+			check( QStringLiteral( "the marked file saves and re-opens with its %1 stroke(s)" )
+				.arg( wrote ), doc.strokes().size() == wrote );
+			QFile f1( path );
+			const QByteArray once = f1.open( QIODevice::ReadOnly )
+				? f1.readAll() : QByteArray();
+			f1.close();
+			check( QStringLiteral( "the marked file differs from the unmarked one (%1 vs %2 bytes)" )
+				.arg( once.size() ).arg( beforeAll.size() ), once != beforeAll );
+			if ( !doc.save( &err ) ) {
+				check( QStringLiteral( "the re-opened document saves again: %1" ).arg( err ), false );
+			} else {
+				QFile f2( path );
+				const QByteArray twice = f2.open( QIODevice::ReadOnly )
+					? f2.readAll() : QByteArray();
+				f2.close();
+				check( QStringLiteral( "P8 round trip: save, reopen, save is byte-identical "
+					"(%1 vs %2 bytes)" ).arg( once.size() ).arg( twice.size() ), once == twice );
+			}
+			doc.clearStrokes();
+			WaterMarkSolve st;
+			doc.solve( &st, &err );
+			if ( !doc.save( &err ) ) {
+				check( QStringLiteral( "the undone document saves: %1" ).arg( err ), false );
+			} else {
+				QFile f3( path );
+				const QByteArray undone = f3.open( QIODevice::ReadOnly )
+					? f3.readAll() : QByteArray();
+				f3.close();
+				qint64 diff = qAbs( qint64( undone.size() ) - qint64( beforeAll.size() ) );
+				const qint64 common = qMin( qint64( undone.size() ), qint64( beforeAll.size() ) );
+				for ( qint64 i = 0; i < common; i++ )
+					if ( undone.at( int( i ) ) != beforeAll.at( int( i ) ) )
+						diff++;
+				check( QStringLiteral( "P3 undo: removing the stroke reproduces the file it "
+					"started from, byte for byte (%1 bytes differ)" ).arg( diff ), diff == 0 );
+			}
+		}
+	}
+
+	if ( text )
+		*text = rep + QStringLiteral( "%1 checks, %2 failures\n%3\n" )
+			.arg( checks ).arg( fails )
+			.arg( fails ? QStringLiteral( "water mark selftest FAIL" )
+				: QStringLiteral( "water mark selftest PASS" ) );
+	return fails == 0;
+}

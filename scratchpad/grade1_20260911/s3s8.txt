@@ -1,0 +1,378 @@
+## 3. The change
+
+`--grade K`, one multiply, in both colour writers.
+
+```cpp
+/* THE GRADE, last before quantisation and after the road and the
+ * tint, so the road is graded with the ground it sits in (lane
+ * GRADE1). The crevice term runs LATER still, on the finished
+ * 8-bit sheet, and is deliberately not scaled: -3.242 was fitted
+ * in levels against vanilla's own residual. At 1.0 this branch is
+ * not taken at all, which is what makes the off value the previous
+ * bake's bytes rather than a float argument about 1.0f. */
+if ( g_landGrade != 1.0f )
+    for ( int k = 0; k < 3; k++ )
+        color[k] *= g_landGrade;
+```
+
+| where | line | what |
+|---|---|---|
+| the state | `src/lodgen.cpp:6260` | `static float g_landGrade = 1.0f;` |
+| the accessors | `src/lodgen.cpp:6300, 6305` | setter clamps to 0..4 |
+| the stock chunk writer | `src/lodgen.cpp:7962` | the two lines above |
+| the pyramid writer (the one that ships) | `src/lodgen.cpp:9258` | the same two lines |
+| the census, JSON and text | `src/lodgen.cpp:8035, 10110` | `landGrade` |
+| the declarations | `src/lodgen.h:270` | |
+| the flag | `src/nifcli.cpp:6166` | `--grade` |
+
+Four decisions inside that, each with its reason:
+
+**The off value is a branch, not an argument about floats.** `x * 1.0f` is
+exact in IEEE for every finite `x`, so a multiply would also have been
+byte-identical -- but proving that requires an argument about rounding modes and
+about what the compiler does with `-ffast-math` on some future build, and the
+brief asked for "byte-identical to the rung" as a property of the change, not of
+the toolchain. Skipping the branch makes it structural. It was still MEASURED
+(gate S1, below), because a property one reasons about is not a property one has
+checked.
+
+**Where in the order.** After the layer blend, after the VCLR multiply, after
+the road composite and after the grass tint; before quantisation to bytes.
+Grading after the road means a road is graded with the ground it sits in, so the
+brief's "road colour within the ground's tolerance" holds by construction at any
+k rather than needing its own number. Grading before quantisation means the
+rounding happens once.
+
+**The crevice term is deliberately NOT graded.** `dL = -3.242 * div(n)` runs
+after the per-texel loop, on the finished 8-bit sheet, in LEVELS -- it was fitted
+against vanilla's own residual in levels, so scaling it by k would move a
+constant that was measured against the thing we are grading towards. This is the
+one term the grade skips, and it is the larger half of the S2 gap.
+
+**Both writers, not just the pyramid.** The pyramid is what ships, but the stock
+per-chunk sheets are what the unmodified engine reads, and a knob that made the
+two disagree would be a trap for the next lane. The anchor `if ( g_landGrade !=
+1.0f )` occurs exactly twice in `lodgen.cpp` and that count is the claim.
+
+**And the value that ships is 1.0** -- see gate S4. The knob exists so the
+question can be asked again on other worldspaces with one flag and no build; it
+does not exist because a value was found.
+
+## 4. Build and gates
+
+### 4.1 The build
+
+One build, no relinks.
+
+```
+bash tools/ww_build.sh src/lodgen.cpp src/lodgen.h src/nifcli.cpp
+  exe not held by a window          (no NifSkope process at all; Fallout4.exe absent)
+  BUILD-RC=0
+  exe newer than the sources
+  copies in step                    (res/style.qss == release/style.qss)
+```
+
+| | path | time | bytes | md5 |
+|---|---|---|---|---|
+| the rung (TILING4's DONE exe, = this lane's launch exe) | `release/NifSkope.before_grade1.exe` | 2026-09-12 02:08:57 | 21,487,616 | `8a1a1e718c6d6822ad0d60b90803fd69` |
+| this lane's | `release/NifSkope.exe` | 2026-09-12 03:06:21 | 21,489,152 | `6af74b4b4667ce50c4506a2d42a04fdf` |
+
+The rung was preserved by copy before the build and is byte-for-byte the exe the
+brief names, so every "the rung's bytes" claim below is against the launch
+binary and not against a rebuild of it.
+
+### 4.2 The ship gates, measured through the binary
+
+`g6_gates.py`, log `logs/g6_gates.txt`: **8 checks, 0 failures.**
+
+**S1 -- off == the rung's bytes.** Both test tiles baked by the new exe with no
+flag, and again with `--grade 1.0`, against the rung's bakes: colour, `_data`,
+`_msn`, the two `.lodt` levels and the `.lodm`, twice per tile per arm --
+**24 of 24 files byte-identical**. Not "no visible difference": `cmp`.
+
+**S2 -- the binary agrees with the model.** Tolerance 1.0 level of RGB RMS,
+registered in 0a with both gap sources named in advance.
+
+| tile | k | before | Python predicts | the binary gives | gap |
+|---|---|---|---|---|---|
+| (-20,24) | 0.8916 | 20.127 | 17.524 | 17.555 | +0.031 |
+| (-20,20) | 1.1180 | 21.897 | 20.410 | 20.544 | +0.134 |
+| (-20,24) | 0.8403 | 20.127 | 18.000 | 18.108 | +0.108 |
+| (-20,20) | 0.8403 | 21.897 | 28.316 | 28.488 | +0.173 |
+
+Every gap is positive and grows with |1-k|, which is the ungraded crevice term
+behaving exactly as predicted; the BC1 floor (0.497 / 0.527) accounts for the
+rest. The model in section 1 therefore describes the shipping code, not a
+prototype.
+
+**S3 -- the mechanism works.** (-20,24) 20.127 -> 17.555 (-12.8 %); (-20,20)
+21.897 -> 20.544 (-6.2 %). Each with its OWN k.
+
+**S4 -- the refusal, as an assertion.** The pooled census optimum k = 0.8403,
+through the binary: (-20,24) 20.127 -> 18.108 (better) and (-20,20) 21.897 ->
+**28.488** (worse by 30 %). The assertion is that exactly one of the two
+improves, and it passes. This is the gate the brief asked for -- "after, whole-
+tile error vs vanilla reduced on both tiles" -- and it is **refused, with the
+arithmetic in section 2 and the number here**, per `gate-refused-with-numbers`:
+the error in k is a parabola whose vertex is the tile's own k_opt, the two
+vertices straddle 1, so no constant can satisfy it and 1 is the off value.
+
+**S5 -- the flag is new.** The rung exe exits 2 with `error: unknown option
+--grade`, so no arm above could have come from it.
+
+### 4.3 The brief's gates
+
+| | gate | result |
+|---|---|---|
+| G1 | known-answer controls recover a synthetic gamma and gain to 3 decimals before any verdict | **PASS** -- 24 checks, 0 failures, both tiles, `logs/g0_controls.txt`, run before section 1 was written |
+| G2 | the fingerprint named, with residuals for all three models on both tiles | **PASS** -- section 1.1's table and section 2 |
+| G3 | switch off == rung bytes; then whole-tile error reduced on both tiles, ground/cover/road separately, road within the ground's tolerance | **HALF PASS, HALF REFUSED**. Off == rung bytes: 24/24. Ground/cover/road: reported in 1.5 and 2.1 (cover is empty, n=0, see G4). Road within the ground's tolerance: by construction -- the grade is applied after the road composite, so the road's ratio to its ground is invariant in k. "Reduced on both tiles": **refused with arithmetic and asserted as S4** |
+| G4 | tint strength decided by a number | **ANSWERED BY A ZERO** -- the cover plane is empty on all 25 census tiles, the tint branch never executes, so no texel exists on which a strength could be fitted. 0.35 stands and the empty plane is a red (section 6) |
+| G5 | exe newer than every changed file; drivers rebuilt; rung == launch bytes; no NifSkope left running | **PASS** -- see below |
+
+G5 in detail. `test release/NifSkope.exe -nt <f>` is true for all three changed
+sources (the doc and this report were written after the link and are not compiled
+inputs). **Gate drivers: there are none to rebuild** -- every one of the eight
+harnesses executes `release/NifSkope.exe` and nothing else, checked by grepping
+the eight scripts for `release/*.exe`. The rung is byte-identical to the launch
+exe (md5 above). `Get-CimInstance Win32_Process` for `NifSkope.exe` and
+`Fallout4.exe` returns **nothing** -- checked immediately before the link and
+again at the end of the lane. Lane UINOTES1's tree (`E:\Projects\NifskopeWWE_ui`)
+was never touched and no GUI was launched by this lane at all: every instrument
+here is `-no-gui`.
+
+### 4.4 The harness chain
+
+All eight at ROADS2's baselines, exactly:
+
+| harness | this lane | ROADS2's baseline |
+|---|---|---|
+| lodgen_terrain | 26 checks, 0 failures | 26/0 |
+| lodgen_terrain_vt | 41 checks, 1 failure | 41/1 |
+| lodgen_roads | 11 checks, 0 failures | 11/0 |
+| lodgen_ground_cover | 29 checks, 5 failures | 29/5 |
+| lodl_open | 23 checks, 0 failures | 23/0 |
+| lod_generation | 116 checks, 0 failures (floor 116) | 116/0 |
+| lodgen_native | 18 checks, 0 failures | 18/0 |
+| lodgen_terrain_pbrm | 14 checks, 0 failures | 14/0 |
+
+The two reds are pre-existing and are not this lane's: they were red at the same
+counts on the rung. Why these eight and not others: the change is in the two
+colour writers and in the CLI, so every harness that bakes terrain colour, roads,
+cover or the VT pyramid is in scope, plus the two that open the products. The
+change is inert at the default, so a green chain is the expected result and the
+gate that discriminates is S1's byte equality, not these counts -- which is why
+S1 is a gate and this is a regression check.
+
+## 5. Pictures
+
+Both were specified in `g7_pictures.py`'s docstring before either was drawn, and
+both were opened and read afterwards -- which is how two defects were caught
+(section 7).
+
+### `images/cmp_tone.png` (1444x946)
+
+**What it must show:** that the two reference chunks want grades in OPPOSITE
+directions, on the sheets themselves, with the numbers burned in so no caption
+can drift from them. Two rows, one per chunk; four panels a row -- vanilla as
+shipped, ours at the rung, ours at that chunk's own best grade, and the
+luminance difference of the graded sheet against vanilla at +-40 levels, blue
+where we are darker and red where we are brighter.
+
+**What it does show.** Row 1, chunk (-20,24): vanilla mean luminance 80.82,
+ours 87.61 -- we are the brighter sheet, and `--grade 0.8916` brings it to 78.13
+with RGB RMS 20.127 -> 17.555. Row 2, chunk (-20,20): vanilla 84.33, ours 71.65
+-- we are the DARKER sheet, and the correction runs the other way,
+`--grade 1.1180` to 79.99, 21.897 -> 20.544. The two difference maps are the
+finding: row 1 is red over most of its area with a blue band along the northern
+ridge, row 2 is blue over most of its area -- and in row 2 the road traces
+through it in solid red, which is the +6.27-level road bias of section 2.1 made
+visible. Neither map is a flat tint, which is what a grade error would look like.
+Saturation is printed on every panel and barely moves between the rung and the
+graded sheet (0.2453 -> 0.2461, 0.2655 -> 0.2645), because a gain cannot move it
+-- the chroma finding of section 1.2, visible.
+
+### `images/curve.png` (1232x1058)
+
+**What it must show:** why the affine and gamma fits are not transfer curves,
+and why no constant ships. Three panels a row. Left: the log-density scatter of
+ours (x) against vanilla (y) over the ground texels with all three fitted curves
+drawn over the identity. Middle: the histogram of per-region optimal gains --
+the 96 land cells on row 1, the 25 census tiles on row 2 -- with 1.0 marked.
+Right: the spatial map of the residual after that tile's best gain.
+
+**What it does show.** In both scatters the affine (blue) and gamma (green)
+curves are nearly FLAT -- they leave the identity at the left edge and run
+horizontally through the cloud's centre, which is a regression predicting the
+mean of its target and nothing else (slopes 0.019 and 0.185; their RMS, 9.47 and
+11.32, is vanilla's own standard deviation, 9.478 and 11.899). The gain (red)
+is the only line that stays a line through the origin. The cloud itself is a
+blob, not a ridge: r = 0.034 and 0.314. The middle panels are the refusal drawn
+-- both histograms are broad and straddle the 1.0 rule, cells 0.699..1.388 mean
+1.004, tiles 0.615..1.241 mean 0.892, with the two reference tiles marked on
+opposite sides and the pooled optimum 0.8403 marked as a line that sits outside
+most of the mass. The right-hand maps are blotchy at a scale of tens of texels,
+not smooth gradients -- cell-shaped, which is the fingerprint -- and their
+captions carry the correlation with our own luminance, +0.835 and +0.827 against
+phase twins of -0.056 and +0.012.
+
+## 6. Owed / red / bungo's calls
+
+**Red 1, and the biggest: the ground-cover plane is EMPTY on all 25 census
+tiles, Sanctuary included.** Every `_data` sheet carries `dwReserved1 = 0`, which
+`lodgen.cpp:8196` and `:9749` set exactly when `coverMax == 0`, and the decoded
+DXT5 alpha is zero on 100 % of texels. So the grass tint branch never executes
+anywhere in the Commonwealth -- the `tintStrength 0.35` constant has never
+affected a shipped byte. This lane could not fit it (gate G4 answered by a zero)
+and did not try to fix it: the defect is in whatever fills the cover channel,
+upstream of the colour law. **It needs a lane.** Vanilla's own sheets should be
+checked for the same emptiness first -- if vanilla's cover is also zero, the
+feature is cosmetic in the engine too and 0.35 never mattered; if vanilla's is
+populated, we are dropping a ground-cover source.
+
+**Red 2: two census tiles are near-achromatic and over-bright.** (-12,28)
+saturation 0.054, mean luminance 124.3; (-16,28) saturation 0.018, luminance
+126.8 -- against a census mean of 0.243 and about 85. Their RGB RMS against
+vanilla is 51.2 and 48.6 where about 20 is typical. A saturation of 0.018 is
+grey, and grey at luminance 127 looks like a base texture that failed to resolve
+and fell back to a mid-grey. They are the two worst tiles in the census by a
+factor of two and they drag the pooled optimum down; excluding them would raise
+it. Worth one lane's morning.
+
+**Red 3: the road materials do not resolve from the unpacked data root.** The
+bake asks for `materials/c:/projects/fallout4/...` -- a Bethesda absolute path
+baked into a record -- and finds it in no archive, so road colour is a fallback.
+That is a plausible part of the road's +6.27-level brightness bias and this lane
+did not chase it.
+
+**Bungo's call 1: the pooled grade.** If a single number is ever wanted for the
+Commonwealth, it is **0.8403**: pooled RGB RMS 24.724 -> 19.644 (-20.5 %),
+better on 19 of 25 tiles, worse on 6 -- and one of the 6 is a reference tile,
+which is why this lane does not ship it as a default. `--grade 0.8403` is one
+flag away and needs no build. **My recommendation is not to**, because the mean
+over land cells is 1.004: the average is already right and a global grade trades
+one half of the map against the other.
+
+**Bungo's call 2: what the saturation gap deserves.** We are more colourful than
+vanilla on every tile measured (0.243 vs 0.219). No brightness model explains it
+and the chroma pull that would correct it is worth 0.15 of a level, a fifth of
+the codec floor. It is real, it is small, and it is the same CONTENT question as
+the tone: which textures we blend where. It belongs with red 4.
+
+**Red 4 / the owed lane: the per-cell content difference.** This is the actual
+cause named in section 2 and it is not a colour bug. The residual after the best
+gain correlates with our own luminance at +0.83, the per-cell gains are blocky,
+and the multi-scale correlation on (-20,20) climbs from 0.31 at one texel to
+0.80 at 128-texel boxes while on (-20,24) it never exceeds 0.041 at ANY scale --
+two chunks that differ in different ways. The next lane is a LAYER BLEND lane:
+which base texture wins a quadrant when BTXT is 0, how the 17x17 opacities are
+bilinearly resolved, and whether our dominant-base choice matches the engine's.
+`fo4-engine-constant-from-ini-setting` is the wrong tool for it and was not
+invoked here -- its precondition is a position-INDEPENDENT gain, and the gain is
+position-dependent by 0.6 of its own value.
+
+**The record correction owed to the project.** "The off-road ground is about 16
+luminance units too dark" is in the record from an earlier lane. It is true of
+ONE chunk. On (-20,20): ground 68.767 vs vanilla 83.464 (-14.70), road 98.753 vs
+92.485 (+6.27). On (-20,24), one chunk north, the ground is +6.79 -- brighter,
+not darker. Of the road's roughly 21 levels of over-contrast against its ground,
+6.3 are the road and 14.7 are the ground, and the ground half reverses sign one
+chunk away. The `--grade` documentation in the contract now carries this and so
+does the handoff block.
+
+**Not done, deliberately:** no change to `tintStrength`, no chroma pull, no
+default grade, no touch to the crevice constant, and no second build. The lane's
+one change is inert until asked for.
+
+## 7. Mistakes
+
+Four, all written to `scratchpad/grade1_20260911/MISTAKES_ENTRIES.md` for the
+root ledger, in full. In brief:
+
+1. **I read a flag's name instead of the census and measured an empty road
+   mask.** `--roads` is the DEFAULT, not opt-in, so my "roads on" arm was
+   byte-identical to the no-flag arm and the difference between them was zero
+   road texels -- which I nearly wrote down as a fact about the test chunks. The
+   bake's own census had printed `roads 1 roadPlacements 142 roadTexels 27509` in
+   both arms before I ran the difference. A mask of exactly zero is evidence
+   about the instrument, never about the data. Fixed by differencing a
+   `--no-roads` bake instead; (-20,20) has 25,189 road texels, 9.61 %.
+2. **I correlated the residual of a model that ignores its input.** I took the
+   best-by-RMS model (the affine fit, slope 0.019) and correlated its residual --
+   which is `constant - vanilla`, i.e. vanilla's structure. The tell was `ours
+   lum` reading exactly r = -0.0000, which is a definition (least squares
+   orthogonalises the residual against its own regressor) and not a measurement.
+   Redone on the constant-gain residual it reads +0.835 and +0.827: the strongest
+   signal in the lane was showing as its own negation. Lowest RMS does not mean
+   "the model to interpret" -- check the fit's RMS against the target's own
+   standard deviation first.
+3. **The pictures were wrong in two ways that only looking could catch.** The
+   difference map clipped at +-22 levels because of a 1.8x multiplier left in the
+   ramp from a sanity test, turning a structured field into two flat tones; and
+   the residual panel cited the affine model's r (mistake 2) and printed -0.000
+   under a scatter that visibly slopes. Both scripts exited 0 and both JSONs were
+   right. A picture is a measurement: say what it must show, then open it and
+   check it shows that.
+4. **The heredoc trap, again, on a file the skill already covers.** `cat > file
+   <<'PYEOF'` died on CRLF line endings while creating a new instrument. It is
+   written down in two places and I did it anyway because the file was "a script,
+   not a patch". The rule has no exception: new files go through the Write tool.
+
+A fifth, smaller, not worth a ledger entry: `fit_affine` crashed with
+`LinAlgError: 3-dimensional array given` because it was handed a 2-D luminance
+map. Fixed inside all three fitters (`ravel` on entry) rather than at each call
+site, so the next caller cannot reintroduce it.
+
+## 8. Finished-work skill review
+
+**`gate-refused-with-numbers` -- used, and it is the reason this lane is DONE
+rather than PARTIAL.** The brief's G3 asked for "error reduced on both tiles",
+and without this skill the honest outcomes available were to ship 0.8403 and
+report a 20 % pooled win while hiding that a reference tile got 30 % worse, or to
+report PARTIAL on finished work. The procedure's steps map cleanly: the
+impossibility was proved from the parabola BEFORE the graded bakes existed (step
+1); the constant that would have to move was named and it is ours, not the
+engine's (step 2); the shipped threshold was registered in `g6_gates.py`'s
+docstring before the first graded bake was read (step 3); both arms were measured
+through the compiled binary and agreed with the Python to +-0.17 of a 1.0
+tolerance (step 4); the refusal is assertion S4 and not a paragraph (step 5); and
+it went into the CONTRACT, section 2.5f, which is what the next lane reads, not
+only into this report (step 6).
+
+One place it is thin, worth adding if it is ever revised: **the skill assumes the
+refused gate has a single scalar to refuse.** Here G3 was a compound -- "off ==
+rung bytes" AND "error reduced on both tiles" -- and the first half passes
+perfectly while the second is impossible. Reporting "G3 refused" would have been
+false and "G3 passed" worse. The lane split it (4.3 reports HALF PASS, HALF
+REFUSED with the two halves separately evidenced), but the skill gives no
+guidance for that and a less careful lane would have picked one word for both.
+Suggested addition: *before refusing, decompose the gate into its clauses and
+rule on each; a compound gate is refused clause by clause or not at all.*
+
+**`nifskope-ww-build-verify` -- used as written, and it held.** `tools/ww_build.sh`
+with the three sources; the process check is inside the chain and printed "exe not
+held by a window" rather than being echoed at the top of the lane; make's own exit
+code gated; `-nt` on all three sources. Two of its specific warnings were live
+here: the gate-driver rule (I checked the eight harnesses for standalone
+`release/*.exe` drivers and found none -- had `lodgen_*` used one, it would have
+linked the old `lodgen.cpp`), and the header rule (`src/lodgen.h` changed, so I
+checked the objects of the TUs that include it rather than trusting make).
+Nothing to add.
+
+**A skill this lane wanted and did not have.** The largest time sink was mistake
+2 -- interpreting a degenerate regression -- and it is a general trap, not a
+terrain one: any lane that fits several models and reads the residual of the best
+one can fall into it, and the failure is silent and looks like a clean result. It
+would be a short skill: *compare every fit's RMS against the target's own
+standard deviation before ranking them; a fit that scores the trivial predictor's
+error has no residual worth reading; an r of exactly 0.000 against a variable the
+model was fitted on is arithmetic, not evidence; interpret the residual of the
+model whose FORM you are testing, not the one with the lowest number.* The two
+brief tiles would be its test case: the affine fit "wins" on both and means
+nothing on either. Offered to the director as
+`fit-residual-is-not-the-best-fits-residual`; not written this session because
+the lane's own reds are worth more.
+
+---
+
+**DONE**

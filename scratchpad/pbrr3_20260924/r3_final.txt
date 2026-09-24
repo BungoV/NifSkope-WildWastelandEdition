@@ -1,0 +1,47 @@
+mask
+  mask rc=0 10850 B
+furnace
+  fur_metal_r10 rc=0 10937 B
+  fur_metal_r50 rc=0 10937 B
+  fur_metal_r99 rc=0 10937 B
+  fur_diel_f004 rc=0 10937 B
+twins
+  twin_twin_v5aa rc=0 99638 B
+  twin_twin_v6aa rc=0 99638 B
+s1
+  s1_spec_w000_all rc=0 99606 B
+  s1_spec_w000_diff rc=0 99606 B
+  s1_spec_w100_all rc=0 102100 B
+  s1_spec_w100_diff rc=0 104050 B
+s2
+  s2_ior_150aa rc=0 51363 B
+  s2_ior_200aa rc=0 35034 B
+s3
+  s3_spec rc=0 88073 B
+  s3_diff rc=0 40460 B
+q9
+  q9_default rc=0 110719 B
+pictures
+  pic_tint_redd rc=0 101879 B
+  pic_eon_dr100 rc=0 28847 B
+  pic_spec_w000 rc=0 99606 B
+  pic_spec_w100 rc=0 102100 B
+  pic_metal_r50 rc=0 110719 B
+  pic_diel_f004 rc=0 99638 B
+  pic_legacy_w100 rc=0 62590 B
+pbr_r3 mask disk centre (699.5, 462.5) radius 298.1 px (279128 px)
+pbr_r3 furnace metal_r10 centre 0.9989 (rgb 0.999 0.999 0.999, n=1788); 60deg 0.9989 (rgb 0.999 0.999 0.999, n=19292) -> PASS
+pbr_r3 furnace metal_r50 centre 0.9989 (rgb 0.999 0.999 0.999, n=1788); 60deg 0.9989 (rgb 0.999 0.999 0.999, n=19292) -> PASS
+pbr_r3 furnace metal_r99 centre 0.9989 (rgb 0.999 0.999 0.999, n=1788); 60deg 0.9989 (rgb 0.999 0.999 0.999, n=19292) -> PASS
+pbr_r3 furnace diel_f004 centre 0.9989 (rgb 0.999 0.999 0.999, n=1788); 60deg 0.9989 (rgb 0.999 0.999 0.999, n=19292) -> PASS
+pbr_r3 twins v5 f0 0.04 vs v6 w1 ior1.5: max |d| 0, 0 px differ, 280464 lit px, census f0 0.04 / 0.04 -> PASS
+pbr_r3 s1 weight 0: full vs diffuse-only max |d| 0 (0 px); weight 1: max |d| 32 (202621 px) -> PASS
+pbr_r3 s2 census f0 0.04 / 0.111 (want 0.0400 / 0.1111); env-spec centre 0.0313 / 0.0858 ratio 2.745 (want 2.778 +-3%, split-sum law 2.748) -> PASS
+pbr_r3 s3 specular centre rgb 0.2961 0.0273 0.0273 (red: R >= 3G, 3B True); diffuse centre rgb 0.7682 0.7991 0.7991 (not red: R <= 1.02 G, B True) -> PASS
+pbr_r3 q9 no mode pin: census mode both(asked=), sphere program pbrm_default.prog (want both(..), pbrm_default.prog) -> PASS
+pbr_r3 furnace -> PASS
+pbr_r3 twins -> PASS
+pbr_r3 s1 -> PASS
+pbr_r3 s2 -> PASS
+pbr_r3 s3 -> PASS
+pbr_r3 q9 -> PASS

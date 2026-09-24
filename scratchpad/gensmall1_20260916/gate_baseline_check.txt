@@ -1,0 +1,9 @@
+  bake wall-clock 8 s (AO=1)
+  ok   25 output files hashed (floor 8: 4 chunks + 4 manifests)
+  ok   profile matches the baseline (ao=1 identity=1 arrays=1 atlas=1 slot-fallback=dim16 exclude=BTR)
+25 files in the baseline, 25 baked, 0 differ
+  ok   every stock file byte-identical to the baseline
+  baseline exe 664e0de4483792b5b7fa4a0d89cb9a9a3d5b76dfd17e29b2b85e2ed594fb8d1b 2026-09-10T03:57:46; this exe 4ad6ee0c4c844600cf361149c6b00fcdb6aaeeebd8bfec2905f596912a692ee0 2026-09-16T13:52:56
+0 failures
+RESULT PASS
+RC=0

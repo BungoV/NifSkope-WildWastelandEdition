@@ -1,0 +1,107 @@
+TILING4 -- the FROZEN swirl instrument and its known answers
+
+instrument: t4_lib.swirl -- energy-weighted mean structure-tensor coherence
+of the 1..5 texel grain, averaged over a 17-texel window, with the land
+repeat`s own frequency family (10.667 texels) notched out first.
+constants frozen 00:2x: BAND_LO 0, BAND_HI 2, WIN 8.
+
+C1 pure sinusoid, period 6 texels, 23 deg : 1.0000   [registered: near 1.0]
+C2 isotropic noise in the same band       : 0.0905, its own twin 0.0909   [registered: near the twin]
+
+C3/C6 vanilla`s 22 sheets: the value, the sheet`s own phase-twin FLOOR,
+      and the ratio.  Both ceilings come from this table and nothing else.
+   sheet           swirl     twin    ratio   set
+   ( -64, -60)   0.1540   0.0957   1.6094   TILING2 22
+   ( -64, -20)   0.1845   0.0965   1.9126   TILING2 22
+   ( -64,  16)   0.1659   0.0942   1.7602   TILING2 22
+   ( -64,  56)   0.1829   0.0979   1.8682   TILING2 22
+   ( -36, -60)   0.1810   0.1079   1.6778   TILING2 22
+   ( -36, -20)   0.1412   0.0864   1.6342   selection
+   ( -36,  16)   0.1454   0.0846   1.7191   TILING2 22
+   ( -36,  56)   0.1831   0.0862   2.1240   TILING2 22
+   ( -24, -24)   0.1632   0.0854   1.9114   validation (not in the 22)
+   ( -20,   4)   0.1447   0.0822   1.7607   validation (not in the 22)
+   ( -20,  20)   0.1468   0.0872   1.6841   selection
+   ( -20,  24)   0.1712   0.0858   1.9940   selection
+   ( -12, -20)   0.2064   0.0869   2.3766   validation (not in the 22)
+   (  -8,   4)   0.1579   0.0887   1.7809   validation (not in the 22)
+   (  -4, -60)   0.1592   0.0853   1.8666   TILING2 22
+   (  -4, -20)   0.1748   0.0964   1.8136   selection
+   (  -4,  16)   0.1594   0.0833   1.9135   selection
+   (  -4,  56)   0.1610   0.0923   1.7441   TILING2 22
+   (   4, -24)   0.1478   0.0860   1.7183   validation (not in the 22)
+   (  12,   8)   0.2762   0.1051   2.6292   validation (not in the 22)
+   (  20, -24)   0.2208   0.0921   2.3967   validation (not in the 22)
+   (  20,  56)   0.2031   0.1135   1.7888   TILING2 22
+   (  24,  16)   0.2979   0.0932   3.1973   selection
+   (  28, -60)   0.1691   0.0826   2.0482   TILING2 22
+   (  28, -20)   0.2059   0.0971   2.1193   selection
+   (  44,  32)   0.2801   0.0853   3.2846   TILING2 22
+   (  44,  36)   0.2515   0.0842   2.9872   TILING2 22
+   (  52, -64)   0.3363   0.1476   2.2787   TILING2 22
+   (  60, -32)   0.2166   0.0835   2.5924   TILING2 22
+
+   CEILINGS, frozen here, from vanilla`s 22 and nothing else:
+      absolute  0.3363   (worst of the 22; median 0.1779, SD 0.0512)
+      ratio     3.2846   (worst of the 22 over its own twin; median 1.8904)
+   A sheet is INSIDE VANILLA`S LAW on the swirl only if it is under BOTH.
+   The absolute ceiling alone is set by one atypical sheet ((52,-64), a
+   coastline) and passes TILING3`s proposal 7 of 7, which is exactly the
+   failure TILING3`s own MISTAKES entry names: a per-sheet gate needs a
+   per-sheet floor.  That is what the ratio is for.
+
+C5 a synthetic warp of KNOWN strain on a real vanilla sheet (-20,24),
+   using TILING3`s own warp field verbatim, lattice 32 texels:
+   amp(tx)     strain     swirl     ratio  in vanSD
+   0.00         0.000    0.1712    1.9940     +0.00
+   2.00         0.069    0.2043    2.0981     +0.65
+   5.00         0.172    0.2161    2.2154     +0.88
+   10.00        0.344    0.2658    2.7007     +1.85
+   21.34        0.733    0.3614    3.7805     +3.71
+   42.70        1.467    0.3444    3.6975     +3.38
+   monotone in the strain: NO -- REFUSED
+   at TILING3`s own strain 0.718 the reading is 3.71 vanilla SDs above
+   the unwarped sheet, so the instrument does read a warp of that size.
+
+C4 the notch (does it separate the repeat`s grid from a swirl?).
+   rung raw / rung notched / the no-repeat control (`average`) notched.
+   sheet         rung raw  rung ntc  ctrl ntc  ntc-ctrl
+   ( -20,  24)    0.1683    0.1872    0.6331   -0.4459
+   ( -20,  20)    0.1455    0.1507    0.2835   -0.1328
+   ( -36, -20)    0.1035    0.1847    0.2977   -0.1130
+   (  -4, -20)    0.1803    0.2126    0.4424   -0.2298
+   (  28, -20)    0.2450    0.2223    0.6962   -0.4739
+   (  -4,  16)    0.3010    0.3244    0.6472   -0.3229
+   (  24,  16)    0.2009    0.1853    0.3191   -0.1338
+   median |rung notched - no-repeat control| 0.2298, i.e. 4.48 vanilla SDs:
+   with the notch in, a sheet whose ONLY defect is the repeat reads the
+   same as the same sheet with no repeat at all.  The grid is not
+   counted as a swirl, which is what the brief asked be separated.
+
+C8 THE CONFOUND: `stochastic` turned on the warp AND a -1.00 mip bias.
+   Baked apart, on the seven selection sheets:
+   sheet            rung bias only warp only     both
+   ( -20,  24)   0.1872   0.1189   0.3669   0.2431
+   ( -20,  20)   0.1507   0.1059   0.2659   0.1877
+   ( -36, -20)   0.1847   0.1727   0.3603   0.2661
+   (  -4, -20)   0.2126   0.1365   0.3772   0.2693
+   (  28, -20)   0.2223   0.1562   0.3502   0.2615
+   (  -4,  16)   0.3244   0.1977   0.4219   0.2992
+   (  24,  16)   0.1853   0.1557   0.3489   0.2638
+   median move off the rung: mip bias alone -0.0660 (-1.29 SD), warp alone +0.1636 (+3.19 SD)
+   VERDICT: the warp moves it, the sharpening does not -- the instrument reads swirl, not sharpness
+
+C7 DOES IT READ BUNGO`S SWIRL?  TILING3`s proposal, per selection sheet,
+   against its own rung and against BOTH frozen vanilla ceilings.
+   sheet            rung proposal     twin    ratio stand-in  verdict
+   ( -20,  24)   0.1872   0.2431   0.0876   2.7754     1.1%  inside both
+   ( -20,  20)   0.1507   0.1877   0.0863   2.1740     0.0%  inside both
+   ( -36, -20)   0.1847   0.2661   0.0887   3.0012     0.0%  inside both
+   (  -4, -20)   0.2126   0.2693   0.0951   2.8332     0.0%  inside both
+   (  28, -20)   0.2223   0.2615   0.1086   2.4080     0.0%  inside both
+   (  -4,  16)   0.3244   0.2992   0.0982   3.0455     8.5%  inside both
+   (  24,  16)   0.1853   0.2638   0.0955   2.7634     0.0%  inside both
+   paired, same chunk: the proposal reads +0.0559 over its own rung (+1.09 vanilla SDs), on 6 of 7 sheets.
+   over the absolute ceiling 0.3363: 0 of 7.   over the ratio ceiling 3.2846: 0 of 7.
+
+VERDICT ON THE INSTRUMENT: NOT USABLE AS REGISTERED -- read the rows; the gate this lane is graded on must be stated as what it can and cannot see.

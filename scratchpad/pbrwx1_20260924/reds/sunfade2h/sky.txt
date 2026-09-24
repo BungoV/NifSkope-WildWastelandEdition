@@ -1,0 +1,649 @@
+# WW_WEATHER data=x:/Programs/Steam/steamapps/common/Fallout 4/Data red=sunfade2h
+load ok files=Fallout4.esm wthr=71
+climate edid=DefaultClimate tnam=30,54,102,126
+weather id=0002B52A edid=CommonwealthClear src=Fallout4.esm owner=Fallout4.esm fv=131 nam0=608 rows=19 tods=8 dalc=8
+nam0hex 212c4000264063001b253500030709000f161e002e405a00242f46000b121900415667004e7cb100556b8100040609002632400088b7f1005d75900028333e000000000000000000000000000000000000000000000000000000000000000000525252005d5d5d003e3e3e000202020052525200595959004d4d4d001111110053668000e1e1e1004e6075003546570032445800ffb59800dc8e7a003d516800fffccd00ffffff00ff535300ff310f00ff976e00822e0000ff001800ff5d31009b9b9b000000000032323200ffffff00eaeaea001e262a0012171900cbcbcb0062779a005c7a9d006478a1001119220035435c006379a0006373a1002a344900b58074008291a2009e6a5c001b252f004d536300b1877a00a07a6d003f424b005b728c00969696003c41620021334300334050007c605c00664f4d003c496100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008b8fb000a6c0dd00636d8d002b3a49004f6382008ba4d10089a0cf00475a770054586400e3eef0003e424e00212d3a0046515c00be8a8300b0867900404550001d293800e1e1e100232e47000e121d00131b2d00a8867700bc806d0010203f00ffa25000ffffff00ff600a00000000007f512800d58d7900d58d79007f3005000000000000000000c8c8c800d2d2d200dcdcdc000000000000000000d2d2d200172e4400394a5d00152029000203050017253300213b5e00182a3900141e2d0061779c007292b3004550650015202d0034475d0093b1e4005c6f970031425600
+row name=SkyUpper tod=Sunrise rgb=33,44,64
+row name=FogNear tod=Sunrise rgb=65,86,103
+row name=Unused tod=Sunrise rgb=0,0,0
+row name=Ambient tod=Sunrise rgb=82,82,82
+row name=Sunlight tod=Sunrise rgb=83,102,128
+row name=Sun tod=Sunrise rgb=255,252,205
+row name=Stars tod=Sunrise rgb=155,155,155
+row name=SkyLower tod=Sunrise rgb=98,119,154
+row name=Horizon tod=Sunrise rgb=181,128,116
+row name=EffectLighting tod=Sunrise rgb=91,114,140
+row name=CloudLODDiffuse tod=Sunrise rgb=0,0,0
+row name=CloudLODAmbient tod=Sunrise rgb=0,0,0
+row name=FogFar tod=Sunrise rgb=139,143,176
+row name=SkyStatics tod=Sunrise rgb=84,88,100
+row name=WaterMult tod=Sunrise rgb=29,41,56
+row name=SunGlare tod=Sunrise rgb=255,162,80
+row name=MoonGlare tod=Sunrise rgb=0,0,0
+row name=FogNearHigh tod=Sunrise rgb=23,46,68
+row name=FogFarHigh tod=Sunrise rgb=97,119,156
+row name=SkyUpper tod=Day rgb=38,64,99
+row name=FogNear tod=Day rgb=78,124,177
+row name=Unused tod=Day rgb=0,0,0
+row name=Ambient tod=Day rgb=93,93,93
+row name=Sunlight tod=Day rgb=225,225,225
+row name=Sun tod=Day rgb=255,255,255
+row name=Stars tod=Day rgb=0,0,0
+row name=SkyLower tod=Day rgb=92,122,157
+row name=Horizon tod=Day rgb=130,145,162
+row name=EffectLighting tod=Day rgb=150,150,150
+row name=CloudLODDiffuse tod=Day rgb=0,0,0
+row name=CloudLODAmbient tod=Day rgb=0,0,0
+row name=FogFar tod=Day rgb=166,192,221
+row name=SkyStatics tod=Day rgb=227,238,240
+row name=WaterMult tod=Day rgb=225,225,225
+row name=SunGlare tod=Day rgb=255,255,255
+row name=MoonGlare tod=Day rgb=0,0,0
+row name=FogNearHigh tod=Day rgb=57,74,93
+row name=FogFarHigh tod=Day rgb=114,146,179
+row name=SkyUpper tod=Sunset rgb=27,37,53
+row name=FogNear tod=Sunset rgb=85,107,129
+row name=Unused tod=Sunset rgb=0,0,0
+row name=Ambient tod=Sunset rgb=62,62,62
+row name=Sunlight tod=Sunset rgb=78,96,117
+row name=Sun tod=Sunset rgb=255,83,83
+row name=Stars tod=Sunset rgb=50,50,50
+row name=SkyLower tod=Sunset rgb=100,120,161
+row name=Horizon tod=Sunset rgb=158,106,92
+row name=EffectLighting tod=Sunset rgb=60,65,98
+row name=CloudLODDiffuse tod=Sunset rgb=0,0,0
+row name=CloudLODAmbient tod=Sunset rgb=0,0,0
+row name=FogFar tod=Sunset rgb=99,109,141
+row name=SkyStatics tod=Sunset rgb=62,66,78
+row name=WaterMult tod=Sunset rgb=35,46,71
+row name=SunGlare tod=Sunset rgb=255,96,10
+row name=MoonGlare tod=Sunset rgb=200,200,200
+row name=FogNearHigh tod=Sunset rgb=21,32,41
+row name=FogFarHigh tod=Sunset rgb=69,80,101
+row name=SkyUpper tod=Night rgb=3,7,9
+row name=FogNear tod=Night rgb=4,6,9
+row name=Unused tod=Night rgb=0,0,0
+row name=Ambient tod=Night rgb=2,2,2
+row name=Sunlight tod=Night rgb=53,70,87
+row name=Sun tod=Night rgb=255,49,15
+row name=Stars tod=Night rgb=255,255,255
+row name=SkyLower tod=Night rgb=17,25,34
+row name=Horizon tod=Night rgb=27,37,47
+row name=EffectLighting tod=Night rgb=33,51,67
+row name=CloudLODDiffuse tod=Night rgb=0,0,0
+row name=CloudLODAmbient tod=Night rgb=0,0,0
+row name=FogFar tod=Night rgb=43,58,73
+row name=SkyStatics tod=Night rgb=33,45,58
+row name=WaterMult tod=Night rgb=14,18,29
+row name=SunGlare tod=Night rgb=0,0,0
+row name=MoonGlare tod=Night rgb=210,210,210
+row name=FogNearHigh tod=Night rgb=2,3,5
+row name=FogFarHigh tod=Night rgb=21,32,45
+row name=SkyUpper tod=EarlySunrise rgb=15,22,30
+row name=FogNear tod=EarlySunrise rgb=38,50,64
+row name=Unused tod=EarlySunrise rgb=0,0,0
+row name=Ambient tod=EarlySunrise rgb=82,82,82
+row name=Sunlight tod=EarlySunrise rgb=50,68,88
+row name=Sun tod=EarlySunrise rgb=255,151,110
+row name=Stars tod=EarlySunrise rgb=234,234,234
+row name=SkyLower tod=EarlySunrise rgb=53,67,92
+row name=Horizon tod=EarlySunrise rgb=77,83,99
+row name=EffectLighting tod=EarlySunrise rgb=51,64,80
+row name=CloudLODDiffuse tod=EarlySunrise rgb=0,0,0
+row name=CloudLODAmbient tod=EarlySunrise rgb=0,0,0
+row name=FogFar tod=EarlySunrise rgb=79,99,130
+row name=SkyStatics tod=EarlySunrise rgb=70,81,92
+row name=WaterMult tod=EarlySunrise rgb=19,27,45
+row name=SunGlare tod=EarlySunrise rgb=127,81,40
+row name=MoonGlare tod=EarlySunrise rgb=220,220,220
+row name=FogNearHigh tod=EarlySunrise rgb=23,37,51
+row name=FogFarHigh tod=EarlySunrise rgb=52,71,93
+row name=SkyUpper tod=LateSunrise rgb=46,64,90
+row name=FogNear tod=LateSunrise rgb=136,183,241
+row name=Unused tod=LateSunrise rgb=0,0,0
+row name=Ambient tod=LateSunrise rgb=89,89,89
+row name=Sunlight tod=LateSunrise rgb=255,181,152
+row name=Sun tod=LateSunrise rgb=130,46,0
+row name=Stars tod=LateSunrise rgb=30,38,42
+row name=SkyLower tod=LateSunrise rgb=99,121,160
+row name=Horizon tod=LateSunrise rgb=177,135,122
+row name=EffectLighting tod=LateSunrise rgb=124,96,92
+row name=CloudLODDiffuse tod=LateSunrise rgb=0,0,0
+row name=CloudLODAmbient tod=LateSunrise rgb=0,0,0
+row name=FogFar tod=LateSunrise rgb=139,164,209
+row name=SkyStatics tod=LateSunrise rgb=190,138,131
+row name=WaterMult tod=LateSunrise rgb=168,134,119
+row name=SunGlare tod=LateSunrise rgb=213,141,121
+row name=MoonGlare tod=LateSunrise rgb=0,0,0
+row name=FogNearHigh tod=LateSunrise rgb=33,59,94
+row name=FogFarHigh tod=LateSunrise rgb=147,177,228
+row name=SkyUpper tod=EarlySunset rgb=36,47,70
+row name=FogNear tod=EarlySunset rgb=93,117,144
+row name=Unused tod=EarlySunset rgb=0,0,0
+row name=Ambient tod=EarlySunset rgb=77,77,77
+row name=Sunlight tod=EarlySunset rgb=220,142,122
+row name=Sun tod=EarlySunset rgb=255,0,24
+row name=Stars tod=EarlySunset rgb=18,23,25
+row name=SkyLower tod=EarlySunset rgb=99,115,161
+row name=Horizon tod=EarlySunset rgb=160,122,109
+row name=EffectLighting tod=EarlySunset rgb=102,79,77
+row name=CloudLODDiffuse tod=EarlySunset rgb=0,0,0
+row name=CloudLODAmbient tod=EarlySunset rgb=0,0,0
+row name=FogFar tod=EarlySunset rgb=137,160,207
+row name=SkyStatics tod=EarlySunset rgb=176,134,121
+row name=WaterMult tod=EarlySunset rgb=188,128,109
+row name=SunGlare tod=EarlySunset rgb=213,141,121
+row name=MoonGlare tod=EarlySunset rgb=0,0,0
+row name=FogNearHigh tod=EarlySunset rgb=24,42,57
+row name=FogFarHigh tod=EarlySunset rgb=92,111,151
+row name=SkyUpper tod=LateSunset rgb=11,18,25
+row name=FogNear tod=LateSunset rgb=40,51,62
+row name=Unused tod=LateSunset rgb=0,0,0
+row name=Ambient tod=LateSunset rgb=17,17,17
+row name=Sunlight tod=LateSunset rgb=61,81,104
+row name=Sun tod=LateSunset rgb=255,93,49
+row name=Stars tod=LateSunset rgb=203,203,203
+row name=SkyLower tod=LateSunset rgb=42,52,73
+row name=Horizon tod=LateSunset rgb=63,66,75
+row name=EffectLighting tod=LateSunset rgb=60,73,97
+row name=CloudLODDiffuse tod=LateSunset rgb=0,0,0
+row name=CloudLODAmbient tod=LateSunset rgb=0,0,0
+row name=FogFar tod=LateSunset rgb=71,90,119
+row name=SkyStatics tod=LateSunset rgb=64,69,80
+row name=WaterMult tod=LateSunset rgb=16,32,63
+row name=SunGlare tod=LateSunset rgb=127,48,5
+row name=MoonGlare tod=LateSunset rgb=210,210,210
+row name=FogNearHigh tod=LateSunset rgb=20,30,45
+row name=FogFarHigh tod=LateSunset rgb=49,66,86
+dalc tod=Sunrise axis=X+ rgb=47,54,65
+dalc tod=Sunrise axis=X- rgb=31,34,45
+dalc tod=Sunrise axis=Y+ rgb=34,38,45
+dalc tod=Sunrise axis=Y- rgb=46,57,64
+dalc tod=Sunrise axis=Z+ rgb=27,43,56
+dalc tod=Sunrise axis=Z- rgb=80,116,156
+dalc tod=Sunrise axis=Spec rgb=0,0,0
+dalc tod=Day axis=X+ rgb=97,113,130
+dalc tod=Day axis=X- rgb=75,93,111
+dalc tod=Day axis=Y+ rgb=82,96,111
+dalc tod=Day axis=Y- rgb=93,113,132
+dalc tod=Day axis=Z+ rgb=42,52,62
+dalc tod=Day axis=Z- rgb=101,133,169
+dalc tod=Day axis=Spec rgb=161,176,180
+dalc tod=Sunset axis=X+ rgb=52,57,70
+dalc tod=Sunset axis=X- rgb=40,45,54
+dalc tod=Sunset axis=Y+ rgb=37,43,55
+dalc tod=Sunset axis=Y- rgb=45,55,69
+dalc tod=Sunset axis=Z+ rgb=35,48,62
+dalc tod=Sunset axis=Z- rgb=92,117,159
+dalc tod=Sunset axis=Spec rgb=0,0,0
+dalc tod=Night axis=X+ rgb=16,24,31
+dalc tod=Night axis=X- rgb=12,17,23
+dalc tod=Night axis=Y+ rgb=14,20,27
+dalc tod=Night axis=Y- rgb=16,21,27
+dalc tod=Night axis=Z+ rgb=13,19,25
+dalc tod=Night axis=Z- rgb=38,54,71
+dalc tod=Night axis=Spec rgb=0,0,0
+dalc tod=EarlySunrise axis=X+ rgb=37,43,51
+dalc tod=EarlySunrise axis=X- rgb=30,33,42
+dalc tod=EarlySunrise axis=Y+ rgb=32,36,43
+dalc tod=EarlySunrise axis=Y- rgb=36,46,51
+dalc tod=EarlySunrise axis=Z+ rgb=27,43,51
+dalc tod=EarlySunrise axis=Z- rgb=68,98,133
+dalc tod=EarlySunrise axis=Spec rgb=0,0,0
+dalc tod=LateSunrise axis=X+ rgb=89,98,117
+dalc tod=LateSunrise axis=X- rgb=67,75,91
+dalc tod=LateSunrise axis=Y+ rgb=67,76,90
+dalc tod=LateSunrise axis=Y- rgb=80,98,113
+dalc tod=LateSunrise axis=Z+ rgb=49,60,72
+dalc tod=LateSunrise axis=Z- rgb=104,128,171
+dalc tod=LateSunrise axis=Spec rgb=94,102,105
+dalc tod=EarlySunset axis=X+ rgb=80,91,107
+dalc tod=EarlySunset axis=X- rgb=70,76,91
+dalc tod=EarlySunset axis=Y+ rgb=63,72,87
+dalc tod=EarlySunset axis=Y- rgb=78,94,115
+dalc tod=EarlySunset axis=Z+ rgb=40,49,62
+dalc tod=EarlySunset axis=Z- rgb=104,123,165
+dalc tod=EarlySunset axis=Spec rgb=94,102,105
+dalc tod=LateSunset axis=X+ rgb=64,73,86
+dalc tod=LateSunset axis=X- rgb=47,52,65
+dalc tod=LateSunset axis=Y+ rgb=22,25,30
+dalc tod=LateSunset axis=Y- rgb=16,20,23
+dalc tod=LateSunset axis=Z+ rgb=29,39,55
+dalc tod=LateSunset axis=Z- rgb=70,101,136
+dalc tod=LateSunset axis=Spec rgb=0,0,0
+tod hour=12.0000 a=Day b=Day t=0.0000 keys=Day
+sun hour=12.0000 disc=50.000,25.000,350.000 light=0.18996,0.09498,0.97719
+blend hour=12.0000 sunlight=225.00,225.00,225.00 ambient=93.00,93.00,93.00 dalcZm=101.00,133.00,169.00
+tod hour=7.0000 a=Sunrise b=LateSunrise t=0.2222 keys=Sunrise->LateSunrise 22%
+sun hour=7.0000 disc=300.000,25.000,100.000 light=0.87255,0.07271,0.48308
+blend hour=7.0000 sunlight=121.22,119.56,133.33 ambient=83.56,83.56,83.56 dalcZm=85.33,118.67,159.33
+tod hour=19.5000 a=Sunset b=LateSunset t=0.2222 keys=Sunset->LateSunset 22%
+sun hour=19.5000 disc=-325.000,25.000,75.000 light=-0.87831,0.06756,0.47329
+blend hour=19.5000 sunlight=74.22,92.67,114.11 ambient=52.00,52.00,52.00 dalcZm=87.11,113.44,153.89
+tod hour=9.0000 a=Day b=Day t=0.0000 keys=Day
+sun hour=9.0000 disc=200.000,25.000,200.000 light=0.79854,0.09982,0.59361
+blend hour=9.0000 sunlight=225.00,225.00,225.00 ambient=93.00,93.00,93.00 dalcZm=101.00,133.00,169.00
+tod hour=16.0000 a=Day b=Day t=0.0000 keys=Day
+sun hour=16.0000 disc=-150.000,25.000,250.000 light=-0.65039,0.10840,0.75182
+blend hour=16.0000 sunlight=225.00,225.00,225.00 ambient=93.00,93.00,93.00 dalcZm=101.00,133.00,169.00
+tod hour=1.0000 a=Night b=Night t=0.0000 keys=Night
+sun hour=1.0000 disc=600.000,25.000,-200.000 light=0.87476,0.03645,0.48318
+blend hour=1.0000 sunlight=53.00,70.00,87.00 ambient=2.00,2.00,2.00 dalcZm=38.00,54.00,71.00
+tod hour=6.9000 a=Sunrise b=LateSunrise t=0.1333 keys=Sunrise->LateSunrise 13%
+sun hour=6.9000 disc=305.000,25.000,95.000 light=0.87393,0.07163,0.48074
+blend hour=6.9000 sunlight=105.93,112.53,131.20 ambient=82.93,82.93,82.93 dalcZm=83.20,117.60,158.00
+tod hour=6.9500 a=Sunrise b=LateSunrise t=0.1778 keys=Sunrise->LateSunrise 18%
+sun hour=6.9500 disc=302.500,25.000,97.500 light=0.87326,0.07217,0.48188
+blend hour=6.9500 sunlight=113.58,116.04,132.27 ambient=83.24,83.24,83.24 dalcZm=84.27,118.13,158.67
+tod hour=7.0000 a=Sunrise b=LateSunrise t=0.2222 keys=Sunrise->LateSunrise 22%
+sun hour=7.0000 disc=300.000,25.000,100.000 light=0.87255,0.07271,0.48308
+blend hour=7.0000 sunlight=121.22,119.56,133.33 ambient=83.56,83.56,83.56 dalcZm=85.33,118.67,159.33
+tod hour=7.1000 a=Sunrise b=LateSunrise t=0.3111 keys=Sunrise->LateSunrise 31%
+sun hour=7.1000 disc=295.000,25.000,105.000 light=0.87104,0.07382,0.48564
+blend hour=7.1000 sunlight=136.51,126.58,135.47 ambient=84.18,84.18,84.18 dalcZm=87.47,119.73,160.67
+tod hour=18.9500 a=EarlySunset b=Sunset t=0.7333 keys=EarlySunset->Sunset 73%
+sun hour=18.9500 disc=-297.500,25.000,102.500 light=-0.87181,0.07326,0.48433
+blend hour=18.9500 sunlight=115.87,108.27,118.33 ambient=66.00,66.00,66.00 dalcZm=95.20,118.60,160.60
+tod hour=19.1000 a=EarlySunset b=Sunset t=0.8667 keys=EarlySunset->Sunset 87%
+sun hour=19.1000 disc=-305.000,25.000,95.000 light=-0.87393,0.07163,0.48074
+blend hour=19.1000 sunlight=96.93,102.13,117.67 ambient=64.00,64.00,64.00 dalcZm=93.60,117.80,159.80
+tod hour=2.9900 a=Night b=Night t=0.0000 keys=Night
+sun hour=2.9900 disc=500.500,25.000,-100.500 light=0.88100,0.04401,0.47106
+blend hour=2.9900 sunlight=53.00,70.00,87.00 ambient=2.00,2.00,2.00 dalcZm=38.00,54.00,71.00
+tod hour=3.0100 a=Night b=Night t=0.0000 keys=Night
+sun hour=3.0100 disc=499.500,25.000,-99.500 light=0.88106,0.04410,0.47095
+blend hour=3.0100 sunlight=53.00,70.00,87.00 ambient=2.00,2.00,2.00 dalcZm=38.00,54.00,71.00
+tod hour=22.9900 a=Night b=Night t=0.0000 keys=Night
+sun hour=22.9900 disc=-499.500,25.000,-99.500 light=-0.88106,0.04410,0.47095
+blend hour=22.9900 sunlight=53.00,70.00,87.00 ambient=2.00,2.00,2.00 dalcZm=38.00,54.00,71.00
+tod hour=23.0100 a=Night b=Night t=0.0000 keys=Night
+sun hour=23.0100 disc=-500.500,25.000,-100.500 light=-0.88100,0.04401,0.47106
+blend hour=23.0100 sunlight=53.00,70.00,87.00 ambient=2.00,2.00,2.00 dalcZm=38.00,54.00,71.00
+tod hour=22.0000 a=Night b=Night t=0.0000 keys=Night
+sun hour=22.0000 disc=-450.000,25.000,-50.000 light=-0.88338,0.04908,0.46609
+blend hour=22.0000 sunlight=53.00,70.00,87.00 ambient=2.00,2.00,2.00 dalcZm=38.00,54.00,71.00
+tod hour=6.3000 a=EarlySunrise b=Sunrise t=0.6000 keys=EarlySunrise->Sunrise 60%
+sun hour=6.3000 disc=335.000,25.000,65.000 light=0.87991,0.06567,0.47057
+blend hour=6.3000 sunlight=69.80,88.40,112.00 ambient=82.00,82.00,82.00 dalcZm=75.20,108.80,146.80
+gmst fSunXExtreme=600(esm) fSunYExtreme=-325(esm) fSunAlphaTransTime=0.15(esm) fDaytimeColorExtension=2(esm) fSunShadowScale=-15(esm) fSunShadowMinAngle=30(exe) fSunBaseSize=425(exe) fSunGlareSize=600(exe) fWeatherCloudSpeedMax=0.1(exe) iSecundaSize=75(esm) iMasserSize=90(esm) fSecundaAngleFadeStart=5(esm) fSecundaAngleFadeEnd=10(esm) fMasserAngleFadeStart=5(esm) fMasserAngleFadeEnd=10(esm)
+climate2 edid=DefaultClimate tnam=30,54,102,126,175,68 moons=0x44 sunTex=Sky\Sun_d.dds glareTex=Sky\SunGlare.dds
+sky imsp=001955D1,00216A9C,001955CF,001955D0,001C8576,001955D3,001955D4,001955D5 skyscale=3.5,2.4,2.5,3,3.4,3.4,3,4.2 found=8 sunglare=127 lnam=16 nam1=0xFFFF2FC0 disabled=0xFFFF2FC0
+skyclock hour=12.0000 keys=Day,Day,0.000000 A=6.000000 B=8.000000 C=18.000000 D=20.000000 sunpos=85.714,-325.000,514.286 light=0.175737,-0.666335,0.724648 sunalpha=1.000000 starsalpha=0.000000 elev=56.8333 az=165.2254
+skycolor hour=12.0000 upper=38.003,64.001,99.000 lower=92.003,122.002,157.001 horizon=130.002,145.003,162.001 sun=255.000,255.000,255.000 glare=255.000,255.000,255.000 moonglare=0.000,0.000,0.000 stars=0.000,0.000,0.000 sunlight=225.001,225.005,225.002 ambient=93.001,93.002,93.001 skyscale=2.400000 glarealpha=0.498039
+cloud hour=12.0000 layer=0 tex=Sky\SkyrimCloudsUpper01.dds drawn=1 rgb=133.001,136.003,138.001 alpha=0.750000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=12.0000 layer=1 tex=Sky\SkyrimCloudsUpper02.dds drawn=1 rgb=217.002,222.005,226.002 alpha=0.750000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=12.0000 layer=2 tex=Sky\CloudsLower04_d.dds drawn=1 rgb=220.002,227.005,230.002 alpha=0.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=12.0000 layer=3 tex=Sky\SkyrimCloudsHorizon01.dds drawn=1 rgb=184.001,188.004,190.001 alpha=0.700000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=12.0000 layer=4 tex=SkySky\GS01_d.dds drawn=1 rgb=131.002,164.003,175.001 alpha=0.000000 speedx=0.02992126 speedy=0.00000000 offx=0.299213 offy=0.000000
+cloud hour=12.0000 layer=5 tex=Sky\GS01_d.dds drawn=1 rgb=131.002,164.003,175.001 alpha=0.000000 speedx=0.02992126 speedy=0.00000000 offx=0.299213 offy=0.000000
+cloud hour=12.0000 layer=6 tex=- drawn=0 rgb=131.002,164.003,175.001 alpha=0.200000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=12.0000 layer=7 tex=- drawn=0 rgb=131.002,164.003,175.001 alpha=0.400000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=12.0000 layer=8 tex=- drawn=0 rgb=131.002,164.003,175.001 alpha=0.650000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=12.0000 layer=9 tex=- drawn=0 rgb=131.002,164.003,175.001 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=12.0000 layer=10 tex=- drawn=0 rgb=131.002,164.003,175.001 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=12.0000 layer=11 tex=Sky\SkyrimCloudsFill.dds drawn=0 rgb=131.002,164.003,175.001 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=12.0000 layer=12 tex=Sky\SkyrimCloudsFill.dds drawn=1 rgb=127.002,147.003,169.001 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=12.0000 layer=13 tex=Sky\CloudsHorizonLight01_d.DDS drawn=0 rgb=131.002,164.003,175.001 alpha=0.500000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=12.0000 layer=14 tex=Sky\CloudsLowerLight01_d.DDS drawn=1 rgb=132.001,141.003,150.001 alpha=0.900000 speedx=0.02125984 speedy=0.00000000 offx=0.212598 offy=0.000000
+cloud hour=12.0000 layer=15 tex=Sky\CloudsLowerLightB01_d.dds drawn=1 rgb=194.002,202.005,212.001 alpha=1.000000 speedx=0.02125984 speedy=0.00000000 offx=0.212598 offy=0.000000
+moon hour=12.0000 day=4.000 which=secunda phase=1 suffix=three_wan tex=textures/sky/secunda_three_wan.dds alpha=0.000000 shadowalpha=0.000000 halfangle=7.1250 elev=56.8333 az=165.2254
+moon hour=12.0000 day=17.000 which=secunda phase=4 suffix=new tex=textures/sky/secunda_new.dds alpha=0.000000 shadowalpha=0.000000 halfangle=7.1250 elev=56.8333 az=165.2254
+moon hour=12.0000 day=32.000 which=secunda phase=0 suffix=full tex=textures/sky/secunda_full.dds alpha=0.000000 shadowalpha=0.000000 halfangle=7.1250 elev=56.8333 az=165.2254
+skyclock hour=7.0000 keys=Sunrise,LateSunrise,0.666667 A=6.000000 B=8.000000 C=18.000000 D=20.000000 sunpos=514.286,-325.000,85.714 light=0.747308,-0.472257,0.467445 sunalpha=0.500000 starsalpha=0.000000 elev=8.0197 az=122.2906
+skycolor hour=7.0000 upper=41.613,57.206,81.170 lower=98.677,120.335,157.997 horizon=178.377,132.690,119.995 sun=176.916,112.695,65.743 glare=227.467,147.865,108.441 moonglare=0.000,0.000,0.000 stars=68.341,73.956,76.910 sunlight=199.175,153.961,144.594 ambient=86.656,86.658,86.656 skyscale=3.433333 glarealpha=0.249020
+cloud hour=7.0000 layer=0 tex=Sky\SkyrimCloudsUpper01.dds drawn=1 rgb=146.704,92.604,75.190 alpha=0.750000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=7.0000 layer=1 tex=Sky\SkyrimCloudsUpper02.dds drawn=1 rgb=205.879,133.888,108.312 alpha=0.750000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=7.0000 layer=2 tex=Sky\CloudsLower04_d.dds drawn=1 rgb=164.333,87.343,63.672 alpha=0.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=7.0000 layer=3 tex=Sky\SkyrimCloudsHorizon01.dds drawn=1 rgb=198.144,129.674,105.259 alpha=0.500000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=7.0000 layer=4 tex=SkySky\GS01_d.dds drawn=1 rgb=82.525,92.414,114.239 alpha=0.000000 speedx=0.02992126 speedy=0.00000000 offx=0.299213 offy=0.000000
+cloud hour=7.0000 layer=5 tex=Sky\GS01_d.dds drawn=1 rgb=82.525,92.414,114.239 alpha=0.000000 speedx=0.02992126 speedy=0.00000000 offx=0.299213 offy=0.000000
+cloud hour=7.0000 layer=6 tex=- drawn=0 rgb=82.525,92.414,114.239 alpha=0.333333 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=7.0000 layer=7 tex=- drawn=0 rgb=82.525,92.414,114.239 alpha=0.800000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=7.0000 layer=8 tex=- drawn=0 rgb=82.525,92.414,114.239 alpha=0.650000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=7.0000 layer=9 tex=- drawn=0 rgb=82.525,92.414,114.239 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=7.0000 layer=10 tex=- drawn=0 rgb=82.525,92.414,114.239 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=7.0000 layer=11 tex=Sky\SkyrimCloudsFill.dds drawn=0 rgb=82.525,92.414,114.239 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=7.0000 layer=12 tex=Sky\SkyrimCloudsFill.dds drawn=1 rgb=86.823,99.184,118.466 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=7.0000 layer=13 tex=Sky\CloudsHorizonLight01_d.DDS drawn=0 rgb=82.525,92.414,114.239 alpha=0.750000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=7.0000 layer=14 tex=Sky\CloudsLowerLight01_d.DDS drawn=1 rgb=134.946,100.392,98.979 alpha=1.000000 speedx=0.02125984 speedy=0.00000000 offx=0.212598 offy=0.000000
+cloud hour=7.0000 layer=15 tex=Sky\CloudsLowerLightB01_d.dds drawn=1 rgb=198.244,133.195,106.605 alpha=1.000000 speedx=0.02125984 speedy=0.00000000 offx=0.212598 offy=0.000000
+moon hour=7.0000 day=4.000 which=secunda phase=1 suffix=three_wan tex=textures/sky/secunda_three_wan.dds alpha=0.000000 shadowalpha=0.000000 halfangle=7.1250 elev=8.0197 az=122.2906
+moon hour=7.0000 day=17.000 which=secunda phase=4 suffix=new tex=textures/sky/secunda_new.dds alpha=0.000000 shadowalpha=0.000000 halfangle=7.1250 elev=8.0197 az=122.2906
+moon hour=7.0000 day=32.000 which=secunda phase=0 suffix=full tex=textures/sky/secunda_full.dds alpha=0.000000 shadowalpha=0.000000 halfangle=7.1250 elev=8.0197 az=122.2906
+skyclock hour=19.5000 keys=EarlySunset,Sunset,0.666667 A=6.000000 B=8.000000 C=18.000000 D=20.000000 sunpos=-557.143,-325.000,42.857 light=-0.764866,-0.446172,0.464663 sunalpha=0.250000 starsalpha=0.000000 elev=3.8014 az=239.7436
+skycolor hour=19.5000 upper=29.971,40.296,58.583 lower=99.682,118.336,161.003 horizon=158.795,111.354,97.619 sun=255.000,66.368,64.441 glare=243.401,113.019,57.024 moonglare=128.386,128.389,128.386 stars=39.065,40.681,41.402 sunlight=128.926,111.498,119.170 ambient=66.940,66.941,66.940 skyscale=2.666667 glarealpha=0.124510
+cloud hour=19.5000 layer=0 tex=Sky\SkyrimCloudsUpper01.dds drawn=1 rgb=90.987,54.977,47.495 alpha=0.750000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=19.5000 layer=1 tex=Sky\SkyrimCloudsUpper02.dds drawn=1 rgb=150.199,78.043,53.932 alpha=0.750000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=19.5000 layer=2 tex=Sky\CloudsLower04_d.dds drawn=1 rgb=187.661,90.055,69.715 alpha=0.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=19.5000 layer=3 tex=Sky\SkyrimCloudsHorizon01.dds drawn=1 rgb=113.429,92.767,96.023 alpha=0.500000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=19.5000 layer=4 tex=SkySky\GS01_d.dds drawn=1 rgb=57.065,65.205,80.940 alpha=0.000000 speedx=0.02992126 speedy=0.00000000 offx=0.299213 offy=0.000000
+cloud hour=19.5000 layer=5 tex=Sky\GS01_d.dds drawn=1 rgb=57.065,65.205,80.940 alpha=0.000000 speedx=0.02992126 speedy=0.00000000 offx=0.299213 offy=0.000000
+cloud hour=19.5000 layer=6 tex=- drawn=0 rgb=57.065,65.205,80.940 alpha=0.366667 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=19.5000 layer=7 tex=- drawn=0 rgb=57.065,65.205,80.940 alpha=0.900000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=19.5000 layer=8 tex=- drawn=0 rgb=57.065,65.205,80.940 alpha=0.650000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=19.5000 layer=9 tex=- drawn=0 rgb=57.065,65.205,80.940 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=19.5000 layer=10 tex=- drawn=0 rgb=57.065,65.205,80.940 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=19.5000 layer=11 tex=Sky\SkyrimCloudsFill.dds drawn=0 rgb=57.065,65.205,80.940 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=19.5000 layer=12 tex=Sky\SkyrimCloudsFill.dds drawn=1 rgb=63.976,71.215,92.175 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=19.5000 layer=13 tex=Sky\CloudsHorizonLight01_d.DDS drawn=0 rgb=57.065,65.205,80.940 alpha=0.916667 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=19.5000 layer=14 tex=Sky\CloudsLowerLight01_d.DDS drawn=1 rgb=97.078,82.028,89.781 alpha=1.000000 speedx=0.02125984 speedy=0.00000000 offx=0.212598 offy=0.000000
+cloud hour=19.5000 layer=15 tex=Sky\CloudsLowerLightB01_d.dds drawn=1 rgb=143.711,80.860,69.287 alpha=1.000000 speedx=0.02125984 speedy=0.00000000 offx=0.212598 offy=0.000000
+moon hour=19.5000 day=4.000 which=secunda phase=1 suffix=three_wan tex=textures/sky/secunda_three_wan.dds alpha=0.000000 shadowalpha=0.000000 halfangle=7.1250 elev=3.8014 az=239.7436
+moon hour=19.5000 day=17.000 which=secunda phase=4 suffix=new tex=textures/sky/secunda_new.dds alpha=0.000000 shadowalpha=0.000000 halfangle=7.1250 elev=3.8014 az=239.7436
+moon hour=19.5000 day=32.000 which=secunda phase=0 suffix=full tex=textures/sky/secunda_full.dds alpha=0.000000 shadowalpha=0.000000 halfangle=7.1250 elev=3.8014 az=239.7436
+skyclock hour=9.0000 keys=Day,Day,0.000000 A=6.000000 B=8.000000 C=18.000000 D=20.000000 sunpos=342.857,-325.000,257.143 light=0.623388,-0.590920,0.512055 sunalpha=1.000000 starsalpha=0.000000 elev=28.5601 az=133.4684
+skycolor hour=9.0000 upper=38.003,64.001,99.000 lower=92.003,122.002,157.001 horizon=130.002,145.003,162.001 sun=255.000,255.000,255.000 glare=255.000,255.000,255.000 moonglare=0.000,0.000,0.000 stars=0.000,0.000,0.000 sunlight=225.001,225.005,225.002 ambient=93.001,93.002,93.001 skyscale=2.400000 glarealpha=0.498039
+cloud hour=9.0000 layer=0 tex=Sky\SkyrimCloudsUpper01.dds drawn=1 rgb=133.001,136.003,138.001 alpha=0.750000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=9.0000 layer=1 tex=Sky\SkyrimCloudsUpper02.dds drawn=1 rgb=217.002,222.005,226.002 alpha=0.750000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=9.0000 layer=2 tex=Sky\CloudsLower04_d.dds drawn=1 rgb=220.002,227.005,230.002 alpha=0.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=9.0000 layer=3 tex=Sky\SkyrimCloudsHorizon01.dds drawn=1 rgb=184.001,188.004,190.001 alpha=0.700000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=9.0000 layer=4 tex=SkySky\GS01_d.dds drawn=1 rgb=131.002,164.003,175.001 alpha=0.000000 speedx=0.02992126 speedy=0.00000000 offx=0.299213 offy=0.000000
+cloud hour=9.0000 layer=5 tex=Sky\GS01_d.dds drawn=1 rgb=131.002,164.003,175.001 alpha=0.000000 speedx=0.02992126 speedy=0.00000000 offx=0.299213 offy=0.000000
+cloud hour=9.0000 layer=6 tex=- drawn=0 rgb=131.002,164.003,175.001 alpha=0.200000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=9.0000 layer=7 tex=- drawn=0 rgb=131.002,164.003,175.001 alpha=0.400000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=9.0000 layer=8 tex=- drawn=0 rgb=131.002,164.003,175.001 alpha=0.650000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=9.0000 layer=9 tex=- drawn=0 rgb=131.002,164.003,175.001 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=9.0000 layer=10 tex=- drawn=0 rgb=131.002,164.003,175.001 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=9.0000 layer=11 tex=Sky\SkyrimCloudsFill.dds drawn=0 rgb=131.002,164.003,175.001 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=9.0000 layer=12 tex=Sky\SkyrimCloudsFill.dds drawn=1 rgb=127.002,147.003,169.001 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=9.0000 layer=13 tex=Sky\CloudsHorizonLight01_d.DDS drawn=0 rgb=131.002,164.003,175.001 alpha=0.500000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=9.0000 layer=14 tex=Sky\CloudsLowerLight01_d.DDS drawn=1 rgb=132.001,141.003,150.001 alpha=0.900000 speedx=0.02125984 speedy=0.00000000 offx=0.212598 offy=0.000000
+cloud hour=9.0000 layer=15 tex=Sky\CloudsLowerLightB01_d.dds drawn=1 rgb=194.002,202.005,212.001 alpha=1.000000 speedx=0.02125984 speedy=0.00000000 offx=0.212598 offy=0.000000
+moon hour=9.0000 day=4.000 which=secunda phase=1 suffix=three_wan tex=textures/sky/secunda_three_wan.dds alpha=0.000000 shadowalpha=0.000000 halfangle=7.1250 elev=28.5601 az=133.4684
+moon hour=9.0000 day=17.000 which=secunda phase=4 suffix=new tex=textures/sky/secunda_new.dds alpha=0.000000 shadowalpha=0.000000 halfangle=7.1250 elev=28.5601 az=133.4684
+moon hour=9.0000 day=32.000 which=secunda phase=0 suffix=full tex=textures/sky/secunda_full.dds alpha=0.000000 shadowalpha=0.000000 halfangle=7.1250 elev=28.5601 az=133.4684
+skyclock hour=16.0000 keys=Day,Day,0.000000 A=6.000000 B=8.000000 C=18.000000 D=20.000000 sunpos=-257.143,-325.000,342.857 light=-0.513199,-0.648626,0.562060 sunalpha=1.000000 starsalpha=0.000000 elev=39.6013 az=218.3514
+skycolor hour=16.0000 upper=38.003,64.001,99.000 lower=92.003,122.002,157.001 horizon=130.002,145.003,162.001 sun=255.000,255.000,255.000 glare=255.000,255.000,255.000 moonglare=0.000,0.000,0.000 stars=0.000,0.000,0.000 sunlight=225.001,225.005,225.002 ambient=93.001,93.002,93.001 skyscale=2.400000 glarealpha=0.498039
+cloud hour=16.0000 layer=0 tex=Sky\SkyrimCloudsUpper01.dds drawn=1 rgb=133.001,136.003,138.001 alpha=0.750000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=16.0000 layer=1 tex=Sky\SkyrimCloudsUpper02.dds drawn=1 rgb=217.002,222.005,226.002 alpha=0.750000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=16.0000 layer=2 tex=Sky\CloudsLower04_d.dds drawn=1 rgb=220.002,227.005,230.002 alpha=0.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=16.0000 layer=3 tex=Sky\SkyrimCloudsHorizon01.dds drawn=1 rgb=184.001,188.004,190.001 alpha=0.700000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=16.0000 layer=4 tex=SkySky\GS01_d.dds drawn=1 rgb=131.002,164.003,175.001 alpha=0.000000 speedx=0.02992126 speedy=0.00000000 offx=0.299213 offy=0.000000
+cloud hour=16.0000 layer=5 tex=Sky\GS01_d.dds drawn=1 rgb=131.002,164.003,175.001 alpha=0.000000 speedx=0.02992126 speedy=0.00000000 offx=0.299213 offy=0.000000
+cloud hour=16.0000 layer=6 tex=- drawn=0 rgb=131.002,164.003,175.001 alpha=0.200000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=16.0000 layer=7 tex=- drawn=0 rgb=131.002,164.003,175.001 alpha=0.400000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=16.0000 layer=8 tex=- drawn=0 rgb=131.002,164.003,175.001 alpha=0.650000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=16.0000 layer=9 tex=- drawn=0 rgb=131.002,164.003,175.001 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=16.0000 layer=10 tex=- drawn=0 rgb=131.002,164.003,175.001 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=16.0000 layer=11 tex=Sky\SkyrimCloudsFill.dds drawn=0 rgb=131.002,164.003,175.001 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=16.0000 layer=12 tex=Sky\SkyrimCloudsFill.dds drawn=1 rgb=127.002,147.003,169.001 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=16.0000 layer=13 tex=Sky\CloudsHorizonLight01_d.DDS drawn=0 rgb=131.002,164.003,175.001 alpha=0.500000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=16.0000 layer=14 tex=Sky\CloudsLowerLight01_d.DDS drawn=1 rgb=132.001,141.003,150.001 alpha=0.900000 speedx=0.02125984 speedy=0.00000000 offx=0.212598 offy=0.000000
+cloud hour=16.0000 layer=15 tex=Sky\CloudsLowerLightB01_d.dds drawn=1 rgb=194.002,202.005,212.001 alpha=1.000000 speedx=0.02125984 speedy=0.00000000 offx=0.212598 offy=0.000000
+moon hour=16.0000 day=4.000 which=secunda phase=1 suffix=three_wan tex=textures/sky/secunda_three_wan.dds alpha=0.000000 shadowalpha=0.000000 halfangle=7.1250 elev=39.6013 az=218.3514
+moon hour=16.0000 day=17.000 which=secunda phase=4 suffix=new tex=textures/sky/secunda_new.dds alpha=0.000000 shadowalpha=0.000000 halfangle=7.1250 elev=39.6013 az=218.3514
+moon hour=16.0000 day=32.000 which=secunda phase=0 suffix=full tex=textures/sky/secunda_full.dds alpha=0.000000 shadowalpha=0.000000 halfangle=7.1250 elev=39.6013 az=218.3514
+skyclock hour=1.0000 keys=Night,Night,0.000000 A=6.000000 B=8.000000 C=18.000000 D=20.000000 sunpos=0.000,-325.000,600.000 light=0.000000,-0.610749,0.791825 sunalpha=0.000000 starsalpha=1.000000 elev=61.5571 az=180.0000
+skycolor hour=1.0000 upper=3.000,7.000,9.000 lower=17.001,25.001,34.000 horizon=27.001,37.001,47.000 sun=254.999,49.019,15.002 glare=0.000,0.000,0.000 moonglare=210.001,210.005,210.001 stars=255.000,255.000,255.000 sunlight=53.001,70.001,87.000 ambient=2.000,2.000,2.000 skyscale=3.000000 glarealpha=0.000000
+cloud hour=1.0000 layer=0 tex=Sky\SkyrimCloudsUpper01.dds drawn=1 rgb=14.001,21.001,27.000 alpha=0.750000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=1.0000 layer=1 tex=Sky\SkyrimCloudsUpper02.dds drawn=1 rgb=15.001,24.001,36.000 alpha=0.750000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=1.0000 layer=2 tex=Sky\CloudsLower04_d.dds drawn=1 rgb=20.001,27.001,34.000 alpha=0.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=1.0000 layer=3 tex=Sky\SkyrimCloudsHorizon01.dds drawn=1 rgb=12.000,17.001,21.000 alpha=0.300000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=1.0000 layer=4 tex=SkySky\GS01_d.dds drawn=1 rgb=35.001,44.001,53.000 alpha=0.000000 speedx=0.02992126 speedy=0.00000000 offx=0.299213 offy=0.000000
+cloud hour=1.0000 layer=5 tex=Sky\GS01_d.dds drawn=1 rgb=35.001,44.001,53.000 alpha=0.000000 speedx=0.02992126 speedy=0.00000000 offx=0.299213 offy=0.000000
+cloud hour=1.0000 layer=6 tex=- drawn=0 rgb=35.001,44.001,53.000 alpha=0.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=1.0000 layer=7 tex=- drawn=0 rgb=35.001,44.001,53.000 alpha=0.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=1.0000 layer=8 tex=- drawn=0 rgb=35.001,44.001,53.000 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=1.0000 layer=9 tex=- drawn=0 rgb=35.001,44.001,53.000 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=1.0000 layer=10 tex=- drawn=0 rgb=35.001,44.001,53.000 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=1.0000 layer=11 tex=Sky\SkyrimCloudsFill.dds drawn=0 rgb=35.001,44.001,53.000 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=1.0000 layer=12 tex=Sky\SkyrimCloudsFill.dds drawn=1 rgb=21.001,29.001,38.000 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=1.0000 layer=13 tex=Sky\CloudsHorizonLight01_d.DDS drawn=0 rgb=35.001,44.001,53.000 alpha=0.750000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=1.0000 layer=14 tex=Sky\CloudsLowerLight01_d.DDS drawn=1 rgb=19.001,26.001,33.000 alpha=1.000000 speedx=0.02125984 speedy=0.00000000 offx=0.212598 offy=0.000000
+cloud hour=1.0000 layer=15 tex=Sky\CloudsLowerLightB01_d.dds drawn=1 rgb=16.001,21.001,27.000 alpha=1.000000 speedx=0.02125984 speedy=0.00000000 offx=0.212598 offy=0.000000
+moon hour=1.0000 day=4.000 which=secunda phase=1 suffix=three_wan tex=textures/sky/secunda_three_wan.dds alpha=0.000000 shadowalpha=0.000000 halfangle=7.1250 elev=61.5571 az=180.0000
+moon hour=1.0000 day=17.000 which=secunda phase=4 suffix=new tex=textures/sky/secunda_new.dds alpha=0.000000 shadowalpha=0.000000 halfangle=7.1250 elev=61.5571 az=180.0000
+moon hour=1.0000 day=32.000 which=secunda phase=0 suffix=full tex=textures/sky/secunda_full.dds alpha=0.000000 shadowalpha=0.000000 halfangle=7.1250 elev=61.5571 az=180.0000
+skyclock hour=6.9000 keys=Sunrise,LateSunrise,0.600000 A=6.000000 B=8.000000 C=18.000000 D=20.000000 sunpos=522.857,-325.000,77.143 light=0.751134,-0.466893,0.466700 sunalpha=0.450000 starsalpha=0.000000 elev=7.1423 az=121.8645
+skycolor hour=6.9000 upper=40.742,55.862,79.422 lower=98.611,120.201,157.597 horizon=178.647,132.225,119.594 sun=185.652,126.034,78.704 glare=230.295,149.255,105.831 moonglare=0.000,0.000,0.000 stars=76.457,81.566,84.268 sunlight=188.042,148.633,143.039 ambient=86.189,86.190,86.189 skyscale=3.440000 glarealpha=0.224118
+cloud hour=6.9000 layer=0 tex=Sky\SkyrimCloudsUpper01.dds drawn=1 rgb=145.041,90.334,73.645 alpha=0.750000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=6.9000 layer=1 tex=Sky\SkyrimCloudsUpper02.dds drawn=1 rgb=201.307,130.116,105.415 alpha=0.750000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=6.9000 layer=2 tex=Sky\CloudsLower04_d.dds drawn=1 rgb=164.800,87.411,63.605 alpha=0.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=6.9000 layer=3 tex=Sky\SkyrimCloudsHorizon01.dds drawn=1 rgb=193.233,126.646,103.520 alpha=0.500000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=6.9000 layer=4 tex=SkySky\GS01_d.dds drawn=1 rgb=81.208,90.125,110.936 alpha=0.000000 speedx=0.02992126 speedy=0.00000000 offx=0.299213 offy=0.000000
+cloud hour=6.9000 layer=5 tex=Sky\GS01_d.dds drawn=1 rgb=81.208,90.125,110.936 alpha=0.000000 speedx=0.02992126 speedy=0.00000000 offx=0.299213 offy=0.000000
+cloud hour=6.9000 layer=6 tex=- drawn=0 rgb=81.208,90.125,110.936 alpha=0.340000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=6.9000 layer=7 tex=- drawn=0 rgb=81.208,90.125,110.936 alpha=0.820000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=6.9000 layer=8 tex=- drawn=0 rgb=81.208,90.125,110.936 alpha=0.650000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=6.9000 layer=9 tex=- drawn=0 rgb=81.208,90.125,110.936 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=6.9000 layer=10 tex=- drawn=0 rgb=81.208,90.125,110.936 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=6.9000 layer=11 tex=Sky\SkyrimCloudsFill.dds drawn=0 rgb=81.208,90.125,110.936 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=6.9000 layer=12 tex=Sky\SkyrimCloudsFill.dds drawn=1 rgb=85.969,97.238,116.182 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=6.9000 layer=13 tex=Sky\CloudsHorizonLight01_d.DDS drawn=0 rgb=81.208,90.125,110.936 alpha=0.750000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=6.9000 layer=14 tex=Sky\CloudsLowerLight01_d.DDS drawn=1 rgb=127.183,96.538,97.537 alpha=1.000000 speedx=0.02125984 speedy=0.00000000 offx=0.212598 offy=0.000000
+cloud hour=6.9000 layer=15 tex=Sky\CloudsLowerLightB01_d.dds drawn=1 rgb=188.897,127.560,103.734 alpha=1.000000 speedx=0.02125984 speedy=0.00000000 offx=0.212598 offy=0.000000
+moon hour=6.9000 day=4.000 which=secunda phase=1 suffix=three_wan tex=textures/sky/secunda_three_wan.dds alpha=0.000000 shadowalpha=0.000000 halfangle=7.1250 elev=7.1423 az=121.8645
+moon hour=6.9000 day=17.000 which=secunda phase=4 suffix=new tex=textures/sky/secunda_new.dds alpha=0.000000 shadowalpha=0.000000 halfangle=7.1250 elev=7.1423 az=121.8645
+moon hour=6.9000 day=32.000 which=secunda phase=0 suffix=full tex=textures/sky/secunda_full.dds alpha=0.000000 shadowalpha=0.000000 halfangle=7.1250 elev=7.1423 az=121.8645
+skyclock hour=6.9500 keys=Sunrise,LateSunrise,0.633333 A=6.000000 B=8.000000 C=18.000000 D=20.000000 sunpos=518.571,-325.000,81.429 light=0.749242,-0.469566,0.467060 sunalpha=0.475000 starsalpha=0.000000 elev=7.5789 az=122.0763
+skycolor hour=6.9500 upper=41.177,56.533,80.295 lower=98.644,120.268,157.797 horizon=178.513,132.457,119.794 sun=181.310,119.351,72.198 glare=228.884,148.560,107.141 moonglare=0.000,0.000,0.000 stars=72.382,77.745,80.575 sunlight=193.609,151.294,143.820 ambient=86.423,86.424,86.423 skyscale=3.436667 glarealpha=0.236569
+cloud hour=6.9500 layer=0 tex=Sky\SkyrimCloudsUpper01.dds drawn=1 rgb=145.873,91.469,74.417 alpha=0.750000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=6.9500 layer=1 tex=Sky\SkyrimCloudsUpper02.dds drawn=1 rgb=203.591,132.000,106.862 alpha=0.750000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=6.9500 layer=2 tex=Sky\CloudsLower04_d.dds drawn=1 rgb=164.566,87.377,63.638 alpha=0.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=6.9500 layer=3 tex=Sky\SkyrimCloudsHorizon01.dds drawn=1 rgb=195.686,128.159,104.389 alpha=0.500000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=6.9500 layer=4 tex=SkySky\GS01_d.dds drawn=1 rgb=81.868,91.268,112.585 alpha=0.000000 speedx=0.02992126 speedy=0.00000000 offx=0.299213 offy=0.000000
+cloud hour=6.9500 layer=5 tex=Sky\GS01_d.dds drawn=1 rgb=81.868,91.268,112.585 alpha=0.000000 speedx=0.02992126 speedy=0.00000000 offx=0.299213 offy=0.000000
+cloud hour=6.9500 layer=6 tex=- drawn=0 rgb=81.868,91.268,112.585 alpha=0.336667 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=6.9500 layer=7 tex=- drawn=0 rgb=81.868,91.268,112.585 alpha=0.810000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=6.9500 layer=8 tex=- drawn=0 rgb=81.868,91.268,112.585 alpha=0.650000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=6.9500 layer=9 tex=- drawn=0 rgb=81.868,91.268,112.585 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=6.9500 layer=10 tex=- drawn=0 rgb=81.868,91.268,112.585 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=6.9500 layer=11 tex=Sky\SkyrimCloudsFill.dds drawn=0 rgb=81.868,91.268,112.585 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=6.9500 layer=12 tex=Sky\SkyrimCloudsFill.dds drawn=1 rgb=86.397,98.210,117.323 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=6.9500 layer=13 tex=Sky\CloudsHorizonLight01_d.DDS drawn=0 rgb=81.868,91.268,112.585 alpha=0.750000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=6.9500 layer=14 tex=Sky\CloudsLowerLight01_d.DDS drawn=1 rgb=131.063,98.462,98.259 alpha=1.000000 speedx=0.02125984 speedy=0.00000000 offx=0.212598 offy=0.000000
+cloud hour=6.9500 layer=15 tex=Sky\CloudsLowerLightB01_d.dds drawn=1 rgb=193.562,130.372,105.169 alpha=1.000000 speedx=0.02125984 speedy=0.00000000 offx=0.212598 offy=0.000000
+moon hour=6.9500 day=4.000 which=secunda phase=1 suffix=three_wan tex=textures/sky/secunda_three_wan.dds alpha=0.000000 shadowalpha=0.000000 halfangle=7.1250 elev=7.5789 az=122.0763
+moon hour=6.9500 day=17.000 which=secunda phase=4 suffix=new tex=textures/sky/secunda_new.dds alpha=0.000000 shadowalpha=0.000000 halfangle=7.1250 elev=7.5789 az=122.0763
+moon hour=6.9500 day=32.000 which=secunda phase=0 suffix=full tex=textures/sky/secunda_full.dds alpha=0.000000 shadowalpha=0.000000 halfangle=7.1250 elev=7.5789 az=122.0763
+skyclock hour=7.0000 keys=Sunrise,LateSunrise,0.666667 A=6.000000 B=8.000000 C=18.000000 D=20.000000 sunpos=514.286,-325.000,85.714 light=0.747308,-0.472257,0.467445 sunalpha=0.500000 starsalpha=0.000000 elev=8.0197 az=122.2906
+skycolor hour=7.0000 upper=41.613,57.206,81.170 lower=98.677,120.335,157.997 horizon=178.377,132.690,119.995 sun=176.916,112.695,65.743 glare=227.467,147.865,108.441 moonglare=0.000,0.000,0.000 stars=68.341,73.956,76.910 sunlight=199.175,153.961,144.594 ambient=86.656,86.658,86.656 skyscale=3.433333 glarealpha=0.249020
+cloud hour=7.0000 layer=0 tex=Sky\SkyrimCloudsUpper01.dds drawn=1 rgb=146.704,92.604,75.190 alpha=0.750000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=7.0000 layer=1 tex=Sky\SkyrimCloudsUpper02.dds drawn=1 rgb=205.879,133.888,108.312 alpha=0.750000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=7.0000 layer=2 tex=Sky\CloudsLower04_d.dds drawn=1 rgb=164.333,87.343,63.672 alpha=0.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=7.0000 layer=3 tex=Sky\SkyrimCloudsHorizon01.dds drawn=1 rgb=198.144,129.674,105.259 alpha=0.500000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=7.0000 layer=4 tex=SkySky\GS01_d.dds drawn=1 rgb=82.525,92.414,114.239 alpha=0.000000 speedx=0.02992126 speedy=0.00000000 offx=0.299213 offy=0.000000
+cloud hour=7.0000 layer=5 tex=Sky\GS01_d.dds drawn=1 rgb=82.525,92.414,114.239 alpha=0.000000 speedx=0.02992126 speedy=0.00000000 offx=0.299213 offy=0.000000
+cloud hour=7.0000 layer=6 tex=- drawn=0 rgb=82.525,92.414,114.239 alpha=0.333333 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=7.0000 layer=7 tex=- drawn=0 rgb=82.525,92.414,114.239 alpha=0.800000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=7.0000 layer=8 tex=- drawn=0 rgb=82.525,92.414,114.239 alpha=0.650000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=7.0000 layer=9 tex=- drawn=0 rgb=82.525,92.414,114.239 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=7.0000 layer=10 tex=- drawn=0 rgb=82.525,92.414,114.239 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=7.0000 layer=11 tex=Sky\SkyrimCloudsFill.dds drawn=0 rgb=82.525,92.414,114.239 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=7.0000 layer=12 tex=Sky\SkyrimCloudsFill.dds drawn=1 rgb=86.823,99.184,118.466 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=7.0000 layer=13 tex=Sky\CloudsHorizonLight01_d.DDS drawn=0 rgb=82.525,92.414,114.239 alpha=0.750000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=7.0000 layer=14 tex=Sky\CloudsLowerLight01_d.DDS drawn=1 rgb=134.946,100.392,98.979 alpha=1.000000 speedx=0.02125984 speedy=0.00000000 offx=0.212598 offy=0.000000
+cloud hour=7.0000 layer=15 tex=Sky\CloudsLowerLightB01_d.dds drawn=1 rgb=198.244,133.195,106.605 alpha=1.000000 speedx=0.02125984 speedy=0.00000000 offx=0.212598 offy=0.000000
+moon hour=7.0000 day=4.000 which=secunda phase=1 suffix=three_wan tex=textures/sky/secunda_three_wan.dds alpha=0.000000 shadowalpha=0.000000 halfangle=7.1250 elev=8.0197 az=122.2906
+moon hour=7.0000 day=17.000 which=secunda phase=4 suffix=new tex=textures/sky/secunda_new.dds alpha=0.000000 shadowalpha=0.000000 halfangle=7.1250 elev=8.0197 az=122.2906
+moon hour=7.0000 day=32.000 which=secunda phase=0 suffix=full tex=textures/sky/secunda_full.dds alpha=0.000000 shadowalpha=0.000000 halfangle=7.1250 elev=8.0197 az=122.2906
+skyclock hour=7.1000 keys=Sunrise,LateSunrise,0.733333 A=6.000000 B=8.000000 C=18.000000 D=20.000000 sunpos=505.714,-325.000,94.286 light=0.743311,-0.477693,0.468294 sunalpha=0.550000 starsalpha=0.000000 elev=8.9139 az=122.7270
+skycolor hour=7.1000 upper=42.487,58.555,82.923 lower=98.743,120.468,158.397 horizon=178.105,133.154,120.396 sun=167.965,99.448,52.961 glare=224.619,146.481,111.014 moonglare=0.000,0.000,0.000 stars=60.366,66.476,69.669 sunlight=210.306,159.317,146.124 ambient=87.124,87.126,87.124 skyscale=3.426667 glarealpha=0.273922
+cloud hour=7.1000 layer=0 tex=Sky\SkyrimCloudsUpper01.dds drawn=1 rgb=148.366,94.877,76.741 alpha=0.750000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=7.1000 layer=1 tex=Sky\SkyrimCloudsUpper02.dds drawn=1 rgb=210.468,137.677,111.223 alpha=0.750000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=7.1000 layer=2 tex=Sky\CloudsLower04_d.dds drawn=1 rgb=163.866,87.276,63.738 alpha=0.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=7.1000 layer=3 tex=Sky\SkyrimCloudsHorizon01.dds drawn=1 rgb=203.075,132.716,107.001 alpha=0.500000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=7.1000 layer=4 tex=SkySky\GS01_d.dds drawn=1 rgb=83.835,94.712,117.559 alpha=0.000000 speedx=0.02992126 speedy=0.00000000 offx=0.299213 offy=0.000000
+cloud hour=7.1000 layer=5 tex=Sky\GS01_d.dds drawn=1 rgb=83.835,94.712,117.559 alpha=0.000000 speedx=0.02992126 speedy=0.00000000 offx=0.299213 offy=0.000000
+cloud hour=7.1000 layer=6 tex=- drawn=0 rgb=83.835,94.712,117.559 alpha=0.326667 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=7.1000 layer=7 tex=- drawn=0 rgb=83.835,94.712,117.559 alpha=0.780000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=7.1000 layer=8 tex=- drawn=0 rgb=83.835,94.712,117.559 alpha=0.650000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=7.1000 layer=9 tex=- drawn=0 rgb=83.835,94.712,117.559 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=7.1000 layer=10 tex=- drawn=0 rgb=83.835,94.712,117.559 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=7.1000 layer=11 tex=Sky\SkyrimCloudsFill.dds drawn=0 rgb=83.835,94.712,117.559 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=7.1000 layer=12 tex=Sky\SkyrimCloudsFill.dds drawn=1 rgb=87.671,101.136,120.757 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=7.1000 layer=13 tex=Sky\CloudsHorizonLight01_d.DDS drawn=0 rgb=83.835,94.712,117.559 alpha=0.750000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=7.1000 layer=14 tex=Sky\CloudsLowerLight01_d.DDS drawn=1 rgb=142.718,104.269,100.408 alpha=1.000000 speedx=0.02125984 speedy=0.00000000 offx=0.212598 offy=0.000000
+cloud hour=7.1000 layer=15 tex=Sky\CloudsLowerLightB01_d.dds drawn=1 rgb=207.660,138.874,109.478 alpha=1.000000 speedx=0.02125984 speedy=0.00000000 offx=0.212598 offy=0.000000
+moon hour=7.1000 day=4.000 which=secunda phase=1 suffix=three_wan tex=textures/sky/secunda_three_wan.dds alpha=0.000000 shadowalpha=0.000000 halfangle=7.1250 elev=8.9139 az=122.7270
+moon hour=7.1000 day=17.000 which=secunda phase=4 suffix=new tex=textures/sky/secunda_new.dds alpha=0.000000 shadowalpha=0.000000 halfangle=7.1250 elev=8.9139 az=122.7270
+moon hour=7.1000 day=32.000 which=secunda phase=0 suffix=full tex=textures/sky/secunda_full.dds alpha=0.000000 shadowalpha=0.000000 halfangle=7.1250 elev=8.9139 az=122.7270
+skyclock hour=18.9500 keys=EarlySunset,Sunset,0.300000 A=6.000000 B=8.000000 C=18.000000 D=20.000000 sunpos=-510.000,-325.000,90.000 light=-0.745331,-0.474966,0.467856 sunalpha=0.525000 starsalpha=0.000000 elev=8.4647 az=237.4925
+skycolor hour=18.9500 upper=33.273,43.965,64.822 lower=99.315,116.502,161.003 horizon=159.523,117.217,103.855 sun=255.000,42.401,43.372 glare=228.175,129.122,93.034 moonglare=57.466,57.467,57.465 stars=27.446,30.781,32.240 sunlight=179.481,128.351,120.992 ambient=72.444,72.446,72.444 skyscale=2.850000 glarealpha=0.261471
+cloud hour=18.9500 layer=0 tex=Sky\SkyrimCloudsUpper01.dds drawn=1 rgb=115.963,64.875,55.941 alpha=0.750000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=18.9500 layer=1 tex=Sky\SkyrimCloudsUpper02.dds drawn=1 rgb=165.170,109.863,91.125 alpha=0.750000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=18.9500 layer=2 tex=Sky\CloudsLower04_d.dds drawn=1 rgb=196.094,91.153,68.247 alpha=0.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=18.9500 layer=3 tex=Sky\SkyrimCloudsHorizon01.dds drawn=1 rgb=169.489,119.988,104.063 alpha=0.500000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=18.9500 layer=4 tex=SkySky\GS01_d.dds drawn=1 rgb=61.460,74.380,87.544 alpha=0.000000 speedx=0.02992126 speedy=0.00000000 offx=0.299213 offy=0.000000
+cloud hour=18.9500 layer=5 tex=Sky\GS01_d.dds drawn=1 rgb=61.460,74.380,87.544 alpha=0.000000 speedx=0.02992126 speedy=0.00000000 offx=0.299213 offy=0.000000
+cloud hour=18.9500 layer=6 tex=- drawn=0 rgb=61.460,74.380,87.544 alpha=0.330000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=18.9500 layer=7 tex=- drawn=0 rgb=61.460,74.380,87.544 alpha=0.790000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=18.9500 layer=8 tex=- drawn=0 rgb=61.460,74.380,87.544 alpha=0.650000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=18.9500 layer=9 tex=- drawn=0 rgb=61.460,74.380,87.544 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=18.9500 layer=10 tex=- drawn=0 rgb=61.460,74.380,87.544 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=18.9500 layer=11 tex=Sky\SkyrimCloudsFill.dds drawn=0 rgb=61.460,74.380,87.544 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=18.9500 layer=12 tex=Sky\SkyrimCloudsFill.dds drawn=1 rgb=69.477,79.291,102.453 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=18.9500 layer=13 tex=Sky\CloudsHorizonLight01_d.DDS drawn=0 rgb=61.460,74.380,87.544 alpha=0.825000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=18.9500 layer=14 tex=Sky\CloudsLowerLight01_d.DDS drawn=1 rgb=142.603,103.722,96.729 alpha=1.000000 speedx=0.02125984 speedy=0.00000000 offx=0.212598 offy=0.000000
+cloud hour=18.9500 layer=15 tex=Sky\CloudsLowerLightB01_d.dds drawn=1 rgb=191.920,107.380,82.850 alpha=1.000000 speedx=0.02125984 speedy=0.00000000 offx=0.212598 offy=0.000000
+moon hour=18.9500 day=4.000 which=secunda phase=1 suffix=three_wan tex=textures/sky/secunda_three_wan.dds alpha=0.000000 shadowalpha=0.000000 halfangle=7.1250 elev=8.4647 az=237.4925
+moon hour=18.9500 day=17.000 which=secunda phase=4 suffix=new tex=textures/sky/secunda_new.dds alpha=0.000000 shadowalpha=0.000000 halfangle=7.1250 elev=8.4647 az=237.4925
+moon hour=18.9500 day=32.000 which=secunda phase=0 suffix=full tex=textures/sky/secunda_full.dds alpha=0.000000 shadowalpha=0.000000 halfangle=7.1250 elev=8.4647 az=237.4925
+skyclock hour=19.1000 keys=EarlySunset,Sunset,0.400000 A=6.000000 B=8.000000 C=18.000000 D=20.000000 sunpos=-522.857,-325.000,77.143 light=-0.751134,-0.466893,0.466700 sunalpha=0.450000 starsalpha=0.000000 elev=7.1423 az=238.1355
+skycolor hour=19.1000 upper=32.369,42.960,63.110 lower=99.417,117.002,161.003 horizon=159.340,115.620,102.148 sun=255.000,49.957,49.258 glare=232.639,124.931,83.547 moonglare=75.821,75.823,75.820 stars=30.571,33.442,34.706 sunlight=165.889,123.773,120.557 ambient=70.936,70.937,70.936 skyscale=2.800000 glarealpha=0.224118
+cloud hour=19.1000 layer=0 tex=Sky\SkyrimCloudsUpper01.dds drawn=1 rgb=109.070,62.172,53.617 alpha=0.750000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=19.1000 layer=1 tex=Sky\SkyrimCloudsUpper02.dds drawn=1 rgb=161.399,101.198,80.793 alpha=0.750000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=19.1000 layer=2 tex=Sky\CloudsLower04_d.dds drawn=1 rgb=193.793,90.860,68.653 alpha=0.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=19.1000 layer=3 tex=Sky\SkyrimCloudsHorizon01.dds drawn=1 rgb=154.169,112.461,101.955 alpha=0.500000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=19.1000 layer=4 tex=SkySky\GS01_d.dds drawn=1 rgb=60.269,71.862,85.736 alpha=0.000000 speedx=0.02992126 speedy=0.00000000 offx=0.299213 offy=0.000000
+cloud hour=19.1000 layer=5 tex=Sky\GS01_d.dds drawn=1 rgb=60.269,71.862,85.736 alpha=0.000000 speedx=0.02992126 speedy=0.00000000 offx=0.299213 offy=0.000000
+cloud hour=19.1000 layer=6 tex=- drawn=0 rgb=60.269,71.862,85.736 alpha=0.340000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=19.1000 layer=7 tex=- drawn=0 rgb=60.269,71.862,85.736 alpha=0.820000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=19.1000 layer=8 tex=- drawn=0 rgb=60.269,71.862,85.736 alpha=0.650000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=19.1000 layer=9 tex=- drawn=0 rgb=60.269,71.862,85.736 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=19.1000 layer=10 tex=- drawn=0 rgb=60.269,71.862,85.736 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=19.1000 layer=11 tex=Sky\SkyrimCloudsFill.dds drawn=0 rgb=60.269,71.862,85.736 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=19.1000 layer=12 tex=Sky\SkyrimCloudsFill.dds drawn=1 rgb=67.974,77.074,99.631 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=19.1000 layer=13 tex=Sky\CloudsHorizonLight01_d.DDS drawn=0 rgb=60.269,71.862,85.736 alpha=0.850000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=19.1000 layer=14 tex=Sky\CloudsLowerLight01_d.DDS drawn=1 rgb=130.220,97.731,94.888 alpha=1.000000 speedx=0.02125984 speedy=0.00000000 offx=0.212598 offy=0.000000
+cloud hour=19.1000 layer=15 tex=Sky\CloudsLowerLightB01_d.dds drawn=1 rgb=178.545,100.017,79.145 alpha=1.000000 speedx=0.02125984 speedy=0.00000000 offx=0.212598 offy=0.000000
+moon hour=19.1000 day=4.000 which=secunda phase=1 suffix=three_wan tex=textures/sky/secunda_three_wan.dds alpha=0.000000 shadowalpha=0.000000 halfangle=7.1250 elev=7.1423 az=238.1355
+moon hour=19.1000 day=17.000 which=secunda phase=4 suffix=new tex=textures/sky/secunda_new.dds alpha=0.000000 shadowalpha=0.000000 halfangle=7.1250 elev=7.1423 az=238.1355
+moon hour=19.1000 day=32.000 which=secunda phase=0 suffix=full tex=textures/sky/secunda_full.dds alpha=0.000000 shadowalpha=0.000000 halfangle=7.1250 elev=7.1423 az=238.1355
+skyclock hour=2.9900 keys=Night,Night,0.000000 A=6.000000 B=8.000000 C=18.000000 D=20.000000 sunpos=238.800,-325.000,361.200 light=0.484420,-0.659282,0.575051 sunalpha=0.000000 starsalpha=1.000000 elev=41.8480 az=143.6927
+skycolor hour=2.9900 upper=3.000,7.000,9.000 lower=17.001,25.001,34.000 horizon=27.001,37.001,47.000 sun=254.999,49.019,15.002 glare=0.000,0.000,0.000 moonglare=210.001,210.005,210.001 stars=255.000,255.000,255.000 sunlight=53.001,70.001,87.000 ambient=2.000,2.000,2.000 skyscale=3.000000 glarealpha=0.000000
+cloud hour=2.9900 layer=0 tex=Sky\SkyrimCloudsUpper01.dds drawn=1 rgb=14.001,21.001,27.000 alpha=0.750000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=2.9900 layer=1 tex=Sky\SkyrimCloudsUpper02.dds drawn=1 rgb=15.001,24.001,36.000 alpha=0.750000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=2.9900 layer=2 tex=Sky\CloudsLower04_d.dds drawn=1 rgb=20.001,27.001,34.000 alpha=0.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=2.9900 layer=3 tex=Sky\SkyrimCloudsHorizon01.dds drawn=1 rgb=12.000,17.001,21.000 alpha=0.300000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=2.9900 layer=4 tex=SkySky\GS01_d.dds drawn=1 rgb=35.001,44.001,53.000 alpha=0.000000 speedx=0.02992126 speedy=0.00000000 offx=0.299213 offy=0.000000
+cloud hour=2.9900 layer=5 tex=Sky\GS01_d.dds drawn=1 rgb=35.001,44.001,53.000 alpha=0.000000 speedx=0.02992126 speedy=0.00000000 offx=0.299213 offy=0.000000
+cloud hour=2.9900 layer=6 tex=- drawn=0 rgb=35.001,44.001,53.000 alpha=0.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=2.9900 layer=7 tex=- drawn=0 rgb=35.001,44.001,53.000 alpha=0.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=2.9900 layer=8 tex=- drawn=0 rgb=35.001,44.001,53.000 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=2.9900 layer=9 tex=- drawn=0 rgb=35.001,44.001,53.000 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=2.9900 layer=10 tex=- drawn=0 rgb=35.001,44.001,53.000 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=2.9900 layer=11 tex=Sky\SkyrimCloudsFill.dds drawn=0 rgb=35.001,44.001,53.000 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=2.9900 layer=12 tex=Sky\SkyrimCloudsFill.dds drawn=1 rgb=21.001,29.001,38.000 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=2.9900 layer=13 tex=Sky\CloudsHorizonLight01_d.DDS drawn=0 rgb=35.001,44.001,53.000 alpha=0.750000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=2.9900 layer=14 tex=Sky\CloudsLowerLight01_d.DDS drawn=1 rgb=19.001,26.001,33.000 alpha=1.000000 speedx=0.02125984 speedy=0.00000000 offx=0.212598 offy=0.000000
+cloud hour=2.9900 layer=15 tex=Sky\CloudsLowerLightB01_d.dds drawn=1 rgb=16.001,21.001,27.000 alpha=1.000000 speedx=0.02125984 speedy=0.00000000 offx=0.212598 offy=0.000000
+moon hour=2.9900 day=4.000 which=secunda phase=1 suffix=three_wan tex=textures/sky/secunda_three_wan.dds alpha=0.000000 shadowalpha=0.000000 halfangle=7.1250 elev=41.8480 az=143.6927
+moon hour=2.9900 day=17.000 which=secunda phase=4 suffix=new tex=textures/sky/secunda_new.dds alpha=0.000000 shadowalpha=0.000000 halfangle=7.1250 elev=41.8480 az=143.6927
+moon hour=2.9900 day=32.000 which=secunda phase=0 suffix=full tex=textures/sky/secunda_full.dds alpha=0.000000 shadowalpha=0.000000 halfangle=7.1250 elev=41.8480 az=143.6927
+skyclock hour=3.0100 keys=Night,EarlySunrise,0.006667 A=6.000000 B=8.000000 C=18.000000 D=20.000000 sunpos=241.200,-325.000,358.800 light=0.488291,-0.657938,0.573314 sunalpha=0.000000 starsalpha=0.996667 elev=41.5579 az=143.4189
+skycolor hour=3.0100 upper=3.090,7.129,9.216 lower=17.222,25.259,34.354 horizon=27.314,37.287,47.325 sun=255.000,50.174,15.923 glare=1.447,0.845,0.437 moonglare=210.068,210.071,210.068 stars=254.861,254.865,254.861 sunlight=52.982,69.988,87.007 ambient=2.835,2.835,2.835 skyscale=3.002667 glarealpha=0.000000
+cloud hour=3.0100 layer=0 tex=Sky\SkyrimCloudsUpper01.dds drawn=1 rgb=14.162,21.121,27.145 alpha=0.750000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=3.0100 layer=1 tex=Sky\SkyrimCloudsUpper02.dds drawn=1 rgb=15.124,24.103,36.079 alpha=0.750000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=3.0100 layer=2 tex=Sky\CloudsLower04_d.dds drawn=1 rgb=20.060,27.098,34.091 alpha=0.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=3.0100 layer=3 tex=Sky\SkyrimCloudsHorizon01.dds drawn=1 rgb=12.135,17.147,21.141 alpha=0.300000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=3.0100 layer=4 tex=SkySky\GS01_d.dds drawn=1 rgb=35.142,44.143,53.193 alpha=0.000000 speedx=0.02992126 speedy=0.00000000 offx=0.299213 offy=0.000000
+cloud hour=3.0100 layer=5 tex=Sky\GS01_d.dds drawn=1 rgb=35.142,44.143,53.193 alpha=0.000000 speedx=0.02992126 speedy=0.00000000 offx=0.299213 offy=0.000000
+cloud hour=3.0100 layer=6 tex=- drawn=0 rgb=35.142,44.143,53.193 alpha=0.001333 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=3.0100 layer=7 tex=- drawn=0 rgb=35.142,44.143,53.193 alpha=0.003333 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=3.0100 layer=8 tex=- drawn=0 rgb=35.142,44.143,53.193 alpha=0.998800 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=3.0100 layer=9 tex=- drawn=0 rgb=35.142,44.143,53.193 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=3.0100 layer=10 tex=- drawn=0 rgb=35.142,44.143,53.193 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=3.0100 layer=11 tex=Sky\SkyrimCloudsFill.dds drawn=0 rgb=35.142,44.143,53.193 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=3.0100 layer=12 tex=Sky\SkyrimCloudsFill.dds drawn=1 rgb=21.128,29.147,38.191 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=3.0100 layer=13 tex=Sky\CloudsHorizonLight01_d.DDS drawn=0 rgb=35.142,44.143,53.193 alpha=0.750000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=3.0100 layer=14 tex=Sky\CloudsLowerLight01_d.DDS drawn=1 rgb=19.066,26.072,33.097 alpha=0.998000 speedx=0.02125984 speedy=0.00000000 offx=0.212598 offy=0.000000
+cloud hour=3.0100 layer=15 tex=Sky\CloudsLowerLightB01_d.dds drawn=1 rgb=16.105,21.121,27.133 alpha=1.000000 speedx=0.02125984 speedy=0.00000000 offx=0.212598 offy=0.000000
+moon hour=3.0100 day=4.000 which=secunda phase=1 suffix=three_wan tex=textures/sky/secunda_three_wan.dds alpha=0.000000 shadowalpha=0.000000 halfangle=7.1250 elev=41.5579 az=143.4189
+moon hour=3.0100 day=17.000 which=secunda phase=4 suffix=new tex=textures/sky/secunda_new.dds alpha=0.000000 shadowalpha=0.000000 halfangle=7.1250 elev=41.5579 az=143.4189
+moon hour=3.0100 day=32.000 which=secunda phase=0 suffix=full tex=textures/sky/secunda_full.dds alpha=0.000000 shadowalpha=0.000000 halfangle=7.1250 elev=41.5579 az=143.4189
+skyclock hour=22.9900 keys=LateSunset,Night,0.993333 A=6.000000 B=8.000000 C=18.000000 D=20.000000 sunpos=-241.200,-325.000,358.800 light=-0.488291,-0.657938,0.573314 sunalpha=0.000000 starsalpha=0.996667 elev=41.5579 az=216.5811
+skycolor hour=22.9900 upper=3.054,7.086,9.154 lower=17.158,25.171,34.244 horizon=27.237,37.185,47.180 sun=255.000,49.424,15.298 glare=1.624,0.559,0.106 moonglare=210.001,210.005,210.001 stars=254.648,254.652,254.648 sunlight=53.055,70.074,87.112 ambient=2.110,2.110,2.110 skyscale=3.008000 glarealpha=0.000000
+cloud hour=22.9900 layer=0 tex=Sky\SkyrimCloudsUpper01.dds drawn=1 rgb=14.133,21.079,27.102 alpha=0.750000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=22.9900 layer=1 tex=Sky\SkyrimCloudsUpper02.dds drawn=1 rgb=15.131,24.097,36.085 alpha=0.750000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=22.9900 layer=2 tex=Sky\CloudsLower04_d.dds drawn=1 rgb=20.092,27.079,34.097 alpha=0.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=22.9900 layer=3 tex=Sky\SkyrimCloudsHorizon01.dds drawn=1 rgb=12.299,17.258,21.318 alpha=0.300667 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=22.9900 layer=4 tex=SkySky\GS01_d.dds drawn=1 rgb=35.008,43.994,52.987 alpha=0.000000 speedx=0.02992126 speedy=0.00000000 offx=0.299213 offy=0.000000
+cloud hour=22.9900 layer=5 tex=Sky\GS01_d.dds drawn=1 rgb=35.008,43.994,52.987 alpha=0.000000 speedx=0.02992126 speedy=0.00000000 offx=0.299213 offy=0.000000
+cloud hour=22.9900 layer=6 tex=- drawn=0 rgb=35.008,43.994,52.987 alpha=0.001333 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=22.9900 layer=7 tex=- drawn=0 rgb=35.008,43.994,52.987 alpha=0.003333 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=22.9900 layer=8 tex=- drawn=0 rgb=35.008,43.994,52.987 alpha=0.998800 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=22.9900 layer=9 tex=- drawn=0 rgb=35.008,43.994,52.987 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=22.9900 layer=10 tex=- drawn=0 rgb=35.008,43.994,52.987 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=22.9900 layer=11 tex=Sky\SkyrimCloudsFill.dds drawn=0 rgb=35.008,43.994,52.987 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=22.9900 layer=12 tex=Sky\SkyrimCloudsFill.dds drawn=1 rgb=21.085,29.098,38.135 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=22.9900 layer=13 tex=Sky\CloudsHorizonLight01_d.DDS drawn=0 rgb=35.021,44.008,53.007 alpha=0.750000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=22.9900 layer=14 tex=Sky\CloudsLowerLight01_d.DDS drawn=1 rgb=19.047,26.047,33.072 alpha=1.000000 speedx=0.02125984 speedy=0.00000000 offx=0.212598 offy=0.000000
+cloud hour=22.9900 layer=15 tex=Sky\CloudsLowerLightB01_d.dds drawn=1 rgb=16.070,21.079,27.090 alpha=1.000000 speedx=0.02125984 speedy=0.00000000 offx=0.212598 offy=0.000000
+moon hour=22.9900 day=4.000 which=secunda phase=1 suffix=three_wan tex=textures/sky/secunda_three_wan.dds alpha=0.000000 shadowalpha=0.000000 halfangle=7.1250 elev=41.5579 az=216.5811
+moon hour=22.9900 day=17.000 which=secunda phase=4 suffix=new tex=textures/sky/secunda_new.dds alpha=0.000000 shadowalpha=0.000000 halfangle=7.1250 elev=41.5579 az=216.5811
+moon hour=22.9900 day=32.000 which=secunda phase=0 suffix=full tex=textures/sky/secunda_full.dds alpha=0.000000 shadowalpha=0.000000 halfangle=7.1250 elev=41.5579 az=216.5811
+skyclock hour=23.0100 keys=Night,Night,0.000000 A=6.000000 B=8.000000 C=18.000000 D=20.000000 sunpos=-238.800,-325.000,361.200 light=-0.484420,-0.659282,0.575051 sunalpha=0.000000 starsalpha=1.000000 elev=41.8480 az=216.3073
+skycolor hour=23.0100 upper=3.000,7.000,9.000 lower=17.001,25.001,34.000 horizon=27.001,37.001,47.000 sun=254.999,49.019,15.002 glare=0.000,0.000,0.000 moonglare=210.001,210.005,210.001 stars=255.000,255.000,255.000 sunlight=53.001,70.001,87.000 ambient=2.000,2.000,2.000 skyscale=3.000000 glarealpha=0.000000
+cloud hour=23.0100 layer=0 tex=Sky\SkyrimCloudsUpper01.dds drawn=1 rgb=14.001,21.001,27.000 alpha=0.750000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=23.0100 layer=1 tex=Sky\SkyrimCloudsUpper02.dds drawn=1 rgb=15.001,24.001,36.000 alpha=0.750000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=23.0100 layer=2 tex=Sky\CloudsLower04_d.dds drawn=1 rgb=20.001,27.001,34.000 alpha=0.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=23.0100 layer=3 tex=Sky\SkyrimCloudsHorizon01.dds drawn=1 rgb=12.000,17.001,21.000 alpha=0.300000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=23.0100 layer=4 tex=SkySky\GS01_d.dds drawn=1 rgb=35.001,44.001,53.000 alpha=0.000000 speedx=0.02992126 speedy=0.00000000 offx=0.299213 offy=0.000000
+cloud hour=23.0100 layer=5 tex=Sky\GS01_d.dds drawn=1 rgb=35.001,44.001,53.000 alpha=0.000000 speedx=0.02992126 speedy=0.00000000 offx=0.299213 offy=0.000000
+cloud hour=23.0100 layer=6 tex=- drawn=0 rgb=35.001,44.001,53.000 alpha=0.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=23.0100 layer=7 tex=- drawn=0 rgb=35.001,44.001,53.000 alpha=0.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=23.0100 layer=8 tex=- drawn=0 rgb=35.001,44.001,53.000 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=23.0100 layer=9 tex=- drawn=0 rgb=35.001,44.001,53.000 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=23.0100 layer=10 tex=- drawn=0 rgb=35.001,44.001,53.000 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=23.0100 layer=11 tex=Sky\SkyrimCloudsFill.dds drawn=0 rgb=35.001,44.001,53.000 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=23.0100 layer=12 tex=Sky\SkyrimCloudsFill.dds drawn=1 rgb=21.001,29.001,38.000 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=23.0100 layer=13 tex=Sky\CloudsHorizonLight01_d.DDS drawn=0 rgb=35.001,44.001,53.000 alpha=0.750000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=23.0100 layer=14 tex=Sky\CloudsLowerLight01_d.DDS drawn=1 rgb=19.001,26.001,33.000 alpha=1.000000 speedx=0.02125984 speedy=0.00000000 offx=0.212598 offy=0.000000
+cloud hour=23.0100 layer=15 tex=Sky\CloudsLowerLightB01_d.dds drawn=1 rgb=16.001,21.001,27.000 alpha=1.000000 speedx=0.02125984 speedy=0.00000000 offx=0.212598 offy=0.000000
+moon hour=23.0100 day=4.000 which=secunda phase=1 suffix=three_wan tex=textures/sky/secunda_three_wan.dds alpha=0.000000 shadowalpha=0.000000 halfangle=7.1250 elev=41.8480 az=216.3073
+moon hour=23.0100 day=17.000 which=secunda phase=4 suffix=new tex=textures/sky/secunda_new.dds alpha=0.000000 shadowalpha=0.000000 halfangle=7.1250 elev=41.8480 az=216.3073
+moon hour=23.0100 day=32.000 which=secunda phase=0 suffix=full tex=textures/sky/secunda_full.dds alpha=0.000000 shadowalpha=0.000000 halfangle=7.1250 elev=41.8480 az=216.3073
+skyclock hour=22.0000 keys=LateSunset,Night,0.333333 A=6.000000 B=8.000000 C=18.000000 D=20.000000 sunpos=-360.000,-325.000,240.000 light=-0.640914,-0.578603,0.504429 sunalpha=0.000000 starsalpha=0.666667 elev=26.3283 az=227.9250
+skycolor hour=22.0000 upper=8.356,14.908,20.783 lower=33.367,42.699,59.503 horizon=50.792,56.054,65.445 sun=255.000,80.638,38.796 glare=85.079,34.966,7.920 moonglare=210.001,210.005,210.001 stars=220.085,220.089,220.085 sunlight=58.329,77.305,98.277 ambient=12.760,12.760,12.760 skyscale=3.800000 glarealpha=0.000000
+cloud hour=22.0000 layer=0 tex=Sky\SkyrimCloudsUpper01.dds drawn=1 rgb=24.178,28.330,37.544 alpha=0.750000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=22.0000 layer=1 tex=Sky\SkyrimCloudsUpper02.dds drawn=1 rgb=27.703,33.887,44.610 alpha=0.750000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=22.0000 layer=2 tex=Sky\CloudsLower04_d.dds drawn=1 rgb=29.256,34.937,43.911 alpha=0.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=22.0000 layer=3 tex=Sky\SkyrimCloudsHorizon01.dds drawn=1 rgb=30.560,38.163,51.542 alpha=0.366667 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=22.0000 layer=4 tex=SkySky\GS01_d.dds drawn=1 rgb=35.678,43.334,51.666 alpha=0.000000 speedx=0.02992126 speedy=0.00000000 offx=0.299213 offy=0.000000
+cloud hour=22.0000 layer=5 tex=Sky\GS01_d.dds drawn=1 rgb=35.678,43.334,51.666 alpha=0.000000 speedx=0.02992126 speedy=0.00000000 offx=0.299213 offy=0.000000
+cloud hour=22.0000 layer=6 tex=- drawn=0 rgb=35.678,43.334,51.666 alpha=0.133333 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=22.0000 layer=7 tex=- drawn=0 rgb=35.678,43.334,51.666 alpha=0.333333 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=22.0000 layer=8 tex=- drawn=0 rgb=35.678,43.334,51.666 alpha=0.880000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=22.0000 layer=9 tex=- drawn=0 rgb=35.678,43.334,51.666 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=22.0000 layer=10 tex=- drawn=0 rgb=35.678,43.334,51.666 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=22.0000 layer=11 tex=Sky\SkyrimCloudsFill.dds drawn=0 rgb=35.678,43.334,51.666 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=22.0000 layer=12 tex=Sky\SkyrimCloudsFill.dds drawn=1 rgb=29.583,38.903,51.845 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=22.0000 layer=13 tex=Sky\CloudsHorizonLight01_d.DDS drawn=0 rgb=37.007,44.668,53.667 alpha=0.750000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=22.0000 layer=14 tex=Sky\CloudsLowerLight01_d.DDS drawn=1 rgb=23.644,30.644,40.284 alpha=1.000000 speedx=0.02125984 speedy=0.00000000 offx=0.212598 offy=0.000000
+cloud hour=22.0000 layer=15 tex=Sky\CloudsLowerLightB01_d.dds drawn=1 rgb=21.460,28.321,36.237 alpha=1.000000 speedx=0.02125984 speedy=0.00000000 offx=0.212598 offy=0.000000
+moon hour=22.0000 day=4.000 which=secunda phase=1 suffix=three_wan tex=textures/sky/secunda_three_wan.dds alpha=0.000000 shadowalpha=0.000000 halfangle=7.1250 elev=26.3283 az=227.9250
+moon hour=22.0000 day=17.000 which=secunda phase=4 suffix=new tex=textures/sky/secunda_new.dds alpha=0.000000 shadowalpha=0.000000 halfangle=7.1250 elev=26.3283 az=227.9250
+moon hour=22.0000 day=32.000 which=secunda phase=0 suffix=full tex=textures/sky/secunda_full.dds alpha=0.000000 shadowalpha=0.000000 halfangle=7.1250 elev=26.3283 az=227.9250
+skyclock hour=6.3000 keys=Sunrise,LateSunrise,0.200000 A=6.000000 B=8.000000 C=18.000000 D=20.000000 sunpos=574.286,-325.000,25.714 light=0.770881,-0.436257,0.464137 sunalpha=0.150000 starsalpha=0.000000 elev=2.2316 az=119.5064
+skycolor hour=6.3000 upper=35.561,47.906,69.079 lower=98.208,119.402,155.198 horizon=180.231,129.419,117.196 sun=233.698,208.773,161.023 glare=246.896,157.710,89.200 moonglare=0.000,0.000,0.000 stars=127.814,129.622,130.597 sunlight=120.101,117.267,133.219 ambient=83.393,83.394,83.393 skyscale=3.480000 glarealpha=0.074706
+cloud hour=6.3000 layer=0 tex=Sky\SkyrimCloudsUpper01.dds drawn=1 rgb=135.029,76.768,64.494 alpha=0.750000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=6.3000 layer=1 tex=Sky\SkyrimCloudsUpper02.dds drawn=1 rgb=174.264,107.871,88.335 alpha=0.750000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=6.3000 layer=2 tex=Sky\CloudsLower04_d.dds drawn=1 rgb=167.600,87.809,63.204 alpha=0.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=6.3000 layer=3 tex=Sky\SkyrimCloudsHorizon01.dds drawn=1 rgb=164.215,108.758,93.146 alpha=0.500000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=6.3000 layer=4 tex=SkySky\GS01_d.dds drawn=1 rgb=73.142,76.612,91.481 alpha=0.000000 speedx=0.02992126 speedy=0.00000000 offx=0.299213 offy=0.000000
+cloud hour=6.3000 layer=5 tex=Sky\GS01_d.dds drawn=1 rgb=73.142,76.612,91.481 alpha=0.000000 speedx=0.02992126 speedy=0.00000000 offx=0.299213 offy=0.000000
+cloud hour=6.3000 layer=6 tex=- drawn=0 rgb=73.142,76.612,91.481 alpha=0.380000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=6.3000 layer=7 tex=- drawn=0 rgb=73.142,76.612,91.481 alpha=0.940000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=6.3000 layer=8 tex=- drawn=0 rgb=73.142,76.612,91.481 alpha=0.650000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=6.3000 layer=9 tex=- drawn=0 rgb=73.142,76.612,91.481 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=6.3000 layer=10 tex=- drawn=0 rgb=73.142,76.612,91.481 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=6.3000 layer=11 tex=Sky\SkyrimCloudsFill.dds drawn=0 rgb=73.142,76.612,91.481 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=6.3000 layer=12 tex=Sky\SkyrimCloudsFill.dds drawn=1 rgb=80.714,85.691,102.652 alpha=1.000000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=6.3000 layer=13 tex=Sky\CloudsHorizonLight01_d.DDS drawn=0 rgb=73.142,76.612,91.481 alpha=0.750000 speedx=0.00000000 speedy=0.00000000 offx=0.000000 offy=0.000000
+cloud hour=6.3000 layer=14 tex=Sky\CloudsLowerLight01_d.DDS drawn=1 rgb=80.152,73.937,88.623 alpha=1.000000 speedx=0.02125984 speedy=0.00000000 offx=0.212598 offy=0.000000
+cloud hour=6.3000 layer=15 tex=Sky\CloudsLowerLightB01_d.dds drawn=1 rgb=134.318,94.728,86.561 alpha=1.000000 speedx=0.02125984 speedy=0.00000000 offx=0.212598 offy=0.000000
+moon hour=6.3000 day=4.000 which=secunda phase=1 suffix=three_wan tex=textures/sky/secunda_three_wan.dds alpha=0.000000 shadowalpha=0.000000 halfangle=7.1250 elev=2.2316 az=119.5064
+moon hour=6.3000 day=17.000 which=secunda phase=4 suffix=new tex=textures/sky/secunda_new.dds alpha=0.000000 shadowalpha=0.000000 halfangle=7.1250 elev=2.2316 az=119.5064
+moon hour=6.3000 day=32.000 which=secunda phase=0 suffix=full tex=textures/sky/secunda_full.dds alpha=0.000000 shadowalpha=0.000000 halfangle=7.1250 elev=2.2316 az=119.5064
+rc=0

@@ -1,0 +1,35 @@
+
+--- case 5: UI3 candidate, TWO-PASS calibration in the code
+    bar h=35  sheet="QMenuBar::item { min-height: 26px; padding-top: 2px; padding-bottom: 2px; }QToolButton { min-height: 26px; padding-top: 2px; padding-bottom: 2px; }"
+    Workspaces: height=32 sizeHint=35 minHint=35
+    LOD: height=32 sizeHint=35 minHint=35
+    Animation: height=32 sizeHint=35 minHint=35
+    Collision: height=32 sizeHint=35 minHint=35
+
+line height used = 16 (max of icon 16 and fm.height)
+
+--- sweep: content -> sizeHint -> height, bar pinned to 35
+    bar contentsMargins 0/0  layout margins 4/4  PM_ToolBarItemMargin 2  PM_ToolBarFrameWidth 2
+    content 18  hint 27  height 27
+    content 19  hint 28  height 27
+    content 20  hint 29  height 27
+    content 21  hint 30  height 27
+    content 22  hint 31  height 28
+    content 23  hint 32  height 29
+    content 24  hint 33  height 30
+    content 25  hint 34  height 31
+    content 26  hint 35  height 32
+    content 27  hint 36  height 33
+    content 28  hint 37  height 34
+    content 29  hint 38  height 35   <== the row
+    content 30  hint 39  height 36
+    content 31  hint 40  height 37
+    content 32  hint 41  height 38
+    content 33  hint 42  height 39
+    content 34  hint 43  height 40
+    content 35  hint 44  height 41
+    content 36  hint 45  height 42
+    content 37  hint 46  height 43
+    content 38  hint 47  height 44
+    content 39  hint 48  height 45
+    content 40  hint 49  height 46

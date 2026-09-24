@@ -1,0 +1,4 @@
+709db070122ba67f3b0fb9692f13f3c79244abc0  E:/Projects/NifskopeWildWastelandEdition/scratchpad/defaults1_20260912/gate/f_bad  7 files  1652257 bytes
+007d657c5fd7fa5e673aec3ca320194c73785008  E:/Projects/NifskopeWildWastelandEdition/scratchpad/defaults1_20260912/gate/f_def  7 files  1652221 bytes
+  differs: Commonwealth.lodb (2015 vs 1979 bytes)
+DIFFERENT: 1 files

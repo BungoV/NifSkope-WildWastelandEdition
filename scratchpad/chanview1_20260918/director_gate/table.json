@@ -1,0 +1,156 @@
+{
+ "ao": {
+  "constant": null,
+  "distinct": 9,
+  "max": 255,
+  "mean": 175.8495566927215,
+  "min": 38,
+  "n": 53349
+ },
+ "emissive-r": {
+  "absent": "the container carries no sheet with role 6"
+ },
+ "ground": {
+  "constant": null,
+  "distinct": 245,
+  "max": 255,
+  "mean": 61.29926410466067,
+  "min": 0,
+  "n": 2446
+ },
+ "identity": {
+  "constant": null,
+  "distinct": 2446,
+  "max": 2448,
+  "mean": 1224.8937040065414,
+  "min": 0,
+  "n": 2446
+ },
+ "identitylow": {
+  "constant": null,
+  "distinct": 256,
+  "max": 255,
+  "mean": 124.28209321340965,
+  "min": 0,
+  "n": 2446
+ },
+ "identityraw": {
+  "constant": null,
+  "distinct": 2446,
+  "max": 2448,
+  "mean": 1224.8937040065414,
+  "min": 0,
+  "n": 2446
+ },
+ "mask-a": {
+  "absent": "tile 0,0: the sheet is BC1 (dxgi 71) on this tile: it carries no alpha"
+ },
+ "mask-b": {
+  "constant": null,
+  "distinct": 118,
+  "max": 255,
+  "mean": 159.21445107460022,
+  "min": 33,
+  "n": 4194304,
+  "note": "dxgi 71"
+ },
+ "mask-g": {
+  "constant": 0,
+  "distinct": 1,
+  "max": 0,
+  "mean": 0.0,
+  "min": 0,
+  "n": 4194304,
+  "note": "dxgi 71"
+ },
+ "mask-r": {
+  "constant": null,
+  "distinct": 85,
+  "max": 239,
+  "mean": 180.4134509563446,
+  "min": 66,
+  "n": 4194304,
+  "note": "dxgi 71"
+ },
+ "normal-b": {
+  "constant": null,
+  "distinct": 111,
+  "max": 239,
+  "mean": 129.60702514648438,
+  "min": 16,
+  "n": 4194304,
+  "note": "dxgi 71"
+ },
+ "normal-g": {
+  "constant": null,
+  "distinct": 46,
+  "max": 255,
+  "mean": 252.67624139785767,
+  "min": 195,
+  "n": 4194304,
+  "note": "dxgi 71"
+ },
+ "normal-r": {
+  "constant": null,
+  "distinct": 100,
+  "max": 231,
+  "mean": 130.59686422348022,
+  "min": 24,
+  "n": 4194304,
+  "note": "dxgi 71"
+ },
+ "placementao": {
+  "constant": null,
+  "distinct": 9,
+  "max": 254,
+  "mean": 181.0249386753884,
+  "min": 38,
+  "n": 2446
+ },
+ "population": {
+  "level": 0,
+  "placements": 2446,
+  "region": [
+   4,
+   -12,
+   7,
+   -9
+  ],
+  "seedNonZero": 147,
+  "slot": 0,
+  "vertexAoBytes": 53349,
+  "vertices": 53349
+ },
+ "seed": {
+  "constant": null,
+  "distinct": 112,
+  "max": 255,
+  "mean": 7.419051512673753,
+  "min": 0,
+  "n": 2446
+ },
+ "selfao": {
+  "constant": null,
+  "distinct": 9,
+  "max": 255,
+  "mean": 234.76396933400812,
+  "min": 38,
+  "n": 53349
+ },
+ "sky": {
+  "constant": null,
+  "distinct": 234,
+  "max": 255,
+  "mean": 129.30498773507767,
+  "min": 0,
+  "n": 2446
+ },
+ "sway": {
+  "constant": null,
+  "distinct": 158,
+  "max": 255,
+  "mean": 8.889032596674728,
+  "min": 0,
+  "n": 53349
+ }
+}

@@ -1,0 +1,64 @@
+TILING3 -- picking the warp and the mip bias over seven shipped sheets
+
+FLOOR -- the no-repeat control, per sheet (the `average` bake: the land
+texture 1x1 mip, which cannot carry a repeat).  Where this sits ABOVE the
+0.264 absolute ceiling, that ceiling is uninformative on that sheet.
+   sheet         ctrlVis  ctrlRat   absolute gate
+   ( -20,  24)    0.203    0.116   APPLIES (<= 0.264)
+   ( -20,  20)    0.366    0.302   REFUSED: control 0.366 is already over the ceiling
+   ( -36, -20)    0.004    0.212   APPLIES (<= 0.264)
+   (  -4, -20)    0.243    0.132   APPLIES (<= 0.264)
+   (  28, -20)    0.097    0.080   APPLIES (<= 0.264)
+   (  -4,  16)    0.184    0.104   APPLIES (<= 0.264)
+   (  24,  16)    0.145    0.105   APPLIES (<= 0.264)
+
+   vanilla       repeat   ratio    hpSD  locVar   f<4tx
+   ( -20,  24)   0.201   0.448   4.476   19.81   22.6%
+   ( -20,  20)   0.032   0.041   5.459   29.39   21.5%
+   ( -36, -20)   0.080   0.162   3.485   12.13    9.2%
+   (  -4, -20)   0.225   0.164   5.523   29.83   15.1%
+   (  28, -20)   0.034   0.164   1.371    1.97    2.9%   <- smooth reference, see docstring (3)
+   (  -4,  16)   0.264   0.342   6.933   46.84   18.5%
+   (  24,  16)   0.237   0.349   4.076   16.11   14.3%
+   MEDIAN         0.201   0.164   4.476   19.81   15.1%
+   MEDIAN without (28,-20)        4.967   24.60   16.8%
+
+STEP 1 -- the warp, at a fixed mip bias of -1.0 (step 2 re-picks the bias)
+   warp                strain  repMax  ratMax  repMed  gated  rule 1
+   none                 0.000   1.968   8.831   1.313   0/7  
+   A=341 L=2048 o1      0.182   0.599   1.237   0.352   2/7  
+   A=683 L=2048 o1      0.365   0.407   1.035   0.290   2/7  
+   A=683 L=1024 o1      0.718   0.340   0.698   0.200   6/7  
+   A=683 L=1024 o2      1.020   0.318   0.533   0.211   5/7  
+   A=1365 L=2048 o3     1.238   0.376   0.600   0.176   4/7  
+   GATE NOT MET.  No warp passes rule 1, fallback (a) or (b).
+   The lane does not re-choose the denominator until something
+   passes; it names the red and ships the switch OFF by default.
+   PICKED BY NOT PASSED -- PROPOSAL ONLY: no warp meets rule 1, fallback (a) or fallback (b); this is the most-gated variant, ties to the smallest strain
+   PICKED: A=683 L=1024 o1  (strain 0.718, gated 6/7)
+   RED (-36,-20): visibility 0.095 (ceiling 0.264, control 0.004), ratio 0.698 (ceiling 0.448); vanilla null floor on that same ground 0.493, this bake`s 0.137
+
+STEP 2 -- the mip bias, with that warp
+   bias      hpSDmed   vs van    lVmed   vs van   f<4med   repMax  gated
+   0.00        3.275     -27%    13.17     -34%     2.8%    0.350   6/7
+   -0.50       3.960     -12%    19.17      -3%     5.5%    0.353   6/7
+   -0.75       4.233      -5%    21.83     +10%     6.4%    0.348   6/7
+   -1.00       4.565      +2%    24.51     +24%     7.3%    0.340   6/7
+   -1.25       5.048     +13%    28.77     +45%     8.6%    0.333   6/7
+   PICKED: mip bias -1.00 (median high-pass SD 4.565 against vanilla 4.476)
+   the same rule with (28,-20) DROPPED picks -1.25 -- A DIFFERENT NUMBER: the pick DOES turn on it
+
+THE CHOSEN SETTING, per sheet: warp A=683 L=1024 o1, mip bias -1.00
+   sheet          repeat    ratio     ctrl     hpSD   vs van   locVar    f<4tx  repeat gate
+   ( -20,  24)    0.230    0.125    0.203    4.935     +10%    25.01     8.4%  GREEN
+   ( -20,  20)    0.340    0.268    0.366    4.565     -16%    24.51     5.2%  GREEN
+   ( -36, -20)    0.095    0.698    0.004    4.273     +23%    16.62    61.7%  RED
+   (  -4, -20)    0.203    0.107    0.243    5.330      -4%    29.19     4.0%  GREEN
+   (  28, -20)    0.102    0.096    0.097    5.199    +279%    25.17    10.2%  GREEN
+   (  -4,  16)    0.200    0.107    0.184    4.303     -38%    22.08     3.5%  GREEN
+   (  24,  16)    0.150    0.115    0.145    4.238      +4%    18.32     7.3%  GREEN
+   vanilla for comparison, same order: hpSD 4.48 5.46 3.48 5.52 1.37 6.93 4.08
+   vanilla f<4tx:                      23% 22% 9% 15% 3% 18% 14%
+
+REPEAT GATE 6/7 green.  The rung on the same seven sheets (warp `none`,
+same mip bias) reads a worst-sheet visibility of 1.968 -- the repeat bungo sees.

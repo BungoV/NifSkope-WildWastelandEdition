@@ -1,0 +1,146 @@
+[
+ {
+  "edid": "LRiverbedSilt01",
+  "ltex": "000227B7",
+  "txst": "000227B6",
+  "via": "TX00",
+  "rel": "Landscape\\Ground\\RiverbedSilt01_d.dds",
+  "path": "E:/Tools/Fallout 4/DataUnpacked/Data\\textures\\Landscape\\Ground\\RiverbedSilt01_d.dds",
+  "info": "2048x2048  12 mips  5592560 B  mean RGB 61.0,48.3,40.9"
+ },
+ {
+  "edid": "LDriedGrass01",
+  "ltex": "0001D1D3",
+  "txst": "0001D1D2",
+  "via": "TX00",
+  "rel": "Landscape\\Ground\\DriedGrass01_D.dds",
+  "path": "E:/Tools/Fallout 4/DataUnpacked/Data\\textures\\Landscape\\Ground\\DriedGrass01_D.dds",
+  "info": "2048x2048  12 mips  5592560 B  mean RGB 113.8,97.9,82.7"
+ },
+ {
+  "edid": "LRubbleRock01",
+  "ltex": "0001F78C",
+  "txst": "0001F78B",
+  "via": "TX00",
+  "rel": "Landscape\\Ground\\RubbleRock01_D.dds",
+  "path": "E:/Tools/Fallout 4/DataUnpacked/Data\\textures\\Landscape\\Ground\\RubbleRock01_D.dds",
+  "info": "2048x2048  12 mips  5592560 B  mean RGB 88.4,81.8,73.8"
+ },
+ {
+  "edid": "LRubbleRock01Grass",
+  "ltex": "00084765",
+  "txst": "0001F78B",
+  "via": "TX00",
+  "rel": "Landscape\\Ground\\RubbleRock01_D.dds",
+  "path": "E:/Tools/Fallout 4/DataUnpacked/Data\\textures\\Landscape\\Ground\\RubbleRock01_D.dds",
+  "info": "2048x2048  12 mips  5592560 B  mean RGB 88.4,81.8,73.8"
+ },
+ {
+  "edid": "LDriedGrass01NoGrass",
+  "ltex": "0001D9B1",
+  "txst": "0001D1D2",
+  "via": "TX00",
+  "rel": "Landscape\\Ground\\DriedGrass01_D.dds",
+  "path": "E:/Tools/Fallout 4/DataUnpacked/Data\\textures\\Landscape\\Ground\\DriedGrass01_D.dds",
+  "info": "2048x2048  12 mips  5592560 B  mean RGB 113.8,97.9,82.7"
+ },
+ {
+  "edid": "LForestFloor01",
+  "ltex": "0003343C",
+  "txst": "0003343B",
+  "via": "TX00",
+  "rel": "Landscape\\Ground\\ForestFloor01_D.dds",
+  "path": "E:/Tools/Fallout 4/DataUnpacked/Data\\textures\\Landscape\\Ground\\ForestFloor01_D.dds",
+  "info": "2048x2048  12 mips  5592560 B  mean RGB 76.2,63.6,53.4"
+ },
+ {
+  "edid": "LRiverbedRocks02Wet",
+  "ltex": "000BC13D",
+  "txst": "000BC13E",
+  "via": "TX00",
+  "rel": "Landscape\\Ground\\RiverbedRocks02Wet_d.dds",
+  "path": "E:/Tools/Fallout 4/DataUnpacked/Data\\textures\\Landscape\\Ground\\RiverbedRocks02Wet_d.dds",
+  "info": "2048x2048  12 mips  5592560 B  mean RGB 74.4,65.3,56.3"
+ },
+ {
+  "edid": "LRiverbedRocks02WetGrass",
+  "ltex": "000BC13F",
+  "txst": "000BC13E",
+  "via": "TX00",
+  "rel": "Landscape\\Ground\\RiverbedRocks02Wet_d.dds",
+  "path": "E:/Tools/Fallout 4/DataUnpacked/Data\\textures\\Landscape\\Ground\\RiverbedRocks02Wet_d.dds",
+  "info": "2048x2048  12 mips  5592560 B  mean RGB 74.4,65.3,56.3"
+ },
+ {
+  "edid": "LDirtGravel01",
+  "ltex": "00021336",
+  "txst": "00021335",
+  "via": "TX00",
+  "rel": "Landscape\\Ground\\DirtGravel01_d.dds",
+  "path": "E:/Tools/Fallout 4/DataUnpacked/Data\\textures\\Landscape\\Ground\\DirtGravel01_d.dds",
+  "info": "2048x2048  12 mips  5592560 B  mean RGB 101.9,98.4,87.7"
+ },
+ {
+  "edid": "LRiverbedSilt01Wet",
+  "ltex": "0004DDF3",
+  "txst": "0004DDF2",
+  "via": "TX00",
+  "rel": "Landscape\\Ground\\RiverbedSilt01Wet_d.dds",
+  "path": "E:/Tools/Fallout 4/DataUnpacked/Data\\textures\\Landscape\\Ground\\RiverbedSilt01Wet_d.dds",
+  "info": "2048x2048  12 mips  5592560 B  mean RGB 71.4,59.7,48.2"
+ },
+ {
+  "edid": "LRiverbedRocks01Grass",
+  "ltex": "000BA522",
+  "txst": "000A7C4A",
+  "via": "TX00",
+  "rel": "Landscape\\Ground\\RiverbedRocks_d.dds",
+  "path": "E:/Tools/Fallout 4/DataUnpacked/Data\\textures\\Landscape\\Ground\\RiverbedRocks_d.dds",
+  "info": "2048x2048  12 mips  5592560 B  mean RGB 118.3,111.5,101.6"
+ },
+ {
+  "edid": "LDriedGrass02Weeds",
+  "ltex": "00022B63",
+  "txst": "0001D1D2",
+  "via": "TX00",
+  "rel": "Landscape\\Ground\\DriedGrass01_D.dds",
+  "path": "E:/Tools/Fallout 4/DataUnpacked/Data\\textures\\Landscape\\Ground\\DriedGrass01_D.dds",
+  "info": "2048x2048  12 mips  5592560 B  mean RGB 113.8,97.9,82.7"
+ },
+ {
+  "edid": "LDirtGravel01Grass",
+  "ltex": "0004417F",
+  "txst": "00021335",
+  "via": "TX00",
+  "rel": "Landscape\\Ground\\DirtGravel01_d.dds",
+  "path": "E:/Tools/Fallout 4/DataUnpacked/Data\\textures\\Landscape\\Ground\\DirtGravel01_d.dds",
+  "info": "2048x2048  12 mips  5592560 B  mean RGB 101.9,98.4,87.7"
+ },
+ {
+  "edid": "LDebrisGround",
+  "ltex": "0014EC5C",
+  "txst": "0014EC5E",
+  "via": "MNAM->Landscape\\Ground\\DebrisGroundTile.BGSM",
+  "rel": null,
+  "path": null,
+  "info": "<not unpacked>"
+ },
+ {
+  "edid": "LRootsEroded01",
+  "ltex": "00038C05",
+  "txst": "00038C04",
+  "via": "TX00",
+  "rel": "Landscape\\Ground\\RootsEroded01_d.dds",
+  "path": "E:/Tools/Fallout 4/DataUnpacked/Data\\textures\\Landscape\\Ground\\RootsEroded01_d.dds",
+  "info": "2048x2048  12 mips  5592560 B  mean RGB 103.5,93.5,82.8"
+ },
+ {
+  "edid": "LRootsEroded01Grass01",
+  "ltex": "0003E1A4",
+  "txst": "00038C04",
+  "via": "TX00",
+  "rel": "Landscape\\Ground\\RootsEroded01_d.dds",
+  "path": "E:/Tools/Fallout 4/DataUnpacked/Data\\textures\\Landscape\\Ground\\RootsEroded01_d.dds",
+  "info": "2048x2048  12 mips  5592560 B  mean RGB 103.5,93.5,82.8"
+ }
+]

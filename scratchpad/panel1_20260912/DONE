@@ -1,0 +1,24 @@
+lane PANEL1 done 2026-09-12 18:14 CEDT (second pass: the pictures)
+
+Every deliverable the brief names is on disk in this folder:
+  lane_panel1_report.md   61,289 B   sections 0-6, all present
+  WW_CHANGES_ENTRY.md      5,809 B   starts "## 2026-09-12 - Every bake setting..."
+  HANDOFF_BLOCK.md         1,936 B   20 lines
+  MISTAKES_ENTRIES.md      8,004 B   five entries, also spliced into the root MISTAKES.md
+  CHANGED_FILES.txt        5,506 B   A/M, path, byte/CR/LF counts before and after
+  rows_table.md            per-row table, 57 rows, 57 gate verdicts
+  byte_gate4.txt           the a/b/c run; byte_gate5_a.txt = leg (a) on the final exe
+  shots/panel_full_after.png  483x2897, the whole settings column, 55 of the 57 rows
+
+exe: release/NifSkope.exe, 2026-09-12 18:07:58, 22,154,240 bytes, rc 0, one TU
+(nifskope_ui.o), make -n zero, no source newer than the exe, style.qss in step.
+gates: (a) 11 files 47,645,750 B identical across the rung and the new exe,
+           re-run on the final exe after the picture knob went in;
+       (b) 57 rows asked - 32 move the bake, 2 are the control, 23 named skips,
+           0 refused, 0 unmovable   (17:39:04 exe; the row plumbing did not
+           change in build 7, so (b) and (c) were not re-run);
+       (c) panel vs command line: 15 files identical, 0 differ, 0 missing.
+harness: lod_generation.sh 121 checks, 0 failures on the final exe.
+nothing committed, nothing stashed, no default changed, no generator behaviour
+touched (src/lodgen.cpp not opened for edit), bungo's own window never used.
+owed and named in the report: a full-column picture of the STOCK target.

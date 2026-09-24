@@ -1,0 +1,124 @@
+# IDENTGAP -- identity-gated distance, measured against pure identity
+
+bungo to the director, 2026-09-19: *"unless you've got a better idea on how to prevent self
+occlusion outside the cascade range"*.
+
+Today's answer is **identity**: outside the cascade an LOD pixel ignores any occluder carrying
+its own `.lodi` GROUP id, which kills the artefact patch that appears mid-wall when a flat
+low-poly LOD wall shadows itself. The price is **every** genuine self-shadow inside one
+identity, and the just-ruled proximity join (non-tree placements, mesh-to-mesh gap <= 64 u,
+588 groups -> 167, Gwinnett 205 -> 6) makes identities bigger, so the price rises.
+
+The candidate, stated before anything was run:
+
+> **IDENTITY-GATED DISTANCE.** A same-identity occluder is ignored **only** when it lies within
+> `D` units of the receiver **along the sun ray** -- the zone where self-occlusion is an
+> artefact of the lookup's own resolution. A same-identity occluder farther than `D` still
+> shadows. A different-identity occluder always shadows, with the normal small bias.
+
+Every figure below is in `run.log`, `dsweep.log`, `rows.json` or `dsweep.json`. Nothing is
+quoted here that is not in one of them.
+
+---
+
+## 1. What was run
+
+Reused, not rewritten: sunsim1's scene, cameras and shading (`scene.py`, `render.py`,
+`shade.py`), horizon4's `h4map.ShadowMap` and `h4core`, identprox's `join` (both identity
+tables) and `cams`/`hwycams`, identres's `IdentShear` (the exact identity-carrying sun cast).
+New here: `identgap.py` (the gate in both the map lookup and the exact cast, the back-face
+selection, the shell census), `sss.py` (the screen-space march of the director's addendum),
+`run.py`, `dsweep.py`, `fair.py`, `wallart.py`, `pics.py`. The last two exist because the first
+tables were unfair to G0 and blind to where the artefact actually lives; both are in section 3
+and both moved the verdict. All three G-buffers and all three LEFT panels were read from
+the caches earlier lanes built; nothing was written into another lane's folder.
+
+### The geometry of the gate, and why it is one compare
+
+`h4map`'s light space puts `u` along the sun's horizontal direction and `s = z - u*tan(el)`,
+constant along a sun ray. A blocker at map depth `mu` above a receiver at depth `u` sits
+
+```
+L = (mu - u) / cos(el)
+```
+
+units from it **along the ray**. So *"within D along the ray"* is `mu - u <= D*cos(el)`: one
+subtract and one compare, on a depth the shader has already fetched, beside the identity it
+has already fetched. `D*cos(el)` is a per-frame constant. That is the entire runtime cost --
+no new texture, no second tap, no extra bandwidth, no change to the `.lodi` file.
+
+### The gate in the exact (no-map) cast
+
+`IdentShear` stores, per 16 u cell and after a suffix maximum along `u`, the best `s`, the
+identity that achieved it, **and** the best `s` among entries of a different identity. Its
+`lit()` is exactly *"the best-of-another-identity over every column beyond the receiver"*.
+Because a different-identity occluder shadows at any distance and a same-identity one shadows
+beyond `D`, the gated answer needs no new structure at all:
+
+```
+blocked(D) = blocked_G1  OR  ( best s over columns beyond u + D*cos(el) ) > s
+```
+
+-- the same `bs` plane, read at a shifted column.
+
+### The two identity tables
+
+| table | rule | groups | largest group |
+|---|---|---|---|
+| **A** | today's shipped `.lodi` v7 | **588** over 2,449 placements | 205 placements |
+| **B** | the ruled proximity join: non-tree, mesh gap <= 64 u | **167** | 206 placements |
+
+Both reproduce identprox's `RECOMMENDATION.txt` (588 -> 167) exactly; asserted in `run.py`.
+
+### The rows
+
+| id | rule |
+|---|---|
+| **G0** | no identity at all; slope-scaled + normal-offset bias, **tuned** over a 96-cell sweep |
+| **G0strict** | the same, with the bias cell that fights the artefact hardest instead |
+| **G1** | pure identity -- today's rule, the baseline |
+| **G2** | the gate, `D` = 64 / 128 / 256 / 512 / 1024 u |
+| **G3** | back-face casting -- only triangles facing away from the sun write the map -- no identity |
+| **G4** | the best `G2` with the bias re-tuned on top |
+| **+SSS** | the addendum: a screen-space shadow march on top of a far row |
+
+Three lookups: **16 u texel with 3x3 PCF** (the realistic one), **no map at all** (the limit),
+and **64 u texel with one nearest tap** (the coarse case, the only one where the mid-wall patch
+is large enough to see). Three cameras.
+
+### How the bias was tuned, since G0 lives or dies by it
+
+96 cells: normal offset 0 / 0.5 / 1 / 2 / 3 / 4 texels x constant depth bias 0.25 / 0.5 / 1 / 2
+texels x slope-scaled term 0 / 1 / 2 / 4, scored on every third decided pixel and the winner
+re-scored on all of them. The objective is the **object disagreement total**, so a bias that
+kills acne by peter-panning the shadow off the wall pays for it in false-LIT. `run.log` also
+prints, for every sweep, the cell with the least object false-DARK and what it costs -- that is
+the `G0strict` row, and it is how the report shows what a no-identity build pays to suppress
+the artefact.
+
+### The controls, per camera, all in `run.log`
+
+1. The gated cast at `D = 0` agrees with the ray-cast LEFT panel on **100.00%** of decided
+   pixels on all three cameras -- the machinery differs from the truth only by the rule.
+2. The gated cast at `D = infinity` is **array-identical** to identres's `IdentShear.lit`, so
+   G1 reproduces the published baseline rather than re-deriving it.
+3. The gate is **monotone in `D`**: every shadow at a larger `D` is a subset of the shadow at a
+   smaller one. This FAILED on the first build -- a receiver outside the near grid could acquire
+   a blocker purely because `D` moved the read column into range -- and the fix is in
+   `identgap.py`, commented.
+4. Both identity tables reproduce identprox's counts.
+
+### G3's geometry census, which decides G3 before a single pixel is drawn
+
+Positions welded at 0.25 u (a `.lodo` mesh splits a vertex at every seam, so an index-keyed
+edge test calls even a watertight box open -- keyed on raw indices **0** of 2,449 placements
+would count as closed):
+
+> **2,449 placements carry level-0 triangles. 106 are closed shells. 2,343 are OPEN.
+> 26,999 of 29,587 triangles (91.3%) belong to an open shell, and 1,282 of the open ones are
+> two-triangle CARDS (2,551 triangles).**
+
+Under back-face casting an open shell has nothing behind its sun-facing side, so once that side
+is culled it writes no depth at all and **stops casting**. 91.3% of this chunk's LOD triangles
+are in that state. G3 is measured anyway, and the numbers are below, but the census is the
+verdict: back-face casting is not available to an LOD field made of cards and open shells.

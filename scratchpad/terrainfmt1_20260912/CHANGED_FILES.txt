@@ -1,0 +1,71 @@
+LANE TERRAINFMT1 -- files created or changed under src/ tests/ docs/ tools/ .claude/skills/
+Tree: E:/Projects/NifskopeWildWastelandEdition, branch main, MAIN tree. Nothing committed.
+Byte counts measured with Python (b.count(b'\r') / b.count(b'\n')); the whole tree is LF-only
+for these files and stayed LF-only.
+
+A/M  path                                            before                     after
+---  ----                                            ------                     -----
+ M   src/lodgen.cpp                                  581,408 B  CR 0  LF 13,370  591,582 B  CR 0  LF 13,612
+ M   src/lodgen.h                                     83,313 B  CR 0  LF  1,495   86,565 B  CR 0  LF  1,550
+ M   src/nifcli.cpp                                  347,250 B  CR 0  LF  7,528  351,366 B  CR 0  LF  7,586
+ M   docs/LODGEN_TERRAIN_VT.md                       176,501 B  CR 0  LF  2,715  185,143 B  CR 0  LF  2,841
+ A   .claude/skills/ww-render-arm-isolate/SKILL.md         --                      5,296 B  CR 0  LF   106
+ M   .claude/skills/ww-texel-picture/SKILL.md          6,682 B  CR 0  LF    117    8,300 B  CR 0  LF   146
+
+CR count unchanged (0) on every file. No file gained a CR.
+
+sha256 (first 16 hex) of each file as delivered:
+  src/lodgen.cpp                                  3b15ed9e8ed9b805
+  src/lodgen.h                                    0e512da98c08b8a0
+  src/nifcli.cpp                                  11002abc4072c060
+  docs/LODGEN_TERRAIN_VT.md                       95e7cfe613ebeb5b
+  .claude/skills/ww-render-arm-isolate/SKILL.md   2129542097006aae
+  .claude/skills/ww-texel-picture/SKILL.md        59a8b92754db2e68
+
+What each change is
+-------------------
+src/lodgen.cpp
+  * lodgenWriteDds gains a `mipsToOne` parameter (write the full chain down to 1x1
+    instead of stopping at the sheet's old floor).
+  * new globals g_sheetFormat (line 6581, default LODGEN_SHEETFMT_LEGACY) and
+    g_msnCacheDir -- both default to the rung's behaviour.
+  * new lodgenWriteDdsBgra8 (line 6830): uncompressed B8G8R8A8 behind a DX10
+    header, dxgi 87, full mip chain.
+  * new lodgenMsnFromCache (line 6906): reads a cleaned 2K PNG out of the
+    --msn-cache directory. The cache directory is opened READ-ONLY and is never
+    written to.
+  * lodgenWriteChunkSheets rewritten to route colour and _msn through the format
+    choice; census fields added for what it wrote.
+
+src/lodgen.h
+  * enum LodgenSheetFormat (line 376), int lodgenSheetFormat() (382),
+    QString lodgenMsnCacheDir() (406), bool terrainIdentity = true (578).
+
+src/nifcli.cpp
+  * --sheet-format vanilla|legacy (line 6738), --msn-cache DIR (6761).
+  * bool lgTerrainIdentity = true (6442) is PRE-EXISTING and unchanged; it is
+    recorded here because section 3 of the report is about it.
+
+docs/LODGEN_TERRAIN_VT.md
+  * two CLI rows, a new section 7a (four subsections), and a provenance block
+    with the three source hashes; 10 anchors each asserted to appear exactly once.
+
+.claude/skills/ww-render-arm-isolate/SKILL.md  (NEW)
+  * isolating a rendered defect to one input before writing code against it.
+
+.claude/skills/ww-texel-picture/SKILL.md
+  * new section 8, the ARM page: every arm on the page with its own number, the
+    page caption wrapped and the canvas grown, the camera named with the
+    application's logged upp.
+
+NOT changed by this lane
+------------------------
+  * WW_CHANGES.md, MISTAKES.md, HANDOFF.md  -- the director splices these.
+  * docs/LODGEN_PARITY.md -- it contradicts the shipped default (report 8);
+    reported, not edited, because the fix is a decision about the default.
+  * No --msn-detail code exists: gate F3 was refused, so nothing was written.
+  * E:/Projects/NifskopeWWE_ui, scratchpad/land1_20260912/,
+    scratchpad/ground1_20260912/ (read once, read-only, for a baseline),
+    scratchpad/uinotes2_20260912/, src/anim*, src/ui/**, res/**.
+  * bungo's Data\Terrain and his cache at E:/Tools/Upscale/esrgan-bat/ -- neither
+    was written to at any point.

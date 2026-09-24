@@ -1,0 +1,57 @@
+  ok   the LOD button exists
+  ok   the LOD slider toolbar is gone from the row
+LOD button text 'LOD 0', enabled 0, menu entries 6
+  ok   the button names the current level
+  ok   it is visible even with no LODs in the file
+  ok   ...but greyed, because this fixture has none
+  ok   it offers the four levels
+  ok   it stands beside Animation
+menu bar: File, View, Spells, Options, Help
+  ok   the menu bar still has File
+  ok   the menu bar has a View menu
+View menu: Top, Front, Left, Flip, Perspective, Walk, Center Viewpoint, Show Grid, Load View, Save View, Screenshot, Color Key Debug, Bounds Debug, Lighting Only, Silhouette, Save Current Lighting as Default, Update View, Auto-Key Transforms, Gizmo Snap Distance..., Frame Selected	Num ., Left Editor, Inspect, KFM, Interactive Help, Toolbars, Block List Display, Block Details Display
+  ok   and it holds the view directions
+  FAIL and the panel toggles it absorbed
+  ok   Frame Selected came across from the toolbar glyph
+  ok   the Panels button is gone from the row
+  ok   the View menu exists to hold them
+Panels: Top, Front, Left, Flip, Perspective, Walk, Center Viewpoint, Show Grid, Load View, Save View, Screenshot, Color Key Debug, Bounds Debug, Lighting Only, Silhouette, Save Current Lighting as Default, Update View, Auto-Key Transforms, Gizmo Snap Distance..., Frame Selected	Num ., Left Editor, Inspect, KFM, Interactive Help, Toolbars, Block List Display, Block Details Display
+  FAIL Panels lists the Block List dock
+  FAIL Panels lists the Block Details dock
+  FAIL Panels lists the Header dock
+  FAIL Panels lists the NIF Browser dock
+  ok   Panels lists the Inspect dock
+  ok   Panels lists the KFM dock
+  ok   Panels carries the Toolbars submenu
+  ok   Panels carries the Block List submenu
+  ok   Panels carries the Block Details submenu
+Toolbars: Render, Mode, LOD, View
+  ok   and it can actually bring a hidden toolbar back
+  ok   every toolbar entry is a toggle
+Block List: Show Blocks in Tree, Show Blocks in List | Block Details: Show Non-applicable Rows, Header
+  ok   the block-view display options came across
+Render icons examined: 24, still coloured: none
+  ok   the Render menu actually has icons to check
+  ok   every Render menu icon is greyscale
+  ok   the unlabelled Lighting bulb is off the toolbar
+  ok   the lighting sliders live in Viewport Shading now
+lighting panel sliders: 7
+  ok   and all of them came across
+  ok   without a second control for Unlit/Shaded
+row shape: x|x|xxxx
+  ok   the row has controls on it
+  ok   no two group rules are adjacent
+  ok   the row does not start with a rule
+  ok   the row does not end with a rule
+header shape: x|xxx|xxxx|xxx|xxxx
+  ok   the viewport header has controls on it
+  ok   no two footer rules are adjacent
+  ok   the footer does not start with a rule
+  ok   the footer does not end with a rule
+  ok   the mode button can be found by name
+mode entries: 7, duplicate icons: none
+  ok   the fixture has every mode to compare
+  ok   no two viewport modes draw the same icon
+43 checks, 5 failures
+FAIL
+done

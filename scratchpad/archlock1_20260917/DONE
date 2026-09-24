@@ -1,0 +1,35 @@
+archlock -- lane ARCHLOCK1 finished 2026-09-17 04:50.
+
+release/NifSkope.exe  2026-09-17 03:56:42  22,477,824 B
+sha1 304d6bdc6d6070a508bdfc3782c96a22011a4a0a
+refuter exe kept beside it: release/NifSkope.archlock1_rung.exe (03:56:37,
+sha1 b9b5e8d36d0308b7412fb673985663d051f78827) = this tree minus the two
+archiveReadLock.unlock() lines.
+
+tests/spells/gamemanager_archlock.sh  20 checks, 0 failures.
+  (a) GUI, the Files tab's configured-resource row: the RUNG HANGS, killed at
+      90 s with its log stopped on the "opening ..." line; this exe opens it,
+      paints, and exits 0 in 5 s.
+  (b) -no-gui archlock-probe: rung killed at 91 s inside get_file; this exe
+      answers in under 1 s.
+  (c) find_file on a texture, CLI and GUI.  (d) the fixture bake is
+  byte-identical to $PREV's (3 identical, 0 differ).  (e) the --bake-record
+  refusal names the directory it looked in.
+
+Neighbours on this exe, all unchanged from the 01:17 run: lodgen_bakerec 21/3,
+lodgen_layout 22/5, lodgen_defaults 28/0, lodgen_native same section counts and
+the same 2 rows; newly run: lodgen_btofree 21/1, lod_generation 128/0 (floor
+121). Every red is BAKEREC1's Commonwealth.lodb, in four gates.
+
+Report: scratchpad/archlock1_20260917/lane_archlock1_report.md (sections 0, 3d,
+3e, 3f, 6, 7 carry the numbers). Pictures in scratchpad/archlock1_20260917/
+images/; BAKEREC1's owed leg (e) picture delivered to
+scratchpad/bakerec1_20260916/images/native_verify_names_the_plugin.png.
+
+Not fixed, and named: about one run in ten the GUI harness exits 139 AFTER
+writing PASS -- the Qt teardown of the configured-resource route (it leaves a
+second, invisible window) is not reliable. Not the deadlock; every measurement
+is complete before it happens.
+
+WW_CHANGES.md and HANDOFF.md untouched: their text is in report section 5.
+Nothing committed, nothing stashed.

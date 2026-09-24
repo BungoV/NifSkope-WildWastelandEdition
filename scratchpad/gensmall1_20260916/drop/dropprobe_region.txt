@@ -1,0 +1,44 @@
+# the asymmetric-drop proof, Commonwealth.32.-32.0.BTO
+# lodgen manifest 2 ws Commonwealth dim 32 chunk -32 0 columns index base type x y z scale class height ref part
+
+## the shapes, biggest first (the bucket cap is 65,535 vertices)
+block name                                    vertices triangles  stride    ids
+243   obj-at                                     65535     21845      32   6272
+250   obj-at                                     65534     29840      32   8280
+264   obj                                        61618     51116      32   3587
+308   obj                                        58133     25083      32    174
+383   obj                                        53226     25329      32   7286
+257   obj-at                                     46560     23280      32   5820
+47    obj                                        45717     26323      32    694
+357   obj                                        29128     11594      32    107
+377   obj                                        28392     12415      32   1953
+389   obj                                        25060     12347      32   2498
+105   obj-at                                     22739     14525      32    170
+22    obj-at                                     20032     10689      32    685
+shapes: 62   at 65,000 vertices or more: 2   vertices in file: 704522
+
+## the placements
+manifest rows          42560
+indices with geometry  39932
+indices with NONE      2628  (6.17%)
+indices in the file that the manifest does not list: 0
+
+## is the loss ORDER-dependent?
+first index with no geometry      38695
+indices at or after it            3865
+of those, with no geometry        2628  (68.0%)
+of those, WITH geometry           1237  (32.0%)
+
+## what was dropped, by record type
+  STAT       2628
+## the ten bases that lost the most placements
+  0004a075      851
+  000393cd      326
+  0003e0d1      263
+  000531b3      203
+  0003e08d      181
+  00038599      178
+  0003e08f      153
+  0004d93b      144
+  000531ae      142
+  000503b6      101

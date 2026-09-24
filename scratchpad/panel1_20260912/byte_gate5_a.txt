@@ -1,0 +1,7 @@
+== (a) the rung: the panel's own run, before and after ==
+  rung: 125 checks, 0 failures
+  new: 130 checks, 0 failures
+f77f8410b893a2ba514d2baa34e27f36f25d81da  C:\Users\bungo\AppData\Local\Temp/Lodgen_PANEL1_rung  11 files  47645750 bytes
+f77f8410b893a2ba514d2baa34e27f36f25d81da  C:\Users\bungo\AppData\Local\Temp/Lodgen_PANEL1_new  11 files  47645750 bytes
+IDENTICAL: 11 files, 47645750 bytes, sha1 f77f8410b893a2ba514d2baa34e27f36f25d81da
+byte gate failures: 0

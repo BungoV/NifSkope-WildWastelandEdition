@@ -1,0 +1,84 @@
+### water_ui start 17:45:59
+### water_ui rc=0  17:46:06
+30 checks, 0 failures, 0 skips
+PASS
+checks run: 30 (floor 24)
+water_ui.sh PASS
+
+### water_weights start 17:46:06
+### water_weights rc=0  17:46:23
+64 checks, 8 failures
+water mark selftest FAIL
+64 checks, 8 failures
+water_weights.sh PASS
+
+### water_flow start 17:46:23
+### water_flow rc=1  17:46:39
+64 checks, 3 failures
+water mark selftest FAIL
+water_flow.sh FAIL (3)
+
+### water_mark start 17:46:39
+### water_mark rc=1  17:46:57
+water mark selftest FAIL
+model checks run: 64 (floor 14)
+20 checks, 0 failures
+PASS
+dock checks run: 20 (floor 16)
+water_mark.sh FAIL (2)
+
+### water_window start 17:46:57
+### water_window rc=0  17:47:13
+46 checks, 0 failures
+PASS
+window checks run: 46 (floor 24)
+water_window.sh PASS
+
+### lodl_water start 17:47:13
+### lodl_water rc=0  17:47:39
+  control PASS
+RESULT PASS
+  RESULT PASS
+RESULT PASS
+PASS
+
+### lodl_open start 17:47:39
+### lodl_open rc=0  17:48:57
+23 checks, 0 failures
+PASS
+
+=== neighbours ===
+### ui_align start 17:48:57
+### ui_align rc=0  17:49:03
+11 checks, 0 failures
+PASS
+
+### top_bar start 17:49:04
+### top_bar rc=1  17:49:08
+43 checks, 5 failures
+FAIL
+
+### loaded_nifs start 17:49:08
+### loaded_nifs rc=1  17:49:19
+166 checks, 2 failures
+FAIL
+
+### files_tab start 17:49:19
+### files_tab rc=1  17:49:25
+  FAIL (5) every tool button explains itself (0 without)
+  FAIL (4) unload restores the bind pose BYTE-identically
+28 checks, 2 failures
+FAIL
+
+### hkxanim_ui start 17:49:25
+### hkxanim_ui rc=1  17:49:31
+  FAIL (g floor) and steps it once focused
+48 checks, 1 failures, 0 skips
+FAIL
+
+### animws start 17:49:31
+### animws rc=0  17:49:37
+57 checks, 0 failures, 1 skips
+PASS
+
+CHAIN DONE 17:49:38

@@ -1,0 +1,274 @@
+{
+ "tallest": 11160.10451923082,
+ "top": [
+  {
+   "i": 5826,
+   "land_z": 607.246587209737,
+   "top_over_land": 11160.10451923082,
+   "model": "LOD\\SetDressing\\Greebs\\GreebTower02_LOD_0.nif",
+   "x": 19120.04174868391,
+   "y": -7712.117677576867,
+   "z": 9376.00033569336,
+   "scale": 1.0999755859375,
+   "top_over_origin": 2391.3507707471967,
+   "top_z": 11767.351106440556,
+   "chunk_zmin": 40.958343505859375,
+   "top_over_chunk_zmin": 11726.392762934696
+  },
+  {
+   "i": 5827,
+   "land_z": 603.4921440237224,
+   "top_over_land": 10294.204042359574,
+   "model": "LOD\\SetDressing\\Greebs\\GreebTower02_LOD_0.nif",
+   "x": 19088.04126039521,
+   "y": -7872.12011902037,
+   "z": 9376.00033569336,
+   "scale": 0.699951171875,
+   "top_over_origin": 1521.6958506899375,
+   "top_z": 10897.696186383297,
+   "chunk_zmin": 40.958343505859375,
+   "top_over_chunk_zmin": 10856.737842877437
+  },
+  {
+   "i": 18901,
+   "land_z": 0.0,
+   "top_over_land": 9523.890685904757,
+   "model": "LOD\\Architecture\\Shacks\\Metal\\ShackMetalWallFlat02_LOD_0.nif",
+   "x": 4083.562310215915,
+   "y": -24736.877454795147,
+   "z": 9325.882873535156,
+   "scale": 1.0,
+   "top_over_origin": 198.00781236959972,
+   "top_z": 9523.890685904757,
+   "chunk_zmin": 167.04595947265625,
+   "top_over_chunk_zmin": 9356.8447264321
+  },
+  {
+   "i": 18900,
+   "land_z": 0.0,
+   "top_over_land": 9326.556776960586,
+   "model": "LOD\\Architecture\\Shacks\\Metal\\ShackMetalWallFlat01_LOD_0.nif",
+   "x": 4083.562310215915,
+   "y": -24736.877454795147,
+   "z": 9128.548964590986,
+   "scale": 1.0,
+   "top_over_origin": 198.00781236959972,
+   "top_z": 9326.556776960586,
+   "chunk_zmin": 167.04595947265625,
+   "top_over_chunk_zmin": 9159.51081748793
+  },
+  {
+   "i": 18957,
+   "land_z": 0.0,
+   "top_over_land": 9255.322006089602,
+   "model": "LOD\\SetDressing\\Greebs\\PW_05_Generator_LOD.nif",
+   "x": 3699.3064469367514,
+   "y": -24720.62720683604,
+   "z": 9068.314605699386,
+   "scale": 1.0,
+   "top_over_origin": 187.00740039021602,
+   "top_z": 9255.322006089602,
+   "chunk_zmin": 167.04595947265625,
+   "top_over_chunk_zmin": 9088.276046616946
+  },
+  {
+   "i": 18958,
+   "land_z": 0.0,
+   "top_over_land": 9255.322006089602,
+   "model": "LOD\\SetDressing\\Greebs\\PW_05_Generator_LOD.nif",
+   "x": 3955.310353246357,
+   "y": -24720.62720683604,
+   "z": 9068.314605699386,
+   "scale": 1.0,
+   "top_over_origin": 187.00740039021602,
+   "top_z": 9255.322006089602,
+   "chunk_zmin": 167.04595947265625,
+   "top_over_chunk_zmin": 9088.276046616946
+  },
+  {
+   "i": 18943,
+   "land_z": 0.0,
+   "top_over_land": 9132.333395583157,
+   "model": "LOD\\Interiors\\Industrial\\Catwalks\\IndCatMid01_LOD.nif",
+   "x": 3315.300587472343,
+   "y": -24736.62745098039,
+   "z": 9132.322346702524,
+   "scale": 1.0,
+   "top_over_origin": 0.011048880633399625,
+   "top_z": 9132.333395583157,
+   "chunk_zmin": 167.04595947265625,
+   "top_over_chunk_zmin": 8965.2874361105
+  },
+  {
+   "i": 18944,
+   "land_z": 0.0,
+   "top_over_land": 9132.333395583157,
+   "model": "LOD\\Interiors\\Industrial\\Catwalks\\IndCatMid01_LOD.nif",
+   "x": 4083.3123064011597,
+   "y": -24736.62745098039,
+   "z": 9132.322346702524,
+   "scale": 1.0,
+   "top_over_origin": 0.011048880633399625,
+   "top_z": 9132.333395583157,
+   "chunk_zmin": 167.04595947265625,
+   "top_over_chunk_zmin": 8965.2874361105
+  },
+  {
+   "i": 18874,
+   "land_z": 0.0,
+   "top_over_land": 9060.321784033746,
+   "model": "LOD\\Architecture\\Buildings\\Hightech\\HitExtRoofFloorAEdge01_LOD.nif",
+   "x": 3507.303517204547,
+   "y": -24928.630380712595,
+   "z": 9036.310735197818,
+   "scale": 1.0,
+   "top_over_origin": 24.011048835927188,
+   "top_z": 9060.321784033746,
+   "chunk_zmin": 167.04595947265625,
+   "top_over_chunk_zmin": 8893.27582456109
+  },
+  {
+   "i": 18875,
+   "land_z": 0.0,
+   "top_over_land": 9060.321784033746,
+   "model": "LOD\\Architecture\\Buildings\\Hightech\\HitExtRoofFloorAEdge01_LOD.nif",
+   "x": 4019.311329823758,
+   "y": -24928.630380712595,
+   "z": 9036.310735197818,
+   "scale": 1.0,
+   "top_over_origin": 24.011048835927188,
+   "top_z": 9060.321784033746,
+   "chunk_zmin": 167.04595947265625,
+   "top_over_chunk_zmin": 8893.27582456109
+  }
+ ],
+ "reach_by_elevation_deg": {
+  "1": 639361.9597019985,
+  "2": 319583.5796765048,
+  "3": 212947.47978077657,
+  "5": 127560.5783590915,
+  "7.5": 84769.40980039004,
+  "10": 63292.09786494718,
+  "15": 41650.07708354846,
+  "20": 30662.13516534016,
+  "30": 19329.86804508682,
+  "45": 11160.104519230821,
+  "60": 6443.289348362275
+ },
+ "clmt": [
+  {
+   "form": 1899957,
+   "edid": "ClearClimate",
+   "tnam": [
+    30,
+    54,
+    102,
+    126,
+    0,
+    68
+   ],
+   "sunriseBegin_h": 5.0,
+   "sunriseEnd_h": 9.0,
+   "sunsetBegin_h": 17.0,
+   "sunsetEnd_h": 21.0
+  },
+  {
+   "form": 1844316,
+   "edid": "DefaultClimateBackup",
+   "tnam": [
+    30,
+    54,
+    102,
+    126,
+    0,
+    68
+   ],
+   "sunriseBegin_h": 5.0,
+   "sunriseEnd_h": 9.0,
+   "sunsetBegin_h": 17.0,
+   "sunsetEnd_h": 21.0
+  },
+  {
+   "form": 1221005,
+   "edid": "SanctuaryHillsWorldClimate",
+   "tnam": [
+    30,
+    54,
+    102,
+    126,
+    0,
+    68
+   ],
+   "sunriseBegin_h": 5.0,
+   "sunriseEnd_h": 9.0,
+   "sunsetBegin_h": 17.0,
+   "sunsetEnd_h": 21.0
+  },
+  {
+   "form": 1137769,
+   "edid": "GoodneighborClimate",
+   "tnam": [
+    33,
+    48,
+    96,
+    123,
+    0,
+    3
+   ],
+   "sunriseBegin_h": 5.5,
+   "sunriseEnd_h": 8.0,
+   "sunsetBegin_h": 16.0,
+   "sunsetEnd_h": 20.5
+  },
+  {
+   "form": 351,
+   "edid": "DefaultClimate",
+   "tnam": [
+    30,
+    54,
+    102,
+    126,
+    175,
+    68
+   ],
+   "sunriseBegin_h": 5.0,
+   "sunriseEnd_h": 9.0,
+   "sunsetBegin_h": 17.0,
+   "sunsetEnd_h": 21.0
+  },
+  {
+   "form": 4464,
+   "edid": "DiamondCityClimate",
+   "tnam": [
+    33,
+    48,
+    96,
+    123,
+    0,
+    3
+   ],
+   "sunriseBegin_h": 5.5,
+   "sunriseEnd_h": 8.0,
+   "sunsetBegin_h": 16.0,
+   "sunsetEnd_h": 20.5
+  },
+  {
+   "form": 4463,
+   "edid": "DiamondCityPastelClimate",
+   "tnam": [
+    24,
+    60,
+    96,
+    132,
+    0,
+    195
+   ],
+   "sunriseBegin_h": 4.0,
+   "sunriseEnd_h": 10.0,
+   "sunsetBegin_h": 16.0,
+   "sunsetEnd_h": 22.0
+  }
+ ],
+ "instances": 33123,
+ "drawn": 33123
+}

@@ -1,0 +1,6 @@
+	if ( leftColumnSelector && wwBarRowHeight() > 0 )
+		/* `this` is the QMainWindow, and the strip needs it: the RIGHT hand
+		 * air is the full air less the dock separator's width, and that style
+		 * metric only answers res/style.qss's 3 px when it is asked WITH a
+		 * widget (lane UI4, measured). */
+		leftColumnSelector->setStyleSheet( wwSegmentedTabBarQss( wwBarRowHeight(), this ) );

@@ -1,0 +1,3 @@
+pbr_r1 sibling_v6 (c) f0(read back)=1.000 want 0.040 -> FAIL
+pbr_r1 sibling_v5 (c) f0(read back)=0.040 want 0.040 -> PASS
+pbr_r1 RED CONTROL f0law: gate (c) 1 of 2 checks FAILED -> BITES (control PASS)

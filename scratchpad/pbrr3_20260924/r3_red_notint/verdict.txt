@@ -1,0 +1,3 @@
+pbr_r3 mask disk centre (699.5, 462.5) radius 298.1 px (279128 px)
+pbr_r3 s3 specular centre rgb 0.2961 0.2961 0.2961 (red: R >= 3G, 3B False); diffuse centre rgb 0.7682 0.7682 0.7682 (not red: R <= 1.02 G, B True) -> FAIL
+RED notint aims at s3: FAILED -> OK

@@ -1,0 +1,18 @@
+pbr_shade_ab bgsm_duct gate=zero old=d38fa7ae new=d38fa7ae size=1280x826 px=0 frac=0.000000 max=0 mean=0.00000 bar=0/0 noise=0/0|0/0 content=0.126 progs=fo4_default.prog -> PASS
+pbr_shade_ab bgsm_duct census prog=same(2) cam=same(1) pbrm=new-only(1 rows; old arm predates it) -> PASS
+pbr_shade_ab bgem_plane gate=zero old=c2470e55 new=c2470e55 size=1280x826 px=0 frac=0.000000 max=0 mean=0.00000 bar=0/0 noise=0/0|0/0 content=0.087 progs=fo4_effectshader.prog -> PASS
+pbr_shade_ab bgem_plane census prog=same(2) cam=same(1) pbrm=new-only(1 rows; old arm predates it) -> PASS
+pbr_shade_ab embedded_lit gate=zero old=dcbde7fd new=dcbde7fd size=1280x826 px=0 frac=0.000000 max=0 mean=0.00000 bar=0/0 noise=0/0|0/0 content=0.025 progs=fo4_default.prog -> PASS
+pbr_shade_ab embedded_lit census prog=same(2) cam=same(1) pbrm=new-only(1 rows; old arm predates it) -> PASS
+pbr_shade_ab embedded_effect gate=zero old=6e371fd3 new=6e371fd3 size=1280x826 px=0 frac=0.000000 max=0 mean=0.00000 bar=0/0 noise=0/0|0/0 content=0.289 progs=fo4_effectshader.prog -> PASS
+pbr_shade_ab embedded_effect census prog=same(2) cam=same(1) pbrm=new-only(1 rows; old arm predates it) -> PASS
+pbr_shade_ab particles_fire gate=zero old=53d72021 new=53d72021 size=1280x826 px=0 frac=0.000000 max=0 mean=0.00000 bar=0/0 noise=0/0|0/0 content=0.000 progs=none -> EMPTY FRAME (content 0.0000 < 0.002 floor) FAIL
+pbr_shade_ab particles_fire census prog=none(all runs) cam=same(1) pbrm=ABSENT -> FAIL
+pbr_shade_ab particles_smoke gate=zero old=53d72021 new=53d72021 size=1280x826 px=0 frac=0.000000 max=0 mean=0.00000 bar=0/0 noise=0/0|0/0 content=0.000 progs=none -> EMPTY FRAME (content 0.0000 < 0.002 floor) FAIL
+pbr_shade_ab particles_smoke census prog=none(all runs) cam=same(1) pbrm=ABSENT -> FAIL
+pbr_shade_ab particles_mist gate=zero old=53d72021 new=53d72021 size=1280x826 px=0 frac=0.000000 max=0 mean=0.00000 bar=0/0 noise=0/0|0/0 content=0.000 progs=none -> EMPTY FRAME (content 0.0000 < 0.002 floor) FAIL
+pbr_shade_ab particles_mist census prog=none(all runs) cam=same(1) pbrm=PARTICLES-NOT-particles.prog(2) pbrm=new-only(2 rows; old arm predates it) -> FAIL
+pbr_shade_ab pistol_10mm gate=zero old=1bdc0244 new=1bdc0244 size=1280x826 px=0 frac=0.000000 max=0 mean=0.00000 bar=0/0 noise=0/0|0/0 content=0.087 progs=fo4_default.prog -> PASS
+pbr_shade_ab pistol_10mm census prog=same(7) cam=same(1) pbrm=new-only(6 rows; old arm predates it) -> PASS
+pbr_shade_ab census-moves kinds=effect,lit,particles distinct_refusals=2 -> PASS
+pbr_shade_ab SUMMARY 8 cases, 6 failures, 0 empty by the viewer (none) -> FAIL

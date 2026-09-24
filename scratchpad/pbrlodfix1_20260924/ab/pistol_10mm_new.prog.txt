@@ -1,0 +1,7 @@
+# WW_PROGRAM_CENSUS  light(view) = 0 0 1
+shape="Pistol10mmBolt:0" bsver=130 msn=0 lodland=0 prog=fo4_default.prog
+shape="Pistol10mmRelease:0" bsver=130 msn=0 lodland=0 prog=fo4_default.prog
+shape="Pistol10mmHammer:0" bsver=130 msn=0 lodland=0 prog=fo4_default.prog
+shape="Pistol10mmBoltRelease:0" bsver=130 msn=0 lodland=0 prog=fo4_default.prog
+shape="10mmTrigger:0" bsver=130 msn=0 lodland=0 prog=fo4_default.prog
+shape="Pistol10mmReceiver:0" bsver=130 msn=0 lodland=0 prog=fo4_default.prog

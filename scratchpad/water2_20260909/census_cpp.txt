@@ -1,0 +1,63 @@
+== INPUT ==
+  cells -96..95 x -96..95 = 36864  spc 32  wet texels 21754958
+  worldspace default water height 450.0 type 00000018
+  bridge gap 2 texels: 528 merges accepted, 13 refused
+  rule C: 805 components, 12 merged into a painted neighbour, 1 refused (the inheriting side was not the smaller), 1 had more than one candidate
+
+== BODIES ==
+  total 346
+    area >=      1 texels :  346
+    area >=      4 texels :  231
+    area >=     16 texels :  183
+    area >=     64 texels :   89
+    area >=    256 texels :   49
+    area >=   1024 texels :   20
+    area >=  65536 texels :    1
+  class: sea 1  river 115  lake 230
+  class (area >= 64): sea 1  river 42  lake 46
+  bodies assembled from more than one component: 63
+  TINY (< 4 texels): 115
+
+== PER WATR FORM ==
+  00000018                     bodies  176  texels  21583510
+  00102d5a                     bodies   34  texels     44040
+  00102d5b                     bodies   49  texels     26410
+  001c4995                     bodies   11  texels     25214
+  000c8633                     bodies   15  texels     24003
+  0012e2c1                     bodies    6  texels     23662
+  00034519                     bodies    2  texels     10666
+  000c863d                     bodies   13  texels      8426
+  00204c42                     bodies    1  texels      3696
+  001bddb6                     bodies   17  texels      1427
+  001c6eeb                     bodies    3  texels      1400
+  000df42c                     bodies   12  texels      1203
+  001c358e                     bodies    1  texels       677
+  001c6ee0                     bodies    5  texels       373
+  001c26c6                     bodies    1  texels       251
+
+== FLOW SOURCE ==
+  all bodies : none 132  form NAM0 182  bed 2  drain 30
+  area >= 64 : none 12  form NAM0 47  bed 1  drain 29
+
+== THE 20 BIGGEST BODIES ==
+  id   form     class      area   height parts  elong  aniso flow      cells
+  1    00000018 sea     21575619    450.0   323    1.7   0.05 none      (-96..95, -96..95)
+  2    00102d5a river      29312   1300.0    14    9.5   0.90 drain     (-9..2, -38..-22)
+  3    001c4995 river      25114   1300.0    14   13.2   0.98 drain     (-16..-6, -21..-4)
+  4    0012e2c1 lake       15429   1800.0     4    4.2   0.90 form NAM0 (-22..-17, -16..-8)
+  5    00102d5b river      14639    450.0    13    5.9   0.75 drain     (-3..5, -26..-17)
+  6    000c8633 river      11045    450.0     3    9.3   0.94 form NAM0 (6..14, 14..23)
+  7    00034519 river      10665   7250.0     5    6.8   0.90 drain     (-23..-15, 17..24)
+  8    00102d5a river       7586    800.0     3    5.4   0.91 drain     (-3..2, -29..-23)
+  9    0012e2c1 river       7466   5490.0     2    3.1   0.68 drain     (-24..-20, 11..14)
+  10   000c8633 river       6147    750.0     3    4.0   0.90 drain     (-5..-3, 9..13)
+  11   000c863d river       4657   2400.0     2   17.8   0.95 drain     (-4..4, 26..28)
+  12   00102d5b river       4248    600.0     5    6.0   0.85 drain     (6..10, -27..-24)
+  13   00204c42 lake        3696   1250.0     1    2.6   0.76 form NAM0 (0..2, 21..24)
+  14   00102d5b lake        2771    450.0     5    4.1   0.76 form NAM0 (10..13, -24..-22)
+  15   00000018 lake        2735    450.0     3    1.5   0.33 none      (9..11, -14..-12)
+  16   000c8633 lake        2277    750.0     1    3.6   0.89 form NAM0 (1..2, 16..18)
+  17   000c863d river       2277  10000.0     1    5.6   0.92 drain     (-20..-17, 27..28)
+  18   000c8633 river       2152    850.0     6    1.9   0.29 form NAM0 (-9..-7, -7..-6)
+  19   00102d5a river       1515    800.0     3    2.4   0.65 drain     (-4..-3, -23..-22)
+  20   00102d5a river       1478    600.0     2    3.0   0.65 drain     (4..6, -27..-26)

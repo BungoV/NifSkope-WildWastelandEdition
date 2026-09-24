@@ -1,0 +1,81 @@
+model hedgerow03.nif
+projection ortho
+rangekept LOD1 (no shape fills the LOD0 slot)
+ranges L2_HedgeRow03:0 - L1_HedgeRow03:0 388+676
+lodm Materials\Landscape\Plants\HedgeRow.lodm none textures\landscape\plants\hedgerow01_d.dds
+mask tree
+emissive 0 shapes 0
+front 970.743 497.695 -19.3291 46.7962 78.896
+side 970.743 497.695 -19.3291 46.7962 78.896
+class 128 128
+gap 8 8
+coverage 16 128 160
+oct 8 128 128 430.937 430.937 -19.3291 46.7962 78.896 3072 legacy 512 spec1
+frameoff 0 0 -12.6368 5.34634
+frameoff 1 0 -5.83237 13.6089
+frameoff 2 0 2.91618 5.34634
+frameoff 3 0 13.1228 4.86031
+frameoff 4 0 13.1228 4.37428
+frameoff 5 0 3.88824 4.86031
+frameoff 6 0 5.83235 4.86031
+frameoff 7 0 6.80443 4.86031
+frameoff 0 1 -18.4691 4.86031
+frameoff 1 1 -12.6368 5.83237
+frameoff 2 1 -3.40221 0
+frameoff 3 1 10.2066 11.6647
+frameoff 4 1 8.26253 25.7596
+frameoff 5 1 5.34634 17.9831
+frameoff 6 1 6.80443 16.525
+frameoff 7 1 8.26253 4.86031
+frameoff 0 2 -11.1787 4.86031
+frameoff 1 2 -23.8155 4.86031
+frameoff 2 2 -13.1228 -8.26253
+frameoff 3 2 7.29045 11.6647
+frameoff 4 2 3.40221 15.553
+frameoff 5 2 6.80443 13.1228
+frameoff 6 2 0.486038 17.4971
+frameoff 7 2 -14.5809 4.86031
+frameoff 0 3 25.7596 4.86031
+frameoff 1 3 17.9831 6.31839
+frameoff 2 3 9.23457 -4.86031
+frameoff 3 3 -13.6089 -8.74855
+frameoff 4 3 7.29045 -3.40221
+frameoff 5 3 -24.3015 15.553
+frameoff 6 3 -37.4243 23.3295
+frameoff 7 3 -43.2567 4.86031
+frameoff 0 4 43.2567 4.86031
+frameoff 1 4 37.4243 18.9552
+frameoff 2 4 34.0221 3.40221
+frameoff 3 4 -6.80443 22.8434
+frameoff 4 4 13.6089 6.80443
+frameoff 5 4 0.486038 26.7317
+frameoff 6 4 -17.4971 25.7596
+frameoff 7 4 -25.7596 4.86031
+frameoff 0 5 14.5809 4.86031
+frameoff 1 5 -0.486038 19.9272
+frameoff 2 5 9.72061 29.1618
+frameoff 3 5 3.40222 11.1787
+frameoff 4 5 -3.88824 -37.4244
+frameoff 5 5 17.4971 -8.26251
+frameoff 6 5 25.2736 6.80443
+frameoff 7 5 11.1787 4.86031
+frameoff 0 6 -8.26253 4.86031
+frameoff 1 6 -6.80443 22.8434
+frameoff 2 6 -4.86031 18.4692
+frameoff 3 6 -8.26253 10.2066
+frameoff 4 6 -9.7206 -7.77649
+frameoff 5 6 3.40221 -17.4971
+frameoff 6 6 13.1228 -7.29045
+frameoff 7 6 18.4691 4.86031
+frameoff 0 7 -6.80443 4.86031
+frameoff 1 7 -5.83235 4.86031
+frameoff 2 7 -3.88824 4.86031
+frameoff 3 7 -13.1228 4.37428
+frameoff 4 7 -13.1228 4.86031
+frameoff 5 7 -2.91618 5.34634
+frameoff 6 7 5.83237 13.6089
+frameoff 7 7 12.6368 5.34634
+frameclamped 0
+aa 4 1024 0.875
+framefit 400.003 398.059 405.835 406.807
+orthofit 441.427 441.427 0

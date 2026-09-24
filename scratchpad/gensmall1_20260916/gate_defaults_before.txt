@@ -1,0 +1,2 @@
+no rung at /e/Projects/NifskopeWildWastelandEdition/release/NifSkope.before_defaults1.exe
+RC=2

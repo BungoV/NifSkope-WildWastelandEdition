@@ -1,0 +1,48 @@
+style.qss loaded: 11093 chars
+font: Sans Serif 9  fm.height=16
+
+--- case 0: no bar sheet at all (the naked button)
+    bar h=35  sheet=""
+    Workspaces: height=27 sizeHint=27 minHint=27
+    LOD: height=27 sizeHint=27 minHint=27
+    Animation: height=27 sizeHint=27 minHint=27
+    Collision: height=27 sizeHint=27 minHint=27
+
+--- case 1: BUILD12's shipped sheet, on the bar
+    bar h=35  sheet="QMenuBar::item { min-height: 31px; padding: 8px 8px; }QToolButton { min-height: 31px; padding: 8px 4px; }"
+    Workspaces: height=39 sizeHint=42 minHint=42
+    LOD: height=39 sizeHint=42 minHint=42
+    Animation: height=39 sizeHint=42 minHint=42
+    Collision: height=39 sizeHint=42 minHint=42
+
+--- case 2: BUILD12's shipped sheet, on the bar AND the buttons
+    bar h=35  sheet="QMenuBar::item { min-height: 31px; padding: 8px 8px; }QToolButton { min-height: 31px; padding: 8px 4px; }"
+    Workspaces: height=49 sizeHint=52 minHint=52
+    LOD: height=49 sizeHint=52 minHint=52
+    Animation: height=49 sizeHint=52 minHint=52
+    Collision: height=49 sizeHint=52 minHint=52
+
+--- case 3: UI3 candidate, content = ROW (the calibration pass)
+    bar h=35  sheet="QMenuBar::item { min-height: 35px; padding-top: 2px; padding-bottom: 2px; }QToolButton { min-height: 35px; padding-top: 2px; padding-bottom: 2px; }"
+    Workspaces: height=41 sizeHint=44 minHint=44
+    LOD: height=41 sizeHint=44 minHint=44
+    Animation: height=41 sizeHint=44 minHint=44
+    Collision: height=41 sizeHint=44 minHint=44
+
+--- case 4: UI3 candidate, content = ROW - 9 (the calibrated sheet)
+    bar h=35  sheet="QMenuBar::item { min-height: 26px; padding-top: 2px; padding-bottom: 2px; }QToolButton { min-height: 26px; padding-top: 2px; padding-bottom: 2px; }"
+    Workspaces: height=32 sizeHint=35 minHint=35
+    LOD: height=32 sizeHint=35 minHint=35
+    Animation: height=32 sizeHint=35 minHint=35
+    Collision: height=32 sizeHint=35 minHint=35
+
+    [calibration] overhead measured = 9, content = 26
+
+--- case 5: UI3 candidate, TWO-PASS calibration in the code
+    bar h=35  sheet="QMenuBar::item { min-height: 26px; padding-top: 2px; padding-bottom: 2px; }QToolButton { min-height: 26px; padding-top: 2px; padding-bottom: 2px; }"
+    Workspaces: height=32 sizeHint=35 minHint=35
+    LOD: height=32 sizeHint=35 minHint=35
+    Animation: height=32 sizeHint=35 minHint=35
+    Collision: height=32 sizeHint=35 minHint=35
+
+line height used = 16 (max of icon 16 and fm.height)

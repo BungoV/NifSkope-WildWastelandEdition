@@ -1,0 +1,3 @@
+rules Commonwealth.VT.4.lodt: dim 4 tiles 2304 present 2304 cover 0 file 755028064 B, 2304 tile CRCs checked, bad 0, indexCrc 0x44c5c1d1
+rules Commonwealth.VT.2.lodt: dim 2 tiles 9216 present 9216 cover 0 file 3020120160 B, 9216 tile CRCs checked, bad 0, indexCrc 0xc0d13f63
+RESULT PASS (0 failures)

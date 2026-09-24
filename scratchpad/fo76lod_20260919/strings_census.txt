@@ -1,0 +1,25 @@
+files parsed: 80
+=== string-table vocabulary (grouped, digits -> #) ===
+   960  Cell_#
+   146  RemeshedShape_<asset>_LOD_#_sg_processed_scene
+    80  DistantObjectExtraData
+    70  
+    69  GlobalAtlasShape_NotAlphaTested
+    66  GlobalAtlasShape_AlphaTested
+    61  GlobalAtlasShape_Translucent
+    32  DistantLOD_-#_-#_DIM_#
+    20  InstancedShapes
+    19  DistantLOD_#_#_DIM_#
+    15  DistantLOD_#_-#_DIM_#
+    15  water#
+    14  DistantLOD_-#_#_DIM_#
+     8  RemeshedShape_NotAlphaTested_Merged
+     7  XWA
+=== shape-kind by level ===
+   ('16', 'atlas') 8
+   ('16', 'remesh') 3
+   ('32', 'atlas') 1
+   ('4', 'atlas') 178
+   ('4', 'remesh') 146
+   ('8', 'atlas') 9
+   ('8', 'remesh') 5

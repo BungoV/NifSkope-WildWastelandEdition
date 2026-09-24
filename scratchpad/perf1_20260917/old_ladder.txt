@@ -1,0 +1,48 @@
+		for ( auto it = models.begin(); it != models.end(); ++it ) {
+			Model & m = it.value();
+			if ( !m.loaded )
+				continue;
+			std::vector<LodoSrcShape> src;
+			for ( NativeSrcShape & sh : m.shapes ) {
+				sh.geom.materialId = materialId.value( materialKey( sh ) );
+				src.push_back( sh.geom );
+			}
+			QString err;
+			LodoMeshStats ms;
+			if ( !lodoAppendMesh( lib, src, m.path, &m.meshId, &err, &ms ) )
+				return fail( err );
+			meshStats.push_back( ms );
+			meshStatPath.push_back( m.path );
+			/* THE SHADOW-CASTER REFUSAL (bungo 2026-09-11 08:3x). The emitter
+			 * does not decimate, so the emitted silhouette must equal the
+			 * source's exactly; anything else means a triangle was lost between
+			 * the loader and the clusters, and a lost triangle is a hole a far
+			 * shadow leaks through. */
+			if ( ms.boundaryEmitted > ms.boundarySource )
+				return fail( QString( "%1: the emitted mesh has %2 boundary edges against the source's %3 -- "
+					"the emit opened the silhouette and this object is a shadow caster" )
+					.arg( m.path ).arg( ms.boundaryEmitted ).arg( ms.boundarySource ) );
+			LodoMesh & row = lib.meshes.back();
+			if ( m.anyAlpha )
+				row.flags |= LODO_MESH_ANY_ALPHA;
+
+			/* v3: THE OCCLUDER BOX for this model, in its own space at scale 1.
+			 * `ms.boundarySource == 0` is the watertight test -- the same
+			 * boundary-edge count the shadow-caster rule reads, so one
+			 * measurement serves both -- and it is the gate that keeps ray
+			 * parity meaningful. */
+			if ( s.occluders ) {
+				std::vector<float> soupPos;
+				std::vector<quint32> soupTris;
+				for ( const LodoSrcShape & sh : src ) {
+					const quint32 base = quint32( soupPos.size() / 3 );
+					soupPos.insert( soupPos.end(), sh.pos.begin(), sh.pos.end() );
+					for ( quint32 t : sh.tris )
+						soupTris.push_back( base + t );
+				}
+				m.occRefusal = fitOccluderBox( soupPos, soupTris, ms.boundarySource == 0,
+					m.occCentre, m.occHalf );
+				m.occOk = ( m.occRefusal == NATIVE_OCC_OK );
+			}
+		}
+	}

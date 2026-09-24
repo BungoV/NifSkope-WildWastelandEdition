@@ -1,0 +1,41 @@
+object field: 384 x 384 squares of 128 u, origin (-832,704), 45222 occupied
+  object tops: min 5590.5  p05 7404.2  median 9139.8  p95 12156.2  max 13844.2
+content texels compared: 1048576  (texel 32 u)
+
+== A2d: the reach, measured against the field, not against the map ==
+  distance to the nearest occupied square: darkened / total / BRIGHTENED
+  (brightening is impossible for a term that only multiplies visibility
+   downward, so the brightened column IS the BC1 block noise floor)
+        0..  256 u    542885 /  542896   100.0%       4
+      256..  512 u    197897 /  198192    99.9%      63
+      512..  768 u     67890 /   69024    98.4%     166
+      768.. 1024 u     32100 /   34928    91.9%     366
+     1024.. 1280 u     15446 /   22032    70.1%     179
+     1280.. 1536 u      6777 /   18608    36.4%     183
+     1536.. 1792 u       591 /   15344     3.9%      46
+     1792.. 2048 u         0 /   14576     0.0%       0
+     2048.. 2304 u         0 /   12576     0.0%       0
+     2304.. 2560 u         0 /   12320     0.0%       0
+     2560.. 2816 u         0 /   11328     0.0%       0
+     2816.. 3072 u         0 /   11088     0.0%       0
+     3072.. 3328 u         0 /   10496     0.0%       0
+     3328.. 3584 u         0 /   10480     0.0%       0
+     3584.. 3840 u         0 /    9552     0.0%       0
+     3840.. 4096 u         0 /    9328     0.0%       0
+     4096.. 4352 u         0 /    8352     0.0%       0
+     4352.. 4608 u         0 /    7680     0.0%       0
+    beyond 4352 u              0 /   29776               0
+  A2d: reach + one lattice diagonal + one texel = 1682.0 u
+       darkened beyond it: 0 by any amount, 0 by more than 2 bytes, 0 by more than 4, 0 by more than 8
+       floor: 863586 texels nearer than that moved
+
+== A2c: a building footprint against five displaced controls ==
+  blobs 1031; the subject is the largest of the 258 between 16 and 200 squares:
+    183 squares, top 11663.8, centre world (-75443, 109250)
+  SUBJECT   mean AO drop 215.20 bytes over 2928 texels
+  control 1 at ( -85945, 122126)  mean AO drop   18.27 over 2928 texels
+  control 2 at ( -88678, 119773)  mean AO drop   13.59 over 2928 texels
+  control 3 at ( -86314, 121914)  mean AO drop   21.50 over 2928 texels
+  control 4 at ( -86747, 121632)  mean AO drop   22.75 over 2928 texels
+  control 5 at ( -87132, 121348)  mean AO drop   25.92 over 2928 texels
+  A2c: subject 215.20, worst of 5 controls 25.92, margin 189.28 bytes

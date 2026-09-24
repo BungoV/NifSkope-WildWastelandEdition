@@ -1,0 +1,30 @@
+  cedar01 bake rc=0 8692 ms  oct 4 464 512 58.8368  aa 4 1024 4.625
+    lodgen rc=0 sheets=5 lodm=1
+  cedar03 bake rc=0 6868 ms  oct 4 512 448 101.943  aa 4 1024 3
+    lodgen rc=0 sheets=5 lodm=1
+  maple1 bake rc=0 5878 ms  oct 4 272 512 387.597  aa 4 1024 5.5
+    lodgen rc=0 sheets=5 lodm=1
+  mapleinst06g bake rc=0 7820 ms  oct 4 480 512 323.723  aa 4 1024 4
+    lodgen rc=0 sheets=5 lodm=1
+  elmforest01 bake rc=0 5636 ms  oct 4 288 512 650.927  aa 4 1024 1.5
+    lodgen rc=0 sheets=5 lodm=1
+  hero01 bake rc=0 7194 ms  oct 4 512 512 1156.9  aa 4 1024 4.25
+    lodgen rc=0 sheets=5 lodm=1
+  burnt01 bake rc=0 5186 ms  oct 4 160 512 208.764  aa 4 1024 11.125
+    lodgen rc=0 sheets=5 lodm=1
+  destroyed02 bake rc=0 4883 ms  oct 4 96 512 135.829  aa 4 1024 0.25
+    lodgen rc=0 sheets=5 lodm=1
+  blasted02 bake rc=0 5607 ms  oct 4 96 512 88.2059  aa 4 1024 5
+    lodgen rc=0 sheets=5 lodm=1
+  smarsh01 bake rc=0 6230 ms  oct 4 144 512 162.263  aa 4 1024 0.25
+    lodgen rc=0 sheets=5 lodm=1
+  sapling01 bake rc=0 7002 ms  oct 4 512 512 1.07733  aa 4 1024 0
+    lodgen rc=0 sheets=5 lodm=1
+  undergrowth01 bake rc=0 7407 ms  oct 4 512 512 1.07733  aa 4 1024 0
+    lodgen rc=0 sheets=5 lodm=1
+  shrub05 bake rc=0 6181 ms  oct 4 512 512 1.07733  aa 4 1024 0
+    lodgen rc=0 sheets=5 lodm=1
+  foothills01 bake rc=0 6637 ms  oct 4 512 480 629.159  aa 4 1024 8.875
+    lodgen rc=0 sheets=5 lodm=1
+  evergreen01 bake rc=0 7658 ms  oct 4 128 512 49.3263  aa 4 1024 0.25
+    lodgen rc=0 sheets=5 lodm=1

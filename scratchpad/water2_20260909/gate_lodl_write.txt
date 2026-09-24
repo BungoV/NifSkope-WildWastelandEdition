@@ -1,0 +1,49 @@
+  ok   tool:   cross-check: 36864 samples against the ESM, 0 mismatched, worst 0 (129 seam samples raised by the max rule)
+  ok   tool:   alpha words: 0 of 36864 differ (2328 nonzero); colour words: 0 of 36864 differ (2112 coloured)
+  ok   magic is still LODT after the .lodl rename
+  ok   header size field matches the file
+  ok   offsets ascend and stay in the file
+  ok   LTEX and WATR tables are populated
+  ok   height quantum is VHGT's own 8
+  ok   block directory has exactly the predicted entries
+  ok   heights round-trip EXACTLY against the ESM's LAND corners
+  ok   quadrant layers stay sparse (10.2%, ESM scan said 10.5%)
+  ok   AO plane varies (not a constant)
+RESULT PASS
+== header version 2 and the worldspace default water ==
+  the writer says: worldspace default height 450 type 00000018
+  ok   the written header says version 2
+  ok   the first section starts at 0xA0, so the header really grew
+  file says default water height 450 type 00000018
+  ok   the file's default water height is what the writer reported (450)
+  ok   the file's default water form is what the writer reported (00000018)
+  ok   the Commonwealth has a default water type (WRLD NAM2)
+  water cells: 36357 inherit the worldspace type, 507 name their own, 0 have no water
+  ok   cells that INHERIT the worldspace water exist
+  ok   cells that name their OWN water type exist
+  ok   every explicit water type indexes the WATR table (15 entries)
+  ok   version 1 still writes a 152-byte header (first section at 0x98)
+  ok   every section offset moved by exactly the 8 bytes appended
+  48960 directory entries, 0 offsets not +8, 0 sizes changed
+  ok   the directory has entries at all (so this can fail)
+  ok   every block payload offset moved by exactly 8, and no size moved
+  ok   and NOTHING ELSE moved: identical either side of the directory
+RESULT PASS
+== a worldspace with landless cells (NukaWorldAmphitheater) ==
+  ok   the .lodl grid and the heightmap are the same size (512x224)
+  110 of 112 cells carry no LAND record
+  ok   the worldspace HAS landless cells, so this can fail
+  ok   every texel agrees with the shadow heightmap (0 differ)
+RESULT PASS
+== each reader refuses the other's file by name ==
+  ok   control: the landscape route opens a .lodl
+  ok   the landscape route names the .lodt texture file it was handed
+  error: refused: fake_texture.lodt is a terrain TEXTURE file (.lodt, magic LDTX), not a .lodl landscape file
+  ok   the texture route names the landscape file it was handed
+  lodt refused: this is the whole-worldspace LANDSCAPE file (magic LODT), which is called .lodl since 2026-09-09; .lodt names the terrain texture sheets now -- open it as .lodl
+  ok   --lodt is refused and names --lodl
+  ok   the 'lodt' command is refused and names 'lodl'
+  ok   WW_LODT_VERSION is refused and names WW_LODL_VERSION
+  verify-only under the new name: 0 mismatched
+  ok   the file verifies under its new name with 0 mismatches
+PASS

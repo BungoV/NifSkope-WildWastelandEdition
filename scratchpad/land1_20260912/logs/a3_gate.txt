@@ -1,0 +1,28 @@
+LAND1 gate A3 -- border continuity: the sheet is a function of WORLD
+position, not of the region rectangle.  Four rectangles, every chunk
+sheet that appears in more than one compared byte for byte.
+
+   rule           chunk     rectangles                   verdict
+   no rule (hex 2 -20,20    split20+joint+joint4         identical
+   no rule (hex 2 -16,20    split16+joint+joint4         identical
+   aspecthex:1.0  -20,20    split20+joint+joint4         identical
+   aspecthex:1.0  -16,20    split16+joint+joint4         identical
+   drag:171       -20,20    split20+joint+joint4         identical
+   drag:171       -16,20    split16+joint+joint4         identical
+   aspect:1.0     -20,20    split20+joint+joint4         identical
+   aspect:1.0     -16,20    split16+joint+joint4         identical
+   slopewarp:1.0  -20,20    split20+joint+joint4         identical
+   slopewarp:1.0  -16,20    split16+joint+joint4         identical
+   flatwarp:1.0 - -20,20    split20+joint+joint4         identical
+   flatwarp:1.0 - -16,20    split16+joint+joint4         identical
+
+   72 file comparisons across the rectangles, 0 rows RED
+
+THE FLOOR THAT MUST FIRE -- the same chunk, two macro scales:
+   --land-guide-scale 1024 vs 512, aspecthex:1.0   1 of 3 files differ  the guide IS reading the heightmap
+       Commonwealth.4.-20.20.DDS          3528053ff333 vs f797d6325d8b
+
+GATE A7 -- the winning rule at 1 chunk thread against 16, whole tile:
+   15 files compared, 0 differ   IDENTICAL
+
+A3 GREEN    A7 GREEN

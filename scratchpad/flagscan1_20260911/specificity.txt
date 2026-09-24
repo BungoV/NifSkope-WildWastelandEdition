@@ -1,0 +1,37 @@
+road sub-folder         bases  bit15
+highwayoverpass            74     54
+city                       69      0
+park                       35     11
+alley                      25      0
+country                    22      0
+dirt                       19      0
+sanctuary                  18      0
+river                      15     11
+bridge                      8      6
+glowingsea                  7      0
+raised                      6      0
+lexingtongreen              4      0
+swcurb4x1str01grass.nif      3      0
+swcurb4x1str02grass.nif      2      0
+swcurb4x1str03grass.nif      2      0
+sw4x1str01grass.nif         2      0
+swcurb4x1str04grass.nif      2      0
+swcurb4x1endl01grass.nif      2      0
+swcurb4x1strslant01grass.nif      2      0
+roadachunk01.nif            1      0
+swcurb8x1str02.nif          1      0
+roadachunk04.nif            1      0
+roadachunk02.nif            1      0
+roadachunk03.nif            1      0
+roadachunk06.nif            1      0
+roadachunk05.nif            1      0
+roadaskirtcurveopenr01.nif      1      0
+roadaskirtcurveopenl01.nif      1      0
+roadaskirtrampupopen01.nif      1      0
+swcurb8x1strpark01.nif      1      0
+
+elevated sub-folders (HighwayOverpass|Bridge): 82 bases, 60 carry bit15 (73.2% sensitivity)
+every other road sub-folder:                   388 bases, 23 carry bit15
+   of those 23: sub-folders = ['park', 'plaza', 'river']
+
+placements: elevated 994, flat 18550

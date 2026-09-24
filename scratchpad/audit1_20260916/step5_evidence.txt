@@ -1,0 +1,20 @@
+AUDIT1 step 5 raw evidence (measured 2026-09-17 16:2x, greps on src/)
+symbols present:
+  slotInstances        src/lodifile.cpp:415
+  fullTriangles        src/lodofile.cpp:1699
+  cardCount            src/lodofile.cpp:47 (header 0xD0)
+  LODO_MESH_WATERTIGHT src/lodofile.cpp:922
+  lodoBoundaryEdges    src/lodofile.cpp:275
+  cardLayer            src/lodifile.cpp:1502
+  cardCorpusHash       src/lodbfile.cpp:374
+  placementAo          src/lodifile.cpp:366
+  crossPx16            src/lodofile.cpp:1697
+  refFormId            src/lodifile.cpp:291
+  lodgenSetLandGrade   src/lodgen.cpp:6927
+  aggregateViews       src/lodgenmanager.cpp:1687 (panel spin)
+ABSENT: forestedCells (no symbol anywhere in src/)
+census keywords actually emitted (grep of string literals in src/*.cpp):
+  arrays written: / bake census: / bake-record: / bake-record moved: / far rings:
+  incremental: / merged: / native cache: / native-aggregate: / native-casters:
+  native-ladder: / native-ladder-refused: / native-library: / native-library-build:
+  native-occluders: / native: / stage times: / vt: / vt estimate:

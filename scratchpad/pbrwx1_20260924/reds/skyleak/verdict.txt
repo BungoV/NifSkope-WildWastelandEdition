@@ -1,0 +1,11 @@
+pbr_wx1_gates judge, red=skyleak, CommonwealthClear fv=131 tods=8, climate TNAM=30,54,102,126,175,68
+  judge GMST: X=600 Y=-325 T=0.15 ext=2 shadowScale=-15 secunda=75 fades=5/10; A..D=6.9250 7.0750 18.9250 19.0750
+off
+  FAIL off_up1: every part OFF = before_pbrwx1, byte for byte -- 1035889 px differ, (1280, 826) vs (1280, 826)
+  FAIL off_up12: every part OFF = before_pbrwx1, byte for byte -- 1056549 px differ, (1280, 826) vs (1280, 826)
+  FAIL off_up12_pinned: every part OFF = before_pbrwx1, byte for byte -- 1056549 px differ, (1280, 826) vs (1280, 826)
+  FAIL off_up1_pinned: every part OFF = before_pbrwx1, byte for byte -- 1035889 px differ, (1280, 826) vs (1280, 826)
+  FAIL off_v8: every part OFF = before_pbrwx1, byte for byte -- 113920 px differ, (1280, 826) vs (1280, 826)
+  FAIL off_v8_pinned: every part OFF = before_pbrwx1, byte for byte -- 113920 px differ, (1280, 826) vs (1280, 826)
+6 checks, 6 failures
+FAIL

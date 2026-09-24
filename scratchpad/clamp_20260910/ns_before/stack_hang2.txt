@@ -1,0 +1,10 @@
+attempt 1: finished before 25s, retrying
+attempt 2: finished before 25s, retrying
+attempt 3: finished before 25s, retrying
+attempt 4: finished before 25s, retrying
+attempt 5: finished before 25s, retrying
+attempt 6: finished before 25s, retrying
+attempt 7: finished before 25s, retrying
+attempt 8: finished before 25s, retrying
+attempt 9: finished before 25s, retrying
+attempt 10: finished before 25s, retrying

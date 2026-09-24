@@ -1,0 +1,30 @@
+road bases WITH Has Distant LOD :   83 bases,     589 placements
+road bases WITHOUT              :  387 bases,   18955 placements
+
+flagged road bases by third model component (the sub-folder):
+   landscape/roads/highwayoverpass                   54 bases    497 placements
+   landscape/sidewalks/park                          11 bases     45 placements
+   landscape/roads/bridge                             6 bases     35 placements
+   landscape/roads/river                             11 bases     11 placements
+   landscape/sidewalks/plaza                          1 bases      1 placements
+
+UNflagged road bases by sub-folder (top 12):
+   landscape/sidewalks                              166 bases  10256 placements
+   landscape/roads                                  221 bases   8699 placements
+
+unflagged road bases under HighwayOverpass or Bridge: 23
+   HWSingleChunkSmall02                   Landscape\Roads\HighwayOverpass\HWSingleChunkSmall   139
+   HWDoublePartitionA01                   Landscape\Roads\HighwayOverpass\Partitions\HWDoubl    94
+   HWSingleChunkSmall01                   Landscape\Roads\HighwayOverpass\HWSingleChunkSmall    75
+   HWDoublePartitionA02                   Landscape\Roads\HighwayOverpass\Partitions\HWDoubl    63
+   HWSingleChunkLarge03                   Landscape\Roads\HighwayOverpass\HWSingleChunkLarge    39
+   HWSurfaceSingle1Way01RW                Landscape\Roads\HighwayOverpass\HWSurfaceSingle1Wa    15
+   RoadBridgeFreeSupport01                Landscape\Roads\Bridge\RoadBridgeFreeSupport01.nif     6
+   RoadBridgeFreeSupportBase01            Landscape\Roads\Bridge\RoadBridgeFreeSupportBase01     6
+   HWSurfaceSingle1Way01RWStairs          Landscape\Roads\HighwayOverpass\HWSurfaceSingle1Wa     5
+   HWSurfaceSingle1Way01                  Landscape\Roads\HighwayOverpass\HWSurfaceSingle1Wa     4
+   HWDoublePartitionB01                   Landscape\Roads\HighwayOverpass\Partitions\HWDoubl     2
+   HWSurfaceSingleTransRampRoad01         Landscape\Roads\HighwayOverpass\HWSurfaceSingleTra     2
+   HWSurfaceSingleRamp01                  Landscape\Roads\HighwayOverpass\HWSurfaceSingleRam     2
+   HWSurfaceSingle1Way01NoRail            Landscape\Roads\HighwayOverpass\HWSurfaceSingle1Wa     2
+   RRoad2SCustomBridgeEndL                Landscape\Roads\River\RRoad2SCustomBridgeEndL.nif      2

@@ -1,0 +1,11 @@
+﻿== HANDOFF.md: 58 copies
+  09-12 08:19 450000 C:\Users\bungo\.claude\file-history\843169d8-671d-4705-ba26-ce53a8012252\5fcfe493b278bdd9@v76 []
+  09-12 07:23 449530 C:\Users\bungo\.claude\file-history\843169d8-671d-4705-ba26-ce53a8012252\5fcfe493b278bdd9@v75 []
+  09-12 06:02 440927 C:\Users\bungo\.claude\file-history\843169d8-671d-4705-ba26-ce53a8012252\5fcfe493b278bdd9@v74 []
+  09-12 05:20 434079 C:\Users\bungo\.claude\file-history\843169d8-671d-4705-ba26-ce53a8012252\5fcfe493b278bdd9@v73 []
+== WW_CHANGES.md: 4 copies
+  09-24 14:16 1457790 E:\Projects\NifskopeWildWastelandEdition\scratchpad\docs2_20260910\WW_CHANGES.md.bak-docs2 ["Todd's treat"]
+  09-24 14:16 1490786 E:\Projects\NifskopeWildWastelandEdition\scratchpad\build8_20260910\WW_CHANGES.md.bak ["Todd's treat"]
+  09-24 14:16 1474003 E:\Projects\NifskopeWildWastelandEdition\scratchpad\build7_20260910\WW_CHANGES.md.bak ["Todd's treat"]
+  09-09 17:01 1342846 E:\Projects\NifskopeWildWastelandEdition\scratchpad\noprompt_20260909\WW_CHANGES.md.orig []
+== MISTAKES.md: 0 copies

@@ -1,0 +1,27 @@
+=== THE REFUTER, first ===
+flipped one byte in E:/Projects/NifskopeWildWastelandEdition/scratchpad/resume3_20260911/refuter/b/Commonwealth.4.-12.24.BTR
+IDENTITY REFUTER 1: one flipped byte
+  A: 60 file(s)   B: 60 file(s)   compared: 60
+  A total bytes: 24975886
+  DIFFER    Commonwealth.4.-12.24.BTR  (38217/6f244c37473f vs 38217/f5b7fe43c0c3)
+  RESULT FAIL - 0 only-in-A, 0 only-in-B, 1 differ
+   (must be non-zero above) rc=1
+deleted /e/Projects/NifskopeWildWastelandEdition/scratchpad/resume3_20260911/refuter/b/Commonwealth.4.-12.24.BTO
+IDENTITY REFUTER 2: one file missing
+  A: 60 file(s)   B: 59 file(s)   compared: 59
+  A total bytes: 24975886
+  ONLY-IN-A Commonwealth.4.-12.24.BTO
+  RESULT FAIL - 1 only-in-A, 0 only-in-B, 0 differ
+   (must be non-zero above) rc=1
+
+=== THE GATE ===
+IDENTITY Sanctuary: --chunk-threads 1 vs --chunk-threads 16
+  A: 60 file(s)   B: 60 file(s)   compared: 60
+  A total bytes: 24975886
+  RESULT PASS - 60 file(s), 24975886 bytes, byte-identical
+rc=0
+IDENTITY Boston: --chunk-threads 1 vs --chunk-threads 16
+  A: 163 file(s)   B: 163 file(s)   compared: 163
+  A total bytes: 77591755
+  RESULT PASS - 163 file(s), 77591755 bytes, byte-identical
+rc=0

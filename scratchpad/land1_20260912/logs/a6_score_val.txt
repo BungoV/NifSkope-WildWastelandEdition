@@ -1,0 +1,30 @@
+LAND1 Part A -- candidates on the VALIDATION seven
+instruments: tiling4_20260912 h1_sweep.score + t4_gates.decided, unchanged
+floor for G2 / G2-band: ls_rung = the launch exe, defaults, --road-detail 1
+
+   variant                     bias |  rep  swl |      G1   G2 | G1bnd G2bd | litG litB |  ALL
+   rung (the floor)              -- |  0/7  7/7 |  -37.0%  7/7 |   1/6  7/7 |  1/7  0/7 |    -
+   g_stoch                       -- |  5/7  7/7 |  -31.0%  7/7 |   1/6  6/7 |  2/7  0/7 |    -
+   g_ahs_s256                    -- |  5/7  7/7 |  -34.1%  7/7 |   1/6  4/7 |  1/7  0/7 |    -
+   g_ahs100                      -- |  5/7  7/7 |  -34.1%  7/7 |   1/6  4/7 |  1/7  0/7 |    -
+
+THE REPEAT, SHEET BY SHEET (ceiling = 0.264 absolute or the sheet`s
+own no-repeat control where that reads higher; ratio ceiling 0.448)
+   chunk        ceil  ls_rung  g_stoch ahs_s256 g_ahs100
+   -24,-24     0.264    1.160    0.161    0.218    0.221
+   -12,-20     0.264    1.344    0.287    0.308    0.288
+   4,-24       0.264    1.349    0.321    0.314    0.292
+   20,-24      0.264    0.916    0.205    0.152    0.156
+   -20,4       0.264    0.961    0.173    0.166    0.158
+   -8,4        0.264    1.038    0.132    0.150    0.134
+   12,8        0.264    0.541    0.118    0.081    0.100
+
+THE SWIRL, SHEET BY SHEET (ceiling = 1.20 x that chunk`s vanilla, 3.2846 absolute)
+   chunk        ceil  ls_rung  g_stoch ahs_s256 g_ahs100
+   -24,-24     2.294    1.539    1.583    1.565    1.595
+   -12,-20     2.852    1.365    1.370    1.362    1.383
+   4,-24       2.062    1.930    1.825    1.912    1.906
+   20,-24      2.876    0.977    1.034    1.571    1.593
+   -20,4       2.113    1.126    1.076    1.170    1.173
+   -8,4        2.137    1.096    1.135    1.149    1.147
+   12,8        3.155    1.258    1.262    1.311    1.313

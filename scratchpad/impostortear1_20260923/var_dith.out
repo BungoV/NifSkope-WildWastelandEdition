@@ -1,0 +1,21 @@
+  RETRY blast_n4 az: the mesh did not open (orbit counted 0)
+  run_var  blast_n4  az   rc=0 cards=360 94s orbit counted 360 of 360
+  run_var  maple_n4  az   rc=0 cards=360 32s orbit counted 360 of 360
+  run_var  rock_n4   az   rc=0 cards=360 39s orbit counted 360 of 360
+  run_var  blast_n4  el   rc=0 cards=90 10s orbit counted 90 of 90
+  run_var  maple_n4  el   rc=0 cards=90 9s orbit counted 90 of 90
+  run_var  rock_n4   el   rc=0 cards=90 14s orbit counted 90 of 90
+dith2   blast_n4  az:   8423 vs  27180 x1.5 =  40770.0  ratio 0.31  PASS
+dith2   blast_n4  el:   7245 vs  14750 x1.5 =  22125.0  ratio 0.49  PASS
+dith2   maple_n4  az:  16510 vs  15890 x1.5 =  23835.0  ratio 1.04  PASS
+dith2   maple_n4  el:  15556 vs  12319 x1.5 =  18478.5  ratio 1.26  PASS
+dith2   rock_n4   az:  28331 vs  90847 x1.5 = 136270.5  ratio 0.31  PASS
+dith2   rock_n4   el:   9995 vs 125698 x1.5 = 188547.0  ratio 0.08  PASS
+dith2   VERDICT PASS
+dith2   blast_n4  az030 run_ship IoU 0.4664  card  17922 mesh  38190  torn share 44.9% (14398 of 32060 mesh&nearest px)
+dith2   blast_n4  az030 dith2    IoU 0.6668  card  46429 mesh  38190  torn share 5.9% (1885 of 32060 mesh&nearest px)
+dith2   maple_n4  az210 run_ship IoU 0.1910  card  10075 mesh  43508  torn share 68.3% (13986 of 20482 mesh&nearest px)
+dith2   maple_n4  az210 dith2    IoU 0.4007  card  38185 mesh  43508  torn share 19.0% (3883 of 20482 mesh&nearest px)
+dith2   rock_n4   az030 run_ship IoU 0.6213  card 208460 mesh 334905  torn share 27.3% (74872 of 274649 mesh&nearest px)
+dith2   rock_n4   az030 dith2    IoU 0.7917  card 299161 mesh 334905  torn share 5.4% (14903 of 274649 mesh&nearest px)
+VARDONE

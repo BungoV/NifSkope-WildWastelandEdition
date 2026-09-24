@@ -1,0 +1,39 @@
+chain=after exe=2026-09-12_04:38:12 21798400
+start 04:44:44
+### animws start 04:44:45
+### animws rc=1  04:47:52
+
+### hkxanim_ui start 04:47:52
+### hkxanim_ui rc=1  04:47:57
+48 checks, 1 failures, 0 skips
+FAIL
+
+### ui_align start 04:47:57
+### ui_align rc=0  04:48:04
+15 checks, 0 failures
+PASS
+
+### water_ui start 04:48:04
+### water_ui rc=0  04:48:17
+84 checks, 0 failures, 0 skips
+PASS
+
+### files_tab start 04:48:18
+### files_tab rc=1  04:48:22
+29 checks, 1 failures
+FAIL
+
+### top_bar start 04:48:23
+### top_bar rc=1  04:48:27
+43 checks, 5 failures
+FAIL
+
+### skeleton_overlay start 04:48:28
+### skeleton_overlay rc=1  04:49:36
+5 checks, 1 failures
+FAIL
+PASS
+FAIL: the four renders are not the same size: [(941, 1524, 3), (941, 1524, 3), (965, 1024, 3), (965, 1024, 3)]
+
+end 04:49:36
+left running: 0 NifSkope process(es)

@@ -1,0 +1,4 @@
+
+HKEY_CURRENT_USER\Software\NifTools\NifSkope 2.0\File
+    Recent File List    REG_MULTI_SZ    e:/Projects/NifskopeWildWastelandEdition/tests/render/refraction_fixture.nif\0E:/Projects/Fallout 4 Mods/mods/FO4CS/Terrain/DiamondCity.lodl\0E:/Projects/NifskopeWildWastelandEdition/release/ww_render_shot/cube512.nif\0E:/Projects/NifskopeWildWastelandEdition/release/ww_render_shot/cube_plain.nif\0E:/Projects/NifskopeWildWastelandEdition/release/ww_render_shot/cube_lod.nif\0C:/Users/bungo/AppData/Local/Temp/tmp.QHRnNW3PsB/cube512.nif\0E:/Tools/Fallout 4/DataUnpacked/Data/meshes/Landscape/Trees/TreeMapleForest2.nif\0C:/Users/bungo/AppData/Local/Temp/tmp.vV8ZewlHvG/cube512.nif\0E:/Tools/Fallout 4/DataUnpacked/Data/meshes/Landscape/Trees/TreeMapleblasted05.nif\0E:/Projects/NifskopeWildWastelandEdition/scratchpad/impostorfix3_20260919/fixture/blast_n4/cards/000531b3_oct.lodm
+

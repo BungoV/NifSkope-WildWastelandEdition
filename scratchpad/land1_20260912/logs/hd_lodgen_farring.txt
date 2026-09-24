@@ -1,0 +1,49 @@
+  [r0base] atlas written: Commonwealth.LodgenObjects.DDS (+_n, _s)
+  [r0base] merged: 10 shapes -> 5 across 1 chunks
+  [r0cut] atlas written: Commonwealth.LodgenObjects.DDS (+_n, _s)
+  [r0cut] merged: 10 shapes -> 5 across 1 chunks
+  [r0cut] far rings: 0 shapes cut in 0 chunks: 0 -> 0 triangles, 0 -> 0 vertices (0 shapes and 0 groups kept whole, 0 restored; worst error 0.0 units)
+  ok   ring 0 is byte-identical with the pass on (1 chunk(s), meshes and manifests)
+  [r1base] atlas written: Commonwealth.LodgenObjects.DDS (+_n, _s)
+  [r1base] merged: 9 shapes -> 4 across 1 chunks
+  [r1cut] atlas written: Commonwealth.LodgenObjects.DDS (+_n, _s)
+  [r1cut] merged: 9 shapes -> 4 across 1 chunks
+  [r1cut] far rings: 2 shapes cut in 1 chunks: 1909 -> 1705 triangles, 3222 -> 2862 vertices (2 shapes and 0 groups kept whole, 0 restored; worst error 253.2 units)
+  [r2base] atlas written: Commonwealth.LodgenObjects.DDS (+_n, _s)
+  [r2base] merged: 29 shapes -> 16 across 1 chunks
+  [r2cut] atlas written: Commonwealth.LodgenObjects.DDS (+_n, _s)
+  [r2cut] merged: 29 shapes -> 16 across 1 chunks
+  [r2cut] far rings: 7 shapes cut in 1 chunks: 55293 -> 46087 triangles, 73416 -> 64513 vertices (9 shapes and 6 groups kept whole, 0 restored; worst error 511.8 units)
+  note ring 3 skipped (FARRING_RING3=1 to run it: 21,498 refs before SCOL expansion)
+  ring dim 8: 1 chunk(s), 2 shapes cut, 1909 -> 1705 triangles (ratio 0.893, asked 0.35), 3222 -> 2862 vertices, 1536 ids -> 1536
+  ok   dim 8: the pass removed at least 2% of the triangles (0.893 achieved, 0.35 asked)
+  ok   dim 8: the vertex count fell with them (3222 -> 2862)
+  ok   dim 8: the identity indices are the same set (1536)
+  ok   dim 8: no segment moved and the pass pushed no geometry out of the chunk (0 mismatches, 0 strays, 66 outside after vs 71 before)
+  ok   dim 8: every vertex is inside its bounds (0 outside the sphere, 0 outside the AABB)
+  ok   dim 8: the manifest placement rows are unchanged and every A line names a live block (0 differing manifests, 0 dangling A lines)
+  ring dim 16: 1 chunk(s), 7 shapes cut, 55293 -> 46087 triangles (ratio 0.834, asked 0.35), 73416 -> 64513 vertices, 7626 ids -> 7626
+  ok   dim 16: the pass removed at least 2% of the triangles (0.834 achieved, 0.35 asked)
+  ok   dim 16: the vertex count fell with them (73416 -> 64513)
+  ok   dim 16: the identity indices are the same set (7626)
+  ok   dim 16: no segment moved and the pass pushed no geometry out of the chunk (0 mismatches, 0 strays, 242 outside after vs 305 before)
+  ok   dim 16: every vertex is inside its bounds (0 outside the sphere, 0 outside the AABB)
+  ok   dim 16: the manifest placement rows are unchanged and every A line names a live block (0 differing manifests, 0 dangling A lines)
+  totals: 9 shapes cut, 9410 triangles removed
+  ok   the pass actually cut something (floor: 1 shape, 200 triangles)
+  [bc1] atlas written: Commonwealth.LodgenObjects.DDS (+_n, _s)
+  [bc1] merged: 10 shapes -> 5 across 1 chunks
+  [bc1] far rings: 0 shapes cut in 0 chunks: 0 -> 0 triangles, 0 -> 0 vertices (0 shapes and 0 groups kept whole, 0 restored; worst error 0.0 units)
+  r0cut atlas: DXT5 4096x2048 mips 10, 11184928 bytes
+  ok   r0cut writes the diffuse sheet as DXT5
+  ok   r0cut keeps the _s sheet at DX10 BC5
+  bc1 atlas: DXT1 4096x2048 mips 10, 5592528 bytes
+  ok   bc1 writes the diffuse sheet as DXT1
+  ok   bc1 keeps the _s sheet at DX10 BC5
+  vanilla Commonwealth.Objects.DDS: DXT1 4096x2048 mips 13, 5592552 bytes
+  ok   vanilla ships DXT1, which is what --atlas-bc1 matches
+  sheet sizes: BC3 11184928 bytes, BC1 5592528 bytes (0.50x)
+  ok   the BC1 sheet is about half the BC3 one
+  punch-through blocks per mip: [499561, 124920, 31232, 7808, 1952, 488, 122, 32, 8, 2, 0, 0, 0]
+  ok   the cut-outs survive past the top mip (mip 1 and mip 2 carry them)
+RESULT PASS

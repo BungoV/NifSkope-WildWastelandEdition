@@ -1,0 +1,141 @@
+Thu Sep 17 07:37:45 CEDT 2026
+exe   : /e/Projects/NifskopeWildWastelandEdition/release/NifSkope.exe (22534144 bytes, 2026-09-17 07:33:21)
+rung  : /e/Projects/NifskopeWildWastelandEdition/release/NifSkope.before_bakerec1.exe (22382592 bytes, 2026-09-17 00:56:51)
+plugin: X:/Programs/Steam/steamapps/common/Fallout 4/Data/Fallout4.esm (330776576 bytes)
+region: -20 24 -20 24 dim 4, worldspace Commonwealth
+work  : /tmp/tmp.eEP6fSUYVF
+
+== the baseline bake ==
+  one: rc=0, 15 file(s), record 1
+  record: /tmp/tmp.eEP6fSUYVF/one/FO4CSLOD/Commonwealth/Commonwealth.lodb
+
+== (a) the record is written last, complete, and counts its own tree ==
+  ok   (a) the record is at FO4CSLOD/Commonwealth/Commonwealth.lodb
+    ok   the record is the LAST file the bake wrote -- 0 file(s) newer, worst -
+    1 check(s), 0 failure(s)
+  ok   (a) the record is the LAST file the bake wrote
+    ok   the record is plain text with no CR byte -- 0 CR
+    ok   the record is valid UTF-8 -- 5779 bytes
+    ok   the record ends with exactly one LF
+    ok   1. version line: lodb v2 names the worldspace and the exe -- Commonwealth, exe 0.3.3+720762a, 22534144 bytes
+    ok      the baked line carries a UTC stamp -- 2026-09-17T05:38:45Z
+    ok      the alg line states all four algorithms -- {'chunk': 'sha1', 'file': 'sha1', 'plugin': 'fnv1a64', 'switches': 'sha1'}
+    ok      the shape line names the target -- fo4cs
+    ok   2. corpus hashes: five under the FO4CS target -- 5: cardCorpusHash,loadOrderHash,modelCorpusHash,objectCorpusHash,pluginCorpusHash
+    ok      every hash is 16 hex digits -- [('cardCorpusHash', '0000000000000000'), ('loadOrderHash', 'a056a596e2bb16e7'), ('modelCorpusHash', '340b99130f5a0c86'), ('objectCorpusHash', '6324ed6a35cde4ea'), ('pluginCorpusHash', 'd8337d022f637f22')]
+    ok      at least three of them are distinct and non-zero -- 4 non-zero of 5
+    ok   3. plugin lines: at least one, indices 0..n-1 in order -- 1 plugin(s)
+    ok   4. resource lines: every one names a kind -- 0 resource(s)
+    ok   5. switch lines: the argument vector is there verbatim -- 22 token(s): X:/Programs/Steam/steamapps/common/Fallout 4/Data/Fallout4.esm --worldspace 3C --terrain-region -20 24
+    ok      and the switch DIGEST is 40 hex digits -- f9fc7ff7dc3830ac7cb94c6ee7c8137025a77a43
+    ok   6. chunk lines: at least one, each with a 40-hex input digest -- 1 chunk(s)
+    ok      the chunk rows are sorted by (cy,cx), never by retire order
+    ok   7. census lines: at least one -- 12 line(s)
+    ok   8. end line is present -- 10 file(s), 228757277 bytes
+    ok      no line kind this reader does not know
+    ok   the end line equals a find of the record's own tree -- C:\Users\bungo\AppData\Local\Temp\tmp.eEP6fSUYVF\one\FO4CSLOD\Commonwealth: record says 10/228757277, disk says 10/228757277
+    note: the whole out-dir holds 14 file(s), 229668435 bytes; the record's own folder holds 10, 228757277
+    ok   every census line the bake printed is in the record -- 12 printed, 0 missing: 
+    ok   the floor is not vacuous: the bake printed census lines at all -- 12 printed
+    ok   the record invents no census line the bake did not print
+    ok   the bake-record: line is printed and is NOT in the record -- bake-record: C:/Users/bungo/AppData/Local/Temp/tmp.eEP6fSUYVF/one/FO4CSLOD/Commonwealth/Commonwealth
+    note: 3 worker-thread census line(s) are excluded by name (scheduler order would make the record non-deterministic)
+    24 check(s), 0 failure(s)
+  ok   (a) all eight sections, the end line against a find, and the census floor
+
+== (b) the five staleness hashes equal the pair's headers ==
+    ok   the record's cardCorpusHash equals the .lodo header -- 0000000000000000 vs 0000000000000000
+    ok   the record's loadOrderHash equals the .lodo header -- a056a596e2bb16e7 vs a056a596e2bb16e7
+    ok   the record's modelCorpusHash equals the .lodo header -- 340b99130f5a0c86 vs 340b99130f5a0c86
+    ok   the record's objectCorpusHash equals the .lodo header -- 6324ed6a35cde4ea vs 6324ed6a35cde4ea
+    ok   the record's pluginCorpusHash equals the .lodo header -- d8337d022f637f22 vs d8337d022f637f22
+    ok   the .lodi agrees with the .lodo on loadOrderHash -- a056a596e2bb16e7 / a056a596e2bb16e7
+    ok   the record's loadorder line agrees with its hash line -- a056a596e2bb16e7 vs a056a596e2bb16e7
+    ok   the five hashes are not all the same value -- a056a596e2bb16e7 d8337d022f637f22 6324ed6a35cde4ea 340b99130f5a0c86 0000000000000000
+    8 check(s), 0 failure(s)
+  ok   (b) every hash in the record equals the one in the pair's header
+
+== (c) the plugin lines are the list that was given ==
+    ok   the record has one plugin line a plugin given, in order -- 1 recorded, 1 given
+    ok   plugin 0 is fallout4.esm at index 0 -- fallout4.esm
+    ok   plugin 0 size equals stat -- 330776576 vs 330776576
+    ok   plugin 0 FNV-1a 64 equals an independent Python hash -- f1433cd4cadce243 vs f1433cd4cadce243
+    ok   no plugin line carries a zero or unread hash -- f1433cd4cadce243
+    ok   the hashes are distinct
+    6 check(s), 0 failure(s)
+  ok   (c) name, order, size and an independent FNV-1a 64, plugin by plugin
+
+== (d) the refuters: what the record notices and what it does not ==
+  the edited cell inside the region: -20,24; outside it: 20,64
+  ok   (d) a real edited plugin was made: one placement moved 96 units at -20,24
+  ok   (d) and a second one: a height raised at 20,64, outside the baked region
+  d1: rc=0, 15 file(s), record 1
+    ok   the two records cover the same chunks -- 1 vs 1
+      chunk (-20, 24): 4795701094b9 -> 8091d22abe62
+    ok   at least one chunk input digest MOVED -- 1 of 1 moved
+      plugin byte-hash moved for: nothing
+      loadOrderHash: a056a596e2bb16e7 -> 46ad47edc1465847 (moved)
+    2 check(s), 0 failure(s)
+  ok   (d1) a placement moved inside the region moves a chunk input digest
+  d2: rc=0, 15 file(s), record 1
+    ok   the two records cover the same chunks -- 1 vs 1
+    ok   no chunk input digest moved -- 0 of 1 moved
+      plugin byte-hash moved for: nothing
+      loadOrderHash: a056a596e2bb16e7 -> 0cd87f0f3ea0b1a3 (moved)
+    2 check(s), 0 failure(s)
+  ok   (d2) an edit outside the region moves no chunk input digest
+  ok   (d2) and the plugin's own byte hash moved, which loadOrderHash cannot see
+  d3a: rc=0, 15 file(s), record 1
+  d3c: rc=0, 15 file(s), record 1
+    ok   the two records cover the same chunks -- 1 vs 1
+    ok   no chunk input digest moved -- 0 of 1 moved
+      plugin byte-hash moved for: nothing
+      loadOrderHash: a056a596e2bb16e7 -> a056a596e2bb16e7 (BLIND to this edit)
+    2 check(s), 0 failure(s)
+  ok   (d3) renaming the mod folder moves no chunk input digest
+
+== (e) --native-verify names the plugin that went stale ==
+      bake record 1 plugin(s), 0 moved since the bake
+      pair identity ok
+  ok   (e) the pair verifies clean against the plugin it was baked from
+      native REFUSED C:/Users/bungo/AppData/Local/Temp/tmp.eEP6fSUYVF/one/FO4CSLOD/Commonwealth/Commonwealth.lodo is STALE: objectCorpusHash 0x6324ed6a35cde4ea in the file, 0x9e97ef9d6f906cda from C:/Users/bungo/AppData/Local/Temp/tmp.eEP6fSUYVF/moved.esm -- a placement, a base's MNAM or a SCOL part changed since the bake
+        the bake record names what moved:
+          plugin 0 moved.esm was ADDED since the bake
+          plugin 0 fallout4.esm was REMOVED since the bake
+  ok   (e) the pair is REFUSED against an edited plugin (rc=1)
+  ok   (e) and the refusal NAMES the plugin (Fallout4.esm)
+  ok   (e) and says WHICH WAY it moved (edited / added / removed / reordered / resized)
+
+== (f) the stock target is byte-identical to the rung, the record aside ==
+  stock: rc=0, 13 file(s), record 1
+  stock_rung: rc=0, 13 file(s)
+  12 stock file(s) compared, 0 differ
+  ok   (f) the stock bake is byte-identical to the rung's (12 files)
+  this exe's stock record: /tmp/tmp.eEP6fSUYVF/stock/Commonwealth.lodb
+  the rung's stock record: /tmp/tmp.eEP6fSUYVF/stock_rung/Commonwealth.lodb
+  ok   (f) and the stock target writes a record too (the stated divergence)
+  ok   (f) the rung's record is the v1 BINARY container, so the two cannot be compared row by row
+
+== (g) one parser: nothing in the tree reads the record by hand ==
+  ok   (g) no harness parses the record's container by hand any more
+  the shared reader is imported by:
+    tests/spells/lodb_read.py
+    tests/spells/lodgen_bakerec.sh
+    tests/spells/lodgen_bakerec_gate.py
+    tests/spells/lodgen_btofree_ledger.py
+    tests/spells/lodgen_defaults.sh
+    tests/spells/lodgen_incremental.sh
+    tests/spells/lodgen_layout.sh
+  ok   (g) every harness that reads a record imports the one reader (7 files)
+
+== (h) two bakes of one tree differ only in the volatile fields ==
+  det: rc=0, 15 file(s), record 1
+  det: rc=0, 15 file(s), record 1
+    ok   normalised, the two records are byte-identical -- 5648 vs 5648 bytes
+    ok   the RAW records do differ (so the mask is doing work) -- 3 line(s) differ
+    ok   and they differ only on baked / resource / plugin / masked-census lines -- kinds that differ: baked, census
+    3 check(s), 0 failure(s)
+  ok   (h) normalised the two records are byte-equal, and raw they are not
+
+== lodgen_bakerec: 21 check(s), 0 failure(s) ==
+RESULT PASS

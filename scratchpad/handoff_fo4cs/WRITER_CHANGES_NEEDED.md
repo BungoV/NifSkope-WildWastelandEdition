@@ -108,7 +108,7 @@ contract page carries the warning.
 ## 4. `.lodl` version 2 shipped without its consumer
 
 **What is wrong.** `LodtOptions::headerVersion` defaults to **2**
-(`src/lodtfile.h:58`), and FO4CS's parser pins `kVersion = 1u`. A file generated
+(`src/lodtfile.h:159`), and FO4CS's parser pins `kVersion = 1u`. A file generated
 today is **refused** by the shipped consumer.
 
 **This is not a bug in either side** — both refuse cleanly rather than misparse,

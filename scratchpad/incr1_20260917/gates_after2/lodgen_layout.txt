@@ -1,0 +1,176 @@
+Thu Sep 17 07:45:27 CEDT 2026
+exe   : /e/Projects/NifskopeWildWastelandEdition/release/NifSkope.exe (22534144 bytes, 2026-09-17 07:33:21)
+rung  : /e/Projects/NifskopeWildWastelandEdition/release/NifSkope.before_layout1.exe (22356992 bytes, 2026-09-16 20:21:17)
+region: -20 24 -20 24 dim 4, worldspace Commonwealth
+cards : /e/Projects/NifskopeWildWastelandEdition/scratchpad/showcase1_20260912/cards (300 file(s))
+
+== (a) the FO4CS bake puts every file under the one root ==
+  new: rc=0, 85 file(s)
+  ok   (a) every expected file is at its new path (5/5)
+  ok   (a) nothing of ours outside FO4CSLOD/ but the named exemptions
+    the exemptions, counted by name:
+      *.BTR: 1
+      *.BTO: 0
+      the named --tex-dir: 3 file(s)
+  ok   (a) the bake left no empty folder behind
+  ok   (a) no Terrain/ folder is created at all
+  ok   (a) no Textures/Lodgen/ folder is created at all
+  ok   (a) no meshes/ folder is created at all
+      ledger: 6 entry(ies) resolve and match, 0 do not
+  ok   (a) every output the ledger records is on disk with the digest it recorded
+    THE REFUTER: the same test on the rung exe's own bake --
+      rung: 4 file(s) outside FO4CSLOD/, 0 under it
+  ok   (a) the refuter fires: the rung's bake fails this leg on every row
+
+== (b) the bytes across the move: only the path strings changed ==
+  identical: Commonwealth.lodo (225399755 bytes)
+  identical: Commonwealth.lodi (41638 bytes)
+  identical: Commonwealth.4.-20.24.BTO.manifest.txt (168377 bytes, 1313 path string(s) rewritten)
+  identical: Commonwealth.4.-20.24.BTR (36942 bytes)
+  identical: Commonwealth.LodgenArrays.256x256.lodm (718 bytes, 4 path string(s) rewritten, LODM payload length repacked)
+  identical: Commonwealth.LodgenArrays.256x256_d.DDS (437028 bytes)
+  identical: Commonwealth.LodgenArrays.256x256_g.DDS (218588 bytes)
+  identical: Commonwealth.LodgenArrays.256x256_gsaos.DDS (437028 bytes)
+  identical: Commonwealth.LodgenArrays.256x256_n.DDS (437028 bytes)
+  identical: Commonwealth.LodgenArrays.txt (1422 bytes, 5 path string(s) rewritten)
+  identical: Commonwealth.LodgenCards.legacy.1024x2048.lodm (3272 bytes, 4 path string(s) rewritten, LODM payload length repacked)
+  identical: Commonwealth.LodgenCards.legacy.1024x2048_d.DDS (2752660 bytes)
+  identical: Commonwealth.LodgenCards.legacy.1024x2048_g.DDS (1376404 bytes)
+  identical: Commonwealth.LodgenCards.legacy.1024x2048_gsaos.DDS (2752660 bytes)
+  identical: Commonwealth.LodgenCards.legacy.1024x2048_n.DDS (2752660 bytes)
+  identical: Commonwealth.LodgenCards.legacy.1152x2048.lodm (3288 bytes, 4 path string(s) rewritten, LODM payload length repacked)
+  identical: Commonwealth.LodgenCards.legacy.1152x2048_d.DDS (3096724 bytes)
+  identical: Commonwealth.LodgenCards.legacy.1152x2048_g.DDS (1548436 bytes)
+  identical: Commonwealth.LodgenCards.legacy.1152x2048_gsaos.DDS (3096724 bytes)
+  identical: Commonwealth.LodgenCards.legacy.1152x2048_n.DDS (3096724 bytes)
+  identical: Commonwealth.LodgenCards.legacy.128x1024.lodm (3296 bytes, 4 path string(s) rewritten, LODM payload length repacked)
+  identical: Commonwealth.LodgenCards.legacy.128x1024_d.DDS (131220 bytes)
+  identical: Commonwealth.LodgenCards.legacy.128x1024_g.DDS (65684 bytes)
+  identical: Commonwealth.LodgenCards.legacy.128x1024_gsaos.DDS (131220 bytes)
+  identical: Commonwealth.LodgenCards.legacy.128x1024_n.DDS (131220 bytes)
+  identical: Commonwealth.LodgenCards.legacy.2048x4096.lodm (3242 bytes, 4 path string(s) rewritten, LODM payload length repacked)
+  identical: Commonwealth.LodgenCards.legacy.2048x4096_d.DDS (11141268 bytes)
+  identical: Commonwealth.LodgenCards.legacy.2048x4096_g.DDS (5570708 bytes)
+  identical: Commonwealth.LodgenCards.legacy.2048x4096_gsaos.DDS (11141268 bytes)
+  identical: Commonwealth.LodgenCards.legacy.2048x4096_n.DDS (11141268 bytes)
+  identical: Commonwealth.LodgenCards.legacy.2304x4096.lodm (3275 bytes, 4 path string(s) rewritten, LODM payload length repacked)
+  identical: Commonwealth.LodgenCards.legacy.2304x4096_d.DDS (12533908 bytes)
+  identical: Commonwealth.LodgenCards.legacy.2304x4096_g.DDS (6267028 bytes)
+  identical: Commonwealth.LodgenCards.legacy.2304x4096_gsaos.DDS (12533908 bytes)
+  identical: Commonwealth.LodgenCards.legacy.2304x4096_n.DDS (12533908 bytes)
+  identical: Commonwealth.LodgenCards.legacy.256x1024.lodm (11006 bytes, 4 path string(s) rewritten, LODM payload length repacked)
+  identical: Commonwealth.LodgenCards.legacy.256x1024_d.DDS (1048724 bytes)
+  identical: Commonwealth.LodgenCards.legacy.256x1024_g.DDS (524436 bytes)
+  identical: Commonwealth.LodgenCards.legacy.256x1024_gsaos.DDS (1048724 bytes)
+  identical: Commonwealth.LodgenCards.legacy.256x1024_n.DDS (1048724 bytes)
+  identical: Commonwealth.LodgenCards.legacy.256x2048.lodm (3044 bytes, 4 path string(s) rewritten, LODM payload length repacked)
+  identical: Commonwealth.LodgenCards.legacy.256x2048_d.DDS (524436 bytes)
+  identical: Commonwealth.LodgenCards.legacy.256x2048_g.DDS (262292 bytes)
+  identical: Commonwealth.LodgenCards.legacy.256x2048_gsaos.DDS (524436 bytes)
+  identical: Commonwealth.LodgenCards.legacy.256x2048_n.DDS (524436 bytes)
+  identical: Commonwealth.LodgenCards.legacy.384x1024.lodm (3310 bytes, 4 path string(s) rewritten, LODM payload length repacked)
+  identical: Commonwealth.LodgenCards.legacy.384x1024_d.DDS (491668 bytes)
+  identical: Commonwealth.LodgenCards.legacy.384x1024_g.DDS (245908 bytes)
+  identical: Commonwealth.LodgenCards.legacy.384x1024_gsaos.DDS (491668 bytes)
+  identical: Commonwealth.LodgenCards.legacy.384x1024_n.DDS (491668 bytes)
+  identical: Commonwealth.LodgenCards.legacy.384x2048.lodm (5974 bytes, 4 path string(s) rewritten, LODM payload length repacked)
+  identical: Commonwealth.LodgenCards.legacy.384x2048_d.DDS (1966228 bytes)
+  identical: Commonwealth.LodgenCards.legacy.384x2048_g.DDS (983188 bytes)
+  identical: Commonwealth.LodgenCards.legacy.384x2048_gsaos.DDS (1966228 bytes)
+  identical: Commonwealth.LodgenCards.legacy.384x2048_n.DDS (1966228 bytes)
+  identical: Commonwealth.LodgenCards.legacy.4096x3968.lodm (3276 bytes, 4 path string(s) rewritten, LODM payload length repacked)
+  identical: Commonwealth.LodgenCards.legacy.4096x3968_d.DDS (21649556 bytes)
+  identical: Commonwealth.LodgenCards.legacy.4096x3968_g.DDS (10824852 bytes)
+  identical: Commonwealth.LodgenCards.legacy.4096x3968_gsaos.DDS (21649556 bytes)
+  identical: Commonwealth.LodgenCards.legacy.4096x3968_n.DDS (21649556 bytes)
+  identical: Commonwealth.LodgenCards.legacy.512x1024.lodm (3245 bytes, 4 path string(s) rewritten, LODM payload length repacked)
+  identical: Commonwealth.LodgenCards.legacy.512x1024_d.DDS (655508 bytes)
+  identical: Commonwealth.LodgenCards.legacy.512x1024_g.DDS (327828 bytes)
+  identical: Commonwealth.LodgenCards.legacy.512x1024_gsaos.DDS (655508 bytes)
+  identical: Commonwealth.LodgenCards.legacy.512x1024_n.DDS (655508 bytes)
+  identical: Commonwealth.LodgenCards.legacy.512x2048.lodm (5738 bytes, 4 path string(s) rewritten, LODM payload length repacked)
+  identical: Commonwealth.LodgenCards.legacy.512x2048_d.DDS (2621588 bytes)
+  identical: Commonwealth.LodgenCards.legacy.512x2048_g.DDS (1310868 bytes)
+  identical: Commonwealth.LodgenCards.legacy.512x2048_gsaos.DDS (2621588 bytes)
+  identical: Commonwealth.LodgenCards.legacy.512x2048_n.DDS (2621588 bytes)
+  identical: Commonwealth.LodgenCards.legacy.640x2048.lodm (3324 bytes, 4 path string(s) rewritten, LODM payload length repacked)
+  identical: Commonwealth.LodgenCards.legacy.640x2048_d.DDS (1638548 bytes)
+  identical: Commonwealth.LodgenCards.legacy.640x2048_g.DDS (819348 bytes)
+  identical: Commonwealth.LodgenCards.legacy.640x2048_gsaos.DDS (1638548 bytes)
+  identical: Commonwealth.LodgenCards.legacy.640x2048_n.DDS (1638548 bytes)
+  identical: Commonwealth.LodgenCards.legacy.896x2048.lodm (3268 bytes, 4 path string(s) rewritten, LODM payload length repacked)
+  identical: Commonwealth.LodgenCards.legacy.896x2048_d.DDS (2408596 bytes)
+  identical: Commonwealth.LodgenCards.legacy.896x2048_g.DDS (1204372 bytes)
+  identical: Commonwealth.LodgenCards.legacy.896x2048_gsaos.DDS (2408596 bytes)
+  identical: Commonwealth.LodgenCards.legacy.896x2048_n.DDS (2408596 bytes)
+  identical: Commonwealth.4.-20.24.DDS (174888 bytes)
+  identical: Commonwealth.4.-20.24_data.DDS (349648 bytes)
+  identical: Commonwealth.4.-20.24_msn.DDS (349680 bytes)
+  83 identical, 0 differ, 0 missing, 17 carried a path string
+  ok   (b) every file is byte-identical once the path strings are rewritten
+    THE REFUTER: the same comparison WITHOUT the rewrite --
+  DIFFERS: Commonwealth.4.-20.24.BTO.manifest.txt (178227 vs 168377 bytes, first at 0xF1)
+  DIFFERS: Commonwealth.LodgenArrays.256x256.lodm (754 vs 718 bytes, first at 0x8)
+  DIFFERS: Commonwealth.LodgenArrays.txt (1462 vs 1422 bytes, first at 0x99)
+  DIFFERS: Commonwealth.LodgenCards.legacy.1024x2048.lodm (3308 vs 3272 bytes, first at 0x8)
+  DIFFERS: Commonwealth.LodgenCards.legacy.1152x2048.lodm (3324 vs 3288 bytes, first at 0x8)
+  DIFFERS: Commonwealth.LodgenCards.legacy.128x1024.lodm (3332 vs 3296 bytes, first at 0x8)
+  DIFFERS: Commonwealth.LodgenCards.legacy.2048x4096.lodm (3278 vs 3242 bytes, first at 0x8)
+  DIFFERS: Commonwealth.LodgenCards.legacy.2304x4096.lodm (3311 vs 3275 bytes, first at 0x8)
+  DIFFERS: Commonwealth.LodgenCards.legacy.256x1024.lodm (11042 vs 11006 bytes, first at 0x8)
+  DIFFERS: Commonwealth.LodgenCards.legacy.256x2048.lodm (3080 vs 3044 bytes, first at 0x8)
+  DIFFERS: Commonwealth.LodgenCards.legacy.384x1024.lodm (3346 vs 3310 bytes, first at 0x8)
+  DIFFERS: Commonwealth.LodgenCards.legacy.384x2048.lodm (6010 vs 5974 bytes, first at 0x8)
+  DIFFERS: Commonwealth.LodgenCards.legacy.4096x3968.lodm (3312 vs 3276 bytes, first at 0x8)
+  DIFFERS: Commonwealth.LodgenCards.legacy.512x1024.lodm (3281 vs 3245 bytes, first at 0x8)
+  DIFFERS: Commonwealth.LodgenCards.legacy.512x2048.lodm (5774 vs 5738 bytes, first at 0x8)
+  DIFFERS: Commonwealth.LodgenCards.legacy.640x2048.lodm (3360 vs 3324 bytes, first at 0x8)
+  DIFFERS: Commonwealth.LodgenCards.legacy.896x2048.lodm (3304 vs 3268 bytes, first at 0x8)
+  66 identical, 17 differ, 0 missing, 17 carried a path string
+  REFUTER: fires (17 file(s) carry a path string, 17 differ without the rewrite)
+  ok   (b) the refuter fires: without the rewrite the path-carrying files differ
+
+== (c) the stock target is untouched, dim 4/8/16/32 ==
+      NOT COMPARABLE: Commonwealth.lodb is the v1 binary container (magic b'LODB'), the rung exe predates the plain-text record.
+      The record is still measured, on this exe, by tests/spells/lodgen_bakerec.sh and by lodgen_incremental.sh arm (d). It is not measured here.
+  ok   (c) dim 4: the whole stock tree matches the rung's (12 files; 1 record(s) excepted from the bytes, 1 of those not comparable at all)
+      NOT COMPARABLE: Commonwealth.lodb is the v1 binary container (magic b'LODB'), the rung exe predates the plain-text record.
+      The record is still measured, on this exe, by tests/spells/lodgen_bakerec.sh and by lodgen_incremental.sh arm (d). It is not measured here.
+  ok   (c) dim 8: the whole stock tree matches the rung's (12 files; 1 record(s) excepted from the bytes, 1 of those not comparable at all)
+      NOT COMPARABLE: Commonwealth.lodb is the v1 binary container (magic b'LODB'), the rung exe predates the plain-text record.
+      The record is still measured, on this exe, by tests/spells/lodgen_bakerec.sh and by lodgen_incremental.sh arm (d). It is not measured here.
+  ok   (c) dim 16: the whole stock tree matches the rung's (4 files; 1 record(s) excepted from the bytes, 1 of those not comparable at all)
+      NOT COMPARABLE: Commonwealth.lodb is the v1 binary container (magic b'LODB'), the rung exe predates the plain-text record.
+      The record is still measured, on this exe, by tests/spells/lodgen_bakerec.sh and by lodgen_incremental.sh arm (d). It is not measured here.
+  ok   (c) dim 32: the whole stock tree matches the rung's (12 files; 1 record(s) excepted from the bytes, 1 of those not comparable at all)
+
+== (d) --keep-bto keeps its chunks where BTOFREE1 left them ==
+  ok   (d) the .BTO chunks are still written outside the new root (1 at the out-dir root)
+  ok   (d) and --keep-bto still creates no scratch folder
+  ok   (d) each kept chunk still has its sidecar beside it (1 at the out-dir root, 0 under FO4CSLOD/Commonwealth/)
+
+== (e) one spelling in the source, and the old ones are READ paths ==
+    src/lodgen.cpp:2908:			 * 2026-09-16): `Data\Textures\Lodgen\Cards\` until today,
+    src/lodgen.cpp:3291:	/* ONE ROOT (lane LAYOUT1, 2026-09-16): `Textures\Lodgen\Aggregate\<ws>`
+    src/lodgen.cpp:5277: *  Data/Textures/Terrain/<EDID>/<EDID>.HeightMap.<S>.<W>.<N>.<E>.<B>.<T>.dds
+    src/lodgen.cpp:5414:	const QString dir = outDir + QStringLiteral( "/Textures/Terrain/" ) + edid;
+    src/lodgen.cpp:6979:	return g_vanillaLodRoot + QStringLiteral( "/Textures/Terrain/" ) + ws
+    src/lodgen.h:585:	QString textureBase = QStringLiteral( "Data\\Textures\\Terrain\\%1\\%1.%2.%3.%4.DDS" );
+    src/lodgen.h:790://! Writes <outDir>/Textures/Terrain/<EDID>/<EDID>.HeightMap.S.W.N.E.B.T.dds,
+    src/lodgenlayout.h:15: * pyramid and the native pair, `Textures\Lodgen\` for the aggregate sheets and
+    src/lodgenmanager.cpp:2420:			: QString( "data\\Textures\\Terrain\\%1\\Objects\\%1.%2" ).arg( ws ).arg( stem );
+    src/lodgenmanager.cpp:2685:			parts << tr( "Textures\\Terrain\\%1\\%1.HeightMap.dds (%2 x %3, %4 MB)" ).arg( ws ).arg( w ).arg( h )
+    src/nifcli.cpp:3948:		 * suggested <out>/Terrain/<WS>.lodb; --out-dir has no Terrain/
+    src/nifcli.cpp:4515:				: QString( "data\\Textures\\Terrain\\%1\\Objects\\%1.%2" ).arg( ws ).arg( stem );
+  ok   (e) every remaining hit is a READ path, a comment or the HeightMap writer
+  ok   (e) the folder name is a string literal in ONE file (src/lodgenlayout.cpp)
+
+== (f) the census names the root it actually wrote to ==
+    layout C:/Users/bungo/AppData/Local/Temp/tmp.E8hsRdHMiI/new/FO4CSLOD, 80 file(s), 0 outside
+  ok   (f) the census root is a folder that exists (C:/Users/bungo/AppData/Local/Temp/tmp.E8hsRdHMiI/new/FO4CSLOD)
+  ok   (f) 1 bake record excepted from the disk count (section 2.8: it is not written when the census line is composed)
+  ok   (f) it counts what is on disk (80 file(s), 81 on disk less 1 record)
+  ok   (f) and reports 0 files written outside it
+
+layout checks: 23, failures: 0
+RESULT PASS

@@ -1,0 +1,107 @@
+IDENTPROX -- proximity join of the .lodi v7 GROUP table, chunk 4.4.-12
+=====================================================================
+All numbers below come from scripts in this folder; sweep.log holds the full
+60+ cell table, overmerge.txt names every over-merged identity, selfshadow.log
+the cost, hwy_render.log / hwy_rerun.log the highway.
+
+WHAT TODAY'S RULE MEASURES  (asked explicitly)
+----------------------------------------------
+The WORLD AXIS-ALIGNED BOUNDING BOX GAP.  Not an oriented box, not the mesh.
+  src/nativeemit.cpp:1191   useBox = true
+  src/nativeemit.cpp:2489-2527  the DRAWN MESH's eight local corners are placed
+                                and RE-BOUNDED AXIS-ALIGNED in world space
+  src/nativeemit.cpp:2530-2553  join when  A.lo[k] - B.hi[k] <= 16.0  on every
+                                axis k
+  src/nativeemit.cpp:1178   the eligibility word is "architecture", tested as a
+                            PATH COMPONENT of the base row's model string
+
+THE CONTROL
+-----------
+Cell (arch, aabb, 16 u) reproduces the shipped file exactly: 588 groups, 468
+singletons, largest 205 placements, 0 partition disagreements.  PASS.  Nothing
+else in the table would mean anything without it.
+
+THE RECOMMENDATION -- one rule
+------------------------------
+  WHO      every placement that is not a tree and not terrain
+  MEASURE  true mesh-to-mesh minimum distance between the LOD meshes
+  GAP      64 world units
+
+  chunk         588 identities -> 167
+  singletons    468 -> 62
+  DN135_GwinnettExt (260 placements, ONE building)   205 identities -> 6
+  AndrewStation (230 placements)                       7 identities -> 6
+  self-shadow loss (M1, 64 u texel, east+street, suns 120/5 and 120/15)
+                1.08%..20.74%  ->  1.13%..23.59%
+
+WHERE IT STARTS JOINING SEPARATE HOUSES
+---------------------------------------
+With the MESH measure: 128 u is the last safe gap.  At 256 u an identity first
+holds placements of TWO different reference buildings.  The measure is what
+protects you, not the gap:
+  aabb 16 u  ALREADY welds 286 placements across 9 Creation Kit layers
+             (4 South Boston city blocks + the highway), an 18,121 u identity
+  obb  16 u  the same weld, 173 placements, 8 layers, 18,121 u
+  mesh 16..128 u   the ONLY identity over the 6,110 u threshold is the highway
+             itself (Roads_FlyingHighway, 15,913..16,280 u) -- which is what a
+             highway is -- plus three RockCliff01 placements
+So: use the mesh measure.  A box gap of any kind bridges a street because the
+elevated deck's box hangs over the buildings underneath it.
+
+THE HIGHWAY  (bungo's "the highway has 4 segments here though")
+---------------------------------------------------------------
+24 placements: 10 deck (HWDouble*), 5 support columns (HWOnRampCol01), 6 ramp,
+3 sign posts -> 20 identities today, every one a singleton.
+
+WHY it breaks: ELIGIBILITY, not geometry.  0 of the 24 carry an "architecture"
+path component -- they are filed under Landscape\Roads\HighwayOverpass\ and
+SetDressing\Signage\ -- so the shipped rule makes each one a singleton whatever
+its bounds do.  Geometrically the run is nearly one object already: 7 connected
+components at a 0 u tolerance, 3 at 16 u, 2 at 128 u.  Widening the gap alone
+changes nothing: arch/aabb/16 through arch/meshv/256 all leave 10 deck
+identities.
+
+The identities bungo counted, left to right (hwy_colours.py, same palette and
+seed as HORIZON4's ident_east.png):
+  g100481  green         HWDoubleEndCapL03        x1   35,873 px
+  g100263  yellow-green  HWDoubleStr01Damaged01   x1    4,412 px
+  g100293  yellow-green  HWDoubleChunkLargeTop03  x1    1,583 px
+  g100092  magenta/pink  HWDoubleStrExit01        x1   11,418 px
+  g100091  green-teal    HWDoubleStr01Damaged01   x1      859 px
+  g100007  blue          HWDoubleStr01            x1    6,523 px
+  g100006  teal          HWDoubleEndCapR01        x1    1,312 px
+  (the pink-red block at x 676..749 is g100122 Billboard02TallR, not highway)
+
+DOES IT SHADOW CLEANLY TODAY?  YES.
+  seam false-dark, deck pixels within 64 u of a plane where two deck identities
+  abut, against the same deck away from every seam:
+      hwydeck  az120/el5   0.18% vs 0.60%
+      hwydeck  az180/el10  3.36% vs 1.56%   (the worst cell of the whole matrix)
+      hwyunder az120/el5   0.00% vs 1.72%
+      hwyunder az180/el10  0.41% vs 7.71%
+  the deck's shadow on the ground is byte-identical under every identity tested
+  (0.50% false-lit at 120/5): terrain is judged on DEPTH ALONE, so no identity
+  rule can break it.
+WHAT DOES BREAK: the support columns.  30.45% of the truth-dark column pixels
+are handed back to the light at 120/5 (38.3% of that is the identity rule
+throwing the caster away, the rest is a 64 u map holding no caster at all).
+
+WELDING THE RUN MAKES THAT WORSE, NOT BETTER.  Under kit/aabb/16 (today's rule
+with the road kit added to the eligible list) the 10 deck pieces become ONE
+identity, the seam band drops to 0.00-0.08%, and the columns go from 30.45% to
+36.96% handed back (identity fault 38.3% -> 49.2%), because a column that
+shares the deck's identity can no longer be shadowed by it.  It also drags in
+22 non-highway placements, among them the 3-placement Theater_Buildings layer.
+
+At which gap/measure does the whole run become one identity?
+  arch  (today's eligibility)  NEVER, at any gap or measure
+  kit / aabb or obb / 16 u     1 deck identity, 22 others dragged in
+  all  / aabb or obb / 16 u    1 deck identity, 151-267 others dragged in
+  all  / mesh / 32 u           4    "     "      5 others
+  all  / mesh / 64 u           3    "     "     40 others
+  all  / mesh / 256 u          1    "     "    570 others, and it swallows
+                               AndrewStation -- do not go there
+The honest answer: under the recommended rule the run is 3 identities, not 1,
+and that is fine, because the seams were never the problem.  If bungo wants the
+run as one identity the cheap, targeted change is the ELIGIBILITY word, not the
+gap -- and he should know it costs ~6 points of column shadow.

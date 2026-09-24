@@ -1,0 +1,5 @@
+  blast_n4  rc=0   10s mesh=16 card=16  coverage cut: from the set -- floor 16/255 = 0.0627 orbit iou mean 0.8468 
+  blast_n8  rc=0    9s mesh=64 card=64  coverage cut: from the set -- floor 16/255 = 0.0627 orbit iou mean 0.8351 
+  maple_n4  rc=0    5s mesh=16 card=16  coverage cut: from the set -- floor 16/255 = 0.0627 orbit iou mean 0.4880 
+  dead_n4   rc=0    5s mesh=16 card=16  coverage cut: from the set -- floor 16/255 = 0.0627 orbit iou mean 0.4483 
+  rock_n4   rc=0    7s mesh=16 card=16  coverage cut: from the set -- floor 16/255 = 0.0627 orbit iou mean 0.8497 

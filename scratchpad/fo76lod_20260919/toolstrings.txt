@@ -1,0 +1,10 @@
+appalachia.16.-14.-29.bto {'atlas': 3, 'remesh': 1}
+appalachia.32.-30.-29.bto {'atlas': 3, 'remesh': 1}
+appalachia.4.-10.-25.bto {'atlas': 3, 'remesh': 7, 'sg_processed': 7}
+appalachia.4.-14.-29.bto {'atlas': 3, 'remesh': 9, 'sg_processed': 9}
+appalachia.8.-14.-29.bto {'atlas': 2, 'remesh': 1}
+  appalachia.16.-14.-29.bto author=b'\x00'
+  appalachia.32.-30.-29.bto author=b'\x00'
+  appalachia.4.-10.-25.bto author=b'\x00'
+  appalachia.4.-14.-29.bto author=b'\x00'
+  appalachia.8.-14.-29.bto author=b'\x00'

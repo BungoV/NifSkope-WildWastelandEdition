@@ -1,0 +1,91 @@
+== (a) the rung: the panel's own run, before and after ==
+  rung: 125 checks, 0 failures
+  new: 130 checks, 0 failures
+f77f8410b893a2ba514d2baa34e27f36f25d81da  C:\Users\bungo\AppData\Local\Temp/Lodgen_PANEL1_rung  11 files  47645750 bytes
+f77f8410b893a2ba514d2baa34e27f36f25d81da  C:\Users\bungo\AppData\Local\Temp/Lodgen_PANEL1_new  11 files  47645750 bytes
+IDENTICAL: 11 files, 47645750 bytes, sha1 f77f8410b893a2ba514d2baa34e27f36f25d81da
+== (b) per row: does the bake move when the row moves? ==
+gate base bake: 15 files, 50975596 bytes, 12156 ms, digest 9527aa275abd88908620aa112cd86365ab7a9a04
+gate base result line: 'stage times: landscape 5.4 s, meshes 4.9 s, textures 1.2 s, impostors 0.0 s
+gate base tree kept at C:/Users/bungo/AppData/Local/Temp/Lodgen_PANEL1_base
+  row waterSubdiv 4 -> 5: bytes MOVED (15 files, 50998708 bytes, 10375 ms)
+  row landTiling 341.3333 -> 357.3333: bytes MOVED (15 files, 50975596 bytes, 10948 ms)
+  row landSample 0 -> 1: bytes MOVED (15 files, 50975596 bytes, 10718 ms)
+  row landHex 0 -> 16: bytes MOVED (15 files, 50975596 bytes, 11022 ms)
+  row landWarp 0 -> 16: bytes MOVED (15 files, 50975596 bytes, 11029 ms)
+  row landMipBias 0 -> 0.1: bytes MOVED (15 files, 50975596 bytes, 11218 ms)
+  row landGuide 0 -> 1: bytes MOVED (15 files, 50975596 bytes, 11007 ms)
+  row landDetailSource 1 -> 0: bytes MOVED (15 files, 50800804 bytes, 10148 ms)
+  row vanillaLodRoot: skipped, it carries a path
+  row landShade -3.242 -> -3.142: bytes MOVED (15 files, 50975596 bytes, 10901 ms)
+  row landGrade 1 -> 1.01: bytes MOVED (15 files, 50975596 bytes, 10713 ms)
+  row blendEdges 0 -> 1: bytes MOVED (15 files, 50975596 bytes, 10606 ms)
+  row erosion 0 -> 0.05: bytes MOVED (15 files, 50975596 bytes, 11233 ms)
+  row sheetFormat 0 -> 1: bytes MOVED (15 files, 51150388 bytes, 10983 ms)
+  row msnCache: skipped, it carries a path
+  row coverFull 96 -> 100: bytes MOVED (15 files, 50975596 bytes, 11074 ms)
+  row roads: NOT EXERCISED HERE -- the road pass writes nothing on this chunk -- the command line own --no-roads moves only the ledger here (measured 2026-09-12); tests/spells/lodgen_roads.sh reads the road rows
+  row roadDetail: NOT EXERCISED HERE -- the road pass writes nothing on this chunk -- the command line own --no-roads moves only the ledger here (measured 2026-09-12); tests/spells/lodgen_roads.sh reads the road rows
+  row roadGroundPaint: NOT EXERCISED HERE -- the road pass writes nothing on this chunk -- the command line own --no-roads moves only the ledger here (measured 2026-09-12); tests/spells/lodgen_roads.sh reads the road rows
+  row roadCoverSuppress: NOT EXERCISED HERE -- the road pass writes nothing on this chunk -- the command line own --no-roads moves only the ledger here (measured 2026-09-12); tests/spells/lodgen_roads.sh reads the road rows
+  row roadComposite: NOT EXERCISED HERE -- the road pass writes nothing on this chunk -- the command line own --no-roads moves only the ledger here (measured 2026-09-12); tests/spells/lodgen_roads.sh reads the road rows
+  row roadRaised: NOT EXERCISED HERE -- the road pass writes nothing on this chunk -- the command line own --no-roads moves only the ledger here (measured 2026-09-12); tests/spells/lodgen_roads.sh reads the road rows
+  row roadSidewalks: NOT EXERCISED HERE -- the road pass writes nothing on this chunk -- the command line own --no-roads moves only the ledger here (measured 2026-09-12); tests/spells/lodgen_roads.sh reads the road rows
+  row terrainObjectAo false -> true: bytes MOVED (15 files, 50975596 bytes, 10863 ms)
+  row waterBodies false -> true: bytes MOVED (15 files, 53595446 bytes, 12758 ms)
+  row waterVelocities: skipped, it carries a path
+  row aggregate: NOT EXERCISED HERE -- aggregate sheets need a card library and this gate arms none, so the run has nothing to aggregate; tools/bake_impostor_cards.sh builds one and tests/spells/lodgen_card_arrays.sh reads it
+  row aggregateMin: NOT EXERCISED HERE -- aggregate sheets need a card library and this gate arms none, so the run has nothing to aggregate; tools/bake_impostor_cards.sh builds one and tests/spells/lodgen_card_arrays.sh reads it
+  row aggregateTile: NOT EXERCISED HERE -- aggregate sheets need a card library and this gate arms none, so the run has nothing to aggregate; tools/bake_impostor_cards.sh builds one and tests/spells/lodgen_card_arrays.sh reads it
+  row aggregateViews: NOT EXERCISED HERE -- aggregate sheets need a card library and this gate arms none, so the run has nothing to aggregate; tools/bake_impostor_cards.sh builds one and tests/spells/lodgen_card_arrays.sh reads it
+  row nativeLadder true -> false: bytes MOVED (15 files, 47522668 bytes, 10671 ms)
+  row nativeOccluders: NOT EXERCISED HERE -- no occluder box is found on this chunk -- the command line own --native-no-occluders moves only the ledger here (measured 2026-09-12); tests/spells/lodgen_native.sh reads it
+  row merge: NOT EXERCISED HERE -- hidden under the FO4 Community Shaders target this gate arms, and a hidden row reads as its default by design; the stock-engine target is where it reaches the bake
+  row atlasFormat: NOT EXERCISED HERE -- hidden under the FO4 Community Shaders target this gate arms, and a hidden row reads as its default by design; the stock-engine target is where it reaches the bake
+  row threads 0 -> 1: SAME bytes -- this row reaches nothing in this bake
+  row chunkThreads 1 -> 2: SAME bytes -- this row reaches nothing in this bake
+  row vtContent: NOT EXERCISED HERE -- the terrain virtual texture module is off in this gate module set -- the pyramid is worldspace-wide, not one chunk; tests/spells/lodgen_terrain_vt.sh reads the pyramid rows
+  row vtBorder: NOT EXERCISED HERE -- the terrain virtual texture module is off in this gate module set -- the pyramid is worldspace-wide, not one chunk; tests/spells/lodgen_terrain_vt.sh reads the pyramid rows
+  row vtMips: NOT EXERCISED HERE -- the terrain virtual texture module is off in this gate module set -- the pyramid is worldspace-wide, not one chunk; tests/spells/lodgen_terrain_vt.sh reads the pyramid rows
+  row vtCompress: NOT EXERCISED HERE -- the terrain virtual texture module is off in this gate module set -- the pyramid is worldspace-wide, not one chunk; tests/spells/lodgen_terrain_vt.sh reads the pyramid rows
+  row vtHeight: NOT EXERCISED HERE -- the terrain virtual texture module is off in this gate module set -- the pyramid is worldspace-wide, not one chunk; tests/spells/lodgen_terrain_vt.sh reads the pyramid rows
+  row vtCoverInColor: NOT EXERCISED HERE -- the terrain virtual texture module is off in this gate module set -- the pyramid is worldspace-wide, not one chunk; tests/spells/lodgen_terrain_vt.sh reads the pyramid rows
+  row landDetail (with landSample on) 0 -> 0.05: bytes MOVED (15 files, 50975596 bytes, 11223 ms)
+  row landWarpLattice (with landWarp on) 1024 -> 1088: bytes MOVED (15 files, 50975596 bytes, 10839 ms)
+  row landWarpOctaves (with landWarp on) 1 -> 2: bytes MOVED (15 files, 50975596 bytes, 10941 ms)
+  row landGuideStrength (with landGuide on) 1 -> 1.05: bytes MOVED (15 files, 50975596 bytes, 11098 ms)
+  row landGuideScale (with landGuide on) 1024 -> 1088: bytes MOVED (15 files, 50975596 bytes, 10830 ms)
+  row landGuideSlope (with landGuide at 4) 0.5 -> 0.55: SAME bytes -- this row reaches nothing in this bake
+  row blendMargin (with blendEdges on) 128 -> 144: bytes MOVED (15 files, 50975596 bytes, 10994 ms)
+  row erosionIterations (with erosion on) 1 -> 2: bytes MOVED (15 files, 50975596 bytes, 11584 ms)
+  row erosionSeed (with erosion on) 1 -> 2: bytes MOVED (15 files, 50975596 bytes, 11254 ms)
+  row terrainObjectAoStrength (with terrainObjectAo on) 0.5 -> 0.55: bytes MOVED (15 files, 50975596 bytes, 10881 ms)
+  row waterBridge (with waterBodies on) 2 -> 3: bytes MOVED (15 files, 53590660 bytes, 12480 ms)
+  row waterNear (with waterBodies on) 64 -> 512: bytes MOVED (15 files, 53595446 bytes, 15206 ms)
+  row waterBodySamples (with waterBodies on) 0 -> 1: bytes MOVED (15 files, 52761864 bytes, 12561 ms)
+  row waterFlowSamples (with waterBodies on) 0 -> 1: bytes MOVED (15 files, 53595446 bytes, 12294 ms)
+  row waterShore (with waterBodies on) true -> false: bytes MOVED (15 files, 52275823 bytes, 11576 ms)
+gate rows bumped: 49, bytes moved: 31, same bytes: 3, not exercised here: 20, could not be moved: 0, refused: 0
+  same bytes: threads, chunkThreads, landGuideSlope
+gate control (threads, chunk threads) leave the bytes alone: yes
+checks run: 125 (floor 125), failures: 1
+== (c) the command line's own bake of the same chunk ==
+  CLI landscape file rc=0
+  CLI chunk sweep rc=0
+  identical: Commonwealth.lodl (35953294 bytes)
+  DIFFERS: Commonwealth.4.-20.24.BTR (56916 vs 46518 bytes)
+  identical: Commonwealth.4.-20.24.BTO (1280239 bytes)
+  identical: Commonwealth.4.-20.24.BTO.manifest.txt (53999 bytes)
+  identical: Commonwealth.4.-20.24.DDS (174888 bytes)
+  identical: Commonwealth.4.-20.24_data.DDS (349648 bytes)
+  identical: Commonwealth.4.-20.24_msn.DDS (349680 bytes)
+  identical: Commonwealth.LodgenArrays.256x256.lodm (937 bytes)
+  identical: Commonwealth.LodgenArrays.txt (2679 bytes)
+  identical: Commonwealth.LodgenArrays.256x256_d.DDS (873908 bytes)
+  identical: Commonwealth.LodgenArrays.256x256_n.DDS (873908 bytes)
+  identical: Commonwealth.LodgenArrays.256x256_g.DDS (437028 bytes)
+  identical: Commonwealth.LodgenArrays.256x256_gsaos.DDS (873908 bytes)
+  identical: Commonwealth.lodo (9657316 bytes)
+  identical: Commonwealth.lodi (37248 bytes)
+  panel vs command line: 14 identical, 1 differ, 0 missing
+byte gate failures: 2

@@ -1,0 +1,28 @@
+================================================================================================================
+IDENTGAP fair  2026-09-19 07:11:06   -- every rule at its own best bias, 16 u texel, 3x3 PCF
+
+VIEW hwydeck  az 180 el 10  (342,493 sweep pixels: 141,392 object, 201,101 terrain)
+  G0 no identity     best by objects | normal 0.0 depth 1.00 slope 2.0 | obj false-DARK  0.75%  false-LIT  4.83%  (total  5.58%) | terrain  9.46% | ALL  7.86%
+  G0 no identity     best by ALL     | normal 1.0 depth 0.25 slope 0.0 | obj false-DARK  0.65%  false-LIT  5.28%  (total  5.93%) | terrain  8.44% | ALL  7.40%
+  G1 pure identity   best by objects | normal 0.0 depth 0.25 slope 1.0 | obj false-DARK  0.68%  false-LIT  6.29%  (total  6.96%) | terrain  9.26% | ALL  8.31%
+  G1 pure identity   best by ALL     | normal 1.0 depth 0.25 slope 0.0 | obj false-DARK  0.55%  false-LIT  6.81%  (total  7.37%) | terrain  8.44% | ALL  8.00%
+  G2 gate D = 64 u   best by objects | normal 0.0 depth 1.00 slope 2.0 | obj false-DARK  0.74%  false-LIT  4.85%  (total  5.59%) | terrain  9.46% | ALL  7.86%
+  G2 gate D = 64 u   best by ALL     | normal 1.0 depth 0.25 slope 0.0 | obj false-DARK  0.64%  false-LIT  5.32%  (total  5.96%) | terrain  8.44% | ALL  7.41%
+
+VIEW east  az 120 el 15  (298,959 sweep pixels: 208,287 object, 90,672 terrain)
+  G0 no identity     best by objects | normal 0.0 depth 2.00 slope 0.0 | obj false-DARK  1.14%  false-LIT  3.03%  (total  4.17%) | terrain 16.72% | ALL  7.98%
+  G0 no identity     best by ALL     | normal 0.5 depth 0.25 slope 1.0 | obj false-DARK  1.18%  false-LIT  3.23%  (total  4.41%) | terrain  6.14% | ALL  4.93%
+  G1 pure identity   best by objects | normal 0.0 depth 2.00 slope 0.0 | obj false-DARK  0.87%  false-LIT  7.18%  (total  8.05%) | terrain 16.72% | ALL 10.68%
+  G1 pure identity   best by ALL     | normal 0.5 depth 0.25 slope 1.0 | obj false-DARK  0.98%  false-LIT  7.23%  (total  8.21%) | terrain  6.14% | ALL  7.58%
+  G2 gate D = 64 u   best by objects | normal 0.0 depth 2.00 slope 0.0 | obj false-DARK  1.13%  false-LIT  3.06%  (total  4.19%) | terrain 16.72% | ALL  7.99%
+  G2 gate D = 64 u   best by ALL     | normal 0.5 depth 0.25 slope 1.0 | obj false-DARK  1.18%  false-LIT  3.26%  (total  4.44%) | terrain  6.14% | ALL  4.95%
+
+VIEW street  az 120 el 5  (343,940 sweep pixels: 160,198 object, 183,742 terrain)
+  G0 no identity     best by objects | normal 1.0 depth 2.00 slope 0.0 | obj false-DARK  4.18%  false-LIT  3.98%  (total  8.15%) | terrain 11.06% | ALL  9.71%
+  G0 no identity     best by ALL     | normal 1.0 depth 2.00 slope 0.0 | obj false-DARK  4.18%  false-LIT  3.98%  (total  8.15%) | terrain 11.06% | ALL  9.71%
+  G1 pure identity   best by objects | normal 1.0 depth 2.00 slope 0.0 | obj false-DARK  4.18%  false-LIT  4.70%  (total  8.88%) | terrain 11.06% | ALL 10.05%
+  G1 pure identity   best by ALL     | normal 1.0 depth 2.00 slope 0.0 | obj false-DARK  4.18%  false-LIT  4.70%  (total  8.88%) | terrain 11.06% | ALL 10.05%
+  G2 gate D = 64 u   best by objects | normal 1.0 depth 2.00 slope 0.0 | obj false-DARK  4.18%  false-LIT  4.02%  (total  8.19%) | terrain 11.06% | ALL  9.73%
+  G2 gate D = 64 u   best by ALL     | normal 1.0 depth 2.00 slope 0.0 | obj false-DARK  4.18%  false-LIT  4.02%  (total  8.19%) | terrain 11.06% | ALL  9.73%
+
+fair TOTAL 1.4 min

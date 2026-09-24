@@ -1,0 +1,39 @@
+Lane VT1, 2026-09-16. Changed files, with line endings measured by Python byte
+counts (b.count(b'\r'), b.count(b'\n')) before and after. Nothing committed.
+
+M  src/lodgen.cpp
+       before   594075 B   CR 0   LF 13651
+       after    600189 B   CR 0   LF 13788      (+6114 B, +137 lines, LF-only kept)
+
+M  tests/spells/lodgen_terrain_vt.sh
+       before    30529 B   CR 0   LF   593
+       after     34070 B   CR 0   LF   654      (+3541 B, +61 lines, LF-only kept)
+
+M  docs/LODGEN_TERRAIN_VT.md
+       before   186608 B   CR 0   LF  2859
+       after    189400 B   CR 0   LF  2905      (+2792 B, +46 lines, LF-only kept)
+
+Not touched, measured to prove it: src/lodtfile.cpp 141680 B CR 0 LF 3658
+(unchanged), res/shaders/fo4_default.frag and src/gl/renderer.cpp (not opened),
+and every default value in lodgen.cpp (no ruled default moved).
+
+New files, all under scratchpad/vt1_20260912/, all LF-only, all A:
+
+  the probes                diffmap.py, ringdiff.py, ringfix_model.py,
+                            texelpredict.py, predict_check.py, predict_*.npy
+  item 4, V9c               v9c.py, v9c_probe.py, v9c_white.py, v9c_correct.py
+  the picture               pics.py, images/vt1_pyramid_sheet_rung_vs_new.png
+  the bakes and their logs  gate/bake.sh, gate/{rung,new}.{vt,d}/,
+                            gate/new.{dold,dnowarp,dnoguide}/, gate/*.log
+  the documents             lane_vt1_report.md, WW_CHANGES_ENTRY.md,
+                            HANDOFF_BLOCK.md, MISTAKES_ENTRIES.md,
+                            CHANGED_FILES.txt, DONE
+
+M  MISTAKES.md   (root, spliced at the TOP as CONSTITUTION rule 2 requires)
+       before   435190 B   CR 0   LF  7371
+       after    437794 B   CR 0   LF  7413      (+2604 B, +42 lines, LF-only kept)
+
+WW_CHANGES.md was NOT edited by this lane: the entry is delivered as
+scratchpad/vt1_20260912/WW_CHANGES_ENTRY.md for the overseer to splice, because
+that file is mixed CR/LF (19,020 CR against 29,352 LF) and must match its
+neighbours rather than be normalised. Measured unchanged at 1,753,346 B.

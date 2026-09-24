@@ -1,0 +1,68 @@
+TILING4 -- the fine bias sweep, the pick, its stability, and the
+           frozen validation seven
+
+ALL = repeat 7/7 and swirl 7/7 and G1 and G2 7/7 and G2-band 7/7.
+G1-band is reported and is not in ALL (refused gate: the rung reads 2/6).
+
+STAGE D -- the bias window at quarter-tenths
+   variant                     bias |  rep  swl |      G1   G2 | G1bnd G2bd | litG litB |  ALL
+   H1 hex 256                 -0.22 |  6/7  7/7 |  -19.9%  7/7 |   2/6  6/7 |  3/7  0/7 |    -
+   H1 hex 256                 -0.25 |  6/7  7/7 |  -19.1%  7/7 |   2/6  6/7 |  3/7  0/7 |    -
+   H1 hex 256                 -0.27 |  6/7  7/7 |  -18.5%  6/7 |   2/6  6/7 |  3/7  0/7 |    -
+   H1 hex 341                 -0.22 |  5/7  7/7 |  -20.4%  7/7 |   2/6  5/7 |  3/7  0/7 |    -
+   H1 hex 341                 -0.25 |  5/7  7/7 |  -19.5%  7/7 |   2/6  5/7 |  3/7  0/7 |    -
+   H1 hex 341                 -0.27 |  5/7  7/7 |  -18.9%  6/7 |   2/6  6/7 |  3/7  0/7 |    -
+
+PICK: H1 hex 256 at mip bias -0.22.
+   repeat 6 of 7 (worst sheet 0.350), swirl 7 of 7 (worst 2.1894),
+   G1 -19.9% (ceiling +-20 %), G2 7 of 7, G2-band 6 of 7,
+   G1-band 2 of 6 (refused gate), literal per-sheet grain 3 of 7.
+
+THE REPEAT ON EVERY SELECTION SHEET, ours beside THAT SHEET`S OWN
+vanilla.  The gate is TILING2`s frozen pair and it is not moved here:
+amplitude <= 0.264 (vanilla`s worst of 22) or the sheet`s own
+no-repeat control where that is higher, AND ratio <= 0.448.
+   sheet           ours    ceil   ratio | vanilla  vanRat    rung | verdict
+   ( -20,  24)   0.259   0.264   0.144 |   0.201   0.448   1.152 | ok
+   ( -20,  20)   0.350   0.366   0.281 |   0.032   0.041   1.364 | ok
+   ( -36, -20)   0.056   0.264   0.389 |   0.080   0.162   1.557 | ok
+   (  -4, -20)   0.308   0.264   0.155 |   0.225   0.164   1.200 | RED +17% over the ceiling
+   (  28, -20)   0.213   0.264   0.205 |   0.034   0.164   1.707 | ok
+   (  -4,  16)   0.224   0.264   0.123 |   0.264   0.342   1.100 | ok
+   (  24,  16)   0.143   0.264   0.123 |   0.237   0.349   1.084 | ok
+
+DOES THE PICK TURN ON ONE SHEET?  The same rule with each selection
+sheet dropped, over the same stage D rows:
+   without (   -20,24): H1 hex 256 @ -0.22
+   without (   -20,20): H1 hex 256 @ -0.22
+   without (  -36,-20): H1 hex 341 @ -0.22
+   without (   -4,-20): H1 hex 256 @ -0.22
+   without (   28,-20): H1 hex 256 @ -0.22
+   without (    -4,16): H1 hex 256 @ -0.22
+   without (    24,16): H1 hex 256 @ -0.22
+   the pick is the same on 6 of 7 drops (floor: it must not need
+   any single sheet, so 7 of 7 is the only passing answer).
+
+THE VALIDATION SEVEN, frozen 00:11, never looked at until now.
+   variant                     bias |  rep  swl |      G1   G2 | G1bnd G2bd | litG litB |  ALL
+   rung (footprint)            0.00 |  0/7  7/7 |  -50.7%  7/7 |   1/6  7/7 |  1/7  0/7 |    -
+   H1 hex 256                 -0.22 |  6/7  7/7 |  -44.4%  7/7 |   1/6  6/7 |  0/7  0/7 |    -
+
+   sheet         repeat    ceil   ratio |   grain    rung  G2 err |   swirl    ceil | verdict
+   ( -24, -24)   0.171   0.264   0.151 |   3.449   2.972  +16.1% |  1.2120  2.2937 | PASS
+   ( -12, -20)   0.279   0.264   0.298 |   3.497   3.099  +12.8% |  1.2655  2.8519 | RED: repeat
+   (   4, -24)   0.222   0.264   0.110 |   4.404   4.041   +9.0% |  1.5878  2.0619 | PASS
+   (  20, -24)   0.189   0.264   0.374 |   2.842   2.479  +14.6% |  1.0124  2.8761 | PASS
+   ( -20,   4)   0.132   0.264   0.133 |   4.059   3.544  +14.5% |  1.0675  2.1128 | PASS
+   (  -8,   4)   0.200   0.264   0.367 |   4.720   4.135  +14.1% |  1.0794  2.1371 | PASS
+   (  12,   8)   0.161   0.264   0.158 |   2.894   2.562  +13.0% |  1.3090  3.1550 | PASS
+   (19 s)
+
+THE ANSWER TO GATE F3, in one line per set:
+   selection  repeat 6/7  swirl 7/7  G1 -19.9%  G2 7/7  G2-band 6/7  G1-band 2/6
+   validation repeat 6/7  swirl 7/7  G1 -44.4%  G2 7/7  G2-band 6/7  G1-band 1/6
+   F3 as decided asks 7 of 7 on repeat, swirl, G1/G2 and G2-band on
+   BOTH sets.  It is NOT met: the repeat and G2-band are short.
+   So `stochastic` does NOT become the default in this lane, and the
+   switch`s meaning is replaced instead -- the swirl goes from 2 of 7
+   (TILING3`s warp) to 7 of 7 with the repeat count unchanged at 6.

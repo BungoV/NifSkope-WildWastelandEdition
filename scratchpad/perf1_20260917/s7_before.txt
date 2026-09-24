@@ -1,0 +1,11 @@
+side before exe /e/Projects/NifskopeWildWastelandEdition/release/NifSkope.before_perf1.exe
+-rwxr-xr-x 1 bungo 197609 22534144 Sep 17 08:55 /e/Projects/NifskopeWildWastelandEdition/release/NifSkope.before_perf1.exe
+lod_generation	rc=0	ok=129	redlines=0	vacuous=0	10s	PASS
+lodgen_defaults	rc=0	ok=28	redlines=13	vacuous=0	853s	RESULT PASS
+lodgen_native	rc=1	ok=123	redlines=6	vacuous=0	220s	RESULT FAIL
+lodgen_bakerec	rc=0	ok=69	redlines=4	vacuous=0	475s	RESULT PASS
+lodgen_layout	rc=0	ok=23	redlines=4	vacuous=0	854s	RESULT PASS
+lodgen_btofree	rc=1	ok=18	redlines=7	vacuous=0	191s	FAIL
+lodgen_incremental	rc=0	ok=10	redlines=1	vacuous=0	323s	FAILURES: 0
+lodgen_stage_times	rc=1	ok=15	redlines=2	vacuous=0	71s	FAIL
+lodgen_identity	rc=0	ok=8	redlines=0	vacuous=0	2s	RESULT PASS

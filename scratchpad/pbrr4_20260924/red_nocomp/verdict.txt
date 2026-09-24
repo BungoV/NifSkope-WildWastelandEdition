@@ -1,0 +1,9 @@
+pbr_r4 plane 355216 px; uv origin (400.5, 163.5) u-axis (598.0, 0.0) v-axis (0.0, 598.0)
+pbr_r4 comp Opaque (opacity 0.3 ignored): plate [46.0, 46.0, 46.0] vs background [46.0, 46.0, 46.0] (std 0.00) |d| 0.0 -> FAIL
+pbr_r4 comp Alpha Test 0.3 < 0.5: plate area [46.0, 46.0, 46.0] = background [46.0, 46.0, 46.0] -> PASS
+pbr_r4 comp Alpha Test 0.7 >= 0.5 = the plate: got [231.0, 170.0, 124.0] want [46.0, 46.0, 46.0] mean |d| 185.00 max |d| 185.0 -> FAIL
+pbr_r4 comp Alpha Blend = 0.3 src + 0.7 dst: got [46.0, 46.0, 46.0] want [46.0, 46.0, 46.0] mean |d| 0.00 max |d| 0.0 -> PASS
+pbr_r4 comp Premultiplied = 0.3 src + 0.7 dst: got [46.0, 46.0, 46.0] want [46.0, 46.0, 46.0] mean |d| 0.00 max |d| 0.0 -> PASS
+pbr_r4 comp Additive = 0.3 src + dst: got [46.0, 46.0, 46.0] want [59.8, 59.8, 59.8] mean |d| 13.80 max |d| 13.8 -> FAIL
+pbr_r4 comp Multiply = src x dst: got [46.0, 46.0, 46.0] want [8.3, 8.3, 8.3] mean |d| 37.70 max |d| 37.7 -> FAIL
+RED nocomp aims at comp: FAILED -> OK

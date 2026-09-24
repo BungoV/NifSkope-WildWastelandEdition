@@ -1,0 +1,32 @@
+model FoothillsShrubLarge01.nif
+projection ortho
+ranges FoothillsShrubLarge01:0 - L1_FoothillsShrubLarge01:0 546+0
+lodm Materials\Landscape\Plants\Creosote01.lodm none textures\Landscape\Plants\Creosote01_d.dds
+mask tree
+emissive 0 shapes 0
+front 1448.95 742.872 15.1484 -2.64864e-06 25.3467
+side 1448.95 742.872 15.1484 -2.64864e-06 25.3467
+class 512 480
+gap 32 30
+coverage 16 128 160
+oct 4 512 480 629.159 589.836 15.1484 -2.64864e-06 25.3467 3072 legacy 512 spec1
+frameoff 0 0 18.862 87.0554
+frameoff 1 0 31.1948 87.7808
+frameoff 2 0 11.6074 73.9971
+frameoff 3 0 -9.431 87.0554
+frameoff 0 1 -23.2148 87.7808
+frameoff 1 1 26.8421 -0.725464
+frameoff 2 1 13.0583 24.6657
+frameoff 3 1 44.2531 87.7808
+frameoff 0 2 -44.2531 87.7808
+frameoff 1 2 -20.3129 -10.8819
+frameoff 2 2 -26.1166 23.9402
+frameoff 3 2 23.2148 87.7808
+frameoff 0 3 9.431 87.0554
+frameoff 1 3 -11.6074 73.9971
+frameoff 2 3 -31.1948 87.7808
+frameoff 3 3 -18.862 87.0554
+frameclamped 0
+aa 4 1024 8.875
+framefit 583.996 542.645 610.113 553.527
+orthofit 640.752 640.752 0

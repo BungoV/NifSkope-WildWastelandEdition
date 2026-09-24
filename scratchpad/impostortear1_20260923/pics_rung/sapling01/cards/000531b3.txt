@@ -1,0 +1,32 @@
+model Sapling01.nif
+projection ortho
+ranges L2_Sapling01:0 - L1_Sapling01:0 38+22
+lodm Materials\Landscape\Plants\SaplingShrub.lodm none textures\landscape\trees\saplingbranches_d.dds
+mask tree
+emissive 0 shapes 0
+front 240.597 123.353 -4.90625 9.25 73.375
+side 240.597 123.353 -4.90625 9.25 73.375
+class 512 512
+gap 32 32
+coverage 16 128 160
+oct 4 512 512 1.07733 1.07733 -4.90625 9.25 73.375 3072 legacy 512 spec1
+frameoff 0 0 0 0
+frameoff 1 0 0 0
+frameoff 2 0 0 0
+frameoff 3 0 0 0
+frameoff 0 1 0 0
+frameoff 1 1 0 0
+frameoff 2 1 0 0
+frameoff 3 1 0 0
+frameoff 0 2 0 0
+frameoff 1 2 0 0
+frameoff 2 2 0 0
+frameoff 3 2 0 0
+frameoff 0 3 0 0
+frameoff 1 3 0 0
+frameoff 2 3 0 0
+frameoff 3 3 0 0
+frameclamped 0
+aa 2 1024 0
+framefit 1 1 1 1
+orthofit 1.01 1.01 0

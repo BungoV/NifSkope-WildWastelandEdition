@@ -1,0 +1,33 @@
+model TreeMapleForest2.nif
+projection ortho
+ranges TreeMapleForest02:1 - L2_TreeMapleForest02:1 - L1_TreeMapleForest02:1 23+8
+lodm Materials\Landscape\Trees\MapleAtlas02_Tree.lodm none textures\Landscape\Trees\MapleAtlas02_d.dds
+lodm Materials\Landscape\Trees\MapleAtlas01.lodm none textures\Landscape\Trees\MapleAtlas01_d.dds
+mask tree
+emissive 0 shapes 0
+front 2142.39 1098.39 93.1789 66.2978 886.405
+side 2142.39 1098.39 93.1789 66.2978 886.405
+class 256 512
+gap 16 32
+coverage 16 128 160
+oct 4 256 512 440.283 880.567 93.1789 66.2978 886.405 3072 legacy 512 spec1
+frameoff 0 0 -28.9615 -94.393
+frameoff 1 0 17.1624 -83.6665
+frameoff 2 0 27.8888 -78.3033
+frameoff 3 0 74.0127 -78.3033
+frameoff 0 1 -25.7435 -83.6665
+frameoff 1 1 -27.8888 37.5427
+frameoff 2 1 47.1965 49.3418
+frameoff 3 1 109.41 -78.3033
+frameoff 0 2 -109.41 -78.3033
+frameoff 1 2 -75.0853 -13.9444
+frameoff 2 2 16.0897 149.098
+frameoff 3 2 25.7435 -83.6665
+frameoff 0 3 -74.0127 -78.3033
+frameoff 1 3 -27.8888 -78.3033
+frameoff 2 3 -17.1624 -83.6665
+frameoff 3 3 28.9615 -94.393
+frameclamped 0
+aa 2 1024 1.25
+framefit 386.153 817.358 460.166 895.661
+orthofit 974.629 974.629 0

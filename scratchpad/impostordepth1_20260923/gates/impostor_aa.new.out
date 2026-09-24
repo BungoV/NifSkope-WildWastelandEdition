@@ -1,0 +1,25 @@
+impostor_aa gate 2026-09-23 11:10:01
+exe /e/Projects/NifskopeWildWastelandEdition/release/NifSkope.exe  23834624 2026-09-23_10:27:11  sha1 e294ae80
+  ok    the 512-unit cube fixture was written
+  baked new560: aa 4 1024 0
+  baked new1400: aa 4 1024 0
+  baked old560: aa 0 1024x525 crop 525 rows into 480
+  baked old1400: aa 0 1400x965 crop 965 rows into 480
+FACT 1: the known-answer cube
+  ok    the default bake is the 4x4 offscreen arm (sidecar: aa 4)
+    new: mass: truth 2538265.9 texels, bake 2538329.0 (+0.002%)
+    new: edge coverage error: mean 21.78 levels, rms 22.90, worst 31.8, 25648 edge texels
+    new: ideal 4x4 estimator vs truth: mean 21.22 levels, rms 22.51, worst 31.9 (the design ceiling)
+    new: bake vs the ideal 4x4 estimator: mean 0.59 levels, worst 1.6, bias +0.59
+    AA=0: mass: truth 2520661.8 texels, bake 2523038.4 (+0.094%)
+    AA=0: edge coverage error: mean 65.98 levels, rms 77.67, worst 151.0, 25584 edge texels
+    AA=0: ideal 2x2 estimator vs truth: mean 15.92 levels, rms 15.93, worst 15.9 (the design ceiling)
+    AA=0: bake vs the ideal 2x2 estimator: mean 71.09 levels, worst 166.9, bias +53.08
+  ok    the bake reproduces the ideal KxK estimator on the cube's edges (0.59 levels, bar 4)
+  ok    the edge coverage error sits at the design ceiling (21.78 levels against a ceiling of 21.22)
+  ok    FLOOR: the window-grab fallback is refused by the same bar (71.09 levels against the estimator)
+FACT 2: window-size independence
+  ok    the four octahedral sheets are byte-identical baked in a 560x560 and a 1400x1000 window
+  ok    FLOOR: the window-grab fallback's sheets DO differ between the two windows (3 of 4), so the knob reaches the window
+7 checks, 0 failures
+PASS

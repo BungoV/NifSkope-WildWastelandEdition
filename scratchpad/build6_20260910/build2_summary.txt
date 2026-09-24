@@ -1,0 +1,23 @@
+GAMECHECK rc=1
+  after: bytes 263848 LF 6030 dLF 40
+  WRITTEN src/nifcli.cpp
+ALL ANCHORS OK | mode APPLY
+AFTER src/lodgen.cpp bytes 391673 CR 0 LF 8924
+AFTER src/nifcli.cpp bytes 263848 CR 0 LF 6030
+AFTER src/lodgen.h bytes 30578 CR 0 LF 561
+659	129	src/lodgen.cpp
+3	0	src/lodgen.h
+124	7	src/nifcli.cpp
+GeneratedFiles/.obj/lodifile.o
+GeneratedFiles/.obj/lodofile.o
+GeneratedFiles/.obj/nativeemit.o
+### qmake+make start 03:56:58
+QMAKE-RC=0
+BUILD-RC=0
+### build end 03:57:48
+-rw-r--r-- 1 bungo 197609  1134745 2026-09-10 03:57:34.362140600 +0200 GeneratedFiles/.obj/lodgen.o
+-rw-r--r-- 1 bungo 197609   135349 2026-09-10 03:38:42.414345500 +0200 GeneratedFiles/.obj/lodifile.o
+-rw-r--r-- 1 bungo 197609   102522 2026-09-10 03:38:38.891198400 +0200 GeneratedFiles/.obj/lodofile.o
+-rw-r--r-- 1 bungo 197609   159386 2026-09-10 03:57:44.149367600 +0200 GeneratedFiles/.obj/nativeemit.o
+-rw-r--r-- 1 bungo 197609   716526 2026-09-10 03:57:15.509513200 +0200 GeneratedFiles/.obj/nifcli.o
+-rwxr-xr-x 1 bungo 197609 18526720 2026-09-10 03:57:46.921436900 +0200 release/NifSkope.exe

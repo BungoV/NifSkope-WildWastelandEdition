@@ -1,0 +1,338 @@
+{
+ "Commonwealth.4.-20.24": {
+  "vanilla_rough1": 19.82527844453278,
+  "ours_rough1": 2.2205731714774952,
+  "textures": {
+   "BlastedForestDirt01_n.DDS": {
+    "rough1_at_s1": 11.769684485381617,
+    "fit_s": 1.7341294828029277,
+    "rough1_at_fit": 19.825278444539265,
+    "frac_tangential_over_1": 0.002552032470703125,
+    "max_tangential": 1.4075450202756903
+   },
+   "BlastedForestFallenLeaves01_n.DDS": {
+    "rough1_at_s1": 15.658992459034263,
+    "fit_s": 1.2778012088519972,
+    "rough1_at_fit": 19.825278444542583,
+    "frac_tangential_over_1": 0.002140045166015625,
+    "max_tangential": 1.418482280247021
+   },
+   "BlastedForestFloor01_n.DDS": {
+    "rough1_at_s1": 4.863915925939562,
+    "fit_s": 5.266972434747004,
+    "rough1_at_fit": 19.825278444533968,
+    "frac_tangential_over_1": 0.0028533935546875,
+    "max_tangential": 1.7101143753455432
+   },
+   "BlastedForestFloor02_n.DDS": {
+    "rough1_at_s1": 3.583155444496631,
+    "fit_s": 9.465435828307818,
+    "rough1_at_fit": 19.82527844452862,
+    "frac_tangential_over_1": 0.001556396484375,
+    "max_tangential": 1.4635866433736973
+   },
+   "BlastedForestGrass01_n.DDS": {
+    "rough1_at_s1": 7.601150401841474,
+    "fit_s": 2.9214708508679905,
+    "rough1_at_fit": 19.825278444540658,
+    "frac_tangential_over_1": 0.006992340087890625,
+    "max_tangential": 1.669532614290971
+   },
+   "BlastedForestGravel01_n.DDS": {
+    "rough1_at_s1": 3.5802650731615033,
+    "fit_s": 9.40366733121482,
+    "rough1_at_fit": 19.825278444527843,
+    "frac_tangential_over_1": 0.00167083740234375,
+    "max_tangential": 1.4272673403501495
+   },
+   "BeachGrass01_n.DDS": {
+    "rough1_at_s1": 5.097997339802438,
+    "fit_s": 4.891319484097039,
+    "rough1_at_fit": 19.825278444540018,
+    "frac_tangential_over_1": 0.002262115478515625,
+    "max_tangential": 1.4409617379717707
+   },
+   "BlastedForestGrass02_n.DDS": {
+    "rough1_at_s1": 3.02517495836055,
+    "fit_s": 15.770194581091346,
+    "rough1_at_fit": 19.82527844453263,
+    "frac_tangential_over_1": 0.0203857421875,
+    "max_tangential": 2.0494579416594907
+   },
+   "BlastedForestTwigs01_n.DDS": {
+    "rough1_at_s1": 5.103530706644333,
+    "fit_s": 5.10906602716932,
+    "rough1_at_fit": 19.825278444529342,
+    "frac_tangential_over_1": 0.0140533447265625,
+    "max_tangential": 2.0859458614257003
+   },
+   "DriedGrassObj02_n.DDS": {
+    "rough1_at_s1": 19.067757468725787,
+    "fit_s": 1.0412210362856058,
+    "rough1_at_fit": 19.8252784445485,
+    "frac_tangential_over_1": 0.002567291259765625,
+    "max_tangential": 1.2734053339332212
+   },
+   "AsphTrim01_n.DDS": {
+    "rough1_at_s1": 4.2998333484595825,
+    "fit_s": 7.540675766274944,
+    "rough1_at_fit": 19.825278444530092,
+    "frac_tangential_over_1": 0.11336898803710938,
+    "max_tangential": 2.7614395670429976
+   },
+   "Asphalt01_n.DDS": {
+    "rough1_at_s1": 2.912769412225147,
+    "fit_s": 17.6878136171581,
+    "rough1_at_fit": 19.825278444547422,
+    "frac_tangential_over_1": 0.003002166748046875,
+    "max_tangential": 1.492172040065494
+   },
+   "Asphalt02_n.DDS": {
+    "rough1_at_s1": 3.6907356913212337,
+    "fit_s": 9.028634201742534,
+    "rough1_at_fit": 19.825278444524205,
+    "frac_tangential_over_1": 0.00653839111328125,
+    "max_tangential": 1.6546140355018673
+   },
+   "AsphaltBrick01_n.DDS": {
+    "rough1_at_s1": 2.922877520349952,
+    "fit_s": 17.318308734960738,
+    "rough1_at_fit": 19.825278444523363,
+    "frac_tangential_over_1": 0.0024261474609375,
+    "max_tangential": 1.3934233852265259
+   },
+   "AsphaltCracks01_n.DDS": {
+    "rough1_at_s1": 3.380430714073097,
+    "fit_s": 11.030087338418525,
+    "rough1_at_fit": 19.82527844454153,
+    "frac_tangential_over_1": 0.002593994140625,
+    "max_tangential": 1.5222260596105852
+   },
+   "Cobblestone01Landscape_n.DDS": {
+    "rough1_at_s1": 4.519299273608935,
+    "fit_s": 5.925905662374134,
+    "rough1_at_fit": 19.825278444540192,
+    "frac_tangential_over_1": 0.001377105712890625,
+    "max_tangential": 1.3614774546409765
+   },
+   "BlastedForestRocksGrain_n.DDS": {
+    "rough1_at_s1": 6.691550911595438,
+    "fit_s": 3.354725214869177,
+    "rough1_at_fit": 19.825278444532653,
+    "frac_tangential_over_1": 0.002071380615234375,
+    "max_tangential": 1.434613361207231
+   },
+   "BlastedForestRocksMoss_n.DDS": {
+    "rough1_at_s1": 14.93634580144042,
+    "fit_s": 1.344885966253969,
+    "rough1_at_fit": 19.825278444528124,
+    "frac_tangential_over_1": 0.003997802734375,
+    "max_tangential": 1.4913752676787113
+   },
+   "BlastedForestRocksSlab_n.DDS": {
+    "rough1_at_s1": 5.424106062189436,
+    "fit_s": 4.476812778568274,
+    "rough1_at_fit": 19.825278444536973,
+    "frac_tangential_over_1": 0.002246856689453125,
+    "max_tangential": 1.4957655225110147
+   },
+   "BlastedForestRocksTrim_n.DDS": {
+    "rough1_at_s1": 4.026446556847384,
+    "fit_s": 7.348294647479634,
+    "rough1_at_fit": 19.825278444533186,
+    "frac_tangential_over_1": 0.0509185791015625,
+    "max_tangential": 2.090775559840861
+   },
+   "CoastCliff01Wet_n.DDS": {
+    "rough1_at_s1": 11.858429426970629,
+    "fit_s": 1.7227105219199075,
+    "rough1_at_fit": 19.82527844452507,
+    "frac_tangential_over_1": 0.00287628173828125,
+    "max_tangential": 1.4285592806278478
+   },
+   "CoastCliff01_n.DDS": {
+    "rough1_at_s1": 11.858429426970629,
+    "fit_s": 1.7227105219199075,
+    "rough1_at_fit": 19.82527844452507,
+    "frac_tangential_over_1": 0.00287628173828125,
+    "max_tangential": 1.4285592806278478
+   }
+  },
+  "best_at_s1": {
+   "texture": "DriedGrassObj02_n.DDS",
+   "rough1": 19.067757468725787,
+   "fit_s": 1.0412210362856058,
+   "frac_over_1": 0.002567291259765625
+  },
+  "mean_rough1_at_s1": 7.085130836792729,
+  "median_fit_s": 5.188019230958162
+ },
+ "Commonwealth.4.-16.24": {
+  "vanilla_rough1": 20.302227938478474,
+  "ours_rough1": 2.3255861286081214,
+  "textures": {
+   "BlastedForestDirt01_n.DDS": {
+    "rough1_at_s1": 11.802250182704013,
+    "fit_s": 1.7754812315588424,
+    "rough1_at_fit": 20.302227938474097,
+    "frac_tangential_over_1": 0.0012664794921875,
+    "max_tangential": 1.371033779054943
+   },
+   "BlastedForestFallenLeaves01_n.DDS": {
+    "rough1_at_s1": 15.682106553158889,
+    "fit_s": 1.3083084909567333,
+    "rough1_at_fit": 20.30222793847757,
+    "frac_tangential_over_1": 0.00121307373046875,
+    "max_tangential": 1.2973444094403952
+   },
+   "BlastedForestFloor01_n.DDS": {
+    "rough1_at_s1": 4.937371592641077,
+    "fit_s": 5.389722994634212,
+    "rough1_at_fit": 20.302227938491363,
+    "frac_tangential_over_1": 0.002040863037109375,
+    "max_tangential": 1.5714225291383765
+   },
+   "BlastedForestFloor02_n.DDS": {
+    "rough1_at_s1": 3.6682353082661066,
+    "fit_s": 9.689997297398804,
+    "rough1_at_fit": 20.302227938467368,
+    "frac_tangential_over_1": 0.000865936279296875,
+    "max_tangential": 1.349834734823822
+   },
+   "BlastedForestGrass01_n.DDS": {
+    "rough1_at_s1": 7.650571811675303,
+    "fit_s": 2.991204176991232,
+    "rough1_at_fit": 20.302227938488475,
+    "frac_tangential_over_1": 0.0059661865234375,
+    "max_tangential": 1.5692661482879755
+   },
+   "BlastedForestGravel01_n.DDS": {
+    "rough1_at_s1": 3.663077934627984,
+    "fit_s": 9.623295255667472,
+    "rough1_at_fit": 20.302227938475614,
+    "frac_tangential_over_1": 0.000812530517578125,
+    "max_tangential": 1.2763339155932143
+   },
+   "BeachGrass01_n.DDS": {
+    "rough1_at_s1": 5.167877499500044,
+    "fit_s": 5.005651581643178,
+    "rough1_at_fit": 20.3022279384855,
+    "frac_tangential_over_1": 0.001384735107421875,
+    "max_tangential": 1.306662089025473
+   },
+   "BlastedForestGrass02_n.DDS": {
+    "rough1_at_s1": 3.115240487151744,
+    "fit_s": 16.141586926401942,
+    "rough1_at_fit": 20.302227938462657,
+    "frac_tangential_over_1": 0.0206451416015625,
+    "max_tangential": 2.164153739819713
+   },
+   "BlastedForestTwigs01_n.DDS": {
+    "rough1_at_s1": 5.177742953358981,
+    "fit_s": 5.225025549629208,
+    "rough1_at_fit": 20.302227938468825,
+    "frac_tangential_over_1": 0.013553619384765625,
+    "max_tangential": 1.9197225836765532
+   },
+   "DriedGrassObj02_n.DDS": {
+    "rough1_at_s1": 19.09292513612767,
+    "fit_s": 1.0658660335002423,
+    "rough1_at_fit": 20.302227938463666,
+    "frac_tangential_over_1": 0.001010894775390625,
+    "max_tangential": 1.2261455270197783
+   },
+   "AsphTrim01_n.DDS": {
+    "rough1_at_s1": 4.386951272655111,
+    "fit_s": 7.709039491779549,
+    "rough1_at_fit": 20.30222793847422,
+    "frac_tangential_over_1": 0.11559677124023438,
+    "max_tangential": 2.7601423890992223
+   },
+   "Asphalt01_n.DDS": {
+    "rough1_at_s1": 3.0046053703908377,
+    "fit_s": 18.10677385951567,
+    "rough1_at_fit": 20.30222793847968,
+    "frac_tangential_over_1": 0.001895904541015625,
+    "max_tangential": 1.4671377459198316
+   },
+   "Asphalt02_n.DDS": {
+    "rough1_at_s1": 3.7741077680964414,
+    "fit_s": 9.238467853028851,
+    "rough1_at_fit": 20.30222793848316,
+    "frac_tangential_over_1": 0.005603790283203125,
+    "max_tangential": 1.5585526793468192
+   },
+   "AsphaltBrick01_n.DDS": {
+    "rough1_at_s1": 3.016078562355484,
+    "fit_s": 17.72461843166093,
+    "rough1_at_fit": 20.302227938480087,
+    "frac_tangential_over_1": 0.001483917236328125,
+    "max_tangential": 1.317110277684895
+   },
+   "AsphaltCracks01_n.DDS": {
+    "rough1_at_s1": 3.467205902942156,
+    "fit_s": 11.289530280984764,
+    "rough1_at_fit": 20.30222793846858,
+    "frac_tangential_over_1": 0.001953125,
+    "max_tangential": 1.4527151840436128
+   },
+   "Cobblestone01Landscape_n.DDS": {
+    "rough1_at_s1": 4.589436187827247,
+    "fit_s": 6.066820078402088,
+    "rough1_at_fit": 20.302227938479025,
+    "frac_tangential_over_1": 0.000576019287109375,
+    "max_tangential": 1.2637624992861063
+   },
+   "BlastedForestRocksGrain_n.DDS": {
+    "rough1_at_s1": 6.749322525389461,
+    "fit_s": 3.43297183143477,
+    "rough1_at_fit": 20.302227938476438,
+    "frac_tangential_over_1": 0.00140380859375,
+    "max_tangential": 1.3729239787537308
+   },
+   "BlastedForestRocksMoss_n.DDS": {
+    "rough1_at_s1": 14.961875244278847,
+    "fit_s": 1.3770513365880106,
+    "rough1_at_fit": 20.30222793846881,
+    "frac_tangential_over_1": 0.002872467041015625,
+    "max_tangential": 1.4102578567391966
+   },
+   "BlastedForestRocksSlab_n.DDS": {
+    "rough1_at_s1": 5.485725955044501,
+    "fit_s": 4.583762803598802,
+    "rough1_at_fit": 20.30222793849019,
+    "frac_tangential_over_1": 0.001983642578125,
+    "max_tangential": 1.6089866375721353
+   },
+   "BlastedForestRocksTrim_n.DDS": {
+    "rough1_at_s1": 4.104793312125432,
+    "fit_s": 7.522924382716155,
+    "rough1_at_fit": 20.302227938480222,
+    "frac_tangential_over_1": 0.04723358154296875,
+    "max_tangential": 1.925362533062443
+   },
+   "CoastCliff01Wet_n.DDS": {
+    "rough1_at_s1": 11.895442758179378,
+    "fit_s": 1.7632615269840244,
+    "rough1_at_fit": 20.302227938469603,
+    "frac_tangential_over_1": 0.0018157958984375,
+    "max_tangential": 1.3886731270707642
+   },
+   "CoastCliff01_n.DDS": {
+    "rough1_at_s1": 11.895442758179378,
+    "fit_s": 1.7632615269840244,
+    "rough1_at_fit": 20.302227938469603,
+    "frac_tangential_over_1": 0.0018157958984375,
+    "max_tangential": 1.3886731270707642
+   }
+  },
+  "best_at_s1": {
+   "texture": "DriedGrassObj02_n.DDS",
+   "rough1": 19.09292513612767,
+   "fit_s": 1.0658660335002423,
+   "frac_over_1": 0.001010894775390625
+  },
+  "mean_rough1_at_s1": 7.149472139848911,
+  "median_fit_s": 5.30737427213171
+ }
+}

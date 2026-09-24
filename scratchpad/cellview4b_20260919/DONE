@@ -1,0 +1,10 @@
+Lane CELLVIEW4B finished 2026-09-19 21:32 (date read in the same turn).
+
+Shipping exe: release/NifSkope.exe  23,684,608 B  2026-09-19 20:58:28
+              sha1 595f4b9fdef7091fe1b8ec0a9760c92be2e07943
+Rung at launch (never run): NifSkope.before_cellview4.exe  23,625,728 B
+              19:49:03  sha1 c529e3c12fe4216a3c33cc14631e3c811169fbb0
+
+Read DELIVERABLE_TEXT.md in this folder. WW_CHANGES.md and HANDOFF.md text is
+in sections 10 and 11; neither file was edited by this lane, and nothing was
+committed or stashed.

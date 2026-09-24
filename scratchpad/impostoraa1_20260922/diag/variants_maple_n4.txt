@@ -1,0 +1,18 @@
+maple_n4: worst view az 210 el 20 (torn 14207 px)
+  registration scale x 0.678 y 0.682 (ref px per app px); nearest-only IoU vs mesh as the registration check: 0.340
+  variant                       IoU  recall top / mid / bottom
+  steps 0 mean                0.150  0.173 / 0.213 / 0.143
+  steps 0 max                 0.269  0.551 / 0.658 / 0.863
+  steps 0 nearest             0.307  0.322 / 0.338 / 0.788
+  steps 1 mean                0.170  0.148 / 0.330 / 0.123 <- SHIPPED
+  steps 1 max                 0.332  0.467 / 0.656 / 0.841
+  steps 1 nearest             0.340  0.291 / 0.445 / 0.794
+  steps 4 mean                0.179  0.158 / 0.342 / 0.164
+  steps 4 max                 0.354  0.485 / 0.674 / 0.862
+  steps 4 nearest             0.336  0.306 / 0.457 / 0.793
+  steps 8 mean                0.177  0.154 / 0.329 / 0.176
+  steps 8 max                 0.349  0.486 / 0.659 / 0.863
+  steps 8 nearest             0.337  0.307 / 0.458 / 0.792
+  march th 48    mean          0.389  0.479 / 0.462 / 0.777
+  march th 48    max           0.401  0.868 / 0.765 / 0.922
+  march th 48    nearest       0.395  0.587 / 0.515 / 0.803

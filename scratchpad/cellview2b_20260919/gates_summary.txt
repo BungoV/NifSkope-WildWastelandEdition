@@ -1,0 +1,31 @@
+### render_shot start 17:54:59
+### render_shot rc=0  17:57:20
+render_shot.sh: 82 checks, 0 failures
+PASS
+
+### harness_window start 17:57:20
+### harness_window rc=0  18:02:01
+        23 checks, 0 failures
+    17 checks, 0 failures, 2 skipped
+15 checks, 0 failures, 0 skips
+PASS
+
+### native_open start 18:02:01
+### native_open rc=0  18:05:25
+    23 checks, 0 failures
+17 checks, 0 failures, 2 skipped
+PASS
+
+### impostor_draw start 18:05:25
+### impostor_draw rc=1  18:05:28
+PASS  3 N=8  C++ mapping == Python reference (20 probe directions)
+PASS  3 N=12  C++ mapping == Python reference (20 probe directions)
+PASS  3 N=16  C++ mapping == Python reference (20 probe directions)
+FAIL  4 IMPOSTOR_LODM is not set to a baked <id>_oct.lodm -- REFUSED rather than passing with no subject
+done  11 steps, 1 failures
+
+### lodgen_octahedral start 18:05:28
+### lodgen_octahedral rc=0  18:06:16
+RESULT PASS
+
+CHAIN DONE 18:06:17

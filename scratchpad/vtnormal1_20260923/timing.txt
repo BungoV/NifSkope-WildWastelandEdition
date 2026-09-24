@@ -1,0 +1,12 @@
+timing.sh: line 22: bc: command not found
+density 32 full rc=0 wall  s vt: levels 4 tiles 85 pyramid bytes 14889758 stage times: landscape 0.0 s, meshes 3.0 s, textures 16.3 s, impostors 0.0 s normalMsnCache 64 normalHeights 0
+timing.sh: line 22: bc: command not found
+density 32 --vt-half-aux rc=0 wall  s vt: levels 4 tiles 85 pyramid bytes 6335864 stage times: landscape 0.0 s, meshes 2.8 s, textures 13.2 s, impostors 0.0 s normalMsnCache 64 normalHeights 0
+timing.sh: line 22: bc: command not found
+density 16 full rc=0 wall  s vt: levels 4 tiles 85 pyramid bytes 55489309 stage times: landscape 0.0 s, meshes 2.6 s, textures 33.6 s, impostors 0.0 s normalMsnCache 64 normalHeights 0
+timing.sh: line 22: bc: command not found
+density 16 --vt-half-aux rc=0 wall  s vt: levels 4 tiles 85 pyramid bytes 23178615 stage times: landscape 0.0 s, meshes 2.7 s, textures 33.0 s, impostors 0.0 s normalMsnCache 64 normalHeights 0
+timing.sh: line 22: bc: command not found
+density 8 full rc=0 wall  s vt: levels 5 tiles 341 pyramid bytes 217187936 stage times: landscape 0.0 s, meshes 2.7 s, textures 118.9 s, impostors 0.0 s normalMsnCache 256 normalHeights 0
+timing.sh: line 22: bc: command not found
+density 8 --vt-half-aux rc=0 wall  s vt: levels 5 tiles 341 pyramid bytes 91848506 stage times: landscape 0.0 s, meshes 2.9 s, textures 117.9 s, impostors 0.0 s normalMsnCache 256 normalHeights 0

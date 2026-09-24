@@ -1,0 +1,29 @@
+================ TILE t2020
+BAKE new_default t2020 rc=0  4s  texfiles=3  args=[]
+BAKE new_op1 t2020 rc=0  4s  texfiles=3  args=[--road-opacity 1]
+BAKE new_legacy t2020 rc=0  5s  texfiles=3  args=[--roads-legacy]
+BAKE new_op0326 t2020 rc=0  4s  texfiles=3  args=[--road-opacity 0.326]
+-- OFF VALUE == THE RUNG (must be all identical)
+  new exe, no flag vs rung: 9 identical, 0 differ, 0 missing
+  --road-opacity 1 vs rung: 9 identical, 0 differ, 0 missing
+  --roads-legacy vs rung legacy: 9 identical, 0 differ, 0 missing
+-- THE COMPARE SHOWN ABLE TO FAIL (colour must move, nothing else)
+    DIFFERS  mod/Terrain/Commonwealth.VT.2.lodt
+    DIFFERS  mod/Terrain/Commonwealth.VT.4.lodt
+    DIFFERS  tex/Commonwealth.4.-20.20.DDS
+  --road-opacity 0.326 vs rung: 6 identical, 3 differ, 0 missing
+================ TILE t0808
+BAKE new_default t0808 rc=0  7s  texfiles=3  args=[]
+BAKE new_op1 t0808 rc=0  7s  texfiles=3  args=[--road-opacity 1]
+BAKE new_legacy t0808 rc=0  9s  texfiles=3  args=[--roads-legacy]
+BAKE new_op0326 t0808 rc=0  6s  texfiles=3  args=[--road-opacity 0.326]
+-- OFF VALUE == THE RUNG (must be all identical)
+  new exe, no flag vs rung: 10 identical, 0 differ, 0 missing
+  --road-opacity 1 vs rung: 10 identical, 0 differ, 0 missing
+  --roads-legacy vs rung legacy: 10 identical, 0 differ, 0 missing
+-- THE COMPARE SHOWN ABLE TO FAIL (colour must move, nothing else)
+    DIFFERS  mod/Terrain/Commonwealth.VT.2.lodt
+    DIFFERS  mod/Terrain/Commonwealth.VT.4.lodt
+    DIFFERS  mod/Terrain/Commonwealth.VT.8.lodt
+    DIFFERS  tex/Commonwealth.4.-8.8.DDS
+  --road-opacity 0.326 vs rung: 6 identical, 4 differ, 0 missing

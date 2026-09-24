@@ -1,0 +1,3 @@
+pyramid L02 (decoded)      step |d| across chunk edge 0.3967, across tile edge 0.3996, interior 0.3127, interior block edges 0.3930 (chunk/block-edge 1.01)
+his sheets downsampled     step |d| across chunk edge 0.4148, across tile edge 0.4060, interior 0.3940, interior block edges 0.4031 (chunk/block-edge 1.03)
+border law: 24 shared edges, mean |border - neighbour content| 0.0000 (interior step 0.3227 for scale)

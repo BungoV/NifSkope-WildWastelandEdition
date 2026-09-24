@@ -1,0 +1,15 @@
+C1 header bit15 vs MNAM subrecord, over 10940 placed STAT bases
+   both 3005   bit15 only 5   MNAM only 0   neither 7930
+   agreement 99.95%   (a misaligned header word reads ~50%)
+
+C2 ROADS1 window road models 119 ; in this census 119 ; missing 0
+
+C4 ROADS1 reported 321 Landscape\Roads placements over 71 models in
+   cells -24..-12 x 16..30 (post-SCOL).  Road models under
+   landscape/roads only, this census, whole worldspace: 292
+
+C3 bits by ROAD fraction, highest first:
+   bit 15 Has Distant LOD        road  17.66% (83/470)   non-road  27.96%
+   bit 30 NavMesh - Ground       road   0.21% (1/470)   non-road   0.05%
+   -> NO bit is ~100%% on roads.  There is no candidate of the
+      shape the question assumes.

@@ -1,0 +1,23 @@
+run_ship blast_n4  az: card step worst  27180 at az003 el20, mean  3841.0 | mesh step worst   5120 mean  3585.2 | card area   30968 | IoU mean 0.6114 min 0.2166
+run_ship blast_n4  el: card step worst  14750 at az030 el19, mean  1656.6 | mesh step worst   2977 mean  2364.7 | card area   15550 | IoU mean 0.3938 min 0.1581
+run_ship maple_n4  az: card step worst  15890 at az183 el20, mean  5950.7 | mesh step worst  21363 mean 18534.7 | card area   17870 | IoU mean 0.3241 min 0.1564
+run_ship maple_n4  el: card step worst  12319 at az210 el19, mean  4460.2 | mesh step worst  27023 mean 23653.2 | card area   10462 | IoU mean 0.1786 min 0.0525
+run_ship rock_n4   az: card step worst  90847 at az003 el20, mean  6744.0 | mesh step worst   6435 mean  4294.5 | card area  136601 | IoU mean 0.5282 min 0.1422
+run_ship rock_n4   el: card step worst 125698 at az030 el34, mean  6824.5 | mesh step worst   4332 mean  3185.2 | card area  318952 | IoU mean 0.8530 min 0.5140
+m16_step_mean blast_n4  az: card step worst  28629 at az003 el20, mean  4316.4 | mesh step worst   5120 mean  3585.2 | card area   31723 | IoU mean 0.5928 min 0.2552
+m16_step_mean maple_n4  az: card step worst  16535 at az356 el20, mean  5738.3 | mesh step worst  21363 mean 18534.7 | card area   16808 | IoU mean 0.2783 min 0.1142
+m16_step_mean rock_n4   az: card step worst  86663 at az044 el20, mean 19615.5 | mesh step worst   6435 mean  4294.5 | card area  152697 | IoU mean 0.6361 min 0.3862
+
+POPPING BAR (m16_step_mean worst <= run_ship worst x 1.5):
+  blast_n4  az:  28629 vs  27180 x1.5 =  40770.0  ratio 1.05  PASS
+  maple_n4  az:  16535 vs  15890 x1.5 =  23835.0  ratio 1.04  PASS
+  rock_n4   az:  86663 vs  90847 x1.5 = 136270.5  ratio 0.95  PASS
+  VERDICT PASS
+
+TEAR at the torn views (el 20):
+  blast_n4  az030 run_ship IoU 0.4664  card  17922 mesh  38190  torn share 44.9% (14398 of 32060 mesh&nearest px)
+  blast_n4  az030 m16_step_mean IoU 0.4909  card  20171 mesh  38190  torn share 42.7% (13688 of 32060 mesh&nearest px)
+  maple_n4  az210 run_ship IoU 0.1910  card  10075 mesh  43508  torn share 68.3% (13986 of 20482 mesh&nearest px)
+  maple_n4  az210 m16_step_mean IoU 0.2602  card  13705 mesh  43508  torn share 57.6% (11799 of 20482 mesh&nearest px)
+  rock_n4   az030 run_ship IoU 0.6213  card 208460 mesh 334905  torn share 27.3% (74872 of 274649 mesh&nearest px)
+  rock_n4   az030 m16_step_mean IoU 0.6959  card 235232 mesh 334905  torn share 27.4% (75357 of 274649 mesh&nearest px)

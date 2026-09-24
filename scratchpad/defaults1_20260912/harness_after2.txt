@@ -1,0 +1,6 @@
+lodgen_terrain             rc=0     13s  26 checks, 0 failures PASS 
+lodgen_farring             rc=0     31s  RESULT PASS 
+lodgen_tree_sway           rc=0      9s  4 checks, 0 failures PASS 
+lodgen_roads               rc=0     19s  11 checks, 0 failures RESULT PASS 
+lodgen_texture_arrays      rc=0      6s  RESULT PASS 
+lodgen_terrain_vt          rc=1     39s  41 checks, 1 failures RESULT FAIL 

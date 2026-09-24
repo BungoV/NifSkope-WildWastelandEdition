@@ -1,0 +1,6 @@
+subject    frame   w@floor     w@0.5 bloat/side      ramp partial%
+blast_n4   48x128       8.0       7.0       0.50       2.0      31%
+blast_n8   48x128       7.5       7.0       0.25       2.0      31%
+maple_n4   32x64        2.0       1.0       0.50       1.0      87%
+dead_n4    32x128       6.0       5.5       0.25       2.0      37%
+rock_n4   128x128     108.5      13.5      47.50       6.5      32%

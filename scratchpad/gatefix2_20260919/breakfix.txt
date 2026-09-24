@@ -1,0 +1,7 @@
+BROKEN ign   4 normal tiles -> ad7f8084e3fb 4d40d0a9b8e0 c898e6db6fc1 fb07fb9847dc
+BROKEN ts    4 normal tiles -> 80b03854ec6b 4bfdaf770050 4cfeb3205653 480d04dba6f1
+BROKEN scram 4 normal tiles -> cb6b7492adfd 5a93a50eff55 0c92ffbd550a 8f490a29a8c4
+GOOD   own   4 normal tiles -> ad7f8084e3fb 4d40d0a9b8e0 c898e6db6fc1 fb07fb9847dc
+CONTROL ign   colour sheets identical to own: True
+CONTROL ts    colour sheets identical to own: True
+CONTROL scram colour sheets identical to own: True

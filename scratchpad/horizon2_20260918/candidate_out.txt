@@ -1,0 +1,16 @@
+shipped    |march - directional truth| mean  11.83 max  74.22 bias  +8.52 ; |march - STORED|   0.14
+candidate  |march - directional truth| mean   8.52 max  64.87 bias  +2.74 ; |march - STORED|   6.62
+
+576 texels of chunk 4.4.-12, the lit question put to each witness
+candidate cast 3s
+sun                TRUE    SHEET      REF     CAND
+az 120 el  5        3.8%     0.0%     0.0%     0.0%
+az 120 el 15       10.8%     1.2%     5.6%     4.3%
+az 120 el 30       22.7%    12.3%    17.7%    18.1%
+az 120 el 60       52.6%    36.1%    38.7%    44.3%
+  az 120 elevation: TRUE mean  54.5 | SHEET  63.7 (err 16.55 bias +9.27) | REF  60.6 | CAND  58.6 (err 15.34 bias +4.18)
+az 240 el  5        2.8%     0.0%     0.0%     0.0%
+az 240 el 15       10.2%     0.0%     3.8%     1.2%
+az 240 el 30       23.6%     7.3%    15.5%    14.6%
+az 240 el 60       52.4%    35.6%    37.7%    46.9%
+  az 240 elevation: TRUE mean  53.5 | SHEET  64.9 (err 17.07 bias +11.40) | REF  61.6 | CAND  58.6 (err 14.92 bias +5.10)

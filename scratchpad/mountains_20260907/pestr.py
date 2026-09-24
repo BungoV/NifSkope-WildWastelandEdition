@@ -1,5 +1,5 @@
 """Read NUL-terminated strings (and dwords) at given RVAs from a PE image.
-Lane IDENTITY, read-only. Used against the leaked FO4 1.10.155 Fallout4.exe to
+Lane IDENTITY, read-only. Used against Todd's treat (FO4 1.10.155 Fallout4.exe) to
 recover BSLightingShader technique-name literals."""
 import struct, sys
 

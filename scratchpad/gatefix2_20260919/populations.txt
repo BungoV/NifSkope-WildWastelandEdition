@@ -1,0 +1,7 @@
+pair           IoU      blockSD   mean|dY|   blocks  
+own vs flat    0.850    2.28      3.10       266      (pixel sd of dY 2.48)
+own vs ign     1.000    0.00      0.00       266      (pixel sd of dY 0.00)
+ts vs flat     0.887    1.54      2.91       266      (pixel sd of dY 1.94)
+scram vs flat  0.821    1.00      3.99       266      (pixel sd of dY 4.28)
+ts vs own      0.949    0.99      3.37       266      (pixel sd of dY 1.35)
+scram vs own   0.774    2.31      4.66       266      (pixel sd of dY 4.51)

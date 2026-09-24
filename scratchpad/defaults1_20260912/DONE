@@ -1,0 +1,14 @@
+defaults
+
+Lane DEFAULTS1 finished 2026-09-12 21:5x. bungo's four rulings are the shipped
+defaults; the way back is one command line; nothing is committed.
+
+  exe          release/NifSkope.exe  2026-09-12 21:52:25  22,280,192 B
+  rung         release/NifSkope.before_defaults1.exe  19:45:31  22,275,072 B  (do not delete)
+  new gate     tests/spells/lodgen_defaults.sh  28 checks, 0 failures PASS
+  re-check     PHASES=abce on the 21:52:25 exe      22 checks, 0 failures PASS
+  panel        lod_generation.sh  121 checks, 0 failures PASS on BOTH exes
+  report       scratchpad/defaults1_20260912/lane_defaults1_report.md  (sections 0..7)
+  pictures     scratchpad/defaults1_20260912/images/  11 files
+  documents    WW_CHANGES_ENTRY.md, HANDOFF_BLOCK.md, CHANGED_FILES.txt, MISTAKES_ENTRIES.md
+  mistakes     4 entries, already at the TOP of root MISTAKES.md, LF only, CR 0

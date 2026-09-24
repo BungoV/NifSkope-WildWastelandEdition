@@ -1,0 +1,2 @@
+CLAMP2 built and gated by lane BUILD6 2026-09-10 (exe 03:38:56 = BUILD5b link carrying lodgen.cpp 03:33:44).
+Verdict: 6 of 7 gates green; gate 2/3 RED = V9b 32 texels on Commonwealth.4.-20.28 _msn, north border rows 0-3 x 252..259 (the -19|-18 cell corner on y=31|32). Cause measured, not cured. See scratchpad/lane_clamp2_report.md "## Build (BUILD6)".

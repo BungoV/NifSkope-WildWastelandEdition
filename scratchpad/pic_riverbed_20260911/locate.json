@@ -1,0 +1,2032 @@
+{
+ "chunk": [
+  -20,
+  20
+ ],
+ "dim": 4,
+ "res": 512,
+ "win": 128,
+ "dominant": [
+  "000227B7",
+  "LRiverbedSilt01"
+ ],
+ "quads": [
+  {
+   "cell": [
+    -20,
+    20
+   ],
+   "quad": 0,
+   "base": "LRiverbedSilt01",
+   "baseForm": 141239,
+   "layers": [
+    [
+     "LDriedGrass01",
+     0.202,
+     119251
+    ],
+    [
+     "LForestFloor01",
+     0.159,
+     209980
+    ],
+    [
+     "LDriedGrass01NoGrass",
+     0.004,
+     121265
+    ],
+    [
+     "LRubbleRock01Grass",
+     0.172,
+     542565
+    ]
+   ]
+  },
+  {
+   "cell": [
+    -20,
+    20
+   ],
+   "quad": 1,
+   "base": "LRiverbedRocks02Wet",
+   "baseForm": 770365,
+   "layers": [
+    [
+     "LDriedGrass01",
+     0.162,
+     119251
+    ],
+    [
+     "LRubbleRock01Grass",
+     0.064,
+     542565
+    ],
+    [
+     "LRubbleRock01",
+     0.147,
+     128908
+    ],
+    [
+     "LRiverbedRocks02WetGrass",
+     0.086,
+     770367
+    ],
+    [
+     "LRiverbedSilt01",
+     0.082,
+     141239
+    ]
+   ]
+  },
+  {
+   "cell": [
+    -20,
+    20
+   ],
+   "quad": 2,
+   "base": "LRiverbedSilt01",
+   "baseForm": 141239,
+   "layers": [
+    [
+     "LDriedGrass01",
+     0.084,
+     119251
+    ],
+    [
+     "LRubbleRock01",
+     0.052,
+     128908
+    ],
+    [
+     "LForestFloor01",
+     0.066,
+     209980
+    ],
+    [
+     "LDriedGrass01NoGrass",
+     0.011,
+     121265
+    ],
+    [
+     "LRubbleRock01Grass",
+     0.016,
+     542565
+    ]
+   ]
+  },
+  {
+   "cell": [
+    -20,
+    20
+   ],
+   "quad": 3,
+   "base": "LRiverbedSilt01",
+   "baseForm": 141239,
+   "layers": [
+    [
+     "LDriedGrass01",
+     0.108,
+     119251
+    ],
+    [
+     "LRubbleRock01",
+     0.105,
+     128908
+    ],
+    [
+     "LDirtGravel01",
+     0.09,
+     135990
+    ],
+    [
+     "LDriedGrass01NoGrass",
+     0.025,
+     121265
+    ],
+    [
+     "LRubbleRock01Grass",
+     0.075,
+     542565
+    ]
+   ]
+  },
+  {
+   "cell": [
+    -19,
+    20
+   ],
+   "quad": 0,
+   "base": "LRiverbedRocks02Wet",
+   "baseForm": 770365,
+   "layers": [
+    [
+     "LRubbleRock01",
+     0.036,
+     128908
+    ],
+    [
+     "LRiverbedSilt01Wet",
+     0.209,
+     318963
+    ],
+    [
+     "LRiverbedRocks02WetGrass",
+     0.103,
+     770367
+    ],
+    [
+     "LRiverbedRocks01Grass",
+     0.083,
+     763170
+    ]
+   ]
+  },
+  {
+   "cell": [
+    -19,
+    20
+   ],
+   "quad": 1,
+   "base": "LRubbleRock01",
+   "baseForm": 128908,
+   "layers": [
+    [
+     "LDriedGrass01",
+     0.139,
+     119251
+    ],
+    [
+     "LDriedGrass01NoGrass",
+     0.05,
+     121265
+    ],
+    [
+     "LRubbleRock01Grass",
+     0.056,
+     542565
+    ],
+    [
+     "LRiverbedRocks02Wet",
+     0.222,
+     770365
+    ],
+    [
+     "LRiverbedRocks02WetGrass",
+     0.09,
+     770367
+    ],
+    [
+     "LRiverbedRocks01Grass",
+     0.131,
+     763170
+    ]
+   ]
+  },
+  {
+   "cell": [
+    -19,
+    20
+   ],
+   "quad": 2,
+   "base": "LRiverbedRocks02Wet",
+   "baseForm": 770365,
+   "layers": [
+    [
+     "LDriedGrass01",
+     0.065,
+     119251
+    ],
+    [
+     "LDriedGrass01NoGrass",
+     0.007,
+     121265
+    ],
+    [
+     "LRiverbedSilt01Wet",
+     0.264,
+     318963
+    ],
+    [
+     "LRiverbedRocks02WetGrass",
+     0.241,
+     770367
+    ],
+    [
+     "LRiverbedRocks01Grass",
+     0.065,
+     763170
+    ]
+   ]
+  },
+  {
+   "cell": [
+    -19,
+    20
+   ],
+   "quad": 3,
+   "base": "LRiverbedSilt01Wet",
+   "baseForm": 318963,
+   "layers": [
+    [
+     "LRiverbedRocks02Wet",
+     0.221,
+     770365
+    ],
+    [
+     "LRiverbedRocks02WetGrass",
+     0.339,
+     770367
+    ],
+    [
+     "LRiverbedSilt01",
+     0.11,
+     141239
+    ],
+    [
+     "LRiverbedRocks01Grass",
+     0.043,
+     763170
+    ]
+   ]
+  },
+  {
+   "cell": [
+    -18,
+    20
+   ],
+   "quad": 0,
+   "base": "LRiverbedSilt01",
+   "baseForm": 141239,
+   "layers": [
+    [
+     "LRubbleRock01",
+     0.123,
+     128908
+    ],
+    [
+     "LDirtGravel01",
+     0.061,
+     135990
+    ],
+    [
+     "LDriedGrass01",
+     0.258,
+     119251
+    ],
+    [
+     "LDriedGrass01NoGrass",
+     0.048,
+     121265
+    ],
+    [
+     "LDriedGrass02Weeds",
+     0.082,
+     142179
+    ],
+    [
+     "LRubbleRock01Grass",
+     0.056,
+     542565
+    ]
+   ]
+  },
+  {
+   "cell": [
+    -18,
+    20
+   ],
+   "quad": 1,
+   "base": "LRiverbedSilt01",
+   "baseForm": 141239,
+   "layers": [
+    [
+     "LDriedGrass01",
+     0.243,
+     119251
+    ],
+    [
+     "LRubbleRock01",
+     0.097,
+     128908
+    ],
+    [
+     "LDirtGravel01",
+     0.187,
+     135990
+    ],
+    [
+     "LDriedGrass02Weeds",
+     0.092,
+     142179
+    ],
+    [
+     "LRubbleRock01Grass",
+     0.051,
+     542565
+    ],
+    [
+     "LDirtGravel01Grass",
+     0.022,
+     278911
+    ]
+   ]
+  },
+  {
+   "cell": [
+    -18,
+    20
+   ],
+   "quad": 2,
+   "base": "LRiverbedSilt01",
+   "baseForm": 141239,
+   "layers": [
+    [
+     "LDriedGrass01",
+     0.079,
+     119251
+    ],
+    [
+     "LRubbleRock01",
+     0.035,
+     128908
+    ],
+    [
+     "LRiverbedRocks02Wet",
+     0.201,
+     770365
+    ],
+    [
+     "LDriedGrass02Weeds",
+     0.063,
+     142179
+    ],
+    [
+     "LDriedGrass01NoGrass",
+     0.078,
+     121265
+    ],
+    [
+     "LRiverbedRocks02WetGrass",
+     0.161,
+     770367
+    ]
+   ]
+  },
+  {
+   "cell": [
+    -18,
+    20
+   ],
+   "quad": 3,
+   "base": "LRiverbedSilt01",
+   "baseForm": 141239,
+   "layers": [
+    [
+     "LDriedGrass01",
+     0.192,
+     119251
+    ],
+    [
+     "LRiverbedRocks02WetGrass",
+     0.118,
+     770367
+    ],
+    [
+     "LForestFloor01",
+     0.271,
+     209980
+    ],
+    [
+     "LDriedGrass02Weeds",
+     0.023,
+     142179
+    ],
+    [
+     "LRiverbedRocks02Wet",
+     0.056,
+     770365
+    ]
+   ]
+  },
+  {
+   "cell": [
+    -17,
+    20
+   ],
+   "quad": 0,
+   "base": "LDirtGravel01",
+   "baseForm": 135990,
+   "layers": [
+    [
+     "LRubbleRock01",
+     0.057,
+     128908
+    ],
+    [
+     "LDriedGrass01",
+     0.203,
+     119251
+    ],
+    [
+     "LRiverbedSilt01",
+     0.285,
+     141239
+    ],
+    [
+     "LDriedGrass02Weeds",
+     0.032,
+     142179
+    ],
+    [
+     "LRubbleRock01Grass",
+     0.046,
+     542565
+    ],
+    [
+     "LDirtGravel01Grass",
+     0.008,
+     278911
+    ]
+   ]
+  },
+  {
+   "cell": [
+    -17,
+    20
+   ],
+   "quad": 1,
+   "base": "LRiverbedSilt01",
+   "baseForm": 141239,
+   "layers": [
+    [
+     "LRubbleRock01",
+     0.063,
+     128908
+    ],
+    [
+     "LDriedGrass01",
+     0.213,
+     119251
+    ],
+    [
+     "LDirtGravel01",
+     0.062,
+     135990
+    ],
+    [
+     "LDriedGrass02Weeds",
+     0.038,
+     142179
+    ],
+    [
+     "LRubbleRock01Grass",
+     0.089,
+     542565
+    ]
+   ]
+  },
+  {
+   "cell": [
+    -17,
+    20
+   ],
+   "quad": 2,
+   "base": "LRiverbedSilt01",
+   "baseForm": 141239,
+   "layers": [
+    [
+     "LForestFloor01",
+     0.209,
+     209980
+    ],
+    [
+     "LDriedGrass01",
+     0.206,
+     119251
+    ],
+    [
+     "LDriedGrass02Weeds",
+     0.042,
+     142179
+    ],
+    [
+     "LRiverbedSilt01",
+     0.039,
+     141239
+    ]
+   ]
+  },
+  {
+   "cell": [
+    -17,
+    20
+   ],
+   "quad": 3,
+   "base": "LRiverbedSilt01",
+   "baseForm": 141239,
+   "layers": [
+    [
+     "LDriedGrass01",
+     0.279,
+     119251
+    ],
+    [
+     "LDriedGrass02Weeds",
+     0.072,
+     142179
+    ],
+    [
+     "LForestFloor01",
+     0.202,
+     209980
+    ]
+   ]
+  },
+  {
+   "cell": [
+    -20,
+    21
+   ],
+   "quad": 0,
+   "base": "LRiverbedSilt01",
+   "baseForm": 141239,
+   "layers": [
+    [
+     "LDriedGrass01",
+     0.087,
+     119251
+    ],
+    [
+     "LDriedGrass01NoGrass",
+     0.096,
+     121265
+    ],
+    [
+     "LRubbleRock01Grass",
+     0.026,
+     542565
+    ]
+   ]
+  },
+  {
+   "cell": [
+    -20,
+    21
+   ],
+   "quad": 1,
+   "base": "LRiverbedSilt01",
+   "baseForm": 141239,
+   "layers": [
+    [
+     "LDriedGrass01",
+     0.197,
+     119251
+    ],
+    [
+     "LDriedGrass01NoGrass",
+     0.111,
+     121265
+    ],
+    [
+     "LRubbleRock01Grass",
+     0.039,
+     542565
+    ]
+   ]
+  },
+  {
+   "cell": [
+    -20,
+    21
+   ],
+   "quad": 2,
+   "base": "LRiverbedSilt01",
+   "baseForm": 141239,
+   "layers": [
+    [
+     "LRubbleRock01",
+     0.014,
+     128908
+    ],
+    [
+     "LDriedGrass01",
+     0.05,
+     119251
+    ],
+    [
+     "LRubbleRock01Grass",
+     0.007,
+     542565
+    ]
+   ]
+  },
+  {
+   "cell": [
+    -20,
+    21
+   ],
+   "quad": 3,
+   "base": "LRiverbedSilt01",
+   "baseForm": 141239,
+   "layers": [
+    [
+     "LDriedGrass01",
+     0.128,
+     119251
+    ],
+    [
+     "LDriedGrass01NoGrass",
+     0.056,
+     121265
+    ],
+    [
+     "LRubbleRock01",
+     0.011,
+     128908
+    ],
+    [
+     "LRubbleRock01Grass",
+     0.007,
+     542565
+    ]
+   ]
+  },
+  {
+   "cell": [
+    -19,
+    21
+   ],
+   "quad": 0,
+   "base": "LRiverbedSilt01",
+   "baseForm": 141239,
+   "layers": [
+    [
+     "LDriedGrass01",
+     0.235,
+     119251
+    ],
+    [
+     "LRubbleRock01",
+     0.105,
+     128908
+    ],
+    [
+     "LDriedGrass01NoGrass",
+     0.009,
+     121265
+    ],
+    [
+     "LRubbleRock01Grass",
+     0.066,
+     542565
+    ],
+    [
+     "LRiverbedRocks02Wet",
+     0.104,
+     770365
+    ],
+    [
+     "LRiverbedRocks02WetGrass",
+     0.009,
+     770367
+    ]
+   ]
+  },
+  {
+   "cell": [
+    -19,
+    21
+   ],
+   "quad": 1,
+   "base": "LRiverbedSilt01",
+   "baseForm": 141239,
+   "layers": [
+    [
+     "LDriedGrass01",
+     0.225,
+     119251
+    ],
+    [
+     "LRubbleRock01",
+     0.049,
+     128908
+    ],
+    [
+     "LRubbleRock01Grass",
+     0.117,
+     542565
+    ],
+    [
+     "LRiverbedRocks02Wet",
+     0.129,
+     770365
+    ],
+    [
+     "LRiverbedRocks02WetGrass",
+     0.139,
+     770367
+    ]
+   ]
+  },
+  {
+   "cell": [
+    -19,
+    21
+   ],
+   "quad": 2,
+   "base": "LRiverbedSilt01",
+   "baseForm": 141239,
+   "layers": [
+    [
+     "LDriedGrass01",
+     0.124,
+     119251
+    ],
+    [
+     "LDriedGrass01NoGrass",
+     0.097,
+     121265
+    ]
+   ]
+  },
+  {
+   "cell": [
+    -19,
+    21
+   ],
+   "quad": 3,
+   "base": "LRiverbedSilt01",
+   "baseForm": 141239,
+   "layers": [
+    [
+     "LDriedGrass01",
+     0.078,
+     119251
+    ],
+    [
+     "LRubbleRock01",
+     0.008,
+     128908
+    ],
+    [
+     "LDirtGravel01",
+     0.004,
+     135990
+    ],
+    [
+     "LRubbleRock01Grass",
+     0.076,
+     542565
+    ]
+   ]
+  },
+  {
+   "cell": [
+    -18,
+    21
+   ],
+   "quad": 0,
+   "base": "LRiverbedSilt01",
+   "baseForm": 141239,
+   "layers": [
+    [
+     "LDriedGrass01",
+     0.094,
+     119251
+    ],
+    [
+     "LRubbleRock01",
+     0.048,
+     128908
+    ],
+    [
+     "LDriedGrass02Weeds",
+     0.033,
+     142179
+    ],
+    [
+     "LRubbleRock01Grass",
+     0.144,
+     542565
+    ],
+    [
+     "LRiverbedRocks02Wet",
+     0.189,
+     770365
+    ],
+    [
+     "LRiverbedRocks02WetGrass",
+     0.143,
+     770367
+    ]
+   ]
+  },
+  {
+   "cell": [
+    -18,
+    21
+   ],
+   "quad": 1,
+   "base": "LRiverbedSilt01",
+   "baseForm": 141239,
+   "layers": [
+    [
+     "LRubbleRock01",
+     0.013,
+     128908
+    ],
+    [
+     "LRubbleRock01Grass",
+     0.061,
+     542565
+    ],
+    [
+     "LRiverbedRocks02Wet",
+     0.209,
+     770365
+    ],
+    [
+     "LRiverbedRocks02WetGrass",
+     0.221,
+     770367
+    ],
+    [
+     "LDebrisGround",
+     0.016,
+     1371228
+    ]
+   ]
+  },
+  {
+   "cell": [
+    -18,
+    21
+   ],
+   "quad": 2,
+   "base": "LRiverbedSilt01",
+   "baseForm": 141239,
+   "layers": [
+    [
+     "LDriedGrass01",
+     0.194,
+     119251
+    ],
+    [
+     "LDirtGravel01",
+     0.019,
+     135990
+    ],
+    [
+     "LDriedGrass02Weeds",
+     0.117,
+     142179
+    ],
+    [
+     "LRubbleRock01Grass",
+     0.07,
+     542565
+    ]
+   ]
+  },
+  {
+   "cell": [
+    -18,
+    21
+   ],
+   "quad": 3,
+   "base": "LRiverbedSilt01",
+   "baseForm": 141239,
+   "layers": [
+    [
+     "LDriedGrass01",
+     0.235,
+     119251
+    ],
+    [
+     "LRiverbedSilt01",
+     0.262,
+     141239
+    ],
+    [
+     "LRubbleRock01Grass",
+     0.023,
+     542565
+    ]
+   ]
+  },
+  {
+   "cell": [
+    -17,
+    21
+   ],
+   "quad": 0,
+   "base": "LRiverbedSilt01",
+   "baseForm": 141239,
+   "layers": [
+    [
+     "LRiverbedSilt01",
+     0.136,
+     141239
+    ],
+    [
+     "LRubbleRock01",
+     0.174,
+     128908
+    ],
+    [
+     "LDriedGrass01NoGrass",
+     0.042,
+     121265
+    ],
+    [
+     "LDriedGrass01",
+     0.051,
+     119251
+    ]
+   ]
+  },
+  {
+   "cell": [
+    -17,
+    21
+   ],
+   "quad": 1,
+   "base": "LRiverbedSilt01",
+   "baseForm": 141239,
+   "layers": [
+    [
+     "LRiverbedSilt01",
+     0.324,
+     141239
+    ],
+    [
+     "LDriedGrass01",
+     0.179,
+     119251
+    ],
+    [
+     "LDriedGrass01NoGrass",
+     0.094,
+     121265
+    ],
+    [
+     "LRootsEroded01",
+     0.044,
+     232453
+    ]
+   ]
+  },
+  {
+   "cell": [
+    -17,
+    21
+   ],
+   "quad": 2,
+   "base": "LRiverbedSilt01",
+   "baseForm": 141239,
+   "layers": [
+    [
+     "LRiverbedSilt01",
+     0.063,
+     141239
+    ],
+    [
+     "LRubbleRock01",
+     0.231,
+     128908
+    ],
+    [
+     "LRiverbedRocks02WetGrass",
+     0.101,
+     770367
+    ],
+    [
+     "LRiverbedRocks02Wet",
+     0.125,
+     770365
+    ]
+   ]
+  },
+  {
+   "cell": [
+    -17,
+    21
+   ],
+   "quad": 3,
+   "base": "LRiverbedSilt01",
+   "baseForm": 141239,
+   "layers": [
+    [
+     "LRubbleRock01",
+     0.289,
+     128908
+    ],
+    [
+     "LRiverbedRocks02Wet",
+     0.227,
+     770365
+    ],
+    [
+     "LRubbleRock01Grass",
+     0.048,
+     542565
+    ]
+   ]
+  },
+  {
+   "cell": [
+    -20,
+    22
+   ],
+   "quad": 0,
+   "base": "LRiverbedSilt01",
+   "baseForm": 141239,
+   "layers": [
+    [
+     "LDriedGrass01",
+     0.164,
+     119251
+    ],
+    [
+     "LRubbleRock01",
+     0.059,
+     128908
+    ],
+    [
+     "LRubbleRock01Grass",
+     0.014,
+     542565
+    ]
+   ]
+  },
+  {
+   "cell": [
+    -20,
+    22
+   ],
+   "quad": 1,
+   "base": "LRiverbedSilt01",
+   "baseForm": 141239,
+   "layers": [
+    [
+     "LDriedGrass01",
+     0.075,
+     119251
+    ],
+    [
+     "LRubbleRock01Grass",
+     0.015,
+     542565
+    ]
+   ]
+  },
+  {
+   "cell": [
+    -20,
+    22
+   ],
+   "quad": 2,
+   "base": "LRubbleRock01",
+   "baseForm": 128908,
+   "layers": [
+    [
+     "LDriedGrass01",
+     0.125,
+     119251
+    ],
+    [
+     "LRiverbedSilt01",
+     0.211,
+     141239
+    ],
+    [
+     "LRiverbedSilt01",
+     0.029,
+     141239
+    ],
+    [
+     "LRubbleRock01Grass",
+     0.078,
+     542565
+    ]
+   ]
+  },
+  {
+   "cell": [
+    -20,
+    22
+   ],
+   "quad": 3,
+   "base": "LRiverbedSilt01",
+   "baseForm": 141239,
+   "layers": [
+    [
+     "LDriedGrass01",
+     0.115,
+     119251
+    ],
+    [
+     "LRubbleRock01",
+     0.051,
+     128908
+    ],
+    [
+     "LForestFloor01",
+     0.025,
+     209980
+    ],
+    [
+     "LRubbleRock01Grass",
+     0.025,
+     542565
+    ]
+   ]
+  },
+  {
+   "cell": [
+    -19,
+    22
+   ],
+   "quad": 0,
+   "base": "LRiverbedSilt01",
+   "baseForm": 141239,
+   "layers": [
+    [
+     "LDriedGrass01",
+     0.051,
+     119251
+    ],
+    [
+     "LRubbleRock01",
+     0.007,
+     128908
+    ]
+   ]
+  },
+  {
+   "cell": [
+    -19,
+    22
+   ],
+   "quad": 1,
+   "base": "LRiverbedSilt01",
+   "baseForm": 141239,
+   "layers": [
+    [
+     "LDriedGrass01",
+     0.15,
+     119251
+    ],
+    [
+     "LDirtGravel01",
+     0.091,
+     135990
+    ],
+    [
+     "LRubbleRock01",
+     0.004,
+     128908
+    ],
+    [
+     "LDriedGrass01NoGrass",
+     0.009,
+     121265
+    ]
+   ]
+  },
+  {
+   "cell": [
+    -19,
+    22
+   ],
+   "quad": 2,
+   "base": "LRiverbedSilt01",
+   "baseForm": 141239,
+   "layers": [
+    [
+     "LDriedGrass01",
+     0.107,
+     119251
+    ],
+    [
+     "LRubbleRock01",
+     0.098,
+     128908
+    ],
+    [
+     "LDriedGrass02Weeds",
+     0.046,
+     142179
+    ],
+    [
+     "LRubbleRock01Grass",
+     0.026,
+     542565
+    ]
+   ]
+  },
+  {
+   "cell": [
+    -19,
+    22
+   ],
+   "quad": 3,
+   "base": "LRiverbedSilt01",
+   "baseForm": 141239,
+   "layers": [
+    [
+     "LDriedGrass01",
+     0.162,
+     119251
+    ],
+    [
+     "LRubbleRock01",
+     0.112,
+     128908
+    ],
+    [
+     "LForestFloor01",
+     0.085,
+     209980
+    ],
+    [
+     "LRubbleRock01Grass",
+     0.055,
+     542565
+    ],
+    [
+     "LDriedGrass01NoGrass",
+     0.007,
+     121265
+    ]
+   ]
+  },
+  {
+   "cell": [
+    -18,
+    22
+   ],
+   "quad": 0,
+   "base": "LRiverbedSilt01",
+   "baseForm": 141239,
+   "layers": [
+    [
+     "LDriedGrass01",
+     0.143,
+     119251
+    ],
+    [
+     "LRiverbedSilt01",
+     0.154,
+     141239
+    ],
+    [
+     "LDirtGravel01",
+     0.047,
+     135990
+    ],
+    [
+     "LDriedGrass01NoGrass",
+     0.042,
+     121265
+    ]
+   ]
+  },
+  {
+   "cell": [
+    -18,
+    22
+   ],
+   "quad": 1,
+   "base": "LRiverbedSilt01",
+   "baseForm": 141239,
+   "layers": [
+    [
+     "LDriedGrass01",
+     0.237,
+     119251
+    ],
+    [
+     "LRiverbedSilt01",
+     0.035,
+     141239
+    ],
+    [
+     "LForestFloor01",
+     0.322,
+     209980
+    ]
+   ]
+  },
+  {
+   "cell": [
+    -18,
+    22
+   ],
+   "quad": 2,
+   "base": "LRiverbedSilt01",
+   "baseForm": 141239,
+   "layers": [
+    [
+     "LDriedGrass01",
+     0.167,
+     119251
+    ],
+    [
+     "LForestFloor01",
+     0.329,
+     209980
+    ],
+    [
+     "LDriedGrass01NoGrass",
+     0.017,
+     121265
+    ]
+   ]
+  },
+  {
+   "cell": [
+    -18,
+    22
+   ],
+   "quad": 3,
+   "base": "LRiverbedSilt01",
+   "baseForm": 141239,
+   "layers": [
+    [
+     "LRiverbedSilt01Wet",
+     0.112,
+     318963
+    ],
+    [
+     "LForestFloor01",
+     0.577,
+     209980
+    ],
+    [
+     "LDriedGrass01",
+     0.012,
+     119251
+    ]
+   ]
+  },
+  {
+   "cell": [
+    -17,
+    22
+   ],
+   "quad": 0,
+   "base": "LRiverbedSilt01",
+   "baseForm": 141239,
+   "layers": [
+    [
+     "LRiverbedSilt01",
+     0.175,
+     141239
+    ],
+    [
+     "LRubbleRock01",
+     0.081,
+     128908
+    ],
+    [
+     "LRiverbedRocks02Wet",
+     0.238,
+     770365
+    ],
+    [
+     "LRiverbedRocks02WetGrass",
+     0.008,
+     770367
+    ]
+   ]
+  },
+  {
+   "cell": [
+    -17,
+    22
+   ],
+   "quad": 1,
+   "base": "LRiverbedSilt01",
+   "baseForm": 141239,
+   "layers": [
+    [
+     "LRubbleRock01",
+     0.23,
+     128908
+    ],
+    [
+     "LRiverbedRocks02Wet",
+     0.307,
+     770365
+    ],
+    [
+     "LDebrisGround",
+     0.042,
+     1371228
+    ],
+    [
+     "LRiverbedRocks02WetGrass",
+     0.025,
+     770367
+    ]
+   ]
+  },
+  {
+   "cell": [
+    -17,
+    22
+   ],
+   "quad": 2,
+   "base": "LRiverbedSilt01",
+   "baseForm": 141239,
+   "layers": [
+    [
+     "LRiverbedSilt01",
+     0.21,
+     141239
+    ],
+    [
+     "LRiverbedSilt01Wet",
+     0.191,
+     318963
+    ],
+    [
+     "LForestFloor01",
+     0.265,
+     209980
+    ]
+   ]
+  },
+  {
+   "cell": [
+    -17,
+    22
+   ],
+   "quad": 3,
+   "base": "LRiverbedSilt01",
+   "baseForm": 141239,
+   "layers": [
+    [
+     "LRiverbedSilt01",
+     0.024,
+     141239
+    ],
+    [
+     "LRubbleRock01",
+     0.371,
+     128908
+    ],
+    [
+     "LRiverbedRocks02Wet",
+     0.218,
+     770365
+    ]
+   ]
+  },
+  {
+   "cell": [
+    -20,
+    23
+   ],
+   "quad": 0,
+   "base": "LRubbleRock01",
+   "baseForm": 128908,
+   "layers": [
+    [
+     "LDriedGrass01",
+     0.208,
+     119251
+    ],
+    [
+     "LRiverbedSilt01",
+     0.25,
+     141239
+    ],
+    [
+     "LRubbleRock01Grass",
+     0.022,
+     542565
+    ],
+    [
+     "LRiverbedRocks02WetGrass",
+     0.255,
+     770367
+    ]
+   ]
+  },
+  {
+   "cell": [
+    -20,
+    23
+   ],
+   "quad": 1,
+   "base": "LRubbleRock01",
+   "baseForm": 128908,
+   "layers": [
+    [
+     "LDriedGrass01",
+     0.172,
+     119251
+    ],
+    [
+     "LRiverbedSilt01",
+     0.25,
+     141239
+    ],
+    [
+     "LForestFloor01",
+     0.069,
+     209980
+    ],
+    [
+     "LRubbleRock01Grass",
+     0.091,
+     542565
+    ]
+   ]
+  },
+  {
+   "cell": [
+    -20,
+    23
+   ],
+   "quad": 2,
+   "base": "LRubbleRock01",
+   "baseForm": 128908,
+   "layers": [
+    [
+     "LDriedGrass01",
+     0.096,
+     119251
+    ],
+    [
+     "LForestFloor01",
+     0.013,
+     209980
+    ],
+    [
+     "LRootsEroded01",
+     0.236,
+     232453
+    ],
+    [
+     "LRubbleRock01Grass",
+     0.089,
+     542565
+    ]
+   ]
+  },
+  {
+   "cell": [
+    -20,
+    23
+   ],
+   "quad": 3,
+   "base": "LRiverbedSilt01",
+   "baseForm": 141239,
+   "layers": [
+    [
+     "LDriedGrass01",
+     0.219,
+     119251
+    ],
+    [
+     "LRubbleRock01",
+     0.222,
+     128908
+    ],
+    [
+     "LRootsEroded01",
+     0.182,
+     232453
+    ],
+    [
+     "LRubbleRock01Grass",
+     0.127,
+     542565
+    ]
+   ]
+  },
+  {
+   "cell": [
+    -19,
+    23
+   ],
+   "quad": 0,
+   "base": "LRiverbedSilt01",
+   "baseForm": 141239,
+   "layers": [
+    [
+     "LDriedGrass01",
+     0.243,
+     119251
+    ],
+    [
+     "LRubbleRock01",
+     0.106,
+     128908
+    ],
+    [
+     "LDriedGrass02Weeds",
+     0.172,
+     142179
+    ]
+   ]
+  },
+  {
+   "cell": [
+    -19,
+    23
+   ],
+   "quad": 1,
+   "base": "LRiverbedSilt01",
+   "baseForm": 141239,
+   "layers": [
+    [
+     "LDriedGrass01",
+     0.151,
+     119251
+    ],
+    [
+     "LRubbleRock01",
+     0.197,
+     128908
+    ],
+    [
+     "LDriedGrass02Weeds",
+     0.041,
+     142179
+    ],
+    [
+     "LForestFloor01",
+     0.095,
+     209980
+    ],
+    [
+     "LRubbleRock01Grass",
+     0.057,
+     542565
+    ]
+   ]
+  },
+  {
+   "cell": [
+    -19,
+    23
+   ],
+   "quad": 2,
+   "base": "LRiverbedSilt01",
+   "baseForm": 141239,
+   "layers": [
+    [
+     "LRubbleRock01",
+     0.334,
+     128908
+    ],
+    [
+     "LRiverbedSilt01",
+     0.135,
+     141239
+    ],
+    [
+     "LRootsEroded01",
+     0.023,
+     232453
+    ],
+    [
+     "LRubbleRock01Grass",
+     0.023,
+     542565
+    ]
+   ]
+  },
+  {
+   "cell": [
+    -19,
+    23
+   ],
+   "quad": 3,
+   "base": "LRubbleRock01",
+   "baseForm": 128908,
+   "layers": [
+    [
+     "LRiverbedSilt01",
+     0.251,
+     141239
+    ],
+    [
+     "LRiverbedSilt01",
+     0.252,
+     141239
+    ],
+    [
+     "LRootsEroded01",
+     0.02,
+     232453
+    ],
+    [
+     "LRootsEroded01Grass01",
+     0.03,
+     254372
+    ],
+    [
+     "LRubbleRock01Grass",
+     0.063,
+     542565
+    ]
+   ]
+  },
+  {
+   "cell": [
+    -18,
+    23
+   ],
+   "quad": 0,
+   "base": "LRiverbedSilt01",
+   "baseForm": 141239,
+   "layers": [
+    [
+     "LDriedGrass01",
+     0.149,
+     119251
+    ],
+    [
+     "LRubbleRock01",
+     0.232,
+     128908
+    ],
+    [
+     "LForestFloor01",
+     0.328,
+     209980
+    ],
+    [
+     "LRubbleRock01Grass",
+     0.026,
+     542565
+    ]
+   ]
+  },
+  {
+   "cell": [
+    -18,
+    23
+   ],
+   "quad": 1,
+   "base": "LRiverbedSilt01",
+   "baseForm": 141239,
+   "layers": [
+    [
+     "LDriedGrass01",
+     0.168,
+     119251
+    ],
+    [
+     "LRiverbedSilt01",
+     0.079,
+     141239
+    ],
+    [
+     "LForestFloor01",
+     0.524,
+     209980
+    ]
+   ]
+  },
+  {
+   "cell": [
+    -18,
+    23
+   ],
+   "quad": 2,
+   "base": "LRiverbedSilt01",
+   "baseForm": 141239,
+   "layers": [
+    [
+     "LRubbleRock01",
+     0.207,
+     128908
+    ],
+    [
+     "LRiverbedSilt01",
+     0.281,
+     141239
+    ],
+    [
+     "LForestFloor01",
+     0.148,
+     209980
+    ],
+    [
+     "LRubbleRock01Grass",
+     0.025,
+     542565
+    ]
+   ]
+  },
+  {
+   "cell": [
+    -18,
+    23
+   ],
+   "quad": 3,
+   "base": "LRiverbedSilt01",
+   "baseForm": 141239,
+   "layers": [
+    [
+     "LDriedGrass01",
+     0.059,
+     119251
+    ],
+    [
+     "LRiverbedSilt01",
+     0.371,
+     141239
+    ],
+    [
+     "LForestFloor01",
+     0.056,
+     209980
+    ]
+   ]
+  },
+  {
+   "cell": [
+    -17,
+    23
+   ],
+   "quad": 0,
+   "base": "LRiverbedSilt01",
+   "baseForm": 141239,
+   "layers": [
+    [
+     "LDriedGrass01",
+     0.019,
+     119251
+    ],
+    [
+     "LRiverbedSilt01",
+     0.227,
+     141239
+    ],
+    [
+     "LForestFloor01",
+     0.193,
+     209980
+    ]
+   ]
+  },
+  {
+   "cell": [
+    -17,
+    23
+   ],
+   "quad": 1,
+   "base": "LRiverbedSilt01",
+   "baseForm": 141239,
+   "layers": [
+    [
+     "LRiverbedSilt01",
+     0.028,
+     141239
+    ],
+    [
+     "LRubbleRock01",
+     0.129,
+     128908
+    ],
+    [
+     "LRiverbedRocks02Wet",
+     0.296,
+     770365
+    ]
+   ]
+  },
+  {
+   "cell": [
+    -17,
+    23
+   ],
+   "quad": 2,
+   "base": "LRiverbedSilt01",
+   "baseForm": 141239,
+   "layers": [
+    [
+     "LRiverbedSilt01",
+     0.171,
+     141239
+    ],
+    [
+     "LRubbleRock01",
+     0.213,
+     128908
+    ],
+    [
+     "LRootsEroded01",
+     0.095,
+     232453
+    ]
+   ]
+  },
+  {
+   "cell": [
+    -17,
+    23
+   ],
+   "quad": 3,
+   "base": "LRiverbedSilt01",
+   "baseForm": 141239,
+   "layers": [
+    [
+     "LRubbleRock01",
+     0.375,
+     128908
+    ],
+    [
+     "LRiverbedSilt01",
+     0.07,
+     141239
+    ],
+    [
+     "LRiverbedRocks02Wet",
+     0.098,
+     770365
+    ]
+   ]
+  }
+ ],
+ "window": {
+  "y": 165,
+  "x": 58,
+  "win": 128,
+  "world": [
+   -80064.0,
+   -75968.0,
+   88928.0,
+   93024.0
+  ]
+ },
+ "composition": [
+  [
+   "LRiverbedSilt01",
+   0.9128
+  ],
+  [
+   "LDriedGrass01",
+   0.0743
+  ],
+  [
+   "LRubbleRock01",
+   0.0046
+  ],
+  [
+   "LRubbleRock01Grass",
+   0.0043
+  ],
+  [
+   "LDriedGrass01NoGrass",
+   0.004
+  ]
+ ]
+}

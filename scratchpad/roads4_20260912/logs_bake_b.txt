@@ -1,0 +1,8 @@
+BAKE r4_gp0 t2020 rc=0  4s  texfiles=3  args=[--road-ground-paint 0]
+BAKE r4_gp025 t2020 rc=0  4s  texfiles=3  args=[--road-ground-paint 0.25]
+BAKE r4_gp05 t2020 rc=0  4s  texfiles=3  args=[--road-ground-paint 0.5]
+BAKE r4_gp075 t2020 rc=0  4s  texfiles=3  args=[--road-ground-paint 0.75]
+BAKE r4_gp0 t0808 rc=0  6s  texfiles=3  args=[--road-ground-paint 0]
+BAKE r4_gp025 t0808 rc=0  7s  texfiles=3  args=[--road-ground-paint 0.25]
+BAKE r4_gp05 t0808 rc=0  6s  texfiles=3  args=[--road-ground-paint 0.5]
+BAKE r4_gp075 t0808 rc=0  6s  texfiles=3  args=[--road-ground-paint 0.75]

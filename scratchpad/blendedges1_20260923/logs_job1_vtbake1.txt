@@ -1,0 +1,42 @@
+== ours VTBAKE1 L02  (../vtbake1_20260923/images/sanctuary_L02_colour_raw.png, 512x512)
+  x (vertical lines): quadrant boundaries 1.12 1.41 1.33 1.29 1.65 1.47 1.37  max 1.653 mean 1.377
+    fold P=2    peak phase 0    peak/mean 1.032  (min/mean 0.968)
+    fold P=4    peak phase 0    peak/mean 1.099  (min/mean 0.965)
+    fold P=8    peak phase 0    peak/mean 1.121  (min/mean 0.960)
+    fold P=16   peak phase 0    peak/mean 1.168  (min/mean 0.956)
+    fold P=32   peak phase 0    peak/mean 1.232  (min/mean 0.939)
+    fold P=64   peak phase 0    peak/mean 1.376  (min/mean 0.928)
+    fold P=128  peak phase 0    peak/mean 1.388  (min/mean 0.895)
+    12 strongest boundaries (b+1, ratio, mod64, mod4): 320:1.65(0,0), 384:1.47(0,0), 128:1.41(0,0), 448:1.37(0,0), 192:1.33(0,0), 256:1.29(0,0), 365:1.24(45,1), 337:1.22(17,1), 329:1.22(9,1), 488:1.21(40,0), 344:1.21(24,0), 324:1.20(4,0)
+  y (horizontal lines): quadrant boundaries 1.50 1.62 2.48 2.28 1.75 1.35 1.11  max 2.477 mean 1.727
+    fold P=2    peak phase 0    peak/mean 1.037  (min/mean 0.963)
+    fold P=4    peak phase 0    peak/mean 1.118  (min/mean 0.957)
+    fold P=8    peak phase 0    peak/mean 1.152  (min/mean 0.948)
+    fold P=16   peak phase 0    peak/mean 1.224  (min/mean 0.945)
+    fold P=32   peak phase 0    peak/mean 1.391  (min/mean 0.922)
+    fold P=64   peak phase 0    peak/mean 1.724  (min/mean 0.890)
+    fold P=128  peak phase 0    peak/mean 1.748  (min/mean 0.863)
+    12 strongest boundaries (b+1, ratio, mod64, mod4): 192:2.48(0,0), 256:2.28(0,0), 320:1.75(0,0), 128:1.62(0,0), 64:1.50(0,0), 384:1.35(0,0), 468:1.26(20,0), 308:1.25(52,0), 304:1.25(48,0), 312:1.25(56,0), 248:1.24(56,0), 408:1.24(24,0)
+  top-2% x steps: 5276; on quadrant line 0.042 (chance 0.016); on 4-grid phase0 0.245; 4-phase split 0.245 0.251 0.246 0.258
+  top-2% y steps: 5233; on quadrant line 0.076 (chance 0.016); on 4-grid phase0 0.280; 4-phase split 0.280 0.245 0.237 0.238
+== vanilla 4.-20.24  (E:/Tools/Fallout 4/DataUnpacked/Data/Textures/Terrain/Commonwealth/Commonwealth.4.-20.24.DDS, 512x512)
+  x (vertical lines): quadrant boundaries 1.30 1.14 1.11 1.09 1.01 1.03 1.09  max 1.304 mean 1.113
+    fold P=2    peak phase 0    peak/mean 1.030  (min/mean 0.970)
+    fold P=4    peak phase 0    peak/mean 1.083  (min/mean 0.967)
+    fold P=8    peak phase 0    peak/mean 1.092  (min/mean 0.962)
+    fold P=16   peak phase 0    peak/mean 1.101  (min/mean 0.949)
+    fold P=32   peak phase 16   peak/mean 1.108  (min/mean 0.936)
+    fold P=64   peak phase 16   peak/mean 1.150  (min/mean 0.912)
+    fold P=128  peak phase 16   peak/mean 1.169  (min/mean 0.854)
+    12 strongest boundaries (b+1, ratio, mod64, mod4): 136:1.38(8,0), 132:1.34(4,0), 140:1.33(12,0), 141:1.33(13,1), 142:1.33(14,2), 144:1.33(16,0), 139:1.31(11,3), 64:1.30(0,0), 232:1.28(40,0), 65:1.26(1,1), 66:1.25(2,2), 180:1.25(52,0)
+  y (horizontal lines): quadrant boundaries 1.66 1.07 1.12 0.90 1.00 1.32 0.84  max 1.659 mean 1.131
+    fold P=2    peak phase 0    peak/mean 1.031  (min/mean 0.969)
+    fold P=4    peak phase 0    peak/mean 1.084  (min/mean 0.966)
+    fold P=8    peak phase 0    peak/mean 1.092  (min/mean 0.961)
+    fold P=16   peak phase 0    peak/mean 1.095  (min/mean 0.952)
+    fold P=32   peak phase 12   peak/mean 1.121  (min/mean 0.945)
+    fold P=64   peak phase 8    peak/mean 1.185  (min/mean 0.881)
+    fold P=128  peak phase 16   peak/mean 1.244  (min/mean 0.837)
+    12 strongest boundaries (b+1, ratio, mod64, mod4): 64:1.66(0,0), 308:1.44(52,0), 72:1.43(8,0), 157:1.43(29,1), 156:1.40(28,0), 63:1.38(63,3), 44:1.36(44,0), 48:1.34(48,0), 272:1.34(16,0), 65:1.34(1,1), 68:1.34(4,0), 62:1.33(62,2)
+  top-2% x steps: 5236; on quadrant line 0.016 (chance 0.016); on 4-grid phase0 0.249; 4-phase split 0.249 0.252 0.243 0.257
+  top-2% y steps: 5297; on quadrant line 0.017 (chance 0.016); on 4-grid phase0 0.253; 4-phase split 0.253 0.249 0.243 0.255

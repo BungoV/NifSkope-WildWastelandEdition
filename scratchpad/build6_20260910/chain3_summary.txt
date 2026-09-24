@@ -1,0 +1,56 @@
+gamecheck rc=1 (must be 1)
+### c1_fixture start 04:01:31
+### c1_fixture rc=0  04:01:31
+expect lodi.identityMatchesLodo 1
+
+     
+    0 .
+    0 ..
+    1901 Synthetic.expect.txt
+    16408 Synthetic.lodi
+    28903 Synthetic.lodo
+### c1_decode start 04:01:31
+### c1_decode rc=0  04:01:31
+  ok   lodi.identityMatchesLodo
+46 checks, 0 failures
+RESULT PASS
+
+### c1_verify start 04:01:31
+### c1_verify rc=0  04:01:31
+pair identity ok
+
+fixture .lodo byte-identical to the standalone tool's
+fixture .lodi byte-identical to the standalone tool's
+### c3_verify_d4 start 04:01:32
+### c3_verify_d4 rc=0  04:01:32
+pair identity ok
+
+### c3_verify_d8 start 04:01:32
+### c3_verify_d8 rc=0  04:01:32
+pair identity ok
+
+### c3_verify_d16 start 04:01:32
+### c3_verify_d16 rc=0  04:01:32
+pair identity ok
+
+### c3_verify_d32 start 04:01:32
+### c3_verify_d32 rc=0  04:01:33
+pair identity ok
+
+### CLAMP2 gates 1+2 re-run on the 03:57:46 exe
+### r1_ringcontrol start 04:01:33
+### r1_ringcontrol rc=0  04:01:35
+       ring: self-test 9 checks, 0 failures, RESULT PASS
+13 checks, 0 failures
+RESULT PASS
+
+### r2_terrain_vt start 04:01:35
+### r2_terrain_vt rc=1  04:02:13
+  ok   FLOOR the ground-cover tint actually moves these sheets, so the two identity bars above were asked of something
+35 checks, 1 failures
+RESULT FAIL
+
+243:       msn differs: Commonwealth.4.-20.28
+244:  FAIL V9b the assembled and direct _msn sheets are byte-identical
+254:RESULT FAIL
+### CHAIN3 DONE 04:02:13

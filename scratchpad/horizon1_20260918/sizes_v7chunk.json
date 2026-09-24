@@ -1,0 +1,48 @@
+{
+ "lodi_version": 7,
+ "instances": 2449,
+ "lodi_bytes": 243420,
+ "lodo_bytes": 6204388,
+ "lodi_bytes_per_placement": 99.39567170273581,
+ "vertexAoBytes": 63196,
+ "vertexSkyBytes": 63196,
+ "streamed_placements": 2449,
+ "drawn_vertices_total": 53396,
+ "drawn_vertices_mean": 21.803184973458553,
+ "drawn_vertices_max": 1004,
+ "horizon_stream": {
+  "8": {
+   "bytes": 436968,
+   "per_placement": 178.42711310739077,
+   "ws_bytes": 125100780.24009801
+  },
+  "16": {
+   "bytes": 864136,
+   "per_placement": 352.8525928950592,
+   "ws_bytes": 247395891.30910578
+  },
+  "32": {
+   "bytes": 1718472,
+   "per_placement": 701.7035524703961,
+   "ws_bytes": 491986113.4471213
+  }
+ },
+ "terrain_sheet": {
+  "8": 524288.0,
+  "16": 131072.0,
+  "32": 32768.0,
+  "64": 8192.0,
+  "128": 2048.0
+ },
+ "ws_land_cells": 36864,
+ "ws_populated_cells": 4707,
+ "ws_refrs": 701131,
+ "ws_scale": 286.2927725602287,
+ "terrain_ws": {
+  "8": 19327352832.0,
+  "16": 4831838208.0,
+  "32": 1207959552.0,
+  "64": 301989888.0,
+  "128": 75497472.0
+ }
+}

@@ -1,0 +1,6 @@
+dim 8: tiles 576, flat-and-uniform (colour SD<2 levels AND height range 0) 258 = 44.8%; colour-SD<2 alone 499; height-range-0 alone 258
+  non-void tile bbox tx 2..21 ty 2..21 -> cells x -80..79 y -80..79
+  bytes in void tiles: 83509440 of 186439680 (44.8%)
+dim 2: tiles 9216, flat-and-uniform (colour SD<2 levels AND height range 0) 4561 = 49.5%; colour-SD<2 alone 8154; height-range-0 alone 4561
+  non-void tile bbox tx 9..86 ty 9..86 -> cells x -78..77 y -78..77
+  bytes in void tiles: 1476304480 of 2983034880 (49.5%)

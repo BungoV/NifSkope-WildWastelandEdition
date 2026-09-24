@@ -1,0 +1,12 @@
+ROADS3 done 2026-09-12 04:32
+exe release/NifSkope.exe 2026-09-12 04:10:38 21489152 B md5 fe65cc978f3896881140c2eea57c69c6
+rung release/NifSkope.before_roads3.exe 21489152 B md5 6af74b4b4667ce50c4506a2d42a04fdf == the exe found at launch
+1 build, BUILD-RC=0 first try, 0 extra relinks
+F1 met (the brief's own law refused by its own floor); F2 met 9/9 and 10/10 both tiles, compare shown able to fail
+F3a-F3h measured on real bakes: F3d refused as unresolvable (SNR 0.65), F3a refused on (-8,8) by arithmetic (7.53 levels outside the reachable interval)
+F4 chain at GRADE1's baselines row for row: 11/0 26/0 41/1 29/5 14/0 native-all-green 23/0 116/0
+the single VT red (V9c) fails identically on the rung exe -- control in logs/f4_vt_RUNG_control.txt
+default did not move: --road-opacity ships at 1.0 and its bytes are the rung's
+pictures cmp_road_wash.png + cmp_road_profile.png -- every panel a real bake or Bethesda's own sheet
+nothing committed, nothing stashed, no GUI launched, his Data\Terrain untouched, nothing killed
+bungo's open NifSkope window needs a restart

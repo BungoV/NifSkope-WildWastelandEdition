@@ -1,0 +1,5 @@
+# WW_PROGRAM_CENSUS  light(view) = 0 0 1
+shape="Terrain -20,24" bsver=130 msn=1 lodland=0 prog=fo4_default.prog
+shape="Terrain -18,24" bsver=130 msn=1 lodland=0 prog=fo4_default.prog
+shape="Terrain -20,26" bsver=130 msn=1 lodland=0 prog=fo4_default.prog
+shape="Terrain -18,26" bsver=130 msn=1 lodland=0 prog=fo4_default.prog

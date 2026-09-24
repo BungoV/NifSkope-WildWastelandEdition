@@ -27,8 +27,8 @@ sections (4), the refutation pass (5), and the VERDICT (1) and WHAT MUST CHANGE
 (2) assembled from them. Sections 2.a, 2.a2 and 2.b are already written and
 verified — leave them alone, and fold them into the final ordered list.
 The single highest-value unanswered question remains whether Fallout 4's LOD
-object shader path actually honours `SLSF2_Vertex_Colors`. Routes: the 1.10.155
-PDB at `E:\Projects\Fo4CommunityShaders\Fo4PDB` with `tools\exere\f4pdb.py`;
+object shader path actually honours `SLSF2_Vertex_Colors`. Routes: Todd's treat
+(1.10.155) with the Todd's treat tooling (kept outside this repo);
 `Fallout4 - Shaders.ba2`; and what FO4CS already knows.
 
 **MOUNTAINS** still owes: lens 4 above all — what xLODGen and DynDOLOD actually

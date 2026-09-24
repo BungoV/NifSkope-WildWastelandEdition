@@ -1,0 +1,60 @@
+CHANGED_FILES -- lane NATIVE1c, 2026-09-16
+==========================================
+
+Every number below is a PYTHON BYTE COUNT (`b.count(bytes([13,10]))` for CRLF,
+`b.count(bytes([10])) - crlf` for LF). `grep`, `wc -l` and the editors are not
+consulted; the WW line-ending rule says byte counts only.
+
+READ THE BEFORE COLUMN CAREFULLY. It is `git show HEAD:<path>`, which is the
+LAST COMMIT -- not the state of the tree when this lane started. Twelve of the
+nineteen paths were created by earlier lanes and are still uncommitted, and four
+are new this lane, so for those sixteen HEAD has nothing and the column reads
+"not in HEAD" or "new this lane". My own before figure for the eleven is LOST;
+mistake 6 in MISTAKES_ENTRIES.md owns that and states the rule that would have
+prevented it. Three paths are tracked -- `src/lodgen.cpp`, `src/nifcli.cpp` and
+`docs/LODGEN_NATIVE_LODO_LODI.md` -- and their HEAD figures are given for what
+they are worth: they include earlier lanes' uncommitted work as well as mine.
+
+EVERY FILE IN THIS LANE IS LF-ONLY, BEFORE AND AFTER: the CRLF column is 0 on
+all nineteen paths. The four new files are LF-only by construction.
+
+  status  path                                        after bytes / CRLF / LF    at HEAD bytes / CRLF / LF
+  ------  ------------------------------------------  -----------------------    -------------------------
+  M       src/lodofile.h                                  29012 /  0 /   534     not in HEAD
+  M       src/lodofile.cpp                                95023 /  0 /  2096     not in HEAD
+  M       src/lodifile.h                                  30001 /  0 /   582     not in HEAD
+  M       src/lodifile.cpp                                91398 /  0 /  1695     not in HEAD
+  M       src/nativeemit.h                                 9164 /  0 /   170     not in HEAD
+  M       src/nativeemit.cpp                              69470 /  0 /  1617     not in HEAD
+  M       src/lodgen.cpp                                 602162 /  0 / 13822     364264 /  0 /  8394
+  M       src/nifcli.cpp                                 357893 /  0 /  7683     257510 /  0 /  5913
+  M       tests/spells/lodgen_native_decode.py            56817 /  0 /  1058     not in HEAD
+  M       tests/spells/lodgen_native_mutate.py            15196 /  0 /   328     not in HEAD
+  M       tests/spells/lodgen_native_fields.py            28024 /  0 /   510     not in HEAD
+  A       tests/spells/lodgen_silhouette.py               13243 /  0 /   317     new this lane
+  A       tests/spells/lodgen_ladder_select.py             3544 /  0 /    92     new this lane
+  A       tests/spells/lodgen_ladder.sh                   12975 /  0 /   231     new this lane
+  A       tests/spells/lodgen_lodi_wayback.py              5109 /  0 /   130     new this lane
+  M       .claude/skills/ww-module-off-is-identical/SKILL.md
+                                                    8888 /  0 /   167     not in HEAD
+  M       docs/LODGEN_NATIVE_LODO_LODI.md                111373 /  0 /  1748      24653 /  0 /   450
+  M       docs/LODGEN_CENSUS.md                           41490 /  0 /   497     not in HEAD
+  M       docs/FO4CS_IMPROVED_LOD_PLAN.md                 80512 /  0 /  1303     not in HEAD
+
+The three docs, sha256 (first 16) before and after THIS LANE's patches:
+
+  docs/LODGEN_NATIVE_LODO_LODI.md   3396e97840246047 -> 941de2e9e4d5f494   100,130 -> 111,373 B
+  docs/LODGEN_CENSUS.md             81327077a39ec660 -> d7fe363ce9f7f85c    37,851 ->  41,490 B
+  docs/FO4CS_IMPROVED_LOD_PLAN.md   518e615510c1c6cf -> 402367780f723e1b    78,541 ->  80,512 B
+
+Deliverables in scratchpad/native1c_20260916/ are not listed above; they are this
+lane's own output and the report names them. Every deliverable I AUTHORED is
+LF-only, checked by byte count: the four .md files, DONE, CHANGED_FILES.txt,
+make_pictures.py. The gate LOGS in that directory do carry CRLF (1 to 90 pairs
+each) because they are the Windows exe's own stdout captured by the harness; no
+editor touched them and none of them is a source file.
+
+Nothing was committed, stashed, or added to the index. `git status` was read
+twice, `git show HEAD:<path>` was used as a reader only; the index and the
+working tree are exactly as this lane found them apart from the file contents
+above.

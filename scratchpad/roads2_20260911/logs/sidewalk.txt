@@ -1,0 +1,30 @@
+sidewalk     meshes   448  triangles    36601  texels  17801 ( 6.79%)
+road_flat    meshes   281  triangles    43899  texels  11266 ( 4.30%)
+nonroad      meshes 14995  triangles  4650442  texels 167071 (63.73%)
+
+sidewalk texels on chunk (-8,8): 17801  (the brief asks for >= 5000): OK
+
+AUC BRIGHTNESS, tie-averaged (brighter = higher)
+family        texels                vanilla                   rung                  blend
+sidewalk       17801  0.540 [0.469..0.611]  0.770 [0.441..0.571]  0.858 [0.486..0.575]
+road_flat      11266  0.761 [0.464..0.661]  0.611 [0.460..0.656]  0.724 [0.439..0.609]
+nonroad       167071  0.521 [0.488..0.521]  0.637 [0.500..0.550]  0.490 [0.468..0.545]
+twins (sw)                     0.507..0.527           0.473..0.525           0.519..0.532
+
+AUC GREYNESS, tie-averaged (greyer = higher)
+family        texels                vanilla                   rung                  blend
+sidewalk       17801  0.640 [0.371..0.564]  0.392 [0.437..0.538]  0.256 [0.471..0.538]
+road_flat      11266  0.852 [0.338..0.728]  0.741 [0.464..0.614]  0.673 [0.466..0.603]
+nonroad       167071  0.517 [0.466..0.506]  0.485 [0.477..0.499]  0.538 [0.480..0.507]
+twins (sw)                     0.453..0.501           0.485..0.520           0.476..0.517
+
+CLEARANCE above the displaced floor top (tie-averaged brightness)
+family           vanilla        rung       blend
+sidewalk          -0.071      +0.198      +0.283
+road_flat         +0.100      -0.045      +0.115
+nonroad           -0.001      +0.087      -0.055
+
+MEAN LUMINANCE and MEAN ABSOLUTE ERROR AGAINST VANILLA
+sidewalk       17801  lum   87.21  128.63  128.22   |err|    0.00   42.14   41.64
+road_flat      11266  lum   95.23  112.92  109.93   |err|    0.00   20.01   16.68
+nonroad       167071  lum   85.85  112.57  101.20   |err|    0.00   28.88   18.45

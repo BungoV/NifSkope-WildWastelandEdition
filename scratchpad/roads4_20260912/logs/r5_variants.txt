@@ -1,0 +1,80 @@
+=== r4_default
+centreline texels 9777 of 262144 (road-coloured 27055)
+ceiling  vanilla vs vanilla     1.0000
+floor    ours --no-roads        0.1354
+after    ours --roads           0.3078
+reference the ground around it  0.4029
+mean |colour error| vs vanilla, --no-roads  whole tile 22.44  on the centreline 38.04
+mean |colour error| vs vanilla, --roads     whole tile 20.95  on the centreline 23.64
+bar 1  after >= 2 x floor       0.3078 >= 0.2708  ok
+bar 2  after >= 0.8 x reference 0.3078 >= 0.3223  FAIL
+=== r4_gp075
+centreline texels 9777 of 262144 (road-coloured 27055)
+ceiling  vanilla vs vanilla     1.0000
+floor    ours --no-roads        0.1354
+after    ours --roads           0.2935
+reference the ground around it  0.4008
+mean |colour error| vs vanilla, --no-roads  whole tile 22.44  on the centreline 38.04
+mean |colour error| vs vanilla, --roads     whole tile 21.04  on the centreline 24.29
+bar 1  after >= 2 x floor       0.2935 >= 0.2708  ok
+bar 2  after >= 0.8 x reference 0.2935 >= 0.3206  FAIL
+=== r4_gp05
+centreline texels 9777 of 262144 (road-coloured 27055)
+ceiling  vanilla vs vanilla     1.0000
+floor    ours --no-roads        0.1354
+after    ours --roads           0.2854
+reference the ground around it  0.3957
+mean |colour error| vs vanilla, --no-roads  whole tile 22.44  on the centreline 38.04
+mean |colour error| vs vanilla, --roads     whole tile 21.21  on the centreline 25.05
+bar 1  after >= 2 x floor       0.2854 >= 0.2708  ok
+bar 2  after >= 0.8 x reference 0.2854 >= 0.3165  FAIL
+=== r4_gp025
+centreline texels 9777 of 262144 (road-coloured 27055)
+ceiling  vanilla vs vanilla     1.0000
+floor    ours --no-roads        0.1354
+after    ours --roads           0.2833
+reference the ground around it  0.3914
+mean |colour error| vs vanilla, --no-roads  whole tile 22.44  on the centreline 38.04
+mean |colour error| vs vanilla, --roads     whole tile 21.43  on the centreline 25.82
+bar 1  after >= 2 x floor       0.2833 >= 0.2708  ok
+bar 2  after >= 0.8 x reference 0.2833 >= 0.3131  FAIL
+=== r4_gp0
+centreline texels 9777 of 262144 (road-coloured 27055)
+ceiling  vanilla vs vanilla     1.0000
+floor    ours --no-roads        0.1354
+after    ours --roads           0.2783
+reference the ground around it  0.3897
+mean |colour error| vs vanilla, --no-roads  whole tile 22.44  on the centreline 38.04
+mean |colour error| vs vanilla, --roads     whole tile 21.64  on the centreline 26.47
+bar 1  after >= 2 x floor       0.2783 >= 0.2708  ok
+bar 2  after >= 0.8 x reference 0.2783 >= 0.3118  FAIL
+=== r4_op083
+centreline texels 9777 of 262144 (road-coloured 27055)
+ceiling  vanilla vs vanilla     1.0000
+floor    ours --no-roads        0.1354
+after    ours --roads           0.3545
+reference the ground around it  0.4089
+mean |colour error| vs vanilla, --no-roads  whole tile 22.44  on the centreline 38.04
+mean |colour error| vs vanilla, --roads     whole tile 20.63  on the centreline 22.94
+bar 1  after >= 2 x floor       0.3545 >= 0.2708  ok
+bar 2  after >= 0.8 x reference 0.3545 >= 0.3271  ok
+=== r4_op05
+centreline texels 9777 of 262144 (road-coloured 27055)
+ceiling  vanilla vs vanilla     1.0000
+floor    ours --no-roads        0.1354
+after    ours --roads           0.2019
+reference the ground around it  0.4173
+mean |colour error| vs vanilla, --no-roads  whole tile 22.44  on the centreline 38.04
+mean |colour error| vs vanilla, --roads     whole tile 20.74  on the centreline 27.35
+bar 1  after >= 2 x floor       0.2019 >= 0.2708  FAIL
+bar 2  after >= 0.8 x reference 0.2019 >= 0.3338  FAIL
+=== r4_op0326
+centreline texels 9777 of 262144 (road-coloured 27055)
+ceiling  vanilla vs vanilla     1.0000
+floor    ours --no-roads        0.1354
+after    ours --roads           0.1576
+reference the ground around it  0.4012
+mean |colour error| vs vanilla, --no-roads  whole tile 22.44  on the centreline 38.04
+mean |colour error| vs vanilla, --roads     whole tile 21.27  on the centreline 30.87
+bar 1  after >= 2 x floor       0.1576 >= 0.2708  FAIL
+bar 2  after >= 0.8 x reference 0.1576 >= 0.3210  FAIL

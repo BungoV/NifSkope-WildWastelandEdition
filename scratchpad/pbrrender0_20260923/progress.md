@@ -1,0 +1,21 @@
+# PBRRENDER0 progress
+
+- 22:25 started; read CONSTITUTION + HANDOFF top.
+- 22:2x Job 1: read TBI s0/s12, glproperty.cpp:997-1086 (resolvePbrm, gate constant false at :1005), renderer.cpp:176-237 (route), :764-917 (setupProgramPBRM), res/shaders/pbrm_default.frag (229 lines, v5 BRDF).
+- 22:2x FINDING: renderer.cpp:910 mesh->setUniforms(prog) added in 53fe028 (2026-08-03) - modelViewMatrix was never uploaded in PBR mode before; strong candidate for the s0 empty-frame bug (vertices collapse). Gate constant never flipped since, so untested.
+- 22:2x coordinator added scope: legacy must not break; audit legacy spec/gloss vs vanilla FO4 lighting (Todd's treat first); upgrade stage.
+- 22:2x launched 4 research agents (detection, reference law, legacy audit, card bake); notes -> research_*.md in this folder.
+- 22:2x coordinator added: particles must not change (hard constraint, pixel gate); BGSM/BGEM/embedded gate coverage; one shared old-vs-new comparison harness design. Launching agent 5 for particles + harness hooks + mesh picks.
+- 22:2x NifSkope reader: src/io/pbrmfile.cpp:149 accepts envelope 4/5 only -> every v6 .pbrm is a hard parse error today (falls back to BGSM, glproperty.cpp:1080).
+- 22:2x coordinator added scene-lighting audit; agent 6 launched (research_scene_lighting.md); legacy-audit agent asked for vanilla lighting inputs (item 8).
+- NOTE: earlier entries were stamped 22:3x-22:5x from feel; corrected to 22:2x after reading the clock (22:28).
+- 22:29 coordinator added FO4 lookdev test scene; agent 7 launched (research_lookdev_scene.md).
+- 22:30 coordinator added WTHR-driven weather picker (any .esm/.esp); agent 8 launched (research_weather.md); agent 7 narrowed.
+- 22:31 coordinator added shadows/SSAO/SSGI with toggles; agent 9 launched (research_screen_effects.md).
+- 22:31 card-bake agent DONE (research_cardbake.md): bake = paintGL per direction with wwLodChannelView!=0 -> never PBR; material values not lit colour; needs channel branch in pbrm_default.
+- 22:32 bungo ruled .nifx sidecar (FO4CS NifSidecar.h) is the linked json; detection agent asked for schema + precedence + the PBRM-v6.md:440 vs PBRM.cpp:1368 conflict.
+- 22:33 added: later stage = .nifx editor alongside NIF (flat Name|Value, skinVars palette); stage-1 reader must be one parser/writer, round-trip stable for unknown keys.
+- 22:33 detection addendum in: .nifx v1 schema, game precedence swap>sibling>FO76; NifSkope diverges (direct link honoured unconditionally glproperty.cpp:1058, no diffuse-swap rule, sibling only under auto-replace).
+- 22:34 added: future geometry-carrying .nifx; one node-keyed interface with swappable storage; two routes (real NIF 20.2.0.7 vs custom binary) = owed ruling; version field distinguishes generations.
+- 23:03 read research_screen_effects + research_cardbake; found RENDERER_MATCH_PLAN.md s1/s2 context (07-27 direct-link ruling; s1 moved legacy to GGX).
+- 23:03 wrote docs/NIFSKOPE_PBR_RENDERER.md (LF, matches neighbours), DELIVERABLE_TEXT.md, DONE.

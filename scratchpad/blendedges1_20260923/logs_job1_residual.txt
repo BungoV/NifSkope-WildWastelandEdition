@@ -1,0 +1,4 @@
+ours x quadrant lines removed: P4 peak 1.087@0  P8 peak 1.094@0  P16 peak 1.112@0  P32 peak 1.112@16
+ours y quadrant lines removed: P4 peak 1.092@0  P8 peak 1.093@4  P16 peak 1.105@4  P32 peak 1.123@24
+vanilla x quadrant lines removed: P4 peak 1.082@0  P8 peak 1.089@0  P16 peak 1.098@0  P32 peak 1.108@16
+vanilla y quadrant lines removed: P4 peak 1.082@0  P8 peak 1.088@0  P16 peak 1.091@8  P32 peak 1.122@12

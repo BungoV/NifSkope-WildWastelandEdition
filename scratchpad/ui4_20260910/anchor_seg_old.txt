@@ -1,0 +1,42 @@
+namespace
+{
+QString wwSegmentedQss( const QString & base, const QString & first,
+	const QString & last, int rowHeight = 0 )
+{
+	/* The segment's own box is min-height + 3+3 padding + 1+1 border, so a
+	 * segment asked to fill a bar row of H is min-height H-8. Kept as the ONE
+	 * piece of arithmetic that knows this sheet's padding, rather than a second
+	 * number typed at the call site that would drift from it. */
+	const int minH = rowHeight > 0 ? qMax( 10, rowHeight - 8 ) : 18;
+	/* MINH is a token, not a numbered arg: "%10" would be read by QString::arg
+	 * as marker ten, not as marker one followed by a zero, and this sheet
+	 * already uses %1 to %9. */
+	QString sheet = QStringLiteral(
+		"%1 { min-height: MINHpx; padding: 3px 10px; color: %4; background: %5;"
+		" border: 1px solid %6; border-left: 0; border-radius: 0; }"
+		"%2 { border-left: 1px solid %6; border-top-left-radius: 3px;"
+		" border-bottom-left-radius: 3px; }"
+		"%3 { border-top-right-radius: 3px; border-bottom-right-radius: 3px; }"
+		"%1:hover { background: %7; }"
+		"%1:checked, %1:selected { border-color: %8; color: %9; background: %8; }" )
+		.arg( base, first, last, wwSkinColor( "text" ), wwSkinColor( "bgBtn" ),
+			wwSkinColor( "border" ), wwSkinColor( "bgBtnHover" ),
+			wwSkinColor( "selBgActive" ), wwSkinColor( "textBright" ) );
+	sheet.replace( QLatin1String( "MINH" ), QString::number( minH ) );
+	return sheet;
+}
+}
+
+QString wwSegmentedToolButtonQss()
+{
+	return wwSegmentedQss( QStringLiteral( "QToolButton" ),
+		QStringLiteral( "QToolButton[wwSegmentFirst=\"true\"]" ),
+		QStringLiteral( "QToolButton[wwSegmentLast=\"true\"]" ) );
+}
+
+QString wwSegmentedTabBarQss( int rowHeight )
+{
+	return wwSegmentedQss( QStringLiteral( "QTabBar::tab" ),
+		QStringLiteral( "QTabBar::tab:first" ),
+		QStringLiteral( "QTabBar::tab:last" ), rowHeight );
+}

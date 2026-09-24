@@ -1,0 +1,21 @@
+blast_n4 sum 0.5795/1.417 vote 0.5774/0.796 max 0.5711/1.476 domsum 0.6062/0.880
+blast_n8 sum 0.7499/1.223 vote 0.8022/1.013 max 0.7077/1.334 domsum 0.7906/1.048
+maple_n4 sum 0.3704/1.892 vote 0.3723/1.327 max 0.3355/2.306 domsum 0.3684/1.466
+dead_n4 sum 0.6190/1.152 vote 0.5748/0.766 max 0.6068/1.222 domsum 0.5876/0.811
+rock_n4 sum 0.8328/1.117 vote 0.8073/0.858 max 0.8304/1.125 domsum 0.8216/0.880
+
+DEFECT 1 -- how the three frames COMBINE, 24 views, frozen registration
+tag                      sum              vote               max            domsum
+                   IoU / ink         IoU / ink         IoU / ink         IoU / ink
+blast_n4       0.5795 /1.417     0.5774 /0.796     0.5711 /1.476     0.6062 /0.880
+blast_n8       0.7499 /1.223     0.8022 /1.013     0.7077 /1.334     0.7906 /1.048
+maple_n4       0.3704 /1.892     0.3723 /1.327     0.3355 /2.306     0.3684 /1.466
+dead_n4        0.6190 /1.152     0.5748 /0.766     0.6068 /1.222     0.5876 /0.811
+rock_n4        0.8328 /1.117     0.8073 /0.858     0.8304 /1.125     0.8216 /0.880
+
+delta against `sum`, the 0.011 bar is the instrument bias:
+  blast_n4      vote -0.0021 (nm)     max -0.0083 (nm)  domsum +0.0267
+  blast_n8      vote +0.0523     max -0.0422  domsum +0.0408
+  maple_n4      vote +0.0018 (nm)     max -0.0350  domsum -0.0020 (nm)
+  dead_n4       vote -0.0442     max -0.0122  domsum -0.0315
+  rock_n4       vote -0.0255     max -0.0024 (nm)  domsum -0.0112

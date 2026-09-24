@@ -1,0 +1,131 @@
+{
+ "window": {
+  "y": 362,
+  "x": 136,
+  "win": 128,
+  "riverbedW": 0.8706609990493632,
+  "world": [
+   -77568.0,
+   -73472.0,
+   82624.0,
+   86720.0
+  ],
+  "lv_ours": 106.84979829359222,
+  "lv_van": 29.037478400673763
+ },
+ "composition": [
+  [
+   "E:/Tools/Fallout 4/DataUnpacked/Data\\textures\\Landscape\\Ground\\RiverbedRocks02Wet_d.dds",
+   "Landscape\\Ground\\RiverbedRocks02Wet_d.dds",
+   0.5259931158690531,
+   [
+    [
+     "LRiverbedRocks02Wet",
+     0.31272873066006335
+    ],
+    [
+     "LRiverbedRocks02WetGrass",
+     0.21326438520898974
+    ]
+   ]
+  ],
+  [
+   "E:/Tools/Fallout 4/DataUnpacked/Data\\textures\\Landscape\\Ground\\RiverbedSilt01Wet_d.dds",
+   "Landscape\\Ground\\RiverbedSilt01Wet_d.dds",
+   0.1866732296755198,
+   [
+    [
+     "LRiverbedSilt01Wet",
+     0.1866732296755198
+    ]
+   ]
+  ],
+  [
+   "E:/Tools/Fallout 4/DataUnpacked/Data\\textures\\Landscape\\Ground\\RiverbedSilt01_d.dds",
+   "Landscape\\Ground\\RiverbedSilt01_d.dds",
+   0.09377992718910841,
+   [
+    [
+     "LRiverbedSilt01",
+     0.09377992718910841
+    ]
+   ]
+  ],
+  [
+   "E:/Tools/Fallout 4/DataUnpacked/Data\\textures\\Landscape\\Ground\\RubbleRock01_D.dds",
+   "Landscape\\Ground\\RubbleRock01_D.dds",
+   0.07974943962781894,
+   [
+    [
+     "LRubbleRock01Grass",
+     0.010087941231365565
+    ],
+    [
+     "LRubbleRock01",
+     0.06966149839645337
+    ]
+   ]
+  ],
+  [
+   "E:/Tools/Fallout 4/DataUnpacked/Data\\textures\\Landscape\\Ground\\RiverbedRocks_d.dds",
+   "Landscape\\Ground\\RiverbedRocks_d.dds",
+   0.06421472631568026,
+   [
+    [
+     "LRiverbedRocks01Grass",
+     0.06421472631568026
+    ]
+   ]
+  ],
+  [
+   "E:/Tools/Fallout 4/DataUnpacked/Data\\textures\\Landscape\\Ground\\DriedGrass01_D.dds",
+   "Landscape\\Ground\\DriedGrass01_D.dds",
+   0.04891005898290157,
+   [
+    [
+     "LDriedGrass01",
+     0.04891005898290157
+    ]
+   ]
+  ]
+ ],
+ "lv_engine": 8.054351936878435,
+ "mip_engine": 7.5849626416093505,
+ "lv_baked": 148.54439038608456,
+ "mip_baked": 5.0,
+ "lv_ours": 106.84979829359222,
+ "lv_van": 29.037478400673763,
+ "baked_period64_maxdiff": 0,
+ "engine_period64_maxdiff": 1,
+ "page": [
+  1106,
+  2049
+ ],
+ "dominant": {
+  "path": "E:/Tools/Fallout 4/DataUnpacked/Data\\textures\\Landscape\\Ground\\RiverbedRocks02Wet_d.dds",
+  "rel": "Landscape\\Ground\\RiverbedRocks02Wet_d.dds",
+  "share": 0.5259931158690531,
+  "edids": [
+   [
+    "LRiverbedRocks02Wet",
+    0.31272873066006335
+   ],
+   [
+    "LRiverbedRocks02WetGrass",
+    0.21326438520898974
+   ]
+  ],
+  "ltex": [
+   [
+    "LRiverbedRocks02Wet",
+    "000BC13D",
+    "000BC13E"
+   ],
+   [
+    "LRiverbedRocks02WetGrass",
+    "000BC13F",
+    "000BC13E"
+   ]
+  ]
+ }
+}

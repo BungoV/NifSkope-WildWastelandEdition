@@ -1,0 +1,11 @@
+subject    sheets     frames  A:band fail/worst   B:continuity fail/worst
+blast_n4   cards_r3    16        0 /   0.0%            4 /  20.6%
+blast_n4   cards       16        0 /   0.0%            0 /   0.0%
+blast_n8   cards_r3    64        0 /   0.0%           17 /  33.1%
+blast_n8   cards       64        0 /   0.0%            0 /   5.9%
+maple_n4   cards_r3    16        0 /   4.7%            3 /  39.9%
+maple_n4   cards       16        0 /   9.9%            2 /  29.3%
+dead_n4    cards_r3    16        0 /   0.0%            6 /  27.9%
+dead_n4    cards       16        0 /   0.0%            0 /   5.9%
+rock_n4    cards_r3    16        0 /   0.0%           16 /  57.2%
+rock_n4    cards       16        0 /   8.0%            1 /  13.9%

@@ -1,0 +1,27 @@
+pbr_r1 sibling_v6 resolver-self route=sibling path=Materials\WWPbrTest01\SiblingV6Duct.pbrm intent=sibling -> PASS
+pbr_r1 sibling_v6 census ABSENT -> FAIL
+pbr_r1 sibling_v5 resolver-self route=sibling path=Materials\WWPbrTest01\SiblingV5Duct.pbrm intent=sibling -> PASS
+pbr_r1 sibling_v5 census ABSENT -> FAIL
+pbr_r1 direct resolver-self route=direct path=Materials\WWPbrTest01\DirectV6Ducts.PBRM intent=direct -> PASS
+pbr_r1 direct census ABSENT -> FAIL
+pbr_r1 nifx resolver-self route=nifx path=Materials\WWPbrTest01\NifxTarget.pbrm intent=nifx -> PASS
+pbr_r1 nifx census ABSENT -> FAIL
+pbr_r1 direct_nifx resolver-self route=nifx path=Materials\WWPbrTest01\NifxTarget.pbrm intent=nifx -> PASS
+pbr_r1 direct_nifx census ABSENT -> FAIL
+pbr_r1 swap resolver-self route=swap path=Materials\WWPbrTest01\SwapDuct.pbrm intent=swap -> PASS
+pbr_r1 swap census ABSENT -> FAIL
+pbr_r1 fo76 resolver-self route=fo76 path=Materials\WWPbrTest01\Fo76BgsmDucts.BGSM intent=fo76 -> PASS
+pbr_r1 fo76 (b) census=fo76 Materials\WWPbrTest01\Fo76BgsmDucts.BGSM python=fo76 Materials\WWPbrTest01\Fo76BgsmDucts.BGSM -> PASS
+pbr_r1 fo76 served-by prog=pbrm_default.prog route=fo76 -> PASS
+pbr_r1 fo76 (a) legacy_px=132984 (0.1258 of frame) pbr_px=132984 kept=1.0000 floor 0.99 -> PASS
+pbr_r1 fo76 route-view colour=(1.00,0.50,0.00) want fo76=(1, 0.5, 0) prog=pbr_route.prog -> PASS
+pbr_r1 texfail resolver-self route=sibling path=Materials\WWPbrTest01\TexFailDucts1.pbrm intent=sibling -> PASS
+pbr_r1 texfail (b) census=sibling Materials\WWPbrTest01\TexFailDucts1.pbrm python=sibling Materials\WWPbrTest01\TexFailDucts1.pbrm -> PASS
+pbr_r1 texfail route=legacy refusal="texture load failed: baseColor wwpbrtest01\doesnotexist_d.dds; PBR binding aborted; resolved sibling Materials\WWPbrTest01\TexFailDucts1.pbrm not served" -> PASS
+pbr_r1 texfail (a) legacy_px=132984 (0.1258 of frame) pbr_px=132984 kept=1.0000 floor 0.99 -> PASS
+pbr_r1 texfail route-view colour=(0.00,1.00,0.00) want sibling=(0, 1, 0) prog=pbr_route.prog -> PASS
+pbr_r1 legacy resolver-self route=legacy path=- intent=legacy -> PASS
+pbr_r1 legacy census ABSENT -> FAIL
+pbr_r1 (d) nifx round trip nifx_rt_same.nifx: 272 bytes in, 272 out, identical=True -> PASS
+pbr_r1 (d-info) set+set then remove+restore: edit 342 bytes (differs=True), undo identical to input=True
+pbr_r1 SUMMARY 25 checks, 7 failures (a=2/2 b=2/9 d=1/1 resolver=9/9 routeview=2/2 served=1/1 texfail=1/1) -> FAIL

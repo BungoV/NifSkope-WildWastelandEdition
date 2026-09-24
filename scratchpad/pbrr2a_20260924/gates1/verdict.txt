@@ -1,0 +1,8 @@
+GATE grey: PASS  covered=132984 within188+-1=0.9925 mode=188
+GATE srgbtag: FAIL  max|d|=3 differing=0.03229 flat-vs-twin mean=34.2
+GATE srgbtag_legacy: FAIL  max|d|=4 differing=0.03047
+GATE cube (cube): PASS  PASS
+GATE window (window1): FAIL  FAIL |   FAIL (geometry) reopened where it was: 1960,71,1280,859 == 2500,200,420,600
+GATE window (window2): FAIL  FAIL |   FAIL (restart) reopened after the restart at 1960,71,1280,859 == 2500,200,420,600
+pictures: pic_legacy pic_studio pic_studio_agx
+R2A GATES: FAIL (grey=True, srgbtag=False, cube=True, window=False)

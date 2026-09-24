@@ -1,0 +1,75 @@
+---- PART 1: the segmented strip ----
+=== case 0 -- THE SHIPPED SHEET, air 4, separated (must read between 4 / 4)
+  tab bar x 0 top 35 w 383 h 35; header x 386; separator metric 3
+  segment 0 painted x 4 y 4 w 124 h 27 (right 127 bottom 30); tabRect x 0 w 128 h 35
+  segment 1 painted x 132 y 4 w 123 h 27 (right 254 bottom 30); tabRect x 128 w 127 h 35
+  segment 2 painted x 259 y 4 w 123 h 27 (right 381 bottom 30); tabRect x 255 w 128 h 35
+  THE FIVE: top 4  bottom 4  left 4  right-to-toolbar 4  between 4 / 4   (segment h 27)
+=== case 1 -- air 0, the 18:25:20 flush strip (must read every distance 0)
+  tab bar x 0 top 35 w 383 h 35; header x 386; separator metric 3
+  segment 0 painted x 0 y 0 w 128 h 35 (right 127 bottom 34); tabRect x 0 w 128 h 35
+  segment 1 painted x 128 y 0 w 127 h 35 (right 254 bottom 34); tabRect x 128 w 127 h 35
+  segment 2 painted x 255 y 0 w 128 h 35 (right 382 bottom 34); tabRect x 255 w 128 h 35
+  THE FIVE: top 0  bottom 0  left 0  right-to-toolbar 3  between 0 / 0   (segment h 35)
+=== case J4 -- THE CANDIDATE: joined, air 4 (want top/bottom/left/right 4, between 0 / 0, segment h 27)
+  tab bar x 0 top 35 w 383 h 35; header x 386; separator metric 3
+  segment 0 painted x 4 y 4 w 124 h 27 (right 127 bottom 30); tabRect x 0 w 128 h 35
+  segment 1 painted x 128 y 4 w 127 h 27 (right 254 bottom 30); tabRect x 128 w 127 h 35
+  segment 2 painted x 255 y 4 w 127 h 27 (right 381 bottom 30); tabRect x 255 w 128 h 35
+  THE FIVE: top 4  bottom 4  left 4  right-to-toolbar 4  between 0 / 0   (segment h 27)
+=== case J0 -- joined at air 0 (the way back: must equal case 1 exactly)
+  tab bar x 0 top 35 w 383 h 35; header x 386; separator metric 3
+  segment 0 painted x 0 y 0 w 128 h 35 (right 127 bottom 34); tabRect x 0 w 128 h 35
+  segment 1 painted x 128 y 0 w 127 h 35 (right 254 bottom 34); tabRect x 128 w 127 h 35
+  segment 2 painted x 255 y 0 w 128 h 35 (right 382 bottom 34); tabRect x 255 w 128 h 35
+  THE FIVE: top 0  bottom 0  left 0  right-to-toolbar 3  between 0 / 0   (segment h 35)
+
+---- PART 2: the dropdown arrow ----
+=== case A0 -- THE SHIPPED SHEET, no arrow air (must show the overlap: gap <= 0 on the icon-only buttons)
+  calibration: overhead 9 -> content 26
+  Global  : 80x35 at y 0; arrow cols 9 first 68; glyph last ink 18;  GAP 49
+  pivot   : 37x35 at y 0; arrow cols 9 first 25; glyph last ink 21;  GAP 3
+  snap    : 37x35 at y 0; arrow cols 9 first 25; glyph last ink 24;  GAP 0
+  grid    : 37x35 at y 0; arrow cols 9 first 25; glyph last ink 24;  GAP 0
+=== case A2 -- padding-right 2 on QToolButton[popupMode="2"]
+  calibration: overhead 9 -> content 26
+  Global  : 78x35 at y 0; arrow cols 9 first 66; glyph last ink 18;  GAP 47
+  pivot   : 35x35 at y 0; arrow cols 9 first 23; glyph last ink 21;  GAP 1
+  snap    : 35x35 at y 0; arrow cols 9 first 23; glyph last ink 24;  GAP -2
+  grid    : 35x35 at y 0; arrow cols 9 first 23; glyph last ink 24;  GAP -2
+=== case A4 -- padding-right 4 on QToolButton[popupMode="2"]
+  calibration: overhead 9 -> content 26
+  Global  : 80x35 at y 0; arrow cols 9 first 68; glyph last ink 18;  GAP 49
+  pivot   : 37x35 at y 0; arrow cols 9 first 25; glyph last ink 21;  GAP 3
+  snap    : 37x35 at y 0; arrow cols 9 first 25; glyph last ink 24;  GAP 0
+  grid    : 37x35 at y 0; arrow cols 9 first 25; glyph last ink 24;  GAP 0
+=== case A6 -- padding-right 6 on QToolButton[popupMode="2"]
+  calibration: overhead 9 -> content 26
+  Global  : 82x35 at y 0; arrow cols 9 first 70; glyph last ink 18;  GAP 51
+  pivot   : 39x35 at y 0; arrow cols 9 first 27; glyph last ink 21;  GAP 5
+  snap    : 39x35 at y 0; arrow cols 9 first 27; glyph last ink 24;  GAP 2
+  grid    : 39x35 at y 0; arrow cols 9 first 27; glyph last ink 24;  GAP 2
+=== case A8 -- padding-right 8 on QToolButton[popupMode="2"]
+  calibration: overhead 9 -> content 26
+  Global  : 84x35 at y 0; arrow cols 9 first 72; glyph last ink 18;  GAP 53
+  pivot   : 41x35 at y 0; arrow cols 9 first 29; glyph last ink 21;  GAP 7
+  snap    : 41x35 at y 0; arrow cols 9 first 29; glyph last ink 24;  GAP 4
+  grid    : 41x35 at y 0; arrow cols 9 first 29; glyph last ink 24;  GAP 4
+=== case A10 -- padding-right 10 on QToolButton[popupMode="2"]
+  calibration: overhead 9 -> content 26
+  Global  : 86x35 at y 0; arrow cols 9 first 74; glyph last ink 18;  GAP 55
+  pivot   : 43x35 at y 0; arrow cols 9 first 31; glyph last ink 21;  GAP 9
+  snap    : 43x35 at y 0; arrow cols 9 first 31; glyph last ink 24;  GAP 6
+  grid    : 43x35 at y 0; arrow cols 9 first 31; glyph last ink 24;  GAP 6
+=== case A12 -- padding-right 12 on QToolButton[popupMode="2"]
+  calibration: overhead 9 -> content 26
+  Global  : 88x35 at y 0; arrow cols 9 first 76; glyph last ink 18;  GAP 57
+  pivot   : 45x35 at y 0; arrow cols 9 first 33; glyph last ink 21;  GAP 11
+  snap    : 45x35 at y 0; arrow cols 9 first 33; glyph last ink 24;  GAP 8
+  grid    : 45x35 at y 0; arrow cols 9 first 33; glyph last ink 24;  GAP 8
+=== case A14 -- padding-right 14 on QToolButton[popupMode="2"]
+  calibration: overhead 9 -> content 26
+  Global  : 90x35 at y 0; arrow cols 9 first 78; glyph last ink 18;  GAP 59
+  pivot   : 47x35 at y 0; arrow cols 9 first 35; glyph last ink 21;  GAP 13
+  snap    : 47x35 at y 0; arrow cols 9 first 35; glyph last ink 24;  GAP 10
+  grid    : 47x35 at y 0; arrow cols 9 first 35; glyph last ink 24;  GAP 10

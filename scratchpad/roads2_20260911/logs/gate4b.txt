@@ -1,0 +1,27 @@
+
+AUC BRIGHTNESS, tie-averaged (darker = higher)
+family            texels                vanilla                   rung                 raised                  blend
+road_elevated      72264  0.546 [0.442..0.554]  0.883 [0.438..0.569]  0.934 [0.434..0.572]  0.572 [0.426..0.571]
+road_ground        27988  0.628 [0.475..0.618]  0.715 [0.479..0.591]  0.748 [0.474..0.598]  0.819 [0.466..0.577]
+nonroad           145001  0.506 [0.483..0.534]  0.541 [0.507..0.545]  0.553 [0.509..0.548]  0.468 [0.484..0.554]
+twins (ground)                     0.494..0.530           0.475..0.533           0.471..0.533           0.522..0.528
+
+AUC GREYNESS, tie-averaged (greyer = higher)
+family            texels                vanilla                   rung                 raised                  blend
+road_elevated      72264  0.437 [0.445..0.531]  0.355 [0.447..0.489]  0.487 [0.460..0.496]  0.480 [0.432..0.513]
+road_ground        27988  0.731 [0.396..0.616]  0.534 [0.445..0.571]  0.436 [0.467..0.555]  0.419 [0.469..0.557]
+nonroad           145001  0.545 [0.448..0.519]  0.521 [0.477..0.506]  0.531 [0.482..0.512]  0.548 [0.491..0.512]
+twins (ground)                     0.480..0.518           0.495..0.521           0.499..0.501           0.484..0.520
+
+AUC GREYNESS, argsort as hw_tile.py wrote it
+family            texels                vanilla                   rung                 raised                  blend
+road_elevated      72264  0.481 [0.414..0.576]  0.360 [0.456..0.491]  0.486 [0.465..0.507]  0.488 [0.448..0.526]
+road_ground        27988  0.757 [0.417..0.624]  0.532 [0.445..0.574]  0.432 [0.460..0.564]  0.410 [0.476..0.559]
+nonroad           145001  0.566 [0.465..0.508]  0.524 [0.481..0.505]  0.535 [0.484..0.515]  0.551 [0.496..0.505]
+twins (ground)                     0.473..0.521           0.494..0.517           0.495..0.496           0.482..0.516
+
+CLEARANCE above the top of the displaced floor (tie-averaged brightness); positive = the family is visible in the sheet
+family               vanilla        rung      raised       blend
+road_elevated         -0.009      +0.314      +0.362      +0.001
+road_ground           +0.011      +0.124      +0.151      +0.242
+nonroad               -0.028      -0.005      +0.004      -0.086

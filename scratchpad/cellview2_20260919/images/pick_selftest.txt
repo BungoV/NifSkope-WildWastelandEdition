@@ -1,0 +1,18 @@
+# WW_CELLPICK_TEST -- lane CELLVIEW2
+PASS  a cell scene is open and its placement table is filled   [240 entries]
+PASS  the dock exists, with the flat Name|Value tree and the summary line
+PASS  at least one placement has a box with volume
+PASS  the click is OWNED by the cell view while the master is on
+PASS  the ray picks a placement   [index 84 of 240, 10 boxes entered]
+PASS  the pick is the one an independent walk of the same boxes gives (nearest, ties to the smaller)   [picked 84, independent answer 84]
+PASS  the dock shows exactly the rows rowsFor() returns   [19 in the dock, 19 from rowsFor()]
+PASS  the dock's first row carries the PICKED reference's form id   [Reference = 0x00068D9F]
+PASS  the dock says how many boxes were under the cursor   [10 boxes under the cursor; the nearest, smallest one is shown.]
+PASS  the highlight shape is in the document
+PASS  the highlight MOVED onto the picked placement's box   [centre -81940.4 31711.7 6107.3, radius 3659.97]
+PASS  RED: a ray pointed away picks nothing   [index -1]
+PASS  RED: the miss is still owned, so the welded bucket is never selected instead
+PASS  RED: the dock says so in one line   [Nothing under the cursor.]
+PASS  RED: the highlight collapsed to a point (the block stays)   [radius 0]
+PASS  RED: with the master row unticked the click is NOT taken
+rows 16 failures 0

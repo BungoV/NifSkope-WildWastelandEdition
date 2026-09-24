@@ -1,0 +1,20 @@
+audit AUDIT1 complete, all seven steps and the report on disk.
+
+exe          release/NifSkope.exe  48f7f1ab0e563bfe24aeb2003dc8b72cc41a3fd1
+             22,567,424 B  2026-09-17 19:30:16
+rung         release/NifSkope.before_audit1.exe  a843fca68c18c2740efddcb20e9fe715b7732a22
+             (the audited exe's own bytes, the sha1 the addendum names)
+sources      0 files under src/ newer than the exe; BUILDING cleared
+report       scratchpad/audit1_20260916/lane_audit1_report.md  132,451 B, CR 0
+             Summary + sections 0, L, 1, 2, 3, 4, 5, 6, 7; no placeholder survives
+board        27 gates on the fixed exe: 24 green, 3 red, all three pre-registered
+             known reds (ground_cover 7, byte_gate 3, octahedral/CARDWIDTH 1)
+             5 gates red -> green, including all three addendum standing reds
+writer       region (a) re-baked on the fixed exe: 55 of 55 byte-identical
+invariants   15 invariants re-run, nothing moved; 33/0 on the bake record,
+             100/0 over all 99 .lodm sidecars after the reader was widened
+pictures     images/native_sanctuary.png, native_coast.png, native_urban.png,
+             lodt_colour_level4.png, lodt_colour_level2.png, leaf_sidebyside.png
+ledger       ten AUDIT1 entries at the head of MISTAKES.md
+not touched  WW_CHANGES.md, HANDOFF.md, git (no commit, no stash), and every
+             release/NifSkope.before_*.exe / archlock1_rung / inuse copy (14)

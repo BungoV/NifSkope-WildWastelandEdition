@@ -1,0 +1,14 @@
+FO4 esm 330776576 bytes
+STAT records: 19368
+STAT records carrying MNAM: 3436
+MNAM byte-size distribution: [(1040, 3436)]
+
+Named examples (requested EDIDs):
+  ChurchBellTower01            NOT FOUND or no MNAM
+  DiamondStadiumLight01        NOT FOUND or no MNAM
+  SubwayLampPost01             NOT FOUND or no MNAM
+
+Fallback examples (first STATs with MNAM>=1040B found):
+  00249DE0 MetalIntCeilingA1x1MidFlrOnly01_LOD MNAM=1040B slots=['LOD\\Buildings\\MetalKit\\MetalIntCeilingA1x1Mid01_LOD_0.nif', 'LOD\\Buildings\\MetalKit\\MetalIntCeilingA1x1Mid01_LOD_0.nif', '', '']
+  00249C04 SWParkStr02_HasLOD           MNAM=1040B slots=['LOD\\Landscape\\Sidewalks\\Park\\SWParkStr02_LOD_0.nif', 'LOD\\Landscape\\Sidewalks\\Park\\SWParkStr02_LOD_0.nif', '', '']
+  00249C03 SWParkStr01_HasLOD           MNAM=1040B slots=['LOD\\Landscape\\Sidewalks\\Park\\SWParkStr01_LOD_0.nif', 'LOD\\Landscape\\Sidewalks\\Park\\SWParkStr01_LOD_0.nif', '', '']

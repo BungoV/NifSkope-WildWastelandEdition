@@ -1,0 +1,102 @@
+[
+ {
+  "id": "LOW1",
+  "class": "LOW",
+  "x": 25984.0,
+  "y": -45056.0,
+  "z": 528.0,
+  "boxDist": 269.79767666451517,
+  "relief": 160.0,
+  "footTop": null
+ },
+ {
+  "id": "LOW2",
+  "class": "LOW",
+  "x": 23296.0,
+  "y": -44288.0,
+  "z": 536.0,
+  "boxDist": 277.6538798381371,
+  "relief": 32.0,
+  "footTop": null
+ },
+ {
+  "id": "LOW3",
+  "class": "LOW",
+  "x": 21888.0,
+  "y": -44160.0,
+  "z": 592.0,
+  "boxDist": 304.57695449800667,
+  "relief": 48.0,
+  "footTop": null
+ },
+ {
+  "id": "FLAT1",
+  "class": "FLAT",
+  "x": 27136.0,
+  "y": -41088.0,
+  "z": 680.0,
+  "boxDist": 490.5717392146619,
+  "relief": 0.0,
+  "footTop": null
+ },
+ {
+  "id": "FLAT2",
+  "class": "FLAT",
+  "x": 27392.0,
+  "y": -38144.0,
+  "z": 688.0,
+  "boxDist": 538.0715525375163,
+  "relief": 8.0,
+  "footTop": null
+ },
+ {
+  "id": "FLAT3",
+  "class": "FLAT",
+  "x": 23808.0,
+  "y": -41984.0,
+  "z": 672.0,
+  "boxDist": 473.7996910319198,
+  "relief": 8.0,
+  "footTop": null
+ },
+ {
+  "id": "ST1",
+  "class": "ST",
+  "x": 26368.0,
+  "y": -38528.0,
+  "z": 680.0,
+  "boxDist": 257.0938276064262,
+  "relief": 8.0,
+  "footTop": null
+ },
+ {
+  "id": "ST2",
+  "class": "ST",
+  "x": 25856.0,
+  "y": -39168.0,
+  "z": 680.0,
+  "boxDist": 250.6440079188542,
+  "relief": 56.0,
+  "footTop": null
+ },
+ {
+  "id": "FOOT1",
+  "class": "FOOT",
+  "x": 22144.0,
+  "y": -39680.0,
+  "z": 880.0,
+  "boxDist": 8.938856835346087,
+  "relief": 192.0,
+  "footTop": null
+ },
+ {
+  "id": "FOOT2",
+  "class": "FOOT",
+  "x": 25600.0,
+  "y": -41216.0,
+  "z": 656.0,
+  "boxDist": 9.490336829800071,
+  "relief": 8.0,
+  "footTop": null
+ }
+]
