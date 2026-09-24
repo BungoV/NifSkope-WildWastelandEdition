@@ -27,3 +27,14 @@
   unresolved over 10 arrays, cardCorpusHash 65d2bf61ff72c5b2 == contract recomputed, FORCE_CARD 3446 of 3526, 0 on a card-less base.
 - docs/LODGEN_NATIVE_LODO_LODI.md: p4_docs.py, 8 edits (new 4.13; 3 hash row, cardCount row, cardLayer; 4.1 flags; 4.4; 5 table; deviation 5).
 - Skill nifskope-ww-worktree-build: section 6 added (make -n proof, REVISION define, touch, card driver port 45917, set file names).
+
+## 21:5x gate run 1: RESULT PASS (0 failures), exe 1ff89a08, rung 0af99c99
+- G1 cardCount 23 == 23 tree bases with a set (of 2970 bases); rows naming a layer are exactly those.
+- G2 0 of 23 layers unresolved over 10 arrays.
+- G3 hash 65d2bf61ff72c5b2 == contract; one albedo texel of 00038599 flipped -> f1b93d3ee8c01b3a == contract.
+- FORCE_CARD 3446 of 3526 instances, 0 on a card-less base.
+- G4 --native-verify on cardCount 23->24 (CRC recomputed): rc 1 "cardCount 24 but 23 base row(s) name a card layer"; unedited pair rc 0.
+- ID: bake without --impostors, 34 files byte-identical new vs rung (version word did not move either).
+- RED on the rung: cardCount 0, cardCorpusHash 0, forced 0 -> G1/G2/G3/FORCE_CARD all FAIL there; bumped rung .lodo refused only by pairing (lodoIdentity), never by cardCount.
+- docs/FO4CS_IMPROVED_LOD_PLAN.md rows 11 + 28 closed with these numbers (p5_plan.py).
+- Kept-green spells running (btfxkz7if).
