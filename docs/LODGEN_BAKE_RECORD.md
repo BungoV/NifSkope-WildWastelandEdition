@@ -310,8 +310,12 @@ bake-record endAgrees 0|1              ← the end line, re-counted off the disk
 bake-record normalisedLines <n>        bake-record normalisedSha1 <sha1>
 ```
 
-Given a plugin list — positionally, or via `--plugins-txt` / `--mo2` — it also
-diffs:
+Given a plugin list — positionally, or via `--plugins-txt` / `--mo2` /
+`--mo2-profile` — it also diffs. (`--mo2-profile <profile folder>` reads MO2's
+`modlist.txt` + `plugins.txt` off disk without usvfs: Fallout4.esm, the DLC and CC
+masters present in Data, then each `*` plugin as the FULL PATH found in overwrite,
+the enabled mod folders top-down, then Data -- so the record names every plugin
+where it really sits. `--print-source` prints the list and the resource stack.)
 
 ```
 bake-record diffAgainst <list>

@@ -226,7 +226,7 @@ chunk whose assets changed under it.
 ```
 --out-dir  --tex-dir  --data-root  --incremental
 --threads  --chunk-threads  --preview-dir
---resource --plugins-txt
+--resource --plugins-txt  --mo2-profile  --mo2-mods
 --native   --native-mesh-report
 ```
 
