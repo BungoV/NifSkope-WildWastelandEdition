@@ -29868,9 +29868,12 @@ void NifSkope::initMenu()
 						auto * srcStatus = findChild<QLabel *>( QStringLiteral( "LodgenSourceStatus" ) );
 						auto * genBtn = findChild<QPushButton *>( QStringLiteral( "LodgenGenerateButton" ) );
 						auto * sumLbl = findChild<QLabel *>( QStringLiteral( "LodgenSummaryLabel" ) );
-						check( "a source selector offers Specified and Mod Organizer 2",
-							source && source->count() == 2
-							&& source->itemText( 1 ).contains( QLatin1String( "Mod Organizer" ) ) );
+						// three since lane LOADORDER1 (2026-09-24): the profile read off disk
+						check( "a source selector offers Specified, Mod Organizer 2 and a Mod Organizer 2 profile",
+							source && source->count() == 3
+							&& source->itemText( 1 ).contains( QLatin1String( "Mod Organizer" ) )
+							&& source->itemData( 2 ).toInt() == 2
+							&& source->itemText( 2 ).contains( QLatin1String( "profile" ) ) );
 						if ( source && resList && srcStatus && genBtn && sumLbl ) {
 							const int keepSource = source->currentIndex();
 							source->setCurrentIndex( 0 );

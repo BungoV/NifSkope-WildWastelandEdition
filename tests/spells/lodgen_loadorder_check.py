@@ -215,5 +215,8 @@ if __name__ == '__main__':
         swap(*sys.argv[2:6])
     elif cmd == 'record':
         record(*sys.argv[2:6])
+    elif cmd == 'counts':
+        pl, st = expected(*sys.argv[2:5])[:2]
+        print('%d %d' % (len(pl), len(st)))
     elif cmd == 'untick':
         untick(*sys.argv[2:5])

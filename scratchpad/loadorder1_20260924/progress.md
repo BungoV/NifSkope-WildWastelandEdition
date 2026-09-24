@@ -43,3 +43,11 @@
 - 21:30 kept-green: resources 4/0 PASS; bakerec FAIL only (f) 2 of 12 stock files vs the OLD rung before_bakerec1 -- (f) vs this lane's rung PASS 12 identical (pre-existing drift, not mine); defaults 31/1, the (d) C-line floor, same FAIL on this lane's rung (pre-existing).
 - 21:30 SCOPE CHANGE from the director: panel MO2-profile input REQUIRED + output/R2 questions + panel gates.
 - 21:36 panel leg built 21:36:07 BUILD-RC=0 (nifskope_ui.o + lodgenmanager.o), exe sha1 c7a96c2fcbb7b5ff86d616c45e424da45fcf11b3. Source row: 3rd choice 'Mod Organizer 2 profile' + Profile / Mods folder rows + read-only 'Mod order' list; self-test leg WW_LODGEN_MO2DISK; spell lodgen_panel_mo2.sh.
+- 21:38 first panel run: whole suite 1 failure (the structural check still expected TWO source items) and the CLI comparison printed 0 plugins (a copied profile has no ModOrganizer.ini, so the CLI call needs --data-root). Fixed: patch_selftest2.py (3 items, item 2 = profile), --data-root in the spell. Rebuilt 21:38:51 BUILD-RC=0 (nifskope_ui.o only).
+
+## 21:45 panel gates (exe 21:38:51, sha1 5ff25b1bcfdcc88c4ecd1401df2ea0bfa204ecb4)
+- lodgen_panel_mo2.sh: 4 checks, 0 failures (gate_panel.txt). MO2DISK leg 14/0; whole WW_LODGEN_TEST 142/0; GUI plugin list == CLI --print-source path for path (46). RED: rung 0 of floor 14 MO2DISK (rung suite 128/0).
+- GUI bake (one chunk -20,24 dim 4, FO4CS target, output = stand-in gate/panel/FO4CSLOD): 3.8 s, 19 files, 0 .BTO/.BTR, no lodgen_bto_scratch left. FO4CS root = <mod>/FO4CSLOD/Commonwealth, so with the mod folder named FO4CSLOD the disk path is mods/FO4CSLOD/FO4CSLOD/Commonwealth = Data/FO4CSLOD/Commonwealth in game (correct, not a bug).
+- R2: under the FO4CS target the panel already writes the FO4CS set only (.BTR section hidden, .BTO built in scratch and dropped, keepBto OFF). No new control needed.
+- Gap (pre-existing): the panel writes no .lodb bake record; that is CLI only.
+- G1-G5 rerun on the final exe: 24 checks, 0 failures (gate_final.txt).
