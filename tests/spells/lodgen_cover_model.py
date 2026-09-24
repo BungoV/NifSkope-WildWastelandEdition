@@ -67,7 +67,8 @@ class Esm(object):
 		with open(path, 'rb') as f:
 			self.buf = f.read()
 		self.lands = {}          # (cx, cy) -> parsed paint
-		self.ltex = {}           # formid -> {'gnam': [...], 'edid': str}
+		self.ltex = {}           # formid -> {'gnam': [...], 'edid': str, 'tnam': formid}
+		self.txst = {}           # formid -> {'tx00','tx01','tx07','mnam'}
 		self.gras = {}           # formid -> {'density':, 'maxSlope':, 'modl':, 'dataSize':}
 		self.ltexOrder = []
 		self.grasOrder = []
@@ -100,14 +101,26 @@ class Esm(object):
 				elif t == b'LAND' and cell is not None and world == worldTarget:
 					self.lands[cell] = self.parse_land(body)
 				elif t == b'LTEX':
-					rec = {'gnam': [], 'edid': ''}
+					rec = {'gnam': [], 'edid': '', 'tnam': 0}
 					for ft, fd in read_fields(body):
 						if ft == b'EDID':
 							rec['edid'] = fd.rstrip(b'\0').decode('latin-1')
 						elif ft == b'GNAM' and len(fd) >= 4:
 							rec['gnam'].append(struct.unpack_from('<I', fd, 0)[0])
+						elif ft == b'TNAM' and len(fd) >= 4:
+							# the TXST this landscape texture names; the mask model
+							# needs TX07 and MNAM, which the cover model never did
+							rec['tnam'] = struct.unpack_from('<I', fd, 0)[0]
 					self.ltex[formid] = rec
 					self.ltexOrder.append(formid)
+				elif t == b'TXST':
+					rec = {'tx00': '', 'tx01': '', 'tx07': '', 'mnam': '', 'edid': ''}
+					for ft, fd in read_fields(body):
+						key = {b'EDID': 'edid', b'TX00': 'tx00', b'TX01': 'tx01',
+							   b'TX07': 'tx07', b'MNAM': 'mnam'}.get(ft)
+						if key:
+							rec[key] = fd.rstrip(b'\0').decode('latin-1')
+					self.txst[formid] = rec
 				elif t == b'GRAS':
 					rec = {'density': 0, 'minSlope': 0, 'maxSlope': 0, 'modl': '',
 						   'dataSize': -1, 'edid': ''}

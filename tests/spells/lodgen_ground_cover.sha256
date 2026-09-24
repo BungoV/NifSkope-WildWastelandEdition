@@ -1,0 +1,43 @@
+# THE FROZEN --no-cover REFERENCE for tests/spells/lodgen_ground_cover.sh check C1.
+#
+# What it is: the sha256 of the three chunk sheets of Sanctuary chunk
+# Commonwealth.4.-20.24, baked with ground cover OFF. C1's claim is that with the
+# feature off NOT ONE BYTE MOVES, and "not one byte moved" measured against a
+# fresh bake of the build under test is a bake compared with itself. These three
+# hashes are the other side of that comparison and they are meant to outlive the
+# build that produced them: a later build that changes any of the three has
+# changed the far terrain with the feature off, and C1 is where that shows up.
+#
+# WRITTEN 2026-09-16 by lane GENSMALL1 (director ROW C, after bungo lifted his
+# hold on freezing it).
+#
+# The build it was taken from:
+#   release/NifSkope.exe   22,300,160 bytes   2026-09-16 13:52:56
+#   sha256 4ad6ee0c4c844600cf361149c6b00fcdb6aaeeebd8bfec2905f596912a692ee0
+#
+# Why that build and not the 12:49:19 one the director named as the fallback:
+# it is the exe on disk, it is the one every gate in that lane's report ran on,
+# and its stock bake is not lane-specific. Two independent measurements say so:
+#   * lodgen_native_baseline.sh --check, same day: 25 files in the baseline, 25
+#     baked, 0 differ, against a baseline frozen on the 2026-09-10 03:57:46 exe;
+#   * resource_ext.sh leg 5: a stock bake of (-20,24) dim 4 under this exe and
+#     under the pre-lane rung, cmp'd file for file, 0 of them differ.
+# So these hashes are the fork's --no-cover output, not this build's.
+#
+# The stated precondition of the freeze, met on the same exe before it was
+# written: tests/spells/lodgen_identity.sh RESULT PASS (2026-09-16 14:2x).
+#
+# The bake: the spell's own `plain` bake -- worldspace 3C, --terrain-region
+# -20 24 -20 24, --dim 4, --no-cover, the ruled defaults otherwise. Each sheet is
+# 174,888 bytes and the _data sheet is still DXT1, which C1 checks separately, so
+# a re-freeze that quietly turned one of them into BC3 would be caught by size
+# and fourCC before it ever reached these lines.
+#
+# TO RE-FREEZE (only when a ruling deliberately moves the far terrain, and say
+# which ruling in this header): run the spell, take the three lines it prints
+# above check C1, and replace the three below. Do not edit one line by hand.
+#
+# sha256                                                            file
+05ee9489e68d03bf0c3f41df841c53661faec4324d70f5b4bfaeeddf4658a0b2  Commonwealth.4.-20.24.DDS
+5b5e55e3279c0fc78169490c363ef46f1a0651247dde2e3b0977b3b40fff674b  Commonwealth.4.-20.24_msn.DDS
+6a91bdfd9bf5b9bc03e43d68ccfd7d7a57fb806fedd1343824b3f87a63bb413a  Commonwealth.4.-20.24_data.DDS

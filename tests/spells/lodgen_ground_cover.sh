@@ -93,7 +93,14 @@ bake() {   # bake <outname> <x0> <y0> <x1> <y1> <extra...>
 	local name="$1"; shift
 	local x0="$1" y0="$2" x1="$3" y1="$4"; shift 4
 	mkdir -p "$W/$name/obj" "$W/$name/tex"
-	"$NS" -no-gui lodgen "$ESM" --worldspace 3C \
+	# A harness forces the state it measures. Lane TILING3 made
+	# --land-detail-source vanilla the DEFAULT: the _msn of a chunk with a
+	# shipped vanilla sheet becomes vanillas file byte for byte, which is BC5
+	# (349,680 bytes) and not our DXT1 (174,888). That is the ruling working,
+	# not a cover regression, and this harness measures ground cover -- so it
+	# pins the source OFF. The default is gated in its own lane: F2 off==rung
+	# bytes, the _msn cmp==vanilla census, and the empty-root control.
+	"$NS" -no-gui lodgen "$ESM" --worldspace 3C --land-detail-source none \
 		--terrain-region "$x0" "$y0" "$x1" "$y1" --dim 4 \
 		--out-dir "$W/$name/obj" --tex-dir "$W/$name/tex" --data-root "$DATA" \
 		"$@" > "$W/$name.log" 2>&1

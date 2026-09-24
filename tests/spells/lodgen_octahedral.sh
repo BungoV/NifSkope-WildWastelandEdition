@@ -74,13 +74,40 @@ for s in albedo normal gsaos g; do
 done
 ok "the four legacy sheets were written (albedo, normal, gsaos, g)"
 [ -e "$W/bake/${BASE}_oct_e.png" ] && bad "a pbr-name emissive sheet was written by the legacy bake"
-# `oct N tw th halfW halfH cx cy cz span family base` - the family is no longer
-# the last token, the RUN's chosen resolution is
-grep -qE "^oct 4 .* legacy 64$" "$W/bake/${BASE}.txt" && ok "the meta's oct line says legacy and names the run's 64 px" || bad "no legacy oct line naming the run's resolution in the meta"
+# `oct N tw th halfW halfH cx cy cz span family base conv` - neither the family
+# nor the RUN's chosen resolution is the last token any more: the VIEW
+# CONVENTION token is (2026-09-19, the azimuth repair). RE-BASED from
+# `legacy 64$`, which was written when `base` ended the line. A set whose line
+# lacks `spec1` was baked with the azimuth turned by 180 degrees.
+grep -qE "^oct 4 .* legacy 64 spec1$" "$W/bake/${BASE}.txt" && ok "the meta's oct line says legacy, names the run's 64 px and declares the spec1 view convention" || bad "no legacy oct line naming the run's resolution and the spec1 convention in the meta"
 NCAND="$(grep -c "^lodm .* none " "$W/bake/${BASE}.txt")"
 echo "  .lodm candidates looked for: $NCAND"
 [ "$NCAND" -ge 1 ] && ok "the meta names every .lodm candidate it looked for" || bad "no lodm candidate lines in the meta"
 grep -q "^model " "$W/bake/${BASE}.txt" && ok "the meta names the model it photographed" || bad "no model line in the meta"
+# THE CAMERA THE SHEET WAS PHOTOGRAPHED THROUGH, in the bake's own words and
+# read back off the live GLView, not off what the hook asked for. Every extent
+# this sidecar records is a world measurement taken off viewport pixels through
+# ONE units-per-pixel constant, and only an orthographic camera makes that true;
+# until 2026-09-10 nothing headless ever called setProjection and every card was
+# drawn through a 60-degree perspective frustum while being measured as if it
+# were not (lane HOOKCAM). The floor for this check is bake 4's perspective
+# control below, which must say `persp` on the same line.
+grep -qx "projection ortho" "$W/bake/${BASE}.txt" && ok "the meta says the sheet was photographed orthographically" || bad "the meta does not say 'projection ortho' (got: $(grep '^projection' "$W/bake/${BASE}.txt" | head -1))"
+# 'orthofit <asked> <achieved> <persp 0|1>': the fit read back through the same
+# accessor the frames are sized with, and the projection it was read through.
+# The first two are true in either projection -- both are Dist/Zoom -- which is
+# exactly why the third field exists.
+OF="$(grep "^orthofit " "$W/bake/${BASE}.txt" | head -1)"
+echo "  bake 1 $OF"
+"$PY" - "$OF" <<'PYEOF'
+import sys
+f = sys.argv[1].split()
+ask, got, persp = float(f[1]), float(f[2]), int(f[3])
+ok = persp == 0 and abs(got - ask) <= 1e-3 * max(1.0, ask)
+print(('  ok   ' if ok else '  FAIL ') + 'the fit was read back through an ORTHOGRAPHIC camera (asked %.4f, achieved %.4f, persp %d)' % (ask, got, persp))
+sys.exit(0 if ok else 1)
+PYEOF
+[ $? -eq 0 ] || fails=$((fails + 1))
 HID="$(grep -c "^hidden " "$W/bake/${BASE}.txt")"
 EXP="$("$PY" - "$MESH" <<'PYEOF'
 import sys, io, contextlib, re
@@ -225,47 +252,146 @@ print('  union of the %d silhouette boxes: %d x %d texels; inner rect %d x %d (l
 check('the silhouette fills at least 85% of the inner rect on the long axis',
       unionL >= 0.85 * INNER_L)
 check('and does not exceed it (the padding is not eaten)', unionL <= INNER_L and unionS <= INNER_S)
-# THE SHORT AXIS IS AS NARROW AS IT CAN BE. A long-axis floor alone cannot see
-# the defect this law was written for -- the old five-rung ladder left
-# TreeBlasted05's silhouette in 4 texels of a 32-texel frame while its LONG axis
-# was fine. The discriminating statement is that the frame is the SMALLEST
-# multiple of 16 that does not crop, so ONE RUNG NARROWER WOULD HAVE CUT it.
-# Stated as an AIR BUDGET rather than as tightness against the frame-resolution
-# silhouette, because the two are not the same thing and the difference is not a
-# defect: the frame is sized from pass one's VIEWPORT-resolution measurement, so
-# that a faint extremity a fraction of a texel wide is never cropped, and the
-# frame-resolution silhouette is therefore always a little smaller. What the law
-# does promise is that the quantisation costs AT MOST ONE RUNG: 16 texels.
+# THE SHORT AXIS IS AS NARROW AS IT CAN BE, stated as the ladder's own law: the
+# short side is the SMALLEST multiple of 16 in [16, long] whose inner rect is not
+# narrower, in proportion, than the silhouette pass one measured -- so ONE RUNG
+# NARROWER WOULD HAVE CROPPED IT.
 #
-# The old five-rung ladder cannot pass this. TreeBlasted05 sat in a 32x32 frame
-# (inner 24) with a 4-texel silhouette -- 20 texels of air, five rungs' worth.
+# It was an AIR BUDGET in texels ("at most one rung, 16") until 2026-09-09
+# evening, calibrated on the union of the frames' own silhouette boxes. That
+# proxy stopped meaning what it says when PER-FRAME POSITIONING landed: the union
+# used to be wider than any single view, because the views sat at different
+# offsets inside the frame, and now it IS the widest single view -- so the same
+# bake reads one texel narrower and the budget tips over its own boundary with
+# nothing having got worse (measured: 29 texels of silhouette before, 28 after,
+# against a bound of 16 texels of air). The law itself is checkable directly,
+# because the `framefit` line records what the ladder was fed, so it is now
+# checked directly and the air is printed as information.
+#
+# The old five-rung ladder cannot pass this either: TreeBlasted05 sat in a 32x32
+# frame whose inner rect was 24 texels against a silhouette that needed 4, three
+# rungs above the smallest that fits.
 SHORT = min(TW, TH)
-print('  air on the short axis: inner %d, silhouette %d -> %d texels (one rung is 16)'
+print('  air on the short axis: inner %d, silhouette %d -> %d texels'
+      ' (information; the ladder\'s law is the check below)'
       % (INNER_S, unionS, INNER_S - unionS))
-check('the short side carries at most ONE rung of air, which is the bound the quantisation itself sets',
-      INNER_S - unionS < 16)
+_ff = [l.split() for l in open(f'{d}/{base}.txt').read().splitlines() if l.startswith('framefit ')]
+if not _ff:
+    check('the meta carries the framefit line the aspect ladder is checked from', False)
+else:
+    _sx, _sy = float(_ff[0][1]), float(_ff[0][2])
+    LONG = max(TW, TH)
+    wantRatio = min(_sx, _sy) / max(_sx, _sy)
+    il = LONG - 2 * padOf(LONG)
+    rungs = [(_s, (_s - 2 * padOf(_s)) / il) for _s in range(16, LONG + 1, 16)]
+    fits = [r for r in rungs if r[1] >= wantRatio]
+    smallest = fits[0][0] if fits else LONG
+    below = [r for r in rungs if r[0] < smallest]
+    print('  aspect ladder: silhouette %.1f x %.1f units wants a short/long inner ratio of %.4f;'
+          ' rungs %s; smallest that does not crop %d, shipped %d'
+          % (_sx, _sy, wantRatio, ['%d:%.3f' % r for r in rungs], smallest, SHORT))
+    check('the short side is the SMALLEST multiple of 16 whose inner rect does not crop the measured silhouette',
+          SHORT == smallest)
+    # the floor on the other side: one rung narrower must actually crop, or the
+    # statement above is one a frame of almost any width could satisfy
+    check('and one rung narrower would have cropped it (the ladder sits on its floor, not merely on a rung)',
+          not below or below[-1][1] < wantRatio)
 
-# MIP BLEED, ON THE GAP RULE. Frames never mix during CONSTRUCTION -- the box
+# PER-FRAME POSITIONING (bungo, 2026-09-09 evening). Every frame shifts its own
+# silhouette to its own centre, so the frame holds the WIDEST SINGLE VIEW rather
+# than the union of all of them, and the shift is written to the sidecar as one
+# `frameoff i j ox oy` line per frame -- model units, along that view's own right
+# and up axes -- so a reader puts the quad back where the model was.
+#
+# Three statements, and each needs the others:
+#   1. every frame's silhouette IS centred in its frame, to within a texel;
+#   2. the sidecar's offsets, converted to texels and added back, would put those
+#      centres where a fixed-centre bake had them -- and that spread must be MORE
+#      than a texel, or the law bought nothing and the first check is vacuous;
+#   3. the frame is sized from the widest single view, which the `framefit` line
+#      reports beside the union the old law used.
+foff = {}
+for l in open(f'{d}/{base}.txt').read().splitlines():
+    t = l.split()
+    if t and t[0] == 'frameoff' and len(t) >= 5:
+        foff[(int(t[1]), int(t[2]))] = (float(t[3]), float(t[4]))
+clampLine = [l.split() for l in open(f'{d}/{base}.txt').read().splitlines() if l.startswith('frameclamped ')]
+fitLine = [l.split() for l in open(f'{d}/{base}.txt').read().splitlines() if l.startswith('framefit ')]
+check('the meta carries one frameoff line per frame, and none outside the grid', len(foff) == N * N)
+check('the meta says how many frames had their crop pulled back inside the photograph, and it is none',
+      len(clampLine) == 1 and int(clampLine[0][1]) == 0)
+# units per texel, from the recorded FULL half extents against the whole frame
+uptX = 2.0 * halfW / TW
+uptY = 2.0 * halfH / TH
+# measured at the bake's OWN coverage floor of 16/255, not at 128: the bake
+# centred the floor-16 box, and judging it by a different threshold measures the
+# thresholds' disagreement rather than the centring
+def covered16(i, j): return [k for k, p in enumerate(tile(alb, i, j).getdata()) if p[3] >= 16]
+nowOff, wasOff = [], []
+for j in range(N):
+    for i in range(N):
+        ks = covered16(i, j)
+        if not ks:
+            continue
+        xs = [k % TW for k in ks]; ys = [k // TW for k in ks]
+        cx = 0.5 * (min(xs) + max(xs) + 1) - 0.5 * TW
+        cy = 0.5 * (min(ys) + max(ys) + 1) - 0.5 * TH
+        nowOff.append(max(abs(cx), abs(cy)))
+        ox, oy = foff.get((i, j), (0.0, 0.0))
+        # the sidecar's y is UP-positive; the image's y runs down
+        wasOff.append(max(abs(cx + ox / uptX), abs(cy - oy / uptY)))
+print('  per-frame centring: silhouette box centre off its frame centre, worst of %d frames: %.2f texels now;'
+      ' %.2f texels with the recorded offsets added back (what a fixed-centre bake had)'
+      % (len(nowOff), max(nowOff) if nowOff else -1, max(wasOff) if wasOff else -1))
+# THE TOLERANCE, stated before the run. Pass one measures in VIEWPORT pixels and
+# pass two downsamples into the frame, so an extremity a fraction of a texel wide
+# can drop under the floor on the way in and move the frame-resolution box by
+# about a texel a side -- half of that on a centre. 1.5 texels is that, plus
+# rounding, and nothing else.
+check('every frame\'s silhouette is centred in its own frame, within 1.5 texels', nowOff and max(nowOff) <= 1.5)
+# THE CONTROL for that check: undoing the shift must make the centring measurably
+# WORSE, or "the frames are centred" is a statement the metric cannot fail on.
+check('and the recorded offsets are real: putting them back moves a frame more than a texel further off centre',
+      wasOff and max(wasOff) > max(nowOff) + 1.0)
+if fitLine:
+    sx, sy, ux, uy = (float(v) for v in fitLine[0][1:5])
+    print('  framefit: widest single view %.1f x %.1f units, union about the centre %.1f x %.1f'
+          ' -> the frame is %.1f%% / %.1f%% narrower on x / y than a fixed-centre bake would need'
+          % (sx, sy, ux, uy, 100.0 * (1 - sx / ux), 100.0 * (1 - sy / uy)))
+check('the meta reports what the frame was sized from and what a fixed centre would have needed',
+      len(fitLine) == 1 and float(fitLine[0][1]) <= float(fitLine[0][3]) + 1e-3
+      and float(fitLine[0][2]) <= float(fitLine[0][4]) + 1e-3)
+
+# MIP BLEED, ON THE GAP RULE, ONE LEVEL SHALLOWER (bungo, 2026-09-09 evening:
+# "SHIP ONE MIP FEWER: mips = log2(gap) so the deepest shipped level still has a
+# full texel of margin per side"). Frames never mix during CONSTRUCTION -- the box
 # filter halves an even frame into an even frame -- so the bleed is at SAMPLE
 # time: a tap ON a frame's UV border reads half of that frame's last texel and
-# half of the neighbour's first. What has to survive at every shipped level is
-# therefore the SEPARATION between the two silhouettes that meet on the border,
-# measured across exactly those two texels as transparent coverage:
+# half of the neighbour's first. What it picks up of the NEIGHBOUR is decided by
+# the margin inside each frame, gap/2, so the chain stops while
+#
+#   gap / 2^(k+1) >= 1            i.e.   mips = log2( min(gap) )
+#
+# and not one level later, which is where each margin is half a texel and a
+# border tap does reach the neighbour's edge. Two measurements, both on the
+# shipped levels: the SEPARATION between the two silhouettes, across the two
+# texels a border tap reads,
 #
 #   gap = (255 - alphaA)/255 + (255 - alphaB)/255      in texels
 #
-# and the promise is that it is still a whole texel at the deepest level shipped,
-# which is what `mips = 1 + log2(min(gap))` buys. Only INTERIOR borders are
-# measured: the sheet's outer border has no neighbouring frame beyond it and is
-# sampled clamped, so half a gap is all it needs.
+# which must stay at two whole texels now, and the NEIGHBOUR ALPHA a tap actually
+# picks up, which must be ZERO. Only INTERIOR borders are measured: the sheet's
+# outer border has no neighbouring frame beyond it and is sampled clamped, so
+# half a gap is all it needs.
 #
 # The CONTROL is the same sheet with the margins stripped and the inner rects
 # re-tiled edge to edge, and it MUST come out under a texel -- a check that
 # cannot fail on its input is not a check.
-MIPS = 1
+MIPS = 0
 g_ = min(GAPX, GAPY)
 while g_ >= 2:
     g_ //= 2; MIPS += 1
+MIPS = max(1, MIPS)
 def boxdown(px, w, h):
     w2, h2 = w // 2, h // 2
     out = []
@@ -302,12 +428,42 @@ def min_gap(px, w, h, fw, fh, mips):
                 g = (255 - px[(y - 1) * w + x][3]) / 255.0 + (255 - px[y * w + x][3]) / 255.0
                 worst = min(worst, g); samples += 1
     return worst, samples
+def border_alpha(px, w, h, fw, fh, mips):
+    """what a bilinear tap taken ON an interior frame border picks up of the
+    NEIGHBOUR: half the alpha of the texel on the other side. Zero is the whole
+    point of shipping one mip fewer, so it is measured as well as the gap."""
+    worst, samples = 0, 0
+    for k in range(mips):
+        if k:
+            px, w, h = boxdown(px, w, h)
+        fwk, fhk = fw >> k, fh >> k
+        if fwk < 2 or fhk < 2:
+            continue
+        for i in range(1, N):
+            x = i * fwk
+            if x < 1 or x >= w:
+                continue
+            for y in range(h):
+                worst = max(worst, px[y * w + x - 1][3], px[y * w + x][3]); samples += 1
+        for j in range(1, N):
+            y = j * fhk
+            if y < 1 or y >= h:
+                continue
+            for x in range(w):
+                worst = max(worst, px[(y - 1) * w + x][3], px[y * w + x][3]); samples += 1
+    return worst, samples
 apx = list(alb.getdata())
 mg, ns = min_gap(apx, alb.width, alb.height, TW, TH, MIPS)
-print('  %d shipped mips (gap %d,%d): narrowest gap across an interior frame border %.3f texels, over %d border samples'
-      % (MIPS, GAPX, GAPY, mg, ns))
+ba, bs_ = border_alpha(apx, alb.width, alb.height, TW, TH, MIPS)
+print('  %d shipped mips (gap %d,%d): narrowest gap across an interior frame border %.3f texels, over %d border samples;'
+      ' worst neighbour alpha a border tap picks up %d/255' % (MIPS, GAPX, GAPY, mg, ns, ba))
 check('every shipped mip keeps a whole texel of gap between the silhouettes that meet on a frame border',
       ns > 0 and mg >= 0.999)
+# and the point of the shallower chain: a border tap reads NOTHING of its
+# neighbour, at every level shipped. The level that was dropped is the one where
+# each margin is half a texel and this number stops being zero.
+check('no shipped mip lets a border tap pick up any of the neighbouring frame (zero cross-frame bleed)',
+      bs_ > 0 and ba == 0)
 IW, IH = TW - 2 * PADX, TH - 2 * PADY
 NEAR = Image.Resampling.NEAREST if hasattr(Image, 'Resampling') else Image.NEAREST
 cells = []
@@ -327,10 +483,13 @@ for j in range(N):
 edge = sum(1 for j in range(N) for i in range(N) for y in range(IH) for x in range(IW)
            if (x in (0, IW - 1) or y in (0, IH - 1)) and cells[j][i][y * IW + x][3] >= 128)
 cg, cs = min_gap(ctl, N * IW, N * IH, IW, IH, MIPS)
-print('  CONTROL, every silhouette cropped to its own box and filling its cell: %d covered texels sit on a cell border; narrowest gap %.3f texels over %d samples (must be under 1)'
-      % (edge, cg, cs))
+ca, cas = border_alpha(ctl, N * IW, N * IH, IW, IH, MIPS)
+print('  CONTROL, every silhouette cropped to its own box and filling its cell: %d covered texels sit on a cell border; narrowest gap %.3f texels over %d samples (must be under 1); worst border alpha %d/255 (must be above 0)'
+      % (edge, cg, cs, ca))
 check('the gap check FAILS on a sheet with no spacing at all (the metric can see it)',
       edge > 0 and cs > 0 and cg < 0.999)
+check('the border-alpha check FAILS on that same sheet (this metric can see it too)',
+      cas > 0 and ca > 0)
 
 # DILATION is NOT checked here. This is the BAKE's PNG and it is un-dilated by
 # design -- the dilation is lodgenCard's, on the way into the DDS -- and a check
@@ -420,7 +579,7 @@ ver, n = struct.unpack_from('<II', b, 4)
 check('the .lodm envelope is LODM v1 with an exact payload size', b[:4] == b'LODM' and ver == 1 and n == len(b) - 12)
 lm = json.loads(b[12:])
 print('  lodm: %s' % json.dumps(lm, separators=(',', ':'))[:200])
-game = 'Data\\Textures\\Lodgen\\Cards\\' + ident + '_oct'
+game = 'Data\\FO4CSLOD\\Cards\\' + ident + '_oct'
 check('the .lodm is a lodm 1 %s card' % fam, lm.get('lodm') == 1 and lm.get('family') == fam and lm.get('kind') == 'card')
 tex = lm.get('textures', {})
 check('the .lodm names the four sheets under the family\'s keys', tex.get(colorKey) == game + colorSfx + '.DDS' and tex.get('normal') == game + '_n.DDS' and tex.get(maskKey) == game + maskSfx + '.DDS' and tex.get('emissive') == game + emiSfx + '.DDS')
@@ -428,6 +587,39 @@ oct = [l.split() for l in open(f'{d}/{ident}.txt').read().splitlines() if l.star
 tw, th = int(oct[2]), int(oct[3])
 card = lm.get('card', {})
 check('the .lodm carries the grid, the frame and the extents of the meta', card.get('oct') == 4 and card.get('frame') == [tw, th] and abs(card.get('half', [0, 0])[1] - float(oct[5])) < 1e-2 and card.get('depthSpan') == float(oct[9]))
+# THE CAMERA reaches the .lodm, in the sidecar's own word. It is what says the
+# `half`, `center` and `frameOffset` above describe the sheet beside them: they
+# are world measurements taken off viewport pixels through one units-per-pixel
+# constant, which only an orthographic camera makes true. The floor is bake 4's
+# perspective control and the card-array harness's second layer, which carries
+# no such key because its sidecar names no camera.
+check('the .lodm names the camera the sheet was photographed through, and it is orthographic'
+      ' (got %r)' % card.get('projection'), card.get('projection') == 'ortho')
+# THE VIEW CONVENTION reaches the .lodm, in the sidecar's own word (2026-09-19,
+# the azimuth repair). It is what lets a consumer tell a set baked with frame
+# (i,j) holding the view from direction (i,j) -- the spec's law -- from one
+# baked before the repair, whose frames sit 180 degrees of azimuth away. The
+# floor is every set on disk before this exe: they carry no key at all, and the
+# card-array harness's synthetic legacy sidecar is kept that way on purpose.
+check('the meta\'s oct line carries the view convention as its thirteenth token'
+      ' (got %r)' % (oct[12] if len(oct) > 12 else None),
+      len(oct) > 12 and oct[12] == 'spec1')
+check('the .lodm carries the view convention the sidecar stated'
+      ' (got %r)' % card.get('conv'), card.get('conv') == 'spec1')
+# F5 (lane CARDWIDTH, 2026-09-10): THE COVERAGE CONTRACT reaches the .lodm, in the
+# sidecar's own three numbers. It is what says which alpha a consumer must test at
+# to draw the silhouette `half` and `frameOffset` describe -- without it a
+# consumer's own 0.5 draws a smaller tree than the mesh it replaced. The floor is
+# the same absence as the camera's: a set from before the line carries no key.
+_cov = card.get('coverage')
+_covMeta = [l.split()[1:4] for l in open(f'{d}/{ident}.txt').read().splitlines() if l.startswith('coverage ')]
+print('  .lodm coverage: %r (the meta said %r)' % (_cov, _covMeta))
+check('F5: the .lodm carries the coverage contract the sidecar stated',
+      isinstance(_cov, dict) and len(_covMeta) == 1
+      and [_cov.get('floor'), _cov.get('test'), _cov.get('base')]
+          == [int(v) for v in _covMeta[0]])
+check("F5: a consumer testing at the contract's `test` selects the set floored at `floor`",
+      _cov.get('test') == 128 and _cov.get('floor') == 16 and _cov.get('base') == 160)
 # the two spacings, and which is which: `pad` is the margin on EACH side and
 # `gap` is the distance between two neighbouring silhouettes, exactly twice it
 def _gapOf(side):
@@ -439,6 +631,74 @@ print('  .lodm spacing: pad %s (derived %s), gap %s (derived %s)'
 check('the .lodm records the per-side padding and the gap, and the gap is twice the padding',
       card.get('pad') == [_padOf(tw), _padOf(th)] and card.get('gap') == [_gapOf(tw), _gapOf(th)]
       and card.get('gap') == [2 * p for p in card.get('pad', [0, 0])])
+# PER-FRAME POSITIONING reaches the .lodm, in the frames' own sheet order: two
+# numbers per frame, frame (i,j) at index j*oct + i, and they are the sidecar's
+# own numbers rather than a re-derivation.
+octN_ = int(oct[1])
+sidecar = {}
+for l in open(f'{d}/{ident}.txt').read().splitlines():
+    t = l.split()
+    if t and t[0] == 'frameoff' and len(t) >= 5:
+        sidecar[(int(t[1]), int(t[2]))] = (float(t[3]), float(t[4]))
+fo = card.get('frameOffset')
+same = (isinstance(fo, list) and len(fo) == 2 * octN_ * octN_
+        and all(abs(fo[2 * (j * octN_ + i)] - sidecar[(i, j)][0]) < 1e-3
+                and abs(fo[2 * (j * octN_ + i) + 1] - sidecar[(i, j)][1]) < 1e-3
+                for j in range(octN_) for i in range(octN_) if (i, j) in sidecar))
+print('  .lodm frameOffset: %d numbers for %d frames; largest |offset| %.2f units'
+      % (len(fo) if isinstance(fo, list) else -1, octN_ * octN_,
+         max((abs(v) for v in fo), default=-1.0) if isinstance(fo, list) else -1.0))
+check('the .lodm carries the per-frame offsets, one pair per frame in sheet order, as the sidecar wrote them',
+      len(sidecar) == octN_ * octN_ and same)
+# ... and they are not all zero, which is what a set from before the law means
+check('the per-frame offsets are not all zero (the shift actually happened)',
+      isinstance(fo, list) and max((abs(v) for v in fo), default=0.0) > 0.0)
+# THE OFFSETS AGREE WITH THE PICTURE THEY SHIFTED, exactly.
+#
+# For view v the silhouette spans [off - halfV, off + halfV] about the camera
+# centre, so max(|x0|, |x1|) is |off| + halfV -- and the UNION half-extent the
+# `framefit` line records is the largest of those over all N^2 views. So for
+# EVERY frame, |off| plus that frame's own half box (read off the sheet) must not
+# exceed the union, and for at least ONE frame it must reach it. An offset with
+# the wrong sign, the wrong scale, or from a stale bake breaks the first; a set of
+# zeros breaks the second.
+#
+# This ties the written field to the picture. The transition rule against an
+# INDEPENDENT reader -- the model's own declared bound spheres, extended to the
+# most displaced frame, with the zeroed control that must fail -- is
+# `scratchpad/cardfinal_20260909/transition_bounds.py`, which needs the model and
+# is run by the lane rather than here.
+#
+# A quarter of the card's half extent stood here for one run of this harness and
+# was wrong: it was a fraction chosen without measurement, and the maple's TOP
+# view legitimately sits 239 units off centre (28.8%), because a canopy's plan
+# view is not centred on the trunk.
+ffL = [l.split() for l in open(f'{d}/{ident}.txt').read().splitlines() if l.startswith('framefit ')]
+albS = Image.open(f'{d}/{ident}_oct_albedo.png').convert('RGBA')
+uX, uY = (float(ffL[0][3]), float(ffL[0][4])) if ffL else (0.0, 0.0)
+th_ = int(oct[3])
+uptX_, uptY_ = 2.0 * card['half'][0] / tw, 2.0 * card['half'][1] / th_
+reach, over = 0.0, 0
+for j in range(octN_):
+    for i in range(octN_):
+        cell = albS.crop((i * tw, j * th_, (i + 1) * tw, (j + 1) * th_))
+        ks = [k for k, p in enumerate(cell.getdata()) if p[3] >= 16]
+        if not ks:
+            continue
+        xs = [k % tw for k in ks]
+        ys = [k // tw for k in ks]
+        hX = 0.5 * (max(xs) - min(xs)) * uptX_
+        hY = 0.5 * (max(ys) - min(ys)) * uptY_
+        ox, oy = fo[2 * (j * octN_ + i)], fo[2 * (j * octN_ + i) + 1]
+        rx, ry = (abs(ox) + hX) / max(uX, 1e-6), (abs(oy) + hY) / max(uY, 1e-6)
+        reach = max(reach, rx, ry)
+        if rx > 1.02 or ry > 1.02:
+            over += 1
+print('  offsets against the picture: union half-extent %.1f x %.1f units;'
+      ' worst frame reaches %.3f of it; frames past it: %d' % (uX, uY, reach, over))
+check('every frame\'s offset plus its own silhouette stays inside the extent a fixed-centre card spanned',
+      uX > 0 and uY > 0 and over == 0)
+check('and at least one frame REACHES that extent (a sheet of zero offsets could not)', reach >= 0.90)
 # the multiple, at the .lodm's top level for a card set; the meta's own number
 emi = [l.split() for l in open(f'{d}/{ident}.txt').read().splitlines() if l.startswith('emissive ')]
 print('  emissiveScale in the card .lodm: %r (the meta said %r)'
@@ -478,20 +738,29 @@ for (x, y) in ring:
         dark += 1
 print('  edge blocks in the colour sheet: %d, with a near-black endpoint: %d' % (tested, dark))
 check('the colour under the cut-out is dilated (no black endpoint at the edges)', tested > 0 and dark <= tested // 20)
-# THE MIP CAP IS THE GAP'S: 1 + log2(min(gapX, gapY)) -- 4 levels on a 128-texel
-# frame, 3 on a 64. What stood here counted levels until a frame spanned eight
-# texels, a rule that had nothing to do with the spacing and agreed with the
-# shipped count only by coincidence on this bake's frame shape.
-expect, _g = 1, min(_gapOf(tw), _gapOf(th))
+# THE MIP CAP IS log2(min(gapX, gapY)) -- 3 levels on a 128-texel frame at gap 8,
+# 2 on a 64 at gap 4. ONE FEWER than the cap of the morning of 2026-09-09, which
+# shipped the level where each margin is half a texel and a border tap therefore
+# reaches the neighbour (bungo, that evening: "SHIP ONE MIP FEWER ... so the
+# deepest shipped level still has a full texel of margin per side"). Floored at
+# one level, for a 16-texel frame whose gap is already on its floor of 2.
+expect, _g = 0, min(_gapOf(tw), _gapOf(th))
 while _g >= 2:
     expect += 1; _g //= 2
+expect = max(1, expect)
 okm = True
 for s in (colorSfx, '_n', maskSfx):
     b = open(f'{d}/{ident}_oct{s}.DDS', 'rb').read()
     h, w = struct.unpack_from('<II', b, 12); mips = struct.unpack_from('<I', b, 28)[0]; four = b[84:88]
-    print('  _oct%s.DDS: %dx%d %s mips %d (expected %d)' % (s, w, h, four.decode('latin1'), mips, expect))
-    okm = okm and four == b'DXT5' and mips == expect
-check('the sheets are BC3 and mip only while a whole texel of gap survives (mips %d)' % card.get('mips', -1), okm and card.get('mips') == expect)
+    # IMPOSTORDEPTH2 (2026-09-23, bungo): the `_n` is DX10 BC7_UNORM (dxgi 98, arraySize 1);
+    # the colour and mask sheets stay DXT5. Was: all three DXT5.
+    dx = struct.unpack_from('<5I', b, 128) if four == b'DX10' else (0, 0, 0, 0, 0)
+    print('  _oct%s.DDS: %dx%d %s%s mips %d (expected %d)' % (s, w, h, four.decode('latin1'), (' dxgi %d arraySize %d' % (dx[0], dx[3])) if dx[0] else '', mips, expect))
+    if s == '_n':
+        okm = okm and four == b'DX10' and dx[0] == 98 and dx[1] == 3 and dx[3] == 1 and mips == expect
+    else:
+        okm = okm and four == b'DXT5' and mips == expect
+check('the colour and mask sheets are BC3, the _n is BC7 (DX10 dxgi 98), and they mip only while a whole texel of gap survives (mips %d)' % card.get('mips', -1), okm and card.get('mips') == expect)
 # the emissive is BC1: no alpha to carry, and half the bytes of the other three
 be = open(f'{d}/{ident}_oct{emiSfx}.DDS', 'rb').read()
 he, we = struct.unpack_from('<II', be, 12); mipse = struct.unpack_from('<I', be, 28)[0]
@@ -546,7 +815,8 @@ for s in albedo normal rmaos e; do
 done
 ok "the four pbr sheets were written (albedo, normal, rmaos, e)"
 [ -e "$W/bake2/${BASE}_oct_g.png" ] && bad "a legacy-name emissive sheet was written by the pbr bake"
-grep -qE "^oct 4 .* pbr 64$" "$W/bake2/${BASE}.txt" && ok "the meta's oct line says pbr and names the run's 64 px" || bad "no pbr oct line naming the run's resolution in the second meta"
+# RE-BASED with the legacy line above: the conv token now ends the oct line.
+grep -qE "^oct 4 .* pbr 64 spec1$" "$W/bake2/${BASE}.txt" && ok "the meta's oct line says pbr, names the run's 64 px and declares the spec1 view convention" || bad "no pbr oct line naming the run's resolution and the spec1 convention in the second meta"
 EMI2="$(grep "^emissive " "$W/bake2/${BASE}.txt" | head -1)"
 echo "  pbr meta emissive line: ${EMI2:-<none>}"
 [ "$(echo "$EMI2" | cut -d' ' -f2)" = "2.5" ] && ok "the pbr bake takes its multiple from the source .lodm (2.5)" || bad "the pbr bake's emissive multiple is not the fixture's 2.5: $EMI2"
@@ -612,7 +882,7 @@ import struct, sys, json
 d, ident = sys.argv[1], sys.argv[2]
 b = open(f'{d}/{ident}_oct.lodm', 'rb').read()
 lm = json.loads(b[12:])
-game = 'Data\\Textures\\Lodgen\\Cards\\' + ident + '_oct'
+game = 'Data\\FO4CSLOD\\Cards\\' + ident + '_oct'
 tex = lm.get('textures', {})
 ok = lm.get('family') == 'pbr' and tex.get('baseColor') == game + '_bc.DDS' and tex.get('rmaos') == game + '_rmaos.DDS' and tex.get('emissive') == game + '_e.DDS'
 print(('  ok   ' if ok else '  FAIL ') + 'the pbr set\'s .lodm says pbr and names _bc/_rmaos/_e')
@@ -655,6 +925,408 @@ if [ -s "$W/bake3/${BASE}.txt" ]; then
 		|| bad "the short side $SHORT3 is not a multiple of 16 in 16..$LONG3"
 else
 	bad "bake 3 wrote no meta"
+fi
+
+
+# ------------------------------------ bake 4: THE ORTHOGRAPHIC CAMERA, ON A CUBE
+#
+# The bake sizes every frame with orthographicHalfHeight() -- Dist / Zoom --
+# and converts a silhouette from viewport pixels to world units with ONE
+# units-per-pixel constant. Both are statements about an ORTHOGRAPHIC camera,
+# and until 2026-09-10 the headless renderer never had one: restoreUi()
+# hard-codes a 60-degree perspective and nothing in the bake called
+# setProjection(). The name `orthographicHalfHeight` is not a measurement, which
+# is why the read-back beside the fit never caught it.
+#
+# A CUBE is the fixture because its orthographic silhouette is arithmetic. For a
+# box of half-extents h about its own centre, seen along a view whose screen
+# RIGHT and UP axes are r and u,
+#
+#     halfR = hx|rx| + hy|ry| + hz|rz|        halfU = hx|ux| + hy|uy| + hz|uz|
+#
+# and the bake's own camera law -- setRotation( -90 + elev, 0, 90 - azim ) --
+# makes those axes, through Matrix::fromEuler with y = 0,
+#
+#     r = ( sin azim, -cos azim, 0 )
+#     u = ( sin elev cos azim, sin elev sin azim, cos elev )
+#
+# The frame spans 2 * fullHalfW by 2 * fullHalfH world units over tw by th
+# texels (the meta's oct line), so the predicted span is 2*halfR*tw /
+# (2*fullHalfW) texels, in EVERY frame and at every depth. That last clause is
+# the whole point: a perspective frame magnifies by eye / (eye - d) for a
+# point d in front of the card plane, so it cannot hold.
+#
+# Nothing here is typed. The cube's own half-extent is measured through the
+# PINNED ORTHOGRAPHIC camera of the render hook (WW_RENDER_ORTHO, whose gate is
+# tests/spells/render_shot.sh section 7, 27 of 27 on 2026-09-10) -- a
+# different code path from the bake, so this is not our own output judging our
+# own output. The floor is the PERSPECTIVE CONTROL: the same cube baked with
+# WW_IMPOSTOR_PERSP=1, which must fail every check this one passes.
+CUBE="$W/cube512.nif"
+"$NS" -no-gui new -o "$(winpath "$CUBE")" --cube --size 512 >/dev/null 2>&1
+if [ ! -s "$CUBE" ]; then
+	bad "the 512-unit cube fixture was not written by -no-gui new --cube --size 512"
+else
+	ok "the 512-unit cube fixture was written ($(ls -l "$CUBE" | awk '{print $5}') bytes)"
+	# (a) the fixture's own size, through the hook's pinned orthographic camera.
+	# The same recipe as render_shot.sh section 7, whose own gate proves this
+	# camera: the fixture's centre is (0,0,256) -- the cube spans z 0..512, not
+	# -256..256 -- and half-width 512 over a 640 px viewport puts 512 units of
+	# cube across 320 px, so one pixel of edge is 1.6 units.
+	WW_RENDER_SHOT="$(winpath "$W/cube_front.png")" WW_RENDER_VIEW=5 WW_RENDER_ORTHO=512 \
+		WW_RENDER_DIST=1000 WW_RENDER_CENTER=0,0,256 WW_RENDER_SIZE=640x480 \
+		WW_RENDER_CLEAN=1 WW_CAMERA_CENSUS="$(winpath "$W/cubecam.log")" \
+		timeout 240 "$NS" "$(winpath "$CUBE")" --port 45924 >/dev/null 2>&1
+	CUBEHALF="$("$PY" - "$W/cube_front.png" "$W/cubecam.log" <<'PYEOF'
+import sys
+from PIL import Image
+im = Image.open(sys.argv[1]).convert('RGB')
+W, H = im.size
+px = im.load()
+bg = px[2, 2]
+# the silhouette is anything that is not the viewport clear colour; the cube is
+# lit grey on a dark ground, so a plain difference threshold separates them and
+# the FLOOR is that the box must not be the whole frame or a single pixel
+x0, x1 = W, -1
+for y in range(H):
+    for x in range(W):
+        c = px[x, y]
+        if abs(c[0]-bg[0]) + abs(c[1]-bg[1]) + abs(c[2]-bg[2]) > 24:
+            if x < x0: x0 = x
+            if x > x1: x1 = x
+upp = None
+for line in open(sys.argv[2]):
+    for t in line.split():
+        if t.startswith('upp='):
+            upp = float(t[4:])
+if upp is None or x1 < x0 or (x1 - x0 + 1) >= W - 2 or (x1 - x0 + 1) < 8:
+    sys.stderr.write('cube span unreadable: %d..%d of %d, upp=%r\n' % (x0, x1, W, upp))
+    print('0')
+else:
+    print('%.4f' % (0.5 * (x1 - x0 + 1) * upp))
+PYEOF
+)"
+	echo "  the cube fixture measured through WW_RENDER_ORTHO=512: half-extent $CUBEHALF units (512 asked of the CLI)"
+	# 3 units of tolerance: the threshold instrument counts the antialiased edge
+	# pixel on each side, and each is worth 1.6 units at this scale
+	AWKOK="$(awk -v h="$CUBEHALF" 'BEGIN{ d = h - 256; if (d < 0) d = -d; print (h > 0 && d <= 3.0) ? 1 : 0 }')"
+	[ "$AWKOK" = "1" ] && ok "the pinned orthographic camera measures the fixture at 256 units, the size the CLI was asked for" \
+		|| bad "the fixture measures $CUBEHALF units, not 256 -- the fixture or the pinned camera is wrong, and the frames below cannot be predicted"
+	# (b) the bake, and (c) the perspective control
+	mkdir -p "$W/bake4" "$W/bake4p"
+	WW_IMPOSTOR_BAKE="$(winpath "$W/bake4")" WW_IMPOSTOR_OCT=8 WW_IMPOSTOR_TILE=64 \
+		timeout 240 "$NS" "$(winpath "$CUBE")" --port 45925 >/dev/null 2>&1
+	WW_IMPOSTOR_PERSP=1 WW_IMPOSTOR_BAKE="$(winpath "$W/bake4p")" WW_IMPOSTOR_OCT=8 WW_IMPOSTOR_TILE=64 \
+		timeout 240 "$NS" "$(winpath "$CUBE")" --port 45926 >/dev/null 2>&1
+	grep -qx "projection ortho" "$W/bake4/cube512.txt" && ok "the cube bake says orthographic" || bad "the cube bake does not say 'projection ortho'"
+	grep -qx "projection persp" "$W/bake4p/cube512.txt" && ok "the perspective CONTROL says perspective, so the switch and the line both move" \
+		|| bad "the WW_IMPOSTOR_PERSP control does not say 'projection persp' -- the control is not a control"
+	"$PY" - "$W/bake4" "$W/bake4p" "$CUBEHALF" <<'PYEOF'
+import sys, math
+from PIL import Image
+
+fails = 0
+def check(what, cond):
+    global fails
+    print(('  ok   ' if cond else '  FAIL ') + what)
+    if not cond:
+        fails += 1
+
+def meta(d):
+    m = {}
+    for line in open(d + '/cube512.txt'):
+        f = line.split()
+        if f:
+            m.setdefault(f[0], []).append(f[1:])
+    return m
+
+def axes(i, j, n):
+    u = i / (n - 1) * 2.0 - 1.0
+    v = j / (n - 1) * 2.0 - 1.0
+    dx, dy = (u + v) * 0.5, (u - v) * 0.5
+    dz = 1.0 - abs(dx) - abs(dy)
+    L = math.sqrt(dx * dx + dy * dy + dz * dz)
+    dx, dy, dz = dx / L, dy / L, dz / L
+    elev = math.asin(max(-1.0, min(1.0, dz)))
+    azim = math.atan2(dy, dx)
+    r = (math.sin(azim), -math.cos(azim), 0.0)
+    up = (math.sin(elev) * math.cos(azim), math.sin(elev) * math.sin(azim), math.cos(elev))
+    return r, up
+
+def mask(sheet, i, j, tw, th, thr=16, dec=None, dilate=0):
+    # `dec` = (floor, base) off the bake's own `coverage` line. The sheet stores a
+    # MEASURED COVERAGE FRACTION re-encoded as 0 or as a byte in [base,255]; with
+    # `dec` given the stored byte is decoded back to that fraction on 0..255
+    # BEFORE `thr` is applied, so a caller can ask about HALF COVERAGE instead of
+    # asking about the stored byte. Lane GATEFIX1, 2026-09-19.
+    px = sheet.load()
+    out = []
+    for y in range(th):
+        row = []
+        for x in range(tw):
+            a = px[i * tw + x, j * th + y][3]
+            if dec is not None:
+                f, b = dec
+                a = 0 if a < b else f + int(round((a - b) * (255.0 - f) / (255.0 - b)))
+            row.append(1 if a >= thr else 0)
+        out.append(row)
+    # `dilate` grows the mask by that many 8-neighbour rings. Used ONLY by the red
+    # control F2b: a silhouette one texel too wide on every side is the defect F1
+    # exists to catch, and it must not clear F1's bar.
+    for _ in range(dilate):
+        prev = [r[:] for r in out]
+        for y in range(th):
+            for x in range(tw):
+                if prev[y][x]:
+                    continue
+                for dy in (-1, 0, 1):
+                    for dx in (-1, 0, 1):
+                        yy, xx = y + dy, x + dx
+                        if 0 <= yy < th and 0 <= xx < tw and prev[yy][xx]:
+                            out[y][x] = 1
+    return out
+
+def bbox(m):
+    ys = [y for y, row in enumerate(m) if any(row)]
+    if not ys:
+        return None
+    xs = [x for row in m for x, v in enumerate(row) if v]
+    return min(xs), max(xs), min(ys), max(ys)
+
+def measure(d, half, thr=16, dec=None, dilate=0):
+    m = meta(d)
+    o = m['oct'][0]
+    n, tw, th = int(o[0]), int(o[1]), int(o[2])
+    fw, fh = float(o[3]), float(o[4])
+    sheet = Image.open(d + '/cube512_oct_albedo.png').convert('RGBA')
+    rows = []
+    for j in range(n):
+        for i in range(n):
+            r, up = axes(i, j, n)
+            hr = half * (abs(r[0]) + abs(r[1]) + abs(r[2]))
+            hu = half * (abs(up[0]) + abs(up[1]) + abs(up[2]))
+            px = 2.0 * hr * tw / (2.0 * fw)
+            py = 2.0 * hu * th / (2.0 * fh)
+            mk = mask(sheet, i, j, tw, th, thr, dec, dilate)
+            bb = bbox(mk)
+            if bb is None:
+                rows.append((i, j, px, py, 0.0, 0.0, 1.0, 1.0))
+                continue
+            x0, x1, y0, y1 = bb
+            mx = x1 - x0 + 1
+            my = y1 - y0 + 1
+            # CENTRAL SYMMETRY: an orthographic projection of a centrally
+            # symmetric solid is centrally symmetric. A perspective one is not --
+            # the near half is magnified. Disagreement of the mask with its own
+            # 180-degree rotation about the silhouette box, as a fraction of the
+            # covered texels.
+            cov = sum(sum(row) for row in mk)
+            dis = 0
+            for y in range(y0, y1 + 1):
+                for x in range(x0, x1 + 1):
+                    xr, yr = x0 + x1 - x, y0 + y1 - y
+                    if mk[y][x] != mk[yr][xr]:
+                        dis += 1
+            asym = dis / max(1, cov)
+            # NEAR EDGE vs FAR EDGE: the widest row in the top fifth of the
+            # silhouette against the widest row in the bottom fifth. Equal under
+            # an orthographic camera by the symmetry above; under perspective the
+            # edge nearer the eye is wider.
+            band = max(1, my // 5)
+            wt = max(sum(mk[y]) for y in range(y0, y0 + band))
+            wb = max(sum(mk[y]) for y in range(y1 - band + 1, y1 + 1))
+            rows.append((i, j, px, py, mx, my, asym, abs(wt - wb) / max(1.0, 0.5 * (wt + wb))))
+    return n, tw, th, fw, fh, rows
+
+half = float(sys.argv[3])
+n, tw, th, fw, fh, ortho = measure(sys.argv[1], half)
+_, _, _, pfw, pfh, persp = measure(sys.argv[2], half)
+# THE READER'S OWN THRESHOLD (lane CARDWIDTH, 2026-09-10). Everything above reads
+# the sheet at the bake's coverage floor, 16/255. What a consumer DRAWS is the set
+# it alpha-tests, and both specs tell it to test at 0.5 -- so the fixture that
+# matters to bungo's rule ("the tree won't change position", and the same size) is
+# the cube's span at 128/255. Before the coverage re-encoding a bare crown lost up
+# to 5.41 texels of half-width between those two sets; a cube is solid, so this is
+# the arithmetic half of that fixture and the bar is ONE texel, pre-registered.
+_, _, _, _, _, orthoR = measure(sys.argv[1], half, 128)
+_, _, _, _, _, perspR = measure(sys.argv[2], half, 128)
+print('  frame %dx%d texels, %.2f x %.2f units half-extent; %d frames' % (tw, th, fw, fh, len(ortho)))
+print('  i j | predicted x,y | ortho measured x,y | persp measured x,y')
+for k in range(len(ortho)):
+    i, j, px, py, mx, my, asym, ne = ortho[k]
+    _, _, ppx, ppy, pmx, pmy, pasym, pne = persp[k]
+    print('  %d %d | %6.2f %6.2f | %4d %4d | %4d %4d' % (i, j, px, py, mx, my, pmx, pmy))
+dO = max(max(abs(r[4] - r[2]), abs(r[5] - r[3])) for r in ortho)
+dP = max(max(abs(r[4] - r[2]), abs(r[5] - r[3])) for r in persp)
+aO = max(r[6] for r in ortho)
+aP = max(r[6] for r in persp)
+nO = max(r[7] for r in ortho)
+nP = max(r[7] for r in persp)
+print('  worst |measured - predicted| over the %d frames: ORTHO %.2f texels, PERSPECTIVE CONTROL %.2f texels' % (len(ortho), dO, dP))
+print('  worst central asymmetry: ORTHO %.3f, PERSPECTIVE CONTROL %.3f (fraction of covered texels)' % (aO, aP))
+print('  worst near-edge vs far-edge width difference: ORTHO %.3f, PERSPECTIVE CONTROL %.3f (fraction)' % (nO, nP))
+# Pre-registered: 2 texels, which is the crop's integer rounding plus one
+# antialiased texel of the smooth downsample on each side of the silhouette.
+check('every frame of the orthographic bake spans its predicted texels within 2 (worst %.2f)' % dO, dO <= 2.0)
+check('the PERSPECTIVE CONTROL does not (worst %.2f, and it must exceed 2)' % dP, dP > 2.0)
+check('the orthographic silhouettes are centrally symmetric within 5%% (worst %.3f)' % aO, aO <= 0.05)
+check('the PERSPECTIVE CONTROL is not (worst %.3f, and it must exceed 5%%)' % aP, aP > 0.05)
+check('near and far edge of a frame carry the same width within 5%% (worst %.3f)' % nO, nO <= 0.05)
+check('the PERSPECTIVE CONTROL foreshortens (worst %.3f, and it must exceed 5%%)' % nP, nP > 0.05)
+# and the frame the two bakes chose is itself different, because the perspective
+# camera measured a different silhouette in pass one
+check('the two bakes recorded different half-extents, so the camera reaches the FORMAT and not only the picture (%.2f vs %.2f)' % (fw, pfw), abs(fw - pfw) > 0.5)
+
+# ---- lane CARDWIDTH, 2026-09-10: the coverage contract, and the cube at the
+# READER's threshold. Pre-registered in scratchpad/lane_cardwidth_report.md
+# section 8 before this block was written.
+dOR = max(max(abs(r[4] - r[2]), abs(r[5] - r[3])) for r in orthoR)
+dPR = max(max(abs(r[4] - r[2]), abs(r[5] - r[3])) for r in perspR)
+print('  at the READER threshold 128/255: worst |measured - predicted| ORTHO %.2f texels, PERSPECTIVE CONTROL %.2f' % (dOR, dPR))
+# ---- F1, and the instrument it is measured through. Lane GATEFIX1, 2026-09-19,
+# on the director's ruling: "do NOT raise the bar. Make the row DECODE coverage
+# per the spec and test at 0.5; keep bar 1.0."
+#
+# THE ROW WAS RED FROM THE DAY IT WAS WRITTEN (2026-09-10, lane CARDWIDTH: 1.78;
+# 1.68-1.69 on every exe since), and the fault was in the READING, not the bake.
+# CARDWIDTH's 1.0 was pre-registered for a HALF-COVERAGE test -- its own comment
+# above says "both specs tell it to test at 0.5". The coverage contract the SAME
+# lane shipped in the SAME build then re-encoded alpha as 0-or-[160,255], which
+# turned `alpha >= 128` into a test for coverage >= 16/255 = 6.27 per cent. The
+# F3 row below proves that on this very sheet. A 6.27 per cent test admits a
+# barely-touched texel on each side of the true edge, so it reads about one texel
+# wide -- and it does so for a PERFECT bake as much as for ours.
+#
+# Measured, not argued (OCTF1 2026-09-19, reproduced by F2c below): an
+# analytically exact cube -- the convex hull of the eight corners, rasterised at
+# 12x12 samples per texel -- scores 1.78 through the 6.27 per cent reading and
+# 0.71 through a true half-coverage one. 1.0 was unreachable by ANY bake at the
+# old threshold. So the threshold moves onto the decoded coverage and the bar
+# stays where CARDWIDTH pre-registered it.
+_cv = meta(sys.argv[1]).get('coverage')
+if not _cv:
+    check('F1: the bake states a coverage contract, without which the row cannot decode', False)
+else:
+    _cf, _ct, _cb = (int(v) for v in _cv[0][:3])
+    _, _, _, _, _, orthoH = measure(sys.argv[1], half, 128, (_cf, _cb))
+    _, _, _, _, _, perspH = measure(sys.argv[2], half, 128, (_cf, _cb))
+    dOH = max(max(abs(r[4] - r[2]), abs(r[5] - r[3])) for r in orthoH)
+    dPH = max(max(abs(r[4] - r[2]), abs(r[5] - r[3])) for r in perspH)
+    print('  DECODED to coverage and tested at HALF (128/255 of the decoded fraction, contract floor %d base %d):'
+          % (_cf, _cb))
+    print('    worst |measured - predicted| ORTHO %.2f texels, PERSPECTIVE CONTROL %.2f' % (dOH, dPH))
+    check('F1: every frame of the cube spans its predicted texels within 1 AT HALF COVERAGE (worst %.2f)' % dOH,
+          dOH <= 1.0)
+    check('F2 (floor): the PERSPECTIVE CONTROL does not (worst %.2f, and it must exceed 1)' % dPH, dPH > 1.0)
+    # F2b, THE RED CONTROL. F1 exists to catch "the silhouette changed size".
+    # One 8-neighbour ring of dilation IS that defect, one texel on every side,
+    # and it is applied to the SAME sheet through the SAME instrument -- no new
+    # bake. If this ever clears 1.0, F1 has stopped responding.
+    _, _, _, _, _, orthoD = measure(sys.argv[1], half, 128, (_cf, _cb), 1)
+    dOD = max(max(abs(r[4] - r[2]), abs(r[5] - r[3])) for r in orthoD)
+    check('F2b (floor): the same cube with its mask dilated one ring -- a silhouette one texel too '
+          'wide on every side -- does NOT clear the bar (worst %.2f, and it must exceed 1)' % dOD,
+          dOD > 1.0)
+    # F2c/F2d, THE KNOWN ANSWER. An analytically exact cube pushed through this
+    # very instrument: the convex hull of the eight corners projected on each
+    # frame's (r, up), rasterised 12x12 samples per texel over the same extents,
+    # thresholded at the same two readings. It says what a DEFECT-FREE bake
+    # scores, so the bar is checked against arithmetic and not against us.
+    try:
+        import numpy as _np
+    except ImportError:
+        _np = None
+    if _np is None:
+        check('F2c: numpy is present, so the analytic known answer can be computed', False)
+    else:
+        def _hull(pts):
+            pts = sorted(set(pts))
+            def _h(ps):
+                st = []
+                for p in ps:
+                    while len(st) >= 2 and (st[-1][0] - st[-2][0]) * (p[1] - st[-2][1]) \
+                            - (st[-1][1] - st[-2][1]) * (p[0] - st[-2][0]) <= 0:
+                        st.pop()
+                    st.append(p)
+                return st
+            return _h(pts)[:-1] + _h(pts[::-1])[:-1]
+        def _analytic(covThr, SS=12):
+            tx, ty = 2.0 * fw / tw, 2.0 * fh / th
+            sub = (_np.arange(SS) + 0.5) / SS
+            X = (-fw + (_np.arange(tw)[:, None] + sub[None, :]) * tx).ravel()[None, :]
+            Y = (-fh + (_np.arange(th)[:, None] + sub[None, :]) * ty).ravel()[:, None]
+            worst = 0.0
+            for j in range(n):
+                for i in range(n):
+                    r, up = axes(i, j, n)
+                    px = 2.0 * half * (abs(r[0]) + abs(r[1]) + abs(r[2])) * tw / (2.0 * fw)
+                    py = 2.0 * half * (abs(up[0]) + abs(up[1]) + abs(up[2])) * th / (2.0 * fh)
+                    pts = [(sx * r[0] + sy * r[1] + sz * r[2], sx * up[0] + sy * up[1] + sz * up[2])
+                           for sx in (-half, half) for sy in (-half, half) for sz in (-half, half)]
+                    P = _hull(pts)
+                    ins = _np.ones((th * SS, tw * SS), bool)
+                    for k in range(len(P)):
+                        ax, ay = P[k]
+                        bx, by = P[(k + 1) % len(P)]
+                        ins &= ((bx - ax) * (Y - ay) - (by - ay) * (X - ax)) >= 0
+                    mk2 = ins.reshape(th, SS, tw, SS).mean(axis=(1, 3)) >= covThr
+                    cols = _np.flatnonzero(mk2.any(axis=0))
+                    rowsY = _np.flatnonzero(mk2.any(axis=1))
+                    mx2 = int(cols[-1] - cols[0] + 1) if cols.size else 0
+                    my2 = int(rowsY[-1] - rowsY[0] + 1) if rowsY.size else 0
+                    worst = max(worst, abs(mx2 - px), abs(my2 - py))
+            return worst
+        aHalf = _analytic(0.5)
+        aOld = _analytic(_cf / 255.0)
+        print('  KNOWN ANSWER, an analytically exact cube through this same instrument:')
+        print('    at HALF coverage %.2f texels; read the OLD way (coverage >= %d/255 = %.2f%%) %.2f texels'
+              % (aHalf, _cf, 100.0 * _cf / 255.0, aOld))
+        print('    the shipped bake, same two readings: %.2f and %.2f' % (dOH, dOR))
+        check('F2c (known answer): a defect-free cube clears the 1-texel bar through this instrument '
+              '(%.2f, and OCTF1 computed 0.71 on 2026-09-19)' % aHalf, aHalf <= 1.0)
+        check('F2d (floor): the SAME defect-free cube read the OLD way does NOT clear it (%.2f, and it '
+              'must exceed 1) -- which is why the bar was never the thing that was wrong' % aOld,
+              aOld > 1.0)
+# F1b is the invariant the coverage contract actually guarantees, and it is the
+# one to read if F1 goes red: after the re-encoding the set a consumer TESTS is
+# the set the bake FLOORED, so the two readings of the same sheet must agree
+# exactly. On a sheet from before the contract they do not -- 5.41 texels apart
+# on TreeHero01 -- so this is a check that can fail.
+print('  the same cube at the bake floor: %.2f texels; at the reader threshold: %.2f' % (dO, dOR))
+check('F1b: the reader threshold and the bake floor measure the SAME silhouette (%.2f vs %.2f)'
+      % (dO, dOR), abs(dO - dOR) <= 0.01)
+
+# F3/F4: the coverage contract. The sheet's alpha is written 0 or at/above `base`,
+# so a consumer testing at `test` selects exactly the texels whose measured
+# coverage reached `floor`. The floor under F3 is the same count on the DECODED
+# alpha -- the fraction the bake measured -- which a cube's partly covered edge
+# texels put well above zero, so F3 is a check that can fail on its own input.
+mcov = meta(sys.argv[1]).get('coverage')
+check('F5: the bake states its coverage contract on a line of its own', bool(mcov))
+if mcov:
+    cfloor, ctest, cbase = (int(v) for v in mcov[0][:3])
+    print('  coverage contract: floor %d, test %d, base %d' % (cfloor, ctest, cbase))
+    check('F5: the contract is the one this build writes (floor 16, test 128, base 160)',
+          (cfloor, ctest, cbase) == (16, 128, 160))
+    check('F5: the base leaves BC3 no room to round a covered texel under the test '
+          '(base - 255/14 = %.1f > %d)' % (cbase - 255.0 / 14.0, ctest), cbase - 255.0 / 14.0 > ctest)
+    sh = Image.open(sys.argv[1] + '/cube512_oct_albedo.png').convert('RGBA')
+    ap = list(sh.split()[3].getdata())
+    between = sum(1 for v in ap if 0 < v < cbase)
+    dec = [0 if v < cbase else cfloor + int(round((v - cbase) * (255.0 - cfloor) / (255.0 - cbase))) for v in ap]
+    decBetween = sum(1 for v in dec if 0 < v < cbase)
+    print('  base sheet: %d texels with alpha in 1..%d; DECODED, %d' % (between, cbase - 1, decBetween))
+    check('F3: no texel of the base sheet carries alpha between 1 and %d (%d found)' % (cbase - 1, between),
+          between == 0)
+    check('F4 (floor): the DECODED fraction does carry them, so F3 can fail (%d found, must exceed 0)' % decBetween,
+          decBetween > 0)
+    covered = sum(1 for v in ap if v >= ctest)
+    atfloor = sum(1 for v in dec if v >= cfloor)
+    check('F3: the set the consumer tests at %d is exactly the set the bake floored at %d (%d vs %d)'
+          % (ctest, cfloor, covered, atfloor), covered == atfloor and covered > 0)
+sys.exit(1 if fails else 0)
+PYEOF
+	[ $? -eq 0 ] || fails=$((fails + 1))
 fi
 
 [ $fails -eq 0 ] && echo "RESULT PASS" || echo "RESULT FAIL"

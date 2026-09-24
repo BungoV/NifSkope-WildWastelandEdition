@@ -55,9 +55,16 @@ class Lodv(object):
 		self.levelDims = list(struct.unpack_from('<8H', b, 0x88))
 		self.indexCrc = struct.unpack_from('<I', b, 0x98)[0]
 		self.sheets = []
-		for i in range(4):
-			f0, f1, role, space = struct.unpack_from('<HHBB', b, 0xA0 + i * 8)
-			self.sheets.append({'dxgi': f0, 'dxgiCover': f1, 'role': role, 'space': space})
+		# TEN descriptors since 2026-09-18 (0xA0..0xEF); v2 held six at
+		# 0xA0..0xCF and v1 four. Nothing before 0xA0 moved and the stride is
+		# still 8, so a reader that stops at six reads an OLD container
+		# correctly and simply cannot see the horizon sheets.
+		for i in range(10):
+			f0, f1, role, space, skip = struct.unpack_from('<HHBBB', b, 0xA0 + i * 8)
+			# byte 6 is mipSkip (lane VTNORMAL1): 1 on a half-resolution sheet,
+			# which stores the full sheet's mips 1.. and no mip 0
+			self.sheets.append({'dxgi': f0, 'dxgiCover': f1, 'role': role, 'space': space,
+								'skip': skip})
 		self.table = []
 		for i in range(self.tileCount):
 			o = self.tableOffset + i * STRIDE
@@ -66,11 +73,20 @@ class Lodv(object):
 							   'flags': flags, 'reserved': res})
 
 	def sheetMipBytes(self, s, mip, cover):
-		side = self.stored >> mip
+		skip = self.sheets[s]['skip']
+		if mip + skip >= self.mips:
+			return 0
+		side = self.stored >> (mip + skip)
 		if self.sheets[s]['role'] == 4:
 			return side * side * 2
-		fmt = self.sheets[s]['dxgiCover'] if (self.sheets[s]['role'] == 3 and cover) \
-			else self.sheets[s]['dxgi']
+		# role 7 is the HORIZON sheet: uncompressed R8G8B8A8, four azimuth bins
+		# one byte each, so it is the one role with no block compression at all
+		if self.sheets[s]['role'] == 7:
+			return side * side * 4
+		# the cover carrier is whichever sheet declares TWO formats -- the mask
+		# by default, the colour sheet under --vt-cover-in-color
+		sd = self.sheets[s]
+		fmt = sd['dxgiCover'] if (cover and sd['dxgiCover'] != sd['dxgi']) else sd['dxgi']
 		bb = 16 if fmt in (77, 78) else 8
 		return (side // 4) * (side // 4) * bb
 
@@ -108,7 +124,7 @@ class Lodv(object):
 		if hs is None or p is None:
 			return None
 		o = self.sheetOffset(bool(e['flags'] & 2), hs, 0)
-		n = self.stored
+		n = self.stored >> self.sheets[hs]['skip']
 		return [list(struct.unpack_from('<%dH' % n, p, o + y * n * 2)) for y in range(n)]
 
 	def colour(self, index, mip=0):
@@ -172,16 +188,31 @@ def cmd_header(paths):
 			print('    sheet %d role %d dxgi %d dxgiCover %d space %d'
 				  % (i, s['role'], s['dxgi'], s['dxgiCover'], s['space']))
 		check('V1 %s magic, version and header size' % os.path.basename(p),
-			  v.magic == b'LDTX' and v.version == 1 and v.headerBytes == HDR)
+			  v.magic == b'LDTX' and v.version == 2 and v.headerBytes == HDR,
+			  'version %d' % v.version)
 		check('V1 %s the geometry is the one the document fixes' % os.path.basename(p),
 			  v.content == 256 and v.border == 8 and v.stored == 272 and v.mips == 2
 			  and v.aniso == 8)
-		check('V1 %s FOUR sheets: colour, msn, data and HEIGHT' % os.path.basename(p),
-			  v.sheetCount == 4 and [s['role'] for s in v.sheets[:4]] == [1, 2, 3, 4]
-			  and v.sheets[3]['dxgi'] == 56,
-			  'roles %s' % [s['role'] for s in v.sheets[:4]])
+		roles = [x['role'] for x in v.sheets[:v.sheetCount]]
+		# version 2 (docs/LODGEN_TERRAIN_VT.md 2.2): colour, msn, MASK, then
+		# height if it was asked for, then emissive if any layer supplies one.
+		# Role 3 `data` is RETIRED and must appear nowhere.
+		check('V1 %s the object texture family: colour, msn and MASK, in that order'
+			  % os.path.basename(p),
+			  roles[:3] == [1, 2, 5] and 3 not in roles,
+			  'roles %s' % roles)
+		check('V1 %s the HEIGHT sheet is role 4 and R16' % os.path.basename(p),
+			  4 in roles and v.sheets[roles.index(4)]['dxgi'] == 56,
+			  'roles %s' % roles)
+		# exactly ONE sheet may declare two formats, and it is the cover carrier
+		carriers = [i for i, x in enumerate(v.sheets[:v.sheetCount])
+					if x['dxgiCover'] != x['dxgi']]
+		check('V1 %s exactly one sheet carries the ground-cover alpha'
+			  % os.path.basename(p),
+			  len(carriers) == 1 and v.sheets[carriers[0]]['role'] in (1, 5),
+			  'carriers %s' % carriers)
 		check('V1 %s the reserved tail is zero' % os.path.basename(p),
-			  v.b[0xC0:0x100] == b'\0' * 64)
+			  v.b[0xD0:0x100] == b'\0' * 48)
 		check('V1 %s row order is north-up and it is a refusal to be otherwise'
 			  % os.path.basename(p), (v.flags & 1) == 1)
 		check('V3 %s fileBytes matches the file' % os.path.basename(p),
@@ -286,6 +317,11 @@ def cmd_filter(finePath, coarsePath):
 	BC1 both sides, so it gets the document's bars."""
 	fine = Lodv(finePath)
 	coarse = Lodv(coarsePath)
+	# a half-resolution height sheet (--vt-half-aux, descriptor byte 6) stores
+	# no mip 0, so the exact per-texel law has nothing to read at the fine side
+	if any(x['role'] == 4 and x['skip'] for x in fine.sheets + coarse.sheets):
+		print('  skip V8/V10: half-resolution height sheet (mipSkip 1); the law is checked on the full bake')
+		return
 	check('V8 the two levels share one origin (a coarse tile covers exactly four fine)',
 		  fine.west == coarse.west and fine.north == coarse.north
 		  and coarse.levelDim == fine.levelDim * 2)
@@ -495,6 +531,19 @@ def cmd_ladder(paths):
 	check('a coarse tile covers exactly four finer ones', ok)
 	check('every container agrees on the world rectangle and both corpus hashes',
 		  len(set((v.wWest, v.wSouth, v.wEast, v.wNorth, v.vhgt, v.paint) for v in vs)) == 1)
+	# The msn stores UP in GREEN at EVERY level. The parent-tile filter passed its
+	# channels to the pixel function in the wrong order until 2026-09-18, so every
+	# other level came out with up in BLUE and lit sideways.
+	ups = []
+	for v in vs:
+		img = decode_bc1(v.payload(0), v.sheetOffset(False, 1, 0), v.stored, v.stored)
+		flat = [q for row in img[::4] for q in row[::4]]
+		g = sum(q[1] for q in flat) / float(len(flat))
+		b = sum(q[2] for q in flat) / float(len(flat))
+		ups.append((v.levelDim, int(g), int(b)))
+	print('  msn mean (dim, green, blue): %s' % ups)
+	check('every level of the ladder stores the normal with UP in green',
+		  len(ups) > 0 and all(g > 200 and b < 160 for _, g, b in ups), str(ups))
 	for v in vs:
 		print('    dim %2d: %d x %d tiles, %d world units a tile, %d texels a tile edge, '
 			  '%d units a texel' % (v.levelDim, v.tilesX, v.tilesY, v.levelDim * 4096,

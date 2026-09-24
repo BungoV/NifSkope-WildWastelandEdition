@@ -46,7 +46,7 @@ checks=0; fails=0
 check() { checks=$((checks+1)); if [ "$2" = "1" ]; then echo "  ok   $1"; else echo "  FAIL $1"; fails=$((fails+1)); fi; }
 
 GEN="$W/gen.btr"
-"$NS" -no-gui lodgen "$ESM" --worldspace 3C --terrain -20 24 --dim 4 -o "$GEN" >/dev/null 2>&1
+"$NS" -no-gui lodgen "$ESM" --worldspace 3C --terrain -20 24 --dim 4 --terrain-identity -o "$GEN" >/dev/null 2>&1
 check "the chunk generates" "$([ -f "$GEN" ] && echo 1 || echo 0)"
 [ -f "$GEN" ] || { echo "$checks checks, $((fails)) failures"; echo FAIL; exit 1; }
 
@@ -56,8 +56,10 @@ echo "  vanilla anatomy:   $vtypes"
 echo "  generated anatomy: $gtypes"
 check "block anatomy matches vanilla" "$([ "$vtypes" = "$gtypes" ] && echo 1 || echo 0)"
 
-# The CS terrain profile is ON by default now, so the Land descriptor is
-# DELIBERATELY wider than vanilla's -- it carries material class, wetness, AO,
+# The CS terrain profile is OFF by default since 2026-09-12 (bungo's
+# ruling), so the bake above ASKS for it with --terrain-identity and the
+# Land descriptor is then DELIBERATELY wider than vanilla's -- it carries
+# material class, wetness, AO,
 # shore proximity, sky visibility and the second class. The guarantee that
 # still has to hold is the FALLBACK: with the profile off, the descriptor must
 # match vanilla's exactly. Asserting both ways keeps the old protection (no
@@ -165,7 +167,7 @@ check "water bound centres equal vanilla's" "$wok"
 
 # --- rung 2: the object chunk and its identity contract ----------------
 OBJ="$W/gen.bto"
-"$NS" -no-gui lodgen "$ESM" --worldspace 3C --objects -20 24 --dim 4 -o "$OBJ" >/dev/null 2>&1
+"$NS" -no-gui lodgen "$ESM" --worldspace 3C --objects -20 24 --dim 4 --identity -o "$OBJ" >/dev/null 2>&1
 check "the object chunk generates" "$([ -f "$OBJ" ] && echo 1 || echo 0)"
 if [ -f "$OBJ" ]; then
 	check "...with its manifest" "$([ -f "$OBJ.manifest.txt" ] && echo 1 || echo 0)"

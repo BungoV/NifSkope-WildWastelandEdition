@@ -12,7 +12,13 @@
 #      merged shape under 65536 vertices, dim x dim segments each
 #   2. every A line names an existing block, with layer -1 where a merged
 #      shape spans layers, and every vertex of such a shape carries an
-#      integer layer inside its set's layer count
+#      integer layer inside its set's layer count.  Both bakes spell
+#      --identity: since DEFAULTS1 (2026-09-12) object identity is OFF by
+#      default and a default chunk has no UV 2 channel at all, so the layer
+#      claim would be compared against an empty set (lodgen.cpp:5149 writes
+#      the A line either way, by design).  A companion check asserts the
+#      channel is present, and a refuter doctors one claim to prove the
+#      comparison can still fail.
 #   3. the atlas _s sheet exists (BC5, DX10), atlased shapes carry it in
 #      slot 7 at smoothness 1 and strength 1
 #   4. the chunk file is smaller, the root's child list has no holes
@@ -41,7 +47,7 @@ for mode in raw merged; do
 	mkdir -p "$W/$mode/obj" "$W/$mode/tex"
 	flag="--no-merge"; [ "$mode" = merged ] && flag="--merge"
 	"$NS" -no-gui lodgen "$ESM" --worldspace 3C --terrain-region -20 24 -19 25 --dim 4 --no-ao \
-		--out-dir "$W/$mode/obj" --tex-dir "$W/$mode/tex" --data-root "$DATA" --arrays --atlas $flag > "$W/$mode/log.txt" 2>&1
+		--out-dir "$W/$mode/obj" --tex-dir "$W/$mode/tex" --data-root "$DATA" --arrays --atlas --identity $flag > "$W/$mode/log.txt" 2>&1
 	grep -a "^merged:\|^atlas:" "$W/$mode/log.txt" | head -2 | sed 's/^/  /'
 	[ -n "$(ls "$W/$mode/obj/"*.BTO 2>/dev/null)" ] || { bad "$mode: no chunks written"; tail -3 "$W/$mode/log.txt"; echo "RESULT FAIL"; exit 1; }
 done
@@ -64,7 +70,7 @@ def half(hval):
     return s * m / (1 << 24) if e == 0 else s * (1 + m / 1024.0) * 2.0 ** (e - 15)
 
 def shapes(bto):
-    """every BSSubIndexTriShape: (block, numVerts, numTris, segments, uv2 layers set, stride)"""
+    """every BSSubIndexTriShape: (block, numVerts, numTris, segments, uv2 layers set, has uv2)"""
     with contextlib.redirect_stdout(io.StringIO()):
         data, hdr, strings, blocks = nifparse.parse(bto)
     out = []
@@ -89,8 +95,14 @@ def shapes(bto):
         o += nv * stride + nt * 6
         # BSSubIndexTriShape: Num Primitives, Num Segments, Total Segments
         nprim, nseg, tseg = struct.unpack_from('<III', data, o)
-        out.append((i, nv, nt, nseg, layers))
+        out.append((i, nv, nt, nseg, layers, hasUv2))
     return out
+
+def layerOk(layers, layer, n):
+    """the A line's claim against the layers actually stored on the vertices"""
+    if layer == -1:
+        return len(layers) >= 2 and all(float(l).is_integer() and 0 <= l < n for l in layers)
+    return layers == {float(layer)}
 
 def readLodm(path):
     b = open(path, 'rb').read()
@@ -101,6 +113,7 @@ def readLodm(path):
 rawBtos = sorted(glob.glob(os.path.join(W, 'raw', 'obj', '*.BTO')))
 totalBefore = totalAfter = 0; vBefore = vAfter = tBefore = tAfter = 0; sizeBefore = sizeAfter = 0
 badSeg = 0; over = 0; badA = 0; mixed = 0; badLayer = 0; checkedMixed = 0; holes = 0
+noUv2 = 0; claims = []
 for rb in rawBtos:
     mb = rb.replace(os.path.join(W, 'raw'), os.path.join(W, 'merged'))
     if not os.path.exists(mb):
@@ -113,6 +126,7 @@ for rb in rawBtos:
     for s in s2:
         if s[3] != 16: badSeg += 1
         if s[1] > 65535: over += 1
+        if not s[5]: noUv2 += 1
     # the root's child list: Num Children and no -1 entries
     with contextlib.redirect_stdout(io.StringIO()):
         data, hdr, strings, blocks = nifparse.parse(mb)
@@ -133,19 +147,24 @@ for rb in rawBtos:
         layers = byBlock[blk][4]
         lm = readLodm(os.path.join(W, 'merged', 'tex', 'Objects', os.path.basename(lodm.replace('\\', '/'))))
         n = len(lm['array']['layers'])
+        claims.append((set(layers), layer, n))
         if layer == -1:
             mixed += 1
             checkedMixed += 1
-            if not (len(layers) >= 2 and all(float(l).is_integer() and 0 <= l < n for l in layers)): badLayer += 1
-        else:
-            if layers != {float(layer)}: badLayer += 1
+        if not layerOk(layers, layer, n): badLayer += 1
     print('  %s: %d shapes -> %d, %d verts -> %d, %d tris -> %d, %d -> %d bytes, %d A lines (%d per-vertex)' % (
         os.path.basename(rb), len(s1), len(s2), sum(s[1] for s in s1), sum(s[1] for s in s2), sum(s[2] for s in s1), sum(s[2] for s in s2),
         os.path.getsize(rb), os.path.getsize(mb), len(A), sum(1 for a in A if int(a[2]) == -1)))
 check('fewer shapes after the merge (%d -> %d)' % (totalBefore, totalAfter), totalAfter < totalBefore)
 check('the same vertices and triangles in total', vBefore == vAfter and tBefore == tAfter)
 check('every merged shape keeps dim x dim segments and stays under 65536 vertices', badSeg == 0 and over == 0)
+check('every merged shape carries the UV 2 layer channel (%d without)' % noUv2, noUv2 == 0)
 check('every A line names an existing block and its layer matches the vertices (%d per-vertex shapes)' % mixed, badA == 0 and badLayer == 0)
+# the refuter: the same predicate on a doctored claim (a per-vertex shape told
+# it is single-layer, a single-layer one told it is per-vertex) must refuse
+# every one, or the check above is an empty loop
+refused = sum(1 for lay, lv, n in claims if not layerOk(lay, 0 if lv == -1 else -1, n))
+check('the layer comparison can fail (%d of %d doctored claims refused)' % (refused, len(claims)), len(claims) > 0 and refused == len(claims))
 check('the chunk files shrank (%d -> %d bytes)' % (sizeBefore, sizeAfter), sizeAfter < sizeBefore)
 check('the root child lists have no holes', holes == 0)
 # the atlas _s sheet and the atlased shapes' slots

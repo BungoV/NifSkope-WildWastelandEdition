@@ -40,3 +40,43 @@ winpath() {
 		*) printf '%s' "$1" ;;
 	esac
 }
+
+# A FLOORED WINDOW IS A REFUSAL, NOT A MEASUREMENT.  Lane HARNESSWIN1, 2026-09-19.
+#
+# native_open.sh row (c) sat red at 0.8978 for a day because the window it
+# measured was bungo's last window -- maximized, restored out of QSettings,
+# 1822 px wide instead of the 1024 it asked for, so `upp` halved and a sub-pixel
+# disagreement resolved into whole pixels.  Nothing in the run said so.  The
+# number looked like a fact about the scene and was a fact about the machine.
+#
+# The restore no longer happens on a harness run, but a request can still be
+# floored by the layout: the main window has a minimum width of about 1024 px
+# (already written down at native_open.sh:117-119, "480x480 came back
+# 1024x445"), and Qt will not go under a layout minimum for anybody.  So the
+# size obtained is written to release/ww_harness_window.log with the size asked
+# for beside it, and this is how a spell reads it back.
+#
+#   ww_window_refusal   -> prints the REFUSED sentence, or nothing
+#   ww_window_line      -> the settled harness-window line, or nothing
+#
+# Use it the moment before the number is trusted:
+#
+#   if r="$(ww_window_refusal)" && [ -n "$r" ]; then echo "$r"; exit 1; fi
+#
+# It prints nothing when no such log exists, so a spell that has not run the
+# application yet, or an older exe, is not turned red by adding the call.
+ww_window_log() {
+	printf '%s' "${WW_HARNESS_WINDOW_LOG:-$(dirname "${BASH_SOURCE[0]}")/../../release/ww_harness_window.log}"
+}
+
+ww_window_line() {
+	local f; f="$(ww_window_log)"
+	[ -f "$f" ] || return 0
+	grep '^harness-window ' "$f" | tail -1
+}
+
+ww_window_refusal() {
+	local f; f="$(ww_window_log)"
+	[ -f "$f" ] || return 0
+	grep '^REFUSED: the window size asked for was ' "$f" | tail -1
+}

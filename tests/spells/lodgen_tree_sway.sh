@@ -36,7 +36,9 @@ check() { checks=$((checks+1)); if [ "$2" = "1" ]; then echo "  ok   $1"; else e
 # Sanctuary (-20,24): maples, elms, blasted forest, shacks and a warehouse
 # --objects takes its OWN chunk coords, exactly like --terrain; passing
 # --terrain as well makes it silently bake a DIFFERENT chunk.
-"$NS" -no-gui lodgen "$ESM" --worldspace 3C --objects -20 24 --dim 4 \
+# Sway rides in the vertex ALPHA, which is identity data: OFF by default
+# since 2026-09-12, so this harness spells --identity.
+"$NS" -no-gui lodgen "$ESM" --worldspace 3C --objects -20 24 --dim 4 --identity \
 	-o "$W/sway.bto" >/dev/null 2>&1
 [ -f "$W/sway.bto" ] || { echo "FAIL: the object chunk did not generate"; exit 1; }
 

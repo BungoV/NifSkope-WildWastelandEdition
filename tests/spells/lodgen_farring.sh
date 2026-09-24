@@ -63,7 +63,10 @@ bad() { echo "  FAIL $1"; fails=$((fails + 1)); }
 build() {
 	local tag="$1" dim="$2"; shift 2
 	mkdir -p "$W/$tag/obj" "$W/$tag/tex"
-	"$NS" -no-gui lodgen "$ESM" --worldspace 3C --terrain-region -20 24 -19 25 --dim "$dim" \
+	# The ring cut groups by (identity index, UV2.y layer) and this harness
+	# reads both back, so it spells --identity (off by default since
+	# 2026-09-12).
+	"$NS" -no-gui lodgen "$ESM" --worldspace 3C --terrain-region -20 24 -19 25 --dim "$dim" --identity \
 		--no-ao --out-dir "$W/$tag/obj" --tex-dir "$W/$tag/tex" --data-root "$DATA" \
 		--arrays --atlas "$@" > "$W/$tag.log" 2>&1
 	grep -a "^far rings:\|^merged:\|^atlas written" "$W/$tag.log" | sed "s/^/  [$tag] /"

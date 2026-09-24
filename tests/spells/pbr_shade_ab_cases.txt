@@ -1,0 +1,36 @@
+# pbr_shade_ab cases (lane PBRR0, docs/NIFSKOPE_PBR_RENDERER.md s9 + s13).
+#
+# One case per line, whitespace-separated:
+#   <name> <gate> <nif> [KEY=VALUE ...]
+# <gate>  zero | change | value   (R0 builds zero; change/value arrive with R1/R3)
+# <nif>   $DATA/... resolves to the vanilla loose tree (read-only), $PBRDATA/... to
+#         the loose PBR test folder (R1). Any other path is taken as written.
+# KEY=VALUE pairs override the harness pins for THIS case in BOTH arms, so the
+# arms can never differ by a pin.
+# @empty=<reason> is a harness directive, not a pin: the fixture draws NOTHING
+# visible in this viewer, measured, so its zero gate can only say PASS-EMPTY
+# (byte-identical, and it guards no particle pixel). The verdict names it; the
+# drawing particle fixtures below are what actually guard particle display.
+#
+# The standing zero set (s13): the BGSM duct, the BGEM plane, the embedded lit
+# guard rail, the embedded effect, the 3 particle NIFs -- plus the legacy-law
+# 10mm pistol. With every new feature OFF all of them are pixel-identical to the
+# previous rung.
+
+bgsm_duct        zero  $DATA/Meshes/SetDressing/ACDucts/ACDuctConnector01.nif
+bgem_plane       zero  $DATA/Meshes/Effects/GlowFlatPlaneOneSided01.nif
+embedded_lit     zero  $DATA/Meshes/Landscape/GuardRails/GRailCurveR01.nif
+embedded_effect  zero  $DATA/Meshes/Effects/GlassShader01.nif
+# The three s9 particle NIFs, measured 2026-09-24 (lane PBRR0) on both rungs:
+# fire and smoke are BSMasterParticleSystem children fed by
+# BSPSysMultiTargetEmitterCtlr, which src/gl/controllers.cpp (exact match on
+# NiPSysEmitterCtlr) never simulates -> 0 live particles at every time; the
+# mist's two systems draw (census) but nothing reaches a pixel at t=0.5..6, any
+# camera, flat or textured. Making them draw would change particle display.
+particles_fire   zero  $DATA/Meshes/Effects/MPSFireSmall01.nif     @empty=multitarget-emitter-not-simulated
+particles_smoke  zero  $DATA/Meshes/Effects/MPSSmokeFireMed01.nif  @empty=multitarget-emitter-not-simulated
+particles_mist   zero  $DATA/Meshes/Effects/AttachFXMist01.nif     @empty=draws-but-no-visible-pixel
+# Particle NIFs that DO draw here (their harnesses: particle_cap.sh, subtex_flipbook.sh).
+particles_shock  zero  $DATA/meshes/Actors/CreateABot/CharacterAssets/ShockHAndLeft.nif
+particles_cryo   zero  $DATA/Meshes/Effects/CryoJet01.nif
+pistol_10mm      zero  $DATA/Meshes/Weapons/10mmPistol/10MMPistol.nif

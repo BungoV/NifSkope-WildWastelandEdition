@@ -41,7 +41,9 @@ trap 'rm -rf "$W"' EXIT
 "$NS" -no-gui lodgen "$ESM" --worldspace 3C --lodl "$W" > "$W/out.txt" 2>&1 \
 	|| { echo "FAIL: lodgen's own round-trip against the ESM failed:"; cat "$W/out.txt"; exit 1; }
 grep -E 'alpha words|cross-check' "$W/out.txt" | sed 's/^/  ok   tool: /'
-F="$W/Terrain/Commonwealth.lodl"
+# THE .lodl MOVED under one root inside the mod folder (lane LAYOUT1,
+# 2026-09-16, bungo 19:3x): <out>/FO4CSLOD/<ws>/<ws>.lodl.
+F="$W/FO4CSLOD/Commonwealth/Commonwealth.lodl"
 [ -s "$F" ] || { echo "FAIL: no .lodl written"; exit 1; }
 
 "$PY" - "$F" <<'PYEOF'
@@ -150,7 +152,7 @@ WT="$(echo "$CENSUS" | awk '{print $6}')"
 # the same worldspace at version 1: the fallback must be EXACT, not similar
 WW_LODL_VERSION=1 "$NS" -no-gui lodgen "$ESM" --worldspace 3C --lodl "$W/v1" \
 	> "$W/v1.txt" 2>&1 || { echo "FAIL: the version 1 fallback write failed"; rc=1; }
-F1="$W/v1/Terrain/Commonwealth.lodl"
+F1="$W/v1/FO4CSLOD/Commonwealth/Commonwealth.lodl"
 
 "$PY" - "$F" "$F1" "${WH:-nan}" "${WT:-none}" <<'PYEOF2'
 import struct, sys
@@ -269,7 +271,7 @@ else
 		> "$W/nwa.txt" 2>&1 || { bad2 "the NukaWorldAmphitheater .lodl writes"; }
 	"$NS" -no-gui lodgen "$NWESM" --worldspace 52931 --heightmap "$W/hm" \
 		> "$W/hm.txt" 2>&1 || { bad2 "its shadow heightmap bakes"; }
-	L2="$W/nwa/Terrain/NukaWorldAmphitheater.lodl"
+	L2="$W/nwa/FO4CSLOD/NukaWorldAmphitheater/NukaWorldAmphitheater.lodl"
 	H2="$(ls "$W/hm"/Textures/Terrain/NukaWorldAmphitheater/*.dds 2>/dev/null | head -1)"
 	if [ -s "$L2" ] && [ -n "$H2" ]; then
 		"$PY" - "$L2" "$H2" <<'PYEOF3'
@@ -437,8 +439,8 @@ fi
 
 # and the renamed file still VERIFIES against its own source: the rename moved
 # the name, not a byte.
-mkdir -p "$W/verify/Terrain"
-cp "$F" "$W/verify/Terrain/Commonwealth.lodl"
+mkdir -p "$W/verify/FO4CSLOD/Commonwealth"
+cp "$F" "$W/verify/FO4CSLOD/Commonwealth/Commonwealth.lodl"
 if "$NS" -no-gui lodgen "$ESM" --worldspace 3C --lodl "$W/verify" --verify-only \
 	> "$W/verify.txt" 2>&1; then
 	MM="$(grep -o '[0-9]* mismatched' "$W/verify.txt" | head -1)"

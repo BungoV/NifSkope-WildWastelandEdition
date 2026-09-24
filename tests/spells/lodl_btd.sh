@@ -71,7 +71,10 @@ if [ $RC -ne 0 ]; then
 fi
 echo "  ok   the conversion runs with no plugin file"
 
-F="$(ls "$W"/Terrain/*.lodl 2>/dev/null | head -1)"
+# the .lodl moved under FO4CSLOD/<ws>/ (lane LAYOUT1, 2026-09-16); the
+# worldspace folder is named from the .btd, so the glob asks rather than
+# spells it.
+F="$(ls "$W"/FO4CSLOD/*/*.lodl 2>/dev/null | head -1)"
 if [ -n "$F" ] && [ -s "$F" ]; then
 	echo "  ok   a .lodl was written ($(wc -c < "$F") bytes)"
 else

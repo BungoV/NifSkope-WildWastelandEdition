@@ -632,6 +632,288 @@ check "$( [ "${OCT_PNGS:-0}" -ge 1 ] && [ -n "$CARDS_HIDDEN" ] && [ "$CARDS_HIDD
 	"hidden ${CARDS_HIDDEN:0:16} / visible ${CARDS_SHOWN:0:16} over $OCT_PNGS sheet(s)"
 
 echo
+echo "7. THE PINNED CAMERA: a picture with a world-unit scale, or none"
+#
+# Until 2026-09-09 no picture out of this hook carried a number, and both
+# switches that were supposed to give it one were broken in the same place.
+#
+#   WW_RENDER_CENTER did nothing on an axis view. Two look-ats 400 units apart
+#   on the 512-unit cube produced BYTE-IDENTICAL PNGs (md5 fff710bd...). It
+#   "worked" on ViewUser only by accident: setOrientation() returns early when
+#   the requested state is already the current one, so on that one view it
+#   never queued the auto-fit that eats the look-at everywhere else.
+#
+#   WW_RENDER_DIST scaled as 1 / D^2. Measured span of the cube at
+#   WW_RENDER_DIST 400 / 500 / 600 / 700 / 768 / 800 / 900 / 1000 / 1500 /
+#   2000: 539 / 273 / 169 / 117 / 95 / 87 / 67 / 53 / 23 / 11 px. Solving each
+#   for the distance the picture implies gives want^2 / 532 to +-1%, and 532 is
+#   the fixture's own auto-fit distance (bound radius 443.4 * 1.2).
+#
+# ONE CAUSE, in GLView and not in the hook: center() does not centre. It sets
+# `doCenter` and asks for a repaint, and setCenter() -- Pos = -bounds.centre,
+# Dist = radius * 1.2, Zoom = 1 -- runs inside the NEXT paintGL. So the hook
+# set the camera, one frame ran, and paintGL replaced it. The distance survived
+# in mangled form only because the hook read Dist back and "corrected" it,
+# which is what turned an inverse law into an inverse-square one.
+#
+# The fix is a PIN that cancels the queued auto-fit and re-asserts itself at
+# the top of every paint (GLView::WwCameraPin), so a later reframe -- a second
+# compile, a generated .lodl/.btd rebuilding its scene -- cannot take the
+# camera back. It is armed only by WW_RENDER_CENTER / _DIST / _FOV / _ORTHO;
+# a WW_RENDER_VIEW-only capture is left on the old auto-fit path, which is what
+# the control below measures.
+#
+# THE PREDICTION, which is what makes this a gate rather than a demonstration.
+# `upp` is the units per pixel at the look-at plane, so an extent of E world
+# units in that plane spans E / upp pixels.
+#
+#   orthographic (WW_RENDER_ORTHO=<half-width W>):
+#       upp  = 2 * W / viewportWidth              -- the eye distance is free
+#       span = 512 * viewportWidth / ( 2 * W )    -- and the SAME at every DIST
+#
+#   perspective (WW_RENDER_FOV=<full vertical fov>, WW_RENDER_DIST=<eye>):
+#       upp  = 2 * tan( fov / 2 ) * eye / viewportHeight
+#       and the cube's silhouette is its FRONT face, 256 units nearer:
+#       span = 512 * viewportHeight / ( 2 * tan( fov / 2 ) * ( eye - 256 ) )
+#
+# Both are compared to within 1 px, at three distances and on two views, and
+# the viewport is read back from the PNG rather than assumed: WW_RENDER_SIZE is
+# clamped to the desktop and returns a squashed capture without saying so.
+#
+# THE FLOORS, because "the number came out right" is also what a broken
+# instrument says:
+#   * the CONTROL: no camera switch at all, which must still give the old
+#     auto-fit framing -- 2.4 * 443.405 = 1064.17 units of eye distance at
+#     fov 60, so 231 px, a number that shares no factor with any pinned one;
+#   * the pin must MOVE the picture: two look-ats 400 units apart must
+#     separate the silhouette by exactly 400 / upp pixels. This is the check
+#     that was red before the fix, on byte-identical files;
+#   * a REFUSAL must be named, not swallowed: WW_RENDER_ORTHO=-5 has to appear
+#     in the census as a refusal and leave the perspective arm serving;
+#   * two runs of one pinned case must be BYTE-IDENTICAL.
+CUBE="$WORK/cube512.nif"
+cli new -o "$(winpath "$CUBE")" --cube --size 512 >/dev/null 2>&1
+check "$( [ -s "$CUBE" ] && echo 1 || echo 0 )" "the 512-unit cube fixture was written" \
+	"$(ls -l "$CUBE" 2>/dev/null | awk '{print $5}') bytes from -no-gui new --cube --size 512"
+
+# THE SPAN INSTRUMENT. The silhouette edge is taken at HALF INTENSITY between
+# the background and the flat face, with linear interpolation across the two
+# crossing pixels, so the number is sub-pixel and unbiased -- counting "pixels
+# that are exactly the face colour" undercounts by the width of the antialiased
+# edge, which is the same size as the tolerance being tested.
+SPANPY="$WORK/span.py"
+cat > "$SPANPY" <<'PYEOF'
+import sys, json
+import numpy as np
+from PIL import Image
+
+def edges(prof, thr, bright):
+    """Sub-pixel left and right crossings of thr in a 1-D profile."""
+    m = (prof > thr) if bright else (prof < thr)
+    idx = np.nonzero(m)[0]
+    if idx.size == 0:
+        return None
+    # the widest contiguous run, so any stray marker cannot widen the answer
+    runs, s = [], idx[0]
+    for a, b in zip(idx[:-1], idx[1:]):
+        if b != a + 1:
+            runs.append((s, a)); s = b
+    runs.append((s, idx[-1]))
+    lo, hi = max(runs, key=lambda r: r[1] - r[0])
+
+    def cross(i, j):
+        # Where the straight line through prof[i] and prof[j] passes thr.
+        # The (j - i) factor is not decoration: the right-hand edge is called
+        # with j = i - 1, and without it the crossing lands one pixel OUTSIDE
+        # the object and every span reads 1 px too wide. Caught on a hard
+        # (unantialiased) edge, where the answer must come out exactly on the
+        # pixel boundary: 637.5 and 868.5 for a 231.0 px cube.
+        a, b = float(prof[i]), float(prof[j])
+        if a == b:
+            return float(j)
+        return i + (thr - a) / (b - a) * (j - i)
+    left = cross(lo - 1, lo) if lo > 0 else float(lo) - 0.5
+    right = cross(hi + 1, hi) if hi + 1 < prof.size else float(hi) + 0.5
+    return left, right
+
+def measure(path):
+    a = np.asarray(Image.open(path).convert("RGB")).astype(float)
+    h, w, _ = a.shape
+    lum = 0.299 * a[:, :, 0] + 0.587 * a[:, :, 1] + 0.114 * a[:, :, 2]
+    bg = float(np.median([lum[0, 0], lum[0, w - 1], lum[h - 1, 0], lum[h - 1, w - 1]]))
+    far = lum[np.abs(lum - bg) > 8.0]
+    out = dict(w=w, h=h, bg=bg, n=int(far.size), spanx=0.0, spany=0.0, cx=0.0, cy=0.0, face=bg)
+    if far.size < 64:                       # the floor: no object, no number
+        return out
+    vals, counts = np.unique(np.round(far).astype(int), return_counts=True)
+    face = float(vals[int(np.argmax(counts))])
+    out["face"] = face
+    bright = face > bg
+    thr = 0.5 * (bg + face)
+    ex = edges(lum[h // 2], thr, bright)
+    if ex:
+        out["spanx"] = ex[1] - ex[0]
+        out["cx"] = 0.5 * (ex[0] + ex[1])
+    ey = edges(lum[:, int(round(out["cx"])) if ex else w // 2], thr, bright)
+    if ey:
+        out["spany"] = ey[1] - ey[0]
+        out["cy"] = 0.5 * (ey[0] + ey[1])
+    return out
+
+print(json.dumps(measure(sys.argv[1])))
+PYEOF
+
+# A camera run: no window/pixel samplers (section 5 owns those), its own census
+# file, and the cube. RC comes back in a global, the way run() does it.
+CAMRC=0
+camshot() { # label  -- the caller exports the WW_RENDER_* under test
+	rm -f "$WORK/$1.png" "$WORK/$1.camera"
+	export WW_RENDER_SHOT="$(winpath "$WORK/$1.png")"
+	export WW_RENDER_SIZE=640x480 WW_RENDER_TIME=1 WW_RENDER_CLEAN=1
+	export WW_CAMERA_CENSUS="$(winpath "$WORK/$1.camera")"
+	timeout "$CAP" "$EXE" --port "$PORT" "$CUBE" >"$WORK/$1.out" 2>&1
+	CAMRC=$?
+	unset WW_RENDER_SHOT WW_RENDER_SIZE WW_RENDER_TIME WW_RENDER_CLEAN WW_CAMERA_CENSUS
+}
+sp()   { "$PY" "$(winpath "$SPANPY")" "$(winpath "$WORK/$1.png")" 2>/dev/null; }
+spget() { sp "$1" | "$PY" -c "import sys,json;print(json.load(sys.stdin)['$2'])" 2>/dev/null; }
+camfield() { sed -n "s/.* $2=\([^ ]*\).*/\1/p" "$WORK/$1.camera" 2>/dev/null | tail -1; }
+near() { awk -v a="$1" -v b="$2" -v t="$3" 'BEGIN{ d=a-b; if(d<0)d=-d; print (d<=t)?1:0 }'; }
+
+# --- the control: no camera switch, so the old auto-fit framing, unchanged
+export WW_RENDER_VIEW=5
+camshot cam_control
+unset WW_RENDER_VIEW
+CTL_W=$(spget cam_control w); CTL_H=$(spget cam_control h); CTL_SPAN=$(spget cam_control spanx)
+check "$( [ "$CAMRC" -eq 0 ] && [ -s "$WORK/cam_control.png" ] && echo 1 || echo 0 )" \
+	"the control run photographed the cube" "rc=$CAMRC, ${CTL_W}x${CTL_H} px"
+check "$( [ "$(camfield cam_control arm)" = "unpinned" ] && echo 1 || echo 0 )" \
+	"and no pin was armed" "arm=$(camfield cam_control arm)"
+# 512-unit cube, auto-fit eye 2 * 1.2 * 443.405 = 1064.17, fov 60, front face
+# 256 nearer: 512 * H / ( 2 * tan30 * ( 1064.17 - 256 ) ).
+CTL_PRED=$(awk -v h="$CTL_H" 'BEGIN{ printf "%.2f", 512.0*h/(2.0*0.5773503*(1064.17-256.0)) }')
+check "$(near "$CTL_SPAN" "$CTL_PRED" 1.0)" "and framed it the way it always did" \
+	"span $CTL_SPAN px, auto-fit predicts $CTL_PRED"
+
+# --- ORTHOGRAPHIC: the metric arm. Three eye distances, two views, one scale.
+ORTHO_W=1024
+ORTHO_PRED=$(awk -v w="$CTL_W" -v o="$ORTHO_W" 'BEGIN{ printf "%.2f", 512.0*w/(2.0*o) }')
+echo "  ..   orthographic half-width $ORTHO_W -> the cube must span $ORTHO_PRED px at every distance"
+for V in 5 4; do
+	for D in 500 1000 2000; do
+		export WW_RENDER_VIEW=$V WW_RENDER_ORTHO=$ORTHO_W WW_RENDER_DIST=$D WW_RENDER_CENTER=0,0,256
+		camshot "cam_o${V}_$D"
+		unset WW_RENDER_VIEW WW_RENDER_ORTHO WW_RENDER_DIST WW_RENDER_CENTER
+		S=$(spget "cam_o${V}_$D" spanx)
+		check "$(near "$S" "$ORTHO_PRED" 1.0)" \
+			"ortho view $V at eye $D spans what the projection says" \
+			"$S px vs $ORTHO_PRED (persp=$(camfield "cam_o${V}_$D" persp), upp=$(camfield "cam_o${V}_$D" upp))"
+	done
+done
+# The census is not decoration: its own units-per-pixel must agree with the one
+# computed here from W and the PNG, or one of the two is lying.
+UPP_SAID=$(camfield cam_o5_1000 upp)
+UPP_CALC=$(awk -v w="$CTL_W" -v o="$ORTHO_W" 'BEGIN{ printf "%.6f", 2.0*o/w }')
+check "$(near "$UPP_SAID" "$UPP_CALC" 0.001)" "the census agrees with the arithmetic" \
+	"census upp=$UPP_SAID, computed $UPP_CALC"
+check "$( [ "$(camfield cam_o5_1000 vp)" = "${CTL_W}x${CTL_H}" ] && echo 1 || echo 0 )" \
+	"and reports the viewport the PNG actually has" \
+	"census vp=$(camfield cam_o5_1000 vp), png ${CTL_W}x${CTL_H}"
+
+# --- the ortho SCALE LAW: halving the half-width must double the span.
+for O in 2048 4096; do
+	export WW_RENDER_VIEW=5 WW_RENDER_ORTHO=$O WW_RENDER_DIST=1000 WW_RENDER_CENTER=0,0,256
+	camshot "cam_ow$O"
+	unset WW_RENDER_VIEW WW_RENDER_ORTHO WW_RENDER_DIST WW_RENDER_CENTER
+	S=$(spget "cam_ow$O" spanx)
+	P=$(awk -v w="$CTL_W" -v o="$O" 'BEGIN{ printf "%.2f", 512.0*w/(2.0*o) }')
+	check "$(near "$S" "$P" 1.0)" "ortho half-width $O gives the span it should" "$S px vs $P"
+done
+
+# --- PERSPECTIVE: the arm the transition renders use, where DIST is a real
+# world distance and the scale has to follow it.
+for D in 500 1000 2000; do
+	export WW_RENDER_VIEW=5 WW_RENDER_FOV=60 WW_RENDER_DIST=$D WW_RENDER_CENTER=0,0,256
+	camshot "cam_p$D"
+	unset WW_RENDER_VIEW WW_RENDER_FOV WW_RENDER_DIST WW_RENDER_CENTER
+	S=$(spget "cam_p$D" spanx)
+	P=$(awk -v h="$CTL_H" -v d="$D" 'BEGIN{ printf "%.2f", 512.0*h/(2.0*0.5773503*(d-256.0)) }')
+	check "$(near "$S" "$P" 1.0)" "perspective at eye $D spans what the projection says" \
+		"$S px vs $P (persp=$(camfield "cam_p$D" persp), eye=$(camfield "cam_p$D" eye))"
+done
+# ANTI-VACUITY: three distances that all photographed the same thing would pass
+# every check above if the prediction were also constant. It is not, and the
+# census has to move with it.
+check "$( [ "$(camfield cam_p500 upp)" != "$(camfield cam_p1000 upp)" ] && \
+	[ "$(camfield cam_p1000 upp)" != "$(camfield cam_p2000 upp)" ] && echo 1 || echo 0 )" \
+	"and the census moved with the distance" \
+	"upp $(camfield cam_p500 upp) / $(camfield cam_p1000 upp) / $(camfield cam_p2000 upp)"
+check "$( [ "$(camfield cam_o5_500 upp)" = "$(camfield cam_o5_2000 upp)" ] && echo 1 || echo 0 )" \
+	"while an orthographic scale did NOT" \
+	"upp $(camfield cam_o5_500 upp) at eye 500 and $(camfield cam_o5_2000 upp) at 2000"
+
+# --- THE LOOK-AT. This is the check that was red on byte-identical files.
+export WW_RENDER_VIEW=5 WW_RENDER_ORTHO=$ORTHO_W WW_RENDER_DIST=1000 WW_RENDER_CENTER=400,0,256
+camshot cam_moved
+unset WW_RENDER_VIEW WW_RENDER_ORTHO WW_RENDER_DIST WW_RENDER_CENTER
+CX0=$(spget cam_o5_1000 cx); CX1=$(spget cam_moved cx)
+MOVE_PRED=$(awk -v w="$CTL_W" -v o="$ORTHO_W" 'BEGIN{ printf "%.2f", 400.0*w/(2.0*o) }')
+MOVED=$(awk -v a="$CX0" -v b="$CX1" 'BEGIN{ d=b-a; if(d<0)d=-d; printf "%.2f", d }')
+check "$(near "$MOVED" "$MOVE_PRED" 1.0)" "a look-at 400 units across moves it 400 units" \
+	"silhouette centre moved $MOVED px, 400 units is $MOVE_PRED px"
+check "$( [ "$(sha256sum "$WORK/cam_o5_1000.png" | cut -d' ' -f1)" != \
+	"$(sha256sum "$WORK/cam_moved.png" | cut -d' ' -f1)" ] && echo 1 || echo 0 )" \
+	"and the two files are not the same file" \
+	"$(sha256sum "$WORK/cam_o5_1000.png" | cut -c1-16) / $(sha256sum "$WORK/cam_moved.png" | cut -c1-16)"
+
+# --- A REFUSAL IS NAMED (CONSTITUTION 10: a fallback is never silent).
+export WW_RENDER_VIEW=5 WW_RENDER_ORTHO=-5 WW_RENDER_FOV=60 WW_RENDER_DIST=1000 WW_RENDER_CENTER=0,0,256
+camshot cam_refuse
+unset WW_RENDER_VIEW WW_RENDER_ORTHO WW_RENDER_FOV WW_RENDER_DIST WW_RENDER_CENTER
+check "$( case "$(camfield cam_refuse arm)" in *refused-WW_RENDER_ORTHO*) echo 1;; *) echo 0;; esac )" \
+	"a bad half-width is refused BY NAME" "arm=$(camfield cam_refuse arm)"
+check "$( [ "$(camfield cam_refuse persp)" = "1" ] && echo 1 || echo 0 )" \
+	"and the perspective arm served instead" \
+	"persp=$(camfield cam_refuse persp), fov=$(camfield cam_refuse fov)"
+
+# --- DETERMINISM: same switches, same bytes.
+export WW_RENDER_VIEW=5 WW_RENDER_ORTHO=$ORTHO_W WW_RENDER_DIST=1000 WW_RENDER_CENTER=0,0,256
+camshot cam_o5_1000_again
+unset WW_RENDER_VIEW WW_RENDER_ORTHO WW_RENDER_DIST WW_RENDER_CENTER
+SHA_A=$(sha256sum "$WORK/cam_o5_1000.png" | cut -d' ' -f1)
+SHA_B=$(sha256sum "$WORK/cam_o5_1000_again.png" | cut -d' ' -f1)
+check "$( [ "$SHA_A" = "$SHA_B" ] && echo 1 || echo 0 )" "two runs of one pinned camera are byte-identical" \
+	"${SHA_A:0:16} / ${SHA_B:0:16}"
+
+# --- AND ON A GENERATED DOCUMENT, which is where the pin used to be lost for a
+# second reason: a .lodl/.btd is BUILT rather than parsed and reframes itself
+# after the hook has run. Skipped, loudly, when no such file is on this machine
+# -- they are worldspace bakes and the repo does not carry one.
+GENDOC="${WW_RENDER_SHOT_LODL:-E:/Projects/Fallout 4 Mods/mods/FO4CS/Terrain/DiamondCity.lodl}"
+if [ -f "$GENDOC" ]; then
+	for D in 40000 80000; do
+		rm -f "$WORK/cam_gen$D.png" "$WORK/cam_gen$D.camera"
+		WW_RENDER_SHOT="$(winpath "$WORK/cam_gen$D.png")" WW_RENDER_SIZE=640x480 \
+		WW_RENDER_CLEAN=1 WW_RENDER_VIEW=1 WW_RENDER_ORTHO=$D WW_RENDER_DIST=200000 \
+		WW_RENDER_CENTER=0,0,0 WW_CAMERA_CENSUS="$(winpath "$WORK/cam_gen$D.camera")" \
+			timeout "$CAP" "$EXE" --port "$PORT" "$GENDOC" >"$WORK/cam_gen$D.out" 2>&1
+	done
+	G1=$(camfield cam_gen40000 upp); G2=$(camfield cam_gen80000 upp)
+	check "$( [ -s "$WORK/cam_gen40000.png" ] && [ -s "$WORK/cam_gen80000.png" ] && echo 1 || echo 0 )" \
+		"a generated document photographed at all" \
+		"$(ls -l "$WORK/cam_gen40000.png" 2>/dev/null | awk '{print $5}') bytes"
+	check "$( [ -n "$G1" ] && [ "$G1" != "$G2" ] && echo 1 || echo 0 )" \
+		"and the pin held on it too" "upp $G1 at half-width 40000, $G2 at 80000"
+	check "$( [ "$(sha256sum "$WORK/cam_gen40000.png" | cut -d' ' -f1)" != \
+		"$(sha256sum "$WORK/cam_gen80000.png" | cut -d' ' -f1)" ] && echo 1 || echo 0 )" \
+		"two half-widths on it are two different pictures" \
+		"$(sha256sum "$WORK/cam_gen40000.png" | cut -c1-16) / $(sha256sum "$WORK/cam_gen80000.png" | cut -c1-16)"
+else
+	echo "  ..   NOT RUN: no generated document on this machine ($GENDOC)."
+	echo "  ..   Point WW_RENDER_SHOT_LODL at a .lodl or .btd to run the three checks it gates."
+fi
+
+echo
 echo "render_shot.sh: $checks checks, $fails failures"
 [ "$fails" -eq 0 ] && echo PASS || echo FAIL
 [ "$fails" -eq 0 ]

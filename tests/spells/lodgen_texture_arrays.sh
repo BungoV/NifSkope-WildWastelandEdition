@@ -80,7 +80,9 @@ bad() { echo "  FAIL $1"; fails=$((fails + 1)); }
 
 # ---------------------------------------------------------------- run 1: the game's sources, every set legacy
 mkdir -p "$W/obj" "$W/tex"
-"$NS" -no-gui lodgen "$ESM" --worldspace 3C --terrain-region -20 24 -19 25 --dim 4 --no-ao \
+# Every A line is checked against the layer carried PER VERTEX in UV2.y,
+# which is identity data and off by default since 2026-09-12.
+"$NS" -no-gui lodgen "$ESM" --worldspace 3C --terrain-region -20 24 -19 25 --dim 4 --no-ao --identity \
 	--out-dir "$W/obj" --tex-dir "$W/tex" --data-root "$DATA" --arrays > "$W/log.txt" 2>&1
 grep -a "arrays written" "$W/log.txt" | head -1
 # what the CHUNKS carry, read back by the CLI: the emissive colour a legacy _g
@@ -498,7 +500,7 @@ open(p, 'wb').write(b'LODM' + struct.pack('<II', 1, len(payload)) + payload)
 print('  fixture %s: rmaos = emissive = %s, emissiveScale 2.5' % (cand, diffuse))
 PYEOF
 [ $? -eq 0 ] && ok "a pbr source .lodm written beside $FIRSTMAT" || bad "the fixture .lodm was not written"
-"$NS" -no-gui lodgen "$ESM" --worldspace 3C --terrain-region -20 24 -19 25 --dim 4 --no-ao \
+"$NS" -no-gui lodgen "$ESM" --worldspace 3C --terrain-region -20 24 -19 25 --dim 4 --no-ao --identity \
 	--out-dir "$W/obj2" --tex-dir "$W/tex2" --data-root "$W/root" --arrays > "$W/log2.txt" 2>&1
 grep -a "arrays written" "$W/log2.txt" | head -1
 SIDE2="$W/tex2/Objects/Commonwealth.LodgenArrays.txt"

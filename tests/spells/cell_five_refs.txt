@@ -1,0 +1,32 @@
+# FIVE NAMED REFERENCES -- gate row 4 of tests/spells/cell_open.sh.
+#
+# Sanctuary Hills, Commonwealth cell -20,7. PRE-REGISTERED by the INDEPENDENT
+# Python walk (scratchpad/cellview1_20260919/pick_five.py over
+# tests/spells/cell_census.py, Fallout4.esm, 2026-09-19 15:1x) -- NOT taken from
+# any dump the viewer produced. A reference chosen out of our own output would
+# only prove the code agrees with itself.
+#
+# One per record type the cell has (STAT=106, SCOL=20, MSTT=8, FURN=3, CONT=3
+# drawable refs), lowest form id of each type so a re-run picks the same five.
+# Four of the five are types the widened MODL branch and the SCOL expansion
+# ADDED: a viewer that still reads only STAT fails four of these rows.
+#
+# THE LAST COLUMN is how many rows the dump must carry for that reference. It
+# is 1 for everything that is not a collection. TreeCluster05 has FOUR ONAM
+# parts and THREE of them have geometry -- the fourth is
+# StaticCollectionPivotDummy, whose NIF parses to no drawable shape at all --
+# so three rows, numbered 1, 2 and 3, because the part index counts every part
+# and not only the drawn ones.
+#
+# A collection's dump row carries the PART's base form and the PART's record
+# type (a TreeCluster05 part is a STAT), which is the expansion working, not a
+# fault: those two columns are therefore not compared for a SCOL row. This
+# checker said "WRONG SCOL ... base 0x0004A075, expected 0x0003581A; record
+# STAT, expected SCOL" until 2026-09-19 15:4x, and it was the checker.
+#
+# type  refForm     baseForm    x          y         z        scale  rows editor id
+STAT  0x000272B4  0x000243D5  -79641.91  30204.76  4924.69  1.000  1  DirtSlope01_RubbleRocks
+SCOL  0x000272C3  0x0003581A  -78455.05  29749.18  4685.96  0.650  3  TreeCluster05
+MSTT  0x001EC5B9  0x000F6BA5  -81547.76  31531.78  6995.40  1.000  1  ShackBalconyRailingDbl01Dest
+FURN  0x001EC5C1  0x0014D090  -81841.64  31442.72  7028.28  1.000  1  NpcBedMilitaryCotMattressLay01
+CONT  0x001EC5C3  0x001939CB  -81132.99  31813.27  6989.03  1.000  1  Loot_Raider_TrunkMilitary_Boss

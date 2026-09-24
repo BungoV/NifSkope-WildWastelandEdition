@@ -7,7 +7,9 @@
 # front+side, two-pass matte alpha) and files the cards by FORM ID — the
 # naming `lodgen --impostors <dir>` consumes. Cards convert to BC1
 # punch-through DDS lazily at generation time; ship the directory as
-# Data/Textures/Lodgen/Cards.
+# Data/FO4CSLOD/Cards (lane LAYOUT1, 2026-09-16: one root for every
+# FO4CS-target output, and the cards are per TREE, shared by every
+# worldspace, so they sit at the root rather than under a worldspace).
 #
 # One GUI launch per model (the hook quits after the grab), serialized under
 # the harness lock. ~3 s per card.
@@ -36,14 +38,36 @@
 # tests/spells/render_shot.sh sections 5 and 6, which measures the desktop's own
 # luminance as well as what Windows was told.
 #
+# THE CAMERA IS ORTHOGRAPHIC, AND UNTIL 2026-09-10 IT WAS NOT (lane CARDORTHO).
+#
+# Every extent this bake records -- the card's half-width and half-height, the
+# per-frame offsets, the front/side sidecar lines -- is a world measurement taken
+# off viewport pixels through ONE units-per-pixel constant, and only an
+# orthographic camera makes that arithmetic true. The headless renderer never had
+# one: restoreUi() hard-codes a 60-degree perspective and nothing in the bake ever
+# called setProjection, so every card in every library baked before 2026-09-10 was
+# DRAWN through a perspective frustum while being MEASURED as if it were not
+# (lane HOOKCAM measured it, 2026-09-09; MISTAKES.md). orthographicHalfHeight()
+# returns Dist/Zoom whatever the projection is, which is why the read-back beside
+# the fit never caught it.
+#
+# The bake now asserts the projection, and the sidecar NAMES it -- `projection
+# ortho` or `projection persp`, read back off the live viewport -- and the word
+# travels into the .lodm, per card and per card-array layer. A library whose
+# sidecars carry no such line is the older, foreshortened vintage: RE-BAKE IT.
+# WW_IMPOSTOR_PERSP=1 restores the old camera exactly and is the control the
+# gates in tests/spells/lodgen_octahedral.sh must fail against.
+#
 # USAGE
 #   bash tools/bake_impostor_cards.sh <esm> <x0> <y0> <x1> <y1> <outdir>
 #   MAX=5 bash tools/bake_impostor_cards.sh ...   # cap for a smoke run
 #   CANDIDATES=trees bash tools/bake_impostor_cards.sh ...   # TREES AND ONLY TREES, for cards from ring 0
 #   (default: `missing` -- bases whose far MNAM slots are empty. Until 2026-09-09
 #   `trees` meant tree OR missing, so it was a SUPERSET of the default and 14 of a
-#   33-candidate Sanctuary run were shacks and rock cliffs. It is tree-only now.)
-#   OCT=8 TILE=128 bash tools/bake_impostor_cards.sh ...   # plus octahedral sheets
+#   33-candidate Sanctuary run were shacks and rock cliffs. It is tree-only now.
+#   `all` was RETIRED on 2026-09-11 and refuses by name; the panel's "Trees only"
+#   row ON is CANDIDATES=trees and OFF is CANDIDATES=missing.)
+#   OCT=8 TILE=512 bash tools/bake_impostor_cards.sh ...   # plus octahedral sheets
 #   REF=0 bash tools/bake_impostor_cards.sh ...   # every base at TILE, no size ladder
 #
 # The bake writes PNG sheets at full size either way; HALF-RESOLUTION normal, mask
@@ -95,14 +119,26 @@ case "${OCT:-8}" in
 	*) echo "OCT must be 4, 6 or 8 (frames per side); got '${OCT}'" >&2; exit 2 ;;
 esac
 OCT="${OCT:-8}"
-# The frame's long side in texels for the largest base, and only the three the
+# The frame's long side in texels for the largest base, and only the FOUR the
 # panel offers. Cost goes as OCT^2 * TILE^2, so an unvalidated tile is a quiet
-# factor of four.
-case "${TILE:-128}" in
-	64|128|256) ;;
-	*) echo "TILE must be 64, 128 or 256 (texels on the long side of a frame); got '${TILE}'" >&2; exit 2 ;;
+# factor of four. 512 added 2026-09-11 on bungo's "Add it, why not": at OCT=8
+# that is a 4096-texel sheet per channel, about 12 MB for the largest tree type.
+# DEFAULT 256 since 2026-09-23 (bungo: tree cards "8x8 at 2k", lane DEFAULTS2):
+# OCT 8 x TILE 256 = a 2048-texel sheet for the largest base. Was 128 (1024).
+case "${TILE:-256}" in
+	64|128|256|512) ;;
+	*) echo "TILE must be 64, 128, 256 or 512 (texels on the long side of a frame); got '${TILE}'" >&2; exit 2 ;;
 esac
-TILE="${TILE:-128}"
+TILE="${TILE:-256}"
+# Which bases get a card baked, and only the two that are left: `all` was
+# retired on 2026-09-11 (bungo: "I've only wanted trees for the impostors") and
+# refuses here by name rather than quietly baking a library nobody asked for.
+case "${CANDIDATES:-missing}" in
+	trees|missing) ;;
+	all) echo "CANDIDATES=all was retired on 2026-09-11: impostor cards are trees only. Use trees, or missing for any empty far slot." >&2; exit 2 ;;
+	*) echo "CANDIDATES must be trees or missing; got '${CANDIDATES}'" >&2; exit 2 ;;
+esac
+CANDIDATES="${CANDIDATES:-missing}"
 RESOURCES="${RESOURCES:-}"
 MO2="${MO2:-}"
 
@@ -129,7 +165,7 @@ mkdir "$ROOT/.harness.lock" 2>/dev/null || { echo "harness lock busy"; exit 1; }
 # tr strips the CLI's CRLF: a \r glued to the model path fails every -f test
 "$NS" -no-gui lodgen "$ESM" --worldspace 3C --terrain-region "$X0" "$Y0" "$X1" "$Y1" \
 	"${RESARGS[@]+"${RESARGS[@]}"}" \
-	--list-impostor-candidates --candidates "${CANDIDATES:-missing}" 2>/dev/null | tr -d '\r' > "$W/cands.txt"
+	--list-impostor-candidates --candidates "$CANDIDATES" 2>/dev/null | tr -d '\r' > "$W/cands.txt"
 
 # THE SIZE LADDER'S REFERENCE: the largest extent in the list, in world units.
 # REF=0 turns the ladder off and bakes every base at TILE. A list whose extents
@@ -153,7 +189,7 @@ fi
 	echo "tile ${TILE}"
 	echo "ref ${REF}"
 	echo "half_aux ${HALF_AUX:-0}"
-	echo "candidates ${CANDIDATES:-missing}"
+	echo "candidates $CANDIDATES"
 } > "$OUT/library.txt"
 if [ "${HALF_AUX:-0}" = "1" ]; then
 	echo "half-aux ON: convert this library with 'lodgen --card-half-aux' (normal, mask and emissive at half of each side)"

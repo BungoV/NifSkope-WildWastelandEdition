@@ -1,0 +1,13 @@
+# A `.wwcell` is a SPEC, not geometry: one line, pipe-separated.
+#
+#   <plugin path or name> | <worldspace EDID> | <cellX>,<cellY> | <block size> [| <overlay>]
+#
+# THIS FILE IS DELIBERATELY EMPTY OF SPEC LINES.
+#
+# tests/spells/cell_open.sh passes it on the command line while WW_CELL_OPEN
+# carries the real spec. Empty is the point: if the environment spec is ever
+# silently ignored, the open FAILS and says "empty.wwcell has no spec line",
+# instead of quietly drawing whichever cell this file happened to name. A
+# fixture that can stand in for the thing under test cannot detect its absence.
+#
+# For a spec you can actually open by hand, see sanctuary.wwcell beside this.

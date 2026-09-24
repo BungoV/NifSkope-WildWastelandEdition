@@ -11,7 +11,7 @@
 # separate from a fault in the generator. So the shape is asserted in numbers now
 # instead of by eye.
 #
-# WHAT THE ENGINE SAYS (1.10.155, see WW_PDB_COMPARISON.md §2)
+# WHAT THE ENGINE SAYS (1.10.155, see WW_ENGINE_COMPARISON.md §2)
 #
 #   segments   GetBranchVerts(s) = (1<<s)*4 + 4 and GetBranchTris(s) = (1<<s)*4
 #              -> 2^Subdivisions segments. Subdivisions is a RECURSION DEPTH.

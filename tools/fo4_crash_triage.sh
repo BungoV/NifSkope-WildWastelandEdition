@@ -6,8 +6,8 @@
 # WHY THIS EXISTS
 #
 # Compiled collision can only be proved in the engine, and the engine's answer
-# arrives as a crash log. Addictol's logger ships Fallout4.pdb and msdia140.dll,
-# so its stacks are SYMBOLISED — a Havok fault names Havok functions — and its
+# arrives as a crash log. Addictol's logger symbolises its stacks,
+# so a Havok fault names Havok functions — and its
 # "POSSIBLE RELEVANT OBJECTS" block names forms by plugin and editor ID. Both of
 # those map back to a mesh, which is the whole game here.
 #

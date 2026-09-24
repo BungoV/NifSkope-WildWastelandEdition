@@ -58,15 +58,21 @@ WW_LODGEN_TEST=1 WW_LODGEN_SHOT="${SHOT:-}" "$NS" --port "$PORT" "$SRC" >/dev/nu
 cat "$LOG"
 
 # A FLOOR on the count itself, not just on PASS. 74 checks stood before the
-# ground-cover and terrain-virtual-texture rows were added (2026-09-06);
-# a self-test that silently stopped running half its block would still print
+# ground-cover and terrain-virtual-texture rows were added (2026-09-06), and 97
+# before lane LODUI1 (2026-09-11) added the five .lod types under the FO4CS
+# target, the Trees only row, 512 px and the native row -- 19 more, so 116.
+# Lane PANEL1 (2026-09-12) added 57 rows and five checks that read all of them
+# at once -- every row present, in the scrolling settings, deaf to the wheel
+# until focused, round-tripping its own settings key, tooltipped -- so 121.
+# MEASURED on the 16:19:01 exe (121 checks), not predicted.
+# A self-test that silently stopped running half its block would still print
 # PASS, and that is the failure this line exists to catch.
 COUNT="$(grep -a ' checks, ' "$LOG" | tail -1 | awk '{print $1}')"
-echo "checks run: ${COUNT:-none} (floor 74)"
+echo "checks run: ${COUNT:-none} (floor 121)"
 case "$COUNT" in
 	''|*[!0-9]*) echo "FAIL: the log carries no check count"; exit 1 ;;
 esac
-[ "$COUNT" -ge 74 ] || { echo "FAIL: only $COUNT checks ran, floor is 74"; exit 1; }
+[ "$COUNT" -ge 121 ] || { echo "FAIL: only $COUNT checks ran, floor is 121"; exit 1; }
 
 grep -q "^PASS" "$LOG" && exit 0
 exit 1

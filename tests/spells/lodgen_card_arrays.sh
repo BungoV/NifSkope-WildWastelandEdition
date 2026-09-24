@@ -13,10 +13,12 @@
 # (-20,24)..(-19,25) is then built at dim 4 with --arrays --impostors and
 # --impostors-from-level 0, so both bases stand on their card at the near
 # ring. Checks, on the files:
-#   1. the four arrays and the cardArray .lodm exist - three DX10 BC3
-#      (dxgi 77) and the emissive DX10 BC1 (dxgi 71) - arraySize 2, one mip
-#      (a frame's short side is 8 texels), and each file is EXACTLY header +
-#      2 layers of its own mip chain
+#   1. the four arrays and the cardArray .lodm exist - two DX10 BC3
+#      (dxgi 77), the _n DX10 BC7 (dxgi 98, since IMPOSTORDEPTH2) and the
+#      emissive DX10 BC1 (dxgi 71) - arraySize 2, the mip
+#      chain the SETS' OWN SPACING buys (the sidecars say `gap 4 4` for their
+#      2-texel gutter, and mips = log2(gap) = 2 since 2026-09-09), and each
+#      file EXACTLY header + 2 layers of that chain
 #   2. the .lodm names the family, the four sheets, the grid, the frame, the
 #      mip cap and one entry per layer with its half extents, centre, depth
 #      span and source id
@@ -106,10 +108,35 @@ for ident, rgb, scale in ((id1, (255, 0, 0), 1), (id2, (0, 0, 255), 0)):
     png(d + '/' + ident + '_oct_gsaos.png', sheet((90, 60, 200)))
     png(d + '/' + ident + '_oct_g.png', sheet((0, 255, 0)))		# the emissive: solid green on both sets
     png(d + '/' + ident + '_front.png', sheet(rgb))
+    # THE SIDECAR STATES ITS OWN SPACING. These sheets carry a 2-texel gutter per
+    # side, so two neighbouring silhouettes are G*2 = 4 texels apart and the chain
+    # is log2(4) = 2 levels (bungo, 2026-09-09 evening: mips = log2(gap), so the
+    # deepest level still has a whole texel of margin per side). Written out
+    # rather than left to the no-line fallback, which would claim
+    # max(4, longSide/16) = 4 texels PER SIDE on a frame that has 2 and cap the
+    # chain at a level these sheets do not have the spacing for.
+    # `frameoff` lines are deliberately absent: a set from before per-frame
+    # positioning must still pack, and its layer must simply carry no offsets.
+    # THE CAMERA, on ONE of the two sets. An array can hold a metric set beside a
+    # foreshortened one, so the word travels per LAYER; the red set states
+    # 'projection ortho' and the blue set says nothing, which is what every sidecar
+    # written before 2026-09-10 says and means perspective. Present on one and
+    # absent from the other in ONE array is the check that the field is written AND
+    # moves (CONSTITUTION 4, the first of the three rules of 2026-09-04).
+    # THE VIEW CONVENTION travels per LAYER for the same reason and is checked
+    # the same way (2026-09-19, the azimuth repair): the red set's oct line ends
+    # `<base> spec1`, the blue set's ends at `legacy` -- which is what every
+    # sidecar written before the repair says, and means the frames were
+    # photographed with the azimuth turned by 180 degrees. The red set's base
+    # token is max(FW, FH), the value the reader derives when it is absent, so
+    # nothing but the new token moves.
     open(d + '/' + ident + '.txt', 'w').write(
         'front 64 128 0 0 128\n'
+        + ('projection ortho\n' if ident == id1 else '')
+        + 'gap %d %d\n' % (2 * G, 2 * G) +
         'emissive %d shapes 1\n' % scale +
-        'oct %d %d %d 64 128 0 0 128 3072 legacy\n' % (OCT, FW, FH))
+        'oct %d %d %d 64 128 0 0 128 3072 legacy%s\n'
+        % (OCT, FW, FH, (' %d spec1' % max(FW, FH)) if ident == id1 else ''))
 print('  synthetic sets: %dx%d sheets, %d x %d frames on a %dx%d grid, %d-texel gutter;'
       ' emissiveScale 1 on %s and 0 on %s'
       % (SW, SH, FW, FH, OCT, OCT, G, id1, id2))
@@ -143,15 +170,37 @@ SW, SH = OCT * FW, OCT * FH
 base = os.path.join(W, 'tex', 'Objects', 'Commonwealth.LodgenCards.legacy.%dx%d' % (SW, SH))
 game = 'data\\Textures\\Terrain\\Commonwealth\\Objects\\Commonwealth.LodgenCards.legacy.%dx%d' % (SW, SH)
 
-# 1. the arrays: DX10 BC3 (BC1 for the emissive), two layers, one mip, an exact size
-# a mip chain capped at 1: one 16x32 BC3 level = (16/4)*(32/4)*16 bytes a layer
-layerBytes = (SW // 4) * (SH // 4) * 16
-layerBytesE = (SW // 4) * (SH // 4) * 8       # BC1: half the block
+# 1. the arrays: DX10 BC3 (BC1 for the emissive), two layers, the mip chain the
+#    SETS' OWN SPACING buys, and an exact size.
+#
+# The sidecars say `gap 4 4` -- these sheets have a 2-texel gutter per side -- and
+# the law of 2026-09-09 evening is mips = log2(gap), the count whose deepest level
+# still has a whole texel of margin per side. So 2 levels: 16x32 and 8x16.
+# Written as the law rather than as a constant, so a change to the fixture's
+# gutter moves the expectation with it instead of failing here for the wrong
+# reason. (Before 2026-09-09 this said 1, derived from "levels until a frame
+# spans eight texels" -- a rule about the frame, not about the spacing.)
+GAP = 4
+MIPS = 0
+_g = GAP
+while _g >= 2:
+    MIPS += 1; _g //= 2
+MIPS = max(1, MIPS)
+def chainBytes(w, h, blk, n):
+    total, mw, mh = 0, w, h
+    for _ in range(n):
+        total += ((mw + 3) // 4) * ((mh + 3) // 4) * blk
+        mw = max(4, mw // 2); mh = max(4, mh // 2)
+    return total
+layerBytes = chainBytes(SW, SH, 16, MIPS)
+layerBytesE = chainBytes(SW, SH, 8, MIPS)     # BC1: half the block
 expect = 148 + 2 * layerBytes            # 128 header + 20 DX10 extension
 expectE = 148 + 2 * layerBytesE
-for sfx, wantDxgi in (('_d.DDS', 77), ('_n.DDS', 77), ('_gsaos.DDS', 77), ('_g.DDS', 71)):
+# IMPOSTORDEPTH2 (2026-09-23, bungo): the `_n` array is BC7 (dxgi 98), same 16-byte
+# block as BC3, so the same exact size. Was: dxgi 77 like the others.
+for sfx, wantDxgi in (('_d.DDS', 77), ('_n.DDS', 98), ('_gsaos.DDS', 77), ('_g.DDS', 71)):
     p = base + sfx
-    want = expect if wantDxgi == 77 else expectE
+    want = expect if wantDxgi != 71 else expectE
     if not os.path.exists(p):
         check('%s exists' % os.path.basename(p), False)
         continue
@@ -159,11 +208,11 @@ for sfx, wantDxgi in (('_d.DDS', 77), ('_n.DDS', 77), ('_gsaos.DDS', 77), ('_g.D
     h, w = struct.unpack_from('<II', b, 12)
     mips = struct.unpack_from('<I', b, 28)[0]
     dxgi, _, _, arraySize, _ = struct.unpack_from('<5I', b, 128)
-    print('  %s: %dx%d %s dxgi %d layers %d mips %d size %d (expected %d)'
-          % (os.path.basename(p), w, h, b[84:88].decode('latin1'), dxgi, arraySize, mips, len(b), want))
-    check('%s is a DX10 %s array of 2 layers, 1 mip, exactly %d bytes'
-          % (os.path.basename(p), 'BC3' if wantDxgi == 77 else 'BC1', want),
-          b[84:88] == b'DX10' and dxgi == wantDxgi and arraySize == 2 and mips == 1
+    print('  %s: %dx%d %s dxgi %d layers %d mips %d (expected %d) size %d (expected %d)'
+          % (os.path.basename(p), w, h, b[84:88].decode('latin1'), dxgi, arraySize, mips, MIPS, len(b), want))
+    check('%s is a DX10 %s array of 2 layers, %d mips, exactly %d bytes'
+          % (os.path.basename(p), {77: 'BC3', 98: 'BC7', 71: 'BC1'}[wantDxgi], MIPS, want),
+          b[84:88] == b'DX10' and dxgi == wantDxgi and arraySize == 2 and mips == MIPS
           and w == SW and h == SH and len(b) == want)
 
 # 2. the cardArray .lodm
@@ -186,7 +235,13 @@ else:
           and tex.get('gsaos') == game + '_gsaos.DDS' and tex.get('emissive') == game + '_g.DDS')
     check('the .lodm carries the size class, the grid, the frame and the mip cap',
           arr.get('class') == [SW, SH] and arr.get('oct') == OCT
-          and arr.get('frame') == [FW, FH] and arr.get('mips') == 1)
+          and arr.get('frame') == [FW, FH] and arr.get('mips') == MIPS)
+    # the spacing the sets declared, carried to the array, and the cap derived
+    # from it rather than from the frame's size
+    print('  array spacing: pad %s gap %s, mips %s (log2 of the gap)'
+          % (arr.get('pad'), arr.get('gap'), arr.get('mips')))
+    check('the array records the sets\' own gap and the per-side padding that is half of it',
+          arr.get('gap') == [GAP, GAP] and arr.get('pad') == [GAP // 2, GAP // 2])
     layers = arr.get('layers', [])
     ids = [l.get('id') for l in layers]
     print('  layers: %s' % ids)
@@ -195,6 +250,34 @@ else:
     geom = all(l.get('half') == [64.0, 128.0] and l.get('center') == [0.0, 0.0, 128.0]
                and l.get('depthSpan') == 3072.0 for l in layers)
     check('every layer carries the card geometry of its set (half, centre, depth span)', geom)
+    # PER-FRAME POSITIONING travels per LAYER, because two sets in one array have
+    # different offsets. These fixtures carry none, so the key must be ABSENT --
+    # not present as zeros, which would claim a shift that was never measured.
+    check('a set baked before per-frame positioning contributes a layer with no frameOffset',
+          all('frameOffset' not in l for l in layers))
+    # THE CAMERA THE SET WAS PHOTOGRAPHED THROUGH, per layer and only where the
+    # sidecar said so. The red set's meta says 'projection ortho'; the blue set's
+    # says nothing, and a set that says nothing was baked through a 60-degree
+    # perspective frustum -- absence is the older vintage, not 'unknown', so it
+    # must not come out as a word this array invented.
+    proj = dict((l.get('id'), l.get('projection')) for l in layers)
+    print('  projection per layer: %s (expected %s ortho, %s absent)' % (proj, id1, id2))
+    check('the layer whose sidecar named an orthographic camera carries it',
+          proj.get(id1) == 'ortho')
+    check('the layer whose sidecar named none carries no projection key at all',
+          all('projection' not in l for l in layers if l.get('id') == id2))
+    # THE VIEW CONVENTION, per layer and only where the sidecar said so
+    # (2026-09-19, the azimuth repair). A library part-way through its re-bake
+    # holds both vintages in one size class, so this word cannot be one per
+    # ARRAY. Absence is the pre-repair vintage -- the frames sit 180 degrees of
+    # azimuth from where the spec puts them -- and must not come out as a word
+    # this array invented.
+    conv = dict((l.get('id'), l.get('conv')) for l in layers)
+    print('  conv per layer: %s (expected %s spec1, %s absent)' % (conv, id1, id2))
+    check('the layer whose sidecar declared the spec1 view convention carries it',
+          conv.get(id1) == 'spec1')
+    check('the layer whose sidecar declared none carries no conv key at all',
+          all('conv' not in l for l in layers if l.get('id') == id2))
     # THE EMISSIVE MULTIPLE, per layer. The sheet holds the emissive colour;
     # the multiple cannot live in eight bits, so it rides in the material -
     # one entry per layer, parallel to `layers`, because two sets in one array
@@ -305,12 +388,28 @@ def check(what, cond):
 OCT, FW, FH = 2, 8, 16
 SW, SH = OCT * FW, OCT * FH
 AW, AH = SW // 2, SH // 2
+# the sidecars' own spacing, and the chain it buys: mips = log2(gap), the count
+# whose deepest level still keeps a whole texel of margin per side (2026-09-09)
+GAP = 4
+MIPS = 0
+_g = GAP
+while _g >= 2:
+    MIPS += 1; _g //= 2
+MIPS = max(1, MIPS)
 stem = 'Commonwealth.LodgenCards.legacy.%dx%d' % (SW, SH)
 full = os.path.join(W, 'tex', 'Objects', stem)
 half = os.path.join(W, 'texh', 'Objects', stem)
 
 def blocks(w, h, bc3):
     return max(1, w // 4) * max(1, h // 4) * (16 if bc3 else 8)
+
+def chain(w, h, bc3, n):
+    """the whole mip chain's blocks, the way the writer walks it (floor 4)"""
+    total, mw, mh = 0, w, h
+    for _ in range(n):
+        total += blocks(mw, mh, bc3)
+        mw = max(4, mw // 2); mh = max(4, mh // 2)
+    return total
 
 # The base colour must NOT divide: its alpha is the coverage, so it is the
 # silhouette, and that is the one thing an impostor is judged on.
@@ -325,11 +424,13 @@ for sfx, (ww, hh, bc3) in want.items():
     b = open(p, 'rb').read()
     h_, w_ = struct.unpack_from('<II', b, 12)
     mips = struct.unpack_from('<I', b, 28)[0]
-    exact = 148 + 2 * blocks(ww, hh, bc3) * mips if mips == 1 else None
+    # every level, not just a one-level chain: the base colour now ships two
+    # (gap 4 -> log2(4)) while the halved aux sheets ship one, and the old
+    # `if mips == 1 else None` quietly skipped the byte check on the first of them
+    exact = 148 + 2 * chain(ww, hh, bc3, mips)
     print('  %s: %dx%d mips %d, %d bytes (wanted %dx%d)' % (sfx, w_, h_, mips, len(b), ww, hh))
     check('%s is %dx%d with --card-half-aux' % (sfx, ww, hh), w_ == ww and h_ == hh)
-    if exact is not None:
-        check('%s is exactly header + its own blocks (%d)' % (sfx, exact), len(b) == exact)
+    check('%s is exactly header + its own blocks (%d)' % (sfx, exact), len(b) == exact)
     halfTotal += len(b)
     fp = full + sfx
     if os.path.exists(fp):
@@ -357,9 +458,26 @@ if fullTotal and halfTotal:
     # that it went DOWN and by a lot on the payload
     payFull = fullTotal - 4 * 148
     payHalf = halfTotal - 4 * 148
-    print('  payload alone: %d -> %d = %.1f%% (the panel claims 46%%)' % (payFull, payHalf, 100.0 * payHalf / payFull))
-    check('the payload fell to within two points of the claimed 46%%',
-          abs(100.0 * payHalf / payFull - 46.4) < 2.0)
+    # THE EXPECTED BYTES, from the law both runs are written under, rather than
+    # from a remembered percentage. The full run is four sheets at the class with
+    # the gap's own chain; the half-aux run keeps the base colour there and takes
+    # the other three to half of each side with the chain their halved gap buys.
+    # A percentage pinned to a two-point band stood here until 2026-09-09 evening
+    # and had gone stale twice over: the aux chain came down with the gap that
+    # morning, and the whole chain lost a level that evening (bungo: ship one mip
+    # fewer), so 46.4% became 42.9% with nothing having gone wrong.
+    AUXMIPS = max(1, MIPS - 1)          # log2(gap / 2), the halved sheets' own gap
+    wantFull = 4 * 148 + 2 * (3 * chain(SW, SH, True, MIPS) + chain(SW, SH, False, MIPS))
+    wantHalf = 4 * 148 + 2 * (chain(SW, SH, True, MIPS)
+                              + 2 * chain(AW, AH, True, AUXMIPS) + chain(AW, AH, False, AUXMIPS))
+    print('  payload alone: %d -> %d = %.1f%% (the law wants %d and %d bytes with their headers)'
+          % (payFull, payHalf, 100.0 * payHalf / payFull, wantFull, wantHalf))
+    check('the four arrays are EXACTLY the bytes the class, the gap and auxDiv account for, both ways',
+          fullTotal == wantFull and halfTotal == wantHalf)
+    # and the saving is real: the halved run must be well under the full one, or
+    # the check above would pass on a --card-half-aux that did nothing
+    check('--card-half-aux actually halves something (the payload is under two thirds of the full run)',
+          payHalf < 0.67 * payFull)
 else:
     check('both array sets were measurable', False)
 sys.exit(0 if fails == 0 else 1)
