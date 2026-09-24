@@ -1,0 +1,10 @@
+# GATEFIX1 progress
+
+- 22:4x worktree up: objects+stash from main (main at b2f3073 sources, make -n 0), REVISION objects deleted, qmake, tools/ww_build.sh RC 0. Rung = release/NifSkope.before_gatefix1.exe sha1 dca43d83 (b2f3073 unmodified).
+- copied 47 historical rung exes from main release/ into release/rungs/ (read-only copy) for bisecting.
+- rungs moved from release/rungs/ into release/ (an exe needs its DLLs beside it); order from main's mtimes in rung_order.txt.
+- STOCK BASELINE red: rung (dca43d83) --check = 6 CHANGED (baseline_check_rung.log). Swept all 47 rungs (sweep_baseline.sh, bl/): the 09-10 list held byte-exact through before_msncache1 and moved TWICE, nowhere else.
+  - move 1, before_msncache1 -> before_slab1 (09-18 02:34 -> 05:18): 4.-20.24.bto, 8.-24.24.bto, 16.-32.16.bto, region BTO + its manifest. Dump diff: ONLY NiAlphaProperty Threshold 128 -> the BGSM's own alpha ref (127/65/80); the region manifest regroups because Threshold is in the merge key. Ruling in code, src/lodgen.cpp ~2314: bungo 2026-09-18 05:2x "Alpha test 80 looks better" (director VIEWFIX session builds, 09-18). Git: squashed into 85c0b14.
+  - move 2, before_cellview2 -> before_cellview3 (09-19 16:48 -> 18:56): 16.-32.16.bto + manifest. Same block/tri/vert counts, same manifest rows; two shapes whose BGSM is an absolute Bethesda build path (C:\projects\Fallout4\Build\PC\Data\materials\LOD\DecoMainBLOD / SidingKitALOD) now resolve their textures + specular (was empty), and sort to their normalised place. Lane CELLVIEW2b (09-19): "lodgenReadAsset callers prepended materials/ to absolute build paths" fix, scratchpad/cellview2b_20260919/DELIVERABLE_TEXT.md. Git: squashed into 85c0b14.
+  - regenerated with --write (exe dca43d83): equals the before_cellview3 sweep list exactly; --check 0 failures PASS; --selftest 0 failures PASS.
+- native_open: shots now run in a scratch settings scope (SCOPE=nativeopen, wiped before and after).
