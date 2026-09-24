@@ -136,7 +136,7 @@ bash tests/spells/pbr_wx1_gates.sh --out ... --only sky,skypx,probe,lit,off,pers
 The WTHR fog in the Scene popup (the Fog row). The judge re-derives every number from the
 plugin bytes with the WX1 judge's decoder, CIELab and clock (imported, never the app).
 ```bash
-bash tests/spells/pbr_fog1_gates.sh --out "$PWD/scratchpad/<lane>/fog1"           # 59 checks
+bash tests/spells/pbr_fog1_gates.sh --out "$PWD/scratchpad/<lane>/fog1"           # 64 checks
 bash tests/spells/pbr_fog1_gates.sh --out ".../fog1_red_<n>" --red <n>            # must FAIL
 ```
 * Sections: `fog` (`weather --fog --fog-probe "d,z;..."`: FNAM/NAM4 as read, day weight,
@@ -146,9 +146,17 @@ bash tests/spells/pbr_fog1_gates.sh --out ".../fog1_red_<n>" --red <n>          
   colour), `geo` (mode 5 writes R = d/4096, G = 0.5 + z/2000: ground at G 127/128, and
   straight down at x 2000 from 1000 then 2000 units R moves 63 -> 126 = the distance
   scale), `sky`, `near`, `seen`, `off` (vs `release/before_fog1`, pinned + unpinned),
+  `legacy` (PBR mode legacy: census shows fo4_fog.prog with Fog on and fo4_default.prog
+  with it off, probed alpha = the judge, off = before_fog1, fog visible from 20000 u),
   `live` (`WW_SCENE_TEST_FOG=1`), `pics` (not judged).
 * Reds: `WW_LOOKDEV_RED=fogext05 fogpower1 fognoblend fognogamma fognonam4 fognear0
-  fogmaxclamp fognoescape fogheight0 fogleak fogsky`, `WW_R2A_RED=nolive nosave`.
+  fogmaxclamp fognoescape fogheight0 fogleak fogsky fognoswap`, `WW_R2A_RED=nolive nosave`.
+* Shader code that must leave a path byte-identical when off goes under `#ifdef` in a
+  variant program, never behind a false uniform: FOG1's fog code in fo4_default.frag,
+  with fogOn false (even never set), moved 783 px of the zero set (alpha-test edges, up
+  to 56 levels) -- the driver compiles the shader differently. The fix: fo4_fog.frag =
+  `#version` + `#define WW_FOG` + `#include "fo4_default.frag"` (the loader drops an
+  included file's `#version`), fo4_fog.prog without conditions, swapped by name.
 * The lookdev ground is an ~8192-unit quad (`kGroundHalf` 4096). A top-down framing
   centred beyond it shows the Lookdev cube, not ground -- keep geometry probes inside
   x,y < ~3000. Axis views (VIEW 1..6) are perspective under the pin.
