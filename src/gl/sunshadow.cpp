@@ -12,6 +12,8 @@ BSD License - see nifskope.h
 #include "gl/lookdevstage.h"
 #include "gl/renderer.h"
 
+#include <QDir>
+#include <QFile>
 #include <QOpenGLContext>
 #include <QStringList>
 
@@ -72,6 +74,7 @@ struct CsmState
 	Cascade c[kCascades];
 	double L[3] = { 0, 0, -1 }, right[3] = { 1, 0, 0 }, up[3] = { 0, 1, 0 };
 	double C[3] = { 0, 0, 0 }, fwd[3] = { 0, 0, -1 }, tanX = 1, tanY = 1, camNear = 1, sc = 1;
+	double rc[3] = { 1, 0, 0 }, uc[3] = { 0, 1, 0 };	// the camera's right and up rows (world)
 	double split[2] = { kSplit0, kSplit1 };
 	int casters = 0, tris = 0;
 	bool groundCast = false;
@@ -172,7 +175,7 @@ void fitCascades( CsmState & s, const Transform & vt )
 	s.split[0] = red( "wrongsplit" ) ? 400.0 : kSplit0;
 	s.split[1] = red( "wrongsplit" ) ? 1500.0 : kSplit1;
 	const double far[kCascades] = { s.split[0], s.split[1], s.D };	// the last is overridden by D
-	double rc[3], uc[3];
+	double * rc = s.rc, * uc = s.uc;
 	for ( int j = 0; j < 3; j++ ) {
 		rc[j] = vt.rotation( 0, j );
 		uc[j] = vt.rotation( 1, j );
@@ -311,7 +314,42 @@ bool wwSunShadowWanted( Scene * scene )
 	return s.valid && scene && !scene->selecting && wwLookdevActive();
 }
 
+static void sunShadowPassImpl( Scene * scene );
+
+/* WW_CSM_ECHO=<ABSOLUTE path>: the summary of the pass that just ran, rewritten
+ * whenever it changes. The PBRM census row is written at a shape's FIRST draw,
+ * which is before the render hook's camera pin takes; this file holds the fit
+ * of the frame that was grabbed. */
+static void csmEchoFrame()
+{
+	static int armed = -1;
+	static QString path, lastWritten;
+	if ( armed < 0 ) {
+		path = qEnvironmentVariable( "WW_CSM_ECHO" ).trimmed();
+		armed = ( !path.isEmpty() && QDir::isAbsolutePath( path ) ) ? 1 : 0;
+	}
+	if ( armed != 1 )
+		return;
+	const QString line = QStringLiteral( " " ) + wwSunShadowSummary() + QStringLiteral( "\n" );
+	if ( line == lastWritten )
+		return;
+	QFile f( path );
+	if ( f.open( QIODevice::WriteOnly | QIODevice::Truncate ) ) {
+		f.write( line.toUtf8() );
+		f.close();
+		lastWritten = line;
+	}
+}
+
 void wwSunShadowPass( Scene * scene )
+{
+	if ( scene && scene->selecting )
+		return;
+	sunShadowPassImpl( scene );
+	csmEchoFrame();
+}
+
+static void sunShadowPassImpl( Scene * scene )
 {
 	CsmState & s = cs();
 	if ( !scene || !scene->renderer )
@@ -529,11 +567,13 @@ void wwSunShadowUniforms( Scene * scene )
 			fn->glUniformMatrix4fv( l, 1, GL_FALSE, s.c[i].uvdFromView );
 	}
 	const bool nobias = red( "nobias" );
+	// red "bigbias": a 600-unit receiver offset, the peter-panning control (the shadow must detach)
+	const float offA = nobias ? 0.0f : red( "bigbias" ) ? 600.0f : kOffsetA;
+	const float offB = nobias ? 0.0f : red( "bigbias" ) ? 600.0f : kOffsetB;
 	prog->uni3f_l( prog->uniLocation( "csmInvRange" ), float( 1.0 / ( s.c[0].far - kNear ) ),
 		float( 1.0 / ( s.c[1].far - kNear ) ), float( 1.0 / ( s.c[2].far - kNear ) ) );
 	prog->uni4f( "csmParams", FloatVector4( float( 1.0 / s.sc ), float( s.D ), float( s.map ), float( kBlend ) ) );
-	prog->uni4f( "csmSplitOffset", FloatVector4( float( s.split[0] ), float( s.split[1] ),
-		nobias ? 0.0f : kOffsetA, nobias ? 0.0f : kOffsetB ) );
+	prog->uni4f( "csmSplitOffset", FloatVector4( float( s.split[0] ), float( s.split[1] ), offA, offB ) );
 	prog->uni1i( "csmProbe", s.probe );
 	prog->uni1i( "csmRed", redBits() );
 }
@@ -552,6 +592,15 @@ QString wwSunShadowSummary()
 		const Cascade & c = s.c[i];
 		o += QString( " c%1=%2,%3,%4,%5,%6,%7,%8,%9" ).arg( i ).arg( g( c.zn ), g( c.zf ), g( c.texel ) ).arg( c.n ).arg( c.vw ).arg( c.vh )
 			.arg( v3( c.pb ), g( c.l ) + "," + g( c.b ) + "," + g( c.far ) );
+	}
+	// the camera's right/up rows, and the exact floats handed to glUniformMatrix4fv (column-major),
+	// so the judge can apply the UPLOADED receiver matrix to its own world points
+	o += QString( " camrows=%1|%2" ).arg( v3( s.rc ), v3( s.uc ) );
+	for ( int i = 0; i < kCascades; i++ ) {
+		QStringList m;
+		for ( int k = 0; k < 16; k++ )
+			m << QString::number( double( s.c[i].uvdFromView[k] ), 'g', 9 );
+		o += QString( " m%1=%2" ).arg( i ).arg( m.join( QChar( ',' ) ) );
 	}
 	o += QString( " casters=%1 tris=%2 ground=%3 probe=%4 red=%5" ).arg( s.casters ).arg( s.tris ).arg( s.groundCast ? 1 : 0 )
 		.arg( s.probe ).arg( s.reds.isEmpty() ? QStringLiteral( "none" ) : s.reds.join( QChar( '+' ) ) );

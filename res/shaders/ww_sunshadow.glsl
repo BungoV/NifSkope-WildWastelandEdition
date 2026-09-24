@@ -8,7 +8,7 @@ uniform mat4 csmMat[3];		// view space -> (u, v, depth) of cascade i
 uniform vec3 csmInvRange;	// 1 / (far_i - 150): a world-unit offset in depth units
 uniform vec4 csmParams;		// 1 / view scale, shadow distance D, map size, blend band B
 uniform vec4 csmSplitOffset;	// the two pair boundaries (800, 3000), receiver offsets A / B (0.275, 1.0)
-uniform int csmProbe;		// 0 off, 1 hard tap, 2 cascade colour, 3 filtered + blend, 4 final factor
+uniform int csmProbe;		// 0 off, 1 hard tap, 2 cascade colour, 3 filtered + blend, 4 final factor, 5 selection
 uniform int csmRed;		// 1 noblend, 2 nofade, 4 diffonly, 8 factorhalf (the OFF leak)
 
 // spec 2.5: the 16 Poisson taps on [0,1]^2, used as (p - 0.5) x 6 texels
@@ -103,6 +103,10 @@ bool wwSunShadowProbe( vec3 posView, vec3 shaded, out vec3 outc )
 		outc = shaded * c;
 	} else if ( csmProbe == 3 ) {
 		outc = vec3( dv > csmParams.y + csmParams.w ? 1.0 : csmBlended( posView ) );
+	} else if ( csmProbe == 5 ) {
+		// the selection as numbers: R = cascade A / 2, G = cascade B / 2, B = the blend weight;
+		// past D + B all three are 1
+		outc = dv > csmParams.y + csmParams.w ? vec3( 1.0 ) : vec3( float( a ) * 0.5, float( b ) * 0.5, t );
 	} else {
 		outc = vec3( wwSunShadow( posView ) );
 	}

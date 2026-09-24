@@ -42,12 +42,16 @@ BSD License - see nifskope.h
  * Pins: WW_LOOKDEV_SHADOWS=0|1 (the row), WW_CSM_DISTANCE=<D>, WW_CSM_MAP=<px>,
  * WW_CSM_PROBE=1 (hard single tap of the selected cascade, raw grey) | 2 (cascade
  * colour debug: red / green / blue over the shaded picture) | 3 (the filtered
- * factor with the seam blend, no fade, raw grey) | 4 (the final factor, raw grey).
+ * factor with the seam blend, no fade, raw grey) | 4 (the final factor, raw grey) |
+ * 5 (the selection as numbers: R = cascade A / 2, G = cascade B / 2, B = blend).
  * Reds (WW_CSM_RED=<a,b>): flipsun, nofloor, nosnap, onecascade, wrongsplit,
- * nobias, noblend, nofade, diffonly, factorhalf (Shadows OFF still swaps in the
+ * nobias, bigbias (600-unit receiver offset), noblend, nofade, diffonly, factorhalf (Shadows OFF still swaps in the
  * variant and halves the sun: the OFF-identity gate must refuse it).
  * Echo: wwSunShadowSummary() -> "csm=on map=.. D=.. L=.. c0=(zn,zf,texel,n,vw,vh,
- * pb,l,b,far) ..." in the PBRM census line. */
+ * pb,l,b,far) ... camrows=<camera right>|<camera up> m0..m2=<the 16 floats uploaded
+ * as csmMat[i], column-major>" in the PBRM census line (written at a shape's first
+ * draw), and WW_CSM_ECHO=<absolute path> holds the same line for the LAST pass run,
+ * i.e. the grabbed frame once the render hook's camera pin has taken. */
 
 #include <QString>
 
