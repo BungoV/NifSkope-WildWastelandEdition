@@ -25,6 +25,7 @@ See the LICENSE.md file for the full license text.
 #include "esmweather.h"
 #include "lodgen.h"
 #include "lodgenchunkpass.h"
+#include "lodgenloadorder.h"
 #include "lodgenlayout.h"
 #include "lodgenparallel.h"
 #include "nifparsestress.h"
@@ -2740,7 +2741,7 @@ static bool gLgKeepBto = false;
 static const char * const gLgSwitchSkip[] = {
 	"--out-dir", "--tex-dir", "--data-root", "--incremental",
 	"--threads", "--chunk-threads", "--preview-dir",
-	"--resource", "--plugins-txt",
+	"--resource", "--plugins-txt", "--mo2-profile", "--mo2-mods",
 	"--native", "--native-mesh-report",
 	nullptr
 };
@@ -6738,6 +6739,16 @@ int usage()
 		  << "                                          at %LOCALAPPDATA%\\Fallout4 and\n"
 		  << "                                          stacks each enabled plugin's\n"
 		  << "                                          archives in that order\n"
+		  << "  lodgen [--mo2-profile DIR] [--mo2-mods DIR]  his MO2 load order read off\n"
+		  << "                                          disk, MO2 not running: Fallout4.esm,\n"
+		  << "                                          the DLC and CC masters in Data, then\n"
+		  << "                                          plugins.txt's enabled plugins as full\n"
+		  << "                                          paths (overwrite, the enabled mods\n"
+		  << "                                          top-down, then Data); the stack Data,\n"
+		  << "                                          then modlist.txt bottom-up, then\n"
+		  << "                                          overwrite. Mods default to\n"
+		  << "                                          <profile>/../../mods, Data to\n"
+		  << "                                          --data-root or ModOrganizer.ini\n"
 		  << "  lodgen [--resource ...] --probe RELPATH [--probe-out FILE]\n"
 		  << "                                          where one asset actually resolves\n"
 		  << "                                          from: the stack entry, loose or\n"
@@ -7705,6 +7716,8 @@ int nifskopeCliMain( const QStringList & args )
 	QString stressSabotage;
 	QString lgPluginsTxt;
 	bool lgMo2 = false;
+	QString lgMo2Profile;             // lane LOADORDER1: his MO2 profile off disk
+	QString lgMo2Mods;
 	QString lgProbe;
 	QString lgProbeOut;
 	bool lgPrintSource = false;
@@ -7819,6 +7832,8 @@ int nifskopeCliMain( const QStringList & args )
 		else if ( t == QLatin1String( "--resource" ) ) lgResources << next();
 		else if ( t == QLatin1String( "--plugins-txt" ) ) lgPluginsTxt = next();
 		else if ( t == QLatin1String( "--mo2" ) ) lgMo2 = true;
+		else if ( t == QLatin1String( "--mo2-profile" ) ) lgMo2Profile = next();
+		else if ( t == QLatin1String( "--mo2-mods" ) ) lgMo2Mods = next();
 		else if ( t == QLatin1String( "--bake-record" ) ) gLgBakeRecord = next();
 		else if ( t == QLatin1String( "--no-native-cache" ) ) gLgNativeCache = false;
 		else if ( t == QLatin1String( "--probe" ) ) lgProbe = next();
@@ -8493,7 +8508,7 @@ int nifskopeCliMain( const QStringList & args )
 		&& !( cmd == QLatin1String( "lodgen" )
 			&& ( !lgBtdPath.isEmpty() || !lgProbe.isEmpty() || !lgDumpShapes.isEmpty()
 				|| !lgDumpGeometry.isEmpty() || !lgLodmCheck.isEmpty() || !lgLodvCheck.isEmpty()
-				|| lgPrintSource || lgListFiles > 0
+				|| lgPrintSource || lgListFiles > 0 || !lgMo2Profile.isEmpty()
 				/* `--bake-record` reads a file and diffs an OPTIONAL plugin list:
 				 * with none it prints the record and says `diff n/a`, which is
 				 * the useful answer when all you have is the bake's output
@@ -8530,7 +8545,14 @@ int nifskopeCliMain( const QStringList & args )
 	if ( cmd == QLatin1String( "lodgen" ) ) {
 		QStringList stack = lgResources;
 		QStringList mo2Plugins;
-		if ( lgMo2 || !lgPluginsTxt.isEmpty() ) {
+		if ( !lgMo2Profile.isEmpty() ) {
+			/* His MO2 load order read off disk, no usvfs (lane LOADORDER1,
+			 * src/lodgenloadorder.h): the plugins as full paths, masters first,
+			 * and the stack Data -> mods bottom-up -> overwrite, --resource above. */
+			if ( !lodgenApplyMo2Profile( lgMo2Profile, lgMo2Mods, lgDataRoot, lgResources,
+					lgMo2 || !lgPluginsTxt.isEmpty(), &stack, &file, out(), err() ) )
+				return 2;
+		} else if ( lgMo2 || !lgPluginsTxt.isEmpty() ) {
 			/* The Data folder MO2 virtualises. --data-root when given (it IS a
 			 * Data folder), else the folder the first plugin argument sits in,
 			 * else the game path the manager recorded in QSettings. */
@@ -8556,11 +8578,15 @@ int nifskopeCliMain( const QStringList & args )
 					  << Qt::endl;
 				stack = lodgenMo2Stack( dataDir, mo2Plugins ) + lgResources;
 			}
-			// the plugin list becomes the comma list EsmFile merges, in load order
+			/* the plugin list becomes the comma list EsmFile merges, in load order,
+			 * led by the masters plugins.txt never lists (Fallout4.esm, DLC, CC);
+			 * a plugin not in Data is refused by name (lane LOADORDER1) */
 			QStringList resolved;
-			for ( const QString & p : mo2Plugins ) {
-				const QString full = QDir( dataDir ).filePath( p );
-				resolved << ( QFileInfo( full ).isFile() ? QDir::cleanPath( full ) : p );
+			QString rerr;
+			if ( !mo2Plugins.isEmpty()
+				&& !lodgenLoadOrderFromPluginsTxt( dataDir, mo2Plugins, &resolved, &rerr ) ) {
+				err() << "error: --plugins-txt refused: " << rerr << Qt::endl;
+				return 2;
 			}
 			out() << "plugins: " << resolved.size() << Qt::endl;
 			for ( int i = 0; i < resolved.size(); i++ )
@@ -8576,7 +8602,8 @@ int nifskopeCliMain( const QStringList & args )
 		gLgResourceStack = lodgenResources();
 		if ( lgPrintSource ) {
 			const QStringList set = lodgenResources();
-			out() << "source: " << ( lgMo2 ? "mo2" : "specified" ) << Qt::endl;
+			out() << "source: " << ( !lgMo2Profile.isEmpty() ? "mo2-profile" : lgMo2 ? "mo2" : "specified" )
+				  << Qt::endl;
 			out() << "resources: " << set.size() << " (last wins)" << Qt::endl;
 			for ( int i = 0; i < set.size(); i++ )
 				out() << "resource " << i << ": " << set.at( i ) << Qt::endl;

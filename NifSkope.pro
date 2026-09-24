@@ -304,6 +304,7 @@ HEADERS += \
 	src/lodgen.h \
 	src/lodgenao.h \
 	src/lodgenchunkpass.h \
+	src/lodgenloadorder.h \
 	src/lodbfile.h \
 	src/lodgenlayout.h \
 	src/lodgenparallel.h \
@@ -525,6 +526,7 @@ SOURCES += \
 	src/esmweather.cpp \
 	src/lodgen.cpp 	src/lodgenmanager.cpp 	src/lodtfile.cpp \
 	src/lodgenchunkpass.cpp \
+	src/lodgenloadorder.cpp \
 	src/lodbfile.cpp \
 	src/lodgenlayout.cpp \
 	src/lodgenparallel.cpp \
