@@ -21,7 +21,12 @@ and that is what makes this a byte gate rather than a shrug.
   usage: lodgen_btofree_ledger.py keep <a.lodb> <b.lodb> [<a-root> <b-root>]
          lodgen_btofree_ledger.py drop <rung.lodb> <drop.lodb> [<a-root> <b-root>]
          lodgen_btofree_ledger.py same <a.lodb> <b.lodb> [<a-root> <b-root>]
-         ... [--fo4cs-vs-stock]
+         ... [--fo4cs-vs-stock] [--generators-differ]
+
+`--generators-differ` (lane GATEFIX1, 2026-09-24): the two records were written
+by exes with different bytes, so the generator word (VTFIX1) moved every chunk's
+inputs digest. That is CHECKED, chunk by chunk, and only then left out.
+The census is compared through the record's own volatile mask (steady_census).
 
 `same` (lane AUDIT1, 2026-09-17) is `keep`'s other half: the SAME command line on
 both sides, so the recorded outputs must match row for row AND the command-line
@@ -207,6 +212,42 @@ chunk rows themselves. This is what "the two records name the same outputs"
 means, and it is what both check sentences claim to be comparing."""
 
 
+def out_dir_of(doc):
+    """the record's own --out-dir, as its command line spelled it, or None"""
+    toks = doc.get('switchTokens') or []
+    for i, t in enumerate(toks[:-1]):
+        if t == '--out-dir':
+            return toks[i + 1].replace(chr(92), '/').rstrip('/')
+    return None
+
+
+def steady_census(doc):
+    """the census rows with the record's OWN volatile parts masked, and nothing else
+    (lane GATEFIX1, 2026-09-24)
+
+    Two things in a census row move between two bakes of the same inputs, and
+    neither is a property of the bake:
+      * the two volatile things of docs/LODGEN_BAKE_RECORD.md section 3 that
+        live in the census -- the `stage times:` line and the `peak working
+        set:` clause. They are masked by lodb_read.normalise(), the ONE Python
+        half of the record's own rule, so this file cannot drift from it.
+      * the out-dir. `bake census:` names the layout root under it, and the
+        drop bake names its scratch folder under it; two bakes into two
+        folders spell those differently. The record's own `--out-dir` token
+        becomes `<out-dir>`, the way canon() reduces a row's path: a row that
+        differs anywhere else still fails.
+    MASKED, never dropped: a lost or an added census row still differs."""
+    od = out_dir_of(doc)
+    rows = []
+    for r in doc.get('census', []):
+        t = lodb_read.normalise('census' + chr(9) + r).rstrip(chr(10))
+        t = t.split(chr(9), 1)[1] if chr(9) in t else ''
+        if od:
+            t = t.replace(od, '<out-dir>')
+        rows.append(t)
+    return rows
+
+
 def shape(doc, drop_target, ws='Commonwealth'):
     """the part of a ledger two bakes must agree on, as a comparable string
 
@@ -214,6 +255,8 @@ def shape(doc, drop_target, ws='Commonwealth'):
     that none of the three groups names; a caller that finds one must go red,
     because this file cannot know whether it was supposed to match."""
     d = strip_digests(canon_doc(doc, ws))
+    if 'census' in d:
+        d['census'] = steady_census(doc)
     drop = set(RUN_KEYS) | (set(TARGET_KEYS) if drop_target else set())
     unaccounted = sorted(k for k in d
                          if k not in drop and k not in SHAPE_KEYS
@@ -247,9 +290,23 @@ def without_cache(doc):
     return d
 
 
+def without_inputs(doc):
+    """the same ledger with every chunk's inputs digest taken off"""
+    d = json.loads(json.dumps(doc))
+    for ch in d.get('chunks', []):
+        ch.pop('inputs', None)
+    return d
+
+
 def main(argv):
     fo4cs_vs_stock = '--fo4cs-vs-stock' in argv
-    argv = [a for a in argv if a != '--fo4cs-vs-stock']
+    # THE GENERATOR WORD (lane VTFIX1, 2026-09-24; flag added by GATEFIX1). Every
+    # chunk's inputs digest starts with the sha1 of the exe that baked it, so two
+    # DIFFERENT exes never record the same inputs, by design. The caller says
+    # when the two exes' bytes differ; the inputs are then CHECKED to have moved,
+    # chunk by chunk, and only after that left out of the comparison below.
+    generators_differ = '--generators-differ' in argv
+    argv = [a for a in argv if a not in ('--fo4cs-vs-stock', '--generators-differ')]
     if len(argv) not in (3, 5) or argv[0] not in ('keep', 'drop', 'same'):
         raise SystemExit(__doc__)
     mode, pa, pb = argv[:3]
@@ -262,6 +319,18 @@ def main(argv):
         print('  %s %s' % ('ok  ' if ok else 'FAIL', what))
         if not ok:
             fails += 1
+
+    if generators_differ:
+        def inputs_of(doc):
+            return dict(((c.get('cx'), c.get('cy'), c.get('dim')), c.get('inputs'))
+                        for c in doc.get('chunks', []))
+        ia, ib = inputs_of(a), inputs_of(b)
+        common = sorted(set(ia) & set(ib))
+        moved = [k for k in common if ia[k] != ib[k]]
+        check('the exes differ, and the generator word moved every chunk inputs digest '
+              '(%d of %d)' % (len(moved), len(common)),
+              len(common) > 0 and len(moved) == len(common))
+        a, b = without_inputs(a), without_inputs(b)
 
     sa, sb = a.get('switches'), b.get('switches')
     a2 = dict(a); a2.pop('switches', None)
@@ -314,10 +383,86 @@ def main(argv):
               len(bto_a) > 0)
         check('the default bake records NO .BTO row (it is not an output any more)',
               len(bto_b) == 0)
+        # WHAT A DROP MOVES IN THE RECORD, ASKED BY NAME (lane GATEFIX1,
+        # 2026-09-24). This comparison used to hand shape()'s TEXT to
+        # strip_digests() and died with an AttributeError on every run since
+        # AUDIT1 made shape() return text; the rung wrote a version 1 record
+        # until the re-pin, so leg (a) skipped before reaching it and nobody
+        # saw. A drop bake moves exactly three things besides the .BTO row,
+        # and each is checked here rather than left out:
+        #   * the census gains one `bto scratch:` row, and the `bake census:`
+        #     row's bto clause says scratch/dropped/freed where the rung's says
+        #     the mod folder/0/0. The NUMBERS are leg (d)'s; here the clause is
+        #     reduced to its chunk count and every other census byte is ==.
+        #   * the manifest moves into the record's own folder, so the `end`
+        #   line counts it: the file and byte deltas must be exactly the
+        #   out rows that entered the record folder, sized on disk.
+        import re
+        disp = re.compile(r'bto built in (the mod folder|scratch [^,]*), '
+                          r'(\d+) chunk\(s\), \d+ dropped, \d+ bytes freed')
+
+        # the layout clause of the same row counts the FO4CS files, and the
+        # manifest that moved into the record folder is one of them: its delta
+        # is checked against the out rows below, then reduced here.
+        lay = re.compile(r'(layout [^,]*), (\d+) file\(s\)')
+
+        def census_for_drop(doc):
+            rows = [lay.sub(r'\1, <n> file(s)',
+                            disp.sub(r'bto built in <where>, \2 chunk(s), <n> dropped, <n> bytes freed', r))
+                    for r in steady_census(doc)]
+            return rows
+
+        def layout_files(doc):
+            got = [int(m.group(2)) for r in steady_census(doc) for m in [lay.search(r)] if m]
+            return got[0] if len(got) == 1 else None
+
+        cen_a, cen_b = census_for_drop(a2), census_for_drop(b2)
+        scr_a = [r for r in cen_a if r.startswith('bto scratch:')]
+        scr_b = [r for r in cen_b if r.startswith('bto scratch:')]
+        check('the census: the default bake prints ONE bto scratch row and the rung none '
+              '(%d vs %d)' % (len(scr_b), len(scr_a)), len(scr_b) == 1 and len(scr_a) == 0)
+        cen_b = [r for r in cen_b if not r.startswith('bto scratch:')]
+        check('and every other census row, the bto clause reduced to its chunk count, '
+              'is the rung\'s (%d rows)' % len(cen_a), cen_a == cen_b)
+
+        def in_record(doc):
+            return [o.split(' ')[0] for c in doc.get('chunks', []) for o in c.get('out', [])
+                    if not o.split(' ')[0].replace(chr(92), '/').startswith('../')]
+
+        def sized(rec, rows):
+            tot = 0
+            for r in rows:
+                try:
+                    tot += os.path.getsize(os.path.join(os.path.dirname(rec), r))
+                except OSError:
+                    return None
+            return tot
+        ia, ib = in_record(a2), in_record(b2)
+        za, zb = sized(pa, ia), sized(pb, ib)
+        la, lb = layout_files(a2), layout_files(b2)
+        check('the census layout count moved by exactly the out rows that entered the '
+              'record folder (%s -> %s; rows %+d)' % (la, lb, len(ib) - len(ia)),
+              la is not None and lb is not None and lb - la == len(ib) - len(ia))
+        dfiles = b2.get('endFiles', -1) - a2.get('endFiles', -1)
+        dbytes = b2.get('endBytes', -1) - a2.get('endBytes', -1)
+        check('the end line moved by exactly the out rows that entered the record folder '
+              '(%+d files %+d bytes; rows %+d, %s bytes)'
+              % (dfiles, dbytes, len(ib) - len(ia),
+                 'unreadable' if za is None or zb is None else '%+d' % (zb - za)),
+              za is not None and zb is not None
+              and dfiles == len(ib) - len(ia) and dbytes == zb - za)
+
+        def rest(doc, cen):
+            d = without_bto(doc)
+            d['census'] = cen
+            d.pop('endFiles', None)
+            d.pop('endBytes', None)
+            return d
+        ra, ua2 = shape(rest(a2, cen_a), False)
+        rb, ub2 = shape(rest(b2, cen_b), False)
         check('every other recorded file, digest for digest, is what the rung recorded '
               '(or differs by the path rewrite, proved on the files themselves)',
-              json.dumps(strip_digests(canon_doc(without_bto(a2))), sort_keys=True)
-              == json.dumps(strip_digests(cb), sort_keys=True)
+              ra == rb and not ua2 and not ub2
               and explained([r for r in out_a
                              if not r.split(' ')[0].upper().endswith('.BTO')],
                             out_b, root_a, root_b))
