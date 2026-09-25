@@ -9,7 +9,7 @@
 set -u
 L=E:/Projects/NifskopeWWE-bake2/scratchpad/bake2_20260925
 RUNG=E:/Projects/NifskopeWWE-bake2/release/NifSkope.before_bake2.exe
-NEW=$L/run2/release/NifSkope.exe
+NEW=E:/Projects/NifskopeWWE-bake2/release/NifSkope.exe   # final exe 4638a958 (v10 + halo + DLC grid)
 P="E:/Projects/Fallout 4 Mods/profiles/Default"
 INST="E:/Projects/Fallout 4 Mods/mods/FO4CSLOD/FO4CSLOD"
 ESM="X:/Programs/Steam/steamapps/common/Fallout 4/Data/Fallout4.esm"

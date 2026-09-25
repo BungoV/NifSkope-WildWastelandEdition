@@ -9,7 +9,7 @@
 set -u
 WS="$1"; X0="$2"; Y0="$3"; X1="$4"; Y1="$5"; NAME="$6"
 L=E:/Projects/NifskopeWWE-bake2/scratchpad/bake2_20260925
-NS="$L/run/release/NifSkope.exe"
+NS="${EXE:-$L/run/release/NifSkope.exe}"   # EXE= names another run copy
 P="E:/Projects/Fallout 4 Mods/profiles/Default"
 MOD="$L/$NAME/mod"; SCR="$L/$NAME/scratch"; CARDS="$L/cards"; LOGS="$L/$NAME/logs"
 mkdir -p "$LOGS" "$SCR" "$MOD"

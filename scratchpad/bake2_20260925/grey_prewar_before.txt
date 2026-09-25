@@ -1,0 +1,1 @@
+SanctuaryHillsWorld VT.4 cells -28..3 x -12..27: 1280 cells, flat grey 0; tiles 80, all-grey 0; mean lum 78.9 chroma 23.6

@@ -12656,7 +12656,12 @@ static qint64 lodgenVtMsnFromSheets( LodgenVtMsnSheets & sh, int cellX0, int cel
  *                   layer counts: it is paint intent). w = 0, so his MO2 LAND
  *                   layers win and every painted texel is byte-identical.
  *    d              world distance from the texel to the nearest painted cell
- *    w              smoothstep( 0, band, d )
+ *    w              smoothstep( 0, band, d ); 1 on a cell with NO LAND record
+ *                   (lane BAKE2, 2026-09-25): such a cell has no colour of ours,
+ *                   only the generator's flat placeholder grey, and blending FROM
+ *                   it painted a pale halo 1..3 cells wide round pre-war's
+ *                   playable block (+38 luminance over vanilla one cell out).
+ *                   Those cells stay out of the band's p95 for the same reason.
  *    colour         colour + ( T( V ) - colour ) * w
  *    V              Bethesda's dim-4 LOD diffuse, a LOOSE file under --vanilla-lod-root,
  *                   Textures\Terrain\<WS>\<WS>.4.<x>.<y>.dds, (x, y) the chunk's
@@ -12694,12 +12699,16 @@ struct LodgenVtFill
 	QString ws;
 	int x0 = 0, y0 = 0, w = 0, h = 0;           //!< painted bitmap, world cells
 	std::vector<quint8> painted;
+	std::vector<quint8> noLand;                 //!< 1 = no LAND record: no colour of ours, filled whole
 	float gain = 1.0f, offset = 0.0f, sat = 1.0f, cshift[3] = { 0, 0, 0 };
 	float bar = 0.0f, p95 = 0.0f, rawGain = 1.0f;
 	int bandCells = 1;
 	float band = 4096.0f;
 	qint64 overlapCells = 0, ringCells = 0, fitTiles = 0;
 	qint64 tilesTouched = 0, texelsFilled = 0, texelsNoVanilla = 0;
+	qint64 noLandCells = 0, noLandRingCells = 0, texelsNoLand = 0;
+	int gridX = 0, gridY = 0;                   //!< vanilla dim-4 grid phase, cells 0..3 (LODSettings SW cell mod 4)
+	QString gridSource = QStringLiteral( "default" );
 	QSet<qint64> vanillaMissing;
 	QHash<qint64, std::vector<quint8>> sheets;
 	QList<qint64> sheetOrder;
@@ -12710,6 +12719,13 @@ struct LodgenVtFill
 		if ( cx < x0 || cy < y0 || cx >= x0 + w || cy >= y0 + h )
 			return false;
 		return painted[size_t( cy - y0 ) * w + ( cx - x0 )] != 0;
+	}
+
+	bool isNoLand( int cx, int cy ) const
+	{
+		if ( cx < x0 || cy < y0 || cx >= x0 + w || cy >= y0 + h )
+			return false;
+		return noLand[size_t( cy - y0 ) * w + ( cx - x0 )] != 0;
 	}
 
 	static void lumChroma( const float * c, float & l )
@@ -12796,17 +12812,20 @@ struct LodgenVtFill
 		rgb.assign( size_t( ww ) * wh * 3, 0.0f );
 		have.assign( size_t( ww ) * wh, 0 );
 		auto floorDiv = []( int a, int b ) { return ( a >= 0 ) ? a / b : -( ( -a + b - 1 ) / b ); };
-		for ( int cr = floorDiv( gy0, 512 ); cr <= floorDiv( gy1, 512 ); cr++ ) {
-			for ( int cc = floorDiv( gx0, 512 ); cc <= floorDiv( gx1, 512 ); cc++ ) {
-				// chunk row cr spans world y [-(cr + 1) * 16384, -cr * 16384): SW cell y = -(cr + 1) * 4
-				const std::vector<quint8> * t = sheet( cc * 4, -( cr + 1 ) * 4 );
+		// the worldspace's own dim-4 grid: chunk (cc, cr) has SW cell (gridX + 4 cc, gridY - 4 (cr + 1));
+		// its texels start at gx = gridX * 128 + 512 cc, gy = 512 cr - gridY * 128 (phase 0,0 = the old grid)
+		const int ox = gridX * 128, oy = gridY * 128;
+		for ( int cr = floorDiv( gy0 + oy, 512 ); cr <= floorDiv( gy1 + oy, 512 ); cr++ ) {
+			for ( int cc = floorDiv( gx0 - ox, 512 ); cc <= floorDiv( gx1 - ox, 512 ); cc++ ) {
+				const std::vector<quint8> * t = sheet( gridX + cc * 4, gridY - ( cr + 1 ) * 4 );
 				if ( !t )
 					continue;
-				const int tx0 = qMax( gx0, cc * 512 ), tx1 = qMin( gx1, cc * 512 + 511 );
-				const int ty0 = qMax( gy0, cr * 512 ), ty1 = qMin( gy1, cr * 512 + 511 );
+				const int bx = ox + cc * 512, by = cr * 512 - oy;
+				const int tx0 = qMax( gx0, bx ), tx1 = qMin( gx1, bx + 511 );
+				const int ty0 = qMax( gy0, by ), ty1 = qMin( gy1, by + 511 );
 				for ( int gy = ty0; gy <= ty1; gy++ ) {
 					for ( int gx = tx0; gx <= tx1; gx++ ) {
-						const quint8 * c = t->data() + ( size_t( gy - cr * 512 ) * 512 + ( gx - cc * 512 ) ) * 3;
+						const quint8 * c = t->data() + ( size_t( gy - by ) * 512 + ( gx - bx ) ) * 3;
 						const size_t o = size_t( gy - gy0 ) * ww + ( gx - gx0 );
 						rgb[o * 3 + 0] = float( c[0] ) / 255.0f;
 						rgb[o * 3 + 1] = float( c[1] ) / 255.0f;
@@ -12876,11 +12895,16 @@ static void lodgenVtFillPainted( const EsmWorld & world, LodgenVtFill & F, int w
 	F.w = east - west + 1 + 2 * m;
 	F.h = north - south + 1 + 2 * m;
 	F.painted.assign( size_t( F.w ) * F.h, 0 );
+	F.noLand.assign( size_t( F.w ) * F.h, 0 );
 	for ( int cy = F.y0; cy < F.y0 + F.h; cy++ ) {
 		for ( int cx = F.x0; cx < F.x0 + F.w; cx++ ) {
 			EsmLand land;
-			if ( !world.land( cx, cy, land ) )
+			if ( !world.land( cx, cy, land ) ) {
+				F.noLand[size_t( cy - F.y0 ) * F.w + ( cx - F.x0 )] = 1;
+				if ( cx >= west && cx <= east && cy >= south && cy <= north )
+					F.noLandCells++;
 				continue;
+			}
 			bool p = false;
 			for ( int q = 0; q < 4 && !p; q++ )
 				p = land.baseTex[q] != 0 || !land.layers[q].isEmpty();
@@ -12944,12 +12968,13 @@ static void lodgenVtFillTile( LodgenVtFill & F, int cellX0, int cellY0, int dim,
 	// per cell of the tile's reach: painted -> skipped; else its painted neighbours
 	const int ncx = bc1 - bc0 + 1, ncy = br1 - br0 + 1;
 	std::vector<std::vector<std::pair<float, float>>> nb( size_t( ncx ) * ncy );
-	std::vector<quint8> cellPainted( size_t( ncx ) * ncy );
+	std::vector<quint8> cellPainted( size_t( ncx ) * ncy ), cellNoLand( size_t( ncx ) * ncy );
 	for ( int cy = br0; cy <= br1; cy++ )
 		for ( int cx = bc0; cx <= bc1; cx++ ) {
 			const size_t o = size_t( cy - br0 ) * ncx + ( cx - bc0 );
 			cellPainted[o] = F.isPainted( cx, cy ) ? 1 : 0;
-			if ( !cellPainted[o] )
+			cellNoLand[o] = F.isNoLand( cx, cy ) ? 1 : 0;
+			if ( !cellPainted[o] && !cellNoLand[o] )
 				lodgenVtFillNeighbours( F, cx, cy, r, nb[o] );
 		}
 	bool touched = false;
@@ -12962,9 +12987,12 @@ static void lodgenVtFillTile( LodgenVtFill & F, int cellX0, int cellY0, int dim,
 			const size_t co = size_t( cy - br0 ) * ncx + ( cx - bc0 );
 			if ( cellPainted[co] )
 				continue;       // his LAND paint: byte-identical
-			const float d = lodgenVtFillDistance( nb[co], wx, wy );
-			const float t = qBound( 0.0f, d / F.band, 1.0f );
-			const float wgt = t * t * ( 3.0f - 2.0f * t );
+			float wgt = 1.0f;       // no LAND: only the placeholder grey here, filled whole
+			if ( !cellNoLand[co] ) {
+				const float d = lodgenVtFillDistance( nb[co], wx, wy );
+				const float t = qBound( 0.0f, d / F.band, 1.0f );
+				wgt = t * t * ( 3.0f - 2.0f * t );
+			}
 			if ( wgt <= 0.0f )
 				continue;
 			float v[3], tv[3];
@@ -12983,6 +13011,8 @@ static void lodgenVtFillTile( LodgenVtFill & F, int cellX0, int cellY0, int dim,
 				| ( quint32( qBound( 0, int( c[1] * 255.0f + 0.5f ), 255 ) ) << 8 )
 				| quint32( qBound( 0, int( c[2] * 255.0f + 0.5f ), 255 ) );
 			F.texelsFilled++;
+			if ( cellNoLand[co] )
+				F.texelsNoLand++;
 			touched = true;
 		}
 	}
@@ -13130,6 +13160,10 @@ static void lodgenVtFillFit( LodgenVtFill & F, int west, int south, int east, in
 	for ( auto it = role.constBegin(); it != role.constEnd(); ++it ) {
 		if ( it.value() != 2 || !ours.contains( it.key() ) || !van.contains( it.key() ) )
 			continue;
+		if ( F.isNoLand( LodgenVtFill::keyX( it.key() ), LodgenVtFill::keyY( it.key() ) ) ) {
+			F.noLandRingCells++;    // filled whole, so it does not size the band
+			continue;
+		}
 		const auto v = van.value( it.key() );
 		float vv[3] = { v[0] / 255.0f, v[1] / 255.0f, v[2] / 255.0f }, tv[3];
 		F.tone( vv, tv );
@@ -13146,7 +13180,8 @@ static QString lodgenVtFillReport( const LodgenVtFill & F )
 {
 	return QString( "vanillaFill overlapCells=%1 ringCells=%2 fitTiles=%3 gain=%4 rawGain=%5 offset=%6 "
 		"sat=%7 cshift=%8,%9,%10 bar=%11 p95=%12 bandCells=%13 tilesTouched=%14 texelsFilled=%15 "
-		"texelsNoVanilla=%16 vanillaChunksMissing=%17 vanillaSheetsRead=%18 root=%19" )
+		"texelsNoVanilla=%16 vanillaChunksMissing=%17 vanillaSheetsRead=%18 noLandCells=%19 "
+		"noLandRingCells=%20 texelsNoLand=%21 grid=%22,%23(%24) root=%25" )
 		.arg( F.overlapCells ).arg( F.ringCells ).arg( F.fitTiles )
 		.arg( double( F.gain ), 0, 'f', 4 ).arg( double( F.rawGain ), 0, 'f', 4 )
 		.arg( double( F.offset * 255.0f ), 0, 'f', 3 ).arg( double( F.sat ), 0, 'f', 4 )
@@ -13154,7 +13189,8 @@ static QString lodgenVtFillReport( const LodgenVtFill & F )
 		.arg( double( F.cshift[2] * 255.0f ), 0, 'f', 3 )
 		.arg( double( F.bar ), 0, 'f', 3 ).arg( double( F.p95 ), 0, 'f', 3 ).arg( F.bandCells )
 		.arg( F.tilesTouched ).arg( F.texelsFilled ).arg( F.texelsNoVanilla ).arg( F.vanillaMissing.size() )
-		.arg( F.vanillaLoaded ).arg( lodgenVanillaLodRoot() );
+		.arg( F.vanillaLoaded ).arg( F.noLandCells ).arg( F.noLandRingCells ).arg( F.texelsNoLand )
+		.arg( F.gridX ).arg( F.gridY ).arg( F.gridSource ).arg( lodgenVanillaLodRoot() );
 }
 
 bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
@@ -13387,6 +13423,20 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 	if ( opts.vanillaFill ) {
 		fill.on = true;
 		fill.ws = ws;
+		{
+			// the engine's own LOD grid for this worldspace: LODSettings\<WS>.LOD, int16 left, int16 bottom
+			QFile lf( QDir( lodgenVanillaLodRoot() ).filePath( QStringLiteral( "LODSettings/%1.LOD" ).arg( ws ) ) );
+			if ( !lodgenVanillaLodRoot().isEmpty() && lf.open( QIODevice::ReadOnly ) ) {
+				const QByteArray b = lf.read( 16 );
+				if ( b.size() >= 4 ) {
+					const int left = qint16( quint8( b[0] ) | ( quint8( b[1] ) << 8 ) );
+					const int bottom = qint16( quint8( b[2] ) | ( quint8( b[3] ) << 8 ) );
+					fill.gridX = ( ( left % 4 ) + 4 ) % 4;
+					fill.gridY = ( ( bottom % 4 ) + 4 ) % 4;
+					fill.gridSource = QStringLiteral( "LODSettings %1,%2" ).arg( left ).arg( bottom );
+				}
+			}
+		}
 		lodgenVtFillPainted( world, fill, levels[0].west, levels[0].south, levels[0].east, levels[0].north );
 		LodgenVtMaskCache fitMask = maskCache;
 		LodgenVtLandCache fitLand;

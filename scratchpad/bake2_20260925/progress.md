@@ -99,3 +99,38 @@
 - Gate on the RUNG (7cfccac1): NW objects bake rc 1, 'ref 0x0604ddb9 ... scale 8.33 is outside 0 .. 7.99988;
   refused, not clamped' -> WIDESCALE G2 FAIL (pre-registered RED).
 - Fixture (--native-fixture) rung vs new: 3 files, 0 differ.
+
+## 20:39 -- halo (bungo on prewar_topdown.png) and the director's fill-ON ruling for the DLCs
+
+* Halo measured (halo.py, halo_prewar.txt): no-LAND cells 1/2/3 cells off pre-war's LAND read +38.1/+30.5/+19.0
+  luminance over vanilla, +10.8 from 5 out (the tone match). Fill OFF: flat placeholder grey 129.6 everywhere
+  off-LAND. Vanilla's own texels there: 64..66, no ring. Cause: the fill blended FROM the placeholder grey over a
+  4-cell band (and that grey also set the band). Commonwealth: 0 flat-grey cells (halo_cw.txt), so no halo there.
+* Fix in src/lodgen.cpp (patch_halo.py): a no-LAND cell is filled whole (w = 1) and left out of the band's p95.
+  Gate halo_gate.py pre-registered: RED on the current bake (halo_gate_rung.txt: 100 of 180 near cells hot).
+* Director's ruling 2026-09-25 (no calls after approval): Far Harbor and Nuka-World fill ON. Vanilla dim-4 LOD
+  colour tiles extracted READ-ONLY from DLCCoast/DLCNukaWorld - Textures.ba2 into the input cache
+  E:/Tools/Fallout 4/DataUnpacked/Data (1296 + 256 tiles, 512 BC1), plus LODSettings/*.LOD from the Main BA2s;
+  manifest dlc_lod_manifest.tsv (archive, path, bytes, sha1; 1554 lines). Nothing into the mod or git.
+* Found: Far Harbor's vanilla dim-4 grid is offset (LODSettings SW cell -73,-59, so x = 3, y = 1 mod 4); the fill
+  addressed only multiples of 4 and would have found no sheet. patch_grid.py reads the phase from
+  <vanilla root>/LODSettings/<WS>.LOD (phase 0,0 = old addressing). Registration checked: best cell shift 0,0 on
+  Far Harbor (r 0.576) and pre-war (r 0.528) (align_check.py).
+* Far Harbor BEFORE (installed, fill off): VT.4 1517 of 3584 cells flat grey, 77 of 224 tiles all grey;
+  no-LAND cells +45 over vanilla at every distance (halo_gate_fh_before.txt).
+* Build: exe 4638a958 (v10 + halo + DLC grid), run copy run3/. Running halo_runs.sh (pre-war fix/off legs, CW
+  region rung-vs-new VT identity).
+
+## 21:02 -- halo fixed on pre-war, installed; Far Harbor fill-ON bake running
+
+* Exe 4638a958 was blocked by Avast (rc 126 from both run3 and release after about 110 s); relinked: 62412e83
+  (same sources), runs from the worktree release/ (no builds pending).
+* halo_runs.out: HALO GATE PASS on pre-war fill ON (d=1/2/3 ON-VAN +10.76/+10.75/+10.77 vs far +10.75; 0 of 180
+  hot cells, max excess +0.2). .lodi/.lodo/.lodl identical to the install. Fill OFF new vs old exe: 163 files, only
+  the .lodb differs (revision). Commonwealth region -24 16 -9 31 fill ON, rung vs new: VT.2/4/8 + VT.lodm IDENTICAL
+  (noLandCells=0, grid=0,0 from LODSettings -96,-96).
+* Pre-war reinstalled: VT.2, VT.4, .lodb replaced, old copies + sha1 in replaced/prewar_halo_2100/sha1.txt, all MATCH.
+* Pictures (same camera, cam logs identical): pics/prewar_topdown_after.png; side by side
+  pics/prewar_halo_before_after.png. Picture luminance by distance from LAND, before -> after:
+  d1 124.5 -> 95.8, d2 116.4 -> 94.8, d3 106.5 -> 96.9, d4 97.6 -> 96.3, >=6 94.0 -> 94.0 (halo_pics_prewar.txt).
+* Far Harbor fill ON bake started (farharbor_fill/).
