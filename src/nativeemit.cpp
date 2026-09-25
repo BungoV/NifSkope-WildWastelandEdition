@@ -1884,13 +1884,15 @@ bool lodgenNativeWrite( QString * report, QString * error )
 					for ( auto sit = subst.constBegin(); sit != subst.constEnd(); ++sit ) {
 						if ( !mk->contains( sit.key() ) )
 							continue;
-						const QString rk = lodgenMaterialSwapKey( sit.value() );
-						if ( rk == sit.key() )
-							continue;           // a row naming itself changes nothing
-						hits.append( qMakePair( sit.key(), sit.value() ) );
-						sig += sit.key() + QChar( '>' ) + rk + QChar( '\n' );
+						/* CNAM is counted on every row naming a LOD material, a row naming
+						 * itself (a colour-remap-only row) included: that colour is dropped. */
 						if ( cnamKeys.contains( sit.key() ) )
 							cnamHit.insert( QString( "%1:%2" ).arg( w, 8, 16, QChar( '0' ) ).arg( sit.key() ) );
+						const QString rk = lodgenMaterialSwapKey( sit.value() );
+						if ( rk == sit.key() )
+							continue;           // a row naming itself changes no material
+						hits.append( qMakePair( sit.key(), sit.value() ) );
+						sig += sit.key() + QChar( '>' ) + rk + QChar( '\n' );
 					}
 					if ( hits.isEmpty() )
 						continue;
