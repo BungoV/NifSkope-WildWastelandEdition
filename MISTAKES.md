@@ -5,6 +5,17 @@ Written the moment a mistake is recognised, unprompted (CONSTITUTION rule 2).
 Format: date -- what was done -- what was true -- how it was found -- the rule.
 Newest at the top.
 
+## 2026-09-25 -- lane TOWER1 (lane text)
+
+2026-09-25 23:1x TOWER1 (for GREY1's record): GREY1 concluded that "the swap never reaches the LOD; that is
+vanilla's own trait". It had compared ours against our OWN per-model LOD textures, never against vanilla's CK atlas.
+Vanilla's atlas holds the swapped colourways, and applying the swap reproduces vanilla to the third decimal.
+Rule: a "vanilla does it too" verdict needs vanilla's shipped output as the reference, not our inputs.
+2026-09-25 23:0x TOWER1: I assumed a stock .bto is drawn chunk-local like a .btr and framed it with the /4
+camera. 14 of 18 BTO pictures came back blank (the same 11,411 B file every time). NifSkope draws a .BTO in
+world space. Rule: print every render's byte size, and prove the frame with an auto-fit .cam before deriving a
+camera.
+
 ## 2026-09-25 -- lane BAKE2 (lane text)
 
 - **Edited a running shell script.**

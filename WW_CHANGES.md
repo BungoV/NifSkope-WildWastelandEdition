@@ -1,5 +1,11 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## TOWER1
+
+2026-09-25 TOWER1 (measurement only, no code): found that far-LOD buildings lose vanilla's material swaps (MSWP
+via REFR XMSP / base MODS). Those swaps are why downtown towers render darker blue-grey instead of vanilla's cream
+and orange. 21,064 Commonwealth placements are affected. Fix proposed in scratchpad/tower1_20260925/DONE.md s4.
+
 ## BAKE2: three more worldspaces, .lodi v10, and the fill halo
 
 2026-09-25 BAKE2: pre-war Sanctuary, Far Harbor and Nuka-World are baked and installed in FO4CSLOD, all rings, with

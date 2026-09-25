@@ -60,6 +60,19 @@ committed" or names an exe, this block overrides it.
 - Re-run the command-line bakes since 09-19 that used --data-root.
 
 ### Lane and director lines, 2026-09-24, newest first
+- 2026-09-25 23:09 TOWER1:
+  TOWER1 (2026-09-25 22:26-23:10, branch tower1-20260925, commits 0aa2465b + e872a753, not merged): the grey
+  downtown Boston towers are a real bake defect, not a tint. Our lodgen drops the material swaps that vanilla bakes
+  into its LOD atlas. A REFR's XMSP (or the base's MODS) points at an MSWP whose rows name LOD materials, e.g.
+  hittechextalod01 -> hittechextalod07 (cream). We place every building with its base's own LOD .bgsm.
+  Measured base-colour luma, vanilla vs ours, at the 08 camera: tower A 0.458/0.185, B 0.367/0.193, and the control
+  C 0.123/0.133. Offline, applying vanilla's swap to our models lands on vanilla to the third decimal: A 0.378 vs
+  0.377, B 0.380 vs 0.379. Whole map: 21,064 of 184,069 placements carry a swap that names their LOD material
+  (Fallout4.esm refs only), across 41 distinct pairs. The top pair is decomainlod -> decomainblod at 8,062.
+  Picture: scratchpad/tower1_20260925/pics/TOWER1_vanilla_vs_ours.png, untracked.
+  Proposed fix, not built: parse XMSP, MODS and MSWP in esmdata. Key the library by (base, swap) and substitute
+  BNAM -> SNAM on the LOD shapes. Add a bake census line. The refuter is in DONE.md section 4.
+  GREY1's per-placement multiplier is not the fix for these towers.
 - 2026-09-25 23:01 BAKE2:
   ### Lane BAKE2 (2026-09-25): pre-war Sanctuary, Far Harbor and Nuka-World LOD, baked and installed
 
