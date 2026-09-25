@@ -1,0 +1,21 @@
+land_vanilla.bin: cells 192x192 from (-96,-96); LAND in 36864 of 36864; LAND bounds x -96..95 y -96..95; cells with relief (max-min > 0): 17972
+   relief bounds x -77..76 y -77..76
+land_mo2.bin: cells 192x192 from (-96,-96); LAND in 36864 of 36864; LAND bounds x -96..95 y -96..95; cells with relief (max-min > 0): 17972
+   relief bounds x -77..76 y -77..76
+vanilla level-4 BTR tiles: 2304; sizes min 2629 max 167948
+tiles bigger than the flat-ocean size 2629: 2255; tiles whose 4x4 cells carry LAND relief: 1240
+   non-flat BTR but no LAND relief: 1015; LAND relief but flat-size BTR: 0
+   non-flat BTR tile bounds x -96..92 y -96..92 (tile origin cells)
+   tile (-64, 0): BTR 26167 bytes, LAND relief over its 16 cells max 2336 units
+   tile (0, 60): BTR 25984 bytes, LAND relief over its 16 cells max 2512 units
+   tile (0, -80): BTR 17128 bytes, LAND relief over its 16 cells max 1024 units
+   tile (40, 0): BTR 2629 bytes, LAND relief over its 16 cells max 0 units
+   tile (0, 0): BTR 167948 bytes, LAND relief over its 16 cells max 1128 units
+lodl Commonwealth.lodl: header cells [-96,-96]..[95,95] spc 32
+   cell (-80,2): LAND relief 0 u, 121 samples vs .lodl, 0 mismatched, worst 0
+   cell (2,70): LAND relief 1384 u, 121 samples vs .lodl, 0 mismatched, worst 0
+   cell (2,-85): LAND relief 0 u, 121 samples vs .lodl, 0 mismatched, worst 0
+   cell (-60,-60): LAND relief 3776 u, 121 samples vs .lodl, 0 mismatched, worst 0
+   cell (60,60): LAND relief 0 u, 121 samples vs .lodl, 0 mismatched, worst 0
+BTR >= 3000 B: 1239 tiles; LAND-relief tiles: 1240; big-not-relief 0; relief-not-big 1
+BTR>=3000 tile origins x -80..76 y -80..76 -> cells x -80..79 y -80..79
