@@ -60,6 +60,18 @@ committed" or names an exe, this block overrides it.
 - Re-run the command-line bakes since 09-19 that used --data-root.
 
 ### Lane and director lines, 2026-09-24, newest first
+- 2026-09-25 21:08 TINT1:
+  TINT1 (2026-09-25, branch tint1-20260925, not merged):
+  - Object library re-baked at `.lodo` v5, which keeps vertex colour: 52,925 colour rows, 166 meshes.
+  - Installed at 20:13 into mods\FO4CSLOD\...\Commonwealth: .lodo, .lodi and 15 legacy _n arrays. The .lodb was kept (BAKE1's). Backups and sha1s are in scratchpad/tint1_20260925/replaced + install_record.tsv.
+  - FO4CS ImprovedLOD refuses v5 cleanly ("version 5; this reader knows 4"; module ships off). Teaching it v5 is owed, and comes last.
+  - Census over 184,431 placements:
+    - 16.3% carry colour + the Vertex_Colors flag.
+    - Only 3.5% carry a real hue, and almost all of that is trees (TreeBlasted02_LOD_1 alone has 4,055 placements).
+    - Building LOD models carry no hue: not in vertex colour, not as a palette flag, not in the stock .bto.
+    - So the grey buildings bungo sees are NOT fixed by v5. Next place to look: the atlas diffuse textures and whether they resolve.
+  - The viewer needed 61d920ab to draw the v5 colour; merge it with SEAM1's commit.
+  - A headless lit picture inherits the Vertex Color option, so use WW_LODL_AO=1 for colour pictures.
 - 2026-09-25 18:41 WHITE1:
   WHITE1 (2026-09-25, branch white1-20260925 from d40017be): bungo asked "What's up with those white corners though?" about
   whole_top_after.png. It is DATA, and there is no code change, build or re-bake.

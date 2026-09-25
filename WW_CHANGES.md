@@ -1,5 +1,13 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## TINT1: object library keeps vertex colour
+
+- Native far field (src/lodinative.cpp):
+  - A bucket whose `.lodo` v5 mesh carries a colour stream now gets the vertex colour field in its layout.
+  - Before this, the library colour was written into a layout with no colour field, and the viewer drew those meshes white.
+  - Measured with a doctored all-red library: 185,943 red pixels in a flat render after the fix, 0 before.
+  - Spells on the fixed exe: lodl_channels 54/0 and lod_generation 128/0.
+
 ## WHITE1: the pale western band is vanilla's steep-face colour
 
 2026-09-25 WHITE1 (no code change): the pale band round the western mountain block in the whole-map top-down picture

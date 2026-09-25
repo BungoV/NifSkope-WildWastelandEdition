@@ -5,6 +5,16 @@ Written the moment a mistake is recognised, unprompted (CONSTITUTION rule 2).
 Format: date -- what was done -- what was true -- how it was found -- the rule.
 Newest at the top.
 
+## 2026-09-25 -- lane TINT1 (lane text)
+
+2026-09-25 TINT1: I read "v4 and v5 render byte-identical" as a viewer defect for about an hour. I patched the bucket layout, which was a real defect, and still got 0 px changed.
+
+The real gate was that the lit path multiplies vertex colour only under Scene::DoVertexColors, and a headless run inherits that option from the saved UI state.
+
+The cheap test that settled it came last: a doctored file with every colour row set to pure red, rendered flat, lit, and lit with WW_LODL_AO=1. It should have come first.
+
+Rule: when a payload does not show, doctor the payload to an extreme first, then find which switch hides it.
+
 ## 2026-09-25 -- lane WHITE1 (lane text)
 
 None from this lane. One note for the ledger:
