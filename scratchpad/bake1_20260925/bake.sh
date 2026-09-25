@@ -26,8 +26,12 @@ case ",${STAGES:-lodl,chunks}," in *,lodl,*) run lodl --lodl "$MOD" || exit 1 ;;
 # name is the FO4CS mod's own, so a FO4CSLOD copy would shadow the working vanilla map. STAGES=lodl,chunks.
 case ",${STAGES:-lodl,chunks}," in *,heightmap,*) run heightmap --heightmap "$MOD" || exit 1 ;; esac
 case ",${STAGES:-lodl,chunks}," in *,chunks,*) ;; *) exit 0 ;; esac
-run chunks --terrain-region "$X0" "$Y0" "$X1" "$Y1" --dim 4 \
+# --dim all = the panel's "all rings (4+8+16+32)": the far rings are where a card stands in for a tree,
+# so only an all-rings run links cards into the pair (cardCount > 0). DIM=4 is the single-ring run.
+run chunks --terrain-region "$X0" "$Y0" "$X1" "$Y1" --dim "${DIM:-all}" \
 	--out-dir "$SCR" --tex-dir "$SCR/textures" \
 	--native "$MOD" --vt "$MOD" --vt-height --vt-density 16 --cover \
-	--impostors "$CARDS" --arrays || exit 1
+	--impostors "$CARDS" --arrays --fo4cs-one-root || exit 1
+# --fo4cs-one-root (lane BAKE1): the arrays, chunk manifests and the .lodb go under the mod's FO4CSLOD root
+# with the rest, as the panel lays them out; only the stock .BTR/.DDS set stays in the scratch folder.
 echo "$(stamp) ALL DONE" | tee -a "$LOGS/stages.txt"

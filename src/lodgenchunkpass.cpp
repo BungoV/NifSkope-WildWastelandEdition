@@ -710,6 +710,17 @@ QString chunkKey( int cx, int cy )
 	return QString( "%1,%2" ).arg( cx ).arg( cy );
 }
 
+/* A run over several rings (`--dim all`, lane BAKE1) has a ring-4 and a
+ * ring-8 chunk at the same corner. A chunk of the run's OWN ring keeps the
+ * old key, so a one-ring record is unchanged to the byte; another ring's
+ * chunk is `cx,cy@dim`. Only the record writer and the produced-file list use
+ * it: --incremental refuses a many-ring run. */
+QString chunkKeyAt( int dim, int runDim, int cx, int cy )
+{
+	return dim == runDim ? chunkKey( cx, cy )
+		: QString( "%1,%2@%3" ).arg( cx ).arg( cy ).arg( dim );
+}
+
 } // namespace
 
 QStringList lodgenIdentityDump( const LodgenChunkPassOptions & pass, const LodgenIdentityExtras & x )
@@ -870,7 +881,7 @@ LodgenIncrementalVerdict lodgenIncrementalBegin( LodgenIncrementalRun & run, con
 {
 	const QString ws = world.worldspaceEdid();
 	const bool fo4cs = !run.nativeDir.isEmpty();
-	run.ledgerPath = lodbRecordPath( run.outDir, ws, fo4cs );
+	run.ledgerPath = lodbRecordPath( run.recordRoot.isEmpty() ? run.outDir : run.recordRoot, ws, fo4cs );
 	run.lodjDir = fo4cs ? lodgenFo4csWorldDir( run.nativeDir, ws ) : QString();
 	run.allJobs = jobs;
 	run.incremental = false;
@@ -1121,7 +1132,7 @@ void lodgenIncrementalArmCache( LodgenIncrementalRun & run, const QString & worl
 		rp->lodjWritten++;
 		/* the retire hook for this same job appends to this very list a moment
 		 * later, on this same thread */
-		rp->producedFiles[chunkKey( r.cx, r.cy )].append( cp );
+		rp->producedFiles[chunkKeyAt( r.dim, rp->dim, r.cx, r.cy )].append( cp );
 	};
 	if ( run.incremental ) {
 		pass.nativeAllJobs = run.allJobs;
@@ -1142,7 +1153,7 @@ void lodgenIncrementalArmCache( LodgenIncrementalRun & run, const QString & worl
 void lodgenIncrementalNoteRetired( LodgenIncrementalRun & run, const LodgenChunkPassOptions & pass,
 	const LodgenChunkOutcome & r )
 {
-	QStringList & pf = run.producedFiles[chunkKey( r.cx, r.cy )];
+	QStringList & pf = run.producedFiles[chunkKeyAt( r.dim, run.dim, r.cx, r.cy )];
 	const bool scratch = !pass.btoScratchDir.isEmpty();
 	/* WITH A SCRATCH FOLDER the `.BTO` will not survive this run, so it is not
 	 * a tracked output: digesting a file about to be deleted made every later
@@ -1247,9 +1258,9 @@ bool lodgenIncrementalWriteRecord( const LodgenIncrementalRun & run, const EsmWo
 	const QString ledgerRoot = QFileInfo( run.ledgerPath ).absolutePath();
 	QHash<QString, const LodgenLedgerEntry *> oldByKey;
 	for ( const LodgenLedgerEntry & e : run.prev.chunks )
-		oldByKey.insert( chunkKey( e.cx, e.cy ), &e );
+		oldByKey.insert( chunkKeyAt( e.dim, run.dim, e.cx, e.cy ), &e );
 	for ( const LodgenChunkJob & j : run.allJobs ) {
-		const QString key = chunkKey( j.cx, j.cy );
+		const QString key = chunkKeyAt( j.dim, run.dim, j.cx, j.cy );
 		const bool rebaked = run.producedFiles.contains( key );
 		if ( !rebaked && run.incremental ) {
 			/* A chunk this run SKIPPED: its row is carried forward, which makes
@@ -1259,8 +1270,8 @@ bool lodgenIncrementalWriteRecord( const LodgenIncrementalRun & run, const EsmWo
 			continue;
 		}
 		LodgenLedgerEntry e;
-		e.dim = run.dim; e.cx = j.cx; e.cy = j.cy;
-		e.inputs = lodgenChunkInputDigest( world, run.dim, j.cx, j.cy, run.digestRoot );
+		e.dim = j.dim; e.cx = j.cx; e.cy = j.cy;
+		e.inputs = lodgenChunkInputDigest( world, j.dim, j.cx, j.cy, run.digestRoot );
 		for ( const QString & p : run.producedFiles.value( key ) ) {
 			e.outFiles.append( QDir( ledgerRoot ).relativeFilePath( QDir( p ).absolutePath() ) );
 			e.outDigests.append( lodgenFileDigest( p ) );

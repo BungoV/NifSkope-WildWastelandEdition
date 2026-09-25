@@ -317,6 +317,8 @@ struct LodgenIncrementalRun
 	bool    requireRecord = true; //!< false = no record yet is a whole bake, not a refusal (the panel)
 	QString outDir;             //!< where this bake's outputs and record go
 	QString nativeDir;          //!< the FO4CS target's root; empty = the stock target
+	//! where the record goes when not `outDir` (`--fo4cs-one-root`, lane BAKE1); empty = `outDir`
+	QString recordRoot;
 	QString digestRoot;         //!< the loose root the per-chunk input digest reads
 	quint32 worldspace = 0x3CU;
 	int     dim = 4;
