@@ -209,9 +209,10 @@ bool emitBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b,
 	BSVertexDesc desc( LODI_VERTEX_DESC );
 	if ( b.layer >= 0 )
 		desc.SetFlag( VertexFlags::VF_UV_2 );
-	if ( b.withColour )
+	// `.lodo` v5: the library colour needs the field too, or its values are written to nothing
+	if ( b.withColour || b.libColour )
 		desc.SetFlag( VertexFlags::VF_COLORS );
-	if ( b.layer >= 0 || b.withColour )
+	if ( b.layer >= 0 || b.withColour || b.libColour )
 		desc.ResetAttributeOffsets( 130 );
 	const std::uint64_t vertexDesc = desc.Value();
 	const int stride = int( desc.GetVertexSize() );
