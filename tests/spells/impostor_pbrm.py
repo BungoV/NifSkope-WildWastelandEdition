@@ -15,6 +15,8 @@ Subcommands (one verdict line each unless noted):
   stats <cards> <id>         what each sheet holds, per shape class (job 1 numbers)
   check <cards> <refcards> <id> <dir> [--red add|ior|decode]   the gate rows; prints `row <name> ok|FAIL ...`
   floor <idcards> <refcards> <id>      the colour floor: an identity .pbrm card against the legacy card
+  sdds <cards> <fid>         the compressed _s against its PNG, beside the same set's _n R/G codec floor
+  lodm <file.lodm>           the card .lodm's family and texture keys
 """
 import json, os, struct, sys
 import numpy as np
@@ -303,6 +305,11 @@ def cmd_check(cards, refcards, ident, d, red=None):
               % ("present" if rma is not None else "ABSENT", "present" if spc is not None else "ABSENT"))
         return
     cov, cl = classes(alb, rma)
+    if ref.shape != alb.shape:
+        print("row colour FAIL: the legacy card's sheet is %dx%d, this card's %dx%d -- a different frame (the "
+              "silhouette's bounds differ), so no texel-for-texel colour comparison" % (ref.shape[1], ref.shape[0],
+                                                                                     alb.shape[1], alb.shape[0]))
+        ref = None
     # which material is which class: the subsurface mask keys on the tree-animation flag, and the bake's
     # `pbrm <material> <route> tree <0|1>` lines say which material carries it (the NIF's own flag, echoed).
     tree = sc["pbrm"]
@@ -326,6 +333,8 @@ def cmd_check(cards, refcards, ident, d, red=None):
             print("row %s %s %s: median %.2f vs the law %.2f (levels), %.3f of %d texels within 2"
                   % (name, lab, "ok" if good else "FAIL", med, want, share, m.sum()))
         # colour: the law applied to the LEGACY card's texel (same base map, same view) vs the pbrm card
+        if ref is None:
+            continue
         both = m & (ref[..., 3] >= 128)
         lin_ref = srgb2lin(ref[both][:, :3] / 255.0)
         bright = lin_ref.min(1) > 0.02
@@ -354,6 +363,50 @@ def cmd_floor(idcards, refcards, ident):
                          sidecar(idcards, ident)["family"]))
 
 
+def cmd_sdds(cards, fid):
+    """The `_s` sheet through its codec (BC7, the `_n` sheet's): the compressed _oct_s.DDS against the bake's
+    PNG over covered texels, per channel; beside it the SAME set's `_n` R/G error (the codec floor, measured on
+    this card); and the RED, the _s sheet cut to 4 bits. One line; the .sh applies the bar."""
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import impostor_bc_decode as bc
+    s_png = load(cards, fid, "s")
+    n_png = load(cards, fid, "normal")
+    alb = load(cards, fid, "albedo")
+    sp, n = os.path.join(cards, fid + "_oct_s.DDS"), os.path.join(cards, fid + "_oct_n.DDS")
+    if s_png is None or not os.path.isfile(sp) or not os.path.isfile(n):
+        print("sdds: missing (_oct_s.png %s, _oct_s.DDS %s, _oct_n.DDS %s)" % (
+            s_png is not None, os.path.isfile(sp), os.path.isfile(n)))
+        return
+    sd, (w, h), four = bc.load_dds(sp)
+    nd = bc.load_dds(n)[0]
+    if sd.shape[:2] != s_png.shape[:2]:
+        print("sdds: size %s vs the PNG's %s (auxDiv?)" % (sd.shape[:2], s_png.shape[:2]))
+        return
+    cov = alb[..., 3] >= 128
+    sd = np.rint(sd * 255.0); nd = np.rint(nd * 255.0)
+    parts = []
+    worst_m, worst_p = 0.0, 0.0
+    for i, ch in enumerate("RGBA"):
+        e = np.abs(sd[..., i] - s_png[..., i])[cov]
+        parts.append("%s mean %.3f p95 %.1f" % (ch, e.mean(), np.percentile(e, 95)))
+        worst_m, worst_p = max(worst_m, e.mean()), max(worst_p, np.percentile(e, 95))
+    erg = np.concatenate([np.abs(nd[..., 0] - n_png[..., 0])[cov], np.abs(nd[..., 1] - n_png[..., 1])[cov]])
+    q = np.floor(s_png / 16.0) * 16.0 + 8.0                  # RED: the _s sheet cut to 4 bits
+    eq = np.abs(q - s_png)[cov]
+    print("sdds %s %dx%d, %d covered texels: %s | worst channel mean %.3f p95 %.1f | normal R/G error mean %.3f "
+          "p95 %.1f | 4-bit _s: mean %.3f p95 %.1f" % (four.decode().strip(), w, h, cov.sum(), "; ".join(parts),
+                                                     worst_m, worst_p, erg.mean(), np.percentile(erg, 95),
+                                                     eq.mean(), np.percentile(eq, 95)))
+
+
+def cmd_lodm(p):
+    b = open(p, "rb").read()
+    j = json.loads(b[12:])
+    t = j.get("textures", {})
+    print("lodm %s family %s specular %s keys %s" % (j.get("lodm"), j.get("family"), t.get("specular"),
+                                                     ",".join(sorted(t))))
+
+
 if __name__ == "__main__":
     a = sys.argv[1:]
     red = None
@@ -369,3 +422,7 @@ if __name__ == "__main__":
         cmd_check(a[1], a[2], a[3], a[4], red)
     elif a[0] == "floor":
         cmd_floor(a[1], a[2], a[3])
+    elif a[0] == "sdds":
+        cmd_sdds(a[1], a[2])
+    elif a[0] == "lodm":
+        cmd_lodm(a[1])

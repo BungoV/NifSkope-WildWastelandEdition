@@ -1,9 +1,9 @@
 ## HANDOFF text
 
-**Lane CARDFIX1 (LOD-D), 2026-09-24/25: PARTIAL. Steps 1-6 landed (G4 decided by the director, (a)); step 7 in progress.**
+**Lane CARDFIX1 (LOD-D), 2026-09-24/25: PARTIAL. Steps 1-6 landed (G4 decided by the director, (a)); step 7 built, its gate 8/10 with 2 bars reported for a director decision.**
 Branch `cardfix1-20260924` in `E:\Projects\NifskopeWWE-cardfix1` (from 71f96c1). Commits: step 1 19c0347,
 step 2 91ddd41, step 3 d8302c9, step 4 7896ad1, step 5 1303334 + 6c5f5f8, step 6 24e7835, step 6b 6430dff
-(the N8 default), step 6c = the G4 re-pin commit. Exe 309f3aa9a09897da12c94db644ff70f57f33dc7b. Report: `scratchpad/cardfix1_20260924/DONE.md`.
+(the N8 default), step 6c = the G4 re-pin commit, step 7 2672e43 + 1f0368d + 3e92051 + the gate/docs commit. Exe 45719ad43e509a46e6bf04a4dfd3f9d342e844d1. Report: `scratchpad/cardfix1_20260924/DONE.md`.
 
 * **Step 5 (IMPOSTORRING1), a horizon ring card set** (`WW_IMPOSTOR_RING=16`, 16 views x 1 row): baked, carried
   in the `.lodm` as `views`/`grid`, drawn by nearest azimuth; an old exe refuses it by name. **Finding for bungo:
@@ -30,6 +30,17 @@ step 2 91ddd41, step 3 d8302c9, step 4 7896ad1, step 5 1303334 + 6c5f5f8, step 6
   panel's Card frames row and cardsOnDisk ignore ring sets; the FO4CS reader for both ring sets and `lodm` 2.
   Not flown; nothing deployed.
 
+* **Step 7 (IMPOSTORPBRM1), cards from `.pbrm` models** (bungo's ruling: the card carries the `.pbrm`'s specular
+  weight, colour and IOR, and the TintMask is applied in the bake). A model whose every textured shape
+  resolves a `.pbrm` bakes family pbr: the bake photographs the tinted base (PBRM v6 law) and the RMAOS, and
+  writes a new `_oct_s` sheet (RGB = sqrt(F0'), A = weight; BC7) named by a new `.lodm` key `specular`. Gate
+  `tests/spells/impostor_pbrm.sh` 8/10: RED on (1) the colour rows, whose pre-registered bar became 0 once
+  the colour mips were fixed (correct code measures 0.32 / 0.35 levels), and (2) the non-aa arm, a row not in
+  the pre-registration that fails on partially covered texels through that arm's existing edge law.
+  Proposed: a colour floor of one 8-bit rounding (0.5 level); drop the non-aa row or judge full-coverage
+  texels only. The `_s` format is separable (commit 3e92051). FO4CS reader owed (contract in
+  LODGEN_LODM_FORMAT 3.4). native_lighting's 2 failures reproduce on the step-5 exe: baseline drift, not step 7.
+
 ## WW_CHANGES text
 
 **2026-09-24/25 -- lane CARDFIX1 (steps 5-6; branch cardfix1-20260924)**
@@ -49,6 +60,16 @@ step 2 91ddd41, step 3 d8302c9, step 4 7896ad1, step 5 1303334 + 6c5f5f8, step 6
   `WW_IMPOSTOR_ORBIT_SELECT`.
 - New gates: `tests/spells/impostor_ring.sh`, `tests/spells/impostor_wind.sh` (+ `impostor_wind.py`, and
   `impostor_wind_nif.py`, an independent rasteriser of the NIF's own wind weights).
+
+**2026-09-25 -- lane CARDFIX1 (step 7; branch cardfix1-20260924)**
+- **Impostor cards from `.pbrm` models.** The card bake resolves each shape's `.pbrm` and photographs its
+  real material: the base colour with the TintMask applied (Normalize / Add / Priority), roughness,
+  metallic and AO. A new `_oct_s` sheet carries the specular weight, colour and IOR as
+  RGB = sqrt(F0'), A = weight, and the `.lodm` names it under `specular`. Models without a `.pbrm` bake
+  exactly as before.
+- The retargeted colour's mips are now the material law on the map's own mips, so alpha-tested leaves keep
+  their coverage at distance.
+- The card preview can show the mesh with the same `.pbrm` material (`WW_IMPOSTOR_MESH_PBRM=1`).
 
 ## MISTAKES text
 
@@ -73,6 +94,23 @@ of card sets (preview, chunk card, card arrays, aggregate), not only the one the
 The mesh against itself rotated by half a ring step reaches only 0.5015, so no impostor could pass. Re-pinned
 to 0.90 x the measured ceiling. The red filter also dropped colour `EXCLUDED` lines, not only mesh ones; fixed.
 
+**2026-09-25 02:3x -- CARDFIX1 step 7: a relative bar on a floor that can reach 0.** The colour rows' bar
+was 1.25 x the identity card's error. Once the mips were fixed, the identity card equalled the legacy card,
+the floor was 0 and so was the bar, and correct code (0.32 levels, one re-rounding) went red. Rule: a
+relative bar needs an absolute minimum equal to the comparison's own quantisation.
+
+**2026-09-25 02:3x -- CARDFIX1 step 7: a non-aa row was given the aa arm's edge bar.** The row was added in
+the gate, not in the pre-registration. The non-aa arm un-premultiplies partially covered texels, so its edge
+share is lower on every channel, old and new. Rule: every arm's bar is measured on that arm.
+
+**2026-09-25 02:2x -- CARDFIX1 step 7: the preview registered a resource root before its files existed.**
+The file index is built at the next lookup, which ran with the folder empty, and every retargeted texture
+missed (the mesh drew magenta). Rule: write the files, then add the root.
+
+**2026-09-25 02:0x -- CARDFIX1 step 7: the colour source's mips were a box filter of level 0.** The
+box-filtered alpha lost coverage at the coarse mips (silhouette 370 vs 416). Rule: a derived texture's mips
+are the law applied to the inputs' own mips.
+
 ## Skill review
 
 - **Written:** `E:\Projects\Claude\.claude\skills\ww-preregister-bar-from-the-subject\SKILL.md`. It covers
@@ -86,6 +124,9 @@ to 0.90 x the measured ceiling. The red filter also dropped colour `EXCLUDED` li
   of a NIF's per-vertex data for card gates (a HORIZON2-style refuter).
 - More candidates: the pbr_shade_ab OLD arm needs the whole runtime (DLLs, qt.conf) -- an arm that cannot
   start reads as NO PICTURE on every case; previewing a loose card set needs a `textures\` tree beside the
-  .lodm; staging one step's hunks of a file that already holds the next step's (stage6_docs.py).
+  .lodm; staging one step's hunks of a file that already holds the next step's (stage6_docs.py). Step 7: a
+  preview of a loose card set needs its sheets under `<G>/textures/data/fo4cslod/cards/` (lowercase); a
+  resource root goes on after its files exist; `native_lighting.sh`'s fixtures exist only in the main tree
+  (a worktree run needs a copy that reads them there).
 - **Loaded skills, gaps found:** `nifskope-ww-worktree-build` section 6 already names the bake driver's fixed
   port 45917; `nifskope-ww-lodgen` does not yet mention `lodm` 2 or ring sets (director splice).

@@ -32,6 +32,8 @@ Data\FO4CSLOD\Cards\<formid8hex>_oct_d.DDS      legacy   BC3
                     <formid8hex>_oct_n.DDS               BC7 (DX10, DXGI 98)
                     <formid8hex>_oct_rmaos.DDS           BC3
                     <formid8hex>_oct_e.DDS               BC1
+                    <formid8hex>_oct_s.DDS               BC7 (DX10, DXGI 98), OPTIONAL: a .pbrm
+                                                         model's specular (2026-09-25; below)
                     <formid8hex>_oct.lodm                kind "card"
 ```
 
@@ -47,7 +49,8 @@ chunk drew as an opaque square.
 
 The bake's own intermediate is a set of PNGs
 (`<id>_oct_albedo.png`, `_oct_normal.png`, `_oct_gsaos.png` / `_oct_rmaos.png`,
-`_oct_g.png` / `_oct_e.png`) plus a `<id>.txt` sidecar (§5). Those are inputs to
+`_oct_g.png` / `_oct_e.png`, and on a `.pbrm` model with a non-default specular
+`_oct_s.png`) plus a `<id>.txt` sidecar (§5). Those are inputs to
 `lodgenCard` and to the array packer, not a shipped format.
 
 ### 1.2 Card arrays — one per (family, sheet size)
@@ -487,6 +490,7 @@ Formats and channel roles are the `.lodm` family contract
 | mask B (AO) | from the height neighbourhood — the share of neighbours nearer the camera by more than a step, eight directions, four rings — multiplied by the third texture's own B when a `.lodm` supplied one |
 | mask A (subsurface) | a material **label**. 1 where any shape of the model carries the engine's tree-animation flag, else 1 where the shape is alpha-tested and 0 where opaque. The sidecar says which rule ran (`mask tree` \| `mask alpha`) |
 | emissive RGB | legacy: `baseMap.rgb × baseMap.a × lodEmissiveColor` where the material is **not** alpha-tested, black where it is. pbr: the source `.lodm`'s `emissive` raw; an **empty** retarget binds black, which is how a set says it emits nothing. Written opaque, BC1. The **multiple** is not in the picture — it is `emissiveScale` in the `.lodm` |
+| `_s` RGB, A (pbr, optional) | a card whose shapes resolve `.pbrm` files (CARDFIX1 step 7, IMPOSTORPBRM1): RGB = sqrt(F0'), F0' = clamp(weight x sRGB-decoded specular colour x ((ior-1)/(ior+1))^2); A = the specular weight. Two extra channel-10 passes per view photograph per-shape sources the bake wrote on the CPU. Written only when a shape departs from the default specular; absent = F0 0.04, weight 1. BC7 at the aux size, dilated like the other aux sheets. Not carried into card arrays. `LODGEN_LODM_FORMAT.md` §3.4 |
 
 **Un-premultiplication and the coverage floor.** Every channel render is averaged
 over a black background on the way down to the frame, so a partly covered texel
@@ -572,6 +576,12 @@ gap <x> <y>                  the distance in texels between two neighbouring
                              silhouettes across a frame border, per axis; the
                              margin on each side of a frame is half of it
 emissive <scale> shapes <n>  the largest emissive multiple over the model's shapes
+pbrm <path> <route> <used|unused|refused> tree <0|1>
+                             one per shape that resolved a .pbrm (route direct |
+                             sibling | stem); `unused` on a mixed (legacy) model
+pbrmrefused <path> <why>     a .pbrm whose sources the bake could not evaluate
+                             (the card then falls back to legacy)
+specular _s|none             after the `class` line: whether `_oct_s.png` was written
 oct N frameW frameH halfW halfH cx cy cz depthSpan family base
 ring V frameW frameH ...     INSTEAD of the `oct` line on a horizon-ring bake
                              (§2.1): the same fields, V frames in one row. An

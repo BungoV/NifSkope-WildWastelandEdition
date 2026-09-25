@@ -1,0 +1,29 @@
+exe  /e/Projects/NifskopeWWE-cardfix1/release/NifSkope.exe (07a0bc7e)
+prev /e/Projects/NifskopeWWE-cardfix1/release/NifSkope.s5_eaa4b0b6.exe (eaa4b0b6)
+bake pbrm: oct 8 144 256 418.761 744.463 -42.3127 22.6625 775.201 3072 pbr 256 spec1; specular _s; 8 files
+bake pbrmna: oct 8 128 256 370.265 740.53 -42.3127 22.6625 775.201 3072 pbr 256 spec1; specular _s; 8 files
+bake ident: oct 8 144 256 418.761 744.463 -42.3127 22.6625 775.201 3072 pbr 256 spec1; specular none; 7 files
+bake legacy: oct 8 144 256 418.761 744.463 -42.3127 22.6625 775.201 3072 legacy 256 spec1; specular none; 7 files
+bake legacyna: oct 8 144 256 416.548 740.53 -42.3127 22.6625 775.201 3072 legacy 256 spec1; specular none; 7 files
+bake prev: oct 8 144 256 418.761 744.463 -42.3127 22.6625 775.201 3072 legacy 256 spec1; no specular line; 7 files
+law: {"MapleAtlas01": {"F0": [0.003247509872497694, 0.007930175153718489, 0.01504448414964358], "ao": 1.0, "colourGain": [0.7215686274509805, 0.5003921568627451, 0.2810595924644368], "ior": 1.33, "metallic": 0.8, "roughness": 0.35, "s_rgb": [0.05698692720701559, 0.08905153088924686, 0.12265595847590764], "specTint": [0.21586050011389926, 0.5271151257058131, 1.0], "specWeight": 0.75}, "MapleAtlas02_Tree
+floor: identity pbrm card vs the legacy card, median 2.00 levels p90 9.0 over 206887 texels; family pbr
+  ok    R aa arm: 15 rows, all ok (the rows are in the log)
+  FAIL  R non-aa arm: 6 FAIL of 7 rows
+        row MapleAtlas01 roughness FAIL: median 89.00 vs the law 89.25 (levels), 0.801 of 97183 texels within 2
+        row MapleAtlas01 metallic FAIL: median 204.00 vs the law 204.00 (levels), 0.792 of 97183 texels within 2
+        row MapleAtlas01 sqrtF0.R FAIL: median 15.00 vs the law 14.53 (levels), 0.888 of 97183 texels within 2
+        row MapleAtlas01 sqrtF0.G FAIL: median 23.00 vs the law 22.71 (levels), 0.848 of 97183 texels within 2
+        row MapleAtlas01 sqrtF0.B FAIL: median 31.00 vs the law 31.28 (levels), 0.852 of 97183 texels within 2
+        row MapleAtlas01 specWeight FAIL: median 191.00 vs the law 191.25 (levels), 0.791 of 97183 texels within 2
+  ok    red control --red E:/Projects/NifskopeWWE-cardfix1/scratchpad/cardfix1_20260924/pbrm/gate/legacy/bake: 1 row(s) FAIL (row MapleAtlas02_Tree colour FAIL: median |card - law(legacy card)| 4.38 levels, p90 8.9, )
+  ok    red control --red E:/Projects/NifskopeWWE-cardfix1/scratchpad/cardfix1_20260924/pbrm/gate/legacy/bake: 6 row(s) FAIL (row MapleAtlas01 sqrtF0.R FAIL: median 15.00 vs the law 20.52 (levels), 0.017 of 97004 tex)
+  ok    red control --red E:/Projects/NifskopeWWE-cardfix1/scratchpad/cardfix1_20260924/pbrm/gate/legacy/bake: 5 row(s) FAIL (row MapleAtlas01 sqrtF0.R FAIL: median 15.00 vs the law 31.28 (levels), 0.000 of 97004 tex)
+  ok    red control, the pre-step-7 exe: 2 row(s) FAIL (row family FAIL: the sidecar says family legacy (want pbr))
+compress pbrm: lodgen rc 1; Traceback (most recent call last):
+compress legacy: lodgen rc 1; Traceback (most recent call last):
+  FAIL  R3 the pbrm card .lodm has no specular key (Traceback (most recent call last):)
+  FAIL  R3 the legacy card .lodm: Traceback (most recent call last):
+R4 sdds: missing (_oct_s.png True, _oct_s.DDS False, _oct_n.DDS False)
+  FAIL  R4 the codec floor was not measured (normal R/G mean ''): no bar
+impostor_pbrm: 5/9 ok

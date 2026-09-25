@@ -32,7 +32,29 @@ our own format.
 | family | source | textures | third texture |
 |---|---|---|---|
 | **legacy** | the vanilla material: diffuse, normal, the `_s` map, smoothness, specular strength | `_d`, `_n`, `_gsaos`, `_g` | **GSAOS** = gloss, specular, AO, subsurface mask |
-| **pbr** | a source `.lodm` of family pbr | `_bc`, `_n`, `_rmaos`, `_e` | **RMAOS** = roughness, metallic, AO, subsurface mask |
+| **pbr** | a source `.lodm` of family pbr, or (cards, 2026-09-25) a `.pbrm` on every textured shape | `_bc`, `_n`, `_rmaos`, `_e`, and on a card optionally `_s` | **RMAOS** = roughness, metallic, AO, subsurface mask |
+
+**Cards from `.pbrm` models (IMPOSTORPBRM1, lane CARDFIX1 step 7).** The card bake resolves each
+textured shape's `.pbrm` through the viewport's one resolver (`io/pbrmresolve`: the direct name, the
+same-name sibling of the `.bgsm`, the diffuse stem), reading `WW_LODGEN_DATA_ROOT` first and then the
+resource stack. A shape with a source `.lodm` keeps it. Every textured shape pbr-sourced = family pbr;
+a MIXED model stays legacy, exactly as before, and its sidecar names the `.pbrm` shapes it did not use
+(`pbrm <path> <route> unused tree <0|1>`). The bake evaluates the `.pbrm` law in texture space on the
+CPU and retargets the shape's slots at the results; no shader changed.
+
+* **Carried:** base colour x the tint masks (TintMask applied in the bake, so `_bc` is the TINTED
+  colour: Normalize / Add / Priority as the viewport evaluates them), opacity, roughness, metallic,
+  AO, the emissive (colour x mask, `emissiveScale` = luminance / 100), the normal map, and the specular
+  weight, colour and IOR as `_s` (RGB sqrt(F0'), A weight; `LODGEN_LODM_FORMAT.md` §3.4).
+* **Dropped, by design:** coat, fuzz, transmission, thin film, subsurface colour -- no LOD reader for
+  any of them, sub-pixel at LOD distance, and each would be another sheet. A metal's specular colour as
+  its F82 edge tint (the weight is kept).
+* **Not applied:** a normal `strength` other than 1 (the map is photographed as it is).
+* **Not carried:** tint per REFERENCE. FO4 recolours a placed reference by material swap (XMSP -> MSWP,
+  with a colour remapping index); the card is baked per base model, so a swapped reference shows the base
+  material's card. Carrying it would need the mask on the card plus four colours per reference.
+* **FO4CS contract:** a reader of a pbr card binds `_s` when `textures.specular` is present and uses
+  F0 = (_s.rgb)^2, weight = _s.a; absent = F0 0.04, weight 1. Owed (FO4CS readers are built last).
 
 `_gsaos` spells its channels the way `_rmaos` does and sits in the same slots
 (gloss where roughness goes, specular where metallic goes), so one shader
@@ -45,6 +67,7 @@ two-channel `_s`.
 | `_n` | BC3; **BC7** on a card | normal X | normal Y | height | sway weight |
 | `_gsaos` / `_rmaos` | BC3 | gloss / roughness | specular / metallic | AO | subsurface mask |
 | `_g` / `_e` | BC1 | emissive colour | | | — |
+| `_s` (pbr card only, optional) | BC7 | sqrt(F0') R | sqrt(F0') G | sqrt(F0') B | specular weight |
 
 Normal Z is rebuilt as √(1 − x² − y²). Coverage is the cut-out and the
 alpha-test channel; it lives on the colour sheet and nowhere else, which is

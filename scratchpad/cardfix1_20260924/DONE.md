@@ -1,8 +1,7 @@
-PARTIAL -- lane CARDFIX1 (LOD-D), chain of seven steps. Steps 1-6 landed. Step 6 (sway A) went red on G4 only;
-the director decided (a) on 2026-09-25 (step 6c: G4's bar re-pinned to the sheet's measured codec floor),
-and the wind gate is now 28 / 0. Step 6b (the director's relay of bungo's 2026-09-25 ruling, the N8 grid as
-the bake default) landed after 6. NEXT / IN PROGRESS: step 7, IMPOSTORPBRM1 (brief_impostorpbrm1.md).
-
+PARTIAL -- lane CARDFIX1 (LOD-D), chain of seven steps. Steps 1-6 landed (6b, 6c after). Step 7
+(IMPOSTORPBRM1) is BUILT and committed (exe 45719ad4). Its gate is RED on 2 of 10: both are bars reported
+for the director, not code defects found (section 2, step 7, "Reds"). No re-pin was made in this step.
+NEXT: the director's ruling on the two bars. Then step 7 closes, with the gate re-run on the ruled bars.
 # 1. Skills loaded
 nifskope-ww-worktree-build, nifskope-ww-build-verify, nifskope-ww-lodgen, nifskope-ww-render-shot,
 ww-test-harness-add, search-lean (the common rules' list, loaded with the Skill tool before any work).
@@ -213,6 +212,43 @@ ww-test-harness-add, search-lean (the common rules' list, loaded with the Skill 
    specular colour dropped. Kept green as the brief lists: lodgen_octahedral, impostor_draw, and the
    native_lighting control.
 
+### Jobs 3-5 -- built (exe 45719ad4; commits 1f0368d bake, 3e92051 the `_s` format, separable)
+- The design as written above, with one addition found by the gate. The retargeted COLOUR source's mips
+  are the law evaluated on the map's OWN mip at each level (fix37), not a box filter of level 0. Run 1
+  on the box-filtered chain (exe 07a0bc7e) lost alpha coverage at the coarse mips a 1:1 render reads.
+  On the non-aa arm the silhouette's halfW was 370 against the legacy card's 416, and coverage was
+  -1.8 %. With fix37, halfW is 416.548 on both, and the identity card equals the legacy card (median
+  0.00 levels, p90 1.0). This is also the viewport's order: it samples the map first, then applies the law.
+- Pictures (job 5, untracked): pbrm/pics/pbrm_all.png, made by pbrm_pics.sh. They show "3D model" |
+  "Octahedral impostor" for roughness, metallic and the tinted colour, TreeMapleForest1 at az 30 el 5.
+  The mesh half uses the bake's own retarget (WW_IMPOSTOR_MESH_PBRM=1, LOD channel 10 / 12). The trunk
+  (MapleAtlas01) reads roughness 89 / metallic 204 on both halves, and the branches (MapleAtlas02_Tree)
+  179 / 51. The first picture run drew the mesh magenta: the preview registered its root before
+  writing the sources, and the index is built at the next lookup. fix38 reorders it; the log now says
+  "colour found".
+- The `_s` sheet and the `specular` key are SEPARABLE (director relays before a format ships): commit
+  3e92051 holds lodgen's `_s` DDS and the key. Without it, the bake still writes `_oct_s.png` and a
+  `specular _s` sidecar line, which nothing reads.
+- BC7 weights {1,1,32,1} apply to `_s` too (lodgenWriteDds' BC7 path is the `_n` sheet's), so B is
+  favoured. The measured error is still far under the codec floor (R4).
+
+### Reds (reported, not re-pinned; director decision needed)
+1. **R1 colour rows: the pre-registered bar is 0.** The bar was 1.25 x the identity floor. fix37 made
+   the identity card equal the legacy card, so the floor is median 0.00 and the bar is 0.00. Correct
+   code measures 0.32 (MapleAtlas01) and 0.35 (MapleAtlas02_Tree) levels median: the law applied to the
+   legacy card's 8-bit texel, re-rounded, against the card computed from the source at full precision.
+   The 13 constant rows all pass. The red still separates: `--red add` measures 4.14 on
+   MapleAtlas02_Tree. Proposed: bar = max(1.25 x floor, 0.5 level), the one 8-bit rounding the
+   comparison itself adds. This is the skill's check "a relative bar needs a floor that cannot be zero".
+2. **R2, the non-aa arm (WW_IMPOSTOR_AA=0): 14 / 15 rows fail.** This row was added in the gate and
+   was NOT in the design's pre-registration. The constant rows have the right median (roughness 89 vs
+   89.25), but only 0.79-0.89 of texels are within 2. The misses are all partially covered texels
+  , which the arm un-premultiplies by the matte's coverage. Fully covered class-0
+   texels are within 2 on 0.977 (an ad hoc probe during the step, not a gate row). The arm's PRE-EXISTING mask path (roughness, 0.802) fails exactly as
+   the new `_s` path does (weight, 0.791), so this is the arm's edge law, not step 7's. The colour
+   rows fail on the zero bar as in 1. Proposed: drop R2, or gate it on fully covered texels only. The
+   aa arm is the shipped default.
+
 # 3. Gates (numbers; red runs)
 
 ## Step 1 (exe 97716e49, the worktree's first build = the rung, before the comment rebuild)
@@ -341,6 +377,21 @@ Output: gates/cardres_test.out (pictures under cardres/, not committed).
   The synthetic Hero set for comparison: 1.281 / 4 against its own R/G floor 4.992 / 16.
 - G1-G3 unchanged from run 3 (same exe, same bake).
 
+## Step 7 (exe 45719ad4; gates/impostor_pbrm.run3.out + .run3.log)
+| gate | pre-registered | measured |
+|---|---|---|
+| impostor_pbrm.sh R1 (aa) | 15 rows ok | 13 ok; 2 colour rows FAIL on a bar of 0.00 (red 1) |
+| impostor_pbrm.sh R2 (non-aa) | not pre-registered | 14 FAIL of 15 (red 2) |
+| reds add / ior / decode / pre-step-7 exe | each >= 1 FAIL | 2 / 8 / 7 / 2 FAIL (the pre-step-7 exe: family legacy) |
+| R3 `.lodm` | pbrm: `specular` -> `_oct_s.DDS`; legacy: none | ok / ok (both `lodm` 2: the maple carries model sway) |
+| R4 BC7 `_s` | <= 1.25 x the set's `_n` R/G floor | worst channel 0.067 / p95 1 <= 2.776 / 10; 4-bit red 5.572 fails |
+| lodgen_octahedral.sh | PASS | RESULT PASS |
+| impostor_draw.sh | 33/1, row 5 known | 33 steps, 1 failure: row 5 KNOWN RED |
+| lodgen_impostor_cards.sh / lodgen_card_arrays.sh | PASS | PASS / PASS |
+| native_lighting.sh (control) | its own | 21 checks, 2 failures: gate (a) legacy_btr_top / _obl not byte-identical to baseline. The SAME 2 fail on the pre-step-7 exe eaa4b0b6, and the step-7 top picture is byte-identical to that exe's, so the drift predates step 7. Its fixtures are only in the main tree: run from a temporary copy that reads them there (read only) and writes into this worktree |
+Run 1 (exe 07a0bc7e): the box-filtered colour mips (fixed, fix37); compress made no chunk (the gate did not
+copy `_front`/`_side`; fixed). Run 2 (exe a4d0c877): the same as run 3 (fix38 is preview-only).
+
 # 4. Exe sha1 + commits
 - rung / first build: release/NifSkope.exe 97716e4988e493f7b0eab6952780ac18aca0a609 (21:43:55),
   kept as release/NifSkope.before_cardfix1.exe.
@@ -354,6 +405,11 @@ Output: gates/cardres_test.out (pictures under cardres/, not committed).
 - step 6 builds: 0eeade3a (23:59:42, first); 309f3aa9a09897da12c94db644ff70f57f33dc7b (2026-09-25 00:22:33,
   24,737,280 B; + the ring array file name, fix24) = the exe every step-6 number is from.
 
+- step 7 builds: 07a0bc7e (fix34-36), a4d0c877 (+ fix37, the colour mips),
+  45719ad43e509a46e6bf04a4dfd3f9d342e844d1 (+ fix38, preview root order; built 02:27 2026-09-25) = the exe
+  every step-7 number is from. Commits: 2672e43 (jobs 1-2), 1f0368d (bake), 3e92051 (`_s` format), then
+  the commit carrying this text (gate, docs, DONE).
+
 # 5. What the final bake needs
 - A card bake from THIS branch: the N8 grid by default (no RING), TILE 256, the crisp cut (steps 4, 6b).
 - Sway A is on for every model with a tree-animation shape (no switch; ruled). Those cards and their card
@@ -365,6 +421,10 @@ Output: gates/cardres_test.out (pictures under cardres/, not committed).
 - lodgenaggregate does not know ring sets or `lodm` 2 (not this lane's file): with the N8 default no ring
   set is made, and the aggregate composites the weight but writes lodm 1 with no `sway` key.
 - Previewing a loose card set needs a `textures\` tree beside the .lodm (the harness says so by name).
+
+- A `.pbrm` model's card is family pbr only when EVERY textured shape resolves a `.pbrm` (or a source
+  `.lodm`). The `.pbrm` files must be in the resource stack or WW_LODGEN_DATA_ROOT at bake time. The
+  `_s` sheet needs the FO4CS reader (contract in LODGEN_LODM_FORMAT 3.4; owed, FO4CS built last).
 
 # 6. Skill review
 - Written: E:\Projects\Claude\.claude\skills\ww-preregister-bar-from-the-subject\SKILL.md -- measure the

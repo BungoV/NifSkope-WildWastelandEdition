@@ -1,0 +1,35 @@
+exe  /e/Projects/NifskopeWWE-cardfix1/release/NifSkope.exe (a4d0c877)
+prev /e/Projects/NifskopeWWE-cardfix1/release/NifSkope.s5_eaa4b0b6.exe (eaa4b0b6)
+bake pbrm: oct 8 144 256 418.761 744.463 -42.3127 22.6625 775.201 3072 pbr 256 spec1; specular _s; 8 files
+bake pbrmna: oct 8 144 256 416.548 740.53 -42.3127 22.6625 775.201 3072 pbr 256 spec1; specular _s; 8 files
+bake ident: oct 8 144 256 418.761 744.463 -42.3127 22.6625 775.201 3072 pbr 256 spec1; specular none; 7 files
+bake legacy: oct 8 144 256 418.761 744.463 -42.3127 22.6625 775.201 3072 legacy 256 spec1; specular none; 7 files
+bake legacyna: oct 8 144 256 416.548 740.53 -42.3127 22.6625 775.201 3072 legacy 256 spec1; specular none; 7 files
+bake prev: oct 8 144 256 418.761 744.463 -42.3127 22.6625 775.201 3072 legacy 256 spec1; no specular line; 7 files
+law: {"MapleAtlas01": {"F0": [0.003247509872497694, 0.007930175153718489, 0.01504448414964358], "ao": 1.0, "colourGain": [0.7215686274509805, 0.5003921568627451, 0.2810595924644368], "ior": 1.33, "metallic": 0.8, "roughness": 0.35, "s_rgb": [0.05698692720701559, 0.08905153088924686, 0.12265595847590764], "specTint": [0.21586050011389926, 0.5271151257058131, 1.0], "specWeight": 0.75}, "MapleAtlas02_Tree
+floor: identity pbrm card vs the legacy card, median 0.00 levels p90 1.0 over 229618 texels; family pbr
+  FAIL  R aa arm: 2 FAIL of 15 rows
+        row MapleAtlas01 colour FAIL: median |card - law(legacy card)| 0.32 levels, p90 0.7, over 96860 texels (bar = identity floor 0.00 x 1.25 = 0.00); gain 0.722 0.500 0.281
+        row MapleAtlas02_Tree colour FAIL: median |card - law(legacy card)| 0.35 levels, p90 0.8, over 132758 texels (bar = identity floor 0.00 x 1.25 = 0.00); gain 0.792 0.669 0.542
+  FAIL  R non-aa arm: 14 FAIL of 15 rows
+        row MapleAtlas01 roughness FAIL: median 89.00 vs the law 89.25 (levels), 0.802 of 97363 texels within 2
+        row MapleAtlas01 metallic FAIL: median 204.00 vs the law 204.00 (levels), 0.792 of 97363 texels within 2
+        row MapleAtlas01 sqrtF0.R FAIL: median 15.00 vs the law 14.53 (levels), 0.885 of 97363 texels within 2
+        row MapleAtlas01 sqrtF0.G FAIL: median 23.00 vs the law 22.71 (levels), 0.848 of 97363 texels within 2
+        row MapleAtlas01 sqrtF0.B FAIL: median 31.00 vs the law 31.28 (levels), 0.850 of 97363 texels within 2
+        row MapleAtlas01 specWeight FAIL: median 191.00 vs the law 191.25 (levels), 0.791 of 97363 texels within 2
+        row MapleAtlas01 colour FAIL: median |card - law(legacy card)| 0.42 levels, p90 2.8, over 97363 texels (bar = identity floor 0.00 x 1.25 = 0.00); gain 0.722 0.500 0.281
+        row MapleAtlas02_Tree roughness FAIL: median 179.00 vs the law 179.00 (levels), 0.844 of 71881 texels within 2
+  ok    red control --red add: 2 row(s) FAIL (row MapleAtlas01 colour FAIL: median |card - law(legacy card)| 0.32 levels, p90 0.7, over )
+  ok    red control --red ior: 8 row(s) FAIL (row MapleAtlas01 sqrtF0.R FAIL: median 15.00 vs the law 20.52 (levels), 0.016 of 96860 tex)
+  ok    red control --red decode: 7 row(s) FAIL (row MapleAtlas01 sqrtF0.R FAIL: median 15.00 vs the law 31.28 (levels), 0.000 of 96860 tex)
+  ok    red control, the pre-step-7 exe: 2 row(s) FAIL (row family FAIL: the sidecar says family legacy (want pbr))
+compress pbrm: lodgen rc 0; lodm 2 family pbr specular Data\FO4CSLOD\Cards\000531b3_oct_s.DDS keys baseColor,emissive,normal,rmaos,specular
+compress legacy: lodgen rc 0; lodm 2 family legacy specular None keys diffuse,emissive,gsaos,normal
+  ok    R3 the pbrm card .lodm names specular Data\FO4CSLOD\Cards\000531b3_oct_s.DDS and the file exists
+  ok    R3 the legacy card .lodm has no specular key and no _s sheet (lodm 2 family legacy specular None keys diffuse,emissive,gsaos,normal)
+R4 sdds BC7 1152x2048, 229785 covered texels: R mean 0.018 p95 0.0; G mean 0.067 p95 1.0; B mean 0.000 p95 0.0; A mean 0.037 p95 0.0 | worst channel mean 0.067 p95 1.0 | normal R/G error mean 2.221 p95 8.0 | 4-bit _s: mean 5.572 p95 8.0
+R4 bar = codec floor of the set's _n R/G, measured: mean 2.221 p95 8.0, x 1.25 -> 2.776 / 10
+  ok    R4 BC7 _s: worst channel mean 0.067 p95 1.0 <= 2.776 / 10
+  ok    R4 red control: the 4-bit _s fails the same bar (mean 5.572 p95 8.0)
+impostor_pbrm: 8/10 ok
