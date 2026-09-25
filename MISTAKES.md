@@ -5,6 +5,52 @@ Written the moment a mistake is recognised, unprompted (CONSTITUTION rule 2).
 Format: date -- what was done -- what was true -- how it was found -- the rule.
 Newest at the top.
 
+## 2026-09-25 -- lane CARDFIX1 (lane text)
+
+**2026-09-25 00:2x -- CARDFIX1 step 6: G4's bar was copied from the synthetic input onto the real one.**
+The BC7 sway-error bar (mean <= 3.0, p95 <= 12) came from the synthetic law's error (1.34 / 4). The model's own
+wind weight has sharp edges and compresses worse: measured 3.573 / 13, while the same sheet's untouched normal
+R/G channels read 3.266 / 12. Correct code went red on a bar nobody had measured. Rule: a bar for a new input
+is measured on that input, and a lossy-codec bar prints the codec's error on an untouched channel of the same
+sheet beside it. Left red for a ruling, not re-pinned.
+
+**2026-09-25 00:0x -- CARDFIX1 step 6: G1a was pre-registered on a subject with no population for it.**
+"mask-0 texels carry A = 0" was registered on the elm, which is one shape, all tree-animated: 0 mask-0 texels.
+Its shape list had been probed and not read. Now a named n/a line; maple and pine carry the row.
+
+**2026-09-25 00:1x -- CARDFIX1 step 5 shipped a ring card array that could not be written.**
+The ring group key is `legacy|WxH|ring` and the array file name took the key's tail, `|` included, which
+Windows refuses. Step 5's gates never put a ring set through `--arrays`. Found by step 6's wind gate (G3);
+fixed by building the name from the group's fields. Rule: a new card-set KIND is gated through every consumer
+of card sets (preview, chunk card, card arrays, aggregate), not only the one the step targets.
+
+**2026-09-24 23:1x -- CARDFIX1 step 5: R4's absolute bar (IoU >= 0.60) was above the reference's own ceiling.**
+The mesh against itself rotated by half a ring step reaches only 0.5015, so no impostor could pass. Re-pinned
+to 0.90 x the measured ceiling. The red filter also dropped colour `EXCLUDED` lines, not only mesh ones; fixed.
+
+**2026-09-25 02:3x -- CARDFIX1 step 7: a relative bar on a floor that can reach 0.** The colour rows' bar
+was 1.25 x the identity card's error. Once the mips were fixed, the identity card equalled the legacy card,
+the floor was 0 and so was the bar, and correct code (0.32 levels, one re-rounding) went red. Rule: a
+relative bar needs an absolute minimum equal to the comparison's own quantisation.
+
+**2026-09-25 02:5x -- CARDFIX1 step 7: a per-material row judged texels where two materials meet.** A
+texel on the trunk-leaf boundary mixes both materials, which is correct, but the class split gave it to one of
+them. On the non-aa arm's small fully covered leaf population, those texels were 12 % and failed the row (run
+4). Rule: a per-material row judges texels away from any other material, and a population rule is checked for
+what it removes (the aa leaf fell from 132925 to 2570 texels).
+
+**2026-09-25 02:3x -- CARDFIX1 step 7: a non-aa row was given the aa arm's edge bar.** The row was added in
+the gate, not in the pre-registration. The non-aa arm un-premultiplies partially covered texels, so its edge
+share is lower on every channel, old and new. Rule: every arm's bar is measured on that arm.
+
+**2026-09-25 02:2x -- CARDFIX1 step 7: the preview registered a resource root before its files existed.**
+The file index is built at the next lookup, which ran with the folder empty, and every retargeted texture
+missed (the mesh drew magenta). Rule: write the files, then add the root.
+
+**2026-09-25 02:0x -- CARDFIX1 step 7: the colour source's mips were a box filter of level 0.** The
+box-filtered alpha lost coverage at the coarse mips (silhouette 370 vs 416). Rule: a derived texture's mips
+are the law applied to the inputs' own mips.
+
 ## 2026-09-25 -- lane GATEFIX1 (lane text)
 
 - **2026-09-24 GATEFIX1: a harness leg that had never run was counted as a guard.** The btofree ledger

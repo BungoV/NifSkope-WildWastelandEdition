@@ -1,5 +1,35 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Tree cards: depth fix, empty-card models fixed, crisp defaults, 8x8 default with a 16-view ring option, sway, PBR card specular sheet
+
+**2026-09-24/25 -- lane CARDFIX1 (steps 5-6; branch cardfix1-20260924)**
+- **Horizon ring card sets.** The impostor bake takes `WW_IMPOSTOR_RING=V`: V views evenly around the horizon
+  at elevation 0 in one V x 1 sheet. lodgen carries it as `views` / `grid` [V,1] (no `oct` key); the preview
+  and the in-game drawer pick the nearest azimuth frame. It is an option (`RING=16` on the bake driver); the
+  default stays the 8x8 grid (bungo 2026-09-25: "Yes, 8x8 is the default choice for a bake"). An exe from
+  before this refuses a ring set by name. (docs/LODGEN_LODM_FORMAT.md 3.2)
+- **A tree card sways with the tree's own wind weights (sway A).** A card baked from a model with a
+  tree-animation shape writes the model's own vertex-alpha weight x height into the normal sheet's alpha; the
+  trunk stays still. Other models keep the old synthetic sway exactly. Such cards and card arrays are `lodm` 2
+  and name `sway` "model" plus the base's leaf amplitude and frequency; older readers refuse them by name.
+  The bake sidecar says `sway model|synthetic`. (docs/LODGEN_LODM_FORMAT.md 3.3)
+- **Fixed:** a horizon ring card array could not be written (its file name contained `|`); it is now
+  `<ws>.LodgenCards.legacy.<W>x<H>.ring_d.DDS`.
+- The impostor preview harness takes `WW_IMPOSTOR_SWAY_AMP` / `WW_IMPOSTOR_SWAY_PHASE`, and
+  `WW_IMPOSTOR_ORBIT_SELECT`.
+- New gates: `tests/spells/impostor_ring.sh`, `tests/spells/impostor_wind.sh` (+ `impostor_wind.py`, and
+  `impostor_wind_nif.py`, an independent rasteriser of the NIF's own wind weights).
+
+**2026-09-25 -- lane CARDFIX1 (step 7; branch cardfix1-20260924)**
+- **Impostor cards from `.pbrm` models.** The card bake resolves each shape's `.pbrm` and photographs its
+  real material: the base colour with the TintMask applied (Normalize / Add / Priority), roughness,
+  metallic and AO. A new `_oct_s` sheet carries the specular weight, colour and IOR as
+  RGB = sqrt(F0'), A = weight, and the `.lodm` names it under `specular`. Models without a `.pbrm` bake
+  exactly as before.
+- The retargeted colour's mips are now the material law on the map's own mips, so alpha-tested leaves keep
+  their coverage at distance.
+- The card preview can show the mesh with the same `.pbrm` material (`WW_IMPOSTOR_MESH_PBRM=1`).
+
 ## LOD gates that were already red, now green (GATEFIX1)
 
 - **2026-09-25 GATEFIX1 (lane, Opus 5.5): three LOD gates green again, no code changed.**

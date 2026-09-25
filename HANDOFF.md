@@ -60,6 +60,47 @@ committed" or names an exe, this block overrides it.
 - Re-run the command-line bakes since 09-19 that used --data-root.
 
 ### Lane and director lines, 2026-09-24, newest first
+- 2026-09-25 03:41 CARDFIX1:
+  **Lane CARDFIX1 (LOD-D), 2026-09-24/25: DONE. Steps 1-7 landed (G4 and step 7's gate bars decided by the director, not bungo).**
+  Branch `cardfix1-20260924` in `E:\Projects\NifskopeWWE-cardfix1` (from 71f96c1). Commits: step 1 19c0347,
+  step 2 91ddd41, step 3 d8302c9, step 4 7896ad1, step 5 1303334 + 6c5f5f8, step 6 24e7835, step 6b 6430dff
+  (the N8 default), step 6c = the G4 re-pin commit, step 7 2672e43 + 1f0368d + 3e92051 + 8dc4e9e + 9d3fbe3 + the run-5 commit. Exe 45719ad43e509a46e6bf04a4dfd3f9d342e844d1. Report: `scratchpad/cardfix1_20260924/DONE.md`.
+
+  * **Step 5 (IMPOSTORRING1), a horizon ring card set** (`WW_IMPOSTOR_RING=16`, 16 views x 1 row): baked, carried
+    in the `.lodm` as `views`/`grid`, drawn by nearest azimuth; an old exe refuses it by name. **Finding for bungo:
+    the N8 grid beats the 16-view ring at EVERY elevation measured, the horizon included** (mean IoU at the
+    in-between azimuths, el 0: ring 0.4886 vs N8 0.8249). N8 already has 28 frames near the horizon. bungo RULED
+    2026-09-25: "Yes, 8x8 is the default choice for a bake". Step 6b made the bake driver default every run,
+    trees included, to the N8 grid (RING=0); the 16-view ring stays an option (RING=16), gated by
+    impostor_ring.sh (17 / 0, new row R7 reads the driver's own default; red = the step-5 driver).
+  * **Step 6 (IMPOSTORWIND1 job 3), sway A**: a tree card's normal alpha is now the model's OWN vertex-alpha wind
+    weight x linear height (0 on the trunk); a model with no tree-animation shape keeps the synthetic law byte
+    for byte. The `.lodm` says `lodm` 2 / `sway` "model" on the card family only; an old reader refuses it by name.
+    G1-G3 green. **G4 RED against its pre-registered bar**: BC7 error on the new sway channel (elm) is mean 3.573,
+    p95 13 against a bar of 3.0 / 12. The bar was copied from the smooth synthetic sway (1.34 / 4) without
+    measuring a real weight. The same sheet's normal R/G channels read 3.266 / 12, the same order.
+    **Director decision (a), 2026-09-25 (not bungo's ruling):** G4's bar is now the same sheet's measured codec
+    floor x 1.25 (4.082 / 15); the BC7 weights stay `{1,1,32,1}`, because (b) would move every card's normals
+    for a sway error of about 1.4 %. Red controls: the next frame (51.1) and the sway cut to 4 bits (6.702)
+    both fail. Wind gate 28 / 0 (gates/impostor_wind.run4.out).
+  * **Step 7 (IMPOSTORPBRM1)** in progress after step 6c; it is a lane's
+    worth of work (v6 `.pbrm` fixture, family pbr design, `_s` vs folded F0, TintMask law, per-reference tint).
+  * A step-5 defect found and fixed in step 6: a ring card ARRAY's file name contained `|` and could not be
+    written on Windows. No gate had put a ring set through `--arrays`; the wind gate now does.
+  * **Owed:** lodgenaggregate learning the ring and `lodm` 2 (refused by name today; not this lane's file); the
+    panel's Card frames row and cardsOnDisk ignore ring sets; the FO4CS reader for both ring sets and `lodm` 2.
+    Not flown; nothing deployed.
+
+  * **Step 7 (IMPOSTORPBRM1), cards from `.pbrm` models** (bungo's ruling: the card carries the `.pbrm`'s specular
+    weight, colour and IOR, and the TintMask is applied in the bake). A model whose every textured shape
+    resolves a `.pbrm` bakes family pbr: the bake photographs the tinted base (PBRM v6 law) and the RMAOS, and
+    writes a new `_oct_s` sheet (RGB = sqrt(F0'), A = weight; BC7) named by a new `.lodm` key `specular`. Gate
+    `tests/spells/impostor_pbrm.sh`: 14/14 on run 5. It uses the director's decisions: the colour bar is
+    max(1.25 x floor, 0.5 level), and both arms are judged on COVER=full,interior, meaning fully covered
+    texels away from another material. A texel where trunk and leaf meet mixes them, correctly. The wrong
+    tint rule, wrong IOR, wrong decode and the pre-step-7 exe each fail on both arms (tint: colour 4.10 /
+    4.19 levels against a 0.5 bar). The `_s` format is separable (commit 3e92051). FO4CS reader owed (contract in
+    LODGEN_LODM_FORMAT 3.4). native_lighting's 2 failures reproduce on the step-5 exe: baseline drift, not step 7 (left to the director).
 - 2026-09-25 01:22 GATEFIX1:
   **2026-09-25 01:0x GATEFIX1 (lane, Opus 5.5) -- DONE.** Branch gatefix1-20260924 (from b2f3073): 3e343a8,
   d0a8e55, 1d2c769. Not merged. Exe dca43d83 = b2f3073 unmodified; no source code changed.
