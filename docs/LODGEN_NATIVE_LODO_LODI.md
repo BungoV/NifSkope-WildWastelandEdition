@@ -1,9 +1,10 @@
-# `.lodo` v5 (v4..v5) + `.lodi` v7 (v3..v10) — the FO4CS-native far field
+# `.lodo` v6 (v4..v6) + `.lodi` v7 (v3..v10) — the FO4CS-native far field
 
 > **VERSIONS TODAY (re-read 2026-09-23 against `src/lodofile.h`,
-> `src/lodifile.h`, `src/nifcli.cpp`; `.lodo` re-read 2026-09-25, lane SEAM1).**
-> The library is `.lodo` **version 5**, and a version-4 file is read as a v5 file
-> with no colour stream (§3.7). A default bake writes `.lodi` **version 7** (§4.9, §4.10);
+> `src/lodifile.h`, `src/nifcli.cpp`; `.lodo` re-read 2026-09-25, lanes SEAM1 and SWAP1).**
+> The library is `.lodo` **version 6** (§3.8, material-swap variant base rows);
+> a version-5 file is read as a v6 file with no variant rows, and a version-4 file
+> as one with no colour stream either (§3.7). A default bake writes `.lodi` **version 7** (§4.9, §4.10);
 > `--scrappable` writes **version 9** (§4.12); a placement scaled above 7.99988
 > writes **version 10** (§4.14, lane BAKE2 2026-09-25); the ways back (`--lodi-v6`,
 > `--native-no-vertex-ao`, `--native-no-placement-ao`) step it down through 6, 5
@@ -313,9 +314,13 @@ layer, high 5 bits the card array set**, the set's rank in §4.13's order; 0xFFF
 `f32 boundRadius` (at scale 1, **never 0** — the reader refuses it), and **(v4)**
 `u32 fullTriangles` (the base's full-detail triangle count over the DISTINCT
 meshes its `rep` slots name, never 0, recounted by the reader) followed by
-`u16 crossPx16[2]` (what is left of v3's `crossPx16[4]`, written 0). The first
-four bytes are the ones v3 spent on `crossPx16[0..1]`, which is why a v3 file is
-refused by name (Deviation 14; `src/lodofile.h` `struct LodoBase`).
+**(v6)** `u32 materialSwap` — the MSWP form this row is a colourway of, 0 on a
+plain row (§3.8). On v4/v5 those four bytes were `u16 crossPx16[2]`, always
+written 0, and a v4/v5 file is read with `materialSwap` = 0 whatever they hold.
+The first four bytes of `fullTriangles` are the ones v3 spent on
+`crossPx16[0..1]`, which is why a v3 file is refused by name (Deviation 14;
+`src/lodofile.h` `struct LodoBase`). Base flags: bit0..2 as before, **bit3
+SWAPPED (v6)**, set exactly when `materialSwap` is not 0.
 
 **The two caps fight each other** at 1.843 vertices a triangle: a 16-triangle
 patch of an open strip can need more than 48 vertices. The rule is **whichever
@@ -679,6 +684,57 @@ to it. That is the standing order (FO4CS readers come last), not news.
 horizon stream (§4.11) -- was written by lane HORIZON3 on 2026-09-19 and removed
 whole by lane HORIZONOUT the same day. No exe ever wrote it, so this version
 number was free.
+
+### 3.8 Version 6: material-swap variant base rows (lane SWAP1, 2026-09-25)
+
+**Why.** bungo, 2026-09-25: *"these towers still look grey, compare the vanilla
+lod towers to these"*. Lane TOWER1 measured it: the CK bakes each placement's
+material swap into the vanilla LOD atlas, and lodgen ignored swaps. An `MSWP`
+record is a list of `BNAM` (original material) -> `SNAM` (replacement) rows,
+paths relative to `Materials\`, each with an optional `CNAM` colour-remap index.
+A `REFR`'s `XMSP` names one; a base's `MODS` names one; the reader takes the
+winning record of each.
+
+**The effective swap of a placement** (`nativeEffectiveSwap`): the REFR's `XMSP`,
+else the `MODS` of the REFR's `NAME` base (the SCOL itself, for a SCOL part),
+else -- for a SCOL part only -- the part base's own `MODS`.
+
+**The rows.** The library is keyed by (base, effective swap). For every pair the
+whole-worldspace census names (so the library stays a pure function of the
+census, and region/reuse bakes agree), when a swap row's `BNAM` names a material
+of one of the base's four `MNAM` models, the base gets a **variant row**: the same
+`formId`, `materialSwap` = that MSWP, flag SWAPPED, and `rep[k]` pointing at a
+**variant mesh** -- the same LOD NIF loaded with those materials replaced (the
+replacement BGSM and its textures resolve through the MO2 stack like any other).
+A pair whose rows change nothing (no LOD material named, or a row naming itself)
+gets no row and its placements keep the plain row. Two MSWPs giving the same
+substitution on the same model share one variant mesh (its key carries the
+lowest such MSWP). A variant row keeps the plain row's card layer (the card is
+unswapped), and occluder boxes use the plain model (the geometry is identical).
+
+**Sort law.** The base table is sorted by `(formId, materialSwap)` strictly, so a
+base's plain row comes first and its variants follow it. A placement's `.lodi`
+`baseId` is its variant row when one exists for (base, effective swap), else the
+plain row. The mesh table keeps its order (a variant mesh's string is the model
+path plus `|mswp:<8 hex>`, folded), so a worldspace with no swap is
+**byte-identical to v5 apart from the version word** at 0x04 -- outside
+`headerCrc32`, so `lodoIdentity` does not move and the `.lodi` is unchanged.
+
+**CNAM is counted, not applied.** The colour-remap index selects a row of the
+replacement material's grayscale-to-palette ramp; the census line reports how
+many swap rows that hit a LOD material carry one. Applying it is future work.
+
+**The census line** (`native-material-swaps:`) reports the placements read,
+those carrying a swap by clause, those sent to a variant row, those whose swap
+names no LOD material, TOWER1's own count (Fallout4.esm REFRs whose `XMSP`, else
+`NAME` base `MODS`, names a material of their slot-0 model: 21,064 on the
+Commonwealth), the census pairs, variant rows and meshes, load failures,
+missing swap records, CNAM rows, and the `.lodo` version.
+
+**The FO4CS reader is owed** (standing order: FO4CS readers come last). A v5
+reader refuses a v6 file by version. Once it accepts 6, a variant row draws like
+any base row (its `rep` names the swapped mesh); only a lookup BY formId must
+learn that one formId can now own several rows, the plain one first.
 
 
 ---
@@ -1805,7 +1861,7 @@ first time any mod is installed or removed after a bake.
 |---|---|---|---|
 | **hard: both files** | magic, **version (see the per-file rows)**, `vertexStride`, `instanceStride`, **`groupStride` (v7), a group id that is not dense per chunk, a `groupCount` that disagrees with the chunks' sum, a sky slice whose length disagrees with the same placement's AO slice, a version-3…6 file carrying version-7 header words,** `clusterMaxTris`, **`clusterLodStride`**, **`occluderStride`**, a set reserved bit, `ROW_ORDER_NORTH_UP` clear, `chunkCount` over cap, a zero `lodoIdentity` without `NOLIB`, **a `scale` of 0**, **a `drawKey` out of order or not the base's rank**, **a cluster whose `geometricError` exceeds its `parentError`**, **a `CONE_OPEN` cluster carrying a cone (or the reverse)**, **an occluder naming an instance outside its own cell**, any CRC mismatch | refuse, name the field | **refuse to load, and never hide the engine's own LOD tree** |
 | **hard: pairing** (between the two files) | the two files name different worldspaces; `pluginCorpusHash` or `objectCorpusHash` differs **between the `.lodo` and the `.lodi`**; `loadOrderHash` differs **between the two files** (§4 row 0x90); `lodoIdentity` does not name this `.lodo` (unless `NOLIB`) — `src/nativeemit.cpp`, every `pairing:` refusal | refuse, name the field | **refuse to load, and never hide the engine's own LOD tree** |
-| **hard: `.lodo`** (`lodoRead`) | versions **1, 2 and 3 refused by name**, anything but 4 or 5; the `LADDER` flag disagreeing with `ladderGroup` / `levelMax`, `levelMax` > 15; `cardCount` > `baseCount`; `cardCount` not equal to the base rows naming a card layer, or rows naming one while `cardCorpusHash` is 0 (CARDLINK1, §4.13); a base's `fullTriangles` that its own meshes do not recount to, or non-zero on a base with no mesh; mesh flags beyond ALPHA / SWAY / WATERTIGHT (plus VERTEX_COLOUR / VERTEX_ALPHA on v5); VERTEX_ALPHA without VERTEX_COLOUR; `colourVertexCount` and `offColours` not both zero or both set, a count over `vertexCount`, a flagged mesh whose vertices are not one contiguous range, or flagged rows that do not add up to the count (v5); reserved header bytes 0xCE…0xCF and 0xD4…0xFF (0xE0…0xFF on v5) | refuse, name the field | as above |
+| **hard: `.lodo`** (`lodoRead`) | versions **1, 2 and 3 refused by name**, anything but 4, 5 or 6; (v6) the base table not sorted by `(formId, materialSwap)` strictly, the SWAPPED flag disagreeing with `materialSwap`, a variant row with no plain row of its base before it (§3.8); the `LADDER` flag disagreeing with `ladderGroup` / `levelMax`, `levelMax` > 15; `cardCount` > `baseCount`; `cardCount` not equal to the base rows naming a card layer, or rows naming one while `cardCorpusHash` is 0 (CARDLINK1, §4.13); a base's `fullTriangles` that its own meshes do not recount to, or non-zero on a base with no mesh; mesh flags beyond ALPHA / SWAY / WATERTIGHT (plus VERTEX_COLOUR / VERTEX_ALPHA on v5); VERTEX_ALPHA without VERTEX_COLOUR; `colourVertexCount` and `offColours` not both zero or both set, a count over `vertexCount`, a flagged mesh whose vertices are not one contiguous range, or flagged rows that do not add up to the count (v5); reserved header bytes 0xCE…0xCF and 0xD4…0xFF (0xE0…0xFF on v5) | refuse, name the field | as above |
 | **hard: `.lodi`** (`lodiRead`) | versions **1 and 2 refused by name**, anything outside 3…10; a version whose defining table is missing (v5 without the placement-AO blob, v6 without the vertex-AO blob, v7/v9 with neither group table nor sky stream, v8 without the horizon stream); a file carrying a LATER version's header words (v3/v4 with placement-AO words, v3–v6 with v7 words at 0x100/0x110, v7/v9 with v8 words at 0x11C); reserved header bytes by version (from 0xB0 on v3, 0xD4 on v4, 0xF1…0xFF on v5, 0xF1…0xF3 on v6 and later, plus 0x11C…0x1FF on v7/v9, 0x130…0x1FF on v8); instance flag bit 6 below v9 (§4.1); instance flag bit 7 below v10 (§4.14); a stored cell outside the quantisation band (§4.1, `lodiCellAgrees`); the vertex-AO, sky and horizon offset tables and their slice lengths; the aggregate rows and their covered list (§4.6) | refuse, name the field | as above |
 | **soft** (against the user's LIVE data only) | `pluginCorpusHash`, `objectCorpusHash`, `modelCorpusHash`, `cardCorpusHash`, **`loadOrderHash`** recomputed from the running load order and disagreeing with the file — a mod installed, removed or reordered since the bake | refuse, name the field and the plugin | **load anyway, log it, raise a `stale=1` census row, keep rendering** |
 
@@ -1917,6 +1973,13 @@ repointing a base's MNAM does not change it.
 3. then, over the SCOL bases in **ascending formId** order,
    `(SCOL formId, each part's base formId, each placement's position, rotation
    and scale)`.
+4. **(SWAP1, v6) material swaps, each ONLY when set**, so a worldspace with no
+   swap keeps its pre-v6 hash: after a reference's flag byte, `'XMSP'` and its
+   XMSP form; after a base's slot paths, `'MODS'` and its MODS form; after a SCOL's
+   formId, `'MODS'` and the SCOL's MODS form; and last, over every distinct swap
+   form named (including part MODS reached through the third clause of §3.8), in
+   ascending order: `(form, row count or 0xFFFFFFFF when the record is missing,
+   then per row the folded BNAM, the folded SNAM and the CNAM or -1)`.
 
 Nothing else. Both files carry the same value at header 0x18.
 
