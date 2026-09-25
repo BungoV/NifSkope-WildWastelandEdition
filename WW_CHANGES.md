@@ -1,5 +1,16 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## WHITE1: the pale western band is vanilla's steep-face colour
+
+2026-09-25 WHITE1 (no code change): the pale band round the western mountain block in the whole-map top-down picture
+is vanilla's terrain LOD colour.
+- **The band.** Bethesda paints steep faces pale grey, ring +16.7 lum. The vanilla fill carries it into our VT sheets
+  at +10.7. It sits on the block's 3-4-cell outer wall (50-83 deg).
+- **The pale veins inside the block** are the same thing: 97.6% of pale texels are on slopes > 30 deg, and they are
+  not peaks.
+- **Evidence.** Fill-OFF sheets are flat there; the unlit render equals the file's texels; 0 painted LAND in the band.
+- **Tools.** scratchpad/white1_20260925 (cache.py, localise.py, addendum2.py, c1_land.py, pictures.py, renders.sh).
+
 ## 2026-09-25 -- EXTENT1: the whole-map terrain extent, measured (no code change)
 
 - The `.lodl` already spans the whole worldspace (-96..95, 36,864 LAND cells, header = `EsmWorld::cellBounds()`

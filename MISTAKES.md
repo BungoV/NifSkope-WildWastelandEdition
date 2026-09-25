@@ -5,6 +5,17 @@ Written the moment a mistake is recognised, unprompted (CONSTITUTION rule 2).
 Format: date -- what was done -- what was true -- how it was found -- the rule.
 Newest at the top.
 
+## 2026-09-25 -- lane WHITE1 (lane text)
+
+None from this lane. One note for the ledger:
+- **The frame height.** shot.sh asks for `WxH+59`. On exe 53f8f18c the window chrome is 35 rows, not 59, so the
+  PNG comes back H+24 tall: H=3224 gave 3248. EXTENT1's 3224-row picture therefore implies H=3200 was passed; that is
+  inferred, because its call was not recorded. The look-at and upp are the same, so the frame is 12 rows taller at top
+  and bottom.
+- **Why it matters.** A pixel-compare against EXTENT1's whole_top_after.png must crop rows 12..3235 first. Without the
+  crop, every pixel differs; with it, 0 px differ.
+- **Where it is recorded.** Section 7 of the ww-whole-map-picture skill.
+
 ## 2026-09-25 -- lane EXTENT1 (lane text)
 
 ### 2026-09-25 -- a picture's frame was read as the file's extent (EXTENT1)

@@ -60,6 +60,23 @@ committed" or names an exe, this block overrides it.
 - Re-run the command-line bakes since 09-19 that used --data-root.
 
 ### Lane and director lines, 2026-09-24, newest first
+- 2026-09-25 18:41 WHITE1:
+  WHITE1 (2026-09-25, branch white1-20260925 from d40017be): bungo asked "What's up with those white corners though?" about
+  whole_top_after.png. It is DATA, and there is no code change, build or re-bake.
+  - **What the band is.** The pale band is the steep outer wall of the western mountain block: land x -76.5..76.5,
+    y -76.5..77. Heights run from the -352 floor to 31,000-35,000 units within 3-4 cells, at 50-83 deg.
+  - **Where the colour comes from.** Bethesda's own dim-4 terrain LOD diffuse paints steep faces pale grey: ring
+    +16.7 lum over the core. `--vt-fill-vanilla` copies that colour: ours +10.7, corr 0.977 with vanilla. The
+    fill-OFF bake is flat there (0.0).
+  - **Candidates refuted.** 0 painted LAND in the ring (C3). The file's own texels carry the band (C4). The unlit
+    render equals the texels and the lit render is weaker (C5).
+  - **bungo's "are those mountain peaks?"** No, they are steep faces. 97.6% of pale texels in the western block sit on
+    slopes > 30 deg (non-pale 27.0%). 17.8% sit above the block's p80 height (non-pale 20.3%).
+  - **Owed.** A ruling only if he wants it gone: fade the fill's weight on steep faces, or darken vanilla's cliff
+    colour. Either one departs from vanilla on purpose.
+  - **Side finding.** On 47 seam samples at the wall's lip, LAND's two cells disagree with each other, and the .lodl
+    carries a neighbour's value there. It is one sample row and not the band.
+  Report: E:\Projects\NifskopeWWE-white1\scratchpad\white1_20260925\DONE.md; pictures in its pics/.
 - 2026-09-25 18:05 EXTENT1:
   **EXTENT1 (2026-09-25, branch extent1-20260925, no src change, no bake).** bungo asked whether the whole
   Commonwealth map is covered by the landscape heightmap. It is. The installed `Commonwealth.lodl` header covers
