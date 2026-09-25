@@ -60,6 +60,37 @@ committed" or names an exe, this block overrides it.
 - Re-run the command-line bakes since 09-19 that used --data-root.
 
 ### Lane and director lines, 2026-09-24, newest first
+- 2026-09-25 17:55 SEAM1:
+  **Status at 16:14.** Lane SEAM1 is BUILT and INSTALLED, NOT FLOWN.
+  - Exe b9fd029b. The whole-map VT (fill ON, cover and height on) went into mods\FO4CSLOD at 16:14. The old files are in scratchpad/seam1_20260925/replaced/, with sha1 before and after.
+  - Two more fixes landed:
+    - 44805f8f, grass tint: the white/"sandy" cover came from reading straight-alpha mips as premultiplied.
+    - 59a0dd33: the default-ground path had unknown `\G` escapes.
+  - Gate results are in the DONE.md table. Both former reds are attributed (coordinator order, 16:4x):
+    - W4 G1: 62e53a3b moves two selfAO bytes (228 -> 201) by FMA-contraction codegen, not by the AO law (fp-contract=off
+      bakes of both trees are byte-identical). Re-pinned on exactly those two bytes; the .lodo is not installed.
+    - North-east fill gate: the model now reads the LAND that wins in his load order (DLCCoast's dried grass); GREEN on
+      the installed bake, RED on the planted step, in all three regions.
+  - bungo's in-game look is owed.
+
+  The original three commits:
+
+  - **c21eb26a, the Sanctuary edge root.** A BTXT-less quadrant, or a NULL-LTEX layer, now paints the engine default land texture, not the chunk's dominant base.
+  - **a6e5e8de, `--vt-fill-vanilla`.** It is OFF by default. It blends unpainted ground toward Bethesda's dim-4 LOD colour, and the vanilla sheets are read loose at bake time only.
+  - **62e53a3b, `.lodo` v5.** This is the optional per-vertex colour stream, written only for shapes with a colour channel AND Vertex_Colors.
+
+  Every gate is pre-registered under `scratchpad/seam1_20260925/`. The resume list is at the end of DONE.md.
+
+  **Owed, by standing order and not news:** the FO4CS reader of `.lodo` v5, meaning the header words 0xD4/0xD8 and the colour blob.
+
+  **Boston look, measured, not fixed.**
+  - Vanilla object LOD carries no tint of any kind: no vertex colour, black emissive, and a near-grey atlas.
+  - The candidate is the engine's weather light: the sun colour plus the DALC ambient.
+
+  **Open defect, not fixed here: `src/lodtsheets.cpp` ~511-520.**
+  - The sheet cache names tiles by container stem, and the key does not include the container's identity.
+  - Two bakes of one worldspace in two folders therefore draw the first bake's tiles.
+  - Workaround: set WW_LODL_SHEET_CACHE to a fresh directory for each render.
 - 2026-09-25 08:34 BAKE1:
   BAKE1 (2026-09-25) DONE: the whole Commonwealth is baked from bungo's 47-plugin MO2 order into mods\FO4CSLOD.
   - Contents: 3,677 files, 15.96 GB. VT with height + cover, native objects, 79 tree cards (42 from BNS Trees),

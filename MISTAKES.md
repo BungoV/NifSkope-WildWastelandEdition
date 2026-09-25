@@ -5,6 +5,36 @@ Written the moment a mistake is recognised, unprompted (CONSTITUTION rule 2).
 Format: date -- what was done -- what was true -- how it was found -- the rule.
 Newest at the top.
 
+## 2026-09-25 -- lane SEAM1 (lane text)
+
+- **2026-09-25, SEAM1: the native sheet cache served another bake's tiles.**
+  - What happened: two control bakes of Commonwealth in two folders rendered the first bake's terrain, because the viewer's sheet cache is keyed by the container stem, not its identity.
+  - How it was caught: the control renders did not differ where the bakes did.
+  - The rule: every native render of a non-shipped bake sets WW_LODL_SHEET_CACHE to a fresh directory, and the code defect is logged for its own lane.
+- **2026-09-25, SEAM1: a `git add` list with one gitignored path added nothing.**
+  - What happened: the `&&`-chained commit silently did not run.
+  - The rule: read the `git add` result before committing, and keep generated TSVs out of the path list.
+- **2026-09-25, SEAM1: the first worktree build compiled none of the lane's edits.**
+  - What happened: the code was written while the game was up; the objects copied in afterwards were stamped newer than those sources, so make relinked the old code. Caught by the build log listing 0 of the changed files.
+  - The rule: after copying objects, touch every changed source and check the rebuilt-object list names each one (added to skill nifskope-ww-worktree-build §7).
+- **2026-09-25, SEAM1: "Landscape\Ground\..." in a C++ string named no file.**
+  - What happened: `\G` and `\C` are unknown escapes; g++ warns and drops the backslash, so the engine-default ground texture path (c21eb26a) opened nothing and painted the missing-texture grey. Caught from the Sanctuary picture, not from a gate.
+  - The rule: every Windows path literal uses `\` or `/`; `escape_scan.py` over the branch diff reads 0 before a build.
+- **2026-09-25, SEAM1: two gates were registered that could not fail.**
+  - What happened: the edge gate measures steps, so a flat wrong colour passed it; the first default-colour gate (grey with luminance > 150) read 0.0000 on the broken exe too, because missing-texture grey sits at 100-130. The first grass gate needed cover-255 texels, and the region peaks at 159.
+  - The rule: run each gate on the known-broken exe before trusting its GREEN (Measure, don't eyeball). Re-registered forms: DG1 broken 0.1635 RED / fixed 0.0064 GREEN; grass gate by the tint-1 vs tint-0 control.
+- **2026-09-25, SEAM1: grass tint read the smallest mip as premultiplied.**
+  - What happened: DDS mips are straight alpha; dividing by alpha clamped every alpha-cut grass to white, so ground cover paled the terrain toward sand. Fixed in 44805f8f (alpha-weighted mean).
+- **2026-09-25, SEAM1: a planted refuter that could shrink the step it tests.**
+  - What happened: PLANT added +40 lum to the unpainted cell beside a painted one. Beside DLCCoast's bright dried grass
+    the unpainted cell is ~25 darker, so +40 narrowed the step to ~13 and a step gate could not see it. The model also
+    painted every material-backed LTEX flat grey 0.5, which would have handed the DLCCoast border a made-up step.
+  - The rule: a planted step pushes AWAY from the neighbour it is measured against, and the run prints the sign; a
+    model layer it cannot read is refused or read, never given a stand-in colour.
+- **2026-09-25, SEAM1: a 13-gate red read as the code's when it was a half-copied fixture.**
+  - What happened: native_lighting gate (a) went red on 4 legacy frames. Only the sheetcache had been copied into the worktree, not `nativeview1_20260912/resroot` (1 of 45 files), so textures did not load; legacy_bto_top came out at 390,854 B, the exact size the spell's own comment gives for that failure.
+  - The rule: before attributing a worktree red, compare every fixture path the spell names against main by file count. Main's exe on the same fixtures is the control.
+
 ## 2026-09-25 -- lane BAKE1 (lane text)
 
 - 2026-09-25 BAKE1: a dry run of 23 chunks passed, then the whole-map bake died after 70 min in the instances

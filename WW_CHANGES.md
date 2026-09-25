@@ -1,5 +1,21 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## SEAM1: Sanctuary edge, vanilla LOD colour fill, grass tint, .lodo v5 colour stream
+
+2026-09-25, lane SEAM1 (BUILD PENDING, not built, not flown):
+
+- **Terrain colour law, §2.5 step 4.**
+  - Change: a LAND quadrant with no BTXT, and an ATXT layer naming LTEX 0, now paint the engine's default land texture (CommonwealthDefault01), as the engine does. They no longer paint the chunk's dominant base.
+  - Why: this removes the straight-edged dark block at Sanctuary and the flat grey chunks around the map (2019 of 2304 chunks were flat on the shipped bake).
+- **New `--vt-fill-vanilla` (panel row too, OFF by default).**
+  - What it does: ground that his LAND does not paint is blended, over a measured band, toward Bethesda's own LOD colour for those cells. The tone is matched on the overlap, and the gain is capped at 1.
+  - Where vanilla comes from: it is read from `--vanilla-lod-root` at bake time and never shipped.
+  - What it never touches: painted cells.
+- **`.lodo` version 5.**
+  - It carries the vertex colour of the few LOD models the game tints (the Amphitheater, the blasted maples, warehouse roofs, brick shells), and only where the game draws it.
+  - A library without colour is the v4 file with a new version number.
+  - The NifSkope viewer draws the colour. The in-game reader does not read v5 yet.
+
 ## Whole-Commonwealth bake from his MO2 load order into mods\FO4CSLOD
 
 Whole-map bake fixes (lane BAKE1, 2026-09-25):
