@@ -1,0 +1,6 @@
+Commonwealth REFRs of building-LOD bases: {'refs': 75831, 'refs_swap_none': 41425, 'refs_swap_refr': 33708, 'refs_swap_base': 698}
+measured: {'units': 5480, 'refs': 72035, 'missing': 3234, 'unmeasured': 562}
+REFR-weighted over 72035 placements (g2p share of full-detail area 0.41):
+  linear luminance Y       : LOD 0.1926 | full A 0.1981  B 0.1980  C 0.1983
+  saturation of mean colour: LOD 0.158  | full A 0.172   B 0.172   C 0.172
+  mean per-texel saturation: LOD 0.171  | full A 0.191   B 0.191   C 0.191

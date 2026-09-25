@@ -1,0 +1,7 @@
+CommonwealthClear Day: sun [220, 220, 220] x sunlightScale 4.50 -> linear [3.252 3.252 3.252]; DALC up-lighting colour [65, 85, 108]
+
+-- sun elevation 60 deg --
+roof (up)                  light rgb [0.97 0.98 1.  ] (S 0.02) | LOD S 0.17->0.15 neutral S 0.00->0.02 warm S 0.34->0.33
+wall facing sun (south)    light rgb [0.98 0.99 1.  ] (S 0.01) | LOD S 0.17->0.16 neutral S 0.00->0.01 warm S 0.34->0.34
+wall east                  light rgb [0.42 0.69 1.  ] (S 0.32) | LOD S 0.17->0.19 neutral S 0.00->0.33 warm S 0.34->0.05
+wall facing away (north)   light rgb [0.48 0.71 1.  ] (S 0.28) | LOD S 0.17->0.15 neutral S 0.00->0.29 warm S 0.34->0.07

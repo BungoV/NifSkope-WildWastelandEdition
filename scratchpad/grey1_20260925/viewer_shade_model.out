@@ -1,0 +1,10 @@
+albedo (sRGB)          S      | N.L=1.00 out S (Y) | N.L=0.70 out S (Y) | N.L=0.40 out S (Y) | N.L=0.00 out S (Y)
+LOD atlas mean         0.167  |      0.140 (0.89)    |      0.148 (0.76)    |      0.155 (0.62)    |      0.162 (0.41)    | 
+warm brick             0.341  |      0.298 (0.84)    |      0.311 (0.72)    |      0.323 (0.58)    |      0.335 (0.39)    | 
+tinted green (swap)    0.231  |      0.200 (0.83)    |      0.209 (0.71)    |      0.217 (0.58)    |      0.226 (0.39)    | 
+dark grey              0.080  |      0.077 (0.45)    |      0.078 (0.38)    |      0.079 (0.30)    |      0.080 (0.20)    | 
+tonemap log-slope at input 0.3 = 0.984  (out 0.335)
+tonemap log-slope at input 0.6 = 0.908  (out 0.649)
+tonemap log-slope at input 0.9 = 0.804  (out 0.921)
+tonemap log-slope at input 1.2 = 0.693  (out 1.143)
+tonemap log-slope at input 1.6 = 0.558  (out 1.369)
