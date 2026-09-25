@@ -75,3 +75,15 @@ strongly blue (DALC), so in game a neutral grey building is never grey on its sh
 -- and warm walls in shade swing toward neutral-blue. The viewer's Legacy light is pure white everywhere, so a
 neutral atlas stays exactly neutral. Assumption flagged: the DALC axis sense (src/esmweather.cpp calls it an
 assumption); flipped, the up/down faces swap colours but every axis is still blue, so the conclusion holds.
+
+### 3b. What he actually plays with (read 21:35, his live files, read only)
+- **FO4CS Physical Weathers** (FO4CSPhysicalWeathers.esp) overrides CommonwealthClear: sun (220,220,220), NAM0
+  ambient (55,60,68), DALC X+ (62,72,83) X- (48,60,71) Y+ (52,61,71) Y- (60,72,84) Z+ (27,33,40) Z- (65,85,108)
+  -- blue on every axis again. weather_light.py on it (weather_light_pw.out): roof light S 0.02, sunlit wall 0.01,
+  side-on wall 0.32, shaded wall 0.28. Same conclusion as vanilla.
+- **Side finding, not GREY1's to fix:** that override's IMSP (the eight imagespaces) holds 0x01002665..0x0100266C
+  and 0x010044DE. With the esp's masters (Fallout4, DLCCoast, DLCNukaWorld) index 01 = DLCCoast, where those IDs
+  are REFR/STAT records, not imagespaces (pw_imgs_probe.py; DLCNukaWorld has none of them either). So in game
+  the Clear weather's imagespace likely does not resolve. Refuter: xEdit shows the IMSP entries resolving to IMGS.
+- **FO4CS.ini [Post]:** bGradingEnabled 0, fGradeSaturation 1.0, fGradeVibrance 0.0; tone curve Physical with a
+  chroma fade only at 0.98..1.16 of white. In game no pass adds saturation either.

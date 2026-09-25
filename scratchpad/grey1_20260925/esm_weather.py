@@ -27,6 +27,13 @@ def walk(o, end, want):
             o += 24 + sz
 hdr = struct.unpack_from('<I', b, 4)[0]
 walk(24 + hdr, len(b), {b'WTHR', b'IMGS', b'CLMT', b'WRLD'})
+# optional override plugins (argv[2:]), loaded in order after the ESM; their records whose FormID top byte is 0
+# (Fallout4.esm as master 0) replace the ESM's -- enough for a weather mod that overrides WTHR/IMGS/CLMT
+for _p in sys.argv[2:]:
+    b = open(_p, 'rb').read()
+    hdr = struct.unpack_from('<I', b, 4)[0]
+    walk(24 + hdr, len(b), {b'WTHR', b'IMGS', b'CLMT'})
+    print('overrides loaded from', _p)
 def fields(d):
     o = 0; out = []; big = None
     while o < len(d):

@@ -8,10 +8,12 @@ Output: per face, the light's own colour (normalised), the lit colour's HSV satu
 viewer's (white headlight, white ambient: S unchanged before its tone map)."""
 import json, math
 import numpy as np
-W = json.load(open('weathers.json'))
+import sys
+W = json.load(open(sys.argv[1] if len(sys.argv) > 1 else 'weathers.json'))
 w = [x for x in W if x['edid'] == 'CommonwealthClear'][0]
 lin = lambda c: (np.asarray(c, float) / 255.0) ** 2.2
-sun = lin(w['sunlight']) * w['imgs']['HNAM'][6]
+SCALE = w['imgs']['HNAM'][6] if w['imgs'].get('HNAM') else 4.5   # unresolved IMGS -> vanilla Clear's 4.5, ASSUMED
+sun = lin(w['sunlight']) * SCALE
 D = [lin(a) for a in w['dalc']]          # X+ X- Y+ Y- Z+ Z-
 # ambient cube: the colour of axis k lights a normal pointing OPPOSITE the axis' travel direction (esmweather)
 axes = [np.array(v, float) for v in ((1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1))]
@@ -43,7 +45,7 @@ def S(rgb):
 albedos = {'LOD atlas mean (census2)': (0.54, 0.50, 0.45), 'neutral grey': (0.5, 0.5, 0.5), 'warm brick': (0.557, 0.460, 0.367)}
 faces = {'roof (up)': (0, 0, 1), 'wall facing sun (south)': (0, -1, 0), 'wall east': (1, 0, 0), 'wall facing away (north)': (0, 1, 0)}
 print('CommonwealthClear Day: sun %s x sunlightScale %.2f -> linear %s; DALC up-lighting colour %s' % (
-    w['sunlight'], w['imgs']['HNAM'][6], np.round(sun, 3), w['dalc'][5]))
+    w['sunlight'], SCALE, np.round(sun, 3), w['dalc'][5]))
 for el in (60, 40, 75):
     sd = np.array((0, -math.cos(math.radians(el)), math.sin(math.radians(el))))
     print('\n-- sun elevation %d deg --' % el)
