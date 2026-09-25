@@ -64,3 +64,22 @@
   bounds -73,-59 allow; covers every LAND cell) so the VT ladder reaches 32. Chunks stage launched 19:35.
 - G4 picks: Nuka-World is desert (1 full-grass cell of 4225): -28,2 / 2,0 / -8,6 (all-grass share 0.80-0.83).
   Far Harbor: 194 grass cells: -24,6 / -23,-4 / -22,2.
+
+## 19:55 (clock read) -- Far Harbor baked, verified, installed; ruling (a) code patched, not built
+- Far Harbor (DLC03FarHarbor, WRLD 03000B0F), region -32 -32 20 31, fill OFF (vanilla LOD archived only): chunks
+  19:35:01 -> 19:51:41 rc 0 (1000 s). VT 5 levels (2,4,8,16,32), 1164 tiles. .lodl header -73,-59..69,78.
+  578 files, 1,733,543,578 B.
+- G1: native-verify rc 0; census --self-floor FLOOR ok (doctored instanceCount caught); lodb/lodm/lodl rc 0;
+  --lodt-check all 5 VT levels rc 0. G2: 47 plugins. G3: 909 bases, 43 with a card (29 Fallout4.esm, 14 DLCCoast).
+- G4: VT.2 mask BC3. Mixed-grass cells -27,7 / -25,3 / -26,10 non-uniform (PASS); red run (no --cover) BC1 on all 3.
+  The first picks -24,6 and -22,2 read uniform 173: grass_fh.txt says both are all-grass base quadrants with 0 layers,
+  so full uniform cover is the plugin's own answer there, not a missing channel. -23,-4 non-uniform.
+- No-LAND placement cells: 0. Flat grey: LAND chunks 0 of 147. No-LAND VT cells 2029 of 2029 default grey (lum 129.8,
+  chroma 2): the sea round the island inside the aligned VT box; fill is off because vanilla LOD is not loose.
+- Installed mods/FO4CSLOD/FO4CSLOD/DLC03FarHarbor (was absent): 578 files, sha1-identical to scratch.
+- Pictures: pics/farharbor_topdown.png 3200x3124 on header -73,-59..69,78 (header corners 38 px L/R, 54 px T/B by
+  upp 187.5), content INSIDE, lum SD 35.2, 27,790 of 27,790 drawn. pics/farharbor_oblique_town.png (08 camera over
+  9 3 16 10, FarHarborExt): lum SD 28.3, 7,644 colours, church/docks/boats drawn; the 08 camera's diamond touches the
+  side edges, as the pre-war one does.
+- Ruling (a): v10 wide-scale bit patched into src (lodifile.h/.cpp, lodinative.cpp, nativeemit.cpp), the decoder,
+  fields spell, census check, cut.py and the docs (§4.14). Not built yet. Next: gate instruments, build, gates.
