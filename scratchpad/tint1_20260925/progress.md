@@ -8,3 +8,20 @@
 - BAKE2 is alive too (the brief said TINT1 was the only lane); its bake writes to its own scratchpad.
 - Before pictures done with the installed v4 pair, same camera as the after set will use (shot.sh, pics.sh):
   08_boston_oblique 11,416 drawn; amphitheater 1,437; maple 729; hue window (-16,21..-9,28) 3,388. All non-grey (sd 31-41).
+
+## 19:24 (clock read)
+- Spells on exe b72cef2a: lodgen_native 32 checks 0 failures PASS; lodgen_loadorder 24/0 PASS (its red rung leg fails 2 as it must);
+  lodgen_cardlink PASS 0 failures (RUNG + CARDS pointed at the cardlink1 worktree). lod_generation (GUI) waits for the bake.
+- Side probes: the building tint is NOT a palette material (0 of 2,848 placed-LOD .bgsm shapes; control: 282 of 6,616 vanilla
+  .bgsm have it) and NOT in the shipped stock .bto either (Boston dim-4 chunks, vanilla and BNS: no colour channel at all).
+
+## 19:41 (clock read)
+- New .lodo written 19:33 (v5, 6,933,236 B, 52,925 colour rows); instances stage (the ~29 min serial join) running.
+- G1 on the .lodo: strip(v5) is the v4 length; 27 bytes differ. Attributed:
+  - 0x04 version word (expected);
+  - 0xB8 loadOrderHash: CORE.esp changed size since BAKE1 (14,270 -> 14,766 B, file time 14:32) -- his plugin, read only;
+  - 0x28 cardCorpusHash: the 15 legacy _n card arrays differ in a few hundred bytes each (e.g. 201 of 1.97 MB);
+  - 2 vertex self-AO bytes (228 -> 201), WaterTowerConcord01_LOD / WaterTowerGeneric01_LOD;
+  - headerCrc32 + indexCrc32 follow from those.
+  Code or run noise? Small bake (cells -20,17..-17,20, holds the Concord tower) run twice on my exe and once on BAKE1's.
+- .lodb: an objects-only bake's record drops the VT line (levels, 12,276 tiles, cover) -- do NOT install the new .lodb.
