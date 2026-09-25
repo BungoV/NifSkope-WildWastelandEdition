@@ -134,3 +134,20 @@
   pics/prewar_halo_before_after.png. Picture luminance by distance from LAND, before -> after:
   d1 124.5 -> 95.8, d2 116.4 -> 94.8, d3 106.5 -> 96.9, d4 97.6 -> 96.3, >=6 94.0 -> 94.0 (halo_pics_prewar.txt).
 * Far Harbor fill ON bake started (farharbor_fill/).
+
+## 21:20 -- Far Harbor fill ON: gate green, installed; Nuka-World fill ON bake running
+
+* Bake farharbor_fill/ (exe 62412e83, region -32 -32 20 31): chunks 850 s, rc 0. Census: grid=3,1 (LODSettings
+  -73,-59), vanillaChunksMissing=0, vanillaSheetsRead=178, noLandCells=1389, texelsNoVanilla=0.
+* HALO GATE PASS (PHASE=3,1, halo_gate_fh_after.txt): d=1/2/3 ON-VAN -7.71/-7.83/-7.83 vs far -7.83; 0 of 532 hot
+  cells, max excess +2.9; far-field chroma 25.4.
+* Flat grey AFTER (grey_fh_after.txt): 0 of 3584 cells, 0 of 224 tiles (BEFORE 1517 / 77).
+* verify.sh: census 0 failures + FLOOR ok, lodb 47 plugins, lodm ok, lodl header -73 -59 69 78, lodt-check rc 0 on all
+  5 levels, 0 no-LAND placement cells, 0 flat-grey LAND chunks, 0 grey no-LAND VT cells, 578 files 1,733,544,111 bytes.
+* Against the install: 578 = 578 files, 6 differ (VT.2/4/8/16/32 + .lodb); .lodo/.lodi/.lodl identical. Those 6
+  replaced; old copies and sha1 in replaced/farharbor_fill_2117 (BACKUP MATCH, INSTALL MATCH).
+* Pictures, same camera (cam logs identical): pics/farharbor_topdown_after.png 3200x3124 INSIDE, lum SD 20.1,
+  27,790 of 27,790 drawn; side by side pics/farharbor_halo_before_after.png. Picture luminance by distance from LAND,
+  before -> after: d0 90.5 -> 91.9, d1..>=6 158.6 -> 95.9..96.2 (halo_pics_fh.txt). Reported to the coordinator.
+* Earlier Nuka-World failure (nukaworld_failed1/, 19:33): "scale 8.33 is outside 0 .. 7.99988" on a RockCliff03
+  LOD ref -- the case ruling (a) covers. Rebake with fill ON started 21:19 (nukaworld/).

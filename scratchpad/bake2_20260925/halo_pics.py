@@ -2,7 +2,7 @@
 central pixels, grouped by Chebyshev distance to LAND, in both renders; and a side-by-side crop of the LAND edge.
 Cell -> pixel from the camera census (ortho top-down): u = W/2 + (x - lookX)/upp - .5, v = H/2 - (y - lookY)/upp - .5.
 usage: python halo_pics.py <before.png> <after.png> <cam.log> <land dump> <x0> <y0> <x1> <y1> <crop.png> [margin cells]"""
-import sys, re, struct, numpy as np
+import sys, os, re, struct, numpy as np
 from PIL import Image, ImageDraw
 bp, ap, cam, dump = sys.argv[1:5]; x0, y0, x1, y1 = map(int, sys.argv[5:9]); out = sys.argv[9]
 M = int(sys.argv[10]) if len(sys.argv) > 10 else 5
@@ -40,6 +40,6 @@ cx0, cx1, cy0, cy1 = min(lxs) - M, max(lxs) + M + 1, min(lys) - M, max(lys) + M 
 u0, u1 = max(0, int(px(cx0 * 4096))), min(W, int(px(cx1 * 4096))); v0, v1 = max(0, int(py(cy1 * 4096))), min(H, int(py(cy0 * 4096)))
 cb = Image.open(bp).convert('RGB').crop((u0, v0, u1, v1)); ca = Image.open(ap).convert('RGB').crop((u0, v0, u1, v1))
 s = Image.new('RGB', (cb.width * 2 + 16, cb.height + 40), (43, 45, 49)); s.paste(cb, (0, 40)); s.paste(ca, (cb.width + 16, 40))
-dr = ImageDraw.Draw(s); dr.text((8, 12), 'BEFORE (fill blended from the placeholder grey)', fill=(230, 230, 230))
+dr = ImageDraw.Draw(s); dr.text((8, 12), os.environ.get('LABEL_B', 'BEFORE (fill blended from the placeholder grey)'), fill=(230, 230, 230))
 dr.text((cb.width + 24, 12), 'AFTER (no-LAND cells take vanilla colour whole)', fill=(230, 230, 230))
 s.save(out); print('crop cells %d..%d x %d..%d -> %s %dx%d' % (cx0, cx1 - 1, cy0, cy1 - 1, out, s.width, s.height))
