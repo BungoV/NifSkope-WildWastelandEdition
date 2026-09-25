@@ -11,8 +11,10 @@ BSD License - see nifskope.h
 #include "lodbfile.h"       // LodbPlugin / LodbResource: the record's v2 rows
 
 #include <QHash>
+#include <QPair>
 #include <QString>
 #include <QStringList>
+#include <QVector>
 #include <vector>
 
 class NifModel;
@@ -778,6 +780,25 @@ QString lodgenStageTimeLine( qint64 msLandscape, qint64 msMeshes, qint64 msTextu
 	const QString & librarySplit = QString() );
 struct NativeSrcShape;
 bool lodgenNativeLoadModel( void * user, const QString & model, std::vector<NativeSrcShape> * out );
+
+/*! MATERIAL SWAPS (lane SWAP1, 2026-09-25). One MSWP substitution as the
+ *  loader applies it: `first` is the ORIGINAL material and `second` the
+ *  REPLACEMENT, both as lodgenMaterialSwapKey() folds them. */
+typedef QVector<QPair<QString, QString>> LodgenMaterialSubst;
+
+/*! The one folding both sides of a swap are compared in: lower case,
+ *  backslashes, everything up to and including the LAST `materials\` cut, so
+ *  a NIF's `Materials\LOD\X.BGSM`, an MSWP row's `lod\x.bgsm` and a build
+ *  machine path `c:\...\materials\lod\x.bgsm` all come out `lod\x.bgsm`. */
+QString lodgenMaterialSwapKey( const QString & material );
+
+/*! lodgenNativeLoadModel with a material swap applied: every shape whose
+ *  material (folded) is some `first` is loaded as if the NIF named `second`
+ *  (as `Materials\<second>`), and its textures and constants are resolved from
+ *  that material through the resource stack, exactly as for a NIF's own. A
+ *  shape the swap does not name is loaded unchanged. */
+bool lodgenNativeLoadModelSwapped( void * user, const QString & model, const LodgenMaterialSubst & swap,
+	std::vector<NativeSrcShape> * out );
 
 /*! A model's world extent, for the impostor baker's size ladder.
  *
