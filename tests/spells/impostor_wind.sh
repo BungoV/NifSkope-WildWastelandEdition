@@ -159,8 +159,18 @@ compress elm "$EXE"
 say "arrays elm: lodgen rc $?; $( grep -a -m1 '^card arrays written:' "$WORK/elm/arrays.log" )"
 compress hero "$EXE"
 compress heroprev "$PREV"
-v=$( cd "$WORK/hero/cards" && for f in "${FID}"_oct.lodm "${FID}"_oct*.DDS; do cmp -s "$f" "$WORK/heroprev/cards/$f" && echo same || echo "DIFF:$f"; done | sort | uniq -c | tr '\n' ' ' )
-case "$v" in *DIFF*) bad "G2 Hero's compressed set vs the previous exe's: $v" ;; *) ok "G2 Hero's compressed .lodm and sheets are byte-identical to the previous exe's: $v" ;; esac
+# RE-PINNED (lane SEAM1, 2026-09-25): ONE attributed move. a6e5e8de (--vt-fill-vanilla, an edit of
+# lodgen.cpp) moved the BC7 encode of Hero's _oct_n sheet: 57 blocks, index bits only, from the SAME
+# PNG. The encoder's double-precision fit (src/lodgenbc7.h) is inlined into lodgen.cpp, and with that
+# TU built under fp-contract=off ea0ca708 and HEAD encode it identically (3782af27...), so the move
+# is FMA contraction, not a law change (prefix run: c21eb26a ab28c561, a6e5e8de 77fb8981;
+# scratchpad/seam1_20260925/bisect/bcrun.out). Accepted only as that exact sha1 pair; any other
+# byte, file or value is still a DIFF.
+BC7_ATTR="${FID}_oct_n.DDS ab28c5618ec25a8ba36f90444ad27c229299c5e6 77fb898165760d03c1c49fc2a26f98687e8963f6"
+attr() { set -- $BC7_ATTR; [ "$f" = "$1" ] && [ "$(sha1sum < "$WORK/heroprev/cards/$f" | cut -c1-40)" = "$2" ] \
+	&& [ "$(sha1sum < "$WORK/hero/cards/$f" | cut -c1-40)" = "$3" ]; }
+v=$( cd "$WORK/hero/cards" && for f in "${FID}"_oct.lodm "${FID}"_oct*.DDS; do cmp -s "$f" "$WORK/heroprev/cards/$f" && echo same || { attr && echo "attributed-a6e5e8de:$f" || echo "DIFF:$f"; }; done | sort | uniq -c | tr '\n' ' ' )
+case "$v" in *DIFF*) bad "G2 Hero's compressed set vs the previous exe's: $v" ;; *) ok "G2 Hero's compressed .lodm and sheets are byte-identical to the previous exe's (past the named a6e5e8de pair): $v" ;; esac
 
 v=$( "$PY" "$here/impostor_wind.py" lodm "$WORK/elm/cards/${FID}_oct.lodm" 2>&1 )
 case "$v" in "lodm 2 kind card sway model leafAmplitude "[0-9]*) ok "G3 the elm card is $v" ;; *) bad "G3 the elm card: $v" ;; esac

@@ -6749,6 +6749,12 @@ int usage()
 		  << "                                          alpha-tests it would punch holes in\n"
 		  << "                                          thin grass; and it costs 46,240 bytes\n"
 		  << "                                          a tile on every cover-FREE tile.\n"
+		  << "         [--vt-fill-vanilla]              blend the ground no LAND record paints\n"
+		  << "                                          toward Bethesda's own terrain LOD colour\n"
+		  << "                                          for those cells (read at bake time from\n"
+		  << "                                          the load order, never shipped), tone-\n"
+		  << "                                          matched where painted land meets it.\n"
+		  << "                                          OFF by default.\n"
 		  << "         [--vt-height]                    a fourth R16 height sheet per tile,\n"
 		  << "                                          OFF by default: uncompressed where the\n"
 		  << "                                          other three are BC1, so +133% on a tile,\n"
@@ -7721,6 +7727,7 @@ int nifskopeCliMain( const QStringList & args )
 				: ( v == QLatin1String( "zlib" ) ) ? 1 : -1;
 		}
 		else if ( t == QLatin1String( "--vt-height" ) ) lgVt.height = true;
+		else if ( t == QLatin1String( "--vt-fill-vanilla" ) ) lgVt.vanillaFill = true;
 		/* The OTHER arm of bungo's open question on where the ground-cover byte
 		 * lives (lodgen.h, LodgenVtOptions::coverInColor). Off is what ships. */
 		else if ( t == QLatin1String( "--vt-cover-in-color" ) ) lgVt.coverInColor = true;

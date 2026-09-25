@@ -1,0 +1,10 @@
+G1 fixture colourRows      0 | .lodo as written: 1 bytes differ ['0x4'], length +0 -> ok | .lodi 0 differ [] -> ok
+G1 boston  colourRows  34400 | .lodo stripped: 11 bytes differ ['0x4', '0xC', '0xD', '0xE', '0xF', '0xA8'], length +0 -> FAIL | .lodi 12 differ ['0xC', '0xD', '0xE', '0xF', '0x20', '0x21', '0x22', '0x23'] -> ok
+G1 sanc    colourRows  34400 | .lodo stripped: 11 bytes differ ['0x4', '0xC', '0xD', '0xE', '0xF', '0xA8'], length +0 -> FAIL | .lodi 12 differ ['0xC', '0xD', '0xE', '0xF', '0x20', '0x21', '0x22', '0x23'] -> ok
+G2 boston v5: 2982 meshes, 105 VERTEX_COLOUR, 6 VERTEX_ALPHA, colourRows 34400, source NIFs missing 0
+G2a named meshes flagged: [('amphitheater_lod_0.nif', True), ('treemapleblasted01_lod_1.nif', True), ('treemapleblasted02_lod_1.nif', True)]
+G2b non-white RGB: [('amphitheater_lod_0.nif', True), ('treemapleblasted01_lod_1.nif', True)]
+G2c flag <=> source (channel AND Vertex_Colors; Vertex_Alpha): 0 disagree []
+G2d decoded rows == source rows: 0 disagree []
+G1 RED
+G2 GREEN

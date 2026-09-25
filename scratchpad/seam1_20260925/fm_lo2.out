@@ -1,0 +1,38 @@
+== neLO2
+B model: LAND from the load-order winner, official LTEX/TXST, .bgsm diffuse
+painted set: load order (land_lo.pkl) 4086
+FILE GATE: at-line over (B step + line bar) 0 (worst file 32.61 vs B 22.07 at cells (12,36)|(12,35), bar 16.73; vanilla-bar-only reading 8 over); cell-mean max 27.44 vs F 21.75, B 20.76 -> RED
+B model: 11 material layers read from .bgsm; unresolved 0 []
+== neLO2P
+B model: LAND from the load-order winner, official LTEX/TXST, .bgsm diffuse
+painted set: load order (land_lo.pkl) 4086
+PLANTED -40 lum in A at unpainted border cell (12, 36) (outward from painted (13, 36))
+FILE GATE: at-line over (B step + line bar) 2 (worst file 72.61 vs B 22.07 at cells (12,36)|(12,35), bar 16.73; vanilla-bar-only reading 9 over); cell-mean max 66.84 vs F 21.75, B 20.76 -> RED
+B model: 0 material layers read from .bgsm; unresolved 0 []
+== nsancLO2
+B model: LAND from the load-order winner, official LTEX/TXST, .bgsm diffuse
+painted set: load order (land_lo.pkl) 4086
+FILE GATE: at-line over (B step + line bar) 0 (worst file 4.89 vs B 0.67 at cells (-18,29)|(-18,28), bar 10.15; vanilla-bar-only reading 0 over); cell-mean max 10.03 vs F 20.03, B 19.70 -> GREEN
+B model: 5 material layers read from .bgsm; unresolved 0 []
+== nsancLO2P
+B model: LAND from the load-order winner, official LTEX/TXST, .bgsm diffuse
+painted set: load order (land_lo.pkl) 4086
+PLANTED -40 lum in A at unpainted border cell (-11, 30) (outward from painted (-11, 29))
+FILE GATE: at-line over (B step + line bar) 1 (worst file 42.98 vs B 3.21 at cells (-11,30)|(-11,29), bar 10.15; vanilla-bar-only reading 1 over); cell-mean max 41.24 vs F 20.03, B 19.70 -> RED
+B model: 0 material layers read from .bgsm; unresolved 0 []
+== gseaLO2
+B model: LAND from the load-order winner, official LTEX/TXST, .bgsm diffuse
+painted set: load order (land_lo.pkl) 4086
+FILE GATE: at-line over (B step + line bar) 0 (worst file 5.52 vs B 3.22 at cells (-25,-41)|(-25,-42), bar 12.63; vanilla-bar-only reading 0 over); cell-mean max 8.96 vs F 17.82, B 19.41 -> GREEN
+B model: 0 material layers read from .bgsm; unresolved 0 []
+== gseaLO2P
+B model: LAND from the load-order winner, official LTEX/TXST, .bgsm diffuse
+painted set: load order (land_lo.pkl) 4086
+PLANTED +40 lum in A at unpainted border cell (-37, -26) (outward from painted (-36, -26))
+FILE GATE: at-line over (B step + line bar) 1 (worst file 39.60 vs B 9.80 at cells (-37,-26)|(-36,-26), bar 12.63; vanilla-bar-only reading 1 over); cell-mean max 41.00 vs F 17.82, B 19.41 -> RED
+B model: 0 material layers read from .bgsm; unresolved 0 []
+== neESM2
+B model: Fallout4.esm LAND only (old)
+painted set: Fallout4.esm only (w2_cells.pkl) 3955
+FILE GATE: at-line over (B step + line bar) 2 (worst file 29.42 vs B 9.81 at cells (11,30)|(12,30), bar 16.73; vanilla-bar-only reading 2 over); cell-mean max 25.38 vs F 15.43, B 15.78 -> RED
+16:36:38

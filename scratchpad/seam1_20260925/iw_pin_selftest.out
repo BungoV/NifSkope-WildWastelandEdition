@@ -1,0 +1,6 @@
+asis:
+  ok   G2 Hero's compressed .lodm and sheets are byte-identical to the previous exe's (past the named a6e5e8de pair):       1 attributed-a6e5e8de:000531b3_oct_n.DDS       4 same 
+oct_n:
+  FAIL G2 Hero's compressed set vs the previous exe's:       1 DIFF:000531b3_oct_n.DDS       4 same 
+oct_d:
+  FAIL G2 Hero's compressed set vs the previous exe's:       1 DIFF:000531b3_oct_d.DDS       1 attributed-a6e5e8de:000531b3_oct_n.DDS       3 same 

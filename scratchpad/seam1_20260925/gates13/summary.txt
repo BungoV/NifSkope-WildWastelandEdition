@@ -1,0 +1,31 @@
+exe cbdbffe7  16:41:09
+impostor_pbrm rc=0 101s |         row sheets FAIL: _rmaos ABSENT, _s ABSENT (a pbrm card writes both)
+impostor_ring rc=1 209s | FAIL
+impostor_wind rc=0 90s | FAIL
+lodgen_octahedral rc=0 43s | RESULT PASS
+lodgen_impostor_cards rc=0 3s | RESULT PASS
+lodgen_card_arrays rc=0 5s | RESULT PASS
+lodgen_cardlink rc=2 0s | 
+lodgen_incremental rc=0 48s | FAILURES: 0
+lodgen_native rc=0 481s | RESULT PASS
+lod_generation rc=0 8s | checks run: 128 (floor 121)
+lodgen_loadorder rc=0 17s | RESULT PASS
+pbr_shade_ab rc=1 226s | pbr_shade_ab SUMMARY 10 cases, 2 failures, 3 empty by the viewer (particles_fire,particles_smoke,particles_mis
+native_lighting rc=77 0s | 
+done 17:01:45
+impostor_ring RERUN rc=0 208s | 17 checks, 0 failures
+lodgen_cardlink RERUN rc=1 322s | RESULT FAIL (1 failures)
+rerun done 17:10:37
+impostor_wind CONTROL exe 828ac612 rc=0 | 28 checks, 0 failures
+impostor_wind RERUN rc=0 | 28 checks, 1 failures
+pbr_shade_ab RERUN rc=0 | pbr_shade_ab SUMMARY 10 cases, 0 failures, 3 empty by the viewer (particles_fire,particles_smoke,particles_mist) -> PASS
+native_lighting RERUN rc=1 | 21 checks, 4 failures, 0 skips
+rerun2 done 17:18:39
+native_lighting CONTROL exe 828ac612 rc=0 | 21 checks, 0 failures, 0 skips
+native_lighting RERUN resroot copied rc=0 | 21 checks, 0 failures, 0 skips
+impostor_wind exe bis_a6e5e8de rc=0 | 28 checks, 1 failures
+impostor_wind exe bis_62e53a3b rc=0 | 28 checks, 1 failures
+attr done 17:29:06
+impostor_wind REPIN rc=0 | 28 checks, 0 failures
+lodgen_cardlink REPIN rc=0 | RESULT PASS (0 failures)
+repin done 17:52:51

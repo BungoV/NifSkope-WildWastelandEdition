@@ -75,13 +75,34 @@ constexpr quint32 LODO_MAGIC = 0x4F444F4CU;
  *  base with 16 full-detail triangles -- a plausible number, silently wrong,
  *  and the worst kind of format error. v1 and v2 stay refused for their own
  *  reasons. */
-constexpr quint32 LODO_VERSION = 4;
-/* VERSION 5 (lane HORIZON3, 2026-09-19) WAS THE SUBDIVIDED LIBRARY, cut so
- * that the per-vertex horizon stream of `.lodi` v8 had a vertex where a far
- * shadow's edge fell. The baked-horizon route was dropped the same day (lane
- * HORIZONOUT, on bungo's word) and no exe ever wrote a version 5 file, so
- * neither the writer nor the reader carries one: this format's only version
- * is 4. The history paragraph is in docs/LODGEN_NATIVE_LODO_LODI.md. */
+/*! v5 (2026-09-25, lane SEAM1, W4 -- bungo's ruling): the OPTIONAL per-vertex
+ *  COLOUR STREAM. A mesh whose source carries BOTH a vertex-colour channel and
+ *  the shader's Vertex_Colors flag (SLSF2 bit 5), which is exactly when the
+ *  game applies it, gets LODO_MESH_VERTEX_COLOUR and one RGBA8 row per library
+ *  vertex of its range in a blob written LAST, after the strings; header 0xD4
+ *  counts the rows and 0xD8 is the blob's offset. RGB and A are stored as the
+ *  source has them, never premultiplied, and they stay two channels: RGB tints
+ *  the diffuse, A is an opacity factor ONLY where the source shader also sets
+ *  Vertex_Alpha (LODO_MESH_VERTEX_ALPHA) -- on every Fallout4.esm LOD shape the
+ *  census reached, it does not (28 of 28, scratchpad/seam1_20260925/w4_alpha.py).
+ *
+ *  A library with no coloured mesh writes 0 at 0xD4 and 0xD8 and no blob, so its
+ *  bytes are a v4 file's with the version word changed -- the version is outside
+ *  headerCrc32 (which starts at 0x10), so nothing else moves, not even the
+ *  `.lodi`'s lodoIdentity. For the same reason a v4 file is READ as a v5 file
+ *  without colour: v5 EXTENDS the layout into v4's reserved-zero pad and
+ *  reinterprets nothing, unlike v3 -> v4.
+ *
+ *  VERSION 5 was once the subdivided library (lane HORIZON3, 2026-09-19), dropped
+ *  the same day (lane HORIZONOUT); no exe ever wrote that file, so the number is
+ *  free. The history paragraph is in docs/LODGEN_NATIVE_LODO_LODI.md 3.7. */
+constexpr quint32 LODO_VERSION = 5;
+//! The one earlier version this reader accepts: v5's layout with no colour stream.
+constexpr quint32 LODO_VERSION_NO_COLOUR = 4;
+//! v5: a colour row, RGBA8 in byte order R, G, B, A.
+constexpr quint32 LODO_COLOUR_STRIDE = 4;
+//! v5: the in-memory colour of a vertex no coloured shape gave one -- white, opaque.
+constexpr quint32 LODO_COLOUR_NONE = 0xFFFFFFFFU;
 constexpr quint32 LODO_HEADER_BYTES = 256;
 constexpr quint32 LODO_PAYLOAD_ALIGN = 4096;
 
@@ -186,7 +207,13 @@ constexpr quint32 LODO_NO_PARENT = 0xFFFFFFFFU;
  *  `LodoMeshStats::boundarySource == 0` already made for the occluder-box fit.
  *  It is written so a consumer can pick shadow casters and occluders from the
  *  `.lodo` alone, without re-deriving the topology of every mesh at load. */
-enum LodoMeshFlags { LODO_MESH_ANY_ALPHA = 1, LODO_MESH_ANY_SWAY = 2, LODO_MESH_WATERTIGHT = 4 };
+/*! v5, mesh flags bit 3: the mesh has rows in the colour stream (a source
+ *  shape carried a colour channel AND Vertex_Colors). Bit 4: a coloured shape's
+ *  shader also sets Vertex_Alpha (SLSF1 bit 3), so the row's A is an opacity
+ *  factor; without it A is carried but a consumer does not apply it. Bit 4 is
+ *  never set without bit 3. */
+enum LodoMeshFlags { LODO_MESH_ANY_ALPHA = 1, LODO_MESH_ANY_SWAY = 2, LODO_MESH_WATERTIGHT = 4,
+	LODO_MESH_VERTEX_COLOUR = 8, LODO_MESH_VERTEX_ALPHA = 16 };
 enum LodoMaterialFlags { LODO_MAT_TWO_SIDED = 1, LODO_MAT_EMITS = 2, LODO_MAT_TREE = 4 };
 enum LodoBaseFlags { LODO_BASE_TREE = 1, LODO_BASE_ANY_ALPHA = 2, LODO_BASE_ANY_MESH = 4 };
 enum LodoFamily { LODO_FAMILY_LEGACY = 0, LODO_FAMILY_PBR = 1 };
@@ -350,6 +377,11 @@ struct LodoHeader
 	 *  bake links them (lane CARDLINK1, `lodgenNativeLinkCards`). The reader
 	 *  RECOUNTS it from the base rows and refuses a mismatch by name. */
 	quint32 cardCount = 0;
+	/*! v5, 0xD4: rows in the colour stream -- the vertex ranges of the meshes
+	 *  flagged LODO_MESH_VERTEX_COLOUR, in mesh-table order. 0 = no stream. */
+	quint32 colourVertexCount = 0;
+	//! v5, 0xD8: offset of the colour stream, the LAST payload; 0 exactly when the count is 0.
+	quint64 offColours = 0;
 	quint32 indexCrc32 = 0;
 	quint64 fileBytes = 0;
 	/*! v2, file offset 0xB8. FNV-1a 64 over the LOAD ORDER that produced this
@@ -382,6 +414,12 @@ struct LodoLibrary
 	std::vector<LodoMaterial> materials;
 	std::vector<quint8> localIndices;   //!< 48 per cluster
 	std::vector<LodoVertex> vertices;
+	/*! v5: one RGBA8 per library vertex, PARALLEL to `vertices` (R in the low
+	 *  byte), LODO_COLOUR_NONE where no coloured shape gave one. Only the rows of
+	 *  meshes flagged LODO_MESH_VERTEX_COLOUR reach the file; the reader fills
+	 *  the rest with LODO_COLOUR_NONE. Empty is accepted by the writer as "all
+	 *  none" for libraries built by hand. */
+	std::vector<quint32> colours;
 	QByteArray strings;                 //!< NUL-terminated UTF-8, offset 0 = ""
 
 	//! Append a string, returning its offset; "" is always offset 0.
@@ -432,6 +470,12 @@ struct LodoSrcShape
 	 *  was 255 everywhere from v1 to 2026-09-18 (bungo: "we needed vertex AO
 	 *  bakes for the lod objects"). A caller that has its own fills it. */
 	std::vector<quint8> ao;
+	/*! v5: 4 per vertex, R G B A as the source stores them. EMPTY unless the
+	 *  source shape has BOTH a vertex-colour channel and the Vertex_Colors shader
+	 *  flag -- the game's own condition for applying it (bungo, W4 ruling). */
+	std::vector<quint8> rgba;
+	//! v5: the source shader also sets Vertex_Alpha, so A is an opacity factor (meaningful with `rgba` only).
+	bool vertexAlpha = false;
 	std::vector<quint32> tris;  //!< 3 per triangle
 	quint16 materialId = 0;
 };

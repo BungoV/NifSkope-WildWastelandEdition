@@ -1,0 +1,11 @@
+16:33:03 game DOWN
+exe newer than the sources
+copies in step
+build rc=0
+fx rc=0
+boston rc=0 38 s FO4CSLOD 
+sanc rc=0 9 s FO4CSLOD 
+boston fpc_a6e5e8de body diffs 14742 ['clusters row 10752 byte 0: 106->107', 'clusters row 10755 byte 0: 168->160', 'clusters row 10758 byte 0: 113->114', 'clusters row 10761 byte 4: 239->238', 'clusters row 10764 byte 4: 239->238', 'clusters row 10767 byte 4: 154->152', 'clusters row 10770 byte 4: 222->223', 'clusters row 10770 byte 12: 144->143']
+sanc fpc_a6e5e8de body diffs 14742 ['clusters row 10752 byte 0: 106->107', 'clusters row 10755 byte 0: 168->160', 'clusters row 10758 byte 0: 113->114', 'clusters row 10761 byte 4: 239->238', 'clusters row 10764 byte 4: 239->238', 'clusters row 10767 byte 4: 154->152', 'clusters row 10770 byte 4: 222->223', 'clusters row 10770 byte 12: 144->143']
+ M scratchpad/seam1_20260925/fill_model.py
+16:34:48 done fpc_a6e5e8de

@@ -40,6 +40,7 @@ BSD License - see nifskope.h
 #include <QVector>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cmath>
 #include <functional>
@@ -1456,6 +1457,14 @@ struct LodSrcShape
 	bool matAlphaTest = false;
 	bool matAlphaBlend = false;
 	quint8 matAlphaRef = 255;
+	/* `.lodo` v5 (lane SEAM1, W4): whether `col` came from the source's own
+	 * colour channel (vertex descriptor bit 0x20) rather than the white fill, and
+	 * the two shader bits the game reads it by -- SLSF2 Vertex_Colors (bit 5) and
+	 * SLSF1 Vertex_Alpha (bit 3). Read-only facts: the `.BTO` bakes do not look
+	 * at them, so their bytes cannot move. */
+	bool colStream = false;
+	bool vcFlag = false;
+	bool vaFlag = false;
 };
 
 //! Compose a block's transform up the parent chain (local -> model space).
@@ -2168,6 +2177,7 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 			const bool hasColors = ( flags & 0x20 ) != 0;
 			const Transform xf = lodgenWorldTransform( &src, iShape );
 			LodSrcShape s;
+			s.colStream = hasColors;
 			QModelIndex iVD = src.getIndex( iShape, "Vertex Data" );
 			if ( !iVD.isValid() )
 				continue;
@@ -2210,6 +2220,8 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 				s.emitMult = src.get<float>( iShader, "Emissive Multiple" );
 				s.ownEmit = ( src.get<quint32>( iShader, "Shader Flags 1" )
 					& LOD_OWN_EMIT ) != 0;
+				s.vcFlag = ( src.get<quint32>( iShader, "Shader Flags 2" ) & ( 1U << 5 ) ) != 0;
+				s.vaFlag = ( src.get<quint32>( iShader, "Shader Flags 1" ) & ( 1U << 3 ) ) != 0;
 				QModelIndex iTexSet = src.getBlockIndex(
 					src.getLink( iShader, "Texture Set" ) );
 				if ( iTexSet.isValid() ) {
@@ -2407,6 +2419,20 @@ bool lodgenNativeLoadModel( void * user, const QString & model, std::vector<Nati
 		n.emitColor[0] = s.emitColor.red(); n.emitColor[1] = s.emitColor.green(); n.emitColor[2] = s.emitColor.blue();
 		n.emitMult = s.emitMult; n.ownEmit = s.ownEmit;
 		n.hasAlpha = s.hasAlpha; n.alphaThreshold = s.alphaThreshold;
+		/* `.lodo` v5: the colour goes in ONLY where the game applies it -- a
+		 * colour channel AND the Vertex_Colors flag (bungo's W4 ruling). RGB and A
+		 * as the source stores them; A's meaning rides in `vertexAlpha`. */
+		if ( s.colStream && s.vcFlag && s.col.size() == nv ) {
+			n.geom.rgba.resize( size_t( nv ) * 4 );
+			for ( int v = 0; v < nv; v++ ) {
+				const Color4 & c = s.col[v];
+				n.geom.rgba[size_t( v ) * 4 + 0] = quint8( qBound( 0, qRound( c.red() * 255.0f ), 255 ) );
+				n.geom.rgba[size_t( v ) * 4 + 1] = quint8( qBound( 0, qRound( c.green() * 255.0f ), 255 ) );
+				n.geom.rgba[size_t( v ) * 4 + 2] = quint8( qBound( 0, qRound( c.blue() * 255.0f ), 255 ) );
+				n.geom.rgba[size_t( v ) * 4 + 3] = quint8( qBound( 0, qRound( c.alpha() * 255.0f ), 255 ) );
+			}
+			n.geom.vertexAlpha = s.vaFlag;
+		}
 		out->push_back( std::move( n ) );
 	}
 	return !out->empty();
@@ -5894,13 +5920,11 @@ static const DDSTexture16 * lodgenCachedTexture( LodgenBakeCaches & c,
  *    exists precisely because the Fallout 4 archive filter drops every mesh at
  *    index time) -> the one shape's slot 0, or its .bgsm handed to
  *    lodgenLoadTexture, which already resolves a material to its first slot ->
- *    the texture's SMALLEST mip, which IS its average colour and is already
- *    computed by the loader.
+ *    the ALPHA-WEIGHTED mean of the first mip no longer than 1024.
  *
- *  Un-premultiplied: 39 of the 71 shipped grass meshes carry a NiAlphaProperty,
- *  so the smallest mip's RGB is a coverage-weighted average dragged toward the
- *  atlas's transparent gaps. Below alpha 0.05 there is nothing to divide by,
- *  the grass contributes NO tint, and it still contributes its density to D. */
+ *  39 of the 71 shipped grass meshes carry a NiAlphaProperty and their atlases
+ *  are mostly gap. Below a mean alpha of 0.05 the grass contributes NO tint,
+ *  and it still contributes its density to D. */
 static bool lodgenGrassTintResolve( const QString & model, const QString & dataRoot,
 	void * user, float * rgb )
 {
@@ -5958,11 +5982,34 @@ static bool lodgenGrassTintResolve( const QString & model, const QString & dataR
 		if ( !source.isEmpty() ) {
 			const DDSTexture16 * t = lodgenCachedTexture( c, dataRoot, source );
 			if ( t ) {
-				const FloatVector4 avg = t->getPixelT( 0.5f, 0.5f,
-					float( t->getMaxMipLevel() ) );
-				if ( avg[3] >= 0.05f ) {
+				/* ALPHA-WEIGHTED over a real mip, not the smallest mip divided
+				 * by its alpha (lane SEAM1, GRASSCOL). A DDS mip chain is
+				 * STRAIGHT alpha: every shipped grass atlas averages its RGB
+				 * over the transparent gaps unweighted, so rgb/a of the 1x1
+				 * mip is not the leaves' colour -- at mean alpha 0.07..0.30
+				 * it clamps to (1,1,1) on 9 of the 9 alpha-cut grasses under
+				 * Sanctuary and -24,-8, and the cover tint went WHITE (the
+				 * sandy wash bungo saw). sum(rgb*a)/sum(a) at the first mip no
+				 * longer than 1024 is within 2.5/255 of mip 0 on the measured
+				 * atlases (scratchpad grass_mipcheck.py). The 0.05 floor on the
+				 * MEAN alpha is unchanged. */
+				int m = 0;
+				while ( m < t->getMaxMipLevel()
+					&& qMax( t->getWidth() >> m, t->getHeight() >> m ) > 1024 )
+					m++;
+				const int mw = qMax( 1, t->getWidth() >> m ), mh = qMax( 1, t->getHeight() >> m );
+				double sum[4] = { 0.0, 0.0, 0.0, 0.0 };
+				for ( int y = 0; y < mh; y++ )
+					for ( int x = 0; x < mw; x++ ) {
+						const FloatVector4 px = FloatVector4::convertFloat16( t->getPixelN( x, y, m ) );
+						const double a = qBound( 0.0, double( px[3] ), 1.0 );
+						for ( int k = 0; k < 3; k++ )
+							sum[k] += double( px[k] ) * a;
+						sum[3] += a;
+					}
+				if ( sum[3] >= 0.05 * double( mw ) * double( mh ) ) {
 					for ( int k = 0; k < 3; k++ )
-						tint[k] = qBound( 0.0f, avg[k] / avg[3], 1.0f );
+						tint[k] = qBound( 0.0f, float( sum[k] / sum[3] ), 1.0f );
 					ok = true;
 				}
 			}
@@ -10077,18 +10124,13 @@ bool lodgenBakeTerrainTextures( const EsmWorld & world, int chunkX, int chunkY,
 		aCover.assign( 64, 0.0f );
 	}
 
-	// quadrants painted with no BTXT fall back to the chunk's dominant base
-	quint32 dominantBase = 0;
-	{
-		QMap<quint32, int> counts;
-		for ( const EsmLand & land : cells )
-			for ( int q = 0; q < 4; q++ )
-				if ( land.baseTex[q] )
-					counts[land.baseTex[q]]++;
-		int best = 0;
-		for ( auto it = counts.constBegin(); it != counts.constEnd(); ++it )
-			if ( it.value() > best ) { best = it.value(); dominantBase = it.key(); }
-	}
+	/* Quadrants painted with no BTXT, and NULL-LTEX layers, paint the ENGINE's
+	 * default land texture -- one set for the whole world (esmdata.h,
+	 * ESM_LTEX_ENGINE_DEFAULT; lane SEAM1). It used to be the chunk's dominant
+	 * base, which changes from chunk to chunk and drew the chunk grid into the
+	 * ground (Sanctuary, chunk (-20,20), 10-13 levels). The name stays so every
+	 * site below reads as it did. */
+	const quint32 dominantBase = ESM_LTEX_ENGINE_DEFAULT;
 
 	/* Per-quadrant ground-cover constants, resolved ONCE on the quadrant, not
 	 * once per texel. D, S and T are per-FORM scalars and the layer set is
@@ -10426,9 +10468,8 @@ bool lodgenBakeTerrainTextures( const EsmWorld & world, int chunkX, int chunkY,
 						nL++;
 						if ( a <= 0.001f )
 							continue;
-						// NULL-texture layers paint the engine's hardcoded
-						// default ground; the chunk's dominant base is the
-						// local stand-in
+						// NULL-texture layers paint the engine's default
+						// ground (ESM_LTEX_ENGINE_DEFAULT, lane SEAM1)
 						const FloatVector4 lc = sampleLtex(
 							layer.ltex ? layer.ltex : dominantBase );
 						c = c + ( lc - c ) * qBound( 0.0f, a, 1.0f );
@@ -11536,10 +11577,11 @@ struct LodgenVtMaskCache
  *  differences and the 2,048-unit AO march real data instead of the per-chunk
  *  path's edge clamp.
  *
- *  `dominantBase` is computed over the ENCLOSING dim-4 chunk's cells, not over
- *  the tile's own: it is what NULL-LTEX layers and baseTex == 0 texels paint,
- *  so a tile scoped to its own two cells would paint them a different colour
- *  and the assembled chunk sheet would stop matching a direct bake. */
+ *  `dominantBase` is what NULL-LTEX layers and baseTex == 0 texels paint. It
+ *  is the engine's world-wide default land texture (ESM_LTEX_ENGINE_DEFAULT,
+ *  lane SEAM1), so a tile, a chunk and the assembled sheet all agree on it
+ *  with no scope to get wrong. It was the enclosing dim-4 chunk's dominant
+ *  base until 2026-09-25. */
 /* `static` since 2026-09-11: it now takes a `LodgenRoadSet`, which lives in this
  * translation unit's anonymous namespace, and nothing outside this file has ever
  * called it. */
@@ -11622,24 +11664,10 @@ static bool lodgenBakeVtTile( const EsmWorld & world, const QString & dataRoot,
 			return &cells[ci];
 		}, inner );
 
-	quint32 dominantBase = 0;
-	{
-		const int bx = lodgenVtFloorTo( cellX0, 4 ), by = lodgenVtFloorTo( cellY0, 4 );
-		QMap<quint32, int> counts;
-		for ( int y = 0; y < 4; y++ ) {
-			for ( int x = 0; x < 4; x++ ) {
-				const EsmLand * l = landCache.get( world, bx + x, by + y );
-				if ( !l )
-					continue;
-				for ( int q = 0; q < 4; q++ )
-					if ( l->baseTex[q] )
-						counts[l->baseTex[q]]++;
-			}
-		}
-		int best = 0;
-		for ( auto it = counts.constBegin(); it != counts.constEnd(); ++it )
-			if ( it.value() > best ) { best = it.value(); dominantBase = it.key(); }
-	}
+	/* The engine's default land texture, world-wide (lane SEAM1; see the chunk
+	 * baker's twin of this line). No longer scoped to the enclosing dim-4 chunk:
+	 * the old per-chunk dominant base is what put the chunk grid into the VT. */
+	const quint32 dominantBase = ESM_LTEX_ENGINE_DEFAULT;
 
 	const bool doCover = coverOpts.cover;
 	const float coverFull = qMax( 1.0f, coverOpts.coverFull );
@@ -12612,6 +12640,523 @@ static qint64 lodgenVtMsnFromSheets( LodgenVtMsnSheets & sh, int cellX0, int cel
 	return fromSheet;
 }
 
+/*! THE VANILLA-COLOUR FILL (lane SEAM1, 2026-09-25; docs/LODGEN_TERRAIN_VT.md §2.6).
+ *
+ *  bungo, on the whole-map overview: "blend the colors of the terrain not
+ *  covered by the in-game terrain blended tiles, to the vanilla color on those
+ *  tiles, from the bakes bethesda did" -- and "it needs to be done in a proper
+ *  way". Measured on the Commonwealth: 2,023 of its 2,304 dim-4 chunks carry
+ *  LAND with no BTXT on any quadrant and no ATXT layer at all. The §2.5 law
+ *  paints those with the engine's one default texture; Bethesda's own LOD
+ *  diffuse for the same cells carries the region's colour. This stage takes
+ *  that colour, at bake time only (the vanilla sheets are READ, never written
+ *  or shipped), and blends it in on the UNPAINTED side only:
+ *
+ *    painted cell   a LAND quadrant with a BTXT or any ATXT layer (a NULL-LTEX
+ *                   layer counts: it is paint intent). w = 0, so his MO2 LAND
+ *                   layers win and every painted texel is byte-identical.
+ *    d              world distance from the texel to the nearest painted cell
+ *    w              smoothstep( 0, band, d )
+ *    colour         colour + ( T( V ) - colour ) * w
+ *    V              Bethesda's dim-4 LOD diffuse, a LOOSE file under --vanilla-lod-root,
+ *                   Textures\Terrain\<WS>\<WS>.4.<x>.<y>.dds, (x, y) the chunk's
+ *                   SW cell, 512 texels = 32 units a texel, row 0 = north;
+ *                   read with a Mitchell-Netravali bicubic (B = C = 1/3), which
+ *                   neither rings nor blurs a 2x upsample the way bilinear does
+ *    T              the tone + saturation match, FITTED once per bake on the
+ *                   OVERLAP (painted cells with an unpainted cell within
+ *                   LODGEN_VT_FILL_RING cells): luminance offset (gain capped
+ *                   at 1 -- the vanilla sheet carries baked relief light and
+ *                   a gain above 1 amplifies it past its own steps, measured),
+ *                   chroma scaled by the RMS ratio and shifted by the
+ *                   mean-chroma difference. Cell means on both sides, because
+ *                   one side is a point-sampled texture and the other a 32-unit
+ *                   LOD sheet: their per-texel spreads are different quantities.
+ *    band           MEASURED: ceil( p95 over the unpainted ring of
+ *                   |lum ours - lum T(V)| / bar ) cells, at least 1, at most 8;
+ *                   bar = p99 of vanilla's own adjacent cell-mean steps over
+ *                   the overlap and the ring.
+ *
+ *  The fit reads OUR side from a low-resolution bake of the overlap tiles
+ *  through lodgenBakeVtTile itself (16 texels a tile side), so the tone it
+ *  matches includes everything the composite does -- VCLR, the grass tint,
+ *  roads, the grade -- with no second copy of the law to drift.
+ *
+ *  Applied to every FINEST-level tile after its bake; the coarser levels, their
+ *  mips and the assembled chunk sheets inherit it through the existing box
+ *  filter. A missing vanilla tile leaves its texels alone (counted). */
+static const int LODGEN_VT_FILL_RING = 3;
+static const int LODGEN_VT_FILL_MAX_BAND = 8;
+
+struct LodgenVtFill
+{
+	bool on = false;
+	QString ws;
+	int x0 = 0, y0 = 0, w = 0, h = 0;           //!< painted bitmap, world cells
+	std::vector<quint8> painted;
+	float gain = 1.0f, offset = 0.0f, sat = 1.0f, cshift[3] = { 0, 0, 0 };
+	float bar = 0.0f, p95 = 0.0f, rawGain = 1.0f;
+	int bandCells = 1;
+	float band = 4096.0f;
+	qint64 overlapCells = 0, ringCells = 0, fitTiles = 0;
+	qint64 tilesTouched = 0, texelsFilled = 0, texelsNoVanilla = 0;
+	QSet<qint64> vanillaMissing;
+	QHash<qint64, std::vector<quint8>> sheets;
+	QList<qint64> sheetOrder;
+	qint64 vanillaLoaded = 0;
+
+	bool isPainted( int cx, int cy ) const
+	{
+		if ( cx < x0 || cy < y0 || cx >= x0 + w || cy >= y0 + h )
+			return false;
+		return painted[size_t( cy - y0 ) * w + ( cx - x0 )] != 0;
+	}
+
+	static void lumChroma( const float * c, float & l )
+	{
+		l = 0.2126f * c[0] + 0.7152f * c[1] + 0.0722f * c[2];
+	}
+
+	void tone( const float * v, float * out ) const
+	{
+		float l;
+		lumChroma( v, l );
+		const float lt = gain * l + offset;
+		for ( int k = 0; k < 3; k++ )
+			out[k] = qBound( 0.0f, lt + sat * ( v[k] - l ) + cshift[k], 1.0f );
+	}
+
+	static qint64 key( int cx, int cy )
+	{
+		return qint64( ( quint64( quint32( cx ) ) << 32 ) | quint64( quint32( cy ) ) );
+	}
+	static int keyX( qint64 k ) { return int( qint32( quint32( quint64( k ) >> 32 ) ) ); }
+	static int keyY( qint64 k ) { return int( qint32( quint32( quint64( k ) & 0xFFFFFFFFu ) ) ); }
+
+	/*! Bethesda's dim-4 sheet for the chunk whose SW cell is (chunkX, chunkY), as
+	 *  RGB8 at 512 x 512, row 0 = north; nullptr when there is none. READ AS A
+	 *  LOOSE FILE under --vanilla-lod-root (lodgenReadVanillaSheet), never
+	 *  through the resource stack, for the reason 2.5b gives: the stack would
+	 *  serve our own previously installed output and the fill would blend toward
+	 *  yesterday's copy of itself. A replacer at 1024 or 2048 is read at the mip
+	 *  that is 512 so the kernel's texel grid stays 32 units; any other size is
+	 *  refused and counted. An LRU of decoded sheets, 786 KB each. */
+	const std::vector<quint8> * sheet( int chunkX, int chunkY )
+	{
+		const qint64 k = key( chunkX, chunkY );
+		if ( vanillaMissing.contains( k ) )
+			return nullptr;
+		auto it = sheets.find( k );
+		if ( it != sheets.end() ) {
+			sheetOrder.removeOne( k );
+			sheetOrder.append( k );
+			return &it.value();
+		}
+		QByteArray bytes;
+		if ( !lodgenReadVanillaSheet( ws, 4, chunkX, chunkY, QString(), bytes ) ) {
+			vanillaMissing.insert( k );
+			return nullptr;
+		}
+		std::vector<quint8> rgb;
+		try {
+			DDSTexture16 t( reinterpret_cast<const unsigned char *>( bytes.constData() ), size_t( bytes.size() ) );
+			int mip = 0;
+			while ( ( t.getWidth() >> mip ) > 512 )
+				mip++;
+			if ( ( t.getWidth() >> mip ) != 512 || ( t.getHeight() >> mip ) != 512 || mip > t.getMaxMipLevel() ) {
+				vanillaMissing.insert( k );
+				return nullptr;
+			}
+			rgb.resize( size_t( 512 ) * 512 * 3 );
+			for ( int y = 0; y < 512; y++ )
+				for ( int x = 0; x < 512; x++ ) {
+					const FloatVector4 c = FloatVector4::convertFloat16( t.getPixelC( x, y, mip ) );
+					for ( int ch = 0; ch < 3; ch++ )
+						rgb[( size_t( y ) * 512 + x ) * 3 + ch] =
+							quint8( qBound( 0, int( c[ch] * 255.0f + 0.5f ), 255 ) );
+				}
+		} catch ( ... ) {
+			vanillaMissing.insert( k );
+			return nullptr;
+		}
+		vanillaLoaded++;
+		while ( sheetOrder.size() >= 256 )
+			sheets.remove( sheetOrder.takeFirst() );
+		sheetOrder.append( k );
+		return &sheets.insert( k, std::move( rgb ) ).value();
+	}
+
+	/*! Vanilla texels over the global texel rectangle [gx0, gx1] x [gy0, gy1]
+	 *  (global texel k covers world [32k, 32k + 32) on x; on y the index runs
+	 *  NORTH-down: texel row r covers world y [-(r + 1) * 32, -r * 32)), as RGB
+	 *  floats 0..1; `have` marks the texels whose sheet exists. */
+	void window( int gx0, int gy0, int gx1, int gy1, std::vector<float> & rgb, std::vector<quint8> & have )
+	{
+		const int ww = gx1 - gx0 + 1, wh = gy1 - gy0 + 1;
+		rgb.assign( size_t( ww ) * wh * 3, 0.0f );
+		have.assign( size_t( ww ) * wh, 0 );
+		auto floorDiv = []( int a, int b ) { return ( a >= 0 ) ? a / b : -( ( -a + b - 1 ) / b ); };
+		for ( int cr = floorDiv( gy0, 512 ); cr <= floorDiv( gy1, 512 ); cr++ ) {
+			for ( int cc = floorDiv( gx0, 512 ); cc <= floorDiv( gx1, 512 ); cc++ ) {
+				// chunk row cr spans world y [-(cr + 1) * 16384, -cr * 16384): SW cell y = -(cr + 1) * 4
+				const std::vector<quint8> * t = sheet( cc * 4, -( cr + 1 ) * 4 );
+				if ( !t )
+					continue;
+				const int tx0 = qMax( gx0, cc * 512 ), tx1 = qMin( gx1, cc * 512 + 511 );
+				const int ty0 = qMax( gy0, cr * 512 ), ty1 = qMin( gy1, cr * 512 + 511 );
+				for ( int gy = ty0; gy <= ty1; gy++ ) {
+					for ( int gx = tx0; gx <= tx1; gx++ ) {
+						const quint8 * c = t->data() + ( size_t( gy - cr * 512 ) * 512 + ( gx - cc * 512 ) ) * 3;
+						const size_t o = size_t( gy - gy0 ) * ww + ( gx - gx0 );
+						rgb[o * 3 + 0] = float( c[0] ) / 255.0f;
+						rgb[o * 3 + 1] = float( c[1] ) / 255.0f;
+						rgb[o * 3 + 2] = float( c[2] ) / 255.0f;
+						have[o] = 1;
+					}
+				}
+			}
+		}
+	}
+
+	static float mitchell( float t )
+	{
+		t = std::fabs( t );
+		const float b = 1.0f / 3.0f, c = 1.0f / 3.0f;
+		if ( t < 1.0f )
+			return ( ( 12 - 9 * b - 6 * c ) * t * t * t + ( -18 + 12 * b + 6 * c ) * t * t + ( 6 - 2 * b ) ) / 6.0f;
+		if ( t < 2.0f )
+			return ( ( -b - 6 * c ) * t * t * t + ( 6 * b + 30 * c ) * t * t + ( -12 * b - 48 * c ) * t
+				+ ( 8 * b + 24 * c ) ) / 6.0f;
+		return 0.0f;
+	}
+};
+
+//! The Mitchell tap at world (wx, wy) out of a window from LodgenVtFill::window.
+static bool lodgenVtFillSample( const std::vector<float> & rgb, const std::vector<quint8> & have,
+	int gx0, int gy0, int ww, int wh, float wx, float wy, float * out )
+{
+	// continuous texel coordinates, texel centres at k + 0.5
+	const float u = wx / 32.0f - 0.5f;
+	const float v = -wy / 32.0f - 0.5f;
+	const int iu = int( std::floor( u ) ), iv = int( std::floor( v ) );
+	float acc[3] = { 0, 0, 0 }, ws = 0.0f;
+	for ( int dv = -1; dv <= 2; dv++ ) {
+		const int gy = iv + dv;
+		if ( gy < gy0 || gy >= gy0 + wh )
+			continue;
+		const float wv = LodgenVtFill::mitchell( v - float( gy ) );
+		for ( int du = -1; du <= 2; du++ ) {
+			const int gx = iu + du;
+			if ( gx < gx0 || gx >= gx0 + ww )
+				continue;
+			const size_t o = size_t( gy - gy0 ) * ww + ( gx - gx0 );
+			if ( !have[o] )
+				continue;
+			const float wgt = LodgenVtFill::mitchell( u - float( gx ) ) * wv;
+			for ( int k = 0; k < 3; k++ )
+				acc[k] += rgb[o * 3 + k] * wgt;
+			ws += wgt;
+		}
+	}
+	if ( ws < 0.5f )     // under half the kernel had a tile: no vanilla colour here
+		return false;
+	for ( int k = 0; k < 3; k++ )
+		out[k] = qBound( 0.0f, acc[k] / ws, 1.0f );
+	return true;
+}
+
+/*! Build the painted bitmap over the bake's finest-level rectangle plus a margin
+ *  that covers the ring and the widest band. */
+static void lodgenVtFillPainted( const EsmWorld & world, LodgenVtFill & F, int west, int south,
+	int east, int north )
+{
+	const int m = LODGEN_VT_FILL_RING + LODGEN_VT_FILL_MAX_BAND + 1;
+	F.x0 = west - m;
+	F.y0 = south - m;
+	F.w = east - west + 1 + 2 * m;
+	F.h = north - south + 1 + 2 * m;
+	F.painted.assign( size_t( F.w ) * F.h, 0 );
+	for ( int cy = F.y0; cy < F.y0 + F.h; cy++ ) {
+		for ( int cx = F.x0; cx < F.x0 + F.w; cx++ ) {
+			EsmLand land;
+			if ( !world.land( cx, cy, land ) )
+				continue;
+			bool p = false;
+			for ( int q = 0; q < 4 && !p; q++ )
+				p = land.baseTex[q] != 0 || !land.layers[q].isEmpty();
+			F.painted[size_t( cy - F.y0 ) * F.w + ( cx - F.x0 )] = p ? 1 : 0;
+		}
+	}
+}
+
+/*! The painted cells within `r` cells (Chebyshev) of cell (cx, cy), as their
+ *  SW corners in world units; empty when (cx, cy) is itself painted (d = 0). */
+static void lodgenVtFillNeighbours( const LodgenVtFill & F, int cx, int cy, int r,
+	std::vector<std::pair<float, float>> & out )
+{
+	out.clear();
+	for ( int dy = -r; dy <= r; dy++ )
+		for ( int dx = -r; dx <= r; dx++ )
+			if ( F.isPainted( cx + dx, cy + dy ) )
+				out.emplace_back( float( cx + dx ) * 4096.0f, float( cy + dy ) * 4096.0f );
+}
+
+//! Distance, world units, from (wx, wy) to the nearest of those cells; 1e30 if none.
+static float lodgenVtFillDistance( const std::vector<std::pair<float, float>> & cells, float wx, float wy )
+{
+	float best = 1e30f;
+	for ( const auto & c : cells ) {
+		const float ex = qMax( qMax( c.first - wx, wx - ( c.first + 4096.0f ) ), 0.0f );
+		const float ey = qMax( qMax( c.second - wy, wy - ( c.second + 4096.0f ) ), 0.0f );
+		best = qMin( best, std::sqrt( ex * ex + ey * ey ) );
+	}
+	return best;
+}
+
+//! Apply the fill to one finest-level tile (colour plane only).
+static void lodgenVtFillTile( LodgenVtFill & F, int cellX0, int cellY0, int dim, int content, int border, LodgenVtStage & out )
+{
+	const int S = content + 2 * border;
+	const float upt = float( dim ) * 4096.0f / float( content );
+	const float tileW = float( cellX0 ) * 4096.0f;
+	const float tileN = float( cellY0 + dim ) * 4096.0f;
+	// fast outs: every cell the tile (with its border) reaches is painted
+	const int bc0 = int( std::floor( ( tileW - border * upt ) / 4096.0f ) );
+	const int bc1 = int( std::floor( ( tileW + ( content + border ) * upt - 1.0f ) / 4096.0f ) );
+	const int br0 = int( std::floor( ( tileN - ( content + border ) * upt ) / 4096.0f ) );
+	const int br1 = int( std::floor( ( tileN + border * upt - 1.0f ) / 4096.0f ) );
+	bool anyUnpainted = false;
+	for ( int cy = br0; cy <= br1 && !anyUnpainted; cy++ )
+		for ( int cx = bc0; cx <= bc1 && !anyUnpainted; cx++ )
+			anyUnpainted = !F.isPainted( cx, cy );
+	if ( !anyUnpainted )
+		return;
+	// the vanilla window: the tile's world rectangle plus the kernel's reach
+	const float wx0 = tileW - border * upt, wx1 = tileW + ( content + border ) * upt;
+	const float wyN = tileN + border * upt, wyS = tileN - ( content + border ) * upt;
+	const int gx0 = int( std::floor( wx0 / 32.0f ) ) - 2, gx1 = int( std::floor( wx1 / 32.0f ) ) + 2;
+	const int gy0 = int( std::floor( -wyN / 32.0f ) ) - 2, gy1 = int( std::floor( -wyS / 32.0f ) ) + 2;
+	std::vector<float> rgb;
+	std::vector<quint8> have;
+	F.window( gx0, gy0, gx1, gy1, rgb, have );
+	const int ww = gx1 - gx0 + 1, wh = gy1 - gy0 + 1;
+	const int r = F.bandCells + 1;
+	// per cell of the tile's reach: painted -> skipped; else its painted neighbours
+	const int ncx = bc1 - bc0 + 1, ncy = br1 - br0 + 1;
+	std::vector<std::vector<std::pair<float, float>>> nb( size_t( ncx ) * ncy );
+	std::vector<quint8> cellPainted( size_t( ncx ) * ncy );
+	for ( int cy = br0; cy <= br1; cy++ )
+		for ( int cx = bc0; cx <= bc1; cx++ ) {
+			const size_t o = size_t( cy - br0 ) * ncx + ( cx - bc0 );
+			cellPainted[o] = F.isPainted( cx, cy ) ? 1 : 0;
+			if ( !cellPainted[o] )
+				lodgenVtFillNeighbours( F, cx, cy, r, nb[o] );
+		}
+	bool touched = false;
+	for ( int j = 0; j < S; j++ ) {
+		const float wy = tileN - ( float( j ) - float( border ) + 0.5f ) * upt;
+		const int cy = qBound( br0, int( std::floor( wy / 4096.0f ) ), br1 );
+		for ( int i = 0; i < S; i++ ) {
+			const float wx = tileW + ( float( i ) - float( border ) + 0.5f ) * upt;
+			const int cx = qBound( bc0, int( std::floor( wx / 4096.0f ) ), bc1 );
+			const size_t co = size_t( cy - br0 ) * ncx + ( cx - bc0 );
+			if ( cellPainted[co] )
+				continue;       // his LAND paint: byte-identical
+			const float d = lodgenVtFillDistance( nb[co], wx, wy );
+			const float t = qBound( 0.0f, d / F.band, 1.0f );
+			const float wgt = t * t * ( 3.0f - 2.0f * t );
+			if ( wgt <= 0.0f )
+				continue;
+			float v[3], tv[3];
+			if ( !lodgenVtFillSample( rgb, have, gx0, gy0, ww, wh, wx, wy, v ) ) {
+				F.texelsNoVanilla++;
+				continue;
+			}
+			F.tone( v, tv );
+			quint32 & px = out.colour[size_t( j ) * S + i];
+			float c[3] = { float( ( px >> 16 ) & 0xFF ) / 255.0f, float( ( px >> 8 ) & 0xFF ) / 255.0f,
+				float( px & 0xFF ) / 255.0f };
+			for ( int k = 0; k < 3; k++ )
+				c[k] = c[k] + ( tv[k] - c[k] ) * wgt;
+			px = ( px & 0xFF000000U )
+				| ( quint32( qBound( 0, int( c[0] * 255.0f + 0.5f ), 255 ) ) << 16 )
+				| ( quint32( qBound( 0, int( c[1] * 255.0f + 0.5f ), 255 ) ) << 8 )
+				| quint32( qBound( 0, int( c[2] * 255.0f + 0.5f ), 255 ) );
+			F.texelsFilled++;
+			touched = true;
+		}
+	}
+	if ( touched )
+		F.tilesTouched++;
+}
+
+static float lodgenVtFillPercentile( std::vector<float> v, float p )
+{
+	if ( v.empty() )
+		return 0.0f;
+	std::sort( v.begin(), v.end() );
+	// numpy's default (linear) percentile, so the offline model and this agree
+	const double pos = double( p ) / 100.0 * double( v.size() - 1 );
+	const size_t lo = size_t( std::floor( pos ) ), hi = qMin( lo + 1, v.size() - 1 );
+	return float( v[lo] + ( v[hi] - v[lo] ) * ( pos - double( lo ) ) );
+}
+
+/*! THE FIT: our cell means from a 16-texel bake of every finest tile that holds
+ *  an overlap or ring cell, vanilla's from the mean of its 128 x 128 texels a
+ *  cell. Sets gain/offset/sat/cshift, bar, p95 and the band. */
+template <typename BakeFn>
+static void lodgenVtFillFit( LodgenVtFill & F, int west, int south, int east, int north, int dim, BakeFn bakeSmall )
+{
+	const int R = LODGEN_VT_FILL_RING;
+	auto nearOther = [&]( int cx, int cy, bool wantPainted ) {
+		for ( int dy = -R; dy <= R; dy++ )
+			for ( int dx = -R; dx <= R; dx++ )
+				if ( F.isPainted( cx + dx, cy + dy ) == wantPainted )
+					return true;
+		return false;
+	};
+	// 0 none, 1 overlap (painted, unpainted near), 2 ring (unpainted, painted near)
+	QHash<qint64, int> role;
+	for ( int cy = south; cy <= north; cy++ )
+		for ( int cx = west; cx <= east; cx++ ) {
+			const bool p = F.isPainted( cx, cy );
+			if ( nearOther( cx, cy, !p ) )
+				role.insert( LodgenVtFill::key( cx, cy ), p ? 1 : 2 );
+		}
+	QHash<qint64, std::array<float, 3>> ours, van;
+	// OUR side: bake each finest tile holding a role cell once, at 16 texels
+	QSet<qint64> tilesDone;
+	const int C = 16, Bd = 4, S = C + 2 * Bd, perCell = C / dim;
+	for ( auto it = role.constBegin(); it != role.constEnd(); ++it ) {
+		const int cx = LodgenVtFill::keyX( it.key() ), cy = LodgenVtFill::keyY( it.key() );
+		// the driver's own tile grid: west-anchored columns, NORTH-anchored rows
+		const int tx = lodgenVtFloorTo( cx - west, dim ) + west;
+		const int ty = north + 1 - dim - lodgenVtFloorTo( north - cy, dim );
+		if ( tilesDone.contains( LodgenVtFill::key( tx, ty ) ) )
+			continue;
+		tilesDone.insert( LodgenVtFill::key( tx, ty ) );
+		LodgenVtStage st;
+		if ( !bakeSmall( tx, ty, dim, C, Bd, st ) || st.colour.size() != size_t( S ) * S )
+			continue;
+		F.fitTiles++;
+		for ( int ly = 0; ly < dim; ly++ )
+			for ( int lx = 0; lx < dim; lx++ ) {
+				const qint64 k = LodgenVtFill::key( tx + lx, ty + ly );
+				if ( !role.contains( k ) )
+					continue;
+				std::array<float, 3> m = { 0, 0, 0 };
+				const int j0 = Bd + ( dim - 1 - ly ) * perCell, i0 = Bd + lx * perCell;
+				for ( int j = j0; j < j0 + perCell; j++ )
+					for ( int i = i0; i < i0 + perCell; i++ ) {
+						const quint32 px = st.colour[size_t( j ) * S + i];
+						m[0] += float( ( px >> 16 ) & 0xFF );
+						m[1] += float( ( px >> 8 ) & 0xFF );
+						m[2] += float( px & 0xFF );
+					}
+				for ( int k3 = 0; k3 < 3; k3++ )
+					m[k3] /= float( perCell * perCell );
+				ours.insert( k, m );
+			}
+	}
+	// VANILLA's side: the mean of the cell's 128 x 128 texels
+	for ( auto it = role.constBegin(); it != role.constEnd(); ++it ) {
+		const int cx = LodgenVtFill::keyX( it.key() ), cy = LodgenVtFill::keyY( it.key() );
+		const int gx0 = cx * 128, gy0 = -( cy + 1 ) * 128;
+		std::vector<float> rgb;
+		std::vector<quint8> have;
+		F.window( gx0, gy0, gx0 + 127, gy0 + 127, rgb, have );
+		std::array<float, 3> m = { 0, 0, 0 };
+		int n = 0;
+		for ( size_t o = 0; o < have.size(); o++ )
+			if ( have[o] ) {
+				for ( int k3 = 0; k3 < 3; k3++ )
+					m[k3] += rgb[o * 3 + k3] * 255.0f;
+				n++;
+			}
+		if ( n < 128 * 128 )
+			continue;
+		for ( int k3 = 0; k3 < 3; k3++ )
+			m[k3] /= float( n );
+		van.insert( it.key(), m );
+	}
+	auto lum = []( const std::array<float, 3> & c ) {
+		return 0.2126f * c[0] + 0.7152f * c[1] + 0.0722f * c[2];
+	};
+	// the tone fit on the overlap
+	double sLv = 0, sLv2 = 0, sLb = 0, sLb2 = 0, cv2 = 0, cb2 = 0, cvm[3] = { 0, 0, 0 }, cbm[3] = { 0, 0, 0 };
+	qint64 n = 0;
+	for ( auto it = role.constBegin(); it != role.constEnd(); ++it ) {
+		if ( it.value() != 1 || !ours.contains( it.key() ) || !van.contains( it.key() ) )
+			continue;
+		const auto b = ours.value( it.key() ), v = van.value( it.key() );
+		const double lb = lum( b ), lv = lum( v );
+		sLv += lv; sLv2 += lv * lv; sLb += lb; sLb2 += lb * lb;
+		for ( int k = 0; k < 3; k++ ) {
+			cv2 += ( v[k] - lv ) * ( v[k] - lv );
+			cb2 += ( b[k] - lb ) * ( b[k] - lb );
+			cvm[k] += v[k] - lv;
+			cbm[k] += b[k] - lb;
+		}
+		n++;
+	}
+	F.overlapCells = n;
+	for ( auto it = role.constBegin(); it != role.constEnd(); ++it )
+		if ( it.value() == 2 )
+			F.ringCells++;
+	if ( n < 2 ) {
+		F.on = false;       // nothing to fit on: the fill does nothing, and says so
+		return;
+	}
+	const double mLv = sLv / n, mLb = sLb / n;
+	const double sdV = std::sqrt( qMax( 0.0, sLv2 / n - mLv * mLv ) );
+	const double sdB = std::sqrt( qMax( 0.0, sLb2 / n - mLb * mLb ) );
+	F.rawGain = sdV > 0.0 ? float( sdB / sdV ) : 1.0f;
+	F.gain = qMin( 1.0f, F.rawGain );
+	F.offset = float( mLb - F.gain * mLv ) / 255.0f;
+	F.sat = cv2 > 0.0 ? float( std::sqrt( cb2 / cv2 ) ) : 1.0f;
+	for ( int k = 0; k < 3; k++ )
+		F.cshift[k] = float( cbm[k] / n - F.sat * cvm[k] / n ) / 255.0f;
+	// the bar: vanilla's own adjacent cell-mean steps over the overlap and the ring
+	std::vector<float> steps, diffs;
+	for ( auto it = van.constBegin(); it != van.constEnd(); ++it ) {
+		const int cx = LodgenVtFill::keyX( it.key() ), cy = LodgenVtFill::keyY( it.key() );
+		for ( const auto & nb : { LodgenVtFill::key( cx + 1, cy ), LodgenVtFill::key( cx, cy + 1 ) } ) {
+			auto jt = van.constFind( nb );
+			if ( jt != van.constEnd() )
+				steps.push_back( std::fabs( lum( it.value() ) - lum( jt.value() ) ) );
+		}
+	}
+	F.bar = lodgenVtFillPercentile( steps, 99.0f );
+	for ( auto it = role.constBegin(); it != role.constEnd(); ++it ) {
+		if ( it.value() != 2 || !ours.contains( it.key() ) || !van.contains( it.key() ) )
+			continue;
+		const auto v = van.value( it.key() );
+		float vv[3] = { v[0] / 255.0f, v[1] / 255.0f, v[2] / 255.0f }, tv[3];
+		F.tone( vv, tv );
+		const std::array<float, 3> t3 = { tv[0] * 255.0f, tv[1] * 255.0f, tv[2] * 255.0f };
+		diffs.push_back( std::fabs( lum( ours.value( it.key() ) ) - lum( t3 ) ) );
+	}
+	F.p95 = lodgenVtFillPercentile( diffs, 95.0f );
+	F.bandCells = ( F.bar > 0.0f ) ? int( std::ceil( F.p95 / F.bar ) ) : 1;
+	F.bandCells = qBound( 1, F.bandCells, LODGEN_VT_FILL_MAX_BAND );
+	F.band = float( F.bandCells ) * 4096.0f;
+}
+
+static QString lodgenVtFillReport( const LodgenVtFill & F )
+{
+	return QString( "vanillaFill overlapCells=%1 ringCells=%2 fitTiles=%3 gain=%4 rawGain=%5 offset=%6 "
+		"sat=%7 cshift=%8,%9,%10 bar=%11 p95=%12 bandCells=%13 tilesTouched=%14 texelsFilled=%15 "
+		"texelsNoVanilla=%16 vanillaChunksMissing=%17 vanillaSheetsRead=%18 root=%19" )
+		.arg( F.overlapCells ).arg( F.ringCells ).arg( F.fitTiles )
+		.arg( double( F.gain ), 0, 'f', 4 ).arg( double( F.rawGain ), 0, 'f', 4 )
+		.arg( double( F.offset * 255.0f ), 0, 'f', 3 ).arg( double( F.sat ), 0, 'f', 4 )
+		.arg( double( F.cshift[0] * 255.0f ), 0, 'f', 3 ).arg( double( F.cshift[1] * 255.0f ), 0, 'f', 3 )
+		.arg( double( F.cshift[2] * 255.0f ), 0, 'f', 3 )
+		.arg( double( F.bar ), 0, 'f', 3 ).arg( double( F.p95 ), 0, 'f', 3 ).arg( F.bandCells )
+		.arg( F.tilesTouched ).arg( F.texelsFilled ).arg( F.texelsNoVanilla ).arg( F.vanillaMissing.size() )
+		.arg( F.vanillaLoaded ).arg( lodgenVanillaLodRoot() );
+}
+
 bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 	const QString & outDir, const LodgenVtOptions & opts, LodgenBakeCaches * caches,
 	QString * report, QString * error )
@@ -12834,6 +13379,27 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 	if ( opts.cover.cover )
 		world.setGrassTintResolver( &lodgenGrassTintResolve, &bc );
 
+	/* THE VANILLA-COLOUR FILL (2.6): the painted bitmap and the tone fit, once
+	 * for the whole pyramid. The fit's own low-resolution bakes run on COPIES
+	 * of the caches that count things, so the report's census lines are the
+	 * same with the fill on or off. */
+	LodgenVtFill fill;
+	if ( opts.vanillaFill ) {
+		fill.on = true;
+		fill.ws = ws;
+		lodgenVtFillPainted( world, fill, levels[0].west, levels[0].south, levels[0].east, levels[0].north );
+		LodgenVtMaskCache fitMask = maskCache;
+		LodgenVtLandCache fitLand;
+		LodgenRoadCensus fitRoads;
+		LodgenObjectAoCensus fitObj;
+		lodgenVtFillFit( fill, levels[0].west, levels[0].south, levels[0].east,
+			levels[0].north, levels[0].dim,
+			[&]( int x0, int y0, int dim, int c, int b, LodgenVtStage & st ) {
+				return lodgenBakeVtTile( world, dataRoot, bc, opts.cover, fitLand, fitMask, false,
+					x0, y0, dim, c, b, st, roadSet.get(), &fitRoads, objField.get(), &fitObj );
+			} );
+	}
+
 	auto writeTile = [&]( int lv, const LodgenVtStage & st ) -> bool {
 		const QByteArray raw = lodgenVtEncodeTile( st, stored, mips, opts.height,
 			wantEmissive, opts.coverInColor, opts.halfAux );
@@ -12977,6 +13543,9 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 				wantEmissive, cellX0, cellY0, levels[0].dim, content, border, row[size_t( tx )],
 				roadSet.get(), &roadCensus, objField.get(), &objCensus ) )
 				return fail( QString( "could not bake tile (%1,%2)" ).arg( tx ).arg( ty ) );
+			if ( fill.on )
+				lodgenVtFillTile( fill, cellX0, cellY0, levels[0].dim, content, border,
+					row[size_t( tx )] );
 			if ( msnSheets ) {
 				const qint64 got = lodgenVtMsnFromSheets( *msnSheets, cellX0, cellY0,
 					levels[0].dim, content, border, keepHeightsNormal, row[size_t( tx )] );
@@ -13230,6 +13799,9 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 		r << QString( "maskEmissiveMaps %1" ).arg( maskCache.withEmissive );
 		r << QString( "maskDistinctLtex %1" ).arg( maskCache.byForm.size() );
 		r << QString( "maskLayerRefs %1" ).arg( layerFormsSeen );
+		if ( opts.vanillaFill )
+			r << ( fill.on ? lodgenVtFillReport( fill )
+				: QStringLiteral( "vanillaFill off: fewer than 2 overlap cells with a vanilla tile to fit on" ) );
 		r << QString( "finest %1" ).arg( levels[0].dim );
 		r << QString( "coarsest %1" ).arg( levels[nLevels - 1].dim );
 		r << QString( "content %1" ).arg( content );

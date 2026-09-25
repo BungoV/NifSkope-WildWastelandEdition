@@ -1362,6 +1362,11 @@ public:
 				tr( "Each tile also carries the ground height, so a consumer can displace the\n"
 					"far terrain from the pyramid instead of from a mesh.\n"
 					"Command line: --vt-height" ) );
+			xB( f, "LodgenVtFillVanillaCheck", QStringLiteral( "vtFillVanilla" ),
+				tr( "Fill unpainted ground with vanilla's colour" ), false,
+				tr( "Ground no landscape record paints is blended toward the game's own\n"
+					"terrain LOD colour, matched in tone where painted ground meets it.\n"
+					"Command line: --vt-fill-vanilla" ) );
 			xB( f, "LodgenVtCoverInColorCheck", QStringLiteral( "vtCoverInColor" ),
 				tr( "Ground cover in the colour layer" ), false,
 				tr( "The ground cover is tinted into the colour tiles instead of being left in\n"
@@ -1389,7 +1394,7 @@ public:
 			vtSub = { vtFinestBox, vtFinestLabel, vtBtrCheck, vtSummary };
 			// the pyramid's own numbers grey with it too
 			for ( const char * k : { "vtBorder", "vtMips", "vtCompress",
-					"vtHeight", "vtCoverInColor", "vtHalfAux" } ) {
+					"vtHeight", "vtFillVanilla", "vtCoverInColor", "vtHalfAux" } ) {
 				if ( QWidget * w = extras.value( QLatin1String( k ) ).field )
 					vtSub << w;
 				if ( QLabel * l = extraLabels.value( QLatin1String( k ) ) )
@@ -2772,6 +2777,7 @@ private:
 		o.mips = xi( "vtMips" );
 		o.compression = xi( "vtCompress" );
 		o.height = xb( "vtHeight" );
+		o.vanillaFill = xb( "vtFillVanilla" );
 		o.coverInColor = xb( "vtCoverInColor" );
 		o.cover = coverOptions();
 		return o;

@@ -157,6 +157,27 @@ struct EsmLtexCover
  *  `diffuse` keeps its old behaviour EXACTLY, including the fallback that hands
  *  the material path through when a material-backed TXST carries no TX00, so
  *  every existing caller reads what it read before. */
+/*! THE ENGINE'S DEFAULT LAND TEXTURE, as a form (lane SEAM1, 2026-09-25).
+ *
+ *  A LAND quadrant with no BTXT, and an ATXT layer whose LTEX is 0, are painted
+ *  by the game with ONE texture set for the whole world: the INI settings
+ *  `[Landscape] sDefaultLandDiffuseTexture` / `sDefaultLandNormalTexture` /
+ *  `sDefaultLandSpecularTexture`, whose defaults sit beside their names in the
+ *  exe's string table as `Ground\CommonwealthDefault01_d.dds`, `_n`, `_s`, and
+ *  are resolved under `Landscape\` (the format string that follows them). It
+ *  is not an LTEX, so it names no grass.
+ *
+ *  Until SEAM1 the bake painted those texels with the enclosing dim-4 chunk's
+ *  DOMINANT base instead, a stand-in that changes from chunk to chunk: at
+ *  Sanctuary, chunk (-20,20) came out LRiverbedSilt01 and its neighbours
+ *  LRubbleRock01 / LRootsEroded01, a hard-edged block of 10-13 levels on the
+ *  chunk grid that Bethesda's own LOD of the same cells does not have.
+ *
+ *  0xFFFFFFFF is never a record in a plugin (load-order byte 0xFF is the
+ *  runtime's own), so ltexTextureSet() and ltexCover() answer it without a
+ *  record lookup and every other caller is unchanged. */
+constexpr quint32 ESM_LTEX_ENGINE_DEFAULT = 0xFFFFFFFFu;
+
 struct EsmLtexTextureSet
 {
 	QString diffuse;            //!< TX00, or MNAM when the TXST is material-backed

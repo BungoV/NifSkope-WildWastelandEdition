@@ -1,0 +1,19 @@
+16:23:44 game DOWN
+M  src/esmdata.cpp
+M  src/lodgen.cpp
+BUILD-RC=0
+-rwxr-xr-x 1 bungo 197609 24953856 16:24:31 release/NifSkope.exe
+exe newer than the sources
+copies in step
+build rc=0
+-o GeneratedFiles/.obj/esmdata.o -o GeneratedFiles/.obj/lodgen.o 
+1f1b81bf
+fx rc=127
+boston rc=127 0 s 
+sanc rc=127 0 s 
+Traceback (most recent call last):
+  File "E:\Projects\NifskopeWWE-seam1\scratchpad\seam1_20260925\w4_bytes.py", line 17, in <module>
+    B = ns['strip'](ns['rd'](ns['pair']('w4/%s/%s/Native/FO4CSLOD/Commonwealth' % (t, region))[0]))
+  File "<string>", line 74, in pair
+FileNotFoundError: [WinError 3] The system cannot find the path specified: 'w4/bis_62e53a3b/boston/Native/FO4CSLOD/Commonwealth'
+16:24:49 done 62e53a3b

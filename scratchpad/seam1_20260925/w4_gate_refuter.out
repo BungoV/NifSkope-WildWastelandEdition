@@ -1,0 +1,13 @@
+G1 fixture colourRows      0 | .lodo as written: 0 bytes differ [], length +0 -> ok | .lodi 0 differ [] -> ok
+   fixture attributed AO bytes put back before the compare (62e53a3b codegen, see ATTRIBUTED): []
+G1 boston  colourRows      0 | .lodo as written: 0 bytes differ [], length +0 -> ok | .lodi 0 differ [] -> ok
+   boston  attributed AO bytes put back before the compare (62e53a3b codegen, see ATTRIBUTED): []
+G1 sanc    colourRows      0 | .lodo as written: 0 bytes differ [], length +0 -> ok | .lodi 0 differ [] -> ok
+   sanc    attributed AO bytes put back before the compare (62e53a3b codegen, see ATTRIBUTED): []
+G2 boston v4: 2982 meshes, 0 VERTEX_COLOUR, 0 VERTEX_ALPHA, colourRows 0, source NIFs missing 0
+G2a named meshes flagged: [('amphitheater_lod_0.nif', False), ('treemapleblasted01_lod_1.nif', False), ('treemapleblasted02_lod_1.nif', False)]
+G2b non-white RGB: [('amphitheater_lod_0.nif', False), ('treemapleblasted01_lod_1.nif', False)]
+G2c flag <=> source (channel AND Vertex_Colors; Vertex_Alpha): 105 disagree [('LOD\\Architecture\\Buildings\\Hightech\\HitExtACornerTransitionCtoB01_LOD.nif', False, True, False, False), ('LOD\\Architecture\\Unique\\Amphitheater_LOD_0.nif', False, True, False, False), ('LOD\\Architecture\\Unique\\BathHouse\\BathHouseWing01LOD.nif', False, True, False, False), ('LOD\\Architecture\\Unique\\BathHouse\\BathHouseWing02LOD.nif', False, True, False, False), ('LOD\\Architecture\\Unique\\BathHouse\\BathHouseWing03LOD.nif', False, True, False, False)]
+G2d decoded rows == source rows: 0 disagree []
+G1 GREEN
+G2 RED
