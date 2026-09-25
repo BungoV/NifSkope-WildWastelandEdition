@@ -5,6 +5,14 @@ Written the moment a mistake is recognised, unprompted (CONSTITUTION rule 2).
 Format: date -- what was done -- what was true -- how it was found -- the rule.
 Newest at the top.
 
+## 2026-09-25 -- lane GREY1 (lane text)
+
+- 2026-09-25 21:1x GREY1: compared the LOD atlas with the full model's RAW diffuse. That was wrong for the 41% of
+  building area that is grayscale-to-palette (plus material swaps), and it gave the opposite sign ("LOD MORE
+  saturated"). Rule: an in-game colour is palette[diffuse.G, row] with the swap's CNAM row and SNAM material.
+  Now in skill fo4-surface-colour-census.
+- 2026-09-25 21:30 GREY1: typed a log time (21:33) without reading the clock. Corrected to the read time.
+
 ## 2026-09-25 -- lane TINT1 (lane text)
 
 2026-09-25 TINT1: I read "v4 and v5 render byte-identical" as a viewer defect for about an hour. I patched the bucket layout, which was a real defect, and still got 0 px changed.

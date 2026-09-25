@@ -60,6 +60,21 @@ committed" or names an exe, this block overrides it.
 - Re-run the command-line bakes since 09-19 that used --data-root.
 
 ### Lane and director lines, 2026-09-24, newest first
+- 2026-09-25 21:45 GREY1:
+  GREY1 (2026-09-25 21:10-21:45, measure only, branch grey1-20260925, nothing changed or re-baked): why our far-field
+  buildings read greyer than in game. Ranked:
+  1. The per-placement material swap never reaches the LOD. 44% of Commonwealth building placements carry one; in
+     full detail they are 25% more saturated than their shared LOD atlas (S 0.189 vs 0.151). The swap moves colour
+     p10 0.7x .. p90 1.6x over 4,049 (base, swap) variants. This is vanilla's own LOD trait.
+  2. The game's light is coloured (shaded faces lit blue, S ~0.3, vanilla and Physical Weathers alike). The
+     viewer's is not: Legacy is white, and Lookdev gives far-field shapes a flat grey ambient, not the DALC.
+  3. The viewer's tone map under the headlight takes 5%.
+  Not causes: missing textures (the on-screen base colour equals the atlas), the palette rule, mips, FO4CS grading,
+  imagespace.
+  Proposal: a per-placement RGB multiplier (census2.py's full/LOD mean colour of the (base, swap)); Lookdev DALC for
+  far-field shapes. Refuter: the grey buildings he points at carry no XMSP/MODS.
+  Side finding: the Physical Weathers CommonwealthClear IMSP points at DLCCoast REFR/STAT IDs, not imagespaces.
+  Full record: scratchpad/grey1_20260925/DONE.md.
 - 2026-09-25 21:08 TINT1:
   TINT1 (2026-09-25, branch tint1-20260925, not merged):
   - Object library re-baked at `.lodo` v5, which keeps vertex colour: 52,925 colour rows, 166 meshes.

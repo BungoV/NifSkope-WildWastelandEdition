@@ -1,5 +1,12 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## GREY1: why far-field buildings read grey
+
+- 2026-09-25 GREY1 (measure only, no code): far-field grey diagnosed. The cause is the material-swap tint that
+  a shared LOD atlas cannot carry, plus the weather's blue shade light, which the viewer's lighting lacks. The
+  viewer's own tone map takes 5%. Scripts are in scratchpad/grey1_20260925 (census2.py, weather_light.py,
+  measure_pics.py). New skill: fo4-surface-colour-census.
+
 ## TINT1: object library keeps vertex colour
 
 - Native far field (src/lodinative.cpp):
