@@ -151,3 +151,24 @@
   before -> after: d0 90.5 -> 91.9, d1..>=6 158.6 -> 95.9..96.2 (halo_pics_fh.txt). Reported to the coordinator.
 * Earlier Nuka-World failure (nukaworld_failed1/, 19:33): "scale 8.33 is outside 0 .. 7.99988" on a RockCliff03
   LOD ref -- the case ruling (a) covers. Rebake with fill ON started 21:19 (nukaworld/).
+
+## 21:44 -- Nuka-World fill ON baked, verified, installed; pictures rendering
+
+* Bake nukaworld/ (exe 62412e83, region -32 -32 32 32 = the LAND box, fill ON): chunks 1264 s, rc 0 (the 19:33
+  refusal is gone: .lodi v10).
+* Census: grid=0,0 (LODSettings -32,-32), vanillaSheetsRead=162, vanillaChunksMissing=212, texelsNoVanilla=156,389,312,
+  noLandCells=2111, texelsNoLand=0.
+* Where the grey is (grey_split.py, grey_nw.txt): VT.4 box -32..35 x -32..63, .lodl header -32,-32..32,32. Flat-grey
+  cells 2303, ALL outside the header (the terrain mesh never samples them), all no-LAND, and vanilla ships no dim-4
+  sheet over any of them (its LODSettings grid is 64 cells from -32: nothing past 31). Inside the header: 0 grey.
+  So nothing there for the fill to read from; vanilla ships nothing there either.
+* Halo gate: N/A. -32..31 is all LAND (4096 of 4096); halo_gate.py now says N/A instead of crashing on empty
+  means. Far Harbor still PASS with the edited gate. (The rerun of FH halo_gate was PASS.)
+* verify.sh (nukaworld/verify.out): census 0 failures + FLOOR ok; lodb 47 plugins; lodm ok; lodl header -32 -32 32 32;
+  lodt-check rc 0 on all 5 levels; 18,787 placements, 0 on no-LAND cells; flat-grey LAND chunks 0 of 289;
+  654 files, 2,838,424,769 bytes.
+* G3: 1158 bases, 26 with a card (all Fallout4.esm trees).
+* G4 (VT.2 cover): -28,2 / 2,0 / -8,6 present and non-uniform, PASS. Red control (g4red.sh, no --cover) running.
+* Wide scale (widescale_check.py on the real bake): W0..W5 PASS, 4 of 18,787 placements above 7.99988
+  (0604D45A 9.97, 0604D45D 8.33, 0604DDA1 9.23, 0604DDB9 8.33), .lodi version 10, file set == plugin set.
+* Installed mods/FO4CSLOD/FO4CSLOD/NukaWorld (was absent): 654 files, sha1 all match (nukaworld/src_sha1.txt).

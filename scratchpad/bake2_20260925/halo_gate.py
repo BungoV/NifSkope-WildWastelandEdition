@@ -60,6 +60,9 @@ ok = True
 def line(nm, good, d):
     global ok; ok &= bool(good); print('%s %s: %s' % ('PASS' if good else 'FAIL', nm, d))
 far = dist >= 6
+if (~land).sum() == 0:   # nothing a halo could sit on: say so instead of passing or crashing on empty means
+    print('no-LAND cells 0 (LAND %d) in %d..%d x %d..%d: HALO GATE N/A (no cell without LAND to carry a halo)'
+          % (land.sum(), x0, x1, y0, y1)); sys.exit(0)
 fo = (lo - lv)[far].mean(); fc = (co - cv)[far].mean()
 print('no-LAND cells %d (LAND %d); far field d>=6: %d cells, lum ON-VAN %+.2f, chroma ON-VAN %+.2f'
       % ((~land).sum(), land.sum(), far.sum(), fo, fc))
