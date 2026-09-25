@@ -53,3 +53,14 @@
   S*2048, 1600^2, LV 2, slot 0) lum SD 34.6, 12,175 colours; the houses have no authored LOD model (manifests hold
   only street lamps and cliffs besides trees), so the cul-de-sac road shows without houses.
 - Director messaged with the top-down path at 19:14.
+
+## 19:35 (clock read) -- Nuka-World BLOCKED; Far Harbor baking
+- Nuka-World (NukaWorld, WRLD 0600290F), region -32 -32 32 32, fill OFF: chunks stage 19:15:36 -> 19:33:46 rc 1 (1090 s).
+  VT 5 levels written (2.7 GB scratch), then the .lodi writer REFUSED: ref 0604DDB9 (RockCliff03_LOD_0) scale 8.33 >
+  7.99988 (u16/8192 ceiling, src/lodifile.cpp, "refused, not clamped"). overscale.py over the plugins: 12 NukaWorld refs
+  above the line, 4 with an MNAM base (0604D45A 9.97, 0604D45D 8.33, 0604DDA1 9.23, 0604DDB9 8.33). No .lodi/.lodb/
+  manifests -> NOT installed. Director asked for a ruling (format change / drop-and-name / leave out); no code change.
+- Far Harbor: overscale.py 8 refs above the line, 0 with an MNAM base -> safe. Region widened to -32 -32 20 31 (CELL
+  bounds -73,-59 allow; covers every LAND cell) so the VT ladder reaches 32. Chunks stage launched 19:35.
+- G4 picks: Nuka-World is desert (1 full-grass cell of 4225): -28,2 / 2,0 / -8,6 (all-grass share 0.80-0.83).
+  Far Harbor: 194 grass cells: -24,6 / -23,-4 / -22,2.
