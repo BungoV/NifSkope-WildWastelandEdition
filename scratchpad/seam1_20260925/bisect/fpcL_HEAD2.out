@@ -1,0 +1,6 @@
+17:43:18 game DOWN
+exe newer than the sources
+copies in step
+build rc=0
+ M tests/spells/lodgen_cardlink.sh
+17:43:57 done fpcL_HEAD

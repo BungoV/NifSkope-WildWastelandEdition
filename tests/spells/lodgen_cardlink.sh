@@ -17,6 +17,7 @@
 #   G4  --native-verify refuses a .lodo whose cardCount was edited by one
 #       (headerCrc32 recomputed), and names cardCount; the unedited pair passes
 #   ID  a bake WITHOUT --impostors is byte-identical to the rung exe's
+#       (past the named 62e53a3b moves only: tests/spells/lodgen_cardlink_id.py)
 #   RED the same card bake on the rung exe: G1/G2/G3/G4 must FAIL there
 #
 # USAGE
@@ -94,13 +95,13 @@ why=$(grep -m1 -i 'cardCount' "$W/verify.log" | cut -c1-160)
 echo "== ID a bake without --impostors, new exe vs rung"
 bake "$NS" idn || bad "the plain bake ran (new)"; mv "$W/idn" "$W/idn_new"
 bake "$RUNG" idn || bad "the plain bake ran (rung)"; mv "$W/idn" "$W/idn_rung"
-nd=0; nf=0
-while IFS= read -r f; do
-	nf=$((nf + 1))
-	cmp -s "$W/idn_new/$f" "$W/idn_rung/$f" || { nd=$((nd + 1)); echo "    differs: $f"; }
-done < <(cd "$W/idn_new" && find . -type f ! -name '*.lodb' ! -name '*.log' | sort)
-nr=$(cd "$W/idn_rung" && find . -type f ! -name '*.lodb' ! -name '*.log' | wc -l)
-[ "$nf" -gt 0 ] && [ "$nd" -eq 0 ] && [ "$nf" -eq "$nr" ] && ok "ID $nf files byte-identical to the rung" || bad "ID $nd of $nf files differ ($nr on the rung)"
+# RE-PINNED (lane SEAM1, 2026-09-25): byte identity past ONE named commit, 62e53a3b (.lodo v5 colour
+# stream, and two selfAO bytes its build flips by FMA contraction at a ray tie). Every tolerance is
+# exact and named in tests/spells/lodgen_cardlink_id.py; any other byte still fails. Self-test (another
+# AO byte, a third value, a planted .BTR byte: all fail): scratchpad/seam1_20260925/cl_id_selftest.out.
+"$PY" "$ROOT/tests/spells/lodgen_cardlink_id.py" "$W/idn_new" "$W/idn_rung" > "$W/idn.cmp" 2>&1; rc=$?
+cat "$W/idn.cmp"
+[ "$rc" = 0 ] && ok "$(tail -1 "$W/idn.cmp")" || bad "$(tail -1 "$W/idn.cmp")"
 
 echo "== RED the same card bake on the rung exe"
 bake "$RUNG" red --impostors "$CA" --impostors-from-level 0 || bad "the rung card bake ran"

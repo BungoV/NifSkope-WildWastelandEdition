@@ -75,3 +75,6 @@ Every gate is pre-registered under `scratchpad/seam1_20260925/`. The resume list
     painted every material-backed LTEX flat grey 0.5, which would have handed the DLCCoast border a made-up step.
   - The rule: a planted step pushes AWAY from the neighbour it is measured against, and the run prints the sign; a
     model layer it cannot read is refused or read, never given a stand-in colour.
+- **2026-09-25, SEAM1: a 13-gate red read as the code's when it was a half-copied fixture.**
+  - What happened: native_lighting gate (a) went red on 4 legacy frames. Only the sheetcache had been copied into the worktree, not `nativeview1_20260912/resroot` (1 of 45 files), so textures did not load; legacy_bto_top came out at 390,854 B, the exact size the spell's own comment gives for that failure.
+  - The rule: before attributing a worktree red, compare every fixture path the spell names against main by file count. Main's exe on the same fixtures is the control.

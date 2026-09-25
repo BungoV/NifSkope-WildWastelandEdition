@@ -94,6 +94,51 @@ All gates were pre-registered, and each was run on the broken or old exe first t
 - **Scope.** Nothing else under E:\Projects\Fallout 4 Mods was touched.
 - **Leftover.** `whole/off/` (15 GB, the fill-off control) can be deleted.
 
+## The 13-gate set on the final exe (16:41-17:52, game down): 13 of 13 green
+
+- **Exe.** cbdbffe7 (release/NifSkope.exe). After the probe builds it was rebuilt from HEAD; it links as 4024369a, and only 4 PE-header bytes differ (link time and checksum).
+- **Runner.** gates13.sh, then the reruns (gates13_rerun*.sh, gates13_attr.sh, gates13_repin.sh). Verdicts are in gates13/summary.txt. One NifSkope ran at a time, on the second monitor, each on its own port.
+
+| spell | verdict |
+|---|---|
+| impostor_pbrm | 14/14 ok |
+| impostor_ring | 17/0. The first run hit a missing rung exe, which is now copied in. |
+| impostor_wind | **28/0 after a re-pin.** The red was G2: Hero's `_oct_n.DDS` moved against the previous exe. See below. |
+| lodgen_octahedral | PASS |
+| lodgen_impostor_cards | PASS |
+| lodgen_card_arrays | PASS |
+| lodgen_cardlink | **PASS (0 failures) after a re-pin.** The red was ID: 2 of 34 files differed. See below. |
+| lodgen_incremental | FAILURES: 0 |
+| lodgen_native | PASS |
+| lod_generation | 128 checks |
+| lodgen_loadorder | PASS |
+| pbr_shade_ab | 10/0. The first run's 2 empty pictures were flaky and the rerun was clean. |
+| native_lighting | **21/0.** The red was a fixture, not SEAM1: resroot was not copied into this worktree, so textures did not load (legacy_bto_top 390,854 B, the size the spell's own note gives). Main's 828ac612 reads 21/0 on the same fixtures. |
+
+**impostor_wind G2, attributed to a6e5e8de.**
+- **What moved.** From the same PNG, 57 BC7 blocks of Hero's `_oct_n` changed, in their index bits only.
+- **Which commit.**
+
+  | exe | `_oct_n.DDS` sha1 |
+  |---|---|
+  | s5, 828ac612, c21eb26a | ab28c561 |
+  | a6e5e8de, 62e53a3b, cbdbffe7 | 77fb8981 |
+
+- **Mechanism: FMA contraction.** The encoder's double-precision fit (lodgenbc7.h) is compiled inside lodgen.cpp. With that file built under fp-contract=off, ea0ca708 and HEAD both give 3782af27. The evidence is bisect/bcrun.out, fpcL.sh and bc7cmp.sh.
+- **Re-pin.** The spell accepts only that exact sha1 pair for that one file.
+- **Self-test (iw_pin_selftest.out).** The pair as is passes. One more byte in `_oct_n` fails, and so does one byte in `_oct_d`.
+
+**lodgen_cardlink ID, attributed to 62e53a3b.**
+- **What moved.** Two things, both from 62e53a3b:
+  - the .lodo v5 colour stream;
+  - the same two selfAO bytes as W4 (rows 270124 and 271177, 228 to 201).
+- **Measured in cl_id.py / cl_id.out.** With the stream taken out and the two AO bytes put back, only the version word differs. The .lodi differs only at 0x0C..0x0F and 0x20..0x27.
+- **New checker.** tests/spells/lodgen_cardlink_id.py. Every tolerance in it is exact and named.
+- **Self-test (cl_id_selftest.out).** Each of these fails:
+  - another AO byte;
+  - a third value in an attributed byte;
+  - one planted .BTR byte.
+
 ## Still owed
 
 - A Boston oblique render with the .lodo v5 colour on. The .lodo was not re-baked, so v5 is not installed.
