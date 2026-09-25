@@ -5,8 +5,8 @@
 # Then the placement census on the picture: every placement cell mapped to its pixel footprint, and a cell with no
 # terrain under it = its footprint centre is the background colour in T. The cell->pixel map (flip of x / y) is
 # chosen by correlating per-cell placement counts with the per-cell object-pixel share, not assumed.
-# usage: python composite.py <T.png> <A.png|-> <B.png|-> <out.png> <x0> <y0> <x1> <y1> <ortho half-width>
-import sys, struct, mmap, collections
+# usage: python composite.py <T.png> <A.png|-> <B.png|-> <out.png> <x0> <y0> <x1> <y1> <ortho half-width> [nocensus]
+import sys
 import numpy as np
 from PIL import Image
 T, A, B, OUT = sys.argv[1:5]
@@ -23,23 +23,11 @@ Image.fromarray(comp.astype(np.uint8)).save(OUT)
 both = dA & dB
 print('composite %s %dx%d: A objects %d px, B objects %d px, both %d px (%.4f%% of object pixels)'
       % (OUT.replace('\\', '/').split('/')[-1], w, h, dA.sum(), dB.sum(), both.sum(), 100.0 * both.sum() / max(1, (dA | dB).sum())))
-# placements per cell (same decoder as placements.py)
-F = r'E:/Projects/Fallout 4 Mods/mods/FO4CSLOD/FO4CSLOD/Commonwealth/'
-f = open(F + 'Commonwealth.lodi', 'rb'); b = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
-cw, cs, ce, cn = struct.unpack_from('<4h', b, 0x48)
-nchunk, ninst = struct.unpack_from('<II', b, 0x54)
-oCh, oCr, oIn = struct.unpack_from('<3Q', b, 0x68)
-wch = ce - cw + 1
-ch = np.frombuffer(b, np.uint32, nchunk * 8, oCh).reshape(-1, 8)
-ins = np.frombuffer(b, np.uint16, ninst * 12, oIn).reshape(-1, 12)
-cells = collections.Counter()
-for k in range(nchunk):
-    first, cnt = int(ch[k, 0]), int(ch[k, 1])
-    if not cnt: continue
-    r, c = divmod(k, wch); chx = cw + c; chy = cn - r
-    px = ins[first:first + cnt, 0].astype(np.float64) * 16384 / 65535 + chx * 16384
-    py = ins[first:first + cnt, 1].astype(np.float64) * 16384 / 65535 + chy * 16384
-    for x, y in zip(np.floor(px / 4096).astype(int), np.floor(py / 4096).astype(int)): cells[(x, y)] += 1
+if len(sys.argv) > 10 and sys.argv[10] == 'nocensus':   # an oblique camera: the top-down cell map does not apply
+    sys.exit(0)
+sys.path.insert(0, r'E:/Projects/NifskopeWWE-extent1/scratchpad/extent1_20260925')
+import composite_cells
+cells = composite_cells.placement_cells(); ninst = sum(cells.values())
 CX = (x0 + x1 + 1) * 2048.0; CY = (y0 + y1 + 1) * 2048.0
 upp = 2 * ORT / w   # world units per pixel (ortho half-WIDTH)
 def pix(x, y, fx, fy):

@@ -5,7 +5,8 @@
 # usage: shot.sh <out.png> <x0> <y0> <x1> <y1> <view 1|8> <ortho half-width> <W> <H> <port>
 #   env: LV (lodl level, default 3)  LI (WW_LODI_LEVEL, default 0)  SLOT (WW_LODI_SLOT 0..3, or none = the first
 #        authored slot, default 0)  SDIM (sheet dim, default 16)  OBJ_REGION=x0,y0,x1,y1 (objects only; default the
-#        frame)  NOOBJ=1 (terrain only)
+#        frame)  NOOBJ=1 (terrain only)  SHEETS_DIR (VT sheets from another folder,
+#        default the install)
 # Run wait_turn.sh first: one harness NifSkope on the machine at a time.
 OUT="$1"; X0=$2; Y0=$3; X1=$4; Y1=$5; VIEW=$6; ORT=$7; W=$8; H=$9; PORT=${10}
 LV=${LV:-3}; LI=${LI:-0}; SLOT=${SLOT:-0}; SDIM=${SDIM:-16}
@@ -20,7 +21,7 @@ OBJ=( WW_LODL_OBJECTS="$(wp "$F")/Commonwealth.lodi" WW_LODI_REGION="${OBJ_REGIO
 [ "$SLOT" != none ] && OBJ+=( WW_LODI_SLOT=$SLOT )
 [ -n "${NOOBJ:-}" ] && OBJ=( WW_EXTENT1_NOOBJ=1 )
 env "${OBJ[@]}" \
-    WW_LODL_SHEETS="$(wp "$F")" WW_LODL_SHEET_DIM=$SDIM WW_LODL_SHEET_CACHE="$CACHE" \
+    WW_LODL_SHEETS="$(wp "${SHEETS_DIR:-$F}")" WW_LODL_SHEET_DIM=$SDIM WW_LODL_SHEET_CACHE="$CACHE" \
     WW_LODL_REGION="$X0,$Y0,$X1,$Y1,$LV" \
     WW_LODGEN_RESOURCES="$RES" \
     WW_RENDER_SHOT="$(wp "$OUT")" WW_RENDER_SIZE="${W}x$((H + 59))" \

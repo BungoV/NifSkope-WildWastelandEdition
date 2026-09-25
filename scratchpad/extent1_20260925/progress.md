@@ -15,3 +15,8 @@
   2629 and 3000 B are all flat -352 filler. .lodl heights at outer cells (2,70) (-60,-60) (-80,2) (2,-85) (60,60):
   121 samples each, 0 mismatched vs LAND.
 - Next: pictures (top-down + oblique, whole -96..95 frame and the old frame), no bake needed.
+
+## 2026-09-25 17:56
+- whole_top_after.png rendered: top-down, cells -96..95, 3200x3224, margins 27/27/39/39 px (INSIDE >=20). Objects drawn in two halves under the 9.5M cap (63,724 + 120,707 = 184,431 placements, 0 dropped), composited over a terrain-only render; overlap 0.083% of object pixels.
+- placement cells with no terrain under them (background in the picture): 0 of 4,541.
+- rendering the BEFORE set with SEAM1's pre-fill VT sheets (its replaced/ backup), same camera.
