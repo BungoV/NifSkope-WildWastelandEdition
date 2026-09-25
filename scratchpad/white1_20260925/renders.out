@@ -1,0 +1,8 @@
+turn free at 18:34:30
+18:34:30 T_on (control: must match extent1 pics/top/T.png)
+T_on.png 3200x3248 bg (43, 45, 49) (corners agree True): content bbox x 27..3172 y 51..3196; margins L 27 R 27 T 51 B 51 -> INSIDE >=20px; content 95.2%
+18:34:42 T_off (SEAM1 fill-OFF sheets)
+T_off.png 3200x3248 bg (43, 45, 49) (corners agree True): content bbox x 27..3172 y 51..3196; margins L 27 R 27 T 51 B 51 -> INSIDE >=20px; content 95.2%
+18:34:54 T_on_c12 (installed, WW_LOD_CHANNEL=12 unlit base colour)
+T_on_c12.png 3200x3248 bg (43, 45, 49) (corners agree True): content bbox x 27..3172 y 51..3196; margins L 27 R 27 T 51 B 51 -> INSIDE >=20px; content 95.2%
+18:35:06 done

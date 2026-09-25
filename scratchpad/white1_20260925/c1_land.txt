@@ -1,0 +1,16 @@
+land_mo2.bin: 14336 samples over 14 wall cells vs the .lodl, 47 mismatched (> 0.5 unit)
+   (-78,-5) LAND mean     -352 min    -352 max    -352 | .lodl mean     -352
+   (-77,-5) LAND mean     3332 min    -352 max   11944 | .lodl mean     3083
+   (-76,-5) LAND mean    19227 min   10664 max   26736 | .lodl mean    18986
+   (-75,-5) LAND mean    28657 min   25344 max   31848 | .lodl mean    28577
+   (-74,-5) LAND mean    30978 min   27200 max   33184 | .lodl mean    30911
+   (-73,-5) LAND mean    32266 min   29592 max   33872 | .lodl mean    32212
+   (-72,-5) LAND mean    33088 min   31600 max   34080 | .lodl mean    33066
+   (-50,78) LAND mean     -352 min    -352 max    -352 | .lodl mean     -352
+   (-50,77) LAND mean     -352 min    -352 max    -352 | .lodl mean     -141
+   (-50,76) LAND mean     8480 min    -352 max   14464 | .lodl mean     8550
+   (-50,75) LAND mean    20488 min   13912 max   27736 | .lodl mean    20690
+   (-50,74) LAND mean    29827 min   25616 max   33584 | .lodl mean    29960
+   (-50,73) LAND mean    33475 min   31104 max   34528 | .lodl mean    33530
+   (-50,72) LAND mean    33407 min   32504 max   34320 | .lodl mean    33408
+land_vanilla.bin: 14336 samples over 14 wall cells vs the .lodl, 47 mismatched (> 0.5 unit)
