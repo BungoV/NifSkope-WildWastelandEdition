@@ -2209,6 +2209,16 @@ to the vanilla colour on those tiles, "in a proper way".
   the band. The Commonwealth has LAND on every cell of -96..95, so its fill is unchanged
   by construction. Gate: `scratchpad/bake2_20260925/halo_gate.py` (RED on the exe
   before the change: 100 of 180 near cells over vanilla + offset + 8).
+* **Vanilla's grid is the worldspace's own** (lane BAKE2, 2026-09-25). A dim-4 sheet
+  `<WS>.4.<x>.<y>.dds` has its SW cell on the grid of `LODSettings/<WS>.LOD` (int16
+  left, int16 bottom, int32 stride, int32 lodMin, int32 lodMax), not on multiples of 4.
+  The Commonwealth and pre-war say -96,-96 and Nuka-World -32,-32 (phase 0,0: the old
+  addressing, byte for byte); Far Harbor says -73,-59, so its sheets sit at x = 3,
+  y = 1 mod 4 and a multiple-of-4 lookup found none of them. The phase is
+  ((left mod 4), (bottom mod 4)), read from the vanilla root; no file = 0,0, and the
+  census says which (`grid=3,1(LODSettings -73,-59)` or `grid=0,0(default)`).
+  Measured on Far Harbor: 178 sheets read, 0 chunks missing, flat-grey VT.4 cells
+  1517 -> 0 of 3584.
 * **Where it runs.** Every finest-level tile, right after its bake, colour plane
   only. Coarser levels, their mips and the assembled `.btr` chunk sheets inherit it
   through the existing box filter (§2.3, §2.4). A tile whose cells and one-cell
@@ -2216,7 +2226,7 @@ to the vanilla colour on those tiles, "in a proper way".
 * **The census line** (report, only when asked): `vanillaFill overlapCells= ringCells=
   fitTiles= gain= rawGain= offset= sat= cshift= bar= p95= bandCells= tilesTouched=
   texelsFilled= texelsNoVanilla= vanillaChunksMissing= vanillaSheetsRead= noLandCells=
-  noLandRingCells= texelsNoLand= root=`.
+  noLandRingCells= texelsNoLand= grid=X,Y(source) root=`.
   With fewer than 2 overlap cells to fit on, the line says the fill is off and why.
 
 **What is pinned.** Off is the bake before the fill existed, byte for byte, by
