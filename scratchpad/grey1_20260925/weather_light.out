@@ -1,0 +1,19 @@
+CommonwealthClear Day: sun [225, 225, 225] x sunlightScale 4.50 -> linear [3.417 3.417 3.417]; DALC up-lighting colour [101, 133, 169]
+
+-- sun elevation 60 deg --
+roof (up)                  light rgb [0.92 0.95 1.  ] (S 0.04) | LOD S 0.17->0.13 neutral S 0.00->0.04 warm S 0.34->0.31
+wall facing sun (south)    light rgb [0.96 0.98 1.  ] (S 0.02) | LOD S 0.17->0.15 neutral S 0.00->0.02 warm S 0.34->0.33
+wall east                  light rgb [0.42 0.68 1.  ] (S 0.32) | LOD S 0.17->0.20 neutral S 0.00->0.33 warm S 0.34->0.04
+wall facing away (north)   light rgb [0.46 0.71 1.  ] (S 0.29) | LOD S 0.17->0.16 neutral S 0.00->0.30 warm S 0.34->0.06
+
+-- sun elevation 40 deg --
+roof (up)                  light rgb [0.89 0.94 1.  ] (S 0.05) | LOD S 0.17->0.12 neutral S 0.00->0.05 warm S 0.34->0.31
+wall facing sun (south)    light rgb [0.97 0.98 1.  ] (S 0.01) | LOD S 0.17->0.16 neutral S 0.00->0.01 warm S 0.34->0.33
+wall east                  light rgb [0.42 0.68 1.  ] (S 0.32) | LOD S 0.17->0.20 neutral S 0.00->0.33 warm S 0.34->0.04
+wall facing away (north)   light rgb [0.46 0.71 1.  ] (S 0.29) | LOD S 0.17->0.16 neutral S 0.00->0.30 warm S 0.34->0.06
+
+-- sun elevation 75 deg --
+roof (up)                  light rgb [0.93 0.96 1.  ] (S 0.03) | LOD S 0.17->0.14 neutral S 0.00->0.03 warm S 0.34->0.32
+wall facing sun (south)    light rgb [0.93 0.96 1.  ] (S 0.03) | LOD S 0.17->0.14 neutral S 0.00->0.04 warm S 0.34->0.32
+wall east                  light rgb [0.42 0.68 1.  ] (S 0.32) | LOD S 0.17->0.20 neutral S 0.00->0.33 warm S 0.34->0.04
+wall facing away (north)   light rgb [0.46 0.71 1.  ] (S 0.29) | LOD S 0.17->0.16 neutral S 0.00->0.30 warm S 0.34->0.06

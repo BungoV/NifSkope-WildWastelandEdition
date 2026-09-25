@@ -1,0 +1,15 @@
+     2  lod/architecture/lighthouselod01_d.dds                       mean S at mip0/2/4/6: 0.060 0.058 0.059 0.062
+     2  lod/whitemarblebldlod_d.dds                                  mean S at mip0/2/4/6: 0.074 0.071 0.073 0.064
+     2  lod/rwriverlod_d.dds                                         mean S at mip0/2/4/6: 0.144 0.143 0.142 0.141
+     2  lod/landscape/ground/driedgrass01_lod_d.dds                  mean S at mip0/2/4/6: 0.266 0.264 0.264 0.264
+     1  lod/hittechextalargelod_d.dds                                mean S at mip0/2/4/6: 0.272 0.269 0.267 0.267
+     1  lod/oldnorthchurchlod_d.dds                                  mean S at mip0/2/4/6: 0.123 0.109 0.098 0.089
+     1  lod/metalindbgpipesbluegreenlod01_d.dds                      mean S at mip0/2/4/6: 0.204 0.189 0.186 0.178
+     1  lod/metalsiloplatesredlod01_d.dds                            mean S at mip0/2/4/6: 0.627 0.632 0.635 0.636
+     1  lod/metalsiloplateslod01_d.dds                               mean S at mip0/2/4/6: 0.127 0.126 0.126 0.129
+     1  lod/rwstone01lod_d.dds                                       mean S at mip0/2/4/6: 0.178 0.176 0.177 0.179
+     1  lod/hittechextalod03_d.dds                                   mean S at mip0/2/4/6: 0.366 0.364 0.379 0.378
+     1  lod/hittechstructurelargelod_d.dds                           mean S at mip0/2/4/6: 0.647 0.650 0.656 0.657
+     1  lod/amphitheater01lod_d.dds                                  mean S at mip0/2/4/6: 0.147 0.144 0.143 0.140
+     1  lod/architecture/customehouse01lod_d.dds                     mean S at mip0/2/4/6: 0.074 0.072 0.069 0.066
+REFR-weighted mean per-texel S at mip 0/2/4/6: 0.150 0.144 0.139 0.138
