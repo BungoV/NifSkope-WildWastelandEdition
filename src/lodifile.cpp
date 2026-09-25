@@ -309,9 +309,12 @@ bool lodiWrite( const QString & path, const LodiSrcSet & set, LodiHeader * heade
 	quint32 maxBase = 0;
 	for ( size_t i = 0; i < n; i++ ) {
 		const LodiSrcInstance & r = set.instances[i];
-		if ( r.scale > LODI_SCALE_MAX || r.scale < 0.0f )
-			return fail( QString( "ref 0x%1 part %2 (base %3): scale %4 is outside 0 .. %5 (the u16/8192 ceiling); refused, not clamped" )
-				.arg( r.refFormId, 8, 16, QChar( '0' ) ).arg( r.scolPart ).arg( r.baseName ).arg( double( r.scale ) ).arg( double( LODI_SCALE_MAX ), 0, 'f', 5 ) );
+		if ( !( r.scale <= LODI_SCALE_MAX_WIDE ) || r.scale < 0.0f )
+			return fail( QString( "ref 0x%1 part %2 (base %3): scale %4 is outside 0 .. %5 (8 + the u16/8192 ceiling, v10); refused, not clamped" )
+				.arg( r.refFormId, 8, 16, QChar( '0' ) ).arg( r.scolPart ).arg( r.baseName ).arg( double( r.scale ) ).arg( double( LODI_SCALE_MAX_WIDE ), 0, 'f', 5 ) );
+		if ( r.flags & LODI_INST_SCALE_WIDE )
+			return fail( QString( "ref 0x%1: the caller set instance flag bit 7 (SCALE_WIDE); the writer alone decides it from the scale" )
+				.arg( r.refFormId, 8, 16, QChar( '0' ) ) );
 		if ( r.baseId > LODI_BASE_MAX )
 			return fail( QString( "base %1 (ref 0x%2): baseId %3 is past the u16 base table (65,535); refused" )
 				.arg( r.baseName ).arg( r.refFormId, 8, 16, QChar( '0' ) ).arg( r.baseId ) );
@@ -399,7 +402,7 @@ bool lodiWrite( const QString & path, const LodiSrcSet & set, LodiHeader * heade
 			zMin = std::min( zMin, r.pos[2] );
 			zMax = std::max( zMax, r.pos[2] );
 			// the quantised scale, because that is the one the consumer reads
-			const float qs = float( std::clamp( int( std::lround( r.scale * LODI_SCALE_DIVISOR ) ), 0, 65535 ) ) / LODI_SCALE_DIVISOR;
+			const float qs = lodiScaleQuantised( r.scale );
 			maxR = std::max( maxR, r.boundRadius * qs );
 			e++;
 		}
@@ -420,10 +423,10 @@ bool lodiWrite( const QString & path, const LodiSrcSet & set, LodiHeader * heade
 			q.pos[1] = lodoQuantU16( r.pos[1], float( cy ) * LODI_CHUNK_UNITS, LODI_CHUNK_UNITS );
 			q.pos[2] = lodoQuantU16( r.pos[2], c.zMin, c.zExtent );
 			lodiPackRotation( r.rot, q.rot );
-			q.scale = quint16( std::clamp( int( std::lround( r.scale * LODI_SCALE_DIVISOR ) ), 0, 65535 ) );
+			q.scale = lodiScaleWord( r.scale );
 			q.baseId = quint16( r.baseId );
 			q.ao = r.ao; q.sky = r.sky; q.ground = r.ground; q.seed = r.seed;
-			q.flags = r.flags;
+			q.flags = quint16( r.flags | ( lodiScaleIsWide( r.scale ) ? LODI_INST_SCALE_WIDE : 0 ) );
 			q.drawKey = r.drawKey;
 			cold[i].refFormId = r.refFormId;
 			cold[i].scolPart = r.scolPart;
@@ -467,7 +470,7 @@ bool lodiWrite( const QString & path, const LodiSrcSet & set, LodiHeader * heade
 			const LodiSrcInstance & r = set.instances[order[i]];
 			if ( !r.hasOccluder )
 				continue;
-			const float qs = float( std::clamp( int( std::lround( r.scale * LODI_SCALE_DIVISOR ) ), 0, 65535 ) ) / LODI_SCALE_DIVISOR;
+			const float qs = lodiScaleQuantised( r.scale );
 			const double vol = 8.0 * double( r.occHalf[0] * qs ) * double( r.occHalf[1] * qs ) * double( r.occHalf[2] * qs );
 			if ( !( vol > 0.0 ) )
 				continue;
@@ -491,7 +494,7 @@ bool lodiWrite( const QString & path, const LodiSrcSet & set, LodiHeader * heade
 			for ( size_t j = 0; j < keep; j++ ) {
 				const quint32 ii = v[j].second;
 				const LodiSrcInstance & r = set.instances[order[ii]];
-				const float qs = float( std::clamp( int( std::lround( r.scale * LODI_SCALE_DIVISOR ) ), 0, 65535 ) ) / LODI_SCALE_DIVISOR;
+				const float qs = lodiScaleQuantised( r.scale );
 				LodiOccluder b;
 				std::memset( &b, 0, sizeof( b ) );
 				for ( int k = 0; k < 3; k++ ) {
@@ -782,6 +785,25 @@ bool lodiWrite( const QString & path, const LodiSrcSet & set, LodiHeader * heade
 			scrappableWritten = 0;
 		}
 	}
+	/* v10, THE WIDE-SCALE BIT (lane BAKE2, 2026-09-25): like v9, no table and no
+	 * header word, only bit 7 of the instance flags and the version word. It
+	 * rises ONLY when an instance carries the bit, so a file whose scales all
+	 * fit stays the v7/v9 file it was, byte for byte. v10 is the v9 layout (bit
+	 * 6 keeps its meaning), so it needs v7's header block: a pre-v7 bake with a
+	 * wide scale is REFUSED -- dropping the bit would misplace the object by 8x
+	 * its size, and no pre-v7 version can say it. */
+	quint32 wideScaleWritten = 0;
+	for ( const LodiInstance & r : inst )
+		if ( r.flags & LODI_INST_SCALE_WIDE )
+			wideScaleWritten++;
+	if ( wideScaleWritten ) {
+		if ( h.version < LODI_VERSION_GROUP_SKY )
+			return fail( QString( "%1 instance(s) carry a scale above %2, which needs version %3 (the v7 header "
+				"block); this bake asked for a version-%4 file (--lodi-v6?). Refused, not clamped" )
+				.arg( wideScaleWritten ).arg( double( LODI_SCALE_MAX ), 0, 'f', 5 )
+				.arg( LODI_VERSION_WIDE_SCALE ).arg( h.version ) );
+		h.version = LODI_VERSION_WIDE_SCALE;
+	}
 	const quint32 headerBytes = lodiHeaderBytes( h.version );
 	QByteArray file;
 	file.resize( qsizetype( headerBytes ) );
@@ -921,6 +943,7 @@ bool lodiWrite( const QString & path, const LodiSrcSet & set, LodiHeader * heade
 		stats->maxInstancesPerChunk = maxInst;
 		stats->fileBytes = h.fileBytes;
 		stats->maxScale = maxScale;
+		stats->wideScaleInstances = wideScaleWritten;
 		stats->maxBaseId = maxBase;
 		stats->occluders = quint32( occ.size() );
 		stats->occluderCandidates = occCandidates;
@@ -985,12 +1008,12 @@ bool lodiRead( const QString & path, LodiHeader * header, LodiTable * table,
 	if ( h.version != LODI_VERSION && h.version != LODI_VERSION_AGGREGATE
 		&& h.version != LODI_VERSION_PLACEMENT_AO && h.version != LODI_VERSION_VERTEX_AO
 		&& h.version != LODI_VERSION_GROUP_SKY && h.version != LODI_VERSION_HORIZON
-		&& h.version != LODI_VERSION_SCRAPPABLE )
-		return refuse( QString( "version %1; this reader knows %2, %3, %4, %5, %6, %7 and %8" )
+		&& h.version != LODI_VERSION_SCRAPPABLE && h.version != LODI_VERSION_WIDE_SCALE )
+		return refuse( QString( "version %1; this reader knows %2, %3, %4, %5, %6, %7, %8 and %9" )
 			.arg( h.version ).arg( LODI_VERSION ).arg( LODI_VERSION_AGGREGATE )
 			.arg( LODI_VERSION_PLACEMENT_AO ).arg( LODI_VERSION_VERTEX_AO )
 			.arg( LODI_VERSION_GROUP_SKY ).arg( LODI_VERSION_HORIZON )
-			.arg( LODI_VERSION_SCRAPPABLE ) );
+			.arg( LODI_VERSION_SCRAPPABLE ).arg( LODI_VERSION_WIDE_SCALE ) );
 	/* v7's header BLOCK is 512 bytes. On every older version this is still 256
 	 * and the crc window below is the one it always was. */
 	const quint32 headerBytes = lodiHeaderBytes( h.version );
@@ -1064,7 +1087,7 @@ bool lodiRead( const QString & path, LodiHeader * header, LodiTable * table,
 	 * the scrappable flag bit and carries no stream, so it is v7-shaped here. */
 	const bool v8 = ( h.version == LODI_VERSION_HORIZON );
 	const bool v7 = ( h.version == LODI_VERSION_GROUP_SKY ) || v8
-		|| ( h.version == LODI_VERSION_SCRAPPABLE );
+		|| ( h.version == LODI_VERSION_SCRAPPABLE ) || ( h.version == LODI_VERSION_WIDE_SCALE );
 	const bool v6 = ( h.version == LODI_VERSION_VERTEX_AO ) || v7;
 	const bool v5 = ( h.version == LODI_VERSION_PLACEMENT_AO ) || v6;
 	const int padFrom = v5 ? H_RESERVED_F1
@@ -1605,12 +1628,18 @@ bool lodiRead( const QString & path, LodiHeader * header, LodiTable * table,
 						"where that bit is reserved zero; version %4 is the one that means it" )
 						.arg( i ).arg( int( LODI_INST_SCRAPPABLE ), 0, 16 ).arg( h.version )
 						.arg( LODI_VERSION_SCRAPPABLE ) );
+				// v10: bit 7 is reserved zero below version 10, for the same reason
+				if ( ( r.flags & LODI_INST_SCALE_WIDE ) && h.version < LODI_VERSION_WIDE_SCALE )
+					return refuse( QString( "instance %1 carries the wide-scale bit (0x%2) in a version-%3 file, "
+						"where that bit is reserved zero; version %4 is the one that means it" )
+						.arg( i ).arg( int( LODI_INST_SCALE_WIDE ), 0, 16 ).arg( h.version )
+						.arg( LODI_VERSION_WIDE_SCALE ) );
 				/* bungo 2026-09-11 08:0x item 3, the per-instance bound radius:
 				 * the runtime takes base.boundRadius x scale, so a zero scale
 				 * is a zero radius and the object is culled at every distance.
 				 * The base table already refuses boundRadius 0; this is the
 				 * other half, and it is a REFUSAL, not a clamp. */
-				if ( r.scale == 0 )
+				if ( r.scale == 0 && !( r.flags & LODI_INST_SCALE_WIDE ) )
 					return refuse( QString( "instance %1 (ref 0x%2): scale is 0, so base.boundRadius x scale is 0 "
 						"and the screen-size test can never select it" ).arg( i ).arg( T.cold[i].refFormId, 8, 16, QChar( '0' ) ) );
 				/* THE CELL AN INSTANCE IS IN is the one the cell-range table

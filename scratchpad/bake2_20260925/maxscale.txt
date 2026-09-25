@@ -1,0 +1,8 @@
+ws 0000003c: refs 735247; scale > 7.99988: 26; of those with a STAT base carrying MNAM: 0
+ws 0000003c: max XSCL 10.0000 on ref 00047d7a (base 00034107, fallout4.esm, lod None)
+ws 000a7ff4: refs 4276; scale > 7.99988: 0; of those with a STAT base carrying MNAM: 0
+ws 000a7ff4: max XSCL 3.6200 on ref 00128886 (base 0003aa21, fallout4.esm, lod False)
+ws 03000b0f: refs 184457; scale > 7.99988: 8; of those with a STAT base carrying MNAM: 0
+ws 03000b0f: max XSCL 10.0000 on ref 03051449 (base 000b1202, dlccoast.esm, lod False)
+ws 0600290f: refs 146055; scale > 7.99988: 12; of those with a STAT base carrying MNAM: 4
+ws 0600290f: max XSCL 10.0000 on ref 0604ef2e (base 00107468, dlcnukaworld.esm, lod None)

@@ -452,14 +452,16 @@ def read_lodi(path):
     if h['version'] == 2:
         raise Refusal('version 2: a v2 instance table has no occluder tables (header 0x98 and 0xA0 were '
                       'reserved), so every cell would read as occluding nothing')
-    if h['version'] not in (3, 4, 5, 6, 7, 8, 9):
-        raise Refusal('version %d; this reader knows 3, 4, 5, 6, 7, 8 and 9' % h['version'])
+    if h['version'] not in (3, 4, 5, 6, 7, 8, 9, 10):
+        raise Refusal('version %d; this reader knows 3, 4, 5, 6, 7, 8, 9 and 10' % h['version'])
     # v8 = v7 + the per-vertex HORIZON stream, in the room v7's header left reserved.
     # RETIRED 2026-09-19 (lane HORIZONOUT): no exe writes one, this reader still reads one.
     v8 = h['version'] == 8
     # v9 = v7 + instance flag bit 6, the workshop-scrappable bit. It is a superset of v7
     # and NOT of v8: a v9 file carries no horizon stream and its 0x11C..0x1FF are reserved.
-    v9 = h['version'] == 9
+    # v10 = v9 + instance flag bit 7, SCALE_WIDE: scale = 8 + u16 / 8192 (lane BAKE2, 2026-09-25).
+    v10 = h['version'] == 10
+    v9 = h['version'] == 9 or v10
     # v7 = v6 + the group table and/or the per-vertex sky stream, in a 512-byte header BLOCK
     v7 = h['version'] == 7 or v8 or v9
     v6 = h['version'] == 6 or v7    # v6 = v5 + the per-instance vertex-AO stream
@@ -816,10 +818,11 @@ def read_lodi(path):
         prevkey = None
         for i in range(s, e):
             r = T['instances'][i]
-            if r['flags'] & ~(0x7F if v9 else 0x3F):
+            known = 0xFF if v10 else (0x7F if v9 else 0x3F)
+            if r['flags'] & ~known:
                 raise Refusal('instance %d reserved flags 0x%04x (version %d knows 0x%02x)'
-                              % (i, r['flags'], h['version'], 0x7F if v9 else 0x3F))
-            if r['scale'] == 0:
+                              % (i, r['flags'], h['version'], known))
+            if r['scale'] == 0 and not r['flags'] & 0x80:
                 raise Refusal('instance %d (ref %08x): scale is 0, so base.boundRadius x scale is 0'
                               % (i, T['cold'][i]['refFormId']))
             r['x'] = cx * CHUNK_UNITS + r['px'] / 65535.0 * CHUNK_UNITS
@@ -862,7 +865,7 @@ def read_lodi(path):
                            'could have moved it' % (line, CELL_QUANT_TOL)))
                 T['cellAmbiguous'].append((i, ci, stored, derived, line))
             r['m'] = unpack_rotation(r['r0'], r['r1'], r['r2'])
-            r['scaleF'] = r['scale'] / 8192.0
+            r['scaleF'] = r['scale'] / 8192.0 + (8.0 if r['flags'] & 0x80 else 0.0)
             key = (r['cell'], r['drawKey'], T['cold'][i]['refFormId'], T['cold'][i]['scolPart'])
             if prevkey is not None and prevkey > key:
                 raise Refusal('instance %d out of (cell, drawKey, ref, part) order' % i)

@@ -199,8 +199,8 @@ def main():
 
     # ---- c. the per-instance bound radius --------------------------------
     print('c. the bound radius rule: base.boundRadius x scale')
-    ck.check('c1 no record has scale 0', all(r['scale'] != 0 for r in T['instances']),
-             sum(1 for r in T['instances'] if r['scale'] == 0))
+    ck.check('c1 no record has scale 0', all(r['scaleF'] != 0 for r in T['instances']),
+             sum(1 for r in T['instances'] if r['scaleF'] == 0))
     ck.check('c2 no base has boundRadius 0', all(b['boundRadius'] > 0 for b in L['bases']),
              sum(1 for b in L['bases'] if not b['boundRadius'] > 0))
     over = 0
@@ -455,9 +455,13 @@ def main():
 
     # ---- j. the NATIVE1c words: each WRITTEN and each MOVING -------------
     print('j. the v4/v5 words (lane NATIVE1c)')
-    ck.check('j0 the .lodo is at version 5 (SEAM1 W4) and the .lodi at 3, 4, 5, 6, 7 or 8 (%d / %d)'
+    ck.check('j0 the .lodo is at version 5 (SEAM1 W4) and the .lodi at 3, 4, 5, 6, 7, 8, 9 or 10 (%d / %d)'
              % (h['version'], ih['version']),
-             h['version'] == 5 and ih['version'] in (3, 4, 5, 6, 7, 8))
+             h['version'] == 5 and ih['version'] in (3, 4, 5, 6, 7, 8, 9, 10))
+    # v10 (lane BAKE2): bit 7 appears in a v10 file and only there, and a v10 file carries at least one
+    wide = sum(1 for r in T['instances'] if r['flags'] & 0x80)
+    ck.check('j0b the wide-scale bit (0x80) is set on %d instance(s): > 0 exactly when the .lodi is version 10 (%d)'
+             % (wide, ih['version']), (wide > 0) == (ih['version'] == 10))
     # j1: the card count
     cardsFromRows = sum(1 for bs in L['bases'] if bs['cardLayer'] != 0xFFFF)
     ck.check('j1 .lodo cardCount is WRITTEN and equals the rows that name a card layer '

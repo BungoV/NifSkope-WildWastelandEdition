@@ -293,7 +293,7 @@ def derive(lodo_path, lodi_path):
     d['lodi.chunkCount'] = ih['chunkCount']
     d['lodi.maxInstPerChunk'] = ih['maxInstancesPerChunk']
     d['lodi.partial'] = 1 if (ih['flags'] & 2) else 0
-    d['lodi.maxScale'] = round(max(r['scale'] for r in T['instances']) / 8192.0, 4)
+    d['lodi.maxScale'] = round(max(r['scaleF'] for r in T['instances']), 4)   # v10: 8 + u16/8192 under bit 7
     d['lodi.maxBaseId'] = max(r['baseId'] for r in T['instances'])
     d['lodi.occluderCount'] = ih['occluderCount']
     d['lodi.maxOccludersPerCell'] = ih['maxOccludersPerCell']

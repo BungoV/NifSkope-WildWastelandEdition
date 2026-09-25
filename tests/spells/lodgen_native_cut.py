@@ -160,7 +160,7 @@ def read_lodi(path):
             r['x'] = cx * CHUNK_UNITS + r['px'] / 65535.0 * CHUNK_UNITS
             r['y'] = cy * CHUNK_UNITS + r['py'] / 65535.0 * CHUNK_UNITS
             r['z'] = c['zMin'] + r['pz'] / 65535.0 * c['zExtent']
-            r['scaleF'] = r['scale'] / 8192.0
+            r['scaleF'] = r['scale'] / 8192.0 + (8.0 if r['flags'] & 0x80 else 0.0)   # v10 SCALE_WIDE
             r['m'] = unpack_rotation(r['r0'], r['r1'], r['r2'])
     return T
 

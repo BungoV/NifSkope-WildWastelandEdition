@@ -1,0 +1,14 @@
+ws 0600290f: refs 146055; scale > 7.99988: 12; of those with a STAT base carrying MNAM: 4
+ws 0600290f: max XSCL 10.0000 on ref 0604ef2e (base 00107468, dlcnukaworld.esm, lod None)
+   ref 0601bef8 base 0018f36a scale 10.000000 (dlcnukaworld.esm) lod False
+   ref 0601bef9 base 0018f36a scale 10.000000 (dlcnukaworld.esm) lod False
+   ref 060205df base 001ec1df scale 10.000000 (dlcnukaworld.esm) lod False
+   ref 06020611 base 001ec1df scale 10.000000 (dlcnukaworld.esm) lod False
+   ref 0602619e base 0018f36a scale 10.000000 (dlcnukaworld.esm) lod False
+   ref 06029982 base 001c6ee1 scale 8.880000 (dlcnukaworld.esm) lod None
+   ref 0604d45a base 0600aebf scale 9.969999 (dlcnukaworld.esm) lod True
+   ref 0604d45d base 000c8d77 scale 8.330000 (dlcnukaworld.esm) lod True
+   ref 0604dda1 base 0600cb9a scale 9.230000 (dlcnukaworld.esm) lod True
+   ref 0604ddb9 base 000c8d77 scale 8.330000 (dlcnukaworld.esm) lod True
+   ref 0604eeda base 0010746a scale 10.000000 (dlcnukaworld.esm) lod None
+   ref 0604ef2e base 00107468 scale 10.000000 (dlcnukaworld.esm) lod None

@@ -3078,6 +3078,13 @@ bool lodgenNativeWrite( QString * report, QString * error )
 						"surface distance, so every join it made is real." )
 						.arg( double( s.identityJoinGap ), 0, 'f', 1 ).arg( joinEligible )
 						.arg( joinSamples ).arg( joinPairs ).arg( joinMs ) ) );
+		/* v10 (lane BAKE2, 2026-09-25): placements above the old 7.99988 line,
+		 * written with instance flag bit 7. 0 = the file is the v7/v9 file it
+		 * always was; any other number = version 10. */
+		ladderLine += QString( "\n  native-wide-scale: %1 of %2 placements above %3 (flag bit 7); max scale %4; "
+			".lodi version %5" )
+			.arg( stats.wideScaleInstances ).arg( stats.instances ).arg( double( LODI_SCALE_MAX ), 0, 'f', 5 )
+			.arg( double( stats.maxScale ), 0, 'f', 4 ).arg( stats.version );
 		/* v9 (lane HORIZON3, 2026-09-19), on its own prefix. THE GATE NUMBER IS
 		 * 14: that is what the three-clause rule counted on the measured urban
 		 * region's 33,123 placements (0.04%), read out of Fallout4.esm by

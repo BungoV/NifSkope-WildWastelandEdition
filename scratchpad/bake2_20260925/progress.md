@@ -83,3 +83,19 @@
   side edges, as the pre-war one does.
 - Ruling (a): v10 wide-scale bit patched into src (lodifile.h/.cpp, lodinative.cpp, nativeemit.cpp), the decoder,
   fields spell, census check, cut.py and the docs (§4.14). Not built yet. Next: gate instruments, build, gates.
+
+## 20:14 (clock read) -- ruling (a): built; instruments, rung RED, fixture identical
+- Max XSCL in his load order (overscale.py, maxscale.txt): Commonwealth 10.0 (26 refs over 7.99988, 0 with LOD),
+  pre-war 3.62, Far Harbor 10.0 (8 over, 0 with LOD), Nuka-World 10.0 (12 over, 4 with LOD). Engine cap 10.0; the
+  v10 range 8..15.99988 gives 60 percent headroom at the same 1/8192 step.
+- Instruments, no build (widescale_synth.py on the installed pre-war v7 .lodi): hand-built v10 read by the new
+  decoder (instance 0 1.0 -> 9.0, 1349 others unchanged); strip = version + flag byte + 3 CRCs only; HEAD's decoder
+  refuses it ('version 10'); bit 7 in v9 / v7, bit 8 in v10, scale 0 without bit 7 each refused by its own rule;
+  scale 0 with bit 7 reads 8.0; recrc control identical. WIDESCALE INSTRUMENTS PASS.
+- widescale_check.py refuter on the pre-war v7 file: RED on W1/W2/W3/W5 as it must be.
+- Build 20:00 (6 objects: every includer of lodifile.h) gave exe 50e5d920, which Avast blocked (rc 126, 'Access is
+  denied' after a 90 s hold, three tries). Relinked 20:12 -> 0d71d0d6, runs after the 90 s scan. The blocked file is
+  kept as release/NifSkope.blocked_50e5d920.exe (untracked). No exclusion added.
+- Gate on the RUNG (7cfccac1): NW objects bake rc 1, 'ref 0x0604ddb9 ... scale 8.33 is outside 0 .. 7.99988;
+  refused, not clamped' -> WIDESCALE G2 FAIL (pre-registered RED).
+- Fixture (--native-fixture) rung vs new: 3 files, 0 differ.

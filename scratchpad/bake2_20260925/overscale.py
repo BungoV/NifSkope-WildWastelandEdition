@@ -45,5 +45,7 @@ for path, buf in zip(plugins, bufs):
 over = sorted((r, b, s, f) for r, (b, s, f) in refs.items() if s > LIMIT)
 withlod = [o for o in over if stat_lod.get(o[1])]
 print('ws %08x: refs %d; scale > %.5f: %d; of those with a STAT base carrying MNAM: %d' % (WS, len(refs), LIMIT, len(over), len(withlod)))
+mx = max(refs.items(), key=lambda kv: kv[1][1]) if refs else None
+if mx: print('ws %08x: max XSCL %.4f on ref %08x (base %08x, %s, lod %s)' % (WS, mx[1][1], mx[0], mx[1][0] or 0, mx[1][2], stat_lod.get(mx[1][0])))
 for r, b, s, f in over[:30]:
-    print('   ref %08x base %08x scale %.3f (%s) lod %s' % (r, b or 0, s, f, stat_lod.get(b)))
+    print('   ref %08x base %08x scale %.6f (%s) lod %s' % (r, b or 0, s, f, stat_lod.get(b)))
