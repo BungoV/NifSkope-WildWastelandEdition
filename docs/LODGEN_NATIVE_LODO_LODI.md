@@ -1974,8 +1974,9 @@ repointing a base's MNAM does not change it.
    `(SCOL formId, each part's base formId, each placement's position, rotation
    and scale)`.
 4. **(SWAP1, v6) material swaps, each ONLY when set**, so a worldspace with no
-   swap keeps its pre-v6 hash: after a reference's flag byte, `'XMSP'` and its
-   XMSP form; after a base's slot paths, `'MODS'` and its MODS form; after a SCOL's
+   swap reaching a LOD placement keeps its pre-v6 hash: after a reference's flag
+   byte, `'XMSP'` and its XMSP form, for a reference that can reach the library
+   (enabled, not deleted, a SCOL or a LOD-bearing base); after a base's slot paths, `'MODS'` and its MODS form; after a SCOL's
    formId, `'MODS'` and the SCOL's MODS form; and last, over every distinct swap
    form named (including part MODS reached through the third clause of §3.8), in
    ascending order: `(form, row count or 0xFFFFFFFF when the record is missing,

@@ -466,9 +466,13 @@ bool nativeObjectCensus( const EsmWorld & world, std::vector<quint32> * baseIdsO
 		objHash = fnv( objHash, r.scale );
 		const quint8 fl = quint8( ( r.initiallyDisabled ? 1 : 0 ) | ( r.deleted ? 2 : 0 ) );
 		objHash = fnv( objHash, fl );
-		/* SWAP1: the REFR's XMSP joins the hash ONLY when it is set, so a
-		 * worldspace with no swap keeps the hash it had before v6. */
-		if ( r.materialSwap ) {
+		/* SWAP1: the REFR's XMSP joins the hash ONLY when it is set AND the
+		 * reference can reach the library (enabled, not deleted, a SCOL or a
+		 * LOD-bearing base), so a worldspace whose swaps never touch a LOD
+		 * placement keeps the hash it had before v6. */
+		const bool reachesLibrary = !r.initiallyDisabled && !r.deleted && r.base
+			&& ( std::memcmp( &r.baseType, "SCOL", 4 ) == 0 || world.lodBase( r.base ).hasLod );
+		if ( r.materialSwap && reachesLibrary ) {
 			objHash = fnv( objHash, quint32( 0x50534D58U ) );    // 'XMSP'
 			objHash = fnv( objHash, r.materialSwap );
 			swapForms.insert( r.materialSwap );
