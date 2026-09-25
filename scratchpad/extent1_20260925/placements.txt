@@ -1,0 +1,6 @@
+placements 184431 in 4541 cells; placement cell bounds x -42..31 y -48..38
+.lodl extent [-96,-96]..[95,95]: placement cells outside it 0 (0 placements)
+placement cells on UNPAINTED LAND (no BTXT/ATXT in Fallout4.esm): 1058 cells, 14714 placements
+frame [-64,-48]..[31,47]: placement cells outside the terrain region 0 (0 placements)
+frame [-42,-48]..[32,38]: placement cells outside the terrain region 0 (0 placements)
+frame [-96,-96]..[95,95]: placement cells outside the terrain region 0 (0 placements)
