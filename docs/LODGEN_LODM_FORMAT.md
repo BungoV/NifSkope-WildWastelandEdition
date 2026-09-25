@@ -81,6 +81,7 @@ emits a key whose value is the default (that is what keeps the file compact).
 | normal | `normal` | `normal` | `_n` / `_n` | **BC7** (a `DX10` header, `BC7_UNORM`; since 2026-09-23, lane IMPOSTORDEPTH2: BC3 carried the height in the 5:6:5 colour block) | R = normal X, G = normal Y, B = height, A = sway weight |
 | mask | `gsaos` | `rmaos` | `_gsaos` / `_rmaos` | BC3 | R gloss / roughness, G specular / metallic, B AO, A subsurface mask |
 | emissive | `emissive` | `emissive` | `_g` / `_e` | BC1 | RGB emissive colour, no alpha |
+| specular | — | `specular` | — / `_s` | **BC7** (the `_n` sheet's codec) | RGB = sqrt(F0'), **A = specular weight**; `card` files of family pbr only, and only when a shape departs from the default specular (§3.4) |
 
 Reader rules a consumer may rely on:
 
@@ -301,6 +302,34 @@ Because `_n.A` then MEANS something else, the payload version moves, on the card
 * **Owed:** the aggregate (§3a) composites the model weight texel by texel already (§3a.3), but writes
   no `sway` key and stays 1; teaching it v2 is owed with the ring (lodgenaggregate.cpp is not this
   lane's). FO4CS's reader is owed (`docs/LODGEN_IMPOSTOR_SPEC.md`, the owed paragraph).
+
+### 3.4 `textures.specular` -- a `.pbrm` model's specular on the card (2026-09-25, lane CARDFIX1 step 7)
+
+bungo ruled (IMPOSTORPBRM1) that a card baked from a `.pbrm` model carries that material's specular
+weight, colour and IOR. They travel as ONE optional sheet, `<id>_oct_s.DDS`, named by the texture key
+`specular`:
+
+* **RGB = sqrt(F0')**, linear, where F0' = clamp(weight x colour x ((ior - 1) / (ior + 1))^2), colour
+  sRGB-decoded -- the PBRM v6 dielectric law (the editor's preview and NifSkope's viewport). A reader
+  squares it. sqrt is the Fresnel amplitude: the default F0 0.04 sits at level 51, so one level is 3.9 %
+  of it where a linear F0 would be 10 %. F90' = sat(50 F0') derives from it; nothing else is needed for
+  a dielectric lobe. (OpenPBR's remap is ior' = (1 + sqrt F0') / (1 - sqrt F0').)
+* **A = the specular weight.** A metal's lobe is weight x F82(base, colour): the metal keeps its weight
+  and loses only the colour as its F82 edge tint, which FO4CS does not read (PBRM-v6.md, dielectrics
+  only).
+* **Absent key = F0 0.04, weight 1** (the default specular: weight 1, white, IOR 1.5). The bake writes
+  the sheet only when some shape departs from that; a legacy card never has one.
+* BC7 at the aux size (`auxDiv`), mips as the other aux sheets. The BC7 channel weights are the `_n`
+  sheet's ({1, 1, 32, 1}), so B is favoured over R and G on this sheet too; the error is gated against
+  the same set's `_n` R/G codec floor (`tests/spells/impostor_pbrm.sh` R4).
+* **No version bump.** A new texture key changes no existing key's meaning, and a reader ignores keys
+  it does not know (§2).
+* **Not in the card ARRAYS.** `cardArray` files carry no specular layer yet; an array consumer draws
+  arrayed pbr cards at F0 0.04, weight 1. Owed with the FO4CS reader.
+* **Separable.** The sheet and the key are one commit of their own (`src/lodgen.cpp`, the card region);
+  dropping it leaves the rest of step 7 (the `.pbrm` colour, tint, roughness, metallic) intact.
+* This `_s` is a CARD sheet, `<id>_oct_s.DDS`; it is unrelated to the chunk atlas's
+  `<ws>.LodgenObjects_s.DDS` (BC5, gloss / specular, `LODGEN_IMPOSTOR_SPEC.md`, "Chunk shapes").
 
 ## 3a. `kind: "aggregate"` — one forested CELL's whole tree cluster on one card set
 

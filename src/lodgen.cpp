@@ -3169,6 +3169,18 @@ const LodgenCard & lodgenCard( const QString & dir, quint32 formID,
 				if ( emi.size() != alb.size() )
 					emi = QImage();
 			}
+			/* The fifth sheet, a pbr set's SPECULAR (IMPOSTORPBRM1): `_s`, RGB sqrt(F0')
+			 * and A the specular weight. Optional twice over: the bake writes it only
+			 * when a shape departs from the default specular, and never on a legacy set. */
+			QImage spc;
+			if ( card.octPbr ) {
+				const QString octS = dir + "/" + id + QStringLiteral( "_oct_s.png" );
+				if ( QFile::exists( octS ) ) {
+					spc = QImage( octS ).convertToFormat( QImage::Format_ARGB32 );
+					if ( spc.size() != alb.size() )
+						spc = QImage();
+				}
+			}
 			if ( !alb.isNull() && nrm.size() == alb.size() && rm.size() == alb.size() ) {
 				/* Under the transparent texels: every channel of every sheet
 				 * extended from the silhouette, frame by frame, as deep as the
@@ -3178,6 +3190,8 @@ const LodgenCard & lodgenCard( const QString & dir, quint32 formID,
 				lodgenDilateFrames( rm, alb, card.octTileW, card.octTileH, deep );
 				if ( !emi.isNull() )
 					lodgenDilateFrames( emi, alb, card.octTileW, card.octTileH, deep );
+				if ( !spc.isNull() )
+					lodgenDilateFrames( spc, alb, card.octTileW, card.octTileH, deep );
 				lodgenDilateFrames( alb, alb, card.octTileW, card.octTileH, deep );	// last: it is also the coverage
 				/* AFTER the dilate, never before: the dilate is what floods the
 				 * height outside the silhouette with the frame's average. */
@@ -3282,6 +3296,12 @@ const LodgenCard & lodgenCard( const QString & dir, quint32 formID,
 					const QImage emiA = down( emi );
 					ok = lodgenWriteDds( base + emSfx, aw, ah, pixels( emiA ), false, auxMips ) && ok;
 				}
+				// the specular sheet is BC7 with its alpha (the weight), the `_n` sheet's codec
+				if ( !spc.isNull() && !QFile::exists( base + QStringLiteral( "_s.DDS" ) ) ) {
+					const QImage spcA = down( spc );
+					ok = lodgenWriteDds( base + QStringLiteral( "_s.DDS" ), aw, ah, pixels( spcA ), true, auxMips,
+							false, 0, 0, false, true ) && ok;
+				}
 				// the same move as the crossed-quad path above (lane LAYOUT1)
 				const QString game = QStringLiteral( "Data\\" ) + lodgenFo4csGameCardPath()
 					+ QChar( 92 ) + id + QStringLiteral( "_oct" );
@@ -3304,6 +3324,9 @@ const LodgenCard & lodgenCard( const QString & dir, quint32 formID,
 					tex.insert( QLatin1String( lodmMaskKey( card.octPbr ) ), game + maskSfx );
 					if ( !emi.isNull() )
 						tex.insert( QStringLiteral( "emissive" ), game + emSfx );
+					// a new key, no version bump: a reader ignores keys it does not know (LODGEN_LODM_FORMAT 2)
+					if ( !spc.isNull() )
+						tex.insert( QStringLiteral( "specular" ), game + QStringLiteral( "_s.DDS" ) );
 					root.insert( QStringLiteral( "textures" ), tex );
 					// the multiple the sheet is scaled by; 0 = this set emits nothing
 					root.insert( QStringLiteral( "emissiveScale" ), double( card.octEmissiveScale ) );
