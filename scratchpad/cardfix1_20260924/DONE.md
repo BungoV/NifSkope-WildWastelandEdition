@@ -1,14 +1,9 @@
-PARTIAL -- lane CARDFIX1 (LOD-D), chain of seven steps. Steps 1-6 landed (6b, 6c after). Step 7
-(IMPOSTORPBRM1) is BUILT and committed (exe 45719ad4). The director decided both run-3 reds (2026-09-25,
-director decisions, not rulings by bungo). Gate run 4 on those bars: 13/14.
-LEFT: one row. The non-aa arm, judged on fully covered texels as decided, still fails 4 rows of the
-tree-animated material (roughness, metallic, sqrtF0.R, weight: 0.872-0.896 within 2 against 0.90; medians
-exact). 98 % of the misses sit beside a texel of the OTHER material: they are texels where the two
-materials meet, not partial coverage. Away from the other material the share is 0.997. The fully covered
-population keeps only 13781 of that material's texels (the aa arm has 132925), so the boundary share
-rises from 2.6 % to 12.2 %. All the breakages still fail on this population, so the decision's drop
-clause did not fire. The row is neither passing nor dropped: the director's call (section 2, step 7,
-"Run 4"). No bar was changed after run 4.
+DONE -- lane CARDFIX1 (LOD-D), all seven steps landed (6b, 6c after 6). Step 7 (IMPOSTORPBRM1): exe
+45719ad4. Its gate is green on run 5, 14/14. That run uses three director decisions (2026-09-25, not
+rulings by bungo): the colour bar is max(1.25 x floor, 0.5 level); both arms are judged on
+COVER=full,interior (fully covered texels with no 4-neighbour of another material); and every breakage
+still fails on that population on both arms. native_lighting is left to the director (its 2 failures
+reproduce on the step-5 exe). Owed outside this lane: the FO4CS reader for the `_s` sheet.
 # 1. Skills loaded
 nifskope-ww-worktree-build, nifskope-ww-build-verify, nifskope-ww-lodgen, nifskope-ww-render-shot,
 ww-test-harness-add, search-lean (the common rules' list, loaded with the Skill tool before any work).
@@ -239,6 +234,34 @@ ww-test-harness-add, search-lean (the common rules' list, loaded with the Skill 
 - BC7 weights {1,1,32,1} apply to `_s` too (lodgenWriteDds' BC7 path is the `_n` sheet's), so B is
   favoured. The measured error is still far under the codec floor (R4).
 
+### Run 5 -- GREEN, 14/14 (2026-09-25 02:5x; fix40; gates/impostor_pbrm.run5.out)
+- DIRECTOR DECISION (a) after run 4, not a ruling by bungo. On both arms, every material row and both
+  identity floors judge only COVER=full,interior: alpha 255 texels with no 4-neighbour of another material.
+  A boundary texel mixes two materials, which is correct and not what these rows test. The rule is named in
+  the gate header and in impostor_pbrm.py (covmin, interior, classes).
+- Identity floors on that population: aa median 0.00, p90 1.0 over 76216 texels; non-aa median 0.00, p90
+  1.0 over 83992. Colour bar 0.50 on both.
+- Correct code, share within 2 (bar 0.90) and colour margin (bar - measured):
+
+  | arm | MapleAtlas01 (texels) | material rows | colour | MapleAtlas02_Tree (texels) | material rows | colour |
+  |---|---|---|---|---|---|---|
+  | aa | 73646 | 0.985-0.992 | 0.31, margin +0.19 | 2570 | 0.956-0.972 | 0.29, margin +0.21 |
+  | non-aa | 72873 | 0.995-0.998 | 0.33, margin +0.17 | 11082 | 0.996-0.999 | 0.35, margin +0.15 |
+
+- The breakages on this population, both arms (margin = bar - measured):
+
+  | breakage | aa | non-aa |
+  |---|---|---|
+  | --red add (tint rule) | 1 FAIL: leaf colour 4.10, margin -3.60 | 1 FAIL: leaf colour 4.19, margin -3.69 |
+  | --red ior | 6 FAIL: sqrtF0 R/G/B both materials, 0.000-0.005 within 2 (margin >= -0.895) | 6 FAIL: 0.000-0.001 within 2 |
+  | --red decode | 5 FAIL: 0.000 within 2 (margin -0.90) | 5 FAIL: 0.000 within 2 |
+  | pre-step-7 exe | 2 FAIL: family legacy, _rmaos / _s absent | 2 FAIL: the same |
+
+  R3 ok/ok. R4: 0.067 / 1.0 <= 2.776 / 10, and the 4-bit red fails.
+- Population note: on the aa arm, the leaf material keeps only 2570 texels, down from 132925 at alpha >= 128.
+  aa leaf texels are mostly partial alpha, so few reach 255. That is above the rows' 500 minimum, and every
+  red still bites at that size (add 4.10). The non-aa leaf keeps 11082.
+
 ### Run 4 -- the director's decisions applied (2026-09-25 02:4x; director decisions, not rulings by bungo)
 - **(1) Colour rows:** bar = max(1.25 x identity floor, 0.5 level), which is one 8-bit rounding plus
   margin. Every breakage still fails at 0.5. The margins below are bar minus measured, so a negative margin
@@ -411,6 +434,15 @@ Output: gates/cardres_test.out (pictures under cardres/, not committed).
   bar 4.082 / 15: ok. RED 1, the next frame: 51.099 > 4.082. RED 2, the 4-bit sway: mean 6.702 fails.
   The synthetic Hero set for comparison: 1.281 / 4 against its own R/G floor 4.992 / 16.
 - G1-G3 unchanged from run 3 (same exe, same bake).
+
+## Step 7, run 5 -- GREEN (exe 45719ad4; gates/impostor_pbrm.run5.out; fix40, COVER=full,interior)
+| row | measured |
+|---|---|
+| R1 aa / R2 non-aa | 15 / 15 ok and 15 / 15 ok |
+| reds aa: add / ior / decode / pre-step-7 exe | 1 / 6 / 5 / 2 FAIL |
+| reds non-aa: add / ior / decode / pre-step-7 exe | 1 / 6 / 5 / 2 FAIL |
+| R3 / R4 | ok / ok |
+| total | 14 / 14 ok |
 
 ## Step 7, run 4 on the director's bars (exe 45719ad4; gates/impostor_pbrm.run4.out; fix39)
 | row | measured |

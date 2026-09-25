@@ -1,9 +1,9 @@
 ## HANDOFF text
 
-**Lane CARDFIX1 (LOD-D), 2026-09-24/25: PARTIAL. Steps 1-6 landed (G4 decided by the director, (a)); step 7 built; director decisions on its two bars applied; gate run 4 13/14, one non-aa row left for the director.**
+**Lane CARDFIX1 (LOD-D), 2026-09-24/25: DONE. Steps 1-7 landed (G4 and step 7's gate bars decided by the director, not bungo).**
 Branch `cardfix1-20260924` in `E:\Projects\NifskopeWWE-cardfix1` (from 71f96c1). Commits: step 1 19c0347,
 step 2 91ddd41, step 3 d8302c9, step 4 7896ad1, step 5 1303334 + 6c5f5f8, step 6 24e7835, step 6b 6430dff
-(the N8 default), step 6c = the G4 re-pin commit, step 7 2672e43 + 1f0368d + 3e92051 + the gate/docs commit. Exe 45719ad43e509a46e6bf04a4dfd3f9d342e844d1. Report: `scratchpad/cardfix1_20260924/DONE.md`.
+(the N8 default), step 6c = the G4 re-pin commit, step 7 2672e43 + 1f0368d + 3e92051 + 8dc4e9e + 9d3fbe3 + the run-5 commit. Exe 45719ad43e509a46e6bf04a4dfd3f9d342e844d1. Report: `scratchpad/cardfix1_20260924/DONE.md`.
 
 * **Step 5 (IMPOSTORRING1), a horizon ring card set** (`WW_IMPOSTOR_RING=16`, 16 views x 1 row): baked, carried
   in the `.lodm` as `views`/`grid`, drawn by nearest azimuth; an old exe refuses it by name. **Finding for bungo:
@@ -34,11 +34,12 @@ step 2 91ddd41, step 3 d8302c9, step 4 7896ad1, step 5 1303334 + 6c5f5f8, step 6
   weight, colour and IOR, and the TintMask is applied in the bake). A model whose every textured shape
   resolves a `.pbrm` bakes family pbr: the bake photographs the tinted base (PBRM v6 law) and the RMAOS, and
   writes a new `_oct_s` sheet (RGB = sqrt(F0'), A = weight; BC7) named by a new `.lodm` key `specular`. Gate
-  `tests/spells/impostor_pbrm.sh`, run 4 on the director's decisions (colour bar max(1.25 x floor, 0.5);
-  non-aa arm judged on fully covered texels): 13/14. Every breakage fails on both arms. Left: the non-aa
-  row fails 4 rows of the leaf material on texels where trunk and leaf meet (98 % of the misses; 0.997
-  away from the boundary). The options are in DONE.md, step 7, "Run 4". The `_s` format is separable (commit 3e92051). FO4CS reader owed (contract in
-  LODGEN_LODM_FORMAT 3.4). native_lighting's 2 failures reproduce on the step-5 exe: baseline drift, not step 7.
+  `tests/spells/impostor_pbrm.sh`: 14/14 on run 5. It uses the director's decisions: the colour bar is
+  max(1.25 x floor, 0.5 level), and both arms are judged on COVER=full,interior, meaning fully covered
+  texels away from another material. A texel where trunk and leaf meet mixes them, correctly. The wrong
+  tint rule, wrong IOR, wrong decode and the pre-step-7 exe each fail on both arms (tint: colour 4.10 /
+  4.19 levels against a 0.5 bar). The `_s` format is separable (commit 3e92051). FO4CS reader owed (contract in
+  LODGEN_LODM_FORMAT 3.4). native_lighting's 2 failures reproduce on the step-5 exe: baseline drift, not step 7 (left to the director).
 
 ## WW_CHANGES text
 
@@ -97,6 +98,12 @@ to 0.90 x the measured ceiling. The red filter also dropped colour `EXCLUDED` li
 was 1.25 x the identity card's error. Once the mips were fixed, the identity card equalled the legacy card,
 the floor was 0 and so was the bar, and correct code (0.32 levels, one re-rounding) went red. Rule: a
 relative bar needs an absolute minimum equal to the comparison's own quantisation.
+
+**2026-09-25 02:5x -- CARDFIX1 step 7: a per-material row judged texels where two materials meet.** A
+texel on the trunk-leaf boundary mixes both materials, which is correct, but the class split gave it to one of
+them. On the non-aa arm's small fully covered leaf population, those texels were 12 % and failed the row (run
+4). Rule: a per-material row judges texels away from any other material, and a population rule is checked for
+what it removes (the aa leaf fell from 132925 to 2570 texels).
 
 **2026-09-25 02:3x -- CARDFIX1 step 7: a non-aa row was given the aa arm's edge bar.** The row was added in
 the gate, not in the pre-registration. The non-aa arm un-premultiplies partially covered texels, so its edge

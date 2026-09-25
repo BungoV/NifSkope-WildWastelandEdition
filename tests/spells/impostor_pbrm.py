@@ -250,12 +250,29 @@ def covmin():
     """The covered-texel threshold. COVER=full (DIRECTOR DECISION 2026-09-25, the non-aa arm): coverage == 1
     only, alpha 255 -- that arm un-premultiplies partially covered texels by the matte, an edge law of its own
     that every channel (old and new) shares. Default: alpha >= 128."""
-    return 255 if os.environ.get("COVER", "") == "full" else 128
+    return 255 if "full" in os.environ.get("COVER", "").split(",") else 128
+
+
+def interior():
+    """COVER=...,interior (DIRECTOR DECISION 2026-09-25, both arms): a material class keeps only texels with no
+    4-neighbour of the OTHER class (any coverage). A texel where trunk and leaf meet mixes the two materials:
+    correct behaviour, and not what a per-material row tests (run 4: 98 % of the non-aa misses)."""
+    return "interior" in os.environ.get("COVER", "").split(",")
+
+
+def near(mask):
+    p = np.pad(mask, 1)
+    return p[:-2, 1:-1] | p[2:, 1:-1] | p[1:-1, :-2] | p[1:-1, 2:]
 
 
 def classes(alb, third):
     cov = alb[..., 3] >= covmin()
-    return cov, {0: cov & (third[..., 3] < 128), 1: cov & (third[..., 3] >= 128)}
+    c1 = third[..., 3] >= 128
+    cl = {0: cov & ~c1, 1: cov & c1}
+    if interior():
+        ink = alb[..., 3] > 0
+        cl = {0: cl[0] & ~near(ink & c1), 1: cl[1] & ~near(ink & ~c1)}
+    return cov, cl
 
 
 def cmd_stats(cards, ident):
@@ -365,6 +382,9 @@ def cmd_floor(idcards, refcards, ident):
     a = load(idcards, ident, "albedo")
     r = load(refcards, ident, "albedo")
     both = (a[..., 3] >= covmin()) & (r[..., 3] >= covmin())
+    if interior():   # the same population the colour rows judge: the identity card's own material classes
+        _, cl = classes(a, load(idcards, ident, "rmaos"))
+        both &= cl[0] | cl[1]
     lin_ref = srgb2lin(r[both][:, :3] / 255.0)
     bright = lin_ref.min(1) > 0.02
     e = np.abs(a[both][:, :3][bright] - r[both][:, :3][bright])

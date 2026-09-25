@@ -21,6 +21,9 @@
 #       COVERED TEXELS ONLY (coverage == 1, alpha 255; COVER=full), with that arm's own identity floor on that
 #       population. DIRECTOR DECISION 2026-09-25: the arm un-premultiplies partial texels by the matte, an
 #       edge law every channel shares (run 3: 14/15 FAIL, all partial texels). The same reds run on it.
+#   RULE COVER=full,interior -- DIRECTOR DECISION 2026-09-25 after run 4, BOTH arms, every material row and
+#       both identity floors: fully covered texels (alpha 255) with no 4-neighbour of the other material.
+#       A texel where two materials meet mixes them, correctly; run 4's non-aa misses were 98 % such texels.
 #   REDS (each must print >= 1 FAIL), the three pre-registered perturbations of the law: Add in place of
 #       Normalize (--red add), the IOR ignored as 1.5 (--red ior), the specular colour dropped (--red decode); and the pre-step-7 exe (the step-5 build; the step-7 rung that
 #       read the .pbrm but wrote a legacy family, 309f3aa9, was not kept -- its bake is cited in DONE.md).
@@ -79,7 +82,8 @@ compress() {   # $1 tag
 	say "compress $1: lodgen rc $?; $( "$PY" "$here/impostor_pbrm.py" lodm "$O/cards/${FID}_oct.lodm" 2>&1 | head -1 )"
 }
 rows() {   # $1 label  $2 cards  $3 refcards  rest = --red X ; prints the rows, counts FAILs into $nf
-	# env: FL (the floor for this arm), CV (COVER: empty = alpha >= 128, full = coverage == 1)
+	# env: FL (the floor for this arm), CV (COVER: empty = alpha >= 128, full = coverage == 1, interior = away
+	# from the other material; the gate runs full,interior on both arms)
 	local rl="$1" rc="$2" rr="$3"; shift 3
 	out=$( FLOOR="${FL:-$FLOOR}" COVER="${CV:-}" "$PY" "$here/impostor_pbrm.py" check "$rc" "$rr" "$ID" "$FIX" "$@" 2>&1 )
 	nf=$( echo "$out" | grep -cE "FAIL|Traceback" ); nr=$( echo "$out" | grep -c "^row " )
@@ -97,11 +101,12 @@ bake prev     "$PREV" "$FIX"
 bake prevna   "$PREV" "$FIX"   WW_IMPOSTOR_AA=0
 
 say "law: $( "$PY" "$here/impostor_pbrm.py" law "$FIX" 2>&1 | tail -1 | cut -c1-400 )"
-v=$( "$PY" "$here/impostor_pbrm.py" floor "$WORK/ident/bake" "$WORK/legacy/bake" "$ID" 2>&1 | tail -1 ); say "$v"
+CVR=full,interior
+v=$( COVER="$CVR" "$PY" "$here/impostor_pbrm.py" floor "$WORK/ident/bake" "$WORK/legacy/bake" "$ID" 2>&1 | tail -1 ); say "aa, COVER=$CVR: $v"
 FLOOR=$( num "$v" "median" )
 fam=$( echo "$v" | grep -oE "family [a-z]+" | awk '{print $2}' )
 if [ -z "$FLOOR" ] || [ "$fam" != pbr ]; then bad "floor not measured (identity card family '${fam:-?}', median '${FLOOR:-}')"; FLOOR=nan; fi
-v=$( COVER=full "$PY" "$here/impostor_pbrm.py" floor "$WORK/identna/bake" "$WORK/legacyna/bake" "$ID" 2>&1 | tail -1 ); say "non-aa, coverage == 1: $v"
+v=$( COVER="$CVR" "$PY" "$here/impostor_pbrm.py" floor "$WORK/identna/bake" "$WORK/legacyna/bake" "$ID" 2>&1 | tail -1 ); say "non-aa, COVER=$CVR: $v"
 FLOORNA=$( num "$v" "median" )
 fam=$( echo "$v" | grep -oE "family [a-z]+" | awk '{print $2}' )
 if [ -z "$FLOORNA" ] || [ "$fam" != pbr ]; then bad "non-aa floor not measured (identity card family '${fam:-?}', median '${FLOORNA:-}')"; FLOORNA=nan; fi
@@ -109,14 +114,14 @@ if [ -z "$FLOORNA" ] || [ "$fam" != pbr ]; then bad "non-aa floor not measured (
 # ---------------------------------------------------------------- R1 / R2
 for arm in "pbrm legacy aa" "pbrmna legacyna non-aa"; do
 	set -- $arm
-	if [ "$3" = non-aa ]; then FL="$FLOORNA" CV=full; else FL="$FLOOR" CV=; fi
+	if [ "$3" = non-aa ]; then FL="$FLOORNA"; else FL="$FLOOR"; fi; CV="$CVR"
 	rows "$3" "$WORK/$1/bake" "$WORK/$2/bake"
 	if [ "$nr" -ge 15 ] && [ "$nf" = 0 ]; then ok "R $3 arm: $nr rows, all ok (the rows are in the log)"
 	else bad "R $3 arm: $nf FAIL of $nr rows"; echo "$out" | grep FAIL | head -8 | sed 's/^/        /' | tee -a "$log"; fi
 done
 for arm in "pbrm legacy prev aa" "pbrmna legacyna prevna non-aa"; do
 	set -- $arm
-	if [ "$4" = non-aa ]; then FL="$FLOORNA" CV=full; else FL="$FLOOR" CV=; fi
+	if [ "$4" = non-aa ]; then FL="$FLOORNA"; else FL="$FLOOR"; fi; CV="$CVR"
 	for red in add ior decode; do
 		rows "red-$red-$4" "$WORK/$1/bake" "$WORK/$2/bake" --red "$red"
 		if [ "$nf" -ge 1 ]; then ok "red control --red $red ($4): $nf row(s) FAIL"; echo "$out" | grep FAIL | sed 's/^/        /' | tee -a "$log"
