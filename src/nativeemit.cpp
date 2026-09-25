@@ -2303,6 +2303,15 @@ bool lodgenNativeWrite( QString * report, QString * error )
 			}
 		}
 		std::vector<int> chunkNoLand( chunkKeys.size(), 0 );
+		/* ONE reader, many workers (lane BAKE1, 2026-09-25): `s.world` is shared, and
+		 * libfo76utils decompresses a record IN the reader on its first read
+		 * (`ESMFile::uncompressRecord`: `zlibBuf.back()` resized, a new buffer
+		 * emplaced, the record's flags and data pointer rewritten). Two workers
+		 * reaching two never-read LAND records at once corrupt each other; on the
+		 * whole Commonwealth a pool thread threw and the bake died in terminate().
+		 * The read is serialized; the heights copy and the rays stay parallel, and
+		 * the bytes cannot move. */
+		QMutex landLock;
 		lodgenParallelFor( int( chunkKeys.size() ), [&]( int ci ) {
 			nativeNoteWorker();
 			const int cx = std::get<0>( chunkKeys[size_t( ci )] ), cy = std::get<1>( chunkKeys[size_t( ci )] );
@@ -2328,13 +2337,19 @@ bool lodgenNativeWrite( QString * report, QString * error )
 			{
 				EsmLand land;
 				for ( int ly = 0; ly < cells; ly++ )
-					for ( int lx = 0; lx < cells; lx++ )
-						if ( s.world->land( cx - SKIRT + lx, cy - SKIRT + ly, land ) ) {
+					for ( int lx = 0; lx < cells; lx++ ) {
+						bool got;
+						{
+							QMutexLocker lock( &landLock );
+							got = s.world->land( cx - SKIRT + lx, cy - SKIRT + ly, land );
+						}
+						if ( got ) {
 							landCells++;
 							for ( int row = 0; row < 33; row++ )
 								for ( int col = 0; col < 33; col++ )
 									scene.hgt[size_t( ly * 32 + row ) * size_t( scene.hn ) + size_t( lx * 32 + col )] = land.heights[row][col] * inv;
 						}
+					}
 			}
 			if ( landCells == 0 ) {
 				chunkNoLand[size_t( ci )] = 1;
