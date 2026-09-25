@@ -5,6 +5,30 @@ Written the moment a mistake is recognised, unprompted (CONSTITUTION rule 2).
 Format: date -- what was done -- what was true -- how it was found -- the rule.
 Newest at the top.
 
+## 2026-09-25 -- lane BAKE1 (lane text)
+
+- 2026-09-25 BAKE1: a dry run of 23 chunks passed, then the whole-map bake died after 70 min in the instances
+  stage. lodgenParallelFor runs serially below 32 items, so the dry run never used the thread pool, and the
+  shared ESM reader's non-thread-safe LAND decompression never ran concurrently. Rule: a dry run must cross
+  every parallel threshold the real run crosses (here >= 32 chunks per ring). Gate shared-reader code with
+  pool vs --threads 1 bytes.
+- 2026-09-25 BAKE1: after the .lodo was written, a 30-minute single-core phase was nearly read as a hang. It
+  was the serial proximity join. Name a long phase by sampling the stack (skill ww-stripped-frame-by-strings)
+  before calling it stuck, and log the phase's own census line.
+- 2026-09-25 BAKE1: a progress entry was stamped from elapsed-time feel (05:58 vs a real 05:53) and corrected.
+  Read `date` in the same command that writes the line.
+
+## 2026-09-25 -- lane GATEFIX2 (lane text)
+
+- **2026-09-25 GATEFIX2: a profile fix was applied to one gate and not its sibling.** GATEFIX1 found on
+  09-24 that native_open measured bungo's saved settings (the .BTR water drew white) and scoped that one
+  spell. native_lighting renders the same .BTR the same way and stayed unscoped, so it went red for the
+  same reason a day later. **Rule:** when a harness defect is found, grep every spell with the same shape
+  (`WW_RENDER_SHOT` without `WW_SETTINGS_SCOPE`) and fix or list them in the same lane.
+- **2026-09-25 GATEFIX2: an empty settings scope was taken for "defaults".** An empty scope is a first
+  install, and a first install writes the settings dialog's widget values (Background 46,46,46). The first
+  scoped run went from 2 failures to 8. Seed `Settings/Version=1` before each window.
+
 ## 2026-09-25 -- lane CARDFIX1 (lane text)
 
 **2026-09-25 00:2x -- CARDFIX1 step 6: G4's bar was copied from the synthetic input onto the real one.**

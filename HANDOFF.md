@@ -60,6 +60,37 @@ committed" or names an exe, this block overrides it.
 - Re-run the command-line bakes since 09-19 that used --data-root.
 
 ### Lane and director lines, 2026-09-24, newest first
+- 2026-09-25 08:34 BAKE1:
+  BAKE1 (2026-09-25) DONE: the whole Commonwealth is baked from bungo's 47-plugin MO2 order into mods\FO4CSLOD.
+  - Contents: 3,677 files, 15.96 GB. VT with height + cover, native objects, 79 tree cards (42 from BNS Trees),
+    all four rings.
+  - G1-G5 green, each with a red control.
+  - Branch bake1-20260925: 24f5f39b, ad482f49, 23cde121, e27fe279, 77f6eae5. Run-copy exe 27a7bb29.
+  - Pictures: scratchpad/bake1_20260925/pics/ (INDEX.md, contact sheet).
+  - bungo adds +FO4CSLOD to his modlist himself; nothing in MO2 was touched.
+
+  Owed:
+  - (a) The panel has no cover row under the FO4CS target. The whole-map bake runs from the CLI; see skill
+    ww-whole-map-lod-bake.
+  - (b) FORCE_CARD is 0 on a whole map, because ring 4 is every tree's kept arrival. The card reader must pick
+    cards by ring from the base's card layer. This needs a ruling from the card-link owner.
+  - (c) The proximity identity join is serial and takes 29 min of the 96-min bake. Make it parallel or bound it.
+  - (d) Three new skills name the owner and the symbol source. Scrub them before copying to AISkills.
+- 2026-09-25 08:34 GATEFIX2:
+  **2026-09-25 03:5x GATEFIX2 (lane, Opus 5.5) -- DONE.** Branch gatefix2-20260925 (from b1cd5bc): bab6129 +
+  the scratchpad commit. Not merged. Exe 3a4d1e5d = b1cd5bc unmodified; no source code changed.
+  - native_lighting.sh is green again: 21 checks, 0 failures, twice. Its two gate (a) reds were not a generator
+    defect and not a stale baseline. The harness rendered under bungo's saved settings, and in those settings
+    "Vertex Color" is unticked in the Lighting shading mode's Material Contributions. That made the .BTR water
+    shape draw pure white.
+  - No baseline moved. Under the new settings scope all four legacy frames are byte-identical to the 09-16
+    baselines. The exe those baselines were measured on (before_vt1) and before_cellview4 both give the same
+    red under a copy of his settings.
+  - Reds: his Contributions value seeded into the scope gives 21/2, the exact reported failure. A baseline with
+    one flipped byte gives 21/1.
+  - Kept green on 3a4d1e5d: lodgen_native 32/0, lodgen_native_baseline PASS, lodgen_btofree 30/0 (pin before_gatefix1, generators-differ path).
+  - Eleven other render spells still set no settings scope (listed in DONE.md). Any red on them: check his
+    settings first.
 - 2026-09-25 03:41 CARDFIX1:
   **Lane CARDFIX1 (LOD-D), 2026-09-24/25: DONE. Steps 1-7 landed (G4 and step 7's gate bars decided by the director, not bungo).**
   Branch `cardfix1-20260924` in `E:\Projects\NifskopeWWE-cardfix1` (from 71f96c1). Commits: step 1 19c0347,

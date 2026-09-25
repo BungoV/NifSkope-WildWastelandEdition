@@ -1,5 +1,33 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Whole-Commonwealth bake from his MO2 load order into mods\FO4CSLOD
+
+Whole-map bake fixes (lane BAKE1, 2026-09-25):
+- ESM reader: a later plugin's own world group and the cell groups it opens under an overridden cell (persistent
+  ones too) now reach the bake. BNS Trees.esp's 22,827 references were invisible before. The tree-candidate
+  lister reads persistent references too (36 -> 79 candidates on a BNS load order).
+- .lodo writer: the vertex-cache remap stays a true permutation when a LOD mesh has vertices no triangle uses.
+  This fixes a segfault on BNS LOD trees. Vanilla bakes are byte-identical.
+- lodgen CLI: `--dim all` bakes rings 4+8+16+32 in the panel's queue order. `--fo4cs-one-root` (opt-in) puts
+  arrays, manifests and the .lodb under --native, the panel's layout. Both are off by default, so the output
+  is unchanged when they are not given.
+- Native emitter: the vertex-AO loop reads LAND records under a lock. The shared ESM reader decompresses in
+  place and is not thread-safe. This fixes a whole-map crash in the instances stage ("Qt Concurrent has caught
+  an exception thrown from a worker thread"). Output bytes are unchanged against a single-threaded run.
+
+## Lighting gate renders under its own seeded settings, never his
+
+- **2026-09-25 GATEFIX2 (lane, Opus 5.5): native_lighting gate green again, no code changed.**
+  - `tests/spells/native_lighting.sh` runs every window in its own `WW_SETTINGS_SCOPE`, wiped before each
+    window and at exit, and seeded with `Settings/Version=1`.
+  - Why the scope: the harness was reading the operator's saved view. His Lighting-mode "Vertex Color"
+    contribution was off (`GLView/Display/Contributions/2` = 0x00184b00; bit 0x80 alone moves the picture),
+    so the .BTR water drew white and gate (a) failed on every exe back to the one the baselines came from.
+  - Why the seed: an empty scope is a first install. The settings dialog then saves every pane's value,
+    including Background 46,46,46, and the check's coverage masks count the background as terrain
+    (gates b, d, e and f fail).
+  - `SEED_REG=<file.reg>` imports a chosen profile into the scope, for red controls.
+
 ## Tree cards: depth fix, empty-card models fixed, crisp defaults, 8x8 default with a 16-view ring option, sway, PBR card specular sheet
 
 **2026-09-24/25 -- lane CARDFIX1 (steps 5-6; branch cardfix1-20260924)**
