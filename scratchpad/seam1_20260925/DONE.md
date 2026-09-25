@@ -39,22 +39,43 @@ All gates were pre-registered, and each was run on the broken or old exe first t
 | A2 (a2_grey_after.txt) | 2019 flat | 0 flat, 0 chunks without vanilla |
 | fill_model, file vs model: Sanctuary north | -- | cell max 10.03 (model F 12.78); at-line 6.36 < bar 10.15. GREEN |
 | fill_model: Glowing Sea edge | -- | cell max 8.96 (F 17.82); at-line 8.25 < 12.63. GREEN |
-| fill_model: north-east | -- | RED at one border, see below |
+| fill_model: north-east (load-order model) | old model RED | GREEN; planted RED (fm_lo3.out) |
 | whole-map grey share (VT.16, chroma < 12 and lum > 100) | shipped 0.884 | fill off 0.0004, fill on 0.0103 |
-| W4 (w4_gate.py) | old exe: G2 RED | G2 GREEN; G1 RED, see below |
+| W4 (w4_gate.py, G1 re-pinned) | old exe: G2 RED; pre-pin G1 RED | G1 GREEN, G2 GREEN (exe cbdbffe7) |
 | spells lodgen_native / lod_generation / lodgen_loadorder | -- | 32/0, 128/0, 24/0 PASS |
 
-**North-east fill_model RED.**
-- **Where.** One border, cells (11,30)/(12,30), steps 25.4 (line step 29.4, bar 16.73).
-- **Not the fill.** The per-cell colour there is the same with the fill off.
-- **Why the gate fails.** Cell (12,30) is painted in his load order, so the fill leaves it alone. The model's painted set comes from Fallout4.esm only, so it expects the fill to touch that cell.
-- **Verdict.** A gate-definition mismatch, not a fill defect. Before this gate is trusted again, it should read the bake's own painted set.
+**North-east fill_model: RED under the old model, GREEN under the load-order model (coordinator order (B), 16:4x).**
+- **What was wrong with the model.** It read Fallout4.esm's LAND everywhere. In his load order DLCCoast.esm's LAND
+  wins 253 Commonwealth cells and paints x 11-16, y 29-35 with LDriedGrass01 (a whole-cell BTXT, material-backed).
+  The model called those cells unpainted default ground; it also painted every material-backed layer flat grey.
+- **The fix.** land_lo.py: the painted set from the winning LAND (4086 cells; +117 DLCCoast, +14 DLCNukaWorld).
+  land_lo_esm.py + lo_model.py: B composites the WINNING LAND, LTEX/TXST from Fallout4.esm + the DLC masters, and a
+  material layer's diffuse from its .bgsm. `LAND=esm PAINTED=esm` reproduces the old model.
+- **The step is real.** Dried grass beside unpainted default ground is a step the game draws up close too; the fill
+  leaves it (w = 0 at the line). The model now has it: 22.1 at the line, 20.8 cell-mean.
+- **The gate, per border.** File step <= model step + vanilla's bar (line 16.73, cell 10.86). The old region-max
+  cell clause had no tolerance for the model's absolute offset (the file sits 10-19 lum off the model in every
+  region); it still reads 27.44 vs 20.76 here and is printed beside the verdict.
+- **Planted refuter** (PLANT=auto, now pushed OUTWARD: +40 on a cell already darker than its painted neighbour
+  narrowed the step and hid itself). The runs are in fm_lo3.out:
 
-**W4 G1 RED.**
-- **What differs.** The no-colour strip of the .lodo differs from the old exe's output in the selfAO bytes on the water-tower meshes, plus the CRCs.
-- **Deterministic.** It gives the same result on every run of a given exe.
-- **Unproven hypothesis.** An FMA/inlining codegen shift in the header-inline selfAO.
-- **Scope.** The .lodo was not re-baked or installed.
+| region | installed bake | planted +/-40 | old model |
+|---|---|---|---|
+| north-east | GREEN (line 32.61 vs B 22.07; cell 27.44 vs 20.64) | RED (72.61; 66.84) | RED |
+| Sanctuary north | GREEN | RED (42.98) | GREEN (old) |
+| Glowing Sea | GREEN | RED (39.60) | GREEN (old) |
+
+**W4 G1: attributed, re-pinned (coordinator order (A)).**
+- **Bisect (prefix run, no stash; bisect/).** Exe a6e5e8de: 228, 0 diffs. Exe 62e53a3b: 201 on vertex rows 270124
+  and 271177, byte 15 (water-tower meshes). 62e53a3b moves them.
+- **Mechanism: codegen, not law.** The AO block of lodofile.cpp is the same text at both commits; lodgenao.h is
+  untouched. 62e53a3b grew lodoAppendMesh around the inlined ambientOcclusion. -O3 -march=haswell may then contract
+  a*b+c into FMA differently, and one of the 8 rays sits at a grazing tie (1 - 0.85*1/8 -> 228; 2 hits -> 201).
+- **Proof.** Both trees rebuilt with lodofile.cpp under `#pragma GCC optimize("fp-contract=off")` bake
+  byte-identical W4 files (w4_bytes.py fpc_a6e5e8de fpc_HEAD: 0 diffs, both regions).
+- **Re-pin.** w4_gate.py G1 puts back exactly those two bytes, exactly 228 <- 201, before the compare. Every other
+  byte and both CRCs must still match, and a third value refuses. The old gate is w4_gate_prepin.py.
+- **Refuter of the ruling.** Any other byte moving, or these two holding a third value.
 
 **Fill bake census (whole/on/log.txt).**
 - **Tone fit.** One global fit: gain 0.612, offset 33.7, saturation 1.85.
@@ -77,7 +98,9 @@ All gates were pre-registered, and each was run on the broken or old exe first t
 
 - A Boston oblique render with the .lodo v5 colour on. The .lodo was not re-baked, so v5 is not installed.
 - The FO4CS reader of the .lodo v5 colour (standing order, not news).
-- The north-east fill_model gate should use the bake's own painted set.
+- The model reads vanilla assets, not his MO2 textures (BNS Landscape re-points 26 LTEX); texture mods stay out of B.
+- Offered: build lodofile.cpp (the selfAO) with -ffp-contract=off so a later edit of that file cannot move AO bytes.
+  That moves ~14.7k .lodo bytes once (fpc bakes vs old), so it is the director's call, not done here.
 
 ## Pictures (untracked, pics/)
 

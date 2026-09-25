@@ -14,11 +14,27 @@ usage: fill_model.py X0 Y0 X1 Y1 S TAG"""
 import sys, os, math, pickle, numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import law_predict as lp, lodgen_terrain_model as tm, vanilla_tiles as vt, vtread
+# LAND=lo (default): B composites each cell's LAND from the plugin that WINS it in his load order, with LTEX/TXST from
+# Fallout4.esm + the DLC masters and a material-backed layer's diffuse read from its .bgsm (lo_model.py). Before, B
+# read Fallout4.esm's LAND everywhere, so on DLCCoast's 253 cells it modelled ground the game never draws, and it
+# painted every material-backed layer flat grey. LAND=esm = the old model, to reproduce an old verdict.
+LAND = os.environ.get('LAND', 'lo')
+if LAND != 'esm':
+    import lo_model
+    LOSTATS = lo_model.setup(lp, tm)
+    print('B model: LAND from the load-order winner, official LTEX/TXST, .bgsm diffuse')
+else:
+    print('B model: Fallout4.esm LAND only (old)')
 
 X0, X1, Y0, Y1 = int(sys.argv[1]), int(sys.argv[3]), int(sys.argv[2]), int(sys.argv[4])
 S = float(sys.argv[5]); TAG = sys.argv[6]
 RING = 3
-P = pickle.load(open('w2_cells.pkl', 'rb'))['painted']
+# PAINTED SET = HIS LOAD ORDER (coordinator order 16:2x): the LAND of the last plugin that carries one, painted by
+# the C++ definition (land_lo.py -> land_lo.pkl). The Fallout4.esm-only set (w2_cells.pkl) misread the north-east:
+# DLCCoast.esm paints 117 Commonwealth cells (12,30 among them) that the fill therefore, correctly, left alone.
+# PAINTED=esm reads the old set (to reproduce the old verdict).
+P = pickle.load(open('w2_cells.pkl' if os.environ.get('PAINTED') == 'esm' else 'land_lo.pkl', 'rb'))['painted']
+print('painted set:', 'Fallout4.esm only (w2_cells.pkl)' if os.environ.get('PAINTED') == 'esm' else 'load order (land_lo.pkl)', len(P))
 n = int(4096 / S); W = (X1 - X0 + 1) * n; H = (Y1 - Y0 + 1) * n
 xs = X0 * 4096 + (np.arange(W) + .5) * S
 ys = (Y1 + 1) * 4096 - (np.arange(H) + .5) * S          # row 0 = north
@@ -29,7 +45,7 @@ def lum(x):
     return x @ LW
 
 
-cache_f = 'fill_%s_B.npy' % TAG
+cache_f = 'fill_%s%s_B.npy' % (TAG, '' if LAND == 'esm' else '_Blo')
 if os.path.exists(cache_f):
     B = np.load(cache_f)
 else:
@@ -89,6 +105,24 @@ UU, VV = np.meshgrid((xs - vW) / vupt, (vN - ys) / vupt)
 V = np.clip(bicubic(mv, UU, VV), 0, 255)
 
 # masks and distance to the painted set
+cellx = np.floor(xs / 4096).astype(int); celly = np.floor(ys / 4096).astype(int)
+# PLANT=auto[:dl] -- the refuter: add dl (default 40) luminance to the first UNPAINTED cell that borders a painted
+# one in the region (east or north neighbour), in A only. The file gate must read RED on it.
+if os.environ.get('PLANT'):
+    dlp = float(os.environ['PLANT'].split(':')[1]) if ':' in os.environ['PLANT'] else 40.0
+    cand = [(cx, cy) for cy in range(Y1, Y0 - 1, -1) for cx in range(X0, X1 + 1)
+            if (cx, cy) not in P and any((cx + a, cy + b) in P and X0 <= cx + a <= X1 and Y0 <= cy + b <= Y1
+                                         for a, b in ((1, 0), (-1, 0), (0, 1), (0, -1)))]
+    pc = cand[0]
+    cm = lambda c: (np.floor(ys / 4096).astype(int) == c[1])[:, None] & (np.floor(xs / 4096).astype(int) == c[0])[None, :]
+    nb = next((pc[0] + a, pc[1] + b) for a, b in ((1, 0), (-1, 0), (0, 1), (0, -1))
+              if (pc[0] + a, pc[1] + b) in P and X0 <= pc[0] + a <= X1 and Y0 <= pc[1] + b <= Y1)
+    # OUTWARD: the plant widens the step to its painted neighbour (a +40 on a cell already darker than its painted
+    # neighbour would NARROW that step, and a gate on the step could not see it)
+    sg = 1.0 if (A[cm(pc)] @ LW).mean() >= (A[cm(nb)] @ LW).mean() else -1.0
+    msk = cm(pc)
+    A[msk] = np.clip(A[msk] + sg * dlp, 0, 255)
+    print('PLANTED %+.0f lum in A at unpainted border cell %s (outward from painted %s)' % (sg * dlp, pc, nb))
 cellx = np.floor(xs / 4096).astype(int); celly = np.floor(ys / 4096).astype(int)
 pm = np.array([[(cx, cy) in P for cx in cellx] for cy in celly])
 pcells = [c for c in P if X0 - 8 <= c[0] <= X1 + 8 and Y0 - 8 <= c[1] <= Y1 + 8]
@@ -190,6 +224,37 @@ for name, Fx in (('A shipped', A), ('B engine default', B), ('F fill', F), ('V v
           ' | over bar: cell %d, line %d of %d' % (name, np.median(s), np.percentile(s, 95), s.max(), np.median(l),
                                              np.percentile(l, 95), l.max(), int((s > bar).sum()), int((l > lbar).sum()), len(s)))
 print('painted samples identical B vs F:', bool(np.array_equal(B[pm], F[pm])))
+# THE FILE GATE (registered 16:3x, before the load-order run on the installed bake): with VT2 = the fill bake,
+# the file's steps at the painted/unpainted line stay under vanilla's line bar (0 over), and its worst cell-mean
+# border step is no worse than BOTH the model's fill F and the engine-default B.
+sA, lA = border_steps(A), line_steps(A); sF, sB = border_steps(F), border_steps(B)
+# AT-LINE CLAUSE, per border (load-order patch, 2026-09-25): the file's step may exceed the step the game's own ground
+# (B, the engine-default law over the WINNING LAND) has at that same line by at most vanilla's line bar. A plugin that
+# paints a bright block beside unpainted ground (DLCCoast: LDriedGrass01 at x 11-16, y 29-35) is a step the game draws
+# up close too; the fill leaves it (w = 0 at the line by definition) and must not add to it. Wherever B has no step
+# this is the old clause (lA <= lbar).
+lB = line_steps(B)
+overL = lA > lB + lbar
+# CELL-MEAN CLAUSE, per border, the same form: the file's cell-mean step may exceed the SMALLER of the model's (F, B)
+# at that border by at most vanilla's cell bar. The pre-registered region-max form (sA.max <= min(sF.max, sB.max), no
+# tolerance) compared the file with a model whose absolute level sits 10-19 lum off the file in every region (the
+# model reads vanilla assets and none of the bake's colour pipeline: 'A(file) vs F(model)' below); once B carries the
+# game's own step at DLCCoast's line it read 27.44 vs 20.76 there. Printed below as 'region-max reading'.
+overC = sA > np.minimum(sF, sB) + bar
+okA = int(overL.sum()) == 0 and int(overC.sum()) == 0
+okOld = sA.max() <= min(sF.max(), sB.max())
+wc = int(np.argmax(sA - np.minimum(sF, sB))); (k1, m1), (k2, m2) = pairs[wc]
+print('FILE GATE cell-mean: over (min(F,B) step + cell bar %.2f) %d (worst file %.2f vs F %.2f, B %.2f at cells (%d,%d)|(%d,%d));'
+      ' region-max reading %.2f vs F %.2f, B %.2f -> %s' % (bar, int(overC.sum()), sA[wc], sF[wc], sB[wc],
+      X0 + m1, Y1 - k1, X0 + m2, Y1 - k2, sA.max(), sF.max(), sB.max(), 'ok' if okOld else 'over'))
+wi = int(np.argmax(lA - lB)); (j1, i1), (j2, i2) = pairs[wi]
+print('FILE GATE: at-line over (B step + line bar) %d (worst file %.2f vs B %.2f at cells (%d,%d)|(%d,%d), bar %.2f; '
+      'vanilla-bar-only reading %d over); cell-mean max %.2f vs F %.2f, B %.2f -> %s' % (
+    int(overL.sum()), lA[wi], lB[wi], X0 + i1, Y1 - j1, X0 + i2, Y1 - j2, lbar, int((lA > lbar).sum()),
+    sA.max(), sF.max(), sB.max(), 'GREEN' if okA else 'RED'))
+if LAND != 'esm':
+    print('B model: %d material layers read from .bgsm; unresolved %d %s' % (
+        LOSTATS['bgsm'], len(LOSTATS['unresolved']), LOSTATS['unresolved'][:3]))
 np.savez_compressed('fill_%s.npz' % TAG, A=A, B=B, V=V, F=F, TV=TV, pm=pm, d=d, n=n, X0=X0, Y1=Y1, S=S,
                     bar=bar, band=band)
 # the band's own inside: steps between two UNPAINTED cells within band + 1 cell of the painted set

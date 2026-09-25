@@ -7,7 +7,11 @@
 - Two more fixes landed:
   - 44805f8f, grass tint: the white/"sandy" cover came from reading straight-alpha mips as premultiplied.
   - 59a0dd33: the default-ground path had unknown `\G` escapes.
-- Gate results are in the DONE.md table. The north-east fill_model gate is RED from a painted-set mismatch, not from the fill. W4 G1 is RED from the selfAO codegen bytes; the .lodo is not installed.
+- Gate results are in the DONE.md table. Both former reds are attributed (coordinator order, 16:4x):
+  - W4 G1: 62e53a3b moves two selfAO bytes (228 -> 201) by FMA-contraction codegen, not by the AO law (fp-contract=off
+    bakes of both trees are byte-identical). Re-pinned on exactly those two bytes; the .lodo is not installed.
+  - North-east fill gate: the model now reads the LAND that wins in his load order (DLCCoast's dried grass); GREEN on
+    the installed bake, RED on the planted step, in all three regions.
 - bungo's in-game look is owed.
 
 The original three commits:
@@ -65,3 +69,9 @@ Every gate is pre-registered under `scratchpad/seam1_20260925/`. The resume list
   - The rule: run each gate on the known-broken exe before trusting its GREEN (Measure, don't eyeball). Re-registered forms: DG1 broken 0.1635 RED / fixed 0.0064 GREEN; grass gate by the tint-1 vs tint-0 control.
 - **2026-09-25, SEAM1: grass tint read the smallest mip as premultiplied.**
   - What happened: DDS mips are straight alpha; dividing by alpha clamped every alpha-cut grass to white, so ground cover paled the terrain toward sand. Fixed in 44805f8f (alpha-weighted mean).
+- **2026-09-25, SEAM1: a planted refuter that could shrink the step it tests.**
+  - What happened: PLANT added +40 lum to the unpainted cell beside a painted one. Beside DLCCoast's bright dried grass
+    the unpainted cell is ~25 darker, so +40 narrowed the step to ~13 and a step gate could not see it. The model also
+    painted every material-backed LTEX flat grey 0.5, which would have handed the DLCCoast border a made-up step.
+  - The rule: a planted step pushes AWAY from the neighbour it is measured against, and the run prints the sign; a
+    model layer it cannot read is refused or read, never given a stand-in colour.

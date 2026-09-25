@@ -1,0 +1,10 @@
+== mut_other
+G1 boston  colourRows  34400 | .lodo stripped: 10 bytes differ ['0x4', '0xC', '0xD', '0xE', '0xF', '0xA8'], length +0 -> FAIL | .lodi 12 differ ['0xC', '0xD', '
+G1 sanc    colourRows  34400 | .lodo stripped: 10 bytes differ ['0x4', '0xC', '0xD', '0xE', '0xF', '0xA8'], length +0 -> FAIL | .lodi 12 differ ['0xC', '0xD', '
+G1 RED
+== mut_third
+G1 boston  colourRows  34400 | .lodo stripped: 11 bytes differ ['0x4', '0xC', '0xD', '0xE', '0xF', '0xA8'], length +0 -> FAIL | .lodi 12 differ ['0xC', '0xD', '
+   boston  attributed AO bytes put back before the compare (62e53a3b codegen, see ATTRIBUTED): REFUSED -- a listed byte holds neither value
+G1 sanc    colourRows  34400 | .lodo stripped: 11 bytes differ ['0x4', '0xC', '0xD', '0xE', '0xF', '0xA8'], length +0 -> FAIL | .lodi 12 differ ['0xC', '0xD', '
+   sanc    attributed AO bytes put back before the compare (62e53a3b codegen, see ATTRIBUTED): REFUSED -- a listed byte holds neither value
+G1 RED

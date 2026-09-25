@@ -1,0 +1,45 @@
+== neLO3
+B model: LAND from the load-order winner, official LTEX/TXST, .bgsm diffuse
+painted set: load order (land_lo.pkl) 4086
+FILE GATE cell-mean: over (min(F,B) step + cell bar 10.86) 0 (worst file 27.44 vs F 20.91, B 20.64 at cells (11,32)|(11,31)); region-max reading 27.44 vs F 21.75, B 20.76 -> over
+FILE GATE: at-line over (B step + line bar) 0 (worst file 32.61 vs B 22.07 at cells (12,36)|(12,35), bar 16.73; vanilla-bar-only reading 8 over); cell-mean max 27.44 vs F 21.75, B 20.76 -> GREEN
+B model: 0 material layers read from .bgsm; unresolved 0 []
+== neLO3P
+B model: LAND from the load-order winner, official LTEX/TXST, .bgsm diffuse
+painted set: load order (land_lo.pkl) 4086
+PLANTED -40 lum in A at unpainted border cell (12, 36) (outward from painted (13, 36))
+FILE GATE cell-mean: over (min(F,B) step + cell bar 10.86) 2 (worst file 66.84 vs F 21.34, B 20.76 at cells (12,36)|(12,35)); region-max reading 66.84 vs F 21.75, B 20.76 -> over
+FILE GATE: at-line over (B step + line bar) 2 (worst file 72.61 vs B 22.07 at cells (12,36)|(12,35), bar 16.73; vanilla-bar-only reading 9 over); cell-mean max 66.84 vs F 21.75, B 20.76 -> RED
+B model: 0 material layers read from .bgsm; unresolved 0 []
+== nsancLO3
+B model: LAND from the load-order winner, official LTEX/TXST, .bgsm diffuse
+painted set: load order (land_lo.pkl) 4086
+FILE GATE cell-mean: over (min(F,B) step + cell bar 12.38) 0 (worst file 8.68 vs F 3.14, B 0.55 at cells (-28,26)|(-27,26)); region-max reading 10.03 vs F 20.03, B 19.70 -> ok
+FILE GATE: at-line over (B step + line bar) 0 (worst file 4.89 vs B 0.67 at cells (-18,29)|(-18,28), bar 10.15; vanilla-bar-only reading 0 over); cell-mean max 10.03 vs F 20.03, B 19.70 -> GREEN
+B model: 0 material layers read from .bgsm; unresolved 0 []
+== nsancLO3P
+B model: LAND from the load-order winner, official LTEX/TXST, .bgsm diffuse
+painted set: load order (land_lo.pkl) 4086
+PLANTED -40 lum in A at unpainted border cell (-11, 30) (outward from painted (-11, 29))
+FILE GATE cell-mean: over (min(F,B) step + cell bar 12.38) 1 (worst file 41.24 vs F 3.05, B 3.96 at cells (-11,30)|(-11,29)); region-max reading 41.24 vs F 20.03, B 19.70 -> over
+FILE GATE: at-line over (B step + line bar) 1 (worst file 42.98 vs B 3.21 at cells (-11,30)|(-11,29), bar 10.15; vanilla-bar-only reading 1 over); cell-mean max 41.24 vs F 20.03, B 19.70 -> RED
+B model: 0 material layers read from .bgsm; unresolved 0 []
+== gseaLO3
+B model: LAND from the load-order winner, official LTEX/TXST, .bgsm diffuse
+painted set: load order (land_lo.pkl) 4086
+FILE GATE cell-mean: over (min(F,B) step + cell bar 20.56) 0 (worst file 4.44 vs F 0.33, B 2.23 at cells (-34,-37)|(-33,-37)); region-max reading 8.96 vs F 17.82, B 19.41 -> ok
+FILE GATE: at-line over (B step + line bar) 0 (worst file 5.52 vs B 3.22 at cells (-25,-41)|(-25,-42), bar 12.63; vanilla-bar-only reading 0 over); cell-mean max 8.96 vs F 17.82, B 19.41 -> GREEN
+B model: 0 material layers read from .bgsm; unresolved 0 []
+== gseaLO3P
+B model: LAND from the load-order winner, official LTEX/TXST, .bgsm diffuse
+painted set: load order (land_lo.pkl) 4086
+PLANTED +40 lum in A at unpainted border cell (-37, -26) (outward from painted (-36, -26))
+FILE GATE cell-mean: over (min(F,B) step + cell bar 20.56) 1 (worst file 41.00 vs F 4.69, B 1.55 at cells (-37,-26)|(-36,-26)); region-max reading 41.00 vs F 17.82, B 19.41 -> over
+FILE GATE: at-line over (B step + line bar) 1 (worst file 39.60 vs B 9.80 at cells (-37,-26)|(-36,-26), bar 12.63; vanilla-bar-only reading 1 over); cell-mean max 41.00 vs F 17.82, B 19.41 -> RED
+B model: 0 material layers read from .bgsm; unresolved 0 []
+== neESM3
+B model: Fallout4.esm LAND only (old)
+painted set: Fallout4.esm only (w2_cells.pkl) 3955
+FILE GATE cell-mean: over (min(F,B) step + cell bar 10.86) 1 (worst file 25.38 vs F 2.09, B 2.43 at cells (11,30)|(12,30)); region-max reading 25.38 vs F 15.43, B 15.78 -> over
+FILE GATE: at-line over (B step + line bar) 2 (worst file 29.42 vs B 9.81 at cells (11,30)|(12,30), bar 16.73; vanilla-bar-only reading 2 over); cell-mean max 25.38 vs F 15.43, B 15.78 -> RED
+16:39:26

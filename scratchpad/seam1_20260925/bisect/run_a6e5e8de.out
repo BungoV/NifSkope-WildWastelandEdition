@@ -1,0 +1,20 @@
+16:26:52 game DOWN
+M  src/esmdata.cpp
+M  src/lodgen.cpp
+M  src/lodifile.cpp
+M  src/lodinative.cpp
+M  src/lodofile.cpp
+M  src/lodofile.h
+BUILD-RC=0
+-rwxr-xr-x 1 bungo 197609 24933888 16:27:54 release/NifSkope.exe
+exe newer than the sources
+copies in step
+build rc=0
+-o GeneratedFiles/.obj/nifcli.o -o GeneratedFiles/.obj/lodgen.o -o GeneratedFiles/.obj/lodgenmanager.o -o GeneratedFiles/.obj/lodgenchunkpass.o -o GeneratedFiles/.obj/lodofile.o -o GeneratedFiles/.obj/lodifile.o -o GeneratedFiles/.obj/cellview.o -o GeneratedFiles/.obj/lodinative.o -o GeneratedFiles/.obj/nativeemit.o 
+c396d7e3
+fx rc=0
+boston rc=0 44 s FO4CSLOD 
+sanc rc=0 12 s FO4CSLOD 
+boston bis_a6e5e8de body diffs 0 []
+sanc bis_a6e5e8de body diffs 0 []
+16:29:01 done a6e5e8de

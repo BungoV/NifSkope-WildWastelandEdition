@@ -78,46 +78,12 @@ def pair(d):
     return d + '/' + lo[0], d + '/' + li[0]
 
 
-# ------------------------------------------------------------------ G1 re-pin, attributed (2026-09-25)
-# ATTRIBUTED: two selfAO bytes of the library .lodo (vertex rows 270124 and 271177, byte 15, both on the water-tower
-# meshes) read 228 in the pre-v5 bake and 201 from commit 62e53a3b on: one more of the 8 fixed hemisphere rays hits
-# (1 - 0.85*1/8 = 0.894 -> 228; 1 - 0.85*2/8 = 0.788 -> 201). NOT a law change: the AO block of lodofile.cpp is the
-# same text at a6e5e8de and 62e53a3b, and lodgenao.h is untouched. 62e53a3b grew lodoAppendMesh (the colour stream)
-# around the inlined ambientOcclusion, and -O3 -march=haswell contracts a*b+c into FMA per its own codegen; a ray at a
-# grazing tie flips. Measured (coordinator order (A), bisect/): exe a6e5e8de 228, exe 62e53a3b 201; the same two
-# trees with lodofile.cpp under #pragma GCC optimize("fp-contract=off") bake BYTE-IDENTICAL W4 files (w4_bytes.py
-# fpc_a6e5e8de fpc_HEAD: 0 diffs, both regions). The pin: exactly these two bytes, exactly 228 -> 201, may differ;
-# they are put back before the compare, so every other byte (and both CRCs, recomputed by strip) still has to match.
-# A listed byte holding any third value REFUSES the file. The old gate is kept as w4_gate_prepin.py.
-ATTRIBUTED = [(270124, 15, 228, 201), (271177, 15, 228, 201)]
-
-
-def attributed(A, B):
-    if B[4] != 5 or A[4] != 4:
-        return B, []
-    offV = struct.unpack_from('<Q', A, 0x98)[0]      # offVertices (header 0x70 + 5*8)
-    oB = struct.unpack_from('<Q', B, 0x98)[0]
-    b = bytearray(B); out = []
-    for row, byte, was, now in ATTRIBUTED:
-        oa, ob = offV + row * 16 + byte, oB + row * 16 + byte
-        if A[oa] != was:
-            return B, 'REFUSED'
-        if b[ob] == now:
-            b[ob] = was; out.append('row %d %d->%d' % (row, now, was))
-        elif b[ob] != was:
-            return B, 'REFUSED'
-    return bytes(b), out
-
-
 # ------------------------------------------------------------------ G1
 def g1(tag, dold, dnew, fixture):
     (ao, ai), (bo, bi) = pair(dold), pair(dnew)
     A, B = rd(ao), rd(bo)
     LB = dec.read_lodo(bo)                  # the new file must decode
     colour = LB['header']['colourVertexCount'] if B[4] == 5 else 0
-    applied = []
-    if not fixture:
-        B, applied = attributed(A, B)
     S = B if (fixture or not colour) else strip(B)
     d, dl = diffs(A, S)
     okLodo = dl == 0 and d == ([4] if B[4] != A[4] else [])
@@ -127,9 +93,7 @@ def g1(tag, dold, dnew, fixture):
     print('G1 %-7s colourRows %6d | .lodo %s: %d bytes differ %s, length %+d -> %s | .lodi %d differ %s -> %s' % (
         tag, colour, 'stripped' if S is not B else 'as written', len(d), ['0x%X' % x for x in d[:6]], dl,
         'ok' if okLodo else 'FAIL', len(di), ['0x%X' % x for x in di[:8]], 'ok' if okLodi else 'FAIL'))
-    print('   %-7s attributed AO bytes put back before the compare (62e53a3b codegen, see ATTRIBUTED): %s' % (
-        tag, applied if applied != 'REFUSED' else 'REFUSED -- a listed byte holds neither value'))
-    return okLodo and okLodi and (not fixture or colour == 0) and applied != 'REFUSED'
+    return okLodo and okLodi and (not fixture or colour == 0)
 
 
 g1ok = [g1('fixture', OLD + '/fx', NEW + '/fx', True),
