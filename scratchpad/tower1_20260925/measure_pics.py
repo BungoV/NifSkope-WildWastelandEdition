@@ -13,6 +13,7 @@ P = 'pics/'
 VO = r'E:/Tools/Fallout 4/DataUnpacked/Data/Meshes/Terrain/Commonwealth/Objects'
 L = np.array([-2048., -26624., 0.])
 VX = np.array([-0.6859, -0.7277, 0.0]); VY = np.array([0.3240, -0.3055, 0.8952]); VZ = np.array([-0.6516, 0.6142, 0.4453])
+BG = np.array([43, 45, 49], np.float32) / 255   # the clear colour: a blank render is this one value everywhere
 CHUNKS = [(x, y) for y in (-12, -8, -4) for x in (-8, -4, 0)]
 
 def load(tag):
@@ -25,7 +26,7 @@ def composite(arm):
         for X, Y in order:
             im = load('van_%s_%s_%d_%d' % (arm, kind, X, Y))
             if out is None:
-                out = im.copy(); bg = im[2, 2].copy(); out[:] = bg
+                out = im.copy(); bg = BG.copy(); out[:] = bg
             assert im.shape == out.shape, (im.shape, out.shape)
             m = np.abs(im - bg).max(-1) > 1.5 / 255
             out[m] = im[m]; n['%s %d,%d' % (kind, X, Y)] = int(m.sum())
@@ -83,7 +84,7 @@ if __name__ == '__main__':
         ys, xs = np.nonzero(m)
         print('tower %s: %d vanilla tris, mask %d px (eroded from %d), bbox x %d..%d y %d..%d' % (tag, nt, m.sum(), full, xs.min(), xs.max(), ys.min(), ys.max()))
         for k, img in arms.items():
-            bgm = np.abs(img - img[2, 2]).max(-1) > 1.5 / 255
+            bgm = np.abs(img - BG).max(-1) > 1.5 / 255
             s, Sm, mS, Y = stats(img, m & bgm)
             out[(tag, k)] = (s, Sm, mS, Y, int((m & bgm).sum()))
             print('   %-13s sRGB %s  S_of_mean %.3f  mean_S %.3f  Y %.4f  (%d px)' % (k, np.round(s, 3), Sm, mS, Y, (m & bgm).sum()))

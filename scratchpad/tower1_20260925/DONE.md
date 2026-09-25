@@ -102,3 +102,43 @@ Refuter (pre-registered): re-bake cells 0,-8 (towers A and C) and -4,-8 (tower B
  (b) render the same 08 camera, base-colour arm (WW_LOD_CHANNEL=12): tower A's mask mean must move toward
      vanilla's by the same ratio; if it stays at ~0.18 the swap is not the cause, or not reaching the render;
  (c) the census line must say 21,064 on Fallout4.esm; 0 = the parse is not wired.
+
+## 5. Rendered, the 08 camera (pics.sh, pics_bto.sh, measure_pics.py) -- 23:08
+Side by side: `pics/TOWER1_vanilla_vs_ours.png` (untracked, it holds game art): the full 08 frame (vanilla | ours as
+bungo saw it, WW_LODL_AO=1), then the tower crop x2. Exe = run/release copy, sha1 375b42b3 (main's 21:09 build).
+Frame read back 1600x1624, upp 20.480 (ours .cam). Camera facts measured, not assumed:
+* NifSkope draws a stock .BTO in WORLD space (auto-fit look-at of 4.0.-8 = 10012,-24730,1135), so the BTOs take the
+  native camera unchanged. pics.sh's chunk-local /4 camera drew 14 of 18 BTOs blank (11,411 B files); re-shot by
+  pics_bto.sh. A .BTR is drawn chunk-local (the world camera draws it blank), so the terrain keeps the /4 camera; it
+  is context only and is not measured. Towers land on the same pixels in both halves (see the picture).
+* One mask per tower = the vanilla tower triangles projected with the view-8 basis, eroded 2 px (A 22,613 px,
+  B 21,261, C 3,656). Every masked pixel is covered on every picture.
+
+| tower | arm | mean sRGB | S of mean | mean S | linear Y |
+|---|---|---|---|---|---|
+| A | vanilla base colour (ch 12) | 0.768 0.693 0.655 | 0.147 | 0.196 | 0.458 |
+| A | ours base colour (ch 12) | 0.511 0.458 0.430 | 0.158 | 0.160 | 0.185 |
+| A | vanilla lit | 0.832 0.760 0.722 | 0.132 | 0.176 | 0.560 |
+| A | ours lit, vertex colour on | 0.485 0.450 0.428 | 0.117 | 0.152 | 0.176 |
+| B | vanilla base colour | 0.700 0.625 0.590 | 0.158 | 0.217 | 0.367 |
+| B | ours base colour | 0.552 0.458 0.416 | 0.247 | 0.226 | 0.193 |
+| B | vanilla lit | 0.763 0.686 0.652 | 0.146 | 0.199 | 0.449 |
+| B | ours lit, vertex colour on | 0.474 0.410 0.378 | 0.202 | 0.214 | 0.149 |
+| C | vanilla base colour | 0.384 0.386 0.375 | 0.030 | 0.070 | 0.123 |
+| C | ours base colour | 0.396 0.402 0.392 | 0.026 | 0.071 | 0.133 |
+| C | vanilla lit | 0.450 0.454 0.442 | 0.027 | 0.067 | 0.173 |
+| C | ours lit, vertex colour on | 0.399 0.407 0.398 | 0.022 | 0.068 | 0.136 |
+
+The render agrees with the offline numbers: A and B at 40-53% of vanilla's base-colour luma, C (the control, few
+swapped surfaces) within 0.01. Saturation is NOT lower on ours (mean S 0.16/0.23 vs 0.20/0.22): the "grey" is a
+darker, blue-grey panel sheet where vanilla has cream/white panels with orange runs. Vertex colour + AO costs ours
+a further 5-23% of luma (A 0.185 -> 0.176 lit; B lit 0.149); that is GREY1's territory, not this defect. The lit
+arms also carry vanilla's stock shader constants (smoothness 1, spec white), so compare causes on the base arm.
+Answer to task 4: the colours do NOT match, so GREY1's per-placement multiplier is not the fix for these towers.
+
+## 6. Skills
+* Loaded: nifskope-ww-render-shot, nifskope-ww-vanilla-compare, ww-whole-map-picture, search-lean.
+* Wished for: one that said "a stock .bto is drawn in world space, a .btr chunk-local" -- now in the new skill.
+* Written: `fo4-lod-material-swap-check` (E:\Projects\Claude\.claude\skills\ and E:\Tools\AISkills\): name the
+  buildings from the manifests, the offline atlas-vs-ours discriminator, the MSWP swap refuter, the whole-map
+  LOD swap census, and rendering stock chunks at a native camera with the composite + projected mask.
