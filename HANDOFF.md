@@ -60,6 +60,23 @@ committed" or names an exe, this block overrides it.
 - Re-run the command-line bakes since 09-19 that used --data-root.
 
 ### Lane and director lines, 2026-09-24, newest first
+- 2026-09-25 18:05 EXTENT1:
+  **EXTENT1 (2026-09-25, branch extent1-20260925, no src change, no bake).** bungo asked whether the whole
+  Commonwealth map is covered by the landscape heightmap. It is. The installed `Commonwealth.lodl` header covers
+  cells -96..95 x -96..95. That is every LAND cell of Fallout4.esm (36,864 of 36,864) and his MO2 order (the same).
+  Heights sampled at 5 outer cells (121 samples each) match LAND exactly (0 mismatched). Vanilla's non-flat .BTR
+  tiles lie inside the same square. The director's "-42..33 x -48..39" is the PLACEMENT bounds (184,431 objects
+  in 4,541 cells), which earlier pictures used as their frame. The grey land around the objects in the old
+  09_overview was unpainted LAND (32,909 cells have no BTXT/ATXT), not missing terrain. SEAM1's
+  `--vt-fill-vanilla` sheets, installed at 16:14, paint it.
+  Pictures (untracked): `scratchpad/extent1_20260925/pics/whole_top_before.png` / `whole_top_after.png`
+  (top-down, 3200x3224, cells -96..95, all objects), `whole_obl_before.png` / `whole_obl_after.png` (view 8).
+  Placement cells on grey: 776 -> 8 (the 8 are the Glowing Sea, painted grey in the ESM). Cells with no terrain
+  under them: 0 -> 0. Refuter: a placement cell whose centre pixel in `pics/top/T.png` is the background colour,
+  or a LAND cell outside the .lodl header.
+  Open: the viewer's object layer refuses the whole map (13.1M vertices > 9.5M cap, all-or-nothing). The pictures
+  are two halves composited (skill `ww-whole-map-picture`). Raising or streaming the cap is a separate question
+  for bungo.
 - 2026-09-25 17:55 SEAM1:
   **Status at 16:14.** Lane SEAM1 is BUILT and INSTALLED, NOT FLOWN.
   - Exe b9fd029b. The whole-map VT (fill ON, cover and height on) went into mods\FO4CSLOD at 16:14. The old files are in scratchpad/seam1_20260925/replaced/, with sha1 before and after.

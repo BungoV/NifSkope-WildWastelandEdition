@@ -5,6 +5,16 @@ Written the moment a mistake is recognised, unprompted (CONSTITUTION rule 2).
 Format: date -- what was done -- what was true -- how it was found -- the rule.
 Newest at the top.
 
+## 2026-09-25 -- lane EXTENT1 (lane text)
+
+### 2026-09-25 -- a picture's frame was read as the file's extent (EXTENT1)
+Two lanes framed whole-map pictures on the PLACEMENT bounds: SEAM1 W3 used -42..32 x -48..38, and BAKE1
+09_overview used -64,-48..31,47. The terrain beyond the frame was not drawn, so the pictures looked like a
+.lodl that stops at the objects. The director read a shot log's region line ("lodl Commonwealth.lodl: cells [-42,-48]..[33,39]") as the file extent, told bungo the heightmap stopped there, and briefed a writer fix for bounds the file already had, and a
+lane nearly re-baked for it. Rule: a whole-map picture is framed on the `.lodl` header bounds (i32 x4 at 0x08).
+The caption states the frame. Before calling anything "the extent", read the header, not a picture.
+Skill `ww-whole-map-picture` section 1.
+
 ## 2026-09-25 -- lane SEAM1 (lane text)
 
 - **2026-09-25, SEAM1: the native sheet cache served another bake's tiles.**

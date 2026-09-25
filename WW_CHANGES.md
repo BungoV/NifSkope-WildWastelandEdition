@@ -1,5 +1,16 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## 2026-09-25 -- EXTENT1: the whole-map terrain extent, measured (no code change)
+
+- The `.lodl` already spans the whole worldspace (-96..95, 36,864 LAND cells, header = `EsmWorld::cellBounds()`
+  over every CELL with XCLC). No writer change was needed, so there is no red->green code gate. The check
+  "header bounds = LAND bounds" is green on the installed file.
+- The pictures that looked cut short were framed on the placement bounds (-42..31 x -48..38) or on an old
+  render region (-64,-48..31,47). The grey was unpainted LAND before SEAM1's vanilla fill.
+- New lane tools (scratchpad only): the whole-map shot driver with a split-half object composite past the
+  viewer's 9.5M-vertex cap, a frame check (corners at least 20 px inside), and the census of placement cells
+  on grey and on no terrain.
+
 ## SEAM1: Sanctuary edge, vanilla LOD colour fill, grass tint, .lodo v5 colour stream
 
 2026-09-25, lane SEAM1 (BUILD PENDING, not built, not flown):
