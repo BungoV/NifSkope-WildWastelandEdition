@@ -1,0 +1,8 @@
+ON: land outside the playable map, 11325255 samples, pale 1185701 (0.105), height p80 25888
+   above p80 height: pale 0.391 non-pale 0.178 | slope > 30 deg: pale 0.949 non-pale 0.144 (population 0.228) | corr(lum,h) 0.473 corr(lum,slope) 0.621
+VAN: land outside the playable map, 11325255 samples, pale 1166210 (0.103), height p80 25888
+   above p80 height: pale 0.377 non-pale 0.180 | slope > 30 deg: pale 0.953 non-pale 0.145 (population 0.228) | corr(lum,h) 0.483 corr(lum,slope) 0.623
+   ON slope  0-30 deg: pale share below p80 height 0.006, above p80 0.011 (n 7421422 / 1317260)
+   ON slope 30-40 deg: pale share below p80 height 0.169, above p80 0.283 (n 857254 / 524129)
+   ON slope 40-50 deg: pale share below p80 height 0.503, above p80 0.631 (n 284015 / 246911)
+   ON slope 50-90 deg: pale share below p80 height 0.779, above p80 0.823 (n 497927 / 176337)

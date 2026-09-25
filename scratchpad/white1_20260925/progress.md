@@ -1,0 +1,4 @@
+# WHITE1 progress
+- 2026-09-25 18:29 worktree NifskopeWWE-white1 on white1-20260925 from d40017be (no build yet; localising first, no build needed for that). Addendum (pale = peaks / steep faces?) queued.
+- 18:36 localised from files (localise.txt): band = the steep outer wall of the western block (ring slope 50.1 deg vs core 23.8), painted pale in vanilla's own dim-4 LOD diffuse (ring step +16.7 lum), carried by the fill (corr ON/vanilla 0.977); fill OFF flat (step 0.0). 0 painted LAND in ring. Renders: T_on == EXTENT1 T.png (0 px); C5 unlit +10.5 = texels +10.7, lit +7.0. Addendum: pale on >30 deg 0.976 vs non-pale 0.270; above p80 height 0.178 vs 0.203. Verdict: data (vanilla shows it) -> no code change.
+- 18:40 DONE.md, DELIVERABLE_TEXT.md written; skill ww-whole-map-picture section 7 added; committing text only. No build, no bake, FO4CSLOD untouched.

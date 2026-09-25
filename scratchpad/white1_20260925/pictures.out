@@ -1,0 +1,9 @@
+C5 render ON (whole_top_after.png, his picture)     lum ring  113.0 core  106.1 step   +7.0
+C5 render fill OFF (T_off.png)                      lum ring   79.9 core   83.7 step   -3.8
+C5 render ON unlit base colour (T_on_c12.png)       lum ring   96.6 core   86.1 step  +10.5
+C5 texels ON in frame                               lum ring   96.2 core   85.5 step  +10.7
+C5 texels OFF in frame                              lum ring   66.7 core   66.7 step   -0.0
+C5 texels VANILLA in frame                          lum ring  101.6 core   84.9 step  +16.7
+wrote pics/band_nw_zoom4x.png (2392, 2544)
+wrote pics/band_sw_zoom4x.png (2392, 2556)
+wrote pics/whole_compare.png (3238, 3414)
