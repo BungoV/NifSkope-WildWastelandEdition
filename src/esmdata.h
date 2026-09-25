@@ -408,6 +408,9 @@ private:
 	{
 		quint32 cellForm = 0;
 		quint32 childGroup = 0;   //!< the cell's type-6 group (0 if none)
+		//! type-6 groups a LATER plugin opened under this cell (its new REFRs);
+		//! libfo76utils links them to no record, see indexWorldspace (BAKE1)
+		QVector<quint32> extraGroups;
 		//! lane CELLWORK1: the cell record's EDID. FULL is a localised string
 		//! index in Fallout4.esm and this reader has no string table, so the
 		//! DISPLAY name is not available here -- see esmdata.cpp.
@@ -415,6 +418,10 @@ private:
 	};
 	QHash<QPair<int, int>, CellEntry> cellIndex;
 	quint32 persistentCellGroup = 0;
+	quint32 persistentCellForm = 0;
+	QVector<quint32> persistentExtraGroups;   //!< later plugins' persistent-cell groups (BAKE1)
+	int extraWorldGroups = 0;                 //!< later plugins' world-children groups walked (BAKE1)
+	int extraCellGroups = 0;                  //!< later plugins' cell-children groups joined (BAKE1)
 	mutable QHash<quint32, EsmLodBase> lodBaseCache;
 	mutable QHash<quint32, QVector<EsmScolPart>> scolCache;
 	mutable EsmScrapIndex scrapIdx;     //!< v9, built on first scrappable() call

@@ -3728,20 +3728,28 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 					  << QString::number( qMax( ew, eh ), 'f', 1 ) << " " << source << Qt::endl;
 			}
 		};
-		for ( int cy = region[1]; cy <= region[3]; cy++ ) {
-			for ( int cx = region[0]; cx <= region[2]; cx++ ) {
-				for ( const EsmRefr & r : world.refrs( cx, cy ) ) {
-					if ( r.initiallyDisabled || r.deleted || !r.base )
-						continue;
-					if ( std::memcmp( &r.baseType, "SCOL", 4 ) == 0 ) {
-						for ( const EsmScolPart & part : world.scolParts( r.base ) )
-							consider( part.base );
-					} else {
-						consider( r.base );
-					}
-				}
+		auto considerRef = [&]( const EsmRefr & r ) {
+			if ( r.initiallyDisabled || r.deleted || !r.base )
+				return;
+			if ( std::memcmp( &r.baseType, "SCOL", 4 ) == 0 ) {
+				for ( const EsmScolPart & part : world.scolParts( r.base ) )
+					consider( part.base );
+			} else {
+				consider( r.base );
 			}
-		}
+		};
+		for ( int cy = region[1]; cy <= region[3]; cy++ )
+			for ( int cx = region[0]; cx <= region[2]; cx++ )
+				for ( const EsmRefr & r : world.refrs( cx, cy ) )
+					considerRef( r );
+		/* The persistent overlay, as the chunk builder reads it (lodgen.cpp
+		 * gathers refrs + persistentRefrsIn): a tree placed persistent is
+		 * baked into the chunk, so it needs a card like any other. BNS
+		 * Trees.esp places 21,073 of its 22,827 REFRs there (lane BAKE1). */
+		for ( const EsmRefr & r : world.persistentRefrsIn(
+				float( region[0] ) * 4096.0f, float( region[1] ) * 4096.0f,
+				float( region[2] + 1 ) * 4096.0f, float( region[3] + 1 ) * 4096.0f ) )
+			considerRef( r );
 		return 0;
 	}
 	if ( haveObjects ) {
