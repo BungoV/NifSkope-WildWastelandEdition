@@ -20,3 +20,6 @@
 - whole_top_after.png rendered: top-down, cells -96..95, 3200x3224, margins 27/27/39/39 px (INSIDE >=20). Objects drawn in two halves under the 9.5M cap (63,724 + 120,707 = 184,431 placements, 0 dropped), composited over a terrain-only render; overlap 0.083% of object pixels.
 - placement cells with no terrain under them (background in the picture): 0 of 4,541.
 - rendering the BEFORE set with SEAM1's pre-fill VT sheets (its replaced/ backup), same camera.
+
+## 2026-09-25 18:04
+- before/after top-down and oblique composites done; frames inside (27/39 px top, 39/56 px oblique). Placement cells on grey 776 -> 8 (all 8 painted grey, Glowing Sea); no terrain under 0 -> 0. DONE.md + DELIVERABLE_TEXT.md written; skill ww-whole-map-picture written.
