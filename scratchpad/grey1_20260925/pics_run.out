@@ -1,0 +1,32 @@
+wide_lit 2530485 B rc=0
+21393 placements read, 11416 drawn (9863 outside the region, 114 with no mesh, 0 with no geometry at this level); 1112 bases, 1151 buckets
+wide_lit_ao 2473961 B rc=0
+21393 placements read, 11416 drawn (9863 outside the region, 114 with no mesh, 0 with no geometry at this level); 1112 bases, 1151 buckets
+WW_LODL_AO: terrain AO from the MASK SHEET'S B (the texture, Commonwealth.VT.2.lodt), 256 texels a cell, bilinear a vertex; 30 tiles read, 0 vertices without a tile (drawn open); values 2..255, mean 223.0
+wide_base 2405245 B rc=0
+21393 placements read, 11416 drawn (9863 outside the region, 114 with no mesh, 0 with no geometry at this level); 1112 bases, 1151 buckets
+wide_ident 241116 B rc=0
+WW_LODL_CHANNEL=identity: the GROUP (.lodi v7 0x100) on 11416 placements, 66126 groups in the file
+WW_LODL_CHANNEL=identity: the group, hashed to colour (the stock channel 1 palette) from Commonwealth.lodi, 11416 placements read; min 0, max 178, mean 52.797
+21393 placements read, 11416 drawn (9863 outside the region, 114 with no mesh, 0 with no geometry at this level); 1112 bases, 1151 buckets
+wide_seed 185366 B rc=0
+WW_LODL_CHANNEL=seed: the per-placement tree seed, hashed to colour; 0 = not a tree = black (.lodi 0x13) from Commonwealth.lodi, 11416 placements read; min 0, max 255, mean 3.472
+21393 placements read, 11416 drawn (9863 outside the region, 114 with no mesh, 0 with no geometry at this level); 1112 bases, 1151 buckets
+wide_lookdev 2372849 B rc=0
+21393 placements read, 11416 drawn (9863 outside the region, 114 with no mesh, 0 with no geometry at this level); 1112 bases, 1151 buckets
+close_lit 4145640 B rc=0
+21393 placements read, 11416 drawn (9863 outside the region, 114 with no mesh, 0 with no geometry at this level); 1112 bases, 1151 buckets
+close_lit_ao 3919005 B rc=0
+21393 placements read, 11416 drawn (9863 outside the region, 114 with no mesh, 0 with no geometry at this level); 1112 bases, 1151 buckets
+WW_LODL_AO: terrain AO from the MASK SHEET'S B (the texture, Commonwealth.VT.2.lodt), 256 texels a cell, bilinear a vertex; 30 tiles read, 0 vertices without a tile (drawn open); values 2..255, mean 223.0
+close_base 3805978 B rc=0
+21393 placements read, 11416 drawn (9863 outside the region, 114 with no mesh, 0 with no geometry at this level); 1112 bases, 1151 buckets
+close_ident 100486 B rc=0
+WW_LODL_CHANNEL=identity: the GROUP (.lodi v7 0x100) on 11416 placements, 66126 groups in the file
+WW_LODL_CHANNEL=identity: the group, hashed to colour (the stock channel 1 palette) from Commonwealth.lodi, 11416 placements read; min 0, max 178, mean 52.797
+21393 placements read, 11416 drawn (9863 outside the region, 114 with no mesh, 0 with no geometry at this level); 1112 bases, 1151 buckets
+close_seed 78839 B rc=0
+WW_LODL_CHANNEL=seed: the per-placement tree seed, hashed to colour; 0 = not a tree = black (.lodi 0x13) from Commonwealth.lodi, 11416 placements read; min 0, max 255, mean 3.472
+21393 placements read, 11416 drawn (9863 outside the region, 114 with no mesh, 0 with no geometry at this level); 1112 bases, 1151 buckets
+close_lookdev 3681714 B rc=0
+21393 placements read, 11416 drawn (9863 outside the region, 114 with no mesh, 0 with no geometry at this level); 1112 bases, 1151 buckets

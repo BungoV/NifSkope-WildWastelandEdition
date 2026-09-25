@@ -1,0 +1,10 @@
+== wide: 732768 building pixels of 2598400 (28.2%)
+  base     mean sRGB [0.453 0.42  0.378]  S(mean) 0.165  mean S 0.173  luma 0.425  | median S/S_base 1.000  | changed px 0.0%
+  lit      mean sRGB [0.526 0.491 0.444]  S(mean) 0.156  mean S 0.165  luma 0.496  | median S/S_base 0.948  | changed px 99.1%
+  lit_ao   mean sRGB [0.42  0.392 0.354]  S(mean) 0.156  mean S 0.168  luma 0.396  | median S/S_base 0.966  | changed px 95.3%
+  lookdev  mean sRGB [0.27  0.254 0.231]  S(mean) 0.146  mean S 0.169  luma 0.256  | median S/S_base 0.987  | changed px 97.7%
+== close: 2103256 building pixels of 2598400 (80.9%)
+  base     mean sRGB [0.443 0.413 0.371]  S(mean) 0.162  mean S 0.171  luma 0.417  | median S/S_base 1.000  | changed px 0.0%
+  lit      mean sRGB [0.513 0.483 0.436]  S(mean) 0.150  mean S 0.163  luma 0.487  | median S/S_base 0.948  | changed px 98.3%
+  lit_ao   mean sRGB [0.4   0.376 0.339]  S(mean) 0.152  mean S 0.166  luma 0.379  | median S/S_base 0.967  | changed px 95.5%
+  lookdev  mean sRGB [0.26  0.247 0.225]  S(mean) 0.135  mean S 0.169  luma 0.248  | median S/S_base 0.989  | changed px 98.5%

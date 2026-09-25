@@ -12,6 +12,7 @@ Lane GREY1, branch grey1-20260925 from f506a0cc, worktree E:\Projects\NifskopeWW
   building-LOD placements measured). Result in section 1.
 - 21:30 candidate 3 done (weather_light.py) and candidate 2 numeric half done (viewer_shade_model.py). The render
   half waits: BAKE2's NifSkope (PID 3888) is still running.
+- 21:42 BAKE2 exited; 12 renders done 21:42 (all rc 0). 21:44 section 2 written.
 
 ## 1. Candidate 1 -- the LOD atlas colour vs the full-detail building, as the game colours it
 
@@ -87,3 +88,85 @@ assumption); flipped, the up/down faces swap colours but every axis is still blu
   the Clear weather's imagespace likely does not resolve. Refuter: xEdit shows the IMSP entries resolving to IMGS.
 - **FO4CS.ini [Post]:** bGradingEnabled 0, fGradeSaturation 1.0, fGradeVibrance 0.0; tone curve Physical with a
   chroma fade only at 0.98..1.16 of white. In game no pass adds saturation either.
+
+## 4. Candidate 4 -- everything else, each with its discriminator
+
+| # | candidate | measured | verdict | discriminator |
+|---|---|---|---|---|
+| 4a | per-placement material-swap tint cannot reach a shared LOD atlas | full S 0.189 vs LOD 0.151 on the 33,504 swapped placements (section 1) | REAL, vanilla's own | the swap-kind split: unswapped placements show no gap |
+| 4b | LOD atlas textures fail to resolve and draw grey | 0 of the atlases used by the measured building LODs unresolved through his MO2 stack (mip_sat.py); on screen, base colour S 0.165 vs atlas 0.158 | NOT a cause: the raw base colour on screen equals the atlas (section 2) | raw base-colour render (WW_LOD_CHANNEL=12) mean colour vs the atlas mean |
+| 4c | the viewer's palette rule (row x vertex-colour red) differs from the engine | readings A/B/C of section 1 agree to 3 decimals; TINT1: 0 of 2,848 building-LOD BGSMs use the palette | NOT a cause | a building LOD BGSM with bGrayscaleToPaletteColor set |
+| 4d | mip averaging | mean per-texel S 0.150 at mip 0 -> 0.138 at mip 6 (-8%) | common to game and viewer; NOT a cause | the same number from a game capture of the same atlas at that distance |
+| 4e | FO4CS in-game grading adds saturation | grading off, saturation 1.0, vibrance 0 (section 3b) | NOT a cause | a game capture with FO4CS [Post] off |
+| 4f | vanilla imagespace saturation/tint | CNAM saturation 1, tint 0 on every Commonwealth weather (section 3) | NOT a cause | -- |
+
+## 2. Candidate 2 -- the viewer's own shading (read 21:43)
+
+Code (f506a0cc): the Legacy scene mode, which every session starts in, lights with a white headlight (frontalLight,
+lightColor 0 -> white, brightness 1), white ambient 1 (A = sqrt(1) x 0.375), and a per-channel Uncharted2 filmic
+tone map; GGX specular is untinted. The texel is used as stored (UNORM, the shader's sqrt-linear space); no sRGB
+mix-up, no desaturation pass; fog exists only in Lookdev. Lookdev feeds legacy shapes a FLAT NAM0 ambient, so the
+weather's blue DALC never reaches the far-field objects (src/gl/lookdevstage.h).
+
+Numeric model (viewer_shade_model.py): the tone curve's log-slope is 0.98 at input 0.3 and 0.80 at 0.9, so a
+face turned to the headlight is pushed into the shoulder: the atlas mean colour S 0.167 -> 0.140 at N.L = 1,
+0.162 at N.L = 0.
+
+Renders (run/release/NifSkope.exe = main 21:09 exe, sha1 375b42b3; installed FO4CSLOD Commonwealth set; BAKE1's
+Boston window cells -5,-10..2,-3, oblique; frames read back 1600 wide x 1624 high; one NifSkope at a time,
+after BAKE2's had exited; pics/, pics_run.out, contact strip pics/close_strip.png). Building pixels = non-tree placements (seed channel black): 732,768
+(wide) and 2,103,256 (close). Same pixels in every shot (measure_pics.py, measure_pics.out):
+
+| shot | S of mean | mean S | luma | median per-pixel S / S(raw base colour) |
+|---|---|---|---|---|
+| raw base colour (WW_LOD_CHANNEL=12) | 0.165 / 0.162 | 0.173 / 0.171 | 0.425 / 0.417 | 1 |
+| Legacy lit (default) | 0.156 / 0.150 | 0.165 / 0.163 | 0.496 / 0.487 | 0.948 / 0.948 |
+| Legacy lit, vertex colour (AO) forced on | 0.156 / 0.152 | 0.168 / 0.166 | 0.396 / 0.379 | 0.966 / 0.967 |
+| Lookdev, CommonwealthClear 12:00 | 0.146 / 0.135 | 0.169 / 0.169 | 0.256 / 0.248 | 0.987 / 0.989 |
+
+(wide / close.) The raw base colour on screen (S 0.165, mean S 0.173) equals the atlas census (0.158 / 0.171):
+**the textures resolve**; nothing draws grey from a missing texture (4b closed). Lit vs Lookdev differ on 49% /
+96% of pixels, so the Lookdev pin took.
+
+Verdict: SMALL. The viewer's own shading takes ~5% of the saturation (tone-map shoulder under the headlight) and
+adds no colour cast; in Lookdev it takes ~1% but makes the scene half as bright (luma 0.25) and still cast-free.
+
+## 5. Ranked verdict
+
+1. **The per-placement material swap (the "tint") never reaches the LOD.** 44% of Commonwealth building
+   placements carry a material swap that recolours the full model through the palette. Their full-detail colour
+   is 25% more saturated than the one shared LOD atlas (S 0.189 vs 0.151), and the swap moves the colour a lot
+   both ways: full/LOD colour ratio p10 0.7, p90 1.6 over 4,049 (base, swap) variants. In game neighbouring
+   buildings of one kit are many colours; in our far field they are all the one beige-grey atlas. Unswapped
+   buildings show no gap. This is vanilla's own LOD trait -- the game's own far LOD shares it.
+2. **The game's light has a colour; the viewer's does not.** Clear midday (vanilla and his Physical Weathers):
+   sunlit faces lit near-white, shaded faces lit blue (light S 0.28..0.32), so in game no building side reads
+   neutral grey. The viewer's Legacy light is pure white, and Lookdev hands far-field objects a flat grey ambient
+   (the blue DALC never reaches them): the Lookdev render adds no cast (per-pixel S ratio 0.99).
+3. **The viewer's tone map under the headlight: -5%** (render, per-pixel median 0.948). Small.
+- Not causes (measured): missing textures, the viewer's palette rule, mips (-8%, common to both), FO4CS grading
+  (off), imagespace saturation/tint (1 / 0).
+
+Which of 1 or 2 dominates what he sees depends on what he compared against. Discriminator: were the in-game
+buildings inside the loaded cells (full detail, uGridsToLoad) or in the game's own far LOD? Full detail -> 1
+leads; the game's own far LOD -> 1 is shared and 2 leads.
+
+**Smallest change that would close the gap (proposal only, nothing changed):** in the object bake, give each
+placement an RGB multiplier = the census's full-detail mean colour of its (base, swap) / the LOD atlas mean colour
+of its base (census2.py already computes both, REFR by REFR), and multiply it into the albedo like the TINT1
+library colour. Second, for 2: let Lookdev feed legacy far-field shapes the DALC ambient cube instead of the flat
+NAM0 ambient.
+
+**The test that would refute it:** take the buildings he points at as "grey" and read their REFR XMSP and base
+MODS. If they carry no swap, verdict 1 does not explain them. After the change: the WW_LOD_CHANNEL=12 render of the
+Boston window must rise from S 0.165 toward the census's full-detail 0.172 overall, and each swapped placement
+must land within 0.03 of its census full-detail S. If it does not, the multiplier is wrong.
+
+## 6. Skills
+
+- Loaded: search-lean, nifskope-ww-render-shot.
+- Wished for: a skill for the "LOD vs in-game colour" question. None existed, and the first cut (raw diffuse)
+  gave the wrong sign.
+- Written: fo4-surface-colour-census, at E:\Projects\Claude\.claude\skills\fo4-surface-colour-census\SKILL.md
+  and E:\Tools\AISkills (commit 4babe6e). It covers the palette/material-swap trap, the ESM reads, REFR
+  weighting, the swap-kind split, the weather light step, and the pixel-for-pixel viewer A/B.
