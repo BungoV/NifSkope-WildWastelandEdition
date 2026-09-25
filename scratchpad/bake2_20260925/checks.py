@@ -66,6 +66,37 @@ def grey_chunks(vtpath, cells, x0, y0, x1, y1, label):
     allch = chroma.mean(); print('   whole mosaic: mean chroma %.2f, lum mean %.1f sd %.1f' % (allch, lum.mean(), lum.std()))
     return grey
 
+def nonland_grey(vtpath, land, label):
+    """Every VT cell with NO LAND under it (a worldspace whose VT box is wider than its LAND; never the case on the
+    Commonwealth). Per cell: mean chroma; flat grey = chroma < 6. The vanilla fill blends such a cell from the
+    generator's own colour toward vanilla by a smoothstep of its distance to painted LAND (lodgen.cpp, the fill's
+    band loop), so the ring next to LAND keeps the generator's grey. Reported with each cell's distance to LAND."""
+    v = vtread.Vt(vtpath)
+    m, wW, nN = v.mosaic(v.west, v.south, v.east, v.north, 1)
+    upc = v.content // v.levelDim
+    rgb = m[..., :3].astype(np.float32)
+    chroma = rgb.max(-1) - rgb.min(-1)
+    lum = rgb @ np.array([0.299, 0.587, 0.114], np.float32)
+    lx = np.array([c[0] for c in land]); ly = np.array([c[1] for c in land])
+    grey = collections.Counter(); n = 0; worst = []
+    for cy in range(v.south, v.north + 1):
+        for cx in range(v.west, v.east + 1):
+            if (cx, cy) in land: continue
+            r0 = (nN - 1 - cy) * upc; c0 = (cx - wW) * upc
+            if r0 < 0 or c0 < 0 or r0 + upc > chroma.shape[0] or c0 + upc > chroma.shape[1]: continue
+            n += 1
+            ch = float(chroma[r0:r0 + upc, c0:c0 + upc].mean())
+            if ch < 6:
+                d = int(np.max(np.stack([abs(lx - cx), abs(ly - cy)]), 0).min())
+                grey[d] += 1
+                worst.append((cx, cy, d, round(ch, 2), round(float(lum[r0:r0 + upc, c0:c0 + upc].mean()), 1)))
+    print('%s: no-LAND VT cells %d; flat grey (chroma < 6) %d; by distance to LAND (cells) %s'
+          % (label, n, sum(grey.values()), dict(sorted(grey.items()))))
+    for w in worst[:12]:
+        print('   grey no-LAND cell %d,%d dist %d chroma %.2f lum %.1f' % w)
+    return worst
+
+
 if __name__ == '__main__':
     D, E, LB = sys.argv[1:4]
     land = land_cells(LB)
@@ -76,7 +107,11 @@ if __name__ == '__main__':
     for (x, y), n in off:
         print('   no-LAND cell %d,%d: %d placements' % (x, y, n))
     xs = [c[0] for c in land]; ys = [c[1] for c in land]
-    grey_chunks(D + '/' + E + '.VT.16.lodt', land, min(xs), min(ys), max(xs), max(ys), E)
+    import glob, re
+    vts = sorted(glob.glob(D + '/' + E + '.VT.*.lodt'), key=lambda f: int(re.search(r'VT\.(\d+)\.', f).group(1)))
+    vt = [f for f in vts if f.endswith('.VT.16.lodt')] or vts[-1:]   # VT.16 where the ladder reaches it, else its coarsest
+    grey_chunks(vt[0], land, min(xs), min(ys), max(xs), max(ys), E)
+    nonland_grey(vt[0], land, E)
     if '--control' in sys.argv:
         i = sys.argv.index('--control'); p = sys.argv[i + 1]; b = list(map(int, sys.argv[i + 2:i + 6]))
         allc = {(x, y) for x in range(b[0], b[2] + 1) for y in range(b[1], b[3] + 1)}

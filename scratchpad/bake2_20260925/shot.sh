@@ -6,9 +6,13 @@
 #   env: LV (lodl level, default 3)  LI (WW_LODI_LEVEL, default 0)  SLOT (WW_LODI_SLOT, or none = first authored,
 #        default none)  SDIM (sheet dim, default 16)  OBJ_REGION=x0,y0,x1,y1 (objects only; default the frame)
 #        NOOBJ=1 (terrain only)
+#        LREG=x0,y0,x1,y1 (terrain region, default the frame. A region past the VT sheets' box turns the sheets
+#        off, so a worldspace whose VT box is smaller than its .lodl header gives the sheets' box here; the camera
+#        stays on the frame)
 # Run wait_turn.sh first: one harness NifSkope on the machine at a time.
 OUT="$1"; F="$2"; E="$3"; X0=$4; Y0=$5; X1=$6; Y1=$7; VIEW=$8; ORT=$9; W=${10}; H=${11}; PORT=${12}
-LV=${LV:-3}; LI=${LI:-0}; SLOT=${SLOT:-none}; SDIM=${SDIM:-16}
+OUT="$(cd "$(dirname "$OUT")" && pwd)/$(basename "$OUT")"   # absolute: the exe does not resolve a relative path
+LV=${LV:-3};LI=${LI:-0}; SLOT=${SLOT:-none}; SDIM=${SDIM:-16}
 L=/e/Projects/NifskopeWWE-bake2/scratchpad/bake2_20260925
 NS=/e/Projects/NifskopeWWE-bake2/release/NifSkope.exe
 wp() { echo "$1" | sed -E 's#^/([a-zA-Z])/#\U\1:/#'; }
@@ -22,7 +26,7 @@ if tasklist //FI "IMAGENAME eq Fallout4.exe" 2>/dev/null | grep -q Fallout4.exe;
 bash $L/wait_turn.sh 3600 || exit 1
 env "${OBJ[@]}" \
     WW_LODL_SHEETS="$(wp "$F")" WW_LODL_SHEET_DIM=$SDIM WW_LODL_SHEET_CACHE="$CACHE" \
-    WW_LODL_REGION="$X0,$Y0,$X1,$Y1,$LV" \
+    WW_LODL_REGION="${LREG:-$X0,$Y0,$X1,$Y1},$LV" \
     WW_LODGEN_RESOURCES="$RES" \
     WW_RENDER_SHOT="$(wp "$OUT")" WW_RENDER_SIZE="${W}x$((H + 59))" \
     WW_RENDER_CENTER="$CX,$CY,0" WW_RENDER_ORTHO="$ORT" WW_RENDER_VIEW="$VIEW" WW_RENDER_CLEAN=1 \

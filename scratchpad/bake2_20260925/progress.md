@@ -29,3 +29,27 @@
 - Landmark cells (cell_names.py over the plugins' CELL EDIDs): Nuka-World Galactic Zone -6..-3 x -2..1, Nuka-Town
   -1..0 x -6..-1, Kiddie Kingdom 0..3 x 0..3 -> oblique frame -8 -7 3 4; Far Harbor town FarHarborExt 13..14 x
   6..8 -> frame 9 3 16 10; pre-war PrewarSanctuaryExt01 -20,21, PrewarPlayerHouse01 -20,22 -> frame -24 18 -17 25.
+
+## 19:15 (clock read) -- pre-war Sanctuary (SanctuaryHillsWorld, WRLD 000A7FF4) INSTALLED and pictured
+- First bake (region = LAND box -25 -9 2 25) wrote ONE VT level (VT.2). Cause read in the source
+  (lodgenVtLevelsFromBounds): the VT ladder stops at the coarsest dim dividing the region's WEST and SOUTH edge;
+  -25 divides by nothing. The region is clipped to the CELL bounds (-28,-13), so the best a full-LAND region can do
+  here is -28 -12 (dim 4). Re-baked on -28 -12 2 25 (covers every LAND cell): VT.2 + VT.4 (2 levels), 84 s rc 0.
+  Old run kept as prewar_r1_unaligned/. Far Harbor gets -32 -32 20 31 (CELL bounds -73,-59 allow it: 5 levels).
+- Cards: 0 linked, by design: a card stands in only where the ring's MNAM slot is EMPTY (lodgen.cpp card rule);
+  the pre-war maples ship TreeMaple*_LOD_0/_LOD_2 for every ring. G3: 34 bases, 0 with card, all index 00.
+- G1: native-verify rc 0 (pair identity ok); census --self-floor rc 0 FLOOR ok; lodb/lodm/lodl readers rc 0 (lodm
+  2 checks 0 failures); --lodt-check VT.2 and VT.4 rc 0. G2: .lodb plugins 47. G4: VT.2 mask BC3, grass cells
+  -25,17 -22,22 -21,24 non-uniform (PASS); red (g4red.sh, no --cover) BC1 no channel on all 3 (RED as it must).
+- Placement cells with no LAND: 15 cells / 101 placements, all named (x -15..-11, y 16..24; east of the NW block).
+- Flat grey: LAND chunks 0 of 18. NEW: no-LAND VT cells 42 of 1162 flat grey (chroma < 6, lum ~124), ALL at distance
+  1 from LAND = the ring round the NW block. Vanilla's LOD texture there reads lum ~55 chroma ~38. Cause (source):
+  the fill blends a no-LAND cell from the generator's own grey toward vanilla by a smoothstep over bandCells (4) of
+  distance, so the first ring stays grey. The Commonwealth never shows it (every VT cell has LAND). Reported, not
+  changed (code, not bake).
+- Installed mods/FO4CSLOD/FO4CSLOD/SanctuaryHillsWorld (was absent): 163 files, 517,928,527 B, sha1-identical to scratch.
+- Pictures: pics/prewar_topdown.png 3200x4264 on header -28,-13..7,34, INSIDE >=20 px (46 px), lum SD 29.8,
+  15,566 colours, 1350 of 1350 drawn. pics/prewar_oblique_sanctuary.png (BAKE1 08 camera: view 8, 8x8 cells, ORT
+  S*2048, 1600^2, LV 2, slot 0) lum SD 34.6, 12,175 colours; the houses have no authored LOD model (manifests hold
+  only street lamps and cliffs besides trees), so the cul-de-sac road shows without houses.
+- Director messaged with the top-down path at 19:14.
