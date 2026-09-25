@@ -1,5 +1,20 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## BAKE2: three more worldspaces, .lodi v10, and the fill halo
+
+2026-09-25 BAKE2: pre-war Sanctuary, Far Harbor and Nuka-World are baked and installed in FO4CSLOD, all rings, with
+the vanilla colour fill on.
+- **.lodi v10.** A placement scaled above 7.99988 is written with instance flag bit 7 (8 + v/8192, up to 15.99988)
+  instead of refusing the whole file. Nuka-World has 4 cliffs up to 9.97. A file without such a placement is
+  unchanged byte for byte.
+- **The glow round pre-war's playable block is gone.** Cells with no LAND record were blended from the generator's
+  placeholder grey. They now take vanilla's colour whole. Measured by picture brightness 1 cell out from the LAND
+  edge: 124.5 -> 95.8 on pre-war, against 94.0 further out. The Commonwealth is unchanged (every cell has LAND).
+- **The fill finds Far Harbor's vanilla LOD.** Its grid starts at cell -73,-59, so it is not on multiples of 4.
+  The phase is now read from LODSettings\<WS>.LOD. Far Harbor's flat-grey cells went 1517 -> 0 of 3584.
+- **Tools.** scratchpad/bake2_20260925: bake.sh, verify.sh, halo_gate.py, grey_count.py, grey_split.py,
+  halo_pics.py, ba2_terrain.py, widescale_check.py.
+
 ## GREY1: why far-field buildings read grey
 
 - 2026-09-25 GREY1 (measure only, no code): far-field grey diagnosed. The cause is the material-swap tint that

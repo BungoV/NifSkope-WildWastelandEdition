@@ -5,6 +5,38 @@ Written the moment a mistake is recognised, unprompted (CONSTITUTION rule 2).
 Format: date -- what was done -- what was true -- how it was found -- the rule.
 Newest at the top.
 
+## 2026-09-25 -- lane BAKE2 (lane text)
+
+- **Edited a running shell script.**
+  - What was done: I edited halo_runs.sh while an instance of it was running.
+  - What was true: bash reads a script as it goes, so the running instance executed half-old, half-new lines and
+    the run was corrupted.
+  - How it was found: the output lines did not match the script.
+  - The rule: never edit a .sh while it runs; copy it or wait.
+- **First pre-war bake on the raw LAND box.**
+  - What was done: I baked pre-war on its raw LAND box (-25 -9 2 25).
+  - What was true: the VT ladder needs the region's west and south edges to divide by the dim, so only VT.2 was
+    written.
+  - How it was found: the census said so.
+  - The rule: widen west/south to a multiple of 32 within the CELL bounds before a VT bake (now in the
+    ww-whole-map-lod-bake skill).
+- **BA2 reader bugs, caught before any file was used.**
+  - What was done: I read the cubemap flag as a u16 at byte 22, and packed the DDS header with wrong counts.
+  - What was true: the flag is byte 22 only.
+  - How it was found: the header length and flag asserts.
+  - The rule: assert the rebuilt header length and read BA2 flags byte-wise.
+- **Nuka-World top-down: the colourless data view.**
+  - What was done: I rendered the first Nuka-World top-down on its full -32..32 box.
+  - What was true: the box could not snap to sheet tiles inside the .lodl. The viewer drew the pale data view and
+    still returned rc 0.
+  - How it was found: the picture looked pale, and the log said "data view".
+  - The rule: grep every render log for "data view" (now in the ww-whole-map-picture skill).
+- **Halo gate on an all-LAND region.**
+  - What was done: I ran halo_gate.py on Nuka-World's all-LAND box.
+  - What was true: with no no-LAND cell, the gate crashed on empty means instead of saying there was nothing to test.
+  - How it was found: the traceback.
+  - The rule: it now prints N/A. A gate must say when it has no subject.
+
 ## 2026-09-25 -- lane GREY1 (lane text)
 
 - 2026-09-25 21:1x GREY1: compared the LOD atlas with the full model's RAW diffuse. That was wrong for the 41% of

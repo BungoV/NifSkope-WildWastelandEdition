@@ -60,6 +60,30 @@ committed" or names an exe, this block overrides it.
 - Re-run the command-line bakes since 09-19 that used --data-root.
 
 ### Lane and director lines, 2026-09-24, newest first
+- 2026-09-25 23:01 BAKE2:
+  ### Lane BAKE2 (2026-09-25): pre-war Sanctuary, Far Harbor and Nuka-World LOD, baked and installed
+
+  - **Branch.** bake2-20260925 (worktree E:\Projects\NifskopeWWE-bake2). Not merged, not pushed.
+  - **Code commits.** 6da2f793 (.lodi v10 wide-scale bit, ruling (a)); b8d0b957 (VT fill: no-LAND cells filled
+    whole, vanilla grid phase from LODSettings); 3ecb8665 (docs §2.6).
+  - **Installed** into mods\FO4CSLOD\FO4CSLOD, every file sha1-checked, from exe 62412e83:
+
+    | worldspace | files | bytes |
+    |---|---|---|
+    | SanctuaryHillsWorld | 163 | 517,928,695 |
+    | DLC03FarHarbor | 578 | 1,733,544,111 |
+    | NukaWorld | 654 | 2,838,424,769 |
+
+    All three have the vanilla fill ON.
+  - **Fill inputs for the two DLCs.** Vanilla terrain LOD colour and the LODSettings files, extracted read-only into
+    E:\Tools\Fallout 4\DataUnpacked\Data. The sha1 manifest is in the lane folder.
+  - **Owed.**
+    - The FO4CS reader must read .lodi v10 (bit 7 = 8 + v/8192). Only Nuka-World writes v10 today (4 cliffs).
+    - bungo's in-game look at the three worldspaces.
+  - **Pre-war** has 15 placement cells (101 placements) with no LAND under them, at x -15..-11, y 16..24.
+  - **Nuka-World grey cells.** 2303 flat-grey VT cells lie outside the .lodl header, so they are never drawn.
+    Vanilla ships no LOD there.
+  - Detail: scratchpad/bake2_20260925/DONE.md and progress.md.
 - 2026-09-25 21:45 GREY1:
   GREY1 (2026-09-25 21:10-21:45, measure only, branch grey1-20260925, nothing changed or re-baked): why our far-field
   buildings read greyer than in game. Ranked:
