@@ -2634,6 +2634,15 @@ static LodtWaterOptions gLodlWater;
  *  entry on it cannot reach a single output byte. */
 static QString gLgIncremental;
 static QString gLgSwitchDigest;
+/*! `--dim all` (lane BAKE1, 2026-09-25): the region bake runs rings 4, 8, 16
+ *  and 32 in ONE pass and one native session, the LOD panel's "all rings".
+ *  A single ring is what it always was. */
+static bool gLgAllRings = false;
+/*! `--fo4cs-one-root` (lane BAKE1, 2026-09-25): under --native, the arrays,
+ *  the chunk manifests and the bake record are rooted at --native, not at
+ *  --out-dir -- the panel's one-folder layout with the stock chunks kept
+ *  apart. Off = the layout every gate pins. */
+static bool gLgOneRoot = false;
 
 /*! The argument vector verbatim and the resource stack as the run was given
  *  them (lane BAKEREC1, 2026-09-17). Globals for the same reason the two above
@@ -3728,20 +3737,28 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 					  << QString::number( qMax( ew, eh ), 'f', 1 ) << " " << source << Qt::endl;
 			}
 		};
-		for ( int cy = region[1]; cy <= region[3]; cy++ ) {
-			for ( int cx = region[0]; cx <= region[2]; cx++ ) {
-				for ( const EsmRefr & r : world.refrs( cx, cy ) ) {
-					if ( r.initiallyDisabled || r.deleted || !r.base )
-						continue;
-					if ( std::memcmp( &r.baseType, "SCOL", 4 ) == 0 ) {
-						for ( const EsmScolPart & part : world.scolParts( r.base ) )
-							consider( part.base );
-					} else {
-						consider( r.base );
-					}
-				}
+		auto considerRef = [&]( const EsmRefr & r ) {
+			if ( r.initiallyDisabled || r.deleted || !r.base )
+				return;
+			if ( std::memcmp( &r.baseType, "SCOL", 4 ) == 0 ) {
+				for ( const EsmScolPart & part : world.scolParts( r.base ) )
+					consider( part.base );
+			} else {
+				consider( r.base );
 			}
-		}
+		};
+		for ( int cy = region[1]; cy <= region[3]; cy++ )
+			for ( int cx = region[0]; cx <= region[2]; cx++ )
+				for ( const EsmRefr & r : world.refrs( cx, cy ) )
+					considerRef( r );
+		/* The persistent overlay, as the chunk builder reads it (lodgen.cpp
+		 * gathers refrs + persistentRefrsIn): a tree placed persistent is
+		 * baked into the chunk, so it needs a card like any other. BNS
+		 * Trees.esp places 21,073 of its 22,827 REFRs there (lane BAKE1). */
+		for ( const EsmRefr & r : world.persistentRefrsIn(
+				float( region[0] ) * 4096.0f, float( region[1] ) * 4096.0f,
+				float( region[2] + 1 ) * 4096.0f, float( region[3] + 1 ) * 4096.0f ) )
+			considerRef( r );
 		return 0;
 	}
 	if ( haveObjects ) {
@@ -3953,6 +3970,24 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 		for ( int cy = y0; cy <= region[3]; cy += d )
 			for ( int cx = x0; cx <= region[2]; cx += d )
 				jobs.append( LodgenChunkJob{ d, cx, cy } );
+		/* `--dim all`: the wider rings follow the ring-4 jobs, in the panel's
+		 * queue order (LodgenManager::buildQueue: ring, then row, then column).
+		 * Each job carries its own ring; the pass sets the terrain and object
+		 * options from it per job (lodgenchunkpass.cpp). */
+		if ( gLgAllRings ) {
+			if ( !gLgIncremental.isEmpty() ) {
+				err() << "error: --incremental works on one chunk size; --dim all runs four "
+						 "(the panel refuses it the same way)" << Qt::endl;
+				return 2;
+			}
+			for ( int rd : { 8, 16, 32 } ) {
+				const int rx0 = floorTo( region[0], rd ), ry0 = floorTo( region[1], rd );
+				for ( int cy = ry0; cy <= region[3]; cy += rd )
+					for ( int cx = rx0; cx <= region[2]; cx += rd )
+						jobs.append( LodgenChunkJob{ rd, cx, cy } );
+			}
+			out() << "rings: 4+8+16+32 (--dim all), " << jobs.size() << " chunk job(s)" << Qt::endl;
+		}
 
 		/* ===== INCREMENTAL REGENERATION AND THE BAKE RECORD ===============
 		 *
@@ -4044,6 +4079,8 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 		inc.requireRecord = true;
 		inc.outDir = outDir;
 		inc.nativeDir = nativeDir;
+		if ( gLgOneRoot && !nativeDir.isEmpty() )
+			inc.recordRoot = nativeDir;
 		inc.digestRoot = pass.texDataRoot;
 		inc.worldspace = pass.worldspace;
 		inc.dim = d;
@@ -4161,9 +4198,10 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 		 * and the game-relative string baked into the chunks says the same; the
 		 * stock target keeps the engine path it always had, byte for byte. */
 		const bool fo4csTarget = !nativeDir.isEmpty();
+		const QString fo4csRoot = gLgOneRoot && fo4csTarget ? nativeDir : outDir;
 		auto objectsDir = [&]() {
 			return fo4csTarget
-				? lodgenFo4csWorldDir( outDir, world.worldspaceEdid() ) + QStringLiteral( "/Objects" )
+				? lodgenFo4csWorldDir( fo4csRoot, world.worldspaceEdid() ) + QStringLiteral( "/Objects" )
 				: ( texDir.isEmpty() ? outDir : texDir ) + QStringLiteral( "/Objects" );
 		};
 		auto objectsGame = [&]( const QString & stem ) {
@@ -4367,7 +4405,8 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 			 * they describe files that now live under `FO4CSLOD\<ws>\`, so
 			 * they sit beside them rather than at the mod folder's own root. */
 			const QString manifestDir =
-				lodgenFo4csWorldDir( outDir, world.worldspaceEdid() );
+				lodgenFo4csWorldDir( gLgOneRoot && !nativeDir.isEmpty() ? nativeDir : outDir,
+					world.worldspaceEdid() );
 			QDir().mkpath( manifestDir );
 			const LodgenBtoScratchResult r =
 				lodgenDropBtoScratch( writtenBto, btoScratch, manifestDir );
@@ -6086,7 +6125,9 @@ int usage()
 		  << "                                          inspect a worldspace / one cell:\n"
 		  << "                                          LAND heights, refs, LOD models\n"
 		  << "  lodgen <file.esm> --worldspace HEX --terrain-region X0 Y0 X1 Y1\n"
-		  << "         [--dim 4] --out-dir DIR [--atlas]\n"
+		  << "         [--dim 4|8|16|32|all] --out-dir DIR [--atlas]\n"
+		  << "                                          --dim all: rings 4+8+16+32 in one\n"
+		  << "                                          pass, the panel's \"all rings\"\n"
 		  << "                                          sweep: every chunk touching the\n"
 		  << "                                          cell region, vanilla file naming.\n"
 		  << "                                          Default: direct source-texture refs\n"
@@ -7149,6 +7190,8 @@ int nifskopeCliMain( const QStringList & args )
 	bool skeletonOnly = false;
 	bool bodiesOnly = false;
 	gLgIncremental.clear();
+	gLgAllRings = false;
+	gLgOneRoot = false;
 	gLgKeepBto = false;
 	gLgSwitchDigest = lodgenSwitchDigestOf( a );
 	/* THE ARGUMENT VECTOR ITSELF (lane BAKEREC1, 2026-09-17). The digest above
@@ -7239,7 +7282,11 @@ int nifskopeCliMain( const QStringList & args )
 			lgChunk[0] = next().toInt();
 			lgChunk[1] = next().toInt();
 		}
-		else if ( t == QLatin1String( "--dim" ) ) lgDim = next().toInt();
+		else if ( t == QLatin1String( "--dim" ) ) {
+			const QString v = next();
+			gLgAllRings = v == QLatin1String( "all" );
+			lgDim = gLgAllRings ? 4 : v.toInt();
+		}
 		else if ( t == QLatin1String( "--terrain-region" ) ) {
 			lgHaveRegion = true;
 			for ( int r = 0; r < 4; r++ )
@@ -7389,6 +7436,7 @@ int nifskopeCliMain( const QStringList & args )
 		 * case in which it REFUSES rather than quietly full-baking is in
 		 * docs/LODGEN_LEDGER_FORMAT.md section 4. */
 		else if ( t == QLatin1String( "--incremental" ) ) gLgIncremental = next();
+		else if ( t == QLatin1String( "--fo4cs-one-root" ) ) gLgOneRoot = true;
 		else if ( t == QLatin1String( "--land-guide-scale" ) ) lodgenSetLandGuideScale( next().toFloat() );
 		else if ( t == QLatin1String( "--land-guide-slope" ) ) lodgenSetLandGuideSlopeRef( next().toFloat() );
 		/* VANILLA FAR-TERRAIN REUSE (lane TILING3), bungo's ruling 2026-09-11:

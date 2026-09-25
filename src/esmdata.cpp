@@ -156,7 +156,12 @@ void EsmWorld::indexWorldspace()
 				const ESMFile::ESMRecord * pg = esm->findRecord( r->parent );
 				const bool underWorldGroup = pg && pg->type == GRUP && pg->formID == 1;
 				if ( underWorldGroup ) {
-					persistentCellGroup = group;
+					/* the FIRST file's persistent cell; a later plugin overrides
+					 * the record, and its groups join below (BAKE1) */
+					if ( !persistentCellGroup ) {
+						persistentCellGroup = group;
+						persistentCellForm = r->formID;
+					}
 				} else if ( haveGrid ) {
 					CellEntry e;
 					e.cellForm = r->formID;
@@ -171,6 +176,63 @@ void EsmWorld::indexWorldspace()
 		}
 	};
 	walk( wg->children );
+
+	/* LATER PLUGINS' GROUPS (lane BAKE1, 2026-09-25). libfo76utils merges a
+	 * comma list record by record: an override replaces the record's DATA in
+	 * place and is never linked into the later file's chain, so a plugin's own
+	 * world-children group, and every cell-children group it opens under an
+	 * OVERRIDDEN cell, hang from no record's `next`. The walk above therefore
+	 * saw the first file's tree only: BNS Trees.esp's 22,827 new REFRs (21,073
+	 * in the persistent cell, the rest under 755 overridden exterior cells)
+	 * never reached a bake. Group ids are 0x80000000 | k, k dense from 0 across
+	 * every file, so enumerate them once: a type-1 group labelled with this
+	 * worldspace other than the one walked is walked the same way (its NEW
+	 * cells index themselves), and every type-6 group labelled with an indexed
+	 * cell, or the persistent cell, that is not that cell's own child group is
+	 * joined to it in load order. A one-file load has no such group, so it is
+	 * unchanged to the byte. An overriding REFR stays in the FIRST file's chain
+	 * with the last file's data, so no REFR is read twice. */
+	QHash<quint32, QVector<quint32>> cellGroups;
+	QVector<quint32> worldGroups;
+	for ( quint32 k = 0; k < 0x7FFFFFFFU; k++ ) {
+		const quint32 id = 0x80000000U | k;
+		const ESMFile::ESMRecord * g = esm->findRecord( id );
+		if ( !g )
+			break;
+		if ( g->type != GRUP )
+			continue;
+		if ( g->formID == 1 && g->flags == wsForm && id != w.next )
+			worldGroups.append( id );
+		else if ( g->formID == 6 )
+			cellGroups[g->flags].append( id );
+	}
+	for ( quint32 id : worldGroups ) {
+		const ESMFile::ESMRecord * g = esm->findRecord( id );
+		if ( g && g->children )
+			walk( g->children );
+	}
+	extraWorldGroups = int( worldGroups.size() );
+	extraCellGroups = 0;
+	for ( auto it = cellIndex.begin(); it != cellIndex.end(); ++it ) {
+		const auto gl = cellGroups.constFind( it->cellForm );
+		if ( gl == cellGroups.constEnd() )
+			continue;
+		for ( quint32 gid : *gl )
+			if ( gid != it->childGroup ) {
+				it->extraGroups.append( gid );
+				extraCellGroups++;
+			}
+	}
+	if ( persistentCellForm ) {
+		for ( quint32 gid : cellGroups.value( persistentCellForm ) )
+			if ( gid != persistentCellGroup ) {
+				persistentExtraGroups.append( gid );
+				extraCellGroups++;
+			}
+	}
+	if ( qEnvironmentVariableIsSet( "WW_ESM_TRACE" ) )
+		std::fprintf( stderr, "index: %d later world group(s), %d later cell group(s) joined, %d persistent\n",
+			extraWorldGroups, extraCellGroups, int( persistentExtraGroups.size() ) );
 }
 
 bool EsmWorld::cellWater( int cx, int cy, float & height,
@@ -445,7 +507,10 @@ QVector<EsmRefr> EsmWorld::refrs( int cx, int cy ) const
 	auto it = cellIndex.constFind( qMakePair( cx, cy ) );
 	if ( it == cellIndex.constEnd() )
 		return {};
-	return refrsInGroup( it->childGroup );
+	QVector<EsmRefr> out = refrsInGroup( it->childGroup );
+	for ( quint32 g : it->extraGroups )
+		out += refrsInGroup( g );
+	return out;
 }
 
 QString EsmWorld::cellEditorId( int cx, int cy ) const
@@ -464,6 +529,8 @@ const QVector<EsmRefr> & EsmWorld::persistentRefrs() const
 {
 	if ( !persistentCacheBuilt ) {
 		persistentCache = refrsInGroup( persistentCellGroup );
+		for ( quint32 g : persistentExtraGroups )
+			persistentCache += refrsInGroup( g );
 		persistentCacheBuilt = true;
 	}
 	return persistentCache;

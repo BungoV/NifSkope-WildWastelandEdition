@@ -723,6 +723,23 @@ quint32 lodoEmitCluster( LodoLibrary & lib, const LodoMesh & mesh, float meshRad
 	return ci;
 }
 
+/* meshopt_optimizeVertexFetchRemap, made a PERMUTATION. A vertex no triangle
+ * uses comes back as ~0u, and lodoAppendMesh's hand-applied remap then wrote
+ * pos[~0u * 3]: the segfault lane BAKE1 hit on BNS Trees' LOD models
+ * (2026-09-25). Unused vertices take the slots after the used ones, in source
+ * order; a mesh with none (all of vanilla) keeps exactly the remap it had.
+ * NOINLINE on purpose: written inline, the change moved the caller's code
+ * generation and two vanilla self-AO bytes with it. */
+__attribute__(( noinline )) size_t lodoFetchRemapWhole( unsigned int * remap, const unsigned int * tris,
+	size_t indexCount, size_t nv )
+{
+	size_t used = meshopt_optimizeVertexFetchRemap( remap, tris, indexCount, nv );
+	for ( size_t v = 0; v < nv; v++ )
+		if ( remap[v] == ~0u )
+			remap[v] = unsigned( used++ );
+	return used;
+}
+
 } // namespace
 
 bool lodoAppendMesh( LodoLibrary & lib, const std::vector<LodoSrcShape> & shapesGiven,
@@ -872,7 +889,7 @@ bool lodoAppendMesh( LodoLibrary & lib, const std::vector<LodoSrcShape> & shapes
 				tmp.assign( s.tris.begin(), s.tris.end() );
 				meshopt_optimizeVertexCache( tmp.data(), tmp.data(), tmp.size(), nv );
 				remap.assign( nv, 0u );
-				meshopt_optimizeVertexFetchRemap( remap.data(), tmp.data(), tmp.size(), nv );
+				lodoFetchRemapWhole( remap.data(), tmp.data(), tmp.size(), nv );
 				// apply the remap by hand: four parallel attribute arrays, not one interleaved buffer
 				std::vector<float> pos( nv * 3 ), nrm( nv * 3 ), tan( nv * 3 ), uv( nv * 2 );
 				std::vector<quint8> sway, ao;
