@@ -1,8 +1,9 @@
-# `.lodo` v4 + `.lodi` v7 (v3..v9) — the FO4CS-native far field
+# `.lodo` v5 (v4..v5) + `.lodi` v7 (v3..v9) — the FO4CS-native far field
 
 > **VERSIONS TODAY (re-read 2026-09-23 against `src/lodofile.h`,
-> `src/lodifile.h`, `src/nifcli.cpp`).** The library is `.lodo` **version 4**
-> and only 4 (§3.7). A default bake writes `.lodi` **version 7** (§4.9, §4.10);
+> `src/lodifile.h`, `src/nifcli.cpp`; `.lodo` re-read 2026-09-25, lane SEAM1).**
+> The library is `.lodo` **version 5**, and a version-4 file is read as a v5 file
+> with no colour stream (§3.7). A default bake writes `.lodi` **version 7** (§4.9, §4.10);
 > `--scrappable` writes **version 9** (§4.12); the ways back (`--lodi-v6`,
 > `--native-no-vertex-ao`, `--native-no-placement-ao`) step it down through 6, 5
 > and 3/4 (§4.6-§4.8). Version 8 is
@@ -234,7 +235,9 @@ a refusal that names the instance, the ref and the two numbers.
 | **0xCD** | **u8** | **`ladderGroup` (v3) — the grouping target the ladder was built at; 0 iff the LADDER flag is clear** |
 | 0xCE…0xCF | — | reserved, zero |
 | **0xD0** | **u32** | **`cardCount` (v4) — bases whose `cardLayer` is not `LODO_NO_CARD`. A reader sizes its card-draw pass from the header alone; `cardCount > baseCount` is refused by name, and (CARDLINK1) the reader RECOUNTS it over the base rows and refuses a mismatch by name, §4.13** |
-| 0xD4…0xFF | — | reserved, zero |
+| **0xD4** | **u32** | **`colourVertexCount` (v5) — rows in the colour blob; 0 = the file carries no colour. Never more than `vertexCount`, and zero exactly when `offColours` is zero** |
+| **0xD8** | **u64** | **offset: colour blob (v5), 4 B per row, written LAST (after the strings), 4096-aligned, and in `indexCrc32` only when present** |
+| 0xE0…0xFF | — | reserved, zero (on a version-4 file 0xD4…0xFF) |
 
 The ladder table sits **between the cluster table and the material table** in
 file order, which is what makes a v2 file's `indexCrc32` arithmetic different
@@ -260,7 +263,9 @@ vertices, max component deviation 0.0134, zero vertices above 0.02.
 **Mesh entry — 56 B:** `f32 aabbMin[3]`, `f32 aabbExtent[3]`, `f32 uvMin[2]`,
 `f32 uvExtent[2]`, `u32 clusterFirst`, `u16 clusterCount` (**every level**),
 `u16 flags` (bit0 anyAlphaTested, bit1 anySway, **bit2 WATERTIGHT (v4)**: the
-level-0 surface has no boundary edge; bits 3–15 reserved), `u32 modelStringOffset` (the
+level-0 surface has no boundary edge; **bit3 VERTEX_COLOUR (v5)**: the mesh has
+rows in the colour blob, §3.7; **bit4 VERTEX_ALPHA (v5)**: its A is opacity, only
+with bit3; bits 5–15 reserved), `u32 modelStringOffset` (the
 LOD model path — the table's own sort key), and **(v3, the word v2 reserved)**
 `u16 clusterCountL0`, `u8 levelCount` (≥ 1), `u8 reserved` (0). See
 Deviations 1. Both v3 words are REDUNDANT on purpose and both readers recount
@@ -618,19 +623,61 @@ The gate is `tests/spells/lodgen_native_cut.py` groups A and B: every triangle
 of every cluster inside its sphere (+1e-3), every face normal inside its cone,
 with a shrunk sphere and a tightened cone shown red in the same run.
 
-### 3.7 The library is version 4, and there is no version 5
+### 3.7 Version 5: the optional per-vertex colour stream (lane SEAM1, W4, 2026-09-25)
 
-A **version 5** -- the subdivided library -- was written by lane HORIZON3 on
-2026-09-19 to give the per-vertex horizon stream (§4.11) somewhere to put a
-shadow edge on a wall that is two triangles wide. The baked-horizon route was
-dropped the same day (lane HORIZONOUT) and the cut went with it: the writer, the
-reader and the two header words are **removed whole**, and `0xD4`/`0xD8` are
-reserved-zero exactly as they were before HORIZON3.
+**What it is for.** A handful of vanilla LOD models tint their own vertices: the
+Amphitheater's shell, the blasted maples, the warehouse roofs, the brick shells.
+The game draws that tint because the shape has BOTH a colour channel in its
+vertex descriptor (attribute bit 0x20) AND the `Vertex_Colors` shader flag
+(SLSF2 bit 5). v4 had no room for it, so those models went grey in the native
+far field. bungo's ruling (2026-09-25): *match the game exactly* -- carry the
+colour only where both are set, apply it only there, and keep RGB and A as their
+own channels, the way the game uses them.
 
-**Why this is removed whole while `.lodi` v8 is kept read-only.** No exe ever
-wrote a v5 `.lodo`; the file never existed outside a compiler. A v8 `.lodi` does
-exist -- `release/NifSkope.before_horizonout.exe` writes one -- so that reader
-stays tolerant (§4.11) and this one has nothing to be tolerant of.
+**The law.**
+
+* A shape contributes colour iff it has the channel AND `Vertex_Colors`. A shape
+  with only one of the two contributes nothing, exactly as the game draws it.
+* A mesh with at least one such shape is flagged `VERTEX_COLOUR` (mesh bit 3) and
+  gets **one RGBA8 row per vertex over its whole contiguous vertex range**; its
+  other shapes' vertices carry opaque white, which multiplies to no change.
+* `VERTEX_ALPHA` (mesh bit 4) is set when such a shape also has SLSF1
+  `Vertex_Alpha` (bit 3). A is stored as the source stores it either way; only
+  this bit makes it opacity. Measured on the Boston census, 28 streamed shapes:
+  all 28 carry `Vertex_Colors`, none `Vertex_Alpha` and none `Tree_Anim`, and 4
+  have A below 255 (so A is kept, and ignored, on them).
+* The blob: the flagged meshes in mesh order, each its rows `vertexBase..end` in
+  vertex order, R G B A. It sits after the strings, 4096-aligned, and joins
+  `indexCrc32` only when present.
+
+**What stays the same.** A file with no colour differs from a v4 file in the
+version word at 0x04 **and nowhere else**: 0xD4…0xDF are zero, no mesh bit 3/4,
+no blob. The version word is outside `headerCrc32` (0x10…0xFF), so the CRC and
+the `.lodi`'s `lodoIdentity` are unchanged. A version-4 file is read as a
+version-5 file with no colour.
+
+**The viewer.** `src/lodinative.cpp` multiplies the colour into the vertex colour
+of every view (the channel views keep their own value, times the colour), sets
+SLSF2 `Vertex_Colors` on a bucket holding a flagged mesh, and SLSF1
+`Vertex_Alpha` only on a `VERTEX_ALPHA` mesh; elsewhere A is drawn as 1.
+
+**The gate** (pre-registered before the build,
+`scratchpad/seam1_20260925/w4_gate.py`, inputs from `w4_bakes.sh`; the
+instruments' own self-test is `w4_synth.py`): **G1** the synthetic fixture is
+byte-identical but 0x04, and each region's file with its colour stripped is too;
+**G2** the Amphitheater and both blasted maples are `VERTEX_COLOUR`, the
+Amphitheater and maple 01 carry non-white RGB, the flags agree with the source
+NIFs both ways, and each flagged mesh's decoded rows are its source's rows;
+**G3** the same gate on the pre-v5 exe's bakes is RED.
+
+**The FO4CS reader is owed.** The in-game reader of the native pair reads v4;
+it needs the v5 header words and the colour blob before a v5 library can ship
+to it. That is the standing order (FO4CS readers come last), not news.
+
+**History.** An earlier version 5 -- the subdivided library for the per-vertex
+horizon stream (§4.11) -- was written by lane HORIZON3 on 2026-09-19 and removed
+whole by lane HORIZONOUT the same day. No exe ever wrote it, so this version
+number was free.
 
 
 ---
@@ -1712,7 +1759,7 @@ first time any mod is installed or removed after a bake.
 |---|---|---|---|
 | **hard: both files** | magic, **version (see the per-file rows)**, `vertexStride`, `instanceStride`, **`groupStride` (v7), a group id that is not dense per chunk, a `groupCount` that disagrees with the chunks' sum, a sky slice whose length disagrees with the same placement's AO slice, a version-3…6 file carrying version-7 header words,** `clusterMaxTris`, **`clusterLodStride`**, **`occluderStride`**, a set reserved bit, `ROW_ORDER_NORTH_UP` clear, `chunkCount` over cap, a zero `lodoIdentity` without `NOLIB`, **a `scale` of 0**, **a `drawKey` out of order or not the base's rank**, **a cluster whose `geometricError` exceeds its `parentError`**, **a `CONE_OPEN` cluster carrying a cone (or the reverse)**, **an occluder naming an instance outside its own cell**, any CRC mismatch | refuse, name the field | **refuse to load, and never hide the engine's own LOD tree** |
 | **hard: pairing** (between the two files) | the two files name different worldspaces; `pluginCorpusHash` or `objectCorpusHash` differs **between the `.lodo` and the `.lodi`**; `loadOrderHash` differs **between the two files** (§4 row 0x90); `lodoIdentity` does not name this `.lodo` (unless `NOLIB`) — `src/nativeemit.cpp`, every `pairing:` refusal | refuse, name the field | **refuse to load, and never hide the engine's own LOD tree** |
-| **hard: `.lodo`** (`lodoRead`) | versions **1, 2 and 3 refused by name**, anything but 4; the `LADDER` flag disagreeing with `ladderGroup` / `levelMax`, `levelMax` > 15; `cardCount` > `baseCount`; `cardCount` not equal to the base rows naming a card layer, or rows naming one while `cardCorpusHash` is 0 (CARDLINK1, §4.13); a base's `fullTriangles` that its own meshes do not recount to, or non-zero on a base with no mesh; mesh flags beyond ALPHA / SWAY / WATERTIGHT; reserved header bytes 0xCE…0xCF and 0xD4…0xFF | refuse, name the field | as above |
+| **hard: `.lodo`** (`lodoRead`) | versions **1, 2 and 3 refused by name**, anything but 4 or 5; the `LADDER` flag disagreeing with `ladderGroup` / `levelMax`, `levelMax` > 15; `cardCount` > `baseCount`; `cardCount` not equal to the base rows naming a card layer, or rows naming one while `cardCorpusHash` is 0 (CARDLINK1, §4.13); a base's `fullTriangles` that its own meshes do not recount to, or non-zero on a base with no mesh; mesh flags beyond ALPHA / SWAY / WATERTIGHT (plus VERTEX_COLOUR / VERTEX_ALPHA on v5); VERTEX_ALPHA without VERTEX_COLOUR; `colourVertexCount` and `offColours` not both zero or both set, a count over `vertexCount`, a flagged mesh whose vertices are not one contiguous range, or flagged rows that do not add up to the count (v5); reserved header bytes 0xCE…0xCF and 0xD4…0xFF (0xE0…0xFF on v5) | refuse, name the field | as above |
 | **hard: `.lodi`** (`lodiRead`) | versions **1 and 2 refused by name**, anything outside 3…9; a version whose defining table is missing (v5 without the placement-AO blob, v6 without the vertex-AO blob, v7/v9 with neither group table nor sky stream, v8 without the horizon stream); a file carrying a LATER version's header words (v3/v4 with placement-AO words, v3–v6 with v7 words at 0x100/0x110, v7/v9 with v8 words at 0x11C); reserved header bytes by version (from 0xB0 on v3, 0xD4 on v4, 0xF1…0xFF on v5, 0xF1…0xF3 on v6 and later, plus 0x11C…0x1FF on v7/v9, 0x130…0x1FF on v8); instance flag bit 6 below v9 (§4.1); a stored cell outside the quantisation band (§4.1, `lodiCellAgrees`); the vertex-AO, sky and horizon offset tables and their slice lengths; the aggregate rows and their covered list (§4.6) | refuse, name the field | as above |
 | **soft** (against the user's LIVE data only) | `pluginCorpusHash`, `objectCorpusHash`, `modelCorpusHash`, `cardCorpusHash`, **`loadOrderHash`** recomputed from the running load order and disagreeing with the file — a mod installed, removed or reordered since the bake | refuse, name the field and the plugin | **load anyway, log it, raise a `stale=1` census row, keep rendering** |
 

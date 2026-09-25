@@ -2240,7 +2240,7 @@ bool lodNativeFixtureWrite( const QString & dir, QStringList * report, QString *
 	E( QStringLiteral( "lodi.order.identities" ), QStringLiteral( "7,1,2,3,9" ) );
 	E( QStringLiteral( "lodi.order.cells" ), QStringLiteral( "14,12,12,12,12" ) );
 	E( QStringLiteral( "lodo.flags" ), QStringLiteral( "9" ) );      // VERTEX_V1 | LADDER, no CACHE_ORDER
-	E( QStringLiteral( "lodo.version" ), QStringLiteral( "4" ) );
+	E( QStringLiteral( "lodo.version" ), QString::number( LODO_VERSION ) );
 	E( QStringLiteral( "lodi.version" ), QStringLiteral( "3" ) );
 	E( QStringLiteral( "lodi.occluderCount" ), QStringLiteral( "1" ) );
 	E( QStringLiteral( "lodi.occluder0.centre" ), QStringLiteral( "1200,2200,350" ) );

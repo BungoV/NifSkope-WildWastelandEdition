@@ -58,6 +58,9 @@ struct OutVert
 	//! both 0..1. The placement loop needs them per drawn vertex.
 	float selfAo = 1.0f;
 	float sway = 0.0f;
+	/*! `.lodo` v5: the library colour, 0..1, white when the mesh carries none.
+	 *  `rgbaA` is applied as opacity only on a VERTEX_ALPHA mesh, as the game does. */
+	float rgba[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
 	//! index into LodoLibrary::vertices (the .lodi v6 vertex-AO stream is in this order)
 	quint32 libIndex = 0;
 };
@@ -77,6 +80,12 @@ struct Bucket
 	int layer = -1;
 	//! WW_LODL_AO / WW_LODL_CHANNEL: write the vertices' `chan` as a vertex colour
 	bool withColour = false;
+	/*! `.lodo` v5: the mesh carries a colour stream, so the shape is drawn with
+	 *  vertex colours (the source's SLSF2 Vertex_Colors, which is why it has one)
+	 *  and, with `vertexAlpha`, vertex alpha. The channel views keep precedence:
+	 *  they write `chan`, and this multiplies into it. */
+	bool libColour = false;
+	bool vertexAlpha = false;
 	std::vector<OutVert> verts;
 	std::vector<Triangle> tris;
 };
@@ -282,9 +291,10 @@ bool emitBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b,
 				if ( iUv2.isValid() )
 					nif->set<HalfVector2>( row, "UV 2", HalfVector2( Vector2( 0.0f, o.uv2y ) ) );
 			}
-			if ( b.withColour )
+			if ( b.withColour || b.libColour )
 				nif->set<ByteColor4>( row, "Vertex Colors",
-					ByteColor4( FloatVector4( o.chan[0], o.chan[1], o.chan[2], 1.0f ) ) );
+					ByteColor4( FloatVector4( o.chan[0] * o.rgba[0], o.chan[1] * o.rgba[1], o.chan[2] * o.rgba[2],
+						b.vertexAlpha ? o.rgba[3] : 1.0f ) ) );
 			for ( int k = 0; k < 3; k++ ) {
 				lo[k] = qMin( lo[k], o.pos[k] );
 				hi[k] = qMax( hi[k], o.pos[k] );
@@ -318,7 +328,10 @@ bool emitBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b,
 		nif->set<quint32>( iShader, "Shader Flags 1",
 			b.emits ? 2151677953U : ( 2151677953U & ~0x400000U ) );
 		// 0x20 = vertex colours, the same bit the terrain route sets for its plane views
-		nif->set<quint32>( iShader, "Shader Flags 2", b.withColour ? 0x25U : 5U );
+		nif->set<quint32>( iShader, "Shader Flags 2", ( b.withColour || b.libColour ) ? 0x25U : 5U );
+		// `.lodo` v5: SLSF1 bit 3 Vertex_Alpha, only where the source shader set it
+		if ( b.vertexAlpha )
+			nif->set<quint32>( iShader, "Shader Flags 1", nif->get<quint32>( iShader, "Shader Flags 1" ) | 0x8U );
 		QModelIndex iTexSet = nif->insertNiBlock( QStringLiteral( "BSShaderTextureSet" ) );
 		nif->setLink( iShader, "Texture Set", nif->getBlockNumber( iTexSet ) );
 		nif->set<uint>( iTexSet, "Num Textures", 10 );
@@ -687,6 +700,13 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 					o.bit = -o.bit;
 				o.selfAo = float( lv.selfAO ) / 255.0f;
 				o.sway = float( lv.sway ) / 255.0f;
+				if ( ( mesh.flags & LODO_MESH_VERTEX_COLOUR ) && vi < lib.colours.size() )
+					for ( int k = 0; k < 4; k++ )
+						o.rgba[k] = float( ( lib.colours[vi] >> ( 8 * k ) ) & 0xFF ) / 255.0f;
+				// A is opacity only on a VERTEX_ALPHA mesh; elsewhere it stays 1, so a
+				// bucket shared with a VERTEX_ALPHA mesh cannot borrow this one's A
+				if ( !( mesh.flags & LODO_MESH_VERTEX_ALPHA ) )
+					o.rgba[3] = 1.0f;
 				o.libIndex = quint32( vi );
 				p.verts.push_back( o );
 			}
@@ -995,6 +1015,13 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 					bit = buckets.insert( bkey, nb );
 				}
 				Bucket & bk = bit.value();
+				/* `.lodo` v5: the DRAWN mesh's colour stream, drawn in every view and
+				 * multiplied into whatever the channel wrote (white by default). OR'd
+				 * over the placements: a vertex with no colour is white, so it is safe. */
+				if ( meshRow.flags & LODO_MESH_VERTEX_COLOUR )
+					bk.libColour = true;
+				if ( meshRow.flags & LODO_MESH_VERTEX_ALPHA )
+					bk.vertexAlpha = true;
 				/* A Triangle is three u16. One (base, material) bucket takes every
 				 * placement in the region, so a common tree walks past 65,536
 				 * vertices, and `vstart + t[k]` then wrapped: the triangle kept one
@@ -1018,6 +1045,8 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 					o.bit = rotate( m, sv.bit );
 					o.uv = mirrorU ? Vector2( uMid - sv.uv[0], sv.uv[1] ) : sv.uv;
 					o.uv2y = bk.layer >= 0 ? float( bk.layer ) : 0.0f;
+					for ( int k = 0; k < 4; k++ )
+						o.rgba[k] = sv.rgba[k];
 					if ( channel == LodlChannel::Sway ) {
 						o.chan[0] = o.chan[1] = o.chan[2] = sv.sway;
 						chanSeen( int( sv.sway * 255.0f + 0.5f ) );

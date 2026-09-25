@@ -1457,6 +1457,14 @@ struct LodSrcShape
 	bool matAlphaTest = false;
 	bool matAlphaBlend = false;
 	quint8 matAlphaRef = 255;
+	/* `.lodo` v5 (lane SEAM1, W4): whether `col` came from the source's own
+	 * colour channel (vertex descriptor bit 0x20) rather than the white fill, and
+	 * the two shader bits the game reads it by -- SLSF2 Vertex_Colors (bit 5) and
+	 * SLSF1 Vertex_Alpha (bit 3). Read-only facts: the `.BTO` bakes do not look
+	 * at them, so their bytes cannot move. */
+	bool colStream = false;
+	bool vcFlag = false;
+	bool vaFlag = false;
 };
 
 //! Compose a block's transform up the parent chain (local -> model space).
@@ -2169,6 +2177,7 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 			const bool hasColors = ( flags & 0x20 ) != 0;
 			const Transform xf = lodgenWorldTransform( &src, iShape );
 			LodSrcShape s;
+			s.colStream = hasColors;
 			QModelIndex iVD = src.getIndex( iShape, "Vertex Data" );
 			if ( !iVD.isValid() )
 				continue;
@@ -2211,6 +2220,8 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 				s.emitMult = src.get<float>( iShader, "Emissive Multiple" );
 				s.ownEmit = ( src.get<quint32>( iShader, "Shader Flags 1" )
 					& LOD_OWN_EMIT ) != 0;
+				s.vcFlag = ( src.get<quint32>( iShader, "Shader Flags 2" ) & ( 1U << 5 ) ) != 0;
+				s.vaFlag = ( src.get<quint32>( iShader, "Shader Flags 1" ) & ( 1U << 3 ) ) != 0;
 				QModelIndex iTexSet = src.getBlockIndex(
 					src.getLink( iShader, "Texture Set" ) );
 				if ( iTexSet.isValid() ) {
@@ -2408,6 +2419,20 @@ bool lodgenNativeLoadModel( void * user, const QString & model, std::vector<Nati
 		n.emitColor[0] = s.emitColor.red(); n.emitColor[1] = s.emitColor.green(); n.emitColor[2] = s.emitColor.blue();
 		n.emitMult = s.emitMult; n.ownEmit = s.ownEmit;
 		n.hasAlpha = s.hasAlpha; n.alphaThreshold = s.alphaThreshold;
+		/* `.lodo` v5: the colour goes in ONLY where the game applies it -- a
+		 * colour channel AND the Vertex_Colors flag (bungo's W4 ruling). RGB and A
+		 * as the source stores them; A's meaning rides in `vertexAlpha`. */
+		if ( s.colStream && s.vcFlag && s.col.size() == nv ) {
+			n.geom.rgba.resize( size_t( nv ) * 4 );
+			for ( int v = 0; v < nv; v++ ) {
+				const Color4 & c = s.col[v];
+				n.geom.rgba[size_t( v ) * 4 + 0] = quint8( qBound( 0, qRound( c.red() * 255.0f ), 255 ) );
+				n.geom.rgba[size_t( v ) * 4 + 1] = quint8( qBound( 0, qRound( c.green() * 255.0f ), 255 ) );
+				n.geom.rgba[size_t( v ) * 4 + 2] = quint8( qBound( 0, qRound( c.blue() * 255.0f ), 255 ) );
+				n.geom.rgba[size_t( v ) * 4 + 3] = quint8( qBound( 0, qRound( c.alpha() * 255.0f ), 255 ) );
+			}
+			n.geom.vertexAlpha = s.vaFlag;
+		}
 		out->push_back( std::move( n ) );
 	}
 	return !out->empty();

@@ -49,6 +49,11 @@ constexpr int H_LEVELMAX = 0xCC, H_LADDERGROUP = 0xCD;
  *  u32 lands 4-byte aligned in the file exactly as every other u32 does. The
  *  pad is now 0xCE..0xCF plus 0xD4..0xFF, and both halves are checked zero. */
 constexpr int H_RESERVED_CE = 0xCE, H_CARDCOUNT = 0xD0, H_RESERVED_D4 = 0xD4;
+/*! v5 (lane SEAM1, W4) takes the next twelve bytes of that pad: 0xD4 the colour
+ *  stream's row count, 0xD8 its offset. Both are zero on a library with no
+ *  coloured mesh, so a v4 file is a v5 file without colour. The pad is now
+ *  0xCE..0xCF plus 0xE0..0xFF. */
+constexpr int H_COLOURCOUNT = 0xD4, H_OFF_COLOURS = 0xD8, H_RESERVED_E0 = 0xE0;
 
 template <typename T> void putLE( QByteArray & b, int off, T v )
 {
@@ -307,7 +312,17 @@ struct LodoEmitVert
 	float uv[2] = { 0.0f, 0.0f };
 	quint8 sway = 0;
 	quint8 ao = 255;
+	quint32 rgba = LODO_COLOUR_NONE;    //!< v5: R low byte; NONE when the shape carries no colour
 };
+
+//! v5: a source vertex's packed colour, R in the low byte; NONE when the shape carries none.
+inline quint32 lodoSrcRgba( const LodoSrcShape & s, size_t v )
+{
+	if ( s.rgba.size() < ( v + 1 ) * 4 )
+		return LODO_COLOUR_NONE;
+	const quint8 * c = &s.rgba[v * 4];
+	return quint32( c[0] ) | ( quint32( c[1] ) << 8 ) | ( quint32( c[2] ) << 16 ) | ( quint32( c[3] ) << 24 );
+}
 
 //! Squared distance from p to the triangle (a, b, c). Ericson, Real-Time Collision Detection 5.1.5.
 float lodoPointTriDist2( const float p[3], const float a[3], const float b[3], const float c[3] )
@@ -713,6 +728,7 @@ quint32 lodoEmitCluster( LodoLibrary & lib, const LodoMesh & mesh, float meshRad
 		lv.sway = v.sway;
 		lv.selfAO = v.ao;
 		lib.vertices.push_back( lv );
+		lib.colours.push_back( v.rgba );
 	}
 	const size_t at = lib.localIndices.size();
 	lib.localIndices.resize( at + LODO_LOCAL_INDEX_BYTES, LODO_LOCAL_INDEX_NONE );
@@ -778,7 +794,8 @@ bool lodoAppendMesh( LodoLibrary & lib, const std::vector<LodoSrcShape> & shapes
 			return fail( QString( "shape %1 has %2 vertices and %3 triangles" )
 				.arg( si ).arg( nv ).arg( s.tris.size() / 3 ) );
 		if ( s.nrm.size() != s.pos.size() || s.tan.size() != s.pos.size() || s.uv.size() != nv * 2
-			|| ( !s.sway.empty() && s.sway.size() != nv ) || s.tris.size() % 3 )
+			|| ( !s.sway.empty() && s.sway.size() != nv ) || ( !s.rgba.empty() && s.rgba.size() != nv * 4 )
+			|| s.tris.size() % 3 )
 			return fail( QString( "shape %1: attribute arrays disagree with %2 vertices" ).arg( si ).arg( nv ) );
 		for ( quint32 idx : s.tris )
 			if ( idx >= nv )
@@ -814,6 +831,19 @@ bool lodoAppendMesh( LodoLibrary & lib, const std::vector<LodoSrcShape> & shapes
 		+ mesh.aabbExtent[1] * mesh.aabbExtent[1] + mesh.aabbExtent[2] * mesh.aabbExtent[2] );
 	mesh.clusterFirst = quint32( lib.clusters.size() );
 	mesh.flags = anySway ? LODO_MESH_ANY_SWAY : 0;
+	/* v5: the colour stream, only for a shape the game would colour (the loader
+	 * leaves `rgba` empty unless the source has the channel AND Vertex_Colors). */
+	for ( const LodoSrcShape & s : shapesIn )
+		if ( !s.rgba.empty() ) {
+			mesh.flags |= LODO_MESH_VERTEX_COLOUR;
+			if ( s.vertexAlpha )
+				mesh.flags |= LODO_MESH_VERTEX_ALPHA;
+		}
+	/* A library appended to without colours so far (built by hand, or read from
+	 * a file) gets its parallel array now, so the push in lodoEmitCluster keeps it
+	 * one-for-one with `vertices`. */
+	if ( lib.colours.size() != lib.vertices.size() )
+		lib.colours.resize( lib.vertices.size(), LODO_COLOUR_NONE );
 	mesh.modelStringOffset = lib.addString( name );
 	const quint16 id = quint16( lib.meshes.size() );
 
@@ -892,7 +922,9 @@ bool lodoAppendMesh( LodoLibrary & lib, const std::vector<LodoSrcShape> & shapes
 				lodoFetchRemapWhole( remap.data(), tmp.data(), tmp.size(), nv );
 				// apply the remap by hand: four parallel attribute arrays, not one interleaved buffer
 				std::vector<float> pos( nv * 3 ), nrm( nv * 3 ), tan( nv * 3 ), uv( nv * 2 );
-				std::vector<quint8> sway, ao;
+				std::vector<quint8> sway, ao, rgba;
+				if ( !s.rgba.empty() )
+					rgba.assign( nv * 4, 255 );
 				if ( !s.sway.empty() )
 					sway.assign( nv, 0 );
 				if ( !s.ao.empty() )
@@ -910,12 +942,17 @@ bool lodoAppendMesh( LodoLibrary & lib, const std::vector<LodoSrcShape> & shapes
 						sway[d] = s.sway[v];
 					if ( !ao.empty() )
 						ao[d] = s.ao[v];
+					if ( !rgba.empty() )
+						for ( int k = 0; k < 4; k++ )
+							rgba[d * 4 + k] = s.rgba[v * 4 + k];
 				}
 				s.pos.swap( pos ); s.nrm.swap( nrm ); s.tan.swap( tan ); s.uv.swap( uv );
 				if ( !sway.empty() )
 					s.sway.swap( sway );
 				if ( !ao.empty() )
 					s.ao.swap( ao );
+				if ( !rgba.empty() )
+					s.rgba.swap( rgba );
 				s.tris.assign( tmp.size(), 0u );
 				for ( size_t i = 0; i < tmp.size(); i++ )
 					s.tris[i] = remap[tmp[i]];
@@ -1057,6 +1094,7 @@ bool lodoAppendMesh( LodoLibrary & lib, const std::vector<LodoSrcShape> & shapes
 				e.uv[1] = s.uv[v * 2 + 1];
 				e.sway = s.sway.empty() ? 0 : s.sway[v];
 				e.ao = s.ao.empty() ? 255 : s.ao[v];
+				e.rgba = lodoSrcRgba( s, v );
 				const quint32 w = quint32( wv.size() );
 				wv.push_back( e );
 				for ( int c2 = 0; c2 < 3; c2++ )
@@ -1091,6 +1129,7 @@ bool lodoAppendMesh( LodoLibrary & lib, const std::vector<LodoSrcShape> & shapes
 					e.uv[1] = s.uv[v * 2 + 1];
 					e.sway = s.sway.empty() ? 0 : s.sway[v];
 					e.ao = s.ao.empty() ? 255 : s.ao[v];
+					e.rgba = lodoSrcRgba( s, v );
 					cv.push_back( e );
 				}
 				std::vector<quint32> tris, cover;
@@ -1432,6 +1471,7 @@ bool lodoAppendMesh( LodoLibrary & lib, const std::vector<LodoSrcShape> & shapes
 						lib.clusterLods.resize( snapLods );
 						lib.localIndices.resize( snapLocal );
 						lib.vertices.resize( snapVerts );
+						lib.colours.resize( snapVerts );
 						clustersLadder = snapLadder; groupsFormed = snapFormed;
 						refSmall = snapSmall; refNoCut = snapNoCut; refFlat = snapFlat;
 						refSilhouette = snapSil; errExact = snapExact; errBounded = snapBounded;
@@ -1583,6 +1623,13 @@ bool lodoMergeStagedMesh( LodoLibrary & lib, const LodoLibrary & staged,
 	lib.localIndices.insert( lib.localIndices.end(),
 		staged.localIndices.begin(), staged.localIndices.end() );
 	lib.vertices.insert( lib.vertices.end(), staged.vertices.begin(), staged.vertices.end() );
+	// v5: the parallel colours, padded first if `lib` had none so far
+	if ( lib.colours.size() != size_t( vertexBase ) )
+		lib.colours.resize( size_t( vertexBase ), LODO_COLOUR_NONE );
+	if ( staged.colours.size() == staged.vertices.size() )
+		lib.colours.insert( lib.colours.end(), staged.colours.begin(), staged.colours.end() );
+	else
+		lib.colours.resize( lib.vertices.size(), LODO_COLOUR_NONE );
 
 	LodoMesh mesh = staged.meshes[0];
 	mesh.clusterFirst += clusterBase;
@@ -1619,6 +1666,36 @@ bool lodoWrite( const QString & path, const LodoLibrary & lib, LodoHeader * head
 	QByteArray strings = lib.strings;
 	if ( strings.isEmpty() )
 		strings.append( '\0' );
+	if ( !lib.colours.empty() && lib.colours.size() != lib.vertices.size() )
+		return fail( QString( "the v5 colour array has %1 entries for %2 vertices; it is PARALLEL, one a vertex" )
+			.arg( lib.colours.size() ).arg( lib.vertices.size() ) );
+	/* v5: the colour stream. Each flagged mesh's vertex range, in mesh-table
+	 * order; the range must be CONTIGUOUS (every mesh's clusters are appended in
+	 * one run, and the reader recomputes the same ranges from the cluster rows),
+	 * so a reader finds a mesh's rows by a prefix sum and no per-mesh offset is
+	 * stored. Built only when some mesh is flagged: a library with no colour
+	 * writes no blob and 0 at 0xD4/0xD8. */
+	std::vector<quint8> colourBlob;
+	for ( size_t mi = 0; mi < lib.meshes.size(); mi++ ) {
+		const LodoMesh & m = lib.meshes[mi];
+		if ( !( m.flags & LODO_MESH_VERTEX_COLOUR ) )
+			continue;
+		quint64 lo = ~quint64( 0 ), hi = 0, sum = 0;
+		for ( quint64 c = m.clusterFirst; c < quint64( m.clusterFirst ) + m.clusterCount && c < lib.clusters.size(); c++ ) {
+			const LodoCluster & cl = lib.clusters[size_t( c )];
+			lo = std::min<quint64>( lo, cl.vertexBase );
+			hi = std::max<quint64>( hi, quint64( cl.vertexBase ) + cl.vertexCount );
+			sum += cl.vertexCount;
+		}
+		if ( sum == 0 || hi - lo != sum || hi > lib.vertices.size() )
+			return fail( QString( "mesh %1 is flagged VERTEX_COLOUR but its clusters' vertices are not one "
+				"contiguous range (%2..%3 holding %4)" ).arg( mi ).arg( lo ).arg( hi ).arg( sum ) );
+		for ( quint64 v = lo; v < hi; v++ ) {
+			const quint32 c = lib.colours.empty() ? LODO_COLOUR_NONE : lib.colours[size_t( v )];
+			for ( int k = 0; k < 4; k++ )
+				colourBlob.push_back( quint8( ( c >> ( 8 * k ) ) & 0xFF ) );
+		}
+	}
 
 	QByteArray file;
 	file.resize( LODO_HEADER_BYTES );
@@ -1689,6 +1766,15 @@ bool lodoWrite( const QString & path, const LodoLibrary & lib, LodoHeader * head
 	crcOver( lib.vertices.data(), quint64( lib.vertices.size() ) * sizeof( LodoVertex ) );
 	h.offStrings = payload( strings.constData(), quint64( strings.size() ) );
 	crcOver( strings.constData(), quint64( strings.size() ) );
+	/* v5: the colour stream LAST, so no earlier offset moves, and inside
+	 * indexCrc32 only when it exists -- a library without colour hashes exactly
+	 * what v4 hashed. */
+	h.colourVertexCount = quint32( colourBlob.size() / LODO_COLOUR_STRIDE );
+	h.offColours = 0;
+	if ( !colourBlob.empty() ) {
+		h.offColours = payload( colourBlob.data(), quint64( colourBlob.size() ) );
+		crcOver( colourBlob.data(), quint64( colourBlob.size() ) );
+	}
 	h.indexCrc32 = icrc;
 	h.fileBytes = quint64( file.size() );
 
@@ -1724,6 +1810,8 @@ bool lodoWrite( const QString & path, const LodoLibrary & lib, LodoHeader * head
 	putLE<quint8>( file, H_LEVELMAX, h.levelMax );
 	putLE<quint8>( file, H_LADDERGROUP, h.ladderGroup );
 	putLE<quint32>( file, H_CARDCOUNT, h.cardCount );
+	putLE<quint32>( file, H_COLOURCOUNT, h.colourVertexCount );
+	putLE<quint64>( file, H_OFF_COLOURS, h.offColours );
 	h.headerCrc32 = lodvCrc32( reinterpret_cast<const unsigned char *>( file.constData() ) + H_PLUGIN,
 		LODO_HEADER_BYTES - H_PLUGIN );
 	putLE<quint32>( file, H_HCRC, h.headerCrc32 );
@@ -1782,10 +1870,13 @@ bool lodoRead( const QString & path, LodoHeader * header, LodoLibrary * lib,
 			"screen-size steps in 1/16 px, and this reader takes them as the base's full-detail triangle "
 			"count -- the same bytes, a different meaning, so a v3 file read as v4 would report a plausible "
 			"and wrong triangle count for every base. A v3 file also carries no cardCount at header 0xD0 and "
-			"no WATERTIGHT bit in its mesh flags. Re-bake; this reader knows version 4" ) );
-	if ( h.version != LODO_VERSION )
-		return refuse( QString( "version %1; this reader knows %2" ).arg( h.version )
-			.arg( LODO_VERSION ) );
+			"no WATERTIGHT bit in its mesh flags. Re-bake; this reader knows versions 4 and 5" ) );
+	/* v5 EXTENDS v4 into its reserved pad and reinterprets nothing, so a v4 file
+	 * is read as a v5 file without a colour stream; the pad sweep below still
+	 * refuses a v4 file that carries anything at 0xD4..0xDF. */
+	if ( h.version != LODO_VERSION && h.version != LODO_VERSION_NO_COLOUR )
+		return refuse( QString( "version %1; this reader knows %2 and %3" ).arg( h.version )
+			.arg( LODO_VERSION_NO_COLOUR ).arg( LODO_VERSION ) );
 	h.headerCrc32 = getLE<quint32>( p + H_HCRC );
 	const quint32 hcrc = lodvCrc32( p + H_PLUGIN, LODO_HEADER_BYTES - H_PLUGIN );
 	if ( hcrc != h.headerCrc32 )
@@ -1852,8 +1943,23 @@ bool lodoRead( const QString & path, LodoHeader * header, LodoLibrary * lib,
 	if ( h.cardCount > h.baseCount )
 		return refuse( QString( "cardCount %1 is above the file's %2 bases; a card belongs to a base" )
 			.arg( h.cardCount ).arg( h.baseCount ) );
+	/* v5: the colour words at 0xD4/0xD8. On a v4 file they are pad and the sweep
+	 * refuses them by position; on v5 the count and the offset are 0 together. */
+	const bool v5 = h.version == LODO_VERSION;
+	if ( v5 ) {
+		h.colourVertexCount = getLE<quint32>( p + H_COLOURCOUNT );
+		h.offColours = getLE<quint64>( p + H_OFF_COLOURS );
+		if ( ( h.colourVertexCount == 0 ) != ( h.offColours == 0 ) )
+			return refuse( QString( "colourVertexCount %1 and colour offset %2: a colour stream has both or neither" )
+				.arg( h.colourVertexCount ).arg( h.offColours ) );
+		if ( h.colourVertexCount > h.vertexCount )
+			return refuse( QString( "colourVertexCount %1 is above the file's %2 vertices" )
+				.arg( h.colourVertexCount ).arg( h.vertexCount ) );
+	}
 	for ( int i = H_RESERVED_CE; i < int( LODO_HEADER_BYTES ); i++ ) {
 		if ( i >= H_CARDCOUNT && i < H_RESERVED_D4 )
+			continue;
+		if ( v5 && i >= H_COLOURCOUNT && i < H_RESERVED_E0 )
 			continue;
 		if ( p[i] != 0 )
 			return refuse( QString( "reserved header byte at 0x%1 is not zero" ).arg( i, 2, 16, QChar( '0' ) ) );
@@ -1862,7 +1968,8 @@ bool lodoRead( const QString & path, LodoHeader * header, LodoLibrary * lib,
 		return refuse( QString( "fileBytes %1 but the file is %2 bytes" ).arg( h.fileBytes ).arg( file.size() ) );
 
 	struct Tab { const char * name; quint64 off; quint64 bytes; };
-	const Tab tabs[8] = {
+	const int nTabs = h.colourVertexCount ? 9 : 8;
+	const Tab tabs[9] = {
 		{ "base table", h.offBases, quint64( h.baseCount ) * sizeof( LodoBase ) },
 		{ "mesh table", h.offMeshes, quint64( h.meshCount ) * sizeof( LodoMesh ) },
 		{ "cluster table", h.offClusters, quint64( h.clusterCount ) * sizeof( LodoCluster ) },
@@ -1870,9 +1977,11 @@ bool lodoRead( const QString & path, LodoHeader * header, LodoLibrary * lib,
 		{ "material table", h.offMaterials, quint64( h.materialCount ) * sizeof( LodoMaterial ) },
 		{ "local-index blob", h.offLocalIndices, quint64( h.clusterCount ) * LODO_LOCAL_INDEX_BYTES },
 		{ "vertex blob", h.offVertices, quint64( h.vertexCount ) * sizeof( LodoVertex ) },
-		{ "string blob", h.offStrings, quint64( h.stringBytes ) } };
+		{ "string blob", h.offStrings, quint64( h.stringBytes ) },
+		{ "colour stream (v5)", h.offColours, quint64( h.colourVertexCount ) * LODO_COLOUR_STRIDE } };
 	quint64 prevEnd = LODO_HEADER_BYTES;
-	for ( const Tab & t : tabs ) {
+	for ( int ti = 0; ti < nTabs; ti++ ) {
+		const Tab & t = tabs[ti];
 		if ( t.off % LODO_PAYLOAD_ALIGN )
 			return refuse( QString( "%1 offset %2 is not 4,096-aligned" ).arg( t.name ).arg( t.off ) );
 		if ( t.off < prevEnd )
@@ -1896,8 +2005,8 @@ bool lodoRead( const QString & path, LodoHeader * header, LodoLibrary * lib,
 		return refuse( QStringLiteral( "string blob is not NUL-terminated" ) );
 	if ( payloadCheck ) {
 		quint32 icrc = 0;
-		for ( const Tab & t : tabs )
-			icrc = lodvCrc32( p + t.off, qsizetype( t.bytes ), icrc );
+		for ( int ti = 0; ti < nTabs; ti++ )
+			icrc = lodvCrc32( p + tabs[ti].off, qsizetype( tabs[ti].bytes ), icrc );
 		if ( icrc != h.indexCrc32 )
 			return refuse( QString( "indexCrc32 0x%1 does not match the tables (0x%2)" )
 				.arg( h.indexCrc32, 8, 16, QChar( '0' ) ).arg( icrc, 8, 16, QChar( '0' ) ) );
@@ -1949,6 +2058,41 @@ bool lodoRead( const QString & path, LodoHeader * header, LodoLibrary * lib,
 	if ( h.clusterCount ) std::memcpy( L.localIndices.data(), p + h.offLocalIndices, tabs[5].bytes );
 	if ( h.vertexCount ) std::memcpy( L.vertices.data(), p + h.offVertices, tabs[6].bytes );
 	L.strings = QByteArray( file.constData() + h.offStrings, qsizetype( h.stringBytes ) );
+	/* v5: the colour stream, scattered back to the parallel array by the same
+	 * contiguous ranges the writer used. This walk runs with or without the
+	 * payload check: the rows it reads are the ones a consumer draws, so the
+	 * range arithmetic is checked every time. */
+	L.colours.assign( h.vertexCount, LODO_COLOUR_NONE );
+	{
+		quint64 row = 0;
+		for ( size_t mi = 0; mi < L.meshes.size(); mi++ ) {
+			const LodoMesh & m = L.meshes[mi];
+			if ( ( m.flags & LODO_MESH_VERTEX_ALPHA ) && !( m.flags & LODO_MESH_VERTEX_COLOUR ) )
+				return refuse( QString( "mesh %1: VERTEX_ALPHA without VERTEX_COLOUR; A has no row to live in" ).arg( mi ) );
+			if ( !( m.flags & LODO_MESH_VERTEX_COLOUR ) )
+				continue;
+			quint64 lo = ~quint64( 0 ), hi = 0, sum = 0;
+			for ( quint64 c = m.clusterFirst; c < quint64( m.clusterFirst ) + m.clusterCount && c < L.clusters.size(); c++ ) {
+				lo = std::min<quint64>( lo, L.clusters[size_t( c )].vertexBase );
+				hi = std::max<quint64>( hi, quint64( L.clusters[size_t( c )].vertexBase ) + L.clusters[size_t( c )].vertexCount );
+				sum += L.clusters[size_t( c )].vertexCount;
+			}
+			if ( sum == 0 || hi - lo != sum || hi > h.vertexCount )
+				return refuse( QString( "mesh %1 is flagged VERTEX_COLOUR but its vertices are not one contiguous "
+					"range (%2..%3 holding %4)" ).arg( mi ).arg( lo ).arg( hi ).arg( sum ) );
+			if ( row + sum > h.colourVertexCount )
+				return refuse( QString( "the colour-flagged meshes need more than the %1 rows colourVertexCount gives "
+					"(mesh %2)" ).arg( h.colourVertexCount ).arg( mi ) );
+			const unsigned char * cp = p + h.offColours + row * LODO_COLOUR_STRIDE;
+			for ( quint64 v = lo; v < hi; v++, cp += LODO_COLOUR_STRIDE )
+				L.colours[size_t( v )] = quint32( cp[0] ) | ( quint32( cp[1] ) << 8 ) | ( quint32( cp[2] ) << 16 )
+					| ( quint32( cp[3] ) << 24 );
+			row += sum;
+		}
+		if ( row != h.colourVertexCount )
+			return refuse( QString( "colourVertexCount %1 but the colour-flagged meshes hold %2 vertices" )
+				.arg( h.colourVertexCount ).arg( row ) );
+	}
 
 	if ( payloadCheck ) {
 		// rows: ranges, reserved fields, the never-0 radius, and the sort keys
@@ -1966,7 +2110,8 @@ bool lodoRead( const QString & path, LodoHeader * header, LodoLibrary * lib,
 				return refuse( QString( "mesh %1: clusters %2 + %3 past clusterCount %4" ).arg( i ).arg( m.clusterFirst ).arg( m.clusterCount ).arg( h.clusterCount ) );
 			if ( m.modelStringOffset >= h.stringBytes )
 				return refuse( QString( "mesh %1: modelStringOffset %2 past stringBytes" ).arg( i ).arg( m.modelStringOffset ) );
-			if ( m.flags & ~quint16( LODO_MESH_ANY_ALPHA | LODO_MESH_ANY_SWAY | LODO_MESH_WATERTIGHT ) )
+			if ( m.flags & ~quint16( LODO_MESH_ANY_ALPHA | LODO_MESH_ANY_SWAY | LODO_MESH_WATERTIGHT
+					| ( v5 ? ( LODO_MESH_VERTEX_COLOUR | LODO_MESH_VERTEX_ALPHA ) : 0 ) ) )
 				return refuse( QString( "mesh %1: reserved flag bits set" ).arg( i ) );
 			maxClusters = std::max<quint32>( maxClusters, m.clusterCount );
 			{
@@ -2205,6 +2350,8 @@ QStringList lodoDescribe( const LodoHeader & h, const LodoLibrary * lib )
 		<< QString( "levelMax %1" ).arg( h.levelMax )
 		<< QString( "ladderGroup %1" ).arg( h.ladderGroup )
 		<< QString( "cardCount %1" ).arg( h.cardCount )
+		<< QString( "colourVertexCount %1" ).arg( h.colourVertexCount )
+		<< QString( "offColours %1" ).arg( h.offColours )
 		<< QString( "indexCrc32 0x%1" ).arg( h.indexCrc32, 8, 16, QChar( '0' ) )
 		<< QString( "fileBytes %1" ).arg( h.fileBytes );
 	if ( lib ) {
@@ -2258,6 +2405,27 @@ QStringList lodoDescribe( const LodoHeader & h, const LodoLibrary * lib )
 			if ( bs.fullTriangles )
 				basesWithFull++;
 		}
+		/* v5: which meshes carry colour, and whether any of it is not white --
+		 * the number gate W4-2 reads (a stream of all-white rows would pass a
+		 * presence check and colour nothing). */
+		quint64 colourMeshes = 0, alphaMeshes = 0, colourNotWhite = 0;
+		QStringList colourNames;
+		for ( const LodoMesh & m : lib->meshes ) {
+			if ( !( m.flags & LODO_MESH_VERTEX_COLOUR ) )
+				continue;
+			colourMeshes++;
+			if ( m.flags & LODO_MESH_VERTEX_ALPHA )
+				alphaMeshes++;
+			if ( colourNames.size() < 40 )
+				colourNames << QFileInfo( QString( lib->stringAt( m.modelStringOffset ) ).replace( QChar( '\\' ), QChar( '/' ) ) ).fileName();
+		}
+		for ( quint32 c : lib->colours )
+			if ( ( c & 0x00FFFFFFU ) != 0x00FFFFFFU )
+				colourNotWhite++;
+		out << QString( "colourMeshes %1" ).arg( colourMeshes )
+			<< QString( "colourAlphaMeshes %1" ).arg( alphaMeshes )
+			<< QString( "colourVerticesNotWhite %1" ).arg( colourNotWhite )
+			<< QString( "colourMeshNames %1" ).arg( colourNames.isEmpty() ? QStringLiteral( "-" ) : colourNames.join( ',' ) );
 		out << QString( "watertightMeshes %1" ).arg( watertight )
 			<< QString( "baseFullTriangles %1" ).arg( fullTris )
 			<< QString( "basesWithFullTriangles %1" ).arg( basesWithFull );

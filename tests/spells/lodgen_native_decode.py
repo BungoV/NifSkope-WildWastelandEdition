@@ -100,8 +100,9 @@ def read_lodo(path):
     if h['version'] == 3:
         raise Refusal('version 3: a v3 base row spends crossPx16[0..1] on two screen-size steps in '
                       '1/16 px, and this reader takes those same four bytes as the base FULL-DETAIL '
-                      'TRIANGLE COUNT. Re-bake; this reader knows version 4')
-    if h['version'] != 4:
+                      'TRIANGLE COUNT. Re-bake; this reader knows versions 4 and 5')
+    # v5 (lane SEAM1, W4) = v4 + an optional per-vertex RGBA8 colour stream; a v4 file reads as v5 without one
+    if h['version'] not in (4, 5):
         raise Refusal('version %d' % h['version'])
     if crc32(b[0x10:0x100]) != h['headerCrc32']:
         raise Refusal('headerCrc32 mismatch')
@@ -143,9 +144,17 @@ def read_lodo(path):
     if not h['flags'] & 8 and h['levelMax']:
         raise Refusal('the LADDER flag is clear but levelMax is %d' % h['levelMax'])
     # v4: the card count lives at 0xD0; the pad is 0xCE..0xCF and 0xD4..0xFF
+    # v5: colourVertexCount u32 at 0xD4, offColours u64 at 0xD8; the pad is 0xCE..0xCF and 0xE0..0xFF
     h['cardCount'] = le('I', b, 0xD0)[0]
-    if any(b[0xCE:0xD0]) or any(b[0xD4:0x100]):
-        raise Refusal('reserved bytes 0xCE..0xCF / 0xD4..0xFF not zero')
+    h['colourVertexCount'], h['offColours'] = (le('IQ', b, 0xD4) if h['version'] == 5 else (0, 0))
+    padFrom = 0xE0 if h['version'] == 5 else 0xD4
+    if any(b[0xCE:0xD0]) or any(b[padFrom:0x100]):
+        raise Refusal('reserved bytes 0xCE..0xCF / 0x%02X..0xFF not zero' % padFrom)
+    if bool(h['colourVertexCount']) != bool(h['offColours']):
+        raise Refusal('colourVertexCount %d and offColours %d: both or neither'
+                      % (h['colourVertexCount'], h['offColours']))
+    if h['colourVertexCount'] > h['vertexCount']:
+        raise Refusal('colourVertexCount %d past the %d vertices' % (h['colourVertexCount'], h['vertexCount']))
     if h['cardCount'] > h['baseCount']:
         raise Refusal('cardCount %d is more than the %d bases' % (h['cardCount'], h['baseCount']))
     if h['fileBytes'] != len(b):
@@ -158,6 +167,9 @@ def read_lodo(path):
             ('localIndices', h['offLocalIndices'], h['clusterCount'] * 48),
             ('vertices', h['offVertices'], h['vertexCount'] * 16),
             ('strings', h['offStrings'], h['stringBytes'])]
+    if h['colourVertexCount']:
+        # v5: the colour blob is written LAST, and is in indexCrc32 only when present
+        tabs.append(('colours', h['offColours'], h['colourVertexCount'] * 4))
     prev = 256
     crc = 0
     for name, off, size in tabs:
@@ -207,6 +219,32 @@ def read_lodo(path):
     L['localIndices'] = b[h['offLocalIndices']:h['offLocalIndices'] + h['clusterCount'] * 48]
     L['vertices'] = [dict(zip(('px', 'py', 'pz', 'u', 'v', 'n0', 'n1', 'n2', 'tangent', 'sway', 'selfAO'),
                               le('HHHHHBBBBBB', b, h['offVertices'] + i * 16))) for i in range(h['vertexCount'])]
+
+    # v5: scatter the colour rows back per vertex (None = no colour), the flagged meshes in mesh order,
+    # each over its clusters' ONE contiguous vertex range
+    L['colours'] = [None] * h['vertexCount']
+    row = 0
+    for i, m in enumerate(L['meshes']):
+        if m['flags'] & ~(1 | 2 | 4 | (8 | 16 if h['version'] == 5 else 0)):
+            raise Refusal('mesh %d flags 0x%x: unknown bits for version %d' % (i, m['flags'], h['version']))
+        if m['flags'] & 16 and not m['flags'] & 8:
+            raise Refusal('mesh %d: VERTEX_ALPHA without VERTEX_COLOUR' % i)
+        if not m['flags'] & 8:
+            continue
+        cs = L['clusters'][m['clusterFirst']:m['clusterFirst'] + m['clusterCount']]
+        lo = min((c['vertexBase'] for c in cs), default=0)
+        hi = max((c['vertexBase'] + c['vertexCount'] for c in cs), default=0)
+        n = sum(c['vertexCount'] for c in cs)
+        if n == 0 or hi - lo != n:
+            raise Refusal('mesh %d flagged VERTEX_COLOUR but its vertices are not one contiguous range' % i)
+        if row + n > h['colourVertexCount']:
+            raise Refusal('colour rows run past colourVertexCount at mesh %d' % i)
+        o = h['offColours'] + row * 4
+        for v in range(lo, hi):
+            L['colours'][v] = tuple(b[o + 4 * (v - lo):o + 4 * (v - lo) + 4])
+        row += n
+    if row != h['colourVertexCount']:
+        raise Refusal('colourVertexCount %d but the flagged meshes hold %d' % (h['colourVertexCount'], row))
 
     # row rules
     for i, m in enumerate(L['meshes']):

@@ -455,9 +455,9 @@ def main():
 
     # ---- j. the NATIVE1c words: each WRITTEN and each MOVING -------------
     print('j. the v4/v5 words (lane NATIVE1c)')
-    ck.check('j0 the .lodo is at version 4 and the .lodi at 3, 4, 5, 6, 7 or 8 (%d / %d)'
+    ck.check('j0 the .lodo is at version 5 (SEAM1 W4) and the .lodi at 3, 4, 5, 6, 7 or 8 (%d / %d)'
              % (h['version'], ih['version']),
-             h['version'] == 4 and ih['version'] in (3, 4, 5, 6, 7, 8))
+             h['version'] == 5 and ih['version'] in (3, 4, 5, 6, 7, 8))
     # j1: the card count
     cardsFromRows = sum(1 for bs in L['bases'] if bs['cardLayer'] != 0xFFFF)
     ck.check('j1 .lodo cardCount is WRITTEN and equals the rows that name a card layer '
