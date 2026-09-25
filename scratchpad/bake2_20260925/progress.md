@@ -18,3 +18,14 @@
   BAKE1's library settings (N8, ring 0, tile 256, ref 1328.6 = also the max over the three lists).
 - 18:57 lodl stage rc 0 for all three (1-3 s each), cross-check 0 mismatched.
 - G5 before-listings taken 18:56 (mods top 78, root 8, profile 13 files, FO4CSLOD 3681 entries: Commonwealth only).
+- 19:01 (clock read) cards DONE: 31 new sets baked 18:56:59 -> 19:01:27, 0 FAILED/MISSING; library 61 sets, 0 empty,
+  lowest coverage 7.3 % (000531ae, a reused BAKE1 set); new and reused sidecars both `projection ortho`, `legacy 256`.
+- 19:01:36 pre-war chunks stage launched (region -25 -9 2 25, --dim all, fill ON). TINT1's -no-gui Commonwealth bake
+  is running at the same time (allowed; the starve rule is a bake past twice its expected time).
+- Instruments ready: checks.py (no-LAND placement cells, named; flat-grey dim-4 chunks from VT.16). Grey refuter:
+  SEAM1's pre-fill Commonwealth VT.16 reads 2021 of 2304 chunks flat grey; the installed fill-ON one 0 of 2304;
+  playable Sanctuary / Boston blocks 0 of 16 on both (the grey was the unpainted ring). Threshold chroma < 6 and
+  luminance SD < 2 per chunk.
+- Landmark cells (cell_names.py over the plugins' CELL EDIDs): Nuka-World Galactic Zone -6..-3 x -2..1, Nuka-Town
+  -1..0 x -6..-1, Kiddie Kingdom 0..3 x 0..3 -> oblique frame -8 -7 3 4; Far Harbor town FarHarborExt 13..14 x
+  6..8 -> frame 9 3 16 10; pre-war PrewarSanctuaryExt01 -20,21, PrewarPlayerHouse01 -20,22 -> frame -24 18 -17 25.
