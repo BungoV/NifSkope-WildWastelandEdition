@@ -1,0 +1,5 @@
+slot 0 split at cell x -16: west 4095097, east 8951433 vertices
+slot 0 split at cell x -12: west 5174124, east 7872406 vertices
+slot 0 split at cell x -8: west 6323425, east 6723105 vertices
+slot 0 split at cell x -4: west 7348255, east 5698275 vertices
+slot 0 split at cell x 0: west 8357835, east 4688695 vertices

@@ -1,0 +1,8 @@
+calibration (BEFORE picture), per-cell chroma percentiles 1/5/50/95/99:
+   painted LAND    3955 cells: 2.1 4.6 25.6 36.4 41.8
+   unpainted LAND 32909 cells: 2.0 2.0 2.0 2.2 19.4
+   classes OVERLAP (unpainted p99 >= painted p1); threshold = unpainted p95 2.2, read with care
+BEFORE: placement cells on grey (chroma <= 2.2): 776 of 4541 cells, 9767 of 184431 placements; LAND cells on grey 31501 of 36864
+   of those placement cells, painted LAND in the ESM (grey by its own texture): 34; unpainted: 742
+AFTER: placement cells on grey (chroma <= 2.2): 8 of 4541 cells, 97 of 184431 placements; LAND cells on grey 9 of 36864
+   of those placement cells, painted LAND in the ESM (grey by its own texture): 8; unpainted: 0
