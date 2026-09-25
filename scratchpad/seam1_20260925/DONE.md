@@ -1,76 +1,96 @@
-BUILD PENDING -- lane SEAM1, worktree E:\Projects\NifskopeWWE-seam1, branch seam1-20260925 (from main ea0ca708)
+DONE -- lane SEAM1, worktree E:\Projects\NifskopeWWE-seam1, branch seam1-20260925 (from main ea0ca708). Built, gated, INSTALLED 16:14 (not flown).
 
-Fallout4.exe was running at every check (11:59 through 13:32), so nothing has been built. Everything below is code on the branch plus measurements that did not need a build. mods\FO4CSLOD is untouched.
+- **Build.** The game went down at 13:46. The final exe is b9fd029b (release/NifSkope.exe, built 14:15:55).
+- **Install.** The whole-map VT is installed into mods\FO4CSLOD\FO4CSLOD\Commonwealth: fill ON (bungo's ruling (a)), cover and height on, as in BAKE1.
+- **Backups.** The 6 files it replaced are in `replaced/`.
 
 ## Commits (nothing pushed, nothing merged)
 
 | commit | what |
 |---|---|
-| c21eb26a | Sanctuary edge root fix, docs/LODGEN_TERRAIN_VT.md §2.5 step 4. A LAND quadrant with no BTXT, and an ATXT layer that names LTEX 0, now paint the engine's one default land texture (CommonwealthDefault01) instead of the chunk's dominant base. |
-| a6e5e8de | `--vt-fill-vanilla` (CLI and panel, OFF by default). It blends ground that his LAND does not paint toward Bethesda's dim-4 LOD colour (§2.6). The vanilla sheets are read loose at bake time, never shipped: `<root>/Textures/Terrain/<WS>/<WS>.4.<x>.<y>.DDS`. |
-| 62e53a3b | `.lodo` v5, the optional per-vertex colour stream (W4, bungo's ruling). The stream is written only for shapes with a colour channel AND Vertex_Colors. RGB and A stay separate channels, and the viewer applies the colour only there. |
+| c21eb26a | **Sanctuary edge root fix** (docs/LODGEN_TERRAIN_VT.md §2.5 step 4). A LAND quadrant with no BTXT, and an ATXT layer that names LTEX 0, now paint the engine's default land texture (CommonwealthDefault01). Before, they painted the chunk's dominant base. |
+| a6e5e8de | **`--vt-fill-vanilla`** (CLI and panel, OFF by default). Unpainted ground is blended toward Bethesda's dim-4 LOD colour (§2.6). The vanilla sheets are read loose at bake time and never shipped. |
+| 62e53a3b | **`.lodo` v5**: an optional per-vertex colour stream, written only for shapes that have a colour channel AND Vertex_Colors. |
+| 28605665 | Gate scripts. |
+| 44805f8f | **Grass tint** (§1.1). The bake divided the smallest mip by alpha, but DDS mips hold straight alpha. Every alpha-cut grass therefore tinted white, which is the "sandy" cover. It now takes the alpha-weighted mean over the first mip of 1024 px or less. |
+| 59a0dd33 | **Default-texture path fix.** c21eb26a's path had `\G`/`\C` escapes; g++ drops the backslash, so the path named no file and painted grey. Now escaped. Also adds the DG1 gate, escape_scan.py and grass_pic.py. |
 
-## Findings
+## Grass question (bungo: "my grass is green, but the cover turns sandy")
 
-- **Sanctuary edge.**
-  - The edge is in our file, on the cell grid: block x -20..-16, y 20..24, which is one dim-4 chunk.
-  - C1 (plugins) is out: control b, Fallout4.esm alone, has the edge. Ground cover is out too: control c, `--cover off`, has it.
-  - C4 is out: the edge is in the texels.
-  - The cause is our colour law (C2), §2.5 step 4.
-  - Model replay of the step across the block border:
-    - shipped law: 18.9 lum
-    - engine default: 0.7 to 4.8 lum
-    - neighbouring cells: about 1.3 to 1.9 lum
-- **W1-W3 share the Sanctuary root.**
-  - W1: 2023 of 2304 dim-4 chunks have LAND with no BTXT and no ATXT. The shipped VT paints 2016 of them one flat grey (132,128,132). By the FG1 definition, colour SD below 2, 2019 chunks are flat.
-  - W2: 1,058 cells hold placements (14,714 of them) but have no painted LAND. They stand on the grey fill.
-  - W3: `pics/w3_overview_before_oblique.png` shows the grey ring around the painted land.
-- **A2.**
-  - `a2_grey_before.txt` lists the 2019 flat chunks.
-  - Vanilla covers all 2304 chunks.
-  - 0 chunks are missing .lodl geometry.
-  - The after list waits on the build.
-- **Fill, offline model (doc_fill.md).** At every region the fill adds no border step over the bar that the engine-default law does not already have. The step at the line is under the line bar (Sanctuary north 9.86 against a bar of 10.15). These are model numbers, not the built file.
-- **W4, measured on the source.**
-  - Of 1,086 Boston shapes, 28 carry a colour channel, and all 28 have Vertex_Colors.
-  - None of the 28 has Vertex_Alpha. 4 have A below 255.
-  - The gate instruments pass their self-test (`w4_synth.py`).
-  - On bakes from the old exe the gate reads G1 GREEN and G2 RED, so the refuter holds.
-- **Boston look (measurement only, nothing fixed).**
-  - Vanilla's downtown object-LOD chunks have no vertex colour and no Vertex_Colors bit.
-  - Their shader words are the ones our viewer writes, and their emissive is black.
-  - Their atlas is near-grey at their own UVs: lum 80, sat 0.067.
-  - So no LOD tint exists in the files. The candidate is the engine's weather light: the sun colour plus the DALC ambient.
+**C4 wins: our averaging.**
+- **Old tint.** Every GRAS came out (255,255,255).
+- **New tint.** Examples: TG_DriedGrassObj01s (65,69,40), TG_GrassPatch_S (126,136,82).
+- **Sanctuary cover texels at the default tint 0.35.** Old (137,129,121); new (90,83,62).
+- **C1 is out.** The files we open are the same TrueGrass/BNS/vanilla files MO2 resolves (grass_census.txt).
 
-## Out of reach in this lane
+## Gates on b9fd029b
 
-All post-build verification is still to do, because the game never closed. P1-P6 are code-complete, P5 included (the VHGT geometry under the fill). No Pn is out of reach in design.
+All gates were pre-registered, and each was run on the broken or old exe first to prove it can fail.
 
-## Resume when Fallout4.exe is down (in order)
+| gate | before | after |
+|---|---|---|
+| G1 Sanctuary edge step (edge_gate.py) | shipped 12.93 RED | 0.41 GREEN |
+| Grass (grass_gate.py: tint-1 vs tint-0 solve) | old (238,235,236) RED | (101,97,62) / (99,100,66) GREEN |
+| DG1 default-ground grey share (default_gate.py) | broken exe 0.1635 RED | 0.0064 GREEN (old exe 0.0064) |
+| escape_scan.py over the branch diff | -- | 0 lines |
+| FG1 flat dim-4 chunks (SD < 2) | shipped 2019 | 0 (fill off: 0 too) |
+| FG2 painted tiles byte-identical; other tiles identical except colour | -- | GREEN, 0 differ |
+| FG3 the fill is wired | -- | colour moved on 8236 tiles, GREEN |
+| A2 (a2_grey_after.txt) | 2019 flat | 0 flat, 0 chunks without vanilla |
+| fill_model, file vs model: Sanctuary north | -- | cell max 10.03 (model F 12.78); at-line 6.36 < bar 10.15. GREEN |
+| fill_model: Glowing Sea edge | -- | cell max 8.96 (F 17.82); at-line 8.25 < 12.63. GREEN |
+| fill_model: north-east | -- | RED at one border, see below |
+| whole-map grey share (VT.16, chroma < 12 and lum > 100) | shipped 0.884 | fill off 0.0004, fill on 0.0103 |
+| W4 (w4_gate.py) | old exe: G2 RED | G2 GREEN; G1 RED, see below |
+| spells lodgen_native / lod_generation / lodgen_loadorder | -- | 32/0, 128/0, 24/0 PASS |
 
-1. Game gate, then build with skill nifskope-ww-worktree-build. Keep a copy of the pre-build exe: BAKE1's `run/release/NifSkope.exe` is the OLD exe.
-2. Fill off vs the OLD exe on the rung controls: byte-identical (`controls.sh <exe> <tag> a b c`, then `g2_compare.py`).
-3. G1 edge gate, `edge_gate.py <VT.2.lodt>`: RED on the shipped file, GREEN on the new one.
-4. G2, `g2_compare.py <before> <after>`.
-5. Whole-map bakes with and without `--vt-fill-vanilla --vanilla-lod-root "E:/Tools/Fallout 4/DataUnpacked/Data"`, then:
-   - `fill_gate.py <off> <on>` (FG1-FG3)
-   - `VT2=<on> fill_model.py` on the 3 regions in doc_fill.md
-   - `a2_lists.py <on VT.2> a2_grey_after.txt`
-6. W4: `w4_bakes.sh <new exe> new`, then `w4_gate.py w4/old w4/new` must give G1 and G2 GREEN. Also `tests/spells/lodgen_native.sh` (fixture + fields j0) and a Boston oblique render with the colour on.
-7. After pictures, with a fresh WW_LODL_SHEET_CACHE per render:
-   - `w3_overview.sh`, `edge_zoom.sh`, the Sanctuary before/after, `ctl_oblique.sh`
-   - the vanilla tile beside ours, from the file
-8. Only when gates 2-6 are green: re-bake into mods\FO4CSLOD.
-   - First copy the files it replaces to `replaced/`.
-   - List sha1 before and after.
+**North-east fill_model RED.**
+- **Where.** One border, cells (11,30)/(12,30), steps 25.4 (line step 29.4, bar 16.73).
+- **Not the fill.** The per-cell colour there is the same with the fill off.
+- **Why the gate fails.** Cell (12,30) is painted in his load order, so the fill leaves it alone. The model's painted set comes from Fallout4.esm only, so it expects the fill to touch that cell.
+- **Verdict.** A gate-definition mismatch, not a fill defect. Before this gate is trusted again, it should read the bake's own painted set.
+
+**W4 G1 RED.**
+- **What differs.** The no-colour strip of the .lodo differs from the old exe's output in the selfAO bytes on the water-tower meshes, plus the CRCs.
+- **Deterministic.** It gives the same result on every run of a given exe.
+- **Unproven hypothesis.** An FMA/inlining codegen shift in the header-inline selfAO.
+- **Scope.** The .lodo was not re-baked or installed.
+
+**Fill bake census (whole/on/log.txt).**
+- **Tone fit.** One global fit: gain 0.612, offset 33.7, saturation 1.85.
+- **Coverage.** Band 2 cells; 8321 tiles touched.
+- **Missing vanilla.** 196 vanilla chunk sheets were missing and 1.6 M texels had no vanilla. A2 still reads 0 chunks without vanilla.
+
+## Install (16:14, game down)
+
+- **Source.** The files are `whole/on/vt/FO4CSLOD/Commonwealth/Commonwealth.VT.{2,4,8,16,32}.lodt` and `Commonwealth.VT.lodm`, written by whole_vt.sh on. They were moved into FO4CSLOD.
+- **Backups.** The shipped files were moved to `replaced/`.
+- **sha1 checks.**
+  - `install_sha1_before.txt` (shipped) equals `install_sha1_replaced.txt`.
+  - `install_sha1_after.txt` equals `install_sha1_new_src.txt`.
+- **VT.2.** Before 0093d335, after f5f15e79.
+- **Rollback.** Move the 6 files from `replaced/` back.
+- **Scope.** Nothing else under E:\Projects\Fallout 4 Mods was touched.
+- **Leftover.** `whole/off/` (15 GB, the fill-off control) can be deleted.
+
+## Still owed
+
+- A Boston oblique render with the .lodo v5 colour on. The .lodo was not re-baked, so v5 is not installed.
+- The FO4CS reader of the .lodo v5 colour (standing order, not news).
+- The north-east fill_model gate should use the bake's own painted set.
 
 ## Pictures (untracked, pics/)
 
-- `controls_side_by_side_oblique.png`: the three controls, perspective.
-- `w3_overview_before_oblique.png`: W3 overview, before.
-- `edge_zoom4x_before_oblique.png`: the edge zoomed 4x, before.
-- `fill_model_sanctuary_north.png`: our tile beside vanilla's, from the model.
-- `ao/`: the AO set.
+- **Sanctuary, 08 camera** (view 8, cells -23,18..-16,25, Z 6690):
+  - `seam/sanctuary_before_oblique.png`
+  - `seam/sanctuary_after_oblique.png`
+  - `seam/sanctuary_before_after.png`
+- **Whole map, terrain bounds** (-42..32 x -48..38, view 8):
+  - `seam/whole_before_oblique.png`
+  - `seam/whole_after_oblique.png`
+  - `seam/whole_before_after.png`
+- `grass_green_vs_sandy.png`: GRAS swatches, old vs new, plus Sanctuary crops from the old exe and b9fd029b.
+- `controls_side_by_side_oblique.png`, `w3_overview_before_oblique.png`, `edge_zoom4x_before_oblique.png`, `fill_model_sanctuary_north.png`, `ao/`: the earlier set.
 
 ## Skill review
 
@@ -80,5 +100,7 @@ All post-build verification is still to do, because the game never closed. P1-P6
   - ww-lodl-offline-census
   - nifskope-ww-render-shot
   - fo4-nif-vertex-channel-census
-- **Wished for:** a skill that says which exe and which sheet cache a native render really used. The stale sheet cache cost one set of pictures.
-- **Written:** ww-lodo-version-bump (E:\Projects\Claude\.claude\skills\ww-lodo-version-bump). It covers where the `.lodo` version is known, the layout that keeps a file without the stream at "old version but 0x04", and the strip gate with its self-test.
+  - nifskope-ww-worktree-build
+- **Written:** ww-lodo-version-bump.
+- **Updated:** nifskope-ww-worktree-build §7. Copied objects are stamped newer than sources edited before the copy, so touch the changed sources before the first make.
+- **Wished for:** a skill that says which exe and which sheet cache a native render really used.

@@ -38,3 +38,16 @@
 - Pictures (before, perspective): pics/w3_overview_before_oblique.png (terrain bounds -42..32 x -48..38), pics/edge_zoom4x_before_oblique.png (cells -21..-20 x 21..22).
 - A2 before: a2_grey_before.txt -- shipped VT.2: 2019 of 2304 dim-4 chunks flat (SD<2); vanilla covers all 2304.
 - Game UP at 13:32.
+
+## 13:46-14:27 (from the logs; game DOWN at 13:46)
+- Builds 1-3 (build1 recompiled nothing: copied objects newer than the edited sources; touched and rebuilt). Final exe b9fd029b (14:15:55).
+- Grass: C4 wins (bake tint = smallest mip rgb/alpha, clamped white). Fix 44805f8f (alpha-weighted mean, first mip <= 1024). Grass gate old (238,235,236) RED -> new (101,97,62) / (99,100,66) GREEN, re-run on b9fd029b 14:21 GREEN. Report sent.
+- Engine-default path bug in c21eb26a ("\G" escapes -> no file -> grey). Fix 59a0dd33. DG1 (re-registered 14:21) broken 0.1635 RED, fixed 0.0064 GREEN. escape_scan: 0.
+- G1 edge GREEN (shipped 12.93 RED); G2a/G2c GREEN; G2b unmeasurable (0 untouched tiles). Spells on b9fd029b: lodgen_native 32/0, lod_generation 128/0, lodgen_loadorder 24/0 PASS.
+- W4 on b9fd029b: G2 GREEN, G1 RED (selfAO bytes at 0xA8 on the water-tower meshes + CRCs; deterministic per exe; hypothesis FMA/inlining codegen, unproven). Not part of the VT re-bake.
+- 14:27 pics/seam/sanctuary_before_oblique.png (shipped FO4CSLOD).
+
+## 14:39 (clock read)
+- Director restart at 14:38 cut off both whole-map VT bakes (no end line, 0-byte VT.32) and a spell re-run. Game down (gate read). Both bakes relaunched 14:38:53 on b9fd029b; spells + shipped VT sha1 re-running.
+- 14:53 (clock read) spells on b9fd029b re-run clean: lodgen_native 32/0, lod_generation 128/0, lodgen_loadorder 24/0 PASS. Shipped VT sha1 recorded (install_sha1_before.txt). pics/seam/whole_before_oblique.png (shipped, W3 terrain-bounds framing -42..32 x -48..38, view 8). Bakes running.
+- 16:20 (clock read) bakes ended 15:53 (off) / 15:55 (on), rc 0. FG1-FG3 GREEN, A2 0 flat, fill_model Sanctuary-north + Glowing Sea GREEN, north-east RED at one border that is identical with the fill off (painted-set mismatch in the model). Game gate DOWN -> installed 16:14 into FO4CSLOD (6 files, replaced/ + sha1 verified both ways). Sanctuary after picture 16:14, messaged. Whole after 16:19. DONE.md rewritten.

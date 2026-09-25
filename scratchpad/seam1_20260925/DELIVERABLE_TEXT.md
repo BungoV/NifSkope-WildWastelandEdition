@@ -2,7 +2,15 @@
 
 ## HANDOFF (top block)
 
-Lane SEAM1 is BUILD PENDING: the game was up all session. Branch seam1-20260925 has three commits:
+**Status at 16:14.** Lane SEAM1 is BUILT and INSTALLED, NOT FLOWN.
+- Exe b9fd029b. The whole-map VT (fill ON, cover and height on) went into mods\FO4CSLOD at 16:14. The old files are in scratchpad/seam1_20260925/replaced/, with sha1 before and after.
+- Two more fixes landed:
+  - 44805f8f, grass tint: the white/"sandy" cover came from reading straight-alpha mips as premultiplied.
+  - 59a0dd33: the default-ground path had unknown `\G` escapes.
+- Gate results are in the DONE.md table. The north-east fill_model gate is RED from a painted-set mismatch, not from the fill. W4 G1 is RED from the selfAO codegen bytes; the .lodo is not installed.
+- bungo's in-game look is owed.
+
+The original three commits:
 
 - **c21eb26a, the Sanctuary edge root.** A BTXT-less quadrant, or a NULL-LTEX layer, now paints the engine default land texture, not the chunk's dominant base.
 - **a6e5e8de, `--vt-fill-vanilla`.** It is OFF by default. It blends unpainted ground toward Bethesda's dim-4 LOD colour, and the vanilla sheets are read loose at bake time only.
@@ -46,3 +54,14 @@ Every gate is pre-registered under `scratchpad/seam1_20260925/`. The resume list
 - **2026-09-25, SEAM1: a `git add` list with one gitignored path added nothing.**
   - What happened: the `&&`-chained commit silently did not run.
   - The rule: read the `git add` result before committing, and keep generated TSVs out of the path list.
+- **2026-09-25, SEAM1: the first worktree build compiled none of the lane's edits.**
+  - What happened: the code was written while the game was up; the objects copied in afterwards were stamped newer than those sources, so make relinked the old code. Caught by the build log listing 0 of the changed files.
+  - The rule: after copying objects, touch every changed source and check the rebuilt-object list names each one (added to skill nifskope-ww-worktree-build §7).
+- **2026-09-25, SEAM1: "Landscape\Ground\..." in a C++ string named no file.**
+  - What happened: `\G` and `\C` are unknown escapes; g++ warns and drops the backslash, so the engine-default ground texture path (c21eb26a) opened nothing and painted the missing-texture grey. Caught from the Sanctuary picture, not from a gate.
+  - The rule: every Windows path literal uses `\` or `/`; `escape_scan.py` over the branch diff reads 0 before a build.
+- **2026-09-25, SEAM1: two gates were registered that could not fail.**
+  - What happened: the edge gate measures steps, so a flat wrong colour passed it; the first default-colour gate (grey with luminance > 150) read 0.0000 on the broken exe too, because missing-texture grey sits at 100-130. The first grass gate needed cover-255 texels, and the region peaks at 159.
+  - The rule: run each gate on the known-broken exe before trusting its GREEN (Measure, don't eyeball). Re-registered forms: DG1 broken 0.1635 RED / fixed 0.0064 GREEN; grass gate by the tint-1 vs tint-0 control.
+- **2026-09-25, SEAM1: grass tint read the smallest mip as premultiplied.**
+  - What happened: DDS mips are straight alpha; dividing by alpha clamped every alpha-cut grass to white, so ground cover paled the terrain toward sand. Fixed in 44805f8f (alpha-weighted mean).
