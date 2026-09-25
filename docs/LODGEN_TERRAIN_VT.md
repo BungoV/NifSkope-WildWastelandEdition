@@ -107,10 +107,19 @@ T(L) = ( Σ_g density(g) · avg(g) ) / Σ_{g: has a tint} density(g)
 32 bytes in every shipped GRAS record; byte 1 (Min Slope) is 0 in all of them,
 so a lower gate would be dead code. Bytes 3, 6–7 and 29–31 are stale slots and
 are not read. `avg(g)` is the average colour of the grass MESH's diffuse — the
-smallest mip of the texture named by `GRAS.MODL`'s one shape, un-premultiplied
-by its own alpha above 0.05 — **not** the GRAS record's `Colour Range`, which
+**alpha-weighted** mean, `Σ rgb·a / Σ a`, over the first mip no longer than
+1024 of the texture named by `GRAS.MODL`'s one shape, refused when the mean
+alpha is under 0.05 — **not** the GRAS record's `Colour Range`, which
 is a per-instance random *spread*, and **not** the LTEX's own diffuse, which is
 missing on a third of the base game's landscape texture sets.
+
+It was once the smallest mip divided by its own alpha. That is wrong: a DDS
+mip chain is straight alpha, so the smallest mip's RGB is the unweighted
+average over the atlas's transparent gaps, and dividing by a mean alpha of
+0.07–0.30 clamped every alpha-cut grass under Sanctuary and cell −24,−8 to
+white (lane SEAM1, `grass_census.txt`): the cover tint washed his green grass
+sandy. Measured against mip 0, the 1024 cap moves the mean by ≤ 2.5/255
+(`grass_mipcheck.py`).
 
 ### 1.2 The per-texel law
 

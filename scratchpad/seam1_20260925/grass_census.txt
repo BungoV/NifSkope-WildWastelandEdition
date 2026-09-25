@@ -1,0 +1,229 @@
+# plugins walked 47 | LTEX 129 | GRAS 201 | cells with LAND 26
+cell  -20  20 LAND from Fallout4.esm           textures 20 -> GRAS TG_GrassPatch_S:7 TG_DriedGrassObj01s:6 TG_DriedGrassLongObj02s:6 BNS_ForestWildGrassObj01:4 BNS_ForestWildGrassObj02:4 TG_BaseGreenGrass_S:4 BNS_RockGrassObj01:4 BNS_RockGrassObj02:4 TG_BaseGreenGrass:3 BNS_FallenGrassObj04:2 BNS_FallenGrassObj02:2 BNS_FallenGrassObj01:2 BNS_FallenGrassObj03:2 RiverRockWetGrassObj02:1 RiverRockWetGrassObj01:1 TG_NearWaterPlant:1 TG_MutatedBeachGrass:1 BNS_DirtGravelRocksObj01:1 BNS_DirtGravelRocksObj02:1
+cell  -20  21 LAND from Fallout4.esm           textures 13 -> GRAS TG_DriedGrassObj01s:5 TG_DriedGrassLongObj02s:5 TG_GrassPatch_S:5 BNS_ForestWildGrassObj01:4 BNS_ForestWildGrassObj02:4 BNS_RockGrassObj01:4 BNS_RockGrassObj02:4 TG_BaseGreenGrass_S:3 TG_BaseGreenGrass:3
+cell  -20  22 LAND from Fallout4.esm           textures 14 -> GRAS BNS_ForestWildGrassObj01:4 BNS_ForestWildGrassObj02:4 BNS_RockGrassObj01:4 BNS_RockGrassObj02:4 TG_DriedGrassObj01s:3 TG_DriedGrassLongObj02s:3 TG_GrassPatch_S:3 BNS_FallenGrassObj04:1 BNS_FallenGrassObj02:1 BNS_FallenGrassObj01:1 BNS_FallenGrassObj03:1
+cell  -20  23 LAND from Fallout4.esm           textures 20 -> GRAS TG_DriedGrassObj01s:8 TG_GrassPatch_S:5 TG_DriedGrassLongObj02s:4 BNS_ForestWildGrassObj01:4 BNS_ForestWildGrassObj02:4 BNS_RockGrassObj01:4 BNS_RockGrassObj02:4 BNS_FallenGrassObj04:2 BNS_FallenGrassObj02:2 BNS_FallenGrassObj01:2 BNS_FallenGrassObj03:2 DriedGrassObj01:2 RiverRockWetGrassObj02:1 RiverRockWetGrassObj01:1 TG_BaseGreenGrass_S:1 TG_NearWaterPlant:1 TG_MutatedBeachGrass:1
+cell  -20  24 LAND from Fallout4.esm           textures 22 -> GRAS TG_DriedGrassObj01s:8 BNS_FallenGrassObj04:6 BNS_FallenGrassObj02:6 BNS_FallenGrassObj01:6 BNS_FallenGrassObj03:6 TG_DriedGrassLongObj02s:4 TG_GrassPatch_S:4 BNS_ForestWildGrassObj01:3 BNS_ForestWildGrassObj02:3 BNS_RockGrassObj01:3 BNS_RockGrassObj02:3 DriedGrassObj01:2 BNS_ForestWildGrassObj01Sparse:2 TG_BaseGreenGrass_S:1 TG_BaseGreenGrass:1
+cell  -19  20 LAND from Fallout4.esm           textures 23 -> GRAS TG_GrassPatch_S:12 TG_BaseGreenGrass_S:10 TG_NearWaterPlant:8 TG_MutatedBeachGrass:8 TG_BaseGreenGrass:6 TG_DriedGrassObj01s:4 TG_DriedGrassLongObj02s:4 RiverRockWetGrassObj02:4 RiverRockWetGrassObj01:4 RiverRockGrassObj02:4 RiverRockGrassObj01:4 BNS_ForestWildGrassObj01:2 BNS_ForestWildGrassObj02:2 BNS_RockGrassObj01:1 BNS_RockGrassObj02:1
+cell  -19  21 LAND from Fallout4.esm           textures 17 -> GRAS TG_GrassPatch_S:7 TG_DriedGrassObj01s:5 TG_DriedGrassLongObj02s:5 BNS_ForestWildGrassObj01:4 BNS_ForestWildGrassObj02:4 TG_BaseGreenGrass_S:4 BNS_RockGrassObj01:3 BNS_RockGrassObj02:3 TG_BaseGreenGrass:2 RiverRockWetGrassObj02:2 RiverRockWetGrassObj01:2 TG_NearWaterPlant:2 TG_MutatedBeachGrass:2 BNS_DirtGravelRocksObj01:1 BNS_DirtGravelRocksObj02:1
+cell  -19  22 LAND from Fallout4.esm           textures 15 -> GRAS TG_DriedGrassObj01s:6 TG_DriedGrassLongObj02s:6 TG_GrassPatch_S:6 BNS_ForestWildGrassObj01:4 BNS_ForestWildGrassObj02:4 TG_BaseGreenGrass_S:2 TG_BaseGreenGrass:2 BNS_RockGrassObj01:2 BNS_RockGrassObj02:2 BNS_DirtGravelRocksObj01:1 BNS_DirtGravelRocksObj02:1 BNS_ForestWildGrassWeedsObj01:1 BNS_ForestWildGrassWeedsObj02:1 BNS_FallenGrassObj04:1 BNS_FallenGrassObj02:1 BNS_FallenGrassObj01:1 BNS_FallenGrassObj03:1
+cell  -19  23 LAND from Fallout4.esm           textures 19 -> GRAS TG_DriedGrassObj01s:8 TG_DriedGrassLongObj02s:4 TG_GrassPatch_S:4 BNS_RockGrassObj01:3 BNS_RockGrassObj02:3 BNS_ForestWildGrassObj01:2 BNS_ForestWildGrassObj02:2 BNS_ForestWildGrassWeedsObj01:2 BNS_ForestWildGrassWeedsObj02:2 DriedGrassObj01:2 BNS_FallenGrassObj04:1 BNS_FallenGrassObj02:1 BNS_FallenGrassObj01:1 BNS_FallenGrassObj03:1 BNS_ForestWildGrassObj01Sparse:1
+cell  -19  24 LAND from Fallout4.esm           textures 20 -> GRAS TG_DriedGrassObj01s:11 DriedGrassObj01:4 TG_DriedGrassLongObj02s:3 TG_GrassPatch_S:3 BNS_ForestWildGrassObj01Sparse:3 BNS_RockGrassObj01:3 BNS_RockGrassObj02:3 BNS_FallenGrassObj04:2 BNS_FallenGrassObj02:2 BNS_FallenGrassObj01:2 BNS_FallenGrassObj03:2 BNS_ForestWildGrassObj01:2 BNS_ForestWildGrassObj02:2
+cell  -18  20 LAND from Fallout4.esm           textures 23 -> GRAS TG_GrassPatch_S:8 TG_DriedGrassObj01s:5 TG_DriedGrassLongObj02s:5 TG_BaseGreenGrass_S:5 BNS_ForestWildGrassObj01:4 BNS_ForestWildGrassObj02:4 BNS_ForestWildGrassWeedsObj01:4 BNS_ForestWildGrassWeedsObj02:4 BNS_DirtGravelRocksObj01:2 BNS_DirtGravelRocksObj02:2 TG_BaseGreenGrass:2 BNS_RockGrassObj01:2 BNS_RockGrassObj02:2 RiverRockWetGrassObj02:2 RiverRockWetGrassObj01:2 TG_NearWaterPlant:2 TG_MutatedBeachGrass:2 GrassphaltObj01:1 GrassphaltObj02:1 GrassphaltObj03:1 BNS_FallenGrassObj04:1 BNS_FallenGrassObj02:1 BNS_FallenGrassObj01:1 BNS_FallenGrassObj03:1
+cell  -18  21 LAND from Fallout4.esm           textures 19 -> GRAS TG_GrassPatch_S:5 BNS_RockGrassObj01:4 BNS_RockGrassObj02:4 BNS_ForestWildGrassObj01:3 BNS_ForestWildGrassObj02:3 TG_DriedGrassObj01s:3 TG_DriedGrassLongObj02s:3 BNS_ForestWildGrassWeedsObj01:2 BNS_ForestWildGrassWeedsObj02:2 RiverRockWetGrassObj02:2 RiverRockWetGrassObj01:2 TG_BaseGreenGrass_S:2 TG_NearWaterPlant:2 TG_MutatedBeachGrass:2 BNS_DirtGravelRocksObj01:1 BNS_DirtGravelRocksObj02:1
+cell  -18  22 LAND from Fallout4.esm           textures 13 -> GRAS BNS_ForestWildGrassObj01:4 BNS_ForestWildGrassObj02:4 BNS_FallenGrassObj04:3 BNS_FallenGrassObj02:3 BNS_FallenGrassObj01:3 BNS_FallenGrassObj03:3 TG_DriedGrassObj01s:2 TG_DriedGrassLongObj02s:2 TG_BaseGreenGrass_S:2 TG_BaseGreenGrass:2 TG_GrassPatch_S:2 BNS_DirtGravelRocksObj01:1 BNS_DirtGravelRocksObj02:1
+cell  -18  23 LAND from Fallout4.esm           textures 16 -> GRAS BNS_FallenGrassObj04:4 BNS_FallenGrassObj02:4 BNS_FallenGrassObj01:4 BNS_FallenGrassObj03:4 BNS_ForestWildGrassObj01:3 BNS_ForestWildGrassObj02:3 TG_DriedGrassObj01s:2 TG_DriedGrassLongObj02s:2 TG_GrassPatch_S:2 BNS_RockGrassObj01:2 BNS_RockGrassObj02:2
+cell  -18  24 LAND from Fallout4.esm           textures 11 -> GRAS TG_DriedGrassObj01s:7 BNS_ForestWildGrassObj01:4 BNS_ForestWildGrassObj02:4 DriedGrassObj01:3 BNS_FallenGrassObj04:3 BNS_FallenGrassObj02:3 BNS_FallenGrassObj01:3 BNS_FallenGrassObj03:3 TG_DriedGrassLongObj02s:1 TG_GrassPatch_S:1
+cell  -17  20 LAND from Fallout4.esm           textures 19 -> GRAS BNS_ForestWildGrassObj01:4 BNS_ForestWildGrassObj02:4 BNS_ForestWildGrassWeedsObj01:4 BNS_ForestWildGrassWeedsObj02:4 TG_GrassPatch_S:3 BNS_DirtGravelRocksObj01:2 BNS_DirtGravelRocksObj02:2 TG_DriedGrassObj01s:2 TG_DriedGrassLongObj02s:2 BNS_RockGrassObj01:2 BNS_RockGrassObj02:2 BNS_FallenGrassObj04:2 BNS_FallenGrassObj02:2 BNS_FallenGrassObj01:2 BNS_FallenGrassObj03:2 GrassphaltObj01:1 GrassphaltObj02:1 GrassphaltObj03:1 TG_BaseGreenGrass_S:1
+cell  -17  21 LAND from Fallout4.esm           textures 18 -> GRAS TG_DriedGrassObj01s:7 TG_GrassPatch_S:6 TG_DriedGrassLongObj02s:5 TG_BaseGreenGrass_S:3 TG_BaseGreenGrass:2 BNS_ForestWildGrassObj01:2 BNS_ForestWildGrassObj02:2 DriedGrassObj01:1 RiverRockWetGrassObj02:1 RiverRockWetGrassObj01:1 TG_NearWaterPlant:1 TG_MutatedBeachGrass:1 BNS_RockGrassObj01:1 BNS_RockGrassObj02:1
+cell  -17  22 LAND from Fallout4.esm           textures 18 -> GRAS TG_GrassPatch_S:6 TG_DriedGrassObj01s:4 TG_DriedGrassLongObj02s:4 RiverRockWetGrassObj02:2 RiverRockWetGrassObj01:2 TG_BaseGreenGrass_S:2 TG_NearWaterPlant:2 TG_MutatedBeachGrass:2 BNS_FallenGrassObj04:1 BNS_FallenGrassObj02:1 BNS_FallenGrassObj01:1 BNS_FallenGrassObj03:1
+cell  -17  23 LAND from Fallout4.esm           textures 16 -> GRAS TG_DriedGrassObj01s:5 TG_DriedGrassLongObj02s:3 TG_GrassPatch_S:3 BNS_ForestWildGrassObj01:1 BNS_ForestWildGrassObj02:1 BNS_FallenGrassObj04:1 BNS_FallenGrassObj02:1 BNS_FallenGrassObj01:1 BNS_FallenGrassObj03:1 DriedGrassObj01:1
+cell  -17  24 LAND from Fallout4.esm           textures 15 -> GRAS TG_DriedGrassObj01s:6 BNS_ForestWildGrassObj01:4 BNS_ForestWildGrassObj02:4 TG_DriedGrassLongObj02s:2 TG_GrassPatch_S:2 DriedGrassObj01:2 BNS_FallenGrassObj04:2 BNS_FallenGrassObj02:2 BNS_FallenGrassObj01:2 BNS_FallenGrassObj03:2 BNS_ForestWildGrassWeedsObj01:2 BNS_ForestWildGrassWeedsObj02:2
+cell  -16  20 LAND from Fallout4.esm           textures 16 -> GRAS BNS_ForestWildGrassObj01:4 BNS_ForestWildGrassObj02:4 TG_DriedGrassObj01s:3 TG_DriedGrassLongObj02s:3 TG_GrassPatch_S:3 BNS_RockGrassObj01:3 BNS_RockGrassObj02:3 BNS_FallenGrassObj04:3 BNS_FallenGrassObj02:3 BNS_FallenGrassObj01:3 BNS_FallenGrassObj03:3 BNS_ForestWildGrassWeedsObj01:3 BNS_ForestWildGrassWeedsObj02:3
+cell  -16  21 LAND from Fallout4.esm           textures 20 -> GRAS TG_DriedGrassObj01s:6 TG_DriedGrassLongObj02s:6 TG_GrassPatch_S:6 BNS_ForestWildGrassObj01:4 BNS_ForestWildGrassObj02:4 TG_BaseGreenGrass_S:3 TG_BaseGreenGrass:3 BNS_FallenGrassObj04:2 BNS_FallenGrassObj02:2 BNS_FallenGrassObj01:2 BNS_FallenGrassObj03:2 BNS_RockGrassObj01:2 BNS_RockGrassObj02:2
+cell  -16  22 LAND from Fallout4.esm           textures 17 -> GRAS TG_GrassPatch_S:7 TG_BaseGreenGrass_S:5 TG_DriedGrassObj01s:4 TG_DriedGrassLongObj02s:4 TG_NearWaterPlant:3 TG_MutatedGreenGrass01_SHD:3 ForestGrassObj03:2 TG_MutatedPlant02:2 BNS_RockGrassObj01:1 BNS_RockGrassObj02:1 RiverRockWetGrassObj02:1 RiverRockWetGrassObj01:1 TG_MutatedBeachGrass:1 RiverRockGrassObj02:1 RiverRockGrassObj01:1
+cell  -16  23 LAND from Fallout4.esm           textures 18 -> GRAS TG_GrassPatch_S:7 TG_DriedGrassObj01s:4 TG_DriedGrassLongObj02s:4 TG_BaseGreenGrass_S:4 TG_NearWaterPlant:3 RiverRockWetGrassObj02:2 RiverRockWetGrassObj01:2 TG_MutatedBeachGrass:2 ForestGrassObj03:1 TG_MutatedGreenGrass01_SHD:1 TG_MutatedPlant02:1 BNS_ForestWildGrassObj01:1 BNS_ForestWildGrassObj02:1
+cell  -16  24 LAND from Fallout4.esm           textures 16 -> GRAS TG_DriedGrassObj01s:4 TG_DriedGrassLongObj02s:4 TG_GrassPatch_S:4 BNS_ForestWildGrassObj01:3 BNS_ForestWildGrassObj02:3 BNS_FallenGrassObj04:3 BNS_FallenGrassObj02:3 BNS_FallenGrassObj01:3 BNS_FallenGrassObj03:3 BNS_RockGrassObj01:1 BNS_RockGrassObj02:1
+cell  -24  -8 LAND from Fallout4.esm           textures 20 -> GRAS TG_DriedGrassObj01s:10 TG_DriedGrassLongObj02s:10 TG_GrassPatch_S:6 TG_MutatedGrassPlant01_SD:4 BNS_RockGrassObj01:4 BNS_RockGrassObj02:4 BNS_ForestGrassObj01:4 BNS_ForestGrassObj02:4
+
+# per GRAS (count = texture references across the cells above)
+GRAS TG_DriedGrassObj01s          n=138 from TrueGrass.esp              MODL Landscape\Grass\DriedGrassObj01.nif
+   nif  <- ba2 Fallout4 - Meshes.ba2 | tex0 textures\landscape\grass\DriedGrassObj01_D.dds | bgsm Materials\Landscape\Grass\DriedGrassObj01.BGSM -> diffuse landscape/grass/driedgrassobj01_d.dds (bgsm from ba2 TrueGrass - Main.ba2)
+   tex0 <- ba2 TrueGrass - Textures.ba2       fmt 77 1024x1024 mips 11 (smallest 1x1) meanA 0.17 cov 0.18
+        smallest-mip rgb (180 183 164) a 0.17 | BAKE tint rgb/a (255 255 255) | mip0 unweighted (184 186 169) alpha-weighted ( 65  69  40) a>=.5 ( 65  69  41)
+   bgsm <- ba2 TrueGrass - Textures.ba2       fmt 77 1024x1024 mips 11 (smallest 1x1) meanA 0.17 cov 0.18
+        smallest-mip rgb (180 183 164) a 0.17 | BAKE tint rgb/a (255 255 255) | mip0 unweighted (184 186 169) alpha-weighted ( 65  69  40) a>=.5 ( 65  69  41)
+GRAS TG_GrassPatch_S              n=127 from TrueGrass.esp              MODL Landscape\Grass\PreWarLawnGrassObj01.nif
+   nif  <- ba2 Fallout4 - Meshes.ba2 | tex0 textures\Landscape\Grass\PreWarLawnGrassObj01_d.dds | bgsm Materials\Landscape\Grass\PreWarLawnGrassObj01.BGSM -> diffuse Landscape/Grass/PreWarLawnGrassObj01_d.dds (bgsm from ba2 Fallout4 - Materials.ba2)
+   tex0 <- ba2 TrueGrass - Textures.ba2       fmt 77 2048x2048 mips 12 (smallest 1x1) meanA 0.07 cov 0.08
+        smallest-mip rgb (169 178 150) a 0.07 | BAKE tint rgb/a (255 255 255) | mip0 unweighted (176 182 157) alpha-weighted (126 136  82) a>=.5 (126 136  82)
+   bgsm <- ba2 TrueGrass - Textures.ba2       fmt 77 2048x2048 mips 12 (smallest 1x1) meanA 0.07 cov 0.08
+        smallest-mip rgb (169 178 150) a 0.07 | BAKE tint rgb/a (255 255 255) | mip0 unweighted (176 182 157) alpha-weighted (126 136  82) a>=.5 (126 136  82)
+GRAS TG_DriedGrassLongObj02s      n=104 from TrueGrass.esp              MODL Landscape\Grass\DriedGrassLongObj02.nif
+   nif  <- ba2 Fallout4 - Meshes.ba2 | tex0 textures\landscape\grass\driedgrassobj02_d.dds | bgsm Materials\Landscape\Grass\DriedGrassObj02.BGSM -> diffuse landscape/grass/driedgrassobj02_d.dds (bgsm from ba2 Fallout4 - Materials.ba2)
+   tex0 <- ba2 TrueGrass - Textures.ba2       fmt 77 2048x2048 mips 12 (smallest 1x1) meanA 0.07 cov 0.07
+        smallest-mip rgb (153 149 128) a 0.07 | BAKE tint rgb/a (255 255 255) | mip0 unweighted (161 158 138) alpha-weighted (104 100  73) a>=.5 (104 100  73)
+   bgsm <- ba2 TrueGrass - Textures.ba2       fmt 77 2048x2048 mips 12 (smallest 1x1) meanA 0.07 cov 0.07
+        smallest-mip rgb (153 149 128) a 0.07 | BAKE tint rgb/a (255 255 255) | mip0 unweighted (161 158 138) alpha-weighted (104 100  73) a>=.5 (104 100  73)
+GRAS BNS_ForestWildGrassObj01     n= 74 from BNS Landscape.esp          MODL Landscape\Grass\BNS_WildGrass01.nif
+   nif  <- ba2 BNS Landscape - Main.ba2 | tex0 textures\bns\landscape\grass\wildgrassatlas01_d.dds | bgsm Materials\BNS\Landscape\Grass\WildGrass01.BGSM -> diffuse BNS/Landscape/Grass/WildGrassAtlas01_d.DDS (bgsm from ba2 BNS Landscape - Main.ba2)
+   tex0 <- ba2 BNS Landscape - Textures.ba2   fmt 77 2048x1024 mips 12 (smallest 1x1) meanA 0.07 cov 0.07
+        smallest-mip rgb (177 172 148) a 0.07 | BAKE tint rgb/a (255 255 255) | mip0 unweighted (171 162 123) alpha-weighted (142 134  86) a>=.5 (142 134  86)
+   bgsm <- ba2 BNS Landscape - Textures.ba2   fmt 77 2048x1024 mips 12 (smallest 1x1) meanA 0.07 cov 0.07
+        smallest-mip rgb (177 172 148) a 0.07 | BAKE tint rgb/a (255 255 255) | mip0 unweighted (171 162 123) alpha-weighted (142 134  86) a>=.5 (142 134  86)
+GRAS BNS_ForestWildGrassObj02     n= 74 from BNS Landscape.esp          MODL Landscape\Grass\BNS_WildGrass02.nif
+   nif  <- ba2 BNS Landscape - Main.ba2 | tex0 textures\bns\landscape\grass\wildgrassatlas01_d.dds | bgsm Materials\BNS\Landscape\Grass\WildGrass01.BGSM -> diffuse BNS/Landscape/Grass/WildGrassAtlas01_d.DDS (bgsm from ba2 BNS Landscape - Main.ba2)
+   tex0 <- ba2 BNS Landscape - Textures.ba2   fmt 77 2048x1024 mips 12 (smallest 1x1) meanA 0.07 cov 0.07
+        smallest-mip rgb (177 172 148) a 0.07 | BAKE tint rgb/a (255 255 255) | mip0 unweighted (171 162 123) alpha-weighted (142 134  86) a>=.5 (142 134  86)
+   bgsm <- ba2 BNS Landscape - Textures.ba2   fmt 77 2048x1024 mips 12 (smallest 1x1) meanA 0.07 cov 0.07
+        smallest-mip rgb (177 172 148) a 0.07 | BAKE tint rgb/a (255 255 255) | mip0 unweighted (171 162 123) alpha-weighted (142 134  86) a>=.5 (142 134  86)
+GRAS BNS_RockGrassObj01           n= 53 from BNS Landscape.esp          MODL Landscape\Grass\BNS_RockGrassObj01.nif
+   nif  <- ba2 BNS Landscape - Main.ba2 | tex0  | bgsm Materials\Landscape\Ground\RubbleRock01.BGSM -> diffuse BNS/Landscape/Ground/ForestDirtRocks01_d.dds (bgsm from ba2 BNS Landscape - Main.ba2)
+   tex0: None
+   bgsm <- ba2 BNS Landscape - Textures.ba2   fmt 71 2048x2048 mips 12 (smallest 1x1) meanA 1.00 cov 1.00
+        smallest-mip rgb ( 87  74  62) a 1.00 | BAKE tint rgb/a ( 87  74  62) | mip0 unweighted ( 83  72  61) alpha-weighted ( 83  72  61) a>=.5 ( 83  72  61)
+GRAS BNS_RockGrassObj02           n= 53 from BNS Landscape.esp          MODL Landscape\Grass\BNS_RockGrassObj02.nif
+   nif  <- ba2 BNS Landscape - Main.ba2 | tex0  | bgsm Materials\Landscape\Ground\RubbleRock01.BGSM -> diffuse BNS/Landscape/Ground/ForestDirtRocks01_d.dds (bgsm from ba2 BNS Landscape - Main.ba2)
+   tex0: None
+   bgsm <- ba2 BNS Landscape - Textures.ba2   fmt 71 2048x2048 mips 12 (smallest 1x1) meanA 1.00 cov 1.00
+        smallest-mip rgb ( 87  74  62) a 1.00 | BAKE tint rgb/a ( 87  74  62) | mip0 unweighted ( 83  72  61) alpha-weighted ( 83  72  61) a>=.5 ( 83  72  61)
+GRAS TG_BaseGreenGrass_S          n= 52 from TrueGrass.esp              MODL Landscape\Grass\TG_GreenGrassSimple01.nif
+   nif  <- ba2 TrueGrass - Main.ba2 | tex0 textures\landscape\grass\DriedGrassObj01_D.dds | bgsm Materials\Landscape\Grass\TG_GreenGrassSimple01.BGSM -> diffuse landscape/grass/TG_GreenGrassSimple_D.dds (bgsm from ba2 TrueGrass - Main.ba2)
+   tex0 <- ba2 TrueGrass - Textures.ba2       fmt 77 1024x1024 mips 11 (smallest 1x1) meanA 0.17 cov 0.18
+        smallest-mip rgb (180 183 164) a 0.17 | BAKE tint rgb/a (255 255 255) | mip0 unweighted (184 186 169) alpha-weighted ( 65  69  40) a>=.5 ( 65  69  41)
+   bgsm <- ba2 TrueGrass - Textures.ba2       fmt 77 1024x1024 mips 11 (smallest 1x1) meanA 0.16 cov 0.16
+        smallest-mip rgb (145 146 120) a 0.16 | BAKE tint rgb/a (255 255 255) | mip0 unweighted (154 156 132) alpha-weighted ( 79  83  24) a>=.5 ( 79  83  24)
+GRAS BNS_FallenGrassObj04         n= 40 from BNS Landscape.esp          MODL Landscape\Grass\BNS_FallenLeavesObj04.nif
+   nif  <- ba2 BNS Landscape - Main.ba2 | tex0 textures\bns\landscape\grass\fallenleaves01_d.dds | bgsm Materials\BNS\Landscape\Grass\FallenLeavesObj01.BGSM -> diffuse BNS/Landscape/Grass/FallenLeaves01_d.DDS (bgsm from ba2 BNS Landscape - Main.ba2)
+   tex0 <- ba2 BNS Landscape - Textures.ba2   fmt 77 2048x1024 mips 12 (smallest 1x1) meanA 0.16 cov 0.17
+        smallest-mip rgb (123  94  73) a 0.16 | BAKE tint rgb/a (255 255 255) | mip0 unweighted (120  90  66) alpha-weighted (126  89  63) a>=.5 (125  89  63)
+   bgsm <- ba2 BNS Landscape - Textures.ba2   fmt 77 2048x1024 mips 12 (smallest 1x1) meanA 0.16 cov 0.17
+        smallest-mip rgb (123  94  73) a 0.16 | BAKE tint rgb/a (255 255 255) | mip0 unweighted (120  90  66) alpha-weighted (126  89  63) a>=.5 (125  89  63)
+GRAS BNS_FallenGrassObj02         n= 40 from BNS Landscape.esp          MODL Landscape\Grass\BNS_FallenLeavesObj02.nif
+   nif  <- ba2 BNS Landscape - Main.ba2 | tex0 textures\bns\landscape\grass\fallenleaves01_d.dds | bgsm Materials\BNS\Landscape\Grass\FallenLeavesObj01.BGSM -> diffuse BNS/Landscape/Grass/FallenLeaves01_d.DDS (bgsm from ba2 BNS Landscape - Main.ba2)
+   tex0 <- ba2 BNS Landscape - Textures.ba2   fmt 77 2048x1024 mips 12 (smallest 1x1) meanA 0.16 cov 0.17
+        smallest-mip rgb (123  94  73) a 0.16 | BAKE tint rgb/a (255 255 255) | mip0 unweighted (120  90  66) alpha-weighted (126  89  63) a>=.5 (125  89  63)
+   bgsm <- ba2 BNS Landscape - Textures.ba2   fmt 77 2048x1024 mips 12 (smallest 1x1) meanA 0.16 cov 0.17
+        smallest-mip rgb (123  94  73) a 0.16 | BAKE tint rgb/a (255 255 255) | mip0 unweighted (120  90  66) alpha-weighted (126  89  63) a>=.5 (125  89  63)
+GRAS BNS_FallenGrassObj01         n= 40 from BNS Landscape.esp          MODL Landscape\Grass\BNS_FallenLeavesObj01.nif
+   nif  <- ba2 BNS Landscape - Main.ba2 | tex0 textures\bns\landscape\grass\fallenleaves01_d.dds | bgsm Materials\BNS\Landscape\Grass\FallenLeavesObj01.BGSM -> diffuse BNS/Landscape/Grass/FallenLeaves01_d.DDS (bgsm from ba2 BNS Landscape - Main.ba2)
+   tex0 <- ba2 BNS Landscape - Textures.ba2   fmt 77 2048x1024 mips 12 (smallest 1x1) meanA 0.16 cov 0.17
+        smallest-mip rgb (123  94  73) a 0.16 | BAKE tint rgb/a (255 255 255) | mip0 unweighted (120  90  66) alpha-weighted (126  89  63) a>=.5 (125  89  63)
+   bgsm <- ba2 BNS Landscape - Textures.ba2   fmt 77 2048x1024 mips 12 (smallest 1x1) meanA 0.16 cov 0.17
+        smallest-mip rgb (123  94  73) a 0.16 | BAKE tint rgb/a (255 255 255) | mip0 unweighted (120  90  66) alpha-weighted (126  89  63) a>=.5 (125  89  63)
+GRAS BNS_FallenGrassObj03         n= 40 from BNS Landscape.esp          MODL Landscape\Grass\BNS_FallenLeavesObj03.nif
+   nif  <- ba2 BNS Landscape - Main.ba2 | tex0 textures\bns\landscape\grass\fallenleaves01_d.dds | bgsm Materials\BNS\Landscape\Grass\FallenLeavesObj01.BGSM -> diffuse BNS/Landscape/Grass/FallenLeaves01_d.DDS (bgsm from ba2 BNS Landscape - Main.ba2)
+   tex0 <- ba2 BNS Landscape - Textures.ba2   fmt 77 2048x1024 mips 12 (smallest 1x1) meanA 0.16 cov 0.17
+        smallest-mip rgb (123  94  73) a 0.16 | BAKE tint rgb/a (255 255 255) | mip0 unweighted (120  90  66) alpha-weighted (126  89  63) a>=.5 (125  89  63)
+   bgsm <- ba2 BNS Landscape - Textures.ba2   fmt 77 2048x1024 mips 12 (smallest 1x1) meanA 0.16 cov 0.17
+        smallest-mip rgb (123  94  73) a 0.16 | BAKE tint rgb/a (255 255 255) | mip0 unweighted (120  90  66) alpha-weighted (126  89  63) a>=.5 (125  89  63)
+GRAS TG_BaseGreenGrass            n= 26 from TrueGrass.esp              MODL Landscape\Grass\TG_GreenGrassSimple01.nif
+   nif  <- ba2 TrueGrass - Main.ba2 | tex0 textures\landscape\grass\DriedGrassObj01_D.dds | bgsm Materials\Landscape\Grass\TG_GreenGrassSimple01.BGSM -> diffuse landscape/grass/TG_GreenGrassSimple_D.dds (bgsm from ba2 TrueGrass - Main.ba2)
+   tex0 <- ba2 TrueGrass - Textures.ba2       fmt 77 1024x1024 mips 11 (smallest 1x1) meanA 0.17 cov 0.18
+        smallest-mip rgb (180 183 164) a 0.17 | BAKE tint rgb/a (255 255 255) | mip0 unweighted (184 186 169) alpha-weighted ( 65  69  40) a>=.5 ( 65  69  41)
+   bgsm <- ba2 TrueGrass - Textures.ba2       fmt 77 1024x1024 mips 11 (smallest 1x1) meanA 0.16 cov 0.16
+        smallest-mip rgb (145 146 120) a 0.16 | BAKE tint rgb/a (255 255 255) | mip0 unweighted (154 156 132) alpha-weighted ( 79  83  24) a>=.5 ( 79  83  24)
+GRAS TG_NearWaterPlant            n= 25 from TrueGrass.esp              MODL Landscape\Grass\TG_NearWaterPlant.nif
+   nif  <- ba2 TrueGrass - Main.ba2 | tex0 textures\landscape\grass\NearWaterPlant_D.dds | bgsm Materials\Landscape\Grass\TG_NearWaterPlant.BGSM -> diffuse landscape/grass/NearWaterPlant_D.dds (bgsm from ba2 TrueGrass - Main.ba2)
+   tex0 <- ba2 TrueGrass - Textures.ba2       fmt 77 2048x2048 mips 12 (smallest 1x1) meanA 0.05 cov 0.05
+        smallest-mip rgb (207 211 205) a 0.05 | BAKE tint rgb/a (255 255 255) | mip0 unweighted (214 217 211) alpha-weighted ( 75  84  54) a>=.5 ( 75  84  54)
+   bgsm <- ba2 TrueGrass - Textures.ba2       fmt 77 2048x2048 mips 12 (smallest 1x1) meanA 0.05 cov 0.05
+        smallest-mip rgb (207 211 205) a 0.05 | BAKE tint rgb/a (255 255 255) | mip0 unweighted (214 217 211) alpha-weighted ( 75  84  54) a>=.5 ( 75  84  54)
+GRAS TG_MutatedBeachGrass         n= 22 from TrueGrass.esp              MODL Landscape\Grass\TG_MutatedBeachGrass.nif
+   nif  <- ba2 TrueGrass - Main.ba2 | tex0 textures\landscape\grass\TG_MutatedBeachGrass.dds | bgsm Materials\Landscape\Grass\TG_MutatedbeachGrass.BGSM -> diffuse landscape/grass/TG_MutatedBeachGrass.dds (bgsm from ba2 TrueGrass - Main.ba2)
+   tex0 <- ba2 TrueGrass - Textures.ba2       fmt 77 2048x2048 mips 12 (smallest 1x1) meanA 0.02 cov 0.02
+        smallest-mip rgb (227 226 222) a 0.02 | BAKE tint rgb/a None | mip0 unweighted (227 225 219) alpha-weighted (125 116  97) a>=.5 (124 115  97)
+   bgsm <- ba2 TrueGrass - Textures.ba2       fmt 77 2048x2048 mips 12 (smallest 1x1) meanA 0.02 cov 0.02
+        smallest-mip rgb (227 226 222) a 0.02 | BAKE tint rgb/a None | mip0 unweighted (227 225 219) alpha-weighted (125 116  97) a>=.5 (124 115  97)
+GRAS RiverRockWetGrassObj02       n= 18 from TrueGrass.esp              MODL Landscape\Grass\RiverRockWetGrassObj02.nif
+   nif  <- ba2 Fallout4 - Meshes.ba2 | tex0  | bgsm C:\Projects\Fallout4\Build\PC\Data\materials\Landscape\Rocks\RockRiverStones_Wet.BGSM -> diffuse Landscape/Rocks/RockRiverStones_Wet_d.dds (bgsm from ba2 Fallout4 - Materials.ba2)
+   tex0: None
+   bgsm <- ba2 DLCUltraHighResolution - Textures07.ba2 fmt 71 2048x2048 mips 12 (smallest 1x1) meanA 1.00 cov 1.00
+        smallest-mip rgb ( 65  60  57) a 1.00 | BAKE tint rgb/a ( 65  60  57) | mip0 unweighted ( 64  60  55) alpha-weighted ( 64  60  55) a>=.5 ( 64  60  55)
+GRAS RiverRockWetGrassObj01       n= 18 from TrueGrass.esp              MODL Landscape\Grass\RiverRockWetGrassObj01.nif
+   nif  <- ba2 Fallout4 - Meshes.ba2 | tex0  | bgsm C:\Projects\Fallout4\Build\PC\Data\materials\Landscape\Rocks\RockRiverStones_Wet.BGSM -> diffuse Landscape/Rocks/RockRiverStones_Wet_d.dds (bgsm from ba2 Fallout4 - Materials.ba2)
+   tex0: None
+   bgsm <- ba2 DLCUltraHighResolution - Textures07.ba2 fmt 71 2048x2048 mips 12 (smallest 1x1) meanA 1.00 cov 1.00
+        smallest-mip rgb ( 65  60  57) a 1.00 | BAKE tint rgb/a ( 65  60  57) | mip0 unweighted ( 64  60  55) alpha-weighted ( 64  60  55) a>=.5 ( 64  60  55)
+GRAS BNS_ForestWildGrassWeedsObj01 n= 18 from BNS Landscape.esp          MODL Landscape\Grass\BNS_WildGrassWeeds01.nif
+   nif  <- ba2 BNS Landscape - Main.ba2 | tex0 textures\bns\landscape\grass\wildgrassatlas02_d.dds | bgsm Materials\BNS\Landscape\Grass\WildGrass01Weeds.BGSM -> diffuse BNS/Landscape/Grass/WildGrassAtlas02_d.DDS (bgsm from ba2 BNS Landscape - Main.ba2)
+   tex0 <- ba2 BNS Landscape - Textures.ba2   fmt 77 2048x1024 mips 12 (smallest 1x1) meanA 0.12 cov 0.12
+        smallest-mip rgb (172 159 136) a 0.12 | BAKE tint rgb/a (255 255 255) | mip0 unweighted (164 148 117) alpha-weighted (132 117  82) a>=.5 (132 117  82)
+   bgsm <- ba2 BNS Landscape - Textures.ba2   fmt 77 2048x1024 mips 12 (smallest 1x1) meanA 0.12 cov 0.12
+        smallest-mip rgb (172 159 136) a 0.12 | BAKE tint rgb/a (255 255 255) | mip0 unweighted (164 148 117) alpha-weighted (132 117  82) a>=.5 (132 117  82)
+GRAS BNS_ForestWildGrassWeedsObj02 n= 18 from BNS Landscape.esp          MODL Landscape\Grass\BNS_WildGrassWeeds02.nif
+   nif  <- ba2 BNS Landscape - Main.ba2 | tex0 textures\bns\landscape\grass\wildgrassatlas02_d.dds | bgsm Materials\BNS\Landscape\Grass\WildGrass01Weeds.BGSM -> diffuse BNS/Landscape/Grass/WildGrassAtlas02_d.DDS (bgsm from ba2 BNS Landscape - Main.ba2)
+   tex0 <- ba2 BNS Landscape - Textures.ba2   fmt 77 2048x1024 mips 12 (smallest 1x1) meanA 0.12 cov 0.12
+        smallest-mip rgb (172 159 136) a 0.12 | BAKE tint rgb/a (255 255 255) | mip0 unweighted (164 148 117) alpha-weighted (132 117  82) a>=.5 (132 117  82)
+   bgsm <- ba2 BNS Landscape - Textures.ba2   fmt 77 2048x1024 mips 12 (smallest 1x1) meanA 0.12 cov 0.12
+        smallest-mip rgb (172 159 136) a 0.12 | BAKE tint rgb/a (255 255 255) | mip0 unweighted (164 148 117) alpha-weighted (132 117  82) a>=.5 (132 117  82)
+GRAS DriedGrassObj01              n= 17 from TrueGrass.esp              MODL Landscape\Grass\DriedGrassObj01.nif
+   nif  <- ba2 Fallout4 - Meshes.ba2 | tex0 textures\landscape\grass\DriedGrassObj01_D.dds | bgsm Materials\Landscape\Grass\DriedGrassObj01.BGSM -> diffuse landscape/grass/driedgrassobj01_d.dds (bgsm from ba2 TrueGrass - Main.ba2)
+   tex0 <- ba2 TrueGrass - Textures.ba2       fmt 77 1024x1024 mips 11 (smallest 1x1) meanA 0.17 cov 0.18
+        smallest-mip rgb (180 183 164) a 0.17 | BAKE tint rgb/a (255 255 255) | mip0 unweighted (184 186 169) alpha-weighted ( 65  69  40) a>=.5 ( 65  69  41)
+   bgsm <- ba2 TrueGrass - Textures.ba2       fmt 77 1024x1024 mips 11 (smallest 1x1) meanA 0.17 cov 0.18
+        smallest-mip rgb (180 183 164) a 0.17 | BAKE tint rgb/a (255 255 255) | mip0 unweighted (184 186 169) alpha-weighted ( 65  69  40) a>=.5 ( 65  69  41)
+GRAS BNS_DirtGravelRocksObj01     n=  9 from BNS Landscape.esp          MODL Landscape\Grass\BNS_DirtGravelRocksObj01.nif
+   nif  <- ba2 BNS Landscape - Main.ba2 | tex0 textures\Landscape\Rocks\CommonwealthRockSlab01_d.dds | bgsm materials\Landscape\rockslab01.BGSM -> diffuse BNS/Landscape/Rocks/BNSRockSlab01_D.DDS (bgsm from ba2 BNS Landscape - Main.ba2)
+   tex0 <- ba2 DLCUltraHighResolution - Textures07.ba2 fmt 71 2048x2048 mips 12 (smallest 1x1) meanA 1.00 cov 1.00
+        smallest-mip rgb (106 105 106) a 1.00 | BAKE tint rgb/a (106 105 106) | mip0 unweighted (104 104 102) alpha-weighted (104 104 102) a>=.5 (104 104 102)
+   bgsm <- ba2 BNS Landscape - Textures.ba2   fmt 71 2048x2048 mips 12 (smallest 1x1) meanA 1.00 cov 1.00
+        smallest-mip rgb ( 98  97  87) a 1.00 | BAKE tint rgb/a ( 98  97  87) | mip0 unweighted ( 99  95  86) alpha-weighted ( 99  95  86) a>=.5 ( 99  95  86)
+GRAS BNS_DirtGravelRocksObj02     n=  9 from BNS Landscape.esp          MODL Landscape\Grass\BNS_DirtGravelRocksObj02.nif
+   nif  <- ba2 BNS Landscape - Main.ba2 | tex0 textures\landscape\rocks\commonwealthrockslab02_d.dds | bgsm materials\Landscape\rockslab02.BGSM -> diffuse BNS/Landscape/Rocks/BNSRockSlab02_D.DDS (bgsm from ba2 BNS Landscape - Main.ba2)
+   tex0 <- ba2 DLCUltraHighResolution - Textures07.ba2 fmt 71 2048x2048 mips 12 (smallest 1x1) meanA 1.00 cov 1.00
+        smallest-mip rgb (106 105 106) a 1.00 | BAKE tint rgb/a (106 105 106) | mip0 unweighted (104 104 104) alpha-weighted (104 104 104) a>=.5 (104 104 104)
+   bgsm <- ba2 BNS Landscape - Textures.ba2   fmt 71 2048x2048 mips 12 (smallest 1x1) meanA 1.00 cov 1.00
+        smallest-mip rgb (100  98  90) a 1.00 | BAKE tint rgb/a (100  98  90) | mip0 unweighted ( 99  97  89) alpha-weighted ( 99  97  89) a>=.5 ( 99  97  89)
+GRAS BNS_ForestWildGrassObj01Sparse n=  6 from BNS Landscape.esp          MODL Landscape\Grass\BNS_WildGrass01.nif
+   nif  <- ba2 BNS Landscape - Main.ba2 | tex0 textures\bns\landscape\grass\wildgrassatlas01_d.dds | bgsm Materials\BNS\Landscape\Grass\WildGrass01.BGSM -> diffuse BNS/Landscape/Grass/WildGrassAtlas01_d.DDS (bgsm from ba2 BNS Landscape - Main.ba2)
+   tex0 <- ba2 BNS Landscape - Textures.ba2   fmt 77 2048x1024 mips 12 (smallest 1x1) meanA 0.07 cov 0.07
+        smallest-mip rgb (177 172 148) a 0.07 | BAKE tint rgb/a (255 255 255) | mip0 unweighted (171 162 123) alpha-weighted (142 134  86) a>=.5 (142 134  86)
+   bgsm <- ba2 BNS Landscape - Textures.ba2   fmt 77 2048x1024 mips 12 (smallest 1x1) meanA 0.07 cov 0.07
+        smallest-mip rgb (177 172 148) a 0.07 | BAKE tint rgb/a (255 255 255) | mip0 unweighted (171 162 123) alpha-weighted (142 134  86) a>=.5 (142 134  86)
+GRAS RiverRockGrassObj02          n=  5 from TrueGrass.esp              MODL Landscape\Grass\RiverRockGrassObj02.nif
+   nif  <- ba2 Fallout4 - Meshes.ba2 | tex0 textures\Landscape\Rocks\RockRiverStones_d.dds | bgsm materials\Landscape\Rocks\RockRiverStones.BGSM -> diffuse Landscape/Rocks/RockRiverStones_d.dds (bgsm from ba2 Fallout4 - Materials.ba2)
+   tex0 <- ba2 DLCUltraHighResolution - Textures07.ba2 fmt 71 2048x2048 mips 12 (smallest 1x1) meanA 1.00 cov 1.00
+        smallest-mip rgb ( 90  89  82) a 1.00 | BAKE tint rgb/a ( 90  89  82) | mip0 unweighted ( 92  88  83) alpha-weighted ( 92  88  83) a>=.5 ( 92  88  83)
+   bgsm <- ba2 DLCUltraHighResolution - Textures07.ba2 fmt 71 2048x2048 mips 12 (smallest 1x1) meanA 1.00 cov 1.00
+        smallest-mip rgb ( 90  89  82) a 1.00 | BAKE tint rgb/a ( 90  89  82) | mip0 unweighted ( 92  88  83) alpha-weighted ( 92  88  83) a>=.5 ( 92  88  83)
+GRAS RiverRockGrassObj01          n=  5 from TrueGrass.esp              MODL Landscape\Grass\RiverRockGrassObj01.nif
+   nif  <- ba2 Fallout4 - Meshes.ba2 | tex0 textures\Landscape\Rocks\RockRiverStones_d.dds | bgsm materials\Landscape\Rocks\RockRiverStones.BGSM -> diffuse Landscape/Rocks/RockRiverStones_d.dds (bgsm from ba2 Fallout4 - Materials.ba2)
+   tex0 <- ba2 DLCUltraHighResolution - Textures07.ba2 fmt 71 2048x2048 mips 12 (smallest 1x1) meanA 1.00 cov 1.00
+        smallest-mip rgb ( 90  89  82) a 1.00 | BAKE tint rgb/a ( 90  89  82) | mip0 unweighted ( 92  88  83) alpha-weighted ( 92  88  83) a>=.5 ( 92  88  83)
+   bgsm <- ba2 DLCUltraHighResolution - Textures07.ba2 fmt 71 2048x2048 mips 12 (smallest 1x1) meanA 1.00 cov 1.00
+        smallest-mip rgb ( 90  89  82) a 1.00 | BAKE tint rgb/a ( 90  89  82) | mip0 unweighted ( 92  88  83) alpha-weighted ( 92  88  83) a>=.5 ( 92  88  83)
+GRAS TG_MutatedGreenGrass01_SHD   n=  4 from TrueGrass.esp              MODL Landscape\Grass\TG_MutatedGrass01.nif
+   nif  <- ba2 TrueGrass - Main.ba2 | tex0 textures\Landscape\Grass\TG_MutatedGrass_d.dds | bgsm Materials\Landscape\Grass\TG_MutatedGrass01.BGSM -> diffuse landscape/grass/TG_MutatedGrass_d.dds (bgsm from ba2 TrueGrass - Main.ba2)
+   tex0 <- ba2 TrueGrass - Textures.ba2       fmt 77 2048x2048 mips 12 (smallest 1x1) meanA 0.12 cov 0.12
+        smallest-mip rgb ( 84  91  82) a 0.13 | BAKE tint rgb/a (255 255 255) | mip0 unweighted ( 99 106  97) alpha-weighted ( 44  54  32) a>=.5 ( 44  54  33)
+   bgsm <- ba2 TrueGrass - Textures.ba2       fmt 77 2048x2048 mips 12 (smallest 1x1) meanA 0.12 cov 0.12
+        smallest-mip rgb ( 84  91  82) a 0.13 | BAKE tint rgb/a (255 255 255) | mip0 unweighted ( 99 106  97) alpha-weighted ( 44  54  32) a>=.5 ( 44  54  33)
+GRAS TG_MutatedGrassPlant01_SD    n=  4 from TrueGrass.esp              MODL Landscape\Grass\TG_GrassPlant01.nif
+   nif  <- ba2 TrueGrass - Main.ba2 | tex0 textures\landscape\grass\meadowgrass01_d.dds | bgsm Materials\Landscape\Grass\TG_GrassPlant01.BGSM -> diffuse landscape/grass/TG_GrassPlant01_d.dds (bgsm from ba2 TrueGrass - Main.ba2)
+   tex0 <- ba2 TrueGrass - Textures.ba2       fmt 77 1024x1024 mips 11 (smallest 1x1) meanA 0.28 cov 0.28
+        smallest-mip rgb (156 149 125) a 0.32 | BAKE tint rgb/a (255 255 255) | mip0 unweighted (165 159 137) alpha-weighted (117 113  76) a>=.5 (116 113  76)
+   bgsm <- ba2 TrueGrass - Textures.ba2       fmt 77 2048x2048 mips 12 (smallest 1x1) meanA 0.13 cov 0.13
+        smallest-mip rgb (210 186 180) a 0.17 | BAKE tint rgb/a (255 255 255) | mip0 unweighted (218 201 197) alpha-weighted (106  93  82) a>=.5 (106  93  82)
+GRAS BNS_ForestGrassObj01         n=  4 from BNS Landscape.esp          MODL Landscape\Grass\BNS_ForestGrass01.nif
+   nif  <- ba2 BNS Landscape - Main.ba2 | tex0 textures\bns\landscape\grass\forestgrass01_d.dds | bgsm Materials\BNS\Landscape\Grass\ForestGrass01.BGSM -> diffuse BNS/Landscape/Grass/ForestGrass01_d.DDS (bgsm from ba2 BNS Landscape - Main.ba2)
+   tex0 <- ba2 BNS Landscape - Textures.ba2   fmt 77 1024x1024 mips 11 (smallest 1x1) meanA 0.09 cov 0.09
+        smallest-mip rgb (172 166 150) a 0.09 | BAKE tint rgb/a (255 255 255) | mip0 unweighted (159 150 123) alpha-weighted (109 109  81) a>=.5 (109 109  81)
+   bgsm <- ba2 BNS Landscape - Textures.ba2   fmt 77 1024x1024 mips 11 (smallest 1x1) meanA 0.09 cov 0.09
+        smallest-mip rgb (172 166 150) a 0.09 | BAKE tint rgb/a (255 255 255) | mip0 unweighted (159 150 123) alpha-weighted (109 109  81) a>=.5 (109 109  81)
+GRAS BNS_ForestGrassObj02         n=  4 from BNS Landscape.esp          MODL Landscape\Grass\BNS_ForestGrass02.nif
+   nif  <- ba2 BNS Landscape - Main.ba2 | tex0 textures\bns\landscape\grass\forestgrass02_d.dds | bgsm Materials\BNS\Landscape\Grass\ForestGrass02.BGSM -> diffuse BNS/Landscape/Grass/ForestGrass02_d.DDS (bgsm from ba2 BNS Landscape - Main.ba2)
+   tex0 <- ba2 BNS Landscape - Textures.ba2   fmt 77 1024x1024 mips 11 (smallest 1x1) meanA 0.15 cov 0.15
+        smallest-mip rgb (180 170 158) a 0.15 | BAKE tint rgb/a (255 255 255) | mip0 unweighted (166 150 130) alpha-weighted (121 103  76) a>=.5 (121 103  76)
+   bgsm <- ba2 BNS Landscape - Textures.ba2   fmt 77 1024x1024 mips 11 (smallest 1x1) meanA 0.15 cov 0.15
+        smallest-mip rgb (180 170 158) a 0.15 | BAKE tint rgb/a (255 255 255) | mip0 unweighted (166 150 130) alpha-weighted (121 103  76) a>=.5 (121 103  76)
+GRAS ForestGrassObj03             n=  3 from TrueGrass.esp              MODL Landscape\Grass\ForestGrassObj03.nif
+   nif  <- ba2 Fallout4 - Meshes.ba2 | tex0 textures\landscape\grass\forestgrass01_d.dds | bgsm Materials\Landscape\Grass\ForestGrass01.BGSM -> diffuse landscape/grass/forestgrass01_d.dds (bgsm from ba2 Fallout4 - Materials.ba2)
+   tex0 <- ba2 DLCUltraHighResolution - Textures06.ba2 fmt 77 2048x1024 mips 12 (smallest 1x1) meanA 0.16 cov 0.17
+        smallest-mip rgb (115  97  82) a 0.16 | BAKE tint rgb/a (255 255 255) | mip0 unweighted (115  98  82) alpha-weighted (119 101  81) a>=.5 (118 101  81)
+   bgsm <- ba2 DLCUltraHighResolution - Textures06.ba2 fmt 77 2048x1024 mips 12 (smallest 1x1) meanA 0.16 cov 0.17
+        smallest-mip rgb (115  97  82) a 0.16 | BAKE tint rgb/a (255 255 255) | mip0 unweighted (115  98  82) alpha-weighted (119 101  81) a>=.5 (118 101  81)
+GRAS TG_MutatedPlant02            n=  3 from TrueGrass.esp              MODL Landscape\Grass\TG_MutatedPlant02.nif
+   nif  <- ba2 TrueGrass - Main.ba2 | tex0 textures\Landscape\Grass\TG_MutatedPlant02_D.dds | bgsm Materials\Landscape\Grass\TG_MutatedPlant02.BGSM -> diffuse Landscape/Grass/TG_MutatedPlant02_D.dds (bgsm from ba2 TrueGrass - Main.ba2)
+   tex0 <- ba2 TrueGrass - Textures.ba2       fmt 77 2048x2048 mips 12 (smallest 1x1) meanA 0.03 cov 0.03
+        smallest-mip rgb (216 218 210) a 0.03 | BAKE tint rgb/a None | mip0 unweighted (219 221 214) alpha-weighted ( 70  57  43) a>=.5 ( 69  56  43)
+   bgsm <- ba2 TrueGrass - Textures.ba2       fmt 77 2048x2048 mips 12 (smallest 1x1) meanA 0.03 cov 0.03
+        smallest-mip rgb (216 218 210) a 0.03 | BAKE tint rgb/a None | mip0 unweighted (219 221 214) alpha-weighted ( 70  57  43) a>=.5 ( 69  56  43)
+GRAS GrassphaltObj01              n=  2 from TrueGrass.esp              MODL Landscape\Grass\Grassphalt01.nif
+   nif  <- ba2 Fallout4 - Meshes.ba2 | tex0 textures\landscape\grass\grassphalt01_d.dds | bgsm Materials\Landscape\Grass\Grassphalt01.BGSM -> diffuse landscape/grass/grassphalt01_d.dds (bgsm from ba2 Fallout4 - Materials.ba2)
+   tex0 <- ba2 DLCUltraHighResolution - Textures06.ba2 fmt 71 2048x2048 mips 12 (smallest 1x1) meanA 1.00 cov 1.00
+        smallest-mip rgb ( 98  97  90) a 1.00 | BAKE tint rgb/a ( 98  97  90) | mip0 unweighted ( 97  97  88) alpha-weighted ( 97  97  88) a>=.5 ( 97  97  88)
+   bgsm <- ba2 DLCUltraHighResolution - Textures06.ba2 fmt 71 2048x2048 mips 12 (smallest 1x1) meanA 1.00 cov 1.00
+        smallest-mip rgb ( 98  97  90) a 1.00 | BAKE tint rgb/a ( 98  97  90) | mip0 unweighted ( 97  97  88) alpha-weighted ( 97  97  88) a>=.5 ( 97  97  88)
+GRAS GrassphaltObj02              n=  2 from TrueGrass.esp              MODL Landscape\Grass\Grassphalt02.nif
+   nif  <- ba2 Fallout4 - Meshes.ba2 | tex0 textures\landscape\grass\grassphalt01_d.dds | bgsm Materials\Landscape\Grass\Grassphalt01.BGSM -> diffuse landscape/grass/grassphalt01_d.dds (bgsm from ba2 Fallout4 - Materials.ba2)
+   tex0 <- ba2 DLCUltraHighResolution - Textures06.ba2 fmt 71 2048x2048 mips 12 (smallest 1x1) meanA 1.00 cov 1.00
+        smallest-mip rgb ( 98  97  90) a 1.00 | BAKE tint rgb/a ( 98  97  90) | mip0 unweighted ( 97  97  88) alpha-weighted ( 97  97  88) a>=.5 ( 97  97  88)
+   bgsm <- ba2 DLCUltraHighResolution - Textures06.ba2 fmt 71 2048x2048 mips 12 (smallest 1x1) meanA 1.00 cov 1.00
+        smallest-mip rgb ( 98  97  90) a 1.00 | BAKE tint rgb/a ( 98  97  90) | mip0 unweighted ( 97  97  88) alpha-weighted ( 97  97  88) a>=.5 ( 97  97  88)
+GRAS GrassphaltObj03              n=  2 from TrueGrass.esp              MODL Landscape\Grass\Grassphalt03.nif
+   nif  <- ba2 Fallout4 - Meshes.ba2 | tex0 textures\landscape\grass\Grassphalt01_d.dds | bgsm Materials\Landscape\Grass\Grassphalt01.BGSM -> diffuse landscape/grass/grassphalt01_d.dds (bgsm from ba2 Fallout4 - Materials.ba2)
+   tex0 <- ba2 DLCUltraHighResolution - Textures06.ba2 fmt 71 2048x2048 mips 12 (smallest 1x1) meanA 1.00 cov 1.00
+        smallest-mip rgb ( 98  97  90) a 1.00 | BAKE tint rgb/a ( 98  97  90) | mip0 unweighted ( 97  97  88) alpha-weighted ( 97  97  88) a>=.5 ( 97  97  88)
+   bgsm <- ba2 DLCUltraHighResolution - Textures06.ba2 fmt 71 2048x2048 mips 12 (smallest 1x1) meanA 1.00 cov 1.00
+        smallest-mip rgb ( 98  97  90) a 1.00 | BAKE tint rgb/a ( 98  97  90) | mip0 unweighted ( 97  97  88) alpha-weighted ( 97  97  88) a>=.5 ( 97  97  88)
