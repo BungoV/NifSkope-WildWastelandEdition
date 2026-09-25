@@ -189,3 +189,22 @@
   lane TINT1's install (its progress.md and install_record.tsv say so); none of this lane's scripts write there.
 * Commonwealth .lodi identity (widescale_identity.sh cw, exe 62412e83) started; the installed .lodi it reads is now
   TINT1's (eaf1fe5e), not BAKE1's (94c30130, in TINT1's replaced/).
+
+## 22:00 -- waiting on the Commonwealth .lodi identity bake
+
+* wsgate/cw_new chunks pass running ([1772] Commonwealth.4.20.24.BTO); DONE.md and DELIVERABLE_TEXT.md drafted, the identity line open.
+* Skills: fo4-terrain-lod-input-cache (new, also AISkills d542644); ww-whole-map-lod-bake and ww-whole-map-picture updated.
+
+## 22:20 -- Commonwealth .lodi identity bake still running
+
+*  refused_raised=0 raised_bases=0 blend_texels=0 refused_sidewalk=0 sidewalk_bases=0 ground_shapes=0 ground_texels=0 refu
+
+## 22:30 -- Commonwealth identity bake: chunks and arrays done, in the serial instances stage (~29 min on BAKE1)
+
+## 22:50 -- Commonwealth identity bake: instances stage still running
+
+## 23:01 -- Commonwealth .lodi identity: IDENTICAL; lane report written
+
+* wsid_cw.out: rebake rc 0, 4442 s; installed .lodi sha1 eaf1fe5e before and after (TINT1s install); new == installed,
+  34,371,499 B; 0 of 184,431 placements above 7.99988, .lodi version 7.
+* DONE.md and DELIVERABLE_TEXT.md written.

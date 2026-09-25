@@ -1,0 +1,5 @@
+installed CW .lodi before: eaf1fe5e85290d0982cb2cde0bf503a81041f2ca
+bake rc=0 4442 s
+installed CW .lodi after:  eaf1fe5e85290d0982cb2cde0bf503a81041f2ca
+IDENTICAL Commonwealth .lodi (new exe vs installed): eaf1fe5e8529 34371499 B
+  native-wide-scale: 0 of 184431 placements above 7.99988 (flag bit 7); max scale 4.9700; .lodi version 7
