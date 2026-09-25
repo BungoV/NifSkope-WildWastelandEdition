@@ -89,6 +89,9 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/scenelighting.h"
 #include "ui/scenewindow.h"
 #include "io/lodmfile.h"
+#include "io/pbrmfile.h"
+#include "io/pbrmresolve.h"
+#include "libfo76utils/src/ddstxt16.hpp"
 #include "gl/glshape.h"
 #include "gl/renderer.h"
 #include "model/kfmmodel.h"
@@ -200,6 +203,10 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QLineEdit>
 
 #include <memory>
+#include <QTemporaryDir>
+#include <functional>
+#include <QtEndian>
+#include <vector>
 
 namespace {
 //! QMenu normally closes after every QAction trigger. Contribution checkboxes
@@ -1563,6 +1570,465 @@ void NifSkope::wwPlaceHeadlessWindow( QWidget * w )
 		w->setWindowOpacity( 0.0 );
 	wwHeadlessPlacementArm() = arm;
 }
+
+/* IMPOSTORPBRM1 (lane CARDFIX1 step 7, 2026-09-25): a card baked from a model whose materials are
+ * .pbrm files carries the .pbrm's quantities (docs/LODGEN_IMPOSTOR_SPEC.md "Ours, for LOD").
+ *
+ * The bake photographs data channels through the LEGACY program (channel views never take the PBRM
+ * program, src/gl/renderer.cpp:271-278), so the .pbrm law is evaluated HERE, on the CPU, in texture
+ * space, and handed to that program as ordinary textures through the retarget hook:
+ *   slot 0  sRGB( decode(map) x colour x tintMix ), A = the map's A (overrideOpacity off) or the constant
+ *   slot 7  R roughness, G metallic, B AO -- a map channel while its override is off, else the constant
+ *   slot 2  sRGB( colour x mask ) when the emissive is on, else empty (black); the multiple = luminance/100
+ *   spec    RGB = sqrt(F0'), F0' = clamp( w x decode(tint) x min(((ior-1)/(ior+1))^2, 1) )
+ *   weight  RGB = w, the specular weight
+ * The law is NifSkope's viewport law (renderer.cpp:1056-1095, pbrm_default.frag), which is the PBRM
+ * editor's; the gate's Python evaluation (tests/spells/impostor_pbrm.py) is written from the contract. */
+namespace {
+
+int wwPbrmBakeSerial = 0;
+
+struct WwPbrmCardShape
+{
+	int block = -1;
+	BSShaderLightingProperty * bsp = nullptr;
+	QString served, route;
+	PbrmMaterial m;
+	int tree = 0;
+	QString colour, normal, rmaos, emissive, spec, weight;    // the retarget names (game paths)
+	float emissiveScale = 0.0f;
+	bool specDefault = true;
+	QString refusal;
+};
+
+//! One shape's slot 7 for the specular passes: the spec source, the weight source, and what to restore.
+struct WwPbrmSpecSlot
+{
+	BSShaderLightingProperty * bsp;
+	QString spec, weight, restore;
+};
+
+float wwSrgbToLinear( float c )
+{
+	c = qBound( 0.0f, c, 1.0f );
+	return c <= 0.04045f ? c / 12.92f : std::pow( ( c + 0.055f ) / 1.055f, 2.4f );
+}
+
+float wwLinearToSrgb( float c )
+{
+	c = qBound( 0.0f, c, 1.0f );
+	return c <= 0.0031308f ? c * 12.92f : 1.055f * std::pow( c, 1.0f / 2.4f ) - 0.055f;
+}
+
+int wwByte( float c )
+{
+	return qBound( 0, int( c * 255.0f + 0.5f ), 255 );
+}
+
+//! A texture by its .pbrm lookup path (normalised, no `textures\`): the loose root first, then the stack.
+std::unique_ptr<DDSTexture16> wwPbrmLoadTexture( const NifModel * nif, const QString & looseRoot,
+	const QString & lookup, QString & why )
+{
+	QString rel = lookup;
+	rel.replace( QChar( '\\' ), QChar( '/' ) );
+	if ( !rel.startsWith( QStringLiteral( "textures/" ), Qt::CaseInsensitive ) )
+		rel.prepend( QStringLiteral( "textures/" ) );
+	QByteArray b;
+	if ( !looseRoot.isEmpty() ) {
+		QFile f( looseRoot + "/" + rel );
+		if ( f.open( QIODevice::ReadOnly ) )
+			b = f.readAll();
+	}
+	if ( b.isEmpty() && nif && !nif->findResourceFile( rel, "textures", ".dds" ).isEmpty() )
+		nif->getResourceFile( b, rel, "textures", ".dds" );
+	if ( b.isEmpty() ) {
+		why = QStringLiteral( "unreadable %1" ).arg( rel );
+		return nullptr;
+	}
+	try {
+		// raw stored values (noSRGBExpand): the law decodes what it decodes itself
+		return std::make_unique<DDSTexture16>( reinterpret_cast<const unsigned char *>( b.constData() ),
+			size_t( b.size() ), 0, true );
+	} catch ( std::exception & e ) {
+		why = QStringLiteral( "undecodable %1 (%2)" ).arg( rel, QString::fromUtf8( e.what() ) );
+	}
+	return nullptr;
+}
+
+/*! An uncompressed B8G8R8A8 DDS (the legacy header) with a mip chain down to 1 x 1: box-filtered, or,
+ *  with `level`, each level made by it at that level's size (the colour source: the law on the map's own mip). */
+bool wwWriteDdsBgra( const QString & path, const QImage & top,
+	const std::function<QImage( int, int )> & level = std::function<QImage( int, int )>() )
+{
+	QImage lv = top.convertToFormat( QImage::Format_ARGB32 );
+	int levels = 1;
+	for ( int s = qMax( lv.width(), lv.height() ); s > 1; s >>= 1 )
+		levels++;
+	QByteArray out( 128, 0 );
+	auto put = [&out]( int off, quint32 v ) { qToLittleEndian<quint32>( v, out.data() + off ); };
+	put( 0, 0x20534444u );                                  // "DDS "
+	put( 4, 124 );
+	put( 8, 0x1 | 0x2 | 0x4 | 0x1000 | 0x20000 );           // caps, height, width, pixelformat, mipmapcount
+	put( 12, quint32( lv.height() ) );
+	put( 16, quint32( lv.width() ) );
+	put( 20, quint32( lv.width() * 4 ) );
+	put( 28, quint32( levels ) );
+	put( 76, 32 );
+	put( 80, 0x41 );                                        // RGB | ALPHAPIXELS
+	put( 88, 32 );
+	put( 92, 0x00FF0000u );
+	put( 96, 0x0000FF00u );
+	put( 100, 0x000000FFu );
+	put( 104, 0xFF000000u );
+	put( 108, 0x1000 | 0x8 | 0x400000 );                    // texture, complex, mipmap
+	for ( int l = 0; l < levels; l++ ) {
+		for ( int y = 0; y < lv.height(); y++ )
+			out.append( reinterpret_cast<const char *>( lv.constScanLine( y ) ), lv.width() * 4 );
+		if ( l + 1 == levels )
+			break;
+		const int w2 = qMax( 1, lv.width() / 2 ), h2 = qMax( 1, lv.height() / 2 );
+		if ( level ) {
+			lv = level( w2, h2 ).convertToFormat( QImage::Format_ARGB32 );
+			continue;
+		}
+		QImage nx( w2, h2, QImage::Format_ARGB32 );
+		for ( int y = 0; y < h2; y++ ) {
+			QRgb * d = reinterpret_cast<QRgb *>( nx.scanLine( y ) );
+			const int y0 = qMin( 2 * y, lv.height() - 1 ), y1 = qMin( 2 * y + 1, lv.height() - 1 );
+			const QRgb * r0 = reinterpret_cast<const QRgb *>( lv.constScanLine( y0 ) );
+			const QRgb * r1 = reinterpret_cast<const QRgb *>( lv.constScanLine( y1 ) );
+			for ( int x = 0; x < w2; x++ ) {
+				const int x0 = qMin( 2 * x, lv.width() - 1 ), x1 = qMin( 2 * x + 1, lv.width() - 1 );
+				const QRgb q[4] = { r0[x0], r0[x1], r1[x0], r1[x1] };
+				int s[4] = {};
+				for ( const QRgb c : q ) {
+					s[0] += qRed( c ); s[1] += qGreen( c ); s[2] += qBlue( c ); s[3] += qAlpha( c );
+				}
+				d[x] = qRgba( ( s[0] + 2 ) / 4, ( s[1] + 2 ) / 4, ( s[2] + 2 ) / 4, ( s[3] + 2 ) / 4 );
+			}
+		}
+		lv = nx;
+	}
+	QFile f( path );
+	return f.open( QIODevice::WriteOnly ) && f.write( out ) == out.size();
+}
+
+/*! Evaluate one shape's .pbrm law in texture space and write its retarget sources into `texDir`
+ *  (game path `gameDir`), file names `<stem>_<c|rmaos|spec|w|e>.dds`. False, with `why`, when a map
+ *  the law SAMPLES cannot be read: the shape is then refused and the card stays legacy. */
+bool wwPbrmCardSources( const NifModel * nif, const QString & looseRoot, const QString & texDir,
+	const QString & gameDir, const QString & stem, WwPbrmCardShape & s, QString & why )
+{
+	const PbrmMaterial & m = s.m;
+	const quint32 f = m.features;
+	std::unique_ptr<DDSTexture16> base, rm, sp, tint, em;
+	auto need = [&]( const PbrmMaterial::Slot & slot, std::unique_ptr<DDSTexture16> & t ) {
+		t = wwPbrmLoadTexture( nif, looseRoot, slot.lookupPath, why );
+		return bool( t );
+	};
+	const bool rmSampled = ( f & ( PbrmMaterial::RmaosRoughness | PbrmMaterial::RmaosMetallic
+		| PbrmMaterial::RmaosAo | PbrmMaterial::RmaosSpecularWeight ) ) != 0;
+	const bool spSampled = ( f & ( PbrmMaterial::SpecularColorTexture | PbrmMaterial::SpecularIorTexture ) ) != 0;
+	bool tintTex = false;
+	for ( int c = 0; c < 4; c++ )
+		tintTex = tintTex || ( m.tintEnabled && m.tintUseTexture[c] );
+	const bool emOn = m.emissive.enabled && m.emissiveIntensity > 0.0f;
+	if ( ( f & PbrmMaterial::BaseColorTexture ) && !need( m.baseColor, base ) )
+		return false;
+	if ( rmSampled && !need( m.rmaos, rm ) )
+		return false;
+	if ( spSampled && !need( m.specularColor, sp ) )
+		return false;
+	if ( tintTex && !need( m.tintMask, tint ) )
+		return false;
+	if ( emOn && ( f & PbrmMaterial::EmissiveTexture ) && !need( m.emissive, em ) )
+		return false;
+
+	// a grid: the map's own, halved until neither side exceeds 2048; 4 x 4 for a constant
+	struct Grid { int w = 4, h = 4; };
+	auto gridOf = []( std::initializer_list<const DDSTexture16 *> ts ) {
+		Grid g;
+		bool any = false;
+		for ( const DDSTexture16 * t : ts ) {
+			if ( !t )
+				continue;
+			int w = t->getWidth(), h = t->getHeight();
+			while ( w > 2048 || h > 2048 ) {
+				w = qMax( 1, w / 2 ); h = qMax( 1, h / 2 );
+			}
+			if ( !any || w * h > g.w * g.h ) {
+				g.w = w; g.h = h;
+			}
+			any = true;
+		}
+		return g;
+	};
+	auto mipOf = []( const DDSTexture16 * t, int w ) {
+		float mm = 0.0f;
+		for ( int s2 = t->getWidth(); s2 > w; s2 /= 2 )
+			mm += 1.0f;
+		return mm;
+	};
+	auto at = [&]( const std::unique_ptr<DDSTexture16> & t, float u, float v, int w ) {
+		return t ? t->getPixelT( u, v, mipOf( t.get(), w ) ) : FloatVector4( 0.0f, 0.0f, 0.0f, 0.0f );
+	};
+	auto write = [&]( const QImage & img, const QString & suffix, QString & name,
+			const std::function<QImage( int, int )> & level = std::function<QImage( int, int )>() ) {
+		const QString file = stem + "_" + suffix + ".dds";
+		if ( !wwWriteDdsBgra( texDir + "/" + file, img, level ) ) {
+			why = QStringLiteral( "cannot write %1/%2" ).arg( texDir, file );
+			return false;
+		}
+		name = gameDir + "\\" + file;
+		return true;
+	};
+
+	// slot 0: the colour, tinted -- every mip level evaluated on the maps' own mip of that size
+	{
+		const Grid g = gridOf( { base.get(), tint.get() } );
+		auto colourAt = [&]( int gw, int gh ) {
+		QImage img( gw, gh, QImage::Format_ARGB32 );
+		for ( int y = 0; y < gh; y++ ) {
+			QRgb * d = reinterpret_cast<QRgb *>( img.scanLine( y ) );
+			for ( int x = 0; x < gw; x++ ) {
+				const float u = ( float( x ) + 0.5f ) / float( gw ), v = ( float( y ) + 0.5f ) / float( gh );
+				float rgb[3] = { m.baseColorRGB[0], m.baseColorRGB[1], m.baseColorRGB[2] };
+				float a = m.opacity;
+				if ( base ) {
+					const FloatVector4 c = at( base, u, v, gw );
+					for ( int k = 0; k < 3; k++ )
+						rgb[k] *= wwSrgbToLinear( c[k] );
+					if ( f & PbrmMaterial::OpacityTexture )
+						a = c[3];
+				}
+				if ( m.tintEnabled ) {
+					const FloatVector4 tv = at( tint, u, v, gw );
+					float k4[4];
+					for ( int c = 0; c < 4; c++ )
+						k4[c] = ( m.tintUseTexture[c] && tint ) ? tv[c] : m.tintMaskConst[c];
+					float sum = k4[0] + k4[1] + k4[2] + k4[3];
+					if ( m.tintOverlap == 0 && sum > 1.0f ) {
+						for ( float & k : k4 )
+							k /= sum;
+					} else if ( m.tintOverlap == 2 ) {
+						const float r = k4[0], gg = k4[1], bb = k4[2];
+						k4[1] = gg * ( 1.0f - r );
+						k4[2] = bb * ( 1.0f - r ) * ( 1.0f - gg );
+						k4[3] = k4[3] * ( 1.0f - r ) * ( 1.0f - gg ) * ( 1.0f - bb );
+					}
+					sum = k4[0] + k4[1] + k4[2] + k4[3];
+					for ( int k = 0; k < 3; k++ ) {
+						float mix = 1.0f - sum;
+						for ( int c = 0; c < 4; c++ )
+							mix += m.tintColor[c][k] * k4[c];
+						rgb[k] *= qMax( 0.0f, mix );
+					}
+				}
+				d[x] = qRgba( wwByte( wwLinearToSrgb( rgb[0] ) ), wwByte( wwLinearToSrgb( rgb[1] ) ),
+					wwByte( wwLinearToSrgb( rgb[2] ) ), wwByte( a ) );
+			}
+		}
+		return img;
+		};
+		if ( !write( colourAt( g.w, g.h ), QStringLiteral( "c" ), s.colour, colourAt ) )
+			return false;
+	}
+	// slot 7: roughness, metallic, AO
+	{
+		const Grid g = gridOf( { rm.get() } );
+		QImage img( g.w, g.h, QImage::Format_ARGB32 );
+		for ( int y = 0; y < g.h; y++ ) {
+			QRgb * d = reinterpret_cast<QRgb *>( img.scanLine( y ) );
+			for ( int x = 0; x < g.w; x++ ) {
+				const FloatVector4 r = at( rm, ( float( x ) + 0.5f ) / float( g.w ), ( float( y ) + 0.5f ) / float( g.h ), g.w );
+				d[x] = qRgba( wwByte( ( f & PbrmMaterial::RmaosRoughness ) ? r[0] : m.roughness ),
+					wwByte( ( f & PbrmMaterial::RmaosMetallic ) ? r[1] : m.metallic ),
+					wwByte( ( f & PbrmMaterial::RmaosAo ) ? r[2] : m.ao ), 255 );
+			}
+		}
+		if ( !write( img, QStringLiteral( "rmaos" ), s.rmaos ) )
+			return false;
+	}
+	// the specular: sqrt(F0') and the weight. A v4/v5 document: weight 1, white, its own F0.
+	{
+		const bool v6 = m.specularV6;
+		const bool wMap = v6 && ( f & PbrmMaterial::RmaosSpecularWeight ) && rm;
+		const bool f0Map = !v6 && ( f & PbrmMaterial::RmaosF0 ) && rm;
+		const float tintC[3] = { wwSrgbToLinear( m.specularTint[0] ), wwSrgbToLinear( m.specularTint[1] ),
+			wwSrgbToLinear( m.specularTint[2] ) };
+		const float f0c = v6 ? std::min( pbrmIorF0( m.specularIor ), 1.0f ) : pbrmDielectricF0( m );
+		s.specDefault = !spSampled && !wMap && !f0Map && ( !v6 || m.specularWeight >= 1.0f )
+			&& tintC[0] >= 1.0f && tintC[1] >= 1.0f && tintC[2] >= 1.0f && std::fabs( f0c - 0.04f ) < 1.0e-4f;
+		if ( s.specDefault ) {
+			s.spec = QStringLiteral( "#ff333333" );    // sqrt(0.04) = 0.2 -> 51
+			s.weight = QStringLiteral( "#ffffffff" );
+		} else {
+			const Grid g = gridOf( { ( wMap || f0Map ) ? rm.get() : nullptr, sp.get() } );
+			QImage img( g.w, g.h, QImage::Format_ARGB32 ), wimg( g.w, g.h, QImage::Format_ARGB32 );
+			for ( int y = 0; y < g.h; y++ ) {
+				QRgb * d = reinterpret_cast<QRgb *>( img.scanLine( y ) );
+				QRgb * dw = reinterpret_cast<QRgb *>( wimg.scanLine( y ) );
+				for ( int x = 0; x < g.w; x++ ) {
+					const float u = ( float( x ) + 0.5f ) / float( g.w ), v = ( float( y ) + 0.5f ) / float( g.h );
+					const FloatVector4 r = at( rm, u, v, g.w ), sv = at( sp, u, v, g.w );
+					float w = v6 ? ( wMap ? r[3] : m.specularWeight ) : 1.0f;
+					w = qBound( 0.0f, w, 1.0f );
+					float lvl = f0c;
+					if ( v6 && ( f & PbrmMaterial::SpecularIorTexture ) && sp )
+						lvl = std::min( pbrmIorF0( sv[3] * m.specularIorMax ), 1.0f );
+					if ( f0Map )
+						lvl = qBound( 0.0f, r[3], 0.16f );
+					float t3[3] = { tintC[0], tintC[1], tintC[2] };
+					if ( v6 && ( f & PbrmMaterial::SpecularColorTexture ) && sp )
+						for ( int k = 0; k < 3; k++ )
+							t3[k] = wwSrgbToLinear( sv[k] );
+					int o[3];
+					for ( int k = 0; k < 3; k++ )
+						o[k] = wwByte( std::sqrt( qBound( 0.0f, ( v6 ? w : 1.0f ) * t3[k] * lvl, 1.0f ) ) );
+					d[x] = qRgba( o[0], o[1], o[2], 255 );
+					dw[x] = qRgba( wwByte( w ), wwByte( w ), wwByte( w ), 255 );
+				}
+			}
+			if ( !write( img, QStringLiteral( "spec" ), s.spec ) || !write( wimg, QStringLiteral( "w" ), s.weight ) )
+				return false;
+		}
+	}
+	// slot 2: the emissive, or black
+	if ( !emOn ) {
+		s.emissive.clear();
+		s.emissiveScale = 0.0f;
+	} else {
+		const Grid g = gridOf( { em.get() } );
+		QImage img( g.w, g.h, QImage::Format_ARGB32 );
+		for ( int y = 0; y < g.h; y++ ) {
+			QRgb * d = reinterpret_cast<QRgb *>( img.scanLine( y ) );
+			for ( int x = 0; x < g.w; x++ ) {
+				const FloatVector4 e = at( em, ( float( x ) + 0.5f ) / float( g.w ), ( float( y ) + 0.5f ) / float( g.h ), g.w );
+				const bool mapColour = em && !m.overrideEmissiveColor, mapMask = em && !m.overrideEmissiveMask;
+				const float mask = mapMask ? e[3] : m.emissiveMask;
+				int o[3];
+				for ( int k = 0; k < 3; k++ )
+					o[k] = wwByte( wwLinearToSrgb( wwSrgbToLinear( mapColour ? e[k] : m.emissiveRGB[k] ) * mask ) );
+				d[x] = qRgba( o[0], o[1], o[2], 255 );
+			}
+		}
+		if ( !write( img, QStringLiteral( "e" ), s.emissive ) )
+			return false;
+		s.emissiveScale = m.emissiveIntensity;
+	}
+	// slot 1: the .pbrm's normal map as it is, when the stack can serve it (the bake's normal sheet is
+	// the GEOMETRIC normal, channel 8, so this is for the lit passes only)
+	if ( ( f & PbrmMaterial::NormalTexture ) && nif ) {
+		const QString n = QStringLiteral( "textures\\" ) + m.normal.lookupPath;
+		if ( !nif->findResourceFile( n, "textures", ".dds" ).isEmpty() )
+			s.normal = n;
+	}
+	return true;
+}
+
+/*! Resolve one shape's .pbrm through the viewport's one resolver (io/pbrmresolve: the direct name, the
+ *  same-name sibling, the diffuse stem), reading the loose root first and then the stack -- the mesh-LOD
+ *  mask path's order (src/lodgen.cpp ~1849-1869). Fills `s` (no sources yet) and returns true when one served. */
+bool wwPbrmResolveShape( Scene * sc, const QString & looseRoot, int b, const QModelIndex & iShader,
+	const QString & matName, const QString & diffuse, WwPbrmCardShape & s )
+{
+	const NifModel * nif = sc ? sc->nifModel : nullptr;
+	if ( !nif )
+		return false;
+	PbrmResolveInput rin;
+	rin.material = matName;
+	rin.cutAuthoringPath = true;
+	rin.sibling = true;
+	rin.fo76 = false;
+	rin.stemDiffuse = diffuse;
+	auto reader = [&]( const QString & path, QByteArray & out ) -> bool {
+		QString rel = path;
+		rel.replace( QChar( '\\' ), QChar( '/' ) );
+		if ( rel.startsWith( QStringLiteral( "Materials/" ) ) )
+			rel.replace( 0, 1, QChar( 'm' ) );
+		out.clear();
+		if ( !looseRoot.isEmpty() ) {
+			QFile f( looseRoot + "/" + rel );
+			if ( f.open( QIODevice::ReadOnly ) )
+				out = f.readAll();
+			if ( !out.isEmpty() )
+				return true;
+		}
+		if ( !nif->findResourceFile( rel, "materials", ".pbrm" ).isEmpty() )
+			nif->getResourceFile( out, rel, "materials", ".pbrm" );
+		return !out.isEmpty();
+	};
+	const PbrmResolveResult rr = pbrmResolve( rin, reader );
+	if ( rr.route == PbrmRoute::Legacy || !rr.material.ok )
+		return false;
+	Property * p = sc->getProperty( nif, iShader );
+	auto * bsp = p ? p->cast<BSShaderLightingProperty>() : nullptr;
+	if ( !bsp )
+		return false;
+	s.block = b;
+	s.bsp = bsp;
+	s.served = rr.path;
+	s.served.replace( QChar( '\\' ), QChar( '/' ) );
+	s.route = QLatin1String( pbrmRouteName( rr.route ) );
+	s.m = rr.material;
+	s.tree = bsp->isVertexAlphaAnimation ? 1 : 0;
+	return true;
+}
+
+}    // namespace
+
+/*! HARNESS ONLY (impostorpreviewtest.cpp, WW_IMPOSTOR_MESH_PBRM=1): the bake's .pbrm retarget on the preview's
+ *  mesh, so LOD channel 10 shows each .pbrm shape's own roughness / metallic / AO -- the "3D model" column of
+ *  IMPOSTORPBRM1's pictures. Every shape that resolves one is retargeted, mixed models included. One line per
+ *  shape for the harness log. The sources' folder lives until the next call. */
+QStringList wwPbrmRetargetScene( Scene * sc, const QString & looseRoot )
+{
+	static std::unique_ptr<QTemporaryDir> tmp;
+	QStringList lines;
+	const NifModel * nif = sc ? sc->nifModel : nullptr;
+	if ( !nif )
+		return { QStringLiteral( "pbrm preview: no scene" ) };
+	tmp = std::make_unique<QTemporaryDir>();
+	const QString sub = QStringLiteral( "wwpbrmcard%1" ).arg( ++wwPbrmBakeSerial );
+	const QString texDir = tmp->path() + "/textures/" + sub;
+	if ( !tmp->isValid() || !QDir().mkpath( texDir ) )
+		return { QStringLiteral( "pbrm preview: no temporary folder" ) };
+	std::vector<WwPbrmCardShape> done;    // the root goes on AFTER the sources exist: the index is built at
+	                                      // the next lookup, and the sources' own normal lookup is one
+	for ( int b = 0; b < nif->getBlockCount(); b++ ) {
+		const QModelIndex iShader = nif->getBlockIndex( b );
+		if ( !nif->isNiBlock( iShader, "BSLightingShaderProperty" ) )
+			continue;
+		QString diffuse;
+		const QModelIndex iTexSet = nif->getBlockIndex( nif->getLink( iShader, "Texture Set" ) );
+		if ( iTexSet.isValid() ) {
+			const QModelIndex iArr = nif->getIndex( iTexSet, "Textures" );
+			if ( iArr.isValid() )
+				diffuse = nif->get<QString>( nif->getIndex( iArr, 0 ) );
+		}
+		WwPbrmCardShape s;
+		if ( !wwPbrmResolveShape( sc, looseRoot, b, iShader, nif->get<QString>( iShader, "Name" ), diffuse, s ) )
+			continue;
+		QString why;
+		if ( !wwPbrmCardSources( nif, looseRoot, texDir, QStringLiteral( "textures\\" ) + sub,
+				QString::number( b ), s, why ) ) {
+			lines << QStringLiteral( "pbrm preview: %1 refused: %2" ).arg( s.served, why );
+			continue;
+		}
+		done.push_back( s );
+	}
+	const_cast< NifModel * >( nif )->addResourceRoot( QDir::toNativeSeparators( tmp->path() + "/textures" ) );
+	for ( const WwPbrmCardShape & s : done ) {
+		s.bsp->wwTextureOverride.insert( 0, s.colour );
+		s.bsp->wwTextureOverride.insert( 2, s.emissive );
+		s.bsp->wwTextureOverride.insert( 7, s.rmaos );
+		const QString found = nif->findResourceFile( s.colour, "textures", ".dds" );
+		lines << QStringLiteral( "pbrm preview: %1 %2 retargeted (tree %3), colour %4" ).arg( s.served, s.route )
+			.arg( s.tree ).arg( found.isEmpty() ? QStringLiteral( "NOT FOUND" ) : QStringLiteral( "found" ) );
+	}
+	return lines;
+}
+
 
 NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 {
@@ -22664,6 +23130,14 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					 * that file's `emissiveScale`. Whichever law composed a shape's
 					 * emissive picture owns the multiple that goes with it. */
 					QHash<int, float> lodmEmissiveScale;
+					/* IMPOSTORPBRM1: the per-bake folder holding the .pbrm law's sources
+					 * (alive until the bake ends), each pbr shape's slot 7 for the specular
+					 * passes, and whether a `_s` sheet is owed (a shape departs from the
+					 * default specular: weight 1, white, IOR 1.5). */
+					std::unique_ptr<QTemporaryDir> pbrmTmp;
+					std::vector<WwPbrmSpecSlot> pbrmSpecSlots;
+					bool pbrmSpec = false;
+
 					{
 						Scene * sc = skope->ogl->getScene();
 						const NifModel * nif = sc ? sc->nifModel : nullptr;
@@ -22683,6 +23157,22 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 								nif->getResourceFile( out, candidate, "materials", ".lodm" );
 							return !out.isEmpty();
 						};
+						/* THE .pbrm ROUTE (IMPOSTORPBRM1): a shape with no usable .lodm that
+						 * resolves a .pbrm through the viewport's one resolver (io/pbrmresolve:
+						 * the direct name, the same-name sibling, the diffuse stem), read from
+						 * the loose root first and then the stack -- the mesh-LOD mask path's
+						 * order (src/lodgen.cpp ~1849-1869). Counted pbr-sourced here; its law
+						 * is evaluated after the loop, and a map it cannot read refuses it. */
+						std::vector<WwPbrmCardShape> pbrmShapes;
+						auto pbrmTry = [&]( int b, const QModelIndex & iShader, const QString & matName, const QString & diffuse ) {
+							WwPbrmCardShape s;
+							if ( !wwPbrmResolveShape( sc, looseRoot, b, iShader, matName, diffuse, s ) )
+								return false;
+							pbrmShapes.push_back( s );
+							return true;
+
+						};
+
 						int texturedShapes = 0, pbrShapes = 0;
 						for ( int b = 0; nif && b < nif->getBlockCount(); b++ ) {
 							const QModelIndex iShader = nif->getBlockIndex( b );
@@ -22703,11 +23193,15 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							QByteArray bytes;
 							if ( !readLodm( candidate, bytes ) ) {
 								ms << "lodm " << candidate << " none " << diffuse << "\n";
+								if ( pbrmTry( b, iShader, matName, diffuse ) )
+									pbrShapes++;
 								continue;
 							}
 							const LodmMaterial lm = lodmParse( bytes );
 							if ( !lm.ok ) {
 								ms << "lodm " << candidate << " rejected " << diffuse << " " << lm.error << "\n";
+								if ( pbrmTry( b, iShader, matName, diffuse ) )
+									pbrShapes++;
 								continue;
 							}
 							Property * p = sc->getProperty( nif, iShader );
@@ -22737,11 +23231,62 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 							// for a pbr set naming none), so its multiple is this shape's
 							if ( !lm.emissive.isEmpty() || lm.pbr )
 								lodmEmissiveScale.insert( b, lm.emissiveScale );
-							if ( lm.pbr )
+							if ( lm.pbr ) {
 								pbrShapes++;
+								// a pbr .lodm has no specular of its own: the default, F0 0.04 and weight 1
+								pbrmSpecSlots.push_back( { bsp, QStringLiteral( "#ff333333" ), QStringLiteral( "#ffffffff" ),
+									bsp->wwTextureOverride.value( 7 ) } );
+							}
 							ms << "lodm " << candidate << " " << lm.family << " " << diffuse << "\n";
 						}
 						familyPbr = ( texturedShapes > 0 && pbrShapes == texturedShapes );
+						/* The .pbrm shapes' sources, only when they make the card pbr: a MIXED
+						 * model stays legacy exactly as before (DONE.md step 7 design 2) and its
+						 * sidecar names the .pbrm shapes whose data went unused. */
+						if ( familyPbr && !pbrmShapes.empty() ) {
+							pbrmTmp = std::make_unique<QTemporaryDir>();
+							const QString sub = QStringLiteral( "wwpbrmcard%1" ).arg( ++wwPbrmBakeSerial );
+							const QString texDir = pbrmTmp->path() + "/textures/" + sub;
+							bool okAll = pbrmTmp->isValid() && QDir().mkpath( texDir );
+							for ( auto & s : pbrmShapes ) {
+								if ( !okAll ) {
+									if ( s.refusal.isEmpty() )
+										s.refusal = QStringLiteral( "not-evaluated" );
+									continue;
+								}
+								if ( !wwPbrmCardSources( nif, looseRoot, texDir, QStringLiteral( "textures\\" ) + sub,
+										QString::number( s.block ), s, s.refusal ) )
+									okAll = false;
+							}
+							if ( !okAll ) {
+								familyPbr = false;
+							} else {
+								/* THE `textures` FOLDER ITSELF IS THE ROOT (ImpostorDraw::
+								 * registerLooseSheets says why), and through the model. */
+								const_cast< NifModel * >( nif )->addResourceRoot( QDir::toNativeSeparators( pbrmTmp->path() + "/textures" ) );
+								for ( auto & s : pbrmShapes ) {
+									s.bsp->wwTextureOverride.insert( 0, s.colour );
+									if ( !s.normal.isEmpty() )
+										s.bsp->wwTextureOverride.insert( 1, s.normal );
+									s.bsp->wwTextureOverride.insert( 2, s.emissive );    // empty = black: a pbr set's emissive is its own or none
+									s.bsp->wwTextureOverride.insert( 7, s.rmaos );
+									lodmEmissiveScale.insert( s.block, s.emissiveScale );
+									pbrmSpecSlots.push_back( { s.bsp, s.spec, s.weight, s.rmaos } );
+									if ( !s.specDefault )
+										pbrmSpec = true;
+								}
+								lodmShapes++;
+							}
+						}
+						for ( const auto & s : pbrmShapes ) {
+							ms << "pbrm " << s.served << " " << s.route << " "
+								<< ( familyPbr ? "used" : s.refusal.isEmpty() ? "unused" : "refused" ) << " tree " << s.tree << "\n";
+							if ( !s.refusal.isEmpty() )
+								ms << "pbrmrefused " << s.served << " " << s.refusal << "\n";
+						}
+						if ( !familyPbr )
+							pbrmSpec = false;
+
 						if ( lodmShapes )
 							skope->ogl->update();
 					}
@@ -23409,6 +23954,21 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						normal.fill( qRgba( 128, 128, 128, 0 ) );		// X, Y neutral; height at the card plane; no sway
 						rmaos.fill( qRgba( 128, 0, 255, 0 ) );			// the mask sheet (GSAOS or RMAOS): mid, none, open, no subsurface
 						emissive.fill( qRgba( 0, 0, 0, 255 ) );			// the emissive sheet: black, and opaque - it ships as BC1
+						/* THE SPECULAR SHEET `_s` (IMPOSTORPBRM1), only when a shape departs
+						 * from the default: RGB sqrt(F0'), A the specular weight; the empty texel
+						 * is the default, sqrt(0.04) = 51 and weight 1. Slot 7 is pointed at
+						 * each shape's spec source, then its weight source, for one channel-10
+						 * pass each, and restored. */
+						QImage specS;
+						if ( pbrmSpec ) {
+							specS = QImage( S_W, S_H, QImage::Format_ARGB32 );
+							specS.fill( qRgba( 51, 51, 51, 255 ) );
+						}
+						auto pbrmSlot7 = [&]( int which ) {
+							for ( const auto & p : pbrmSpecSlots )
+								p.bsp->wwTextureOverride.insert( 7, which == 0 ? p.spec : which == 1 ? p.weight : p.restore );
+						};
+
 						/* The crop: the frame's extents out of the viewport's, around THIS
 						 * VIEW'S OWN silhouette centre (`ox`, `oy` in units, the pair pass
 						 * one measured). The crop's SIZE is the card's one scale, so the
@@ -23533,7 +24093,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 									echoAz[j * gCols + i] = az;
 									echoEl[j * gCols + i] = std::asin( qBound( -1.0f, ez, 1.0f ) ) * 180.0f / 3.14159265f;
 								}
-								QImage tA, tN, tD, tS, tM, tE;
+								QImage tA, tN, tD, tS, tM, tE, tP, tW;
 								if ( !aaOn ) {
 									tA = frameOf( matte(), ox, oy );
 									tN = frameOf( channel( 8 ), ox, oy );		// normal, view space
@@ -23541,6 +24101,14 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 									tS = frameOf( channel( 10 ), ox, oy );		// the material channel: legacy pair, or a .lodm's third texture raw
 									tM = frameOf( channel( 11 ), ox, oy );		// alpha-tested: the leaf cards
 									tE = frameOf( channel( 13 ), ox, oy );		// the emissive: a .lodm's texture raw, or the vanilla glow rule
+									if ( pbrmSpec ) {
+										pbrmSlot7( 0 );
+										tP = frameOf( channel( 10 ), ox, oy );    // the specular: sqrt(F0')
+										pbrmSlot7( 1 );
+										tW = frameOf( channel( 10 ), ox, oy );    // the specular weight
+										pbrmSlot7( 2 );
+									}
+
 								} else {
 									/* THE OFFSCREEN ARM: the frame's inner rect, exactly, at aaK x iw
 									 * by aaK x ih samples -- halfW / halfH == iw / ih, so the samples
@@ -23553,20 +24121,30 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 									const QImage s10 = channelOff( 10, RW, RH, halfH, ox, oy );
 									const QImage s11 = channelOff( 11, RW, RH, halfH, ox, oy );
 									const QImage s13 = channelOff( 13, RW, RH, halfH, ox, oy );
-									QImage * outs[6] = { &tA, &tN, &tD, &tS, &tM, &tE };
+									QImage s10p, s10w;
+									if ( pbrmSpec ) {
+										pbrmSlot7( 0 );
+										s10p = channelOff( 10, RW, RH, halfH, ox, oy );
+										pbrmSlot7( 1 );
+										s10w = channelOff( 10, RW, RH, halfH, ox, oy );
+										pbrmSlot7( 2 );
+									}
+									const int nch = pbrmSpec ? 6 : 4;
+
+									QImage * outs[8] = { &tA, &tN, &tD, &tS, &tM, &tE, &tP, &tW };
 									for ( QImage * o : outs ) {
 										*o = QImage( tw, th, QImage::Format_ARGB32 );
 										o->fill( 0 );
 									}
-									const QImage * chans[4] = { &s9, &s10, &s11, &s13 };
-									QImage * chOut[4] = { &tD, &tS, &tM, &tE };
+									const QImage * chans[6] = { &s9, &s10, &s11, &s13, &s10p, &s10w };
+									QImage * chOut[6] = { &tD, &tS, &tM, &tE, &tP, &tW };
 									// the self-check on the pan: the covered samples' box must sit
 									// on the render's centre, as pass one measured it
 									int bx0 = RW, bx1 = -1, by0 = RH, by1 = -1;
 									for ( int y = 0; y < ih; y++ ) {
 										for ( int x = 0; x < iw; x++ ) {
 											int sa = 0, cr = 0, cg = 0, cb = 0;
-											int ch[4][3] = {};
+											int ch[6][3] = {};
 											float nx = 0.0f, ny = 0.0f, nz = 0.0f;
 											for ( int q = 0; q < KK; q++ ) {
 												const int sx = aaK * x + q % aaK, sy = aaK * y + q / aaK;
@@ -23580,7 +24158,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 													continue;
 												sa += a;
 												cr += qRed( pa ); cg += qGreen( pa ); cb += qBlue( pa );
-												for ( int c = 0; c < 4; c++ ) {
+												for ( int c = 0; c < nch; c++ ) {
 													const QRgb pc = chans[c]->pixel( sx, sy );
 													ch[c][0] += qRed( pc ); ch[c][1] += qGreen( pc ); ch[c][2] += qBlue( pc );
 												}
@@ -23597,7 +24175,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 												continue;
 											auto un = [sa]( int c ) { return qBound( 0, ( c * 255 + sa / 2 ) / sa, 255 ); };
 											tA.setPixel( X, Y, qRgba( un( cr ), un( cg ), un( cb ), cov ) );
-											for ( int c = 0; c < 4; c++ )
+											for ( int c = 0; c < nch; c++ )
 												chOut[c]->setPixel( X, Y, qRgba( un( ch[c][0] ), un( ch[c][1] ), un( ch[c][2] ), 255 ) );
 											const float len = std::sqrt( nx * nx + ny * ny + nz * nz );
 											if ( len > 1.0e-6f ) {
@@ -23696,6 +24274,12 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 										const QRgb pe = tE.pixel( x, y );
 										emissive.setPixel( i * tw + x, j * th + y,
 											qRgba( unp( qRed( pe ) ), unp( qGreen( pe ) ), unp( qBlue( pe ) ), 255 ) );
+										if ( pbrmSpec ) {
+											const QRgb pp = tP.pixel( x, y ), pw = tW.pixel( x, y );
+											specS.setPixel( i * tw + x, j * th + y,
+												qRgba( unp( qRed( pp ) ), unp( qGreen( pp ) ), unp( qBlue( pp ) ), unp( qRed( pw ) ) ) );
+										}
+
 									}
 								}
 							}
@@ -23708,6 +24292,9 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						// the fourth, likewise: _oct_e.png (pbr) or _oct_g.png (legacy)
 						emissive.save( outDir + "/" + base + QStringLiteral( "_oct" ) + QLatin1String( lodmEmissiveSuffix( familyPbr ) )
 							+ QStringLiteral( ".png" ) );
+						// the fifth, a pbr card's specular, only when owed: _oct_s.png
+						if ( pbrmSpec )
+							specS.save( outDir + "/" + base + QStringLiteral( "_oct_s.png" ) );
 						/* The frame's SIZE CLASS, on a line of its own. It is the
 						 * frame size the `oct` line already carries, said once in
 						 * the meta's own words: the `oct` line's shape does not
@@ -23715,6 +24302,7 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 						 * indexes by position (docs/MISTAKES.md, the family token
 						 * that carried a newline). */
 						ms << "class " << tw << " " << th << "\n";
+						ms << "specular " << ( pbrmSpec ? "_s" : "none" ) << "\n";
 						/* THE GAP, on a line of its own, because the mip cap is DERIVED from it
 						 * and a reader must not have to re-guess the law that produced the sheet.
 						 * `gap <x> <y>`, in texels, is the distance between two neighbouring

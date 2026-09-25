@@ -23,6 +23,9 @@ BSD License - see nifskope.h
 #include <cstdio>	// fflush, for the redirected streams a caller reads
 #include <cstdlib>	// std::_Exit -- see endRun()
 
+//! nifskope_ui.cpp: the card bake's .pbrm retarget, applied to the preview's mesh (harness only)
+QStringList wwPbrmRetargetScene( Scene * sc, const QString & looseRoot );
+
 /* ---------------------------------------------------------------------------
  * WW_IMPOSTOR_PREVIEW -- what "actually works" is allowed to mean.
  *
@@ -1023,6 +1026,16 @@ bool wwImpostorPreviewStart( NifSkope * skope, GLView * ogl, QWidget * viewportH
 			 * it is the side-light picture's switch. Neither is persisted: the
 			 * members are set on this window only, never in QSettings. */
 			const int meshChannel = qEnvironmentVariableIntValue( "WW_IMPOSTOR_MESH_CHANNEL" );
+			/* WW_IMPOSTOR_MESH_PBRM=1 (IMPOSTORPBRM1's pictures): the mesh takes the
+			 * bake's .pbrm retarget, so channel 10 on the mesh half is the source's
+			 * own roughness / metallic. The .pbrm is read from WW_LODGEN_DATA_ROOT
+			 * first, as the bake reads it. */
+			if ( qEnvironmentVariableIntValue( "WW_IMPOSTOR_MESH_PBRM" ) == 1 ) {
+				for ( const QString & l : wwPbrmRetargetScene( ogl->getScene(),
+						qEnvironmentVariable( "WW_LODGEN_DATA_ROOT" ) ) )
+					st.log << l;
+			}
+
 			if ( meshChannel != 0 )
 				st.log << QStringLiteral( "orbit mesh half through LOD channel %1 (WW_IMPOSTOR_MESH_CHANNEL)" )
 						.arg( meshChannel );
