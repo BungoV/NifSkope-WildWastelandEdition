@@ -176,10 +176,24 @@ class Esm(object):
 		return land
 
 
+# THE ENGINE'S DEFAULT LAND TEXTURE (lane SEAM1, 2026-09-25): what a BTXT-less
+# quadrant and a NULL-LTEX layer paint, one set world-wide -- the INI
+# [Landscape] sDefaultLandDiffuseTexture, default Ground\CommonwealthDefault01_d.dds
+# under Landscape\. Mirrors ESM_LTEX_ENGINE_DEFAULT in src/esmdata.h. It is not an
+# LTEX and grows nothing. The per-chunk dominant base it replaces is kept below
+# only so a report can name what the old law would have painted.
+ENGINE_DEFAULT = 0xFFFFFFFF
+ENGINE_DEFAULT_TEX = ('Landscape/Ground/CommonwealthDefault01_d.dds',
+					  'Landscape/Ground/CommonwealthDefault01_n.dds',
+					  'Landscape/Ground/CommonwealthDefault01_s.dds')
+
+
 def ltex_cover(esm, form):
 	"""D and S for one LTEX form: the density SUM over its grasses and the
 	density-weighted Max Slope. The tint is NOT modelled here -- it needs the
 	grass mesh and its texture, which this reader deliberately does not open."""
+	if form == ENGINE_DEFAULT:
+		return (0.0, 0.0)
 	rec = esm.ltex.get(form)
 	if rec is None:
 		return None                      # dangling: a data error, contributes nothing
@@ -235,7 +249,7 @@ def cover_plane(esm, cx0, cy0, dim, coverFull, res=512):
 	and does not pretend to re-derive the heightfield."""
 	span = dim * 4096.0
 	cwx, cwy = cx0 * 4096.0, cy0 * 4096.0
-	dom = dominant_base(esm, cx0, cy0, dim)
+	dom = ENGINE_DEFAULT
 	dtex = [[0.0] * res for _ in range(res)]
 	stex = [[0.0] * res for _ in range(res)]
 	renorm = 0

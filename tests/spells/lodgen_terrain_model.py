@@ -42,7 +42,7 @@ import struct
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from lodgen_cover_model import Esm, bilinear, dominant_base     # noqa: E402
+from lodgen_cover_model import Esm, bilinear, dominant_base, ENGINE_DEFAULT, ENGINE_DEFAULT_TEX     # noqa: E402
 
 # The bake's world-space tiling of a landscape texture, in world units per
 # repeat. 341.3333 = 128/0.375 is the engine's own number, read out of
@@ -405,6 +405,18 @@ class Layer(object):
 		self.gateable = False
 		self.edid = ''
 		self.why = 'not an LTEX'
+		if form == ENGINE_DEFAULT:
+			# the engine's default ground (lane SEAM1): TX00 + TX07, no material
+			self.edid = 'ENGINE_DEFAULT'
+			self.rule = 'legacy-inverted'
+			d = find_asset(data, ENGINE_DEFAULT_TEX[0])
+			sp = find_asset(data, ENGINE_DEFAULT_TEX[2])
+			self.diffuse = Dds(d) if d else None
+			self.spec = Dds(sp) if sp else None
+			self.roughConst = 0.0
+			self.gateable = self.diffuse is not None
+			self.why = 'ok' if self.gateable else 'engine default diffuse not found'
+			return
 		rec = esm.ltex.get(form)
 		if not rec:
 			return
@@ -570,7 +582,7 @@ def cmd_mask(esmPath, data, lodt, cx0, cy0, dim):
 	px, side = got
 	content, border = v.content, v.border
 	upt = v.levelDim * CELL / content
-	domBase = dominant_base(e, (cx0 // 4) * 4, (cy0 // 4) * 4, 4)
+	domBase = ENGINE_DEFAULT   # lane SEAM1: was the dim-4 chunk's dominant base
 	cache = {}
 
 	# T2 first: metallic. Every legacy layer must read EXACTLY 0.
@@ -671,7 +683,7 @@ def cmd_ring0(esmPath, data, lodt, cx0, cy0, dim):
 	px, side = got
 	content, border = v.content, v.border
 	upt = v.levelDim * CELL / content
-	domBase = dominant_base(e, (cx0 // 4) * 4, (cy0 // 4) * 4, 4)
+	domBase = ENGINE_DEFAULT   # lane SEAM1: was the dim-4 chunk's dominant base
 	cache = {}
 	tileN = (cy0 + v.levelDim) * CELL
 	tileW = cx0 * CELL

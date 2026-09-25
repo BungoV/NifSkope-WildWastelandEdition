@@ -623,6 +623,14 @@ const EsmLtexTextureSet & EsmWorld::ltexTextureSet( quint32 ltexForm ) const
 	if ( it != ltexCache.constEnd() )
 		return *it;
 	EsmLtexTextureSet s;
+	if ( ltexForm == ESM_LTEX_ENGINE_DEFAULT ) {
+		// the engine's own fallback set (esmdata.h), paths as a TXST spells them
+		s.diffuse = QStringLiteral( "Landscape\Ground\CommonwealthDefault01_d.dds" );
+		s.normal = QStringLiteral( "Landscape\Ground\CommonwealthDefault01_n.dds" );
+		s.specular = QStringLiteral( "Landscape\Ground\CommonwealthDefault01_s.dds" );
+		s.exists = true;
+		return *ltexCache.insert( ltexForm, s );
+	}
 	const ESMFile::ESMRecord * lr = esm->findRecord( ltexForm );
 	if ( lr && *lr == "LTEX" ) {
 		quint32 txst = 0;
@@ -870,6 +878,12 @@ const EsmLtexCover & EsmWorld::ltexCover( quint32 ltexForm, const QString & data
 		return *it;
 	EsmLtexCover c;
 	c.resolved = true;
+	if ( ltexForm == ESM_LTEX_ENGINE_DEFAULT ) {
+		// the engine's default ground is a texture, not an LTEX: it exists and
+		// grows nothing (D = 0, no tint)
+		c.exists = true;
+		return *ltexCoverCache.insert( ltexForm, c );
+	}
 	const ESMFile::ESMRecord * lr = esm->findRecord( ltexForm );
 	if ( lr && lr->type != GRUP && *lr == "LTEX" ) {
 		c.exists = true;

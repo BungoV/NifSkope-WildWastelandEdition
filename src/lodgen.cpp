@@ -10077,18 +10077,13 @@ bool lodgenBakeTerrainTextures( const EsmWorld & world, int chunkX, int chunkY,
 		aCover.assign( 64, 0.0f );
 	}
 
-	// quadrants painted with no BTXT fall back to the chunk's dominant base
-	quint32 dominantBase = 0;
-	{
-		QMap<quint32, int> counts;
-		for ( const EsmLand & land : cells )
-			for ( int q = 0; q < 4; q++ )
-				if ( land.baseTex[q] )
-					counts[land.baseTex[q]]++;
-		int best = 0;
-		for ( auto it = counts.constBegin(); it != counts.constEnd(); ++it )
-			if ( it.value() > best ) { best = it.value(); dominantBase = it.key(); }
-	}
+	/* Quadrants painted with no BTXT, and NULL-LTEX layers, paint the ENGINE's
+	 * default land texture -- one set for the whole world (esmdata.h,
+	 * ESM_LTEX_ENGINE_DEFAULT; lane SEAM1). It used to be the chunk's dominant
+	 * base, which changes from chunk to chunk and drew the chunk grid into the
+	 * ground (Sanctuary, chunk (-20,20), 10-13 levels). The name stays so every
+	 * site below reads as it did. */
+	const quint32 dominantBase = ESM_LTEX_ENGINE_DEFAULT;
 
 	/* Per-quadrant ground-cover constants, resolved ONCE on the quadrant, not
 	 * once per texel. D, S and T are per-FORM scalars and the layer set is
@@ -10426,9 +10421,8 @@ bool lodgenBakeTerrainTextures( const EsmWorld & world, int chunkX, int chunkY,
 						nL++;
 						if ( a <= 0.001f )
 							continue;
-						// NULL-texture layers paint the engine's hardcoded
-						// default ground; the chunk's dominant base is the
-						// local stand-in
+						// NULL-texture layers paint the engine's default
+						// ground (ESM_LTEX_ENGINE_DEFAULT, lane SEAM1)
 						const FloatVector4 lc = sampleLtex(
 							layer.ltex ? layer.ltex : dominantBase );
 						c = c + ( lc - c ) * qBound( 0.0f, a, 1.0f );
@@ -11536,10 +11530,11 @@ struct LodgenVtMaskCache
  *  differences and the 2,048-unit AO march real data instead of the per-chunk
  *  path's edge clamp.
  *
- *  `dominantBase` is computed over the ENCLOSING dim-4 chunk's cells, not over
- *  the tile's own: it is what NULL-LTEX layers and baseTex == 0 texels paint,
- *  so a tile scoped to its own two cells would paint them a different colour
- *  and the assembled chunk sheet would stop matching a direct bake. */
+ *  `dominantBase` is what NULL-LTEX layers and baseTex == 0 texels paint. It
+ *  is the engine's world-wide default land texture (ESM_LTEX_ENGINE_DEFAULT,
+ *  lane SEAM1), so a tile, a chunk and the assembled sheet all agree on it
+ *  with no scope to get wrong. It was the enclosing dim-4 chunk's dominant
+ *  base until 2026-09-25. */
 /* `static` since 2026-09-11: it now takes a `LodgenRoadSet`, which lives in this
  * translation unit's anonymous namespace, and nothing outside this file has ever
  * called it. */
@@ -11622,24 +11617,10 @@ static bool lodgenBakeVtTile( const EsmWorld & world, const QString & dataRoot,
 			return &cells[ci];
 		}, inner );
 
-	quint32 dominantBase = 0;
-	{
-		const int bx = lodgenVtFloorTo( cellX0, 4 ), by = lodgenVtFloorTo( cellY0, 4 );
-		QMap<quint32, int> counts;
-		for ( int y = 0; y < 4; y++ ) {
-			for ( int x = 0; x < 4; x++ ) {
-				const EsmLand * l = landCache.get( world, bx + x, by + y );
-				if ( !l )
-					continue;
-				for ( int q = 0; q < 4; q++ )
-					if ( l->baseTex[q] )
-						counts[l->baseTex[q]]++;
-			}
-		}
-		int best = 0;
-		for ( auto it = counts.constBegin(); it != counts.constEnd(); ++it )
-			if ( it.value() > best ) { best = it.value(); dominantBase = it.key(); }
-	}
+	/* The engine's default land texture, world-wide (lane SEAM1; see the chunk
+	 * baker's twin of this line). No longer scoped to the enclosing dim-4 chunk:
+	 * the old per-chunk dominant base is what put the chunk grid into the VT. */
+	const quint32 dominantBase = ESM_LTEX_ENGINE_DEFAULT;
 
 	const bool doCover = coverOpts.cover;
 	const float coverFull = qMax( 1.0f, coverOpts.coverFull );

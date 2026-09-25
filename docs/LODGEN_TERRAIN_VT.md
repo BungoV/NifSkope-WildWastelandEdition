@@ -150,9 +150,9 @@ growing there:
 
 | case | cover uses |
 |---|---|
-| `layer.ltex == 0` (NULL) | `D(dominantBase)`, `S(dominantBase)` — the same thing the diffuse paints |
+| `layer.ltex == 0` (NULL) | the engine default (`ESM_LTEX_ENGINE_DEFAULT`): `D = 0`, `S = 0` — the same thing the diffuse paints |
 | `layer.ltex` names a form that is not a record | `D = 0`, `S = 0`, and `danglingLtex` increments. A dangling reference is a data error, not paint intent, so it does **not** fall back |
-| `land.baseTex[q] == 0` | `dominantBase`, as the diffuse already does |
+| `land.baseTex[q] == 0` | the engine default, as the diffuse already does |
 
 **The value is ordinal in scale and linear in composition.** It is
 `255·gate·Dtex/COVER_FULL`, so 128 does **not** mean "half the ground is grass"
@@ -1127,10 +1127,17 @@ that would mean decoding BC blocks and re-encoding them, which §2.3's first
 sentence forbids and which would put the assembled sheet a quantisation step
 away from a direct bake.
 
-`dominantBase` is scope-dependent — it is what NULL-LTEX layers and
-`baseTex == 0` texels paint — so the tile baker computes it over the **enclosing
-dim-4 chunk's** cell set, not over the tile's own two cells, and carries it into
-the four tiles that compose that chunk.
+`dominantBase` — what NULL-LTEX layers and `baseTex == 0` texels paint — is
+**no longer scope-dependent** (lane SEAM1, 2026-09-25). It used to be the most
+common base of the enclosing dim-4 chunk, and a chunk whose dominant base
+differed from its neighbours' painted a hard-edged block on the chunk grid
+(Sanctuary, cells -20..-16 x 20..24: steps 12.9 / 11.3 / 11.9 / 8.8 luminance
+at its four borders against interior tile borders of 1.5 and less). It is now
+the one world-wide texture the engine itself paints there,
+`ESM_LTEX_ENGINE_DEFAULT` = `Landscape\Ground\CommonwealthDefault01_{d,n,s}.dds`
+(the game's `sDefaultLandDiffuseTexture:Landscape` family, read from the exe's
+string table; see §2.5 step 4). The chunk and tile bakers use the same constant,
+so V9a's byte identity holds by construction.
 
 The sampling grid is identical to a direct bake: at dim 4 a texel centre sits at
 `cwX + (px + 0.5)·32`, and the pyramid's composite index gives the same world
@@ -1196,13 +1203,13 @@ and the generator gate below reproduces it.
 2  q      = (cly >= 2048 ? 2 : 0) + (clx >= 2048 ? 1 : 0)        the quadrant
 3  layer opacity a_i = BILINEAR over the quadrant's 17x17 VTXT grid
 4  colour = diffuse( base )                          base = BTXT, or the
-                                                     enclosing dim-4 chunk's
-                                                     DOMINANT base when it is 0
+                                                     ENGINE DEFAULT land texture
+                                                     when it is 0 (lane SEAM1)
 5  for each ATXT layer i, IN RECORD ORDER:
        if a_i <= 0.001: skip                         (and it is SKIPPED, not
                                                       blended with a tiny weight)
        colour = colour + ( diffuse(ltex_i) - colour ) * clamp(a_i, 0, 1)
-       ltex_i == 0 paints the same dominant base
+       ltex_i == 0 paints the same engine default
 6  colour *= VCLR / 255                               bilinear over the 33x33
                                                      grid; ABSENT on most cells
 7  colour += ( Ttex - colour ) * (cover/255) * tintStrength      the grass tint,
@@ -2500,7 +2507,11 @@ base, is painted with the none-default mask constants, and the mask cache keeps
 an entry for it. Until VTFIX1 that entry was stored and never counted, so on the
 whole Commonwealth `distinctLtex` was 101 against a rule sum of 100 (lane VTBAKE1:
 `pbrm 0 + legacyInverted 99 + noneDefault 1`). It now reads `noneDefault 2`, and
-the census identity above holds. The gate is `tests/spells/lodgen_vtfix.sh` G1,
+the census identity above holds. Since lane SEAM1 (2026-09-25) a null layer
+paints the engine default, which resolves through its `_s` like any legacy
+layer, so form 0 no longer reaches the mask cache: expect `noneDefault` one
+lower and `legacyInverted` one higher on a whole-map bake that contains a null
+layer or a BTXT-less quadrant, and the identity unchanged. The gate is `tests/spells/lodgen_vtfix.sh` G1,
 which checks the `.lodm` of a whole-map `--vt` bake. A region with no null layer,
 such as Sanctuary's 14 = 14, does not move.
 
