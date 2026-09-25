@@ -172,3 +172,20 @@
 * Wide scale (widescale_check.py on the real bake): W0..W5 PASS, 4 of 18,787 placements above 7.99988
   (0604D45A 9.97, 0604D45D 8.33, 0604DDA1 9.23, 0604DDB9 8.33), .lodi version 10, file set == plugin set.
 * Installed mods/FO4CSLOD/FO4CSLOD/NukaWorld (was absent): 654 files, sha1 all match (nukaworld/src_sha1.txt).
+
+## 21:48 -- Nuka-World pictures; G4 red; G5 after; Commonwealth .lodi identity running
+
+* G4 red control (g4red.sh -28 0 3 7, no --cover): BC1, no cover channel on all 3 cells -> RED as it must be.
+* Pictures (installed folder): pics/nukaworld_topdown.png 3200x3224 on header -32,-32..32,32, INSIDE (78/125/137/90 px),
+  lum SD 21.3, 5583 colours, 18,787 of 18,787 drawn. The terrain region is -32..31: the viewer only draws the VT
+  sheets on whole 16-cell tiles that also sit inside the .lodl (btdterrain.cpp), and 32 snaps to 47 > 32, so column
+  x = 32 and row y = 32 show background (objects there are drawn). A first try on -32..32 fell back to the data view
+  (pale, no colour): kept as pics/nukaworld_topdown_datav.png, not a result.
+  pics/nukaworld_oblique_galactic.png (08 camera, frame -8 -7 3 4, ORT 24576, 1600^2, LV 2, slot 0, SDIM 2): lum SD
+  39.5, 7757 colours, 8358 drawn (2089 outside the region); Galactic Zone, Nuka-Town and the Kiddie Kingdom castle
+  drawn; the diamond touches the side edges, as the other obliques do.
+* G5 after (g5_*_after.txt): mods top level, MO2 root and profile files identical to before (names, sizes, mtimes).
+  FO4CSLOD: + SanctuaryHillsWorld, DLC03FarHarbor, NukaWorld (mine). Commonwealth: 17 files changed at 20:13:47..50 =
+  lane TINT1's install (its progress.md and install_record.tsv say so); none of this lane's scripts write there.
+* Commonwealth .lodi identity (widescale_identity.sh cw, exe 62412e83) started; the installed .lodi it reads is now
+  TINT1's (eaf1fe5e), not BAKE1's (94c30130, in TINT1's replaced/).

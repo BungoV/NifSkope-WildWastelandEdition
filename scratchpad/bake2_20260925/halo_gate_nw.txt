@@ -1,0 +1,1 @@
+no-LAND cells 0 (LAND 4096) in -32..31 x -32..31: HALO GATE N/A (no cell without LAND to carry a halo)
