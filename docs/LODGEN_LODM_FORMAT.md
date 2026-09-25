@@ -42,7 +42,8 @@ A reader refuses — naming the field — on:
 4. declared payload > 4,194,304;
 5. declared payload != `fileSize − 12`;
 6. the payload is not well-formed JSON, or is not a JSON **object**;
-7. `lodm` != 1;
+7. `lodm` is neither 1 nor 2; and `lodm` 2 on a kind outside the card family (card, cardArray,
+   aggregate), refused naming the version and the kind (§3.3);
 8. `family` is neither `"legacy"` nor `"pbr"` — **a third family word is a hard
    refusal, not a fallback.** The terrain-VT index used to say `legacy` for that
    reason alone; since 2026-09-11 it says `pbr` and means it (see §5).
@@ -80,6 +81,7 @@ emits a key whose value is the default (that is what keeps the file compact).
 | normal | `normal` | `normal` | `_n` / `_n` | **BC7** (a `DX10` header, `BC7_UNORM`; since 2026-09-23, lane IMPOSTORDEPTH2: BC3 carried the height in the 5:6:5 colour block) | R = normal X, G = normal Y, B = height, A = sway weight |
 | mask | `gsaos` | `rmaos` | `_gsaos` / `_rmaos` | BC3 | R gloss / roughness, G specular / metallic, B AO, A subsurface mask |
 | emissive | `emissive` | `emissive` | `_g` / `_e` | BC1 | RGB emissive colour, no alpha |
+| specular | — | `specular` | — / `_s` | **BC7** (the `_n` sheet's codec) | RGB = sqrt(F0'), **A = specular weight**; `card` files of family pbr only, and only when a shape departs from the default specular (§3.4) |
 
 Reader rules a consumer may rely on:
 
@@ -118,7 +120,7 @@ stem with the family's suffixes and `.DDS`.
 
 | key | type | meaning |
 |---|---|---|
-| `oct` | int | **frames per side, N.** The sheet is **N × N frames = N² views** — `OCT=8` is 64 views, **not 81**. The sheet is `N·frameW` by `N·frameH` pixels |
+| `oct` | int | **frames per side, N. ABSENT on a horizon-RING card (§3.2), which says `views` and `grid` instead.** The sheet is **N × N frames = N² views** — `OCT=8` is 64 views, **not 81**. The sheet is `N·frameW` by `N·frameH` pixels |
 | `frame` | int[2] | `[frameW, frameH]` in pixels — the size class, longer side = the run's tile rung, shorter side a multiple of 16 |
 | `base` | int | the run's chosen resolution before the size ladder. `frame` at or below it is a **rung, not a different run** |
 | `half` | float[2] | `[halfW, halfH]`, the quad's half extents in **model units**, spanning the WHOLE frame including its padding |
@@ -127,7 +129,7 @@ stem with the family's suffixes and `.DDS`.
 | `center` | float[3] | **the offset from the object's PIVOT to the card's centre**, in model units. The pivot is the NIF root, i.e. the reference's own placement origin, so a reader places the quad at `pivot + center`. The bake points its camera at this one point in every one of the N-squared views, so it is the projection of the frame's centre in all of them -- which is what makes the model-to-card transition still (3.1 below) |
 | `depthSpan` | float | world units the height channel spans: `units = (B − 0.5) × depthSpan`, 0.5 = the card plane |
 | `mips` | int | stored mips, `max(1, log2(min(gapX,gapY)))`: the chain stops at the last level where **each of the two frames meeting on an interior border still keeps a whole texel of margin**, because at the next level that margin is half a texel and a border tap reaches across (bungo, 2026-09-09 evening: ship one mip fewer -- a 128 frame at gap 8 ships 128/64/32) |
-| `frameOffset` | float[2·oct²] | **per-frame positioning.** Where each frame's quad sits relative to `center`, in model units, along that view's own right and up axes: frame `(i,j)` at index `j·oct + i`, so `[2·(j·oct+i)]` is its right offset and the next its up offset. Every frame shifts its own silhouette to its own centre, so the frame holds the widest SINGLE view rather than the union of all of them; `half` is still ONE size for the whole card. Absent = a set from before 2026-09-09 evening, whose frames were all centred on `center`. A reader that ignores it draws every quad at `center`, and the tree steps sideways by the offset when the mesh hands over |
+| `frameOffset` | float[2·oct²] | (`2·views` on a ring card, §3.2) **per-frame positioning.** Where each frame's quad sits relative to `center`, in model units, along that view's own right and up axes: frame `(i,j)` at index `j·oct + i`, so `[2·(j·oct+i)]` is its right offset and the next its up offset. Every frame shifts its own silhouette to its own centre, so the frame holds the widest SINGLE view rather than the union of all of them; `half` is still ONE size for the whole card. Absent = a set from before 2026-09-09 evening, whose frames were all centred on `center`. A reader that ignores it draws every quad at `center`, and the tree steps sideways by the offset when the mesh hands over |
 | `auxDiv` | int | **present only when > 1.** The normal, mask and emissive sheets were written at `1/auxDiv` of each side; the colour sheet never divides. Sampling is unaffected (normalised UV); a consumer needs this only to size its own allocation |
 | `projection` | string | **the camera the sheet was photographed through**: `ortho`, or `persp` for a set deliberately baked the old way. `half`, `center` and `frameOffset` are world measurements taken off viewport pixels through ONE units-per-pixel constant, which only an orthographic camera makes true; this is what says they describe the sheet beside them. **Absent = the bake did not say, and every bake that did not say drew a 60-degree perspective frustum** -- absence is the older, foreshortened vintage, not "unknown". See `docs/LODGEN_CARD_SHEETS.md` §3.7 |
 | `coverage` | object | **the coverage contract of the base-colour sheet**: `{ floor, test, base }`. `floor` is the coverage at which the bake counted a texel covered and measured `half` and every `frameOffset`; `test` is the alpha a consumer must ALPHA-TEST at to select that same set (`128`, i.e. 0.5, on a sheet written under the contract); `base` is the alpha the floor was written at, so the coverage FRACTION is `floor + (a - base) * (255 - floor) / (255 - base)`. **Absent = the sheet's alpha is the raw fraction and its declared extents describe the silhouette at 16/255, which is what such a set must be tested at** -- reading an older set at 0.5 draws a tree up to 5.41 texels of half-width narrower than `half` declares. See `docs/LODGEN_CARD_SHEETS.md` §4 |
@@ -208,6 +210,126 @@ not say what camera made it cannot be corrected after the fact.
 ---
 
 ---
+
+### 3.2 A horizon-RING card (2026-09-24, lane CARDFIX1 step 5)
+
+bungo, 2026-09-23 04:4x, RULED: *"for fo4cs use the convention was 22.5 degrees
+per take"*. A ring card is photographed at 16 azimuths, 22.5 degrees apart, at
+elevation 0 -- not over the hemi-octahedral grid. **It is an option, not the
+default:** bungo RULED 2026-09-25, *"Yes, 8x8 is the default choice for a bake"*,
+after step 5 measured the N8 grid better than the ring at every elevation, the
+horizon included. The card bake driver defaults every run, trees included, to the
+grid (`RING=0`); `RING=16` bakes the ring (`tests/spells/impostor_ring.sh` R7).
+
+A ring card uses **the aggregate's own layout keys (section 3a)**, not a third
+layout:
+
+| key | ring card | grid card |
+|---|---|---|
+| `oct` | **ABSENT** | N |
+| `views` | V (16) | absent |
+| `grid` | `[V, 1]` | absent |
+| `frameOffset` | `2·V` numbers, view `v` at `[2v]`, `[2v+1]` | `2·N²` |
+
+Every other key (`frame`, `half`, `pad`, `gap`, `mips`, `center`, `depthSpan`,
+`coverage`, `projection`, `conv`, `auxDiv`) means exactly what it means on a grid
+card. Frame `v` occupies pixels `[v·frameW, (v+1)·frameW) × [0, frameH)` and was
+photographed from
+
+```
+eye(v)   = ( cos φ, sin φ, 0 )          φ = 2π·v / V
+right(v) = ( −sin φ, cos φ, 0 )         up(v) = ( 0, 0, 1 )
+```
+
+under the `spec1` convention. **A reader blends the TWO frames that bracket the
+camera's azimuth**, `f = φ_cam / (2π) · V`, `v0 = floor(f) mod V`, `v1 = v0 + 1
+mod V`, weights `1 − t` and `t` with `t = f − floor(f)`; elevation selects
+nothing (there are no frames above the horizon; what that costs is measured in
+`tests/spells/impostor_ring.sh`, row M). At the slider's crisp end the stronger
+of the two is drawn alone.
+
+**Why there is no `oct` key, and why the sheet is one row.** A reader that knows
+only the grid then finds no grid and refuses the set BY THAT KEY'S NAME (the
+NifSkope reader before this change: *"oct is 0, outside the bake's own 2..16"*).
+A 4 × 4 packing of the same 16 frames would carry a square sheet and an `oct 4`
+that every existing reader would accept -- and draw hemisphere views from
+horizon photographs without a word. The one-row sheet cannot be taken for any
+N × N grid. Its width is `V·frameW`: 4096 at a 256 tile, 8192 at 512, 16384 at
+1024, which is the Direct3D 11 texture limit, so a 16-view ring above a 1024
+tile would not load (nothing enforces this yet; the driver's TILE default is 256).
+At one tile it holds a quarter of an N8 sheet's pixels.
+
+**Card arrays** (section 4) carry the same keys on the array object: a ring set
+groups only with ring sets of its own sheet size (the group key gains `|ring`,
+and the file name gains `.ring` after its `WxH`:
+`<ws>.LodgenCards.legacy.2304x256.ring_d.DDS`; until 2026-09-25 the name took the
+key's `|` and the array could not be written at all).
+**The aggregate** (section 3a) composites from grid cards only; a ring set given
+to it is refused by name and counted (`aggregate cards: refused N horizon-ring
+set(s) by name`). Teaching the aggregate the ring is owed.
+
+**A ring alone does not move the version.** A reader that does not know `views` on a card
+refuses the set; nothing is misread. Version 2 is the model sway (§3.3).
+
+### 3.3 `lodm` 2 -- the model's OWN sway (2026-09-24, lane CARDFIX1 step 6)
+
+bungo, 2026-09-23: *"sway from the tree's model's own wind weights would be neat"*; RULED 2026-09-24
+21:1x as **sway A**. A card baked from a model that has at least one tree-animation shape (a
+`BSLightingShaderProperty` with the vertex-alpha-animation flag -- the same test that makes the mask
+"tree") writes, per texel,
+
+    _n.A = W x h
+
+`W` the model's own vertex-alpha wind weight at that texel (the only wind input the game's tree vertex
+shader reads; 0 on a shape without the flag, which the game never moves), `h` the linear height up from
+the view's own coverage bottom row. A model with NO tree-animation shape keeps the synthetic
+`h^2 x (0.35 + 0.65 r)`, byte for byte. The bake's sidecar says which: `sway model` or `sway synthetic`.
+
+Because `_n.A` then MEANS something else, the payload version moves, on the card family only:
+
+| key | on | type | meaning |
+|---|---|---|---|
+| `lodm` | card, cardArray | int | **2** when the set (any layer of an array) carries model sway; 1 otherwise, with none of the keys below |
+| `sway` | card | string | `"model"` -- `_n.A` is `W x h` |
+| `leafAmplitude`, `leafFrequency` | card | number | the placed base's own leaf numbers (STAT DNAM / TREE CNAM); both 0 in the record reads as 1 / 1 |
+| `array.sway`, `array.leafAmplitude`, `array.leafFrequency` | cardArray | list | one per layer, parallel to `layers`; a synthetic layer says `"synthetic"` and 1 / 1 |
+
+* **An old reader refuses a v2 card by name** (`payload is not a lodm 1 object`), which is the point:
+  it would otherwise draw a real wind weight under the synthetic law's assumptions.
+* **A SOURCE (or any kind outside card, cardArray, aggregate) claiming 2 is refused by name**:
+  `lodm 2 is the card family's version (...); a "<kind>" .lodm is lodm 1`.
+* The envelope version stays 1.
+* **Owed:** the aggregate (§3a) composites the model weight texel by texel already (§3a.3), but writes
+  no `sway` key and stays 1; teaching it v2 is owed with the ring (lodgenaggregate.cpp is not this
+  lane's). FO4CS's reader is owed (`docs/LODGEN_IMPOSTOR_SPEC.md`, the owed paragraph).
+
+### 3.4 `textures.specular` -- a `.pbrm` model's specular on the card (2026-09-25, lane CARDFIX1 step 7)
+
+bungo ruled (IMPOSTORPBRM1) that a card baked from a `.pbrm` model carries that material's specular
+weight, colour and IOR. They travel as ONE optional sheet, `<id>_oct_s.DDS`, named by the texture key
+`specular`:
+
+* **RGB = sqrt(F0')**, linear, where F0' = clamp(weight x colour x ((ior - 1) / (ior + 1))^2), colour
+  sRGB-decoded -- the PBRM v6 dielectric law (the editor's preview and NifSkope's viewport). A reader
+  squares it. sqrt is the Fresnel amplitude: the default F0 0.04 sits at level 51, so one level is 3.9 %
+  of it where a linear F0 would be 10 %. F90' = sat(50 F0') derives from it; nothing else is needed for
+  a dielectric lobe. (OpenPBR's remap is ior' = (1 + sqrt F0') / (1 - sqrt F0').)
+* **A = the specular weight.** A metal's lobe is weight x F82(base, colour): the metal keeps its weight
+  and loses only the colour as its F82 edge tint, which FO4CS does not read (PBRM-v6.md, dielectrics
+  only).
+* **Absent key = F0 0.04, weight 1** (the default specular: weight 1, white, IOR 1.5). The bake writes
+  the sheet only when some shape departs from that; a legacy card never has one.
+* BC7 at the aux size (`auxDiv`), mips as the other aux sheets. The BC7 channel weights are the `_n`
+  sheet's ({1, 1, 32, 1}), so B is favoured over R and G on this sheet too; the error is gated against
+  the same set's `_n` R/G codec floor (`tests/spells/impostor_pbrm.sh` R4).
+* **No version bump.** A new texture key changes no existing key's meaning, and a reader ignores keys
+  it does not know (§2).
+* **Not in the card ARRAYS.** `cardArray` files carry no specular layer yet; an array consumer draws
+  arrayed pbr cards at F0 0.04, weight 1. Owed with the FO4CS reader.
+* **Separable.** The sheet and the key are one commit of their own (`src/lodgen.cpp`, the card region);
+  dropping it leaves the rest of step 7 (the `.pbrm` colour, tint, roughness, metallic) intact.
+* This `_s` is a CARD sheet, `<id>_oct_s.DDS`; it is unrelated to the chunk atlas's
+  `<ws>.LodgenObjects_s.DDS` (BC5, gloss / specular, `LODGEN_IMPOSTOR_SPEC.md`, "Chunk shapes").
 
 ## 3a. `kind: "aggregate"` — one forested CELL's whole tree cluster on one card set
 
@@ -305,6 +427,7 @@ from, which is the same rule applied where the rule means something.
 | `layers` | `array` | string[] | one entry per layer: the **source colour texture path** that layer was built from |
 | `layers` | `cardArray` | object[] | one per layer: `{ id, half[2], center[3], depthSpan, frameOffset?, projection?, conv?, coverage?, source }` — `id` is the base's form ID, and the geometry is per layer because two trees of one sheet size are not the same size in the world. `frameOffset` is per layer for the same reason: two sets in one array have different per-frame shifts, and a layer from a set baked before the law carries no key at all. `projection` is per layer for the same reason again: an array can hold a metric set beside a foreshortened one, and only the layer knows which it is. `conv` (§3) is per layer for the same reason: a library part-way through the re-bake holds both vintages in one size class |
 | `emissiveScale` | both | number[] | one per layer, **parallel to `layers`** |
+| `sway`, `leafAmplitude`, `leafFrequency` | `cardArray`, only when a layer carries model sway (the file is then `lodm` 2) | string[], number[], number[] | one per layer, parallel to `layers` (§3.3) |
 | `oct` | `cardArray` | int | frames per side, shared by every layer of the array |
 | `frame` | `cardArray` | int[2] | frame size, shared by every layer |
 | `pad` | `cardArray` | int[2] | the margin in texels on each side of a frame, per axis, shared. An array is built from the same PNGs and the same dilation as the per-card sets, so it inherits their spacing and their clean mip depth |
@@ -469,7 +592,7 @@ before trusting a number here.**
 |---|---|---|
 | magic, envelope version, 4 MiB cap | `lodmfile.cpp:10` | `static const qsizetype LODM_PAYLOAD_CAP` |
 | 12-byte envelope, exact payload size | `lodmfile.cpp:16-38` | `bytes.size() < 12`, `declared != bytes.size() - 12` |
-| `lodm != 1` refusal | `lodmfile.cpp:47` | `payload is not a lodm 1 object` |
+| `lodm` 1 or 2 refusals | `lodmfile.cpp:46-63` | `payload is not a lodm 1 object`, `lodm 2 is the card family's version` |
 | family hard refusal | `lodmfile.cpp:52-54` | `family must be legacy or pbr` |
 | `kind` defaults to `source` | `lodmfile.cpp:56` | `.toString( QStringLiteral( "source" ) )` |
 | `emissiveScale` defaults to 1 | `lodmfile.cpp:63` | `.toDouble( 1.0 )` |

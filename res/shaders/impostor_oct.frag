@@ -154,7 +154,9 @@ uniform int   debugChannel;        // 0 = lit; otherwise one sheet channel raw
 
 /* SWAY, AND WHAT A CARD CAN HONESTLY SHOW OF IT (spec 288..290).
  *
- * The sway weight is h^2 x (0.35 + 0.65 r) per TEXEL, and the law it feeds is
+ * The sway weight is per TEXEL: W x h on a model with a tree-animation shape
+ * (its own vertex-alpha wind weight, `lodm` 2, sway A), else the synthetic
+ * h^2 x (0.35 + 0.65 r). The law it feeds is
  * the chunk builder's, applied to VERTICES. A card is four vertices, so there
  * is nothing to displace: the weight varies across the quad and the quad does
  * not.

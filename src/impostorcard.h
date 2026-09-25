@@ -55,7 +55,17 @@ struct ImpostorCardSet
 	bool pbr = false;		//!< family: false legacy (GSAOS), true pbr (RMAOS)
 	QString kind;			//!< "card" or "cardArray"
 
-	int oct = 0;			//!< N, the grid side (spec 225)
+	int oct = 0;			//!< N, the grid side (spec 225); 0 on a ring set
+	/*! THE HORIZON RING (lane CARDFIX1 step 5, IMPOSTORRING1; bungo 2026-09-23:
+	 *  "22.5 degrees per take"). > 0 = the set's `views` V: V frames in ONE row,
+	 *  frame v photographed from azimuth 360*v/V at elevation 0 (the aggregate's
+	 *  layout, docs/LODGEN_LODM_FORMAT.md 3a). `oct` is then 0, so nothing that
+	 *  lays out an N x N grid can take a ring for one; cols()/rows() are the
+	 *  sheet's layout either way, and frame (i, j) is at index j*cols() + i. */
+	int views = 0;
+	int cols() const { return views > 0 ? views : oct; }
+	int rows() const { return views > 0 ? 1 : oct; }
+	bool ring() const { return views > 0; }
 	int frameW = 0, frameH = 0;	//!< one frame's pixels; the sheet is N x this
 	int mips = 0;			//!< spec 243: the cap, which a consumer must obey
 	float halfW = 0.0f, halfH = 0.0f;	//!< the quad IS the frame (spec 239)

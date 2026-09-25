@@ -32,6 +32,8 @@ Data\FO4CSLOD\Cards\<formid8hex>_oct_d.DDS      legacy   BC3
                     <formid8hex>_oct_n.DDS               BC7 (DX10, DXGI 98)
                     <formid8hex>_oct_rmaos.DDS           BC3
                     <formid8hex>_oct_e.DDS               BC1
+                    <formid8hex>_oct_s.DDS               BC7 (DX10, DXGI 98), OPTIONAL: a .pbrm
+                                                         model's specular (2026-09-25; below)
                     <formid8hex>_oct.lodm                kind "card"
 ```
 
@@ -47,7 +49,8 @@ chunk drew as an opaque square.
 
 The bake's own intermediate is a set of PNGs
 (`<id>_oct_albedo.png`, `_oct_normal.png`, `_oct_gsaos.png` / `_oct_rmaos.png`,
-`_oct_g.png` / `_oct_e.png`) plus a `<id>.txt` sidecar (§5). Those are inputs to
+`_oct_g.png` / `_oct_e.png`, and on a `.pbrm` model with a non-default specular
+`_oct_s.png`) plus a `<id>.txt` sidecar (§5). Those are inputs to
 `lodgenCard` and to the array packer, not a shipped format.
 
 ### 1.2 Card arrays — one per (family, sheet size)
@@ -132,6 +135,39 @@ wrong.
 passes: the first photographs every view at the bound-sphere fit and takes the
 widest and tallest silhouette extent from the centre over all of them; the second
 bakes at that fit.
+
+### 2.1 The tree RING (2026-09-24)
+
+Tree cards are not on this grid any more: they are 16 azimuths at elevation 0 in
+ONE row, `views × 1` -- the aggregate's ring (§10.2) at 22.5 degrees, by bungo's
+ruling of 2026-09-23. `docs/LODGEN_LODM_FORMAT.md` §3.2 is the contract: `views`
+and `grid` instead of `oct`, frame `v` at `[v·frameW, (v+1)·frameW) × [0, frameH)`,
+two neighbours blended by angle. Everything in §3 onward -- the gap, the padding,
+the size ladders, per-frame positioning, the orthographic camera, the channels --
+is the grid's, frame for frame. The bake: `WW_IMPOSTOR_RING=16` (it wins over
+`WW_IMPOSTOR_OCT`); the driver: `RING=16`, an option -- the default is the N8 grid
+(`RING=0`) for every run, trees included (bungo 2026-09-25: "Yes, 8x8 is the default choice for a bake").
+
+Measured against the N8 grid on the same model at the same tile: the grid's
+horizon is 28 frames whose azimuths bunch toward the diagonals (per quadrant 0,
+9.5, 21.8, 36.9, 53.1, 68.2, 80.5, 90 degrees; largest step 16.2), the ring's is
+16 at a uniform 22.5. `tests/spells/impostor_ring.sh` prints both at the
+in-between azimuths and at elevations 0/5/15/30/60.
+
+Measured 2026-09-24 (exe eaa4b0b6, TreeMapleblasted05, 256 tile, the default
+crisp draw, card vs mesh silhouette IoU):
+
+| | ring16 | N8 | ring8 |
+|---|---|---|---|
+| full turn at el 0, 1-degree steps | 0.690 | 0.784 | 0.526 |
+| worst 1-degree popping step (px) | 62,795 | 47,453 | 78,686 |
+| in-between azimuths, el 0 | 0.489 | 0.825 | |
+| el 15 / 30 / 60 | 0.427 / 0.285 / 0.209 | 0.651 / 0.795 / 0.371 | |
+
+The ring draws within 2 percent of what a perfect photograph from its nearest
+frame could score (the mesh against itself 0-11.25 degrees away: 0.701 over the
+full turn). What it gives up against N8 is the frame count -- 16 horizon frames
+to 28 -- and every frame above the horizon; it costs a quarter of the pixels.
 
 ---
 
@@ -449,11 +485,12 @@ Formats and channel roles are the `.lodm` family contract
 | colour A | **coverage**, from a two-pass matte over black and white: `coverage = 1 − (passes' difference)` |
 | normal R, G | the geometric normal in the **VIEW's** space, back faces flipped, half-packed. Opposite views differ; top and horizon agree |
 | normal B (height) | window depth of the orthographic bake. **0.5 is the card plane**; `units = (B − 0.5) × depthSpan`, with `depthSpan = 3 × max(boundRadius, 1024)`. Drives pixel depth offset, ghost-free frame blending, shadows and the model-to-card transition. Stored **BC7** since 2026-09-23 (§6.1) |
-| normal A (sway) | `h² × (0.35 + 0.65·r)`, `h` up from the view's own bottom row, `r` the radius from the silhouette's axis; **explicit 0 for rigid objects** |
+| normal A (sway) | a model with a tree-animation shape: **`W × h`**, `W` its own vertex-alpha wind weight (channel 11 G; 0 on a shape the game never moves), `h` linear up from the view's own bottom row -- sway A, `lodm` 2 (CARDFIX1 step 6). Otherwise `h² × (0.35 + 0.65·r)`, `r` the radius from the silhouette's axis; **explicit 0 for rigid objects** |
 | mask R, G | legacy: gloss = smoothness × the `_s` map's G, specular = the `_s` map's R × specular strength, **never inverted**. pbr: the source `.lodm`'s third texture **raw** |
 | mask B (AO) | from the height neighbourhood — the share of neighbours nearer the camera by more than a step, eight directions, four rings — multiplied by the third texture's own B when a `.lodm` supplied one |
 | mask A (subsurface) | a material **label**. 1 where any shape of the model carries the engine's tree-animation flag, else 1 where the shape is alpha-tested and 0 where opaque. The sidecar says which rule ran (`mask tree` \| `mask alpha`) |
 | emissive RGB | legacy: `baseMap.rgb × baseMap.a × lodEmissiveColor` where the material is **not** alpha-tested, black where it is. pbr: the source `.lodm`'s `emissive` raw; an **empty** retarget binds black, which is how a set says it emits nothing. Written opaque, BC1. The **multiple** is not in the picture — it is `emissiveScale` in the `.lodm` |
+| `_s` RGB, A (pbr, optional) | a card whose shapes resolve `.pbrm` files (CARDFIX1 step 7, IMPOSTORPBRM1): RGB = sqrt(F0'), F0' = clamp(weight x sRGB-decoded specular colour x ((ior-1)/(ior+1))^2); A = the specular weight. Two extra channel-10 passes per view photograph per-shape sources the bake wrote on the CPU. Written only when a shape departs from the default specular; absent = F0 0.04, weight 1. BC7 at the aux size, dilated like the other aux sheets. Not carried into card arrays. `LODGEN_LODM_FORMAT.md` §3.4 |
 
 **Un-premultiplication and the coverage floor.** Every channel render is averaged
 over a black background on the way down to the frame, so a partly covered texel
@@ -539,7 +576,17 @@ gap <x> <y>                  the distance in texels between two neighbouring
                              silhouettes across a frame border, per axis; the
                              margin on each side of a frame is half of it
 emissive <scale> shapes <n>  the largest emissive multiple over the model's shapes
+pbrm <path> <route> <used|unused|refused> tree <0|1>
+                             one per shape that resolved a .pbrm (route direct |
+                             sibling | stem); `unused` on a mixed (legacy) model
+pbrmrefused <path> <why>     a .pbrm whose sources the bake could not evaluate
+                             (the card then falls back to legacy)
+specular _s|none             after the `class` line: whether `_oct_s.png` was written
 oct N frameW frameH halfW halfH cx cy cz depthSpan family base
+ring V frameW frameH ...     INSTEAD of the `oct` line on a horizon-ring bake
+                             (§2.1): the same fields, V frames in one row. An
+                             old lodgen finds no `oct` line and makes no set,
+                             rather than reading V as N
 frameoff <i> <j> <ox> <oy>   one per frame: where THAT frame's quad sits relative
                              to `center`, in model units, along that view's own
                              right and up axes (§3.6)
@@ -555,6 +602,10 @@ orthofit <asked> <achieved> <persp 0|1>
                              projection -- both are Dist/Zoom -- so the third is
                              the field that MOVES (§3.7)
 lodm <candidate> <family|none|rejected> <diffuse>    one per textured shape
+ringview <v> <azim> <elev>   ring bakes only, one per frame: the camera the
+                             renderer HELD for frame v, in degrees, read back
+                             from the view at the moment it was drawn -- the
+                             echo impostor_ring.sh R1 checks against v x 360/V
 ```
 
 **The `oct` line's family is NOT the last token any more** — `base` follows it.

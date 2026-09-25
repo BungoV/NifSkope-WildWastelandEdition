@@ -1,0 +1,19 @@
+== lodgen_defaults: the exe under test ==
+       -rwxr-xr-x 1 bungo 197609 24729600 2026-09-24_23:00:20 /e/Projects/NifskopeWWE-cardfix1/release/NifSkope.exe
+== (d) arrays and impostor cards with identity OFF ==
+       d_new: rc=0, 697 s, 93 files
+       d_on: rc=0, 694 s, 93 files
+       rows lines: default (identity off) 7626 | identity spelled on 7626
+  ok   (d) rows line count is unchanged with identity off (7626)
+       C lines: default (identity off) 7210 | identity spelled on 7210
+  ok   (d) C line count is unchanged with identity off (7210)
+       I lines: default (identity off) 35 | identity spelled on 35
+  ok   (d) I line count is unchanged with identity off (35)
+       M lines: default (identity off) 12 | identity spelled on 12
+  ok   (d) M line count is unchanged with identity off (12)
+       A lines: default (identity off) 23 | identity spelled on 23
+  ok   (d) A line count is unchanged with identity off (23)
+       texture-array files: identity off 11 | identity on 11
+  ok   (d) the texture arrays are still written with identity off (11 files)
+6 checks, 0 failures
+RESULT PASS

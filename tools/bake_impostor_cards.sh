@@ -139,6 +139,17 @@ case "${CANDIDATES:-missing}" in
 	*) echo "CANDIDATES must be trees or missing; got '${CANDIDATES}'" >&2; exit 2 ;;
 esac
 CANDIDATES="${CANDIDATES:-missing}"
+# THE HORIZON RING (lane CARDFIX1 step 5, IMPOSTORRING1) is an OPTION: RING=16 photographs 16 azimuths
+# at elevation 0 in one row (the aggregate's ring layout) instead of the OCT x OCT hemi-octahedral grid.
+# THE DEFAULT IS THE N8 GRID (RING=0) for every run, trees included. bungo RULED 2026-09-25: "Yes, 8x8
+# is the default choice for a bake" -- replacing his 2026-09-23 ring default for tree runs, after step 5
+# measured N8 better than the ring at every elevation, the horizon included (docs/LODGEN_LODM_FORMAT.md
+# 3.2). With a ring, OCT is not used for the sheets (the library.txt says which one the set carries).
+RING="${RING:-0}"
+case "$RING" in
+	0|16) ;;
+	*) echo "RING must be 0 (the N8 grid, the default) or 16 (the 22.5-degree horizon ring); got '${RING}'" >&2; exit 2 ;;
+esac
 RESOURCES="${RESOURCES:-}"
 MO2="${MO2:-}"
 
@@ -186,6 +197,7 @@ fi
 # the half-aux choice, recorded beside the library it applies to
 {
 	echo "oct ${OCT}"
+	echo "ring ${RING}"
 	echo "tile ${TILE}"
 	echo "ref ${REF}"
 	echo "half_aux ${HALF_AUX:-0}"
@@ -220,9 +232,10 @@ while read -r formid extent model; do
 		continue
 	fi
 	rm -rf "$W/bake"; mkdir "$W/bake"
-	# OCT=N adds the octahedral sheets (N x N views, TILE px each) for FO4CS.
+	# OCT=N adds the octahedral sheets (N x N views, TILE px each) for FO4CS;
+	# RING=16 photographs the horizon ring instead (16 views in one row, TILE px each).
 	# The GUI gets the same stack, so the card photographs the mod's textures.
-	WW_IMPOSTOR_BAKE="$(winpath "$W/bake")" WW_IMPOSTOR_OCT="${OCT:-}" WW_IMPOSTOR_TILE="$TILE" \
+	WW_IMPOSTOR_BAKE="$(winpath "$W/bake")" WW_IMPOSTOR_OCT="${OCT:-}" WW_IMPOSTOR_RING="$RING" WW_IMPOSTOR_TILE="$TILE" \
 		WW_IMPOSTOR_REF="$REF" \
 		WW_LODGEN_RESOURCES="$RESOURCES" WW_LODGEN_MO2="$MO2" \
 		"$NS" "$(winpath "$mesh")" --port 45917 >/dev/null 2>&1

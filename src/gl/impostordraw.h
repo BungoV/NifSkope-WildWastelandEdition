@@ -66,6 +66,10 @@ struct Options
 	//! read before; 2 = the strongest frame alone, which pops and exists only
 	//! as impostor_draw.sh row 18's red control. `WW_IMPOSTOR_CUT=mean|strong`
 	//! forces 1 or 2 for every draw.
+	//! THIS IS THE BLENDED SLIDER'S CUT. At the crisp end (the default, one
+	//! frame) the cut is rule 2, the strongest frame, BY NAME -- bungo's R5
+	//! (2026-09-24 21:1x: "crisp cards -- N8, crisp cut, slider crisp end");
+	//! see Resolved::cutRule.
 	int cutRule = 0;
 	/*! THE SLIDER, crisp (0) to smooth (1) -- docs/FO4CS_IMPROVED_LOD_PLAN.md's
 	 *  slider contract, bungo's rulings of 2026-09-23 (lane IMPOSTORDEPTH2):
@@ -220,6 +224,8 @@ struct Resolved
 	int   frameCount = 1;     //!< 1 snap or flat, 3 blended
 	int   searchSteps = 0;    //!< after WW_IMPOSTOR_SEARCH / Options::depthSearchSteps
 	float sharpen = 1.0f;     //!< the weights' exponent, 1/slider between the ends
+	int   cutRule = 2;        //!< the cut drawn: 2 (strongest frame) at the crisp end,
+	                          //!< Options::cutRule once blended; WW_IMPOSTOR_CUT still wins
 	bool  sliderForced = false, snapForced = false, searchForced = false;
 };
 Resolved resolve( const Options & opt );

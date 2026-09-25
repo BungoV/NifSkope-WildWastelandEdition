@@ -1,0 +1,13 @@
+- Kept green on eaa4b0b6 (gates/*.s5.out, *.s5b.out): impostor_trunk 38 / 3, the three named (flat-snap tear
+  el 0 and el 20 = bungo's 13:1x ruling; smooth end el 20) -- re-run ALONE (s5b) because the chained run
+  was refused while another lane's --port harness was up; impostor_draw 33 / 1 (row 5, the known red);
+  impostor_aa 7 / 0; impostor_defaults 7 / 0 with RUNG= the rung (D7 byte-identical at all 16 views; the
+  chained run without RUNG reads 6 / 0 because D7 only runs with a rung); impostor_shrubs PASS (54 of 54
+  baked, 0 empty); lodgen_octahedral 116 ok / 0; lodgen_card_arrays 37 ok / 0; lodgen_impostor_cards
+  12 ok / 0.
+- lodgen_defaults.sh phase (d) with CARDS=<main tree>/scratchpad/showcase1_20260912/cards: 6 / 0
+  (C lines 7210 = 7210, I 35, M 12, A 23, arrays 11 = 11; gates/lodgen_defaults.d.s5.out). The director's
+  "no impostor-card lines with identity off" red is NOT a generator defect: a fresh worktree's card
+  directory holds only the .txt sidecars git carries, so no card places and every C count reads 0. Fixed
+  cheaply in step 1 (19c0347): the gate now fails BY NAME ("the card directory holds no card image ...
+  set CARDS=") instead of reporting 0 C lines. Gate dir restored with git checkout afterwards.

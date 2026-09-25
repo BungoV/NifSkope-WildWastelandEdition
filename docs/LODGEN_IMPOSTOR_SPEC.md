@@ -32,7 +32,29 @@ our own format.
 | family | source | textures | third texture |
 |---|---|---|---|
 | **legacy** | the vanilla material: diffuse, normal, the `_s` map, smoothness, specular strength | `_d`, `_n`, `_gsaos`, `_g` | **GSAOS** = gloss, specular, AO, subsurface mask |
-| **pbr** | a source `.lodm` of family pbr | `_bc`, `_n`, `_rmaos`, `_e` | **RMAOS** = roughness, metallic, AO, subsurface mask |
+| **pbr** | a source `.lodm` of family pbr, or (cards, 2026-09-25) a `.pbrm` on every textured shape | `_bc`, `_n`, `_rmaos`, `_e`, and on a card optionally `_s` | **RMAOS** = roughness, metallic, AO, subsurface mask |
+
+**Cards from `.pbrm` models (IMPOSTORPBRM1, lane CARDFIX1 step 7).** The card bake resolves each
+textured shape's `.pbrm` through the viewport's one resolver (`io/pbrmresolve`: the direct name, the
+same-name sibling of the `.bgsm`, the diffuse stem), reading `WW_LODGEN_DATA_ROOT` first and then the
+resource stack. A shape with a source `.lodm` keeps it. Every textured shape pbr-sourced = family pbr;
+a MIXED model stays legacy, exactly as before, and its sidecar names the `.pbrm` shapes it did not use
+(`pbrm <path> <route> unused tree <0|1>`). The bake evaluates the `.pbrm` law in texture space on the
+CPU and retargets the shape's slots at the results; no shader changed.
+
+* **Carried:** base colour x the tint masks (TintMask applied in the bake, so `_bc` is the TINTED
+  colour: Normalize / Add / Priority as the viewport evaluates them), opacity, roughness, metallic,
+  AO, the emissive (colour x mask, `emissiveScale` = luminance / 100), the normal map, and the specular
+  weight, colour and IOR as `_s` (RGB sqrt(F0'), A weight; `LODGEN_LODM_FORMAT.md` §3.4).
+* **Dropped, by design:** coat, fuzz, transmission, thin film, subsurface colour -- no LOD reader for
+  any of them, sub-pixel at LOD distance, and each would be another sheet. A metal's specular colour as
+  its F82 edge tint (the weight is kept).
+* **Not applied:** a normal `strength` other than 1 (the map is photographed as it is).
+* **Not carried:** tint per REFERENCE. FO4 recolours a placed reference by material swap (XMSP -> MSWP,
+  with a colour remapping index); the card is baked per base model, so a swapped reference shows the base
+  material's card. Carrying it would need the mask on the card plus four colours per reference.
+* **FO4CS contract:** a reader of a pbr card binds `_s` when `textures.specular` is present and uses
+  F0 = (_s.rgb)^2, weight = _s.a; absent = F0 0.04, weight 1. Owed (FO4CS readers are built last).
 
 `_gsaos` spells its channels the way `_rmaos` does and sits in the same slots
 (gloss where roughness goes, specular where metallic goes), so one shader
@@ -45,6 +67,7 @@ two-channel `_s`.
 | `_n` | BC3; **BC7** on a card | normal X | normal Y | height | sway weight |
 | `_gsaos` / `_rmaos` | BC3 | gloss / roughness | specular / metallic | AO | subsurface mask |
 | `_g` / `_e` | BC1 | emissive colour | | | — |
+| `_s` (pbr card only, optional) | BC7 | sqrt(F0') R | sqrt(F0') G | sqrt(F0') B | specular weight |
 
 Normal Z is rebuilt as √(1 − x² − y²). Coverage is the cut-out and the
 alpha-test channel; it lives on the colour sheet and nowhere else, which is
@@ -213,6 +236,24 @@ the format from the header (DirectXTex `LoadFromDDSMemory` does) reads both.
 Channel meaning is unchanged and the `.lodm` names files, not formats, so no
 version moved.
 
+**The tree ring, and what FO4CS's card reader must learn (2026-09-24, owed;
+FO4CS is built last).** Tree cards are now 16 azimuths at elevation 0, one
+row (`docs/LODGEN_LODM_FORMAT.md` §3.2). The `.lodm` says `views` 16 and
+`grid` [16,1] and has **no `oct`**. Until FO4CS reads that, a reader that
+requires `oct` must refuse the set by name -- never take `views` for N. The
+change, in order: (1) layout from `views`/`grid` when `oct` is absent, frame
+`v` at u `[v/V, (v+1)/V)`, v `[0, 1)`; (2) frame eye `(cos φ, sin φ, 0)`,
+`φ = 2πv/V`, right `(−sin φ, cos φ, 0)`, up `(0, 0, 1)`; (3) selection = the two
+frames bracketing the camera azimuth, weights `1 − t`, `t` by angle, no
+elevation term; the crisp end draws the stronger alone; (4) `frameOffset` is
+`2·V` long, view `v` at `[2v]`; (5) a `cardArray` carries the same keys;
+(6) a card or card array at `lodm` 2 (`sway` "model", CARDFIX1 step 6) holds
+the model's own weight × h in `_n.A`, not the synthetic law: FO4CS refuses it
+by name until its reader drives the card's wind from that weight and the
+`leafAmplitude` / `leafFrequency` beside it.
+NifSkope's drawer (`src/gl/impostordraw.cpp`, `selectFrames` ring branch) is
+the reference.
+
 **Source.** The base's own near model (the record's MODL), not a LOD
 derivative: the candidate listing (`--list-impostor-candidates`, driver
 `tools/bake_impostor_cards.sh`) prints it, falling back to the first filled
@@ -335,9 +376,12 @@ tests low still gets the neighbours' colour there.
   units = (value − 0.5) × depthspan, with depthspan = 3 × max(bound radius,
   1024). Used for pixel depth offset, ghost-free frame blending, shadows and
   the model-to-card transition.
-- sway: h² × (0.35 + 0.65 × r), h up from the view's own bottom row, r the
-  radius from the silhouette's axis; 0 for rigid objects. The chunk builder's
-  law, applied to the picture.
+- sway: **sway A** (bungo 2026-09-24 21:1x) on a model with a tree-animation
+  shape: W × h, W the model's own vertex-alpha wind weight (0 on a shape the
+  game never moves), h linear up from the view's own bottom row; the `.lodm`
+  says `lodm` 2, `sway` "model" (`docs/LODGEN_LODM_FORMAT.md` §3.3). Otherwise
+  h² × (0.35 + 0.65 × r), r the radius from the silhouette's axis; 0 for rigid
+  objects. The chunk builder's law, applied to the picture.
 - R, G of the third sheet: shader channel 10 — the legacy pair composed
   from the vanilla material (above), or a source `.lodm`'s third texture raw.
 - AO: from the height neighbourhood — the share of neighbours nearer the

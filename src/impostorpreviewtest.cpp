@@ -23,6 +23,9 @@ BSD License - see nifskope.h
 #include <cstdio>	// fflush, for the redirected streams a caller reads
 #include <cstdlib>	// std::_Exit -- see endRun()
 
+//! nifskope_ui.cpp: the card bake's .pbrm retarget, applied to the preview's mesh (harness only)
+QStringList wwPbrmRetargetScene( Scene * sc, const QString & looseRoot );
+
 /* ---------------------------------------------------------------------------
  * WW_IMPOSTOR_PREVIEW -- what "actually works" is allowed to mean.
  *
@@ -583,9 +586,14 @@ bool wwImpostorPreviewStart( NifSkope * skope, GLView * ogl, QWidget * viewportH
 		s.opt.cutRule = cut.compare( QStringLiteral( "mean" ), Qt::CaseInsensitive ) == 0 ? 1
 				: cut.compare( QStringLiteral( "strong" ), Qt::CaseInsensitive ) == 0 ? 2 : 0;
 	}
-	s.log << ( s.opt.cutRule == 1
+	// Lane CARDFIX1 (R5): the rule the DRAWER resolves, so the crisp end's own
+	// cut (the strongest frame, by name) is what the log says.
+	const int cutDrawn = s.opt.cutRule != 0 ? s.opt.cutRule : ImpostorDraw::resolve( s.opt ).cutRule;
+	s.log << ( cutDrawn == 1
 			? QStringLiteral( "cut rule: mean -- the 3-frame MEAN coverage (WW_IMPOSTOR_CUT=mean, the way back)" )
-			: s.opt.cutRule == 2
+			: cutDrawn == 2 && s.opt.cutRule == 0
+			? QStringLiteral( "cut rule: strong -- the STRONGEST frame alone: the crisp end's own cut (R5, the default)" )
+			: cutDrawn == 2
 			? QStringLiteral( "cut rule: strong -- the STRONGEST frame alone (WW_IMPOSTOR_CUT=strong, row 18's red control)" )
 			: QStringLiteral( "cut rule: stipple -- each frame's own silhouette at density min(1, 2w), mean as the floor (IMPOSTORTEAR1)" ) );
 	// Lane IMPOSTORDEPTH1: the blend, the snap and the depth search, each said
@@ -662,6 +670,13 @@ bool wwImpostorPreviewStart( NifSkope * skope, GLView * ogl, QWidget * viewportH
 			|| qEnvironmentVariableIntValue( "WW_IMPOSTOR_SHUFFLE" ) != 0;
 	if ( s.opt.shuffleFrames )
 		s.log << QStringLiteral( "SHUFFLED: the frame choice is deliberately wrong (red control)" );
+
+	/* THE SWAY, on request (CARDFIX1 step 6): the drawer's wind shear at a fixed
+	 * amplitude and phase, so a run of phases makes a moving picture. 0 = still. */
+	s.opt.swayAmplitude = float( qEnvironmentVariable( "WW_IMPOSTOR_SWAY_AMP" ).toDouble() );
+	s.opt.swayPhase = float( qEnvironmentVariable( "WW_IMPOSTOR_SWAY_PHASE" ).toDouble() );
+	if ( s.opt.swayAmplitude != 0.0f )
+		s.log << QStringLiteral( "sway: amplitude %1, phase %2 rad" ).arg( s.opt.swayAmplitude ).arg( s.opt.swayPhase );
 
 	/* THE SECOND SET. Loaded for every mode, not just `pair`, so a `show` run
 	 * can put two grids on the screen for a picture; only `pair` measures it. */
@@ -1011,6 +1026,16 @@ bool wwImpostorPreviewStart( NifSkope * skope, GLView * ogl, QWidget * viewportH
 			 * it is the side-light picture's switch. Neither is persisted: the
 			 * members are set on this window only, never in QSettings. */
 			const int meshChannel = qEnvironmentVariableIntValue( "WW_IMPOSTOR_MESH_CHANNEL" );
+			/* WW_IMPOSTOR_MESH_PBRM=1 (IMPOSTORPBRM1's pictures): the mesh takes the
+			 * bake's .pbrm retarget, so channel 10 on the mesh half is the source's
+			 * own roughness / metallic. The .pbrm is read from WW_LODGEN_DATA_ROOT
+			 * first, as the bake reads it. */
+			if ( qEnvironmentVariableIntValue( "WW_IMPOSTOR_MESH_PBRM" ) == 1 ) {
+				for ( const QString & l : wwPbrmRetargetScene( ogl->getScene(),
+						qEnvironmentVariable( "WW_LODGEN_DATA_ROOT" ) ) )
+					st.log << l;
+			}
+
 			if ( meshChannel != 0 )
 				st.log << QStringLiteral( "orbit mesh half through LOD channel %1 (WW_IMPOSTOR_MESH_CHANNEL)" )
 						.arg( meshChannel );
@@ -1081,6 +1106,12 @@ bool wwImpostorPreviewStart( NifSkope * skope, GLView * ogl, QWidget * viewportH
 							.arg( iou, 0, 'f', 4 ).arg( col, 0, 'f', 4 ).arg( overlap )
 							.arg( ( wroteMesh && wroteCard ) ? QStringLiteral( "written" )
 									: QStringLiteral( "SAVE FAILED" ) );
+
+					// THE SELECTION, per view, on request (CARDFIX1 step 5): the frames the
+					// drawer chose here and their weights, so a gate can check the rule.
+					if ( qEnvironmentVariableIntValue( "WW_IMPOSTOR_ORBIT_SELECT" ) != 0 )
+						for ( const QString & line : ImpostorDraw::describeSelection( scene, st.set, st.offset, st.opt ) )
+							st.log << QStringLiteral( "  select %1" ).arg( line );
 
 					if ( meshCov == 0 || frac > 0.95 ) {
 						st.log << QStringLiteral( "  EXCLUDED: mesh coverage %1 is degenerate" )

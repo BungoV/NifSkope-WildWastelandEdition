@@ -7463,7 +7463,7 @@ int nifskopeCliMain( const QStringList & args )
 		 * and the triple RENORMALISED, never clamped. The sheet is written
 		 * UNCOMPRESSED (B8G8R8A8 through a DX10 header) with a full mip chain,
 		 * because a BC re-encode puts back the 4x4 block grid that is the one
-		 * thing the cache removed. There is no BC7 encoder in this tree. What
+		 * thing the cache removed. BC7 (src/lodgenbc7.h) is not used here. What
 		 * this costs over a worldspace is in the lane report; it is not a
 		 * decision this flag makes for anyone. */
 		else if ( t == QLatin1String( "--msn-cache" ) ) lodgenSetMsnCacheDir( next() );

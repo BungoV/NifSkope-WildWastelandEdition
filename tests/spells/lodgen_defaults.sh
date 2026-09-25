@@ -378,8 +378,15 @@ fi
 if [ "${PHASES#*d}" != "$PHASES" ]; then
 	echo "== (d) arrays and impostor cards with identity OFF =="
 	DIMD="${DIMD:-16}"
+	nimg="$(find "$CARDS" -maxdepth 1 \( -iname "*.png" -o -iname "*.dds" \) 2>/dev/null | wc -l)"
 	if [ ! -d "$CARDS" ]; then
 		echo "  SKIP: no impostor card directory at $CARDS"
+	elif [ "$nimg" -eq 0 ]; then
+		# git carries only the .txt sidecars of this card set, so a fresh WORKTREE has the
+		# directory and no image: the bake then places no card and every C count reads 0,
+		# which looks like a generator defect and is not (CARDFIX1, 2026-09-24). Point
+		# CARDS= at a directory holding the card images (the main tree's copy).
+		bad "(d) the card directory holds no card image ($CARDS): set CARDS= to a baked card set"
 	else
 		CA="$(cygpath -m "$CARDS" 2>/dev/null || echo "$CARDS")"
 		bake "$NS" d_new "$DIMD" -20 24 -20 24 -- --road-detail 1 --no-ao \

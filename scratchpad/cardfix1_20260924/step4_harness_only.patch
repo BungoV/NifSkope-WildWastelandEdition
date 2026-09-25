@@ -1,0 +1,15 @@
+diff --git a/src/impostorpreviewtest.cpp b/src/impostorpreviewtest.cpp
+index 9afc500..55d57aa 100644
+--- a/src/impostorpreviewtest.cpp
++++ b/src/impostorpreviewtest.cpp
+@@ -586 +586,4 @@ bool wwImpostorPreviewStart( NifSkope * skope, GLView * ogl, QWidget * viewportH
+-	s.log << ( s.opt.cutRule == 1
++	// Lane CARDFIX1 (R5): the rule the DRAWER resolves, so the crisp end's own
++	// cut (the strongest frame, by name) is what the log says.
++	const int cutDrawn = s.opt.cutRule != 0 ? s.opt.cutRule : ImpostorDraw::resolve( s.opt ).cutRule;
++	s.log << ( cutDrawn == 1
+@@ -588 +591,3 @@ bool wwImpostorPreviewStart( NifSkope * skope, GLView * ogl, QWidget * viewportH
+-			: s.opt.cutRule == 2
++			: cutDrawn == 2 && s.opt.cutRule == 0
++			? QStringLiteral( "cut rule: strong -- the STRONGEST frame alone: the crisp end's own cut (R5, the default)" )
++			: cutDrawn == 2

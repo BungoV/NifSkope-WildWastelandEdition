@@ -1,0 +1,243 @@
+  ok   candidate 0004a074: Landscape\Trees\TreeMapleForest2.nif
+  ok   the four legacy sheets were written (albedo, normal, gsaos, g)
+  ok   the meta's oct line says legacy, names the run's 64 px and declares the spec1 view convention
+  .lodm candidates looked for: 2
+  ok   the meta names every .lodm candidate it looked for
+  ok   the meta names the model it photographed
+  ok   the meta says the sheet was photographed orthographically
+  bake 1 orthofit 974.629 974.629 0
+  ok   the fit was read back through an ORTHOGRAPHIC camera (asked 974.6290, achieved 974.6290, persp 0)
+  engine detail steps hidden for the bake: 0 (the model names 0)
+  ok   every _L detail step of the model was hidden, and nothing else
+  subsurface mask decided by: tree
+  meta emissive line: emissive 0 shapes 0
+  ok   the meta names the set's emissive multiple
+  ok   the legacy bake's multiple is 0 (nothing own-emits with a lit colour)
+  in-mesh detail ranges reduced to the first: 1 (the model has 1 BSMeshLODTriShape)
+  ok   the bake draws only the first range of the in-mesh steps
+  frame: 32 x 64 px, 440.283 x 880.567 units, family legacy
+  ok   sheets are N frames wide and tall
+  frame law: long 64 (the run's 64), short 32, multiples of 16 allowed [16, 32, 48, 64]
+  ok   the long side is the run's resolution and the short side is a multiple of 16 within it
+  gap: derived 2,4  sidecar ['2', '4']; margin per side 1,2; inner rect 30x60 of 32x64 (0.9375 x 0.9375 of the frame)
+  ok   the meta names the gap on a line of its own, per axis
+  ok   the meta does not also carry the superseded per-side `pad` line
+  ok   the inner rect is exactly 15/16 of the 32-texel frame side
+  ok   the inner rect is exactly 15/16 of the 64-texel frame side
+  ok   the oct line names the run's resolution as its last token
+  ok   the meta names the class on a line of its own
+  distinct albedo frames: 16 of 16; covered pixels per frame: min 277 max 390 of 1800 inside the margins (best 21.7%)
+  ok   the views differ and none is empty
+  ok   the matte leaves the background transparent (no frame is fully covered)
+  frame aspect 0.5000, extents aspect 0.5000
+  ok   the recorded extents carry the frame's aspect (the silhouette is given air, not stretched), best view >= 2% of the inner rect
+  covered texels inside the 1,2-texel padding: 0
+  ok   every frame keeps its padding clear on all four sides
+  union of the 16 silhouette boxes: 28 x 60 texels; inner rect 30 x 60 (long axis fill 100.0%)
+  ok   the silhouette fills at least 85% of the inner rect on the long axis
+  ok   and does not exceed it (the padding is not eaten)
+  air on the short axis: inner 30, silhouette 28 -> 2 texels (information; the ladder's law is the check below)
+  aspect ladder: silhouette 386.2 x 817.4 units wants a short/long inner ratio of 0.4724; rungs ['16:0.233', '32:0.500', '48:0.733', '64:1.000']; smallest that does not crop 32, shipped 32
+  ok   the short side is the SMALLEST multiple of 16 whose inner rect does not crop the measured silhouette
+  ok   and one rung narrower would have cropped it (the ladder sits on its floor, not merely on a rung)
+  ok   the meta carries one frameoff line per frame, and none outside the grid
+  ok   the meta says how many frames had their crop pulled back inside the photograph, and it is none
+  per-frame centring: silhouette box centre off its frame centre, worst of 16 frames: 1.00 texels now; 5.42 texels with the recorded offsets added back (what a fixed-centre bake had)
+  ok   every frame's silhouette is centred in its own frame, within 1.5 texels
+  ok   and the recorded offsets are real: putting them back moves a frame more than a texel further off centre
+  framefit: widest single view 386.2 x 817.4 units, union about the centre 460.2 x 895.7 -> the frame is 16.1% / 8.7% narrower on x / y than a fixed-centre bake would need
+  ok   the meta reports what the frame was sized from and what a fixed centre would have needed
+  1 shipped mips (gap 2,4): narrowest gap across an interior frame border 2.000 texels, over 1152 border samples; worst neighbour alpha a border tap picks up 0/255
+  ok   every shipped mip keeps a whole texel of gap between the silhouettes that meet on a frame border
+  ok   no shipped mip lets a border tap pick up any of the neighbouring frame (zero cross-frame bleed)
+  CONTROL, every silhouette cropped to its own box and filling its cell: 206 covered texels sit on a cell border; narrowest gap 0.471 texels over 1080 samples (must be under 1); worst border alpha 255/255 (must be above 0)
+  ok   the gap check FAILS on a sheet with no spacing at all (the metric can see it)
+  ok   the border-alpha check FAILS on that same sheet (this metric can see it too)
+  normal X: opposite-view red difference max 26.6 (view space if large)
+  ok   the normal sheet differs between opposite views (not one frame copied)
+  ok   normals vary within a covered frame
+  height distinct values 80 in one frame
+  ok   height varies over the covered pixels (normal blue)
+  sway (normal alpha): top quarter 106.6, bottom quarter 0.0
+  ok   sway rises with height (normal alpha)
+  gloss (R) distinct values 24 mean 75.0, specular (G) distinct values 10 mean 14.5, AO distinct values 109
+  ok   gloss carries the map (more than four values)
+  ok   specular carries the map (more than four values)
+  ok   AO varies over the covered pixels (mask sheet blue)
+  subsurface mask: crown rows 253.9, trunk rows 0.0
+  ok   the subsurface mask marks the leaf cards and not the trunk
+  emissive over 5506 covered texels: max channel 0 (the alpha-tested rule says 0)
+  ok   an alpha-tested model emits nothing (the emissive sheet is black wherever it is covered)
+  C lines in the manifest: 863
+  ok   the manifest's C line names the grid and the set's .lodm
+  ok   0004a074_oct_d.DDS written
+  ok   0004a074_oct_n.DDS written
+  ok   0004a074_oct_gsaos.DDS written
+  ok   0004a074_oct_g.DDS written
+  ok   0004a074_oct.lodm written
+  ok   the .lodm envelope is LODM v1 with an exact payload size
+  lodm: {"card":{"base":64,"center":[93.17890167236328,66.29779815673828,886.405029296875],"conv":"spec1","coverage":{"base":160,"floor":16,"test":128},"depthSpan":3072,"frame":[32,64],"frameOffset":[-28.9615
+  ok   the .lodm is a lodm 2 legacy card (the sidecar says sway model; lodm 2 = model sway)
+  ok   the .lodm names the four sheets under the family's keys
+  ok   the .lodm carries the grid, the frame and the extents of the meta
+  ok   the .lodm names the camera the sheet was photographed through, and it is orthographic (got 'ortho')
+  ok   the meta's oct line carries the view convention as its thirteenth token (got 'spec1')
+  ok   the .lodm carries the view convention the sidecar stated (got 'spec1')
+  .lodm coverage: {'base': 160, 'floor': 16, 'test': 128} (the meta said [['16', '128', '160']])
+  ok   F5: the .lodm carries the coverage contract the sidecar stated
+  ok   F5: a consumer testing at the contract's `test` selects the set floored at `floor`
+  .lodm spacing: pad [1, 2] (derived [1, 2]), gap [2, 4] (derived [2, 4])
+  ok   the .lodm records the per-side padding and the gap, and the gap is twice the padding
+  .lodm frameOffset: 32 numbers for 16 frames; largest |offset| 149.10 units
+  ok   the .lodm carries the per-frame offsets, one pair per frame in sheet order, as the sidecar wrote them
+  ok   the per-frame offsets are not all zero (the shift actually happened)
+  offsets against the picture: union half-extent 460.2 x 895.7 units; worst frame reaches 1.000 of it; frames past it: 0
+  ok   every frame's offset plus its own silhouette stays inside the extent a fixed-centre card spanned
+  ok   and at least one frame REACHES that extent (a sheet of zero offsets could not)
+  emissiveScale in the card .lodm: 0 (the meta said '0')
+  ok   the card .lodm carries the meta's emissive multiple at the top level
+  ok   a model whose shapes do not own-emit with a lit colour carries emissiveScale 0
+  ring texels outside the silhouette: 3500
+  edge blocks in the colour sheet: 777, with a near-black endpoint: 0
+  ok   the colour under the cut-out is dilated (no black endpoint at the edges)
+  _oct_d.DDS: 128x256 DXT5 mips 1 (expected 1)
+  _oct_n.DDS: 128x256 DX10 dxgi 98 arraySize 1 mips 1 (expected 1)
+  _oct_gsaos.DDS: 128x256 DXT5 mips 1 (expected 1)
+  ok   the colour and mask sheets are BC3, the _n is BC7 (DX10 dxgi 98), and they mip only while a whole texel of gap survives (mips 1)
+  _oct_g.DDS: 128x256 DXT1 mips 1, 16512 bytes (128 + 16384 expected)
+  ok   the emissive sheet is BC1 (DXT1) at the same size and mip cap, exactly header + its blocks
+  fixture Materials\Landscape\Trees\MapleAtlas02_Tree.lodm -> {'rmaos': 'textures\\Landscape\\Trees\\MapleAtlas02_d.dds', 'emissive': 'textures\\Landscape\\Trees\\MapleAtlas02_d.dds'}
+  fixture Materials\Landscape\Trees\MapleAtlas01.lodm -> {'rmaos': 'textures\\Landscape\\Trees\\MapleAtlas01_d.dds', 'emissive': 'textures\\Landscape\\Trees\\MapleAtlas01_d.dds'}
+  ok   a pbr source .lodm written per candidate
+  ok   the four pbr sheets were written (albedo, normal, rmaos, e)
+  ok   the meta's oct line says pbr, names the run's 64 px and declares the spec1 view convention
+  pbr meta emissive line: emissive 2.5 shapes 2
+  ok   the pbr bake takes its multiple from the source .lodm (2.5)
+  ok   every candidate resolved its .lodm (2 of 2)
+  ok   the pbr bake has the legacy bake's sheet size
+  texels at least a quarter covered in both bakes: 5506, with identical coverage: 5506
+  ok   the cut-out is the same in both bakes
+  pbr mask vs colour sheet (R, G, premultiplied): 0.00; pbr mask vs legacy gsaos (R, G): 60.74 (mean over the texels)
+  ok   a source .lodm retargets the slot and the bake reads it RAW (the mask sheet is the colour sheet)
+  ok   the raw slot differs from the legacy composition
+  emissive: legacy bake max over the compared texels 0; pbr bake vs its colour sheet 0.00, mean level 97.4
+  ok   the alpha-tested legacy bake emits nothing
+  ok   a source .lodm's emissive is read RAW off the glow slot (the emissive sheet is the colour sheet)
+  ok   the pbr card set's chunk names the set's .lodm
+  ok   0004a074_oct_bc.DDS written
+  ok   0004a074_oct_n.DDS written
+  ok   0004a074_oct_rmaos.DDS written
+  ok   0004a074_oct_e.DDS written
+  ok   0004a074_oct.lodm written
+  ok   the pbr set's .lodm says pbr and names _bc/_rmaos/_e
+  ok   the pbr set's .lodm carries the source's emissiveScale 2.5 (got 2.5)
+  ok   the pbr emissive sheet is BC1 (DXT1), fourCC DXT1
+  bake 3: the candidate's extent is 835.0 units, the run's largest is claimed at 3340.0 (four times)
+  bake 3 oct line: oct 4 32 64 440.283 880.567 93.1789 66.2978 886.405 3072 legacy 256 spec1
+  ok   a base a quarter of the run's largest drops two rungs (256 -> 64)
+  ok   the downscaled set still records the run's 256 px, so it is not read as another run
+  bake 3 frame: 32 x 64
+  ok   the aspect quantisation applies beneath the size rung (short 32, a multiple of 16 within the long side)
+  ok   the 512-unit cube fixture was written (1350 bytes)
+  the cube fixture measured through WW_RENDER_ORTHO=512: half-extent 256.8658 units (512 asked of the CLI)
+  ok   the pinned orthographic camera measures the fixture at 256 units, the size the CLI was asked for
+  ok   the cube bake says orthographic
+  ok   the perspective CONTROL says perspective, so the switch and the line both move
+  frame 64x64 texels, 456.24 x 456.24 units half-extent; 64 frames
+  i j | predicted x,y | ortho measured x,y | persp measured x,y
+  0 0 |  36.03  36.03 |   36   36 |   54   54
+  1 0 |  41.47  36.03 |   42   36 |   52   58
+  2 0 |  46.84  36.03 |   48   36 |   47   60
+  3 0 |  50.45  36.03 |   52   36 |   49   60
+  4 0 |  50.45  36.03 |   52   36 |   49   60
+  5 0 |  46.84  36.03 |   48   36 |   47   60
+  6 0 |  41.47  36.03 |   42   36 |   52   58
+  7 0 |  36.03  36.03 |   36   36 |   54   54
+  0 1 |  41.47  36.03 |   42   36 |   52   58
+  1 1 |  36.03  46.84 |   36   48 |   60   47
+  2 1 |  43.70  51.49 |   44   52 |   58   52
+  3 1 |  49.97  55.75 |   50   56 |   58   55
+  4 1 |  49.97  55.75 |   50   56 |   58   55
+  5 1 |  43.70  51.49 |   44   52 |   58   52
+  6 1 |  36.03  46.84 |   36   48 |   60   47
+  7 1 |  41.47  36.03 |   42   36 |   52   58
+  0 2 |  46.84  36.03 |   48   36 |   47   60
+  1 2 |  43.70  51.49 |   44   52 |   58   52
+  2 2 |  36.03  50.45 |   36   52 |   60   49
+  3 2 |  48.34  59.78 |   48   60 |   60   59
+  4 2 |  48.34  59.78 |   48   60 |   60   59
+  5 2 |  36.03  50.45 |   36   52 |   60   49
+  6 2 |  43.70  51.49 |   44   52 |   58   52
+  7 2 |  46.84  36.03 |   48   36 |   47   60
+  0 3 |  50.45  36.03 |   52   36 |   49   60
+  1 3 |  49.97  55.75 |   50   56 |   58   55
+  2 3 |  48.34  59.78 |   48   60 |   60   59
+  3 3 |  36.03  41.47 |   36   42 |   58   52
+  4 3 |  36.03  41.47 |   36   42 |   58   52
+  5 3 |  48.34  59.78 |   48   60 |   60   59
+  6 3 |  49.97  55.75 |   50   56 |   58   55
+  7 3 |  50.45  36.03 |   52   36 |   49   60
+  0 4 |  50.45  36.03 |   52   36 |   49   60
+  1 4 |  49.97  55.75 |   50   56 |   58   55
+  2 4 |  48.34  59.78 |   48   60 |   60   59
+  3 4 |  36.03  41.47 |   36   42 |   58   52
+  4 4 |  36.03  41.47 |   36   42 |   58   52
+  5 4 |  48.34  59.78 |   48   60 |   60   59
+  6 4 |  49.97  55.75 |   50   56 |   58   55
+  7 4 |  50.45  36.03 |   52   36 |   49   60
+  0 5 |  46.84  36.03 |   48   36 |   47   60
+  1 5 |  43.70  51.49 |   44   52 |   58   52
+  2 5 |  36.03  50.45 |   36   52 |   60   49
+  3 5 |  48.34  59.78 |   48   60 |   60   59
+  4 5 |  48.34  59.78 |   48   60 |   60   59
+  5 5 |  36.03  50.45 |   36   52 |   60   49
+  6 5 |  43.70  51.49 |   44   52 |   58   52
+  7 5 |  46.84  36.03 |   48   36 |   47   60
+  0 6 |  41.47  36.03 |   42   36 |   52   58
+  1 6 |  36.03  46.84 |   36   48 |   60   47
+  2 6 |  43.70  51.49 |   44   52 |   58   52
+  3 6 |  49.97  55.75 |   50   56 |   58   55
+  4 6 |  49.97  55.75 |   50   56 |   58   55
+  5 6 |  43.70  51.49 |   44   52 |   58   52
+  6 6 |  36.03  46.84 |   36   48 |   60   47
+  7 6 |  41.47  36.03 |   42   36 |   52   58
+  0 7 |  36.03  36.03 |   36   36 |   54   54
+  1 7 |  41.47  36.03 |   42   36 |   52   58
+  2 7 |  46.84  36.03 |   48   36 |   47   60
+  3 7 |  50.45  36.03 |   52   36 |   49   60
+  4 7 |  50.45  36.03 |   52   36 |   49   60
+  5 7 |  46.84  36.03 |   48   36 |   47   60
+  6 7 |  41.47  36.03 |   42   36 |   52   58
+  7 7 |  36.03  36.03 |   36   36 |   54   54
+  worst |measured - predicted| over the 64 frames: ORTHO 1.55 texels, PERSPECTIVE CONTROL 19.55 texels
+  worst central asymmetry: ORTHO 0.000, PERSPECTIVE CONTROL 0.561 (fraction of covered texels)
+  worst near-edge vs far-edge width difference: ORTHO 0.000, PERSPECTIVE CONTROL 0.795 (fraction)
+  ok   every frame of the orthographic bake spans its predicted texels within 2 (worst 1.55)
+  ok   the PERSPECTIVE CONTROL does not (worst 19.55, and it must exceed 2)
+  ok   the orthographic silhouettes are centrally symmetric within 5% (worst 0.000)
+  ok   the PERSPECTIVE CONTROL is not (worst 0.561, and it must exceed 5%)
+  ok   near and far edge of a frame carry the same width within 5% (worst 0.000)
+  ok   the PERSPECTIVE CONTROL foreshortens (worst 0.795, and it must exceed 5%)
+  ok   the two bakes recorded different half-extents, so the camera reaches the FORMAT and not only the picture (456.24 vs 406.41)
+  at the READER threshold 128/255: worst |measured - predicted| ORTHO 1.55 texels, PERSPECTIVE CONTROL 19.55
+  DECODED to coverage and tested at HALF (128/255 of the decoded fraction, contract floor 16 base 160):
+    worst |measured - predicted| ORTHO 0.84 texels, PERSPECTIVE CONTROL 19.55
+  ok   F1: every frame of the cube spans its predicted texels within 1 AT HALF COVERAGE (worst 0.84)
+  ok   F2 (floor): the PERSPECTIVE CONTROL does not (worst 19.55, and it must exceed 1)
+  ok   F2b (floor): the same cube with its mask dilated one ring -- a silhouette one texel too wide on every side -- does NOT clear the bar (worst 2.53, and it must exceed 1)
+  KNOWN ANSWER, an analytically exact cube through this same instrument:
+    at HALF coverage 0.84 texels; read the OLD way (coverage >= 16/255 = 6.27%) 1.66 texels
+    the shipped bake, same two readings: 0.84 and 1.55
+  ok   F2c (known answer): a defect-free cube clears the 1-texel bar through this instrument (0.84, and OCTF1 computed 0.71 on 2026-09-19)
+  ok   F2d (floor): the SAME defect-free cube read the OLD way does NOT clear it (1.66, and it must exceed 1) -- which is why the bar was never the thing that was wrong
+  the same cube at the bake floor: 1.55 texels; at the reader threshold: 1.55
+  ok   F1b: the reader threshold and the bake floor measure the SAME silhouette (1.55 vs 1.55)
+  ok   F5: the bake states its coverage contract on a line of its own
+  coverage contract: floor 16, test 128, base 160
+  ok   F5: the contract is the one this build writes (floor 16, test 128, base 160)
+  ok   F5: the base leaves BC3 no room to round a covered texel under the test (base - 255/14 = 141.8 > 128)
+  base sheet: 0 texels with alpha in 1..159; DECODED, 3552
+  ok   F3: no texel of the base sheet carries alpha between 1 and 159 (0 found)
+  ok   F4 (floor): the DECODED fraction does carry them, so F3 can fail (3552 found, must exceed 0)
+  ok   F3: the set the consumer tests at 128 is exactly the set the bake floored at 16 (117104 vs 117104)
+RESULT PASS

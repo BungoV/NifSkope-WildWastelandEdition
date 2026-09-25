@@ -402,8 +402,9 @@ void lodgenSetSheetFormat( int fmt );            // LEGACY = off = the rung's by
  *      vanilla's own 512 `_msn` reads a block-grid line of 1.0975 at period 4,
  *      the cleaned 2K reads 1.0259 at period 16, and a plain bicubic 4x upscale
  *      of vanilla -- a control that cleans nothing -- still reads 1.3460.
- *  There is no BC7 encoder in this tree, so BC7 is not offered; the size that
- *  costs is in the lane report, for bungo to rule on. */
+ *  A BC7 encoder exists (src/lodgenbc7.h, lane IMPOSTORDEPTH2, used for the
+ *  card `_n` sheets) but this cache does not use it: BC7 here is unruled, and
+ *  the size the uncompressed sheet costs is in the lane report. */
 QString lodgenMsnCacheDir();
 void lodgenSetMsnCacheDir( const QString & dir );  // empty = off = the rung's bytes; "auto" = the resource stack's upscaled set
 bool lodgenMsnCacheAuto();  // the setting is "auto" (lodgenMsnCacheDir() then names what it found, or nothing)

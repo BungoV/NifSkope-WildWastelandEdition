@@ -10,6 +10,9 @@ out mat3 btnMatrix;
 flat out vec4 A;
 out vec4 C;
 flat out vec4 D;
+// the vertex colour's OWN alpha, before vertexColorOverride forces it to 1 on a tree-
+// animation shape: the wind weight W the impostor bake reads (channel 11 G, CARDFIX1 step 6)
+out float rawVertexAlpha;
 
 flat out mat3 reflMatrix;
 
@@ -60,5 +63,6 @@ void main()
 
 	A = vec4( sqrt(lightSourceAmbient.rgb) * 0.375, toneMapScale );
 	C = mix( vertexColor, vertexColorOverride, greaterThan( vertexColorOverride, vec4( 0.0 ) ) );
+	rawVertexAlpha = vertexColor.a;
 	D = vec4( sqrt(lightSourceDiffuse[0].rgb), brightnessScale );
 }

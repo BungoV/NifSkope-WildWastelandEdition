@@ -2439,6 +2439,14 @@ struct LodgenCard
 	bool hasSide = false;       // the sheet's right half is a real side view
 	// the octahedral sheets, when the bake made them (0 = none)
 	int oct = 0, octTileW = 0, octTileH = 0;
+	//! THE HORIZON RING (lane CARDFIX1 step 5, IMPOSTORRING1; bungo 2026-09-23: "22.5 degrees
+	//! per take"). > 0 = the sidecar said `ring V`: the sheet is V frames in ONE row, frame v at
+	//! azimuth 360*v/V and elevation 0 (docs/LODGEN_LODM_FORMAT.md 3a). `oct` then carries V too,
+	//! so every "this base has a sheet" test holds; whatever lays frames out reads octCols() and
+	//! octRows(), never `oct` squared.
+	int ringViews = 0;
+	int octCols() const { return ringViews > 0 ? ringViews : oct; }
+	int octRows() const { return ringViews > 0 ? 1 : oct; }
 	//! The RUN's chosen resolution. octTileW/H sit at or below it: a smaller
 	//! frame is this base's rung on the size ladder (its world size against the
 	//! run's largest), not evidence of a differently-configured bake.
@@ -2483,6 +2491,12 @@ struct LodgenCard
 	// `emissiveScale`: what a consumer multiplies the emissive sheet by (the
 	// meta's `emissive` line). 1 when a bake from before it says nothing.
 	float octEmissiveScale = 1.0f;
+	//! THE SWAY SOURCE (IMPOSTORWIND1 sway A, CARDFIX1 step 6): the sidecar's `sway model`
+	//! line -- _n.A is the tree's own wind weight x height -- and the base's leaf amplitude
+	//! and frequency for it. `sway synthetic` or no line: the synthetic law, and the .lodm
+	//! stays version 1 byte for byte.
+	bool swayModel = false;
+	float leafAmplitude = 1.0f, leafFrequency = 1.0f;
 	//! THE CAMERA THE SHEET WAS PHOTOGRAPHED THROUGH -- the meta's `projection`
 	//! line, `ortho` or `persp` (lane CARDORTHO, 2026-09-10). Every extent this
 	//! struct carries -- `octHalfW`, `octHalfH`, `octFrameOff` -- is a world
@@ -2934,12 +2948,16 @@ bool lodgenWriteDdsBC5( const QString & path, int w, int h,
 
 //! Look up (and lazily DDS-convert) an impostor card for a base form.
 const LodgenCard & lodgenCard( const QString & dir, quint32 formID,
-	QHash<quint32, LodgenCard> & cache, int auxDiv )
+	QHash<quint32, LodgenCard> & cache, int auxDiv, const EsmLodBase * base = nullptr )
 {
 	auto it = cache.constFind( formID );
 	if ( it != cache.constEnd() )
 		return *it;
 	LodgenCard card;
+	if ( base && ( base->leafAmplitude != 0.0f || base->leafFrequency != 0.0f ) ) {
+		card.leafAmplitude = base->leafAmplitude;
+		card.leafFrequency = base->leafFrequency;
+	}
 	const QString id = QString( "%1" ).arg( formID, 8, 16, QChar( '0' ) );
 	const QString metaPath = dir + "/" + id + QStringLiteral( ".txt" );
 	const QString frontPng = dir + "/" + id + QStringLiteral( "_front.png" );
@@ -2967,10 +2985,13 @@ const LodgenCard & lodgenCard( const QString & dir, quint32 formID,
 				card.center = Vector3( line[3].toFloat(), line[4].toFloat(), line[5].toFloat() );
 			} else if ( line[0] == QLatin1String( "model" ) && line.size() >= 2 ) {
 				card.octSource = line.mid( 1 ).join( QChar( ' ' ) );
-			} else if ( line[0] == QLatin1String( "oct" ) && line.size() >= 11 ) {
-				// oct N tileW tileH halfW halfH cx cy cz depthspan family [base]
+			} else if ( ( line[0] == QLatin1String( "oct" ) || line[0] == QLatin1String( "ring" ) )
+				&& line.size() >= 11 ) {
+				// oct N tileW tileH halfW halfH cx cy cz depthspan family [base] [conv]
+				// ring V tileW tileH ... the same fields; V frames in one row (CARDFIX1 step 5)
 				card.octPbr = ( line[10] == QLatin1String( "pbr" ) );
 				card.oct = line[1].toInt();
+				card.ringViews = ( line[0] == QLatin1String( "ring" ) ) ? card.oct : 0;
 				card.octTileW = line[2].toInt();
 				card.octTileH = line[3].toInt();
 				/* A bake from before the size ladder has no base token; its frame
@@ -3042,6 +3063,9 @@ const LodgenCard & lodgenCard( const QString & dir, quint32 formID,
 				card.octCovFloor = qBound( 1, line[1].toInt(), 255 );
 				card.octCovTest = qBound( 1, line[2].toInt(), 255 );
 				card.octCovBase = qBound( 1, line[3].toInt(), 255 );
+			} else if ( line[0] == QLatin1String( "sway" ) && line.size() >= 2 ) {
+				// where _n.A came from: the model's own wind weight, or the synthetic law
+				card.swayModel = ( line[1] == QLatin1String( "model" ) );
 			} else if ( line[0] == QLatin1String( "emissive" ) && line.size() >= 2 ) {
 				// the set's emissive multiple; the colour is already in the sheet
 				card.octEmissiveScale = line[1].toFloat();
@@ -3056,13 +3080,14 @@ const LodgenCard & lodgenCard( const QString & dir, quint32 formID,
 		 * behaviour, centred on the card's centre -- so a partial set degrades
 		 * to the law before it rather than to nothing. */
 		if ( card.oct >= 2 && !rawFrameOff.isEmpty() ) {
-			card.octFrameOff.fill( 0.0f, 2 * card.oct * card.oct );
+			const int cols = card.octCols(), rows = card.octRows();
+			card.octFrameOff.fill( 0.0f, 2 * cols * rows );
 			for ( int k = 0; k + 3 < rawFrameOff.size(); k += 4 ) {
 				const int fi = int( rawFrameOff[k] ), fj = int( rawFrameOff[k + 1] );
-				if ( fi < 0 || fj < 0 || fi >= card.oct || fj >= card.oct )
+				if ( fi < 0 || fj < 0 || fi >= cols || fj >= rows )
 					continue;
-				card.octFrameOff[2 * ( fj * card.oct + fi )] = rawFrameOff[k + 2];
-				card.octFrameOff[2 * ( fj * card.oct + fi ) + 1] = rawFrameOff[k + 3];
+				card.octFrameOff[2 * ( fj * cols + fi )] = rawFrameOff[k + 2];
+				card.octFrameOff[2 * ( fj * cols + fi ) + 1] = rawFrameOff[k + 3];
 			}
 		}
 		if ( card.halfH > 0.0f ) {
@@ -3144,6 +3169,18 @@ const LodgenCard & lodgenCard( const QString & dir, quint32 formID,
 				if ( emi.size() != alb.size() )
 					emi = QImage();
 			}
+			/* The fifth sheet, a pbr set's SPECULAR (IMPOSTORPBRM1): `_s`, RGB sqrt(F0')
+			 * and A the specular weight. Optional twice over: the bake writes it only
+			 * when a shape departs from the default specular, and never on a legacy set. */
+			QImage spc;
+			if ( card.octPbr ) {
+				const QString octS = dir + "/" + id + QStringLiteral( "_oct_s.png" );
+				if ( QFile::exists( octS ) ) {
+					spc = QImage( octS ).convertToFormat( QImage::Format_ARGB32 );
+					if ( spc.size() != alb.size() )
+						spc = QImage();
+				}
+			}
 			if ( !alb.isNull() && nrm.size() == alb.size() && rm.size() == alb.size() ) {
 				/* Under the transparent texels: every channel of every sheet
 				 * extended from the silhouette, frame by frame, as deep as the
@@ -3153,6 +3190,8 @@ const LodgenCard & lodgenCard( const QString & dir, quint32 formID,
 				lodgenDilateFrames( rm, alb, card.octTileW, card.octTileH, deep );
 				if ( !emi.isNull() )
 					lodgenDilateFrames( emi, alb, card.octTileW, card.octTileH, deep );
+				if ( !spc.isNull() )
+					lodgenDilateFrames( spc, alb, card.octTileW, card.octTileH, deep );
 				lodgenDilateFrames( alb, alb, card.octTileW, card.octTileH, deep );	// last: it is also the coverage
 				/* AFTER the dilate, never before: the dilate is what floods the
 				 * height outside the silhouette with the frame's average. */
@@ -3257,24 +3296,52 @@ const LodgenCard & lodgenCard( const QString & dir, quint32 formID,
 					const QImage emiA = down( emi );
 					ok = lodgenWriteDds( base + emSfx, aw, ah, pixels( emiA ), false, auxMips ) && ok;
 				}
+				// the specular sheet is BC7 with its alpha (the weight), the `_n` sheet's codec
+				if ( !spc.isNull() && !QFile::exists( base + QStringLiteral( "_s.DDS" ) ) ) {
+					const QImage spcA = down( spc );
+					ok = lodgenWriteDds( base + QStringLiteral( "_s.DDS" ), aw, ah, pixels( spcA ), true, auxMips,
+							false, 0, 0, false, true ) && ok;
+				}
 				// the same move as the crossed-quad path above (lane LAYOUT1)
 				const QString game = QStringLiteral( "Data\\" ) + lodgenFo4csGameCardPath()
 					+ QChar( 92 ) + id + QStringLiteral( "_oct" );
 				if ( ok ) {
 					// the set's .lodm: family, the sheets, the frame grid (compact by design)
 					QJsonObject root, tex, oc;
-					root.insert( QStringLiteral( "lodm" ), 1 );
+					/* VERSION 2 ONLY WHERE THE SWAY IS THE MODEL'S (IMPOSTORWIND1 sway A):
+					 * `sway` "model" plus the base's leaf amplitude and frequency. A
+					 * synthetic set writes none of it and stays version 1, byte for byte. */
+					root.insert( QStringLiteral( "lodm" ), card.swayModel ? 2 : 1 );
 					root.insert( QStringLiteral( "family" ), card.octPbr ? QStringLiteral( "pbr" ) : QStringLiteral( "legacy" ) );
 					root.insert( QStringLiteral( "kind" ), QStringLiteral( "card" ) );
+					if ( card.swayModel ) {
+						root.insert( QStringLiteral( "sway" ), QStringLiteral( "model" ) );
+						root.insert( QStringLiteral( "leafAmplitude" ), double( card.leafAmplitude ) );
+						root.insert( QStringLiteral( "leafFrequency" ), double( card.leafFrequency ) );
+					}
 					tex.insert( QLatin1String( lodmColorKey( card.octPbr ) ), game + colorSfx );
 					tex.insert( QStringLiteral( "normal" ), game + QStringLiteral( "_n.DDS" ) );
 					tex.insert( QLatin1String( lodmMaskKey( card.octPbr ) ), game + maskSfx );
 					if ( !emi.isNull() )
 						tex.insert( QStringLiteral( "emissive" ), game + emSfx );
+					// a new key, no version bump: a reader ignores keys it does not know (LODGEN_LODM_FORMAT 2)
+					if ( !spc.isNull() )
+						tex.insert( QStringLiteral( "specular" ), game + QStringLiteral( "_s.DDS" ) );
 					root.insert( QStringLiteral( "textures" ), tex );
 					// the multiple the sheet is scaled by; 0 = this set emits nothing
 					root.insert( QStringLiteral( "emissiveScale" ), double( card.octEmissiveScale ) );
-					oc.insert( QStringLiteral( "oct" ), card.oct );
+					/* THE LAYOUT. A grid card says `oct` N (N x N frames, hemi-octahedral);
+					 * a RING card says `views` V and `grid` [V,1] -- the aggregate's own keys
+					 * (docs/LODGEN_LODM_FORMAT.md 3a) -- and NO `oct`, so a reader that knows
+					 * only the grid finds no grid and refuses the set by that key's name
+					 * instead of reading sixteen frames as a 16 x 16 sheet. frameOffset is
+					 * then 2*V numbers, frame v at index v. */
+					if ( card.ringViews > 0 ) {
+						oc.insert( QStringLiteral( "views" ), card.ringViews );
+						oc.insert( QStringLiteral( "grid" ), QJsonArray{ card.ringViews, 1 } );
+					} else {
+						oc.insert( QStringLiteral( "oct" ), card.oct );
+					}
 					oc.insert( QStringLiteral( "frame" ), QJsonArray{ card.octTileW, card.octTileH } );
 					// the run's resolution: `frame` at or below it, per the size ladder
 					oc.insert( QStringLiteral( "base" ), card.octBase );
@@ -3434,7 +3501,7 @@ QHash<quint32, LodgenAggCard> lodgenAggregateCards( const EsmWorld & world, cons
 		return out;
 	QHash<quint32, LodgenCard> cache;
 	QSet<quint32> seen;
-	int noSet = 0, notOrtho = 0, noOct = 0;
+	int noSet = 0, notOrtho = 0, noOct = 0, ringSet = 0;
 	auto consider = [&]( quint32 baseId ) {
 		if ( !baseId || seen.contains( baseId ) )
 			return;
@@ -3452,9 +3519,17 @@ QHash<quint32, LodgenAggCard> lodgenAggregateCards( const EsmWorld & world, cons
 		const bool isTree = std::memcmp( &b.type, "TREE", 4 ) == 0 || lodgenIsTreeModel( probe );
 		if ( !isTree )
 			return;
-		const LodgenCard & c = lodgenCard( cardDir, baseId, cache, auxDiv );
+		const LodgenCard & c = lodgenCard( cardDir, baseId, cache, auxDiv, &b );
 		if ( !c.valid || c.oct <= 1 ) {
 			noSet++;
+			return;
+		}
+		/* A HORIZON-RING set (CARDFIX1 step 5). The aggregate composites from N x N
+		 * grid frames (lodgenaggregate.cpp, cardFrameDir); reading V ring frames as a
+		 * V x V grid would composite the wrong views. Refused and counted by name;
+		 * teaching the aggregate the ring is owed (not this lane's file). */
+		if ( c.ringViews > 0 ) {
+			ringSet++;
 			return;
 		}
 		if ( c.octProjection != QLatin1String( "ortho" ) ) {
@@ -3502,6 +3577,9 @@ QHash<quint32, LodgenAggCard> lodgenAggregateCards( const EsmWorld & world, cons
 		*notes << QString( "aggregate cards: %1 tree bases with a usable ortho card set; "
 			"refused %2 with no set in %3, %4 baked through a perspective camera, %5 with no octahedral grid" )
 			.arg( out.size() ).arg( noSet ).arg( cardDir ).arg( notOrtho ).arg( noOct );
+		if ( ringSet > 0 )
+			*notes << QString( "aggregate cards: refused %1 horizon-ring set(s) by name -- the aggregate"
+				" composites N x N grid frames only" ).arg( ringSet );
 	}
 	return out;
 }
@@ -3888,7 +3966,7 @@ bool lodgenBuildObjectChunk( NifModel * nif, const EsmWorld & world,
 		if ( !opts.impostorDir.isEmpty() && !cardEligible && model.isEmpty() )
 			cardsRefusedNotTree++;
 		if ( cardWanted ) {
-			const LodgenCard & card = lodgenCard( opts.impostorDir, r.base, cardCache, opts.cardAuxDiv );
+			const LodgenCard & card = lodgenCard( opts.impostorDir, r.base, cardCache, opts.cardAuxDiv, &base );
 			if ( card.valid ) {
 				cardShapes.append( lodgenCardShape( card ) );
 				usedCard = card;
@@ -14504,8 +14582,9 @@ bool lodgenBuildCardArrays( const QStringList & btoPaths, const QString & cardDi
 	/* `conv` is the view-convention token (2026-09-19): per LAYER, not per
 	 * array, because an array packs whatever sets share a size class and a
 	 * library part-way through a re-bake legitimately holds both vintages. */
-	struct Layer { QString id, lodmGame, source, projection, conv; float halfW = 0, halfH = 0, span = 0, emissiveScale = 1.0f; Vector3 center; QJsonArray frameOff; QJsonObject coverage; };
-	struct Group { bool pbr = false; int w = 0, h = 0, aw = 0, ah = 0, oct = 0, fw = 0, fh = 0, padX = 0, padY = 0, gapX = 0, gapY = 0, mips = 1, auxMips = 1; QVector<Layer> layers; std::vector<std::vector<quint32>> color, n, mask, emis; };
+	struct Layer { QString id, lodmGame, source, projection, conv; float halfW = 0, halfH = 0, span = 0, emissiveScale = 1.0f; Vector3 center; QJsonArray frameOff; QJsonObject coverage;
+		bool swayModel = false; double leafAmplitude = 1.0, leafFrequency = 1.0; };
+	struct Group { bool pbr = false, ring = false; int w = 0, h = 0, aw = 0, ah = 0, oct = 0, fw = 0, fh = 0, padX = 0, padY = 0, gapX = 0, gapY = 0, mips = 1, auxMips = 1; QVector<Layer> layers; std::vector<std::vector<quint32>> color, n, mask, emis; };
 	if ( auxDiv < 1 )
 		auxDiv = 1;
 	QMap<QString, Group> groups;
@@ -14531,7 +14610,11 @@ bool lodgenBuildCardArrays( const QStringList & btoPaths, const QString & cardDi
 		const QJsonArray frame = card.value( QStringLiteral( "frame" ) ).toArray();
 		const QJsonArray half = card.value( QStringLiteral( "half" ) ).toArray();
 		const QJsonArray center = card.value( QStringLiteral( "center" ) ).toArray();
-		const int oct = card.value( QStringLiteral( "oct" ) ).toInt();
+		/* A RING card (CARDFIX1 step 5) says `views` V and `grid` [V,1], never `oct`:
+		 * V frames in one row. `oct` below is then V, and the sheet height is one frame. */
+		const int ringViews = card.value( QStringLiteral( "views" ) ).toInt();
+		const int oct = ringViews > 0 ? ringViews : card.value( QStringLiteral( "oct" ) ).toInt();
+		const int octRows = ringViews > 0 ? 1 : oct;
 		const int fw = frame.size() == 2 ? frame[0].toInt() : 0, fh = frame.size() == 2 ? frame[1].toInt() : 0;
 		/* The gutter and the GAP, per axis, as the set's own .lodm records them. An
 		 * array is built from the same PNGs and the same dilation as the per-card set,
@@ -14559,7 +14642,7 @@ bool lodgenBuildCardArrays( const QStringList & btoPaths, const QString & cardDi
 		QImage nrm( cardDir + "/" + id + QStringLiteral( "_oct_normal.png" ) );
 		QImage rm( cardDir + "/" + id + QStringLiteral( "_oct" ) + QLatin1String( lodmMaskSuffix( lm.pbr ) ) + QStringLiteral( ".png" ) );
 		if ( alb.isNull() || nrm.size() != alb.size() || rm.size() != alb.size()
-			|| alb.width() != oct * fw || alb.height() != oct * fh ) {
+			|| alb.width() != oct * fw || alb.height() != octRows * fh ) {
 			unreadable++;
 			continue;
 		}
@@ -14588,12 +14671,14 @@ bool lodgenBuildCardArrays( const QStringList & btoPaths, const QString & cardDi
 				fprintf( stderr, "lodgen: arrays: card %s: %s\n", id.toLocal8Bit().constData(),
 					heightReport.toLocal8Bit().constData() );
 		}
-		const QString key = QString( "%1|%2x%3" ).arg( lm.pbr ? QStringLiteral( "pbr" ) : QStringLiteral( "legacy" ) ).arg( alb.width() ).arg( alb.height() );
+		const QString key = QString( "%1|%2x%3" ).arg( lm.pbr ? QStringLiteral( "pbr" ) : QStringLiteral( "legacy" ) ).arg( alb.width() ).arg( alb.height() )
+			+ ( ringViews > 0 ? QStringLiteral( "|ring" ) : QString() );
 		Group & g = groups[key];
 		g.pbr = lm.pbr;
 		g.w = alb.width();
 		g.h = alb.height();
 		g.oct = oct;
+		g.ring = ringViews > 0;
 		g.fw = fw;
 		g.fh = fh;
 		g.padX = padX;
@@ -14653,6 +14738,10 @@ bool lodgenBuildCardArrays( const QStringList & btoPaths, const QString & cardDi
 		l.coverage = card.value( QStringLiteral( "coverage" ) ).toObject();
 		// the set's emissive multiple travels with its layer, like its geometry
 		l.emissiveScale = lm.emissiveScale;
+		// and where its sway came from (IMPOSTORWIND1 sway A), with the base's leaf numbers
+		l.swayModel = lm.root.value( QStringLiteral( "sway" ) ).toString() == QLatin1String( "model" );
+		l.leafAmplitude = lm.root.value( QStringLiteral( "leafAmplitude" ) ).toDouble( 1.0 );
+		l.leafFrequency = lm.root.value( QStringLiteral( "leafFrequency" ) ).toDouble( 1.0 );
 		g.layers.append( l );
 		g.color.push_back( pixels( alb ) );
 		g.n.push_back( pixels( nrm ) );
@@ -14667,7 +14756,10 @@ bool lodgenBuildCardArrays( const QStringList & btoPaths, const QString & cardDi
 	int arrays = 0, sets = 0;
 	for ( auto it = groups.begin(); it != groups.end(); ++it ) {
 		Group & g = it.value();
-		const QString sizeKey = it.key().mid( it.key().indexOf( QChar( '|' ) ) + 1 );
+		/* The size in the FILE NAME: WxH, and ".ring" for a horizon-ring group. Never the
+		 * group key's tail -- that is joined with '|', which no Windows file name may hold. */
+		const QString sizeKey = QStringLiteral( "%1x%2" ).arg( g.w ).arg( g.h )
+			+ ( g.ring ? QStringLiteral( ".ring" ) : QString() );
 		const QString stem = QString( ".%1.%2" ).arg( g.pbr ? QStringLiteral( "pbr" ) : QStringLiteral( "legacy" ) ).arg( sizeKey );
 		const QString fileBase = arrayFileBase + stem, gameBase = arrayGameBase + stem;
 		const QString colorSfx = QLatin1String( lodmColorSuffix( g.pbr ) ) + QStringLiteral( ".DDS" );
@@ -14687,7 +14779,11 @@ bool lodgenBuildCardArrays( const QStringList & btoPaths, const QString & cardDi
 			arrays++;
 		}
 		QJsonObject root, tex, arr;
-		root.insert( QStringLiteral( "lodm" ), 1 );
+		// version 2 only when a layer's sway is its model's (IMPOSTORWIND1 sway A)
+		bool anySwayModel = false;
+		for ( const Layer & L : g.layers )
+			anySwayModel = anySwayModel || L.swayModel;
+		root.insert( QStringLiteral( "lodm" ), anySwayModel ? 2 : 1 );
 		root.insert( QStringLiteral( "family" ), g.pbr ? QStringLiteral( "pbr" ) : QStringLiteral( "legacy" ) );
 		root.insert( QStringLiteral( "kind" ), QStringLiteral( "cardArray" ) );
 		tex.insert( QLatin1String( lodmColorKey( g.pbr ) ), gameBase + colorSfx );
@@ -14696,7 +14792,13 @@ bool lodgenBuildCardArrays( const QStringList & btoPaths, const QString & cardDi
 		tex.insert( QStringLiteral( "emissive" ), gameBase + emSfx );
 		root.insert( QStringLiteral( "textures" ), tex );
 		arr.insert( QStringLiteral( "class" ), QJsonArray{ g.w, g.h } );
-		arr.insert( QStringLiteral( "oct" ), g.oct );
+		if ( g.ring ) {
+			// a ring array: the aggregate's layout keys, and no `oct` (CARDFIX1 step 5)
+			arr.insert( QStringLiteral( "views" ), g.oct );
+			arr.insert( QStringLiteral( "grid" ), QJsonArray{ g.oct, 1 } );
+		} else {
+			arr.insert( QStringLiteral( "oct" ), g.oct );
+		}
 		arr.insert( QStringLiteral( "frame" ), QJsonArray{ g.fw, g.fh } );
 		arr.insert( QStringLiteral( "pad" ), QJsonArray{ g.padX, g.padY } );
 		// the distance between two neighbouring silhouettes, shared: the mip cap's own input
@@ -14737,6 +14839,18 @@ bool lodgenBuildCardArrays( const QStringList & btoPaths, const QString & cardDi
 		arr.insert( QStringLiteral( "layers" ), layers );
 		// one multiple per layer, parallel to `layers`, as the mesh arrays have it
 		arr.insert( QStringLiteral( "emissiveScale" ), scales );
+		// the sway source and leaf numbers, parallel to `layers` too -- version 2 only
+		if ( anySwayModel ) {
+			QJsonArray sw, amp, frq;
+			for ( const Layer & L : g.layers ) {
+				sw.append( L.swayModel ? QStringLiteral( "model" ) : QStringLiteral( "synthetic" ) );
+				amp.append( L.leafAmplitude );
+				frq.append( L.leafFrequency );
+			}
+			arr.insert( QStringLiteral( "sway" ), sw );
+			arr.insert( QStringLiteral( "leafAmplitude" ), amp );
+			arr.insert( QStringLiteral( "leafFrequency" ), frq );
+		}
 		root.insert( QStringLiteral( "array" ), arr );
 		if ( !lodmWriteFile( fileBase + QStringLiteral( ".lodm" ), root ) )
 			return fail( QString( "could not write %1" ).arg( fileBase + QStringLiteral( ".lodm" ) ) );

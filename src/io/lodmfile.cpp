@@ -43,9 +43,24 @@ LodmMaterial lodmParse( const QByteArray & bytes )
 		return m;
 	}
 	m.root = doc.object();
-	if ( m.root.value( QStringLiteral( "lodm" ) ).toInt( 0 ) != int( LODM_VERSION ) ) {
-		m.error = QStringLiteral( "payload is not a lodm 1 object" );
-		return m;
+	/* PAYLOAD VERSION 2 is the CARD family's (IMPOSTORWIND1 sway A, CARDFIX1 step 6):
+	 * a card, card array or aggregate whose _n.A is a model's own wind weight says
+	 * `lodm` 2 and `sway` "model". Nothing else may claim it: a source (a material)
+	 * is version 1 and is refused BY NAME if it says 2. */
+	{
+		const int pv = m.root.value( QStringLiteral( "lodm" ) ).toInt( 0 );
+		const QString k = m.root.value( QStringLiteral( "kind" ) ).toString( QStringLiteral( "source" ) );
+		const bool cardFamily = k == QLatin1String( "card" ) || k == QLatin1String( "cardArray" )
+			|| k == QLatin1String( "aggregate" );
+		if ( pv == 2 && !cardFamily ) {
+			m.error = QStringLiteral( "lodm 2 is the card family's version (card, cardArray, aggregate: the "
+				"model sway); a \"%1\" .lodm is lodm 1" ).arg( k );
+			return m;
+		}
+		if ( pv != int( LODM_VERSION ) && pv != 2 ) {
+			m.error = QStringLiteral( "payload is not a lodm 1 object (nor a card family lodm 2)" );
+			return m;
+		}
 	}
 	m.family = m.root.value( QStringLiteral( "family" ) ).toString();
 	if ( m.family != QLatin1String( "legacy" ) && m.family != QLatin1String( "pbr" ) ) {
