@@ -94,6 +94,41 @@ BASE="$ROOT/tests/baselines/native_lighting"
 OUT="${OUT:-$R2/work/gate}"
 LOG="$ROOT/release/ww_native_lighting.log"
 
+# Every window runs in its OWN settings scope (src/harnesswindow.cpp,
+# WW_SETTINGS_SCOPE): the QSettings tree moves to
+# HKCU\Software\NifTools\NifSkope 2.0 <scope>, wiped before EACH window (a
+# window saves its layout on close, and the next would open at another size)
+# and at exit. Lane GATEFIX2, 2026-09-25: gate (a) read 2 failures on every exe
+# back to before_vt1 -- the very exe the four legacy baselines were measured on
+# (2026-09-16 11:54:47, 22,288,896 B) -- because the gate rendered under
+# bungo's own profile, and that profile now has "Vertex Color" unticked in the
+# Lighting shading mode's Material Contributions (GLView/Display/Contributions/2
+# = 0x00184b00; bit 0x80 alone moves the picture). The .BTR water shape then
+# drew PURE WHITE instead of its dark vertex colour: legacy_btr_top 93,893
+# pixels, mean luma 109.87 -> 132.89. A gate that reads the user's profile
+# measures the profile. No baseline moved: under this scope all four legacy
+# frames are byte-identical to the 2026-09-16 baselines again.
+#
+# The wiped scope is SEEDED with Settings/Version=1, i.e. "not a first install".
+# On a first install (src/ui/settingsdialog.cpp, a null Settings/Version) the
+# settings dialog saves every pane's widget value, among them Background
+# 46,46,46 (src/ui/settingspane.cpp), which is not the viewport skin colour
+# native_lighting_check.py's BG constant names; every coverage mask then counts
+# the background as terrain and gates (b)(d)(e)(f) fail (measured: 21 checks,
+# 7-8 failures in an empty scope, 0 with the seed).
+SCOPE="${SCOPE:-nativelighting}"
+REGKEY="HKCU\\Software\\NifTools\\NifSkope 2.0 $SCOPE"
+wipe_scope() { reg delete "$REGKEY" //f > /dev/null 2>&1; }
+# SEED_REG (a .reg file whose keys are already under $REGKEY) is imported after
+# the seed -- the red control's way of rendering under a chosen profile without
+# touching the user's. Empty in a normal run.
+seed_scope() {
+	wipe_scope
+	reg add "$REGKEY\\Settings" //v Version //t REG_SZ //d 1 //f > /dev/null 2>&1
+	[ -n "${SEED_REG:-}" ] && reg import "$(winpath "$SEED_REG")" > /dev/null 2>&1
+	return 0
+}
+
 LODL="$S/lodl/Terrain/Commonwealth.lodl"
 SHEETS="$S/look/mod/Terrain"
 OBJ="$S/look/obj"
@@ -137,6 +172,8 @@ fi
 
 mkdir -p "$OUT"
 rm -f "$OUT"/*.png "$OUT"/*.census.txt
+wipe_scope
+trap wipe_scope EXIT
 
 CEN="-73728,106496,0"
 CENO="-73728,106496,8500"
@@ -146,7 +183,8 @@ ORT=8192
 
 shot() {  # shot <name> <file> <view> <center> [extra env...]
 	local name="$1" file="$2" view="$3" ctr="$4"; shift 4
-	env "$@" \
+	seed_scope
+	env "$@" WW_SETTINGS_SCOPE="$SCOPE" \
 		WW_WINDOW_AT=1960,40 \
 		WW_RENDER_SHOT="$OUT/$name.png" WW_RENDER_SIZE=1024x1024 \
 		WW_RENDER_VIEW="$view" WW_RENDER_CLEAN=1 \
