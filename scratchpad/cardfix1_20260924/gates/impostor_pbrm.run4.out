@@ -1,0 +1,74 @@
+exe  /e/Projects/NifskopeWWE-cardfix1/release/NifSkope.exe (45719ad4)
+prev /e/Projects/NifskopeWWE-cardfix1/release/NifSkope.s5_eaa4b0b6.exe (eaa4b0b6)
+bake pbrm: oct 8 144 256 418.761 744.463 -42.3127 22.6625 775.201 3072 pbr 256 spec1; specular _s; 8 files
+bake pbrmna: oct 8 144 256 416.548 740.53 -42.3127 22.6625 775.201 3072 pbr 256 spec1; specular _s; 8 files
+bake ident: oct 8 144 256 418.761 744.463 -42.3127 22.6625 775.201 3072 pbr 256 spec1; specular none; 7 files
+bake identna: oct 8 144 256 416.548 740.53 -42.3127 22.6625 775.201 3072 pbr 256 spec1; specular none; 7 files
+bake legacy: oct 8 144 256 418.761 744.463 -42.3127 22.6625 775.201 3072 legacy 256 spec1; specular none; 7 files
+bake legacyna: oct 8 144 256 416.548 740.53 -42.3127 22.6625 775.201 3072 legacy 256 spec1; specular none; 7 files
+bake prev: oct 8 144 256 418.761 744.463 -42.3127 22.6625 775.201 3072 legacy 256 spec1; no specular line; 7 files
+bake prevna: oct 8 144 256 416.548 740.53 -42.3127 22.6625 775.201 3072 legacy 256 spec1; no specular line; 7 files
+law: {"MapleAtlas01": {"F0": [0.003247509872497694, 0.007930175153718489, 0.01504448414964358], "ao": 1.0, "colourGain": [0.7215686274509805, 0.5003921568627451, 0.2810595924644368], "ior": 1.33, "metallic": 0.8, "roughness": 0.35, "s_rgb": [0.05698692720701559, 0.08905153088924686, 0.12265595847590764], "specTint": [0.21586050011389926, 0.5271151257058131, 1.0], "specWeight": 0.75}, "MapleAtlas02_Tree
+floor: identity pbrm card vs the legacy card, median 0.00 levels p90 1.0 over 229618 texels; family pbr
+non-aa, coverage == 1: floor: identity pbrm card vs the legacy card, median 0.00 levels p90 1.0 over 90395 texels; family pbr
+  ok    R aa arm: 15 rows, all ok (the rows are in the log)
+  FAIL  R non-aa arm: 4 FAIL of 15 rows
+        row MapleAtlas02_Tree roughness FAIL: median 179.00 vs the law 179.00 (levels), 0.878 of 13781 texels within 2
+        row MapleAtlas02_Tree metallic FAIL: median 51.00 vs the law 51.00 (levels), 0.872 of 13781 texels within 2
+        row MapleAtlas02_Tree sqrtF0.R FAIL: median 46.00 vs the law 45.77 (levels), 0.896 of 13781 texels within 2
+        row MapleAtlas02_Tree specWeight FAIL: median 128.00 vs the law 128.00 (levels), 0.881 of 13781 texels within 2
+  ok    red control --red add (aa): 1 row(s) FAIL
+        row MapleAtlas02_Tree colour FAIL: median |card - law(legacy card)| 4.14 levels, p90 6.1, over 132758 texels (bar = max(identity floor 0.00 x 1.25, 0.5) = 0.50; margin -3.64); gain 0.750 0.602 0.449
+  ok    red control --red ior (aa): 6 row(s) FAIL
+        row MapleAtlas01 sqrtF0.R FAIL: median 15.00 vs the law 20.52 (levels), 0.016 of 96860 texels within 2
+        row MapleAtlas01 sqrtF0.G FAIL: median 23.00 vs the law 32.07 (levels), 0.000 of 96860 texels within 2
+        row MapleAtlas01 sqrtF0.B FAIL: median 31.00 vs the law 44.17 (levels), 0.000 of 96860 texels within 2
+        row MapleAtlas02_Tree sqrtF0.R FAIL: median 46.00 vs the law 27.46 (levels), 0.000 of 132925 texels within 2
+        row MapleAtlas02_Tree sqrtF0.G FAIL: median 33.00 vs the law 19.95 (levels), 0.000 of 132925 texels within 2
+        row MapleAtlas02_Tree sqrtF0.B FAIL: median 22.00 vs the law 12.90 (levels), 0.000 of 132925 texels within 2
+  ok    red control --red decode (aa): 5 row(s) FAIL
+        row MapleAtlas01 sqrtF0.R FAIL: median 15.00 vs the law 31.28 (levels), 0.000 of 96860 texels within 2
+        row MapleAtlas01 sqrtF0.G FAIL: median 23.00 vs the law 31.28 (levels), 0.000 of 96860 texels within 2
+        row MapleAtlas02_Tree sqrtF0.R FAIL: median 46.00 vs the law 60.22 (levels), 0.000 of 132925 texels within 2
+        row MapleAtlas02_Tree sqrtF0.G FAIL: median 33.00 vs the law 60.22 (levels), 0.000 of 132925 texels within 2
+        row MapleAtlas02_Tree sqrtF0.B FAIL: median 22.00 vs the law 60.22 (levels), 0.000 of 132925 texels within 2
+  ok    red control, the pre-step-7 exe (aa): 2 row(s) FAIL
+        row family FAIL: the sidecar says family legacy (want pbr)
+        row sheets FAIL: _rmaos ABSENT, _s ABSENT (a pbrm card writes both)
+  ok    red control --red add (non-aa): 5 row(s) FAIL
+        row MapleAtlas02_Tree roughness FAIL: median 179.00 vs the law 179.00 (levels), 0.878 of 13781 texels within 2
+        row MapleAtlas02_Tree metallic FAIL: median 51.00 vs the law 51.00 (levels), 0.872 of 13781 texels within 2
+        row MapleAtlas02_Tree sqrtF0.R FAIL: median 46.00 vs the law 45.77 (levels), 0.896 of 13781 texels within 2
+        row MapleAtlas02_Tree specWeight FAIL: median 128.00 vs the law 128.00 (levels), 0.881 of 13781 texels within 2
+        row MapleAtlas02_Tree colour FAIL: median |card - law(legacy card)| 4.00 levels, p90 6.1, over 13781 texels (bar = max(identity floor 0.00 x 1.25, 0.5) = 0.50; margin -3.50); gain 0.750 0.602 0.449
+  ok    red control --red ior (non-aa): 9 row(s) FAIL
+        row MapleAtlas01 sqrtF0.R FAIL: median 15.00 vs the law 20.52 (levels), 0.006 of 76567 texels within 2
+        row MapleAtlas01 sqrtF0.G FAIL: median 23.00 vs the law 32.07 (levels), 0.000 of 76567 texels within 2
+        row MapleAtlas01 sqrtF0.B FAIL: median 31.00 vs the law 44.17 (levels), 0.000 of 76567 texels within 2
+        row MapleAtlas02_Tree roughness FAIL: median 179.00 vs the law 179.00 (levels), 0.878 of 13781 texels within 2
+        row MapleAtlas02_Tree metallic FAIL: median 51.00 vs the law 51.00 (levels), 0.872 of 13781 texels within 2
+        row MapleAtlas02_Tree sqrtF0.R FAIL: median 46.00 vs the law 27.46 (levels), 0.006 of 13781 texels within 2
+        row MapleAtlas02_Tree sqrtF0.G FAIL: median 33.00 vs the law 19.95 (levels), 0.000 of 13781 texels within 2
+        row MapleAtlas02_Tree sqrtF0.B FAIL: median 22.00 vs the law 12.90 (levels), 0.000 of 13781 texels within 2
+        row MapleAtlas02_Tree specWeight FAIL: median 128.00 vs the law 128.00 (levels), 0.881 of 13781 texels within 2
+  ok    red control --red decode (non-aa): 8 row(s) FAIL
+        row MapleAtlas01 sqrtF0.R FAIL: median 15.00 vs the law 31.28 (levels), 0.001 of 76567 texels within 2
+        row MapleAtlas01 sqrtF0.G FAIL: median 23.00 vs the law 31.28 (levels), 0.000 of 76567 texels within 2
+        row MapleAtlas02_Tree roughness FAIL: median 179.00 vs the law 179.00 (levels), 0.878 of 13781 texels within 2
+        row MapleAtlas02_Tree metallic FAIL: median 51.00 vs the law 51.00 (levels), 0.872 of 13781 texels within 2
+        row MapleAtlas02_Tree sqrtF0.R FAIL: median 46.00 vs the law 60.22 (levels), 0.000 of 13781 texels within 2
+        row MapleAtlas02_Tree sqrtF0.G FAIL: median 33.00 vs the law 60.22 (levels), 0.000 of 13781 texels within 2
+        row MapleAtlas02_Tree sqrtF0.B FAIL: median 22.00 vs the law 60.22 (levels), 0.000 of 13781 texels within 2
+        row MapleAtlas02_Tree specWeight FAIL: median 128.00 vs the law 128.00 (levels), 0.881 of 13781 texels within 2
+  ok    red control, the pre-step-7 exe (non-aa): 2 row(s) FAIL
+        row family FAIL: the sidecar says family legacy (want pbr)
+        row sheets FAIL: _rmaos ABSENT, _s ABSENT (a pbrm card writes both)
+compress pbrm: lodgen rc 0; lodm 2 family pbr specular Data\FO4CSLOD\Cards\000531b3_oct_s.DDS keys baseColor,emissive,normal,rmaos,specular
+compress legacy: lodgen rc 0; lodm 2 family legacy specular None keys diffuse,emissive,gsaos,normal
+  ok    R3 the pbrm card .lodm names specular Data\FO4CSLOD\Cards\000531b3_oct_s.DDS and the file exists
+  ok    R3 the legacy card .lodm has no specular key and no _s sheet (lodm 2 family legacy specular None keys diffuse,emissive,gsaos,normal)
+R4 sdds BC7 1152x2048, 229785 covered texels: R mean 0.018 p95 0.0; G mean 0.067 p95 1.0; B mean 0.000 p95 0.0; A mean 0.037 p95 0.0 | worst channel mean 0.067 p95 1.0 | normal R/G error mean 2.221 p95 8.0 | 4-bit _s: mean 5.572 p95 8.0
+R4 bar = codec floor of the set's _n R/G, measured: mean 2.221 p95 8.0, x 1.25 -> 2.776 / 10
+  ok    R4 BC7 _s: worst channel mean 0.067 p95 1.0 <= 2.776 / 10
+  ok    R4 red control: the 4-bit _s fails the same bar (mean 5.572 p95 8.0)
+impostor_pbrm: 13/14 ok

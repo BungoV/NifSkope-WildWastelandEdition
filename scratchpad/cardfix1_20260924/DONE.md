@@ -1,7 +1,14 @@
 PARTIAL -- lane CARDFIX1 (LOD-D), chain of seven steps. Steps 1-6 landed (6b, 6c after). Step 7
-(IMPOSTORPBRM1) is BUILT and committed (exe 45719ad4). Its gate is RED on 2 of 10: both are bars reported
-for the director, not code defects found (section 2, step 7, "Reds"). No re-pin was made in this step.
-NEXT: the director's ruling on the two bars. Then step 7 closes, with the gate re-run on the ruled bars.
+(IMPOSTORPBRM1) is BUILT and committed (exe 45719ad4). The director decided both run-3 reds (2026-09-25,
+director decisions, not rulings by bungo). Gate run 4 on those bars: 13/14.
+LEFT: one row. The non-aa arm, judged on fully covered texels as decided, still fails 4 rows of the
+tree-animated material (roughness, metallic, sqrtF0.R, weight: 0.872-0.896 within 2 against 0.90; medians
+exact). 98 % of the misses sit beside a texel of the OTHER material: they are texels where the two
+materials meet, not partial coverage. Away from the other material the share is 0.997. The fully covered
+population keeps only 13781 of that material's texels (the aa arm has 132925), so the boundary share
+rises from 2.6 % to 12.2 %. All the breakages still fail on this population, so the decision's drop
+clause did not fire. The row is neither passing nor dropped: the director's call (section 2, step 7,
+"Run 4"). No bar was changed after run 4.
 # 1. Skills loaded
 nifskope-ww-worktree-build, nifskope-ww-build-verify, nifskope-ww-lodgen, nifskope-ww-render-shot,
 ww-test-harness-add, search-lean (the common rules' list, loaded with the Skill tool before any work).
@@ -232,7 +239,35 @@ ww-test-harness-add, search-lean (the common rules' list, loaded with the Skill 
 - BC7 weights {1,1,32,1} apply to `_s` too (lodgenWriteDds' BC7 path is the `_n` sheet's), so B is
   favoured. The measured error is still far under the codec floor (R4).
 
-### Reds (reported, not re-pinned; director decision needed)
+### Run 4 -- the director's decisions applied (2026-09-25 02:4x; director decisions, not rulings by bungo)
+- **(1) Colour rows:** bar = max(1.25 x identity floor, 0.5 level), which is one 8-bit rounding plus
+  margin. Every breakage still fails at 0.5. The margins below are bar minus measured, so a negative margin
+  means a failure. `--red add` gives colour 4.14 levels on the aa arm (margin -3.64) and 4.00 on the non-aa
+  arm (-3.50). `--red ior` and `--red decode` fail their sqrtF0 rows with 0.000-0.016 of texels within 2
+  (bar 0.90). The pre-step-7 exe fails family (legacy) and sheets (_rmaos / _s absent) on both arms.
+  Correct code: MapleAtlas01 0.32 (margin +0.18), MapleAtlas02_Tree 0.35 (+0.15) on the aa arm; 0.34 (+0.16)
+  and 0.39 (+0.11) on the non-aa arm.
+- **(2) Non-aa arm:** kept, judged on fully covered texels only (coverage == 1, alpha 255; `COVER=full`,
+  named in the gate header and in impostor_pbrm.py's covmin). It has its own identity floor on that
+  population (bake identna: median 0.00, p90 1.0 over 90395 texels) and its own pre-step-7 bake (prevna).
+  Every breakage fails on it: add 5 rows (colour 4.00), ior 9, decode 8, pre-step-7 exe 2. The drop clause
+  did not fire.
+- **Still red: the non-aa arm, 4 of 15 rows**, all MapleAtlas02_Tree (the tree-animated class):
+  roughness 0.878, metallic 0.872, sqrtF0.R 0.896, specWeight 0.881 within 2 (bar 0.90). The medians are
+  exact (179 / 51 / 46 vs 45.77 / 128). MapleAtlas01 passes every row, and so does the colour row of both
+  materials. An offline probe on the run-4 bakes (not a gate row) found this:
+  - 98.0 % of the misses have a 4-neighbour of the other class, and the missed values read between the two
+    materials (roughness p50 155, between 89 and 179): texels where trunk and leaf meet.
+  - Away from class 0, the class-1 share within 2 is 0.997 (11082 texels).
+  - The aa arm has the same boundary texels (92 % of its misses), but they are 2.6 % of 132925. The fully
+    covered non-aa population is 13781 leaf texels, and 12.2 % of them sit on a boundary.
+  So this is the per-texel class split at material boundaries, a population effect of the decided rule,
+  not the step-7 law. Options for the director: (a) judge both arms away from the other class (texels with
+  no 4-neighbour of the other class). On run 4, the leaf class's roughness then reads aa 0.998 and non-aa
+  0.997 (only that channel was probed). (b) Drop the non-aa
+  row with this reason. (c) Accept 4 known reds. Not applied: the decision said re-run once.
+
+### Reds of run 3 (reported, not re-pinned; decided by the director, see "Run 4" above)
 1. **R1 colour rows: the pre-registered bar is 0.** The bar was 1.25 x the identity floor. fix37 made
    the identity card equal the legacy card, so the floor is median 0.00 and the bar is 0.00. Correct
    code measures 0.32 (MapleAtlas01) and 0.35 (MapleAtlas02_Tree) levels median: the law applied to the
@@ -376,6 +411,16 @@ Output: gates/cardres_test.out (pictures under cardres/, not committed).
   bar 4.082 / 15: ok. RED 1, the next frame: 51.099 > 4.082. RED 2, the 4-bit sway: mean 6.702 fails.
   The synthetic Hero set for comparison: 1.281 / 4 against its own R/G floor 4.992 / 16.
 - G1-G3 unchanged from run 3 (same exe, same bake).
+
+## Step 7, run 4 on the director's bars (exe 45719ad4; gates/impostor_pbrm.run4.out; fix39)
+| row | measured |
+|---|---|
+| R1 aa arm | 15 / 15 ok (colour 0.32 / 0.35, bar 0.50) |
+| R2 non-aa arm, coverage == 1 | 11 / 15 ok; 4 FAIL, MapleAtlas02_Tree boundary texels (0.872-0.896 vs 0.90) |
+| reds, aa: add / ior / decode / pre-step-7 exe | 1 / 6 / 5 / 2 FAIL |
+| reds, non-aa: add / ior / decode / pre-step-7 exe | 5 / 9 / 8 / 2 FAIL |
+| R3 / R4 | ok / ok (0.067 / 1.0 <= 2.776 / 10; 4-bit 5.572 fails) |
+| total | 13 / 14 ok |
 
 ## Step 7 (exe 45719ad4; gates/impostor_pbrm.run3.out + .run3.log)
 | gate | pre-registered | measured |

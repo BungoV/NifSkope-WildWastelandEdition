@@ -1,6 +1,6 @@
 ## HANDOFF text
 
-**Lane CARDFIX1 (LOD-D), 2026-09-24/25: PARTIAL. Steps 1-6 landed (G4 decided by the director, (a)); step 7 built, its gate 8/10 with 2 bars reported for a director decision.**
+**Lane CARDFIX1 (LOD-D), 2026-09-24/25: PARTIAL. Steps 1-6 landed (G4 decided by the director, (a)); step 7 built; director decisions on its two bars applied; gate run 4 13/14, one non-aa row left for the director.**
 Branch `cardfix1-20260924` in `E:\Projects\NifskopeWWE-cardfix1` (from 71f96c1). Commits: step 1 19c0347,
 step 2 91ddd41, step 3 d8302c9, step 4 7896ad1, step 5 1303334 + 6c5f5f8, step 6 24e7835, step 6b 6430dff
 (the N8 default), step 6c = the G4 re-pin commit, step 7 2672e43 + 1f0368d + 3e92051 + the gate/docs commit. Exe 45719ad43e509a46e6bf04a4dfd3f9d342e844d1. Report: `scratchpad/cardfix1_20260924/DONE.md`.
@@ -34,11 +34,10 @@ step 2 91ddd41, step 3 d8302c9, step 4 7896ad1, step 5 1303334 + 6c5f5f8, step 6
   weight, colour and IOR, and the TintMask is applied in the bake). A model whose every textured shape
   resolves a `.pbrm` bakes family pbr: the bake photographs the tinted base (PBRM v6 law) and the RMAOS, and
   writes a new `_oct_s` sheet (RGB = sqrt(F0'), A = weight; BC7) named by a new `.lodm` key `specular`. Gate
-  `tests/spells/impostor_pbrm.sh` 8/10: RED on (1) the colour rows, whose pre-registered bar became 0 once
-  the colour mips were fixed (correct code measures 0.32 / 0.35 levels), and (2) the non-aa arm, a row not in
-  the pre-registration that fails on partially covered texels through that arm's existing edge law.
-  Proposed: a colour floor of one 8-bit rounding (0.5 level); drop the non-aa row or judge full-coverage
-  texels only. The `_s` format is separable (commit 3e92051). FO4CS reader owed (contract in
+  `tests/spells/impostor_pbrm.sh`, run 4 on the director's decisions (colour bar max(1.25 x floor, 0.5);
+  non-aa arm judged on fully covered texels): 13/14. Every breakage fails on both arms. Left: the non-aa
+  row fails 4 rows of the leaf material on texels where trunk and leaf meet (98 % of the misses; 0.997
+  away from the boundary). The options are in DONE.md, step 7, "Run 4". The `_s` format is separable (commit 3e92051). FO4CS reader owed (contract in
   LODGEN_LODM_FORMAT 3.4). native_lighting's 2 failures reproduce on the step-5 exe: baseline drift, not step 7.
 
 ## WW_CHANGES text

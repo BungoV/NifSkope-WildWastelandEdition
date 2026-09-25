@@ -246,8 +246,15 @@ def sidecar(cards, ident):
     return out
 
 
+def covmin():
+    """The covered-texel threshold. COVER=full (DIRECTOR DECISION 2026-09-25, the non-aa arm): coverage == 1
+    only, alpha 255 -- that arm un-premultiplies partially covered texels by the matte, an edge law of its own
+    that every channel (old and new) shares. Default: alpha >= 128."""
+    return 255 if os.environ.get("COVER", "") == "full" else 128
+
+
 def classes(alb, third):
-    cov = alb[..., 3] >= 128
+    cov = alb[..., 3] >= covmin()
     return cov, {0: cov & (third[..., 3] < 128), 1: cov & (third[..., 3] >= 128)}
 
 
@@ -290,7 +297,9 @@ def within(vals, want, tol_med, tol_share):
 def cmd_check(cards, refcards, ident, d, red=None):
     """Rows. Exit 0 always; each row prints ok|FAIL. Bars PRE-REGISTERED (DONE.md step 7 design):
     constant channels median within 1.0 level of the law and >= 0.90 of texels within 2 levels;
-    the colour row: median |pbrm - law(legacy)| <= the identity floor x 1.25 (passed in env FLOOR)."""
+    the colour row: median |pbrm - law(legacy)| <= max(the identity floor x 1.25, 0.5) (FLOOR in env; the 0.5
+    minimum is a DIRECTOR DECISION 2026-09-25: one 8-bit rounding plus margin, since the floor can reach 0).
+    COVER=full judges fully covered texels only (see covmin)."""
     res = {n: law(read_pbrm(os.path.join(d, TREE, n + ".pbrm")), d, red) for n in MATS}
     sc = sidecar(cards, ident)
     fam = sc["family"]
@@ -335,26 +344,27 @@ def cmd_check(cards, refcards, ident, d, red=None):
         # colour: the law applied to the LEGACY card's texel (same base map, same view) vs the pbrm card
         if ref is None:
             continue
-        both = m & (ref[..., 3] >= 128)
+        both = m & (ref[..., 3] >= covmin())
         lin_ref = srgb2lin(ref[both][:, :3] / 255.0)
         bright = lin_ref.min(1) > 0.02
         pred = lin2srgb(lin_ref[bright] * np.array(L["colourGain"])) * 255.0
         got = alb[both][:, :3][bright]
         e = np.abs(got - pred)
         floor = float(os.environ.get("FLOOR", "nan"))
-        bar = 1.25 * floor
+        bar = max(1.25 * floor, 0.5) if np.isfinite(floor) else float("nan")
         med = float(np.median(e))
         good = np.isfinite(bar) and med <= bar
         print("row %s colour %s: median |card - law(legacy card)| %.2f levels, p90 %.1f, over %d texels "
-              "(bar = identity floor %.2f x 1.25 = %.2f); gain %s"
+              "(bar = max(identity floor %.2f x 1.25, 0.5) = %.2f; margin %+.2f); gain %s"
               % (name, "ok" if good else "FAIL", med, float(np.percentile(e, 90)), bright.sum(), floor, bar,
+                 bar - med,
                  " ".join("%.3f" % g for g in L["colourGain"])))
 
 
 def cmd_floor(idcards, refcards, ident):
     a = load(idcards, ident, "albedo")
     r = load(refcards, ident, "albedo")
-    both = (a[..., 3] >= 128) & (r[..., 3] >= 128)
+    both = (a[..., 3] >= covmin()) & (r[..., 3] >= covmin())
     lin_ref = srgb2lin(r[both][:, :3] / 255.0)
     bright = lin_ref.min(1) > 0.02
     e = np.abs(a[both][:, :3][bright] - r[both][:, :3][bright])
