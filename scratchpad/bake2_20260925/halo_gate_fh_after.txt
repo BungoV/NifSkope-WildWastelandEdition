@@ -1,0 +1,10 @@
+no-LAND cells 1325 (LAND 2067); far field d>=6: 557 cells, lum ON-VAN -7.83, chroma ON-VAN +1.65
+PASS H1 d=1 lum: ON-VAN -7.71 vs far -7.83 (207 cells)
+PASS H2 d=1 chroma: ON-VAN +1.66 vs far +1.65
+PASS H1 d=2 lum: ON-VAN -7.83 vs far -7.83 (168 cells)
+PASS H2 d=2 chroma: ON-VAN +1.65 vs far +1.65
+PASS H1 d=3 lum: ON-VAN -7.83 vs far -7.83 (157 cells)
+PASS H2 d=3 chroma: ON-VAN +1.65 vs far +1.65
+PASS H3 halo cells: 0 of 532 no-LAND cells at d<=3 above VAN+offset+8; max excess +2.9
+PASS H4 far field filled: chroma ON 25.4 (placeholder grey = 2)
+HALO GATE PASS

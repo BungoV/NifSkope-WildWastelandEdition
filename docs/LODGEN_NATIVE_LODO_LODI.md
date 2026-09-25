@@ -1,13 +1,14 @@
-# `.lodo` v5 (v4..v5) + `.lodi` v7 (v3..v9) — the FO4CS-native far field
+# `.lodo` v5 (v4..v5) + `.lodi` v7 (v3..v10) — the FO4CS-native far field
 
 > **VERSIONS TODAY (re-read 2026-09-23 against `src/lodofile.h`,
 > `src/lodifile.h`, `src/nifcli.cpp`; `.lodo` re-read 2026-09-25, lane SEAM1).**
 > The library is `.lodo` **version 5**, and a version-4 file is read as a v5 file
 > with no colour stream (§3.7). A default bake writes `.lodi` **version 7** (§4.9, §4.10);
-> `--scrappable` writes **version 9** (§4.12); the ways back (`--lodi-v6`,
+> `--scrappable` writes **version 9** (§4.12); a placement scaled above 7.99988
+> writes **version 10** (§4.14, lane BAKE2 2026-09-25); the ways back (`--lodi-v6`,
 > `--native-no-vertex-ao`, `--native-no-placement-ao`) step it down through 6, 5
 > and 3/4 (§4.6-§4.8). Version 8 is
-> retired and read only (§4.11). The reader accepts `.lodi` 3..9 and refuses 1
+> retired and read only (§4.11). The reader accepts `.lodi` 3..10 and refuses 1
 > and 2 by name. The default library is **authored-only** (bungo 2026-09-17,
 > *"Authored LODs only"*): `--library mnam` and no ladder (§3.5.7). A default
 > urban `.lodo` is **6,204,388 B** (2,970 bases, 2,982 meshes, 10,634 clusters,
@@ -687,7 +688,7 @@ number was free.
 | off | type | field |
 |---|---|---|
 | 0x00 | char[4] | magic `LODI` |
-| 0x04 | u32 | **version = 3, or 4 when the file carries aggregates (§4.6), 5 when it carries the placement-AO blob (§4.7), 6 when it carries the per-vertex AO stream (§4.8), 7 when it carries a group table (§4.9) or a per-vertex sky stream (§4.10), or 9 when it carries the workshop-scrappable bit (§4.12)**; versions 1 and 2 are refused by name. **Version 8 is RETIRED** (§4.11): no exe in this tree writes one, v9 is a superset of **v7** and not of v8, and the reader opens a v8 file met in the wild |
+| 0x04 | u32 | **version = 3, or 4 when the file carries aggregates (§4.6), 5 when it carries the placement-AO blob (§4.7), 6 when it carries the per-vertex AO stream (§4.8), 7 when it carries a group table (§4.9) or a per-vertex sky stream (§4.10), or 9 when it carries the workshop-scrappable bit (§4.12), or 10 when any instance carries the wide-scale bit (§4.14)**; versions 1 and 2 are refused by name. **Version 8 is RETIRED** (§4.11): no exe in this tree writes one, v9 is a superset of **v7** and not of v8, and the reader opens a v8 file met in the wild |
 | 0x08 | u32 | flags — bit0 `ROW_ORDER_NORTH_UP` (**clear = refusal**), bit1 `PARTIAL`, bit2 `NOLIB` |
 | 0x0C | u32 | `headerCrc32` — over `0x10 … headerBytes − 1`, so it covers **256 bytes on a v3…v6 file and 512 on a v7 one**, and a v6 file's CRC is the byte-for-byte same number it was before v7 existed |
 | 0x10 | u64 | `pluginCorpusHash` — must equal the `.lodo`'s |
@@ -764,13 +765,13 @@ against `zMin`/`zExtent` alone would pop it.
 |---|---|---|---|
 | 0x00 | 6 | `position` | 3 × u16 into the **chunk box**. X and Y span 16,384 world units; Z spans the chunk directory's `zMin`/`zExtent`. Step 0.250 u, worst 0.125 u |
 | 0x06 | 6 | `rotation` | 2-bit selector (the dropped, largest component; w,x,y,z order) + 3 × 15-bit smallest-three quaternion over [−1/√2, 1/√2], **LSB-first over the three u16**. Measured worst **0.0073°**. This is the **DRAWN** rotation — the ESM rotation × the generator's tree yaw — see Deviations 2 |
-| 0x0C | 2 | `scale` | u16, `scale = v / 8192`, range 0 … 7.99988. **A stored 0 is a refusal** (§4.1b) |
+| 0x0C | 2 | `scale` | u16, `scale = v / 8192`, range 0 … 7.99988; **with flags bit 7 (version 10), `scale = 8 + v / 8192`, range 8 … 15.99988** (§4.14). **A stored 0 without bit 7 is a refusal** (§4.1b) |
 | 0x0E | 2 | `baseId` | u16 index into the `.lodo` base table |
 | 0x10 | 1 | `ao` | u8 |
 | 0x11 | 1 | `sky` | u8, sky visibility |
 | 0x12 | 1 | `ground` | u8 ground-contact blend over the 256-unit ramp |
 | 0x13 | 1 | `seed` | u8 = `treeHash & 0xFF` (0 for a non-tree): sway phase / jitter only, **not** the yaw — see §4.3 |
-| 0x14 | 2 | `flags` | u16: bit0 mirrored, bit1 force-card (§4.13: the base has a card and the ring slot has no mesh, or a `C` line put it on its card), bit2 alpha-tested, bit3 emits, bit4 SCOL part, bit5 buried-cull candidate, **bit6 workshop-scrappable (version 9 only, §4.12: set in a file below version 9 it is refused by name)**; **bits 7–15 reserved, and a set reserved bit is a refusal** (`LODI_INST_FLAGS_KNOWN` = 0x7F) |
+| 0x14 | 2 | `flags` | u16: bit0 mirrored, bit1 force-card (§4.13: the base has a card and the ring slot has no mesh, or a `C` line put it on its card), bit2 alpha-tested, bit3 emits, bit4 SCOL part, bit5 buried-cull candidate, **bit6 workshop-scrappable (version 9 only, §4.12: set in a file below version 9 it is refused by name)**; **bit7 wide scale (version 10 only, §4.14: set by the writer alone, refused by name below version 10)**; **bits 8–15 reserved, and a set reserved bit is a refusal** (`LODI_INST_FLAGS_KNOWN` = 0xFF) |
 | 0x16 | 2 | `drawKey` (v2) | the base's (primary mesh, that mesh's first material) rank, §2.1 |
 
 **Cold record — 8 B, parallel to the instance blob:** `u32 refFormId`,
@@ -958,7 +959,7 @@ writer defect and the field gate checks for it by name.
 
 ### 4.2 The two u16 refusals
 
-`scale` maxes at **7.99988** and `baseId` at **65,535**. The measured corpus
+`scale` maxes at **15.99988** (7.99988 before version 10, §4.14) and `baseId` at **65,535**. The measured corpus
 reaches 1.9600 and 2,019 on this region and 4.970 / 3,400 worldwide, but a modded
 load order is the only environment this ships into. **The writer computes both
 maxima over the whole census before it writes a byte and refuses above range,
@@ -1671,6 +1672,51 @@ be a lie — and dropped visibly, because the census then reads 0.
 **Census**, on its own `native-scrappable:` prefix, ending with the word the
 gate greps for: `scrappablePlacements`.
 
+### 4.14 The wide-scale bit (`.lodi` v10, lane BAKE2, 2026-09-25; the director's ruling (a))
+
+**Why.** The instance record stores its scale as `u16 / 8192`, so nothing above
+65535/8192 = **7.99988** fits, and the writer refused the whole file on such a ref
+(§4.2). The engine and the CK allow a reference scale up to **10.0**. Nuka-World
+places four LOD-carrying cliffs above the old line (0604D45A 9.97, 0604D45D 8.33,
+0604DDA1 9.23, 0604DDB9 8.33 in his load order), so its `.lodi` could not be
+written at all. Dropping them was ruled out: the distant view shows the game's
+own data.
+
+**The rule.** Instance flag **bit 7, `LODI_INST_SCALE_WIDE` (0x80)**:
+
+| bit 7 | `scale` means | range | step |
+|---|---|---|---|
+| clear | `v / 8192` (every version) | 0 … 7.99988 | 1/8192 |
+| set (v10 only) | `8 + v / 8192` | 8 … 15.99988 | 1/8192 |
+
+`lodiScaleWord()` / `lodiScaleValue()` / `lodiScaleQuantised()` in
+`src/lodifile.h` are the one encoder and the one decoder. At or below 7.99988 the
+word is `lround(s × 8192)` clamped to u16, the exact arithmetic of every earlier
+version, and the bit is clear: **no instance anywhere is coarser than before**.
+Above **15.99988** the writer still REFUSES (never clamps), naming the ref; 16 is
+60 percent headroom over the engine's 10. A caller that sets bit 7 itself is
+refused: the writer alone decides it from the scale.
+
+**The version moves only when it must.** Like v9 (§4.12), the version word is the
+only thing that tells a reader which flag bits may appear. It rises to **10 only
+when some instance carries bit 7**. A file whose scales all fit is the v7 (or v9)
+file this writer always wrote, **byte for byte**, version word included, so every
+`.lodi` already installed stays valid and readers keep accepting 7 and 9.
+Version 10 is the **v9 layout** (bit 6 keeps its meaning; 512-byte header, no new
+table, no header word). A `--lodi-v6` bake that meets a wide scale is REFUSED:
+no pre-v7 version can say the bit, and dropping it would draw the object at an
+eighth of the scale it should have or worse.
+
+**Readers.** `lodiRead`: bit 7 below version 10 is refused by name; a stored 0 is
+refused only without bit 7 (a wide 0 is 8.0). `lodinative.cpp` decodes the scale
+through `lodiScaleValue`. The independent decoder
+(`tests/spells/lodgen_native_decode.py`) and the fields spell (`j0`, `j0b`: bit 7
+appears exactly when the version is 10) read both. **The FO4CS reader owes the
+same decode** (version 10 accepted, bit 7 = +8).
+
+**Census**, on its own `native-wide-scale:` prefix: placements above the line,
+of the total, the max scale and the `.lodi` version written.
+
 ### 4.13 The card link (lane CARDLINK1, 2026-09-24) -- `cardLayer`, `cardCount`, `cardCorpusHash`, FORCE_CARD
 
 **Status: the `cardCorpusHash` definition below is PROPOSED (R19).** bungo has
@@ -1760,7 +1806,7 @@ first time any mod is installed or removed after a bake.
 | **hard: both files** | magic, **version (see the per-file rows)**, `vertexStride`, `instanceStride`, **`groupStride` (v7), a group id that is not dense per chunk, a `groupCount` that disagrees with the chunks' sum, a sky slice whose length disagrees with the same placement's AO slice, a version-3…6 file carrying version-7 header words,** `clusterMaxTris`, **`clusterLodStride`**, **`occluderStride`**, a set reserved bit, `ROW_ORDER_NORTH_UP` clear, `chunkCount` over cap, a zero `lodoIdentity` without `NOLIB`, **a `scale` of 0**, **a `drawKey` out of order or not the base's rank**, **a cluster whose `geometricError` exceeds its `parentError`**, **a `CONE_OPEN` cluster carrying a cone (or the reverse)**, **an occluder naming an instance outside its own cell**, any CRC mismatch | refuse, name the field | **refuse to load, and never hide the engine's own LOD tree** |
 | **hard: pairing** (between the two files) | the two files name different worldspaces; `pluginCorpusHash` or `objectCorpusHash` differs **between the `.lodo` and the `.lodi`**; `loadOrderHash` differs **between the two files** (§4 row 0x90); `lodoIdentity` does not name this `.lodo` (unless `NOLIB`) — `src/nativeemit.cpp`, every `pairing:` refusal | refuse, name the field | **refuse to load, and never hide the engine's own LOD tree** |
 | **hard: `.lodo`** (`lodoRead`) | versions **1, 2 and 3 refused by name**, anything but 4 or 5; the `LADDER` flag disagreeing with `ladderGroup` / `levelMax`, `levelMax` > 15; `cardCount` > `baseCount`; `cardCount` not equal to the base rows naming a card layer, or rows naming one while `cardCorpusHash` is 0 (CARDLINK1, §4.13); a base's `fullTriangles` that its own meshes do not recount to, or non-zero on a base with no mesh; mesh flags beyond ALPHA / SWAY / WATERTIGHT (plus VERTEX_COLOUR / VERTEX_ALPHA on v5); VERTEX_ALPHA without VERTEX_COLOUR; `colourVertexCount` and `offColours` not both zero or both set, a count over `vertexCount`, a flagged mesh whose vertices are not one contiguous range, or flagged rows that do not add up to the count (v5); reserved header bytes 0xCE…0xCF and 0xD4…0xFF (0xE0…0xFF on v5) | refuse, name the field | as above |
-| **hard: `.lodi`** (`lodiRead`) | versions **1 and 2 refused by name**, anything outside 3…9; a version whose defining table is missing (v5 without the placement-AO blob, v6 without the vertex-AO blob, v7/v9 with neither group table nor sky stream, v8 without the horizon stream); a file carrying a LATER version's header words (v3/v4 with placement-AO words, v3–v6 with v7 words at 0x100/0x110, v7/v9 with v8 words at 0x11C); reserved header bytes by version (from 0xB0 on v3, 0xD4 on v4, 0xF1…0xFF on v5, 0xF1…0xF3 on v6 and later, plus 0x11C…0x1FF on v7/v9, 0x130…0x1FF on v8); instance flag bit 6 below v9 (§4.1); a stored cell outside the quantisation band (§4.1, `lodiCellAgrees`); the vertex-AO, sky and horizon offset tables and their slice lengths; the aggregate rows and their covered list (§4.6) | refuse, name the field | as above |
+| **hard: `.lodi`** (`lodiRead`) | versions **1 and 2 refused by name**, anything outside 3…10; a version whose defining table is missing (v5 without the placement-AO blob, v6 without the vertex-AO blob, v7/v9 with neither group table nor sky stream, v8 without the horizon stream); a file carrying a LATER version's header words (v3/v4 with placement-AO words, v3–v6 with v7 words at 0x100/0x110, v7/v9 with v8 words at 0x11C); reserved header bytes by version (from 0xB0 on v3, 0xD4 on v4, 0xF1…0xFF on v5, 0xF1…0xF3 on v6 and later, plus 0x11C…0x1FF on v7/v9, 0x130…0x1FF on v8); instance flag bit 6 below v9 (§4.1); instance flag bit 7 below v10 (§4.14); a stored cell outside the quantisation band (§4.1, `lodiCellAgrees`); the vertex-AO, sky and horizon offset tables and their slice lengths; the aggregate rows and their covered list (§4.6) | refuse, name the field | as above |
 | **soft** (against the user's LIVE data only) | `pluginCorpusHash`, `objectCorpusHash`, `modelCorpusHash`, `cardCorpusHash`, **`loadOrderHash`** recomputed from the running load order and disagreeing with the file — a mod installed, removed or reordered since the bake | refuse, name the field and the plugin | **load anyway, log it, raise a `stale=1` census row, keep rendering** |
 
 **The rows above are the classes, not every check.** `lodoRead` and `lodiRead` are

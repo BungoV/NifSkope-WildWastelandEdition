@@ -2173,7 +2173,8 @@ to the vanilla colour on those tiles, "in a proper way".
 
     painted cell  a LAND quadrant with a BTXT or any ATXT layer (a NULL-LTEX layer counts)
     d             world distance from the texel to the nearest painted cell (0 inside one)
-    w             smoothstep(0, band, d); w = 0 on a painted cell, so its texels are untouched
+    w             smoothstep(0, band, d); w = 0 on a painted cell, so its texels are untouched;
+                  w = 1 on a cell with NO LAND record (lane BAKE2, 2026-09-25, below)
     colour        colour + (T(V) - colour) * w          (RGB, 0..1; alpha untouched)
     V             Bethesda's dim-4 LOD diffuse, Mitchell-Netravali bicubic, B = C = 1/3
     T             tone + saturation match fitted on the overlap (below)
@@ -2196,14 +2197,36 @@ to the vanilla colour on those tiles, "in a proper way".
 * **The bar** = p99 of vanilla's own adjacent cell-mean luminance steps over the
   overlap and the ring (the unpainted cells within 3 cells of a painted one).
   **The band** = ceil(p95 over the ring of |lum ours - lum T(V)| / bar) cells,
-  at least 1, at most 8.
+  at least 1, at most 8. No-LAND ring cells are left out of the p95.
+* **A cell with no LAND record is filled whole** (lane BAKE2, 2026-09-25). It has no
+  colour of ours: the generator writes its flat placeholder grey (luminance 129.6,
+  chroma 2) there. Blending FROM that grey over the band painted a pale halo round
+  pre-war Sanctuary's playable block, which bungo saw on the top-down picture: no-LAND
+  cells one, two and three cells off the LAND edge read +38, +30 and +19 luminance
+  over vanilla, against +11 (the tone match) six cells out, while vanilla's own texels
+  there are flat. Those cells were also in the band's p95, where the grey set the band
+  (4 cells on pre-war). Both are removed: w = 1 on a no-LAND cell, and it does not size
+  the band. The Commonwealth has LAND on every cell of -96..95, so its fill is unchanged
+  by construction. Gate: `scratchpad/bake2_20260925/halo_gate.py` (RED on the exe
+  before the change: 100 of 180 near cells over vanilla + offset + 8).
+* **Vanilla's grid is the worldspace's own** (lane BAKE2, 2026-09-25). A dim-4 sheet
+  `<WS>.4.<x>.<y>.dds` has its SW cell on the grid of `LODSettings/<WS>.LOD` (int16
+  left, int16 bottom, int32 stride, int32 lodMin, int32 lodMax), not on multiples of 4.
+  The Commonwealth and pre-war say -96,-96 and Nuka-World -32,-32 (phase 0,0: the old
+  addressing, byte for byte); Far Harbor says -73,-59, so its sheets sit at x = 3,
+  y = 1 mod 4 and a multiple-of-4 lookup found none of them. The phase is
+  ((left mod 4), (bottom mod 4)), read from the vanilla root; no file = 0,0, and the
+  census says which (`grid=3,1(LODSettings -73,-59)` or `grid=0,0(default)`).
+  Measured on Far Harbor: 178 sheets read, 0 chunks missing, flat-grey VT.4 cells
+  1517 -> 0 of 3584.
 * **Where it runs.** Every finest-level tile, right after its bake, colour plane
   only. Coarser levels, their mips and the assembled `.btr` chunk sheets inherit it
   through the existing box filter (§2.3, §2.4). A tile whose cells and one-cell
   ring are all painted is skipped whole.
 * **The census line** (report, only when asked): `vanillaFill overlapCells= ringCells=
   fitTiles= gain= rawGain= offset= sat= cshift= bar= p95= bandCells= tilesTouched=
-  texelsFilled= texelsNoVanilla= vanillaChunksMissing= vanillaSheetsRead= root=`.
+  texelsFilled= texelsNoVanilla= vanillaChunksMissing= vanillaSheetsRead= noLandCells=
+  noLandRingCells= texelsNoLand= grid=X,Y(source) root=`.
   With fewer than 2 overlap cells to fit on, the line says the fill is off and why.
 
 **What is pinned.** Off is the bake before the fill existed, byte for byte, by

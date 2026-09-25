@@ -1,0 +1,10 @@
+picture luminance by distance from LAND (same camera, upp 187.500), central half of each cell
+ d   cells  before  after
+ 0   2067    90.5   91.9
+ 1    207   158.6   95.9
+ 2    168   158.6   96.2
+ 3    157   158.6   96.2
+ 4    125   158.6   96.2
+ 5    111   158.6   96.2
+>=6    557   158.6   96.2
+crop cells -32..23 x -24..34 -> pics/farharbor_halo_before_after.png 2462x1329

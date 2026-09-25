@@ -10,6 +10,7 @@ BSD License - see nifskope.h
 #include <QString>
 #include <QStringList>
 
+#include <cmath>
 #include <vector>
 
 /*! `.lodi` v1 -- the FO4CS-native INSTANCE TABLE: one 24-byte quantised record
@@ -273,6 +274,33 @@ constexpr quint32 LODI_VERSION_HORIZON = 8;
  *  default) writes no bit, keeps the version at 7, and the file is byte for
  *  byte the v7 file. */
 constexpr quint32 LODI_VERSION_SCRAPPABLE = 9;
+/*! VERSION 10 IS THE v9 LAYOUT PLUS BIT 7 OF THE INSTANCE FLAGS, `SCALE_WIDE`
+ *  (lane BAKE2, 2026-09-25; the director's ruling (a) the same day).
+ *
+ *  THE CEILING IT LIFTS. The instance record stores its scale as u16 / 8192, so
+ *  nothing above 65535/8192 = 7.99988 fits, and the writer refused the whole
+ *  file on such a ref. The engine and the CK allow a reference scale up to 10.0,
+ *  and Nuka-World places four LOD-carrying cliffs above the old line
+ *  (0604D45A 9.97, 0604D45D 8.33, 0604DDA1 9.23, 0604DDB9 8.33): its .lodi could
+ *  not be written at all.
+ *
+ *  THE RULE. Bit 7 set: scale = 8 + v / 8192, range 8 .. 15.99988. Bit 7 clear:
+ *  scale = v / 8192, exactly as before. The step is 1/8192 on both sides, so no
+ *  instance anywhere reads coarser than it did, and 16 is 60 percent headroom
+ *  over the engine's 10. A scale above 15.99988 is still REFUSED, not clamped.
+ *
+ *  WHAT DOES NOT MOVE. A placement at or below 7.99988 is written with bit 7
+ *  clear and the very same u16, and the version rises to 10 ONLY when some
+ *  instance carries the bit. A file whose scales all fit is therefore byte for
+ *  byte the file this writer wrote before (v7, or v9 with `--scrappable`); the
+ *  installed Commonwealth .lodi stays a v7 file every reader keeps accepting.
+ *
+ *  Like v9, the number moves because the version word is the only thing that
+ *  tells a reader which flag bits may appear: below v10, bit 7 is reserved zero.
+ *  10 implies v7's 512-byte header block, so a `--lodi-v6` bake that meets a
+ *  wide scale is refused (no pre-v7 version can say it). The FO4CS reader owes
+ *  the same decode. */
+constexpr quint32 LODI_VERSION_WIDE_SCALE = 10;
 /*! WHAT A VERSION-8 FILE'S BYTES MEAN (contract s4.11). No writer in this tree
  *  produces such a file any more (see LODI_VERSION_HORIZON above) and there is
  *  no longer a switch that moves these; they stay because a reader that meets
@@ -317,7 +345,9 @@ constexpr quint32 LODI_MAX_CHUNKS = 65536;
 constexpr float LODI_CELL_UNITS = 4096.0f;
 constexpr float LODI_CHUNK_UNITS = 16384.0f;        //!< LODI_CHUNK_CELLS x 4096
 constexpr float LODI_SCALE_DIVISOR = 8192.0f;
-constexpr float LODI_SCALE_MAX = 65535.0f / 8192.0f;  //!< 7.99988, the refusal line
+constexpr float LODI_SCALE_MAX = 65535.0f / 8192.0f;  //!< 7.99988, the narrow range's top (v10: bit 7 above it)
+constexpr float LODI_SCALE_WIDE_BASE = 8.0f;          //!< v10: bit 7 set adds this to v / 8192
+constexpr float LODI_SCALE_MAX_WIDE = LODI_SCALE_WIDE_BASE + 65535.0f / 8192.0f;  //!< 15.99988, the refusal line
 constexpr quint32 LODI_BASE_MAX = 65535;
 
 /*! v3: at most this many occluder boxes a cell, the largest by world volume.
@@ -361,9 +391,35 @@ enum LodiInstanceFlags
 	LODI_INST_SCOL_PART = 16,
 	LODI_INST_BURIED_CANDIDATE = 32,
 	//! v9: the player can scrap this placement at a workshop (LODI_VERSION_SCRAPPABLE)
-	LODI_INST_SCRAPPABLE = 64
+	LODI_INST_SCRAPPABLE = 64,
+	//! v10: scale = 8 + v / 8192 (LODI_VERSION_WIDE_SCALE); set by the writer, never by a caller
+	LODI_INST_SCALE_WIDE = 128
 };
-constexpr quint16 LODI_INST_FLAGS_KNOWN = 0x7F;
+constexpr quint16 LODI_INST_FLAGS_KNOWN = 0xFF;
+
+/*! v10, the one encoder and the one decoder of the instance scale. At or below
+ *  LODI_SCALE_MAX the word is `lround( s x 8192 )` clamped to u16 -- the exact
+ *  arithmetic of every version before 10 -- and the bit is clear. */
+inline bool lodiScaleIsWide( float s )
+{
+	return s > LODI_SCALE_MAX;
+}
+inline quint16 lodiScaleWord( float s )
+{
+	const float b = lodiScaleIsWide( s ) ? s - LODI_SCALE_WIDE_BASE : s;
+	const long v = std::lround( b * LODI_SCALE_DIVISOR );
+	return quint16( v < 0 ? 0 : ( v > 65535 ? 65535 : v ) );
+}
+inline float lodiScaleValue( quint16 word, quint16 flags )
+{
+	const float s = float( word ) / LODI_SCALE_DIVISOR;
+	return ( flags & LODI_INST_SCALE_WIDE ) ? s + LODI_SCALE_WIDE_BASE : s;
+}
+//! the quantised scale a consumer reads back, for the writer's own bounds
+inline float lodiScaleQuantised( float s )
+{
+	return lodiScaleValue( lodiScaleWord( s ), lodiScaleIsWide( s ) ? quint16( LODI_INST_SCALE_WIDE ) : quint16( 0 ) );
+}
 
 #pragma pack( push, 1 )
 
@@ -372,7 +428,7 @@ struct LodiInstance
 {
 	quint16 pos[3];     //!< u16 into the chunk box: X, Y over 16,384 units, Z over zMin..zMin+zExtent
 	quint16 rot[3];     //!< 2-bit selector + 3 x 15-bit smallest-three quaternion, LSB-first over the three u16
-	quint16 scale;      //!< scale = v / 8192
+	quint16 scale;      //!< scale = v / 8192; v10 with flags bit 7: 8 + v / 8192 (lodiScaleValue)
 	quint16 baseId;     //!< index into the .lodo base table
 	quint8 ao;
 	quint8 sky;
@@ -766,6 +822,7 @@ struct LodiWriteStats
 	quint32 vertexSkyBytes = 0;         //!< the whole sky stream, offsets included
 	quint32 vertexSkyPlacements = 0;    //!< placements with a non-empty sky slice
 	quint32 version = LODI_VERSION;     //!< the version word actually written
+	quint32 wideScaleInstances = 0;     //!< v10: instances written with bit 7 (scale above 7.99988)
 };
 
 /*! Write the table. Refuses BEFORE writing a byte on: a scale above

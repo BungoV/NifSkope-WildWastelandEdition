@@ -793,7 +793,7 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 
 			float quat[4], m[9];
 			lodiUnpackRotation( inst.rot, quat, m );
-			const float scale = float( inst.scale ) / LODI_SCALE_DIVISOR;
+			const float scale = lodiScaleValue( inst.scale, inst.flags );
 			/* REGION SPACE. `lodiDecodePosition` gives the WORLD position, and
 			 * every shape this builder emits carries the region `origin` as its
 			 * Translation (emitBucket, "Translation"), so a vertex has to be the

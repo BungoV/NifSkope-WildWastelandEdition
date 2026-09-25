@@ -1,0 +1,10 @@
+picture luminance by distance from LAND (same camera, upp 47.462), central half of each cell
+ d   cells  before  after
+ 0    118    99.5   99.5
+ 1     55   124.5   95.8
+ 2     59   116.4   94.8
+ 3     66   106.5   96.9
+ 4     51    97.6   96.3
+ 5     55    94.6   94.6
+>=6    774    94.0   94.0
+crop cells -30..7 x -14..30 -> pics/prewar_halo_before_after.png 6320x3899

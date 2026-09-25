@@ -1,0 +1,2 @@
+NukaWorld: VT.4 box -32..35 x -32..63, .lodl header -32,-32..32,32, flat-grey cells 2303
+  outside header  no-LAND  no vanilla sheet    2303
