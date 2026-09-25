@@ -1,0 +1,44 @@
+lodo old v4 6719215 B, new v5 6933236 B, colourRows 52925, stripped 6719215 B
+G1 lodo: 27 bytes differ; version word differs; others 26 in 25 (table, byte) groups
+   vertices     byte 15   x2      e.g. [(293881, 228, 201, 'WaterTowerConcord01_LOD.nif'), (294934, 228, 201, 'WaterTowerGeneric01_LOD.nif')]
+   header       byte 12   x1      e.g. [(0, 224, 111, '')]
+   header       byte 13   x1      e.g. [(0, 119, 163, '')]
+   header       byte 14   x1      e.g. [(0, 116, 40, '')]
+   header       byte 15   x1      e.g. [(0, 147, 223, '')]
+   header       byte 40   x1      e.g. [(0, 159, 212, '')]
+   header       byte 41   x1      e.g. [(0, 100, 51, '')]
+   header       byte 42   x1      e.g. [(0, 119, 193, '')]
+   header       byte 43   x1      e.g. [(0, 70, 68, '')]
+   header       byte 44   x1      e.g. [(0, 164, 131, '')]
+   header       byte 45   x1      e.g. [(0, 236, 25, '')]
+   header       byte 46   x1      e.g. [(0, 87, 74, '')]
+   header       byte 47   x1      e.g. [(0, 221, 201, '')]
+   header       byte 168  x1      e.g. [(0, 67, 119, '')]
+   header       byte 169  x1      e.g. [(0, 134, 42, '')]
+   header       byte 170  x1      e.g. [(0, 38, 177, '')]
+   header       byte 171  x1      e.g. [(0, 66, 138, '')]
+   header       byte 184  x1      e.g. [(0, 26, 144, '')]
+   header       byte 185  x1      e.g. [(0, 214, 75, '')]
+   header       byte 186  x1      e.g. [(0, 56, 18, '')]
+   header       byte 187  x1      e.g. [(0, 15, 127, '')]
+   header       byte 188  x1      e.g. [(0, 234, 52, '')]
+   header       byte 189  x1      e.g. [(0, 252, 29, '')]
+   header       byte 190  x1      e.g. [(0, 17, 139, '')]
+   header       byte 191  x1      e.g. [(0, 159, 110, '')]
+lodi old 34371499 B new 34371499 B, instances old 184431 new 184431
+G1 lodi: 20 bytes differ, 8 outside lodoIdentity/headerCrc32 in 8 groups
+   header       byte 144  x1      e.g. [(0, 26, 144, '')]
+   header       byte 145  x1      e.g. [(0, 214, 75, '')]
+   header       byte 146  x1      e.g. [(0, 56, 18, '')]
+   header       byte 147  x1      e.g. [(0, 15, 127, '')]
+   header       byte 148  x1      e.g. [(0, 234, 52, '')]
+   header       byte 149  x1      e.g. [(0, 252, 29, '')]
+   header       byte 150  x1      e.g. [(0, 17, 139, '')]
+   header       byte 151  x1      e.g. [(0, 159, 110, '')]
+G2 new v5: 3125 meshes, 166 VERTEX_COLOUR, 6 VERTEX_ALPHA, colourRows 52925, source NIFs missing 0
+G2 named meshes non-white: {'amphitheater_lod_0.nif': True, 'treemapleblasted01_lod_1.nif': True}
+G2 flag <=> source: 0 disagree []
+G2 decoded rows == source rows: 1 disagree [('BNS\\LOD\\Landscape\\Trees\\Evergreen\\TreeFirForest04Gr_LOD_0.nif', 1, 2, 0, 1)]
+G1 lodo (0x04 only) RED
+G1 lodi RED
+G2 RED

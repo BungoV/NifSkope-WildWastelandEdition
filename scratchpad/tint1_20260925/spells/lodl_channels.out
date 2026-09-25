@@ -1,0 +1,61 @@
+exe   /e/Projects/NifskopeWWE-tint1/release/NifSkope.exe  (2026-09-25 20:18:20.578481800 +0200 24954880 B)
+lodi  /e/Projects/NifskopeWildWastelandEdition/scratchpad/viewfix_20260917/urban_ao/nat/FO4CSLOD/Commonwealth/Commonwealth.lodi
+sheet /e/Projects/NifskopeWildWastelandEdition/scratchpad/slab1_20260918/after/vt/FO4CSLOD/Commonwealth/Commonwealth.VT.1.lodt
+out   E:/Projects/NifskopeWWE-tint1/scratchpad/tint1_20260925/spells/lodl_channels
+--- checks ---
+  ok   (floor) the flat default and the textured default are DIFFERENT pictures, so a pixel count of 0 means "identical", not "broken reader"
+  ok   (a) identity: note line present, 2446 read
+  ok   (b) identity: render differs from the default, 1109710 px
+  ok   (c) identity: note mean 1224.894 vs reader 1224.894 (tolerance 1)
+  ok   (a) placement: note line present, 2446 read
+  ok   (b) placement: render differs from the default, 1109710 px
+  ok   (c) placement: note mean 1224.894 vs reader 1224.894 (tolerance 1)
+  ok   (a) identityraw: note line present, 2446 read
+  ok   (b) identityraw: render differs from the default, 1109585 px
+  ok   (c) identityraw: note mean 124.282 vs reader 124.282 (tolerance 1)
+  ok   (a) sky: note line present, 2446 read
+  ok   (b) sky: render differs from the default, 1081487 px
+  ok   (c) sky: note mean 129.305 vs reader 129.305 (tolerance 1)
+  ok   (a) ground: note line present, 2446 read, constant
+  ok   (b) ground: render differs from the default, 1109361 px
+  ok   (c) ground: note mean 61.299 vs reader 61.299 (tolerance 1)
+  ok   (a) seed: note line present, 2446 read
+  ok   (b) seed: render differs from the default, 1109710 px
+  ok   (c) seed: note mean 7.419 vs reader 7.419 (tolerance 1)
+  ok   (a) sway: note line present, 53349 read
+  ok   (b) sway: render differs from the default, 1109710 px
+  ok   (c) sway: note mean 8.889 vs reader 8.889 (tolerance 1)
+  ok   (a) selfao: note line present, 53349 read
+  ok   (b) selfao: render differs from the default, 251518 px
+  ok   (c) selfao: note mean 234.764 vs reader 234.764 (tolerance 1)
+  ok   (a) ao: note line present, 2446 read
+  ok   (b) ao: render differs from the default, 1015816 px
+  ok   (c) ao: note mean 175.800 vs reader 175.850 (tolerance 1)
+  ok   (a) mask-r: note line present, 16 read
+  ok   (b) mask-r: render differs from the default, 380174 px
+  ok   (c) mask-r: note census mean ['180.413'] vs reader ['180.413'] (tolerance 1)
+  ok   (a) mask-g: note line present, 16 read, constant
+  ok   (b) mask-g: render differs from the default, 380174 px
+  ok   (c) mask-g: note census mean ['0.000'] vs reader ['0.000'] (tolerance 1)
+  ok   (a) mask-b: note line present, 16 read
+  ok   (b) mask-b: render differs from the default, 380084 px
+  ok   (c) mask-b: note census mean ['159.214'] vs reader ['159.214'] (tolerance 1)
+  ok   (a) mask-a: the note line says ABSENT by name -- WW_LODL_CHANNEL=mask-a: ABSENT on this bake -- tile 0,3 is BC1 (dxgi 71): it carries no alpha; the lit view is
+  ok   (b) mask-a: absent, so its render is IDENTICAL to the default (0 px differ, must be 0)
+  ok   (c) mask-a: the reader agrees it is absent
+  ok   (a) emissive: the note line says ABSENT by name -- WW_LODL_CHANNEL=emissive: emissive sheet ABSENT -- Commonwealth.VT.1.lodt carries no sheet with role 6; nothin
+  ok   (b) emissive: absent, so its render is IDENTICAL to the default (0 px differ, must be 0)
+  ok   (c) emissive: the reader agrees it is absent
+  ok   (a) normal: note line present, 4194304 read
+  ok   (b) normal: render differs from the default, 397352 px
+  ok   (c) normal: note census mean ['130.597', '252.676', '129.607'] vs reader ['130.597', '252.676', '129.607'] (tolerance 1)
+  ok   (c floor) the same tolerance REFUSES identityraw's mean against sky's (124.282 vs 129.305) -- so (c) is not vacuous
+  ok   (f) on a version-6 file `identity` NAMES its fallback to the placement identity -- WW_LODL_CHANNEL=identity: no group table in Commonwealth.lodi (a version-6 file), so the PLACEMENT IDENTITY served it on 2446 placements WW_
+  ok   (f) on a version-6 file `sky` NAMES the placement byte as what served it -- WW_LODL_CHANNEL=sky: no per-vertex stream in Commonwealth.lodi (a version-6 file), so the PLACEMENT BYTE (.lodi 0x11) served it WW_LODL_CHAN
+  ok   (f) with no group table, `identity` and `placement` are the SAME picture (95460 B vs 95460 B) -- on a version-7 file they must differ, which tests/spells/lodi_v7.sh G4 asserts
+  ok   (d) WW_LODL_AO=1 with WW_LODL_CHANNEL unset is byte-identical to WW_LODL_CHANNEL=ao (351578 B vs 351578 B)
+  ok   (e) an unknown name is refused BY NAME -- WW_LODL_CHANNEL: REFUSED "nosuchchannel" -- no such channel; the scene is the default one. Known names: identity, placem
+  ok   (e) the refusal lists the known names
+  ok   (e) the refused render is byte-identical to the default (6844 B vs 6844 B)
+54 checks, 0 failures
+PASS

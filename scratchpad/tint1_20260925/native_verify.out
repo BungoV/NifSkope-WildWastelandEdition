@@ -1,0 +1,304 @@
+mo2-profile: E:/Projects/Fallout 4 Mods/profiles/Default
+mo2-mods: E:/Projects/Fallout 4 Mods/mods
+mo2-data: X:/Programs/Steam/steamapps/common/Fallout 4/Data (from C:/Users/bungo/AppData/Local/ModOrganizer/Fallout 4/ModOrganizer.ini)
+mo2-overwrite: E:/Projects/Fallout 4 Mods/overwrite
+mo2-mods-enabled: 47
+mo2-mods-disabled: 29
+mo2-separators: 0
+mo2-mods-missing: 0
+mo2-archives-without-plugin: 0
+mo2-masters: 17
+plugins: 47
+plugin 0: X:/Programs/Steam/steamapps/common/Fallout 4/Data/Fallout4.esm
+plugin 1: X:/Programs/Steam/steamapps/common/Fallout 4/Data/DLCRobot.esm
+plugin 2: X:/Programs/Steam/steamapps/common/Fallout 4/Data/DLCworkshop01.esm
+plugin 3: X:/Programs/Steam/steamapps/common/Fallout 4/Data/DLCCoast.esm
+plugin 4: X:/Programs/Steam/steamapps/common/Fallout 4/Data/DLCworkshop02.esm
+plugin 5: X:/Programs/Steam/steamapps/common/Fallout 4/Data/DLCworkshop03.esm
+plugin 6: X:/Programs/Steam/steamapps/common/Fallout 4/Data/DLCNukaWorld.esm
+plugin 7: X:/Programs/Steam/steamapps/common/Fallout 4/Data/DLCUltraHighResolution.esm
+plugin 8: X:/Programs/Steam/steamapps/common/Fallout 4/Data/ccBGSFO4044-HellfirePowerArmor.esl
+plugin 9: X:/Programs/Steam/steamapps/common/Fallout 4/Data/ccBGSFO4115-X02.esl
+plugin 10: X:/Programs/Steam/steamapps/common/Fallout 4/Data/ccBGSFO4116-HeavyFlamer.esl
+plugin 11: X:/Programs/Steam/steamapps/common/Fallout 4/Data/ccBGSFO4110-WS_Enclave.esl
+plugin 12: X:/Programs/Steam/steamapps/common/Fallout 4/Data/ccBGSFO4096-AS_Enclave.esl
+plugin 13: X:/Programs/Steam/steamapps/common/Fallout 4/Data/ccFSVFO4007-Halloween.esl
+plugin 14: X:/Programs/Steam/steamapps/common/Fallout 4/Data/ccBGSFO4046-TesCan.esl
+plugin 15: X:/Programs/Steam/steamapps/common/Fallout 4/Data/ccSBJFO4003-Grenade.esl
+plugin 16: X:/Programs/Steam/steamapps/common/Fallout 4/Data/ccOTMFO4001-Remnants.esl
+plugin 17: E:/Projects/Fallout 4 Mods/mods/HUDFramework/HUDFramework.esm
+plugin 18: E:/Projects/Fallout 4 Mods/mods/Slow Motion Dismemberment/Slow Motion Dismemberment.esm
+plugin 19: E:/Projects/Fallout 4 Mods/mods/Baka Framework/BakaFramework.esm
+plugin 20: E:/Projects/Fallout 4 Mods/mods/Bullet Impact Overhaul/Bullet Impact Overhaul.esp
+plugin 21: E:/Projects/Fallout 4 Mods/mods/Fallout 4 Particle Patch - No More Glowing Objects/FO4ParticlePatch.esp
+plugin 22: E:/Projects/Fallout 4 Mods/mods/Very Zen Impacts/Very Zen Impacts.esp
+plugin 23: E:/Projects/Fallout 4 Mods/mods/DEF_UI/def_inv_scrap_en.esp
+plugin 24: E:/Projects/Fallout 4 Mods/mods/Grass Reworked/Grasslands - Healthy.esp
+plugin 25: E:/Projects/Fallout 4 Mods/mods/Gloomy Glass - All transparent materials revised/Gloomy Glass.esp
+plugin 26: E:/Projects/Fallout 4 Mods/mods/RAW INPUT - The Ultimate Mouse Sensitivity Fix/RAW INPUT.esp
+plugin 27: E:/Projects/Fallout 4 Mods/mods/Remove Ironsight Blur/RemoveBlur.esp
+plugin 28: E:/Projects/Fallout 4 Mods/mods/AnotherOne's Test World/TestWorldspace.esp
+plugin 29: E:/Projects/Fallout 4 Mods/mods/True Grass/TrueGrass.esp
+plugin 30: E:/Projects/Fallout 4 Mods/mods/X01Tesla/X01Remastered.esp
+plugin 31: E:/Projects/Fallout 4 Mods/mods/Simple FOV Slider/Simple FOV Slider.esp
+plugin 32: E:/Projects/Fallout 4 Mods/mods/Vanilla Reanimation Project - Pistol/44DA.esp
+plugin 33: E:/Projects/Fallout 4 Mods/mods/Vanilla Reanimation Project - Lasers/LaserReanim.esp
+plugin 34: E:/Projects/Fallout 4 Mods/mods/VRP Shared Content/VRPShared.esp
+plugin 35: E:/Projects/Fallout 4 Mods/mods/Vanilla Reanimation Project - Rifle/RifleReanim_FarHarbor.esp
+plugin 36: E:/Projects/Fallout 4 Mods/mods/Vanilla Reanimation Project - Rifle/RifleReanim.esp
+plugin 37: E:/Projects/Fallout 4 Mods/mods/Vanilla Reanimation Project - Pistol/PistolReanims.esp
+plugin 38: E:/Projects/Fallout 4 Mods/mods/Vanilla Reanimation Project - Pipe/PipeReanim.esp
+plugin 39: E:/Projects/Fallout 4 Mods/mods/Vanilla Reanimation Project - Rifle/RifleReanim_Nuka.esp
+plugin 40: E:/Projects/Fallout 4 Mods/mods/Ultra Interior Lighting/UltraInteriorLighting.esp
+plugin 41: E:/Projects/Fallout 4 Mods/mods/Ultra Exterior Lighting/UltraExteriorLighting.esp
+plugin 42: E:/Projects/Fallout 4 Mods/mods/F76Weathers/F76Weathers.esp
+plugin 43: E:/Projects/Fallout 4 Mods/mods/Boston Natural Surroundings/BNS Landscape.esp
+plugin 44: E:/Projects/Fallout 4 Mods/mods/Boston Natural Surroundings/BNS Trees.esp
+plugin 45: E:/Projects/Fallout 4 Mods/mods/BoSInfantryArmor/BoSInfantryArmor.esp
+plugin 46: E:/Projects/Fallout 4 Mods/mods/CORE/CORE.esp
+plugin-from 0: data
+plugin-from 1: data
+plugin-from 2: data
+plugin-from 3: data
+plugin-from 4: data
+plugin-from 5: data
+plugin-from 6: data
+plugin-from 7: data
+plugin-from 8: data
+plugin-from 9: data
+plugin-from 10: data
+plugin-from 11: data
+plugin-from 12: data
+plugin-from 13: data
+plugin-from 14: data
+plugin-from 15: data
+plugin-from 16: data
+plugin-from 17: HUDFramework
+plugin-from 18: Slow Motion Dismemberment
+plugin-from 19: Baka Framework
+plugin-from 20: Bullet Impact Overhaul
+plugin-from 21: Fallout 4 Particle Patch - No More Glowing Objects
+plugin-from 22: Very Zen Impacts
+plugin-from 23: DEF_UI
+plugin-from 24: Grass Reworked
+plugin-from 25: Gloomy Glass - All transparent materials revised
+plugin-from 26: RAW INPUT - The Ultimate Mouse Sensitivity Fix
+plugin-from 27: Remove Ironsight Blur
+plugin-from 28: AnotherOne's Test World
+plugin-from 29: True Grass
+plugin-from 30: X01Tesla
+plugin-from 31: Simple FOV Slider
+plugin-from 32: Vanilla Reanimation Project - Pistol
+plugin-from 33: Vanilla Reanimation Project - Lasers
+plugin-from 34: VRP Shared Content
+plugin-from 35: Vanilla Reanimation Project - Rifle
+plugin-from 36: Vanilla Reanimation Project - Rifle
+plugin-from 37: Vanilla Reanimation Project - Pistol
+plugin-from 38: Vanilla Reanimation Project - Pipe
+plugin-from 39: Vanilla Reanimation Project - Rifle
+plugin-from 40: Ultra Interior Lighting
+plugin-from 41: Ultra Exterior Lighting
+plugin-from 42: F76Weathers
+plugin-from 43: Boston Natural Surroundings
+plugin-from 44: Boston Natural Surroundings
+plugin-from 45: BoSInfantryArmor
+plugin-from 46: CORE
+mo2-stack 0: data
+mo2-stack 1: mod CreationKit
+mo2-stack 2: mod Address Library for F4SE Plugins
+mo2-stack 3: mod PrismaUI F4 2.0.1.2
+mo2-stack 4: mod Hydra
+mo2-stack 5: mod Addictol
+mo2-stack 6: mod Assorted Modular Tweaks
+mo2-stack 7: mod RAW INPUT - The Ultimate Mouse Sensitivity Fix
+mo2-stack 8: mod Mod Configuration Menu
+mo2-stack 9: mod Baka Framework
+mo2-stack 10: mod ImGui Fonts
+mo2-stack 11: mod Simple FOV Slider
+mo2-stack 12: mod Boston Natural Surroundings
+mo2-stack 13: mod DEF_UI
+mo2-stack 14: mod True Grass
+mo2-stack 15: mod Grass Reworked
+mo2-stack 16: mod True Grass - Invisible and Glowing Plants FIX
+mo2-stack 17: mod True Grass - Floating Grass Fix
+mo2-stack 18: mod Classic Holstered Weapons System (CHW)
+mo2-stack 19: mod Havok Aware Bullet Counted Reload (HaBCR)
+mo2-stack 20: mod Merged RootBehavior
+mo2-stack 21: mod VRP Shared Content
+mo2-stack 22: mod Vanilla Reanimation Project - Rifle
+mo2-stack 23: mod Vanilla Reanimation Project - Pipe
+mo2-stack 24: mod Vanilla Reanimation Project - Plasma Gun
+mo2-stack 25: mod Vanilla Reanimation Project - Lasers
+mo2-stack 26: mod Vanilla Reanimation Project - Pistol
+mo2-stack 27: mod AnotherOne's Test World
+mo2-stack 28: mod Bullet Impact Overhaul
+mo2-stack 29: mod Very Zen Impacts
+mo2-stack 30: mod Slow Motion Dismemberment
+mo2-stack 31: mod Ultra Interior Lighting
+mo2-stack 32: mod Ultra Exterior Lighting
+mo2-stack 33: mod Remove Ironsight Blur
+mo2-stack 34: mod Decal Fix
+mo2-stack 35: mod HUDFramework
+mo2-stack 36: mod F4SE Menu Framework
+mo2-stack 37: mod Vanilla Cubemap Fix
+mo2-stack 38: mod Faster Workbench Exit
+mo2-stack 39: mod Fallout 4 Particle Patch - No More Glowing Objects
+mo2-stack 40: mod Gloomy Glass - All transparent materials revised
+mo2-stack 41: mod Glowing Glass Fix
+mo2-stack 42: mod F76Weathers
+mo2-stack 43: mod X01Tesla
+mo2-stack 44: mod X01TeslaPBR
+mo2-stack 45: mod VaultSuitPBR
+mo2-stack 46: mod BoSInfantryArmor
+mo2-stack 47: mod CORE
+mo2-stack 48: overwrite
+lodo magic LODO
+lodo version 5
+lodo flags 0x5
+lodo headerCrc32 0x076ca8b9
+lodo pluginCorpusHash 0xcd9657c5ed7fbf70
+lodo objectCorpusHash 0x3b00f2edb5f551e7
+lodo modelCorpusHash 0xb1a53b3cc1bebe36
+lodo cardCorpusHash 0xc94a198344c133d4
+lodo loadOrderHash 0x6e8b1d347f124b90
+lodo lodoIdentity 0x923acdb5d226289f
+lodo worldspace Commonwealth
+lodo bases 3064
+lodo meshes 3125
+lodo clusters 11677
+lodo materials 169
+lodo vertices 297452
+lodo maxClustersPerMesh 141
+lodo clusterMaxTris 16
+lodo vertexStride 16
+lodo stringBytes 366319
+lodo offBases 4096
+lodo offMeshes 102400
+lodo offClusters 278528
+lodo offMaterials 1028096
+lodo offLocalIndices 1032192
+lodo offVertices 1593344
+lodo offStrings 6352896
+lodo offClusterLods 466944
+lodo clusterLodStride 48
+lodo levelMax 0
+lodo ladderGroup 0
+lodo cardCount 79
+lodo colourVertexCount 52925
+lodo offColours 6721536
+lodo indexCrc32 0x24ce54b8
+lodo fileBytes 6933236
+lodo triangles 157199
+lodo indexPadding 1.189
+lodo level0Triangles 157199
+lodo coneOpenClusters 7741
+lodo rootClusters 11677
+lodo meanGeometricError 0.0000
+lodo maxGeometricError 0.0000
+lodo level 0 clusters 11677 triangles 157199
+lodo colourMeshes 166
+lodo colourAlphaMeshes 6
+lodo colourVerticesNotWhite 3592
+lodo colourMeshNames TreeElmFree01Br_LOD_0.nif,TreeElmFree01Gr_LOD_0.nif,TreeElmFree01Rd_LOD_0.nif,TreeElmFree01Yw_LOD_0.nif,TreeElmFrst01Br_LOD_0.nif,TreeElmFrst01Gr_LOD_0.nif,TreeElmFrst01Rd_LOD_0.nif,TreeElmFrst01Yw_LOD_0.nif,TreeElmFrst02Br_LOD_0.nif,TreeElmFrst02Gr_LOD_0.nif,TreeElmFrst02Rd_LOD_0.nif,TreeElmFrst02Yw_LOD_0.nif,TreeFirForest01Gr_LOD_0.nif,TreeFirForest02Gr_LOD_0.nif,TreeFirForest03Gr_LOD_0.nif,TreeFirForest04Gr_LOD_0.nif,TreeFirForest05Gr_LOD_0.nif,TreeMaple01Br_LOD_0.nif,TreeMaple01Br_LOD_1.nif,TreeMaple01Gr_LOD_0.nif,TreeMaple01Gr_LOD_1.nif,TreeMaple01Or_LOD_0.nif,TreeMaple01Or_LOD_1.nif,TreeMaple01Rd_LOD_0.nif,TreeMaple01Rd_LOD_1.nif,TreeMaple02Br_LOD_0.nif,TreeMaple02Br_LOD_1.nif,TreeMaple02Gr_LOD_0.nif,TreeMaple02Gr_LOD_1.nif,TreeMaple02Or_LOD_0.nif,TreeMaple02Or_LOD_1.nif,TreeMaple02Rd_LOD_0.nif,TreeMaple02Rd_LOD_1.nif,TreeMaple03Br_LOD_0.nif,TreeMaple03Br_LOD_1.nif,TreeMaple03Gr_LOD_0.nif,TreeMaple03Gr_LOD_1.nif,TreeMaple03Or_LOD_0.nif,TreeMaple03Or_LOD_1.nif,TreeMaple03Rd_LOD_0.nif
+lodo watertightMeshes 399
+lodo baseFullTriangles 167597
+lodo basesWithFullTriangles 3064
+lodi magic LODI
+lodi version 7
+lodi flags 0x3
+lodi headerCrc32 0x605dcf15
+lodi pluginCorpusHash 0xcd9657c5ed7fbf70
+lodi objectCorpusHash 0x3b00f2edb5f551e7
+lodi lodoIdentity 0x923acdb5d226289f
+lodi loadOrderHash 0x6e8b1d347f124b90
+lodi worldspace Commonwealth
+lodi chunkWest -11
+lodi chunkSouth -12
+lodi chunkEast 7
+lodi chunkNorth 9
+lodi chunkCells 4
+lodi instanceStride 24
+lodi chunkCount 418
+lodi instanceCount 184431
+lodi presentChunks 346
+lodi maxInstancesPerChunk 10733
+lodi indexCrc32 0xfb9df890
+lodi offChunks 4096
+lodi offCellRanges 20480
+lodi offInstances 65536
+lodi offCold 4493312
+lodi offOccluders 5971968
+lodi offOccluderRanges 6029312
+lodi occluderCount 1376
+lodi slotInstances0 184069
+lodi slotInstances1 342
+lodi slotInstances2 20
+lodi slotInstances3 0
+lodi offPlacementAo 6074368
+lodi placementAoCount 184431
+lodi placementAoStride 1
+lodi offVertexAo 6262784
+lodi vertexAoBytes 13866923
+lodi offGroup 20131840
+lodi groupCount 66126
+lodi groupStride 2
+lodi offVertexSky 20504576
+lodi vertexSkyBytes 13866923
+lodi offVertexHorizon 0
+lodi vertexHorizonBytes 0
+lodi horizonAzimuths 0
+lodi horizonSteps 0
+lodi horizonReach 0.0
+lodi occluderStride 40
+lodi maxOccludersPerCell 4
+lodi offAggregates 0
+lodi offCovered 0
+lodi aggregateCount 0
+lodi coveredCount 0
+lodi aggregateStride 0
+lodi aggregateViews 0
+lodi aggSwitchPx 0.000
+lodi aggBandRatio 0.000
+lodi fileBytes 34371499
+lodi scolParts 50696
+lodi mirrored 42667
+lodi distinctDrawKeys 2939
+lodi maxDrawKey 2938
+lodi distinctIdentities 10823
+lodi cellsPopulated 4541
+lodi cellsWithOccluder 531
+lodi occludersPerPopulatedCell 0.303
+lodi meanOccluderVolume 6714739.9
+lodi aggregates 0
+lodi aggregateCovered 0
+lodi aggregateCoveredMin 0
+lodi aggregateCoveredMax 0
+lodi aggregateCoveredMean 0.00
+lodi aggregateMeanHalfW 0.0
+lodi placementAoMeasured 184431
+lodi placementAoUnmeasured 0
+lodi placementAoMin 38
+lodi placementAoMax 254
+lodi placementAoMean 194.80
+lodi vertexAoInstances 184431
+lodi vertexAoBytesTotal 13129195
+lodi vertexAoMean 154.63
+lodi vertexAoDark 5491427
+lodi groups 66126
+lodi groupedPlacements 135401
+lodi largestGroup 3023
+lodi singletonGroups 49030
+lodi vertexSkyPlacements 184431
+lodi vertexSkyBytesTotal 13129195
+lodi vertexSkyMean 92.50
+lodi vertexSkyOpen 4352407
+pair identity ok
+instancesWithGeometry 184431
+instancesWithNeitherGeometryNorCard 0
+distinctStockIdentities 10823
+drawKeyRanksChecked 184431
+ladderMeshes 0 of 3125
+ladderRootTriangles 157199
+ladderLevel0Triangles 157199
+occluderBoxes 1376
+occluderCells 531

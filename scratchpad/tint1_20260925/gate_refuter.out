@@ -1,0 +1,11 @@
+lodo old v4 6719215 B, new v4 6719215 B, colourRows 0, stripped 6719215 B
+G1 lodo: 0 bytes differ; version word same; others 0 in 0 (table, byte) groups
+lodi old 34371499 B new 34371499 B, instances old 184431 new 184431
+G1 lodi: 0 bytes differ, 0 outside lodoIdentity/headerCrc32 in 0 groups
+G2 new v4: 3125 meshes, 0 VERTEX_COLOUR, 0 VERTEX_ALPHA, colourRows 0, source NIFs missing 0
+G2 named meshes non-white: {'amphitheater_lod_0.nif': False, 'treemapleblasted01_lod_1.nif': False}
+G2 flag <=> source: 166 disagree [('BNS\\LOD\\Landscape\\Trees\\Elm\\TreeElmFree01Br_LOD_0.nif', False, True, False), ('BNS\\LOD\\Landscape\\Trees\\Elm\\TreeElmFree01Gr_LOD_0.nif', False, True, False), ('BNS\\LOD\\Landscape\\Trees\\Elm\\TreeElmFree01Rd_LOD_0.nif', False, True, False), ('BNS\\LOD\\Landscape\\Trees\\Elm\\TreeElmFree01Yw_LOD_0.nif', False, True, False), ('BNS\\LOD\\Landscape\\Trees\\Elm\\TreeElmFrst01Br_LOD_0.nif', False, True, False)]
+G2 decoded rows == source rows: 0 disagree []
+G1 lodo (0x04 only) GREEN
+G1 lodi GREEN
+G2 RED

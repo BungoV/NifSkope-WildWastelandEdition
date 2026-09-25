@@ -1,0 +1,7 @@
+ebbdbfd09d72597161f980fcf508ace9e7dfbb22 *Commonwealth.VT.16.lodt
+f5f15e7960a96766b2a3e9fbfd94d55f4f4d5e51 *Commonwealth.VT.2.lodt
+22bc562523a9d27d7c32550befc183c393be14bb *Commonwealth.VT.32.lodt
+c0f73c556d98da99c25fb22c58f5a5e6e279a229 *Commonwealth.VT.4.lodt
+0f72e63e1f511ad9fcdbe4101140c03cdc56bc12 *Commonwealth.VT.8.lodt
+e250724d715b46eb9819b395ca671dc1cdfc59fc *Commonwealth.VT.lodm
+b4466203c9875dcc659707bfcd2f03ee91382618 *Commonwealth.lodl

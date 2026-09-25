@@ -25,3 +25,35 @@
   - headerCrc32 + indexCrc32 follow from those.
   Code or run noise? Small bake (cells -20,17..-17,20, holds the Concord tower) run twice on my exe and once on BAKE1's.
 - .lodb: an objects-only bake's record drops the VT line (levels, 12,276 tiles, cover) -- do NOT install the new .lodb.
+
+## 20:19 (clock read)
+- Bake done 20:03:54 rc 0 (3,859 s). Gate (d): 3,670 object files, same names as installed; 3,652 byte-identical
+  (all 3,060 .lodj, all 486 manifests, 106 of 121 arrays); 18 differ: .lodo, .lodi, .lodb, 15 legacy _n arrays.
+  Placements 184,431 = installed.
+- G1 lodi: only lodoIdentity/headerCrc32 (allowed) + loadOrderHash 0x90 (CORE.esp). G2: 166 flagged meshes = source
+  both ways; 1 row disagreement = 2 black vertices no triangle uses in TreeFirForest04Gr_LOD_0 (dropped by design).
+- Determinism: my exe twice on cells -20,17..-17,20 = byte-identical (A = B). BAKE1's exe there (C) reproduces the
+  whole-map differences (2 water-tower self-AO bytes, the legacy _n arrays): code change, not run noise.
+  A no-v5 build of this tree (08bf7589) to split SEAM1 from the other 4 commits is exec-blocked on this machine
+  (new exes: "Permission denied" / hang for minutes; the AV scanning new binaries?) -- retrying.
+- INSTALLED 20:13:47..20:13:50: .lodo, .lodi, 15 legacy _n arrays; backups in replaced/, sha1s in install_record.tsv;
+  .lodb kept (BAKE1's, it records the VT); VT + .lodl sha1 unchanged; 3,677 files. native-verify rc 0, v5, 52,925 rows.
+  BAKE2 took a before-listing of FO4CSLOD at 18:56: these 17 mtimes are TINT1's.
+- After pictures: 0 px differ from before on all four. Viewer defect found: vertex row had no colour field for a
+  library-only colour (src/lodinative.cpp). Fixed in 61d920ab, built 880f5056, waiting for it to be allowed to run.
+
+## 21:03 (clock read)
+- Viewer: the fix (880f5056) DOES carry the colour -- a doctored pair with every colour row pure red (doctor.py,
+  red/, CRCs + lodoIdentity recomputed) gives 185,943 red px flat, 0 before the fix. The lit renders stayed
+  identical because the lit path multiplies vertex colour only with Scene::DoVertexColors, which a headless run
+  inherits from the persisted UI option (nifskope_ui.cpp ~22768: only WW_RENDER_FLAT / WW_LODL_AO / WW_LODL_CHANNEL
+  force it). Proof: with WW_LODL_AO=1 the red pair differs from the installed pair on 137,332 px (was 0).
+- Pictures redone with WW_LODL_AO=1 on 880f5056, v4 (replaced/) vs v5 (installed), pics/vc_on/:
+  Boston 1,040 px differ; Amphitheater 5,389; blasted maple 4,814; hue window 13,404 (of 2,598,400). *_diff.png beside.
+- Determinism D (no-v5 build 08bf7589) vs A (v5) and C (BAKE1 exe): the 15 _n arrays = A (so the 4 other commits,
+  not SEAM1); the water-tower self-AO byte 228 = C (so SEAM1's build). strip(A.lodo) vs D = 0x04, the two CRCs and
+  that one vertex byte (WaterTowerConcord01_LOD, a mesh with NO colour flag). Mechanism not proven; best reading:
+  the AO caster is inline (lodgenao.h:160) and compiled into lodofile.cpp with -O3 -march=haswell (FMA), so SEAM1's
+  edit to that file moved float codegen and one grazing ray flipped (27/255 = one ray). Refuter: a build of
+  SEAM1's lodofile.cpp with -ffp-contract=off giving 201 again.
+- Spells on 880f5056: lod_generation 128/0 PASS; lodl_channels 54/0 PASS (main-tree fixtures by absolute path).
