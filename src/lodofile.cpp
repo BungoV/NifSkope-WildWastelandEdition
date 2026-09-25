@@ -13,6 +13,7 @@ BSD License - see nifskope.h
 
 #include <QFile>
 #include <QFileInfo>
+#include <QSet>
 
 #include <algorithm>
 #include <cmath>
@@ -1870,12 +1871,14 @@ bool lodoRead( const QString & path, LodoHeader * header, LodoLibrary * lib,
 			"screen-size steps in 1/16 px, and this reader takes them as the base's full-detail triangle "
 			"count -- the same bytes, a different meaning, so a v3 file read as v4 would report a plausible "
 			"and wrong triangle count for every base. A v3 file also carries no cardCount at header 0xD0 and "
-			"no WATERTIGHT bit in its mesh flags. Re-bake; this reader knows versions 4 and 5" ) );
+			"no WATERTIGHT bit in its mesh flags. Re-bake; this reader knows versions 4 to 6" ) );
 	/* v5 EXTENDS v4 into its reserved pad and reinterprets nothing, so a v4 file
 	 * is read as a v5 file without a colour stream; the pad sweep below still
-	 * refuses a v4 file that carries anything at 0xD4..0xDF. */
-	if ( h.version != LODO_VERSION && h.version != LODO_VERSION_NO_COLOUR )
-		return refuse( QString( "version %1; this reader knows %2 and %3" ).arg( h.version )
+	 * refuses a v4 file that carries anything at 0xD4..0xDF. v6 (lane SWAP1)
+	 * names the base row's last word `materialSwap`; a v4/v5 file is read as v6
+	 * with no variant rows (that word forced to 0 below). */
+	if ( h.version != LODO_VERSION && h.version != LODO_VERSION_NO_SWAP && h.version != LODO_VERSION_NO_COLOUR )
+		return refuse( QString( "version %1; this reader knows %2 to %3" ).arg( h.version )
 			.arg( LODO_VERSION_NO_COLOUR ).arg( LODO_VERSION ) );
 	h.headerCrc32 = getLE<quint32>( p + H_HCRC );
 	const quint32 hcrc = lodvCrc32( p + H_PLUGIN, LODO_HEADER_BYTES - H_PLUGIN );
@@ -1945,7 +1948,7 @@ bool lodoRead( const QString & path, LodoHeader * header, LodoLibrary * lib,
 			.arg( h.cardCount ).arg( h.baseCount ) );
 	/* v5: the colour words at 0xD4/0xD8. On a v4 file they are pad and the sweep
 	 * refuses them by position; on v5 the count and the offset are 0 together. */
-	const bool v5 = h.version == LODO_VERSION;
+	const bool v5 = h.version >= LODO_VERSION_NO_SWAP;
 	if ( v5 ) {
 		h.colourVertexCount = getLE<quint32>( p + H_COLOURCOUNT );
 		h.offColours = getLE<quint64>( p + H_OFF_COLOURS );
@@ -2033,6 +2036,11 @@ bool lodoRead( const QString & path, LodoHeader * header, LodoLibrary * lib,
 	L.localIndices.resize( size_t( h.clusterCount ) * LODO_LOCAL_INDEX_BYTES );
 	L.vertices.resize( h.vertexCount );
 	if ( h.baseCount ) std::memcpy( L.bases.data(), p + h.offBases, tabs[0].bytes );
+	/* v6: before v6 the base row's last word was `crossPx16[0..1]`, always
+	 * written 0 and never a material swap; take it as 0 whatever it holds. */
+	if ( h.version < LODO_VERSION )
+		for ( LodoBase & b : L.bases )
+			b.materialSwap = 0;
 	/* CARDLINK1 (2026-09-24): `cardCount` is REDUNDANT on purpose, like
 	 * `fullTriangles`, so the reader RECOUNTS it from the base rows instead of
 	 * believing it -- with or without the payload check, because a consumer
@@ -2266,9 +2274,21 @@ bool lodoRead( const QString & path, LodoHeader * header, LodoLibrary * lib,
 		}
 		for ( size_t i = 0; i < L.bases.size(); i++ ) {
 			const LodoBase & b = L.bases[i];
-			if ( i > 0 && L.bases[i - 1].formId >= b.formId )
-				return refuse( QString( "base table is not sorted by formId ascending at row %1 (0x%2 after 0x%3)" )
-					.arg( i ).arg( b.formId, 8, 16, QChar( '0' ) ).arg( L.bases[i - 1].formId, 8, 16, QChar( '0' ) ) );
+			/* v6: sorted by (formId, materialSwap) strictly, so a base's plain
+			 * row (swap 0) comes first and each variant after it once. */
+			if ( i > 0 && ( L.bases[i - 1].formId > b.formId
+					|| ( L.bases[i - 1].formId == b.formId && L.bases[i - 1].materialSwap >= b.materialSwap ) ) )
+				return refuse( QString( "base table is not sorted by (formId, materialSwap) ascending at row %1 "
+					"(0x%2/0x%3 after 0x%4/0x%5)" ).arg( i ).arg( b.formId, 8, 16, QChar( '0' ) )
+					.arg( b.materialSwap, 8, 16, QChar( '0' ) ).arg( L.bases[i - 1].formId, 8, 16, QChar( '0' ) )
+					.arg( L.bases[i - 1].materialSwap, 8, 16, QChar( '0' ) ) );
+			if ( ( ( b.flags & LODO_BASE_SWAPPED ) != 0 ) != ( b.materialSwap != 0 ) )
+				return refuse( QString( "base 0x%1: the SWAPPED flag and materialSwap 0x%2 disagree (set together or "
+					"neither; a file before v6 has no variant row)" ).arg( b.formId, 8, 16, QChar( '0' ) )
+					.arg( b.materialSwap, 8, 16, QChar( '0' ) ) );
+			if ( b.materialSwap && ( i == 0 || L.bases[i - 1].formId != b.formId ) )
+				return refuse( QString( "base 0x%1: variant row for swap 0x%2 has no plain row of its base before it" )
+					.arg( b.formId, 8, 16, QChar( '0' ) ).arg( b.materialSwap, 8, 16, QChar( '0' ) ) );
 			bool anyMesh = false;
 			for ( int k = 0; k < 4; k++ ) {
 				if ( b.rep[k] == LODO_NO_MESH )
@@ -2283,7 +2303,7 @@ bool lodoRead( const QString & path, LodoHeader * header, LodoLibrary * lib,
 				return refuse( QString( "base 0x%1: boundRadius is %2 (never 0)" ).arg( b.formId, 8, 16, QChar( '0' ) ).arg( double( b.boundRadius ) ) );
 			if ( b.modelStringOffset >= h.stringBytes )
 				return refuse( QString( "base 0x%1: modelStringOffset past stringBytes" ).arg( b.formId, 8, 16, QChar( '0' ) ) );
-			if ( b.flags & ~quint16( LODO_BASE_TREE | LODO_BASE_ANY_ALPHA | LODO_BASE_ANY_MESH ) )
+			if ( b.flags & ~quint16( LODO_BASE_TREE | LODO_BASE_ANY_ALPHA | LODO_BASE_ANY_MESH | LODO_BASE_SWAPPED ) )
 				return refuse( QString( "base 0x%1: reserved flag bits set" ).arg( b.formId, 8, 16, QChar( '0' ) ) );
 			/* v4: `fullTriangles` is REDUNDANT on purpose -- the rows hold the
 			 * same number -- so the reader RECOUNTS it from the distinct meshes
@@ -2394,7 +2414,7 @@ QStringList lodoDescribe( const LodoHeader & h, const LodoLibrary * lib )
 		/* v4: the two new per-row words, read back from the library the reader
 		 * just parsed. `watertightMeshes` counts the mesh rows whose source
 		 * soup had no boundary edge; `baseFullTriangles` is the sum over bases
-		 * of the full-detail triangle count now living in `crossPx16[0..1]`. */
+		 * of the full-detail triangle count (v4's reading of v3's `crossPx16[0..1]`). */
 		quint64 watertight = 0;
 		for ( const LodoMesh & m : lib->meshes )
 			if ( m.flags & LODO_MESH_WATERTIGHT )
@@ -2426,6 +2446,16 @@ QStringList lodoDescribe( const LodoHeader & h, const LodoLibrary * lib )
 			<< QString( "colourAlphaMeshes %1" ).arg( alphaMeshes )
 			<< QString( "colourVerticesNotWhite %1" ).arg( colourNotWhite )
 			<< QString( "colourMeshNames %1" ).arg( colourNames.isEmpty() ? QStringLiteral( "-" ) : colourNames.join( ',' ) );
+		/* v6: the material-swap variant rows (lane SWAP1). */
+		quint64 variantRows = 0;
+		QSet<quint32> variantSwaps;
+		for ( const LodoBase & bs : lib->bases )
+			if ( bs.materialSwap ) {
+				variantRows++;
+				variantSwaps.insert( bs.materialSwap );
+			}
+		out << QString( "materialSwapRows %1" ).arg( variantRows )
+			<< QString( "materialSwapForms %1" ).arg( variantSwaps.size() );
 		out << QString( "watertightMeshes %1" ).arg( watertight )
 			<< QString( "baseFullTriangles %1" ).arg( fullTris )
 			<< QString( "basesWithFullTriangles %1" ).arg( basesWithFull );

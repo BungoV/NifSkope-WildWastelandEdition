@@ -413,8 +413,37 @@ bool shapeEmits( const NativeSrcShape & s )
  *  formId order, (SCOL formId, each part's base formId, each placement's
  *  position, rotation and scale). Nothing else -- the LOAD ORDER is a separate
  *  u64 beside it (EsmWorld::loadOrderHash). */
+/*! Lane SWAP1: THE EFFECTIVE MATERIAL SWAP of one placement, one rule for the
+ *  census walk and for the instance writer. `xmsp` is the REFR's own XMSP,
+ *  `nameBase` the REFR's NAME (the SCOL for a SCOL part), `partBase` the part's
+ *  own base (0 when the placement is not a SCOL part). First nonzero wins:
+ *    1. the REFR's XMSP;
+ *    2. the MODS of the REFR's base (for a SCOL part: the SCOL's MODS);
+ *    3. a SCOL part only: the MODS of the part's own base.
+ *  `clause` receives 1..3, or 0 when there is no swap. */
+quint32 nativeEffectiveSwap( const EsmWorld & world, quint32 xmsp, quint32 nameBase, quint32 partBase, int * clause )
+{
+	int c = 0;
+	quint32 w = 0;
+	if ( xmsp ) {
+		c = 1; w = xmsp;
+	} else if ( nameBase && world.lodBase( nameBase ).materialSwap ) {
+		c = 2; w = world.lodBase( nameBase ).materialSwap;
+	} else if ( partBase && partBase != nameBase && world.lodBase( partBase ).materialSwap ) {
+		c = 3; w = world.lodBase( partBase ).materialSwap;
+	}
+	if ( clause )
+		*clause = c;
+	return w;
+}
+
+/*! Lane SWAP1: the (LOD base, effective MSWP) pairs the census walk met, the
+ *  set the library builds its variant rows from. Pure function of the plugins,
+ *  like the base census itself, so a reused library and a fresh one agree. */
+typedef std::set<std::pair<quint32, quint32>> NativeSwapPairs;
+
 bool nativeObjectCensus( const EsmWorld & world, std::vector<quint32> * baseIdsOut,
-	quint64 * objHashOut, quint64 * censusRefsOut, QString * error )
+	quint64 * objHashOut, quint64 * censusRefsOut, QString * error, NativeSwapPairs * swapPairsOut = nullptr )
 {
 	auto fail = [&]( const QString & m ) {
 		if ( error )
@@ -427,6 +456,8 @@ bool nativeObjectCensus( const EsmWorld & world, std::vector<quint32> * baseIdsO
 	QSet<quint32> scolSeen;
 	quint64 objHash = Q_UINT64_C( 0xCBF29CE484222325 );
 	quint64 censusRefs = 0;
+	NativeSwapPairs swapPairs;
+	std::set<quint32> swapForms;         //!< SWAP1: every nonzero MSWP the hashed data names
 	auto takeRef = [&]( const EsmRefr & r ) {
 		objHash = fnv( objHash, r.formID );
 		objHash = fnv( objHash, r.base );
@@ -435,16 +466,28 @@ bool nativeObjectCensus( const EsmWorld & world, std::vector<quint32> * baseIdsO
 		objHash = fnv( objHash, r.scale );
 		const quint8 fl = quint8( ( r.initiallyDisabled ? 1 : 0 ) | ( r.deleted ? 2 : 0 ) );
 		objHash = fnv( objHash, fl );
+		/* SWAP1: the REFR's XMSP joins the hash ONLY when it is set, so a
+		 * worldspace with no swap keeps the hash it had before v6. */
+		if ( r.materialSwap ) {
+			objHash = fnv( objHash, quint32( 0x50534D58U ) );    // 'XMSP'
+			objHash = fnv( objHash, r.materialSwap );
+			swapForms.insert( r.materialSwap );
+		}
 		if ( r.initiallyDisabled || r.deleted || !r.base )
 			return;
 		censusRefs++;
 		if ( std::memcmp( &r.baseType, "SCOL", 4 ) == 0 ) {
 			for ( const EsmScolPart & part : world.scolParts( r.base ) )
-				if ( world.lodBase( part.base ).hasLod )
+				if ( world.lodBase( part.base ).hasLod ) {
 					baseSet.insert( part.base );
+					if ( const quint32 w = nativeEffectiveSwap( world, r.materialSwap, r.base, part.base, nullptr ) )
+						swapPairs.insert( std::make_pair( part.base, w ) );
+				}
 			scolSeen.insert( r.base );
 		} else if ( world.lodBase( r.base ).hasLod ) {
 			baseSet.insert( r.base );
+			if ( const quint32 w = nativeEffectiveSwap( world, r.materialSwap, r.base, 0, nullptr ) )
+				swapPairs.insert( std::make_pair( r.base, w ) );
 		}
 	};
 	for ( int cy = minY; cy <= maxY; cy++ )
@@ -465,11 +508,21 @@ bool nativeObjectCensus( const EsmWorld & world, std::vector<quint32> * baseIdsO
 		objHash = fnv( objHash, b );
 		for ( int k = 0; k < 4; k++ )
 			objHash = fnvStr( objHash, foldPath( lb.models[k] ) );
+		if ( lb.materialSwap ) {         // SWAP1: only when set (see XMSP above)
+			objHash = fnv( objHash, quint32( 0x53444F4DU ) );    // 'MODS'
+			objHash = fnv( objHash, lb.materialSwap );
+			swapForms.insert( lb.materialSwap );
+		}
 	}
 	std::vector<quint32> scols( scolSeen.begin(), scolSeen.end() );
 	std::sort( scols.begin(), scols.end() );
 	for ( quint32 sc : scols ) {
 		objHash = fnv( objHash, sc );
+		if ( const quint32 w = world.lodBase( sc ).materialSwap ) {     // SWAP1: the SCOL's MODS, only when set
+			objHash = fnv( objHash, quint32( 0x53444F4DU ) );
+			objHash = fnv( objHash, w );
+			swapForms.insert( w );
+		}
 		for ( const EsmScolPart & part : world.scolParts( sc ) ) {
 			objHash = fnv( objHash, part.base );
 			for ( const EsmScolPlacement & pl : part.placements ) {
@@ -479,6 +532,23 @@ bool nativeObjectCensus( const EsmWorld & world, std::vector<quint32> * baseIdsO
 			}
 		}
 	}
+	/* SWAP1: the swap records themselves, ascending, only when any is named:
+	 * an edited MSWP moves the hash, so a reused library cannot keep a stale
+	 * colourway. Part MODS reached only through clause 3 are named here too. */
+	for ( const auto & pr : swapPairs )
+		swapForms.insert( pr.second );
+	for ( quint32 w : swapForms ) {
+		const EsmMaterialSwap & m = world.materialSwap( w );
+		objHash = fnv( objHash, w );
+		objHash = fnv( objHash, quint32( m.exists ? m.rows.size() : 0xFFFFFFFFU ) );
+		for ( const EsmMaterialSubst & row : m.rows ) {
+			objHash = fnvStr( objHash, foldPath( row.original ) );
+			objHash = fnvStr( objHash, foldPath( row.replacement ) );
+			objHash = fnv( objHash, row.hasColorRemap ? row.colorRemap : -1.0f );
+		}
+	}
+	if ( swapPairsOut )
+		*swapPairsOut = swapPairs;
 	if ( baseIdsOut )
 		*baseIdsOut = baseIds;
 	if ( objHashOut )
@@ -1430,7 +1500,8 @@ bool lodgenNativeWrite( QString * report, QString * error )
 	 *    object walk reads (spec 8.6), in ascending cell order. */
 	std::vector<quint32> baseIds;
 	quint64 objHash = 0, censusRefs = 0;
-	if ( !nativeObjectCensus( world, &baseIds, &objHash, &censusRefs, error ) )
+	NativeSwapPairs swapPairs;      // SWAP1: (base, effective MSWP) over the whole worldspace
+	if ( !nativeObjectCensus( world, &baseIds, &objHash, &censusRefs, error, &swapPairs ) )
 		return false;
 	int minX, minY, maxX, maxY;
 	world.cellBounds( minX, minY, maxX, maxY );
@@ -1485,6 +1556,12 @@ bool lodgenNativeWrite( QString * report, QString * error )
 	std::vector<LodoMeshStats> meshStats;      // staged meshes; EMPTY under reuse
 	std::vector<QString> meshStatPath;
 	QHash<quint32, quint16> baseRow;           // formId -> row in the WRITTEN table
+	//! SWAP1 (v6): (formId, MSWP) -> the variant row in the WRITTEN table
+	QHash<QPair<quint32, quint32>, quint16> variantRow;
+	/* SWAP1 census, filled by the library build (zero under reuse). */
+	int swapPairsHit = 0, swapVariantMeshes = 0, swapVariantRows = 0, swapVariantLoadFailed = 0;
+	int swapMissingRecord = 0, swapCnamRows = 0, swapUnreadable = 0, swapRefusedLoader = 0;
+	QHash<QString, QSet<QString>> modelSwapKeys;     // plain model key -> its shapes' folded material keys
 	int modelsLoaded = 0, modelsFailed = 0;
 	int basesWritten = 0, basesWithoutMesh = 0;
 	int cardOnlyBases = 0;     //!< CARDLINK1: bases written with a card and no mesh
@@ -1522,8 +1599,12 @@ bool lodgenNativeWrite( QString * report, QString * error )
 			/* The base table is the read file's, so the row numbers the `.lodi`
 			 * writes are the read file's row numbers, which is the whole point. */
 			basesWritten = int( lib.bases.size() );
-			for ( size_t i = 0; i < lib.bases.size(); i++ )
-				baseRow.insert( lib.bases[i].formId, quint16( i ) );
+			for ( size_t i = 0; i < lib.bases.size(); i++ ) {
+				if ( lib.bases[i].materialSwap )       // SWAP1: a variant row
+					variantRow.insert( qMakePair( lib.bases[i].formId, lib.bases[i].materialSwap ), quint16( i ) );
+				else
+					baseRow.insert( lib.bases[i].formId, quint16( i ) );
+			}
 		} else {
 			lib = LodoLibrary();
 			lh = LodoHeader();
@@ -1549,6 +1630,12 @@ bool lodgenNativeWrite( QString * report, QString * error )
 		float maxDist = 0.0f;
 		bool anyAlpha = false, anyEmit = false;
 		quint16 meshId = LODO_NO_MESH;
+		/*! SWAP1 (v6): a MATERIAL-SWAP VARIANT of the model at `srcPath` -- the same
+		 *  file loaded with `swap` applied to its shapes' materials. `path` then
+		 *  carries the `|mswp:<8 hex>` suffix, so the mesh string says what it is. */
+		bool variant = false;
+		QString srcPath;
+		LodgenMaterialSubst swap;
 		//! v3: the occluder box fitted inside this model, in MODEL space at scale 1
 		bool occOk = false;
 		float occCentre[3] = { 0.0f, 0.0f, 0.0f };
@@ -1663,11 +1750,16 @@ bool lodgenNativeWrite( QString * report, QString * error )
 		 * It is a ceiling, never a floor -- `--threads 1` is still one -- and the
 		 * mechanism behind the curve is not proven, only its shape; report section
 		 * 12 carries the row that asks whether it should be a switch. */
-		lodgenParallelFor( int( modelJobs.size() ), [&]( int i ) {
-			ModelJob & j = modelJobs[size_t( i )];
+		auto loadJob = [&]( ModelJob & j ) {
 			Model & m = *j.m;
 			nativeNoteWorker();
-			m.loaded = s.loader( s.user, m.path, &m.shapes ) && !m.shapes.empty();
+			/* SWAP1: a variant loads its SOURCE file with the substitution applied
+			 * before the material is resolved; only the stack loader knows how. */
+			if ( m.variant )
+				m.loaded = s.loader == lodgenNativeLoadModel
+					&& lodgenNativeLoadModelSwapped( s.user, m.srcPath, m.swap, &m.shapes ) && !m.shapes.empty();
+			else
+				m.loaded = s.loader( s.user, m.path, &m.shapes ) && !m.shapes.empty();
 			if ( !m.loaded )
 				return;
 			for ( NativeSrcShape & sh : m.shapes ) {
@@ -1719,10 +1811,158 @@ bool lodgenNativeWrite( QString * report, QString * error )
 					sh.geom.sway[v] = quint8( std::clamp( int( std::lround( hF * hF * ( 0.35f + 0.65f * rF ) * 255.0f ) ), 0, 255 ) );
 				}
 			}
+		};
+		lodgenParallelFor( int( modelJobs.size() ), [&]( int i ) {
+			loadJob( modelJobs[size_t( i )] );
 		}, NATIVE_MODEL_WORKER_CAP );
 
-		// retired in job order: the hash chain, the first-wins material table, the counters
-		for ( const ModelJob & j : modelJobs ) {
+		/* ---- SWAP1 (v6): THE MATERIAL-SWAP VARIANTS -------------------------
+		 *
+		 * bungo 2026-09-25: "these towers still look grey, compare the vanilla
+		 * lod towers to these". The Creation Kit applies a placement's material
+		 * swap to its LOD model when it bakes the atlas (lane TOWER1), so one kit
+		 * piece stands in the stock LOD in several colourways; the library had one.
+		 *
+		 * For every (base, MSWP) pair the census met, in ascending (MSWP, base)
+		 * order: a slot whose LOADED plain model has a shape whose material an
+		 * MSWP row names (BNAM, folded after `materials\`) gets a VARIANT model --
+		 * the same file loaded with those rows applied -- keyed
+		 * `<folded path>|mswp:<8 hex>` with the LOWEST MSWP giving that exact
+		 * substitution, so two swaps that do the same thing to a model share one
+		 * mesh. A pair with at least one hit slot gets a variant base row. A
+		 * worldspace with no hit adds nothing here, and every byte below is
+		 * the v5 build's. */
+		std::map<quint32, std::vector<std::pair<quint32, std::array<QString, 4>>>> variantsOf;
+		std::vector<ModelJob> variantJobs;
+		{
+			for ( auto it = models.begin(); it != models.end(); ++it ) {
+				if ( !it.value().loaded )
+					continue;
+				QSet<QString> & ks = modelSwapKeys[it.key()];
+				for ( const NativeSrcShape & sh : it.value().shapes )
+					if ( !sh.matName.isEmpty() )
+						ks.insert( lodgenMaterialSwapKey( sh.matName ) );
+			}
+			std::vector<std::pair<quint32, quint32>> order;       // (MSWP, base)
+			for ( const auto & pr : swapPairs )
+				order.push_back( std::make_pair( pr.second, pr.first ) );
+			std::sort( order.begin(), order.end() );
+			QHash<QString, QString> variantBySig;
+			QSet<QString> cnamHit;
+			std::vector<QString> newVariantKeys;
+			for ( const auto & ow : order ) {
+				const quint32 w = ow.first, b = ow.second;
+				const EsmMaterialSwap & mw = world.materialSwap( w );
+				if ( !mw.exists ) {
+					swapMissingRecord++;
+					continue;
+				}
+				QMap<QString, QString> subst;       // folded BNAM -> SNAM as stored; the first row wins
+				QSet<QString> cnamKeys;
+				for ( const EsmMaterialSubst & row : mw.rows ) {
+					const QString k = lodgenMaterialSwapKey( row.original );
+					if ( k.isEmpty() || row.replacement.isEmpty() || subst.contains( k ) )
+						continue;
+					subst.insert( k, row.replacement );
+					if ( row.hasColorRemap )
+						cnamKeys.insert( k );
+				}
+				QString slot[4];
+				slotModels( world.lodBase( b ), slot );
+				std::array<QString, 4> keys;
+				bool anyHit = false;
+				for ( int k = 0; k < 4; k++ ) {
+					if ( slot[k].isEmpty() )
+						continue;
+					const QString pk = foldPath( slot[k] );
+					keys[size_t( k )] = pk;
+					auto mk = modelSwapKeys.constFind( pk );
+					if ( mk == modelSwapKeys.constEnd() )
+						continue;               // the plain model did not load: nothing to vary
+					LodgenMaterialSubst hits;
+					QString sig;
+					for ( auto sit = subst.constBegin(); sit != subst.constEnd(); ++sit ) {
+						if ( !mk->contains( sit.key() ) )
+							continue;
+						const QString rk = lodgenMaterialSwapKey( sit.value() );
+						if ( rk == sit.key() )
+							continue;           // a row naming itself changes nothing
+						hits.append( qMakePair( sit.key(), sit.value() ) );
+						sig += sit.key() + QChar( '>' ) + rk + QChar( '\n' );
+						if ( cnamKeys.contains( sit.key() ) )
+							cnamHit.insert( QString( "%1:%2" ).arg( w, 8, 16, QChar( '0' ) ).arg( sit.key() ) );
+					}
+					if ( hits.isEmpty() )
+						continue;
+					anyHit = true;
+					const QString sigKey = pk + QChar( '\n' ) + sig;
+					auto vb = variantBySig.constFind( sigKey );
+					if ( vb != variantBySig.constEnd() ) {
+						keys[size_t( k )] = vb.value();
+						continue;
+					}
+					const QString suffix = QString( "|mswp:%1" ).arg( w, 8, 16, QChar( '0' ) );
+					const QString vk = pk + suffix;
+					const auto pm = models.constFind( pk );
+					Model vm;
+					vm.variant = true;
+					vm.srcPath = pm.value().path;
+					vm.path = pm.value().path + suffix;
+					vm.swap = hits;
+					vm.tree = pm.value().tree;
+					models.insert( vk, vm );
+					variantBySig.insert( sigKey, vk );
+					newVariantKeys.push_back( vk );
+					keys[size_t( k )] = vk;
+				}
+				if ( !anyHit )
+					continue;
+				swapPairsHit++;
+				variantsOf[b].push_back( std::make_pair( w, keys ) );
+			}
+			swapCnamRows = cnamHit.size();
+			swapVariantMeshes = int( newVariantKeys.size() );
+			variantJobs.reserve( newVariantKeys.size() );
+			for ( const QString & vk : newVariantKeys ) {
+				auto it = models.find( vk );
+				ModelJob j;
+				j.key = &it.key();
+				j.m = &it.value();
+				variantJobs.push_back( std::move( j ) );
+			}
+		}
+		if ( !variantJobs.empty() )
+			lodgenParallelFor( int( variantJobs.size() ), [&]( int i ) {
+				loadJob( variantJobs[size_t( i )] );
+			}, NATIVE_MODEL_WORKER_CAP );
+		for ( const ModelJob & j : variantJobs ) {
+			const Model & m = *j.m;
+			if ( !m.loaded ) {
+				swapVariantLoadFailed++;
+				if ( s.loader != lodgenNativeLoadModel )
+					swapRefusedLoader++;
+				continue;
+			}
+			/* a replacement that did not resolve: the shape kept a material
+			 * name it could not read, so it draws the fallback */
+			QSet<QString> replaced;
+			for ( const auto & h : m.swap )
+				replaced.insert( lodgenMaterialSwapKey( h.second ) );
+			for ( const NativeSrcShape & sh : m.shapes )
+				if ( sh.matUnreadable && replaced.contains( lodgenMaterialSwapKey( sh.matName ) ) )
+					swapUnreadable++;
+		}
+
+		/* retired in MAP order (which was job order before SWAP1, and still is
+		 * for a worldspace with no variant): the hash chain, the first-wins
+		 * material table, the counters */
+		QHash<const Model *, const ModelJob *> jobOf;
+		for ( const ModelJob & j : modelJobs )
+			jobOf.insert( j.m, &j );
+		for ( const ModelJob & j : variantJobs )
+			jobOf.insert( j.m, &j );
+		for ( auto mit = models.cbegin(); mit != models.cend(); ++mit ) {
+			const ModelJob & j = *jobOf.value( &mit.value() );
 			const Model & m = *j.m;
 			if ( !m.loaded ) {
 				modelsFailed++;
@@ -1901,24 +2141,28 @@ bool lodgenNativeWrite( QString * report, QString * error )
 			batch.clear();
 		}
 		g_nativeStage.ladder = stageTimer.restart();
-		for ( quint32 b : baseIds ) {
-			const EsmLodBase & lb = world.lodBase( b );
-			LodoBase row;
+		/* SWAP1: ONE ROW BUILDER for the plain row and its variants. `keys` are
+		 * the `models` keys of the four slots (empty = none): the folded slot
+		 * paths for the plain row, the variant meshes where a variant's slot was
+		 * hit. False = the row is not written (no mesh and no card); `cardOnly`
+		 * says a card stood in for a mesh. The plain path is the v5 code. */
+		auto fillRow = [&]( quint32 b, const EsmLodBase & lb, quint32 modelOff, const QString keys[4],
+			LodoBase & row, bool & cardOnly ) -> bool {
 			std::memset( &row, 0, sizeof( row ) );
+			cardOnly = false;
 			row.formId = b;
-			row.modelStringOffset = lib.addString( lb.model );
+			row.modelStringOffset = modelOff;
 			row.cardLayer = s.cardLayerOf.value( b, LODO_NO_CARD );
 			bool any = false, tree = std::memcmp( &lb.type, "TREE", 4 ) == 0, alpha = false;
 			float radius = 0.0f;
-			QString slot[4];
-			slotModels( lb, slot );
 			for ( int k = 0; k < 4; k++ ) {
 				row.rep[k] = LODO_NO_MESH;
-				if ( slot[k].isEmpty() )
+				if ( keys[k].isEmpty() )
 					continue;
-				const Model & m = models[foldPath( slot[k] )];
-				if ( !m.loaded )
+				const auto mi = models.constFind( keys[k] );
+				if ( mi == models.constEnd() || !mi.value().loaded )
 					continue;
+				const Model & m = mi.value();
 				row.rep[k] = m.meshId;
 				any = true;
 				tree = tree || m.tree;
@@ -1954,22 +2198,66 @@ bool lodgenNativeWrite( QString * report, QString * error )
 			 * or 0xFFFF. A base whose slots loaded nothing but which has a card is
 			 * WRITTEN -- docs 4.4's "no mesh in any slot must have a cardLayer" --
 			 * with the card's own bound radius; without a card it is left out as
-			 * before. */
+			 * before. A variant row keeps its base's card: the card shows the
+			 * unswapped colours (SWAP1, reported). */
 			if ( row.cardLayer != LODO_NO_CARD && !( radius > 0.0f ) ) {
 				radius = s.cardRadiusOf.value( b, 0.0f );
 				if ( !any && radius > 0.0f )
-					cardOnlyBases++;
+					cardOnly = true;
 			}
-			if ( ( !any && row.cardLayer == LODO_NO_CARD ) || !( radius > 0.0f ) ) {
+			if ( ( !any && row.cardLayer == LODO_NO_CARD ) || !( radius > 0.0f ) )
+				return false;
+			row.flags = quint16( ( tree ? LODO_BASE_TREE : 0 ) | ( alpha ? LODO_BASE_ANY_ALPHA : 0 ) | ( any ? LODO_BASE_ANY_MESH : 0 ) );
+			row.boundRadius = radius;
+			return true;
+		};
+		for ( quint32 b : baseIds ) {
+			const EsmLodBase & lb = world.lodBase( b );
+			QString slot[4], keys[4];
+			slotModels( lb, slot );
+			for ( int k = 0; k < 4; k++ )
+				if ( !slot[k].isEmpty() )
+					keys[k] = foldPath( slot[k] );
+			LodoBase row;
+			bool cardOnly = false;
+			const quint32 modelOff = lib.addString( lb.model );
+			if ( !fillRow( b, lb, modelOff, keys, row, cardOnly ) ) {
 				basesWithoutMesh++;         // no slot loaded: the stock bake draws nothing for it either
 				continue;
 			}
-			row.flags = quint16( ( tree ? LODO_BASE_TREE : 0 ) | ( alpha ? LODO_BASE_ANY_ALPHA : 0 ) | ( any ? LODO_BASE_ANY_MESH : 0 ) );
-			row.boundRadius = radius;
+			if ( cardOnly )
+				cardOnlyBases++;
 			baseRow.insert( b, quint16( lib.bases.size() ) );
 			lib.bases.push_back( row );
 			basesWritten++;
+			/* SWAP1 (v6): the base's variant rows, right after it, ascending MSWP. */
+			const auto vo = variantsOf.find( b );
+			if ( vo == variantsOf.end() )
+				continue;
+			for ( const auto & v : vo->second ) {
+				QString vkeys[4];
+				for ( int k = 0; k < 4; k++ ) {
+					vkeys[k] = v.second[size_t( k )];
+					const auto vm = models.constFind( vkeys[k] );
+					if ( !vkeys[k].isEmpty() && ( vm == models.constEnd() || !vm.value().loaded ) )
+						vkeys[k] = keys[k];     // the variant did not load: that slot stays plain
+				}
+				LodoBase vrow;
+				bool vCardOnly = false;
+				if ( !fillRow( b, lb, modelOff, vkeys, vrow, vCardOnly ) )
+					continue;
+				if ( std::memcmp( vrow.rep, row.rep, sizeof( row.rep ) ) == 0 )
+					continue;                   // every hit slot fell back: the plain row serves
+				vrow.materialSwap = v.first;
+				vrow.flags |= LODO_BASE_SWAPPED;
+				variantRow.insert( qMakePair( b, v.first ), quint16( lib.bases.size() ) );
+				lib.bases.push_back( vrow );
+				swapVariantRows++;
+			}
 		}
+		if ( lib.bases.size() > size_t( LODI_BASE_MAX ) + 1 )
+			return fail( QString( "%1 base rows (%2 of them material-swap variants); the u16 baseId holds 65,536" )
+				.arg( lib.bases.size() ).arg( swapVariantRows ) );
 	}
 	if ( lib.bases.empty() )
 		return fail( QStringLiteral( "no base of the census loaded a LOD model; nothing to write" ) );
@@ -2040,12 +2328,57 @@ bool lodgenNativeWrite( QString * report, QString * error )
 	qint64 joinMs = 0;
 	set.placementAo = s.placementAo;
 	QVector<LodgenAggTree> aggTrees;
+	/* SWAP1 census over the placements this write is given (docs 3.9):
+	 * carrying a swap by clause, sent to a variant row, and TOWER1's own count
+	 * (REFR from Fallout4.esm, XMSP else its NAME base's MODS, a row naming a
+	 * material of the slot-0 plain model) so the number can be held to 21,064. */
+	quint64 swapRead = 0, swapCarry[4] = { 0, 0, 0, 0 }, swapPlaced = 0, swapTower1 = 0, swapNoVariant = 0;
+	QHash<QPair<quint32, quint32>, bool> tower1Memo;
+	auto tower1Hit = [&]( quint32 b, quint32 w ) {
+		const auto key = qMakePair( b, w );
+		auto it = tower1Memo.constFind( key );
+		if ( it != tower1Memo.constEnd() )
+			return it.value();
+		bool hit = false;
+		QString slot[4];
+		slotModels( world.lodBase( b ), slot );
+		const auto mk = slot[0].isEmpty() ? modelSwapKeys.constEnd() : modelSwapKeys.constFind( foldPath( slot[0] ) );
+		if ( mk != modelSwapKeys.constEnd() )
+			for ( const EsmMaterialSubst & row : world.materialSwap( w ).rows )
+				hit = hit || mk->contains( lodgenMaterialSwapKey( row.original ) );
+		tower1Memo.insert( key, hit );
+		return hit;
+	};
 	for ( const Arrival & a : s.arrivals ) {
 		const NativePlacement & p = a.p;
+		swapRead++;
 		auto br = baseRow.find( p.baseForm );
+		/* SWAP1: the placement's effective material swap (the census rule,
+		 * nativeEffectiveSwap) picks its variant row when the library has one. */
+		quint32 xmsp = 0, nameBase = 0;
+		if ( !world.refrMaterialSwap( p.refForm, &xmsp, &nameBase ) || !nameBase )
+			nameBase = p.baseForm;
+		int swapClause = 0;
+		const quint32 effSwap = nativeEffectiveSwap( world, xmsp, nameBase, p.scolPart >= 0 ? p.baseForm : 0, &swapClause );
+		swapCarry[swapClause]++;
+		if ( ( p.refForm >> 24 ) == 0 && br != baseRow.end() && lib.bases[br.value()].rep[0] != LODO_NO_MESH ) {
+			const quint32 tw = xmsp ? xmsp : world.lodBase( nameBase ).materialSwap;
+			if ( tw && tower1Hit( p.baseForm, tw ) )
+				swapTower1++;
+		}
 		if ( br == baseRow.end() ) {
 			droppedNoBase++;
 			continue;
+		}
+		quint16 rowId = br.value();
+		if ( effSwap ) {
+			const auto vr = variantRow.constFind( qMakePair( p.baseForm, effSwap ) );
+			if ( vr != variantRow.constEnd() ) {
+				rowId = vr.value();
+				swapPlaced++;
+			} else {
+				swapNoVariant++;
+			}
 		}
 		LodiSrcInstance r;
 		for ( int k = 0; k < 3; k++ )
@@ -2053,7 +2386,7 @@ bool lodgenNativeWrite( QString * report, QString * error )
 		for ( int k = 0; k < 9; k++ )
 			r.rot[k] = p.rot[k];
 		r.scale = p.scale;
-		r.baseId = br.value();
+		r.baseId = rowId;
 		r.refFormId = p.refForm;
 		r.scolPart = qint16( p.scolPart );
 		if ( a.litVerts ) {
@@ -2064,7 +2397,7 @@ bool lodgenNativeWrite( QString * report, QString * error )
 			unlit++;
 			r.ao = 255; r.sky = 255; r.ground = 0;
 		}
-		r.drawKey = baseDrawKey[br.value()];
+		r.drawKey = baseDrawKey[rowId];
 		/* IDENTITY (bungo 2026-09-11 08:4x: the far-shadow pass keys on the
 		 * colour id). The stock bake's own identity index for this placement,
 		 * the manifest's `index` column, R + G*256 of the .bto vertex colour.
@@ -2123,7 +2456,7 @@ bool lodgenNativeWrite( QString * report, QString * error )
 			r.flags = quint16( r.flags | quint16( LODI_INST_SCRAPPABLE ) );
 			scrappablePlacements++;
 		}
-		r.boundRadius = lib.bases[br.value()].boundRadius;   // at scale 1; lodiWrite applies the quantised scale
+		r.boundRadius = lib.bases[rowId].boundRadius;   // at scale 1; lodiWrite applies the quantised scale
 		/* v3: the occluder box of the mesh this placement actually DREW -- not
 		 * of its finest slot -- because the box has to lie inside the geometry
 		 * the file carries for it. The writer picks which boxes survive per
@@ -2166,7 +2499,7 @@ bool lodgenNativeWrite( QString * report, QString * error )
 		 * an ESM and a path from a loose file do not agree on which one Bethesda
 		 * used. */
 		{
-			const QString bp = lib.stringAt( lib.bases[br.value()].modelStringOffset );
+			const QString bp = lib.stringAt( lib.bases[rowId].modelStringOffset );
 			bool arch = false;
 			int from = 0;
 			while ( from <= bp.size() ) {
@@ -3078,6 +3411,20 @@ bool lodgenNativeWrite( QString * report, QString * error )
 						"surface distance, so every join it made is real." )
 						.arg( double( s.identityJoinGap ), 0, 'f', 1 ).arg( joinEligible )
 						.arg( joinSamples ).arg( joinPairs ).arg( joinMs ) ) );
+		/* v6 .lodo (lane SWAP1, 2026-09-25): the material-swap census. The gate
+		 * number is `tower1Rule`: 21,064 on the whole Commonwealth (TOWER1's
+		 * lodswap_census.py over the installed dim-4 manifests). */
+		ladderLine += QString( "\n  native-material-swaps: placements %1; carrying a swap %2 (REFR XMSP %3, base or "
+			"SCOL MODS %4, SCOL part's own MODS %5); sent to a variant row %6; swap names no LOD material %7; "
+			"tower1Rule %8%9; census pairs %10, pairs with a LOD hit %11, variant rows %12, variant meshes %13 "
+			"(%14 failed to load, %15 loader refused), swap records missing %16, CNAM rows hit %17 (colour "
+			"remap NOT applied), unreadable replacement shapes %18; .lodo version %19" )
+			.arg( swapRead ).arg( swapCarry[1] + swapCarry[2] + swapCarry[3] ).arg( swapCarry[1] )
+			.arg( swapCarry[2] ).arg( swapCarry[3] ).arg( swapPlaced ).arg( swapNoVariant )
+			.arg( swapTower1 ).arg( libraryReused ? QStringLiteral( " (library reused: not measured)" ) : QString() )
+			.arg( quint64( swapPairs.size() ) ).arg( swapPairsHit ).arg( libraryReused ? int( variantRow.size() ) : swapVariantRows )
+			.arg( swapVariantMeshes ).arg( swapVariantLoadFailed ).arg( swapRefusedLoader )
+			.arg( swapMissingRecord ).arg( swapCnamRows ).arg( swapUnreadable ).arg( lh.version );
 		/* v10 (lane BAKE2, 2026-09-25): placements above the old 7.99988 line,
 		 * written with instance flag bit 7. 0 = the file is the v7/v9 file it
 		 * always was; any other number = version 10. */
