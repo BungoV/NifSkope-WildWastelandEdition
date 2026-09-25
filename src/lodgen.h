@@ -1366,6 +1366,11 @@ struct LodgenVtOptions
 	 *  load. Worth turning on for a source with finer terrain than Fallout 4's,
 	 *  which is what a Fallout 76 port brings (128 samples a cell, not 32). */
 	bool height = false;
+	/*! THE VANILLA-COLOUR FILL (lane SEAM1, docs/LODGEN_TERRAIN_VT.md 2.6): blend
+	 *  the ground no LAND record paints toward Bethesda's own LOD diffuse for
+	 *  those cells, tone-matched on the overlap. Read at bake time only. OFF by
+	 *  default; a bake without it is byte-identical to one before it existed. */
+	bool vanillaFill = false;
 	/*! Where the ground-cover byte lives (bungo's open question, 2026-09-11
 	 *  09:5x: the mask's A, mirroring the object family's subsurface slot, or
 	 *  the colour sheet's A, the object family's `coverage` slot).
