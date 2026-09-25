@@ -624,10 +624,13 @@ const EsmLtexTextureSet & EsmWorld::ltexTextureSet( quint32 ltexForm ) const
 		return *it;
 	EsmLtexTextureSet s;
 	if ( ltexForm == ESM_LTEX_ENGINE_DEFAULT ) {
-		// the engine's own fallback set (esmdata.h), paths as a TXST spells them
-		s.diffuse = QStringLiteral( "Landscape\Ground\CommonwealthDefault01_d.dds" );
-		s.normal = QStringLiteral( "Landscape\Ground\CommonwealthDefault01_n.dds" );
-		s.specular = QStringLiteral( "Landscape\Ground\CommonwealthDefault01_s.dds" );
+		// the engine's own fallback set (esmdata.h), paths as a TXST spells them.
+		// ESCAPED backslashes: a bare "\G" is an unknown escape that g++ turns into
+		// "G" with a warning, the path then names no file and the ground went to the
+		// missing-texture colour (lane SEAM1, GRASSCOL picture, 2026-09-25)
+		s.diffuse = QStringLiteral( "Landscape\\Ground\\CommonwealthDefault01_d.dds" );
+		s.normal = QStringLiteral( "Landscape\\Ground\\CommonwealthDefault01_n.dds" );
+		s.specular = QStringLiteral( "Landscape\\Ground\\CommonwealthDefault01_s.dds" );
 		s.exists = true;
 		return *ltexCache.insert( ltexForm, s );
 	}
