@@ -1,0 +1,38 @@
+exe  b72cef2a60d0  rung 0af99c9921a3  card sets 23
+== G1-G3 on the new exe
+  bake new rc=0 (native-cards: LINKED: cardCount 23 of 2970 bases over 10 array(s) of 23 layer(s), cardCorpusHash 0xc17ab58cec0)
+  ok   G1 cardCount > 0 [new]: 23
+  ok   G1 cardCount == tree bases with a card set in the card dir [new]: 23 vs 23 (of 2970 bases)
+  ok   G1 the rows that name a layer ARE those bases [new]: 23 rows, 0 missing, 0 extra
+  ok   G2 every cardLayer resolves to its own base's layer of its array .lodm [new]: 0 of 23 unresolved over 10 array(s)
+  ok   G3 cardCorpusHash != 0 [new]: c17ab58cec0d3148
+  ok   G3 cardCorpusHash == the contract recomputed from the arrays [new]: c17ab58cec0d3148 vs c17ab58cec0d3148
+  ok   FORCE_CARD set on some instances, never on a base without a card [new]: 3446 of 3526 forced, 0 on a card-less base
+  cards-summary [new]: version 5 cardCount 23 cardCorpusHash c17ab58cec0d3148 forced 3446 arrays 10
+  ok   G1-G3a all hold (7 checks)
+== G3 the hash moves with one card byte
+flipped one byte of 00038599_oct_albedo.png at (5,258)
+  bake flip rc=0 (native-cards: LINKED: cardCount 23 of 2970 bases over 10 array(s) of 23 layer(s), cardCorpusHash 0x5f3823dc62a)
+  ok   G3 cardCorpusHash moved: c17ab58cec0d3148 -> 5f3823dc62ad6130
+  ok   G3 the flipped pair's hash is the contract of its arrays (5f3823dc62ad6130)
+== G4 --native-verify refuses a cardCount off by one
+  ok   the unedited pair verifies (rc 0)
+cardCount 23 -> 24, headerCrc32 recomputed
+  ok   G4 refused (rc 1): native REFUSED bumped.lodo: cardCount 24 but 23 base row(s) name a card layer
+== ID a bake without --impostors, new exe vs rung
+  bake idn rc=0 (native-cards: OFF (no card arrays linked))
+  bake idn rc=0 ()
+    attributed FO4CSLOD/Commonwealth/Commonwealth.lodo: stripped (62e53a3b), AO rows put back [270124, 271177]: 1 bytes differ ['0x4'], length +0
+    attributed FO4CSLOD/Commonwealth/Commonwealth.lodi: 12 bytes differ ['0xC', '0xD', '0xE', '0xF', '0x20', '0x21', '0x22', '0x23', '0x24', '0x25', '0x26', '0x27'] (its .lodo attributed)
+ID 0 of 34 files differ past the 62e53a3b attribution (34 on the rung)
+  ok   ID 0 of 34 files differ past the 62e53a3b attribution (34 on the rung)
+== RED the same card bake on the rung exe
+  bake red rc=0 ()
+  cards-summary [rung]: version 4 cardCount 0 cardCorpusHash 0000000000000000 forced 0 arrays 10
+  ok   RED G1 cardCount > 0 fails on the rung
+  ok   RED G2 every fails on the rung
+  ok   RED G3 cardCorpusHash != 0 fails on the rung
+  ok   RED FORCE_CARD fails on the rung
+cardCount 0 -> 1, headerCrc32 recomputed
+  ok   RED G4: the rung does not refuse by cardCount (rc 1: native REFUSED pairing: lodoIdentity 0xc51a75a0fc42d8e1 does not name this .lodo (0xab909f3a34b28c1b)
+RESULT PASS (0 failures)
