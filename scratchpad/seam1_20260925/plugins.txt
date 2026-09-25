@@ -1,0 +1,47 @@
+X:/Programs/Steam/steamapps/common/Fallout 4/Data/Fallout4.esm
+X:/Programs/Steam/steamapps/common/Fallout 4/Data/DLCRobot.esm
+X:/Programs/Steam/steamapps/common/Fallout 4/Data/DLCworkshop01.esm
+X:/Programs/Steam/steamapps/common/Fallout 4/Data/DLCCoast.esm
+X:/Programs/Steam/steamapps/common/Fallout 4/Data/DLCworkshop02.esm
+X:/Programs/Steam/steamapps/common/Fallout 4/Data/DLCworkshop03.esm
+X:/Programs/Steam/steamapps/common/Fallout 4/Data/DLCNukaWorld.esm
+X:/Programs/Steam/steamapps/common/Fallout 4/Data/DLCUltraHighResolution.esm
+X:/Programs/Steam/steamapps/common/Fallout 4/Data/ccBGSFO4044-HellfirePowerArmor.esl
+X:/Programs/Steam/steamapps/common/Fallout 4/Data/ccBGSFO4115-X02.esl
+X:/Programs/Steam/steamapps/common/Fallout 4/Data/ccBGSFO4116-HeavyFlamer.esl
+X:/Programs/Steam/steamapps/common/Fallout 4/Data/ccBGSFO4110-WS_Enclave.esl
+X:/Programs/Steam/steamapps/common/Fallout 4/Data/ccBGSFO4096-AS_Enclave.esl
+X:/Programs/Steam/steamapps/common/Fallout 4/Data/ccFSVFO4007-Halloween.esl
+X:/Programs/Steam/steamapps/common/Fallout 4/Data/ccBGSFO4046-TesCan.esl
+X:/Programs/Steam/steamapps/common/Fallout 4/Data/ccSBJFO4003-Grenade.esl
+X:/Programs/Steam/steamapps/common/Fallout 4/Data/ccOTMFO4001-Remnants.esl
+E:/Projects/Fallout 4 Mods/mods/HUDFramework/HUDFramework.esm
+E:/Projects/Fallout 4 Mods/mods/Slow Motion Dismemberment/Slow Motion Dismemberment.esm
+E:/Projects/Fallout 4 Mods/mods/Baka Framework/BakaFramework.esm
+E:/Projects/Fallout 4 Mods/mods/Bullet Impact Overhaul/Bullet Impact Overhaul.esp
+E:/Projects/Fallout 4 Mods/mods/Fallout 4 Particle Patch - No More Glowing Objects/FO4ParticlePatch.esp
+E:/Projects/Fallout 4 Mods/mods/Very Zen Impacts/Very Zen Impacts.esp
+E:/Projects/Fallout 4 Mods/mods/DEF_UI/def_inv_scrap_en.esp
+E:/Projects/Fallout 4 Mods/mods/Grass Reworked/Grasslands - Healthy.esp
+E:/Projects/Fallout 4 Mods/mods/Gloomy Glass - All transparent materials revised/Gloomy Glass.esp
+E:/Projects/Fallout 4 Mods/mods/RAW INPUT - The Ultimate Mouse Sensitivity Fix/RAW INPUT.esp
+E:/Projects/Fallout 4 Mods/mods/Remove Ironsight Blur/RemoveBlur.esp
+E:/Projects/Fallout 4 Mods/mods/AnotherOne's Test World/TestWorldspace.esp
+E:/Projects/Fallout 4 Mods/mods/True Grass/TrueGrass.esp
+E:/Projects/Fallout 4 Mods/mods/X01Tesla/X01Remastered.esp
+E:/Projects/Fallout 4 Mods/mods/Simple FOV Slider/Simple FOV Slider.esp
+E:/Projects/Fallout 4 Mods/mods/Vanilla Reanimation Project - Pistol/44DA.esp
+E:/Projects/Fallout 4 Mods/mods/Vanilla Reanimation Project - Lasers/LaserReanim.esp
+E:/Projects/Fallout 4 Mods/mods/VRP Shared Content/VRPShared.esp
+E:/Projects/Fallout 4 Mods/mods/Vanilla Reanimation Project - Rifle/RifleReanim_FarHarbor.esp
+E:/Projects/Fallout 4 Mods/mods/Vanilla Reanimation Project - Rifle/RifleReanim.esp
+E:/Projects/Fallout 4 Mods/mods/Vanilla Reanimation Project - Pistol/PistolReanims.esp
+E:/Projects/Fallout 4 Mods/mods/Vanilla Reanimation Project - Pipe/PipeReanim.esp
+E:/Projects/Fallout 4 Mods/mods/Vanilla Reanimation Project - Rifle/RifleReanim_Nuka.esp
+E:/Projects/Fallout 4 Mods/mods/Ultra Interior Lighting/UltraInteriorLighting.esp
+E:/Projects/Fallout 4 Mods/mods/Ultra Exterior Lighting/UltraExteriorLighting.esp
+E:/Projects/Fallout 4 Mods/mods/F76Weathers/F76Weathers.esp
+E:/Projects/Fallout 4 Mods/mods/Boston Natural Surroundings/BNS Landscape.esp
+E:/Projects/Fallout 4 Mods/mods/Boston Natural Surroundings/BNS Trees.esp
+E:/Projects/Fallout 4 Mods/mods/BoSInfantryArmor/BoSInfantryArmor.esp
+E:/Projects/Fallout 4 Mods/mods/CORE/CORE.esp
