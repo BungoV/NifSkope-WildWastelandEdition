@@ -2605,11 +2605,12 @@ bool lodgenNativeWrite( QString * report, QString * error )
 	quint64 vskyBytes = 0, vskyOpen = 0;
 	double vskySum = 0.0;
 	// lane AO2: the face cast's census
+	bool vaoWeldAcross = false;
 	float vaoFaceStep = 0.0f, vskyReach = 0.0f, vaoWeldDeg = -1.0f, vaoUnderTol = -1.0f, vaoPatchDeg = -1.0f;
 	bool vaoPatchSamples = false;
 	int vaoFaceMax = 0, vaoScenes = 0;
 	double vaoCastSeconds = 0.0;
-	quint64 vaoSamples = 0, vaoBuried = 0, vaoAtVertex = 0, vaoRingLeftOut = 0, vaoWelded = 0, vaoUnder = 0, vaoPatches = 0, vaoPatchTris = 0, vaoPatchSampleFit = 0;
+	quint64 vaoSamples = 0, vaoBuried = 0, vaoAtVertex = 0, vaoRingLeftOut = 0, vaoWelded = 0, vaoAcross = 0, vaoTJoin = 0, vaoUnder = 0, vaoPatches = 0, vaoPatchTris = 0, vaoPatchSampleFit = 0;
 	std::array<quint64, 8> vskyHist{};
 	if ( s.vertexAo && s.placementAo && s.world ) {
 		set.vertexAo = true;
@@ -2744,6 +2745,8 @@ bool lodgenNativeWrite( QString * report, QString * error )
 		if ( qEnvironmentVariableIsSet( "WW_AO_WELD_DEG" ) )
 			weldDeg = qMin( 180.0f, qEnvironmentVariable( "WW_AO_WELD_DEG" ).toFloat() );
 		vaoWeldDeg = weldDeg;
+		const bool weldAcross = qEnvironmentVariable( "WW_AO_WELD_ACROSS" ) != QStringLiteral( "0" );
+		vaoWeldAcross = weldAcross;
 		/* A sample more than underTol world u below the chunk's ground (the ESM
 		 * heightfield the rays march) is on a part of the mesh the terrain hides:
 		 * a foundation or the buried foot of a wall. All its rays meet the ground
@@ -2777,7 +2780,7 @@ bool lodgenNativeWrite( QString * report, QString * error )
 					probe[k] = pl[k].toFloat();
 		}
 		QMutex probeLock;
-		std::atomic<quint64> aSamples{ 0 }, aBuried{ 0 }, aAtVertex{ 0 }, aRingLeftOut{ 0 }, aWelded{ 0 }, aUnder{ 0 }, aPatches{ 0 }, aPatchTris{ 0 }, aPatchSampleFit{ 0 };
+		std::atomic<quint64> aAcross{ 0 }, aTJoin{ 0 }, aSamples{ 0 }, aBuried{ 0 }, aAtVertex{ 0 }, aRingLeftOut{ 0 }, aWelded{ 0 }, aUnder{ 0 }, aPatches{ 0 }, aPatchTris{ 0 }, aPatchSampleFit{ 0 };
 		std::atomic<int> aScenes{ 0 };
 		std::array<std::atomic<quint64>, 8> aSkyHist;
 		for ( auto & h : aSkyHist )
@@ -2877,6 +2880,15 @@ bool lodgenNativeWrite( QString * report, QString * error )
 				const bool wantSky = set.vertexSky;
 				std::vector<Vector3> wn;
 				std::vector<double> aoAcc, skyAcc, wAcc, aoU, skyU, wU;
+				// steps 4-5 run over EVERY receiver of this chunk and ring at once (lane AO2, the tower round):
+				// their corners, triangles, sums and samples are appended here, receiver after receiver
+				std::vector<Vector3> cP, cN;
+				std::vector<quint32> cT, cOwner, cRecv, cFirst;
+				std::vector<double> cAo, cSk, cW, cAoU, cSkU, cWU;
+				std::vector<size_t> cSTri;
+				std::vector<Vector3> cSP;
+				std::vector<float> cSAo, cSSk;
+				std::vector<double> cSW;
 				// step 5's fit data: the above-ground samples of each triangle, [sTri[t], sTri[t + 1])
 				std::vector<size_t> sTri;
 				std::vector<Vector3> sP;
@@ -2999,6 +3011,75 @@ bool lodgenNativeWrite( QString * report, QString * error )
 						}
 					}
 					sTri[d.tris.size() / 3] = sP.size();
+					{
+						const quint32 base = quint32( cP.size() );
+						const size_t sBase = cSP.size();
+						cRecv.push_back( i );
+						cFirst.push_back( base );
+						for ( quint32 v = 0; v < d.count; v++ ) {
+							cP.push_back( wp[v] );
+							cN.push_back( wn[v] );
+							cOwner.push_back( quint32( cRecv.size() - 1 ) );
+							cAo.push_back( aoAcc[v] );
+							cSk.push_back( skyAcc[v] );
+							cW.push_back( wAcc[v] );
+							cAoU.push_back( aoU[v] );
+							cSkU.push_back( skyU[v] );
+							cWU.push_back( wU[v] );
+						}
+						for ( quint32 x : d.tris )
+							cT.push_back( base + x );
+						for ( size_t t = 0; t < d.tris.size() / 3; t++ )
+							cSTri.push_back( sBase + sTri[t] );
+						cSP.insert( cSP.end(), sP.begin(), sP.end() );
+						cSAo.insert( cSAo.end(), sAo.begin(), sAo.end() );
+						cSSk.insert( cSSk.end(), sSk.begin(), sSk.end() );
+						cSW.insert( cSW.end(), sW.begin(), sW.end() );
+					}
+				}
+				/* Steps 4 and 5 over the whole chunk and ring (lane AO2, bungo 2026-09-26 on the
+				 * right round tower: "a hard AO cutoff, then the next face is totally white").
+				 * A wall built of kit pieces is several placements; each piece averaged only its
+				 * own samples, so two pieces meeting at one corner drew two values (136 bytes
+				 * apart there). Corners of DIFFERENT placements at one point now pool as the
+				 * copies inside one mesh do (0.5 u, within weldDeg). A flat patch still grows
+				 * inside one placement only, so a street or a roof of many tiles keeps its
+				 * detail; the final re-pool makes the pieces agree at every shared corner.
+				 * WW_AO_WELD_ACROSS=0 keeps the pooling inside each placement (the refuter). */
+				if ( !cRecv.empty() ) {
+					cSTri.push_back( cSP.size() );
+					struct { quint32 count; std::vector<quint32> tris; } d;
+					d.count = quint32( cP.size() );
+					d.tris.swap( cT );
+					wp.swap( cP );
+					wn.swap( cN );
+					aoAcc.swap( cAo );
+					skyAcc.swap( cSk );
+					wAcc.swap( cW );
+					aoU.swap( cAoU );
+					skyU.swap( cSkU );
+					wU.swap( cWU );
+					sTri.swap( cSTri );
+					// weldNodes over each placement's own corners, as before this round
+					auto weldSlices = [&]( float cosW, std::vector<quint32> & out ) {
+						out.resize( d.count );
+						quint64 pooled = 0;
+						std::vector<Vector3> sp, sn;
+						std::vector<quint32> so;
+						for ( size_t k = 0; k < cRecv.size(); k++ ) {
+							const quint32 b0 = cFirst[k], b1 = k + 1 < cRecv.size() ? cFirst[k + 1] : d.count;
+							sp.assign( wp.begin() + b0, wp.begin() + b1 );
+							sn.assign( wn.begin() + b0, wn.begin() + b1 );
+							pooled += LodgenAoScene::weldNodes( sp, sn, double( dim ) * 2.0, cosW, so );
+							for ( quint32 v = 0; v < b1 - b0; v++ )
+								out[b0 + v] = b0 + so[v];
+						}
+						return pooled;
+					};
+					sP.swap( cSP );
+					sAo.swap( cSAo );
+					sSk.swap( cSSk );
+					sW.swap( cSW );
 					/* 4. ONE VALUE PER SURFACE POINT (lane AO2, bungo 2026-09-26: "These
 					 * split lines", on the ballpark roof, the tower faces and a lone box).
 					 * A mesh splits a corner into copies for its UVs or its smoothing;
@@ -3015,7 +3096,14 @@ bool lodgenNativeWrite( QString * report, QString * error )
 					 * pooling off (the refuter: bytes as ee52efc0). */
 					std::vector<quint32> node;
 					if ( weldDeg >= 0.0f && d.count > 1 ) {
-						aWelded += LodgenAoScene::weldNodes( wp, wn, double( dim ) * 2.0, std::cos( weldDeg * 3.14159265f / 180.0f ), node );
+						const float cosW = std::cos( weldDeg * 3.14159265f / 180.0f );
+						if ( weldAcross ) {
+							aWelded += LodgenAoScene::weldNodes( wp, wn, double( dim ) * 2.0, cosW, node );
+							for ( quint32 v = 0; v < d.count; v++ )
+								if ( cOwner[node[v]] != cOwner[v] )
+									aAcross++;
+						} else
+							aWelded += weldSlices( cosW, node );
 						std::vector<double> aoN( d.count, 0.0 ), skyN( d.count, 0.0 ), wN( d.count, 0.0 );
 						std::vector<double> aoUN( d.count, 0.0 ), skyUN( d.count, 0.0 ), wUN( d.count, 0.0 );
 						for ( quint32 v = 0; v < d.count; v++ ) {
@@ -3054,7 +3142,6 @@ bool lodgenNativeWrite( QString * report, QString * error )
 							aAtVertex++;
 							if ( buried )
 								aBuried++;
-							probeSample( wp[v], wn[v], ao, sk, buried );
 						}
 						aoV[v] = ao;
 						skV[v] = sk;
@@ -3076,7 +3163,7 @@ bool lodgenNativeWrite( QString * report, QString * error )
 					const size_t nt = d.tris.size() / 3;
 					if ( patchDeg >= 0.0f && nt >= 2 ) {
 						std::vector<quint32> pnode;
-						LodgenAoScene::weldNodes( wp, wn, double( dim ) * 2.0, -2.0f, pnode );
+						weldSlices( -2.0f, pnode );
 						std::vector<Vector3> fnT( nt );
 						std::vector<double> arT( nt, 0.0 );
 						for ( size_t t = 0; t < nt; t++ ) {
@@ -3127,7 +3214,8 @@ bool lodgenNativeWrite( QString * report, QString * error )
 								stack.pop_back();
 								members.push_back( t );
 								for ( quint32 t2 : nbr[t] ) {
-									if ( patch[t2] >= 0 || !( arT[t2] > 0.0 ) || Vector3::dotproduct( fnT[t2], n0 ) < cosP )
+									if ( patch[t2] >= 0 || !( arT[t2] > 0.0 ) || cOwner[d.tris[3 * size_t( t2 )]] != cOwner[d.tris[3 * t0]]
+										|| Vector3::dotproduct( fnT[t2], n0 ) < cosP )
 										continue;
 									bool onPlane = true;
 									for ( size_t c = 0; c < 3; c++ )
@@ -3276,13 +3364,121 @@ bool lodgenNativeWrite( QString * report, QString * error )
 								skV[v] = float( fSk[v] / fW[v] );
 							}
 					}
-					r.vertexAo.resize( d.count );
-					if ( wantSky )
-						r.vertexSky.resize( d.count );
-					for ( quint32 v = 0; v < d.count; v++ ) {
-						r.vertexAo[v] = quint8( std::lround( std::min( 1.0f, std::max( 0.0f, aoV[v] ) ) * 255.0f ) );
+					/* 6. T-JUNCTIONS BETWEEN PLACEMENTS (lane AO2, the same tower). After step 4 the
+					 * kit pieces agree at every corner they share, but a long piece often has no corner
+					 * where a short neighbour's corner touches its edge (the tall wall panel beside a
+					 * stack of two window panels). Its edge draws the straight line between its own two
+					 * corners while the short piece's corner there draws its own value (63 bytes apart
+					 * at the tower): a hard step along the panel boundary. The long piece cannot gain a
+					 * vertex (authored meshes are never edited), so the corner lying on the edge takes
+					 * the edge's value, the usual repair of a T-junction in baked vertex values. Only a
+					 * coplanar contact counts: the corner within 0.5 world u of the edge and off both of
+					 * its ends, its normal within 1 deg of the other face.
+					 * Off with WW_AO_WELD_ACROSS=0. */
+					if ( weldAcross && nt >= 1 ) {
+						const float cell = 256.0f / float( dim ), tolT = 0.5f / float( dim );
+						const float cosT = std::cos( 1.0f * 3.14159265f / 180.0f );
+						auto cellOf = [&]( float x ) { return qint64( std::floor( x / cell ) ); };
+						auto key = []( qint64 x, qint64 y, qint64 z ) {
+							return ( quint64( x + ( 1 << 20 ) ) << 42 ) | ( quint64( y + ( 1 << 20 ) ) << 21 ) | quint64( z + ( 1 << 20 ) );
+						};
+						std::unordered_map<quint64, std::vector<quint32>> grid;
+						std::vector<Vector3> fnJ( nt );
+						for ( size_t t = 0; t < nt; t++ ) {
+							const Vector3 & pa = wp[d.tris[3 * t]], & pb = wp[d.tris[3 * t + 1]], & pc = wp[d.tris[3 * t + 2]];
+							Vector3 fn = Vector3::crossproduct( pb - pa, pc - pa );
+							const float len = fn.length();
+							if ( !( len > 1e-12f ) )
+								continue;
+							fnJ[t] = fn / len;
+							qint64 lo[3], hi[3];
+							for ( int a = 0; a < 3; a++ ) {
+								lo[a] = cellOf( std::min( { pa[a], pb[a], pc[a] } ) - tolT );
+								hi[a] = cellOf( std::max( { pa[a], pb[a], pc[a] } ) + tolT );
+							}
+							for ( qint64 x = lo[0]; x <= hi[0]; x++ )
+								for ( qint64 y = lo[1]; y <= hi[1]; y++ )
+									for ( qint64 z = lo[2]; z <= hi[2]; z++ )
+										grid[key( x, y, z )].push_back( quint32( t ) );
+						}
+						// the contacts once: corner (its welded representative) on edge a-b at s
+						struct TJoin { quint32 v, a, b; float s; };
+						std::vector<TJoin> joins;
+						auto rep = [&]( quint32 x ) { return node.empty() ? x : node[x]; };
+						for ( quint32 v = 0; v < d.count; v++ ) {
+							if ( rep( v ) != v )
+								continue;
+							const Vector3 & p = wp[v];
+							const auto it = grid.find( key( cellOf( p[0] ), cellOf( p[1] ), cellOf( p[2] ) ) );
+							if ( it == grid.end() )
+								continue;
+							for ( quint32 t : it->second ) {
+								const quint32 * tv = &d.tris[3 * size_t( t )];
+								if ( cOwner[tv[0]] == cOwner[v] || Vector3::dotproduct( fnJ[t], wn[v] ) < cosT
+										|| std::fabs( Vector3::dotproduct( p - wp[tv[0]], fnJ[t] ) ) > tolT )
+									continue;
+								for ( int e = 0; e < 3; e++ ) {
+									const quint32 a = tv[e], b = tv[( e + 1 ) % 3];
+									const Vector3 ab = wp[b] - wp[a];
+									const float L2 = Vector3::dotproduct( ab, ab );
+									if ( !( L2 > 16.0f * tolT * tolT ) )
+										continue;
+									const float s = Vector3::dotproduct( p - wp[a], ab ) / L2, L = std::sqrt( L2 );
+									if ( s * L <= tolT || ( 1.0f - s ) * L <= tolT || ( p - wp[a] - ab * s ).length() > tolT )
+										continue;
+									joins.push_back( { v, rep( a ), rep( b ), s } );
+								}
+							}
+						}
+						/* A corner on an edge whose own end is on a third piece's edge forms a chain;
+							 * the values are settled in place (Gauss-Seidel) until no corner moves by more
+							 * than a tenth of a byte, at most 64 sweeps. */
+						if ( !joins.empty() ) {
+							std::vector<quint8> jN( d.count, 0 );
+							for ( int sweep = 0; sweep < 64; sweep++ ) {
+								float moved = 0.0f;
+								for ( size_t j0 = 0; j0 < joins.size(); ) {
+									size_t j1 = j0;
+									double sa = 0.0, ss = 0.0;
+									for ( ; j1 < joins.size() && joins[j1].v == joins[j0].v; j1++ ) {
+										const TJoin & J = joins[j1];
+										sa += double( aoV[J.a] + J.s * ( aoV[J.b] - aoV[J.a] ) );
+										ss += double( skV[J.a] + J.s * ( skV[J.b] - skV[J.a] ) );
+									}
+									const quint32 v = joins[j0].v;
+									const float na = float( sa / double( j1 - j0 ) ), ns = float( ss / double( j1 - j0 ) );
+									moved = std::max( moved, std::fabs( na - aoV[v] ) );
+									aoV[v] = na;
+									skV[v] = ns;
+									j0 = j1;
+								}
+								if ( moved * 255.0f < 0.1f )
+									break;
+							}
+							for ( const TJoin & J : joins )
+								jN[J.v] = 1;
+							for ( quint32 v = 0; v < d.count; v++ ) {
+								const quint32 r = rep( v );
+								if ( jN[r] ) {
+									aoV[v] = aoV[r];
+									skV[v] = skV[r];
+									if ( r == v )
+										aTJoin++;
+								}
+							}
+						}
+					}
+					for ( size_t k = 0; k < cRecv.size(); k++ ) {
+						LodiSrcInstance & r = set.instances[cRecv[k]];
+						const quint32 b0 = cFirst[k], n = ( k + 1 < cRecv.size() ? cFirst[k + 1] : d.count ) - b0;
+						r.vertexAo.resize( n );
 						if ( wantSky )
-							r.vertexSky[v] = quint8( std::lround( std::min( 1.0f, std::max( 0.0f, skV[v] ) ) * 255.0f ) );
+							r.vertexSky.resize( n );
+						for ( quint32 v = 0; v < n; v++ ) {
+							r.vertexAo[v] = quint8( std::lround( std::min( 1.0f, std::max( 0.0f, aoV[b0 + v] ) ) * 255.0f ) );
+							if ( wantSky )
+								r.vertexSky[v] = quint8( std::lround( std::min( 1.0f, std::max( 0.0f, skV[b0 + v] ) ) * 255.0f ) );
+						}
 					}
 				}
 			}
@@ -3295,6 +3491,8 @@ bool lodgenNativeWrite( QString * report, QString * error )
 		vaoAtVertex = aAtVertex;
 		vaoRingLeftOut = aRingLeftOut;
 		vaoWelded = aWelded;
+		vaoAcross = aAcross;
+		vaoTJoin = aTJoin;
 		vaoUnder = aUnder;
 		vaoPatches = aPatches;
 		vaoPatchTris = aPatchTris;
@@ -3935,6 +4133,8 @@ bool lodgenNativeWrite( QString * report, QString * error )
 					.arg( vaoCastSeconds, 0, 'f', 1 )
 					.arg( ( vaoWeldDeg >= 0.0f ? QString( "%1 split vertex copies pooled with a co-located copy within %2 deg (one value a surface point)" )
 							.arg( vaoWelded ).arg( double( vaoWeldDeg ), 0, 'f', 0 )
+							+ ( vaoWeldAcross ? QString( ", %1 of them joined to another placement's corner (kit pieces), %2 corner(s) on another placement's edge took that edge's value" ).arg( vaoAcross ).arg( vaoTJoin )
+								: QStringLiteral( ", inside each placement only (WW_AO_WELD_ACROSS=0)" ) )
 						: QStringLiteral( "split copies NOT pooled (WW_AO_WELD_DEG < 0)" ) )
 						+ ( vaoUnderTol >= 0.0f ? QString( "; %1 sample(s) more than %2 u under the ground set aside" )
 							.arg( vaoUnder ).arg( double( vaoUnderTol ), 0, 'f', 0 )
