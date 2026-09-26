@@ -5196,7 +5196,7 @@ bool lodgenWriteDds( const QString & path, int w, int h,
 		mh = mipH[mi];
 		const int bw = ( mw + 3 ) / 4, bh = ( mh + 3 ) / 4;
 		std::vector<quint8> block( size_t( bw ) * bh * blockBytes );
-		// BC7 on the GPU when it is on (the CPU's bytes; src/lodgengpu.h), else the loop below
+		// BC7 on the GPU when it is on (no worse on the CPU's error measure, not its bytes; src/lodgengpu.h), else the loop below
 		if ( bc7 && lodgenGpuEncodeBc7( mip.data(), mw, mh, kCardNormalBc7Weights, block.data() ) ) {
 			f.write( reinterpret_cast<const char *>( block.data() ), qint64( block.size() ) );
 			continue;
@@ -5347,7 +5347,7 @@ static int lodgenEncodeArrayLayer( const std::vector<quint32> & bgra, int w, int
 		const int bw = ( mw + 3 ) / 4, bh = ( mh + 3 ) / 4;
 		const size_t at = out.size();
 		out.resize( at + size_t( bw ) * bh * blockBytes );
-		// BC7 on the GPU when it is on (the CPU's bytes; src/lodgengpu.h), else the loop below
+		// BC7 on the GPU when it is on (no worse on the CPU's error measure, not its bytes; src/lodgengpu.h), else the loop below
 		const bool onGpu = bc7 && lodgenGpuEncodeBc7( mip.data(), mw, mh, kCardNormalBc7Weights, out.data() + at );
 		// BLOCK ROWS IN PARALLEL: disjoint writes into `out`, `mip` read-only.
 		if ( !onGpu )
