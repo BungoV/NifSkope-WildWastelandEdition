@@ -95,7 +95,9 @@ struct NearShapeSum
 	QString matName, tex0;
 	bool emits = false;
 	float emitMult = 0.0f;
-	quint32 verts = 0, tris = 0;
+	quint32 verts = 0, tris = 0;   //!< drawn (after the LOD0 trim)
+	quint32 srcTris = 0;            //!< the Triangles array as stored
+	bool lodTrimmed = false;
 	float bmin[3] = { 0, 0, 0 }, bmax[3] = { 0, 0, 0 };
 	QString reason;         //!< empty = drawn
 	QString matKey;         //!< drawn shapes only
@@ -109,6 +111,7 @@ struct NearModel
 	quint32 swapForm = 0;
 	LodgenMaterialSubst swap;
 	bool loaded = false;
+	bool found = false;     //!< the file is in the stack (probed only when the load gave nothing)
 	int controllers = 0;
 	std::vector<NearShapeSum> shapes;
 	QSet<QString> swapKeys;     //!< every shape's material, lodgenMaterialSwapKey-folded
@@ -156,6 +159,53 @@ QString nearMaterialKey( const NearShapeSum & s )
 	for ( const QString & t : f.textures )
 		k += QChar( '|' ) + nearFold( t );
 	return k;
+}
+
+/*! BSMeshLODTriShape: its Triangles array is LOD0, LOD1 and LOD2 end to end
+ *  (`LOD0 Size` + `LOD1 Size` + `LOD2 Size`), and the game draws the first
+ *  `LOD0 Size` of them up close. MEASURED on the Boston test region (lane
+ *  NEAR1): 756 of 756 such shapes store more than LOD0 -- 712,209 triangles
+ *  where LOD0 is 336,926 -- so keeping the whole array would draw the two
+ *  coarser copies inside the full one. Keep LOD0, then drop the vertices only
+ *  the coarser levels used (their order kept). False = nothing to trim. */
+bool nearTrimToLod0( NativeSrcShape & sh )
+{
+	const size_t keep = size_t( sh.nearFacts.lod0Tris ) * 3;
+	LodoSrcShape & g = sh.geom;
+	if ( !keep || keep >= g.tris.size() )
+		return false;
+	g.tris.resize( keep );
+	const size_t nv = g.pos.size() / 3;
+	std::vector<quint32> remap( nv, 0xFFFFFFFFu );
+	for ( quint32 t : g.tris )
+		if ( t < nv )
+			remap[t] = 0;
+	quint32 next = 0;
+	for ( size_t v = 0; v < nv; v++ )
+		if ( remap[v] == 0 )
+			remap[v] = next++;
+	auto pack = [&]( auto & arr, size_t per ) {
+		if ( arr.size() != nv * per )
+			return;
+		size_t o = 0;
+		for ( size_t v = 0; v < nv; v++ )
+			if ( remap[v] != 0xFFFFFFFFu ) {
+				for ( size_t k = 0; k < per; k++ )
+					arr[o + k] = arr[v * per + k];
+				o += per;
+			}
+		arr.resize( o );
+	};
+	pack( g.pos, 3 );
+	pack( g.nrm, 3 );
+	pack( g.tan, 3 );
+	pack( g.uv, 2 );
+	pack( g.rgba, 4 );
+	pack( g.sway, 1 );
+	pack( g.ao, 1 );
+	for ( quint32 & t : g.tris )
+		t = t < nv ? remap[t] : t;
+	return true;
 }
 
 QString nearShapeReason( const NearShapeFacts & f )
@@ -342,6 +392,10 @@ bool nearLibraryBake( const EsmWorld & world, const NearLibraryOptions & opts, Q
 	const qint64 msWalk = clock.elapsed();
 
 	/* ---- 2. pass A: every distinct plain model, loaded once, facts kept ---- */
+	/* The resource stack's index is built on first use by a function-local
+	 * static: four workers reaching it at once saw a half-built index (every
+	 * model "not found") and then crashed. Build it here, on this thread. */
+	lodgenWarmSharedIndices();
 	void * user = const_cast<QString *>( &opts.dataRoot );
 	std::map<QString, NearModel> models;       // key = mesh name; std::map keeps the name order
 	for ( const NearCand & c : cands ) {
@@ -352,11 +406,24 @@ bool nearLibraryBake( const EsmWorld & world, const NearLibraryOptions & opts, Q
 	auto passA = [&]( NearModel & m ) {
 		std::vector<NativeSrcShape> shapes;
 		m.loaded = lodgenNativeLoadModelOnce( user, m.path, m.variant ? &m.swap : nullptr, &shapes ) && !shapes.empty();
-		if ( !m.loaded )
+		if ( !m.loaded ) {
+			/* Nothing came back: say WHICH nothing. A file the stack does not
+			 * hold is `model-missing`; one it holds that yields no BSTriShape
+			 * with vertices and triangles (the *DummyLOD.nif stand-ins, sky
+			 * shells) is `no-geometry`. */
+			QString rel = m.path;
+			rel.replace( QChar( '\\' ), QChar( '/' ) );
+			if ( !rel.startsWith( QStringLiteral( "meshes/" ), Qt::CaseInsensitive ) )
+				rel.prepend( QStringLiteral( "meshes/" ) );
+			QString e, k, p;
+			m.found = lodgenProbeAsset( opts.dataRoot, rel, &e, &k, &p, nullptr );
 			return;
+		}
 		m.controllers = shapes.front().nearFacts.modelControllers;
-		for ( const NativeSrcShape & sh : shapes ) {
+		for ( NativeSrcShape & sh : shapes ) {
 			NearShapeSum s;
+			s.srcTris = quint32( sh.geom.tris.size() / 3 );
+			s.lodTrimmed = nearTrimToLod0( sh );
 			s.nf = sh.nearFacts;
 			s.matName = sh.matName;
 			s.tex0 = sh.tex0;
@@ -401,7 +468,10 @@ bool nearLibraryBake( const EsmWorld & world, const NearLibraryOptions & opts, Q
 
 	/* ---- 3. placements judged on their models; SWAP1's variant rule ---- */
 	auto plainOk = [&]( const NearModel & m, QString * why ) {
-		if ( !m.loaded ) { *why = QStringLiteral( "model-unloadable" ); return false; }
+		if ( !m.loaded ) {
+			*why = m.found ? QStringLiteral( "no-geometry" ) : QStringLiteral( "model-missing" );
+			return false;
+		}
 		if ( m.controllers > 0 ) { *why = QStringLiteral( "animated" ); return false; }
 		if ( m.kept == 0 ) { *why = QStringLiteral( "no-drawable-shape" ); return false; }
 		return true;
@@ -628,6 +698,8 @@ bool nearLibraryBake( const EsmWorld & world, const NearLibraryOptions & opts, Q
 					j.err = QString( "%1: pass B loaded %2 shapes, pass A %3" ).arg( m.name ).arg( shapes.size() ).arg( m.shapes.size() );
 					return;
 				}
+				for ( NativeSrcShape & shp : shapes )
+					nearTrimToLod0( shp );
 				std::vector<LodoSrcShape> src;
 				for ( size_t k = 0; k < shapes.size(); k++ ) {
 					const NearShapeSum & s = m.shapes[k];
@@ -849,20 +921,27 @@ bool nearLibraryBake( const EsmWorld & world, const NearLibraryOptions & opts, Q
 		return fail( err );
 
 	QStringList sh;
-	sh << QStringLiteral( "# near shapes v1: mesh<TAB>path<TAB>variant<TAB>block<TAB>name<TAB>verts<TAB>tris<TAB>lod0"
-		"<TAB>minx miny minz maxx maxy maxz<TAB>kept|reason<TAB>material|-<TAB>meshId|-" );
+	sh << QStringLiteral( "# near shapes v2: mesh<TAB>path<TAB>variant<TAB>block<TAB>name<TAB>verts<TAB>tris<TAB>lod0"
+		"<TAB>minx miny minz maxx maxy maxz<TAB>kept|reason<TAB>material|-<TAB>meshId|-<TAB>srcTris" );
+	sh << QStringLiteral( "# verts/tris/bounds = what is drawn: a BSMeshLODTriShape keeps its first lod0 triangles and the"
+		" vertices they use; srcTris = the Triangles array as stored" );
 	QMap<QString, quint64> shapeExcluded;
-	quint64 shapesKept = 0;
+	quint64 shapesKept = 0, lodTrimmedShapes = 0, lodTrimmedTris = 0;
 	std::set<std::pair<quint16, quint16>> meshMatPairs;
 	for ( const auto & kv : models ) {
 		const NearModel & m = kv.second;
 		if ( !m.loaded ) {
-			sh << QString( "%1\t%2\t%3\t-\t-\t-\t-\t-\t-\tmodel-unloadable\t-\t-" ).arg( m.name, m.path ).arg( m.variant ? 1 : 0 );
+			sh << QString( "%1\t%2\t%3\t-\t-\t-\t-\t-\t-\t%4\t-\t-\t-" ).arg( m.name, m.path ).arg( m.variant ? 1 : 0 )
+				.arg( m.found ? QStringLiteral( "no-geometry" ) : QStringLiteral( "model-missing" ) );
 			continue;
 		}
 		const bool used = usedModels.count( kv.first ) != 0;
 		for ( const NearShapeSum & s : m.shapes ) {
 			if ( used ) {
+				if ( s.lodTrimmed ) {
+					lodTrimmedShapes++;
+					lodTrimmedTris += s.srcTris - s.tris;
+				}
 				if ( s.reason.isEmpty() ) {
 					shapesKept++;
 					meshMatPairs.insert( std::make_pair( m.meshId, materialId.value( s.matKey ) ) );
@@ -870,14 +949,14 @@ bool nearLibraryBake( const EsmWorld & world, const NearLibraryOptions & opts, Q
 					shapeExcluded[s.reason]++;
 				}
 			}
-			sh << QString( "%1\t%2\t%3\t%4\t%5\t%6\t%7\t%8\t%9 %10 %11 %12 %13 %14\t%15\t%16\t%17" )
+			sh << QString( "%1\t%2\t%3\t%4\t%5\t%6\t%7\t%8\t%9 %10 %11 %12 %13 %14\t%15\t%16\t%17\t%18" )
 				.arg( m.name, m.path ).arg( m.variant ? 1 : 0 ).arg( s.nf.block ).arg( s.nf.name ).arg( s.verts ).arg( s.tris )
 				.arg( s.nf.lod0Tris )
 				.arg( double( s.bmin[0] ), 0, 'g', 9 ).arg( double( s.bmin[1] ), 0, 'g', 9 ).arg( double( s.bmin[2] ), 0, 'g', 9 )
 				.arg( double( s.bmax[0] ), 0, 'g', 9 ).arg( double( s.bmax[1] ), 0, 'g', 9 ).arg( double( s.bmax[2] ), 0, 'g', 9 )
 				.arg( s.reason.isEmpty() ? ( m.controllers ? QStringLiteral( "model-animated" ) : QStringLiteral( "kept" ) ) : s.reason )
 				.arg( s.reason.isEmpty() && used ? QString::number( materialId.value( s.matKey ) ) : QStringLiteral( "-" ) )
-				.arg( used ? QString::number( m.meshId ) : QStringLiteral( "-" ) );
+				.arg( used ? QString::number( m.meshId ) : QStringLiteral( "-" ) ).arg( s.srcTris );
 		}
 	}
 	if ( !nearWriteText( stem + QStringLiteral( ".shapes.txt" ), sh, &shBytes, &err ) )
@@ -955,7 +1034,8 @@ bool nearLibraryBake( const EsmWorld & world, const NearLibraryOptions & opts, Q
 			"emits %6); scol part placements excluded (%7); scol parts skipped by record (%8)" ).arg( placements )
 			.arg( nParts ).arg( nDisabled ).arg( nScrap ).arg( nAlpha ).arg( nEmit ).arg( nearCounts( placeExcluded ) )
 			.arg( nearCounts( partExcluded ) );
-		*report << QString( "near shapes: kept %1, excluded (%2)" ).arg( shapesKept ).arg( nearCounts( shapeExcluded ) );
+		*report << QString( "near shapes: kept %1, excluded (%2); BSMeshLODTriShape trimmed to LOD0 %3 (%4 coarser-level "
+			"triangles not drawn)" ).arg( shapesKept ).arg( nearCounts( shapeExcluded ) ).arg( lodTrimmedShapes ).arg( lodTrimmedTris );
 		*report << QString( "near library: meshes %1 (swap variants %2, swap pairs whose MSWP is missing %3, variants "
 			"drawn plain %4), bases %5, materials %6 (%7; legacy %8, pbr %9)" ).arg( lib.meshes.size() ).arg( variants )
 			.arg( swapMissing ).arg( variantFallback ).arg( lib.bases.size() ).arg( lib.materials.size() )
@@ -966,7 +1046,7 @@ bool nearLibraryBake( const EsmWorld & world, const NearLibraryOptions & opts, Q
 		*report << QString( "near textures: %1 distinct, %2 missing, %3 (format/size) buckets, %4 diffuse sets (%5 past the "
 			"u8 arraySet)" ).arg( texInfo.size() ).arg( texMissing ).arg( texBuckets.size() ).arg( sets.size() ).arg( layerlessSets );
 		*report << QString( "near files: %1.lodo %2 bytes (v%3), %1.lodi %4 bytes (v%5), textures.txt %6, shapes.txt %7, "
-			"refs.txt %8" ).arg( QFileInfo( stem ).fileName() ).arg( lodoBytes ).arg( lh.version ).arg( lodiBytes )
+			"refs.txt %8" ).arg( QFileInfo( stem ).absoluteFilePath() ).arg( lodoBytes ).arg( lh.version ).arg( lodiBytes )
 			.arg( is.version ).arg( txBytes ).arg( shBytes ).arg( rfBytes );
 		*report << QString( "near times: walk %1 s, models %2 s, textures %3 s, meshes %4 s, write %5 s, total %6 s" )
 			.arg( msWalk / 1000.0, 0, 'f', 1 ).arg( ( msPassA - msWalk ) / 1000.0, 0, 'f', 1 )
