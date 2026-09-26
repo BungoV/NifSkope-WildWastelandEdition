@@ -14,6 +14,7 @@ BSD License - see nifskope.h
 #include "lodgenao.h"
 #include "io/lodmfile.h"
 #include <array>
+#include <atomic>
 #include <limits>
 
 #include <QDir>
@@ -2592,7 +2593,9 @@ bool lodgenNativeWrite( QString * report, QString * error )
 	 * origin lies inside that field -- the chunk's own and the apron from the
 	 * neighbours -- and the same LodgenAoScene caster with the same 8 rays and
 	 * the same reach (300 miniature units = 300 x dim world units). One scene a
-	 * chunk, chunks in parallel. A card-drawn instance, a base with no mesh in
+	 * chunk and RING (lane AO2: a receiver drawn from MNAM slot s sees the slot-s
+	 * meshes only), cast across each face, not at the bare vertex; the law is at
+	 * the cast below. Chunks in parallel. A card-drawn instance, a base with no mesh in
 	 * its slot, or a chunk with no land record leaves its range EMPTY, which the
 	 * census counts. */
 	int vaoInstances = 0, vaoEmpty = 0, vaoChunks = 0, vaoNoLand = 0;
@@ -2601,6 +2604,12 @@ bool lodgenNativeWrite( QString * report, QString * error )
 	int vskyInstances = 0;
 	quint64 vskyBytes = 0, vskyOpen = 0;
 	double vskySum = 0.0;
+	// lane AO2: the face cast's census
+	float vaoFaceStep = 0.0f, vskyReach = 0.0f;
+	int vaoFaceMax = 0, vaoScenes = 0;
+	double vaoCastSeconds = 0.0;
+	quint64 vaoSamples = 0, vaoBuried = 0, vaoAtVertex = 0, vaoRingLeftOut = 0;
+	std::array<quint64, 8> vskyHist{};
 	if ( s.vertexAo && s.placementAo && s.world ) {
 		set.vertexAo = true;
 		// v7: the sky stream rides the SAME loop, the same scene, the same reach
@@ -2688,6 +2697,69 @@ bool lodgenNativeWrite( QString * report, QString * error )
 		 * The read is serialized; the heights copy and the rays stay parallel, and
 		 * the bytes cannot move. */
 		QMutex landLock;
+		/* ---- lane AO2 (2026-09-26): WHAT THE STREAMS ARE CAST FROM, AND WHERE ----
+		 * bungo on the Boston oblique: "isn't the vertex AO kind of strong and placed
+		 * not in the right places?". Measured (scratchpad/ao2_20260926/DONE.md):
+		 *
+		 * 1. ONE RING A SCENE. The scene used to hold every placement's OWN kept-slot
+		 *    mesh. A building's far-ring stand-in (rep[0] empty, rep[2] = the whole
+		 *    building) then sat in the SAME scene as the near-ring kit pieces it
+		 *    replaces, and its lid 72 u above the Prudential's kit roof took 136 of
+		 *    136 rays. MNAM slot k is what ring k draws (an empty slot = not drawn at
+		 *    that distance, docs/LODGEN_NATIVE_LODO_LODI.md), so a receiver drawn from
+		 *    slot s is now cast against the slot-s mesh of every placement in the
+		 *    field, and a placement with no slot-s mesh is not in that scene.
+		 *
+		 * 2. ACROSS THE FACE (bungo: "Sample across the face sounds good"; "it is fine
+		 *    if the two corners would get equalized with also the whole face's
+		 *    context"). One cast per VERTEX drew a 1024 x 512 wall at the value of
+		 *    its four corners, and every corner stood inside a corner tower. Each
+		 *    triangle is now cut into k x k equal-area pieces (k = the longest edge /
+		 *    faceStep world units, 1..faceMax), each piece's centroid is cast with the
+		 *    interpolated normal, and a vertex takes the area x barycentric weighted
+		 *    mean of the samples of every triangle it belongs to. A vertex on no
+		 *    level-0 triangle is cast where it stands. Fixed pattern, fixed order,
+		 *    one chunk per thread and one placement per chunk: deterministic.
+		 *
+		 * 3. The v7 sky byte is the horizon-aware law (LodgenAoScene::skyVisibilityFace),
+		 *    cast at the same samples, reach skyReach world units.
+		 *
+		 * WW_AO_FACE_STEP / WW_AO_FACE_MAX / WW_SKY_REACH are research knobs for the
+		 * measurements that chose the defaults (DONE.md s2); WW_AO_FACE_STEP=0 casts
+		 * at the vertex alone. WW_AO_PROBE=x,y,z,r logs every SAMPLE within r world
+		 * units of (x,y,z): its AO rays, what each met (terrain, or which triangle of
+		 * which placement, front or back) and how far, to stderr. No byte depends on
+		 * the probe. */
+		float faceStep = 256.0f;
+		int faceMax = 4;
+		float skyReach = 10000.0f;
+		if ( qEnvironmentVariableIsSet( "WW_AO_FACE_STEP" ) )
+			faceStep = qMax( 0.0f, qEnvironmentVariable( "WW_AO_FACE_STEP" ).toFloat() );
+		if ( qEnvironmentVariableIsSet( "WW_AO_FACE_MAX" ) )
+			faceMax = qBound( 1, qEnvironmentVariable( "WW_AO_FACE_MAX" ).toInt(), 16 );
+		if ( qEnvironmentVariableIsSet( "WW_SKY_REACH" ) )
+			skyReach = qMax( 1.0f, qEnvironmentVariable( "WW_SKY_REACH" ).toFloat() );
+		vaoFaceStep = faceStep;
+		vaoFaceMax = faceMax;
+		vskyReach = skyReach;
+		std::vector<std::vector<float>> samplePattern( size_t( faceMax ) + 1 );
+		for ( int k = 1; k <= faceMax; k++ )
+			LodgenAoScene::faceSamples( k, samplePattern[size_t( k )] );
+		float probe[4] = { 0, 0, 0, -1 };
+		{
+			const QStringList pl = qEnvironmentVariable( "WW_AO_PROBE" ).split( ',' );
+			if ( pl.size() == 4 )
+				for ( int k = 0; k < 4; k++ )
+					probe[k] = pl[k].toFloat();
+		}
+		QMutex probeLock;
+		std::atomic<quint64> aSamples{ 0 }, aBuried{ 0 }, aAtVertex{ 0 }, aRingLeftOut{ 0 };
+		std::atomic<int> aScenes{ 0 };
+		std::array<std::atomic<quint64>, 8> aSkyHist;
+		for ( auto & h : aSkyHist )
+			h = 0;
+		QElapsedTimer castClock;
+		castClock.start();
 		lodgenParallelFor( int( chunkKeys.size() ), [&]( int ci ) {
 			nativeNoteWorker();
 			const int cx = std::get<0>( chunkKeys[size_t( ci )] ), cy = std::get<1>( chunkKeys[size_t( ci )] );
@@ -2702,13 +2774,13 @@ bool lodgenNativeWrite( QString * report, QString * error )
 			 * its slab got the slab top darkened by its own second layer (bungo
 			 * 2026-09-18, "why is this area so dark on the AO?"). */
 			const float inv = 1.0f / float( dim );
-			LodgenAoScene scene;
-			scene.hn = cells * 32 + 1;
-			scene.hSpacing = 128.0f * inv;
-			scene.ox = float( cx - SKIRT ) * 4096.0f * inv;
-			scene.oy = float( cy - SKIRT ) * 4096.0f * inv;
-			scene.span = float( cells ) * 4096.0f * inv;
-			scene.hgt.assign( size_t( scene.hn ) * size_t( scene.hn ), s.world->defaultLandHeight() * inv );
+			LodgenAoScene ground;
+			ground.hn = cells * 32 + 1;
+			ground.hSpacing = 128.0f * inv;
+			ground.ox = float( cx - SKIRT ) * 4096.0f * inv;
+			ground.oy = float( cy - SKIRT ) * 4096.0f * inv;
+			ground.span = float( cells ) * 4096.0f * inv;
+			ground.hgt.assign( size_t( ground.hn ) * size_t( ground.hn ), s.world->defaultLandHeight() * inv );
 			int landCells = 0;
 			{
 				EsmLand land;
@@ -2723,7 +2795,7 @@ bool lodgenNativeWrite( QString * report, QString * error )
 							landCells++;
 							for ( int row = 0; row < 33; row++ )
 								for ( int col = 0; col < 33; col++ )
-									scene.hgt[size_t( ly * 32 + row ) * size_t( scene.hn ) + size_t( lx * 32 + col )] = land.heights[row][col] * inv;
+									ground.hgt[size_t( ly * 32 + row ) * size_t( ground.hn ) + size_t( lx * 32 + col )] = land.heights[row][col] * inv;
 						}
 					}
 			}
@@ -2731,11 +2803,11 @@ bool lodgenNativeWrite( QString * report, QString * error )
 				chunkNoLand[size_t( ci )] = 1;
 				return;
 			}
+			ground.prepareGround();
 			// every instance whose origin lies in the field: the chunk's own and the apron
-			const float x0 = scene.ox, x1 = scene.ox + scene.span, y0 = scene.oy, y1 = scene.oy + scene.span;  // miniature
-			auto place = [&]( const LodiSrcInstance & r, quint16 mid, auto && perVertex, bool addTris ) {
-				const DecodedMesh & d = dm[mid];
-				std::vector<Vector3> wp( d.count );
+			const float x0 = ground.ox, x1 = ground.ox + ground.span, y0 = ground.oy, y1 = ground.oy + ground.span;  // miniature
+			auto placed = [&]( const LodiSrcInstance & r, const DecodedMesh & d, std::vector<Vector3> & wp ) {
+				wp.resize( d.count );
 				for ( quint32 v = 0; v < d.count; v++ ) {
 					const float * lp = &d.pos[size_t( v ) * 3];
 					const float sx = lp[0] * r.scale, sy = lp[1] * r.scale, sz = lp[2] * r.scale;
@@ -2743,53 +2815,169 @@ bool lodgenNativeWrite( QString * report, QString * error )
 						( r.rot[3] * sx + r.rot[4] * sy + r.rot[5] * sz + r.pos[1] ) * inv,
 						( r.rot[6] * sx + r.rot[7] * sy + r.rot[8] * sz + r.pos[2] ) * inv );
 				}
-				if ( addTris )
-					for ( size_t t = 0; t + 2 < d.tris.size(); t += 3 ) {
-						const Vector3 & ta = wp[d.tris[t]], & tb = wp[d.tris[t + 1]], & tc = wp[d.tris[t + 2]];
-						scene.addTriangle( ta, tb, tc );
-					}
-				perVertex( d, wp );
 			};
-			auto noop = []( const DecodedMesh &, const std::vector<Vector3> & ) {};
-			for ( size_t i = 0; i < ni; i++ ) {
-				const LodiSrcInstance & r = set.instances[i];
-				if ( instMesh[i] == LODO_NO_MESH || instMesh[i] >= dm.size() || dm[instMesh[i]].count == 0 )
-					continue;
-				if ( r.pos[0] * inv < x0 || r.pos[0] * inv >= x1 || r.pos[1] * inv < y0 || r.pos[1] * inv >= y1 )
-					continue;
-				place( r, instMesh[i], noop, true );
-			}
-			const float maxT = 300.0f;  // miniature units = 300 x dim world units, as the .BTO cast
-			for ( quint32 i : chunkInst[size_t( ci )] ) {
-				LodiSrcInstance & r = set.instances[i];
-				if ( instMesh[i] == LODO_NO_MESH || instMesh[i] >= dm.size() || dm[instMesh[i]].count == 0 )
-					continue;
+			auto meshOk = [&]( quint16 mid ) { return mid != LODO_NO_MESH && mid < dm.size() && dm[mid].count > 0; };
+			// the receivers of this chunk, by the ring (MNAM slot) they are drawn from
+			std::map<int, std::vector<quint32>> bySlot;
+			for ( quint32 i : chunkInst[size_t( ci )] )
+				if ( meshOk( instMesh[i] ) )
+					bySlot[int( set.instances[i].mnamSlot )].push_back( i );
+			const float maxT = 300.0f;            // miniature units = 300 x dim world units, as the .BTO cast
+			const float skyT = skyReach * inv;    // the sky reach, world units -> miniature
+			quint64 hist[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
+			for ( const auto & slotRecv : bySlot ) {
+				const int slot = slotRecv.first;
+				LodgenAoScene scene = ground;
+				aScenes++;
+				std::vector<quint32> triOwner;   // WW_AO_PROBE only
+				std::vector<Vector3> wp;
+				for ( size_t i = 0; i < ni; i++ ) {
+					const LodiSrcInstance & r = set.instances[i];
+					if ( r.pos[0] * inv < x0 || r.pos[0] * inv >= x1 || r.pos[1] * inv < y0 || r.pos[1] * inv >= y1 )
+						continue;
+					if ( r.baseId >= lib.bases.size() )
+						continue;
+					const quint16 mid = lib.bases[r.baseId].rep[slot];
+					if ( !meshOk( mid ) ) {
+						if ( meshOk( instMesh[i] ) )
+							aRingLeftOut++;
+						continue;
+					}
+					const DecodedMesh & d = dm[mid];
+					placed( r, d, wp );
+					if ( probe[3] > 0 )
+						triOwner.resize( scene.tri.size() / 9 + d.tris.size() / 3, quint32( i ) );
+					for ( size_t t = 0; t + 2 < d.tris.size(); t += 3 )
+						scene.addTriangle( wp[d.tris[t]], wp[d.tris[t + 1]], wp[d.tris[t + 2]] );
+				}
 				const bool wantSky = set.vertexSky;
-				place( r, instMesh[i], [&]( const DecodedMesh & d, const std::vector<Vector3> & wp ) {
+				std::vector<Vector3> wn;
+				std::vector<double> aoAcc, skyAcc, wAcc;
+				for ( quint32 i : slotRecv.second ) {
+					LodiSrcInstance & r = set.instances[i];
+					const DecodedMesh & d = dm[instMesh[i]];
+					placed( r, d, wp );
+					wn.resize( d.count );
+					for ( quint32 v = 0; v < d.count; v++ ) {
+						const float * ln = &d.nrm[size_t( v ) * 3];
+						Vector3 n( r.rot[0] * ln[0] + r.rot[1] * ln[1] + r.rot[2] * ln[2],
+							r.rot[3] * ln[0] + r.rot[4] * ln[1] + r.rot[5] * ln[2],
+							r.rot[6] * ln[0] + r.rot[7] * ln[1] + r.rot[8] * ln[2] );
+						n.normalize();
+						wn[v] = n;
+					}
+					aoAcc.assign( d.count, 0.0 );
+					skyAcc.assign( d.count, 0.0 );
+					wAcc.assign( d.count, 0.0 );
+					auto probeSample = [&]( const Vector3 & p, const Vector3 & n, float ao, float sk, bool buried ) {
+						if ( !( probe[3] > 0 ) || std::fabs( p[0] * dim - probe[0] ) >= probe[3]
+							|| std::fabs( p[1] * dim - probe[1] ) >= probe[3] || std::fabs( p[2] * dim - probe[2] ) >= probe[3] )
+							return;
+						static const float pd[8][3] = {
+							{ 0.7f, 0.0f, 0.7f }, { -0.7f, 0.0f, 0.7f }, { 0.0f, 0.7f, 0.7f }, { 0.0f, -0.7f, 0.7f },
+							{ 0.5f, 0.5f, 0.7f }, { -0.5f, 0.5f, 0.7f }, { 0.5f, -0.5f, 0.7f }, { -0.5f, -0.5f, 0.7f } };
+						QString line = QString( "AOPROBE chunk %1,%2,%3 slot %4 inst %5 %6 p %7,%8,%9 n %10,%11,%12 ao %13 sky %14%15:" )
+							.arg( cx ).arg( cy ).arg( dim ).arg( slot ).arg( i ).arg( r.baseName )
+							.arg( p[0] * dim, 0, 'f', 0 ).arg( p[1] * dim, 0, 'f', 0 ).arg( p[2] * dim, 0, 'f', 0 )
+							.arg( n[0], 0, 'f', 2 ).arg( n[1], 0, 'f', 2 ).arg( n[2], 0, 'f', 2 )
+							.arg( ao, 0, 'f', 3 ).arg( sk, 0, 'f', 3 ).arg( buried ? " BURIED" : "" );
+						const Vector3 o = p + n * 2.0f;
+						for ( const auto & dv : pd ) {
+							Vector3 dd( dv[0], dv[1], dv[2] );
+							dd = dd + n * 0.6f;
+							dd.normalize();
+							if ( Vector3::dotproduct( dd, n ) < 0.05f ) {
+								line += " skip";
+								continue;
+							}
+							LodgenAoScene::FaceHit h;
+							if ( !scene.rayHitFace( o, dd, maxT, &h ) )
+								line += " open";
+							else if ( h.tri < 0 )
+								line += QString( " TERRAIN@%1" ).arg( h.t * dim, 0, 'f', 0 );
+							else {
+								const quint32 own = h.tri < int( triOwner.size() ) ? triOwner[size_t( h.tri )] : 0xFFFFFFFFu;
+								line += QString( " TRI@%1(inst %2 %3 %4)" ).arg( h.t * dim, 0, 'f', 0 ).arg( own )
+									.arg( own < set.instances.size() ? set.instances[own].baseName.section( QChar( 92 ), -1 ) : QString( "?" ) )
+									.arg( h.back ? "back" : "front" );
+							}
+						}
+						QMutexLocker pk( &probeLock );
+						fprintf( stderr, "%s%c", line.toUtf8().constData(), 10 );
+					};
+					if ( faceStep > 0.0f ) {
+						for ( size_t t = 0; t + 2 < d.tris.size(); t += 3 ) {
+							const quint32 ia = d.tris[t], ib = d.tris[t + 1], ic = d.tris[t + 2];
+							const Vector3 & pa = wp[ia], & pb = wp[ib], & pc = wp[ic];
+							Vector3 fn = Vector3::crossproduct( pb - pa, pc - pa );
+							const float twice = fn.length();
+							if ( !( twice > 1e-12f ) )
+								continue;
+							fn = fn / twice;
+							const float edge = std::max( { ( pb - pa ).length(), ( pc - pb ).length(), ( pa - pc ).length() } ) * float( dim );
+							const int k = qBound( 1, int( std::ceil( edge / faceStep ) ), faceMax );
+							const std::vector<float> & pat = samplePattern[size_t( k )];
+							const double w = 0.5 * double( twice ) / double( k * k );
+							for ( size_t sI = 0; sI + 2 < pat.size(); sI += 3 ) {
+								const float wa = pat[sI], wb = pat[sI + 1], wc = pat[sI + 2];
+								const Vector3 p = pa * wa + pb * wb + pc * wc;
+								Vector3 n = wn[ia] * wa + wn[ib] * wb + wn[ic] * wc;
+								if ( n.length() < 1e-4f )
+									n = fn;
+								n.normalize();
+								bool buried = false;
+								const float ao = scene.ambientOcclusionFace( p, n, maxT, &buried );
+								const float sk = wantSky ? scene.skyVisibilityFace( p, n, skyT, float( dim ), hist ) : 0.0f;
+								aSamples++;
+								if ( buried )
+									aBuried++;
+								probeSample( p, n, ao, sk, buried );
+								const quint32 vs[3] = { ia, ib, ic };
+								const float ws[3] = { wa, wb, wc };
+								for ( int c = 0; c < 3; c++ ) {
+									aoAcc[vs[c]] += w * ws[c] * ao;
+									skyAcc[vs[c]] += w * ws[c] * sk;
+									wAcc[vs[c]] += w * ws[c];
+								}
+							}
+						}
+					}
 					r.vertexAo.resize( d.count );
 					if ( wantSky )
 						r.vertexSky.resize( d.count );
 					for ( quint32 v = 0; v < d.count; v++ ) {
-						const float * ln = &d.nrm[size_t( v ) * 3];
-						Vector3 wn( r.rot[0] * ln[0] + r.rot[1] * ln[1] + r.rot[2] * ln[2],
-							r.rot[3] * ln[0] + r.rot[4] * ln[1] + r.rot[5] * ln[2],
-							r.rot[6] * ln[0] + r.rot[7] * ln[1] + r.rot[8] * ln[2] );
-						wn.normalize();
-						const float ao = scene.ambientOcclusion( wp[v], wn, maxT );
-						r.vertexAo[v] = quint8( std::lround( std::min( 1.0f, std::max( 0.0f, ao ) ) * 255.0f ) );
-						if ( wantSky ) {
-							/* v7 (bungo: "We need per vertex sky visbility too").
-							 * The SAME caster, the SAME scene, the SAME reach in
-							 * the SAME miniature units as the AO byte beside it --
-							 * `skyVisibility` is normal-independent by design, so
-							 * the normal above is not passed to it. */
-							const float sk = scene.skyVisibility( wp[v], maxT );
-							r.vertexSky[v] = quint8( std::lround( std::min( 1.0f, std::max( 0.0f, sk ) ) * 255.0f ) );
+						float ao, sk = 0.0f;
+						if ( wAcc[v] > 0.0 ) {
+							ao = float( aoAcc[v] / wAcc[v] );
+							sk = float( skyAcc[v] / wAcc[v] );
+						} else {
+							// on no triangle (or WW_AO_FACE_STEP=0): cast where it stands
+							bool buried = false;
+							ao = scene.ambientOcclusionFace( wp[v], wn[v], maxT, &buried );
+							if ( wantSky )
+								sk = scene.skyVisibilityFace( wp[v], wn[v], skyT, float( dim ), hist );
+							aAtVertex++;
+							if ( buried )
+								aBuried++;
+							probeSample( wp[v], wn[v], ao, sk, buried );
 						}
+						r.vertexAo[v] = quint8( std::lround( std::min( 1.0f, std::max( 0.0f, ao ) ) * 255.0f ) );
+						if ( wantSky )
+							r.vertexSky[v] = quint8( std::lround( std::min( 1.0f, std::max( 0.0f, sk ) ) * 255.0f ) );
 					}
-				}, false );
+				}
 			}
+			for ( int b = 0; b < 8; b++ )
+				aSkyHist[size_t( b )] += hist[b];
 		} );
+		vaoCastSeconds = double( castClock.elapsed() ) / 1000.0;
+		vaoSamples = aSamples;
+		vaoBuried = aBuried;
+		vaoAtVertex = aAtVertex;
+		vaoRingLeftOut = aRingLeftOut;
+		vaoScenes = aScenes;
+		for ( int b = 0; b < 8; b++ )
+			vskyHist[size_t( b )] = aSkyHist[size_t( b )];
 		vaoChunks = int( chunkKeys.size() );
 		for ( int x : chunkNoLand )
 			vaoNoLand += x;
@@ -3415,15 +3603,27 @@ bool lodgenNativeWrite( QString * report, QString * error )
 			.arg( s.vertexAo && s.placementAo ? QString( "ON: %1 instances streamed (%2 bytes, mean %3, %4 below 128), %5 empty, %6 chunk(s) cast, %7 without land" )
 				.arg( vaoInstances ).arg( vaoBytes ).arg( vaoBytes ? vaoSum / double( vaoBytes ) : 0.0, 0, 'f', 1 ).arg( vaoDark )
 				.arg( vaoEmpty ).arg( vaoChunks ).arg( vaoNoLand )
+				+ QString( "; face cast (lane AO2): %1 ring scene(s), %2 placement(s) left out of a ring they have no mesh in, "
+					"%3 sample(s) across the faces (k x k a triangle, k = longest edge / %4 u, 1..%5), %6 vertex(es) on no triangle cast where they stand, "
+					"%7 buried (every ray met a back face), cast %8 s" )
+					.arg( vaoScenes ).arg( vaoRingLeftOut ).arg( vaoSamples )
+					.arg( double( vaoFaceStep ), 0, 'f', 0 ).arg( vaoFaceMax ).arg( vaoAtVertex ).arg( vaoBuried )
+					.arg( vaoCastSeconds, 0, 'f', 1 )
 				: QStringLiteral( "OFF (--native-no-vertex-ao)" ) );
 		/* v7 (2026-09-18, lane LODIV7). Both halves state their OFF value by
 		 * the switch that turns them off, so a reader of the census never has
 		 * to guess whether a zero means "measured none" or "never ran". */
 		ladderLine += QString( "; vertex sky %1" )
 			.arg( s.lodiV7 && s.vertexAo && s.placementAo
-				? QString( "ON: %1 placements streamed (%2 bytes, mean %3, %4 at or above 128)" )
+				? QString( "ON: %1 placements streamed (%2 bytes, mean %3, %4 at or above 128); horizon-aware, %5 rays "
+					"(%6 rings x %7 azimuths, irradiance-weighted), reach %8 u; blocked rays by nearest hit (world u) "
+					"<250 %9, <500 %10, <1000 %11, <2000 %12, <4000 %13, <8000 %14, <16000 %15, beyond %16" )
 					.arg( vskyInstances ).arg( vskyBytes )
 					.arg( vskyBytes ? vskySum / double( vskyBytes ) : 0.0, 0, 'f', 1 ).arg( vskyOpen )
+					.arg( LodgenAoScene::SKY_RINGS * LodgenAoScene::RING_AZ ).arg( LodgenAoScene::SKY_RINGS ).arg( LodgenAoScene::RING_AZ )
+					.arg( double( vskyReach ), 0, 'f', 0 )
+					.arg( vskyHist[0] ).arg( vskyHist[1] ).arg( vskyHist[2] ).arg( vskyHist[3] )
+					.arg( vskyHist[4] ).arg( vskyHist[5] ).arg( vskyHist[6] ).arg( vskyHist[7] )
 				: QStringLiteral( "OFF (--lodi-v6)" ) );
 		ladderLine += QString( "; groups %1" )
 			.arg( s.lodiV7
