@@ -524,6 +524,11 @@ struct LodoSrcShape
 	bool vertexAlpha = false;
 	std::vector<quint32> tris;  //!< 3 per triangle
 	quint16 materialId = 0;
+	/*! Lane AO2 (overlay casters), in memory only, never written: the alpha of
+	 *  a see-through material (alpha-blended, or a decal that tests), so the
+	 *  `selfAO` cast lets rays through its transparent texels (src/lodgenao.h).
+	 *  Null = solid. The pointee outlives the bake (a process-wide cache). */
+	const struct LodgenAoAlpha * aoAlpha = nullptr;
 };
 
 /*! What one `lodoAppendMesh` call measured about the mesh it just wrote. Every

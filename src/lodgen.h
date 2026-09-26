@@ -791,6 +791,10 @@ QString lodgenStageTimeLine( qint64 msLandscape, qint64 msMeshes, qint64 msTextu
 	const QString & librarySplit = QString() );
 struct NativeSrcShape;
 bool lodgenNativeLoadModel( void * user, const QString & model, std::vector<NativeSrcShape> * out );
+/*! Lane AO2 (overlay casters): the level-0 alpha of a diffuse texture as the AO
+ *  caster tests it (alpha >= ref blocks a ray), from a process-wide cache that
+ *  lives until exit. Null when the texture does not load. Thread-safe. */
+const struct LodgenAoAlpha * lodgenAoAlphaMap( const QString & dataRoot, const QString & texPath, quint8 ref );
 
 /*! MATERIAL SWAPS (lane SWAP1, 2026-09-25). One MSWP substitution as the
  *  loader applies it: `first` is the ORIGINAL material and `second` the

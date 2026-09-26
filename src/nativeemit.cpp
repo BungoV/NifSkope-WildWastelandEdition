@@ -1577,6 +1577,17 @@ bool lodgenNativeWrite( QString * report, QString * error )
 	 * materials have no palette path) and the census names as a defect;
 	 * `swapCnamNoPalette` the rows the game ignores. */
 	int swapCnamApplied = 0, swapCnamNoPalette = 0, swapCnamUnset = 0;
+	/* Lane AO2 (overlay casters): per WRITTEN material row, how its shapes
+	 * treat what is behind them. 0 = solid, 1 = OVERLAY (every shape on the
+	 * row blends, or is a decal that tests: a stain sheet, a skybridge's glass;
+	 * its texture alpha decides where it blocks a ray), 2 = alpha-TESTED only
+	 * (fences, cards: they cast as solid, as before). Built from the shapes' own
+	 * material facts -- the NIF alpha property and the BGSM/BGEM switches --
+	 * never from a name. In memory only: the .lodo does not carry it, so a
+	 * vertex-AO bake does not reuse a previous library (the reuse test below). */
+	std::vector<quint8> matCaster;
+	std::vector<const LodgenAoAlpha *> matAlpha;    //!< per row: the see-through row's alpha, else null
+	int matOverlayRows = 0, matOverlayMixed = 0, matTestOnlyRows = 0, matOverlayModels = 0, matOverlayNoTex = 0;
 	QHash<QString, QSet<QString>> modelSwapKeys;     // plain model key -> its shapes' folded material keys
 	int modelsLoaded = 0, modelsFailed = 0;
 	int basesWritten = 0, basesWithoutMesh = 0;
@@ -1593,6 +1604,8 @@ bool lodgenNativeWrite( QString * report, QString * error )
 			libraryWhy = QStringLiteral( "not offered: this is not an incremental bake" );
 		else if ( s.occluders )
 			libraryWhy = QStringLiteral( "occluders are on and the per-model box is in neither file" );
+		else if ( s.vertexAo && s.placementAo && s.world && qEnvironmentVariable( "WW_AO_OVERLAY_CASTERS" ) != QStringLiteral( "1" ) )
+			libraryWhy = QStringLiteral( "vertex AO is on and which materials are see-through (blend, or a decal that tests) is in neither file" );
 		else if ( offer.loadOrderHex != hex16( world.loadOrderHash() ) )
 			libraryWhy = QStringLiteral( "the load order moved" );
 		else if ( offer.pluginCorpusHex != hex16( world.vhgtCorpusHash() ) )
@@ -2113,6 +2126,70 @@ bool lodgenNativeWrite( QString * report, QString * error )
 				if ( it.value().loaded )
 					ladderModels.push_back( &it.value() );
 
+			/* Lane AO2 (overlay casters): which rows are SEE-THROUGH, serially,
+			 * before the fan-out. A shape is see-through when its material blends
+			 * (NIF alpha property bit 0, or the BGSM/BGEM switch) or is a decal that
+			 * tests; its diffuse alpha then decides, texel by texel, where it blocks
+			 * a ray (src/lodgenao.h, LodgenAoAlpha). One row can gather shapes of
+			 * several models (the key has no blend bit), so a row is see-through only
+			 * when EVERY shape on it is; a row with both kinds stays solid and is
+			 * counted. A row whose texture does not load stays solid and is counted. */
+			const bool overlayCastLib = qEnvironmentVariable( "WW_AO_OVERLAY_CASTERS" ) == QStringLiteral( "1" );
+			{
+				std::vector<quint8> anyOver( lib.materials.size(), 0 ), anySolid( lib.materials.size(), 0 ), anyTest( lib.materials.size(), 0 );
+				std::vector<const NativeSrcShape *> first( lib.materials.size(), nullptr );
+				for ( const Model * pm : ladderModels )
+					for ( const NativeSrcShape & sh : pm->shapes ) {
+						const quint16 mid = materialId.value( materialKey( sh ), 0xFFFF );
+						if ( mid >= lib.materials.size() )
+							continue;
+						const NearShapeFacts & f = sh.nearFacts;
+						if ( f.alphaBlend || ( f.decal && f.alphaTest ) ) {
+							anyOver[mid] = 1;
+							if ( !first[mid] )
+								first[mid] = &sh;
+						} else {
+							anySolid[mid] = 1;
+						}
+						if ( f.alphaTest )
+							anyTest[mid] = 1;
+					}
+				const QString * dataRoot = s.loader == lodgenNativeLoadModel ? static_cast<const QString *>( s.user ) : nullptr;
+				matCaster.assign( lib.materials.size(), 0 );
+				matAlpha.assign( lib.materials.size(), nullptr );
+				for ( size_t i = 0; i < lib.materials.size(); i++ ) {
+					if ( anyOver[i] && !anySolid[i] ) {
+						const NativeSrcShape & sh = *first[i];
+						const QString tex = sh.tex0.isEmpty() ? sh.effectTex0 : sh.tex0;
+						const quint8 ref = sh.nearFacts.alphaTest ? sh.nearFacts.alphaRef : quint8( 128 );
+						matAlpha[i] = ( dataRoot && !overlayCastLib ) ? lodgenAoAlphaMap( *dataRoot, tex, ref ) : nullptr;
+						if ( matAlpha[i] ) {
+							matCaster[i] = 1;
+							matOverlayRows++;
+							continue;
+						}
+						if ( !overlayCastLib )
+							matOverlayNoTex++;
+					} else if ( anyOver[i] ) {
+						matOverlayMixed++;
+					}
+					if ( anyTest[i] ) {
+						matCaster[i] = 2;
+						matTestOnlyRows++;
+					}
+				}
+				// the models whose own selfAO the rule reaches: see-through AND solid shapes in one model
+				for ( const Model * pm : ladderModels ) {
+					bool o = false, so = false;
+					for ( const NativeSrcShape & sh : pm->shapes ) {
+						const quint16 mid = materialId.value( materialKey( sh ), 0xFFFF );
+						( mid < matCaster.size() && matCaster[mid] == 1 ? o : so ) = true;
+					}
+					if ( o && so )
+						matOverlayModels++;
+				}
+			}
+
 			struct LadderJob
 			{
 				LodoLibrary staged;
@@ -2134,6 +2211,8 @@ bool lodgenNativeWrite( QString * report, QString * error )
 					src.reserve( m.shapes.size() );
 					for ( NativeSrcShape & sh : m.shapes ) {
 						sh.geom.materialId = materialId.value( materialKey( sh ) );
+						// lane AO2: a see-through row blocks the model's own selfAO rays only where it is opaque
+						sh.geom.aoAlpha = sh.geom.materialId < matAlpha.size() ? matAlpha[sh.geom.materialId] : nullptr;
 						src.push_back( sh.geom );
 					}
 					j.ok = lodoStageMesh( j.staged, proto, src, m.path, &j.err, &j.ms );
@@ -2607,10 +2686,10 @@ bool lodgenNativeWrite( QString * report, QString * error )
 	// lane AO2: the face cast's census
 	bool vaoWeldAcross = false;
 	float vaoFaceStep = 0.0f, vskyReach = 0.0f, vaoWeldDeg = -1.0f, vaoUnderTol = -1.0f, vaoPatchDeg = -1.0f;
-	bool vaoPatchSamples = false;
+	bool vaoPatchSamples = false, vaoOverlayCast = false;
 	int vaoFaceMax = 0, vaoScenes = 0;
 	double vaoCastSeconds = 0.0;
-	quint64 vaoSamples = 0, vaoBuried = 0, vaoAtVertex = 0, vaoRingLeftOut = 0, vaoWelded = 0, vaoAcross = 0, vaoTJoin = 0, vaoUnder = 0, vaoPatches = 0, vaoPatchTris = 0, vaoPatchSampleFit = 0;
+	quint64 vaoSamples = 0, vaoBuried = 0, vaoAtVertex = 0, vaoRingLeftOut = 0, vaoWelded = 0, vaoAcross = 0, vaoTJoin = 0, vaoOverTris = 0, vaoOverInst = 0, vaoTestTris = 0, vaoTestInst = 0, vaoUnder = 0, vaoPatches = 0, vaoPatchTris = 0, vaoPatchSampleFit = 0;
 	std::array<quint64, 8> vskyHist{};
 	if ( s.vertexAo && s.placementAo && s.world ) {
 		set.vertexAo = true;
@@ -2622,6 +2701,9 @@ bool lodgenNativeWrite( QString * report, QString * error )
 			bool contiguous = true;
 			std::vector<float> pos, nrm;      // 3 a vertex, mesh space at scale 1
 			std::vector<quint32> tris;        // level-0 triangles, indices into the range
+			std::vector<quint8> cast;         // per triangle: its row's matCaster (0 solid, 1 see-through, 2 alpha-tested)
+			std::vector<const LodgenAoAlpha *> alpha;   // per triangle: the see-through row's alpha, else null
+			std::vector<float> uv;            // 2 a vertex, filled only for a mesh with a see-through triangle
 		};
 		std::vector<DecodedMesh> dm( lib.meshes.size() );
 		for ( size_t m = 0; m < lib.meshes.size(); m++ ) {
@@ -2663,7 +2745,15 @@ bool lodgenNativeWrite( QString * report, QString * error )
 					d.tris.push_back( cl.vertexBase + a - lo );
 					d.tris.push_back( cl.vertexBase + b - lo );
 					d.tris.push_back( cl.vertexBase + cc - lo );
+					d.cast.push_back( cl.materialId < matCaster.size() ? matCaster[cl.materialId] : quint8( 0 ) );
+					d.alpha.push_back( cl.materialId < matAlpha.size() ? matAlpha[cl.materialId] : nullptr );
 				}
+			}
+			if ( std::any_of( d.alpha.begin(), d.alpha.end(), []( const LodgenAoAlpha * a ) { return a != nullptr; } ) ) {
+				d.uv.resize( size_t( d.count ) * 2 );
+				for ( quint32 v = 0; v < d.count; v++ )
+					for ( int k = 0; k < 2; k++ )
+						d.uv[size_t( v ) * 2 + k] = lodoDequantU16( lib.vertices[lo + v].uv[k], mesh.uvMin[k], mesh.uvExtent[k] );
 			}
 		}
 		// which mesh each instance draws, and which chunk lit it
@@ -2747,6 +2837,8 @@ bool lodgenNativeWrite( QString * report, QString * error )
 		vaoWeldDeg = weldDeg;
 		const bool weldAcross = qEnvironmentVariable( "WW_AO_WELD_ACROSS" ) != QStringLiteral( "0" );
 		vaoWeldAcross = weldAcross;
+		const bool overlayCast = qEnvironmentVariable( "WW_AO_OVERLAY_CASTERS" ) == QStringLiteral( "1" );
+		vaoOverlayCast = overlayCast;
 		/* A sample more than underTol world u below the chunk's ground (the ESM
 		 * heightfield the rays march) is on a part of the mesh the terrain hides:
 		 * a foundation or the buried foot of a wall. All its rays meet the ground
@@ -2780,7 +2872,7 @@ bool lodgenNativeWrite( QString * report, QString * error )
 					probe[k] = pl[k].toFloat();
 		}
 		QMutex probeLock;
-		std::atomic<quint64> aAcross{ 0 }, aTJoin{ 0 }, aSamples{ 0 }, aBuried{ 0 }, aAtVertex{ 0 }, aRingLeftOut{ 0 }, aWelded{ 0 }, aUnder{ 0 }, aPatches{ 0 }, aPatchTris{ 0 }, aPatchSampleFit{ 0 };
+		std::atomic<quint64> aAcross{ 0 }, aTJoin{ 0 }, aOverTris{ 0 }, aOverInst{ 0 }, aTestTris{ 0 }, aTestInst{ 0 }, aSamples{ 0 }, aBuried{ 0 }, aAtVertex{ 0 }, aRingLeftOut{ 0 }, aWelded{ 0 }, aUnder{ 0 }, aPatches{ 0 }, aPatchTris{ 0 }, aPatchSampleFit{ 0 };
 		std::atomic<int> aScenes{ 0 };
 		std::array<std::atomic<quint64>, 8> aSkyHist;
 		for ( auto & h : aSkyHist )
@@ -2872,10 +2964,35 @@ bool lodgenNativeWrite( QString * report, QString * error )
 					}
 					const DecodedMesh & d = dm[mid];
 					placed( r, d, wp );
+					/* Lane AO2 (overlay casters): a triangle on a SEE-THROUGH row (it blends,
+					 * or is a decal that tests: the stain sheet 5 u in front of a wall) blocks
+					 * a ray only where its texture is opaque at the hit. It is still a receiver
+					 * below. Alpha-TESTED rows cast as solid, as before, and are counted.
+					 * WW_AO_OVERLAY_CASTERS=1 casts every row as solid (the refuter). */
+					quint64 over = 0, tested = 0;
 					if ( probe[3] > 0 )
 						triOwner.resize( scene.tri.size() / 9 + d.tris.size() / 3, quint32( i ) );
-					for ( size_t t = 0; t + 2 < d.tris.size(); t += 3 )
+					for ( size_t t = 0; t + 2 < d.tris.size(); t += 3 ) {
+						const size_t k = t / 3;
+						const LodgenAoAlpha * al = k < d.alpha.size() && !d.uv.empty() ? d.alpha[k] : nullptr;
+						if ( al ) {
+							over++;
+							scene.addTriangleAlpha( wp[d.tris[t]], wp[d.tris[t + 1]], wp[d.tris[t + 2]], &d.uv[size_t( d.tris[t] ) * 2],
+								&d.uv[size_t( d.tris[t + 1] ) * 2], &d.uv[size_t( d.tris[t + 2] ) * 2], al );
+							continue;
+						}
+						if ( k < d.cast.size() && d.cast[k] == 2 )
+							tested++;
 						scene.addTriangle( wp[d.tris[t]], wp[d.tris[t + 1]], wp[d.tris[t + 2]] );
+					}
+					if ( over ) {
+						aOverTris += over;
+						aOverInst++;
+					}
+					if ( tested ) {
+						aTestTris += tested;
+						aTestInst++;
+					}
 				}
 				const bool wantSky = set.vertexSky;
 				std::vector<Vector3> wn;
@@ -3493,6 +3610,10 @@ bool lodgenNativeWrite( QString * report, QString * error )
 		vaoWelded = aWelded;
 		vaoAcross = aAcross;
 		vaoTJoin = aTJoin;
+		vaoOverTris = aOverTris;
+		vaoOverInst = aOverInst;
+		vaoTestTris = aTestTris;
+		vaoTestInst = aTestInst;
 		vaoUnder = aUnder;
 		vaoPatches = aPatches;
 		vaoPatchTris = aPatchTris;
@@ -4143,7 +4264,14 @@ bool lodgenNativeWrite( QString * report, QString * error )
 							.arg( vaoPatches ).arg( vaoPatchTris ).arg( double( vaoPatchDeg ), 0, 'f', 1 )
 							+ ( vaoPatchSamples ? QString( ", %1 fitted to their samples, the rest to their corners" ).arg( vaoPatchSampleFit )
 								: QStringLiteral( ", fitted to their corners" ) )
-						: QStringLiteral( "; flat patches NOT fitted (WW_AO_PATCH_DEG < 0)" ) ) )
+						: QStringLiteral( "; flat patches NOT fitted (WW_AO_PATCH_DEG < 0)" ) )
+						+ QString( "; casters: %1 see-through material row(s) (alpha-blended, or a decal that tests; %2 mixed row(s) kept solid; %7 model(s) mix see-through and solid shapes in their own selfAO), %3 alpha-tested row(s)%4, "
+							"%5 alpha-tested triangle(s) of %6 placement-ring(s) cast" )
+							.arg( matOverlayRows ).arg( matOverlayMixed ).arg( matTestOnlyRows )
+							.arg( vaoOverlayCast ? QStringLiteral( "; every row cast as solid (WW_AO_OVERLAY_CASTERS=1)" )
+								: QString( "; %1 see-through triangle(s) of %2 placement-ring(s) block rays only where their texture is opaque"
+									" (%3 see-through row(s) without a loadable texture kept solid)" ).arg( vaoOverTris ).arg( vaoOverInst ).arg( matOverlayNoTex ) )
+							.arg( vaoTestTris ).arg( vaoTestInst ).arg( matOverlayModels ) )
 				: QStringLiteral( "OFF (--native-no-vertex-ao)" ) );
 		/* v7 (2026-09-18, lane LODIV7). Both halves state their OFF value by
 		 * the switch that turns them off, so a reader of the census never has
