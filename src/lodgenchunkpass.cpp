@@ -999,7 +999,12 @@ LodgenIncrementalVerdict lodgenIncrementalBegin( LodgenIncrementalRun & run, con
 		 * decides whether the neighbours are dragged in with it. */
 		bool lostAny = false, lostReal = false;
 		for ( int k = 0; k < e.outFiles.size(); k++ ) {
-			const QString fp = run.prevRecordDir + "/" + e.outFiles[k];
+			/* An out row is relative to the record folder -- unless the out-dir sits
+			 * on another drive, where QDir::relativeFilePath can only give the
+			 * absolute path back (lane INCR2: a Commonwealth out-dir on E: with the
+			 * mod tree on C: made all 3060 chunks "output lost" on every run). */
+			const QString fp = QDir::isAbsolutePath( e.outFiles[k] )
+				? e.outFiles[k] : run.prevRecordDir + "/" + e.outFiles[k];
 			if ( lodgenFileDigest( fp ) == e.outDigests[k] )
 				continue;
 			const bool isCache = e.outFiles[k].endsWith( QLatin1String( ".lodj" ) );
