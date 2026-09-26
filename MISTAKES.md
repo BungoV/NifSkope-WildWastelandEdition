@@ -1529,3 +1529,11 @@ script -- not its output -- go red.
   harness is run** -- `re.findall` the `<<'PYEOF'` blocks and `compile()` each,
   which is two seconds against ten minutes, and would have caught it the first
   time.
+
+## 2026-09-26 16:33 -- told him "AO off draws none of our AO" from the render log, not from the code
+He asked why a bridge still looked AO-darkened in the AO-off Boston render. I answered from the log line
+(no AO stream loaded) that AO off draws no AO and blamed Bethesda's vertex colours or texture. A probe
+measured it: lodinative.cpp's fallback branch still multiplies the library self-AO into every mesh that
+carries a .lodo v5 colour stream (bridge deck self-AO 38/255; colour stream white; texture flat). Rule: a
+claim about what a view draws is read from the code path that writes the vertex colour, not from what the
+log says was loaded. Fix handed to lane AO2 with a gate that fails on the current code.
