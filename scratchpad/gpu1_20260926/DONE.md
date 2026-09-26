@@ -90,9 +90,10 @@ image mask every pass of every frame; the work it does is small.
   true weighted error of the bytes it wrote.
 - Deterministic: no atomics, no cross-thread reductions; every block is a pure function of its 16 pixels; the
   host builds the pass lists in block order.
-- Refused at start-up unless a self-check passes: a fixed 128x64 image is encoded by both, every GPU block is
-  decoded with the vendored detex decoder and must decode to its reported error, and the GPU total must be <=
-  the CPU total. Measured on this card: GPU 26082378 <= CPU 26090366.
+- Refused at start-up unless a self-check passes: a fixed 128x64 image is encoded by both under two weightings
+  (equal, and the card weights; 1024 blocks), every GPU block is decoded with the vendored detex decoder and
+  must decode to its reported error, and the GPU total must be <= the CPU total for each weighting. Measured
+  on this card: GPU 26082378 <= CPU 26090366. Costs ~0.5 s once per process.
 - Fallback: context creation failure, self-check failure or a failed job turn the GPU path off with a log
   line (`gpu: CPU path -- <why>`); a failed job falls back to the CPU loop for that image and the rest of the run.
 - The switch: Settings > NIF > LOD bake > Use GPU (on by default). The headless `-no-gui lodgen` reads the same
