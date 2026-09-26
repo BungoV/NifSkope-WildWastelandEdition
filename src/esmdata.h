@@ -332,6 +332,11 @@ public:
 	//! Exactly the string load() was given: one plugin path, or a comma-separated list in load order.
 	QString pluginList() const { return srcPath; }
 
+	/*! Lane FLAT1: the base file name of the plugin that holds the WINNING
+	 *  version of a record (ESMFile's srcFile, an index into pluginList()).
+	 *  Empty when the form is not in the load order. */
+	QString recordPlugin( quint32 formID ) const;
+
 	/*! FNV-1a 64 over the LOAD ORDER, in the order load() was given: for each
 	 *  plugin, its lower-cased BASE FILE NAME's UTF-8 bytes, then its byte
 	 *  size as a little-endian u64. Nothing else -- not the path, not the

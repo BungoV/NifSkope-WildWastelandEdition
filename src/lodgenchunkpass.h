@@ -266,8 +266,10 @@ QString lodgenSwitchDigestOf( const QStringList & argv );
  *  The REVISION is the manual half: bump it when a change moves output bytes
  *  with no setting moving (a new rule, a bug fix in a writer). The dump cannot
  *  see a constant that lives inside lodgen.cpp, and this number is how a lane
- *  says so. */
-constexpr int kLodgenGeneratorRevision = 1;
+ *  says so.
+ *  2: lane ROADS1 (2026-09-26) -- the road stamp applies the material swap and
+ *     paints has-LOD ground pieces (river road, park pavements). */
+constexpr int kLodgenGeneratorRevision = 2;
 
 /*! What the front end adds to the pass's own options: the whole-region steps,
  *  the far-ring cut, the pyramid and the native modules. Every field is set by
@@ -327,6 +329,14 @@ struct LodgenIncrementalRun
 	bool    regionProducts = false;
 	bool    nativeCache = true; //!< false = `--no-native-cache`: no `.lodj`, and `--native` refuses as before INCR1
 	std::function<void( const QString & )> warn;  //!< a cache failure, as it happens
+	/*! THE RAW CHUNK CACHE (lane INCR2, 2026-09-26). On: every chunk's `.BTO` and
+	 *  manifest are copied, as the chunk pass wrote them and BEFORE any
+	 *  post-pass touches them, into `<outDir>/lodgen_chunk_cache/`; an
+	 *  incremental run copies the clean ones back into the chunk folder so the
+	 *  region passes (texture arrays, merge, far rings, card arrays, card links)
+	 *  run over the WHOLE list, exactly as a full bake runs them. That is what
+	 *  lifts the RegionProducts refusal on the FO4CS target. Off: INCR1 as it was. */
+	bool    rawCache = false;
 	// ---- the ledger's ----
 	QString ledgerPath, prevRecordDir, lodjDir;
 	LodgenLedger prev;
@@ -335,6 +345,21 @@ struct LodgenIncrementalRun
 	QHash<QString, QStringList> producedFiles;
 	int     lodjWritten = 0, lodjReplayed = 0, lodjFailed = 0;
 	qint64  lodjPlacements = 0;
+	// ---- lane INCR2's ----
+	QString rawCacheDir;                //!< `<outDir>/lodgen_chunk_cache` when `rawCache`
+	int     movedInputs = 0;            //!< chunks whose input digest moved (Begin)
+	int     unknownChunks = 0;          //!< chunks the record never heard of (Begin)
+	int     rawCacheLost = 0;           //!< clean chunks rebaked because their raw cache was missing or stale
+	int     rawRestored = 0;            //!< clean chunks whose raw files were copied back this run
+	/*! region products that no longer hash as the record says (or cannot be
+	 *  vouched for: no product rows, a plugin or the load order moved); -1 =
+	 *  not checked. Set by lodgenIncrementalCheckProducts(). */
+	int     productsLost = -1;
+	bool    nullRun = false;            //!< nothing moved: no stage ran, the record is carried forward
+	//! each chunk key's input digest, computed once and shared by the diff, the record and the raw cache
+	mutable QHash<QString, QString> inputsMemo;
+	//! raw copies made this run, keyed like producedFiles: {bto sha1 or "-", manifest sha1 or "-"}
+	QHash<QString, QStringList> rawStored;
 };
 
 /*! THE DIFF. Sets `ledgerPath` and `allJobs`; with `fromDir` set it reads the
@@ -367,5 +392,32 @@ void lodgenIncrementalOfferReuse( const LodgenIncrementalRun & run );
 bool lodgenIncrementalWriteRecord( const LodgenIncrementalRun & run, const EsmWorld & world,
 	const QStringList & switchTokens, const QStringList & resourceStack,
 	QStringList * warnings, QString * readBack );
+
+/* ---- lane INCR2: whole-map incremental FO4CS bakes (2026-09-26) ---------- */
+
+/*! After Begin, on an incremental run: are the previous record's region
+ *  products still the files it names, and did the plugin list and the load
+ *  order stay put? Sets `run.productsLost` (0 = all intact) and appends up to
+ *  eight reasons. A record written before INCR2 lists no products and counts
+ *  as one lost. */
+void lodgenIncrementalCheckProducts( LodgenIncrementalRun & run, const EsmWorld & world,
+	QStringList * reasons );
+/*! Right after the chunk pass returns (every file flushed, no post-pass run
+ *  yet): copy each retired chunk's raw `.BTO` and manifest into the raw
+ *  cache. `retired` maps a chunk key to the `.BTO` path the pass wrote, or to
+ *  an empty string for a chunk that built no `.BTO`. False + `error` on a copy
+ *  failure. */
+bool lodgenIncrementalStoreRaw( LodgenIncrementalRun & run, const QString & worldEdid,
+	const QHash<QString, QString> & retired, QString * error );
+/*! The full job-order `.BTO` list for the post-passes: this run's own chunks
+ *  where they were rebaked, the raw cache copied back into `btoDir` for every
+ *  clean one. False + `error` when a cached file cannot be copied. */
+bool lodgenIncrementalRestoreRaw( LodgenIncrementalRun & run, const QString & worldEdid,
+	const QString & btoDir, const QHash<QString, QString> & retired, QStringList * writtenBto,
+	QString * error );
+//! After the record: the key files that make this run's raw copies valid for the next one.
+void lodgenIncrementalSealRaw( const LodgenIncrementalRun & run, const QString & worldEdid );
+//! a chunk's key as the record and the produced-file list spell it
+QString lodgenIncrementalChunkKey( const LodgenIncrementalRun & run, int dim, int cx, int cy );
 
 #endif // LODGENCHUNKPASS_H

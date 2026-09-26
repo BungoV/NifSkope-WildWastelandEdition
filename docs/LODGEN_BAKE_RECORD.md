@@ -150,8 +150,10 @@ chunk      <cx>  <cy>  <dim>  <sha1 of everything the chunk reads>
 out        <cx>  <cy>  <path relative to the RECORD'S folder>  <sha1 of the file>
 ```
 
-The rows are sorted by `(cy,cx)` — **never** by the order the pass retired them,
-which is the scheduler's and would make the record differ from itself.
+The rows are sorted by `(cy,cx,dim)` — **never** by the order the pass retired them,
+which is the scheduler's and would make the record differ from itself. (`dim` was
+added to the key by lane INCR2: a `--dim all` record has four chunks at many
+corners, and a sort on `(cy,cx)` alone left their order to `std::sort`.)
 
 `chunk.inputs` is `lodgenChunkInputDigest()`, unchanged by this lane: a SHA-1
 over the chunk's own cells **and the one-cell ring around them** —
@@ -183,6 +185,30 @@ reader in `src/nifcli.cpp` therefore keeps two dirty sets rather than one, and
 seeds the one-cell widening from the smaller: see §4.2 of the ledger page for
 the measurement that forced that, in which deleting a single cache file
 rebaked an entire region.
+
+#### 6a. Region products (lane INCR2, 2026-09-26)
+
+```
+product    <path relative to the RECORD'S folder>  <sha1 of the file>
+```
+
+Written after the chunk rows, sorted by path, FO4CS target only: every file
+under the record's folder that no `out` row claims — the `.lodo`/`.lodi`, the
+texture and card arrays, the VT levels, the `.lodl`. An older reader skips the
+line kind (the C++ reader ignores unknown kinds; `lodb_read.py` keeps them in
+`unknown` before INCR2 and in `products` since).
+
+An `--incremental` FO4CS run checks them before any stage runs. One product
+missing or edited, the load-order hash moved, or a plugin's name/size/bytes
+moved counts as a lost product: every chunk is then **replayed** (placements
+from its `.lodj`, raw geometry from the raw chunk cache) and every region pass
+runs over the whole list, as a full bake runs them. With no dirty chunk and no
+lost product the run is a **null run**: nothing is baked and only the record
+is rewritten.
+
+INCR2 also found that FO4CS manifest `out` rows named the out-dir rather than
+the folder the teardown moves them to, with an empty digest — a deleted
+manifest never made its chunk dirty. The rows now name the moved file.
 
 ### 7. The census
 

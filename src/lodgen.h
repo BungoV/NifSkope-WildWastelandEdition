@@ -1061,14 +1061,25 @@ struct LodgenCoverOptions
 	float roadGroundPaint = 0.0f;
 
 	/*! Put the RAISED road families back into the ground sheet. Off, the
-	 *  default, a road base that carries its own Distant LOD mesh is refused,
-	 *  and so is anything under `Landscape\Roads\HighwayOverpass\` or
-	 *  `...\Bridge\` -- see `lodgenIsRaisedRoadModel`. On is the way back to
-	 *  ROADS1, which painted them. */
+	 *  default, anything under `Landscape\Roads\HighwayOverpass\` or
+	 *  `...\Bridge\` is refused -- see `lodgenIsRaisedRoadModel`. (Until lane
+	 *  ROADS1 of 2026-09-26 a base carrying its own Distant LOD was refused too;
+	 *  outside those folders every such base is laid on the ground -- Storrow
+	 *  Drive's river pieces, the park pavements -- so it is painted now.) On is
+	 *  the way back to the first ROADS1, which painted everything. */
 	bool roadRaised = false;
 
-	/*! Paint `Landscape\Sidewalks\` with the roads. OFF is the default, and
-	 *  the number that decided it was measured on chunk (-8,8) downtown, which
+	/*! Paint `Landscape\Sidewalks\` with the roads. ON IS THE DEFAULT since
+	 *  lane ROADS1 (2026-09-26), by bungo's ruling: "I approve of the roads" and
+	 *  "if that is their in game texture, it is their texture on our terrain
+	 *  too". The pavement is painted with the diffuse it wears in game, its
+	 *  material swap applied, checked against an independent re-rasterisation
+	 *  of the in-game materials over the Boston box. Bethesda's darker sheet is
+	 *  NOT the target. `--no-road-sidewalks` is the off switch;
+	 *  `--road-sidewalks` is kept and does nothing.
+	 *
+	 *  The history -- why it was OFF from 2026-09-12 to 2026-09-26. The number
+	 *  that decided it then was measured on chunk (-8,8) downtown, which
 	 *  carries 17,801 projected sidewalk texels (the brief asked for at least
 	 *  5,000), 15,696 of them more than two texels from any flat road so the
 	 *  two families cannot be confused:
@@ -1083,9 +1094,28 @@ struct LodgenCoverOptions
 	 *    the same tile says the flat ROAD family is right: vanilla's clearance
 	 *    +0.100, ours +0.101, mean error 16.7 -- better than the tile's own.
 	 *
-	 *  So the roads stay and the pavements go. On is the way back, and
-	 *  `--roads-legacy` includes it. */
-	bool roadSidewalks = false;
+	 *  That compared us with Bethesda's own bake, which is not the look bungo
+	 *  asked for. `--roads-legacy` includes the pavements too. */
+	bool roadSidewalks = true;
+
+	/*! FLAT GROUND OBJECTS (lane FLAT1, 2026-09-26): a placed object that lies
+	 *  flat ON the ground -- a slab, a railway track, a path, a decal, a debris
+	 *  pile -- is painted into the far terrain's colour beside the roads, with
+	 *  its in-game diffuse. Which objects is MEASURED, never read off a path:
+	 *  the mesh under its placement, against the ground under it (LAND, raised
+	 *  to the stamped road surface), must lie low (top at most 64 units up),
+	 *  rest on the ground (underside within 16), have little side standing up
+	 *  (steep area rising more than 8 units / top area at most 0.35), not be
+	 *  buried (top at least -8) and not stand under water. The census that set
+	 *  those numbers is scratchpad/flat1_20260926/DONE.md.
+	 *
+	 *  ON by default; `--no-flat-objects` / the panel row is the off switch, and
+	 *  off is the roads-only bake's BYTES (no candidate is gathered). */
+	bool flatObjects = true;
+	/*! The override file: one line per model or folder, `bake` or `nobake`.
+	 *  Empty = `lodgenFlatObjectsDefaultFile()`. Read on every bake, never
+	 *  written by one (created, header only, when the default is missing). */
+	QString flatObjectsFile;
 
 	/*! THE FAR TERRAIN RECEIVES AMBIENT OCCLUSION FROM THE PLACED OBJECTS
 	 *  (lane GROUND1, bungo 2026-09-11 15:4x: "Okay, so the AO can be acurate
@@ -1264,6 +1294,15 @@ bool lodgenIsRaisedRoadModel( const QString & modelPath );
  *  off is written out there. */
 bool lodgenIsSidewalkModel( const QString & modelPath );
 
+/*! Lane FLAT1: where the flat-object override file lives when no flag names
+ *  one -- `lodgen_flat_objects.txt` beside the NifSkope executable. */
+QString lodgenFlatObjectsDefaultFile();
+
+/*! Lane FLAT1: the override file's effective rules as one digest line (the
+ *  settings digest reads it, so editing the file rebakes). Creates the DEFAULT
+ *  file, header only, when it is missing; never writes any other path. */
+QString lodgenFlatObjectsRulesDigest( const QString & file );
+
 //! What one bake's road pass did, for the census line. Every field is written
 //! unconditionally and moves with the thing it measures (the three rules of
 //! 2026-09-04 21:33): a region with no roads reads zeros across the row.
@@ -1279,13 +1318,23 @@ struct LodgenRoadCensus
 	int alphaRejected = 0;      //!< texels an alpha-tested shape refused
 	int refusedNoLoad = 0;      //!< road models that would not load
 	int refusedNoTexture = 0;   //!< road shapes whose diffuse would not resolve
-	int refusedRaised = 0;      //!< road placements refused as raised (lodgenIsRaisedRoadModel or hasLod)
+	int refusedRaised = 0;      //!< road placements refused as raised (lodgenIsRaisedRoadModel; hasLod no longer refuses, ROADS1)
 	int raisedBases = 0;        //!< distinct raised bases behind those refusals
 	int blendTexels = 0;        //!< texels a partially transparent road shape composited into
 	int refusedSidewalk = 0;    //!< placements refused as `Landscape\Sidewalks\` (roadSidewalks off)
 	int sidewalkBases = 0;      //!< distinct sidewalk bases behind those refusals
 	int groundShapes = 0;       //!< road shapes whose material is under materials/Landscape/Ground/
 	int groundTexels = 0;       //!< texels such a shape wrote (0 when roadGroundPaint is 0)
+	int swappedPlacements = 0;  //!< stamped placements drawn with a material swap (XMSP / MODS), ROADS1
+	/* Lane FLAT1: the flat ground objects (LodgenCoverOptions::flatObjects). */
+	int flatExamined = 0;       //!< non-road STAT placements the flat rule measured
+	int flatPainted = 0;        //!< of those, painted (the rule or a `bake` line)
+	int flatOverridden = 0;     //!< placements an override line decided
+	int flatHasLod = 0;         //!< painted placements whose base carries its own distant LOD
+	int flatShapes = 0;         //!< flat shapes offered to the scan converter
+	int flatTexels = 0;         //!< texels a flat object wrote last (tile content only)
+	int flatDecalTexels = 0;    //!< of those, by a decal / blended / alpha-tested shape
+	int flatRefusedNoTexture = 0; //!< flat shapes whose diffuse would not resolve
 	QStringList refusals;       //!< "<reason> <name>", deduplicated, capped at 16
 	void addRefusal( const char * why, const QString & name );
 	void add( const LodgenRoadCensus & o );
@@ -1655,6 +1704,14 @@ struct LodgenLedger
 	QStringList census;              //!< every census line the bake printed, verbatim
 	int     endFiles = 0;            //!< files under the record's own directory tree, READ BACK
 	qint64  endBytes = 0;            //!< their total size, READ BACK
+	/*! THE REGION PRODUCTS (lane INCR2, 2026-09-26): every file under the
+	 *  record's own folder that no chunk row claims -- the `.lodo`/`.lodi`, the
+	 *  texture and card arrays, the VT levels -- with its sha1, sorted by path.
+	 *  An incremental run with no dirty chunk skips every stage only when each
+	 *  of these still hashes the same. Line kind `product`; a reader older than
+	 *  INCR2 ignores it. */
+	QStringList productFiles;        //!< paths relative to the record's folder
+	QStringList productDigests;      //!< sha1 hex, parallel to productFiles
 };
 
 /*! The digest of everything chunk (cx,cy) at `dim` reads.
