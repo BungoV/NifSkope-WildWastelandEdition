@@ -100,9 +100,10 @@ def read_lodo(path):
     if h['version'] == 3:
         raise Refusal('version 3: a v3 base row spends crossPx16[0..1] on two screen-size steps in '
                       '1/16 px, and this reader takes those same four bytes as the base FULL-DETAIL '
-                      'TRIANGLE COUNT. Re-bake; this reader knows versions 4 and 5')
+                      'TRIANGLE COUNT. Re-bake; this reader knows versions 4 to 6')
     # v5 (lane SEAM1, W4) = v4 + an optional per-vertex RGBA8 colour stream; a v4 file reads as v5 without one
-    if h['version'] not in (4, 5):
+    # v6 (lane SWAP1) = v5 + material-swap variant base rows (the base row's last u32 = materialSwap)
+    if h['version'] not in (4, 5, 6):
         raise Refusal('version %d' % h['version'])
     if crc32(b[0x10:0x100]) != h['headerCrc32']:
         raise Refusal('headerCrc32 mismatch')
@@ -146,8 +147,8 @@ def read_lodo(path):
     # v4: the card count lives at 0xD0; the pad is 0xCE..0xCF and 0xD4..0xFF
     # v5: colourVertexCount u32 at 0xD4, offColours u64 at 0xD8; the pad is 0xCE..0xCF and 0xE0..0xFF
     h['cardCount'] = le('I', b, 0xD0)[0]
-    h['colourVertexCount'], h['offColours'] = (le('IQ', b, 0xD4) if h['version'] == 5 else (0, 0))
-    padFrom = 0xE0 if h['version'] == 5 else 0xD4
+    h['colourVertexCount'], h['offColours'] = (le('IQ', b, 0xD4) if h['version'] >= 5 else (0, 0))
+    padFrom = 0xE0 if h['version'] >= 5 else 0xD4
     if any(b[0xCE:0xD0]) or any(b[padFrom:0x100]):
         raise Refusal('reserved bytes 0xCE..0xCF / 0x%02X..0xFF not zero' % padFrom)
     if bool(h['colourVertexCount']) != bool(h['offColours']):
@@ -197,9 +198,14 @@ def read_lodo(path):
     L = {'header': h, 'strings': strings, 'string_at': string_at}
     # v4: the row is still 32 bytes, but crossPx16[0..1] is now one u32
     # fullTriangles -- the base's FULL-DETAIL triangle count
+    # v6 (lane SWAP1): the last u32 (v4/v5 crossPx16[2..3], always 0) is materialSwap;
+    # a file before v6 has none, whatever the bytes hold
     L['bases'] = [dict(zip(('formId', 'modelStringOffset', 'rep0', 'rep1', 'rep2', 'rep3', 'cardLayer',
-                            'flags', 'boundRadius', 'fullTriangles', 'cross2', 'cross3'),
-                           le('IIHHHHHHfIHH', b, h['offBases'] + i * 32))) for i in range(h['baseCount'])]
+                            'flags', 'boundRadius', 'fullTriangles', 'materialSwap'),
+                           le('IIHHHHHHfII', b, h['offBases'] + i * 32))) for i in range(h['baseCount'])]
+    if h['version'] < 6:
+        for bse in L['bases']:
+            bse['materialSwap'] = 0
     # v3: the mesh row's v2 reserved word became clusterCountL0 + levelCount + a byte
     L['meshes'] = [dict(zip(('aabbMin', 'aabbExtent', 'uvMin', 'uvExtent', 'clusterFirst', 'clusterCount',
                              'flags', 'modelStringOffset', 'clusterCountL0', 'levelCount', 'reserved'),
@@ -225,7 +231,7 @@ def read_lodo(path):
     L['colours'] = [None] * h['vertexCount']
     row = 0
     for i, m in enumerate(L['meshes']):
-        if m['flags'] & ~(1 | 2 | 4 | (8 | 16 if h['version'] == 5 else 0)):
+        if m['flags'] & ~(1 | 2 | 4 | (8 | 16 if h['version'] >= 5 else 0)):
             raise Refusal('mesh %d flags 0x%x: unknown bits for version %d' % (i, m['flags'], h['version']))
         if m['flags'] & 16 and not m['flags'] & 8:
             raise Refusal('mesh %d: VERTEX_ALPHA without VERTEX_COLOUR' % i)
@@ -343,8 +349,13 @@ def read_lodo(path):
         if i and key(L['materials'][i - 1]) > key(m):
             raise Refusal('material table not sorted at %d' % i)
     for i, bse in enumerate(L['bases']):
-        if i and L['bases'][i - 1]['formId'] >= bse['formId']:
-            raise Refusal('base table not sorted by formId at %d' % i)
+        # v6: sorted by (formId, materialSwap) strictly; a variant follows its base's plain row
+        if i and (L['bases'][i - 1]['formId'], L['bases'][i - 1]['materialSwap']) >= (bse['formId'], bse['materialSwap']):
+            raise Refusal('base table not sorted by (formId, materialSwap) at %d' % i)
+        if bool(bse['flags'] & 8) != bool(bse['materialSwap']):
+            raise Refusal('base %08x: SWAPPED flag and materialSwap %08x disagree' % (bse['formId'], bse['materialSwap']))
+        if bse['materialSwap'] and (i == 0 or L['bases'][i - 1]['formId'] != bse['formId']):
+            raise Refusal('base %08x: variant row %08x with no plain row before it' % (bse['formId'], bse['materialSwap']))
         reps = [bse['rep%d' % k] for k in range(4)]
         for r in reps:
             if r != NO_MESH and r >= h['meshCount']:
@@ -353,7 +364,7 @@ def read_lodo(path):
             raise Refusal('base %08x has no mesh and no card' % bse['formId'])
         if not bse['boundRadius'] > 0:
             raise Refusal('base %08x boundRadius 0' % bse['formId'])
-        if bse['flags'] & ~7:
+        if bse['flags'] & ~(15 if h['version'] >= 6 else 7):
             raise Refusal('base %08x reserved flags' % bse['formId'])
         string_at(bse['modelStringOffset'])
     return L

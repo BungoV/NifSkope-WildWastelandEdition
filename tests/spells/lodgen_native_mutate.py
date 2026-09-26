@@ -66,6 +66,11 @@ def resign_lodo(b):
              (offClusters, clusterCount * 16), (offLods, clusterCount * 48),
              (offMaterials, materialCount * 16), (offLocal, clusterCount * 48),
              (offVerts, vertexCount * 16), (offStrings, stringBytes)]
+    colourCount, offColours = get(b, 0xD4, 'I')[0], get(b, 0xD8, 'Q')[0]
+    if colourCount:
+        # v5: the colour blob is written LAST and joins indexCrc32 only when present
+        # (the fixture has none; a real baked library does)
+        table.append((offColours, colourCount * 4))
     crc = 0
     for off, size in table:
         crc = crc32(bytes(b[off:off + size]), crc)
@@ -148,7 +153,19 @@ def cases(lodo, lodi):
 
     # --- v1 row rules, re-signed so the RULE answers
     add('lodo base table out of formId order', 'lodo',
-        lambda b: put(b, offBases, 'I', 0xFFFFFFFF), True, 'sorted by formId')
+        lambda b: put(b, offBases, 'I', 0xFFFFFFFF), True, 'sorted by (formId')
+    # --- v6 (lane SWAP1): the material-swap variant rows, row 0 of the base table
+    if get(lodo, 0x04, 'I')[0] >= 6:
+        add('v6 lodo SWAPPED flag with materialSwap 0', 'lodo',
+            lambda b: put(b, offBases + 18, 'H', get(b, offBases + 18, 'H')[0] | 8), True, 'disagree')
+        add('v6 lodo materialSwap with the SWAPPED flag clear', 'lodo',
+            lambda b: put(b, offBases + 28, 'I', 0x0001ABCD), True, 'disagree')
+        add('v6 lodo variant row with no plain row before it', 'lodo',
+            lambda b: (put(b, offBases + 28, 'I', 0x0001ABCD),
+                       put(b, offBases + 18, 'H', get(b, offBases + 18, 'H')[0] | 8)), True, 'no plain row')
+        add('v6 lodo read as v5: a SWAPPED flag has no materialSwap', 'lodo',
+            lambda b: (put(b, 0x04, 'I', 5), put(b, offBases + 28, 'I', 0x0001ABCD),
+                       put(b, offBases + 18, 'H', get(b, offBases + 18, 'H')[0] | 8)), True, 'disagree')
     add('lodo base boundRadius 0', 'lodo',
         lambda b: put(b, offBases + 20, 'f', 0.0), True, 'boundRadius')
     add('lodo cluster reserved flag bit', 'lodo',

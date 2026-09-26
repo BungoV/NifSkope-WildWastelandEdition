@@ -96,8 +96,26 @@ constexpr quint32 LODO_MAGIC = 0x4F444F4CU;
  *  VERSION 5 was once the subdivided library (lane HORIZON3, 2026-09-19), dropped
  *  the same day (lane HORIZONOUT); no exe ever wrote that file, so the number is
  *  free. The history paragraph is in docs/LODGEN_NATIVE_LODO_LODI.md 3.7. */
-constexpr quint32 LODO_VERSION = 5;
-//! The one earlier version this reader accepts: v5's layout with no colour stream.
+/*! v6 (2026-09-25, lane SWAP1 -- bungo: "these towers still look grey"): the
+ *  MATERIAL-SWAP VARIANT base rows. The Creation Kit applies a placement's
+ *  material swap (REFR XMSP, else its base's MODS; an MSWP's BNAM -> SNAM rows)
+ *  to the LOD model when it bakes vanilla's atlas, so one kit piece stands in
+ *  several colourways. A v6 library carries, after a base's own row, one row per
+ *  (base, MSWP) whose MSWP names a material one of the base's LOD models uses:
+ *  same formId, `materialSwap` = that MSWP's form id, LODO_BASE_SWAPPED set, and
+ *  `rep[]` naming VARIANT meshes (the same geometry with the swapped shapes'
+ *  materials replaced; mesh string `<model>|mswp:<8 hex>`). The base table is
+ *  sorted by (formId, materialSwap), strictly.
+ *
+ *  `materialSwap` is the base row's last u32, the four bytes v4 and v5 named
+ *  `crossPx16[0..1]` and always wrote 0. A library with no variant row is a v5
+ *  file with the version word changed (outside headerCrc32, so nothing else
+ *  moves). v5 and v4 are READ as v6 with no variant rows: their last base word
+ *  is taken as 0 whatever it holds, so no old byte is ever reinterpreted. */
+constexpr quint32 LODO_VERSION = 6;
+//! v5: the layout with the colour stream and no variant rows (read as v6 without swaps).
+constexpr quint32 LODO_VERSION_NO_SWAP = 5;
+//! The earliest version this reader accepts: v5's layout with no colour stream.
 constexpr quint32 LODO_VERSION_NO_COLOUR = 4;
 //! v5: a colour row, RGBA8 in byte order R, G, B, A.
 constexpr quint32 LODO_COLOUR_STRIDE = 4;
@@ -215,7 +233,8 @@ constexpr quint32 LODO_NO_PARENT = 0xFFFFFFFFU;
 enum LodoMeshFlags { LODO_MESH_ANY_ALPHA = 1, LODO_MESH_ANY_SWAY = 2, LODO_MESH_WATERTIGHT = 4,
 	LODO_MESH_VERTEX_COLOUR = 8, LODO_MESH_VERTEX_ALPHA = 16 };
 enum LodoMaterialFlags { LODO_MAT_TWO_SIDED = 1, LODO_MAT_EMITS = 2, LODO_MAT_TREE = 4 };
-enum LodoBaseFlags { LODO_BASE_TREE = 1, LODO_BASE_ANY_ALPHA = 2, LODO_BASE_ANY_MESH = 4 };
+//! v6 (lane SWAP1): LODO_BASE_SWAPPED -- the row is a material-swap variant; set exactly when `materialSwap` != 0.
+enum LodoBaseFlags { LODO_BASE_TREE = 1, LODO_BASE_ANY_ALPHA = 2, LODO_BASE_ANY_MESH = 4, LODO_BASE_SWAPPED = 8 };
 enum LodoFamily { LODO_FAMILY_LEGACY = 0, LODO_FAMILY_PBR = 1 };
 
 #pragma pack( push, 1 )
@@ -334,8 +353,10 @@ struct LodoBase
 	 *  measured on. Never 0 for a base in the table: a base with no mesh at all
 	 *  is not written (docs 11, deviation 5). */
 	quint32 fullTriangles;
-	//! v4: what is LEFT of the v3 `crossPx16[4]` -- two screen-size radius steps, 1/16 px (0 = unset).
-	quint16 crossPx16[2];
+	/*! v6 (lane SWAP1): the MSWP form id this variant row bakes in, 0 = the plain
+	 *  row. v4/v5 named these four bytes `crossPx16[0..1]` and always wrote 0;
+	 *  the reader forces 0 for a file older than v6. */
+	quint32 materialSwap;
 };
 
 #pragma pack( pop )

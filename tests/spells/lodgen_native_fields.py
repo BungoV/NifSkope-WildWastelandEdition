@@ -455,9 +455,9 @@ def main():
 
     # ---- j. the NATIVE1c words: each WRITTEN and each MOVING -------------
     print('j. the v4/v5 words (lane NATIVE1c)')
-    ck.check('j0 the .lodo is at version 5 (SEAM1 W4) and the .lodi at 3, 4, 5, 6, 7, 8, 9 or 10 (%d / %d)'
+    ck.check('j0 the .lodo is at version 6 (SWAP1) and the .lodi at 3, 4, 5, 6, 7, 8, 9 or 10 (%d / %d)'
              % (h['version'], ih['version']),
-             h['version'] == 5 and ih['version'] in (3, 4, 5, 6, 7, 8, 9, 10))
+             h['version'] == 6 and ih['version'] in (3, 4, 5, 6, 7, 8, 9, 10))
     # v10 (lane BAKE2): bit 7 appears in a v10 file and only there, and a v10 file carries at least one
     wide = sum(1 for r in T['instances'] if r['flags'] & 0x80)
     ck.check('j0b the wide-scale bit (0x80) is set on %d instance(s): > 0 exactly when the .lodi is version 10 (%d)'

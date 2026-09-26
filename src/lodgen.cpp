@@ -2100,10 +2100,18 @@ namespace
 
 //! Load every shape of a per-object LOD model, transforms applied, textures
 //! resolved from its shader property. Results cached per path.
+//! Lane SWAP1: `swap`, when given and not empty, replaces each shape's material
+//! BEFORE it is resolved (lodgenNativeLoadModelSwapped); the cache key carries it.
 const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
-	const QString & meshPath, QHash<QString, QVector<LodSrcShape>> & cache )
+	const QString & meshPath, QHash<QString, QVector<LodSrcShape>> & cache,
+	const LodgenMaterialSubst * swap = nullptr )
 {
-	const QString key = meshPath.toLower();
+	if ( swap && swap->isEmpty() )
+		swap = nullptr;
+	QString key = meshPath.toLower();
+	if ( swap )
+		for ( const auto & sw : *swap )
+			key += QStringLiteral( "|" ) + sw.first + QStringLiteral( ">" ) + sw.second;
 	auto it = cache.constFind( key );
 	if ( it != cache.constEnd() )
 		return *it;
@@ -2214,6 +2222,24 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 				src.getLink( iShape, "Shader Property" ) );
 			if ( iShader.isValid() ) {
 				s.matName = src.get<QString>( iShader, "Name" );
+				/* THE MATERIAL SWAP (lane SWAP1, 2026-09-25): the placement's MSWP
+				 * names this shape's material, so the shape is loaded as if the NIF
+				 * named the replacement -- as the Creation Kit does when it bakes
+				 * vanilla's LOD atlas. Everything below resolves it like any other. */
+				if ( swap && !s.matName.isEmpty() ) {
+					const QString mk = lodgenMaterialSwapKey( s.matName );
+					for ( const auto & sw : *swap ) {
+						if ( sw.first == mk ) {
+							QString rp = sw.second;
+							rp.replace( QChar( '/' ), QChar( '\\' ) );
+							const int ri = rp.lastIndexOf( QStringLiteral( "materials\\" ), -1, Qt::CaseInsensitive );
+							if ( ri >= 0 )
+								rp.remove( 0, ri + 10 );
+							s.matName = QStringLiteral( "Materials\\" ) + rp;
+							break;
+						}
+					}
+				}
 				s.smoothness = src.get<float>( iShader, "Smoothness" );
 				s.specMult = src.get<float>( iShader, "Specular Strength" );
 				s.emitColor = src.get<Color3>( iShader, "Emissive Color" );
@@ -2368,7 +2394,34 @@ struct ObjBucket
 /* The FO4CS-native emitter's model loader: lodgenLoadModel through the same
  * resource stack, one cache for the run, LodSrcShape flattened into the plain
  * arrays nativeemit.h takes. `user` is the data root (a QString). */
+QString lodgenMaterialSwapKey( const QString & material )
+{
+	QString t = material.toLower();
+	t.replace( QChar( '/' ), QChar( '\\' ) );
+	const int i = t.lastIndexOf( QStringLiteral( "materials\\" ) );
+	if ( i >= 0 )
+		t.remove( 0, i + 10 );
+	while ( t.startsWith( QChar( '\\' ) ) )
+		t.remove( 0, 1 );
+	return t;
+}
+
+static bool nativeLoadModelImpl( void * user, const QString & model, const LodgenMaterialSubst * swap,
+	std::vector<NativeSrcShape> * out );
+
 bool lodgenNativeLoadModel( void * user, const QString & model, std::vector<NativeSrcShape> * out )
+{
+	return nativeLoadModelImpl( user, model, nullptr, out );
+}
+
+bool lodgenNativeLoadModelSwapped( void * user, const QString & model, const LodgenMaterialSubst & swap,
+	std::vector<NativeSrcShape> * out )
+{
+	return nativeLoadModelImpl( user, model, &swap, out );
+}
+
+static bool nativeLoadModelImpl( void * user, const QString & model, const LodgenMaterialSubst * swap,
+	std::vector<NativeSrcShape> * out )
 {
 	/* PER THREAD, NOT PER PROCESS (lane PERF1, 2026-09-17). lodgenLoadModel
 	 * hands back a REFERENCE INTO this hash, so a `static` here is the exact
@@ -2386,7 +2439,7 @@ bool lodgenNativeLoadModel( void * user, const QString & model, std::vector<Nati
 	 * one cache, which is what the static was. */
 	thread_local QHash<QString, QVector<LodSrcShape>> cache;
 	const QString & dataRoot = *static_cast<const QString *>( user );
-	const QVector<LodSrcShape> & shapes = lodgenLoadModel( dataRoot, model, cache );
+	const QVector<LodSrcShape> & shapes = lodgenLoadModel( dataRoot, model, cache, swap );
 	out->clear();
 	for ( const LodSrcShape & s : shapes ) {
 		if ( s.pos.isEmpty() || s.tris.isEmpty() )

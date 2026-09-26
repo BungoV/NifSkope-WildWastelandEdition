@@ -54,6 +54,29 @@ struct EsmRefr
 	quint32 layer = 0;
 	quint32 enableParent = 0;
 	bool enableParentOpposite = false;    //!< XESP flag bit 0: the parent's state, inverted
+	/* Lane SWAP1 (2026-09-25): XMSP, the placement's MATERIAL SWAP (an MSWP
+	 * form), 0 when the ref carries none. It overrides the base's MODS. The
+	 * Creation Kit applies it to the LOD model when it builds vanilla's .bto,
+	 * so a LOD bake that ignores it draws the wrong colourway. */
+	quint32 materialSwap = 0;
+};
+
+//! Lane SWAP1: one MSWP substitution row, BNAM -> SNAM (+ CNAM when present).
+struct EsmMaterialSubst
+{
+	QString original;           //!< BNAM, as stored (relative to Materials\)
+	QString replacement;        //!< SNAM, as stored
+	bool hasColorRemap = false; //!< a CNAM followed this row
+	float colorRemap = 0.0f;    //!< CNAM, the colour-remapping index
+};
+
+//! Lane SWAP1: an MSWP record, the winning version by load order.
+struct EsmMaterialSwap
+{
+	quint32 formID = 0;
+	bool exists = false;        //!< the form is an MSWP record
+	QString edid;
+	QVector<EsmMaterialSubst> rows;
 };
 
 //! A base object's LOD model set (STAT MNAM rows / TREE model).
@@ -65,6 +88,7 @@ struct EsmLodBase
 	QString model;              //!< the base's own near model (MODL): what the impostor bake photographs
 	bool hasLod = false;
 	QString edid;               //!< EDID, for the cell view's pick panel
+	quint32 materialSwap = 0;   //!< lane SWAP1: MODS, the base's default material swap (MSWP), 0 = none
 	// tree wind knobs (TREE CNAM / STAT DNAM), for the chunk manifest
 	float trunkFlexibility = 0.0f;
 	float branchFlexibility = 0.0f;
@@ -376,6 +400,18 @@ public:
 	//! LOD model info for a base object, cached. Never null.
 	const EsmLodBase & lodBase( quint32 baseFormID ) const;
 
+	/*! Lane SWAP1 (2026-09-25): an MSWP record's substitution rows, cached.
+	 *  Never null; a form that is not an MSWP comes back with `exists` false.
+	 *  The record read is the WINNING one (libfo76utils merges overrides in
+	 *  load order, as for every other record). Layout: wbDefinitionsFO4 MSWP. */
+	const EsmMaterialSwap & materialSwap( quint32 mswpForm ) const;
+
+	/*! Lane SWAP1: a placed REFR's XMSP and NAME, read from the record by its
+	 *  form id (the winning version). False when the form is not a REFR. The
+	 *  native writer asks this per placement, because its placements carry the
+	 *  REFR form and not the record. */
+	bool refrMaterialSwap( quint32 refrForm, quint32 * xmsp, quint32 * base ) const;
+
 	/*! v9 (lane HORIZON3, 2026-09-19): is this placement WORKSHOP-SCRAPPABLE?
 	 *  The three-clause rule of `EsmScrapIndex`, on the base form and the
 	 *  placement's WORLD position. The index behind it is built once, on the
@@ -444,6 +480,7 @@ private:
 	int extraWorldGroups = 0;                 //!< later plugins' world-children groups walked (BAKE1)
 	int extraCellGroups = 0;                  //!< later plugins' cell-children groups joined (BAKE1)
 	mutable QHash<quint32, EsmLodBase> lodBaseCache;
+	mutable QHash<quint32, EsmMaterialSwap> mswpCache;   //!< lane SWAP1
 	mutable QHash<quint32, QVector<EsmScolPart>> scolCache;
 	mutable EsmScrapIndex scrapIdx;     //!< v9, built on first scrappable() call
 	mutable QHash<quint32, EsmLtexTextureSet> ltexCache;

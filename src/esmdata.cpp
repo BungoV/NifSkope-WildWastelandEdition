@@ -482,6 +482,9 @@ QVector<EsmRefr> EsmWorld::refrsInGroup( quint32 groupID ) const
 						ref.enableParentOpposite = ( f.readUInt32() & 1 ) != 0;
 					} else if ( f == "XLYR" && f.size() >= 4 ) {
 						ref.layer = esm->mapFormID( *r, f.readUInt32() );
+					} else if ( f == "XMSP" && f.size() >= 4 ) {
+						// lane SWAP1: the placement's material swap (MSWP)
+						ref.materialSwap = esm->mapFormID( *r, f.readUInt32() );
 					}
 				}
 				if ( ref.base ) {
@@ -592,6 +595,11 @@ const EsmLodBase & EsmWorld::lodBase( quint32 baseFormID ) const
 				b.leafFrequency = f.readFloat();
 			} else if ( f == "EDID" ) {
 				b.edid = fieldString( f );
+			} else if ( f == "MODS" && f.size() >= 4 && !b.materialSwap ) {
+				/* Lane SWAP1: the base's default material swap, the MODS of its
+				 * MODL group (wbDefinitionsFO4 wbMODL). The first one wins: it is
+				 * the only one a STAT, SCOL or TREE carries. */
+				b.materialSwap = esm->mapFormID( *br, f.readUInt32() );
 			} else if ( f == "MODL" && !( *br == "TREE" || *br == "STAT" )
 				&& b.model.isEmpty() ) {
 				/* CELLVIEW1: every record type the cell view draws -- MSTT,
@@ -615,6 +623,58 @@ const EsmLodBase & EsmWorld::lodBase( quint32 baseFormID ) const
 	}
 	auto ins = lodBaseCache.insert( baseFormID, b );
 	return *ins;
+}
+
+const EsmMaterialSwap & EsmWorld::materialSwap( quint32 mswpForm ) const
+{
+	auto it = mswpCache.constFind( mswpForm );
+	if ( it != mswpCache.constEnd() )
+		return *it;
+	EsmMaterialSwap m;
+	m.formID = mswpForm;
+	const ESMFile::ESMRecord * r = mswpForm ? esm->findRecord( mswpForm ) : nullptr;
+	if ( r && r->type != GRUP && *r == "MSWP" ) {
+		m.exists = true;
+		/* wbDefinitionsFO4 MSWP: EDID, FNAM (tree folder), then repeating
+		 * Substitution structs of BNAM (original), SNAM (replacement), an
+		 * obsolete FNAM, CNAM (f32 colour-remapping index). A row starts at
+		 * its BNAM; SNAM and CNAM belong to the row they follow. */
+		ESMFile::ESMField f( *esm, *r );
+		while ( f.next() ) {
+			if ( f == "EDID" ) {
+				m.edid = fieldString( f );
+			} else if ( f == "BNAM" ) {
+				EsmMaterialSubst row;
+				row.original = fieldString( f );
+				m.rows.append( row );
+			} else if ( f == "SNAM" && !m.rows.isEmpty() ) {
+				m.rows.last().replacement = fieldString( f );
+			} else if ( f == "CNAM" && !m.rows.isEmpty() && f.size() >= 4 ) {
+				m.rows.last().hasColorRemap = true;
+				m.rows.last().colorRemap = f.readFloat();
+			}
+		}
+	}
+	return *mswpCache.insert( mswpForm, m );
+}
+
+bool EsmWorld::refrMaterialSwap( quint32 refrForm, quint32 * xmsp, quint32 * base ) const
+{
+	if ( xmsp )
+		*xmsp = 0;
+	if ( base )
+		*base = 0;
+	const ESMFile::ESMRecord * r = refrForm ? esm->findRecord( refrForm ) : nullptr;
+	if ( !r || r->type == GRUP || !( *r == "REFR" ) )
+		return false;
+	ESMFile::ESMField f( *esm, *r );
+	while ( f.next() ) {
+		if ( f == "NAME" && f.size() >= 4 && base )
+			*base = esm->mapFormID( *r, f.readUInt32() );
+		else if ( f == "XMSP" && f.size() >= 4 && xmsp )
+			*xmsp = esm->mapFormID( *r, f.readUInt32() );
+	}
+	return true;
 }
 
 const EsmLtexTextureSet & EsmWorld::ltexTextureSet( quint32 ltexForm ) const
