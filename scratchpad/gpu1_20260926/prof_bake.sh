@@ -13,6 +13,8 @@ CARDS=E:/Projects/NifskopeWWE-bake1/scratchpad/bake1_20260925/cards
 VR=( --vanilla-lod-root "E:/Tools/Fallout 4/DataUnpacked/Data" )
 if tasklist //FI "IMAGENAME eq Fallout4.exe" 2>/dev/null | grep -q Fallout4.exe; then echo "GAME UP"; exit 1; fi
 mkdir -p "$R/mod" "$R/scr"
+# NifSkope resolves relative output paths against its own folder, not this shell's: make R absolute.
+R=$(cd "$R" && pwd)
 bash $TURN acquire gpu1 || exit 1
 trap 'bash $TURN release gpu1' EXIT
 stamp() { while IFS= read -r l; do printf '%(%s)T %s\n' -1 "$l"; done; }
