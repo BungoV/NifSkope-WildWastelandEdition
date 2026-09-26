@@ -60,14 +60,102 @@ Job folder (scratch only): S\instalod_job\
   distance (mean/median/p90/p99/max, metres) and open-edge count.
 - InstaLOD was not launched or driven. Results: (none yet)
 
+Baseline for judging results -- the authored LOD models measured the same way
+(compare_glb.py, reference = chunk.glb objects, 2,000,000 sample points, floor 0.53 m):
+
+| candidate | triangles | materials | area kept | new->original mean / p90 / max | original->new mean / p90 / p99 | open edges |
+|---|---|---|---|---|---|---|
+| authored LOD (level 4) | 24,996 | 34 | 39% | 0.32 / 0.53 / 9.55 m | 1.45 / 4.20 / 13.51 m | 10,964 (full: 597,829) |
+
+Outline kept against full detail (alpha masks 1280x720, pics\silhouette.txt): far view 88%,
+skyline from south 90%, from west 85%, oblique 82%; pixels outside the full outline 0.3-1.1%.
+Two runs of the same shots differed by up to 0.5 points.
+
 ## 4. Fallout 76 measurements
-(in progress)
+
+Source: X:\...\Fallout76\Data holds only 28 mod files (no SeventySix archives), so the
+fallback E:\SteamLibrary\steamapps\common\Fallout 76 Playtest\Data was used. Measure-only:
+six files extracted to S\fo76\ (scratch), nothing in git.
+Charleston located by the CELL records' EDIDs in SeventySix.esm (78 cells named Charleston*;
+Capitol at -24..-22, -15..-14). Level-4 chunks there: x0 = -30/-26/-22, y0 = -17/-13.
+
+| FO76 chunk (level 4) | triangles | shapes | remeshed shapes (tris) | of which "loose components" | authored LOD on shared atlas (tris) | file |
+|---|---|---|---|---|---|---|
+| -30,-17 | 95,599 | 74 | 32 (40,247) | 32,293 | 42 (55,352) | 5.0 MB |
+| -30,-13 | 125,415 | 107 | 60 (112,520) | 77,629 | 39 (12,879) | 5.5 MB |
+| -26,-17 (Capitol) | 134,349 | 132 | 91 (100,750) | 37,589 | 37 (33,591) | 6.0 MB |
+| -26,-13 | 106,398 | 82 | 33 (64,338) | 43,455 | 44 (42,050) | 5.2 MB |
+| -22,-17 | 112,822 | 87 | 33 (65,721) | 48,971 | 46 (47,085) | 5.7 MB |
+| -22,-13 | 136,112 | 90 | 46 (108,981) | 96,595 | 44 (27,131) | 6.0 MB |
+| FO4 -4,-8 (vanilla, for scale) | 24,929 | 2 | -- | -- | 1 atlas | 1.2 MB |
+
+What that says (from the shape names and texture paths inside the files):
+- Not one merged mesh: 74-132 shapes per chunk, named `RemeshedShape_<building>_...`,
+  `RemeshedShape_LooseComponents_Appalachia` and `GlobalAtlasShape_{NotAlphaTested,AlphaTested,Translucent}`.
+- So FO76 remeshes per building (each with its own baked texture, e.g.
+  `bld_a_brick_building_ruins01_<id>_lod_0_d.dds`; 57 of them in the Capitol chunk), remeshes
+  all small loose objects of a chunk together into one shape, and keeps authored LOD pieces on
+  a world-shared set of texture arrays (textures/lod/generated/texturearrays/..., 404 diffuse
+  layers, UVs tile from -23 to 19) -- not one atlas per chunk.
+- The chunk also carries 3D trees (alpha-tested, 15,798 of 134,349 triangles in the Capitol chunk).
+- Budget: 4-5 times the FO4 chunk's triangles (95k-136k vs 25k).
+- Silhouette kept: not measurable -- FO76's full-detail source for these chunks was not rebuilt
+  (would need its REFR walk + precombined meshes). The clay pictures show the Capitol dome and
+  buildings as recognisable shapes, trees as crumpled low-poly blobs.
 
 ## 5. Pictures
-(pending)
+
+All in E:\Projects\NifskopeWWE-cell1\scratchpad\cell1_20260926\pics\ (gitignored). Same camera per
+subject; labels carry the triangle count and outline kept.
+- 1_oblique_side_by_side.png -- full detail | authored LOD, textured, from above south-west.
+- 2_far_view_side_by_side.png -- from about 21,000 units (5 cells) away, north-east, 70 degree
+  view, standing 2,400 high, with the 8 surrounding chunks' terrain for context (no water, no
+  neighbouring buildings).
+- 3_far_view_zoom3x_side_by_side.png -- the same far view, centre enlarged 3x.
+- 4_skyline_from_south_side_by_side.png -- orthographic, from the south.
+- 5_top_down_side_by_side.png -- orthographic, from above.
+- 6_fo76_vs_fo4_oblique_clay.png -- untextured: FO4 full | FO4 authored LOD | FO4 vanilla .BTO |
+  FO76 Charleston Capitol chunk -26,-17.
+- 7_fo76_vs_fo4_skyline_clay.png -- the same four, from the south.
+- silhouette.txt -- outline numbers.
+InstaLOD panels get added to 1-5 when result_*.glb files appear (compose.py takes them as
+extra labels).
 
 ## 6. What a bridge would need
-(pending)
+
+1. Per-chunk export: done (tools/cellexport). A dense chunk is 4.6M triangles, 550 MB, 3.5 min.
+2. InstaLOD has no command line here and must not be scripted from the repo, so a whole map is
+   one Start per profile per chunk by hand. A bridge is therefore a drop folder: bungo exports
+   result_<profile>.glb, our side validates (compare_glb + outline masks) and converts.
+3. Converting back needs: glb -> our LOD format (the .lodl / .BTO writer takes triangles in world
+   space; the glb origin is written in asset.extras, and the file name must also carry the chunk id
+   because an outside tool may drop extras -- the bounds check catches a lost origin).
+4. Textures: Optimize keeps the 765 source materials -- the bake needs one atlas page per chunk,
+   so an Optimize result still needs our atlas pass; Remesh gives one baked page directly.
+5. Seams: ProtectBoundaries holds open edges of the meshes, not the chunk cut line; neighbouring
+   chunks simplified separately will not meet unless the cut edges are locked.
+6. FO76's own answer is per building, not per chunk: remesh each building with its own texture,
+   remesh the loose small objects together, keep authored LOD pieces as they are. That split maps
+   onto our data (authored LOD slot present -> keep it; absent -> remesh that object).
+
+Mistakes (for the director to splice into MISTAKES.md):
+- Ran a grep over E:\Projects\NifskopeWWE-*\scratchpad (many worktrees at once) for a word; it
+  timed out and was stopped. Search-lean rule broken. Rule: one folder per search.
+- Passed the ground texture as a path relative to the data root; the tool only tried it relative
+  to the working folder, drew the ground untextured, and the census said nothing. Caught by eye in
+  the first picture. Fixed: the path is tried under the data root and the census now prints
+  "ground texture missing".
+- First far-view camera stood under the terrain (2,500 high where the ground is 2,600-3,000):
+  camera heights were typed without reading LAND. Caught by eye; moved to a measured spot.
+- Assumed Blender's view-layer material override works in EEVEE; the clay renders came out
+  textured. Now every material slot is assigned directly.
 
 ## 7. Skills review
-(pending)
+- Loaded: nifskope-ww-lodgen, nifskope-ww-gltf-character-export (CONSTITUTION + HANDOFF top block).
+  nifskope-ww-render-shot was not needed: no NifSkope render in this lane (Blender only).
+- Wished for: a skill that says where each game's archives live on this machine and that the
+  X: Fallout76 folder holds only mods; a skill for reading FO76 (BS 155) NIFs (the header has an
+  extra 4 bytes, BSTriShape has a 24-byte box, BSLightingShaderProperty has no shader type).
+- Written: .claude/skills/ww-chunk-model-export/SKILL.md (export a chunk as one model, render it
+  headless, measure a simplified copy). Should also be copied to E:\Tools\AISkills -- left to the
+  overseer (outside this worktree).

@@ -140,6 +140,8 @@ class Bucket:
 
 def build_objects(plugin, lib, placements, library, origin, stats):
     buckets = OrderedDict()
+    if not placements:
+        return buckets
     slot = None if library == 'near' else int(library[3:])
     for pl in placements:
         if slot is None:
@@ -392,6 +394,8 @@ def main():
     ap.add_argument('--obj', action='store_true')
     ap.add_argument('--no-glb', action='store_true')
     ap.add_argument('--cache', default=None)
+    ap.add_argument('--origin', default=None, help='x,y in game units (default: the rectangle centre); '
+                    'use one origin for several exports that must line up')
     a = ap.parse_args()
 
     stats = defaultdict(int)
@@ -399,7 +403,11 @@ def main():
         stats[k] = []
     plugin = esm_cells.load_cached(a.esm, a.world, a.cache)
     placements, pc = esm_cells.expand(plugin, a.x0, a.y0, a.x1, a.y1)
+    if a.library == 'none':                      # ground only
+        placements = []
     origin = np.array([(a.x0 + a.x1 + 1) * CELL / 2.0, (a.y0 + a.y1 + 1) * CELL / 2.0, 0.0])
+    if a.origin:
+        origin[:2] = [float(v) for v in a.origin.split(',')]
     lib = Library(a.data_root, plugin, stats)
     buckets = build_objects(plugin, lib, placements, a.library, origin, stats)
 
@@ -416,16 +424,17 @@ def main():
         mname = 'm%03d_%s' % (i, os.path.basename(b.texture)[:-4] if b.texture else 'untextured')
         prims.append((mname, png, b.alpha, b.alpha_ref, b.two_sided, pos, nrm, uv, col, idx))
         tri_obj += len(idx); vert_obj += len(pos)
-    parts = [('Objects', prims)]
+    parts = [('Objects', prims)] if prims else []
     tri_g = vert_g = 0
     if a.ground != 'none':
         gp, gn, guv, gc, gi = build_ground(plugin, a.x0, a.y0, a.x1, a.y1, origin, stats)
         gpng = None
-        if os.path.isfile(a.ground):
+        gsrc = a.ground if os.path.isfile(a.ground) else os.path.join(a.data_root, a.ground)
+        if os.path.isfile(gsrc):
             from PIL import Image
-            gpng = 'ground_' + re.sub(r'[^a-z0-9_.-]+', '_', os.path.basename(a.ground).lower()).replace('.dds', '') + '.png'
+            gpng = 'ground_' + re.sub(r'[^a-z0-9_.-]+', '_', os.path.basename(gsrc).lower()).replace('.dds', '') + '.png'
             if not os.path.isfile(os.path.join(tex_dir, gpng)):
-                Image.open(a.ground).convert('RGB').save(os.path.join(tex_dir, gpng))
+                Image.open(gsrc).convert('RGB').save(os.path.join(tex_dir, gpng))
         else:
             stats['ground_texture_missing'] += 1
         parts.append(('Ground', [('ground', gpng, 'OPAQUE', 128, False, gp, gn, guv, gc, gi)]))
@@ -459,8 +468,8 @@ def main():
                                                stats['material_file_missing']))
     lines.append('Objects: %d triangles, %d vertices, %d materials (%d grayscale-to-palette, written grey)'
                  % (tri_obj, vert_obj, len(prims), stats['materials_grayscale_to_palette']))
-    lines.append('Ground: %d triangles, %d vertices, cells without LAND %d' % (tri_g, vert_g,
-                 stats['ground_cells_without_land']))
+    lines.append('Ground: %d triangles, %d vertices, cells without LAND %d, ground texture missing %d'
+                 % (tri_g, vert_g, stats['ground_cells_without_land'], stats['ground_texture_missing']))
     lines.append('textures: %d converted to PNG (max %d px), missing %d, unreadable %d'
                  % (len({p[1] for p in prims if p[1]}), a.tex_max, stats['texture_missing'],
                     stats['texture_unreadable']))
