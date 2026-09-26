@@ -1,5 +1,19 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Near library bake (lane NEAR1, 2026-09-26)
+
+- `lodgen --near-library <dir>` writes a worldspace's full-detail static models into `<ws>.near.lodo` /
+  `.near.lodi`, for a future close-range renderer.
+- Eligibility:
+  - Kept: STAT and SCOL placements, with SCOL parts expanded.
+  - Out: destructible, animated, marker and non-static types.
+  - Shapes out: alpha-blend, effect, decal and tree-wind shapes.
+- Every excluded REFR is counted by its reason.
+- BSMeshLODTriShape models draw their full-detail level only.
+- Each placement keeps its reference form ID, its initially-disabled flag and its scrappable flag.
+- New format versions for these files only: `.lodo` v7 and `.lodi` v11. Far-field bakes are byte-identical to before.
+- Whole Commonwealth: 523,755 of 736,214 references, 12.2 M triangles, 382 MB, about 3 minutes.
+
 ## SWAP1
 
 - **LOD buildings keep their vanilla colourways (material swaps).** A placed building whose record swaps its

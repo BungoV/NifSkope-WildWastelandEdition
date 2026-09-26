@@ -5,6 +5,18 @@ Written the moment a mistake is recognised, unprompted (CONSTITUTION rule 2).
 Format: date -- what was done -- what was true -- how it was found -- the rule.
 Newest at the top.
 
+## 2026-09-26 -- lane NEAR1 (lane text)
+
+- 2026-09-26 02:4x NEAR1: started the near bake's model workers without first building the resource stack's
+  lazy static index. Four workers built it at once: every model came back "not found", then a segfault
+  (rc 139). The far path already calls `lodgenWarmSharedIndices()` before its pool, and I did not look.
+  Rule: a new parallel path copies the far path's warm-up, and a first run is read for "all not found".
+- 2026-09-26 02:4x NEAR1: passed a relative `--near-library` directory. The exe chdirs to release/, so the
+  library landed under release/. Rule: every lodgen output path is absolute (the render-shot rule, again).
+- 2026-09-26 03:1x NEAR1: ran a `find /e/Projects -maxdepth 4` to look for a `.lodl`. It timed out, and I stopped it.
+  That breaks the search-lean rule (one folder per search). The installed path was already known. Rule: name the
+  folder, never the projects root.
+
 ## 2026-09-26 -- lane SWAP1 (lane text)
 
 - 2026-09-25 SWAP1: folded every REFR's XMSP into objectCorpusHash. A swap on a non-LOD reference cannot change

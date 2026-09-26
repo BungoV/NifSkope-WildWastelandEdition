@@ -60,6 +60,30 @@ committed" or names an exe, this block overrides it.
 - Re-run the command-line bakes since 09-19 that used --data-root.
 
 ### Lane and director lines, 2026-09-24, newest first
+- 2026-09-26 03:24 NEAR1:
+  ### NEAR1 -- near library, rung N1 (2026-09-26 03:2x): BUILT AND GATED, NOT MERGED, NOTHING INSTALLED
+
+  - New CLI: `lodgen ... --near-library <abs dir>` (src/nearlib.cpp). Bakes the full-detail MODL of every eligible
+    STAT/SCOL placement into `<ws>.near.lodo` + `.near.lodi` + refs/shapes/textures sidecars. The far writer is not
+    entered.
+  - **FORMAT VERSIONS MOVED (near files only):**
+    - `.lodo` v7 = v6 layout + header flag bit4 `NEAR` (16; set exactly on v7) + material row byte +7 `features`
+      (1 parallax, 2 env map, 4 greyscale, 8 vertex colour, 16 model-space normals; bits 5..7 refused).
+    - `.lodi` v11 = v10 layout + instance flag bit8 `INITIALLY_DISABLED` (0x100), written only when an instance
+      carries it (Sanctuary has none and wrote v9).
+    - Far bakes are unchanged, version word included (G4: 130 of 130 files byte-identical to the rung).
+    - READER1 still runs on lodo v6 / lodi v10. The FO4CS reader owes v7/v11 before it can read a near library.
+  - Whole Commonwealth (his MO2 stack):
+    - 736,214 REFRs read, 523,755 eligible, 677,390 placements.
+    - 38,622 (mesh, material) pairs; 12.16 M triangles; 777,824 clusters.
+    - `.lodo` 382 MB, `.lodi` 26.5 MB; 178 s. Output is in `scratchpad/near1_20260926/commonwealth`.
+  - Clusters are the far code's 16 triangles / 48 vertices, not the brief's ~128. Bigger clusters are a later rung's call.
+  - Known gaps:
+    - The near `.lodi` writes placement identity 0.
+    - Texture arrays are a list only (`textures.txt`); nothing is re-encoded.
+    - Materials are all legacy (0 PBR) on his stack.
+  - Gates: `tests/spells/near_library_check.py` (G1-G3, independent ESM + NIF + BGSM reading, `--sabotage` refuters),
+    `tests/spells/near_format_selftest.py`, and `lodgen_native_fields.py` j0c. The skill is `nifskope-ww-near-library`.
 - 2026-09-26 02:10 SWAP1:
   SWAP1 (2026-09-25/26, branch swap1-20260925, worktree E:\Projects\NifskopeWWE-swap1, not merged or pushed):
   lodgen now applies material swaps (REFR XMSP, else the base's MODS -> MSWP BNAM/SNAM rows) to the native object
