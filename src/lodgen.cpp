@@ -1708,11 +1708,13 @@ namespace
 {
 //! Lane NEAR1: format + size out of a DDS header (148 bytes with a DX10 block, 128 without).
 bool lodgenDdsHeaderInfo( const unsigned char * p, size_t n, quint32 * dxgi, quint32 * width, quint32 * height,
-	quint32 * mips )
+	quint32 * mips, bool * cube = nullptr )
 {
 	if ( n < 128 || std::memcmp( p, "DDS ", 4 ) != 0 )
 		return false;
 	auto u32 = [&]( size_t o ) { quint32 v; std::memcpy( &v, p + o, 4 ); return v; };
+	if ( cube )
+		*cube = ( u32( 112 ) & 0x200u ) != 0;      // caps2 DDSCAPS2_CUBEMAP
 	*height = u32( 12 );
 	*width = u32( 16 );
 	*mips = std::max<quint32>( 1, u32( 28 ) );
@@ -1748,9 +1750,11 @@ bool lodgenDdsHeaderInfo( const unsigned char * p, size_t n, quint32 * dxgi, qui
 } // namespace
 
 bool lodgenTextureInfo( const QString & dataRoot, const QString & texPath, quint32 * dxgi, quint32 * width,
-	quint32 * height, quint32 * mips, QString * source )
+	quint32 * height, quint32 * mips, QString * source, bool * cube )
 {
 	*dxgi = 0; *width = 0; *height = 0; *mips = 0;
+	if ( cube )
+		*cube = false;
 	if ( texPath.isEmpty() )
 		return false;
 	if ( BA2File * ix = lodgenStackIndex() ) {
@@ -1764,6 +1768,8 @@ bool lodgenTextureInfo( const QString & dataRoot, const QString & texPath, quint
 				*width = quint32( d[5] ) | ( quint32( d[6] ) << 8 );
 				*mips = std::max<quint32>( 1, d[7] );
 				*dxgi = d[8];
+				if ( cube )
+					*cube = ( d[9] & 1 ) != 0;      // the record's flag byte (bit 0 cube; 0x08 in the next is tiling)
 				if ( source )
 					*source = QStringLiteral( "ba2" );
 				return true;
@@ -1773,7 +1779,7 @@ bool lodgenTextureInfo( const QString & dataRoot, const QString & texPath, quint
 				if ( f.open( QIODevice::ReadOnly ) ) {
 					const QByteArray h = f.read( 148 );
 					if ( lodgenDdsHeaderInfo( reinterpret_cast<const unsigned char *>( h.constData() ), size_t( h.size() ),
-							dxgi, width, height, mips ) ) {
+							dxgi, width, height, mips, cube ) ) {
 						if ( source )
 							*source = QStringLiteral( "loose" );
 						return true;
@@ -1790,7 +1796,7 @@ bool lodgenTextureInfo( const QString & dataRoot, const QString & texPath, quint
 	if ( !lodgenReadAsset( dataRoot, rel, "textures", ".dds", bytes ) )
 		return false;
 	if ( !lodgenDdsHeaderInfo( reinterpret_cast<const unsigned char *>( bytes.constData() ), size_t( bytes.size() ),
-			dxgi, width, height, mips ) )
+			dxgi, width, height, mips, cube ) )
 		return false;
 	if ( source )
 		*source = QStringLiteral( "read" );

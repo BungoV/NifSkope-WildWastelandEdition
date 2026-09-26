@@ -825,9 +825,11 @@ bool lodgenNativeLoadModelOnce( void * user, const QString & model, const Lodgen
  *  parses its header. `dxgi` is the DXGI_FORMAT code (a legacy FourCC is mapped:
  *  DXT1 71, DXT3 74, DXT5 77, ATI1/BC4U 80, ATI2/BC5U 83; uncompressed 32-bit
  *  87 for BGRA, 28 for RGBA). `source` says which route answered: "ba2",
- *  "loose" or "read". False when nothing supplies the file. */
+ *  "loose" or "read". False when nothing supplies the file. `cube` (lane NEAR2)
+ *  is true for a cube map: the BA2 record's flag byte bit 0, or a DDS header's
+ *  caps2 CUBEMAP bit -- a cube map cannot be a layer of a Texture2DArray. */
 bool lodgenTextureInfo( const QString & dataRoot, const QString & texPath, quint32 * dxgi, quint32 * width,
-	quint32 * height, quint32 * mips, QString * source = nullptr );
+	quint32 * height, quint32 * mips, QString * source = nullptr, bool * cube = nullptr );
 
 /*! A model's world extent, for the impostor baker's size ladder.
  *
