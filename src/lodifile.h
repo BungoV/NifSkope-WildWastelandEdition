@@ -148,7 +148,10 @@ constexpr quint8 LODI_PLACEMENT_AO_MAX = 0xFE;
  *  at the placement's world position against the chunk's heightfield, every
  *  placement of the chunk and the apron of placements one cell into the
  *  neighbours (`src/lodgenao.h`, the one caster). The per-placement byte of
- *  v5 is that cast's MEAN; this blob is what it was averaged from.
+ *  v5 is that cast's MEAN; this blob is what it was averaged from. Since lane
+ *  AO2 (2026-09-26) the blob is cast per RING (a receiver drawn from slot s sees
+ *  the slot-s meshes only) and ACROSS each face (area-weighted samples, docs
+ *  s4.8), so it no longer equals the v5 byte's population; the law is unchanged.
  *
  *  Layout, at header 0xF4 (u64 offset) / 0xFC (u32 bytes): u32 first[n + 1]
  *  in INSTANCE order, then the bytes; instance i's vertices are
@@ -179,11 +182,14 @@ constexpr quint32 LODI_VERSION_VERTEX_AO = 6;
  *  the SAME layout as v6's vertex-AO blob at 0xF4, byte for byte -- u32
  *  first[n + 1] in instance order, then one byte a library vertex in the mesh's
  *  vertex order, `first[0] == 0`, monotone, `first[n] == bytes - 4 (n + 1)`.
- *  The values are `LodgenAoScene::skyVisibility(p, 300)` against the same scene
- *  the v6 AO stream is cast in, in the same `place`/`perVertex` loop. The 0x11
- *  `sky` byte is the mean of a RELATED cast over a DIFFERENT vertex population
- *  (the stock .BTO chunk mesh's, see docs s4.10); the two agree to a quarter of
- *  a byte for a typical placement and diverge near a chunk line.
+ *  The values are `LodgenAoScene::skyVisibilityFace` (lane AO2, 2026-09-26: the
+ *  horizon-aware law -- 7 elevation rings from 7 to 79 degrees x 8 azimuths,
+ *  each ring weighted by its share of the cosine-weighted sky, reach 10,000
+ *  world units) against the same ring scene the v6 AO stream is cast in, at the
+ *  same across-the-face samples (docs s4.8/s4.10). The 0x11 `sky` byte is still
+ *  the stock 9-ray zenith cast over a DIFFERENT vertex population (the .BTO
+ *  chunk mesh's), so since AO2 the two are different laws, not two samplings
+ *  of one; the stream is the one to draw.
  *
  *  Version 7 is written when the file carries EITHER table. A v7 header is a
  *  SUPERSET of a v6 one and `--lodi-v6` is the exact way back. The header BLOCK

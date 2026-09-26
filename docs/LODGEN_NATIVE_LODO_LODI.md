@@ -263,7 +263,7 @@ mistake one for the other.
 | 0x0A | 3 | normal | octahedral **12:12** — `n = b0 \| b1<<8 \| b2<<16`, `octX = n & 0xFFF`, `octY = n >> 12`. Worst error 0.0591°, mean 0.0209°, against vanilla `ByteVector3`'s 0.384° / 0.170° |
 | 0x0D | 1 | tangent | bits 0–6 roll angle around the normal (2.83° step), bit 7 handedness |
 | 0x0E | 1 | `sway` | per-vertex sway weight, 0 = rigid; `h²·(0.35+0.65r)` |
-| 0x0F | 1 | `selfAO` | the **model's own** self-occlusion — constant across copies, so it belongs in the library, not in the instance |
+| 0x0F | 1 | `selfAO` | the **model's own** self-occlusion — constant across copies, so it belongs in the library, not in the instance. Since AO2 (2026-09-26) cast across each face and pooled over split copies like the §4.8 stream (`src/lodofile.cpp`; `WW_SELFAO_FACE=0` = the old cast at the vertex) |
 
 No bitangent: it is exactly `cross(normal, tangent)`, verified over 949,477 real
 vertices, max component deviation 0.0134, zero vertices above 0.02.
@@ -1495,18 +1495,119 @@ objects shade this chunk's edge, as the `.BTO` skirt placements did. The chunk's
 own placements then cast `ambientOcclusion(pos, nrm, 300 × dim)` per vertex, the
 reach the `.BTO` route used. Chunks run in parallel.
 
+**One ring a scene, across the face (lane AO2, 2026-09-26).** bungo, on the
+Boston oblique AO picture: *"isn't the vertex AO kind of strong and placed not in
+the right places?"*. Two measured causes, two changes; the ray law itself
+(8 rays, reach, `1 − 0.85 × hits / 8`) is unchanged.
+
+1. *Mixed rings.* The scene held every placement's OWN kept-slot mesh, so a
+   building's far-ring stand-in (`rep[0]` empty, `rep[2]` = the whole building)
+   sat in the same scene as the near-ring kit pieces it replaces. Its lid, 72 u
+   above the Prudential's kit roof, took 136 of 136 rays and drew that roof at
+   byte 38. MNAM slot *k* is what ring *k* draws, so the scene is now built PER
+   SLOT: a receiver drawn from slot *s* is cast against the slot-*s* mesh of every
+   placement in the field, plus the heightfield; a placement with no slot-*s*
+   mesh is not in that scene (the census counts them).
+2. *Corners inside other geometry.* One cast per VERTEX drew a 1024 × 512 wall at
+   the value of its four corners, and each corner stood inside a corner tower
+   (7 of 7 rays on the tower's back faces), so the open wall read 65 across its
+   whole area. bungo: *"Sample across the face sounds good"*. Each level-0
+   triangle is cut into *k* × *k* equal-area pieces, *k* = ⌈longest edge / 256 u⌉
+   clamped to 1…4, and each piece's centroid is cast with the barycentric blend
+   of the vertex normals. A vertex takes Σ (A / k² · bary · value) / Σ (A / k² ·
+   bary) over the samples of every triangle it belongs to (bungo: *"it is fine if
+   the two corners would get equalized with also the whole face's context"* —
+   no corner is kept apart). A vertex on no triangle is cast where it stands.
+   Fixed pattern and order, one chunk a thread: deterministic.
+3. *Split copies* (the split-line round, bungo on the ballpark grandstand roof and
+   the tower faces: *"These split lines"*). A mesh splits a corner into copies for
+   its UVs or its smoothing; step 2 gave each copy the mean of its OWN triangles,
+   so two copies at one point of one flat face carried two bytes and the
+   rasteriser drew a hard step between their triangles (Boston: 100,900
+   co-located pairs with normals within 1°, mean jump 0 → 25.2 bytes, 48% above
+   16). Copies at one position (0.5 world u) whose normals lie within 30°
+   (Blender's auto-smooth default) now pool their samples and share one value;
+   across a crease of angle *a* the two hemispheres differ by a lune of *a*/180,
+   so pooling below 30° moves at most 1/6 of the rays, and sharper creases keep
+   their own values. Boston after: 0-1° pairs 0.0 / 0%, 1-10° 0.1, 10-20° 1.3,
+   20-30° 3.3; above 30° unchanged. `WW_AO_WELD_DEG` (default 30, −1 = off,
+   bytes as ee52efc0) is the research knob. A least-squares vertex fit was tried
+   on paper and rejected: on a quad with a nonlinear field it twists the diagonal
+   more than the lumped mean.
+4. *Under the ground* (bungo on a lone box on grass: *"never a diagonal"*). A
+   sample more than 32 world u below the chunk's ESM ground is on a part the
+   terrain hides (a foundation, a buried wall foot); every ray meets the ground
+   within a few units, so it read about 0.26 and pulled the visible foot vertex
+   dark. Such samples are set aside: a vertex uses them only when it has no sample
+   above the ground (pooled over its welded copies like the rest), so a wholly
+   buried vertex still takes one value and never a per-copy cast. Boston: 154,019
+   of 2,303,975 samples set aside; the lone box's foot 97 → 141, its diagonal
+   step 16 → 11. `WW_AO_UNDER_TOL` (world u, default 32, < 0 = keep, bytes as the
+   weld-only bake) is the research knob.
+5. *Flat patches* (bungo: *"The answer would be, to merge flat geometry"*). A
+   duplicate corner test on the three spots showed his reading holds: every
+   visible line ran along an edge where the two triangles share no vertex index,
+   only duplicate corners at one position (ballpark 1 of 1 inner edges, lone box
+   3 of 3, tower 1 of 3), and ee52efc0 gave the duplicates different bytes (32,
+   68 and 136 apart). Step 3 joined the duplicates; a quad whose field is not
+   linear still bent along its diagonal (tower 69 bytes). The mesh is not
+   edited (authored LOD meshes never are, and the duplicates exist for their
+   UVs): the values are merged. Triangles joined through shared corner
+   positions whose normals lie within 1° of the seed triangle's (44% of the
+   adjacent-edge area of Boston's library meshes lies within 0.1°) and whose
+   corners sit within 2 world u of its plane form a patch, and the patch takes
+   ONE linear field in its plane. Any triangulation draws a linear field
+   exactly, so no corner can draw a diagonal across a flat face; creases are
+   patch borders and keep their own values. The field is the least-squares
+   plane of the patch's face samples (clamped to 0…1), or, when the samples do
+   not span a plane, of its corner values (clamped to their range). Boston:
+   143,395 patches of 346,614 triangles; coplanar kink mean 17.8 → 7.5 bytes with
+   the corner fit, 12.7 with the sample fit; the wall foot reads 7.6 (corner
+   fit) or 13.6 (sample fit) bytes under the wall top (installed: 32.6).
+   `WW_AO_PATCH_DEG` (default 1, < 0 = off, bytes as step 4) and
+   `WW_AO_PATCH_FIT=vertex` (the corner fit) are the research knobs; which fit
+   ships is bungo's pick.
+
+The library `selfAO` (§3, 0x0F) uses steps 2 and 3 as well (not step 4: the
+library has no ground). The Charles bridge deck (Bridge01End01) read 38 from one
+corner buried in the pier; it now reads 240-245. On 15,323 up-facing library
+faces that vertical rays show open, the area below 128 went 1.65% → 0.59%
+(area-weighted mean 238.7 → 242.5).
+
+Measured on Boston (cells −8…3 × −12…−1, 19,234 up-facing faces classified by an
+independent 2.5D horizon march over the ring-0 world, not by the caster):
+open up-facing faces 237.5 → 252.0 (area below 201: 13.4% → 2.2%), faces
+enclosed across their whole area 96.9 → 73.2. The circled spots: the Prudential
+kit roof 38 → 255, the Trinity Church west wall 65 → 234…245, its tower cap's
+pyramid faces 38/38/255 → 255/255/255. Every other table of the `.lodi` and every
+other file of the bake is byte-identical (only the two vertex streams and the two
+CRCs move). Cost on the whole Commonwealth: 24.5 M samples, the library
+instances stage 1,478 s → 1,810 s. `WW_AO_FACE_STEP` / `WW_AO_FACE_MAX` are research knobs
+(`WW_AO_FACE_STEP=0` = cast at the vertex alone); `WW_AO_PROBE=x,y,z,r` logs every
+sample's rays near a point.
+
 **Consumer.** When the slice length equals the drawn mesh's vertex count, use the
 byte ALONE — it already holds what `selfAO` and the v5 placement byte
 approximated; multiplying either in darkens twice. Otherwise fall back to
 `selfAO × placementAo` (v5) or `selfAO` (v4). The NifSkope viewer does exactly
-this under `WW_LODL_AO=1` (`src/lodinative.cpp`).
+this under `WW_LODL_AO=1` (`src/lodinative.cpp`); with AO off it draws no AO of
+any kind, `selfAO` included (before AO2 the `selfAO` byte still reached meshes
+that carry a v5 colour stream, e.g. the Charles bridge deck).
+
+**Impostor cards take ONE value** (bungo, 2026-09-26): a placement drawn as an
+impostor tree card uses the v5 placement byte alone, never a per-vertex stream
+and never `selfAO`. Per-corner AO on a flat card smears a gradient across it and
+doubles the self-shading already painted into the card. A tree placement's
+stream belongs to its LOD MESH and applies only when that mesh is drawn.
 
 **Way back.** `--native-no-vertex-ao` writes a v5 file, byte-identical to hotfix 6
 (the stream is written last; no other offset moves). v6 requires the v5 blob.
 
-**Known.** The caster fires 8 rays, so a byte is one of 9 values (255, 228, …
-38); colour B had the same steps. A finer ladder is a caster change, not a
-format change. Urban region 0 -12 11 -1: 33,123 placements, 490,600 bytes, mean
+**Known.** The caster fires 8 rays, so a SAMPLE is one of 9 values (255, 228, …
+38); colour B had the same steps. Since AO2 a vertex is a weighted mean of many
+samples, so its byte is no longer on that ladder. The 8 rays never aim lower
+than about 8° over the tangent plane, so ground contact at the foot of a wall is
+weakly represented (unchanged by AO2). Urban region 0 -12 11 -1: 33,123 placements, 490,600 bytes, mean
 174.3 against `selfAO` 242.5 over the same vertices.
 
 ### 4.9 The group table (v7)
@@ -1660,6 +1761,41 @@ is refused by name, by both readers.
 **The cast** rides the same `place`/`perVertex` loop the v6 scene AO uses, in the
 same `LodgenAoScene`: `skyVisibility(p, 300)` — 9 rays, normal-independent,
 upper hemisphere, 2-unit Z offset. Same scene, same reach, same parallelism.
+
+**Since lane AO2 (2026-09-26) the stream is HORIZON-AWARE** (bungo: *"Yes, horizon
+aware would be preferable"*). The old 9 rays all lay within 45° of the zenith,
+so a street between towers that hid the sky below 45° read open.
+`LodgenAoScene::skyVisibilityFace`:
+
+* **Directions.** 7 elevation bands 0–10–20–30–45–60–75–90°, one ring per band
+  at the band's irradiance median `asin(√((sin²a + sin²b) / 2))` = 7.1°, 15.7°,
+  25.4°, 37.8°, 52.2°, 66.5°, 79.5°; 8 azimuths a ring, odd rings turned half a
+  step; 56 rays.
+* **Weights.** Each ring carries its band's share of the cosine-weighted sky
+  about +Z, `sin²b − sin²a` = .030, .087, .133, .250, .250, .183, .067 (sum 1),
+  split evenly over its 8 azimuths — the irradiance a horizontal receiver gets
+  from a uniform sky, the convention FO4CS Skylighting integrates in.
+* **Reach** 10,000 world units, FO4CS Skylighting's default maximum occluder
+  distance. Measured on Boston: of the blocked rays, 0.16% met their occluder
+  between 8,000 and 10,000 u, 1.2% between 4,000 and 8,000, 74.7% inside 250.
+* **Where the ray starts.** p + 2n (miniature units), at the same across-the-face
+  samples as the AO stream (§4.8), in the same per-ring scene.
+
+**Where it differs from FO4CS Skylighting** (read-only comparison): the same
+cosine-about-+Z weighting and the same 10,000 reach; FO4CS draws its directions
+from an R2 low-discrepancy sequence over many frames where we use fixed rings (a
+deterministic bake); its horizon bias (0.1) is not applied; and the terrain
+beyond the chunk field (the chunk plus one cell) is not in our scene, so the
+reach is cut at the field's edge.
+
+**What moves.** Boston, same classifier as §4.8: faces open to the sky 221.1 →
+252.2; faces under a 20…45° horizon (the refuter the old rays cannot see) 213.8
+→ 204.5, 47.7 below open where the old law put them 7.3 below; street floors and
+courtyards (≥ 30° at 4 of 8 azimuths) 152.4 → 136.6. By the law, a vertical wall
+now sees at most about half the sky and a down-facing soffit almost none: over
+every streamed vertex, walls 99.2 → 72.1, down-facing 74.4 → 24.7, all 105.8 →
+79.4. The 0x11 `sky` byte keeps the old law, so the stream and the byte are no
+longer two samplings of ONE law; the comparison below is the v7 record.
 
 **How it compares with the 0x11 byte, and the honest half.** On chunk 4.4.-12,
 2,449 placements:

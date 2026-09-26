@@ -889,15 +889,97 @@ bool lodoAppendMesh( LodoLibrary & lib, const std::vector<LodoSrcShape> & shapes
 						Vector3( c[0], c[1], c[2] ) );
 				}
 			const float maxT = std::max( 8.0f, meshRadius );
-			for ( LodoSrcShape & s : work ) {
+			/* ACROSS THE FACE, ONE VALUE PER POINT (lane AO2, 2026-09-26). The cast at
+			 * the vertex put a corner that sits inside the model's own walls (a bridge
+			 * deck's corner under its tower: all 8 rays meet BACK faces) at byte 38 and
+			 * smeared that across the whole open deck triangle; library-wide 14.8% of
+			 * the up-facing vertices were below 128, 71% of those buried. Now as the
+			 * native vertex AO (src/nativeemit.cpp steps 2 and 4): each triangle is
+			 * cut into k x k pieces (k = ceil(longest edge / 256 u), 1..4), the face
+			 * caster runs at each piece's centroid with the interpolated normal, a
+			 * vertex takes the area x barycentric weighted mean of its triangles'
+			 * samples, and copies at one position (0.5 u) with normals within 30 deg
+			 * pool theirs. WW_SELFAO_FACE=0 = the old cast at the vertex (the refuter). */
+			static const bool faceCast = qEnvironmentVariable( "WW_SELFAO_FACE", "1" ) != "0";
+			std::vector<size_t> base( work.size() + 1, 0 );
+			for ( size_t si = 0; si < work.size(); si++ )
+				base[si + 1] = base[si] + ( work[si].ao.size() == work[si].pos.size() / 3 ? 0 : work[si].pos.size() / 3 );
+			const size_t nAll = base.back();
+			std::vector<Vector3> ap( nAll ), an( nAll );
+			for ( size_t si = 0; si < work.size(); si++ )
+				for ( size_t v = 0; v < base[si + 1] - base[si]; v++ ) {
+					const LodoSrcShape & s = work[si];
+					ap[base[si] + v] = Vector3( s.pos[v * 3], s.pos[v * 3 + 1], s.pos[v * 3 + 2] );
+					Vector3 n( s.nrm[v * 3], s.nrm[v * 3 + 1], s.nrm[v * 3 + 2] );
+					an[base[si] + v] = n;
+				}
+			std::vector<double> aoAcc( nAll, 0.0 ), wAcc( nAll, 0.0 );
+			if ( faceCast ) {
+				constexpr float faceStep = 256.0f;
+				constexpr int faceMax = 4;
+				std::vector<float> pat[faceMax + 1];
+				for ( int k = 1; k <= faceMax; k++ )
+					LodgenAoScene::faceSamples( k, pat[k] );
+				for ( size_t si = 0; si < work.size(); si++ ) {
+					if ( base[si + 1] == base[si] )
+						continue;
+					const std::vector<quint32> & tr = work[si].tris;
+					for ( size_t t = 0; t + 2 < tr.size(); t += 3 ) {
+						const size_t ia = base[si] + tr[t], ib = base[si] + tr[t + 1], ic = base[si] + tr[t + 2];
+						const Vector3 & pa = ap[ia], & pb = ap[ib], & pc = ap[ic];
+						Vector3 fn = Vector3::crossproduct( pb - pa, pc - pa );
+						const float twice = fn.length();
+						if ( !( twice > 1e-12f ) )
+							continue;
+						fn = fn / twice;
+						const float edge = std::max( { ( pb - pa ).length(), ( pc - pb ).length(), ( pa - pc ).length() } );
+						const int k = std::min( faceMax, std::max( 1, int( std::ceil( edge / faceStep ) ) ) );
+						const double w = 0.5 * double( twice ) / double( k * k );
+						const std::vector<float> & pk = pat[k];
+						for ( size_t sI = 0; sI + 2 < pk.size(); sI += 3 ) {
+							const float wa = pk[sI], wb = pk[sI + 1], wc = pk[sI + 2];
+							const Vector3 p = pa * wa + pb * wb + pc * wc;
+							Vector3 n = an[ia] * wa + an[ib] * wb + an[ic] * wc;
+							if ( n.length() < 1e-4f )
+								n = fn;
+							n.normalize();
+							const double ao = scene.ambientOcclusionFace( p, n, maxT );
+							aoAcc[ia] += w * wa * ao;
+							aoAcc[ib] += w * wb * ao;
+							aoAcc[ic] += w * wc * ao;
+							wAcc[ia] += w * wa;
+							wAcc[ib] += w * wb;
+							wAcc[ic] += w * wc;
+						}
+					}
+				}
+				if ( nAll > 1 ) {
+					std::vector<Vector3> un( an );
+					for ( Vector3 & n : un )
+						if ( n.length() > 1e-6f )
+							n.normalize();
+					std::vector<quint32> node;
+					LodgenAoScene::weldNodes( ap, un, 2.0, std::cos( 30.0f * 3.14159265f / 180.0f ), node );
+					std::vector<double> aoN( nAll, 0.0 ), wN( nAll, 0.0 );
+					for ( size_t v = 0; v < nAll; v++ ) {
+						aoN[node[v]] += aoAcc[v];
+						wN[node[v]] += wAcc[v];
+					}
+					for ( size_t v = 0; v < nAll; v++ ) {
+						aoAcc[v] = aoN[node[v]];
+						wAcc[v] = wN[node[v]];
+					}
+				}
+			}
+			for ( size_t si = 0; si < work.size(); si++ ) {
+				LodoSrcShape & s = work[si];
 				const size_t nv = s.pos.size() / 3;
 				if ( s.ao.size() == nv )
 					continue;
 				s.ao.assign( nv, 255 );
 				for ( size_t v = 0; v < nv; v++ ) {
-					const Vector3 p( s.pos[v * 3], s.pos[v * 3 + 1], s.pos[v * 3 + 2] );
-					const Vector3 n( s.nrm[v * 3], s.nrm[v * 3 + 1], s.nrm[v * 3 + 2] );
-					const float ao = scene.ambientOcclusion( p, n, maxT );
+					const size_t g = base[si] + v;
+					const float ao = wAcc[g] > 0.0 ? float( aoAcc[g] / wAcc[g] ) : scene.ambientOcclusion( ap[g], an[g], maxT );
 					s.ao[v] = quint8( std::lround( std::min( 1.0f, std::max( 0.0f, ao ) ) * 255.0f ) );
 				}
 			}

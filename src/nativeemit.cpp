@@ -14,6 +14,7 @@ BSD License - see nifskope.h
 #include "lodgenao.h"
 #include "io/lodmfile.h"
 #include <array>
+#include <atomic>
 #include <limits>
 
 #include <QDir>
@@ -2592,7 +2593,9 @@ bool lodgenNativeWrite( QString * report, QString * error )
 	 * origin lies inside that field -- the chunk's own and the apron from the
 	 * neighbours -- and the same LodgenAoScene caster with the same 8 rays and
 	 * the same reach (300 miniature units = 300 x dim world units). One scene a
-	 * chunk, chunks in parallel. A card-drawn instance, a base with no mesh in
+	 * chunk and RING (lane AO2: a receiver drawn from MNAM slot s sees the slot-s
+	 * meshes only), cast across each face, not at the bare vertex; the law is at
+	 * the cast below. Chunks in parallel. A card-drawn instance, a base with no mesh in
 	 * its slot, or a chunk with no land record leaves its range EMPTY, which the
 	 * census counts. */
 	int vaoInstances = 0, vaoEmpty = 0, vaoChunks = 0, vaoNoLand = 0;
@@ -2601,6 +2604,13 @@ bool lodgenNativeWrite( QString * report, QString * error )
 	int vskyInstances = 0;
 	quint64 vskyBytes = 0, vskyOpen = 0;
 	double vskySum = 0.0;
+	// lane AO2: the face cast's census
+	float vaoFaceStep = 0.0f, vskyReach = 0.0f, vaoWeldDeg = -1.0f, vaoUnderTol = -1.0f, vaoPatchDeg = -1.0f;
+	bool vaoPatchSamples = false;
+	int vaoFaceMax = 0, vaoScenes = 0;
+	double vaoCastSeconds = 0.0;
+	quint64 vaoSamples = 0, vaoBuried = 0, vaoAtVertex = 0, vaoRingLeftOut = 0, vaoWelded = 0, vaoUnder = 0, vaoPatches = 0, vaoPatchTris = 0, vaoPatchSampleFit = 0;
+	std::array<quint64, 8> vskyHist{};
 	if ( s.vertexAo && s.placementAo && s.world ) {
 		set.vertexAo = true;
 		// v7: the sky stream rides the SAME loop, the same scene, the same reach
@@ -2688,6 +2698,92 @@ bool lodgenNativeWrite( QString * report, QString * error )
 		 * The read is serialized; the heights copy and the rays stay parallel, and
 		 * the bytes cannot move. */
 		QMutex landLock;
+		/* ---- lane AO2 (2026-09-26): WHAT THE STREAMS ARE CAST FROM, AND WHERE ----
+		 * bungo on the Boston oblique: "isn't the vertex AO kind of strong and placed
+		 * not in the right places?". Measured (scratchpad/ao2_20260926/DONE.md):
+		 *
+		 * 1. ONE RING A SCENE. The scene used to hold every placement's OWN kept-slot
+		 *    mesh. A building's far-ring stand-in (rep[0] empty, rep[2] = the whole
+		 *    building) then sat in the SAME scene as the near-ring kit pieces it
+		 *    replaces, and its lid 72 u above the Prudential's kit roof took 136 of
+		 *    136 rays. MNAM slot k is what ring k draws (an empty slot = not drawn at
+		 *    that distance, docs/LODGEN_NATIVE_LODO_LODI.md), so a receiver drawn from
+		 *    slot s is now cast against the slot-s mesh of every placement in the
+		 *    field, and a placement with no slot-s mesh is not in that scene.
+		 *
+		 * 2. ACROSS THE FACE (bungo: "Sample across the face sounds good"; "it is fine
+		 *    if the two corners would get equalized with also the whole face's
+		 *    context"). One cast per VERTEX drew a 1024 x 512 wall at the value of
+		 *    its four corners, and every corner stood inside a corner tower. Each
+		 *    triangle is now cut into k x k equal-area pieces (k = the longest edge /
+		 *    faceStep world units, 1..faceMax), each piece's centroid is cast with the
+		 *    interpolated normal, and a vertex takes the area x barycentric weighted
+		 *    mean of the samples of every triangle it belongs to. A vertex on no
+		 *    level-0 triangle is cast where it stands. Fixed pattern, fixed order,
+		 *    one chunk per thread and one placement per chunk: deterministic.
+		 *
+		 * 3. The v7 sky byte is the horizon-aware law (LodgenAoScene::skyVisibilityFace),
+		 *    cast at the same samples, reach skyReach world units.
+		 *
+		 * WW_AO_FACE_STEP / WW_AO_FACE_MAX / WW_SKY_REACH are research knobs for the
+		 * measurements that chose the defaults (DONE.md s2); WW_AO_FACE_STEP=0 casts
+		 * at the vertex alone. WW_AO_PROBE=x,y,z,r logs every SAMPLE within r world
+		 * units of (x,y,z): its AO rays, what each met (terrain, or which triangle of
+		 * which placement, front or back) and how far, to stderr. No byte depends on
+		 * the probe. */
+		float faceStep = 256.0f;
+		int faceMax = 4;
+		float skyReach = 10000.0f;
+		if ( qEnvironmentVariableIsSet( "WW_AO_FACE_STEP" ) )
+			faceStep = qMax( 0.0f, qEnvironmentVariable( "WW_AO_FACE_STEP" ).toFloat() );
+		if ( qEnvironmentVariableIsSet( "WW_AO_FACE_MAX" ) )
+			faceMax = qBound( 1, qEnvironmentVariable( "WW_AO_FACE_MAX" ).toInt(), 16 );
+		if ( qEnvironmentVariableIsSet( "WW_SKY_REACH" ) )
+			skyReach = qMax( 1.0f, qEnvironmentVariable( "WW_SKY_REACH" ).toFloat() );
+		float weldDeg = 30.0f;   // step 4 below; < 0 = off
+		if ( qEnvironmentVariableIsSet( "WW_AO_WELD_DEG" ) )
+			weldDeg = qMin( 180.0f, qEnvironmentVariable( "WW_AO_WELD_DEG" ).toFloat() );
+		vaoWeldDeg = weldDeg;
+		/* A sample more than underTol world u below the chunk's ground (the ESM
+		 * heightfield the rays march) is on a part of the mesh the terrain hides:
+		 * a foundation or the buried foot of a wall. All its rays meet the ground
+		 * within a few units, so it read ~0.26 and pulled the visible foot vertex
+		 * dark (lane AO2, the lone box on grass: its foot samples 1248-1479 u were
+		 * every one TERRAIN@32). Such samples are set aside: a vertex uses them only
+		 * when it has no sample above the ground (a vertex wholly buried), so it
+		 * still takes one welded value and never a per-copy cast; < 0 keeps them. */
+		float underTol = 32.0f;
+		if ( qEnvironmentVariableIsSet( "WW_AO_UNDER_TOL" ) )
+			underTol = qEnvironmentVariable( "WW_AO_UNDER_TOL" ).toFloat();
+		vaoUnderTol = underTol;
+		float patchDeg = 1.0f;   // step 5 below; < 0 = off. Measured: 44% of the edge area between adjacent
+		                          // triangles of the Boston library meshes lies within 0.1 deg (flat faces)
+		if ( qEnvironmentVariableIsSet( "WW_AO_PATCH_DEG" ) )
+			patchDeg = qMin( 89.0f, qEnvironmentVariable( "WW_AO_PATCH_DEG" ).toFloat() );
+		vaoPatchDeg = patchDeg;
+		const bool patchSamples = qEnvironmentVariable( "WW_AO_PATCH_FIT" ) != QStringLiteral( "vertex" );
+		vaoPatchSamples = patchSamples;
+		vaoFaceStep = faceStep;
+		vaoFaceMax = faceMax;
+		vskyReach = skyReach;
+		std::vector<std::vector<float>> samplePattern( size_t( faceMax ) + 1 );
+		for ( int k = 1; k <= faceMax; k++ )
+			LodgenAoScene::faceSamples( k, samplePattern[size_t( k )] );
+		float probe[4] = { 0, 0, 0, -1 };
+		{
+			const QStringList pl = qEnvironmentVariable( "WW_AO_PROBE" ).split( ',' );
+			if ( pl.size() == 4 )
+				for ( int k = 0; k < 4; k++ )
+					probe[k] = pl[k].toFloat();
+		}
+		QMutex probeLock;
+		std::atomic<quint64> aSamples{ 0 }, aBuried{ 0 }, aAtVertex{ 0 }, aRingLeftOut{ 0 }, aWelded{ 0 }, aUnder{ 0 }, aPatches{ 0 }, aPatchTris{ 0 }, aPatchSampleFit{ 0 };
+		std::atomic<int> aScenes{ 0 };
+		std::array<std::atomic<quint64>, 8> aSkyHist;
+		for ( auto & h : aSkyHist )
+			h = 0;
+		QElapsedTimer castClock;
+		castClock.start();
 		lodgenParallelFor( int( chunkKeys.size() ), [&]( int ci ) {
 			nativeNoteWorker();
 			const int cx = std::get<0>( chunkKeys[size_t( ci )] ), cy = std::get<1>( chunkKeys[size_t( ci )] );
@@ -2702,13 +2798,13 @@ bool lodgenNativeWrite( QString * report, QString * error )
 			 * its slab got the slab top darkened by its own second layer (bungo
 			 * 2026-09-18, "why is this area so dark on the AO?"). */
 			const float inv = 1.0f / float( dim );
-			LodgenAoScene scene;
-			scene.hn = cells * 32 + 1;
-			scene.hSpacing = 128.0f * inv;
-			scene.ox = float( cx - SKIRT ) * 4096.0f * inv;
-			scene.oy = float( cy - SKIRT ) * 4096.0f * inv;
-			scene.span = float( cells ) * 4096.0f * inv;
-			scene.hgt.assign( size_t( scene.hn ) * size_t( scene.hn ), s.world->defaultLandHeight() * inv );
+			LodgenAoScene ground;
+			ground.hn = cells * 32 + 1;
+			ground.hSpacing = 128.0f * inv;
+			ground.ox = float( cx - SKIRT ) * 4096.0f * inv;
+			ground.oy = float( cy - SKIRT ) * 4096.0f * inv;
+			ground.span = float( cells ) * 4096.0f * inv;
+			ground.hgt.assign( size_t( ground.hn ) * size_t( ground.hn ), s.world->defaultLandHeight() * inv );
 			int landCells = 0;
 			{
 				EsmLand land;
@@ -2723,7 +2819,7 @@ bool lodgenNativeWrite( QString * report, QString * error )
 							landCells++;
 							for ( int row = 0; row < 33; row++ )
 								for ( int col = 0; col < 33; col++ )
-									scene.hgt[size_t( ly * 32 + row ) * size_t( scene.hn ) + size_t( lx * 32 + col )] = land.heights[row][col] * inv;
+									ground.hgt[size_t( ly * 32 + row ) * size_t( ground.hn ) + size_t( lx * 32 + col )] = land.heights[row][col] * inv;
 						}
 					}
 			}
@@ -2731,11 +2827,11 @@ bool lodgenNativeWrite( QString * report, QString * error )
 				chunkNoLand[size_t( ci )] = 1;
 				return;
 			}
+			ground.prepareGround();
 			// every instance whose origin lies in the field: the chunk's own and the apron
-			const float x0 = scene.ox, x1 = scene.ox + scene.span, y0 = scene.oy, y1 = scene.oy + scene.span;  // miniature
-			auto place = [&]( const LodiSrcInstance & r, quint16 mid, auto && perVertex, bool addTris ) {
-				const DecodedMesh & d = dm[mid];
-				std::vector<Vector3> wp( d.count );
+			const float x0 = ground.ox, x1 = ground.ox + ground.span, y0 = ground.oy, y1 = ground.oy + ground.span;  // miniature
+			auto placed = [&]( const LodiSrcInstance & r, const DecodedMesh & d, std::vector<Vector3> & wp ) {
+				wp.resize( d.count );
 				for ( quint32 v = 0; v < d.count; v++ ) {
 					const float * lp = &d.pos[size_t( v ) * 3];
 					const float sx = lp[0] * r.scale, sy = lp[1] * r.scale, sz = lp[2] * r.scale;
@@ -2743,53 +2839,469 @@ bool lodgenNativeWrite( QString * report, QString * error )
 						( r.rot[3] * sx + r.rot[4] * sy + r.rot[5] * sz + r.pos[1] ) * inv,
 						( r.rot[6] * sx + r.rot[7] * sy + r.rot[8] * sz + r.pos[2] ) * inv );
 				}
-				if ( addTris )
-					for ( size_t t = 0; t + 2 < d.tris.size(); t += 3 ) {
-						const Vector3 & ta = wp[d.tris[t]], & tb = wp[d.tris[t + 1]], & tc = wp[d.tris[t + 2]];
-						scene.addTriangle( ta, tb, tc );
-					}
-				perVertex( d, wp );
 			};
-			auto noop = []( const DecodedMesh &, const std::vector<Vector3> & ) {};
-			for ( size_t i = 0; i < ni; i++ ) {
-				const LodiSrcInstance & r = set.instances[i];
-				if ( instMesh[i] == LODO_NO_MESH || instMesh[i] >= dm.size() || dm[instMesh[i]].count == 0 )
-					continue;
-				if ( r.pos[0] * inv < x0 || r.pos[0] * inv >= x1 || r.pos[1] * inv < y0 || r.pos[1] * inv >= y1 )
-					continue;
-				place( r, instMesh[i], noop, true );
-			}
-			const float maxT = 300.0f;  // miniature units = 300 x dim world units, as the .BTO cast
-			for ( quint32 i : chunkInst[size_t( ci )] ) {
-				LodiSrcInstance & r = set.instances[i];
-				if ( instMesh[i] == LODO_NO_MESH || instMesh[i] >= dm.size() || dm[instMesh[i]].count == 0 )
-					continue;
+			auto meshOk = [&]( quint16 mid ) { return mid != LODO_NO_MESH && mid < dm.size() && dm[mid].count > 0; };
+			// the receivers of this chunk, by the ring (MNAM slot) they are drawn from
+			std::map<int, std::vector<quint32>> bySlot;
+			for ( quint32 i : chunkInst[size_t( ci )] )
+				if ( meshOk( instMesh[i] ) )
+					bySlot[int( set.instances[i].mnamSlot )].push_back( i );
+			const float maxT = 300.0f;            // miniature units = 300 x dim world units, as the .BTO cast
+			const float skyT = skyReach * inv;    // the sky reach, world units -> miniature
+			quint64 hist[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
+			for ( const auto & slotRecv : bySlot ) {
+				const int slot = slotRecv.first;
+				LodgenAoScene scene = ground;
+				aScenes++;
+				std::vector<quint32> triOwner;   // WW_AO_PROBE only
+				std::vector<Vector3> wp;
+				for ( size_t i = 0; i < ni; i++ ) {
+					const LodiSrcInstance & r = set.instances[i];
+					if ( r.pos[0] * inv < x0 || r.pos[0] * inv >= x1 || r.pos[1] * inv < y0 || r.pos[1] * inv >= y1 )
+						continue;
+					if ( r.baseId >= lib.bases.size() )
+						continue;
+					const quint16 mid = lib.bases[r.baseId].rep[slot];
+					if ( !meshOk( mid ) ) {
+						if ( meshOk( instMesh[i] ) )
+							aRingLeftOut++;
+						continue;
+					}
+					const DecodedMesh & d = dm[mid];
+					placed( r, d, wp );
+					if ( probe[3] > 0 )
+						triOwner.resize( scene.tri.size() / 9 + d.tris.size() / 3, quint32( i ) );
+					for ( size_t t = 0; t + 2 < d.tris.size(); t += 3 )
+						scene.addTriangle( wp[d.tris[t]], wp[d.tris[t + 1]], wp[d.tris[t + 2]] );
+				}
 				const bool wantSky = set.vertexSky;
-				place( r, instMesh[i], [&]( const DecodedMesh & d, const std::vector<Vector3> & wp ) {
+				std::vector<Vector3> wn;
+				std::vector<double> aoAcc, skyAcc, wAcc, aoU, skyU, wU;
+				// step 5's fit data: the above-ground samples of each triangle, [sTri[t], sTri[t + 1])
+				std::vector<size_t> sTri;
+				std::vector<Vector3> sP;
+				std::vector<float> sAo, sSk;
+				std::vector<double> sW;
+				for ( quint32 i : slotRecv.second ) {
+					LodiSrcInstance & r = set.instances[i];
+					const DecodedMesh & d = dm[instMesh[i]];
+					placed( r, d, wp );
+					wn.resize( d.count );
+					for ( quint32 v = 0; v < d.count; v++ ) {
+						const float * ln = &d.nrm[size_t( v ) * 3];
+						Vector3 n( r.rot[0] * ln[0] + r.rot[1] * ln[1] + r.rot[2] * ln[2],
+							r.rot[3] * ln[0] + r.rot[4] * ln[1] + r.rot[5] * ln[2],
+							r.rot[6] * ln[0] + r.rot[7] * ln[1] + r.rot[8] * ln[2] );
+						n.normalize();
+						wn[v] = n;
+					}
+					aoAcc.assign( d.count, 0.0 );
+					skyAcc.assign( d.count, 0.0 );
+					wAcc.assign( d.count, 0.0 );
+					aoU.assign( d.count, 0.0 );
+					skyU.assign( d.count, 0.0 );
+					wU.assign( d.count, 0.0 );
+					sTri.assign( d.tris.size() / 3 + 1, 0 );
+					sP.clear();
+					sAo.clear();
+					sSk.clear();
+					sW.clear();
+					auto probeSample = [&]( const Vector3 & p, const Vector3 & n, float ao, float sk, bool buried ) {
+						if ( !( probe[3] > 0 ) || std::fabs( p[0] * dim - probe[0] ) >= probe[3]
+							|| std::fabs( p[1] * dim - probe[1] ) >= probe[3] || std::fabs( p[2] * dim - probe[2] ) >= probe[3] )
+							return;
+						static const float pd[8][3] = {
+							{ 0.7f, 0.0f, 0.7f }, { -0.7f, 0.0f, 0.7f }, { 0.0f, 0.7f, 0.7f }, { 0.0f, -0.7f, 0.7f },
+							{ 0.5f, 0.5f, 0.7f }, { -0.5f, 0.5f, 0.7f }, { 0.5f, -0.5f, 0.7f }, { -0.5f, -0.5f, 0.7f } };
+						QString line = QString( "AOPROBE chunk %1,%2,%3 slot %4 inst %5 %6 p %7,%8,%9 n %10,%11,%12 ao %13 sky %14%15:" )
+							.arg( cx ).arg( cy ).arg( dim ).arg( slot ).arg( i ).arg( r.baseName )
+							.arg( p[0] * dim, 0, 'f', 0 ).arg( p[1] * dim, 0, 'f', 0 ).arg( p[2] * dim, 0, 'f', 0 )
+							.arg( n[0], 0, 'f', 2 ).arg( n[1], 0, 'f', 2 ).arg( n[2], 0, 'f', 2 )
+							.arg( ao, 0, 'f', 3 ).arg( sk, 0, 'f', 3 ).arg( buried ? " BURIED" : "" );
+						const Vector3 o = p + n * 2.0f;
+						for ( const auto & dv : pd ) {
+							Vector3 dd( dv[0], dv[1], dv[2] );
+							dd = dd + n * 0.6f;
+							dd.normalize();
+							if ( Vector3::dotproduct( dd, n ) < 0.05f ) {
+								line += " skip";
+								continue;
+							}
+							LodgenAoScene::FaceHit h;
+							if ( !scene.rayHitFace( o, dd, maxT, &h ) )
+								line += " open";
+							else if ( h.tri < 0 )
+								line += QString( " TERRAIN@%1" ).arg( h.t * dim, 0, 'f', 0 );
+							else {
+								const quint32 own = h.tri < int( triOwner.size() ) ? triOwner[size_t( h.tri )] : 0xFFFFFFFFu;
+								line += QString( " TRI@%1(inst %2 %3 %4)" ).arg( h.t * dim, 0, 'f', 0 ).arg( own )
+									.arg( own < set.instances.size() ? set.instances[own].baseName.section( QChar( 92 ), -1 ) : QString( "?" ) )
+									.arg( h.back ? "back" : "front" );
+							}
+						}
+						QMutexLocker pk( &probeLock );
+						fprintf( stderr, "%s%c", line.toUtf8().constData(), 10 );
+					};
+					if ( faceStep > 0.0f ) {
+						for ( size_t t = 0; t + 2 < d.tris.size(); t += 3 ) {
+							sTri[t / 3] = sP.size();
+							const quint32 ia = d.tris[t], ib = d.tris[t + 1], ic = d.tris[t + 2];
+							const Vector3 & pa = wp[ia], & pb = wp[ib], & pc = wp[ic];
+							Vector3 fn = Vector3::crossproduct( pb - pa, pc - pa );
+							const float twice = fn.length();
+							if ( !( twice > 1e-12f ) )
+								continue;
+							fn = fn / twice;
+							const float edge = std::max( { ( pb - pa ).length(), ( pc - pb ).length(), ( pa - pc ).length() } ) * float( dim );
+							const int k = qBound( 1, int( std::ceil( edge / faceStep ) ), faceMax );
+							const std::vector<float> & pat = samplePattern[size_t( k )];
+							const double w = 0.5 * double( twice ) / double( k * k );
+							for ( size_t sI = 0; sI + 2 < pat.size(); sI += 3 ) {
+								const float wa = pat[sI], wb = pat[sI + 1], wc = pat[sI + 2];
+								const Vector3 p = pa * wa + pb * wb + pc * wc;
+								Vector3 n = wn[ia] * wa + wn[ib] * wb + wn[ic] * wc;
+								if ( n.length() < 1e-4f )
+									n = fn;
+								n.normalize();
+								const bool under = underTol >= 0.0f && scene.hn
+									&& p[2] < scene.groundHeight( p[0], p[1] ) - underTol / float( dim );
+								bool buried = false;
+								const float ao = scene.ambientOcclusionFace( p, n, maxT, &buried );
+								const float sk = wantSky ? scene.skyVisibilityFace( p, n, skyT, float( dim ), hist ) : 0.0f;
+								if ( under ) {
+									// kept apart: used only by a vertex with no sample above the ground
+									aUnder++;
+									const quint32 vs[3] = { ia, ib, ic };
+									const float ws[3] = { wa, wb, wc };
+									for ( int c = 0; c < 3; c++ ) {
+										aoU[vs[c]] += w * ws[c] * ao;
+										skyU[vs[c]] += w * ws[c] * sk;
+										wU[vs[c]] += w * ws[c];
+									}
+									continue;
+								}
+								aSamples++;
+								if ( buried )
+									aBuried++;
+								probeSample( p, n, ao, sk, buried );
+								sP.push_back( p );
+								sAo.push_back( ao );
+								sSk.push_back( sk );
+								sW.push_back( w );
+								const quint32 vs[3] = { ia, ib, ic };
+								const float ws[3] = { wa, wb, wc };
+								for ( int c = 0; c < 3; c++ ) {
+									aoAcc[vs[c]] += w * ws[c] * ao;
+									skyAcc[vs[c]] += w * ws[c] * sk;
+									wAcc[vs[c]] += w * ws[c];
+								}
+							}
+						}
+					}
+					sTri[d.tris.size() / 3] = sP.size();
+					/* 4. ONE VALUE PER SURFACE POINT (lane AO2, bungo 2026-09-26: "These
+					 * split lines", on the ballpark roof, the tower faces and a lone box).
+					 * A mesh splits a corner into copies for its UVs or its smoothing;
+					 * step 2 gave each copy the mean of ITS OWN triangles only, so two
+					 * copies at one point on one flat face drew two values, and the
+					 * rasteriser a hard step between the triangles (Boston: 101,050
+					 * co-located pairs with equal normals, mean jump 0 -> 25 bytes,
+					 * 48% above 16). Copies at the same position (0.5 world u) whose
+					 * normals lie within weldDeg pool their samples and share one value.
+					 * 30 deg = Blender's auto-smooth default; across a crease of angle a
+					 * the two hemispheres differ by a lune of a/180 of the hemisphere, so
+					 * pooling below 30 deg moves at most 1/6 of the rays. Copies across a
+					 * sharper crease keep their own values. WW_AO_WELD_DEG=-1 turns the
+					 * pooling off (the refuter: bytes as ee52efc0). */
+					std::vector<quint32> node;
+					if ( weldDeg >= 0.0f && d.count > 1 ) {
+						aWelded += LodgenAoScene::weldNodes( wp, wn, double( dim ) * 2.0, std::cos( weldDeg * 3.14159265f / 180.0f ), node );
+						std::vector<double> aoN( d.count, 0.0 ), skyN( d.count, 0.0 ), wN( d.count, 0.0 );
+						std::vector<double> aoUN( d.count, 0.0 ), skyUN( d.count, 0.0 ), wUN( d.count, 0.0 );
+						for ( quint32 v = 0; v < d.count; v++ ) {
+							aoN[node[v]] += aoAcc[v];
+							skyN[node[v]] += skyAcc[v];
+							wN[node[v]] += wAcc[v];
+							aoUN[node[v]] += aoU[v];
+							skyUN[node[v]] += skyU[v];
+							wUN[node[v]] += wU[v];
+						}
+						for ( quint32 v = 0; v < d.count; v++ ) {
+							aoAcc[v] = aoN[node[v]];
+							skyAcc[v] = skyN[node[v]];
+							wAcc[v] = wN[node[v]];
+							aoU[v] = aoUN[node[v]];
+							skyU[v] = skyUN[node[v]];
+							wU[v] = wUN[node[v]];
+						}
+					}
+					std::vector<float> aoV( d.count, 0.0f ), skV( d.count, 0.0f );
+					for ( quint32 v = 0; v < d.count; v++ ) {
+						float ao, sk = 0.0f;
+						if ( wAcc[v] > 0.0 ) {
+							ao = float( aoAcc[v] / wAcc[v] );
+							sk = float( skyAcc[v] / wAcc[v] );
+						} else if ( wU[v] > 0.0 ) {
+							// every sample under the ground: their mean, still one value per welded point
+							ao = float( aoU[v] / wU[v] );
+							sk = float( skyU[v] / wU[v] );
+						} else {
+							// on no triangle (or WW_AO_FACE_STEP=0): cast where it stands
+							bool buried = false;
+							ao = scene.ambientOcclusionFace( wp[v], wn[v], maxT, &buried );
+							if ( wantSky )
+								sk = scene.skyVisibilityFace( wp[v], wn[v], skyT, float( dim ), hist );
+							aAtVertex++;
+							if ( buried )
+								aBuried++;
+							probeSample( wp[v], wn[v], ao, sk, buried );
+						}
+						aoV[v] = ao;
+						skV[v] = sk;
+					}
+					/* 5. FLAT PATCHES (lane AO2; bungo 2026-09-26: "The answer would be, to
+					 * merge flat geometry"). The mesh is not edited (authored LOD meshes are
+					 * never changed, and its split copies exist for their UVs): the VALUES
+					 * are merged. Triangles joined through shared corner positions whose face
+					 * normals lie within patchDeg of the seed triangle's, with every corner
+					 * within 2 world u of its plane, form one flat patch. A patch takes ONE
+					 * linear field a + b u + c v in its plane: the area-weighted least-squares
+					 * fit to its corners' values, clamped to their range. Any triangulation
+					 * draws a linear field exactly, so no single corner can draw a diagonal
+					 * across a flat face, and a corner's copies on one patch get one value.
+					 * Creases (normals further apart than patchDeg) are patch borders and keep
+					 * their own values. A corner on several patches, or also on a loose
+					 * triangle, takes the area-weighted mean; copies are then pooled again as
+					 * in step 4. WW_AO_PATCH_DEG < 0 turns this off (bytes as step 4 alone). */
+					const size_t nt = d.tris.size() / 3;
+					if ( patchDeg >= 0.0f && nt >= 2 ) {
+						std::vector<quint32> pnode;
+						LodgenAoScene::weldNodes( wp, wn, double( dim ) * 2.0, -2.0f, pnode );
+						std::vector<Vector3> fnT( nt );
+						std::vector<double> arT( nt, 0.0 );
+						for ( size_t t = 0; t < nt; t++ ) {
+							const Vector3 & pa = wp[d.tris[3 * t]], & pb = wp[d.tris[3 * t + 1]], & pc = wp[d.tris[3 * t + 2]];
+							Vector3 fn = Vector3::crossproduct( pb - pa, pc - pa );
+							const float len = fn.length();
+							if ( len > 1e-12f ) {
+								fnT[t] = fn / len;
+								arT[t] = 0.5 * double( len ) * double( dim ) * double( dim );
+							}
+						}
+						std::vector<std::pair<quint64, quint32>> edges;
+						edges.reserve( nt * 3 );
+						for ( size_t t = 0; t < nt; t++ )
+							for ( size_t e = 0; e < 3; e++ ) {
+								const quint32 a = pnode[d.tris[3 * t + e]], b = pnode[d.tris[3 * t + ( e + 1 ) % 3]];
+								if ( a != b )
+									edges.push_back( { ( quint64( std::min( a, b ) ) << 32 ) | quint64( std::max( a, b ) ), quint32( t ) } );
+							}
+						std::sort( edges.begin(), edges.end() );
+						std::vector<std::vector<quint32>> nbr( nt );
+						for ( size_t e0 = 0; e0 < edges.size(); ) {
+							size_t e1 = e0 + 1;
+							while ( e1 < edges.size() && edges[e1].first == edges[e0].first )
+								e1++;
+							for ( size_t x = e0; x < e1; x++ )
+								for ( size_t y = e0; y < e1; y++ )
+									if ( x != y && edges[x].second != edges[y].second )
+										nbr[edges[x].second].push_back( edges[y].second );
+							e0 = e1;
+						}
+						const float cosP = std::cos( patchDeg * 3.14159265f / 180.0f );
+						const float tolD = 2.0f / float( dim );
+						std::vector<qint32> patch( nt, -1 );
+						std::vector<quint8> fitted( nt, 0 );
+						std::vector<double> fAo( d.count, 0.0 ), fSk( d.count, 0.0 ), fW( d.count, 0.0 );
+						std::vector<quint32> members, stack;
+						for ( size_t t0 = 0; t0 < nt; t0++ ) {
+							if ( patch[t0] >= 0 || !( arT[t0] > 0.0 ) )
+								continue;
+							const Vector3 n0 = fnT[t0];
+							const Vector3 o = wp[d.tris[3 * t0]];
+							members.clear();
+							stack.assign( 1, quint32( t0 ) );
+							patch[t0] = qint32( t0 );
+							while ( !stack.empty() ) {
+								const quint32 t = stack.back();
+								stack.pop_back();
+								members.push_back( t );
+								for ( quint32 t2 : nbr[t] ) {
+									if ( patch[t2] >= 0 || !( arT[t2] > 0.0 ) || Vector3::dotproduct( fnT[t2], n0 ) < cosP )
+										continue;
+									bool onPlane = true;
+									for ( size_t c = 0; c < 3; c++ )
+										if ( std::fabs( Vector3::dotproduct( wp[d.tris[3 * size_t( t2 ) + c]] - o, n0 ) ) > tolD )
+											onPlane = false;
+									if ( !onPlane )
+										continue;
+									patch[t2] = qint32( t0 );
+									stack.push_back( t2 );
+								}
+							}
+							if ( members.size() < 2 )
+								continue;   // one triangle draws its own linear field already
+							Vector3 u = std::fabs( n0[0] ) < 0.9f ? Vector3::crossproduct( n0, Vector3( 1, 0, 0 ) )
+								: Vector3::crossproduct( n0, Vector3( 0, 1, 0 ) );
+							u.normalize();
+							const Vector3 vv = Vector3::crossproduct( n0, u );
+							auto coords = [&]( quint32 vi, double x[3] ) {
+								const Vector3 q = wp[vi] - o;
+								x[0] = 1.0;
+								x[1] = double( Vector3::dotproduct( q, u ) ) * double( dim );
+								x[2] = double( Vector3::dotproduct( q, vv ) ) * double( dim );
+							};
+							auto det3 = []( const double m[3][3] ) {
+								return m[0][0] * ( m[1][1] * m[2][2] - m[1][2] * m[2][1] ) - m[0][1] * ( m[1][0] * m[2][2] - m[1][2] * m[2][0] )
+									+ m[0][2] * ( m[1][0] * m[2][1] - m[1][1] * m[2][0] );
+							};
+							double M[3][3], bA[3], bS[3], loA, hiA, loS, hiS, det = 0.0;
+							auto clearFit = [&]() {
+								for ( int i = 0; i < 3; i++ ) {
+									bA[i] = bS[i] = 0.0;
+									for ( int j = 0; j < 3; j++ )
+										M[i][j] = 0.0;
+								}
+								loA = loS = 1e9;
+								hiA = hiS = -1e9;
+							};
+							auto addFit = [&]( const double x[3], double w, double a, double sv ) {
+								for ( int i = 0; i < 3; i++ ) {
+									for ( int j = 0; j < 3; j++ )
+										M[i][j] += w * x[i] * x[j];
+									bA[i] += w * x[i] * a;
+									bS[i] += w * x[i] * sv;
+								}
+								loA = std::min( loA, a );
+								hiA = std::max( hiA, a );
+								loS = std::min( loS, sv );
+								hiS = std::max( hiS, sv );
+							};
+							auto solvable = [&]() {
+								det = det3( M );
+								return std::fabs( det ) > 1e-9 * std::fabs( M[0][0] * M[1][1] * M[2][2] );
+							};
+							bool ok = false;
+							if ( patchSamples ) {
+								/* Fit the SAMPLES, not the corner values: the corner values are
+								 * hat-weighted means that flatten a gradient (a wall foot read 12 bytes
+								 * under its top against 33 at the corners before AO2); the samples' own
+								 * least-squares plane keeps it. bungo 2026-09-26: "You can try more
+								 * darkening at the bottom". WW_AO_PATCH_FIT=vertex = the corner fit. */
+								clearFit();
+								for ( quint32 t : members )
+									for ( size_t k = sTri[t]; k < sTri[size_t( t ) + 1]; k++ ) {
+										const Vector3 q = sP[k] - o;
+										const double x[3] = { 1.0, double( Vector3::dotproduct( q, u ) ) * double( dim ),
+											double( Vector3::dotproduct( q, vv ) ) * double( dim ) };
+										addFit( x, sW[k], double( sAo[k] ), double( sSk[k] ) );
+									}
+								ok = solvable();
+								if ( ok ) {
+									aPatchSampleFit++;
+									// the samples lie inside the patch and its corners outside them: clamping the corners to
+									// the samples' range would bend the plane there (a kink), so only 0..1 applies
+									loA = loS = 0.0;
+									hiA = hiS = 1.0;
+								}
+							}
+							if ( !ok ) {
+								clearFit();
+								for ( quint32 t : members )
+									for ( size_t c = 0; c < 3; c++ ) {
+										const quint32 vi = d.tris[3 * size_t( t ) + c];
+										double x[3];
+										coords( vi, x );
+										addFit( x, arT[t] / 3.0, double( aoV[vi] ), double( skV[vi] ) );
+									}
+								ok = solvable();
+							}
+							if ( !ok )
+								continue;   // corners on one line: no plane to fit, keep the values
+							auto solve = [&]( const double b[3], double cf[3] ) {
+								for ( int k = 0; k < 3; k++ ) {
+									double Mk[3][3];
+									for ( int i = 0; i < 3; i++ )
+										for ( int j = 0; j < 3; j++ )
+											Mk[i][j] = j == k ? b[i] : M[i][j];
+									cf[k] = det3( Mk ) / det;
+								}
+							};
+							double cA[3], cS[3];
+							solve( bA, cA );
+							solve( bS, cS );
+							aPatches++;
+							aPatchTris += members.size();
+							for ( quint32 t : members ) {
+								fitted[t] = 1;
+								for ( size_t c = 0; c < 3; c++ ) {
+									const quint32 vi = d.tris[3 * size_t( t ) + c];
+									double x[3];
+									coords( vi, x );
+									const double w = arT[t] / 3.0;
+									fAo[vi] += w * std::clamp( cA[0] + cA[1] * x[1] + cA[2] * x[2], loA, hiA );
+									fSk[vi] += w * std::clamp( cS[0] + cS[1] * x[1] + cS[2] * x[2], loS, hiS );
+									fW[vi] += w;
+								}
+							}
+						}
+						// a corner also on loose (unfitted) triangles keeps their share of its own value
+						for ( size_t t = 0; t < nt; t++ ) {
+							if ( fitted[t] || !( arT[t] > 0.0 ) )
+								continue;
+							for ( size_t c = 0; c < 3; c++ ) {
+								const quint32 vi = d.tris[3 * t + c];
+								const double w = arT[t] / 3.0;
+								fAo[vi] += w * double( aoV[vi] );
+								fSk[vi] += w * double( skV[vi] );
+								fW[vi] += w;
+							}
+						}
+						if ( !node.empty() ) {
+							std::vector<double> aoN( d.count, 0.0 ), skN( d.count, 0.0 ), wN( d.count, 0.0 );
+							for ( quint32 v = 0; v < d.count; v++ ) {
+								aoN[node[v]] += fAo[v];
+								skN[node[v]] += fSk[v];
+								wN[node[v]] += fW[v];
+							}
+							for ( quint32 v = 0; v < d.count; v++ ) {
+								fAo[v] = aoN[node[v]];
+								fSk[v] = skN[node[v]];
+								fW[v] = wN[node[v]];
+							}
+						}
+						for ( quint32 v = 0; v < d.count; v++ )
+							if ( fW[v] > 0.0 ) {
+								aoV[v] = float( fAo[v] / fW[v] );
+								skV[v] = float( fSk[v] / fW[v] );
+							}
+					}
 					r.vertexAo.resize( d.count );
 					if ( wantSky )
 						r.vertexSky.resize( d.count );
 					for ( quint32 v = 0; v < d.count; v++ ) {
-						const float * ln = &d.nrm[size_t( v ) * 3];
-						Vector3 wn( r.rot[0] * ln[0] + r.rot[1] * ln[1] + r.rot[2] * ln[2],
-							r.rot[3] * ln[0] + r.rot[4] * ln[1] + r.rot[5] * ln[2],
-							r.rot[6] * ln[0] + r.rot[7] * ln[1] + r.rot[8] * ln[2] );
-						wn.normalize();
-						const float ao = scene.ambientOcclusion( wp[v], wn, maxT );
-						r.vertexAo[v] = quint8( std::lround( std::min( 1.0f, std::max( 0.0f, ao ) ) * 255.0f ) );
-						if ( wantSky ) {
-							/* v7 (bungo: "We need per vertex sky visbility too").
-							 * The SAME caster, the SAME scene, the SAME reach in
-							 * the SAME miniature units as the AO byte beside it --
-							 * `skyVisibility` is normal-independent by design, so
-							 * the normal above is not passed to it. */
-							const float sk = scene.skyVisibility( wp[v], maxT );
-							r.vertexSky[v] = quint8( std::lround( std::min( 1.0f, std::max( 0.0f, sk ) ) * 255.0f ) );
-						}
+						r.vertexAo[v] = quint8( std::lround( std::min( 1.0f, std::max( 0.0f, aoV[v] ) ) * 255.0f ) );
+						if ( wantSky )
+							r.vertexSky[v] = quint8( std::lround( std::min( 1.0f, std::max( 0.0f, skV[v] ) ) * 255.0f ) );
 					}
-				}, false );
+				}
 			}
+			for ( int b = 0; b < 8; b++ )
+				aSkyHist[size_t( b )] += hist[b];
 		} );
+		vaoCastSeconds = double( castClock.elapsed() ) / 1000.0;
+		vaoSamples = aSamples;
+		vaoBuried = aBuried;
+		vaoAtVertex = aAtVertex;
+		vaoRingLeftOut = aRingLeftOut;
+		vaoWelded = aWelded;
+		vaoUnder = aUnder;
+		vaoPatches = aPatches;
+		vaoPatchTris = aPatchTris;
+		vaoPatchSampleFit = aPatchSampleFit;
+		vaoScenes = aScenes;
+		for ( int b = 0; b < 8; b++ )
+			vskyHist[size_t( b )] = aSkyHist[size_t( b )];
 		vaoChunks = int( chunkKeys.size() );
 		for ( int x : chunkNoLand )
 			vaoNoLand += x;
@@ -3415,15 +3927,38 @@ bool lodgenNativeWrite( QString * report, QString * error )
 			.arg( s.vertexAo && s.placementAo ? QString( "ON: %1 instances streamed (%2 bytes, mean %3, %4 below 128), %5 empty, %6 chunk(s) cast, %7 without land" )
 				.arg( vaoInstances ).arg( vaoBytes ).arg( vaoBytes ? vaoSum / double( vaoBytes ) : 0.0, 0, 'f', 1 ).arg( vaoDark )
 				.arg( vaoEmpty ).arg( vaoChunks ).arg( vaoNoLand )
+				+ QString( "; face cast (lane AO2): %1 ring scene(s), %2 placement(s) left out of a ring they have no mesh in, "
+					"%3 sample(s) across the faces (k x k a triangle, k = longest edge / %4 u, 1..%5), %6 vertex(es) on no triangle cast where they stand, "
+					"%7 buried (every ray met a back face), cast %8 s; %9" )
+					.arg( vaoScenes ).arg( vaoRingLeftOut ).arg( vaoSamples )
+					.arg( double( vaoFaceStep ), 0, 'f', 0 ).arg( vaoFaceMax ).arg( vaoAtVertex ).arg( vaoBuried )
+					.arg( vaoCastSeconds, 0, 'f', 1 )
+					.arg( ( vaoWeldDeg >= 0.0f ? QString( "%1 split vertex copies pooled with a co-located copy within %2 deg (one value a surface point)" )
+							.arg( vaoWelded ).arg( double( vaoWeldDeg ), 0, 'f', 0 )
+						: QStringLiteral( "split copies NOT pooled (WW_AO_WELD_DEG < 0)" ) )
+						+ ( vaoUnderTol >= 0.0f ? QString( "; %1 sample(s) more than %2 u under the ground set aside" )
+							.arg( vaoUnder ).arg( double( vaoUnderTol ), 0, 'f', 0 )
+						: QStringLiteral( "; samples under the ground KEPT (WW_AO_UNDER_TOL < 0)" ) )
+						+ ( vaoPatchDeg >= 0.0f ? QString( "; %1 flat patch(es) of %2 triangles given one linear field each (normals within %3 deg)" )
+							.arg( vaoPatches ).arg( vaoPatchTris ).arg( double( vaoPatchDeg ), 0, 'f', 1 )
+							+ ( vaoPatchSamples ? QString( ", %1 fitted to their samples, the rest to their corners" ).arg( vaoPatchSampleFit )
+								: QStringLiteral( ", fitted to their corners (WW_AO_PATCH_FIT=vertex)" ) )
+						: QStringLiteral( "; flat patches NOT fitted (WW_AO_PATCH_DEG < 0)" ) ) )
 				: QStringLiteral( "OFF (--native-no-vertex-ao)" ) );
 		/* v7 (2026-09-18, lane LODIV7). Both halves state their OFF value by
 		 * the switch that turns them off, so a reader of the census never has
 		 * to guess whether a zero means "measured none" or "never ran". */
 		ladderLine += QString( "; vertex sky %1" )
 			.arg( s.lodiV7 && s.vertexAo && s.placementAo
-				? QString( "ON: %1 placements streamed (%2 bytes, mean %3, %4 at or above 128)" )
+				? QString( "ON: %1 placements streamed (%2 bytes, mean %3, %4 at or above 128); horizon-aware, %5 rays "
+					"(%6 rings x %7 azimuths, irradiance-weighted), reach %8 u; blocked rays by nearest hit (world u) "
+					"<250 %9, <500 %10, <1000 %11, <2000 %12, <4000 %13, <8000 %14, <16000 %15, beyond %16" )
 					.arg( vskyInstances ).arg( vskyBytes )
 					.arg( vskyBytes ? vskySum / double( vskyBytes ) : 0.0, 0, 'f', 1 ).arg( vskyOpen )
+					.arg( LodgenAoScene::SKY_RINGS * LodgenAoScene::RING_AZ ).arg( LodgenAoScene::SKY_RINGS ).arg( LodgenAoScene::RING_AZ )
+					.arg( double( vskyReach ), 0, 'f', 0 )
+					.arg( vskyHist[0] ).arg( vskyHist[1] ).arg( vskyHist[2] ).arg( vskyHist[3] )
+					.arg( vskyHist[4] ).arg( vskyHist[5] ).arg( vskyHist[6] ).arg( vskyHist[7] )
 				: QStringLiteral( "OFF (--lodi-v6)" ) );
 		ladderLine += QString( "; groups %1" )
 			.arg( s.lodiV7
