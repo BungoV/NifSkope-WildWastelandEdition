@@ -326,6 +326,7 @@ HEADERS += \
 	src/lodtsheets.h \
 	src/lodgenaggregate.h \
 	src/nativeemit.h \
+	src/nearlib.h \
 	src/watermark.h \
 	src/watermarkpanel.h \
 	src/watercurves.h \
@@ -548,6 +549,7 @@ SOURCES += \
 	src/lodtsheets.cpp \
 	src/lodgenaggregate.cpp \
 	src/nativeemit.cpp \
+	src/nearlib.cpp \
 	src/watermark.cpp \
 	src/watermarkpanel.cpp \
 	src/watercurves.cpp \
