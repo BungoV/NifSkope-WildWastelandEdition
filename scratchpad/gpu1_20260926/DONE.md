@@ -114,3 +114,31 @@ image mask every pass of every frame; the work it does is small.
   decode and the cache lookup, which stay on the CPU. The big saving there (~2500 s) is fanning the tile loop
   over the cores, a CPU change; the loop shares the land/mask caches, the census and the sheet state, so it is
   a lane of its own (see section 5, what is left).
+
+## 4. Gates with numbers
+
+### Boston box (-8 -12 3 -1), whole bake tree (253 files), `cmp_trees.sh` (sha1 of every file; masks only the exe digest in chunk keys and the run path in the flat-objects report)
+| pair | result | what it proves |
+|---|---|---|
+| rung exe vs dilate + join fixes (cpu1) | SAME, 253 files | the CPU fixes keep every byte |
+| gpuA vs gpuB (GPU on, two runs) | SAME, 253 files | the GPU path is deterministic |
+| cpu1 vs cpu2 (`--no-gpu`) | SAME, 253 files | the switch gives today's CPU bytes |
+| cpu1 vs off (setting Use GPU planted off) | SAME, 253 files | the setting gives today's CPU bytes |
+| cpu1 vs gpuA | 36 files differ, all expected | 16 card normal arrays (`_n`), the .lodb, the .lodo/.lodi (header CRC + card corpus hash), 17 .key files (digest word `|bc7gpu`) |
+
+### Quality gate, card normal sheets (the only BC7 class in the bake), on the CPU encoder's own error measure
+- 79 card normal sheets (`gputest`, the lane's offline harness around the product encoder, gt5.out): class total
+  CPU 6254874358, GPU 6254772022 (GPU lower); 18 single images above the CPU, worst +0.011%. Every GPU block
+  decodes (detex) to exactly its reported error; two GPU runs identical per image. GATE PASS.
+- Decoded difference in the bake (dds_diff.py, cpu2 vs gpuA, the 16 `_n` arrays, top mip): 99.73% of pixels
+  identical, worst |d| 52 of 255 on one channel of one texel; the class error above is the measure that counts.
+- Start-up self-check in the product (every run): GPU 26082378 <= CPU 26090366 on the fixed test image.
+
+### Settings row (GUI harness WW_USEGPU_TEST, second monitor, own settings scope, Use GPU PLANTED off)
+- The bake read "off" before the dialog opened (the planted state was really read); the row is labelled
+  "Use GPU" in the group "LOD bake" (one label there), opens unchecked, and ticking/unticking it stores
+  true/false and the bake reads on/off. PASS. Scope wiped afterwards.
+
+### Pictures
+- Boston oblique, CPU over GPU: pixel-identical, because the view draws the card albedo, not the card normal
+  arrays; the normal difference is shown separately (card_normal_cpu_gpu_diff.png, amplified).
