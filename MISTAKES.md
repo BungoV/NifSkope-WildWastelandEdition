@@ -5,6 +5,14 @@ Written the moment a mistake is recognised, unprompted (CONSTITUTION rule 2).
 Format: date -- what was done -- what was true -- how it was found -- the rule.
 Newest at the top.
 
+## 2026-09-26 -- lane SWAP1 (lane text)
+
+- 2026-09-25 SWAP1: folded every REFR's XMSP into objectCorpusHash. A swap on a non-LOD reference cannot change
+  the library, yet it moved the hash and lodoIdentity of pre-war Sanctuary. The synthetic fixture passed; only G1
+  on a REAL worldspace caught it. Rule: fold only what can reach the file, and run G1 on a real worldspace too.
+- 2026-09-25 SWAP1: counted CNAM only on rows that change the material, so colour-remap-only rows (BNAM = SNAM +
+  CNAM) went uncounted -- the census under-reported the colour lodgen drops. Count before the skip.
+
 ## 2026-09-25 -- lane TOWER1 (lane text)
 
 2026-09-25 23:1x TOWER1 (for GREY1's record): GREY1 concluded that "the swap never reaches the LOD; that is

@@ -60,6 +60,21 @@ committed" or names an exe, this block overrides it.
 - Re-run the command-line bakes since 09-19 that used --data-root.
 
 ### Lane and director lines, 2026-09-24, newest first
+- 2026-09-26 02:10 SWAP1:
+  SWAP1 (2026-09-25/26, branch swap1-20260925, worktree E:\Projects\NifskopeWWE-swap1, not merged or pushed):
+  lodgen now applies material swaps (REFR XMSP, else the base's MODS -> MSWP BNAM/SNAM rows) to the native object
+  library. **.lodo FORMAT CHANGED 5 -> 6** (variant base rows: same formId, last u32 = materialSwap, flag SWAPPED;
+  table sorted by (formId, materialSwap)); .lodi unchanged. A worldspace with no swap on a LOD placement bakes
+  byte-identical to v5 except the version word (G1 GREEN on the fixture and pre-war Sanctuary). Refuter GREEN:
+  towers A/B linear Y 0.179/0.197 -> 0.376/0.379 (vanilla 0.377/0.379), control C 0.136; rendered base colour A
+  0.185 -> 0.464 (vanilla 0.458). CNAM colour remap is counted, not applied. Cards stay unswapped.
+  OWED: the FO4CS reader must learn .lodo v6 (queued after this lane; standing order, FO4CS last) -- until then
+  FO4CS refuses the installed v6 libraries. Merge of swap1-20260925 is the director's.
+  INSTALLED 2026-09-26 01:45-02:00 (object library only, .lodb and terrain kept, backups in the lane's replaced/):
+  Commonwealth .lodo 51b19e76->50e9ad63 .lodi eaf1fe5e->cf0cde74 (census 21,064 = TOWER1); SanctuaryHillsWorld .lodo
+  ba723d9d->62cb4bc3 (0x04 only, no swaps); DLC03FarHarbor .lodo f11526bb->34731684 .lodi 064a2da7->ad338fbc (62 variant
+  rows); NukaWorld .lodo 4e440bbc->bc3f21c8 .lodi d3bc06bc->27ad56bc (496 variant rows). All four pass the C++
+  --native-verify. The kept .lodb's objectCorpusHash is stale: the next object bake will not offer reuse (safe).
 - 2026-09-25 23:09 TOWER1:
   TOWER1 (2026-09-25 22:26-23:10, branch tower1-20260925, commits 0aa2465b + e872a753, not merged): the grey
   downtown Boston towers are a real bake defect, not a tint. Our lodgen drops the material swaps that vanilla bakes

@@ -1,5 +1,13 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## SWAP1
+
+- **LOD buildings keep their vanilla colourways (material swaps).** A placed building whose record swaps its
+  materials (REFR XMSP, or its base's MODS) now gets its own LOD row with those materials swapped, as the
+  Creation Kit bakes into vanilla's LOD atlas. The white/cream high-rise towers of downtown Boston no longer
+  draw as dark blue-grey. The `.lodo` library is now version 6; the bake log's `native-material-swaps:` line
+  counts what was swapped. Colour-remap indices (CNAM) are counted but not yet applied.
+
 ## TOWER1
 
 2026-09-25 TOWER1 (measurement only, no code): found that far-LOD buildings lose vanilla's material swaps (MSWP
