@@ -1544,6 +1544,29 @@ the right places?"*. Two measured causes, two changes; the ray law itself
    of 2,303,975 samples set aside; the lone box's foot 97 → 141, its diagonal
    step 16 → 11. `WW_AO_UNDER_TOL` (world u, default 32, < 0 = keep, bytes as the
    weld-only bake) is the research knob.
+5. *Flat patches* (bungo: *"The answer would be, to merge flat geometry"*). A
+   duplicate corner test on the three spots showed his reading holds: every
+   visible line ran along an edge where the two triangles share no vertex index,
+   only duplicate corners at one position (ballpark 1 of 1 inner edges, lone box
+   3 of 3, tower 1 of 3), and ee52efc0 gave the duplicates different bytes (32,
+   68 and 136 apart). Step 3 joined the duplicates; a quad whose field is not
+   linear still bent along its diagonal (tower 69 bytes). The mesh is not
+   edited (authored LOD meshes never are, and the duplicates exist for their
+   UVs): the values are merged. Triangles joined through shared corner
+   positions whose normals lie within 1° of the seed triangle's (44% of the
+   adjacent-edge area of Boston's library meshes lies within 0.1°) and whose
+   corners sit within 2 world u of its plane form a patch, and the patch takes
+   ONE linear field in its plane. Any triangulation draws a linear field
+   exactly, so no corner can draw a diagonal across a flat face; creases are
+   patch borders and keep their own values. The field is the least-squares
+   plane of the patch's face samples (clamped to 0…1), or, when the samples do
+   not span a plane, of its corner values (clamped to their range). Boston:
+   143,395 patches of 346,614 triangles; coplanar kink mean 17.8 → 7.5 bytes with
+   the corner fit, 12.7 with the sample fit; the wall foot reads 7.6 (corner
+   fit) or 13.6 (sample fit) bytes under the wall top (installed: 32.6).
+   `WW_AO_PATCH_DEG` (default 1, < 0 = off, bytes as step 4) and
+   `WW_AO_PATCH_FIT=vertex` (the corner fit) are the research knobs; which fit
+   ships is bungo's pick.
 
 The library `selfAO` (§3, 0x0F) uses steps 2 and 3 as well (not step 4: the
 library has no ground). The Charles bridge deck (Bridge01End01) read 38 from one
