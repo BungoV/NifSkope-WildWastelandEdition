@@ -14,6 +14,11 @@ of build/nif.xml. The bake's own files are only the thing being checked.
       transform and its NiNode chain; a BSMeshLODTriShape keeps its first LOD0 Size triangles).
   G3  the census line: eligible + excluded = read, the reasons sum to excluded, and each count equals
       the refs.txt rows.
+  GI  (lane NEAR2) every .lodi cold record's `identity` is its plugin's load-order-resolved identity,
+      worked out HERE from each plugin's own TES4 header (flag 0x200, or an .esl name): a full plugin
+      gets the next game index, a light one 0x8000 | the next light slot. The refFormId's top byte is
+      the plugin's position in the merged list (the bake's id space); `<ws>.near.plugins.txt` must
+      list the same table.
 
 `--sabotage <kind>` breaks ONE input in memory and must turn its gate red (the refuter):
   drop-instance  forget one eligible .lodi instance          -> G1 red
@@ -24,6 +29,9 @@ of build/nif.xml. The bake's own files are only the thing being checked.
   no-lod0-trim   this reader draws a BSMeshLODTriShape whole -> G2 red
   tris-off       one shapes.txt row's triangle count + 1     -> G2 red
   census-off     the census line's eligible count + 1        -> G3 red
+  identity-off   one placement's identity + 1                -> GI red
+  identity-flat  this reader numbers light plugins like full ones (the id space the bake stores)
+                 -> GI red wherever a placement comes from a plugin after the first light one
 
 usage: near_library_check.py --lib <dir> --region x0 y0 x1 y1 [--profile P] [--mods M] [--data D]
        [--ws 3C] [--sabotage kind] [--shapes N]   (N = cap on G2 models, default all)
@@ -805,6 +813,53 @@ def main():
     print('G3 %s: %s%s' % ('PASS' if not g3 else 'FAIL', line[:120] + '...' if line else '-',
                            '' if not g3 else '\n  ' + '\n  '.join(g3)))
     fails += bool(g3)
+    # ---- GI
+    gi = []
+    ids = []
+    full = light = 0
+    for p in plugins:
+        with open(p, 'rb') as f:
+            h = f.read(12)
+        is_light = (h[:4] == b'TES4' and bool(struct.unpack_from('<I', h, 8)[0] & 0x200)) \
+            or p.lower().endswith('.esl')
+        if sab == 'identity-flat':
+            is_light = False
+        if is_light:
+            ids.append(0x8000 | light)
+            light += 1
+        else:
+            ids.append(full)
+            full += 1
+    cold = [dict(c) for c in T['cold']]
+    if sab == 'identity-off' and cold:
+        cold[0]['identity'] = (cold[0]['identity'] + 1) & 0xFFFF
+    wrong = []
+    by_id = {}
+    for c in cold:
+        fi = c['refFormId'] >> 24
+        want_id = ids[fi] if fi < len(ids) else None
+        by_id[c['identity']] = by_id.get(c['identity'], 0) + 1
+        if c['identity'] != want_id:
+            wrong.append('%08x identity %04x, want %s' % (c['refFormId'], c['identity'],
+                                                          '%04x' % want_id if want_id is not None else 'no plugin'))
+    if wrong:
+        gi.append('%d placements carry a wrong identity (e.g. %s)' % (len(wrong), '; '.join(wrong[:3])))
+    pt = stem + '.plugins.txt'
+    if not os.path.isfile(pt):
+        gi.append('no plugins.txt')
+    else:
+        rows_p = [ln.rstrip('\n').split('\t') for ln in open(pt, encoding='utf-8') if ln.startswith('plugin\t')]
+        if len(rows_p) != len(plugins):
+            gi.append('plugins.txt lists %d plugins, the load order has %d' % (len(rows_p), len(plugins)))
+        bad = [r[4] for r, p, i in zip(rows_p, plugins, ids)
+               if int(r[2], 16) != i or r[4].lower() != os.path.basename(p.replace(chr(92), '/')).lower()]
+        if bad:
+            gi.append('plugins.txt disagrees on %d plugins (e.g. %s)' % (len(bad), bad[:3]))
+    print('GI %s: %d plugins (%d light); placements by identity %s%s'
+          % ('PASS' if not gi else 'FAIL', len(plugins), light,
+             ', '.join('%04x %d' % kv for kv in sorted(by_id.items())),
+             '' if not gi else '\n  ' + '\n  '.join(gi)))
+    fails += bool(gi)
     print('RESULT %s (%d gate(s) red)%s' % ('PASS' if not fails else 'FAIL', fails,
                                             ' [sabotage %s]' % sab if sab else ''))
     return 1 if fails else 0

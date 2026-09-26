@@ -102,6 +102,11 @@ def main():
         folders = [data + '/' + f for f in ('Textures', 'Materials') if os.path.isdir(os.path.join(data, f))]
         arch = [n for n in os.listdir(data) if n.lower().endswith(('.ba2', '.bsa'))
                 and os.path.isfile(os.path.join(data, n))]
+        # WW_SCOPE_SKIP_ARCHIVES=<substr>[;<substr>...] (lane NEAR2): leave matching archives out, case-insensitive.
+        # A textured render of a whole near library decodes ~1,700 textures; with the 2048-px UHD pack that is
+        # past a 16 GB card and the window stalls. Opt-in only; the default seed is unchanged.
+        skip = [t.strip().lower() for t in os.environ.get('WW_SCOPE_SKIP_ARCHIVES', '').split(';') if t.strip()]
+        arch = [n for n in arch if not any(t in n.lower() for t in skip)]
         folders += [data + '/' + n for n in archive_order(arch)]
         lines.append(reg_variant('Game Paths', variant_map({'Fallout 4': v_string(game)})))
         lines.append(reg_variant('Game Folders', variant_map({'Fallout 4': v_stringlist(folders)})))
