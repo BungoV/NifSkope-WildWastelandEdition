@@ -66,6 +66,11 @@ def resign_lodo(b):
              (offClusters, clusterCount * 16), (offLods, clusterCount * 48),
              (offMaterials, materialCount * 16), (offLocal, clusterCount * 48),
              (offVerts, vertexCount * 16), (offStrings, stringBytes)]
+    colourCount, offColours = get(b, 0xD4, 'I')[0], get(b, 0xD8, 'Q')[0]
+    if colourCount:
+        # v5: the colour blob is written LAST and joins indexCrc32 only when present
+        # (the fixture has none; a real baked library does)
+        table.append((offColours, colourCount * 4))
     crc = 0
     for off, size in table:
         crc = crc32(bytes(b[off:off + size]), crc)
