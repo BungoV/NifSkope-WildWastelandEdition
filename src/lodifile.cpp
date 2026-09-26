@@ -2124,8 +2124,28 @@ bool lodNativeFixtureWrite( const QString & dir, QStringList * report, QString *
 		b[2].modelStringOffset = lib.addString( QStringLiteral( "meshes\\synthetic\\c_part.nif" ) );
 		b[2].rep[0] = meshA; b[2].rep[1] = LODO_NO_MESH; b[2].rep[2] = LODO_NO_MESH; b[2].rep[3] = LODO_NO_MESH;
 		b[2].cardLayer = LODO_NO_CARD; b[2].boundRadius = 216.0f;
-		for ( auto & x : b )
+		/* Lane FIX1 (fix 8, 2026-09-26): the v4 `fullTriangles` word, counted
+		 * the emitter's way (nativeemit.cpp): level-0 triangles over the
+		 * DISTINCT meshes the slots name. The memset left it 0, so both
+		 * readers refused the fixture ("fullTriangles 0 but its distinct
+		 * meshes hold 12"). */
+		for ( auto & x : b ) {
+			quint16 seen[4] = { LODO_NO_MESH, LODO_NO_MESH, LODO_NO_MESH, LODO_NO_MESH };
+			int ns = 0;
+			for ( int k = 0; k < 4; k++ ) {
+				bool dup = x.rep[k] == LODO_NO_MESH;
+				for ( int j = 0; j < ns && !dup; j++ )
+					dup = seen[j] == x.rep[k];
+				if ( dup )
+					continue;
+				seen[ns++] = x.rep[k];
+				const LodoMesh & bm = lib.meshes[x.rep[k]];
+				for ( quint32 c = bm.clusterFirst; c < bm.clusterFirst + bm.clusterCount; c++ )
+					if ( lib.clusterLods[c].level == 0 )
+						x.fullTriangles += lib.clusters[c].triangleCount;
+			}
 			lib.bases.push_back( x );
+		}
 	}
 	LodoHeader lh;
 	QString err;
@@ -2134,6 +2154,8 @@ bool lodNativeFixtureWrite( const QString & dir, QStringList * report, QString *
 		return fail( err );
 	E( QStringLiteral( "lodo.meshCount" ), QStringLiteral( "2" ) );
 	E( QStringLiteral( "lodo.baseCount" ), QStringLiteral( "3" ) );
+	//! by hand: a = the cube once over four slots (12), b = the strip (16 + 4), c = the cube (12)
+	E( QStringLiteral( "lodo.bases.fullTriangles" ), QStringLiteral( "12,20,12" ) );
 	E( QStringLiteral( "lodo.materialCount" ), QStringLiteral( "2" ) );
 	/* v3: the counts that a hand can still derive are the LEVEL-0 ones. The
 	 * whole-file cluster and vertex counts now include the ladder, which no

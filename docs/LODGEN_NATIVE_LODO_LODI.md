@@ -2111,6 +2111,13 @@ hand-derivable too: a box of half (40, 40, 90) about the cube's centre, drawn at
 scale 0.5 with no rotation, lands at world centre (1200, 2200, 350) with half
 extents (19.98, 19.98, 44.955) — the 0.999 pull-in stated, not hidden.
 
+**Each base's `fullTriangles` is a known answer too (lane FIX1, 2026-09-26):**
+`lodo.bases.fullTriangles 12,20,12`. That is the cube counted once over its four
+slots, the strip's 16 + 4, and the cube again. Until then the fixture left the word
+at 0, so NifSkope's own `--native-verify` and the FO4CS reader both refused it
+("fullTriangles 0 but its distinct meshes hold 12"). The independent decoder now
+recounts it from the rows and checks it against the hand answer.
+
 **What the fixture does NOT claim.** The ladder's own output is a simplifier's
 and no hand derives it, so the whole-file cluster and vertex counts are no longer
 stated as known answers. The ladder is checked by INVARIANTS instead — errors
