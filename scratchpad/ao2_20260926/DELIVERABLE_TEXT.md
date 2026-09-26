@@ -2,6 +2,21 @@
 
 ## HANDOFF text
 
+### AO2 decal round -- stain sheets no longer shade the walls behind them (built, region-baked, NOT installed, not flown)
+- Commits on ao2-20260926: 5ef03110 (src: lodgenao.h, lodofile.h/.cpp, lodgen.h/.cpp, nativeemit.cpp), c1a84b8c
+  (docs s4.8 step 7).
+- Cause: yes, a decal in front. The stain sheet (HitExtAStainsWall3x1_LOD) stands 5 u in front of the tall panel;
+  about 3 of the panel's 8 AO rays hit the sheet's back. Its see-through switch lives in the LOD BGSM
+  (HitTechStain_LOD: blend + test 134), and the AO caster took every triangle as solid.
+- Fix: a blended material, or a decal that tests, blocks AO rays only where its texture's alpha is opaque. Walls and
+  skybridges with the same switches still block where they draw (a flag-only rule would have stopped them; rejected).
+  Alpha-tested-only rows (fences, tree cards: 64 rows) still cast as solid.
+- Gates, Boston region: panel 28942 216 (was 163) against neighbours 211 / 218; seam census 0.2; a, b, s1-s3,
+  ballpark, tower face, lone box PASS. 1.16% of vertex AO bytes move, almost all lighter.
+- Refuter: WW_AO_OVERLAY_CASTERS=1 = the 3a36445d build's .lodi and .lodo byte for byte.
+- Next: the overseer's combined whole-map bake + install; then bungo's eye and a flight.
+- What would prove this wrong: bungo's eye on pics\tower_right_decal_5rows.png and pics\08_roads_decal_side.png.
+
 ### AO2 tower round -- kit pieces share their AO values (built, region-baked, NOT installed, not flown)
 - Commits on ao2-20260926 (= main 422881d4 + 2): 3a36445d (src/nativeemit.cpp), f0dff006 (docs s4.8 step 6).
 - Cause, measured in the bytes, both of bungo's tower spots: a wall or roof of kit pieces is several placements, and
@@ -84,6 +99,12 @@
 - What would prove this wrong: the crops in scratchpad\ao2_20260926\pics (old | ee52efc0 | new), then a flight.
 
 ## WW_CHANGES text
+
+### Native LOD objects: stains and glass no longer darken the walls behind them (AO2 decal round, 2026-09-27)
+- The baked ambient shading now treats see-through overlays (stain sheets, window glass, other blended or decal
+  materials) as see-through: they shade what is behind them only where their texture is opaque. Before, a stain
+  sheet hanging in front of a wall darkened the wall behind it.
+- Tuning knob for testing only (environment): WW_AO_OVERLAY_CASTERS=1 treats every material as solid again.
 
 ### Native LOD objects: walls and roofs built from kit pieces shade as one surface (AO2 tower round, 2026-09-26)
 - Buildings assembled from several wall or roof pieces no longer show a hard step in the baked ambient shading
@@ -192,3 +213,20 @@
 - The first T-junction build did two Jacobi passes; a chain of three pieces left the tower step at 20 bytes, and the
   per-corner printout showed the corner off the edge's line. Settling in place to 0.1 byte took it to 1.3.
 - Rule: an iterative fix stops on a measured change bound, not on a pass count.
+
+### A flag-only rule was nearly shipped (AO2 decal round, 2026-09-27)
+- What happened: the first fix skipped every material row with a blend or decal switch. It was built and baked
+  (23,547 vertices moved) before its reach was measured. A census of each row's drawn opacity showed warehouse
+  walls (decal + test, 100% opaque) and skybridges (blend + test, 54%) under the same switches.
+- Rule: before a rule keyed on a material switch ships, measure what the switch catches across the region (the
+  drawn surface each row covers), not only the one case in the picture.
+
+### The stock caster was edited and broke the byte-exact refuter (AO2 decal round, 2026-09-27)
+- What happened: the alpha test was added inline to the shared rayHit, which no alpha scene uses. With the rule
+  off, 6 placement AO values still moved (max 7 bytes): the compiler folded the float maths differently.
+- Rule: when the refuter must be byte for byte, leave the stock hot path alone; add the new test in a separate path.
+
+### Two build errors from where code was placed (AO2 decal round, 2026-09-27)
+- What happened: the alpha loader was first written above the texture type's declaration (not declared), then
+  inside lodgen.cpp's unnamed namespace (internal linkage, undefined at link).
+- Rule: in lodgen.cpp, check which namespace a spot is in before adding an exported function there.
