@@ -1495,6 +1495,42 @@ objects shade this chunk's edge, as the `.BTO` skirt placements did. The chunk's
 own placements then cast `ambientOcclusion(pos, nrm, 300 × dim)` per vertex, the
 reach the `.BTO` route used. Chunks run in parallel.
 
+**One ring a scene, across the face (lane AO2, 2026-09-26).** bungo, on the
+Boston oblique AO picture: *"isn't the vertex AO kind of strong and placed not in
+the right places?"*. Two measured causes, two changes; the ray law itself
+(8 rays, reach, `1 − 0.85 × hits / 8`) is unchanged.
+
+1. *Mixed rings.* The scene held every placement's OWN kept-slot mesh, so a
+   building's far-ring stand-in (`rep[0]` empty, `rep[2]` = the whole building)
+   sat in the same scene as the near-ring kit pieces it replaces. Its lid, 72 u
+   above the Prudential's kit roof, took 136 of 136 rays and drew that roof at
+   byte 38. MNAM slot *k* is what ring *k* draws, so the scene is now built PER
+   SLOT: a receiver drawn from slot *s* is cast against the slot-*s* mesh of every
+   placement in the field, plus the heightfield; a placement with no slot-*s*
+   mesh is not in that scene (the census counts them).
+2. *Corners inside other geometry.* One cast per VERTEX drew a 1024 × 512 wall at
+   the value of its four corners, and each corner stood inside a corner tower
+   (7 of 7 rays on the tower's back faces), so the open wall read 65 across its
+   whole area. bungo: *"Sample across the face sounds good"*. Each level-0
+   triangle is cut into *k* × *k* equal-area pieces, *k* = ⌈longest edge / 256 u⌉
+   clamped to 1…4, and each piece's centroid is cast with the barycentric blend
+   of the vertex normals. A vertex takes Σ (A / k² · bary · value) / Σ (A / k² ·
+   bary) over the samples of every triangle it belongs to (bungo: *"it is fine if
+   the two corners would get equalized with also the whole face's context"* —
+   no corner is kept apart). A vertex on no triangle is cast where it stands.
+   Fixed pattern and order, one chunk a thread: deterministic.
+
+Measured on Boston (cells −8…3 × −12…−1, 19,234 up-facing faces classified by an
+independent 2.5D horizon march over the ring-0 world, not by the caster):
+open up-facing faces 237.5 → 252.0 (area below 201: 13.4% → 2.2%), faces
+enclosed across their whole area 96.9 → 73.2. The circled spots: the Prudential
+kit roof 38 → 255, the Trinity Church west wall 65 → 234…245, its tower cap's
+pyramid faces 38/38/255 → 255/255/255. Every other table of the `.lodi` and every
+other file of the bake is byte-identical (only the two vertex streams and the two
+CRCs move). `WW_AO_FACE_STEP` / `WW_AO_FACE_MAX` are research knobs
+(`WW_AO_FACE_STEP=0` = cast at the vertex alone); `WW_AO_PROBE=x,y,z,r` logs every
+sample's rays near a point.
+
 **Consumer.** When the slice length equals the drawn mesh's vertex count, use the
 byte ALONE — it already holds what `selfAO` and the v5 placement byte
 approximated; multiplying either in darkens twice. Otherwise fall back to
@@ -1504,9 +1540,11 @@ this under `WW_LODL_AO=1` (`src/lodinative.cpp`).
 **Way back.** `--native-no-vertex-ao` writes a v5 file, byte-identical to hotfix 6
 (the stream is written last; no other offset moves). v6 requires the v5 blob.
 
-**Known.** The caster fires 8 rays, so a byte is one of 9 values (255, 228, …
-38); colour B had the same steps. A finer ladder is a caster change, not a
-format change. Urban region 0 -12 11 -1: 33,123 placements, 490,600 bytes, mean
+**Known.** The caster fires 8 rays, so a SAMPLE is one of 9 values (255, 228, …
+38); colour B had the same steps. Since AO2 a vertex is a weighted mean of many
+samples, so its byte is no longer on that ladder. The 8 rays never aim lower
+than about 8° over the tangent plane, so ground contact at the foot of a wall is
+weakly represented (unchanged by AO2). Urban region 0 -12 11 -1: 33,123 placements, 490,600 bytes, mean
 174.3 against `selfAO` 242.5 over the same vertices.
 
 ### 4.9 The group table (v7)
@@ -1660,6 +1698,41 @@ is refused by name, by both readers.
 **The cast** rides the same `place`/`perVertex` loop the v6 scene AO uses, in the
 same `LodgenAoScene`: `skyVisibility(p, 300)` — 9 rays, normal-independent,
 upper hemisphere, 2-unit Z offset. Same scene, same reach, same parallelism.
+
+**Since lane AO2 (2026-09-26) the stream is HORIZON-AWARE** (bungo: *"Yes, horizon
+aware would be preferable"*). The old 9 rays all lay within 45° of the zenith,
+so a street between towers that hid the sky below 45° read open.
+`LodgenAoScene::skyVisibilityFace`:
+
+* **Directions.** 7 elevation bands 0–10–20–30–45–60–75–90°, one ring per band
+  at the band's irradiance median `asin(√((sin²a + sin²b) / 2))` = 7.1°, 15.7°,
+  25.4°, 37.8°, 52.2°, 66.5°, 79.5°; 8 azimuths a ring, odd rings turned half a
+  step; 56 rays.
+* **Weights.** Each ring carries its band's share of the cosine-weighted sky
+  about +Z, `sin²b − sin²a` = .030, .087, .133, .250, .250, .183, .067 (sum 1),
+  split evenly over its 8 azimuths — the irradiance a horizontal receiver gets
+  from a uniform sky, the convention FO4CS Skylighting integrates in.
+* **Reach** 10,000 world units, FO4CS Skylighting's default maximum occluder
+  distance. Measured on Boston: of the blocked rays, 0.16% met their occluder
+  between 8,000 and 10,000 u, 1.2% between 4,000 and 8,000, 74.7% inside 250.
+* **Where the ray starts.** p + 2n (miniature units), at the same across-the-face
+  samples as the AO stream (§4.8), in the same per-ring scene.
+
+**Where it differs from FO4CS Skylighting** (read-only comparison): the same
+cosine-about-+Z weighting and the same 10,000 reach; FO4CS draws its directions
+from an R2 low-discrepancy sequence over many frames where we use fixed rings (a
+deterministic bake); its horizon bias (0.1) is not applied; and the terrain
+beyond the chunk field (the chunk plus one cell) is not in our scene, so the
+reach is cut at the field's edge.
+
+**What moves.** Boston, same classifier as §4.8: faces open to the sky 221.1 →
+252.2; faces under a 20…45° horizon (the refuter the old rays cannot see) 213.8
+→ 204.5, 47.7 below open where the old law put them 7.3 below; street floors and
+courtyards (≥ 30° at 4 of 8 azimuths) 152.4 → 136.6. By the law, a vertical wall
+now sees at most about half the sky and a down-facing soffit almost none: over
+every streamed vertex, walls 99.2 → 72.1, down-facing 74.4 → 24.7, all 105.8 →
+79.4. The 0x11 `sky` byte keeps the old law, so the stream and the byte are no
+longer two samplings of ONE law; the comparison below is the v7 record.
 
 **How it compares with the 0x11 byte, and the honest half.** On chunk 4.4.-12,
 2,449 placements:
