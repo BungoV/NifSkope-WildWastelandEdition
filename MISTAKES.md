@@ -5,6 +5,25 @@ Written the moment a mistake is recognised, unprompted (CONSTITUTION rule 2).
 Format: date -- what was done -- what was true -- how it was found -- the rule.
 Newest at the top.
 
+## 2026-09-26 -- lane FIX1 (lane text)
+
+### FIX1, 2026-09-26: a byte-identity gate compared two bakes across a load-order change
+The first switch-off bake (03:02) differed from the rung bake (02:52) in the .lodo/.lodi header. Cause: CORE.esp
+left the MO2 profile at 02:53 (plugins.txt mtime), and the load-order hash is in those headers. The rung was
+re-baked on the current order. Rule: a byte-identity gate's two arms are baked back to back, and the lane records
+the plugins.txt sha1 with each arm.
+
+### FIX1, 2026-09-26: a harness scope seeded with Settings/Version only is a Game Manager first install
+My fix 5b gate (03:18-03:19) wiped its scope and seeded only Settings/Version=1. NifSkope then treats the run as a
+first install: an opaque "Initializing the Game Manager" dialog opens on the PRIMARY monitor before any harness
+placement, and Game Folders stay empty (no archives). Found by the fix 4 helper. Rule: seed Game Manager Version 2
+and the machine's game state (tests/spells/settings_scope_game.py), as the 11 fixed spells now do.
+
+### FIX1, 2026-09-26: a self-test gate whose red arm cannot run the test
+The first fix 5b gate used the pre-fix exe as its red arm, but the test lives in the exe, so the rung never ran
+it. And the test read the row through a folded section (isVisibleTo), failing on correct code. Rule: the red arm
+of an in-exe self-test is an exe WITH the test and WITHOUT the fix.
+
 ## 2026-09-26 -- lane NEAR1 (lane text)
 
 - 2026-09-26 02:4x NEAR1: started the near bake's model workers without first building the resource stack's

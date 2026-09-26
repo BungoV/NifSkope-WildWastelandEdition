@@ -1,5 +1,16 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Far terrain under pre-war Sanctuary's hills (lane FIX1, 2026-09-26)
+
+- New: `--land-fill-vanilla`. A cell with no landscape record now takes the game's own far-terrain heights, so
+  objects out there stand on ground instead of floating thousands of units over a flat plain. The panel does it
+  whenever *Fill unpainted ground with vanilla's colour* is ticked.
+- New: *Ground cover* can be ticked under the Fallout 4 Community Shaders target (it was only reachable under the
+  stock target).
+- The material-swap census now says whether the game would actually use a colour-remap row.
+- The test fixture for the native library carries real triangle counts.
+- The render test spells no longer read your own NifSkope settings.
+
 ## Near library bake (lane NEAR1, 2026-09-26)
 
 - `lodgen --near-library <dir>` writes a worldspace's full-detail static models into `<ws>.near.lodo` /
