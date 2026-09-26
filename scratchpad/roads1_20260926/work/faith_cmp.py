@@ -1,6 +1,6 @@
 """ROADS1 faithfulness gate: a bake's VT.2 colour sheet vs the independent re-rasterisation (pave_faith.py).
 
-  python faith_cmp.py <bake tag> [<bake tag> ...]
+  python faith_cmp.py <bake tag> [<bake tag> ...]      (RULE=new: against the ROADS1 placement-rule rasters)
 
 Sample set: texels whose max-z winner (INGAME raster) is a pavement shape at full coverage, and whose 3x3
 neighbourhood has that same winner (no triangle / piece / BC1-block edge mixing), the same set for every bake.
@@ -30,8 +30,10 @@ def sheet(tag, level=2):
 
 
 def main():
-    ing = np.load(os.path.join(HERE, 'out', 'raster_INGAME.npz'))
-    old = np.load(os.path.join(HERE, 'out', 'raster_OLD.npz'))
+    sfx = '_NEWRULE' if os.environ.get('RULE') == 'new' else ''
+    print('rasters: 6382a09a placement rule' if not sfx else "rasters: ROADS1's placement rule (has-LOD ground pieces in)")
+    ing = np.load(os.path.join(HERE, 'out', 'raster_INGAME%s.npz' % sfx))
+    old = np.load(os.path.join(HERE, 'out', 'raster_OLD%s.npz' % sfx))
     win = ing['win']
     meta = ing['meta']
     sw = np.zeros(win.shape, bool)

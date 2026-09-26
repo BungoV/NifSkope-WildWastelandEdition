@@ -12,7 +12,9 @@ dropped (roadGroundPaint 0), raised bases (MNAM LOD or the overpass/bridge folde
 Writes out/raster_<tag>.npz: rgb (float 0..255), cov, winner shape id, is-sidewalk, is-swapped, and the
 footprint mask (any road/pavement fragment, all coverage, pavements included) for the confinement gate.
 
-  python pave_faith.py            -> rasterises and saves
+  python pave_faith.py            -> rasterises and saves (the 6382a09a placement rule)
+  RULE=new python pave_faith.py   -> the same with ROADS1's placement rule (has-LOD ground pieces stamped),
+                                     saved as raster_<tag>_NEWRULE.npz
 """
 import math
 import os
@@ -78,8 +80,11 @@ def main():
     # ---------------------------------------------------------------- shapes, both variants
     shapes = []      # dict per (placement, shape, variant)
     nsw = {'placements': 0, 'swapped': 0}
+    # RULE=new (ROADS1's rule): the has-LOD bases outside the overpass / bridge folders are stamped too
+    new_rule = os.environ.get('RULE') == 'new'
     for d in pl:
-        if d['decision'] != 'stamped':
+        if d['decision'] != 'stamped' and not (new_rule and d['decision'] == 'refused raised-haslod'
+                                               and not rg.is_raised_folder(d['modl'])):
             continue
         eff = d['xmsp'] or mods(d['refBase']) or (mods(d['base']) if d['part'] >= 0 and d['base'] != d['refBase'] else 0)
         rows = None
@@ -122,7 +127,7 @@ def main():
     print('shapes', len(shapes), nsw, 'swap forms', len(swaps), '%.0fs' % (time.time() - t0))
 
     for variant in ('INGAME', 'OLD'):
-        raster(R, [s for s in shapes if s['variant'] == variant], variant)
+        raster(R, [s for s in shapes if s['variant'] == variant], variant + ('_NEWRULE' if new_rule else ''))
     print('done %.0fs' % (time.time() - t0))
 
 
