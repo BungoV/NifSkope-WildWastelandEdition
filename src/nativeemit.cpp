@@ -3555,8 +3555,10 @@ bool lodgenNativeWrite( QString * report, QString * error )
 					continue;
 				const LodiSrcInstance & r = set.instances[i];
 				const std::vector<float> & lp = samplesOf( meshOf[i] );
-				pts.reserve( pts.size() + lp.size() );
-				owner.reserve( owner.size() + lp.size() / 3 );
+				/* No reserve( size() + n ) here: an exact reserve per placement defeats the
+				 * vector's doubling, so every placement copied the whole array again --
+				 * 42,306 copies of up to 23 MB, ~100 s of Boston's 103 s join (lane GPU1,
+				 * measured offline on the bake's own join input: the walk is 0.5 s). */
 				for ( size_t p = 0; p + 2 < lp.size(); p += 3 ) {
 					/* The SAME placement arithmetic the box above uses: scale on the
 					 * local point, then the row-major rotation, then the position. */
@@ -3579,30 +3581,93 @@ bool lodgenNativeWrite( QString * report, QString * error )
 					| ( ( quint64( quint32( gy ) ) & 0x1FFFFFull ) << 21 )
 					| ( quint64( quint32( gz ) ) & 0x1FFFFFull );
 			};
-			std::unordered_map<quint64, std::vector<quint32>> pgrid;
-			pgrid.reserve( owner.size() / 4 + 16 );
+			/* GROUPED BY (CELL, PLACEMENT) (lane GPU1, 2026-09-26). The first walk
+			 * went sample by sample: every sample looked at every sample of the 27
+			 * cells around it and paid a `find` on each one of another placement --
+			 * 1,330 s of the whole-map bake, the largest single stage after the
+			 * terrain pyramid. The samples of one placement in one cell are now ONE
+			 * group, and the walk goes group pair by group pair: one `find` per pair,
+			 * a box test that can only ever SKIP pairs no sample pair of which is
+			 * within the gap (it keeps a margin, so rounding cannot make it skip a
+			 * pair the sample test would join), then the same sample test as before
+			 * until the first hit.
+			 *
+			 * WHY THE BYTES CANNOT MOVE. The groups a bake writes are the connected
+			 * components of "some sample of A is within the gap of some sample of B".
+			 * The old walk and this one test the same sample pairs with the same
+			 * float expression, differ only in which pairs they skip because the two
+			 * placements are ALREADY in one set (which never changes a component),
+			 * and the union keeps the smaller index as the root whatever the order.
+			 * `joinPairs` counts successful unions, which is (placements joined) minus
+			 * (components they form) in any order. */
+			struct Smp { quint64 key; quint32 own; quint32 p; };
+			std::vector<Smp> smp( owner.size() );
 			for ( size_t p = 0; p < owner.size(); p++ )
-				pgrid[keyOf3( cellOf( pts[p * 3] ), cellOf( pts[p * 3 + 1] ), cellOf( pts[p * 3 + 2] ) )]
-					.push_back( quint32( p ) );
+				smp[p] = { keyOf3( cellOf( pts[p * 3] ), cellOf( pts[p * 3 + 1] ), cellOf( pts[p * 3 + 2] ) ),
+					owner[p], quint32( p ) };
+			std::sort( smp.begin(), smp.end(), []( const Smp & a, const Smp & b ) {
+				return a.key != b.key ? a.key < b.key : ( a.own != b.own ? a.own < b.own : a.p < b.p );
+			} );
+			struct Grp { quint64 key; quint32 own, first, count; float lo[3], hi[3]; int gx, gy, gz; };
+			std::vector<Grp> grp;
+			std::vector<quint32> cellFirst;      // per cell: its first group; cellFirst.back() = end
+			std::unordered_map<quint64, quint32> cellIndex;
+			for ( size_t a = 0; a < smp.size(); ) {
+				size_t b = a;
+				while ( b < smp.size() && smp[b].key == smp[a].key && smp[b].own == smp[a].own )
+					b++;
+				if ( grp.empty() || grp.back().key != smp[a].key ) {
+					cellIndex.emplace( smp[a].key, quint32( cellFirst.size() ) );
+					cellFirst.push_back( quint32( grp.size() ) );
+				}
+				Grp g;
+				g.key = smp[a].key; g.own = smp[a].own; g.first = quint32( a ); g.count = quint32( b - a );
+				const quint32 p0 = smp[a].p;
+				for ( int k = 0; k < 3; k++ ) { g.lo[k] = pts[size_t( p0 ) * 3 + k]; g.hi[k] = g.lo[k]; }
+				for ( size_t c = a + 1; c < b; c++ )
+					for ( int k = 0; k < 3; k++ ) {
+						const float v = pts[size_t( smp[c].p ) * 3 + k];
+						g.lo[k] = std::min( g.lo[k], v ); g.hi[k] = std::max( g.hi[k], v );
+					}
+				g.gx = cellOf( pts[size_t( p0 ) * 3] ); g.gy = cellOf( pts[size_t( p0 ) * 3 + 1] );
+				g.gz = cellOf( pts[size_t( p0 ) * 3 + 2] );
+				grp.push_back( g );
+				a = b;
+			}
+			cellFirst.push_back( quint32( grp.size() ) );
 			const float T2 = T * T;
-			for ( size_t p = 0; p < owner.size(); p++ ) {
-				const int gx = cellOf( pts[p * 3] ), gy = cellOf( pts[p * 3 + 1] ), gz = cellOf( pts[p * 3 + 2] );
+			const float boxSkip = T * 1.001f + 0.001f;     // a gap past this is past T for every sample pair
+			for ( size_t gi = 0; gi < grp.size(); gi++ ) {
+				const Grp & A = grp[gi];
 				for ( int dz = -1; dz <= 1; dz++ )
 					for ( int dy = -1; dy <= 1; dy++ )
 						for ( int dx = -1; dx <= 1; dx++ ) {
-							auto cit = pgrid.find( keyOf3( gx + dx, gy + dy, gz + dz ) );
-							if ( cit == pgrid.end() )
+							auto cit = cellIndex.find( keyOf3( A.gx + dx, A.gy + dy, A.gz + dz ) );
+							if ( cit == cellIndex.end() )
 								continue;
-							for ( quint32 q : cit->second ) {
-								if ( owner[q] == owner[p] )
+							const quint32 h1 = cellFirst[cit->second + 1];
+							for ( quint32 hi = std::max( cellFirst[cit->second], quint32( gi + 1 ) ); hi < h1; hi++ ) {
+								const Grp & B = grp[hi];      // every unordered pair once: B after A
+								if ( B.own == A.own )
 									continue;
-								if ( find( owner[p] ) == find( owner[q] ) )
+								bool far = false;
+								for ( int k = 0; k < 3 && !far; k++ )
+									far = ( B.lo[k] - A.hi[k] > boxSkip ) || ( A.lo[k] - B.hi[k] > boxSkip );
+								if ( far || find( A.own ) == find( B.own ) )
 									continue;
-								const float ex = pts[p * 3] - pts[size_t( q ) * 3];
-								const float ey = pts[p * 3 + 1] - pts[size_t( q ) * 3 + 1];
-								const float ez = pts[p * 3 + 2] - pts[size_t( q ) * 3 + 2];
-								if ( ex * ex + ey * ey + ez * ez <= T2 ) {
-									join( owner[p], owner[q] );
+								bool hit = false;
+								for ( quint32 ia = A.first; ia < A.first + A.count && !hit; ia++ ) {
+									const size_t p = smp[ia].p;
+									for ( quint32 ib = B.first; ib < B.first + B.count; ib++ ) {
+										const size_t q = smp[ib].p;
+										const float ex = pts[p * 3] - pts[q * 3];
+										const float ey = pts[p * 3 + 1] - pts[q * 3 + 1];
+										const float ez = pts[p * 3 + 2] - pts[q * 3 + 2];
+										if ( ex * ex + ey * ey + ez * ez <= T2 ) { hit = true; break; }
+									}
+								}
+								if ( hit ) {
+									join( A.own, B.own );
 									joinPairs++;
 								}
 							}
