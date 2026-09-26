@@ -2605,10 +2605,11 @@ bool lodgenNativeWrite( QString * report, QString * error )
 	quint64 vskyBytes = 0, vskyOpen = 0;
 	double vskySum = 0.0;
 	// lane AO2: the face cast's census
-	float vaoFaceStep = 0.0f, vskyReach = 0.0f, vaoWeldDeg = -1.0f, vaoUnderTol = -1.0f;
+	float vaoFaceStep = 0.0f, vskyReach = 0.0f, vaoWeldDeg = -1.0f, vaoUnderTol = -1.0f, vaoPatchDeg = -1.0f;
+	bool vaoPatchSamples = false;
 	int vaoFaceMax = 0, vaoScenes = 0;
 	double vaoCastSeconds = 0.0;
-	quint64 vaoSamples = 0, vaoBuried = 0, vaoAtVertex = 0, vaoRingLeftOut = 0, vaoWelded = 0, vaoUnder = 0;
+	quint64 vaoSamples = 0, vaoBuried = 0, vaoAtVertex = 0, vaoRingLeftOut = 0, vaoWelded = 0, vaoUnder = 0, vaoPatches = 0, vaoPatchTris = 0, vaoPatchSampleFit = 0;
 	std::array<quint64, 8> vskyHist{};
 	if ( s.vertexAo && s.placementAo && s.world ) {
 		set.vertexAo = true;
@@ -2755,6 +2756,13 @@ bool lodgenNativeWrite( QString * report, QString * error )
 		if ( qEnvironmentVariableIsSet( "WW_AO_UNDER_TOL" ) )
 			underTol = qEnvironmentVariable( "WW_AO_UNDER_TOL" ).toFloat();
 		vaoUnderTol = underTol;
+		float patchDeg = 1.0f;   // step 5 below; < 0 = off. Measured: 44% of the edge area between adjacent
+		                          // triangles of the Boston library meshes lies within 0.1 deg (flat faces)
+		if ( qEnvironmentVariableIsSet( "WW_AO_PATCH_DEG" ) )
+			patchDeg = qMin( 89.0f, qEnvironmentVariable( "WW_AO_PATCH_DEG" ).toFloat() );
+		vaoPatchDeg = patchDeg;
+		const bool patchSamples = qEnvironmentVariable( "WW_AO_PATCH_FIT" ) == QStringLiteral( "samples" );
+		vaoPatchSamples = patchSamples;
 		vaoFaceStep = faceStep;
 		vaoFaceMax = faceMax;
 		vskyReach = skyReach;
@@ -2769,7 +2777,7 @@ bool lodgenNativeWrite( QString * report, QString * error )
 					probe[k] = pl[k].toFloat();
 		}
 		QMutex probeLock;
-		std::atomic<quint64> aSamples{ 0 }, aBuried{ 0 }, aAtVertex{ 0 }, aRingLeftOut{ 0 }, aWelded{ 0 }, aUnder{ 0 };
+		std::atomic<quint64> aSamples{ 0 }, aBuried{ 0 }, aAtVertex{ 0 }, aRingLeftOut{ 0 }, aWelded{ 0 }, aUnder{ 0 }, aPatches{ 0 }, aPatchTris{ 0 }, aPatchSampleFit{ 0 };
 		std::atomic<int> aScenes{ 0 };
 		std::array<std::atomic<quint64>, 8> aSkyHist;
 		for ( auto & h : aSkyHist )
@@ -2869,6 +2877,11 @@ bool lodgenNativeWrite( QString * report, QString * error )
 				const bool wantSky = set.vertexSky;
 				std::vector<Vector3> wn;
 				std::vector<double> aoAcc, skyAcc, wAcc, aoU, skyU, wU;
+				// step 5's fit data: the above-ground samples of each triangle, [sTri[t], sTri[t + 1])
+				std::vector<size_t> sTri;
+				std::vector<Vector3> sP;
+				std::vector<float> sAo, sSk;
+				std::vector<double> sW;
 				for ( quint32 i : slotRecv.second ) {
 					LodiSrcInstance & r = set.instances[i];
 					const DecodedMesh & d = dm[instMesh[i]];
@@ -2888,6 +2901,11 @@ bool lodgenNativeWrite( QString * report, QString * error )
 					aoU.assign( d.count, 0.0 );
 					skyU.assign( d.count, 0.0 );
 					wU.assign( d.count, 0.0 );
+					sTri.assign( d.tris.size() / 3 + 1, 0 );
+					sP.clear();
+					sAo.clear();
+					sSk.clear();
+					sW.clear();
 					auto probeSample = [&]( const Vector3 & p, const Vector3 & n, float ao, float sk, bool buried ) {
 						if ( !( probe[3] > 0 ) || std::fabs( p[0] * dim - probe[0] ) >= probe[3]
 							|| std::fabs( p[1] * dim - probe[1] ) >= probe[3] || std::fabs( p[2] * dim - probe[2] ) >= probe[3] )
@@ -2926,6 +2944,7 @@ bool lodgenNativeWrite( QString * report, QString * error )
 					};
 					if ( faceStep > 0.0f ) {
 						for ( size_t t = 0; t + 2 < d.tris.size(); t += 3 ) {
+							sTri[t / 3] = sP.size();
 							const quint32 ia = d.tris[t], ib = d.tris[t + 1], ic = d.tris[t + 2];
 							const Vector3 & pa = wp[ia], & pb = wp[ib], & pc = wp[ic];
 							Vector3 fn = Vector3::crossproduct( pb - pa, pc - pa );
@@ -2965,6 +2984,10 @@ bool lodgenNativeWrite( QString * report, QString * error )
 								if ( buried )
 									aBuried++;
 								probeSample( p, n, ao, sk, buried );
+								sP.push_back( p );
+								sAo.push_back( ao );
+								sSk.push_back( sk );
+								sW.push_back( w );
 								const quint32 vs[3] = { ia, ib, ic };
 								const float ws[3] = { wa, wb, wc };
 								for ( int c = 0; c < 3; c++ ) {
@@ -2975,6 +2998,7 @@ bool lodgenNativeWrite( QString * report, QString * error )
 							}
 						}
 					}
+					sTri[d.tris.size() / 3] = sP.size();
 					/* 4. ONE VALUE PER SURFACE POINT (lane AO2, bungo 2026-09-26: "These
 					 * split lines", on the ballpark roof, the tower faces and a lone box).
 					 * A mesh splits a corner into copies for its UVs or its smoothing;
@@ -2989,8 +3013,8 @@ bool lodgenNativeWrite( QString * report, QString * error )
 					 * pooling below 30 deg moves at most 1/6 of the rays. Copies across a
 					 * sharper crease keep their own values. WW_AO_WELD_DEG=-1 turns the
 					 * pooling off (the refuter: bytes as ee52efc0). */
+					std::vector<quint32> node;
 					if ( weldDeg >= 0.0f && d.count > 1 ) {
-						std::vector<quint32> node;
 						aWelded += LodgenAoScene::weldNodes( wp, wn, double( dim ) * 2.0, std::cos( weldDeg * 3.14159265f / 180.0f ), node );
 						std::vector<double> aoN( d.count, 0.0 ), skyN( d.count, 0.0 ), wN( d.count, 0.0 );
 						std::vector<double> aoUN( d.count, 0.0 ), skyUN( d.count, 0.0 ), wUN( d.count, 0.0 );
@@ -3011,9 +3035,7 @@ bool lodgenNativeWrite( QString * report, QString * error )
 							wU[v] = wUN[node[v]];
 						}
 					}
-					r.vertexAo.resize( d.count );
-					if ( wantSky )
-						r.vertexSky.resize( d.count );
+					std::vector<float> aoV( d.count, 0.0f ), skV( d.count, 0.0f );
 					for ( quint32 v = 0; v < d.count; v++ ) {
 						float ao, sk = 0.0f;
 						if ( wAcc[v] > 0.0 ) {
@@ -3034,9 +3056,233 @@ bool lodgenNativeWrite( QString * report, QString * error )
 								aBuried++;
 							probeSample( wp[v], wn[v], ao, sk, buried );
 						}
-						r.vertexAo[v] = quint8( std::lround( std::min( 1.0f, std::max( 0.0f, ao ) ) * 255.0f ) );
+						aoV[v] = ao;
+						skV[v] = sk;
+					}
+					/* 5. FLAT PATCHES (lane AO2; bungo 2026-09-26: "The answer would be, to
+					 * merge flat geometry"). The mesh is not edited (authored LOD meshes are
+					 * never changed, and its split copies exist for their UVs): the VALUES
+					 * are merged. Triangles joined through shared corner positions whose face
+					 * normals lie within patchDeg of the seed triangle's, with every corner
+					 * within 2 world u of its plane, form one flat patch. A patch takes ONE
+					 * linear field a + b u + c v in its plane: the area-weighted least-squares
+					 * fit to its corners' values, clamped to their range. Any triangulation
+					 * draws a linear field exactly, so no single corner can draw a diagonal
+					 * across a flat face, and a corner's copies on one patch get one value.
+					 * Creases (normals further apart than patchDeg) are patch borders and keep
+					 * their own values. A corner on several patches, or also on a loose
+					 * triangle, takes the area-weighted mean; copies are then pooled again as
+					 * in step 4. WW_AO_PATCH_DEG < 0 turns this off (bytes as step 4 alone). */
+					const size_t nt = d.tris.size() / 3;
+					if ( patchDeg >= 0.0f && nt >= 2 ) {
+						std::vector<quint32> pnode;
+						LodgenAoScene::weldNodes( wp, wn, double( dim ) * 2.0, -2.0f, pnode );
+						std::vector<Vector3> fnT( nt );
+						std::vector<double> arT( nt, 0.0 );
+						for ( size_t t = 0; t < nt; t++ ) {
+							const Vector3 & pa = wp[d.tris[3 * t]], & pb = wp[d.tris[3 * t + 1]], & pc = wp[d.tris[3 * t + 2]];
+							Vector3 fn = Vector3::crossproduct( pb - pa, pc - pa );
+							const float len = fn.length();
+							if ( len > 1e-12f ) {
+								fnT[t] = fn / len;
+								arT[t] = 0.5 * double( len ) * double( dim ) * double( dim );
+							}
+						}
+						std::vector<std::pair<quint64, quint32>> edges;
+						edges.reserve( nt * 3 );
+						for ( size_t t = 0; t < nt; t++ )
+							for ( size_t e = 0; e < 3; e++ ) {
+								const quint32 a = pnode[d.tris[3 * t + e]], b = pnode[d.tris[3 * t + ( e + 1 ) % 3]];
+								if ( a != b )
+									edges.push_back( { ( quint64( std::min( a, b ) ) << 32 ) | quint64( std::max( a, b ) ), quint32( t ) } );
+							}
+						std::sort( edges.begin(), edges.end() );
+						std::vector<std::vector<quint32>> nbr( nt );
+						for ( size_t e0 = 0; e0 < edges.size(); ) {
+							size_t e1 = e0 + 1;
+							while ( e1 < edges.size() && edges[e1].first == edges[e0].first )
+								e1++;
+							for ( size_t x = e0; x < e1; x++ )
+								for ( size_t y = e0; y < e1; y++ )
+									if ( x != y && edges[x].second != edges[y].second )
+										nbr[edges[x].second].push_back( edges[y].second );
+							e0 = e1;
+						}
+						const float cosP = std::cos( patchDeg * 3.14159265f / 180.0f );
+						const float tolD = 2.0f / float( dim );
+						std::vector<qint32> patch( nt, -1 );
+						std::vector<quint8> fitted( nt, 0 );
+						std::vector<double> fAo( d.count, 0.0 ), fSk( d.count, 0.0 ), fW( d.count, 0.0 );
+						std::vector<quint32> members, stack;
+						for ( size_t t0 = 0; t0 < nt; t0++ ) {
+							if ( patch[t0] >= 0 || !( arT[t0] > 0.0 ) )
+								continue;
+							const Vector3 n0 = fnT[t0];
+							const Vector3 o = wp[d.tris[3 * t0]];
+							members.clear();
+							stack.assign( 1, quint32( t0 ) );
+							patch[t0] = qint32( t0 );
+							while ( !stack.empty() ) {
+								const quint32 t = stack.back();
+								stack.pop_back();
+								members.push_back( t );
+								for ( quint32 t2 : nbr[t] ) {
+									if ( patch[t2] >= 0 || !( arT[t2] > 0.0 ) || Vector3::dotproduct( fnT[t2], n0 ) < cosP )
+										continue;
+									bool onPlane = true;
+									for ( size_t c = 0; c < 3; c++ )
+										if ( std::fabs( Vector3::dotproduct( wp[d.tris[3 * size_t( t2 ) + c]] - o, n0 ) ) > tolD )
+											onPlane = false;
+									if ( !onPlane )
+										continue;
+									patch[t2] = qint32( t0 );
+									stack.push_back( t2 );
+								}
+							}
+							if ( members.size() < 2 )
+								continue;   // one triangle draws its own linear field already
+							Vector3 u = std::fabs( n0[0] ) < 0.9f ? Vector3::crossproduct( n0, Vector3( 1, 0, 0 ) )
+								: Vector3::crossproduct( n0, Vector3( 0, 1, 0 ) );
+							u.normalize();
+							const Vector3 vv = Vector3::crossproduct( n0, u );
+							auto coords = [&]( quint32 vi, double x[3] ) {
+								const Vector3 q = wp[vi] - o;
+								x[0] = 1.0;
+								x[1] = double( Vector3::dotproduct( q, u ) ) * double( dim );
+								x[2] = double( Vector3::dotproduct( q, vv ) ) * double( dim );
+							};
+							auto det3 = []( const double m[3][3] ) {
+								return m[0][0] * ( m[1][1] * m[2][2] - m[1][2] * m[2][1] ) - m[0][1] * ( m[1][0] * m[2][2] - m[1][2] * m[2][0] )
+									+ m[0][2] * ( m[1][0] * m[2][1] - m[1][1] * m[2][0] );
+							};
+							double M[3][3], bA[3], bS[3], loA, hiA, loS, hiS, det = 0.0;
+							auto clearFit = [&]() {
+								for ( int i = 0; i < 3; i++ ) {
+									bA[i] = bS[i] = 0.0;
+									for ( int j = 0; j < 3; j++ )
+										M[i][j] = 0.0;
+								}
+								loA = loS = 1e9;
+								hiA = hiS = -1e9;
+							};
+							auto addFit = [&]( const double x[3], double w, double a, double sv ) {
+								for ( int i = 0; i < 3; i++ ) {
+									for ( int j = 0; j < 3; j++ )
+										M[i][j] += w * x[i] * x[j];
+									bA[i] += w * x[i] * a;
+									bS[i] += w * x[i] * sv;
+								}
+								loA = std::min( loA, a );
+								hiA = std::max( hiA, a );
+								loS = std::min( loS, sv );
+								hiS = std::max( hiS, sv );
+							};
+							auto solvable = [&]() {
+								det = det3( M );
+								return std::fabs( det ) > 1e-9 * std::fabs( M[0][0] * M[1][1] * M[2][2] );
+							};
+							bool ok = false;
+							if ( patchSamples ) {
+								/* Fit the SAMPLES, not the corner values: the corner values are
+								 * hat-weighted means that flatten a gradient (a wall foot read 12 bytes
+								 * under its top against 33 at the corners before AO2); the samples' own
+								 * least-squares plane keeps it. bungo 2026-09-26: "You can try more
+								 * darkening at the bottom". Research only: WW_AO_PATCH_FIT=samples. */
+								clearFit();
+								for ( quint32 t : members )
+									for ( size_t k = sTri[t]; k < sTri[size_t( t ) + 1]; k++ ) {
+										const Vector3 q = sP[k] - o;
+										const double x[3] = { 1.0, double( Vector3::dotproduct( q, u ) ) * double( dim ),
+											double( Vector3::dotproduct( q, vv ) ) * double( dim ) };
+										addFit( x, sW[k], double( sAo[k] ), double( sSk[k] ) );
+									}
+								ok = solvable();
+								if ( ok ) {
+									aPatchSampleFit++;
+									// the samples lie inside the patch and its corners outside them: clamping the corners to
+									// the samples' range would bend the plane there (a kink), so only 0..1 applies
+									loA = loS = 0.0;
+									hiA = hiS = 1.0;
+								}
+							}
+							if ( !ok ) {
+								clearFit();
+								for ( quint32 t : members )
+									for ( size_t c = 0; c < 3; c++ ) {
+										const quint32 vi = d.tris[3 * size_t( t ) + c];
+										double x[3];
+										coords( vi, x );
+										addFit( x, arT[t] / 3.0, double( aoV[vi] ), double( skV[vi] ) );
+									}
+								ok = solvable();
+							}
+							if ( !ok )
+								continue;   // corners on one line: no plane to fit, keep the values
+							auto solve = [&]( const double b[3], double cf[3] ) {
+								for ( int k = 0; k < 3; k++ ) {
+									double Mk[3][3];
+									for ( int i = 0; i < 3; i++ )
+										for ( int j = 0; j < 3; j++ )
+											Mk[i][j] = j == k ? b[i] : M[i][j];
+									cf[k] = det3( Mk ) / det;
+								}
+							};
+							double cA[3], cS[3];
+							solve( bA, cA );
+							solve( bS, cS );
+							aPatches++;
+							aPatchTris += members.size();
+							for ( quint32 t : members ) {
+								fitted[t] = 1;
+								for ( size_t c = 0; c < 3; c++ ) {
+									const quint32 vi = d.tris[3 * size_t( t ) + c];
+									double x[3];
+									coords( vi, x );
+									const double w = arT[t] / 3.0;
+									fAo[vi] += w * std::clamp( cA[0] + cA[1] * x[1] + cA[2] * x[2], loA, hiA );
+									fSk[vi] += w * std::clamp( cS[0] + cS[1] * x[1] + cS[2] * x[2], loS, hiS );
+									fW[vi] += w;
+								}
+							}
+						}
+						// a corner also on loose (unfitted) triangles keeps their share of its own value
+						for ( size_t t = 0; t < nt; t++ ) {
+							if ( fitted[t] || !( arT[t] > 0.0 ) )
+								continue;
+							for ( size_t c = 0; c < 3; c++ ) {
+								const quint32 vi = d.tris[3 * t + c];
+								const double w = arT[t] / 3.0;
+								fAo[vi] += w * double( aoV[vi] );
+								fSk[vi] += w * double( skV[vi] );
+								fW[vi] += w;
+							}
+						}
+						if ( !node.empty() ) {
+							std::vector<double> aoN( d.count, 0.0 ), skN( d.count, 0.0 ), wN( d.count, 0.0 );
+							for ( quint32 v = 0; v < d.count; v++ ) {
+								aoN[node[v]] += fAo[v];
+								skN[node[v]] += fSk[v];
+								wN[node[v]] += fW[v];
+							}
+							for ( quint32 v = 0; v < d.count; v++ ) {
+								fAo[v] = aoN[node[v]];
+								fSk[v] = skN[node[v]];
+								fW[v] = wN[node[v]];
+							}
+						}
+						for ( quint32 v = 0; v < d.count; v++ )
+							if ( fW[v] > 0.0 ) {
+								aoV[v] = float( fAo[v] / fW[v] );
+								skV[v] = float( fSk[v] / fW[v] );
+							}
+					}
+					r.vertexAo.resize( d.count );
+					if ( wantSky )
+						r.vertexSky.resize( d.count );
+					for ( quint32 v = 0; v < d.count; v++ ) {
+						r.vertexAo[v] = quint8( std::lround( std::min( 1.0f, std::max( 0.0f, aoV[v] ) ) * 255.0f ) );
 						if ( wantSky )
-							r.vertexSky[v] = quint8( std::lround( std::min( 1.0f, std::max( 0.0f, sk ) ) * 255.0f ) );
+							r.vertexSky[v] = quint8( std::lround( std::min( 1.0f, std::max( 0.0f, skV[v] ) ) * 255.0f ) );
 					}
 				}
 			}
@@ -3050,6 +3296,9 @@ bool lodgenNativeWrite( QString * report, QString * error )
 		vaoRingLeftOut = aRingLeftOut;
 		vaoWelded = aWelded;
 		vaoUnder = aUnder;
+		vaoPatches = aPatches;
+		vaoPatchTris = aPatchTris;
+		vaoPatchSampleFit = aPatchSampleFit;
 		vaoScenes = aScenes;
 		for ( int b = 0; b < 8; b++ )
 			vskyHist[size_t( b )] = aSkyHist[size_t( b )];
@@ -3689,7 +3938,12 @@ bool lodgenNativeWrite( QString * report, QString * error )
 						: QStringLiteral( "split copies NOT pooled (WW_AO_WELD_DEG < 0)" ) )
 						+ ( vaoUnderTol >= 0.0f ? QString( "; %1 sample(s) more than %2 u under the ground set aside" )
 							.arg( vaoUnder ).arg( double( vaoUnderTol ), 0, 'f', 0 )
-						: QStringLiteral( "; samples under the ground KEPT (WW_AO_UNDER_TOL < 0)" ) ) )
+						: QStringLiteral( "; samples under the ground KEPT (WW_AO_UNDER_TOL < 0)" ) )
+						+ ( vaoPatchDeg >= 0.0f ? QString( "; %1 flat patch(es) of %2 triangles given one linear field each (normals within %3 deg)" )
+							.arg( vaoPatches ).arg( vaoPatchTris ).arg( double( vaoPatchDeg ), 0, 'f', 1 )
+							+ ( vaoPatchSamples ? QString( ", %1 fitted to their samples, the rest to their corners" ).arg( vaoPatchSampleFit )
+								: QStringLiteral( ", fitted to their corners" ) )
+						: QStringLiteral( "; flat patches NOT fitted (WW_AO_PATCH_DEG < 0)" ) ) )
 				: QStringLiteral( "OFF (--native-no-vertex-ao)" ) );
 		/* v7 (2026-09-18, lane LODIV7). Both halves state their OFF value by
 		 * the switch that turns them off, so a reader of the census never has
