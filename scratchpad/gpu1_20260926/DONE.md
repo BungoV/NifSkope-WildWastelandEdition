@@ -58,3 +58,58 @@ image mask every pass of every frame; the work it does is small.
   Neither can match the CPU bytes (the CPU build fuses multiply-adds; the GPU rounds differently), so both need the
   "no worse on the stage's own error measure" gate.
 - Order of work: CPU fixes 3, 2, (texture cache lookup of) 1 first; then GPU BC7; then GPU AO last after the main merge.
+
+## 3. What was built, per stage, and how each stays deterministic
+
+### 3a. CPU fixes first (the ranked table said the slow stages are single-thread, not heavy math)
+- **Card dilate** (row 3, fe4b19c1): dilate works on each frame's own rectangle, stops when a pass changes nothing,
+  frames fan out over the cores and are written back in frame order; the texture cache's LRU is kept as stamps
+  instead of a list remove per lookup. Same bytes: Boston 253 files identical to the rung.
+- **Identity join** (row 2, 212af0be): every placement called `reserve(size()+n)` with the exact size, which
+  defeats the vector's doubling, so each placement copied the whole sample array. The walk is grouped and the
+  reserve lines are gone. Boston join 109175 ms -> 706 ms, same 42306 placements / 1,931,045 samples / 40,294
+  pairs; the whole Boston bake is byte-identical to the one before it (cmp_trees: SAME, 253 files).
+
+### 3b. GPU BC7 (row 5, baf912be)
+- Where: the card normal sheets (`_n`, weights R1 G1 B32 A1), the bake's only BC7 images: `lodgenWriteDds` and
+  `lodgenEncodeArrayLayer` in src/lodgen.cpp call `lodgenGpuEncodeBc7` first and run their CPU loop when it
+  returns false.
+- How: one offscreen OpenGL 4.3 context (Qt `QOffscreenSurface`, no window, headless too: `main()` makes a
+  QGuiApplication for a `lodgen` run that wants the GPU) on a thread of its own; a compute shader running the
+  same search as src/lodgenbc7.h in single precision, one thread per block, in three passes (mode 6; modes 4/5
+  on the blocks with error left; the two-subset modes on those still with error), each pass compacted on the
+  host in block order.
+- First try was a double-precision port that matched the CPU byte for byte: 3.0 s on a 1024x512 image against
+  0.4 s on 16 CPU threads (a GeForce runs doubles at 1/64 rate). Dropped.
+- The float version first ran slower than the CPU too: the NVIDIA compiler put the constant tables and the
+  dynamically indexed arrays in per-thread local memory (the program binary showed `lmem` of 288 words).
+  Packed pixels, weights computed instead of looked up, named struct fields instead of indexed arrays and the
+  pass compaction brought it to 2.3x faster than 16 CPU threads.
+- Not the CPU's bytes: a float fit can land one code step off the double fit, either way. What IS exact: the
+  palette, the index choice and each block's error are integer math, so every block's reported error is the
+  true weighted error of the bytes it wrote.
+- Deterministic: no atomics, no cross-thread reductions; every block is a pure function of its 16 pixels; the
+  host builds the pass lists in block order.
+- Refused at start-up unless a self-check passes: a fixed 128x64 image is encoded by both, every GPU block is
+  decoded with the vendored detex decoder and must decode to its reported error, and the GPU total must be <=
+  the CPU total. Measured on this card: GPU 26082378 <= CPU 26090366.
+- Fallback: context creation failure, self-check failure or a failed job turn the GPU path off with a log
+  line (`gpu: CPU path -- <why>`); a failed job falls back to the CPU loop for that image and the rest of the run.
+- The switch: Settings > NIF > LOD bake > Use GPU (on by default). The headless `-no-gui lodgen` reads the same
+  key; `--no-gpu` wins over it for one run. The bake log's first lines say `gpu: GPU path -- setting Use GPU on;
+  <card>, OpenGL 4.3; BC7 self-check ...` or `gpu: CPU path -- switch --no-gpu` / `-- setting Use GPU off`, and
+  the last line counts images, blocks, GPU ms and fall-backs.
+- Incremental cache: the path taken goes into the chunk digest (`|bc7gpu`, empty on the CPU path), so a cache
+  from one path is never reused by the other and the CPU path's digest is today's.
+
+### 3c. Not built, and why
+- **GPU AO / sky ray cast (row 6, 194 s whole map).** AO2 merged? Yes: 53fb5d8d is in main and this branch
+  starts at main 422881d4. Not built because (1) the AO2 follow-up lane is changing the AO cast right now, so a
+  GPU port would chase moving code; (2) the stage is slow because the largest chunk runs on one thread (the
+  profile's one-core tail), which a byte-identical CPU fan-out of that chunk's faces fixes (~150 of 194 s)
+  without the float-ray error gate; (3) at 194 s it is the smallest row left. The AO spot gates (ballpark roof,
+  tower face, lone box) therefore did not apply.
+- **Terrain painting on the GPU (part of row 1).** Painting is ~15% of the VT tile time; the rest is texture
+  decode and the cache lookup, which stay on the CPU. The big saving there (~2500 s) is fanning the tile loop
+  over the cores, a CPU change; the loop shares the land/mask caches, the census and the sheet state, so it is
+  a lane of its own (see section 5, what is left).
