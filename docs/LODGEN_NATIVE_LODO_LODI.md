@@ -1590,6 +1590,35 @@ the right places?"*. Two measured causes, two changes; the ray law itself
    corners now follow the neighbours, coplanar kink mean 7.5 → 10.0 bytes
    (share above 16: 7.7% → 13.5%). `WW_AO_WELD_ACROSS=0` keeps steps 3-5
    inside each placement (bytes as the step-5 bake).
+7. *See-through casters* (the decal round, bungo on the same tower: *"why are
+   these faces on the tower darkened? Is it because there's a decal in front of
+   them?"*). The stain sheets (HitExtAStains*_LOD) stand 5 u in front of the
+   walls. In game they are drips over the wall, but the caster took every
+   triangle as solid, so about three of a panel's eight rays met a stain's back
+   face. The LOD NIF carries no alpha property; the see-through switch is in
+   its LOD BGSM (HitTechStain_LOD: alpha blend, alpha test at 134). A shape is
+   now SEE-THROUGH when its material blends (NIF alpha property bit 0, or the
+   BGSM/BGEM switch) or is a decal that tests. A material row is see-through
+   only when every shape on it is. A see-through triangle enters the scene with
+   its UVs and its diffuse's level-0 alpha (`LodgenAoAlpha`, src/lodgenao.h),
+   and the face caster counts a hit on it only where that alpha is at or above
+   the material's own test cutoff (128 for a blend without a test).
+
+   The switches alone do not decide it. A flag-only rule was measured first and
+   rejected: Wrhs01LOD (warehouse walls) is a decal, and SkyBrigde_LOD_01 (the
+   skybridges) blends, yet their drawn surfaces are 100% and 54% opaque, against
+   27-32% for the stains. Where the alpha passes the ray, the ray goes through;
+   where it is opaque, the ray is blocked, as the pixels are. Alpha-TESTED-only
+   rows (fences, tree cards) still cast as solid, as before; the census counts
+   them. The library `selfAO` casts see-through shapes the same way.
+
+   Boston: 9 see-through rows, 10,241 triangles over 2,704 placement-rings;
+   64 alpha-tested rows, 403,568 triangles over 20,839 placement-rings. The
+   rule is in memory only (the .lodo carries no such bit), so a vertex-AO bake
+   does not reuse an earlier library. `WW_AO_OVERLAY_CASTERS=1` casts every
+   row as solid (the refuter: the .lodi and .lodo come out as the step-6 bake's).
+   The stock caster (`rayHit`: the chunk pass and `WW_SELFAO_FACE=0`) is
+   unchanged and still takes every triangle as solid.
 
 The library `selfAO` (§3, 0x0F) uses steps 2 and 3 as well (not step 4: the
 library has no ground). The Charles bridge deck (Bridge01End01) read 38 from one
