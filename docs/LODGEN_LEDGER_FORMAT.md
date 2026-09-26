@@ -448,6 +448,15 @@ so the old behaviour is reachable rather than merely remembered. Measured on
 that four-chunk bake: 658,970 bytes for 2,243 placements = **294 bytes a
 placement**, 0.29 % of the 225,399,755-byte `.lodo`.
 
+**Written by default: bungo's call, recorded by lane FIX1 on 2026-09-26.**
+bungo asked what the `.lodj` files in the mod folder are. Each one is this cache:
+one chunk's placements, which the NEXT bake reads back so that a chunk it skips
+still reaches the pair. The game never opens one, and neither does any FO4CS
+reader (the FO4CS source has no `lodj` in it). The cost is about 294 bytes a
+placement. Deleting a `.lodj` is safe: the next `--incremental` rebakes that one
+chunk (`with no native chunk cache 1`), and a full bake writes it again. The
+default stays ON. `--no-native-cache` is the way to leave it out.
+
 The cache is an output of the FO4CS target like any other, so it is registered
 with `lodgenNoteLayoutFile()` and counted in the census's `layout <root>, N
 file(s)` clause. `tests/spells/lodgen_layout.sh` leg (f) holds that count

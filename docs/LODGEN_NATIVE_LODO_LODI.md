@@ -1846,6 +1846,14 @@ slot has no mesh, N on a card by a C line); C lines N read, N linked` -- or
 `native-cards: OFF (no card arrays linked); cardCount 0, cardCorpusHash
 0x0000000000000000, FORCE_CARD on 0 instances`.
 
+**Whole-map FORCE_CARD: NO (bungo's call, recorded by lane FIX1, 2026-09-26).**
+A whole-map bake writes FORCE_CARD on 0 placements, and that is correct. Every
+tree first arrives at ring 4, where its own LOD mesh fills the slot, so neither
+rule above fires. A region bake shows thousands only because its far rings reach
+past the ring-4 area it baked. No switch forces cards across the whole map. Do
+not compare a region's FORCE_CARD count with a whole map's as a
+regression.
+
 **For whoever makes the native bake incremental:** `--incremental --native` is
 refused today (CONSTITUTION 10), so the link never meets a chunk replayed from
 the `.lodj` cache. When that changes, a replayed chunk must bring its manifest
