@@ -1527,7 +1527,8 @@ enclosed across their whole area 96.9 → 73.2. The circled spots: the Prudentia
 kit roof 38 → 255, the Trinity Church west wall 65 → 234…245, its tower cap's
 pyramid faces 38/38/255 → 255/255/255. Every other table of the `.lodi` and every
 other file of the bake is byte-identical (only the two vertex streams and the two
-CRCs move). `WW_AO_FACE_STEP` / `WW_AO_FACE_MAX` are research knobs
+CRCs move). Cost on the whole Commonwealth: 24.5 M samples, the library
+instances stage 1,478 s → 1,810 s. `WW_AO_FACE_STEP` / `WW_AO_FACE_MAX` are research knobs
 (`WW_AO_FACE_STEP=0` = cast at the vertex alone); `WW_AO_PROBE=x,y,z,r` logs every
 sample's rays near a point.
 
