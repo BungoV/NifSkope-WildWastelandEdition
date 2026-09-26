@@ -33,6 +33,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "gamemanager.h"
 #include "lodgen.h"
+#include "lodgengpu.h"
 #include "lodgenlayout.h"
 #include "esmdata.h"
 #include "cellclick.h"		// lane CELLVIEW2
@@ -5769,6 +5770,85 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 				log << "done\n";
 				logf.close();
 				// dismiss the save-on-quit prompt (decline), then quit
+				QTimer * qd = new QTimer( qApp );
+				QObject::connect( qd, &QTimer::timeout, qApp, []() {
+					auto * mb = qobject_cast<QMessageBox *>( QApplication::activeModalWidget() );
+					if ( !mb ) return;
+					QAbstractButton * bn = mb->button( QMessageBox::No );
+					if ( !bn ) bn = mb->button( QMessageBox::Discard );
+					if ( !bn && !mb->buttons().isEmpty() ) bn = mb->buttons().first();
+					if ( bn ) bn->click();
+				} );
+				qd->start( 50 );
+				QTimer::singleShot( 300, qApp, &QApplication::quit );
+			} );
+		} );
+	}
+
+	// TEST HARNESS (WW_USEGPU_TEST=1, lane GPU1): the Settings > NIF > LOD bake >
+	// Use GPU row. Run it under WW_SETTINGS_SCOPE with the key PLANTED (the
+	// gate plants "false"): the row must open showing the planted value, write
+	// exactly the key the bake reads (lodgenGpuSettingEnabled), and round-trip
+	// on -> off. Pictures of the NIF tab in both states beside the exe.
+	// Log: <exe dir>/ww_usegpu_test.log.
+	if ( !fname.isEmpty() && qEnvironmentVariableIsSet( "WW_USEGPU_TEST" ) ) {
+		QObject::connect( skope, &NifSkope::completeLoading, skope, [skope]( bool ok, QString & ) {
+			QTimer::singleShot( 800, skope, [skope, ok]() {
+				const QString dir = QApplication::applicationDirPath();
+				QFile logf( dir + "/ww_usegpu_test.log" );
+				if ( !logf.open( QIODevice::WriteOnly | QIODevice::Text ) )
+					return;
+				QTextStream log( &logf );
+				QStringList fails;
+				do {
+					if ( !ok ) { fails << "load failed"; break; }
+					log << "settings scope suffix = '" << wwHarnessSettingsSuffix() << "'\n";
+					if ( wwHarnessSettingsSuffix().isEmpty() ) { fails << "no WW_SETTINGS_SCOPE: refusing to touch the user's key"; break; }
+					const bool planted = lodgenGpuSettingEnabled();
+					log << "bake reads before the dialog = " << ( planted ? "on" : "off" ) << "\n";
+					SettingsDialog * opt = skope->getOptions();
+					if ( !opt ) { fails << "no settings dialog"; break; }
+					opt->move( 1920 + 120, 120 );
+					opt->show();
+					qApp->processEvents();
+					auto * tabs = opt->findChild<QTabWidget *>( "general" );
+					auto * page = opt->findChild<QWidget *>( "nif" );
+					auto * chk = opt->findChild<QCheckBox *>( "useGPU" );
+					auto * lbl = opt->findChild<QLabel *>( "lblUseGPU" );
+					auto * grp = opt->findChild<QGroupBox *>( "groupBoxLodBake" );
+					if ( !tabs || !page || !chk || !lbl || !grp ) { fails << "Use GPU row widgets missing"; break; }
+					log << "label = '" << lbl->text() << "', group = '" << grp->title() << "', labels in group = "
+						<< grp->findChildren<QLabel *>().size() << "\n";
+					if ( lbl->text() != QStringLiteral( "Use GPU" ) || grp->findChildren<QLabel *>().size() != 1 )
+						fails << "the row is not label + control only";
+					log << "row opens " << ( chk->isChecked() ? "checked" : "unchecked" ) << "\n";
+					if ( chk->isChecked() != planted )
+						fails << "the row does not show the stored value";
+					tabs->setCurrentWidget( page );
+					qApp->processEvents();
+					opt->grab().save( dir + ( planted ? "/ww_usegpu_on.png" : "/ww_usegpu_off.png" ) );
+					for ( int step = 0; step < 2; step++ ) {
+						const bool want = step == 0 ? !planted : planted;
+						chk->setChecked( want );
+						opt->apply();
+						qApp->processEvents();
+						QSettings s;
+						const QVariant raw = s.value( QLatin1String( kLodgenGpuSettingKey ) );
+						const bool reads = lodgenGpuSettingEnabled();
+						log << "set " << ( want ? "on" : "off" ) << ": stored '" << raw.toString() << "', bake reads "
+							<< ( reads ? "on" : "off" ) << "\n";
+						if ( reads != want )
+							fails << QString( "the bake does not read the row (step %1)" ).arg( step );
+						if ( step == 0 ) {
+							opt->grab().save( dir + ( want ? "/ww_usegpu_on.png" : "/ww_usegpu_off.png" ) );
+						}
+					}
+				} while ( false );
+				for ( const QString & f : fails )
+					log << "  FAIL: " << f << "\n";
+				log << ( fails.isEmpty() ? "PASS -- Use GPU row shows, writes and round-trips the key the bake reads\n" : "FAILED\n" );
+				log << "done\n";
+				logf.close();
 				QTimer * qd = new QTimer( qApp );
 				QObject::connect( qd, &QTimer::timeout, qApp, []() {
 					auto * mb = qobject_cast<QMessageBox *>( QApplication::activeModalWidget() );
