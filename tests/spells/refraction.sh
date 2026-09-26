@@ -36,13 +36,52 @@
 set -u
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-EXE="$REPO/release/NifSkope.exe"
+EXE="${EXE:-$REPO/release/NifSkope.exe}"   # FIX1: EXE= runs a copy (another lane may be relinking release/)
+PORT="${PORT:-42371}"   # FIX1: every window gets its own IPC port
 # Every window this opens goes to the second monitor. WW_RENDER_SHOT still puts
 # a REAL window on screen for a couple of seconds per capture, and this script
 # opens eighteen of them, so without WW_WINDOW_AT a run walks all over whatever
 # is on the primary display. _harness.sh owns the coordinates for every harness
 # in this directory - set them there, not here.
 . "$(dirname "$0")/_harness.sh"
+# ---- settings scope (lane FIX1 fix 4, 2026-09-26) ----------------------------
+# Every NifSkope WINDOW this spell opens runs in its OWN QSettings scope -- never
+# bungo's profile, and never a scope the caller's environment names. A gate that
+# inherits the user's settings measures the profile, not the code (lane GATEFIX2,
+# native_lighting.sh: his "Vertex Color" unticked in the Lighting shading mode
+# turned the .BTR water white). WW_SETTINGS_SCOPE=<scope> moves the whole tree to
+# HKCU\Software\NifTools\NifSkope 2.0 <scope> (src/harnesswindow.cpp).
+# fresh_scope wipes it before EACH window (a window saves its layout on close, so
+# the next would open at another size) and seeds Settings/Version=1: an EMPTY
+# scope is a first install, whose settings dialog saves every pane's widget value
+# (Background 46,46,46, src/ui/settingspane.cpp). SEED_REG=<file.reg> (keys
+# already under the scope) is imported after the seed -- a red control's way to
+# render under a chosen profile. The scope is wiped at exit. The -no-gui CLI
+# calls are not windows and are left as they were.
+SCOPE="${SCOPE:-refraction}"
+case "$SCOPE" in
+	''|*[!A-Za-z0-9_-]*) echo "REFUSED: SCOPE='$SCOPE' is not a usable settings scope name"; exit 2 ;;
+esac
+[ ${#SCOPE} -le 40 ] || { echo "REFUSED: SCOPE='$SCOPE' is longer than 40"; exit 2; }
+REGKEY="HKCU\\Software\\NifTools\\NifSkope 2.0 $SCOPE"
+wipe_scope() { reg delete "$REGKEY" //f > /dev/null 2>&1 || true; }
+fresh_scope() {  # wipe + seed, then print the name: WW_SETTINGS_SCOPE="$(fresh_scope)"
+	wipe_scope
+	reg add "$REGKEY\\Settings" //v Version //t REG_SZ //d 1 //f > /dev/null 2>&1 || true
+	# not a Game Manager first install either: version 0 shows an opaque progress dialog on the
+	# PRIMARY monitor (src/gamemanager.cpp prog_dialog) before any WW window placement exists
+	reg add "$REGKEY" //v "Game Manager Version" //t REG_DWORD //d 2 //f > /dev/null 2>&1 || true
+	# ...and the game manager state an empty scope never gets (its Game Folders come out empty):
+	# Fallout 4's path and folders read from THIS MACHINE, never from the user's profile
+	local gm; gm="$(mktemp)"
+	python "$(dirname "$0")/settings_scope_game.py" "$SCOPE" "$(cygpath -w "$gm")" > /dev/null 2>&1 \
+		&& reg import "$(cygpath -w "$gm")" > /dev/null 2>&1
+	rm -f "$gm"
+	if [ -n "${SEED_REG:-}" ]; then reg import "$(winpath "$SEED_REG")" > /dev/null 2>&1 || true; fi
+	printf '%s' "$SCOPE"
+}
+wipe_scope
+trap wipe_scope EXIT
 WORK="$REPO/release/ww_refraction"
 DIFF="$REPO/tools/render_regression/imgdiff.ps1"
 SRC_IN="${WW_REFRACTION_SRC:-E:/Projects/Fallout 4 Mods/mods/X01Tesla/meshes/actors/powerarmor/x01/X01_Torso_VFX.nif}"
@@ -146,7 +185,7 @@ shot() { # nif name time [size] [view] [refr]
 	export WW_RENDER_SIZE="${4:-1280x800}" WW_RENDER_SEQ=autoLoop
 	export WW_RENDER_REFRACTION="${6:-1}"
 	if [ -n "${5:-}" ]; then export WW_RENDER_VIEW="$5"; else unset WW_RENDER_VIEW; fi
-	timeout 120 "$EXE" "$1" >/dev/null 2>&1
+	WW_SETTINGS_SCOPE="$(fresh_scope)" timeout 120 "$EXE" --port "$PORT" "$1" >/dev/null 2>&1
 	unset WW_RENDER_SHOT WW_RENDER_TIME WW_RENDER_SIZE WW_RENDER_SEQ WW_RENDER_REFRACTION WW_RENDER_VIEW
 	[ -s "$SHOT" ] || { echo "FAIL  no framebuffer for $2"; exit 1; }
 }
@@ -342,7 +381,7 @@ FF="$WORK/firstframe"
 ff_run() { # outdir refractionOn
 	rm -rf "$1"; mkdir -p "$1"
 	WW_FRAME_SHOTS="$(winpath "$1/f")" WW_FRAME_SHOTS_MAX=16 WW_FIRSTFRAME_TEST=1 \
-		WW_RENDER_REFRACTION="$2" timeout 120 "$EXE" "$SRC" >/dev/null 2>&1
+		WW_RENDER_REFRACTION="$2" WW_SETTINGS_SCOPE="$(fresh_scope)" timeout 120 "$EXE" --port "$PORT" "$SRC" >/dev/null 2>&1
 }
 ff_run "$FF/on"  1
 ff_run "$FF/off" 0

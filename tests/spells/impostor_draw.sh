@@ -155,6 +155,44 @@ fi
 # that shipped the defect (lane IMPOSTORLIGHT1). It reads the shaders beside
 # itself (applicationDirPath()/shaders), so a rung folder carries its own.
 exe="${IMPOSTOR_EXE:-$root/release/NifSkope.exe}"
+# ---- settings scope (lane FIX1 fix 4, 2026-09-26) ----------------------------
+# Every NifSkope WINDOW this spell opens runs in its OWN QSettings scope -- never
+# bungo's profile, and never a scope the caller's environment names. A gate that
+# inherits the user's settings measures the profile, not the code (lane GATEFIX2,
+# native_lighting.sh: his "Vertex Color" unticked in the Lighting shading mode
+# turned the .BTR water white). WW_SETTINGS_SCOPE=<scope> moves the whole tree to
+# HKCU\Software\NifTools\NifSkope 2.0 <scope> (src/harnesswindow.cpp).
+# fresh_scope wipes it before EACH window (a window saves its layout on close, so
+# the next would open at another size) and seeds Settings/Version=1: an EMPTY
+# scope is a first install, whose settings dialog saves every pane's widget value
+# (Background 46,46,46, src/ui/settingspane.cpp). SEED_REG=<file.reg> (keys
+# already under the scope) is imported after the seed -- a red control's way to
+# render under a chosen profile. The scope is wiped at exit. The -no-gui CLI
+# calls are not windows and are left as they were.
+SCOPE="${SCOPE:-impostor_draw}"
+case "$SCOPE" in
+	''|*[!A-Za-z0-9_-]*) echo "REFUSED: SCOPE='$SCOPE' is not a usable settings scope name"; exit 2 ;;
+esac
+[ ${#SCOPE} -le 40 ] || { echo "REFUSED: SCOPE='$SCOPE' is longer than 40"; exit 2; }
+REGKEY="HKCU\\Software\\NifTools\\NifSkope 2.0 $SCOPE"
+wipe_scope() { reg delete "$REGKEY" //f > /dev/null 2>&1 || true; }
+fresh_scope() {  # wipe + seed, then print the name: WW_SETTINGS_SCOPE="$(fresh_scope)"
+	wipe_scope
+	reg add "$REGKEY\\Settings" //v Version //t REG_SZ //d 1 //f > /dev/null 2>&1 || true
+	# not a Game Manager first install either: version 0 shows an opaque progress dialog on the
+	# PRIMARY monitor (src/gamemanager.cpp prog_dialog) before any WW window placement exists
+	reg add "$REGKEY" //v "Game Manager Version" //t REG_DWORD //d 2 //f > /dev/null 2>&1 || true
+	# ...and the game manager state an empty scope never gets (its Game Folders come out empty):
+	# Fallout 4's path and folders read from THIS MACHINE, never from the user's profile
+	local gm; gm="$(mktemp)"
+	python "$(dirname "$0")/settings_scope_game.py" "$SCOPE" "$(cygpath -w "$gm")" > /dev/null 2>&1 \
+		&& reg import "$(cygpath -w "$gm")" > /dev/null 2>&1
+	rm -f "$gm"
+	if [ -n "${SEED_REG:-}" ]; then reg import "$(winpath "$SEED_REG")" > /dev/null 2>&1 || true; fi
+	printf '%s' "$SCOPE"
+}
+wipe_scope
+trap wipe_scope EXIT
 if [ ! -x "$exe" ]; then
 	bad "4 $exe is missing -- the in-application half needs the build"
 	say "done  $steps steps, $fails failures"
@@ -199,7 +237,7 @@ run_harness() {
 	WW_IMPOSTOR_LOG="$work/$2" \
 	WW_WINDOW_AT=1960,40 \
 	WW_RENDER_SIZE="${IMPOSTOR_SIZE:-1024x1024}" \
-	"$exe" --port "$port" ${IMPOSTOR_NIF:+"$IMPOSTOR_NIF"} >> "$log" 2>&1
+	WW_SETTINGS_SCOPE="$(fresh_scope)" "$exe" --port "$port" ${IMPOSTOR_NIF:+"$IMPOSTOR_NIF"} >> "$log" 2>&1
 }
 
 if run_harness map "ww_impostor_map.log"; then
@@ -379,7 +417,7 @@ else
 	WW_IMPOSTOR_LOG="$work/ww_impostor_iou8.log" \
 	WW_WINDOW_AT=1960,40 \
 	WW_RENDER_SIZE="${IMPOSTOR_SIZE:-1024x1024}" \
-	"$exe" --port "$port" "$NIF8" >> "$log" 2>&1
+	WW_SETTINGS_SCOPE="$(fresh_scope)" "$exe" --port "$port" "$NIF8" >> "$log" 2>&1
 	got8=$( sed -n 's/^iou mean //p' "$work/ww_impostor_iou8.log" | tail -1 )
 	crisp8=$( grep -c "the CRISP end, flat snap" "$work/ww_impostor_iou8.log" )
 	if [ -z "$got8" ]; then
@@ -636,7 +674,7 @@ else
 		WW_IMPOSTOR_LOG="$work/$1" \
 		WW_WINDOW_AT=1960,40 \
 		WW_RENDER_SIZE="${IMPOSTOR_SIZE:-1024x1024}" \
-		"$exe" --port "$port" ${IMPOSTOR_NIF:+"$IMPOSTOR_NIF"} >> "$log" 2>&1
+		WW_SETTINGS_SCOPE="$(fresh_scope)" "$exe" --port "$port" ${IMPOSTOR_NIF:+"$IMPOSTOR_NIF"} >> "$log" 2>&1
 		rc=$?
 		unset WW_IMPOSTOR_FORCE_N
 		return $rc
@@ -703,7 +741,7 @@ else
 		WW_RENDER_SHOT="$work/chunk_$1.png" \
 		WW_RENDER_SIZE="${IMPOSTOR_SIZE:-1024x1024}" \
 		WW_WINDOW_AT=1960,40 \
-		"$exe" "$IMPOSTOR_CHUNK" --port "$port" > "$work/chunk_$1.txt" 2>&1
+		WW_SETTINGS_SCOPE="$(fresh_scope)" "$exe" "$IMPOSTOR_CHUNK" --port "$port" > "$work/chunk_$1.txt" 2>&1
 	}
 	cexp=$( grep -c "^C " "$IMPOSTOR_CHUNK.manifest.txt" )
 	if chunk_run 1 && chunk_run 0; then
@@ -758,7 +796,7 @@ doc_run() {
 	WW_RENDER_SHOT="$work/lodm_doc.png" \
 	WW_RENDER_SIZE="${IMPOSTOR_SIZE:-1024x1024}" \
 	WW_WINDOW_AT=1960,40 \
-	timeout 300 "$exe" "$1" --port "$port" > "$2" 2>&1
+	WW_SETTINGS_SCOPE="$(fresh_scope)" timeout 300 "$exe" "$1" --port "$port" > "$2" 2>&1
 }
 
 if doc_run "$IMPOSTOR_LODM" "$work/lodm_doc.txt"; then
@@ -1049,7 +1087,7 @@ photo_iou() {   # $1 = WW_IMPOSTOR_BLEND, $2 = log name, $3 = WW_IMPOSTOR_SLIDER
 	WW_IMPOSTOR_BLEND="$1" \
 	WW_WINDOW_AT=1960,40 \
 	WW_RENDER_SIZE="${IMPOSTOR_SIZE:-1024x1024}" \
-	"$exe" --port "$port" ${IMPOSTOR_NIF:+"$IMPOSTOR_NIF"} >> "$log" 2>&1
+	WW_SETTINGS_SCOPE="$(fresh_scope)" "$exe" --port "$port" ${IMPOSTOR_NIF:+"$IMPOSTOR_NIF"} >> "$log" 2>&1
 	pn=$( sed -n 's/^orbit counted \([0-9]*\) of.*/\1/p' "$work/$2" | tail -1 )
 	pi=$( sed -n 's/^orbit iou mean //p' "$work/$2" | tail -1 )
 }
@@ -1116,7 +1154,7 @@ light_run() {   # $1 = subfolder; the rest are env assignments for this run
 	WW_IMPOSTOR_BLEND=1 WW_RENDER_CLEAN=1 \
 	WW_WINDOW_AT=1960,40 \
 	WW_RENDER_SIZE="${IMPOSTOR_SIZE:-1024x1024}" \
-	"$exe" --port "$port" ${IMPOSTOR_NIF:+"$IMPOSTOR_NIF"} >> "$log" 2>&1
+	WW_SETTINGS_SCOPE="$(fresh_scope)" "$exe" --port "$port" ${IMPOSTOR_NIF:+"$IMPOSTOR_NIF"} >> "$log" 2>&1
 }
 light_row() {   # $1 = row label, $2 = the checker's fixed sentence start
 	lr=$( grep -E "^  (ok  |FAIL) $2" "$lchk" | head -1 )
@@ -1188,7 +1226,7 @@ orbit_grab() {   # $1 = out dir, $2 = views, rest = extra env; writes $1/v_*.png
 	WW_IMPOSTOR_CHANNEL=2 WW_IMPOSTOR_MESH_CHANNEL=8 WW_RENDER_CLEAN=1 \
 	WW_WINDOW_AT=1960,40 \
 	WW_RENDER_SIZE=1024x1024 \
-	"$exe" --port "$port" ${IMPOSTOR_NIF:+"$IMPOSTOR_NIF"} >> "$log" 2>&1
+	WW_SETTINGS_SCOPE="$(fresh_scope)" "$exe" --port "$port" ${IMPOSTOR_NIF:+"$IMPOSTOR_NIF"} >> "$log" 2>&1
 }
 # 0.60 x the rung. Rung = NifSkope.before_impostortear1.exe + the shipped shader, on the 4x blast_n4 bake
 # (TreeMapleblasted05, cardRes 512, N=4), 2026-09-23: torn share 0.2234 (worst az150 el20 0.7156).
