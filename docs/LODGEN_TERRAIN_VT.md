@@ -2675,7 +2675,7 @@ without them is byte-identical to before:
 
 | flag | default | effect |
 |---|---|---|
-| `--cover` / `--no-cover` | off | bake ground cover and the grass tint |
+| `--cover` / `--no-cover` | off | bake ground cover and the grass tint. Panel: *Ground cover and grass tint* under the stock target; *Ground cover* in the pyramid's section under the FO4CS target (lane FIX1, 2026-09-26; the grass tint then reads as this switch's default) |
 | `--grass-tint F` | 0.35 | 0 keeps the albedo byte-identical and still writes the plane |
 | `--cover-full N` | 96 | the fixed normalisation constant, 1..65535 |
 | `--dump-cover FILE` | — | also write the raw 512² u8 plane, north-up, headerless |

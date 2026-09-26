@@ -30441,6 +30441,37 @@ void NifSkope::initMenu()
 								log << "pyramid summary at " << den1 << ": " << sum1 << "\n";
 								check( "the pyramid's summary is computed, not a fixed sentence",
 									!sum2.isEmpty() && !sum1.isEmpty() && sum1 != sum2 );
+								/* Lane FIX1 (2026-09-26): ground cover under the FO4CS
+								 * target, measured against its opposite state through the
+								 * request the run reads (wwCoverRequested on the summary
+								 * label = coverOptions().cover). The stock rows are ticked
+								 * above, so they are unticked here: with them the request
+								 * is true whatever this row says. */
+								{
+									auto * vtCov = findChild<QCheckBox *>( QStringLiteral( "LodgenVtCoverCheck" ) );
+									auto * sumL = findChild<QLabel *>( QStringLiteral( "LodgenSummaryLabel" ) );
+									if ( vtCov && sumL ) {
+										const bool keepCov = vtCov->isChecked(), keepBtr = btrChk->isChecked();
+										btrChk->setChecked( false );
+										vtCov->setChecked( false );
+										QApplication::processEvents();
+										const bool reqOff = sumL->property( "wwCoverRequested" ).toBool();
+										vtCov->setChecked( true );
+										QApplication::processEvents();
+										const bool reqOn = sumL->property( "wwCoverRequested" ).toBool();
+										// the panel's own rule (xvar + wantVt): the row and the section
+										// are not hidden; a FOLDED body is still a request
+										const bool shownCs = !vtCov->isHidden() && vtSec && !vtSec->isHidden();
+										log << "FO4CS ground cover row: shown " << shownCs << ", request off " << reqOff << ", on " << reqOn << "\n";
+										check( "ground cover can be asked for under the FO4CS target",
+											shownCs && !reqOff && reqOn );
+										vtCov->setChecked( keepCov );
+										btrChk->setChecked( keepBtr );
+										QApplication::processEvents();
+									} else {
+										check( "ground cover can be asked for under the FO4CS target", false );
+									}
+								}
 								if ( vtSec ) {
 									target->setCurrentIndex( 1 );		// stock engine
 									QApplication::processEvents();
