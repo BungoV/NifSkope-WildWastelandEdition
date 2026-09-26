@@ -2748,6 +2748,8 @@ private:
 		lodgenSetLandGuideSlopeRef( xf( "landGuideSlope" ) );
 		lodgenSetLandDetailSource( xi( "landDetailSource" ) );
 		lodgenSetVanillaLodRoot( xs( "vanillaLodRoot" ) );
+		// lane FIX1: the vanilla fill's shape half (landless cells take vanilla's terrain LOD heights)
+		lodgenSetLandFillVanilla( xb( "vtFillVanilla" ) );
 		lodgenSetLandShade( xf( "landShade" ) );
 		lodgenSetLandGrade( xf( "landGrade" ) );
 		lodgenSetBlendEdges( xi( "blendEdges" ) );
@@ -3162,6 +3164,15 @@ private:
 					} );
 					return !cancelFlag.load();
 				};
+				/* Lane FIX1: with the vanilla fill on, a landless cell takes the
+				 * game's own terrain LOD heights too (lodgen.h), as on the CLI. */
+				lodgenSetLandFillVanilla( xb( "vtFillVanilla" ) );
+				if ( lodgenLandFillVanilla() ) {
+					const QString fillWs = w.worldspaceEdid();
+					o.landFill = [fillWs]( int cx, int cy, float * h ) {
+						return lodgenVanillaCellHeights( fillWs, cx, cy, h );
+					};
+				}
 				QString written;
 				if ( !lodtWrite( w, job.outDir, o, &written, &err ) ) {
 					post( [this, err]() { finishWorld( false, err ); } );

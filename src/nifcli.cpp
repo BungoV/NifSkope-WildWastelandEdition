@@ -3504,6 +3504,15 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 			/* THE LANDSCAPE STAGE. A `.lodl` run is where this one of the four
 			 * moves; a region bake writes no landscape file and prints 0.0 for
 			 * it, which is the other half of the written-and-moves pair. */
+			/* Lane FIX1: `--land-fill-vanilla` -- a landless cell takes the
+			 * game's own terrain LOD heights (lodgen.h). Off: no filler, and
+			 * the file is the bytes it always was. */
+			if ( lodgenLandFillVanilla() ) {
+				const QString fillWs = world.worldspaceEdid();
+				lopts.landFill = [fillWs]( int cx, int cy, float * h ) {
+					return lodgenVanillaCellHeights( fillWs, cx, cy, h );
+				};
+			}
 			QElapsedTimer landscapeTimer;
 			landscapeTimer.start();
 			const bool lodlOk = lodtWrite( world, lodtDir, lopts, &written, &berr );
@@ -3514,6 +3523,8 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 			}
 			out() << "lodl: " << written << Qt::endl;
 			out() << "  " << berr << Qt::endl;   // the writer reports its census here
+			if ( lodgenLandFillVanilla() )
+				out() << "  " << lodgenLandFillCensusLine() << Qt::endl;
 			censusOut( lodgenStageTimeLine( msLandscape, 0, 0, 0 ) );
 			censusOut( lodgenBakeCensusLine() );
 		}
@@ -6755,6 +6766,11 @@ int usage()
 		  << "                                          the load order, never shipped), tone-\n"
 		  << "                                          matched where painted land meets it.\n"
 		  << "                                          OFF by default.\n"
+		  << "         [--land-fill-vanilla]            a cell with no LAND takes the heights of\n"
+		  << "                                          the game's own dim-4 terrain LOD (.BTR\n"
+		  << "                                          under --vanilla-lod-root, read as input,\n"
+		  << "                                          never shipped) in the .lodl and the VT\n"
+		  << "                                          height grid. OFF by default.\n"
 		  << "         [--vt-height]                    a fourth R16 height sheet per tile,\n"
 		  << "                                          OFF by default: uncompressed where the\n"
 		  << "                                          other three are BC1, so +133% on a tile,\n"
@@ -7484,6 +7500,10 @@ int nifskopeCliMain( const QStringList & args )
 					v.toLatin1().constData() );
 		}
 		else if ( t == QLatin1String( "--vanilla-lod-root" ) ) lodgenSetVanillaLodRoot( next() );
+		/* Lane FIX1: a cell with no LAND takes the game's own terrain LOD
+		 * heights (read as input under --vanilla-lod-root) in the .lodl and
+		 * the VT height grid. Off by default. */
+		else if ( t == QLatin1String( "--land-fill-vanilla" ) ) lodgenSetLandFillVanilla( true );
 		/* THE SHEET FORMAT (lane TERRAINFMT1). `legacy` is the default and is
 		 * the previous bake's bytes -- the writer is called with the arguments
 		 * it was called with before. `vanilla` is Bethesda's law as MEASURED

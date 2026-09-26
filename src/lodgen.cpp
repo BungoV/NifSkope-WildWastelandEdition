@@ -7364,6 +7364,186 @@ void lodgenSetVanillaLodRoot( const QString & root )
 		g_vanillaLodRoot.chop( 1 );
 }
 
+/* ==========================================================================
+ *  THE LANDLESS-CELL HEIGHT FILL (lane FIX1, 2026-09-26).
+ *
+ *  A cell with no LAND record has no height of its own, and the terrain we
+ *  wrote there was the worldspace's default land height -- flat. Pre-war
+ *  Sanctuary (SanctuaryHillsWorld) carries LAND only round the Sanctuary
+ *  block, yet 101 LOD placements stand in 15 cells east of it at z 6,400 to
+ *  9,200 over our flat 0. The game draws its OWN terrain LOD there: the
+ *  shipped SanctuaryHillsWorld .BTR, whose Land in those cells sits at 5,000
+ *  to 9,500 (the Commonwealth's hills; near Sanctuary the files equal the
+ *  Commonwealth's but for their name strings).
+ *
+ *  So a landless cell may take its heights from the game's dim-4 terrain LOD,
+ *  read as INPUT only (ruling R2: no stock .BTR ships): the chunk's Land
+ *  triangles are rasterised onto our 128-unit grid, barycentric, once per
+ *  chunk. The chunk grid's phase is the engine's own (LODSettings\<WS>.LOD,
+ *  as the colour fill reads it). A cell any of whose 33x33 samples no
+ *  triangle covers is not filled at all -- a partial cell would be a cliff.
+ *  OFF by default: with the switch off nothing is read and nothing moves.
+ * ========================================================================== */
+static std::atomic<bool> g_landFillVanilla( false );
+static std::atomic<qint64> g_landFillAsked( 0 ), g_landFillFilled( 0 ), g_landFillChunksRead( 0 ),
+	g_landFillChunksMissing( 0 );
+
+bool lodgenLandFillVanilla()
+{
+	return g_landFillVanilla.load();
+}
+
+void lodgenSetLandFillVanilla( bool on )
+{
+	g_landFillVanilla.store( on );
+}
+
+QString lodgenLandFillCensusLine()
+{
+	return QStringLiteral( "landless-cell fill (vanilla terrain LOD heights): cells asked %1, filled %2; "
+		"dim-4 chunks read %3, missing %4; root %5" )
+		.arg( g_landFillAsked.load() ).arg( g_landFillFilled.load() )
+		.arg( g_landFillChunksRead.load() ).arg( g_landFillChunksMissing.load() )
+		.arg( lodgenVanillaLodRoot() );
+}
+
+namespace
+{
+//! One dim-4 chunk's heights on our grid: 129 x 129 samples at 128 world units
+//! from the chunk's south-west corner, row 0 south; NaN where no triangle is.
+struct LodgenVanillaBtrGrid
+{
+	std::vector<float> h;
+};
+
+QMutex g_vanBtrMutex;
+QHash<QString, std::shared_ptr<const LodgenVanillaBtrGrid>> g_vanBtrCache;   // null entry = no file
+QHash<QString, QPair<int, int>> g_vanBtrPhase;
+
+QPair<int, int> lodgenVanillaGridPhase( const QString & ws )
+{
+	{
+		QMutexLocker lock( &g_vanBtrMutex );
+		auto it = g_vanBtrPhase.constFind( ws.toLower() );
+		if ( it != g_vanBtrPhase.constEnd() )
+			return it.value();
+	}
+	QPair<int, int> ph( 0, 0 );
+	QFile lf( QDir( lodgenVanillaLodRoot() ).filePath( QStringLiteral( "LODSettings/%1.LOD" ).arg( ws ) ) );
+	if ( lf.open( QIODevice::ReadOnly ) ) {
+		const QByteArray b = lf.read( 4 );
+		if ( b.size() >= 4 ) {
+			const int left = qint16( quint8( b[0] ) | ( quint8( b[1] ) << 8 ) );
+			const int bottom = qint16( quint8( b[2] ) | ( quint8( b[3] ) << 8 ) );
+			ph = qMakePair( ( ( left % 4 ) + 4 ) % 4, ( ( bottom % 4 ) + 4 ) % 4 );
+		}
+	}
+	QMutexLocker lock( &g_vanBtrMutex );
+	g_vanBtrPhase.insert( ws.toLower(), ph );
+	return ph;
+}
+
+std::shared_ptr<const LodgenVanillaBtrGrid> lodgenVanillaBtrGrid( const QString & ws, int chX, int chY )
+{
+	const QString rel = QStringLiteral( "Meshes/Terrain/%1/%1.4.%2.%3.BTR" ).arg( ws ).arg( chX ).arg( chY );
+	{
+		QMutexLocker lock( &g_vanBtrMutex );
+		auto it = g_vanBtrCache.constFind( rel.toLower() );
+		if ( it != g_vanBtrCache.constEnd() )
+			return it.value();
+	}
+	std::shared_ptr<LodgenVanillaBtrGrid> g;
+	const QString path = QDir( lodgenVanillaLodRoot() ).filePath( rel );
+	NifModel nif;
+	if ( QFileInfo::exists( path ) && nif.loadFromFile( path ) ) {
+		constexpr int N = 129;
+		g = std::make_shared<LodgenVanillaBtrGrid>();
+		g->h.assign( size_t( N ) * N, std::numeric_limits<float>::quiet_NaN() );
+		const float ox = float( chX ) * 4096.0f, oy = float( chY ) * 4096.0f;
+		for ( int b = 0; b < nif.getBlockCount(); b++ ) {
+			const QModelIndex iShape = nif.getBlockIndex( b );
+			if ( !nif.blockInherits( iShape, "BSTriShape" )
+				|| nif.get<QString>( iShape, "Name" ) != QLatin1String( "Land" ) )
+				continue;
+			const QModelIndex iVD = nif.getIndex( iShape, "Vertex Data" );
+			const QModelIndex iTris = nif.getIndex( iShape, "Triangles" );
+			if ( !iVD.isValid() || !iTris.isValid() )
+				continue;
+			const bool fullPrec = ( ( nif.get<BSVertexDesc>( iShape, "Vertex Desc" ).Value() >> 44 ) & 0x400 ) != 0;
+			const Transform xf = lodgenWorldTransform( &nif, iShape );
+			/* Vanilla's Land sits at translation 0 and is placed by its file
+			 * name; a shape that carries the chunk's world position itself
+			 * (as a .BTO does) is brought back to the chunk's frame. */
+			const bool placed = ( ox != 0.0f || oy != 0.0f )
+				&& std::fabs( xf.translation[0] - ox ) < 1.0f && std::fabs( xf.translation[1] - oy ) < 1.0f;
+			const float sx = placed ? ox : 0.0f, sy = placed ? oy : 0.0f;
+			const int nv = qMin( int( nif.get<quint32>( iShape, "Num Vertices" ) ), nif.rowCount( iVD ) );
+			std::vector<Vector3> p( size_t( qMax( 0, nv ) ) );
+			for ( int v = 0; v < nv; v++ ) {
+				const QModelIndex row = nif.index( v, 0, iVD );
+				const Vector3 lp = fullPrec ? nif.get<Vector3>( row, "Vertex" )
+					: Vector3( nif.get<HalfVector3>( row, "Vertex" ) );
+				const Vector3 w = xf * lp;
+				// grid units: 128 world units a sample, from the chunk's corner
+				p[size_t( v )] = Vector3( ( w[0] - sx ) / 128.0f, ( w[1] - sy ) / 128.0f, w[2] );
+			}
+			for ( const Triangle & t : nif.getArray<Triangle>( iTris ) ) {
+				if ( t.v1() >= nv || t.v2() >= nv || t.v3() >= nv )
+					continue;
+				const Vector3 & a = p[t.v1()];
+				const Vector3 & bb = p[t.v2()];
+				const Vector3 & c = p[t.v3()];
+				const float den = ( bb[1] - c[1] ) * ( a[0] - c[0] ) + ( c[0] - bb[0] ) * ( a[1] - c[1] );
+				if ( std::fabs( den ) < 1e-6f )
+					continue;   // the skirt's vertical flaps project to a line
+				const int i0 = qMax( 0, int( std::floor( qMin( a[0], qMin( bb[0], c[0] ) ) ) ) );
+				const int i1 = qMin( N - 1, int( std::ceil( qMax( a[0], qMax( bb[0], c[0] ) ) ) ) );
+				const int j0 = qMax( 0, int( std::floor( qMin( a[1], qMin( bb[1], c[1] ) ) ) ) );
+				const int j1 = qMin( N - 1, int( std::ceil( qMax( a[1], qMax( bb[1], c[1] ) ) ) ) );
+				for ( int j = j0; j <= j1; j++ )
+					for ( int i = i0; i <= i1; i++ ) {
+						const float x = float( i ), y = float( j );
+						const float l1 = ( ( bb[1] - c[1] ) * ( x - c[0] ) + ( c[0] - bb[0] ) * ( y - c[1] ) ) / den;
+						const float l2 = ( ( c[1] - a[1] ) * ( x - c[0] ) + ( a[0] - c[0] ) * ( y - c[1] ) ) / den;
+						const float l3 = 1.0f - l1 - l2;
+						constexpr float E = -1e-4f;
+						if ( l1 < E || l2 < E || l3 < E )
+							continue;
+						g->h[size_t( j ) * N + size_t( i )] = l1 * a[2] + l2 * bb[2] + l3 * c[2];
+					}
+			}
+		}
+		g_landFillChunksRead++;
+	} else {
+		g_landFillChunksMissing++;
+	}
+	QMutexLocker lock( &g_vanBtrMutex );
+	g_vanBtrCache.insert( rel.toLower(), g );
+	return g;
+}
+}   // namespace
+
+bool lodgenVanillaCellHeights( const QString & ws, int cx, int cy, float * h33x33 )
+{
+	g_landFillAsked++;
+	const QPair<int, int> ph = lodgenVanillaGridPhase( ws );
+	auto floor4 = []( int v, int phase ) { const int d = v - phase; return ( d >= 0 ? d / 4 : -( ( -d + 3 ) / 4 ) ) * 4 + phase; };
+	const int chX = floor4( cx, ph.first ), chY = floor4( cy, ph.second );
+	const std::shared_ptr<const LodgenVanillaBtrGrid> g = lodgenVanillaBtrGrid( ws, chX, chY );
+	if ( !g )
+		return false;
+	const int c0 = ( cx - chX ) * 32, r0 = ( cy - chY ) * 32;
+	for ( int r = 0; r < 33; r++ )
+		for ( int c = 0; c < 33; c++ ) {
+			const float v = g->h[size_t( r0 + r ) * 129 + size_t( c0 + c )];
+			if ( !( v == v ) )
+				return false;   // a sample no triangle covers: no partial cells
+			h33x33[r * 33 + c] = v;
+		}
+	g_landFillFilled++;
+	return true;
+}
+
 float lodgenLandShade()
 {
 	return g_landShade;
@@ -11724,6 +11904,36 @@ static bool lodgenBakeVtTile( const EsmWorld & world, const QString & dataRoot,
 			haveLand[ci] = true;
 			return &cells[ci];
 		}, inner );
+	/* Lane FIX1: THE LANDLESS-CELL HEIGHT FILL (`--land-fill-vanilla`), the
+	 * VT's half of it: a landless cell's samples take the game's own terrain
+	 * LOD heights, so the normal and height sheets see the same ground as the
+	 * `.lodl`. A sample any cell WITH land also holds stays that cell's (real
+	 * terrain wins, the `.lodl` seam rule). Only the height grid moves: colour,
+	 * cover and mask still read a landless cell as landless. */
+	if ( lodgenLandFillVanilla() ) {
+		const QString fillWs = world.worldspaceEdid();
+		auto landAt = [&]( int rcx, int rcy ) {
+			if ( rcx >= 0 && rcy >= 0 && rcx < rdim && rcy < rdim )
+				return bool( haveLand[size_t( rcy ) * rdim + size_t( rcx )] );
+			return landCache.get( world, rx0 + rcx, ry0 + rcy ) != nullptr;
+		};
+		float fh[33 * 33];
+		for ( int cy = 0; cy < rdim; cy++ )
+			for ( int cx = 0; cx < rdim; cx++ ) {
+				if ( haveLand[size_t( cy ) * rdim + size_t( cx )]
+					|| !lodgenVanillaCellHeights( fillWs, rx0 + cx, ry0 + cy, fh ) )
+					continue;
+				for ( int row = 0; row < 33; row++ )
+					for ( int col = 0; col < 33; col++ ) {
+						bool owned = false;
+						for ( int dy = ( row == 0 ? -1 : 0 ); dy <= ( row == 32 ? 1 : 0 ) && !owned; dy++ )
+							for ( int dx = ( col == 0 ? -1 : 0 ); dx <= ( col == 32 ? 1 : 0 ) && !owned; dx++ )
+								owned = ( dx || dy ) && landAt( cx + dx, cy + dy );
+						if ( !owned )
+							hgt[size_t( cy * 32 + row ) * hn + size_t( cx * 32 + col )] = fh[row * 33 + col];
+					}
+			}
+	}
 
 	/* The engine's default land texture, world-wide (lane SEAM1; see the chunk
 	 * baker's twin of this line). No longer scoped to the enclosing dim-4 chunk:

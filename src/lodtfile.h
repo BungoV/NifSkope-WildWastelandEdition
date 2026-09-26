@@ -161,6 +161,16 @@ struct LodtOptions
 	//! Water bodies, flow and shore -- OFF by default; see LodtWaterOptions.
 	LodtWaterOptions water;
 
+	/*! THE LANDLESS-CELL HEIGHT FILL (lane FIX1, 2026-09-26). Empty by default,
+	 *  and then every byte is the one this writer wrote before it existed. Set,
+	 *  it is asked once per cell that has NO LAND record, for that cell's 33x33
+	 *  heights (row 0 = south, as VHGT) in world units; false = it has none and
+	 *  the worldspace's default height stands. The samples a landless cell
+	 *  inherits across a shared edge from a neighbour WITH land keep the seam
+	 *  rule: real terrain wins over any fill. lodgenVanillaCellHeights (the
+	 *  game's own terrain LOD, read as input) is the one filler today. */
+	std::function<bool( int cx, int cy, float * h33x33 )> landFill;
+
 	/*! Progress, for a GUI: phase 0 = pass one (done = cell rows, total =
 	 *  cell rows), phase 1 = blocks (done = blocks emitted, total = blocks;
 	 *  level and the block's i, j so a map can paint the cells it covers -
