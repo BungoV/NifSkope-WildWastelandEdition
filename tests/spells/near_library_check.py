@@ -57,17 +57,23 @@ SCALE_MAX_WIDE = 8.0 + 65535.0 / 8192.0
 # ------------------------------------------------------------------------------------------ stack
 
 class Stack:
-    """The resource stack: loose folders and GNRL archives; LAST entry wins; loose beats archive."""
+    """The resource stack: loose folders and GNRL archives; LAST entry wins; loose beats archive. Inside one
+    entry an archive "<plugin> - *.ba2" takes its plugin's load-order index, later wins (lane NEAR2: the
+    game's rule; by name alone DLCNukaWorld beat DLCUltraHighResolution)."""
 
-    def __init__(self, entries):
+    def __init__(self, entries, plugins=None):
         self.loose = list(reversed(entries))       # first hit wins in this order
         self.arch = {}                              # lowercase backslash name -> (archive, rec)
+        rank = {}
+        for i, p in enumerate(plugins or []):
+            rank[os.path.splitext(os.path.basename(p.replace(chr(92), '/')))[0].lower()] = i
         for e in entries:                           # later entries overwrite earlier
             if not os.path.isdir(e):
                 continue
-            for n in sorted(os.listdir(e)):
-                if n.lower().endswith('.ba2'):
-                    self._index(os.path.join(e, n))
+            names = [n for n in os.listdir(e) if n.lower().endswith('.ba2')]
+            names.sort(key=lambda n: (rank.get(n.lower()[:-4].split(' - ')[0], -1), n.lower()))
+            for n in names:
+                self._index(os.path.join(e, n))
 
     def _index(self, path):
         with open(path, 'rb') as f:
@@ -670,7 +676,7 @@ def main():
     if missing:
         print('ERROR plugins missing: %s' % missing)
         return 2
-    S = Stack(stack)
+    S = Stack(stack, plugins)
     W = World(plugins, int(a.ws, 16))
     M = Models(S, NifTypes(os.path.join(ROOT, 'build', 'nif.xml')), lod0_trim=(sab != 'no-lod0-trim'))
     print('reader: %d plugins, %d stack entries, %d archived files, %d refs under the worldspace, %d cells'

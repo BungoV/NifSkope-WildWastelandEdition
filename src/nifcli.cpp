@@ -3710,6 +3710,7 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 		no.outDir = gLgNearLibrary;
 		no.dataRoot = dataRoot;
 		no.plugins = file.split( QChar( ',' ), Qt::SkipEmptyParts );
+		lodgenSetPluginOrder( no.plugins );     // lane NEAR2: archives in the game's order (near only)
 		no.haveRegion = haveRegion;
 		if ( haveRegion )
 			for ( int k = 0; k < 4; k++ )

@@ -1545,12 +1545,34 @@ int lodgenArchiveRank( const QString & baseName )
 	return 0;
 }
 
+//! lane NEAR2: the active plugins' stems (lower case) -> load-order index; empty = unset
+QHash<QString, int> & lodgenPluginRank()
+{
+	static QHash<QString, int> rank;
+	return rank;
+}
+
 //! the .ba2/.bsa files sitting directly in a folder, in the engine's own order
 QStringList lodgenFolderArchives( const QString & folder )
 {
 	QDir d( folder );
 	QStringList names = d.entryList( QStringList{ QStringLiteral( "*.ba2" ), QStringLiteral( "*.bsa" ) },
 		QDir::Files, QDir::Name );
+	const QHash<QString, int> & pr = lodgenPluginRank();
+	if ( !pr.isEmpty() ) {
+		// FIRST-WINS: the latest-loaded plugin's archive first, the later name first inside one plugin
+		auto rankOf = [&pr]( const QString & n ) {
+			const QString l = n.toLower();
+			const int dash = l.indexOf( QLatin1String( " - " ) );
+			return pr.value( dash >= 0 ? l.left( dash ) : QString(), -1 );
+		};
+		std::stable_sort( names.begin(), names.end(), [&]( const QString & a, const QString & b ) {
+			const int ra = rankOf( a ), rb = rankOf( b );
+			if ( ra != rb )
+				return ra > rb;
+			return a.compare( b, Qt::CaseInsensitive ) > 0;
+		} );
+	} else
 	std::stable_sort( names.begin(), names.end(), []( const QString & a, const QString & b ) {
 		return lodgenArchiveRank( a ) < lodgenArchiveRank( b );
 	} );
@@ -1594,11 +1616,13 @@ BA2File * lodgenStackIndex()
 {
 	static std::unique_ptr<BA2File> index;
 	static QStringList builtFor;
+	static QHash<QString, int> builtRank;
 	static bool tried = false;
-	if ( tried && builtFor == lodgenStack() )
+	if ( tried && builtFor == lodgenStack() && builtRank == lodgenPluginRank() )
 		return index.get();
 	tried = true;
 	builtFor = lodgenStack();
+	builtRank = lodgenPluginRank();
 	index.reset();
 	const QStringList paths = lodgenStackSearchPaths();
 	if ( paths.isEmpty() )
@@ -1817,6 +1841,17 @@ void lodgenSetResources( const QStringList & entries )
 QStringList lodgenResources()
 {
 	return lodgenStack();
+}
+
+void lodgenSetPluginOrder( const QStringList & plugins )
+{
+	QHash<QString, int> rank;
+	for ( int i = 0; i < plugins.size(); i++ ) {
+		const QString n = QFileInfo( QDir::fromNativeSeparators( plugins.at( i ).trimmed() ) ).completeBaseName().toLower();
+		if ( !n.isEmpty() )
+			rank.insert( n, i );
+	}
+	lodgenPluginRank() = rank;
 }
 
 QStringList lodgenResourceSearchPaths()
