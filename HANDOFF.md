@@ -60,6 +60,108 @@ committed" or names an exe, this block overrides it.
 - Re-run the command-line bakes since 09-19 that used --data-root.
 
 ### Lane and director lines, 2026-09-24, newest first
+- 2026-09-26 21:01 MERGE ROADS1 + FLAT1 + AO2:
+  Director: merged into main on bungo's word ("Do a whole merge, then fix the AO bake"). 914d8159 MISTAKES (16:33 wrong 'AO off' claim); 72d676f8 merge ROADS1 + FLAT1 (flat1 contains roads1); 53fb5d8d merge AO2; 3bc55877 reverts the AO2 foot variant 2d8f5c9a (corner fit stays; ballpark step 37 failed the 32 gate; bungo did not pick it, he can ask for it back). NOT installed, no whole-map bake yet.
+  OPEN: bungo found two AO defects on the flat-patch view: the left tall tower's roof has a black patch; the right round tower has a hard AO cutoff next to a totally white face ("There is no smooth gradient here anymore"). Lane AO2 continues on main to fix them. Then: one GUI start of the merged exe (FLAT1's start failure), one whole-Commonwealth bake, pictures, install into FO4CSLOD on his word.
+
+  ROADS1, branch roads1-20260926 (worktree E:\Projects\NifskopeWWE-roads1, from 6382a09a), commits aa8f096b, 273b704d
+  and the report commit. Not merged, not installed.
+  - Pavements are painted into the LOD terrain colour BY DEFAULT (bungo: "I approve of the roads"; "if that is their
+    in game texture, it is their texture on our terrain too"). `--no-road-sidewalks` leaves them out;
+    `--road-sidewalks` is kept as a no-op.
+  - The road stamp now applies the game's material swap (REFR swap, else the base's, else a SCOL part's own) --
+    229 placements in the Boston box. Faithfulness gate: on the 3,169 swapped pavement texels the new sheet is
+    2.25 levels from the in-game diffuse; 6382a09a is 50.26 off (it painted the unswapped texture).
+  - "Is there no roads here?" -- there is: the river road east of Diamond City (Landscape\Roads\River\RRoadCurveCustom01..11)
+    was refused because its bases carry their own distant LOD, which the stamp read as "raised". Raised is now the
+    HighwayOverpass and Bridge folders only; the river road, 45 park pavement placements and PlazaSwanPond01 are painted.
+  - The 2x2 tile lines on pavements are the texture's own slab joints (measured), kept.
+  - kLodgenGeneratorRevision 1 -> 2.
+  - OWED: the installed|new pictures (pics.py ready). lodgen_roads.sh R5 is red, but equally red at 6382a09a (0.3210;
+    ROADS1 0.3193): a stale gate, not this lane. Pavements on/off confinement: 0 texels outside the footprints.
+
+  **FLAT1 (2026-09-26), branch flat1-20260926 (head: see DONE.md section 5), NOT merged, NOT installed.**
+  The terrain colour now paints flat ground objects (pads, railway track, paths, decals, flat debris) beside the
+  road stamp. The rule is measured from each placed mesh: on the ground (median underside <= 16), top between -8
+  and 64, standing sides / top <= 0.35, not under water. It reads no kinds and no paths.
+
+  - Default ON; `--no-flat-objects`, or the panel row *Paint flat ground objects*, turns it off.
+  - User override file: `lodgen_flat_objects.txt` beside NifSkope.exe, with `bake`/`nobake` lines. It ships
+    header-only, and `--flat-objects-file` names another file.
+  - Each bake writes `<ws>.flat_objects_report.txt` beside the VT sheets.
+  - Boston box: 10,834 of 144,655 placements painted, 730,420 texels.
+  - Confinement: 0 changed texels outside the 4x4 blocks, and the mask moves only there.
+  - Faithfulness per kind: 2.6-3.4 levels, against 9-35 for the off bake.
+  - Override: nobake reverts exactly, and bake paints a refused model.
+  - Owed: bungo's look at pics/oblique_*.png and the close-ups; a merge; a real install bake; his eye in game.
+  - Owed: one ordinary GUI start of the merged exe. The FLAT1 run copy exited at GUI start (rc 0, no output) on
+    23 of 24 picture tries, while the pre-FLAT1 rung started. FLAT1 changes nothing on the start path; the
+    suspect is the new exe being refused its UDP port. Not proven.
+
+  ### AO2 -- native per-vertex AO + sky: open roofs no longer drawn black (built, baked, NOT installed, not flown)
+  - Commits: ee52efc0 (code: src/lodgenao.h, src/nativeemit.cpp, src/lodifile.h), 4b23daa9 + 22d83a48
+    (docs/LODGEN_NATIVE_LODO_LODI.md s4.8, s4.10).
+  - Cause, measured on bungo's three circled spots in 08_boston_oblique_AO.png:
+    (a) the Prudential roof was darkened by a far-ring stand-in: the native cast built one scene with every MNAM slot
+    mixed, so a lower-ring lid 72 u above the roof took 136 of 136 rays;
+    (b), (c) the cathedral wall and tower cap were darkened because the vertex corners sit inside the neighbouring towers
+    and pinnacles (back faces), and the corner value spread across a face that is open in the middle.
+    bungo's hypothesis holds for (b) and (c), not for (a).
+  - Fix:
+    - One scene per chunk AND slot.
+    - Each vertex is the area- and hat-weighted mean over k x k equal-area pieces of its triangles, with
+      k = ceil(longest edge / 256), 1..4. The AO ray law (8 rays, 1 - 0.85 hits/8) is unchanged.
+    - Sky (v7 stream) is horizon aware: 7 rings at the irradiance medians (7-79 deg), cos-weighted, 8 azimuths
+      (56 rays), reach 10000 u, origin offset 2 u along the normal.
+    - The .BTO colour B, the v5 placement AO, the .lodo selfAO and the 0x11 byte are untouched.
+  - Gates on the Boston region (-8 -12 3 -1), each red on the old code:
+    - a: open roofs AO 237.5 / 13.4% below 201 -> 252.0 / 2.2%;
+    - b: enclosed faces AO 73.2, 179 below open;
+    - s1: sky-open 221 -> 252;
+    - s3: low canyon 7 -> 48 below open;
+    - c: whole map, every file except Commonwealth.lodi sha1-equal; inside the .lodi only vertexAo/vertexSky and the
+      two CRCs move.
+  - Whole bake (not installed): scratchpad\ao2_20260926\whole\after\mod\FO4CSLOD\Commonwealth in the bake2 worktree.
+    The overseer installs Commonwealth.lodi (+ the .lodb record) only. whole\before equals the installed files.
+  - Cost: the whole-map instances stage 1478 s -> 1810 s (+22%). The whole bake is 5448 s before and 5386 s after
+    (noisy machine).
+  - Open:
+    - The wall foot reads only 12 bytes darker than the wall top (was 33): the whole-triangle averaging flattens it.
+      A least-squares vertex fit would keep it; bungo's call.
+    - Sky is now physical for every facing, so walls read 99 -> 72 and soffits 74 -> 25; FO4CS consumers darken walls more.
+    - Face step 256 leaves a mean 6 byte per-vertex sampling error against a dense reference (step 128: 3.6, +85% cast).
+    - tests/spells/lodi_v7.sh G3 (stream vs the 0x11 byte) was written for the old law; it was not re-run and is
+      expected to move.
+  - What would prove this wrong: bungo's eye on the after picture and the three crops in scratchpad\ao2_20260926\pics, then a flight.
+
+  ### AO2 split-line round -- one AO value per surface point; AO off means off (built, baked, NOT installed, not flown)
+  - Commits: e5c0beb4 (viewer), 7e081591 (weld + under-ground), fc03aaa6 (library selfAO), e93e19b5 (docs),
+    5bebb273 (flat patches), 2d8f5c9a (DROPPABLE foot variant, branch tip), 75226ac8 (docs).
+  - Cause of bungo's "split lines" (ballpark roof, tower faces, lone box): ee52efc0 gave each split copy of a corner
+    (UV seam / smoothing copies) its own value, so one point of a flat face carried two bytes. Boston: 100,900 such
+    pairs, mean jump 25.2 bytes. Not the viewer's lighting: the step is in the stored bytes.
+  - bungo's hypothesis "the triangles are geometry that's not connected" holds at all three spots: each line runs
+    along an edge where the triangles share no vertex, only duplicate corners (ballpark 32, lone box 68, tower 136
+    bytes apart), the box's diagonal included.
+  - Fix: copies within 0.5 u and 30 deg pool into one value (0-1 deg jump 25.2 -> 0.0); samples more than 32 u under
+    the ground are used only when a vertex has nothing above ground (lone box foot 97 -> 141, diagonal 68 -> 11);
+    bungo's "merge flat geometry": each flat patch (normals within 1 deg) takes one linear field, so no corner can
+    draw a diagonal (ballpark 26 -> 9, tower 69 -> 2, box 11 -> 2; Boston kink share > 16: 27.5% -> 7.7%);
+    the library selfAO uses the same face cast (the Charles bridge deck 38 -> 240-245); the viewer's AO off now
+    draws no AO at all (bridge-deck gate 0.44 -> 1.00).
+  - Gates: ballpark and lone box PASS (fail on ee52efc0); earlier region gates a, b, s1-s3 all PASS; each knob's
+    refuter reproduces the previous bake byte for byte.
+  - Foot variant for bungo to pick (2d8f5c9a, droppable): the patch plane fits the face samples, not the corners.
+    Wall foot/top gap: installed 32.6, split-line fix 7.6, variant 13.6 bytes; lone box 255 -> 61 top to foot,
+    smooth. Cost: ballpark step 37 (fails <= 32), kink share 7.7% -> 17.8%. Picture: pics\walls_AO_old_fix_foot.png.
+  - Rulings recorded: sky stream darker walls/soffits accepted; install = ONE combined whole-map bake (ROADS1 +
+    FLAT1 + AO2) after merge.
+  - Card ruling (bungo, 2026-09-26): impostor tree cards get NO per-vertex AO, only the one placement AO value per
+    tree. Per-corner AO on a flat card smears a gradient and doubles the card's self-shading. Cards stay on the
+    one-value path.
+  - Whole bake (not installed): scratchpad\ao2_20260926\whole\after2\mod\FO4CSLOD\Commonwealth. COST_PLACEHOLDER
+  - Open: which fit ships (corner fit or foot variant). Sharp creases (> 30 deg) keep separate values by design.
+  - What would prove this wrong: the crops in scratchpad\ao2_20260926\pics (old | ee52efc0 | new), then a flight.
 - 2026-09-26 04:08 FIX1:
   ### Lane FIX1 -- the small fixes (2026-09-26, 02:13 to 04:10), branch fix1-20260926, not merged
   - Fix 1, colour remap: the game uses a swap's colour-remap index only on a material with the palette flag

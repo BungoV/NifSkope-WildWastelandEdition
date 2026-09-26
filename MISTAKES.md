@@ -5,6 +5,98 @@ Written the moment a mistake is recognised, unprompted (CONSTITUTION rule 2).
 Format: date -- what was done -- what was true -- how it was found -- the rule.
 Newest at the top.
 
+## 2026-09-26 -- lane AO2 (lane text)
+
+### Heredoc backslash trap, four times in one lane (AO2, 2026-09-26)
+- A bash heredoc (or a printf format) holding a literal backslash was written through the tool and lost or changed
+  the backslash:
+  - a C++ probe insertion;
+  - the bake_region printf "\n";
+  - gatec.py's '\\' became '\', a SyntaxError;
+  - worstface.py's split('\\') became split('\'), a SyntaxError (split-line round).
+- Rule: never put a backslash literal in generated code. Use os.sep, chr(92) or a raw file written with the Write
+  tool, then run it.
+
+### A brief's coordinates were taken on trust (AO2, 2026-09-26)
+- The brief named world coordinates for the "right white tower", and they pointed at another building. Time went
+  into probing the wrong placement.
+- Rule: match a circled spot by projecting candidate placements into the picture's camera and checking the pixel,
+  before measuring.
+
+### Comment written from memory, not from the constants (AO2, 2026-09-26)
+- A lodifile.h comment said the sky rings span "5 to 87 deg". The constants say 7.1 to 79.5. It was caught before
+  the commit and corrected.
+- Rule: derive numbers in comments from the code constants in the same turn.
+
+### A finished bake was read off concatenated background output (AO2 split-line round, 2026-09-26)
+- Two background bakes wrote into one reading; the tail of the older one was taken as the newer one's "rc=0".
+- Rule: read the bake's own .out file and its rc line, never a merged task output, before using its files.
+
+### make clean leaves this tree unbuildable (AO2 split-line round, 2026-09-26)
+- After `make clean`, make stops on "No rule to make target GeneratedFiles/.obj/icon_res.o": the Makefile lists the
+  object by a relative path but has its windres rule under the absolute one.
+- Rule: after a clean, run `make -f Makefile.Release <absolute path>/GeneratedFiles/.obj/icon_res.o` once, then
+  tools/ww_build.sh.
+
+### A harness NifSkope exited 0 with no window, and a clean rebuild was blamed first (AO2, 2026-09-26)
+- For about 30 minutes every harness launch (old and new exes, any folder) returned 0 at once with no log; 30 minutes
+  later the same exes started normally. A clean rebuild (12 min) was done on the stale-build theory before a control
+  run of the OLD exe in the same minute showed it failing too.
+- Rule: when a harness launch fails, run the last known-good exe as a control in the same minute before touching the
+  build.
+
+### A sample filter was shipped to a region bake without a fallback (AO2 split-line round, 2026-09-26)
+- The first under-ground rule dropped the buried samples outright. Vertices whose samples were all buried then had no
+  weight and fell back to a cast at the vertex per copy, which re-split exactly the copies the weld had joined
+  (10-20 deg jumps 1.3 -> 4.5). The spot gates passed; only the region census showed it.
+- Rule: a filter on samples needs a stated fallback for the empty case, and the jumps census runs on every bake that
+  touches the cast, not only the spot gates.
+
+### A whole-map bake was started before the brief settled, then could not be stopped (AO2, 2026-09-26)
+- The whole bake was launched with the weld + under-ground exe; minutes later the brief asked for flat patches.
+  Stopping the task ended the shell but left the -no-gui NifSkope running (a kill was refused), so it ran 40 more
+  minutes beside the region bakes and its output was thrown away.
+- Rule: launch the hour-long whole bake only after every follow-up in the queue is in the exe; never stop a bake
+  through its shell.
+
+### The harness exit-0 flake came back (AO2, 2026-09-26, 19:33-19:48)
+- Renders again returned 0 at once with an empty log; a control run of the exe that had rendered a minute before
+  failed the same way, so no build was touched. Fifteen minutes later renders worked.
+
+## 2026-09-26 -- lane FLAT1 (lane text)
+
+- **2026-09-26 FLAT1: a patch script wrote literal TAB characters into two C++ string literals.** The Python
+  escape was meant to be `\t` in the source, not a TAB byte. The compiler accepted it, and the report still
+  looked tab-separated. Found by reading the diff; fixed in patch 6. Rule: after a patch script, grep the diff
+  for TAB bytes inside quotes.
+- **2026-09-26 FLAT1: a patch went through a bash heredoc again, and the backslashes were halved.** The anchor
+  failed, so nothing was written wrongly. The standing rule (skill nifskope-ww-lodgen, editing traps) already
+  says: no backslash or apostrophe through a heredoc. Patch scripts go through the Write tool.
+- **2026-09-26 FLAT1: the report and the census disagreed on the override count (141,603 vs 141,397).** A model
+  that would not load still carried the override that matched its path. Fixed: an unloadable model carries
+  none. Rule: a decision that is refused before measurement takes no override.
+- **2026-09-26 FLAT1: two bakes were spent on `--land-shade 0` as a "different" bake.** That is already the
+  value in the VT bake mode (the log says `landShade 0.000`), so the bakes were byte-identical to the default.
+  Rule: read the census line for the switch's current value before baking a variant of it.
+
+## 2026-09-26 -- lane ROADS1 (lane text)
+
+- 2026-09-26 ROADS1: ran `bash turn.sh status` to look at FIX1's machine-wide NifSkope turn. The script has no
+  status command -- every word but `release` acquires -- so it took the turn as "anon" and blocked every lane.
+  Rule: read a lock script before calling it with a verb you have not seen in it; inspect a lock by `ls` of its
+  directory, never by calling the script.
+- 2026-09-26 ROADS1: declared nativeEffectiveSwap (anonymous namespace in nativeemit.cpp) in nativeemit.h for
+  reuse; every call became "call of overloaded ... is ambiguous", one build lost. A function in an anonymous
+  namespace is restated where it is needed (as nearlib.cpp does), never exported by a header declaration.
+- 2026-09-26 ROADS1: three scripts through bash heredocs lost backslashes (a NUL byte in one, an anchor that did
+  not match in flip.py, a Windows path read as a \N escape in a DONE.md filler). The skill's rule already says it:
+  anything with a backslash goes through the Write tool.
+- 2026-09-26 ROADS1: a Python rewrite with io.open(..., 'w') turned an LF script CRLF (a 493-line diff). Write
+  with newline='' and check b.count(b'\r').
+- 2026-09-26 ROADS1: the independent reader first took the BSTriShape UV and colour offsets from the wrong
+  vertex-desc nibbles; the right ones are bits 8 and 24 (x4 bytes). Its first raster "disagreed" with the code
+  for that reason alone.
+
 ## 2026-09-26 -- lane FIX1 (lane text)
 
 ### FIX1, 2026-09-26: a byte-identity gate compared two bakes across a load-order change

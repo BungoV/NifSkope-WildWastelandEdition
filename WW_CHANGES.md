@@ -1,5 +1,45 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Roads, pavements and flat ground objects in the far terrain (lanes ROADS1 + FLAT1, 2026-09-26)
+
+- LOD terrain: pavements and sidewalks now appear in the distant ground colour by default, wearing the same
+  texture they wear up close, including the retextured variants the game swaps in.
+- LOD terrain: the riverside road east of Diamond City and the park paths now show in the distant ground.
+- Command line: `--no-road-sidewalks` turns pavements off; `--road-sidewalks` still parses and does nothing.
+- **Flat ground objects in the far terrain** (lane FLAT1). Slabs, floors, railway track, foot paths, trash
+  decals, leaf piles and flat rubble now show on the distant terrain in the colour they wear in game. Standing
+  things (fences, guard rails, jersey barriers, cars, benches, walls) stay out.
+  - Your own list of exceptions lives in `lodgen_flat_objects.txt` beside NifSkope: `bake <path>` or
+    `nobake <path>`, one per line, a model or a folder.
+  - Every bake leaves a report beside its output: one line per model, saying painted or why not.
+  - Panel: *Paint flat ground objects* (Roads section, on). Command line: `--no-flat-objects`,
+    `--flat-objects-file <file>`.
+
+## Distant building shading (lane AO2, 2026-09-26)
+
+### Native LOD objects: no more split lines in the baked ambient shading (AO2 split-line round, 2026-09-26)
+- A corner a mesh stores as several copies (for its UVs or smoothing) now gets one shading value, and each flat face
+  takes one smooth shading gradient (bungo's idea: merge flat geometry), so flat roofs, tower faces and boxes no
+  longer show a hard line or a diagonal along their triangle edges. Creases keep their shade.
+- Parts of a mesh buried under the terrain no longer darken the visible foot of a building.
+- The model's own shading stored in the .lodo library uses the same method; open decks such as the Charles bridge no
+  longer read dark.
+- LOD viewer: "AO off" now draws no ambient shading of any kind.
+- Impostor tree cards keep one shading value per tree, by design.
+- Tuning knobs for testing only (environment): WW_AO_WELD_DEG, WW_AO_UNDER_TOL, WW_SELFAO_FACE,
+  WW_AO_PATCH_DEG, WW_AO_PATCH_FIT.
+
+### Native LOD objects: ambient shading no longer blackens open roofs (AO2, 2026-09-26)
+- The per-vertex ambient occlusion baked into FO4CSLOD .lodi files now uses each LOD level's own geometry only.
+  A coarse stand-in for a far ring no longer shades a roof it floats above.
+- Each vertex is now shaded from samples spread across its faces, not from the corner alone. A corner tucked inside
+  a neighbouring building no longer blackens a wall that is open in the middle.
+- The per-vertex sky visibility stream now sees the sky down to the horizon (7 elevation rings, 8 directions,
+  weighted by how much light each band of sky casts on a flat roof, reach 10000 units, as FO4CS Skylighting's default).
+  Street canyons read darker than open roofs; walls and undersides read by the share of sky they can see.
+- Only the .lodi changes; every other LOD file bakes byte-for-byte as before. Whole-map bake cost +22% on that stage.
+- Tuning knobs for testing only (environment): WW_AO_FACE_STEP, WW_AO_FACE_MAX, WW_SKY_REACH, WW_AO_PROBE.
+
 ## Far terrain under pre-war Sanctuary's hills (lane FIX1, 2026-09-26)
 
 - New: `--land-fill-vanilla`. A cell with no landscape record now takes the game's own far-terrain heights, so
