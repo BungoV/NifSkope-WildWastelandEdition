@@ -36,7 +36,8 @@ addrs = [a for a, _ in syms]
 IMAGE_BASE = 0x140000000
 
 def short(n):
-    n = re.sub(r'\(.*$', '', n)
+    n = n.replace('(anonymous namespace)::', '~')
+    n = re.sub(r'\(.*$', '', n) or '?paren'
     return n[:110]
 
 mods = []; S = []; T = []

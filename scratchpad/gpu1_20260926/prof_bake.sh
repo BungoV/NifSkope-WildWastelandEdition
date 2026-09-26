@@ -25,13 +25,17 @@ t1=$(date +%s)
 	--vt-fill-vanilla "${VR[@]}" --land-fill-vanilla --impostors "$CARDS" --arrays --fo4cs-one-root "$@" 2>&1 | stamp > "$R/bake.log"; echo "chunks rc=${PIPESTATUS[0]}" > "$R/rc.txt" ) &
 if [ -n "${PROF:-}" ]; then
 	RUNW=$(cd "$RUN" && pwd -W)/NifSkope.exe
-	pid=""
+	# The first pid seen can be a short-lived launcher (GPU1 run 1: OpenProcess error 87 on it), so re-query
+	# until wwprof attaches. wwprof runs from the scratch copy (Avast holds fresh worktree exes).
+	WWPROF=/c/Users/bungo/AppData/Local/Temp/claude/E--Projects-Claude/b560e4ec-6e66-4c21-9572-1ad4acca0043/scratchpad/gpu1/wwprof.exe
 	for i in $(seq 1 60); do
-		pid=$(powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name='NifSkope.exe'\" | Where-Object { \$_.ExecutablePath -eq '$(echo $RUNW | sed 's#/#\\#g')' } | ForEach-Object { \$_.ProcessId }" | tr -d '\r' | head -1)
-		[ -n "$pid" ] && break; sleep 1
+		[ -f "$R/rc.txt" ] && break
+		pid=$(powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name='NifSkope.exe'\" | Where-Object { \$_.ExecutablePath -eq '$(echo $RUNW | sed 's#/#\\#g')' } | Sort-Object CreationDate | ForEach-Object { \$_.ProcessId }" | tr -d '\r' | tail -1)
+		[ -z "$pid" ] && { sleep 1; continue; }
+		echo "profiling pid $pid (chunk epoch $t1, attach epoch $(date +%s))" | tee "$R/prof_pid.txt"
+		"$WWPROF" "$pid" "$R/prof.txt" "${PROF_MS:-200}" 48 && break
+		sleep 1
 	done
-	echo "profiling pid $pid (epoch $t1)" | tee "$R/prof_pid.txt"
-	[ -n "$pid" ] && "$G/wwprof.exe" "$pid" "$R/prof.txt" "${PROF_MS:-200}" 48
 fi
 wait
 cat "$R/rc.txt"; echo "chunk stage $(( $(date +%s) - t1 )) s"

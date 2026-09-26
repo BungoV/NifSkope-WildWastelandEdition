@@ -39,17 +39,24 @@ int main(int argc, char ** argv) {
 	if (!o) { fprintf(stderr, "cannot open %s\n", argv[2]); return 2; }
 	HANDLE hp = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ | SYNCHRONIZE, FALSE, pid);
 	if (!hp) { fprintf(stderr, "OpenProcess %lu failed %lu\n", pid, GetLastError()); return 1; }
-	SymSetOptions(SYMOPT_DEFERRED_LOADS);
-	if (!SymInitialize(hp, NULL, TRUE)) fprintf(stderr, "SymInitialize failed %lu (walking anyway)\n", GetLastError());
+	/* No symbol search at all: invade=TRUE with the default path stalled for minutes (symbol server / big
+	 * COFF table). Unwinding only needs each module's .pdata, which dbghelp reads from the image once the
+	 * module is registered; names come offline from nm. */
+	SymSetOptions(SYMOPT_DEFERRED_LOADS | SYMOPT_FAIL_CRITICAL_ERRORS | SYMOPT_NO_PROMPTS | 0x00001000 /* IGNORE_NT_SYMPATH */
+		| 0x02000000 /* DISABLE_SYMSRV_AUTODETECT */);
+	if (!SymInitialize(hp, "C:\\wwprof_no_symbols", FALSE)) fprintf(stderr, "SymInitialize failed %lu (walking anyway)\n", GetLastError());
 	HMODULE mods[1024]; DWORD need = 0;
 	if (EnumProcessModules(hp, mods, sizeof(mods), &need)) {
 		for (unsigned i = 0; i < need / sizeof(HMODULE); i++) {
 			MODULEINFO mi; char name[MAX_PATH];
-			if (GetModuleInformation(hp, mods[i], &mi, sizeof(mi)) && GetModuleFileNameExA(hp, mods[i], name, MAX_PATH))
+			if (GetModuleInformation(hp, mods[i], &mi, sizeof(mi)) && GetModuleFileNameExA(hp, mods[i], name, MAX_PATH)) {
 				fprintf(o, "M %llx %lx %s\n", (unsigned long long)(ULONG_PTR)mi.lpBaseOfDll, mi.SizeOfImage, name);
+				SymLoadModuleEx(hp, NULL, name, NULL, (DWORD64)(ULONG_PTR)mi.lpBaseOfDll, mi.SizeOfImage, NULL, 0);
+			}
 		}
 	}
 	fflush(o);
+	fprintf(stderr, "wwprof: attached to %lu, %lu modules\n", pid, (unsigned long)(need / sizeof(HMODULE)));
 	LARGE_INTEGER fq, t0, tn; QueryPerformanceFrequency(&fq); QueryPerformanceCounter(&t0);
 	int refreshMods = 0;
 	for (;;) {
