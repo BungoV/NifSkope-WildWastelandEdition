@@ -1070,7 +1070,11 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 						o.chan[0] = o.chan[1] = o.chan[2] = float( a ) / 255.0f;
 						vaoSum += a;
 					} else {
-						const float g = sv.selfAo * placementAo;
+						/* AO off = no AO of any kind (lane AO2, 2026-09-26): the
+						 * library self-AO rode in here unconditionally, so "AO off"
+						 * still darkened e.g. the Charles bridge deck (self-AO 38)
+						 * wherever the .lodo carries a v5 colour stream. */
+						const float g = wantAo ? sv.selfAo * placementAo : 1.0f;
 						o.chan[0] = o.chan[1] = o.chan[2] = g;
 					}
 					bk.verts.push_back( o );
