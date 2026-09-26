@@ -111,3 +111,58 @@ Code: `LodgenRoadSet` (gather -> addPlacement -> evaluateFlat -> finishFlat; ras
 * Out of scope, stated: TXST projected decals (1,982 in the box) have no mesh and are not painted; the legacy
   per-chunk .BTR path paints the flat objects too but writes no report file; the flat pass runs only when the
   roads are on.
+
+## 4. Faithfulness per kind, and the order things are painted in
+**What a painted texel is** (src/lodgen.cpp `rasteriseFlat`, the same reader the road stamp uses):
+- The material: the shape's BGSM (or BGEM: its base map, slot 0), after the material swap. Swap order as the road
+  stamp: the REFR's XMSP, else the MODS of the placing base (the SCOL's for a SCOL part), else the part's own MODS.
+- The diffuse, sampled with the NIF's UVs times the material's UV scale plus offset, at the mip the footprint
+  asks for (texture area over footprint area, as the road pass), read as stored (the textures are UNORM, so no
+  gamma step, like the road stamp).
+- Times the material tint, times the vertex colour when the shape has one; a blended shape with Vertex_Alpha
+  also takes the vertex alpha as coverage.
+- A fragment whose height is more than 8 below the ground under it is skipped (the terrain covers it in game).
+
+**Order:**
+1. The roads first (ROADS1, unchanged).
+2. Opaque flat shapes: highest wins (max z against the road z buffer); they replace what is there.
+3. Decal, alpha-blend and alpha-test shapes: sorted by their mean height, lowest first, each painted OVER what
+   is there (alpha-test = its cut, alpha-blend = texture alpha x material alpha), skipped where it is more than
+   4 units under the top already painted.
+
+The alpha of the colour word also clears the ground-cover byte under the paint, as the roads do.
+
+**The gate** (work/flat_faith.py): an independent raster in Python. It reads each placement's own NIF, BGSM,
+swap and DDS, with none of the C++, and is compared with the baked VT.2 colour sheet.
+
+The sample is texels where one painted shape wins at full coverage, not under a road, not a BGEM shape (the
+raster does not read BGEM), not a margin placement, and 16 texels in from the box edge. Mean |luma difference|,
+in 0-255 levels. The off bake is the same exe with `--no-flat-objects`: it must fail, and it does.
+
+Strict sample (3x3 of the same winning shape):
+
+| kind | texels | flat1 mean / p90 | flat off mean / p90 |
+|---|---|---|---|
+| pad | 15,382 | 2.22 / 5.0 | 36.10 / 75.9 |
+| rail | 22,270 | 2.17 / 4.5 | 9.44 / 19.9 |
+| path | 346 | 2.33 / 4.9 | 11.22 / 24.9 |
+| decal | 41 | 3.43 / 6.5 | 18.20 / 43.7 |
+| debris | 141,745 | 2.88 / 6.7 | 16.34 / 33.2 |
+
+Decals are thin and rarely hold a 3x3 of one shape, so the brief's 200 texels per kind comes from the looser
+sample (the 3x3 rule dropped):
+
+| kind | texels | flat1 mean / p90 | flat off mean / p90 |
+|---|---|---|---|
+| pad | 22,656 | 2.68 / 6.3 | 34.72 / 73.6 |
+| rail | 63,256 | 2.63 / 5.5 | 9.14 / 19.1 |
+| path | 1,112 | 2.62 / 5.5 | 12.81 / 28.1 |
+| decal | 1,836 | 3.43 / 6.6 | 19.51 / 38.9 |
+| debris | 313,537 | 3.29 / 7.5 | 17.00 / 35.4 |
+
+The remaining 2-3 levels are BC1 compression of the sheet (ROADS1 measured the same floor on the road plane).
+Nothing was tuned toward Bethesda's LOD colours; the target is the in-game diffuse.
+
+These bakes used `--land-shade 0`, but this bake mode already runs with land shade 0 (the log says
+`landShade 0.000`, `chunksShaded 0`), so ls0_on is byte-identical to flat_default. That also shows two bakes of
+one exe are deterministic.

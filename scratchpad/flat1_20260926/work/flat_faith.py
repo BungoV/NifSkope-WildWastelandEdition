@@ -296,7 +296,7 @@ def sheet(tag, level=2, role=1):
     return m[r0:r0 + (CY1 - CY0 + 1) * per, c0:c0 + (CX1 - CX0 + 1) * per, (slice(0, 3) if role == 1 else slice(3, 4))].astype(float)
 
 
-def sample():
+def sample(loose=False):
     """the texels the gate reads: a painted shape wins, full coverage, its 3x3 neighbourhood has the same winner,
     no road or pavement footprint there (the road z decides those), not a BGEM shape, 16 texels in from the box"""
     D = np.load(os.path.join(OUT, 'flat_raster.npz'))
@@ -313,12 +313,16 @@ def sample():
     kind[win >= 0] = meta[win[win >= 0], 0]
     bgem = np.zeros(win.shape, bool)
     bgem[win >= 0] = meta[win[win >= 0], 1] == 1
-    sel = ok & same & b & ~road & ~bgem & ~D['mfoot']
+    # loose: the 3x3 same-winner rule dropped (thin decals and paths rarely hold a 3x3 of one shape)
+    sel = ok & (True if loose else same) & b & ~road & ~bgem & ~D['mfoot']
     return D, sel, kind
 
 
 def cmp(tags):
-    D, sel, kind = sample()
+    loose = '--loose' in tags
+    tags = [t for t in tags if t != '--loose']
+    D, sel, kind = sample(loose)
+    print('loose sample (no 3x3 rule)' if loose else 'strict sample')
     ras = D['rgb']
     lr = ras @ LW
     print('sample: %d texels (%s)' % (sel.sum(), ', '.join('%s %d' % (k, (sel & (kind == i)).sum()) for i, k in enumerate(KINDS))))

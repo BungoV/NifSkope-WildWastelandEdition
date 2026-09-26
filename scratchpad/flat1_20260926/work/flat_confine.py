@@ -77,6 +77,11 @@ def blocks(m):
 
 
 def main():
+    shift = 0
+    if '--shift' in sys.argv:  # the can-fail proof: the same bakes against a footprint moved N texels east
+        i = sys.argv.index('--shift')
+        shift = int(sys.argv[i + 1])
+        del sys.argv[i:i + 2]
     a, b = sys.argv[1], sys.argv[2]
     fa, fb = files(a), files(b)
     same, diff = [], []
@@ -95,6 +100,9 @@ def main():
     ch = np.abs(sa - sb).max(2) > 0
     D = np.load(os.path.join(HERE, 'out', 'flat_raster.npz'))
     foot = D['foot'] | D['mfoot']
+    if shift:
+        foot = np.roll(foot, shift, 1)
+        print('FOOTPRINT MOVED %d texels east (this run must fail)' % shift)
     fb4 = blocks(foot)
     print('VT.2 colour: changed texels %d; outside the painted footprint: strict %d, outside its 4x4 blocks %d'
           ' (of the changed, under a margin placement only: %d)' % (
