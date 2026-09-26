@@ -560,7 +560,7 @@ def base_facts(W, form):
     parts = []
     for ft, pl in fl:
         if ft == b'MODL':
-            modl = pl.split(b'\0')[0].decode('cp1252')
+            modl = pl.split(b'\0')[0].decode('latin-1')    # some MODLs are not cp1252 text
         elif ft == b'ONAM' and t == 'SCOL' and len(pl) >= 4:
             parts.append([W._gmap(pi, masters, struct.unpack_from('<I', pl, 0)[0]), []])
         elif ft == b'DATA' and t == 'SCOL' and parts:

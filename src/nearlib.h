@@ -28,16 +28,21 @@ class EsmWorld;
  *  count): deleted; no base record; a base type other than STAT or SCOL (doors,
  *  furniture, activators, containers, lights, MSTT, trees ... all by type);
  *  STAT flag Is Marker; a DEST/DSTD subrecord; no MODL; for a SCOL, no parts,
- *  and each part placement judged as a STAT; the model does not load; the
- *  model carries a controller or sequence block; no shape survives the shape
- *  rules. A SCOL REFR is eligible when one of its part placements is.
+ *  and each part placement judged as a STAT; the model is not in the stack
+ *  (`model-missing`) or holds no BSTriShape with vertices and triangles
+ *  (`no-geometry`: marker and DummyLOD stand-ins); the model carries a
+ *  controller or sequence block (`animated`); no shape survives the shape rules
+ *  (`no-drawable-shape`); scale above 15.99988. A SCOL REFR is eligible when one
+ *  of its part placements is (else `scol-no-eligible-part`).
  *
  *  SHAPES, excluded by reason: effect shader (BGEM or BSEffectShaderProperty),
  *  alpha BLEND, decal (BGSM or SLSF1), tree / wind animation (SLSF2 Tree_Anim or
  *  BGSM bTree). Everything else is drawn, with a bucket tag on its material:
  *  alpha test (the threshold), two-sided (flag), parallax / env map /
  *  greyscale-to-palette / vertex colour / model-space normals (the v7
- *  `features` byte), legacy vs PBR (family).
+ *  `features` byte), legacy vs PBR (family). A BSMeshLODTriShape keeps its
+ *  first `LOD0 Size` triangles and the vertices they use: its array also holds
+ *  the LOD1 and LOD2 copies, which the engine never draws up close.
  *
  *  Per placement the `.lodi` keeps the REFR form id (+ SCOL part ordinal), the
  *  Initially-Disabled bit (v11) and the Scrappable bit (v9).

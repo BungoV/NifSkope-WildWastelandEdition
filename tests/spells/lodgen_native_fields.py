@@ -462,6 +462,13 @@ def main():
     wide = sum(1 for r in T['instances'] if r['flags'] & 0x80)
     ck.check('j0b the wide-scale bit (0x80) is set on %d instance(s): > 0 exactly when the .lodi is version 10 (%d)'
              % (wide, ih['version']), (wide > 0) == (ih['version'] == 10))
+    # NEAR1 (2026-09-26): .lodo v7 (NEAR flag 16, material features) and .lodi v11 (instance bit 8,
+    # INITIALLY_DISABLED) belong to the near library alone; a far file never carries either
+    disabled = sum(1 for r in T['instances'] if r['flags'] & 0x100)
+    ck.check('j0c a far pair carries no near-library meaning: NEAR flag clear, no material features byte, '
+             'no instance with bit 8 (%d)' % disabled,
+             not h['flags'] & 16 and all(m['reserved'] == 0 for m in L['materials']) and disabled == 0
+             and ih['version'] != 11)
     # j1: the card count
     cardsFromRows = sum(1 for bs in L['bases'] if bs['cardLayer'] != 0xFFFF)
     ck.check('j1 .lodo cardCount is WRITTEN and equals the rows that name a card layer '
