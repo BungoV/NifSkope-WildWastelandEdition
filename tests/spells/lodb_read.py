@@ -59,6 +59,7 @@
 #     census      [str]      every census line the bake printed
 #     endFiles    int
 #     endBytes    int
+#     products    [ {path, sha1} ]  region products, lane INCR2
 #     unknown     [str]      every line kind this reader did not know
 #
 # USAGE
@@ -111,7 +112,7 @@ def reads(raw, path='<bytes>'):
         'chunks': [], 'exe': '', 'exeBytes': 0, 'baked': '', 'target': '',
         'alg': {}, 'hashes': {}, 'plugins': [], 'resources': [],
         'switchTokens': [], 'census': [], 'endFiles': -1, 'endBytes': -1,
-        'unknown': [], 'lineCount': 0, 'bytes': len(raw),
+        'products': [], 'unknown': [], 'lineCount': 0, 'bytes': len(raw),
     }
     at = {}          # (cx,cy) -> index into rec['chunks']
     saw_version = False
@@ -187,6 +188,10 @@ def reads(raw, path='<bytes>'):
             ch['outFiles'].append(f[3])
             ch['outDigests'].append(f[4])
             ch['out'].append('%s %s' % (f[3], f[4]))
+        elif k == 'product' and len(f) > 2:
+            # lane INCR2: a region product -- a file under the record folder
+            # that no chunk row claims -- with its sha1
+            rec['products'].append({'path': f[1], 'sha1': f[2]})
         elif k == 'census' and len(f) > 1:
             rec['census'].append(f[1])
         elif k == 'end' and len(f) > 2:

@@ -399,7 +399,11 @@ bool lodgenWriteLedger( const QString & path, const LodgenLedger & led, QString 
 	std::sort( sorted.begin(), sorted.end(),
 		[]( const LodgenLedgerEntry & a, const LodgenLedgerEntry & b ) {
 			if ( a.cy != b.cy ) return a.cy < b.cy;
-			return a.cx < b.cx;
+			if ( a.cx != b.cx ) return a.cx < b.cx;
+			/* the ring breaks the tie (lane INCR2): a `--dim all` record has four
+			 * chunks at one corner, and std::sort does not keep equal keys in
+			 * any particular order. A one-ring record never reaches this line. */
+			return a.dim < b.dim;
 		} );
 	for ( const LodgenLedgerEntry & e : sorted ) {
 		row( { QStringLiteral( "chunk" ), QString::number( e.cx ), QString::number( e.cy ),
@@ -409,6 +413,12 @@ bool lodgenWriteLedger( const QString & path, const LodgenLedger & led, QString 
 			       tsv( e.outFiles.at( i ) ),
 			       i < e.outDigests.size() ? e.outDigests.at( i ) : QString() } );
 	}
+
+	/* 6b. the region products (lane INCR2), sorted by path by the writer's
+	 *     caller. An older reader ignores the line kind. */
+	for ( int i = 0; i < led.productFiles.size(); i++ )
+		row( { QStringLiteral( "product" ), tsv( led.productFiles.at( i ) ),
+		       i < led.productDigests.size() ? led.productDigests.at( i ) : QString() } );
 
 	/* 7. every census line the bake printed, verbatim. */
 	for ( const QString & c : led.census )
@@ -484,6 +494,8 @@ bool lodgenReadLedger( const QString & path, LodgenLedger * led, QString * error
 	led->resources.clear();
 	led->switchTokens.clear();
 	led->census.clear();
+	led->productFiles.clear();
+	led->productDigests.clear();
 	QHash<QString, int> chunkAt;
 
 	for ( const QString & rawLine : L ) {
@@ -561,6 +573,9 @@ bool lodgenReadLedger( const QString & path, LodgenLedger * led, QString * error
 				led->chunks[at].outFiles.append( f.at( 3 ) );
 				led->chunks[at].outDigests.append( f.at( 4 ) );
 			}
+		} else if ( k == QLatin1String( "product" ) && f.size() > 2 ) {
+			led->productFiles.append( f.at( 1 ) );
+			led->productDigests.append( f.at( 2 ) );
 		} else if ( k == QLatin1String( "census" ) && f.size() > 1 ) {
 			led->census.append( f.at( 1 ) );
 		} else if ( k == QLatin1String( "end" ) && f.size() > 2 ) {

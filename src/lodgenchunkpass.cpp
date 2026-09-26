@@ -18,6 +18,8 @@ BSD License - see nifskope.h
 #include <QCryptographicHash>
 #include <QDateTime>
 #include <QDir>
+#include <QDirIterator>
+#include <QFile>
 #include <QElapsedTimer>
 #include <QFileInfo>
 #include <QHash>
@@ -935,7 +937,10 @@ LodgenIncrementalVerdict lodgenIncrementalBegin( LodgenIncrementalRun & run, con
 	 * of every written .BTO, so a filtered list would build them from a
 	 * fraction of the region. The merge is ON by default; refusing it would
 	 * have made --incremental refuse every command anybody types. */
-	if ( run.regionProducts )
+	/* Lane INCR2 (2026-09-26) lifts this on the FO4CS target with the raw chunk
+	 * cache on: the clean chunks' raw files are copied back before the region
+	 * passes, so those passes see the whole list, as a full bake's do. */
+	if ( run.regionProducts && !( fo4cs && run.rawCache && run.nativeCache ) )
 		return LodgenIncrementalVerdict::RegionProducts;
 	/* --native builds ONE .lodo/.lodi pair out of the placements the chunk
 	 * pass hands it. Since lane INCR1 a skipped chunk speaks from its `.lodj`
@@ -954,15 +959,23 @@ LodgenIncrementalVerdict lodgenIncrementalBegin( LodgenIncrementalRun & run, con
 	 * changes nothing for its neighbours. Seeding the widening from it made
 	 * deleting ONE cache file rebake the whole region
 	 * (`scratchpad/incr1_20260917/s2_proof.txt` leg C). */
+	/* RING-AWARE since lane INCR2 (2026-09-26). A `--dim all` run has four
+	 * chunks at one corner; each is keyed `cx,cy@dim` (a chunk of the run's own
+	 * ring keeps the plain `cx,cy`, so a one-ring record reads exactly as
+	 * before), digested at ITS OWN ring, and widens only its own ring: a ring-8
+	 * chunk reads nothing a ring-4 chunk wrote. */
 	const int d = run.dim;
 	QSet<QString> dirty, dirtyWide;
 	QHash<QString, const LodgenLedgerEntry *> byKey;
 	for ( const LodgenLedgerEntry & e : prev.chunks )
-		byKey.insert( chunkKey( e.cx, e.cy ), &e );
+		byKey.insert( chunkKeyAt( e.dim, d, e.cx, e.cy ), &e );
+	auto ringTag = [d]( const LodgenChunkJob & j ) {
+		return j.dim == d ? QString() : QString( " ring %1" ).arg( j.dim );
+	};
 	int movedInputs = 0, unknown = 0, lostOutput = 0;
 	QStringList reasons;
 	for ( const LodgenChunkJob & j : run.allJobs ) {
-		const QString key = chunkKey( j.cx, j.cy );
+		const QString key = chunkKeyAt( j.dim, d, j.cx, j.cy );
 		const LodgenLedgerEntry * pe = byKey.value( key, nullptr );
 		if ( !pe ) {
 			dirty.insert( key );
@@ -971,14 +984,15 @@ LodgenIncrementalVerdict lodgenIncrementalBegin( LodgenIncrementalRun & run, con
 			continue;
 		}
 		const LodgenLedgerEntry & e = *pe;
-		const QString now = lodgenChunkInputDigest( world, d, j.cx, j.cy, run.digestRoot );
+		const QString now = lodgenChunkInputDigest( world, j.dim, j.cx, j.cy, run.digestRoot );
+		run.inputsMemo.insert( key, now );
 		if ( now != e.inputs ) {
 			dirty.insert( key );
 			dirtyWide.insert( key );
 			movedInputs++;
 			if ( reasons.size() < 8 )
-				reasons.append( QString( "  (%1,%2) inputs %3 -> %4" )
-					.arg( j.cx ).arg( j.cy ).arg( e.inputs.left( 12 ), now.left( 12 ) ) );
+				reasons.append( QString( "  (%1,%2)%5 inputs %3 -> %4" )
+					.arg( j.cx ).arg( j.cy ).arg( e.inputs.left( 12 ), now.left( 12 ), ringTag( j ) ) );
 			continue;
 		}
 		/* EVERY output, not the first lost one, because WHICH output was lost
@@ -990,9 +1004,9 @@ LodgenIncrementalVerdict lodgenIncrementalBegin( LodgenIncrementalRun & run, con
 				continue;
 			const bool isCache = e.outFiles[k].endsWith( QLatin1String( ".lodj" ) );
 			if ( !lostAny && reasons.size() < 8 )
-				reasons.append( QString( "  (%1,%2) output %3 is missing or edited%4" )
+				reasons.append( QString( "  (%1,%2)%5 output %3 is missing or edited%4" )
 					.arg( j.cx ).arg( j.cy ).arg( e.outFiles[k] )
-					.arg( isCache ? QStringLiteral( " (a chunk cache: this chunk only)" ) : QString() ) );
+					.arg( isCache ? QStringLiteral( " (a chunk cache: this chunk only)" ) : QString(), ringTag( j ) ) );
 			lostAny = true;
 			if ( !isCache )
 				lostReal = true;
@@ -1004,19 +1018,25 @@ LodgenIncrementalVerdict lodgenIncrementalBegin( LodgenIncrementalRun & run, con
 				dirtyWide.insert( key );
 		}
 	}
-	/* THE WIDENING. A chunk is also dirty when a chunk within ONE CELL of it
-	 * is: the terrain ring and the AO skirt each reach exactly one cell
-	 * (docs/LODGEN_LEDGER_FORMAT.md section 2). It fires on a neighbour whose
-	 * OUTPUT was lost, which no input digest can see. */
+	/* THE WIDENING. A chunk is also dirty when a chunk OF ITS OWN RING within
+	 * ONE CELL of it is: the terrain ring and the AO skirt each reach exactly
+	 * one cell (docs/LODGEN_LEDGER_FORMAT.md section 2). It fires on a
+	 * neighbour whose OUTPUT was lost, which no input digest can see. */
+	QVector<LodgenChunkJob> wideJobs;
+	for ( const LodgenChunkJob & j : run.allJobs )
+		if ( dirtyWide.contains( chunkKeyAt( j.dim, d, j.cx, j.cy ) ) )
+			wideJobs.append( j );
 	QSet<QString> widened = dirty;
 	for ( const LodgenChunkJob & j : run.allJobs ) {
-		if ( widened.contains( chunkKey( j.cx, j.cy ) ) )
+		const QString key = chunkKeyAt( j.dim, d, j.cx, j.cy );
+		if ( widened.contains( key ) )
 			continue;
-		for ( const QString & dk : dirtyWide ) {
-			const int dx = dk.section( QLatin1Char( ',' ), 0, 0 ).toInt();
-			const int dy = dk.section( QLatin1Char( ',' ), 1, 1 ).toInt();
-			if ( j.cx <= dx + d && dx <= j.cx + d && j.cy <= dy + d && dy <= j.cy + d ) {
-				widened.insert( chunkKey( j.cx, j.cy ) );
+		const int jd = j.dim;
+		for ( const LodgenChunkJob & w : wideJobs ) {
+			if ( w.dim != jd )
+				continue;
+			if ( j.cx <= w.cx + jd && w.cx <= j.cx + jd && j.cy <= w.cy + jd && w.cy <= j.cy + jd ) {
+				widened.insert( key );
 				break;
 			}
 		}
@@ -1029,7 +1049,7 @@ LodgenIncrementalVerdict lodgenIncrementalBegin( LodgenIncrementalRun & run, con
 	int lostCache = 0;
 	if ( fo4cs ) {
 		for ( const LodgenChunkJob & j : run.allJobs ) {
-			const QString key = chunkKey( j.cx, j.cy );
+			const QString key = chunkKeyAt( j.dim, d, j.cx, j.cy );
 			if ( widened.contains( key ) )
 				continue;
 			const QString cp = QString( "%1/%2.%3.%4.%5.lodj" )
@@ -1038,23 +1058,83 @@ LodgenIncrementalVerdict lodgenIncrementalBegin( LodgenIncrementalRun & run, con
 				widened.insert( key );
 				lostCache++;
 				if ( reasons.size() < 8 )
-					reasons.append( QString( "  (%1,%2) has no native chunk cache" ).arg( j.cx ).arg( j.cy ) );
+					reasons.append( QString( "  (%1,%2)%3 has no native chunk cache" )
+						.arg( j.cx ).arg( j.cy ).arg( ringTag( j ) ) );
+			}
+		}
+	}
+	/* THE RAW CHUNK CACHE (lane INCR2) has to be there, and be the bytes its
+	 * key names, for every chunk this run will skip -- the region passes are
+	 * about to read those files as if this run had written them. The key names
+	 * the input digest and the switches it was baked under, so a cache left by
+	 * a different bake cannot stand in. A missing or stale entry rebakes that
+	 * chunk only, like a lost `.lodj`: its neighbours read nothing from it. */
+	run.rawCacheLost = 0;
+	if ( fo4cs && run.rawCache ) {
+		run.rawCacheDir = QDir( run.outDir ).absolutePath() + QStringLiteral( "/lodgen_chunk_cache" );
+		for ( const LodgenChunkJob & j : run.allJobs ) {
+			const QString key = chunkKeyAt( j.dim, d, j.cx, j.cy );
+			if ( widened.contains( key ) )
+				continue;
+			const QString stem = chunkStem( ws, j.dim, j.cx, j.cy );
+			const QString base = run.rawCacheDir + QChar( '/' ) + stem;
+			QString why;
+			QFile kf( base + QStringLiteral( ".key" ) );
+			if ( !kf.open( QIODevice::ReadOnly ) ) {
+				why = QStringLiteral( "no raw chunk cache" );
+			} else {
+				QHash<QString, QString> kv;
+				for ( const QByteArray & raw : kf.readAll().split( '\n' ) ) {
+					const QString l = QString::fromUtf8( raw ).trimmed();
+					const int sp = l.indexOf( QChar( ' ' ) );
+					if ( sp > 0 )
+						kv.insert( l.left( sp ), l.mid( sp + 1 ) );
+				}
+				const LodgenLedgerEntry * pe = byKey.value( key, nullptr );
+				if ( !pe || kv.value( QStringLiteral( "inputs" ) ) != pe->inputs )
+					why = QStringLiteral( "raw chunk cache baked from other inputs" );
+				else if ( kv.value( QStringLiteral( "switches" ) ) != run.switches )
+					why = QStringLiteral( "raw chunk cache baked under other switches" );
+				else {
+					const QString bs = kv.value( QStringLiteral( "bto" ) );
+					const QString ms = kv.value( QStringLiteral( "manifest" ) );
+					if ( bs.isEmpty() || ms.isEmpty() )
+						why = QStringLiteral( "raw chunk cache key is short" );
+					else if ( bs != QLatin1String( "-" ) && lodgenFileDigest( base + QStringLiteral( ".BTO" ) ) != bs )
+						why = QStringLiteral( "raw chunk .BTO missing or edited" );
+					else if ( ms != QLatin1String( "-" )
+						&& lodgenFileDigest( base + QStringLiteral( ".BTO.manifest.txt" ) ) != ms )
+						why = QStringLiteral( "raw chunk manifest missing or edited" );
+				}
+			}
+			if ( !why.isEmpty() ) {
+				widened.insert( key );
+				run.rawCacheLost++;
+				if ( reasons.size() < 8 )
+					reasons.append( QString( "  (%1,%2)%3 %4 (this chunk only)" )
+						.arg( j.cx ).arg( j.cy ).arg( ringTag( j ), why ) );
 			}
 		}
 	}
 	QVector<LodgenChunkJob> kept;
 	for ( const LodgenChunkJob & j : run.allJobs )
-		if ( widened.contains( chunkKey( j.cx, j.cy ) ) )
+		if ( widened.contains( chunkKeyAt( j.dim, d, j.cx, j.cy ) ) )
 			kept.append( j );
-	if ( census )
+	if ( census ) {
 		*census = QString( "incremental: %1 of %2 chunks dirty "
 						   "(%3 inputs moved, %4 not in the ledger, %5 output lost, "
-						   "%6 by neighbour, %7 with no native chunk cache)" )
+						   "%6 by neighbour, %7 with no native chunk cache" )
 			.arg( kept.size() ).arg( run.allJobs.size() )
 			.arg( movedInputs ).arg( unknown ).arg( lostOutput ).arg( spread )
 			.arg( lostCache );
+		if ( fo4cs && run.rawCache )
+			*census += QString( ", %1 with no raw chunk cache" ).arg( run.rawCacheLost );
+		*census += QChar( ')' );
+	}
 	if ( reasonsOut )
 		*reasonsOut = reasons;
+	run.movedInputs = movedInputs;
+	run.unknownChunks = unknown;
 	jobs = kept;
 	run.incremental = true;
 	return LodgenIncrementalVerdict::Go;
@@ -1167,7 +1247,14 @@ void lodgenIncrementalNoteRetired( LodgenIncrementalRun & run, const LodgenChunk
 		if ( scratch && p == r.btoPath )
 			continue;
 		if ( scratch && p == r.manifestPath ) {
-			pf.append( lodgenFo4csWorldDir( run.outDir, pass.worldEdid ) + QStringLiteral( "/" )
+			/* THE ROOT THE TEARDOWN MOVES IT UNDER: `--fo4cs-one-root` puts it
+			 * under --native, not --out-dir. Naming the out-dir here recorded a
+			 * path no file ever reached, with an EMPTY digest -- which matched
+			 * the empty digest of the missing file, so deleting a manifest from
+			 * the mod never made its chunk dirty (lane INCR2 found it in every
+			 * installed record). */
+			pf.append( lodgenFo4csWorldDir( run.recordRoot.isEmpty() ? run.outDir : run.recordRoot,
+					pass.worldEdid ) + QStringLiteral( "/" )
 				+ QFileInfo( r.btoPath ).fileName() + QStringLiteral( ".manifest.txt" ) );
 			continue;
 		}
@@ -1264,14 +1351,27 @@ bool lodgenIncrementalWriteRecord( const LodgenIncrementalRun & run, const EsmWo
 		const bool rebaked = run.producedFiles.contains( key );
 		if ( !rebaked && run.incremental ) {
 			/* A chunk this run SKIPPED: its row is carried forward, which makes
-			 * the record a record of what is on disk. */
-			if ( const LodgenLedgerEntry * pe = oldByKey.value( key, nullptr ) )
-				led.chunks.append( *pe );
+			 * the record a record of what is on disk. Since lane INCR2 the region
+			 * passes run over the whole list, so a skipped chunk's manifest was
+			 * written again (the card arrays append its layers) -- the digests
+			 * are taken again from the disk; its input digest stays. A null run
+			 * wrote nothing and carries the row as it was. */
+			if ( const LodgenLedgerEntry * pe = oldByKey.value( key, nullptr ) ) {
+				LodgenLedgerEntry e = *pe;
+				if ( !run.nullRun && run.rawCache )
+					for ( int k = 0; k < e.outFiles.size() && k < e.outDigests.size(); k++ )
+						e.outDigests[k] = lodgenFileDigest( ledgerRoot + QChar( '/' ) + e.outFiles.at( k ) );
+				led.chunks.append( e );
+			}
 			continue;
 		}
 		LodgenLedgerEntry e;
 		e.dim = j.dim; e.cx = j.cx; e.cy = j.cy;
-		e.inputs = lodgenChunkInputDigest( world, j.dim, j.cx, j.cy, run.digestRoot );
+		e.inputs = run.inputsMemo.value( key );
+		if ( e.inputs.isEmpty() ) {
+			e.inputs = lodgenChunkInputDigest( world, j.dim, j.cx, j.cy, run.digestRoot );
+			run.inputsMemo.insert( key, e.inputs );
+		}
 		for ( const QString & p : run.producedFiles.value( key ) ) {
 			e.outFiles.append( QDir( ledgerRoot ).relativeFilePath( QDir( p ).absolutePath() ) );
 			e.outDigests.append( lodgenFileDigest( p ) );
@@ -1344,6 +1444,37 @@ bool lodgenIncrementalWriteRecord( const LodgenIncrementalRun & run, const EsmWo
 		led.resources.append( e );
 	}
 
+	/* THE REGION PRODUCTS (lane INCR2): every file under the record's folder
+	 * that no chunk row names, hashed from the disk. A null run carries the
+	 * previous rows: it verified each of them a moment ago and wrote nothing. */
+	if ( led.fo4csTarget ) {
+		if ( run.nullRun ) {
+			led.productFiles = run.prev.productFiles;
+			led.productDigests = run.prev.productDigests;
+		} else {
+			QSet<QString> claimed;
+			claimed.insert( QDir::fromNativeSeparators( QFileInfo( run.ledgerPath ).absoluteFilePath() ).toLower() );
+			for ( const LodgenLedgerEntry & e : led.chunks )
+				for ( const QString & f : e.outFiles )
+					claimed.insert( QDir::fromNativeSeparators(
+						QFileInfo( ledgerRoot + QChar( '/' ) + f ).absoluteFilePath() ).toLower() );
+			QStringList rel;
+			QDirIterator it( ledgerRoot, QDir::Files, QDirIterator::Subdirectories );
+			while ( it.hasNext() ) {
+				it.next();
+				const QString abs = QDir::fromNativeSeparators( it.fileInfo().absoluteFilePath() );
+				if ( claimed.contains( abs.toLower() ) )
+					continue;
+				rel.append( QDir( ledgerRoot ).relativeFilePath( abs ) );
+			}
+			rel.sort();
+			for ( const QString & r : rel ) {
+				led.productFiles.append( r );
+				led.productDigests.append( lodgenFileDigest( ledgerRoot + QChar( '/' ) + r ) );
+			}
+		}
+	}
+
 	led.switchTokens = switchTokens;
 	led.census = lodbCensusLines();
 
@@ -1374,4 +1505,191 @@ bool lodgenIncrementalWriteRecord( const LodgenIncrementalRun & run, const EsmWo
 				.arg( QFileInfo( run.ledgerPath ).size() );
 	}
 	return true;
+}
+
+/* ===== LANE INCR2 (2026-09-26): WHOLE-MAP INCREMENTAL FO4CS BAKES ==========
+ *
+ * bungo, 2026-09-26: "And yes, allow quick rebakes". INCR1 made one ring
+ * incremental and refused the rest: `--dim all` (four rings) and the region
+ * products (texture arrays, card arrays), which build ONE thing out of every
+ * written .BTO. The FO4CS target drops its .BTO scaffolding at the end of every
+ * bake, so a later run had nothing to build them from.
+ *
+ * The raw chunk cache keeps it. Each chunk's .BTO and manifest are copied as
+ * the chunk pass wrote them -- before the merge, the far-ring cut and the card
+ * arrays rewrite them -- and an incremental run copies the clean ones back, so
+ * every region pass sees the whole list in job order, the list a full bake
+ * gives it. The native pair still takes the clean chunks' placements from their
+ * `.lodj` (INCR1); the card links it reads come from the manifests the card
+ * arrays pass has just written for the WHOLE list, so a replayed chunk carries
+ * the same links a full bake gives it. */
+
+QString lodgenIncrementalChunkKey( const LodgenIncrementalRun & run, int dim, int cx, int cy )
+{
+	return chunkKeyAt( dim, run.dim, cx, cy );
+}
+
+void lodgenIncrementalCheckProducts( LodgenIncrementalRun & run, const EsmWorld & world,
+	QStringList * reasons )
+{
+	run.productsLost = 0;
+	if ( !run.incremental )
+		return;
+	auto say = [reasons]( const QString & r ) {
+		if ( reasons && reasons->size() < 8 )
+			reasons->append( r );
+	};
+	const LodgenLedger & p = run.prev;
+	if ( p.productFiles.isEmpty() ) {
+		run.productsLost++;
+		say( QStringLiteral( "  the record lists no region products (written before lane INCR2)" ) );
+	}
+	for ( int i = 0; i < p.productFiles.size(); i++ ) {
+		const QString fp = run.prevRecordDir + QChar( '/' ) + p.productFiles.at( i );
+		if ( lodgenFileDigest( fp ) != p.productDigests.value( i ) ) {
+			run.productsLost++;
+			say( QString( "  product %1 is missing or edited" ).arg( p.productFiles.at( i ) ) );
+		}
+	}
+	/* THE LOAD ORDER AND THE PLUGINS' BYTES. A plugin that moved without
+	 * moving any chunk's inputs still moves the pair's header words; a null run
+	 * would keep yesterday's. */
+	const QString lo = QString( "%1" ).arg( world.loadOrderHash(), 16, 16, QChar( '0' ) );
+	if ( !p.loadOrderHashHex.isEmpty() && p.loadOrderHashHex != lo ) {
+		run.productsLost++;
+		say( QString( "  the load order moved (%1 -> %2)" ).arg( p.loadOrderHashHex, lo ) );
+	}
+	const QStringList paths = world.pluginList().split( QChar( ',' ), Qt::SkipEmptyParts );
+	bool pluginsMoved = paths.size() != p.plugins.size();
+	for ( int i = 0; !pluginsMoved && i < paths.size(); i++ ) {
+		const QFileInfo fi( paths.at( i ).trimmed() );
+		quint64 h = 0;
+		if ( fi.fileName().toLower() != p.plugins.at( i ).name || fi.size() != p.plugins.at( i ).bytes
+			|| !lodbFileFnv1a64( QDir::fromNativeSeparators( fi.absoluteFilePath() ), &h )
+			|| h != p.plugins.at( i ).hash )
+			pluginsMoved = true;
+	}
+	if ( pluginsMoved ) {
+		run.productsLost++;
+		say( QStringLiteral( "  the plugin list or the bytes of a plugin moved" ) );
+	}
+}
+
+bool lodgenIncrementalStoreRaw( LodgenIncrementalRun & run, const QString & worldEdid,
+	const QHash<QString, QString> & retired, QString * error )
+{
+	run.rawStored.clear();
+	if ( !run.rawCache || run.nativeDir.isEmpty() )
+		return true;
+	run.rawCacheDir = QDir( run.outDir ).absolutePath() + QStringLiteral( "/lodgen_chunk_cache" );
+	if ( !QDir().mkpath( run.rawCacheDir ) ) {
+		if ( error )
+			*error = QStringLiteral( "cannot create the raw chunk cache %1" ).arg( run.rawCacheDir );
+		return false;
+	}
+	for ( const LodgenChunkJob & j : run.allJobs ) {
+		const QString key = chunkKeyAt( j.dim, run.dim, j.cx, j.cy );
+		if ( !retired.contains( key ) )
+			continue;
+		const QString base = run.rawCacheDir + QChar( '/' ) + chunkStem( worldEdid, j.dim, j.cx, j.cy );
+		/* THE KEY GOES FIRST AND COMES BACK LAST: a run that dies between here
+		 * and the record leaves a cache entry with no key, which the next run
+		 * reads as missing and rebakes. */
+		QFile::remove( base + QStringLiteral( ".key" ) );
+		QFile::remove( base + QStringLiteral( ".BTO" ) );
+		QFile::remove( base + QStringLiteral( ".BTO.manifest.txt" ) );
+		const QString bto = retired.value( key );
+		QStringList sums{ QStringLiteral( "-" ), QStringLiteral( "-" ) };
+		if ( !bto.isEmpty() ) {
+			if ( !QFile::copy( bto, base + QStringLiteral( ".BTO" ) ) ) {
+				if ( error )
+					*error = QStringLiteral( "cannot copy %1 into the raw chunk cache" ).arg( bto );
+				return false;
+			}
+			sums[0] = lodgenFileDigest( base + QStringLiteral( ".BTO" ) );
+			const QString man = bto + QStringLiteral( ".manifest.txt" );
+			if ( QFileInfo::exists( man ) ) {
+				if ( !QFile::copy( man, base + QStringLiteral( ".BTO.manifest.txt" ) ) ) {
+					if ( error )
+						*error = QStringLiteral( "cannot copy %1 into the raw chunk cache" ).arg( man );
+					return false;
+				}
+				sums[1] = lodgenFileDigest( base + QStringLiteral( ".BTO.manifest.txt" ) );
+			}
+		}
+		run.rawStored.insert( key, sums );
+	}
+	return true;
+}
+
+bool lodgenIncrementalRestoreRaw( LodgenIncrementalRun & run, const QString & worldEdid,
+	const QString & btoDir, const QHash<QString, QString> & retired, QStringList * writtenBto,
+	QString * error )
+{
+	run.rawRestored = 0;
+	QStringList full;
+	for ( const LodgenChunkJob & j : run.allJobs ) {
+		const QString key = chunkKeyAt( j.dim, run.dim, j.cx, j.cy );
+		if ( retired.contains( key ) ) {
+			if ( !retired.value( key ).isEmpty() )
+				full.append( retired.value( key ) );
+			continue;
+		}
+		if ( !run.incremental || !run.rawCache )
+			continue;
+		const QString stem = chunkStem( worldEdid, j.dim, j.cx, j.cy );
+		const QString base = run.rawCacheDir + QChar( '/' ) + stem;
+		if ( !QFileInfo::exists( base + QStringLiteral( ".BTO" ) ) )
+			continue;           // the key said "-": this chunk builds no .BTO
+		const QString dst = btoDir + QChar( '/' ) + stem + QStringLiteral( ".BTO" );
+		const QString dstMan = dst + QStringLiteral( ".manifest.txt" );
+		QFile::remove( dst );
+		QFile::remove( dstMan );
+		if ( !QFile::copy( base + QStringLiteral( ".BTO" ), dst )
+			|| ( QFileInfo::exists( base + QStringLiteral( ".BTO.manifest.txt" ) )
+				 && !QFile::copy( base + QStringLiteral( ".BTO.manifest.txt" ), dstMan ) ) ) {
+			if ( error )
+				*error = QStringLiteral( "cannot copy the raw chunk cache for %1 back into %2" ).arg( stem, btoDir );
+			return false;
+		}
+		/* QFile::copy keeps the source's read-only bit on Windows; the merge
+		 * and the far-ring cut save over this file. */
+		QFile( dst ).setPermissions( QFile( dst ).permissions() | QFileDevice::WriteOwner );
+		if ( QFileInfo::exists( dstMan ) )
+			QFile( dstMan ).setPermissions( QFile( dstMan ).permissions() | QFileDevice::WriteOwner );
+		full.append( dst );
+		run.rawRestored++;
+	}
+	if ( writtenBto )
+		*writtenBto = full;
+	return true;
+}
+
+void lodgenIncrementalSealRaw( const LodgenIncrementalRun & run, const QString & worldEdid )
+{
+	if ( !run.rawCache || run.rawCacheDir.isEmpty() )
+		return;
+	for ( auto it = run.rawStored.constBegin(); it != run.rawStored.constEnd(); ++it ) {
+		const QString inputs = run.inputsMemo.value( it.key() );
+		if ( inputs.isEmpty() )
+			continue;           // no record row was written for it: leave it unkeyed
+		int dim = run.dim, cx = 0, cy = 0;
+		{
+			QString k = it.key();
+			const int at = k.indexOf( QChar( '@' ) );
+			if ( at >= 0 ) {
+				dim = k.mid( at + 1 ).toInt();
+				k = k.left( at );
+			}
+			cx = k.section( QChar( ',' ), 0, 0 ).toInt();
+			cy = k.section( QChar( ',' ), 1, 1 ).toInt();
+		}
+		const QString base = run.rawCacheDir + QChar( '/' ) + chunkStem( worldEdid, dim, cx, cy );
+		QSaveFile f( base + QStringLiteral( ".key" ) );
+		if ( !f.open( QIODevice::WriteOnly ) )
+			continue;
+		f.write( QString( "inputs %1\nswitches %2\nbto %3\nmanifest %4\n" )
+			.arg( inputs, run.switches, it.value().value( 0 ), it.value().value( 1 ) ).toUtf8() );
+		f.commit();
+	}
 }

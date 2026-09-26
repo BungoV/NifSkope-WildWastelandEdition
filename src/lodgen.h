@@ -1655,6 +1655,14 @@ struct LodgenLedger
 	QStringList census;              //!< every census line the bake printed, verbatim
 	int     endFiles = 0;            //!< files under the record's own directory tree, READ BACK
 	qint64  endBytes = 0;            //!< their total size, READ BACK
+	/*! THE REGION PRODUCTS (lane INCR2, 2026-09-26): every file under the
+	 *  record's own folder that no chunk row claims -- the `.lodo`/`.lodi`, the
+	 *  texture and card arrays, the VT levels -- with its sha1, sorted by path.
+	 *  An incremental run with no dirty chunk skips every stage only when each
+	 *  of these still hashes the same. Line kind `product`; a reader older than
+	 *  INCR2 ignores it. */
+	QStringList productFiles;        //!< paths relative to the record's folder
+	QStringList productDigests;      //!< sha1 hex, parallel to productFiles
 };
 
 /*! The digest of everything chunk (cx,cy) at `dim` reads.

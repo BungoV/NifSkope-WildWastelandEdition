@@ -3967,36 +3967,13 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 		/* The pyramid runs FIRST and ONCE. It has to: when the chunk sheets
 		 * come from it, they are assembled while its staging is live, and a
 		 * pass that ran after the chunk queue would have nothing to read. */
-		bool texFromVt = false;
+		/* The sheets-from-the-pyramid decision is made HERE, before the pyramid
+		 * runs, because the identity word below reads it; the pyramid itself now
+		 * runs after the incremental diff (lane INCR2), which may skip it. */
+		const bool texFromVt = !vtDir.isEmpty() && vtBtr != 0 && !texDir.isEmpty();
 		if ( !vtDir.isEmpty() || vtEstimate ) {
 			if ( !cmdLodgenVtEstimate( world, vtOpts, !texDir.isEmpty() ) )
 				return 1;
-		}
-		if ( !vtDir.isEmpty() ) {
-			LodgenVtOptions vo = vtOpts;
-			vo.haveRegion = true;
-			for ( int r = 0; r < 4; r++ )
-				vo.region[r] = region[r];
-			if ( vtBtr != 0 && !texDir.isEmpty() ) {
-				QDir().mkpath( texDir );
-				vo.btrTexDir = texDir;
-				vo.btrDims = QVector<int>{ 4, 8, 16, 32 };
-				texFromVt = true;
-			}
-			QString vtReport, vterr;
-			bool vtOk = false;
-			{
-				StageTimer st( &msTextures );		// the pyramid is a TEXTURE stage
-				vtOk = lodgenBakeTerrainVt( world,
-					dataRoot.isEmpty() ? QStringLiteral( "E:/Tools/Fallout 4/DataUnpacked/Data" ) : dataRoot,
-					vtDir, vo, bakeCaches, &vtReport, &vterr );
-			}
-			if ( !vtOk ) {
-				err() << "error: " << vterr << Qt::endl;
-				return 1;
-			}
-			censusOut( vtReport );
-			out().flush();
 		}
 		int done = 0, skipped = 0, failed = 0;
 		QStringList writtenBto;
@@ -4015,12 +3992,9 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 		 * queue order (LodgenManager::buildQueue: ring, then row, then column).
 		 * Each job carries its own ring; the pass sets the terrain and object
 		 * options from it per job (lodgenchunkpass.cpp). */
+		/* `--incremental` takes all four since lane INCR2 (2026-09-26): the diff
+		 * keys, digests and widens each chunk at its own ring. */
 		if ( gLgAllRings ) {
-			if ( !gLgIncremental.isEmpty() ) {
-				err() << "error: --incremental works on one chunk size; --dim all runs four "
-						 "(the panel refuses it the same way)" << Qt::endl;
-				return 2;
-			}
 			for ( int rd : { 8, 16, 32 } ) {
 				const int rx0 = floorTo( region[0], rd ), ry0 = floorTo( region[1], rd );
 				for ( int cy = ry0; cy <= region[3]; cy += rd )
@@ -4127,9 +4101,36 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 		inc.dim = d;
 		for ( int k = 0; k < 4; k++ )
 			inc.region[k] = region[k];
-		inc.switches = lodgenSwitchesWithIdentity( gLgSwitchDigest, idWord );
+		/* THE CARD SETS' BYTES (lane INCR2). The argv digest names the --impostors
+		 * folder, not what is in it, and a chunk's input digest says only that
+		 * cards are on -- so a re-rendered card set would have left every chunk
+		 * "clean" with yesterday's card links. The folder's content goes into the
+		 * switches: a changed card set refuses an incremental run by name. */
+		QString cardsWord;
+		if ( !impostors.isEmpty() ) {
+			QStringList rel;
+			QDirIterator it( impostors, QDir::Files, QDirIterator::Subdirectories );
+			while ( it.hasNext() ) {
+				it.next();
+				rel.append( QDir( impostors ).relativeFilePath( it.filePath() ) );
+			}
+			rel.sort();
+			QCryptographicHash ch( QCryptographicHash::Sha1 );
+			for ( const QString & r : rel ) {
+				ch.addData( r.toLower().toUtf8() );
+				ch.addData( QByteArray( "\x1f", 1 ) );
+				ch.addData( lodgenFileDigest( impostors + QChar( '/' ) + r ).toUtf8() );
+				ch.addData( QByteArray( "\x1e", 1 ) );
+			}
+			cardsWord = QStringLiteral( "|cards:" ) + QString::fromLatin1( ch.result().toHex() );
+			out() << "card sets: " << rel.size() << " file(s) under " << impostors << ", digest "
+				  << cardsWord.mid( 7, 12 ) << Qt::endl;
+		}
+		inc.switches = lodgenSwitchesWithIdentity( gLgSwitchDigest, idWord + cardsWord );
 		inc.regionProducts = atlas || arrays || !impostors.isEmpty();
 		inc.nativeCache = gLgNativeCache;
+		/* the raw chunk cache rides on the .lodj one: `--no-native-cache` turns both off */
+		inc.rawCache = !nativeDir.isEmpty() && gLgNativeCache;
 		inc.warn = []( const QString & w ) { err() << w << Qt::endl; };
 		{
 			QString incCensus, incDetail;
@@ -4147,6 +4148,72 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 					out() << r << Qt::endl;
 				out().flush();
 			}
+		}
+		/* ===== LANE INCR2: THE REGION PRODUCTS, THE NULL RUN, THE PYRAMID =====
+		 *
+		 * An incremental FO4CS run also asks whether the files no chunk owns --
+		 * the pair, the arrays, the VT levels -- are still the ones the record
+		 * names, and whether the plugins and the load order stayed put. */
+		if ( inc.incremental && inc.rawCache ) {
+			QStringList prodReasons;
+			lodgenIncrementalCheckProducts( inc, world, &prodReasons );
+			censusOut( QString( "incremental: %1 region product check(s) failed of %2 product(s) "
+							   "listed (plugins and load order included)" )
+				.arg( inc.productsLost ).arg( inc.prev.productFiles.size() ) );
+			for ( const QString & r : prodReasons )
+				out() << r << Qt::endl;
+			out().flush();
+		}
+		/* THE NULL RUN: no chunk dirty and every product intact. Nothing is built,
+		 * nothing is written but the record, which carries every row forward. */
+		if ( inc.incremental && inc.rawCache && jobs.isEmpty() && inc.productsLost == 0 ) {
+			inc.nullRun = true;
+			if ( lodgenNativeActive() )
+				lodgenNativeEnd();
+			censusOut( QStringLiteral( "incremental: nothing moved -- no chunk, no region product, no "
+									   "plugin; no stage ran and every file was kept" ) );
+			QStringList recWarn;
+			QString recLine;
+			lodgenIncrementalWriteRecord( inc, world, gLgArgv, gLgResourceStack, &recWarn, &recLine );
+			for ( const QString & w : recWarn )
+				err() << w << Qt::endl;
+			if ( !recLine.isEmpty() )
+				out() << recLine << Qt::endl;
+			out().flush();
+			return 0;
+		}
+		/* THE PYRAMID reads the land, the land textures, the grass and the roads
+		 * -- every one of them inside some chunk's input digest -- plus the
+		 * vanilla colour fill. An incremental run with no chunk whose inputs moved
+		 * and every product intact keeps yesterday's levels. */
+		const bool vtSkip = inc.incremental && inc.rawCache && inc.movedInputs == 0
+			&& inc.unknownChunks == 0 && inc.productsLost == 0;
+		if ( vtSkip && !vtDir.isEmpty() )
+			censusOut( QStringLiteral( "vt: kept -- no chunk input moved and every VT level is intact" ) );
+		if ( !vtDir.isEmpty() && !vtSkip ) {
+			LodgenVtOptions vo = vtOpts;
+			vo.haveRegion = true;
+			for ( int r = 0; r < 4; r++ )
+				vo.region[r] = region[r];
+			if ( vtBtr != 0 && !texDir.isEmpty() ) {
+				QDir().mkpath( texDir );
+				vo.btrTexDir = texDir;
+				vo.btrDims = QVector<int>{ 4, 8, 16, 32 };
+			}
+			QString vtReport, vterr;
+			bool vtOk = false;
+			{
+				StageTimer st( &msTextures );		// the pyramid is a TEXTURE stage
+				vtOk = lodgenBakeTerrainVt( world,
+					dataRoot.isEmpty() ? QStringLiteral( "E:/Tools/Fallout 4/DataUnpacked/Data" ) : dataRoot,
+					vtDir, vo, bakeCaches, &vtReport, &vterr );
+			}
+			if ( !vtOk ) {
+				err() << "error: " << vterr << Qt::endl;
+				return 1;
+			}
+			censusOut( vtReport );
+			out().flush();
 		}
 
 		/* ===== THE .BTO SCRATCH FOLDER (lane BTOFREE1, 2026-09-16) =========
@@ -4182,11 +4249,17 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 		 * incremental run skips. The hooks live in lodgenchunkpass.cpp. */
 		lodgenIncrementalArmCache( inc, world.worldspaceEdid(), pass );
 
+		/* every retired chunk's raw .BTO path ("" = built none), for the raw cache */
+		QHash<QString, QString> retiredBto;
 		{
 			QString passErr;
 			const bool passOk = lodgenRunChunkPass( jobs, pass,
 				[&]( const LodgenChunkOutcome & r ) {
 					lodgenIncrementalNoteRetired( inc, pass, r );
+					if ( !r.btoBuilt )
+						retiredBto.insert( lodgenIncrementalChunkKey( inc, r.dim, r.cx, r.cy ), QString() );
+					else if ( r.btoSaved )
+						retiredBto.insert( lodgenIncrementalChunkKey( inc, r.dim, r.cx, r.cy ), r.btoPath );
 					if ( pass.wantBtr ) {
 						if ( !r.btrBuilt ) {
 							if ( r.btrNoLand )
@@ -4229,6 +4302,34 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 			}
 			out() << "chunk pass: " << lodgenLastPassJobs() << " job(s) over "
 				  << lodgenLastPassWorkers() << " worker(s)" << Qt::endl;
+			out().flush();
+		}
+		/* THE RAW CHUNK CACHE (lane INCR2): keep this run's chunks as the pass
+		 * wrote them, then put the clean ones back beside them so every region
+		 * pass below reads the whole list in job order. The pass has returned, so
+		 * every file is flushed; no post-pass has touched one yet. */
+		if ( inc.rawCache ) {
+			QString rawErr;
+			if ( !lodgenIncrementalStoreRaw( inc, world.worldspaceEdid(), retiredBto, &rawErr ) ) {
+				err() << "error: " << rawErr << Qt::endl;
+				return 1;
+			}
+			/* WW_LODGEN_INCR_NO_RESTORE=1 is the REFUTER: the region passes see only
+			 * the rebaked chunks, as they would have if the refusal were simply
+			 * lifted. The gate must go red on it. */
+			if ( inc.incremental && qEnvironmentVariableIntValue( "WW_LODGEN_INCR_NO_RESTORE" ) == 1 ) {
+				out() << "raw chunk cache: RESTORE SKIPPED (WW_LODGEN_INCR_NO_RESTORE, a refuter)" << Qt::endl;
+			} else {
+				const QString btoDir = btoScratch.isEmpty() ? outDir : btoScratch;
+				if ( !lodgenIncrementalRestoreRaw( inc, world.worldspaceEdid(), btoDir, retiredBto,
+						&writtenBto, &rawErr ) ) {
+					err() << "error: " << rawErr << Qt::endl;
+					return 1;
+				}
+			}
+			censusOut( QString( "raw chunk cache: %1 chunk(s) stored, %2 restored, %3 .BTO in the "
+							   "region passes" ).arg( inc.rawStored.size() ).arg( inc.rawRestored )
+				.arg( writtenBto.size() ) );
 			out().flush();
 		}
 
@@ -4507,7 +4608,8 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 		{
 			QStringList recWarn;
 			QString recLine;
-			lodgenIncrementalWriteRecord( inc, world, gLgArgv, gLgResourceStack, &recWarn, &recLine );
+			if ( lodgenIncrementalWriteRecord( inc, world, gLgArgv, gLgResourceStack, &recWarn, &recLine ) )
+				lodgenIncrementalSealRaw( inc, world.worldspaceEdid() );
 			for ( const QString & w : recWarn )
 				err() << w << Qt::endl;
 			if ( !recLine.isEmpty() )
