@@ -175,7 +175,7 @@ one exe are deterministic.
   override; the TAB literals are now escapes; flat_confine.py and flat_pics.py.
 - cde019eb: faithfulness per kind (the loose sample for decals), the confinement can-fail run, the override pair
   gate, the oblique shot script.
-- (last) DONE.md sections 5-8, DELIVERABLE_TEXT.md.
+- 60214db0: DONE.md sections 5-8, DELIVERABLE_TEXT.md (this line added in the commit after it).
 
 ## 6. Gates, with numbers
 All bakes are the Boston box -8 -12 3 -1, run from a copy of the exe under the session scratch
