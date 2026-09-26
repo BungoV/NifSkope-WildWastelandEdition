@@ -113,6 +113,14 @@ constexpr quint32 LODO_MAGIC = 0x4F444F4CU;
  *  moves). v5 and v4 are READ as v6 with no variant rows: their last base word
  *  is taken as 0 whatever it holds, so no old byte is ever reinterpreted. */
 constexpr quint32 LODO_VERSION = 6;
+/*! v7 (lane NEAR1, 2026-09-26): the NEAR library, written ONLY when the header
+ *  carries LODO_FLAG_NEAR -- a far-field file never does, so it stays the v6 file
+ *  it was, byte for byte. v7 is the v6 layout plus two meanings: the NEAR flag
+ *  (every mesh is a base's FULL-DETAIL model, one level, no MNAM slots past 0)
+ *  and the material row's `features` byte (LodoMaterialFeatures), which is the
+ *  v6 row's reserved byte and must be 0 below v7. A v7 file without the flag, or
+ *  a NEAR flag on any other version, is refused. */
+constexpr quint32 LODO_VERSION_NEAR = 7;
 //! v5: the layout with the colour stream and no variant rows (read as v6 without swaps).
 constexpr quint32 LODO_VERSION_NO_SWAP = 5;
 //! The earliest version this reader accepts: v5's layout with no colour stream.
@@ -138,10 +146,15 @@ enum LodoHeaderFlags
 	 *  is the root marker, the sphere and the cone are still written, and
 	 *  `levelMax` is 0. A consumer then selects full detail everywhere, which
 	 *  is what v2 did. The output NAMES its serving arm (CONSTITUTION 10). */
-	LODO_FLAG_LADDER = 8
+	LODO_FLAG_LADDER = 8,
+	/*! v7 (lane NEAR1): a NEAR library -- full-detail models of the placements
+	 *  the engine draws up close, not LOD models; set exactly when version is 7.
+	 *  `arraySet`/`layer` of a material then index the near texture sidecar
+	 *  (`<ws>.near.textures.txt`), not the far arrays. */
+	LODO_FLAG_NEAR = 16
 };
 constexpr quint32 LODO_FLAGS_KNOWN = LODO_FLAG_VERTEX_V1 | LODO_FLAG_PARTIAL | LODO_FLAG_CACHE_ORDER
-	| LODO_FLAG_LADDER;
+	| LODO_FLAG_LADDER | LODO_FLAG_NEAR;
 
 constexpr quint16 LODO_CLUSTER_MAX_TRIS = 16;
 constexpr quint16 LODO_CLUSTER_MAX_VERTS = 48;
@@ -233,6 +246,18 @@ constexpr quint32 LODO_NO_PARENT = 0xFFFFFFFFU;
 enum LodoMeshFlags { LODO_MESH_ANY_ALPHA = 1, LODO_MESH_ANY_SWAY = 2, LODO_MESH_WATERTIGHT = 4,
 	LODO_MESH_VERTEX_COLOUR = 8, LODO_MESH_VERTEX_ALPHA = 16 };
 enum LodoMaterialFlags { LODO_MAT_TWO_SIDED = 1, LODO_MAT_EMITS = 2, LODO_MAT_TREE = 4 };
+/*! v7 (lane NEAR1): the material row's `features` byte, NEAR libraries only. The
+ *  draw BUCKET is derived, never stored twice: (family, alphaThreshold != 0,
+ *  LODO_MAT_TWO_SIDED, LODO_MAT_FEAT_PARALLAX). Bits 5..7 are refused. */
+enum LodoMaterialFeatures
+{
+	LODO_MAT_FEAT_PARALLAX = 1,         //!< SLSF2 Multi_Layer_Parallax
+	LODO_MAT_FEAT_ENV_MAP = 2,          //!< environment (cube) mapping
+	LODO_MAT_FEAT_GREYSCALE = 4,        //!< greyscale-to-palette colour
+	LODO_MAT_FEAT_VERTEX_COLOUR = 8,    //!< a colour stream the shader reads (the v5 rule)
+	LODO_MAT_FEAT_MODEL_SPACE_NORMALS = 16
+};
+constexpr quint8 LODO_MAT_FEATURES_KNOWN = 0x1F;
 //! v6 (lane SWAP1): LODO_BASE_SWAPPED -- the row is a material-swap variant; set exactly when `materialSwap` != 0.
 enum LodoBaseFlags { LODO_BASE_TREE = 1, LODO_BASE_ANY_ALPHA = 2, LODO_BASE_ANY_MESH = 4, LODO_BASE_SWAPPED = 8 };
 enum LodoFamily { LODO_FAMILY_LEGACY = 0, LODO_FAMILY_PBR = 1 };
@@ -331,7 +356,7 @@ struct LodoMaterial
 	quint8 family;          //!< LodoFamily
 	quint8 alphaThreshold;  //!< 0 = opaque
 	quint8 flags;           //!< LodoMaterialFlags
-	quint8 reserved;
+	quint8 features;        //!< v7 NEAR only (LodoMaterialFeatures); the v6 reserved byte, 0 below v7
 	float emissiveScale;
 	quint32 lodmStringOffset;   //!< into the string blob
 };

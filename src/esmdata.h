@@ -89,6 +89,11 @@ struct EsmLodBase
 	bool hasLod = false;
 	QString edid;               //!< EDID, for the cell view's pick panel
 	quint32 materialSwap = 0;   //!< lane SWAP1: MODS, the base's default material swap (MSWP), 0 = none
+	/* Lane NEAR1 (2026-09-26): the record header's flag word (STAT bit 23 = Is
+	 * Marker, 0x00800000) and whether the record carries destructible data
+	 * (a DEST or DSTD subrecord). Read-only facts for the near-library bake. */
+	quint32 recordFlags = 0;
+	bool hasDestructible = false;
 	// tree wind knobs (TREE CNAM / STAT DNAM), for the chunk manifest
 	float trunkFlexibility = 0.0f;
 	float branchFlexibility = 0.0f;

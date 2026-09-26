@@ -1,4 +1,12 @@
-# `.lodo` v6 (v4..v6) + `.lodi` v7 (v3..v10) — the FO4CS-native far field
+# `.lodo` v6 (v4..v7) + `.lodi` v7 (v3..v11) — the FO4CS-native far field (and the v7/v11 near library)
+
+> **NEAR LIBRARY (lane NEAR1, 2026-09-26).** `lodgen --near-library <dir>` writes
+> `<ws>.near.lodo` at **version 7** (§3.9: header flag `NEAR` 16 + the material
+> row's `features` byte) and `<ws>.near.lodi` on the v7 layout, at **version 11**
+> when a placement is Initially Disabled (§4.15: instance flag bit 8), else 9 or 7.
+> **No far-field file ever carries either:** a far bake is byte-identical to the
+> one before NEAR1, version word included (gate G4, 130 of 130 files). The readers
+> accept `.lodo` 4..7 and `.lodi` 3..11.
 
 > **VERSIONS TODAY (re-read 2026-09-23 against `src/lodofile.h`,
 > `src/lodifile.h`, `src/nifcli.cpp`; `.lodo` re-read 2026-09-25, lanes SEAM1 and SWAP1).**
@@ -204,7 +212,7 @@ a refusal that names the instance, the ref and the two numbers.
 |---|---|---|
 | 0x00 | char[4] | magic `LODO` |
 | 0x04 | u32 | **version = 4** (versions 1, 2 and 3 are refused by name — v3 by §3.7) |
-| 0x08 | u32 | flags — **bit0 must be 1** (vertex layout v1, stride 16); bit1 `PARTIAL`; bit2 `CACHE_ORDER` (§3.3); **bit3 `LADDER` (v3)**; all others reserved 0 |
+| 0x08 | u32 | flags — **bit0 must be 1** (vertex layout v1, stride 16); bit1 `PARTIAL`; bit2 `CACHE_ORDER` (§3.3); **bit3 `LADDER` (v3)**; **bit4 `NEAR` (v7, §3.9: set exactly when the version is 7)**; all others reserved 0 |
 | 0x0C | u32 | `headerCrc32`, over 0x10…0xFF |
 | 0x10 | u64 | `pluginCorpusHash` — the terrain writers' hash, carried for the object/terrain/plugin triple |
 | 0x18 | u64 | `objectCorpusHash` — see §8 |
@@ -305,8 +313,8 @@ path does not branch on level at all.
 **Material entry — 16 B:** `u8 arrayClass` (0 = 256², 1 = 128²), `u8 arraySet`,
 `u16 layer` (**< 2048**, or 0xFFFF = no array layer assigned), `u8 family`
 (0 legacy / 1 pbr), `u8 alphaThreshold` (0 = opaque; vanilla writes 128),
-`u8 flags` (twoSided / emits / tree), `u8 reserved`, `f32 emissiveScale`,
-`u32 lodmStringOffset`.
+`u8 flags` (twoSided / emits / tree), `u8 reserved` (**v7: `features`**, §3.9;
+zero below v7), `f32 emissiveScale`, `u32 lodmStringOffset`.
 
 **Base entry — 32 B:** `u32 formId`, `u32 modelStringOffset`, `u16 rep[4]` (per
 MNAM slot 0–3: a mesh index, or **0xFFFF**), `u16 cardLayer` (**low 11 bits the
@@ -736,6 +744,71 @@ reader refuses a v6 file by version. Once it accepts 6, a variant row draws like
 any base row (its `rep` names the swapped mesh); only a lookup BY formId must
 learn that one formId can now own several rows, the plain one first.
 
+### 3.9 Version 7: the NEAR library (lane NEAR1, 2026-09-26)
+
+**What.** `lodgen <plugins|--mo2-profile P> --worldspace HEX [--terrain-region x0 y0
+x1 y1] --near-library <dir>` bakes the FULL-DETAIL models (the base's own `MODL`,
+never an MNAM LOD model) of the static placements the engine draws up close into
+`<dir>/<ws>.near.lodo` + `.near.lodi`, plus three text sidecars. It is a separate
+path (`src/nearlib.cpp`); the far writer is not entered.
+
+**The layout is v6's.** Version 7 adds two meanings and no byte:
+
+| where | v7 meaning |
+|---|---|
+| header 0x08 bit4 `LODO_FLAG_NEAR` (16) | this is a near library: every mesh is a base's full model, one level (`levelCount` 1, no ladder), `rep[1..3]` 0xFFFF. **Set exactly when the version is 7**; a v7 file without it, or the flag on any other version, is refused |
+| material row +7 (`u8`, v6 `reserved`) `features` | bit0 `PARALLAX` (SLSF2 Multi_Layer_Parallax), bit1 `ENV_MAP`, bit2 `GREYSCALE` (greyscale to palette), bit3 `VERTEX_COLOUR`, bit4 `MODEL_SPACE_NORMALS`; **bits 5..7 refused**; non-zero below v7 refused |
+| material `arraySet` / `layer` | on a NEAR file they index the DIFFUSE set of `<ws>.near.textures.txt`, not the far arrays |
+
+The draw BUCKET is derived, never stored twice: (family, `alphaThreshold` != 0,
+`TWO_SIDED`, `PARALLAX`) -- opaque, alpha-test, two-sided, alpha-test-two-sided,
+parallax; legacy vs PBR is `family`.
+
+**Clusters.** The far code's clusters are reused as they are: **at most 16
+triangles and 48 vertices** each, with the §3.6 bounding sphere and normal cone.
+The campaign brief's "~128 triangles" is NOT what this rung writes; a bigger
+cluster is a later rung's call.
+
+**Eligibility** (per REFR, the first failing rule is its census reason): deleted;
+no base; a type other than STAT or SCOL (`type:DOOR`, `type:FURN`, `type:ACTI`,
+`type:CONT`, `type:LIGH`, `type:MSTT`, trees ...); STAT Is Marker; DEST/DSTD; no
+MODL; SCOL with no parts. Per placement (a STAT, or each SCOL part placement, the
+part judged as a STAT with `part-` reasons): `model-missing` (not in the stack),
+`no-geometry` (in the stack, no BSTriShape with vertices and triangles),
+`animated` (any NiTimeController / NiSequence block), `no-drawable-shape`,
+`scale-out-of-range` (> 15.99988, §4.14). A SCOL REFR with no eligible placement is
+`scol-no-eligible-part`. **Shapes** excluded: `effect` (BSEffectShaderProperty /
+BGEM), `alpha-blend`, `decal` (SLSF1 bits 26/27 or BGSM), `tree-anim` (SLSF2 bit 29
+or BGSM bTree); EditorMarker subtrees are skipped as the far loader does. A
+**BSMeshLODTriShape** keeps its first `LOD0 Size` triangles and only the vertices
+they use (measured: every such shape in Boston stores LOD1+LOD2 after LOD0).
+
+**Material key** = (base, effective material swap), the SWAP1 rule (§3.8): a swap
+that renames a material of the model gets a variant base row.
+
+**Sidecars** (text, beside the pair):
+* `<ws>.near.textures.txt` -- `set <id> dxgi <code> w <px> h <px> part <n> layers
+  <count>` lines, then each material's slots with their own (format, size) bucket.
+  A LIST: nothing is re-encoded. The array layer reaches the shader through UV2.y
+  as in the far field.
+* `<ws>.near.shapes.txt` (v2) -- one row per source shape: mesh, path, variant,
+  block, name, verts, tris, lod0, model-space box, `kept` or the reason, material,
+  meshId, srcTris. verts/tris/box are what is DRAWN (after the LOD0 trim).
+* `<ws>.near.refs.txt` -- `R ref type eligible|reason` per REFR read and `P ref part
+  base swap baseRow|- eligible|reason disabled` per placement.
+
+**Gates** (`tests/spells/near_library_check.py`, independent Python ESM + NIF +
+BGSM reading; `tests/spells/near_format_selftest.py` for the refusals; the far
+byte identity with the rung exe): G1 every eligible REFR in the `.lodi` exactly
+once with its form id, the eligible count equal to the Python count; G2 per shape
+tris + verts + box equal to the source NIF; G3 the census sums. Whole Commonwealth
+(his MO2 stack, 2026-09-26): 736,214 REFRs read, 523,755 eligible, 677,390
+placements, 38,622 (mesh, material) pairs, 12,160,169 triangles, 777,824 clusters;
+`.lodo` 382,058,580 B, `.lodi` 26,549,276 B; 178 s.
+
+**The FO4CS reader is owed** (standing order). A v6 reader refuses a v7 file by
+version, which is the right answer: a near library is not a far field.
+
 
 ---
 
@@ -827,7 +900,7 @@ against `zMin`/`zExtent` alone would pop it.
 | 0x11 | 1 | `sky` | u8, sky visibility |
 | 0x12 | 1 | `ground` | u8 ground-contact blend over the 256-unit ramp |
 | 0x13 | 1 | `seed` | u8 = `treeHash & 0xFF` (0 for a non-tree): sway phase / jitter only, **not** the yaw — see §4.3 |
-| 0x14 | 2 | `flags` | u16: bit0 mirrored, bit1 force-card (§4.13: the base has a card and the ring slot has no mesh, or a `C` line put it on its card), bit2 alpha-tested, bit3 emits, bit4 SCOL part, bit5 buried-cull candidate, **bit6 workshop-scrappable (version 9 only, §4.12: set in a file below version 9 it is refused by name)**; **bit7 wide scale (version 10 only, §4.14: set by the writer alone, refused by name below version 10)**; **bits 8–15 reserved, and a set reserved bit is a refusal** (`LODI_INST_FLAGS_KNOWN` = 0xFF) |
+| 0x14 | 2 | `flags` | u16: bit0 mirrored, bit1 force-card (§4.13: the base has a card and the ring slot has no mesh, or a `C` line put it on its card), bit2 alpha-tested, bit3 emits, bit4 SCOL part, bit5 buried-cull candidate, **bit6 workshop-scrappable (version 9 only, §4.12: set in a file below version 9 it is refused by name)**; **bit7 wide scale (version 10 only, §4.14: set by the writer alone, refused by name below version 10)**; **bit8 initially disabled (version 11 only, §4.15: the near library alone)**; **bits 9–15 reserved, and a set reserved bit is a refusal** (`LODI_INST_FLAGS_KNOWN` = 0x1FF) |
 | 0x16 | 2 | `drawKey` (v2) | the base's (primary mesh, that mesh's first material) rank, §2.1 |
 
 **Cold record — 8 B, parallel to the instance blob:** `u32 refFormId`,
@@ -1773,6 +1846,21 @@ same decode** (version 10 accepted, bit 7 = +8).
 **Census**, on its own `native-wide-scale:` prefix: placements above the line,
 of the total, the max scale and the `.lodi` version written.
 
+### 4.15 The Initially-Disabled bit (`.lodi` v11, lane NEAR1, 2026-09-26)
+
+Instance flag **bit 8, `LODI_INST_INITIALLY_DISABLED` (0x100)**: the placement's
+REFR carries record flag 0x800, so the engine does not draw it until a script
+enables it, and a consumer keeps it hidden until told otherwise. Like v9 and v10
+there is no table and no header word: **v11 is the v10 layout plus bit 8**, and
+the version rises to 11 **only when an instance carries the bit** (the Sanctuary
+test region has none and wrote 9). The far field drops initially-disabled
+references before the writer, so **no far file can carry it**; only the near
+library keeps them (50 on the whole Commonwealth). v11 implies v7's 512-byte header
+block, so a `--lodi-v6` set carrying the bit is refused (dropping it would draw a
+hidden object). Readers: bit 8 below version 11 is refused by name
+(`tests/spells/near_format_selftest.py` relabels a v11 file 10 and requires it).
+**The FO4CS reader owes the same** (version 11 accepted, bit 8 = hidden).
+
 ### 4.13 The card link (lane CARDLINK1, 2026-09-24) -- `cardLayer`, `cardCount`, `cardCorpusHash`, FORCE_CARD
 
 **Status: the `cardCorpusHash` definition below is PROPOSED (R19).** bungo has
@@ -1861,8 +1949,8 @@ first time any mod is installed or removed after a bake.
 |---|---|---|---|
 | **hard: both files** | magic, **version (see the per-file rows)**, `vertexStride`, `instanceStride`, **`groupStride` (v7), a group id that is not dense per chunk, a `groupCount` that disagrees with the chunks' sum, a sky slice whose length disagrees with the same placement's AO slice, a version-3…6 file carrying version-7 header words,** `clusterMaxTris`, **`clusterLodStride`**, **`occluderStride`**, a set reserved bit, `ROW_ORDER_NORTH_UP` clear, `chunkCount` over cap, a zero `lodoIdentity` without `NOLIB`, **a `scale` of 0**, **a `drawKey` out of order or not the base's rank**, **a cluster whose `geometricError` exceeds its `parentError`**, **a `CONE_OPEN` cluster carrying a cone (or the reverse)**, **an occluder naming an instance outside its own cell**, any CRC mismatch | refuse, name the field | **refuse to load, and never hide the engine's own LOD tree** |
 | **hard: pairing** (between the two files) | the two files name different worldspaces; `pluginCorpusHash` or `objectCorpusHash` differs **between the `.lodo` and the `.lodi`**; `loadOrderHash` differs **between the two files** (§4 row 0x90); `lodoIdentity` does not name this `.lodo` (unless `NOLIB`) — `src/nativeemit.cpp`, every `pairing:` refusal | refuse, name the field | **refuse to load, and never hide the engine's own LOD tree** |
-| **hard: `.lodo`** (`lodoRead`) | versions **1, 2 and 3 refused by name**, anything but 4, 5 or 6; (v6) the base table not sorted by `(formId, materialSwap)` strictly, the SWAPPED flag disagreeing with `materialSwap`, a variant row with no plain row of its base before it (§3.8); the `LADDER` flag disagreeing with `ladderGroup` / `levelMax`, `levelMax` > 15; `cardCount` > `baseCount`; `cardCount` not equal to the base rows naming a card layer, or rows naming one while `cardCorpusHash` is 0 (CARDLINK1, §4.13); a base's `fullTriangles` that its own meshes do not recount to, or non-zero on a base with no mesh; mesh flags beyond ALPHA / SWAY / WATERTIGHT (plus VERTEX_COLOUR / VERTEX_ALPHA on v5); VERTEX_ALPHA without VERTEX_COLOUR; `colourVertexCount` and `offColours` not both zero or both set, a count over `vertexCount`, a flagged mesh whose vertices are not one contiguous range, or flagged rows that do not add up to the count (v5); reserved header bytes 0xCE…0xCF and 0xD4…0xFF (0xE0…0xFF on v5) | refuse, name the field | as above |
-| **hard: `.lodi`** (`lodiRead`) | versions **1 and 2 refused by name**, anything outside 3…10; a version whose defining table is missing (v5 without the placement-AO blob, v6 without the vertex-AO blob, v7/v9 with neither group table nor sky stream, v8 without the horizon stream); a file carrying a LATER version's header words (v3/v4 with placement-AO words, v3–v6 with v7 words at 0x100/0x110, v7/v9 with v8 words at 0x11C); reserved header bytes by version (from 0xB0 on v3, 0xD4 on v4, 0xF1…0xFF on v5, 0xF1…0xF3 on v6 and later, plus 0x11C…0x1FF on v7/v9, 0x130…0x1FF on v8); instance flag bit 6 below v9 (§4.1); instance flag bit 7 below v10 (§4.14); a stored cell outside the quantisation band (§4.1, `lodiCellAgrees`); the vertex-AO, sky and horizon offset tables and their slice lengths; the aggregate rows and their covered list (§4.6) | refuse, name the field | as above |
+| **hard: `.lodo`** (`lodoRead`) | versions **1, 2 and 3 refused by name**, anything but 4, 5, 6 or 7; (v7) the `NEAR` flag without version 7 or version 7 without it, a material `features` byte with bits 5..7 set, or non-zero below v7 (§3.9); (v6) the base table not sorted by `(formId, materialSwap)` strictly, the SWAPPED flag disagreeing with `materialSwap`, a variant row with no plain row of its base before it (§3.8); the `LADDER` flag disagreeing with `ladderGroup` / `levelMax`, `levelMax` > 15; `cardCount` > `baseCount`; `cardCount` not equal to the base rows naming a card layer, or rows naming one while `cardCorpusHash` is 0 (CARDLINK1, §4.13); a base's `fullTriangles` that its own meshes do not recount to, or non-zero on a base with no mesh; mesh flags beyond ALPHA / SWAY / WATERTIGHT (plus VERTEX_COLOUR / VERTEX_ALPHA on v5); VERTEX_ALPHA without VERTEX_COLOUR; `colourVertexCount` and `offColours` not both zero or both set, a count over `vertexCount`, a flagged mesh whose vertices are not one contiguous range, or flagged rows that do not add up to the count (v5); reserved header bytes 0xCE…0xCF and 0xD4…0xFF (0xE0…0xFF on v5) | refuse, name the field | as above |
+| **hard: `.lodi`** (`lodiRead`) | versions **1 and 2 refused by name**, anything outside 3…11; a version whose defining table is missing (v5 without the placement-AO blob, v6 without the vertex-AO blob, v7/v9 with neither group table nor sky stream, v8 without the horizon stream); a file carrying a LATER version's header words (v3/v4 with placement-AO words, v3–v6 with v7 words at 0x100/0x110, v7/v9 with v8 words at 0x11C); reserved header bytes by version (from 0xB0 on v3, 0xD4 on v4, 0xF1…0xFF on v5, 0xF1…0xF3 on v6 and later, plus 0x11C…0x1FF on v7/v9, 0x130…0x1FF on v8); instance flag bit 6 below v9 (§4.1); instance flag bit 7 below v10 (§4.14); instance flag bit 8 below v11 (§4.15); a stored cell outside the quantisation band (§4.1, `lodiCellAgrees`); the vertex-AO, sky and horizon offset tables and their slice lengths; the aggregate rows and their covered list (§4.6) | refuse, name the field | as above |
 | **soft** (against the user's LIVE data only) | `pluginCorpusHash`, `objectCorpusHash`, `modelCorpusHash`, `cardCorpusHash`, **`loadOrderHash`** recomputed from the running load order and disagreeing with the file — a mod installed, removed or reordered since the bake | refuse, name the field and the plugin | **load anyway, log it, raise a `stale=1` census row, keep rendering** |
 
 **The rows above are the classes, not every check.** `lodoRead` and `lodiRead` are

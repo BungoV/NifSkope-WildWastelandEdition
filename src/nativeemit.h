@@ -35,6 +35,38 @@ class EsmWorld;
  *  begin) every call is a no-op and the stock bake is untouched -- the
  *  standing gate of every native lane. */
 
+/*! Lane NEAR1 (2026-09-26): what the near-library bake needs to know about one
+ *  source shape and the model around it, beyond what the far field reads. READ-
+ *  ONLY facts: set by lodgenLoadModel, copied by the native loader, read by
+ *  src/nearlib.cpp alone -- materialKey()/shapeEmits() and every far pass never
+ *  look at them, so no far-field byte can move. Each fact is the BGSM's when
+ *  the shape names one that reads, OR'd with the NIF property's own bit (the
+ *  census would rather over-exclude a blend than draw one opaque). */
+struct NearShapeFacts
+{
+	int block = -1;                 //!< the BSTriShape's block number in the NIF
+	QString name;                   //!< its Name
+	bool effectShader = false;      //!< BSEffectShaderProperty (a BGEM or its own effect fields)
+	bool alphaBlend = false;        //!< NiAlphaProperty flags bit 0, or BGSM bAlphaBlend
+	bool alphaTest = false;         //!< NiAlphaProperty flags bit 9, or BGSM bAlphaTest
+	quint8 alphaRef = 128;          //!< the test's cutoff: BGSM ref when it tests, else the property's own
+	bool decal = false;             //!< BGSM bDecal, or SLSF1 Decal (26) / Dynamic_Decal (27)
+	bool treeAnim = false;          //!< SLSF2 Tree_Anim (29), or BGSM bTree
+	bool twoSided = false;          //!< SLSF2 Double_Sided (4), or BGSM bTwoSided
+	bool parallax = false;          //!< SLSF2 Multi_Layer_Parallax (24); FO4 BGSM carries no parallax switch
+	bool envMap = false;            //!< SLSF1 Environment_Mapping (7), or BGSM bEnvironmentMapping
+	bool greyscale = false;         //!< SLSF1 GreyscaleToPalette_Color (4), or BGSM bGrayscaleToPaletteColor
+	bool modelSpaceNormals = false; //!< SLSF1 Model_Space_Normals (12), or BGSM bModelSpaceNormals
+	bool vertexColour = false;      //!< a colour stream AND SLSF2 Vertex_Colors, the `.lodo` v5 rule
+	bool pbr = false;               //!< BGSM bPBR
+	bool bgsmRead = false;          //!< a BGSM was named and parsed
+	quint32 sourceTris = 0;         //!< the Triangles array as stored
+	quint32 lod0Tris = 0;           //!< BSMeshLODTriShape LOD0 Size, 0 on any other shape
+	bool modelAnimated = false;     //!< the MODEL carries a NiTimeController or NiSequence block
+	int modelControllers = 0;       //!< how many
+	QStringList textures;           //!< every texture the material names, slot order, empty slots kept as ""
+};
+
 //! One shape of a LOD model, as the loader hands it over: geometry plus the material facts.
 struct NativeSrcShape
 {
@@ -54,6 +86,7 @@ struct NativeSrcShape
 	float emitColor[3] = { 0.0f, 0.0f, 0.0f };
 	float emitMult = 1.0f;
 	float smoothness = 1.0f, specMult = 1.0f;
+	NearShapeFacts nearFacts;   //!< lane NEAR1: read by src/nearlib.cpp only
 };
 
 //! The loader the emitter uses for every model of the census (lodgen.cpp's

@@ -560,8 +560,11 @@ const EsmLodBase & EsmWorld::lodBase( quint32 baseFormID ) const
 	const ESMFile::ESMRecord * br = esm->findRecord( baseFormID );
 	if ( br && br->type != GRUP ) {
 		b.type = br->type;
+		b.recordFlags = br->flags;
 		ESMFile::ESMField f( *esm, *br );
 		while ( f.next() ) {
+			if ( f == "DEST" || f == "DSTD" )
+				b.hasDestructible = true;   // lane NEAR1: read-only, nothing else consults it
 			if ( f == "MNAM" && *br == "STAT" ) {
 				/* STAT MNAM: 4 x 260-byte entries, each a zero-terminated
 				 * mesh path followed by junk (wbDefinitionsFO4). */

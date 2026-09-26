@@ -57,6 +57,10 @@ public:
 	bool hasAlphaBlend() const { return (bAlphaBlend != 0); }
 	bool hasAlphaTest() const { return (bAlphaTest != 0); }
 	bool hasDecal() const { return (bDecal != 0); }
+	//! Lane NEAR1: read-only accessors for the near-library bake's material buckets.
+	bool isTwoSided() const { return (bTwoSided != 0); }
+	bool hasEnvironmentMapping() const { return (bEnvironmentMapping != 0); }
+	bool hasGrayscaleToPaletteColor() const { return (bGrayscaleToPaletteColor != 0); }
 	const QStringList & textures() const { return textureList; }
 	bool isEffectMaterial() const { return isBGEM; }
 	bool isShaderMaterial() const { return isBGSM; }

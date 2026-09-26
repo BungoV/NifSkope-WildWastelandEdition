@@ -800,6 +800,24 @@ QString lodgenMaterialSwapKey( const QString & material );
 bool lodgenNativeLoadModelSwapped( void * user, const QString & model, const LodgenMaterialSubst & swap,
 	std::vector<NativeSrcShape> * out );
 
+/*! Lane NEAR1 (2026-09-26): the same load, swap optional, with NO cache -- the
+ *  parse is dropped on return. The near-library bake visits every full-detail
+ *  model of a worldspace and must not hold them all. */
+bool lodgenNativeLoadModelOnce( void * user, const QString & model, const LodgenMaterialSubst * swap,
+	std::vector<NativeSrcShape> * out );
+
+/*! Lane NEAR1 (2026-09-26): a texture's format and size WITHOUT decoding it, for
+ *  the near library's texture-array sidecar. A BA2 texture record carries the
+ *  DXGI code, width, height and mip count in its own index entry, so no chunk is
+ *  read; a loose file gives its 148-byte header. Anything else (the game
+ *  manager's archives, a legacy DDS) reads the file through lodgenReadAsset and
+ *  parses its header. `dxgi` is the DXGI_FORMAT code (a legacy FourCC is mapped:
+ *  DXT1 71, DXT3 74, DXT5 77, ATI1/BC4U 80, ATI2/BC5U 83; uncompressed 32-bit
+ *  87 for BGRA, 28 for RGBA). `source` says which route answered: "ba2",
+ *  "loose" or "read". False when nothing supplies the file. */
+bool lodgenTextureInfo( const QString & dataRoot, const QString & texPath, quint32 * dxgi, quint32 * width,
+	quint32 * height, quint32 * mips, QString * source = nullptr );
+
 /*! A model's world extent, for the impostor baker's size ladder.
  *
  *  `halfW` is the largest radius about the vertical axis through the model's

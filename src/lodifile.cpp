@@ -804,6 +804,22 @@ bool lodiWrite( const QString & path, const LodiSrcSet & set, LodiHeader * heade
 				.arg( LODI_VERSION_WIDE_SCALE ).arg( h.version ) );
 		h.version = LODI_VERSION_WIDE_SCALE;
 	}
+	/* v11, THE INITIALLY-DISABLED BIT (lane NEAR1, 2026-09-26): bit 8 and the
+	 * version word, nothing else. It rises ONLY when an instance carries the bit,
+	 * so every file that carries none -- every far-field file -- is the v7/v9/v10
+	 * file it was, byte for byte. Like v10 it needs v7's header block, and a
+	 * pre-v7 set carrying it is refused rather than dropped. */
+	quint32 disabledWritten = 0;
+	for ( const LodiInstance & r : inst )
+		if ( r.flags & LODI_INST_INITIALLY_DISABLED )
+			disabledWritten++;
+	if ( disabledWritten ) {
+		if ( h.version < LODI_VERSION_GROUP_SKY )
+			return fail( QString( "%1 instance(s) carry the initially-disabled bit, which needs version %2 (the v7 "
+				"header block); this set asked for a version-%3 file. Refused, not dropped" )
+				.arg( disabledWritten ).arg( LODI_VERSION_INITIALLY_DISABLED ).arg( h.version ) );
+		h.version = LODI_VERSION_INITIALLY_DISABLED;
+	}
 	const quint32 headerBytes = lodiHeaderBytes( h.version );
 	QByteArray file;
 	file.resize( qsizetype( headerBytes ) );
@@ -1008,7 +1024,8 @@ bool lodiRead( const QString & path, LodiHeader * header, LodiTable * table,
 	if ( h.version != LODI_VERSION && h.version != LODI_VERSION_AGGREGATE
 		&& h.version != LODI_VERSION_PLACEMENT_AO && h.version != LODI_VERSION_VERTEX_AO
 		&& h.version != LODI_VERSION_GROUP_SKY && h.version != LODI_VERSION_HORIZON
-		&& h.version != LODI_VERSION_SCRAPPABLE && h.version != LODI_VERSION_WIDE_SCALE )
+		&& h.version != LODI_VERSION_SCRAPPABLE && h.version != LODI_VERSION_WIDE_SCALE
+		&& h.version != LODI_VERSION_INITIALLY_DISABLED )
 		return refuse( QString( "version %1; this reader knows %2, %3, %4, %5, %6, %7, %8 and %9" )
 			.arg( h.version ).arg( LODI_VERSION ).arg( LODI_VERSION_AGGREGATE )
 			.arg( LODI_VERSION_PLACEMENT_AO ).arg( LODI_VERSION_VERTEX_AO )
@@ -1087,7 +1104,8 @@ bool lodiRead( const QString & path, LodiHeader * header, LodiTable * table,
 	 * the scrappable flag bit and carries no stream, so it is v7-shaped here. */
 	const bool v8 = ( h.version == LODI_VERSION_HORIZON );
 	const bool v7 = ( h.version == LODI_VERSION_GROUP_SKY ) || v8
-		|| ( h.version == LODI_VERSION_SCRAPPABLE ) || ( h.version == LODI_VERSION_WIDE_SCALE );
+		|| ( h.version == LODI_VERSION_SCRAPPABLE ) || ( h.version == LODI_VERSION_WIDE_SCALE )
+		|| ( h.version == LODI_VERSION_INITIALLY_DISABLED );
 	const bool v6 = ( h.version == LODI_VERSION_VERTEX_AO ) || v7;
 	const bool v5 = ( h.version == LODI_VERSION_PLACEMENT_AO ) || v6;
 	const int padFrom = v5 ? H_RESERVED_F1
@@ -1634,6 +1652,12 @@ bool lodiRead( const QString & path, LodiHeader * header, LodiTable * table,
 						"where that bit is reserved zero; version %4 is the one that means it" )
 						.arg( i ).arg( int( LODI_INST_SCALE_WIDE ), 0, 16 ).arg( h.version )
 						.arg( LODI_VERSION_WIDE_SCALE ) );
+				// v11: bit 8 is reserved zero below version 11, for the same reason
+				if ( ( r.flags & LODI_INST_INITIALLY_DISABLED ) && h.version < LODI_VERSION_INITIALLY_DISABLED )
+					return refuse( QString( "instance %1 carries the initially-disabled bit (0x%2) in a version-%3 file, "
+						"where that bit is reserved zero; version %4 is the one that means it" )
+						.arg( i ).arg( int( LODI_INST_INITIALLY_DISABLED ), 0, 16 ).arg( h.version )
+						.arg( LODI_VERSION_INITIALLY_DISABLED ) );
 				/* bungo 2026-09-11 08:0x item 3, the per-instance bound radius:
 				 * the runtime takes base.boundRadius x scale, so a zero scale
 				 * is a zero radius and the object is culled at every distance.

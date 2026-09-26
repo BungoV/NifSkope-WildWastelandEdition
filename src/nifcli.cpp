@@ -30,6 +30,7 @@ See the LICENSE.md file for the full license text.
 #include "lodgenparallel.h"
 #include "nifparsestress.h"
 #include "nativeemit.h"
+#include "nearlib.h"
 #include "lodifile.h"
 #include "lodofile.h"
 #include "lodbfile.h"
@@ -2691,6 +2692,12 @@ static void censusOut( const QString & line )
  *  in the switch-digest skip list, because it decides what is on disk. */
 static bool gLgKeepBto = false;
 
+/*! `--near-library <dir>` (lane NEAR1, 2026-09-26): the offline NEAR library
+ *  bake (src/nearlib.h) -- full-detail models of the eligible static placements
+ *  in `--terrain-region` (or the whole worldspace) into `<dir>/<ws>.near.*`.
+ *  A branch of its own: no other output of the run is written. */
+static QString gLgNearLibrary;
+
 //! `lodgen <file.esm>` — the LOD generation campaign's ESM record layer
 //! (docs/LODGEN_PLAN.md rung 0). --list-worldspaces enumerates WRLD records;
 //! --worldspace/--cell inspect one cell: LAND corner heights, REFR counts,
@@ -3679,6 +3686,29 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 					? QStringLiteral( "%1^2" ).arg( heightmapSize )
 					: QStringLiteral( "%1x%2 native" ).arg( ( mxx - mnx + 1 ) * 32 ).arg( ( mxy - mny + 1 ) * 32 ) )
 			  << " R16_UNORM" << Qt::endl;
+		return 0;
+	}
+	if ( !gLgNearLibrary.isEmpty() ) {
+		EsmWorld world;
+		QString error;
+		if ( !world.load( file, worldspace ? worldspace : 0x3CU, &error ) ) {
+			err() << "error: " << error << Qt::endl;
+			return 1;
+		}
+		NearLibraryOptions no;
+		no.outDir = gLgNearLibrary;
+		no.dataRoot = dataRoot;
+		no.haveRegion = haveRegion;
+		if ( haveRegion )
+			for ( int k = 0; k < 4; k++ )
+				no.region[k] = region[k];
+		QStringList report;
+		if ( !nearLibraryBake( world, no, &report, &error ) ) {
+			err() << "error: " << error << Qt::endl;
+			return 1;
+		}
+		for ( const QString & line : report )
+			out() << line << Qt::endl;
 		return 0;
 	}
 	if ( listCandidates && haveRegion ) {
@@ -7199,6 +7229,7 @@ int nifskopeCliMain( const QStringList & args )
 	gLgAllRings = false;
 	gLgOneRoot = false;
 	gLgKeepBto = false;
+	gLgNearLibrary.clear();
 	gLgSwitchDigest = lodgenSwitchDigestOf( a );
 	/* THE ARGUMENT VECTOR ITSELF (lane BAKEREC1, 2026-09-17). The digest above
 	 * answers "is this the same command"; the record answers "what WAS the
@@ -7737,6 +7768,7 @@ int nifskopeCliMain( const QStringList & args )
 		else if ( t == QLatin1String( "--vt-estimate" ) ) lgVtEstimate = true;
 		else if ( t == QLatin1String( "--lodm-check" ) ) lgLodmCheck = next();
 		else if ( t == QLatin1String( "--native" ) ) lgNativeDir = next();
+		else if ( t == QLatin1String( "--near-library" ) ) gLgNearLibrary = next();
 		else if ( t == QLatin1String( "--keep-bto" ) ) gLgKeepBto = true;
 		else if ( t == QLatin1String( "--native-verify" ) ) { lgNativeVerifyLodo = next(); lgNativeVerifyLodi = next(); }
 		else if ( t == QLatin1String( "--native-fixture" ) ) lgNativeFixture = next();

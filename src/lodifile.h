@@ -301,6 +301,16 @@ constexpr quint32 LODI_VERSION_SCRAPPABLE = 9;
  *  wide scale is refused (no pre-v7 version can say it). The FO4CS reader owes
  *  the same decode. */
 constexpr quint32 LODI_VERSION_WIDE_SCALE = 10;
+/*! v11 (lane NEAR1, 2026-09-26): THE INITIALLY-DISABLED BIT. Instance flag bit 8
+ *  says the placement's REFR carries the Initially Disabled record flag (0x800):
+ *  the engine does not draw it until a script enables it, so a consumer keeps it
+ *  hidden until told otherwise. Like v9 and v10 there is no table and no header
+ *  word -- the v10 layout plus bit 8 -- and the version rises ONLY when an
+ *  instance carries the bit. The far field drops initially-disabled references
+ *  before they reach the writer, so no far file can carry it; the near library
+ *  keeps them. v11 implies v7's 512-byte header block, so a pre-v7 set carrying
+ *  the bit is refused (dropping it would draw a hidden object). */
+constexpr quint32 LODI_VERSION_INITIALLY_DISABLED = 11;
 /*! WHAT A VERSION-8 FILE'S BYTES MEAN (contract s4.11). No writer in this tree
  *  produces such a file any more (see LODI_VERSION_HORIZON above) and there is
  *  no longer a switch that moves these; they stay because a reader that meets
@@ -393,9 +403,11 @@ enum LodiInstanceFlags
 	//! v9: the player can scrap this placement at a workshop (LODI_VERSION_SCRAPPABLE)
 	LODI_INST_SCRAPPABLE = 64,
 	//! v10: scale = 8 + v / 8192 (LODI_VERSION_WIDE_SCALE); set by the writer, never by a caller
-	LODI_INST_SCALE_WIDE = 128
+	LODI_INST_SCALE_WIDE = 128,
+	//! v11: the REFR is Initially Disabled (LODI_VERSION_INITIALLY_DISABLED); the near library only
+	LODI_INST_INITIALLY_DISABLED = 256
 };
-constexpr quint16 LODI_INST_FLAGS_KNOWN = 0xFF;
+constexpr quint16 LODI_INST_FLAGS_KNOWN = 0x1FF;
 
 /*! v10, the one encoder and the one decoder of the instance scale. At or below
  *  LODI_SCALE_MAX the word is `lround( s x 8192 )` clamped to u16 -- the exact

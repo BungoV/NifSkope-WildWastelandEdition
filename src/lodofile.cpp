@@ -1720,6 +1720,16 @@ bool lodoWrite( const QString & path, const LodoLibrary & lib, LodoHeader * head
 	};
 	LodoHeader h;
 	h.flags = lib.flags;
+	/* v7 (lane NEAR1): the version follows the NEAR flag and nothing else, so a
+	 * far-field library -- which never sets it -- is written as v6, unchanged. */
+	h.version = ( lib.flags & LODO_FLAG_NEAR ) ? LODO_VERSION_NEAR : LODO_VERSION;
+	for ( size_t i = 0; i < lib.materials.size(); i++ ) {
+		if ( lib.materials[i].features & ~LODO_MAT_FEATURES_KNOWN )
+			return fail( QString( "material %1: features 0x%2 set reserved bits" ).arg( i ).arg( lib.materials[i].features, 0, 16 ) );
+		if ( lib.materials[i].features && !( lib.flags & LODO_FLAG_NEAR ) )
+			return fail( QString( "material %1: features 0x%2 on a library without the NEAR flag (v7 only)" )
+				.arg( i ).arg( lib.materials[i].features, 0, 16 ) );
+	}
 	h.pluginCorpusHash = lib.pluginCorpusHash;
 	h.objectCorpusHash = lib.objectCorpusHash;
 	h.modelCorpusHash = lib.modelCorpusHash;
@@ -1877,9 +1887,10 @@ bool lodoRead( const QString & path, LodoHeader * header, LodoLibrary * lib,
 	 * refuses a v4 file that carries anything at 0xD4..0xDF. v6 (lane SWAP1)
 	 * names the base row's last word `materialSwap`; a v4/v5 file is read as v6
 	 * with no variant rows (that word forced to 0 below). */
-	if ( h.version != LODO_VERSION && h.version != LODO_VERSION_NO_SWAP && h.version != LODO_VERSION_NO_COLOUR )
+	if ( h.version != LODO_VERSION && h.version != LODO_VERSION_NO_SWAP && h.version != LODO_VERSION_NO_COLOUR
+		&& h.version != LODO_VERSION_NEAR )
 		return refuse( QString( "version %1; this reader knows %2 to %3" ).arg( h.version )
-			.arg( LODO_VERSION_NO_COLOUR ).arg( LODO_VERSION ) );
+			.arg( LODO_VERSION_NO_COLOUR ).arg( LODO_VERSION_NEAR ) );
 	h.headerCrc32 = getLE<quint32>( p + H_HCRC );
 	const quint32 hcrc = lodvCrc32( p + H_PLUGIN, LODO_HEADER_BYTES - H_PLUGIN );
 	if ( hcrc != h.headerCrc32 )
@@ -1890,6 +1901,10 @@ bool lodoRead( const QString & path, LodoHeader * header, LodoLibrary * lib,
 		return refuse( QStringLiteral( "flags bit0 (vertex layout v1) is clear" ) );
 	if ( h.flags & ~LODO_FLAGS_KNOWN )
 		return refuse( QString( "flags 0x%1 has reserved bits set" ).arg( h.flags, 0, 16 ) );
+	/* v7 (lane NEAR1): the NEAR flag and version 7 come together or not at all */
+	if ( ( ( h.flags & LODO_FLAG_NEAR ) != 0 ) != ( h.version == LODO_VERSION_NEAR ) )
+		return refuse( QString( "version %1 with flags 0x%2: the NEAR flag (16) is set exactly on a version-7 file" )
+			.arg( h.version ).arg( h.flags, 0, 16 ) );
 	h.pluginCorpusHash = getLE<quint64>( p + H_PLUGIN );
 	h.objectCorpusHash = getLE<quint64>( p + H_OBJECT );
 	h.modelCorpusHash = getLE<quint64>( p + H_MODEL );
@@ -2255,8 +2270,10 @@ bool lodoRead( const QString & path, LodoHeader * header, LodoLibrary * lib,
 		}
 		for ( size_t i = 0; i < L.materials.size(); i++ ) {
 			const LodoMaterial & m = L.materials[i];
-			if ( m.reserved )
+			if ( m.features && h.version < LODO_VERSION_NEAR )
 				return refuse( QString( "material %1: reserved byte is not zero" ).arg( i ) );
+			if ( m.features & ~LODO_MAT_FEATURES_KNOWN )
+				return refuse( QString( "material %1: features 0x%2 set reserved bits (5..7)" ).arg( i ).arg( m.features, 0, 16 ) );
 			if ( m.layer != LODO_NO_LAYER && m.layer >= LODO_LAYER_CAP )
 				return refuse( QString( "material %1: layer %2 is not < 2048 (the D3D11 array-axis limit)" ).arg( i ).arg( m.layer ) );
 			if ( m.family > LODO_FAMILY_PBR )

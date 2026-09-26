@@ -103,14 +103,19 @@ def read_lodo(path):
                       'TRIANGLE COUNT. Re-bake; this reader knows versions 4 to 6')
     # v5 (lane SEAM1, W4) = v4 + an optional per-vertex RGBA8 colour stream; a v4 file reads as v5 without one
     # v6 (lane SWAP1) = v5 + material-swap variant base rows (the base row's last u32 = materialSwap)
-    if h['version'] not in (4, 5, 6):
+    # v7 (lane NEAR1) = v6 + header flag bit 4 NEAR (set exactly on v7) + the material row's
+    #   reserved byte as `features` (bits 0..4: parallax, env map, greyscale, vertex colour, MSN)
+    if h['version'] not in (4, 5, 6, 7):
         raise Refusal('version %d' % h['version'])
     if crc32(b[0x10:0x100]) != h['headerCrc32']:
         raise Refusal('headerCrc32 mismatch')
     if not h['flags'] & 1:
         raise Refusal('flags bit0 clear')
-    if h['flags'] & ~15:
+    if h['flags'] & ~31:
         raise Refusal('reserved flag bits set')
+    if bool(h['flags'] & 16) != (h['version'] == 7):
+        raise Refusal('the NEAR flag (16) and version 7 come together or not at all (version %d, flags 0x%x)'
+                      % (h['version'], h['flags']))
     (h['pluginCorpusHash'], h['objectCorpusHash'], h['modelCorpusHash'],
      h['cardCorpusHash']) = le('QQQQ', b, 0x10)
     edid = b[0x30:0x50]
@@ -338,8 +343,10 @@ def read_lodo(path):
         elif not 0.0 < cl['coneCos'] <= 1.0:
             raise Refusal('cluster %d cone cosine %r outside (0, 1]' % (i, cl['coneCos']))
     for i, m in enumerate(L['materials']):
-        if m['reserved']:
+        if m['reserved'] and h['version'] < 7:
             raise Refusal('material %d reserved not zero' % i)
+        if m['reserved'] & ~0x1F:
+            raise Refusal('material %d features 0x%x set reserved bits 5..7' % (i, m['reserved']))
         if m['layer'] != NO_LAYER and m['layer'] >= 2048:
             raise Refusal('material %d layer %d >= 2048' % (i, m['layer']))
         if m['family'] > 1:
@@ -463,15 +470,17 @@ def read_lodi(path):
     if h['version'] == 2:
         raise Refusal('version 2: a v2 instance table has no occluder tables (header 0x98 and 0xA0 were '
                       'reserved), so every cell would read as occluding nothing')
-    if h['version'] not in (3, 4, 5, 6, 7, 8, 9, 10):
-        raise Refusal('version %d; this reader knows 3, 4, 5, 6, 7, 8, 9 and 10' % h['version'])
+    if h['version'] not in (3, 4, 5, 6, 7, 8, 9, 10, 11):
+        raise Refusal('version %d; this reader knows 3 to 11' % h['version'])
     # v8 = v7 + the per-vertex HORIZON stream, in the room v7's header left reserved.
     # RETIRED 2026-09-19 (lane HORIZONOUT): no exe writes one, this reader still reads one.
     v8 = h['version'] == 8
     # v9 = v7 + instance flag bit 6, the workshop-scrappable bit. It is a superset of v7
     # and NOT of v8: a v9 file carries no horizon stream and its 0x11C..0x1FF are reserved.
     # v10 = v9 + instance flag bit 7, SCALE_WIDE: scale = 8 + u16 / 8192 (lane BAKE2, 2026-09-25).
-    v10 = h['version'] == 10
+    # v11 = v10 + instance flag bit 8, INITIALLY_DISABLED (lane NEAR1, 2026-09-26; the near library only).
+    v11 = h['version'] == 11
+    v10 = h['version'] == 10 or v11
     v9 = h['version'] == 9 or v10
     # v7 = v6 + the group table and/or the per-vertex sky stream, in a 512-byte header BLOCK
     v7 = h['version'] == 7 or v8 or v9
@@ -829,7 +838,7 @@ def read_lodi(path):
         prevkey = None
         for i in range(s, e):
             r = T['instances'][i]
-            known = 0xFF if v10 else (0x7F if v9 else 0x3F)
+            known = 0x1FF if v11 else (0xFF if v10 else (0x7F if v9 else 0x3F))
             if r['flags'] & ~known:
                 raise Refusal('instance %d reserved flags 0x%04x (version %d knows 0x%02x)'
                               % (i, r['flags'], h['version'], known))

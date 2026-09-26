@@ -1465,6 +1465,8 @@ struct LodSrcShape
 	bool colStream = false;
 	bool vcFlag = false;
 	bool vaFlag = false;
+	//! Lane NEAR1: read-only facts for the near-library bake (nativeemit.h); no far pass reads them.
+	NearShapeFacts nearFacts;
 };
 
 //! Compose a block's transform up the parent chain (local -> model space).
@@ -1696,6 +1698,99 @@ static bool lodgenReadAsset( const QString & dataRoot, const QString & relPath,
 } // namespace
 
 // --- the resource stack, and Mod Organizer 2 -------------------------------
+
+namespace
+{
+//! Lane NEAR1: format + size out of a DDS header (148 bytes with a DX10 block, 128 without).
+bool lodgenDdsHeaderInfo( const unsigned char * p, size_t n, quint32 * dxgi, quint32 * width, quint32 * height,
+	quint32 * mips )
+{
+	if ( n < 128 || std::memcmp( p, "DDS ", 4 ) != 0 )
+		return false;
+	auto u32 = [&]( size_t o ) { quint32 v; std::memcpy( &v, p + o, 4 ); return v; };
+	*height = u32( 12 );
+	*width = u32( 16 );
+	*mips = std::max<quint32>( 1, u32( 28 ) );
+	const quint32 pfFlags = u32( 80 );
+	const quint32 fourcc = u32( 84 );
+	auto cc = []( const char * c ) { return quint32( quint8( c[0] ) ) | ( quint32( quint8( c[1] ) ) << 8 )
+		| ( quint32( quint8( c[2] ) ) << 16 ) | ( quint32( quint8( c[3] ) ) << 24 ); };
+	if ( pfFlags & 0x4 ) {
+		if ( fourcc == cc( "DX10" ) ) {
+			if ( n < 148 )
+				return false;
+			*dxgi = u32( 128 );
+		} else if ( fourcc == cc( "DXT1" ) ) {
+			*dxgi = 71;
+		} else if ( fourcc == cc( "DXT3" ) ) {
+			*dxgi = 74;
+		} else if ( fourcc == cc( "DXT5" ) ) {
+			*dxgi = 77;
+		} else if ( fourcc == cc( "ATI1" ) || fourcc == cc( "BC4U" ) ) {
+			*dxgi = 80;
+		} else if ( fourcc == cc( "ATI2" ) || fourcc == cc( "BC5U" ) ) {
+			*dxgi = 83;
+		} else {
+			*dxgi = 0;
+		}
+	} else {
+		// uncompressed: 32-bit with red in the low byte is RGBA (28), else BGRA (87); anything else 0
+		const quint32 bits = u32( 88 ), rMask = u32( 92 );
+		*dxgi = bits == 32 ? ( rMask == 0x000000FFu ? 28u : 87u ) : 0u;
+	}
+	return true;
+}
+} // namespace
+
+bool lodgenTextureInfo( const QString & dataRoot, const QString & texPath, quint32 * dxgi, quint32 * width,
+	quint32 * height, quint32 * mips, QString * source )
+{
+	*dxgi = 0; *width = 0; *height = 0; *mips = 0;
+	if ( texPath.isEmpty() )
+		return false;
+	if ( BA2File * ix = lodgenStackIndex() ) {
+		const std::string full = Game::GameManager::get_full_path( texPath, "textures", ".dds" );
+		if ( const BA2File::FileInfo * fd = ix->findFile( full ) ) {
+			if ( fd->archiveType == 1 && fd->fileData ) {
+				// the BA2 DX10 record: fileData -> numChunks, then u16 chunk-header size,
+				// u16 height, u16 width, u8 mips, u8 DXGI (lib/libfo76utils ba2file.cpp)
+				const unsigned char * d = fd->fileData;
+				*height = quint32( d[3] ) | ( quint32( d[4] ) << 8 );
+				*width = quint32( d[5] ) | ( quint32( d[6] ) << 8 );
+				*mips = std::max<quint32>( 1, d[7] );
+				*dxgi = d[8];
+				if ( source )
+					*source = QStringLiteral( "ba2" );
+				return true;
+			}
+			if ( fd->archiveType < 0 && fd->fileData ) {
+				QFile f( QString::fromUtf8( reinterpret_cast<const char *>( fd->fileData ), int( fd->packedSize ) ) );
+				if ( f.open( QIODevice::ReadOnly ) ) {
+					const QByteArray h = f.read( 148 );
+					if ( lodgenDdsHeaderInfo( reinterpret_cast<const unsigned char *>( h.constData() ), size_t( h.size() ),
+							dxgi, width, height, mips ) ) {
+						if ( source )
+							*source = QStringLiteral( "loose" );
+						return true;
+					}
+				}
+			}
+		}
+	}
+	QString rel = texPath;
+	rel.replace( QChar( '\\' ), QChar( '/' ) );
+	if ( !rel.startsWith( QStringLiteral( "textures/" ), Qt::CaseInsensitive ) )
+		rel.prepend( QStringLiteral( "textures/" ) );
+	QByteArray bytes;
+	if ( !lodgenReadAsset( dataRoot, rel, "textures", ".dds", bytes ) )
+		return false;
+	if ( !lodgenDdsHeaderInfo( reinterpret_cast<const unsigned char *>( bytes.constData() ), size_t( bytes.size() ),
+			dxgi, width, height, mips ) )
+		return false;
+	if ( source )
+		*source = QStringLiteral( "read" );
+	return true;
+}
 
 void lodgenSetResources( const QStringList & entries )
 {
@@ -2155,6 +2250,16 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 		fprintf( stderr, "lodgen: model %s: %s (%lld bytes)\n", path.toLocal8Bit().constData(),
 			!found ? "not found in the loose folder or the archives" : "read, but did not load",
 			(long long) bytes.size() );
+	/* Lane NEAR1: does the MODEL animate? Any controller or sequence block says
+	 * so; the near bake leaves such a base to the engine. Counted here, on the
+	 * one parse, and read by nobody else. */
+	int modelControllers = 0;
+	if ( loaded )
+		for ( int b = 0; b < src.getBlockCount(); b++ ) {
+			const QModelIndex ib = src.getBlockIndex( b );
+			if ( src.blockInherits( ib, "NiTimeController" ) || src.blockInherits( ib, "NiSequence" ) )
+				modelControllers++;
+		}
 	if ( loaded ) {
 		for ( int b = 0; b < src.getBlockCount(); b++ ) {
 			QModelIndex iShape = src.getBlockIndex( b );
@@ -2204,11 +2309,22 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 			QModelIndex iTris = src.getIndex( iShape, "Triangles" );
 			if ( iTris.isValid() )
 				s.tris = src.getArray<Triangle>( iTris );
+			NearShapeFacts & nf = s.nearFacts;
+			nf.block = b;
+			nf.name = src.get<QString>( iShape, "Name" );
+			nf.sourceTris = quint32( s.tris.size() );
+			if ( src.blockInherits( iShape, "BSMeshLODTriShape" ) )
+				nf.lod0Tris = src.get<quint32>( iShape, "LOD0 Size" );
+			nf.modelControllers = modelControllers;
+			nf.modelAnimated = modelControllers > 0;
 			QModelIndex iAlpha = src.getBlockIndex(
 				src.getLink( iShape, "Alpha Property" ) );
 			if ( iAlpha.isValid() ) {
 				s.hasAlpha = true;
 				s.alphaFlags = quint16( src.get<int>( iAlpha, "Flags" ) );
+				nf.alphaBlend = ( s.alphaFlags & 0x0001 ) != 0;
+				nf.alphaTest = ( s.alphaFlags & 0x0200 ) != 0;
+				nf.alphaRef = quint8( src.get<int>( iAlpha, "Threshold" ) );
 				/* NOT the source's threshold: near-tree materials test at
 				 * 65-80, which at LOD distance passes far more canopy
 				 * texels than vanilla's chunks do. Vanilla LOD alpha
@@ -2248,6 +2364,18 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 					& LOD_OWN_EMIT ) != 0;
 				s.vcFlag = ( src.get<quint32>( iShader, "Shader Flags 2" ) & ( 1U << 5 ) ) != 0;
 				s.vaFlag = ( src.get<quint32>( iShader, "Shader Flags 1" ) & ( 1U << 3 ) ) != 0;
+				{
+					const quint32 sf1 = src.get<quint32>( iShader, "Shader Flags 1" );
+					const quint32 sf2 = src.get<quint32>( iShader, "Shader Flags 2" );
+					nf.effectShader = src.blockInherits( iShader, "BSEffectShaderProperty" );
+					nf.decal = ( sf1 & ( ( 1U << 26 ) | ( 1U << 27 ) ) ) != 0;
+					nf.treeAnim = ( sf2 & ( 1U << 29 ) ) != 0;
+					nf.twoSided = ( sf2 & ( 1U << 4 ) ) != 0;
+					nf.parallax = ( sf2 & ( 1U << 24 ) ) != 0;
+					nf.envMap = ( sf1 & ( 1U << 7 ) ) != 0;
+					nf.greyscale = ( sf1 & ( 1U << 4 ) ) != 0;
+					nf.modelSpaceNormals = ( sf1 & ( 1U << 12 ) ) != 0;
+				}
 				QModelIndex iTexSet = src.getBlockIndex(
 					src.getLink( iShader, "Texture Set" ) );
 				if ( iTexSet.isValid() ) {
@@ -2257,6 +2385,9 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 						s.tex1 = src.get<QString>( src.getIndex( iArr, 1 ) );
 						if ( src.get<int>( iTexSet, "Num Textures" ) > 7 )
 							s.tex7 = src.get<QString>( src.getIndex( iArr, 7 ) );
+						const int nTex = src.get<int>( iTexSet, "Num Textures" );
+						for ( int t = 0; t < nTex; t++ )
+							nf.textures.append( src.get<QString>( src.getIndex( iArr, t ) ) );
 					}
 				}
 				/* A BGSM wins over the texture set, as the renderer's
@@ -2307,6 +2438,23 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 							s.matAlphaTest = sm.hasAlphaTest();
 							s.matAlphaBlend = sm.hasAlphaBlend();
 							s.matAlphaRef = sm.alphaTestThreshold();
+							/* Lane NEAR1: the same material's switches, OR'd onto the
+							 * property's bits; read by the near bake only. */
+							nf.bgsmRead = true;
+							nf.alphaBlend = nf.alphaBlend || sm.hasAlphaBlend();
+							if ( sm.hasAlphaTest() ) {
+								nf.alphaTest = true;
+								nf.alphaRef = sm.alphaTestThreshold();
+							}
+							nf.decal = nf.decal || sm.hasDecal();
+							nf.twoSided = nf.twoSided || sm.isTwoSided();
+							nf.envMap = nf.envMap || sm.hasEnvironmentMapping();
+							nf.greyscale = nf.greyscale || sm.hasGrayscaleToPaletteColor();
+							const quint32 msf2 = sm.shaderFlags2();
+							nf.pbr = ( msf2 & 0x00000020U ) != 0;
+							nf.modelSpaceNormals = nf.modelSpaceNormals || ( msf2 & 0x00000200U ) != 0;
+							nf.treeAnim = nf.treeAnim || ( msf2 & 0x00080000U ) != 0;
+							nf.textures = t;
 						}
 					}
 				} else if ( s.matName.endsWith( QStringLiteral( ".bgem" ), Qt::CaseInsensitive ) ) {
@@ -2358,6 +2506,7 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 			 * NiAlphaProperty and the .lodo material byte now carry. */
 			if ( s.hasAlpha && s.matAlphaTest )
 				s.alphaThreshold = s.matAlphaRef;
+			nf.vertexColour = s.colStream && s.vcFlag;
 			if ( !s.tris.isEmpty() )
 				shapes.append( s );
 		}
@@ -2407,11 +2556,17 @@ QString lodgenMaterialSwapKey( const QString & material )
 }
 
 static bool nativeLoadModelImpl( void * user, const QString & model, const LodgenMaterialSubst * swap,
-	std::vector<NativeSrcShape> * out );
+	std::vector<NativeSrcShape> * out, bool keepInCache = true );
 
 bool lodgenNativeLoadModel( void * user, const QString & model, std::vector<NativeSrcShape> * out )
 {
 	return nativeLoadModelImpl( user, model, nullptr, out );
+}
+
+bool lodgenNativeLoadModelOnce( void * user, const QString & model, const LodgenMaterialSubst * swap,
+	std::vector<NativeSrcShape> * out )
+{
+	return nativeLoadModelImpl( user, model, swap, out, false );
 }
 
 bool lodgenNativeLoadModelSwapped( void * user, const QString & model, const LodgenMaterialSubst & swap,
@@ -2421,7 +2576,7 @@ bool lodgenNativeLoadModelSwapped( void * user, const QString & model, const Lod
 }
 
 static bool nativeLoadModelImpl( void * user, const QString & model, const LodgenMaterialSubst * swap,
-	std::vector<NativeSrcShape> * out )
+	std::vector<NativeSrcShape> * out, bool keepInCache )
 {
 	/* PER THREAD, NOT PER PROCESS (lane PERF1, 2026-09-17). lodgenLoadModel
 	 * hands back a REFERENCE INTO this hash, so a `static` here is the exact
@@ -2438,8 +2593,11 @@ static bool nativeLoadModelImpl( void * user, const QString & model, const Lodge
 	 * The way back is unaffected -- at `--threads 1` there is one thread and
 	 * one cache, which is what the static was. */
 	thread_local QHash<QString, QVector<LodSrcShape>> cache;
+	/* Lane NEAR1: the near bake loads every full-detail model of a worldspace,
+	 * twice, and keeps none of them -- a per-call cache, dropped on return. */
+	QHash<QString, QVector<LodSrcShape>> once;
 	const QString & dataRoot = *static_cast<const QString *>( user );
-	const QVector<LodSrcShape> & shapes = lodgenLoadModel( dataRoot, model, cache, swap );
+	const QVector<LodSrcShape> & shapes = lodgenLoadModel( dataRoot, model, keepInCache ? cache : once, swap );
 	out->clear();
 	for ( const LodSrcShape & s : shapes ) {
 		if ( s.pos.isEmpty() || s.tris.isEmpty() )
@@ -2472,6 +2630,7 @@ static bool nativeLoadModelImpl( void * user, const QString & model, const Lodge
 		n.emitColor[0] = s.emitColor.red(); n.emitColor[1] = s.emitColor.green(); n.emitColor[2] = s.emitColor.blue();
 		n.emitMult = s.emitMult; n.ownEmit = s.ownEmit;
 		n.hasAlpha = s.hasAlpha; n.alphaThreshold = s.alphaThreshold;
+		n.nearFacts = s.nearFacts;
 		/* `.lodo` v5: the colour goes in ONLY where the game applies it -- a
 		 * colour channel AND the Vertex_Colors flag (bungo's W4 ruling). RGB and A
 		 * as the source stores them; A's meaning rides in `vertexAlpha`. */
