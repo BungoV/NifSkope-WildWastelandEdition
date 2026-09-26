@@ -2761,7 +2761,7 @@ bool lodgenNativeWrite( QString * report, QString * error )
 		if ( qEnvironmentVariableIsSet( "WW_AO_PATCH_DEG" ) )
 			patchDeg = qMin( 89.0f, qEnvironmentVariable( "WW_AO_PATCH_DEG" ).toFloat() );
 		vaoPatchDeg = patchDeg;
-		const bool patchSamples = qEnvironmentVariable( "WW_AO_PATCH_FIT" ) != QStringLiteral( "vertex" );
+		const bool patchSamples = qEnvironmentVariable( "WW_AO_PATCH_FIT" ) == QStringLiteral( "samples" );
 		vaoPatchSamples = patchSamples;
 		vaoFaceStep = faceStep;
 		vaoFaceMax = faceMax;
@@ -3187,7 +3187,7 @@ bool lodgenNativeWrite( QString * report, QString * error )
 								 * hat-weighted means that flatten a gradient (a wall foot read 12 bytes
 								 * under its top against 33 at the corners before AO2); the samples' own
 								 * least-squares plane keeps it. bungo 2026-09-26: "You can try more
-								 * darkening at the bottom". WW_AO_PATCH_FIT=vertex = the corner fit. */
+								 * darkening at the bottom". Research only: WW_AO_PATCH_FIT=samples. */
 								clearFit();
 								for ( quint32 t : members )
 									for ( size_t k = sTri[t]; k < sTri[size_t( t ) + 1]; k++ ) {
@@ -3942,7 +3942,7 @@ bool lodgenNativeWrite( QString * report, QString * error )
 						+ ( vaoPatchDeg >= 0.0f ? QString( "; %1 flat patch(es) of %2 triangles given one linear field each (normals within %3 deg)" )
 							.arg( vaoPatches ).arg( vaoPatchTris ).arg( double( vaoPatchDeg ), 0, 'f', 1 )
 							+ ( vaoPatchSamples ? QString( ", %1 fitted to their samples, the rest to their corners" ).arg( vaoPatchSampleFit )
-								: QStringLiteral( ", fitted to their corners (WW_AO_PATCH_FIT=vertex)" ) )
+								: QStringLiteral( ", fitted to their corners" ) )
 						: QStringLiteral( "; flat patches NOT fitted (WW_AO_PATCH_DEG < 0)" ) ) )
 				: QStringLiteral( "OFF (--native-no-vertex-ao)" ) );
 		/* v7 (2026-09-18, lane LODIV7). Both halves state their OFF value by
