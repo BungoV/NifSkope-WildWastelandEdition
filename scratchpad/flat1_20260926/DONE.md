@@ -166,3 +166,91 @@ Nothing was tuned toward Bethesda's LOD colours; the target is the in-game diffu
 These bakes used `--land-shade 0`, but this bake mode already runs with land shade 0 (the log says
 `landShade 0.000`, `chunksShaded 0`), so ls0_on is byte-identical to flat_default. That also shows two bakes of
 one exe are deterministic.
+
+## 5. Commits (branch flat1-20260926, by explicit path, not pushed, not merged)
+- dbda923d: the census of flat ground objects over the Boston box; rule thresholds from histograms.
+- b23f5631: the implementation (src/lodgen.cpp, lodgen.h, esmdata.h/.cpp, lodgenchunkpass.cpp, nifcli.cpp,
+  lodgenmanager.cpp, nifskope_ui.cpp), with its patch scripts, bake.sh and flat_faith.py.
+- 31b70b79: the report names each placing plugin with its painted count; an unloadable model carries no
+  override; the TAB literals are now escapes; flat_confine.py and flat_pics.py.
+- cde019eb: faithfulness per kind (the loose sample for decals), the confinement can-fail run, the override pair
+  gate, the oblique shot script.
+- (last) DONE.md sections 5-8, DELIVERABLE_TEXT.md.
+
+## 6. Gates, with numbers
+All bakes are the Boston box -8 -12 3 -1, run from a copy of the exe under the session scratch
+(flat1/run). The final exe is release/NifSkope.exe 17:02:29, sha1 784eeb66.
+
+- **Build**: tools/ww_build.sh RC=0 (three builds), and the exe is newer than every changed source.
+- **Final bake** (flat_final, final exe): rc 0, 166 s. flatExamined 144,655, flatPainted 10,834, flatHasLod 102,
+  flatTexels 730,420, flatDecalTexels 478,813, flatRefusedNoTexture 14. VT.2 and VT.4 are byte-identical to
+  flat_default (build-1 exe), so patch 6 changed the report only.
+- **Off = old**: `--no-flat-objects` (flat_off) is byte-identical (VT.2, VT.4) to ROADS1 new_default.
+- **Confinement**, flat_off vs flat_default:
+  - VT.2 colour changed 992,102 texels; outside the painted footprint strictly 176,881 (the BC1 blocks);
+    **outside its 4x4 blocks 0**; changed only under a margin placement 3,440.
+  - Non-colour sheets: VT.2 108 and VT.4 27 slices compared, 0 differ.
+  - Mask (ground-cover byte, cleared under the paint like the roads): changed 500,804; outside the blocks **0**.
+  - Can fail: the same bakes against the footprint moved 32 texels east give 610,857 colour and 302,673 mask
+    texels outside the blocks.
+- **Faithfulness per kind**: section 4. Every kind has at least 1,112 texels in the loose sample; flat1 is at
+  2.6-3.4 mean |dluma|, while the off bake is at 9.1-34.7.
+- **Standing things refused** (final report: placements; top / underside / side-top medians; reasons):
+  1. FenceChainlink01: 163; 182.5 / 24.4 / 41.8; not on the ground 98, too tall 65.
+  2. GRailStrShort01 (guard rail): 27; 60.0 / 24.6 / 6.28; not on the ground 19, stands up 8.
+  3. JerseyBarricade01: 27; 60.1 / -2.9 / 2.94; stands up 17, too tall 6, not on the ground 3, under water 1.
+  4. ECDBenchShrt01 (bench): 32; 54.3 / 19.6 / 1.06; not on the ground 18, stands up 10, under the ground 4.
+  5. FenceChainlinkEndLeft02RR: 44; 146.6 / 89.3 / 2.74; not on the ground 43, stands up 1.
+  6. CarFrame03: 12; 50.8 / 6.2 / 1.75; stands up 6, not on the ground 4, under the ground 1, under water 1.
+  7. Coupe_Postwar_Cheap01 (car): 34 placements, 32 refused (not on the ground 18, too tall 6, under water 7,
+     stands up 1). 2 are painted: cars sunk into the land, which measure as low mounds (section 2). The override
+     demonstration turns them off.
+  Retaining-wall and building wall pieces are refused by the thousand (for example DecoMainA1x1Wall01:
+  2,725 placements, 0 painted).
+- **Mods**: the final report's plugin line: BNS Trees.esp 50 examined / 0 painted;
+  UltraExteriorLighting.esp 34 / 0; ccSBJFO4003-Grenade.esl 1 / 0; DLCCoast.esm 4 / 0;
+  Fallout4.esm 144,566 / 10,834. Every mod placement was examined by the same rule, and none is a flat ground
+  object. (The Python box census agrees: 617 non-Bethesda placements, none qualifies.)
+- **Override**:
+  - A file with a `nobake` line on every top folder (ovr_all): painted 0, overridden 141,397. VT.2, VT.4 and
+    .lodm are byte-identical to flat_off, so nobake reverts exactly.
+  - The pair (ovr_pair): `nobake Vehicles/Automotive/Coupe_Postwar_Cheap01.nif` plus
+    `bake setdressing/bricksblocks/jerseybarricade04.nif` (a refused model). Painted 10,858, overridden 60 =
+    the coupe's 34 placements plus the jersey's 26. Changed 957 texels (coupe 544, jersey 126); outside the two
+    models strictly 287, **outside their 4x4 blocks 0**. So bake paints a refused model, and nobake removes a
+    painted one, touching nothing else.
+- **Determinism**: two default bakes of one exe (flat_default, ls0_on) are byte-identical.
+
+## 7. Pictures (scratchpad/flat1_20260926/pics/, not in git)
+- Top-down close-ups, one per kind, installed | ROADS1 new_default | FLAT1 (VT.2 colour, 160 texels square):
+  pad_, rail_, path_, decal_, debris_installed_roads1_flat1.png. Texels of each kind in view: pad 6,650,
+  rail 7,698, path 547, decal 336, debris 11,608.
+- The oblique shot (a copy of the persp shot.sh, work/shot.sh; the brief's command, LV=2 SLOT=0 SDIM=2
+  WW_LODL_AO=1, cells -5 -10 2 -3, view 8): oblique_roads1_new_default.png and oblique_flat1.png;
+  oblique_roads1_over_flat1.png stacks them, ROADS1 on top; oblique_zoom_roads1_flat1.png is the 600-pixel window
+  where they differ most (the river embankment and the streets west of it: flat debris now shows).
+  - 69,113 of 2,598,400 pixels differ between the two, 40,712 by more than 8 levels.
+  - The renderer is the persp script's own exe (scratchpad/incr2/ns_run1), which is exactly the brief's script.
+    The FLAT1 exe rendered oblique_flat1 once, pixel-identical (0 pixels differ), but after that it exited at GUI
+    start with no output and rc 0 on 23 of 24 tries. The pre-FLAT1 rung of this worktree
+    (release/NifSkope.before_flat1.exe) started on the same script right before it.
+  - FLAT1 changes nothing on the start path: main.cpp is untouched, and the first thing the GUI does is bind its
+    UDP port and quietly exit with 0 if the bind fails. So this looks like the fresh exe being refused the port,
+    like the new-exe block in nifskope-ww-worktree-build section 8. It is not proven.
+  - Owed: one ordinary GUI start of the merged exe.
+
+## 8. Skills review
+- Written: `E:\Projects\Claude\.claude\skills\ww-flat-object-stamp\SKILL.md`: the measured rule and why each
+  number, the painting order, the override file and report, the five gates each with its can-fail run, and the
+  traps (land shade is already 0 in this bake mode; TAB literals from a patch escape; a lazy import).
+- ww-road-stamp-faithfulness was right and was enough for the raster reader; no change is needed.
+- nifskope-ww-worktree-build section 8 (a fresh exe is blocked from running for minutes) held: the final exe ran
+  on the first try, and the retry loop is in the bake command.
+- Declined: a separate skill for the oblique shot. It is the persp shot.sh with its exe and turn name changed,
+  and the skill above names it.
+
+**Out of scope, stated:**
+- TXST projected decals (1,982 in the box) have no mesh.
+- The legacy .BTR path paints the flat objects but writes no report.
+- The pass runs only with the roads on.
+- The mask sheet's ground-cover byte is cleared under the paint (as the roads do).
