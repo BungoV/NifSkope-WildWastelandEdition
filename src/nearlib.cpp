@@ -48,6 +48,26 @@ QString nearFold( const QString & s )
 	return t;
 }
 
+/*! Lane NEAR2: a texture path as the game resolves it -- folded, and exactly one
+ *  `textures\` in front, with anything before an embedded `\textures\` (an
+ *  author's absolute build path) dropped. NEAR1 keyed textures on the path as
+ *  the NIF or BGSM spelled it, so `shared\black01_d.dds` and
+ *  `textures\shared\black01_d.dds` were two keys (two layers of one image),
+ *  and a sidecar path could not be opened as written. */
+QString nearTexKey( const QString & s )
+{
+	QString t = nearFold( s.trimmed() );
+	while ( t.startsWith( QChar( '\\' ) ) )
+		t.remove( 0, 1 );
+	if ( t.isEmpty() )
+		return t;
+	if ( !t.startsWith( QStringLiteral( "textures\\" ) ) ) {
+		const int at = t.indexOf( QStringLiteral( "\\textures\\" ) );
+		t = at >= 0 ? t.mid( at + 1 ) : QStringLiteral( "textures\\" ) + t;
+	}
+	return t;
+}
+
 QString nearFourcc( quint32 t )
 {
 	char c[5];
@@ -277,6 +297,34 @@ bool nearLibraryBake( const EsmWorld & world, const NearLibraryOptions & opts, Q
 		x1 = std::max( opts.region[0], opts.region[2] );
 		y0 = std::min( opts.region[1], opts.region[3] );
 		y1 = std::max( opts.region[1], opts.region[3] );
+	}
+
+	/* ---- 0. the plugins' load-order-resolved identities (lane NEAR2) ----
+	 * The game gives a FULL plugin the next index (0..0xFD) and a LIGHT one
+	 * (TES4 flag 0x200, or an .esl) the next 12-bit slot under 0xFE. EsmWorld's
+	 * ids number every file in the merged list, a light one included, so the
+	 * top byte of a stored refFormId is a position in opts.plugins. */
+	struct NearPlugin { QString name; bool light = false; quint16 identity = 0; };
+	std::vector<NearPlugin> plugins;
+	{
+		quint32 full = 0, light = 0;
+		for ( const QString & path : opts.plugins ) {
+			NearPlugin pl;
+			pl.name = QFileInfo( path ).fileName();
+			QFile f( path );
+			if ( !f.open( QIODevice::ReadOnly ) )
+				return fail( QString( "cannot read plugin %1 for its identity" ).arg( path ) );
+			const QByteArray h = f.read( 12 );
+			if ( h.size() < 12 || !h.startsWith( "TES4" ) )
+				return fail( QString( "plugin %1 has no TES4 header" ).arg( path ) );
+			quint32 fl = 0;
+			std::memcpy( &fl, h.constData() + 8, 4 );
+			pl.light = ( fl & 0x200U ) != 0 || pl.name.endsWith( QStringLiteral( ".esl" ), Qt::CaseInsensitive );
+			pl.identity = pl.light ? quint16( NEAR_IDENTITY_LIGHT | light++ ) : quint16( full++ );
+			plugins.push_back( pl );
+		}
+		if ( full > 0xFD || light > 0x1000 )
+			return fail( QString( "%1 full and %2 light plugins: past the game's 253 / 4096" ).arg( full ).arg( light ) );
 	}
 
 	/* ---- 1. the ESM walk: every REFR in the region, judged on the records ---- */
@@ -562,7 +610,7 @@ bool nearLibraryBake( const EsmWorld & world, const NearLibraryOptions & opts, Q
 			c.reason = QStringLiteral( "scale-out-of-range" );
 
 	/* ---- 4. the textures, bucketed by (DXGI, width, height) ---- */
-	struct TexInfo { bool ok = false; quint32 dxgi = 0, w = 0, h = 0, mips = 0; QString src; };
+	struct TexInfo { bool ok = false; bool cube = false; quint32 dxgi = 0, w = 0, h = 0, mips = 0; QString src; };
 	QMap<QString, TexInfo> texInfo;             // folded path -> header facts
 	std::set<QString> usedModels;
 	for ( const NearCand & c : cands )
@@ -575,10 +623,10 @@ bool nearLibraryBake( const EsmWorld & world, const NearLibraryOptions & opts, Q
 			if ( s.reason.isEmpty() )
 				for ( const QString & t : s.nf.textures )
 					if ( !t.isEmpty() )
-						texInfo.insert( nearFold( t ), TexInfo() );
+						texInfo.insert( nearTexKey( t ), TexInfo() );
 	for ( auto it = texInfo.begin(); it != texInfo.end(); ++it ) {
 		TexInfo & ti = it.value();
-		ti.ok = lodgenTextureInfo( opts.dataRoot, it.key(), &ti.dxgi, &ti.w, &ti.h, &ti.mips, &ti.src );
+		ti.ok = lodgenTextureInfo( opts.dataRoot, it.key(), &ti.dxgi, &ti.w, &ti.h, &ti.mips, &ti.src, &ti.cube );
 	}
 	const qint64 msTextures = clock.elapsed();
 
@@ -606,43 +654,66 @@ bool nearLibraryBake( const EsmWorld & world, const NearLibraryOptions & opts, Q
 			r.key = s.matKey;
 			matByKey.insert( s.matKey, r );
 		}
-	// diffuse buckets: (dxgi, w, h) -> the sorted distinct diffuse paths; split every 2048 layers
-	std::map<std::tuple<quint32, quint32, quint32>, std::set<QString>> diffuseBuckets;
+	/* Texture2DArray pools (lane NEAR2). Every texture a kept material names, in
+	 * ANY slot, joins the one pool keyed by (cube, dxgi, width, height, mips):
+	 * the slices of one D3D11 array must agree on all five, so the renderer can
+	 * CopySubresourceRegion each source DDS's mips into its slice unchanged --
+	 * nothing is decoded or re-encoded. A pool splits every LODO_LAYER_CAP
+	 * layers (a cube pool every LODO_LAYER_CAP / 6: six faces a layer). Pools
+	 * that hold a diffuse come first, so the .lodo's u8 arraySet names the
+	 * diffuse's pool; a layer is the rank of the path in its pool, sorted.
+	 * Order is a function of the path set alone: byte-deterministic. */
+	struct PoolKey { quint32 cube, dxgi, w, h, mips; bool operator<( const PoolKey & o ) const {
+		return std::tie( cube, dxgi, w, h, mips ) < std::tie( o.cube, o.dxgi, o.w, o.h, o.mips ); } };
+	std::map<PoolKey, std::set<QString>> poolPaths;
+	std::set<PoolKey> diffusePools;
+	quint64 slotOverflow = 0;
 	for ( const MatRec & r : matByKey ) {
-		const QString d = r.textures.isEmpty() ? QString() : nearFold( r.textures.front() );
-		if ( d.isEmpty() || !texInfo.value( d ).ok )
-			continue;
-		const TexInfo & ti = texInfo[d];
-		diffuseBuckets[std::make_tuple( ti.dxgi, ti.w, ti.h )].insert( d );
-	}
-	struct SetRow { quint32 dxgi, w, h, part, layers; };
-	std::vector<SetRow> sets;
-	QHash<QString, QPair<int, int>> diffuseLayer;     // folded diffuse -> (set, layer)
-	quint64 layerlessSets = 0;
-	for ( const auto & b : diffuseBuckets ) {
-		int layer = 0;
-		int set = -1;
-		quint32 part = 0;
-		for ( const QString & d : b.second ) {
-			if ( set < 0 || layer >= int( LODO_LAYER_CAP ) ) {
-				if ( set >= 0 )
-					part++;
-				sets.push_back( SetRow{ std::get<0>( b.first ), std::get<1>( b.first ), std::get<2>( b.first ), part, 0 } );
-				set = int( sets.size() ) - 1;
-				layer = 0;
-			}
-			diffuseLayer.insert( d, qMakePair( set, layer ) );
-			sets[size_t( set )].layers++;
-			layer++;
+		if ( r.textures.size() > int( NEAR_TEX_SLOTS ) )
+			slotOverflow++;
+		for ( int k = 0; k < r.textures.size() && k < int( NEAR_TEX_SLOTS ); k++ ) {
+			const QString t = nearTexKey( r.textures[k] );
+			if ( t.isEmpty() )
+				continue;
+			const TexInfo ti = texInfo.value( t );
+			if ( !ti.ok || ti.dxgi == 0 )
+				continue;
+			const PoolKey pk{ ti.cube ? 1U : 0U, ti.dxgi, ti.w, ti.h, ti.mips };
+			poolPaths[pk].insert( t );
+			if ( k == 0 )
+				diffusePools.insert( pk );
 		}
 	}
+	struct PoolRow { PoolKey key; quint32 part, first, layers; };
+	std::vector<PoolRow> pools;
+	std::vector<QString> poolTex;                        // texture records, pool by pool
+	QHash<QString, QPair<int, int>> texLayer;           // canonical path -> (pool, layer)
+	for ( int pass = 0; pass < 2; pass++ )
+		for ( const auto & pp : poolPaths ) {
+			if ( ( diffusePools.count( pp.first ) != 0 ) != ( pass == 0 ) )
+				continue;
+			const quint32 cap = pp.first.cube ? LODO_LAYER_CAP / 6 : LODO_LAYER_CAP;
+			bool fresh = true;
+			for ( const QString & t : pp.second ) {
+				if ( fresh || pools.back().layers >= cap ) {
+					pools.push_back( PoolRow{ pp.first, fresh ? 0U : pools.back().part + 1, quint32( poolTex.size() ), 0 } );
+					fresh = false;
+				}
+				texLayer.insert( t, qMakePair( int( pools.size() ) - 1, int( pools.back().layers ) ) );
+				pools.back().layers++;
+				poolTex.push_back( t );
+			}
+		}
+	if ( pools.size() >= 0xFFFF )
+		return fail( QString( "%1 texture pools; the u16 pool id holds 65,534" ).arg( pools.size() ) );
+	quint64 layerlessSets = 0;      // materials whose diffuse pool is past the u8 arraySet
 	for ( MatRec & r : matByKey ) {
-		const QString d = r.textures.isEmpty() ? QString() : nearFold( r.textures.front() );
-		const auto dl = diffuseLayer.constFind( d );
-		if ( dl == diffuseLayer.constEnd() )
+		const QString d = r.textures.isEmpty() ? QString() : nearTexKey( r.textures.front() );
+		const auto dl = texLayer.constFind( d );
+		if ( dl == texLayer.constEnd() )
 			continue;
 		if ( dl.value().first > 255 ) {
-			layerlessSets++;        // past the u8 arraySet: stays NO_LAYER, counted
+			layerlessSets++;        // stays NO_LAYER in the .lodo; the texarrays slot still names it
 			continue;
 		}
 		r.row.arraySet = quint8( dl.value().first );
@@ -830,9 +901,22 @@ bool nearLibraryBake( const EsmWorld & world, const NearLibraryOptions & opts, Q
 	set.vertexAo = true;
 	set.group = true;           // every placement its own group
 	quint64 nDisabled = 0, nScrap = 0, nParts = 0, nAlpha = 0, nEmit = 0;
+	quint64 nLightRefs = 0, nLightWide = 0;
+	std::map<quint16, quint64> identityCount;
 	for ( const NearCand & c : cands ) {
 		if ( !c.reason.isEmpty() )
 			continue;
+		const quint32 fileIndex = c.ref >> 24;
+		if ( fileIndex >= plugins.size() )
+			return fail( QString( "REFR %1 names file %2 of a %3-plugin load order" ).arg( c.ref, 8, 16, QChar( '0' ) )
+				.arg( fileIndex ).arg( plugins.size() ) );
+		const quint16 identity = plugins[fileIndex].identity;
+		identityCount[identity]++;
+		if ( identity & NEAR_IDENTITY_LIGHT ) {
+			nLightRefs++;
+			if ( c.ref & 0x00FFF000U )
+				nLightWide++;       // a light plugin's id past 0xFFF: the game cannot address it
+		}
 		const quint32 row = baseRow.at( std::make_pair( c.base, c.useSwap ) );
 		const NearModel & m = models[c.useKey];
 		LodiSrcInstance in;
@@ -844,6 +928,7 @@ bool nearLibraryBake( const EsmWorld & world, const NearLibraryOptions & opts, Q
 		in.baseId = row;
 		in.refFormId = c.ref;
 		in.scolPart = qint16( c.part );
+		in.identity = identity;
 		in.drawKey = drawKey[row];
 		in.boundRadius = lib.bases[row].boundRadius;
 		in.baseName = world.lodBase( c.base ).edid;
@@ -864,20 +949,19 @@ bool nearLibraryBake( const EsmWorld & world, const NearLibraryOptions & opts, Q
 
 	/* ---- 9. the sidecars ---- */
 	QStringList tx;
-	tx << QString( "# near texture sidecar v1, worldspace %1 (lane NEAR1). A material's arraySet/layer index a"
-		" DIFFUSE set below; every slot's own (format, size) bucket is listed per material. Nothing re-encoded." ).arg( ws );
-	tx << QStringLiteral( "# set <id> dxgi <code> w <px> h <px> part <n> layers <count>" );
-	for ( size_t i = 0; i < sets.size(); i++ )
-		tx << QString( "set %1 dxgi %2 w %3 h %4 part %5 layers %6" ).arg( i ).arg( sets[i].dxgi ).arg( sets[i].w )
-			.arg( sets[i].h ).arg( sets[i].part ).arg( sets[i].layers );
-	tx << QStringLiteral( "# layer <set> <layer> <diffuse path>" );
-	{
-		std::vector<std::tuple<int, int, QString>> ls;
-		for ( auto it = diffuseLayer.constBegin(); it != diffuseLayer.constEnd(); ++it )
-			ls.push_back( std::make_tuple( it.value().first, it.value().second, it.key() ) );
-		std::sort( ls.begin(), ls.end() );
-		for ( const auto & l : ls )
-			tx << QString( "layer %1 %2 %3" ).arg( std::get<0>( l ) ).arg( std::get<1>( l ) ).arg( std::get<2>( l ) );
+	tx << QString( "# near texture sidecar v2, worldspace %1 (lanes NEAR1, NEAR2). Every slot's texture sits in one"
+		" Texture2DArray pool keyed by (kind, dxgi, w, h, mips); a material's .lodo arraySet/layer = its diffuse's"
+		" pool/layer. The binary twin is %1.near.texarrays.bin. Nothing re-encoded." ).arg( ws );
+	tx << QStringLiteral( "# pool <id> kind <2d|cube> dxgi <code> w <px> h <px> mips <n> part <n> first <texture> layers <count>" );
+	for ( size_t i = 0; i < pools.size(); i++ )
+		tx << QString( "pool %1 kind %2 dxgi %3 w %4 h %5 mips %6 part %7 first %8 layers %9" ).arg( i )
+			.arg( pools[i].key.cube ? QStringLiteral( "cube" ) : QStringLiteral( "2d" ) ).arg( pools[i].key.dxgi )
+			.arg( pools[i].key.w ).arg( pools[i].key.h ).arg( pools[i].key.mips ).arg( pools[i].part ).arg( pools[i].first )
+			.arg( pools[i].layers );
+	tx << QStringLiteral( "# layer <pool> <layer> <path>" );
+	for ( size_t i = 0; i < poolTex.size(); i++ ) {
+		const auto tl = texLayer.value( poolTex[i] );
+		tx << QString( "layer %1 %2 %3" ).arg( tl.first ).arg( tl.second ).arg( poolTex[i] );
 	}
 	tx << QStringLiteral( "# tex <path> dxgi <code> w <px> h <px> mips <n> <ba2|loose|read>, or tex <path> missing" );
 	QMap<QString, quint64> texBuckets;
@@ -893,7 +977,8 @@ bool nearLibraryBake( const EsmWorld & world, const NearLibraryOptions & opts, Q
 			.arg( ti.mips ).arg( ti.src );
 		texBuckets[QString( "%1/%2x%3" ).arg( ti.dxgi ).arg( ti.w ).arg( ti.h )]++;
 	}
-	tx << QStringLiteral( "# mat <id> set <s> layer <l|none> bucket <name> family <legacy|pbr> lodm <path>, then slot <i> <path|-> <dxgi/wxh|missing|->" );
+	tx << QStringLiteral( "# mat <id> set <arraySet> layer <l|none> bucket <name> family <legacy|pbr> lodm <path>, then slot <i> <path|-> "
+		"<p<pool>:<layer>|missing|unusable|->" );
 	QMap<QString, quint64> matBuckets;
 	quint64 matPbr = 0;
 	for ( size_t i = 0; i < matOrder.size(); i++ ) {
@@ -907,11 +992,13 @@ bool nearLibraryBake( const EsmWorld & world, const NearLibraryOptions & opts, Q
 			.arg( row.layer == LODO_NO_LAYER ? QStringLiteral( "none" ) : QString::number( row.layer ) ).arg( bucket )
 			.arg( row.family == LODO_FAMILY_PBR ? QStringLiteral( "pbr" ) : QStringLiteral( "legacy" ) ).arg( r.lodm );
 		for ( int k = 0; k < r.textures.size(); k++ ) {
-			const QString t = nearFold( r.textures[k] );
+			const QString t = nearTexKey( r.textures[k] );
 			QString b = QStringLiteral( "-" );
 			if ( !t.isEmpty() ) {
 				const TexInfo ti = texInfo.value( t );
-				b = ti.ok ? QString( "%1/%2x%3" ).arg( ti.dxgi ).arg( ti.w ).arg( ti.h ) : QStringLiteral( "missing" );
+				const auto tl = texLayer.constFind( t );
+				b = !ti.ok ? QStringLiteral( "missing" ) : tl == texLayer.constEnd() ? QStringLiteral( "unusable" )
+					: QString( "p%1:%2" ).arg( tl.value().first ).arg( tl.value().second );
 			}
 			tx << QString( "  slot %1 %2 %3" ).arg( k ).arg( t.isEmpty() ? QStringLiteral( "-" ) : t ).arg( b );
 		}
@@ -919,6 +1006,65 @@ bool nearLibraryBake( const EsmWorld & world, const NearLibraryOptions & opts, Q
 	qint64 txBytes = 0, shBytes = 0, rfBytes = 0;
 	if ( !nearWriteText( stem + QStringLiteral( ".textures.txt" ), tx, &txBytes, &err ) )
 		return fail( err );
+
+	// lane NEAR2: <ws>.near.texarrays.bin, the pools in binary (layout in nearlib.h)
+	qint64 taBytes = 0;
+	{
+		QByteArray body, strings;
+		auto put = [&]( QByteArray & a, const void * p, int n ) { a.append( reinterpret_cast<const char *>( p ), n ); };
+		auto u8 = [&]( QByteArray & a, quint8 v ) { put( a, &v, 1 ); };
+		auto u16 = [&]( QByteArray & a, quint16 v ) { put( a, &v, 2 ); };
+		auto u32 = [&]( QByteArray & a, quint32 v ) { put( a, &v, 4 ); };
+		for ( const PoolRow & pr : pools ) {
+			u8( body, quint8( pr.key.cube ) ); u8( body, quint8( pr.key.dxgi ) ); u8( body, quint8( pr.key.mips ) ); u8( body, 0 );
+			u16( body, quint16( pr.key.w ) ); u16( body, quint16( pr.key.h ) );
+			u32( body, pr.first ); u16( body, quint16( pr.layers ) ); u16( body, quint16( pr.part ) );
+		}
+		for ( const QString & t : poolTex ) {
+			const auto tl = texLayer.value( t );
+			u32( body, quint32( strings.size() ) ); u16( body, quint16( tl.first ) ); u16( body, quint16( tl.second ) );
+			strings.append( t.toUtf8() );
+			strings.append( '\0' );
+		}
+		const quint32 slotsOffset = quint32( NEAR_TEXARRAYS_HEADER + body.size() );
+		for ( size_t i = 0; i < matOrder.size(); i++ ) {
+			const MatRec & r = *matOrder[i];
+			for ( int k = 0; k < int( NEAR_TEX_SLOTS ); k++ ) {
+				const QString t = k < r.textures.size() ? nearTexKey( r.textures[k] ) : QString();
+				quint32 v = NEAR_SLOT_NONE | NEAR_SLOT_EMPTY;
+				if ( !t.isEmpty() ) {
+					const auto tl = texLayer.constFind( t );
+					if ( tl != texLayer.constEnd() )
+						v = quint32( tl.value().first ) << 16 | quint32( tl.value().second );
+					else
+						v = NEAR_SLOT_NONE | ( texInfo.value( t ).ok ? NEAR_SLOT_UNUSABLE : NEAR_SLOT_MISSING );
+				}
+				u32( body, v );
+			}
+		}
+		const quint32 stringsOffset = quint32( NEAR_TEXARRAYS_HEADER + body.size() );
+		body.append( strings );
+		QByteArray hdr;
+		put( hdr, "NTXA", 4 );
+		u32( hdr, NEAR_TEXARRAYS_VERSION ); u32( hdr, NEAR_TEXARRAYS_HEADER );
+		u32( hdr, quint32( pools.size() ) ); u32( hdr, quint32( poolTex.size() ) ); u32( hdr, quint32( matOrder.size() ) );
+		u32( hdr, NEAR_TEX_SLOTS ); u32( hdr, quint32( strings.size() ) );
+		const quint64 lodoId = set.lodoIdentity;
+		put( hdr, &lodoId, 8 );
+		u32( hdr, NEAR_TEXARRAYS_HEADER );
+		u32( hdr, quint32( NEAR_TEXARRAYS_HEADER + pools.size() * 16 ) );
+		u32( hdr, slotsOffset ); u32( hdr, stringsOffset );
+		const quint64 sum = lodoFnv1a64( body.constData(), size_t( body.size() ) );
+		put( hdr, &sum, 8 );
+		if ( hdr.size() != int( NEAR_TEXARRAYS_HEADER ) )
+			return fail( QString( "texarrays header is %1 bytes" ).arg( hdr.size() ) );
+		QFile f( stem + QStringLiteral( ".texarrays.bin" ) );
+		if ( !f.open( QIODevice::WriteOnly | QIODevice::Truncate ) || f.write( hdr ) != hdr.size()
+				|| f.write( body ) != body.size() )
+			return fail( QString( "cannot write %1" ).arg( f.fileName() ) );
+		f.close();
+		taBytes = hdr.size() + body.size();
+	}
 
 	QStringList sh;
 	sh << QStringLiteral( "# near shapes v2: mesh<TAB>path<TAB>variant<TAB>block<TAB>name<TAB>verts<TAB>tris<TAB>lod0"
@@ -1010,6 +1156,24 @@ bool nearLibraryBake( const EsmWorld & world, const NearLibraryOptions & opts, Q
 	if ( !nearWriteText( stem + QStringLiteral( ".refs.txt" ), rf, &rfBytes, &err ) )
 		return fail( err );
 
+	// lane NEAR2: the identity table, and the stack every asset was resolved from
+	QStringList pt;
+	pt << QStringLiteral( "# near plugins v1: plugin<TAB>file index (refFormId >> 24)<TAB>identity (hex)<TAB>full|light<TAB>name. "
+		"Game form id: full = identity << 24 | (ref & 0xFFFFFF); light = 0xFE000000 | (identity & 0xFFF) << 12 | (ref & 0xFFF)" );
+	for ( size_t i = 0; i < plugins.size(); i++ )
+		pt << QString( "plugin\t%1\t%2\t%3\t%4" ).arg( i ).arg( plugins[i].identity, 4, 16, QChar( '0' ) )
+			.arg( plugins[i].light ? QStringLiteral( "light" ) : QStringLiteral( "full" ) ).arg( plugins[i].name );
+	qint64 plBytes = 0, rsBytes = 0;
+	if ( !nearWriteText( stem + QStringLiteral( ".plugins.txt" ), pt, &plBytes, &err ) )
+		return fail( err );
+	QStringList rs;
+	rs << QStringLiteral( "# near resources v1: the stack this library was baked from, one entry a line, LAST WINS "
+		"(WW_LODGEN_RESOURCES takes the same list joined by ';'). Empty = the data root and the Game Manager folders." );
+	for ( const QString & e : lodgenResources() )
+		rs << QDir::fromNativeSeparators( e );
+	if ( !nearWriteText( stem + QStringLiteral( ".resources.txt" ), rs, &rsBytes, &err ) )
+		return fail( err );
+
 	/* ---- 10. the census line ---- */
 	quint64 tris = 0, variants = 0;
 	for ( const LodoCluster & c : lib.clusters )
@@ -1043,11 +1207,33 @@ bool nearLibraryBake( const EsmWorld & world, const NearLibraryOptions & opts, Q
 		*report << QString( "near draw: distinct (mesh, material) pairs %1 (%2); triangles %3, clusters %4 (<= %5 triangles each), "
 			"vertices %6" ).arg( meshMatPairs.size() ).arg( nearCounts( pairBuckets ) ).arg( tris ).arg( lib.clusters.size() )
 			.arg( LODO_CLUSTER_MAX_TRIS ).arg( lib.vertices.size() );
-		*report << QString( "near textures: %1 distinct, %2 missing, %3 (format/size) buckets, %4 diffuse sets (%5 past the "
-			"u8 arraySet)" ).arg( texInfo.size() ).arg( texMissing ).arg( texBuckets.size() ).arg( sets.size() ).arg( layerlessSets );
+		quint64 cubeTex = 0, diffPools = 0, texUnusable = 0;
+		for ( const TexInfo & ti : texInfo )
+			if ( ti.ok && ti.dxgi == 0 )
+				texUnusable++;
+		for ( const PoolRow & pr : pools ) {
+			if ( pr.key.cube )
+				cubeTex += pr.layers;
+			if ( diffusePools.count( pr.key ) )
+				diffPools++;
+		}
+		*report << QString( "near textures: %1 distinct, %2 missing, %3 unusable (dxgi 0), %4 (format/size) buckets; "
+			"arrays: %5 pools (%6 hold a diffuse, %7 cube layers), %8 layers; materials past the u8 arraySet %9, "
+			"with more than %10 slots %11" ).arg( texInfo.size() ).arg( texMissing )
+			.arg( texUnusable ).arg( texBuckets.size() )
+			.arg( pools.size() ).arg( diffPools ).arg( cubeTex ).arg( poolTex.size() ).arg( layerlessSets )
+			.arg( NEAR_TEX_SLOTS ).arg( slotOverflow );
+		QStringList idParts;
+		for ( const auto & kv : identityCount )
+			idParts << QString( "%1 %2" ).arg( kv.first, 4, 16, QChar( '0' ) ).arg( kv.second );
+		*report << QString( "near identity: %1 plugins (%2 light); placements by identity (%3); from light plugins %4, "
+			"light ids past 0xFFF %5" ).arg( plugins.size() )
+			.arg( std::count_if( plugins.begin(), plugins.end(), []( const NearPlugin & q ) { return q.light; } ) )
+			.arg( idParts.join( QStringLiteral( ", " ) ) ).arg( nLightRefs ).arg( nLightWide );
 		*report << QString( "near files: %1.lodo %2 bytes (v%3), %1.lodi %4 bytes (v%5), textures.txt %6, shapes.txt %7, "
-			"refs.txt %8" ).arg( QFileInfo( stem ).absoluteFilePath() ).arg( lodoBytes ).arg( lh.version ).arg( lodiBytes )
-			.arg( is.version ).arg( txBytes ).arg( shBytes ).arg( rfBytes );
+			"refs.txt %8, plugins.txt %9, resources.txt %10, texarrays.bin %11" ).arg( QFileInfo( stem ).absoluteFilePath() )
+			.arg( lodoBytes ).arg( lh.version ).arg( lodiBytes ).arg( is.version ).arg( txBytes ).arg( shBytes ).arg( rfBytes )
+			.arg( plBytes ).arg( rsBytes ).arg( taBytes );
 		*report << QString( "near times: walk %1 s, models %2 s, textures %3 s, meshes %4 s, write %5 s, total %6 s" )
 			.arg( msWalk / 1000.0, 0, 'f', 1 ).arg( ( msPassA - msWalk ) / 1000.0, 0, 'f', 1 )
 			.arg( ( msTextures - msPassA ) / 1000.0, 0, 'f', 1 ).arg( ( msMeshes - msTextures ) / 1000.0, 0, 'f', 1 )

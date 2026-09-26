@@ -3709,6 +3709,7 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 		NearLibraryOptions no;
 		no.outDir = gLgNearLibrary;
 		no.dataRoot = dataRoot;
+		no.plugins = file.split( QChar( ',' ), Qt::SkipEmptyParts );
 		no.haveRegion = haveRegion;
 		if ( haveRegion )
 			for ( int k = 0; k < 4; k++ )
