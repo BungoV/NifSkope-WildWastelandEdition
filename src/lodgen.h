@@ -1061,14 +1061,25 @@ struct LodgenCoverOptions
 	float roadGroundPaint = 0.0f;
 
 	/*! Put the RAISED road families back into the ground sheet. Off, the
-	 *  default, a road base that carries its own Distant LOD mesh is refused,
-	 *  and so is anything under `Landscape\Roads\HighwayOverpass\` or
-	 *  `...\Bridge\` -- see `lodgenIsRaisedRoadModel`. On is the way back to
-	 *  ROADS1, which painted them. */
+	 *  default, anything under `Landscape\Roads\HighwayOverpass\` or
+	 *  `...\Bridge\` is refused -- see `lodgenIsRaisedRoadModel`. (Until lane
+	 *  ROADS1 of 2026-09-26 a base carrying its own Distant LOD was refused too;
+	 *  outside those folders every such base is laid on the ground -- Storrow
+	 *  Drive's river pieces, the park pavements -- so it is painted now.) On is
+	 *  the way back to the first ROADS1, which painted everything. */
 	bool roadRaised = false;
 
-	/*! Paint `Landscape\Sidewalks\` with the roads. OFF is the default, and
-	 *  the number that decided it was measured on chunk (-8,8) downtown, which
+	/*! Paint `Landscape\Sidewalks\` with the roads. ON IS THE DEFAULT since
+	 *  lane ROADS1 (2026-09-26), by bungo's ruling: "I approve of the roads" and
+	 *  "if that is their in game texture, it is their texture on our terrain
+	 *  too". The pavement is painted with the diffuse it wears in game, its
+	 *  material swap applied, checked against an independent re-rasterisation
+	 *  of the in-game materials over the Boston box. Bethesda's darker sheet is
+	 *  NOT the target. `--no-road-sidewalks` is the off switch;
+	 *  `--road-sidewalks` is kept and does nothing.
+	 *
+	 *  The history -- why it was OFF from 2026-09-12 to 2026-09-26. The number
+	 *  that decided it then was measured on chunk (-8,8) downtown, which
 	 *  carries 17,801 projected sidewalk texels (the brief asked for at least
 	 *  5,000), 15,696 of them more than two texels from any flat road so the
 	 *  two families cannot be confused:
@@ -1083,9 +1094,9 @@ struct LodgenCoverOptions
 	 *    the same tile says the flat ROAD family is right: vanilla's clearance
 	 *    +0.100, ours +0.101, mean error 16.7 -- better than the tile's own.
 	 *
-	 *  So the roads stay and the pavements go. On is the way back, and
-	 *  `--roads-legacy` includes it. */
-	bool roadSidewalks = false;
+	 *  That compared us with Bethesda's own bake, which is not the look bungo
+	 *  asked for. `--roads-legacy` includes the pavements too. */
+	bool roadSidewalks = true;
 
 	/*! THE FAR TERRAIN RECEIVES AMBIENT OCCLUSION FROM THE PLACED OBJECTS
 	 *  (lane GROUND1, bungo 2026-09-11 15:4x: "Okay, so the AO can be acurate
@@ -1279,13 +1290,14 @@ struct LodgenRoadCensus
 	int alphaRejected = 0;      //!< texels an alpha-tested shape refused
 	int refusedNoLoad = 0;      //!< road models that would not load
 	int refusedNoTexture = 0;   //!< road shapes whose diffuse would not resolve
-	int refusedRaised = 0;      //!< road placements refused as raised (lodgenIsRaisedRoadModel or hasLod)
+	int refusedRaised = 0;      //!< road placements refused as raised (lodgenIsRaisedRoadModel; hasLod no longer refuses, ROADS1)
 	int raisedBases = 0;        //!< distinct raised bases behind those refusals
 	int blendTexels = 0;        //!< texels a partially transparent road shape composited into
 	int refusedSidewalk = 0;    //!< placements refused as `Landscape\Sidewalks\` (roadSidewalks off)
 	int sidewalkBases = 0;      //!< distinct sidewalk bases behind those refusals
 	int groundShapes = 0;       //!< road shapes whose material is under materials/Landscape/Ground/
 	int groundTexels = 0;       //!< texels such a shape wrote (0 when roadGroundPaint is 0)
+	int swappedPlacements = 0;  //!< stamped placements drawn with a material swap (XMSP / MODS), ROADS1
 	QStringList refusals;       //!< "<reason> <name>", deduplicated, capped at 16
 	void addRefusal( const char * why, const QString & name );
 	void add( const LodgenRoadCensus & o );

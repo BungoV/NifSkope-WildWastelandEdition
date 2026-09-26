@@ -1661,9 +1661,9 @@ public:
 					"ground they pass over as well.\n"
 					"Command line: --road-raised / --no-road-raised" ) );
 			xB( f, "LodgenRoadSidewalksCheck", QStringLiteral( "roadSidewalks" ),
-				tr( "Paint sidewalks" ), false,
-				tr( "Sidewalk models are painted like roads.\n"
-					"Command line: --road-sidewalks / --no-road-sidewalks" ) );
+				tr( "Paint sidewalks" ), true,
+				tr( "Sidewalk models are painted like roads, with the texture they wear in game.\n"
+					"Command line: --no-road-sidewalks turns them off" ) );
 			roadsSection->body()->setLayout( f.g );
 			auto sync = [this]() {
 				const bool on = roadsCheck->isChecked();

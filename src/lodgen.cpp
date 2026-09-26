@@ -8550,6 +8550,23 @@ bool lodgenIsSidewalkModel( const QString & modelPath )
 		&& c[i + 1] == QLatin1String( "sidewalks" );
 }
 
+/*! The effective material swap of one road placement -- lane SWAP1's rule
+ *  (nativeemit.cpp `nativeEffectiveSwap`, which lives in that file's anonymous
+ *  namespace; nearlib.cpp restates it the same way). First nonzero wins:
+ *  the REFR's XMSP; the MODS of the REFR's base (a SCOL part: the SCOL's);
+ *  a SCOL part only, the MODS of the part's own base. 0 = no swap. */
+static quint32 lodgenRoadEffectiveSwap( const EsmWorld & world, quint32 xmsp, quint32 nameBase,
+	quint32 partBase )
+{
+	if ( xmsp )
+		return xmsp;
+	if ( nameBase && world.lodBase( nameBase ).materialSwap )
+		return world.lodBase( nameBase ).materialSwap;
+	if ( partBase && partBase != nameBase && world.lodBase( partBase ).materialSwap )
+		return world.lodBase( partBase ).materialSwap;
+	return 0;
+}
+
 bool lodgenIsRaisedRoadModel( const QString & modelPath )
 {
 	QString p = modelPath;
@@ -8598,6 +8615,7 @@ void LodgenRoadCensus::add( const LodgenRoadCensus & o )
 	sidewalkBases += o.sidewalkBases;
 	groundShapes += o.groundShapes;
 	groundTexels += o.groundTexels;
+	swappedPlacements += o.swappedPlacements;
 	for ( const QString & r : o.refusals )
 		if ( refusals.size() < 16 && !refusals.contains( r ) )
 			refusals.append( r );
@@ -8657,6 +8675,7 @@ QString LodgenRoadCensus::line() const
 	kv( "sidewalk_bases", sidewalkBases );
 	kv( "ground_shapes", groundShapes );
 	kv( "ground_texels", groundTexels );
+	kv( "swapped_placements", swappedPlacements );
 	s += QStringLiteral( " refusals=" );
 	s += refusals.isEmpty() ? QStringLiteral( "none" )
 		: QString( QStringLiteral( "[%1]" ) ).arg( refusals.join( QStringLiteral( "; " ) ) );
@@ -8787,19 +8806,33 @@ public:
 					Matrix rm;
 					rm.fromEuler( -r.rot[0], -r.rot[1], -r.rot[2] );
 					const Vector3 rp( r.pos[0], r.pos[1], r.pos[2] );
+					/* THE MATERIAL SWAP (lane ROADS1, 2026-09-26). The game draws a
+					 * placement with its effective MSWP applied -- the REFR's XMSP,
+					 * else the MODS of the REFR's base (the SCOL for a part), else a
+					 * part's own MODS: `lodgenRoadEffectiveSwap`, the far field's rule --
+					 * so the stamp paints the swapped material's diffuse, as bungo
+					 * ruled ("if that is their in game texture, it is their texture on
+					 * our terrain too"). Measured on the Boston box: 193 pavement and
+					 * 18 road REFRs carry an XMSP (SWtoBrickSw, Sidewalk01 -> the
+					 * SWLand01 ground, ...); the stamp painted the unswapped concrete
+					 * there, 147.7 luma where the game shows 97.9. */
 					if ( std::memcmp( &r.baseType, "SCOL", 4 ) == 0 ) {
-						for ( const EsmScolPart & part : world.scolParts( r.base ) )
+						for ( const EsmScolPart & part : world.scolParts( r.base ) ) {
+							const LodgenMaterialSubst * sw = swapFor( world,
+								lodgenRoadEffectiveSwap( world, r.materialSwap, r.base, part.base ) );
 							for ( const EsmScolPlacement & pl : part.placements ) {
 								Matrix pm;
 								pm.fromEuler( -pl.rot[0], -pl.rot[1], -pl.rot[2] );
 								addPlacement( world, dataRoot, loaded, part.base,
 									rp + rm * ( Vector3( pl.pos[0], pl.pos[1], pl.pos[2] )
 										* r.scale ),
-									rm * pm, r.scale * pl.scale );
+									rm * pm, r.scale * pl.scale, sw );
 							}
+						}
 						continue;
 					}
-					addPlacement( world, dataRoot, loaded, r.base, rp, rm, r.scale );
+					addPlacement( world, dataRoot, loaded, r.base, rp, rm, r.scale,
+						swapFor( world, lodgenRoadEffectiveSwap( world, r.materialSwap, r.base, 0 ) ) );
 				}
 			}
 		}
@@ -9063,37 +9096,73 @@ public:
 	const LodgenRoadCensus & gatherCensus() const { return cen; }
 
 private:
+	/*! The substitution list of one MSWP form, built once: folded BNAM ->
+	 *  SNAM as stored, the first row per key wins, a row that swaps a material
+	 *  for itself is dropped -- the far field's rule (nativeemit.cpp). Null for
+	 *  no swap, a missing record, or a swap with no usable row. */
+	const LodgenMaterialSubst * swapFor( const EsmWorld & world, quint32 mswp )
+	{
+		if ( !mswp )
+			return nullptr;
+		auto it = swapCache.constFind( mswp );
+		if ( it == swapCache.constEnd() ) {
+			LodgenMaterialSubst subst;
+			const EsmMaterialSwap & mw = world.materialSwap( mswp );
+			if ( mw.exists ) {
+				QSet<QString> seen;
+				for ( const EsmMaterialSubst & row : mw.rows ) {
+					const QString k = lodgenMaterialSwapKey( row.original );
+					if ( k.isEmpty() || row.replacement.isEmpty() || seen.contains( k ) )
+						continue;
+					seen.insert( k );
+					if ( lodgenMaterialSwapKey( row.replacement ) == k )
+						continue;
+					subst.append( qMakePair( k, row.replacement ) );
+				}
+			}
+			it = swapCache.insert( mswp, subst );
+		}
+		return it->isEmpty() ? nullptr : &*it;
+	}
+
 	void addPlacement( const EsmWorld & world, const QString & dataRoot,
 		QSet<QString> & loaded, quint32 base, const Vector3 & pos,
-		const Matrix & rot, float scale )
+		const Matrix & rot, float scale, const LodgenMaterialSubst * swap )
 	{
 		const EsmLodBase & lb = world.lodBase( base );
 		if ( std::memcmp( &lb.type, "STAT", 4 ) != 0 )
 			return;
 		if ( !lodgenIsRoadModel( lb.model ) )
 			return;
-		/* THE RAISED FAMILIES. A base that carries its own Distant LOD mesh is
-		 * DRAWN at distance as an object; painting it into the ground as well
-		 * draws it twice, once in the air where it stands and once flattened on
-		 * the soil beneath. `lodgenIsRaisedRoadModel` closes the 22 shipped
-		 * HighwayOverpass and Bridge bases that carry no MNAM at all. */
-		if ( !raised && ( lb.hasLod || lodgenIsRaisedRoadModel( lb.model ) ) ) {
+		/* THE RAISED FAMILIES: the HighwayOverpass and Bridge folders, by
+		 * name. A deck painted into the ground would be drawn twice, once in
+		 * the air where it stands and once flattened on the soil beneath.
+		 *
+		 * Until lane ROADS1 (2026-09-26) any base carrying its own Distant LOD
+		 * (`hasLod`) was refused here too. MEASURED over the whole load order:
+		 * outside those two folders the has-LOD road bases are exactly
+		 * `Roads\River\RRoadCurveCustom01..11` (Storrow Drive along the river,
+		 * 11 placements), `Sidewalks\Park\*` (16 bases, 45 placements) and
+		 * `Sidewalks\Plaza\PlazaSwanPond01` -- all laid ON the ground, none
+		 * raised. Refusing them left the three bare river-bank strips bungo
+		 * circled ("Is there no roads here?"). A flat piece's own LOD mesh
+		 * lies on the same ground the stamp paints, so nothing is drawn twice
+		 * in the air. */
+		if ( !raised && lodgenIsRaisedRoadModel( lb.model ) ) {
 			cen.refusedRaised++;
 			const QString rk = lb.model.toLower();
 			if ( !raisedSeen.contains( rk ) ) {
 				raisedSeen.insert( rk );
 				cen.raisedBases++;
-				cen.addRefusal( lb.hasLod ? "raised-haslod" : "raised-folder", lb.model );
+				cen.addRefusal( "raised-folder", lb.model );
 			}
 			return;
 		}
-		/* THE PAVEMENTS. Measured on chunk (-8,8), 15,696 sidewalk texels more
-		 * than two texels from any flat road: vanilla's own sheet sits 0.102
-		 * BELOW its displaced-mask floor there in brightness, ours cleared the
-		 * same floor by 0.284, and our mean luminance was 128.4 against
-		 * vanilla's 86.5 -- 42 units. The flat road family on the same tile
-		 * matches vanilla's clearance to 0.001. So pavements are out by
-		 * default; `--road-sidewalks` (and `--roads-legacy`) put them back. */
+		/* THE PAVEMENTS. Painted by default since lane ROADS1 (2026-09-26), by
+		 * bungo's ruling: the pavement wears its in-game texture on our terrain,
+		 * not Bethesda's darker bake (which read 86.5 luma on chunk (-8,8) where
+		 * the in-game concrete is ~138). `--no-road-sidewalks` is the off
+		 * switch. */
 		if ( !sidewalks && lodgenIsSidewalkModel( lb.model ) ) {
 			cen.refusedSidewalk++;
 			const QString sk = lb.model.toLower();
@@ -9105,7 +9174,9 @@ private:
 			return;
 		}
 		cen.placements++;
-		const QVector<LodSrcShape> & src = lodgenLoadModel( dataRoot, lb.model, modelCache );
+		if ( swap )
+			cen.swappedPlacements++;
+		const QVector<LodSrcShape> & src = lodgenLoadModel( dataRoot, lb.model, modelCache, swap );
 		const QString key = lb.model.toLower();
 		if ( src.isEmpty() ) {
 			if ( !loaded.contains( key ) ) {
@@ -9189,6 +9260,7 @@ private:
 	}
 
 	QHash<QString, QVector<LodSrcShape>> modelCache;
+	QHash<quint32, LodgenMaterialSubst> swapCache;
 	QHash<QString, LodgenRoadMat> matCache;
 	QVector<LodgenRoadShape> shapes;
 	LodgenRoadCensus cen;
@@ -14375,6 +14447,7 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 		r << QString( "roadSidewalksIncluded %1" ).arg( opts.cover.roadSidewalks ? 1 : 0 );
 		r << QString( "roadRefusedSidewalk %1" ).arg( roadCensus.refusedSidewalk );
 		r << QString( "roadSidewalkBases %1" ).arg( roadCensus.sidewalkBases );
+		r << QString( "roadSwappedPlacements %1" ).arg( roadCensus.swappedPlacements );
 		r << QString( "roadRefusals %1" ).arg( roadCensus.refusals.isEmpty()
 			? QStringLiteral( "none" )
 			: QString( QStringLiteral( "[%1]" ) )

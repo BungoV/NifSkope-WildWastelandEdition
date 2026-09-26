@@ -266,8 +266,10 @@ QString lodgenSwitchDigestOf( const QStringList & argv );
  *  The REVISION is the manual half: bump it when a change moves output bytes
  *  with no setting moving (a new rule, a bug fix in a writer). The dump cannot
  *  see a constant that lives inside lodgen.cpp, and this number is how a lane
- *  says so. */
-constexpr int kLodgenGeneratorRevision = 1;
+ *  says so.
+ *  2: lane ROADS1 (2026-09-26) -- the road stamp applies the material swap and
+ *     paints has-LOD ground pieces (river road, park pavements). */
+constexpr int kLodgenGeneratorRevision = 2;
 
 /*! What the front end adds to the pass's own options: the whole-region steps,
  *  the far-ring cut, the pyramid and the native modules. Every field is set by
