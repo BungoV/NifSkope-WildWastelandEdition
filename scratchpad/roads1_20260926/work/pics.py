@@ -9,7 +9,8 @@ from PIL import Image, ImageDraw
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-sys.path.insert(0, r'E:/Projects/NifskopeWWE-seam1/scratchpad/seam1_20260925')
+sys.path.insert(0, os.path.join(HERE, '..', '..', '..', 'tests', 'spells'))  # lodgen_vt_check, which vtread imports
+sys.path.insert(0, r'E:/Projects/NifskopeWildWastelandEdition/scratchpad/seam1_20260925')
 import vtread  # noqa: E402
 import faith_cmp as fc  # noqa: E402
 

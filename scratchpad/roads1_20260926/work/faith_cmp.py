@@ -12,7 +12,8 @@ import sys
 import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, r'E:/Projects/NifskopeWWE-seam1/scratchpad/seam1_20260925')
+sys.path.insert(0, os.path.join(HERE, '..', '..', '..', 'tests', 'spells'))  # lodgen_vt_check, which vtread imports
+sys.path.insert(0, r'E:/Projects/NifskopeWildWastelandEdition/scratchpad/seam1_20260925')
 import vtread  # noqa: E402
 
 BAKES = r'C:/Users/bungo/AppData/Local/Temp/claude/E--Projects-Claude/b560e4ec-6e66-4c21-9572-1ad4acca0043/scratchpad/roads1b/bake/'

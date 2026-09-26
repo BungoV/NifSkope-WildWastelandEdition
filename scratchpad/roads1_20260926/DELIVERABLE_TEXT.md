@@ -14,8 +14,8 @@ and the report commit. Not merged, not installed.
   HighwayOverpass and Bridge folders only; the river road, 45 park pavement placements and PlazaSwanPond01 are painted.
 - The 2x2 tile lines on pavements are the texture's own slab joints (measured), kept.
 - kLodgenGeneratorRevision 1 -> 2.
-- OWED: the pavements-on/off confinement diff, the installed|new pictures, tests/spells/lodgen_roads.sh (R5 may
-  move with pavements on by default) -- all blocked at hand-back by the turn lock (MISTAKES below).
+- OWED: the installed|new pictures (pics.py ready). lodgen_roads.sh R5 is red, but equally red at 6382a09a (0.3210;
+  ROADS1 0.3193): a stale gate, not this lane. Pavements on/off confinement: 0 texels outside the footprints.
 
 ## WW_CHANGES (user-facing)
 - LOD terrain: pavements and sidewalks now appear in the distant ground colour by default, wearing the same

@@ -108,10 +108,25 @@ the way to leave pavements out. No fix-only toggle: the swap and the has-LOD rul
   cover different fragments (alpha test, or a texture missing from the archives such as quarrymarblefloor01), so
   the old paint that was removed lies under the OLD footprint; the union settles it. VT.2 and VT.4 (the next rung
   of the same colour ladder) differ; VT.lodm is byte-identical.
-- **Confinement, pavements on vs off (same code) -- NOT RUN.** The `--no-road-sidewalks` bake and the default
-  bake are queued behind the machine's NifSkope turn lock, which I took by mistake (see the end of this file).
-- **Harness:** tests/spells/lodgen_roads.sh reaches this change (default pavements ON can move R5, the
-  road-presence metric against vanilla) -- NOT RUN for the same reason.
+- **Confinement, pavements on vs off (same code, run after the lock cleared, 15:3x):** `new_nosw_s0`
+  (`--no-road-sidewalks --land-shade 0`) against `new_s0`: 1,159,436 colour texels changed, 0 outside the
+  footprints' 4x4 blocks (135,945 outside strictly: the compression blocks). VT.lodm byte-identical.
+  Census: off = `roadRefusedSidewalk 4040 roadSidewalksIncluded 0`; default = `roadRefusedSidewalk 0
+  roadSidewalksIncluded 1 roadSwappedPlacements 229`, `roadRefusedRaised 255` in both.
+- **Harness tests/spells/lodgen_roads.sh** (it reaches this change: pavements ON by default can move R5, the
+  road-presence metric against vanilla's Sanctuary sheet). Run 15:33-15:37 under the turn, three exes, logs
+  `lodgen_roads_{run,rung,nosw}.log` beside this file (not committed):
+
+  | exe | R1-R4 ok | R5 after (bar 1 needs 0.3768, bar 2 0.4225) | verdict |
+  |---|---|---|---|
+  | rung 6382a09a | 12 | 0.3210 | FAIL |
+  | ROADS1 with `--no-road-sidewalks` | 12 | 0.3210 | FAIL (identical to the rung) |
+  | ROADS1 default | 12 | 0.3193 | FAIL |
+
+  R5 fails on the rung too, so the failure is NOT this lane's: the gate was already red at 6382a09a (skill
+  ww-stale-gate-attribution applies before anyone re-pins it). ROADS1 with pavements off reproduces the rung's
+  number exactly (the swap and has-LOD changes do not reach Sanctuary's loop road). Pavements on move it by
+  -0.0017. R1-R4 all pass on every exe.
 
 ## 7. Pictures (scratchpad/roads1_20260926/pics/, not committed)
 - river_decisions_-6_-6_1_-2.png, _river_decisions_rot180_half.png: the riverside decision map (section 4).
@@ -132,4 +147,7 @@ status check took the lock as "anon" at 13:00:08 (E:\Projects\NifskopeWWE-fix1\s
 Releasing it (`bash turn.sh release anon`) was refused by the permission check, so it is still held and blocks
 every lane that uses turn.sh, mine included. My chain (new_nosw_s0, then new_default) waits behind it and behind
 AO2's headless NifSkope (scratchpad\ao2\ns_before, which turn.sh does not see: it only looks for NifskopeWWE-*
-paths). Owed after release: `python confine.py new_s0 new_nosw_s0`, `python pics.py new_default`, lodgen_roads.sh.
+paths). Someone released it later (at 15:32 it was held by AO2 as "ao2pic"); my three bakes then finished and the on/off
+confinement ran. Still owed: `python pics.py new_default` (refused earlier; left for bungo).
+Also: SEAM1's worktree is gone, so faith_cmp.py / pics.py now import vtread from main's scratchpad/seam1_20260925
+(read-only) and lodgen_vt_check from this worktree's tests/spells.
