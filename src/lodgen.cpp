@@ -9839,7 +9839,10 @@ private:
 			const QVector<LodSrcShape> src = lodgenLoadModel( dataRoot, lb.model, modelCache, sw );
 			const int recIndex = flatRecs.size();
 			if ( src.isEmpty() ) {
+				/* No override decides a model that will not load: a bake line
+				 * cannot paint it, and the report says why, not "overridden". */
 				rec.why = "would not load";
+				rec.override = -1;
 				flatRecs.append( rec );
 				continue;
 			}
@@ -10135,7 +10138,8 @@ QString LodgenRoadSet::flatReport( const QString & title ) const
 	struct Row
 	{
 		QString model;
-		QSet<QString> plugins;
+		//! plugin of the placing record -> (placements, painted)
+		QMap<QString, QPair<int, int>> plugins;
 		int placements = 0, painted = 0, overridden = 0, squares = 0;
 		std::vector<double> top, under, ratio;
 		QMap<QString, int> why;
@@ -10148,7 +10152,9 @@ QString LodgenRoadSet::flatReport( const QString & title ) const
 		Row & w = rows[r.model.toLower()];
 		if ( w.model.isEmpty() )
 			w.model = r.model;
-		w.plugins.insert( r.plugin.isEmpty() ? QStringLiteral( "?" ) : r.plugin );
+		QPair<int, int> & pp = w.plugins[r.plugin.isEmpty() ? QStringLiteral( "?" ) : r.plugin];
+		pp.first++;
+		pp.second += r.painted ? 1 : 0;
 		w.placements++;
 		w.squares += r.squares;
 		w.hasLod = w.hasLod || r.hasLod;
@@ -10201,12 +10207,23 @@ QString LodgenRoadSet::flatReport( const QString & title ) const
 		" top (90th percentile) >= -8 and <= 64; steep side rising > 8 / visible top <= 0.35; some top." );
 	out << QString( "# Override file: %1 (%2 rule line(s)%3)" ).arg( flatFileResolved ).arg( flatRules.size() )
 		.arg( flatProblems.isEmpty() ? QString() : QStringLiteral( "; " ) + flatProblems.join( QStringLiteral( "; " ) ) );
+	QMap<QString, QPair<int, int>> byPlugin;
+	for ( const LodgenFlatRec & r : flatRecs ) {
+		QPair<int, int> & pp = byPlugin[r.plugin.isEmpty() ? QStringLiteral( "?" ) : r.plugin];
+		pp.first++;
+		pp.second += r.painted ? 1 : 0;
+	}
+	QStringList pls;
+	for ( auto it = byPlugin.constBegin(); it != byPlugin.constEnd(); ++it )
+		pls << QString( "%1 %2 examined / %3 painted" ).arg( it.key() ).arg( it->first ).arg( it->second );
+	out << QStringLiteral( "# By the plugin of the placing record: " ) + pls.join( QStringLiteral( "; " ) );
 	out << QString( "# Placements examined %1, painted %2, decided by an override %3, models %4, texels written %5,"
 		" shapes with a greyscale-to-palette material painted %6" )
 		.arg( flatRecs.size() ).arg( painted ).arg( over ).arg( rows.size() ).arg( tex ).arg( flatG2p );
 	out << QStringLiteral( "# top / underside in game units above the ground, medians over the model's placements;"
 		" squares = 16-unit squares under its placements; texels = sheet texels it wrote last" );
-	out << QStringLiteral( "model	plugin	placements	top	underside	side/top	decision	kind	has LOD	squares	texels" );
+	out << QStringLiteral( "# plugin: the placing records' plugins; with more than one, each as painted/placements" );
+	out << QStringLiteral( "model\tplugin\tplacements\ttop\tunderside\tside/top\tdecision\tkind\thas LOD\tsquares\ttexels" );
 	auto med = []( const std::vector<double> & v ) {
 		return v.empty() ? QStringLiteral( "-" ) : QString::number( lodgenFlatPercentile( v, 50.0 ), 'f', 1 );
 	};
@@ -10214,12 +10231,14 @@ QString LodgenRoadSet::flatReport( const QString & title ) const
 		return v.empty() ? QStringLiteral( "-" ) : QString::number( lodgenFlatPercentile( v, 50.0 ), 'f', 2 );
 	};
 	for ( const Row * w : order ) {
-		QStringList pl = w->plugins.values();
-		pl.sort( Qt::CaseInsensitive );
+		QStringList pl;
+		for ( auto it = w->plugins.constBegin(); it != w->plugins.constEnd(); ++it )
+			pl << ( w->plugins.size() == 1 ? it.key()
+				: QString( "%1 %2/%3" ).arg( it.key() ).arg( it->second ).arg( it->first ) );
 		QStringList dec;
 		for ( auto it = w->why.constBegin(); it != w->why.constEnd(); ++it )
 			dec << QString( "%1 x%2" ).arg( it.key() ).arg( it.value() );
-		out << QString( "%1	%2	%3	%4	%5	%6	%7	%8	%9	%10	%11" )
+		out << QString( "%1\t%2\t%3\t%4\t%5\t%6\t%7\t%8\t%9\t%10\t%11" )
 			.arg( w->model, pl.join( QChar( '+' ) ) ).arg( w->placements )
 			.arg( med( w->top ), med( w->under ), med2( w->ratio ), dec.join( QStringLiteral( "; " ) ),
 				QString::fromLatin1( lodgenFlatKindLabel( w->model ) ), w->hasLod ? QStringLiteral( "yes" ) : QStringLiteral( "no" ) )

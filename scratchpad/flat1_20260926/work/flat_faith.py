@@ -29,7 +29,6 @@ import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import flatgeo as fg  # noqa: E402
-import flat_rule as fr  # noqa: E402
 
 rg = fg.rg
 OUT = os.path.join(HERE, 'out')
@@ -98,6 +97,7 @@ def frags(xs, ys):
 
 
 def build():
+    import flat_rule as fr  # the census (loads its pickle)
     t0 = time.time()
     R = rg.Reader()
     T = fg.Terrain(R)
@@ -284,16 +284,16 @@ def bil_vec(a, u, v):
             + a[y1, x0] * (1 - fx) * fy + a[y1, x1] * fx * fy)
 
 
-def sheet(tag, level=2):
+def sheet(tag, level=2, role=1):
     sys.path.insert(0, os.path.join(HERE, '..', '..', '..', 'tests', 'spells'))
     sys.path.insert(0, r'E:/Projects/NifskopeWildWastelandEdition/scratchpad/seam1_20260925')
     import vtread
     v = vtread.Vt(BAKES + tag + '/mod/FO4CSLOD/Commonwealth/Commonwealth.VT.%d.lodt' % level)
-    m, wW, nN = v.mosaic(CX0, CY0, CX1, CY1, 1)
+    m, wW, nN = v.mosaic(CX0, CY0, CX1, CY1, role)
     per = v.content // v.levelDim
     c0 = (CX0 - wW) * per
     r0 = (nN - (CY1 + 1)) * per
-    return m[r0:r0 + (CY1 - CY0 + 1) * per, c0:c0 + (CX1 - CX0 + 1) * per, :3].astype(float)
+    return m[r0:r0 + (CY1 - CY0 + 1) * per, c0:c0 + (CX1 - CX0 + 1) * per, (slice(0, 3) if role == 1 else slice(3, 4))].astype(float)
 
 
 def sample():

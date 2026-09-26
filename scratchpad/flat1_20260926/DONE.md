@@ -79,3 +79,35 @@ has-LOD road that lies on the ground: the distant model sits at the same height 
 is drawn twice in the air.
 
 **Under water: 4,291** (boulders and coast rocks; water 450 default, also 850 and 578).
+
+## 3. The rule and the override file (in src/lodgen.cpp, beside the road stamp)
+Code: `LodgenRoadSet` (gather -> addPlacement -> evaluateFlat -> finishFlat; rasteriseFlat after the road pass).
+* Candidates: every STAT that is not a road model (SCOL parts expanded), in the gather rectangle plus 2 cells,
+  not disabled. No path and no kind is read by the decision (the kind column in the report is a label only).
+  Has-LOD pieces are painted like any other, as ROADS1 does for the ground road pieces.
+* Measured per placement, mesh x scale x rotation, over 16-unit squares, against LAND raised to the highest
+  stamped (non-raised) road triangle there. Refused, in this order: would not load; no land under it; under
+  water (origin below the cell's water); underside median > 16 above the ground (not on the ground: a bridge,
+  a raised piece, a roof); top p90 < -8 (under the ground); top p90 > 64 (too tall); steep side rising above 8
+  / visible top > 0.35 (stands up); no top surface. The census histograms (section 2) chose 64 / 0.35 / 16 / -8;
+  the brief's "start near 70" became 64: railway track reaches 57, and above 64 the counts that pass the side
+  test are flat noise (26-34 a bin).
+* Override file: plain text, one line each `bake <path>` or `nobake <path>`, `#` comments. A path ending in
+  .nif is one model, otherwise a folder prefix; lower case, either slash, a leading data/ and meshes/ ignored.
+  Its lines win over the rule (the longest match wins, a later line wins a tie).
+  **Location and name: `lodgen_flat_objects.txt` beside NifSkope.exe** (the folder the exe runs from). Made
+  with only its header comment when missing, never written again; read on every bake;
+  `--flat-objects-file <path>` names another file (a named file that is missing is a stated problem, not made).
+  The chunk-pass digest carries `flatObjects` and `flatObjectsRules` (count + sha1 of the rule lines), so a rule
+  edit rebakes and a comment edit does not.
+* Switches: default ON with the roads. `--no-flat-objects`, panel row *Paint flat ground objects* (Roads
+  section, ticked). `--roads-legacy` leaves it off unless `--flat-objects` is named too.
+* Per-bake report: `<mod>/FO4CSLOD/<ws>/<ws>.flat_objects_report.txt`, written by the terrain VT bake beside
+  its sheets, never inside a .lodt. One tab-separated row per base model: model, plugin(s), placements, median
+  top, median underside, side/top, decision breakdown (painted xN; refused, <reason> xN; overridden bake|nobake
+  (line N; the rule: ...) xN), kind label, has LOD, squares, texels written. The bake log carries the counts
+  (flatExamined, flatPainted, flatOverridden, flatHasLod, flatShapeTiles, flatTexels, flatDecalTexels,
+  flatRefusedNoTexture, flatReport <path>).
+* Out of scope, stated: TXST projected decals (1,982 in the box) have no mesh and are not painted; the legacy
+  per-chunk .BTR path paints the flat objects too but writes no report file; the flat pass runs only when the
+  roads are on.
