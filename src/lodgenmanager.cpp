@@ -7,6 +7,7 @@ BSD License - see nifskope.h
 #include "lodbfile.h"
 #include "lodgen.h"
 #include "lodgenchunkpass.h"
+#include "lodgengpu.h"
 #include "lodgenparallel.h"
 #include "lodgenlayout.h"
 #include "lodgenloadorder.h"
@@ -3081,6 +3082,9 @@ private:
 		// the process-wide generator settings, from their rows, before any
 		// stage reads one of them (lane PANEL1)
 		applyGeneratorSettings();
+		// GPU or CPU for this run, from Settings > NIF > LOD bake > Use GPU (src/lodgengpu.h)
+		lodgenGpuConfigure( false );
+		qInfo().noquote() << lodgenGpuReport();
 		// the four stage times start at zero for every run, so a stage that
 		// does not run this time reads 0 and not the last run's number
 		msLandscape = msMeshes = msTextures = msImpostors = 0;
@@ -3357,7 +3361,7 @@ private:
 				incRun.region[2] = x1Spin->value();
 				incRun.region[3] = y1Spin->value();
 				incRun.switches = lodgenSwitchesWithIdentity(
-					lodgenSwitchDigestOf( { QStringLiteral( "--panel" ) } ), word );
+					lodgenSwitchDigestOf( { QStringLiteral( "--panel" ) } ), word + lodgenGpuDigestWord() );
 				incRun.regionProducts = objectPassOn()
 					&& ( arraysCheck->isChecked() || idx.atlas || !cardSourceDir().isEmpty() );
 				incRun.nativeCache = true;
