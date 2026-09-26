@@ -346,6 +346,17 @@ int lodgenLandDetailSource();
 void lodgenSetLandDetailSource( int mode );      // NONE = off = the rung's bytes
 QString lodgenVanillaLodRoot();
 void lodgenSetVanillaLodRoot( const QString & root );
+/*! THE LANDLESS-CELL HEIGHT FILL (lane FIX1, 2026-09-26; `--land-fill-vanilla`).
+ *  OFF by default. On, a cell with no LAND record takes its heights from the
+ *  game's own dim-4 terrain LOD (`Meshes/Terrain/<ws>/<ws>.4.X.Y.BTR` under
+ *  lodgenVanillaLodRoot(), read as input only) in the `.lodl` and in the VT
+ *  pyramid's height grid. lodgenVanillaCellHeights: that cell's 33x33 heights
+ *  (row 0 south, world units); false = no chunk file, or a sample no triangle
+ *  covers (never a partial cell). */
+bool lodgenLandFillVanilla();
+void lodgenSetLandFillVanilla( bool on );
+bool lodgenVanillaCellHeights( const QString & ws, int cx, int cy, float * h33x33 );
+QString lodgenLandFillCensusLine();
 float lodgenLandShade();
 void lodgenSetLandShade( float kDiv );           // 0 = no crevice term
 /*! The far-terrain colour GRADE: every baked colour texel is multiplied by this

@@ -47,8 +47,45 @@ ESM="${ESM:-X:/Programs/Steam/steamapps/common/Fallout 4/Data/Fallout4.esm}"
 DATA="${DATA:-E:/Tools/Fallout 4/DataUnpacked/Data}"
 PY="${PY:-$(command -v python || echo /c/Windows/py)}"
 . "$ROOT/tests/spells/_harness.sh"
+# ---- settings scope (lane FIX1 fix 4, 2026-09-26) ----------------------------
+# Every NifSkope WINDOW this spell opens runs in its OWN QSettings scope -- never
+# bungo's profile, and never a scope the caller's environment names. A gate that
+# inherits the user's settings measures the profile, not the code (lane GATEFIX2,
+# native_lighting.sh: his "Vertex Color" unticked in the Lighting shading mode
+# turned the .BTR water white). WW_SETTINGS_SCOPE=<scope> moves the whole tree to
+# HKCU\Software\NifTools\NifSkope 2.0 <scope> (src/harnesswindow.cpp).
+# fresh_scope wipes it before EACH window (a window saves its layout on close, so
+# the next would open at another size) and seeds Settings/Version=1: an EMPTY
+# scope is a first install, whose settings dialog saves every pane's widget value
+# (Background 46,46,46, src/ui/settingspane.cpp). SEED_REG=<file.reg> (keys
+# already under the scope) is imported after the seed -- a red control's way to
+# render under a chosen profile. The scope is wiped at exit. The -no-gui CLI
+# calls are not windows and are left as they were.
+SCOPE="${SCOPE:-lodgen_octahedral}"
+case "$SCOPE" in
+	''|*[!A-Za-z0-9_-]*) echo "REFUSED: SCOPE='$SCOPE' is not a usable settings scope name"; exit 2 ;;
+esac
+[ ${#SCOPE} -le 40 ] || { echo "REFUSED: SCOPE='$SCOPE' is longer than 40"; exit 2; }
+REGKEY="HKCU\\Software\\NifTools\\NifSkope 2.0 $SCOPE"
+wipe_scope() { reg delete "$REGKEY" //f > /dev/null 2>&1 || true; }
+fresh_scope() {  # wipe + seed, then print the name: WW_SETTINGS_SCOPE="$(fresh_scope)"
+	wipe_scope
+	reg add "$REGKEY\\Settings" //v Version //t REG_SZ //d 1 //f > /dev/null 2>&1 || true
+	# not a Game Manager first install either: version 0 shows an opaque progress dialog on the
+	# PRIMARY monitor (src/gamemanager.cpp prog_dialog) before any WW window placement exists
+	reg add "$REGKEY" //v "Game Manager Version" //t REG_DWORD //d 2 //f > /dev/null 2>&1 || true
+	# ...and the game manager state an empty scope never gets (its Game Folders come out empty):
+	# Fallout 4's path and folders read from THIS MACHINE, never from the user's profile
+	local gm; gm="$(mktemp)"
+	python "$(dirname "$0")/settings_scope_game.py" "$SCOPE" "$(cygpath -w "$gm")" > /dev/null 2>&1 \
+		&& reg import "$(cygpath -w "$gm")" > /dev/null 2>&1
+	rm -f "$gm"
+	if [ -n "${SEED_REG:-}" ]; then reg import "$(winpath "$SEED_REG")" > /dev/null 2>&1 || true; fi
+	printf '%s' "$SCOPE"
+}
+wipe_scope
 W="$(mktemp -d)"
-trap 'rm -rf "$W"' EXIT
+trap 'rm -rf "$W"; wipe_scope' EXIT
 
 [ -x "$NS" ] || { echo "no NifSkope.exe at $NS"; exit 2; }
 [ -f "$ESM" ] || { echo "no ESM at $ESM"; exit 2; }
@@ -68,7 +105,7 @@ BASE="$(basename "${MODEL//\\//}" .nif | tr 'A-Z' 'a-z')"
 
 # ---------------------------------------------------------------- bake 1: legacy
 mkdir -p "$W/bake" "$W/cards"
-WW_IMPOSTOR_BAKE="$(winpath "$W/bake")" WW_IMPOSTOR_OCT=4 WW_IMPOSTOR_TILE=64 timeout 240 "$NS" "$(winpath "$MESH")" --port 45919 >/dev/null 2>&1
+WW_IMPOSTOR_BAKE="$(winpath "$W/bake")" WW_IMPOSTOR_OCT=4 WW_IMPOSTOR_TILE=64 WW_SETTINGS_SCOPE="$(fresh_scope)" timeout 240 "$NS" "$(winpath "$MESH")" --port 45919 >/dev/null 2>&1
 for s in albedo normal gsaos g; do
 	[ -s "$W/bake/${BASE}_oct_$s.png" ] || { bad "sheet ${BASE}_oct_$s.png was not written"; ls "$W/bake"; echo "RESULT FAIL"; exit 1; }
 done
@@ -814,7 +851,7 @@ for line in open(meta).read().splitlines():
 sys.exit(0 if n else 1)
 PYEOF
 [ $? -eq 0 ] && ok "a pbr source .lodm written per candidate" || bad "no fixture .lodm could be written"
-WW_LODGEN_DATA_ROOT="$(winpath "$W/root")" WW_IMPOSTOR_BAKE="$(winpath "$W/bake2")" WW_IMPOSTOR_OCT=4 WW_IMPOSTOR_TILE=64 timeout 240 "$NS" "$(winpath "$MESH")" --port 45921 >/dev/null 2>&1
+WW_LODGEN_DATA_ROOT="$(winpath "$W/root")" WW_IMPOSTOR_BAKE="$(winpath "$W/bake2")" WW_IMPOSTOR_OCT=4 WW_IMPOSTOR_TILE=64 WW_SETTINGS_SCOPE="$(fresh_scope)" timeout 240 "$NS" "$(winpath "$MESH")" --port 45921 >/dev/null 2>&1
 for s in albedo normal rmaos e; do
 	[ -s "$W/bake2/${BASE}_oct_$s.png" ] || { bad "sheet ${BASE}_oct_$s.png was not written by the pbr bake"; ls "$W/bake2"; echo "RESULT FAIL"; exit 1; }
 done
@@ -911,7 +948,7 @@ mkdir -p "$W/bake3"
 REFX="$(awk -v e="${EXTENT:-0}" 'BEGIN{printf "%.1f", (e+0 > 0 ? e*4 : 100000)}')"
 echo "  bake 3: the candidate's extent is ${EXTENT:-?} units, the run's largest is claimed at $REFX (four times)"
 WW_IMPOSTOR_BAKE="$(winpath "$W/bake3")" WW_IMPOSTOR_OCT=4 WW_IMPOSTOR_TILE=256 WW_IMPOSTOR_REF="$REFX" \
-	timeout 240 "$NS" "$(winpath "$MESH")" --port 45923 >/dev/null 2>&1
+	WW_SETTINGS_SCOPE="$(fresh_scope)" timeout 240 "$NS" "$(winpath "$MESH")" --port 45923 >/dev/null 2>&1
 if [ -s "$W/bake3/${BASE}.txt" ]; then
 	L3="$(grep "^oct " "$W/bake3/${BASE}.txt" | head -1)"
 	echo "  bake 3 oct line: $L3"
@@ -981,7 +1018,7 @@ else
 	WW_RENDER_SHOT="$(winpath "$W/cube_front.png")" WW_RENDER_VIEW=5 WW_RENDER_ORTHO=512 \
 		WW_RENDER_DIST=1000 WW_RENDER_CENTER=0,0,256 WW_RENDER_SIZE=640x480 \
 		WW_RENDER_CLEAN=1 WW_CAMERA_CENSUS="$(winpath "$W/cubecam.log")" \
-		timeout 240 "$NS" "$(winpath "$CUBE")" --port 45924 >/dev/null 2>&1
+		WW_SETTINGS_SCOPE="$(fresh_scope)" timeout 240 "$NS" "$(winpath "$CUBE")" --port 45924 >/dev/null 2>&1
 	CUBEHALF="$("$PY" - "$W/cube_front.png" "$W/cubecam.log" <<'PYEOF'
 import sys
 from PIL import Image
@@ -1020,9 +1057,9 @@ PYEOF
 	# (b) the bake, and (c) the perspective control
 	mkdir -p "$W/bake4" "$W/bake4p"
 	WW_IMPOSTOR_BAKE="$(winpath "$W/bake4")" WW_IMPOSTOR_OCT=8 WW_IMPOSTOR_TILE=64 \
-		timeout 240 "$NS" "$(winpath "$CUBE")" --port 45925 >/dev/null 2>&1
+		WW_SETTINGS_SCOPE="$(fresh_scope)" timeout 240 "$NS" "$(winpath "$CUBE")" --port 45925 >/dev/null 2>&1
 	WW_IMPOSTOR_PERSP=1 WW_IMPOSTOR_BAKE="$(winpath "$W/bake4p")" WW_IMPOSTOR_OCT=8 WW_IMPOSTOR_TILE=64 \
-		timeout 240 "$NS" "$(winpath "$CUBE")" --port 45926 >/dev/null 2>&1
+		WW_SETTINGS_SCOPE="$(fresh_scope)" timeout 240 "$NS" "$(winpath "$CUBE")" --port 45926 >/dev/null 2>&1
 	grep -qx "projection ortho" "$W/bake4/cube512.txt" && ok "the cube bake says orthographic" || bad "the cube bake does not say 'projection ortho'"
 	grep -qx "projection persp" "$W/bake4p/cube512.txt" && ok "the perspective CONTROL says perspective, so the switch and the line both move" \
 		|| bad "the WW_IMPOSTOR_PERSP control does not say 'projection persp' -- the control is not a control"

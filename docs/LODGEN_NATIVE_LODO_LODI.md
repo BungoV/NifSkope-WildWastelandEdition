@@ -728,9 +728,16 @@ path plus `|mswp:<8 hex>`, folded), so a worldspace with no swap is
 **byte-identical to v5 apart from the version word** at 0x04 -- outside
 `headerCrc32`, so `lodoIdentity` does not move and the `.lodi` is unchanged.
 
-**CNAM is counted, not applied.** The colour-remap index selects a row of the
-replacement material's grayscale-to-palette ramp; the census line reports how
-many swap rows that hit a LOD material carry one. Applying it is future work.
+**CNAM follows the game's rule (lane FIX1, 2026-09-26).** The colour-remap index
+selects a row of the replacement material's grayscale-to-palette ramp, and the
+game reads it ONLY when that material has `Greyscale_To_PaletteColor` set (BGSM
+common flags bit 15, NIF Shader Flags 1 bit 4). Otherwise the game ignores the
+index. No installed LOD material has the flag: on Nuka-World both CNAM rows are
+ignored by the game, so the written library is byte-identical to one that
+never read CNAM. A row that WOULD be game-applied is counted, not carried; the
+`.lodo` has no palette-row field. The census splits the CNAM count:
+`CNAM rows hit N (game-applied A -- a palette row the library cannot carry;
+ignored by the game, no Greyscale_To_PaletteColor B; index unset C)`.
 
 **The census line** (`native-material-swaps:`) reports the placements read,
 those carrying a swap by clause, those sent to a variant row, those whose swap
@@ -1927,6 +1934,14 @@ slot has no mesh, N on a card by a C line); C lines N read, N linked` -- or
 `native-cards: OFF (no card arrays linked); cardCount 0, cardCorpusHash
 0x0000000000000000, FORCE_CARD on 0 instances`.
 
+**Whole-map FORCE_CARD: NO (bungo's call, recorded by lane FIX1, 2026-09-26).**
+A whole-map bake writes FORCE_CARD on 0 placements, and that is correct. Every
+tree first arrives at ring 4, where its own LOD mesh fills the slot, so neither
+rule above fires. A region bake shows thousands only because its far rings reach
+past the ring-4 area it baked. No switch forces cards across the whole map. Do
+not compare a region's FORCE_CARD count with a whole map's as a
+regression.
+
 **For whoever makes the native bake incremental:** `--incremental --native` is
 refused today (CONSTITUTION 10), so the link never meets a chunk replayed from
 the `.lodj` cache. When that changes, a replayed chunk must bring its manifest
@@ -2198,6 +2213,13 @@ centre (0, 0, 100), radius √(50²+50²+100²) = 122.474487. The occluder is
 hand-derivable too: a box of half (40, 40, 90) about the cube's centre, drawn at
 scale 0.5 with no rotation, lands at world centre (1200, 2200, 350) with half
 extents (19.98, 19.98, 44.955) — the 0.999 pull-in stated, not hidden.
+
+**Each base's `fullTriangles` is a known answer too (lane FIX1, 2026-09-26):**
+`lodo.bases.fullTriangles 12,20,12`. That is the cube counted once over its four
+slots, the strip's 16 + 4, and the cube again. Until then the fixture left the word
+at 0, so NifSkope's own `--native-verify` and the FO4CS reader both refused it
+("fullTriangles 0 but its distinct meshes hold 12"). The independent decoder now
+recounts it from the rows and checks it against the hand answer.
 
 **What the fixture does NOT claim.** The ladder's own output is a simplifier's
 and no hand derives it, so the whole-file cluster and vertex counts are no longer

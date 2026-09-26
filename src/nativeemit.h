@@ -80,6 +80,8 @@ struct NativeSrcShape
 	QString effectTex0;
 	//! The shape named a material and NOTHING resolved: drawn neutral and counted, not magenta.
 	bool matUnreadable = false;
+	//! Lane FIX1: Greyscale_To_PaletteColor on this shape (BGSM wins) -- where an MSWP CNAM would reach it.
+	bool g2p = false;
 	bool hasAlpha = false;
 	quint8 alphaThreshold = 128;
 	bool ownEmit = false;

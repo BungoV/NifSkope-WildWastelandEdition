@@ -977,6 +977,23 @@ def check_expect(L, T, expect_path, ck):
         m = L['meshes'][mesh]
         return [i for i in range(m['clusterFirst'], m['clusterFirst'] + m['clusterCount'])
                 if L['clusterLods'][i]['level'] == 0]
+    # lane FIX1 fix 8: each base's stored fullTriangles against (a) a recount from the
+    # rows (level-0 triangles over the DISTINCT meshes its slots name) and (b) the hand
+    # answer. The fixture wrote 0 here until 2026-09-26, and both readers refused it.
+    if h['version'] >= 4:
+        stored, recount = [], []
+        for bse in L['bases']:
+            ms = []
+            for k in range(4):
+                r = bse['rep%d' % k]
+                if r != NO_MESH and r not in ms:
+                    ms.append(r)
+            stored.append(bse['fullTriangles'])
+            recount.append(sum(L['clusters'][i]['triangleCount'] for m in ms for i in l0_of(m)))
+        ck.check('lodo.bases.fullTriangles recount', stored == recount, (stored, recount))
+        want = exp.get('lodo.bases.fullTriangles')
+        ck.check('lodo.bases.fullTriangles', want is not None
+                 and stored == [int(x) for x in want.split(',')], (stored, want))
     m1 = l0_of(1)
     ck.check('lodo.mesh1.l0cluster0.triangleCount',
              L['clusters'][m1[0]]['triangleCount'] == int(exp['lodo.mesh1.l0cluster0.triangleCount']),

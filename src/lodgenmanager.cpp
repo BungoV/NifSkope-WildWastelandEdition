@@ -1367,6 +1367,14 @@ public:
 				tr( "Ground no landscape record paints is blended toward the game's own\n"
 					"terrain LOD colour, matched in tone where painted ground meets it.\n"
 					"Command line: --vt-fill-vanilla" ) );
+			/* Lane FIX1 (2026-09-26, bungo's owed call): ground cover under the
+			 * FO4CS target. The stock row lives in the hidden .btr section and
+			 * needs the stock sheets ticked, so this target could not ask for
+			 * it. Label and control only (his menu rule). */
+			xB( f, "LodgenVtCoverCheck", QStringLiteral( "vtCover" ),
+				tr( "Ground cover" ), false, tr( "Command line: --cover" ) );
+			if ( auto * c = qobject_cast<QCheckBox *>( extras.value( QStringLiteral( "vtCover" ) ).field ) )
+				connect( c, &QCheckBox::toggled, this, [this]( bool ) { refreshSummary(); } );
 			xB( f, "LodgenVtCoverInColorCheck", QStringLiteral( "vtCoverInColor" ),
 				tr( "Ground cover in the colour layer" ), false,
 				tr( "The ground cover is tinted into the colour tiles instead of being left in\n"
@@ -1394,7 +1402,7 @@ public:
 			vtSub = { vtFinestBox, vtFinestLabel, vtBtrCheck, vtSummary };
 			// the pyramid's own numbers grey with it too
 			for ( const char * k : { "vtBorder", "vtMips", "vtCompress",
-					"vtHeight", "vtFillVanilla", "vtCoverInColor", "vtHalfAux" } ) {
+					"vtHeight", "vtFillVanilla", "vtCover", "vtCoverInColor", "vtHalfAux" } ) {
 				if ( QWidget * w = extras.value( QLatin1String( k ) ).field )
 					vtSub << w;
 				if ( QLabel * l = extraLabels.value( QLatin1String( k ) ) )
@@ -2748,6 +2756,8 @@ private:
 		lodgenSetLandGuideSlopeRef( xf( "landGuideSlope" ) );
 		lodgenSetLandDetailSource( xi( "landDetailSource" ) );
 		lodgenSetVanillaLodRoot( xs( "vanillaLodRoot" ) );
+		// lane FIX1: the vanilla fill's shape half (landless cells take vanilla's terrain LOD heights)
+		lodgenSetLandFillVanilla( xb( "vtFillVanilla" ) );
 		lodgenSetLandShade( xf( "landShade" ) );
 		lodgenSetLandGrade( xf( "landGrade" ) );
 		lodgenSetBlendEdges( xi( "blendEdges" ) );
@@ -2785,9 +2795,14 @@ private:
 	LodgenCoverOptions coverOptions() const
 	{
 		LodgenCoverOptions o;
-		o.cover = coverCheck->isChecked() && !coverCheck->isHidden()
+		const bool stockCover = coverCheck->isChecked() && !coverCheck->isHidden()
 			&& texCheck->isChecked() && btrCheck->isChecked();
-		o.tintStrength = float( tintSpin->value() ) / 100.0f;
+		// the FO4CS row (lane FIX1): the cover plane in the pyramid's mask
+		// tiles; the hidden tint row reads as the command line's default
+		const bool vtCover = fo4cs() && wantVt() && xb( "vtCover" );
+		o.cover = stockCover || vtCover;
+		o.tintStrength = ( vtCover && !stockCover ) ? LodgenCoverOptions().tintStrength
+			: float( tintSpin->value() ) / 100.0f;
 		o.coverFull = xf( "coverFull" );
 		o.roads = xb( "roads" );
 		o.roadCoverSuppress = xf( "roadCoverSuppress" );
@@ -2828,6 +2843,10 @@ private:
 		 * "choose an output folder" would make the one live number in the
 		 * section look like a fixed sentence. */
 		refreshVtSummary();
+		/* The cover request as the run will read it (lane FIX1), set before the
+		 * refusal chain like the pyramid's line: WW_LODGEN_TEST reads it to prove
+		 * the FO4CS row reaches coverOptions(), which no bake-free gate sees. */
+		summary->setProperty( "wwCoverRequested", coverOptions().cover );
 		const bool chunks = objectPassOn() || btrCheck->isChecked();
 		QString why;
 		/* The source comes first: with MO2 chosen and no MO2 around it, every
@@ -3162,6 +3181,15 @@ private:
 					} );
 					return !cancelFlag.load();
 				};
+				/* Lane FIX1: with the vanilla fill on, a landless cell takes the
+				 * game's own terrain LOD heights too (lodgen.h), as on the CLI. */
+				lodgenSetLandFillVanilla( xb( "vtFillVanilla" ) );
+				if ( lodgenLandFillVanilla() ) {
+					const QString fillWs = w.worldspaceEdid();
+					o.landFill = [fillWs]( int cx, int cy, float * h ) {
+						return lodgenVanillaCellHeights( fillWs, cx, cy, h );
+					};
+				}
 				QString written;
 				if ( !lodtWrite( w, job.outDir, o, &written, &err ) ) {
 					post( [this, err]() { finishWorld( false, err ); } );

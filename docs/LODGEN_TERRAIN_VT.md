@@ -2257,6 +2257,39 @@ the height or the emissive. It does not follow a plugin that reshapes terrain:
 vanilla's colour belongs to vanilla's ground, so a worldspace whose heights moved
 should leave it off (as `vanilla-blend` exists for the normal, §2.5d).
 
+### 2.6b The landless-cell height fill (lane FIX1, 2026-09-26) -- `--land-fill-vanilla`, OFF by default
+
+**What it is for.** A cell with no LAND record has no height of its own, and the
+generator wrote the worldspace's default land height there: flat. Pre-war Sanctuary
+(SanctuaryHillsWorld) has LAND only round the Sanctuary block, yet 101 LOD
+placements stand in 15 cells east of it, 6,400 to 9,200 units up, over that flat
+ground: every one floated more than 1,500 units, and the worst step at a LAND /
+no-LAND edge beside them was 8,664 units. The game draws its own terrain LOD there
+(the shipped `.BTR`, whose ground in those cells is the Commonwealth's hills).
+
+**The law.** With the switch on, a cell with no LAND takes its 33x33 heights from the
+game's dim-4 terrain LOD, `Meshes/Terrain/<WS>/<WS>.4.X.Y.BTR` under
+`--vanilla-lod-root`, **read as input only** (no stock `.BTR` ships). The chunk's
+Land triangles are rasterised onto the 128-unit grid, barycentric, once a chunk, on
+the grid phase of `LODSettings/<WS>.LOD` (as §2.6 reads it). A cell any of whose
+samples no triangle covers is not filled at all (a partial cell would be a cliff). A
+sample a cell WITH land also holds stays that cell's: real terrain wins, the `.lodl`
+seam rule. It moves the `.lodl` heights and the VT height grid (so the height and
+normal sheets); colour, cover and mask still read the cell as landless. Census:
+`landless-cell fill: N cells filled` on the `.lodl` stage, `landless-cell fill
+(vanilla terrain LOD heights): cells asked A, filled F; dim-4 chunks read R,
+missing M` on the chunk stage. The panel runs it whenever *Fill unpainted ground
+with vanilla's colour* is ticked: that row already reads vanilla's LOD for the
+ground no LAND paints, and this is the same ground's shape.
+
+**Gate** (`scratchpad/fix1_20260926/fix3/float_gate.py <lodl> <lodi>`, pre-registered
+before the fixed bake; pre-war region -28..2 x -12..25 at BAKE2's switches):
+switch off = the bake before the change, byte for byte but the `.lodb`; switch on =
+landless placements floating more than 1,500 units **101 in 15 cells -> 0**, the
+edge step 8,664 -> 200 units, placements on LAND cells unchanged (1,249, none
+floating); the objects (`.lodo`, `.lodi`) do not move. The Commonwealth has LAND on
+every cell of -96..95, so it is unchanged by construction.
+
 ---
 
 ## 3. `.lodt` v2 — the container
@@ -2642,7 +2675,7 @@ without them is byte-identical to before:
 
 | flag | default | effect |
 |---|---|---|
-| `--cover` / `--no-cover` | off | bake ground cover and the grass tint |
+| `--cover` / `--no-cover` | off | bake ground cover and the grass tint. Panel: *Ground cover and grass tint* under the stock target; *Ground cover* in the pyramid's section under the FO4CS target (lane FIX1, 2026-09-26; the grass tint then reads as this switch's default) |
 | `--grass-tint F` | 0.35 | 0 keeps the albedo byte-identical and still writes the plane |
 | `--cover-full N` | 96 | the fixed normalisation constant, 1..65535 |
 | `--dump-cover FILE` | — | also write the raw 512² u8 plane, north-up, headerless |
@@ -2659,6 +2692,7 @@ without them is byte-identical to before:
 | `--vt-mips N` | 2 | stored mips per tile |
 | `--vt-height` | **off** | §2.2 layer 3: a fourth R16_UNORM height sheet per tile, on the same tile grid and border as the other three, finest from the LAND records and coarser by the same box filter. **Off by default and it stays off** -- it is uncompressed where the other three are BC1, so at content 256 / border 8 / 2 mips a height sheet is **184,960 B** against a BC1 sheet's **46,240 B** (§3.3), and a tile goes from **138,720 B** of colour classes to **323,680 B** without cover, **369,920 B** with (§2.2, §3.3). Not passing it is byte-identical to the bake before the layer existed. The panel row is **Terrain → Carry a height layer** (`LodgenVtHeightCheck`), also unticked by default |
 | `--vt-fill-vanilla` | **off** | §2.6: blend the ground no LAND record paints toward Bethesda's dim-4 LOD colour, read as loose files under `--vanilla-lod-root`, tone-matched on the overlap with a measured band. Colour only; painted cells untouched. Panel row *Fill unpainted ground with vanilla's colour* (`LodgenVtFillVanillaCheck`), unticked by default |
+| `--land-fill-vanilla` | **off** | §2.6b: a cell with no LAND takes the heights of the game's own dim-4 terrain LOD (`.BTR` under `--vanilla-lod-root`, read as input, never shipped) in the `.lodl` and the VT height grid. The panel runs it with *Fill unpainted ground with vanilla's colour* |
 | `--vt-cover-in-color` / `--vt-cover-in-mask` | mask | which sheet's alpha carries the ground cover (§2.2a). The two cost the same bytes, measured; the default is the mask because the colour sheet's alpha is the object family's OPACITY slot |
 | `--vt-compress none\|zlib` | none | payload compression |
 | `--vt-btr` / `--no-vt-btr` | on | assemble the `.btr` chunk sheets from the pyramid |

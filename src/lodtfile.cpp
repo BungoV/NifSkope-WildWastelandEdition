@@ -180,6 +180,9 @@ struct LodtSource
 	 *  inherits from a neighbour across the shared VHGT edge; false = it
 	 *  inherits nothing. Optional -- a .btd has no shared edge. */
 	std::function<bool( int, int, float &, float & )> edgeRange;
+	/*! Lane FIX1: the range of a landless cell's FILLED heights (the
+	 *  landFill option); false = not filled. Optional. */
+	std::function<bool( int, int, float &, float & )> fillRange;
 };
 
 /* The AO plane from a coarse height grid: horizon-based sky occlusion. Eight
@@ -1559,6 +1562,7 @@ static bool lodtWriteSource( const LodtSource & src, const QString & outDir,
 	std::vector<quint16> gcvrSlots;
 	float worldMin = 3.4e38f, worldMax = -3.4e38f;
 	int landCells = 0, waterCells = 0;
+	int filledCells = 0;   // lane FIX1: landless cells the landFill option filled
 	for ( int cy = minY; cy <= maxY; cy++ ) {
 		if ( opts.progress && !opts.progress( 0, cy - minY, cellsY, 0, 0, 0 ) )
 			return fail( QStringLiteral( "cancelled" ) );
@@ -1575,6 +1579,8 @@ static bool lodtWriteSource( const LodtSource & src, const QString & outDir,
 				 * with a neighbour that does have terrain. Without those in the
 				 * range, a renderer culling on it would cull the inherited row. */
 				lo = hi = src.defaultLand;
+				if ( src.fillRange && src.fillRange( cx, cy, lo, hi ) )
+					filledCells++;   // lane FIX1: the landless-cell fill
 				float elo = 0.0f, ehi = 0.0f;
 				if ( src.edgeRange && src.edgeRange( cx, cy, elo, ehi ) ) {
 					lo = qMin( lo, elo );
@@ -2181,6 +2187,8 @@ static bool lodtWriteSource( const LodtSource & src, const QString & outDir,
 			.arg( nullPlanes )
 			.arg( version ).arg( double( src.defaultWaterHeight ) )
 			.arg( src.defaultWaterType, 8, 16, QChar( '0' ) );
+	if ( error && src.fillRange )
+		*error += QStringLiteral( "\n  landless-cell fill: %1 cells filled" ).arg( filledCells );
 	if ( error && !waterSummary.isEmpty() )
 		*error += QStringLiteral( "\n  " ) + waterSummary;
 	return true;
@@ -2366,7 +2374,27 @@ bool lodtWrite( const EsmWorld & world, const QString & outDir,
 			take( sm.swC );
 		return true;
 	};
-	src.planes = [get, seams, defaultLand = world.defaultLandHeight()](
+	/* Lane FIX1: the landless-cell fill's range (LodtOptions::landFill). Rows
+	 * and columns 0..31, the samples this cell stores; an inherited one is
+	 * the edge rule's and the caller merges edgeRange on top. */
+	if ( opts.landFill ) {
+		src.fillRange = [get, fill = opts.landFill]( int cx, int cy, float & lo, float & hi ) {
+			if ( get( cx, cy ) )
+				return false;
+			float fh[33 * 33];
+			if ( !fill( cx, cy, fh ) )
+				return false;
+			lo = 3.4e38f;
+			hi = -3.4e38f;
+			for ( int r = 0; r < 32; r++ )
+				for ( int c = 0; c < 32; c++ ) {
+					lo = qMin( lo, fh[r * 33 + c] );
+					hi = qMax( hi, fh[r * 33 + c] );
+				}
+			return true;
+		};
+	}
+	src.planes = [get, seams, defaultLand = world.defaultLandHeight(), fill = opts.landFill](
 		int cx, int cy, const quint32 * slotForms, float quantum,
 		std::vector<quint16> & h, std::vector<quint16> & a,
 		std::vector<quint16> & c, std::vector<quint16> & g )
@@ -2403,7 +2431,12 @@ bool lodtWrite( const EsmWorld & world, const QString & outDir,
 			 * Harbor's default is 0 and its inherited row is around -250, and
 			 * a max against the default would have kept every one of those 62
 			 * texels wrong. */
-			if ( !sm.s && !sm.w && !sm.sw )
+			/* Lane FIX1: a landless cell the landFill option has heights for
+			 * (the game's own terrain LOD there) takes them wherever it does
+			 * not inherit a real sample across an edge. */
+			float fh[33 * 33];
+			const bool filled = fill && fill( cx, cy, fh );
+			if ( !sm.s && !sm.w && !sm.sw && !filled )
 				return false;                // nothing inherited: the caller's default
 			h.assign( size_t( spc ) * spc, 0 );
 			a.assign( size_t( spc ) * spc, 0 );
@@ -2411,7 +2444,7 @@ bool lodtWrite( const EsmWorld & world, const QString & outDir,
 			g.clear();
 			for ( int r = 0; r < spc; r++ ) {
 				for ( int cc = 0; cc < spc; cc++ ) {
-					float hh = defaultLand;
+					float hh = filled ? fh[r * 33 + cc] : defaultLand;
 					bool inherited = false;
 					auto take = [&hh, &inherited]( float v ) {
 						hh = inherited ? qMax( hh, v ) : v;

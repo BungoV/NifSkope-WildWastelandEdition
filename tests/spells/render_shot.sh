@@ -115,6 +115,44 @@ EXE="$REPO/release/NifSkope.exe"
 # refuses a main-monitor position and falls back to the first non-primary
 # screen, naming the refusal in the window log's arm= field.
 . "$(dirname "$0")/_harness.sh"
+# ---- settings scope (lane FIX1 fix 4, 2026-09-26) ----------------------------
+# Every NifSkope WINDOW this spell opens runs in its OWN QSettings scope -- never
+# bungo's profile, and never a scope the caller's environment names. A gate that
+# inherits the user's settings measures the profile, not the code (lane GATEFIX2,
+# native_lighting.sh: his "Vertex Color" unticked in the Lighting shading mode
+# turned the .BTR water white). WW_SETTINGS_SCOPE=<scope> moves the whole tree to
+# HKCU\Software\NifTools\NifSkope 2.0 <scope> (src/harnesswindow.cpp).
+# fresh_scope wipes it before EACH window (a window saves its layout on close, so
+# the next would open at another size) and seeds Settings/Version=1: an EMPTY
+# scope is a first install, whose settings dialog saves every pane's widget value
+# (Background 46,46,46, src/ui/settingspane.cpp). SEED_REG=<file.reg> (keys
+# already under the scope) is imported after the seed -- a red control's way to
+# render under a chosen profile. The scope is wiped at exit. The -no-gui CLI
+# calls are not windows and are left as they were.
+SCOPE="${SCOPE:-render_shot}"
+case "$SCOPE" in
+	''|*[!A-Za-z0-9_-]*) echo "REFUSED: SCOPE='$SCOPE' is not a usable settings scope name"; exit 2 ;;
+esac
+[ ${#SCOPE} -le 40 ] || { echo "REFUSED: SCOPE='$SCOPE' is longer than 40"; exit 2; }
+REGKEY="HKCU\\Software\\NifTools\\NifSkope 2.0 $SCOPE"
+wipe_scope() { reg delete "$REGKEY" //f > /dev/null 2>&1 || true; }
+fresh_scope() {  # wipe + seed, then print the name: WW_SETTINGS_SCOPE="$(fresh_scope)"
+	wipe_scope
+	reg add "$REGKEY\\Settings" //v Version //t REG_SZ //d 1 //f > /dev/null 2>&1 || true
+	# not a Game Manager first install either: version 0 shows an opaque progress dialog on the
+	# PRIMARY monitor (src/gamemanager.cpp prog_dialog) before any WW window placement exists
+	reg add "$REGKEY" //v "Game Manager Version" //t REG_DWORD //d 2 //f > /dev/null 2>&1 || true
+	# ...and the game manager state an empty scope never gets (its Game Folders come out empty):
+	# Fallout 4's path and folders read from THIS MACHINE, never from the user's profile
+	local gm; gm="$(mktemp)"
+	python "$(dirname "$0")/settings_scope_game.py" "$SCOPE" "$(cygpath -w "$gm")" > /dev/null 2>&1 \
+		&& reg import "$(cygpath -w "$gm")" > /dev/null 2>&1
+	rm -f "$gm"
+	if [ -n "${SEED_REG:-}" ]; then reg import "$(winpath "$SEED_REG")" > /dev/null 2>&1 || true; fi
+	printf '%s' "$SCOPE"
+}
+wipe_scope
+trap wipe_scope EXIT
 WORK="$REPO/release/ww_render_shot"
 CLOSELOG="$REPO/release/ww_headless_close.log"
 WINLOG="$REPO/release/ww_headless_windows.log"
@@ -357,7 +395,7 @@ run() { # label file  (env for the run is exported by the caller)
 	rm -f "$WINLOG"
 	watch_start "$1"
 	t0=$(date +%s)
-	timeout "$CAP" "$EXE" --port "$PORT" "$2" >"$WORK/$1.out" 2>&1
+	WW_SETTINGS_SCOPE="$(fresh_scope)" timeout "$CAP" "$EXE" --port "$PORT" "$2" >"$WORK/$1.out" 2>&1
 	RC=$?
 	t1=$(date +%s)
 	SECS=$((t1-t0))
@@ -771,7 +809,7 @@ camshot() { # label  -- the caller exports the WW_RENDER_* under test
 	export WW_RENDER_SHOT="$(winpath "$WORK/$1.png")"
 	export WW_RENDER_SIZE=640x480 WW_RENDER_TIME=1 WW_RENDER_CLEAN=1
 	export WW_CAMERA_CENSUS="$(winpath "$WORK/$1.camera")"
-	timeout "$CAP" "$EXE" --port "$PORT" "$CUBE" >"$WORK/$1.out" 2>&1
+	WW_SETTINGS_SCOPE="$(fresh_scope)" timeout "$CAP" "$EXE" --port "$PORT" "$CUBE" >"$WORK/$1.out" 2>&1
 	CAMRC=$?
 	unset WW_RENDER_SHOT WW_RENDER_SIZE WW_RENDER_TIME WW_RENDER_CLEAN WW_CAMERA_CENSUS
 }
@@ -896,7 +934,7 @@ if [ -f "$GENDOC" ]; then
 		WW_RENDER_SHOT="$(winpath "$WORK/cam_gen$D.png")" WW_RENDER_SIZE=640x480 \
 		WW_RENDER_CLEAN=1 WW_RENDER_VIEW=1 WW_RENDER_ORTHO=$D WW_RENDER_DIST=200000 \
 		WW_RENDER_CENTER=0,0,0 WW_CAMERA_CENSUS="$(winpath "$WORK/cam_gen$D.camera")" \
-			timeout "$CAP" "$EXE" --port "$PORT" "$GENDOC" >"$WORK/cam_gen$D.out" 2>&1
+			WW_SETTINGS_SCOPE="$(fresh_scope)" timeout "$CAP" "$EXE" --port "$PORT" "$GENDOC" >"$WORK/cam_gen$D.out" 2>&1
 	done
 	G1=$(camfield cam_gen40000 upp); G2=$(camfield cam_gen80000 upp)
 	check "$( [ -s "$WORK/cam_gen40000.png" ] && [ -s "$WORK/cam_gen80000.png" ] && echo 1 || echo 0 )" \

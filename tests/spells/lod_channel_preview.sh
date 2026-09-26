@@ -35,10 +35,47 @@ set -u
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 NS="${EXE:-$ROOT/release/NifSkope.exe}"
+# ---- settings scope (lane FIX1 fix 4, 2026-09-26) ----------------------------
+# Every NifSkope WINDOW this spell opens runs in its OWN QSettings scope -- never
+# bungo's profile, and never a scope the caller's environment names. A gate that
+# inherits the user's settings measures the profile, not the code (lane GATEFIX2,
+# native_lighting.sh: his "Vertex Color" unticked in the Lighting shading mode
+# turned the .BTR water white). WW_SETTINGS_SCOPE=<scope> moves the whole tree to
+# HKCU\Software\NifTools\NifSkope 2.0 <scope> (src/harnesswindow.cpp).
+# fresh_scope wipes it before EACH window (a window saves its layout on close, so
+# the next would open at another size) and seeds Settings/Version=1: an EMPTY
+# scope is a first install, whose settings dialog saves every pane's widget value
+# (Background 46,46,46, src/ui/settingspane.cpp). SEED_REG=<file.reg> (keys
+# already under the scope) is imported after the seed -- a red control's way to
+# render under a chosen profile. The scope is wiped at exit. The -no-gui CLI
+# calls are not windows and are left as they were.
+SCOPE="${SCOPE:-lod_channel_preview}"
+case "$SCOPE" in
+	''|*[!A-Za-z0-9_-]*) echo "REFUSED: SCOPE='$SCOPE' is not a usable settings scope name"; exit 2 ;;
+esac
+[ ${#SCOPE} -le 40 ] || { echo "REFUSED: SCOPE='$SCOPE' is longer than 40"; exit 2; }
+REGKEY="HKCU\\Software\\NifTools\\NifSkope 2.0 $SCOPE"
+wipe_scope() { reg delete "$REGKEY" //f > /dev/null 2>&1 || true; }
+fresh_scope() {  # wipe + seed, then print the name: WW_SETTINGS_SCOPE="$(fresh_scope)"
+	wipe_scope
+	reg add "$REGKEY\\Settings" //v Version //t REG_SZ //d 1 //f > /dev/null 2>&1 || true
+	# not a Game Manager first install either: version 0 shows an opaque progress dialog on the
+	# PRIMARY monitor (src/gamemanager.cpp prog_dialog) before any WW window placement exists
+	reg add "$REGKEY" //v "Game Manager Version" //t REG_DWORD //d 2 //f > /dev/null 2>&1 || true
+	# ...and the game manager state an empty scope never gets (its Game Folders come out empty):
+	# Fallout 4's path and folders read from THIS MACHINE, never from the user's profile
+	local gm; gm="$(mktemp)"
+	python "$(dirname "$0")/settings_scope_game.py" "$SCOPE" "$(cygpath -w "$gm")" > /dev/null 2>&1 \
+		&& reg import "$(cygpath -w "$gm")" > /dev/null 2>&1
+	rm -f "$gm"
+	if [ -n "${SEED_REG:-}" ]; then reg import "$(winpath "$SEED_REG")" > /dev/null 2>&1 || true; fi
+	printf '%s' "$SCOPE"
+}
+wipe_scope
 ESM="${ESM:-X:/Programs/Steam/steamapps/common/Fallout 4/Data/Fallout4.esm}"
 PORT="${PORT:-42309}"
 W="$(mktemp -d)"
-trap 'rm -rf "$W"' EXIT
+trap 'rm -rf "$W"; wipe_scope' EXIT
 
 [ -x "$NS" ] || { echo "no NifSkope.exe at $NS"; exit 2; }
 [ -f "$ESM" ] || { echo "no ESM at $ESM"; exit 2; }
@@ -52,7 +89,7 @@ winpath() { cygpath -w "$1" 2>/dev/null || echo "$1"; }
 
 shot() { # shot <channel> <png>
 	WW_RENDER_SHOT="$(winpath "$2")" WW_RENDER_FLAT=1 WW_RENDER_VIEW=1 WW_LOD_CHANNEL="$1" WW_RENDER_SIZE=480x480 \
-		timeout 90 "$NS" --port "$PORT" "$CHUNK" >/dev/null 2>&1
+		WW_SETTINGS_SCOPE="$(fresh_scope)" timeout 90 "$NS" --port "$PORT" "$CHUNK" >/dev/null 2>&1
 	[ -s "$2" ]
 }
 

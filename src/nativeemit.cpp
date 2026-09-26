@@ -14,6 +14,7 @@ BSD License - see nifskope.h
 #include "lodgenao.h"
 #include "io/lodmfile.h"
 #include <array>
+#include <limits>
 
 #include <QDir>
 #include <QElapsedTimer>
@@ -1565,6 +1566,16 @@ bool lodgenNativeWrite( QString * report, QString * error )
 	/* SWAP1 census, filled by the library build (zero under reuse). */
 	int swapPairsHit = 0, swapVariantMeshes = 0, swapVariantRows = 0, swapVariantLoadFailed = 0;
 	int swapMissingRecord = 0, swapCnamRows = 0, swapUnreadable = 0, swapRefusedLoader = 0;
+	/* Lane FIX1: the CNAM rows as the GAME applies them. The engine (1.10.155,
+	 * the MSWP lambda of BGSModelMaterialSwap::Apply) takes a row's colour-remap
+	 * index only when it is below FLT_MAX, and writes it to the material's
+	 * fLookupScale (the grayscale-to-palette row) only on a property with
+	 * SLSF1 Greyscale_To_PaletteColor. So a CNAM on a material without that
+	 * flag changes nothing on screen. `swapCnamApplied` counts the rows the
+	 * game WOULD apply -- a palette-row change the library cannot carry (its
+	 * materials have no palette path) and the census names as a defect;
+	 * `swapCnamNoPalette` the rows the game ignores. */
+	int swapCnamApplied = 0, swapCnamNoPalette = 0, swapCnamUnset = 0;
 	QHash<QString, QSet<QString>> modelSwapKeys;     // plain model key -> its shapes' folded material keys
 	int modelsLoaded = 0, modelsFailed = 0;
 	int basesWritten = 0, basesWithoutMesh = 0;
@@ -1838,6 +1849,7 @@ bool lodgenNativeWrite( QString * report, QString * error )
 		 * the v5 build's. */
 		std::map<quint32, std::vector<std::pair<quint32, std::array<QString, 4>>>> variantsOf;
 		std::vector<ModelJob> variantJobs;
+		QHash<QString, QPair<QString, float>> cnamRowsForGame;
 		{
 			for ( auto it = models.begin(); it != models.end(); ++it ) {
 				if ( !it.value().loaded )
@@ -1853,6 +1865,7 @@ bool lodgenNativeWrite( QString * report, QString * error )
 			std::sort( order.begin(), order.end() );
 			QHash<QString, QString> variantBySig;
 			QSet<QString> cnamHit;
+			QHash<QString, QPair<QString, float>> cnamHitRow;   // hit -> (replacement key, CNAM)
 			std::vector<QString> newVariantKeys;
 			for ( const auto & ow : order ) {
 				const quint32 w = ow.first, b = ow.second;
@@ -1862,14 +1875,14 @@ bool lodgenNativeWrite( QString * report, QString * error )
 					continue;
 				}
 				QMap<QString, QString> subst;       // folded BNAM -> SNAM as stored; the first row wins
-				QSet<QString> cnamKeys;
+				QHash<QString, float> cnamKeys;
 				for ( const EsmMaterialSubst & row : mw.rows ) {
 					const QString k = lodgenMaterialSwapKey( row.original );
 					if ( k.isEmpty() || row.replacement.isEmpty() || subst.contains( k ) )
 						continue;
 					subst.insert( k, row.replacement );
 					if ( row.hasColorRemap )
-						cnamKeys.insert( k );
+						cnamKeys.insert( k, row.colorRemap );
 				}
 				QString slot[4];
 				slotModels( world.lodBase( b ), slot );
@@ -1890,9 +1903,12 @@ bool lodgenNativeWrite( QString * report, QString * error )
 							continue;
 						/* CNAM is counted on every row naming a LOD material, a row naming
 						 * itself (a colour-remap-only row) included: that colour is dropped. */
-						if ( cnamKeys.contains( sit.key() ) )
-							cnamHit.insert( QString( "%1:%2" ).arg( w, 8, 16, QChar( '0' ) ).arg( sit.key() ) );
 						const QString rk = lodgenMaterialSwapKey( sit.value() );
+						if ( cnamKeys.contains( sit.key() ) ) {
+							const QString hk = QString( "%1:%2" ).arg( w, 8, 16, QChar( '0' ) ).arg( sit.key() );
+							cnamHit.insert( hk );
+							cnamHitRow.insert( hk, qMakePair( rk, cnamKeys.value( sit.key() ) ) );
+						}
 						if ( rk == sit.key() )
 							continue;           // a row naming itself changes no material
 						hits.append( qMakePair( sit.key(), sit.value() ) );
@@ -1927,6 +1943,7 @@ bool lodgenNativeWrite( QString * report, QString * error )
 				variantsOf[b].push_back( std::make_pair( w, keys ) );
 			}
 			swapCnamRows = cnamHit.size();
+			cnamRowsForGame = cnamHitRow;
 			swapVariantMeshes = int( newVariantKeys.size() );
 			variantJobs.reserve( newVariantKeys.size() );
 			for ( const QString & vk : newVariantKeys ) {
@@ -1957,6 +1974,26 @@ bool lodgenNativeWrite( QString * report, QString * error )
 			for ( const NativeSrcShape & sh : m.shapes )
 				if ( sh.matUnreadable && replaced.contains( lodgenMaterialSwapKey( sh.matName ) ) )
 					swapUnreadable++;
+		}
+
+		/* Lane FIX1: each CNAM hit against the game's rule. The replacement
+		 * material's flag is read from the loaded shapes (plain and variant) that
+		 * carry it; a material no loaded shape carries counts as unflagged. */
+		if ( !cnamRowsForGame.isEmpty() ) {
+			QSet<QString> g2pMats;
+			for ( auto it = models.cbegin(); it != models.cend(); ++it )
+				if ( it.value().loaded )
+					for ( const NativeSrcShape & sh : it.value().shapes )
+						if ( sh.g2p && !sh.matName.isEmpty() )
+							g2pMats.insert( lodgenMaterialSwapKey( sh.matName ) );
+			for ( auto it = cnamRowsForGame.cbegin(); it != cnamRowsForGame.cend(); ++it ) {
+				if ( !( it.value().second < std::numeric_limits<float>::max() ) )
+					swapCnamUnset++;
+				else if ( g2pMats.contains( it.value().first ) )
+					swapCnamApplied++;
+				else
+					swapCnamNoPalette++;
+			}
 		}
 
 		/* retired in MAP order (which was job order before SWAP1, and still is
@@ -3423,14 +3460,16 @@ bool lodgenNativeWrite( QString * report, QString * error )
 		ladderLine += QString( "\n  native-material-swaps: placements %1; carrying a swap %2 (REFR XMSP %3, base or "
 			"SCOL MODS %4, SCOL part's own MODS %5); sent to a variant row %6; swap names no LOD material %7; "
 			"tower1Rule %8%9; census pairs %10, pairs with a LOD hit %11, variant rows %12, variant meshes %13 "
-			"(%14 failed to load, %15 loader refused), swap records missing %16, CNAM rows hit %17 (colour "
-			"remap NOT applied), unreadable replacement shapes %18; .lodo version %19" )
+			"(%14 failed to load, %15 loader refused), swap records missing %16, CNAM rows hit %17 (game-applied "
+			"%20 -- a palette row the library cannot carry; ignored by the game, no Greyscale_To_PaletteColor %21; "
+			"index unset %22), unreadable replacement shapes %18; .lodo version %19" )
 			.arg( swapRead ).arg( swapCarry[1] + swapCarry[2] + swapCarry[3] ).arg( swapCarry[1] )
 			.arg( swapCarry[2] ).arg( swapCarry[3] ).arg( swapPlaced ).arg( swapNoVariant )
 			.arg( swapTower1 ).arg( libraryReused ? QStringLiteral( " (library reused: not measured)" ) : QString() )
 			.arg( quint64( swapPairs.size() ) ).arg( swapPairsHit ).arg( libraryReused ? int( variantRow.size() ) : swapVariantRows )
 			.arg( swapVariantMeshes ).arg( swapVariantLoadFailed ).arg( swapRefusedLoader )
-			.arg( swapMissingRecord ).arg( swapCnamRows ).arg( swapUnreadable ).arg( lh.version );
+			.arg( swapMissingRecord ).arg( swapCnamRows ).arg( swapUnreadable ).arg( lh.version )
+			.arg( swapCnamApplied ).arg( swapCnamNoPalette ).arg( swapCnamUnset );
 		/* v10 (lane BAKE2, 2026-09-25): placements above the old 7.99988 line,
 		 * written with instance flag bit 7. 0 = the file is the v7/v9 file it
 		 * always was; any other number = version 10. */
