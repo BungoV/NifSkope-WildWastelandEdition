@@ -925,6 +925,41 @@ def read_lodi(path):
     return T
 
 
+def check_near_identity(T):
+    """Lane NEAR2: the cold `identity` of a NEAR .lodi (paired with a NEAR .lodo) is the REFR's plugin's
+    load-order-resolved identity -- a full plugin's game index (<= 0xFD) or 0x8000 | its light slot
+    (<= 0xFFF). refFormId >> 24 is the plugin's position in the bake's merged list, so, without the plugin
+    list: one identity per file index, never shared, file 0 is 0, and the full indices and the light slots
+    each rise with the file index and never pass it. Raises Refusal naming `identity`. (Which light plugin
+    gets which slot needs the plugins' TES4 headers: near_library_check.py gate GI.)"""
+    per = {}
+    for c in T['cold']:
+        per.setdefault(c['refFormId'] >> 24, set()).add(c['identity'])
+    owner = {}
+    for fi in sorted(per):
+        ids = per[fi]
+        if len(ids) != 1:
+            raise Refusal('identity: file index %d carries %d identities (%s)'
+                          % (fi, len(ids), ', '.join('%04x' % x for x in sorted(ids))))
+        i = next(iter(ids))
+        if (i & 0x8000 and i & 0x7000) or (not i & 0x8000 and i > 0xFD):
+            raise Refusal('identity %04x of file index %d is neither a full index nor 0x8000 | a light slot' % (i, fi))
+        if i in owner:
+            raise Refusal('identity %04x shared by file indices %d and %d' % (i, owner[i], fi))
+        owner[i] = fi
+        if fi == 0 and i != 0:
+            raise Refusal('identity %04x on file index 0 (the first master is full index 0)' % i)
+        if (i & 0xFFF) > fi:
+            raise Refusal('identity %04x on file index %d: an index past its position in the load order' % (i, fi))
+    for light in (False, True):
+        seq = [(fi, next(iter(per[fi]))) for fi in sorted(per) if bool(next(iter(per[fi])) & 0x8000) == light]
+        for (fa, ia), (fb, ib) in zip(seq, seq[1:]):
+            if ib <= ia:
+                raise Refusal('identity: file index %d has %04x, later file index %d has %04x (out of load order)'
+                              % (fa, ia, fb, ib))
+    return len(per)
+
+
 # ----------------------------------------------------------------- checks
 class Checker:
     def __init__(self):

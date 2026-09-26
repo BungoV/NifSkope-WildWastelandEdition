@@ -109,6 +109,41 @@ def main():
     b = bytearray(NI); put(b, 0x04, 'I', 12)
     refused('near .lodi relabelled version 12', 'lodi', b, 'version 12')
 
+    # ---- lane NEAR2: the placement identity. A PAIR rule (a .lodi alone cannot say it is near; a far
+    # .lodi's identity is the stock chunk index), so the mutations edit the DECODED cold table.
+    def ident(cold):
+        try:
+            return dec.check_near_identity({'cold': cold}), None
+        except dec.Refusal as e:
+            return None, str(e)
+    n, why = ident(T['cold'])
+    nz = sum(1 for c in T['cold'] if c['identity'])
+    check('near .lodi identities are load-order identities', n is not None,
+          why or '%d file indices, %d placements with a non-zero identity' % (n, nz))
+    check('near .lodi fixture has a placement from a plugin past the first (a non-zero identity)', nz > 0,
+          '%d non-zero' % nz)
+    fi0 = next((c['refFormId'] >> 24 for c in T['cold'] if c['identity']), None)
+
+    def refused_ident(name, fn):
+        cold = [dict(c) for c in T['cold']]
+        fn(cold)
+        got, why = ident(cold)
+        check(name, got is None and 'identity' in (why or ''), 'refused: %s' % why if why else 'ACCEPTED')
+
+    def set_file(cold, v):
+        for c in cold:
+            if c['refFormId'] >> 24 == fi0:
+                c['identity'] = v
+
+    def one_off(cold):
+        c = next(c for c in cold if c['refFormId'] >> 24 == fi0)
+        c['identity'] += 1
+    refused_ident('near .lodi, every identity 0 (the NEAR1 shape)', lambda cold: [c.update(identity=0) for c in cold])
+    refused_ident('near .lodi, one placement of a plugin given another identity', one_off)
+    refused_ident('near .lodi, identity 0x9000 (light, bits 12-14 set)', lambda cold: set_file(cold, 0x9000))
+    refused_ident('near .lodi, full identity 0xFE', lambda cold: set_file(cold, 0xFE))
+    refused_ident('near .lodi, an identity past the file index', lambda cold: set_file(cold, min(fi0 + 1, 0xFD)))
+
     bad = results.count(False)
     print('%d checks, %d failures' % (len(results), bad))
     print('RESULT %s' % ('PASS' if not bad else 'FAIL'))
