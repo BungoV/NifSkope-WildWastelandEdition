@@ -29967,6 +29967,8 @@ void NifSkope::initMenu()
 								"the road pass writes nothing on this chunk -- the command line own --no-roads moves only the ledger here (measured 2026-09-12); tests/spells/lodgen_roads.sh reads the road rows", nullptr, nullptr, nullptr, nullptr, "0" },
 							{ "LodgenRoadSidewalksCheck", "roadSidewalks", nullptr,
 								"the road pass writes nothing on this chunk -- the command line own --no-roads moves only the ledger here (measured 2026-09-12); tests/spells/lodgen_roads.sh reads the road rows", nullptr, nullptr, nullptr, nullptr, "1" },
+							{ "LodgenFlatObjectsCheck", "flatObjects", nullptr,
+								"the road pass writes nothing on this chunk -- the command line own --no-roads moves only the ledger here (measured 2026-09-12); tests/spells/lodgen_roads.sh reads the road rows", nullptr, nullptr, nullptr, nullptr, "1" },
 							{ "LodgenTerrainObjectAoCheck", "terrainObjectAo", nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, "0" },
 							{ "LodgenTerrainObjectAoStrengthSpin", "terrainObjectAoStrength", "LodgenTerrainObjectAoCheck", nullptr, nullptr, nullptr, nullptr, nullptr, "0.5" },
 							{ "LodgenWaterBodiesCheck", "waterBodies", nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, "0" },

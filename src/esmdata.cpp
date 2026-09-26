@@ -344,6 +344,21 @@ void EsmWorld::cellBounds( int & minX, int & minY, int & maxX, int & maxY ) cons
 	}
 }
 
+QString EsmWorld::recordPlugin( quint32 formID ) const
+{
+	if ( !esm )
+		return QString();
+	const ESMFile::ESMRecord * r = esm->findRecord( formID );
+	if ( !r )
+		return QString();
+	const QStringList files = srcPath.split( QChar( ',' ), Qt::SkipEmptyParts );
+	if ( r->srcFile >= unsigned( files.size() ) )
+		return QString();
+	QString f = files[int( r->srcFile )].trimmed();
+	f.replace( QChar( 92 ), QChar( '/' ) );
+	return f.mid( f.lastIndexOf( QChar( '/' ) ) + 1 );
+}
+
 bool EsmWorld::hasCell( int cx, int cy ) const
 {
 	return cellIndex.contains( qMakePair( cx, cy ) );

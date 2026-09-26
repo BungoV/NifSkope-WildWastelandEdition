@@ -1098,6 +1098,25 @@ struct LodgenCoverOptions
 	 *  asked for. `--roads-legacy` includes the pavements too. */
 	bool roadSidewalks = true;
 
+	/*! FLAT GROUND OBJECTS (lane FLAT1, 2026-09-26): a placed object that lies
+	 *  flat ON the ground -- a slab, a railway track, a path, a decal, a debris
+	 *  pile -- is painted into the far terrain's colour beside the roads, with
+	 *  its in-game diffuse. Which objects is MEASURED, never read off a path:
+	 *  the mesh under its placement, against the ground under it (LAND, raised
+	 *  to the stamped road surface), must lie low (top at most 64 units up),
+	 *  rest on the ground (underside within 16), have little side standing up
+	 *  (steep area rising more than 8 units / top area at most 0.35), not be
+	 *  buried (top at least -8) and not stand under water. The census that set
+	 *  those numbers is scratchpad/flat1_20260926/DONE.md.
+	 *
+	 *  ON by default; `--no-flat-objects` / the panel row is the off switch, and
+	 *  off is the roads-only bake's BYTES (no candidate is gathered). */
+	bool flatObjects = true;
+	/*! The override file: one line per model or folder, `bake` or `nobake`.
+	 *  Empty = `lodgenFlatObjectsDefaultFile()`. Read on every bake, never
+	 *  written by one (created, header only, when the default is missing). */
+	QString flatObjectsFile;
+
 	/*! THE FAR TERRAIN RECEIVES AMBIENT OCCLUSION FROM THE PLACED OBJECTS
 	 *  (lane GROUND1, bungo 2026-09-11 15:4x: "Okay, so the AO can be acurate
 	 *  from objects").
@@ -1275,6 +1294,15 @@ bool lodgenIsRaisedRoadModel( const QString & modelPath );
  *  off is written out there. */
 bool lodgenIsSidewalkModel( const QString & modelPath );
 
+/*! Lane FLAT1: where the flat-object override file lives when no flag names
+ *  one -- `lodgen_flat_objects.txt` beside the NifSkope executable. */
+QString lodgenFlatObjectsDefaultFile();
+
+/*! Lane FLAT1: the override file's effective rules as one digest line (the
+ *  settings digest reads it, so editing the file rebakes). Creates the DEFAULT
+ *  file, header only, when it is missing; never writes any other path. */
+QString lodgenFlatObjectsRulesDigest( const QString & file );
+
 //! What one bake's road pass did, for the census line. Every field is written
 //! unconditionally and moves with the thing it measures (the three rules of
 //! 2026-09-04 21:33): a region with no roads reads zeros across the row.
@@ -1298,6 +1326,15 @@ struct LodgenRoadCensus
 	int groundShapes = 0;       //!< road shapes whose material is under materials/Landscape/Ground/
 	int groundTexels = 0;       //!< texels such a shape wrote (0 when roadGroundPaint is 0)
 	int swappedPlacements = 0;  //!< stamped placements drawn with a material swap (XMSP / MODS), ROADS1
+	/* Lane FLAT1: the flat ground objects (LodgenCoverOptions::flatObjects). */
+	int flatExamined = 0;       //!< non-road STAT placements the flat rule measured
+	int flatPainted = 0;        //!< of those, painted (the rule or a `bake` line)
+	int flatOverridden = 0;     //!< placements an override line decided
+	int flatHasLod = 0;         //!< painted placements whose base carries its own distant LOD
+	int flatShapes = 0;         //!< flat shapes offered to the scan converter
+	int flatTexels = 0;         //!< texels a flat object wrote last (tile content only)
+	int flatDecalTexels = 0;    //!< of those, by a decal / blended / alpha-tested shape
+	int flatRefusedNoTexture = 0; //!< flat shapes whose diffuse would not resolve
 	QStringList refusals;       //!< "<reason> <name>", deduplicated, capped at 16
 	void addRefusal( const char * why, const QString & name );
 	void add( const LodgenRoadCensus & o );

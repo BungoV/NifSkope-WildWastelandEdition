@@ -751,6 +751,11 @@ QStringList lodgenIdentityDump( const LodgenChunkPassOptions & pass, const Lodge
 		add( p + "roadGroundPaint", f( c.roadGroundPaint ) );
 		add( p + "roadRaised", b( c.roadRaised ) );
 		add( p + "roadSidewalks", b( c.roadSidewalks ) );
+		add( p + "flatObjects", b( c.flatObjects ) );
+		/* The override file's rules move the output, so their digest is an input
+		 * (the rule lines only: a comment edit moves nothing). */
+		add( p + "flatObjectsRules", c.roads && c.flatObjects
+			? lodgenFlatObjectsRulesDigest( c.flatObjectsFile ) : QStringLiteral( "-" ) );
 		add( p + "terrainObjectAo", b( c.terrainObjectAo ) );
 		add( p + "terrainObjectAoStrength", f( c.terrainObjectAoStrength ) );
 		add( p + "terrainObjectAoSlab", b( c.terrainObjectAoSlab ) );

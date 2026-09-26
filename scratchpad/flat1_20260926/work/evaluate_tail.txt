@@ -1,0 +1,193 @@
+				std::vector<double> ghi, glo;
+				ghi.reserve( size_t( sq.size() ) );
+				glo.reserve( size_t( sq.size() ) );
+				for ( auto it = sq.constBegin(); it != sq.constEnd(); ++it ) {
+					const qint64 bx = it.key() >> 32;
+					const qint64 by = qint64( qint32( quint32( it.key() & 0xFFFFFFFFLL ) ) );
+					const double g = groundOf( landAt( world, ( double( bx ) + 0.5 ) * 16.0,
+						( double( by ) + 0.5 ) * 16.0 ), roadZSquare( bx, by ) );
+					if ( std::isnan( g ) )
+						continue;
+					ghi.push_back( it->first - g );
+					glo.push_back( it->second - g );
+				}
+				rec.squares = int( ghi.size() );
+				if ( ghi.empty() ) {
+					rec.why = "no land under it";
+					finishFlat( rec, recIndex, src, wv, world );
+					continue;
+				}
+				rec.measured = true;
+				rec.top = lodgenFlatPercentile( ghi, 90.0 );
+				rec.under = lodgenFlatPercentile( glo, 50.0 );
+				// the faces: steep side rising above the ground against the visible top
+				double side = 0.0, upvis = 0.0;
+				for ( int si = 0; si < src.size(); si++ ) {
+					const QVector<Vector3> & w = wv[si];
+					std::vector<double> gv( size_t( w.size() ) );
+					for ( int k = 0; k < w.size(); k++ )
+						gv[size_t( k )] = groundOf( landAt( world, w[k][0], w[k][1] ),
+							roadZSquare( qint64( std::floor( w[k][0] / 16.0 ) ),
+								qint64( std::floor( w[k][1] / 16.0 ) ) ) );
+					for ( const Triangle & t : src[si].tris ) {
+						const Vector3 & a = w[t[0]];
+						const Vector3 & b = w[t[1]];
+						const Vector3 & cc = w[t[2]];
+						const double ux = double( b[0] ) - a[0], uy = double( b[1] ) - a[1], uz = double( b[2] ) - a[2];
+						const double vx = double( cc[0] ) - a[0], vy = double( cc[1] ) - a[1], vz = double( cc[2] ) - a[2];
+						const double nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+						const double len = std::sqrt( nx * nx + ny * ny + nz * nz );
+						const double area = 0.5 * len;
+						const double cz = len > 0.0 ? nz / len : 0.0;
+						double rise = -1e30;
+						bool bad = false;
+						for ( int q = 0; q < 3; q++ ) {
+							const double g = gv[size_t( t[q] )];
+							if ( std::isnan( g ) ) {
+								bad = true;
+								break;
+							}
+							rise = qMax( rise, double( w[t[q]][2] ) - g );
+						}
+						if ( bad )
+							rise = 0.0;
+						const bool steep = std::fabs( cz ) < 0.7;
+						if ( steep && rise > 8.0 )
+							side += area;
+						else if ( !steep && rise > -16.0 )
+							upvis += area;
+					}
+				}
+				rec.ratio = side / qMax( upvis, 1.0 );
+				const double wh = waterAt( world, c.pos[0], c.pos[1] );
+				if ( !std::isnan( wh ) && double( c.pos[2] ) < wh )
+					rec.why = "under water";
+				else if ( rec.under > 16.0 )
+					rec.why = "not on the ground";
+				else if ( rec.top < -8.0 )
+					rec.why = "under the ground";
+				else if ( rec.top > 64.0 )
+					rec.why = "too tall";
+				else if ( rec.ratio > 0.35 )
+					rec.why = "stands up";
+				else if ( upvis <= 0.0 )
+					rec.why = "no top surface";
+				finishFlat( rec, recIndex, src, wv, world );
+			}
+			flatRecTexels.assign( size_t( flatRecs.size() ), 0 );
+			flatCands.clear();
+			flatCands.squeeze();
+		}
+
+		//! The decision (the rule, then an override line), and the shapes when painted.
+		void finishFlat( LodgenFlatRec & rec, int recIndex, const QVector<LodSrcShape> & src,
+			const QVector<QVector<Vector3>> & wv, const EsmWorld & world )
+		{
+			rec.rulePaint = rec.measured && rec.why[0] == 0;
+			rec.painted = rec.rulePaint;
+			if ( rec.override >= 0 ) {
+				rec.painted = flatRules[rec.override].bake;
+				cen.flatOverridden++;
+			}
+			if ( rec.painted && src.isEmpty() )
+				rec.painted = false;
+			flatRecs.append( rec );
+			if ( !rec.painted )
+				return;
+			cen.flatPainted++;
+			if ( rec.hasLod )
+				cen.flatHasLod++;
+			for ( int si = 0; si < src.size(); si++ ) {
+				const LodSrcShape & s = src[si];
+				if ( s.tris.isEmpty() || wv[si].isEmpty() )
+					continue;
+				LodgenFlatShape fs;
+				fs.pos = wv[si];
+				fs.uv = s.uv;
+				fs.tris = s.tris;
+				fs.rec = recIndex;
+				/* Vertex colour only where the game applies it: a colour channel AND
+				 * the shader's Vertex_Colors flag (the .lodo writer's rule). */
+				if ( s.colStream && s.vcFlag && s.col.size() == s.pos.size() )
+					fs.col = s.col;
+				fs.vertexAlpha = s.vaFlag;
+				const LodgenFlatMat & m = flatMaterial( s );
+				fs.tex0 = ( m.read && !m.tex0.isEmpty() ) ? m.tex0
+					: ( m.effect || s.nearFacts.effectShader ) && !s.effectTex0.isEmpty() ? s.effectTex0 : s.tex0;
+				fs.decal = m.read ? ( m.decal || s.nearFacts.decal ) : ( s.matDecal || s.nearFacts.decal );
+				const bool matTest = m.read ? m.alphaTest : s.matAlphaTest;
+				fs.alphaTest = matTest || ( s.hasAlpha && ( s.alphaFlags & 0x0200 ) );
+				fs.alphaBlend = ( m.read ? m.alphaBlend : s.matAlphaBlend )
+					|| ( s.hasAlpha && ( s.alphaFlags & 0x0001 ) && !fs.alphaTest );
+				fs.alphaRef = matTest ? ( m.read ? m.alphaRef : float( s.matAlphaRef ) / 255.0f )
+					: float( s.alphaThreshold ) / 255.0f;
+				fs.matAlpha = m.alpha;
+				fs.uOff = m.uOff; fs.vOff = m.vOff; fs.uScale = m.uScale; fs.vScale = m.vScale;
+				for ( int q = 0; q < 3; q++ )
+					fs.tint[q] = m.tint[q];
+				if ( m.g2p )
+					flatG2p++;
+				fs.rise.resize( fs.pos.size() );
+				double zsum = 0.0;
+				fs.bx0 = fs.bx1 = fs.pos[0][0];
+				fs.by0 = fs.by1 = fs.pos[0][1];
+				for ( int k = 0; k < fs.pos.size(); k++ ) {
+					const Vector3 & v = fs.pos[k];
+					const double l = landAt( world, v[0], v[1] );
+					fs.rise[k] = std::isnan( l ) ? 0.0f : float( double( v[2] ) - l );
+					fs.bx0 = qMin( fs.bx0, v[0] ); fs.bx1 = qMax( fs.bx1, v[0] );
+					fs.by0 = qMin( fs.by0, v[1] ); fs.by1 = qMax( fs.by1, v[1] );
+					zsum += double( v[2] );
+				}
+				fs.meanZ = float( zsum / double( fs.pos.size() ) );
+				flatShapes.append( fs );
+			}
+		}
+
+		/*! The flat shape's material: a BGSM (textures()[0], its switches, its UV
+		 *  transform and opacity) or a BGEM (its base map, its base colour x scale
+		 *  as the tint), read through `lodgenRoadMaterialPath` and cached. */
+		const LodgenFlatMat & flatMaterial( const LodSrcShape & s )
+		{
+			static const LodgenFlatMat none;
+			if ( s.matName.isEmpty() )
+				return none;
+			const QString key = s.matName.toLower();
+			auto it = flatMatCache.constFind( key );
+			if ( it != flatMatCache.constEnd() )
+				return *it;
+			LodgenFlatMat m;
+			const QString path = lodgenRoadMaterialPath( s.matName );
+			const bool bgem = path.endsWith( QStringLiteral( ".bgem" ), Qt::CaseInsensitive );
+			QByteArray bytes;
+			if ( lodgenReadAsset( flatDataRoot, path, "materials", bgem ? ".bgem" : ".bgsm", bytes ) ) {
+				std::unique_ptr<Material> mat;
+				if ( bgem ) {
+					EffectMaterial * em = new EffectMaterial( bytes );
+					mat.reset( em );
+					if ( em->isValid() ) {
+						m.effect = true;
+						const Color3 bc = em->baseColor();
+						const float k = em->baseColorScale();
+						m.tint[0] = bc[0] * k; m.tint[1] = bc[1] * k; m.tint[2] = bc[2] * k;
+					}
+				} else {
+					mat.reset( new ShaderMaterial( bytes ) );
+				}
+				if ( mat->isValid() ) {
+					const QStringList & t = mat->textures();
+					if ( !t.isEmpty() )
+						m.tex0 = t[0];
+					m.decal = mat->hasDecal();
+					m.alphaTest = mat->hasAlphaTest();
+					m.alphaBlend = mat->hasAlphaBlend();
+					m.alphaRef = float( mat->alphaTestThreshold() ) / 255.0f;
+					m.alpha = mat->alpha();
+					m.g2p = mat->hasGrayscaleToPaletteColor();
+					m.uOff = mat->uvOffset()[0]; m.vOff = mat->uvOffset()[1];
+					m.uScale = mat->uvScale()[0]; m.vScale = mat->uvScale()[1];
+					m.read = true;
+				}
+			}
+			return *flatMatCache.insert( key, m );
+		}

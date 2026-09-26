@@ -6706,6 +6706,8 @@ int usage()
 		  << "             [--road-ground-paint 0..1]\n"
 		  << "             [--road-raised] [--no-road-raised]\n"
 		  << "             [--road-sidewalks] [--no-road-sidewalks] [--roads-legacy]\n"
+		  << "             [--flat-objects] [--no-flat-objects]\n"
+		  << "             [--flat-objects-file FILE]\n"
 		  << "                                          --road-detail lerps the diffuse\n"
 		  << "                                          sample toward the texture's own\n"
 		  << "                                          average: 1 (the default) prints the\n"
@@ -6766,6 +6768,25 @@ int usage()
 		  << "                                          families and the sidewalks, so\n"
 		  << "                                          such a bake is byte-identical to\n"
 		  << "                                          the bake before this existed.\n"
+		  << "                                          FLAT GROUND OBJECTS (on with the\n"
+		  << "                                          roads, --no-flat-objects turns them\n"
+		  << "                                          off): every other placed static\n"
+		  << "                                          that is low and lies on the ground\n"
+		  << "                                          (measured from its mesh: top at most\n"
+		  << "                                          64 above the ground, underside at\n"
+		  << "                                          most 16 above it, not under water,\n"
+		  << "                                          more top than side) is painted with\n"
+		  << "                                          its in-game texture; decals and\n"
+		  << "                                          alpha shapes go over, lowest first.\n"
+		  << "                                          The override file (default\n"
+		  << "                                          lodgen_flat_objects.txt beside the\n"
+		  << "                                          exe, --flat-objects-file names\n"
+		  << "                                          another) takes lines `bake PATH` /\n"
+		  << "                                          `nobake PATH` (a .nif or a folder)\n"
+		  << "                                          that win over the rule. The bake\n"
+		  << "                                          writes <ws>.flat_objects_report.txt\n"
+		  << "                                          beside the sheets (terrain VT bake).\n"
+		  << "                                          --roads-legacy turns them off.\n"
 		  << "  lodgen ... [--terrain-object-ao]\n"
 		  << "             [--terrain-object-ao-strength 0..4, default 0.5]\n"
 		  << "             [--terrain-object-ao-slab 0|1, default 1; 0 = the old\n"
@@ -7208,7 +7229,7 @@ int nifskopeCliMain( const QStringList & args )
 	bool lgRoadGroundPaintSet = false;
 	bool lgRoadDetailSet = false, lgRoadRaisedSet = false,
 		lgRoadSidewalksSet = false, lgRoadsLegacy = false,
-		lgRoadOpacitySet = false;
+		lgRoadOpacitySet = false, lgFlatObjectsSet = false;
 	/* The terrain virtual texture (lodgen.h). OFF by default; --vt names the
 	 * mod folder to write Terrain/ under. */
 	LodgenVtOptions lgVt;
@@ -7853,6 +7874,15 @@ int nifskopeCliMain( const QStringList & args )
 			lgCover.roadSidewalks = false;
 			lgRoadSidewalksSet = true;
 		}
+		else if ( t == QLatin1String( "--flat-objects" ) ) {
+			lgCover.flatObjects = true;
+			lgFlatObjectsSet = true;
+		}
+		else if ( t == QLatin1String( "--no-flat-objects" ) ) {
+			lgCover.flatObjects = false;
+			lgFlatObjectsSet = true;
+		}
+		else if ( t == QLatin1String( "--flat-objects-file" ) ) lgCover.flatObjectsFile = next();
 		else if ( t == QLatin1String( "--roads-legacy" ) ) {
 			lgRoadsLegacy = true;
 			lgCover.roadComposite = LodgenCoverOptions::RoadMaxZ;
@@ -8093,6 +8123,9 @@ int nifskopeCliMain( const QStringList & args )
 			lgCover.roadRaised = true;
 		if ( !lgRoadSidewalksSet )
 			lgCover.roadSidewalks = true;
+		/* ROADS1 painted no flat ground objects. */
+		if ( !lgFlatObjectsSet )
+			lgCover.flatObjects = false;
 	}
 
 	if ( cmd == QLatin1String( "new" ) ) {

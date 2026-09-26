@@ -1664,11 +1664,18 @@ public:
 				tr( "Paint sidewalks" ), true,
 				tr( "Sidewalk models are painted like roads, with the texture they wear in game.\n"
 					"Command line: --no-road-sidewalks turns them off" ) );
+			xB( f, "LodgenFlatObjectsCheck", QStringLiteral( "flatObjects" ),
+				tr( "Paint flat ground objects" ), true,
+				tr( "Low objects lying on the ground (pads, tracks, paths, decals, flat debris)\n"
+					"are painted with the texture they wear in game. Standing things stay out.\n"
+					"The file lodgen_flat_objects.txt beside NifSkope overrides the rule per model\n"
+					"or folder (bake / nobake lines); each bake writes a report beside its output.\n"
+					"Command line: --no-flat-objects turns them off" ) );
 			roadsSection->body()->setLayout( f.g );
 			auto sync = [this]() {
 				const bool on = roadsCheck->isChecked();
 				for ( const char * k : { "roadDetail", "roadGroundPaint", "roadCoverSuppress",
-						"roadComposite", "roadRaised", "roadSidewalks" } )
+						"roadComposite", "roadRaised", "roadSidewalks", "flatObjects" } )
 					enableExtra( k, on );
 			};
 			connect( roadsCheck, &QCheckBox::toggled, this, sync );
@@ -2812,6 +2819,7 @@ private:
 		o.roadGroundPaint = xf( "roadGroundPaint" );
 		o.roadRaised = xb( "roadRaised" );
 		o.roadSidewalks = xb( "roadSidewalks" );
+		o.flatObjects = xb( "flatObjects" );
 		o.terrainObjectAo = xb( "terrainObjectAo" );
 		o.terrainObjectAoStrength = xf( "terrainObjectAoStrength" );
 		// roadOpacity is left at its own default: bungo, 2026-09-12 16:0x,
