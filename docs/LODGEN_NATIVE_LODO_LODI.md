@@ -263,7 +263,7 @@ mistake one for the other.
 | 0x0A | 3 | normal | octahedral **12:12** — `n = b0 \| b1<<8 \| b2<<16`, `octX = n & 0xFFF`, `octY = n >> 12`. Worst error 0.0591°, mean 0.0209°, against vanilla `ByteVector3`'s 0.384° / 0.170° |
 | 0x0D | 1 | tangent | bits 0–6 roll angle around the normal (2.83° step), bit 7 handedness |
 | 0x0E | 1 | `sway` | per-vertex sway weight, 0 = rigid; `h²·(0.35+0.65r)` |
-| 0x0F | 1 | `selfAO` | the **model's own** self-occlusion — constant across copies, so it belongs in the library, not in the instance |
+| 0x0F | 1 | `selfAO` | the **model's own** self-occlusion — constant across copies, so it belongs in the library, not in the instance. Since AO2 (2026-09-26) cast across each face and pooled over split copies like the §4.8 stream (`src/lodofile.cpp`; `WW_SELFAO_FACE=0` = the old cast at the vertex) |
 
 No bitangent: it is exactly `cross(normal, tangent)`, verified over 949,477 real
 vertices, max component deviation 0.0134, zero vertices above 0.02.
@@ -1519,6 +1519,37 @@ the right places?"*. Two measured causes, two changes; the ray law itself
    the two corners would get equalized with also the whole face's context"* —
    no corner is kept apart). A vertex on no triangle is cast where it stands.
    Fixed pattern and order, one chunk a thread: deterministic.
+3. *Split copies* (the split-line round, bungo on the ballpark grandstand roof and
+   the tower faces: *"These split lines"*). A mesh splits a corner into copies for
+   its UVs or its smoothing; step 2 gave each copy the mean of its OWN triangles,
+   so two copies at one point of one flat face carried two bytes and the
+   rasteriser drew a hard step between their triangles (Boston: 100,900
+   co-located pairs with normals within 1°, mean jump 0 → 25.2 bytes, 48% above
+   16). Copies at one position (0.5 world u) whose normals lie within 30°
+   (Blender's auto-smooth default) now pool their samples and share one value;
+   across a crease of angle *a* the two hemispheres differ by a lune of *a*/180,
+   so pooling below 30° moves at most 1/6 of the rays, and sharper creases keep
+   their own values. Boston after: 0-1° pairs 0.0 / 0%, 1-10° 0.1, 10-20° 1.3,
+   20-30° 3.3; above 30° unchanged. `WW_AO_WELD_DEG` (default 30, −1 = off,
+   bytes as ee52efc0) is the research knob. A least-squares vertex fit was tried
+   on paper and rejected: on a quad with a nonlinear field it twists the diagonal
+   more than the lumped mean.
+4. *Under the ground* (bungo on a lone box on grass: *"never a diagonal"*). A
+   sample more than 32 world u below the chunk's ESM ground is on a part the
+   terrain hides (a foundation, a buried wall foot); every ray meets the ground
+   within a few units, so it read about 0.26 and pulled the visible foot vertex
+   dark. Such samples are set aside: a vertex uses them only when it has no sample
+   above the ground (pooled over its welded copies like the rest), so a wholly
+   buried vertex still takes one value and never a per-copy cast. Boston: 154,019
+   of 2,303,975 samples set aside; the lone box's foot 97 → 141, its diagonal
+   step 16 → 11. `WW_AO_UNDER_TOL` (world u, default 32, < 0 = keep, bytes as the
+   weld-only bake) is the research knob.
+
+The library `selfAO` (§3, 0x0F) uses steps 2 and 3 as well (not step 4: the
+library has no ground). The Charles bridge deck (Bridge01End01) read 38 from one
+corner buried in the pier; it now reads 240-245. On 15,323 up-facing library
+faces that vertical rays show open, the area below 128 went 1.65% → 0.59%
+(area-weighted mean 238.7 → 242.5).
 
 Measured on Boston (cells −8…3 × −12…−1, 19,234 up-facing faces classified by an
 independent 2.5D horizon march over the ring-0 world, not by the caster):
@@ -1536,7 +1567,15 @@ sample's rays near a point.
 byte ALONE — it already holds what `selfAO` and the v5 placement byte
 approximated; multiplying either in darkens twice. Otherwise fall back to
 `selfAO × placementAo` (v5) or `selfAO` (v4). The NifSkope viewer does exactly
-this under `WW_LODL_AO=1` (`src/lodinative.cpp`).
+this under `WW_LODL_AO=1` (`src/lodinative.cpp`); with AO off it draws no AO of
+any kind, `selfAO` included (before AO2 the `selfAO` byte still reached meshes
+that carry a v5 colour stream, e.g. the Charles bridge deck).
+
+**Impostor cards take ONE value** (bungo, 2026-09-26): a placement drawn as an
+impostor tree card uses the v5 placement byte alone, never a per-vertex stream
+and never `selfAO`. Per-corner AO on a flat card smears a gradient across it and
+doubles the self-shading already painted into the card. A tree placement's
+stream belongs to its LOD MESH and applies only when that mesh is drawn.
 
 **Way back.** `--native-no-vertex-ao` writes a v5 file, byte-identical to hotfix 6
 (the stream is written last; no other offset moves). v6 requires the v5 blob.
