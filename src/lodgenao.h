@@ -15,6 +15,8 @@ BSD License - see nifskope.h
 
 #include "data/niftypes.h"
 
+#include <algorithm>
+#include <array>
 #include <cmath>
 #include <vector>
 
@@ -200,10 +202,12 @@ struct LodgenAoScene
 
 	/* ==== THE FACE CASTER (lane AO2, 2026-09-26) ================================
 	 * bungo on the Boston oblique: "isn't the vertex AO kind of strong and placed
-	 * not in the right places?". Used ONLY by the native `.lodi` v6 vertex-AO and
-	 * v7 vertex-sky streams (src/nativeemit.cpp). The `.BTO` colour B, the v5
-	 * placement byte and the `.lodo` selfAO keep rayHit / ambientOcclusion /
-	 * skyVisibility above, byte for byte.
+	 * not in the right places?". Used by the native `.lodi` v6 vertex-AO and v7
+	 * vertex-sky streams (src/nativeemit.cpp) and, since the split-line round
+	 * (AO2, 2026-09-26), the `.lodo` selfAO (src/lodofile.cpp; WW_SELFAO_FACE=0
+	 * restores its old cast at the vertex). The `.BTO` colour B and the v5
+	 * placement byte keep rayHit / ambientOcclusion / skyVisibility above, byte
+	 * for byte.
 	 *
 	 * What differs from rayHit, and why:
 	 *  - the bins are walked cell by cell (Amanatides-Woo). rayHit steps one bin
@@ -434,6 +438,51 @@ struct LodgenAoScene
 	 *  sub-triangles and each one's centroid is a sample, so every sample stands
 	 *  for the same area. Returns barycentric weights (a, b, c), 3 floats a sample,
 	 *  k^2 samples. A fixed pattern: no RNG, no seed. */
+	/*! ONE VALUE PER SURFACE POINT (lane AO2, bungo 2026-09-26: "These split
+	 *  lines"). A mesh splits a corner into copies for its UVs or its smoothing;
+	 *  the across-face mean gave each copy the mean of ITS OWN triangles, so two
+	 *  copies at one point of one flat face drew two values and the rasteriser a
+	 *  hard step between their triangles. node[v] = the first copy (lowest index)
+	 *  at v's position -- positions rounded to 1/quant -- whose normal lies within
+	 *  acos(cosWeld) of v's; the callers pool the samples of a node's copies.
+	 *  Deterministic: sorted by (position, index). Returns the copies pooled. */
+	static quint64 weldNodes( const std::vector<Vector3> & p, const std::vector<Vector3> & n, double quant, float cosWeld,
+		std::vector<quint32> & node )
+	{
+		const size_t nv = p.size();
+		node.resize( nv );
+		std::vector<std::array<qint64, 3>> qk( nv );
+		std::vector<quint32> ord( nv );
+		for ( size_t v = 0; v < nv; v++ ) {
+			for ( int c = 0; c < 3; c++ )
+				qk[v][size_t( c )] = std::llround( double( p[v][c] ) * quant );
+			ord[v] = quint32( v );
+		}
+		std::sort( ord.begin(), ord.end(), [&]( quint32 a, quint32 b ) { return qk[a] != qk[b] ? qk[a] < qk[b] : a < b; } );
+		std::vector<quint32> reps;
+		quint64 pooled = 0;
+		for ( size_t s0 = 0; s0 < nv; ) {
+			size_t s1 = s0 + 1;
+			while ( s1 < nv && qk[ord[s1]] == qk[ord[s0]] )
+				s1++;
+			reps.clear();
+			for ( size_t s = s0; s < s1; s++ ) {
+				const quint32 v = ord[s];
+				node[v] = v;
+				for ( quint32 rp : reps )
+					if ( Vector3::dotproduct( n[v], n[rp] ) >= cosWeld ) {
+						node[v] = rp;
+						pooled++;
+						break;
+					}
+				if ( node[v] == v )
+					reps.push_back( v );
+			}
+			s0 = s1;
+		}
+		return pooled;
+	}
+
 	static void faceSamples( int k, std::vector<float> & out )
 	{
 		out.clear();

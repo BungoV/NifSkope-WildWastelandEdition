@@ -2605,10 +2605,10 @@ bool lodgenNativeWrite( QString * report, QString * error )
 	quint64 vskyBytes = 0, vskyOpen = 0;
 	double vskySum = 0.0;
 	// lane AO2: the face cast's census
-	float vaoFaceStep = 0.0f, vskyReach = 0.0f;
+	float vaoFaceStep = 0.0f, vskyReach = 0.0f, vaoWeldDeg = -1.0f, vaoUnderTol = -1.0f;
 	int vaoFaceMax = 0, vaoScenes = 0;
 	double vaoCastSeconds = 0.0;
-	quint64 vaoSamples = 0, vaoBuried = 0, vaoAtVertex = 0, vaoRingLeftOut = 0;
+	quint64 vaoSamples = 0, vaoBuried = 0, vaoAtVertex = 0, vaoRingLeftOut = 0, vaoWelded = 0, vaoUnder = 0;
 	std::array<quint64, 8> vskyHist{};
 	if ( s.vertexAo && s.placementAo && s.world ) {
 		set.vertexAo = true;
@@ -2739,6 +2739,22 @@ bool lodgenNativeWrite( QString * report, QString * error )
 			faceMax = qBound( 1, qEnvironmentVariable( "WW_AO_FACE_MAX" ).toInt(), 16 );
 		if ( qEnvironmentVariableIsSet( "WW_SKY_REACH" ) )
 			skyReach = qMax( 1.0f, qEnvironmentVariable( "WW_SKY_REACH" ).toFloat() );
+		float weldDeg = 30.0f;   // step 4 below; < 0 = off
+		if ( qEnvironmentVariableIsSet( "WW_AO_WELD_DEG" ) )
+			weldDeg = qMin( 180.0f, qEnvironmentVariable( "WW_AO_WELD_DEG" ).toFloat() );
+		vaoWeldDeg = weldDeg;
+		/* A sample more than underTol world u below the chunk's ground (the ESM
+		 * heightfield the rays march) is on a part of the mesh the terrain hides:
+		 * a foundation or the buried foot of a wall. All its rays meet the ground
+		 * within a few units, so it read ~0.26 and pulled the visible foot vertex
+		 * dark (lane AO2, the lone box on grass: its foot samples 1248-1479 u were
+		 * every one TERRAIN@32). Such samples are set aside: a vertex uses them only
+		 * when it has no sample above the ground (a vertex wholly buried), so it
+		 * still takes one welded value and never a per-copy cast; < 0 keeps them. */
+		float underTol = 32.0f;
+		if ( qEnvironmentVariableIsSet( "WW_AO_UNDER_TOL" ) )
+			underTol = qEnvironmentVariable( "WW_AO_UNDER_TOL" ).toFloat();
+		vaoUnderTol = underTol;
 		vaoFaceStep = faceStep;
 		vaoFaceMax = faceMax;
 		vskyReach = skyReach;
@@ -2753,7 +2769,7 @@ bool lodgenNativeWrite( QString * report, QString * error )
 					probe[k] = pl[k].toFloat();
 		}
 		QMutex probeLock;
-		std::atomic<quint64> aSamples{ 0 }, aBuried{ 0 }, aAtVertex{ 0 }, aRingLeftOut{ 0 };
+		std::atomic<quint64> aSamples{ 0 }, aBuried{ 0 }, aAtVertex{ 0 }, aRingLeftOut{ 0 }, aWelded{ 0 }, aUnder{ 0 };
 		std::atomic<int> aScenes{ 0 };
 		std::array<std::atomic<quint64>, 8> aSkyHist;
 		for ( auto & h : aSkyHist )
@@ -2852,7 +2868,7 @@ bool lodgenNativeWrite( QString * report, QString * error )
 				}
 				const bool wantSky = set.vertexSky;
 				std::vector<Vector3> wn;
-				std::vector<double> aoAcc, skyAcc, wAcc;
+				std::vector<double> aoAcc, skyAcc, wAcc, aoU, skyU, wU;
 				for ( quint32 i : slotRecv.second ) {
 					LodiSrcInstance & r = set.instances[i];
 					const DecodedMesh & d = dm[instMesh[i]];
@@ -2869,6 +2885,9 @@ bool lodgenNativeWrite( QString * report, QString * error )
 					aoAcc.assign( d.count, 0.0 );
 					skyAcc.assign( d.count, 0.0 );
 					wAcc.assign( d.count, 0.0 );
+					aoU.assign( d.count, 0.0 );
+					skyU.assign( d.count, 0.0 );
+					wU.assign( d.count, 0.0 );
 					auto probeSample = [&]( const Vector3 & p, const Vector3 & n, float ao, float sk, bool buried ) {
 						if ( !( probe[3] > 0 ) || std::fabs( p[0] * dim - probe[0] ) >= probe[3]
 							|| std::fabs( p[1] * dim - probe[1] ) >= probe[3] || std::fabs( p[2] * dim - probe[2] ) >= probe[3] )
@@ -2925,9 +2944,23 @@ bool lodgenNativeWrite( QString * report, QString * error )
 								if ( n.length() < 1e-4f )
 									n = fn;
 								n.normalize();
+								const bool under = underTol >= 0.0f && scene.hn
+									&& p[2] < scene.groundHeight( p[0], p[1] ) - underTol / float( dim );
 								bool buried = false;
 								const float ao = scene.ambientOcclusionFace( p, n, maxT, &buried );
 								const float sk = wantSky ? scene.skyVisibilityFace( p, n, skyT, float( dim ), hist ) : 0.0f;
+								if ( under ) {
+									// kept apart: used only by a vertex with no sample above the ground
+									aUnder++;
+									const quint32 vs[3] = { ia, ib, ic };
+									const float ws[3] = { wa, wb, wc };
+									for ( int c = 0; c < 3; c++ ) {
+										aoU[vs[c]] += w * ws[c] * ao;
+										skyU[vs[c]] += w * ws[c] * sk;
+										wU[vs[c]] += w * ws[c];
+									}
+									continue;
+								}
 								aSamples++;
 								if ( buried )
 									aBuried++;
@@ -2942,6 +2975,42 @@ bool lodgenNativeWrite( QString * report, QString * error )
 							}
 						}
 					}
+					/* 4. ONE VALUE PER SURFACE POINT (lane AO2, bungo 2026-09-26: "These
+					 * split lines", on the ballpark roof, the tower faces and a lone box).
+					 * A mesh splits a corner into copies for its UVs or its smoothing;
+					 * step 2 gave each copy the mean of ITS OWN triangles only, so two
+					 * copies at one point on one flat face drew two values, and the
+					 * rasteriser a hard step between the triangles (Boston: 101,050
+					 * co-located pairs with equal normals, mean jump 0 -> 25 bytes,
+					 * 48% above 16). Copies at the same position (0.5 world u) whose
+					 * normals lie within weldDeg pool their samples and share one value.
+					 * 30 deg = Blender's auto-smooth default; across a crease of angle a
+					 * the two hemispheres differ by a lune of a/180 of the hemisphere, so
+					 * pooling below 30 deg moves at most 1/6 of the rays. Copies across a
+					 * sharper crease keep their own values. WW_AO_WELD_DEG=-1 turns the
+					 * pooling off (the refuter: bytes as ee52efc0). */
+					if ( weldDeg >= 0.0f && d.count > 1 ) {
+						std::vector<quint32> node;
+						aWelded += LodgenAoScene::weldNodes( wp, wn, double( dim ) * 2.0, std::cos( weldDeg * 3.14159265f / 180.0f ), node );
+						std::vector<double> aoN( d.count, 0.0 ), skyN( d.count, 0.0 ), wN( d.count, 0.0 );
+						std::vector<double> aoUN( d.count, 0.0 ), skyUN( d.count, 0.0 ), wUN( d.count, 0.0 );
+						for ( quint32 v = 0; v < d.count; v++ ) {
+							aoN[node[v]] += aoAcc[v];
+							skyN[node[v]] += skyAcc[v];
+							wN[node[v]] += wAcc[v];
+							aoUN[node[v]] += aoU[v];
+							skyUN[node[v]] += skyU[v];
+							wUN[node[v]] += wU[v];
+						}
+						for ( quint32 v = 0; v < d.count; v++ ) {
+							aoAcc[v] = aoN[node[v]];
+							skyAcc[v] = skyN[node[v]];
+							wAcc[v] = wN[node[v]];
+							aoU[v] = aoUN[node[v]];
+							skyU[v] = skyUN[node[v]];
+							wU[v] = wUN[node[v]];
+						}
+					}
 					r.vertexAo.resize( d.count );
 					if ( wantSky )
 						r.vertexSky.resize( d.count );
@@ -2950,6 +3019,10 @@ bool lodgenNativeWrite( QString * report, QString * error )
 						if ( wAcc[v] > 0.0 ) {
 							ao = float( aoAcc[v] / wAcc[v] );
 							sk = float( skyAcc[v] / wAcc[v] );
+						} else if ( wU[v] > 0.0 ) {
+							// every sample under the ground: their mean, still one value per welded point
+							ao = float( aoU[v] / wU[v] );
+							sk = float( skyU[v] / wU[v] );
 						} else {
 							// on no triangle (or WW_AO_FACE_STEP=0): cast where it stands
 							bool buried = false;
@@ -2975,6 +3048,8 @@ bool lodgenNativeWrite( QString * report, QString * error )
 		vaoBuried = aBuried;
 		vaoAtVertex = aAtVertex;
 		vaoRingLeftOut = aRingLeftOut;
+		vaoWelded = aWelded;
+		vaoUnder = aUnder;
 		vaoScenes = aScenes;
 		for ( int b = 0; b < 8; b++ )
 			vskyHist[size_t( b )] = aSkyHist[size_t( b )];
@@ -3605,10 +3680,16 @@ bool lodgenNativeWrite( QString * report, QString * error )
 				.arg( vaoEmpty ).arg( vaoChunks ).arg( vaoNoLand )
 				+ QString( "; face cast (lane AO2): %1 ring scene(s), %2 placement(s) left out of a ring they have no mesh in, "
 					"%3 sample(s) across the faces (k x k a triangle, k = longest edge / %4 u, 1..%5), %6 vertex(es) on no triangle cast where they stand, "
-					"%7 buried (every ray met a back face), cast %8 s" )
+					"%7 buried (every ray met a back face), cast %8 s; %9" )
 					.arg( vaoScenes ).arg( vaoRingLeftOut ).arg( vaoSamples )
 					.arg( double( vaoFaceStep ), 0, 'f', 0 ).arg( vaoFaceMax ).arg( vaoAtVertex ).arg( vaoBuried )
 					.arg( vaoCastSeconds, 0, 'f', 1 )
+					.arg( ( vaoWeldDeg >= 0.0f ? QString( "%1 split vertex copies pooled with a co-located copy within %2 deg (one value a surface point)" )
+							.arg( vaoWelded ).arg( double( vaoWeldDeg ), 0, 'f', 0 )
+						: QStringLiteral( "split copies NOT pooled (WW_AO_WELD_DEG < 0)" ) )
+						+ ( vaoUnderTol >= 0.0f ? QString( "; %1 sample(s) more than %2 u under the ground set aside" )
+							.arg( vaoUnder ).arg( double( vaoUnderTol ), 0, 'f', 0 )
+						: QStringLiteral( "; samples under the ground KEPT (WW_AO_UNDER_TOL < 0)" ) ) )
 				: QStringLiteral( "OFF (--native-no-vertex-ao)" ) );
 		/* v7 (2026-09-18, lane LODIV7). Both halves state their OFF value by
 		 * the switch that turns them off, so a reader of the census never has
