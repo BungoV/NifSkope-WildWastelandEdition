@@ -720,9 +720,16 @@ path plus `|mswp:<8 hex>`, folded), so a worldspace with no swap is
 **byte-identical to v5 apart from the version word** at 0x04 -- outside
 `headerCrc32`, so `lodoIdentity` does not move and the `.lodi` is unchanged.
 
-**CNAM is counted, not applied.** The colour-remap index selects a row of the
-replacement material's grayscale-to-palette ramp; the census line reports how
-many swap rows that hit a LOD material carry one. Applying it is future work.
+**CNAM follows the game's rule (lane FIX1, 2026-09-26).** The colour-remap index
+selects a row of the replacement material's grayscale-to-palette ramp, and the
+game reads it ONLY when that material has `Greyscale_To_PaletteColor` set (BGSM
+common flags bit 15, NIF Shader Flags 1 bit 4). Otherwise the game ignores the
+index. No installed LOD material has the flag: on Nuka-World both CNAM rows are
+ignored by the game, so the written library is byte-identical to one that
+never read CNAM. A row that WOULD be game-applied is counted, not carried; the
+`.lodo` has no palette-row field. The census splits the CNAM count:
+`CNAM rows hit N (game-applied A -- a palette row the library cannot carry;
+ignored by the game, no Greyscale_To_PaletteColor B; index unset C)`.
 
 **The census line** (`native-material-swaps:`) reports the placements read,
 those carrying a swap by clause, those sent to a variant row, those whose swap
