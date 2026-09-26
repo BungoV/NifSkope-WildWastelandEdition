@@ -1567,6 +1567,29 @@ the right places?"*. Two measured causes, two changes; the ray law itself
    `WW_AO_PATCH_DEG` (default 1, < 0 = off, bytes as step 4) and
    `WW_AO_PATCH_FIT=vertex` (the corner fit) are the research knobs; which fit
    ships is bungo's pick.
+6. *Kit pieces* (the tower round, bungo on the round tower's flat wall: *"a hard
+   AO cutoff, then the next face is totally white"*, and a black roof tile under
+   a catwalk on the left tower). A wall or roof built of kit pieces is several
+   placements, and steps 3-5 worked inside one placement only, so two pieces
+   meeting at one point drew two values (the tower: 115 against 251 at one
+   corner; Boston: 21,515 co-located cross-placement pairs with normals within
+   1°, mean jump 0.1 in the installed bake, 19.8 after step 5, 19% above 32).
+   It was not a missing value, a 255 clamp, or the weld failing inside a mesh:
+   each piece averaged only its own samples, and the tall panel's samples hit the
+   back of an opaque stain overlay 5 u in front of it. Steps 3-5 now run over
+   every receiver of the chunk and ring at once: step 3 pools the corners of
+   DIFFERENT placements at one point (0.5 u, within 30°); a flat patch still
+   grows inside one placement only, so a street or roof of many tiles keeps its
+   detail; the final re-pool makes the pieces agree at every shared corner. A
+   long piece with no corner where a short neighbour's corner touches its edge
+   (a T-junction: the tall panel beside two stacked window panels) still drew a
+   step, because its edge interpolates its own two corners; the corner lying on
+   the edge (within 0.5 u, off both ends, normal within 1°) now takes the edge's
+   value, settled in place until nothing moves by 0.1 byte (Boston: 16,571
+   such corners). Cost: inside one piece the linear field is bent where its
+   corners now follow the neighbours, coplanar kink mean 7.5 → 10.0 bytes
+   (share above 16: 7.7% → 13.5%). `WW_AO_WELD_ACROSS=0` keeps steps 3-5
+   inside each placement (bytes as the step-5 bake).
 
 The library `selfAO` (§3, 0x0F) uses steps 2 and 3 as well (not step 4: the
 library has no ground). The Charles bridge deck (Bridge01End01) read 38 from one
