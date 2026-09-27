@@ -63,7 +63,7 @@ next speed lane (terrain VT across all cores, hash while writing, AO tail).
 
 
 ### FO4CS note (bungo 14:2x)
-Cloud shadows compared with 1001Bits/FO4CloudShadows: theirs = 256 cubemap of captured cloud meshes, mip 0, shell 10000 u (~140 m), opacity 2.0 clamped -> hard edges. Ours = weather cloud textures, deck 110000 u, 200000 u tiles, footprint mip, opacity 1.0, sky fraction 0.25 -> soft (his screenshot confirms). No action.
+Cloud shadows compared with 1001Bits/FO4CloudShadows: theirs = 256 cubemap of captured cloud meshes, mip 0, shell 10000 u (~140 m), opacity 2.0 clamped -> hard edges. Ours = weather cloud textures, deck 110000 u, 200000 u tiles, footprint mip, opacity 1.0, sky fraction 0.25 -> soft. bungo's screenshot of THEIR mod shows the hard edge. No action.
 
 
 ## TOP BLOCK -- written 2026-09-24 16:52 (`date`-read) by lane LEDGERFIX1, after the ledger wipe
