@@ -130,6 +130,20 @@ Measured now (offline, no NifSkope run):
 
 `run_gates.sh` runs both and prints PASS/FAIL lines to `gates.log`.
 
+**RUN by lane GATES, 10:51-11:27 (exe `run/NifSkope.exe` = release sha1 59f08533; log `gates.log`):**
+
+| gate | expected | measured | verdict |
+|---|---|---|---|
+| off (KEEP_BLACK_EMISSIVE + NO_LAYER_DEDUPE) == base, every file under mod/ | 153/153 | 152/153; only `Commonwealth.lodb` differs (39,106 -> 39,079 B): its exe/time/path/census/chunk lines. GPU1 `cmp_trees.sh` (masks the exe digest): **SAME 272 files** (mod + scr) | PASS, explained (skill ww-off-identity-cross-exe) |
+| on: every black emissive file gone | 21 of 21, 50,064,092 B | **20 of 21**, 49,670,728 B. Kept: `Commonwealth.LodgenCards.legacy.256x512_g.DDS`, 393,364 B = 6 BC1 layers, **every byte 0** (one distinct 16-byte block), byte-identical to the base's. Its 6 source sets in bake1 `cards/` (000531b3, 000a7208, 000a7209, 000f4791, 00121550, 2c550e59 `_oct_g.DDS`, DXT1) are all-zero bytes too. The bake log says 7 mesh + 13 card sheets dropped. So the card-array drop test (`lodgenLayersBlack` on the decoded `g.emis`, src/lodgen.cpp ~17073) did not fire on this group; cause not found | **FAIL** |
+| on: lit emissive kept byte-identical | 2 of 2, 2 emissive files in the test | 2 of 2 kept; 3 emissive files in the test (the one above) | FAIL (same cause) |
+| on: no other file gone | 0 | 0 | PASS |
+| on: every base source resolves to a layer with identical texels | 114/114 | 114/114, 0 differ, 0 unresolved | PASS |
+| on: layers 114 -> 106 (8 merged) | 106 | 106, 8 merged spellings logged (9 "identical texels" lines) | PASS |
+| on: every A line resolves | 647/647 | 647/647 | PASS |
+
+Not gated, seen: 12 `.bto.manifest.txt` files shrink 1-3 B: their `A` lines point merged sources at the surviving layer (e.g. `A 66 31` -> `A 66 0`), which the A-line gate resolves.
+
 ## 5. Commits
 - eb5dfa38: the probe reads the glow flag and slot; rank 7 decisions.
 - 8741678f: no black emissive; one layer per identical texture; viewer labels; docs; harnesses.
