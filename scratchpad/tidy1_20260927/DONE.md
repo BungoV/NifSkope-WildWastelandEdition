@@ -320,3 +320,24 @@ TIDY1 PARTIAL cause found and fixed in source (cc0642bc: BC1 truncates 1-3/255 g
   `cls.w/cls.h`, mips 0 = full; cards: `g.aw/g.ah/g.auxMips`). Palette rule checked: index 2 (and 3 in
   4-colour mode) is black only when both end points are 0.
 - 20:01 an FO4CS MSVC build (xmake + cl.exe) was running; waiting for the build slot (`wait_build_slot.sh`).
+- 20:12:58 slot free. `bash tools/ww_build.sh src/lodgen.cpp src/io/lodmfile.h`: RC 0, exe newer than the
+  sources. `GeneratedFiles/.obj/lodgen.o` recompiled at 20:14 (2,166,033 -> 2,168,768 B).
+  `release/NifSkope.exe` sha1 **119d46d4e377d2ffe746fd4cdc0adb75b2140b8a**, 25,927,168 B. Run copy
+  `run/` (same sha1) started at the first try (no antivirus hold).
+- 20:15 `run_gates.sh`: waited on TERR1's turn until 20:16:49. Off bake 20:16:49-20:33:42 (1013 s), on bake
+  20:33:43-20:52:51 (1148 s). The turn was taken and released as `tidy1` each time. Log: `gates.log`.
+
+### Gates on exe 119d46d4 (Boston box -8 -12 3 -1; base = GROUND1's on bake, snapshot `base_ground1_on.json`)
+
+| gate | expected | measured | verdict |
+|---|---|---|---|
+| off (KEEP_BLACK_EMISSIVE + NO_LAYER_DEDUPE) == base, every file under mod/ | 153/153 except the provenance `.lodb` | 152/153 identical. Only `Commonwealth.lodb` differs, 39,106 -> 39,088 B (-18). The file names the bake folder 6 times; the base's folder `NifskopeWWE-ground1/scratchpad/ground1_20260927/bakes/on` is 3 characters longer than `NifskopeWWE-tidy1/scratchpad/tidy1_20260927/bakes/off`, and 6 x 3 = 18. Its other lines are the bake time, the stage times and the census. A line-by-line diff was NOT measured: the base bake is deleted, only its hash is kept | PASS, explained (the script prints FAIL because it compares every byte) |
+| on: every black emissive file gone | 21 of 21, 50,064,092 B | **21 of 21**, 50,064,092 B (mesh 6,873,796 + cards 43,190,296), `legacy.256x512_g` (393,364 B) now among them. The bake log says 7 mesh + **14** card sheets not written (13 before the fix) | **PASS** (was FAIL) |
+| on: lit emissive kept byte-identical | 2 of 2, and only those 2 in the test | 2 of 2 kept (`legacy.128x512_g`, `legacy.384x1024_g`); 2 emissive files in the test | **PASS** (was FAIL) |
+| on: no other file gone | 0 | 0 | PASS |
+| on: every base source resolves to a layer with identical texels | 114/114 | 114/114, 0 differ, 0 unresolved | PASS |
+| on: layers 114 -> 106 | 106, 8 merged | 106, 8 merged spellings logged (9 "identical texels" lines) | PASS |
+| on: every A line resolves | 647/647 | 647/647 | PASS |
+
+Not gated, seen: 12 `.bto.manifest.txt` shrink 1-3 B (the `A` lines point merged sources at the kept layer,
+as before). The on bake is 425,863,710 -> 374,024,103 B (-51,839,607).
