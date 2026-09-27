@@ -7,6 +7,7 @@ BSD License - see nifskope.h
 #include "lodgen.h"
 #include "lodgenparallel.h"
 #include "lodgenbc7.h"
+#include "lodgengpu.h"
 #include "lodgenao.h"
 
 #include <QMutex>
@@ -2805,65 +2806,108 @@ static void lodgenDilateFrames( QImage & img, const QImage & coverage, int frame
 {
 	if ( img.isNull() || coverage.size() != img.size() || frameW <= 0 || frameH <= 0 )
 		return;
+	/* THE SAME ARITHMETIC, FRAME-LOCAL (lane GPU1, 2026-09-26). The first
+	 * version copied the WHOLE sheet's fill mask once per pass per frame and
+	 * went through QImage::pixel/setPixel per texel: on a 64-frame sheet at 32
+	 * passes that is gigabytes of memcpy per sheet, and the Boston profile had
+	 * the serial chunk pass inside this function most of the time. Now every
+	 * frame works on its own mask and its own texels through the scan lines,
+	 * a pass that fills nothing ends the passes (every later pass would find
+	 * the same nothing), and the frames -- which never read or write outside
+	 * themselves -- run side by side. Byte-identical: the reads of a pass are
+	 * still only the texels filled BEFORE it, the sums and the integer
+	 * divisions are the same, the flood is the same average. Both images are
+	 * ARGB32 at every caller; any other format is converted there and back. */
 	const int W = img.width(), H = img.height();
-	std::vector<quint8> filled( size_t( W ) * H, 0 );
-	for ( int y = 0; y < H; y++ )
-		for ( int x = 0; x < W; x++ )
-			// the coverage floor (docs/LODGEN_IMPOSTOR_SPEC.md): under 16/255 a texel's colour is the
-			// rounding of one or two source pixels, often black, and is filled from its neighbours instead
-			filled[size_t( y ) * W + x] = qAlpha( coverage.pixel( x, y ) ) >= 16 ? 1 : 0;
 	const bool isCoverage = ( &img == &coverage );
-	auto put = [&]( int x, int y, int r, int g, int b, int a ) {
-		if ( isCoverage )
-			img.setPixel( x, y, qRgba( r, g, b, qAlpha( img.pixel( x, y ) ) ) );
-		else
-			img.setPixel( x, y, qRgba( r, g, b, a ) );
-	};
-	for ( int fy = 0; fy < H; fy += frameH ) {
-		for ( int fx = 0; fx < W; fx += frameW ) {
-			const int x1 = qMin( W, fx + frameW ), y1 = qMin( H, fy + frameH );
-			// the frame's average covered value, the flood for what dilation never reaches
-			quint64 sr = 0, sg = 0, sb = 0, sa = 0, n = 0;
-			for ( int y = fy; y < y1; y++ )
-				for ( int x = fx; x < x1; x++ )
-					if ( filled[size_t( y ) * W + x] ) {
-						const QRgb p = img.pixel( x, y );
-						sr += qRed( p ); sg += qGreen( p ); sb += qBlue( p ); sa += qAlpha( p ); n++;
-					}
-			if ( !n )
-				continue;		// an empty frame stays as it is
-			const int ar = int( sr / n ), ag = int( sg / n ), ab = int( sb / n ), aa = int( sa / n );
-			for ( int pass = 0; pass < passes; pass++ ) {
-				std::vector<quint8> next( filled );
-				for ( int y = fy; y < y1; y++ ) {
-					for ( int x = fx; x < x1; x++ ) {
-						if ( filled[size_t( y ) * W + x] )
+	if ( img.format() != QImage::Format_ARGB32 || coverage.format() != QImage::Format_ARGB32 ) {
+		QImage a = img.convertToFormat( QImage::Format_ARGB32 );
+		if ( isCoverage ) {
+			lodgenDilateFrames( a, a, frameW, frameH, passes );
+		} else {
+			const QImage c = coverage.convertToFormat( QImage::Format_ARGB32 );
+			lodgenDilateFrames( a, c, frameW, frameH, passes );
+		}
+		img = a.convertToFormat( img.format() );
+		return;
+	}
+	quint32 * px = reinterpret_cast<quint32 *>( img.bits() );	// detaches once, before any fan-out
+	const qsizetype stride = img.bytesPerLine() / 4;
+	const quint32 * cv = isCoverage ? px : reinterpret_cast<const quint32 *>( coverage.constBits() );
+	const qsizetype cstride = coverage.bytesPerLine() / 4;
+	const int framesX = ( W + frameW - 1 ) / frameW, framesY = ( H + frameH - 1 ) / frameH;
+	auto one = [&]( int f ) {
+		const int fx = ( f % framesX ) * frameW, fy = ( f / framesX ) * frameH;
+		const int x1 = qMin( W, fx + frameW ), y1 = qMin( H, fy + frameH );
+		const int fw = x1 - fx, fh = y1 - fy;
+		// the coverage floor (docs/LODGEN_IMPOSTOR_SPEC.md): under 16/255 a texel's colour is the
+		// rounding of one or two source pixels, often black, and is filled from its neighbours instead
+		std::vector<quint8> filled( size_t( fw ) * fh ), next;
+		quint64 sr = 0, sg = 0, sb = 0, sa = 0, n = 0;
+		for ( int y = 0; y < fh; y++ ) {
+			const quint32 * crow = cv + ( fy + y ) * cstride + fx;
+			const quint32 * row = px + ( fy + y ) * stride + fx;
+			for ( int x = 0; x < fw; x++ ) {
+				const bool on = qAlpha( crow[x] ) >= 16;
+				filled[size_t( y ) * fw + x] = on ? 1 : 0;
+				if ( on ) {
+					// the frame's average covered value, the flood for what dilation never reaches
+					const QRgb p = row[x];
+					sr += qRed( p ); sg += qGreen( p ); sb += qBlue( p ); sa += qAlpha( p ); n++;
+				}
+			}
+		}
+		if ( !n )
+			return;		// an empty frame stays as it is
+		const int ar = int( sr / n ), ag = int( sg / n ), ab = int( sb / n ), aa = int( sa / n );
+		auto put = [&]( quint32 & t, int r, int g, int b, int a ) {
+			t = isCoverage ? qRgba( r, g, b, qAlpha( t ) ) : qRgba( r, g, b, a );
+		};
+		size_t open = size_t( fw ) * fh - size_t( n );
+		for ( int pass = 0; pass < passes && open; pass++ ) {
+			next = filled;
+			size_t got = 0;
+			for ( int y = 0; y < fh; y++ ) {
+				quint32 * row = px + ( fy + y ) * stride + fx;
+				for ( int x = 0; x < fw; x++ ) {
+					if ( filled[size_t( y ) * fw + x] )
+						continue;
+					int r = 0, g = 0, b = 0, a = 0, k = 0;
+					for ( int dy = -1; dy <= 1; dy++ ) {
+						const int sy = y + dy;
+						if ( sy < 0 || sy >= fh )
 							continue;
-						int r = 0, g = 0, b = 0, a = 0, k = 0;
-						for ( int dy = -1; dy <= 1; dy++ )
-							for ( int dx = -1; dx <= 1; dx++ ) {
-								const int sx = x + dx, sy = y + dy;
-								if ( ( !dx && !dy ) || sx < fx || sy < fy || sx >= x1 || sy >= y1 )
-									continue;
-								if ( !filled[size_t( sy ) * W + sx] )
-									continue;
-								const QRgb p = img.pixel( sx, sy );
-								r += qRed( p ); g += qGreen( p ); b += qBlue( p ); a += qAlpha( p ); k++;
-							}
-						if ( k ) {
-							put( x, y, r / k, g / k, b / k, a / k );
-							next[size_t( y ) * W + x] = 1;
+						const quint32 * srow = px + ( fy + sy ) * stride + fx;
+						const quint8 * frow = filled.data() + size_t( sy ) * fw;
+						for ( int dx = -1; dx <= 1; dx++ ) {
+							const int sx = x + dx;
+							if ( ( !dx && !dy ) || sx < 0 || sx >= fw || !frow[sx] )
+								continue;
+							const QRgb p = srow[sx];
+							r += qRed( p ); g += qGreen( p ); b += qBlue( p ); a += qAlpha( p ); k++;
 						}
 					}
+					if ( k ) {
+						put( row[x], r / k, g / k, b / k, a / k );
+						next[size_t( y ) * fw + x] = 1;
+						got++;
+					}
 				}
-				filled.swap( next );
 			}
-			for ( int y = fy; y < y1; y++ )
-				for ( int x = fx; x < x1; x++ )
-					if ( !filled[size_t( y ) * W + x] )
-						put( x, y, ar, ag, ab, aa );
+			filled.swap( next );
+			if ( !got )
+				break;		// nothing moved: every later pass would find the same nothing
+			open -= got;
 		}
-	}
+		if ( open )
+			for ( int y = 0; y < fh; y++ ) {
+				quint32 * row = px + ( fy + y ) * stride + fx;
+				for ( int x = 0; x < fw; x++ )
+					if ( !filled[size_t( y ) * fw + x] )
+						put( row[x], ar, ag, ab, aa );
+			}
+	};
+	lodgenParallelFor( framesX * framesY, one );
 }
 
 /*! THE HEIGHT CHANNEL'S REPAIR, and the one that stops the card coming apart.
@@ -5152,6 +5196,11 @@ bool lodgenWriteDds( const QString & path, int w, int h,
 		mh = mipH[mi];
 		const int bw = ( mw + 3 ) / 4, bh = ( mh + 3 ) / 4;
 		std::vector<quint8> block( size_t( bw ) * bh * blockBytes );
+		// BC7 on the GPU when it is on (no worse on the CPU's error measure, not its bytes; src/lodgengpu.h), else the loop below
+		if ( bc7 && lodgenGpuEncodeBc7( mip.data(), mw, mh, kCardNormalBc7Weights, block.data() ) ) {
+			f.write( reinterpret_cast<const char *>( block.data() ), qint64( block.size() ) );
+			continue;
+		}
 		// BLOCK ROWS IN PARALLEL: disjoint writes into `block`, `mip` read-only.
 		lodgenParallelFor( bh, [&]( int by ) {
 			for ( int bx = 0; bx < bw; bx++ ) {
@@ -5333,7 +5382,10 @@ static int lodgenEncodeArrayLayer( const std::vector<quint32> & bgra, int w, int
 		const int bw = ( mw + 3 ) / 4, bh = ( mh + 3 ) / 4;
 		const size_t at = out.size();
 		out.resize( at + size_t( bw ) * bh * blockBytes );
+		// BC7 on the GPU when it is on (no worse on the CPU's error measure, not its bytes; src/lodgengpu.h), else the loop below
+		const bool onGpu = bc7 && lodgenGpuEncodeBc7( mip.data(), mw, mh, kCardNormalBc7Weights, out.data() + at );
 		// BLOCK ROWS IN PARALLEL: disjoint writes into `out`, `mip` read-only.
+		if ( !onGpu )
 		lodgenParallelFor( bh, [&]( int by ) {
 			for ( int bx = 0; bx < bw; bx++ ) {
 				quint8 * o = out.data() + at + ( size_t( by ) * bw + bx ) * blockBytes;
@@ -6096,7 +6148,15 @@ bool lodgenBakeHeightmap( const EsmWorld & world, const QString & outDir,
 struct LodgenBakeCaches
 {
 	QHash<QString, DDSTexture16 *> texCache;
-	QStringList texOrder;               //!< least recently used first
+	/*! THE LRU ORDER AS STAMPS (lane GPU1, 2026-09-26): the key's last use.
+	 *  It was a QStringList, least recently used first, and every HIT paid a
+	 *  removeOne() -- a string compare against every cached key -- from inside
+	 *  the pyramid's per-texel loop. The least recently used key is the one with
+	 *  the smallest stamp; stamps are unique, so the victims are the list's
+	 *  first entries in the list's order and the loads (and their census count)
+	 *  are the same. */
+	QHash<QString, quint64> texStamp;
+	quint64 texClock = 0;
 	qint64 texBudget = qint64( 512 ) << 20;
 	qint64 texBytes = 0;
 	//! MODL path -> (resolved, average diffuse colour), for the grass tint
@@ -6140,21 +6200,24 @@ static const DDSTexture16 * lodgenCachedTexture( LodgenBakeCaches & c,
 	const QString key = texPath.toLower();
 	auto it = c.texCache.constFind( key );
 	if ( it != c.texCache.constEnd() ) {
-		c.texOrder.removeOne( key );
-		c.texOrder.append( key );
+		c.texStamp[key] = ++c.texClock;
 		return *it;
 	}
 	const DDSTexture16 * tex = lodgenLoadTexture( dataRoot, texPath, c.texCache );
-	c.texOrder.append( key );
+	c.texStamp[key] = ++c.texClock;
 	if ( tex ) {
 		c.texLoads++;
 		c.texBytes += qint64( tex->size() );
 	}
-	while ( c.texBytes > c.texBudget && c.texOrder.size() > 1 ) {
-		const QString victim = c.texOrder.first();
+	while ( c.texBytes > c.texBudget && c.texStamp.size() > 1 ) {
+		auto oldest = c.texStamp.constBegin();
+		for ( auto s = c.texStamp.constBegin(); s != c.texStamp.constEnd(); ++s )
+			if ( s.value() < oldest.value() )
+				oldest = s;
+		const QString victim = oldest.key();
 		if ( victim == key )
 			break;
-		c.texOrder.removeFirst();
+		c.texStamp.remove( victim );
 		auto vt = c.texCache.find( victim );
 		if ( vt != c.texCache.end() ) {
 			if ( *vt )

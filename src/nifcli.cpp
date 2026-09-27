@@ -25,6 +25,7 @@ See the LICENSE.md file for the full license text.
 #include "esmweather.h"
 #include "lodgen.h"
 #include "lodgenchunkpass.h"
+#include "lodgengpu.h"
 #include "lodgenloadorder.h"
 #include "lodgenlayout.h"
 #include "lodgenparallel.h"
@@ -4126,7 +4127,7 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 			out() << "card sets: " << rel.size() << " file(s) under " << impostors << ", digest "
 				  << cardsWord.mid( 7, 12 ) << Qt::endl;
 		}
-		inc.switches = lodgenSwitchesWithIdentity( gLgSwitchDigest, idWord + cardsWord );
+		inc.switches = lodgenSwitchesWithIdentity( gLgSwitchDigest, idWord + cardsWord + lodgenGpuDigestWord() );
 		inc.regionProducts = atlas || arrays || !impostors.isEmpty();
 		inc.nativeCache = gLgNativeCache;
 		/* the raw chunk cache rides on the .lodj one: `--no-native-cache` turns both off */
@@ -6284,6 +6285,11 @@ int usage()
 		  << "                                          the vanilla sheet for vanilla BTOs)\n"
 		  << "  lodgen <file.esm> --worldspace HEX --objects X Y [--dim 4]\n"
 		  << "         [--data-root DIR] [--identity] [--no-identity] [--no-ao] [--arrays]\n"
+		  << "         [--no-gpu]                       (this run on the CPU; the GPU is\n"
+		  << "                                          used when Settings > NIF > LOD bake\n"
+		  << "                                          > Use GPU is on, the default; its\n"
+		  << "                                          card normal BC7 is as good, not\n"
+		  << "                                          the same bytes)\n"
 		  << "         [--no-merge]                     (shapes merge per material after\n"
 		  << "                                          the atlas; --no-merge keeps one\n"
 		  << "                                          shape per source material)\n"
@@ -7197,6 +7203,7 @@ int nifskopeCliMain( const QStringList & args )
 	// The AO bake is the identity channel's B. Off leaves it at 255, which is
 	// what makes each object ONE flat colour -- the index and nothing else.
 	bool lgBakeAO = true;
+	bool lgNoGpu = false;
 	bool lgCullBuried = false;
 	float lgCullMargin = 128.0f;
 	bool lgAoGrey = false;
@@ -7489,6 +7496,10 @@ int nifskopeCliMain( const QStringList & args )
 		else if ( t == QLatin1String( "--identity" ) ) lgIdentity = true;
 		else if ( t == QLatin1String( "--no-identity" ) ) lgIdentity = false;
 		else if ( t == QLatin1String( "--no-ao" ) ) lgBakeAO = false;
+		/* `--no-gpu`: this run on the CPU whatever Settings > NIF > LOD bake >
+		 * Use GPU says (src/lodgengpu.h). The path taken, not this token, goes
+		 * into the chunk digest (lodgenGpuDigestWord). */
+		else if ( t == QLatin1String( "--no-gpu" ) ) lgNoGpu = true;
 		/* THE THREAD BUDGET, and the exact way back. `--threads 1` runs the
 		 * generator on one core the way it always ran: one world, one cache
 		 * set, one chunk at a time, written inline. 0 or absent = the
@@ -8651,6 +8662,8 @@ int nifskopeCliMain( const QStringList & args )
 				return 2;
 			}
 		}
+		lodgenGpuConfigure( lgNoGpu );
+		out() << lodgenGpuReport() << Qt::endl;
 		rc = cmdLodgen( file, lgListWorldspaces, lgWorldspace,
 			lgHaveCell, lgCell[0], lgCell[1],
 			lgHaveTerrain, lgChunk[0], lgChunk[1], lgDim, outFile,
@@ -8668,6 +8681,7 @@ int nifskopeCliMain( const QStringList & args )
 			lgLibraryNear, lgNativeLadderFoliage, lgNativeSilhouette, lgNativePlacementAo, lgNativeVertexAo, lgLodiV7,
 			lgScrappable, lgIdentityJoinLegacy, lgIdentityJoinGap,
 			lgTreesOnly, lgAggregate, lgAggMin, lgAggTile, lgAggViews );
+		out() << lodgenGpuSummary() << Qt::endl;
 	}
 	else if ( cmd == QLatin1String( "anim-setup" ) )
 		rc = cmdAnimSetup( file, block, controllers, sequence, newSequence,

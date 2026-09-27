@@ -673,11 +673,26 @@ static const char * const gLgSwitchSkipValue[] = {
 	nullptr
 };
 
+/*! Flags that take NO value and are dropped alone. --no-gpu is one of two
+ *  ways to the CPU path (the other is the Use GPU setting), so the token says
+ *  nothing: the path actually taken goes into the identity word instead
+ *  (lodgenGpuDigestWord, empty on the CPU path), and a cache written on one
+ *  path is never reused by the other (lane GPU1, 2026-09-26). */
+static const char * const gLgSwitchSkipToken[] = {
+	"--no-gpu",
+	nullptr
+};
+
 QString lodgenSwitchDigestOf( const QStringList & a )
 {
 	QCryptographicHash h( QCryptographicHash::Sha1 );
 	for ( int i = 0; i < a.size(); i++ ) {
 		bool skip = false;
+		for ( const char * const * s = gLgSwitchSkipToken; *s; s++ )
+			if ( a.at( i ) == QLatin1String( *s ) )
+				skip = true;
+		if ( skip )
+			continue;
 		for ( const char * const * s = gLgSwitchSkip; *s; s++ ) {
 			if ( a.at( i ) == QLatin1String( *s ) ) {
 				skip = true;
