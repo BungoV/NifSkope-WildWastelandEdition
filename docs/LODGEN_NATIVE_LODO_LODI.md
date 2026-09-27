@@ -2107,10 +2107,15 @@ streamed (B bytes, mean M, F at the terrain = 255, Z at 256 u or more above it =
 S placement(s) spanning half the ramp or more)`. `--native-verify`'s describe adds
 `vertexGroundPlacements / BytesTotal / Mean / Full / Zero`.
 
-**Measured** (Boston box −8 −12 3 −1; the numbers are in lane GROUND1's report,
-`scratchpad/ground1_20260927/DONE.md` §4): the gates are independent recompute
-within 1 level, the physical ends of the ramp, and each placement's stream mean
-against its 0x12 byte.
+**Measured** (Boston box −8 −12 3 −1, 46,205 placements / 999,977 vertices; lane
+GROUND1's report, `scratchpad/ground1_20260927/DONE.md` §4): an independent
+recompute agrees within 1 level on 99.998% of vertices (99.62% exact); every
+vertex more than 256 u above the terrain reads 0 (768,197); every vertex 0–5 u
+above reads ≥ 250 (101,893). Each placement's stream mean is within 2 levels of
+its 0x12 byte on 98.35% of placements (correlation 0.99992): the byte averages
+the stock `.BTO` ring's vertices and the stream the `.lodo` library mesh's, so
+tall trees spanning the ramp differ most. Cost: the stream is the AO stream's
+size; Boston's `.lodi` grows 25%, the whole Commonwealth's about 40% (~13.9 MB).
 
 **The FO4CS reader owes** version 12 in its whitelist. A reader that does not
 draw the stream still reads the file: every v11 payload is where it was, the

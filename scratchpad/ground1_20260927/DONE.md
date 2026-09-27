@@ -82,14 +82,50 @@ Size: Boston .lodi 5,089,578 -> 6,375,722 B (+1,286,144 B, +25.3%); the stream i
 Whole Commonwealth estimate: the ao2 whole-map .lodi is 34,371,499 B with an AO stream of 13,866,923 B, so about
 +13.87 MB (+40.4%).
 
-## 5. Commits
-(in progress)
+## 5. Commits (branch ground1-20260927)
+- 8da99315 code + decoder + doc section 4.16
+- 00112531 harness version lists taught v12, gate/bake/shot scripts, DONE section 3
+- 60151149 gate numbers (trial), deliverable text, picture labeller
+- ef0d1191 reader verify script
+- (next) doc Measured line, DONE 5-8, resume steps, gates.py terrain-window fix
 
 ## 6. Pictures
-(in progress)
+NOT MADE. Every render needs the machine-wide NifSkope turn. It has been held since 05:44:55 by "anon", a process
+that has exited. Overseer ruling: do not release, remove or work around it; that waits for bungo.
+Tooling is ready: `shot.sh` (maps1 Boston camera, view 8 ortho) and `label.py` (60 px bar, 2x crop).
 
-## 7. What is still not right
-(in progress)
+## 7. What is still not right / RESUME STEPS
+Blocked on the turn lock only. Still owed, in order (each script takes the turn itself; game gate inside):
+1. Rung bake (the real "night bake"), about 20 min:
+   `G=/e/Projects/NifskopeWWE-ground1/scratchpad/ground1_20260927; bash $G/bake.sh $G/run_rung/NifSkope.exe $G/bakes/rung`
+   The byte-for-byte gate against the rung exe has NOT been run yet.
+2. Final gates: `SP=/c/Users/bungo/AppData/Local/Temp/claude/E--Projects-Claude/b560e4ec-6e66-4c21-9572-1ad4acca0043/scratchpad;
+   python $G/gates.py $G/bakes/rung $G/bakes/off $G/bakes/on $SP/ao2/terr_x1/Commonwealth.lodl $G/gates.json`
+   -> fill the IDENTITY_PENDING row of section 4 (it carries its flip-byte and drop-file red controls).
+3. C++ reader red controls: `python $G/redread.py $G/bakes/on/mod/FO4CSLOD/Commonwealth/Commonwealth.lodi $G/red`, then
+   `bash $G/verify.sh $G/run_new/NifSkope.exe $G/bakes/on/mod/FO4CSLOD/Commonwealth/Commonwealth.lodo $G/bakes/off/mod/FO4CSLOD/Commonwealth $G/red`
+   -> good pairs accepted, 7 doctored copies refused by name; fill the CPP_PENDING row.
+4. Pictures (unused ports, e.g. 43711 / 43712):
+   `NS=$G/run_rung/NifSkope.exe LODI_DIR=$G/bakes/rung/mod/FO4CSLOD/Commonwealth bash $G/shot.sh $G/pics/stored.png 43711 WW_RENDER_FLAT=1 WW_LODL_CHANNEL=ground`
+   `NS=$G/run_new/NifSkope.exe LODI_DIR=$G/bakes/on/mod/FO4CSLOD/Commonwealth bash $G/shot.sh $G/pics/vertex.png 43712 WW_RENDER_FLAT=1 WW_LODL_CHANNEL=ground`
+   Check each log's note line (rung: placement byte; new: PER-VERTEX GROUND-CONTACT STREAM). Then
+   `python $G/label.py <in> <out> "<title>" [x y w h]`: "Ground contact as stored today (one value per object)",
+   "Ground contact per vertex (new)", 2x crops at the ballpark (about 1080,960 in the 1600 map) and at one tower
+   foot (about 530,700). Find both on the actual render first.
+5. Cleanup: `rm -rf $G/bakes $G/red $G/cache $G/pics` after the pictures are handed over. bakes/off and bakes/on
+   (943 MB) are KEPT only so steps 2-4 need no re-bake.
+
+Known, not a defect of the code:
+- Brief gate "within 16 u reads >= 250" fails by the law itself (16 u reads 239); the law's own numbers pass.
+- Brief gate "placement mean == 0x12 within 2" fails on 761 of 46,205 placements (1.65%): different vertex sets.
+- 327 placements (ambiguous mesh slot) are not recomputed; mnamSlot is not stored per instance.
+- Size: +25% Boston, about +40% whole map. The FO4CS reader change is owed (DELIVERABLE_TEXT.md).
 
 ## 8. Skill review
-(in progress)
+- New skill `E:\Projects\Claude\.claude\skills\ww-lodi-add-vertex-stream\SKILL.md`: the per-vertex .lodi stream
+  procedure (third time: AO, sky, ground), doctored-file red controls, the recompute gate, the two brief-gate
+  traps, the rung-from-sibling bake.
+- ww-module-off-is-identical held: conditional version + payload last + CRC fold gave an off arm at v7, zeros at 0x130.
+- nifskope-ww-worktree-build 5b held (water1 sibling objects). ww_build.sh's log carries no `-o` lines, so the
+  rebuilt objects were checked by mtime -- worth one line in nifskope-ww-build-verify.
+- A turn lock left by an exited process has no procedure here; that is bungo's call, not a skill.

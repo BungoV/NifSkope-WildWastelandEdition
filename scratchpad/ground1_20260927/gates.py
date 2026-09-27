@@ -127,7 +127,10 @@ def mesh_local(mi):
 # terrain (audit1 aud_lib.Terrain, restated)
 D = LA.Lodt(LODL)
 s = D.spc
-x0, y0, x1, y1 = -9, -13, 4, 0
+# every streamed placement's cell, 2 cells of margin (a piece reaches past its origin cell)
+sx = [math.floor(Ton['instances'][i]['x'] / 4096.0) for i in range(n) if F[i + 1] > F[i]]
+sy = [math.floor(Ton['instances'][i]['y'] / 4096.0) for i in range(n) if F[i + 1] > F[i]]
+x0, y0, x1, y1 = min(sx) - 2, min(sy) - 2, max(sx) + 2, max(sy) + 2
 x0, y0 = max(x0, D.minX), max(y0, D.minY); x1, y1 = min(x1, D.maxX), min(y1, D.maxY)
 say('terrain.lodl_cells', (D.minX, D.minY, D.maxX, D.maxY)); say('terrain.window', (x0, y0, x1, y1))
 gx0, gy0 = (x0 - D.minX) * s, (y0 - D.minY) * s
@@ -172,7 +175,7 @@ for i, inst in enumerate(Ton['instances']):
     rb = np.rint(np.clip(1.0 - dz / 256.0, 0, 1) * 255.0)
     sv = np.frombuffer(bytes(G[F[i]:F[i + 1]]), np.uint8).astype(np.float64)
     st.append(sv); rc.append(rb); dz_all.append(dz); own.append(np.full(ln, inst['ground'], np.float64)); lvl0mask.append(l0)
-    means.append((sv.mean(), inst['ground'], sv[l0].mean() if l0.any() else sv.mean(), sv.max() - sv.min()))
+    means.append((sv.mean(), inst['ground'], sv[l0].mean() if l0.any() else sv.mean(), sv.max() - sv.min(), i, ln))
 say('placements.measured', len(means)); say('placements.empty_slice', empty)
 say('placements.skipped_ambiguous_slot', amb); say('placements.skipped_no_mesh_match', nomatch)
 say('placements.skipped_outside_terrain_window', outside)
@@ -224,6 +227,21 @@ say('placement level-0 mean vs 0x12: share within 2', round(float((d0 <= 2).mean
 say('placement level-0 mean vs 0x12: mean |d|', round(float(d0.mean()), 4))
 say('GATE placement mean within 2 of 0x12 (all)', 'PASS' if (dmean <= 2).all() else 'FAIL')
 say('placements whose stream spans >=128 levels', int((mm[:, 3] >= 128).sum()))
+bad = dmean > 2
+say('placements off by more than 2', int(bad.sum()))
+say('  of those spanning >=128 levels', int((bad & (mm[:, 3] >= 128)).sum()))
+say('  share of all placements spanning >=128 that are off by >2', round(float((bad & (mm[:, 3] >= 128)).sum() / max(1, (mm[:, 3] >= 128).sum())), 4))
+say('  of those with stream all 0 or all 255 (flat)', int((bad & (mm[:, 3] == 0)).sum()))
+byModel = {}
+for row, dd in zip(mm[bad], dmean[bad]):
+    ii = int(row[4]); bs = L['bases'][Ton['instances'][ii]['baseId']]
+    nm = L['string_at'](bs['modelStringOffset']).replace('\\', '/').split('/')[-1]
+    byModel.setdefault(nm, []).append(dd)
+top = sorted(byModel.items(), key=lambda kv: -len(kv[1]))[:12]
+say('off-by->2 models (count, mean |d|)', [(k, len(v), round(float(np.mean(v)), 1)) for k, v in top])
+worst = np.argsort(-dmean)[:8]
+say('worst placements (inst, verts, stream mean, byte, span)',
+    [(int(mm[w, 4]), int(mm[w, 5]), round(float(mm[w, 0]), 1), int(mm[w, 1]), int(mm[w, 3])) for w in worst])
 # red controls
 print('-- red: the old per-vertex value (placement byte on every vertex)')
 okr = gates('red_old', O)
