@@ -67,6 +67,10 @@ if has diag; then game
 	patch -R -p1 -d $W -i $T/stamp_diag.patch
 	grep -q "TERR1-DIAG" $W/src/lodgen.cpp && { echo "diagnostic NOT reversed -- fix src before anything else"; exit 1; }
 	[ $brc = 0 ] || exit 1
+fi
+# 5a'. the diagnostic bake + reading alone (the exe runs/diag1 already built by `diag`); also run by `diag`
+if has diag || has diagbake; then game
+	rm -f bakes/stamp_diag.bin
 	WW_TERR1_STAMP_DIAG="E:/Projects/NifskopeWWE-terr1/scratchpad/terr1_20260927/bakes/stamp_diag.bin" \
 		bash bake.sh diag1 bakes/diag || exit 1
 	cmp -s bakes/diag/$V bakes/on/$V && echo "diag sheets == on sheets" || echo "diag sheets DIFFER from on (read with care)"
