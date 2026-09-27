@@ -48,7 +48,39 @@ File by file:
   viewer table `ground` row.
 
 ## 4. Gates
-(in progress)
+Exes: rung = night 8f58e7db build (md5 2411b228bbc308f14b8d934d46eef3b4, water1's `NifSkope.before_water1.exe`);
+new = this branch (md5 8501f7f5df32a8132789350b4c07a1a8, 25,915,392 B, linked 04:50:27).
+Bakes: Boston box -8 -12 3 -1, AO2's switches (`bake.sh`), `WW_SETTINGS_SCOPE=ground1`. Measured by `gates.py`.
+Population: 46,205 placements / 999,977 vertices measured; 327 skipped (the mesh slot is ambiguous: two reps with
+the slice's vertex count); 23,274 empty slices (card-drawn or no land -- they draw 0x12).
+
+Bake census (on): `vertex ground contact ON: 46532 placements streamed (1005166 bytes, mean 41.1, 100766 at the
+terrain = 255, 771502 at 256 u or more above it = 0, 12363 placement(s) spanning half the ramp or more)`.
+The off bake's .lodi is version 7, zeros at 0x130, no census clause.
+
+| gate | result |
+|---|---|
+| off == night bake, byte for byte | IDENTITY_PENDING |
+| independent recompute within 1 level | **99.9984%** (16 vertices off by more than 1, max 7); 99.62% exact. PASS (>= 99.9%) |
+| more than 256 u above the terrain reads 0 | **768,197 of 768,197**. PASS |
+| within 16 u of the terrain reads >= 250 (as briefed) | **14,464 of 20,827**. FAIL -- by the law, not the code: 16 u above reads 255*(1-16/256) = 239; >= 250 holds only within ~5 u |
+| the same, taken from the law | 0..5 u above -> >= 250: **101,893 of 101,893**; 0..16 u above -> >= 239: **10,165 of 10,165**. PASS |
+| placement stream mean vs its 0x12 byte within 2 | **98.35%** (761 placements outside); within 4: 99.30%; mean abs diff 0.1955; max 15.0; correlation 0.999917. FAIL as briefed |
+| red: old byte broadcast over each placement's vertices | recompute 34.9% within 1 (FAIL), >256 u -> 0 FAIL, law FAIL. The gates can go red |
+| red: stream + 2 | recompute FAIL |
+| decoder refuses a bad v12 by name (`redread.py`, CRCs re-sealed) | good ACCEPTED; 7 of 7 doctored copies REFUSED by name: v12 offset 0, v12 no stream, v11 carrying 0x130, pad 0x13C non-zero, slice length != AO slice, end offset short, offsets not monotone |
+| C++ reader (`--native-verify`) on the same copies | CPP_PENDING |
+| harness `lodgen_native_fields.py` | on and off give the same 40 checks / 6 failures / 2 skips; j0, j0b, j0c, j0d ok on both (on: v12 with stream; off: v7 without). The 6 failures (e1/g1 no mesh report given, f3, h1/h2/h4b ladder) are this bake's switches, identical on both arms |
+
+Why the placement-mean gate misses on 761 placements: the 0x12 byte averages the stock `.BTO` ring vertices of the
+placement; the stream is the `.lodo` library mesh's vertices. Different vertex sets, same law. 756 of the 761 span
+at least 128 levels (half the ramp) inside themselves, and they are mostly tall trees (TreeMapleForest1 122,
+TreeMaple06Green 92, TreeMapleblasted04 83, ...), where a different vertex distribution moves the mean most.
+The stream agrees with the independent recompute on its own vertices (row 2), so the byte is what differs.
+
+Size: Boston .lodi 5,089,578 -> 6,375,722 B (+1,286,144 B, +25.3%); the stream is 1,284,394 B = the AO stream's size.
+Whole Commonwealth estimate: the ao2 whole-map .lodi is 34,371,499 B with an AO stream of 13,866,923 B, so about
++13.87 MB (+40.4%).
 
 ## 5. Commits
 (in progress)
