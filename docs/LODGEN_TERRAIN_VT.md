@@ -789,11 +789,38 @@ The census reports it: `ground_shapes` and `ground_texels` on the census line,
 | sheet | touched | why |
 |---|---|---|
 | colour (role 1) | yes | measured: vanilla carries the road there |
-| `_msn` normal (role 2) | no | measured: vanilla's `_msn` is the heightmap's on the road too |
+| `_msn` normal (role 2) | yes, from lane TERR1 (2026-09-27) | vanilla's `_msn` is the heightmap's on the road too (measured), but bungo overruled that parity: the object's own normal map is stamped in, section 1a.6b |
 | mask (role 5, RMAOS) | alpha only | the ground-cover byte is suppressed under the road; R/G/B untouched |
 | emissive (role 6) | no | a road emits nothing |
 | height (role 4) | no | the road is not the ground's height |
 | retired `data` plane and the `.btr` `_data.DDS` | alpha only | the same cover byte, the same reason |
+
+### 1a.6b The normal stamp (lane TERR1, 2026-09-27)
+
+bungo: "normal map on the ground has no details baked from the objects (roads, railway tracks, concrete pieces,
+decals, etc)". So on the pyramid path the `_msn` sheet now carries, wherever the colour sheet was stamped from a
+flat object (a road, a rail, a sleeper, a kerb, a pavement slab, a decal), that object's OWN normal map:
+
+* **Which map.** The BGSM's normal slot, `textures()[1]`. A BGEM or effect-shader shape (`litNormal = false`) is
+  colour only -- its normal slot, if any, lights a glow, not a surface.
+* **Into world space.** Per triangle, dP/du and dP/dv from the world positions and the UVs (the material's UV scale
+  included), Gram-Schmidt against the interpolated vertex normal turned to +z; the texel is
+  `n = x * dP/du + y * dP/dv + z * N` with x = 2R-1, y = 2G-1, z = sqrt(1 - x^2 - y^2): the renderer's order
+  (Bitangent = dP/du, Tangent = dP/dv). The NIF's own tangents are read only to COUNT agreement with that frame
+  (`stampNormalFrame agree N flip M`).
+* **The same mask and alpha as the colour.** The normal is composited in the rasteriser beside the colour, by the
+  colour's own rule (max-z or blend), order and coverage, and a normal texel whose colour came out transparent is
+  dropped. The weight is set inside the colour lerp itself: `w = min(raGeom, lit coverage) * roadOpacity`.
+* **Over the height normal.** After the sheet's height normal is final (and after the upscaled-sheet replacement),
+  `n = normalize(hN + (oN - hN) * w)`. A texel with `w = 0` is not written: off the stamped mask the sheet is the
+  heights' normal byte for byte.
+* **The format does not change.** R east, G up, B north, BC1, no version bump.
+* **Not stamped:** the stock chunk path's `.btr` `_msn`.
+* **Census.** `stampNormals`, `stampNormalShapeTiles`, `stampNormalNoMap` (a lit shape whose material names no normal
+  map, or whose map did not load: it stamps colour only), `stampNormalUnlit`, `stampNormalFrame agree/flip`,
+  `stampNormalTexels` (content texels moved).
+* **Way back.** `--no-stamp-normals` (command line only; `--roads-legacy` implies it unless `--stamp-normals` is
+  named). Settings digest key `cover.stampNormals`.
 
 ### 1a.7 The census
 
@@ -978,6 +1005,37 @@ With `--terrain-object-ao` this byte carries a SECOND visibility fraction
 multiplied into the first, from the placed objects rather than from the
 ground's own horizon (section 2.5h). Without the switch the byte is exactly
 what it was.
+
+**From lane TERR1 (2026-09-27) the byte sees the objects by default (`skyObjects`,
+`--no-sky-objects` is the way back, command line only).** Per direction the
+terrain march's slope and the object height field of 2.5h are ONE blocked
+measure, not a product:
+
+* the march starts from the ground's visible SURFACE: a low cover over the
+  texel's own 128-unit square (top within 128 units of the terrain: a road, a
+  pavement slab, rubble) lifts the sample to its top (`lodgenSkySurface`);
+* the lattice is read every 64 units out to 1,458 (23 reads), not at the
+  terrain's seven steps, which step over a street's far wall;
+* a square whose lowest surface is less than 128 units over the surface is a
+  WALL up to its top; one a cell or more up is a CEILING (2.5h(2)'s slab law);
+* `blocked = min(1, F(max(terrain slope, wall)) + ceiling term)`, F(t) = t/(1+t),
+  summed over the eight directions under the same `1 - 1.6 * sum / 8`.
+
+No strength dial: the union's terrain part is the terrain march, so any dial
+would move ground with no building near it. Where no object square is met the
+byte is the terrain march's own, bit for bit. It supersedes GROUND1's product on
+the VT sheets (both on would count the objects twice); the chunk path's `.btr`
+and the `.lodl` AO plane stay terrain-only. **The `.lodl` plane is where the
+terrain-only term is kept** (it is recomputed from the stored heights by
+`--refresh-ao`, see the refusal in `nifcli.cpp`); FO4CS needs no separate
+terrain-only sheet channel.
+
+Chosen by a ray cast through the Boston box's level-0 LOD triangles (skill
+`ww-sky-raycast-check`): on 2,208 samples with a building in reach, this law
+MAE 22.3 levels, bias -13.0, corr 0.905 against the cast; the terrain march
+alone 87.4 / +87.2 / 0.07; GROUND1's product at strength 1, 32.6 / +7.4 / 0.741.
+The census: `skyObjects 1`, and `objAoTexels` / `objAoMeanDark` then count the
+union's darkening against the terrain-only march.
 
 **The blend is the colour's blend, exactly.** Per texel: the quadrant's base
 layer, then each painted layer by the same bilinear opacity the diffuse

@@ -6159,6 +6159,8 @@ struct LodgenBakeCaches
 	quint64 texClock = 0;
 	qint64 texBudget = qint64( 512 ) << 20;
 	qint64 texBytes = 0;
+	//! Lane TERR1: keys the eviction skips (lower case), set only around the normal stamp's second load
+	QSet<QString> texPinned;
 	//! MODL path -> (resolved, average diffuse colour), for the grass tint
 	QHash<QString, QPair<bool, FloatVector4>> grassTint;
 	int nifReads = 0;                   //!< grass meshes actually loaded
@@ -6210,10 +6212,17 @@ static const DDSTexture16 * lodgenCachedTexture( LodgenBakeCaches & c,
 		c.texBytes += qint64( tex->size() );
 	}
 	while ( c.texBytes > c.texBudget && c.texStamp.size() > 1 ) {
-		auto oldest = c.texStamp.constBegin();
+		/* Lane TERR1: a PINNED key is never the victim -- the normal stamp holds
+		 * a shape's diffuse while it loads that shape's normal map, and the
+		 * second load must not free the first. Nothing is pinned outside the
+		 * stamp, so the victims without it are the ones they always were. */
+		auto oldest = c.texStamp.constEnd();
 		for ( auto s = c.texStamp.constBegin(); s != c.texStamp.constEnd(); ++s )
-			if ( s.value() < oldest.value() )
+			if ( ( oldest == c.texStamp.constEnd() || s.value() < oldest.value() )
+				&& !c.texPinned.contains( s.key() ) )
 				oldest = s;
+		if ( oldest == c.texStamp.constEnd() )
+			break;
 		const QString victim = oldest.key();
 		if ( victim == key )
 			break;
@@ -8724,6 +8733,12 @@ void LodgenRoadCensus::add( const LodgenRoadCensus & o )
 	flatTexels += o.flatTexels;
 	flatDecalTexels += o.flatDecalTexels;
 	flatRefusedNoTexture += o.flatRefusedNoTexture;
+	nrmShapes += o.nrmShapes;
+	nrmNoMap += o.nrmNoMap;
+	nrmUnlit += o.nrmUnlit;
+	nrmFrameAgree += o.nrmFrameAgree;
+	nrmFrameFlip += o.nrmFrameFlip;
+	nrmTexels += o.nrmTexels;
 	for ( const QString & r : o.refusals )
 		if ( refusals.size() < 16 && !refusals.contains( r ) )
 			refusals.append( r );
@@ -8974,7 +8989,13 @@ QString LodgenRoadCensus::line() const
 	kv( "flat_texels", flatTexels );
 	kv( "flat_decal_texels", flatDecalTexels );
 	kv( "flat_refused_notexture", flatRefusedNoTexture );
-	s += QStringLiteral( " refusals=" );
+	kv( "nrm_shapes", nrmShapes );
+	kv( "nrm_nomap", nrmNoMap );
+	kv( "nrm_unlit", nrmUnlit );
+	kv( "nrm_frame_agree", nrmFrameAgree );
+	kv( "nrm_frame_flip", nrmFrameFlip );
+	kv( "nrm_texels", nrmTexels );
+	s +=QStringLiteral( " refusals=" );
 	s += refusals.isEmpty() ? QStringLiteral( "none" )
 		: QString( QStringLiteral( "[%1]" ) ).arg( refusals.join( QStringLiteral( "; " ) ) );
 	return s;
@@ -9049,6 +9070,8 @@ struct LodgenRoadMat
 	bool read = false;
 	//! The material lives under materials/Landscape/Ground/: it is terrain.
 	bool ground = false;
+	//! Lane TERR1: the BGSM's normal map, textures()[1]; empty when it names none.
+	QString tex1;
 };
 
 //! One placed road shape, already in world space, with its world bounds.
@@ -9074,6 +9097,15 @@ struct LodgenRoadShape
 	bool groundMat = false;
 	//! Lane FLAT1: the shape's model is in a raised road folder (a deck, not ground).
 	bool raisedModel = false;
+	/* Lane TERR1: THE NORMAL STAMP's operands. `nrm` is the vertex normals in
+	 * WORLD space (the placement's rotation applied; empty when the source had
+	 * none), `tex1` the tangent-space normal map. `litNormal` is false for a
+	 * shape the game draws without lighting -- an effect (BGEM) shape -- which
+	 * paints colour and leaves the ground's normal alone. */
+	QVector<Vector3> nrm;
+	QVector<Vector3> tan;           //!< the NIF's Tangent field in world space: only the census's frame check reads it
+	QString tex1;
+	bool litNormal = true;
 };
 
 /*! Lane FLAT1: one flat object's shape, in world space, with what the game's
@@ -9092,6 +9124,7 @@ struct LodgenFlatShape : LodgenRoadShape
 struct LodgenFlatMat
 {
 	QString tex0;
+	QString tex1;                   //!< Lane TERR1: the BGSM's normal map (textures()[1]); a BGEM's is not read
 	bool read = false, effect = false, decal = false, alphaTest = false, alphaBlend = false;
 	bool g2p = false;
 	float alphaRef = 1.0f, alpha = 1.0f;
@@ -9119,6 +9152,106 @@ struct LodgenFlatCand
 	Matrix rot;
 	float scale = 1.0f;
 };
+
+/* Lane TERR1: THE NORMAL STAMP, one triangle's frame.
+ *
+ * The game lights a stamped shape with `n = (2R-1) T_u + (2G-1) T_v + z N`:
+ * the NIF's Bitangent field is dP/du and its Tangent field is dP/dv (the
+ * renderer's fo4_default.frag reads them in that order, and the census's
+ * `nrm_frame_agree / nrm_frame_flip` pair MEASURES the Tangent-vs-dP/dv sign
+ * on every stamped triangle). The frame here is solved from the triangle's own
+ * world positions and UVs -- with the material's UV scale in, whose sign
+ * mirrors the map -- so a shape with no stored tangents stamps the same way.
+ * `F` is the face normal turned up (+Z): the stamp looks from above. */
+struct LodgenStampFrame
+{
+	Vector3 U, V, F;
+	bool uvOk = false;
+};
+
+static LodgenStampFrame lodgenStampFrame( const LodgenRoadShape & sh, const Triangle & t,
+	float uScale, float vScale, LodgenRoadCensus & out )
+{
+	LodgenStampFrame f;
+	const Vector3 & p0 = sh.pos[t[0]];
+	const Vector3 e1 = sh.pos[t[1]] - p0, e2 = sh.pos[t[2]] - p0;
+	f.F = Vector3::crossproduct( e1, e2 );
+	if ( f.F[2] < 0.0f )
+		f.F = -f.F;
+	if ( f.F.length() <= 0.0f )
+		f.F = Vector3( 0.0f, 0.0f, 1.0f );
+	else
+		f.F.normalize();
+	if ( sh.uv.size() != sh.pos.size() )
+		return f;
+	const Vector2 & a = sh.uv[t[0]];
+	const float du1 = ( sh.uv[t[1]][0] - a[0] ) * uScale, dv1 = ( sh.uv[t[1]][1] - a[1] ) * vScale;
+	const float du2 = ( sh.uv[t[2]][0] - a[0] ) * uScale, dv2 = ( sh.uv[t[2]][1] - a[1] ) * vScale;
+	const float det = du1 * dv2 - du2 * dv1;
+	if ( std::fabs( det ) < 1e-12f )
+		return f;
+	f.U = ( e1 * dv2 - e2 * dv1 ) / det;
+	f.V = ( e2 * du1 - e1 * du2 ) / det;
+	f.uvOk = true;
+	if ( sh.tan.size() == sh.pos.size() ) {
+		const Vector3 tn = sh.tan[t[0]] + sh.tan[t[1]] + sh.tan[t[2]];
+		const float c = Vector3::dotproduct( tn, f.V );
+		if ( c > 0.0f )
+			out.nrmFrameAgree++;
+		else if ( c < 0.0f )
+			out.nrmFrameFlip++;
+	}
+	return f;
+}
+
+/* One fragment's world normal: the interpolated vertex normal (the face's
+ * when the shape has none), turned up, and the normal map's tangent-space
+ * sample carried onto it through the Gram-Schmidt'ed UV frame. `nmap` null =
+ * the vertex normal alone (a lit shape whose normal map does not read). */
+static Vector3 lodgenStampNormal( const LodgenRoadShape & sh, const Triangle & t,
+	const LodgenStampFrame & f, float w0, float w1, float w2,
+	const DDSTexture16 * nmap, float u, float v, float nmip )
+{
+	Vector3 N = f.F;
+	if ( sh.nrm.size() == sh.pos.size() ) {
+		Vector3 n = sh.nrm[t[0]] * w0 + sh.nrm[t[1]] * w1 + sh.nrm[t[2]] * w2;
+		if ( n.length() > 1e-6f )
+			N = n.normalize();
+	}
+	if ( N[2] < 0.0f )
+		N = -N;
+	if ( !nmap || !f.uvOk )
+		return N;
+	Vector3 tu = f.U - N * Vector3::dotproduct( f.U, N );
+	Vector3 tv = f.V - N * Vector3::dotproduct( f.V, N );
+	if ( tu.length() <= 1e-8f || tv.length() <= 1e-8f )
+		return N;
+	tu.normalize();
+	tv.normalize();
+	const FloatVector4 c = nmap->getPixelT( u, v, nmip );
+	const float x = c[0] * 2.0f - 1.0f, y = c[1] * 2.0f - 1.0f;
+	const float z = std::sqrt( qMax( 0.0f, 1.0f - x * x - y * y ) );
+	Vector3 n = tu * x + tv * y + N * z;
+	if ( n.length() <= 1e-6f )
+		return N;
+	return n.normalize();
+}
+
+/* The shape's normal map, loaded with its diffuse PINNED so the second load
+ * cannot evict the first (a 2k DDSTexture16 is 44 MB; a worker's budget can
+ * be smaller than two of them). Null when the shape names none or it does not
+ * read. */
+static const DDSTexture16 * lodgenStampNormalMap( LodgenBakeCaches & bc,
+	const QString & dataRoot, const QString & diffuse, const QString & nmapPath )
+{
+	if ( nmapPath.isEmpty() )
+		return nullptr;
+	const QString pin = diffuse.toLower();
+	bc.texPinned.insert( pin );
+	const DDSTexture16 * n = lodgenCachedTexture( bc, dataRoot, nmapPath );
+	bc.texPinned.remove( pin );
+	return n;
+}
 
 /*! Every road placement in a cell rectangle, resolved to world-space shapes
  *  once, so a bake that writes many tiles over the same ground pays for the
@@ -9233,14 +9366,24 @@ public:
 	 *
 	 *  `detail` lerps the diffuse sample toward the texture's own whole-texture
 	 *  average (LodgenCoverOptions::roadDetail). RGB only: the alpha channel
-	 *  cuts alpha-tested decals out and averaging it would dissolve them. */
+	 *  cuts alpha-tested decals out and averaging it would dissolve them.
+	 *
+	 *  `nplane` (lane TERR1, THE NORMAL STAMP), when given, receives 4 floats a
+	 *  texel: the stamped world normal (x east, y north, z up; not normalised
+	 *  where fragments averaged) and its coverage A. It is composited by the
+	 *  SAME rule, order and coverage as `colour`, fragment for fragment, and a
+	 *  texel whose colour A8 is 0 carries A 0, so the normal's mask is the
+	 *  colour's. Null = nothing of the stamp runs and `colour` is the bytes it
+	 *  always was (the stamp only READS the fragments the colour pass makes). */
 	void rasterise( float wx0, float wyTop, float upt, int S,
 		std::vector<quint32> & colour, LodgenBakeCaches & bc,
 		const QString & dataRoot, LodgenRoadCensus & out,
 		int composite = LodgenCoverOptions::RoadMaxZ, float detail = 1.0f,
-		float groundPaint = 1.0f, int inset = 0 ) const
+		float groundPaint = 1.0f, int inset = 0, std::vector<float> * nplane = nullptr ) const
 	{
 		colour.assign( size_t( S ) * S, 0U );
+		if ( nplane )
+			nplane->assign( size_t( S ) * S * 4, 0.0f );
 		if ( shapes.isEmpty() && flatShapes.isEmpty() )
 			return;
 		const bool blend = ( composite == LodgenCoverOptions::RoadBlend );
@@ -9285,6 +9428,11 @@ public:
 			out.shapes++;
 			if ( sh.decal )
 				out.decalShapes++;
+			const bool stamp = nplane && sh.litNormal;
+			const DDSTexture16 * nmap = stamp
+				? lodgenStampNormalMap( bc, dataRoot, sh.tex0, sh.tex1 ) : nullptr;
+			if ( stamp )
+				( nmap ? out.nrmShapes : out.nrmNoMap )++;
 			const int texW = int( tex->getWidth() ), texH = int( tex->getHeight() );
 			/* The texture's own average, read once a shape at its deepest mip --
 			 * the same call the splat path uses for a layer's flat colour. Only
@@ -9319,6 +9467,22 @@ public:
 				 * bake texels. A road mesh does not tile with the world, so the
 				 * landscape path's world-tiling mip would be meaningless here. */
 				float mip = 0.0f;
+				LodgenStampFrame fr;
+				float nmip = 0.0f;
+				if ( stamp ) {
+					fr = lodgenStampFrame( sh, t, 1.0f, 1.0f, out );
+					if ( nmap && !sh.uv.isEmpty() ) {
+						const Vector2 & a = sh.uv[t[0]];
+						const Vector2 & b = sh.uv[t[1]];
+						const Vector2 & c = sh.uv[t[2]];
+						const float uvA = std::fabs( ( b[0] - a[0] ) * ( c[1] - a[1] )
+							- ( c[0] - a[0] ) * ( b[1] - a[1] ) )
+							* float( nmap->getWidth() ) * float( nmap->getHeight() );
+						if ( uvA > 0.0f )
+							nmip = qBound( 0.0f, 0.5f * std::log2( uvA / std::fabs( d ) ),
+								float( nmap->getMaxMipLevel() ) );
+					}
+				}
 				if ( !sh.uv.isEmpty() ) {
 					const Vector2 & a = sh.uv[t[0]];
 					const Vector2 & b = sh.uv[t[1]];
@@ -9396,6 +9560,9 @@ public:
 							out.alphaRejected++;
 							continue;
 						}
+						Vector3 sn;
+						if ( stamp )
+							sn = lodgenStampNormal( sh, t, fr, w0, w1, w2, nmap, u, v, nmip );
 						if ( !blend ) {
 							zbuf[o] = z;
 							const quint32 a8 = quint32( qBound( 0.0f, cov * 255.0f + 0.5f, 255.0f ) );
@@ -9403,12 +9570,24 @@ public:
 								| ( quint32( qBound( 0, int( c[0] * 255.0f + 0.5f ), 255 ) ) << 16 )
 								| ( quint32( qBound( 0, int( c[1] * 255.0f + 0.5f ), 255 ) ) << 8 )
 								| quint32( qBound( 0, int( c[2] * 255.0f + 0.5f ), 255 ) );
+							if ( nplane ) {
+								float * q = &( *nplane )[o * 4];
+								for ( int ch = 0; ch < 3; ch++ )
+									q[ch] = stamp ? sn[ch] : 0.0f;
+								q[3] = stamp ? cov : 0.0f;
+							}
 						} else {
 							float * a = &acc[o * 4];
 							const float k = 1.0f - cov;
 							for ( int ch = 0; ch < 3; ch++ )
 								a[ch] = c[ch] * cov + a[ch] * k;
 							a[3] = cov + a[3] * k;
+							if ( nplane && stamp ) {
+								float * q = &( *nplane )[o * 4];
+								for ( int ch = 0; ch < 3; ch++ )
+									q[ch] = sn[ch] * cov + q[ch] * k;
+								q[3] = cov + q[3] * k;
+							}
 							if ( cov < 1.0f )
 								partial[o] = 1;
 							/* Lane FLAT1: the road's top, so a flat object under
@@ -9452,8 +9631,22 @@ public:
 		out.texels += wrote;
 		out.decalTexels += dwrote;
 		decalHere.clear();
+		/* The normal plane leaves the road pass UN-premultiplied, as the colour
+		 * does, because the flat pass composites over plain values. */
+		if ( nplane && blend )
+			for ( size_t o = 0; o < colour.size(); o++ ) {
+				float * q = &( *nplane )[o * 4];
+				if ( q[3] > 0.0f )
+					for ( int ch = 0; ch < 3; ch++ )
+						q[ch] /= q[3];
+			}
 		if ( !flatShapes.isEmpty() )
-			rasteriseFlat( wx0, wyTop, upt, S, colour, zbuf, bc, dataRoot, out, inset );
+			rasteriseFlat( wx0, wyTop, upt, S, colour, zbuf, bc, dataRoot, out, inset, nplane );
+		// the colour's mask is the normal's: a texel the colour plane left empty stamps nothing
+		if ( nplane )
+			for ( size_t o = 0; o < colour.size(); o++ )
+				if ( !( colour[o] >> 24 ) )
+					( *nplane )[o * 4 + 3] = 0.0f;
 	}
 
 	/*! THE FLAT PASS (lane FLAT1), after the roads, into the same plane.
@@ -9474,7 +9667,8 @@ public:
 	 *  the plane is the road pass's own. */
 	void rasteriseFlat( float wx0, float wyTop, float upt, int S,
 		std::vector<quint32> & colour, std::vector<float> & zbuf, LodgenBakeCaches & bc,
-		const QString & dataRoot, LodgenRoadCensus & out, int inset ) const
+		const QString & dataRoot, LodgenRoadCensus & out, int inset,
+		std::vector<float> * nplane = nullptr ) const
 	{
 		const float wy0 = wyTop - float( S ) * upt;
 		std::vector<int> opaque, over;
@@ -9503,6 +9697,16 @@ public:
 				return;
 			}
 			out.flatShapes++;
+			/* Lane TERR1: an effect (unlit) shape paints colour and leaves the
+			 * normal plane untouched; a lit one stamps its normal by the colour's
+			 * own rule below. */
+			const bool stamp = nplane && sh.litNormal;
+			const DDSTexture16 * nmap = stamp
+				? lodgenStampNormalMap( bc, dataRoot, sh.tex0, sh.tex1 ) : nullptr;
+			if ( stamp )
+				( nmap ? out.nrmShapes : out.nrmNoMap )++;
+			else if ( nplane )
+				out.nrmUnlit++;
 			const int texW = int( tex->getWidth() ), texH = int( tex->getHeight() );
 			const bool vc = !sh.col.isEmpty();
 			for ( const Triangle & t : sh.tris ) {
@@ -9538,6 +9742,23 @@ public:
 					if ( uvA > 0.0f && pxA > 0.0f )
 						mip = qBound( 0.0f, 0.5f * std::log2( uvA / pxA ),
 							float( tex->getMaxMipLevel() ) );
+				}
+				LodgenStampFrame fr;
+				float nmip = 0.0f;
+				if ( stamp ) {
+					fr = lodgenStampFrame( sh, t, sh.uScale, sh.vScale, out );
+					if ( nmap && !sh.uv.isEmpty() ) {
+						const Vector2 & a = sh.uv[t[0]];
+						const Vector2 & b = sh.uv[t[1]];
+						const Vector2 & c = sh.uv[t[2]];
+						const float uvA = std::fabs( ( b[0] - a[0] ) * ( c[1] - a[1] )
+							- ( c[0] - a[0] ) * ( b[1] - a[1] ) )
+							* float( nmap->getWidth() ) * float( nmap->getHeight() )
+							* std::fabs( sh.uScale * sh.vScale );
+						if ( uvA > 0.0f )
+							nmip = qBound( 0.0f, 0.5f * std::log2( uvA / std::fabs( d ) ),
+								float( nmap->getMaxMipLevel() ) );
+					}
 				}
 				for ( int j = j0; j <= j1; j++ ) {
 					for ( int i = i0; i <= i1; i++ ) {
@@ -9586,6 +9807,30 @@ public:
 							continue;
 						float r = qBound( 0.0f, c[0], 1.0f ), g = qBound( 0.0f, c[1], 1.0f ),
 							b = qBound( 0.0f, c[2], 1.0f ), A = 1.0f;
+						/* Lane TERR1: the normal, by the colour's rule -- replace
+						 * (opaque, or an over-shape at full coverage), else
+						 * `n = ( n cov + n0 A0 (1-cov) ) / A`. Written only if the
+						 * colour below is written: the a8 == 0 test repeats it. */
+						if ( stamp ) {
+							const Vector3 sn = lodgenStampNormal( sh, t, fr, w0, w1, w2, nmap, u, v, nmip );
+							const float A0c = float( colour[o] >> 24 ) / 255.0f;
+							const float Acol = ( composite && cov < 1.0f ) ? cov + A0c * ( 1.0f - cov ) : 1.0f;
+							if ( quint32( qBound( 0.0f, Acol * 255.0f + 0.5f, 255.0f ) ) != 0U ) {
+								float * q = &( *nplane )[o * 4];
+								if ( composite && cov < 1.0f ) {
+									const float A0 = q[3];
+									const float An = cov + A0 * ( 1.0f - cov );
+									const float k0 = A0 * ( 1.0f - cov );
+									for ( int ch = 0; ch < 3; ch++ )
+										q[ch] = An > 0.0f ? ( sn[ch] * cov + q[ch] * k0 ) / An : sn[ch];
+									q[3] = An;
+								} else {
+									for ( int ch = 0; ch < 3; ch++ )
+										q[ch] = sn[ch];
+									q[3] = 1.0f;
+								}
+							}
+						}
 						if ( !composite ) {
 							zbuf[o] = z;
 						} else if ( cov < 1.0f ) {
@@ -9758,6 +10003,19 @@ private:
 			out.tris = s.tris;
 			const LodgenRoadMat & m = material( dataRoot, s );
 			out.tex0 = m.read && !m.tex0.isEmpty() ? m.tex0 : s.tex0;
+			/* Lane TERR1: the normal stamp's operands, the same fallback as the
+			 * diffuse's (the material's slot, else the shape's texture set). */
+			out.tex1 = m.read && !m.tex1.isEmpty() ? m.tex1 : s.tex1;
+			if ( s.nrm.size() == s.pos.size() ) {
+				out.nrm.resize( s.nrm.size() );
+				for ( int k = 0; k < s.nrm.size(); k++ )
+					out.nrm[k] = rot * s.nrm[k];
+			}
+			if ( s.tan.size() == s.pos.size() ) {
+				out.tan.resize( s.tan.size() );
+				for ( int k = 0; k < s.tan.size(); k++ )
+					out.tan[k] = rot * s.tan[k];
+			}
 			out.groundMat = m.ground;
 			if ( out.groundMat )
 				cen.groundShapes++;
@@ -9987,7 +10245,7 @@ private:
 			rec.squares = int( ghi.size() );
 			if ( ghi.empty() ) {
 				rec.why = "no land under it";
-				finishFlat( rec, recIndex, src, wv, world );
+				finishFlat( rec, recIndex, src, wv, world, c.rot );
 				continue;
 			}
 			rec.measured = true;
@@ -10045,7 +10303,7 @@ private:
 				rec.why = "stands up";
 			else if ( upvis <= 0.0 )
 				rec.why = "no top surface";
-			finishFlat( rec, recIndex, src, wv, world );
+			finishFlat( rec, recIndex, src, wv, world, c.rot );
 		}
 		flatRecTexels.assign( size_t( flatRecs.size() ), 0 );
 		flatCands.clear();
@@ -10054,7 +10312,7 @@ private:
 
 	//! The decision (the rule, then an override line), and the shapes when painted.
 	void finishFlat( LodgenFlatRec & rec, int recIndex, const QVector<LodSrcShape> & src,
-		const QVector<QVector<Vector3>> & wv, const EsmWorld & world )
+		const QVector<QVector<Vector3>> & wv, const EsmWorld & world, const Matrix & rot )
 	{
 		rec.rulePaint = rec.measured && rec.why[0] == 0;
 		rec.painted = rec.rulePaint;
@@ -10087,6 +10345,23 @@ private:
 			const LodgenFlatMat & m = flatMaterial( s );
 			fs.tex0 = ( m.read && !m.tex0.isEmpty() ) ? m.tex0
 				: ( m.effect || s.nearFacts.effectShader ) && !s.effectTex0.isEmpty() ? s.effectTex0 : s.tex0;
+			/* Lane TERR1: the normal stamp. An effect shape is not lit in game,
+			 * so it changes no normal; a lit one brings its normal map (the
+			 * material's, else the texture set's) and its world vertex normals. */
+			fs.litNormal = !( m.effect || s.nearFacts.effectShader );
+			if ( fs.litNormal ) {
+				fs.tex1 = ( m.read && !m.tex1.isEmpty() ) ? m.tex1 : s.tex1;
+				if ( s.nrm.size() == s.pos.size() ) {
+					fs.nrm.resize( s.nrm.size() );
+					for ( int k = 0; k < s.nrm.size(); k++ )
+						fs.nrm[k] = rot * s.nrm[k];
+				}
+				if ( s.tan.size() == s.pos.size() ) {
+					fs.tan.resize( s.tan.size() );
+					for ( int k = 0; k < s.tan.size(); k++ )
+						fs.tan[k] = rot * s.tan[k];
+				}
+			}
 			fs.decal = m.read ? ( m.decal || s.nearFacts.decal ) : ( s.matDecal || s.nearFacts.decal );
 			const bool matTest = m.read ? m.alphaTest : s.matAlphaTest;
 			fs.alphaTest = matTest || ( s.hasAlpha && ( s.alphaFlags & 0x0200 ) );
@@ -10151,6 +10426,8 @@ private:
 				const QStringList & t = mat->textures();
 				if ( !t.isEmpty() )
 					m.tex0 = t[0];
+				if ( !bgem && t.size() > 1 )
+					m.tex1 = t[1];
 				m.decal = mat->hasDecal();
 				m.alphaTest = mat->hasAlphaTest();
 				m.alphaBlend = mat->hasAlphaBlend();
@@ -10189,6 +10466,8 @@ private:
 				const QStringList & t = sm.textures();
 				if ( !t.isEmpty() )
 					m.tex0 = t[0];
+				if ( t.size() > 1 )
+					m.tex1 = t[1];
 				m.decal = sm.hasDecal();
 				m.alphaTest = sm.hasAlphaTest();
 				m.alphaBlend = sm.hasAlphaBlend();
@@ -10778,6 +11057,96 @@ static float lodgenObjectSkyVis( const LodgenObjectHeightField & f,
 	if ( occl == 0.0f )
 		return 1.0f;
 	return qBound( 0.0f, 1.0f - occl / 8.0f * 1.6f * strength, 1.0f );
+}
+
+/*! THE GROUND'S SKY WITH THE OBJECTS IN IT (lane TERR1, 2026-09-27; `skyObjects`,
+ *  default ON, VT sheets only).
+ *
+ *  One direction of the sky march, terrain and objects together, as ONE blocked
+ *  measure: `maxSlope` is the terrain march's own value for this direction
+ *  (computed by the caller, unchanged), the object lattice adds its wall and
+ *  ceiling (the slab law above), and the direction's blocked fraction is
+ *
+ *      wu = max( terrain slope, object wall )
+ *      blocked = F(wu)                                  no ceiling seen
+ *      blocked = min( 1, F(wu) + 1 - F(ceilOpen) )      under a ceiling
+ *
+ *  with F(t) = t / (1 + t). The UNION, not the product: a hill and a building
+ *  standing in the same direction hide the same part of the sky once, where
+ *  lane GROUND1's `vis_terrain * vis_objects` counts it twice.
+ *
+ *  DENSE: the lattice is read every 64 units out to the march's reach (1,458),
+ *  not at the terrain march's seven steps (128 * 1.5^k): the lattice is a
+ *  128-unit field, and the seven steps step OVER a street's far wall. Chosen by
+ *  a ray cast through the level-0 LOD triangles of the Boston box (lane TERR1,
+ *  skycast.py; the lattice there built from those same triangles; 2,208
+ *  samples 512 units apart with a building 64+ units tall in reach; `h0` here
+ *  is `lodgenSkySurface`'s): this law MAE 22.3 levels, bias -13.0, corr 0.905
+ *  against the cast; the same union marched from the terrain with no slab bar
+ *  30.5 / -0.4 / 0.755 (and -101 on the 122 samples standing on a road piece,
+ *  which it reads as a ceiling); the 7-step union 32.3 / +9.4 / 0.752; the
+ *  product at strength 1, 32.6 / +7.4 / 0.741; the terrain march alone
+ *  87.4 / +87.2 / 0.07.
+ *
+ *  No strength dial, and that is the law: the union's terrain part IS the
+ *  terrain march, so a strength would move ground with no building near it.
+ *
+ *  Where no object square is met (or none rises above the terrain slope and no
+ *  ceiling is seen) the returned term is `maxSlope / (1 + maxSlope)` computed
+ *  exactly as the terrain march computes it, so the sum -- and the byte -- is
+ *  the terrain march's own, bit for bit. */
+/*! The height the union marches FROM (lane TERR1): the ground's visible
+ *  surface. A LOW cover over the texel's own square -- its top within one cell
+ *  (128 units, the slab bar of `countSlabSquares`) of the terrain: a road, a
+ *  pavement slab, rubble -- lifts the sample to that top, so the road the
+ *  texel is painted with does not read as a ceiling a few units over it. A
+ *  taller span (a building over the texel, a deck) leaves the terrain height.
+ *  An empty square returns `h0` unchanged. */
+static float lodgenSkySurface( const LodgenObjectHeightField & f, float wx, float wy, float h0 )
+{
+	float lo = 0.0f, hi = 0.0f;
+	f.spanAt( wx, wy, lo, hi );
+	if ( hi < LodgenObjectHeightField::SENTINEL_TEST || hi <= h0 )
+		return h0;
+	return ( hi - h0 <= LodgenObjectHeightField::CELL ) ? hi : h0;
+}
+
+static float lodgenSkyDirBlocked( const LodgenObjectHeightField & f,
+	float wx, float wy, float h0, float dx, float dy, float maxSlope, bool slab )
+{
+	float wall = 0.0f;
+	float ceilOpen = 0.0f;
+	bool haveCeil = false;
+	bool covered = true;
+	for ( int k = 1; k <= 23; k++ ) {
+		const float dist = ( k == 23 ) ? 1458.0f : 64.0f * float( k );
+		float lo = 0.0f, hi = 0.0f;
+		f.spanAt( wx + dx * dist, wy + dy * dist, lo, hi );
+		if ( hi < LodgenObjectHeightField::SENTINEL_TEST ) {
+			covered = false;
+			continue;
+		}
+		/* A ceiling only a CELL or more over the surface (the slab bar): an
+		 * underside closer than that is a low object's, and a low object is a
+		 * wall up to its top. */
+		if ( !slab || lo <= h0 + LodgenObjectHeightField::CELL ) {
+			covered = false;
+			const float dh = hi - h0;
+			if ( dh > 0.0f )
+				wall = qMax( wall, dh / dist );
+		} else if ( covered ) {
+			const float open = ( lo - h0 ) / dist;
+			if ( !haveCeil || open < ceilOpen ) {
+				ceilOpen = open;
+				haveCeil = true;
+			}
+		}
+	}
+	const float wu = qMax( maxSlope, wall );
+	const float wallBlocked = wu / ( 1.0f + wu );
+	if ( !haveCeil )
+		return wallBlocked;
+	return qMin( 1.0f, wallBlocked + ( 1.0f - ceilOpen / ( 1.0f + ceilOpen ) ) );
 }
 
 /*! THE SLAB LAW'S KNOWN-ANSWER CONTROL (lane SLAB1, 2026-09-18), run once per
@@ -12685,6 +13054,14 @@ struct LodgenVtStage
 	 *  staging: the chunk-sheet path reads this plane, so its bytes do not move
 	 *  when the pyramid's normal does. Empty otherwise. */
 	std::vector<quint32> msnHeights;
+	/*! Lane TERR1: THE NORMAL STAMP. `stampNormal` is the road/flat scan's
+	 *  normal plane (4 floats a texel: world east, north, up, lit coverage),
+	 *  `stampW` the per-texel weight the colour lerp itself set (the colour's
+	 *  `ra`, capped by the lit coverage). Both empty when the stamp is off or no
+	 *  road set exists; folded into `msn` / `msnHeights` by lodgenVtStampMsn in
+	 *  the driver and freed there. */
+	std::vector<float> stampNormal;
+	std::vector<float> stampW;
 	bool cover = false;
 };
 
@@ -13151,9 +13528,15 @@ static bool lodgenBakeVtTile( const EsmWorld & world, const QString & dataRoot,
 		const float wx0 = float( cellX0 ) * 4096.0f - float( border ) * upt;
 		const float wyTop = float( cellY0 + dim ) * 4096.0f + float( border ) * upt;
 		LodgenRoadCensus local;
+		/* Lane TERR1: THE NORMAL STAMP's plane comes out of the same scan as
+		 * the colour; its per-texel weight is set below, by the colour lerp
+		 * itself, and the driver folds it into the msn (lodgenVtStampMsn). */
+		const bool stampN = coverOpts.stampNormals;
 		roads->rasterise( wx0, wyTop, upt, S, roadPlane, bc, dataRoot, local,
 			coverOpts.roadComposite, coverOpts.roadDetail,
-			coverOpts.roadGroundPaint, border );
+			coverOpts.roadGroundPaint, border, stampN ? &out.stampNormal : nullptr );
+		if ( stampN )
+			out.stampW.assign( size_t( S ) * S, 0.0f );
 		if ( roadCensus )
 			roadCensus->add( local );
 	}
@@ -13737,6 +14120,16 @@ static bool lodgenBakeVtTile( const EsmWorld & world, const QString & dataRoot,
 						if ( ra > 0.0f )
 							for ( int k = 0; k < 3; k++ )
 								color[k] = color[k] + ( rc[k] - color[k] ) * ra;
+						/* Lane TERR1: the normal's weight is the colour's `ra`,
+						 * capped by the LIT shapes' own coverage (an unlit effect
+						 * shape paints colour and no normal). Only here, so a
+						 * texel the colour did not lerp stamps no normal. */
+						if ( ra > 0.0f && !out.stampW.empty() ) {
+							const size_t o = size_t( j ) * S + i;
+							const float nA = out.stampNormal[o * 4 + 3];
+							out.stampW[o] = ( coverOpts.roadOpacity == 1.0f )
+								? qMin( raGeom, nA ) : qMin( raGeom, nA ) * coverOpts.roadOpacity;
+						}
 						if ( doCover ) {
 							const float keep = qBound( 0.0f,
 								1.0f - raGeom * coverOpts.roadCoverSuppress, 1.0f );
@@ -13769,6 +14162,12 @@ static bool lodgenBakeVtTile( const EsmWorld & world, const QString & dataRoot,
 			// R AO, G wetness, B shore proximity, A cover
 			const float h0 = heightAt( lx, ly );
 			float occl = 0.0f;
+			/* `occlU`: the same sum with the objects in each direction
+			 * (lodgenSkyDirBlocked, lane TERR1). `occl` stays the terrain-only
+			 * term: the census measures the darkening against it. */
+			const bool skyUnion = objField && coverOpts.skyObjects;
+			const float h0s = skyUnion ? lodgenSkySurface( *objField, wx, wy, h0 ) : h0;
+			float occlU = 0.0f;
 			for ( const auto & d : dirs ) {
 				float maxSlope = 0.0f;
 				for ( float dist = 128.0f; dist <= 2048.0f; dist *= 1.5f ) {
@@ -13777,14 +14176,29 @@ static bool lodgenBakeVtTile( const EsmWorld & world, const QString & dataRoot,
 						maxSlope = qMax( maxSlope, dh / dist );
 				}
 				occl += maxSlope / ( 1.0f + maxSlope );
+				if ( skyUnion )
+					occlU += lodgenSkyDirBlocked( *objField, wx, wy, h0s, d[0], d[1],
+						maxSlope, coverOpts.terrainObjectAoSlab );
 			}
 			const float vis = qBound( 0.0f, 1.0f - occl / 8.0f * 1.6f, 1.0f );
 			quint32 ao8 = quint32( qBound( 0.0f, vis * 255.0f + 0.5f, 255.0f ) );
+			if ( skyUnion ) {
+				const float visU = qBound( 0.0f, 1.0f - occlU / 8.0f * 1.6f, 1.0f );
+				const quint32 a2 = quint32( qBound( 0.0f, visU * 255.0f + 0.5f, 255.0f ) );
+				if ( objCensus && a2 < ao8 && i >= border && i < S - border
+					&& j >= border && j < S - border ) {
+					objCensus->texels++;
+					objCensus->darkSum += double( ao8 - a2 );
+				}
+				ao8 = a2;
+			}
 			/* THE OBJECT TERM (lane GROUND1). `wx`/`wy` on this path are already
 			 * WORLD coordinates, so the field is read with them unchanged. The
 			 * census counts CONTENT texels only: tiles overlap by `border` and a
-			 * texel counted twice is not a texel. */
-			if ( objField ) {
+			 * texel counted twice is not a texel. Superseded on the VT sheets by
+			 * the union above while `skyObjects` is on (a product over the union
+			 * would count the objects twice). */
+			else if ( objField && coverOpts.terrainObjectAo ) {
 				const float vo = lodgenObjectSkyVis( *objField, wx, wy, h0, dirs,
 					coverOpts.terrainObjectAoStrength,
 					coverOpts.terrainObjectAoSlab );
@@ -14175,6 +14589,59 @@ struct LodgenVtMsnSheets
 		}
 	}
 };
+
+/*! Lane TERR1: THE NORMAL STAMP, folded into one finest tile's msn (and the
+ *  kept heights normal, when there is one). Runs AFTER the sheet replacement,
+ *  so the object normal lands on whichever surface normal the tile ended with:
+ *
+ *      n = normalize( hN + ( oN - hN ) * w )
+ *
+ *  hN decoded from the msn texel (R east, G up, B north), oN the stamped
+ *  object normal, w the colour lerp's own weight at that texel. A texel with
+ *  w == 0 is not touched, byte for byte. Frees the plane. Returns the CONTENT
+ *  texels whose msn moved. */
+static qint64 lodgenVtStampMsn( int content, int border, LodgenVtStage & st )
+{
+	qint64 moved = 0;
+	const int stored = content + 2 * border;
+	const size_t n = size_t( stored ) * size_t( stored );
+	if ( st.stampW.size() == n && st.stampNormal.size() == n * 4 ) {
+		auto fold = [&st]( quint32 px, size_t o ) {
+			const float e = float( ( px >> 16 ) & 255U ) / 255.0f * 2.0f - 1.0f;
+			const float up = float( ( px >> 8 ) & 255U ) / 255.0f * 2.0f - 1.0f;
+			const float no = float( px & 255U ) / 255.0f * 2.0f - 1.0f;
+			Vector3 h( e, no, up );
+			h.normalize();
+			Vector3 s( st.stampNormal[o * 4], st.stampNormal[o * 4 + 1], st.stampNormal[o * 4 + 2] );
+			if ( s.length() <= 1e-6f )
+				return px;
+			s.normalize();
+			const float w = qBound( 0.0f, st.stampW[o], 1.0f );
+			Vector3 m = h + ( s - h ) * w;
+			if ( m.length() <= 1e-6f )
+				return px;
+			m.normalize();
+			return lodgenTerrainMsnPixel( m );
+		};
+		const bool heights = st.msnHeights.size() == n;
+		for ( int j = 0; j < stored; j++ )
+			for ( int i = 0; i < stored; i++ ) {
+				const size_t o = size_t( j ) * size_t( stored ) + size_t( i );
+				if ( !( st.stampW[o] > 0.0f ) )
+					continue;
+				const quint32 was = st.msn[o];
+				st.msn[o] = fold( was, o );
+				if ( heights )
+					st.msnHeights[o] = fold( st.msnHeights[o], o );
+				if ( st.msn[o] != was && j >= border && j < border + content
+					&& i >= border && i < border + content )
+					moved++;
+			}
+	}
+	std::vector<float>().swap( st.stampNormal );
+	std::vector<float>().swap( st.stampW );
+	return moved;
+}
 
 /*! Overwrite one finest tile's msn from the sheets, border included (a border
  *  texel reads the neighbouring chunk's sheet, so seams match by construction).
@@ -14973,7 +15440,9 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 	 * existing box filter, exactly as they inherit the splat. */
 	std::unique_ptr<LodgenObjectHeightField> objField;
 	LodgenObjectAoCensus objCensus;
-	if ( opts.cover.terrainObjectAo ) {
+	/* lane TERR1: the sky union (`skyObjects`, default on) reads the same
+	 * field, so it is gathered for either switch. */
+	if ( opts.cover.terrainObjectAo || opts.cover.skyObjects ) {
 		objField.reset( new LodgenObjectHeightField );
 		objField->gather( world, dataRoot, levels[0].west, levels[0].south,
 			levels[0].east, levels[0].north );
@@ -15018,10 +15487,14 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 		LodgenVtLandCache fitLand;
 		LodgenRoadCensus fitRoads;
 		LodgenObjectAoCensus fitObj;
+		// the fit reads colour only: the normal stamp and the sky union (lane TERR1) would be work thrown away
+		LodgenCoverOptions fitCover = opts.cover;
+		fitCover.stampNormals = false;
+		fitCover.skyObjects = false;
 		lodgenVtFillFit( fill, levels[0].west, levels[0].south, levels[0].east,
 			levels[0].north, levels[0].dim,
 			[&]( int x0, int y0, int dim, int c, int b, LodgenVtStage & st ) {
-				return lodgenBakeVtTile( world, dataRoot, bc, opts.cover, fitLand, fitMask, false,
+				return lodgenBakeVtTile( world, dataRoot, bc, fitCover, fitLand, fitMask, false,
 					x0, y0, dim, c, b, st, roadSet.get(), &fitRoads, objField.get(), &fitObj );
 			} );
 	}
@@ -15184,6 +15657,8 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 			} else {
 				normalTilesHeights++;
 			}
+			// lane TERR1: the object normals, onto whichever surface normal the tile ended with
+			roadCensus.nrmTexels += int( lodgenVtStampMsn( content, border, row[size_t( tx )] ) );
 		}
 		for ( int tx = 0; tx < levels[0].tilesX; tx++ )
 			if ( !writeTile( 0, row[size_t( tx )] ) )
@@ -15534,6 +16009,14 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 		r << QString( "flatTexels %1" ).arg( roadCensus.flatTexels );
 		r << QString( "flatDecalTexels %1" ).arg( roadCensus.flatDecalTexels );
 		r << QString( "flatRefusedNoTexture %1" ).arg( roadCensus.flatRefusedNoTexture );
+		// lane TERR1: the normal stamp
+		r << QString( "stampNormals %1" ).arg( opts.cover.roads && opts.cover.stampNormals ? 1 : 0 );
+		r << QString( "stampNormalShapeTiles %1" ).arg( roadCensus.nrmShapes );
+		r << QString( "stampNormalNoMap %1" ).arg( roadCensus.nrmNoMap );
+		r << QString( "stampNormalUnlit %1" ).arg( roadCensus.nrmUnlit );
+		r << QString( "stampNormalFrame agree %1 flip %2" ).arg( roadCensus.nrmFrameAgree )
+			.arg( roadCensus.nrmFrameFlip );
+		r << QString( "stampNormalTexels %1" ).arg( roadCensus.nrmTexels );
 		if ( roadSet && opts.cover.flatObjects ) {
 			const QString rp = dir + QChar( '/' ) + ws + QStringLiteral( ".flat_objects_report.txt" );
 			QFile rf( rp );
@@ -15555,6 +16038,10 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 		 * `terrainObjectAo 1 objAoTexels 0` means it was on and nothing in the
 		 * region stood high enough within 1,458 units of a texel to darken it. */
 		r << QString( "terrainObjectAo %1" ).arg( opts.cover.terrainObjectAo ? 1 : 0 );
+		/* lane TERR1: `skyObjects 1` = mask B is the terrain + object UNION
+		 * (the objAo* counters below then count ITS darkening against the
+		 * terrain-only march; GROUND1's product is not applied). */
+		r << QString( "skyObjects %1" ).arg( opts.cover.skyObjects ? 1 : 0 );
 		r << QString( "objAoReach %1" ).arg( 1458 );
 		r << QString( "objAoStrength %1" )
 			.arg( double( opts.cover.terrainObjectAoStrength ), 0, 'f', 3 );

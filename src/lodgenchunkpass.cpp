@@ -771,9 +771,11 @@ QStringList lodgenIdentityDump( const LodgenChunkPassOptions & pass, const Lodge
 		 * (the rule lines only: a comment edit moves nothing). */
 		add( p + "flatObjectsRules", c.roads && c.flatObjects
 			? lodgenFlatObjectsRulesDigest( c.flatObjectsFile ) : QStringLiteral( "-" ) );
+		add( p + "stampNormals", b( c.stampNormals ) );
 		add( p + "terrainObjectAo", b( c.terrainObjectAo ) );
 		add( p + "terrainObjectAoStrength", f( c.terrainObjectAoStrength ) );
 		add( p + "terrainObjectAoSlab", b( c.terrainObjectAoSlab ) );
+		add( p + "skyObjects", b( c.skyObjects ) );
 	};
 
 	add( "generator", n( kLodgenGeneratorRevision ) );
