@@ -312,3 +312,11 @@ the base bake is deleted.
   > (`shipsblack.py <bake or mod root>`, which also cross-checks gates.py).
 
 TIDY1 PARTIAL cause found and fixed in source (cc0642bc: BC1 truncates 1-3/255 glow in card set 000a7209 to zero; the drop test now reads the encoded sheet), offline rule check on the installed bake 4/4 PASS; build, off/on bakes and pictures NOT RUN (bash launches refused, no approver present)
+
+## CONTINUATION 2026-09-27 (second, in-session)
+- Start 20:01, HEAD b212247b. Game down. Turn lock free. `night_rules.md` read this time.
+- Re-read the uncompiled fix (cc0642bc) before building: `lodgenEmissiveShipsBlack` calls
+  `lodgenEncodeArrayLayer` with the same size, codec (BC1) and mip count as each writer's `_g` write (mesh:
+  `cls.w/cls.h`, mips 0 = full; cards: `g.aw/g.ah/g.auxMips`). Palette rule checked: index 2 (and 3 in
+  4-colour mode) is black only when both end points are 0.
+- 20:01 an FO4CS MSVC build (xmake + cl.exe) was running; waiting for the build slot (`wait_build_slot.sh`).
