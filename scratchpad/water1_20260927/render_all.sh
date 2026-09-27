@@ -42,7 +42,7 @@ fi
 if [ $G = slope ]; then
   # task 3 (sloped water): the sloped-water exe on the sloped-water writer's vanilla bake, the same
   # camera and names as pics/ (flat build, flat writer) and pics_depth/FL_depth, for pixel identity
-  SNS=$ME/run_slope/NifSkope.exe; V3S=$ME/bk_slope_def/FO4CSLOD/Commonwealth/Commonwealth.lodl
+  SNS=${SLOPENS:-$ME/run_slope/NifSkope.exe}; V3S=$ME/bk_slope_def/FO4CSLOD/Commonwealth/Commonwealth.lodl
   [ -f $V3S ] && [ -f $SNS ] || { echo "missing $V3S or $SNS"; exit 1; }
   P=$ME/pics_slope; mkdir -p $P
   shot FL_default NS=$SNS NOOBJ=1 LODL=$V3S WW_RENDER_FLAT=1
@@ -50,13 +50,37 @@ if [ $G = slope ]; then
     shot FL_$pl NS=$SNS NOOBJ=1 LODL=$V3S WW_RENDER_FLAT=1 WW_LODL_PLANE=$pl
   done
   shot A_waterheight NS=$SNS NOOBJ=1 LODL=$V3S WW_LODL_PLANE=waterheight
-  shot A1_default NS=$SNS LODL=$V3S
+  # A1_default (objects on) dropped 20:10: its object input ($OD, ao2/reg_x7) no longer exists on disk
   port=$((port+1))
   if [ ! -s $P/WH_default.png ]; then
     env NS=$SNS NOOBJ=1 LV=3 SDIM=16 SHEETS="$INST" LODL=$V3S \
       bash $ME/shot.sh $P/WH_default.png $T Commonwealth -96 -96 95 95 8 570000 3200 1528 $port | tail -1
     [ -s $P/WH_default.png ] || { echo "STOPPED at WH_default"; exit 2; }
   fi
+  echo "RENDER PASS DONE $G"; exit 0
+fi
+if [ $G = real ]; then
+  # task 3 on the real bake: the sloped placed water the Commonwealth has (real_cmp.py: cells 1,-4 and
+  # -12..-11,27..28). BEFORE = what he had: the flat viewer (run_new) on the flat writer's file; AFTER =
+  # the slope viewer on the slope writer's file. Same camera per pair, terrain + water only.
+  SNS=${SLOPENS:-$ME/run_slope/NifSkope.exe}; V3S=$ME/bk_slope_def/FO4CSLOD/Commonwealth/Commonwealth.lodl
+  [ -f $V3S ] && [ -f $SNS ] && [ -f $V3NEW ] && [ -f $NEW ] || { echo "missing inputs"; exit 1; }
+  P=$ME/pics_real; mkdir -p $P
+  cshot() { # <name> <x0 y0 x1 y1 ortho> <env...>
+    local name=$1 x0=$2 y0=$3 x1=$4 y1=$5 ort=$6; shift 6; port=$((port+1))
+    if [ -s $P/$name.png ]; then echo "SKIP $name"; return; fi
+    local r; r=$(env LV=0 SLOT=0 SDIM=2 NOOBJ=1 "$@" \
+      bash $ME/shot.sh $P/$name.png $T Commonwealth $x0 $y0 $x1 $y1 8 $ort 1600 1600 $port | tail -1)
+    echo "$(date +%H:%M:%S) $r"
+    case "$r" in OK*) ;; *) echo "STOPPED at $name"; exit 2;; esac
+  }
+  for v in default waterheight; do
+    pe=(); [ $v != default ] && pe=(WW_LODL_PLANE=$v)
+    cshot E_${v}_after 0 -5 2 -3 6144 NS=$SNS LODL=$V3S "${pe[@]}"
+    cshot E_${v}_before 0 -5 2 -3 6144 NS=$NEW LODL=$V3NEW "${pe[@]}"
+    cshot N_${v}_after -13 26 -10 29 8192 NS=$SNS LODL=$V3S "${pe[@]}"
+    cshot N_${v}_before -13 26 -10 29 8192 NS=$NEW LODL=$V3NEW "${pe[@]}"
+  done
   echo "RENDER PASS DONE $G"; exit 0
 fi
 if [ $G = river ]; then
