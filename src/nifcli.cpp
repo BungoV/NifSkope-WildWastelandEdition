@@ -6812,6 +6812,26 @@ int usage()
 		  << "                                          writes <ws>.flat_objects_report.txt\n"
 		  << "                                          beside the sheets (terrain VT bake).\n"
 		  << "                                          --roads-legacy turns them off.\n"
+		  << "  lodgen ... [--stamp-normals] [--no-stamp-normals]\n"
+		  << "                                          THE NORMAL STAMP (on by default,\n"
+		  << "                                          terrain VT bake): where a road or a\n"
+		  << "                                          flat object paints the colour sheet,\n"
+		  << "                                          its normal map is stamped into the\n"
+		  << "                                          msn sheet too, in world space, with\n"
+		  << "                                          the colour's own mask and weight.\n"
+		  << "                                          --no-stamp-normals (or\n"
+		  << "                                          --roads-legacy) is the old msn.\n"
+		  << "  lodgen ... [--sky-objects] [--no-sky-objects]\n"
+		  << "                                          THE GROUND'S SKY WITH THE OBJECTS\n"
+		  << "                                          (on by default, terrain VT bake):\n"
+		  << "                                          the mask sheet's sky AO is the\n"
+		  << "                                          terrain march and the placed objects'\n"
+		  << "                                          height field as one union per\n"
+		  << "                                          direction, so street canyons and the\n"
+		  << "                                          ground under decks read darker.\n"
+		  << "                                          Supersedes --terrain-object-ao on the\n"
+		  << "                                          VT sheets. --no-sky-objects is the\n"
+		  << "                                          old mask B.\n"
 		  << "  lodgen ... [--terrain-object-ao]\n"
 		  << "             [--terrain-object-ao-strength 0..4, default 0.5]\n"
 		  << "             [--terrain-object-ao-slab 0|1, default 1; 0 = the old\n"
@@ -7255,7 +7275,7 @@ int nifskopeCliMain( const QStringList & args )
 	bool lgRoadGroundPaintSet = false;
 	bool lgRoadDetailSet = false, lgRoadRaisedSet = false,
 		lgRoadSidewalksSet = false, lgRoadsLegacy = false,
-		lgRoadOpacitySet = false, lgFlatObjectsSet = false;
+		lgRoadOpacitySet = false, lgFlatObjectsSet = false, lgStampNormalsSet = false;
 	/* The terrain virtual texture (lodgen.h). OFF by default; --vt names the
 	 * mod folder to write Terrain/ under. */
 	LodgenVtOptions lgVt;
@@ -7922,6 +7942,19 @@ int nifskopeCliMain( const QStringList & args )
 			lgFlatObjectsSet = true;
 		}
 		else if ( t == QLatin1String( "--flat-objects-file" ) ) lgCover.flatObjectsFile = next();
+		else if ( t == QLatin1String( "--stamp-normals" ) ) {
+			lgCover.stampNormals = true;
+			lgStampNormalsSet = true;
+		}
+		else if ( t == QLatin1String( "--no-stamp-normals" ) ) {
+			lgCover.stampNormals = false;
+			lgStampNormalsSet = true;
+		}
+		/* lane TERR1: the sky union (lodgen.h `skyObjects`), on by default. */
+		else if ( t == QLatin1String( "--sky-objects" ) )
+			lgCover.skyObjects = true;
+		else if ( t == QLatin1String( "--no-sky-objects" ) )
+			lgCover.skyObjects = false;
 		else if ( t == QLatin1String( "--roads-legacy" ) ) {
 			lgRoadsLegacy = true;
 			lgCover.roadComposite = LodgenCoverOptions::RoadMaxZ;
@@ -8181,6 +8214,9 @@ int nifskopeCliMain( const QStringList & args )
 		/* ROADS1 painted no flat ground objects. */
 		if ( !lgFlatObjectsSet )
 			lgCover.flatObjects = false;
+		/* ROADS1 stamped no normals (lane TERR1). */
+		if ( !lgStampNormalsSet )
+			lgCover.stampNormals = false;
 	}
 
 	if ( cmd == QLatin1String( "new" ) ) {
@@ -8672,7 +8708,12 @@ int nifskopeCliMain( const QStringList & args )
 	 *
 	 * So the sheets carry the object term and the .lodl keeps the bytes it has.
 	 * A run that asks for both is refused here rather than quietly writing one
-	 * of them without it. */
+	 * of them without it.
+	 *
+	 * Lane TERR1's `skyObjects` (on by default) is NOT refused with --lodl: it is
+	 * a default, not an ask, and the .lodl plane stays the TERRAIN-ONLY sky term
+	 * by the contract above -- the one place that term is kept (docs VT 2.2,
+	 * mask B). */
 		if ( lgCover.terrainObjectAo && !lgLodtDir.isEmpty() ) {
 			err() << "refused: --terrain-object-ao writes the object occlusion into the "
 					 "terrain SHEETS, while the .lodl's own AO plane is computed from the "
