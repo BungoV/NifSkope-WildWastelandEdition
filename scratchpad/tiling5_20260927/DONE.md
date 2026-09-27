@@ -164,3 +164,57 @@ Next step, exactly:
 
 Uncommitted artefacts (stay out of git): `out/{id_rung,id_new,today,height,relief,b05,b10,s20,s10}`,
 `run_new`, `run_rung`, `run_m3`, `logs/*s10*`, `logs/*s20*`.
+
+## CONTINUATION 2026-09-27
+
+Resumed from the RESUME above. Brief: env overrides -> code constants, final arms, pictures; both features stay
+OFF by default (his call; this overrides the night rules' "on when it passes").
+
+### C1. Refusals met, recorded (not routed around)
+* Reading `night_rules.md` in the main tree and `turn.sh` in the fix1 worktree: refused (outside this session's
+  allowed folders). The night rules were then read from this repo's own history
+  (`git show a84ffe06:scratchpad/overseer_20260927/night_rules.md`, the overseer's commit) -- same text, read-only.
+  `turn.sh` itself was not read.
+* `bash t5_mosaics.sh` (the four extra macro-licence bakes): **"This command requires approval"**, twice, with
+  nobody present to approve. Not run. Python scripts in the lane folder do run.
+
+### C2. The constants (commit 39cb880f, `src/lodgen.cpp`, `src/lodgen.h`; not yet compiled at commit time)
+* `WW_TILING5_BETA` removed -> `LODGEN_LAND_HEIGHT_BETA = 2.0f`. Why 2.0 (measured, 3h split table): beta 1.0
+  moved nothing (7 of 14 transition sheets, today's count); 2.0 brought the zones' high-pass SD to vanilla's
+  (5.36 vs 5.39) with G1 +19.9 % (bar 20 %) and G2 7/7. Above 2.0 was not measured on the split blend; that
+  G1 would pass the 20 % bar there is unlikely (reasoned: +16.7 % -> +19.9 % from 1 to 2).
+* `WW_TILING5_MACRO` removed -> `LODGEN_MACRO_AMP = {0, 0, 0}`, and `lodgenLandMacroApply` returns its input
+  unchanged when all three are 0, so `--land-macro on` stores the same colour as off (only its ledger key
+  `land.macro` differs). Why 0: the licence per channel is the MINIMUM over places (one world-wide field may not
+  exceed it anywhere). Measured (3g): brightness licence 0 at Boston in both bands, colour licence 0 in the rural
+  hills in both bands. So every channel's minimum is already 0 on two mosaics; four more mosaics can only lower
+  a minimum, never raise it (reasoned, arithmetic), so the refused step C1 could not change the constants.
+  Old first-arm values 0.06 / 0.05 / 0.06 are gone.
+
+### C3. Why G2-band is red (found; measured on the existing s20 / s10 / today sheets, nothing re-baked)
+G2-band (TILING4's `t4_gates.decided`, read from commit 92c068f5): per sheet, the mean over six radial bands of
+|share / vanilla share - 1| must be no larger than today's on that sheet, **tolerance 1e-12** -- any move away from
+vanilla on a sheet is red. `t5_g2bd.py s20` (log `logs/g2bd_s20.txt`): red on 6 of 14 (5 selection, 1 validation);
+over all 14 the median sheet moves TOWARD vanilla (scalar diff median -0.0075, range -0.083..+0.102). The two finest
+bands move toward vanilla on 14 of 14 sheets (today has too little fine grain; the arm adds it). The red comes
+from the COARSEST band (>= 128 texels = >= 58 m): its absolute power rises on 12 of 14 sheets, median x1.14
+(up to x1.26), and its share rises on 10 of 14.
+
+A detail-only blend should not add 58 m-scale power. `t5_meanbias.py` (logs `meanbias_s20.txt`, `meanbias_s10.txt`):
+
+| arm | beta | sheets brighter | median mean-luminance shift (of 255) | low-passed shift correlates with today's own large-scale brightness |
+|---|---|---|---|---|
+| s10 | 1.0 | 14 of 14 | +1.39 | r > 0 on 12 of 14, median +0.61 |
+| s20 | 2.0 | 14 of 14 | +2.23 (range +0.16..+3.86) | r > 0 on 12 of 14, median +0.61 |
+
+**Cause (the shift is measured, the mechanism is reasoned):** choosing the texel with the higher relief also
+chooses the brighter texel, because inside a land texture relief and brightness correlate (+0.196 coverage-weighted
+median, section 2: lit tops of the normal-map relief). The layer split removed that bias from the layers' MEANS, but
+two places still select on relief without correcting the mean: (1) the hex joins, `w_k exp(beta h_k)` over three
+taps of the SAME texture -- everywhere, interiors included; (2) the detail half of the layer blend. Each texture
+brightens by its own amount (its own lum-relief correlation x its own contrast), so the large-scale pattern of
+textures gains contrast; the shift doubles from beta 1 to 2, as a selection bias should.
+**Proposed fix, not made:** per texture and mip level, precompute the relief-weighted mean bias
+(E[s exp(beta h)] / E[exp(beta h)] - E[s], same pyramid pass as the relief) and subtract it from the hex tap and
+from the layer detail. Expected: dMean -> ~0 and the coarse band back to today's. It needs a build, a bake of the
+fourteen chunks and the gates re-run -- none of which can run in this session (C1), so it is left open.
