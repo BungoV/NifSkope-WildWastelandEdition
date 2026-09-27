@@ -138,16 +138,16 @@
    "1180079c57eb8572bc05660a7a01662e8be67357"
   ],
   "fo4cslod/commonwealth/commonwealth.lodb": [
-   37169,
-   "3fda0098fcec1f6359e552ba2b9e7df2934abfdd"
+   37075,
+   "91d2d19f03f2e195b79249a56805e7a8a74a3abc"
   ],
   "fo4cslod/commonwealth/commonwealth.lodi": [
    6375722,
-   "e749549691a4eab810c9da6fb6f0d50ded336d52"
+   "4f913d6d4b4cee1dfc54ed57a2e19442ed41cce6"
   ],
   "fo4cslod/commonwealth/commonwealth.lodo": [
    7945888,
-   "ad1f13d4462e52f094ef79c3564d60c6ff739caf"
+   "b144e9aff92d0fffa99265cfebb0374c06cdf552"
   ],
   "fo4cslod/commonwealth/objects/commonwealth.lodgenarrays.128x128.lodm": [
    978,
@@ -382,16 +382,12 @@
    "87d71891ae986ff90df3b74a77deab08713acd12"
   ],
   "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.256x512.lodm": [
-   16812,
-   "e1b94ebc4bbd8106d25a3795103f01cc416cad98"
+   16714,
+   "919ce375f643ec5ae654126f21a3ee8d4cc6bbd2"
   ],
   "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.256x512_d.dds": [
    786580,
    "60bbc79bef0119e0c9e58b7efb74def40becbe8d"
-  ],
-  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.256x512_g.dds": [
-   393364,
-   "a2d01fd29625db1df57d891a6444700c7912a0ff"
   ],
   "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.256x512_gsaos.dds": [
    786580,
@@ -1190,11 +1186,6 @@
   "commonwealth.lodgencards.legacy.128x512_g.dds": {
    "size": 262292,
    "black": false,
-   "cards": true
-  },
-  "commonwealth.lodgencards.legacy.256x512_g.dds": {
-   "size": 393364,
-   "black": true,
    "cards": true
   },
   "commonwealth.lodgencards.legacy.384x1024_g.dds": {

@@ -341,3 +341,36 @@ TIDY1 PARTIAL cause found and fixed in source (cc0642bc: BC1 truncates 1-3/255 g
 
 Not gated, seen: 12 `.bto.manifest.txt` shrink 1-3 B (the `A` lines point merged sources at the kept layer,
 as before). The on bake is 425,863,710 -> 374,024,103 B (-51,839,607).
+
+### Pictures (20:53-21:01; `shot.sh` = MAPS1's shot.sh with the turn name `tidy1`; MAPS1 Boston camera: view 8
+ortho, half-width 16384, cells -5,-10..2,-3, terrain from ao2/terr_x1, objects from each bake)
+
+| gate | expected | measured | verdict |
+|---|---|---|---|
+| on render == off render, same camera | 0 pixels differ | 0 pixels differ (`ImageChops.difference(...).getbbox()` = None; the two raw PNGs have the same md5). In between, `.lodo`, `.lodi`, 21 `.lodm` and 9 array sheets changed, so the viewer resolved every merged layer and read a missing glow sheet as none | PASS |
+| emissive-channel view, off and on | a picture each | NOT MADE: from 20:58 the antivirus sandboxed every launch of the run copy AND of `release/NifSkope.exe` (Avast log: "marked for virtualization", then "unable to add autosandbox exclusion"; rc 0, empty log, no PNG). One launch per path, no retry loop (skill ww-gui-launch-silent-exit). A glow view would be black in both anyway: the only lit sheets hold at most 8/255 | NOT MEASURED |
+
+Pictures (full size 1600x1684, one per file, 60 px title bar; game-asset renders, not committed):
+- `E:\Projects\NifskopeWWE-tidy1\scratchpad\tidy1_20260927\pics\before_boston_lod_off.png`
+- `E:\Projects\NifskopeWWE-tidy1\scratchpad\tidy1_20260927\pics\after_boston_lod_on.png`
+- (earlier, still valid) `pics\37_P_colour.png`, `pics\46_S_A512_colour_d.png`, `pics\36_P_cellrange.png`
+
+Cleanup: `bakes/` (895 MB), `run/` (107 MB) and `cache/` deleted at 21:03. `glow/plugin.pkl` was already gone.
+The turn lock was released by `tidy1` after every run (at the end it was held by `water1`, not touched).
+
+### Still open
+- The emissive-channel pictures (antivirus sandbox; bungo's setting, not changed).
+- The off-gate `.lodb` line diff was explained by arithmetic, not diffed: the base bake is deleted.
+- Not run: `tests/spells/lodgen_texture_arrays.sh` and the cardlink spell (optional in resume step 6). They
+  need NifSkope launches, and the sandbox was taking every launch by then.
+
+### Skills (this session)
+- Loaded: nifskope-ww-worktree-build (the build: sources touched after the object copy, so lodgen.o was
+  checked as recompiled) and ww-gui-launch-silent-exit (the empty-log launches: read the Avast log, one
+  launch per path, no loop).
+- Wished had existed: none new. The build, gate and turn steps were all in skills or lane scripts.
+- Written: `.claude/skills/ww-merge-by-texels/SKILL.md` (this worktree), with two additions: the writer's
+  drop test must decode the encoded sheet (the refused paragraph from the first continuation), and the
+  off/on render pixel gate.
+
+TIDY1 DONE the kept all-zero 256x512 card glow sheet is now dropped (exe 119d46d4): on gates 6/6 PASS (21/21 black glow sheets gone, 50.1 MB; 2 lit kept; 114->106 layers, all texels identical; 647/647 A lines), off 152/153 with only the provenance .lodb moving (-18 B = 6 paths x 3 chars), off/on Boston renders pixel-identical; glow-view pictures not made (antivirus sandbox)

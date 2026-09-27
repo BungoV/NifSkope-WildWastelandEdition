@@ -27,6 +27,14 @@ BC1 blocks (max 8/255). An "every sheet is empty" rule would have thrown that li
 2. **Test "black" the way the reader sees it.** A BC1 block is black when both 565 endpoints are 0. Count the
    files and layers that are not, and find their source (the card `.txt` has an `emissive <mult> shapes <n>`
    line) before you write "all empty".
+   **The WRITER's drop test must use that same definition, on the encoded bytes.** Testing the 8-bit input
+   ("every texel RGB 0") is not the same: `lodgenPack565` truncates, so 1-7/255 (red, blue) or 1-3/255 (green)
+   ships as 0. TIDY1's first rule kept `Commonwealth.LodgenCards.legacy.256x512_g.DDS` as 393,364 all-zero
+   bytes, because card set 000a7209 had 2,575 texels of 1-3/255 in its `_oct_g.png`.
+   `lodgenEmissiveShipsBlack` encodes with the writer's own encoder (same size, mips and codec), then decodes
+   each block's used palette entries. To find such a group: measure the source PNGs of the kept sheet's sets
+   (`scratchpad/tidy1_20260927/glow256.py`), then run the rule over the shipped sheets
+   (`shipsblack.py <bake or mod root>`, which also cross-checks gates.py).
 3. **In the writer, compare the composed 32-bit layers (all sheets and the emissive multiple), not the key.**
    Use a hash bucket and then an exact compare. The duplicate key is aliased to the kept layer, so a shape's
    UV2.y and its `A` line resolve to it. Log each merge (`KEY = layer N (REPKEY), identical texels`) so a gate
@@ -39,6 +47,10 @@ BC1 blocks (max 8/255). An "every sheet is empty" rule would have thrown that li
      - Every manifest `A` line resolves to a listed layer.
      - Every black emissive file is gone, and every lit one is kept byte-identical.
    - Prove the ON gate fails on unchanged output: run compare base-vs-base in `on` mode and require FAILs.
+   - Picture gate: render the OFF and the ON bake with the same camera (tidy1's `shot.sh`, the MAPS1 Boston
+     camera) and require 0 differing pixels (PIL `ImageChops.difference(a, b).getbbox()` is None). TIDY1:
+     identical while `.lodo`, `.lodi`, 21 `.lodm` and 9 array sheets changed, so the viewer resolved every
+     alias and took a missing emissive as black.
 
 ## Don't
 - Don't normalise a material path to merge layers: the shapes behind two spellings can differ.
