@@ -331,4 +331,18 @@ the fixture log is not empty (Avast). Fixes C and the sea-ring bake choice are p
   skill for the offline poke model. openitems.py carries its controls in its docstring; that is enough until
   a second lane needs it.
 
-WATER1 PARTIAL task 3 still NOT gated (script launches, the turn lock and commits were refused by the session); three open items measured offline, uncommitted
+(superseded 19:53 line) WATER1 PARTIAL task 3 still NOT gated (script launches, the turn lock and commits were refused by the session); three open items measured offline, uncommitted
+
+## CONTINUATION 2 (in-session) 2026-09-27
+Started 20:00 (date-read 20:01:37). Scripts and NifSkope allowed this time. First: the 19:53 attempt's text files
+committed by path (c2ae2beb). agree_pick.json NOT committed: it is sampled bake output (game-derived numbers).
+
+### Task 3 gates
+| gate | expected | measured | result |
+|---|---|---|---|
+| synthetic sloped river (`task3.sh fixture`, run_slope exe, 20:01) | checks (a)-(d) ok, refuter (e) fails (a) | 8 checks, 0 failures; (a) max error 0 u over 1351 texels; (e) flat-only build: max error 248 u | **PASS** (refuter bites) |
+| real bake with the slope exe (`task3.sh bake`, 20:02) | rc 0, a "placed water" census line | rc 0, 72.4 s wall (landscape 8.7 s), 39,264,792 B, sha1 c2df0134...; "placed water: 306 ref(s) found, 300 flat ignored, 6 sloped used, 0 mesh load failure(s)"; "sloped water: 6 mesh(es), 5 over the grid, 537 texel(s) under them"; 355 bodies (was 348); surface plane 36859 of 36864 tiles uniform, 165 texels wet under a sloped mesh | **PASS** |
+| `lodl_cmp.py` flat file vs slope file: only +8 offsets, tables identical | PASS / floor FAIL | FAIL: offsets moved +12 not +8, WATR count 15 -> 16, body count 348 -> 355 | **FAIL -- the gate's premise was wrong**: it assumed the vanilla bake has no sloped placed water. It has 6 meshes, which add 1 WATR form (+4 bytes) and 7 bodies. Its floor is meaningless on this pair (also FAIL). Replaced by the next row |
+| `real_cmp.py` (new, pre-registered in its docstring): every difference within 2 cells of S = the cells with a non-uniform surface tile | PASS, floor FAIL | S = 5 cells (1,-4; -12..-11,27..28). All 348 old bodies found unchanged (251 renumbered). body-ID 6 cells differ, flow 5, shore 6, cell table 6 (bit 0 set: dry -> water) -- 5 in S, **1 far: cell -7,13** | **FAIL as pre-registered** |
+| why -7,13 | -- | it holds a NEW 1-texel body (id 344, lake, 3099.5 u) of the one NEW WATR form 001643ce, which only the sloped water brought. A body's height is its lowest wet surface, so a 1-texel body's surface offset is 0 and its tile is uniform: S could not see it | explained |
+| `real_cmp.py --amend-s` (AMENDED after the first run: S += cells of bodies the flat file did not have) | PASS, floor FAIL | S = 6 cells; every difference at distance 0 (6/5/6/6 cells); floor (one body-ID sample flipped at -96,-96) FAIL rc 1 | **PASS (amended gate)** |
