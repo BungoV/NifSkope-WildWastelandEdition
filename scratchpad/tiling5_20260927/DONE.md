@@ -66,3 +66,61 @@ r = +1.00000, refused as it must be. Channels against each other: |r| <= 0.060. 
 Chunk-aligned 12x12-cell windows inside +-40 cells, >= 95 % dry, not overlapping Boston, ranked by the SD of cell
 mid-heights: -36,-40 (3723) and -36,-36 (3709) are the far south-west (the Glowing Sea side, one blasted palette);
 **-36,4..-25,15 (3549, dry 1.00)**, the west-central hills, is the rural camera.
+
+### 3d. Layer-transition gate, today's bake FIRST (`t5_gates.py trans`, pre-registered in its docstring)
+rz = SD(r=2 high-pass) in the transition zone / the same in the layer interiors; PASS per sheet rz >= 0.9 x vanilla.
+**Today's default bake: 7 of 14 sheets pass -- red, as a crossfade must read** (worst -36,-20 0.569 vs vanilla 1.050,
+-4,-20 0.623 vs 0.991, -20,20 0.667 vs 0.910). Vanilla's own sheets read 0.645-1.063 (median 1.0): its transitions
+carry as much grain as its interiors; ours average two grains away.
+
+### 3e. First height arm, beta 2.0 (the code's first default): overshoots
+`height` = `--land-height-blend on`: transition gate 14 of 14, but rz 1.05-2.59, and TILING4's grain gate goes red
+(G1 +49.5 % / G2 1 of 7 on selection). `t5_split.py` puts the whole change in the zone: median hp SD in Z 4.84 ->
+9.09 (vanilla 5.39), interiors 6.58 -> 6.81 (vanilla 5.53). Beta 2 turns the transitions into a per-texel dither of
+two textures. The sweep below finds the beta where the zone's grain matches the interior's.
+
+### 3f. First macro arm (amplitudes 0.06 / 0.05 / 0.06, applied before VCLR): the hard line broke once
+`relief` (= height + macro) against `height`: mean HSV saturation 13 of 14 sheets >= unmodified, **-36,-20 lower by
+0.00245** (0.26069 -> 0.25824). The per-texel hold was exact where it ran, but VCLR (a tinted multiply), the road
+lerp, the grass tint and the shading ran AFTER it, and none of them keeps an HSV-saturation order. Fix: the macro
+is now the LAST colour step in both writers (after the grade, before quantisation), and the hold compares against
+the clamped colour the texel would store. Re-measured below.
+
+### 3g. Macro amplitude from vanilla, per band (`t5_band.py`)
+The pre-registered within-sheet gate (`t5_gates.py macro`, large-scale lum SD median <= vanilla's) is ALREADY red on
+today's default bake, before any macro: FROZEN14 median 7.383 vs vanilla 4.988, BOSTON9 7.802 vs 4.787. So the
+licence is read per band as "what vanilla has that today does not", L = sqrt(max(0, van^2 - today^2)), on a
+contiguous 3x3-sheet mosaic reduced to 15 m blocks: band A 60-234 m (box r2 - box r8), band B 234-700 m (SD of the
+nine sheet means). Brightness on log luminance, hue/saturation on the opponent axes over the mosaic's mean chroma.
+
+Boston mosaic, today (`logs/band_id_rung_boston.txt`):
+
+| band | vanilla | today | licence |
+|---|---|---|---|
+| log-lum A | 0.0741 | 0.1065 | **0** |
+| log-lum B | 0.0936 | 0.0978 | **0** |
+| chroma A | 1.931 | 1.864 | 0.502 |
+| chroma B | 1.381 | 1.357 | 0.258 |
+
+Mean chroma: vanilla 10.6, today 19.0. The field's own band SD (64 windows): 0.057 (A), 0.136-0.155 (B).
+**Vanilla licenses no brightness variation on top of today's bake** -- today already carries more large-scale
+brightness variation than vanilla in both bands. Hue alone could go to 0.098 rad, saturation alone to 0.175.
+
+Rural mosaic -36,4..-25,15, today (`logs/band_today_rural.txt`): log-lum A 0.0554 vanilla / 0.0528 today (licence
+0.0167), B 0.0462 / 0.0390 (0.0249); chroma A 1.044 / 1.448 (**0**), B 0.715 / 2.359 (**0**). The two places
+disagree channel by channel: Boston has no room for brightness, the rural hills none for colour.
+
+### 3h. Beta sweep on the whole-colour height blend, and the redesign it forced
+| arm | beta | transitions (of 14) | G1 sel / val | G2 sel / val | worst per-sheet grain vs today |
+|---|---|---|---|---|---|
+| today | -- | 7 | +11.8 % / -7.7 % | 7/7 / 7/7 | -- |
+| b05 | 0.5 | 8 | +16.0 % / -2.9 % | 7/7 / 7/7 | +18.5 % (20,-24) |
+| b10 | 1.0 | 13 | +23.5 % / +4.8 % | 6/7 / 5/7 | +48.2 % (20,-24) |
+| height | 2.0 | 14 | +49.5 % / +17.2 % | 1/7 / 3/7 | +115.8 % (20,-24) |
+
+No beta passes both: the grain gates allow <= 0.5, where the transitions barely move (8 of 14). The reason is in
+the zone: the height opacity dithered the two materials' MEAN colours per texel, and on 20,-24 (two smooth
+materials of different brightness) that mean edge is almost all of the added high-pass. Redesign
+(`lodgenLandHeightLayer`): each sample splits into its texture's repeat average (1x1 mip) + detail; the averages
+crossfade with the painted opacity exactly as today, only the details take the height opacity. Algebra:
+c' = c + (lc - c) ah + (ml - m)(a - ah); ah = a is today's blend. Arms s20 / s10 below.

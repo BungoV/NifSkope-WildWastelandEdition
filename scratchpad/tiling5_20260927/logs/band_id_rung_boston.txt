@@ -1,0 +1,9 @@
+mosaic boston  arm id_rung
+                vanilla   id_rung   licence
+   logL_A        0.0741    0.1065    0.0000
+   logL_B        0.0936    0.0978    0.0000
+   chroma_A      1.9309    1.8644    0.5023
+   chroma_B      1.3812    1.3568    0.2583
+   Cmean         10.577    18.991
+field band SD (A, B): bright 0.057 0.136  hue 0.057 0.139  sat 0.056 0.155
+AMPLITUDE CEILINGS (each alone): Ab 0.0000  Ah 0.0979 rad  As 0.1752

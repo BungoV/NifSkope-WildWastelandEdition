@@ -23,6 +23,15 @@ def main():
             lo, hi, wh, wt, fl = L.cell(cx, cy)
             mid[cy - L.minY, cx - L.minX] = 0.5 * (lo + hi)
             dry[cy - L.minY, cx - L.minX] = lo > wh
+    if len(sys.argv) > 2:
+        # the named windows' stats: x0,y0 [x0,y0 ...]
+        for w in sys.argv[2:]:
+            x0, y0 = (int(v) for v in w.split(','))
+            sy, sx = y0 - L.minY, x0 - L.minX
+            m = mid[sy:sy + 12, sx:sx + 12]
+            d = dry[sy:sy + 12, sx:sx + 12]
+            print("window %d,%d..%d,%d  mid-height SD %.0f  dry %.2f" % (x0, y0, x0 + 11, y0 + 11, float(np.nanstd(m)), float(d.mean())))
+        return
     res = []
     # inside the playable map (+-40 cells): the border ranges beyond it are
     # the scenery wall, one texture, not "rural hills"

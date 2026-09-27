@@ -243,10 +243,13 @@ void lodgenSetLandHexSize( float units );        // 0 = off = the rung's bytes
  *   * at the hex joins the three barycentric weights become
  *     w_k exp(beta h_k), renormalised -- the raised tap wins, and a weight that
  *     is zero at a lattice edge stays zero, so no seam is introduced;
- *   * between LTEX layers the opacity becomes sigma( logit(a) + beta (h_layer
- *     - h_below) ), which keeps a = 0 and a = 1 exactly where they were and
- *     turns the crossfade in between into a height-shaped edge.  The pyramid
- *     writer blends roughness, metalness and emissive with the same opacity.
+ *   * between LTEX layers each sample splits into its texture's repeat average
+ *     and the detail about it; the averages crossfade with the painted opacity
+ *     a as before, the details with sigma( logit(a) + beta (h_layer -
+ *     h_below) ), which keeps a = 0 and a = 1 exactly where they were and gives
+ *     the transition one texture's grain, the raised one's, instead of the
+ *     average of two.  The pyramid writer blends roughness, metalness and
+ *     emissive with the height opacity.
  * A texture with no readable normal map has h = 0, which is the linear blend.
  *
  * MACRO VARIATION (`--land-macro on`).  A smooth world-space field (value-noise
@@ -254,8 +257,9 @@ void lodgenSetLandHexSize( float units );        // 0 = off = the rung's bytes
  * independent of the 256-unit hex patches) that moves the land colour's
  * brightness and hue slightly and its saturation only UP: per texel the
  * saturation is never below the unmodified colour's.  A pure function of
- * world position -- no seam, no thread-count dependence.  Applied after the
- * quadrant cross-fade and before VCLR, cover tint and roads.
+ * world position -- no seam, no thread-count dependence.  Applied LAST, after
+ * the grade and before quantisation, so the saturation hold compares against
+ * the colour the texel would store without it.
  *
  * `--land-sample relief` turns both on and leaves the sampler as it is. */
 bool lodgenLandHeightBlend();
