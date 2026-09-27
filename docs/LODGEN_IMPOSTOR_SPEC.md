@@ -532,8 +532,11 @@ BEFORE the atlas; the stock engine reads none of it.
   and its `.lodm` names no `textures.emissive`; absent = emits nothing.
   Vanilla LOD has no glow source (`tools/lod_emission_probe.py`: 0 of 121 LOD
   materials with emit, a glow-map flag or a glow texture; 0 of 3430 LOD shader
-  blocks with a lit emissive colour), so no vanilla set writes one: 52.5 MB of
-  368 MB of arrays on the Boston box. `array.emissiveScale` is still written,
+  blocks with a lit emissive colour), so no mesh set writes one. A card set
+  can: cards are shot from the FULL models, and TreeAspen01-03 carry a faint
+  emissive (0.05), so 2 of the 16 Boston card arrays keep theirs (max 8/255,
+  46 and 6 blocks lit). The Boston box saves 21 files, 50.1 MB of 368 MB of
+  arrays (measured by the ground1 bake's sheets). `array.emissiveScale` is still written,
   parallel to the layers. `WW_LODGEN_KEEP_BLACK_EMISSIVE=1` writes the black
   sheet as before (gate only).
 - **One layer per texture (lane TIDY1).** Two sources whose four composed
@@ -541,9 +544,12 @@ BEFORE the atlas; the stock engine reads none of it.
   ONE layer: the second one's shapes get the first one's layer in UV2.y and in
   their `A` line, and the sidecar lists the layer once. Vanilla chunk shapes
   name some materials as `c:\projects\fallout4\build\pc\data\materials\lod\X.bgsm`
-  and others as `materials\lod\X.bgsm`, which made 10 of 114 Boston layers
-  duplicates. The test is the texels, not the path spelling, so a merge can
-  never hand a shape different pixels. `WW_LODGEN_NO_LAYER_DEDUPE=1` keeps one
+  and others as `materials\lod\X.bgsm`, and some by material on one shape and
+  by diffuse on another: 13 such pairs among 114 Boston layers. The test is the
+  texels, not the path spelling, so a merge can never hand a shape different
+  pixels: 7 of the pairs merge, plus ElmTrunks under two texture paths, 114 ->
+  106. The other 6 differ in content (5 in the mask sheet's alpha-test byte,
+  Wrhs01 in gloss) and stay two layers. `WW_LODGEN_NO_LAYER_DEDUPE=1` keeps one
   layer per spelling (gate only).
 
 Gate: `tests/spells/lodgen_texture_arrays.sh` — the game's sources (legacy),

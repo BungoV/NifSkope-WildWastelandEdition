@@ -5501,7 +5501,7 @@ bool lodgenWriteDdsArray( const QString & path, int w, int h,
  *  A legacy `.lodm` supplies its own textures, the third and the emissive raw, under
  *  the legacy names. A set whose emissive is black on every layer writes no
  *  `_g`/`_e` and its `.lodm` names no `textures.emissive` (lane TIDY1,
- *  2026-09-27: vanilla LOD has no glow source, so that is every vanilla set).
+ *  2026-09-27: vanilla LOD has no glow source, so that is every vanilla mesh set).
  *  Layers whose four sheets are identical texel for texel are ONE layer; the
  *  other spellings of its source resolve to it. Run BEFORE the atlas. bungo, 2026-09-06: "keep it
  *  specular or roughness, depending if source texture is vanilla or
@@ -5611,10 +5611,13 @@ bool lodgenBuildTextureArrays( const QStringList & btoPaths, const QString & dat
 	 * spellings of its path (vanilla chunk shapes name some as
 	 * `c:\projects\fallout4\build\pc\data\materials\lod\X.bgsm`, others as
 	 * `materials\lod\X.bgsm`), or by material on one shape and by diffuse on
-	 * another, was one layer per spelling: 10 of 114 layers on the Boston box
-	 * (lane TIDY1, 2026-09-27). Comparing the TEXELS rather than normalising
+	 * another, was one layer per spelling: 13 such pairs among 114 layers on
+	 * the Boston box, 7 of them identical texels, plus ElmTrunks under two
+	 * texture paths with identical texels: 114 -> 106 (lane TIDY1, 2026-09-27,
+	 * measured on the shipped sheets). Comparing the TEXELS rather than normalising
 	 * the spelling means a merge can never hand a placement different pixels:
-	 * two spellings whose shapes carried different gloss or alpha stay apart. */
+	 * two spellings whose shapes carried different gloss or alpha stay apart
+	 * (5 pairs differ only in the mask sheet's alpha-test byte, Wrhs01 in gloss). */
 	struct ArrayClass { bool pbr = false; int w = 0, h = 0; QVector<Layer> layers; std::vector<std::vector<quint32>> bc, n, rm, em;
 		QHash<size_t, QVector<int>> byHash; QHash<QString, int> alias; };
 	QMap<QString, ArrayClass> classes;               // "family|WxH" -> class (QMap: stable order)
@@ -5797,8 +5800,9 @@ bool lodgenBuildTextureArrays( const QStringList & btoPaths, const QString & dat
 	int arrays = 0, textures = 0, legacyClasses = 0, pbrClasses = 0, blackEmissiveDropped = 0;
 	/* A BLACK EMISSIVE IS NOT WRITTEN (lane TIDY1, 2026-09-27). Vanilla LOD has
 	 * no glow source (tools/lod_emission_probe.py: 0 of 121 LOD materials, 0 of
-	 * 3430 LOD shader blocks), so every `_g` this pass wrote was black: 52.5 MB
-	 * of 368 MB on the Boston box, mesh and card arrays together. A set whose
+	 * 3430 LOD shader blocks), so every `_g` this pass wrote was black: 6.9 MB
+	 * on the Boston box. The card arrays save 43.2 MB more (2 of 16 card sets
+	 * keep a faint light from the full TreeAspen models). A set whose
 	 * emissive texel is black on every layer names no `textures.emissive` in
 	 * its .lodm and has no `_g`/`_e` file; absent = emits nothing, as the VT
 	 * sheets already have it. A set with one lit texel ships the sheet whole.

@@ -2168,7 +2168,8 @@ manifests.
    **A set whose `.lodm` names no emissive hashes four files** (`.lodm`,
    colour, normal, mask). Since lane TIDY1 (2026-09-27) a card array whose
    emissive is black on every layer writes no `_g`/`_e` and names none --
-   that is every vanilla set, because vanilla LOD has no glow source. The
+   14 of the 16 Boston card sets; the other 2 hold TreeAspen01-03, whose full
+   models emit 0.05, and keep their sheet. The
    hash of a set that does name one is unchanged; colour, normal and mask
    stay required and a set missing one is still refused.
    `tests/spells/lodgen_cardlink.py hash <pair dir>` recomputes it outside the

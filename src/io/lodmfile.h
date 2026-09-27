@@ -56,7 +56,8 @@
  * that names none emits nothing. An `array` or `cardArray` set whose
  * emissive is black on every layer names none and ships no `_g`/`_e`
  * (lane TIDY1, 2026-09-27: vanilla LOD has no glow source, so every vanilla
- * set is one); the terrain VT sheets already had it so.
+ * mesh set is one; a card set shot from a full model that emits keeps its
+ * sheet); the terrain VT sheets already had it so.
  *
  * `emissiveScale` is the other half of that light, and the reason this
  * material carries a number at all. The sheet holds the emissive COLOUR
