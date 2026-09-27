@@ -142,3 +142,63 @@ image mask every pass of every frame; the work it does is small.
 ### Pictures
 - Boston oblique, CPU over GPU: pixel-identical, because the view draws the card albedo, not the card normal
   arrays; the normal difference is shown separately (card_normal_cpu_gpu_diff.png, amplified).
+
+## 5. Old vs new stage times, and the whole-map estimate
+
+### Fair GPU A/B (ab_bakes.sh): Boston box, same exe, back to back in the order CPU, GPU, GPU, CPU, quiet machine
+| run | chunk stage s | meshes s | textures s | impostors (card arrays) s | instances s | GPU BC7 |
+|---|---|---|---|---|---|---|
+| CPU 1 (`--no-gpu`) | 469 | 279.2 | 94.3 | 52.9 | 193.7 | - |
+| GPU 1 | 447 | 282.7 | 87.7 | 31.3 | 206.3 | 154 images, 5.71 M blocks, 19.9 s |
+| GPU 2 | 432 | 273.5 | 88.2 | 31.8 | 195.4 | 154 images, 5.71 M blocks, 19.9 s |
+| CPU 2 (`--no-gpu`) | 466 | 277.5 | 96.6 | 51.7 | 197.0 | - |
+- GPU saves ~28 s of 468 s at Boston (6%): the card array stage goes 52 -> 31.5 s. The two GPU runs are byte-identical,
+  and so are the two CPU runs (cmp_trees SAME, 253 files each).
+- The earlier gate bakes had shown the GPU runs slower (486-569 s against 469-470 s). Those ran while other lanes were
+  rendering and baking; standalone the GPU was faster at every mip level (real card layers: CPU 5.4 s, GPU 3.0 s),
+  with or without idle gaps. The ABBA run on a quiet machine settles it: the GPU path is a net win, so on by default stands.
+
+### Old (rung exe) vs new, Boston box
+| stage | rung (prof2) | new, CPU path | new, GPU path | measured how |
+|---|---|---|---|---|
+| identity join | 109.2 s | 0.5-0.7 s | 0.5-0.7 s | bake log, same counts |
+| meshes (holds the card dilate) | 653.4 s | 278 s | 278 s | stage times |
+| impostors (card arrays) | 150.3 s | 52 s | 31.5 s | stage times |
+| whole chunk stage | 1017 s | 466-469 s | 432-447 s | wall |
+- Caveat: the rung numbers come from the profiled bake with other lanes busy (section 2), so the whole-stage "before"
+  is inflated; the join (109 s -> under 1 s) is a direct measurement with the same counts.
+
+### Whole-map estimate (not measured: no whole-map bake was run in this lane)
+- From INCR2's whole-map log (7639 s): the join saves ~1300 s, the card dilate ~1200 s, GPU BC7 ~60-100 s (the card
+  array stage loses ~40%, as at Boston). About 7639 -> ~5000 s (2.1 h -> ~1.4 h).
+- What is left, biggest first: the VT tile loop on one thread (~2500 s whole map, fan it over the cores; a lane of its
+  own), hashing the bake record while writing (~450 s), the AO cast's one-thread tail (~150 s), GPU AO (not built,
+  section 3c; the AO2 follow-up changed the AO cast on its own branch, not merged into main when this lane closed).
+
+## 6. Commits (branch gpu1-20260926, from main 422881d4; not pushed, not merged)
+- 481d0733 report skeleton, build wrapper, sampling profiler (wwprof)
+- df442ab5 profile + ranked table (before any GPU code); profiler attach fixes
+- fe4b19c1 lodgen: frame-local card dilate, early stop, frames fanned out; texture cache LRU as stamps
+- 212af0be lodgen: identity join 109 s -> 0.7 s at Boston, same bytes
+- baf912be lodgen: BC7 on the GPU (OpenGL 4.3 compute), on by default, Settings row to turn it off
+- fb1996ed DONE.md section 3
+- 1f3c8c6f skills ww-gl-compute-stage and ww-exact-reserve-quadratic; gate bake script
+- eeacbfc1 WW_USEGPU_TEST harness for the Use GPU row; gate scripts; ledger text
+- 0487e03b lodgen.cpp comments (GPU BC7 is no worse, not the CPU's bytes); ABBA A/B script
+- c21ab2cf DONE.md section 4; this commit: sections 5-8
+
+## 7. Pictures (outside git)
+C:\Users\bungo\AppData\Local\Temp\claude\E--Projects-Claude\b560e4ec-6e66-4c21-9572-1ad4acca0043\scratchpad\gpu1\pics\
+- ww_usegpu_off.png, ww_usegpu_on.png, ww_usegpu_test.log: the Settings row, harness grabs (second monitor)
+- oblique_cpu_over_gpu.png (with oblique_cpu2.png, oblique_gpuA.png): Boston oblique, CPU over GPU, pixel-identical
+- card_normal_cpu_gpu_diff.png: a card normal array, CPU vs GPU, difference amplified
+
+## 8. Skill review
+- Loaded: nifskope-ww-lodgen, nifskope-ww-build-verify, ww-measure-before-you-parallelise, ww-parallelise-a-stage,
+  ww-module-off-is-identical, nifskope-ww-worktree-build, search-lean. The worktree skill's section 8 (new exe held
+  by the AV, retry on rc 126) was needed on every run folder.
+- Wished for, now written (committed in .claude/skills): ww-gl-compute-stage (GL compute stage: context, headless,
+  determinism rules, the "no worse" gate, NVIDIA local-memory spills, the fair A/B) and ww-exact-reserve-quadratic
+  (the exact-size reserve in an append loop).
+- Lesson added to ww-gl-compute-stage: time a GPU path inside the bake in ABBA order on a quiet machine; single
+  bakes beside other lanes put it 20-80 s slower when it was 28 s faster.

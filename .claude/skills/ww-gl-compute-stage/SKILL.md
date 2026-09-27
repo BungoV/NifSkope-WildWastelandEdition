@@ -62,3 +62,11 @@ GPU on by default; ONE Settings row (NIF page, "LOD bake" group, "Use GPU", labe
 the GUI bake and the headless one alike (same QSettings scope, WW_SETTINGS_SCOPE honoured); `--no-gpu` wins for
 one run. The bake log says which path and why, and ends with images / blocks / GPU ms / fall-backs.
 Harness: `WW_USEGPU_TEST=1` under a planted WW_SETTINGS_SCOPE (src/nifskope_ui.cpp).
+
+## 7. Is it faster IN the bake? (the fair A/B)
+Standalone numbers do not carry over by themselves, and a bake timed beside other lanes lies. GPU1's gate bakes,
+run while other lanes rendered and baked, put the GPU path 16-100 s SLOWER than the CPU at Boston; standalone it was
+faster at every mip level, with or without idle gaps. The fair test: same exe, back to back, order CPU, GPU, GPU, CPU
+(ABBA, so drift hits both sides), on a quiet machine (no other NifSkope or make running), and compare the stage the
+GPU touches as well as the whole wall time. GPU1 (scratch `ab_bakes.sh`): CPU 469/466 s, GPU 447/432 s, the card array
+stage 52 -> 31.5 s. Each pair must also be byte-identical to its twin, which checks determinism for free.
