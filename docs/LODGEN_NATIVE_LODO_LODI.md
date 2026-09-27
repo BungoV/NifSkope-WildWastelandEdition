@@ -2930,8 +2930,8 @@ never shown.
 | name | what it paints | the byte, and where it is stored |
 |---|---|---|
 | `identity` | **the GROUP**, hashed with the stock channel-1 palette -- one colour a house (v7). On a file with no group table it falls back to the per-placement identity **and the note line says so by name**, rather than drawing the fallback silently | `.lodi` group table (§4.9) |
-| `placement` | every placement its own colour -- **what `identity` drew before v7** | `.lodi` instance identity (§4.1c) |
-| `identityraw` | that identity's low byte as grey | `.lodi` instance identity & 0xFF |
+| `placement` | one colour per placed kit piece -- **what `identity` drew before v7**; not a building map | `.lodi` instance identity (§4.1c) |
+| `placement-lowbyte` | the low byte of each placed kit piece's id, as grey: a debug view, not a building map (was `identityraw` until IDENT1, 2026-09-27) | `.lodi` instance identity & 0xFF |
 | `sky` | sky visibility: the **per-vertex stream** on a v7 file (§4.10), the flat per-placement byte on a v6 one. The note line names WHICH served, with its own count -- `per-vertex stream, N bytes over M slices` against `placement byte, N placements` -- and both numbers are read back from what was uploaded | `.lodi` sky stream (§4.10), else instance byte 0x11 |
 | `ground` | ground-contact blend -- PLACEMENTS and TERRAIN in one grey ramp | **per vertex from the `.lodi` v12 stream (§4.16) when the file carries it**, else instance byte 0x12 (one flat value a placement); the note line says which of the two it drew; the terrain is drawn at the ramp's value at the surface, which is the constant 255, and the note line says so |
 | `seed` | per-placement tree seed hashed to colour; **0 = not a tree = black** | `.lodi` instance byte 0x13 (§4.3) |

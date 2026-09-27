@@ -286,6 +286,10 @@ struct LodgenIdentityExtras
 	bool placementAo = false, vertexAo = false, lodiV7 = false, scrappable = false;
 	bool identityJoinLegacy = false;
 	float identityJoinGap = 0.0f;
+	/*! IDENT1 (2026-09-27): the contact join and the building occluder. The
+	 *  identity dump names them only when ON, so a bake with both off hashes the
+	 *  exact words a bake from before the lane did. */
+	bool identityJoinContact = false, occluderBuilding = false;
 	bool aggregate = false;
 	int aggMin = 0, aggTile = 0, aggViews = 0;
 	QStringList more;           //!< further `key=value` lines a front end owns (sorted before use)

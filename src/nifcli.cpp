@@ -2734,7 +2734,8 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 	const QString & nativeVerifyLodi, const QString & nativeFixture, const QString & nativeMeshReport,
 	bool nativeVerifyCorpus, bool nativeLadder, bool nativeOccluders,
 	bool libraryNear, bool ladderFoliage, float silhouetteMin, bool placementAo, bool vertexAo, bool lodiV7,
-	bool scrappable, bool identityJoinLegacy, float identityJoinGap, bool treesOnly,
+	bool scrappable, bool identityJoinLegacy, float identityJoinGap, bool identityJoinContact,
+	bool occluderBuilding, bool treesOnly,
 	bool aggregate, int aggMin, int aggTile, int aggViews )
 {
 	/* The layout clause starts blank for this run and is filled by the writers
@@ -3928,6 +3929,7 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 			lodgenNativeLodiV7Option( lodiV7 );
 			lodgenNativeScrappableOption( scrappable );
 			lodgenNativeIdentityJoinOption( identityJoinLegacy, identityJoinGap );
+			lodgenNativeIdentityContactOption( identityJoinContact, occluderBuilding );
 			/* `--native` NAMES A MOD FOLDER from today (lane LAYOUT1,
 			 * 2026-09-16), exactly as `--vt` and `--lodl` already did: the pair
 			 * lands at `<MODFOLDER>/FO4CSLOD/<ws>/`, not in the directory
@@ -4085,6 +4087,8 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 		idx.scrappable = scrappable;
 		idx.identityJoinLegacy = identityJoinLegacy;
 		idx.identityJoinGap = identityJoinGap;
+		idx.identityJoinContact = identityJoinContact && !identityJoinLegacy;
+		idx.occluderBuilding = occluderBuilding;
 		idx.aggregate = aggregate;
 		idx.aggMin = aggMin;
 		idx.aggTile = aggTile;
@@ -6475,12 +6479,17 @@ int usage()
 	  << "  lodgen ... --native <dir> --lodi-v6\n"
 	  << "  lodgen ... --native <dir> --lodi-v7\n"
 	  << "  lodgen ... --native <dir> --scrappable  (off by default; .lodi v9 instance bit 6)\n"
-	  << "  lodgen ... --native <dir> --identity-join-gap 64 | --identity-join legacy\n"
-	  << "                                          v7 GROUPING: a non-tree placement joins\n"
-	  << "                                          a group when its LOD MESH is within the\n"
-	  << "                                          gap of another's (bungo 2026-09-19);\n"
-	  << "                                          `legacy` is the old architecture-only\n"
-	  << "                                          16-unit BOX rule, byte for byte\n"
+	  << "  lodgen ... --native <dir> --identity-join contact | proximity | legacy\n"
+	  << "                                          v7 GROUPING: `contact` (the default,\n"
+	  << "                                          lane IDENT1) joins pieces whose placed\n"
+	  << "                                          triangles touch, plus SCOL parts, under\n"
+	  << "                                          a size cap; `proximity` is the 64-unit\n"
+	  << "                                          mesh gap (--identity-join-gap) of\n"
+	  << "                                          2026-09-19; `legacy` is the old\n"
+	  << "                                          architecture-only 16-unit BOX rule\n"
+	  << "  lodgen ... --native <dir> --occluder-fit building | piece\n"
+	  << "                                          one occluder box a building group (the\n"
+	  << "                                          default) or one a piece (the way back)\n"
 	  << "                                          write no group table and no\n"
 	  << "                                          per-vertex sky stream; the\n"
 	  << "                                          .lodi stays at version 6,\n"
@@ -7294,8 +7303,13 @@ int nifskopeCliMain( const QStringList & args )
  *                             buildings. Trees never join.
  *   --identity-join legacy    the way back: the pre-2026-09-19 rule, only an
  *                             `architecture`-pathed placement, joined on a WORLD
- *                             AXIS-ALIGNED BOX gap of 16 u. `--identity-join
- *                             proximity` says the default out loud. */
+ *                             AXIS-ALIGNED BOX gap of 16 u.
+ *   --identity-join contact   the default since lane IDENT1 (2026-09-27): pieces
+ *                             whose placed level-0 triangles touch, plus SCOL
+ *                             parts, under a size cap. `--identity-join
+ *                             proximity` is the 2026-09-19 rule, byte for byte.
+ *   --occluder-fit building   IDENT1's default: one occluder box a building
+ *                             group; `piece` is the one-box-a-piece way back. */
 	bool lgLibraryNear = false;
 	bool lgNativeLadderFoliage = LODO_LADDER_FOLIAGE_DEFAULT;
 	float lgNativeSilhouette = LODO_SILHOUETTE_MIN_DEFAULT;
@@ -7313,6 +7327,8 @@ int nifskopeCliMain( const QStringList & args )
 	 * RULING, not a module, and the rule it replaces is the way back. */
 	bool lgIdentityJoinLegacy = false;
 	float lgIdentityJoinGap = 64.0f;
+	bool lgIdentityJoinContact = true;     // IDENT1: `--identity-join proximity` is the way back
+	bool lgOccluderBuilding = true;        // IDENT1: `--occluder-fit piece` is the way back
 	/* THE AGGREGATE MODULE, AND IT SHIPS OFF. Aggregation is
 	 * a module, and CONSTITUTION 10 makes its off value the exact way back --
 	 * with it off the .lodi is written at version 3 and every output file is
@@ -7987,10 +8003,26 @@ int nifskopeCliMain( const QStringList & args )
 			const QString v = next().toLower();
 			if ( v == QLatin1String( "legacy" ) ) {
 				lgIdentityJoinLegacy = true;
+				lgIdentityJoinContact = false;
 			} else if ( v == QLatin1String( "proximity" ) ) {
 				lgIdentityJoinLegacy = false;
+				lgIdentityJoinContact = false;
+			} else if ( v == QLatin1String( "contact" ) ) {
+				lgIdentityJoinLegacy = false;
+				lgIdentityJoinContact = true;
 			} else {
-				err() << "error: --identity-join takes proximity or legacy, not '" << v << "'" << Qt::endl;
+				err() << "error: --identity-join takes contact, proximity or legacy, not '" << v << "'" << Qt::endl;
+				return 2;
+			}
+		}
+		else if ( t == QLatin1String( "--occluder-fit" ) ) {
+			const QString v = next().toLower();
+			if ( v == QLatin1String( "building" ) ) {
+				lgOccluderBuilding = true;
+			} else if ( v == QLatin1String( "piece" ) ) {
+				lgOccluderBuilding = false;
+			} else {
+				err() << "error: --occluder-fit takes building or piece, not '" << v << "'" << Qt::endl;
 				return 2;
 			}
 		}
@@ -8691,7 +8723,7 @@ int nifskopeCliMain( const QStringList & args )
 			lgCardAuxDiv, lgNativeDir, lgNativeVerifyLodo, lgNativeVerifyLodi, lgNativeFixture,
 			lgNativeMeshReport, lgNativeVerifyCorpus, lgNativeLadder, lgNativeOccluders,
 			lgLibraryNear, lgNativeLadderFoliage, lgNativeSilhouette, lgNativePlacementAo, lgNativeVertexAo, lgLodiV7,
-			lgScrappable, lgIdentityJoinLegacy, lgIdentityJoinGap,
+			lgScrappable, lgIdentityJoinLegacy, lgIdentityJoinGap, lgIdentityJoinContact, lgOccluderBuilding,
 			lgTreesOnly, lgAggregate, lgAggMin, lgAggTile, lgAggViews );
 		out() << lodgenGpuSummary() << Qt::endl;
 	}

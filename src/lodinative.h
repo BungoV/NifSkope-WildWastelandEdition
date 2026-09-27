@@ -91,7 +91,7 @@ enum class LodlChannel
 	 *  note line SAYS by name rather than drawing it silently. */
 	Identity,
 	Placement,      //!< the unique per-placement identity, hashed -- what `identity` drew before v7
-	IdentityRaw,    //!< the identity's low byte as grey
+	IdentityRaw,    //!< `placement-lowbyte`: the placed piece's id, low byte as grey (was `identityraw`)
 	Sky,            //!< `.lodi` sky visibility, per placement
 	Ground,         //!< `.lodi` ground-contact blend, per placement (+ the terrain)
 	Seed,           //!< `.lodi` tree seed, hashed; 0 (not a tree) is black
