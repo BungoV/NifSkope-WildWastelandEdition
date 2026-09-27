@@ -95,7 +95,10 @@ fi
 # 6. pictures (maps1 Boston camera, full size, then a 60 px title bar by label.py); ports 43761..
 if has pics; then
 	mkdir -p pics; P=43761
-	shot() { game; env LODI_DIR=$OD LV=2 SLOT=0 SDIM=2 SHEETS=$T/bakes/$2/$C "${@:3}" bash shot.sh pics/$1.png $F Commonwealth $X0 $Y0 $X1 $Y1 8 $HW 1600 1600 $P; P=$((P+1)); }
+	# LODL: the ao2/terr_x1 folder the first session opened is gone and the Boston bakes write no .lodl, so the
+	# terrain mesh comes from a copy of the installed Commonwealth.lodl (the one maps1 copied; read-only source).
+	# The sheets drawn on it are the bake's own (SHEETS).
+	shot() { game; env LODI_DIR=$OD LV=2 SLOT=0 SDIM=2 SHEETS=$T/bakes/$2/$C LODL=$T/bakes/Commonwealth.lodl "${@:3}" bash shot.sh pics/$1.png $F Commonwealth $X0 $Y0 $X1 $Y1 8 $HW 1600 1600 $P; P=$((P+1)); }
 	lab() { [ -s pics/$1.png ] && python label.py pics/$1.png pics/$1_labeled.png "$2"; }
 	X0=-5; Y0=-10; X1=2; Y1=-3; HW=16384
 	shot sky_before base WW_RENDER_FLAT=1 WW_LODL_CHANNEL=mask-b

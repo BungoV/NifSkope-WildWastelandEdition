@@ -309,3 +309,16 @@ against phys1458; OFF bake == base, byte for byte.
   so that update is owed (text: the "Fix 1" table plus physlaw.py/lawfit.py usage above).
 
 TERR1 PARTIAL cosine sky law committed (6eb5954f, predicted canyon 88 vs physical 99) but unbuilt/unbaked -- harness refused every build; G2 narrowed to stamped texels whose colour move vanishes, diagnostic ready, not fixed; CR fix in resume.sh
+
+## CONTINUATION 2026-09-27 (second, in-session, from 20:00)
+
+Builds, bakes and NifSkope runs are allowed in this session.
+
+### Progress log
+- 20:01 committed the untracked scripts + DELIVERABLE_TEXT.md by path (11ce1a75); bakes/, runs/, outputs not committed.
+- 20:03-20:06 built 6eb5954f (cosine sky law): build.sh sky3, WW_BUILD-RC=0, lodgen.o rebuilt 20:05, run copy
+  runs/sky3 sha1 c9ea6c99 (differs from sky2).
+- resume.sh: the pictures opened `ao2/terr_x1/Commonwealth.lodl`, which is gone, and the Boston bakes write no
+  .lodl. The shots now open a copy of the installed Commonwealth.lodl (bakes/Commonwealth.lodl, read-only source,
+  the same file maps1 copied); the sheets drawn on it are each bake's own. `bash -n resume.sh` passes.
+- 20:06 ON + OFF bakes started (resume.sh on off).
