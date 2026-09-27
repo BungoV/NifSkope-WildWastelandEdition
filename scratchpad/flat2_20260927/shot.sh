@@ -1,0 +1,42 @@
+#!/bin/bash
+# FLAT2 picture: a copy of WATER1's shot.sh (itself maps1's). Differences, and only these:
+#   NS is required (env), turn.sh name + settings scope = flat2; sheet cache under flat2/cache.
+# usage: NS=<exe> shot.sh <out.png> <lod dir> <EDID> <x0> <y0> <x1> <y1> <view 1|8> <ortho half-width> <W> <H> <port>
+#   env: LV LI SLOT SDIM OBJ_REGION NOOBJ LODI_DIR SHEETS LREG LODL (as maps1)
+OUT="$1"; F="$2"; E="$3"; X0=$4; Y0=$5; X1=$6; Y1=$7; VIEW=$8; ORT=$9; W=${10}; H=${11}; PORT=${12}
+OUT="$(cd "$(dirname "$OUT")" && pwd)/$(basename "$OUT")"
+LV=${LV:-3};LI=${LI:-0}; SLOT=${SLOT:-none}; SDIM=${SDIM:-16}
+ME=/e/Projects/NifskopeWWE-flat2/scratchpad/flat2_20260927
+LODL=${LODL:-$F/$E.lodl}
+wp() { echo "$1" | sed -E 's#^/([a-zA-Z])/#\U\1:/#'; }
+RES=$("$NS" -no-gui lodgen --mo2-profile "E:/Projects/Fallout 4 Mods/profiles/Default" --print-source 2>&1 | tr -d '\r' | sed -n 's/^resource [0-9]*: //p' | paste -sd ';')
+CX=$(( (X0 + X1 + 1) * 2048 )); CY=$(( (Y0 + Y1 + 1) * 2048 ))
+mkdir -p "$ME/cache"
+CACHE="E:/Projects/NifskopeWWE-flat2/scratchpad/flat2_20260927/cache/sc_$(basename "$OUT" .png)_$(date +%s)"
+OBJ=( WW_LODL_OBJECTS="$(wp "${LODI_DIR:-$F}")/$E.lodi" WW_LODI_REGION="${OBJ_REGION:-$X0,$Y0,$X1,$Y1}" WW_LODI_LEVEL=$LI )
+[ "$SLOT" != none ] && OBJ+=( WW_LODI_SLOT=$SLOT )
+[ -n "${NOOBJ:-}" ] && OBJ=( WW_BAKE2_NOOBJ=1 )
+if tasklist //FI "IMAGENAME eq Fallout4.exe" 2>/dev/null | grep -q Fallout4.exe; then echo "GAME UP"; exit 1; fi
+bash /e/Projects/NifskopeWWE-fix1/scratchpad/fix1_20260926/turn.sh acquire flat2 21600 || exit 1
+SCOPE=flat2; REGKEY="HKCU\Software\NifTools\NifSkope 2.0 $SCOPE"
+wipe() { reg delete "$REGKEY" //f > /dev/null 2>&1 || true; }
+wipe; trap wipe EXIT
+reg add "$REGKEY\Settings" //v Version //t REG_SZ //d 1 //f > /dev/null 2>&1
+reg add "$REGKEY" //v "Game Manager Version" //t REG_DWORD //d 2 //f > /dev/null 2>&1
+GM="$(dirname "$OUT")/gm_$$.reg"
+python E:/Projects/NifskopeWWE-fix1/tests/spells/settings_scope_game.py "$SCOPE" "$(wp "$GM")" > /dev/null && reg import "$(wp "$GM")" > /dev/null 2>&1; rm -f "$GM"
+env "${OBJ[@]}" WW_SETTINGS_SCOPE="$SCOPE" \
+    WW_LODL_SHEETS="$(wp "${SHEETS:-$F}")" WW_LODL_SHEET_DIM=$SDIM WW_LODL_SHEET_CACHE="$CACHE" \
+    WW_LODL_REGION="${LREG:-$X0,$Y0,$X1,$Y1},$LV" \
+    WW_LODGEN_RESOURCES="$RES" \
+    WW_RENDER_SHOT="$(wp "$OUT")" WW_RENDER_SIZE="${W}x$((H + 59))" \
+    WW_RENDER_CENTER="$CX,$CY,0" WW_RENDER_ORTHO="$ORT" WW_RENDER_VIEW="$VIEW" WW_RENDER_CLEAN=1 \
+    WW_CAMERA_CENSUS="$(wp "${OUT%.png}.cam.log")" \
+    WW_WINDOW_AT=1960,40 \
+    timeout 1200 "$NS" --port "$PORT" "$(wp "$LODL")" > "${OUT%.png}.log" 2>&1
+rc=$?; bash /e/Projects/NifskopeWWE-fix1/scratchpad/fix1_20260926/turn.sh release flat2
+if [ -s "$OUT" ]; then
+  echo "OK $(basename "$OUT") $(stat -c %s "$OUT") B rc=$rc"
+else
+  echo "NO FILE $OUT rc=$rc"
+fi
