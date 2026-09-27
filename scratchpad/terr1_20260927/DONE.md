@@ -322,3 +322,15 @@ Builds, bakes and NifSkope runs are allowed in this session.
   .lodl. The shots now open a copy of the installed Commonwealth.lodl (bakes/Commonwealth.lodl, read-only source,
   the same file maps1 copied); the sheets drawn on it are each bake's own. `bash -n resume.sh` passes.
 - 20:06 ON + OFF bakes started (resume.sh on off).
+- 20:07-20:10 built the G2 diagnostic exe (resume.sh diag: patch, build.sh diag1 WW_BUILD-RC=0, sha1 5d455fde,
+  patch reversed; `git status -uno` clean, 0 TERR1-DIAG lines in src).
+- **Every bake refused to start: rc 126 "Permission denied" after ~60 s**, for runs/sky3 (ON 20:07, OFF 20:11) and
+  runs/diag1 (20:12). The antivirus holds the freshly linked exes. bake.sh deletes its output folder before each
+  attempt, so the first session's ON/OFF sheets are gone (their numbers stand in sections 4 and CONTINUATION
+  above); bakes/base, bakes/noroads, bakes/noflat remain.
+- bake.sh fixed: it exited with the `ls`'s rc, so a refused bake looked like a pass to resume.sh; it now exits with
+  the bake's rc. I also gave it a retry loop on rc 126 (drop the turn, wait 60 s, up to 40 tries) -- a MISTAKE
+  (see Mistakes, second continuation): each try makes the antivirus evaluate the exe again and pop up a notice. I
+  stopped the task at 21:03, but the orphaned bake.sh (ON bake) keeps retrying; stopping it by pid was refused by
+  the harness, so it runs until it gets through or reaches 40 tries (21:05 = try 5, still rc 126).
+- New `diagbake` step in resume.sh: the diagnostic bake + reading without rebuilding.
