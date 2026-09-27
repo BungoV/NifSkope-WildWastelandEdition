@@ -2,8 +2,6 @@
 name: ww-picture-point-to-cell
 description: Name the world cell / region edge a spot in a NifSkope WW headless render shows, from the render's own .cam.log (rot, lookat, upp, vp), before writing "the south-east corner" in a report. Use when a picture artefact (a sheet past the terrain, a poke-through, a seam) has to be tied to cells in the .lodl so it can be measured offline.
 ---
-<!-- DRAFT: the session refused a write under .claude/skills/; move this file to
-     .claude/skills/ww-picture-point-to-cell/SKILL.md -->
 
 # A picture spot -> the cell it shows
 
@@ -44,3 +42,13 @@ the one that fits; write down which.
 Cells named -> read them with `tests/spells/lodl_open_authority.py <file> cell CX CY`, or WATER1's
 `scratchpad/water1_20260927/openitems.py` (v2 sheets, poke-through, sea body), whose controls must first
 reproduce the render log's own counts.
+
+## The other way: a cell -> a pixel mask (a locality gate)
+`scratchpad/water1_20260927/pixcell.py <before.png> <after.png> <after.cam.log> "cx,cy,zmin,zmax;..."`
+projects each cell's 8 box corners (zmin/zmax = the cell's ground range from the per-cell table), fills
+their convex hull, dilates 3 px, and FAILS if any differing pixel lies outside. Use it when a change is
+meant to touch named cells only (WATER1 task 3: the flat pictures may change only where sloped water is).
+It has a floor (`--floor` paints a block outside: must FAIL). Traps seen: a view whose colour ramp spans
+the REGION's own range (water height) changes everywhere when one new value widens the range -- the gate
+fails correctly and the log's legend line explains it; a view coloured by an ID that is assigned by area
+(body id) changes everywhere when one body is added.
