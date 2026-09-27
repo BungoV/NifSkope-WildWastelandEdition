@@ -34,25 +34,35 @@ a picture.
    - the terrain march alone;
    - product A(s);
    - union B(s) at the 7 march steps;
-   - union Bd(s) with the lattice read every 64 u.
+   - union Bd(s) with the lattice read every 64 u;
+   - union Be(s) = Bd plus the two fixes below (the shipped law, `lodgenSkyDirBlocked`).
 3. **Two self-checks must pass before you trust any score:**
-   - The Python terrain march must reproduce the sheet's mask B (TERR1: MAE 3.9 levels, corr 0.989).
+   - The Python terrain march must reproduce the sheet's mask B (TERR1: MAE 3.96 levels, corr 0.988).
    - On `open` samples the terrain ray cast must equal the union reference (MAE 0.09).
+4. Score the `lifted` class on its own (samples whose own lattice square is 0..128 u above the ground: road
+   pieces). A law that fails only there is reading low covers as ceilings.
 
-## What TERR1 measured (Boston, stand-in lattice, 2,095 near samples)
+## What TERR1 measured (Boston, stand-in lattice 512 u grid, J = 32, 2,208 near samples)
 
 | law | MAE | bias | corr |
 |---|---|---|---|
-| terrain only | 87.6 | +87.6 | 0.05 |
-| product, s = 0.5 (GROUND1 default) | 50.5 | +49.5 | 0.754 |
-| product, s = 1 | 29.3 | +12.4 | 0.809 |
-| union, 7 steps | 29.2 | +14.2 | 0.821 |
-| **union, dense 64 u (shipped)** | **26.3** | **+5.2** | **0.834** |
+| terrain only | 87.4 | +87.2 | 0.07 |
+| product, s = 1 | 32.6 | +7.4 | 0.741 |
+| union, 7 steps | 32.3 | +9.4 | 0.752 |
+| union, dense 64 u (no lift, no bar) | 30.5 | -0.4 | 0.755 (lifted samples: bias -101) |
+| **Be: dense + lift + 128 bar (shipped)** | **22.3** | **-13.0** | **0.905** |
 
+- Deck class (909 samples) under Be: 15.9 / -15.9 / 0.779.
 - Any strength other than 1 on the union moves open ground (bias +16.7 at s = 0.75). A union takes no strength dial.
+- An earlier, smaller run (2,095 samples, 1,024 grid) had the dense union at 26.3 / +5.2 / 0.834; the table above
+  is the one the shipped law was chosen on.
 
 ## Traps
 - A strength that scales the union also scales the terrain term, so it breaks "open ground unchanged". Only a
   product can take a dial.
 - The 7-step march (128·1.5^k) steps over a street's far wall in a 128-unit lattice. Read the lattice densely.
+- Road pieces sit a few units over the terrain. Marched from the terrain height, the slab law reads them as
+  ceilings and a street goes black. Two fixes, both shipped: start the march from the texel's own square top when
+  it is 0..128 u above the ground (`lodgenSkySurface`), and call a square a wall when its bottom is within 128 u
+  of that start.
 - Check the stand-in lattice's row order against the OBJH doc: rows run south to north, `gy = floor(y/128) - gy0`.
