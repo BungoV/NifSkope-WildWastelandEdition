@@ -78,8 +78,9 @@ if [ $G = real ]; then
     pe=(); [ $v != default ] && pe=(WW_LODL_PLANE=$v)
     cshot E_${v}_after 0 -5 2 -3 6144 NS=$SNS LODL=$V3S "${pe[@]}"
     cshot E_${v}_before 0 -5 2 -3 6144 NS=$NEW LODL=$V3NEW "${pe[@]}"
-    cshot N_${v}_after -13 26 -10 29 8192 NS=$SNS LODL=$V3S "${pe[@]}"
-    cshot N_${v}_before -13 26 -10 29 8192 NS=$NEW LODL=$V3NEW "${pe[@]}"
+    # the hills stand at ~7,000 units: centre the camera at that height (CZ), 2 cells across
+    cshot N_${v}_after -13 26 -10 29 4096 CZ=7000 NS=$SNS LODL=$V3S "${pe[@]}"
+    cshot N_${v}_before -13 26 -10 29 4096 CZ=7000 NS=$NEW LODL=$V3NEW "${pe[@]}"
   done
   echo "RENDER PASS DONE $G"; exit 0
 fi

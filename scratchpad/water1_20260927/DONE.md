@@ -355,3 +355,16 @@ Avast: run_slope launches 1-3 made pictures; launch 4 (FL_bodyid, 20:10) and its
 EMPTY log; AvastSvc.log has "marked for virtualization ... run_slope\NifSkope.exe" at 18:10:30 / 18:13:12 UTC and
 ScanCompleteClean + error 122 about 18 s later (skill ww-gui-launch-silent-exit). No antivirus setting touched.
 Next: ONE launch of the same bytes from `release/NifSkope.exe` (md5 37bd178a = run_slope).
+20:14 that launch was sandboxed too (Avast marked `release\NifSkope.exe` at 18:14:45 UTC, error 122 at 18:15:02).
+Waited 10 min (night rule), resumed 20:25; the lock was held by TIDY1 until 20:53; FL_bodyid made 20:53.
+FL_depth (20:57) sandboxed; not needed for a gate (it has no before picture), left out.
+Sandboxing is intermittent: about half of this evening's GUI launches of either copy made a picture.
+
+### Real placed-water pictures (`render_all.sh real`, 20:58-)
+| gate | expected | measured | result |
+|---|---|---|---|
+| pond cell 1,-4, textured default view, 3x3 cells: before (flat exe, flat file) vs after (slope exe, slope file), `pixcell.py` with cell 1,-4 | 0 outside | 3,939 differ, 0 outside, bbox 784..900 x 575..626 | **PASS** |
+| after log | -- | body 107 river 801.75 u, 32 texels, 31 off the body height by up to 19.76 u, drawn corner mean within 1.114 u of the file; ground above water 0 full rate, 0 view mesh (32 a cell) | measured |
+The north pair (cells -12..-11, 27..28, ground ~7,000 u) first came out with the land at the top edge: shot.sh
+centres the camera at z 0. Added `CZ` to shot.sh (default 0, old pictures unchanged) and re-framed it at 7,000 u,
+2 cells across. 21:05: **the game came up** (tasklist Fallout4.exe), so the re-frame waits for the game to close.

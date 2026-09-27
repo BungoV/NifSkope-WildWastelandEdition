@@ -31,7 +31,7 @@ env "${OBJ[@]}" WW_SETTINGS_SCOPE="$SCOPE" \
     WW_LODL_REGION="${LREG:-$X0,$Y0,$X1,$Y1},$LV" \
     WW_LODGEN_RESOURCES="$RES" \
     WW_RENDER_SHOT="$(wp "$OUT")" WW_RENDER_SIZE="${W}x$((H + 59))" \
-    WW_RENDER_CENTER="$CX,$CY,0" WW_RENDER_ORTHO="$ORT" WW_RENDER_VIEW="$VIEW" WW_RENDER_CLEAN=1 \
+    WW_RENDER_CENTER="$CX,$CY,${CZ:-0}" WW_RENDER_ORTHO="$ORT" WW_RENDER_VIEW="$VIEW" WW_RENDER_CLEAN=1 \
     WW_CAMERA_CENSUS="$(wp "${OUT%.png}.cam.log")" \
     WW_WINDOW_AT=1960,40 \
     timeout 1200 "$NS" --port "$PORT" "$(wp "$LODL")" > "${OUT%.png}.log" 2>&1
