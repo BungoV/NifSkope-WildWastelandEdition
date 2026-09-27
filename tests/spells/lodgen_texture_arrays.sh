@@ -238,6 +238,7 @@ def readLodm(path):
     return json.loads(b[12:])
 headersOk = 0; distinct = 0; arraysSeen = 0; lodmOk = 0
 glowChecked = glowOk = blackChecked = blackOk = 0
+darkSets = darkDropped = 0
 mutedChecked = mutedOk = scaleChecked = scaleOk = 0
 pbrEmissive = []
 for (fam, cls), lays in sets.items():
@@ -250,10 +251,17 @@ for (fam, cls), lays in sets.items():
     emiSfx = '_e' if pbr else '_g'		# the key is `emissive` in both families
     stem = os.path.basename(lodmGame.replace('\\', '/'))[:-5]
     tex = lm.get('textures', {})
+    # lane TIDY1 (2026-09-27): a set whose every layer emits nothing names NO emissive
+    # and ships no _g/_e; a set with one emitting layer names it. Both halves asserted.
+    allDark = all(r[7] == '-' for r in lays)
+    emiOk = (('emissive' not in tex and not os.path.exists(local(lodmGame)[:-5] + emiSfx + '.DDS'))
+             if allDark else tex.get('emissive', '').endswith(stem + emiSfx + '.DDS'))
+    darkSets += allDark
+    darkDropped += (allDark and emiOk)
     good = (lm.get('lodm') == 1 and lm.get('family') == fam and lm.get('kind') == 'array'
             and tex.get(colorKey, '').endswith(stem + colorSfx + '.DDS') and tex.get('normal', '').endswith(stem + '_n.DDS')
             and tex.get(maskKey, '').endswith(stem + maskSfx + '.DDS')
-            and tex.get('emissive', '').endswith(stem + emiSfx + '.DDS')
+            and emiOk
             and lm.get('array', {}).get('class') == [w, h] and len(lm.get('array', {}).get('layers', [])) == len(lays)
             and isinstance(lm.get('array', {}).get('emissiveScale'), list)
             and len(lm['array']['emissiveScale']) == len(lays)
@@ -264,6 +272,8 @@ for (fam, cls), lays in sets.items():
     lodmOk += good
     for game, wantDxgi in ((tex.get(colorKey, ''), 77), (tex.get('normal', ''), 77),
                            (tex.get(maskKey, ''), 77), (tex.get('emissive', ''), 71)):
+        if wantDxgi == 71 and allDark:
+            continue        # no emissive sheet on a set that emits nothing (asserted above)
         path = local(game)
         if not game or not os.path.exists(path):
             print('  FAIL missing array %s' % path); fails += 1; continue
@@ -282,8 +292,9 @@ for (fam, cls), lays in sets.items():
             distinct += 1
     # THE EMISSIVE, decoded against the law the sidecar's column names
     colorPath, emiPath = local(tex.get(colorKey, '')), local(tex.get('emissive', ''))
-    if os.path.exists(colorPath) and os.path.exists(emiPath):
-        cb, eb = open(colorPath, 'rb').read(), open(emiPath, 'rb').read()
+    if os.path.exists(colorPath) and (allDark or os.path.exists(emiPath)):
+        cb = open(colorPath, 'rb').read()
+        eb = None if allDark else open(emiPath, 'rb').read()    # absent = black everywhere
         perC, _ = mipbytes(w, h, 16)
         perE, _ = mipbytes(w, h, 8)
         for r in lays:
@@ -307,7 +318,7 @@ for (fam, cls), lays in sets.items():
                 # mip-0 BC1 block must have BOTH endpoints 0 - a block with a lit
                 # endpoint is a lit texel wherever it is used
                 nb = ((w + 3) // 4) * ((h + 3) // 4)
-                litBlocks = sum(1 for k in range(nb)
+                litBlocks = 0 if eb is None else sum(1 for k in range(nb)
                                 if struct.unpack_from('<HH', eb, 148 + l * perE + k * 8) != (0, 0))
                 blackChecked += 1; blackOk += (litBlocks == 0)
                 if litBlocks:
@@ -353,7 +364,9 @@ for (fam, cls), lays in sets.items():
             # a MISSING multiply would land on dFlat, which is asserted apart - and
             # only where the alpha is low enough for the two to differ at all
             glowOk += (dRule <= 16.0 and (meanA > 235.0 or dFlat >= 20.0))
-check('every set\'s .lodm says its family, names its four arrays and lists a source per layer', lodmOk == len(sets))
+check('every set\'s .lodm says its family, names its arrays (the emissive only where a layer emits) and lists a source per layer', lodmOk == len(sets))
+check('a set whose every layer emits nothing names no emissive and has no _g/_e file (%d of %d such sets)'
+      % (darkDropped, darkSets), darkSets >= 1 and darkDropped == darkSets)
 check('every array carries a DX10 header (BC3, BC1 for the emissive) with the sidecar\'s layer count and an exact size', arraysSeen >= 4 and headersOk == arraysSeen)
 check('layers differ within an array', distinct >= 1)
 check('a layer the sidecar says emits nothing decodes black (%d layers)' % blackChecked, blackOk == blackChecked)

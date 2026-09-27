@@ -52,7 +52,11 @@
  * subsurface mask. A FOURTH texture is the emissive sheet, `emissive` under
  * both families and `_g` on a legacy set / `_e` on a pbr one, BC1, RGB the
  * emissive colour and no alpha: LOD's light, which vanilla carries as the
- * diffuse's alpha on an opaque chunk shape.
+ * diffuse's alpha on an opaque chunk shape. The emissive is OPTIONAL: a set
+ * that names none emits nothing. An `array` or `cardArray` set whose
+ * emissive is black on every layer names none and ships no `_g`/`_e`
+ * (lane TIDY1, 2026-09-27: vanilla LOD has no glow source, so every vanilla
+ * set is one); the terrain VT sheets already had it so.
  *
  * `emissiveScale` is the other half of that light, and the reason this
  * material carries a number at all. The sheet holds the emissive COLOUR
