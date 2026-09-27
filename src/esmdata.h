@@ -94,6 +94,10 @@ struct EsmLodBase
 	 * (a DEST or DSTD subrecord). Read-only facts for the near-library bake. */
 	quint32 recordFlags = 0;
 	bool hasDestructible = false;
+	/* Lane WATER1 (2026-09-27): an ACTI's WNAM, the water type (WATR) it
+	 * carries. A placed ACTI with one is an authored water mesh (a river,
+	 * a pool); 0 = none. */
+	quint32 waterType = 0;
 	// tree wind knobs (TREE CNAM / STAT DNAM), for the chunk manifest
 	float trunkFlexibility = 0.0f;
 	float branchFlexibility = 0.0f;

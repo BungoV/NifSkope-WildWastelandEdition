@@ -177,3 +177,76 @@ Loaded: see section 1, plus ww-gui-launch-silent-exit (the Avast diagnosis). Wis
 - I first wrote the fallback helper with the type name `LodtWriteOptions`; the real type is `LodtOptions`.
   The syntax check caught it before any build.
 - Bake outputs (bk_*) and the sheet cache deleted by 12:19; pictures kept in pics/ (untracked).
+- 13:02 I ran `turn.sh status`, the 05:10 mistake again: turn.sh has no status form, so it was an acquire as
+  "anon". It never got the lock and the process is gone. Read `.ns_turn/who` instead.
+- I patched `legend_check.py` with `sed -i` (night rule: Write/Edit only).
+- The first follow-up bakes were given relative output paths; NifSkope runs from its own folder, so the files
+  landed inside `run_new/bk_*`. Moved them; bake.sh and bake_btr.sh now take `realpath -m` of the out dir.
+
+## Follow-up 1 -- water depth view (commit f21fb31d, built, gates NOT finished)
+bungo: "water height bake is uniform color for the charles, even nearer or further away from the shore".
+The view `WW_LODL_PLANE=depth` paints the flat water in 6 bands (ground at/above water, 0-128, 128-512,
+512-1024, 1024-2048, >=2048 units): the water surface minus the file's own full-rate ground at the texel.
+Viewer only; the data was already in v3, so no format change. `WW_LODL_DEPTH_PROBE="x,y;x,y"` prints
+"water depth probe x,y: body B water W, ground G ..., depth D units, band ..." lines for gates.
+Done: agreement sample picked from the old chunk bake (`agree.py pick bk_btr_cur agree_pick.json`): 9 .btr,
+1940 water vertices (R=0: 1067, R=255: 0), 300 unsaturated samples; G,B,A = (0,0,255) on all 1940.
+Pictures made (run_depth exe, old .lodl): pics_depth/FL0_default_nowater, FL_default, FL_waterheight --
+all three pixel-identical to pics/ (PIL difference bbox None).
+Not done: FL_watertype, FL_bodyid, FL_flow, FL_shore, FL_cellflags, FL_depth, A_depth; the agreement score,
+the pixel identity, the legend check and the 3 Charles points.
+
+## Follow-up 2 -- depth bake dropped (commit dc67e5c8, built, gates NOT run)
+bungo: "so we drop the depth bake for water from code". The water shape's colour attribute is gone (reclaimed,
+not kept constant): measured G,B,A constant over all 1940 Boston water vertices, and FO4CS
+`res/Water/WaterLOD.hlsl` reads no vertex colour. Water shapes go back to vanilla's 8-byte WATER_VERTEX_DESC.
+Generator revision 2 -> 3. Preview channel 7 removed (it had no shader branch; it drew black).
+Premise mismatch: depth was never part of `--terrain-identity`; it was in the default-ON water mesh colours,
+so identity-OFF chunk bakes change too, in the water shapes only.
+Not run: the chunk bakes (`bake_btr.sh`) and `btr_cmp.py` (+ `--floor`), the grep proof, lod_channel_preview.sh.
+
+## Task 3 -- sloped water (NOT committed as gated: code built green 13:51, no gate run yet)
+bungo: "so, water can now be non flat geometry wise? for stuff like rivers going down" / "we only need
+support for it on nifskope side". What the bake read before: cell water only (XCLW or the worldspace default);
+placed water refs were never read; every body flat at one cell's height.
+Changed (writer/format/reader by a helper agent, reviewed; viewer by me):
+- Gather: placed ACTI refs with a WNAM water type, moved to world space; a mesh under one height quantum of
+  z-span with vertical normals is flat and ignored, the rest are sloped. Census line "placed water: ...".
+- Format: v3 in place. Header 0xF8 -> 0x100 (u64 surface-plane offset at 0xF8), section bit 9. The surface
+  plane = float32 (surface - body height) at the body rate, LAST section, uniform 0 where flat. The body height
+  stays the reference = the lowest wet surface. Old v3 files still open (floor 0xF8). NEW reader rule: unknown
+  section bits 10..31 are refused.
+- Viewer (src/btdterrain.cpp): a sloped body is drawn a texel a quad with each corner at the mean surface of the
+  texels round it; flat bodies are the old merged runs, byte for byte. Water height and depth views and the
+  depth probe use the per-point surface. New note line "water surface: ...".
+- Fixture: `NifSkope.exe -no-gui lodl <out> --water-slope-selftest [--water-slope-flat <f>]` (8x8 cells,
+  ribbon dropping 256 per 4096, a flat-only refuter file).
+Nothing of task 3 has been run. Doc provenance tables in LODGEN_BTD_FORMAT.md (~1490, ~1545) still quote 0xF8.
+DELIVERABLE_TEXT not yet updated for follow-ups 1-3.
+
+## RESUME (paused 2026-09-27 on bungo's word: "we're pausing now, make sure nothing gets lost")
+State at pause: no WATER1 NifSkope running. The depth render pass (render_all.sh depth) was stopped by
+renaming `run_depth/NifSkope.exe` to `run_depth/NifSkope.exe.paused`, so its queued shot launches nothing
+and the pass ends "STOPPED". Nothing was killed.
+All commands run from `E:\Projects\NifskopeWWE-water1\scratchpad\water1_20260927`, bash, game closed, one at a time.
+Untracked on disk (not in git, public repo): run_new/ run_depth/ run_nodepth/ run_slope/ run_rung/ (exe copies),
+bk_new_def/ (flat-writer .lodl, sha1 1abc7d37...), bk_btr_cur/ (old-code chunk bake), agree_pick.json,
+legend_check.json, pics/ pics_depth/ (pictures), cache/, build_*.log.
+1. Depth view: `mv run_depth/NifSkope.exe.paused run_depth/NifSkope.exe`, then
+   `P=$(python -c "import json;print(json.load(open('agree_pick.json'))['probe'])"); G=$(python -c "print(';'.join('%d,%d'%(x,y) for x in range(-20480,12289,1024) for y in range(-40960,-8191,1024)))"); WW_LODL_DEPTH_PROBE="$P;$G" DEPTHNS=$PWD/run_depth/NifSkope.exe bash render_all.sh depth`
+   (skips the 3 pictures on disk). Then `python agree.py score agree_pick.json pics_depth/A_depth.log`;
+   pixel identity pics_depth/FL_* vs pics/FL_*; legend_check.py with depth; pick 3 Charles points from the
+   probe grid lines in pics_depth/A_depth.log and cross-check ground with
+   `python ../../tests/spells/lodl_open_authority.py bk_new_def/FO4CSLOD/Commonwealth/Commonwealth.lodl height GX GY`;
+   `python label.py pics_depth/A_depth.png pics_depth/A_depth.log pics/labeled/A_depth.png "<title>"`.
+2. Depth removal: `bash bake_btr.sh run_nodepth/NifSkope.exe bk_btr_nd`; `python btr_cmp.py bk_btr_cur bk_btr_nd`
+   and `--floor` (must FAIL); then identity ON pair: `bash bake_btr.sh run_new/NifSkope.exe bk_btr_cur_id --terrain-identity`,
+   `bash bake_btr.sh run_nodepth/NifSkope.exe bk_btr_nd_id --terrain-identity`, `python btr_cmp.py bk_btr_cur_id bk_btr_nd_id`.
+   Grep proof: `git grep -n -i "waterChannels\|Water depth (R)" -- src docs`.
+3. Sloped water, in order (task3.sh): `bash task3.sh fixture` (selftest must PASS, its (e) is the refuter);
+   `bash task3.sh bake`; `bash task3.sh cmp` (lodl_cmp.py: +8 offsets, body/cell/WATR tables identical,
+   surface plane 100% uniform, last; --floor must FAIL); `bash task3.sh slope` (pics_slope/* vs pics/* and
+   pics_depth/FL_depth, pixel-identical); `bash task3.sh river` (pics_river: R_default, R_waterheight, and the
+   flat-only exe on the same file as the before). Then one labeled side-by-side picture of R_default +
+   R_waterheight, docs provenance fix, DELIVERABLE_TEXT reader list (FO4CS included), commit by path.
+4. Last: delete bk_*, cache/, fixture/ .lodl files; report to the coordinator.

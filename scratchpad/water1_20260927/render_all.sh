@@ -39,6 +39,44 @@ if [ $G = depth ]; then
   shot A_depth NS=$DNS NOOBJ=1 LODL=$V3NEW WW_LODL_PLANE=depth
   echo "RENDER PASS DONE $G"; exit 0
 fi
+if [ $G = slope ]; then
+  # task 3 (sloped water): the sloped-water exe on the sloped-water writer's vanilla bake, the same
+  # camera and names as pics/ (flat build, flat writer) and pics_depth/FL_depth, for pixel identity
+  SNS=$ME/run_slope/NifSkope.exe; V3S=$ME/bk_slope_def/FO4CSLOD/Commonwealth/Commonwealth.lodl
+  [ -f $V3S ] && [ -f $SNS ] || { echo "missing $V3S or $SNS"; exit 1; }
+  P=$ME/pics_slope; mkdir -p $P
+  shot FL_default NS=$SNS NOOBJ=1 LODL=$V3S WW_RENDER_FLAT=1
+  for pl in waterheight watertype bodyid depth; do
+    shot FL_$pl NS=$SNS NOOBJ=1 LODL=$V3S WW_RENDER_FLAT=1 WW_LODL_PLANE=$pl
+  done
+  shot A_waterheight NS=$SNS NOOBJ=1 LODL=$V3S WW_LODL_PLANE=waterheight
+  shot A1_default NS=$SNS LODL=$V3S
+  port=$((port+1))
+  if [ ! -s $P/WH_default.png ]; then
+    env NS=$SNS NOOBJ=1 LV=3 SDIM=16 SHEETS="$INST" LODL=$V3S \
+      bash $ME/shot.sh $P/WH_default.png $T Commonwealth -96 -96 95 95 8 570000 3200 1528 $port | tail -1
+    [ -s $P/WH_default.png ] || { echo "STOPPED at WH_default"; exit 2; }
+  fi
+  echo "RENDER PASS DONE $G"; exit 0
+fi
+if [ $G = river ]; then
+  # task 3: the synthetic sloped river (--water-slope-selftest's file) over its own 8x8 cells, view 8;
+  # the flat-only exe (run_nodepth) on the SAME file is the before: it draws the river at its body height
+  FX=$ME/fixture; [ -f $FX/slope.lodl ] || { echo "missing $FX/slope.lodl"; exit 1; }
+  P=$ME/pics_river; mkdir -p $P
+  rshot() { # <name> <env...>
+    local name=$1; shift; port=$((port+1))
+    if [ -s $P/$name.png ]; then echo "SKIP $name"; return; fi
+    local r; r=$(env NOOBJ=1 LV=0 LODL=$FX/slope.lodl "$@" \
+      bash $ME/shot.sh $P/$name.png $FX WaterSlopeFixture 0 0 7 7 8 20480 1600 1600 $port | tail -1)
+    echo "$(date +%H:%M:%S) $r"
+    case "$r" in OK*) ;; *) echo "STOPPED at $name"; exit 2;; esac
+  }
+  rshot R_default NS=$ME/run_slope/NifSkope.exe
+  rshot R_waterheight NS=$ME/run_slope/NifSkope.exe WW_LODL_PLANE=waterheight
+  rshot R_default_flatbuild NS=$ME/run_nodepth/NifSkope.exe
+  echo "RENDER PASS DONE $G"; exit 0
+fi
 for f in $V3NEW $V2NEW $V3RUNG $RUNG $NEW; do [ -f $f ] || { echo "missing $f"; exit 1; }; done
 if [ $G = gate ] || [ $G = all ]; then
   # identity: rung exe vs new exe with WW_LODL_WATER=0, same camera, same files

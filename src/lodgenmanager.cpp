@@ -3220,6 +3220,36 @@ private:
 						return lodgenVanillaCellHeights( fillWs, cx, cy, h );
 					};
 				}
+				/* Lane WATER1 (sloped water): the placed water meshes' triangles,
+				 * model space, 9 floats a triangle, through the object bake's own
+				 * NIF reader. An EMPTY data root = the session's resource stack,
+				 * as for the native pair below. Same loader as the command line
+				 * (src/nifcli.cpp), so the panel and the CLI write the same file. */
+				if ( o.water.enabled ) {
+					lodgenWarmSharedIndices();
+					o.placedWaterModel = []( const QString & model, std::vector<float> & tris ) {
+						std::vector<NativeSrcShape> shapes;
+						QString root;
+						if ( !lodgenNativeLoadModelOnce( &root, model, nullptr, &shapes ) )
+							return false;
+						tris.clear();
+						for ( const NativeSrcShape & s : shapes ) {
+							const std::vector<float> & p = s.geom.pos;
+							const size_t nv = p.size() / 3;
+							for ( size_t t = 0; t + 2 < s.geom.tris.size(); t += 3 ) {
+								const quint32 a = s.geom.tris[t], b = s.geom.tris[t + 1], c = s.geom.tris[t + 2];
+								if ( a >= nv || b >= nv || c >= nv )
+									continue;
+								for ( quint32 v : { a, b, c } ) {
+									tris.push_back( p[v * 3] );
+									tris.push_back( p[v * 3 + 1] );
+									tris.push_back( p[v * 3 + 2] );
+								}
+							}
+						}
+						return true;
+					};
+				}
 				QString written;
 				if ( !lodtWrite( w, job.outDir, o, &written, &err ) ) {
 					post( [this, err]() { finishWorld( false, err ); } );

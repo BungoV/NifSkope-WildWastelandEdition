@@ -3531,6 +3531,37 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 					return lodgenVanillaCellHeights( fillWs, cx, cy, h );
 				};
 			}
+			/* Lane WATER1 (sloped water): the writer asks for each placed water
+			 * mesh's triangles through this loader, in model space, 9 floats a
+			 * triangle. The same NIF reader the object bake uses; false = the
+			 * model did not load, and the writer counts it. */
+			if ( lopts.water.enabled ) {
+				const QString waterDataRoot = dataRoot.isEmpty()
+					? QStringLiteral( "E:/Tools/Fallout 4/DataUnpacked/Data" ) : dataRoot;
+				lodgenWarmSharedIndices();
+				lopts.placedWaterModel = [waterDataRoot]( const QString & model, std::vector<float> & tris ) {
+					std::vector<NativeSrcShape> shapes;
+					QString rootCopy = waterDataRoot;
+					if ( !lodgenNativeLoadModelOnce( &rootCopy, model, nullptr, &shapes ) )
+						return false;
+					tris.clear();
+					for ( const NativeSrcShape & s : shapes ) {
+						const std::vector<float> & p = s.geom.pos;
+						const size_t nv = p.size() / 3;
+						for ( size_t t = 0; t + 2 < s.geom.tris.size(); t += 3 ) {
+							const quint32 a = s.geom.tris[t], b = s.geom.tris[t + 1], c = s.geom.tris[t + 2];
+							if ( a >= nv || b >= nv || c >= nv )
+								continue;
+							for ( quint32 v : { a, b, c } ) {
+								tris.push_back( p[v * 3] );
+								tris.push_back( p[v * 3 + 1] );
+								tris.push_back( p[v * 3 + 2] );
+							}
+						}
+					}
+					return true;
+				};
+			}
 			QElapsedTimer landscapeTimer;
 			landscapeTimer.start();
 			const bool lodlOk = lodtWrite( world, lodtDir, lopts, &written, &berr );
@@ -6262,6 +6293,12 @@ int usage()
 		  << "  lodl <file.lodl> --water-mark-selftest  the MARKING tool's gates. It\n"
 		  << "                                          REWRITES the file it is given,\n"
 		  << "                                          so give it a copy\n"
+		  << "  lodl <out.lodl> --water-slope-selftest [--water-slope-flat <flat.lodl>]\n"
+		  << "                                          sloped-water known-answer test: it\n"
+		  << "                                          WRITES <out.lodl> (a tilted river\n"
+		  << "                                          ribbon) and checks the surface plane;\n"
+		  << "                                          --water-slope-flat keeps the\n"
+		  << "                                          flat-steps comparison file too\n"
 		  << "  lodl <file.lodl> [--region X0 Y0 X1 Y1] [--lod N] [--plane KEY] [-o OUT.nif]\n"
 		  << "                                          build the region as BSTriShape\n"
 		  << "                                          geometry, painted with one stored\n"
@@ -7190,6 +7227,8 @@ int nifskopeCliMain( const QStringList & args )
 	bool lodtWaterCensusOnly = false;
 	bool lodtWaterSelfTestOnly = false;
 	bool lodtWaterMarkSelfTestOnly = false;
+	bool lodtWaterSlopeSelfTestOnly = false;
+	QString lodtWaterSlopeFlat;
 	bool lgListWorldspaces = false;
 	quint32 lgWorldspace = 0;
 	bool lgHaveCell = false;
@@ -7460,6 +7499,8 @@ int nifskopeCliMain( const QStringList & args )
 		else if ( t == QLatin1String( "--water-census" ) ) lodtWaterCensusOnly = true;
 		else if ( t == QLatin1String( "--water-selftest" ) ) lodtWaterSelfTestOnly = true;
 		else if ( t == QLatin1String( "--water-mark-selftest" ) ) lodtWaterMarkSelfTestOnly = true;
+		else if ( t == QLatin1String( "--water-slope-selftest" ) ) lodtWaterSlopeSelfTestOnly = true;
+		else if ( t == QLatin1String( "--water-slope-flat" ) ) lodtWaterSlopeFlat = next();
 		else if ( t == QLatin1String( "--list-worldspaces" ) ) lgListWorldspaces = true;
 		else if ( t == QLatin1String( "--worldspace" ) ) lgWorldspace = next().toUInt( nullptr, 16 );
 		else if ( t == QLatin1String( "--cell" ) ) {
@@ -8595,6 +8636,16 @@ int nifskopeCliMain( const QStringList & args )
 		if ( lodtWaterMarkSelfTestOnly ) {
 			QString report, werr;
 			const bool ok = lodtWaterMarkSelfTest( file, &report, &werr );
+			out() << report << Qt::endl;
+			if ( !ok && !werr.isEmpty() )
+				err() << "error: " << werr << Qt::endl;
+			rc = ok ? 0 : 1;
+		} else if ( lodtWaterSlopeSelfTestOnly ) {
+			/* --water-slope-selftest (lane WATER1) WRITES <file> itself: a
+			 * made-up world with a tilted river ribbon, baked through the
+			 * real writer and read back through the real reader. */
+			QString report, werr;
+			const bool ok = lodtWaterSlopeSelfTest( file, lodtWaterSlopeFlat, &report, &werr );
 			out() << report << Qt::endl;
 			if ( !ok && !werr.isEmpty() )
 				err() << "error: " << werr << Qt::endl;

@@ -889,7 +889,7 @@ QString lodtPlaneLabel( LodtPlane plane )
 	case LodtPlane::WaterBodyId:       return QStringLiteral( "Water body — which sheet of water a texel belongs to" );
 	case LodtPlane::WaterFlow:         return QStringLiteral( "Water flow — direction, speed and confidence" );
 	case LodtPlane::WaterShore:        return QStringLiteral( "Shore distance — how far a texel is from dry land" );
-	case LodtPlane::WaterDepth:        return QStringLiteral( "Water depth — the body's water height minus the ground under it" );
+	case LodtPlane::WaterDepth:        return QStringLiteral( "Water depth — the water surface minus the ground under it" );
 	default:                           return QStringLiteral( "Heights" );
 	}
 }
@@ -1122,6 +1122,9 @@ namespace {
 struct WaterQuad
 {
 	float x0 = 0, y0 = 0, x1 = 0, y1 = 0, z = 0;
+	/*! Corner offsets from `z` (SW, SE, NE, NW): 0 on flat water, the .lodl's
+	 *  surface plane averaged round each corner on a sloped body (lane WATER1). */
+	float dz[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
 	quint32 rgba = 0;
 	quint16 body = 0;   //!< 0 on a version-2 per-cell sheet
 };
@@ -1159,8 +1162,13 @@ int addWaterShapes( NifModel * nif, const std::vector<WaterQuad> & quads, bool b
 			tris.append( Triangle( a, quint16( a + 1 ), quint16( a + 2 ) ) );
 			tris.append( Triangle( a, quint16( a + 2 ), quint16( a + 3 ) ) );
 			const WaterQuad & w = quads[q0 + size_t( k )];
-			lo = Vector3( qMin( lo[0], w.x0 ), qMin( lo[1], w.y0 ), qMin( lo[2], w.z ) );
-			hi = Vector3( qMax( hi[0], w.x1 ), qMax( hi[1], w.y1 ), qMax( hi[2], w.z ) );
+			float zLo = w.z + w.dz[0], zHi = zLo;
+			for ( int c = 1; c < 4; c++ ) {
+				zLo = qMin( zLo, w.z + w.dz[c] );
+				zHi = qMax( zHi, w.z + w.dz[c] );
+			}
+			lo = Vector3( qMin( lo[0], w.x0 ), qMin( lo[1], w.y0 ), qMin( lo[2], zLo ) );
+			hi = Vector3( qMax( hi[0], w.x1 ), qMax( hi[1], w.y1 ), qMax( hi[2], zHi ) );
 		}
 		QModelIndex iShape = nif->insertNiBlock( QStringLiteral( "BSTriShape" ) );
 		nif->set<QString>( iShape, "Name", QString( "Water %1" ).arg( shapes ) );
@@ -1178,8 +1186,8 @@ int addWaterShapes( NifModel * nif, const std::vector<WaterQuad> & quads, bool b
 		const Vector3 bit = Vector3::crossproduct( nrm, tan );
 		for ( int k = 0; k < nq; k++ ) {
 			const WaterQuad & w = quads[q0 + size_t( k )];
-			const Vector3 p[4] = { Vector3( w.x0, w.y0, w.z ), Vector3( w.x1, w.y0, w.z ),
-				Vector3( w.x1, w.y1, w.z ), Vector3( w.x0, w.y1, w.z ) };
+			const Vector3 p[4] = { Vector3( w.x0, w.y0, w.z + w.dz[0] ), Vector3( w.x1, w.y0, w.z + w.dz[1] ),
+				Vector3( w.x1, w.y1, w.z + w.dz[2] ), Vector3( w.x0, w.y1, w.z + w.dz[3] ) };
 			const Vector2 uv[4] = { Vector2( 0, 1 ), Vector2( 1, 1 ), Vector2( 1, 0 ), Vector2( 0, 0 ) };
 			const quint32 c = w.rgba;
 			const ByteColor4 col( FloatVector4( float( c & 0xFF ) / 255.0f,
@@ -1286,11 +1294,19 @@ void addLodlWater( NifModel * nif, const LodtFile & f, const LodtRegionSpec & sp
 		const int W = cellsXr * r, H = cellsYr * r;
 		const int bx0 = ( spec.x0 - minX ) * bodyS, by0 = ( spec.y0 - minY ) * bodyS;
 		std::vector<quint16> ids( size_t( W ) * size_t( H ), 0 );
+		/* The SURFACE plane (lane WATER1): each texel's water surface minus its
+		 * body's height. All 0 on flat water and when the file has no plane, and
+		 * then every number and quad below is what the flat-only build made. */
+		std::vector<float> dls( size_t( W ) * size_t( H ), 0.0f );
+		QSet<quint16> sloped;   // bodies with any texel off their height in this region
+		qint64 slopedTexels = 0;
+		float dlLo = 0.0f, dlHi = 0.0f;
 		QHash<quint16, qint64> count;
 		QHash<quint16, LodtWaterBody> table;
 		qint64 aboveFull = 0, aboveMesh = 0, wet = 0;
 		qint64 depthBands[6] = { 0, 0, 0, 0, 0, 0 };
 		float depthMax = 0.0f;
+		float hLo = 3.4e38f, hHi = -3.4e38f;   // the surface's range over the region's texels
 		const int fullStep = qMax( 1, spc / bodyS );
 		for ( int v = 0; v < H; v++ ) {
 			const int by = by0 + v * stepT;
@@ -1308,7 +1324,17 @@ void addLodlWater( NifModel * nif, const LodtFile & f, const LodtRegionSpec & sp
 				ids[size_t( v ) * size_t( W ) + size_t( u )] = id;
 				count[id]++;
 				wet++;
-				const float wh = table.value( id ).waterHeight;
+				const float dl = f.surfaceDeltaAt( bx, by );
+				dls[size_t( v ) * size_t( W ) + size_t( u )] = dl;
+				if ( dl != 0.0f ) {
+					sloped.insert( id );
+					slopedTexels++;
+					dlLo = qMin( dlLo, dl );
+					dlHi = qMax( dlHi, dl );
+				}
+				const float wh = table.value( id ).waterHeight + dl;
+				hLo = qMin( hLo, wh );
+				hHi = qMax( hHi, wh );
 				const float ground = f.height( bx * fullStep, by * fullStep );
 				if ( ground >= wh )
 					aboveFull++;
@@ -1320,11 +1346,6 @@ void addLodlWater( NifModel * nif, const LodtFile & f, const LodtRegionSpec & sp
 					aboveMesh++;
 			}
 		}
-		float hLo = 3.4e38f, hHi = -3.4e38f;
-		for ( auto it = table.constBegin(); it != table.constEnd(); ++it ) {
-			hLo = qMin( hLo, it.value().waterHeight );
-			hHi = qMax( hHi, it.value().waterHeight );
-		}
 		if ( hLo > hHi )
 			hLo = hHi = 0.0f;
 		const int flowS = f.flowPlaneSamples(), shoreS = f.shorePlaneSamples();
@@ -1333,9 +1354,10 @@ void addLodlWater( NifModel * nif, const LodtFile & f, const LodtRegionSpec & sp
 		auto colourOf = [&]( int u, int v, quint16 id ) -> quint32 {
 			const LodtWaterBody & B = table[id];
 			const int bx = bx0 + u * stepT, by = by0 + v * stepT;
+			const float surf = B.waterHeight + dls[size_t( v ) * size_t( W ) + size_t( u )];
 			switch ( plane ) {
 			case LodtPlane::WaterHeight:
-				return waterHeightRgba( ( hHi > hLo ) ? ( B.waterHeight - hLo ) / ( hHi - hLo ) : 0.5f );
+				return waterHeightRgba( ( hHi > hLo ) ? ( surf - hLo ) / ( hHi - hLo ) : 0.5f );
 			case LodtPlane::WaterType:
 				return waterTypeRgba( worldDef && B.watrForm == f.defaultWaterType(), B.watrForm );
 			case LodtPlane::WaterBodyId:
@@ -1355,8 +1377,7 @@ void addLodlWater( NifModel * nif, const LodtFile & f, const LodtRegionSpec & sp
 					int( qint64( by ) * shoreS / bodyS ) ) );
 			case LodtPlane::WaterDepth:
 				// the same ground sample the "ground above water" count reads
-				return waterDepthBandRgba( waterDepthBand(
-					B.waterHeight - f.height( bx * fullStep, by * fullStep ) ) );
+				return waterDepthBandRgba( waterDepthBand( surf - f.height( bx * fullStep, by * fullStep ) ) );
 			case LodtPlane::CellFlags: {
 				float lo, hi, wh;
 				quint16 wt, fl = 0;
@@ -1368,6 +1389,7 @@ void addLodlWater( NifModel * nif, const LodtFile & f, const LodtRegionSpec & sp
 			}
 		};
 		// runs along each row, one quad per run of equal body and colour
+		std::vector<float> surfAtQuad;   // a sloped quad's texel surface from the file; NaN on flat runs
 		for ( int v = 0; v < H; v++ ) {
 			const float cy = float( minY ) * 4096.0f + float( by0 + v * stepT ) * 4096.0f / float( bodyS );
 			const float y0 = qMax( ry0, cy - texel * 0.5f ), y1 = qMin( ry1, cy + texel * 0.5f );
@@ -1379,8 +1401,10 @@ void addLodlWater( NifModel * nif, const LodtFile & f, const LodtRegionSpec & sp
 					continue;
 				}
 				const quint32 c = colourOf( u, v, id );
+				// a sloped body is drawn a texel a quad, each corner on the surface
+				const bool flat = !sloped.contains( id );
 				int e = u + 1;
-				while ( e < W && ids[size_t( v ) * size_t( W ) + size_t( e )] == id
+				while ( flat && e < W && ids[size_t( v ) * size_t( W ) + size_t( e )] == id
 					&& colourOf( e, v, id ) == c )
 					e++;
 				const float cx0 = float( minX ) * 4096.0f + float( bx0 + u * stepT ) * 4096.0f / float( bodyS );
@@ -1391,10 +1415,33 @@ void addLodlWater( NifModel * nif, const LodtFile & f, const LodtRegionSpec & sp
 				q.y0 = y0;
 				q.y1 = y1;
 				q.z = table[id].waterHeight;
+				if ( !flat ) {
+					/* each corner = the mean surface of the up-to-four texels of
+					 * this body that share it: the texel centres carry the plane's
+					 * samples, so a corner half a texel off lies between them */
+					static const int CORNER[4][2] = { { -1, -1 }, { 0, -1 }, { 0, 0 }, { -1, 0 } };
+					for ( int k = 0; k < 4; k++ ) {
+						float sum = 0.0f;
+						int n = 0;
+						for ( int dv = 0; dv < 2; dv++ )
+							for ( int du = 0; du < 2; du++ ) {
+								const int uu = u + CORNER[k][0] + du, vv = v + CORNER[k][1] + dv;
+								if ( uu < 0 || vv < 0 || uu >= W || vv >= H
+									|| ids[size_t( vv ) * size_t( W ) + size_t( uu )] != id )
+									continue;
+								sum += dls[size_t( vv ) * size_t( W ) + size_t( uu )];
+								n++;
+							}
+						q.dz[k] = n ? sum / float( n ) : dls[size_t( v ) * size_t( W ) + size_t( u )];
+					}
+				}
 				q.rgba = c;
 				q.body = id;
-				if ( q.x1 > q.x0 && q.y1 > q.y0 )
+				if ( q.x1 > q.x0 && q.y1 > q.y0 ) {
 					quads.push_back( q );
+					surfAtQuad.push_back( flat ? std::nanf( "" )
+						: q.z + dls[size_t( v ) * size_t( W ) + size_t( u )] );
+				}
 				u = e;
 			}
 		}
@@ -1437,6 +1484,30 @@ void addLodlWater( NifModel * nif, const LodtFile & f, const LodtRegionSpec & sp
 		note << QString( "water flatness: largest height spread inside one body %1 units over %2 bodies, "
 				"largest distance from the body table's height %3 (read back from the built vertices)" )
 			.arg( spread, 0, 'f', 4 ).arg( span.size() ).arg( offTable, 0, 'f', 4 );
+		{
+			/* The surface plane, and whether the drawn sheet follows it: the mean
+			 * of a sloped quad's four READ-BACK corners against the file's surface
+			 * at that texel (equal on a plane-shaped slope; a body's edge, where a
+			 * corner has fewer neighbours, is where they part). */
+			double offSurf = 0.0;
+			qint64 checked = 0;
+			for ( size_t k = 0; k < quads.size(); k++ ) {
+				if ( std::isnan( surfAtQuad[k] ) )
+					continue;
+				const double mean = ( double( readZ[k * 4] ) + readZ[k * 4 + 1] + readZ[k * 4 + 2] + readZ[k * 4 + 3] ) / 4.0;
+				offSurf = qMax( offSurf, qAbs( mean - double( surfAtQuad[k] ) ) );
+				checked++;
+			}
+			if ( f.surfacePlaneSamples() <= 0 )
+				note << QStringLiteral( "water surface: this file has no surface plane; every body drawn flat at its height" );
+			else
+				note << QString( "water surface: plane at %1 a cell; %L2 of %L3 wet texels off their body's height "
+						"(%4..%5 units) in %6 sloped bodies, drawn as %L7 one-texel quads whose read-back "
+						"corner mean is at most %8 units from the file's surface" )
+					.arg( f.surfacePlaneSamples() ).arg( slopedTexels ).arg( wet )
+					.arg( double( dlLo ), 0, 'f', 2 ).arg( double( dlHi ), 0, 'f', 2 ).arg( sloped.size() )
+					.arg( checked ).arg( offSurf, 0, 'f', 3 );
+		}
 		note << QString( "ground above water: %L1 of %L2 wet texels have the file's own full-rate ground "
 				"at or above their body's water; %L3 have the view's terrain mesh (%4 a cell) above it "
 				"at the texel centre, where the coarser mesh is drawn over the water" )
@@ -1509,8 +1580,8 @@ void addLodlWater( NifModel * nif, const LodtFile & f, const LodtRegionSpec & sp
 				legend << QString( "%1 = %2" ).arg( QLatin1String( BANDS[b] ) ).arg( rgbText( waterDepthBandRgba( b ) ) );
 				counts << QString( "%1 %L2" ).arg( QLatin1String( BANDS[b] ) ).arg( depthBands[b] );
 			}
-			note << QString( "water depth: body water height minus the file's full-rate ground under each "
-					"texel; deepest %1 units; texels per band: %2" )
+			note << QString( "water depth: the water surface (body height plus the surface plane) minus the "
+					"file's full-rate ground under each texel; deepest %1 units; texels per band: %2" )
 				.arg( double( depthMax ), 0, 'f', 1 ).arg( counts.join( QStringLiteral( "; " ) ) );
 			/* WW_LODL_DEPTH_PROBE="x,y;x,y": world points to report, so a gate can
 			 * quote numbers at named places and check them against the file. */
@@ -1529,12 +1600,13 @@ void addLodlWater( NifModel * nif, const LodtFile & f, const LodtRegionSpec & sp
 					continue;
 				}
 				const float ground = f.height( bx * fullStep, by * fullStep );
+				const float surf = B.waterHeight + f.surfaceDeltaAt( bx, by );   // the per-point surface
 				note << QString( "water depth probe %1,%2: body %3 water %4, ground %5 at full-rate sample %6,%7, "
 						"depth %8 units, band \"%9\"" )
-					.arg( double( wx ) ).arg( double( wy ) ).arg( id ).arg( double( B.waterHeight ), 0, 'f', 2 )
+					.arg( double( wx ) ).arg( double( wy ) ).arg( id ).arg( double( surf ), 0, 'f', 2 )
 					.arg( double( ground ), 0, 'f', 2 ).arg( bx * fullStep ).arg( by * fullStep )
-					.arg( double( B.waterHeight - ground ), 0, 'f', 1 )
-					.arg( QLatin1String( BANDS[waterDepthBand( B.waterHeight - ground )] ) );
+					.arg( double( surf - ground ), 0, 'f', 1 )
+					.arg( QLatin1String( BANDS[waterDepthBand( surf - ground )] ) );
 			}
 			break;
 		}
@@ -2141,7 +2213,9 @@ bool nifCreateLodtTerrainScene( NifModel * nif, const QString & lodtPath,
 					} else if ( spec.plane == LodtPlane::WaterDepth ) {
 						LodtWaterBody B;
 						if ( id && f.waterBody( id, B ) )
-							c = waterDepthBandRgba( waterDepthBand( B.waterHeight - f.height( gx, gy ) ) );
+							c = waterDepthBandRgba( waterDepthBand( B.waterHeight
+								+ f.surfaceDeltaAt( int( qint64( gx ) * idRate / spc ), int( qint64( gy ) * idRate / spc ) )
+								- f.height( gx, gy ) ) );
 					} else if ( spec.plane == LodtPlane::WaterFlow ) {
 						/* direction as a hue round the wheel, speed as its
 						 * brightness -- so still water inside a body reads

@@ -7,6 +7,7 @@ BSD License - see nifskope.h
 #include "lodtfile.h"
 #include "esmdata.h"
 #include "lodgenlayout.h"
+#include "data/niftypes.h"   // lane WATER1: Matrix, for placed water refs
 
 /* Only for LODTEX_MAGIC: this reader must be able to NAME a terrain
  * TEXTURE file when it is handed one, because `.lodt` meant THIS format
@@ -60,8 +61,18 @@ constexpr qsizetype LODL_HEADER_V1 = 0x98;
 constexpr qsizetype LODL_HEADER_V2 = 0xA0;
 /* Version 3 appends the water-body fields from 0xA0 and its SECTIONS after the
  * block data, so 0x00..0x9F is byte-for-byte what version 2 writes and every
- * version-2 offset still sits where it did. */
-constexpr qsizetype LODL_HEADER_V3 = 0xF8;
+ * version-2 offset still sits where it did.
+ *
+ * Lane WATER1 (2026-09-27) grew it IN PLACE from 0xF8 to 0x100: the u64 at 0xF8
+ * is the surface plane's offset. The version stays 3. A version-3 file written
+ * before that still opens: the reader's floor for version 3 is the OLD size,
+ * LODL_HEADER_V3_OLD, so a first table at 0xF8 passes the offset check, and its
+ * section word never carries the surface bit, so the eight bytes at 0xF8 are
+ * never read as an offset. A file that DOES carry the bit must have the full
+ * 0x100-byte header, and the reader refuses one that does not. The writer
+ * always writes 0x100. */
+constexpr qsizetype LODL_HEADER_V3 = 0x100;
+constexpr qsizetype LODL_HEADER_V3_OLD = 0xF8;
 
 /*! Header size by version -- a TABLE, not a ternary.
  *
@@ -90,6 +101,11 @@ constexpr quint32 SECT_BODIES = LODL_SECT_BODIES;
 constexpr quint32 SECT_FLOW = LODL_SECT_FLOW;
 constexpr quint32 SECT_SHORE = LODL_SECT_SHORE;
 constexpr quint32 SECT_STROKE = LODL_SECT_STROKE;
+constexpr quint32 SECT_SURFACE = LODL_SECT_SURFACE;
+//! Every section bit this build knows; the reader refuses any other.
+constexpr quint32 SECT_KNOWN = LODL_SECT_COLOUR | LODL_SECT_GROUNDCOVER | LODL_SECT_AO
+	| LODL_SECT_WATER | LODL_SECT_BODIES | LODL_SECT_FLOW | LODL_SECT_SHORE
+	| LODL_SECT_STROKE | LODL_SECT_DYE | LODL_SECT_SURFACE;
 
 //! Two pi, spelled out: M_PI is not standard C++ and is absent under /std:c++.
 constexpr double kTwoPi = 6.283185307179586476925286766559;
@@ -141,6 +157,33 @@ void patch64( QByteArray & b, qsizetype at, quint64 v )
 		b[at + i] = char( ( v >> ( i * 8 ) ) & 0xFF );
 }
 
+/*! Lane WATER1 (2026-09-27): one placed water mesh that is NOT flat -- a river
+ *  running down a slope -- as world-space triangles. Flat placed water never
+ *  gets here; the gather drops it (the cell water already draws it). */
+struct LodtSlopedWater
+{
+	std::vector<float> tris;     //!< nine floats a triangle: three world xyz corners
+	quint32 form = 0;            //!< its WATR form (the ACTI's WNAM)
+};
+
+//! One level-0 texel under a sloped mesh: where, the surface there, which mesh.
+struct LodtSurfTexel
+{
+	qint64 at = 0;               //!< gy * (cellsX * spc) + gx
+	float z = 0.0f;              //!< the mesh surface at the texel's sample point
+	qint32 mesh = 0;             //!< index into the source's sloped-mesh list
+};
+
+/*! The sloped surface the body pass reads: texels sorted by `at`, and each
+ *  mesh's water-type index (as the cell table stores types: 0xFFFF = the
+ *  worldspace default). Empty = no sloped water, and then every byte the body
+ *  pass writes is the one it wrote before this existed. */
+struct LodtWaterSurface
+{
+	std::vector<LodtSurfTexel> texels;
+	std::vector<quint16> meshTq;
+};
+
 /*! Everything the writer needs from a landscape source.
  *
  *  Two exist: Fallout 4's LAND records, and a Fallout 76 .btd. The writer
@@ -183,7 +226,85 @@ struct LodtSource
 	/*! Lane FIX1: the range of a landless cell's FILLED heights (the
 	 *  landFill option); false = not filled. Optional. */
 	std::function<bool( int, int, float &, float & )> fillRange;
+	/*! Lane WATER1: the placed water meshes that are not flat. Empty = none,
+	 *  and the file is what it was. Used only when bodies are written. */
+	std::vector<LodtSlopedWater> slopedWater;
+	//! Lane WATER1: the gather's one census line, appended to the writer's.
+	QString placedWaterNote;
+	//! Write exactly here instead of the layout path (the slope fixture). Empty = the layout path.
+	QString outFile;
 };
+
+/*! Lane WATER1: lay sloped water meshes onto the level-0 texel grid.
+ *
+ *  ONE function, used by the Fallout 4 path and the fixture alike (the fixture
+ *  goes through the same writer). A texel's point is the height grid's own
+ *  sample: world x = minX * 4096 + gx * 4096 / spc, and the same in y, row 0
+ *  south -- the convention the viewer draws the body plane with. The point is
+ *  under a triangle when its XY lies inside or ON an edge; its z is then
+ *  barycentric on that triangle. Where triangles or meshes overlap, the highest
+ *  z wins (ties keep the lower mesh index). A triangle with no XY area (a wall)
+ *  covers nothing. `out` comes back sorted by `at`. */
+static void lodtRasteriseSurface( const std::vector<LodtSlopedWater> & meshes,
+	int minX, int minY, int cellsX, int cellsY, int spc, std::vector<LodtSurfTexel> & out )
+{
+	out.clear();
+	const qint64 gw = qint64( cellsX ) * spc, gh = qint64( cellsY ) * spc;
+	if ( gw <= 0 || gh <= 0 || spc <= 0 )
+		return;
+	const double ox = double( minX ) * 4096.0, oy = double( minY ) * 4096.0;
+	const double step = 4096.0 / double( spc );
+	QHash<qint64, LodtSurfTexel> best;
+	for ( size_t m = 0; m < meshes.size(); m++ ) {
+		const std::vector<float> & t = meshes[m].tris;
+		for ( size_t k = 0; k + 9 <= t.size(); k += 9 ) {
+			const double ax = t[k], ay = t[k + 1], az = t[k + 2];
+			const double bx = t[k + 3], by = t[k + 4], bz = t[k + 5];
+			const double cx = t[k + 6], cy = t[k + 7], cz = t[k + 8];
+			const double area = ( bx - ax ) * ( cy - ay ) - ( by - ay ) * ( cx - ax );
+			if ( std::fabs( area ) < 1e-6 )
+				continue;
+			const double eps = 1e-7;   // in barycentric weight: "on the edge" counts
+			const qint64 gx0 = qMax<qint64>( 0,
+				qint64( std::ceil( ( qMin( ax, qMin( bx, cx ) ) - ox ) / step - 1e-6 ) ) );
+			const qint64 gx1 = qMin<qint64>( gw - 1,
+				qint64( std::floor( ( qMax( ax, qMax( bx, cx ) ) - ox ) / step + 1e-6 ) ) );
+			const qint64 gy0 = qMax<qint64>( 0,
+				qint64( std::ceil( ( qMin( ay, qMin( by, cy ) ) - oy ) / step - 1e-6 ) ) );
+			const qint64 gy1 = qMin<qint64>( gh - 1,
+				qint64( std::floor( ( qMax( ay, qMax( by, cy ) ) - oy ) / step + 1e-6 ) ) );
+			for ( qint64 gy = gy0; gy <= gy1; gy++ ) {
+				const double py = oy + double( gy ) * step;
+				for ( qint64 gx = gx0; gx <= gx1; gx++ ) {
+					const double px = ox + double( gx ) * step;
+					const double wa = ( ( bx - px ) * ( cy - py ) - ( by - py ) * ( cx - px ) ) / area;
+					const double wb = ( ( cx - px ) * ( ay - py ) - ( cy - py ) * ( ax - px ) ) / area;
+					const double wc = 1.0 - wa - wb;
+					if ( wa < -eps || wb < -eps || wc < -eps )
+						continue;
+					const float z = float( wa * az + wb * bz + wc * cz );
+					const qint64 at = gy * gw + gx;
+					auto it = best.find( at );
+					if ( it == best.end() ) {
+						LodtSurfTexel s;
+						s.at = at;
+						s.z = z;
+						s.mesh = qint32( m );
+						best.insert( at, s );
+					} else if ( z > it->z ) {
+						it->z = z;
+						it->mesh = qint32( m );
+					}
+				}
+			}
+		}
+	}
+	out.reserve( size_t( best.size() ) );
+	for ( auto it = best.constBegin(); it != best.constEnd(); ++it )
+		out.push_back( it.value() );
+	std::sort( out.begin(), out.end(),
+		[]( const LodtSurfTexel & a, const LodtSurfTexel & b ) { return a.at < b.at; } );
+}
 
 /* The AO plane from a coarse height grid: horizon-based sky occlusion. Eight
  * directions, march out to twelve coarse samples, keep the steepest upward
@@ -283,6 +404,9 @@ struct WaterInput
 	//! WATR NAM0 linear velocity, X and Y. False = this arm is unavailable.
 	std::function<bool( quint32 form, float &, float & )> velocity;
 	LodtWaterOptions opt;
+	/*! Lane WATER1: the sloped surface, or null. Null or empty = the pass is
+	 *  exactly what it was, texel for texel and byte for byte. */
+	const LodtWaterSurface * surface = nullptr;
 };
 
 //! What the pass produces: the sections, already packed, and its own census.
@@ -299,6 +423,17 @@ struct WaterOut
 	 *  cell's level-0 samples is under its water (a wet texel of the body rule).
 	 *  Version 3's cell-table bit 0 is this (lane WATER1). */
 	std::vector<quint8> wetCell;
+	/*! Lane WATER1, the surface plane: packed right after the shore plane (or
+	 *  the flow plane when there is no shore), float32 a sample at the body
+	 *  rate. Always built with the bodies; all uniform 0 when nothing slopes. */
+	QByteArray surfacePlane;
+	int surfaceSamples = 0;
+	/*! Per cell, row-major: the sloped mesh of the cell's first wet sloped
+	 *  texel, -1 = none. The writer uses it to give a cell that only a sloped
+	 *  mesh wets its has-water bit, height and type. */
+	std::vector<qint32> cellSloped;
+	//! Per sloped mesh: its REFERENCE height (the lowest surface over its wet texels).
+	std::vector<float> meshRefH;
 };
 
 /*! One maximal run of wet texels with one (height, type) key, in one row. */
@@ -530,11 +665,58 @@ static bool lodtBuildWater( const WaterInput & in, quint64 baseOffset,
 	const int gap = qBound( 0, in.opt.bridgeGap, 32 );
 	const int near = qBound( 1, in.opt.nearTexels, 4096 );
 
+	/* ---- lane WATER1: the sloped surface, before pass A ------------------
+	 *
+	 * A texel under a sloped mesh is wet when its ground is below the mesh's
+	 * surface there, whatever its cell's water says -- UNLESS the cell's own
+	 * flat water stands at or above that surface, where the flat water is on
+	 * top and today's rule decides (the highest surface wins, as it does
+	 * between meshes). Each mesh keys its runs on ONE height, its reference:
+	 * the lowest surface over its wet texels, which needs every wet texel
+	 * known first -- hence this pre-pass over the rows that hold any. */
+	const std::vector<LodtSurfTexel> * stx =
+		( in.surface && !in.surface->texels.empty() ) ? &in.surface->texels : nullptr;
+	std::vector<quint8> sWet;          // per surface texel: 1 = wet under its sloped mesh
+	std::vector<float> meshRef;        // per mesh: the reference height
+	out.cellSloped.assign( size_t( cellsX ) * size_t( cellsY ), qint32( -1 ) );
+	qint64 slopedWet = 0;
+	if ( stx ) {
+		meshRef.assign( in.surface->meshTq.size(), std::numeric_limits<float>::infinity() );
+		sWet.assign( stx->size(), quint8( 0 ) );
+		std::vector<quint16> row( size_t( gw ), quint16( 0 ) );
+		qint64 curRow = -1;
+		for ( size_t k = 0; k < stx->size(); k++ ) {
+			const LodtSurfTexel & t = ( *stx )[k];
+			if ( t.at < 0 || t.at >= samples || t.mesh < 0
+				|| size_t( t.mesh ) >= meshRef.size() )
+				continue;
+			const qint64 gy = t.at / gw, gx = t.at % gw;
+			if ( gy != curRow ) {
+				in.heightRow( int( gy ), row.data() );
+				curRow = gy;
+			}
+			const size_t s = size_t( gy / spc ) * size_t( cellsX ) + size_t( gx / spc );
+			if ( ( ( *in.cellFlags )[s] & CELL_HAS_WATER ) && ( *in.cellWaterH )[s] >= t.z )
+				continue;                  // the flat water is on top here
+			const float h = ( float( row[size_t( gx )] ) - 32767.0f ) * in.quantum;
+			if ( !( h < t.z ) )
+				continue;
+			sWet[k] = 1;
+			slopedWet++;
+			meshRef[size_t( t.mesh )] = qMin( meshRef[size_t( t.mesh )], t.z );
+			if ( out.cellSloped[s] < 0 )
+				out.cellSloped[s] = t.mesh;
+		}
+	}
+	out.meshRefH = meshRef;
+
 	// ---- pass A: the wet mask, as runs -----------------------------------
 	std::vector<WaterRun> runs;
 	std::vector<qint64> rowAt( size_t( gh ) + 1, 0 );
 	{
 		std::vector<quint16> row( size_t( gw ), quint16( 0 ) );
+		size_t sk = 0;                     // walks the sorted surface texels in step
+		const size_t sEnd = stx ? stx->size() : 0;
 		for ( qint64 gy = 0; gy < gh; gy++ ) {
 			rowAt[size_t( gy )] = qint64( runs.size() );
 			in.heightRow( int( gy ), row.data() );
@@ -548,7 +730,19 @@ static bool lodtBuildWater( const WaterInput & in, quint64 baseOffset,
 				bool wet = false;
 				float wh = 0.0f;
 				quint16 tq = WATER_TYPE_DEFAULT;
-				if ( has ) {
+				bool sloped = false;
+				if ( sEnd ) {
+					const qint64 at = gy * gw + gx;
+					while ( sk < sEnd && ( *stx )[sk].at < at )
+						sk++;
+					sloped = sk < sEnd && ( *stx )[sk].at == at && sWet[sk];
+				}
+				if ( sloped ) {
+					const qint32 m = ( *stx )[sk].mesh;
+					wet = true;
+					wh = meshRef[size_t( m )];
+					tq = in.surface->meshTq[size_t( m )];
+				} else if ( has ) {
 					wh = ( *in.cellWaterH )[s];
 					tq = ( *in.cellWaterT )[s];
 					const float h = ( float( row[size_t( gx )] ) - 32767.0f ) * in.quantum;
@@ -1291,6 +1485,46 @@ static bool lodtBuildWater( const WaterInput & in, quint64 baseOffset,
 				}
 			}, &uniformShore );
 	}
+	pos += quint64( out.shorePlane.size() );
+
+	/* Lane WATER1: the SURFACE plane, at the body plane's rate and on its
+	 * samples, always written with the bodies. A sample is the float32 bits of
+	 * (mesh surface - the texel's body waterHeight) where the texel is wet
+	 * under a sloped mesh, and 0 everywhere else -- so with no sloped water
+	 * every tile is uniform 0 and costs sixteen bytes of directory. The body's
+	 * height is the FINAL one (after every merge), so body height + sample is
+	 * the mesh surface whatever body the texel ended up in. */
+	qint64 uniformSurf = 0, surfNonZero = 0;
+	out.surfaceSamples = bodyS;
+	out.surfacePlane = lodtPackPlane( cellsX, cellsY, bodyS, 4, pos,
+		[&]( int tx, int ty, quint8 * dst ) {
+			for ( int j = 0; j < bodyS; j++ ) {
+				const qint64 gy = qint64( ty ) * spc + qint64( j ) * stepB;
+				for ( int i = 0; i < bodyS; i++ ) {
+					const qint64 gx = qint64( tx ) * spc + qint64( i ) * stepB;
+					const qint64 at = gy * gw + gx;
+					quint32 bits = 0;
+					const quint16 b = grid[size_t( at )];
+					if ( stx && b ) {
+						auto it = std::lower_bound( stx->begin(), stx->end(), at,
+							[]( const LodtSurfTexel & t, qint64 v ) { return t.at < v; } );
+						if ( it != stx->end() && it->at == at
+							&& sWet[size_t( it - stx->begin() )] ) {
+							const float d = it->z - bodies[size_t( b ) - 1].wh;
+							if ( d != 0.0f ) {          // never the bits of -0
+								std::memcpy( &bits, &d, 4 );
+								surfNonZero++;
+							}
+						}
+					}
+					quint8 * o = dst + size_t( j * bodyS + i ) * 4;
+					o[0] = quint8( bits & 0xFF );
+					o[1] = quint8( ( bits >> 8 ) & 0xFF );
+					o[2] = quint8( ( bits >> 16 ) & 0xFF );
+					o[3] = quint8( ( bits >> 24 ) & 0xFF );
+				}
+			}
+		}, &uniformSurf );
 
 	// ---- the census -------------------------------------------------------
 	{
@@ -1412,6 +1646,10 @@ static bool lodtBuildWater( const WaterInput & in, quint64 baseOffset,
 			.arg( out.idPlane.size() ).arg( out.flowPlane.size() ).arg( out.shorePlane.size() )
 			.arg( uniformId ).arg( uniformFlow ).arg( uniformShore )
 			.arg( qint64( cellsX ) * cellsY );
+		out.summary += QString( "; surface plane %1 bytes, %2 of %3 tiles uniform, "
+			"%4 texel(s) wet under a sloped mesh, %5 sample(s) off their body's plane" )
+			.arg( out.surfacePlane.size() ).arg( uniformSurf )
+			.arg( qint64( cellsX ) * cellsY ).arg( slopedWet ).arg( surfNonZero );
 	}
 	if ( error )
 		error->clear();
@@ -1740,6 +1978,42 @@ static bool lodtWriteSource( const LodtSource & src, const QString & outDir,
 		return fail( QStringLiteral( "header version %1 is not one this writer knows (%2..%3)" )
 			.arg( version ).arg( LODL_VERSION_MIN ).arg( LODL_VERSION ) );
 
+	/* Lane WATER1: the sloped water, laid onto the texel grid NOW, because a
+	 * mesh's WATR form has to be in the type table and the table is written
+	 * before any block. Only meshes that cover at least one texel are interned,
+	 * and only when bodies are written, so a file without sloped water has the
+	 * table it always had. */
+	LodtWaterSurface surface;
+	QString surfaceNote;
+	if ( version >= 3 && wantWater && !src.slopedWater.empty() ) {
+		lodtRasteriseSurface( src.slopedWater, minX, minY, cellsX, cellsY, spc, surface.texels );
+		surface.meshTq.assign( src.slopedWater.size(), WATER_TYPE_DEFAULT );
+		std::vector<quint8> covers( src.slopedWater.size(), quint8( 0 ) );
+		for ( const LodtSurfTexel & t : surface.texels )
+			covers[size_t( t.mesh )] = 1;
+		int covering = 0;
+		for ( size_t m = 0; m < src.slopedWater.size(); m++ ) {
+			if ( !covers[m] )
+				continue;
+			covering++;
+			const quint32 wt = src.slopedWater[m].form;
+			if ( !wt || wt == src.defaultWaterType )
+				continue;                        // the worldspace default: 0xFFFF
+			auto it = watrIndex.constFind( wt );
+			int idx;
+			if ( it == watrIndex.constEnd() ) {
+				idx = watrForms.size();
+				watrForms.append( wt );
+				watrIndex.insert( wt, idx );
+			} else {
+				idx = it.value();
+			}
+			surface.meshTq[m] = quint16( idx );
+		}
+		surfaceNote = QString( "sloped water: %1 mesh(es), %2 over the grid, %3 texel(s) under them" )
+			.arg( src.slopedWater.size() ).arg( covering ).arg( surface.texels.size() );
+	}
+
 	Buf h;
 	h.u32( LODL_MAGIC );
 	h.u32( version );
@@ -1789,6 +2063,7 @@ static bool lodtWriteSource( const LodtSource & src, const QString & outDir,
 	qsizetype offBodyAt = 0, offBodyCountAt = 0, offNameAt = 0, offNameLenAt = 0;
 	qsizetype offIdRateAt = 0, offIdAt = 0, offFlowRateAt = 0, offFlowAt = 0;
 	qsizetype offShoreRateAt = 0, offShoreAt = 0, offStrokeAt = 0, offStrokeLenAt = 0;
+	qsizetype offSurfAt = 0;
 	if ( version >= 3 ) {
 		offBodyAt = h.size();       h.u64( 0 );
 		offBodyCountAt = h.size();  h.u32( 0 ); h.u32( quint32( LODL_BODY_RECORD ) );
@@ -1803,7 +2078,8 @@ static bool lodtWriteSource( const LodtSource & src, const QString & outDir,
 		offShoreAt = h.size();      h.u64( 0 );
 		offStrokeAt = h.size();     h.u64( 0 );
 		offStrokeLenAt = h.size();  h.u32( 0 );
-		h.u32( 0 );                                            // reserved
+		h.u32( 0 );                                            // reserved (the dye plane's, watermark writes it)
+		offSurfAt = h.size();       h.u64( 0 );                // lane WATER1: the surface plane, 0xF8
 	}
 	/* The header size is what every section offset is measured against, so it
 	 * is checked here rather than asserted in a debug build nobody runs. */
@@ -1825,10 +2101,17 @@ static bool lodtWriteSource( const LodtSource & src, const QString & outDir,
 	 * file used to go to `Terrain\<ws>.lodl`, an engine folder that no engine
 	 * reader ever opens it from. It is `FO4CSLOD\<ws>\<ws>.lodl` now, composed
 	 * by lodgenFo4csWorldDir() like every other FO4CS-target file. */
-	const QString dir = lodgenFo4csWorldDir( outDir, edid );
-	QDir().mkpath( dir );
-	const QString path = dir + QStringLiteral( "/" ) + edid + QStringLiteral( ".lodl" );
-	lodgenNoteLayoutFile( path );
+	QString path;
+	if ( src.outFile.isEmpty() ) {
+		const QString dir = lodgenFo4csWorldDir( outDir, edid );
+		QDir().mkpath( dir );
+		path = dir + QStringLiteral( "/" ) + edid + QStringLiteral( ".lodl" );
+		lodgenNoteLayoutFile( path );
+	} else {
+		// lane WATER1: the slope fixture names its file exactly
+		path = src.outFile;
+		QDir().mkpath( QFileInfo( path ).absolutePath() );
+	}
 	QFile f( path );
 	if ( !f.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
 		return fail( QStringLiteral( "could not open %1" ).arg( path ) );
@@ -2078,6 +2361,7 @@ static bool lodtWriteSource( const LodtSource & src, const QString & outDir,
 		wi.defaultWaterType = src.defaultWaterType;
 		wi.defaultWaterHeight = src.defaultWaterHeight;
 		wi.opt = opts.water;
+		wi.surface = surface.texels.empty() ? nullptr : &surface;   // lane WATER1
 		/* One decoded cell per cell per row, out of the same cache the pyramid
 		 * used, so the two passes over the world cost cache hits and not LAND
 		 * parses. */
@@ -2147,6 +2431,20 @@ static bool lodtWriteSource( const LodtSource & src, const QString & outDir,
 		 * is set wherever a cell names a water height, which in the Commonwealth
 		 * is every cell, dry hilltops included. Height and type stay as the cell
 		 * data gave them; only the bit is cleared, and only here. */
+		/* Lane WATER1: a cell that ONLY a sloped mesh wets names no water of its
+		 * own, so the loop below would never see it. It gets the bit, and the
+		 * height and type of the mesh that wets it (its reference height and
+		 * its WATR index) -- a bit over a zero height would be a lie. */
+		qint64 slopedCells = 0;
+		for ( size_t s = 0; s < cellFlags.size() && s < wo.cellSloped.size(); s++ ) {
+			const qint32 m = wo.cellSloped[s];
+			if ( m < 0 || ( cellFlags[s] & CELL_HAS_WATER ) )
+				continue;
+			cellFlags[s] = quint16( cellFlags[s] | CELL_HAS_WATER );
+			cellWaterH[s] = wo.meshRefH[size_t( m )];
+			cellWaterT[s] = surface.meshTq[size_t( m )];
+			slopedCells++;
+		}
 		qint64 wetKept = 0, wetCleared = 0;
 		for ( size_t s = 0; s < cellFlags.size(); s++ ) {
 			if ( !( cellFlags[s] & CELL_HAS_WATER ) )
@@ -2158,7 +2456,7 @@ static bool lodtWriteSource( const LodtSource & src, const QString & outDir,
 				wetCleared++;
 			}
 		}
-		if ( wetCleared > 0 ) {
+		if ( wetCleared > 0 || slopedCells > 0 ) {
 			const Buf t = cellTable();
 			const qint64 back = f.pos();
 			if ( !f.seek( qint64( cellTableAt ) ) || f.write( t.b ) != t.b.size()
@@ -2167,7 +2465,9 @@ static bool lodtWriteSource( const LodtSource & src, const QString & outDir,
 		}
 		wo.summary += QStringLiteral( "; has-water bit: %1 cell(s) with water over ground, "
 			"%2 cleared (dry under their water height)" ).arg( wetKept ).arg( wetCleared );
-		quint32 sect = ( waterCells ? SECT_WATER : 0u )
+		if ( slopedCells > 0 )
+			wo.summary += QStringLiteral( ", %1 set by sloped water alone" ).arg( slopedCells );
+		quint32 sect = ( ( waterCells || slopedCells ) ? SECT_WATER : 0u )
 			| ( colourCells ? SECT_COLOUR : 0u )
 			| ( gcvrForms.isEmpty() ? 0u : SECT_GROUNDCOVER )
 			| ( opts.aoSamples > 0 ? SECT_AO : 0u );
@@ -2193,6 +2493,12 @@ static bool lodtWriteSource( const LodtSource & src, const QString & outDir,
 			wr( wo.shorePlane );
 			sect |= SECT_SHORE;
 		}
+		/* Lane WATER1: the surface plane, LAST, always with the bodies. The
+		 * body pass packed it at exactly this offset (after shore, or after
+		 * flow when there is no shore). */
+		patch64( hdr, offSurfAt, pos );
+		wr( wo.surfacePlane );
+		sect |= SECT_SURFACE;
 		// the name blob stays empty until something names a body
 		patch64( hdr, offNameAt, 0 );
 		patch32( hdr, offNameLenAt, 0 );
@@ -2236,6 +2542,10 @@ static bool lodtWriteSource( const LodtSource & src, const QString & outDir,
 		*error += QStringLiteral( "\n  landless-cell fill: %1 cells filled" ).arg( filledCells );
 	if ( error && !waterSummary.isEmpty() )
 		*error += QStringLiteral( "\n  " ) + waterSummary;
+	if ( error && !src.placedWaterNote.isEmpty() )
+		*error += QStringLiteral( "\n  " ) + src.placedWaterNote;
+	if ( error && !surfaceNote.isEmpty() )
+		*error += QStringLiteral( "\n  " ) + surfaceNote;
 	return true;
 }
 
@@ -2592,6 +2902,111 @@ bool lodtWrite( const EsmWorld & world, const QString & outDir,
 		return world.cellWater( cx, cy, wh, &wt );
 	};
 
+	/* ---- lane WATER1: placed water meshes that are not flat -------------
+	 *
+	 * bungo, 2026-09-27: "so, water can now be non flat geometry wise? for
+	 * stuff like rivers going down". Every placed reference in the exterior
+	 * cells, plus the worldspace's persistent ones, whose base is an ACTI with
+	 * a water type (WNAM). Deleted and initially-disabled refs are skipped.
+	 * Each mesh is moved to world space with the lodgen convention (stored
+	 * euler angles NEGATED into Matrix::fromEuler, then scale, then position)
+	 * and sorted: FLAT when its world z-span is under one height quantum AND
+	 * every triangle's normal is vertical within 1e-4 -- the cell water already
+	 * draws those, so they are ignored -- otherwise SLOPED, and only those
+	 * feed the surface. A mesh that fails to load is counted, never fatal. */
+	if ( opts.water.enabled ) {
+		if ( !opts.placedWaterModel ) {
+			src.placedWaterNote = QStringLiteral( "placed water: not gathered (no mesh loader "
+				"was given to the writer)" );
+		} else {
+			const float quantum = opts.heightQuantum > 0.0f ? opts.heightQuantum : 8.0f;
+			qint64 found = 0, flat = 0, sloped = 0, loadFail = 0, empty = 0;
+			QSet<quint32> seen;
+			QHash<QString, std::vector<float>> loaded;
+			QSet<QString> failed;
+			auto take = [&]( const EsmRefr & r ) {
+				if ( r.deleted || r.initiallyDisabled || !r.base )
+					return;
+				if ( r.baseType && std::memcmp( &r.baseType, "ACTI", 4 ) != 0 )
+					return;
+				const EsmLodBase & b = world.lodBase( r.base );
+				if ( std::memcmp( &b.type, "ACTI", 4 ) != 0 || !b.waterType )
+					return;
+				if ( seen.contains( r.formID ) )
+					return;
+				seen.insert( r.formID );
+				found++;
+				const QString key = b.model.toLower();
+				if ( key.isEmpty() || failed.contains( key ) ) {
+					loadFail++;
+					return;
+				}
+				auto it = loaded.constFind( key );
+				if ( it == loaded.constEnd() ) {
+					std::vector<float> tris;
+					if ( !opts.placedWaterModel( b.model, tris ) ) {
+						failed.insert( key );
+						loadFail++;
+						return;
+					}
+					it = loaded.insert( key, tris );
+				}
+				const std::vector<float> & local = it.value();
+				if ( local.size() < 9 ) {
+					empty++;
+					return;
+				}
+				Matrix rm;
+				rm.fromEuler( -r.rot[0], -r.rot[1], -r.rot[2] );
+				const Vector3 rp( r.pos[0], r.pos[1], r.pos[2] );
+				LodtSlopedWater w;
+				w.form = b.waterType;
+				w.tris.resize( local.size() - local.size() % 9 );
+				float zLo = 3.4e38f, zHi = -3.4e38f;
+				for ( size_t k = 0; k + 3 <= w.tris.size(); k += 3 ) {
+					const Vector3 p = rp + rm * ( Vector3( local[k], local[k + 1], local[k + 2] )
+						* r.scale );
+					w.tris[k] = p[0];
+					w.tris[k + 1] = p[1];
+					w.tris[k + 2] = p[2];
+					zLo = qMin( zLo, p[2] );
+					zHi = qMax( zHi, p[2] );
+				}
+				bool level = ( zHi - zLo ) < quantum;
+				for ( size_t k = 0; level && k + 9 <= w.tris.size(); k += 9 ) {
+					const double ux = w.tris[k + 3] - w.tris[k], uy = w.tris[k + 4] - w.tris[k + 1],
+						uz = w.tris[k + 5] - w.tris[k + 2];
+					const double vx = w.tris[k + 6] - w.tris[k], vy = w.tris[k + 7] - w.tris[k + 1],
+						vz = w.tris[k + 8] - w.tris[k + 2];
+					const double nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+					const double len = std::sqrt( nx * nx + ny * ny + nz * nz );
+					if ( len < 1e-9 )
+						continue;                // a degenerate triangle has no normal
+					if ( std::sqrt( nx * nx + ny * ny ) > 1e-4 * len )
+						level = false;
+				}
+				if ( level ) {
+					flat++;
+					return;
+				}
+				sloped++;
+				src.slopedWater.push_back( std::move( w ) );
+			};
+			for ( int cy = src.minY; cy <= src.maxY; cy++ )
+				for ( int cx = src.minX; cx <= src.maxX; cx++ )
+					for ( const EsmRefr & r : world.refrs( cx, cy ) )
+						take( r );
+			for ( const EsmRefr & r : world.persistentRefrsIn( float( src.minX ) * 4096.0f,
+					float( src.minY ) * 4096.0f, float( src.maxX + 1 ) * 4096.0f,
+					float( src.maxY + 1 ) * 4096.0f ) )
+				take( r );
+			src.placedWaterNote = QString( "placed water: %1 ref(s) found, %2 flat ignored, "
+				"%3 sloped used, %4 mesh load failure(s)%5" )
+				.arg( found ).arg( flat ).arg( sloped ).arg( loadFail )
+				.arg( empty ? QString( ", %1 with no triangles" ).arg( empty ) : QString() );
+		}
+	}
+
 	return lodtWriteSourceOrV2( src, outDir, opts, outPath, error );
 }
 
@@ -2909,7 +3324,10 @@ bool LodtFile::open( const QString & path, QString * error )
 				.arg( ver ).arg( LODL_VERSION_MIN ).arg( LODL_VERSION ) );
 		const quint64 dataAt = rd<quint64>( buf, 0x88 );
 		const quint64 total = rd<quint64>( buf, 0x90 );
-		if ( dataAt < quint64( hdrBytes ) || dataAt > total || total != quint64( file.size() ) )
+		/* Version 3's floor is the pre-WATER1 0xF8 header (see LODL_HEADER_V3):
+		 * a file with the surface bit is held to 0x100 where that bit is read. */
+		const qsizetype hdrFloor = ver == 3 ? LODL_HEADER_V3_OLD : hdrBytes;
+		if ( dataAt < quint64( hdrFloor ) || dataAt > total || total != quint64( file.size() ) )
 			return fail( QStringLiteral( "header offsets do not fit the file" ) );
 		file.seek( 0 );
 		buf = file.read( qint64( dataAt ) );
@@ -2963,6 +3381,11 @@ bool LodtFile::open( const QString & path, QString * error )
 		return fail( QStringLiteral( "height quantum must be positive" ) );
 	if ( oData < oDir || oData > quint64( file.size() ) )
 		return fail( QStringLiteral( "block directory does not precede its data" ) );
+	/* A section bit this reader does not know names bytes it cannot place, and
+	 * reading around them would draw a file the writer did not mean. */
+	if ( sect & ~SECT_KNOWN )
+		return fail( QStringLiteral( "unknown section bit(s) 0x%1; this reader knows 0x%2" )
+			.arg( sect & ~SECT_KNOWN, 0, 16 ).arg( SECT_KNOWN, 0, 16 ) );
 
 	ltex.resize( nLtex );
 	for ( int i = 0; i < nLtex; i++ )
@@ -3108,6 +3531,31 @@ bool LodtFile::open( const QString & path, QString * error )
 		if ( !dyeS )
 			return fail( QStringLiteral( "the dye plane declares 0 samples a cell" ) );
 	}
+	surfS = 0;
+	surfStore = PlaneStore();
+	if ( ver >= 3 && ( sect & LODL_SECT_SURFACE ) ) {
+		/* Lane WATER1: the surface plane's u64 offset at 0xF8, the version-3
+		 * header's last field since it grew to 0x100. One float32 a sample,
+		 * on the body plane's own grid, so its rate MUST be the body rate:
+		 * a sample is a delta from the body the SAME sample names. */
+		if ( buf.size() < LODL_HEADER_V3 )
+			return fail( QStringLiteral( "section surface is declared present but the header is "
+				"%1 bytes; the surface offset needs %2" ).arg( buf.size() ).arg( LODL_HEADER_V3 ) );
+		const quint64 oSurf = rd<quint64>( buf, 0xF8 );
+		if ( !oSurf )
+			return fail( QStringLiteral( "section surface is declared present but its offset "
+				"is empty" ) );
+		if ( !( sect & LODL_SECT_BODIES ) || !bodyS )
+			return fail( QStringLiteral( "section surface is declared present without a "
+				"body-ID plane to measure it from" ) );
+		if ( !readPlaneStore( oSurf, 4, surfStore, error ) )
+			return false;
+		if ( surfStore.tileEdge != bodyS )
+			return fail( QStringLiteral( "the surface plane declares %1 samples a cell where "
+				"the body-ID plane has %2; they must match" )
+				.arg( surfStore.tileEdge ).arg( bodyS ) );
+		surfS = surfStore.tileEdge;
+	}
 
 	if ( error )
 		error->clear();
@@ -3237,6 +3685,25 @@ quint32 LodtFile::dyeWordAt( int dx, int dy ) const
 {
 	// 0 = no dye, which is also what an absent plane answers
 	return planeSampleOf( dyeStore, dx, dy, 0 );
+}
+
+float LodtFile::surfaceDeltaAt( int bx, int by ) const
+{
+	/* Exactly 0.0f for flat water, dry ground and an absent plane: the writer
+	 * stores the bits of +0 there, and an absent plane answers 0 bits. */
+	const quint32 bits = planeSampleOf( surfStore, bx, by, 0 );
+	float d;
+	std::memcpy( &d, &bits, 4 );
+	return d;
+}
+
+bool LodtFile::waterSurfaceAt( int bx, int by, float & z ) const
+{
+	const quint16 id = bodyIdAt( bx, by );
+	if ( !id || id > bodies.size() )
+		return false;
+	z = bodies[id - 1].waterHeight + surfaceDeltaAt( bx, by );
+	return true;
 }
 
 bool LodtFile::cell( int cx, int cy, float & lo, float & hi,
@@ -3767,6 +4234,347 @@ bool lodtWaterSelfTest( QString * text, QString * error )
 	check( QStringLiteral( "the refuter FIRES: ignoring water type changes the answer" ),
 		blind.bodyCount != real.bodyCount );
 	L << QString( "control %1" ).arg( fails ? QStringLiteral( "FAIL" ) : QStringLiteral( "PASS" ) );
+	if ( text )
+		*text = L.join( QStringLiteral( "\n" ) );
+	if ( error )
+		error->clear();
+	return fails == 0;
+}
+
+/* ---- lane WATER1: the sloped-water known answer --------------------------
+ *
+ * bungo, 2026-09-27: "But what if we'd author non flat water?" This writes
+ * REAL files through lodtWriteSource -- the writer every .lodl goes through --
+ * from a synthetic source, then reads them back with LodtFile and a raw read
+ * of the plane directory. The answer is written down before the run:
+ *
+ *   8 x 8 cells from (0,0), 32 samples a cell (128 world units a texel).
+ *   RIBBON: z(x) = 1600 - x / 16 (it drops 256 every 4096), placed water from
+ *     x = 0 to 24576 and 512 either side of y = 16384, six quads.
+ *   GROUND: z(x) - 200 in the channel, rising 1:1 beyond 300 from its middle,
+ *     so the ribbon is above the floor and below both banks (at its edges the
+ *     bank stands 12 above it).
+ *   SEA: cell column 7 holds flat water at 0 in the worldspace's own form.
+ *
+ * The flat-only refuter is the same valley with the ribbon replaced by what
+ * flat water can do: a per-cell step at the ribbon's height at each cell's
+ * west edge. Its (a) must fail, by up to one step (256). */
+bool lodtWaterSlopeSelfTest( const QString & outPath, const QString & flatPath,
+	QString * text, QString * error )
+{
+	auto fail = [error]( const QString & m ) {
+		if ( error )
+			*error = m;
+		return false;
+	};
+	if ( outPath.isEmpty() )
+		return fail( QStringLiteral( "the slope fixture needs an output .lodl path" ) );
+	const int CELLS = 8, SPC = 32;
+	const double STEP = 4096.0 / double( SPC );
+	const double YC = 16384.0, HALF = 512.0, X1 = 24576.0;
+	const float QUANTUM = 8.0f;
+	const quint32 SEA = 0x0A000001u, RIVER = 0x0A000002u;
+	auto ribbonZ = []( double x ) { return 1600.0 - x * 256.0 / 4096.0; };
+	auto ground = [&]( double x, double y ) {
+		return ribbonZ( x ) - 200.0 + qMax( 0.0, std::fabs( y - YC ) - 300.0 );
+	};
+	auto underRibbon = [&]( double x, double y ) {
+		return x >= 0.0 && x <= X1 && std::fabs( y - YC ) <= HALF;
+	};
+
+	enum { RIBBON = 0, FLAT_ONLY = 1, NO_RIBBON = 2 };
+	auto build = [&]( int mode, const QString & path, QString * note ) -> bool {
+		LodtSource src;
+		src.edid = QStringLiteral( "WaterSlopeFixture" );
+		src.minX = src.minY = 0;
+		src.maxX = src.maxY = CELLS - 1;
+		src.spc = SPC;
+		src.defaultLand = 0.0f;
+		src.defaultWaterType = SEA;
+		src.defaultWaterHeight = 0.0f;
+		src.outFile = path;
+		src.range = [&]( int cx, int cy, float & lo, float & hi ) {
+			lo = 3.4e38f;
+			hi = -3.4e38f;
+			for ( int r = 0; r <= SPC; r++ )
+				for ( int c = 0; c <= SPC; c++ ) {
+					const float g = float( ground( cx * 4096.0 + c * STEP, cy * 4096.0 + r * STEP ) );
+					lo = qMin( lo, g );
+					hi = qMax( hi, g );
+				}
+			return true;
+		};
+		src.hasColour = []( int, int ) { return false; };
+		src.quadForms = []( int, int, int, quint32 * ) {};
+		src.planes = [&]( int cx, int cy, const quint32 *, float q,
+			std::vector<quint16> & h, std::vector<quint16> & a,
+			std::vector<quint16> & c, std::vector<quint16> & g ) {
+			h.assign( size_t( SPC ) * SPC, 0 );
+			a.assign( size_t( SPC ) * SPC, 0 );
+			c.assign( size_t( SPC ) * SPC, 0xFFFFU );
+			g.clear();
+			for ( int r = 0; r < SPC; r++ )
+				for ( int cc = 0; cc < SPC; cc++ )
+					h[size_t( r ) * SPC + size_t( cc )] = lodtHeightWord(
+						ground( cx * 4096.0 + cc * STEP, cy * 4096.0 + r * STEP ), q );
+			return true;
+		};
+		src.water = [&, mode]( int cx, int cy, float & wh, quint32 & wt ) {
+			if ( cx == CELLS - 1 ) {
+				wh = 0.0f;
+				wt = SEA;
+				return true;
+			}
+			if ( mode == FLAT_ONLY && cx <= 6 && ( cy == 3 || cy == 4 ) ) {
+				wh = float( ribbonZ( cx * 4096.0 ) );
+				wt = RIVER;
+				return true;
+			}
+			return false;
+		};
+		if ( mode == RIBBON ) {
+			LodtSlopedWater w;
+			w.form = RIVER;
+			auto v = [&w]( double x, double y, double z ) {
+				w.tris.push_back( float( x ) );
+				w.tris.push_back( float( y ) );
+				w.tris.push_back( float( z ) );
+			};
+			for ( int s = 0; s < 6; s++ ) {
+				const double xa = s * 4096.0, xb = xa + 4096.0;
+				v( xa, YC - HALF, ribbonZ( xa ) ); v( xb, YC - HALF, ribbonZ( xb ) );
+				v( xb, YC + HALF, ribbonZ( xb ) );
+				v( xa, YC - HALF, ribbonZ( xa ) ); v( xb, YC + HALF, ribbonZ( xb ) );
+				v( xa, YC + HALF, ribbonZ( xa ) );
+			}
+			src.slopedWater.push_back( w );
+		}
+		LodtOptions o;
+		o.water.enabled = true;
+		o.water.fallbackV2 = false;
+		QString err;
+		const bool ok = lodtWriteSource( src, QString(), o, nullptr, &err );
+		if ( note )
+			*note = err;
+		return ok;
+	};
+
+	// ---- measuring a written file -----------------------------------------
+	struct Measure
+	{
+		qint64 under = 0, wetUnder = 0, dryUnder = 0, wetTexels = 0, wetAboveGround = 0;
+		double maxErr = 0.0, minWetZ = 1e30;
+		int ribbonBody = 0;
+		bool oneBody = true;
+	};
+	auto measure = [&]( const LodtFile & lf, Measure & m ) {
+		const int bS = lf.bodyIdSamples();
+		if ( bS <= 0 )
+			return;
+		for ( int by = 0; by < CELLS * bS; by++ ) {
+			for ( int bx = 0; bx < CELLS * bS; bx++ ) {
+				const int gx = bx * ( SPC / bS ), gy = by * ( SPC / bS );
+				const double x = double( gx ) * STEP, y = double( gy ) * STEP;
+				const float gr = lf.height( gx, gy );
+				float z = 0.0f;
+				const bool wet = lf.waterSurfaceAt( bx, by, z );
+				if ( wet ) {
+					m.wetTexels++;
+					if ( gr >= z )
+						m.wetAboveGround++;
+				}
+				if ( !underRibbon( x, y ) || !( double( gr ) < ribbonZ( x ) ) )
+					continue;
+				m.under++;
+				const double zr = ribbonZ( x );
+				if ( wet ) {
+					m.wetUnder++;
+					m.maxErr = qMax( m.maxErr, std::fabs( double( z ) - zr ) );
+					m.minWetZ = qMin( m.minWetZ, zr );
+					const int id = lf.bodyIdAt( bx, by );
+					if ( !m.ribbonBody )
+						m.ribbonBody = id;
+					else if ( id != m.ribbonBody )
+						m.oneBody = false;
+				} else {
+					m.dryUnder++;
+					m.maxErr = qMax( m.maxErr, zr - double( gr ) );   // the water that is missing
+				}
+			}
+		}
+	};
+	/* The surface plane's directory, read RAW from the file -- not through
+	 * LodtFile -- so "uniform 0" is what the bytes say. */
+	struct Dir
+	{
+		bool ok = false;
+		int tilesX = 0, tilesY = 0, edge = 0, bps = 0;
+		std::vector<quint32> csz, usz;
+		quint64 end = 0, fileSize = 0;
+	};
+	auto readDir = [&]( const QString & path, Dir & d ) {
+		QFile f( path );
+		if ( !f.open( QIODevice::ReadOnly ) )
+			return false;
+		d.fileSize = quint64( f.size() );
+		const QByteArray hdr = f.read( 0x100 );
+		if ( hdr.size() != 0x100 )
+			return false;
+		const quint64 off = rd<quint64>( hdr, 0xF8 );
+		if ( !off || !f.seek( qint64( off ) ) )
+			return false;
+		const QByteArray head = f.read( 32 );
+		if ( head.size() != 32 )
+			return false;
+		d.tilesX = int( rd<quint32>( head, 0 ) );
+		d.tilesY = int( rd<quint32>( head, 4 ) );
+		d.edge = int( rd<quint32>( head, 8 ) );
+		d.bps = int( rd<quint32>( head, 12 ) );
+		const quint64 dirAt = rd<quint64>( head, 16 );
+		const qint64 n = qint64( d.tilesX ) * d.tilesY;
+		if ( n <= 0 || !f.seek( qint64( dirAt ) ) )
+			return false;
+		const QByteArray dir = f.read( n * 16 );
+		if ( dir.size() != n * 16 )
+			return false;
+		d.end = dirAt + quint64( n * 16 );
+		for ( qint64 t = 0; t < n; t++ ) {
+			const quint64 o = rd<quint64>( dir, qsizetype( t * 16 ) );
+			const quint32 c = rd<quint32>( dir, qsizetype( t * 16 + 8 ) );
+			d.csz.push_back( c );
+			d.usz.push_back( rd<quint32>( dir, qsizetype( t * 16 + 12 ) ) );
+			if ( c )
+				d.end = qMax( d.end, o + c );
+		}
+		d.ok = true;
+		return true;
+	};
+
+	QStringList L;
+	int checks = 0, fails = 0;
+	auto check = [&]( const QString & what, bool ok ) {
+		checks++;
+		L << QString( "  %1 %2" ).arg( ok ? QStringLiteral( "ok  " ) : QStringLiteral( "FAIL" ) )
+			.arg( what );
+		if ( !ok )
+			fails++;
+	};
+	const QFileInfo outInfo( outPath );
+	const QString stem = outInfo.absolutePath() + QStringLiteral( "/" ) + outInfo.completeBaseName();
+	const QString flatFile = flatPath.isEmpty() ? stem + QStringLiteral( "_flatonly.lodl" ) : flatPath;
+	const QString bareFile = stem + QStringLiteral( "_noribbon.lodl" );
+
+	L << QStringLiteral( "EXPECTED  the ribbon's texels wet at z(x) = 1600 - x/16 within one "
+		"quantum; its body at its lowest wet surface (64); the surface plane uniform 0 off it" );
+
+	// ---- the ribbon -------------------------------------------------------
+	QString note;
+	if ( !build( RIBBON, outPath, &note ) )
+		return fail( QStringLiteral( "the ribbon build failed: %1" ).arg( note ) );
+	for ( const QString & ln : note.split( QLatin1Char( '\n' ) ) )
+		if ( ln.contains( QStringLiteral( "water" ) ) )
+			L << QStringLiteral( "  writer: " ) + ln.trimmed();
+	LodtFile lf;
+	QString oerr;
+	if ( !lf.open( outPath, &oerr ) )
+		return fail( QStringLiteral( "the ribbon file does not open: %1" ).arg( oerr ) );
+	lf.setBlockCacheSize( 16 );
+	check( QString( "version 3 with the surface bit, plane at the body rate (%1 = %2)" )
+			.arg( lf.surfacePlaneSamples() ).arg( lf.bodyIdSamples() ),
+		lf.headerVersion() == 3 && ( lf.sectionFlags() & LODL_SECT_SURFACE )
+			&& lf.surfacePlaneSamples() > 0 && lf.surfacePlaneSamples() == lf.bodyIdSamples() );
+	Measure m;
+	measure( lf, m );
+	check( QString( "(a) all %1 texels under the ribbon with ground below it are wet (%2 dry), "
+			"surface within one quantum: max error %3 units" )
+			.arg( m.under ).arg( m.dryUnder ).arg( m.maxErr, 0, 'g', 6 ),
+		m.under > 0 && m.dryUnder == 0 && m.maxErr <= double( QUANTUM ) );
+	check( QString( "(b) 0 wet texels with ground at or above their water surface (%1 of %2)" )
+			.arg( m.wetAboveGround ).arg( m.wetTexels ),
+		m.wetTexels > 0 && m.wetAboveGround == 0 );
+	{
+		LodtWaterBody b;
+		const bool have = m.ribbonBody && lf.waterBody( m.ribbonBody, b );
+		check( QString( "(c) the ribbon is one body (%1) and its table height %2 is its lowest "
+				"wet surface %3; form %4" )
+				.arg( m.ribbonBody ).arg( double( b.waterHeight ), 0, 'f', 3 )
+				.arg( m.minWetZ, 0, 'f', 3 ).arg( b.watrForm, 8, 16, QChar( '0' ) ),
+			have && m.oneBody && std::fabs( double( b.waterHeight ) - m.minWetZ ) <= 1e-3
+				&& b.watrForm == RIVER );
+	}
+	{
+		Dir d;
+		const bool ok = readDir( outPath, d );
+		qint64 outside = 0, outsideZero = 0, inside = 0, insideCarry = 0;
+		if ( ok ) {
+			for ( int ty = 0; ty < d.tilesY; ty++ )
+				for ( int tx = 0; tx < d.tilesX; tx++ ) {
+					const size_t t = size_t( ty ) * size_t( d.tilesX ) + size_t( tx );
+					const bool ribbonCell = tx <= 6 && ( ty == 3 || ty == 4 );
+					const bool zero = d.csz[t] == 0 && d.usz[t] == 0;
+					if ( ribbonCell ) {
+						inside++;
+						if ( !zero )
+							insideCarry++;
+					} else {
+						outside++;
+						if ( zero )
+							outsideZero++;
+					}
+				}
+		}
+		check( QString( "(d) surface tiles off the ribbon uniform 0: %1 of %2 (the ribbon's "
+				"own %3 tiles: %4 carry a slope)" )
+				.arg( outsideZero ).arg( outside ).arg( inside ).arg( insideCarry ),
+			ok && d.bps == 4 && outside > 0 && outsideZero == outside && insideCarry > 0 );
+		check( QString( "the surface plane is the LAST section: it ends at byte %1 of %2" )
+				.arg( d.end ).arg( d.fileSize ),
+			ok && d.end == d.fileSize );
+	}
+
+	// ---- the same valley with no ribbon: the plane must be all uniform 0 ----
+	{
+		QString n2;
+		const bool built = build( NO_RIBBON, bareFile, &n2 );
+		Dir d;
+		const bool ok = built && readDir( bareFile, d );
+		qint64 zero = 0;
+		for ( size_t t = 0; ok && t < d.csz.size(); t++ )
+			if ( d.csz[t] == 0 && d.usz[t] == 0 )
+				zero++;
+		check( QString( "no ribbon: the surface plane is 100% uniform 0 (%1 of %2 tiles), "
+				"and still the last section (%3 of %4 bytes)" )
+				.arg( zero ).arg( ok ? qint64( d.csz.size() ) : 0 ).arg( d.end ).arg( d.fileSize ),
+			ok && zero == qint64( d.csz.size() ) && d.end == d.fileSize );
+		if ( !built )
+			L << QStringLiteral( "    (the no-ribbon build failed: %1)" ).arg( n2 );
+		QFile::remove( bareFile );
+	}
+
+	// ---- (e) the refuter: flat water only ------------------------------------
+	{
+		QString n3;
+		LodtFile ff;
+		QString ferr;
+		const bool built = build( FLAT_ONLY, flatFile, &n3 ) && ff.open( flatFile, &ferr );
+		Measure fm;
+		if ( built ) {
+			ff.setBlockCacheSize( 16 );
+			measure( ff, fm );
+		}
+		check( QString( "(e) flat-only build fails (a): max error %1 units (%2 of %3 dry)" )
+				.arg( fm.maxErr, 0, 'g', 6 ).arg( fm.dryUnder ).arg( fm.under ),
+			built && fm.under > 0 && fm.maxErr > double( QUANTUM ) );
+		if ( !built )
+			L << QStringLiteral( "    (the flat-only build failed: %1%2)" ).arg( n3, ferr );
+		if ( flatPath.isEmpty() )
+			QFile::remove( flatFile );
+		else
+			L << QStringLiteral( "  flat-only file kept: " ) + flatFile;
+	}
+
+	L << QString( "%1 checks, %2 failures" ).arg( checks ).arg( fails );
+	L << ( fails ? QStringLiteral( "FAIL" ) : QStringLiteral( "PASS" ) );
 	if ( text )
 		*text = L.join( QStringLiteral( "\n" ) );
 	if ( error )

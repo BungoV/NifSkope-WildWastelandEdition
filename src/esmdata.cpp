@@ -613,6 +613,10 @@ const EsmLodBase & EsmWorld::lodBase( quint32 baseFormID ) const
 				b.leafFrequency = f.readFloat();
 			} else if ( f == "EDID" ) {
 				b.edid = fieldString( f );
+			} else if ( f == "WNAM" && *br == "ACTI" && f.size() >= 4 ) {
+				/* Lane WATER1: the ACTI's water type (wbDefinitionsFO4:
+				 * wbFormIDCk(WNAM, 'Water Type', [WATR])). */
+				b.waterType = esm->mapFormID( *br, f.readUInt32() );
 			} else if ( f == "MODS" && f.size() >= 4 && !b.materialSwap ) {
 				/* Lane SWAP1: the base's default material swap, the MODS of its
 				 * MODL group (wbDefinitionsFO4 wbMODL). The first one wins: it is

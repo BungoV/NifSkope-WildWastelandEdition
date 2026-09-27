@@ -70,6 +70,9 @@ def pick(d, out, n):
                 key = tuple(nif.data[base + k * sh['stride'] + co + 1:base + k * sh['stride'] + co + 4])
                 gba[key] = gba.get(key, 0) + 1
                 x, y, z = to_world(nif, sh, v)
+                # a .btr's shapes are chunk-local: the chunk's SW cell is in its name (<ws>.<dim>.<x>.<y>.BTR)
+                parts = os.path.basename(p).split('.')
+                x, y = x + int(parts[2]) * 4096.0, y + int(parts[3]) * 4096.0
                 if rb >= 255:
                     sat += 1
                 elif rb == 0:

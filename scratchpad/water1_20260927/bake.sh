@@ -3,7 +3,7 @@
 # usage: bake.sh <exe> <out dir> [extra lodgen args...]
 # The .lodl is a whole-worldspace file by design (a region bake writes none), so there is no Boston box here:
 # the landscape stage is the whole worldspace in tens of seconds.
-EXE="$1"; OUT="$2"; shift 2
+EXE="$1"; OUT="$(realpath -m "$2")"; shift 2   # absolute: NifSkope runs from its own folder
 if tasklist //FI "IMAGENAME eq Fallout4.exe" 2>/dev/null | grep -q Fallout4.exe; then echo "GAME UP"; exit 1; fi
 mkdir -p "$OUT"
 wp() { echo "$1" | sed -E 's#^/([a-zA-Z])/#\U\1:/#'; }

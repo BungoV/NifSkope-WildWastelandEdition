@@ -1,7 +1,7 @@
 #!/bin/bash
 # WATER1: terrain chunks (.btr) of the Boston box, for the water-depth agreement check.
 # usage: bake_btr.sh <exe> <out dir> [extra lodgen args...]
-EXE="$1"; OUT="$2"; shift 2
+EXE="$1"; OUT="$(realpath -m "$2")"; shift 2   # absolute: NifSkope runs from its own folder
 if tasklist //FI "IMAGENAME eq Fallout4.exe" 2>/dev/null | grep -q Fallout4.exe; then echo "GAME UP"; exit 1; fi
 mkdir -p "$OUT"
 wp() { echo "$1" | sed -E 's#^/([a-zA-Z])/#\U\1:/#'; }
