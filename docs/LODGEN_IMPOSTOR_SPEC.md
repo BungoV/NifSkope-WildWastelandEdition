@@ -528,7 +528,10 @@ BEFORE the atlas; the stock engine reads none of it.
   so a gate can check a layer against its SOURCE rather than against the pass
   that wrote it.
 - **A black emissive is not written (lane TIDY1, 2026-09-27).** A set, mesh or
-  card, whose emissive texel is black on every layer writes no `_g`/`_e` file
+  card, whose emissive sheet DECODES black on every layer writes no `_g`/`_e` file
+  (the test encodes the BC1 sheet: its 5:6:5 end points truncate, so a glow of
+  1-7/255 ships as 0 -- card set 000a7209 has 2575 texels of 1-3/255 and was
+  once kept as an all-zero sheet)
   and its `.lodm` names no `textures.emissive`; absent = emits nothing.
   Vanilla LOD has no glow source (`tools/lod_emission_probe.py`: 0 of 121 LOD
   materials with emit, a glow-map flag or a glow texture; 0 of 3430 LOD shader

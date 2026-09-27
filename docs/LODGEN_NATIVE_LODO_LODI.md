@@ -2167,7 +2167,8 @@ manifests.
    file. 0 when no set is linked. One byte of one card sheet moves it.
    **A set whose `.lodm` names no emissive hashes four files** (`.lodm`,
    colour, normal, mask). Since lane TIDY1 (2026-09-27) a card array whose
-   emissive is black on every layer writes no `_g`/`_e` and names none --
+   emissive sheet decodes black on every layer (as BC1, which turns 1-7/255
+   into 0) writes no `_g`/`_e` and names none --
    14 of the 16 Boston card sets; the other 2 hold TreeAspen01-03, whose full
    models emit 0.05, and keep their sheet. The
    hash of a set that does name one is unchanged; colour, normal and mask

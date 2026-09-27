@@ -5519,6 +5519,36 @@ static bool lodgenLayersBlack( const std::vector<std::vector<quint32>> & layers 
 	return true;
 }
 
+/*! True when the BC1 emissive sheet these layers make DECODES black on every
+ *  texel of every mip - the test a sheet must pass to be left unwritten. The
+ *  8-bit test above is not enough: the BC1 end points keep 5:6:5 and truncate,
+ *  so a texel of 1-7/255 ships as 0. Card set 000a7209 (Boston, legacy 256x512)
+ *  has 2575 glow texels of 1-3/255 and its sheet was all-zero bytes, kept
+ *  (lane TIDY1, 2026-09-27). Encodes with the writer's own path, so the answer
+ *  is about the bytes lodgenWriteDdsArray would write. */
+static bool lodgenEmissiveShipsBlack( const std::vector<std::vector<quint32>> & layers, int w, int h, int maxMips = 0 )
+{
+	if ( lodgenLayersBlack( layers ) )
+		return true;
+	std::vector<quint8> data;
+	for ( const std::vector<quint32> & l : layers )
+		lodgenEncodeArrayLayer( l, w, h, false, data, maxMips, false );
+	for ( size_t at = 0; at + 8 <= data.size(); at += 8 ) {
+		const quint8 * b = data.data() + at;
+		const quint16 c0 = quint16( b[0] | ( b[1] << 8 ) ), c1 = quint16( b[2] | ( b[3] << 8 ) );
+		const quint32 bits = quint32( b[4] ) | ( quint32( b[5] ) << 8 ) | ( quint32( b[6] ) << 16 ) | ( quint32( b[7] ) << 24 );
+		/* index 0 is c0, 1 is c1; 2 (and 3 in four-colour mode) mix both, so black
+		 * only when both are; 3 in three-colour mode (c0 <= c1) is transparent black */
+		for ( int i = 0; i < 16; i++ ) {
+			const int k = ( bits >> ( 2 * i ) ) & 3;
+			const bool black = k == 0 ? c0 == 0 : k == 1 ? c1 == 0 : ( k == 3 && c0 <= c1 ) || ( c0 == 0 && c1 == 0 );
+			if ( !black )
+				return false;
+		}
+	}
+	return true;
+}
+
 bool lodgenBuildTextureArrays( const QStringList & btoPaths, const QString & dataRoot,
 	const QString & arrayFileBase, const QString & arrayGameBase, QString * report, QString * error )
 {
@@ -5803,7 +5833,8 @@ bool lodgenBuildTextureArrays( const QStringList & btoPaths, const QString & dat
 	 * 3430 LOD shader blocks), so every `_g` this pass wrote was black: 6.9 MB
 	 * on the Boston box. The card arrays save 43.2 MB more (2 of 16 card sets
 	 * keep a faint light from the full TreeAspen models). A set whose
-	 * emissive texel is black on every layer names no `textures.emissive` in
+	 * emissive sheet DECODES black on every layer (lodgenEmissiveShipsBlack:
+	 * BC1 turns 1-7/255 into 0) names no `textures.emissive` in
 	 * its .lodm and has no `_g`/`_e` file; absent = emits nothing, as the VT
 	 * sheets already have it. A set with one lit texel ships the sheet whole.
 	 * Gate-only way back: WW_LODGEN_KEEP_BLACK_EMISSIVE=1. */
@@ -5816,7 +5847,7 @@ bool lodgenBuildTextureArrays( const QStringList & btoPaths, const QString & dat
 		const QString colorSfx = QLatin1String( lodmColorSuffix( cls.pbr ) ) + QStringLiteral( ".DDS" );
 		const QString maskSfx = QLatin1String( lodmMaskSuffix( cls.pbr ) ) + QStringLiteral( ".DDS" );
 		const QString emSfx = QLatin1String( lodmEmissiveSuffix( cls.pbr ) ) + QStringLiteral( ".DDS" );
-		const bool writeEmissive = keepBlackEmissive || !lodgenLayersBlack( cls.em );
+		const bool writeEmissive = keepBlackEmissive || !lodgenEmissiveShipsBlack( cls.em, cls.w, cls.h );
 		if ( !writeEmissive )
 			blackEmissiveDropped++;
 		const struct { QString suffix; const std::vector<std::vector<quint32>> * px; bool bc3; } sheets[4] = {
@@ -17071,7 +17102,9 @@ bool lodgenBuildCardArrays( const QStringList & btoPaths, const QString & cardDi
 		const QString emSfx = QLatin1String( lodmEmissiveSuffix( g.pbr ) ) + QStringLiteral( ".DDS" );
 		// a black emissive is not written, as the mesh arrays have it (lane TIDY1);
 		// WW_LODGEN_KEEP_BLACK_EMISSIVE=1 is the gate's way back
-		const bool writeEmissive = !qgetenv( "WW_LODGEN_KEEP_BLACK_EMISSIVE" ).isEmpty() || !lodgenLayersBlack( g.emis );
+		// black as SHIPPED: the BC1 sheet at the aux size and mip count it is written with
+		const bool writeEmissive = !qgetenv( "WW_LODGEN_KEEP_BLACK_EMISSIVE" ).isEmpty()
+			|| !lodgenEmissiveShipsBlack( g.emis, g.aw, g.ah, g.auxMips );
 		if ( !writeEmissive )
 			blackEmissiveDropped++;
 		// `_n` is BC7, as the per-card set is (lane IMPOSTORDEPTH2)
