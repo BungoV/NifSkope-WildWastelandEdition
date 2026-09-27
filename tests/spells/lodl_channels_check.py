@@ -22,7 +22,7 @@ from PIL import Image
 # `placement` (v7) reads the same per-placement identity `identity` read before
 # v7 existed, so it is graded against the same column of the reader's table.
 PLACEMENT = {'identity': 'identity', 'placement': 'identity',
-             'identityraw': 'identitylow', 'sky': 'sky',
+             'placement-lowbyte': 'identitylow', 'sky': 'sky',
              'ground': 'ground', 'seed': 'seed'}
 VERTEX = {'sway': 'sway', 'selfao': 'selfao', 'ao': 'ao'}
 TEXEL = {'mask-r': ['mask-r'], 'mask-g': ['mask-g'], 'mask-b': ['mask-b'],
@@ -30,7 +30,7 @@ TEXEL = {'mask-r': ['mask-r'], 'mask-g': ['mask-g'], 'mask-b': ['mask-b'],
          'emissive': ['emissive-r']}
 ABSENT = ('mask-a', 'emissive')
 TEXTURED = ('normal', 'emissive')
-ORDER = ['identity', 'placement', 'identityraw', 'sky', 'ground', 'seed', 'sway', 'selfao',
+ORDER = ['identity', 'placement', 'placement-lowbyte', 'sky', 'ground', 'seed', 'sway', 'selfao',
          'ao', 'mask-r', 'mask-g', 'mask-b', 'mask-a', 'emissive', 'normal']
 TOL = 1.0                       # the brief's tolerance: "within 1"
 
@@ -182,9 +182,9 @@ def main():
                      'none' if tm is None else '%.3f' % tm, TOL))
 
     # (c-floor) the tolerance must still REFUSE a wrong pairing, or it proves nothing
-    id_mean = vertex_mean(notes(os.path.join(d, 'identityraw.log'), 'identityraw'))
+    id_mean = vertex_mean(notes(os.path.join(d, 'placement-lowbyte.log'), 'placement-lowbyte'))
     check(id_mean is not None and abs(id_mean - table['sky']['mean']) > TOL,
-          '(c floor) the same tolerance REFUSES identityraw\'s mean against sky\'s '
+          '(c floor) the same tolerance REFUSES placement-lowbyte\'s mean against sky\'s '
           '(%.3f vs %.3f) -- so (c) is not vacuous'
           % (id_mean or -1, table['sky']['mean']))
 

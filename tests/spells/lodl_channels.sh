@@ -157,7 +157,7 @@ shot() {
 }
 
 shot default    -   1 0 0
-for c in identity placement identityraw sky ground seed sway selfao ao \
+for c in identity placement placement-lowbyte sky ground seed sway selfao ao \
 	mask-r mask-g mask-b mask-a; do
 	shot "$c" "$c" 1 0 0
 done
