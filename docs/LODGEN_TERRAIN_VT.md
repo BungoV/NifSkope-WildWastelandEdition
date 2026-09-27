@@ -1018,22 +1018,38 @@ measure, not a product:
   terrain's seven steps, which step over a street's far wall;
 * a square whose lowest surface is less than 128 units over the surface is a
   WALL up to its top; one a cell or more up is a CEILING (2.5h(2)'s slab law);
-* `blocked = min(1, F(max(terrain slope, wall)) + ceiling term)`, F(t) = t/(1+t),
-  summed over the eight directions under the same `1 - 1.6 * sum / 8`.
+* per direction the objects take away the COSINE-WEIGHTED sky they hide beyond
+  the terrain horizon: `extra = min(1, P(max(terrain slope, wall)) + ceiling
+  term) - P(terrain slope)`, with P(t) = t^2/(1+t^2) = sin^2 of the elevation and
+  the ceiling term 1/(1+open^2) = cos^2 of the opening's elevation;
+* `vis = vis_terrain - sum(extra) / 8`, where `vis_terrain` is the terrain
+  march's own `1 - 1.6 * sum F(slope) / 8`, F(t) = t/(1+t).
 
-No strength dial: the union's terrain part is the terrain march, so any dial
-would move ground with no building near it. Where no object square is met the
-byte is the terrain march's own, bit for bit. It supersedes GROUND1's product on
+Why cosine: the sky that lights a horizontal patch of ground is the
+cosine-weighted hemisphere about +Z (the object sky stream's convention, 4.10);
+the band between elevations a and b weighs sin^2 b - sin^2 a, so a street wall
+hiding the low sky hides little light. The first TERR1 law (2026-09-27 morning)
+summed F(max(slope, wall)) under the terrain's `1 - 1.6 * sum / 8` and read the
+Theater District street floor 12-16 against a physical cosine-weighted ray cast
+of 84-92 (lane GATES) -- 3-7x too dark.
+
+No strength dial: the terrain part is the terrain march, so any dial would move
+ground with no building near it. Where no object square rises above the terrain
+horizon and no ceiling is seen, `extra` is exactly 0 and the byte is the terrain
+march's own, bit for bit. It supersedes GROUND1's product on
 the VT sheets (both on would count the objects twice); the chunk path's `.btr`
 and the `.lodl` AO plane stay terrain-only. **The `.lodl` plane is where the
 terrain-only term is kept** (it is recomputed from the stored heights by
 `--refresh-ao`, see the refusal in `nifcli.cpp`); FO4CS needs no separate
 terrain-only sheet channel.
 
-Chosen by a ray cast through the Boston box's level-0 LOD triangles (skill
-`ww-sky-raycast-check`): on 2,208 samples with a building in reach, this law
-MAE 22.3 levels, bias -13.0, corr 0.905 against the cast; the terrain march
-alone 87.4 / +87.2 / 0.07; GROUND1's product at strength 1, 32.6 / +7.4 / 0.741.
+Scored offline against a physical cosine-weighted ray cast (224 rays a texel,
+reach 1,458, terrain + every level-0 LOD triangle of the Boston box; 312 texels;
+TERR1 `physlaw.py` / `lawfit.py`, skill `ww-canyon-sky-physical-check`): street
+canyons 88.2 vs 98.8 (the F law 45.4), decks 43.8 vs 44.1 (6.5), near a
+building 169.0 vs 166.8 (149.7); all texels MAE 30.6 levels, bias -4.8, corr
+0.864 (F law 42.3 / -32.6 / 0.865). These are offline predictions from the law's
+own inputs; the baked numbers are in the TERR1 report.
 The census: `skyObjects 1`, and `objAoTexels` / `objAoMeanDark` then count the
 union's darkening against the terrain-only march.
 

@@ -11062,39 +11062,44 @@ static float lodgenObjectSkyVis( const LodgenObjectHeightField & f,
 /*! THE GROUND'S SKY WITH THE OBJECTS IN IT (lane TERR1, 2026-09-27; `skyObjects`,
  *  default ON, VT sheets only).
  *
- *  One direction of the sky march, terrain and objects together, as ONE blocked
- *  measure: `maxSlope` is the terrain march's own value for this direction
- *  (computed by the caller, unchanged), the object lattice adds its wall and
- *  ceiling (the slab law above), and the direction's blocked fraction is
+ *  One direction of the sky march, terrain and objects together: `maxSlope` is
+ *  the terrain march's own value for this direction (computed by the caller,
+ *  unchanged), the object lattice adds its wall and ceiling (the slab law
+ *  above), and the function returns the COSINE-WEIGHTED share of this
+ *  direction's sky that the objects hide BEYOND the terrain horizon:
  *
- *      wu = max( terrain slope, object wall )
- *      blocked = F(wu)                                  no ceiling seen
- *      blocked = min( 1, F(wu) + 1 - F(ceilOpen) )      under a ceiling
+ *      P(t) = t^2 / (1 + t^2)                  = sin^2 of the elevation atan(t)
+ *      wu   = max( terrain slope, object wall )
+ *      Pu   = P(wu)                                   no ceiling seen
+ *      Pu   = min( 1, P(wu) + 1 / (1 + ceilOpen^2) )  under a ceiling (cos^2)
+ *      extra = Pu - P(terrain slope)                  >= 0
  *
- *  with F(t) = t / (1 + t). The UNION, not the product: a hill and a building
- *  standing in the same direction hide the same part of the sky once, where
- *  lane GROUND1's `vis_terrain * vis_objects` counts it twice.
+ *  and the caller writes  vis = vis_terrain - sum(extra) / 8 . The sky that
+ *  lights a horizontal patch of ground is the cosine-weighted hemisphere about
+ *  +Z (the object per-vertex sky stream's convention, docs 4.10), where the band
+ *  between elevations a and b weighs sin^2 b - sin^2 a: a street wall that
+ *  hides the low sky hides little light. The UNION, not the product: a hill and
+ *  a building standing in the same direction hide the same part of the sky once.
+ *
+ *  WHY NOT THE TERRAIN MARCH'S OWN MEASURE (the first TERR1 law, 2026-09-27
+ *  morning): `1 - 1.6 * sum F(wu) / 8` with F(t) = t/(1+t) weighs every
+ *  elevation alike and then gains it by 1.6 -- tuned for hills, where F is
+ *  small. In a street canyon it read the Theater District floor 12-16 against a
+ *  physical cosine-weighted ray cast of 84-92 (lane GATES, canyon_check.py; the
+ *  object stream on the same walls' feet reads ~52). Scored against that cast
+ *  (terrain + every level-0 LOD triangle of the Boston box, 224 rays a texel,
+ *  reach 1,458; TERR1 physlaw.py / lawfit.py, 312 texels): this law canyon mean
+ *  88.2 vs 98.8 (the F law 45.4), deck 43.8 vs 44.1 (6.5), near 169.0 vs 166.8
+ *  (149.7), all MAE 30.6, bias -4.8, corr 0.864 (42.3 / -32.6 / 0.865).
  *
  *  DENSE: the lattice is read every 64 units out to the march's reach (1,458),
  *  not at the terrain march's seven steps (128 * 1.5^k): the lattice is a
- *  128-unit field, and the seven steps step OVER a street's far wall. Chosen by
- *  a ray cast through the level-0 LOD triangles of the Boston box (lane TERR1,
- *  skycast.py; the lattice there built from those same triangles; 2,208
- *  samples 512 units apart with a building 64+ units tall in reach; `h0` here
- *  is `lodgenSkySurface`'s): this law MAE 22.3 levels, bias -13.0, corr 0.905
- *  against the cast; the same union marched from the terrain with no slab bar
- *  30.5 / -0.4 / 0.755 (and -101 on the 122 samples standing on a road piece,
- *  which it reads as a ceiling); the 7-step union 32.3 / +9.4 / 0.752; the
- *  product at strength 1, 32.6 / +7.4 / 0.741; the terrain march alone
- *  87.4 / +87.2 / 0.07.
+ *  128-unit field, and the seven steps step OVER a street's far wall.
  *
- *  No strength dial, and that is the law: the union's terrain part IS the
- *  terrain march, so a strength would move ground with no building near it.
- *
- *  Where no object square is met (or none rises above the terrain slope and no
- *  ceiling is seen) the returned term is `maxSlope / (1 + maxSlope)` computed
- *  exactly as the terrain march computes it, so the sum -- and the byte -- is
- *  the terrain march's own, bit for bit. */
+ *  No strength dial, and that is the law: the terrain part IS the terrain march.
+ *  Where no object square rises above the terrain slope and no ceiling is seen,
+ *  `extra` is exactly 0.0f (the same float subtracted from itself), so the byte
+ *  is the terrain march's own, bit for bit. */
 /*! The height the union marches FROM (lane TERR1): the ground's visible
  *  surface. A LOW cover over the texel's own square -- its top within one cell
  *  (128 units, the slab bar of `countSlabSquares`) of the terrain: a road, a
@@ -11142,11 +11147,10 @@ static float lodgenSkyDirBlocked( const LodgenObjectHeightField & f,
 			}
 		}
 	}
-	const float wu = qMax( maxSlope, wall );
-	const float wallBlocked = wu / ( 1.0f + wu );
-	if ( !haveCeil )
-		return wallBlocked;
-	return qMin( 1.0f, wallBlocked + ( 1.0f - ceilOpen / ( 1.0f + ceilOpen ) ) );
+	const float pT = maxSlope * maxSlope / ( 1.0f + maxSlope * maxSlope );
+	const float pW = ( wall > maxSlope ) ? wall * wall / ( 1.0f + wall * wall ) : pT;
+	const float pU = haveCeil ? qMin( 1.0f, pW + 1.0f / ( 1.0f + ceilOpen * ceilOpen ) ) : pW;
+	return qMax( 0.0f, pU - pT );
 }
 
 /*! THE SLAB LAW'S KNOWN-ANSWER CONTROL (lane SLAB1, 2026-09-18), run once per
@@ -14162,9 +14166,10 @@ static bool lodgenBakeVtTile( const EsmWorld & world, const QString & dataRoot,
 			// R AO, G wetness, B shore proximity, A cover
 			const float h0 = heightAt( lx, ly );
 			float occl = 0.0f;
-			/* `occlU`: the same sum with the objects in each direction
-			 * (lodgenSkyDirBlocked, lane TERR1). `occl` stays the terrain-only
-			 * term: the census measures the darkening against it. */
+			/* `occlU`: the cosine-weighted sky the objects hide beyond the
+			 * terrain horizon, summed over the directions (lodgenSkyDirBlocked,
+			 * lane TERR1). `occl` stays the terrain-only term: the census
+			 * measures the darkening against it. */
 			const bool skyUnion = objField && coverOpts.skyObjects;
 			const float h0s = skyUnion ? lodgenSkySurface( *objField, wx, wy, h0 ) : h0;
 			float occlU = 0.0f;
@@ -14183,7 +14188,7 @@ static bool lodgenBakeVtTile( const EsmWorld & world, const QString & dataRoot,
 			const float vis = qBound( 0.0f, 1.0f - occl / 8.0f * 1.6f, 1.0f );
 			quint32 ao8 = quint32( qBound( 0.0f, vis * 255.0f + 0.5f, 255.0f ) );
 			if ( skyUnion ) {
-				const float visU = qBound( 0.0f, 1.0f - occlU / 8.0f * 1.6f, 1.0f );
+				const float visU = qBound( 0.0f, vis - occlU / 8.0f, 1.0f );
 				const quint32 a2 = quint32( qBound( 0.0f, visU * 255.0f + 0.5f, 255.0f ) );
 				if ( objCensus && a2 < ao8 && i >= border && i < S - border
 					&& j >= border && j < S - border ) {
