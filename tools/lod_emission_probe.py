@@ -367,9 +367,19 @@ def readBgsm(path):
     mult = r.f32()
     r.u8()
     external = r.u8()
+    if v >= 12:
+        r.f32()                              # fLumEmittance
+    if v >= 13:
+        r.u8(); r.f32(); r.f32(); r.f32()    # adaptive emissive
+    if v < 8:
+        r.u8()                               # bBackLighting
+    r.u8(); r.u8(); r.u8()                   # receive / hide secret / cast shadows
+    r.u8(); r.u8()                           # dissolve fade / assume shadowmask
+    glowmap = r.u8()                         # bGlowmap
     if r.o > len(r.b):
         return None
     return dict(version=v, textures=tex, emitEnabled=bool(emit), emittanceColor=colour,
+                glowmapFlag=bool(glowmap), glowTexture=tex[5] if len(tex) > 5 else '',
                 emittanceMult=mult, externalEmittance=bool(external), alpha=alpha,
                 specEnabled=bool(specEnabled), specMult=specMult, smoothness=smoothness,
                 rootMaterial=root, consumed=r.o, size=len(r.b))
@@ -474,7 +484,7 @@ def main():
 
     # ---- B
     print('\nB. materials those LOD models name: %d' % len(mats))
-    hit = miss = emitMat = 0
+    hit = miss = emitMat = glowFlag = glowTex = emitAny = 0
     for k in sorted(mats):
         p = mat(k)
         if p is None:
@@ -488,13 +498,23 @@ def main():
             miss += 1
             continue
         hit += 1
+        if g['emitEnabled']:
+            emitAny += 1
+        if g['glowmapFlag']:
+            glowFlag += 1
+            print('   MAT GLOWMAP FLAG %-56s glow texture %r' % (k[-56:], g['glowTexture']))
+        if g['glowTexture']:
+            glowTex += 1
+            print('   MAT GLOW TEXTURE %-56s %r' % (k[-56:], g['glowTexture']))
         if g['emitEnabled'] and max(g['emittanceColor']) > 0.0:
             emitMat += 1
             print('   MAT EMITS %-56s v%d colour %s mult %.3f glow %r'
                   % (k[-56:], g['version'], tuple(round(c, 3) for c in g['emittanceColor']),
-                     g['emittanceMult'], g['textures'][2]))
+                     g['emittanceMult'], g['glowTexture']))
     print('   read %d, unreadable/missing %d; OWN-EMIT with a colour that is not black: %d'
           % (hit, miss, emitMat))
+    print('   emit enabled %d; glow-map flag set %d; glow texture slot filled %d'
+          % (emitAny, glowFlag, glowTex))
 
     # ---- C
     print('\nC. bases matching %r' % args.match)
