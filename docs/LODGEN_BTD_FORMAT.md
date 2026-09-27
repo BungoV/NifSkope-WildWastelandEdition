@@ -1487,7 +1487,7 @@ no-ground-cover comment now wrap in the writer).
 | claim | line | anchor |
 |---|---|---|
 | magic `'LODT'` (unchanged by the `.lodl` rename) | `lodtfile.h` | `constexpr quint32 LODL_MAGIC = 0x54444F4CU;` |
-| versions 1..3, header sizes 0x98 / 0xA0 / 0xF8 | 56-63 | `constexpr quint32 LODL_VERSION = 3;` … `LODL_HEADER_V3 = 0xF8;` |
+| versions 1..3, header sizes 0x98 / 0xA0 / 0x100 (0xF8 before lane WATER1; row re-anchored 2026-09-27) | 58-75 | `constexpr quint32 LODL_VERSION = 3;` … `constexpr qsizetype LODL_HEADER_V3 = 0x100;` `constexpr qsizetype LODL_HEADER_V3_OLD = 0xF8;` |
 | section flag bits 0..7, now named in the header | 84-91 | `constexpr quint32 SECT_COLOUR = LODL_SECT_COLOUR;` |
 | cell flag bits, water-type sentinel | 101-103 | `constexpr quint16 WATER_TYPE_DEFAULT = 0xFFFFU;` |
 | everything is little-endian | 115 | `//! Little-endian appenders. Everything in the file is LE regardless of host.` |
@@ -1542,7 +1542,7 @@ line numbers are the state of the hashes above.
 
 | claim | line | anchor |
 |---|---|---|
-| versions 1..3, header sizes 0x98 / 0xA0 / 0xF8 | lodtfile.cpp 56-63 | `constexpr quint32 LODL_VERSION = 3;` … `LODL_HEADER_V3 = 0xF8;` |
+| versions 1..3, header sizes 0x98 / 0xA0 / 0x100 (0xF8 before lane WATER1; row re-anchored 2026-09-27) | lodtfile.cpp 58-75 | `constexpr quint32 LODL_VERSION = 3;` … `constexpr qsizetype LODL_HEADER_V3 = 0x100;` `constexpr qsizetype LODL_HEADER_V3_OLD = 0xF8;` |
 | the header size is a TABLE, 0 for an unknown version | lodtfile.cpp 74 | `static inline qsizetype lodtHeaderBytes( int version )` |
 | section bits 4..7 | lodtfile.h 42-45 | `constexpr quint32 LODL_SECT_BODIES      = 1u << 4;` |
 | the body record is 48 bytes; the shore quantum is 32 | lodtfile.cpp 97-99 | `constexpr int LODL_BODY_RECORD = 48;` |

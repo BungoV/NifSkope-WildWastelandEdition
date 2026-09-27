@@ -40,3 +40,16 @@ Pictures in the lane scratchpad pics/labeled. NOT FLOWN; FO4CS reader changes li
    The per-cell height stays in the file as the v2 fallback.
 4. A default bake can still be version 2 (the fallback when the body step refuses); the reader must take
    both.
+5. (task 3, code built at badd500f, NOT gated) The v3 header grows to 0x100 bytes: a u64 surface-plane offset
+   at 0xF8, declared by section bit 9 of 0x44. Old v3 files (0xF8 header, bit 9 clear) must still open: take
+   the header size as 0xF8 when bit 9 is clear. The surface plane is float32 (surface - body height) at the
+   body-ID rate; a sloped body's water at a texel = body height + that float. Flat bodies store 0.
+   NifSkope's reader now REFUSES unknown section bits 10..31; FO4CS should do the same or ignore them, but must
+   not misread bit 9 as absent.
+6. (follow-up 2, dc67e5c8, NOT gated) Water LOD shapes carry no vertex colour any more (vanilla's 8-byte
+   WATER_VERTEX_DESC); generator revision 3. `res/Water/WaterLOD.hlsl` reads no vertex colour, so nothing to do
+   there; any other FO4CS reader of the water shapes must not expect the colour.
+
+## Continuation 2026-09-27 evening: not landed
+Task 3 is still NOT gated. Launching NifSkope, taking the turn lock and committing were refused by the
+session's permission gate, so nothing was run. See DONE.md `## CONTINUATION 2026-09-27`.

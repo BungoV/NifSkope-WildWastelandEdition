@@ -250,3 +250,85 @@ legend_check.json, pics/ pics_depth/ (pictures), cache/, build_*.log.
    flat-only exe on the same file as the before). Then one labeled side-by-side picture of R_default +
    R_waterheight, docs provenance fix, DELIVERABLE_TEXT reader list (FO4CS included), commit by path.
 4. Last: delete bk_*, cache/, fixture/ .lodl files; report to the coordinator.
+
+## CONTINUATION 2026-09-27
+Resumed 19:43 (date-read) on the overseer's brief ("finish task 3: run its gates, make the labelled pictures;
+open items if cheap"). Report written 19:52. Worktree HEAD badd500f.
+
+### What stopped the gates
+- The night rules file (`E:\Projects\NifskopeWildWastelandEdition\scratchpad\overseer_20260927\night_rules.md`)
+  could not be read: Read, cat and Get-Content were all refused (outside the session's allowed directory). I
+  worked from the rules quoted in the brief.
+- Every `bash <script>` call came back "This command requires approval" and nobody was there to approve it:
+  `bash task3.sh fixture`, and `bash .../fix1_20260926/turn.sh acquire water1 21600` on its own. So I never
+  took the NifSkope turn and **launched no NifSkope**. `git commit -- <path>` was refused the same way, so
+  **nothing from this continuation is committed**. Writing under `.claude/skills/` was refused too.
+- I did not route around the refusals (e.g. by starting the scripts from Python). One try each, then stopped.
+- State checked before stopping: `release/NifSkope.exe` = `run_slope/NifSkope.exe` (md5 37bd178a...), linked
+  13:51:40, newer than every file in src/ (find -newer: empty), build_slope.log BUILD-RC=0. `run_slope` has
+  never been launched, so the first launch may be sandboxed by Avast (skill ww-gui-launch-silent-exit).
+
+### Gates (task 3, sloped water)
+| gate | expected | measured | result |
+|---|---|---|---|
+| synthetic sloped-river fixture (`task3.sh fixture`, selftest (a)-(e), (e) = flat-only refuter) | PASS, refuter FAIL | not run (script launch refused) | NOT MEASURED |
+| real bake with the slope exe (`task3.sh bake`), census line "placed water" | rc 0, a census line | not run | NOT MEASURED |
+| `lodl_cmp.py` old v3 vs slope v3: +8 offsets, tables identical, surface plane 100% uniform and last; `--floor` FAILs | PASS / floor FAIL | not run | NOT MEASURED |
+| flat pictures unchanged (`task3.sh slope`, pics_slope vs pics) | pixel-identical | not run | NOT MEASURED |
+| river pictures (`task3.sh river`: R_default, R_waterheight, flat-only exe before) | made | not run | NOT MEASURED |
+| depth view (follow-up 1) and depth-bake removal (follow-up 2) gates | see RESUME 1-2 | not run | NOT MEASURED |
+
+### Open items, measured offline (no launch; python over `bk_new_def/.../Commonwealth.lodl`, the flat-writer v3 file)
+New scripts: `openitems.py` (poke / v2 / sea), `searing.py`. They read the file through
+`tests/spells/lodl_open_authority.py` (shares no code with src/) plus the body-ID plane container decoded from
+docs/LODGEN_BTD_FORMAT.md.
+
+| item | control (must match the viewer's own log first) | measured | verdict |
+|---|---|---|---|
+| coarse mesh through the water, Boston, 8 a cell | A_bodyid.log: 8,415 wet / 0 full-rate above / 212 mesh above | 8,415 / 0 / 212 | control PASS |
+| same, which bodies | -- | sea 103, river 43 (578 u) 44, lakes 65; mesh over water up to 454 u, median 18 u | measured |
+| candidate viewer fix C: a poking texel lowers the 3 corners of its own mesh triangle by its excess + 1 u | poke-through after = 0 | 0; 166 of 5,265 vertices lowered, median 29 u, max 455 u; 2,349 of 73,505 dry texels drawn lower (max 455 u) | simulated only, NOT BUILT |
+| (fixes A/B, cap every vertex next to water / next to a poke at water - 1) | 0 after | 0 after; lower more: 190 / 131 vertices, median 103 / 111 u, max 687 / 583 u | C is the smallest |
+| v2 sheet "past the terrain edge" | V2_default.log: 22 cells drawn | 22 cells | control PASS |
+| where it is | -- | projecting the region corners with V2_default.cam.log puts the stray band on the **WEST region edge next to the NORTH-WEST corner**, not the south-east (my 12:19 wording was wrong). The cells there, (-6,-5) and (-6,-4), get a whole-cell sheet at 450 u while their ground reaches 1,400 / 824 u. Every sheet's footprint is inside the region (the loop only visits region cells). The sheet lies under the ground and shows through the region's open side, because the view draws no side walls | reasoned from measured cell values + the projection; v2 is the way-back format only. No fix made |
+| sea ring outside the S/E cliffs, whole map | -- | sea body 1 (450 u) covers 21,673 cells; 18,792 of them are flat at -352 u (no relief, the file's no-land fallback height); the cells with relief form the box x -77..76, y -77..77; every fallback cell that touches land touches a cell whose ground dips below 450 (E 211, W 211, N 221, S 221). The land flag (bit 1) is set on all cells, so the file cannot tell a real LAND cell from a fallback one | measured: the ring is the fallback cells under the worldspace default water. Whether the game draws sea there: NOT CHECKED |
+
+What would fix each (not done, owed):
+- Poke-through: fix C in `addLodlWater`'s caller (lower the view mesh's vertices before `buildTerrainSurface`),
+  viewer only. Needs a build, then the A_bodyid log's "mesh above" = 0 and the water-off identity gate
+  (the lowering only applies when water is drawn).
+- Sea ring: a bake-side choice for bungo: let the worldspace default water fill only cells with a LAND record.
+  The file needs a real "has LAND" bit for that, because bit 1 is set on every cell today.
+- V2 sheet: nothing needed for v3. For v2, clipping the sheets would need per-texel ground, which v2 lacks.
+
+### Other files changed (uncommitted, on disk)
+- docs/LODGEN_BTD_FORMAT.md: the two provenance rows that still quoted `LODL_HEADER_V3 = 0xF8;` are re-anchored to
+  `LODL_HEADER_V3 = 0x100;` / `LODL_HEADER_V3_OLD = 0xF8;` (lodtfile.cpp 58-75).
+- scratchpad/water1_20260927/DELIVERABLE_TEXT.md: FO4CS reader list items 5 (0x100 header, bit 9 surface
+  plane, unknown bits refused) and 6 (no vertex colour on water shapes), plus a "not landed" note.
+- scratchpad/water1_20260927/openitems.py, searing.py, skill_draft_ww-picture-point-to-cell.md (new).
+To commit (by path, when someone can approve):
+`git commit -- docs/LODGEN_BTD_FORMAT.md scratchpad/water1_20260927/DONE.md scratchpad/water1_20260927/DELIVERABLE_TEXT.md scratchpad/water1_20260927/openitems.py scratchpad/water1_20260927/searing.py scratchpad/water1_20260927/skill_draft_ww-picture-point-to-cell.md`
+(git add the three new files first, by path).
+
+### Pictures
+None made this session (no launch). Existing ones, unchanged, in `pics/labeled/` (see section 6). I looked at
+V2_default and WH_default only to place the open items.
+
+### Still open
+Everything in RESUME 1-3 (the depth view, the depth-bake removal and all of task 3's gates and pictures). The
+command order in RESUME still holds. First step when launches are allowed: `bash task3.sh fixture`. Then check
+the fixture log is not empty (Avast). Fixes C and the sea-ring bake choice are proposals only.
+
+### Skills
+- Loaded: ww-gui-launch-silent-exit, nifskope-ww-worktree-build.
+- Wished for: one page on "the session refuses scripts, commits and outside reads -- what a lane can still do
+  and how it reports" (core-worktree-build touches this for CORE only). Also a turn.sh read-only "who holds it"
+  form (asked for before).
+- Written: `ww-picture-point-to-cell` (spot in a render -> the cells it shows, from the .cam.log). The write
+  under `.claude/skills/` was refused, so it is a draft at
+  `scratchpad/water1_20260927/skill_draft_ww-picture-point-to-cell.md`, to be moved. Declined: a separate
+  skill for the offline poke model. openitems.py carries its controls in its docstring; that is enough until
+  a second lane needs it.
+
+WATER1 PARTIAL task 3 still NOT gated (script launches, the turn lock and commits were refused by the session); three open items measured offline, uncommitted
