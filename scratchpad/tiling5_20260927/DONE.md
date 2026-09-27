@@ -124,3 +124,43 @@ materials of different brightness) that mean edge is almost all of the added hig
 (`lodgenLandHeightLayer`): each sample splits into its texture's repeat average (1x1 mip) + detail; the averages
 crossfade with the painted opacity exactly as today, only the details take the height opacity. Algebra:
 c' = c + (lc - c) ah + (ml - m)(a - ah); ah = a is today's blend. Arms s20 / s10 below.
+
+Split design, exe `run_m3` (sha1 4f7ce9e9, commit 295d3988), beta via env `WW_TILING5_BETA` (tuning only):
+
+| arm | beta | transitions (of 14) | rep sel / val | G1 sel / val | G2 sel / val | G2bd sel / val | zone / interior hp median |
+|---|---|---|---|---|---|---|---|
+| vanilla | -- | -- | -- | -- | -- | -- | 5.39 / 5.53 |
+| today | -- | 7 | 5/7 / 6/7 | +11.8 % / -7.7 % | 7/7 / 7/7 | 7/7 / 7/7 (rung) | 4.84 / 6.58 |
+| s10 | 1.0 | 7 | 5/7 / 6/7 | +16.7 % / -3.2 % | 7/7 / 7/7 | 2/7 / 6/7 | 5.09 / 6.70 |
+| s20 | 2.0 | 8 | 6/7 / 6/7 | +19.9 % / -1.6 % | 7/7 / 7/7 | 2/7 / 6/7 | 5.36 / 6.70 |
+
+Reading: the split keeps grain inside TILING4's 20 % (G1, G2 7/7) at beta 2, and brings the ZONE's grain to
+vanilla's (5.36 vs 5.39). The transition ratio still fails 6 sheets because today's INTERIORS carry more grain
+than vanilla's (6.70 vs 5.53) -- that part is the hex sampler's, not the layer blend's. G2bd (band shape no
+further from vanilla than today's) goes red on 5 of 7 selection sheets for every changed arm. Repeat 7/7: not
+reached by any arm. Leading candidate: beta 2.0 (s20).
+
+## RESUME (paused 2026-09-27 14:16 at bungo's word; nothing running, lock not held)
+
+Done: height source measured (2); off-identity PASS (3a); macro-vs-hex PASS (3b); rural camera (3c); transition
+gate red on today (3d); beta sweeps, whole-colour (3h table 1) and split (3h table 2); macro licence on Boston +
+rural (3g, licence 0 for brightness at Boston, 0 for colour in the hills). Source is committed (295d3988): both
+switches OFF by default, env overrides `WW_TILING5_BETA` / `WW_TILING5_MACRO` still in the code (must be removed).
+
+Next step, exactly:
+1. Macro licence on four more mosaics (script written, `t5_mosaics.sh`, not yet run -- stopped before it took the
+   lock): game gate, then
+   `cd /e/Projects/NifskopeWWE-tiling5/scratchpad/tiling5_20260927 && EXE=$PWD/run_m3/NifSkope.exe bash t5_mosaics.sh`
+   then `python t5_band.py today -20,16`, `-24,-28`, `-8,12`, `-20,-12`. If every channel's minimum licence
+   stays 0, the macro amplitudes become 0 by measurement (on == off bytes for the macro); say so plainly.
+2. Freeze constants in `src/lodgen.cpp` (beta 2.0, macro amplitudes from step 1), delete the two env reads,
+   update the `src/lodgen.h` doc block; `bash tools/ww_build.sh src/lodgen.cpp src/lodgen.h > build4.log`
+   (one build on the machine, game down).
+3. Re-run 3a off-identity (Boston, run copy vs run_rung), final arms (`t5_arms.sh`), `t5_gates.py trans|tiling|macro`,
+   saturation per sheet, THREADS=1 vs 16 cmp on Boston, timing before/after.
+4. Pictures via `t5_shot.sh` (Boston -5 -10 2 -3 and rural -36,4..-25,15; flat colour + lit; 4x dirt->grass crop),
+   `label.py` titles.
+5. DELIVERABLE_TEXT.md, skills review, delete `out/`, `run_*`, cache; commit by path; hand back.
+
+Uncommitted artefacts (stay out of git): `out/{id_rung,id_new,today,height,relief,b05,b10,s20,s10}`,
+`run_new`, `run_rung`, `run_m3`, `logs/*s10*`, `logs/*s20*`.
