@@ -9,6 +9,38 @@ A sky-occlusion law is a guess about how much sky a texel sees. The reference is
 geometry. Score the candidate laws against that reference before you ship one. Do not tune a law by looking at
 a picture.
 
+## FIRST: the reference must be the COSINE-weighted cast, not the law's own measure (TERR1 continuation, 2026-09-27)
+The method below casts elevations uniform in F = t/(1+t), the terrain march's own measure. A law scored against
+it only proves it fits its own measure: the first TERR1 law (`1 - 1.6 * sum F / 8`) matched that reference
+(canyon 45 vs 40) and was 2-7x too dark against physics (Theater District floor 12-16 vs 84-92). A horizontal
+patch of ground is lit by the cosine-weighted hemisphere about +Z (the object per-vertex sky stream's
+convention, docs 4.10): the band between elevations a and b weighs sin^2 b - sin^2 a, so walls that hide only
+the low sky hide little light. Do it like this (scripts in `scratchpad/terr1_20260927/`):
+1. **Cast once, store the law's inputs.** `physlaw.py <after VT.2> <before VT.2> <objh .bin> <lod prefix>
+   <ref sky json> <out.json> [per_cell n_open n_near]` casts the physical cosine-weighted sky (reach 1,458 and
+   10,000, canyon_check.py's caster, samples and seed; skill ww-canyon-sky-physical-check) through the bake's own
+   level-0 `.lodo/.lodi`, and stores per direction the terrain slope and the lattice wall / ceiling the law reads.
+   312 texels, ~90 s.
+2. **Score laws offline, no re-cast:** `lawfit.py <out.json> phys1458` (MAE / bias / corr per class: canyon, open,
+   near, deck). A new law is a new function in lawfit.py, never a new cast.
+3. **Self-check before trusting it:** replay the SHIPPED law from the stored inputs and compare with the baked byte
+   (TERR1: class means within 1 level, per-texel mean |d| 8.7 -- the height sheet stores 8-unit steps). And the
+   open-ground calibration must agree (mask B 210 vs physical 209-230).
+4. Measured (inputs from the f78c574c bake, ref = physical 1458):
+
+   | class | n | physical | F law (f78c574c) | cosine law `vis_T - sum(P(max(slope,wall)) - P(slope))/8`, P = t^2/(1+t^2) |
+   |---|---|---|---|---|
+   | canyon | 96 | 98.8 | 45.4 | 88.2 |
+   | open | 36 | 229.5 | 208.8 | 209.1 (= terrain byte) |
+   | near | 120 | 166.8 | 149.7 | 169.0 |
+   | deck | 60 | 44.1 | 6.5 | 43.8 |
+   | all MAE / bias / corr | 312 | | 42.3 / -32.6 / 0.865 | 30.6 / -4.8 / 0.864 |
+
+   The cosine law is commit 6eb5954f. These are PREDICTIONS from the stored inputs until a bake of that commit
+   is scored the same way (`resume.sh phys`).
+5. Keep the terrain part untouched and subtract only the objects' EXTRA cosine share over the terrain horizon:
+   where no object rises above the terrain slope the extra is 0.0f exactly and the byte stays the terrain byte.
+
 ## Inputs (all offline, no NifSkope run needed)
 - **Height sheet:** a `.lodt` VT.2 file from any Boston bake. Heights do not depend on the sky law.
 - **Object LOD triangles:** a native `.lodo`/`.lodi` pair (for example ao2 `reg_x7`). Read them with
