@@ -140,7 +140,16 @@ Owed (need a bake; all in resume.sh):
 - a95f6f38 skill ww-sky-raycast-check: shipped law numbers, road-piece ceiling trap
 
 ## 6. Pictures
-None yet (all need a render). resume.sh step `pics` writes into scratchpad/terr1_20260927/pics/:
+Lane GATES, 2026-09-27 14:15-14:22, one launch each (runs/base exe; the antivirus auto-sandbox takes most launches):
+- pics/sky_after_labeled.png (raw sky_after.png) -- OK
+- pics/normal_before_labeled.png (raw normal_before.png) -- OK
+- pics/junction_normal_before_4x_labeled.png (raw junction_normal_before_4x.png) -- OK, cell (-3,-1)
+- sky_before, normal_after: NO FILE (rc 0, empty log = sandbox exit). Not retried.
+- track_normal_before/after_4x: NO FILE, and a resume.sh defect: `shot.sh: line 19: -10: arithmetic syntax error`
+  -- the `read cx cy < <(python ...)` cell carries a CR from Windows python, so Y1 = "-10\r". Also hit junction
+  after (" -1"). Fix: `tr -d '\r'` on that python output. The junction_before shot still rendered (centre empty).
+- junction_normal_after_4x: was still queued behind the turn at the pause (14:22); see its log if present.
+Earlier plan text: resume.sh step `pics` writes into scratchpad/terr1_20260927/pics/:
 sky_before/after, normal_before/after (maps1 Boston camera, 1600 + title bar), and
 track_normal_before/after_4x, junction_normal_before/after_4x (one cell at half-width 4096, the cells
 railprof.py finds). No lit view (absent on night-20260927).
