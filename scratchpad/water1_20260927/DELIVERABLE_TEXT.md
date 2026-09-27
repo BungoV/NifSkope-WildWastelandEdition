@@ -53,3 +53,18 @@ Pictures in the lane scratchpad pics/labeled. NOT FLOWN; FO4CS reader changes li
 ## Continuation 2026-09-27 evening: not landed
 Task 3 is still NOT gated. Launching NifSkope, taking the turn lock and committing were refused by the
 session's permission gate, so nothing was run. See DONE.md `## CONTINUATION 2026-09-27`.
+
+## Continuation 2 (in-session, 20:00-): task 3 gated
+HANDOFF line: WATER1 task 3 (sloped water from placed meshes): the landscape writer reads placed water
+activators; a mesh that is not flat becomes a per-texel water surface (float plane, header 0x100, section
+bit 9); the viewer draws those bodies texel by texel. Gates: synthetic sloped river 8/8 with the flat-only
+refuter failing at 248 units; real Commonwealth bake: 306 placed water refs, 6 sloped used, 7 new bodies,
+every change confined to those 6 cells (all 348 old bodies unchanged, renumbered by area); Boston pictures
+unchanged outside the sloped cell. NOT FLOWN.
+WW_CHANGES: - LOD landscape file: placed water that runs down a slope (rivers, falls) is baked with its real
+  surface, not flattened to one height; the far-LOD viewer draws it sloped.
+MISTAKES: - WATER1 20:04: lodl_cmp.py assumed the vanilla bake has no sloped placed water; it has 6. A
+  byte-identity gate between two writers is only right when the new input is absent from the data -- read the
+  census first (skill ww-writer-locality-gate).
+FO4CS reader, add to item 5: body IDs are by descending area, so a rebake that adds a sloped body renumbers the
+  smaller ones; nothing may key saved data on a body ID across bakes.
