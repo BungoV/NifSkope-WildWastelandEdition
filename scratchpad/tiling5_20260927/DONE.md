@@ -1,0 +1,38 @@
+# Lane TILING5 -- LOD terrain: height-aware blending + large-scale variation
+
+Worktree `E:\Projects\NifskopeWWE-tiling5`, branch `tiling5-20260927` from night-trial @ 5b338d39.
+Rung = this worktree's first build, `release/NifSkope.before_tiling5.exe`, 11:54:04, 26,074,624 B,
+sha1 a94745fd. Objects copied from sibling NifskopeWWE-night (same commit, `make -n` 0 g++ lines).
+
+## 1. Skills loaded
+
+nifskope-ww-lodgen, nifskope-ww-worktree-build (section 5b path: sibling objects, 57 objects, rc 0).
+More are added below as they are loaded.
+
+## Finding before any work: the brief's "SHIPS OFF" is stale
+
+The brief says TILING4's hex tiling ships OFF behind `--land-sample stochastic`. The tree says otherwise:
+since 2026-09-12 (lane DEFAULTS1, bungo's pick) the DEFAULT land look is hex 256 + guide `flatwarp:1.0`
+with warp 341 + mip bias -0.22 (`src/lodgen.cpp` g_landHexSize = 256, g_landWarpAmp = 341,
+g_landGuideRule = FLATWARP; `src/nifcli.cpp` usage "DEFAULT 256 since 2026-09-12").
+`--land-sample stochastic` today means hex 256 with the warp forced to 0 -- a DIFFERENT look from the
+default. So "current hex" in this lane's gate table is the shipped default, and the new work is its own
+switch stacked on whatever sampler is active (section 3 of the code notes says why).
+
+## 2. Height source: height integrated from each texture's own normal map
+
+Measured by `m1_height_source.py` (log `logs/m1_height_source.txt`, numbers `m1_height_source.json`): every land
+texture the Commonwealth paints, weighted by the ground it covers, 70 of 100 textures measured = 18,607 of 20,050
+coverage weight (the 30 skipped are material-backed sets the Python model does not resolve; the C++ reads them).
+Reference = the relief the artist drew, integrated back out of the normal map (Frankot-Chellappa, periodic).
+
+| candidate | coverage-weighted median corr with the relief | note |
+|---|---|---|
+| diffuse luminance | 0.196 raw, 0.17 low-passed | bright is NOT high; would also bias every transition toward the brighter texture |
+| diffuse alpha | 0.314 (where it varies) | flat on 20.7 % of coverage: no signal there at all |
+| luminance vs slope (cavity) | 0.027 | no relation |
+| **normal-integrated height** | (the reference) | exists for every texture with a normal map; integrability residual median 0.54 |
+
+Neither free candidate reaches 0.35, so the bake integrates height from the normal map itself, once per texture
+(C++ FFT at <= 256 texels, per-mip unit-SD pyramid, thread-safe cache). A texture without a normal map gets h = 0,
+which reduces the height blend exactly to today's linear crossfade for that pair.
