@@ -5,7 +5,9 @@ WATER1 (2026-09-27, branch water1-20260927): the .lodl is written with water bod
 from the CLI and the panel; `--no-water-bodies` is the way back (version 2, byte for byte). In v3 the per-cell
 has-water bit is set only where water is over ground. The far-LOD viewer draws every water body as a flat
 surface at its body height (plain water, alpha 0.60, in the default view; the water plane views paint on the
-water, with a legend line). NOT FLOWN; FO4CS reader changes listed below are owed.
+water, with a legend line). Gates: --no-water-bodies = rung v2 byte for byte; v3 diff = 14,607 has-water
+clears only; water-off pictures identical 3/3; flatness 0; 0 wet texels under ground; legend 97.85% per view.
+Pictures in the lane scratchpad pics/labeled. NOT FLOWN; FO4CS reader changes listed below are owed.
 
 ## WW_CHANGES.md
 - LOD landscape file: water bodies are on by default (version 3). `--no-water-bodies` writes the old version 2.
@@ -16,6 +18,11 @@ water, with a legend line). NOT FLOWN; FO4CS reader changes listed below are owe
   leave the ground as it is. Flow is a colour wheel. Each view prints its legend.
 
 ## MISTAKES.md (root, newest on top)
+- WATER1 10:44: a second render pass was run after the first gave empty logs, without reading the Avast log
+  first. Both were Avast auto-sandbox (AvastSvc.log "marked for virtualization" + error 122). Rule: skill
+  ww-gui-launch-silent-exit before any retry; render passes stop at the first missing picture.
+- WATER1: the legend gate first compared FLAT pixels with legend bytes at 3/255 and failed; the FLAT frame
+  applies a fixed curve (255 -> 253, 51 -> 57). Measure the curve from categorical views and test the others.
 - WATER1 05:10: a bare `turn.sh` call (no arguments) queued an `acquire anon` for the machine-wide NifSkope
   turn; it holds the lock with no owner once it gets it. Rule: turn.sh has no "status" form -- read
   `.ns_turn/who` instead.

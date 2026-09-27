@@ -102,12 +102,25 @@ Audit rank 1 (audit1 DONE.md section 2.7, rows 34/35/38/42/43/44, 67-79, evidenc
 
 ## 5. Commits
 d658f922 bake default + has-water bit + docs + two harness pins; 23b371de viewer water + viewer harness pins;
-0a97fc8b report and scripts; (this commit) report update + skill.
+0a97fc8b report and scripts; 3df91f7f report + skill; 80b6f187 queued bakes gave up; f8462fcc bake gates +
+crash notes; be525b37 legend gate + stop-on-missing render pass; (this commit) pictures + final report.
 
 ## 6. Pictures
-In `scratchpad/water1_20260927/pics/` (not committed, public repo): A_waterheight.png, A_bodyid.png, A_shore.png
-(raw, no title bar yet), G_* six gate pictures. Still owed: A1_default, A_watertype, A_flow, A_cellflags, the
-before pair, the FLAT legend set, the v2 set, the whole-map oblique.
+Full size, 60 px title bar + legend strip from each render's own log line, in
+`E:\Projects\NifskopeWWE-water1\scratchpad\water1_20260927\pics\labeled\` (not committed, public repo).
+Boston = maps1 camera (region -5,-10..2,-3, view 8, ortho 16384, 1600x1600).
+- A1_default.png -- default view with objects: the Charles as flat semi-transparent water, bridges over it.
+- A_waterheight / A_watertype / A_bodyid / A_flow / A_shore / A_cellflags .png -- the plane views on the water,
+  ground left as it is. Flow carries the colour wheel. The Charles belongs to the sea body, so it reads "still".
+- B1_default_before.png -- the old exe on the same v3 file: no water drawn.
+- V2_default.png, V2_waterheight.png -- a v2 file: per-cell sheets; the log says "this file has no water
+  bodies (version 2)... 22 cells drawn, 58 cells flagged with water but dry left out". V2_bodyid is the same
+  picture as V2_default (sha1 e1b086d2aa89): the log says "bodyid: ABSENT -- ... plain water drawn".
+- WH_default.png -- whole Commonwealth, LIT1's camera (view 8, ortho 570000, look-at 0,0,0, 3200x1528):
+  220 of 348 bodies in view, flatness 0.0000, 0 of 1,359,242 wet texels under full-rate ground.
+- Gate-only (raw, unlabelled): G_* (identity), FL_* (legend gate).
+- Not made: B_waterheight_before (the old exe's water-height view). Avast sandboxed that launch (09:30:43 UTC
+  mark, exit at the 09:30:57 error-122 line); I did not relaunch it.
 
 ### Picture runs that made no file (10:35-10:51)
 Pass 1 and a retry: 11 of 14 shots ended rc 0 with an EMPTY log and no picture, in about 20-40 s. In the turn
@@ -126,14 +139,25 @@ no faulting-path record, so the owner is not proven from the log. My flat-water 
 cleared or blamed by this crash: the process that crashed was not running a .lodl.
 
 ## 7. Still not right
-- Everything in section 4's "not run yet" list is unmeasured. No claim is made that the water draws right.
+- Not flown; bungo has not looked. Nothing here is a claim that it is right in his eyes.
+- The coarse view mesh pokes up through the water in a few places (212 texel centres in Boston at 8 a cell,
+  2,971 in the whole map at 4 a cell): the grey patches at the Charles shore in A1_default. The file's own
+  ground is under the water there (0 above); it is the view mesh rate.
+- Whole map: the sea (body 1, 450 units) fills every low cell around the land, including a ring outside the
+  south and east edges, where the land ends in a cliff skirt. That is what the file says (those cells are below
+  450). Whether the game shows sea there is not checked.
+- V2_default: one per-cell sheet at the south-east corner reaches past where the view's terrain stops.
+- The Charles has one flow ("still") because it is part of the sea body; the river bodies carry the flow.
+- The legend gate needed a measured display curve (section 4). The curve itself (why FLAT is not raw bytes)
+  was not traced in the renderer.
+- B_waterheight_before not made (Avast).
 - The CLI `-no-gui lodl --region ... -o x.nif` goes through the same scene builder, so its NIF now carries
   the water shapes too (unless WW_LODL_WATER=0). Intended, but not yet looked at.
 - lodgen_byte_gate.sh phase (c) compares panel vs CLI .lodl: both are now v3 by default; expected equal
   (same fallback, same velocity plugin for a single ESM) but not run.
 
 ## 8. Skills review
-Loaded: see section 1. Wished for: a turn.sh "status" form (a bare call acquires). Written:
+Loaded: see section 1, plus ww-gui-launch-silent-exit (the Avast diagnosis). Wished for: a turn.sh "status" form (a bare call acquires). Written:
 `.claude/skills/ww-lodl-water-view/SKILL.md` in the worktree (switches, notes, gates, traps).
 
 ## Mistakes
@@ -152,3 +176,4 @@ Loaded: see section 1. Wished for: a turn.sh "status" form (a bare call acquires
   diagnosed before retrying.
 - I first wrote the fallback helper with the type name `LodtWriteOptions`; the real type is `LodtOptions`.
   The syntax check caught it before any build.
+- Bake outputs (bk_*) and the sheet cache deleted 12:2x; pictures kept in pics/ (untracked).
