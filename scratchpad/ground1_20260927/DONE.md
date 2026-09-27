@@ -60,7 +60,7 @@ The off bake's .lodi is version 7, zeros at 0x130, no census clause.
 
 | gate | result |
 |---|---|
-| off == night bake, byte for byte | IDENTITY_PENDING |
+| off == night bake, byte for byte | **254 of 272 files byte-identical, including every payload file** (.lodo, .lodi, .BTO, .BTR, .DDS ...). The 18 that differ are bookkeeping only: `Commonwealth.lodb` (exe stamp/size, bake time, output paths, stage times, working set) and 17 `scr/lodgen_chunk_cache/*.key` files, whose "inputs" line carries `lodgenGeneratorIdentity()` = the exe's own sha1, so two exes can never write the same key. Every `out.*` digest line in the two .lodb files is equal. Red controls (flip one byte; drop one file) fail as they must. Script verdict FAIL (it compares every file). GPU1's `cmp_trees.sh` (masks exactly those exe-digest / clock / path fields): **SAME rung vs off: 272 files**; its red control rung vs on: DIFF 2 of 272 (the .lodi and its .lodb record line), as it must. **PASS** (lane GATES, 10:5x) |
 | independent recompute within 1 level | **99.9984%** (16 vertices off by more than 1, max 7); 99.62% exact. PASS (>= 99.9%) |
 | more than 256 u above the terrain reads 0 | **768,197 of 768,197**. PASS |
 | within 16 u of the terrain reads >= 250 (as briefed) | **14,464 of 20,827**. FAIL -- by the law, not the code: 16 u above reads 255*(1-16/256) = 239; >= 250 holds only within ~5 u |
@@ -69,7 +69,7 @@ The off bake's .lodi is version 7, zeros at 0x130, no census clause.
 | red: old byte broadcast over each placement's vertices | recompute 34.9% within 1 (FAIL), >256 u -> 0 FAIL, law FAIL. The gates can go red |
 | red: stream + 2 | recompute FAIL |
 | decoder refuses a bad v12 by name (`redread.py`, CRCs re-sealed) | good ACCEPTED; 7 of 7 doctored copies REFUSED by name: v12 offset 0, v12 no stream, v11 carrying 0x130, pad 0x13C non-zero, slice length != AO slice, end offset short, offsets not monotone |
-| C++ reader (`--native-verify`) on the same copies | CPP_PENDING |
+| C++ reader (`--native-verify`) on the same copies | on_good (v12 with stream: 100,766 at 255, 771,502 at 0), off_good (v7) and good: accepted, rc 0. **7 of 7 doctored copies REFUSED by name, rc 1** (end offset short, offsets not monotone, pad 0x13C, slice != AO slice, v11 carrying 0x130, v12 no stream, v12 offset 0). PASS. Note: `verify.sh` as written fails rc 2 "'lodgen' needs a <file>" -- `--native-verify` still needs `--mo2-profile` or a file; lane GATES ran it with `--mo2-profile ".../profiles/Default" --worldspace 3C` (logs in `red/*.verify.log`) |
 | harness `lodgen_native_fields.py` | on and off give the same 40 checks / 6 failures / 2 skips; j0, j0b, j0c, j0d ok on both (on: v12 with stream; off: v7 without). The 6 failures (e1/g1 no mesh report given, f3, h1/h2/h4b ladder) are this bake's switches, identical on both arms |
 
 Why the placement-mean gate misses on 761 placements: the 0x12 byte averages the stock `.BTO` ring vertices of the
@@ -90,11 +90,21 @@ Whole Commonwealth estimate: the ao2 whole-map .lodi is 34,371,499 B with an AO 
 - (next) doc Measured line, DONE 5-8, resume steps, gates.py terrain-window fix
 
 ## 6. Pictures
-NOT MADE. Every render needs the machine-wide NifSkope turn. It has been held since 05:44:55 by "anon", a process
-that has exited. Overseer ruling: do not release, remove or work around it; that waits for bungo.
-Tooling is ready: `shot.sh` (maps1 Boston camera, view 8 ortho) and `label.py` (60 px bar, 2x crop).
+Made by lane GATES, 11:27 and 11:31, maps1 Boston camera (view 8 ortho, region -5,-10..2,-3), `WW_RENDER_FLAT=1
+WW_LODL_CHANNEL=ground`. Full size, one file each, 60 px bar (not in git):
+- `E:\Projects\NifskopeWWE-ground1\scratchpad\ground1_20260927\pics\ground1_stored_full.png` -- rung exe on bakes/rung;
+  note line: "the per-placement ground-contact blend (.lodi 0x12) ... 11416 placements read; min 0, max 255, mean 29.852"
+- `...\pics\ground1_vertex_full.png` -- run_new on bakes/on; note line: "the PER-VERTEX GROUND-CONTACT STREAM (.lodi v12
+  0x130) ... 213939 values read; min 0, max 255, mean 42.599"
+- `...\pics\ground1_stored_ballpark_2x.png`, `...\pics\ground1_vertex_ballpark_2x.png` -- 2x crop 860,580 400x400
+- `...\pics\ground1_stored_tower_2x.png`, `...\pics\ground1_vertex_tower_2x.png` -- 2x crop 330,340 400x400 (west tower)
+The two full renders differ in 478,789 of 2,598,400 pixels (not byte-identical, so the channel is wired). Terrain is
+255 in both (the note line says so).
 
 ## 7. What is still not right / RESUME STEPS
+**Steps 1-5 below were done by lane GATES (2026-09-27 10:1x-11:3x): rung bake, gates, C++ reader, pictures,
+cleanup (bakes/, red/, cache/ deleted; pics/ kept for hand-over).** `verify.sh` is still broken as written
+(needs `--mo2-profile`); the lane owns that fix.
 Blocked on the turn lock only. Still owed, in order (each script takes the turn itself; game gate inside):
 1. Rung bake (the real "night bake"), about 20 min:
    `G=/e/Projects/NifskopeWWE-ground1/scratchpad/ground1_20260927; bash $G/bake.sh $G/run_rung/NifSkope.exe $G/bakes/rung`
