@@ -49,19 +49,43 @@ Audit rank 1 (audit1 DONE.md section 2.7, rows 34/35/38/42/43/44, 67-79, evidenc
   flag bit 0 now means "water over ground". The reader still refuses unknown bits (no new bits).
 
 ## 4. Gates
-(in progress)
+- Build: `tools/ww_build.sh`, BUILD-RC=0, exe 05:04:14, MZ, rebuilt objects include every changed TU
+  (btdterrain, lodtfile, nifcli, lodgenmanager, nifskope_ui, + lodtfile.h includers). Run copy
+  `run_new/NifSkope.exe` sha1 27597ebe...; rung `run_rung/NifSkope.exe` sha1 da128947....
+- Syntax check of the four changed .cpp: RC=0, no warnings.
+- **BLOCKED from 05:44**: every bake/render gate needs the machine-wide NifSkope turn, and the turn lock is
+  held by `anon` (my stray bare `turn.sh` call, see Mistakes). Releasing it was refused to me. Not run yet:
+  the `--no-water-bodies` == rung sha1 gate, the default-v3 vs rung-v3 flag diff (bake_cmp.py), timing,
+  the water-off identity renders, flatness/Charles/ground-above numbers, the legend gate, the pictures.
+- Measured earlier with the rung exe (before this build): whole-Commonwealth landscape stage 4.4 s (v2) vs
+  6.6 s (v3, 348 bodies); file 36,014,342 B vs 38,673,288 B. So bodies cost about +2.2 s and +2.66 MB for
+  the whole worldspace (the .lodl is whole-worldspace by design; a region bake writes none).
+
+### Resume (all scripts are in scratchpad/water1_20260927, committed)
+1. `turn.sh release anon` (overseer), then my queued `bake.sh` pair runs by itself if still waiting
+   (limit 07:05); otherwise: `bash bake.sh run_new/NifSkope.exe bk_new_off --no-water-bodies` and
+   `bash bake.sh run_new/NifSkope.exe bk_new_def`.
+2. `sha1sum bk_new_off/.../Commonwealth.lodl` must be b4466203c9875dcc659707bfcd2f03ee91382618;
+   `python bake_cmp.py bk_new_def/.../Commonwealth.lodl bk_rung_v3/.../Commonwealth.lodl`.
+3. `bash render_all.sh gate|pics|flat|v2|whole`; `python legend_check.py`; `python label.py` per picture.
 
 ## 5. Commits
-(in progress)
+d658f922 bake default + has-water bit + docs + two harness pins; 23b371de viewer water + viewer harness pins;
+0a97fc8b report and scripts; (this commit) report update + skill.
 
 ## 6. Pictures
-(in progress)
+None yet (blocked, section 4).
 
 ## 7. Still not right
-(in progress)
+- Everything in section 4's "not run yet" list is unmeasured. No claim is made that the water draws right.
+- The CLI `-no-gui lodl --region ... -o x.nif` goes through the same scene builder, so its NIF now carries
+  the water shapes too (unless WW_LODL_WATER=0). Intended, but not yet looked at.
+- lodgen_byte_gate.sh phase (c) compares panel vs CLI .lodl: both are now v3 by default; expected equal
+  (same fallback, same velocity plugin for a single ESM) but not run.
 
 ## 8. Skills review
-(in progress)
+Loaded: see section 1. Wished for: a turn.sh "status" form (a bare call acquires). Written:
+`.claude/skills/ww-lodl-water-view/SKILL.md` in the worktree (switches, notes, gates, traps).
 
 ## Mistakes
 - 05:10 I ran `turn.sh` with NO arguments (meaning to print its state). A bare call is `acquire anon`: it queued
