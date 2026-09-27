@@ -187,3 +187,125 @@ Exe runs/sky2 = commit f78c574c (sha1 0c9908c5). If the source moves, rebuild wi
 - Edited skycast.py with a heredoc Python patch and canyon.py with `sed -i`; night rules say scripts go through
   Write/Edit only. Both files were re-read and re-run afterwards.
 - Tried a foreground `sleep` chain to wait for the lock; the tool blocks that. Used background waiters instead.
+
+## CONTINUATION 2026-09-27
+
+Brief: fix the canyon sky (mask B 3-7x too dark against the physical ray cast), find and fix what moves 324 normal
+blocks outside the roads mask (G2), fix resume.sh's carriage-return defect, make the missing pictures.
+
+**The blocker, first:** in this session the harness refused to run any build or any lane shell script
+(`bash build.sh ...`, the same through PowerShell, backgrounded or not; also `bash -n` and `patch --dry-run`).
+Python and read-only git ran. I did not route a build through Python to get around the refusal. So
+**nothing was built, baked or rendered this session**: every number below is measured OFFLINE on the first session's
+bakes (lane GATES, 2026-09-27 11:20-12:36, exe runs/sky2 = f78c574c), or is an offline PREDICTION of the new law.
+Also not readable here: `E:\Projects\NifskopeWildWastelandEdition\scratchpad\overseer_20260927\night_rules.md`
+(outside the session's allowed folders); I worked from the brief's rules.
+
+### What I ran
+1. `physlaw.py` (new): the physical cosine-weighted cast of skill `ww-canyon-sky-physical-check` (canyon_check.py's
+   caster, samples and seed), through bakes/on's own `.lodo/.lodi` (the ao2 `reg_x7` pair it used is gone from
+   Temp), plus the law's inputs per direction, 312 texels, 83 s. Reproduces GATES' canyon numbers: mask B 44.8,
+   physical 98.8 (reach 1458) / 85.3 (reach 10000) vs GATES 45 / 99 / 85 (measured).
+2. `lawfit.py` (new): scores laws over those inputs against the cast, no re-cast.
+3. G2 forensics on the bakes: `g2diag.py`, `g2tex.py`, `g2steep.py`, `g2tail.py`, `g2shift.py` (new).
+
+### Fix 1: the sky law (commit 6eb5954f, src/lodgen.cpp + docs/LODGEN_TERRAIN_VT.md; NOT BUILT)
+Cause (reasoned from the code + measured by the cast): the union summed F(max(slope, wall)), F(t) = t/(1+t),
+under the terrain march's `1 - 1.6 * sum / 8`. That weighs every elevation alike and gains it by 1.6, which is
+tuned for hills. A horizontal patch of ground is lit by the cosine-weighted sky, where the low sky that street walls
+hide weighs little.
+New law: `vis = vis_terrain - sum_dirs( min(1, P(max(slope, wall)) + [ceiling] 1/(1+open^2)) - P(slope) ) / 8`,
+P(t) = t^2/(1+t^2) = sin^2 of the elevation. The terrain part is untouched. Where no object square rises above the
+terrain horizon and no ceiling is seen, the increment is exactly 0.0f, so the byte is the terrain byte bit for bit
+(reasoned from the code; the OFF gate and the open-ground gate re-measure it after a bake).
+Offline prediction (lawfit.py, ref = physical cast reach 1458; measured on the law's inputs, NOT a bake):
+
+| class | n | physical | F law (baked f78c574c) | cosine law (predicted) |
+|---|---|---|---|---|
+| canyon | 96 | 98.8 | 45.4 | **88.2** |
+| open | 36 | 229.5 | 208.8 | 209.1 (= terrain byte) |
+| near | 120 | 166.8 | 149.7 | 169.0 |
+| deck | 60 | 44.1 | 6.5 | 43.8 |
+| all: MAE / bias / corr | 312 | | 42.3 / -32.6 / 0.865 | **30.6 / -4.8 / 0.864** |
+
+Named streets, predicted (cosine / F law replay / baked F law / physical): Theater (3,-7) 56.9 / 14.9 / 12.3 / 92.3;
+VaultTec (3,-3) 65.3 / 28.7 / 27.4 / 89.7; BeaconHill (3,-1) 67.0 / 29.9 / 30.6 / 96.6; Hubris (1,-5)
+72.6 / 29.1 / 31.0 / 80.7; FensBank (-3,-5) 96.7 / 52.5 / 55.0 / 94.4; DiamondCity (-4,-8) 107.2 / 51.8 / 51.5 /
+95.9; FensSewer (-5,-7) 132.5 / 88.9 / 85.2 / 115.9; BackBay (0,-7) 107.8 / 67.7 / 65.5 / 124.9.
+Still too dark in the deepest streets (Theater 57 vs 92), but above the object stream's ~52 on the wall feet.
+Self-check: replaying the F law from the Python inputs vs the baked byte: class means within 1 level, per texel mean
+|d| 8.7 (48% within 2 levels; the height sheet stores heights in 8-unit steps).
+Pre-registered bars for the bake (written before any bake of 6eb5954f): canyon mean mask B 70-114 (physical 85-99
++-15); every named street >= 52; open ground byte-identical to the terrain-only bake; all-texel |bias| <= 10
+against phys1458; OFF bake == base, byte for byte.
+
+### Finding 2: G2, what moves the 324 blocks (measured on the bakes; the cause is NOT proven)
+- All 324 violating blocks have a decoded colour difference of 0 at every texel. 315 of 324 touch (<= 1 block) a
+  block whose colour did change; 6.8% are border blocks. Typically ONE texel in the block moves, by 2-83 degrees
+  (241 blocks > 10 deg).
+- Not a grid offset: IoU of the moved-normal mask against the colour-change mask is highest at shift (0,0)
+  (0.652; any 1-texel shift <= 0.638).
+- Not steep faces: the moved texel's normal has up-component median 0.934 (5.9% below 0.5).
+- `--no-roads` removes flat objects too (census `flatObjects = roads && flatObjects`), so the mask covers every
+  stamp source.
+- Texel level, whole box: of 1,089,154 texels whose normal moved > 10 deg, 0.94% (10,231) show no decoded colour
+  change, and 94% of those sit within 1 texel of a colour change: a fringe along road edges.
+- Code reading: the stamp weight is set ONLY inside the colour lerp (`ra > 0`), both the road and the flat passes
+  composite normal and colour from the same fragment, and the fold skips w = 0. So each violating texel had a
+  real road or flat fragment with w > 0, and its colour move did not survive to the sheet. Candidates: the road's
+  colour is close to the ground's, or BC1 (565 endpoints, 4-entry palette) swallows a small single-texel colour
+  move that the msn sheet (also BC1) keeps because the normal moved a lot. Neither is proven.
+- NOT FIXED: I did not change code on a cause I could not measure. The measurement is prepared:
+  `stamp_diag.patch` (env `WW_TERR1_STAMP_DIAG`, a per-texel record of weight, colour move before rounding,
+  coverage), `resume.sh diag` (patch, build, UN-patch, bake, check its sheets equal bakes/on), and
+  `g2stampdiag.py`. Its header pre-registers the reading: A (colour move < 2 levels on >= 90%: the gate's BC1
+  proxy is too coarse; fix the gate), B (>= 10% have no stamp record: something else writes msn; find it),
+  C (colour moved >= 2 levels and was undone later; find the stage).
+
+### Fix 3: resume.sh (done)
+- The 4x cell read now strips the carriage return: `python ... | tr -d '\r'`.
+- New exe tag `sky3` + a `build` step; the `diag` and `phys` steps; `label.py` adds the 60 px title bar after each
+  shot; the picture objects come from bakes/on's own .lodo/.lodi (the ao2 `reg_x7` folder is gone).
+- NOT RUN: the harness refused `bash -n resume.sh`, so even its syntax is unchecked.
+
+### Gates
+
+| gate | expected | measured | verdict |
+|---|---|---|---|
+| sky law vs physical cast, canyon mean | 70-114 | predicted 88.2 (baked: none) | NOT MEASURED (no bake) |
+| named streets >= 52 | all 8 | predicted min 56.9 (Theater) | NOT MEASURED (no bake) |
+| open ground = terrain byte | identical | predicted identical (increment 0.0f) | NOT MEASURED (no bake) |
+| all-texel bias vs phys1458 | abs <= 10 | predicted -4.8 | NOT MEASURED (no bake) |
+| OFF == base | byte-identical | -- | NOT MEASURED (no bake) |
+| G2 off-mask identity | 0 violations | 324 (first-session bake, unchanged code) | FAIL, cause narrowed, not fixed |
+| G1 / G3 / G4 / rail profile | as first session | stamp code unchanged since | first-session PASS stands; not re-run |
+| physical cast reproduces GATES | canyon 45 / 99 / 85 | 44.8 / 98.8 / 85.3 | PASS |
+| resume.sh CR fix | 4x cells read clean | edited, not run | NOT MEASURED |
+
+### Pictures (for the overseer to send)
+- pics/junction_normal_after_4x_labeled.png -- NEW this session (labelled from the render lane GATES made at
+  14:23; the normal stamp code is unchanged since, so it stands). Cell (-3,-1).
+- Still standing from the first session: pics/normal_before_labeled.png,
+  pics/junction_normal_before_4x_labeled.png.
+- STALE: pics/sky_after_labeled.png shows the OLD, too-dark law. Do not send it as "fixed".
+- NOT MADE (renders refused): sky_before, sky_after (new law), normal_after, track_normal_before_4x,
+  track_normal_after_4x. `bash resume.sh build on off noroads noflat gates phys pics` makes them all.
+
+### Still open
+1. Build 6eb5954f and bake (resume.sh `build on off noroads noflat`), then `gates phys pics`, then write the
+   measured numbers over the predictions above.
+2. G2: `resume.sh diag`, read g2stamp.json against the pre-registered A/B/C, fix whatever it names.
+3. The deepest canyons stay darker than physical (Theater predicted 57 vs 92). Likely from the 128-unit lattice
+   reading a whole square's top at 64 u (reasoned, not measured).
+4. `clean` after the numbers are in (bakes are ~785 MB).
+
+### Skills
+- Loaded: ww-canyon-sky-physical-check, nifskope-ww-worktree-build.
+- Wished for: a skill that says which shell forms this harness accepts for build/bake scripts at night, and what a
+  lane does when none is accepted (this session lost every build, bake and render to it).
+- Written: none. The procedure I re-derived (cast once, store the law's inputs, score laws offline; the reference
+  must be the cosine-weighted cast, not the law's own measure) belongs in the existing
+  `.claude/skills/ww-sky-raycast-check/SKILL.md`. The harness refused writes under `.claude/skills` in this session,
+  so that update is owed (text: the "Fix 1" table plus physlaw.py/lawfit.py usage above).
+
+TERR1 PARTIAL cosine sky law committed (6eb5954f, predicted canyon 88 vs physical 99) but unbuilt/unbaked -- harness refused every build; G2 narrowed to stamped texels whose colour move vanishes, diagnostic ready, not fixed; CR fix in resume.sh
