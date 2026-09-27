@@ -53,13 +53,28 @@ Audit rank 1 (audit1 DONE.md section 2.7, rows 34/35/38/42/43/44, 67-79, evidenc
   (btdterrain, lodtfile, nifcli, lodgenmanager, nifskope_ui, + lodtfile.h includers). Run copy
   `run_new/NifSkope.exe` sha1 27597ebe...; rung `run_rung/NifSkope.exe` sha1 da128947....
 - Syntax check of the four changed .cpp: RC=0, no warnings.
-- **BLOCKED from 05:44**: every bake/render gate needs the machine-wide NifSkope turn, and the turn lock is
-  held by `anon` (my stray bare `turn.sh` call, see Mistakes). Releasing it was refused to me. Not run yet:
-  the `--no-water-bodies` == rung sha1 gate, the default-v3 vs rung-v3 flag diff (bake_cmp.py), timing,
-  the water-off identity renders, flatness/Charles/ground-above numbers, the legend gate, the pictures.
-- Measured earlier with the rung exe (before this build): whole-Commonwealth landscape stage 4.4 s (v2) vs
-  6.6 s (v3, 348 bodies); file 36,014,342 B vs 38,673,288 B. So bodies cost about +2.2 s and +2.66 MB for
-  the whole worldspace (the .lodl is whole-worldspace by design; a region bake writes none).
+- Blocked 05:44-10:14 on the turn lock (`anon`, my mistake, see Mistakes); resumed after the overseer freed it.
+- **Bakes with the new exe** (Boston box, whole-worldspace .lodl):
+  - `--no-water-bodies`: rc 0, 28.6 s wall, landscape stage 4.7 s, 36,014,342 B,
+    sha1 b4466203c9875dcc659707bfcd2f03ee91382618 = the rung's v2 file. **PASS (byte-identical).**
+  - default: rc 0, 18.9 s wall, landscape stage 5.6 s, v3, 38,673,288 B, sha1 1abc7d379f476efaea944f87bca51ccd77d37d24.
+    Log: 348 bodies (sea 1, river 115, lake 232), 525 bridge merges kept / 13 refused;
+    "has-water bit: 22257 cell(s) with water over ground, 14607 cleared".
+  - Cost: +0.9 s (this exe) to +2.2 s (rung exe, earlier) on the landscape stage, +2.66 MB for the whole map.
+    Wall time is dominated by other stages (the default run was faster than the off run: disk cache).
+- **bake_cmp.py** (new default v3 vs rung v3, sha1 203f65d8...): floors first -- a flipped byte at 2361004 -> FAIL
+  naming it; a flipped bit1 -> FAIL. Subject: **PASS**. 14,607 differing bytes, all in cell flag words; all 14,607
+  are bit0 cleared; 0 stray changes; bit0 cells 22,257 (new) vs 36,864 (rung = every cell).
+- **Water forced off gives identical pictures** (rung exe vs new exe with `WW_LODL_WATER=0`, 1600x1624):
+  L01_default ed61cd30ea82 = ed61cd30ea82; P_waterheight 42a17b9465b3 = 42a17b9465b3;
+  W3_bodyid a76ebc190c33 = a76ebc190c33. **PASS (3 of 3).**
+- **Flatness / Charles / ground above** (A_bodyid log, maps1 Boston camera): 8 of 348 bodies in the region,
+  8,415 wet texels at 32 a cell, 181 flat quads in 1 shape. Body 1 (sea, which carries the Charles and the
+  harbour) at 450.00 units, 7,911 texels -- one body; body 43 (river) at 578.00, 340 texels; lakes at 450.
+  Flatness: 0.0000 spread inside each body, 0.0000 from the table height. Ground above water: **0 of 8,415** in
+  the file's full-rate ground; 212 where the coarser view mesh (8 a cell) pokes up at texel centres (mesh rate,
+  not the data). Bridges over the Charles need the A1_default picture (objects on) -- not rendered yet.
+- **Legend gate**: not run yet (needs the FLAT renders).
 
 ### Resume (all scripts are in scratchpad/water1_20260927, committed)
 1. `turn.sh release anon` (overseer). My queued `bake.sh` pair gave up at 07:05 and 09:05 with the lock
@@ -74,7 +89,20 @@ d658f922 bake default + has-water bit + docs + two harness pins; 23b371de viewer
 0a97fc8b report and scripts; (this commit) report update + skill.
 
 ## 6. Pictures
-None yet (blocked, section 4).
+In `scratchpad/water1_20260927/pics/` (not committed, public repo): A_waterheight.png, A_bodyid.png, A_shore.png
+(raw, no title bar yet), G_* six gate pictures. Still owed: A1_default, A_watertype, A_flow, A_cellflags, the
+before pair, the FLAT legend set, the v2 set, the whole-map oblique.
+
+### Picture runs that made no file (10:35-10:51)
+Pass 1 and a retry: 11 of 14 shots ended rc 0 with an EMPTY log and no picture, in about 20-40 s. In the turn
+waits right after each such shot a `water1\run_new` (or `run_rung`) NifSkope was still listed for 15-30 s.
+An empty log with rc 0 is what `main.cpp` does when it cannot bind its `--port` (it forwards the file to
+the port's holder and exits 0) -- or an AV kill of a fresh exe (night rules). Not settled which.
+The overseer's crash at 10:47 (null write, pids 19148/49176 started 10:47:34, `--port 43742`, empty "" argument):
+**not one of my launches by its command line** -- mine all use ports 42901-42951 and always pass a .lodl path;
+437xx ports and a `run_new` folder are also ground1's. The event log has two popups (10:47:21 and 10:47:43) and
+no faulting-path record, so the owner is not proven from the log. My flat-water draw path cannot be
+cleared or blamed by this crash: the process that crashed was not running a .lodl.
 
 ## 7. Still not right
 - Everything in section 4's "not run yet" list is unmeasured. No claim is made that the water draws right.

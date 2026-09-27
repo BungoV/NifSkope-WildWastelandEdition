@@ -7,7 +7,7 @@ EXE="$1"; OUT="$2"; shift 2
 if tasklist //FI "IMAGENAME eq Fallout4.exe" 2>/dev/null | grep -q Fallout4.exe; then echo "GAME UP"; exit 1; fi
 mkdir -p "$OUT"
 wp() { echo "$1" | sed -E 's#^/([a-zA-Z])/#\U\1:/#'; }
-bash /e/Projects/NifskopeWWE-fix1/scratchpad/fix1_20260926/turn.sh acquire water1 7200 || exit 1
+bash /e/Projects/NifskopeWWE-fix1/scratchpad/fix1_20260926/turn.sh acquire water1 21600 || exit 1
 t0=$(date +%s.%N)
 "$EXE" -no-gui lodgen --mo2-profile "E:/Projects/Fallout 4 Mods/profiles/Default" --worldspace 3C \
     --lodl "$(wp "$OUT")" "$@" > "$OUT/bake.log" 2>&1
