@@ -59,6 +59,9 @@
 set -u
 
 . "$(dirname "$0")/_harness.sh"
+# The flat water surfaces the viewer adds (lane WATER1) are left out: this gate
+# measures the terrain mesh. The water has its own renders in the WATER1 lane.
+export WW_LODL_WATER=0
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 NS="${EXE:-$ROOT/release/NifSkope.exe}"
