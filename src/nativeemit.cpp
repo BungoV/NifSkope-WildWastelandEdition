@@ -2683,6 +2683,10 @@ bool lodgenNativeWrite( QString * report, QString * error )
 	int vskyInstances = 0;
 	quint64 vskyBytes = 0, vskyOpen = 0;
 	double vskySum = 0.0;
+	// v12 (lane GROUND1): the ground-contact stream's census
+	int vgndInstances = 0, vgndSpan = 0;
+	quint64 vgndBytes = 0, vgndFull = 0, vgndZero = 0;
+	double vgndSum = 0.0;
 	// lane AO2: the face cast's census
 	bool vaoWeldAcross = false;
 	float vaoFaceStep = 0.0f, vskyReach = 0.0f, vaoWeldDeg = -1.0f, vaoUnderTol = -1.0f, vaoPatchDeg = -1.0f;
@@ -2695,6 +2699,10 @@ bool lodgenNativeWrite( QString * report, QString * error )
 		set.vertexAo = true;
 		// v7: the sky stream rides the SAME loop, the same scene, the same reach
 		set.vertexSky = s.lodiV7;
+		/* v12 (lane GROUND1): the per-vertex ground-contact stream rides the same
+		 * loop and reads the same ESM heightfield. ON by default; the env switch is
+		 * the byte-identity gate's way back and nothing else. */
+		set.vertexGround = s.lodiV7 && qEnvironmentVariable( "WW_LODGEN_NO_VERTEX_GROUND" ) != QStringLiteral( "1" );
 		// the library meshes decoded once: vertex range, positions, normals, level-0 triangles
 		struct DecodedMesh {
 			quint32 first = 0, count = 0;
@@ -3591,10 +3599,23 @@ bool lodgenNativeWrite( QString * report, QString * error )
 						r.vertexAo.resize( n );
 						if ( wantSky )
 							r.vertexSky.resize( n );
+						if ( set.vertexGround )
+							r.vertexGround.resize( n );
 						for ( quint32 v = 0; v < n; v++ ) {
 							r.vertexAo[v] = quint8( std::lround( std::min( 1.0f, std::max( 0.0f, aoV[b0 + v] ) ) * 255.0f ) );
 							if ( wantSky )
 								r.vertexSky[v] = quint8( std::lround( std::min( 1.0f, std::max( 0.0f, skV[b0 + v] ) ) * 255.0f ) );
+							if ( set.vertexGround ) {
+								/* v12: the stock ground-contact law at THIS vertex (src/lodgen.cpp,
+								 * CONTACT_RANGE): 1 at or below the bilinear ESM surface, 0 by
+								 * 256 world u above it. The vertex's own placed position, not
+								 * the across-face samples the AO pools: the ramp is geometry,
+								 * not a cast, and has nothing to average. Miniature units. */
+								const Vector3 & q = wp[b0 + v];
+								const float g = ground.groundHeight( q[0], q[1] );
+								const float gb = std::min( 1.0f, std::max( 0.0f, 1.0f - ( q[2] - g ) / ( 256.0f * inv ) ) );
+								r.vertexGround[v] = quint8( std::lround( gb * 255.0f ) );
+							}
 						}
 					}
 				}
@@ -3647,6 +3668,22 @@ bool lodgenNativeWrite( QString * report, QString * error )
 				if ( v >= 128 )
 					vskyOpen++;
 			}
+		}
+		for ( const LodiSrcInstance & r : set.instances ) {
+			if ( r.vertexGround.empty() )
+				continue;
+			vgndInstances++;
+			vgndBytes += r.vertexGround.size();
+			quint8 lo = 255, hi = 0;
+			for ( quint8 v : r.vertexGround ) {
+				vgndSum += v;
+				vgndFull += ( v == 255 );
+				vgndZero += ( v == 0 );
+				lo = std::min( lo, v );
+				hi = std::max( hi, v );
+			}
+			if ( hi - lo >= 128 )
+				vgndSpan++;   // the placements one flat byte could never draw: half the ramp or more inside them
 		}
 	}
 	/* ---- v7: THE GROUPING. bungo 2026-09-18: "The houses should be one object
@@ -4353,6 +4390,14 @@ bool lodgenNativeWrite( QString * report, QString * error )
 					.arg( vskyHist[0] ).arg( vskyHist[1] ).arg( vskyHist[2] ).arg( vskyHist[3] )
 					.arg( vskyHist[4] ).arg( vskyHist[5] ).arg( vskyHist[6] ).arg( vskyHist[7] )
 				: QStringLiteral( "OFF (--lodi-v6)" ) );
+		/* v12 (lane GROUND1): named only when it ran, so the report of a bake with
+		 * the stream off is the report it was before this lane, word for word. */
+		if ( vgndInstances || vgndBytes )
+			ladderLine += QString( "; vertex ground contact ON: %1 placements streamed (%2 bytes, mean %3, %4 at the terrain = 255, "
+				"%5 at 256 u or more above it = 0, %6 placement(s) spanning half the ramp or more)" )
+				.arg( vgndInstances ).arg( vgndBytes )
+				.arg( vgndBytes ? vgndSum / double( vgndBytes ) : 0.0, 0, 'f', 1 )
+				.arg( vgndFull ).arg( vgndZero ).arg( vgndSpan );
 		ladderLine += QString( "; groups %1" )
 			.arg( s.lodiV7
 				? QString( "%1 over %2 placements (%3 grouped, largest %4, %5 singleton), %6 placement(s) whose BASE model path has a `%7` component" )

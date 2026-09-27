@@ -470,8 +470,8 @@ def read_lodi(path):
     if h['version'] == 2:
         raise Refusal('version 2: a v2 instance table has no occluder tables (header 0x98 and 0xA0 were '
                       'reserved), so every cell would read as occluding nothing')
-    if h['version'] not in (3, 4, 5, 6, 7, 8, 9, 10, 11):
-        raise Refusal('version %d; this reader knows 3 to 11' % h['version'])
+    if h['version'] not in (3, 4, 5, 6, 7, 8, 9, 10, 11, 12):
+        raise Refusal('version %d; this reader knows 3 to 12' % h['version'])
     # v8 = v7 + the per-vertex HORIZON stream, in the room v7's header left reserved.
     # RETIRED 2026-09-19 (lane HORIZONOUT): no exe writes one, this reader still reads one.
     v8 = h['version'] == 8
@@ -479,7 +479,9 @@ def read_lodi(path):
     # and NOT of v8: a v9 file carries no horizon stream and its 0x11C..0x1FF are reserved.
     # v10 = v9 + instance flag bit 7, SCALE_WIDE: scale = 8 + u16 / 8192 (lane BAKE2, 2026-09-25).
     # v11 = v10 + instance flag bit 8, INITIALLY_DISABLED (lane NEAR1, 2026-09-26; the near library only).
-    v11 = h['version'] == 11
+    # v12 = v11 + the per-vertex GROUND-CONTACT stream at 0x130/0x138 (lane GROUND1, 2026-09-27).
+    v12 = h['version'] == 12
+    v11 = h['version'] == 11 or v12
     v10 = h['version'] == 10 or v11
     v9 = h['version'] == 9 or v10
     # v7 = v6 + the group table and/or the per-vertex sky stream, in a 512-byte header BLOCK
@@ -623,8 +625,27 @@ def read_lodi(path):
             if any(b[0x130:0x200]):
                 raise Refusal('reserved bytes 0x130..0x1FF not zero')
         elif v7:
-            if any(b[0x11C:0x200]):
-                raise Refusal('reserved bytes 0x11C..0x1FF not zero (version-8 words in a version-7 file)')
+            if any(b[0x11C:0x130]):
+                raise Refusal('reserved bytes 0x11C..0x12F not zero (version-8 words in a version-%d file)'
+                              % h['version'])
+            # v12: the ground-contact stream at 0x130 (u64 offset) / 0x138 (u32 bytes); version 12 IS it
+            h['offVertexGround'] = h['vertexGroundBytes'] = 0
+            if v12:
+                h['offVertexGround'] = le('Q', b, 0x130)[0]
+                h['vertexGroundBytes'] = le('I', b, 0x138)[0]
+                if h['offVertexGround'] == 0:
+                    raise Refusal('version 12 with no vertex-ground stream (header 0x130 is 0); '
+                                  'the stream is what version 12 IS')
+                if h['vertexGroundBytes'] < 4 * (h['instanceCount'] + 1):
+                    raise Refusal('vertex-ground stream of %d bytes cannot hold its own %d offset words'
+                                  % (h['vertexGroundBytes'], h['instanceCount'] + 1))
+                if any(b[0x13C:0x200]):
+                    raise Refusal('reserved bytes 0x13C..0x1FF not zero')
+            elif any(b[0x130:0x13C]):
+                raise Refusal('version %d carrying version-12 header words (vertex-ground stream at 0x130); '
+                              'the stream is a version 12 payload' % h['version'])
+            elif any(b[0x13C:0x200]):
+                raise Refusal('reserved bytes 0x13C..0x1FF not zero')
     elif any(b[0x100:0x120]) and len(b) >= 0x120:
         raise Refusal('version %d carrying version-7 header words; versions 3 to 6 have a 256-byte '
                       'header and end at 0x100' % h['version'])
@@ -665,6 +686,10 @@ def read_lodi(path):
     if v8 and h['offVertexHorizon']:
         iVhor = len(tabs)
         tabs.append(('vertexHorizon', h['offVertexHorizon'], h['vertexHorizonBytes']))
+    iVgnd = -1
+    if v12 and h.get('offVertexGround'):
+        iVgnd = len(tabs)
+        tabs.append(('vertexGround', h['offVertexGround'], h['vertexGroundBytes']))
     prev = hdr
     for name, off, size in tabs:
         if off % 4096:
@@ -698,7 +723,9 @@ def read_lodi(path):
         ranges.append((tabs[iVsky][1], tabs[iVsky][2]))
     if iVhor >= 0:                     # v8: the horizon stream joins after the sky one
         ranges.append((tabs[iVhor][1], tabs[iVhor][2]))
-    idx = b''.join(b[off:off + size] for off, size in ranges)
+    if iVgnd >= 0:                     # v12: the ground stream joins after the sky one
+        ranges.append((tabs[iVgnd][1], tabs[iVgnd][2]))
+    idx =b''.join(b[off:off + size] for off, size in ranges)
     if crc32(idx) != h['indexCrc32']:
         raise Refusal('indexCrc32 mismatch')
     T = {'header': h, 'indexRanges': ranges, 'headerBytes': hdr}
@@ -739,7 +766,23 @@ def read_lodi(path):
         f = T['vertexHorizonFirst']
         if f[0] != 0 or any(f[i] > f[i + 1] for i in range(n1 - 1)) or f[-1] != len(T['vertexHorizon']):
             raise Refusal('vertex-horizon offsets are not a monotone run from 0 to the byte count')
-    T['chunks'] = [dict(zip(('instanceFirst', 'instanceCount', 'zMin', 'zExtent', 'maxBoundRadius', 'cellRangeOffset',
+    # v12: s4.10's layout exactly, for ground contact, one vertex population with the AO stream
+    T['vertexGroundFirst'], T['vertexGround'] = [], []
+    if iVgnd >= 0:
+        n1 = h['instanceCount'] + 1
+        o = h['offVertexGround']
+        T['vertexGroundFirst'] = list(le('%dI' % n1, b, o))
+        T['vertexGround'] = list(b[o + 4 * n1:o + h['vertexGroundBytes']])
+        f = T['vertexGroundFirst']
+        if f[0] != 0 or any(f[i] > f[i + 1] for i in range(n1 - 1)) or f[-1] != len(T['vertexGround']):
+            raise Refusal('vertex-ground offsets are not a monotone run from 0 to the byte count')
+        a = T['vertexAoFirst']
+        for i in range(n1 - 1):
+            gn = f[i + 1] - f[i]
+            if gn and (not a or gn != a[i + 1] - a[i]):
+                raise Refusal('instance %d has %d ground-contact bytes but %d AO bytes; the two streams are '
+                              'one vertex population' % (i, gn, (a[i + 1] - a[i]) if a else 0))
+    T['chunks'] =[dict(zip(('instanceFirst', 'instanceCount', 'zMin', 'zExtent', 'maxBoundRadius', 'cellRangeOffset',
                              'crc32', 'reserved'), le('IIfffIII', b, h['offChunks'] + i * 32))) for i in range(h['chunkCount'])]
     T['cellRanges'] = [le('II', b, h['offCellRanges'] + i * 8) for i in range(h['presentChunks'] * 16)]
     T['instances'] = [dict(zip(('px', 'py', 'pz', 'r0', 'r1', 'r2', 'scale', 'baseId', 'ao', 'sky', 'ground', 'seed',
