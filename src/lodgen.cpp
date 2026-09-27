@@ -15416,6 +15416,7 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 
 	std::vector<std::unique_ptr<LodvWriter>> writers;
 	std::vector<QString> paths;
+	std::vector<LodvHeaderFields> headers;      // the one-value test reads the sheet set
 	for ( int l = 0; l < nLevels; l++ ) {
 		LodvHeaderFields h;
 		h.flags = LODV_FLAG_ROW_ORDER_NORTH_UP
@@ -15478,6 +15479,7 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 			return fail( werr );
 		writers.push_back( std::move( w ) );
 		paths.push_back( path );
+		headers.push_back( h );
 		lodgenNoteLayoutFile( path );
 	}
 
@@ -15580,11 +15582,27 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 			} );
 	}
 
+	/* ONE-VALUE SHEETS (lane FLAT2): per sheet index, how many tiles stored the
+	 * 16-byte record instead of the sheet, and the raw bytes that saved. */
+	qint64 uniformCount[LODV_MAX_SHEETS] = {};
+	qint64 uniformSaved = 0;
 	auto writeTile = [&]( int lv, const LodgenVtStage & st ) -> bool {
 		const QByteArray raw = lodgenVtEncodeTile( st, stored, mips, opts.height,
 			wantEmissive, opts.coverInColor, opts.halfAux );
 		QString werr;
-		if ( !writers[size_t( lv )]->addTile( raw, st.cover, &werr ) )
+		quint32 um = 0;
+		QByteArray collapsed;
+		if ( opts.collapseUniform ) {
+			const LodvHeaderFields & hf = headers[size_t( lv )];
+			um = lodvCollapseUniform( hf, st.cover, raw, &collapsed );
+			for ( int s = 0; s < int( hf.sheetCount ); s++ )
+				if ( um & ( 1u << s ) ) {
+					uniformCount[s]++;
+					uniformSaved += qint64( lodvSheetStoredBytes( hf, s, st.cover, 0 ) )
+						- qint64( LODV_UNIFORM_RECORD_BYTES );
+				}
+		}
+		if ( !writers[size_t( lv )]->addTile( um ? collapsed : raw, st.cover, um, &werr ) )
 			return fail( werr );
 		presentTotal++;
 		if ( st.cover )
@@ -15990,6 +16008,19 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 		r << QString( "border %1" ).arg( border );
 		r << QString( "mips %1" ).arg( mips );
 		r << QString( "compression %1" ).arg( opts.compression );
+		/* THE ONE-VALUE CENSUS (lane FLAT2), unconditional: `collapseUniform 0`
+		 * with zeros is the gate's way back; with it on, the counts per sheet
+		 * kind and the raw bytes not stored MOVE with the corpus (open sea). */
+		{
+			r << QString( "collapseUniform %1" ).arg( opts.collapseUniform ? 1 : 0 );
+			const int nSheets = 3 + ( opts.height ? 1 : 0 ) + ( wantEmissive ? 1 : 0 );
+			const char * names[5] = { "Colour", "Msn", "Mask", "Height", "Emissive" };
+			for ( int s = 0; s < nSheets; s++ ) {
+				const int kind = ( s < 3 ) ? s : ( ( s == 3 && opts.height ) ? 3 : 4 );
+				r << QString( "uniform%1 %2" ).arg( QLatin1String( names[kind] ) ).arg( uniformCount[s] );
+			}
+			r << QString( "uniformBytesSaved %1" ).arg( uniformSaved );
+		}
 		/* THE VANILLA-REUSE CENSUS (lane TILING3), written UNCONDITIONALLY so
 		 * that a run with the switch off says so with zeros rather than going
 		 * silent, and so that a run that DID copy vanilla's sheets cannot be

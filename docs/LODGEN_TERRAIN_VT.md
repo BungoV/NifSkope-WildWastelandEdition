@@ -2445,15 +2445,62 @@ cells y ∈ [ north − (ty+1)·levelDim + 1 ,  north − ty·levelDim ]
 |---|---|---|
 | 0x00 | u64 | `offset` — absolute; **0 exactly when the tile is absent** |
 | 0x08 | u32 | `storedBytes` — on disk, after compression |
-| 0x0C | u32 | `rawBytes` — after inflate; must equal the size the header + this entry's `COVER` bit imply |
+| 0x0C | u32 | `rawBytes` — after inflate; must equal the size the header + this entry's `COVER` bit + its one-value bits imply |
 | 0x10 | u32 | `crc32` — over the `storedBytes` on disk |
-| 0x14 | u16 | `flags` — bit 0 `PRESENT`, bit 1 `COVER`, bits 2..15 zero |
+| 0x14 | u16 | `flags` — bit 0 `PRESENT`, bit 1 `COVER`, **bit 2+k `UNIFORM` for sheet k** (k < `sheetCount`, §3.2a), every bit above zero |
 | 0x16 | u16 | `reserved` — 0 |
 
 **An absent tile's 24 bytes are all zero**, not just `offset`: the other five
 fields are validated only when `PRESENT` is set, so without this a reader
 summing `storedBytes` over the table would sum garbage. The explicit present
 flag exists because "offset 0" is exactly the sentinel that gets misread.
+
+### 3.2a One-value sheets (lane FLAT2, 2026-09-27)
+
+bungo, 2026-09-27: *"If there is a single color on the whole map, it gets
+reduced in size? Since it doesn't need to render 1024 for a whole one color
+mask"* / *"on the whole chunk I mean"*. Open sea and landless cells bake sheets
+that are one value over every texel of every mip, and each was stored in full.
+
+**The rule.** A present tile whose sheet k is one value sets flag bit `2 + k`.
+That sheet's mips are then **not stored**: in their place, at the same position
+in the sheet-major order, the payload holds a **16-byte record** = the sheet's
+one repeating UNIT followed by zeros. The unit is the sheet's native form:
+
+| sheet format | unit | record |
+|---|---|---|
+| BC1 (71/72) | the 8-byte block | block + 8 zero bytes |
+| BC3 (77/78) | the 16-byte block | the block |
+| R16 (height, role 4) | the 2-byte texel | texel + 14 zero bytes |
+| R8G8B8A8 (role 7, retired) | the 4-byte texel | texel + 12 zero bytes |
+
+**Expanding a record gives the uncollapsed sheet back byte for byte**: repeat
+the unit over the sheet's full size (every stored mip, `lodvSheetMipBytes`
+summed). A reader that expands first sees exactly the bytes a
+`--no-collapse-uniform` bake wrote, so nothing downstream of the read moves.
+A reader that does not want the bytes decodes the one block (or takes the one
+texel) and draws that value everywhere, including every mip: that is what the
+collapse test guarantees (below).
+
+**When a sheet collapses** (writer, `lodvCollapseUniform`): every unit of every
+mip is the same bytes, AND for a block format that block decodes to one value
+under ANY decoder's convention, judged from its indices rather than a decode —
+all 16 indices equal, or both endpoints equal with no index that selects a
+constant of the mode (BC1's index 3 when `c0 <= c1`; the BC3 alpha's 6 and 7
+when `a0 <= a1`; BC3's colour half is treated like BC1, since a decoder that
+does so exists). So case (b) of the brief -- a sheet uniform only within the
+codec's error -- is never collapsed; the whole-map measurement found 0 such
+sheets on the installed bake. A sheet smaller than two units is never collapsed.
+
+**Sizes.** `rawBytes` = the sum over sheets of (16 if the sheet's bit is set,
+else its full size). The writer collapses by default; `--no-collapse-uniform`
+(command line only) writes every sheet in full, byte-identical to a bake from
+before this section.
+
+**Version.** None raised -- the precedent of `mipSkip` and role 7 (§3.1). A
+reader that predates the bits refuses such a tile by rule 16 (an unknown flag
+bit) rather than misparsing it, and a file with no bit set is exactly a v2 file
+as before. `.lodt` stays v2; `.lodi` (v12) and `.lodl` (v3) are untouched.
 
 ### 3.3 Payload
 
@@ -2596,8 +2643,9 @@ Refuse — **by name, with the field that failed** — on any of:
     `sheetCount` that is not all zero (its `mipSkip` included)
 14. `compression ∉ {0,1}`
 15. `tileTableOffset < 256` or not 8-aligned; `tileTableOffset + 24·tileCount > payloadOffset`; `payloadOffset > fileBytes` or not 4096-aligned
-16. any entry where `PRESENT` disagrees with `offset != 0`; any absent entry whose 24 bytes are not all zero; or, if present: an unknown flag bit, a non-zero `reserved`, `offset < payloadOffset`, `offset % 4096 != 0`, `offset + storedBytes > fileBytes`, `storedBytes == 0`, `rawBytes` != the size the header and the `COVER` bit imply, or `compression == 0 && storedBytes != rawBytes`
+16. any entry where `PRESENT` disagrees with `offset != 0`; any absent entry whose 24 bytes are not all zero; or, if present: an unknown flag bit (any bit above `2 + sheetCount − 1`; bits 2.. are the one-value sheets, §3.2a), a non-zero `reserved`, `offset < payloadOffset`, `offset % 4096 != 0`, `offset + storedBytes > fileBytes`, `storedBytes == 0`, `rawBytes` != the size the header, the `COVER` bit and the one-value bits imply, or `compression == 0 && storedBytes != rawBytes`
 16b. `compression == 1` and a present tile whose first two bytes are not a valid zlib header with CM = 8, CINFO ≤ 7, FDICT clear and `% 31 == 0`
+16c. (payload check, `compression == 0`) a one-value record whose bytes after the unit are not zero, or whose block does not pass the writer's one-value test (§3.2a)
 17. every tile present-flagged 0 (a level with no tiles is a broken bake, not an empty world)
 18. **`vhgtCorpusHash` or `paintCorpusHash` != the consumer's own hash** of the worldspace it is loading — the same refusal a stale heightmap already earns. *This is the one rule the file-local validator cannot make: it needs the plugin. `lodgen --corpus-hash` prints both hashes for the comparison.*
 19. `flags` bit 0 (`ROW_ORDER_NORTH_UP`) clear — no other row order is defined
