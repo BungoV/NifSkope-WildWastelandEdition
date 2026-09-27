@@ -1,0 +1,71 @@
+== off bake 10:51:46
+turn taken by tidy1 at 10:51:47
+released by tidy1 11:10:08
+rc=0 1101 s  11:10:08
+lodgen: arrays: card 00038599: oct height repaired: 7428 whole kept, 5892 partial filled from the nearest whole texel, 50328 outside inside the 16-ring ramp carried the object's height faded towards the card plane, 1888 outside set to the card plane; self-check PASS (no covered texel decodes outside its frame's depth)
+lodgen: arrays: card 000393cd: oct height repaired: 4080 whole kept, 6667 partial filled from the nearest whole texel, 50356 outside inside the 16-ring ramp carried the object's height faded towards the card plane, 4433 outside set to the card plane; self-check PASS (no covered texel decodes outside its frame's depth)
+lodgen: arrays: card 0003a28b: oct height repaired: 244447 whole kept, 605077 partial filled from the nearest whole texel, 958546 outside inside the 16-ring ramp carried the object's height faded towards the card plane, 2386234 outside set to the card plane; self-check PASS (no covered texel decodes outside its frame's depth)
+lodgen: arrays: card 0003e08d: oct height repaired: 3695 whole kept, 5670 partial filled from the nearest whole texel, 52436 outside inside the 16-ring ramp carried the object's height faded towards the card plane, 3735 outside set to the card plane; self-check PASS (no covered texel decodes outside its frame's depth)
+lodgen: arrays: card 0003e08f: oct height repaired: 27790 whole kept, 12418 partial filled from the nearest whole texel, 195283 outside inside the 16-ring ramp carried the object's height faded towards the card plane, 26653 outside set to the card plane; self-check PASS (no covered texel decodes outside its frame's depth)
+lodgen: arrays: card 0003e0d1: oct height repaired: 14614 whole kept, 11438 partial filled from the nearest whole texel, 202742 outside inside the 16-ring ramp carried the object's height faded towards the card plane, 33350 outside set to the card plane; self-check PASS (no covered texel decodes outside its frame's depth)
+lodgen: arrays: card 00049532: oct height repaired: 9805 whole kept, 10795 partial filled from the nearest whole texel, 97014 outside inside the 16-ring ramp carried the object's height faded towards the card plane, 13458 outside set to the card plane; self-check PASS (no covered texel decodes outside its frame's depth)
+lodgen: arrays: card 0004a073: oct height repaired: 17894 whole kept, 53044 partial filled from the nearest whole texel, 237221 outside inside the 16-ring ramp carried the object's height faded towards the card plane, 347201 outside set to the card plane; self-check PASS (no covered texel decodes outside its frame's depth)
+snapshot E:/Projects/NifskopeWWE-tidy1/scratchpad/tidy1_20260927/bakes/off: 153 files, 114 sources, 114 layers, 0 aliases, A lines 647/647 resolve, 23 emissive files
+files: 152 same, 1 differ, 0 only in base, 0 only in test; bytes 425863710 -> 425863683 (-27)
+   differs: fo4cslod/commonwealth/commonwealth.lodb  39106 -> 39079
+FAIL  off is byte-identical to the base (every file under mod/): 152 of 153 files identical
+== on bake 11:10:09
+turn taken by tidy1 at 11:10:09
+released by tidy1 11:26:58
+rc=0 1009 s  11:26:58
+lodgen: arrays: materials\lod\billboard02lod.bgsm = layer 0 (c:\projects\fallout4\build\pc\data\materials\lod\billboard02lod.bgsm), identical texels
+lodgen: arrays: materials\lod\bldgbricklargelod.bgsm = layer 0 (c:\projects\fallout4\build\pc\data\materials\lod\bldgbricklargelod.bgsm), identical texels
+lodgen: arrays: materials\lod\decolargelod.bgsm = layer 1 (c:\projects\fallout4\build\pc\data\materials\lod\decolargelod.bgsm), identical texels
+lodgen: arrays: materials\lod\hittechextalargelod.bgsm = layer 9 (c:\projects\fallout4\build\pc\data\materials\lod\hittechextalargelod.bgsm), identical texels
+lodgen: arrays: materials\lod\ncalargelod.bgsm = layer 10 (c:\projects\fallout4\build\pc\data\materials\lod\ncalargelod.bgsm), identical texels
+lodgen: arrays: materials\lod\trees\elmtrunkslod.bgsm = layer 0 (materials\bns\lod\landscape\trees\elm\elmtrunkslod.bgsm), identical texels
+lodgen: arrays: textures\lod\commonwealthrockslab01lod_d.dds = layer 46 (materials\lod\rockslab01lod.bgsm), identical texels
+lodgen: arrays: textures\lod\commonwealthrockslab02lod_d.dds = layer 47 (materials\lod\rockslab02lod.bgsm), identical texels
+snapshot E:/Projects/NifskopeWWE-tidy1/scratchpad/tidy1_20260927/bakes/on: 133 files, 106 sources, 106 layers, 8 aliases, A lines 647/647 resolve, 3 emissive files
+files: 83 same, 50 differ, 20 only in base, 0 only in test; bytes 425863710 -> 374417659 (-51446051)
+   differs: fo4cslod/commonwealth/commonwealth.16.-16.-16.bto.manifest.txt  1668484 -> 1668482
+   differs: fo4cslod/commonwealth/commonwealth.16.0.-16.bto.manifest.txt  350775 -> 350772
+   differs: fo4cslod/commonwealth/commonwealth.32.-32.-32.bto.manifest.txt  5816462 -> 5816461
+   differs: fo4cslod/commonwealth/commonwealth.32.0.-32.bto.manifest.txt  1266166 -> 1266165
+   differs: fo4cslod/commonwealth/commonwealth.4.-4.-12.bto.manifest.txt  104680 -> 104679
+   differs: fo4cslod/commonwealth/commonwealth.4.-4.-4.bto.manifest.txt  166190 -> 166189
+   differs: fo4cslod/commonwealth/commonwealth.4.-4.-8.bto.manifest.txt  259525 -> 259524
+   differs: fo4cslod/commonwealth/commonwealth.4.-8.-12.bto.manifest.txt  95035 -> 95034
+   differs: fo4cslod/commonwealth/commonwealth.4.-8.-4.bto.manifest.txt  98722 -> 98721
+   differs: fo4cslod/commonwealth/commonwealth.4.-8.-8.bto.manifest.txt  201071 -> 201070
+   differs: fo4cslod/commonwealth/commonwealth.4.0.-12.bto.manifest.txt  46636 -> 46635
+   differs: fo4cslod/commonwealth/commonwealth.4.0.-4.bto.manifest.txt  265667 -> 265666
+   gone:    fo4cslod/commonwealth/objects/commonwealth.lodgenarrays.128x128_g.dds  218548
+   gone:    fo4cslod/commonwealth/objects/commonwealth.lodgenarrays.256x256_g.dds  3233060
+   gone:    fo4cslod/commonwealth/objects/commonwealth.lodgenarrays.256x512_g.dds  262276
+   gone:    fo4cslod/commonwealth/objects/commonwealth.lodgenarrays.512x2048_g.dds  699188
+   gone:    fo4cslod/commonwealth/objects/commonwealth.lodgenarrays.512x512_g.dds  2446788
+   gone:    fo4cslod/commonwealth/objects/commonwealth.lodgenarrays.64x256_g.dds  11060
+   gone:    fo4cslod/commonwealth/objects/commonwealth.lodgenarrays.64x64_g.dds  2876
+   gone:    fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.1024x2048_g.dds  6881428
+   gone:    fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.1152x2048_g.dds  1548436
+   gone:    fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.1280x2048_g.dds  5161108
+   gone:    fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.128x1024_g.dds  65684
+   gone:    fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.2048x2048_g.dds  16711828
+   gone:    fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.256x1024_g.dds  1048724
+   gone:    fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.384x512_g.dds  123028
+   gone:    fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.512x1024_g.dds  1638548
+   gone:    fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.512x2048_g.dds  655508
+   gone:    fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.512x512_g.dds  983188
+   gone:    fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.640x1024_g.dds  1638548
+   gone:    fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.768x1024_g.dds  3932308
+   gone:    fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.896x1024_g.dds  2408596
+base emissive files: 23, 21 black, 2 with light (commonwealth.lodgencards.legacy.128x512_g.dds, commonwealth.lodgencards.legacy.384x1024_g.dds)
+FAIL  every black emissive file is gone: 20 of 21 gone (mesh 6873796 B, cards 42796932 B, total 49670728 B)
+FAIL  every emissive file with light is kept byte-identical: 2 of 2 kept; 3 emissive files in the test
+PASS  no other file is gone: 0 other files gone []
+PASS  every base source resolves to a layer with identical texels (colour+normal+mask, all mips; emissive both black): 114 of 114 identical, 0 differ, 0 unresolved
+PASS  layer count falls by exactly the merged spellings: 114 -> 106 layers (8 merged spellings logged)
+PASS  every A line resolves to a listed layer: test 647/647 (base 647/647) []
+9
+GATES off=1 on=1 11:26:59

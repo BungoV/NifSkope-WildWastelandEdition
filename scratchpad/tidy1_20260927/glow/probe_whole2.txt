@@ -1,0 +1,45 @@
+cache: scratchpad/tidy1_20260927/glow/plugin.pkl
+Fallout4.esm: 28932 bases, 706171 placements in Commonwealth/DiamondCity/DiamondCityFX
+
+A. LOD models named by a base: 3361
+   read 3354, missing 7; shader blocks 3430; Own-Emit 3430 (100.0%); Own-Emit with a lit NIF colour 0; models with a BSEffectShaderProperty 0; models with a filled glow slot 0
+
+B. materials those LOD models name: 121
+   read 121, unreadable/missing 0; OWN-EMIT with a colour that is not black: 0
+   emit enabled 0; glow-map flag set 0; glow texture slot filled 0
+
+C. bases matching '^(DiamondStadiumLight|DiamondCityStadiumLights)'
+   00001004 LIGH DiamondCityStadiumLights01NS     placed x3   LODslots=0  -
+        worldspaces=Commonwealth,DiamondCity cells=[(-1, -1), (0, 0), (1, 0)]
+   00001005 LIGH DiamondCityStadiumLights01Spot   placed x0   LODslots=0  -
+        worldspaces=- cells=[]
+   00001020 STAT DiamondStadiumLight02            placed x3   LODslots=0  Architecture\DiamondCity\Stadium_Ext\DiamondStadiumLight02.nif
+        worldspaces=Commonwealth cells=[(-4, -6), (-3, -6)]
+        EMITS name='materials\\Architecture\\DiamondCity\\DiamondLights01AlphaOn.BGSM' NIF colour (1.0, 1.0, 1.0) mult 6.000  |  BGSM emit=True colour (1.0, 1.0, 1.0) mult 6.000 glow 'architecture/diamondcity/diamondlights01_s.dds' (369 of 413 bytes read)
+   00001021 STAT DiamondStadiumLight01Off         placed x0   LODslots=0  Architecture\DiamondCity\Stadium_Ext\DiamondStadiumLight01Off.nif
+        worldspaces=- cells=[]
+   00001022 STAT DiamondStadiumLight01            placed x1   LODslots=0  Architecture\DiamondCity\Stadium_Ext\DiamondStadiumLight01.nif
+        worldspaces=DiamondCity cells=[(0, 1)]
+        EMITS name='materials\\Architecture\\DiamondCity\\DiamondLights01AlphaOn.BGSM' NIF colour (1.0, 1.0, 1.0) mult 6.000  |  BGSM emit=True colour (1.0, 1.0, 1.0) mult 6.000 glow 'architecture/diamondcity/diamondlights01_s.dds' (369 of 413 bytes read)
+   00001028 STAT DiamondStadiumLight02Off         placed x0   LODslots=0  Architecture\DiamondCity\Stadium_Ext\DiamondStadiumLight02Off.nif
+        worldspaces=- cells=[]
+   000010DF STAT DiamondStadiumLight03            placed x2   LODslots=0  Architecture\DiamondCity\Stadium_Ext\DiamondStadiumLight03.nif
+        worldspaces=Commonwealth cells=[(-4, -6), (-3, -7)]
+        EMITS name='materials\\Architecture\\DiamondCity\\DiamondLights01AlphaOn.BGSM' NIF colour (1.0, 1.0, 1.0) mult 6.000  |  BGSM emit=True colour (1.0, 1.0, 1.0) mult 6.000 glow 'architecture/diamondcity/diamondlights01_s.dds' (369 of 413 bytes read)
+   000010E0 STAT DiamondStadiumLight03Off         placed x0   LODslots=0  Architecture\DiamondCity\Stadium_Ext\DiamondStadiumLight03Off.nif
+        worldspaces=- cells=[]
+   00004CF8 STAT DiamondStadiumLight01OffBroke    placed x0   LODslots=0  Architecture\DiamondCity\Stadium_Ext\DiamondStadiumLight01OffBroke.nif
+        worldspaces=- cells=[]
+   00004CF9 STAT DiamondStadiumLight01Broke       placed x1   LODslots=0  Architecture\DiamondCity\Stadium_Ext\DiamondStadiumLight01Broke.nif
+        worldspaces=DiamondCity cells=[(1, 1)]
+        EMITS name='materials\\Architecture\\DiamondCity\\DiamondLights01AlphaOn.BGSM' NIF colour (1.0, 1.0, 1.0) mult 6.000  |  BGSM emit=True colour (1.0, 1.0, 1.0) mult 6.000 glow 'architecture/diamondcity/diamondlights01_s.dds' (369 of 413 bytes read)
+   00004CFC STAT DiamondStadiumLight02Broke       placed x2   LODslots=0  Architecture\DiamondCity\Stadium_Ext\DiamondStadiumLight02Broke.nif
+        worldspaces=DiamondCity cells=[(-1, 1), (2, 0)]
+        EMITS name='materials\\Architecture\\DiamondCity\\DiamondLights01AlphaOn.BGSM' NIF colour (1.0, 1.0, 1.0) mult 6.000  |  BGSM emit=True colour (1.0, 1.0, 1.0) mult 6.000 glow 'architecture/diamondcity/diamondlights01_s.dds' (369 of 413 bytes read)
+   00004CFD STAT DiamondStadiumLight02OffBroke    placed x1   LODslots=0  Architecture\DiamondCity\Stadium_Ext\DiamondStadiumLight02OffBroke.nif
+        worldspaces=DiamondCity cells=[(1, -1)]
+   00004CFE STAT DiamondStadiumLight03Broke       placed x2   LODslots=0  Architecture\DiamondCity\Stadium_Ext\DiamondStadiumLight03Broke.nif
+        worldspaces=Commonwealth,DiamondCity cells=[(-3, -8), (0, -1)]
+        EMITS name='materials\\Architecture\\DiamondCity\\DiamondLights01AlphaOn.BGSM' NIF colour (1.0, 1.0, 1.0) mult 6.000  |  BGSM emit=True colour (1.0, 1.0, 1.0) mult 6.000 glow 'architecture/diamondcity/diamondlights01_s.dds' (369 of 413 bytes read)
+   00004CFF STAT DiamondStadiumLight03OffBroke    placed x1   LODslots=0  Architecture\DiamondCity\Stadium_Ext\DiamondStadiumLight03OffBroke.nif
+        worldspaces=DiamondCity cells=[(-1, 0)]

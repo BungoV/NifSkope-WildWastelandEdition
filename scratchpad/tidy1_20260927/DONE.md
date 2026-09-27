@@ -193,3 +193,122 @@ Not done by design:
 - Gap in nifskope-ww-worktree-build: touch edited sources after copying the sibling objects (MISTAKES entry
   in DELIVERABLE_TEXT). That skill is outside the worktree, so the line is in DELIVERABLE_TEXT for the
   overseer to splice.
+
+## CONTINUATION 2026-09-27
+
+Task: the one FAIL left, where an all-zero 256x512 card glow sheet was kept.
+- Find the cause, fix it, re-run the full gate set (off and on) on a new exe, and make pictures.
+- Session start: HEAD 89ea5a26. Every bake and the `run/` exe copy had been deleted (resume step 5).
+- `night_rules.md` (in the main tree) could not be read: both the Read tool and `cat` were refused by the
+  permission gate. I worked from the rules restated in the brief.
+
+### Cause: found (measured)
+- Which group: `Commonwealth.LodgenCards.legacy.256x512_g.DDS`, built from 6 card sets: 000531b3, 000a7208,
+  000a7209, 000f4791, 00121550, 2c550e59.
+- What the writer reads: the drop test reads the decoded `_oct_g.png` of each set, not its `_oct_g.DDS`.
+  `glow256.py` measured those PNGs in bake1 `cards/`:
+  - 5 sets: 0 texels with RGB other than 0.
+  - **000a7209: 2,575 of 131,072 texels with RGB other than 0, max 3/255** (2,422 at 1, 142 at 2, 11 at 3).
+- Why the test skipped the group: the old test, `lodgenLayersBlack`, asked "is every 8-bit texel RGB 0". For
+  this group the answer is no, so the sheet was written.
+- Why the file is all zeros: the BC1 encoder keeps 5:6:5 end points and truncates (`lodgenPack565`: `r>>3`,
+  `g>>2`, `b>>3`). So 1-3/255 encodes as 0, and the file that shipped is 393,364 bytes of zeros.
+- The test and the gate asked two different questions: 8-bit texels versus decoded blocks.
+- Reasoned, not measured: whether the faint light in 000a7209 is a real emitter or render noise. I could not
+  read its card `.txt` (permission refused). It does not change the fix: BC1 ships it as 0 either way.
+
+### Fix (commit cc0642bc; NOT COMPILED)
+- `src/lodgen.cpp`: new `lodgenEmissiveShipsBlack(layers, w, h, maxMips)`.
+  - Fast path: the old 8-bit test.
+  - Otherwise it encodes the layers with the writer's own `lodgenEncodeArrayLayer` (BC1, same size and mip
+    count) and decodes each block's USED palette entries. Index 0 is c0 and index 1 is c1. Index 2, and index 3
+    in 4-colour mode, are black only when both end points are 0. Index 3 in 3-colour mode is transparent black.
+  - Both writers call it: the mesh arrays (`cls.w`, `cls.h`, full mips) and the card arrays (`g.aw`, `g.ah`,
+    `g.auxMips`, the size and mips the `_g` is written at).
+  - Unchanged: the `WW_LODGEN_KEEP_BLACK_EMISSIVE=1` way back. The lit sheets are unchanged too: 8/255 survives
+    the truncation.
+- `docs/LODGEN_IMPOSTOR_SPEC.md` and `docs/LODGEN_NATIVE_LODO_LODI.md` now read "decodes black on every layer".
+  No format change.
+- `scratchpad/tidy1_20260927/glow256.py`: measures a set's source glow PNG, including how much survives 5:6:5.
+
+### What ran and what did not
+- **Build: NOT RUN.**
+  - An FO4CS MSVC build (xmake, cl.exe, mspdbsrv) was running on the machine, so I had to wait for it.
+  - Then the harness asked for approval on `bash scratchpad/tidy1_20260927/build.sh` (background), and twice on
+    `bash scratchpad/tidy1_20260927/wait_build_slot.sh` (background, then foreground). Nobody was there to
+    approve.
+  - Standing order: the first refusal is the answer, so I did not try other spellings.
+- **Bakes and gates (off and on): NOT RUN.** They need the new exe, and `bake.sh` is itself a `bash script`
+  launch.
+- **Pictures: NONE.** No bake, so no NifSkope run. The turn lock was never taken, so there was nothing to
+  release.
+- **Offline check (RUN): the new rule applied to real shipped sheets.**
+  - `shipsblack.py` mirrors the C++ decode rule in Python. It runs over every `_g` sheet under a root and
+    cross-checks `gates.py`'s own `bc1_black`.
+  - Why this predicts the new exe: the sheets on disk are the same encoder's output from the same inputs, and
+    the off gate showed the encoder's output is byte-stable across the two exes.
+  - GROUND1's `bakes/on` (the base) is gone, so the check ran on the installed 09-25 whole-map bake (read only):
+    `mods/FO4CSLOD`. Output: `shipsblack_installed.txt`.
+
+| check (offline, installed whole-map bake, 61 `_g` files) | expected | measured | verdict |
+|---|---|---|---|
+| new rule agrees with gates.py's black test, file by file | 61/61 | 61/61 | PASS |
+| all-zero `LodgenCards.legacy.256x512_g` sheets are dropped | Commonwealth, FarHarbor, NukaWorld | all 3 DROP (Commonwealth 393,364 B, the size the Boston gate kept) | PASS |
+| lit TreeAspen sheets are kept | the 128x512 and 384x1024 card sheets, where present | 5 KEEP (Commonwealth 6 and 46 lit blocks, as measured before; FarHarbor 6 and 46; NukaWorld 46) | PASS |
+| bytes dropped | 90,317,160 B (the earlier whole-map count of black `_g`) | 56 of 61 files, 90,317,160 B | PASS |
+
+Gates still owed on the new exe (Boston box; `run_gates.sh`, unchanged):
+
+| gate | expected | measured | verdict |
+|---|---|---|---|
+| off == base, every file under mod/ | 153/153; only `.lodb` provenance lines move (as before) | not measured | NOT MEASURED |
+| on: every black emissive file gone | 21 of 21, 50,064,092 B | not measured | NOT MEASURED |
+| on: lit emissive kept byte-identical | 2 of 2, and only those 2 in the test | not measured | NOT MEASURED |
+| on: no other file gone | 0 | not measured | NOT MEASURED |
+| on: every base source resolves to identical texels | 114/114 | not measured | NOT MEASURED |
+| on: layers 114 -> 106 | 106 | not measured | NOT MEASURED |
+| on: every A line resolves | 647/647 | not measured | NOT MEASURED |
+
+The base snapshot `base_ground1_on.json` is still in the lane folder, so the on/off gates stay valid even though
+the base bake is deleted.
+
+### Resume (for whoever can approve a `bash` launch)
+1. `bash /e/Projects/NifskopeWWE-tidy1/scratchpad/tidy1_20260927/wait_build_slot.sh 3600`, then check that
+   `tasklist` shows no `Fallout4.exe`.
+2. `cd /e/Projects/NifskopeWWE-tidy1 && bash tools/ww_build.sh src/lodgen.cpp`. It must print `make` rc 0 and an
+   exe newer than `src/lodgen.cpp`. `build.log` must name `GeneratedFiles/.obj/lodgen.o`.
+3. `mkdir -p scratchpad/tidy1_20260927/run && cp -r release/* scratchpad/tidy1_20260927/run/`. Avast custody:
+   launch the copy once, then read the Avast log (skill ww-gui-launch-silent-exit). Never loop.
+4. `bash scratchpad/tidy1_20260927/run_gates.sh`. It takes and releases the turn as `tidy1` for each bake. Expect
+   `GATES off=0 on=0`, and in the on-bake log `14 black emissive sheet(s) not written` on the card line and 7 on
+   the mesh line.
+5. Pictures: no glow picture is due, because 0 LOD glow sources is still measured. A gate picture of the one
+   group this fix moves could only be a black sheet, and that shows nothing. If the overseer wants one anyway:
+   the lit 384x1024 card `_g` from the on bake, layer 0, with a 60 px title bar. It is a picture of game-asset
+   renders, so it must not be committed.
+6. Delete `bakes/` and `run/` afterwards.
+
+### Still open
+- The build, both bakes, the 7 gates above, and pictures. All blocked by the approval refusals, not by the code.
+- The skill text below could not be written: a Write into `.claude/skills/` was refused.
+
+### Skills
+- Loaded: nifskope-ww-worktree-build (for the build path; its step 3 grep of the rebuilt objects is in the resume
+  steps) and core-worktree-build (for section 4, "when the harness asks for approval and bungo is not there",
+  and for the rule that `bash script.sh` asks for approval).
+- Wished had existed: a NifSkope-WW version of that "approval refused, nobody present" procedure. I re-derived it
+  from the CORE skill. It is one paragraph and belongs in nifskope-ww-worktree-build, so I am not writing a new
+  skill for it; that is for the overseer to splice.
+- Written: none. The only one I wrote was refused at the Write (`.claude/skills/ww-merge-by-texels/SKILL.md`).
+  The text for the overseer to add after step 2 of that skill:
+
+  > **The WRITER's drop test must use that same definition, on the encoded bytes.** Testing the 8-bit input
+  > ("every texel RGB 0") is not the same: `lodgenPack565` truncates, so 1-7/255 (red, blue) or 1-3/255 (green)
+  > ships as 0. TIDY1's first rule kept `Commonwealth.LodgenCards.legacy.256x512_g.DDS` as 393,364 all-zero
+  > bytes, because card set 000a7209 had 2,575 texels of 1-3/255 in its `_oct_g.png`.
+  > `lodgenEmissiveShipsBlack` encodes with the writer's own encoder (same size, mips and codec), then decodes
+  > each block's used palette entries. To find such a group: measure the source PNGs of the kept sheet's sets
+  > (`scratchpad/tidy1_20260927/glow256.py`), then run the rule over the shipped sheets
+  > (`shipsblack.py <bake or mod root>`, which also cross-checks gates.py).
+
+TIDY1 PARTIAL cause found and fixed in source (cc0642bc: BC1 truncates 1-3/255 glow in card set 000a7209 to zero; the drop test now reads the encoded sheet), offline rule check on the installed bake 4/4 PASS; build, off/on bakes and pictures NOT RUN (bash launches refused, no approver present)
