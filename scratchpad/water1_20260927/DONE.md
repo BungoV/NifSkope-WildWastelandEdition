@@ -62,8 +62,8 @@ Audit rank 1 (audit1 DONE.md section 2.7, rows 34/35/38/42/43/44, 67-79, evidenc
   the whole worldspace (the .lodl is whole-worldspace by design; a region bake writes none).
 
 ### Resume (all scripts are in scratchpad/water1_20260927, committed)
-1. `turn.sh release anon` (overseer), then my queued `bake.sh` pair runs by itself if still waiting
-   (limit 07:05); otherwise: `bash bake.sh run_new/NifSkope.exe bk_new_off --no-water-bodies` and
+1. `turn.sh release anon` (overseer). My queued `bake.sh` pair gave up at 07:05 and 09:05 with the lock
+   still `anon`, so nothing was baked; run by hand: `bash bake.sh run_new/NifSkope.exe bk_new_off --no-water-bodies` and
    `bash bake.sh run_new/NifSkope.exe bk_new_def`.
 2. `sha1sum bk_new_off/.../Commonwealth.lodl` must be b4466203c9875dcc659707bfcd2f03ee91382618;
    `python bake_cmp.py bk_new_def/.../Commonwealth.lodl bk_rung_v3/.../Commonwealth.lodl`.
