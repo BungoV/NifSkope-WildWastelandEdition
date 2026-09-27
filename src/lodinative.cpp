@@ -8,6 +8,7 @@ BSD License - see nifskope.h
 
 #include "lodifile.h"
 #include "lodofile.h"
+#include "gl/lodlit.h"
 
 #include "model/nifmodel.h"
 #include "spells/blocks.h"
@@ -61,6 +62,10 @@ struct OutVert
 	/*! `.lodo` v5: the library colour, 0..1, white when the mesh carries none.
 	 *  `rgbaA` is applied as opacity only on a VERTEX_ALPHA mesh, as the game does. */
 	float rgba[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+	/*! The far-LOD lit view (WW_LODL_LIT, lane LIT1): the baked ambient visibility,
+	 *  0..1, written to the vertex ALPHA of a bucket whose alpha is not opacity.
+	 *  -1 = not the lit view, and the alpha is written exactly as before. */
+	float occ = -1.0f;
 	//! index into LodoLibrary::vertices (the .lodi v6 vertex-AO stream is in this order)
 	quint32 libIndex = 0;
 };
@@ -295,7 +300,7 @@ bool emitBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b,
 			if ( b.withColour || b.libColour )
 				nif->set<ByteColor4>( row, "Vertex Colors",
 					ByteColor4( FloatVector4( o.chan[0] * o.rgba[0], o.chan[1] * o.rgba[1], o.chan[2] * o.rgba[2],
-						b.vertexAlpha ? o.rgba[3] : 1.0f ) ) );
+						b.vertexAlpha ? o.rgba[3] : ( o.occ >= 0.0f ? o.occ : 1.0f ) ) ) );
 			for ( int k = 0; k < 3; k++ ) {
 				lo[k] = qMin( lo[k], o.pos[k] );
 				hi[k] = qMax( hi[k], o.pos[k] );
@@ -599,6 +604,16 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 	 * in front of you). */
 	const bool skyPerVertex = ( channel == LodlChannel::Sky ) && !table.vertexSkyFirst.empty()
 		&& !table.vertexSky.empty();
+	/* WW_LODL_LIT=1 (lane LIT1, src/gl/lodlit.h): the lit view reads the SAME two
+	 * streams the `ao` and `sky` views draw -- the v6 per-vertex AO and the v7
+	 * per-vertex sky visibility -- and writes their product into the vertex alpha,
+	 * where lod_lit.frag takes it as the sky term's visibility. The RGB stays the
+	 * library colour alone. Refused (off) while a channel view is asked for. */
+	QString litRefused;
+	const bool lit = WwLodLit::wanted( &litRefused );
+	const bool litSkyStream = lit && !table.vertexSkyFirst.empty() && !table.vertexSky.empty();
+	qint64 litVerts = 0, litAoStream = 0, litSkyStreamVerts = 0, litAlphaKept = 0;
+	double litAoSum = 0.0, litSkySum = 0.0, litOccSum = 0.0;
 	const bool objectChannel = channel == LodlChannel::Identity
 		|| channel == LodlChannel::Placement
 		|| channel == LodlChannel::IdentityRaw || ( channel == LodlChannel::Sky && !skyPerVertex )
@@ -805,7 +820,7 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 			 * -- the objects were drawn a chunk-origin away from the camera. */
 			const Vector3 pos = Vector3( xyz[0], xyz[1], xyz[2] ) - origin;
 			float placementAo = 1.0f;
-			if ( wantAo ) {
+			if ( wantAo || lit ) {
 				const quint8 pa = ( ii < table.placementAo.size() )
 					? table.placementAo[ii] : LODI_PLACEMENT_AO_UNMEASURED;
 				if ( pa != LODI_PLACEMENT_AO_UNMEASURED ) {
@@ -897,7 +912,7 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 			 * empty slice, or a slice cast for another slot's mesh. */
 			const quint8 * vaoSlice = nullptr;
 			quint32 vaoFirstVertex = 0;
-			if ( wantAo && ii + 1 < table.vertexAoFirst.size() ) {
+			if ( ( wantAo || lit ) && ii + 1 < table.vertexAoFirst.size() ) {
 				const quint32 f = table.vertexAoFirst[ii], l = table.vertexAoFirst[ii + 1];
 				if ( l > f && l <= table.vertexAo.size() ) {
 					auto rit = meshRange.find( meshId );
@@ -926,7 +941,7 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 			 * here rather than drawn as somebody else's numbers. */
 			const quint8 * vskSlice = nullptr;
 			quint32 vskFirstVertex = 0;
-			if ( skyPerVertex && ii + 1 < table.vertexSkyFirst.size() ) {
+			if ( ( skyPerVertex || litSkyStream ) && ii + 1 < table.vertexSkyFirst.size() ) {
 				const quint32 f = table.vertexSkyFirst[ii], l = table.vertexSkyFirst[ii + 1];
 				if ( l > f && l <= table.vertexSky.size() ) {
 					auto rit = meshRange.find( meshId );
@@ -1012,7 +1027,7 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 						nb.emissiveScale = mat.emissiveScale;
 						nb.layer = ( mat.layer == LODO_NO_LAYER ) ? -1 : int( mat.layer );
 					}
-					nb.withColour = wantAo || objectChannel || skyPerVertex;
+					nb.withColour = wantAo || objectChannel || skyPerVertex || lit;
 					bit = buckets.insert( bkey, nb );
 				}
 				Bucket & bk = bit.value();
@@ -1065,6 +1080,28 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 						const quint8 sk = vskSlice ? vskSlice[sv.libIndex - vskFirstVertex] : inst.sky;
 						o.chan[0] = o.chan[1] = o.chan[2] = float( sk ) / 255.0f;
 						chanSeen( int( sk ) );
+					} else if ( lit ) {
+						/* The lit view: RGB = the library colour alone (chan white),
+						 * alpha = AO x sky, from the streams when this placement has
+						 * them and from the same fallbacks the `ao` / `sky` views use
+						 * when it does not. */
+						float ao = sv.selfAo * placementAo;
+						if ( vaoSlice ) {
+							ao = float( vaoSlice[sv.libIndex - vaoFirstVertex] ) / 255.0f;
+							litAoStream++;
+						}
+						float sk = float( inst.sky ) / 255.0f;
+						if ( vskSlice ) {
+							sk = float( vskSlice[sv.libIndex - vskFirstVertex] ) / 255.0f;
+							litSkyStreamVerts++;
+						}
+						o.occ = ao * sk;
+						litVerts++;
+						litAoSum += ao;
+						litSkySum += sk;
+						litOccSum += o.occ;
+						if ( bk.vertexAlpha )
+							litAlphaKept++;
 					} else if ( vaoSlice ) {
 						const quint8 a = vaoSlice[sv.libIndex - vaoFirstVertex];
 						o.chan[0] = o.chan[1] = o.chan[2] = float( a ) / 255.0f;
@@ -1233,6 +1270,19 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 				"(mean %2), %3 unmeasured (drawn open)" )
 			.arg( aoMeasured ).arg( aoMeasured ? aoSum / double( aoMeasured ) : 255.0, 0, 'f', 1 )
 			.arg( aoUnmeasured );
+	if ( !lit && !litRefused.isEmpty() )
+		note << QString( "WW_LODL_LIT refused: %1 is a data view and wins" ).arg( litRefused );
+	if ( lit ) {
+		note << WwLodLit::noteLine();
+		note << QString( "WW_LODL_LIT: objects' ambient visibility = AO x sky in the vertex alpha over %L1 "
+				"vertices: AO mean %2 (%L3 from the v6 stream, the rest self-AO x placement AO), sky mean %4 "
+				"(%L5 from the v7 stream, the rest the placement's 0x11 byte), product mean %6; "
+				"%L7 vertices sit in VERTEX_ALPHA buckets and keep their opacity (visibility 1)" )
+			.arg( litVerts )
+			.arg( litVerts ? litAoSum / double( litVerts ) : 1.0, 0, 'f', 3 ).arg( litAoStream )
+			.arg( litVerts ? litSkySum / double( litVerts ) : 1.0, 0, 'f', 3 ).arg( litSkyStreamVerts )
+			.arg( litVerts ? litOccSum / double( litVerts ) : 1.0, 0, 'f', 3 ).arg( litAlphaKept );
+	}
 	note << QString( "%1 placements read, %2 drawn (%3 outside the region, %4 with no mesh, "
 			"%5 with no geometry at this level); %6 bases, %L7 buckets" )
 		.arg( read ).arg( placed ).arg( outsideRegion ).arg( noMesh ).arg( noGeometry )

@@ -46,6 +46,10 @@ struct LodtSheetTile
 	//! The EMISSIVE sheet (role 6), empty when the container carries none.
 	//! Unpacked for WW_LODL_CHANNEL=emissive only -- nothing else binds it.
 	QString emissive;
+	//! The MASK sheet (role 5: R roughness, G metallic, B sky AO, A cover).
+	//! Unpacked only after setUnpackMask( true ), which the far-LOD lit view
+	//! (WW_LODL_LIT, lane LIT1) asks for; empty otherwise.
+	QString mask;
 };
 
 /*! One LEVEL of one worldspace's pyramid, opened and ready to hand out tiles.
@@ -108,6 +112,9 @@ public:
 	 *  session; a file already on disk is reused) and return their names.
 	 *  False with `*why` when the tile is absent or the unpack failed. */
 	bool tile( int tx, int ty, LodtSheetTile & out, QString * why );
+
+	//! Also unpack each tile's mask sheet in tile() (`LodtSheetTile::mask`). Off by default.
+	void setUnpackMask( bool on );
 
 	//! One `u` or `v` in [0,1] over a tile's CONTENT maps to this range of the
 	//! STORED sheet: `uvBias + t * uvScale`, i.e. border/stored and content/stored.

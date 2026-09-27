@@ -222,6 +222,7 @@ HEADERS += \
 	src/gl/scenelighting.h \
 	src/gl/lookdevstage.h \
 	src/gl/sunshadow.h \
+	src/gl/lodlit.h \
 	src/ui/scenewindow.h \
 	src/gl/impostordraw.h \
 	src/impostoroct.h \

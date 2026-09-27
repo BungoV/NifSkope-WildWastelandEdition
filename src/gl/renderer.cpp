@@ -38,6 +38,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/glproperty.h"
 #include "gl/glscene.h"
 #include "gl/gltex.h"
+#include "gl/lodlit.h"
 #include "gl/scenelighting.h"
 #include "gl/lookdevstage.h"
 #include "gl/sunshadow.h"
@@ -221,6 +222,49 @@ void wwRestoreSrgbDecode()
 	}
 	glBindTexture( GL_TEXTURE_2D, GLuint( prev ) );
 }
+
+/* The texture on `unit` is sRGB-tagged and the GL still DECODES it. A tagged
+ * texture has its hardware decode skipped here (undone by wwRestoreSrgbDecode) so
+ * the shader's decode is the only one, and this answers false; true only when the
+ * extension is missing and the sampler decodes. The PBR program's rule, shared
+ * by the far-LOD lit view (lane LIT1). */
+bool wwSrgbDecodeAt( NifSkopeOpenGLContext::GLFunctions * fn, int unit )
+{
+	if ( unit < 0 || wwR2aRed( "srgbtag" ) )
+		return false;
+	fn->glActiveTexture( GL_TEXTURE0 + GLenum( unit ) );
+	GLint tex = 0;
+	glGetIntegerv( GL_TEXTURE_BINDING_2D, &tex );
+	if ( !tex )
+		return false;
+	GLint f = 0;
+	glGetTexLevelParameteriv( GL_TEXTURE_2D, 0, GL_TEXTURE_INTERNAL_FORMAT, &f );
+	switch ( f ) {
+	case 0x8C40:	// GL_SRGB
+	case 0x8C41:	// GL_SRGB8
+	case 0x8C42:	// GL_SRGB_ALPHA
+	case 0x8C43:	// GL_SRGB8_ALPHA8
+	case 0x8C48:	// GL_COMPRESSED_SRGB
+	case 0x8C49:	// GL_COMPRESSED_SRGB_ALPHA
+	case 0x8C4C:	// GL_COMPRESSED_SRGB_S3TC_DXT1_EXT
+	case 0x8C4D:	// GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT1_EXT
+	case 0x8C4E:	// GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT3_EXT
+	case 0x8C4F:	// GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT
+	case 0x8E8D:	// GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM
+		break;
+	default:
+		return false;
+	}
+	// sRGB-tagged: skip the hardware decode so the shader's decode is the only
+	// one (see wwRestoreSrgbDecode); without the extension the sampler decodes
+	if ( QOpenGLContext * c = QOpenGLContext::currentContext();
+		c && c->hasExtension( QByteArrayLiteral( "GL_EXT_texture_sRGB_decode" ) ) ) {
+		glTexParameteri( GL_TEXTURE_2D, 0x8A48, 0x8A4A );	// TEXTURE_SRGB_DECODE_EXT = SKIP_DECODE_EXT
+		wwSkippedDecode().append( { c, GLuint( tex ) } );
+		return false;
+	}
+	return true;
+}
 } // namespace
 
 NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program * hint )
@@ -264,6 +308,24 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 			if ( setupProgramRoute( nif, program, mesh ) )
 				return wwProgramCensus( nif, mesh, wwSp, wwKind, wwMsn, wwLodLand, program,
 				globalUniforms->lightSourcePosition[0] );
+			stopProgram();
+		}
+	}
+
+	/* The far-LOD lit view (lane LIT1, src/gl/lodlit.h): a VIEW MODE of the LOD
+	 * viewer, chosen by name ahead of the shading routes, and only for the shapes
+	 * the LOD builders write -- SF2 bit 1 (LOD landscape: the .lodl terrain tiles)
+	 * or bit 2 (LOD objects: the .lodi placements, a .BTO's shapes). With
+	 * WW_LODL_LIT unset this is one cached bool and nothing else runs, so every
+	 * program, uniform and draw is the one it was. */
+	if ( WwLodLit::on() && mesh->bslsp && wwLodChannelView == 0
+		&& nif->getBSVersion() >= 130 && nif->getBSVersion() <= 139
+		&& ( mesh->bslsp->hasSF2( ShaderFlags::SLSF2_LOD_Landscape )
+			|| mesh->bslsp->hasSF2( ShaderFlags::SLSF2_LOD_Objects ) ) ) {
+		if ( Program * program = useProgram( "lod_lit.prog" ) ) {
+			if ( setupProgramCE1( nif, program, mesh ) && setupProgramLodLit( nif, program, mesh ) )
+				return wwProgramCensus( nif, mesh, wwSp, wwKind, wwMsn, wwLodLand, program,
+					globalUniforms->lightSourcePosition[0] );
 			stopProgram();
 		}
 	}
@@ -329,7 +391,8 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 	 * either of those programs is stale. */
 	const bool stalePbrmHint = hint
 		&& ( ( pbrmProgramSeen && hint == pbrmProgramSeen ) || ( routeProgramSeen && hint == routeProgramSeen )
-			|| hint->name == std::string_view( "pbrm_csm.prog" ) );	// lane CSM1: the shadow variant is never a hint
+			|| hint->name == std::string_view( "pbrm_csm.prog" )	// lane CSM1: the shadow variant is never a hint
+			|| hint->name == std::string_view( "lod_lit.prog" ) );	// lane LIT1: selected by name only
 	/* Weather fog (lane FOG1) has its own program, fo4_fog.prog: the same
 	 * fo4_default.frag with WW_FOG defined. With the fog code merely present and
 	 * fogOn false, the driver compiled fo4_default differently -- 783 px of the
@@ -1004,40 +1067,7 @@ bool Renderer::setupProgramPBRM( const NifModel * nif, Program * prog, Shape * m
 	 * from the file name. Red "srgbtag": always decode, so the sRGB twin is decoded
 	 * twice. */
 	auto srgbAt = [&]( int unit ) -> bool {
-		if ( unit < 0 || wwR2aRed( "srgbtag" ) )
-			return false;
-		fn->glActiveTexture( GL_TEXTURE0 + GLenum( unit ) );
-		GLint tex = 0;
-		glGetIntegerv( GL_TEXTURE_BINDING_2D, &tex );
-		if ( !tex )
-			return false;
-		GLint f = 0;
-		glGetTexLevelParameteriv( GL_TEXTURE_2D, 0, GL_TEXTURE_INTERNAL_FORMAT, &f );
-		switch ( f ) {
-		case 0x8C40:	// GL_SRGB
-		case 0x8C41:	// GL_SRGB8
-		case 0x8C42:	// GL_SRGB_ALPHA
-		case 0x8C43:	// GL_SRGB8_ALPHA8
-		case 0x8C48:	// GL_COMPRESSED_SRGB
-		case 0x8C49:	// GL_COMPRESSED_SRGB_ALPHA
-		case 0x8C4C:	// GL_COMPRESSED_SRGB_S3TC_DXT1_EXT
-		case 0x8C4D:	// GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT1_EXT
-		case 0x8C4E:	// GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT3_EXT
-		case 0x8C4F:	// GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT
-		case 0x8E8D:	// GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM
-			break;
-		default:
-			return false;
-		}
-		// sRGB-tagged: skip the hardware decode so the shader's decode is the only
-		// one (see wwRestoreSrgbDecode); without the extension the sampler decodes
-		if ( QOpenGLContext * c = QOpenGLContext::currentContext();
-			c && c->hasExtension( QByteArrayLiteral( "GL_EXT_texture_sRGB_decode" ) ) ) {
-			glTexParameteri( GL_TEXTURE_2D, 0x8A48, 0x8A4A );	// TEXTURE_SRGB_DECODE_EXT = SKIP_DECODE_EXT
-			wwSkippedDecode().append( { c, GLuint( tex ) } );
-			return false;
-		}
-		return true;
+		return wwSrgbDecodeAt( fn, unit );
 	};
 	prog->uni1i( "baseIsSrgbTex", srgbAt( baseUnit ) );
 	prog->uni1i( "emissiveIsSrgbTex", srgbAt( emissiveUnit ) );
@@ -1298,6 +1328,46 @@ bool Renderer::setupProgramRoute( const NifModel * nif, Program * prog, Shape * 
 
 	mesh->setUniforms( prog );
 	prog->uni4f( "vertexColorOverride", FloatVector4( 1.0f ) );
+	return true;
+}
+
+/* The far-LOD lit view's own uniforms (lane LIT1), set AFTER setupProgramCE1 has
+ * bound the legacy material: BaseMap 0, NormalMap 1, SpecularMap 7 (an object's
+ * `_s`, or the terrain MASK sheet the .lodl builder puts in slot 7 in this mode).
+ * The constants are src/gl/lodlit.h's, the ones the builders' notes print. */
+bool Renderer::setupProgramLodLit( const NifModel *, Program * prog, Shape * mesh )
+{
+	auto lsp = mesh->bslsp;
+	if ( !lsp )
+		return false;
+
+	// the base colour's sRGB tag, the PBR program's rule (CE1 bound BaseMap first)
+	GLint baseUnit = -1;
+	if ( const int l = prog->uniLocation( "BaseMap" ); l >= 0 )
+		prog->f->glGetUniformiv( prog->id, l, &baseUnit );
+	prog->uni1i( "baseIsSrgbTex", wwSrgbDecodeAt( fn, int( baseUnit ) ) );
+
+	const bool terrain = lsp->hasSF2( ShaderFlags::SLSF2_LOD_Landscape );
+	int surface = 0;
+	if ( terrain )
+		surface = lsp->fileName( 7 ).isEmpty() ? 2 : 1;
+	prog->uni1i( "lodLitSurface", surface );
+	/* An OBJECT shape's vertex alpha is the baked visibility unless the source
+	 * shader said its alpha is opacity (SF1 bit 3, which the .lodi builder sets on
+	 * a `.lodo` VERTEX_ALPHA bucket and on nothing else). */
+	prog->uni1i( "lodLitOccAlpha", int( !terrain && mesh->hasVertexColors
+		&& !lsp->hasSF1( ShaderFlags::SLSF1_Vertex_Alpha ) ) );
+
+	float d[3];
+	WwLodLit::sunDirection( d );
+	prog->uni3f( "lodLitSun", d[0], d[1], d[2] );
+	const float e = WwLodLit::kSunIntensity * float( 3.14159265358979 );
+	prog->uni3f( "lodLitSunE", WwLodLit::kSunColour[0] * e, WwLodLit::kSunColour[1] * e,
+		WwLodLit::kSunColour[2] * e );
+	prog->uni3f( "lodLitSkyZenith", WwLodLit::kSkyZenith[0], WwLodLit::kSkyZenith[1], WwLodLit::kSkyZenith[2] );
+	prog->uni3f( "lodLitSkyNadir", WwLodLit::kSkyNadir[0], WwLodLit::kSkyNadir[1], WwLodLit::kSkyNadir[2] );
+	prog->uni1i( "lodLitTerm", WwLodLit::term() );
+	prog->uni1i( "lodLitRed", WwLodLit::red() );
 	return true;
 }
 

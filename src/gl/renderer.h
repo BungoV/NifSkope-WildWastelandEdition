@@ -92,6 +92,9 @@ protected:
 	bool setupProgramPBRM( const NifModel *, Program *, Shape * );
 	// the PBR route debug view (pbr_route.prog), selected by name
 	bool setupProgramRoute( const NifModel *, Program *, Shape * );
+	// the far-LOD lit view (lod_lit.prog, WW_LODL_LIT=1, lane LIT1): CE1's
+	// bindings plus the sun, the sky and the surface kind, selected by name
+	bool setupProgramLodLit( const NifModel *, Program *, Shape * );
 	// other games
 	void setupFixedFunction( Shape * );
 

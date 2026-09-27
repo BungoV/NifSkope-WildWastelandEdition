@@ -54,10 +54,13 @@ struct LodtSheets::Impl
 	LodvHeaderFields h;
 	std::vector<LodvTileEntry> table;
 	int colourSheet = -1, msnSheet = -1, maskSheet = -1;
+	bool unpackMask = false;
 	QStringList notes;
 };
 
 LodtSheets::LodtSheets() : d( new Impl ) {}
+
+void LodtSheets::setUnpackMask( bool on ) { d->unpackMask = on; }
 LodtSheets::~LodtSheets() = default;
 
 bool LodtSheets::isOpen() const { return d->open; }
@@ -549,8 +552,13 @@ bool LodtSheets::tile( int tx, int ty, LodtSheetTile & out, QString * why )
 	if ( !unpack( emissiveSheet, "e", emissive ) )
 		return no( QString( "could not unpack tile %1,%2's emissive sheet" ).arg( tx ).arg( ty ) );
 
+	QString mask;
+	if ( d->unpackMask && !unpack( d->maskSheet, "m", mask ) )
+		return no( QString( "could not unpack tile %1,%2's mask sheet" ).arg( tx ).arg( ty ) );
+
 	out.colour = colour;
 	out.msn = msn;
 	out.emissive = emissive;
+	out.mask = mask;
 	return !colour.isEmpty();
 }

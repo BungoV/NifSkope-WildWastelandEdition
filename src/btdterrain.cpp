@@ -14,6 +14,7 @@ BSD License - see nifskope.h
 #include "lodinative.h"
 #include "lodtfile.h"
 #include "lodtsheets.h"
+#include "gl/lodlit.h"
 
 #include <QCoreApplication>
 #include <QDebug>
@@ -159,6 +160,8 @@ struct TerrainSurface
 	//! Indexed `sty * sheetTilesX + stx`, `sty` = 0 the NORTH row. Empty = no sheets.
 	std::vector<QString> tileDiffuse;
 	std::vector<QString> tileNormal;
+	//! The mask sheets, filled only in the far-LOD lit view (WW_LODL_LIT); empty = slot 7 untouched.
+	std::vector<QString> tileMask;
 };
 
 bool buildTerrainSurface( NifModel * nif, TerrainSurface & s, QString * error )
@@ -404,6 +407,12 @@ bool buildTerrainSurface( NifModel * nif, TerrainSurface & s, QString * error )
 				nif->set<quint32>( iShader, "Shader Flags 1", sf1 );
 				const quint32 sf2 = nif->get<quint32>( iShader, "Shader Flags 2" );
 				nif->set<quint32>( iShader, "Shader Flags 2", sf2 | 0x2u );
+				/* The far-LOD lit view (WW_LODL_LIT, lane LIT1): the mask sheet in
+				 * slot 7, read by lod_lit.frag as R rough, G metal, B sky AO. The
+				 * vector is empty in every other view, so this writes nothing. */
+				if ( sheetIndex < int( s.tileMask.size() )
+					&& !s.tileMask[size_t( sheetIndex )].isEmpty() )
+					nif->set<QString>( nif->getIndex( iTexArray, 7 ), s.tileMask[size_t( sheetIndex )] );
 			}
 			if ( haveColour ) {
 				/* FO4's own path always applies vertex colours when the vertex
@@ -1038,6 +1047,15 @@ bool nifCreateLodtTerrainScene( NifModel * nif, const QString & lodtPath,
 	QString sheetChanGiven;
 	int sheetChanBin = 0;
 	const LodlChannel sheetChan = lodlChannelFromEnv( &sheetChanGiven, &sheetChanBin );
+	/* WW_LODL_LIT=1 (lane LIT1, src/gl/lodlit.h): the mask sheet is unpacked too
+	 * and bound in slot 7, the only change this mode makes to the document. */
+	QString litRefused;
+	const bool lit = WwLodLit::wanted( &litRefused );
+	if ( lit )
+		sheets.setUnpackMask( true );
+	else if ( !litRefused.isEmpty() )
+		sheetNote << QString( "WW_LODL_LIT refused: %1 is a data view and wins" ).arg( litRefused );
+	int litMaskTiles = 0;
 	bool haveSheets = false;
 	int sheetTilesX = 0, sheetTilesY = 0, sheetDim = 0, sheetTilesFound = 0;
 	if ( spec.plane == LodtPlane::Height ) {
@@ -1144,6 +1162,8 @@ bool nifCreateLodtTerrainScene( NifModel * nif, const QString & lodtPath,
 		s.uvScale = sheets.uvScale();
 		s.tileDiffuse.assign( size_t( sheetTilesX ) * size_t( sheetTilesY ), QString() );
 		s.tileNormal.assign( s.tileDiffuse.size(), QString() );
+		if ( lit )
+			s.tileMask.assign( s.tileDiffuse.size(), QString() );
 		QStringList missing;
 		for ( int sty = 0; sty < sheetTilesY; sty++ ) {
 			// sty 0 is the NORTH row of the region, the sheets' own order
@@ -1171,6 +1191,11 @@ bool nifCreateLodtTerrainScene( NifModel * nif, const QString & lodtPath,
 					: ( sheetChan == LodlChannel::Emissive && !t.emissive.isEmpty() )
 						? t.emissive : t.colour;
 				s.tileNormal[at] = t.msn;
+				if ( lit ) {
+					s.tileMask[at] = t.mask;
+					if ( !t.mask.isEmpty() )
+						litMaskTiles++;
+				}
 				sheetTilesFound++;
 			}
 		}
@@ -1179,6 +1204,7 @@ bool nifCreateLodtTerrainScene( NifModel * nif, const QString & lodtPath,
 			s.sheetDim = 0;
 			s.tileDiffuse.clear();
 			s.tileNormal.clear();
+			s.tileMask.clear();
 			s.uvBias = 0.0f;
 			s.uvScale = 1.0f;
 			haveSheets = false;
@@ -1196,6 +1222,10 @@ bool nifCreateLodtTerrainScene( NifModel * nif, const QString & lodtPath,
 				.arg( double( s.uvBias ), 0, 'f', 5 ).arg( double( s.uvScale ), 0, 'f', 5 )
 				.arg( sheets.borderTexels() ).arg( sheets.storedTexels() );
 			sheetNote << sheets.notes();
+			if ( lit )
+				sheetNote << WwLodLit::noteLine()
+					<< QString( "WW_LODL_LIT: terrain mask sheet (R rough, G metal, B sky AO) bound in "
+						"slot 7 on %1 of %2 sheet tiles" ).arg( litMaskTiles ).arg( sheetTilesFound );
 		}
 	}
 	note << sheetNote;

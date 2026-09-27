@@ -1,0 +1,5 @@
+# The far-LOD view under a real sun and sky (lane LIT1, WW_LODL_LIT=1). No
+# conditions: the condition scan never picks it; Renderer::setupProgram selects it
+# by name for LOD terrain and LOD object shapes while that mode is on.
+
+shaders fo4_default.vert lod_lit.frag
