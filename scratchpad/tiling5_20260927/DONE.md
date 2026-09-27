@@ -218,3 +218,53 @@ textures gains contrast; the shift doubles from beta 1 to 2, as a selection bias
 (E[s exp(beta h)] / E[exp(beta h)] - E[s], same pyramid pass as the relief) and subtract it from the hex tap and
 from the layer detail. Expected: dMean -> ~0 and the coarse band back to today's. It needs a build, a bake of the
 fourteen chunks and the gates re-run -- none of which can run in this session (C1), so it is left open.
+
+### C4. Further refusals, and the build slot
+* Writing `.claude/skills/ww-selection-mean-bias-check/SKILL.md`: permission refused. The text is in the lane
+  folder as `skill_draft_ww-selection-mean-bias-check.md` for the overseer to install. Nothing else was tried.
+* The build: from 19:00:05 another lane's FO4CS build (`xmake build -y -j2 FO4CS`) held the machine's one build slot,
+  and it was still running at every check this session. Per the brief I waited and did not start `make`.
+  The bake, arms and picture scripts are all `bash <script>` calls of the kind refused in C1.
+
+### C5. Gates (final state of this session)
+The final build's height arm is the `s20` arm: same code, and the constant equals the env value s20 was baked with
+(reasoned, not byte-checked: no new build exists). So the s20 numbers stand for the final arm until re-baked.
+
+| gate | expected | measured | verdict |
+|---|---|---|---|
+| env tuning reads gone from `src/` | 0 matches of `WW_TILING5` | 0 | PASS |
+| new source compiles | build rc 0 | not built (C4) | NOT MEASURED |
+| off = rung bytes, new exe (Boston) | 27/27 sheets identical | not run; previous exe 27/27 (3a) | NOT MEASURED |
+| `--land-macro on` = off bytes | identical colour sheets | not run (early return in code) | NOT MEASURED |
+| transitions rz >= 0.9 x vanilla (s20) | 14/14 | 8/14 (today 7/14) | FAIL |
+| repeat (s20) sel / val | 7/7, 7/7 | 6/7, 6/7 (today 5/7, 6/7; -36,-20 ratio red on every arm) | FAIL |
+| G1 grain median within 20 % (s20) | both sets | +19.9 % / -1.6 % | PASS |
+| G2 grain per sheet within 20 % of today (s20) | 7/7, 7/7 | 7/7, 7/7 | PASS |
+| G2-band no further from vanilla than today (s20) | 7/7, 7/7 | 2/7, 6/7 -- cause found (C3) | FAIL |
+| THREADS=1 vs 16 byte cmp | identical | not run | NOT MEASURED |
+| timing before/after | reported | not run | NOT MEASURED |
+
+### C6. Pictures
+None made. `t5_shot.sh` needs a bash call of the refused kind (C1) and the new exe (C4). No picture paths to send.
+
+### C7. Still open
+1. Build the constants commit (39cb880f) when the build slot is free; re-run 3a off-identity with the new exe.
+2. The mean-bias correction (C3) -- the one change that could turn G2-band green; then re-bake the fourteen
+   chunks and re-run `t5_gates.py trans|tiling`, `t5_meanbias.py`.
+3. Transitions stay red on 6 sheets because today's INTERIORS carry more grain than vanilla's (6.70 vs 5.53, 3h):
+   that part is the hex sampler's, not the layer blend's.
+4. Pictures (Boston -5,-10..2,-3 and rural -36,4..-25,15; flat + lit; before/after as separate files).
+5. Cleanup: `out/`, `run_*` (untracked, size not measured) -- kept, because items 1-4 need them.
+6. The four extra macro mosaics were not baked; they cannot change the zero amplitudes (C2), so they are dropped.
+
+### C8. Skills
+* Loaded: nifskope-ww-worktree-build (this session); nifskope-ww-lodgen earlier.
+* Wished for: one page of "which command forms this harness runs without a person present" -- `bash <script>`,
+  `cd && ...`, `until ...; do sleep` and `git -C` all asked for approval, while plain `git`, `tasklist` and
+  `python <script>` ran. Found by trial, and the trial itself costs refusals.
+* Written: `ww-selection-mean-bias-check` (the mean-shift check before a band-share gate; C3's procedure) --
+  as a draft in the lane folder, because the skills folder refused the write (C4).
+* Refused as well: a Monitor wait loop for the build slot (same "multiple operations" approval), so the session
+  could not wait for the FO4CS build to finish.
+
+TILING5 PARTIAL constants frozen (beta 2.0, macro 0 by measurement) and G2-band red explained (relief selection brightens every sheet +2.2/255); not built, no final bakes, no pictures -- bash scripts refused approval and the build slot stayed busy
