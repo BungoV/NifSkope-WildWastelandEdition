@@ -1116,13 +1116,12 @@ bool lodgenBuildTerrainChunk( NifModel * nif, const EsmWorld & world,
 				std::vector<int> leafIdx;
 				int blocksPerCell = 1;
 				QVector<Vector3> wverts;
-				QVector<Color4> wcols;
 				QVector<Triangle> wtris;
-				/* Channels only once the mesh can carry them. At subdiv 0 the
-				 * water is one quad per wet cell and four corner values 4096
-				 * units apart describe nothing, so the descriptor stays
-				 * vanilla's and the output stays byte-identical. */
-				const bool waterChans = opts.waterChannels && opts.waterSubdiv > 0;
+				/* No vertex colours on the water: the depth tint that rode in R
+				 * was dropped 2026-09-27 (bungo: "so we drop the depth bake for
+				 * water from code"); G, B and A only ever held constants, so the
+				 * whole colour attribute went with it and the descriptor is
+				 * vanilla's at every subdivision level. */
 				QVector<QPair<int, int>> segPrims( dim * dim, qMakePair( 0, 0 ) );
 				float wMinX = 3.4e38f, wMinY = 3.4e38f, wMaxX = -3.4e38f, wMaxY = -3.4e38f;
 				const float cellSpan = 4096.0f * invDim;
@@ -1131,7 +1130,6 @@ bool lodgenBuildTerrainChunk( NifModel * nif, const EsmWorld & world,
 					leaves.clear();
 					leafIdx.clear();
 					wverts.clear();
-					wcols.clear();
 					wtris.clear();
 					segPrims.fill( qMakePair( 0, 0 ) );
 					wMinX = 3.4e38f; wMinY = 3.4e38f; wMaxX = -3.4e38f; wMaxY = -3.4e38f;
@@ -1161,22 +1159,6 @@ bool lodgenBuildTerrainChunk( NifModel * nif, const EsmWorld & world,
 						wMinY = qMin( wMinY, y ); wMaxY = qMax( wMaxY, y );
 						const quint16 idx = quint16( wverts.size() );
 						wverts.append( Vector3( x, y, h ) );
-						if ( waterChans ) {
-							/* R = depth, water plane minus terrain directly
-							 * under this vertex. Every corner and split sits on
-							 * a block coordinate and blocksPerCell divides 32,
-							 * so the heightfield sample is exact -- no
-							 * interpolation, no half-sample drift. */
-							const int step = 32 / blocksPerCell;
-							const int gc = qBound( 0, gx * step, n - 1 );
-							const int gr = qBound( 0, gy * step, n - 1 );
-							const float terrain =
-								grid[size_t( gr ) * size_t( n ) + size_t( gc )];
-							const float depth = qMax( 0.0f, hWorld - terrain );
-							wcols.append( Color4(
-								qBound( 0.0f, depth / 2048.0f, 1.0f ),
-								0.0f, 0.0f, 1.0f ) );
-						}
 						if ( subdiv > 0 )
 							weld.insert( key, idx );
 						return idx;
@@ -1275,13 +1257,7 @@ bool lodgenBuildTerrainChunk( NifModel * nif, const EsmWorld & world,
 
 				const int wvCount = wverts.size();
 				const int wtCount = wtris.size();
-				BSVertexDesc wdesc( WATER_VERTEX_DESC );
-				if ( waterChans ) {
-					wdesc.SetFlag( VertexFlags::VF_COLORS );
-					wdesc.ResetAttributeOffsets( 130 );
-					nif->set<BSVertexDesc>( iWater, "Vertex Desc", wdesc.Value() );
-				}
-				const int wStride = waterChans ? int( wdesc.GetVertexSize() ) : 8;
+				const int wStride = 8;   // WATER_VERTEX_DESC: position only
 				nif->set<quint32>( iWater, "Num Vertices", quint32( wvCount ) );
 				nif->set<quint32>( iWater, "Num Triangles", quint32( wtCount ) );
 				nif->set<quint32>( iWater, "Data Size",
@@ -1294,11 +1270,6 @@ bool lodgenBuildTerrainChunk( NifModel * nif, const EsmWorld & world,
 					QModelIndex row = nif->index( v, 0, iWV );
 					nif->set<HalfVector3>( row, "Vertex", HalfVector3( wverts[v] ) );
 					nif->set<float>( row, "Bitangent X", 1.0f );
-					if ( waterChans && v < wcols.size() ) {
-						const Color4 & wc = wcols[v];
-						nif->set<ByteColor4>( row, "Vertex Colors", ByteColor4(
-							FloatVector4( wc.red(), wc.green(), wc.blue(), wc.alpha() ) ) );
-					}
 				}
 				QModelIndex iWT = nif->getIndex( iWater, "Triangles" );
 				nif->updateArraySize( iWT );
@@ -12545,8 +12516,9 @@ bool lodgenBakeTerrainTextures( const EsmWorld & world, int chunkX, int chunkY,
 					 *                     vis and ao[i] = vis * 255 from ONE horizon
 					 *                     measure, so storing it stores AO twice;
 					 *   slope          -- recoverable as acos(n.z) from _msn;
-					 *   water depth    -- the water mesh already carries it, and
-					 *                     land wants shore proximity, not depth;
+					 *   water depth    -- a runtime subtraction (the .lodl's water
+					 *                     plane minus the ground), and land wants
+					 *                     shore proximity, not depth;
 					 *   material blend -- the diffuse ALREADY composites the layers,
 					 *                     and the class ids it would weight are
 					 *                     per-VERTEX, so a per-texel weight has no

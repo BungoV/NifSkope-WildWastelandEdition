@@ -56,6 +56,7 @@ def to_world(nif, sh, v):
 
 def pick(d, out, n):
     rows, shapes, files, sat, zero = [], 0, 0, 0, 0
+    gba = {}   # the other three colour bytes: constant or not decides reclaim vs keep
     for p in sorted(glob.glob(os.path.join(d, '**', '*.btr'), recursive=True)):
         nif = G.Nif(p)
         files += 1
@@ -66,6 +67,8 @@ def pick(d, out, n):
             base, co = shape_base(nif, sh), colour_offset(sh['va'])
             for k, v in enumerate(sh['verts']):
                 rb = nif.data[base + k * sh['stride'] + co]
+                key = tuple(nif.data[base + k * sh['stride'] + co + 1:base + k * sh['stride'] + co + 4])
+                gba[key] = gba.get(key, 0) + 1
                 x, y, z = to_world(nif, sh, v)
                 if rb >= 255:
                     sat += 1
@@ -80,6 +83,7 @@ def pick(d, out, n):
                    sample=sample, probe=probe), open(out, 'w'))
     print('files %d, water shapes with colours %d, vertices %d (R=0: %d, R=255: %d), sampled %d unsaturated'
           % (files, shapes, len(rows), zero, sat, len(sample)))
+    print('distinct G,B,A byte triples over every water vertex: %s' % {str(k): v for k, v in gba.items()})
 
 
 def score(js, log):

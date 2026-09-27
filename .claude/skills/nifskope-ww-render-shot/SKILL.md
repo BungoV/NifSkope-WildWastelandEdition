@@ -153,7 +153,7 @@ which do draw. A byte-identical pair of empty frames guards nothing.
 
 Channels: 1 identity hashed colour per object, 2 identity raw R+G, 3 ambient occlusion (B),
 4 tree sway / shore proximity (vertex alpha), 5 terrain material class (R, hashed), 6 terrain
-wetness (G), 7 water depth (R), 8 geometric normal in view space (half-packed), 9 window depth,
+wetness (G), 7 unassigned (was water depth, dropped 2026-09-27), 8 geometric normal in view space (half-packed), 9 window depth,
 10 the material's smoothness (normal map alpha), 11 the shape's alpha-test flag (1 = alpha-tested).
 Channels 8 and 9 keep texturing ON (no WW_RENDER_FLAT) or the leaf cards' alpha test stops cutting
 and every card photographs as a solid quad. The impostor bake (`WW_IMPOSTOR_BAKE=<dir>

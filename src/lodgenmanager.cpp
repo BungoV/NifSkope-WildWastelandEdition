@@ -1264,7 +1264,7 @@ public:
 			terrainIdCheck->setObjectName( QStringLiteral( "LodgenTerrainIdentityCheck" ) );
 			// OFF since 2026-09-12 (lane DEFAULTS1, bungo's 15:53 ruling)
 			terrainIdCheck->setChecked( false );
-			terrainIdCheck->setToolTip( tr( "Material class, wetness and water depth in the chunk's vertex colours, for FO4CS.\n"
+			terrainIdCheck->setToolTip( tr( "Material class and wetness in the chunk's vertex colours, for FO4CS.\n"
 				"Off, the .BTR carries vanilla's vertex layout.\nCommand line: --terrain-identity" ) );
 			geomorphCheck = new QCheckBox( tr( "Geomorph weights" ), page );
 			geomorphCheck->setChecked( false );
@@ -2007,7 +2007,6 @@ public:
 			previewBox->addItem( tr( "Tree sway / shore proximity (A)" ), 4 );
 			previewBox->addItem( tr( "Terrain material class (R, hashed)" ), 5 );
 			previewBox->addItem( tr( "Terrain wetness (G)" ), 6 );
-			previewBox->addItem( tr( "Water depth (R)" ), 7 );
 			previewBox->setToolTip( tr( "Draw one generated vertex channel flat, with no textures or lighting.\nOnly for an open .bto or .btr - on any other mesh these channels mean\nsomething else." ) );
 			wwMatchFieldStyle( previewBox );
 			f.g->addWidget( previewLabel, f.row, 0 );

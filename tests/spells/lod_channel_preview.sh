@@ -120,15 +120,18 @@ fi
 # A third pair, added with the ground-cover work (2026-09-06 TERRAIN1): the
 # more channels there are, the more this gate matters, and two of them
 # collapsing into one another is exactly what it was written to catch.
-if shot 7 "$W/c7.png"; then
-	if cmp -s "$W/c6.png" "$W/c7.png"; then
-		echo "  FAIL wetness (6) and channel 7 render byte-identical on terrain"
+# It used channel 7 (water depth, R on the water shape) until 2026-09-27, when
+# that bake was dropped (lane WATER1); material class (5) is the other terrain
+# channel on the same vertex colours.
+if shot 5 "$W/c5.png"; then
+	if cmp -s "$W/c6.png" "$W/c5.png"; then
+		echo "  FAIL wetness (6) and material class (5) render byte-identical on terrain"
 		fails=$((fails + 1))
 	else
-		echo "  ok   channel 7 differs from wetness (6)"
+		echo "  ok   material class (5) differs from wetness (6)"
 	fi
 else
-	echo "  FAIL channel 7 did not render"
+	echo "  FAIL channel 5 did not render"
 	fails=$((fails + 1))
 fi
 #

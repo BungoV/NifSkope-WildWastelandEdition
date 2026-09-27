@@ -782,7 +782,6 @@ QStringList lodgenIdentityDump( const LodgenChunkPassOptions & pass, const Lodge
 	add( "terrain.dim", n( t.dim ) );
 	add( "terrain.water", b( t.water ) );
 	add( "terrain.waterSubdiv", n( t.waterSubdiv ) );
-	add( "terrain.waterChannels", b( t.waterChannels ) );
 	add( "terrain.waterCullBuried", b( t.waterCullBuried ) );
 	add( "terrain.shoreDenser", b( t.shoreDenser ) );
 	add( "terrain.shoreDensity", n( t.shoreDensity ) );
