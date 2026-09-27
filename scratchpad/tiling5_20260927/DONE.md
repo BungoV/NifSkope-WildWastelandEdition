@@ -42,3 +42,12 @@ which reduces the height blend exactly to today's linear crossfade for that pair
 One source patch (`#include <complex>`, a pi constant replacing M_PI) went through a Python heredoc instead of
 the Edit tool, against the night rule. Checked afterwards: exactly the three intended replacements, LF-only file
 unchanged in line endings. All other source edits use Edit.
+
+## 3. Gates (filled in as measured)
+
+### 3a. Off = the rung's bytes (Boston box -8,-12..3,-1, dim 4, `--vt --cover`)
+Rung `run_rung` (sha1 a94745fd, this worktree's first build = night-trial @ 5b338d39) against the new exe
+`run_new` (sha1 514096ef), no new switch: **terrain sheets 27 of 27 identical** (colour, `_data`, `_msn`), VT
+`.lodt`/`.lodm` 3 of 3 identical, 27 `.BTR`/`.BTO`/manifests identical. The only differing bytes are the run
+folder's own path in `flat_objects_report.txt` and the `.lodb` ledger's exe size / time / out path -- its switch
+list is identical (the two new ledger keys are written only when ON). **PASS.**
