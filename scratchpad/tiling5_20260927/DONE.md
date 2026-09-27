@@ -36,3 +36,9 @@ Reference = the relief the artist drew, integrated back out of the normal map (F
 Neither free candidate reaches 0.35, so the bake integrates height from the normal map itself, once per texture
 (C++ FFT at <= 256 texels, per-mip unit-SD pyramid, thread-safe cache). A texture without a normal map gets h = 0,
 which reduces the height blend exactly to today's linear crossfade for that pair.
+
+## Rule slip (recorded the moment it happened)
+
+One source patch (`#include <complex>`, a pi constant replacing M_PI) went through a Python heredoc instead of
+the Edit tool, against the night rule. Checked afterwards: exactly the three intended replacements, LF-only file
+unchanged in line endings. All other source edits use Edit.

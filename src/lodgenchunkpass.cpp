@@ -838,6 +838,12 @@ QStringList lodgenIdentityDump( const LodgenChunkPassOptions & pass, const Lodge
 	add( "land.sheetFormat", n( lodgenSheetFormat() ) );
 	add( "blend.edges", n( lodgenBlendEdges() ) );
 	add( "blend.margin", f( lodgenBlendMargin() ) );
+	/* lane TILING5: named only when ON, so a ledger written without them is
+	 * the rung's bytes and an incremental run still sees them change */
+	if ( lodgenLandHeightBlend() )
+		add( "land.heightBlend", b( true ) );
+	if ( lodgenLandMacro() )
+		add( "land.macro", b( true ) );
 
 	add( "run.atlas", b( x.atlas ) );
 	add( "run.arrays", b( x.arrays ) );

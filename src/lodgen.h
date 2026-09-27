@@ -228,6 +228,41 @@ void lodgenSetLandMipBias( float bias );         // 0 = off = the rung's bytes
 float lodgenLandHexSize();
 void lodgenSetLandHexSize( float units );        // 0 = off = the rung's bytes
 
+/* --- HEIGHT-AWARE LAND BLENDING + LARGE-SCALE VARIATION (lane TILING5) -----
+ *
+ * bungo 2026-09-27: "terrain blending on lods / lod terrain patterning could
+ * use an improvement".  Two independent switches, both OFF by default and
+ * both off BY RETURN, so a bake without them is the rung's bytes:
+ *
+ * HEIGHT BLEND (`--land-height-blend on`).  Every land texture's relief is
+ * integrated back out of its own normal map (Frankot-Chellappa on the periodic
+ * grid, <= 256 texels, unit SD per mip) -- FO4 ships no height maps, and the
+ * lane measured the free stand-ins against that relief: diffuse luminance
+ * correlates 0.196 with it, diffuse alpha 0.314 and is flat on a fifth of the
+ * ground.  The relief is used twice, with ONE sharpness constant:
+ *   * at the hex joins the three barycentric weights become
+ *     w_k exp(beta h_k), renormalised -- the raised tap wins, and a weight that
+ *     is zero at a lattice edge stays zero, so no seam is introduced;
+ *   * between LTEX layers the opacity becomes sigma( logit(a) + beta (h_layer
+ *     - h_below) ), which keeps a = 0 and a = 1 exactly where they were and
+ *     turns the crossfade in between into a height-shaped edge.  The pyramid
+ *     writer blends roughness, metalness and emissive with the same opacity.
+ * A texture with no readable normal map has h = 0, which is the linear blend.
+ *
+ * MACRO VARIATION (`--land-macro on`).  A smooth world-space field (value-noise
+ * fBm on 4,096 / 16,384 / 65,536-unit lattices, its own hash keys, so it is
+ * independent of the 256-unit hex patches) that moves the land colour's
+ * brightness and hue slightly and its saturation only UP: per texel the
+ * saturation is never below the unmodified colour's.  A pure function of
+ * world position -- no seam, no thread-count dependence.  Applied after the
+ * quadrant cross-fade and before VCLR, cover tint and roads.
+ *
+ * `--land-sample relief` turns both on and leaves the sampler as it is. */
+bool lodgenLandHeightBlend();
+void lodgenSetLandHeightBlend( bool on );        // false = off = the rung's bytes
+bool lodgenLandMacro();
+void lodgenSetLandMacro( bool on );              // false = off = the rung's bytes
+
 /* --- TERRAIN-GUIDED LAND SAMPLING (lane LAND1, bungo 2026-09-12) ----------
  *
  * bungo, after the warp sweep picture: "what is used for the land sample

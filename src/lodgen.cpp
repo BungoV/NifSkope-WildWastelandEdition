@@ -46,6 +46,7 @@ BSD License - see nifskope.h
 #include <array>
 #include <atomic>
 #include <cmath>
+#include <complex>
 #include <functional>
 #include <limits>
 #include <vector>
@@ -7440,6 +7441,455 @@ static inline void lodgenLandHexVertexPos( qint32 i, qint32 j, double size,
 	*wy = py * size;
 }
 
+/* --- THE LAND TEXTURE'S RELIEF, AND THE HEIGHT-AWARE BLEND (lane TILING5) ---
+ *
+ * See lodgen.h.  FO4 land textures ship no height map, so the relief is
+ * integrated out of the texture's own normal map, once per texture, and kept
+ * as a small float pyramid with zero mean and unit SD on every level, so that
+ * ONE sharpness constant means the same thing at every distance.
+ *
+ * Lane TILING5's measurement (scratchpad/tiling5_20260927/m1_height_source.py,
+ * coverage-weighted over the Commonwealth's land): diffuse luminance
+ * correlates 0.196 with this relief and diffuse alpha 0.314 (and alpha is flat
+ * on 20.7 % of the ground), so neither free channel is a height. */
+static bool g_landHeightBlend = false;         // --land-height-blend; off == rung's bytes
+static bool g_landMacro = false;               // --land-macro; off == rung's bytes
+
+/* THE ONE SHARPNESS CONSTANT: the logit shift per unit-SD of relief
+ * difference.  Tuned against the lane's gates (DONE.md section 3). */
+static const float LODGEN_LAND_HEIGHT_BETA_DEFAULT = 2.0f;
+
+static float lodgenLandHeightBeta()
+{
+	/* TUNING ONLY, removed before the lane lands: the environment override the
+	 * sweep in DONE.md section 3 used. */
+	static const float beta = []() {
+		bool ok = false;
+		const float b = qEnvironmentVariable( "WW_TILING5_BETA" ).toFloat( &ok );
+		return ok ? b : LODGEN_LAND_HEIGHT_BETA_DEFAULT;
+	}();
+	return beta;
+}
+
+struct LodgenLandHeight
+{
+	float log2W0 = 0.0f;                     // log2 of level 0's width
+	std::vector<int> lw, lh;                 // per level size (powers of two)
+	std::vector<std::vector<float>> lv;      // per level, mean 0, SD 1
+
+	/*! Bilinear, wrapped, at a fractional level (trilinear across levels).
+	 *  `u`/`v` are in [0,1) of one repeat, like the diffuse tap's. */
+	float at( float u, float v, float levelF ) const
+	{
+		const int n = int( lv.size() );
+		if ( n == 0 )
+			return 0.0f;
+		const float lf = qBound( 0.0f, levelF, float( n - 1 ) );
+		const int l0 = int( lf );
+		const int l1 = qMin( l0 + 1, n - 1 );
+		const float t = lf - float( l0 );
+		auto bil = [&]( int l ) -> float {
+			const int w = lw[size_t( l )], h = lh[size_t( l )];
+			const float x = u * float( w ) - 0.5f;
+			const float y = v * float( h ) - 0.5f;
+			const float fx0 = std::floor( x ), fy0 = std::floor( y );
+			const float fx = x - fx0, fy = y - fy0;
+			const int x0 = int( fx0 ) & ( w - 1 ), y0 = int( fy0 ) & ( h - 1 );
+			const int x1 = ( x0 + 1 ) & ( w - 1 ), y1 = ( y0 + 1 ) & ( h - 1 );
+			const float * p = lv[size_t( l )].data();
+			const float a = p[size_t( y0 ) * w + x0] * ( 1.0f - fx ) + p[size_t( y0 ) * w + x1] * fx;
+			const float b = p[size_t( y1 ) * w + x0] * ( 1.0f - fx ) + p[size_t( y1 ) * w + x1] * fx;
+			return a * ( 1.0f - fy ) + b * fy;
+		};
+		const float h0 = bil( l0 );
+		if ( l1 == l0 || t <= 0.0f )
+			return h0;
+		return h0 + ( bil( l1 ) - h0 ) * t;
+	}
+};
+
+static const double LODGEN_PI = 3.14159265358979323846;
+
+//! In-place radix-2 complex FFT of length n (a power of two); inverse unscaled.
+static void lodgenFft( std::complex<double> * a, int n, bool inverse )
+{
+	for ( int i = 1, j = 0; i < n; i++ ) {
+		int bit = n >> 1;
+		for ( ; j & bit; bit >>= 1 )
+			j ^= bit;
+		j ^= bit;
+		if ( i < j )
+			std::swap( a[i], a[j] );
+	}
+	for ( int len = 2; len <= n; len <<= 1 ) {
+		const double ang = 2.0 * LODGEN_PI / double( len ) * ( inverse ? 1.0 : -1.0 );
+		const std::complex<double> wl( std::cos( ang ), std::sin( ang ) );
+		for ( int i = 0; i < n; i += len ) {
+			std::complex<double> w( 1.0, 0.0 );
+			for ( int k = 0; k < len / 2; k++ ) {
+				const std::complex<double> x = a[i + k];
+				const std::complex<double> y = a[i + k + len / 2] * w;
+				a[i + k] = x + y;
+				a[i + k + len / 2] = x - y;
+				w *= wl;
+			}
+		}
+	}
+}
+
+//! 2-D FFT of a w x h row-major grid, both powers of two.
+static void lodgenFft2( std::vector<std::complex<double>> & g, int w, int h, bool inverse )
+{
+	for ( int y = 0; y < h; y++ )
+		lodgenFft( g.data() + size_t( y ) * w, w, inverse );
+	std::vector<std::complex<double>> col( static_cast<size_t>( h ) );
+	for ( int x = 0; x < w; x++ ) {
+		for ( int y = 0; y < h; y++ )
+			col[size_t( y )] = g[size_t( y ) * w + x];
+		lodgenFft( col.data(), h, inverse );
+		for ( int y = 0; y < h; y++ )
+			g[size_t( y ) * w + x] = col[size_t( y )];
+	}
+}
+
+/*! Frankot-Chellappa: the periodic least-squares surface whose gradient is
+ *  (p, q), p along x (columns), q along y (rows). */
+static std::vector<double> lodgenIntegrateGradient( const std::vector<double> & p,
+	const std::vector<double> & q, int w, int h )
+{
+	std::vector<std::complex<double>> P( p.begin(), p.end() ), Q( q.begin(), q.end() );
+	lodgenFft2( P, w, h, false );
+	lodgenFft2( Q, w, h, false );
+	const std::complex<double> I( 0.0, 1.0 );
+	for ( int y = 0; y < h; y++ ) {
+		const double wy = 2.0 * LODGEN_PI * double( y < h / 2 ? y : y - h ) / double( h );
+		for ( int x = 0; x < w; x++ ) {
+			const double wx = 2.0 * LODGEN_PI * double( x < w / 2 ? x : x - w ) / double( w );
+			const size_t o = size_t( y ) * w + x;
+			const double den = wx * wx + wy * wy;
+			P[o] = den > 0.0 ? ( -I * wx * P[o] - I * wy * Q[o] ) / den
+				: std::complex<double>( 0.0, 0.0 );
+		}
+	}
+	lodgenFft2( P, w, h, true );
+	std::vector<double> z( size_t( w ) * h );
+	const double s = 1.0 / double( size_t( w ) * h );
+	for ( size_t o = 0; o < z.size(); o++ )
+		z[o] = P[o].real() * s;
+	return z;
+}
+
+//! The relief of one normal map, or nullptr when it cannot be measured.
+static LodgenLandHeight * lodgenBuildLandHeight( const DDSTexture16 & t )
+{
+	const int W = t.getWidth(), H = t.getHeight();
+	if ( W <= 0 || H <= 0 || ( W & ( W - 1 ) ) || ( H & ( H - 1 ) ) )
+		return nullptr;
+	int m = 0;
+	while ( m < t.getMaxMipLevel() && ( ( W >> m ) > 256 || ( H >> m ) > 256 ) )
+		m++;
+	const int w = qMax( 1, W >> m ), h = qMax( 1, H >> m );
+	if ( w < 4 || h < 4 )
+		return nullptr;
+	const size_t N = size_t( w ) * h;
+	std::vector<double> px( N ), py( N );
+	for ( int y = 0; y < h; y++ )
+		for ( int x = 0; x < w; x++ ) {
+			const FloatVector4 c = FloatVector4::convertFloat16( t.getPixelN( x, y, m ) );
+			const double nx = double( c[0] ) * 2.0 - 1.0;
+			const double ny = double( c[1] ) * 2.0 - 1.0;
+			const double nz = qMax( 0.05, std::sqrt( qMax( 1e-4, 1.0 - nx * nx - ny * ny ) ) );
+			px[size_t( y ) * w + x] = -nx / nz;
+			py[size_t( y ) * w + x] = -ny / nz;
+		}
+	/* The green channel's sign is a convention (up or down the rows); the
+	 * wrong one leaves a gradient field that no surface has, so pick the sign
+	 * whose integrated surface reproduces the map's gradient best. */
+	std::vector<double> best;
+	double bestRes = 0.0;
+	double gm = 0.0;
+	for ( size_t o = 0; o < N; o++ )
+		gm += px[o] * px[o] + py[o] * py[o];
+	gm = std::sqrt( gm / double( N ) );
+	if ( gm < 1e-6 )
+		return nullptr;
+	for ( int sgn = 1; sgn >= -1; sgn -= 2 ) {
+		std::vector<double> q( N );
+		for ( size_t o = 0; o < N; o++ )
+			q[o] = py[o] * double( sgn );
+		std::vector<double> z = lodgenIntegrateGradient( px, q, w, h );
+		double r = 0.0;
+		for ( int y = 0; y < h; y++ )
+			for ( int x = 0; x < w; x++ ) {
+				const size_t o = size_t( y ) * w + x;
+				const double gx = ( z[size_t( y ) * w + ( ( x + 1 ) & ( w - 1 ) )]
+					- z[size_t( y ) * w + ( ( x - 1 ) & ( w - 1 ) )] ) * 0.5;
+				const double gy = ( z[size_t( ( y + 1 ) & ( h - 1 ) ) * w + x]
+					- z[size_t( ( y - 1 ) & ( h - 1 ) ) * w + x] ) * 0.5;
+				r += ( gx - px[o] ) * ( gx - px[o] ) + ( gy - q[o] ) * ( gy - q[o] );
+			}
+		r = std::sqrt( r / double( N ) ) / gm;
+		if ( best.empty() || r < bestRes ) {
+			bestRes = r;
+			best.swap( z );
+		}
+	}
+	LodgenLandHeight * hm = new LodgenLandHeight;
+	hm->log2W0 = std::log2( float( w ) );
+	std::vector<double> cur = best;
+	int cw = w, ch = h;
+	for ( ;; ) {
+		double mean = 0.0, var = 0.0;
+		for ( double d : cur )
+			mean += d;
+		mean /= double( cur.size() );
+		for ( double d : cur )
+			var += ( d - mean ) * ( d - mean );
+		const double sd = std::sqrt( var / double( cur.size() ) );
+		std::vector<float> lvl( cur.size() );
+		for ( size_t o = 0; o < cur.size(); o++ )
+			lvl[o] = sd > 1e-9 ? float( ( cur[o] - mean ) / sd ) : 0.0f;
+		hm->lw.push_back( cw );
+		hm->lh.push_back( ch );
+		hm->lv.push_back( std::move( lvl ) );
+		if ( cw == 1 && ch == 1 )
+			break;
+		const int nw = qMax( 1, cw / 2 ), nh = qMax( 1, ch / 2 );
+		std::vector<double> nxt( size_t( nw ) * nh, 0.0 );
+		const int fx = cw / nw, fy = ch / nh;
+		for ( int y = 0; y < ch; y++ )
+			for ( int x = 0; x < cw; x++ )
+				nxt[size_t( y / fy ) * nw + x / fx] += cur[size_t( y ) * cw + x];
+		for ( double & d : nxt )
+			d /= double( fx * fy );
+		cur.swap( nxt );
+		cw = nw;
+		ch = nh;
+	}
+	return hm;
+}
+
+/*! The relief of one land texture set, cached for the process (never freed,
+ *  like the AO alpha maps: every bake thread holds pointers into it).  The
+ *  normal map is read through a PRIVATE loader cache that is emptied here, not
+ *  through the bake's LRU -- loading it there could evict the diffuse the
+ *  caller is holding. */
+static const LodgenLandHeight * lodgenLandHeightFor( const QString & dataRoot,
+	const QString & diffuse, const QString & normal )
+{
+	static QMutex mutex;
+	static QHash<QString, LodgenLandHeight *> maps;
+	const QString key = ( normal.isEmpty() ? diffuse : normal ).toLower();
+	QMutexLocker lock( &mutex );
+	auto it = maps.constFind( key );
+	if ( it != maps.constEnd() )
+		return *it;
+	QString npath = normal;
+	if ( npath.isEmpty() && diffuse.endsWith( QStringLiteral( ".bgsm" ), Qt::CaseInsensitive ) ) {
+		/* A material-backed set names its normal map in the material, second
+		 * slot; the path is cut the way lodgenLoadTexture cuts it. */
+		QString path = diffuse;
+		path.replace( QChar( '\\' ), QChar( '/' ) );
+		const int pmi = path.lastIndexOf( QStringLiteral( "materials/" ), -1, Qt::CaseInsensitive );
+		if ( pmi > 0 )
+			path.remove( 0, pmi );
+		else if ( !path.startsWith( QStringLiteral( "materials/" ), Qt::CaseInsensitive ) )
+			path.prepend( QStringLiteral( "materials/" ) );
+		QByteArray mbytes;
+		if ( lodgenReadAsset( dataRoot, path, "materials", ".bgsm", mbytes ) ) {
+			const ShaderMaterial sm( mbytes );
+			if ( sm.isValid() && sm.textures().size() > 1 )
+				npath = sm.textures().at( 1 );
+		}
+	}
+	LodgenLandHeight * hm = nullptr;
+	if ( !npath.isEmpty() ) {
+		QHash<QString, DDSTexture16 *> texCache;
+		const DDSTexture16 * t = lodgenLoadTexture( dataRoot, npath, texCache );
+		if ( t )
+			hm = lodgenBuildLandHeight( *t );
+		for ( DDSTexture16 * d : texCache )
+			delete d;
+	}
+	maps.insert( key, hm );
+	return hm;
+}
+
+/*! The height-aware layer opacity: sigma( logit(a) + beta * dh ).  a = 0 and
+ *  a = 1 are kept exactly; dh = 0 (no relief on either side) is `a` itself. */
+static inline float lodgenLandHeightAlpha( float a, float dh )
+{
+	if ( a <= 0.0f )
+		return 0.0f;
+	if ( a >= 1.0f )
+		return 1.0f;
+	const double lg = std::log( double( a ) / double( 1.0f - a ) )
+		+ double( lodgenLandHeightBeta() ) * double( dh );
+	return float( 1.0 / ( 1.0 + std::exp( -lg ) ) );
+}
+
+bool lodgenLandHeightBlend()
+{
+	return g_landHeightBlend;
+}
+
+void lodgenSetLandHeightBlend( bool on )
+{
+	g_landHeightBlend = on;
+}
+
+/* --- THE LARGE-SCALE VARIATION (lane TILING5) --------------------------------
+ *
+ * Three independent smooth fields (brightness, hue, saturation), each value-
+ * noise fBm on 4,096 / 16,384 / 65,536-unit lattices (58 m / 234 m / 936 m) with
+ * quintic interpolation, from the warp's own integer hash under keys the hex
+ * and the warp never use.  Pure functions of world position. */
+static const double LODGEN_MACRO_LATTICE[3] = { 4096.0, 16384.0, 65536.0 };
+static const double LODGEN_MACRO_WEIGHT[3]  = { 0.25, 0.5, 1.0 };
+/* THE AMPLITUDES, set by measurement against vanilla's own LOD sheets (DONE.md
+ * section 3): brightness as a log gain per unit field, hue in radians per unit
+ * field, and the saturation boost's ceiling (the boost is always >= 1). */
+static const float LODGEN_MACRO_AMP_DEFAULT[3] = { 0.06f, 0.05f, 0.06f };
+
+static void lodgenMacroAmps( float * a )
+{
+	/* TUNING ONLY, removed before the lane lands (see the beta above). */
+	static const std::array<float, 3> amps = []() {
+		std::array<float, 3> r = { LODGEN_MACRO_AMP_DEFAULT[0],
+			LODGEN_MACRO_AMP_DEFAULT[1], LODGEN_MACRO_AMP_DEFAULT[2] };
+		const QStringList parts = qEnvironmentVariable( "WW_TILING5_MACRO" ).split( QLatin1Char( ',' ) );
+		if ( parts.size() == 3 )
+			for ( int i = 0; i < 3; i++ ) {
+				bool ok = false;
+				const float v = parts[i].toFloat( &ok );
+				if ( ok )
+					r[size_t( i )] = v;
+			}
+		return r;
+	}();
+	for ( int i = 0; i < 3; i++ )
+		a[i] = amps[size_t( i )];
+}
+
+//! One octave of quintic value noise in [-1,+1], its own hash key.
+static double lodgenMacroNoise( double wx, double wy, double lattice, quint32 key )
+{
+	const double gx = wx / lattice;
+	const double gy = wy / lattice;
+	const double fi = std::floor( gx );
+	const double fj = std::floor( gy );
+	const qint32 i = qint32( fi );
+	const qint32 j = qint32( fj );
+	const double fx = gx - fi;
+	const double fy = gy - fj;
+	const double sx = fx * fx * fx * ( fx * ( fx * 6.0 - 15.0 ) + 10.0 );
+	const double sy = fy * fy * fy * ( fy * ( fy * 6.0 - 15.0 ) + 10.0 );
+	const double a = double( lodgenWarpHash( i,     j,     key ) ) / 4294967296.0;
+	const double b = double( lodgenWarpHash( i + 1, j,     key ) ) / 4294967296.0;
+	const double c = double( lodgenWarpHash( i,     j + 1, key ) ) / 4294967296.0;
+	const double d = double( lodgenWarpHash( i + 1, j + 1, key ) ) / 4294967296.0;
+	const double v = ( a * ( 1.0 - sx ) + b * sx ) * ( 1.0 - sy )
+		+ ( c * ( 1.0 - sx ) + d * sx ) * sy;
+	return v * 2.0 - 1.0;
+}
+
+//! The fBm of one channel (0 brightness, 1 hue, 2 saturation), about [-1,+1].
+static double lodgenMacroField( double wx, double wy, int channel )
+{
+	double s = 0.0, wsum = 0.0;
+	for ( int o = 0; o < 3; o++ ) {
+		/* keys 0x7A5E0000 + 16 * channel + octave: nothing else in this file
+		 * hashes with a key above 1 */
+		s += LODGEN_MACRO_WEIGHT[o] * lodgenMacroNoise( wx, wy, LODGEN_MACRO_LATTICE[o],
+			0x7A5E0000u + quint32( 16 * channel + o ) );
+		wsum += LODGEN_MACRO_WEIGHT[o];
+	}
+	return s / wsum;
+}
+
+static inline float lodgenHsvSat( const FloatVector4 & c )
+{
+	const float mx = qMax( c[0], qMax( c[1], c[2] ) );
+	const float mn = qMin( c[0], qMin( c[1], c[2] ) );
+	return mx > 1e-6f ? ( mx - mn ) / mx : 0.0f;
+}
+
+/*! The macro variation applied to one land colour (0..1, alpha untouched).
+ *  Hue turns about the grey axis, saturation is scaled about the grey level
+ *  by k >= 1, brightness is a gain; then, per texel, the saturation is held
+ *  at or above the unmodified colour's -- the hard line. */
+static FloatVector4 lodgenLandMacroApply( const FloatVector4 & c0, double wx, double wy )
+{
+	float amp[3];
+	lodgenMacroAmps( amp );
+	const double fb = lodgenMacroField( wx, wy, 0 );
+	const double fh = lodgenMacroField( wx, wy, 1 );
+	const double fs = lodgenMacroField( wx, wy, 2 );
+	const float gain = float( std::exp( double( amp[0] ) * fb ) );
+	const double th = double( amp[1] ) * fh;
+	const float k = 1.0f + amp[2] * float( 0.5 * ( 1.0 + qBound( -1.0, fs, 1.0 ) ) );
+	const float s0 = lodgenHsvSat( c0 );
+	auto clamp01 = []( FloatVector4 c ) {
+		for ( int i = 0; i < 3; i++ )
+			c[i] = qBound( 0.0f, c[i], 1.0f );
+		return c;
+	};
+	// Rodrigues about n = (1,1,1)/sqrt(3)
+	const double ct = std::cos( th ), st = std::sin( th );
+	const double r = c0[0], g = c0[1], b = c0[2];
+	const double m = ( r + g + b ) / 3.0;
+	const double inv3 = 0.57735026918962576;
+	const double cxr = ( b - g ) * inv3, cxg = ( r - b ) * inv3, cxb = ( g - r ) * inv3;   // n x c
+	FloatVector4 c = c0;
+	c[0] = float( r * ct + cxr * st + m * ( 1.0 - ct ) );
+	c[1] = float( g * ct + cxg * st + m * ( 1.0 - ct ) );
+	c[2] = float( b * ct + cxb * st + m * ( 1.0 - ct ) );
+	for ( int i = 0; i < 3; i++ )
+		c[i] = float( m ) + ( c[i] - float( m ) ) * k;
+	for ( int i = 0; i < 3; i++ )
+		c[i] *= gain;
+	c = clamp01( c );
+	if ( lodgenHsvSat( c ) + 1e-6f < s0 ) {
+		/* raise the saturation about this colour's grey level until it is
+		 * back at s0: S(k2) = k2 (mx - mn) / (m3 + k2 (mx - m3)) = s0 */
+		const float mx = qMax( c[0], qMax( c[1], c[2] ) );
+		const float mn = qMin( c[0], qMin( c[1], c[2] ) );
+		const float m3 = ( c[0] + c[1] + c[2] ) / 3.0f;
+		const float den = ( mx - mn ) - s0 * ( mx - m3 );
+		bool fixed = false;
+		if ( den > 1e-6f ) {
+			const float k2 = s0 * m3 / den * 1.0001f;
+			FloatVector4 t = c;
+			for ( int i = 0; i < 3; i++ )
+				t[i] = m3 + ( c[i] - m3 ) * k2;
+			t = clamp01( t );
+			if ( lodgenHsvSat( t ) + 1e-6f >= s0 ) {
+				c = t;
+				fixed = true;
+			}
+		}
+		if ( !fixed ) {
+			FloatVector4 t = c0;
+			for ( int i = 0; i < 3; i++ )
+				t[i] *= gain;
+			t = clamp01( t );
+			c = ( lodgenHsvSat( t ) + 1e-6f >= s0 ) ? t : c0;
+		}
+	}
+	c[3] = c0[3];
+	return c;
+}
+
+bool lodgenLandMacro()
+{
+	return g_landMacro;
+}
+
+void lodgenSetLandMacro( bool on )
+{
+	g_landMacro = on;
+}
+
 /*! The land diffuse tap: one texel off it when the hex tiling is off, the
  *  three-tap variance-preserving blend when it is on.
  *
@@ -7449,8 +7899,80 @@ static inline void lodgenLandHexVertexPos( qint32 i, qint32 j, double size,
 static FloatVector4 lodgenLandHexTap( const DDSTexture16 * tex,
                                       float swx, float swy, float tile,
                                       float u, float v, float mip, float maxMip,
-                                      const LodgenLandGuideCtx * guide )
+                                      const LodgenLandGuideCtx * guide,
+                                      const LodgenLandHeight * ht = nullptr,
+                                      float * hOut = nullptr )
 {
+	/* THE HEIGHT-AWARE PATH (lane TILING5) is its own branch, taken only when
+	 * the caller hands in a relief: without one, every line below is the
+	 * expression the rung compiled. */
+	if ( ht && hOut ) {
+		/* the relief level whose texel matches the diffuse mip's texel */
+		const float lvl = mip + ht->log2W0 - std::log2( float( tex->getWidth() ) );
+		if ( g_landHexSize <= 0.0f ) {
+			*hOut = ht->at( u, v, lvl );
+			return tex->getPixelT( u, v, mip );
+		}
+		qint32 vi[3], vj[3];
+		double w[3];
+		lodgenLandHexCell( double( swx ), double( swy ), double( g_landHexSize ),
+		                   vi, vj, w );
+		const FloatVector4 mean = tex->getPixelT( 0.5f, 0.5f, maxMip );
+		FloatVector4 s[3];
+		double hk[3];
+		for ( int k = 0; k < 3; k++ ) {
+			const double ox = lodgenLandHexOffset( vi[k], vj[k], 0 ) * double( tile );
+			const double oy = lodgenLandHexOffset( vi[k], vj[k], 1 ) * double( tile );
+			double px = double( swx ), py = double( swy );
+			if ( guide && g_landGuideRule == LODGEN_LANDGUIDE_ASPECTHEX ) {
+				double vx = 0.0, vy = 0.0;
+				lodgenLandHexVertexPos( vi[k], vj[k], double( g_landHexSize ),
+					&vx, &vy );
+				lodgenLandGuideRotate( *guide, vx, vy, &px, &py );
+			}
+			double tu = std::fmod( ( px + ox ) / double( tile ), 1.0 );
+			double tv = std::fmod( ( py + oy ) / double( tile ), 1.0 );
+			if ( tu < 0.0 ) tu += 1.0;
+			if ( tv < 0.0 ) tv += 1.0;
+			s[k] = tex->getPixelT( float( tu ), float( tv ), mip );
+			hk[k] = double( ht->at( float( tu ), float( tv ), lvl ) );
+		}
+		/* raised features win at the joins: w_k exp(beta h_k), renormalised.
+		 * A weight that is 0 at a lattice edge stays 0, so no seam. The
+		 * largest relief is subtracted first so exp() cannot overflow. */
+		const double beta = double( lodgenLandHeightBeta() );
+		const double hmx = qMax( hk[0], qMax( hk[1], hk[2] ) );
+		double wp[3], wsum = 0.0;
+		for ( int k = 0; k < 3; k++ ) {
+			wp[k] = w[k] * std::exp( beta * ( hk[k] - hmx ) );
+			wsum += wp[k];
+		}
+		if ( wsum <= 1e-300 ) {
+			for ( int k = 0; k < 3; k++ )
+				wp[k] = w[k];
+			wsum = w[0] + w[1] + w[2];
+		}
+		FloatVector4 acc( 0.0f, 0.0f, 0.0f, 0.0f );
+		double wsq = 0.0, hsum = 0.0;
+		float bestW = -1.0f;
+		float bestA = mean[3];
+		for ( int k = 0; k < 3; k++ ) {
+			const double wk = wp[k] / wsum;
+			acc += ( s[k] - mean ) * float( wk );
+			wsq += wk * wk;
+			hsum += wk * hk[k];
+			if ( float( wk ) > bestW ) {
+				bestW = float( wk );
+				bestA = s[k][3];
+			}
+		}
+		if ( wsq > 1e-12 )
+			acc *= float( 1.0 / std::sqrt( wsq ) );
+		FloatVector4 r = mean + acc;
+		r[3] = bestA;
+		*hOut = float( hsum );
+		return r;
+	}
 	if ( g_landHexSize <= 0.0f )
 		return tex->getPixelT( u, v, mip );
 	qint32 vi[3], vj[3];
@@ -12367,7 +12889,7 @@ bool lodgenBakeTerrainTextures( const EsmWorld & world, int chunkX, int chunkY,
 				const int q = ( ly >= 2048.0f ? 2 : 0 ) + ( lx >= 2048.0f ? 1 : 0 );
 				const float qx = ( lx - ( q & 1 ? 2048.0f : 0.0f ) ) / 2048.0f;
 				const float qy = ( ly - ( q & 2 ? 2048.0f : 0.0f ) ) / 2048.0f;
-				auto sampleLtex = [&]( quint32 ltex ) -> FloatVector4 {
+				auto sampleLtex = [&]( quint32 ltex, float * hOut ) -> FloatVector4 {
 					QString d, n;
 					world.ltexTextures( ltex, d, n );
 					const DDSTexture16 * tex = d.isEmpty() ? nullptr
@@ -12376,6 +12898,13 @@ bool lodgenBakeTerrainTextures( const EsmWorld & world, int chunkX, int chunkY,
 						statNoTex++;
 						failedLtex.insert( ltex );
 						return FloatVector4( 0.5f, 0.5f, 0.5f, 1.0f );
+					}
+					/* THE RELIEF (lane TILING5), only when the height blend
+					 * asked for it; a set without one reads h = 0. */
+					const LodgenLandHeight * ht = nullptr;
+					if ( hOut ) {
+						*hOut = 0.0f;
+						ht = lodgenLandHeightFor( dataRoot, d, n );
 					}
 					/* THE DOMAIN WARP (lane TILING3), on the land diffuse
 					 * lookup and on nothing else: not the footprint, not the
@@ -12412,7 +12941,7 @@ bool lodgenBakeTerrainTextures( const EsmWorld & world, int chunkX, int chunkY,
 					 * default: it costs the swirl and buys no repeat). */
 					const FloatVector4 fp =
 						lodgenLandHexTap( tex, swx, swy, TILE, u, v, mip, maxMip,
-							&lguide );
+							&lguide, ht, hOut );
 					if ( !lodgenLandSampleAverage() )
 						return fp;
 					/* THE REPEAT-AVERAGED SAMPLE (lane TILING2). A landscape
@@ -12428,6 +12957,7 @@ bool lodgenBakeTerrainTextures( const EsmWorld & world, int chunkX, int chunkY,
 						return avg;
 					return avg + ( fp - avg ) * kDetail;
 				};
+				const bool heightBlend = lodgenLandHeightBlend();
 				/* THE QUADRANT COMPOSITE, lifted out as a function of
 				 * (paint, quadrant, quadrant-local position) -- lane TILING2.
 				 * The arithmetic is exactly what was inline here; the only
@@ -12441,9 +12971,10 @@ bool lodgenBakeTerrainTextures( const EsmWorld & world, int chunkX, int chunkY,
 				auto quadComposite = [&]( const EsmLand & pl, int pq,
 						float pqx, float pqy, bool own ) -> FloatVector4 {
 					FloatVector4 c( 0.5f, 0.5f, 0.5f, 1.0f );
+					float hc = 0.0f;           // the composite's relief (TILING5)
 					const quint32 bt = pl.baseTex[pq] ? pl.baseTex[pq] : dominantBase;
 					if ( bt )
-						c = sampleLtex( bt );
+						c = sampleLtex( bt, heightBlend ? &hc : nullptr );
 					else if ( own )
 						statNoBase++;
 					int nL = 0;
@@ -12465,9 +12996,18 @@ bool lodgenBakeTerrainTextures( const EsmWorld & world, int chunkX, int chunkY,
 							continue;
 						// NULL-texture layers paint the engine's default
 						// ground (ESM_LTEX_ENGINE_DEFAULT, lane SEAM1)
+						float hl = 0.0f;
 						const FloatVector4 lc = sampleLtex(
-							layer.ltex ? layer.ltex : dominantBase );
-						c = c + ( lc - c ) * qBound( 0.0f, a, 1.0f );
+							layer.ltex ? layer.ltex : dominantBase,
+							heightBlend ? &hl : nullptr );
+						if ( !heightBlend ) {
+							c = c + ( lc - c ) * qBound( 0.0f, a, 1.0f );
+						} else {
+							/* THE HEIGHT-AWARE LAYER BLEND (lane TILING5) */
+							const float ah = lodgenLandHeightAlpha( qBound( 0.0f, a, 1.0f ), hl - hc );
+							c = c + ( lc - c ) * ah;
+							hc = hc + ( hl - hc ) * ah;
+						}
 					}
 					if ( own )
 						nLayers = nL;
@@ -12569,6 +13109,10 @@ bool lodgenBakeTerrainTextures( const EsmWorld & world, int chunkX, int chunkY,
 							+ cD * ( wxN * wyN );
 					}
 				}
+				/* THE LARGE-SCALE VARIATION (lane TILING5): after the
+				 * quadrant cross-fade, before VCLR, cover tint and roads. */
+				if ( lodgenLandMacro() )
+					color = lodgenLandMacroApply( color, double( wx ), double( wy ) );
 				if ( doCover ) {
 					/* The per-texel cover law. Every operand is already in hand:
 					 * the per-quadrant D/S/T array, the same bilinear opacities
@@ -13935,13 +14479,19 @@ static bool lodgenBakeVtTile( const EsmWorld & world, const QString & dataRoot,
 					for ( int k = 0; k < 3; k++ )
 						rgb[k] = e[k];
 				};
-				auto sampleLtex = [&]( quint32 ltex ) -> FloatVector4 {
+				auto sampleLtex = [&]( quint32 ltex, float * hOut ) -> FloatVector4 {
 					QString d, n;
 					world.ltexTextures( ltex, d, n );
 					const DDSTexture16 * tex = d.isEmpty() ? nullptr
 						: lodgenCachedTexture( bc, dataRoot, d );
 					if ( !tex )
 						return FloatVector4( 0.5f, 0.5f, 0.5f, 1.0f );
+					/* THE RELIEF (lane TILING5), only when asked for */
+					const LodgenLandHeight * ht = nullptr;
+					if ( hOut ) {
+						*hOut = 0.0f;
+						ht = lodgenLandHeightFor( dataRoot, d, n );
+					}
 					/* THE DOMAIN WARP (lane TILING3). THIS is the site that
 					 * writes the shipped sheet -- the PYRAMID/VT path -- and it
 					 * is the one lane TILING2 missed and lost a relink to.
@@ -13972,7 +14522,7 @@ static bool lodgenBakeVtTile( const EsmWorld & world, const QString & dataRoot,
 					 * default: it costs the swirl and buys no repeat). */
 					const FloatVector4 fp =
 						lodgenLandHexTap( tex, swx, swy, TILE, u, v, mip, maxMip,
-							&lguide );
+							&lguide, ht, hOut );
 					if ( !lodgenLandSampleAverage() )
 						return fp;
 					/* THE REPEAT-AVERAGED SAMPLE (lane TILING2). A landscape
@@ -13988,9 +14538,11 @@ static bool lodgenBakeVtTile( const EsmWorld & world, const QString & dataRoot,
 						return avg;
 					return avg + ( fp - avg ) * kDetail;
 				};
+				const bool heightBlend = lodgenLandHeightBlend();
+				float hBase = 0.0f;            // the composite's relief (TILING5)
 				const quint32 baseTex = land.baseTex[q] ? land.baseTex[q] : dominantBase;
 				if ( baseTex ) {
-					color = sampleLtex( baseTex );
+					color = sampleLtex( baseTex, heightBlend ? &hBase : nullptr );
 					const LodgenMaterialMask & bm =
 						maskCache.resolve( world, dataRoot, baseTex ).mat;
 					rough = layerRough( bm );
@@ -14013,8 +14565,16 @@ static bool lodgenBakeVtTile( const EsmWorld & world, const QString & dataRoot,
 					if ( a <= 0.001f )
 						continue;
 					const quint32 lform = layer.ltex ? layer.ltex : dominantBase;
-					const FloatVector4 lc = sampleLtex( lform );
-					const float aw = qBound( 0.0f, a, 1.0f );
+					float hl = 0.0f;
+					const FloatVector4 lc = sampleLtex( lform, heightBlend ? &hl : nullptr );
+					float aw = qBound( 0.0f, a, 1.0f );
+					if ( heightBlend ) {
+						/* THE HEIGHT-AWARE LAYER BLEND (lane TILING5); the
+						 * mask channels below take the SAME opacity, so a
+						 * material's roughness stays on its own colour. */
+						aw = lodgenLandHeightAlpha( aw, hl - hBase );
+						hBase = hBase + ( hl - hBase ) * aw;
+					}
 					color = color + ( lc - color ) * aw;
 					/* THE SAME BLEND, on the same operands, in the same order --
 					 * the layer opacities, over the base, un-renormalised. A
@@ -14055,9 +14615,10 @@ static bool lodgenBakeVtTile( const EsmWorld & world, const QString & dataRoot,
 					auto quadColorAt = [&]( const EsmLand & pl, int pq,
 							float pqx, float pqy ) -> FloatVector4 {
 						FloatVector4 c( 0.5f, 0.5f, 0.5f, 1.0f );
+						float hc = 0.0f;
 						const quint32 bt = pl.baseTex[pq] ? pl.baseTex[pq] : dominantBase;
 						if ( bt )
-							c = sampleLtex( bt );
+							c = sampleLtex( bt, heightBlend ? &hc : nullptr );
 						for ( const EsmLandLayer & layer : pl.layers[pq] ) {
 							const float fx = qBound( 0.0f, pqx * 16.0f, 15.999f );
 							const float fy = qBound( 0.0f, pqy * 16.0f, 15.999f );
@@ -14068,9 +14629,17 @@ static bool lodgenBakeVtTile( const EsmWorld & world, const QString & dataRoot,
 								+ ( layer.opacity[iy + 1][ix] * ( 1 - tx ) + layer.opacity[iy + 1][ix + 1] * tx ) * ty;
 							if ( a <= 0.001f )
 								continue;
+							float hl = 0.0f;
 							const FloatVector4 lc = sampleLtex(
-								layer.ltex ? layer.ltex : dominantBase );
-							c = c + ( lc - c ) * qBound( 0.0f, a, 1.0f );
+								layer.ltex ? layer.ltex : dominantBase,
+								heightBlend ? &hl : nullptr );
+							if ( !heightBlend ) {
+								c = c + ( lc - c ) * qBound( 0.0f, a, 1.0f );
+							} else {
+								const float ah = lodgenLandHeightAlpha( qBound( 0.0f, a, 1.0f ), hl - hc );
+								c = c + ( lc - c ) * ah;
+								hc = hc + ( hl - hc ) * ah;
+							}
 						}
 						return c;
 					};
@@ -14131,6 +14700,11 @@ static bool lodgenBakeVtTile( const EsmWorld & world, const QString & dataRoot,
 							+ cD * ( wxN * wyN );
 					}
 				}
+				/* THE LARGE-SCALE VARIATION (lane TILING5): after the
+				 * quadrant cross-fade, before VCLR, cover tint and roads --
+				 * the same place as the chunk writer's. */
+				if ( lodgenLandMacro() )
+					color = lodgenLandMacroApply( color, double( wx ), double( wy ) );
 				if ( doCover ) {
 					const LodgenVtQuadCover & qc = quadCover[ci * 4 + q];
 					const int nL = qMin( nLayers, qc.layers.size() );
