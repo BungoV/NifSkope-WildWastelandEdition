@@ -56,6 +56,43 @@ eye 128 u over the median foot of the 9 nearest placements; no eye inside any fo
 - occluded share of skyline pixels 0.0366 / 0.0370 / 0.0134, mean **0.029**; Hi-Z culled placements mean 0.0083.
 - with the proposed hill boxes added (hills.py, 28 boxes in cells -10..5 x -14..1): mean **0.0399**, culled 0.0089.
 
+### Run by lane GATES, 2026-09-27 11:00-12:40 (bakes on run_v2 = exe 6c1ef67b09c1; console gates_bakes.console)
+**Tolerance / cap sweep** (step 2; groups.py on dump_l1.txt, Boston box, 46,532 placements):
+
+| tol / cap | groups | widest group | Diamond City (165 pieces) | row houses |
+|---|---|---|---|---|
+| 0 / none | 8,794 | 595 pieces, 22,810 x 13,356 u | 9 groups, top 318 (166 not DC) | -- |
+| 0.5, 1, 2, 4 / none | 6,833 .. 6,244 | ~1,501-1,508 pieces, **22,810 x 22,283 u** | 4-6 groups, top ~350 (~192 not DC) | welded: 963 pieces, 20,161 x 8,510 u |
+| 8, 16 / none | 5,828 / 4,666 | 1,523 pieces, same span | 4 groups, top 375-381 | welded (967-970) |
+| 2 / 2048 | 7,646 (23,898 refused) | 6,550 x 2,015 | 53 groups | not welded |
+| **2 / 4096** | 6,790 (4,694 refused) | 6,550 x 2,015 | 17 groups, top 53 (20 not DC) | not welded |
+| 2 / 8192 | 6,515 (183 refused) | 2,923 x 8,192 | 7 groups, top 134 (78 not DC) | -- |
+
+Contact alone welds the city at every tolerance (the 0 u touch the docs 4.9 note predicted), so the cap is what
+splits. Recommendation: **tol 2, cap ~4096** (the code default is cap 0 = none; NOT changed -- lane GATES does not
+edit lane code). The Hub towers are never one group at any setting (53 / 44 groups at tol 2): they need a
+landmark / precombine-parent join. Trinity Church is one group (25 pieces) at every setting.
+
+| gate | expected | measured | verdict |
+|---|---|---|---|
+| OFF (`--identity-join proximity --occluder-fit piece`) == b_rung | identical | cmp_trees masked: DIFF 17 of 254 -- all 17 = chunk-cache `.key` files, whose `inputs` (exe digest) AND `switches` lines differ (the off bake names its switches); the `bto`/`manifest` digests inside every key match, and all 237 product files (.lodi, .lodo, .lodb record lines, .BTO ...) are byte-identical | **PASS** (bookkeeping only) |
+| red: one flipped byte (.lodi copy) | DIFF | DIFF 18 of 254, names the .lodi | PASS |
+| red: one removed file (.lodo) | MISSING | MISSING, names the .lodo | PASS |
+| red: rung vs after | DIFF on the feature's files | DIFF 19: .lodb record lines + .lodi + 17 keys | PASS |
+| landmarks one id each (b_after, dump_after.txt, tol 2 cap 0) | 1 group each | towers east 53 / west 44 groups; Trinity 1; Diamond City 4 groups, top 351 with 192 non-DC pieces | **FAIL** (towers, DC) |
+| row houses three ids | 3 | welded into one 963-piece group, 20,161 x 8,510 u | **FAIL** (cap 0) |
+| no group over the cap | -- | cap 0: vacuous; widest group 1,507 pieces, 22,810 x 22,283 u | **FAIL** in intent |
+| groups / placements | every placement one group | 69,806 placements, 42,306 eligible, 23,062 groups (histogram 1:17,662 2-4:4,753 5-16:356 17-64:165 65-256:88 257-1024:36 >1024:2); emitter roots 23,071 | stated |
+| split at chunk lines (dim-4 = 16,384 u grid) | stated | 131 multi-placement groups cross a chunk line, holding 11,409 pieces (the per-chunk u16 ids cut them; see 2a) | stated |
+| occluder poke gate (lodi_occluder_building.py --gate) | every box pokes <= 1% | 495 boxes, **59 over 1%**, worst 1.00, volume-weighted 1.0%; floor grown 1.25x: 495 of 495 over; median thickness **368 u** (was 5.1 u), min 16, max 1,402 | **FAIL** (59 boxes) |
+| street coverage AFTER (3 eyes) | up from 0.029 | occluded share mean **0.569**, Hi-Z culled 0.760 | measured (beware: 59 poking boxes can over-cull) |
+| + hill boxes | -- | 0.573 / 0.761 (hills add ~0.4 points) | measured |
+
+Pictures: identity before (raw_ident_before) launched once, NO FILE: the run_v2 exe was taken by the antivirus
+auto-sandbox at launch (AvastSvc.log 10:23:22 UTC "marked for virtualization ... run_v2\NifSkope.exe", clean at
+10:23:36, exclusion add failed error 122) and exited rc 0 with an empty log. Not retried. The other three are listed
+in section 6 with their outcome. occ_top_after.png made offline.
+
 ## STATUS 06:03: BLOCKED on the NifSkope turn (overseer note: lock stuck, held by "anon", a dead process; wait for bungo)
 Every remaining step needs a NifSkope run. Code, build, offline tools and the before-side numbers are done and
 committed. My queued bake and my waiter are stopped (TaskStop 06:02); m_l1 (empty) removed.
