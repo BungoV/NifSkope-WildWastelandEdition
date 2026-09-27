@@ -67,7 +67,7 @@ def present(img_px, col):
 
 base = img('FL0_default_nowater').reshape(-1, 3)
 out = {}
-views = ['waterheight', 'watertype', 'bodyid', 'flow', 'shore', 'cellflags']
+views = ['waterheight', 'watertype', 'bodyid', 'flow', 'shore', 'cellflags', 'depth']
 legs = {}
 for v in views + ['default']:
     legs[v] = legend('FL_' + v)
@@ -78,7 +78,7 @@ for v in views + ['default']:
 # CALIBRATE the curve from two views (swatch -> the mode of the picture pixels nearest it), then UNDO it on
 # the OTHER views' pixels and run the tests above unchanged. Two folds, so every view is tested by a curve
 # it did not help build. The curve is pooled over channels, monotone, linear outside the measured range.
-FOLDS = [(['cellflags', 'watertype'], ['waterheight', 'bodyid', 'flow', 'shore', 'default']),
+FOLDS = [(['cellflags', 'watertype'], ['waterheight', 'bodyid', 'flow', 'shore', 'depth', 'default']),
          (['bodyid', 'watertype'], ['cellflags']),
          (['bodyid', 'cellflags'], ['watertype'])]
 # only CATEGORICAL views calibrate: flow and the ramps are continuous, so their pixels are not swatch colours.
@@ -132,7 +132,7 @@ def undo(px, cur):
 
 def test(v, px, leg):
     cols = [c for _, c in leg]
-    if v in ('watertype', 'cellflags', 'bodyid'):
+    if v in ('watertype', 'cellflags', 'bodyid', 'depth'):
         return near_any(px, cols)
     if v in ('waterheight', 'shore'):
         return on_segment(px, cols[0], cols[-1])
@@ -145,7 +145,7 @@ def test(v, px, leg):
 
 
 OTHER = {'waterheight': 'cellflags', 'watertype': 'cellflags', 'bodyid': 'cellflags', 'flow': 'waterheight',
-         'shore': 'cellflags', 'cellflags': 'watertype'}
+         'shore': 'cellflags', 'cellflags': 'watertype', 'depth': 'bodyid'}
 
 
 def check_view(v, cur):

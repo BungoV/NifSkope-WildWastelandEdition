@@ -24,8 +24,22 @@ shot() { # <name> <extra env...>
   # a picture that did not appear = stop the pass (Avast sandbox or a crash); never go on launching
   case "$r" in OK*) ;; *) echo "STOPPED at $name"; exit 2;; esac
 }
-for f in $V3NEW $V2NEW $V3RUNG $RUNG $NEW; do [ -f $f ] || { echo "missing $f"; exit 1; }; done
 G=${1:-all}
+if [ $G = depth ]; then
+  # follow-up 1: the depth-view exe ($DEPTHNS) -- the FL views again into pics_depth/ for the pixel
+  # identity check against pics/FL_*, then the depth view flat (legend gate) and full (the picture)
+  DNS=${DEPTHNS:?set DEPTHNS}
+  [ -f $V3NEW ] && [ -f $DNS ] || { echo "missing $V3NEW or $DNS"; exit 1; }
+  P=$ME/pics_depth; mkdir -p $P
+  shot FL0_default_nowater NS=$DNS NOOBJ=1 LODL=$V3NEW WW_RENDER_FLAT=1 WW_LODL_WATER=0
+  shot FL_default NS=$DNS NOOBJ=1 LODL=$V3NEW WW_RENDER_FLAT=1
+  for pl in waterheight watertype bodyid flow shore cellflags depth; do
+    shot FL_$pl NS=$DNS NOOBJ=1 LODL=$V3NEW WW_RENDER_FLAT=1 WW_LODL_PLANE=$pl
+  done
+  shot A_depth NS=$DNS NOOBJ=1 LODL=$V3NEW WW_LODL_PLANE=depth
+  echo "RENDER PASS DONE $G"; exit 0
+fi
+for f in $V3NEW $V2NEW $V3RUNG $RUNG $NEW; do [ -f $f ] || { echo "missing $f"; exit 1; }; done
 if [ $G = gate ] || [ $G = all ]; then
   # identity: rung exe vs new exe with WW_LODL_WATER=0, same camera, same files
   shot G_rung_L01_default NS=$RUNG

@@ -531,6 +531,33 @@ quint32 waterShoreRgba( int sv )
 	return packRgba( 0.05f + 0.20f * t, 0.25f + 0.55f * t, 0.45f + 0.50f * t );
 }
 
+/*! Water depth in game units, in bands: orange where the ground is at or above
+ *  the water, then pale to dark blue at 0 / 128 / 512 / 1024 / 2048. Bands, not
+ *  a ramp, so every drawn pixel is one legend swatch and reads as a number. */
+const float WATER_DEPTH_STOPS[5] = { 0.0f, 128.0f, 512.0f, 1024.0f, 2048.0f };
+
+int waterDepthBand( float depth )
+{
+	if ( !( depth > 0.0f ) )
+		return 0;
+	int b = 1;
+	while ( b < 5 && depth >= WATER_DEPTH_STOPS[b] )
+		b++;
+	return b;   // 1..5
+}
+
+quint32 waterDepthBandRgba( int band )
+{
+	switch ( band ) {
+	case 0:  return packRgba( 0.90f, 0.55f, 0.15f );   // ground at or above the water
+	case 1:  return packRgba( 0.72f, 0.95f, 0.93f );   // 0 - 128
+	case 2:  return packRgba( 0.35f, 0.78f, 0.90f );   // 128 - 512
+	case 3:  return packRgba( 0.15f, 0.52f, 0.85f );   // 512 - 1024
+	case 4:  return packRgba( 0.10f, 0.28f, 0.66f );   // 1024 - 2048
+	default: return packRgba( 0.05f, 0.08f, 0.35f );   // 2048 and deeper
+	}
+}
+
 //! Cell flags: red = bit 0 (water), green = bit 1 (land), both = yellow.
 quint32 cellFlagsRgba( quint16 fl )
 {
@@ -841,6 +868,7 @@ const char * lodtPlaneKey( LodtPlane plane )
 	case LodtPlane::WaterBodyId:       return "bodyid";
 	case LodtPlane::WaterFlow:         return "flow";
 	case LodtPlane::WaterShore:        return "shore";
+	case LodtPlane::WaterDepth:        return "depth";
 	default:                           return "height";
 	}
 }
@@ -861,6 +889,7 @@ QString lodtPlaneLabel( LodtPlane plane )
 	case LodtPlane::WaterBodyId:       return QStringLiteral( "Water body — which sheet of water a texel belongs to" );
 	case LodtPlane::WaterFlow:         return QStringLiteral( "Water flow — direction, speed and confidence" );
 	case LodtPlane::WaterShore:        return QStringLiteral( "Shore distance — how far a texel is from dry land" );
+	case LodtPlane::WaterDepth:        return QStringLiteral( "Water depth — the body's water height minus the ground under it" );
 	default:                           return QStringLiteral( "Heights" );
 	}
 }
@@ -940,12 +969,16 @@ QList<LodtPlane> lodtAvailablePlanes( const LodtWorldInfo & info )
 		out << LodtPlane::CoarseOverview;
 	/* The BIT, then the rate: a section bit set over a zero rate is a refusal
 	 * in the reader, so by the time a plane is offered here both agree. */
-	if ( ( info.sectionFlags & LODL_SECT_BODIES ) && info.bodySamples > 0 && info.bodyCount > 0 )
+	const bool bodies = ( info.sectionFlags & LODL_SECT_BODIES ) && info.bodySamples > 0 && info.bodyCount > 0;
+	if ( bodies )
 		out << LodtPlane::WaterBodyId;
 	if ( ( info.sectionFlags & LODL_SECT_FLOW ) && info.flowSamples > 0 )
 		out << LodtPlane::WaterFlow;
 	if ( ( info.sectionFlags & LODL_SECT_SHORE ) && info.shoreSamples > 0 )
 		out << LodtPlane::WaterShore;
+	// depth needs only the body plane and the ground every file carries
+	if ( bodies )
+		out << LodtPlane::WaterDepth;
 	return out;
 }
 
@@ -1256,6 +1289,8 @@ void addLodlWater( NifModel * nif, const LodtFile & f, const LodtRegionSpec & sp
 		QHash<quint16, qint64> count;
 		QHash<quint16, LodtWaterBody> table;
 		qint64 aboveFull = 0, aboveMesh = 0, wet = 0;
+		qint64 depthBands[6] = { 0, 0, 0, 0, 0, 0 };
+		float depthMax = 0.0f;
 		const int fullStep = qMax( 1, spc / bodyS );
 		for ( int v = 0; v < H; v++ ) {
 			const int by = by0 + v * stepT;
@@ -1274,8 +1309,11 @@ void addLodlWater( NifModel * nif, const LodtFile & f, const LodtRegionSpec & sp
 				count[id]++;
 				wet++;
 				const float wh = table.value( id ).waterHeight;
-				if ( f.height( bx * fullStep, by * fullStep ) >= wh )
+				const float ground = f.height( bx * fullStep, by * fullStep );
+				if ( ground >= wh )
 					aboveFull++;
+				depthBands[waterDepthBand( wh - ground )]++;
+				depthMax = qMax( depthMax, wh - ground );
 				const float wx = float( minX ) * 4096.0f + float( bx ) * 4096.0f / float( bodyS );
 				const float wy = float( minY ) * 4096.0f + float( by ) * 4096.0f / float( bodyS );
 				if ( meshHeight( wx, wy ) > wh )
@@ -1315,6 +1353,10 @@ void addLodlWater( NifModel * nif, const LodtFile & f, const LodtRegionSpec & sp
 					return waterPlainRgba();
 				return waterShoreRgba( f.shoreAt( int( qint64( bx ) * shoreS / bodyS ),
 					int( qint64( by ) * shoreS / bodyS ) ) );
+			case LodtPlane::WaterDepth:
+				// the same ground sample the "ground above water" count reads
+				return waterDepthBandRgba( waterDepthBand(
+					B.waterHeight - f.height( bx * fullStep, by * fullStep ) ) );
 			case LodtPlane::CellFlags: {
 				float lo, hi, wh;
 				quint16 wt, fl = 0;
@@ -1459,6 +1501,43 @@ void addLodlWater( NifModel * nif, const LodtFile & f, const LodtRegionSpec & sp
 				<< QString( "land only = %1" ).arg( rgbText( cellFlagsRgba( 2 ) ) )
 				<< QString( "neither = %1" ).arg( rgbText( cellFlagsRgba( 0 ) ) );
 			break;
+		case LodtPlane::WaterDepth: {
+			static const char * const BANDS[6] = { "ground at or above the water", "0 to 128 units",
+				"128 to 512 units", "512 to 1024 units", "1024 to 2048 units", "2048 units and deeper" };
+			QStringList counts;
+			for ( int b = 0; b < 6; b++ ) {
+				legend << QString( "%1 = %2" ).arg( QLatin1String( BANDS[b] ) ).arg( rgbText( waterDepthBandRgba( b ) ) );
+				counts << QString( "%1 %L2" ).arg( QLatin1String( BANDS[b] ) ).arg( depthBands[b] );
+			}
+			note << QString( "water depth: body water height minus the file's full-rate ground under each "
+					"texel; deepest %1 units; texels per band: %2" )
+				.arg( double( depthMax ), 0, 'f', 1 ).arg( counts.join( QStringLiteral( "; " ) ) );
+			/* WW_LODL_DEPTH_PROBE="x,y;x,y": world points to report, so a gate can
+			 * quote numbers at named places and check them against the file. */
+			const QList<QByteArray> pts = qgetenv( "WW_LODL_DEPTH_PROBE" ).split( ';' );
+			for ( const QByteArray & p : pts ) {
+				const QList<QByteArray> xy = p.split( ',' );
+				if ( xy.size() != 2 )
+					continue;
+				const float wx = xy[0].trimmed().toFloat(), wy = xy[1].trimmed().toFloat();
+				const int bx = int( std::floor( ( wx - float( minX ) * 4096.0f ) * float( bodyS ) / 4096.0f ) );
+				const int by = int( std::floor( ( wy - float( minY ) * 4096.0f ) * float( bodyS ) / 4096.0f ) );
+				const quint16 id = ( bx >= 0 && by >= 0 ) ? f.bodyIdAt( bx, by ) : quint16( 0 );
+				LodtWaterBody B;
+				if ( !id || !f.waterBody( id, B ) ) {
+					note << QString( "water depth probe %1,%2: no water body there" ).arg( double( wx ) ).arg( double( wy ) );
+					continue;
+				}
+				const float ground = f.height( bx * fullStep, by * fullStep );
+				note << QString( "water depth probe %1,%2: body %3 water %4, ground %5 at full-rate sample %6,%7, "
+						"depth %8 units, band \"%9\"" )
+					.arg( double( wx ) ).arg( double( wy ) ).arg( id ).arg( double( B.waterHeight ), 0, 'f', 2 )
+					.arg( double( ground ), 0, 'f', 2 ).arg( bx * fullStep ).arg( by * fullStep )
+					.arg( double( B.waterHeight - ground ), 0, 'f', 1 )
+					.arg( QLatin1String( BANDS[waterDepthBand( B.waterHeight - ground )] ) );
+			}
+			break;
+		}
 		default:
 			legend << QString( "water = %1" ).arg( rgbText( waterPlainRgba() ) );
 			break;
@@ -1487,7 +1566,7 @@ void addLodlWater( NifModel * nif, const LodtFile & f, const LodtRegionSpec & sp
 				wHi = qMax( wHi, wh );
 			}
 		const bool bodyPlane = plane == LodtPlane::WaterBodyId || plane == LodtPlane::WaterFlow
-			|| plane == LodtPlane::WaterShore;
+			|| plane == LodtPlane::WaterShore || plane == LodtPlane::WaterDepth;
 		for ( const CellW & c : cells ) {
 			WaterQuad q;
 			q.x0 = float( c.cx ) * 4096.0f;
@@ -1616,6 +1695,7 @@ bool nifCreateLodtTerrainScene( NifModel * nif, const QString & lodtPath,
 		case LodtPlane::WaterBodyId:
 		case LodtPlane::WaterFlow:
 		case LodtPlane::WaterShore:
+		case LodtPlane::WaterDepth:
 		case LodtPlane::CellFlags:
 			waterPlane = spec.plane;
 			spec.plane = LodtPlane::Height;
@@ -2021,8 +2101,10 @@ bool nifCreateLodtTerrainScene( NifModel * nif, const QString & lodtPath,
 
 		case LodtPlane::WaterBodyId:
 		case LodtPlane::WaterFlow:
-		case LodtPlane::WaterShore: {
-			/* The three version-3 water planes. Each has its OWN sample rate in
+		case LodtPlane::WaterShore:
+		case LodtPlane::WaterDepth: {
+			/* The three version-3 water planes (and depth, worked out from the
+			 * body plane and this sample's own ground). Each has its OWN sample rate in
 			 * the header, which need not be the file's, so the grid position is
 			 * mapped into the plane's grid rather than assumed equal to it.
 			 *
@@ -2056,6 +2138,10 @@ bool nifCreateLodtTerrainScene( NifModel * nif, const QString & lodtPath,
 					if ( spec.plane == LodtPlane::WaterBodyId ) {
 						if ( id )
 							c = waterBodyRgba( id );
+					} else if ( spec.plane == LodtPlane::WaterDepth ) {
+						LodtWaterBody B;
+						if ( id && f.waterBody( id, B ) )
+							c = waterDepthBandRgba( waterDepthBand( B.waterHeight - f.height( gx, gy ) ) );
 					} else if ( spec.plane == LodtPlane::WaterFlow ) {
 						/* direction as a hue round the wheel, speed as its
 						 * brightness -- so still water inside a body reads
@@ -2090,6 +2176,9 @@ bool nifCreateLodtTerrainScene( NifModel * nif, const QString & lodtPath,
 						"(%3 of the region); the rest are still water, which is the same "
 						"word as dry on purpose" )
 					.arg( flowing ).arg( wetSamples ).arg( total );
+			else if ( spec.plane == LodtPlane::WaterDepth )
+				note << QString( "water depth: %1 wet samples, painted on the ground (no water drawn)" )
+					.arg( wetSamples );
 			else
 				note << QString( "shore distance: %1 wet samples, stored steps %2..%3 "
 						"(x %4 world units, 255 saturates)" )
