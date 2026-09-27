@@ -30,6 +30,8 @@
 #  13. the occluders on a SECOND small region: measured 2026-09-11, the
 #      Sanctuary region draws 41 distinct LOD meshes and none is watertight, so
 #      its box count is legitimately 0 and leg 11's box gates are vacuous there
+#  13c. the DEFAULT occluders (one box a building, lane IDENT1) on that region:
+#      inside their buildings to 1 percent, with the grown-box floor red
 #
 # It runs `-no-gui` only, so it needs no window and no display; it does not
 # write anywhere but its own scratch directory.
@@ -116,7 +118,7 @@ mkdir -p "$WA/native/Native" "$WA/stock"
 # default (one authored level a mesh) is what section 12 and lodgen_defaults.sh read.
 if run "$NS" -no-gui lodgen "$ESM" --worldspace 3C --terrain-region $REGION --dim 4 \
 	--data-root "$DATA" --out-dir "$WA/native" --native "$WA/native/Native" \
-	--keep-bto --library near --native-ladder \
+	--keep-bto --library near --native-ladder --occluder-fit piece \
 	--native-mesh-report "$WA/native/mesh_report.txt"; then
 	note "the region baked with --native"
 else bad "the region baked with --native"; tail -5 "$W/last.log"; fi
@@ -337,9 +339,13 @@ echo "== 13. v3: the occluders, on a region that HAS a watertight building"
 # has the closed shells, so the box gates get their teeth from a second small
 # region rather than from a loosened rule.
 mkdir -p "$WA/occ/Native"
+# IDENT1 (2026-09-27): the default occluder is now ONE BOX A BUILDING, fitted over the group's placed triangles
+# in the group's own frame; the D gate below reads a box in its CARRIER's mesh frame, which is the per-piece
+# fit. So these bakes spell `--occluder-fit piece` (the way back) and keep measuring what they measured; the
+# building boxes are gated by tests/spells/lodi_occluder_building.py (leg 13c).
 # shellcheck disable=SC2086
 if run "$NS" -no-gui lodgen "$ESM" --worldspace 3C --terrain-region $OCCREGION --dim 4 \
-	--data-root "$DATA" --out-dir "$WA/occ" --native "$WA/occ/Native"; then
+	--data-root "$DATA" --out-dir "$WA/occ" --native "$WA/occ/Native" --occluder-fit piece; then
 	note "the occluder region baked"
 else bad "the occluder region baked"; tail -5 "$W/last.log"; fi
 cp "$W/last.log" "$W/bake_occ.log"
@@ -384,6 +390,26 @@ if [ "${AMB:-0}" -gt 0 ]; then
 else
 	bad "(13b) no instance sits in the cell-line band (${AMB:-?}): the pair no longer tests plan 5 row 6"
 fi
+
+echo "== 13c. the DEFAULT occluders: one box a building, inside the building (lane IDENT1)"
+# Lane IDENT1, 2026-09-27. The default fit is one box over a building group's placed triangles, in the group's
+# own frame (--occluder-fit building). The same region as leg 13, baked with the defaults and the emitter's
+# group dump (WW_LODI_GROUP_DUMP), so the checker knows every member of the carrier's building. The gate: every
+# box pokes out of its building's solid by at most 1 percent of its volume (a lattice of points in the box, a
+# ray test on the building's triangles), AND the same boxes grown 1.25x leave their buildings -- the red floor
+# in the same run, or the green proves nothing.
+mkdir -p "$WA/occb/Native"
+# shellcheck disable=SC2086
+if WW_LODI_GROUP_DUMP="$WA/occb/groups.txt" run "$NS" -no-gui lodgen "$ESM" --worldspace 3C \
+	--terrain-region $OCCREGION --dim 4 --data-root "$DATA" --out-dir "$WA/occb" --native "$WA/occb/Native"; then
+	note "(13c) the occluder region baked with the default (building) fit"
+else bad "(13c) the occluder region baked with the default (building) fit"; tail -5 "$W/last.log"; fi
+grep -E "^native-occluders" "$W/last.log" | sed 's/^/    /'
+OCCB="$(pairdir "$WA/occb/Native")"
+if run "$PY" "$ROOT/tests/spells/lodi_occluder_building.py" "$OCCB/Commonwealth" --dump "$WA/occb/groups.txt" --gate; then
+	note "(13c) every building box is inside its building, and a grown box leaks"
+else bad "(13c) every building box is inside its building, and a grown box leaks"; fi
+grep -E "^(ok|FAIL)   " "$W/last.log" | sed 's/^/    /'
 
 echo "== 14. the C++ reader's own rules: the payload bounds and the aggregates"
 # WHY THIS IS NOT leg 3. Leg 3 runs lodgen_native_mutate.py, and that tool asks

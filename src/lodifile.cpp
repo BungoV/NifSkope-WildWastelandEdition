@@ -470,7 +470,7 @@ bool lodiWrite( const QString & path, const LodiSrcSet & set, LodiHeader * heade
 			const LodiSrcInstance & r = set.instances[order[i]];
 			if ( !r.hasOccluder )
 				continue;
-			const float qs = lodiScaleQuantised( r.scale );
+			const float qs = r.occWorld ? 1.0f : lodiScaleQuantised( r.scale );
 			const double vol = 8.0 * double( r.occHalf[0] * qs ) * double( r.occHalf[1] * qs ) * double( r.occHalf[2] * qs );
 			if ( !( vol > 0.0 ) )
 				continue;
@@ -497,6 +497,21 @@ bool lodiWrite( const QString & path, const LodiSrcSet & set, LodiHeader * heade
 				const float qs = lodiScaleQuantised( r.scale );
 				LodiOccluder b;
 				std::memset( &b, 0, sizeof( b ) );
+				if ( r.occWorld ) {
+					/* IDENT1: a building group's box, already world-placed; the
+					 * placement only carries it (it is in this cell, and so is the
+					 * box's listing). The same 0.999 pull-in for the same reason. */
+					for ( int k = 0; k < 3; k++ ) {
+						b.centre[k] = r.occCentre[k];
+						b.halfExtent[k] = r.occHalf[k] * 0.999f;
+					}
+					lodiPackRotation( r.occWorldRot, b.rot );
+					b.flags = 1;        // fitted inside the object's own solid (docs 4.5)
+					b.instanceIndex = ii;
+					b.meshId = r.occMeshId;
+					occ.push_back( b );
+					continue;
+				}
 				for ( int k = 0; k < 3; k++ ) {
 					b.centre[k] = r.pos[k] + qs * ( r.rot[k * 3] * r.occCentre[0]
 						+ r.rot[k * 3 + 1] * r.occCentre[1] + r.rot[k * 3 + 2] * r.occCentre[2] );

@@ -689,6 +689,13 @@ struct LodiSrcInstance
 	float occCentre[3] = { 0.0f, 0.0f, 0.0f };
 	float occHalf[3] = { 0.0f, 0.0f, 0.0f };
 	quint16 occMeshId = 0;      //!< the `.lodo` mesh the box was fitted inside
+	/*! IDENT1 (2026-09-27): the box is a BUILDING GROUP's, already in WORLD
+	 *  units -- `occCentre` a world point, `occHalf` world half extents, the
+	 *  box's own rotation in `occWorldRot` (row-major, world = R * box) -- and
+	 *  this placement is only the group member that carries it. The writer
+	 *  applies no scale and packs `occWorldRot` rather than the placement's. */
+	bool occWorld = false;
+	float occWorldRot[9] = { 1, 0, 0, 0, 1, 0, 0, 0, 1 };
 	QString baseName;           //!< what a refusal quotes for this record's base
 };
 
