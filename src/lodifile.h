@@ -317,6 +317,30 @@ constexpr quint32 LODI_VERSION_WIDE_SCALE = 10;
  *  keeps them. v11 implies v7's 512-byte header block, so a pre-v7 set carrying
  *  the bit is refused (dropping it would draw a hidden object). */
 constexpr quint32 LODI_VERSION_INITIALLY_DISABLED = 11;
+/*! v12 (lane GROUND1, 2026-09-27, bungo: "Ground contact on buildings, does that
+ *  look right to you, it's a texture map that is not usable?"): THE PER-VERTEX
+ *  GROUND-CONTACT STREAM, header 0x130 (u64 offset) / 0x138 (u32 bytes), docs
+ *  s4.16. The 0x12 `ground` byte is the MEAN over a placement of a ramp that is
+ *  defined per vertex (docs/LODGEN_VERTEX_PACKING.md: 1 at the terrain, 0 by 256
+ *  world units above it), so a wall whose foot is in the ground and whose top is
+ *  in the air read as one flat grey. The stream carries the ramp itself.
+ *
+ *  THE LAYOUT IS s4.10's sky stream exactly: u32 first[n + 1] in instance order,
+ *  then one byte a library vertex of `bases[baseId].rep[mnamSlot]` in that mesh's
+ *  vertex order, `first[0] == 0`, monotone, `first[n] == bytes - 4 (n + 1)`, and
+ *  one vertex population with the v6 AO stream: a non-empty slice whose length is
+ *  not the AO slice's is refused by name. byte = round(255 x clamp(1 - (z - g) /
+ *  256)), z the vertex's placed world height, g the BILINEAR ESM heightfield
+ *  under it (the same terrain and the same law as the 0x12 byte). 0x12 is kept.
+ *
+ *  v12 is the v11 layout plus the stream (bits 6-8 keep their meaning) and it
+ *  rises ONLY when the stream is written, after the v9/v10/v11 rules, so they
+ *  never lower it. 0x130..0x13B is fresh room: v8's retired words end at 0x12F,
+ *  so no offset means two things across versions. Needs v7's header block and
+ *  the v6 AO stream. `WW_LODGEN_NO_VERTEX_GROUND=1` is the exact way back (the
+ *  byte-identity gate only). The FO4CS reader owes the version and may skip the
+ *  stream by its two header words. */
+constexpr quint32 LODI_VERSION_VERTEX_GROUND = 12;
 /*! WHAT A VERSION-8 FILE'S BYTES MEAN (contract s4.11). No writer in this tree
  *  produces such a file any more (see LODI_VERSION_HORIZON above) and there is
  *  no longer a switch that moves these; they stay because a reader that meets
@@ -637,6 +661,8 @@ struct LodiHeader
 	quint16 horizonAzimuths = 0;            //!< v8, 0x128: bytes a vertex; 0 when the stream is absent
 	quint16 horizonSteps = 0;               //!< v8, 0x12A: far-march steps a azimuth, as cast
 	float horizonReach = 0.0f;              //!< v8, 0x12C: the march reach in WORLD units
+	quint64 offVertexGround = 0;            //!< v12, 0x130: the per-vertex ground-contact stream, s4.10's layout
+	quint32 vertexGroundBytes = 0;          //!< v12, 0x138: the whole stream's size, offsets included
 };
 
 //! What the writer takes: one unquantised placement.
@@ -665,6 +691,10 @@ struct LodiSrcInstance
 	 *  the same population and order as `vertexAo`; EMPTY when the bake had
 	 *  none. 255 = the whole upper hemisphere open. */
 	std::vector<quint8> vertexSky;
+	/*! v12: one ground-contact byte per vertex of the mesh this instance draws,
+	 *  the same population and order as `vertexAo`; EMPTY when the bake had none.
+	 *  255 = at (or under) the terrain, 0 = 256 world units or more above it. */
+	std::vector<quint8> vertexGround;
 	/*! v7: which GROUP this placement belongs to, as the EMITTER sees it -- a
 	 *  global key, any u32, equal for two placements of one object.
 	 *  LODI_GROUP_ALONE means "its own group". The writer turns these into ids
@@ -744,6 +774,8 @@ struct LodiSrcSet
 	bool group = false;
 	//! v7. FALSE is the module's off value (`--lodi-v6`). Needs `vertexAo`.
 	bool vertexSky = false;
+	//! v12. FALSE is the off value (WW_LODGEN_NO_VERTEX_GROUND=1). Needs `vertexAo` and the v7 block.
+	bool vertexGround = false;
 };
 
 //! The whole table in memory, as the reader gives it.
@@ -763,6 +795,8 @@ struct LodiTable
 	std::vector<quint16> group;                     //!< v7, parallel to `instances`; dense per chunk from 0
 	std::vector<quint32> vertexSkyFirst;            //!< v7, instanceCount + 1 entries into `vertexSky`
 	std::vector<quint8> vertexSky;                  //!< v7, one byte a library vertex an instance
+	std::vector<quint32> vertexGroundFirst;         //!< v12, instanceCount + 1 entries into `vertexGround`
+	std::vector<quint8> vertexGround;               //!< v12, one byte a library vertex an instance
 	/* v8's per-vertex horizon stream is NOT read into this table (lane
 	 * HORIZONOUT, 2026-09-19). A v8 file still opens and its stream is still
 	 * bounds-checked, but the payload is skipped by its length: nothing in this
@@ -839,6 +873,8 @@ struct LodiWriteStats
 	quint32 singletonGroups = 0;        //!< groups of exactly one placement
 	quint32 vertexSkyBytes = 0;         //!< the whole sky stream, offsets included
 	quint32 vertexSkyPlacements = 0;    //!< placements with a non-empty sky slice
+	quint32 vertexGroundBytes = 0;      //!< v12: the whole ground-contact stream, offsets included
+	quint32 vertexGroundPlacements = 0; //!< v12: placements with a non-empty ground slice
 	quint32 version = LODI_VERSION;     //!< the version word actually written
 	quint32 wideScaleInstances = 0;     //!< v10: instances written with bit 7 (scale above 7.99988)
 };

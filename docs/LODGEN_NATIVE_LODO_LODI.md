@@ -1,4 +1,4 @@
-# `.lodo` v6 (v4..v7) + `.lodi` v7 (v3..v11) — the FO4CS-native far field (and the v7/v11 near library)
+# `.lodo` v6 (v4..v7) + `.lodi` v12 (v3..v12) — the FO4CS-native far field (and the v7/v11 near library)
 
 > **NEAR LIBRARY (lane NEAR1, 2026-09-26).** `lodgen --near-library <dir>` writes
 > `<ws>.near.lodo` at **version 7** (§3.9: header flag `NEAR` 16 + the material
@@ -824,7 +824,7 @@ version, which is the right answer: a near library is not a far field.
 | off | type | field |
 |---|---|---|
 | 0x00 | char[4] | magic `LODI` |
-| 0x04 | u32 | **version = 3, or 4 when the file carries aggregates (§4.6), 5 when it carries the placement-AO blob (§4.7), 6 when it carries the per-vertex AO stream (§4.8), 7 when it carries a group table (§4.9) or a per-vertex sky stream (§4.10), or 9 when it carries the workshop-scrappable bit (§4.12), or 10 when any instance carries the wide-scale bit (§4.14)**; versions 1 and 2 are refused by name. **Version 8 is RETIRED** (§4.11): no exe in this tree writes one, v9 is a superset of **v7** and not of v8, and the reader opens a v8 file met in the wild |
+| 0x04 | u32 | **version = 3, or 4 when the file carries aggregates (§4.6), 5 when it carries the placement-AO blob (§4.7), 6 when it carries the per-vertex AO stream (§4.8), 7 when it carries a group table (§4.9) or a per-vertex sky stream (§4.10), or 9 when it carries the workshop-scrappable bit (§4.12), or 10 when any instance carries the wide-scale bit (§4.14), or 11 when any instance carries the initially-disabled bit (§4.15), or 12 when it carries the per-vertex ground-contact stream (§4.16) — decided last, so 12 wins over 9, 10 and 11 and keeps their bits**; versions 1 and 2 are refused by name. **Version 8 is RETIRED** (§4.11): no exe in this tree writes one, v9 is a superset of **v7** and not of v8, and the reader opens a v8 file met in the wild |
 | 0x08 | u32 | flags — bit0 `ROW_ORDER_NORTH_UP` (**clear = refusal**), bit1 `PARTIAL`, bit2 `NOLIB` |
 | 0x0C | u32 | `headerCrc32` — over `0x10 … headerBytes − 1`, so it covers **256 bytes on a v3…v6 file and 512 on a v7 one**, and a v6 file's CRC is the byte-for-byte same number it was before v7 existed |
 | 0x10 | u64 | `pluginCorpusHash` — must equal the `.lodo`'s |
@@ -870,7 +870,10 @@ version, which is the right answer: a near library is not a far field.
 | **0x10C** | **u16** | **`groupStride` = 2 (v7); any other value is refused by name** |
 | **0x110** | **u64** | **offset: per-vertex sky stream (v7, §4.10)** |
 | **0x118** | **u32** | **`vertexSkyBytes` (v7) — the whole stream, offsets included; must be ≥ 4 × (`instanceCount` + 1)** |
-| 0x11C…0x1FF | — | reserved, zero (v7) |
+| 0x11C…0x12F | — | reserved, zero (v7, v9…v12); the retired v8's horizon words lived here (§4.11) |
+| **0x130** | **u64** | **offset: per-vertex ground-contact stream (v12, §4.16), written LAST so no existing offset moves** |
+| **0x138** | **u32** | **`vertexGroundBytes` (v12) — the whole stream, offsets included; must be ≥ 4 × (`instanceCount` + 1). A v7…v11 file carrying anything at 0x130…0x13B is refused by version name** |
+| 0x13C…0x1FF | — | reserved, zero (v7 on) |
 | — | — | the pad starts at 0xF1 on a v5 file, 0xD4 on a v4 file and 0xB0 on a v3 file; a v3 or v4 file carrying anything at 0xE4…0xF0, or a v3…v5 file carrying anything at 0xF4…0xFF, is refused BY VERSION NAME. **A version-3…6 file carrying anything at 0x100…0x11F is refused by version name too: those versions have a 256-byte header and END at 0x100.** |
 
 **THE HEADER BLOCK GREW, and that is a deviation stated out loud.** The 256-byte
@@ -2056,6 +2059,71 @@ hidden object). Readers: bit 8 below version 11 is refused by name
 (`tests/spells/near_format_selftest.py` relabels a v11 file 10 and requires it).
 **The FO4CS reader owes the same** (version 11 accepted, bit 8 = hidden).
 
+### 4.16 The per-vertex ground-contact stream (`.lodi` v12, lane GROUND1, 2026-09-27)
+
+bungo, 2026-09-27: *"Ground contact on buildings, does that look right to you,
+it's a texture map that is not usable?"* §4.1's `ground` (0x12) is ONE byte a
+placement: the MEAN of a ramp that is defined per vertex
+(`docs/LODGEN_VERTEX_PACKING.md`: 1 at the terrain surface, 0 by 256 world units
+above it). A wall whose foot is in the ground and whose top is in the air drew
+as one flat grey; the map review (audit1 §2.1) found 24% of Boston's placements
+span at least half the ramp inside themselves.
+
+**Layout mirrors §4.10 exactly.** `offVertexGround` (0x130) points at
+`u32 first[instanceCount + 1]` in instance order, then one byte a library vertex
+of the mesh the placement draws (`bases[baseId].rep[mnamSlot]`), in that mesh's
+vertex order; `vertexGroundBytes` (0x138) is the whole stream, offsets included.
+`first[0] == 0`, monotone, `first[n] == vertexGroundBytes − 4 (n + 1)`. **It is
+the AO stream's vertex population**: a non-empty slice whose length is not the AO
+slice's is refused by name, by the writer and by both readers. An empty slice
+(a card-drawn placement, a chunk with no land) means "no stream here"; a viewer
+draws the 0x12 byte for it.
+
+**The value.** `byte = round(255 × clamp(1 − (z − g) / 256, 0, 1))`, z the vertex's
+placed world height, g the BILINEAR ESM heightfield under it (128-unit posts) —
+the same terrain and the same law `lodgenNativeLighting` averages into the 0x12
+byte (`src/lodgen.cpp`, `CONTACT_RANGE`). It is evaluated at the vertex itself,
+not at the across-the-face samples the AO stream pools: the ramp is geometry,
+not a cast, so there is nothing to integrate. Computed in the chunk's miniature
+units inside the v6 pass (`src/nativeemit.cpp`), so it costs no extra walk.
+
+**Why a new version and why 0x130.** A v11 reader must be able to tell that the
+header words are there, and the version word is the only thing that tells it.
+The words go at 0x130, AFTER the retired v8's 0x11C…0x12F, so no header offset
+means two things across versions. v12 is the v11 layout plus the stream (bits
+6–8 keep their meaning); it is decided AFTER the v9/v10/v11 rules so they never
+lower it, and it needs the v7 header block and the v6 AO stream (a `--lodi-v6`
+set asking for it is refused, not dropped).
+
+**The 0x12 byte is kept**, written exactly as before, for older readers and as
+the fallback above.
+
+**Way back** (the byte-identity gate only, not a feature switch):
+`WW_LODGEN_NO_VERTEX_GROUND=1` writes the v7/v9/v10/v11 file this exe wrote
+before, byte for byte, and the census leaves the clause out.
+
+**Census**, in the `native-ladder:` line: `vertex ground contact ON: N placements
+streamed (B bytes, mean M, F at the terrain = 255, Z at 256 u or more above it = 0,
+S placement(s) spanning half the ramp or more)`. `--native-verify`'s describe adds
+`vertexGroundPlacements / BytesTotal / Mean / Full / Zero`.
+
+**Measured** (Boston box −8 −12 3 −1, 46,205 placements / 999,977 vertices; lane
+GROUND1's report, `scratchpad/ground1_20260927/DONE.md` §4): an independent
+recompute agrees within 1 level on 99.998% of vertices (99.62% exact); every
+vertex more than 256 u above the terrain reads 0 (768,197); every vertex 0–5 u
+above reads ≥ 250 (101,893). Each placement's stream mean is within 2 levels of
+its 0x12 byte on 98.35% of placements (correlation 0.99992): the byte averages
+the stock `.BTO` ring's vertices and the stream the `.lodo` library mesh's, so
+tall trees spanning the ramp differ most. Cost: the stream is the AO stream's
+size; Boston's `.lodi` grows 25%, the whole Commonwealth's about 40% (~13.9 MB).
+
+**The FO4CS reader owes** version 12 in its whitelist. A reader that does not
+draw the stream still reads the file: every v11 payload is where it was, the
+stream is after all of them, so such a reader bounds it by 0x130/0x138, folds its
+bytes into `indexCrc32` LAST (after the sky stream) if it checks that CRC, and
+otherwise ignores it. A reader that draws it takes the
+slice exactly as it takes the sky slice (§4.10).
+
 ### 4.13 The card link (lane CARDLINK1, 2026-09-24) -- `cardLayer`, `cardCount`, `cardCorpusHash`, FORCE_CARD
 
 **Status: the `cardCorpusHash` definition below is PROPOSED (R19).** bungo has
@@ -2097,6 +2165,13 @@ manifests.
    `textures` object gives, last path component): the lower-cased file name's
    UTF-8 bytes, the file size as a little-endian u64, then every byte of the
    file. 0 when no set is linked. One byte of one card sheet moves it.
+   **A set whose `.lodm` names no emissive hashes four files** (`.lodm`,
+   colour, normal, mask). Since lane TIDY1 (2026-09-27) a card array whose
+   emissive is black on every layer writes no `_g`/`_e` and names none --
+   14 of the 16 Boston card sets; the other 2 hold TreeAspen01-03, whose full
+   models emit 0.05, and keep their sheet. The
+   hash of a set that does name one is unchanged; colour, normal and mask
+   stay required and a set missing one is still refused.
    `tests/spells/lodgen_cardlink.py hash <pair dir>` recomputes it outside the
    exe.
 5. **FORCE_CARD** (`.lodi` instance flags bit 1) is set on a placement whose
@@ -2858,7 +2933,7 @@ never shown.
 | `placement` | every placement its own colour -- **what `identity` drew before v7** | `.lodi` instance identity (§4.1c) |
 | `identityraw` | that identity's low byte as grey | `.lodi` instance identity & 0xFF |
 | `sky` | sky visibility: the **per-vertex stream** on a v7 file (§4.10), the flat per-placement byte on a v6 one. The note line names WHICH served, with its own count -- `per-vertex stream, N bytes over M slices` against `placement byte, N placements` -- and both numbers are read back from what was uploaded | `.lodi` sky stream (§4.10), else instance byte 0x11 |
-| `ground` | ground-contact blend -- PLACEMENTS and TERRAIN in one grey ramp | `.lodi` instance byte 0x12; the terrain is drawn at the ramp's value at the surface, which is the constant 255, and the note line says so |
+| `ground` | ground-contact blend -- PLACEMENTS and TERRAIN in one grey ramp | **per vertex from the `.lodi` v12 stream (§4.16) when the file carries it**, else instance byte 0x12 (one flat value a placement); the note line says which of the two it drew; the terrain is drawn at the ramp's value at the surface, which is the constant 255, and the note line says so |
 | `seed` | per-placement tree seed hashed to colour; **0 = not a tree = black** | `.lodi` instance byte 0x13 (§4.3) |
 | `sway` | per-vertex wind-sway weight | `.lodo` library vertex byte 0x0E (§3.1) |
 | `selfao` | per-vertex self-AO | `.lodo` library vertex byte 0x0F (§3.1) |
@@ -2869,6 +2944,17 @@ never shown.
 | `mask-a` | terrain **ground cover** | role-5 sheet, A. **A BC1 sheet has no alpha at all**; the switch then says `ABSENT on this bake -- tile x,y is BC1 (dxgi N): it carries no alpha` and draws the default view |
 | `emissive` | the role-6 emissive sheet bound as the terrain's base colour, texturing ON | `.lodt` role 6. Absent containers say `emissive sheet ABSENT -- <file> carries no sheet with role 6` |
 | `normal` | the role-2 MSN sheet bound as the terrain's base colour, texturing ON | `.lodt` role 2 (the model-space normal map of the section above) |
+
+**Aliases, not extra maps (lane TIDY1, 2026-09-27).** `ao` is another name for
+`WW_LODL_AO=1`: a picture set renders ONE of them, never both (the 2026-09-27 map review
+rendered both and got two identical pictures, 16 and 22). Likewise `sky` from above is the
+same data as `sky` from the default angle, and the `.lodl` v3 file's `height`, `cellflags`,
+`waterheight` and `watertype` planes are the v2 planes carried forward unchanged: render them
+once. The `.lodl` plane `colour` is the terrain's VERTEX TINT (VCLR), which multiplies the
+ground textures and is near white; the ground's colour is the VT colour sheet. The plane
+`groundcover` is empty on every Fallout 4 file (no GCVR records); the Fallout 4 cover is
+`mask-a`. The plane `cellrange` is the per-cell min/max height (the culling table, one value
+per 4096-unit cell), not a picture of the ground.
 
 `sky`, `ground`, `sway`, `selfao` and the four `mask-*` are a single byte written into all
 three colour components, so the picture is a grey ramp and byte 128 is 128 grey. `identity`
