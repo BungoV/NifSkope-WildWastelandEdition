@@ -7456,19 +7456,16 @@ static bool g_landHeightBlend = false;         // --land-height-blend; off == ru
 static bool g_landMacro = false;               // --land-macro; off == rung's bytes
 
 /* THE ONE SHARPNESS CONSTANT: the logit shift per unit-SD of relief
- * difference.  Tuned against the lane's gates (DONE.md section 3). */
-static const float LODGEN_LAND_HEIGHT_BETA_DEFAULT = 2.0f;
+ * difference.  Lane TILING5's sweep of the split blend (DONE.md 3h, fourteen
+ * frozen chunks): beta 1.0 moved nothing (7 of 14 transition sheets, as today);
+ * beta 2.0 brought the transition zones' high-pass SD to vanilla's (5.36 vs
+ * 5.39) with TILING4's grain gates still green (G1 +19.9 %, bar 20 %; G2 7/7),
+ * so 2.0 is the largest value the grain bar allows. */
+static const float LODGEN_LAND_HEIGHT_BETA = 2.0f;
 
-static float lodgenLandHeightBeta()
+static inline float lodgenLandHeightBeta()
 {
-	/* TUNING ONLY, removed before the lane lands: the environment override the
-	 * sweep in DONE.md section 3 used. */
-	static const float beta = []() {
-		bool ok = false;
-		const float b = qEnvironmentVariable( "WW_TILING5_BETA" ).toFloat( &ok );
-		return ok ? b : LODGEN_LAND_HEIGHT_BETA_DEFAULT;
-	}();
-	return beta;
+	return LODGEN_LAND_HEIGHT_BETA;
 }
 
 struct LodgenLandHeight
@@ -7774,30 +7771,19 @@ void lodgenSetLandHeightBlend( bool on )
  * and the warp never use.  Pure functions of world position. */
 static const double LODGEN_MACRO_LATTICE[3] = { 4096.0, 16384.0, 65536.0 };
 static const double LODGEN_MACRO_WEIGHT[3]  = { 0.25, 0.5, 1.0 };
-/* THE AMPLITUDES, set by measurement against vanilla's own LOD sheets (DONE.md
- * section 3): brightness as a log gain per unit field, hue in radians per unit
- * field, and the saturation boost's ceiling (the boost is always >= 1). */
-static const float LODGEN_MACRO_AMP_DEFAULT[3] = { 0.06f, 0.05f, 0.06f };
-
-static void lodgenMacroAmps( float * a )
-{
-	/* TUNING ONLY, removed before the lane lands (see the beta above). */
-	static const std::array<float, 3> amps = []() {
-		std::array<float, 3> r = { LODGEN_MACRO_AMP_DEFAULT[0],
-			LODGEN_MACRO_AMP_DEFAULT[1], LODGEN_MACRO_AMP_DEFAULT[2] };
-		const QStringList parts = qEnvironmentVariable( "WW_TILING5_MACRO" ).split( QLatin1Char( ',' ) );
-		if ( parts.size() == 3 )
-			for ( int i = 0; i < 3; i++ ) {
-				bool ok = false;
-				const float v = parts[i].toFloat( &ok );
-				if ( ok )
-					r[size_t( i )] = v;
-			}
-		return r;
-	}();
-	for ( int i = 0; i < 3; i++ )
-		a[i] = amps[size_t( i )];
-}
+/* THE AMPLITUDES: brightness as a log gain per unit field, hue in radians per
+ * unit field, and the saturation boost's ceiling (the boost is always >= 1).
+ *
+ * All three are ZERO, by measurement.  Lane TILING5 read the licence as what
+ * vanilla's own LOD sheets carry at 60-700 m that today's bake does not,
+ * sqrt(max(0, vanilla^2 - today^2)), on 12x12-cell mosaics (DONE.md 3g): at
+ * Boston today already carries MORE large-scale brightness variation than
+ * vanilla (licence 0 in both bands), in the west-central hills more colour
+ * variation (licence 0 in both bands).  One world-wide field may not exceed
+ * the licence anywhere, so every channel is 0 and `--land-macro on` writes
+ * the same colour as off (lodgenLandMacroApply returns its input unchanged).
+ * The field is kept for a later bake whose sheets leave room for it. */
+static const float LODGEN_MACRO_AMP[3] = { 0.0f, 0.0f, 0.0f };
 
 //! One octave of quintic value noise in [-1,+1], its own hash key.
 static double lodgenMacroNoise( double wx, double wy, double lattice, quint32 key )
@@ -7848,8 +7834,9 @@ static inline float lodgenHsvSat( const FloatVector4 & c )
  *  at or above the unmodified colour's -- the hard line. */
 static FloatVector4 lodgenLandMacroApply( const FloatVector4 & cIn, double wx, double wy )
 {
-	float amp[3];
-	lodgenMacroAmps( amp );
+	const float * amp = LODGEN_MACRO_AMP;
+	if ( amp[0] == 0.0f && amp[1] == 0.0f && amp[2] == 0.0f )
+		return cIn;   // the measured amplitudes: exactly today's colour
 	const double fb = lodgenMacroField( wx, wy, 0 );
 	const double fh = lodgenMacroField( wx, wy, 1 );
 	const double fs = lodgenMacroField( wx, wy, 2 );

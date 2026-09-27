@@ -260,6 +260,13 @@ void lodgenSetLandHexSize( float units );        // 0 = off = the rung's bytes
  * world position -- no seam, no thread-count dependence.  Applied LAST, after
  * the grade and before quantisation, so the saturation hold compares against
  * the colour the texel would store without it.
+ * Its three amplitudes are 0 by measurement (lodgen.cpp LODGEN_MACRO_AMP):
+ * vanilla's own sheets leave no large-scale brightness room at Boston and no
+ * colour room in the west-central hills, so today `--land-macro on` stores
+ * the same colour as off and only adds its ledger key.
+ *
+ * The sharpness constant beta = 2.0 (lodgen.cpp LODGEN_LAND_HEIGHT_BETA) is
+ * the largest the lane's sweep found inside TILING4's grain bar.
  *
  * `--land-sample relief` turns both on and leaves the sampler as it is. */
 bool lodgenLandHeightBlend();
