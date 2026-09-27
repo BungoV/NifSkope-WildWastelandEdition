@@ -136,7 +136,10 @@ as `ident1` and exits without a bake, so the lock would then read `ident1`: rele
 - scratchpad/ident1_20260927/pics/occ_top_before.png -- today's boxes, top-down, maps1 frame (95 of 340 in frame)
 - scratchpad/ident1_20260927/pics/occ_top_hills_proposed.png -- the 28 proposed hill boxes (cyan) over today's (orange)
 - cov_before_eye0..2.png -- the three street panoramas (grey skyline, orange hidden)
-- Identity before/after, boxes over the city, occluder top-down AFTER: not taken (turn lock).
+- pics/occ_top_after.png -- AFTER boxes, top-down, offline (133 of 495 in frame) (lane GATES)
+- Identity before/after, boxes before/after: launched once each by lane GATES (12:23, 14:19, 14:20, 14:21), all
+  NO FILE rc 0 with empty logs -- the run_v2 exe is auto-sandboxed by the antivirus at every launch (AvastSvc.log
+  "marked for virtualization ... run_v2\NifSkope.exe", exclusion add fails error 122). Not retried.
 
 ## 7. What is still not right
 - Nothing on the AFTER side is measured: no landmark count, no row-house check, no cap, no histogram, no off gate.
