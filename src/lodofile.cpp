@@ -880,14 +880,22 @@ bool lodoAppendMesh( LodoLibrary & lib, const std::vector<LodoSrcShape> & shapes
 			scene.ox = mn[0] - 1.0f;
 			scene.oy = mn[1] - 1.0f;
 			scene.span = std::max( mesh.aabbExtent[0], mesh.aabbExtent[1] ) + 2.0f;
-			for ( const LodoSrcShape & s : work )
+			// lane AO2: a see-through shape blocks rays only where its texture is opaque
+			for ( const LodoSrcShape & s : work ) {
+				const bool seeThrough = s.aoAlpha && s.uv.size() / 2 == s.pos.size() / 3;
 				for ( size_t t = 0; t + 2 < s.tris.size(); t += 3 ) {
 					const float * a = &s.pos[size_t( s.tris[t] ) * 3];
 					const float * b = &s.pos[size_t( s.tris[t + 1] ) * 3];
 					const float * c = &s.pos[size_t( s.tris[t + 2] ) * 3];
-					scene.addTriangle( Vector3( a[0], a[1], a[2] ), Vector3( b[0], b[1], b[2] ),
-						Vector3( c[0], c[1], c[2] ) );
+					if ( seeThrough )
+						scene.addTriangleAlpha( Vector3( a[0], a[1], a[2] ), Vector3( b[0], b[1], b[2] ),
+							Vector3( c[0], c[1], c[2] ), &s.uv[size_t( s.tris[t] ) * 2], &s.uv[size_t( s.tris[t + 1] ) * 2],
+							&s.uv[size_t( s.tris[t + 2] ) * 2], s.aoAlpha );
+					else
+						scene.addTriangle( Vector3( a[0], a[1], a[2] ), Vector3( b[0], b[1], b[2] ),
+							Vector3( c[0], c[1], c[2] ) );
 				}
+			}
 			const float maxT = std::max( 8.0f, meshRadius );
 			/* ACROSS THE FACE, ONE VALUE PER POINT (lane AO2, 2026-09-26). The cast at
 			 * the vertex put a corner that sits inside the model's own walls (a bridge

@@ -5252,6 +5252,41 @@ const DDSTexture16 * lodgenLoadTexture( const QString & dataRoot,
 	return tex;
 }
 
+} // namespace (lane AO2: the alpha map loader below is exported)
+
+const LodgenAoAlpha * lodgenAoAlphaMap( const QString & dataRoot, const QString & texPath, quint8 ref )
+{
+	static QMutex mutex;
+	static QHash<QString, LodgenAoAlpha *> maps;     // never freed: the scenes point into it
+	const QString key = texPath.toLower() + QStringLiteral( "|%1" ).arg( ref );
+	QMutexLocker lock( &mutex );
+	auto it = maps.constFind( key );
+	if ( it != maps.constEnd() )
+		return *it;
+	QHash<QString, DDSTexture16 *> texCache;
+	const DDSTexture16 * t = texPath.isEmpty() ? nullptr : lodgenLoadTexture( dataRoot, texPath, texCache );
+	LodgenAoAlpha * m = nullptr;
+	if ( t && t->getWidth() > 0 && t->getHeight() > 0 ) {
+		m = new LodgenAoAlpha;
+		m->w = t->getWidth();
+		m->h = t->getHeight();
+		m->ref = ref;
+		m->a.resize( size_t( m->w ) * size_t( m->h ) );
+		for ( int y = 0; y < m->h; y++ )
+			for ( int x = 0; x < m->w; x++ ) {
+				const FloatVector4 px = FloatVector4::convertFloat16( t->getPixelN( x, y, 0 ) );
+				m->a[size_t( y ) * size_t( m->w ) + size_t( x )] = quint8( qBound( 0, int( std::lround( px[3] * 255.0f ) ), 255 ) );
+			}
+	}
+	for ( DDSTexture16 * d : texCache )
+		delete d;
+	maps.insert( key, m );
+	return m;
+}
+
+namespace
+{
+
 /*! One layer of a DX10 texture array: the full mip chain, BC1 or BC3,
  *  appended to `out`. The mip filter and the block encoders are the ones
  *  lodgenWriteDds uses, in the same order, so a layer is byte for byte what

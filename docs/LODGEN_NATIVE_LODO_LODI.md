@@ -1567,6 +1567,58 @@ the right places?"*. Two measured causes, two changes; the ray law itself
    `WW_AO_PATCH_DEG` (default 1, < 0 = off, bytes as step 4) and
    `WW_AO_PATCH_FIT=vertex` (the corner fit) are the research knobs; which fit
    ships is bungo's pick.
+6. *Kit pieces* (the tower round, bungo on the round tower's flat wall: *"a hard
+   AO cutoff, then the next face is totally white"*, and a black roof tile under
+   a catwalk on the left tower). A wall or roof built of kit pieces is several
+   placements, and steps 3-5 worked inside one placement only, so two pieces
+   meeting at one point drew two values (the tower: 115 against 251 at one
+   corner; Boston: 21,515 co-located cross-placement pairs with normals within
+   1°, mean jump 0.1 in the installed bake, 19.8 after step 5, 19% above 32).
+   It was not a missing value, a 255 clamp, or the weld failing inside a mesh:
+   each piece averaged only its own samples, and the tall panel's samples hit the
+   back of an opaque stain overlay 5 u in front of it. Steps 3-5 now run over
+   every receiver of the chunk and ring at once: step 3 pools the corners of
+   DIFFERENT placements at one point (0.5 u, within 30°); a flat patch still
+   grows inside one placement only, so a street or roof of many tiles keeps its
+   detail; the final re-pool makes the pieces agree at every shared corner. A
+   long piece with no corner where a short neighbour's corner touches its edge
+   (a T-junction: the tall panel beside two stacked window panels) still drew a
+   step, because its edge interpolates its own two corners; the corner lying on
+   the edge (within 0.5 u, off both ends, normal within 1°) now takes the edge's
+   value, settled in place until nothing moves by 0.1 byte (Boston: 16,571
+   such corners). Cost: inside one piece the linear field is bent where its
+   corners now follow the neighbours, coplanar kink mean 7.5 → 10.0 bytes
+   (share above 16: 7.7% → 13.5%). `WW_AO_WELD_ACROSS=0` keeps steps 3-5
+   inside each placement (bytes as the step-5 bake).
+7. *See-through casters* (the decal round, bungo on the same tower: *"why are
+   these faces on the tower darkened? Is it because there's a decal in front of
+   them?"*). The stain sheets (HitExtAStains*_LOD) stand 5 u in front of the
+   walls. In game they are drips over the wall, but the caster took every
+   triangle as solid, so about three of a panel's eight rays met a stain's back
+   face. The LOD NIF carries no alpha property; the see-through switch is in
+   its LOD BGSM (HitTechStain_LOD: alpha blend, alpha test at 134). A shape is
+   now SEE-THROUGH when its material blends (NIF alpha property bit 0, or the
+   BGSM/BGEM switch) or is a decal that tests. A material row is see-through
+   only when every shape on it is. A see-through triangle enters the scene with
+   its UVs and its diffuse's level-0 alpha (`LodgenAoAlpha`, src/lodgenao.h),
+   and the face caster counts a hit on it only where that alpha is at or above
+   the material's own test cutoff (128 for a blend without a test).
+
+   The switches alone do not decide it. A flag-only rule was measured first and
+   rejected: Wrhs01LOD (warehouse walls) is a decal, and SkyBrigde_LOD_01 (the
+   skybridges) blends, yet their drawn surfaces are 100% and 54% opaque, against
+   27-32% for the stains. Where the alpha passes the ray, the ray goes through;
+   where it is opaque, the ray is blocked, as the pixels are. Alpha-TESTED-only
+   rows (fences, tree cards) still cast as solid, as before; the census counts
+   them. The library `selfAO` casts see-through shapes the same way.
+
+   Boston: 9 see-through rows, 10,241 triangles over 2,704 placement-rings;
+   64 alpha-tested rows, 403,568 triangles over 20,839 placement-rings. The
+   rule is in memory only (the .lodo carries no such bit), so a vertex-AO bake
+   does not reuse an earlier library. `WW_AO_OVERLAY_CASTERS=1` casts every
+   row as solid (the refuter: the .lodi and .lodo come out as the step-6 bake's).
+   The stock caster (`rayHit`: the chunk pass and `WW_SELFAO_FACE=0`) is
+   unchanged and still takes every triangle as solid.
 
 The library `selfAO` (§3, 0x0F) uses steps 2 and 3 as well (not step 4: the
 library has no ground). The Charles bridge deck (Bridge01End01) read 38 from one
