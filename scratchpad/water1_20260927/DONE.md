@@ -176,4 +176,4 @@ Loaded: see section 1, plus ww-gui-launch-silent-exit (the Avast diagnosis). Wis
   diagnosed before retrying.
 - I first wrote the fallback helper with the type name `LodtWriteOptions`; the real type is `LodtOptions`.
   The syntax check caught it before any build.
-- Bake outputs (bk_*) and the sheet cache deleted 12:2x; pictures kept in pics/ (untracked).
+- Bake outputs (bk_*) and the sheet cache deleted by 12:19; pictures kept in pics/ (untracked).
