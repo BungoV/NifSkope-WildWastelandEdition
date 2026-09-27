@@ -72,6 +72,63 @@ legs = {}
 for v in views + ['default']:
     legs[v] = legend('FL_' + v)
 
+# ---- display curve --------------------------------------------------------------------------------------
+# Measured 2026-09-27: the FLAT frame is not raw vertex bytes. The same draw path maps a vertex byte through a
+# fixed curve (legend 51,217,242 -> 57,223,243; 255,92,203 -> 253,102,211; white ground 255 -> 253). So:
+# CALIBRATE the curve from two views (swatch -> the mode of the picture pixels nearest it), then UNDO it on
+# the OTHER views' pixels and run the tests above unchanged. Two folds, so every view is tested by a curve
+# it did not help build. The curve is pooled over channels, monotone, linear outside the measured range.
+FOLDS = [(['cellflags', 'watertype'], ['waterheight', 'bodyid', 'flow', 'shore', 'default']),
+         (['bodyid', 'watertype'], ['cellflags']),
+         (['bodyid', 'cellflags'], ['watertype'])]
+# only CATEGORICAL views calibrate: flow and the ramps are continuous, so their pixels are not swatch colours.
+# bodyid alone does not reach below 69, and the curve bends at the low end, so it is paired with a low swatch.
+
+
+def wet_px(v):
+    a = img('FL_' + v).reshape(-1, 3)
+    return a[np.abs(a - base).max(axis=1) > 2]
+
+
+def swatch_pairs(v):
+    px = wet_px(v)
+    cols = [c for _, c in legs[v][1]]
+    if not cols or not len(px):
+        return []
+    C = np.stack(cols)
+    d = np.sqrt(((px[:, None, :] - C[None, :, :]) ** 2).sum(axis=2))
+    k = d.argmin(axis=1)
+    pairs = []
+    for i, c in enumerate(cols):
+        sel = px[(k == i) & (d.min(axis=1) < 25.0)]
+        if len(sel) < 50:
+            continue
+        u, n = np.unique(sel, axis=0, return_counts=True)
+        pairs += list(zip(c, u[n.argmax()]))
+    return pairs
+
+
+def build_curve(cal_views):
+    pairs = []
+    for v in cal_views:
+        pairs += swatch_pairs(v)
+    xs = sorted(set(p[0] for p in pairs))
+    ys = [float(np.mean([p[1] for p in pairs if p[0] == x])) for x in xs]
+    ys = list(np.maximum.accumulate(ys))   # monotone
+    return np.array(xs), np.array(ys)
+
+
+def undo(px, cur):
+    xs, ys = cur
+    if len(xs) < 2:
+        return px
+    lo = (xs[1] - xs[0]) / max(ys[1] - ys[0], 1e-6)
+    hi = (xs[-1] - xs[-2]) / max(ys[-1] - ys[-2], 1e-6)
+    r = np.interp(px, ys, xs)
+    r = np.where(px < ys[0], xs[0] + (px - ys[0]) * lo, r)
+    r = np.where(px > ys[-1], xs[-1] + (px - ys[-1]) * hi, r)
+    return r
+
 
 def test(v, px, leg):
     cols = [c for _, c in leg]
@@ -87,44 +144,60 @@ def test(v, px, leg):
     raise ValueError(v)
 
 
-for v in views:
+OTHER = {'waterheight': 'cellflags', 'watertype': 'cellflags', 'bodyid': 'cellflags', 'flow': 'waterheight',
+         'shore': 'cellflags', 'cellflags': 'watertype'}
+
+
+def check_view(v, cur):
     name, leg = legs[v]
-    a = img('FL_' + v).reshape(-1, 3)
-    wet = np.abs(a - base).max(axis=1) > 2
-    px = a[wet]
+    px = undo(wet_px(v), cur)
     r = {'legend_view': name, 'swatches': len(leg), 'water_px': int(px.shape[0])}
     if px.shape[0] < 500 or not leg:
         r['verdict'] = 'REFUSED (too few water pixels or no legend)'
-        out[v] = r
-        continue
-    ok = test(v, px, leg)
-    r['share_matching_legend'] = round(float(ok.mean()), 4)
+        return r
+    r['share_matching_legend'] = round(float(test(v, px, leg).mean()), 4)
     r['swatches_present'] = {l: present(px, c) for l, c in leg}
-    # floor: another view's legend on these pixels
-    other = {'waterheight': 'cellflags', 'watertype': 'cellflags', 'bodyid': 'cellflags', 'flow': 'waterheight',
-             'shore': 'cellflags', 'cellflags': 'watertype'}[v]
-    try:
-        r['floor_with_%s_legend' % other] = round(float(test(v, px, legs[other][1]).mean()), 4)
+    try:   # floor: another view's legend on these pixels
+        r['floor_with_%s_legend' % OTHER[v]] = round(float(test(v, px, legs[OTHER[v]][1]).mean()), 4)
     except Exception as e:
         r['floor_error'] = str(e)
-    out[v] = r
+    return r
 
-# default: blended plain water
-name, leg = legs['default']
-a = img('FL_default').reshape(-1, 3)
-wet = np.abs(a - base).max(axis=1) > 2
-if leg:
-    w = leg[0][1]
-    pred = 0.60 * w + 0.40 * base[wet]
-    ok = np.abs(a[wet] - pred).max(axis=1) <= TOL
-    out['default'] = {'legend_view': name, 'legend': leg[0][0] + ' = ' + ','.join(str(int(x)) for x in w),
-                      'water_px': int(wet.sum()), 'share_matching_blend_0.60': round(float(ok.mean()), 4)}
-    # floor: the blend at a wrong alpha
-    pred2 = 0.30 * w + 0.70 * base[wet]
-    out['default']['floor_blend_0.30'] = round(float((np.abs(a[wet] - pred2).max(axis=1) <= TOL).mean()), 4)
+
+def check_default(cur):
+    name, leg = legs['default']
+    a = img('FL_default').reshape(-1, 3)
+    wet = np.abs(a - base).max(axis=1) > 2
+    if not leg or wet.sum() < 500:
+        return {'verdict': 'REFUSED'}
+    xs, ys = cur
+    fw = np.interp(leg[0][1], xs, ys)      # the water's own colour through the measured curve, then the blend
+    r = {'legend_view': name, 'legend': leg[0][0] + ' = ' + ','.join(str(int(x)) for x in leg[0][1]),
+         'water_px': int(wet.sum())}
+    for al, key in ((0.60, 'share_matching_blend_0.60'), (0.30, 'floor_blend_0.30')):
+        pred = al * fw + (1 - al) * base[wet]
+        r[key] = round(float((np.abs(a[wet] - pred).max(axis=1) <= TOL).mean()), 4)
+    return r
+
+
+# the raw test (no curve) is kept as the first row: it is what the curve is for
+ident = (np.array([0.0, 255.0]), np.array([0.0, 255.0]))
+out['raw_no_curve'] = {v: check_view(v, ident).get('share_matching_legend') for v in views}
+for i, (cal, tst) in enumerate(FOLDS):
+    cur = build_curve(cal)
+    f = {'calibrated_on': cal, 'curve': [(int(x), round(float(y), 1)) for x, y in zip(*cur)]}
+    for v in tst:
+        f[v] = check_default(cur) if v == 'default' else check_view(v, cur)
+    out['fold%d' % (i + 1)] = f
 json.dump(out, open(os.path.join(HERE, 'legend_check.json'), 'w'), indent=1)
-for k, r in out.items():
-    print(k, {kk: vv for kk, vv in r.items() if kk != 'swatches_present'})
-    if 'swatches_present' in r:
-        miss = [l for l, n in r['swatches_present'].items() if n == 0]
-        print('   swatches missing from the picture:', miss if miss else 'none')
+print('raw (no curve):', out['raw_no_curve'])
+for i in range(len(FOLDS)):
+    f = out['fold%d' % (i + 1)]
+    print('fold%d calibrated on %s, curve %s' % (i + 1, f['calibrated_on'], f['curve']))
+    for v, r in f.items():
+        if v in ('calibrated_on', 'curve'):
+            continue
+        print('  ', v, {kk: vv for kk, vv in r.items() if kk != 'swatches_present'})
+        if 'swatches_present' in r:
+            miss = [l for l, n in r['swatches_present'].items() if n == 0]
+            print('      swatches missing from the picture:', miss if miss else 'none')

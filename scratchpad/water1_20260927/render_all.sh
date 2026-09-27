@@ -18,9 +18,13 @@ shot() { # <name> <extra env...>
   local name=$1; shift
   port=$((port+1))
   if [ -s $P/$name.png ]; then echo "SKIP $name"; return; fi
-  env LODI_DIR=$OD LV=2 SLOT=0 SDIM=2 "$@" \
-    bash $ME/shot.sh $P/$name.png $T Commonwealth -5 -10 2 -3 8 16384 1600 1600 $port
+  local r; r=$(env LODI_DIR=$OD LV=2 SLOT=0 SDIM=2 "$@" \
+    bash $ME/shot.sh $P/$name.png $T Commonwealth -5 -10 2 -3 8 16384 1600 1600 $port | tail -1)
+  echo "$(date +%H:%M:%S) $r"
+  # a picture that did not appear = stop the pass (Avast sandbox or a crash); never go on launching
+  case "$r" in OK*) ;; *) echo "STOPPED at $name"; exit 2;; esac
 }
+for f in $V3NEW $V2NEW $V3RUNG $RUNG $NEW; do [ -f $f ] || { echo "missing $f"; exit 1; }; done
 G=${1:-all}
 if [ $G = gate ] || [ $G = all ]; then
   # identity: rung exe vs new exe with WW_LODL_WATER=0, same camera, same files
@@ -58,7 +62,8 @@ if [ $G = whole ] || [ $G = all ]; then
   port=$((port+1))
   if [ ! -s $P/WH_default.png ]; then
     env NS=$NEW NOOBJ=1 LV=3 SDIM=16 SHEETS="$INST" LODL=$V3NEW \
-      bash $ME/shot.sh $P/WH_default.png $T Commonwealth -96 -96 95 95 8 570000 3200 1528 $port
+      bash $ME/shot.sh $P/WH_default.png $T Commonwealth -96 -96 95 95 8 570000 3200 1528 $port | tail -1
+    [ -s $P/WH_default.png ] || { echo "STOPPED at WH_default"; exit 2; }
   fi
 fi
 echo "RENDER PASS DONE $G"

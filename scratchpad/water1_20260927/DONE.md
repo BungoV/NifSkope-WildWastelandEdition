@@ -74,7 +74,23 @@ Audit rank 1 (audit1 DONE.md section 2.7, rows 34/35/38/42/43/44, 67-79, evidenc
   Flatness: 0.0000 spread inside each body, 0.0000 from the table height. Ground above water: **0 of 8,415** in
   the file's full-rate ground; 212 where the coarser view mesh (8 a cell) pokes up at texel centres (mesh rate,
   not the data). Bridges over the Charles need the A1_default picture (objects on) -- not rendered yet.
-- **Legend gate**: not run yet (needs the FLAT renders).
+- **Legend gate** (`legend_check.py`, FLAT renders = vertex colours only, water pixels = the difference from the
+  same frame with the water off): **PASS, 97.85% of water pixels on their legend in every view, floors 0.0**.
+  - First run FAILED at 3/255 in 4 of 6 views: the FLAT frame is not raw vertex bytes. The draw path puts every
+    byte through one fixed curve (legend 51,217,242 -> picture 57,223,243; 255,92,203 -> 253,102,211; white
+    ground 255 -> 253). The gate now measures that curve from two categorical views (swatch -> mode of the
+    pixels nearest it), undoes it on the OTHER views, and runs the unchanged 3/255 tests. Three folds, so
+    every view is judged by a curve it did not help build; the raw, no-curve row is still printed.
+  - fold 1 (curve from cellflags + watertype): waterheight 0.9785, bodyid 0.9785, flow 0.9785 (on the colour
+    wheel), shore 0.9786, default 0.9778 (= 0.60 water + 0.40 ground; the 0.30 blend floor 0.0).
+    fold 2 (bodyid + watertype): cellflags 0.9785. fold 3 (bodyid + cellflags): watertype 0.9785.
+    Every floor (another view's legend on the same pixels) 0.0.
+  - The other ~2.15% are mixed colours between the water and the white ground at water edges (e.g. 190,239,248);
+    not examined one by one.
+  - A trap found on the way: a curve built from flow pixels is wrong (flow is continuous, its pixels are not
+    swatch colours), and bodyid alone does not reach below 69 where the curve bends. Only categorical views,
+    with a low swatch, calibrate.
+  - Cellflags in Boston shows only "water and land" on the water: every drawn wet cell has ground too.
 
 ### Resume (all scripts are in scratchpad/water1_20260927, committed)
 1. `turn.sh release anon` (overseer). My queued `bake.sh` pair gave up at 07:05 and 09:05 with the lock
@@ -96,8 +112,13 @@ before pair, the FLAT legend set, the v2 set, the whole-map oblique.
 ### Picture runs that made no file (10:35-10:51)
 Pass 1 and a retry: 11 of 14 shots ended rc 0 with an EMPTY log and no picture, in about 20-40 s. In the turn
 waits right after each such shot a `water1\run_new` (or `run_rung`) NifSkope was still listed for 15-30 s.
-An empty log with rc 0 is what `main.cpp` does when it cannot bind its `--port` (it forwards the file to
-the port's holder and exits 0) -- or an AV kill of a fresh exe (night rules). Not settled which.
+**Cause (read from the antivirus log, skill ww-gui-launch-silent-exit): Avast auto-sandbox.**
+`C:\ProgramData\Avast Software\Avast\log\AvastSvc.log` (UTC, local minus 2 h) has "File is succesfully marked
+for virtualization" for my exe copies 36 times (`run_new`) and 16 times (`run_rung`) between 08:35 and
+08:51 UTC, each followed about 10-15 s later by "tskChangeExcludedHash is unable to add autosandbox
+exclusion" (error 122). The sandboxed process writes nothing and exits rc 0. Not my code, not shot.sh.
+I did not change any antivirus setting (bungo's call). `release/NifSkope.exe` in my worktree is the same
+bytes as `run_new` (md5 54125e45...) and has NO mark in the Avast log.
 The overseer's crash at 10:47 (null write, pids 19148/49176 started 10:47:34, `--port 43742`, empty "" argument):
 **not one of my launches by its command line** -- mine all use ports 42901-42951 and always pass a .lodl path;
 437xx ports and a `run_new` folder are also ground1's. The event log has two popups (10:47:21 and 10:47:43) and
@@ -126,5 +147,8 @@ Loaded: see section 1. Wished for: a turn.sh "status" form (a bare call acquires
 - I added two `#include` lines to src/btdterrain.cpp with a `python - <<'EOF'` heredoc. The night rules say
   source is patched through Write/Edit only. The result was right (CR count 0 before and after, anchors
   asserted once each), but the route was against the rule.
+- 10:35-10:51 I ran a second (retry) render pass after the first gave empty logs, without first reading
+  the antivirus log. Both passes were sandboxed (above); the retry was 7 more wasted launches. Should have
+  diagnosed before retrying.
 - I first wrote the fallback helper with the type name `LodtWriteOptions`; the real type is `LodtOptions`.
   The syntax check caught it before any build.
