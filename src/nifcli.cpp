@@ -2612,10 +2612,21 @@ static bool cmdLodgenVtEstimate( const EsmWorld & world, const LodgenVtOptions &
 /*! The `.lodl` water-body module's switches, filled by the argument loop.
  *
  *  `cmdLodgen` already carries forty-five parameters; five more for one
- *  optional section would be churn nobody reads. Default-constructed means the
- *  module is OFF, which is the state every run that does not name
- *  `--water-bodies` is in. */
-static LodtWaterOptions gLodlWater;
+ *  optional section would be churn nobody reads.
+ *
+ *  ON BY DEFAULT since lane WATER1 (2026-09-27): a `.lodl` says where water is,
+ *  body by body (version 3). `--no-water-bodies` is the way back, byte for
+ *  byte, to the version-2 file. On by default the module FALLS BACK to version 2
+ *  and says why when it cannot classify a worldspace (no water above its
+ *  ground); an explicit `--water-bodies` keeps the old strict refusal. */
+static LodtWaterOptions lodlWaterDefaults()
+{
+	LodtWaterOptions o;
+	o.enabled = true;
+	o.fallbackV2 = true;
+	return o;
+}
+static LodtWaterOptions gLodlWater = lodlWaterDefaults();
 
 /*! INCREMENTAL REGENERATION (lane INCR1, 2026-09-12), filled by the argument
  *  loop for the same reason gLodlWater is: cmdLodgen already carries
@@ -3482,9 +3493,8 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 		LodtOptions lopts;
 		/* The water module's switches. They ride a file-scope struct rather
 		 * than five more parameters on a function that already takes
-		 * forty-five; what matters is that they are OFF unless the command line
-		 * said otherwise, so a run that did not ask for bodies writes the bytes
-		 * it always wrote. */
+		 * forty-five. ON by default since lane WATER1; --no-water-bodies
+		 * writes the version-2 bytes this run always wrote before. */
 		lopts.water = gLodlWater;
 		if ( lopts.water.enabled && lopts.water.velocityPlugin.isEmpty() )
 			lopts.water.velocityPlugin = file;   // the WATR NAM0 fallback floor
@@ -7776,9 +7786,11 @@ int nifskopeCliMain( const QStringList & args )
 		else if ( t == QLatin1String( "--verify-only" ) ) lgLodtVerify = true;
 		else if ( t == QLatin1String( "--refresh-ao" ) ) lgRefreshAo = true;
 		/* The water-body module (docs/LODGEN_BTD_FORMAT.md, version 3). It is
-		 * the ONLY thing that raises the written version to 3, so a run without
-		 * it is byte-identical to what this writer produced before. */
-		else if ( t == QLatin1String( "--water-bodies" ) ) gLodlWater.enabled = true;
+		 * the ONLY thing that raises the written version to 3. ON by default
+		 * since lane WATER1; a run with --no-water-bodies is byte-identical to
+		 * what this writer produced before. */
+		else if ( t == QLatin1String( "--water-bodies" ) ) { gLodlWater.enabled = true; gLodlWater.fallbackV2 = false; }
+		else if ( t == QLatin1String( "--no-water-bodies" ) ) gLodlWater.enabled = false;
 		else if ( t == QLatin1String( "--water-bridge" ) ) gLodlWater.bridgeGap = next().toInt();
 		else if ( t == QLatin1String( "--water-near" ) ) gLodlWater.nearTexels = next().toInt();
 		else if ( t == QLatin1String( "--water-body-samples" ) ) gLodlWater.bodySamples = next().toInt();

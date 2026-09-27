@@ -83,6 +83,8 @@
 # than the container by construction.
 
 . "$(dirname "$0")/_harness.sh" 2>/dev/null || true
+# lane WATER1: the viewer's flat water is left out; this gate measures lighting
+export WW_LODL_WATER=0
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 EXE="${EXE:-$ROOT/release/NifSkope.exe}"
 PORT="${PORT:-42937}"

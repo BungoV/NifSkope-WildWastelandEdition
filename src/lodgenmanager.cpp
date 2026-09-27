@@ -464,6 +464,16 @@ public:
 				qDebug() << "LOD Generation: 2026-09-12 defaults applied to" << moveds
 					<< "saved rows," << kept << "left as they were set";
 		}
+		/* The same once-only sweep for the water bodies (lane WATER1,
+		 * 2026-09-27): they are ON by default now, and a panel saved before
+		 * holds the old default `false` for the row. Only that exact old value
+		 * moves; the marker makes it once. */
+		if ( !settings.value( QStringLiteral( "LodGeneration/water1Applied" ), false ).toBool() ) {
+			const QString k = QStringLiteral( "LodGeneration/waterBodies" );
+			if ( settings.contains( k ) && !settings.value( k ).toBool() )
+				settings.setValue( k, true );
+			settings.setValue( QStringLiteral( "LodGeneration/water1Applied" ), true );
+		}
 
 		/* One label | field grid per section, the field column stretching so
 		 * every value is the same width; `indent` sets a sub-form under its
@@ -1709,15 +1719,16 @@ public:
 		}
 
 		// ---- Water bodies in the landscape file -----------------------------
-		/* A module of the `.lodl` writer, off by default: unarmed, the file is
-		 * the one the same bake wrote before the module existed. */
+		/* A module of the `.lodl` writer, ON by default since lane WATER1
+		 * (2026-09-27): the file says where water is, body by body. Unticked,
+		 * the file is the version-2 one the same bake wrote before. */
 		waterBodiesCheck = new QCheckBox( tr( "Water bodies in the landscape file" ), page );
 		waterBodiesCheck->setObjectName( QStringLiteral( "LodgenWaterBodiesCheck" ) );
 		waterBodiesCheck->setChecked(
-			settings.value( QStringLiteral( "LodGeneration/waterBodies" ), false ).toBool() );
+			settings.value( QStringLiteral( "LodGeneration/waterBodies" ), true ).toBool() );
 		waterBodiesCheck->setToolTip( tr( "Writes each connected body of water, its shore and its flow into the\n"
-			".lodl beside the landscape.\nCommand line: --water-bodies" ) );
-		extras.insert( QStringLiteral( "waterBodies" ), WwExtraRow{ waterBodiesCheck, false } );
+			".lodl beside the landscape.\nCommand line: on by default; --no-water-bodies turns it off" ) );
+		extras.insert( QStringLiteral( "waterBodies" ), WwExtraRow{ waterBodiesCheck, true } );
 		waterBodiesSection = new LodgenSection( waterBodiesCheck, QStringLiteral( "WaterBodies" ), false, page );
 		layout->addWidget( waterBodiesSection );
 		{
@@ -3169,16 +3180,24 @@ private:
 				LodtOptions o;
 				o.aoSamples = job.aoSamples;
 				o.overviewSamples = job.overviewSamples;
-				/* The water-body module of the .lodl writer, off by default:
-				 * unarmed, the file is the one this bake wrote before the
-				 * module existed. */
+				/* The water-body module of the .lodl writer, ON by default
+				 * since lane WATER1; unticked, the file is the version-2 one
+				 * this bake wrote before. A worldspace the module cannot
+				 * classify (no water above its ground) falls back to version 2
+				 * and says so, instead of failing the bake. */
 				o.water.enabled = xb( "waterBodies" );
+				o.water.fallbackV2 = true;
 				o.water.bridgeGap = xi( "waterBridge" );
 				o.water.nearTexels = xi( "waterNear" );
 				o.water.bodySamples = xi( "waterBodySamples" );
 				o.water.flowSamples = xi( "waterFlowSamples" );
 				o.water.shore = xb( "waterShore" );
 				o.water.velocityPlugin = xs( "waterVelocities" );
+				/* The WATR NAM0 fallback floor, from the plugins this bake
+				 * loads -- what the command line has always done, so the panel
+				 * and the command line write the same flow. */
+				if ( o.water.enabled && o.water.velocityPlugin.isEmpty() )
+					o.water.velocityPlugin = job.plugins;
 				o.progress = [this, post]( int phase, int done, int total, int level, int i, int j ) {
 					post( [this, phase, done, total, level, i, j]() {
 						if ( phase == 0 ) {

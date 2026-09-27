@@ -295,6 +295,10 @@ struct WaterOut
 	int bodySamples = 0, flowSamples = 0, shoreSamples = 0;
 	QString census;      //!< the table --water-census prints
 	QString summary;     //!< one line for the writer's own census
+	/*! One byte a cell, row-major like the cell table: 1 = at least one of the
+	 *  cell's level-0 samples is under its water (a wet texel of the body rule).
+	 *  Version 3's cell-table bit 0 is this (lane WATER1). */
+	std::vector<quint8> wetCell;
 };
 
 /*! One maximal run of wet texels with one (height, type) key, in one row. */
@@ -518,7 +522,7 @@ static bool lodtBuildWater( const WaterInput & in, quint64 baseOffset,
 	if ( samples > ( qint64( 1 ) << 28 ) )
 		return fail( QString( "water bodies need the whole %1 x %2 sample grid resident "
 			"(%3 million samples, about %4 MB); this build refuses above 268 million. "
-			"Write without --water-bodies, or raise the body sample rate" )
+			"Write with --no-water-bodies, or raise the body sample rate" )
 			.arg( gw ).arg( gh ).arg( samples / 1000000 ).arg( samples * 4 / ( 1 << 20 ) ) );
 	if ( gw <= 0 || gh <= 0 )
 		return fail( QStringLiteral( "the worldspace has no samples to classify" ) );
@@ -570,6 +574,16 @@ static bool lodtBuildWater( const WaterInput & in, quint64 baseOffset,
 			}
 		}
 		rowAt[size_t( gh )] = qint64( runs.size() );
+	}
+	// the cells that hold a wet texel: version 3's cell-table bit 0 (lane WATER1)
+	out.wetCell.assign( size_t( cellsX ) * size_t( cellsY ), quint8( 0 ) );
+	for ( qint64 gy = 0; gy < gh; gy++ ) {
+		const size_t cellRow = size_t( gy / spc ) * size_t( cellsX );
+		for ( qint64 k = rowAt[size_t( gy )]; k < rowAt[size_t( gy ) + 1]; k++ ) {
+			const WaterRun & r = runs[size_t( k )];
+			for ( int cx = int( r.x0 / spc ); cx <= int( r.x1 / spc ); cx++ )
+				out.wetCell[cellRow + size_t( cx )] = 1;
+		}
 	}
 	if ( runs.empty() )
 		return fail( QStringLiteral( "no wet texel anywhere: every cell's terrain is at or "
@@ -1875,7 +1889,10 @@ static bool lodtWriteSource( const LodtSource & src, const QString & outDir,
 	}
 
 	patch64( hdr, offCellAt, pos );
-	{
+	/* Built by a function because version 3 writes it TWICE: once here with
+	 * the cell data's has-water bit, and again over the same bytes once the
+	 * water bodies know which cells really hold water (lane WATER1). */
+	auto cellTable = [&]() {
 		Buf t;
 		for ( size_t s = 0; s < cellMinH.size(); s++ ) {
 			t.f32( cellMinH[s] );
@@ -1884,8 +1901,10 @@ static bool lodtWriteSource( const LodtSource & src, const QString & outDir,
 			t.u16( cellWaterT[s] );
 			t.u16( cellFlags[s] );
 		}
-		append( t );
-	}
+		return t;
+	};
+	const quint64 cellTableAt = pos;
+	append( cellTable() );
 
 	patch64( hdr, offOverAt, pos );
 	{
@@ -2122,6 +2141,32 @@ static bool lodtWriteSource( const LodtSource & src, const QString & outDir,
 			QFile::remove( path );
 			return fail( QStringLiteral( "water bodies: %1" ).arg( werr ) );
 		}
+		/* Lane WATER1: in version 3 the cell table's bit 0 means "a water body
+		 * covers ground in this cell" -- at least one of the cell's samples is
+		 * below its water height. The cell data's own bit (what version 2 keeps)
+		 * is set wherever a cell names a water height, which in the Commonwealth
+		 * is every cell, dry hilltops included. Height and type stay as the cell
+		 * data gave them; only the bit is cleared, and only here. */
+		qint64 wetKept = 0, wetCleared = 0;
+		for ( size_t s = 0; s < cellFlags.size(); s++ ) {
+			if ( !( cellFlags[s] & CELL_HAS_WATER ) )
+				continue;
+			if ( s < wo.wetCell.size() && wo.wetCell[s] ) {
+				wetKept++;
+			} else {
+				cellFlags[s] = quint16( cellFlags[s] & ~CELL_HAS_WATER );
+				wetCleared++;
+			}
+		}
+		if ( wetCleared > 0 ) {
+			const Buf t = cellTable();
+			const qint64 back = f.pos();
+			if ( !f.seek( qint64( cellTableAt ) ) || f.write( t.b ) != t.b.size()
+				|| !f.seek( back ) )
+				ioFail = true;
+		}
+		wo.summary += QStringLiteral( "; has-water bit: %1 cell(s) with water over ground, "
+			"%2 cleared (dry under their water height)" ).arg( wetKept ).arg( wetCleared );
 		quint32 sect = ( waterCells ? SECT_WATER : 0u )
 			| ( colourCells ? SECT_COLOUR : 0u )
 			| ( gcvrForms.isEmpty() ? 0u : SECT_GROUNDCOVER )
@@ -2207,6 +2252,39 @@ template <typename T> T rd( const QByteArray & b, qsizetype at )
 	std::memcpy( &v, b.constData() + at, sizeof( T ) );
 	return v;
 }
+}
+
+/*! lodtWriteSource, and when the water bodies REFUSE (no wet texel, a grid too
+ *  big to hold) under a DEFAULT that asked for the fallback, the same write
+ *  again without them: a version-2 file and one line saying why. An explicit
+ *  --water-bodies keeps its refusal (lane WATER1). */
+static bool lodtWriteSourceOrV2( const LodtSource & src, const QString & outDir,
+	const LodtOptions & opts, QString * outPath, QString * error )
+{
+	QString err;
+	if ( lodtWriteSource( src, outDir, opts, outPath, &err ) ) {
+		if ( error )
+			*error = err;
+		return true;
+	}
+	const QString tag = QStringLiteral( "water bodies: " );
+	if ( !( opts.water.enabled && opts.water.fallbackV2 && err.startsWith( tag ) ) ) {
+		if ( error )
+			*error = err;
+		return false;
+	}
+	LodtOptions o2 = opts;
+	o2.water.enabled = false;
+	QString err2;
+	if ( !lodtWriteSource( src, outDir, o2, outPath, &err2 ) ) {
+		if ( error )
+			*error = err2;
+		return false;
+	}
+	if ( error )
+		*error = err2 + QStringLiteral( "\n  water: bodies not written (%1); the file is "
+			"version 2" ).arg( err.mid( tag.size() ) );
+	return true;
 }
 
 /* ---- source 1: Fallout 4's LAND records ------------------------------- */
@@ -2514,7 +2592,7 @@ bool lodtWrite( const EsmWorld & world, const QString & outDir,
 		return world.cellWater( cx, cy, wh, &wt );
 	};
 
-	return lodtWriteSource( src, outDir, opts, outPath, error );
+	return lodtWriteSourceOrV2( src, outDir, opts, outPath, error );
 }
 
 /* ---- source 2: a Fallout 76 .btd ------------------------------------- */
@@ -2761,7 +2839,7 @@ bool lodtWriteBtd( const QString & btdPath, const QString & outDir,
 		};
 	}
 
-	if ( !lodtWriteSource( src, outDir, o, outPath, error ) )
+	if ( !lodtWriteSourceOrV2( src, outDir, o, outPath, error ) )
 		return false;
 
 	if ( notes ) {

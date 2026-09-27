@@ -16,10 +16,14 @@ no file on disk and in no command.
 `version 2` (header 0xA0 = 160 bytes, adding the worldspace default water) and
 `version 3` (header 0xF8 = 248 bytes, adding WATER BODIES - a body table, a
 per-texel body-ID plane, flow, shore distance and a stroke store).**
-**The writer still defaults to version 2**; the reader accepts 1, 2 and 3.
-**Version 3 is written only when the water module is switched on**
-(`--water-bodies`), so a run that does not ask for bodies is byte-identical to
-what this writer produced before the section existed.
+**Since lane WATER1 (2026-09-27) both front ends write version 3 by default**
+(the CLI and the LOD Generation panel switch the water module on); the reader
+accepts 1, 2 and 3. `--no-water-bodies` is the way back: it writes version 2,
+byte-identical to what this writer produced before the section existed. If the
+body classifier refuses a worldspace (too many bodies, no water), a DEFAULT
+run falls back to version 2 and says so in its notes; an explicit
+`--water-bodies` still refuses. The `LodtOptions` struct itself still starts
+with the module off, so a caller that builds its own options is unchanged.
 **Status: WRITER, READER AND .btd CONVERSION SHIPPED** (`src/lodtfile.cpp`).
 **Version 3's writer and reader are shipped and gated
 (`tests/spells/lodl_water.sh`); NOTHING HAS BEEN FLOWN in a consumer.**
@@ -362,6 +366,19 @@ place a plane for it.
     worldspace, and `0xFFFF` is not a "missing" value but the commonest case:
     the Commonwealth's default is `ExtOceanWater`.
 
+**Deviation W1 (lane WATER1, 2026-09-27): bit 0 means "water over ground" in a
+version-3 file.** In version 1 and 2, bit 0 is the `CELL` has-water bit, and
+FO4 sets it on every exterior cell: 36,864 of the Commonwealth's 36,864 cells,
+dry hills included, so it tells a reader nothing. A version-3 writer clears
+bit 0 on every cell where no body-ID sample is wet, i.e. where the resolved
+water height is below the ground everywhere in the cell. The height and type
+fields are left as they were (a reader may still read them), only the flag
+moves. Why no version bump: the bit's layout is unchanged and version 3 is new
+enough that no consumer reads it yet; a version-2 file keeps the old meaning,
+byte for byte. The writer's note prints the split
+(`has-water bit: N cell(s) with water over ground, M cleared`). Cost of making
+it a separate bit instead: one more flag bit and every reader taught it.
+
 16 bytes a cell - 590 KB for the Commonwealth, 10 MB for the 804-cell port.
 Flat and uncompressed on purpose: it is the culling and water-plane lookup,
 wanted before any block is decompressed.
@@ -703,7 +720,8 @@ different lakes with one colour and one velocity, `ExtOceanWater` paints the
 harbour and four hundred inland pools — so per-form is the wrong granularity for
 a tint, and there is no per-body anything in vanilla at all. Version 3 adds one.
 
-Everything here is written **only** under `--water-bodies`. The module's
+Everything here is written when the water module is on, which since lane
+WATER1 is the default (`--no-water-bodies` turns it off). The module's
 fallback is the version-2 path a consumer already has: per-cell water height and
 type, one tint per form, and the form's own `NAM0` for flow.
 
@@ -998,7 +1016,9 @@ Row 0 is SOUTH in all three of these planes, like everything else here.
 ### The CLI
 
 ```
-lodgen <esm> --worldspace <id> --lodl <dir> --water-bodies
+lodgen <esm> --worldspace <id> --lodl <dir>      bodies ON by default (v3)
+        [--no-water-bodies]         version 2, byte-identical to before
+        [--water-bodies]            ON, and REFUSE rather than fall back to v2
         [--water-bridge N] [--water-near N]
         [--water-body-samples N] [--water-flow-samples N] [--water-no-shore]
         [--water-velocities <plugin>] [--water-report <file>]
@@ -1157,6 +1177,20 @@ no second one.
     and a plane that was never read look identical in a picture.
   * **A section the file does not carry is refused in words**, naming the
     section flags, rather than drawn black.
+  * **Water is drawn as water** (lane WATER1, 2026-09-27). The default view and
+    every water plane (`waterheight`, `watertype`, `bodyid`, `flow`, `shore`,
+    `cellflags`) add FLAT quads over the terrain: on a version-3 file one quad
+    run per wet body-ID texel at its body's table height (clipped to the id
+    plane, so bridges and dry ground stay out); on a version-2 file one sheet
+    per cell whose water height is above the cell's lowest ground. The ground
+    under the water keeps its normal view. The default view draws plain water
+    (0.16,0.36,0.50) at alpha 0.60; the plane views paint the plane's colour on
+    the water, opaque. The build prints the body list, the flatness read back
+    from the built vertices, the count of texels whose ground is above their
+    water, and a `water legend (<view>):` line with the exact rgb of every
+    swatch. The flow view is a colour wheel (hue = direction, brightness =
+    speed). A plane the file lacks (flow or shore on a v2 file) says ABSENT.
+    `WW_LODL_WATER=0` leaves the water out -- for the identity gate only.
   * Headless: `NifSkope.exe -no-gui lodl <file.lodl> --info` prints the header
     and the plane keys; `--region X0 Y0 X1 Y1 --lod N --plane KEY -o OUT.nif`
     builds through the same generator. In the GUI, `WW_LODL_REGION=

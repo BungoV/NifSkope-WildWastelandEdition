@@ -85,10 +85,20 @@ struct LodtWaterBody
  *
  *  With `enabled` false the writer emits version 2 and the bytes are what they
  *  were; that is the zero-effort way back, and it is what `WW_LODL_VERSION=2`
- *  reaches without a rebuild. */
+ *  reaches without a rebuild.
+ *
+ *  The STRUCT default stays off (a library caller that says nothing gets the
+ *  bytes it always got); the two front ends turn it ON (lane WATER1,
+ *  2026-09-27): the command line unless `--no-water-bodies`, the panel row
+ *  ticked unless unticked. */
 struct LodtWaterOptions
 {
-	bool enabled = false;        //!< --water-bodies
+	bool enabled = false;        //!< on in both front ends; --no-water-bodies
+	/*! When the classifier REFUSES the worldspace (no water above its ground,
+	 *  or a grid too large to hold), write version 2 and say why in the census
+	 *  instead of failing the whole file. Set by the front ends' default; an
+	 *  explicit `--water-bodies` clears it and keeps the strict refusal. */
+	bool fallbackV2 = false;
 	int bridgeGap = 2;           //!< --water-bridge N, texels; 0 = no bridging
 	int nearTexels = 64;         //!< the drainage proximity, texels
 	int bodySamples = 0;         //!< body-ID plane rate; 0 = the file's own
@@ -152,13 +162,15 @@ struct LodtOptions
 	 *  environment variable WW_LODL_VERSION overrides it, so the fallback is
 	 *  reachable without a rebuild (WW_LODT_VERSION is refused by name).
 	 *
-	 *  Version 3 appends the water-body sections. It is NOT the default: the
-	 *  writer raises the version to 3 only when the water module is switched
-	 *  on, so a file nobody asked new sections of is byte-identical to the one
-	 *  this writer produced before the module existed. */
+	 *  Version 3 appends the water-body sections. The writer raises the
+	 *  version to 3 only when the water module is switched on, so a file
+	 *  nobody asked new sections of is byte-identical to the one this writer
+	 *  produced before the module existed. Since lane WATER1 (2026-09-27) the
+	 *  CLI and the panel switch it on by default; `--no-water-bodies` is the
+	 *  way back to these version-2 bytes. */
 	int headerVersion = 2;
 
-	//! Water bodies, flow and shore -- OFF by default; see LodtWaterOptions.
+	//! Water bodies, flow and shore -- off in the struct, on in both front ends.
 	LodtWaterOptions water;
 
 	/*! THE LANDLESS-CELL HEIGHT FILL (lane FIX1, 2026-09-26). Empty by default,

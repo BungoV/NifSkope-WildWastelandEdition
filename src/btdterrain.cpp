@@ -25,11 +25,13 @@ BSD License - see nifskope.h
 #include <QFileInfo>
 #include <QGridLayout>
 #include <QLabel>
+#include <QMap>
 #include <QPushButton>
 #include <QSet>
 #include <QSpinBox>
 #include <QVBoxLayout>
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <memory>
@@ -456,6 +458,89 @@ quint32 packRgba( float r, float g, float b, float a = 1.0f )
 		return quint32( qBound( 0, int( v * 255.0f + 0.5f ), 255 ) );
 	};
 	return q( r ) | ( q( g ) << 8 ) | ( q( b ) << 16 ) | ( q( a ) << 24 );
+}
+
+/* ---- the water colours, ONE function each (lane WATER1) ------------------
+ *
+ * The ground-painted plane views, the water surfaces and the legend lines all
+ * call these, so a legend cannot print a colour the picture does not draw
+ * (skill ww-legend-matches-picture). The arithmetic is the plane views' own,
+ * moved here unchanged, so a run with the water off is byte-identical. */
+
+//! The default view's water: one plain colour, semi-transparent.
+constexpr float WATER_PLAIN_R = 0.16f, WATER_PLAIN_G = 0.36f, WATER_PLAIN_B = 0.50f;
+constexpr float WATER_PLAIN_A = 0.60f;
+quint32 waterPlainRgba() { return packRgba( WATER_PLAIN_R, WATER_PLAIN_G, WATER_PLAIN_B, WATER_PLAIN_A ); }
+
+//! Water height, `t` = 0 the lowest water of the region, 1 the highest.
+quint32 waterHeightRgba( float t )
+{
+	return packRgba( 0.10f + 0.25f * t, 0.30f + 0.45f * t, 0.60f + 0.40f * t );
+}
+
+//! Water type: cyan = the worldspace's own default water, else a hue per WATR form.
+quint32 waterTypeRgba( bool worldDefault, quint32 form )
+{
+	if ( worldDefault )
+		return packRgba( 0.20f, 0.85f, 0.95f );
+	float r, g, b;
+	hashColour( form, r, g, b );
+	return packRgba( r, g, b );
+}
+
+//! Body id: a categorical hue per id.
+quint32 waterBodyRgba( quint16 id )
+{
+	float r, g, b;
+	hashColour( quint32( id ) * 2654435761u, r, g, b );
+	return packRgba( r, g, b );
+}
+
+//! Still water inside a body (flow word 0).
+quint32 waterStillRgba() { return packRgba( 0.12f, 0.16f, 0.22f ); }
+
+/*! A flow word (dir8 | speed4 << 8): direction as a hue round the wheel -- byte 0
+ *  = east, 64 = north, 128 = west, 192 = south, counter-clockwise as the writer's
+ *  atan2 -- and speed as brightness. Word 0 is still water. */
+quint32 waterFlowRgba( quint16 w )
+{
+	if ( !w )
+		return waterStillRgba();
+	const float ang = float( w & 0xFF ) / 256.0f;
+	const float spd = float( ( w >> 8 ) & 0xF ) / 15.0f;
+	const float h6 = ang * 6.0f;
+	const int sector = int( h6 ) % 6;
+	const float frac = h6 - float( int( h6 ) );
+	float rr = 0, gg = 0, bb = 0;
+	switch ( sector ) {
+	case 0: rr = 1; gg = frac; break;
+	case 1: rr = 1 - frac; gg = 1; break;
+	case 2: gg = 1; bb = frac; break;
+	case 3: gg = 1 - frac; bb = 1; break;
+	case 4: rr = frac; bb = 1; break;
+	default: rr = 1; bb = 1 - frac; break;
+	}
+	const float k = 0.35f + 0.65f * spd;
+	return packRgba( rr * k, gg * k, bb * k );
+}
+
+//! Shore distance in stored steps, 0 = at the shore, 255 = far.
+quint32 waterShoreRgba( int sv )
+{
+	const float t = float( sv ) / 255.0f;
+	return packRgba( 0.05f + 0.20f * t, 0.25f + 0.55f * t, 0.45f + 0.50f * t );
+}
+
+//! Cell flags: red = bit 0 (water), green = bit 1 (land), both = yellow.
+quint32 cellFlagsRgba( quint16 fl )
+{
+	return packRgba( ( fl & 1u ) ? 0.90f : 0.10f, ( fl & 2u ) ? 0.90f : 0.10f, 0.15f );
+}
+
+//! "r,g,b" of a packed colour, in bytes: what the legend prints.
+QString rgbText( quint32 c )
+{
+	return QString( "%1,%2,%3" ).arg( c & 0xFF ).arg( ( c >> 8 ) & 0xFF ).arg( ( c >> 16 ) & 0xFF );
 }
 
 } // namespace
@@ -998,6 +1083,474 @@ bool lodtRegionFromEnv( LodtRegionSpec & spec )
 	return got;
 }
 
+namespace {
+
+//! One flat water rectangle, world units, at one height and one colour.
+struct WaterQuad
+{
+	float x0 = 0, y0 = 0, x1 = 0, y1 = 0, z = 0;
+	quint32 rgba = 0;
+	quint16 body = 0;   //!< 0 on a version-2 per-cell sheet
+};
+
+/*! The quads as BSTriShapes under the document's root, at most 16,000 quads
+ *  (64,000 vertices) a shape. `readZ` gets every vertex's z READ BACK from the
+ *  document after it was written, four a quad, in quad order -- what the
+ *  flatness number is taken from. */
+int addWaterShapes( NifModel * nif, const std::vector<WaterQuad> & quads, bool blend,
+	std::vector<float> & readZ )
+{
+	readZ.assign( quads.size() * 4, 0.0f );
+	if ( quads.empty() )
+		return 0;
+	const QModelIndex iRoot = nif->getBlockIndex( 0 );
+	if ( !iRoot.isValid() )
+		return 0;
+	BSVertexDesc desc( 0x0041B00000650407ULL );
+	desc.SetFlag( VertexFlags::VF_COLORS );
+	desc.ResetAttributeOffsets( 130 );
+	const std::uint64_t vertexDesc = desc.Value();
+	const int stride = int( desc.GetVertexSize() );
+	const size_t perShape = 16000;
+	int shapes = 0;
+	nif->holdUpdates( true );
+	for ( size_t q0 = 0; q0 < quads.size(); q0 += perShape ) {
+		const size_t q1 = qMin( quads.size(), q0 + perShape );
+		const int nq = int( q1 - q0 );
+		QVector<Triangle> tris;
+		tris.reserve( nq * 2 );
+		Vector3 lo( 3.4e38f, 3.4e38f, 3.4e38f ), hi( -3.4e38f, -3.4e38f, -3.4e38f );
+		for ( int k = 0; k < nq; k++ ) {
+			const quint16 a = quint16( k * 4 );
+			// CCW seen from above: SW, SE, NE, NW
+			tris.append( Triangle( a, quint16( a + 1 ), quint16( a + 2 ) ) );
+			tris.append( Triangle( a, quint16( a + 2 ), quint16( a + 3 ) ) );
+			const WaterQuad & w = quads[q0 + size_t( k )];
+			lo = Vector3( qMin( lo[0], w.x0 ), qMin( lo[1], w.y0 ), qMin( lo[2], w.z ) );
+			hi = Vector3( qMax( hi[0], w.x1 ), qMax( hi[1], w.y1 ), qMax( hi[2], w.z ) );
+		}
+		QModelIndex iShape = nif->insertNiBlock( QStringLiteral( "BSTriShape" ) );
+		nif->set<QString>( iShape, "Name", QString( "Water %1" ).arg( shapes ) );
+		nif->set<quint32>( iShape, "Flags", 14 );
+		nif->set<float>( iShape, "Scale", 1.0f );
+		nif->set<Vector3>( iShape, "Translation", Vector3( 0.0f, 0.0f, 0.0f ) );
+		nif->set<BSVertexDesc>( iShape, "Vertex Desc", vertexDesc );
+		nif->set<quint32>( iShape, "Num Vertices", quint32( nq * 4 ) );
+		nif->set<quint32>( iShape, "Num Triangles", quint32( tris.size() ) );
+		nif->set<quint32>( iShape, "Data Size", quint32( nq * 4 * stride + tris.size() * 6 ) );
+		nif->setState( BaseModel::Processing );
+		QModelIndex iVertexData = nif->getIndex( iShape, "Vertex Data" );
+		nif->updateArraySize( iVertexData );
+		const Vector3 nrm( 0.0f, 0.0f, 1.0f ), tan( 1.0f, 0.0f, 0.0f );
+		const Vector3 bit = Vector3::crossproduct( nrm, tan );
+		for ( int k = 0; k < nq; k++ ) {
+			const WaterQuad & w = quads[q0 + size_t( k )];
+			const Vector3 p[4] = { Vector3( w.x0, w.y0, w.z ), Vector3( w.x1, w.y0, w.z ),
+				Vector3( w.x1, w.y1, w.z ), Vector3( w.x0, w.y1, w.z ) };
+			const Vector2 uv[4] = { Vector2( 0, 1 ), Vector2( 1, 1 ), Vector2( 1, 0 ), Vector2( 0, 0 ) };
+			const quint32 c = w.rgba;
+			const ByteColor4 col( FloatVector4( float( c & 0xFF ) / 255.0f,
+				float( ( c >> 8 ) & 0xFF ) / 255.0f, float( ( c >> 16 ) & 0xFF ) / 255.0f,
+				float( ( c >> 24 ) & 0xFF ) / 255.0f ) );
+			for ( int v = 0; v < 4; v++ ) {
+				QModelIndex row = nif->index( k * 4 + v, 0, iVertexData );
+				nif->set<Vector3>( row, "Vertex", p[v] );
+				nif->set<HalfVector2>( row, "UV", HalfVector2( uv[v] ) );
+				nif->set<ByteVector3>( row, "Normal", ByteVector3( nrm ) );
+				nif->set<ByteVector3>( row, "Tangent", tan );
+				nif->set<float>( row, "Bitangent X", bit[0] );
+				nif->set<float>( row, "Bitangent Y", bit[1] );
+				nif->set<float>( row, "Bitangent Z", bit[2] );
+				nif->set<ByteColor4>( row, "Vertex Colors", col );
+				readZ[( q0 + size_t( k ) ) * 4 + size_t( v )] = nif->get<Vector3>( row, "Vertex" )[2];
+			}
+		}
+		QModelIndex iTriangles = nif->getIndex( iShape, "Triangles" );
+		nif->updateArraySize( iTriangles );
+		nif->setArray<Triangle>( iTriangles, tris );
+		QModelIndex iBound = nif->getIndex( iShape, "Bounding Sphere" );
+		if ( iBound.isValid() ) {
+			nif->set<Vector3>( iBound, "Center", ( lo + hi ) / 2.0f );
+			nif->set<float>( iBound, "Radius", ( ( hi - lo ) / 2.0f ).length() );
+		}
+		nif->restoreState();
+
+		QModelIndex iShader = nif->insertNiBlock( QStringLiteral( "BSLightingShaderProperty" ) );
+		QModelIndex iTextures = nif->insertNiBlock( QStringLiteral( "BSShaderTextureSet" ) );
+		nif->setLink( iShader, "Texture Set", nif->getBlockNumber( iTextures ) );
+		nif->set<uint>( iTextures, "Num Textures", 10 );
+		nif->updateArraySize( iTextures, "Textures" );
+		QModelIndex iTexArray = nif->getIndex( iTextures, "Textures" );
+		// one-texel white: the picture is the vertex colour (see cellview.cpp)
+		nif->set<QString>( nif->getIndex( iTexArray, 0 ), QStringLiteral( "#FFFFFFFF" ) );
+		nif->set<QString>( nif->getIndex( iTexArray, 1 ), QStringLiteral( "#FFFF8080" ) );
+		const quint32 sf2 = nif->get<quint32>( iShader, "Shader Flags 2" );
+		nif->set<quint32>( iShader, "Shader Flags 2", sf2 | 0x20u );
+		nif->setLink( iShape, "Shader Property", nif->getBlockNumber( iShader ) );
+		if ( blend ) {
+			// SRC_ALPHA / ONE_MINUS_SRC_ALPHA, as the cell view's splat layers
+			QModelIndex iAlpha = nif->insertNiBlock( QStringLiteral( "NiAlphaProperty" ) );
+			nif->set<int>( iAlpha, "Flags", 4333 );
+			nif->set<int>( iAlpha, "Threshold", 0 );
+			nif->setLink( iShape, "Alpha Property", nif->getBlockNumber( iAlpha ) );
+		}
+		addLink( nif, iRoot, QStringLiteral( "Children" ), nif->getBlockNumber( iShape ) );
+		shapes++;
+	}
+	nif->holdUpdates( false );
+	nif->updateModel();
+	return shapes;
+}
+
+const char * waterClassName( int cls )
+{
+	return cls == 0 ? "sea" : cls == 1 ? "river" : cls == 2 ? "lake" : "unknown class";
+}
+
+/*! Lane WATER1: every water body of the region as a flat sheet at its body's
+ *  height, clipped to the body-id plane, coloured by `plane` (Height = plain
+ *  water). A file without bodies gets one sheet per cell where the cell's water
+ *  is above its lowest ground, and says so. Every number printed is read from
+ *  what was built. */
+void addLodlWater( NifModel * nif, const LodtFile & f, const LodtRegionSpec & spec,
+	const TerrainSurface & s, LodtPlane plane, QStringList & note )
+{
+	const QString view = ( plane == LodtPlane::Height ) ? QStringLiteral( "default" )
+		: QString::fromLatin1( lodtPlaneKey( plane ) );
+	const int minX = f.cellMinX(), minY = f.cellMinY();
+	const int spc = f.samplesPerCell();
+	const int cellsXr = spec.x1 - spec.x0 + 1, cellsYr = spec.y1 - spec.y0 + 1;
+	const float rx0 = float( spec.x0 ) * 4096.0f, ry0 = float( spec.y0 ) * 4096.0f;
+	const float rx1 = float( spec.x1 + 1 ) * 4096.0f, ry1 = float( spec.y1 + 1 ) * 4096.0f;
+	const bool blend = ( plane == LodtPlane::Height );
+	std::vector<WaterQuad> quads;
+	QStringList legend;
+
+	// the height the TERRAIN MESH draws at a world point: the builder's own two triangles
+	const int gW = s.cellsX * s.n + 1, gH = s.cellsY * s.n + 1;
+	auto meshHeight = [&]( float wx, float wy ) -> float {
+		const float u = ( wx - rx0 ) / s.spacing, v = ( wy - ry0 ) / s.spacing;
+		const int i = qBound( 0, int( std::floor( u ) ), gW - 2 );
+		const int j = qBound( 0, int( std::floor( v ) ), gH - 2 );
+		const float fx = qBound( 0.0f, u - float( i ), 1.0f ), fy = qBound( 0.0f, v - float( j ), 1.0f );
+		auto Z = [&]( int a, int b ) { return s.z[size_t( b ) * size_t( gW ) + size_t( a )]; };
+		const float z00 = Z( i, j ), z10 = Z( i + 1, j ), z01 = Z( i, j + 1 ), z11 = Z( i + 1, j + 1 );
+		if ( fx >= fy )   // SW, SE, NE
+			return z00 + fx * ( z10 - z00 ) + fy * ( z11 - z10 );
+		return z00 + fy * ( z01 - z00 ) + fx * ( z11 - z01 );   // SW, NE, NW
+	};
+
+	if ( f.bodyCount() > 0 && f.bodyIdSamples() > 0 ) {
+		const int bodyS = f.bodyIdSamples();
+		/* The body plane at its own rate, halved until the region holds at most
+		 * 4 M texels: a Boston view keeps every texel, the whole Commonwealth
+		 * draws every second. */
+		int r = bodyS;
+		while ( r > 1 && qint64( cellsXr ) * cellsYr * r * r > ( qint64( 1 ) << 22 ) )
+			r /= 2;
+		const int stepT = qMax( 1, bodyS / r );
+		const float texel = 4096.0f * float( stepT ) / float( bodyS );
+		const int W = cellsXr * r, H = cellsYr * r;
+		const int bx0 = ( spec.x0 - minX ) * bodyS, by0 = ( spec.y0 - minY ) * bodyS;
+		std::vector<quint16> ids( size_t( W ) * size_t( H ), 0 );
+		QHash<quint16, qint64> count;
+		QHash<quint16, LodtWaterBody> table;
+		qint64 aboveFull = 0, aboveMesh = 0, wet = 0;
+		const int fullStep = qMax( 1, spc / bodyS );
+		for ( int v = 0; v < H; v++ ) {
+			const int by = by0 + v * stepT;
+			for ( int u = 0; u < W; u++ ) {
+				const int bx = bx0 + u * stepT;
+				const quint16 id = f.bodyIdAt( bx, by );
+				if ( !id )
+					continue;
+				if ( !table.contains( id ) ) {
+					LodtWaterBody B;
+					if ( !f.waterBody( id, B ) )
+						continue;
+					table.insert( id, B );
+				}
+				ids[size_t( v ) * size_t( W ) + size_t( u )] = id;
+				count[id]++;
+				wet++;
+				const float wh = table.value( id ).waterHeight;
+				if ( f.height( bx * fullStep, by * fullStep ) >= wh )
+					aboveFull++;
+				const float wx = float( minX ) * 4096.0f + float( bx ) * 4096.0f / float( bodyS );
+				const float wy = float( minY ) * 4096.0f + float( by ) * 4096.0f / float( bodyS );
+				if ( meshHeight( wx, wy ) > wh )
+					aboveMesh++;
+			}
+		}
+		float hLo = 3.4e38f, hHi = -3.4e38f;
+		for ( auto it = table.constBegin(); it != table.constEnd(); ++it ) {
+			hLo = qMin( hLo, it.value().waterHeight );
+			hHi = qMax( hHi, it.value().waterHeight );
+		}
+		if ( hLo > hHi )
+			hLo = hHi = 0.0f;
+		const int flowS = f.flowPlaneSamples(), shoreS = f.shorePlaneSamples();
+		const bool worldDef = f.hasDefaultWater();
+		QHash<quint16, int> speedsSeen;
+		auto colourOf = [&]( int u, int v, quint16 id ) -> quint32 {
+			const LodtWaterBody & B = table[id];
+			const int bx = bx0 + u * stepT, by = by0 + v * stepT;
+			switch ( plane ) {
+			case LodtPlane::WaterHeight:
+				return waterHeightRgba( ( hHi > hLo ) ? ( B.waterHeight - hLo ) / ( hHi - hLo ) : 0.5f );
+			case LodtPlane::WaterType:
+				return waterTypeRgba( worldDef && B.watrForm == f.defaultWaterType(), B.watrForm );
+			case LodtPlane::WaterBodyId:
+				return waterBodyRgba( id );
+			case LodtPlane::WaterFlow: {
+				if ( flowS <= 0 )
+					return waterPlainRgba();
+				const quint16 w = f.flowWordAt( int( qint64( bx ) * flowS / bodyS ),
+					int( qint64( by ) * flowS / bodyS ) );
+				speedsSeen[quint16( ( w >> 8 ) & 0xF )]++;
+				return waterFlowRgba( w );
+			}
+			case LodtPlane::WaterShore:
+				if ( shoreS <= 0 )
+					return waterPlainRgba();
+				return waterShoreRgba( f.shoreAt( int( qint64( bx ) * shoreS / bodyS ),
+					int( qint64( by ) * shoreS / bodyS ) ) );
+			case LodtPlane::CellFlags: {
+				float lo, hi, wh;
+				quint16 wt, fl = 0;
+				f.cell( minX + bx / bodyS, minY + by / bodyS, lo, hi, wh, wt, fl );
+				return cellFlagsRgba( fl );
+			}
+			default:
+				return waterPlainRgba();
+			}
+		};
+		// runs along each row, one quad per run of equal body and colour
+		for ( int v = 0; v < H; v++ ) {
+			const float cy = float( minY ) * 4096.0f + float( by0 + v * stepT ) * 4096.0f / float( bodyS );
+			const float y0 = qMax( ry0, cy - texel * 0.5f ), y1 = qMin( ry1, cy + texel * 0.5f );
+			int u = 0;
+			while ( u < W ) {
+				const quint16 id = ids[size_t( v ) * size_t( W ) + size_t( u )];
+				if ( !id ) {
+					u++;
+					continue;
+				}
+				const quint32 c = colourOf( u, v, id );
+				int e = u + 1;
+				while ( e < W && ids[size_t( v ) * size_t( W ) + size_t( e )] == id
+					&& colourOf( e, v, id ) == c )
+					e++;
+				const float cx0 = float( minX ) * 4096.0f + float( bx0 + u * stepT ) * 4096.0f / float( bodyS );
+				const float cx1 = float( minX ) * 4096.0f + float( bx0 + ( e - 1 ) * stepT ) * 4096.0f / float( bodyS );
+				WaterQuad q;
+				q.x0 = qMax( rx0, cx0 - texel * 0.5f );
+				q.x1 = qMin( rx1, cx1 + texel * 0.5f );
+				q.y0 = y0;
+				q.y1 = y1;
+				q.z = table[id].waterHeight;
+				q.rgba = c;
+				q.body = id;
+				if ( q.x1 > q.x0 && q.y1 > q.y0 )
+					quads.push_back( q );
+				u = e;
+			}
+		}
+		std::vector<float> readZ;
+		const int shapes = addWaterShapes( nif, quads, blend, readZ );
+		// flatness, from the read-back vertices: one height per body
+		QHash<quint16, QPair<float, float>> span;
+		for ( size_t k = 0; k < quads.size(); k++ )
+			for ( int c = 0; c < 4; c++ ) {
+				const float z = readZ[k * 4 + size_t( c )];
+				auto it = span.find( quads[k].body );
+				if ( it == span.end() )
+					span.insert( quads[k].body, qMakePair( z, z ) );
+				else
+					it.value() = qMakePair( qMin( it.value().first, z ), qMax( it.value().second, z ) );
+			}
+		double spread = 0.0, offTable = 0.0;
+		for ( auto it = span.constBegin(); it != span.constEnd(); ++it ) {
+			spread = qMax( spread, double( it.value().second - it.value().first ) );
+			offTable = qMax( offTable, double( qAbs( it.value().first - table[it.key()].waterHeight ) ) );
+		}
+		QList<quint16> order = count.keys();
+		std::sort( order.begin(), order.end(), [&]( quint16 a, quint16 b ) {
+			return count[a] != count[b] ? count[a] > count[b] : a < b;
+		} );
+		QStringList biggest;
+		for ( int i = 0; i < order.size() && i < 6; i++ ) {
+			const LodtWaterBody & B = table[order[i]];
+			biggest << QString( "body %1 %2 at %3 units, %L4 texels" ).arg( order[i] )
+				.arg( QLatin1String( waterClassName( B.cls ) ) )
+				.arg( double( B.waterHeight ), 0, 'f', 2 ).arg( count[order[i]] );
+		}
+		note << QString( "water (%1 view): %2 bodies of %3 in this region, %L4 wet texels at %5 a cell "
+				"(the body plane is %6), drawn as %L7 flat quads in %8 shapes, %9" )
+			.arg( view ).arg( table.size() ).arg( f.bodyCount() ).arg( wet ).arg( r ).arg( bodyS )
+			.arg( qint64( quads.size() ) ).arg( shapes )
+			.arg( blend ? QString( "semi-transparent (alpha %1)" ).arg( double( WATER_PLAIN_A ), 0, 'f', 2 )
+				: QStringLiteral( "opaque so the colours read true" ) );
+		note << QString( "water bodies drawn, biggest first: %1" ).arg( biggest.join( QStringLiteral( "; " ) ) );
+		note << QString( "water flatness: largest height spread inside one body %1 units over %2 bodies, "
+				"largest distance from the body table's height %3 (read back from the built vertices)" )
+			.arg( spread, 0, 'f', 4 ).arg( span.size() ).arg( offTable, 0, 'f', 4 );
+		note << QString( "ground above water: %L1 of %L2 wet texels have the file's own full-rate ground "
+				"at or above their body's water; %L3 have the view's terrain mesh (%4 a cell) above it "
+				"at the texel centre, where the coarser mesh is drawn over the water" )
+			.arg( aboveFull ).arg( wet ).arg( aboveMesh ).arg( s.n );
+
+		switch ( plane ) {
+		case LodtPlane::WaterHeight:
+			for ( int k = 0; k <= 4; k++ ) {
+				const float t = float( k ) / 4.0f;
+				legend << QString( "%1 units = %2" ).arg( double( hLo + ( hHi - hLo ) * t ), 0, 'f', 1 )
+					.arg( rgbText( waterHeightRgba( t ) ) );
+			}
+			break;
+		case LodtPlane::WaterType: {
+			QMap<quint32, bool> forms;
+			for ( auto it = table.constBegin(); it != table.constEnd(); ++it )
+				forms.insert( it.value().watrForm, worldDef && it.value().watrForm == f.defaultWaterType() );
+			for ( auto it = forms.constBegin(); it != forms.constEnd(); ++it )
+				legend << QString( "WATR %1%2 = %3" ).arg( it.key(), 8, 16, QLatin1Char( '0' ) )
+					.arg( it.value() ? QStringLiteral( " (worldspace default)" ) : QString() )
+					.arg( rgbText( waterTypeRgba( it.value(), it.key() ) ) );
+			break;
+		}
+		case LodtPlane::WaterBodyId:
+			for ( int i = 0; i < order.size() && i < 12; i++ )
+				legend << QString( "body %1 %2 = %3" ).arg( order[i] )
+					.arg( QLatin1String( waterClassName( table[order[i]].cls ) ) )
+					.arg( rgbText( waterBodyRgba( order[i] ) ) );
+			break;
+		case LodtPlane::WaterFlow: {
+			if ( flowS <= 0 ) {
+				note << QStringLiteral( "water flow: ABSENT -- this file has no flow plane; plain water drawn" );
+				break;
+			}
+			static const char * const DIRS[8] = { "east", "north-east", "north", "north-west",
+				"west", "south-west", "south", "south-east" };
+			QList<quint16> speeds = speedsSeen.keys();
+			std::sort( speeds.begin(), speeds.end() );
+			for ( quint16 sp : speeds ) {
+				if ( sp == 0 )
+					continue;
+				for ( int d = 0; d < 8; d++ )
+					legend << QString( "flowing %1 (speed %2) = %3" ).arg( QLatin1String( DIRS[d] ) ).arg( sp )
+						.arg( rgbText( waterFlowRgba( quint16( ( d * 32 ) | ( sp << 8 ) ) ) ) );
+			}
+			legend << QString( "still = %1" ).arg( rgbText( waterStillRgba() ) );
+			break;
+		}
+		case LodtPlane::WaterShore:
+			if ( shoreS <= 0 ) {
+				note << QStringLiteral( "shore distance: ABSENT -- this file has no shore plane; plain water drawn" );
+				break;
+			}
+			for ( int sv : { 0, 16, 64, 128, 255 } )
+				legend << QString( "%1%2 units from shore = %3" ).arg( sv == 255 ? QStringLiteral( "at least " ) : QString() )
+					.arg( double( float( sv ) * f.shoreQuantum() ), 0, 'f', 0 )
+					.arg( rgbText( waterShoreRgba( sv ) ) );
+			break;
+		case LodtPlane::CellFlags:
+			legend << QString( "water and land = %1" ).arg( rgbText( cellFlagsRgba( 3 ) ) )
+				<< QString( "water only = %1" ).arg( rgbText( cellFlagsRgba( 1 ) ) )
+				<< QString( "land only = %1" ).arg( rgbText( cellFlagsRgba( 2 ) ) )
+				<< QString( "neither = %1" ).arg( rgbText( cellFlagsRgba( 0 ) ) );
+			break;
+		default:
+			legend << QString( "water = %1" ).arg( rgbText( waterPlainRgba() ) );
+			break;
+		}
+	} else {
+		/* Version 2 (or a version 3 written without bodies): no body plane, so one
+		 * sheet per cell, and only where the cell's water is above its lowest
+		 * ground -- a cell whose ground is all above its water has nothing to show. */
+		float wLo = 3.4e38f, wHi = -3.4e38f;
+		struct CellW { int cx, cy; float wh; quint16 wt, fl; };
+		std::vector<CellW> cells;
+		qint64 flagged = 0, dry = 0;
+		for ( int cy = spec.y0; cy <= spec.y1; cy++ )
+			for ( int cx = spec.x0; cx <= spec.x1; cx++ ) {
+				float lo, hi, wh;
+				quint16 wt, fl;
+				if ( !f.cell( cx, cy, lo, hi, wh, wt, fl ) || !( fl & 1u ) )
+					continue;
+				flagged++;
+				if ( !( wh > lo ) ) {
+					dry++;
+					continue;
+				}
+				cells.push_back( { cx, cy, wh, wt, fl } );
+				wLo = qMin( wLo, wh );
+				wHi = qMax( wHi, wh );
+			}
+		const bool bodyPlane = plane == LodtPlane::WaterBodyId || plane == LodtPlane::WaterFlow
+			|| plane == LodtPlane::WaterShore;
+		for ( const CellW & c : cells ) {
+			WaterQuad q;
+			q.x0 = float( c.cx ) * 4096.0f;
+			q.y0 = float( c.cy ) * 4096.0f;
+			q.x1 = q.x0 + 4096.0f;
+			q.y1 = q.y0 + 4096.0f;
+			q.z = c.wh;
+			switch ( plane ) {
+			case LodtPlane::WaterHeight:
+				q.rgba = waterHeightRgba( ( wHi > wLo ) ? ( c.wh - wLo ) / ( wHi - wLo ) : 0.5f );
+				break;
+			case LodtPlane::WaterType:
+				q.rgba = waterTypeRgba( c.wt == 0xFFFFU, c.wt < quint16( f.watrCount() )
+					? f.watrForm( c.wt ) : quint32( c.wt ) );
+				break;
+			case LodtPlane::CellFlags:
+				q.rgba = cellFlagsRgba( c.fl );
+				break;
+			default:
+				q.rgba = waterPlainRgba();
+				break;
+			}
+			quads.push_back( q );
+		}
+		std::vector<float> readZ;
+		const int shapes = addWaterShapes( nif, quads, blend || bodyPlane, readZ );
+		note << QString( "water (%1 view): this file has no water bodies (version %2), so the water is "
+				"one flat sheet per cell: %3 cells drawn, %4 cells flagged with water but dry "
+				"(their water height is at or below their lowest ground) left out; %5 shapes" )
+			.arg( view ).arg( f.headerVersion() ).arg( qint64( cells.size() ) ).arg( dry ).arg( shapes );
+		Q_UNUSED( flagged );
+		if ( bodyPlane )
+			note << QString( "%1: ABSENT -- this file has no water bodies, so there is no %1 to "
+					"paint; plain water drawn" ).arg( view );
+		else if ( plane == LodtPlane::WaterHeight && !cells.empty() )
+			for ( int k = 0; k <= 4; k++ ) {
+				const float t = float( k ) / 4.0f;
+				legend << QString( "%1 units = %2" ).arg( double( wLo + ( wHi - wLo ) * t ), 0, 'f', 1 )
+					.arg( rgbText( waterHeightRgba( t ) ) );
+			}
+		else if ( plane == LodtPlane::CellFlags )
+			legend << QString( "water and land = %1" ).arg( rgbText( cellFlagsRgba( 3 ) ) )
+				<< QString( "water only = %1" ).arg( rgbText( cellFlagsRgba( 1 ) ) );
+		else if ( plane == LodtPlane::WaterType ) {
+			QMap<quint16, bool> types;
+			for ( const CellW & c : cells )
+				types.insert( c.wt, true );
+			for ( auto it = types.constBegin(); it != types.constEnd(); ++it ) {
+				const quint16 wt = it.key();
+				const quint32 form = wt < quint16( f.watrCount() ) ? f.watrForm( wt ) : quint32( wt );
+				legend << ( wt == 0xFFFFU ? QStringLiteral( "worldspace default" )
+						: QString( "WATR %1" ).arg( form, 8, 16, QLatin1Char( '0' ) ) )
+					+ QStringLiteral( " = " ) + rgbText( waterTypeRgba( wt == 0xFFFFU, form ) );
+			}
+		} else if ( plane == LodtPlane::Height || bodyPlane )
+			legend << QString( "water = %1" ).arg( rgbText( waterPlainRgba() ) );
+	}
+	if ( !legend.isEmpty() )
+		note << QString( "water legend (%1): %2" ).arg( view ).arg( legend.join( QStringLiteral( "; " ) ) );
+}
+
+} // namespace
+
 bool nifCreateLodtTerrainScene( NifModel * nif, const QString & lodtPath,
 	const LodtRegionSpec & specIn, QString * error, QString * notes )
 {
@@ -1038,6 +1591,44 @@ bool nifCreateLodtTerrainScene( NifModel * nif, const QString & lodtPath,
 	QString sheetChanGiven;
 	int sheetChanBin = 0;
 	const LodlChannel sheetChan = lodlChannelFromEnv( &sheetChanGiven, &sheetChanBin );
+	/* THE WATER, DRAWN AS WATER (lane WATER1, bungo 2026-09-27: "the water should
+	 * be flat, you're not actually showing me the water with baked data").
+	 *
+	 * The default view draws every water body as a flat, semi-transparent sheet
+	 * at its body's height over the ground. A WATER plane view (water height,
+	 * water type, body id, flow, shore, cell flags) paints its numbers on that
+	 * sheet instead of on the ground, and the ground under it goes back to its
+	 * normal view -- which is why the plane is swapped to Height here, before
+	 * the sheet pyramid is looked for. Channel views (WW_LODL_CHANNEL, WW_LODL_AO)
+	 * and the other ground planes are about the ground and get no water.
+	 *
+	 * WW_LODL_WATER=0 puts everything back exactly as it was: no water shapes,
+	 * and the water planes painted on the ground. It exists for the identity
+	 * gate, not as a feature switch. */
+	const LodtPlane askedPlane = spec.plane;
+	const bool waterForcedOff = qgetenv( "WW_LODL_WATER" ) == "0";
+	LodtPlane waterPlane = LodtPlane::Height;   // Height = the plain water colour
+	bool drawWater = false;
+	if ( !waterForcedOff ) {
+		switch ( spec.plane ) {
+		case LodtPlane::WaterHeight:
+		case LodtPlane::WaterType:
+		case LodtPlane::WaterBodyId:
+		case LodtPlane::WaterFlow:
+		case LodtPlane::WaterShore:
+		case LodtPlane::CellFlags:
+			waterPlane = spec.plane;
+			spec.plane = LodtPlane::Height;
+			drawWater = true;
+			break;
+		case LodtPlane::Height:
+			drawWater = sheetChanGiven.isEmpty()
+				&& qEnvironmentVariableIntValue( "WW_LODL_AO" ) == 0;
+			break;
+		default:
+			break;
+		}
+	}
 	bool haveSheets = false;
 	int sheetTilesX = 0, sheetTilesY = 0, sheetDim = 0, sheetTilesFound = 0;
 	if ( spec.plane == LodtPlane::Height ) {
@@ -1127,7 +1718,7 @@ bool nifCreateLodtTerrainScene( NifModel * nif, const QString & lodtPath,
 	s.rootName = QString( "%1 [%2,%3]..[%4,%5] LOD%6 %7" )
 		.arg( QFileInfo( lodtPath ).completeBaseName() )
 		.arg( spec.x0 ).arg( spec.y0 ).arg( spec.x1 ).arg( spec.y1 )
-		.arg( spec.lod ).arg( QLatin1String( lodtPlaneKey( spec.plane ) ) );
+		.arg( spec.lod ).arg( QLatin1String( lodtPlaneKey( askedPlane ) ) );
 	s.cellX0 = spec.x0;
 	s.cellY0 = spec.y0;
 	s.cellsX = cellsXr;
@@ -1392,22 +1983,14 @@ bool nifCreateLodtTerrainScene( NifModel * nif, const QString & lodtPath,
 					if ( spec.plane == LodtPlane::WaterHeight ) {
 						if ( fl & 1u ) {
 							const float t = ( wHi > wLo ) ? ( wh - wLo ) / ( wHi - wLo ) : 0.5f;
-							c = packRgba( 0.10f + 0.25f * t, 0.30f + 0.45f * t, 0.60f + 0.40f * t );
+							c = waterHeightRgba( t );
 						}
 					} else if ( spec.plane == LodtPlane::WaterType ) {
-						if ( fl & 1u ) {
-							if ( wt == 0xFFFFU ) {
-								c = packRgba( 0.20f, 0.85f, 0.95f );   // worldspace default
-							} else {
-								float r, g, b;
-								hashColour( wt < quint16( f.watrCount() )
-									? f.watrForm( wt ) : quint32( wt ), r, g, b );
-								c = packRgba( r, g, b );
-							}
-						}
+						if ( fl & 1u )
+							c = waterTypeRgba( wt == 0xFFFFU, wt < quint16( f.watrCount() )
+								? f.watrForm( wt ) : quint32( wt ) );
 					} else if ( spec.plane == LodtPlane::CellFlags ) {
-						c = packRgba( ( fl & 1u ) ? 0.90f : 0.10f,
-							( fl & 2u ) ? 0.90f : 0.10f, 0.15f );
+						c = cellFlagsRgba( fl );
 					} else {
 						const float t = ( reliefMax > 0.0f )
 							? qBound( 0.0f, ( hi - lo ) / reliefMax, 1.0f ) : 0.0f;
@@ -1471,44 +2054,25 @@ bool nifCreateLodtTerrainScene( NifModel * nif, const QString & lodtPath,
 							distinct.insert( id );
 					}
 					if ( spec.plane == LodtPlane::WaterBodyId ) {
-						if ( id ) {
-							float r, g, b;
-							hashColour( quint32( id ) * 2654435761u, r, g, b );
-							c = packRgba( r, g, b );
-						}
+						if ( id )
+							c = waterBodyRgba( id );
 					} else if ( spec.plane == LodtPlane::WaterFlow ) {
+						/* direction as a hue round the wheel, speed as its
+						 * brightness -- so still water inside a body reads
+						 * as dark and a fast reach as bright. */
 						const quint16 w = f.flowWordAt( px, py );
 						if ( w ) {
 							flowing++;
-							const float ang = float( w & 0xFF ) / 256.0f;
-							const float spd = float( ( w >> 8 ) & 0xF ) / 15.0f;
-							/* direction as a hue round the wheel, speed as its
-							 * brightness -- so still water inside a body reads
-							 * as dark and a fast reach as bright. */
-							const float h6 = ang * 6.0f;
-							const int sector = int( h6 ) % 6;
-							const float frac = h6 - float( int( h6 ) );
-							float rr = 0, gg = 0, bb = 0;
-							switch ( sector ) {
-							case 0: rr = 1; gg = frac; break;
-							case 1: rr = 1 - frac; gg = 1; break;
-							case 2: gg = 1; bb = frac; break;
-							case 3: gg = 1 - frac; bb = 1; break;
-							case 4: rr = frac; bb = 1; break;
-							default: rr = 1; bb = 1 - frac; break;
-							}
-							const float k = 0.35f + 0.65f * spd;
-							c = packRgba( rr * k, gg * k, bb * k );
+							c = waterFlowRgba( w );
 						} else if ( id ) {
-							c = packRgba( 0.12f, 0.16f, 0.22f );   // in a body, still
+							c = waterStillRgba();   // in a body, still
 						}
 					} else {
 						const quint8 sv = f.shoreAt( px, py );
 						if ( id ) {
 							shoreMin = qMin( shoreMin, int( sv ) );
 							shoreMax = qMax( shoreMax, int( sv ) );
-							const float t = float( sv ) / 255.0f;
-							c = packRgba( 0.05f + 0.20f * t, 0.25f + 0.55f * t, 0.45f + 0.50f * t );
+							c = waterShoreRgba( sv );
 						}
 					}
 					s.rgba[size_t( j ) * gridW + i] = c;
@@ -1862,6 +2426,9 @@ bool nifCreateLodtTerrainScene( NifModel * nif, const QString & lodtPath,
 
 	if ( !buildTerrainSurface( nif, s, error ) )
 		return false;
+
+	if ( drawWater )
+		addLodlWater( nif, f, spec, s, waterPlane, note );
 
 	note << QString( "meshed and built at %1 ms" ).arg( timer.elapsed() );
 	if ( notes )
