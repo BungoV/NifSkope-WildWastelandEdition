@@ -432,3 +432,34 @@ Builds, bakes and NifSkope runs are allowed in this session.
 - The .lodl AO plane stays terrain-only by design (FO4CS intermediate).
 
 - Commits this resume: d893d2c4 (gates + DONE), ad92846a (skill ww-bc-sheet-mask-gate), pushed to origin.
+
+## RESUME 2026-09-28 (second, from 20:42; turn freed by the overseer's flight at ~20:03)
+### Progress log
+- 20:42 game down (tasklist). Pictures run started: `PICS="sky_before sky_after normal_after track_normal_before_4x track_normal_after_4x" bash resume.sh pics` -> pics_resume2.log.
+- MISTAKE 20:42: ran `turn.sh` with no arguments to read its usage; it ACQUIRED the shared turn as "anon" (20:42:38).
+  Released 4 s later (`turn.sh release anon`, 20:42:42). Lesson: turn.sh has no usage/status mode -- read its header
+  with sed, never run it bare.
+- 20:4x run 1: sky_before, sky_after, track_normal_after_4x OK; normal_after and track_normal_before_4x NO FILE (0-byte logs, rc 0). Avast log: every runs/base launch (all 5, the OK ones too) 'marked for virtualization' + error-122 whitelist fail (skill ww-gui-launch-silent-exit). One retry of the two failed names, no loop.
+- 21:12 retry: normal_after OK (21:09); track_normal_before_4x NO FILE again (2nd silent sandbox death). One launch with NS=runs/sky3 (src diff base..6eb5954f = lodgen.cpp/.h, lodgenchunkpass.cpp, nifcli.cpp only; renderer identical).
+- 21:14 third launch, track_normal_before_4x with NS=runs/sky3 (renderer identical to runs/base): OK (679,405 B).
+  ALL 5 OWED PICTURES NOW FROM THIS RUN (mtimes 09-28 20:43..21:14): pics/sky_before, sky_after, normal_after,
+  track_normal_before_4x, track_normal_after_4x (+ `_labeled.png`). Standing from 09-27: normal_before,
+  junction_normal_before_4x, junction_normal_after_4x (labels re-stamped 21:12-21:15, images unchanged).
+- Looked at sky_after: two frame-edge bands read near-black where sky_before is white. MEASURED (darkband.py, whole
+  12x12-cell box, VT.2 mask B, ON vs base): 4,225,707 of 9,437,184 texels darken by > 100 (mean 221.9 -> 123.7);
+  74.6% of those lie under an object top in objh_on.bin (ground under a roof, never seen). Darkened AND open ground
+  per frame-edge cell is 0-9% (cy -3 row, cy -10 row, cx -5 column) while 20-61% of the same cells sit under an
+  object top. Reading: the edge bands are ground under objects the picture does not draw (its .lodi object set is
+  thinner at the frame edge than the gathered height field), NOT dark open ground. Not proven which objects are
+  missing from the picture; the gates (canyon 87.4 vs 98.8, bias -6.0, open ground 99.36% within 1 level) stand.
+  Picture caveat for the overseer: judge sky_after by the centre, not its edges.
+- 21:2x `bash resume.sh clean` rc 0: bakes 1.1 GB -> 37 MB (kept: bakes/Commonwealth.lodl, objh_lod.bin), cache 29 MB gone.
+
+### FINAL (2026-09-28 second resume)
+- Pictures OWED: none. All eight in pics/ (untracked, scratch only). Sky pair and normal_after and the track pair are
+  from this run; see caveat above on sky_after's edge bands.
+- Avast auto-sandbox took every runs/base launch (error 122 whitelist fail each time); 3 of 7 GUI launches died
+  silently. Not changed (security setting, bungo's call).
+- Still not right: deepest canyons darker than physical (Theater 53.9 vs 92.3, BeaconHill 61.7 vs 96.6); the
+  picture's object set vs the height field at frame edges (not proven which objects).
+- Skills this resume: ww-gui-launch-silent-exit (used). Wished for: a turn.sh `status` verb that does not acquire.
