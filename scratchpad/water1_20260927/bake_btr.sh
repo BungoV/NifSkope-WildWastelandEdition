@@ -6,6 +6,8 @@ if tasklist //FI "IMAGENAME eq Fallout4.exe" 2>/dev/null | grep -q Fallout4.exe;
 mkdir -p "$OUT"
 wp() { echo "$1" | sed -E 's#^/([a-zA-Z])/#\U\1:/#'; }
 bash /e/Projects/NifskopeWWE-fix1/scratchpad/fix1_20260926/turn.sh acquire WATER1 21600 || exit 1
+if tasklist //FI "IMAGENAME eq Fallout4.exe" 2>/dev/null | grep -q Fallout4.exe; then
+  bash /e/Projects/NifskopeWWE-fix1/scratchpad/fix1_20260926/turn.sh release WATER1; echo "GAME UP"; exit 1; fi
 t0=$(date +%s)
 "$EXE" -no-gui lodgen --mo2-profile "E:/Projects/Fallout 4 Mods/profiles/Default" --worldspace 3C \
     --terrain-region -5 -10 2 -3 --dim 4 --out-dir "$(wp "$OUT")" "$@" > "$OUT/bake.log" 2>&1

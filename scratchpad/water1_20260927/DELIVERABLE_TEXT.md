@@ -68,3 +68,10 @@ MISTAKES: - WATER1 20:04: lodl_cmp.py assumed the vanilla bake has no sloped pla
   census first (skill ww-writer-locality-gate).
 FO4CS reader, add to item 5: body IDs are by descending area, so a rebake that adds a sloped body renumbers the
   smaller ones; nothing may key saved data on a body ID across bakes.
+
+## Continuation 3 (2026-09-28): placed-water pictures gated
+HANDOFF add: the hill streams north-west (cells -12..-11, 27..28, ~7,000 u) had NO water in the old bake (0 bodies
+there); now 4 sloped bodies, drawn within 7.6 u of the file's surface (pond 1.1 u); every picture change inside the
+sloped cells (hills 21,104 px, pond 3,939 px, 0 outside; floors fail). The water-height view's ramp re-spans when a
+sloped body joins the region, recolouring the flat sea (explained, not a data change). Pictures in the lane's
+pics/labeled/T3_*.png. NOT FLOWN.

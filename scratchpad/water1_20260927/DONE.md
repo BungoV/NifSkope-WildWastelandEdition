@@ -395,3 +395,7 @@ not a data error; no bar was pre-registered for it, so it is reported, not judge
 T3_hills_before.png, T3_hills_after.png, T3_hills_waterheight_after.png, T3_pond_waterheight_after.png (new);
 T3_pond_before.png, T3_pond_after.png (09-27). Looked at T3_hills_after: blue stepped water in the hill valley.
 River fixture pass (`render_all.sh river`) queued behind FLIGHT and the game (waiter, PORTBASE 46100).
+Commit b4e391d9, pushed. Then queued (runs after a clean river pass): `resume12.sh all` = RESUME 2 (three
+Boston chunk bakes: run_nodepth plain, run_new + run_nodepth with --terrain-identity; btr_cmp.py + --floor) and
+RESUME 1 (the depth-view renders with run_depth, renamed back from .paused). shot.sh and bake_btr.sh now re-check
+the game after taking the turn (a flight can hold the turn for 20-30 min).
