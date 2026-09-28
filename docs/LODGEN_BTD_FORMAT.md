@@ -14,12 +14,18 @@ no file on disk and in no command.
 
 **Contract versions: `magic 'LODT'`, `version 1` (header 0x98 = 152 bytes),
 `version 2` (header 0xA0 = 160 bytes, adding the worldspace default water) and
-`version 3` (header 0xF8 = 248 bytes, adding WATER BODIES - a body table, a
-per-texel body-ID plane, flow, shore distance and a stroke store).**
-**The writer still defaults to version 2**; the reader accepts 1, 2 and 3.
-**Version 3 is written only when the water module is switched on**
-(`--water-bodies`), so a run that does not ask for bodies is byte-identical to
-what this writer produced before the section existed.
+`version 3` (header 0x100 = 256 bytes since lane WATER1, 2026-09-27, 0xF8 = 248
+before it; adding WATER BODIES - a body table, a per-texel body-ID plane, flow,
+shore distance, a stroke store and, since WATER1, a surface plane for sloped
+water).**
+**Since lane WATER1 (2026-09-27) both front ends write version 3 by default**
+(the CLI and the LOD Generation panel switch the water module on); the reader
+accepts 1, 2 and 3. `--no-water-bodies` is the way back: it writes version 2,
+byte-identical to what this writer produced before the section existed. If the
+body classifier refuses a worldspace (too many bodies, no water), a DEFAULT
+run falls back to version 2 and says so in its notes; an explicit
+`--water-bodies` still refuses. The `LodtOptions` struct itself still starts
+with the module off, so a caller that builds its own options is unchanged.
 **Status: WRITER, READER AND .btd CONVERSION SHIPPED** (`src/lodtfile.cpp`).
 **Version 3's writer and reader are shipped and gated
 (`tests/spells/lodl_water.sh`); NOTHING HAS BEEN FLOWN in a consumer.**
@@ -166,9 +172,11 @@ refusal. The magic makes that a clean rejection whatever the file is named.
 | **0xE8** | uint64 | **v3 only** — offset: stroke store (0 = none) |
 | **0xF0** | uint32 | **v3 only** — stroke store bytes |
 | **0xF4** | uint32 | **v3 only** — the **dye plane** store offset, 32 bits (lane WATER4); 0 = none, and the generator always writes 0. A reader tests bit 8 of `0x44`, never this word |
+| **0xF8** | uint64 | **v3 only, since lane WATER1 (2026-09-27)** — offset: **surface plane** store (0 = none). Read only when bit 9 of `0x44` is set. See "The surface plane" |
 
 Header is **0x98 = 152 bytes at version 1**, **0xA0 = 160 bytes at version 2**
-and **0xF8 = 248 bytes at version 3**. Every section offset is measured from the
+and **0x100 = 256 bytes at version 3** (0xF8 = 248 bytes before lane WATER1;
+the version did not change, see below). Every section offset is measured from the
 start of the file, so the header size is not something a reader has to compute —
 but it **is** the floor a reader checks `blockDataOffset` against, and the
 writer refuses if its own assembled header is not the size its version declares.
@@ -201,8 +209,12 @@ Version 1 files carry neither and report **0** and "no default water"; a reader
 bit 3 water, and at version 3 bit 4 **water bodies** (the table and the body-ID
 plane together), bit 5 **flow**, bit 6 **shore distance**, bit 7 **strokes**, and (still version 3, lane WATER4)
 bit 8 **dye** (`LODL_SECT_DYE`, `src/lodtfile.h`; its offset lives in the
-reserved word `0xF4`, and the generator always writes 0).
-A reader checks the bit, not the offset.
+reserved word `0xF4`, and the generator always writes 0), and (lane WATER1,
+2026-09-27) bit 9 **surface** (`LODL_SECT_SURFACE`; its u64 offset is at
+`0xF8`; the generator writes it whenever it writes the bodies).
+A reader checks the bit, not the offset. Since WATER1 the reader also
+**refuses any bit it does not know** (bits 10..31), by name, rather than
+silently ignoring a section it cannot read.
 
 Cell bounds are **inclusive**, matching the `HeightMap` texture convention, so
 the world rectangle is `[west*4096, (east+1)*4096] x [south*4096, (north+1)*4096]`.
@@ -361,6 +373,19 @@ place a plane for it.
     never interned, so `watrCount` counts the types that OVERRIDE the
     worldspace, and `0xFFFF` is not a "missing" value but the commonest case:
     the Commonwealth's default is `ExtOceanWater`.
+
+**Deviation W1 (lane WATER1, 2026-09-27): bit 0 means "water over ground" in a
+version-3 file.** In version 1 and 2, bit 0 is the `CELL` has-water bit, and
+FO4 sets it on every exterior cell: 36,864 of the Commonwealth's 36,864 cells,
+dry hills included, so it tells a reader nothing. A version-3 writer clears
+bit 0 on every cell where no body-ID sample is wet, i.e. where the resolved
+water height is below the ground everywhere in the cell. The height and type
+fields are left as they were (a reader may still read them), only the flag
+moves. Why no version bump: the bit's layout is unchanged and version 3 is new
+enough that no consumer reads it yet; a version-2 file keeps the old meaning,
+byte for byte. The writer's note prints the split
+(`has-water bit: N cell(s) with water over ground, M cleared`). Cost of making
+it a separate bit instead: one more flag bit and every reader taught it.
 
 16 bytes a cell - 590 KB for the Commonwealth, 10 MB for the 804-cell port.
 Flat and uncompressed on purpose: it is the culling and water-plane lookup,
@@ -703,7 +728,8 @@ different lakes with one colour and one velocity, `ExtOceanWater` paints the
 harbour and four hundred inland pools — so per-form is the wrong granularity for
 a tint, and there is no per-body anything in vanilla at all. Version 3 adds one.
 
-Everything here is written **only** under `--water-bodies`. The module's
+Everything here is written when the water module is on, which since lane
+WATER1 is the default (`--no-water-bodies` turns it off). The module's
 fallback is the version-2 path a consumer already has: per-cell water height and
 type, one tint per form, and the form's own `NAM0` for flow.
 
@@ -952,6 +978,104 @@ one pass in descending potential. `src/watermark.cpp`, `WaterMarkDoc::solveDye`
 and `WaterFlowGrid::dye`. Reader: `LodtFile::dyeWordAt`, `dyePlaneSamples`,
 `dyePlaneOffset`. **BUILT AND RUN 2026-09-10 by lane BUILD10** (`release/NifSkope.exe` 15:52:46; 47 checks / 2 failures on the Charles, and both failures are the two gates the lane pre-registered as expected red). The plane was written, read back through the reader (8,649 of 8,649 sampled texels agree with the document), and removed again by undo byte for byte; the file with it is 39,235,147 bytes against the unmarked 38,612,038, and save-reopen-save reproduces it exactly.
 
+### The surface plane (lane WATER1, 2026-09-27)
+
+bungo, 2026-09-27: *"so, water can now be non flat geometry wise? for stuff
+like rivers going down"* and *"But what if we'd author non flat water?"*
+
+**Why.** Until this plane, every body had ONE height (`waterHeight` in the body
+table) and a texel's water surface was that height. A river that runs downhill
+could only be a staircase of flat cell waters, each step a separate plane. The
+surface plane lets one body carry a tilted or curved surface: the body keeps a
+single reference height, and each texel stores how far its own surface sits
+from it.
+
+**The source.** Placed water: every ACTI reference whose base carries a
+`WNAM` (a water-type form), from the worldspace's exterior cells and its
+persistent references, skipping deleted and initially-disabled refs. Each
+reference's mesh is loaded (the same NIF reader the object bake uses) and put
+in world space with the reference's position, rotation and scale. A mesh is
+**flat** when its height span is under 8 units AND every triangle's normal is
+vertical to within 1e-4; flat meshes are ignored, because the cell's own water
+already describes them. The rest are **sloped** and feed this plane. The writer
+prints one line: `placed water: N ref(s) found, F flat ignored, S sloped used,
+L mesh load failure(s)`.
+
+**How it enters the body pass.** The sloped triangles are rasterised onto the
+level-0 texel grid by one function (`lodtRasteriseSurface`): barycentric
+height at each texel's sample point, triangle edges included, the highest
+surface winning where meshes overlap. A texel under a sloped surface is **wet
+when its ground is below that surface**, whatever its cell's water flag says;
+if the cell's own flat water stands at or above the sloped surface there, the
+flat water is on top and the old rule decides. Wet sloped texels join bodies by
+the same flood as everything else, keyed by the mesh's **reference height**
+(the lowest surface over its wet texels) and the mesh's own WATR form, so one
+ribbon becomes one body whose table height is its lowest point. A cell wetted
+only by sloped water gets the has-water bit, that reference height and that
+type. **A worldspace with no sloped water bakes exactly the bodies it baked
+before.**
+
+**The sample.** A fifth plane in the same container format, **at the body-ID
+plane's rate** and on its grid, **4 bytes a sample**:
+
+```
+SECT_SURFACE = 1u << 9     surface plane, u64 offset at 0xF8
+float32 sample:
+  (the mesh's surface at this texel) - (waterHeight of the body this texel names)
+  0.0 exactly wherever the texel is not wet under a sloped mesh (never -0.0)
+```
+
+So `waterHeight + sample` is the water surface at every wet texel, flat or
+sloped. A worldspace with no sloped water writes a plane in which every tile is
+UNIFORM 0 (a directory with no payload), so the cost is the directory alone.
+
+**Where it sits, and the header change.** The plane is always written with the
+bodies, and it is the **LAST section**: after the shore plane, or after the
+flow plane when there is no shore. The header grew from 0xF8 to **0x100**
+bytes to hold its u64 offset at `0xF8`; the version stays **3**. Against a file
+written before, every section (and every absolute block offset) slides by
+exactly 8 bytes, and the new plane is appended at the end; nothing else moves.
+A version-3 file written before WATER1 still opens: the reader's floor for
+version 3 is the old 0xF8, and such a file never carries bit 9, so the eight
+bytes at 0xF8 (the start of its first table) are never read as an offset. The
+marking tool (`src/watermark.cpp`) copies the plane verbatim, rebased, between
+the shore plane and the dye plane.
+
+**Refusals** (beside the list below):
+
+* bit 9 set with a zero offset at `0xF8` → *"section surface is declared
+  present but its offset is empty"*;
+* bit 9 set with a header shorter than 0x100 → *"section surface is declared
+  present but the header is N bytes; the surface offset needs 256"*;
+* bit 9 set without the body-ID plane → *"section surface is declared present
+  without a body-ID plane to measure it from"*;
+* a store whose sample size is not 4 or whose tile count is not the cell count
+  → the plane store's own refusals;
+* a rate different from the body-ID plane's → *"the surface plane declares N
+  samples a cell where the body-ID plane has M; they must match"*;
+* any section bit this reader does not know → *"unknown section bit(s) ..."*.
+
+**Reader recipe.** At a body-ID plane sample `(bx, by)`:
+
+1. `id = bodyId(bx, by)`; 0 = no water, stop.
+2. `delta = surface(bx, by)` as a float32, or 0.0 when bit 9 is clear.
+3. The water surface is `body[id].waterHeight + delta`.
+
+`LodtFile::surfacePlaneSamples()` (0 = no plane), `surfaceDeltaAt(bx, by)`
+(exactly 0.0f where the plane is absent or the water is flat) and
+`waterSurfaceAt(bx, by, z)` (false where there is no water).
+
+**The known-answer test.** `NifSkope -no-gui lodl <out.lodl>
+--water-slope-selftest [--water-slope-flat <flat.lodl>]` builds a made-up
+8 x 8 cell world with a sea and a river ribbon falling 1,536 units across six
+cells, through the real writer and the real reader, and checks: no dry texel
+under the ribbon and the surface within one height quantum of the mesh; no
+water below its own ground; the ribbon is one body at its lowest point with its
+own form; tiles off the ribbon uniform 0; the plane is the last section; a
+world with no ribbon writes an all-uniform-0 plane; and the same river drawn as
+flat per-cell steps FAILS the first check (the refuter). It prints `N checks,
+M failures` and `PASS`/`FAIL`, and exits 0 only on PASS.
+
 ### Refusals, by name
 
 Beside the version-1 list further down, a version-3 reader refuses — naming the
@@ -977,11 +1101,16 @@ field, never returning a silent zero — on:
    never filtered** — an id is a name, and the average of two names is a third
    body that does not exist. ID 0 = no water here.
 3. Look the body up in the **body table**. Its `water height` is the plane's
-   height; the per-cell height need not be read at all.
+   height; the per-cell height need not be read at all. **If bit 9 is set**
+   (lane WATER1), add the **surface plane**'s float32 at the same body-ID
+   sample: `surface = waterHeight + delta`. The delta is exactly 0 wherever the
+   water is flat, so a reader that skips this step still draws every flat body
+   right, and only sloped water comes out flat at its lowest point.
 4. **Tint**: if `colour override A != 0`, use it. Otherwise resolve the body's
    `WATR form` through the engine's own loaded form. **The form is the fallback,
    the override is the answer.**
-5. **Depth** = `body.waterHeight - terrainHeight(gx, gy)`; both from this file.
+5. **Depth** = `surface - terrainHeight(gx, gy)` (the surface of step 3, which
+   is `body.waterHeight` without bit 9); both from this file.
 6. **Shore**: `value * shoreQuantum` world units, saturating at 255. Absent →
    skip foam; never synthesise it.
 7. **Flow**: direction = `(bits 0..7) * 2pi / 256`, speed = `(bits 8..11) *
@@ -998,12 +1127,16 @@ Row 0 is SOUTH in all three of these planes, like everything else here.
 ### The CLI
 
 ```
-lodgen <esm> --worldspace <id> --lodl <dir> --water-bodies
+lodgen <esm> --worldspace <id> --lodl <dir>      bodies ON by default (v3)
+        [--no-water-bodies]         version 2, byte-identical to before
+        [--water-bodies]            ON, and REFUSE rather than fall back to v2
         [--water-bridge N] [--water-near N]
         [--water-body-samples N] [--water-flow-samples N] [--water-no-shore]
         [--water-velocities <plugin>] [--water-report <file>]
 lodl <file.lodl> --water-census      the body table, read back out of the FILE
 lodl <file.lodl> --water-selftest    the classifier's known-answer control
+lodl <out.lodl> --water-slope-selftest [--water-slope-flat <flat.lodl>]
+                                     sloped water's known-answer test; WRITES <out.lodl>
 lodl <file.lodl> --plane bodyid|flow|shore     mesh and paint one of them
 ```
 
@@ -1157,6 +1290,20 @@ no second one.
     and a plane that was never read look identical in a picture.
   * **A section the file does not carry is refused in words**, naming the
     section flags, rather than drawn black.
+  * **Water is drawn as water** (lane WATER1, 2026-09-27). The default view and
+    every water plane (`waterheight`, `watertype`, `bodyid`, `flow`, `shore`,
+    `cellflags`) add FLAT quads over the terrain: on a version-3 file one quad
+    run per wet body-ID texel at its body's table height (clipped to the id
+    plane, so bridges and dry ground stay out); on a version-2 file one sheet
+    per cell whose water height is above the cell's lowest ground. The ground
+    under the water keeps its normal view. The default view draws plain water
+    (0.16,0.36,0.50) at alpha 0.60; the plane views paint the plane's colour on
+    the water, opaque. The build prints the body list, the flatness read back
+    from the built vertices, the count of texels whose ground is above their
+    water, and a `water legend (<view>):` line with the exact rgb of every
+    swatch. The flow view is a colour wheel (hue = direction, brightness =
+    speed). A plane the file lacks (flow or shore on a v2 file) says ABSENT.
+    `WW_LODL_WATER=0` leaves the water out -- for the identity gate only.
   * Headless: `NifSkope.exe -no-gui lodl <file.lodl> --info` prints the header
     and the plane keys; `--region X0 Y0 X1 Y1 --lod N --plane KEY -o OUT.nif`
     builds through the same generator. In the GUI, `WW_LODL_REGION=
@@ -1340,7 +1487,7 @@ no-ground-cover comment now wrap in the writer).
 | claim | line | anchor |
 |---|---|---|
 | magic `'LODT'` (unchanged by the `.lodl` rename) | `lodtfile.h` | `constexpr quint32 LODL_MAGIC = 0x54444F4CU;` |
-| versions 1..3, header sizes 0x98 / 0xA0 / 0xF8 | 56-63 | `constexpr quint32 LODL_VERSION = 3;` … `LODL_HEADER_V3 = 0xF8;` |
+| versions 1..3, header sizes 0x98 / 0xA0 / 0x100 (0xF8 before lane WATER1; row re-anchored 2026-09-27) | 58-75 | `constexpr quint32 LODL_VERSION = 3;` … `constexpr qsizetype LODL_HEADER_V3 = 0x100;` `constexpr qsizetype LODL_HEADER_V3_OLD = 0xF8;` |
 | section flag bits 0..7, now named in the header | 84-91 | `constexpr quint32 SECT_COLOUR = LODL_SECT_COLOUR;` |
 | cell flag bits, water-type sentinel | 101-103 | `constexpr quint16 WATER_TYPE_DEFAULT = 0xFFFFU;` |
 | everything is little-endian | 115 | `//! Little-endian appenders. Everything in the file is LE regardless of host.` |
@@ -1395,7 +1542,7 @@ line numbers are the state of the hashes above.
 
 | claim | line | anchor |
 |---|---|---|
-| versions 1..3, header sizes 0x98 / 0xA0 / 0xF8 | lodtfile.cpp 56-63 | `constexpr quint32 LODL_VERSION = 3;` … `LODL_HEADER_V3 = 0xF8;` |
+| versions 1..3, header sizes 0x98 / 0xA0 / 0x100 (0xF8 before lane WATER1; row re-anchored 2026-09-27) | lodtfile.cpp 58-75 | `constexpr quint32 LODL_VERSION = 3;` … `constexpr qsizetype LODL_HEADER_V3 = 0x100;` `constexpr qsizetype LODL_HEADER_V3_OLD = 0xF8;` |
 | the header size is a TABLE, 0 for an unknown version | lodtfile.cpp 74 | `static inline qsizetype lodtHeaderBytes( int version )` |
 | section bits 4..7 | lodtfile.h 42-45 | `constexpr quint32 LODL_SECT_BODIES      = 1u << 4;` |
 | the body record is 48 bytes; the shore quantum is 32 | lodtfile.cpp 97-99 | `constexpr int LODL_BODY_RECORD = 48;` |

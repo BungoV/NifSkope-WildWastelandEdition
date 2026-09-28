@@ -2612,10 +2612,21 @@ static bool cmdLodgenVtEstimate( const EsmWorld & world, const LodgenVtOptions &
 /*! The `.lodl` water-body module's switches, filled by the argument loop.
  *
  *  `cmdLodgen` already carries forty-five parameters; five more for one
- *  optional section would be churn nobody reads. Default-constructed means the
- *  module is OFF, which is the state every run that does not name
- *  `--water-bodies` is in. */
-static LodtWaterOptions gLodlWater;
+ *  optional section would be churn nobody reads.
+ *
+ *  ON BY DEFAULT since lane WATER1 (2026-09-27): a `.lodl` says where water is,
+ *  body by body (version 3). `--no-water-bodies` is the way back, byte for
+ *  byte, to the version-2 file. On by default the module FALLS BACK to version 2
+ *  and says why when it cannot classify a worldspace (no water above its
+ *  ground); an explicit `--water-bodies` keeps the old strict refusal. */
+static LodtWaterOptions lodlWaterDefaults()
+{
+	LodtWaterOptions o;
+	o.enabled = true;
+	o.fallbackV2 = true;
+	return o;
+}
+static LodtWaterOptions gLodlWater = lodlWaterDefaults();
 
 /*! INCREMENTAL REGENERATION (lane INCR1, 2026-09-12), filled by the argument
  *  loop for the same reason gLodlWater is: cmdLodgen already carries
@@ -3482,9 +3493,8 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 		LodtOptions lopts;
 		/* The water module's switches. They ride a file-scope struct rather
 		 * than five more parameters on a function that already takes
-		 * forty-five; what matters is that they are OFF unless the command line
-		 * said otherwise, so a run that did not ask for bodies writes the bytes
-		 * it always wrote. */
+		 * forty-five. ON by default since lane WATER1; --no-water-bodies
+		 * writes the version-2 bytes this run always wrote before. */
 		lopts.water = gLodlWater;
 		if ( lopts.water.enabled && lopts.water.velocityPlugin.isEmpty() )
 			lopts.water.velocityPlugin = file;   // the WATR NAM0 fallback floor
@@ -3519,6 +3529,37 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 				const QString fillWs = world.worldspaceEdid();
 				lopts.landFill = [fillWs]( int cx, int cy, float * h ) {
 					return lodgenVanillaCellHeights( fillWs, cx, cy, h );
+				};
+			}
+			/* Lane WATER1 (sloped water): the writer asks for each placed water
+			 * mesh's triangles through this loader, in model space, 9 floats a
+			 * triangle. The same NIF reader the object bake uses; false = the
+			 * model did not load, and the writer counts it. */
+			if ( lopts.water.enabled ) {
+				const QString waterDataRoot = dataRoot.isEmpty()
+					? QStringLiteral( "E:/Tools/Fallout 4/DataUnpacked/Data" ) : dataRoot;
+				lodgenWarmSharedIndices();
+				lopts.placedWaterModel = [waterDataRoot]( const QString & model, std::vector<float> & tris ) {
+					std::vector<NativeSrcShape> shapes;
+					QString rootCopy = waterDataRoot;
+					if ( !lodgenNativeLoadModelOnce( &rootCopy, model, nullptr, &shapes ) )
+						return false;
+					tris.clear();
+					for ( const NativeSrcShape & s : shapes ) {
+						const std::vector<float> & p = s.geom.pos;
+						const size_t nv = p.size() / 3;
+						for ( size_t t = 0; t + 2 < s.geom.tris.size(); t += 3 ) {
+							const quint32 a = s.geom.tris[t], b = s.geom.tris[t + 1], c = s.geom.tris[t + 2];
+							if ( a >= nv || b >= nv || c >= nv )
+								continue;
+							for ( quint32 v : { a, b, c } ) {
+								tris.push_back( p[v * 3] );
+								tris.push_back( p[v * 3 + 1] );
+								tris.push_back( p[v * 3 + 2] );
+							}
+						}
+					}
+					return true;
 				};
 			}
 			QElapsedTimer landscapeTimer;
@@ -6252,6 +6293,12 @@ int usage()
 		  << "  lodl <file.lodl> --water-mark-selftest  the MARKING tool's gates. It\n"
 		  << "                                          REWRITES the file it is given,\n"
 		  << "                                          so give it a copy\n"
+		  << "  lodl <out.lodl> --water-slope-selftest [--water-slope-flat <flat.lodl>]\n"
+		  << "                                          sloped-water known-answer test: it\n"
+		  << "                                          WRITES <out.lodl> (a tilted river\n"
+		  << "                                          ribbon) and checks the surface plane;\n"
+		  << "                                          --water-slope-flat keeps the\n"
+		  << "                                          flat-steps comparison file too\n"
 		  << "  lodl <file.lodl> [--region X0 Y0 X1 Y1] [--lod N] [--plane KEY] [-o OUT.nif]\n"
 		  << "                                          build the region as BSTriShape\n"
 		  << "                                          geometry, painted with one stored\n"
@@ -7180,6 +7227,8 @@ int nifskopeCliMain( const QStringList & args )
 	bool lodtWaterCensusOnly = false;
 	bool lodtWaterSelfTestOnly = false;
 	bool lodtWaterMarkSelfTestOnly = false;
+	bool lodtWaterSlopeSelfTestOnly = false;
+	QString lodtWaterSlopeFlat;
 	bool lgListWorldspaces = false;
 	quint32 lgWorldspace = 0;
 	bool lgHaveCell = false;
@@ -7450,6 +7499,8 @@ int nifskopeCliMain( const QStringList & args )
 		else if ( t == QLatin1String( "--water-census" ) ) lodtWaterCensusOnly = true;
 		else if ( t == QLatin1String( "--water-selftest" ) ) lodtWaterSelfTestOnly = true;
 		else if ( t == QLatin1String( "--water-mark-selftest" ) ) lodtWaterMarkSelfTestOnly = true;
+		else if ( t == QLatin1String( "--water-slope-selftest" ) ) lodtWaterSlopeSelfTestOnly = true;
+		else if ( t == QLatin1String( "--water-slope-flat" ) ) lodtWaterSlopeFlat = next();
 		else if ( t == QLatin1String( "--list-worldspaces" ) ) lgListWorldspaces = true;
 		else if ( t == QLatin1String( "--worldspace" ) ) lgWorldspace = next().toUInt( nullptr, 16 );
 		else if ( t == QLatin1String( "--cell" ) ) {
@@ -7776,9 +7827,11 @@ int nifskopeCliMain( const QStringList & args )
 		else if ( t == QLatin1String( "--verify-only" ) ) lgLodtVerify = true;
 		else if ( t == QLatin1String( "--refresh-ao" ) ) lgRefreshAo = true;
 		/* The water-body module (docs/LODGEN_BTD_FORMAT.md, version 3). It is
-		 * the ONLY thing that raises the written version to 3, so a run without
-		 * it is byte-identical to what this writer produced before. */
-		else if ( t == QLatin1String( "--water-bodies" ) ) gLodlWater.enabled = true;
+		 * the ONLY thing that raises the written version to 3. ON by default
+		 * since lane WATER1; a run with --no-water-bodies is byte-identical to
+		 * what this writer produced before. */
+		else if ( t == QLatin1String( "--water-bodies" ) ) { gLodlWater.enabled = true; gLodlWater.fallbackV2 = false; }
+		else if ( t == QLatin1String( "--no-water-bodies" ) ) gLodlWater.enabled = false;
 		else if ( t == QLatin1String( "--water-bridge" ) ) gLodlWater.bridgeGap = next().toInt();
 		else if ( t == QLatin1String( "--water-near" ) ) gLodlWater.nearTexels = next().toInt();
 		else if ( t == QLatin1String( "--water-body-samples" ) ) gLodlWater.bodySamples = next().toInt();
@@ -8583,6 +8636,16 @@ int nifskopeCliMain( const QStringList & args )
 		if ( lodtWaterMarkSelfTestOnly ) {
 			QString report, werr;
 			const bool ok = lodtWaterMarkSelfTest( file, &report, &werr );
+			out() << report << Qt::endl;
+			if ( !ok && !werr.isEmpty() )
+				err() << "error: " << werr << Qt::endl;
+			rc = ok ? 0 : 1;
+		} else if ( lodtWaterSlopeSelfTestOnly ) {
+			/* --water-slope-selftest (lane WATER1) WRITES <file> itself: a
+			 * made-up world with a tilted river ribbon, baked through the
+			 * real writer and read back through the real reader. */
+			QString report, werr;
+			const bool ok = lodtWaterSlopeSelfTest( file, lodtWaterSlopeFlat, &report, &werr );
 			out() << report << Qt::endl;
 			if ( !ok && !werr.isEmpty() )
 				err() << "error: " << werr << Qt::endl;

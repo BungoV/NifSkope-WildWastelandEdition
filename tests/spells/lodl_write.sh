@@ -38,7 +38,9 @@ trap 'rm -rf "$W"' EXIT
 # The tool's exit code IS a check: it reads its own file back through the
 # independent reader and round-trips heights, alpha words and colour against
 # the ESM. An earlier version of this script threw that away with >/dev/null.
-"$NS" -no-gui lodgen "$ESM" --worldspace 3C --lodl "$W" > "$W/out.txt" 2>&1 \
+# PINNED to version 2 (lane WATER1, 2026-09-27): water bodies became the
+# default; this gate measures the landscape write, lodl_water.sh measures v3.
+"$NS" -no-gui lodgen "$ESM" --worldspace 3C --lodl "$W" --no-water-bodies > "$W/out.txt" 2>&1 \
 	|| { echo "FAIL: lodgen's own round-trip against the ESM failed:"; cat "$W/out.txt"; exit 1; }
 grep -E 'alpha words|cross-check' "$W/out.txt" | sed 's/^/  ok   tool: /'
 # THE .lodl MOVED under one root inside the mod folder (lane LAYOUT1,
@@ -267,7 +269,7 @@ echo "== a worldspace with landless cells (NukaWorldAmphitheater) =="
 if [ ! -f "$NWESM" ]; then
 	say "SKIPPED: no DLCNukaWorld.esm at $NWESM"
 else
-	"$NS" -no-gui lodgen "$NWESM" --worldspace 52931 --lodl "$W/nwa" \
+	"$NS" -no-gui lodgen "$NWESM" --worldspace 52931 --lodl "$W/nwa" --no-water-bodies \
 		> "$W/nwa.txt" 2>&1 || { bad2 "the NukaWorldAmphitheater .lodl writes"; }
 	"$NS" -no-gui lodgen "$NWESM" --worldspace 52931 --heightmap "$W/hm" \
 		> "$W/hm.txt" 2>&1 || { bad2 "its shadow heightmap bakes"; }

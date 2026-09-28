@@ -530,18 +530,6 @@ struct LodgenTerrainOptions
 	 *  and distant, so vertices spent there buy nothing.
 	 */
 	int waterSubdiv = 3;
-	/*! Per-vertex water channels, in vertex COLORS on the water shape.
-	 *
-	 *  Only meaningful with subdivision on: at waterSubdiv 0 the mesh is
-	 *  one quad per wet cell and four corner values 4096 units apart can
-	 *  describe no shoreline, so the channels stay off there and the
-	 *  output remains byte-identical to vanilla.
-	 *
-	 *  R = depth (water height minus terrain), G = distance to land.
-	 *  B and A are free. The mesh is welded and T-junction-free, which is
-	 *  what lets a channel cross every edge without seaming.
-	 */
-	bool waterChannels = true;
 	/*! Drop water leaves that lie entirely under terrain.
 	 *
 	 *  Vanilla culls water per CELL, so a 4096-unit cell with a hill in it

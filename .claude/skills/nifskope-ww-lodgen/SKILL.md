@@ -141,7 +141,7 @@ front ends: `lodgenDropBtoScratch()` in `src/lodgenchunkpass.cpp`.
 `SetForegroundWindow`; one NifSkope instance ever; `--port <unused>` (it exits silently on a bound
 port); the app writes `release/ww_<name>_test.log` and the script greps `^PASS`. Self-tests live in
 `src/nifskope_ui.cpp` behind `WW_<NAME>_TEST` env vars in the `WW_UNFUCK_TEST` family. Headless
-renders: `WW_RENDER_SHOT=<png> WW_RENDER_FLAT=1 WW_LOD_CHANNEL=<1..7> WW_RENDER_SIZE=WxH`.
+renders: `WW_RENDER_SHOT=<png> WW_RENDER_FLAT=1 WW_LOD_CHANNEL=<1..6, 8..13> WW_RENDER_SIZE=WxH` (7 was water depth, dropped 2026-09-27).
 
 ## Compile a harness's embedded Python BEFORE running the harness (2026-09-09)
 A `tests/spells/*.sh` gate is mostly Python inside `<<'PYEOF'` heredocs. A SyntaxError in one of

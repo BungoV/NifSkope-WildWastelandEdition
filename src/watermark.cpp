@@ -42,7 +42,12 @@ BSD License - see nifskope.h
 namespace {
 
 // ---- the version-3 header fields this file reads and patches ---------------
-constexpr qsizetype kHdrV3      = 0xF8;
+/* 0x100 since lane WATER1 (2026-09-27): the version-3 header grew in place by
+ * the surface plane's u64 at 0xF8. A version-3 file from before that has its
+ * first table at 0xF8; reading 0x100 bytes of it as the "header" is harmless,
+ * because those eight bytes are copied back unchanged and 0xF8 is patched only
+ * when the surface bit is set. */
+constexpr qsizetype kHdrV3      = 0x100;
 constexpr qsizetype kOffSect    = 0x44;
 constexpr qsizetype kOffSize    = 0x90;
 constexpr qsizetype kOffBody    = 0xA0;
@@ -62,6 +67,8 @@ constexpr qsizetype kOffStroke  = 0xE8;
 constexpr qsizetype kOffStrokeL = 0xF0;
 constexpr qsizetype kOffDye     = 0xF4;   //!< the reserved word: the dye plane (WATER4)
 constexpr quint32 kSectDye = LODL_SECT_DYE;
+constexpr qsizetype kOffSurface = 0xF8;   //!< lane WATER1: the surface plane, u64
+constexpr quint32 kSectSurface = LODL_SECT_SURFACE;
 constexpr int kBodyRecord = 48;
 constexpr double kTwoPi = 6.283185307179586;
 //! World units a cell edge. FO4's, and the same constant the writer uses.
@@ -341,6 +348,9 @@ bool WaterMarkDoc::open( const QString & path, QString * error )
 	dyePlane = Plane();
 	if ( oDye && !readPlane( *reader, oDye, 4, dyePlane, error ) )
 		return false;
+	surfacePlane = Plane();
+	if ( oSurface && !readPlane( *reader, oSurface, 4, surfacePlane, error ) )
+		return false;
 	opened = true;
 	return true;
 }
@@ -384,6 +394,9 @@ bool WaterMarkDoc::readTail( QString * error )
 	oDye = ( sect & kSectDye ) ? quint64( rd32( p + kOffDye ) ) : quint64( 0 );
 	if ( ( sect & kSectDye ) && !oDye )
 		return fail( QStringLiteral( "section dye is declared present but its offset is empty" ) );
+	oSurface = ( sect & kSectSurface ) ? rd64( p + kOffSurface ) : quint64( 0 );
+	if ( ( sect & kSectSurface ) && !oSurface )
+		return fail( QStringLiteral( "section surface is declared present but its offset is empty" ) );
 
 	if ( bodyStride != kBodyRecord )
 		return fail( QStringLiteral( "the body table's records are %1 bytes; this tool writes %2" )
@@ -397,7 +410,11 @@ bool WaterMarkDoc::readTail( QString * error )
 			"table at 0x%2; this tool rewrites the tail in the writer's own order" )
 			.arg( oName, 0, 16 ).arg( tableEnd, 0, 16 ) );
 	const quint64 sizeOnDisk = quint64( QFileInfo( filePath ).size() );
-	if ( oDye && !( oDye > oFlow && oDye > oShore && oDye < sizeOnDisk ) )
+	if ( oSurface && !( oSurface > oFlow && oSurface > oShore && oSurface < sizeOnDisk ) )
+		return fail( QStringLiteral( "the surface plane at 0x%1 is not after the flow and shore "
+			"planes; this tool rewrites the tail in the writer's own order and refuses another" )
+			.arg( oSurface, 0, 16 ) );
+	if ( oDye && !( oDye > oFlow && oDye > oShore && oDye > oSurface && oDye < sizeOnDisk ) )
 		return fail( QStringLiteral( "the dye plane at 0x%1 is not after the other planes; this "
 			"tool rewrites the tail in the writer's own order and refuses another" )
 			.arg( oDye, 0, 16 ) );
@@ -3077,6 +3094,22 @@ bool WaterMarkDoc::save( QString * error )
 		patch32( hdr, kOffShoreRt, shoreRate );
 		patch32( hdr, kOffShoreQ, shoreQuantum );
 		patch64( hdr, kOffShore, pos );
+		pos += quint64( moved.size() );
+	}
+
+	/* the surface plane (lane WATER1): verbatim, rebased -- marking strokes
+	 * change no surface -- and where the writer put it, after the shore plane
+	 * and before any dye plane. 0xF8 is patched only when it is there, so an
+	 * older version-3 file keeps the table bytes that sit at 0xF8 in it. */
+	if ( oSurface && surfacePlane.ok ) {
+		in.seek( qint64( oSurface ) );
+		const QByteArray bytes = in.read( qint64( surfacePlane.bytes ) );
+		if ( bytes.size() != qint64( surfacePlane.bytes ) )
+			return fail( QStringLiteral( "the surface plane is short on disk" ) );
+		const QByteArray moved = rebasePlane( bytes, oSurface, pos );
+		if ( out.write( moved ) != moved.size() )
+			return fail( QStringLiteral( "could not write the surface plane" ) );
+		patch64( hdr, kOffSurface, pos );
 		pos += quint64( moved.size() );
 	}
 

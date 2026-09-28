@@ -268,8 +268,11 @@ QString lodgenSwitchDigestOf( const QStringList & argv );
  *  see a constant that lives inside lodgen.cpp, and this number is how a lane
  *  says so.
  *  2: lane ROADS1 (2026-09-26) -- the road stamp applies the material swap and
- *     paints has-LOD ground pieces (river road, park pavements). */
-constexpr int kLodgenGeneratorRevision = 2;
+ *     paints has-LOD ground pieces (river road, park pavements).
+ *  3: lane WATER1 (2026-09-27) -- the water shape's depth tint is gone: no
+ *     vertex colours on water, vanilla's 8-byte water vertex at every
+ *     subdivision (the `terrain.waterChannels` line left the dump with it). */
+constexpr int kLodgenGeneratorRevision = 3;
 
 /*! What the front end adds to the pass's own options: the whole-region steps,
  *  the far-ring cut, the pyramid and the native modules. Every field is set by

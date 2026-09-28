@@ -319,7 +319,7 @@ resolution**?
 |---|---|
 | sky visibility | it IS AO. `lodgenTerrainChannels` writes `skyVis[i] = vis` and `ao[i] = vis * 255` from one horizon measure — **measured r = 0.969** against R. The AO/sky distinction is real for OBJECTS, whose surfaces face every way; on a heightfield every normal points up and it collapses. |
 | slope | independent (r = −0.65) but **recoverable** as `acos(n.z)` from `_msn`. Its only edge is precision below ~15°, which BC1 normals quantise to flat. |
-| water depth | not derivable, but the **water mesh already carries it** per vertex on a mesh that refines toward the shoreline, and what land wants at the waterline is shore proximity — which is channel B. |
+| water depth | a runtime subtraction: the `.lodl`'s water plane (v3: the body's height) minus the ground under the point, and what land wants at the waterline is shore proximity — which is channel B. (The water mesh carried a depth tint in R until 2026-09-27; it was dropped, see the water section.) |
 | material blend weight | not derivable, and it fixes a real gap (`matClass`/`matClass2` say which two materials meet, never in what proportion). But the **diffuse already composites the layers**, so colour needs nothing; and the class ids it would weight are per-VERTEX, so a 512² weight has no operands at its own resolution. |
 
 A **fifth** candidate was tried in 2026-09-06 and is the first to pass both
@@ -361,14 +361,28 @@ considered and rejected on the same derivability test.
     where they are exact.
   * **geomorph weight** — a delta to a specific parent MESH, not a property of
     the ground, so it has no meaning at a texel.
-  * **water depth** — see below: unlike terrain, the water mesh refines toward
-    the data, so its vertices are not the bottleneck.
+  * **water depth** — not baked at all since 2026-09-27: it is the `.lodl`'s
+    water plane minus the ground, worked out where it is used.
 
 The vertex channels all still ship. They are free, they cost no extra file, and
 they remain right for coarse shading; the map is for anything that is actually
 looked at.
 
-### Water — the mesh is subdivided; the channels are next
+### Water — the mesh is subdivided; it carries no channels
+
+> **2026-09-27 (lane WATER1, bungo: "so we drop the depth bake for water from
+> code").** The water shape carried `VF_COLORS` from the subdivision work until
+> this date: R = depth / 2048 (water plane minus the chunk's heightfield under
+> the vertex), G = 0, B = 0, A = 1. G, B and A were constants on every vertex
+> (measured on a Boston bake), so with R gone the whole attribute went:
+> the water shape is back to `WATER_VERTEX_DESC`, 8 bytes, at every
+> `--water-subdiv` level, and the `waterChannels` option, its chunk-pass key
+> line and the "Water depth (R)" preview item are gone; the generator
+> revision moved 2 -> 3. No FO4CS reader existed for it (`res/Water/WaterLOD.hlsl`
+> reads no vertex colour). Depth is now a runtime subtraction from the `.lodl`
+> (v3 body height minus the ground), which is what NifSkope's **Water depth**
+> view draws. The pricing and ranking below are kept as the record of why the
+> channels were added.
 
 `WATER_VERTEX_DESC` = `0x100000000002` — **position only, 8 bytes** — and the
 water shape is a `BSSubIndexTriShape`, so it runs the same `BSVertexDesc`
@@ -514,7 +528,7 @@ engine's own `BSFixedString` pool is.
 `nifskope-cli lodgen ... --ao-grey` writes AO to R=G=B for inspection (a debug
 view — the identity channel it produces is not decodable), and the World LOD
 Generator's **Preview channel** box draws any one channel flat in the viewport:
-identity hashed, identity raw, AO, the class parameter, or the three terrain channels (material class, wetness, water depth). `WW_LOD_CHANNEL=<1..7>`
+identity hashed, identity raw, AO, the class parameter, or the two terrain channels (material class, wetness). `WW_LOD_CHANNEL=<1..6>`
 drives the same modes headlessly.
 
 ---
