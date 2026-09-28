@@ -303,3 +303,20 @@ transition window, straight from the sheets). `t5_shot.sh` now takes the turn as
 The batch has waited on the run lock since 12:44 (holder FLIGHT, Fallout4.exe up the whole time). No bake while the
 game runs. Skill `ww-selection-mean-bias-check` installed: E:\Projects\Claude\.claude\skills, E:\Tools\AISkills and
 this repo's .claude/skills (the write that was refused last session went through this time).
+
+### D4. Paused for the run lock (16:55)
+From 12:43 to 16:55 the NifSkope run lock was held by FLIGHT with Fallout4.exe up the whole time (memory flat at
+~8.19 GB from 13:15 on). The coordinator's estimate was 20-30 min. No bake, gate or picture ran: every one needs
+the lock and the game down. My waiting batch (it never held the lock) was stopped so that no dead TILING5 holder
+can be left behind.
+
+RESUME, exactly:
+1. Game down and lock free, then `cd scratchpad/tiling5_20260927 && bash t5_batch1.sh > logs/batch1.txt 2>&1`
+   (takes and releases the turn itself; bakes id_c1, id_c2 Boston, c1h on 2 chunks, `fix` on 14 chunks,
+   fixB16/fixB1 Boston, `fix` rural).
+2. `python t5_cmp.py out/id_rung/boston out/id_c1/boston` and `... out/id_c2/boston` (3a, both new exes);
+   `python t5_cmp.py out/s20/r_-4_-20_-1_-17 out/c1h/r_-4_-20_-1_-17` (+ 20,-24): the constant equals env beta 2.0;
+   `python t5_cmp.py out/fixB16/boston out/fixB1/boston` (threads); BAKE lines give the Boston timing.
+3. `python t5_meanbias.py fix`, `python t5_g2bd.py fix`, `python t5_gates.py trans s20 fix`,
+   `python t5_gates.py tiling today s20 fix`.
+4. `bash t5_pics.sh`, then `t5_label.py` per file; `python t5_crop.py -4 -20 today fix pics`.
