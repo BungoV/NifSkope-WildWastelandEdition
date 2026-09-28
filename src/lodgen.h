@@ -1109,6 +1109,20 @@ struct LodgenCoverOptions
 	 *  written by one (created, header only, when the default is missing). */
 	QString flatObjectsFile;
 
+	/*! THE NORMAL STAMP (lane TERR1, 2026-09-27; bungo: "normal map on the
+	 *  ground has no details baked from the objects"). Wherever the colour sheet
+	 *  is stamped from a road or a flat object, the object's normal map is
+	 *  stamped into the VT `msn` too: sampled at the fragment's own UV, carried
+	 *  to world space through the triangle's UV frame and its vertex normal,
+	 *  composited by the colour's rule, and folded over the surface normal with
+	 *  the colour lerp's own weight (lodgenVtStampMsn). An effect (unlit) shape
+	 *  paints colour and no normal. The VT path only; the stock chunk path's
+	 *  `_msn` is not stamped.
+	 *
+	 *  ON by default; `--no-stamp-normals` is the off switch (CLI only), and off
+	 *  is the previous bake's bytes (the stamp only reads the colour pass). */
+	bool stampNormals = true;
+
 	/*! THE FAR TERRAIN RECEIVES AMBIENT OCCLUSION FROM THE PLACED OBJECTS
 	 *  (lane GROUND1, bungo 2026-09-11 15:4x: "Okay, so the AO can be acurate
 	 *  from objects").
@@ -1199,6 +1213,20 @@ struct LodgenCoverOptions
 	 *  `lodgenObjectSkyVis`, where the wall branch is the whole of the old
 	 *  loop and the ceiling term is never even added. */
 	bool terrainObjectAoSlab = true;
+
+	/*! THE GROUND'S SKY WITH THE OBJECTS IN IT (lane TERR1, 2026-09-27). The
+	 *  VT mask sheet's B (sky AO) is the terrain march and the object lattice
+	 *  as ONE per-direction union (`lodgenSkyDirBlocked`), the lattice read
+	 *  every 64 units: street canyons and the ground under decks darken, open
+	 *  ground keeps the terrain march's byte exactly. Supersedes GROUND1's
+	 *  product on the VT sheets (both on would count the objects twice); the
+	 *  stock chunk path and the .lodl AO plane stay terrain-only (the .lodl
+	 *  plane is the terrain-only term, recomputed by `--refresh-ao` from the
+	 *  stored heights alone). Uses `terrainObjectAoSlab`, not the strength.
+	 *
+	 *  ON by default; `--no-sky-objects` is the off switch (CLI only) and off
+	 *  is the previous bake's bytes. */
+	bool skyObjects = true;
 
 	/*! Write the object height lattice itself to a file, so the term can be
 	 *  audited against something other than its own output.
@@ -1327,7 +1355,15 @@ struct LodgenRoadCensus
 	int flatTexels = 0;         //!< texels a flat object wrote last (tile content only)
 	int flatDecalTexels = 0;    //!< of those, by a decal / blended / alpha-tested shape
 	int flatRefusedNoTexture = 0; //!< flat shapes whose diffuse would not resolve
-	QStringList refusals;       //!< "<reason> <name>", deduplicated, capped at 16
+	/* Lane TERR1: THE NORMAL STAMP (LodgenCoverOptions::stampNormals). All zero
+	 * when the stamp is off. */
+	int nrmShapes = 0;          //!< stamped shapes (road + flat) whose normal map read
+	int nrmNoMap = 0;           //!< stamped shapes with no readable normal map: their vertex normal is stamped
+	int nrmUnlit = 0;           //!< effect (unlit) flat shapes: colour only, no normal
+	int nrmFrameAgree = 0;      //!< triangles whose NIF Tangent points along the UV frame's dP/dv
+	int nrmFrameFlip = 0;       //!< triangles whose NIF Tangent points against it
+	int nrmTexels = 0;          //!< tile-content texels whose msn the stamp rewrote
+	QStringList refusals;      //!< "<reason> <name>", deduplicated, capped at 16
 	void addRefusal( const char * why, const QString & name );
 	void add( const LodgenRoadCensus & o );
 	//! ONE physical line, `key=value` tokens, never parsed by field position.
