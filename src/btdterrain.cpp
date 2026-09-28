@@ -1376,6 +1376,58 @@ void addLodlWater( NifModel * nif, const LodtFile & f, const LodtRegionSpec & sp
 					aboveMesh++;
 			}
 		}
+		/* The SHORE RING (bungo 2026-09-28: "why is the shore so pixelated"): a
+		 * texel is wet or dry at its centre, so the sheet alone ends in texel-sized
+		 * steps. The game draws water as a plane and lets the ground cut it; do
+		 * the same. Each body grows, texel by texel and up to one terrain-mesh step,
+		 * onto dry texels where the drawn mesh dips below that body's surface, and
+		 * the depth test draws the shoreline where mesh and water meet. Ring texels
+		 * are drawn only: no count or band above includes them. */
+		std::vector<quint8> ring( ids.size(), 0 );
+		std::vector<int> ringSrc( ids.size(), -1 );
+		qint64 ringTexels = 0;
+		const int ringReach = qMax( 1, int( std::ceil( s.spacing / texel ) ) );
+		{
+			std::vector<int> front, next;
+			for ( int i = 0; i < W * H; i++ )
+				if ( ids[size_t( i )] ) {
+					ringSrc[size_t( i )] = i;
+					front.push_back( i );
+				}
+			static const int N4[4][2] = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } };
+			for ( int step = 0; step < ringReach && !front.empty(); step++ ) {
+				next.clear();
+				for ( int i : front ) {
+					const int src = ringSrc[size_t( i )];
+					const quint16 id = ids[size_t( src )];
+					const float surf = table[id].waterHeight + dls[size_t( src )];
+					for ( const auto & d : N4 ) {
+						const int uu = i % W + d[0], vv = i / W + d[1];
+						if ( uu < 0 || vv < 0 || uu >= W || vv >= H )
+							continue;
+						const int j = vv * W + uu;
+						if ( ringSrc[size_t( j )] >= 0 )
+							continue;
+						// only where the drawn mesh is below the water somewhere on this texel
+						const float cx = float( minX ) * 4096.0f + float( bx0 + uu * stepT ) * 4096.0f / float( bodyS );
+						const float cy = float( minY ) * 4096.0f + float( by0 + vv * stepT ) * 4096.0f / float( bodyS );
+						const float h = texel * 0.5f;
+						const bool below = meshHeight( cx, cy ) < surf
+							|| meshHeight( cx - h, cy - h ) < surf || meshHeight( cx + h, cy - h ) < surf
+							|| meshHeight( cx + h, cy + h ) < surf || meshHeight( cx - h, cy + h ) < surf;
+						if ( !below )
+							continue;
+						ringSrc[size_t( j )] = src;
+						ids[size_t( j )] = id;
+						dls[size_t( j )] = dls[size_t( src )];
+						ring[size_t( j )] = 1;
+						ringTexels++;
+						next.push_back( j );
+					}
+				}
+				front.swap( next );
+			}
+		}
 		if ( hLo > hHi )
 			hLo = hHi = 0.0f;
 		/* WW_LODL_HEIGHT_RANGE="lo,hi": pin the water-height ramp to fixed units instead of
@@ -1448,13 +1500,17 @@ void addLodlWater( NifModel * nif, const LodtFile & f, const LodtRegionSpec & sp
 					u++;
 					continue;
 				}
-				const quint32 c = colourOf( u, v, id );
+				const size_t at = size_t( v ) * size_t( W ) + size_t( u );
+				const bool isRing = ring[at] != 0;
+				// a ring texel wears the colour of the wet texel it grew from
+				const quint32 c = isRing ? colourOf( ringSrc[at] % W, ringSrc[at] / W, id ) : colourOf( u, v, id );
 				// a sloped body is drawn a texel a quad, each corner on the surface
 				const bool depthView = plane == LodtPlane::WaterDepth;
-				// the depth view is one texel a quad too: its corners carry their own colour
-				const bool flat = !sloped.contains( id ) && !depthView;
+				// the depth view and the shore ring are one texel a quad too
+				const bool flat = !sloped.contains( id ) && !depthView && !isRing;
 				int e = u + 1;
 				while ( flat && e < W && ids[size_t( v ) * size_t( W ) + size_t( e )] == id
+					&& !ring[size_t( v ) * size_t( W ) + size_t( e )]
 					&& colourOf( e, v, id ) == c )
 					e++;
 				const float cx0 = float( minX ) * 4096.0f + float( bx0 + u * stepT ) * 4096.0f / float( bodyS );
@@ -1492,8 +1548,11 @@ void addLodlWater( NifModel * nif, const LodtFile & f, const LodtRegionSpec & sp
 					 * colour blends across quads (bungo 2026-09-28: "needs some
 					 * interpolation") */
 					auto depthAt = [&]( int uu, int vv ) {
-						return table[id].waterHeight + dls[size_t( vv ) * size_t( W ) + size_t( uu )]
+						const size_t i = size_t( vv ) * size_t( W ) + size_t( uu );
+						const float d = table[id].waterHeight + dls[i]
 							- f.height( ( bx0 + uu * stepT ) * fullStep, ( by0 + vv * stepT ) * fullStep );
+						// a ring texel is dry at its centre: the shallowest colour, never "ground above"
+						return ring[i] ? qMax( d, 0.001f ) : d;
 					};
 					static const int CORNER_D[4][2] = { { -1, -1 }, { 0, -1 }, { 0, 0 }, { -1, 0 } };
 					for ( int k = 0; k < 4; k++ ) {
@@ -1515,7 +1574,7 @@ void addLodlWater( NifModel * nif, const LodtFile & f, const LodtRegionSpec & sp
 				q.body = id;
 				if ( q.x1 > q.x0 && q.y1 > q.y0 ) {
 					quads.push_back( q );
-					surfAtQuad.push_back( flat ? std::nanf( "" )
+					surfAtQuad.push_back( ( flat || isRing ) ? std::nanf( "" )
 						: q.z + dls[size_t( v ) * size_t( W ) + size_t( u )] );
 				}
 				u = e;
@@ -1588,6 +1647,9 @@ void addLodlWater( NifModel * nif, const LodtFile & f, const LodtRegionSpec & sp
 				"at or above their body's water; %L3 have the view's terrain mesh (%4 a cell) above it "
 				"at the texel centre, where the coarser mesh is drawn over the water" )
 			.arg( aboveFull ).arg( wet ).arg( aboveMesh ).arg( s.n );
+		note << QString( "shore ring: %L1 dry texels past the bodies' edges (reach %2 texels) drawn where "
+				"the view's terrain mesh dips below the water, so the ground cuts the shoreline" )
+			.arg( ringTexels ).arg( ringReach );
 
 		switch ( plane ) {
 		case LodtPlane::WaterHeight:
