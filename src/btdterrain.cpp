@@ -558,6 +558,29 @@ quint32 waterDepthBandRgba( int band )
 	}
 }
 
+/*! The depth view's picture colour: the band swatches pinned AT the stops
+ *  (0 / 128 / 512 / 1024 / 2048 units) and blended linearly between them, so a
+ *  texel exactly at a stop wears that stop's legend swatch and the texture's
+ *  own filtering draws a smooth gradient instead of stair-stepped band edges
+ *  (bungo 2026-09-28: "needs some interpolation"). Counts and probes still
+ *  name bands through waterDepthBand(); only the painted colour blends. */
+quint32 waterDepthRgba( float depth )
+{
+	if ( !( depth > 0.0f ) )
+		return waterDepthBandRgba( 0 );
+	static const float SW[5][3] = {
+		{ 0.72f, 0.95f, 0.93f }, { 0.35f, 0.78f, 0.90f }, { 0.15f, 0.52f, 0.85f },
+		{ 0.10f, 0.28f, 0.66f }, { 0.05f, 0.08f, 0.35f } };
+	if ( depth >= WATER_DEPTH_STOPS[4] )
+		return packRgba( SW[4][0], SW[4][1], SW[4][2] );
+	int k = 0;
+	while ( k < 3 && depth >= WATER_DEPTH_STOPS[k + 1] )
+		k++;
+	const float t = ( depth - WATER_DEPTH_STOPS[k] ) / ( WATER_DEPTH_STOPS[k + 1] - WATER_DEPTH_STOPS[k] );
+	return packRgba( SW[k][0] + ( SW[k + 1][0] - SW[k][0] ) * t, SW[k][1] + ( SW[k + 1][1] - SW[k][1] ) * t,
+		SW[k][2] + ( SW[k + 1][2] - SW[k][2] ) * t );
+}
+
 //! Cell flags: red = bit 0 (water), green = bit 1 (land), both = yellow.
 quint32 cellFlagsRgba( quint16 fl )
 {
@@ -1126,6 +1149,10 @@ struct WaterQuad
 	 *  surface plane averaged round each corner on a sloped body (lane WATER1). */
 	float dz[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
 	quint32 rgba = 0;
+	/*! Per-corner colours (SW, SE, NE, NW) when `cornerColour`: the depth view
+	 *  blends across every quad instead of painting it one flat colour. */
+	quint32 rgbaC[4] = { 0, 0, 0, 0 };
+	bool cornerColour = false;
 	quint16 body = 0;   //!< 0 on a version-2 per-cell sheet
 };
 
@@ -1189,11 +1216,14 @@ int addWaterShapes( NifModel * nif, const std::vector<WaterQuad> & quads, bool b
 			const Vector3 p[4] = { Vector3( w.x0, w.y0, w.z + w.dz[0] ), Vector3( w.x1, w.y0, w.z + w.dz[1] ),
 				Vector3( w.x1, w.y1, w.z + w.dz[2] ), Vector3( w.x0, w.y1, w.z + w.dz[3] ) };
 			const Vector2 uv[4] = { Vector2( 0, 1 ), Vector2( 1, 1 ), Vector2( 1, 0 ), Vector2( 0, 0 ) };
-			const quint32 c = w.rgba;
-			const ByteColor4 col( FloatVector4( float( c & 0xFF ) / 255.0f,
-				float( ( c >> 8 ) & 0xFF ) / 255.0f, float( ( c >> 16 ) & 0xFF ) / 255.0f,
-				float( ( c >> 24 ) & 0xFF ) / 255.0f ) );
+			auto colOf = [&]( int v ) {
+				const quint32 c = w.cornerColour ? w.rgbaC[v] : w.rgba;
+				return ByteColor4( FloatVector4( float( c & 0xFF ) / 255.0f,
+					float( ( c >> 8 ) & 0xFF ) / 255.0f, float( ( c >> 16 ) & 0xFF ) / 255.0f,
+					float( ( c >> 24 ) & 0xFF ) / 255.0f ) );
+			};
 			for ( int v = 0; v < 4; v++ ) {
+				const ByteColor4 col = colOf( v );
 				QModelIndex row = nif->index( k * 4 + v, 0, iVertexData );
 				nif->set<Vector3>( row, "Vertex", p[v] );
 				nif->set<HalfVector2>( row, "UV", HalfVector2( uv[v] ) );
@@ -1395,7 +1425,7 @@ void addLodlWater( NifModel * nif, const LodtFile & f, const LodtRegionSpec & sp
 					int( qint64( by ) * shoreS / bodyS ) ) );
 			case LodtPlane::WaterDepth:
 				// the same ground sample the "ground above water" count reads
-				return waterDepthBandRgba( waterDepthBand( surf - f.height( bx * fullStep, by * fullStep ) ) );
+				return waterDepthRgba( surf - f.height( bx * fullStep, by * fullStep ) );
 			case LodtPlane::CellFlags: {
 				float lo, hi, wh;
 				quint16 wt, fl = 0;
@@ -1420,7 +1450,9 @@ void addLodlWater( NifModel * nif, const LodtFile & f, const LodtRegionSpec & sp
 				}
 				const quint32 c = colourOf( u, v, id );
 				// a sloped body is drawn a texel a quad, each corner on the surface
-				const bool flat = !sloped.contains( id );
+				const bool depthView = plane == LodtPlane::WaterDepth;
+				// the depth view is one texel a quad too: its corners carry their own colour
+				const bool flat = !sloped.contains( id ) && !depthView;
 				int e = u + 1;
 				while ( flat && e < W && ids[size_t( v ) * size_t( W ) + size_t( e )] == id
 					&& colourOf( e, v, id ) == c )
@@ -1454,6 +1486,32 @@ void addLodlWater( NifModel * nif, const LodtFile & f, const LodtRegionSpec & sp
 					}
 				}
 				q.rgba = c;
+				if ( depthView ) {
+					/* each corner = the mean depth of the up-to-four texels of this
+					 * body that share it (as the surface corners above), so the
+					 * colour blends across quads (bungo 2026-09-28: "needs some
+					 * interpolation") */
+					auto depthAt = [&]( int uu, int vv ) {
+						return table[id].waterHeight + dls[size_t( vv ) * size_t( W ) + size_t( uu )]
+							- f.height( ( bx0 + uu * stepT ) * fullStep, ( by0 + vv * stepT ) * fullStep );
+					};
+					static const int CORNER_D[4][2] = { { -1, -1 }, { 0, -1 }, { 0, 0 }, { -1, 0 } };
+					for ( int k = 0; k < 4; k++ ) {
+						float sum = 0.0f;
+						int n = 0;
+						for ( int dv = 0; dv < 2; dv++ )
+							for ( int du = 0; du < 2; du++ ) {
+								const int uu = u + CORNER_D[k][0] + du, vv = v + CORNER_D[k][1] + dv;
+								if ( uu < 0 || vv < 0 || uu >= W || vv >= H
+									|| ids[size_t( vv ) * size_t( W ) + size_t( uu )] != id )
+									continue;
+								sum += depthAt( uu, vv );
+								n++;
+							}
+						q.rgbaC[k] = waterDepthRgba( n ? sum / float( n ) : depthAt( u, v ) );
+					}
+					q.cornerColour = true;
+				}
 				q.body = id;
 				if ( q.x1 > q.x0 && q.y1 > q.y0 ) {
 					quads.push_back( q );
@@ -1598,9 +1656,13 @@ void addLodlWater( NifModel * nif, const LodtFile & f, const LodtRegionSpec & sp
 		case LodtPlane::WaterDepth: {
 			static const char * const BANDS[6] = { "ground at or above the water", "0 to 128 units",
 				"128 to 512 units", "512 to 1024 units", "1024 to 2048 units", "2048 units and deeper" };
+			/* the picture blends between the stops (waterDepthRgba), so each
+			 * swatch names the depth it is pinned AT, not a range */
+			static const char * const STOPS[6] = { "ground at or above the water", "0 units",
+				"128 units", "512 units", "1024 units", "2048 units and deeper" };
 			QStringList counts;
 			for ( int b = 0; b < 6; b++ ) {
-				legend << QString( "%1 = %2" ).arg( QLatin1String( BANDS[b] ) ).arg( rgbText( waterDepthBandRgba( b ) ) );
+				legend << QString( "%1 = %2" ).arg( QLatin1String( STOPS[b] ) ).arg( rgbText( waterDepthBandRgba( b ) ) );
 				counts << QString( "%1 %L2" ).arg( QLatin1String( BANDS[b] ) ).arg( depthBands[b] );
 			}
 			note << QString( "water depth: the water surface (body height plus the surface plane) minus the "
@@ -2236,9 +2298,9 @@ bool nifCreateLodtTerrainScene( NifModel * nif, const QString & lodtPath,
 					} else if ( spec.plane == LodtPlane::WaterDepth ) {
 						LodtWaterBody B;
 						if ( id && f.waterBody( id, B ) )
-							c = waterDepthBandRgba( waterDepthBand( B.waterHeight
+							c = waterDepthRgba( B.waterHeight
 								+ f.surfaceDeltaAt( int( qint64( gx ) * idRate / spc ), int( qint64( gy ) * idRate / spc ) )
-								- f.height( gx, gy ) ) );
+								- f.height( gx, gy ) );
 					} else if ( spec.plane == LodtPlane::WaterFlow ) {
 						/* direction as a hue round the wheel, speed as its
 						 * brightness -- so still water inside a body reads
