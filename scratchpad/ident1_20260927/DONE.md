@@ -159,3 +159,41 @@ become one when their after-numbers exist).
 - Started a bake whose turn waiter outlives TaskStop: stopping the pipeline left `turn.sh acquire ident1` running,
   and I could not end it (refused). Next time: run the acquire in the foreground of the tracked task only, or give it
   a short limit.
+
+---
+## RESUME 2026-09-28 (started 21:44, `date`-read) -- lane IDENT1 resume
+Skills loaded: nifskope-ww-lodgen, ww-gui-launch-silent-exit, deepseek-offload (search-lean has no SKILL.md in the live tree).
+
+### R1. Knob sweep, offline on dump_l1.txt (same exe 6c1ef67b09c1; src unchanged since c8d73984). sweep.py (new)
+Landmark sizes: tower E 730 pieces, tower W 727, Trinity 25 (2,322 x 1,679 u), Diamond City 165 (9,137 x 10,582 u).
+Row houses = ResNC* pieces within 1,500 u of (-5975,-15112): 54 pieces. Files: sweep_tol.out, sweep_cap.out.
+- Contact (pair distances, --pairs): 0 u 93,862; <=0.5 43,838; <=1 1,776; <=2 2,379; <=4 3,431; <=8 9,555;
+  <=16 12,889; <=32 14,215. No gap after contact: tolerance only picks up trim floating near walls.
+- Cap (tol 2): 2048 cuts Trinity in 2 and tower W to a 172-piece top; 3072-3584 cut tower W (top 436 of 727);
+  **3840 is the first cap that leaves every landmark's contact core whole**; 4096 same, one exterior cell wide.
+  Above 4096 Diamond City's top group takes in foreign pieces (6144: 46, 8192: 78) and it is still 7+ groups.
+- Tolerance (cap 4096): towers E/W groups 53/44 at tol 2, 49/33 at 8, 9/6 at 16, 4/5 at 24, **1/4 at 32**
+  (top groups 746 = 730 + 16 other, 727 = 723 + 4). Foreign pieces in the landmark tops do NOT grow from 8 to 32
+  (16 / 4 / DC 21), so the extra tolerance joins the towers' own trim, not neighbours. Groups 6,790 -> 4,559.
+- What no knob fixes: Diamond City (10,582 u wide) cannot be one group under any cap that stops the city welding
+  (cap 0 = 4 groups, top holds 192 foreign pieces). Row houses: all 54 pieces are one group at every cap >= 3,328
+  and every tolerance; 2 groups at 2048-3072. Abutting terraces share a wall (0 u) -- the cap splits by width only.
+- Measuring bakes queued 21:5x: m_t32 (tol 32 cap 4096) and m_t2 (tol 2 cap 4096), knobs by env, dumps + poke gate.
+
+### R2. Measuring bakes (21:49-22:00, knobs by env on the run_v2 exe; LIGHT = native pair only)
+gates.py (new) reads the EMITTER's own groups (the dump's root column). The offline re-run agrees except for
+20-26 groups joined by pairs whose distance prints as exactly the tolerance (the dump rounds to 0.001 u).
+| | tol 2 / cap 4096 (m_t2) | tol 32 / cap 4096 (m_t32) |
+|---|---|---|
+| groups (histogram 1 / 2-4 / 5-16 / 17-64 / 65-256 / 257-1024 / >1024) | 6,801 (5,089/1,158/209/184/127/34/0) | 4,562 (3,310/801/127/149/134/41/0) |
+| widest multi-piece group | 313 pieces, 4,096 x 3,360 u | 331 pieces, 4,096 x 3,376 u |
+| Hub tower east / west | 53 / 44 groups (top 644 / 668) | **1** / 4 groups (top 746 / 727; the 4 others are 4 lone pieces) |
+| Trinity / Diamond City | 1 / 18 groups | 1 / 15 groups |
+| row houses (54 pieces near -5975,-15112) | 1 group | 1 group |
+| occluder poke gate | 599 boxes, **84 over 1%** | 537 boxes, **102 over 1%** |
+Poke gate why: the building box is cut from 16 u+ voxels and a surface voxel counts as solid, so faces and corners
+stand outside the walls (of 102: 57 poke 1-10%, 37 poke 10-50%, 8 more than half; 22 are single pieces, among them
+three 20 u slabs at 100%). The building fit had NO probe against the triangles (the per-piece fit has its 100-point
+probe). Fix (this resume): step 5 in fitBuildingBox -- the gate's own 9x9x9 ray test against the triangles, shrink
+half a voxel a face up to 4 times while more than 0.5% is out, else refuse (counted in the census line).
+**Knobs chosen: tol 32, cap 4096** (GroupKnobs in src/nativeemit.cpp; reasons in the comments there and in R1).

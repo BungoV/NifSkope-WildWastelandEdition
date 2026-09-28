@@ -542,12 +542,81 @@ double triTriDist2( const float * A, const float * B )
  *      (every z-slab range, the largest rectangle of their AND);
  *   4. one whole voxel shaved off every face, because a surface voxel is only
  *      partly inside.
+ *   5. THE PROBE (IDENT1 resume, 2026-09-28): the voxels are coarse (16 u or
+ *      more), so a box of whole voxels can still stand partly outside the
+ *      walls -- 84 of 599 boxes did by more than 1 percent in the Boston box.
+ *      The box is checked against the TRIANGLES the way the file's gate
+ *      (tests/spells/lodi_occluder_building.py) checks it: a 9 x 9 x 9 lattice
+ *      over the box, faces and corners included, and a point is inside when a
+ *      ray along every named direction meets a triangle. Over half a percent
+ *      outside, every face comes in by half a voxel and the box is probed
+ *      again, BLD_OCC_PROBE_ROUNDS times; still out, the box is refused.
  * A building whose walls do not close gets nothing: its solid is a shell one
  * voxel thick, and the shave removes it. */
-enum BuildingOccResult { BLD_OCC_OK = 0, BLD_OCC_NO_SOLID, BLD_OCC_TOO_THIN };
+enum BuildingOccResult { BLD_OCC_OK = 0, BLD_OCC_NO_SOLID, BLD_OCC_TOO_THIN, BLD_OCC_PROBE_FAILED };
+static const int BLD_OCC_PROBE_GRID = 9;                // the gate's lattice, 729 points
+static const double BLD_OCC_PROBE_MAX_OUT = 0.005;      // half the gate's 1 percent: room for the file's quantisation
+static const int BLD_OCC_PROBE_ROUNDS = 4;
+
+/*! The share of the box [lo, hi] (the fit's own frame) whose lattice points
+ *  are NOT enclosed by the triangles `f` along every direction in needMask
+ *  (bit 2 axis = +axis, bit 2 axis + 1 = -axis). The lattice's points share
+ *  columns along each axis, so one pass over the triangles per column gives
+ *  the nearest surface on both sides of every point in it. */
+static double bldProbeOutside( const std::vector<double> & f, size_t nt, const double lo[3], const double hi[3], int needMask )
+{
+	const int G = BLD_OCC_PROBE_GRID;
+	auto lat = [&]( int k, int i ) { return lo[k] + ( hi[k] - lo[k] ) * double( i ) / double( G - 1 ); };
+	std::vector<unsigned char> ok( size_t( G ) * G * G, 1 );
+	for ( int ax = 0; ax < 3; ax++ ) {
+		const bool wantPos = ( needMask & ( 1 << ( 2 * ax ) ) ) != 0, wantNeg = ( needMask & ( 1 << ( 2 * ax + 1 ) ) ) != 0;
+		if ( !wantPos && !wantNeg )
+			continue;
+		const int o1 = ( ax + 1 ) % 3, o2 = ( ax + 2 ) % 3;
+		std::vector<size_t> keep;
+		for ( size_t t = 0; t < nt; t++ ) {
+			const double * A = &f[t * 9], * B = &f[t * 9 + 3], * C = &f[t * 9 + 6];
+			const double d = ( B[o1] - A[o1] ) * ( C[o2] - A[o2] ) - ( C[o1] - A[o1] ) * ( B[o2] - A[o2] );
+			if ( std::fabs( d ) <= 1e-9 )
+				continue;
+			if ( std::max( { A[o1], B[o1], C[o1] } ) < lo[o1] || std::min( { A[o1], B[o1], C[o1] } ) > hi[o1]
+				|| std::max( { A[o2], B[o2], C[o2] } ) < lo[o2] || std::min( { A[o2], B[o2], C[o2] } ) > hi[o2] )
+				continue;
+			keep.push_back( t );
+		}
+		for ( int i1 = 0; i1 < G; i1++ )
+			for ( int i2 = 0; i2 < G; i2++ ) {
+				const double px = lat( o1, i1 ), py = lat( o2, i2 );
+				double tMin = 1e300, tMax = -1e300;
+				for ( size_t t : keep ) {
+					const double * A = &f[t * 9], * B = &f[t * 9 + 3], * C = &f[t * 9 + 6];
+					const double d = ( B[o1] - A[o1] ) * ( C[o2] - A[o2] ) - ( C[o1] - A[o1] ) * ( B[o2] - A[o2] );
+					const double w1 = ( ( B[o1] - px ) * ( C[o2] - py ) - ( C[o1] - px ) * ( B[o2] - py ) ) / d;
+					const double w2 = ( ( C[o1] - px ) * ( A[o2] - py ) - ( A[o1] - px ) * ( C[o2] - py ) ) / d;
+					const double w3 = 1.0 - w1 - w2;
+					if ( w1 < 0.0 || w2 < 0.0 || w3 < 0.0 )
+						continue;
+					const double tv = w1 * A[ax] + w2 * B[ax] + w3 * C[ax];
+					tMin = std::min( tMin, tv );
+					tMax = std::max( tMax, tv );
+				}
+				for ( int ia = 0; ia < G; ia++ ) {
+					const double pa = lat( ax, ia );
+					int p[3];
+					p[ax] = ia; p[o1] = i1; p[o2] = i2;
+					if ( ( wantPos && !( tMax > pa ) ) || ( wantNeg && !( tMin < pa ) ) )
+						ok[( size_t( p[2] ) * G + p[1] ) * G + p[0]] = 0;
+				}
+			}
+	}
+	size_t out = 0;
+	for ( unsigned char o : ok )
+		out += o ? 0 : 1;
+	return double( out ) / double( ok.size() );
+}
 
 int fitBuildingBox( const std::vector<float> & tris, double yaw, const QByteArray & rays,
-	float centre[3], float half[3], float rot[9] )
+	float centre[3], float half[3], float rot[9], int * shrinkRounds = nullptr )
 {
 	if ( tris.size() < 9 )
 		return BLD_OCC_NO_SOLID;
@@ -681,6 +750,21 @@ int fitBuildingBox( const std::vector<float> & tris, double yaw, const QByteArra
 		hi[k] = mn[k] + double( b1[k] ) * vs;
 		if ( !( hi[k] > lo[k] ) )
 			return BLD_OCC_TOO_THIN;
+	}
+	// 5. the probe against the triangles; shrink by half a voxel a face, or refuse
+	{
+		int round = 0;
+		while ( bldProbeOutside( f, nt, lo, hi, needMask ) > BLD_OCC_PROBE_MAX_OUT ) {
+			if ( ++round > BLD_OCC_PROBE_ROUNDS )
+				return BLD_OCC_PROBE_FAILED;
+			for ( int k = 0; k < 3; k++ )
+				if ( hi[k] - lo[k] - vs >= 16.0 ) {     // never thinner than the voxel floor
+					lo[k] += 0.5 * vs;
+					hi[k] -= 0.5 * vs;
+				}
+		}
+		if ( shrinkRounds )
+			*shrinkRounds = round;
 	}
 	const double cu = 0.5 * ( lo[0] + hi[0] ), cv = 0.5 * ( lo[1] + hi[1] ), cw = 0.5 * ( lo[2] + hi[2] );
 	centre[0] = float( px + c * cu - s * cv );
@@ -1752,12 +1836,22 @@ struct GroupKnobs
 	float gridCell = 1024.0f;
 	/*! IDENT1 (2026-09-27), the CONTACT join: two pieces are one building when
 	 *  their placed level-0 TRIANGLES come within this many world units of each
-	 *  other (0 = they cross or touch). Measured, see the lane's DONE.md. */
-	float contactTol = 2.0f;
+	 *  other (0 = they cross or touch). Chosen 2026-09-28 from the Boston-box
+	 *  sweep (lane IDENT1 DONE.md, "R1"): abutting pieces touch at 0 u, so the
+	 *  tolerance only decides whether trim floating off a wall joins it. The
+	 *  Hub towers are 53 / 44 groups at 2 u, 9 / 6 at 16 u, 1 / 4 at 32 u,
+	 *  and the pieces joined into the landmarks from outside them do not grow
+	 *  from 8 u to 32 u. 32 is also the widest distance the pair walk
+	 *  measures (the dump's `measure 32`). */
+	float contactTol = 32.0f;
 	/*! IDENT1: no group grows wider than this on X or Y (world axis-aligned
 	 *  box of its pieces' triangles), so a street of touching houses cannot
-	 *  become one building. 0 = no cap. Measured, see the lane's DONE.md. */
-	float groupCap = 0.0f;
+	 *  become one building. 0 = no cap. Chosen 2026-09-28: with no cap the
+	 *  contact join welds 1,507 pieces over 22,810 x 22,283 u; 3,840 u is the
+	 *  first cap that leaves every landmark's joined core whole (Hub tower
+	 *  west is 3,781 u wide), and 4,096 u is one exterior cell. Above it the
+	 *  Diamond City groups take in pieces that are not Diamond City. */
+	float groupCap = 4096.0f;
 	/*! IDENT1, the building occluder's fill test: a voxel counts as solid
 	 *  when a ray along EVERY direction named here meets the building's own
 	 *  surface (x = +X, X = -X, y, Y, z = up, Z = down). */
@@ -2774,7 +2868,7 @@ bool lodgenNativeWrite( QString * report, QString * error )
 	//! IDENT1: the CONTACT join's own census (candidate pairs, touching pairs, unions the cap refused)
 	quint64 contactCandidates = 0, contactTouching = 0, contactCapRefused = 0, contactTriTests = 0;
 	//! IDENT1: the building occluders' census
-	quint32 bldOccGroups = 0, bldOccFitted = 0, bldOccNoSolid = 0, bldOccTooThin = 0;
+	quint32 bldOccGroups = 0, bldOccFitted = 0, bldOccNoSolid = 0, bldOccTooThin = 0, bldOccProbeFailed = 0, bldOccShrunk = 0;
 	qint64 bldOccMs = 0;
 	std::vector<float> bldOccThin;      //!< each fitted box's smallest full extent, world units
 	set.placementAo = s.placementAo;
@@ -4610,7 +4704,7 @@ bool lodgenNativeWrite( QString * report, QString * error )
 				if ( ptCount[i] )
 					byRoot[find( quint32( i ) )].push_back( quint32( i ) );
 			std::vector<std::pair<quint32, std::vector<quint32>>> jobs( byRoot.begin(), byRoot.end() );
-			struct Fit { int res = BLD_OCC_NO_SOLID; float c[3], h[3], R[9]; quint32 carrier = 0; };
+			struct Fit { int res = BLD_OCC_NO_SOLID; float c[3], h[3], R[9]; quint32 carrier = 0; int shrink = 0; };
 			std::vector<Fit> fits( jobs.size() );
 			lodgenParallelFor( int( jobs.size() ), [&]( int gi ) {
 				const std::vector<quint32> & mem = jobs[size_t( gi )].second;
@@ -4641,7 +4735,7 @@ bool lodgenNativeWrite( QString * report, QString * error )
 				}
 				const double yaw = ( pc + ( sw > 0.0 ? sd / sw : 0.0 ) ) / 57.29577951308232;
 				Fit & f = fits[size_t( gi )];
-				f.res = fitBuildingBox( gt, yaw, KNOB.occRays, f.c, f.h, f.R );
+				f.res = fitBuildingBox( gt, yaw, KNOB.occRays, f.c, f.h, f.R, &f.shrink );
 				if ( f.res != BLD_OCC_OK )
 					return;
 				double bestD = 1e300;
@@ -4656,6 +4750,9 @@ bool lodgenNativeWrite( QString * report, QString * error )
 				const Fit & f = fits[gi];
 				if ( f.res == BLD_OCC_NO_SOLID ) { bldOccNoSolid++; continue; }
 				if ( f.res == BLD_OCC_TOO_THIN ) { bldOccTooThin++; continue; }
+				if ( f.res == BLD_OCC_PROBE_FAILED ) { bldOccProbeFailed++; continue; }
+				if ( f.shrink > 0 )
+					bldOccShrunk++;
 				LodiSrcInstance & r = set.instances[f.carrier];
 				r.hasOccluder = true;
 				r.occWorld = true;
@@ -5167,13 +5264,16 @@ bool lodgenNativeWrite( QString * report, QString * error )
 			std::sort( th.begin(), th.end() );
 			occLine += QString( "\n  native-occluders-building: ON (lane IDENT1; --occluder-fit piece is the way back): "
 				"one box a building group -- the per-piece fits above are NOT offered; groups %1, fitted %2, "
-				"no solid volume %3, too thin %4; fill rays `%5`; smallest full extent median %6 u "
-				"(min %7, max %8); %9 ms" )
+				"no solid volume %3, too thin %4, %10 still out of the walls after %11 half-voxel shrinks "
+				"(%12 of the fitted shrunk to pass the %13-point probe, <= %14 percent out); fill rays `%5`; "
+				"smallest full extent median %6 u (min %7, max %8); %9 ms" )
 				.arg( bldOccGroups ).arg( bldOccFitted ).arg( bldOccNoSolid ).arg( bldOccTooThin )
 				.arg( QString::fromLatin1( KNOB.occRays ) )
 				.arg( th.empty() ? 0.0 : double( th[th.size() / 2] ), 0, 'f', 1 )
 				.arg( th.empty() ? 0.0 : double( th.front() ), 0, 'f', 1 )
-				.arg( th.empty() ? 0.0 : double( th.back() ), 0, 'f', 1 ).arg( bldOccMs );
+				.arg( th.empty() ? 0.0 : double( th.back() ), 0, 'f', 1 ).arg( bldOccMs )
+				.arg( bldOccProbeFailed ).arg( BLD_OCC_PROBE_ROUNDS ).arg( bldOccShrunk )
+				.arg( BLD_OCC_PROBE_GRID * BLD_OCC_PROBE_GRID * BLD_OCC_PROBE_GRID ).arg( BLD_OCC_PROBE_MAX_OUT * 100.0, 0, 'f', 1 );
 		}
 		quint64 aggCovered = 0, aggTexels = 0;
 		int hSpanMin = 0, hSpanMax = 0;
