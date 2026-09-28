@@ -58,6 +58,45 @@ def placed_tris(L, inst, mesh):
     return np.array(out, dtype=np.float64).reshape(-1, 3, 3)
 
 
+def l0_tris(L, mesh):
+    me = L['meshes'][mesh]
+    return sum(L['clusters'][c]['triangleCount'] for c in range(me['clusterFirst'], me['clusterFirst'] + me['clusterCount'])
+               if L['clusterLods'][c]['level'] == 0)
+
+
+def drawn_mesh(L, inst, seen=None):
+    """The mesh a placement draws is bases[baseId].rep[mnamSlot], and the instance record does not store
+    mnamSlot. Take the base's mesh only when every non-empty rep slot agrees (as lodi_v7_refuters.one_mesh does);
+    otherwise NO_MESH and the caller counts the member as skipped. The box's CARRIER is exact: the occluder row
+    stores its meshId. `seen` = (level-0 triangle count, world lo xyz, world hi xyz) the emitter printed for
+    this placement in its group dump (--dump): with it, the rep whose triangle count and placed box match what
+    the emitter drew is the drawn mesh; a tie between meshes with the same placed triangles takes either;
+    only a tie between different geometry is skipped. (Up to 2026-09-28 this took the first non-empty rep, which measured rep0 where a
+    placement draws rep1/rep2 -- highway _LOD_1 meshes poked 0.87 against the wrong mesh, 0.0 against the drawn.)"""
+    if inst['baseId'] >= len(L['bases']):
+        return NO_MESH
+    base = L['bases'][inst['baseId']]
+    reps = {r for r in (base['rep0'], base['rep1'], base['rep2'], base['rep3']) if r != NO_MESH}
+    reps = {r for r in reps if r < len(L['meshes'])}
+    if len(reps) > 1 and seen is not None:
+        reps = {r for r in reps if l0_tris(L, r) == seen[0]}
+        if len(reps) > 1:
+            def box_ok(r):
+                t = placed_tris(L, inst, r).reshape(-1, 3)
+                return len(t) and np.abs(t.min(0) - seen[1]).max() < 2.0 and np.abs(t.max(0) - seen[2]).max() < 2.0
+            reps = {r for r in reps if box_ok(r)}
+            if len(reps) > 1:
+                # a tie between meshes whose placed triangles are the same set (one NIF in two MNAM slots) is
+                # no tie for this measurement: either is the geometry drawn
+                geo = [np.sort(np.round(placed_tris(L, inst, r).reshape(-1, 3), 0), axis=0) for r in sorted(reps)]
+                if all(g.shape == geo[0].shape and np.abs(g - geo[0]).max() <= 1.0 for g in geo[1:]):
+                    reps = {min(reps)}
+    if len(reps) != 1:
+        return NO_MESH
+    r = reps.pop()
+    return r
+
+
 def first_mesh(L, inst):
     if inst['baseId'] >= len(L['bases']):
         return NO_MESH
@@ -132,8 +171,10 @@ def main():
     for ii, c in enumerate(cold):
         key_to_ii[(c['refFormId'], c['scolPart'])].append(ii)
     members_of = None
+    seen_of_key = {}
     if '--dump' in opt:
         root_of_key = {}
+        seen_of_key = {}
         by_root = collections.defaultdict(list)
         for line in open(opt['--dump'], encoding='utf-8', errors='replace'):
             if not line.startswith('P '):
@@ -141,6 +182,7 @@ def main():
             f = line.split(' ', 17)
             k = (int(f[2], 16), int(f[3]))
             root_of_key[k] = int(f[16])
+            seen_of_key[k] = (int(f[6]), np.array([float(v) for v in f[10:13]]), np.array([float(v) for v in f[13:16]]))
             by_root[int(f[16])].append(k)
 
         def members_of(ii):
@@ -153,12 +195,17 @@ def main():
                 out.extend(key_to_ii.get(kk, []))
             return out or [ii]
     tri_cache = {}
+    skipped = set()
 
-    def tris_of(ii):
-        if ii not in tri_cache:
-            me = first_mesh(L, inst[ii])
-            tri_cache[ii] = placed_tris(L, inst[ii], me) if me != NO_MESH else np.zeros((0, 3, 3))
-        return tri_cache[ii]
+    def tris_of(ii, me=None):
+        key = (ii, me)
+        if key not in tri_cache:
+            if me is None:
+                me = drawn_mesh(L, inst[ii], seen_of_key.get((cold[ii]['refFormId'], cold[ii]['scolPart'])) if seen_of_key else None)
+                if me == NO_MESH:
+                    skipped.add(ii)
+            tri_cache[key] = placed_tris(L, inst[ii], me) if me != NO_MESH and me < len(L['meshes']) else np.zeros((0, 3, 3))
+        return tri_cache[key]
     def measure(infl):
         rows = []
         for bi, o in enumerate(T['occluders']):
@@ -170,7 +217,7 @@ def main():
             centre = np.array([o['x'], o['y'], o['z']])
             ii = o['instanceIndex']
             mem = members_of(ii) if members_of else [ii]
-            tr = [tris_of(m) for m in mem]
+            tr = [tris_of(m, o['meshId'] if m == ii else None) for m in mem]
             tr = np.concatenate([t for t in tr if len(t)] or [np.zeros((0, 3, 3))])
             share = inside_share(tr, centre, R, half, rays, grid) if len(tr) else 0.0
             rows.append({'box': bi, 'carrier': ii, 'members': len(mem), 'tris': int(len(tr)),
@@ -179,6 +226,12 @@ def main():
                          'centre': [round(float(v)) for v in centre], 'half': [round(float(v), 1) for v in half]})
         return rows
     rows = measure(inflate)
+    carrier_miss = 0
+    if seen_of_key:
+        for o in T['occluders']:
+            ci = o['instanceIndex']
+            if drawn_mesh(L, inst[ci], seen_of_key.get((cold[ci]['refFormId'], cold[ci]['scolPart']))) != o['meshId']:
+                carrier_miss += 1
     pk = np.array([r['poke'] for r in rows]) if rows else np.zeros(0)
     th = np.array([r['thick'] for r in rows]) if rows else np.zeros(0)
     vol = np.array([r['vol'] for r in rows]) if rows else np.zeros(0)
@@ -189,7 +242,9 @@ def main():
            'thickMedian': float(np.median(th)) if len(th) else None,
            'thickMin': float(th.min()) if len(th) else None, 'thickMax': float(th.max()) if len(th) else None,
            'halfMedian': [float(np.median([r['half'][k] for r in rows])) for k in range(3)] if rows else None,
-           'worst': sorted(rows, key=lambda r: -r['poke'])[:8]}
+           'worst': sorted(rows, key=lambda r: -r['poke'])[:8],
+           'membersSkippedRepSlotsDisagree': len(skipped),
+           'carriersWhereTheDumpRuleMissesTheRowMeshId': carrier_miss if seen_of_key else None}
     rc = 0
     if gate:
         grown = measure(1.25)

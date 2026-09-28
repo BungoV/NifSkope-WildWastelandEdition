@@ -197,3 +197,52 @@ three 20 u slabs at 100%). The building fit had NO probe against the triangles (
 probe). Fix (this resume): step 5 in fitBuildingBox -- the gate's own 9x9x9 ray test against the triangles, shrink
 half a voxel a face up to 4 times while more than 0.5% is out, else refuse (counted in the census line).
 **Knobs chosen: tol 32, cap 4096** (GroupKnobs in src/nativeemit.cpp; reasons in the comments there and in R1).
+
+### R3. Build + OFF gate (22:03-22:15)
+Build 22:03 (build_220310.log, rc 0, exe newer than sources), exe sha1 f051a7b90550, copied to run_v2; the census
+text "half-voxel shrinks" found once in the exe bytes. Commit 4436ec28.
+OFF gate (b_off = `--identity-join proximity --occluder-fit piece`, vs b_rung, gpu1 cmp_trees.sh): **DIFF 18 of 254 =
+17 chunk-cache .key files (exe digest + switches, as before) + the .lodb `plugin` line of X01Remastered.esp**, whose
+bytes changed on disk at 2026-09-27 15:08, after the rung was baked (05:00): an input, not this code. Every product
+file is byte-identical (.lodi df507bc6e5ee both). **PASS.** Red controls on hard-linked copies: one flipped byte in
+the .lodi -> DIFF 1 naming the .lodi; the .lodo removed -> MISSING naming the .lodo. Both red, as they must be.
+
+### R4. AFTER bake (defaults, 22:13-22:21) + group gates (gates.py dump_after2.txt 32 4096)
+Census: 181,945 touching pairs, 39,972 unions, 6,355 refused by the cap. Occluders: 1,232 building groups, 565
+fitted, 627 too thin, 40 refused by the new probe (still out after 4 half-voxel shrinks), 62 shrunk to pass;
+511 boxes written (54 dropped by the 4-a-cell cap).
+| gate | number | result |
+|---|---|---|
+| every placement has a group | 69,806 placements, 42,306 eligible, 0 bad roots | PASS |
+| no group over the cap | widest multi-piece group 331 pieces, 4,096 x 3,376 u; 0 multi-piece groups over 4,096; 31 single pieces are wider than the cap on their own (never joined) | PASS |
+| histogram | 21,140 groups: 1:16,042  2-4:4,474  5-16:300  17-64:149  65-256:134  257-1024:41  >1024:0; largest 928 pieces | recorded |
+| landmarks | Hub tower east 1 group (746 = 730 + 16 other); west 4 groups (top 727 = 723 + 4; 4 lone pieces); Trinity 1 group; Diamond City 15 groups (top 56 = 33 + 23 other) | towers/Trinity PASS; Diamond City FAIL (15) |
+| row houses >= 3 ids | 54 pieces in 1 group, 3,109 x 2,144 u | FAIL |
+| chunk lines | 188 multi-piece groups cross a 16,384 u chunk line, holding 10,507 pieces (per-chunk u16 ids: each side gets its own id) | recorded |
+Why Diamond City fails: no cap splits it well -- at any cap that stops the stadium welding to the blocks around it,
+the stadium ring is cut into 15 pieces; it needs a landmark/precombine join, not a distance rule (owed).
+Why row houses fail: the terraces share their walls (pair distance 0 u), so any contact rule joins all 54; the cap
+cuts by width only and 3,109 x 2,144 u is under 4,096. Needs a per-building split rule (owed). Gate NOT loosened.
+
+### R5. Poke gate: it measured the wrong mesh (a measurement fix, not a loosening)
+First AFTER run: 511 boxes, 23 over 1%, worst 0.882. The five worst (boxes 435, 437, 459, 336, 340) poke
+0.87 / 0.88 / 0.35 / 0.20 / 0.10 against rep0 and 0.000 against the mesh the placement draws. Cause:
+tests/spells/lodi_occluder_building.py took the FIRST non-empty rep slot of the base, but a placement draws
+rep[mnamSlot] (e.g. highway `_LOD_1` meshes in rep1/rep2), and the .lodi does not store the slot. rotcheck.py
+ruled out a rotation sign error (R vs R^T) first.
+Fix: `drawn_mesh()` -- the box's carrier uses the occluder row's own meshId (exact); every other member uses the
+base's only mesh when the rep slots agree; when they disagree and --dump is given, the rep whose level-0 triangle
+count and placed box match the emitter's dump line; a tie between meshes with the same placed triangles (one NIF in
+two slots) takes either; any other tie is skipped and COUNTED (membersSkippedRepSlotsDisagree). Skipping a member
+can only raise a poke (fewer walls), never hide one. Self-check: for 507 of 511 carriers the dump rule names the
+row's meshId; the 4 others are same-geometry ties (e.g. IndBldShellOutMidBg01_LOD_1 in slots 0 and 1).
+Measured on b_after after the fix: **511 boxes, 5 over 1%, worst 0.1605, volume-weighted 0.0004; 0 members
+skipped.** Red controls (must fail, do): grown 1.25x 510 of 511 over; --inflate 1.02 -> 270 over; 1.05 -> 437 over.
+**Gate still FAILS (5).** Why, by faceprobe.py:
+- boxes 142, 408 (0.1111) and 486 (0.1111): one whole lattice plane is out -- the box's CENTRE plane, which lies
+  exactly on the seam where two stacked wall pieces meet (12 / 72 / 18 vertices on that plane). Moving the box
+  0.25 u off the seam gives 0.000; shrinking does not move the centre plane, so the emitter's shrink cannot help.
+  The rays pass through the joint line between two pieces (a hairline gap left by per-mesh vertex quantisation).
+- box 323 (0.1605): part seam (0.053 when moved 0.25 u in x) and part real overhang.
+- box 493 (0.0123): 9 lattice points at an edge; 0.000 after a 0.5 u shrink.
+The emitter probe passed these in its own frame; the file's quantised centre moved the plane onto the seam.
