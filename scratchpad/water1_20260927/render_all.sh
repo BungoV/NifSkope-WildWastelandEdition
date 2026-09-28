@@ -59,7 +59,7 @@ if [ $G = slope ]; then
   fi
   echo "RENDER PASS DONE $G"; exit 0
 fi
-if [ $G = real ]; then
+if [ $G = real ] || [ $G = pin ]; then
   # task 3 on the real bake: the sloped placed water the Commonwealth has (real_cmp.py: cells 1,-4 and
   # -12..-11,27..28). BEFORE = what he had: the flat viewer (run_new) on the flat writer's file; AFTER =
   # the slope viewer on the slope writer's file. Same camera per pair, terrain + water only.
@@ -74,6 +74,15 @@ if [ $G = real ]; then
     echo "$(date +%H:%M:%S) $r"
     case "$r" in OK*) ;; *) echo "STOPPED at $name"; exit 2;; esac
   }
+  if [ $G = pin ]; then
+    # the pond water-height pair with the ramp PINNED (WW_LODL_HEIGHT_RANGE, run_pin exe) so the sea keeps
+    # its colour; plus the pin exe with no pin on the slope file = must equal E_waterheight_after (switch off = same)
+    PNS=$ME/run_pin/NifSkope.exe; [ -f $PNS ] || { echo "missing $PNS"; exit 1; }
+    cshot E_waterheight_pinexe_off 0 -5 2 -3 6144 NS=$PNS LODL=$V3S WW_LODL_PLANE=waterheight
+    cshot E_waterheight_pinned_after 0 -5 2 -3 6144 NS=$PNS LODL=$V3S WW_LODL_PLANE=waterheight WW_LODL_HEIGHT_RANGE=${HR:-450,821.5}
+    cshot E_waterheight_pinned_before 0 -5 2 -3 6144 NS=$PNS LODL=$V3NEW WW_LODL_PLANE=waterheight WW_LODL_HEIGHT_RANGE=${HR:-450,821.5}
+    echo "RENDER PASS DONE $G"; exit 0
+  fi
   for v in default waterheight; do
     pe=(); [ $v != default ] && pe=(WW_LODL_PLANE=$v)
     cshot E_${v}_after 0 -5 2 -3 6144 NS=$SNS LODL=$V3S "${pe[@]}"

@@ -1348,6 +1348,23 @@ void addLodlWater( NifModel * nif, const LodtFile & f, const LodtRegionSpec & sp
 		}
 		if ( hLo > hHi )
 			hLo = hHi = 0.0f;
+		/* WW_LODL_HEIGHT_RANGE="lo,hi": pin the water-height ramp to fixed units instead of
+		 * stretching it over this region's own heights, so a before/after pair of pictures
+		 * paints the same height the same colour (a new body can no longer recolour the sea).
+		 * Heights outside the pinned range clamp to its ends; the legend says so. */
+		bool hPinned = false;
+		float hSeenLo = hLo, hSeenHi = hHi;
+		{
+			const QList<QByteArray> r = qgetenv( "WW_LODL_HEIGHT_RANGE" ).split( ',' );
+			bool okLo = false, okHi = false;
+			const float pLo = r.size() == 2 ? r[0].trimmed().toFloat( &okLo ) : 0.0f;
+			const float pHi = r.size() == 2 ? r[1].trimmed().toFloat( &okHi ) : 0.0f;
+			if ( okLo && okHi && pHi > pLo ) {
+				hLo = pLo;
+				hHi = pHi;
+				hPinned = true;
+			}
+		}
 		const int flowS = f.flowPlaneSamples(), shoreS = f.shorePlaneSamples();
 		const bool worldDef = f.hasDefaultWater();
 		QHash<quint16, int> speedsSeen;
@@ -1357,7 +1374,8 @@ void addLodlWater( NifModel * nif, const LodtFile & f, const LodtRegionSpec & sp
 			const float surf = B.waterHeight + dls[size_t( v ) * size_t( W ) + size_t( u )];
 			switch ( plane ) {
 			case LodtPlane::WaterHeight:
-				return waterHeightRgba( ( hHi > hLo ) ? ( surf - hLo ) / ( hHi - hLo ) : 0.5f );
+				return waterHeightRgba( ( hHi > hLo )
+					? qBound( 0.0f, ( surf - hLo ) / ( hHi - hLo ), 1.0f ) : 0.5f );
 			case LodtPlane::WaterType:
 				return waterTypeRgba( worldDef && B.watrForm == f.defaultWaterType(), B.watrForm );
 			case LodtPlane::WaterBodyId:
@@ -1515,6 +1533,11 @@ void addLodlWater( NifModel * nif, const LodtFile & f, const LodtRegionSpec & sp
 
 		switch ( plane ) {
 		case LodtPlane::WaterHeight:
+			if ( hPinned )
+				note << QString( "water height: ramp PINNED to %1..%2 units (WW_LODL_HEIGHT_RANGE), heights "
+						"outside it clamp to its ends; this region's water spans %3..%4 units" )
+					.arg( double( hLo ), 0, 'f', 1 ).arg( double( hHi ), 0, 'f', 1 )
+					.arg( double( hSeenLo ), 0, 'f', 1 ).arg( double( hSeenHi ), 0, 'f', 1 );
 			for ( int k = 0; k <= 4; k++ ) {
 				const float t = float( k ) / 4.0f;
 				legend << QString( "%1 units = %2" ).arg( double( hLo + ( hHi - hLo ) * t ), 0, 'f', 1 )

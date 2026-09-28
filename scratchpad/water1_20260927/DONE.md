@@ -409,3 +409,9 @@ Nothing of RESUME 1-2 or the river pass ran. No WATER1 process is waiting on the
 2. `bash resume12.sh all` (depth-bake removal chunk gates, then the depth-view renders); then agree.py score,
    pixel identity pics_depth/FL_* vs pics/FL_*, legend_check.py with depth, label A_depth.
 3. Last: delete bk_*, cache/, fixture/*.lodl.
+
+## CONTINUATION 4 (resumed 2026-09-28 20:42, date-read; overseer: lock free after the flight)
+20:42 river pass started: PORTBASE=46100 render_all.sh river > river_pass.out (shot.sh takes turn WATER1 per shot).
+20:44 pond water-height colour scale: added WW_LODL_HEIGHT_RANGE=lo,hi (src/btdterrain.cpp, v3 body path) to pin the ramp; building (build_pin.log)
+20:45 build_pin.log BUILD-RC=0, exe 20:44:33 (md5 866abe1a), copied to run_pin/ (runtime from run_slope). render_all.sh group `pin` added (3 pond shots, run_pin).
+20:45 river pass R_default: rc 0, empty log, no picture = Avast sandbox (AvastSvc.log 18:45:13 UTC "marked for virtualization ... run_slope\NifSkope.exe", error 122 at 18:45:29). TERR1's copy was sandboxed the same minute. Waiting 10 min (night rule), then one retry.
