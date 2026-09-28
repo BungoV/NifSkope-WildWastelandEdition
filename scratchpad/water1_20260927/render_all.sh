@@ -4,6 +4,11 @@
 # usage: render_all.sh [group]   groups: gate pics flat v2 whole all
 SP=/c/Users/bungo/AppData/Local/Temp/claude/E--Projects-Claude/b560e4ec-6e66-4c21-9572-1ad4acca0043/scratchpad
 ME=/e/Projects/NifskopeWWE-water1/scratchpad/water1_20260927
+# one WATER1 pass at a time (2026-09-28: two chain4 copies ran at once): a second pass exits BUSY
+if [ -z "${WATER1_PASS_HELD:-}" ]; then
+  mkdir /e/Projects/NifskopeWWE-water1/scratchpad/water1_20260927/.water1_pass 2>/dev/null || { echo "BUSY: another WATER1 pass runs"; exit 3; }
+  export WATER1_PASS_HELD=1; trap 'rmdir /e/Projects/NifskopeWWE-water1/scratchpad/water1_20260927/.water1_pass' EXIT
+fi
 P=$ME/pics; mkdir -p $P
 T=$SP/ao2/terr_x1
 OD=$SP/ao2/reg_x7/mod/FO4CSLOD/Commonwealth

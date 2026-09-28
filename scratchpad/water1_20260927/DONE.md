@@ -425,3 +425,20 @@ Nothing of RESUME 1-2 or the river pass ran. No WATER1 process is waiting on the
   (0..1536 u), 1351 one-texel quads, read-back corner mean within 2.000 u of the file's surface. Looked at both: before,
   the whole river is one flat sheet hanging off below the slope; after, it lies on the slope.
   Labelled: pics/labeled/T3_river_fixture_before.png, T3_river_fixture_after.png, T3_river_fixture_waterheight_after.png.
+21:3x MISTAKE: chain4.sh runs TWICE -- the 21:09 nohup launch I judged dead (Git Bash ps showed 0) was alive
+  (Win32_Process pid 46404) and I launched a second copy at 21:10. Both go through turn.sh, so still one NifSkope at a
+  time, but they duplicate shots and interleave chain4.out. Stopping my own two chain processes was refused by the
+  harness (auto-mode classifier), so render_all.sh and resume12.sh now take a lane mutex (.water1_pass): a second
+  pass exits BUSY and its chain retries/ends harmlessly (every step skips outputs on disk).
+  21:34 pin try: E_waterheight_pinexe_off made (by the other chain), E_waterheight_pinned_after NO FILE (run_pin = fresh copy, sandbox).
+21:32-21:46 pin pass DONE (run_pin exe 866abe1a, WW_LODL_HEIGHT_RANGE=450,821.5 = the after picture's own ramp):
+| gate | expected | measured | result |
+|---|---|---|---|
+| switch unset = old viewer: E_waterheight_pinexe_off (pin exe, no pin) vs E_waterheight_after (slope exe) | byte-identical | md5 253fb0aa both | **PASS** |
+| pin at the region's own range = the stretch: E_waterheight_pinned_after vs E_waterheight_after | byte-identical | md5 253fb0aa | **PASS** |
+| pond water-height pair, pinned: `pixcell.py` cell 1,-4 z 720..1264 | 0 outside | 3,823 differ, **0 outside**, bbox 784..898 x 576..626 (was 71,899 outside unpinned) | **PASS** -- the old FAIL was the ramp stretch, now removed |
+| floor (5x5 block painted far off) | FAIL | 25 outside -> FAIL | floor bites |
+Before log: "this region's water spans 450.0..450.0 units" (sea only), after: 450.0..821.5; one legend for both.
+The "before" is the pin exe on the flat file (the flat exe has no pin switch); the viewer change itself is gated
+by FL_default/FL_watertype (0 outside, 09-27) and the byte-identity rows above.
+Labelled: pics/labeled/T3_pond_waterheight_before_pinned.png, T3_pond_waterheight_after_pinned.png.

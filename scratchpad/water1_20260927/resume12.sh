@@ -3,6 +3,11 @@
 # One NifSkope run per turn (bake_btr.sh / shot.sh take and release WATER1 themselves). Stops at the first
 # missing output; never relaunches. usage: resume12.sh [btr|depth|all]
 ME=/e/Projects/NifskopeWWE-water1/scratchpad/water1_20260927
+# one WATER1 pass at a time (2026-09-28: two chain4 copies ran at once): a second pass exits BUSY
+if [ -z "${WATER1_PASS_HELD:-}" ]; then
+  mkdir /e/Projects/NifskopeWWE-water1/scratchpad/water1_20260927/.water1_pass 2>/dev/null || { echo "BUSY: another WATER1 pass runs"; exit 3; }
+  export WATER1_PASS_HELD=1; trap 'rmdir /e/Projects/NifskopeWWE-water1/scratchpad/water1_20260927/.water1_pass' EXIT
+fi
 cd $ME || exit 1
 G=${1:-all}
 stop() { echo "STOPPED: $1"; exit 2; }
