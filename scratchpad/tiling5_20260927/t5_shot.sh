@@ -18,7 +18,7 @@ CX=$(( (X0 + X1 + 1) * 2048 )); CY=$(( (Y0 + Y1 + 1) * 2048 ))
 mkdir -p "$HERE/cache"
 CACHE="$(wp "$HERE")/cache/sc_$(basename "$OUT" .png)_$(date +%s)"
 if tasklist //FI "IMAGENAME eq Fallout4.exe" 2>/dev/null | grep -q Fallout4.exe; then echo "GAME UP"; exit 1; fi
-bash /e/Projects/NifskopeWWE-fix1/scratchpad/fix1_20260926/turn.sh acquire tiling5 21600 || exit 1
+bash /e/Projects/NifskopeWWE-fix1/scratchpad/fix1_20260926/turn.sh acquire TILING5 21600 || exit 1
 SCOPE=tiling5; REGKEY="HKCU\Software\NifTools\NifSkope 2.0 $SCOPE"
 wipe() { reg delete "$REGKEY" //f > /dev/null 2>&1 || true; }
 wipe; trap wipe EXIT
@@ -35,7 +35,7 @@ env WW_BAKE2_NOOBJ=1 WW_SETTINGS_SCOPE="$SCOPE" \
     WW_CAMERA_CENSUS="$(wp "${OUT%.png}.cam.log")" \
     WW_WINDOW_AT=1960,40 \
     timeout 1200 "$NS" --port "$PORT" "$(wp "$LODL")" > "${OUT%.png}.log" 2>&1
-rc=$?; bash /e/Projects/NifskopeWWE-fix1/scratchpad/fix1_20260926/turn.sh release tiling5
+rc=$?; bash /e/Projects/NifskopeWWE-fix1/scratchpad/fix1_20260926/turn.sh release TILING5
 if [ -s "$OUT" ]; then
   echo "OK $(basename "$OUT") $(stat -c %s "$OUT") B rc=$rc"
 else

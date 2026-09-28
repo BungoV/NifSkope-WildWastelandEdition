@@ -277,3 +277,29 @@ No make/g++/cc1plus/qmake/xmake running (Win32_Process), game down. `bash tools/
 Refuter that lodgen.cpp really recompiled: the string `WW_TILING5` occurs 2x in `run_m3`'s exe (env reads) and
 0x in the new one. Run copy: `run_c1` (run_m3's runtime + the new exe). Superseded arm outputs
 `out/{b05,b10,height,relief,s10}` deleted (their gate logs stay in `logs/`).
+
+### D2. The mean-bias correction (C3's fix), commit 020ae381, built 12:43 (`build5.log`, rc 0, exe sha1 8026c602, run copy `run_c2`)
+Linear regression per texture and relief level instead of C3's exp-weighted bias table (the same thing for a
+Gaussian relief: E[s e^{bh}]/E[e^{bh}] - E[s] = b cov(s,h), and the regression also works per texel):
+* `lodgenLandSlopeFor` (new, `src/lodgen.cpp`): G = cov(colour, h) per relief level, RGB, measured once per
+  (diffuse, normal) pair against the diffuse mip whose texel matches the level; cached for the process.
+* Hex joins (`lodgenLandHexTap`, height branch only): the relief-predicted part of the three taps, G h_k, now
+  blends with the PAINTED barycentric weights (w_k, variance-normalised) instead of the height weights:
+  acc -= G (sum w'_k h_k / |w'| - sum w_k h_k / |w|). The tap also hands back its predicted detail G h_paint.
+* Layer blend (`lodgenLandHeightLayer`): c' = c + (lc - c) ah + ((ml - m) + (pl - p))(a - ah); the composite
+  tracks p like its mean. Under the linear model colour = mean + G h + e, the height opacity now moves only e,
+  whose expectation does not depend on the choice, so the mean is today's.
+* Off path untouched (every new pointer is null when `--land-height-blend` is off). `src/lodgen.h` doc block: one
+  paragraph. No format change, no new switch, no ledger key.
+Not yet measured: waits for the NifSkope turn (a Fallout 4 flight holds it from ~12:45; no bake while the game runs).
+
+### D3. Scripts added this session (lane folder)
+`t5_batch1.sh` (every bake under one turn of the run lock), `t5_cmp.py` (byte compare of two bake folders; refuter:
+id_rung vs id_new PASS 27/27 sheets, today vs s20 on -4,-20 FAIL 2/3 sheets -- it can fail), `t5_pics.sh` +
+`t5_label.py` (eight full-size shots, 60 px title bar), `t5_crop.py` (4x top-down close-up of the densest
+transition window, straight from the sheets). `t5_shot.sh` now takes the turn as `TILING5`.
+
+### D3b. Waiting (recorded 14:04)
+The batch has waited on the run lock since 12:44 (holder FLIGHT, Fallout4.exe up the whole time). No bake while the
+game runs. Skill `ww-selection-mean-bias-check` installed: E:\Projects\Claude\.claude\skills, E:\Tools\AISkills and
+this repo's .claude/skills (the write that was refused last session went through this time).
