@@ -19,7 +19,7 @@ import numpy as np
 from PIL import Image
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-P = os.path.join(HERE, 'pics')
+P = os.path.join(HERE, os.environ.get('LEGEND_DIR', 'pics'))   # pics_depth holds FL_depth (2026-09-28)
 TOL = 3.0
 
 

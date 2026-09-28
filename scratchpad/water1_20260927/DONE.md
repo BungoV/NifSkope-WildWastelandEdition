@@ -452,3 +452,20 @@ Labelled: pics/labeled/T3_pond_waterheight_before_pinned.png, T3_pond_waterheigh
 | identity-ON pair cur_id vs nd_id (amended) | PASS | 84 non-water byte-identical (land identity bytes did not move), 9 water shapes as above | **PASS (amended gate)**; --floor FAIL rc 1 |
 | grep proof `git grep -n -i "waterChannels\|Water depth (R)" -- src docs` | only "gone" notes | 3 hits: docs/LODGEN_VERTEX_PACKING.md 379-380 and src/lodgenchunkpass.h 274, all saying it is gone | PASS |
 21:49 RESUME 1 depth pass: FL0_default_nowater/FL_default/FL_waterheight skipped (on disk), FL_watertype sandboxed (run_depth). Retrying.
+22:27 RESUME 1 depth pass DONE (run_depth exe on the flat-writer file bk_new_def; FL_watertype..FL_cellflags 22:01-22:04,
+  FL_depth 22:26, A_depth 22:27; one sandboxed launch at 21:49, then clean):
+| gate | expected | measured | result |
+|---|---|---|---|
+| pixel identity pics_depth/FL_* vs pics/FL_* (depth exe vs the exe before it, same file, FLAT frame) | 8/8 identical | 8/8 PIL difference bbox None (FL0_default_nowater, default, waterheight, watertype, bodyid, flow, shore, cellflags) | **PASS** |
+| `agree.py score agree_pick.json pics_depth/A_depth.log` (view depth vs the old chunk bake's R tint, 300 unsaturated vertices) | within one R step (8 u) | median 1.2 u, 90% 1.9 u, max 3.7 u; 100.0% within 8 u; mean signed +0.7; bake water height = body height at 100% | **PASS** |
+| `LEGEND_DIR=pics_depth legend_check.py` (depth added) | as the other views | waterheight/bodyid/flow/cellflags/watertype 0.9785, shore 0.9786, default 0.9778, **depth 0.9502**; every floor 0.0 | measured, no bar was pre-registered; depth is 2.8 points lower than the rest (more colour edges inside the water: band borders); not examined pixel by pixel |
+| 3 Charles probes (body 1, 450 u; `probe3.py`), ground cross-checked with `tests/spells/lodl_open_authority.py ... height` | same ground | -15872,-12800: ground 128 = 128, depth 322 (128-512); -16384,-12288: -240 = -240, depth 690 (512-1024); -12800,-12800: 352 = 352, depth 98 (0-128) | **PASS** 3/3; three bands in the one body (bungo's "uniform colour for the Charles" answered) |
+Labelled: pics/labeled/A_depth.png (looked at: sea/Charles in 4 bands, shallow edges light, deep channel dark).
+22:3x cleanup: deleted bk_btr_cur, bk_btr_cur_id, bk_btr_nd, bk_btr_nd_id, bk_new_def, bk_slope_def, cache/, run_depth,
+  run_new, run_nodepth, run_pin, run_rung, run_slope, stale/, fixture/flatonly.lodl, fixture/slope.lodl (all untracked,
+  lane-made). Scratchpad now 96 MB (pictures + logs). DELIVERABLE_TEXT: Continuation 4 section + reader list items 1/5/6.
+
+## FINAL (2026-09-28)
+WATER1 complete; nothing owed by the lane. NOT flown, NOT merged (overseer). 23 labelled pictures in pics/labeled.
+Open for others: FO4CS reader list (DELIVERABLE_TEXT, built last by standing order); turn.sh blind to pathless
+(sandboxed) NifSkope processes (FIX1).
