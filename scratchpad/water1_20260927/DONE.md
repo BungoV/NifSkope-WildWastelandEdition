@@ -415,3 +415,13 @@ Nothing of RESUME 1-2 or the river pass ran. No WATER1 process is waiting on the
 20:44 pond water-height colour scale: added WW_LODL_HEIGHT_RANGE=lo,hi (src/btdterrain.cpp, v3 body path) to pin the ramp; building (build_pin.log)
 20:45 build_pin.log BUILD-RC=0, exe 20:44:33 (md5 866abe1a), copied to run_pin/ (runtime from run_slope). render_all.sh group `pin` added (3 pond shots, run_pin).
 20:45 river pass R_default: rc 0, empty log, no picture = Avast sandbox (AvastSvc.log 18:45:13 UTC "marked for virtualization ... run_slope\NifSkope.exe", error 122 at 18:45:29). TERR1's copy was sandboxed the same minute. Waiting 10 min (night rule), then one retry.
+21:09 retry: R_default.png made (46,920 B); R_waterheight sandboxed again (AvastSvc 19:09:15 UTC, run_slope). 21:09 chain4.sh started
+  (river -> pin -> resume12 all; a stopped pass retries after 600 s, max 5 tries; outputs <group>_pass4_<try>.out, chain4.out).
+21:13 R_waterheight.png made; labelled T3_river_fixture_after.png + T3_river_fixture_waterheight_after.png. 21:17 R_default_flatbuild (run_nodepth, first launch) sandboxed; chain4 retrying.
+21:2x R_waterheight.png turned out to be written 21:11:29 by the SANDBOXED 21:09 launch (ran detached, no log); chain4's 21:13 launch then saw the file and said OK. Moved to stale/ for a clean re-render; shot.sh now deletes the old picture first and holds the turn while any NifSkope on its --port lives (sandboxed copies are pathless in Win32_Process, so turn.sh cannot see them -- lane-rule gap for the overseer).
+21:28-21:29 river pass DONE (try 2): R_waterheight.png re-rendered with a log -- byte-identical (md5 e0a5c8fc) to the
+  sandboxed orphan's picture in stale/; R_default_flatbuild.png made (run_nodepth). R_default vs R_default_flatbuild:
+  24,560 px differ, bbox 448..1252 x 655..1023 (the river strip only). Log: 1344 of 1755 wet texels off the body height
+  (0..1536 u), 1351 one-texel quads, read-back corner mean within 2.000 u of the file's surface. Looked at both: before,
+  the whole river is one flat sheet hanging off below the slope; after, it lies on the slope.
+  Labelled: pics/labeled/T3_river_fixture_before.png, T3_river_fixture_after.png, T3_river_fixture_waterheight_after.png.

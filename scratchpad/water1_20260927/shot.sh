@@ -25,6 +25,7 @@ if tasklist //FI "IMAGENAME eq Fallout4.exe" 2>/dev/null | grep -q Fallout4.exe;
 SCOPE=water1; REGKEY="HKCU\Software\NifTools\NifSkope 2.0 $SCOPE"
 wipe() { reg delete "$REGKEY" //f > /dev/null 2>&1 || true; }
 wipe; trap wipe EXIT
+rm -f "$OUT" "${OUT%.png}.cam.log"
 reg add "$REGKEY\Settings" //v Version //t REG_SZ //d 1 //f > /dev/null 2>&1
 reg add "$REGKEY" //v "Game Manager Version" //t REG_DWORD //d 2 //f > /dev/null 2>&1
 GM="$(dirname "$OUT")/gm_$$.reg"
@@ -38,9 +39,21 @@ env "${OBJ[@]}" WW_SETTINGS_SCOPE="$SCOPE" \
     WW_CAMERA_CENSUS="$(wp "${OUT%.png}.cam.log")" \
     WW_WINDOW_AT=1960,40 \
     timeout 1200 "$NS" --port "$PORT" "$(wp "$LODL")" > "${OUT%.png}.log" 2>&1
-rc=$?; bash /e/Projects/NifskopeWWE-fix1/scratchpad/fix1_20260926/turn.sh release WATER1
+rc=$?
+# Avast sandbox (2026-09-28 21:09): the launch returns rc 0 at once, but the sandboxed copy can go on
+# running detached (pathless in Win32_Process) and write the picture minutes later with no log. Hold the
+# turn while any NifSkope on OUR --port is alive (max 20 min); a picture made that way is flagged LATE.
+late=""
+if [ ! -s "$OUT" ]; then
+  for i in $(seq 1 80); do
+    n=$(powershell -NoProfile -Command "@(Get-CimInstance Win32_Process -Filter \"Name='NifSkope.exe'\" | ? { \$_.CommandLine -like '*--port $PORT*' }).Count" 2>/dev/null | tr -d '\r')
+    [ "${n:-0}" = 0 ] && break; sleep 15
+  done
+  [ -s "$OUT" ] && late=" LATE(sandboxed, no log)"
+fi
+bash /e/Projects/NifskopeWWE-fix1/scratchpad/fix1_20260926/turn.sh release WATER1
 if [ -s "$OUT" ]; then
-  echo "OK $(basename "$OUT") $(stat -c %s "$OUT") B rc=$rc"
+  echo "OK $(basename "$OUT") $(stat -c %s "$OUT") B rc=$rc$late"
 else
   echo "NO FILE $OUT rc=$rc"
 fi
