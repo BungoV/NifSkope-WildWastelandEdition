@@ -20,8 +20,13 @@ sys.path.insert(0, 'E:/Projects/NifskopeWWE-water1/tests/spells')
 import gltf_nifread as G  # noqa: E402
 
 
-def is_water(sh):
-    return 'water' in (sh['name'] or '').lower()
+def is_water(sh, nif=None):
+    # AMENDED 2026-09-28 21:5x after the first run found 0 water shapes: the generator's water shapes are
+    # UNNAMED; they hang under a NiNode named "WATER". Name OR parent-node name, as the docstring meant.
+    if 'water' in (sh['name'] or '').lower():
+        return True
+    par = nif.nodes.get(sh.get('parent')) if nif is not None else None
+    return bool(par) and 'water' in (par['name'] or '').lower()
 
 
 def main():
@@ -38,7 +43,7 @@ def main():
         a, b = G.Nif(os.path.join(old, r)), G.Nif(os.path.join(new, r))
         if floor and not flipped:
             for i in range(b.numBlocks):
-                if i not in b.shapes or not is_water(b.shapes[i]):
+                if i not in b.shapes or not is_water(b.shapes[i], b):
                     k = b.start[i] + b.size[i] // 2
                     b.data = b.data[:k] + bytes([b.data[k] ^ 0x01]) + b.data[k + 1:]
                     flipped = True
@@ -48,7 +53,7 @@ def main():
             continue
         for i in range(a.numBlocks):
             blocks += 1
-            if i in a.shapes and is_water(a.shapes[i]):
+            if i in a.shapes and is_water(a.shapes[i], a):
                 water += 1
                 sa, sb = a.shapes[i], b.shapes[i]
                 if sa['verts'] != sb['verts'] or sa['tris'] != sb['tris']:

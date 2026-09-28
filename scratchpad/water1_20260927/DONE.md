@@ -442,3 +442,13 @@ Before log: "this region's water spans 450.0..450.0 units" (sea only), after: 45
 The "before" is the pin exe on the flat file (the flat exe has no pin switch); the viewer change itself is gated
 by FL_default/FL_watertype (0 outside, 09-27) and the byte-identity rows above.
 Labelled: pics/labeled/T3_pond_waterheight_before_pinned.png, T3_pond_waterheight_after_pinned.png.
+21:46-21:49 RESUME 2 (depth-bake removal, chunk bakes of the Boston box, 9 chunks each): bk_btr_nd (run_nodepth) 38 s,
+  bk_btr_cur_id (run_new --terrain-identity) 40 s, bk_btr_nd_id (run_nodepth --terrain-identity) 37 s; 9 .btr each.
+| gate | expected | measured | result |
+|---|---|---|---|
+| btr_cmp.py as written, cur vs nd | PASS | REFUSED "0 water shapes compared"; the 9 differing blocks are the water shapes | **gate bug**: it found water by shape NAME; the generator's water shapes are unnamed, under a NiNode "WATER" |
+| btr_cmp.py AMENDED (name OR parent node name contains water), cur vs nd | PASS | 9 files, 93 blocks: 84 non-water byte-identical, 9 water shapes: same positions + triangles, new ones 8-byte vertex no colours (va 33 stride 12 -> va 1 stride 8) | **PASS (amended gate)** |
+| same --floor | FAIL | one byte flipped in block 0 -> FAIL rc 1 | floor bites |
+| identity-ON pair cur_id vs nd_id (amended) | PASS | 84 non-water byte-identical (land identity bytes did not move), 9 water shapes as above | **PASS (amended gate)**; --floor FAIL rc 1 |
+| grep proof `git grep -n -i "waterChannels\|Water depth (R)" -- src docs` | only "gone" notes | 3 hits: docs/LODGEN_VERTEX_PACKING.md 379-380 and src/lodgenchunkpass.h 274, all saying it is gone | PASS |
+21:49 RESUME 1 depth pass: FL0_default_nowater/FL_default/FL_waterheight skipped (on disk), FL_watertype sandboxed (run_depth). Retrying.
