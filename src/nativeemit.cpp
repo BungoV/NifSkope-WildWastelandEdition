@@ -668,7 +668,8 @@ void lodgenNativeOfferLibraryReuse( const NativeReuseOffer & offer )
  *   3. cardCorpusHash = FNV-1a 64 from the offset basis over, for each set in
  *      that order, its five files in the order .lodm, colour, normal, mask,
  *      emissive: the lower-cased file name's UTF-8 bytes, the file size as a
- *      little-endian u64, then every byte of the file.
+ *      little-endian u64, then every byte of the file. A set that names no
+ *      emissive sheet (black everywhere, lane TIDY1) hashes the first four.
  *   4. Every layer's `id` is the base's formID in 8 hex digits; a base in two
  *      layers is refused, and so is a `C` line whose (array, layer) is not
  *      the layer its base's id names. */
@@ -810,6 +811,12 @@ bool lodgenNativeLinkCards( const QStringList & btoPaths, const QString & cardAr
 		const QString sheets[4] = { m.color, m.normal, m.mask, m.emissive };
 		static const char * const sheetRole[4] = { "colour", "normal", "mask", "emissive" };
 		for ( int k = 0; k < 4; k++ ) {
+			/* A set whose emissive is black on every layer names no emissive
+			 * sheet (lane TIDY1, 2026-09-27; vanilla LOD has no glow source):
+			 * it hashes four files, not five. Colour, normal and mask stay
+			 * required. */
+			if ( k == 3 && sheets[k].isEmpty() )
+				continue;
 			if ( sheets[k].isEmpty() )
 				return fail( QString( "%1 names no %2 sheet" ).arg( name ).arg( QLatin1String( sheetRole[k] ) ) );
 			if ( !hashFile( lastComponent( sheets[k] ), &why ) )

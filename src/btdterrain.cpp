@@ -908,12 +908,15 @@ QString lodtPlaneLabel( LodtPlane plane )
 	case LodtPlane::Height:            return QStringLiteral( "Heights — the geometry itself" );
 	case LodtPlane::AmbientOcclusion:  return QStringLiteral( "Ambient occlusion — baked sky visibility" );
 	case LodtPlane::LandTextureBlend:  return QStringLiteral( "Land texture blend — five layers over a base" );
-	case LodtPlane::TerrainColour:     return QStringLiteral( "Terrain colour — the authored tint" );
-	case LodtPlane::GroundCover:       return QStringLiteral( "Ground cover — which covers reach a sample" );
+	// a TINT the ground textures are multiplied by, near white almost everywhere; the
+	// ground's colour is the VT colour sheet (lane TIDY1, audit view 37)
+	case LodtPlane::TerrainColour:     return QStringLiteral( "Terrain vertex tint — multiplies the ground textures, not the ground colour" );
+	// Fallout4.esm carries no GCVR records: on FO4 the cover is the VT mask sheet's A
+	case LodtPlane::GroundCover:       return QStringLiteral( "Ground cover (Fallout 76 files only) — on Fallout 4 see mask A" );
 	case LodtPlane::WaterHeight:       return QStringLiteral( "Water height — the per-cell water plane" );
 	case LodtPlane::WaterType:         return QStringLiteral( "Water type — which WATR record a cell uses" );
 	case LodtPlane::CellFlags:         return QStringLiteral( "Cell flags — has land, has water" );
-	case LodtPlane::CellHeightRange:   return QStringLiteral( "Cell height range — per-cell relief" );
+	case LodtPlane::CellHeightRange:   return QStringLiteral( "Cell height range — per-cell min/max height (culling table, one value per 4096-unit cell)" );
 	case LodtPlane::CoarseOverview:    return QStringLiteral( "Coarse overview — the always-resident grid" );
 	case LodtPlane::WaterBodyId:       return QStringLiteral( "Water body — which sheet of water a texel belongs to" );
 	case LodtPlane::WaterFlow:         return QStringLiteral( "Water flow — direction, speed and confidence" );
@@ -2303,7 +2306,8 @@ bool nifCreateLodtTerrainScene( NifModel * nif, const QString & lodtPath,
 						float( cr ) / 31.0f, float( cg ) / 31.0f, float( cb ) / 31.0f );
 				}
 			}
-			note << QString( "terrain colour: %1 of %2 samples (%3%) carry a tint, "
+			note << QString( "terrain vertex tint (multiplies the ground textures; the ground's "
+					"colour is the VT colour sheet): %1 of %2 samples (%3%) carry a tint, "
 					"%4 carry a colour record. A region with no tint paints white -- "
 					"the file's own answer, not a plane that went unread" )
 				.arg( tinted ).arg( qint64( gridW ) * gridH )
@@ -2343,6 +2347,12 @@ bool nifCreateLodtTerrainScene( NifModel * nif, const QString & lodtPath,
 					"%3 of %4 samples carry a cover" )
 				.arg( f.gcvrCount() ).arg( seen, 0, 16 ).arg( covered )
 				.arg( qint64( gridW ) * gridH );
+			// GCVR is a Fallout 76 terrain record; Fallout4.esm has none (LODGEN_BTD_FORMAT
+			// invariant 12), so an FO4 file never sets this section
+			if ( f.gcvrCount() == 0 )
+				note << QStringLiteral( "ground cover: this file has no GCVR records (a Fallout 4 "
+					"plugin never has any), so the plane is empty by construction -- the Fallout 4 "
+					"ground cover is the VT mask sheet's A channel (WW_LODL_CHANNEL=mask-a)" );
 			break;
 		}
 
@@ -2419,7 +2429,9 @@ bool nifCreateLodtTerrainScene( NifModel * nif, const QString & lodtPath,
 						"%2 have water (red); both = yellow" )
 					.arg( land ).arg( water ).arg( cellsInRegion );
 			else
-				note << QString( "cell height range: %1 land cells, deepest relief %2 units" )
+				note << QString( "cell height range (per-cell min/max height: the culling table, "
+						"one value per 4096-unit cell; brightness = max - min): %1 land cells, "
+						"deepest relief %2 units" )
 					.arg( land ).arg( double( reliefMax ), 0, 'f', 1 );
 			break;
 		}

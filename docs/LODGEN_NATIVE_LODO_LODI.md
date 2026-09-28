@@ -2165,6 +2165,14 @@ manifests.
    `textures` object gives, last path component): the lower-cased file name's
    UTF-8 bytes, the file size as a little-endian u64, then every byte of the
    file. 0 when no set is linked. One byte of one card sheet moves it.
+   **A set whose `.lodm` names no emissive hashes four files** (`.lodm`,
+   colour, normal, mask). Since lane TIDY1 (2026-09-27) a card array whose
+   emissive sheet decodes black on every layer (as BC1, which turns 1-7/255
+   into 0) writes no `_g`/`_e` and names none --
+   14 of the 16 Boston card sets; the other 2 hold TreeAspen01-03, whose full
+   models emit 0.05, and keep their sheet. The
+   hash of a set that does name one is unchanged; colour, normal and mask
+   stay required and a set missing one is still refused.
    `tests/spells/lodgen_cardlink.py hash <pair dir>` recomputes it outside the
    exe.
 5. **FORCE_CARD** (`.lodi` instance flags bit 1) is set on a placement whose
@@ -2937,6 +2945,17 @@ never shown.
 | `mask-a` | terrain **ground cover** | role-5 sheet, A. **A BC1 sheet has no alpha at all**; the switch then says `ABSENT on this bake -- tile x,y is BC1 (dxgi N): it carries no alpha` and draws the default view |
 | `emissive` | the role-6 emissive sheet bound as the terrain's base colour, texturing ON | `.lodt` role 6. Absent containers say `emissive sheet ABSENT -- <file> carries no sheet with role 6` |
 | `normal` | the role-2 MSN sheet bound as the terrain's base colour, texturing ON | `.lodt` role 2 (the model-space normal map of the section above) |
+
+**Aliases, not extra maps (lane TIDY1, 2026-09-27).** `ao` is another name for
+`WW_LODL_AO=1`: a picture set renders ONE of them, never both (the 2026-09-27 map review
+rendered both and got two identical pictures, 16 and 22). Likewise `sky` from above is the
+same data as `sky` from the default angle, and the `.lodl` v3 file's `height`, `cellflags`,
+`waterheight` and `watertype` planes are the v2 planes carried forward unchanged: render them
+once. The `.lodl` plane `colour` is the terrain's VERTEX TINT (VCLR), which multiplies the
+ground textures and is near white; the ground's colour is the VT colour sheet. The plane
+`groundcover` is empty on every Fallout 4 file (no GCVR records); the Fallout 4 cover is
+`mask-a`. The plane `cellrange` is the per-cell min/max height (the culling table, one value
+per 4096-unit cell), not a picture of the ground.
 
 `sky`, `ground`, `sway`, `selfao` and the four `mask-*` are a single byte written into all
 three colour components, so the picture is a grey ramp and byte 128 is 128 grey. `identity`

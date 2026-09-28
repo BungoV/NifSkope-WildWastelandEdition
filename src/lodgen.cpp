@@ -5470,10 +5470,56 @@ bool lodgenWriteDdsArray( const QString & path, int w, int h,
  *     when it names none - a pbr source has no vanilla glow to fall back on).
  *     Files `<ws>.LodgenArraysPBR.<WxH>_bc/_n/_rmaos/_e.DDS`.
  *  A legacy `.lodm` supplies its own textures, the third and the emissive raw, under
- *  the legacy names. Run BEFORE the atlas. bungo, 2026-09-06: "keep it
+ *  the legacy names. A set whose emissive is black on every layer writes no
+ *  `_g`/`_e` and its `.lodm` names no `textures.emissive` (lane TIDY1,
+ *  2026-09-27: vanilla LOD has no glow source, so that is every vanilla mesh set).
+ *  Layers whose four sheets are identical texel for texel are ONE layer; the
+ *  other spellings of its source resolve to it. Run BEFORE the atlas. bungo, 2026-09-06: "keep it
  *  specular or roughness, depending if source texture is vanilla or
  *  .pbrm sourced" - and then our own material for LOD, `.lodm`.
  */
+/*! True when every texel of every layer is black in RGB (alpha is not
+ *  emission). The test a mesh or card array's emissive must pass to be left
+ *  unwritten (lane TIDY1, 2026-09-27). */
+static bool lodgenLayersBlack( const std::vector<std::vector<quint32>> & layers )
+{
+	for ( const std::vector<quint32> & l : layers )
+		for ( quint32 px : l )
+			if ( px & 0x00FFFFFFU )
+				return false;
+	return true;
+}
+
+/*! True when the BC1 emissive sheet these layers make DECODES black on every
+ *  texel of every mip - the test a sheet must pass to be left unwritten. The
+ *  8-bit test above is not enough: the BC1 end points keep 5:6:5 and truncate,
+ *  so a texel of 1-7/255 ships as 0. Card set 000a7209 (Boston, legacy 256x512)
+ *  has 2575 glow texels of 1-3/255 and its sheet was all-zero bytes, kept
+ *  (lane TIDY1, 2026-09-27). Encodes with the writer's own path, so the answer
+ *  is about the bytes lodgenWriteDdsArray would write. */
+static bool lodgenEmissiveShipsBlack( const std::vector<std::vector<quint32>> & layers, int w, int h, int maxMips = 0 )
+{
+	if ( lodgenLayersBlack( layers ) )
+		return true;
+	std::vector<quint8> data;
+	for ( const std::vector<quint32> & l : layers )
+		lodgenEncodeArrayLayer( l, w, h, false, data, maxMips, false );
+	for ( size_t at = 0; at + 8 <= data.size(); at += 8 ) {
+		const quint8 * b = data.data() + at;
+		const quint16 c0 = quint16( b[0] | ( b[1] << 8 ) ), c1 = quint16( b[2] | ( b[3] << 8 ) );
+		const quint32 bits = quint32( b[4] ) | ( quint32( b[5] ) << 8 ) | ( quint32( b[6] ) << 16 ) | ( quint32( b[7] ) << 24 );
+		/* index 0 is c0, 1 is c1; 2 (and 3 in four-colour mode) mix both, so black
+		 * only when both are; 3 in three-colour mode (c0 <= c1) is transparent black */
+		for ( int i = 0; i < 16; i++ ) {
+			const int k = ( bits >> ( 2 * i ) ) & 3;
+			const bool black = k == 0 ? c0 == 0 : k == 1 ? c1 == 0 : ( k == 3 && c0 <= c1 ) || ( c0 == 0 && c1 == 0 );
+			if ( !black )
+				return false;
+		}
+	}
+	return true;
+}
+
 bool lodgenBuildTextureArrays( const QStringList & btoPaths, const QString & dataRoot,
 	const QString & arrayFileBase, const QString & arrayGameBase, QString * report, QString * error )
 {
@@ -5560,10 +5606,26 @@ bool lodgenBuildTextureArrays( const QStringList & btoPaths, const QString & dat
 	 * COLOUR texture where the vanilla glow rule composed it (colour x its own
 	 * alpha), and empty where the layer emits nothing. */
 	struct Layer { QString key, color, normal, mask, emissiveFrom, lodm; float emissiveScale = 0.0f; };
-	struct ArrayClass { bool pbr = false; int w = 0, h = 0; QVector<Layer> layers; std::vector<std::vector<quint32>> bc, n, rm, em; };
+	/* `alias`: a source key whose composed texels are IDENTICAL to a layer
+	 * already in the class (all four sheets, bit for bit, and the same
+	 * emissive multiple) -> that layer. The same material reached under two
+	 * spellings of its path (vanilla chunk shapes name some as
+	 * `c:\projects\fallout4\build\pc\data\materials\lod\X.bgsm`, others as
+	 * `materials\lod\X.bgsm`), or by material on one shape and by diffuse on
+	 * another, was one layer per spelling: 13 such pairs among 114 layers on
+	 * the Boston box, 7 of them identical texels, plus ElmTrunks under two
+	 * texture paths with identical texels: 114 -> 106 (lane TIDY1, 2026-09-27,
+	 * measured on the shipped sheets). Comparing the TEXELS rather than normalising
+	 * the spelling means a merge can never hand a placement different pixels:
+	 * two spellings whose shapes carried different gloss or alpha stay apart
+	 * (5 pairs differ only in the mask sheet's alpha-test byte, Wrhs01 in gloss). */
+	struct ArrayClass { bool pbr = false; int w = 0, h = 0; QVector<Layer> layers; std::vector<std::vector<quint32>> bc, n, rm, em;
+		QHash<size_t, QVector<int>> byHash; QHash<QString, int> alias; };
 	QMap<QString, ArrayClass> classes;               // "family|WxH" -> class (QMap: stable order)
 	QHash<QString, DDSTexture16 *> texCache;
-	int unreadable = 0, lodmLayers = 0, ownEmitSources = 0;
+	int unreadable = 0, lodmLayers = 0, ownEmitSources = 0, mergedLayers = 0;
+	// gate-only way back: one layer per spelling, as before lane TIDY1
+	const bool dedupeLayers = qgetenv( "WW_LODGEN_NO_LAYER_DEDUPE" ).isEmpty();
 	for ( auto it = sources.constBegin(); it != sources.constEnd(); ++it ) {
 		const ShapeSrc & src = it.value();
 		// the source .lodm, when there is one: its family and its textures
@@ -5689,6 +5751,31 @@ bool lodgenBuildTextureArrays( const QStringList & btoPaths, const QString & dat
 			emissiveFrom = emissivePath;
 		else if ( glowRule )
 			emissiveFrom = colorPath;		// the glow rule composed it from the colour, its alpha and the emissive colour
+		if ( dedupeLayers ) {
+			const size_t bytes = size_t( w ) * h * sizeof( quint32 );
+			size_t hv = qHashBits( bc.data(), bytes, 0 );
+			hv = qHashBits( n.data(), bytes, hv );
+			hv = qHashBits( rm.data(), bytes, hv );
+			hv = qHashBits( em8.data(), bytes, hv );
+			hv = qHashBits( &emissiveScale, sizeof( emissiveScale ), hv );
+			int same = -1;
+			for ( int cand : cls.byHash.value( hv ) ) {
+				if ( cls.layers[cand].emissiveScale == emissiveScale && cls.bc[cand] == bc && cls.n[cand] == n
+					&& cls.rm[cand] == rm && cls.em[cand] == em8 ) {
+					same = cand;
+					break;
+				}
+			}
+			if ( same >= 0 ) {
+				// the same texels under another spelling: its placements take that layer
+				cls.alias.insert( it.key(), same );
+				mergedLayers++;
+				fprintf( stderr, "lodgen: arrays: %s = layer %d (%s), identical texels\n",
+					it.key().toLocal8Bit().constData(), same, cls.layers[same].key.toLocal8Bit().constData() );
+				continue;
+			}
+			cls.byHash[hv].append( cls.layers.size() );
+		}
 		cls.layers.append( Layer{ it.key(), colorPath, normalPath, maskPath, emissiveFrom, lodmPath, emissiveScale } );
 		cls.bc.push_back( std::move( bc ) );
 		cls.n.push_back( std::move( n ) );
@@ -5711,7 +5798,18 @@ bool lodgenBuildTextureArrays( const QStringList & btoPaths, const QString & dat
 	// version 5: emissiveScale appended on the END, so a reader that indexes the
 	// first nine columns by position is unaffected (the C lines' rule, again)
 	ss << "# lodgen texture arrays 5: family class layer lodm color normal mask emissive source emissiveScale (docs/LODGEN_IMPOSTOR_SPEC.md)\n";
-	int arrays = 0, textures = 0, legacyClasses = 0, pbrClasses = 0;
+	int arrays = 0, textures = 0, legacyClasses = 0, pbrClasses = 0, blackEmissiveDropped = 0;
+	/* A BLACK EMISSIVE IS NOT WRITTEN (lane TIDY1, 2026-09-27). Vanilla LOD has
+	 * no glow source (tools/lod_emission_probe.py: 0 of 121 LOD materials, 0 of
+	 * 3430 LOD shader blocks), so every `_g` this pass wrote was black: 6.9 MB
+	 * on the Boston box. The card arrays save 43.2 MB more (2 of 16 card sets
+	 * keep a faint light from the full TreeAspen models). A set whose
+	 * emissive sheet DECODES black on every layer (lodgenEmissiveShipsBlack:
+	 * BC1 turns 1-7/255 into 0) names no `textures.emissive` in
+	 * its .lodm and has no `_g`/`_e` file; absent = emits nothing, as the VT
+	 * sheets already have it. A set with one lit texel ships the sheet whole.
+	 * Gate-only way back: WW_LODGEN_KEEP_BLACK_EMISSIVE=1. */
+	const bool keepBlackEmissive = !qgetenv( "WW_LODGEN_KEEP_BLACK_EMISSIVE" ).isEmpty();
 	for ( auto it = classes.begin(); it != classes.end(); ++it ) {
 		ArrayClass & cls = it.value();
 		const QString sizeKey = it.key().mid( it.key().indexOf( QChar( '|' ) ) + 1 );
@@ -5720,12 +5818,17 @@ bool lodgenBuildTextureArrays( const QStringList & btoPaths, const QString & dat
 		const QString colorSfx = QLatin1String( lodmColorSuffix( cls.pbr ) ) + QStringLiteral( ".DDS" );
 		const QString maskSfx = QLatin1String( lodmMaskSuffix( cls.pbr ) ) + QStringLiteral( ".DDS" );
 		const QString emSfx = QLatin1String( lodmEmissiveSuffix( cls.pbr ) ) + QStringLiteral( ".DDS" );
+		const bool writeEmissive = keepBlackEmissive || !lodgenEmissiveShipsBlack( cls.em, cls.w, cls.h );
+		if ( !writeEmissive )
+			blackEmissiveDropped++;
 		const struct { QString suffix; const std::vector<std::vector<quint32>> * px; bool bc3; } sheets[4] = {
 			{ colorSfx, &cls.bc, true }, { QStringLiteral( "_n.DDS" ), &cls.n, true },
 			{ maskSfx, &cls.rm, true },
 			// the emissive is BC1: three channels and no alpha to carry
 			{ emSfx, &cls.em, false } };
 		for ( const auto & s : sheets ) {
+			if ( s.px == &cls.em && !writeEmissive )
+				continue;
 			if ( !lodgenWriteDdsArray( fileBase + s.suffix, cls.w, cls.h, *s.px, s.bc3 ) )
 				return fail( QString( "could not write %1" ).arg( fileBase + s.suffix ) );
 			arrays++;
@@ -5738,7 +5841,8 @@ bool lodgenBuildTextureArrays( const QStringList & btoPaths, const QString & dat
 		tex.insert( QLatin1String( lodmColorKey( cls.pbr ) ), gameBase + colorSfx );
 		tex.insert( QStringLiteral( "normal" ), gameBase + QStringLiteral( "_n.DDS" ) );
 		tex.insert( QLatin1String( lodmMaskKey( cls.pbr ) ), gameBase + maskSfx );
-		tex.insert( QStringLiteral( "emissive" ), gameBase + emSfx );
+		if ( writeEmissive )
+			tex.insert( QStringLiteral( "emissive" ), gameBase + emSfx );
 		root.insert( QStringLiteral( "textures" ), tex );
 		arr.insert( QStringLiteral( "class" ), QJsonArray{ cls.w, cls.h } );
 		QJsonArray layers, scales;
@@ -5765,6 +5869,9 @@ bool lodgenBuildTextureArrays( const QStringList & btoPaths, const QString & dat
 			   << cls.layers[l].emissiveScale << '\n';
 			textures++;
 		}
+		// the other spellings of a merged layer resolve to it (no sidecar line: one line per layer)
+		for ( auto a = cls.alias.constBegin(); a != cls.alias.constEnd(); ++a )
+			layerOf.insert( a.key(), qMakePair( lodmGame, a.value() ) );
 	}
 	side.close();
 
@@ -5823,6 +5930,11 @@ bool lodgenBuildTextureArrays( const QStringList & btoPaths, const QString & dat
 			.arg( textures ).arg( arrays ).arg( legacyClasses ).arg( pbrClasses ).arg( lodmLayers )
 			.arg( ownEmitSources )
 			.arg( shapesWithLayer ).arg( shapesWithoutUv2 ).arg( unreadable );
+	// lane TIDY1's two clauses, only when they did something (the switches off leave the line as it was)
+	if ( report && mergedLayers > 0 )
+		*report += QString( "; %1 duplicate layer(s) merged (identical texels)" ).arg( mergedLayers );
+	if ( report && blackEmissiveDropped > 0 )
+		*report += QString( "; %1 black emissive sheet(s) not written" ).arg( blackEmissiveDropped );
 	return true;
 }
 
@@ -16948,7 +17060,7 @@ bool lodgenBuildCardArrays( const QStringList & btoPaths, const QString & cardDi
 
 	// pass 3: the arrays and their .lodm; the layer of every card
 	QHash<QString, QPair<QString, int>> layerOf;   // card lodm (lower) -> (array lodm game path, layer)
-	int arrays = 0, sets = 0;
+	int arrays = 0, sets = 0, blackEmissiveDropped = 0;
 	for ( auto it = groups.begin(); it != groups.end(); ++it ) {
 		Group & g = it.value();
 		/* The size in the FILE NAME: WxH, and ".ring" for a horizon-ring group. Never the
@@ -16960,6 +17072,13 @@ bool lodgenBuildCardArrays( const QStringList & btoPaths, const QString & cardDi
 		const QString colorSfx = QLatin1String( lodmColorSuffix( g.pbr ) ) + QStringLiteral( ".DDS" );
 		const QString maskSfx = QLatin1String( lodmMaskSuffix( g.pbr ) ) + QStringLiteral( ".DDS" );
 		const QString emSfx = QLatin1String( lodmEmissiveSuffix( g.pbr ) ) + QStringLiteral( ".DDS" );
+		// a black emissive is not written, as the mesh arrays have it (lane TIDY1);
+		// WW_LODGEN_KEEP_BLACK_EMISSIVE=1 is the gate's way back
+		// black as SHIPPED: the BC1 sheet at the aux size and mip count it is written with
+		const bool writeEmissive = !qgetenv( "WW_LODGEN_KEEP_BLACK_EMISSIVE" ).isEmpty()
+			|| !lodgenEmissiveShipsBlack( g.emis, g.aw, g.ah, g.auxMips );
+		if ( !writeEmissive )
+			blackEmissiveDropped++;
 		// `_n` is BC7, as the per-card set is (lane IMPOSTORDEPTH2)
 		const struct { QString suffix; const std::vector<std::vector<quint32>> * px; bool bc3; bool aux; bool bc7; } sheets[4] = {
 			{ colorSfx, &g.color, true, false, false }, { QStringLiteral( "_n.DDS" ), &g.n, true, true, true },
@@ -16967,6 +17086,8 @@ bool lodgenBuildCardArrays( const QStringList & btoPaths, const QString & cardDi
 			// the emissive is BC1: three channels and no alpha to carry
 			{ emSfx, &g.emis, false, true, false } };
 		for ( const auto & s : sheets ) {
+			if ( s.px == &g.emis && !writeEmissive )
+				continue;
 			const int sw = s.aux ? g.aw : g.w, sh = s.aux ? g.ah : g.h;
 			const int sm = s.aux ? g.auxMips : g.mips;
 			if ( !lodgenWriteDdsArray( fileBase + s.suffix, sw, sh, *s.px, s.bc3, sm, s.bc7 ) )
@@ -16984,7 +17105,8 @@ bool lodgenBuildCardArrays( const QStringList & btoPaths, const QString & cardDi
 		tex.insert( QLatin1String( lodmColorKey( g.pbr ) ), gameBase + colorSfx );
 		tex.insert( QStringLiteral( "normal" ), gameBase + QStringLiteral( "_n.DDS" ) );
 		tex.insert( QLatin1String( lodmMaskKey( g.pbr ) ), gameBase + maskSfx );
-		tex.insert( QStringLiteral( "emissive" ), gameBase + emSfx );
+		if ( writeEmissive )
+			tex.insert( QStringLiteral( "emissive" ), gameBase + emSfx );
 		root.insert( QStringLiteral( "textures" ), tex );
 		arr.insert( QStringLiteral( "class" ), QJsonArray{ g.w, g.h } );
 		if ( g.ring ) {
@@ -17082,6 +17204,8 @@ bool lodgenBuildCardArrays( const QStringList & btoPaths, const QString & cardDi
 	if ( report )
 		*report = QString( "%1 card sets in %2 arrays (%3 groups), %4 C lines carry a layer, %5 sets unreadable" )
 			.arg( sets ).arg( arrays ).arg( groups.size() ).arg( cLines ).arg( unreadable );
+	if ( report && blackEmissiveDropped > 0 )
+		*report += QString( "; %1 black emissive sheet(s) not written" ).arg( blackEmissiveDropped );
 	if ( error )
 		error->clear();
 	return true;
