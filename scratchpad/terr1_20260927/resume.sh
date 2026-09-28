@@ -98,11 +98,16 @@ for cell in sorted({r['cell'] for r in R if r['cls'] == 'canyon'}):
 fi
 # 6. pictures (maps1 Boston camera, full size, then a 60 px title bar by label.py); ports 43761..
 if has pics; then
-	mkdir -p pics; P=43761
+	# night rule: an unused port per run, never a fixed base -- a random base, each port checked free (netstat) before use
+	mkdir -p pics; P=$(( 45000 + RANDOM % 9000 ))
+	freeport() { while netstat -an 2>/dev/null | grep -q ":$P "; do P=$((P+1)); done; }
 	# LODL: the ao2/terr_x1 folder the first session opened is gone and the Boston bakes write no .lodl, so the
 	# terrain mesh comes from a copy of the installed Commonwealth.lodl (the one maps1 copied; read-only source).
 	# The sheets drawn on it are the bake's own (SHEETS).
-	shot() { game; env LODI_DIR=$OD LV=2 SLOT=0 SDIM=2 SHEETS=$T/bakes/$2/$C LODL=$T/bakes/Commonwealth.lodl "${@:3}" bash shot.sh pics/$1.png $F Commonwealth $X0 $Y0 $X1 $Y1 8 $HW 1600 1600 $P; P=$((P+1)); }
+	# PICS="name name ..." renders only those (default: all eight); a rendered name's old png is removed first, so a
+	# failed launch cannot leave a stale picture to be labelled as new
+	shot() { [ -n "${PICS:-}" ] && case " $PICS " in *" $1 "*) ;; *) echo "skip $1"; return 0;; esac
+		rm -f pics/$1.png pics/$1_labeled.png; freeport; game; env LODI_DIR=$OD LV=2 SLOT=0 SDIM=2 SHEETS=$T/bakes/$2/$C LODL=$T/bakes/Commonwealth.lodl "${@:3}" bash shot.sh pics/$1.png $F Commonwealth $X0 $Y0 $X1 $Y1 8 $HW 1600 1600 $P; P=$((P+1)); }
 	lab() { [ -s pics/$1.png ] && python label.py pics/$1.png pics/$1_labeled.png "$2"; }
 	X0=-5; Y0=-10; X1=2; Y1=-3; HW=16384
 	shot sky_before base WW_RENDER_FLAT=1 WW_LODL_CHANNEL=mask-b

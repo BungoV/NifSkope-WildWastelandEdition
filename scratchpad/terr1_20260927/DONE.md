@@ -334,3 +334,64 @@ Builds, bakes and NifSkope runs are allowed in this session.
   stopped the task at 21:03, but the orphaned bake.sh (ON bake) keeps retrying; stopping it by pid was refused by
   the harness, so it runs until it gets through or reaches 40 tries (21:05 = try 5, still rc 126).
 - New `diagbake` step in resume.sh: the diagnostic bake + reading without rebuilding.
+
+## RESUME 2026-09-28 (from 12:31, lane TERR1 resumed by bungo's "you can continue the work")
+
+### Progress log
+- 12:31 lock absent, no lane NifSkope running, game down. Found the orphaned retry DID get through last night:
+  bakes/on (sky3 = 6eb5954f cosine law, try 6, rc 0, 502 s, 21:14) and bakes/off (sky3, rc 0, 517 s, 21:23).
+- 12:33 OFF byte gate on those bakes (sky3 `--no-stamp-normals --no-sky-objects` vs bakes/base = night-20260927):
+  VT.2.lodt, VT.4.lodt, VT.lodm all `same` -> PASS.
+- 12:34 started `resume.sh diagbake` (G2 diagnostic bake on runs/diag1, takes turn TERR1 itself; waited on WATER1,
+  turn taken 12:34:35).
+- 12:36 `resume.sh phys` on bakes/on (sky3, cosine law) -- MEASURED on the bake, physlaw_bake.json / physlaw_bake_summary.log:
+
+  | class | n | mask B after | before (terrain) | physical 1458 | physical 10k | MAE | bias |
+  |---|---|---|---|---|---|---|---|
+  | canyon | 96 | **87.4** | 231.4 | 98.8 | 85.3 | 30.4 | -11.4 |
+  | open | 36 | 210.7 | 210.9 | 229.5 | 209.1 | 34.7 | -18.8 |
+  | near | 120 | 164.4 | 224.8 | 166.8 | 148.0 | 32.3 | -2.3 |
+  | deck | 60 | 47.1 | 224.2 | 44.1 | 31.0 | 30.0 | +3.0 |
+  | all | 312 | | | | | 31.5 | **-6.0** (terrain-only: +95.6) |
+
+  Named streets baked mask B vs physical 1458: Theater (3,-7) 53.9 / 92.3; VaultTec (3,-3) 65.8 / 89.7; BeaconHill (3,-1)
+  61.7 / 96.6; Hubris (1,-5) 73.9 / 80.7; FensBank (-3,-5) 97.7 / 94.4; DiamondCity (-4,-8) 108.7 / 95.9; FensSewer
+  (-5,-7) 130.5 / 115.9; BackBay (0,-7) 106.9 / 124.9.
+  Pre-registered bars: canyon mean 70-114 -> 87.4 PASS (old F law, same script on its bake: 44.8 FAIL); every named
+  street >= 52 -> min 53.9 PASS (old: Theater 12.3 FAIL); |all bias| <= 10 -> -6.0 PASS (old: -32.6 FAIL).
+  Open ground byte-identical: 35 of 36 samples identical; the one that moved (-8, at -744,-9733) has an object wall
+  (slope 0.19) in reach in one direction, so the law moves it by design. The bar as worded ("open = identical") was
+  too wide: the canyon "open" class admits objects under 64 u. Exact identity is gated where the law claims it (next).
+- 12:40 `resume.sh gates` (canyon.py on the new bakes): canyon 139,679 texels 225.5 -> 122.1 (old law 88.1); under
+  202,275 texels 222.8 -> 43.9; open 10,039 texels 204.3 -> 204.25, within 1 level on 99.36% (old law 97.1%), max 33,
+  mean |d| 0.05, corr 0.9996. Per street (canyon.py, all canyon texels): VaultTec 61.3, Theater 71.5, BeaconHill 59.0,
+  FensBank 95.9, Hubris 94.2. Rail profile (cell -2,-10): ON 4 sign crossings, OFF 0 -> PASS (unchanged).
+- 12:45 NEW gate opengate.py (the law's own identity claim): every 4x4 block whose 16 texels have NO occupied object
+  square within 1458 u (+1 square): 3,860 blocks / 61,760 texels, decoded mask B ON == OFF at 0 violations; planted
+  one-texel refuter counts exactly 1 -> PASS. Near objects: 8,189,692 texels darker, 6,430 brighter (0.07%, BC block
+  coupling: the law cannot brighten). This gate is a regression gate: the old law made the same claim, so it does not
+  separate old from new; the canyon/street/bias bars above do.
+- 12:50 resume.sh CR fix proven on the real rail.json: the 4x cell read WITH `tr -d '\r'` gives track (-2,-10) and
+  `$((cy+1))` = -9; the same read WITHOUT it fails `-10: arithmetic syntax error` (the old defect) -> PASS.
+- G1/G3/G4 re-run on the new bakes (gates_resume.log, nrm.json): G1 2,607,793 stamped, 91.8% moved > 1 deg, mean
+  11.8 deg; G2 still 324 violations (refuter 5 = 4 + 1); identical to the first session (stamp code unchanged).
+- 12:41 diagnostic bake (runs/diag1 = 6eb5954f + stamp_diag.patch, rc 0, 405 s): its sheets == bakes/on byte for
+  byte; record 2,397,725 stamped texels (57.5 MB, whole 24-byte records).
+- 12:43 g2stampdiag.py said reading "B" (2,180 of 2,588 moved violation texels without a record). That per-TEXEL
+  reading was MY script's mistake: BC1 couples a block's 16 texels, so stamping one texel moves its block-mates, which
+  have no record. Key check (g2keycheck.py): quiet texels carry a record 0.007%, colour-changed texels 86%, so the key
+  is sound.
+- 12:47 per BLOCK (g2block.py): **all 324 violating blocks hold a stamp record** (262 exactly one texel, 43 two,
+  19 three or more); the recorded colour move before rounding is median 5.6 levels (23 < 2, 215 in 2-8, 86 >= 8),
+  weight median 1.0. Cause: a real road/flat fragment whose colour is within a few levels of the ground; the colour
+  sheet's BC1 (565 endpoints, 4 palette entries) swallows that one-texel move, the msn keeps the normal move. The
+  normals ARE stamped only where a road/flat fragment was written. The defect was the gate's mask (colour BC1 bytes as
+  a proxy for the stamp) = pre-registered reading A at block level. No code change.
+- 12:50 NEW G2 gate g2gate.py (the stamp's own mask = the diag record): of 178,906 msn blocks moved ON vs OFF,
+  blocks with no stamp record = **0** -> PASS. It can fail: planted one-byte change in an unstamped block = exactly 1;
+  the record mask shifted one block east (a stamp one block off) = 17,324 violations. Old proxy on the same sheets:
+  324. Stamped blocks whose msn bytes did not move: 1,456 (stamp normal ~ height normal, or BC1 swallowed it).
+- 12:55 resume.sh: `PICS="..."` renders a subset; a rendered name's old png is deleted first (the stale sky_after
+  can no longer be relabelled as new); a random port base checked free with netstat (night rule: no fixed base).
+- 12:56 started the five missing renders (sky_before, sky_after, normal_after, track before/after 4x); waiting on the
+  turn (held by FLIGHT).
