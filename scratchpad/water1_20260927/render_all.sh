@@ -13,7 +13,7 @@ V3RUNG=$ME/bk_rung_v3/FO4CSLOD/Commonwealth/Commonwealth.lodl
 RUNG=$ME/run_rung/NifSkope.exe
 NEW=$ME/run_new/NifSkope.exe
 INST="/e/Projects/Fallout 4 Mods/mods/FO4CSLOD/FO4CSLOD/Commonwealth"   # read-only: sheets for the whole map
-port=42900
+port=${PORTBASE:-42900}   # pass PORTBASE= a base checked unused (netstat) for each pass
 shot() { # <name> <extra env...>
   local name=$1; shift
   port=$((port+1))

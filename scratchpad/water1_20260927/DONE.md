@@ -368,3 +368,30 @@ Sandboxing is intermittent: about half of this evening's GUI launches of either 
 The north pair (cells -12..-11, 27..28, ground ~7,000 u) first came out with the land at the top edge: shot.sh
 centres the camera at z 0. Added `CZ` to shot.sh (default 0, old pictures unchanged) and re-framed it at 7,000 u,
 2 cells across. 21:05: **the game came up** (tasklist Fallout4.exe), so the re-frame waits for the game to close.
+
+## CONTINUATION 3 (resumed 2026-09-28 12:31, date-read; bungo: "you can continue the work")
+Lock free (`.ns_turn` absent), game down. The lane's scripts now take the lock as `WATER1` (was `water1`;
+shot.sh, task3.sh, bake.sh, bake_btr.sh); render_all.sh takes `PORTBASE=` (a base checked unused with netstat).
+12:34 `PORTBASE=45900 render_all.sh real` started for the 6 owed pictures (E_waterheight pair, N_default pair,
+N_waterheight pair); run_slope/run_new are copies that already ran (Avast).
+12:32-12:42 all 6 made (no Avast sandbox this time), lock released after each shot; FLIGHT took the turn at 12:43.
+
+### Placed-water pictures, gates (`pixcell.py`, cell z ranges from `lodl_open_authority.py ... cell`)
+| pair | cells | measured | result |
+|---|---|---|---|
+| E_default (pond, cell 1,-4) | 1,-4 z 720..1264 | 3,939 differ, 0 outside (done 09-27) | PASS |
+| E_waterheight | same | 75,722 differ, **71,899 outside** | **FAIL as pre-registered, explained**: 70,046 (92.5%) are ONE colour pair, the sea at 450 u 54,121,178 -> 26,72,137. Before, every body in view was at 450 so the ramp was one value (legend 450.0 x5) and the sea took its middle; after, the new stream (801.75..821.5 u) opens the ramp to 450..821.5 and the sea is its bottom. Same class as FL_waterheight on 09-27. Not a change to the sea's data |
+| N_default (hill streams, 2 cells) | -12..-11, 27..28 (z 6520..8688) | 21,104 differ, 0 outside, bbox 502..994 x 578..762 | PASS (weak: the 4 cells' footprint is 1.19 M of the 2.56 M px frame) |
+| N_waterheight | same | 20,661 differ, 0 outside | PASS (same weakness) |
+| floors (5x5 block painted far off) | -- | E_waterheight: 25 more outside -> FAIL; N_default: 25 outside -> FAIL | floors bite |
+Before logs: the flat file has **0 bodies** in the hill region ("0 bodies of 348 in this region"): the old bake lost
+this water entirely, so N_default_before = N_waterheight_before (md5 df01cfe4). After logs, hills: 5 bodies of 355,
+132 wet texels, 4 sloped bodies, 127 texels off their body height by up to 389.20 u, drawn as 131 one-texel quads,
+**read-back corner mean at most 7.568 u from the file's surface** (pond: 1.114 u); ground above water 0 (full rate)
+and 0 (view mesh, 32 a cell). The 7.6 u is the corner averaging on steep streams (up to 337 u of drop inside one body),
+not a data error; no bar was pre-registered for it, so it is reported, not judged.
+
+### Labelled pictures (full size, 60 px title bar, legend strip from the log), `pics/labeled/`
+T3_hills_before.png, T3_hills_after.png, T3_hills_waterheight_after.png, T3_pond_waterheight_after.png (new);
+T3_pond_before.png, T3_pond_after.png (09-27). Looked at T3_hills_after: blue stepped water in the hill valley.
+River fixture pass (`render_all.sh river`) queued behind FLIGHT and the game (waiter, PORTBASE 46100).

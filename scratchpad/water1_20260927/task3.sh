@@ -10,11 +10,11 @@ gate() { if tasklist //FI "IMAGENAME eq Fallout4.exe" 2>/dev/null | grep -q Fall
 case "$1" in
 fixture)
   gate; mkdir -p $ME/fixture
-  bash $TURN acquire water1 21600 || exit 1
+  bash $TURN acquire WATER1 21600 || exit 1
   "$EXE" -no-gui lodl "$(wp $ME/fixture/slope.lodl)" --water-slope-selftest \
       --water-slope-flat "$(wp $ME/fixture/flatonly.lodl)" > $ME/fixture/selftest.log 2>&1
   rc=$?
-  bash $TURN release water1
+  bash $TURN release WATER1
   echo "rc=$rc"; cat $ME/fixture/selftest.log
   [ -s $ME/fixture/selftest.log ] || { echo "EMPTY LOG: check the Avast log, do not relaunch"; exit 2; }
   ;;
