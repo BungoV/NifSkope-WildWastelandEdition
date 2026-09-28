@@ -246,3 +246,22 @@ skipped.** Red controls (must fail, do): grown 1.25x 510 of 511 over; --inflate 
 - box 323 (0.1605): part seam (0.053 when moved 0.25 u in x) and part real overhang.
 - box 493 (0.0123): 9 lattice points at an edge; 0.000 after a 0.5 u shrink.
 The emitter probe passed these in its own frame; the file's quantised centre moved the plane onto the seam.
+
+### R6. Street coverage + pictures (22:24-22:36)
+Street coverage (coverage.py, the same three eyes as before, b_after): occluded share of skyline pixels
+0.578 / 0.638 / 0.464, **mean 0.560** (before 0.029); Hi-Z culled placements mean 0.728 (before 0.0083).
+With the proposed hill boxes: 0.5615 / 0.728 -- the hills add 0.15 points; Boston is flat.
+Pictures (maps1 camera, run_v2 exe, second monitor, own port each; Avast marked the exe for virtualization at
+every launch, and 2 of 5 launches exited rc 0 with an empty log -- each retried once, both then wrote):
+- pics/ident_before.png -- proximity join, 64 u gap (b_rung)
+- pics/ident_after.png -- contact join, 32 u, cap 4,096 (b_after)
+- pics/occ_top_before.png (95 of 340 boxes in frame) / pics/occ_top_after.png (143 of 511) -- top-down, offline
+- pics/boxes_before.png / pics/boxes_after.png -- WW_LODI_BOXES wire boxes: a box that fits its building is
+  inside the walls, so the two differ in 247 pixels; the top-down pictures are the ones that show the boxes.
+
+### R7. Harnesses (22:37-)
+- lodi_v7_refuters.py on the whole-Commonwealth files: b_after 10 failures, b_rung the SAME 10, b_off the same 10
+  ((d)/(e) the legacy 16 u architecture-box closure, identity unique over chunks 39/41/56/70/71, three sky-stream
+  checks). None is new with IDENT1; the refuters were written for the one-chunk fixture and the legacy rule.
+- lodgen_native.sh: leg 3 "v3 lodo unknown header flag bit -- refused, but nothing named reserved flag" FAILS;
+  no IDENT1 commit touches src/lodofile.* (the flag check predates the lane).
