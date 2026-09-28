@@ -30,6 +30,7 @@ import vtread  # noqa: E402
 
 rungDir, onDir, outDir = sys.argv[1:4]
 os.makedirs(outDir, exist_ok=True)
+EDID = os.environ.get('EDID', 'Commonwealth')  # env EDID=NukaWorld; env COMPARE_ONLY=1 skips the pictures
 ROLE = {1: 'colour', 2: 'msn', 4: 'height', 5: 'mask'}
 BAR = 60
 try:
@@ -129,8 +130,8 @@ def mosaic(L, s, full_of):
 def main():
 	res = []
 	for dim in (2, 4):
-		Lb = vc.Lodv(os.path.join(rungDir, 'Commonwealth.VT.%d.lodt' % dim))
-		La = vc.Lodv(os.path.join(onDir, 'Commonwealth.VT.%d.lodt' % dim))
+		Lb = vc.Lodv(os.path.join(rungDir, EDID + '.VT.%d.lodt' % dim))
+		La = vc.Lodv(os.path.join(onDir, EDID + '.VT.%d.lodt' % dim))
 		c = compare(Lb, La, doctor=True)
 		print('control dim %d (one collapsed record byte flipped): %d tile payloads differ, %d texels differ -> %s'
 			  % (dim, c[3], c[4], 'RED (good)' if c[3] and c[4] else 'NOT RED'))
@@ -139,6 +140,8 @@ def main():
 			  'tiles with a collapsed sheet %d' % (dim, r[0], r[1], r[2], r[3], r[4], sum(1 for m in r[5].values() if m)))
 		res.append((dim, Lb, La, r, c))
 		print('file bytes: before %d, after %d' % (len(Lb.b), len(La.b)))
+	if os.environ.get('COMPARE_ONLY'):
+		return
 
 	dim, Lb, La, r, _ = res[0]
 	masks, diffmap = r[5], r[6]

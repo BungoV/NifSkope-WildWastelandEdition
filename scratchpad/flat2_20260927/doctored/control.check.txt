@@ -1,0 +1,43 @@
+gpu: GPU path -- setting Use GPU on; NVIDIA GeForce RTX 5070 Ti/PCIe/SSE2, OpenGL 4.3; BC7 self-check 1024 blocks, error GPU 26082378 <= CPU 26090366
+lodt ok 1
+lodt magic LDTX
+lodt version 2
+lodt headerBytes 256
+lodt flags 1
+lodt worldspace Commonwealth
+lodt south -12
+lodt west 32
+lodt north -1
+lodt east 43
+lodt worldSouth -12
+lodt worldWest 32
+lodt worldNorth -1
+lodt worldEast 43
+lodt levelDim 2
+lodt levelIndex 0
+lodt levelCount 2
+lodt tilesX 6
+lodt tilesY 6
+lodt contentTexels 512
+lodt borderTexels 8
+lodt storedTexels 528
+lodt mipCount 2
+lodt sheetCount 4
+lodt anisoSupported 8
+lodt compression 0
+lodt tileCount 36
+lodt coverNormalisation 96.0
+lodt tintStrength 0.350
+lodt levelDims 2,4,0,0,0,0,0,0
+lodt vhgtCorpusHash 0xCD9657C5ED7FBF70
+lodt paintCorpusHash 0x1E0EE34905AC77C8
+lodt sheet 0 role 1 dxgi 71 dxgiWithCover 71 colorSpace 1
+lodt sheet 1 role 2 dxgi 71 dxgiWithCover 71 colorSpace 0
+lodt sheet 2 role 5 dxgi 71 dxgiWithCover 77 colorSpace 0
+lodt sheet 3 role 4 dxgi 56 dxgiWithCover 56 colorSpace 0
+lodt present 36
+lodt coverTiles 0
+lodt storedBytesTotal 26485120
+lodt uniformSheets 0,20,0,20
+lodt uniformBytesSaved 17423360
+gpu: bc7 0 image(s), 0 block(s) on the GPU in 0 ms; 0 image(s) fell back to the CPU

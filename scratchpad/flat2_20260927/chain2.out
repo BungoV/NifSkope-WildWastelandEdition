@@ -1,0 +1,44 @@
+21:27:56 FLAT2 waiting on: 15560|E:\Projects\NifskopeWWE-water1\scratchpad\water1_20260927\run_slope\NifSkope.exe lock:WATER1
+21:28:12 FLAT2 waiting on: 6684|E:\Projects\NifskopeWWE-water1\scratchpad\water1_20260927\run_nodepth\NifSkope.exe lock:
+21:28:27 FLAT2 waiting on: 13064|E:\Projects\NifskopeWWE-water1\scratchpad\water1_20260927\run_nodepth\NifSkope.exe lock:WATER1
+21:28:58 FLAT2 waiting on: 42408|E:\Projects\NifskopeWWE-water1\scratchpad\water1_20260927\run_nodepth\NifSkope.exe lock:WATER1
+21:29:13 FLAT2 waiting on: 36768|E:\Projects\NifskopeWWE-water1\scratchpad\water1_20260927\run_pin\NifSkope.exe lock:
+21:29:44 FLAT2 waiting on: 25100|E:\Projects\NifskopeWWE-water1\scratchpad\water1_20260927\run_pin\NifSkope.exe lock:
+21:30:31 FLAT2 waiting on: 43736|E:\Projects\NifskopeWWE-water1\scratchpad\water1_20260927\run_pin\NifSkope.exe lock:WATER1
+21:30:46 FLAT2 waiting on: 15204|E:\Projects\NifskopeWWE-water1\scratchpad\water1_20260927\run_pin\NifSkope.exe lock:WATER1
+21:32:52 FLAT2 waiting on:  lock:WATER1
+21:33:08 FLAT2 waiting on: 3316|E:\Projects\NifskopeWWE-water1\scratchpad\water1_20260927\run_slope\NifSkope.exe lock:WATER1
+21:33:23 FLAT2 waiting on: 26836|E:\Projects\NifskopeWWE-water1\scratchpad\water1_20260927\run_pin\NifSkope.exe lock:
+turn taken by FLAT2 at 21:33:38
+control rc=0
+lodt storedBytesTotal 26485120
+lodt uniformSheets 0,20,0,20
+lodt uniformBytesSaved 17423360
+gpu: bc7 0 image(s), 0 block(s) on the GPU in 0 ms; 0 image(s) fell back to the CPU
+R2_block rc=1
+gpu: GPU path -- setting Use GPU on; NVIDIA GeForce RTX 5070 Ti/PCIe/SSE2, OpenGL 4.3; BC7 self-check 1024 blocks, error GPU 26082378 <= CPU 26090366
+lodt ok 0
+lodt refused: tile 3 sheet 1 one-value record is a block that does not decode to one value
+gpu: bc7 0 image(s), 0 block(s) on the GPU in 0 ms; 0 image(s) fell back to the CPU
+R3_pad rc=1
+gpu: GPU path -- setting Use GPU on; NVIDIA GeForce RTX 5070 Ti/PCIe/SSE2, OpenGL 4.3; BC7 self-check 1024 blocks, error GPU 26082378 <= CPU 26090366
+lodt ok 0
+lodt refused: tile 3 sheet 1 one-value record has a non-zero pad byte
+gpu: bc7 0 image(s), 0 block(s) on the GPU in 0 ms; 0 image(s) fell back to the CPU
+released by FLAT2 21:33:51
+=== render
+21:34:04 FLAT2 waiting on: 36928|E:\Projects\NifskopeWWE-flat2\scratchpad\flat2_20260927\run_rung\NifSkope.exe lock:
+21:34:20 FLAT2 waiting on: 20232|E:\Projects\NifskopeWWE-water1\scratchpad\water1_20260927\run_pin\NifSkope.exe lock:WATER1
+21:34:35 FLAT2 waiting on:  lock:WATER1
+21:34:50 FLAT2 waiting on: 25652|E:\Projects\NifskopeWWE-water1\scratchpad\water1_20260927\run_pin\NifSkope.exe lock:WATER1
+21:35:06 FLAT2 waiting on:  lock:WATER1
+turn taken by FLAT2 at 21:35:21
+released by FLAT2 21:35:50
+OK F8_sea_edge_inapp_before.png 1491802 B rc=0
+SKIP F9_sea_edge_inapp_after
+turn taken by FLAT2 at 21:36:05
+released by FLAT2 21:36:34
+OK F10_sea_edge_inapp_nowater_before.png 1947483 B rc=0
+turn taken by FLAT2 at 21:36:50
+released by FLAT2 21:37:20
+OK F11_sea_edge_inapp_nowater_after.png 1947483 B rc=0

@@ -11,8 +11,11 @@ port=43310
 shot() { # <name> <exe> <sheet dir>
   port=$((port+1))
   if [ -s $P/$1.png ]; then echo "SKIP $1"; return; fi
-  env NS="$2" SHEETS="$3" LODI_DIR="$INST" LV=2 SLOT=0 SDIM=2 \
+  env ${WATER:+WW_LODL_WATER=$WATER} NS="$2" SHEETS="$3" LODI_DIR="$INST" LV=2 SLOT=0 SDIM=2 \
     bash $ME/shot.sh $P/$1.png "$INST" Commonwealth 34 -10 41 -3 8 16384 1600 1600 $port
 }
-shot F2_sea_edge_before $ME/run_rung/NifSkope.exe $ME/bakes/sea_rung/vt/FO4CSLOD/Commonwealth
-shot F3_sea_edge_after  $ME/run_new/NifSkope.exe  $ME/bakes/sea_on/vt/FO4CSLOD/Commonwealth
+shot F8_sea_edge_inapp_before $ME/run_rung/NifSkope.exe $ME/bakes/sea_rung/vt/FO4CSLOD/Commonwealth
+shot F9_sea_edge_inapp_after   $ME/run_new/NifSkope.exe  $ME/bakes/sea_on/vt/FO4CSLOD/Commonwealth
+# the one-value sheets are the sea floor, which the default flat water sheet hides: the same pair with water off
+WATER=0 shot F10_sea_edge_inapp_nowater_before $ME/run_rung/NifSkope.exe $ME/bakes/sea_rung/vt/FO4CSLOD/Commonwealth
+WATER=0 shot F11_sea_edge_inapp_nowater_after  $ME/run_new/NifSkope.exe  $ME/bakes/sea_on/vt/FO4CSLOD/Commonwealth

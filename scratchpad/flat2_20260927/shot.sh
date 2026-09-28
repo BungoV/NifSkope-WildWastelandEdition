@@ -17,7 +17,7 @@ OBJ=( WW_LODL_OBJECTS="$(wp "${LODI_DIR:-$F}")/$E.lodi" WW_LODI_REGION="${OBJ_RE
 [ "$SLOT" != none ] && OBJ+=( WW_LODI_SLOT=$SLOT )
 [ -n "${NOOBJ:-}" ] && OBJ=( WW_BAKE2_NOOBJ=1 )
 if tasklist //FI "IMAGENAME eq Fallout4.exe" 2>/dev/null | grep -q Fallout4.exe; then echo "GAME UP"; exit 1; fi
-bash /e/Projects/NifskopeWWE-fix1/scratchpad/fix1_20260926/turn.sh acquire flat2 21600 || exit 1
+bash /e/Projects/NifskopeWWE-fix1/scratchpad/fix1_20260926/turn.sh acquire FLAT2 21600 || exit 1
 SCOPE=flat2; REGKEY="HKCU\Software\NifTools\NifSkope 2.0 $SCOPE"
 wipe() { reg delete "$REGKEY" //f > /dev/null 2>&1 || true; }
 wipe; trap wipe EXIT
@@ -34,7 +34,7 @@ env "${OBJ[@]}" WW_SETTINGS_SCOPE="$SCOPE" \
     WW_CAMERA_CENSUS="$(wp "${OUT%.png}.cam.log")" \
     WW_WINDOW_AT=1960,40 \
     timeout 1200 "$NS" --port "$PORT" "$(wp "$LODL")" > "${OUT%.png}.log" 2>&1
-rc=$?; bash /e/Projects/NifskopeWWE-fix1/scratchpad/fix1_20260926/turn.sh release flat2
+rc=$?; bash /e/Projects/NifskopeWWE-fix1/scratchpad/fix1_20260926/turn.sh release FLAT2
 if [ -s "$OUT" ]; then
   echo "OK $(basename "$OUT") $(stat -c %s "$OUT") B rc=$rc"
 else
