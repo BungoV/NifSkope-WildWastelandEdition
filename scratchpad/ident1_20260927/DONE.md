@@ -265,3 +265,24 @@ every launch, and 2 of 5 launches exited rc 0 with an empty log -- each retried 
   checks). None is new with IDENT1; the refuters were written for the one-chunk fixture and the legacy rule.
 - lodgen_native.sh: leg 3 "v3 lodo unknown header flag bit -- refused, but nothing named reserved flag" FAILS;
   no IDENT1 commit touches src/lodofile.* (the flag check predates the lane).
+- lodgen_native.sh (all legs; no leg selector), run_v2 exe, 22:37-23:13: **leg 4 (Sanctuary region bake) ok;
+  leg 13 (piece-fit occluders, downtown Boston) ok: 280 boxes, 280 of 280 hold all 100 points, floor 280 of 280
+  leak; leg 13c (the default building fit) FAIL: 302 boxes, 6 over 1 percent, worst 0.1605, floor 300 of 302
+  leak** -- the same failure as the whole-map gate (box 323's 0.1605 is in this region). 34 checks, 3 failures:
+  13c, leg 3 (above), and leg 5 "every field of the record is one this comparison has decided about
+  (unaccounted: products)" -- a .lodb field added by another lane; no IDENT1 commit touches the .lodb writer.
+- lodi_v7.sh (fixtures from the main checkout; RUNG = main's release/NifSkope.before_lodiv7.exe): G2/G3 green
+  (12 refuters, 7 red controls, 0 failures; C++ and Python readers agree, groups 588); G1 byte identity SKIP (no
+  rung bake in this worktree); **G4 identity / placement: no picture** -- the launches exited with an empty log
+  (antivirus sandbox). Retried once: worse (4 failed).
+- lodl_channels.sh (fixtures from the main checkout): first run every channel check that printed was ok, then
+  the checker stopped on the missing ao_way_back.png (empty log, the same sandbox exit). Retried once (23:24):
+  10 shots not written. AvastSvc.log marked run_v2\NifSkope.exe for virtualization 24 times in that window.
+  No more retries, no antivirus change (skill ww-gui-launch-silent-exit). **The GUI harness legs are OWED.**
+
+### R8. Cleanup + skills (23:3x)
+Deleted b_rung, b_off, b_after (573 MB each) and cache (22 MB); no m_* folders were left. Kept: the dumps,
+gate JSONs, pics/, run_v2 (the exe the pictures used).
+Skills loaded this resume: none by the Skill tool (ww-gui-launch-silent-exit followed as quoted in the brief).
+Wished for: a street-panorama coverage skill (coverage.py + eyes.py are the procedure). Written:
+.claude/skills/ww-lodi-drawn-mesh (how an offline gate picks the mesh a .lodi placement draws).
