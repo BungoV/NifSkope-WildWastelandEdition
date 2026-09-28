@@ -399,3 +399,13 @@ Commit b4e391d9, pushed. Then queued (runs after a clean river pass): `resume12.
 Boston chunk bakes: run_nodepth plain, run_new + run_nodepth with --terrain-identity; btr_cmp.py + --floor) and
 RESUME 1 (the depth-view renders with run_depth, renamed back from .paused). shot.sh and bake_btr.sh now re-check
 the game after taking the turn (a flight can hold the turn for 20-30 min).
+14:44: FLIGHT held the turn and Fallout4.exe ran from 12:43 to at least 14:44 (checked every 10 min); the river
+waiter gave up at its 2 h limit, having never taken the turn. I stopped the chain waiter too (it held nothing).
+Nothing of RESUME 1-2 or the river pass ran. No WATER1 process is waiting on the lock.
+
+### Still owed (next pick-up, from this folder, game down, one at a time)
+1. `PORTBASE=<unused> bash render_all.sh river` (R_default, R_waterheight = the synthetic sloped river; R_default_flatbuild
+   = run_nodepth, never launched yet, may be sandboxed by Avast once), then label them with label.py.
+2. `bash resume12.sh all` (depth-bake removal chunk gates, then the depth-view renders); then agree.py score,
+   pixel identity pics_depth/FL_* vs pics/FL_*, legend_check.py with depth, label A_depth.
+3. Last: delete bk_*, cache/, fixture/*.lodl.
