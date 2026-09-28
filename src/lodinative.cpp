@@ -418,7 +418,9 @@ struct ChannelName
 const ChannelName CHANNEL_NAMES[] = {
 	{ "identity", LodlChannel::Identity },
 	{ "placement", LodlChannel::Placement },
-	{ "identityraw", LodlChannel::IdentityRaw },
+	/* IDENT1 (2026-09-27): was `identityraw`. bungo read it as an object map ("05 is unusable"); it is only the
+	 * low byte of the placed piece's id, so the name says that now. */
+	{ "placement-lowbyte", LodlChannel::IdentityRaw },
 	{ "sky", LodlChannel::Sky },
 	{ "ground", LodlChannel::Ground },
 	{ "seed", LodlChannel::Seed },
@@ -1225,11 +1227,11 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 				: channel == LodlChannel::SelfAo
 					? QStringLiteral( "the per-vertex self-AO (.lodo 0x0F)" )
 				: channel == LodlChannel::Identity
-					? QStringLiteral( "the group, hashed to colour (the stock channel 1 palette)" )
+					? QStringLiteral( "one colour per object group (a building; the .lodi group table, cut at chunk lines), hashed" )
 				: channel == LodlChannel::Placement
-					? QStringLiteral( "the placement identity, hashed to colour (the stock channel 1 palette)" )
+					? QStringLiteral( "one colour per placed kit piece (the placement identity, hashed; not a building map)" )
 				: channel == LodlChannel::IdentityRaw
-					? QStringLiteral( "the placement identity's low byte as grey" )
+					? QStringLiteral( "the low byte of each placed kit piece's id, as grey (a debug view, not a building map)" )
 				: channel == LodlChannel::Sky
 					? QStringLiteral( "the per-placement sky visibility (.lodi 0x11)" )
 				: channel == LodlChannel::Ground

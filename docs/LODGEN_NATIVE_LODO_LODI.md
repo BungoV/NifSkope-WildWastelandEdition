@@ -1263,6 +1263,45 @@ checks:
 | cells with none | 60 |
 | instances in the region | 33,123 |
 
+#### 4.5.4 One box a building, and the probe (lane IDENT1, 2026-09-28)
+
+**The default is now one box a BUILDING (`--occluder-fit building`); the rule
+above is `--occluder-fit piece`, the way back.** The emitter takes each object
+group of §4.9 whose pieces are buildings, places every member's DRAWN level-0
+triangles (`bases[baseId].rep[mnamSlot]`), and fits one box in the building's
+own yaw frame (`fitBuildingBox`, `src/nativeemit.cpp`):
+
+1. voxelise the placed triangles at 16 u or coarser; a surface voxel counts as
+   solid, the inside is filled along the rays `WW_LODI_OCC_RAYS` (default
+   `xXyYz`: both ways on X and Y, down on Z);
+2. take the largest solid box in the voxels and shave one voxel off each face;
+3. **THE PROBE** (new): the 9 × 9 × 9 lattice of the box, faces and corners
+   included, is ray-tested against the triangles along the same rays. While more
+   than 0.5 percent of it is out of the walls, shrink half a voxel a face (never
+   under 16 u), at most 4 times; after that the building gets no box, and the
+   census counts it.
+
+The row is unchanged (§4.5.1): the carrier is one member placement, and the
+row's `meshId` is the carrier's drawn mesh.
+
+**Measured on the whole Commonwealth (bake `b_after`, 2026-09-28):** 1,232
+building groups; 565 fitted, 627 too thin for a 16 u box, **40 refused by the
+probe**, 62 shrunk to pass it; **511 boxes written** (54 dropped by the 4-a-cell
+cap). The gate `tests/spells/lodi_occluder_building.py --gate` (every box at
+most 1 percent out of its building, measured against the mesh each member
+DRAWS; the same boxes grown 1.25× must leave): **5 of 511 over 1 percent,
+worst 0.1605, volume-weighted 0.0004; the grown boxes: 510 of 511 over.** The
+gate FAILS on those 5, and says why: in boxes 142, 408 and 486 the box's
+centre lattice plane lies exactly on the joint between two stacked wall pieces
+(moving the box 0.25 u off it gives 0.000); box 323 is part joint, part real
+overhang; box 493 is 9 edge points (0.000 after a 0.5 u shrink). Before the
+probe the same code wrote 537 boxes with 102 over 1 percent.
+
+**Street-level coverage** (three street eyes in Boston, a 360° panorama each,
+`scratchpad/ident1_20260927/coverage.py`): the share of skyline pixels an
+occluder box hides went from **0.029 (one box a piece) to 0.560**; a
+conservative Hi-Z test would cull 0.728 of the placements in view.
+
 ---
 
 ### 4.6 The aggregate ring-3 impostors (v4)
@@ -1706,8 +1745,41 @@ the writer knows the sort and the chunk partition. **A component cut by a chunk
 border becomes two groups, one a side**, which is the same rule the rest of the
 format lives under.
 
-**THE DEFAULT RULE: THE PROXIMITY JOIN (bungo's ruling 2026-09-19; lane
-IDENTPROX measured it, lane HORIZONOUT shipped it).** Three clauses, in order:
+**THE DEFAULT RULE: THE CONTACT JOIN (lane IDENT1, 2026-09-28;
+`--identity-join contact`).** Three clauses, in order:
+
+1. a SCOL part's group is its SCOL reference's group;
+2. every placement that is not a tree and has a drawn LOD mesh joins every
+   other one whose placed level-0 TRIANGLES come within **32 u**
+   (`GroupKnobs::contactTol`), taking the pairs nearest first;
+3. **a join is refused when the joined group would be wider than 4,096 u on
+   X or on Y** (`GroupKnobs::groupCap`, one cell). Trees and card-only
+   placements stay alone.
+
+The two numbers come from a sweep over the whole Commonwealth's touching pairs
+(tolerance 0 / 0.5 / 1 / 2 / 4 / 8 / 16 / 32 u, cap none / 2,048 / 4,096 /
+8,192 u; `scratchpad/ident1_20260927/sweep.py`). **The cap:** 3,840 u is the
+first that keeps every landmark core whole (the west Hub tower is 3,781 u
+wide); above 4,096 u Diamond City welds to the blocks around it. **The
+tolerance:** at cap 4,096 the two Hub towers are 53 / 44 groups at 2 u, 9 / 6
+at 16 u and 1 / 4 at 32 u, and the pieces a tower takes in that are not the
+tower (its shacks, catwalks, the structure LODs) do not grow from 8 u to 32 u.
+Whole-Commonwealth after bake: 69,806 placements, 42,306 eligible, every one
+with a group (0 bad roots); **21,140 groups** (1 piece: 16,042; 2-4: 4,474;
+5-16: 300; 17-64: 149; 65-256: 134; 257-1,024: 41; over 1,024: 0; largest 928);
+the widest joined group 4,096 × 3,376 u, none over the cap; 31 single pieces
+are wider than the cap on their own. Hub tower east 1 group, west 4 (the other
+3 are lone pieces), Trinity 1, **Diamond City 15** (no cap that stops the
+welding keeps the stadium whole), **the row houses 1** (54 pieces, 3,109 ×
+2,144 u: the terraces share walls at 0 u, and the cap cuts by width only).
+The ids stay per chunk (u16): 188 joined groups cross a 16,384 u chunk line
+and get one id a side. `WW_LODI_CONTACT_TOL`, `WW_LODI_GROUP_CAP` and
+`WW_LODI_GROUP_DUMP` are the measuring surface. `--identity-join proximity`
+is the way back, byte-identical to the 2026-09-27 files.
+
+**THE PROXIMITY JOIN (the default 2026-09-19 .. 2026-09-27; bungo's ruling
+2026-09-19; lane IDENTPROX measured it, lane HORIZONOUT shipped it;
+`--identity-join proximity`).** Three clauses, in order:
 
 1. a SCOL part's group is its SCOL reference's group;
 2. every placement that is **not a tree** and **has a drawn LOD mesh** joins a
@@ -1725,11 +1797,10 @@ already welds 286 placements across 9 Creation Kit layers into one
 18,121-unit identity: the elevated highway deck's axis-aligned box hangs over
 four South Boston city blocks, and no gap fixes that (`src/nativeemit.cpp`,
 the `(ii) THE JOIN` comment). 128 u is the last gap at which no identity holds
-two different reference buildings. **Chunk 4.4.-12: 167 groups at the default
+two different reference buildings. **Chunk 4.4.-12: 167 groups under this rule
 against 588 under the legacy rule** (read from the two `.lodi` headers' 0x108
 word, `scratchpad/horizonout_20260919/join/{prox,legacy}`); 2,387 grouped,
-largest 206, 62 singletons. `--identity-join proximity` says the default out
-loud; `--identity-join legacy` is the way back.
+largest 206, 62 singletons. `--identity-join proximity` selects this rule; `--identity-join legacy` is the way back.
 
 **THE LEGACY RULE (`--identity-join legacy`, the shipped rule until
 2026-09-19, and the gate's red control: it must reproduce 588 groups on chunk
@@ -1790,7 +1861,7 @@ the base, not the boxes. That is the open question for the ruling, not a defect
 in the table.
 
 **Census.** `groups`, `groupedPlacements`, `largestGroup`, `singletonGroups`.
-Chunk 4.4.-12 under the LEGACY rule (the default gives 167, above): 588 groups
+Chunk 4.4.-12 under the LEGACY rule (the proximity join gives 167, above): 588 groups
 over 2,449 placements, 1,981 grouped, largest 205
 (a single kit-built house of 205 distinct refs — `DecoMainA1x1Wall01` ×43,
 `DecoRoof1x1Str01` ×24, garage floors — spanning 0.7 × 0.4 of a cell), 468
@@ -2931,8 +3002,8 @@ never shown.
 | name | what it paints | the byte, and where it is stored |
 |---|---|---|
 | `identity` | **the GROUP**, hashed with the stock channel-1 palette -- one colour a house (v7). On a file with no group table it falls back to the per-placement identity **and the note line says so by name**, rather than drawing the fallback silently | `.lodi` group table (§4.9) |
-| `placement` | every placement its own colour -- **what `identity` drew before v7** | `.lodi` instance identity (§4.1c) |
-| `identityraw` | that identity's low byte as grey | `.lodi` instance identity & 0xFF |
+| `placement` | one colour per placed kit piece -- **what `identity` drew before v7**; not a building map | `.lodi` instance identity (§4.1c) |
+| `placement-lowbyte` | the low byte of each placed kit piece's id, as grey: a debug view, not a building map (was `identityraw` until IDENT1, 2026-09-27) | `.lodi` instance identity & 0xFF |
 | `sky` | sky visibility: the **per-vertex stream** on a v7 file (§4.10), the flat per-placement byte on a v6 one. The note line names WHICH served, with its own count -- `per-vertex stream, N bytes over M slices` against `placement byte, N placements` -- and both numbers are read back from what was uploaded | `.lodi` sky stream (§4.10), else instance byte 0x11 |
 | `ground` | ground-contact blend -- PLACEMENTS and TERRAIN in one grey ramp | **per vertex from the `.lodi` v12 stream (§4.16) when the file carries it**, else instance byte 0x12 (one flat value a placement); the note line says which of the two it drew; the terrain is drawn at the ramp's value at the surface, which is the constant 255, and the note line says so |
 | `seed` | per-placement tree seed hashed to colour; **0 = not a tree = black** | `.lodi` instance byte 0x13 (§4.3) |

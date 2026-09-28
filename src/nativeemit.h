@@ -164,6 +164,13 @@ void lodgenNativeScrappableOption( bool scrappable );
  *  BOX gap of any size bridges a street (an elevated highway deck's box hangs
  *  over the buildings under it) while the mesh gap does not until 256 u. */
 void lodgenNativeIdentityJoinOption( bool legacy, float gapWorld );
+/*! IDENT1 (2026-09-27). `contact`: the CONTACT join -- pieces whose placed
+ *  triangles touch, plus SCOL parts, under a size cap -- replaces the 64 u
+ *  proximity join (`--identity-join proximity` is the way back; `legacy` wins
+ *  over both). `occluderBuilding`: one occluder box a building GROUP, fitted
+ *  inside the group's enclosed volume, replaces one box a piece
+ *  (`--occluders piece` is the way back). Both ON by default. */
+void lodgenNativeIdentityContactOption( bool contact, bool occluderBuilding );
 //! One placement (the same (ref, part) arriving from several rings is kept once, first wins).
 void lodgenNativeAddPlacement( const NativePlacement & p );
 //! One lit vertex of a placement: the emitter averages AO, sky and ground per record (0..1 each).

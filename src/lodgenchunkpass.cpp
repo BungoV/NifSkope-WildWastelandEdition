@@ -869,6 +869,11 @@ QStringList lodgenIdentityDump( const LodgenChunkPassOptions & pass, const Lodge
 	add( "native.scrappable", b( x.scrappable ) );
 	add( "native.identityJoinLegacy", b( x.identityJoinLegacy ) );
 	add( "native.identityJoinGap", f( x.identityJoinGap ) );
+	// IDENT1: named only when ON, so the off bake's identity word is the old one exactly
+	if ( x.identityJoinContact )
+		add( "native.identityJoinContact", b( true ) );
+	if ( x.occluderBuilding )
+		add( "native.occluderBuilding", b( true ) );
 	add( "native.aggregate", b( x.aggregate ) );
 	add( "native.aggregateMin", n( x.aggMin ) );
 	add( "native.aggregateTile", n( x.aggTile ) );
