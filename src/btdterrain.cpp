@@ -474,6 +474,8 @@ constexpr float WATER_PLAIN_A = 0.60f;
  * goes clear as its depth over the file's full-rate ground falls to 0, over this
  * many units, so the coarse terrain mesh's cut through the sheet is not a hard line. */
 constexpr float WATER_SHORE_FADE = 64.0f;
+//! A shore texel's quads a side: 4 = one vertex every 32 units at the full body rate.
+constexpr int SHORE_SUB = 4;
 quint32 waterPlainRgba() { return packRgba( WATER_PLAIN_R, WATER_PLAIN_G, WATER_PLAIN_B, WATER_PLAIN_A ); }
 
 //! Water height, `t` = 0 the lowest water of the region, 1 the highest.
@@ -1529,6 +1531,28 @@ void addLodlWater( NifModel * nif, const LodtFile & f, const LodtRegionSpec & sp
 					}
 			}
 		qint64 fadedQuads = 0;
+		// the full-rate ground at a world point, Catmull-Rom through the 4x4 samples round it
+		const int gMaxX = ( f.cellMaxX() - minX + 1 ) * spc - 1, gMaxY = ( f.cellMaxY() - minY + 1 ) * spc - 1;
+		auto groundAt = [&]( float wx, float wy ) -> float {
+			const float gx = ( wx - float( minX ) * 4096.0f ) * float( spc ) / 4096.0f;
+			const float gy = ( wy - float( minY ) * 4096.0f ) * float( spc ) / 4096.0f;
+			const int ix = int( std::floor( gx ) ), iy = int( std::floor( gy ) );
+			auto cr = []( float t, float * o ) {
+				const float t2 = t * t, t3 = t2 * t;
+				o[0] = 0.5f * ( -t3 + 2.0f * t2 - t );
+				o[1] = 0.5f * ( 3.0f * t3 - 5.0f * t2 + 2.0f );
+				o[2] = 0.5f * ( -3.0f * t3 + 4.0f * t2 + t );
+				o[3] = 0.5f * ( t3 - t2 );
+			};
+			float wu[4], wv[4];
+			cr( gx - float( ix ), wu );
+			cr( gy - float( iy ), wv );
+			float h = 0.0f;
+			for ( int b = 0; b < 4; b++ )
+				for ( int a = 0; a < 4; a++ )
+					h += wu[a] * wv[b] * f.height( qBound( 0, ix - 1 + a, gMaxX ), qBound( 0, iy - 1 + b, gMaxY ) );
+			return h;
+		};
 		std::vector<float> surfAtQuad;   // a sloped quad's texel surface from the file; NaN on flat runs
 		for ( int v = 0; v < H; v++ ) {
 			const float cy = float( minY ) * 4096.0f + float( by0 + v * stepT ) * 4096.0f / float( bodyS );
@@ -1612,30 +1636,46 @@ void addLodlWater( NifModel * nif, const LodtFile & f, const LodtRegionSpec & sp
 					}
 					q.cornerColour = true;
 				}
-				if ( nearShore[at] ) {
-					/* each corner's depth = the mean of the up-to-four texels sharing
-					 * it, a dry texel counting as 0 and any body's water as its own
-					 * depth (two bodies meeting do not fade), then smoothstep to alpha */
-					static const int CORNER_F[4][2] = { { -1, -1 }, { 0, -1 }, { 0, 0 }, { -1, 0 } };
-					for ( int k = 0; k < 4; k++ ) {
-						float sum = 0.0f;
-						int n = 0;
-						for ( int dv = 0; dv < 2; dv++ )
-							for ( int du = 0; du < 2; du++ ) {
-								const int uu = u + CORNER_F[k][0] + du, vv = v + CORNER_F[k][1] + dv;
-								if ( uu < 0 || vv < 0 || uu >= W || vv >= H )
-									continue;
-								const size_t j = size_t( vv ) * size_t( W ) + size_t( uu );
-								sum += ids[j] ? qMax( dep[j], 0.0f ) : 0.0f;
-								n++;
-							}
-						const float t = qBound( 0.0f, ( n ? sum / float( n ) : 0.0f ) / WATER_SHORE_FADE, 1.0f );
-						q.fade[k] = t * t * ( 3.0f - 2.0f * t );
-					}
-					fadedQuads++;
-				}
 				q.body = id;
-				if ( q.x1 > q.x0 && q.y1 > q.y0 ) {
+				if ( nearShore[at] && q.x1 > q.x0 && q.y1 > q.y0 ) {
+					/* A shore texel is cut into SHORE_SUB x SHORE_SUB quads. Each
+					 * vertex takes its surface and colour bilinearly from the texel
+					 * quad's corners, and its alpha from its OWN depth: the surface
+					 * minus the full-rate ground through a Catmull-Rom patch, so the
+					 * fade's edge is a smooth curve through the game's heights, not
+					 * the texel mask (bungo 2026-09-28: "looks kind of low quality") */
+					const int S = SHORE_SUB;
+					auto lerpC = [&]( float a, float b, float c, float d, float s0, float t0 ) {
+						return ( a * ( 1 - s0 ) + b * s0 ) * ( 1 - t0 ) + ( d * ( 1 - s0 ) + c * s0 ) * t0;
+					};
+					auto chan = [&]( int k, int sh ) { return float( ( q.rgbaC[k] >> sh ) & 0xFF ) / 255.0f; };
+					for ( int j = 0; j < S; j++ )
+						for ( int i = 0; i < S; i++ ) {
+							WaterQuad sq = q;
+							sq.x0 = q.x0 + ( q.x1 - q.x0 ) * float( i ) / float( S );
+							sq.x1 = q.x0 + ( q.x1 - q.x0 ) * float( i + 1 ) / float( S );
+							sq.y0 = q.y0 + ( q.y1 - q.y0 ) * float( j ) / float( S );
+							sq.y1 = q.y0 + ( q.y1 - q.y0 ) * float( j + 1 ) / float( S );
+							static const int SC[4][2] = { { 0, 0 }, { 1, 0 }, { 1, 1 }, { 0, 1 } };
+							for ( int k = 0; k < 4; k++ ) {
+								const float s0 = float( i + SC[k][0] ) / float( S ), t0 = float( j + SC[k][1] ) / float( S );
+								sq.dz[k] = lerpC( q.dz[0], q.dz[1], q.dz[2], q.dz[3], s0, t0 );
+								if ( q.cornerColour ) {
+									float rgb[3];
+									for ( int ch = 0; ch < 3; ch++ )
+										rgb[ch] = lerpC( chan( 0, ch * 8 ), chan( 1, ch * 8 ), chan( 2, ch * 8 ), chan( 3, ch * 8 ), s0, t0 );
+									sq.rgbaC[k] = packRgba( rgb[0], rgb[1], rgb[2],
+										lerpC( chan( 0, 24 ), chan( 1, 24 ), chan( 2, 24 ), chan( 3, 24 ), s0, t0 ) );
+								}
+								const float wx = q.x0 + ( q.x1 - q.x0 ) * s0, wy = q.y0 + ( q.y1 - q.y0 ) * t0;
+								const float t = qBound( 0.0f, ( q.z + sq.dz[k] - groundAt( wx, wy ) ) / WATER_SHORE_FADE, 1.0f );
+								sq.fade[k] = t * t * ( 3.0f - 2.0f * t );
+							}
+							quads.push_back( sq );
+							surfAtQuad.push_back( std::nanf( "" ) );
+						}
+					fadedQuads++;
+				} else if ( q.x1 > q.x0 && q.y1 > q.y0 ) {
 					quads.push_back( q );
 					surfAtQuad.push_back( ( flat || isRing ) ? std::nanf( "" )
 						: q.z + dls[size_t( v ) * size_t( W ) + size_t( u )] );
@@ -1678,9 +1718,9 @@ void addLodlWater( NifModel * nif, const LodtFile & f, const LodtRegionSpec & sp
 			.arg( qint64( quads.size() ) ).arg( shapes )
 			.arg( blend ? QString( "semi-transparent (alpha %1)" ).arg( double( WATER_PLAIN_A ), 0, 'f', 2 )
 				: QStringLiteral( "opaque so the colours read true" ) );
-		note << QString( "shore fade: %L1 one-texel quads near a shore fade to clear as the water's depth over "
+		note << QString( "shore fade: %L1 texels near a shore, each cut into %3x%3 quads, fade to clear as the water's depth over "
 				"the full-rate ground falls from %2 units to 0" )
-			.arg( fadedQuads ).arg( double( WATER_SHORE_FADE ), 0, 'f', 0 );
+			.arg( fadedQuads ).arg( double( WATER_SHORE_FADE ), 0, 'f', 0 ).arg( SHORE_SUB );
 		note << QString( "water bodies drawn, biggest first: %1" ).arg( biggest.join( QStringLiteral( "; " ) ) );
 		note << QString( "water flatness: largest height spread inside one body %1 units over %2 bodies, "
 				"largest distance from the body table's height %3 (read back from the built vertices)" )
