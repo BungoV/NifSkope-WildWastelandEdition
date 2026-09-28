@@ -1950,6 +1950,26 @@ tile pool, residency manager: more precise, far more machinery).
 * **Unblocker:** section 5 row 14 -- no `.lodt` pyramid has been written for a
   whole worldspace; R2 needs one Commonwealth `--vt` bake as its fixture.
 
+### 8.6 NOTED 2026-09-28 23:58: soft shores on LOD water (bungo: "not yet, just note it")
+
+bungo, on the viewer's new shore: "so in FO4CS can we implement similar blending for
+water and land on LOD?" -- then "Not yet though, just note it". NOT scheduled; it
+rides R2 (terrain) when that rung is chartered.
+
+* **What the viewer does (lane WATER1, branch water1-20260927, commits 1b05c1ce,
+  86fed9a5, dfc243f5):** the water sheet is carried past its last wet texel wherever
+  the drawn terrain dips below it, and fades to clear as its depth over the
+  `.lodl`'s full-rate ground falls from 64 units to 0 -- per vertex every 32 units
+  on shore texels, the ground through a 4x4 Catmull-Rom patch -- so the coarse
+  terrain mesh's cut through the water is never a hard line.
+* **The FO4CS form:** the same law per PIXEL in the LOD water shader: alpha =
+  smoothstep(depth / fade), depth = water surface minus the `.lodl` ground sampled
+  bicubically at the pixel's world position (or, with no `.lodl` resident, the
+  water-to-scene-depth distance along the view ray). The `.lodl` form is the
+  better one: it follows the real ground, not whichever LOD mesh is drawn.
+* **Reads:** the `.lodl` heights and v3 water planes R2 already binds (row 6 above:
+  shore proximity is already a runtime job).
+
 ## 9. The far-shadow contract -- the IDENTITY route (ruled 2026-09-19)
 
 **What this section used to say, and why it does not any more.** Between
