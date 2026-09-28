@@ -378,20 +378,18 @@ bool LodtSheets::sheetChannel( int role, int tx, int ty, int channel,
 	 * BC1 so it has no alpha" case here. */
 	const int dimU = int( d->h.storedTexels );
 	if ( fmt == LODV_DXGI_R8G8B8A8_UNORM ) {
-		quint64 offU = 0;
-		for ( int sIdx = 0; sIdx < sheet; sIdx++ )
-			for ( int m = 0; m < int( d->h.mipCount ); m++ )
-				offU += lodvSheetMipBytes( d->h, sIdx, m, cover );
 		const quint32 bytesU = lodvSheetMipBytes( d->h, sheet, 0, cover );
 		if ( bytesU != quint32( dimU ) * quint32( dimU ) * 4u )
 			return no( QString( "mip 0 of the role-%1 sheet is %2 bytes, not %3x%3x4" )
 				.arg( role ).arg( bytesU ).arg( dimU ) );
 		QFile fu( d->path );
-		if ( !fu.open( QIODevice::ReadOnly ) || !fu.seek( qint64( e.offset + offU ) ) )
+		if ( !fu.open( QIODevice::ReadOnly ) )
 			return no( QString( "could not read %1" ).arg( d->path ) );
-		const QByteArray raw = fu.read( qint64( bytesU ) );
-		if ( raw.size() != qint64( bytesU ) )
-			return no( QString( "short read of the role-%1 sheet" ).arg( role ) );
+		// a one-value sheet (lane FLAT2) comes back expanded, byte for byte
+		QByteArray raw;
+		QString rerr;
+		if ( !lodvReadSheetMip( fu, d->h, e, sheet, 0, &raw, &rerr ) )
+			return no( QString( "role-%1 sheet: %2" ).arg( role ).arg( rerr ) );
 		out.assign( size_t( dimU ) * size_t( dimU ), 0 );
 		const unsigned char * rp = reinterpret_cast<const unsigned char *>( raw.constData() );
 		for ( size_t i = 0; i < out.size(); i++ )
@@ -412,10 +410,6 @@ bool LodtSheets::sheetChannel( int role, int tx, int ty, int channel,
 	if ( channel == 3 && blockBytes == 8 )
 		return no( QString( "tile %1,%2 is BC1 (dxgi %3): it carries no alpha" )
 			.arg( tx ).arg( ty ).arg( fmt ) );
-	quint64 off = 0;
-	for ( int s = 0; s < sheet; s++ )
-		for ( int m = 0; m < int( d->h.mipCount ); m++ )
-			off += lodvSheetMipBytes( d->h, s, m, cover );
 	const quint32 bytes = lodvSheetMipBytes( d->h, sheet, 0, cover );
 	/* A HALF-RESOLUTION sheet (descriptor byte 6, mipSkip 1) stores its first
 	 * mip at storedTexels / 2. It is decoded at its own size and handed back at
@@ -427,11 +421,13 @@ bool LodtSheets::sheetChannel( int role, int tx, int ty, int channel,
 		return no( QString( "mip 0 of the role-%1 sheet is %2 bytes, not %3 blocks of %4" )
 			.arg( role ).arg( bytes ).arg( blocks * blocks ).arg( blockBytes ) );
 	QFile f( d->path );
-	if ( !f.open( QIODevice::ReadOnly ) || !f.seek( qint64( e.offset + off ) ) )
+	if ( !f.open( QIODevice::ReadOnly ) )
 		return no( QString( "could not read %1" ).arg( d->path ) );
-	const QByteArray payload = f.read( qint64( bytes ) );
-	if ( payload.size() != qint64( bytes ) )
-		return no( QString( "short read of the role-%1 sheet" ).arg( role ) );
+	// a one-value sheet (lane FLAT2) comes back expanded, byte for byte
+	QByteArray payload;
+	QString rerr;
+	if ( !lodvReadSheetMip( f, d->h, e, sheet, 0, &payload, &rerr ) )
+		return no( QString( "role-%1 sheet: %2" ).arg( role ).arg( rerr ) );
 	out.assign( size_t( dim ) * size_t( dim ), 255 );
 	const unsigned char * p = reinterpret_cast<const unsigned char *>( payload.constData() );
 	for ( int by = 0; by < blocks; by++ ) {
@@ -483,19 +479,11 @@ bool LodtSheets::tile( int tx, int ty, LodtSheetTile & out, QString * why )
 		return no( QString( "tile %1,%2 is absent" ).arg( tx ).arg( ty ) );
 
 	const bool cover = ( e.flags & LODV_TILE_COVER ) != 0;
-	const quint32 raw = lodvTileRawBytes( d->h, cover );
+	const quint32 raw = lodvTileRawBytes( d->h, cover,
+		lodvUniformMask( e.flags, int( d->h.sheetCount ) ) );
 	if ( e.rawBytes != raw || e.storedBytes != raw )
 		return no( QString( "tile %1,%2 stores %3 of %4 raw bytes" )
 			.arg( tx ).arg( ty ).arg( e.storedBytes ).arg( raw ) );
-
-	// where each sheet's mip 0 starts: sheet-major, mip-minor, tightly packed
-	auto sheetMip0Offset = [&]( int sheet ) {
-		quint64 off = 0;
-		for ( int s = 0; s < sheet; s++ )
-			for ( int m = 0; m < int( d->h.mipCount ); m++ )
-				off += lodvSheetMipBytes( d->h, s, m, cover );
-		return off;
-	};
 
 	QFile f( d->path );
 	if ( !f.open( QIODevice::ReadOnly ) )
@@ -518,10 +506,11 @@ bool LodtSheets::tile( int tx, int ty, LodtSheetTile & out, QString * why )
 		if ( QFileInfo::exists( disk )
 			&& QFileInfo( disk ).lastModified() > QFileInfo( d->path ).lastModified() )
 			return true;
-		if ( !f.seek( qint64( e.offset + sheetMip0Offset( sheet ) ) ) )
-			return false;
-		const QByteArray payload = f.read( qint64( bytes ) );
-		if ( payload.size() != qint64( bytes ) )
+		/* A one-value sheet (lane FLAT2) is expanded here to the very bytes an
+		 * uncollapsed bake stored, so the cached DDS -- and every pixel drawn
+		 * from it -- is the same file either way. */
+		QByteArray payload;
+		if ( !lodvReadSheetMip( f, d->h, e, sheet, 0, &payload ) )
 			return false;
 		const quint32 fmt = cover ? d->h.sheets[sheet].dxgiFormatCover
 			: d->h.sheets[sheet].dxgiFormat;

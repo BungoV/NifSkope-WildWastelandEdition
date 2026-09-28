@@ -1566,6 +1566,13 @@ struct LodgenVtOptions
 	 *  store half the texels a side (their mip 0 is dropped, descriptor byte 6
 	 *  says so). OFF by default and byte-identical when off. */
 	bool halfAux = false;
+	/*! ONE-VALUE SHEETS (lane FLAT2, 2026-09-27, bungo: "it doesn't need to
+	 *  render 1024 for a whole one color mask"). A tile sheet that is one value
+	 *  over every texel of every mip is stored as a 16-byte record and a tile
+	 *  flag bit instead of its mips (docs/LODGEN_TERRAIN_VT.md 3.2). ON by
+	 *  default: it is a size fix and changes no texel. `--no-collapse-uniform`
+	 *  (CLI only, for the byte-identity gate) writes today's bytes. */
+	bool collapseUniform = true;
 	/* THE TERRAIN HORIZON SHEET (lane HORIZON1, 2026-09-18), `.lodt` role 7,
 	 * REMOVED 2026-09-19 by lane HORIZONOUT on bungo's "horizon goes bye bye
 	 * now, we're back to identity". No bake writes a role-7 sheet any more and

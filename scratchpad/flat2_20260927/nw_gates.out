@@ -1,0 +1,29 @@
+PASS  G1 control (flip) is red  -- 110 files in both, 1 differ, 0 only in rung, 0 only in off
+PASS  G1 control (keyflip) is red  -- 110 files in both, 1 differ, 0 only in rung, 0 only in off
+PASS  G1 control (lodbflip) is red  -- 110 files in both, 1 differ, 0 only in rung, 0 only in off
+PASS  G1 control (remove) is red  -- 109 files in both, 0 differ, 0 only in rung, 1 only in off
+PASS  G1 OFF == RUNG: every data file byte for byte, provenance files differ only in provenance words  -- 110 files in both, 0 data files differ, 23 provenance files differ only in their named words (21 .key, 1 .lodb, 1 report), 0 only in rung, 0 only in off
+PASS  G1 every .lodt OFF == RUNG byte for byte  -- 3 .lodt files
+PASS  G2 every non-.lodt file ON == OFF (provenance files: only their named words)  -- 107 files, 0 data files differ, 22 provenance files differ only in their named words
+PASS  G2 the same .lodt set  -- 3 files
+PASS  G2 every tile: flags, identical non-collapsed sheets, collapsed = one value = its record, expanded == OFF, crc  -- 0 failures
+PASS  R1 refuter comes back red  -- vt/FO4CSLOD/NukaWorld/NukaWorld.VT.2.lodt tile 18 sheet 0 (colour): sheet 0 collapsed but OFF sheet spans 99 levels
+PASS  R2 refuter comes back red  -- vt/FO4CSLOD/NukaWorld/NukaWorld.VT.2.lodt tile 0 sheet 0: sheet 0 record decodes to [0, 0, 0, 255], OFF sheet is [132, 130, 132, 255]
+PASS  R3 refuter comes back red  -- vt/FO4CSLOD/NukaWorld/NukaWorld.VT.2.lodt tile 0 sheet 0: sheet 0 record pad not zero
+case-a sheets in OFF not collapsed: none
+PASS  G2 no case-a sheet with identical blocks was left uncollapsed
+dim    sheet      sheets collapsed    raw B saved
+2      colour         48        18        3136032
+2      height         48        18       12544992
+2      mask           48        18        3136032
+2      msn            48        18        3136032
+4      colour         12         3         522672
+4      height         12         3        2090832
+4      mask           12         3         522672
+4      msn            12         3         522672
+8      colour          4         0              0
+8      height          4         0              0
+8      mask            4         0              0
+8      msn             4         0              0
+total       256 sheets, 84 collapsed, 25611936 raw B saved; files 78128416 -> 52581664 B (25546752 saved, 32.70 %)
+RESULT PASS (0 failures)

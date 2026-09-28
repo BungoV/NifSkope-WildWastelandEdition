@@ -8,6 +8,7 @@ BSD License - see nifskope.h
 #define LODVFILE_H
 
 #include <QByteArray>
+#include <QIODevice>
 #include <QString>
 #include <QStringList>
 
@@ -157,8 +158,25 @@ enum LodvHeaderFlags
 enum LodvTileFlags
 {
 	LODV_TILE_PRESENT = 1,
-	LODV_TILE_COVER = 2         //!< the MASK sheet uses dxgiFormatCover, cover in alpha
+	LODV_TILE_COVER = 2,        //!< the MASK sheet uses dxgiFormatCover, cover in alpha
+	/*! ONE-VALUE SHEETS (lane FLAT2, 2026-09-27; docs/LODGEN_TERRAIN_VT.md 3.2).
+	 *  Bit `LODV_TILE_UNIFORM_SHIFT + k` set = sheet k of this tile is one value
+	 *  over every texel of every mip. Its mips are then NOT stored: in their
+	 *  place the payload holds a LODV_UNIFORM_RECORD_BYTES record, the sheet's
+	 *  one repeating unit (a BC1 or BC3 block, an R16 or an R8G8B8A8 texel)
+	 *  followed by zeros. Repeating the unit over the sheet's full size gives
+	 *  back the sheet byte for byte. Bits past `2 + sheetCount` stay refused. */
+	LODV_TILE_UNIFORM_SHIFT = 2
 };
+
+//! The bytes a one-value sheet occupies in its tile's payload.
+constexpr quint32 LODV_UNIFORM_RECORD_BYTES = 16;
+
+//! The tile's one-value sheet mask (bit k = sheet k), from its flags word.
+inline quint32 lodvUniformMask( quint16 tileFlags, int sheetCount )
+{
+	return ( quint32( tileFlags ) >> LODV_TILE_UNIFORM_SHIFT ) & ( ( 1u << sheetCount ) - 1u );
+}
 
 struct LodvSheetDesc
 {
@@ -222,6 +240,34 @@ quint32 lodvSheetMipBytes( const LodvHeaderFields & h, int sheet, int mip, bool 
 //! The side in texels of one sheet's stored mip `mip` (0 = its first stored one).
 int lodvSheetSide( const LodvHeaderFields & h, int sheet, int mip );
 
+/* ---- one-value sheets (lane FLAT2) ---------------------------------------- */
+//! The raw payload size of a tile whose one-value sheets are `uniformMask`.
+quint32 lodvTileRawBytes( const LodvHeaderFields & h, bool cover, quint32 uniformMask );
+//! One sheet's bytes in the payload: all its mips, or the 16-byte record.
+quint32 lodvSheetStoredBytes( const LodvHeaderFields & h, int sheet, bool cover, quint32 uniformMask );
+//! Where sheet `sheet` starts in the payload.
+quint32 lodvSheetStoredOffset( const LodvHeaderFields & h, int sheet, bool cover, quint32 uniformMask );
+//! The sheet's repeating unit: its BC block bytes, or its texel bytes (R16 2, RGBA8 4).
+int lodvSheetUnitBytes( const LodvHeaderFields & h, int sheet, bool cover );
+/*! Which sheets of a FULL payload (today's layout) are one value, and the
+ *  collapsed payload. A sheet collapses when every unit of every mip is the
+ *  same bytes AND, for a block format, that block decodes to one colour
+ *  whatever the decoder's convention (every index equal, or both endpoints
+ *  equal with no index that selects the 3-colour mode's black / the 6-alpha
+ *  mode's 0 or 255). Returns the mask; `collapsed` gets the new payload
+ *  (equal to `full` when the mask is 0). */
+quint32 lodvCollapseUniform( const LodvHeaderFields & h, bool cover, const QByteArray & full,
+	QByteArray * collapsed );
+/*! The inverse: the full payload from a stored (uncompressed) one. False, with
+ *  the reason, when the stored size does not match the mask. */
+bool lodvExpandUniform( const LodvHeaderFields & h, bool cover, quint32 uniformMask,
+	const QByteArray & stored, QByteArray * full, QString * error = nullptr );
+/*! One sheet's bytes at one stored mip, read from an UNCOMPRESSED container at
+ *  the tile's offset; a one-value sheet is expanded, so the caller sees exactly
+ *  the bytes an uncollapsed bake stored. */
+bool lodvReadSheetMip( QIODevice & f, const LodvHeaderFields & h, const LodvTileEntry & e,
+	int sheet, int mip, QByteArray * out, QString * error = nullptr );
+
 //! CRC-32, zlib polynomial 0xEDB88320, the one both the header and the tiles use.
 quint32 lodvCrc32( const unsigned char * p, qsizetype n, quint32 seed = 0 );
 
@@ -239,6 +285,8 @@ public:
 	bool begin( const QString & path, const LodvHeaderFields & fields, QString * error );
 	//! Append the next tile in table-index order. `raw` is the whole payload.
 	bool addTile( const QByteArray & raw, bool cover, QString * error );
+	//! The same, with `raw` already collapsed by lodvCollapseUniform() and its mask.
+	bool addTile( const QByteArray & raw, bool cover, quint32 uniformMask, QString * error );
 	//! Append an absent tile: 24 zero bytes, no payload.
 	bool addAbsent( QString * error );
 	bool finish( QString * error );

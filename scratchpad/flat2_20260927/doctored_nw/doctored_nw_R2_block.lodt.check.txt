@@ -1,0 +1,4 @@
+gpu: GPU path -- setting Use GPU on; NVIDIA GeForce RTX 5070 Ti/PCIe/SSE2, OpenGL 4.3; BC7 self-check 1024 blocks, error GPU 26082378 <= CPU 26090366
+lodt ok 0
+lodt refused: tile 0 sheet 0 one-value record is a block that does not decode to one value
+gpu: bc7 0 image(s), 0 block(s) on the GPU in 0 ms; 0 image(s) fell back to the CPU

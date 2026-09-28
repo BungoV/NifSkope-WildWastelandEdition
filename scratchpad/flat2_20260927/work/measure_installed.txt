@@ -1,0 +1,103 @@
+Commonwealth   dim 16 colour  present   144  a     0 (           0 B)  b-only     0 (           0 B)  sheet bytes      25090560
+Commonwealth   dim 16 msn     present   144  a    17 (     2962080 B)  b-only     0 (           0 B)  sheet bytes      25090560
+Commonwealth   dim 16 mask    present   144  a     0 (           0 B)  b-only     0 (           0 B)  sheet bytes      29272320
+Commonwealth   dim 16 height  present   144  a    61 (    42514560 B)  b-only     0 (           0 B)  sheet bytes     100362240
+  (Commonwealth.VT.16.lodt: 2.5 s)
+Commonwealth   dim  2 colour  present  9216  a     0 (           0 B)  b-only     0 (           0 B)  sheet bytes    1605795840
+Commonwealth   dim  2 msn     present  9216  a  4174 (   727277760 B)  b-only     0 (           0 B)  sheet bytes    1605795840
+Commonwealth   dim  2 mask    present  9216  a     0 (           0 B)  b-only     0 (           0 B)  sheet bytes    1787179680
+Commonwealth   dim  2 height  present  9216  a  4176 (  2910504960 B)  b-only     3 (     2090880 B)  sheet bytes    6423183360
+  (Commonwealth.VT.2.lodt: 932.3 s)
+Commonwealth   dim 32 colour  present    36  a     0 (           0 B)  b-only     0 (           0 B)  sheet bytes       6272640
+Commonwealth   dim 32 msn     present    36  a     0 (           0 B)  b-only     0 (           0 B)  sheet bytes       6272640
+Commonwealth   dim 32 mask    present    36  a     0 (           0 B)  b-only     0 (           0 B)  sheet bytes       8015040
+Commonwealth   dim 32 height  present    36  a     5 (     3484800 B)  b-only     0 (           0 B)  sheet bytes      25090560
+  (Commonwealth.VT.32.lodt: 2.6 s)
+Commonwealth   dim  4 colour  present  2304  a     0 (           0 B)  b-only     0 (           0 B)  sheet bytes     401448960
+Commonwealth   dim  4 msn     present  2304  a   874 (   152285760 B)  b-only     0 (           0 B)  sheet bytes     401448960
+Commonwealth   dim  4 mask    present  2304  a     0 (           0 B)  b-only     0 (           0 B)  sheet bytes     451630080
+Commonwealth   dim  4 height  present  2304  a  1063 (   740868480 B)  b-only     0 (           0 B)  sheet bytes    1605795840
+  (Commonwealth.VT.4.lodt: 620.2 s)
+Commonwealth   dim  8 colour  present   576  a     0 (           0 B)  b-only     0 (           0 B)  sheet bytes     100362240
+Commonwealth   dim  8 msn     present   576  a   165 (    28749600 B)  b-only     0 (           0 B)  sheet bytes     100362240
+Commonwealth   dim  8 mask    present   576  a     0 (           0 B)  b-only     0 (           0 B)  sheet bytes     113778720
+Commonwealth   dim  8 height  present   576  a   258 (   179815680 B)  b-only     0 (           0 B)  sheet bytes     401448960
+  (Commonwealth.VT.8.lodt: 211.8 s)
+DLC03FarHarbor dim 16 colour  present    16  a     0 (           0 B)  b-only     0 (           0 B)  sheet bytes       2787840
+DLC03FarHarbor dim 16 msn     present    16  a     0 (           0 B)  b-only     0 (           0 B)  sheet bytes       2787840
+DLC03FarHarbor dim 16 mask    present    16  a     0 (           0 B)  b-only     0 (           0 B)  sheet bytes       5575680
+DLC03FarHarbor dim 16 height  present    16  a     0 (           0 B)  b-only     0 (           0 B)  sheet bytes      11151360
+  (DLC03FarHarbor.VT.16.lodt: 0.7 s)
+DLC03FarHarbor dim  2 colour  present   864  a     0 (           0 B)  b-only     0 (           0 B)  sheet bytes     150543360
+DLC03FarHarbor dim  2 msn     present   864  a   285 (    49658400 B)  b-only     0 (           0 B)  sheet bytes     150543360
+DLC03FarHarbor dim  2 mask    present   864  a   268 (    46696320 B)  b-only     0 (           0 B)  sheet bytes     235224000
+DLC03FarHarbor dim  2 height  present   864  a   295 (   205603200 B)  b-only    21 (    14636160 B)  sheet bytes     602173440
+  (DLC03FarHarbor.VT.2.lodt: 67.1 s)
+DLC03FarHarbor dim 32 colour  present     4  a     0 (           0 B)  b-only     0 (           0 B)  sheet bytes        696960
+DLC03FarHarbor dim 32 msn     present     4  a     0 (           0 B)  b-only     0 (           0 B)  sheet bytes        696960
+DLC03FarHarbor dim 32 mask    present     4  a     0 (           0 B)  b-only     0 (           0 B)  sheet bytes       1393920
+DLC03FarHarbor dim 32 height  present     4  a     0 (           0 B)  b-only     0 (           0 B)  sheet bytes       2787840
+  (DLC03FarHarbor.VT.32.lodt: 0.2 s)
+DLC03FarHarbor dim  4 colour  present   224  a     0 (           0 B)  b-only     0 (           0 B)  sheet bytes      39029760
+DLC03FarHarbor dim  4 msn     present   224  a    62 (    10802880 B)  b-only     0 (           0 B)  sheet bytes      39029760
+DLC03FarHarbor dim  4 mask    present   224  a    58 (    10105920 B)  b-only     0 (           0 B)  sheet bytes      62029440
+DLC03FarHarbor dim  4 height  present   224  a    65 (    45302400 B)  b-only    10 (     6969600 B)  sheet bytes     156119040
+  (DLC03FarHarbor.VT.4.lodt: 19.5 s)
+DLC03FarHarbor dim  8 colour  present    56  a     0 (           0 B)  b-only     0 (           0 B)  sheet bytes       9757440
+DLC03FarHarbor dim  8 msn     present    56  a    10 (     1742400 B)  b-only     0 (           0 B)  sheet bytes       9757440
+DLC03FarHarbor dim  8 mask    present    56  a    11 (     1916640 B)  b-only     0 (           0 B)  sheet bytes      16727040
+DLC03FarHarbor dim  8 height  present    56  a    10 (     6969600 B)  b-only     1 (      696960 B)  sheet bytes      39029760
+  (DLC03FarHarbor.VT.8.lodt: 3.5 s)
+NukaWorld      dim 16 colour  present    30  a     5 (      871200 B)  b-only     0 (           0 B)  sheet bytes       5227200
+NukaWorld      dim 16 msn     present    30  a     5 (      871200 B)  b-only     0 (           0 B)  sheet bytes       5227200
+NukaWorld      dim 16 mask    present    30  a     5 (      871200 B)  b-only     0 (           0 B)  sheet bytes       7666560
+NukaWorld      dim 16 height  present    30  a     5 (     3484800 B)  b-only     0 (           0 B)  sheet bytes      20908800
+  (NukaWorld.VT.16.lodt: 1.7 s)
+NukaWorld      dim  2 colour  present  1584  a   495 (    86248800 B)  b-only     0 (           0 B)  sheet bytes     275996160
+NukaWorld      dim  2 msn     present  1584  a   495 (    86248800 B)  b-only     0 (           0 B)  sheet bytes     275996160
+NukaWorld      dim  2 mask    present  1584  a   495 (    86248800 B)  b-only     0 (           0 B)  sheet bytes     344472480
+NukaWorld      dim  2 height  present  1584  a   495 (   344995200 B)  b-only     0 (           0 B)  sheet bytes    1103984640
+  (NukaWorld.VT.2.lodt: 297.3 s)
+NukaWorld      dim 32 colour  present     9  a     0 (           0 B)  b-only     0 (           0 B)  sheet bytes       1568160
+NukaWorld      dim 32 msn     present     9  a     0 (           0 B)  b-only     0 (           0 B)  sheet bytes       1568160
+NukaWorld      dim 32 mask    present     9  a     0 (           0 B)  b-only     0 (           0 B)  sheet bytes       2265120
+NukaWorld      dim 32 height  present     9  a     0 (           0 B)  b-only     0 (           0 B)  sheet bytes       6272640
+  (NukaWorld.VT.32.lodt: 1.0 s)
+NukaWorld      dim  4 colour  present   408  a   119 (    20734560 B)  b-only     0 (           0 B)  sheet bytes      71089920
+NukaWorld      dim  4 msn     present   408  a   119 (    20734560 B)  b-only     0 (           0 B)  sheet bytes      71089920
+NukaWorld      dim  4 mask    present   408  a   119 (    20734560 B)  b-only     0 (           0 B)  sheet bytes      90430560
+NukaWorld      dim  4 height  present   408  a   119 (    82938240 B)  b-only     0 (           0 B)  sheet bytes     284359680
+  (NukaWorld.VT.4.lodt: 55.4 s)
+NukaWorld      dim  8 colour  present   108  a    27 (     4704480 B)  b-only     0 (           0 B)  sheet bytes      18817920
+NukaWorld      dim  8 msn     present   108  a    27 (     4704480 B)  b-only     0 (           0 B)  sheet bytes      18817920
+NukaWorld      dim  8 mask    present   108  a    27 (     4704480 B)  b-only     0 (           0 B)  sheet bytes      24916320
+NukaWorld      dim  8 height  present   108  a    27 (    18817920 B)  b-only     0 (           0 B)  sheet bytes      75271680
+  (NukaWorld.VT.8.lodt: 6.5 s)
+SanctuaryHillsWorld dim  2 colour  present   320  a     0 (           0 B)  b-only     0 (           0 B)  sheet bytes      55756800
+SanctuaryHillsWorld dim  2 msn     present   320  a     0 (           0 B)  b-only     0 (           0 B)  sheet bytes      55756800
+SanctuaryHillsWorld dim  2 mask    present   320  a     0 (           0 B)  b-only     0 (           0 B)  sheet bytes      62029440
+SanctuaryHillsWorld dim  2 height  present   320  a     0 (           0 B)  b-only     0 (           0 B)  sheet bytes     223027200
+  (SanctuaryHillsWorld.VT.2.lodt: 18.2 s)
+SanctuaryHillsWorld dim  4 colour  present    80  a     0 (           0 B)  b-only     0 (           0 B)  sheet bytes      13939200
+SanctuaryHillsWorld dim  4 msn     present    80  a     0 (           0 B)  b-only     0 (           0 B)  sheet bytes      13939200
+SanctuaryHillsWorld dim  4 mask    present    80  a     0 (           0 B)  b-only     0 (           0 B)  sheet bytes      16030080
+SanctuaryHillsWorld dim  4 height  present    80  a     0 (           0 B)  b-only     0 (           0 B)  sheet bytes      55756800
+  (SanctuaryHillsWorld.VT.4.lodt: 5.1 s)
+TOTALS per worldspace x sheet kind
+Commonwealth   colour  sheets  12276  a      0              0 B   b-only      0              0 B   of     2138970240 B
+Commonwealth   height  sheets  12276  a   5563     3877188480 B   b-only      3        2090880 B   of     8555880960 B
+Commonwealth   mask    sheets  12276  a      0              0 B   b-only      0              0 B   of     2389875840 B
+Commonwealth   msn     sheets  12276  a   5230      911275200 B   b-only      0              0 B   of     2138970240 B
+DLC03FarHarbor colour  sheets   1164  a      0              0 B   b-only      0              0 B   of      202815360 B
+DLC03FarHarbor height  sheets   1164  a    370      257875200 B   b-only     32       22302720 B   of      811261440 B
+DLC03FarHarbor mask    sheets   1164  a    337       58718880 B   b-only      0              0 B   of      320950080 B
+DLC03FarHarbor msn     sheets   1164  a    357       62203680 B   b-only      0              0 B   of      202815360 B
+NukaWorld      colour  sheets   2139  a    646      112559040 B   b-only      0              0 B   of      372699360 B
+NukaWorld      height  sheets   2139  a    646      450236160 B   b-only      0              0 B   of     1490797440 B
+NukaWorld      mask    sheets   2139  a    646      112559040 B   b-only      0              0 B   of      469751040 B
+NukaWorld      msn     sheets   2139  a    646      112559040 B   b-only      0              0 B   of      372699360 B
+SanctuaryHillsWorld colour  sheets    400  a      0              0 B   b-only      0              0 B   of       69696000 B
+SanctuaryHillsWorld height  sheets    400  a      0              0 B   b-only      0              0 B   of      278784000 B
+SanctuaryHillsWorld mask    sheets    400  a      0              0 B   b-only      0              0 B   of       78059520 B
+SanctuaryHillsWorld msn     sheets    400  a      0              0 B   b-only      0              0 B   of       69696000 B
+files 19984102304 B; case a saves 5955174720 B (29.800 %); case a+b saves 5979568320 B (29.922 %)

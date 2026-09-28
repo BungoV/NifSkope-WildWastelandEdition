@@ -253,6 +253,223 @@ quint32 lodvTileRawBytes( const LodvHeaderFields & h, bool cover )
 	return n;
 }
 
+/* ------------------------------------------- one-value sheets (lane FLAT2) -- */
+
+quint32 lodvSheetStoredBytes( const LodvHeaderFields & h, int sheet, bool cover, quint32 uniformMask )
+{
+	if ( sheet < 0 || sheet >= int( h.sheetCount ) )
+		return 0;
+	if ( uniformMask & ( 1u << sheet ) )
+		return LODV_UNIFORM_RECORD_BYTES;
+	quint32 n = 0;
+	for ( int m = 0; m < int( h.mipCount ); m++ )
+		n += lodvSheetMipBytes( h, sheet, m, cover );
+	return n;
+}
+
+quint32 lodvSheetStoredOffset( const LodvHeaderFields & h, int sheet, bool cover, quint32 uniformMask )
+{
+	quint32 off = 0;
+	for ( int s = 0; s < sheet && s < int( h.sheetCount ); s++ )
+		off += lodvSheetStoredBytes( h, s, cover, uniformMask );
+	return off;
+}
+
+quint32 lodvTileRawBytes( const LodvHeaderFields & h, bool cover, quint32 uniformMask )
+{
+	quint32 n = 0;
+	for ( int s = 0; s < int( h.sheetCount ); s++ )
+		n += lodvSheetStoredBytes( h, s, cover, uniformMask );
+	return n;
+}
+
+int lodvSheetUnitBytes( const LodvHeaderFields & h, int sheet, bool cover )
+{
+	if ( sheet < 0 || sheet >= int( h.sheetCount ) )
+		return 0;
+	const LodvSheetDesc & sd = h.sheets[sheet];
+	if ( sd.role == LODV_ROLE_HEIGHT )
+		return 2;
+	if ( sd.role == LODV_ROLE_HORIZON )
+		return 4;
+	const quint16 fmt = ( cover && sd.dxgiFormatCover != sd.dxgiFormat )
+		? sd.dxgiFormatCover : sd.dxgiFormat;
+	return ( fmt == LODV_DXGI_BC3_UNORM || fmt == LODV_DXGI_BC3_UNORM_SRGB ) ? 16 : 8;
+}
+
+namespace {
+
+/* Does one BC block decode to ONE value under every decoder convention? The
+ * test never decodes: it reads the indices. Every index the same selects one
+ * palette entry for all 16 texels. Otherwise both endpoints equal makes every
+ * interpolated entry the endpoint too, EXCEPT the entries that are constants
+ * of the mode: BC1's index 3 in its 3-colour mode (c0 <= c1, black or
+ * transparent) and the BC3 alpha's indices 6 and 7 in its 6-alpha mode
+ * (a0 <= a1, 0 and 255). BC3's colour half is always the 4-colour mode by the
+ * spec, but a decoder that applies BC1's rule to it exists, so index 3 is
+ * refused there too: the test must not depend on which decoder reads it. */
+bool bcColourHalfIsOneValue( const unsigned char * b )
+{
+	const quint32 bits = quint32( b[4] ) | ( quint32( b[5] ) << 8 ) | ( quint32( b[6] ) << 16 )
+		| ( quint32( b[7] ) << 24 );
+	bool same = true, has3 = false;
+	for ( int i = 0; i < 16; i++ ) {
+		const quint32 ix = ( bits >> ( 2 * i ) ) & 3;
+		if ( ix != ( bits & 3 ) )
+			same = false;
+		if ( ix == 3 )
+			has3 = true;
+	}
+	if ( same )
+		return true;
+	return b[0] == b[2] && b[1] == b[3] && !has3;
+}
+
+bool bcAlphaHalfIsOneValue( const unsigned char * b )
+{
+	quint64 bits = 0;
+	for ( int i = 0; i < 6; i++ )
+		bits |= quint64( b[2 + i] ) << ( 8 * i );
+	bool same = true, hasConst = false;
+	for ( int i = 0; i < 16; i++ ) {
+		const quint64 ix = ( bits >> ( 3 * i ) ) & 7;
+		if ( ix != ( bits & 7 ) )
+			same = false;
+		if ( ix >= 6 )
+			hasConst = true;
+	}
+	if ( same )
+		return true;
+	return b[0] == b[1] && !hasConst;
+}
+
+} // namespace
+
+quint32 lodvCollapseUniform( const LodvHeaderFields & h, bool cover, const QByteArray & full,
+	QByteArray * collapsed )
+{
+	if ( collapsed )
+		*collapsed = full;
+	if ( quint32( full.size() ) != lodvTileRawBytes( h, cover ) )
+		return 0;                      // not a full payload: nothing is claimed
+	const unsigned char * p = reinterpret_cast<const unsigned char *>( full.constData() );
+	quint32 mask = 0;
+	quint32 off = 0;
+	for ( int s = 0; s < int( h.sheetCount ); s++ ) {
+		const quint32 n = lodvSheetStoredBytes( h, s, cover, 0 );
+		const int unit = lodvSheetUnitBytes( h, s, cover );
+		/* A sheet of fewer than two units is not collapsed: the record would
+		 * not be smaller, and "one value" over a single unit is the block test
+		 * alone. */
+		bool one = unit > 0 && n >= 2 * quint32( unit ) && n % quint32( unit ) == 0;
+		for ( quint32 i = quint32( unit ); one && i < n; i += quint32( unit ) )
+			if ( std::memcmp( p + off, p + off + i, size_t( unit ) ) != 0 )
+				one = false;
+		if ( one && unit == 8 )
+			one = bcColourHalfIsOneValue( p + off );
+		else if ( one && unit == 16 )
+			one = bcAlphaHalfIsOneValue( p + off ) && bcColourHalfIsOneValue( p + off + 8 );
+		if ( one )
+			mask |= 1u << s;
+		off += n;
+	}
+	if ( !mask || !collapsed )
+		return mask;
+	QByteArray out;
+	out.reserve( qsizetype( lodvTileRawBytes( h, cover, mask ) ) );
+	off = 0;
+	for ( int s = 0; s < int( h.sheetCount ); s++ ) {
+		const quint32 n = lodvSheetStoredBytes( h, s, cover, 0 );
+		if ( mask & ( 1u << s ) ) {
+			QByteArray rec( qsizetype( LODV_UNIFORM_RECORD_BYTES ), '\0' );
+			std::memcpy( rec.data(), p + off, size_t( lodvSheetUnitBytes( h, s, cover ) ) );
+			out.append( rec );
+		} else {
+			out.append( reinterpret_cast<const char *>( p + off ), qsizetype( n ) );
+		}
+		off += n;
+	}
+	*collapsed = out;
+	return mask;
+}
+
+bool lodvExpandUniform( const LodvHeaderFields & h, bool cover, quint32 uniformMask,
+	const QByteArray & stored, QByteArray * full, QString * error )
+{
+	if ( quint32( stored.size() ) != lodvTileRawBytes( h, cover, uniformMask ) ) {
+		if ( error )
+			*error = QString( "a tile of %1 bytes where its one-value mask 0x%2 implies %3" )
+				.arg( stored.size() ).arg( uniformMask, 0, 16 )
+				.arg( lodvTileRawBytes( h, cover, uniformMask ) );
+		return false;
+	}
+	if ( !full )
+		return true;
+	if ( !uniformMask ) {
+		*full = stored;
+		return true;
+	}
+	QByteArray out;
+	out.reserve( qsizetype( lodvTileRawBytes( h, cover ) ) );
+	quint32 off = 0;
+	for ( int s = 0; s < int( h.sheetCount ); s++ ) {
+		const quint32 n = lodvSheetStoredBytes( h, s, cover, uniformMask );
+		if ( uniformMask & ( 1u << s ) ) {
+			const int unit = lodvSheetUnitBytes( h, s, cover );
+			const quint32 fullN = lodvSheetStoredBytes( h, s, cover, 0 );
+			const QByteArray u = stored.mid( qsizetype( off ), unit );
+			for ( quint32 i = 0; i < fullN; i += quint32( unit ) )
+				out.append( u );
+		} else {
+			out.append( stored.mid( qsizetype( off ), qsizetype( n ) ) );
+		}
+		off += n;
+	}
+	*full = out;
+	return true;
+}
+
+bool lodvReadSheetMip( QIODevice & f, const LodvHeaderFields & h, const LodvTileEntry & e,
+	int sheet, int mip, QByteArray * out, QString * error )
+{
+	auto no = [error]( const QString & m ) {
+		if ( error )
+			*error = m;
+		return false;
+	};
+	if ( h.compression != 0 )
+		return no( QStringLiteral( "a compressed container is read whole, not by sheet" ) );
+	const bool cover = ( e.flags & LODV_TILE_COVER ) != 0;
+	const quint32 mask = lodvUniformMask( e.flags, int( h.sheetCount ) );
+	const quint32 bytes = lodvSheetMipBytes( h, sheet, mip, cover );
+	if ( mask & ( 1u << sheet ) ) {
+		const int unit = lodvSheetUnitBytes( h, sheet, cover );
+		if ( !f.seek( qint64( e.offset + lodvSheetStoredOffset( h, sheet, cover, mask ) ) ) )
+			return no( QStringLiteral( "seek to a one-value record failed" ) );
+		const QByteArray u = f.read( unit );
+		if ( u.size() != unit )
+			return no( QStringLiteral( "short read of a one-value record" ) );
+		QByteArray o;
+		o.reserve( qsizetype( bytes ) );
+		for ( quint32 i = 0; i < bytes; i += quint32( unit ) )
+			o.append( u );
+		if ( out )
+			*out = o;
+		return true;
+	}
+	quint32 off = lodvSheetStoredOffset( h, sheet, cover, mask );
+	for ( int m = 0; m < mip; m++ )
+		off += lodvSheetMipBytes( h, sheet, m, cover );
+	if ( !f.seek( qint64( e.offset + off ) ) )
+		return no( QStringLiteral( "seek to a sheet failed" ) );
+	const QByteArray o = f.read( qint64( bytes ) );
+	if ( o.size() != qint64( bytes ) )
+		return no( QStringLiteral( "short read of a sheet" ) );
+	if ( out )
+		*out = o;
+	return true;
+}
+
 quint32 lodvCrc32( const unsigned char * p, qsizetype n, quint32 seed )
 {
 	static quint32 table[256];
@@ -330,6 +547,11 @@ bool LodvWriter::begin( const QString & path, const LodvHeaderFields & fields, Q
 
 bool LodvWriter::addTile( const QByteArray & raw, bool cover, QString * error )
 {
+	return addTile( raw, cover, 0, error );
+}
+
+bool LodvWriter::addTile( const QByteArray & raw, bool cover, quint32 uniformMask, QString * error )
+{
 	auto fail = [error]( const QString & m ) {
 		if ( error )
 			*error = m;
@@ -339,6 +561,9 @@ bool LodvWriter::addTile( const QByteArray & raw, bool cover, QString * error )
 		return fail( QStringLiteral( "addTile before begin" ) );
 	if ( size_t( d->written ) >= d->table.size() )
 		return fail( QStringLiteral( "more tiles than the table holds" ) );
+	if ( uniformMask >> d->fields.sheetCount )
+		return fail( QString( "one-value mask 0x%1 names a sheet past the %2 declared" )
+			.arg( uniformMask, 0, 16 ).arg( d->fields.sheetCount ) );
 	QByteArray stored = raw;
 	if ( d->fields.compression == 1 ) {
 		/* qCompress emits a 4-byte big-endian raw size followed by a plain
@@ -364,7 +589,8 @@ bool LodvWriter::addTile( const QByteArray & raw, bool cover, QString * error )
 	e.rawBytes = quint32( raw.size() );
 	e.crc32 = lodvCrc32( reinterpret_cast<const unsigned char *>( stored.constData() ),
 		stored.size() );
-	e.flags = quint16( LODV_TILE_PRESENT | ( cover ? LODV_TILE_COVER : 0 ) );
+	e.flags = quint16( LODV_TILE_PRESENT | ( cover ? LODV_TILE_COVER : 0 )
+		| ( uniformMask << LODV_TILE_UNIFORM_SHIFT ) );
 	e.reserved = 0;
 	d->cursor = at + quint64( stored.size() );
 	d->written++;
@@ -738,15 +964,20 @@ bool lodvValidate( const QString & path, LodvHeaderFields * fieldsOut,
 			continue;
 		}
 		present++;
-		if ( e.flags & ~quint16( LODV_TILE_PRESENT | LODV_TILE_COVER ) )
+		/* Bits 2 .. 2+sheetCount-1 are the one-value sheets (lane FLAT2); every
+		 * bit above the last declared sheet is still unknown and refused. */
+		const quint32 knownBits = quint32( LODV_TILE_PRESENT | LODV_TILE_COVER )
+			| ( ( ( 1u << fd.sheetCount ) - 1u ) << LODV_TILE_UNIFORM_SHIFT );
+		if ( quint32( e.flags ) & ~knownBits )
 			return fail( QString( "refused: tile %1 has an unknown flag bit" ).arg( i ) );
+		const quint32 uniformMask = lodvUniformMask( e.flags, int( fd.sheetCount ) );
 		if ( e.reserved )
 			return fail( QString( "refused: tile %1 has a non-zero reserved field" ).arg( i ) );
 		if ( e.offset < payloadOffset || ( e.offset % LODV_PAYLOAD_ALIGN ) != 0 )
 			return fail( QString( "refused: tile %1 offset is below payloadOffset or not 4096-aligned" ).arg( i ) );
 		if ( e.storedBytes == 0 || e.offset + e.storedBytes > fileBytes )
 			return fail( QString( "refused: tile %1 storedBytes runs past the end" ).arg( i ) );
-		const quint32 want = lodvTileRawBytes( fd, ( e.flags & LODV_TILE_COVER ) != 0 );
+		const quint32 want = lodvTileRawBytes( fd, ( e.flags & LODV_TILE_COVER ) != 0, uniformMask );
 		if ( e.rawBytes != want )
 			return fail( QString( "refused: tile %1 rawBytes %2, the header implies %3" )
 				.arg( i ).arg( e.rawBytes ).arg( want ) );
@@ -781,6 +1012,33 @@ bool lodvValidate( const QString & path, LodvHeaderFields * fieldsOut,
 			if ( crc != e.crc32 )
 				return fail( QString( "refused: tile %1 crc32 %2, recomputed %3" )
 					.arg( i ).arg( e.crc32, 8, 16, QChar( '0' ) ).arg( crc, 8, 16, QChar( '0' ) ) );
+			/* A one-value record is its unit, then ZEROS, and the unit must be
+			 * one value under the same test the writer used (rule 16c). Checked
+			 * where the payload is plain; a zlib tile is not inflated here. */
+			const bool tcover = ( e.flags & LODV_TILE_COVER ) != 0;
+			const quint32 um = lodvUniformMask( e.flags, int( fd.sheetCount ) );
+			if ( um && fd.compression == 0 ) {
+				for ( int s = 0; s < int( fd.sheetCount ); s++ ) {
+					if ( !( um & ( 1u << s ) ) )
+						continue;
+					const quint32 at = lodvSheetStoredOffset( fd, s, tcover, um );
+					const int unit = lodvSheetUnitBytes( fd, s, tcover );
+					for ( quint32 k = quint32( unit ); k < LODV_UNIFORM_RECORD_BYTES; k++ )
+						if ( p[qsizetype( at + k )] != '\0' )
+							return fail( QString( "refused: tile %1 sheet %2 one-value record has a "
+								"non-zero pad byte" ).arg( i ).arg( s ) );
+					// the writer's own block test: a block that is not one colour is refused
+					const unsigned char * u = reinterpret_cast<const unsigned char *>( p.constData() ) + at;
+					bool ok = true;
+					if ( unit == 8 )
+						ok = bcColourHalfIsOneValue( u );
+					else if ( unit == 16 )
+						ok = bcAlphaHalfIsOneValue( u ) && bcColourHalfIsOneValue( u + 8 );
+					if ( !ok )
+						return fail( QString( "refused: tile %1 sheet %2 one-value record is a block "
+							"that does not decode to one value" ).arg( i ).arg( s ) );
+				}
+			}
 		}
 	}
 
@@ -848,16 +1106,33 @@ QStringList lodvDescribe( const LodvHeaderFields & h, const std::vector<LodvTile
 			+ ( h.sheets[i].mipSkip ? QString( " mipSkip %1" ).arg( h.sheets[i].mipSkip ) : QString() );
 	int present = 0, cover = 0;
 	quint64 stored = 0;
+	int uniform[LODV_MAX_SHEETS] = {};
+	quint64 uniformSaved = 0;
 	for ( const LodvTileEntry & e : table ) {
 		if ( !( e.flags & LODV_TILE_PRESENT ) )
 			continue;
 		present++;
-		if ( e.flags & LODV_TILE_COVER )
+		const bool c = ( e.flags & LODV_TILE_COVER ) != 0;
+		if ( c )
 			cover++;
 		stored += e.storedBytes;
+		const quint32 um = lodvUniformMask( e.flags, int( h.sheetCount ) );
+		for ( int s = 0; s < int( h.sheetCount ); s++ )
+			if ( um & ( 1u << s ) ) {
+				uniform[s]++;
+				uniformSaved += lodvSheetStoredBytes( h, s, c, 0 ) - LODV_UNIFORM_RECORD_BYTES;
+			}
 	}
 	kvi( "present", present );
 	kvi( "coverTiles", cover );
 	kvi( "storedBytesTotal", qint64( stored ) );
+	// one-value sheets per sheet index (lane FLAT2), and the raw bytes they did not store
+	{
+		QStringList u;
+		for ( int s = 0; s < int( h.sheetCount ); s++ )
+			u << QString::number( uniform[s] );
+		kv( "uniformSheets", u.join( QChar( ',' ) ) );
+		kvi( "uniformBytesSaved", qint64( uniformSaved ) );
+	}
 	return out;
 }

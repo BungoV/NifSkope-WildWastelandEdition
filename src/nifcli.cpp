@@ -6985,6 +6985,12 @@ int usage()
 		  << "                                          sheet descriptor byte 6 says so); the\n"
 		  << "                                          colour keeps the full density. OFF by\n"
 		  << "                                          default; needs --vt-mips 2 or more.\n"
+		  << "         [--no-collapse-uniform]          store a tile sheet that is ONE value\n"
+		  << "                                          (open sea, flat ground) in full, as\n"
+		  << "                                          before 2026-09-27. By default such a\n"
+		  << "                                          sheet is a 16-byte record and a tile\n"
+		  << "                                          flag bit; no texel changes. For the\n"
+		  << "                                          byte-identity gate only.\n"
 		  << "                                          With --msn-cache set, the pyramid's\n"
 		  << "                                          NORMAL is that folder's sheets, box-\n"
 		  << "                                          filtered as vectors to each level;\n"
@@ -8038,6 +8044,7 @@ int nifskopeCliMain( const QStringList & args )
 		}
 		else if ( t == QLatin1String( "--vt-density" ) ) lgVtDensity = qMax( -1, next().toInt() );
 		else if ( t == QLatin1String( "--vt-half-aux" ) ) lgVt.halfAux = true;
+		else if ( t == QLatin1String( "--no-collapse-uniform" ) ) lgVt.collapseUniform = false;
 		else if ( t == QLatin1String( "--vt-border" ) ) lgVt.border = next().toInt();
 		else if ( t == QLatin1String( "--vt-mips" ) ) lgVt.mips = next().toInt();
 		else if ( t == QLatin1String( "--vt-compress" ) ) {

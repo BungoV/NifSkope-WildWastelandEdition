@@ -1,0 +1,6 @@
+control dim 2 (one collapsed record byte flipped): 1 tile payloads differ, 348480 texels differ -> RED (good)
+dim 2: 48 tiles, 384 sheet-mips, 66908160 texels compared; payload bytes differ in 0 tiles; texels differ 0; tiles with a collapsed sheet 18
+file bytes: before 58592352, after 36695136
+control dim 4 (one collapsed record byte flipped): 1 tile payloads differ, 348480 texels differ -> RED (good)
+dim 4: 12 tiles, 96 sheet-mips, 16727040 texels compared; payload bytes differ in 0 tiles; texels differ 0; tiles with a collapsed sheet 3
+file bytes: before 14650464, after 11000928
