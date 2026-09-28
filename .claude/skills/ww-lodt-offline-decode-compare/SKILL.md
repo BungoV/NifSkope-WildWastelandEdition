@@ -5,9 +5,6 @@ description: Prove two .lodt terrain-sheet containers (an old exe's and a new ex
 
 # .lodt offline decode compare (lane FLAT2, 2026-09-27)
 
-(Intended home: .claude/skills/ww-lodt-offline-decode-compare/SKILL.md -- the lane's harness refused writes
-under .claude/, so it waits here for the overseer to move.)
-
 Written when the harness refused every command outside the lane worktree (FIX1's `turn.sh` included), so no
 NifSkope could run and the in-app render of the sea edge was impossible. The sheets themselves could still be
 compared and pictured from the bytes.
@@ -47,3 +44,5 @@ It shows the FILES agree. It does not show that NifSkope's viewer or FO4CS reads
   absolute paths as literal arguments and print to stdout.
 
 Script: `scratchpad/flat2_20260927/sea_pics.py <old vt dir> <new vt dir> <out dir>` (branch flat2-20260927).
+Env `EDID=<worldspace edid>` (default Commonwealth) picks the files; `COMPARE_ONLY=1` runs the compare and its
+control and skips the pictures (used for Nuka-World, 2026-09-28: 83.6 M texels, 0 differ, control red).

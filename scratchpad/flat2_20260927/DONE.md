@@ -58,6 +58,14 @@ Boston (-8 -12 3 -1), LEAN bakes, rung / off / on (bakes/rung, bakes/off, bakes/
 | bake time | within noise | wall 443 / 435 / 469 s (rung/off/on), other lanes' bakes running; no VT stage timer | noted |
 The Boston box is all land: the installed-bake map shows no one-value tile there, which the ON bake confirms.
 The sea region (32 -12 43 -1) is where the ON arm is really tested; its bakes had not started at the pause.
+FINAL (2026-09-28): the sea edge and Nuka-World carry the real test -- see CONTINUATION and RESUME 2 below. Summary:
+| region | sheets collapsed | kinds | decode compare | gates.py | --lodt-check ON / control / R2 / R3 | size |
+|---|---|---|---|---|---|---|
+| Boston -8 -12 3 -1 | 0 of 180 | - | - | PASS (vacuous) | - | - |
+| sea edge 32 -12 43 -1 | 48 of 180 | msn (BC1), height (R16) | 0 texels differ (62.7 M) | PASS | ok / ok / refused / refused | 54.9 -> 34.1 MB (-37.9 %) |
+| Nuka-World -8 24 3 32 | 84 of 256 | colour (BC1), msn, mask (BC3), height | 0 texels differ (83.6 M) | PASS | ok / ok / refused / refused | 78.1 -> 52.6 MB (-32.7 %) |
+In-app render, sea edge, rung exe + full sheets vs new exe + records: F8 == F9 byte-identical PNG; water off F10 == F11
+0 pixels differ (control: water on vs off differs in 1,043,425 pixels, so the picture does see the sea floor).
 
 ## 5. Commits
 - 7e160882 FLAT2: one-value .lodt sheets (src, checker, doc, bake.sh, measure.py, vtread.py)
@@ -67,10 +75,27 @@ The sea region (32 -12 43 -1) is where the ON arm is really tested; its bakes ha
 ## 6. Pictures
 - scratchpad/flat2_20260927/pics/F1_commonwealth_one_value_tiles.png (legend check PASS, not in git)
 - sea-edge before/after: owed (render_sea.sh)
+- DONE 2026-09-28 (in-app, NifSkope render hook, second monitor, own --port):
+  pics/F8_sea_edge_inapp_before.png, pics/F9_sea_edge_inapp_after.png (default water sheet on; identical files)
+  pics/F10_sea_edge_inapp_nowater_before.png, pics/F11_sea_edge_inapp_nowater_after.png (WW_LODL_WATER=0; 0 px differ)
+- offline F2..F7 (sea edge sheets as stored), see CONTINUATION.
 
 ## 7. What is still not right
+- The FO4CS reader change (DELIVERABLE_TEXT.md) is not made: FO4CS is built last. Until it lands, FO4CS refuses a
+  collapsed .lodt by rule 16 (unknown flag bit), i.e. a default bake is NOT loadable by today's FO4CS; bake with
+  --no-collapse-uniform until then.
+- No in-app render of Nuka-World (the gate there is the byte + decode compare and --lodt-check).
+- The in-app render equality has no sheet-level refuter (no doctored-sheet render); the decode-compare control is the refuter.
+- R2 in the in-tree validator was tested on a BC1 record (msn at the sea, colour at Nuka-World); a BC3 mask record passed
+  --lodt-check on the ON file, but no doctored BC3 record was fed to it.
+- Why the Commonwealth colour/mask sheets are not one value in the sea (Nuka-World's are) was not looked into.
+- Avast auto-sandbox killed the first run_rung render (AvastSvc.log, 19:22:29 UTC); one retry rendered.
 
 ## 8. Skills loaded / wished / written
+Loaded: search-lean, nifskope-ww-lodgen, nifskope-ww-worktree-build, nifskope-ww-build-verify, ww-module-off-is-identical,
+ww-gui-launch-silent-exit (2026-09-28, diagnosed the F8 sandbox kill in one read).
+Wished: a skill on what a night lane does when the harness refuses the shared turn lock with nobody to approve.
+Written: ww-lodt-offline-decode-compare, staged at .claude/skills/ww-lodt-offline-decode-compare/SKILL.md (worktree).
 
 ## RESUME (paused 2026-09-27 ~14:20 on bungo's word)
 Measured: whole installed bake 5,955,174,720 of 19,984,102,304 B (29.8 %) are one-value sheets (section 2).
@@ -164,3 +189,41 @@ is darker. That is the same in before and after, so it is not from this change.
   .claude/skills/ww-lodt-offline-decode-compare/SKILL.md.
 
 FLAT2 PARTIAL sea-edge gates all PASS (48/180 sheets collapsed, 38 % smaller, 0 texels differ, R1-R3 red); NifSkope --lodt-check, in-app render and Nuka-World not measured (turn lock refused by harness)
+
+## RESUME 2 (2026-09-28 21:21)
+Turn lock free of the overseer; shared with WATER1/TILING5. Turn name is now FLAT2 (bake.sh, shot.sh, doctored_check.sh).
+- bake.sh takes env WS (worldspace hex, default 3C). nw_bakes.sh: Nuka-World (0600290F) box -8 24 3 32 + --vt-fill-vanilla
+  (the installed bake's switch); the installed dim-2 map has every tile north of cell y 33 one value in all four sheets.
+- render_sea.sh outputs renamed F8/F9 (F2..F7 are taken by the offline pictures).
+- sea_pics.py: env EDID, COMPARE_ONLY.
+- Skill staged at .claude/skills/ww-lodt-offline-decode-compare/SKILL.md (the write was allowed this time).
+- Chain started in background: doctored_check.sh -> render_sea.sh -> nw_bakes.sh (chain.out); waiting on TILING5's turn.
+- 21:21 doctored_check.sh first run: all three "could not open doctored/<f>.lodt" (rc 1) -- a relative path; the
+  exe does not resolve it against the shell's folder. Script now passes the absolute path; rerun queued (chain2.out).
+- 21:22 render F8 (rung exe): NO FILE rc 0, 0-byte log, 25 s. AvastSvc.log: "marked for virtualization ...flat2\run_rung\
+  NifSkope.exe" at 19:22:29 UTC (= my launch), ScanCompleteClean 19:22:54, then the exclusion failed. Avast sandbox, not the
+  script. F9 (run_new) rendered: pics/F9_sea_edge_inapp_after.png (sheets log: 6x6 tiles, 4 sheets, 36 present). The
+  default water sheet covers the sea floor, where the one-value sheets are, so render_sea.sh gained a water-off pair
+  (WW_LODL_WATER=0): F10 before / F11 after. F8 retried once in chain2.
+
+### Nuka-World (0600290F), box -8 24 3 32, LEAN, --vt-fill-vanilla; bakes/nw_{rung,off,on}; all rc 0, 66-68 s
+gates.py (nw_gates.out): RESULT PASS, 0 failures.
+| gate | expected | measured | verdict |
+|---|---|---|---|
+| G1 controls (flip, keyflip, lodbflip, remove) | red | all 4 red | PASS |
+| G1 OFF == RUNG, data files | byte-identical | 110 files, 0 data differ; 23 provenance files differ only in named words (21 .key, 1 .lodb, 1 report) | PASS |
+| G1 every .lodt OFF == RUNG | byte-identical | 3 of 3 | PASS |
+| G2 non-.lodt ON == OFF | identical except provenance | 107 files, 0 data differ, 22 provenance | PASS |
+| G2 per tile | 0 failures | 0 | PASS |
+| G2 collapse exercised, ALL FOUR sheets | > 0 each | 84 of 256 sheets: dim 2 18 of 48 each of colour/msn/mask/height; dim 4 3 of 12 each; dim 8 0 of 4 | PASS |
+| R1 / R2 (BC1 colour record swapped) / R3 | red | red / red ([0,0,0,255] vs OFF [132,130,132,255]) / red | PASS |
+| G2 case-a sheet with identical blocks left uncollapsed | none | none | PASS |
+| decode compare RUNG vs ON expanded (sea_pics.py EDID=NukaWorld COMPARE_ONLY=1) | 0 differ | dim 2: 48 tiles, 384 sheet-mips, 66,908,160 texels, 0 payloads / 0 texels differ; dim 4: 12 tiles, 96 sheet-mips, 16,727,040 texels, 0 / 0 | PASS |
+| decode compare control | red | red both levels (1 payload, 348,480 texels) | PASS |
+| file size | smaller | 78,128,416 -> 52,581,664 B (25,546,752 saved, 32.70 %) | measured |
+- 21:33 doctored_check.sh rerun (absolute path): control ok (uniformSheets 0,20,0,20); R2 refused "one-value record is a
+  block that does not decode to one value"; R3 refused "one-value record has a non-zero pad byte". PASS.
+- 21:35-21:37 renders F8 (retry OK), F10, F11. F8 == F9 byte-identical; F10 vs F11 0 px; control F9 vs F11 1,043,425 px.
+- 21:40 nw_check.sh: Nuka-World ON dim 2 ok (uniformSheets 18,18,18,18), dim 4 ok (3,3,3,3), sea ON ok; doctored_nw
+  control ok, R2 (BC1 colour) refused, R3 refused. PASS.
+FLAT2 DONE: all gates PASS on sea edge + Nuka-World; FO4CS reader change owed (not this lane's).

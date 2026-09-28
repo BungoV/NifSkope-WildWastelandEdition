@@ -9,7 +9,12 @@ repeating that unit gives the old bytes back exactly. Measured on the installed 
 19.98 GB (29.8 %) is such sheets. On by default; `--no-collapse-uniform` (CLI only) writes today's bytes.
 `.lodt` stays v2 (the mipSkip precedent: an old reader refuses the new flag bit by rule 16). The viewer and
 every in-tree reader expand the record; the validator gained rule 16c (record pad zero, block one value).
-NOT FLOWN; the FO4CS reader change below is owed. (Draft: sea-region counts, gates and pictures still owed.)
+Gated on two small bakes against the pre-change exe: the sea edge (48 of 180 sheets stored as one value, file
+54.9 -> 34.1 MB) and Nuka-World's north edge (84 of 256, all four sheet kinds, 78.1 -> 52.6 MB): every file other
+than the .lodt identical, the .lodt identical with the switch off, 0 texels differ after decode, the validator
+refuses a doctored record, and the sea-edge render is the same picture before and after.
+NOT FLOWN. Until the FO4CS reader change below lands, FO4CS refuses a default bake (unknown flag bit):
+bake with `--no-collapse-uniform` for the game until then.
 
 ## WW_CHANGES.md
 - Terrain texture files (.lodt): a tile's sheet that is a single value over the whole tile is stored as one
