@@ -374,3 +374,12 @@ The turn lock was released by `tidy1` after every run (at the end it was held by
   off/on render pixel gate.
 
 TIDY1 DONE the kept all-zero 256x512 card glow sheet is now dropped (exe 119d46d4): on gates 6/6 PASS (21/21 black glow sheets gone, 50.1 MB; 2 lit kept; 114->106 layers, all texels identical; 647/647 A lines), off 152/153 with only the provenance .lodb moving (-18 B = 6 paths x 3 chars), off/on Boston renders pixel-identical; glow-view pictures not made (antivirus sandbox)
+
+## RESUME 2026-09-28 12:31 (`date`-read)
+- The overseer's resume brief still named origin's head 89ea5a26 (FAIL). All the owed work was already done
+  locally in continuation 2 (above, 09-27 20:01-21:03) but never pushed: HEAD aedb99a4 vs origin 89ea5a26.
+- Nothing re-baked: the gates are already measured on the fixed exe 119d46d4, and the code has not changed since
+  (`git diff 2b5b51ea aedb99a4 -- src` is empty). The turn lock was not taken this session.
+- Old code fails the gate (measured by lane GATES on exe 59f08533): 20 of 21 black sheets gone, the all-zero
+  `legacy.256x512_g` kept. New code passes: 21 of 21 (gates.log, exe 119d46d4).
+- Pushed tidy1-20260927 to origin.
