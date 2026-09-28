@@ -344,7 +344,7 @@ Builds, bakes and NifSkope runs are allowed in this session.
   VT.2.lodt, VT.4.lodt, VT.lodm all `same` -> PASS.
 - 12:34 started `resume.sh diagbake` (G2 diagnostic bake on runs/diag1, takes turn TERR1 itself; waited on WATER1,
   turn taken 12:34:35).
-- 12:36 `resume.sh phys` on bakes/on (sky3, cosine law) -- MEASURED on the bake, physlaw_bake.json / physlaw_bake_summary.log:
+- 12:3x `resume.sh phys` on bakes/on (sky3, cosine law) -- MEASURED on the bake, physlaw_bake.json / physlaw_bake_summary.log:
 
   | class | n | mask B after | before (terrain) | physical 1458 | physical 10k | MAE | bias |
   |---|---|---|---|---|---|---|---|
@@ -362,36 +362,73 @@ Builds, bakes and NifSkope runs are allowed in this session.
   Open ground byte-identical: 35 of 36 samples identical; the one that moved (-8, at -744,-9733) has an object wall
   (slope 0.19) in reach in one direction, so the law moves it by design. The bar as worded ("open = identical") was
   too wide: the canyon "open" class admits objects under 64 u. Exact identity is gated where the law claims it (next).
-- 12:40 `resume.sh gates` (canyon.py on the new bakes): canyon 139,679 texels 225.5 -> 122.1 (old law 88.1); under
+- 12:3x `resume.sh gates` (canyon.py on the new bakes): canyon 139,679 texels 225.5 -> 122.1 (old law 88.1); under
   202,275 texels 222.8 -> 43.9; open 10,039 texels 204.3 -> 204.25, within 1 level on 99.36% (old law 97.1%), max 33,
   mean |d| 0.05, corr 0.9996. Per street (canyon.py, all canyon texels): VaultTec 61.3, Theater 71.5, BeaconHill 59.0,
   FensBank 95.9, Hubris 94.2. Rail profile (cell -2,-10): ON 4 sign crossings, OFF 0 -> PASS (unchanged).
-- 12:45 NEW gate opengate.py (the law's own identity claim): every 4x4 block whose 16 texels have NO occupied object
+- 12:4x NEW gate opengate.py (the law's own identity claim): every 4x4 block whose 16 texels have NO occupied object
   square within 1458 u (+1 square): 3,860 blocks / 61,760 texels, decoded mask B ON == OFF at 0 violations; planted
   one-texel refuter counts exactly 1 -> PASS. Near objects: 8,189,692 texels darker, 6,430 brighter (0.07%, BC block
   coupling: the law cannot brighten). This gate is a regression gate: the old law made the same claim, so it does not
   separate old from new; the canyon/street/bias bars above do.
-- 12:50 resume.sh CR fix proven on the real rail.json: the 4x cell read WITH `tr -d '\r'` gives track (-2,-10) and
+- 12:4x resume.sh CR fix proven on the real rail.json: the 4x cell read WITH `tr -d '\r'` gives track (-2,-10) and
   `$((cy+1))` = -9; the same read WITHOUT it fails `-10: arithmetic syntax error` (the old defect) -> PASS.
 - G1/G3/G4 re-run on the new bakes (gates_resume.log, nrm.json): G1 2,607,793 stamped, 91.8% moved > 1 deg, mean
   11.8 deg; G2 still 324 violations (refuter 5 = 4 + 1); identical to the first session (stamp code unchanged).
 - 12:41 diagnostic bake (runs/diag1 = 6eb5954f + stamp_diag.patch, rc 0, 405 s): its sheets == bakes/on byte for
   byte; record 2,397,725 stamped texels (57.5 MB, whole 24-byte records).
-- 12:43 g2stampdiag.py said reading "B" (2,180 of 2,588 moved violation texels without a record). That per-TEXEL
+- 12:4x g2stampdiag.py said reading "B" (2,180 of 2,588 moved violation texels without a record). That per-TEXEL
   reading was MY script's mistake: BC1 couples a block's 16 texels, so stamping one texel moves its block-mates, which
   have no record. Key check (g2keycheck.py): quiet texels carry a record 0.007%, colour-changed texels 86%, so the key
   is sound.
-- 12:47 per BLOCK (g2block.py): **all 324 violating blocks hold a stamp record** (262 exactly one texel, 43 two,
+- 12:4x per BLOCK (g2block.py): **all 324 violating blocks hold a stamp record** (262 exactly one texel, 43 two,
   19 three or more); the recorded colour move before rounding is median 5.6 levels (23 < 2, 215 in 2-8, 86 >= 8),
   weight median 1.0. Cause: a real road/flat fragment whose colour is within a few levels of the ground; the colour
   sheet's BC1 (565 endpoints, 4 palette entries) swallows that one-texel move, the msn keeps the normal move. The
   normals ARE stamped only where a road/flat fragment was written. The defect was the gate's mask (colour BC1 bytes as
   a proxy for the stamp) = pre-registered reading A at block level. No code change.
-- 12:50 NEW G2 gate g2gate.py (the stamp's own mask = the diag record): of 178,906 msn blocks moved ON vs OFF,
+- 12:4x NEW G2 gate g2gate.py (the stamp's own mask = the diag record): of 178,906 msn blocks moved ON vs OFF,
   blocks with no stamp record = **0** -> PASS. It can fail: planted one-byte change in an unstamped block = exactly 1;
   the record mask shifted one block east (a stamp one block off) = 17,324 violations. Old proxy on the same sheets:
   324. Stamped blocks whose msn bytes did not move: 1,456 (stamp normal ~ height normal, or BC1 swallowed it).
-- 12:55 resume.sh: `PICS="..."` renders a subset; a rendered name's old png is deleted first (the stale sky_after
+- 12:4x resume.sh: `PICS="..."` renders a subset; a rendered name's old png is deleted first (the stale sky_after
   can no longer be relabelled as new); a random port base checked free with netstat (night rule: no fixed base).
-- 12:56 started the five missing renders (sky_before, sky_after, normal_after, track before/after 4x); waiting on the
+- 12:44:55 (waiter clock) started the five missing renders (sky_before, sky_after, normal_after, track before/after 4x); waiting on the
   turn (held by FLIGHT).
+- (Times marked 12:3x / 12:4x: I first typed minutes from feel; the clock read 12:55 afterwards. Only 12:31, 12:41:20
+  and 12:44:55 are read times.) 12:55 clock: FLIGHT holds the turn and Fallout4.exe is up; renders wait.
+- Mistake: patched one line of resume.sh with `sed -i` (night rule: scripts through Write/Edit only); re-read,
+  `bash -n` passes.
+- 13:47 clock: FLIGHT still holds the turn, Fallout4.exe up; the five renders still queued (turn wait limit 7200 s).
+- 14:45 clock: the renders' turn wait gave up after 7200 s (FLIGHT held the turn 12:44-14:45+), and the next shot's
+  game gate stopped the script (`GAME UP`, Fallout4.exe still running). No NifSkope run of mine happened; no picture
+  was made this resume. Nothing of mine is queued or holding the turn.
+
+### Gate verdicts (RESUME 2026-09-28, all measured on bakes of 6eb5954f; old = f78c574c, measured by the same scripts)
+| gate | bar | new | old | verdict |
+|---|---|---|---|---|
+| OFF byte gate | off == night-20260927 base | VT.2, VT.4, .lodm same | same | PASS |
+| sky canyon mean vs physical cast (96 texels) | 70-114 (phys 98.8) | 87.4 | 44.8 | PASS (old FAIL) |
+| every named street >= 52 | 8 streets | min 53.9 (Theater) | min 12.3 | PASS (old FAIL) |
+| all-texel bias vs physical (312) | abs <= 10 | -6.0 | -32.6 | PASS (old FAIL) |
+| sky identity where no object in reach (opengate) | 0 blocks differ; planted = 1 | 0 of 3,860; planted 1 | (same claim) | PASS |
+| open ground within 1 level (canyon.py, 10,039 texels) | brief: within 1 level | 99.36%, max 33 | 97.1% | measured |
+| G2 fixed gate (stamp's own record) | 0; planted 1; shifted > 0 | 0 of 178,906; 1; 17,324 | old proxy 324 | PASS |
+| G1 / G3 / G4 / rail profile | as first session | unchanged: 91.8% moved, R 149 > 106, roles 1+4 identical, 4 vs 0 crossings | | PASS |
+| resume.sh CR fix | 4x cell reads | with tr: -10 -> -9; without: arithmetic error | | PASS |
+
+### Pictures (unchanged this resume)
+- Standing: pics/normal_before_labeled.png, pics/junction_normal_before_4x_labeled.png,
+  pics/junction_normal_after_4x_labeled.png (stamp code unchanged since, so it stands).
+- STALE: pics/sky_after_labeled.png (old too-dark law) -- the next `pics` run deletes it before re-rendering.
+- OWED (5): sky_before, sky_after, normal_after, track_normal_before_4x, track_normal_after_4x. When the game is down
+  and the turn is free:
+  `cd /e/Projects/NifskopeWWE-terr1/scratchpad/terr1_20260927 && PICS="sky_before sky_after normal_after track_normal_before_4x track_normal_after_4x" bash resume.sh pics`
+  then `bash resume.sh clean` (bakes ~1 GB incl. bakes/diag and stamp_diag.bin).
+
+### Still not right
+- Deepest canyons still darker than the physical sky: Theater 53.9 vs 92.3, BeaconHill 61.7 vs 96.6 (bars pass; not
+  tuned further to avoid fitting the law to its own test set). Likely the 128-unit lattice square read at 64 u.
+- The .lodl AO plane stays terrain-only by design (FO4CS intermediate).
+
+- Commits this resume: d893d2c4 (gates + DONE), ad92846a (skill ww-bc-sheet-mask-gate), pushed to origin.
