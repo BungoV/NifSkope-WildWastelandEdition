@@ -1,0 +1,5 @@
+window -36,-40..-25,-29  mid-height SD 3723  dry 0.99
+window -36,-36..-25,-25  mid-height SD 3709  dry 0.97
+window -36,4..-25,15  mid-height SD 3549  dry 1.00
+window -36,-32..-25,-21  mid-height SD 3416  dry 0.97
+window -40,0..-29,11  mid-height SD 3396  dry 1.00

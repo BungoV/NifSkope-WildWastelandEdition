@@ -6582,7 +6582,20 @@ int usage()
 		  << "                                          hex tiling (256 units, bias -0.22)\n"
 		  << "                                          with the warp amplitude forced to 0;\n"
 		  << "                                          warp = lane TILING3's domain warp,\n"
-		  << "                                          kept for the record\n"
+		  << "                                          kept for the record; relief = the\n"
+		  << "                                          sampler unchanged plus both switches\n"
+		  << "                                          below\n"
+		  << "  lodgen ... --terrain-region ... [--land-height-blend on|off]\n"
+		  << "                                 [--land-macro on|off]\n"
+		  << "                                          lane TILING5, both OFF by default (off\n"
+		  << "                                          = the same bytes). height-blend: each\n"
+		  << "                                          land texture's relief, integrated from\n"
+		  << "                                          its normal map, decides the hex joins\n"
+		  << "                                          and the layer transitions (raised wins)\n"
+		  << "                                          instead of a crossfade. macro: a smooth\n"
+		  << "                                          58 m - 1 km world field that moves the\n"
+		  << "                                          land colour's brightness and hue\n"
+		  << "                                          slightly; saturation only ever rises\n"
 		  << "  lodgen ... --terrain-region ... [--blend-edges off|quadrant]\n"
 		  << "                                          the 2,048-unit quadrant lines of the\n"
 		  << "                                          land colour. DEFAULT quadrant since\n"
@@ -7643,7 +7656,20 @@ int nifskopeCliMain( const QStringList & args )
 				lodgenSetLandWarpOctaves( 1 );
 				lodgenSetLandMipBias( -1.0f );
 			}
+			/* `relief` (lane TILING5) leaves the sampler exactly as it is --
+			 * today's default hex + flatwarp -- and turns on the height-aware
+			 * blend and the large-scale variation together. */
+			else if ( v == QLatin1String( "relief" ) ) {
+				lodgenSetLandHeightBlend( true );
+				lodgenSetLandMacro( true );
+			}
 		}
+		/* THE TWO HALVES OF `relief`, individually (lane TILING5); both OFF by
+		 * default and off is the rung's bytes. */
+		else if ( t == QLatin1String( "--land-height-blend" ) )
+			lodgenSetLandHeightBlend( next().toLower() == QLatin1String( "on" ) );
+		else if ( t == QLatin1String( "--land-macro" ) )
+			lodgenSetLandMacro( next().toLower() == QLatin1String( "on" ) );
 		else if ( t == QLatin1String( "--land-detail" ) ) lodgenSetLandDetail( next().toFloat() );
 		/* THE FOUR NUMBERS OF THE STOCHASTIC SAMPLE, individually (lane
 		 * TILING3). Since 2026-09-12 the DEFAULTS are bungo's pick -- amplitude

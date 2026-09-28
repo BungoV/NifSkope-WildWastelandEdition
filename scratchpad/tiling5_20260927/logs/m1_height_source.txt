@@ -1,0 +1,204 @@
+000AB72E w= 2717.0 side  256 ysign +1 resid 0.686  lumSD   3.85 aSD   5.56 | corr(lum,h) +0.117 lo -0.016 | corr(alpha,h) 0.099 lo -0.034 | corr(lum,cavity) +0.046  Landscape\Ground\CoastSandWet01_d.dds
+00021336 w= 1689.5 side  256 ysign +1 resid 0.540  lumSD  18.76 aSD  28.23 | corr(lum,h) +0.207 lo +0.083 | corr(alpha,h) 0.395 lo 0.314 | corr(lum,cavity) +0.166  Landscape\Ground\DirtGravel01_d.dds
+0014BF47 w= 1548.3 side  256 ysign +1 resid 0.206  lumSD  11.11 aSD  10.47 | corr(lum,h) +0.385 lo +0.551 | corr(alpha,h) 0.357 lo 0.52 | corr(lum,cavity) -0.274  Landscape\Ground\OceanFloor01_d.DDS
+00125C6C w= 1039.7 side  256 ysign +1 resid 0.315  lumSD  11.54 aSD   0.00 | corr(lum,h) +0.177 lo +0.239 | corr(alpha,h) None lo None | corr(lum,cavity) -0.042  Landscape\Ground\BlastedForestDirt01_d.dds
+0001F78C w=  869.5 side  256 ysign +1 resid 0.628  lumSD  15.36 aSD  32.58 | corr(lum,h) +0.163 lo +0.149 | corr(alpha,h) 0.142 lo 0.098 | corr(lum,cavity) +0.105  Landscape\Ground\RubbleRock01_D.dds
+0001D1D3 w=  798.6 side  256 ysign +1 resid 0.374  lumSD  21.51 aSD  21.98 | corr(lum,h) +0.481 lo +0.725 | corr(alpha,h) 0.695 lo 0.843 | corr(lum,cavity) +0.183  Landscape\Ground\DriedGrass01_D.dds
+00109041 w=  785.9 side  256 ysign +1 resid 0.263  lumSD   8.09 aSD  10.83 | corr(lum,h) +0.548 lo +0.738 | corr(alpha,h) 0.416 lo 0.652 | corr(lum,cavity) -0.178  Landscape\Ground\MarshMudFloor01_d.DDS
+0019DF0C w=  730.0 side  256 ysign +1 resid 0.434  lumSD  10.83 aSD   0.00 | corr(lum,h) +0.267 lo +0.180 | corr(alpha,h) None lo None | corr(lum,cavity) -0.084  Landscape\Ground\NF_Dirt01_d.dds
+000DEDC7 w=  685.4 side  256 ysign +1 resid 0.762  lumSD  15.06 aSD  20.79 | corr(lum,h) +0.052 lo +0.008 | corr(alpha,h) 0.109 lo 0.082 | corr(lum,cavity) +0.023  Landscape\Ground\GlowingSeaRubble01_d.dds
+000DEDC8 w=  534.0 side  256 ysign +1 resid 0.352  lumSD  18.90 aSD   0.00 | corr(lum,h) +0.079 lo -0.052 | corr(alpha,h) None lo None | corr(lum,cavity) -0.069  Landscape\Ground\GlowingSeaCorrosion01_d.dds
+000ECBDF w=  527.2 side  256 ysign +1 resid 0.762  lumSD  15.06 aSD  20.79 | corr(lum,h) +0.052 lo +0.008 | corr(alpha,h) 0.109 lo 0.082 | corr(lum,cavity) +0.023  Landscape\Ground\GlowingSeaRubble01_d.dds
+000DEDC4 w=  481.6 side  256 ysign +1 resid 0.388  lumSD  10.70 aSD  13.62 | corr(lum,h) +0.767 lo +0.809 | corr(alpha,h) 0.792 lo 0.847 | corr(lum,cavity) -0.278  Landscape\Ground\GlowingSeaMud01_d.dds
+000AB72C w=  471.1 side  256 ysign -1 resid 0.707  lumSD   7.11 aSD   5.56 | corr(lum,h) -0.008 lo -0.081 | corr(alpha,h) 0.08 lo 0.143 | corr(lum,cavity) +0.027  Landscape\Ground\CoastSandDry01_d.dds
+000227B7 w=  407.8 side  256 ysign +1 resid 0.683  lumSD  10.52 aSD  29.52 | corr(lum,h) +0.183 lo +0.170 | corr(alpha,h) 0.459 lo 0.481 | corr(lum,cavity) +0.085  Landscape\Ground\RiverbedSilt01_d.dds
+0003343C w=  407.5 side  256 ysign +1 resid 0.724  lumSD  18.33 aSD  19.47 | corr(lum,h) +0.126 lo +0.176 | corr(alpha,h) 0.156 lo 0.239 | corr(lum,cavity) +0.369  Landscape\Ground\ForestFloor01_D.dds
+0004DDF3 w=  400.2 side  256 ysign +1 resid 0.640  lumSD  11.44 aSD  27.85 | corr(lum,h) +0.114 lo +0.110 | corr(alpha,h) 0.252 lo 0.276 | corr(lum,cavity) -0.019  Landscape\Ground\RiverbedSilt01Wet_d.dds
+0001D9B1 w=  382.7 side  256 ysign +1 resid 0.374  lumSD  21.51 aSD  21.98 | corr(lum,h) +0.481 lo +0.725 | corr(alpha,h) 0.695 lo 0.843 | corr(lum,cavity) +0.183  Landscape\Ground\DriedGrass01_D.dds
+000BA4E9 w=  337.1 side  256 ysign +1 resid 0.761  lumSD   9.35 aSD  13.31 | corr(lum,h) +0.196 lo +0.245 | corr(alpha,h) 0.303 lo 0.279 | corr(lum,cavity) +0.445  Landscape\Ground\CoastWetRockSand01_d.dds
+00021C68 w=  280.6 side  256 ysign +1 resid 0.519  lumSD  12.19 aSD   0.00 | corr(lum,h) +0.269 lo +0.248 | corr(alpha,h) None lo None | corr(lum,cavity) -0.085  Landscape\Roads\Asphalt01_d.dds
+0012756A w=  266.1 side  256 ysign +1 resid 0.507  lumSD  12.71 aSD   0.00 | corr(lum,h) +0.386 lo +0.315 | corr(alpha,h) None lo None | corr(lum,cavity) +0.010  Landscape\Ground\BlastedForestGrass01_d.dds
+000ECBDE w=  262.3 side  256 ysign +1 resid 0.388  lumSD  10.70 aSD  13.62 | corr(lum,h) +0.767 lo +0.809 | corr(alpha,h) 0.792 lo 0.847 | corr(lum,cavity) -0.278  Landscape\Ground\GlowingSeaMud01_d.dds
+0014D270 w=  231.9 side  256 ysign +1 resid 0.206  lumSD  11.11 aSD  10.47 | corr(lum,h) +0.385 lo +0.551 | corr(alpha,h) 0.357 lo 0.52 | corr(lum,cavity) -0.274  Landscape\Ground\OceanFloor01_d.DDS
+000FA5A8 w=  207.3 side  256 ysign +1 resid 0.356  lumSD  24.23 aSD   0.00 | corr(lum,h) +0.372 lo +0.439 | corr(alpha,h) None lo None | corr(lum,cavity) -0.302  Landscape\DirtCliffs\GlowingSeaCliff02_d.dds
+00127568 w=  196.4 side  256 ysign +1 resid 0.507  lumSD  12.71 aSD   0.00 | corr(lum,h) +0.386 lo +0.315 | corr(alpha,h) None lo None | corr(lum,cavity) +0.010  Landscape\Ground\BlastedForestGrass01_d.dds
+00084765 w=  191.5 side  256 ysign +1 resid 0.628  lumSD  15.36 aSD  32.58 | corr(lum,h) +0.163 lo +0.149 | corr(alpha,h) 0.142 lo 0.098 | corr(lum,cavity) +0.105  Landscape\Ground\RubbleRock01_D.dds
+0019DF08 w=  186.8 side  256 ysign +1 resid 0.423  lumSD  16.57 aSD   0.00 | corr(lum,h) -0.015 lo -0.036 | corr(alpha,h) None lo None | corr(lum,cavity) -0.003  Landscape\Ground\NF_ScrubGrass_d.dds
+000DEDC9 w=  171.8 side  256 ysign +1 resid 0.740  lumSD  13.44 aSD   0.00 | corr(lum,h) +0.210 lo +0.039 | corr(alpha,h) None lo None | corr(lum,cavity) -0.193  Landscape\Ground\GlowingSeaCrackedMud01_d.dds
+000BC13D w=  166.7 side  256 ysign +1 resid 0.718  lumSD  18.48 aSD  26.70 | corr(lum,h) +0.291 lo +0.284 | corr(alpha,h) 0.311 lo 0.293 | corr(lum,cavity) +0.210  Landscape\Ground\RiverbedRocks02Wet_d.dds
+00038C05 w=  161.9 side  256 ysign +1 resid 0.798  lumSD  15.32 aSD  28.74 | corr(lum,h) +0.025 lo -0.070 | corr(alpha,h) 0.292 lo 0.364 | corr(lum,cavity) -0.018  Landscape\Ground\RootsEroded01_d.dds
+000AB730 w=  135.4 side  256 ysign -1 resid 0.625  lumSD  11.28 aSD   6.98 | corr(lum,h) +0.282 lo +0.385 | corr(alpha,h) 0.314 lo 0.362 | corr(lum,cavity) +0.322  Landscape\Ground\CoastGrassSand01_d.dds
+00022B63 w=  130.1 side  256 ysign +1 resid 0.374  lumSD  21.51 aSD  21.98 | corr(lum,h) +0.481 lo +0.725 | corr(alpha,h) 0.695 lo 0.843 | corr(lum,cavity) +0.183  Landscape\Ground\DriedGrass01_D.dds
+00030888 w=   98.7 side  256 ysign +1 resid 0.785  lumSD  19.73 aSD  27.78 | corr(lum,h) -0.004 lo -0.053 | corr(alpha,h) -0.016 lo -0.036 | corr(lum,cavity) +0.214  Landscape\Ground\FallenLeaves01_D.dds
+0010980A w=   96.7 side  256 ysign +1 resid 0.451  lumSD  18.44 aSD  15.66 | corr(lum,h) +0.768 lo +0.957 | corr(alpha,h) 0.721 lo 0.843 | corr(lum,cavity) -0.068  Landscape\Ground\MarshMuddyGrass01_d.DDS
+0012C097 w=   94.2 side  256 ysign +1 resid 0.494  lumSD  15.65 aSD  47.15 | corr(lum,h) +0.392 lo +0.293 | corr(alpha,h) 0.68 lo 0.72 | corr(lum,cavity) +0.406  Landscape\Ground\BlastedForestGravel01_d.dds
+00118B70 w=   91.6 side  256 ysign +1 resid 0.451  lumSD  18.44 aSD  15.66 | corr(lum,h) +0.768 lo +0.957 | corr(alpha,h) 0.721 lo 0.843 | corr(lum,cavity) -0.068  Landscape\Ground\MarshMuddyGrass01_d.DDS
+0010C70E w=   82.5 side  256 ysign +1 resid 0.486  lumSD  15.53 aSD  13.83 | corr(lum,h) +0.044 lo -0.130 | corr(alpha,h) -0.012 lo -0.034 | corr(lum,cavity) +0.118  Landscape\Ground\MarshHighGround01_d.DDS
+000B8835 w=   72.3 side  256 ysign +1 resid 0.278  lumSD   4.46 aSD   6.14 | corr(lum,h) +0.001 lo -0.346 | corr(alpha,h) -0.076 lo -0.136 | corr(lum,cavity) +0.010  Landscape\Ground\CoastSandRipples01_d.dds
+00166725 w=   49.7 side  256 ysign +1 resid 0.206  lumSD  11.11 aSD  10.47 | corr(lum,h) +0.385 lo +0.551 | corr(alpha,h) 0.357 lo 0.52 | corr(lum,cavity) -0.274  Landscape\Ground\OceanFloor01_d.DDS
+0004417F w=   49.0 side  256 ysign +1 resid 0.540  lumSD  18.76 aSD  28.23 | corr(lum,h) +0.207 lo +0.083 | corr(alpha,h) 0.395 lo 0.314 | corr(lum,cavity) +0.166  Landscape\Ground\DirtGravel01_d.dds
+000ECBDD w=   46.5 side  256 ysign +1 resid 0.740  lumSD  13.44 aSD   0.00 | corr(lum,h) +0.210 lo +0.039 | corr(alpha,h) None lo None | corr(lum,cavity) -0.193  Landscape\Ground\GlowingSeaCrackedMud01_d.dds
+00022DFD w=   42.8 side  256 ysign +1 resid 0.419  lumSD  15.57 aSD  95.80 | corr(lum,h) +0.095 lo +0.101 | corr(alpha,h) -0.062 lo -0.063 | corr(lum,cavity) -0.225  Landscape\Ground\DirtPath01_D.dds
+00125C7B w=   42.1 side  256 ysign +1 resid 0.494  lumSD  15.65 aSD  47.15 | corr(lum,h) +0.392 lo +0.293 | corr(alpha,h) 0.68 lo 0.72 | corr(lum,cavity) +0.406  Landscape\Ground\BlastedForestGravel01_d.dds
+0012C09C w=   39.6 side  256 ysign +1 resid 0.544  lumSD   8.50 aSD   0.00 | corr(lum,h) +0.362 lo +0.281 | corr(alpha,h) None lo None | corr(lum,cavity) +0.044  Landscape\Ground\BlastedForestFloor02_d.dds
+00109043 w=   38.5 side  256 ysign +1 resid 0.695  lumSD  24.96 aSD  16.88 | corr(lum,h) +0.562 lo +0.765 | corr(alpha,h) 0.431 lo 0.617 | corr(lum,cavity) +0.587  Landscape\Ground\MarshMudTrash01_d.DDS
+00055ED0 w=   37.4 side  256 ysign +1 resid 0.746  lumSD  15.26 aSD   0.00 | corr(lum,h) +0.082 lo +0.034 | corr(alpha,h) None lo None | corr(lum,cavity) +0.134  Landscape\Ground\MuddyLeaves01Wet_d.dds
+000A7C4E w=   30.5 side  256 ysign +1 resid 0.494  lumSD  18.20 aSD  19.89 | corr(lum,h) +0.427 lo +0.442 | corr(alpha,h) 0.4 lo 0.315 | corr(lum,cavity) -0.199  Landscape\Ground\RiverbedRocksWet_d.dds
+0012756C w=   27.5 side  256 ysign +1 resid 0.544  lumSD   8.50 aSD   0.00 | corr(lum,h) +0.362 lo +0.281 | corr(alpha,h) None lo None | corr(lum,cavity) +0.044  Landscape\Ground\BlastedForestFloor02_d.dds
+001E7D17 w=   25.9 side  256 ysign +1 resid 0.761  lumSD   9.35 aSD  13.31 | corr(lum,h) +0.196 lo +0.245 | corr(alpha,h) 0.303 lo 0.279 | corr(lum,cavity) +0.445  Landscape\Ground\CoastWetRockSand01_d.dds
+00118017 w=   25.7 side  256 ysign +1 resid 0.263  lumSD   8.09 aSD  10.83 | corr(lum,h) +0.548 lo +0.738 | corr(alpha,h) 0.416 lo 0.652 | corr(lum,cavity) -0.178  Landscape\Ground\MarshMudFloor01_d.DDS
+00125C71 w=   22.7 side  256 ysign +1 resid 0.470  lumSD  17.69 aSD   0.00 | corr(lum,h) +0.231 lo +0.148 | corr(alpha,h) None lo None | corr(lum,cavity) -0.009  Landscape\Ground\BlastedForestFloor01_d.dds
+000BC140 w=   21.6 side  256 ysign +1 resid 0.494  lumSD  18.20 aSD  19.89 | corr(lum,h) +0.427 lo +0.442 | corr(alpha,h) 0.4 lo 0.315 | corr(lum,cavity) -0.199  Landscape\Ground\RiverbedRocksWet_d.dds
+0019DF0D w=   21.1 side  256 ysign +1 resid 0.423  lumSD  16.57 aSD   0.00 | corr(lum,h) -0.015 lo -0.036 | corr(alpha,h) None lo None | corr(lum,cavity) -0.003  Landscape\Ground\NF_ScrubGrass_d.dds
+000BC13F w=   20.6 side  256 ysign +1 resid 0.718  lumSD  18.48 aSD  26.70 | corr(lum,h) +0.291 lo +0.284 | corr(alpha,h) 0.311 lo 0.293 | corr(lum,cavity) +0.210  Landscape\Ground\RiverbedRocks02Wet_d.dds
+00026F7F w=   18.3 side  256 ysign +1 resid 0.746  lumSD  17.18 aSD   0.00 | corr(lum,h) +0.164 lo +0.160 | corr(alpha,h) None lo None | corr(lum,cavity) -0.100  Landscape\Ground\CrackedMud01_d.dds
+0019DF06 w=   16.2 side  256 ysign +1 resid 0.443  lumSD  12.22 aSD   0.00 | corr(lum,h) +0.085 lo +0.058 | corr(alpha,h) None lo None | corr(lum,cavity) +0.045  Landscape\Ground\NF_ForestFloor01_d.dds
+001793E0 w=   16.1 side  256 ysign +1 resid 0.494  lumSD  18.20 aSD  19.89 | corr(lum,h) +0.427 lo +0.442 | corr(alpha,h) 0.4 lo 0.315 | corr(lum,cavity) -0.199  Landscape\Ground\RiverbedRocksWet_d.dds
+000A7C4C w=   14.5 side  256 ysign +1 resid 0.741  lumSD  18.91 aSD  26.70 | corr(lum,h) +0.259 lo +0.241 | corr(alpha,h) 0.338 lo 0.302 | corr(lum,cavity) +0.195  Landscape\Ground\RiverbedRocks02_d.dds
+0003E1A4 w=   14.2 side  256 ysign +1 resid 0.798  lumSD  15.32 aSD  28.74 | corr(lum,h) +0.025 lo -0.070 | corr(alpha,h) 0.292 lo 0.364 | corr(lum,cavity) -0.018  Landscape\Ground\RootsEroded01_d.dds
+0006E61A w=   12.7 side  256 ysign +1 resid 0.374  lumSD  21.51 aSD  21.98 | corr(lum,h) +0.481 lo +0.725 | corr(alpha,h) 0.695 lo 0.843 | corr(lum,cavity) +0.183  Landscape\Ground\DriedGrass01_D.dds
+000AB501 w=    9.6 side  256 ysign +1 resid 0.683  lumSD  10.52 aSD  29.52 | corr(lum,h) +0.183 lo +0.170 | corr(alpha,h) 0.459 lo 0.481 | corr(lum,cavity) +0.085  Landscape\Ground\RiverbedSilt01_d.dds
+000A7C4B w=    9.4 side  256 ysign +1 resid 0.760  lumSD  19.88 aSD  18.83 | corr(lum,h) +0.140 lo +0.180 | corr(alpha,h) 0.326 lo 0.316 | corr(lum,cavity) +0.138  Landscape\Ground\RiverbedRocks_d.dds
+000BA523 w=    7.4 side  256 ysign +1 resid 0.741  lumSD  18.91 aSD  26.70 | corr(lum,h) +0.259 lo +0.241 | corr(alpha,h) 0.338 lo 0.302 | corr(lum,cavity) +0.195  Landscape\Ground\RiverbedRocks02_d.dds
+0004BAE7 w=    3.2 side  256 ysign +1 resid 0.803  lumSD  15.44 aSD  19.47 | corr(lum,h) +0.069 lo +0.086 | corr(alpha,h) 0.081 lo 0.088 | corr(lum,cavity) +0.318  Landscape\Ground\RootsEroded02_d.dds
+000C55F3 w=    2.0 side  256 ysign +1 resid 0.798  lumSD  15.32 aSD  28.74 | corr(lum,h) +0.025 lo -0.070 | corr(alpha,h) 0.292 lo 0.364 | corr(lum,cavity) -0.018  Landscape\Ground\RootsEroded01_d.dds
+0013574B w=    1.6 side  256 ysign -1 resid 0.625  lumSD  11.28 aSD   6.98 | corr(lum,h) +0.282 lo +0.385 | corr(alpha,h) 0.314 lo 0.362 | corr(lum,cavity) +0.322  Landscape\Ground\CoastGrassSand01_d.dds
+000BA522 w=    1.4 side  256 ysign +1 resid 0.760  lumSD  19.88 aSD  18.83 | corr(lum,h) +0.140 lo +0.180 | corr(alpha,h) 0.326 lo 0.316 | corr(lum,cavity) +0.138  Landscape\Ground\RiverbedRocks_d.dds
+0019DF04 w=    0.8 side  256 ysign +1 resid 0.423  lumSD   6.06 aSD   0.00 | corr(lum,h) +0.185 lo +0.049 | corr(alpha,h) None lo None | corr(lum,cavity) +0.001  Landscape\Ground\NF_MountainScrub01_d.dds
+0016579A w=    0.5 side  256 ysign +1 resid 0.307  lumSD   5.17 aSD  28.67 | corr(lum,h) +0.368 lo +0.399 | corr(alpha,h) -0.014 lo -0.007 | corr(lum,cavity) -0.308  Props\MirelurkEggs\MirelurkNest01_d.dds
+00121C34 w=    0.0 side  256 ysign +1 resid 0.408  lumSD   9.88 aSD  17.01 | corr(lum,h) +0.627 lo +0.923 | corr(alpha,h) 0.672 lo 0.834 | corr(lum,cavity) -0.008  Landscape\Ground\PreWarDirt01_d.DDS
+0012630A w=    0.0 side  256 ysign +1 resid 0.374  lumSD  15.98 aSD  21.98 | corr(lum,h) +0.405 lo +0.645 | corr(alpha,h) 0.695 lo 0.843 | corr(lum,cavity) +0.155  Landscape\Ground\PreWarWildGrass01_d.DDS
+{
+ "textures": 100,
+ "measured": 70,
+ "skipped": [
+  [
+   "000C55FC",
+   "no diffuse"
+  ],
+  [
+   "0014EC5C",
+   "no diffuse"
+  ],
+  [
+   "000BE9B6",
+   "no diffuse"
+  ],
+  [
+   "001AC8A1",
+   "no diffuse"
+  ],
+  [
+   "000C55FD",
+   "no diffuse"
+  ],
+  [
+   "000B378E",
+   "no diffuse"
+  ],
+  [
+   "000C55FA",
+   "no diffuse"
+  ],
+  [
+   "000C55F8",
+   "no diffuse"
+  ],
+  [
+   "00085B4F",
+   "no diffuse"
+  ],
+  [
+   "000C55FB",
+   "no diffuse"
+  ],
+  [
+   "000D0E0B",
+   "no diffuse"
+  ],
+  [
+   "000C55F9",
+   "no diffuse"
+  ],
+  [
+   "000B37BB",
+   "no diffuse"
+  ],
+  [
+   "001D1AD7",
+   "no diffuse"
+  ],
+  [
+   "0014EC5D",
+   "no diffuse"
+  ],
+  [
+   "000B378D",
+   "no diffuse"
+  ],
+  [
+   "000B378B",
+   "no diffuse"
+  ],
+  [
+   "001C40A9",
+   "no diffuse"
+  ],
+  [
+   "00154C7D",
+   "no diffuse"
+  ],
+  [
+   "000BA55F",
+   "no diffuse"
+  ],
+  [
+   "000D7D7E",
+   "no diffuse"
+  ],
+  [
+   "0016692D",
+   "no diffuse"
+  ],
+  [
+   "001D7972",
+   "no diffuse"
+  ],
+  [
+   "000BA560",
+   "no diffuse"
+  ],
+  [
+   "0016CCF6",
+   "no diffuse"
+  ],
+  [
+   "001357B2",
+   "no diffuse"
+  ],
+  [
+   "00189848",
+   "no diffuse"
+  ],
+  [
+   "000AB07E",
+   "no diffuse"
+  ],
+  [
+   "000864D2",
+   "no diffuse"
+  ],
+  [
+   "000464C5",
+   "no diffuse"
+  ]
+ ],
+ "wmed_c_lum": 0.196,
+ "wmed_c_lum_lo": 0.17,
+ "wmed_c_lum_cav": 0.027,
+ "frac_alpha_flat": 0.20652499879077116,
+ "wmed_c_alpha": 0.314,
+ "frac_lum_pos": 0.3159150637666672,
+ "frac_lum_neg": 0.0,
+ "wmed_resid": 0.54
+}

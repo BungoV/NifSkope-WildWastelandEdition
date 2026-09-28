@@ -1,0 +1,19 @@
+22:01:30 TILING5 waiting on: 3724|E:\Projects\NifskopeWWE-water1\scratchpad\water1_20260927\run_depth\NifSkope.exe lock:WATER1
+22:01:45 TILING5 waiting on:  lock:WATER1
+22:02:00 TILING5 waiting on: 38624|E:\Projects\NifskopeWWE-water1\scratchpad\water1_20260927\run_depth\NifSkope.exe lock:WATER1
+22:02:16 TILING5 waiting on: 37348|E:\Projects\NifskopeWWE-water1\scratchpad\water1_20260927\run_depth\NifSkope.exe lock:
+22:02:31 TILING5 waiting on: 46172|E:\Projects\NifskopeWWE-water1\scratchpad\water1_20260927\run_depth\NifSkope.exe lock:WATER1
+22:02:47 TILING5 waiting on: 48180|E:\Projects\NifskopeWWE-water1\scratchpad\water1_20260927\run_depth\NifSkope.exe lock:WATER1
+22:03:02 TILING5 waiting on: 54068|E:\Projects\NifskopeWWE-water1\scratchpad\water1_20260927\run_depth\NifSkope.exe lock:
+22:03:18 TILING5 waiting on: 53428|E:\Projects\NifskopeWWE-water1\scratchpad\water1_20260927\run_depth\NifSkope.exe lock:WATER1
+22:03:33 TILING5 waiting on: 30908|E:\Projects\NifskopeWWE-water1\scratchpad\water1_20260927\run_depth\NifSkope.exe lock:
+22:03:48 TILING5 waiting on: 48372|E:\Projects\NifskopeWWE-water1\scratchpad\water1_20260927\run_depth\NifSkope.exe lock:WATER1
+turn taken by TILING5 at 22:04:04
+released by TILING5 22:04:41
+NO FILE /e/Projects/NifskopeWWE-tiling5/scratchpad/tiling5_20260927/pics/raw/boston_flat_today.png rc=0
+turn taken by TILING5 at 22:04:42
+released by TILING5 22:05:17
+NO FILE /e/Projects/NifskopeWWE-tiling5/scratchpad/tiling5_20260927/pics/raw/rural_lit_today.png rc=0
+turn taken by TILING5 at 22:05:18
+released by TILING5 22:05:54
+NO FILE /e/Projects/NifskopeWWE-tiling5/scratchpad/tiling5_20260927/pics/raw/rural_lit_height.png rc=0
