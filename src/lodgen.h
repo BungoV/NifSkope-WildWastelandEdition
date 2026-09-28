@@ -251,6 +251,12 @@ void lodgenSetLandHexSize( float units );        // 0 = off = the rung's bytes
  *     average of two.  The pyramid writer blends roughness, metalness and
  *     emissive with the height opacity.
  * A texture with no readable normal map has h = 0, which is the linear blend.
+ * Mean-bias correction: choosing the raised texel also chose the brighter one
+ * (relief and colour correlate inside a texture), which brightened every
+ * sheet.  Per texture and relief level the colour's slope on the relief,
+ * G = cov(colour, h), is measured once; both choices above then blend the
+ * relief-predicted part G h with the PAINTED weights and select only the
+ * residual, so the mean colour is today's under the linear model.
  *
  * MACRO VARIATION (`--land-macro on`).  A smooth world-space field (value-noise
  * fBm on 4,096 / 16,384 / 65,536-unit lattices, its own hash keys, so it is

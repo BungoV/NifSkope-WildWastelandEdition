@@ -268,3 +268,12 @@ None made. `t5_shot.sh` needs a bash call of the refused kind (C1) and the new e
   could not wait for the FO4CS build to finish.
 
 TILING5 PARTIAL constants frozen (beta 2.0, macro 0 by measurement) and G2-band red explained (relief selection brightens every sheet +2.2/255); not built, no final bakes, no pictures -- bash scripts refused approval and the build slot stayed busy
+
+## CONTINUATION 2 -- 2026-09-28 (resumed at bungo's word "you can continue the work")
+
+### D1. Build of the constants commit 39cb880f (12:33-12:35)
+No make/g++/cc1plus/qmake/xmake running (Win32_Process), game down. `bash tools/ww_build.sh src/lodgen.cpp src/lodgen.h`
+(`build4.log`): BUILD-RC=0, exe newer than both sources, copies in step; exe 26,103,808 B, sha1 34feb02e.
+Refuter that lodgen.cpp really recompiled: the string `WW_TILING5` occurs 2x in `run_m3`'s exe (env reads) and
+0x in the new one. Run copy: `run_c1` (run_m3's runtime + the new exe). Superseded arm outputs
+`out/{b05,b10,height,relief,s10}` deleted (their gate logs stay in `logs/`).
