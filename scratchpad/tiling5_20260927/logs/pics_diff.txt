@@ -1,0 +1,4 @@
+boston_flat 1600 x 1589 px changed 41.0% mean |d| 0.937 mean lum 82.03 -> 82.03
+boston_lit 1600 x 1589 px changed 50.8% mean |d| 1.132 mean lum 89.69 -> 89.67
+rural_flat 1600 x 1589 px changed 22.4% mean |d| 0.420 mean lum 54.99 -> 55.09
+rural_lit 1600 x 1589 px changed 22.6% mean |d| 0.471 mean lum 58.00 -> 58.12

@@ -1,0 +1,69 @@
+turn taken by TILING5 at 21:21:46
+released by TILING5 21:22:19
+OK boston_flat_today.png 33982 B rc=0
+21:22:20 TILING5 waiting on: 41072|E:\Projects\NifskopeWWE-tiling5\scratchpad\tiling5_20260927\run_rung\NifSkope.exe lock:
+21:22:35 TILING5 waiting on: 44820|E:\Projects\NifskopeWWE-flat2\scratchpad\flat2_20260927\run_rung\NifSkope.exe lock:FLAT2
+21:23:06 TILING5 waiting on: 2024|E:\Projects\NifskopeWWE-flat2\scratchpad\flat2_20260927\run_new\NifSkope.exe
+15084|E:\Projects\NifskopeWWE-flat2\scratchpad\flat2_20260927\run_new\NifSkope.exe lock:
+turn taken by TILING5 at 21:23:22
+released by TILING5 21:23:49
+NO FILE /e/Projects/NifskopeWWE-tiling5/scratchpad/tiling5_20260927/pics/raw/boston_flat_height.png rc=0
+21:23:50 TILING5 waiting on: 27888|E:\Projects\NifskopeWWE-tiling5\scratchpad\tiling5_20260927\run_rung\NifSkope.exe lock:
+21:24:06 TILING5 waiting on: 456|E:\Projects\NifskopeWWE-flat2\scratchpad\flat2_20260927\run_new\NifSkope.exe lock:FLAT2
+21:24:21 TILING5 waiting on: 39268|E:\Projects\NifskopeWWE-flat2\scratchpad\flat2_20260927\run_new\NifSkope.exe lock:FLAT2
+21:24:37 TILING5 waiting on: 46156|E:\Projects\NifskopeWWE-flat2\scratchpad\flat2_20260927\run_new\NifSkope.exe lock:FLAT2
+21:24:52 TILING5 waiting on: 2832|E:\Projects\NifskopeWWE-flat2\scratchpad\flat2_20260927\run_new\NifSkope.exe lock:FLAT2
+21:25:38 TILING5 waiting on: 45968|E:\Projects\NifskopeWWE-flat2\scratchpad\flat2_20260927\run_new\NifSkope.exe lock:FLAT2
+21:26:10 TILING5 waiting on: 41192|E:\Projects\NifskopeWWE-flat2\scratchpad\flat2_20260927\run_new\NifSkope.exe lock:FLAT2
+21:26:41 TILING5 waiting on: 27584|E:\Projects\NifskopeWWE-flat2\scratchpad\flat2_20260927\run_rung\NifSkope.exe lock:FLAT2
+21:27:12 TILING5 waiting on: 38316|E:\Projects\NifskopeWWE-flat2\scratchpad\flat2_20260927\run_rung\NifSkope.exe
+47268|E:\Projects\NifskopeWWE-water1\scratchpad\water1_20260927\run_slope\NifSkope.exe lock:FLAT2
+21:27:27 TILING5 waiting on: 38316|E:\Projects\NifskopeWWE-flat2\scratchpad\flat2_20260927\run_rung\NifSkope.exe lock:FLAT2
+21:27:58 TILING5 waiting on: 15560|E:\Projects\NifskopeWWE-water1\scratchpad\water1_20260927\run_slope\NifSkope.exe lock:WATER1
+21:28:14 TILING5 waiting on: 6684|E:\Projects\NifskopeWWE-water1\scratchpad\water1_20260927\run_nodepth\NifSkope.exe lock:
+21:28:29 TILING5 waiting on: 13064|E:\Projects\NifskopeWWE-water1\scratchpad\water1_20260927\run_nodepth\NifSkope.exe lock:WATER1
+21:28:44 TILING5 waiting on: 42408|E:\Projects\NifskopeWWE-water1\scratchpad\water1_20260927\run_nodepth\NifSkope.exe lock:WATER1
+21:29:15 TILING5 waiting on: 36768|E:\Projects\NifskopeWWE-water1\scratchpad\water1_20260927\run_pin\NifSkope.exe lock:
+21:29:46 TILING5 waiting on: 25100|E:\Projects\NifskopeWWE-water1\scratchpad\water1_20260927\run_pin\NifSkope.exe lock:
+21:30:33 TILING5 waiting on: 43736|E:\Projects\NifskopeWWE-water1\scratchpad\water1_20260927\run_pin\NifSkope.exe lock:WATER1
+21:30:48 TILING5 waiting on: 15204|E:\Projects\NifskopeWWE-water1\scratchpad\water1_20260927\run_pin\NifSkope.exe lock:WATER1
+21:32:52 TILING5 waiting on:  lock:WATER1
+21:33:08 TILING5 waiting on: 3316|E:\Projects\NifskopeWWE-water1\scratchpad\water1_20260927\run_slope\NifSkope.exe lock:WATER1
+21:33:23 TILING5 waiting on: 26836|E:\Projects\NifskopeWWE-water1\scratchpad\water1_20260927\run_pin\NifSkope.exe lock:
+21:33:39 TILING5 waiting on: 28092|E:\Projects\NifskopeWWE-flat2\scratchpad\flat2_20260927\run_new\NifSkope.exe lock:FLAT2
+21:33:54 TILING5 waiting on: 36928|E:\Projects\NifskopeWWE-flat2\scratchpad\flat2_20260927\run_rung\NifSkope.exe lock:
+21:34:10 TILING5 waiting on:  lock:WATER1
+21:34:25 TILING5 waiting on: 20232|E:\Projects\NifskopeWWE-water1\scratchpad\water1_20260927\run_pin\NifSkope.exe lock:WATER1
+21:34:41 TILING5 waiting on:  lock:WATER1
+21:34:56 TILING5 waiting on: 25652|E:\Projects\NifskopeWWE-water1\scratchpad\water1_20260927\run_pin\NifSkope.exe lock:WATER1
+21:35:12 TILING5 waiting on:  lock:WATER1
+21:35:27 TILING5 waiting on: 54020|E:\Projects\NifskopeWWE-flat2\scratchpad\flat2_20260927\run_rung\NifSkope.exe lock:FLAT2
+21:35:43 TILING5 waiting on: 12364|E:\Projects\NifskopeWWE-flat2\scratchpad\flat2_20260927\run_rung\NifSkope.exe lock:FLAT2
+21:35:58 TILING5 waiting on: 15268|E:\Projects\NifskopeWWE-flat2\scratchpad\flat2_20260927\run_rung\NifSkope.exe lock:
+21:36:14 TILING5 waiting on: 44188|E:\Projects\NifskopeWWE-flat2\scratchpad\flat2_20260927\run_rung\NifSkope.exe lock:FLAT2
+21:36:44 TILING5 waiting on: 35244|E:\Projects\NifskopeWWE-flat2\scratchpad\flat2_20260927\run_new\NifSkope.exe lock:
+21:37:00 TILING5 waiting on: 47596|E:\Projects\NifskopeWWE-flat2\scratchpad\flat2_20260927\run_new\NifSkope.exe lock:FLAT2
+21:37:15 TILING5 waiting on: 48056|E:\Projects\NifskopeWWE-flat2\scratchpad\flat2_20260927\run_new\NifSkope.exe lock:FLAT2
+turn taken by TILING5 at 21:37:31
+released by TILING5 21:38:09
+OK boston_lit_today.png 2383257 B rc=0
+turn taken by TILING5 at 21:38:10
+released by TILING5 21:38:47
+OK boston_lit_height.png 2378413 B rc=0
+turn taken by TILING5 at 21:38:49
+released by TILING5 21:39:27
+OK rural_flat_today.png 853234 B rc=0
+turn taken by TILING5 at 21:39:28
+released by TILING5 21:40:01
+OK rural_flat_height.png 854773 B rc=0
+turn taken by TILING5 at 21:40:02
+released by TILING5 21:40:37
+NO FILE /e/Projects/NifskopeWWE-tiling5/scratchpad/tiling5_20260927/pics/raw/rural_lit_today.png rc=0
+21:40:38 TILING5 waiting on: 34492|E:\Projects\NifskopeWWE-tiling5\scratchpad\tiling5_20260927\run_rung\NifSkope.exe lock:
+21:40:54 TILING5 waiting on: 47760|E:\Projects\NifskopeWWE-flat2\scratchpad\flat2_20260927\run_new\NifSkope.exe
+2156|E:\Projects\NifskopeWWE-flat2\scratchpad\flat2_20260927\run_new\NifSkope.exe lock:FLAT2
+21:41:09 TILING5 waiting on: 22332|E:\Projects\NifskopeWWE-flat2\scratchpad\flat2_20260927\run_new\NifSkope.exe
+31640|E:\Projects\NifskopeWWE-flat2\scratchpad\flat2_20260927\run_new\NifSkope.exe lock:FLAT2
+turn taken by TILING5 at 21:41:25
+released by TILING5 21:41:56
+NO FILE /e/Projects/NifskopeWWE-tiling5/scratchpad/tiling5_20260927/pics/raw/rural_lit_height.png rc=0

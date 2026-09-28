@@ -1,0 +1,41 @@
+MACRO gates: large-scale lum SD (two r=32 box passes) and mean HSV saturation
+
+FROZEN14  arms present: today fix
+   chunk          van      today        fix | sat:    van    today      fix
+   -20,24       3.986     10.309     10.299 | sat: 0.2215   0.2874   0.2877
+   -20,20       6.668     10.494     10.610 | sat: 0.2149   0.2634   0.2637
+   -36,-20      6.155      7.426      7.564 | sat: 0.1552   0.2596   0.2607
+   -4,-20      11.784     17.106     17.130 | sat: 0.1705   0.2666   0.2651
+   28,-20       4.527      5.993      6.133 | sat: 0.0788   0.2722   0.2692
+   -4,16        4.494      5.003      5.006 | sat: 0.2061   0.2184   0.2169
+   24,16        4.613      7.339      7.457 | sat: 0.1730   0.2730   0.2719
+   -24,-24      2.562      4.732      4.744 | sat: 0.1267   0.0983   0.0954
+   -12,-20      8.876     10.831     10.977 | sat: 0.1499   0.2852   0.2822
+   4,-24       12.255     22.005     22.003 | sat: 0.1832   0.2492   0.2469
+   20,-24       4.383      3.860      3.911 | sat: 0.1247   0.2558   0.2558
+   -20,4        5.364      3.918      3.896 | sat: 0.1887   0.2348   0.2352
+   -8,4         3.965      4.474      4.470 | sat: 0.1521   0.2302   0.2310
+   12,8        10.229     14.975     15.047 | sat: 0.1540   0.2203   0.2214
+   MEDIAN       4.988      7.383      7.511
+   SD(means)   15.784      9.132      9.139   <- sheet-to-sheet (234 m - 1 km) luminance SD
+   CHROMA med    1.838      2.604      2.648   <- large-scale opponent-colour SD, median
+   today: large-scale median 7.383 vs vanilla 4.988 (FAIL); within vanilla range 11/14; sheet-mean SD 9.132 vs vanilla 15.784
+   fix: large-scale median 7.511 vs vanilla 4.988 (FAIL); within vanilla range 11/14; sheet-mean SD 9.139 vs vanilla 15.784
+   saturation fix >= today: 6/14 sheets (worst difference -0.00299)
+
+BOSTON9  arms present: 
+   chunk          van  | sat:    van 
+   -8,-12       4.504  | sat: 0.1530 
+   -4,-12       4.473  | sat: 0.1562 
+   0,-12        4.787  | sat: 0.1334 
+   -8,-8        9.351  | sat: 0.1471 
+   -4,-8        3.746  | sat: 0.1348 
+   0,-8         4.059  | sat: 0.1130 
+   -8,-4       10.372  | sat: 0.1441 
+   -4,-4       12.668  | sat: 0.1465 
+   0,-4        10.358  | sat: 0.1516 
+   MEDIAN       4.787 
+   SD(means)    7.147    <- sheet-to-sheet (234 m - 1 km) luminance SD
+   CHROMA med    2.684    <- large-scale opponent-colour SD, median
+
+

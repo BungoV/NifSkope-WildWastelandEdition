@@ -1,0 +1,32 @@
+20:45:00 TILING5 waiting on: 17748|E:\Projects\NifskopeWWE-terr1\scratchpad\terr1_20260927\runs\base\NifSkope.exe lock:
+20:45:16 TILING5 waiting on: 2260|E:\Projects\NifskopeWWE-water1\scratchpad\water1_20260927\run_slope\NifSkope.exe lock:WATER1
+20:45:31 TILING5 waiting on:  lock:terr1
+20:45:47 TILING5 waiting on: 53672|E:\Projects\NifskopeWWE-terr1\scratchpad\terr1_20260927\runs\base\NifSkope.exe lock:terr1
+20:46:02 TILING5 waiting on: 26996|E:\Projects\NifskopeWWE-terr1\scratchpad\terr1_20260927\runs\base\NifSkope.exe lock:
+20:46:17 TILING5 waiting on: 51428|E:\Projects\NifskopeWWE-terr1\scratchpad\terr1_20260927\runs\base\NifSkope.exe lock:terr1
+turn taken by TILING5 at 20:46:33
+start 20:46:33
+BAKE id_c1 boston rc=0  319s  texfiles=27  args=[ ]
+BAKE id_c2 boston rc=0  100s  texfiles=27  args=[ ]
+BAKE c1h r:-4,-20,-1,-17 rc=0  47s  texfiles=3  args=[ --land-height-blend on]
+BAKE c1h r:20,-24,23,-21 rc=0  30s  texfiles=3  args=[ --land-height-blend on]
+BAKE fix r:-20,24,-17,27 rc=0  36s  texfiles=3  args=[ --land-height-blend on]
+BAKE fix r:-20,20,-17,23 rc=0  43s  texfiles=3  args=[ --land-height-blend on]
+BAKE fix r:-36,-20,-33,-17 rc=0  18s  texfiles=3  args=[ --land-height-blend on]
+BAKE fix r:-4,-20,-1,-17 rc=0  43s  texfiles=3  args=[ --land-height-blend on]
+BAKE fix r:28,-20,31,-17 rc=0  11s  texfiles=3  args=[ --land-height-blend on]
+BAKE fix r:-4,16,-1,19 rc=0  44s  texfiles=3  args=[ --land-height-blend on]
+BAKE fix r:24,16,27,19 rc=0  43s  texfiles=3  args=[ --land-height-blend on]
+BAKE fix r:-24,-24,-21,-21 rc=0  43s  texfiles=3  args=[ --land-height-blend on]
+BAKE fix r:-12,-20,-9,-17 rc=0  41s  texfiles=3  args=[ --land-height-blend on]
+BAKE fix r:4,-24,7,-21 rc=0  50s  texfiles=3  args=[ --land-height-blend on]
+BAKE fix r:20,-24,23,-21 rc=0  31s  texfiles=3  args=[ --land-height-blend on]
+BAKE fix r:-20,4,-17,7 rc=0  40s  texfiles=3  args=[ --land-height-blend on]
+BAKE fix r:-8,4,-5,7 rc=0  53s  texfiles=3  args=[ --land-height-blend on]
+BAKE fix r:12,8,15,11 rc=0  45s  texfiles=3  args=[ --land-height-blend on]
+ARM fix done in 542s  21:03:51
+BAKE fixB16 boston rc=0  113s  texfiles=27  args=[--threads 16 --land-height-blend on]
+BAKE fixB1 boston rc=0  108s  texfiles=27  args=[--threads 1 --land-height-blend on]
+BAKE fix r:-36,4,-25,15 rc=0  49s  texfiles=27  args=[ --land-height-blend on]
+end 21:08:22
+released by TILING5 21:08:22

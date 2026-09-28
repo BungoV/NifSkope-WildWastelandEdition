@@ -320,3 +320,113 @@ RESUME, exactly:
 3. `python t5_meanbias.py fix`, `python t5_g2bd.py fix`, `python t5_gates.py trans s20 fix`,
    `python t5_gates.py tiling today s20 fix`.
 4. `bash t5_pics.sh`, then `t5_label.py` per file; `python t5_crop.py -4 -20 today fix pics`.
+
+## CONTINUATION 3 -- 2026-09-28 (resumed 20:42; lock free after the overseer's flight)
+
+### E0. Slip (20:43, recorded at once)
+I ran `turn.sh status` to look at the lock. turn.sh has no `status` verb: anything but `release` is an
+ACQUIRE, so it began waiting to take the turn as `anon`. Stopped it at 20:44:51 (TaskStop); the lock folder
+`.ns_turn` did not exist afterwards -- it never took the turn. The lock is read with `ls .ns_turn/who` only.
+
+### E1. Batch started 20:45 (`bash t5_batch1.sh > logs/batch1.txt`), exes as D1/D2: run_c1 34feb02e, run_c2 8026c602
+(release/NifSkope.exe = 8026c602, no rebuild needed). Game down (tasklist).
+Turn taken 20:46:33 (waited on TERR1/WATER1).
+
+### E2. Off-identity, constants build c1 (34feb02e): `t5_cmp.py out/id_rung/boston out/id_c1/boston`
+sheets 27/27, VT 3/3, meshes 27/27 identical; only bake.log, flat_objects_report (run path), .lodb (exe/time/path)
+differ, as in 3a. Boston bake 319 s. **PASS.**
+
+### E3. Off-identity, mean-bias build c2 (8026c602): `t5_cmp.py out/id_rung/boston out/id_c2/boston`
+sheets 27/27, VT 3/3, meshes 27/27 identical; same three bookkeeping files differ. Bake 100 s (the first, 319 s,
+paid the cold file cache). **PASS.**
+
+### E4. The constant equals env beta 2.0 (c1h vs s20, two chunks)
+`t5_cmp.py out/s20/<chunk> out/c1h/<chunk>` on -4,-20 and 20,-24: sheets 3/3 and 3/3 identical (VERDICT PASS both).
+So the s20 gate numbers (3h) are the constants build's numbers, byte for byte. **PASS.**
+
+### E5. The corrected arm `fix` (c2 8026c602, `--land-height-blend on`) on the fourteen frozen chunks
+All 14 bakes rc 0 (11-53 s each). Gates, logs in `logs/*_fix.txt`:
+
+| gate | today | s20 (beta 2, no correction) | fix (beta 2 + mean-bias correction) |
+|---|---|---|---|
+| sheets brighter than today / median dMean (of 255) | -- | 14/14, +2.23 | **8/14, +0.009** (range -0.35..+0.39) |
+| G2-band sel / val (no further from vanilla than today) | 7/7, 7/7 | 2/7, 6/7 | **3/7, 7/7** (red 4 of 14: -20,24 +0.012, -20,20 +0.001, -36,-20 +0.002, 28,-20 +0.056) |
+| transitions rz >= 0.9 x vanilla | 7/14 | 8/14 | **7/14** |
+| repeat sel / val | 5/7, 6/7 | 6/7, 6/7 | 5/7, 6/7 |
+| G1 grain median sel / val (within 20 %) | +11.8 %, -7.7 % | +19.9 %, -1.6 % | **+14.9 %, -7.7 %** PASS |
+| G2 grain per sheet sel / val | 7/7, 7/7 | 7/7, 7/7 | 7/7, 7/7 PASS |
+| swirl sel / val | 7/7, 7/7 | 7/7, 7/7 | 7/7, 7/7 PASS |
+| large-scale lum median (vanilla 4.988) | 7.383 | -- | 7.511 (red on today already, 3g) |
+| mean HSV saturation per sheet >= today | -- | -- | 6/14, worst -0.00299 (rule was written for the macro arm) |
+
+Reading: the correction did what C3 predicted for the MEAN (median shift +2.23 -> +0.009 of 255, the brighter
+count 14 -> 8 of 14, i.e. chance) and pulled G2-band from 6 red to 4 red; three of the four reds are within
++0.002..+0.012 of today, the fourth (28,-20, +0.056) is the sheet where vanilla's grain is lowest (1.37).
+It also gave back the transition gain: the zone's extra grain in s20 was partly the brightness bias itself, so
+the corrected arm sits at today's 7 of 14. The repeat gate returns to today's count; -36,-20 stays red on every arm
+(ratio 0.50, down from 0.75). Pre-registered bars not met: transitions 14/14, repeat 7/7, G2-band 7/7.
+
+### E6. Threads and timing (Boston box, c2, `--land-height-blend on`)
+`t5_cmp.py out/fixB16/boston out/fixB1/boston`: sheets 27/27, VT 3/3, meshes 27/27 identical (bake.log and .lodb
+differ: thread count + time). **PASS.** Note: the census reads "chunk threads 1 bound by default" in both, so this
+box runs its chunks on one worker either way. `--threads` is the generator's thread budget (`src/nifcli.cpp`
+"THE THREAD BUDGET": its gate is byte-identical output either way, which this is); the near-equal times (113 s vs
+108 s) say the terrain-texture work did not spread much across threads on this box.
+Timing, whole Boston bake, warm cache, same exe: off (id_c2) 100 s, on (fixB16) 113 s, on 1 thread (fixB1) 108 s
+-> the height blend costs about +13 % of the whole bake here.
+Batch ended 21:08:22, turn released (lock folder gone). Rural fix bake 49 s rc 0.
+
+### E7. Pictures: three script faults found and fixed (21:08-21:25)
+1. `t5_pics.sh` pointed `WW_LODL_SHEETS` at `tex/`; the view reads the `.lodt` pyramid from
+   `mod/FO4CSLOD/Commonwealth`. With the wrong folder the log says "no .lodt sheets ... drawing the inline-colour
+   data view" and today/after come out BYTE-IDENTICAL (boston_lit 275,704 B both, rural_flat 19,072 B both) --
+   pictures of nothing. Fixed; those first files are discarded.
+2. "flat" used `WW_RENDER_FLAT=1` = vertex colour only; a `.lodl` has none -> a white sheet (seen). Now
+   `WW_LOD_CHANNEL=12` (raw base colour, unlit).
+3. Half the shots wrote no file, an EMPTY log and rc 0 in ~30 s. Cause: `free_port` picked a TCP-free port, but
+   NifSkope's `--port` is a UDP bind (`src/main.cpp` IPCsocket::create); when that UDP port is busy the exe
+   forwards "NifSkope::open" to it and returns 0 without a word. Now picked by UDP bind.
+   (Measured: the failures left no ww_headless_windows.log line = no window ever shown.)
+Also: the resource probe (`--print-source`, also a NifSkope launch) moved inside the turn in `t5_shot.sh`.
+4. (21:42-21:57) Even with UDP-free ports, some shots still return rc 0 in ~20 s with an EMPTY log and no PNG,
+   and a run_rung NifSkope of ours is alive right AFTER the wait returns (`pics/raw/*.dbg`). No crash event, no
+   dump. The resource probe's NifSkope also outlives its `$(...)`; `t5_shot.sh` now waits (never kills) for our
+   own NifSkope to be gone before launching and before releasing the turn. Cause of the empty run not yet found.
+   Slip: one `sed -i` on my own scratch script `t5_shot.sh` (a `>` -> `>>`), not Edit.
+5. (22:05-22:10) Retried on a fresh port instead (`shot` = up to 4 tries, the old PNG deleted before each try, so a
+   stale file can no longer read as OK -- it did once: boston_flat_today "OK 33982 B" at 21:21 was the 21:19 white
+   file). Result: boston_flat_today try 1, rural_lit_today try 2, rural_lit_height try 2. All eight logs say
+   "lit from Commonwealth.VT.4.lodt ... 9 unpacked".
+
+### E8. Pictures (labelled, `pics/`; raw in `pics/raw/`), 1600 x 1589 each, today vs corrected height blend
+| pair | px changed | mean abs diff (of 255) | mean luminance today -> height |
+|---|---|---|---|
+| Boston colour sheet, unlit (`boston_flat_*`) | 41.0 % | 0.937 | 82.03 -> 82.03 |
+| Boston lit (`boston_lit_*`) | 50.8 % | 1.132 | 89.69 -> 89.67 |
+| West hills colour, unlit (`rural_flat_*`) | 22.4 % | 0.420 | 54.99 -> 55.09 |
+| West hills lit (`rural_lit_*`) | 22.6 % | 0.471 | 58.00 -> 58.12 |
+Plus the 4x top-down close-up of the densest transition window on -4,-20 (`crop4x_-4_-20_today.png`,
+`crop4x_-4_-20_height_blend.png`, straight from the sheets). Read: the change is small at this distance; the
+4x close-up pair is hard to tell apart by eye (no brightness shift visible either). The west-hills frame: a large
+part of it is one uniform land texture (seen in the pictures; that it is the map's western edge is reasoned, not
+measured), so the change there is small by construction.
+
+## FINAL (2026-09-28 22:1x)
+| gate | bar | measured | verdict |
+|---|---|---|---|
+| env tuning reads gone from `src/` | 0 | 0 | PASS |
+| builds | rc 0 | c1 34feb02e, c2 8026c602 (= release/NifSkope.exe) | PASS |
+| off = rung bytes, c1 and c2 (Boston) | 27/27 sheets | 27/27 and 27/27 | PASS |
+| constant = env beta 2.0 (c1h vs s20) | identical | 3/3 + 3/3 sheets | PASS |
+| `--land-macro on` = off | identical colour | amplitude 0, early return (code); not baked separately | NOT BAKED |
+| brightness shift (fix) | ~0 | median +0.009 of 255, 8/14 brighter | PASS |
+| G1 grain within 20 % | both sets | +14.9 % / -7.7 % | PASS |
+| G2 grain per sheet | 7/7, 7/7 | 7/7, 7/7 | PASS |
+| swirl | 7/7, 7/7 | 7/7, 7/7 | PASS |
+| transitions rz >= 0.9 x vanilla | 14/14 | 7/14 (today 7) | FAIL |
+| repeat | 7/7, 7/7 | 5/7, 6/7 (today same) | FAIL |
+| G2-band | 7/7, 7/7 | 3/7, 7/7 (s20 2/7, 6/7) | FAIL |
+| saturation per sheet >= today | 14/14 | 6/14, worst -0.003 | FAIL (rule written for the macro arm) |
+| threads 1 vs 16 | identical | 27/27 | PASS |
+| timing | reported | 100 s off -> 113 s on (Boston) | +13 % |
+Both switches stay OFF. Cleanup: `out/`, `run_*`, `cache/` deleted at the end (below).
