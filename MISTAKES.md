@@ -8,6 +8,9 @@ Newest at the top.
 ## 2026-09-27..29 -- LOD map-fix lanes (lane text, spliced by MERGE1)
 
 ### IDENT2
+- 09:47 (09-29): rewrote scratchpad DELIVERABLE_TEXT.md (CRLF, 63 lines) with Python text-mode read/write; it came
+  out all LF and was committed that way (377f8a9d, diff 157 lines instead of ~33). Caught by the commit stat. Restored
+  CRLF in the next commit. Same rule as the entry below: count CRLF before any scripted edit, write bytes.
 - 09:3x (09-29): edited WW_CHANGES.md (mixed endings: 19,020 CRLF lines) with the Edit tool; it rewrote every
   CRLF as LF. Caught by the byte count taken after the edit (CRLF 19,020 -> 0); rebuilt from HEAD's bytes plus
   the new LF lines (diff: 7 insertions). Rule (memory: CRLF vs Python edits): mixed-ending files take byte-level
