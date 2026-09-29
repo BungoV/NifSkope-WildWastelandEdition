@@ -171,6 +171,13 @@ void lodgenNativeIdentityJoinOption( bool legacy, float gapWorld );
  *  inside the group's enclosed volume, replaces one box a piece
  *  (`--occluders piece` is the way back). Both ON by default. */
 void lodgenNativeIdentityContactOption( bool contact, bool occluderBuilding );
+/*! IDENT2 (2026-09-29), bungo's "Landmark rule": the NAMED LANDMARKS the
+ *  contact join makes one group each, under no cap. "" = the list built into
+ *  the exe (res/lodgen_landmarks.txt), "none" = no landmarks, anything else =
+ *  that file. The contact join is the only reader. */
+void lodgenNativeLandmarksOption( const QString & file );
+//! The landmark list's digest (rule lines only), for the bake identity; "none" / "unreadable" say so.
+QString lodgenNativeLandmarksDigest();
 //! One placement (the same (ref, part) arriving from several rings is kept once, first wins).
 void lodgenNativeAddPlacement( const NativePlacement & p );
 //! One lit vertex of a placement: the emitter averages AO, sky and ground per record (0..1 each).

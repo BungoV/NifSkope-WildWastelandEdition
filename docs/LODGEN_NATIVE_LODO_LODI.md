@@ -1302,6 +1302,30 @@ probe the same code wrote 537 boxes with 102 over 1 percent.
 occluder box hides went from **0.029 (one box a piece) to 0.560**; a
 conservative Hi-Z test would cull 0.728 of the placements in view.
 
+**The probe against the file's rounding (lane IDENT2, 2026-09-29).** The 5
+boxes over 1 percent came from two gaps between the probe and the file. (a) The
+file rounds each placement (0.25 u steps on X/Y) and that opens hairline gaps
+where two pieces meet, which rays along a seam slip through; so a hit within
+0.5 u (`BLD_OCC_SEAM_U`) of an OPEN edge -- an edge no other triangle of the
+SAME placement shares; stacked pieces often share the seam's exact end
+points -- counts as a miss. (b) The probe now tests TWO lattices and both must
+pass: the box exactly as the file stores it (half-extents × 0.999, the gate's
+own points) and the box grown 0.5 u a face. A grown lattice alone passed a box
+whose top slab stood 0.56 u above three of its walls: its points are other
+points. When every symmetric shrink still fails, ONE face comes in by a
+quarter, then a half voxel (z first, largest box first), which moves the
+lattice off a seam; the first that passes is kept (census: `N boxes passed
+only with one face moved in`), else the building gets no box. **Boston bake
+b_after3:** 1,246 groups, 573 fitted, 26 refused, 117 shrunk, 32 moved in;
+**520 boxes, 0 over 1 percent, worst 0.0041 -- the gate PASSES**, unchanged
+(boxes grown 1.02× -> 230 over, 1.05× -> 427 over, 1.25× -> 514 of 520).
+Street coverage **0.560 -> 0.570** (Hi-Z 0.728 -> 0.736). Split on the same
+exe with `--landmarks none`: the probe alone gives 0.588; the landmark rule
+takes 0.018 of it back, nearly all at the Diamond City eye (0.454 -> 0.380):
+the stadium is one ring-shaped group now, and one box a group fits less of a
+ring than its 15 fragments did. More than one box for a landmark group is not
+done here.
+
 ---
 
 ### 4.6 The aggregate ring-3 impostors (v4)
@@ -1776,6 +1800,38 @@ The ids stay per chunk (u16): 188 joined groups cross a 16,384 u chunk line
 and get one id a side. `WW_LODI_CONTACT_TOL`, `WW_LODI_GROUP_CAP` and
 `WW_LODI_GROUP_DUMP` are the measuring surface. `--identity-join proximity`
 is the way back, byte-identical to the 2026-09-27 files.
+
+**THE LANDMARK RULE (lane IDENT2, 2026-09-29; bungo's ruling in the MERGE1
+review: "the pieces of a named landmark are ONE group, whatever its size").**
+Before the capped contact unions, every drawn placement is matched against the
+list `res/lodgen_landmarks.txt` (built in as `:/lodgen/landmarks.txt`;
+`--landmarks <file>` reads another, `--landmarks none` none). One rule a line:
+`name | prefix[;prefix...] | [centreX centreY radius]`. A placement matches
+when its LOD MODEL PATH (lower case, `/` for `\`, a leading `meshes/` then
+`lod/` taken off) starts with one of the prefixes and, when the rule has a
+centre, it stands within the radius on X/Y (the Hub towers share the hightech
+kit with the rest of Boston). The first rule that matches wins; a second match
+is counted as a conflict. All pieces of one landmark are joined with NO cap;
+the contact pass then runs as before, so a landmark wider than the cap takes in
+no foreign piece and one narrower (a Hub tower) still joins what touches it.
+The list holds model-path prefixes only, no game data: Diamond City
+(`architecture/diamondcity/`, centre (-12500, -25700) r 7,000), Hub tower east
+and west (`architecture/buildings/hightech/hitext`, centres (3625, -24292) and
+(-2271, -30152) r 2,500), Trinity Church (`architecture/unique/trinitychurch/`).
+Its digest (the rule lines only) goes into the chunk-cache identity as
+`native.landmarks` when the contact join is on. The census prints
+`native-landmarks:` and one `native-landmark:` line a rule (pieces, group
+members, extent, the chunks it sits in); the group dump gets a `# landmarks`
+line. **Boston bake, 2026-09-29:** Hub tower east 1 group (unchanged; 730
+pieces + 16 touching), **west 4 -> 1** (727 pieces, 4,100 u wide), Trinity 1,
+**Diamond City 15 -> 1** (165 pieces, 0 foreign, 9,137 x 10,582 u); the row
+houses stay one group of 54 (bungo: a terrace is one group). **A landmark
+across a chunk line:** the group word is a u16 dense PER CHUNK, so Diamond
+City -- one group in the emitter -- is id 85 in chunk (-2,-2) (14 pieces) and
+id 30 in chunk (-1,-2) (151 pieces); no other instance of either chunk carries
+those ids (`scratchpad/ident2_20260929/lmchunk.py` reads it back from the
+file). One id across chunks would need a file-wide group word: a format
+change, not made.
 
 **THE PROXIMITY JOIN (the default 2026-09-19 .. 2026-09-27; bungo's ruling
 2026-09-19; lane IDENTPROX measured it, lane HORIZONOUT shipped it;

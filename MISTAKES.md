@@ -7,6 +7,13 @@ Newest at the top.
 
 ## 2026-09-27..29 -- LOD map-fix lanes (lane text, spliced by MERGE1)
 
+### IDENT2
+- 04:0x and 04:24 (09-29): twice typed Python holding a backslash literal into a bash heredoc (help strings in
+  src/nifcli.cpp; `replace('\', '/')` in a scratch tool), against the standing rule below (backslash or
+  apostrophe text goes through the Write tool or `chr(92)`). The first came out as real newlines in the help text
+  (caught by `cat -A` on the diff), the second as a syntax error (caught by `ast.parse`). Rule unchanged; the
+  check that caught both -- compile or `cat -A` the result before building -- stays in every patch step.
+
 ### WATER1
 - 10:44 (09-27): a second render pass was run after the first gave empty logs, without reading the Avast log
   first. Both were Avast auto-sandbox (AvastSvc.log "marked for virtualization" + error 122). Rule: skill

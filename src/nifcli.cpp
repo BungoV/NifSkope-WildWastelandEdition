@@ -4120,6 +4120,8 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 		idx.identityJoinGap = identityJoinGap;
 		idx.identityJoinContact = identityJoinContact && !identityJoinLegacy;
 		idx.occluderBuilding = occluderBuilding;
+		if ( idx.identityJoinContact )
+			idx.landmarksDigest = lodgenNativeLandmarksDigest();
 		idx.aggregate = aggregate;
 		idx.aggMin = aggMin;
 		idx.aggTile = aggTile;
@@ -6527,6 +6529,11 @@ int usage()
 	  << "  lodgen ... --native <dir> --occluder-fit building | piece\n"
 	  << "                                          one occluder box a building group (the\n"
 	  << "                                          default) or one a piece (the way back)\n"
+	  << "  lodgen ... --native <dir> --landmarks <file> | none\n"
+	  << "                                          the NAMED LANDMARKS the contact join\n"
+	  << "                                          makes one group each under no cap\n"
+	  << "                                          (default: the list built in from\n"
+	  << "                                          res/lodgen_landmarks.txt)\n"
 	  << "                                          write no group table and no\n"
 	  << "                                          per-vertex sky stream; the\n"
 	  << "                                          .lodi stays at version 6,\n"
@@ -7387,7 +7394,10 @@ int nifskopeCliMain( const QStringList & args )
  *                             parts, under a size cap. `--identity-join
  *                             proximity` is the 2026-09-19 rule, byte for byte.
  *   --occluder-fit building   IDENT1's default: one occluder box a building
- *                             group; `piece` is the one-box-a-piece way back. */
+ *                             group; `piece` is the one-box-a-piece way back.
+ *   --landmarks <file>|none   IDENT2 (2026-09-29): the named landmarks the
+ *                             contact join makes one group each, under no cap
+ *                             (default: the built-in res/lodgen_landmarks.txt). */
 	bool lgLibraryNear = false;
 	bool lgNativeLadderFoliage = LODO_LADDER_FOLIAGE_DEFAULT;
 	float lgNativeSilhouette = LODO_SILHOUETTE_MIN_DEFAULT;
@@ -8132,6 +8142,20 @@ int nifskopeCliMain( const QStringList & args )
 				err() << "error: --occluder-fit takes building or piece, not '" << v << "'" << Qt::endl;
 				return 2;
 			}
+		}
+		/* IDENT2 (2026-09-29): the named-landmark list the contact join reads
+		 * (bungo's "Landmark rule"); the built-in list by default. */
+		else if ( t == QLatin1String( "--landmarks" ) ) {
+			const QString v = next();
+			if ( v.isEmpty() ) {
+				err() << "error: --landmarks takes a file or `none`" << Qt::endl;
+				return 2;
+			}
+			if ( v.compare( QLatin1String( "none" ), Qt::CaseInsensitive ) != 0 && !QFileInfo( v ).isFile() ) {
+				err() << "error: --landmarks: no such file '" << v << "'" << Qt::endl;
+				return 2;
+			}
+			lodgenNativeLandmarksOption( v );
 		}
 		else if ( t == QLatin1String( "--identity-join-gap" ) ) {
 			bool ok = false;
