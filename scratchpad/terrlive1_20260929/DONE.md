@@ -453,3 +453,12 @@ under 2000 px skipped):**
   5.2); beyond 6 km the street view sees 2-1,443 px a bin of it (the rest is in the band or vanilla).
 - So on wholly-ours ground the 64 u level stays 3.5-5 from the 16 u one out to ~30 km. The preview fade stays
   8,192..12,288 u (unchanged); a hand-over there shows a step of about 4-5/255.
+
+## 15. Decal read-back on the law-2 whole-map bake (written 09:37)
+- `lodgen --decal-check whole_hybrid_law2/mod/FO4CSLOD/Commonwealth` (dc.sh, under the turn, released 09:37:19), rc 0:
+  - .lodd: 2,818 pieces (roads 642, flat 1,627, flat-over 549), 161,076,176 bytes, 2,774 with a normal stamp,
+    **0 CRC mismatches**, 0 picture decode failures.
+  - .lodg: 80,577 placements, 2,857 cells used (busiest 311), 3,261,484 bytes; bad piece/class/scale/rotation,
+    draw-order breaks, bad or unsorted index all **0**.
+  - pair matched (names table CRC f34c4cd6 on both).
+- Branch terrlive1-20260929: rework commit a843685b pushed (not merged); this section follows it.
