@@ -132,3 +132,61 @@ DIFF 1 of 233; the .lodo removed -> DIFF 1 (names it). Re-run owed on the final 
   group (4,100 u) is over the cap, so contact cannot add it.
 - 08:06: deleted b_off_rung, b_off_new3, b_nolm and the sheet cache (digests and outputs logged above). Kept b_main + b_after3
   (114 MB each) so the pictures can be re-shot.
+
+## 14. Follow-up from the coordinator (08:12): footprints
+bungo: landmarks not whole in the after pictures (pieces inside the DC ring, the west tower sign bands and base
+pieces keep their own colour). Rework: a landmark = name prefixes PLUS a footprint; every non-tree piece whose
+bounds sit inside the outline joins, uncapped; a piece crossing out by more than a margin is refused and logged.
+Sign band joins the tower. Gate: pixel count of non-landmark colour inside each outline (trees excluded) = 0.
+
+## 15. Footprint, first cut: whole contact GROUPS (08:22-08:40)
+- Outline call (logged): the convex hull on X/Y of the name-matched pieces' box corners, derived in the emitter.
+  A box around Diamond City takes in street blocks at its corners; the hull does not.
+- Tower names: the west rule also names the Prudential and backbay17 LOD shells + structures (the same tower's
+  distant models, 675 u past the hitext hull); the east rule names backbay_ttowerbld01 + structure (already in its
+  group).
+- First build judged whole contact groups (join when every piece is within 256 u; else the whole group refused).
+  Bake b_fp (dump_fp_group.txt). Census: DC 40 groups / 233 pieces joined, 2 refused; west 5 / 9, 2 refused.
+- New gate pixgate.py (offline from the file: in-outline triangles point-splatted, 5 views, top + 4 obliques at
+  35 deg; a pixel is wrong when its instance's (chunk, group id) is not the landmark's). Red control on b_after3:
+  **FAIL, 291,974 wrong pixels** (DC 134,682; west 154,564; east 2,728; Trinity 0).
+- Group rule result: **2,743 wrong** (DC 732 = 4 pieces of street block 5498 standing inside the stadium; west
+  2,011 = 16 bldgshell pieces of block 7048 + a billboard). The pictures show it: the west tower's left-side
+  piece bungo circled is exactly those bldgshell pieces. Refusing whole groups keeps them out.
+- So back to bungo's words, PER PIECE. Offline sweep (fp_piece.py on dump_after3): pieces inside leave the hull
+  by at most 319 u; the nearest refused is 1,460 u (whole-block LOD shells). Margin set to **512 u**.
+
+## 16. Footprint per piece (build 08:43 exe 23c51c4c54f1; bakes 09:06-09:28)
+- Emitter: after the named join and BEFORE the contact pass, every drawn non-tree piece whose box overlaps the
+  hull and leaves it by <= 512 u joins its landmark, uncapped. Refusals: one census line each + `# landmark-refused`
+  dump lines; joins: `# landmark-footprint`; the hull: `# landmark-hull`.
+- b_fp2 (full bake) and b_fp3 (LIGHT, like b_after3, dump_fp3.txt) give the same census: DC 239 joined (farthest
+  304 u), 1 refused (fens04_bld01lod, 3,494 u out); east 17 joined, 0 refused; west 27 joined (farthest 319 u),
+  2 refused (backbay15_bld01lod 2,233 u, backbay18_bld02lod 1,460 u), 6 tree/plant placements left alone;
+  Trinity 0 / 0. 283 pieces joined by the footprint in all.
+- **Pixel gate (pixgate.py, 5 views, trees excluded): 0 wrong pixels in all four outlines (PASS).** Red controls:
+  b_after3 -> FAIL 291,974; the group-rule build (dump_fp_group) -> FAIL 2,743 naming the 20 split pieces.
+- Group counts (lmchunk, from the file): DC 1 group, 404 members, ids 85 (-2,-2) and 30 (-1,-2), no other
+  instance shares either; east 1 (749, id 53); west 1 (758, id 52); Trinity 1 (25, id 54). All groups 4,576 -> 4,527.
+- **Poke gate: 513 boxes, 0 over 1 percent, worst 0.0041; floor 1.25x -> 507 of 513 over. ok.**
+- **Coverage: mean 0.570 -> 0.558, Hi-Z 0.736 -> 0.733** (Trinity eye 0.578 -> 0.578, Hub eye 0.752 -> 0.730,
+  DC eye 0.380 -> 0.368). Boxes 520 -> 513: the footprint pieces now sit in the landmark's one box, not their own.
+- **Way back (b_off_fp, full bake, `--identity-join proximity --occluder-fit piece`): .lodi 4f913d6d4b4c, .lodo
+  b144e9aff92d = the recorded digests.** Whole-tree compare against a fresh rung bake: queued after the pictures.
+- Chunk-row label bug in lmchunk.py/pixgate.py found and fixed (MISTAKES.md); earlier numbers unaffected.
+
+## 17. Pictures retaken (b_fp3 LIGHT, same cameras; written 09:35)
+- pics/dc_fp.png, pics/hub_fp.png, pics/west_fp.png (same cameras as the befores/afters) + pics/westclose_fp.png
+  (closer west-tower view, 2,560 u half width). Befores: pics/dc_before.png, hub_before.png, west_before.png.
+- West tower: the two sign bands, the pale base piece and the left-side wall now carry the tower's pink (the
+  strip at hub pixel ~995,480-550 was green (90,179,132) in hub_after, pink (244,69,136) now).
+- DC: one lilac mass + the violet strip on its west side = chunk (-2,-2), id 85, the same group (u16 id per chunk).
+- The red strip right of the west tower in hub_fp = group root 6027 (BldgBrick6Story2x2CornerResEntA_LOD,
+  BackBay21_Bld01LOD, BldgBrick5Story1x2ComA_LOD), 2,100-2,750 u outside the hull, no overlap: a separate
+  building behind the tower, not a tower piece.
+- Close view: non-pink colours near the base are trees or pieces wholly outside the outline. Listed from the
+  file: the only non-tree pieces overlapping the west outline and not in its group are the 2 refused shells.
+- **Way back, whole tree (09:47): main exe (b_off_rung, baked 09:29-09:37) vs this exe (b_off_fp), both with
+  `--identity-join proximity --occluder-fit piece`: SAME, 233 files.** Red controls on copies: one flipped .lodi
+  byte -> DIFF 1 of 233; the .lodo removed -> MISSING (file lists differ). Turn lock released 09:37:05.
+- Skill ww-lodgen-landmark-add: footprint + pixel gate + north-first chunk rows added (both copies).

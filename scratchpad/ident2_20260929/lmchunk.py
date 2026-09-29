@@ -37,7 +37,7 @@ cold, grp, chunks, H = T['cold'], T['group'], T['chunks'], T['header'] if 'heade
 w = H['chunkEast'] - H['chunkWest'] + 1
 chunk_of = [None] * len(cold)
 for ci, ch in enumerate(chunks):
-    cx, cy = H['chunkWest'] + ci % w, H['chunkSouth'] + ci // w
+    cx, cy = H['chunkWest'] + ci % w, H['chunkNorth'] - ci // w
     for ii in range(ch['instanceFirst'], ch['instanceFirst'] + ch['instanceCount']):
         chunk_of[ii] = (cx, cy)
 key_to_ii = collections.defaultdict(list)
@@ -71,7 +71,7 @@ for name, pre, cen in rules:
             ids = collections.Counter(grp[ii] for ii in v)
             others = 0
             if ch is not None:
-                ci = (ch[1] - H['chunkSouth']) * w + (ch[0] - H['chunkWest'])
+                ci = (H['chunkNorth'] - ch[1]) * w + (ch[0] - H['chunkWest'])
                 c0 = chunks[ci]
                 for jj in range(c0['instanceFirst'], c0['instanceFirst'] + c0['instanceCount']):
                     if jj not in mine and grp[jj] in ids:

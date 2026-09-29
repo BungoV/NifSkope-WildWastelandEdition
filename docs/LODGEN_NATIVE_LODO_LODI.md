@@ -1833,6 +1833,35 @@ those ids (`scratchpad/ident2_20260929/lmchunk.py` reads it back from the
 file). One id across chunks would need a file-wide group word: a format
 change, not made.
 
+**THE FOOTPRINT (IDENT2 follow-up, 2026-09-29; bungo on the after pictures:
+"the landmarks are not whole yet").** A landmark is its name prefixes PLUS the
+ground they cover. Its OUTLINE is the convex hull, on X/Y, of the name-matched
+pieces' placed boxes, derived in the emitter (a bounding box around Diamond
+City takes in the street blocks at its corners; the hull does not). After the
+named join and before the contact pass, every other drawn piece whose box
+overlaps the outline and leaves it by no more than 512 u joins the landmark,
+whatever its name and with no cap. The rule is per piece: a street block whose
+edge pieces stand inside the stadium gives those pieces to the landmark and
+keeps the rest, and the contact pass cannot join the halves back (a landmark
+wider than the cap takes in nothing by contact). Trees and plants never join
+(the tree flag, or a `landscape/trees|plants|vines|grass/` model). A piece
+crossing out farther is refused: one `native-landmark: ... footprint REFUSED`
+line each, with how far out; the group dump gets `# landmark-hull`,
+`# landmark-footprint` and `# landmark-refused` lines. The margin is a code
+constant in the measured gap: pieces inside leave the hull by at most 319 u
+(box corners of rotated billboards and roof pieces), the nearest refused by
+1,460 u (a whole-block LOD shell). The Hub rules also name the towers' own
+backbay LOD-only shells (Prudential and backbay17 on the west, the T-tower on
+the east), which stand past the hightech hull. **Boston bake:** Diamond City
+165 named + 239 by footprint (1 refused: fens04_bld01lod, 3,494 u out); west
+tower 731 + 27 (2 refused: backbay15_bld01lod, backbay18_bld02lod); east
+732 + 17; Trinity 25 + 0. The gate is a pixel count read from the file
+(`scratchpad/ident2_20260929/pixgate.py`): the triangles inside each outline,
+trees excluded, point-splatted from straight down and four 35-degree obliques,
+count the pixels whose (chunk, group id) is not the landmark's: **0 in all
+four** (the pre-footprint file: 291,974). Street coverage 0.570 -> 0.558: the
+footprint pieces lose their own occluder boxes to the landmark's one.
+
 **THE PROXIMITY JOIN (the default 2026-09-19 .. 2026-09-27; bungo's ruling
 2026-09-19; lane IDENTPROX measured it, lane HORIZONOUT shipped it;
 `--identity-join proximity`).** Three clauses, in order:

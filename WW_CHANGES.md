@@ -9,6 +9,13 @@
 - Boston: Diamond City 15 groups -> 1, west Hub tower 4 -> 1, east tower and Trinity 1 (unchanged).
   Diamond City crosses a map-chunk line, so in the file it carries one id in each of its two chunks.
 - The lodgen report prints one `native-landmark:` line per landmark (pieces, group, chunks).
+- Landmarks now cover their ground too (bungo: "not whole yet"): every piece standing inside a landmark's outline
+  (the outline drawn around its named pieces) joins it, whatever it is called, up to 512 u past the edge. Trees
+  and plants never join; a piece reaching farther out stays apart, and the report names each one. The west tower's
+  sign bands, base pieces and left-side wall now share its colour; so do the shacks and wall pieces inside
+  Diamond City. Boston: 283 more pieces joined, 3 refused (neighbouring blocks' distant models). Checked by a
+  pixel count on the identity colours: 0 pixels of another colour inside any of the four outlines (was 291,974).
+  Street coverage 0.570 -> 0.558.
 - One occluder box a building: the fit now checks the box exactly as the file stores it, treats a hit next to
   a seam between pieces as a miss, and moves one face in when that clears a seam. Boston: 0 of 520 boxes stick
   out of their building by more than 1 % (was 5 of 511); street coverage 0.560 -> 0.570.

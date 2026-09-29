@@ -3108,7 +3108,7 @@ bool lodgenNativeWrite( QString * report, QString * error )
 	//! IDENT2: one line a landmark (and one a list problem), printed on the census's `native-landmarks` prefix
 	QStringList landmarkLog;
 	QString landmarkSource = QStringLiteral( "not read (the contact join did not run)" ), landmarkDigest = QStringLiteral( "-" );
-	quint32 landmarkRules = 0, landmarkPieces = 0, landmarkConflicts = 0;
+	quint32 landmarkRules = 0, landmarkPieces = 0, landmarkConflicts = 0, landmarkFootprint = 0;
 	//! IDENT2: building boxes the seam-aware probe moved off a seam (asymmetric inset) to pass
 	quint32 bldOccNudged = 0;
 	set.placementAo = s.placementAo;
@@ -4730,6 +4730,158 @@ bool lodgenNativeWrite( QString * report, QString * error )
 						join( quint32( f0 ), quint32( i ) );
 				}
 			}
+			/* IDENT2 follow-up (2026-09-29; bungo on the after pictures: "the
+			 * landmarks are not whole yet"): THE FOOTPRINT. A landmark is its name
+			 * prefixes PLUS the ground they cover. Its OUTLINE is the convex hull,
+			 * on X/Y, of the name-matched pieces' placed boxes -- derived, not
+			 * written by hand: Diamond City's hull follows the stadium walls, where
+			 * its bounding box would take in the street blocks at its corners.
+			 * Every other drawn piece whose box overlaps the outline and leaves it
+			 * by no more than LANDMARK_FOOTPRINT_MARGIN joins the landmark, whatever
+			 * its name, before the contact pass and under no cap; trees and plants
+			 * never join, and a piece crossing out farther is refused and logged.
+			 * The rule is PER PIECE, as bungo's words have it: a street block whose
+			 * edge pieces stand inside the stadium (a shack wall, a window bay) gives
+			 * those pieces to the landmark and keeps the rest -- the contact pass
+			 * below cannot join the two halves back, because a landmark wider than
+			 * the cap takes in nothing by contact. The margin sits in the gap the
+			 * Boston bake measured: the pieces inside the outlines leave it by at
+			 * most 319 u (box corners of rotated billboards and roof pieces), the
+			 * nearest piece outside by 1,460 u (a whole-block LOD shell). */
+			QStringList footDump;
+			{
+				const double LANDMARK_FOOTPRINT_MARGIN = 512.0;
+				typedef std::array<double, 2> P2;
+				auto cornersOf = [&]( size_t i, P2 c[4] ) {
+					const Box & b = tbox[i];
+					c[0] = { b.lo[0], b.lo[1] }; c[1] = { b.hi[0], b.lo[1] };
+					c[2] = { b.hi[0], b.hi[1] }; c[3] = { b.lo[0], b.hi[1] };
+				};
+				auto isVeg = [&]( size_t i ) {
+					const LodiSrcInstance & r = set.instances[i];
+					if ( r.baseId < lib.bases.size() && ( lib.bases[r.baseId].flags & LODO_BASE_TREE ) != 0 )
+						return true;
+					const QString m = landmarkModelOf( r.baseName );
+					return m.startsWith( QLatin1String( "landscape/trees/" ) ) || m.startsWith( QLatin1String( "landscape/plants/" ) )
+						|| m.startsWith( QLatin1String( "landscape/vines/" ) ) || m.startsWith( QLatin1String( "landscape/grass/" ) );
+				};
+				std::vector<char> footTaken( ni, 0 );
+				for ( size_t li = 0; li < rules.size(); li++ ) {
+					std::vector<P2> pts;
+					qint64 first = -1;
+					for ( size_t i = 0; i < ni; i++ ) {
+						if ( landmarkOf[i] != int( li ) )
+							continue;
+						if ( first < 0 )
+							first = qint64( i );
+						P2 c[4];
+						cornersOf( i, c );
+						pts.insert( pts.end(), c, c + 4 );
+					}
+					if ( first < 0 )
+						continue;
+					// Andrew's monotone chain, counter-clockwise, collinear points dropped
+					std::sort( pts.begin(), pts.end() );
+					pts.erase( std::unique( pts.begin(), pts.end() ), pts.end() );
+					auto cross = []( const P2 & o, const P2 & a, const P2 & b ) {
+						return ( a[0] - o[0] ) * ( b[1] - o[1] ) - ( a[1] - o[1] ) * ( b[0] - o[0] );
+					};
+					std::vector<P2> H( 2 * pts.size() + 1 );
+					size_t k = 0;
+					for ( size_t i = 0; i < pts.size(); i++ ) {
+						while ( k >= 2 && cross( H[k - 2], H[k - 1], pts[i] ) <= 0.0 ) k--;
+						H[k++] = pts[i];
+					}
+					for ( size_t i = pts.size() - 1, t = k + 1; i > 0; i-- ) {
+						while ( k >= t && cross( H[k - 2], H[k - 1], pts[i - 1] ) <= 0.0 ) k--;
+						H[k++] = pts[i - 1];
+					}
+					H.resize( k > 1 ? k - 1 : k );
+					if ( H.size() < 3 ) {
+						landmarkLog.append( QString( "%1: footprint skipped, the named pieces make no outline" ).arg( rules[li].name ) );
+						continue;
+					}
+					{
+						QString hl = QString( "# landmark-hull %1 margin %2" ).arg( rules[li].name ).arg( LANDMARK_FOOTPRINT_MARGIN, 0, 'f', 0 );
+						for ( const P2 & h : H )
+							hl += QString( " %1,%2" ).arg( h[0], 0, 'f', 1 ).arg( h[1], 0, 'f', 1 );
+						footDump.append( hl );
+					}
+					// signed distance past the outline (<= 0 inside): the largest over the edges
+					auto outside = [&H]( const P2 & q ) {
+						double d = -1e300;
+						for ( size_t e = 0; e < H.size(); e++ ) {
+							const P2 & a = H[e], & b = H[( e + 1 ) % H.size()];
+							const double ex = b[0] - a[0], ey = b[1] - a[1], L = std::sqrt( ex * ex + ey * ey );
+							d = std::max( d, ( ( q[0] - a[0] ) * ey - ( q[1] - a[1] ) * ex ) / L );
+						}
+						return d;
+					};
+					double hx0 = 1e300, hy0 = 1e300, hx1 = -1e300, hy1 = -1e300;
+					for ( const P2 & h : H ) {
+						hx0 = std::min( hx0, h[0] ); hy0 = std::min( hy0, h[1] );
+						hx1 = std::max( hx1, h[0] ); hy1 = std::max( hy1, h[1] );
+					}
+					// box vs convex outline, separating axes: the box's two, then the outline's edges
+					auto overlaps = [&]( const Box & b, const P2 c[4] ) {
+						if ( b.hi[0] < hx0 || b.lo[0] > hx1 || b.hi[1] < hy0 || b.lo[1] > hy1 )
+							return false;
+						for ( size_t e = 0; e < H.size(); e++ ) {
+							const P2 & a = H[e], & bb = H[( e + 1 ) % H.size()];
+							const double nx = bb[1] - a[1], ny = -( bb[0] - a[0] );
+							double m = 1e300;
+							for ( int q = 0; q < 4; q++ )
+								m = std::min( m, ( c[q][0] - a[0] ) * nx + ( c[q][1] - a[1] ) * ny );
+							if ( m > 0.0 )
+								return false;
+						}
+						return true;
+					};
+					quint32 joined = 0, refused = 0, veg = 0;
+					double worstIn = 0.0;
+					for ( size_t i = 0; i < ni; i++ ) {
+						if ( landmarkOf[i] >= 0 || footTaken[i] )
+							continue;
+						const LodiSrcInstance & r = set.instances[i];
+						Box pb;
+						if ( ptCount[i] )
+							pb = tbox[i];
+						else
+							for ( int q = 0; q < 3; q++ )
+								pb.lo[q] = pb.hi[q] = r.pos[q];
+						P2 c[4] = { { pb.lo[0], pb.lo[1] }, { pb.hi[0], pb.lo[1] }, { pb.hi[0], pb.hi[1] }, { pb.lo[0], pb.hi[1] } };
+						if ( !overlaps( pb, c ) )
+							continue;
+						if ( isVeg( i ) ) {
+							veg++;	// trees and plants never join (a count, not a line each)
+							continue;
+						}
+						if ( !ptCount[i] )
+							continue;	// nothing drawn: no identity to give
+						double w = -1e300;
+						for ( int q = 0; q < 4; q++ )
+							w = std::max( w, outside( c[q] ) );
+						const QString m = landmarkModelOf( r.baseName );
+						if ( w > LANDMARK_FOOTPRINT_MARGIN ) {
+							refused++;
+							landmarkLog.append( QString( "%1: footprint REFUSED %2 (ref %3): it crosses the outline by %4 u (margin %5 u)" )
+								.arg( rules[li].name, m, QString::number( r.refFormId, 16 ) ).arg( w, 0, 'f', 0 ).arg( LANDMARK_FOOTPRINT_MARGIN, 0, 'f', 0 ) );
+							footDump.append( QString( "# landmark-refused %1 i %2 over %3 %4" ).arg( rules[li].name ).arg( i ).arg( w, 0, 'f', 0 ).arg( m ) );
+							continue;
+						}
+						footTaken[i] = 1;
+						join( quint32( first ), quint32( i ) );
+						joined++;
+						worstIn = std::max( worstIn, w );
+						footDump.append( QString( "# landmark-footprint %1 i %2 over %3 %4" ).arg( rules[li].name ).arg( i ).arg( w, 0, 'f', 0 ).arg( m ) );
+					}
+					landmarkFootprint += joined;
+					landmarkLog.append( QString( "%1: footprint = convex hull of %2 point(s) around the named pieces' boxes, margin %3 u: "
+						"%4 piece(s) inside joined (farthest out %5 u), %6 refused, %7 tree/plant placement(s) inside left alone" )
+						.arg( rules[li].name ).arg( H.size() ).arg( LANDMARK_FOOTPRINT_MARGIN, 0, 'f', 0 ).arg( joined )
+						.arg( worstIn, 0, 'f', 0 ).arg( refused ).arg( veg ) );
+				}
+			}
 			// each group's world X/Y extent, carried on its root, for the cap
 			std::vector<float> gb( ni * 4 );
 			for ( size_t i = 0; i < ni; i++ ) {
@@ -4830,6 +4982,8 @@ bool lodgenNativeWrite( QString * report, QString * error )
 					ts << "# C i j dist joined(1 joined, 2 refused by the cap, 0 already one or past tol)\n";
 					ts << "# landmarks " << landmarkSource << " digest " << landmarkDigest << " rules " << landmarkRules
 					   << " pieces " << landmarkPieces << "\n";
+					for ( const QString & fl : footDump )
+						ts << fl << "\n";
 					for ( size_t i = 0; i < ni; i++ ) {
 						const LodiSrcInstance & r = set.instances[i];
 						const quint32 bf = r.baseId < lib.bases.size() ? lib.bases[r.baseId].formId : 0u;
@@ -5544,8 +5698,8 @@ bool lodgenNativeWrite( QString * report, QString * error )
 		/* IDENT2: the named landmarks, one line each, on their own prefix. */
 		if ( s.lodiV7 && s.identityJoinContact && !s.identityJoinLegacy ) {
 			ladderLine += QString( "\n  native-landmarks: list %1, digest %2, %3 rule(s), %4 piece(s) matched, %5 matched "
-				"by a second landmark (left with the first)" )
-				.arg( landmarkSource, landmarkDigest ).arg( landmarkRules ).arg( landmarkPieces ).arg( landmarkConflicts );
+				"by a second landmark (left with the first), %6 more piece(s) joined by the footprint" )
+				.arg( landmarkSource, landmarkDigest ).arg( landmarkRules ).arg( landmarkPieces ).arg( landmarkConflicts ).arg( landmarkFootprint );
 			for ( const QString & l : landmarkLog )
 				ladderLine += QStringLiteral( "\n  native-landmark: " ) + l;
 		}
