@@ -13,6 +13,8 @@ scratchpad/merge1_20260929/DONE.md (every gate line with its numbers).
    artifact; per-piece ids would put it back along kit-panel seams (identity rule, D = 64 u, plan s9.2a).
 3. TERR1 deep canyons too dark: FIX (lane TERR2) -- waits on TERRLIVE1, the fix lands in whichever path paints the ground.
 4. TILING5: KEEP TUNING (lane TILING6), switches stay OFF until it hits its targets.
+   bungo 2026-09-29 08:15 (clock read): the anti-repeat must reach BOTH hybrid and full -- TILING6 fixes it in the live
+   ground shader AND in the baker (one Commonwealth re-bake), and FO4CS does the same for its hybrid and full presets.
 5. THREE LOD TERRAIN RENDER OPTIONS, the same three as FO4CS presets:
    - FULL TEXTURE: every baked .lodt level (~16 GB; tonight's installed bake IS this option's data and is KEPT).
    - HYBRID (the DEFAULT): live splat from the .lodl LTEX weights near/mid + projected road/flat-object decals +
