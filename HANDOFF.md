@@ -20,6 +20,8 @@ scratchpad/merge1_20260929/DONE.md (every gate line with its numbers).
    applies to those two. bungo: outside our painted area hybrid shows VANILLA's LOD diffuse, blended smoothly into ours
    (s2.6 --vt-fill-vanilla, already on in MERGE1's bake). Defects he circled: whole-cell stair-steps (bandCells=2) and a
    dirt outline on the west edge -- TERRLIVE1 resumed to measure the cause and make the blend per-texel.
+   bungo 2026-09-29 09:49: OPTIONAL bake setting (ships OFF = vanilla diffuse outside): paint the ground OUTSIDE the painted
+   area with our landscape textures by rule (slope, height, best match to vanilla's colour there), drawn live -- TERRLIVE1.
 5. THREE LOD TERRAIN RENDER OPTIONS, the same three as FO4CS presets:
    - FULL TEXTURE: every baked .lodt level (~16 GB; tonight's installed bake IS this option's data and is KEPT).
    - HYBRID (the DEFAULT): live splat from the .lodl LTEX weights near/mid + projected road/flat-object decals +
