@@ -2331,6 +2331,132 @@ the height or the emissive. It does not follow a plugin that reshapes terrain:
 vanilla's colour belongs to vanilla's ground, so a worldspace whose heights moved
 should leave it off (as `vanilla-blend` exists for the normal, §2.5d).
 
+### 2.6a Law 2: the blend runs inside our ground, and vanilla stays vanilla (lane TERRLIVE1, 2026-09-29)
+
+**Why law 1 was replaced.** bungo, 2026-09-29, on the MERGE1 whole-map picture: "why is there a dirt outline
+here?" and "The blend was meant to be between the vanilla diffuse and our baked areas". Measured (lane
+TERRLIVE1 DONE.md section 11): law 1 decides "painted" per CELL, so the empty quadrants of an edge cell keep
+the engine-default land colour (luminance ~67 against vanilla's ~80), and its band starts at w = 0 on the
+painted cell edge and runs OUTWARD, so the first 2-4 km outside are mostly the same default ground. That strip
+is the dark outline; cut on cell and quadrant lines, it is also the square steps (colour jump 12.4 at the cell
+grid against 8.5-8.8 with the grid shifted 1024 u). Heightfield and AO were measured and ruled out.
+
+**The law, per finest-level texel, after 2.5's whole composite (replaces the table above):**
+
+    painted quadrant  a LAND quadrant with a BTXT or any ATXT layer (the .lodl's own grain)
+    d                 distance from the texel INSIDE the painted quadrants to the nearest unpainted
+                      quadrant square; 0 on unpainted ground and on cells with no LAND
+    w                 smoothstep(0, LODGEN_VT_FILL_BAND, d), band = 8192 u (lodgen.h)
+    colour            V + (ours - V) * w          (RGB; alpha untouched)
+    V                 Bethesda's dim-4 LOD diffuse, UNTOUCHED (no tone match), Mitchell as before
+
+* Outside our painted ground the colour is vanilla's own; deep inside it is ours byte for byte; the join is
+  one smooth band laid on OUR side, per texel, never per cell.
+* The tone fit (T) still runs, for its census line only; it no longer changes a texel.
+* The census line adds `law=2 band=8192 paintedQuads=<n> texelsVanilla=<n>`.
+* The live preview (`--terrain-preview`) follows the same law from the .lodl's quadrant slots and reads V
+  live from the same sheets; HYBRID's live ground and DYNAMIC = mix(V, live splat, w). A reader that draws
+  the live ground must do the same, with the same band.
+* The band was chosen on the real data before the C++ (edge/model.py): 4096, 8192, 12288 u all leave the
+  profile flat against vanilla (worst sink 0.2-0.4 luminance); 8192 keeps the ramp half as steep as 4096
+  where ours and vanilla differ most (north: 89 against 75).
+* Gate (edge/gate_law2.py): on unpainted ground >= 256 u from ours, mean |lum - lum(V)| <= 2.0; the -12..+12 km
+  profile may not sink below its ends by more than vanilla's own sink + 1.0. The law-1 stage bake reads
+  6.6 / 6.5 and 10.6 / 9.5 -> red.
+
+### 2.6c The rule paint outside (lane TERRLIVE1, 2026-09-29) -- `--outside-paint vanilla|rule`, vanilla by default
+
+**What it is for.** Under law 2 (§2.6a) the ground outside our painted area is vanilla's
+dim-4 LOD diffuse, untouched. bungo's choice (2026-09-29, "option 2, make it optional in the
+baking settings"): an optional switch that paints that ground with the worldspace's own
+landscape textures instead, chosen by rule, and drawn live the same way as the live splat
+inside. Off (the default) is law 2 byte for byte.
+
+**Switches.** CLI `--outside-paint vanilla|rule`; `rule` needs `--vt-fill-vanilla` (the rule
+reads vanilla's diffuse to choose) and says so if it is missing. LOD panel: row *Outside paint*
+(Vanilla / Rule) under *Terrain*; Rule turns the vanilla fill on. The `.lodb` gains the row
+`outside	rule` and the product `<ws>.lodr` only when on.
+
+**The texture set.** The LTEX records the worldspace's own LAND uses (base and layers, counted
+by painted area), keeping those with at least 0.5 % of the painted area and a loadable diffuse.
+The default land set (no LTEX) counts as one. Each one's colour for matching is its 1x1 mip times
+the land grade. Commonwealth: 36 kept, 64 dropped under 0.5 %, 1 with no texture.
+
+**The rule, per sample.** One sample every 512 u (8 a cell side), row 0 south.
+- Inputs:
+  - height and slope from the cell's own 33x33 heights (±256 u); vanilla's LOD heights where a
+    cell has no LAND;
+  - V = the mean of vanilla's 16x16 dim-4 texels under the sample (at least 128 present).
+- Prior: P(texture | slope bin, height bin), counted over OUR painted samples and pulled
+  towards the overall share (kappa 8).
+  - Slope bins: 7, with edges at 4, 8, 14, 22, 32 and 45 degrees.
+  - Height bins: 6, of equal count.
+- The 8 textures most likely for the sample's bins are tried alone and in pairs. A pair's mix
+  weight is the least-squares fit to V, clamped to 0..1. The score is the colour error in 8-bit
+  units minus 2 ln(prior of the mix), and the lowest score wins.
+- Commonwealth: mean colour error at the samples 7.24, luminance 2.96.
+
+**How many layers meet.** Two per sample (A, B and A's weight); a texel mixes its 4 surrounding
+samples bilinearly, so up to 8 textures, usually 2-4.
+
+**Storage: `<ws>.lodr`, a new file** next to the VT levels (lodgen.h `LodgenRuleMap`,
+`lodgenRuleWrite` / `lodgenRuleRead`):
+- a 64-byte header:
+  - "LODR", version 1, header size;
+  - cell min X/Y, cells X/Y, samples a cell;
+  - palette count, band (f32);
+  - payload and raw sizes, CRC32 of palette + payload;
+- the palette as LTEX form ids;
+- a zlib stream of the planes A, B, W (u8; A = 255 means no sample).
+
+The map is stored, not computed live, because the choice needs whole-map statistics and vanilla's
+sheets; the reader only fetches ids and weights, like the `.lodl` splat. No existing format changes.
+Commonwealth: 1536 x 1536 samples, 2,687,771 bytes. `lodgen --rule-check <file|dir>` reads it back
+(magic, sizes, CRC, palette ids) and refuses a flipped bit, a wrong magic and a cut file. A region
+bake writes a region map from the region's own painted ground.
+
+**Where it applies.** Colour only. The rule colour R (the textures' repeat colour, graded like the
+live splat) replaces V in the law-2 fill:
+- an unpainted quadrant is R;
+- inside our ground, the 8,192 u band blends ours into R (c = R + (ours - R) w).
+
+Normals, mask, cover and heights are as in §2.6a.
+
+**HYBRID and DYNAMIC.**
+- HYBRID: the finest level's fill writes R, and the far levels (VT.16, VT.32) are box-filtered from
+  it, so they **carry the rule paint**. That costs no bytes, and the baked far ground and the live
+  near ground show the same textures at the fade; stopping at the painted edge would put a
+  vanilla/rule seam right at the fade.
+- DYNAMIC: writes the `.lodr` only (byte-identical to HYBRID's). The live draw (terrainpreview.cpp
+  `ruleSplat`) mixes the same textures through `ltexFetch`, so the TILING6 hook serves the
+  rule-painted ground too.
+
+**Measured (Commonwealth whole map, build 6).**
+- Switch off: all 7 files sha1-identical to the law-2 head bake (`gate_off.py`). Proven red on the
+  rule bake: 3 VT levels differ and a new `.lodr` appears.
+- Bytes added: 2,687,771 (the `.lodr`), for HYBRID and DYNAMIC alike.
+- Bake time: HYBRID 1,513 s against 1,299 s (+214 s; the map itself 68 s). DYNAMIC: +38 s.
+- Edge gate, rule clauses (dip <= 1.0, step across the edge <= 2.0):
+  - north steps: dip 0.00, step 0.78, PASS;
+  - west outline: dip 0.54, step 0.10, PASS;
+  - the law-1 bake: dips 9.47 / 8.69, steps 7.38 / 1.62, FAIL.
+- Drift from vanilla outside (`drift.py`, mean |d lum| on VT.8):
+  - band 0-8 km 7.20;
+  - near 8-32 km 7.45;
+  - far > 32 km 4.97;
+  - all 5.14 (signed -0.60, p95 20.8).
+- In view (`pic_drift.py`):
+  - whole map: 3.4-3.8, a touch more olive (blue -3 to -4);
+  - low view over the outside hills: far half 7.6 baked / 12.5 live. Vanilla's grey rock on far
+    slopes turns brown/olive; the rule picks rock less often than Bethesda painted it.
+- GPU ms total (off -> on):
+  | view | HYBRID | DYNAMIC |
+  |---|---|---|
+  | Boston | 0.106 -> 0.118 | 0.145 -> 0.166 |
+  | street | 0.183 -> 0.190 | 0.194 -> 0.201 |
+  | whole | 0.409 -> 0.396 | 0.449 -> 0.513 |
+  | hills | 0.187 -> 0.243 | 0.198 -> 0.306 |
+
 ### 2.6b The landless-cell height fill (lane FIX1, 2026-09-26) -- `--land-fill-vanilla`, OFF by default
 
 **What it is for.** A cell with no LAND record has no height of its own, and the

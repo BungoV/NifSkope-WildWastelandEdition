@@ -1,0 +1,16 @@
+files rung 232  new 234
+  .bto       same     17  differ     0  onlyRung    0  onlyNew    0
+  .btr       same     17  differ     0  onlyRung    0  onlyNew    0
+  .dds       same     98  differ     0  onlyRung    0  onlyNew    0
+  .key       same     17  differ     0  onlyRung    0  onlyNew    0
+  .lodb      same      1  differ     0  onlyRung    0  onlyNew    0
+  .lodi      same      1  differ     0  onlyRung    0  onlyNew    0
+  .lodj      same     17  differ     0  onlyRung    0  onlyNew    0
+  .lodl      same      1  differ     0  onlyRung    0  onlyNew    0
+  .lodm      same     24  differ     0  onlyRung    0  onlyNew    0
+  .lodo      same      1  differ     0  onlyRung    0  onlyNew    0
+  .lodt      same      2  differ     0  onlyRung    0  onlyNew    0
+  .txt       same     36  differ     0  onlyRung    0  onlyNew    0
+new files (additive): mod/FO4CSLOD/Commonwealth/Commonwealth.lodd 51991408 bytes, mod/FO4CSLOD/Commonwealth/Commonwealth.lodg 370756 bytes
+equal only after the mask (.lodb/.key/.txt): 19
+GATE GREEN: 232 same, 0 finding(s)

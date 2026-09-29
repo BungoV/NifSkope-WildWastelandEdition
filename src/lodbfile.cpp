@@ -86,6 +86,7 @@ static const char * const g_censusKeywords[] = {
 	"native-library-build:",
 	"native-casters:", "native-occluders:",
 	"vt:",
+	"decals:",       /* lane TERRLIVE1: the ground decal library */
 	"arrays written:", "card arrays written:", "merged:", "far rings:",
 	"bake census:", "stage times:", "incremental:", "bto scratch:",
 	/* `bake-record:` is NOT here, and cannot be: it is printed after the record
@@ -107,6 +108,34 @@ bool lodbIsCensusLine( const QString & line )
 		if ( t.startsWith( QLatin1String( *k ) ) )
 			return true;
 	return false;
+}
+
+static QString g_terrainOption;
+
+void lodbSetTerrainOption( const QString & option )
+{
+	QMutexLocker lock( &g_censusMutex );
+	g_terrainOption = option;
+}
+
+QString lodbTerrainOption()
+{
+	QMutexLocker lock( &g_censusMutex );
+	return g_terrainOption;
+}
+
+static bool g_outsideRule = false;
+
+void lodbSetOutsideRule( bool on )
+{
+	QMutexLocker lock( &g_censusMutex );
+	g_outsideRule = on;
+}
+
+bool lodbOutsideRule()
+{
+	QMutexLocker lock( &g_censusMutex );
+	return g_outsideRule;
 }
 
 void lodbClearCensus()
@@ -392,6 +421,16 @@ bool lodgenWriteLedger( const QString & path, const LodgenLedger & led, QString 
 	for ( const QString & t : led.switchTokens )
 		row( { QStringLiteral( "switch" ), tsv( t ) } );
 	row( { QStringLiteral( "switches" ), led.switches } );
+	/* lane TERRLIVE1: which of the terrain's colour this bake baked (full /
+	 * hybrid / dynamic). Old readers ignore an unknown kind. */
+	{
+		const QString to = lodbTerrainOption();
+		if ( !to.isEmpty() )
+			row( { QStringLiteral( "terrain" ), to } );
+		// the rule paint outside our ground (`--outside-paint rule`); no row when off
+		if ( lodbOutsideRule() )
+			row( { QStringLiteral( "outside" ), QStringLiteral( "rule" ) } );
+	}
 
 	/* 6. the chunks. The rows are sorted by (cy,cx) -- never by the order the
 	 *    pass retired them -- which is what keeps the record deterministic. */

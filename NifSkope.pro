@@ -234,6 +234,8 @@ HEADERS += \
 	src/io/nifxfile.h \
 	src/io/lodmfile.h \
 	src/io/lodvfile.h \
+	src/io/loddecal.h \
+	src/terrainpreview.h \
 	src/io/MeshFile.h \
 	src/io/nifstream.h \
 	src/lib/importex/3ds.h \
@@ -424,6 +426,8 @@ SOURCES += \
 	src/io/nifxfile.cpp \
 	src/io/lodmfile.cpp \
 	src/io/lodvfile.cpp \
+	src/io/loddecal.cpp \
+	src/terrainpreview.cpp \
 	src/io/MeshFile.cpp \
 	src/io/nifstream.cpp \
 	src/lib/importex/3ds.cpp \

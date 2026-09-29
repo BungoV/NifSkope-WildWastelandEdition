@@ -1,0 +1,35 @@
+files rung 232  new 234
+  .bto       same     17  differ     0  onlyRung    0  onlyNew    0
+  .btr       same     17  differ     0  onlyRung    0  onlyNew    0
+  .dds       same     98  differ     0  onlyRung    0  onlyNew    0
+  .key       same      0  differ    17  onlyRung    0  onlyNew    0
+  .lodb      same      0  differ     1  onlyRung    0  onlyNew    0
+  .lodi      same      1  differ     0  onlyRung    0  onlyNew    0
+  .lodj      same     17  differ     0  onlyRung    0  onlyNew    0
+  .lodl      same      1  differ     0  onlyRung    0  onlyNew    0
+  .lodm      same     24  differ     0  onlyRung    0  onlyNew    0
+  .lodo      same      1  differ     0  onlyRung    0  onlyNew    0
+  .lodt      same      2  differ     0  onlyRung    0  onlyNew    0
+  .txt       same     35  differ     1  onlyRung    0  onlyNew    0
+  DIFF mod/FO4CSLOD/Commonwealth/Commonwealth.flat_objects_report.txt
+  DIFF-lodb mod/FO4CSLOD/Commonwealth/Commonwealth.lodb ["census\tnative-library: level 0 from the base's MNAM LOD slots (--library mnam); 0 bases had no near MODL and kept their MNAM slots in place; placement AO ON: 69806 measured, 0 not measured (0xff); vertex AO ON: 46532 instances streamed (1005166 bytes, mean 164.7, 330081 below 128), 23274 empty, 17 chunk(s) cast, 0 without land; face cast (lane AO2): 15 ring scene(s), 50286 placement(s) left out
+  DIFF scr/lodgen_chunk_cache/Commonwealth.16.-16.-16.key
+  DIFF scr/lodgen_chunk_cache/Commonwealth.16.0.-16.key
+  DIFF scr/lodgen_chunk_cache/Commonwealth.32.-32.-32.key
+  DIFF scr/lodgen_chunk_cache/Commonwealth.32.0.-32.key
+  DIFF scr/lodgen_chunk_cache/Commonwealth.4.-4.-12.key
+  DIFF scr/lodgen_chunk_cache/Commonwealth.4.-4.-4.key
+  DIFF scr/lodgen_chunk_cache/Commonwealth.4.-4.-8.key
+  DIFF scr/lodgen_chunk_cache/Commonwealth.4.-8.-12.key
+  DIFF scr/lodgen_chunk_cache/Commonwealth.4.-8.-4.key
+  DIFF scr/lodgen_chunk_cache/Commonwealth.4.-8.-8.key
+  DIFF scr/lodgen_chunk_cache/Commonwealth.4.0.-12.key
+  DIFF scr/lodgen_chunk_cache/Commonwealth.4.0.-4.key
+  DIFF scr/lodgen_chunk_cache/Commonwealth.4.0.-8.key
+  DIFF scr/lodgen_chunk_cache/Commonwealth.8.-8.-16.key
+  DIFF scr/lodgen_chunk_cache/Commonwealth.8.-8.-8.key
+  DIFF scr/lodgen_chunk_cache/Commonwealth.8.0.-16.key
+  DIFF scr/lodgen_chunk_cache/Commonwealth.8.0.-8.key
+new files (additive): mod/FO4CSLOD/Commonwealth/Commonwealth.lodd 51991408 bytes, mod/FO4CSLOD/Commonwealth/Commonwealth.lodg 370756 bytes
+.lodb equal only after the mask: 0
+GATE RED: 213 same, 19 finding(s)

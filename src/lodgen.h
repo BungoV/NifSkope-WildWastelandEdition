@@ -1532,6 +1532,10 @@ void lodgenBakeCacheCounts( const LodgenBakeCaches * caches, int * nifReads, int
 struct LodgenVtOptions
 {
 	int finestDim = 2;              //!< cells per tile at the finest level, 1 or 2
+	/*! Lane TERRLIVE1 (terrain option hybrid): levels finer than this dim are
+	 *  STAGED -- the .btr chunk sheets are assembled from them -- but never
+	 *  encoded or written. 0 = every level is written (today's bake). */
+	int writeFinestDim = 0;
 	int content = 256;
 	int border = 8;
 	int mips = 2;
@@ -1550,6 +1554,14 @@ struct LodgenVtOptions
 	 *  those cells, tone-matched on the overlap. Read at bake time only. OFF by
 	 *  default; a bake without it is byte-identical to one before it existed. */
 	bool vanillaFill = false;
+	/*! THE RULE PAINT OUTSIDE (lane TERRLIVE1, 2026-09-29, bungo: "Yes, option
+	 *  2, make it optional in the baking settings"; `--outside-paint rule`,
+	 *  panel row "Outside paint"). Needs `vanillaFill`. The unpainted ground
+	 *  takes the worldspace's own landscape textures, chosen by slope, height
+	 *  and the best colour match to vanilla's diffuse, instead of that diffuse;
+	 *  the choice is written to `<ws>.lodr` (lodgenRuleWrite). OFF by default
+	 *  and byte-identical when off. */
+	bool outsideRule = false;
 	/*! Where the ground-cover byte lives (bungo's open question, 2026-09-11
 	 *  09:5x: the mask's A, mirroring the object family's subsurface slot, or
 	 *  the colour sheet's A, the object family's `coverage` slot).
@@ -1627,6 +1639,95 @@ bool lodgenVtEstimateBounds( int worldWest, int worldSouth, int worldEast, int w
 bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 	const QString & outDir, const LodgenVtOptions & opts, LodgenBakeCaches * caches,
 	QString * report, QString * error );
+
+/*! THE TERRAIN OPTION (lane TERRLIVE1, 2026-09-29). Which part of the LOD
+ *  terrain's colour is baked and which the consumer builds live:
+ *
+ *   Hybrid   the pyramid from dim 8 up (64 world units a texel at content
+ *            512), baked directly, so VT.2 and VT.4 are never computed; near
+ *            and mid distance are the consumer's live splat from the .lodl.
+ *   Dynamic  no pyramid at all; the live splat everywhere.
+ *
+ *  Every option also writes the ground decals (`<ws>.lodd` + `<ws>.lodg`,
+ *  io/loddecal.h). Hybrid is the default (bungo's ruling). */
+enum class LodgenTerrainOption : int
+{
+	// 0 was Full (today's whole pyramid), ditched 2026-09-29 08:19; the numbers stay
+	Hybrid = 1,
+	Dynamic = 2
+};
+
+//! "hybrid", "dynamic".
+QString lodgenTerrainOptionName( LodgenTerrainOption o );
+//! Parses the two names (any case); false on anything else ("full" included: ditched).
+bool lodgenTerrainOptionParse( const QString & s, LodgenTerrainOption * out );
+/*! The vanilla-colour fill's blend band (law 2, lane TERRLIVE1): world units
+ *  INSIDE the painted ground over which our colour rises from vanilla's
+ *  diffuse (0) to ours (1). One number for the bake and the live preview. */
+constexpr float LODGEN_VT_FILL_BAND = 8192.0f;
+/*! THE RULE PAINT MAP, `<ws>.lodr` (lane TERRLIVE1, docs/LODGEN_TERRAIN_VT.md
+ *  2.6c). A NEW file; no other format changes. One sample every 512 world units
+ *  (8 a cell), sample (sx, sy) centred at world ( (cellMinX * 8 + sx + 0.5) * 512,
+ *  (cellMinY * 8 + sy + 0.5) * 512 ), row 0 = south. Each sample names two
+ *  palette entries A and B and A's weight W (B's is 255 - W); 255 in A = no
+ *  sample (no vanilla colour there). The palette is LTEX form ids.
+ *
+ *  Layout, little-endian: 64-byte header
+ *    0 "LODR"  4 u32 version (1)  8 u32 header bytes (64)
+ *   12 i32 cellMinX  16 i32 cellMinY  20 i32 cellsX  24 i32 cellsY
+ *   28 u32 samples per cell (8)  32 u32 palette count  36 f32 band (world units)
+ *   40 u32 payload bytes (zlib)  44 u32 raw bytes (3 * nx * ny)
+ *   48 u32 CRC32 of palette + payload  52 u32 flags (0)  56..63 zero
+ *  then palette count x u32 LTEX forms, then the zlib stream of planes A, B, W
+ *  (u8, nx * ny each, row 0 south). */
+struct LodgenRuleMap
+{
+	int cellMinX = 0, cellMinY = 0, cellsX = 0, cellsY = 0, spc = 8;
+	float band = 0.0f;
+	QVector<quint32> palette;
+	std::vector<quint8> a, b, w;          //!< nx * ny each
+	int nx() const { return cellsX * spc; }
+	int ny() const { return cellsY * spc; }
+	float spacing() const { return 4096.0f / float( spc ); }
+	float originX() const { return ( float( cellMinX ) * float( spc ) + 0.5f ) * spacing(); }
+	float originY() const { return ( float( cellMinY ) * float( spc ) + 0.5f ) * spacing(); }
+	/*! The bilinear mix at world (wx, wy): up to 8 (palette index, weight)
+	 *  pairs, merged, weights summing to 1 over the samples that exist; the
+	 *  count, 0 where no surrounding sample exists. */
+	int mixAt( float wx, float wy, quint8 * ids, float * wts ) const;
+};
+//! Write `m` to `path`; the byte count, or -1 (and `why`).
+qint64 lodgenRuleWrite( const QString & path, const LodgenRuleMap & m, QString * why );
+//! Read and check a `.lodr` (magic, sizes, CRC, ids within the palette); false and `why` on any fault.
+bool lodgenRuleRead( const QString & path, LodgenRuleMap & m, QString * why );
+/*! DYNAMIC's half of the rule paint: build the rule map over the worldspace (or
+ *  the region in `opts`) and write `<outDir>/<ws>.lodr`. Needs a vanilla LOD
+ *  root. `log` gets the census lines. */
+bool lodgenBakeOutsideRule( const EsmWorld & world, const QString & dataRoot,
+	const QString & outDir, const LodgenVtOptions & opts, QStringList * log, QString * why );
+
+/*! What the option does to the pyramid's options: Hybrid sets the finest level
+ *  to dim 8. Returns a one-line note when it could not (the .btr chunk sheets
+ *  are assembled from level 4 and need it), else empty. */
+QString lodgenTerrainOptionApply( LodgenTerrainOption o, LodgenVtOptions & opts );
+
+/*! THE GROUND DECALS: every road placement and every painted flat object in
+ *  the region (opts.region when opts.haveRegion, else the worldspace) as one
+ *  projected decal, one picture set per distinct piece. Writes `<ws>.lodd` and
+ *  `<ws>.lodg` into lodgenFo4csWorldDir( outDir, ws ), reads both back with
+ *  their own reader, and returns a `decals:` census line in `report`.
+ *  Uses opts.cover for the road / flat-object rules, the same ones the
+ *  pyramid's paint follows. */
+bool lodgenBakeDecals( const EsmWorld & world, const QString & dataRoot,
+	const QString & outDir, const LodgenVtOptions & opts, LodgenBakeCaches * caches,
+	QString * report, QString * error );
+
+/*! Lane TERRLIVE1 (the live-splat preview): one LTEX record's diffuse as
+ *  `side` x `side` texels, 0xAARRGGBB, row 0 = v 0 (the bake's own lookup),
+ *  resampled from the mip nearest `side`. False when the record names no
+ *  texture or it does not load; `path` gets the texture path either way. */
+bool lodgenLtexPicture( const EsmWorld & world, const QString & dataRoot, LodgenBakeCaches * caches,
+	quint32 ltexForm, int side, std::vector<quint32> & rgba, QString * path = nullptr );
 
 bool lodgenBakeTerrainTextures( const EsmWorld & world, int chunkX, int chunkY,
 	int dim, const QString & dataRoot, const QString & outDir,
