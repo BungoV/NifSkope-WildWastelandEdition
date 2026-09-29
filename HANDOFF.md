@@ -1,6 +1,112 @@
 # Handoff — NifSkope, Wild Wasteland Edition
 
-## TOP BLOCK -- written 2026-09-27 14:28 (`date`-read) by the overseer: PAUSED mid-campaign, pick up here
+## TOP BLOCK -- written 2026-09-29 03:49 (`date`-read) by lane MERGE1: the LOD map-fix campaign is MERGED into main, baked whole-map, installed; NOT flown
+
+bungo's order (09-26): "we fix all the maps that are broken, overnight" / "after you're done with fixing bakes, merge
+it, then render the bakes for me, this time fixed". Done by MERGE1 on 2026-09-29. Report:
+scratchpad/merge1_20260929/DONE.md (every gate line with its numbers).
+
+### What landed (main merge b918dc0b = night-20260927 @ b177294f)
+Lanes WATER1, GROUND1, TIDY1, IDENT1, TERR1, TILING5 (switches OFF), FLAT2, GPU1, AO2 -- one line each below under
+"Lane lines". Merges into night were clean (no conflicts); night into main was clean.
+
+### Boston re-gate on the merged exe (sha1 6dc429d1)
+- All ways back together (`--no-water-bodies --identity-join proximity --occluder-fit piece --no-stamp-normals
+  --no-sky-objects --no-collapse-uniform`, WW_LODGEN_NO_VERTEX_GROUND=1, WW_LODGEN_KEEP_BLACK_EMISSIVE=1,
+  WW_LODGEN_NO_LAYER_DEDUPE=1) = the pre-campaign rung, byte for byte, except the water-shape vertex colour
+  (dropped at bungo's word, no way back; 164 non-water blocks identical) and bookkeeping (.key, .lodb).
+- GROUND1, TIDY1, TERR1, FLAT2: the lanes' numbers reproduce exactly. IDENT1: same numbers, same 3 FAILs.
+- Harness legs: lodl_channels 54/54, lodi_v7, lodl_write PASS. lodgen_native 3 fails: leg 3 was a stale check
+  (flag bit 0x10 became NEAR1's NEAR flag) -- FIXED to 0x20; leg 5 "unaccounted: products" (INCR2's .lodb rows
+  never given a group in tests/spells/lodgen_btofree_ledger.py) -- left red, the group is a decision; leg 13c =
+  IDENT1's known box FAIL (6 of 302). lodl_water.sh FAILs its oracle (353 vs 346 bodies = the 7 sloped bodies
+  the oracle does not model) and its header-layout lines (header is 0x100 now) -- owed to WATER1's owner.
+
+### Installed
+- Whole Commonwealth baked on the GPU WITH `--no-collapse-uniform`: 00:58-02:52 (6,800 s), GPU BC7 on (163 images, 0 fell back);
+  3,060 chunks; stage 3,656 files / 15,905,725,868 B; installed = stage (521 copied, 22 stale removed, 3,135 equal).
+- Backup of the whole installed mods\FO4CSLOD before anything: E:\Projects\Fallout 4 Mods\backups\FO4CSLOD_before_MERGE1_20260929
+  (5,072 files, 21,038,690,722 B, verified both sides). Replaced files also kept in
+  E:\Projects\Fallout 4 Mods\backups\FO4CSLOD_replaced_MERGE1_20260929.
+- **The installed bake carries `.lodl` v3 and `.lodi` v12, which today's FO4CS refuses.** Until the FO4CS readers
+  land, far LOD in game may be missing for the Commonwealth. To go back: restore from the backup folder above.
+
+### Maps
+One picture per map, full size, 60 px title bar: E:/Projects/NifskopeWWE-night/scratchpad/merge1_20260929/maps/
+(70 pictures: 35 renders at the MAPS1 Boston camera + 35 offline panels; not in git). 3 are empty by design: ground
+cover (Fallout 76 only), the tree-card glow sheet (TIDY1 writes none when it is black), and the v2 cell-flags panel
+(a v2 file flags every cell).
+
+### Owed (pick up in this order)
+1. bungo: look at the maps; fly the installed bake only after the FO4CS readers land (or restore the backup).
+2. FO4CS readers (FO4CS last, by standing order): `.lodl` v3 (0x100 header, water bodies, sloped surface plane),
+   `.lodi` v12 (ground contact per vertex), texture sets with no emissive, collapsed one-value `.lodt` tiles. Then the
+   installed bake can drop `--no-collapse-uniform`.
+3. IDENT1 needs bungo's ruling: Diamond City in 15 groups, the row houses welded into 1, 5 of 511 boxes poke > 1%.
+   Also owed there: file-wide ids (wider group word), hill boxes (format bump).
+4. TERR1: deepest canyons still darker than physical (Theater 53.9 vs 92.3). TILING5: next lever is the hex
+   sampler's interior grain.
+5. CELL1: bungo's InstaLOD runs and their import.
+6. Queue unchanged from the 09-27 block: FO4CS near-ground anti-tiling, SHADOW1 (parked), next speed lane (terrain VT
+   across all cores, hash while writing, AO tail).
+
+### Lane lines, 2026-09-26..29 (spliced by MERGE1 from each lane's DELIVERABLE_TEXT / report; newest first)
+
+- **WATER1** (branch water1-20260927 @ dfc243f5, merged): the .lodl is written with water bodies (version 3) by
+  default; `--no-water-bodies` is the way back (version 2, byte for byte). In v3 the per-cell has-water bit is set only
+  where water is over ground. Placed water that runs down a slope becomes a per-texel water surface (float plane,
+  header 0x100, section bit 9); 306 placed water refs, 6 sloped used, 7 new bodies, every change confined to those
+  cells; the NW hill streams (no water before) now have 4 sloped bodies drawn within 7.6 u of the file. The viewer
+  draws every body as water at its height; the depth view (body height - ground) is the one non-flat view. Water LOD
+  shapes lose their vertex colour (the depth bake was dropped at bungo's word; 84/84 non-water chunk blocks
+  identical). Gates all PASS; 23 labelled pictures in scratchpad/water1_20260927/pics/labeled. NOT FLOWN.
+- **GROUND1** (@ 625f0a44, merged): `.lodi` version 12 = ground contact per vertex (header 0x130/0x138, last payload,
+  folded into indexCrc32 after the sky stream); the old one-byte-per-placement value is kept. Env
+  `WW_LODGEN_NO_VERTEX_GROUND=1` = the old file. Boston .lodi +1,286,144 B (+25.3%). Recompute 99.9984% within 1
+  PASS; ramp law PASS; the brief's two bars that contradict the law / compare different vertex sets FAIL and are
+  recorded, not loosened. Doc section 4.16.
+- **TIDY1** (@ d0860071 on ground1, merged): no black glow sheets (Boston 21 files, 50,064,092 B; installed 09-25
+  whole map 90 MB), layers merged by identical texels (114 -> 106; whole map 399 -> 371), honest viewer labels. The
+  one kept all-zero card sheet of 09-27 was BC1 truncating faint glow to zero (fixed in source). Gates 6/6 PASS.
+- **IDENT1** (@ 470a2632, merged, fails recorded): identity by contact join (32 u, cap 4,096 u), one occluder box per
+  building. Whole Commonwealth 21,140 groups, 511 boxes, street coverage 0.029 -> 0.560. Hub towers E 1 / W 4,
+  Trinity 1 PASS. **FAIL: Diamond City 15 groups; row houses 1 group; 5 of 511 boxes poke > 1% (3 on a joint
+  between two wall pieces).** Needs bungo's ruling (landmark/precombine join rule), not a code fix. Owed: file-wide
+  ids (u32 group word), hill boxes (format bump), the 5 boxes. Pictures scratchpad/ident1_20260927/pics/.
+- **TERR1** (@ 4c04abe8, merged): object normals stamped into the ground `_msn`; the ground sky (mask B) sees
+  buildings, walls and bridges by a cosine law. Canyon mean 87.4 vs physical ray cast 98.8 (bar 70-114), every
+  named street >= 52 (min 53.9), bias -6.0, open ground identical where no object is in reach (0 of 3,860), stamp
+  confined to its own record (0 of 178,906). Ways back `--no-stamp-normals --no-sky-objects` = old sheets byte for
+  byte. Still darker than physical in the deepest canyons (Theater 53.9 vs 92.3). No format change.
+- **TILING5** (@ 995cffeb, merged, switches OFF): height-aware land blend and large-scale colour variation;
+  `--land-height-blend on`, `--land-macro on` (macro amplitude 0 by measurement). Does NOT reach its own bars
+  (transitions 7/14, band shape 3/7 + 7/7, repeat 5/7 + 6/7); keeps every grain gate green and no longer shifts
+  brightness (+0.009). Recommendation kept OFF; next lever is the hex sampler's interior grain. Off = rung bytes.
+- **FLAT2** (@ e8a10631, merged): a terrain tile sheet that is one value everywhere is stored as a 16-byte record +
+  tile flag bit 2+k (5.96 of 19.98 GB = 29.8% of the installed bake). `.lodt` stays v2. On by default;
+  `--no-collapse-uniform` = old bytes. Sea edge 48/180 collapsed, 54.9 -> 34.1 MB; Nuka-World 84/256, 78.1 -> 52.6
+  MB; 0 texels differ after decode. FO4CS refuses a collapsed bake until its reader lands: the installed bake uses
+  `--no-collapse-uniform`.
+- **GPU1** (merged into night earlier, @ 8f58e7db): the bake measured per stage; faster identity join (109 s -> < 1 s)
+  and card dilate with the same bytes; card normal sheets BC7-encoded on the GPU (on by default; Settings > NIF >
+  LOD bake > Use GPU; `--no-gpu`), gated on the CPU's own error measure. Left: VT tile loop fan-out (~2,500 s of the
+  whole map), hashing the bake record while writing (~450 s), the AO cast's one-thread tail (~150 s).
+- **AO2** (spliced 2026-09-26, commit 422881d4): see its lines below in the 09-26 entries.
+- **AUDIT1** (09-27, read-only, overseer scratch audit1/): audited the MAPS1 bake against the plan on 8 named points.
+  Big faults: water never drawn as water, the v2 bake set has-water on all 36,864 cells, ground contact one grey
+  per piece, identity cut at chunk lines and welded into streets. Its section 4 fault list drove WATER1, GROUND1,
+  TIDY1, IDENT1, TERR1. No code.
+- **MAPS1** (09-27, overseer scratch maps1/): one picture of every LOD map (79 panels) at the 08 Boston camera
+  plus offline decodes; most channels right; emissive, scrappable, ground cover and v3 water planes on a v2 file
+  were empty. bungo called most of the renders broken -> this campaign. Its list is the MERGE1 render list.
+- **VAN1** (09-27, overseer scratch van1/): vanilla's shipped far LOD rendered at the same camera, clipped to our
+  ground: mask match IoU 98.46%; mean brightness vanilla 106.2 vs ours AO on 98.4 vs AO off 117.1 over 1,899,746 px.
+  Differences named (AO, water, terrain, objects), not neutralised.
+- **CELL1** (09-26, overseer scratch cell1_20260926/): exported one downtown Boston LOD chunk at full detail and as
+  the bake draws it (glb + census) and prepared an InstaLOD job folder (HOWTO.txt, profiles) for bungo to run
+  himself. **Owed: bungo's InstaLOD runs and their import/validation.** No result exists yet.
+
+## HISTORY (was the top block) -- written 2026-09-27 14:28 (`date`-read) by the overseer: PAUSED mid-campaign, pick up here
 
 bungo 14:0x: "That's way too long, we're pausing now, make sure nothing gets lost" / "Push what you have to my repo" /
 "Make a handoff doc too so that we can easily pick up where we left off". Every lane stopped at a safe point, committed
@@ -65,6 +171,10 @@ next speed lane (terrain VT across all cores, hash while writing, AO tail).
 ### FO4CS note (bungo 14:2x)
 Cloud shadows compared with 1001Bits/FO4CloudShadows: theirs = 256 cubemap of captured cloud meshes, mip 0, shell 10000 u (~140 m), opacity 2.0 clamped -> hard edges. Ours = weather cloud textures, deck 110000 u, 200000 u tiles, footprint mip, opacity 1.0, sky fraction 0.25 -> soft. bungo's screenshot of THEIR mod shows the hard edge. No action.
 
+
+### Later the same day (09-27)
+- 2026-09-27 19:43 RESUMED (bungo "back to fo4cs and nifskope"): lock free; 5 continuation lanes on account B from their paused heads, briefs brief_<lane>_cont.md in the overseer session scratch: WATER1c pid 41036, TIDY1c 6876, TERR1c 47032, TILING5c 44660, FLAT2c 40220. IDENT1 (FAIL) queued. Reports: each lane's DONE.md '## CONTINUATION 2026-09-27'.
+- 2026-09-27 20:02 The 5 B continuation lanes all closed PARTIAL (B refuses bash scripts, turn.sh, builds, NifSkope launches). Their offline results: TIDY1 cause+fix in source cc0642bc (BC1 truncates faint glow to zero); TERR1 cosine sky law 6eb5954f (canyon 88 vs physical 99) unbuilt; TILING5 constants frozen (beta 2.0, macro 0), G2 band red explained; FLAT2 sea-edge gates PASS (48/180 collapsed, 0 texels differ); WATER1 open items measured offline. Relaunched in-session: WATER1, TIDY1, TERR1 (max 3); TILING5, FLAT2 next.
 
 ## TOP BLOCK -- written 2026-09-24 16:52 (`date`-read) by lane LEDGERFIX1, after the ledger wipe
 
