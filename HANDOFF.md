@@ -15,6 +15,9 @@ scratchpad/merge1_20260929/DONE.md (every gate line with its numbers).
 4. TILING5: KEEP TUNING (lane TILING6), switches stay OFF until it hits its targets.
    bungo 2026-09-29 08:15 (clock read): the anti-repeat must reach BOTH hybrid and full -- TILING6 fixes it in the live
    ground shader AND in the baker (one Commonwealth re-bake), and FO4CS does the same for its hybrid and full presets.
+   bungo 2026-09-29 (after TERRLIVE1's whole-map renders): FULL IS DITCHED -- the baked ground outside the playable
+   area is made-up fill with a repeating pattern. Options are now HYBRID (default) and DYNAMIC; the anti-repeat ruling above
+   applies to those two. Hybrid's far baked levels carry the same fill outside the playable area: open, see the next lane.
 5. THREE LOD TERRAIN RENDER OPTIONS, the same three as FO4CS presets:
    - FULL TEXTURE: every baked .lodt level (~16 GB; tonight's installed bake IS this option's data and is KEPT).
    - HYBRID (the DEFAULT): live splat from the .lodl LTEX weights near/mid + projected road/flat-object decals +
