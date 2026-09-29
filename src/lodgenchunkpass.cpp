@@ -882,6 +882,9 @@ QStringList lodgenIdentityDump( const LodgenChunkPassOptions & pass, const Lodge
 		add( "native.identityJoinContact", b( true ) );
 	if ( x.occluderBuilding )
 		add( "native.occluderBuilding", b( true ) );
+	// IDENT2: the landmark list moves the groups, so its digest is an input (named only with the contact join)
+	if ( x.identityJoinContact )
+		add( "native.landmarks", x.landmarksDigest );
 	add( "native.aggregate", b( x.aggregate ) );
 	add( "native.aggregateMin", n( x.aggMin ) );
 	add( "native.aggregateTile", n( x.aggTile ) );

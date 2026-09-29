@@ -7,6 +7,29 @@ Newest at the top.
 
 ## 2026-09-27..29 -- LOD map-fix lanes (lane text, spliced by MERGE1)
 
+### IDENT2
+- 09:47 (09-29): rewrote scratchpad DELIVERABLE_TEXT.md (CRLF, 63 lines) with Python text-mode read/write; it came
+  out all LF and was committed that way (377f8a9d, diff 157 lines instead of ~33). Caught by the commit stat. Restored
+  CRLF in the next commit. Same rule as the entry below: count CRLF before any scripted edit, write bytes.
+- 09:3x (09-29): edited WW_CHANGES.md (mixed endings: 19,020 CRLF lines) with the Edit tool; it rewrote every
+  CRLF as LF. Caught by the byte count taken after the edit (CRLF 19,020 -> 0); rebuilt from HEAD's bytes plus
+  the new LF lines (diff: 7 insertions). Rule (memory: CRLF vs Python edits): mixed-ending files take byte-level
+  Python inserts, never the Edit tool; count CRLF before and after.
+- 09:2x (09-29): the lane's lmchunk.py (and the new pixgate.py copied from it) labelled chunk rows south-first
+  (`chunkSouth + ci // w`); the .lodi stores them NORTH-first (the decoder: `chunkNorth - ci // w`). Found when a
+  full bake's wider grid printed Diamond City in chunk (-2,-7) while the emitter's census said (-2,-2). The
+  earlier LIGHT bakes' grid (south -4, north 0) put every landmark on the middle row, where both orders agree, so
+  the numbers already reported stand. Rule: take chunk order from lodgen_native_decode.py, never re-derive it.
+- 08:40 (09-29): the footprint's first build judged whole contact groups, where the coordinator's words said
+  "every piece whose bounds sit inside". It left the west tower's left-side pieces (bungo's circled piece) their
+  own colour. Found by the pixel gate (2,743 wrong pixels, all from two split street blocks). Rebuilt per piece.
+  Rule: build the rule as worded first; a deviation is measured against it, not instead of it.
+- 04:0x and 04:24 (09-29): twice typed Python holding a backslash literal into a bash heredoc (help strings in
+  src/nifcli.cpp; `replace('\', '/')` in a scratch tool), against the standing rule below (backslash or
+  apostrophe text goes through the Write tool or `chr(92)`). The first came out as real newlines in the help text
+  (caught by `cat -A` on the diff), the second as a syntax error (caught by `ast.parse`). Rule unchanged; the
+  check that caught both -- compile or `cat -A` the result before building -- stays in every patch step.
+
 ### WATER1
 - 10:44 (09-27): a second render pass was run after the first gave empty logs, without reading the Avast log
   first. Both were Avast auto-sandbox (AvastSvc.log "marked for virtualization" + error 122). Rule: skill

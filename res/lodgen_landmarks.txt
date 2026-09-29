@@ -1,0 +1,35 @@
+# lodgen_landmarks.txt -- the NAMED LANDMARKS of the native .lodi identity join (lane IDENT2, 2026-09-29).
+#
+# bungo 2026-09-29 (HANDOFF, rulings during MERGE1, item 1): "Landmark rule" -- the pieces of a named
+# landmark are ONE group, whatever its size; the rest of the map keeps the contact join (32 u, cap 4,096 u).
+# Built into NifSkope (res/nifskope.qrc, :/lodgen/landmarks.txt); `lodgen ... --landmarks <file>` reads
+# another list instead, `--landmarks none` reads none. Only the contact join reads it
+# (`--identity-join proximity` and `legacy` never do).
+#
+# One landmark a line, three fields split by '|':
+#   name | prefix[;prefix...] | [centreX centreY radius]
+# * prefix: the start of the placement's LOD MODEL PATH, compared in lower case with '/' for '\' and a
+#   leading "meshes/" and then "lod/" taken off both sides. A placement matches when its path starts with
+#   ANY of the prefixes.
+# * centre / radius (world units, optional): a matching placement also has to stand within `radius` of
+#   (centreX, centreY) on X/Y. Use it when the kit is shared with other buildings (the Hub towers' hightech
+#   kit is used all over Boston).
+# The rule lines alone make the list's digest (a comment edit moves no bake). Model paths only: no game data.
+#
+# THE FOOTPRINT (IDENT2 follow-up, 2026-09-29; bungo: "the landmarks are not whole yet"). A landmark is its
+# names PLUS the ground they cover. Its outline is the convex hull, on X/Y, of the name-matched pieces' placed
+# boxes (derived, not written here: Diamond City's bounding box would take in the street blocks at its corners,
+# its hull does not). Every other drawn piece whose box overlaps the outline and leaves it by no more than
+# 512 u joins the landmark, whatever its name, with no cap, before the contact join; the rule is per piece.
+# Trees and plants never join. A piece crossing out farther is refused and logged (`native-landmark:` and the
+# group dump's `# landmark-refused`). A LOD-only model that belongs to the landmark but sticks out past its hull
+# (the Prudential and backbay17 LOD shells on the west tower) is named below instead.
+
+# Diamond City: the stadium's own exterior kit (DExt*) and the shacks inside it, all under one folder.
+diamond_city   | architecture/diamondcity/                | -12500 -25700 7000
+# The two Hub360 (hightech) towers: audit1's centres; 2,500 u holds each tower's 727-730 pieces. Each also
+# names its backbay LOD-only shells (the distant-view models of the same tower) so they are the landmark's too.
+hub_tower_east | architecture/buildings/hightech/hitext;neighborhoods/backbay/backbay_ttowerbld01;neighborhoods/backbay/structure/backbay_ttowerbld01 | 3625 -24292 2500
+hub_tower_west | architecture/buildings/hightech/hitext;neighborhoods/backbay/backbay_prudentialbld01;neighborhoods/backbay/structure/backbay_prudentialbld01;neighborhoods/backbay/backbay17_bld01;neighborhoods/backbay/structure/baybay17_bld01 | -2271 -30152 2500
+# Trinity Church (ChurchTrin* kit).
+trinity_church | architecture/unique/trinitychurch/       |

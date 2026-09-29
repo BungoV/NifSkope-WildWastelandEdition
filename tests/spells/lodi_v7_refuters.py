@@ -90,7 +90,9 @@ for ci, c in enumerate(T['chunks']):
                   cy * 16384.0 + r['py'] / 65535.0 * 16384.0,
                   c['zMin'] + r['pz'] / 65535.0 * c['zExtent'])
 
-# A group id is dense per CHUNK, so it is only a name when paired with its chunk.
+# The decoder hands FILE-WIDE ids (v13 stores them; a v7..v12 per-chunk u16 is offset
+# by the earlier chunks' counts). These refuters are stated per chunk, so the key
+# stays (chunk, id): a v13 group crossing a chunk line is judged one side at a time.
 gk = [(chunk_of[i], grp[i]) if grp else (chunk_of[i], i) for i in range(n)]
 size = collections.Counter(gk)
 
@@ -148,7 +150,7 @@ ok('(d) components cover every arch placement once',
    % (len(arch_idx), len(arch_groups), covered, len(strays),
       '' if not strays else ' -- first: %s' % os.path.basename(base_model[inst[strays[0][1]]['baseId']])))
 red('(d) control: one placement in two groups', False,
-    'a placement carries ONE u16, so two groups for one placement is unrepresentable; '
+    'a placement carries ONE id, so two groups for one placement is unrepresentable; '
     'the reader refuses the neighbouring break instead -- a non-dense id -- which '
     'lodgen_native_decode.py raises by name ("ids are dense per chunk from 0")')
 

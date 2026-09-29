@@ -1,5 +1,32 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Building groups: named landmarks are one group; occluder boxes stay inside their walls (lane IDENT2, 2026-09-29, branch ident2-20260929, not merged)
+
+- Far-LOD building groups: the pieces of a NAMED landmark are now always one group, however big. The list is
+  `res/lodgen_landmarks.txt` (Diamond City, the two Hub towers, Trinity Church), matched by LOD model path and,
+  for the Hub towers, a centre and radius. `--landmarks <file>` reads another list, `--landmarks none` none.
+  Everything else keeps the 32 u / 4,096 u contact rule; a row-house terrace stays one group.
+- Boston: Diamond City 15 groups -> 1, west Hub tower 4 -> 1, east tower and Trinity 1 (unchanged).
+  Diamond City crosses a map-chunk line, so in the file it carries one id in each of its two chunks.
+- The lodgen report prints one `native-landmark:` line per landmark (pieces, group, chunks).
+- Landmarks now cover their ground too (bungo: "not whole yet"): every piece standing inside a landmark's outline
+  (the outline drawn around its named pieces) joins it, whatever it is called, up to 512 u past the edge. Trees
+  and plants never join; a piece reaching farther out stays apart, and the report names each one. The west tower's
+  sign bands, base pieces and left-side wall now share its colour; so do the shacks and wall pieces inside
+  Diamond City. Boston: 283 more pieces joined, 3 refused (neighbouring blocks' distant models). Checked by a
+  pixel count on the identity colours: 0 pixels of another colour inside any of the four outlines (was 291,974).
+  Street coverage 0.570 -> 0.558.
+- One occluder box a building: the fit now checks the box exactly as the file stores it, treats a hit next to
+  a seam between pieces as a miss, and moves one face in when that clears a seam. Boston: 0 of 520 boxes stick
+  out of their building by more than 1 % (was 5 of 511); street coverage 0.560 -> 0.570.
+- One group id across the whole file (bungo circled Diamond City's violet strip): a group that crosses a map-chunk
+  line now keeps ONE id, so Diamond City is one group in the file, not one a chunk. The `.lodi` group table is
+  now 4 bytes a placement (it was 2, counted per chunk); the file says version 13. Older files still open: their
+  ids are renumbered across the file on load. Boston: 4,613 groups -> 4,527 (86 were counted once a side).
+- More than one occluder box for a landmark: a group wider than 4,096 u (Diamond City, the west Hub tower) is cut
+  into 4,096 u squares and each square gets its own box (13 boxes for the two). Street coverage 0.558 -> 0.588.
+- `--identity-join proximity --occluder-fit piece` still writes byte-identical files to main's.
+
 ## LOD map fixes merged: water, ground contact, tidy sheets, building groups, ground normals and sky, one-value tiles (lanes WATER1, GROUND1, TIDY1, IDENT1, TERR1, TILING5, FLAT2, GPU1; merged by MERGE1, 2026-09-29)
 
 bungo reviewed the 79 LOD map pictures on 09-26 and called most of them broken; lane AUDIT1 listed the faults, and

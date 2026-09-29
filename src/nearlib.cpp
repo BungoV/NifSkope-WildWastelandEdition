@@ -829,6 +829,11 @@ bool nearLibraryBake( const EsmWorld & world, const NearLibraryOptions & opts, Q
 	set.placementAo = true;     // 0xFF bytes: never cast (the v7 header block needs the v5/v6 blobs present)
 	set.vertexAo = true;
 	set.group = true;           // every placement its own group
+	/* IDENT2 (2026-09-29): v13's file-wide group word is NOT taken here. Every
+	 * group of the near library is one placement, so no chunk line can cut one
+	 * and a file-wide id would buy nothing; the library stays the v11 file its
+	 * own lane gates, byte for byte. */
+	set.groupPerChunk = true;
 	quint64 nDisabled = 0, nScrap = 0, nParts = 0, nAlpha = 0, nEmit = 0;
 	for ( const NearCand & c : cands ) {
 		if ( !c.reason.isEmpty() )

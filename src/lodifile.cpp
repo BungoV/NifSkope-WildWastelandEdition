@@ -665,24 +665,30 @@ bool lodiWrite( const QString & path, const LodiSrcSet & set, LodiHeader * heade
 		}
 	}
 	/* v7 (a): THE GROUP TABLE. The emitter hands in a GLOBAL groupKey an
-	 * instance; the writer turns those into ids DENSE PER CHUNK from 0, because
-	 * only the writer knows the sort and the chunk partition. A component that
-	 * straddles a chunk line therefore becomes two groups, one a side -- the
-	 * bake never sees such a house whole, and inventing a joint across the seam
-	 * would be a number with nothing behind it. */
-	std::vector<quint16> grp;
+	 * instance; the writer turns those into dense ids, because only the writer
+	 * knows the sort. v13 (default): ONE id space over the FILE, a u32 an
+	 * instance, dense from 0 in sorted order of first use -- a group cut by a
+	 * chunk line keeps one id (Diamond City was 85 and 30). The way back
+	 * (`groupPerChunk`, WW_LODI_GROUPS_PER_CHUNK=1) is v7..v12's table: a u16
+	 * dense PER CHUNK, a straddling group two ids, one a side. */
+	std::vector<quint8> grpBytes;       // the table exactly as written: u16 or u32 an instance
 	quint32 groupsTotal = 0, groupedPlacements = 0, largestGroup = 0, singletonGroups = 0;
 	if ( set.group ) {
 		if ( !set.vertexAo )
 			return fail( QStringLiteral( "group table without vertex AO: version 7 is a superset of version 6" ) );
-		grp.assign( n, 0 );
+		const bool perChunk = set.groupPerChunk;
+		std::vector<quint32> grp( n, 0 );
+		std::unordered_map<quint32, quint32> dense;     // v13: one map for the whole file
+		std::vector<quint32> members;
 		for ( size_t ci = 0; ci < chunks.size(); ci++ ) {
 			const LodiChunk & c = chunks[ci];
 			if ( c.instanceCount == 0 )
 				continue;
+			if ( perChunk ) {
+				dense.clear();
+				members.clear();
+			}
 			// key -> dense id, in the sorted order, so the ids are a function of the file
-			std::unordered_map<quint32, quint32> dense;
-			std::vector<quint32> members;
 			for ( quint32 i = 0; i < c.instanceCount; i++ ) {
 				const quint32 key = set.instances[order[c.instanceFirst + i]].groupKey;
 				quint32 id;
@@ -699,13 +705,25 @@ bool lodiWrite( const QString & path, const LodiSrcSet & set, LodiHeader * heade
 						id = it->second;
 					}
 				}
-				if ( id > 65535 )
-					return fail( QString( "chunk %1 needs %2 groups; the group word is a u16 and stops at 65,536" )
+				if ( perChunk && id > 65535 )
+					return fail( QString( "chunk %1 needs %2 groups; the per-chunk group word is a u16 and stops at 65,536" )
 						.arg( ci ).arg( quint64( id ) + 1 ) );
 				members[id]++;
-				grp[c.instanceFirst + i] = quint16( id );
+				grp[c.instanceFirst + i] = id;
 			}
-			groupsTotal += quint32( members.size() );
+			if ( perChunk ) {
+				groupsTotal += quint32( members.size() );
+				for ( quint32 m : members ) {
+					largestGroup = std::max( largestGroup, m );
+					if ( m == 1 )
+						singletonGroups++;
+					else
+						groupedPlacements += m;
+				}
+			}
+		}
+		if ( !perChunk ) {
+			groupsTotal = quint32( members.size() );
 			for ( quint32 m : members ) {
 				largestGroup = std::max( largestGroup, m );
 				if ( m == 1 )
@@ -713,6 +731,17 @@ bool lodiWrite( const QString & path, const LodiSrcSet & set, LodiHeader * heade
 				else
 					groupedPlacements += m;
 			}
+		}
+		if ( perChunk ) {
+			grpBytes.resize( n * sizeof( quint16 ) );
+			for ( size_t i = 0; i < n; i++ ) {
+				const quint16 g = quint16( grp[i] );
+				std::memcpy( &grpBytes[i * 2], &g, 2 );
+			}
+		} else {
+			grpBytes.resize( n * sizeof( quint32 ) );
+			if ( n )
+				std::memcpy( grpBytes.data(), grp.data(), n * sizeof( quint32 ) );
 		}
 	}
 	/* v7 (b): THE VERTEX-SKY STREAM, s4.8's layout byte for byte. */
@@ -877,6 +906,15 @@ bool lodiWrite( const QString & path, const LodiSrcSet & set, LodiHeader * heade
 		h.version = LODI_VERSION_VERTEX_GROUND;
 		h.vertexGroundBytes = quint32( vgnd.size() );
 	}
+	/* v13, THE FILE-WIDE GROUP WORD (lane IDENT2, 2026-09-29). Decided after
+	 * v12, so nothing above lowers it; it keeps bits 6-8 and the ground stream
+	 * (optional in v13). The group table needs the vertex-AO stream, hence the
+	 * v7 block, so there is nothing to refuse here. `groupPerChunk` leaves the
+	 * version to the rules above: the v7..v12 file, byte for byte. */
+	if ( set.group && !set.groupPerChunk ) {
+		h.version = LODI_VERSION_GROUP_FILE;
+		h.groupStride = LODI_GROUP_STRIDE_FILE;
+	}
 	const quint32 headerBytes = lodiHeaderBytes( h.version );
 	QByteArray file;
 	file.resize( qsizetype( headerBytes ) );
@@ -910,8 +948,8 @@ bool lodiWrite( const QString & path, const LodiSrcSet & set, LodiHeader * heade
 	if ( !vao.empty() )
 		h.offVertexAo = payload( vao.data(), quint64( vao.size() ) );
 	// v7: the group table then the sky stream, after everything, so nothing moves
-	if ( !grp.empty() )
-		h.offGroup = payload( grp.data(), quint64( grp.size() ) * sizeof( quint16 ) );
+	if ( !grpBytes.empty() )
+		h.offGroup = payload( grpBytes.data(), quint64( grpBytes.size() ) );
 	if ( !vsky.empty() )
 		h.offVertexSky = payload( vsky.data(), quint64( vsky.size() ) );
 	// v12: the ground stream after everything, so nothing moves
@@ -935,7 +973,7 @@ bool lodiWrite( const QString & path, const LodiSrcSet & set, LodiHeader * heade
 	h.indexCrc32 = lodvCrc32( reinterpret_cast<const unsigned char *>( vao.data() ), qsizetype( vao.size() ), h.indexCrc32 );
 	/* v7: the group table then the sky stream join last, in that order. Both
 	 * absent, zero bytes fold in and a v3..v6 file's CRC does not move. */
-	h.indexCrc32 = lodvCrc32( reinterpret_cast<const unsigned char *>( grp.data() ), qsizetype( grp.size() * sizeof( quint16 ) ), h.indexCrc32 );
+	h.indexCrc32 = lodvCrc32( reinterpret_cast<const unsigned char *>( grpBytes.data() ), qsizetype( grpBytes.size() ), h.indexCrc32 );
 	h.indexCrc32 = lodvCrc32( reinterpret_cast<const unsigned char *>( vsky.data() ), qsizetype( vsky.size() ), h.indexCrc32 );
 	// v12: the ground stream joins after the sky stream; absent, zero bytes fold in
 	h.indexCrc32 = lodvCrc32( reinterpret_cast<const unsigned char *>( vgnd.data() ), qsizetype( vgnd.size() ), h.indexCrc32 );
@@ -991,7 +1029,7 @@ bool lodiWrite( const QString & path, const LodiSrcSet & set, LodiHeader * heade
 		putLE<quint64>( file, H_OFF_VAO, h.offVertexAo );
 		putLE<quint32>( file, H_VAOBYTES, h.vertexAoBytes );
 	}
-	if ( !grp.empty() ) {
+	if ( !grpBytes.empty() ) {
 		putLE<quint64>( file, H_OFF_GROUP, h.offGroup );
 		putLE<quint32>( file, H_GROUPCOUNT, h.groupCount );
 		putLE<quint16>( file, H_GROUPSTRIDE, h.groupStride );
@@ -1096,9 +1134,10 @@ bool lodiRead( const QString & path, LodiHeader * header, LodiTable * table,
 		&& h.version != LODI_VERSION_PLACEMENT_AO && h.version != LODI_VERSION_VERTEX_AO
 		&& h.version != LODI_VERSION_GROUP_SKY && h.version != LODI_VERSION_HORIZON
 		&& h.version != LODI_VERSION_SCRAPPABLE && h.version != LODI_VERSION_WIDE_SCALE
-		&& h.version != LODI_VERSION_INITIALLY_DISABLED && h.version != LODI_VERSION_VERTEX_GROUND )
+		&& h.version != LODI_VERSION_INITIALLY_DISABLED && h.version != LODI_VERSION_VERTEX_GROUND
+		&& h.version != LODI_VERSION_GROUP_FILE )
 		return refuse( QString( "version %1; this reader knows %2 to %3" )
-			.arg( h.version ).arg( LODI_VERSION ).arg( LODI_VERSION_VERTEX_GROUND ) );
+			.arg( h.version ).arg( LODI_VERSION ).arg( LODI_VERSION_GROUP_FILE ) );
 	/* v7's header BLOCK is 512 bytes. On every older version this is still 256
 	 * and the crc window below is the one it always was. */
 	const quint32 headerBytes = lodiHeaderBytes( h.version );
@@ -1171,8 +1210,10 @@ bool lodiRead( const QString & path, LodiHeader * header, LodiTable * table,
 	 * carries the stream (lane HORIZONOUT, 2026-09-19). v9 is the v7 layout plus
 	 * the scrappable flag bit and carries no stream, so it is v7-shaped here. */
 	const bool v8 = ( h.version == LODI_VERSION_HORIZON );
+	// v13 = the v12 layout with the group word a file-wide u32; its ground stream is OPTIONAL
+	const bool v13 = ( h.version == LODI_VERSION_GROUP_FILE );
 	// v12 = the v11 layout + the ground-contact stream at 0x130 (NOT a superset of the retired v8)
-	const bool v12 = ( h.version == LODI_VERSION_VERTEX_GROUND );
+	const bool v12 = ( h.version == LODI_VERSION_VERTEX_GROUND ) || v13;
 	const bool v7 = ( h.version == LODI_VERSION_GROUP_SKY ) || v8
 		|| ( h.version == LODI_VERSION_SCRAPPABLE ) || ( h.version == LODI_VERSION_WIDE_SCALE )
 		|| ( h.version == LODI_VERSION_INITIALLY_DISABLED ) || v12;
@@ -1217,10 +1258,15 @@ bool lodiRead( const QString & path, LodiHeader * header, LodiTable * table,
 				return refuse( QStringLiteral( "version 7 carrying neither a group table (header 0x100) nor a "
 					"vertex-sky stream (header 0x110). Version 7 IS one of the two; a bake with neither is "
 					"written at version 6, which is what makes the way back byte-identical" ) );
+			if ( v13 && h.offGroup == 0 )
+				return refuse( QStringLiteral( "version 13 with no group table (header 0x100 is 0). The file-wide "
+					"group word is what version 13 IS: a bake without a group table is written at 7 to 12" ) );
 			if ( h.offGroup ) {
-				if ( h.groupStride != LODI_GROUP_STRIDE )
-					return refuse( QString( "groupStride %1; this reader knows %2" )
-						.arg( h.groupStride ).arg( LODI_GROUP_STRIDE ) );
+				const quint16 want = v13 ? LODI_GROUP_STRIDE_FILE : LODI_GROUP_STRIDE;
+				if ( h.groupStride != want )
+					return refuse( QString( "groupStride %1 in a version-%2 file; this reader knows %3 there "
+						"(2 = u16 per chunk, versions 7 to 12; 4 = u32 over the file, version 13)" )
+						.arg( h.groupStride ).arg( h.version ).arg( want ) );
 				if ( h.groupCount == 0 && h.instanceCount != 0 )
 					return refuse( QStringLiteral( "a group table is present but groupCount is 0; every placement "
 						"is in some group, if only its own" ) );
@@ -1277,10 +1323,15 @@ bool lodiRead( const QString & path, LodiHeader * header, LodiTable * table,
 				 * stream's vertex population, so a v12 file without one is refused. */
 				h.offVertexGround = getLE<quint64>( p + H_OFF_VGND );
 				h.vertexGroundBytes = getLE<quint32>( p + H_VGNDBYTES );
-				if ( h.offVertexGround == 0 )
+				if ( v13 && h.offVertexGround == 0 ) {
+					// v13: the stream is optional; absent means both words zero
+					if ( h.vertexGroundBytes != 0 )
+						return refuse( QString( "no vertex-ground stream (header 0x130 is 0) but vertexGroundBytes is %1" )
+							.arg( h.vertexGroundBytes ) );
+				} else if ( h.offVertexGround == 0 )
 					return refuse( QStringLiteral( "version 12 with no vertex-ground stream (header 0x130 is 0). "
 						"The stream is what version 12 IS: a bake without it is written at version 7, 9, 10 or 11" ) );
-				if ( h.vertexGroundBytes < 4ull * ( quint64( h.instanceCount ) + 1 ) )
+				if ( h.offVertexGround && h.vertexGroundBytes < 4ull * ( quint64( h.instanceCount ) + 1 ) )
 					return refuse( QString( "vertex-ground stream of %1 bytes cannot hold its own %2 offset words" )
 						.arg( h.vertexGroundBytes ).arg( quint64( h.instanceCount ) + 1 ) );
 			} else if ( getLE<quint64>( p + H_OFF_VGND ) != 0 || getLE<quint32>( p + H_VGNDBYTES ) != 0 ) {
@@ -1414,7 +1465,7 @@ bool lodiRead( const QString & path, LodiHeader * header, LodiTable * table,
 	// v7: the group table then the sky stream, in the order the writer laid them
 	if ( v7 && h.offGroup ) {
 		iGrp = int( tabs.size() );
-		tabs.push_back( { "group table", h.offGroup, quint64( h.instanceCount ) * sizeof( quint16 ) } );
+		tabs.push_back( { "group table", h.offGroup, quint64( h.instanceCount ) * ( v13 ? 4u : 2u ) } );
 	}
 	if ( v7 && h.offVertexSky ) {
 		iVsky = int( tabs.size() );
@@ -1525,38 +1576,65 @@ bool lodiRead( const QString & path, LodiHeader * header, LodiTable * table,
 		if ( dataBytes ) std::memcpy( T.vertexAo.data(), vb + 4 * nOff, size_t( dataBytes ) );
 	}
 	if ( iGrp >= 0 ) {
-		T.group.resize( h.instanceCount );
-		if ( h.instanceCount ) std::memcpy( T.group.data(), p + h.offGroup, tabs[iGrp].bytes );
-		/* THE DENSE RULE, and it is checked whether or not `payloadCheck` is on,
-		 * because a group id out of its chunk's range is not a slow consistency
-		 * question -- it is a value a viewer would hash into a colour. A chunk
-		 * holding C groups uses exactly {0 .. C-1} and uses every one of them. */
-		quint64 sum = 0;
-		for ( size_t ci = 0; ci < T.chunks.size(); ci++ ) {
-			const LodiChunk & c = T.chunks[ci];
-			if ( c.instanceCount == 0 )
-				continue;
-			if ( quint64( c.instanceFirst ) + c.instanceCount > h.instanceCount )
-				continue;   // the chunk walk below reports this one properly
-			std::vector<bool> used( c.instanceCount, false );
-			quint32 hi = 0;
-			for ( quint32 i = 0; i < c.instanceCount; i++ ) {
-				const quint16 g = T.group[c.instanceFirst + i];
-				if ( g >= c.instanceCount )
-					return refuse( QString( "group id %1 at instance %2 is past chunk %3's %4 placements; ids are "
-						"dense per chunk from 0" ).arg( g ).arg( c.instanceFirst + i ).arg( ci ).arg( c.instanceCount ) );
+		T.group.assign( h.instanceCount, 0 );
+		const unsigned char * gp = p + h.offGroup;
+		if ( v13 ) {
+			/* v13: ONE id space over the file. THE DENSE RULE, file-wide, and it
+			 * is checked whether or not `payloadCheck` is on, because an id out of
+			 * range is a value a viewer would hash into a colour: a file holding
+			 * G groups uses exactly {0 .. G-1}, every one, and G is groupCount. */
+			if ( h.instanceCount ) std::memcpy( T.group.data(), gp, size_t( h.instanceCount ) * 4 );
+			if ( h.groupCount > h.instanceCount )
+				return refuse( QString( "groupCount %1 is past the file's %2 placements" ).arg( h.groupCount ).arg( h.instanceCount ) );
+			std::vector<bool> used( h.groupCount, false );
+			for ( quint32 i = 0; i < h.instanceCount; i++ ) {
+				const quint32 g = T.group[i];
+				if ( g >= h.groupCount )
+					return refuse( QString( "group id %1 at instance %2 is at or past groupCount %3; ids are dense "
+						"over the file from 0" ).arg( g ).arg( i ).arg( h.groupCount ) );
 				used[g] = true;
-				hi = std::max( hi, quint32( g ) );
 			}
-			for ( quint32 g = 0; g <= hi; g++ )
+			for ( quint32 g = 0; g < h.groupCount; g++ )
 				if ( !used[g] )
-					return refuse( QString( "chunk %1 uses group ids up to %2 but never uses %3; ids are dense "
-						"per chunk from 0" ).arg( ci ).arg( hi ).arg( g ) );
-			sum += quint64( hi ) + 1;
+					return refuse( QString( "groupCount %1 but id %2 is never used; ids are dense over the file from 0" )
+						.arg( h.groupCount ).arg( g ) );
+		} else {
+			/* v7..v12: a u16 dense PER CHUNK. THE DENSE RULE per chunk as it
+			 * always was; then each chunk's ids are offset by the groups of the
+			 * chunks before it, so the table in memory is file-wide for every
+			 * version and no consumer has to know the chunk (a group cut by a
+			 * chunk line in such a file stays two ids -- the file says so). */
+			std::vector<quint16> g16( h.instanceCount );
+			if ( h.instanceCount ) std::memcpy( g16.data(), gp, size_t( h.instanceCount ) * 2 );
+			quint64 sum = 0;
+			for ( size_t ci = 0; ci < T.chunks.size(); ci++ ) {
+				const LodiChunk & c = T.chunks[ci];
+				if ( c.instanceCount == 0 )
+					continue;
+				if ( quint64( c.instanceFirst ) + c.instanceCount > h.instanceCount )
+					continue;   // the chunk walk below reports this one properly
+				std::vector<bool> used( c.instanceCount, false );
+				quint32 hi = 0;
+				for ( quint32 i = 0; i < c.instanceCount; i++ ) {
+					const quint16 g = g16[c.instanceFirst + i];
+					if ( g >= c.instanceCount )
+						return refuse( QString( "group id %1 at instance %2 is past chunk %3's %4 placements; ids are "
+							"dense per chunk from 0" ).arg( g ).arg( c.instanceFirst + i ).arg( ci ).arg( c.instanceCount ) );
+					used[g] = true;
+					hi = std::max( hi, quint32( g ) );
+				}
+				for ( quint32 g = 0; g <= hi; g++ )
+					if ( !used[g] )
+						return refuse( QString( "chunk %1 uses group ids up to %2 but never uses %3; ids are dense "
+							"per chunk from 0" ).arg( ci ).arg( hi ).arg( g ) );
+				for ( quint32 i = 0; i < c.instanceCount; i++ )
+					T.group[c.instanceFirst + i] = quint32( sum ) + g16[c.instanceFirst + i];
+				sum += quint64( hi ) + 1;
+			}
+			if ( sum != quint64( h.groupCount ) )
+				return refuse( QString( "groupCount %1 but the chunks' group counts sum to %2" )
+					.arg( h.groupCount ).arg( sum ) );
 		}
-		if ( sum != quint64( h.groupCount ) )
-			return refuse( QString( "groupCount %1 but the chunks' group counts sum to %2" )
-				.arg( h.groupCount ).arg( sum ) );
 	}
 	if ( iVsky >= 0 ) {
 		/* v7: the same three offset rules s4.8 states for the AO stream, asked
@@ -2083,23 +2161,21 @@ QStringList lodiDescribe( const LodiHeader & h, const LodiTable * table )
 		 * and holds another shows as a disagreement rather than as silence. */
 		if ( !table->group.empty() ) {
 			quint32 grouped = 0, largest = 0, singletons = 0;
-			for ( const LodiChunk & c : table->chunks ) {
-				if ( c.instanceCount == 0 || quint64( c.instanceFirst ) + c.instanceCount > table->group.size() )
+			// the table in memory is file-wide for every version (the reader offsets v7..v12's per-chunk ids)
+			std::vector<quint32> members;
+			for ( quint32 g : table->group ) {
+				if ( g >= members.size() )
+					members.resize( size_t( g ) + 1, 0 );
+				members[g]++;
+			}
+			for ( quint32 m : members ) {
+				if ( m == 0 )
 					continue;
-				std::vector<quint32> members;
-				for ( quint32 i = 0; i < c.instanceCount; i++ ) {
-					const quint16 g = table->group[c.instanceFirst + i];
-					if ( g >= members.size() )
-						members.resize( size_t( g ) + 1, 0 );
-					members[g]++;
-				}
-				for ( quint32 m : members ) {
-					largest = std::max( largest, m );
-					if ( m == 1 )
-						singletons++;
-					else
-						grouped += m;
-				}
+				largest = std::max( largest, m );
+				if ( m == 1 )
+					singletons++;
+				else
+					grouped += m;
 			}
 			out << QString( "groups %1" ).arg( h.groupCount )
 				<< QString( "groupedPlacements %1" ).arg( grouped )

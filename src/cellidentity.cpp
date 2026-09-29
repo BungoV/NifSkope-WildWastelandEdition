@@ -74,21 +74,13 @@ bool cellIdentityLoad( const QString & lodiPath, QHash<quint32, CellIdentity> & 
 		if ( last > quint64( t.instances.size() ) )
 			return fail( QString( "chunk %1 names instances %2..%3 and the blob holds %4" )
 				.arg( ci ).arg( first ).arg( last ).arg( t.instances.size() ) );
-		/* THE GROUP ID CANNOT OVERFLOW ITS HALF OF THE KEY, and that is a fact
-		 * about the FORMAT rather than a thing to test: `LodiTable::group` is a
-		 * `quint16` per instance (src/lodifile.h), so the low 16 bits of the key
-		 * always hold it exactly. A refusal here would be dead code -- the
-		 * compiler says so (-Wtype-limits) -- so the statement is written down
-		 * instead of measured, and the CHUNK index, which is a size_t and could
-		 * overflow, is the one that is actually checked. */
-		static_assert( sizeof( t.group[0] ) == 2, "a .lodi group id is 16 bits" );
-		if ( ci > 0xFFFFu )
-			return fail( QString( "chunk index %1 does not fit the 16 bits the file-wide "
-				"key reserves for it (LODI_MAX_CHUNKS is %2)" ).arg( ci ).arg( LODI_MAX_CHUNKS ) );
-
+		/* THE GROUP ID IS FILE-WIDE (lane IDENT2, 2026-09-29): `LodiTable::group`
+		 * is a u32 over the whole file for every version -- a v13 file writes it
+		 * so, and the reader offsets a v7..v12 file's per-chunk ids -- so the id
+		 * is the key as it stands and a group cut by a chunk line is one key. */
 		for ( quint64 i = first; i < last; i++ ) {
 			const size_t s = size_t( i );
-			const quint32 key = ( quint32( ci ) << 16 ) | quint32( t.group[s] );
+			const quint32 key = t.group[s];
 			groupSize[key]++;
 			const quint32 form = t.cold[s].refFormId;
 			if ( !form )

@@ -1,0 +1,4 @@
+diamond_city   | architecture/diamondcity/ | -12500 -25700 7000
+hub_tower_east | architecture/buildings/hightech/hitext;neighborhoods/backbay/backbay_ttowerbld01;neighborhoods/backbay/structure/backbay_ttowerbld01 | 3625 -24292 2500
+hub_tower_west | architecture/buildings/hightech/hitext;neighborhoods/backbay/backbay_prudentialbld01;neighborhoods/backbay/structure/backbay_prudentialbld01;neighborhoods/backbay/backbay17_bld01;neighborhoods/backbay/structure/baybay17_bld01 | -2271 -30152 2500
+trinity_church | architecture/unique/trinitychurch/ |

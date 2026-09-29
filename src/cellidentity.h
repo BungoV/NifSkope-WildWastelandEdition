@@ -25,14 +25,12 @@ BSD License - see nifskope.h
  *
  *      refFormId  ->  { group id, how many placements share it, is it a tree }
  *
- * WHY THE GROUP ID IS NOT `table.group[i]`.  The group ids are dense per CHUNK,
- * so chunk (0,0) and chunk (1,0) both have a group 0 and they are different
- * objects.  A file-wide id is therefore `(chunkIndex << 16) | group`, and
- * `LODI_MAX_CHUNKS` is 65,536 while a chunk's group count cannot exceed its
- * instance count, so the pair fits a u32 exactly as long as no chunk holds more
- * than 65,536 groups -- which the writer already refuses (LODI_BASE_MAX and the
- * per-chunk density rule).  `cellIdentityLoad` CHECKS that rather than assuming
- * it, and refuses by name if a chunk ever breaks it.
+ * THE GROUP ID IS `table.group[i]`, AS IT STANDS.  Before `.lodi` v13 the ids
+ * were dense per CHUNK and this index keyed on `(chunkIndex << 16) | group`;
+ * since lane IDENT2 (2026-09-29) the reader hands every version's table over
+ * as FILE-WIDE u32 ids (v13 writes them so; a v7..v12 file's per-chunk ids are
+ * offset chunk by chunk), so the id is the key and a group cut by a chunk line
+ * in a v13 file is one key.
  *
  * WHY A REFR CAN HAVE SEVERAL INSTANCES.  A SCOL part is its own `.lodi`
  * instance with the collection's refFormId and its own `scolPart`, so a single

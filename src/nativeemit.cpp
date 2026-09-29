@@ -17,6 +17,7 @@ BSD License - see nifskope.h
 #include <atomic>
 #include <limits>
 
+#include <QCryptographicHash>
 #include <QDir>
 #include <QElapsedTimer>
 #include <QMutex>
@@ -551,19 +552,40 @@ double triTriDist2( const float * A, const float * B )
  *      ray along every named direction meets a triangle. Over half a percent
  *      outside, every face comes in by half a voxel and the box is probed
  *      again, BLD_OCC_PROBE_ROUNDS times; still out, the box is refused.
+ *   6. SEAMS AND THE FILE'S ROUNDING (IDENT2, 2026-09-29): 5 of 511 boxes
+ *      still poked out by more than 1 percent in the FILE, though the probe
+ *      passed them here. The file rounds each placement (0.25 u steps on X/Y)
+ *      and the box, and that opens hairline gaps where two pieces meet; with a
+ *      symmetric box the lattice's middle plane sits exactly on the seam of
+ *      stacked pieces, and every ray along it slips through. So the probe now
+ *      (a) counts a hit within BLD_OCC_SEAM_U of an OPEN triangle edge (an edge
+ *      no other triangle OF THE SAME PLACEMENT shares -- two stacked pieces
+ *      often share the seam's exact end points, and the file's rounding still
+ *      parts them) as a miss, and (b) probes TWO lattices, both of which must
+ *      pass: the box exactly as the file will store it (every half-extent
+ *      x 0.999, lodifile.cpp) -- the gate's own points -- and the box grown by
+ *      BLD_OCC_SEAM_U on every face (a face lying on a wall is out). A grown
+ *      lattice alone is NOT enough: its points are other points, and it passed
+ *      a box whose top slab stood 0.5 u above three of its walls.
+ *      When every symmetric shrink still fails, ONE face of the box comes in by
+ *      a quarter, then a half voxel (it moves the lattice off the seam), from
+ *      each shrink round in turn; the first that passes is kept and counted
+ *      NUDGED; none passes, the box is refused.
  * A building whose walls do not close gets nothing: its solid is a shell one
  * voxel thick, and the shave removes it. */
 enum BuildingOccResult { BLD_OCC_OK = 0, BLD_OCC_NO_SOLID, BLD_OCC_TOO_THIN, BLD_OCC_PROBE_FAILED };
 static const int BLD_OCC_PROBE_GRID = 9;                // the gate's lattice, 729 points
 static const double BLD_OCC_PROBE_MAX_OUT = 0.005;      // half the gate's 1 percent: room for the file's quantisation
 static const int BLD_OCC_PROBE_ROUNDS = 4;
+static const double BLD_OCC_SEAM_U = 0.5;               // IDENT2: twice the file's 0.25 u X/Y step
 
 /*! The share of the box [lo, hi] (the fit's own frame) whose lattice points
  *  are NOT enclosed by the triangles `f` along every direction in needMask
  *  (bit 2 axis = +axis, bit 2 axis + 1 = -axis). The lattice's points share
  *  columns along each axis, so one pass over the triangles per column gives
  *  the nearest surface on both sides of every point in it. */
-static double bldProbeOutside( const std::vector<double> & f, size_t nt, const double lo[3], const double hi[3], int needMask )
+static double bldProbeLattice( const std::vector<double> & f, size_t nt, const double lo[3], const double hi[3], int needMask,
+	const std::vector<unsigned char> & openEdges )
 {
 	const int G = BLD_OCC_PROBE_GRID;
 	auto lat = [&]( int k, int i ) { return lo[k] + ( hi[k] - lo[k] ) * double( i ) / double( G - 1 ); };
@@ -596,6 +618,16 @@ static double bldProbeOutside( const std::vector<double> & f, size_t nt, const d
 					const double w3 = 1.0 - w1 - w2;
 					if ( w1 < 0.0 || w2 < 0.0 || w3 < 0.0 )
 						continue;
+					// IDENT2: a hit within BLD_OCC_SEAM_U of an open edge is a miss (the file's rounding opens the seam);
+					// edge 0 = AB (weight w3 = C's), 1 = BC (w1 = A's), 2 = CA (w2 = B's); distance = w * |d| / |edge|
+					if ( const unsigned char oe = openEdges[t] ) {
+						auto len2d = [&]( const double * P, const double * Q ) { return std::hypot( Q[o1] - P[o1], Q[o2] - P[o2] ); };
+						const double ad = std::fabs( d );
+						if ( ( ( oe & 1 ) && w3 * ad < BLD_OCC_SEAM_U * len2d( A, B ) )
+							|| ( ( oe & 2 ) && w1 * ad < BLD_OCC_SEAM_U * len2d( B, C ) )
+							|| ( ( oe & 4 ) && w2 * ad < BLD_OCC_SEAM_U * len2d( C, A ) ) )
+							continue;
+					}
 					const double tv = w1 * A[ax] + w2 * B[ax] + w3 * C[ax];
 					tMin = std::min( tMin, tv );
 					tMax = std::max( tMax, tv );
@@ -615,8 +647,27 @@ static double bldProbeOutside( const std::vector<double> & f, size_t nt, const d
 	return double( out ) / double( ok.size() );
 }
 
+/*! IDENT2: the larger out-share of the two lattices -- the box as the file
+ *  stores it (half-extents x 0.999 about the same centre) and the box grown
+ *  by BLD_OCC_SEAM_U a face. */
+static double bldProbeOutside( const std::vector<double> & f, size_t nt, const double lo[3], const double hi[3], int needMask,
+	const std::vector<unsigned char> & openEdges )
+{
+	double fl[3], fh[3], gl[3], gh[3];
+	for ( int k = 0; k < 3; k++ ) {
+		const double c = 0.5 * ( lo[k] + hi[k] ), h = 0.5 * ( hi[k] - lo[k] );
+		fl[k] = c - 0.999 * h; fh[k] = c + 0.999 * h;
+		gl[k] = lo[k] - BLD_OCC_SEAM_U; gh[k] = hi[k] + BLD_OCC_SEAM_U;
+	}
+	const double a = bldProbeLattice( f, nt, fl, fh, needMask, openEdges );
+	if ( a > BLD_OCC_PROBE_MAX_OUT )
+		return a;
+	return std::max( a, bldProbeLattice( f, nt, gl, gh, needMask, openEdges ) );
+}
+
 int fitBuildingBox( const std::vector<float> & tris, double yaw, const QByteArray & rays,
-	float centre[3], float half[3], float rot[9], int * shrinkRounds = nullptr )
+	float centre[3], float half[3], float rot[9], int * shrinkRounds = nullptr, int * nudged = nullptr,
+	const std::vector<quint32> * triPiece = nullptr )
 {
 	if ( tris.size() < 9 )
 		return BLD_OCC_NO_SOLID;
@@ -751,18 +802,78 @@ int fitBuildingBox( const std::vector<float> & tris, double yaw, const QByteArra
 		if ( !( hi[k] > lo[k] ) )
 			return BLD_OCC_TOO_THIN;
 	}
-	// 5. the probe against the triangles; shrink by half a voxel a face, or refuse
+	// 6 (IDENT2). open edges: an edge (the placement it belongs to + its two end points, exactly) that no other
+	// triangle OF THAT PLACEMENT uses; a seam two pieces share is open in each of them
+	std::vector<unsigned char> openEdges( nt, 0 );
 	{
+		auto less3 = []( const float * p, const float * q ) {
+			return p[0] != q[0] ? p[0] < q[0] : p[1] != q[1] ? p[1] < q[1] : p[2] < q[2]; };
+		std::vector<std::pair<std::array<float, 7>, quint32>> ed;      // ((piece, P, Q), tri * 4 + edge)
+		ed.reserve( nt * 3 );
+		for ( size_t t = 0; t < nt; t++ )
+			for ( int e = 0; e < 3; e++ ) {
+				const float * P = &tris[t * 9 + e * 3], * Q = &tris[t * 9 + ( ( e + 1 ) % 3 ) * 3];
+				if ( less3( Q, P ) )
+					std::swap( P, Q );
+				const float pc = ( triPiece && t < triPiece->size() ) ? float( ( *triPiece )[t] ) : 0.0f;
+				ed.push_back( { { { pc, P[0], P[1], P[2], Q[0], Q[1], Q[2] } }, quint32( t * 4 + e ) } );
+			}
+		std::sort( ed.begin(), ed.end(), []( const std::pair<std::array<float, 7>, quint32> & x,
+			const std::pair<std::array<float, 7>, quint32> & y ) { return x.first < y.first; } );
+		for ( size_t i = 0; i < ed.size(); ) {
+			size_t j = i + 1;
+			while ( j < ed.size() && ed[j].first == ed[i].first )
+				j++;
+			if ( j - i == 1 )
+				openEdges[ed[i].second / 4] |= (unsigned char)( 1u << ( ed[i].second % 4 ) );
+			i = j;
+		}
+	}
+	// 5. the probe against the triangles; shrink by half a voxel a face; then (IDENT2) one face in; or refuse
+	{
+		std::vector<std::array<double, 6>> rounds;     // the box at every symmetric round
 		int round = 0;
-		while ( bldProbeOutside( f, nt, lo, hi, needMask ) > BLD_OCC_PROBE_MAX_OUT ) {
+		bool pass = false;
+		for ( ;; ) {
+			rounds.push_back( { { lo[0], lo[1], lo[2], hi[0], hi[1], hi[2] } } );
+			if ( bldProbeOutside( f, nt, lo, hi, needMask, openEdges ) <= BLD_OCC_PROBE_MAX_OUT ) { pass = true; break; }
 			if ( ++round > BLD_OCC_PROBE_ROUNDS )
-				return BLD_OCC_PROBE_FAILED;
+				break;
 			for ( int k = 0; k < 3; k++ )
 				if ( hi[k] - lo[k] - vs >= 16.0 ) {     // never thinner than the voxel floor
 					lo[k] += 0.5 * vs;
 					hi[k] -= 0.5 * vs;
 				}
 		}
+		if ( !pass ) {
+			// one face in by a quarter, then a half voxel, from the largest box first; z (the stacking axis) first
+			static const int axOrder[3] = { 2, 0, 1 };
+			static const double fracs[2] = { 0.25, 0.5 };
+			for ( size_t r = 0; r < rounds.size() && !pass; r++ )
+				for ( int fi = 0; fi < 2 && !pass; fi++ )
+					for ( int ai = 0; ai < 3 && !pass; ai++ )
+						for ( int side = 0; side < 2 && !pass; side++ ) {
+							const int k = axOrder[ai];
+							const double step = fracs[fi] * vs;
+							double l2[3] = { rounds[r][0], rounds[r][1], rounds[r][2] };
+							double h2[3] = { rounds[r][3], rounds[r][4], rounds[r][5] };
+							if ( h2[k] - l2[k] - step < 16.0 )
+								continue;
+							if ( side )
+								h2[k] -= step;
+							else
+								l2[k] += step;
+							if ( bldProbeOutside( f, nt, l2, h2, needMask, openEdges ) <= BLD_OCC_PROBE_MAX_OUT ) {
+								pass = true;
+								round = int( r );
+								for ( int q = 0; q < 3; q++ ) { lo[q] = l2[q]; hi[q] = h2[q]; }
+								if ( nudged )
+									*nudged = 1;
+							}
+						}
+		}
+		if ( !pass )
+			return BLD_OCC_PROBE_FAILED;
 		if ( shrinkRounds )
 			*shrinkRounds = round;
 	}
@@ -1904,6 +2015,122 @@ struct GroupKnobs
 //! The one instance. Every knob turned here, nowhere else.
 static const GroupKnobs KNOB;
 
+/* ---- IDENT2 (2026-09-29): THE NAMED LANDMARKS. bungo's ruling during MERGE1
+ * (HANDOFF top block, item 1): Diamond City -> "Landmark rule". The contact
+ * join's cap (4,096 u) is right for the city blocks -- without it a street of
+ * touching houses is one building -- and wrong for a building wider than the
+ * cap: Diamond City (about 9,000 x 10,100 u) came out in 15 groups. A LANDMARK
+ * is a named list of model-path prefixes (and optionally a centre and radius);
+ * every eligible placement it matches is joined into ONE group before any
+ * contact pair is looked at, with no cap, the way SCOL parts are. The list is
+ * data (res/lodgen_landmarks.txt, built into the exe), not code. */
+namespace {
+struct LandmarkRule
+{
+	QString name;
+	QStringList prefixes;       //!< normalised: lower case, '/', no leading "meshes/" or "lod/"
+	bool hasCentre = false;
+	double cx = 0.0, cy = 0.0, radius = 0.0;
+};
+//! "" = the list built into the exe; "none" = no landmarks; anything else = that file
+QString & landmarkFileOpt()
+{
+	static QString f;
+	return f;
+}
+QString landmarkNormalisePath( QString p )
+{
+	p = p.trimmed().toLower();
+	p.replace( QChar( '\\' ), QChar( '/' ) );
+	while ( p.startsWith( QChar( '/' ) ) )
+		p.remove( 0, 1 );
+	if ( p.startsWith( QLatin1String( "meshes/" ) ) )
+		p.remove( 0, 7 );
+	if ( p.startsWith( QLatin1String( "lod/" ) ) )
+		p.remove( 0, 4 );
+	return p;
+}
+/*! Reads the list. `source` names where it came from, `digest` is the SHA-1
+ *  of the normalised RULE lines only (so a comment edit moves nothing), and
+ *  every line that is not a rule is named in `problems`. */
+bool landmarkLoad( std::vector<LandmarkRule> & out, QString * source, QString * digest, QStringList * problems )
+{
+	out.clear();
+	const QString opt = landmarkFileOpt();
+	if ( opt.compare( QLatin1String( "none" ), Qt::CaseInsensitive ) == 0 ) {
+		if ( source ) *source = QStringLiteral( "none (--landmarks none)" );
+		if ( digest ) *digest = QStringLiteral( "none" );
+		return true;
+	}
+	const QString path = opt.isEmpty() ? QStringLiteral( ":/lodgen/landmarks.txt" ) : opt;
+	if ( source ) *source = opt.isEmpty() ? QStringLiteral( "built in (:/lodgen/landmarks.txt)" ) : opt;
+	QFile f( path );
+	if ( !f.open( QIODevice::ReadOnly | QIODevice::Text ) ) {
+		if ( problems ) problems->append( QStringLiteral( "cannot open %1" ).arg( path ) );
+		if ( digest ) *digest = QStringLiteral( "unreadable" );
+		return false;
+	}
+	QByteArray canon;
+	int lineNo = 0;
+	while ( !f.atEnd() ) {
+		const QString line = QString::fromUtf8( f.readLine() ).trimmed();
+		lineNo++;
+		if ( line.isEmpty() || line.startsWith( QChar( '#' ) ) )
+			continue;
+		const QStringList fl = line.split( QChar( '|' ) );
+		LandmarkRule r;
+		r.name = fl.value( 0 ).trimmed();
+		for ( const QString & p : fl.value( 1 ).split( QChar( ';' ), Qt::SkipEmptyParts ) ) {
+			const QString n = landmarkNormalisePath( p );
+			if ( !n.isEmpty() )
+				r.prefixes.append( n );
+		}
+		const QStringList c = fl.value( 2 ).simplified().split( QChar( ' ' ), Qt::SkipEmptyParts );
+		bool ok = ( fl.size() >= 2 && fl.size() <= 3 && !r.name.isEmpty() && !r.prefixes.isEmpty() );
+		if ( ok && c.size() == 3 ) {
+			bool a = false, b = false, d = false;
+			r.cx = c[0].toDouble( &a ); r.cy = c[1].toDouble( &b ); r.radius = c[2].toDouble( &d );
+			ok = a && b && d && r.radius > 0.0;
+			r.hasCentre = true;
+		} else if ( !c.isEmpty() ) {
+			ok = false;
+		}
+		if ( !ok ) {
+			if ( problems ) problems->append( QStringLiteral( "line %1 is not `name | prefix[;prefix] | [x y radius]`: %2" ).arg( lineNo ).arg( line ) );
+			continue;
+		}
+		canon += r.name.toUtf8() + '|' + r.prefixes.join( QChar( ';' ) ).toUtf8() + '|'
+			+ ( r.hasCentre ? QString( "%1 %2 %3" ).arg( r.cx, 0, 'g', 12 ).arg( r.cy, 0, 'g', 12 ).arg( r.radius, 0, 'g', 12 ).toUtf8() : QByteArray() )
+			+ '\n';
+		out.push_back( r );
+	}
+	if ( digest )
+		*digest = QString::fromLatin1( QCryptographicHash::hash( canon, QCryptographicHash::Sha1 ).toHex().left( 12 ) );
+	return true;
+}
+//! The LOD model path inside an instance's `baseName`, "0x<form> (<model>)", normalised.
+QString landmarkModelOf( const QString & baseName )
+{
+	const int a = baseName.indexOf( QLatin1String( " (" ) );
+	if ( a < 0 || !baseName.endsWith( QChar( ')' ) ) )
+		return QString();
+	return landmarkNormalisePath( baseName.mid( a + 2, baseName.size() - a - 3 ) );
+}
+} // namespace
+
+void lodgenNativeLandmarksOption( const QString & file )
+{
+	landmarkFileOpt() = file;
+}
+
+QString lodgenNativeLandmarksDigest()
+{
+	QString digest;
+	std::vector<LandmarkRule> rules;
+	landmarkLoad( rules, nullptr, &digest, nullptr );
+	return digest;
+}
+
 
 bool lodgenNativeWrite( QString * report, QString * error )
 {
@@ -2875,9 +3102,17 @@ bool lodgenNativeWrite( QString * report, QString * error )
 	//! IDENT1: the CONTACT join's own census (candidate pairs, touching pairs, unions the cap refused)
 	quint64 contactCandidates = 0, contactTouching = 0, contactCapRefused = 0, contactTriTests = 0;
 	//! IDENT1: the building occluders' census
+	quint32 bldOccSplitGroups = 0, bldOccSplitParts = 0;
+	float bldOccSplitU = 0.0f;
 	quint32 bldOccGroups = 0, bldOccFitted = 0, bldOccNoSolid = 0, bldOccTooThin = 0, bldOccProbeFailed = 0, bldOccShrunk = 0;
 	qint64 bldOccMs = 0;
 	std::vector<float> bldOccThin;      //!< each fitted box's smallest full extent, world units
+	//! IDENT2: one line a landmark (and one a list problem), printed on the census's `native-landmarks` prefix
+	QStringList landmarkLog;
+	QString landmarkSource = QStringLiteral( "not read (the contact join did not run)" ), landmarkDigest = QStringLiteral( "-" );
+	quint32 landmarkRules = 0, landmarkPieces = 0, landmarkConflicts = 0, landmarkFootprint = 0;
+	//! IDENT2: building boxes the seam-aware probe moved off a seam (asymmetric inset) to pass
+	quint32 bldOccNudged = 0;
 	set.placementAo = s.placementAo;
 	QVector<LodgenAggTree> aggTrees;
 	/* SWAP1 census over the placements this write is given (docs 3.9):
@@ -4125,6 +4360,10 @@ bool lodgenNativeWrite( QString * report, QString * error )
 	 * group is a SECOND word beside it (docs s4.9). */
 	if ( s.lodiV7 ) {
 		set.group = true;
+		/* v13 (lane IDENT2, 2026-09-29): the writer makes the group ids FILE-WIDE
+		 * (a u32 a placement), so a group cut by a chunk line keeps one id.
+		 * WW_LODI_GROUPS_PER_CHUNK=1 is the exact way back: v7..v12's u16 per chunk. */
+		set.groupPerChunk = qEnvironmentVariable( "WW_LODI_GROUPS_PER_CHUNK" ) == QStringLiteral( "1" );
 		const size_t ni = set.instances.size();
 		std::vector<quint32> uf( ni );
 		for ( size_t i = 0; i < ni; i++ )
@@ -4446,6 +4685,209 @@ bool lodgenNativeWrite( QString * report, QString * error )
 			std::sort( near.begin(), near.end(), []( const Ct & a, const Ct & b ) {
 				return a.d != b.d ? a.d < b.d : ( a.i != b.i ? a.i < b.i : a.j < b.j );
 			} );
+			/* IDENT2 (2026-09-29): THE NAMED LANDMARKS, joined before any contact
+			 * pair and under no cap (bungo: "Landmark rule"). A placement belongs to
+			 * the FIRST landmark whose prefix and circle it matches; one matched by
+			 * a later landmark too is counted as a conflict and left with the first.
+			 * The contact pass below still runs over the landmark's group: a union
+			 * with it is refused like any other when the merged box passes the cap,
+			 * so a landmark wider than the cap takes in no foreign piece, and one
+			 * narrower than the cap (a Hub tower) joins what touches it as before. */
+			std::vector<int> landmarkOf( ni, -1 );
+			std::vector<LandmarkRule> rules;
+			{
+				QStringList problems;
+				landmarkLoad( rules, &landmarkSource, &landmarkDigest, &problems );
+				landmarkRules = quint32( rules.size() );
+				for ( const QString & p : problems )
+					landmarkLog.append( QStringLiteral( "list problem: " ) + p );
+				for ( size_t i = 0; i < ni && !rules.empty(); i++ ) {
+					if ( !ptCount[i] )
+						continue;
+					const QString model = landmarkModelOf( set.instances[i].baseName );
+					if ( model.isEmpty() )
+						continue;
+					for ( size_t li = 0; li < rules.size(); li++ ) {
+						const LandmarkRule & lr = rules[li];
+						bool hit = false;
+						for ( const QString & p : lr.prefixes )
+							if ( model.startsWith( p ) ) { hit = true; break; }
+						if ( hit && lr.hasCentre ) {
+							const double dx = double( set.instances[i].pos[0] ) - lr.cx, dy = double( set.instances[i].pos[1] ) - lr.cy;
+							hit = dx * dx + dy * dy <= lr.radius * lr.radius;
+						}
+						if ( !hit )
+							continue;
+						if ( landmarkOf[i] < 0 )
+							landmarkOf[i] = int( li );
+						else
+							landmarkConflicts++;
+					}
+				}
+				std::vector<qint64> firstOf( rules.size(), -1 );
+				for ( size_t i = 0; i < ni; i++ ) {
+					if ( landmarkOf[i] < 0 )
+						continue;
+					landmarkPieces++;
+					qint64 & f0 = firstOf[size_t( landmarkOf[i] )];
+					if ( f0 < 0 )
+						f0 = qint64( i );
+					else
+						join( quint32( f0 ), quint32( i ) );
+				}
+			}
+			/* IDENT2 follow-up (2026-09-29; bungo on the after pictures: "the
+			 * landmarks are not whole yet"): THE FOOTPRINT. A landmark is its name
+			 * prefixes PLUS the ground they cover. Its OUTLINE is the convex hull,
+			 * on X/Y, of the name-matched pieces' placed boxes -- derived, not
+			 * written by hand: Diamond City's hull follows the stadium walls, where
+			 * its bounding box would take in the street blocks at its corners.
+			 * Every other drawn piece whose box overlaps the outline and leaves it
+			 * by no more than LANDMARK_FOOTPRINT_MARGIN joins the landmark, whatever
+			 * its name, before the contact pass and under no cap; trees and plants
+			 * never join, and a piece crossing out farther is refused and logged.
+			 * The rule is PER PIECE, as bungo's words have it: a street block whose
+			 * edge pieces stand inside the stadium (a shack wall, a window bay) gives
+			 * those pieces to the landmark and keeps the rest -- the contact pass
+			 * below cannot join the two halves back, because a landmark wider than
+			 * the cap takes in nothing by contact. The margin sits in the gap the
+			 * Boston bake measured: the pieces inside the outlines leave it by at
+			 * most 319 u (box corners of rotated billboards and roof pieces), the
+			 * nearest piece outside by 1,460 u (a whole-block LOD shell). */
+			QStringList footDump;
+			{
+				const double LANDMARK_FOOTPRINT_MARGIN = 512.0;
+				typedef std::array<double, 2> P2;
+				auto cornersOf = [&]( size_t i, P2 c[4] ) {
+					const Box & b = tbox[i];
+					c[0] = { b.lo[0], b.lo[1] }; c[1] = { b.hi[0], b.lo[1] };
+					c[2] = { b.hi[0], b.hi[1] }; c[3] = { b.lo[0], b.hi[1] };
+				};
+				auto isVeg = [&]( size_t i ) {
+					const LodiSrcInstance & r = set.instances[i];
+					if ( r.baseId < lib.bases.size() && ( lib.bases[r.baseId].flags & LODO_BASE_TREE ) != 0 )
+						return true;
+					const QString m = landmarkModelOf( r.baseName );
+					return m.startsWith( QLatin1String( "landscape/trees/" ) ) || m.startsWith( QLatin1String( "landscape/plants/" ) )
+						|| m.startsWith( QLatin1String( "landscape/vines/" ) ) || m.startsWith( QLatin1String( "landscape/grass/" ) );
+				};
+				std::vector<char> footTaken( ni, 0 );
+				for ( size_t li = 0; li < rules.size(); li++ ) {
+					std::vector<P2> pts;
+					qint64 first = -1;
+					for ( size_t i = 0; i < ni; i++ ) {
+						if ( landmarkOf[i] != int( li ) )
+							continue;
+						if ( first < 0 )
+							first = qint64( i );
+						P2 c[4];
+						cornersOf( i, c );
+						pts.insert( pts.end(), c, c + 4 );
+					}
+					if ( first < 0 )
+						continue;
+					// Andrew's monotone chain, counter-clockwise, collinear points dropped
+					std::sort( pts.begin(), pts.end() );
+					pts.erase( std::unique( pts.begin(), pts.end() ), pts.end() );
+					auto cross = []( const P2 & o, const P2 & a, const P2 & b ) {
+						return ( a[0] - o[0] ) * ( b[1] - o[1] ) - ( a[1] - o[1] ) * ( b[0] - o[0] );
+					};
+					std::vector<P2> H( 2 * pts.size() + 1 );
+					size_t k = 0;
+					for ( size_t i = 0; i < pts.size(); i++ ) {
+						while ( k >= 2 && cross( H[k - 2], H[k - 1], pts[i] ) <= 0.0 ) k--;
+						H[k++] = pts[i];
+					}
+					for ( size_t i = pts.size() - 1, t = k + 1; i > 0; i-- ) {
+						while ( k >= t && cross( H[k - 2], H[k - 1], pts[i - 1] ) <= 0.0 ) k--;
+						H[k++] = pts[i - 1];
+					}
+					H.resize( k > 1 ? k - 1 : k );
+					if ( H.size() < 3 ) {
+						landmarkLog.append( QString( "%1: footprint skipped, the named pieces make no outline" ).arg( rules[li].name ) );
+						continue;
+					}
+					{
+						QString hl = QString( "# landmark-hull %1 margin %2" ).arg( rules[li].name ).arg( LANDMARK_FOOTPRINT_MARGIN, 0, 'f', 0 );
+						for ( const P2 & h : H )
+							hl += QString( " %1,%2" ).arg( h[0], 0, 'f', 1 ).arg( h[1], 0, 'f', 1 );
+						footDump.append( hl );
+					}
+					// signed distance past the outline (<= 0 inside): the largest over the edges
+					auto outside = [&H]( const P2 & q ) {
+						double d = -1e300;
+						for ( size_t e = 0; e < H.size(); e++ ) {
+							const P2 & a = H[e], & b = H[( e + 1 ) % H.size()];
+							const double ex = b[0] - a[0], ey = b[1] - a[1], L = std::sqrt( ex * ex + ey * ey );
+							d = std::max( d, ( ( q[0] - a[0] ) * ey - ( q[1] - a[1] ) * ex ) / L );
+						}
+						return d;
+					};
+					double hx0 = 1e300, hy0 = 1e300, hx1 = -1e300, hy1 = -1e300;
+					for ( const P2 & h : H ) {
+						hx0 = std::min( hx0, h[0] ); hy0 = std::min( hy0, h[1] );
+						hx1 = std::max( hx1, h[0] ); hy1 = std::max( hy1, h[1] );
+					}
+					// box vs convex outline, separating axes: the box's two, then the outline's edges
+					auto overlaps = [&]( const Box & b, const P2 c[4] ) {
+						if ( b.hi[0] < hx0 || b.lo[0] > hx1 || b.hi[1] < hy0 || b.lo[1] > hy1 )
+							return false;
+						for ( size_t e = 0; e < H.size(); e++ ) {
+							const P2 & a = H[e], & bb = H[( e + 1 ) % H.size()];
+							const double nx = bb[1] - a[1], ny = -( bb[0] - a[0] );
+							double m = 1e300;
+							for ( int q = 0; q < 4; q++ )
+								m = std::min( m, ( c[q][0] - a[0] ) * nx + ( c[q][1] - a[1] ) * ny );
+							if ( m > 0.0 )
+								return false;
+						}
+						return true;
+					};
+					quint32 joined = 0, refused = 0, veg = 0;
+					double worstIn = 0.0;
+					for ( size_t i = 0; i < ni; i++ ) {
+						if ( landmarkOf[i] >= 0 || footTaken[i] )
+							continue;
+						const LodiSrcInstance & r = set.instances[i];
+						Box pb;
+						if ( ptCount[i] )
+							pb = tbox[i];
+						else
+							for ( int q = 0; q < 3; q++ )
+								pb.lo[q] = pb.hi[q] = r.pos[q];
+						P2 c[4] = { { pb.lo[0], pb.lo[1] }, { pb.hi[0], pb.lo[1] }, { pb.hi[0], pb.hi[1] }, { pb.lo[0], pb.hi[1] } };
+						if ( !overlaps( pb, c ) )
+							continue;
+						if ( isVeg( i ) ) {
+							veg++;	// trees and plants never join (a count, not a line each)
+							continue;
+						}
+						if ( !ptCount[i] )
+							continue;	// nothing drawn: no identity to give
+						double w = -1e300;
+						for ( int q = 0; q < 4; q++ )
+							w = std::max( w, outside( c[q] ) );
+						const QString m = landmarkModelOf( r.baseName );
+						if ( w > LANDMARK_FOOTPRINT_MARGIN ) {
+							refused++;
+							landmarkLog.append( QString( "%1: footprint REFUSED %2 (ref %3): it crosses the outline by %4 u (margin %5 u)" )
+								.arg( rules[li].name, m, QString::number( r.refFormId, 16 ) ).arg( w, 0, 'f', 0 ).arg( LANDMARK_FOOTPRINT_MARGIN, 0, 'f', 0 ) );
+							footDump.append( QString( "# landmark-refused %1 i %2 over %3 %4" ).arg( rules[li].name ).arg( i ).arg( w, 0, 'f', 0 ).arg( m ) );
+							continue;
+						}
+						footTaken[i] = 1;
+						join( quint32( first ), quint32( i ) );
+						joined++;
+						worstIn = std::max( worstIn, w );
+						footDump.append( QString( "# landmark-footprint %1 i %2 over %3 %4" ).arg( rules[li].name ).arg( i ).arg( w, 0, 'f', 0 ).arg( m ) );
+					}
+					landmarkFootprint += joined;
+					landmarkLog.append( QString( "%1: footprint = convex hull of %2 point(s) around the named pieces' boxes, margin %3 u: "
+						"%4 piece(s) inside joined (farthest out %5 u), %6 refused, %7 tree/plant placement(s) inside left alone" )
+						.arg( rules[li].name ).arg( H.size() ).arg( LANDMARK_FOOTPRINT_MARGIN, 0, 'f', 0 ).arg( joined )
+						.arg( worstIn, 0, 'f', 0 ).arg( refused ).arg( veg ) );
+				}
+			}
 			// each group's world X/Y extent, carried on its root, for the cap
 			std::vector<float> gb( ni * 4 );
 			for ( size_t i = 0; i < ni; i++ ) {
@@ -4487,6 +4929,55 @@ bool lodgenNativeWrite( QString * report, QString * error )
 				joinedEdge[e] = 1;
 			}
 			joinMs = joinClock.elapsed();
+			/* IDENT2: one census line a landmark, after the contact pass, so it states
+			 * the group the file gets: its pieces, what else joined it, its size, and
+			 * the CHUNKS it spans. The .lodi group word is dense PER CHUNK (docs 4.9,
+			 * u16), so a landmark over a chunk line is one group in the emitter and
+			 * one id per chunk in the file -- the line says so rather than hiding it. */
+			for ( size_t li = 0; li < rules.size(); li++ ) {
+				const LandmarkRule & lr = rules[li];
+				quint32 n = 0;
+				std::set<quint32> roots;
+				float x0 = 3.4e38f, y0 = 3.4e38f, x1 = -3.4e38f, y1 = -3.4e38f;
+				for ( size_t i = 0; i < ni; i++ ) {
+					if ( landmarkOf[i] != int( li ) )
+						continue;
+					n++;
+					roots.insert( find( quint32( i ) ) );
+					x0 = std::min( x0, tbox[i].lo[0] ); y0 = std::min( y0, tbox[i].lo[1] );
+					x1 = std::max( x1, tbox[i].hi[0] ); y1 = std::max( y1, tbox[i].hi[1] );
+				}
+				QString where = lr.hasCentre
+					? QString( " within %1 u of (%2, %3)" ).arg( lr.radius, 0, 'f', 0 ).arg( lr.cx, 0, 'f', 0 ).arg( lr.cy, 0, 'f', 0 )
+					: QString();
+				if ( !n ) {
+					landmarkLog.append( QString( "%1: 0 pieces match `%2`%3 -- not in this bake" )
+						.arg( lr.name, lr.prefixes.join( QChar( ';' ) ), where ) );
+					continue;
+				}
+				const quint32 root = *roots.begin();
+				quint32 members = 0;
+				std::map<std::pair<int, int>, quint32> chunks;
+				for ( size_t i = 0; i < ni; i++ )
+					if ( find( quint32( i ) ) == root ) {
+						members++;
+						chunks[{ lodiChunkOf( set.instances[i].pos[0] ), lodiChunkOf( set.instances[i].pos[1] ) }]++;
+					}
+				QStringList cl;
+				for ( const auto & c : chunks )
+					cl.append( QString( "(%1,%2):%3" ).arg( c.first.first ).arg( c.first.second ).arg( c.second ) );
+				landmarkLog.append( QString( "%1: %2 pieces match `%3`%4 -> %5 group(s); the group holds %6 "
+					"(%7 not in the landmark), landmark extent %8 x %9 u; chunks %10 [%11]%12" )
+					.arg( lr.name ).arg( n ).arg( lr.prefixes.join( QChar( ';' ) ), where ).arg( roots.size() )
+					.arg( members ).arg( members - n )
+					.arg( double( x1 - x0 ), 0, 'f', 0 ).arg( double( y1 - y0 ), 0, 'f', 0 )
+					.arg( chunks.size() ).arg( cl.join( QChar( ' ' ) ) )
+					.arg( chunks.size() > 1
+						? ( set.groupPerChunk
+							? QStringLiteral( " -- CROSSES A CHUNK LINE: the per-chunk u16 group word (WW_LODI_GROUPS_PER_CHUNK=1) gives it one id in each chunk" )
+							: QStringLiteral( " -- crosses a chunk line; the v13 file-wide group word keeps it one id" ) )
+						: QString() ) );
+			}
 			/* THE DUMP, a measuring surface and not a feature: one `P` line a
 			 * placement and one `C` line a pair whose triangles come within 32 u,
 			 * so the tolerance and the cap are chosen from data. */
@@ -4497,6 +4988,10 @@ bool lodgenNativeWrite( QString * report, QString * error )
 					ts << "# IDENT1 group dump v1: tol " << TOL << " cap " << CAP << " measure " << MEAS << "\n";
 					ts << "# P i ref part base tree tris x y z lox loy loz hix hiy hiz root name\n";
 					ts << "# C i j dist joined(1 joined, 2 refused by the cap, 0 already one or past tol)\n";
+					ts << "# landmarks " << landmarkSource << " digest " << landmarkDigest << " rules " << landmarkRules
+					   << " pieces " << landmarkPieces << "\n";
+					for ( const QString & fl : footDump )
+						ts << fl << "\n";
 					for ( size_t i = 0; i < ni; i++ ) {
 						const LodiSrcInstance & r = set.instances[i];
 						const quint32 bf = r.baseId < lib.bases.size() ? lib.bases[r.baseId].formId : 0u;
@@ -4747,17 +5242,58 @@ bool lodgenNativeWrite( QString * report, QString * error )
 			for ( size_t i = 0; i < ni; i++ )
 				if ( ptCount[i] )
 					byRoot[find( quint32( i ) )].push_back( quint32( i ) );
-			std::vector<std::pair<quint32, std::vector<quint32>>> jobs( byRoot.begin(), byRoot.end() );
-			struct Fit { int res = BLD_OCC_NO_SOLID; float c[3], h[3], R[9]; quint32 carrier = 0; int shrink = 0; };
+			/* IDENT2 (2026-09-29): MORE THAN ONE BOX A LANDMARK. A group wider than
+			 * the cap on X or Y -- which only a landmark can be, the contact join
+			 * refuses every other -- is fitted as SEVERAL boxes: its members are cut
+			 * by a world grid of cap-sized squares (by the centre of each member's
+			 * placed box) and each square's members are fitted on their own, riding
+			 * on their own carrier. So no box is wider than a group the cap allows,
+			 * which is what every other building's box already is; one box a ring
+			 * (Diamond City) fitted less than its fragments did (docs s4.5.4). The
+			 * IDENTITY is untouched: every part's carrier is in the one group.
+			 * WW_LODI_OCC_SPLIT=<u> moves the square (measuring only). */
+			float splitU = KNOB.groupCap > 0.0f ? KNOB.groupCap : 4096.0f;
+			{
+				bool ok = false;
+				const float e = qEnvironmentVariable( "WW_LODI_OCC_SPLIT" ).toFloat( &ok );
+				if ( ok && e >= 256.0f )
+					splitU = e;
+			}
+			bldOccSplitU = splitU;
+			std::vector<std::pair<quint32, std::vector<quint32>>> jobs;
+			for ( auto & kv : byRoot ) {
+				float x0 = 3.4e38f, y0 = 3.4e38f, x1 = -3.4e38f, y1 = -3.4e38f;
+				for ( quint32 m : kv.second ) {
+					x0 = std::min( x0, tbox[m].lo[0] ); y0 = std::min( y0, tbox[m].lo[1] );
+					x1 = std::max( x1, tbox[m].hi[0] ); y1 = std::max( y1, tbox[m].hi[1] );
+				}
+				if ( kv.second.size() < 2 || ( x1 - x0 <= splitU && y1 - y0 <= splitU ) ) {
+					jobs.push_back( kv );
+					continue;
+				}
+				std::map<std::pair<qint64, qint64>, std::vector<quint32>> cut;
+				for ( quint32 m : kv.second ) {
+					const double cx = 0.5 * ( double( tbox[m].lo[0] ) + double( tbox[m].hi[0] ) );
+					const double cy = 0.5 * ( double( tbox[m].lo[1] ) + double( tbox[m].hi[1] ) );
+					cut[{ qint64( std::floor( cx / splitU ) ), qint64( std::floor( cy / splitU ) ) }].push_back( m );
+				}
+				bldOccSplitGroups++;
+				bldOccSplitParts += quint32( cut.size() );
+				for ( auto & c : cut )
+					jobs.push_back( { kv.first, std::move( c.second ) } );
+			}
+			struct Fit { int res = BLD_OCC_NO_SOLID; float c[3], h[3], R[9]; quint32 carrier = 0; int shrink = 0; int nudge = 0; };
 			std::vector<Fit> fits( jobs.size() );
 			lodgenParallelFor( int( jobs.size() ), [&]( int gi ) {
 				const std::vector<quint32> & mem = jobs[size_t( gi )].second;
 				std::vector<float> gt;
+				std::vector<quint32> gp;        // IDENT2: each triangle's member ordinal (open edges are per placement)
 				double hist[90] = { 0.0 };
 				std::vector<std::pair<double, double>> yw;     // (folded yaw degrees, weight)
 				for ( quint32 m : mem ) {
 					gt.insert( gt.end(), ptw.begin() + size_t( ptFirst[m] ) * 9,
 						ptw.begin() + size_t( ptFirst[m] + ptCount[m] ) * 9 );
+					gp.insert( gp.end(), size_t( ptCount[m] ), quint32( gp.empty() ? 0 : gp.back() + 1 ) );
 					const LodiSrcInstance & r = set.instances[m];
 					double yd = std::atan2( double( r.rot[3] ), double( r.rot[0] ) ) * 57.29577951308232;
 					yd = std::fmod( std::fmod( yd, 90.0 ) + 90.0, 90.0 );
@@ -4779,7 +5315,7 @@ bool lodgenNativeWrite( QString * report, QString * error )
 				}
 				const double yaw = ( pc + ( sw > 0.0 ? sd / sw : 0.0 ) ) / 57.29577951308232;
 				Fit & f = fits[size_t( gi )];
-				f.res = fitBuildingBox( gt, yaw, KNOB.occRays, f.c, f.h, f.R, &f.shrink );
+				f.res = fitBuildingBox( gt, yaw, KNOB.occRays, f.c, f.h, f.R, &f.shrink, &f.nudge, &gp );
 				if ( f.res != BLD_OCC_OK )
 					return;
 				double bestD = 1e300;
@@ -4797,6 +5333,8 @@ bool lodgenNativeWrite( QString * report, QString * error )
 				if ( f.res == BLD_OCC_PROBE_FAILED ) { bldOccProbeFailed++; continue; }
 				if ( f.shrink > 0 )
 					bldOccShrunk++;
+				if ( f.nudge )
+					bldOccNudged++;
 				LodiSrcInstance & r = set.instances[f.carrier];
 				r.hasOccluder = true;
 				r.occWorld = true;
@@ -5204,6 +5742,14 @@ bool lodgenNativeWrite( QString * report, QString * error )
 						"surface distance, so every join it made is real." )
 						.arg( double( s.identityJoinGap ), 0, 'f', 1 ).arg( joinEligible )
 						.arg( joinSamples ).arg( joinPairs ).arg( joinMs ) ) );
+		/* IDENT2: the named landmarks, one line each, on their own prefix. */
+		if ( s.lodiV7 && s.identityJoinContact && !s.identityJoinLegacy ) {
+			ladderLine += QString( "\n  native-landmarks: list %1, digest %2, %3 rule(s), %4 piece(s) matched, %5 matched "
+				"by a second landmark (left with the first), %6 more piece(s) joined by the footprint" )
+				.arg( landmarkSource, landmarkDigest ).arg( landmarkRules ).arg( landmarkPieces ).arg( landmarkConflicts ).arg( landmarkFootprint );
+			for ( const QString & l : landmarkLog )
+				ladderLine += QStringLiteral( "\n  native-landmark: " ) + l;
+		}
 		/* v6 .lodo (lane SWAP1, 2026-09-25): the material-swap census. The gate
 		 * number is `tower1Rule`: 21,064 on the whole Commonwealth (TOWER1's
 		 * lodswap_census.py over the installed dim-4 manifests). */
@@ -5317,7 +5863,8 @@ bool lodgenNativeWrite( QString * report, QString * error )
 			occLine += QString( "\n  native-occluders-building: ON (lane IDENT1; --occluder-fit piece is the way back): "
 				"one box a building group -- the per-piece fits above are NOT offered; groups %1, fitted %2, "
 				"no solid volume %3, too thin %4, %10 still out of the walls after %11 half-voxel shrinks "
-				"(%12 of the fitted shrunk to pass the %13-point probe, <= %14 percent out); fill rays `%5`; "
+				"(%12 of the fitted shrunk to pass the %13-point probe, <= %14 percent out; IDENT2: a hit within %15 u of an open "
+				"edge is a miss; the box as stored (x 0.999) and the box %15 u larger a face must both pass; %16 boxes passed only with one face moved in); fill rays `%5`; "
 				"smallest full extent median %6 u (min %7, max %8); %9 ms" )
 				.arg( bldOccGroups ).arg( bldOccFitted ).arg( bldOccNoSolid ).arg( bldOccTooThin )
 				.arg( QString::fromLatin1( KNOB.occRays ) )
@@ -5325,7 +5872,11 @@ bool lodgenNativeWrite( QString * report, QString * error )
 				.arg( th.empty() ? 0.0 : double( th.front() ), 0, 'f', 1 )
 				.arg( th.empty() ? 0.0 : double( th.back() ), 0, 'f', 1 ).arg( bldOccMs )
 				.arg( bldOccProbeFailed ).arg( BLD_OCC_PROBE_ROUNDS ).arg( bldOccShrunk )
-				.arg( BLD_OCC_PROBE_GRID * BLD_OCC_PROBE_GRID * BLD_OCC_PROBE_GRID ).arg( BLD_OCC_PROBE_MAX_OUT * 100.0, 0, 'f', 1 );
+				.arg( BLD_OCC_PROBE_GRID * BLD_OCC_PROBE_GRID * BLD_OCC_PROBE_GRID ).arg( BLD_OCC_PROBE_MAX_OUT * 100.0, 0, 'f', 1 )
+				.arg( BLD_OCC_SEAM_U, 0, 'f', 2 ).arg( bldOccNudged );
+			occLine += QString( "; IDENT2: %1 group(s) wider than %2 u cut by a %2 u world grid into %3 part(s), "
+				"each fitted as its own box (the `groups` count above counts parts)" )
+				.arg( bldOccSplitGroups ).arg( double( bldOccSplitU ), 0, 'f', 0 ).arg( bldOccSplitParts );
 		}
 		quint64 aggCovered = 0, aggTexels = 0;
 		int hSpanMin = 0, hSpanMax = 0;

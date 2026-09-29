@@ -470,8 +470,8 @@ def read_lodi(path):
     if h['version'] == 2:
         raise Refusal('version 2: a v2 instance table has no occluder tables (header 0x98 and 0xA0 were '
                       'reserved), so every cell would read as occluding nothing')
-    if h['version'] not in (3, 4, 5, 6, 7, 8, 9, 10, 11, 12):
-        raise Refusal('version %d; this reader knows 3 to 12' % h['version'])
+    if h['version'] not in (3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13):
+        raise Refusal('version %d; this reader knows 3 to 13' % h['version'])
     # v8 = v7 + the per-vertex HORIZON stream, in the room v7's header left reserved.
     # RETIRED 2026-09-19 (lane HORIZONOUT): no exe writes one, this reader still reads one.
     v8 = h['version'] == 8
@@ -480,7 +480,11 @@ def read_lodi(path):
     # v10 = v9 + instance flag bit 7, SCALE_WIDE: scale = 8 + u16 / 8192 (lane BAKE2, 2026-09-25).
     # v11 = v10 + instance flag bit 8, INITIALLY_DISABLED (lane NEAR1, 2026-09-26; the near library only).
     # v12 = v11 + the per-vertex GROUND-CONTACT stream at 0x130/0x138 (lane GROUND1, 2026-09-27).
-    v12 = h['version'] == 12
+    # v13 = v12's layout with the group word a FILE-WIDE u32 (stride 4); its ground stream is optional
+    # (lane IDENT2, 2026-09-29). T['group'] is file-wide for every version: v7..v12's per-chunk ids
+    # are offset chunk by chunk below.
+    v13 = h['version'] == 13
+    v12 = h['version'] == 12 or v13
     v11 = h['version'] == 11 or v12
     v10 = h['version'] == 10 or v11
     v9 = h['version'] == 9 or v10
@@ -581,9 +585,13 @@ def read_lodi(path):
         if h['offGroup'] == 0 and h['offVertexSky'] == 0:
             raise Refusal('version 7 carrying neither a group table (header 0x100) nor a vertex-sky '
                           'stream (header 0x110); version 7 IS one of the two')
+        if v13 and not h['offGroup']:
+            raise Refusal('version 13 with no group table; the file-wide group word is what version 13 IS')
         if h['offGroup']:
-            if h['groupStride'] != 2:
-                raise Refusal('groupStride %d; this reader knows 2' % h['groupStride'])
+            want = 4 if v13 else 2
+            if h['groupStride'] != want:
+                raise Refusal('groupStride %d in a version-%d file; this reader knows %d there'
+                              % (h['groupStride'], h['version'], want))
             if h['groupCount'] == 0 and h['instanceCount']:
                 raise Refusal('a group table is present but groupCount is 0')
         elif h['groupCount'] or h['groupStride']:
@@ -633,10 +641,13 @@ def read_lodi(path):
             if v12:
                 h['offVertexGround'] = le('Q', b, 0x130)[0]
                 h['vertexGroundBytes'] = le('I', b, 0x138)[0]
-                if h['offVertexGround'] == 0:
+                if h['offVertexGround'] == 0 and v13:
+                    if h['vertexGroundBytes']:
+                        raise Refusal('no vertex-ground stream but vertexGroundBytes is %d' % h['vertexGroundBytes'])
+                elif h['offVertexGround'] == 0:
                     raise Refusal('version 12 with no vertex-ground stream (header 0x130 is 0); '
                                   'the stream is what version 12 IS')
-                if h['vertexGroundBytes'] < 4 * (h['instanceCount'] + 1):
+                elif h['vertexGroundBytes'] < 4 * (h['instanceCount'] + 1):
                     raise Refusal('vertex-ground stream of %d bytes cannot hold its own %d offset words'
                                   % (h['vertexGroundBytes'], h['instanceCount'] + 1))
                 if any(b[0x13C:0x200]):
@@ -678,7 +689,7 @@ def read_lodi(path):
     iGrp = iVsky = -1
     if v7 and h['offGroup']:
         iGrp = len(tabs)
-        tabs.append(('group', h['offGroup'], h['instanceCount'] * 2))
+        tabs.append(('group', h['offGroup'], h['instanceCount'] * (4 if v13 else 2)))
     if v7 and h['offVertexSky']:
         iVsky = len(tabs)
         tabs.append(('vertexSky', h['offVertexSky'], h['vertexSkyBytes']))
@@ -742,10 +753,12 @@ def read_lodi(path):
         f = T['vertexAoFirst']
         if f[0] != 0 or any(f[i] > f[i + 1] for i in range(n1 - 1)) or f[-1] != len(T['vertexAo']):
             raise Refusal('vertex-AO offsets are not a monotone run from 0 to the byte count')
-    # v7: one u16 a placement, in instance order, dense per CHUNK from 0
+    # v7..v12: one u16 a placement, in instance order, dense per CHUNK from 0 (made file-wide below);
+    # v13: one u32 a placement, dense over the FILE from 0
     T['group'] = []
+    T['groupFileWide'] = v13
     if iGrp >= 0:
-        T['group'] = list(le('%dH' % h['instanceCount'], b, h['offGroup'])) if h['instanceCount'] else []
+        T['group'] = list(le('%d%s' % (h['instanceCount'], 'I' if v13 else 'H'), b, h['offGroup']))             if h['instanceCount'] else []
     # v7: s4.8's layout exactly, for sky
     T['vertexSkyFirst'], T['vertexSky'] = [], []
     if iVsky >= 0:
@@ -814,7 +827,7 @@ def read_lodi(path):
             raise Refusal('chunk %d instanceFirst %d != %d' % (ci, c['instanceFirst'], nextFirst))
         if c['cellRangeOffset'] != present * 16:
             raise Refusal('chunk %d cellRangeOffset' % ci)
-        if T['group']:
+        if T['group'] and not v13:
             # v7 THE DENSE RULE: a chunk holding C groups uses exactly {0..C-1}
             ids = T['group'][c['instanceFirst']:c['instanceFirst'] + c['instanceCount']]
             hi = max(ids)
@@ -825,6 +838,9 @@ def read_lodi(path):
             if missing:
                 raise Refusal('chunk %d uses group ids up to %d but never uses %d; ids are dense per '
                               'chunk from 0' % (ci, hi, min(missing)))
+            # file-wide in memory: this chunk's ids follow the chunks before it
+            for k in range(c['instanceFirst'], c['instanceFirst'] + c['instanceCount']):
+                T['group'][k] += groupSum[0]
             groupSum[0] += hi + 1
         s = c['instanceFirst']
         e = s + c['instanceCount']
@@ -942,6 +958,13 @@ def read_lodi(path):
     if occCursor != h['occluderCount']:
         raise Refusal('the cell ranges cover %d occluders but the header says %d'
                       % (occCursor, h['occluderCount']))
+    if T['group'] and v13:
+        # v13 THE DENSE RULE, file-wide: G groups use exactly {0..G-1}, G = groupCount
+        used = set(T['group'])
+        if max(T['group']) >= h['groupCount'] or len(used) != h['groupCount']:
+            raise Refusal('version 13: groupCount %d but the ids use %d distinct values up to %d; ids are '
+                          'dense over the file from 0' % (h['groupCount'], len(used), max(T['group'])))
+        groupSum[0] = h['groupCount']
     if T['group'] and groupSum[0] != h['groupCount']:
         raise Refusal("groupCount %d but the chunks' group counts sum to %d"
                       % (h['groupCount'], groupSum[0]))

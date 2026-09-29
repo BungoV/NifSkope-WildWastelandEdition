@@ -78,4 +78,7 @@
         <file alias="collapse">icon/collapse.png</file>
         <file alias="expand">icon/expand.png</file>
     </qresource>
+    <qresource prefix="/lodgen">
+        <file alias="landmarks.txt">lodgen_landmarks.txt</file>
+    </qresource>
 </RCC>
