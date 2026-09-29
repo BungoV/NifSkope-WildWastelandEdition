@@ -229,7 +229,7 @@ def main():
         cold = T['cold'][ii]
         per_place['identity'].append(cold['identity'])
         per_place['identityraw'].append(cold['identity'])
-        # what the viewer's `identityraw` DRAWS: the identity's low byte. The u16
+        # what the viewer's `placement-lowbyte` (was `identityraw`) DRAWS: the identity's low byte. The u16
         # itself over 0..65535 would put this chunk's 0..2448 at black.
         per_place['identitylow'].append(cold['identity'] & 0xFF)
         per_place['sky'].append(inst['sky'])

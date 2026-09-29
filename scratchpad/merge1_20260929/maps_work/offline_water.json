@@ -1,0 +1,251 @@
+{
+ "v2_cells": {
+  "cells": 36864,
+  "wet": 36864,
+  "land": 36864,
+  "wh_min": -3000.0,
+  "wh_max": 12470.0,
+  "types": [
+   0,
+   1,
+   2,
+   3,
+   4,
+   5,
+   6,
+   7,
+   8,
+   9,
+   10,
+   11,
+   12,
+   13,
+   14,
+   65535
+  ]
+ },
+ "WC_v2_waterheight": "per-cell water height, ramp -200..1200 units (dark blue low, yellow high); grey = no water",
+ "WC_v2_watertype": "per-cell WATR index hashed to colour; cyan = the worldspace default 0xFFFF; grey = no water",
+ "WC_v2_cellflags": "cell flags: green land only, red water only, yellow both",
+ "v3": {
+  "version": 3,
+  "bodies": 355,
+  "bodySamplesPerCell": 32,
+  "flowS": 32,
+  "shoreS": 32,
+  "shoreQuantum": 32,
+  "strokes": 0,
+  "sect": 765,
+  "dye": false,
+  "area_mismatch_bodies": 0
+ },
+ "WC_v3_bodyid": "body-ID plane, id hashed to colour (nearest); grey = dry",
+ "WC_v3_flow": "flow plane: hue = direction (red east, yellow-green north, cyan west, blue-violet south), brightness = speed; dark blue = still water; grey = dry",
+ "WC_v3_shore": "shore distance, ramp 0..64 steps x 32 units = 0..2048 units (dark blue at the bank, yellow far out); grey = dry",
+ "region_bodies": [
+  {
+   "id": 1,
+   "class": "sea",
+   "height": 450.0,
+   "form": "00000018",
+   "areaTexels": 21575593,
+   "texelsInRegion": 6572,
+   "flowSource": 0,
+   "meanFlow": [
+    0.0,
+    0.0
+   ],
+   "name": ""
+  },
+  {
+   "id": 43,
+   "class": "river",
+   "height": 578.0,
+   "form": "00102D5A",
+   "areaTexels": 340,
+   "texelsInRegion": 340,
+   "flowSource": 3,
+   "meanFlow": [
+    -0.25,
+    -0.04
+   ],
+   "name": ""
+  },
+  {
+   "id": 106,
+   "class": "lake",
+   "height": 450.0,
+   "form": "00000018",
+   "areaTexels": 36,
+   "texelsInRegion": 36,
+   "flowSource": 1,
+   "meanFlow": [
+    -0.46,
+    -0.12
+   ],
+   "name": ""
+  },
+  {
+   "id": 107,
+   "class": "river",
+   "height": 801.8,
+   "form": "001C6EE0",
+   "areaTexels": 32,
+   "texelsInRegion": 32,
+   "flowSource": 1,
+   "meanFlow": [
+    0.12,
+    -0.07
+   ],
+   "name": ""
+  },
+  {
+   "id": 181,
+   "class": "lake",
+   "height": 450.0,
+   "form": "00000018",
+   "areaTexels": 21,
+   "texelsInRegion": 21,
+   "flowSource": 1,
+   "meanFlow": [
+    -0.46,
+    -0.12
+   ],
+   "name": ""
+  },
+  {
+   "id": 96,
+   "class": "lake",
+   "height": 450.0,
+   "form": "00000018",
+   "areaTexels": 52,
+   "texelsInRegion": 15,
+   "flowSource": 1,
+   "meanFlow": [
+    -0.46,
+    -0.12
+   ],
+   "name": ""
+  },
+  {
+   "id": 231,
+   "class": "lake",
+   "height": 450.0,
+   "form": "00000018",
+   "areaTexels": 4,
+   "texelsInRegion": 4,
+   "flowSource": 0,
+   "meanFlow": [
+    0.0,
+    0.0
+   ],
+   "name": ""
+  },
+  {
+   "id": 321,
+   "class": "lake",
+   "height": 450.0,
+   "form": "00000018",
+   "areaTexels": 1,
+   "texelsInRegion": 1,
+   "flowSource": 0,
+   "meanFlow": [
+    0.0,
+    0.0
+   ],
+   "name": ""
+  }
+ ],
+ "refute_bodyid": {
+  "body": 1,
+  "wetTexels": 6572,
+  "dryTexels": 58515,
+  "regionTexels": 65536
+ },
+ "refute_flow": {
+  "wet_nonzero_share": 0.0,
+  "dry_nonzero": 0,
+  "wet_dir_deg_median": 0.0,
+  "wet_speed_median": 0.0
+ },
+ "refute_flow_per_body": {
+  "1": {
+   "class": "sea",
+   "flowSource": 0,
+   "nonzero_share": 0.0,
+   "dir_deg_median": 0.0,
+   "mean_flow_deg": 0.0
+  },
+  "43": {
+   "class": "river",
+   "flowSource": 3,
+   "nonzero_share": 1.0,
+   "dir_deg_median": 189.84375,
+   "mean_flow_deg": 189.1
+  },
+  "106": {
+   "class": "lake",
+   "flowSource": 1,
+   "nonzero_share": 1.0,
+   "dir_deg_median": 194.0625,
+   "mean_flow_deg": 194.6
+  },
+  "107": {
+   "class": "river",
+   "flowSource": 1,
+   "nonzero_share": 1.0,
+   "dir_deg_median": 329.0625,
+   "mean_flow_deg": 329.7
+  },
+  "181": {
+   "class": "lake",
+   "flowSource": 1,
+   "nonzero_share": 1.0,
+   "dir_deg_median": 194.0625,
+   "mean_flow_deg": 194.6
+  },
+  "96": {
+   "class": "lake",
+   "flowSource": 1,
+   "nonzero_share": 1.0,
+   "dir_deg_median": 194.0625,
+   "mean_flow_deg": 194.6
+  },
+  "231": {
+   "class": "lake",
+   "flowSource": 0,
+   "nonzero_share": 0.0,
+   "dir_deg_median": 0.0,
+   "mean_flow_deg": 0.0
+  },
+  "321": {
+   "class": "lake",
+   "flowSource": 0,
+   "nonzero_share": 0.0,
+   "dir_deg_median": 0.0,
+   "mean_flow_deg": 0.0
+  }
+ },
+ "refute_shore_dry_values": {
+  "255": 58515
+ },
+ "refute_shore_bank_vs_inner": {
+  "bankTexels": 535,
+  "bank_mean_steps": 4.0,
+  "inner_mean_steps": 59.91026827012026
+ },
+ "refute_shore": {
+  "wet_mean_steps": 58.90535605599513,
+  "wet_max_steps": 141,
+  "dry_max_steps": 255
+ },
+ "refute_v2_waterheight": {
+  "riverCells": 8,
+  "otherCells": 56,
+  "river_wh_mean": 450.0,
+  "river_body_height": 450.0,
+  "river_water_minus_ground_mean": 345.5,
+  "other_water_minus_ground_mean": -746.1428833007812,
+  "other_wh_mean": 438.5
+ }
+}

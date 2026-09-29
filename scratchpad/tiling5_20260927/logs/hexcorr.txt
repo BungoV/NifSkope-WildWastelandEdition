@@ -1,0 +1,24 @@
+(a) vertex  bright vs offset key 0: r=-0.00112  |r|<0.00667  PASS
+(a) vertex  bright vs offset key 1: r=-0.00314  |r|<0.00667  PASS
+(a) vertex  hue    vs offset key 0: r=-0.00089  |r|<0.00667  PASS
+(a) vertex  hue    vs offset key 1: r=-0.00434  |r|<0.00667  PASS
+(a) vertex  sat    vs offset key 0: r=+0.00021  |r|<0.00667  PASS
+(a) vertex  sat    vs offset key 1: r=+0.00201  |r|<0.00667  PASS
+(a) CONTROL key-0 noise on the hex lattice vs offset key 0: r=+1.00000  -> FAIL (must FAIL)
+(b) point   bright vs dominant ox: r=-0.00013  |r|<0.00632  PASS
+(b) point   bright vs dominant oy: r=+0.00092  |r|<0.00632  PASS
+(b) point   bright vs weighted ox: r=-0.00193  |r|<0.00632  PASS
+(b) point   bright vs max weight : r=+0.00001  |r|<0.00632  PASS
+(b) point   hue    vs dominant ox: r=-0.00068  |r|<0.00632  PASS
+(b) point   hue    vs dominant oy: r=+0.00115  |r|<0.00632  PASS
+(b) point   hue    vs weighted ox: r=-0.00223  |r|<0.00632  PASS
+(b) point   hue    vs max weight : r=-0.00312  |r|<0.00632  PASS
+(b) point   sat    vs dominant ox: r=+0.00191  |r|<0.00632  PASS
+(b) point   sat    vs dominant oy: r=-0.00047  |r|<0.00632  PASS
+(b) point   sat    vs weighted ox: r=+0.00163  |r|<0.00632  PASS
+(b) point   sat    vs max weight : r=+0.00008  |r|<0.00632  PASS
+(c) channel 0 vs 1: r=+0.0593  |r|<0.333  PASS
+(c) channel 0 vs 2: r=-0.0097  |r|<0.333  PASS
+(c) channel 1 vs 2: r=+0.0600  |r|<0.333  PASS
+field SD per channel: ['0.288', '0.298', '0.290']  range [['-0.92', '0.86'], ['-0.88', '0.90'], ['-0.95', '0.88']]
+HEXCORR PASS (0 fails)

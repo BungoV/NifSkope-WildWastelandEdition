@@ -1,0 +1,36 @@
+diff --git a/src/lodgen.cpp b/src/lodgen.cpp
+--- a/src/lodgen.cpp
++++ b/src/lodgen.cpp
+@@ -14,6 +14,7 @@ BSD License - see nifskope.h
+ #include <QCoreApplication>
+ #include <QCryptographicHash>
+ #include <QMutexLocker>
++#include <cstdio> // TERR1-DIAG
+ 
+ #include "esmdata.h"
+ #include "nativeemit.h"
+@@ -14121,6 +14122,9 @@ static bool lodgenBakeVtTile( const EsmWorld & world, const QString & dataRoot,
+ 							float( ( rp >> 16 ) & 0xFF ) / 255.0f,
+ 							float( ( rp >> 8 ) & 0xFF ) / 255.0f,
+ 							float( rp & 0xFF ) / 255.0f };
++						float diagDl = 0.0f; // TERR1-DIAG
++						for ( int k = 0; k < 3; k++ ) // TERR1-DIAG
++							diagDl = qMax( diagDl, std::fabs( ( rc[k] - color[k] ) * ra ) * 255.0f ); // TERR1-DIAG
+ 						if ( ra > 0.0f )
+ 							for ( int k = 0; k < 3; k++ )
+ 								color[k] = color[k] + ( rc[k] - color[k] ) * ra;
+@@ -14133,6 +14137,14 @@ static bool lodgenBakeVtTile( const EsmWorld & world, const QString & dataRoot,
+ 							const float nA = out.stampNormal[o * 4 + 3];
+ 							out.stampW[o] = ( coverOpts.roadOpacity == 1.0f )
+ 								? qMin( raGeom, nA ) : qMin( raGeom, nA ) * coverOpts.roadOpacity;
++							static const QByteArray diagPath = qgetenv( "WW_TERR1_STAMP_DIAG" ); // TERR1-DIAG
++							if ( !diagPath.isEmpty() && out.stampW[o] > 0.0f && nA > 0.0f ) { // TERR1-DIAG
++								static QMutex diagMx; // TERR1-DIAG
++								QMutexLocker lk( &diagMx ); // TERR1-DIAG
++								static FILE * diagF = std::fopen( diagPath.constData(), "wb" ); // TERR1-DIAG
++								const float rec[6] = { wx, wy, out.stampW[o], diagDl, raGeom, nA }; // TERR1-DIAG
++								if ( diagF ) std::fwrite( rec, sizeof( rec ), 1, diagF ); // TERR1-DIAG
++							} // TERR1-DIAG
+ 						}
+ 						if ( doCover ) {
+ 							const float keep = qBound( 0.0f,

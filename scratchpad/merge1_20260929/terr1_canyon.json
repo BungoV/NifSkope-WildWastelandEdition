@@ -1,0 +1,671 @@
+{
+ "stride": 4,
+ "samples": 589824,
+ "under": {
+  "n": 202275,
+  "before": 222.8,
+  "after": 43.92
+ },
+ "canyon": {
+  "n": 139679,
+  "before": 225.47,
+  "after": 122.06
+ },
+ "open": {
+  "n": 10039,
+  "before": 204.3,
+  "after": 204.25
+ },
+ "other": {
+  "n": 237831,
+  "before": 219.74,
+  "after": 189.26
+ },
+ "open_absdiff": {
+  "max": 33.0,
+  "le1_share": 0.9936248630341667,
+  "mean": 0.050204203605936845
+ },
+ "open_corr_after_vs_before": 0.9995981984290229,
+ "named": [
+  {
+   "cell": "3,-3",
+   "edid": "VaultTecOfficeExt02",
+   "canyon_n": 1927,
+   "canyon_before": 222.7,
+   "canyon_after": 61.3,
+   "open_n": 0,
+   "open_after": null
+  },
+  {
+   "cell": "3,-7",
+   "edid": "TheaterDistrictExt02",
+   "canyon_n": 1466,
+   "canyon_before": 226.1,
+   "canyon_after": 71.5,
+   "open_n": 0,
+   "open_after": null
+  },
+  {
+   "cell": "-6,-5",
+   "edid": "FensRaiderCampExt",
+   "canyon_n": 1184,
+   "canyon_before": 227.1,
+   "canyon_after": 73.9,
+   "open_n": 0,
+   "open_after": null
+  },
+  {
+   "cell": "3,-1",
+   "edid": "BeaconHillApartmentsExt02",
+   "canyon_n": 1770,
+   "canyon_before": 211.9,
+   "canyon_after": 59.0,
+   "open_n": 0,
+   "open_after": null
+  },
+  {
+   "cell": "3,-2",
+   "edid": "BeaconHillPlaygroundExt",
+   "canyon_n": 2087,
+   "canyon_before": 222.5,
+   "canyon_after": 73.7,
+   "open_n": 0,
+   "open_after": null
+  },
+  {
+   "cell": "1,-4",
+   "edid": "HalluciGenExt",
+   "canyon_n": 1166,
+   "canyon_before": 228.0,
+   "canyon_after": 85.3,
+   "open_n": 0,
+   "open_after": null
+  },
+  {
+   "cell": "-4,-4",
+   "edid": "MS13LatimerAmbush",
+   "canyon_n": 920,
+   "canyon_before": 228.8,
+   "canyon_after": 91.6,
+   "open_n": 189,
+   "open_after": 194.0
+  },
+  {
+   "cell": "2,-5",
+   "edid": "SwansPondExt",
+   "canyon_n": 1257,
+   "canyon_before": 223.7,
+   "canyon_after": 87.3,
+   "open_n": 0,
+   "open_after": null
+  },
+  {
+   "cell": "-3,-5",
+   "edid": "FensBankExt",
+   "canyon_n": 1881,
+   "canyon_before": 230.8,
+   "canyon_after": 95.9,
+   "open_n": 0,
+   "open_after": null
+  },
+  {
+   "cell": "2,-4",
+   "edid": "BostonCommonExt",
+   "canyon_n": 1054,
+   "canyon_before": 233.3,
+   "canyon_after": 102.5,
+   "open_n": 0,
+   "open_after": null
+  },
+  {
+   "cell": "1,-5",
+   "edid": "HubrisComicsExt",
+   "canyon_n": 1066,
+   "canyon_before": 224.6,
+   "canyon_after": 94.2,
+   "open_n": 0,
+   "open_after": null
+  },
+  {
+   "cell": "-6,-9",
+   "edid": "HardwareTownExt",
+   "canyon_n": 1270,
+   "canyon_before": 224.4,
+   "canyon_after": 97.0,
+   "open_n": 0,
+   "open_after": null
+  },
+  {
+   "cell": "2,-7",
+   "edid": "BostonCommonExt04",
+   "canyon_n": 1511,
+   "canyon_before": 227.5,
+   "canyon_after": 100.1,
+   "open_n": 0,
+   "open_after": null
+  },
+  {
+   "cell": "2,-6",
+   "edid": "BostonCommonExt02",
+   "canyon_n": 1856,
+   "canyon_before": 216.9,
+   "canyon_after": 89.6,
+   "open_n": 0,
+   "open_after": null
+  },
+  {
+   "cell": "-5,-5",
+   "edid": "FensRaiderCampExt02",
+   "canyon_n": 970,
+   "canyon_before": 208.8,
+   "canyon_after": 81.9,
+   "open_n": 0,
+   "open_after": null
+  },
+  {
+   "cell": "-4,-8",
+   "edid": "DiamondCityExt",
+   "canyon_n": 1071,
+   "canyon_before": 239.1,
+   "canyon_after": 112.7,
+   "open_n": 0,
+   "open_after": null
+  },
+  {
+   "cell": "3,-5",
+   "edid": "BostonCommonExt03",
+   "canyon_n": 1401,
+   "canyon_before": 234.9,
+   "canyon_after": 108.7,
+   "open_n": 0,
+   "open_after": null
+  },
+  {
+   "cell": "0,-7",
+   "edid": "BackBayFence01",
+   "canyon_n": 972,
+   "canyon_before": 234.2,
+   "canyon_after": 108.2,
+   "open_n": 0,
+   "open_after": null
+  },
+  {
+   "cell": "0,-8",
+   "edid": "LaytonTowersExt",
+   "canyon_n": 922,
+   "canyon_before": 233.5,
+   "canyon_after": 107.7,
+   "open_n": 0,
+   "open_after": null
+  },
+  {
+   "cell": "-4,-9",
+   "edid": "FensEvansWayCuldeSac",
+   "canyon_n": 1452,
+   "canyon_before": 222.7,
+   "canyon_after": 97.6,
+   "open_n": 0,
+   "open_after": null
+  },
+  {
+   "cell": "2,-3",
+   "edid": "VaultTecOfficeExt01",
+   "canyon_n": 1226,
+   "canyon_before": 228.1,
+   "canyon_after": 104.9,
+   "open_n": 0,
+   "open_after": null
+  },
+  {
+   "cell": "-8,-8",
+   "edid": "MassPikeTunnelWestExt",
+   "canyon_n": 1045,
+   "canyon_before": 212.8,
+   "canyon_after": 90.1,
+   "open_n": 0,
+   "open_after": null
+  },
+  {
+   "cell": "-3,-4",
+   "edid": "BackStreetApparelExt",
+   "canyon_n": 769,
+   "canyon_before": 219.9,
+   "canyon_after": 98.0,
+   "open_n": 1,
+   "open_after": 189.0
+  },
+  {
+   "cell": "3,-4",
+   "edid": "Vault114Ext",
+   "canyon_n": 1115,
+   "canyon_before": 233.3,
+   "canyon_after": 111.7,
+   "open_n": 0,
+   "open_after": null
+  },
+  {
+   "cell": "-7,-9",
+   "edid": "HardwareTownExt02",
+   "canyon_n": 1606,
+   "canyon_before": 228.3,
+   "canyon_after": 107.0,
+   "open_n": 0,
+   "open_after": null
+  },
+  {
+   "cell": "0,-5",
+   "edid": "TrinityPlazaExt",
+   "canyon_n": 1140,
+   "canyon_before": 227.4,
+   "canyon_after": 106.2,
+   "open_n": 0,
+   "open_after": null
+  },
+  {
+   "cell": "3,-6",
+   "edid": "CombatZoneExt",
+   "canyon_n": 1432,
+   "canyon_before": 223.9,
+   "canyon_after": 103.2,
+   "open_n": 0,
+   "open_after": null
+  },
+  {
+   "cell": "0,-6",
+   "edid": "TrinityTowerExt",
+   "canyon_n": 1008,
+   "canyon_before": 237.8,
+   "canyon_after": 118.5,
+   "open_n": 0,
+   "open_after": null
+  },
+  {
+   "cell": "-5,-8",
+   "edid": "DiamondCityExt01",
+   "canyon_n": 1620,
+   "canyon_before": 227.9,
+   "canyon_after": 111.7,
+   "open_n": 0,
+   "open_after": null
+  },
+  {
+   "cell": "-5,-7",
+   "edid": "FensStreetSewerExt",
+   "canyon_n": 1543,
+   "canyon_before": 240.6,
+   "canyon_after": 124.5,
+   "open_n": 0,
+   "open_after": null
+  },
+  {
+   "cell": "-6,-7",
+   "edid": "FensSquare",
+   "canyon_n": 1438,
+   "canyon_before": 220.7,
+   "canyon_after": 107.0,
+   "open_n": 0,
+   "open_after": null
+  },
+  {
+   "cell": "3,-8",
+   "edid": "DBTechHighschoolExt",
+   "canyon_n": 1162,
+   "canyon_before": 231.4,
+   "canyon_after": 121.7,
+   "open_n": 0,
+   "open_after": null
+  },
+  {
+   "cell": "-4,-1",
+   "edid": "InstituteExt",
+   "canyon_n": 768,
+   "canyon_before": 230.0,
+   "canyon_after": 120.6,
+   "open_n": 0,
+   "open_after": null
+  },
+  {
+   "cell": "0,-1",
+   "edid": "CambridgeCampKendallExt",
+   "canyon_n": 994,
+   "canyon_before": 236.6,
+   "canyon_after": 127.6,
+   "open_n": 0,
+   "open_after": null
+  },
+  {
+   "cell": "-7,-7",
+   "edid": "ChestnutHillockReservoirExt04",
+   "canyon_n": 917,
+   "canyon_before": 223.5,
+   "canyon_after": 118.0,
+   "open_n": 388,
+   "open_after": 204.2
+  },
+  {
+   "cell": "-2,-6",
+   "edid": "FensIntersection01",
+   "canyon_n": 765,
+   "canyon_before": 225.3,
+   "canyon_after": 120.8,
+   "open_n": 0,
+   "open_after": null
+  },
+  {
+   "cell": "-5,-6",
+   "edid": "FensBrookelineBuildingExt",
+   "canyon_n": 1549,
+   "canyon_before": 246.5,
+   "canyon_after": 143.9,
+   "open_n": 0,
+   "open_after": null
+  },
+  {
+   "cell": "-1,-6",
+   "edid": "BostonPublicLibraryExt",
+   "canyon_n": 739,
+   "canyon_before": 238.2,
+   "canyon_after": 136.6,
+   "open_n": 0,
+   "open_after": null
+  },
+  {
+   "cell": "-6,-8",
+   "edid": "FensParkviewApartmentsExt",
+   "canyon_n": 1283,
+   "canyon_before": 215.6,
+   "canyon_after": 116.6,
+   "open_n": 0,
+   "open_after": null
+  },
+  {
+   "cell": "2,-8",
+   "edid": "BackBayCarDealershipExt",
+   "canyon_n": 710,
+   "canyon_before": 237.2,
+   "canyon_after": 138.3,
+   "open_n": 0,
+   "open_after": null
+  },
+  {
+   "cell": "1,-3",
+   "edid": "CharlesViewAmphitheaterExt",
+   "canyon_n": 1222,
+   "canyon_before": 223.0,
+   "canyon_after": 128.2,
+   "open_n": 0,
+   "open_after": null
+  },
+  {
+   "cell": "-3,-8",
+   "edid": "DiamondCityExt03",
+   "canyon_n": 606,
+   "canyon_before": 235.7,
+   "canyon_after": 141.3,
+   "open_n": 16,
+   "open_after": 251.5
+  },
+  {
+   "cell": "-7,-6",
+   "edid": "ChestnutHillockReservoirExt03",
+   "canyon_n": 709,
+   "canyon_before": 225.6,
+   "canyon_after": 131.7,
+   "open_n": 136,
+   "open_after": 198.2
+  },
+  {
+   "cell": "2,-1",
+   "edid": "BeaconHillApartmentsExt01",
+   "canyon_n": 889,
+   "canyon_before": 205.4,
+   "canyon_after": 112.6,
+   "open_n": 136,
+   "open_after": 230.6
+  },
+  {
+   "cell": "-7,-1",
+   "edid": "CambridgePolymerLabsExt",
+   "canyon_n": 1400,
+   "canyon_before": 246.8,
+   "canyon_after": 156.4,
+   "open_n": 0,
+   "open_after": null
+  },
+  {
+   "cell": "-5,-11",
+   "edid": "POISC08",
+   "canyon_n": 1700,
+   "canyon_before": 226.7,
+   "canyon_after": 137.4,
+   "open_n": 0,
+   "open_after": null
+  },
+  {
+   "cell": "2,-2",
+   "edid": "BeaconHillApartmentsExt03",
+   "canyon_n": 1053,
+   "canyon_before": 214.6,
+   "canyon_after": 125.9,
+   "open_n": 0,
+   "open_after": null
+  },
+  {
+   "cell": "1,-2",
+   "edid": "CharlesViewAmphitheaterExt02",
+   "canyon_n": 379,
+   "canyon_before": 183.6,
+   "canyon_after": 95.7,
+   "open_n": 51,
+   "open_after": 207.5
+  },
+  {
+   "cell": "-5,-12",
+   "edid": "POISC06",
+   "canyon_n": 1584,
+   "canyon_before": 228.3,
+   "canyon_after": 141.6,
+   "open_n": 0,
+   "open_after": null
+  },
+  {
+   "cell": "1,-12",
+   "edid": "BigJohnsSalvageExt",
+   "canyon_n": 543,
+   "canyon_before": 231.4,
+   "canyon_after": 145.9,
+   "open_n": 0,
+   "open_after": null
+  },
+  {
+   "cell": "-5,-10",
+   "edid": "BostonPoliceRationingSiteExt",
+   "canyon_n": 573,
+   "canyon_before": 210.0,
+   "canyon_after": 125.8,
+   "open_n": 0,
+   "open_after": null
+  },
+  {
+   "cell": "-8,-7",
+   "edid": "ChestnutHillockReservoirExt",
+   "canyon_n": 852,
+   "canyon_before": 208.5,
+   "canyon_after": 125.3,
+   "open_n": 496,
+   "open_after": 192.2
+  },
+  {
+   "cell": "-1,-11",
+   "edid": "POISC15",
+   "canyon_n": 882,
+   "canyon_before": 228.6,
+   "canyon_after": 145.4,
+   "open_n": 0,
+   "open_after": null
+  },
+  {
+   "cell": "1,-8",
+   "edid": "AtomatoysCorporateHQExt",
+   "canyon_n": 1181,
+   "canyon_before": 225.9,
+   "canyon_after": 143.4,
+   "open_n": 0,
+   "open_after": null
+  },
+  {
+   "cell": "-5,-1",
+   "edid": "InstituteExt04",
+   "canyon_n": 163,
+   "canyon_before": 182.0,
+   "canyon_after": 103.4,
+   "open_n": 0,
+   "open_after": null
+  },
+  {
+   "cell": "2,-9",
+   "edid": "TheaterDistrictS",
+   "canyon_n": 325,
+   "canyon_before": 222.4,
+   "canyon_after": 144.5,
+   "open_n": 0,
+   "open_after": null
+  },
+  {
+   "cell": "1,-11",
+   "edid": "BigJohnsSalvageExt02",
+   "canyon_n": 277,
+   "canyon_before": 224.7,
+   "canyon_after": 149.1,
+   "open_n": 0,
+   "open_after": null
+  },
+  {
+   "cell": "-3,-12",
+   "edid": "POISC21",
+   "canyon_n": 1594,
+   "canyon_before": 221.9,
+   "canyon_after": 146.9,
+   "open_n": 0,
+   "open_after": null
+  },
+  {
+   "cell": "0,-11",
+   "edid": "BigJohnsSalvageExt04",
+   "canyon_n": 607,
+   "canyon_before": 231.9,
+   "canyon_after": 157.6,
+   "open_n": 0,
+   "open_after": null
+  },
+  {
+   "cell": "-4,-10",
+   "edid": "BostonPoliceRationingSiteExt02",
+   "canyon_n": 417,
+   "canyon_before": 231.6,
+   "canyon_after": 157.6,
+   "open_n": 0,
+   "open_after": null
+  },
+  {
+   "cell": "-2,-12",
+   "edid": "RelayTower03Ext",
+   "canyon_n": 1646,
+   "canyon_before": 236.1,
+   "canyon_after": 163.1,
+   "open_n": 0,
+   "open_after": null
+  },
+  {
+   "cell": "-8,-6",
+   "edid": "ChestnutHillockReservoirExt02",
+   "canyon_n": 627,
+   "canyon_before": 228.3,
+   "canyon_after": 161.3,
+   "open_n": 596,
+   "open_after": 199.3
+  },
+  {
+   "cell": "-2,-10",
+   "edid": "NHMFreightDepotExt",
+   "canyon_n": 482,
+   "canyon_before": 221.8,
+   "canyon_after": 155.7,
+   "open_n": 0,
+   "open_after": null
+  },
+  {
+   "cell": "0,-12",
+   "edid": "BigJohnsSalvageExt03",
+   "canyon_n": 616,
+   "canyon_before": 210.1,
+   "canyon_after": 144.9,
+   "open_n": 0,
+   "open_after": null
+  },
+  {
+   "cell": "-2,-9",
+   "edid": "MassPikeTunnelEastExt",
+   "canyon_n": 1003,
+   "canyon_before": 224.6,
+   "canyon_after": 159.7,
+   "open_n": 0,
+   "open_after": null
+  },
+  {
+   "cell": "-3,-2",
+   "edid": "Riverext01",
+   "canyon_n": 502,
+   "canyon_before": 221.1,
+   "canyon_after": 156.2,
+   "open_n": 62,
+   "open_after": 204.1
+  },
+  {
+   "cell": "-6,-2",
+   "edid": "USSRiptideExt02",
+   "canyon_n": 542,
+   "canyon_before": 215.7,
+   "canyon_after": 158.8,
+   "open_n": 48,
+   "open_after": 150.0
+  },
+  {
+   "cell": "-5,-3",
+   "edid": "USSRiptideExt",
+   "canyon_n": 659,
+   "canyon_before": 187.2,
+   "canyon_after": 133.7,
+   "open_n": 0,
+   "open_after": null
+  },
+  {
+   "cell": "3,-12",
+   "edid": "SouthBostonCheckpointExt",
+   "canyon_n": 616,
+   "canyon_before": 237.9,
+   "canyon_after": 184.5,
+   "open_n": 0,
+   "open_after": null
+  },
+  {
+   "cell": "1,-10",
+   "edid": "BackBayCraterExt",
+   "canyon_n": 89,
+   "canyon_before": 209.1,
+   "canyon_after": 158.7,
+   "open_n": 202,
+   "open_after": 227.8
+  },
+  {
+   "cell": "-6,-10",
+   "edid": "MQ106TrackingSite01",
+   "canyon_n": 316,
+   "canyon_before": 225.8,
+   "canyon_after": 181.5,
+   "open_n": 167,
+   "open_after": 249.2
+  }
+ ]
+}

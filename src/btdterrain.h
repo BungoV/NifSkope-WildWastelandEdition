@@ -110,6 +110,10 @@ enum class LodtPlane
 	WaterBodyId,
 	WaterFlow,
 	WaterShore,
+	/* Not a stored plane: the body's water height minus the file's own
+	 * full-rate ground under the texel, worked out at draw time from two
+	 * things version 3 already holds. */
+	WaterDepth,
 	Count
 };
 

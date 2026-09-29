@@ -1,0 +1,292 @@
+{
+ "raw_no_curve": {
+  "waterheight": 0.9472,
+  "watertype": 0.0,
+  "bodyid": 0.0,
+  "flow": 0.0,
+  "shore": 0.9786,
+  "cellflags": 0.0,
+  "depth": 0.0
+ },
+ "fold1": {
+  "calibrated_on": [
+   "cellflags",
+   "watertype"
+  ],
+  "curve": [
+   [
+    38,
+    42.0
+   ],
+   [
+    51,
+    57.0
+   ],
+   [
+    92,
+    102.0
+   ],
+   [
+    203,
+    211.0
+   ],
+   [
+    217,
+    223.0
+   ],
+   [
+    230,
+    234.0
+   ],
+   [
+    242,
+    243.0
+   ],
+   [
+    255,
+    253.0
+   ]
+  ],
+  "waterheight": {
+   "legend_view": "waterheight",
+   "swatches": 5,
+   "water_px": 140150,
+   "share_matching_legend": 0.9785,
+   "swatches_present": {
+    "450.0 units": 132751,
+    "482.0 units": 0,
+    "514.0 units": 0,
+    "546.0 units": 0,
+    "578.0 units": 4388
+   },
+   "floor_with_cellflags_legend": 0.0
+  },
+  "bodyid": {
+   "legend_view": "bodyid",
+   "swatches": 8,
+   "water_px": 140150,
+   "share_matching_legend": 0.9785,
+   "swatches_present": {
+    "body 1 sea": 131528,
+    "body 43 river": 4388,
+    "body 96 lake": 512,
+    "body 97 lake": 405,
+    "body 103 lake": 280,
+    "body 177 lake": 26,
+    "body 227 lake": 0,
+    "body 317 lake": 0
+   },
+   "floor_with_cellflags_legend": 0.0
+  },
+  "flow": {
+   "legend_view": "flow",
+   "swatches": 9,
+   "water_px": 140150,
+   "share_matching_legend": 0.9785,
+   "swatches_present": {
+    "flowing east (speed 8)": 0,
+    "flowing north-east (speed 8)": 0,
+    "flowing north (speed 8)": 0,
+    "flowing north-west (speed 8)": 0,
+    "flowing west (speed 8)": 0,
+    "flowing south-west (speed 8)": 0,
+    "flowing south (speed 8)": 0,
+    "flowing south-east (speed 8)": 0,
+    "still": 131528
+   },
+   "floor_with_waterheight_legend": 0.0
+  },
+  "shore": {
+   "legend_view": "shore",
+   "swatches": 5,
+   "water_px": 140148,
+   "share_matching_legend": 0.9786,
+   "swatches_present": {
+    "0 units from shore": 0,
+    "512 units from shore": 13835,
+    "2048 units from shore": 5151,
+    "4096 units from shore": 3915,
+    "at least 8160 units from shore": 0
+   },
+   "floor_with_cellflags_legend": 0.0
+  },
+  "depth": {
+   "legend_view": "depth",
+   "swatches": 6,
+   "water_px": 140148,
+   "share_matching_legend": 0.9502,
+   "swatches_present": {
+    "ground at or above the water": 0,
+    "0 to 128 units": 14066,
+    "128 to 512 units": 61675,
+    "512 to 1024 units": 55670,
+    "1024 to 2048 units": 1753,
+    "2048 units and deeper": 0
+   },
+   "floor_with_bodyid_legend": 0.0
+  },
+  "default": {
+   "legend_view": "default",
+   "legend": "water = 41,92,128",
+   "water_px": 141810,
+   "share_matching_blend_0.60": 0.9778,
+   "floor_blend_0.30": 0.0
+  }
+ },
+ "fold2": {
+  "calibrated_on": [
+   "bodyid",
+   "watertype"
+  ],
+  "curve": [
+   [
+    51,
+    57.0
+   ],
+   [
+    69,
+    77.0
+   ],
+   [
+    72,
+    80.0
+   ],
+   [
+    77,
+    85.0
+   ],
+   [
+    84,
+    93.0
+   ],
+   [
+    90,
+    99.0
+   ],
+   [
+    92,
+    102.0
+   ],
+   [
+    116,
+    127.0
+   ],
+   [
+    143,
+    155.0
+   ],
+   [
+    160,
+    171.0
+   ],
+   [
+    203,
+    211.0
+   ],
+   [
+    217,
+    223.0
+   ],
+   [
+    225,
+    230.0
+   ],
+   [
+    239,
+    241.0
+   ],
+   [
+    242,
+    243.0
+   ],
+   [
+    255,
+    253.0
+   ]
+  ],
+  "cellflags": {
+   "legend_view": "cellflags",
+   "swatches": 4,
+   "water_px": 140150,
+   "share_matching_legend": 0.9785,
+   "swatches_present": {
+    "water and land": 137139,
+    "water only": 0,
+    "land only": 0,
+    "neither": 0
+   },
+   "floor_with_watertype_legend": 0.0
+  }
+ },
+ "fold3": {
+  "calibrated_on": [
+   "bodyid",
+   "cellflags"
+  ],
+  "curve": [
+   [
+    38,
+    42.0
+   ],
+   [
+    69,
+    77.0
+   ],
+   [
+    72,
+    80.0
+   ],
+   [
+    77,
+    85.0
+   ],
+   [
+    84,
+    93.0
+   ],
+   [
+    90,
+    99.0
+   ],
+   [
+    116,
+    127.0
+   ],
+   [
+    143,
+    155.0
+   ],
+   [
+    160,
+    171.0
+   ],
+   [
+    225,
+    230.0
+   ],
+   [
+    230,
+    234.0
+   ],
+   [
+    239,
+    241.0
+   ],
+   [
+    255,
+    253.0
+   ]
+  ],
+  "watertype": {
+   "legend_view": "watertype",
+   "swatches": 2,
+   "water_px": 140150,
+   "share_matching_legend": 0.9785,
+   "swatches_present": {
+    "WATR 00000018 (worldspace default)": 132751,
+    "WATR 00102d5a": 4388
+   },
+   "floor_with_cellflags_legend": 0.0
+  }
+ }
+}

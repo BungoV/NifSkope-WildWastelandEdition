@@ -673,11 +673,26 @@ static const char * const gLgSwitchSkipValue[] = {
 	nullptr
 };
 
+/*! Flags that take NO value and are dropped alone. --no-gpu is one of two
+ *  ways to the CPU path (the other is the Use GPU setting), so the token says
+ *  nothing: the path actually taken goes into the identity word instead
+ *  (lodgenGpuDigestWord, empty on the CPU path), and a cache written on one
+ *  path is never reused by the other (lane GPU1, 2026-09-26). */
+static const char * const gLgSwitchSkipToken[] = {
+	"--no-gpu",
+	nullptr
+};
+
 QString lodgenSwitchDigestOf( const QStringList & a )
 {
 	QCryptographicHash h( QCryptographicHash::Sha1 );
 	for ( int i = 0; i < a.size(); i++ ) {
 		bool skip = false;
+		for ( const char * const * s = gLgSwitchSkipToken; *s; s++ )
+			if ( a.at( i ) == QLatin1String( *s ) )
+				skip = true;
+		if ( skip )
+			continue;
 		for ( const char * const * s = gLgSwitchSkip; *s; s++ ) {
 			if ( a.at( i ) == QLatin1String( *s ) ) {
 				skip = true;
@@ -756,9 +771,11 @@ QStringList lodgenIdentityDump( const LodgenChunkPassOptions & pass, const Lodge
 		 * (the rule lines only: a comment edit moves nothing). */
 		add( p + "flatObjectsRules", c.roads && c.flatObjects
 			? lodgenFlatObjectsRulesDigest( c.flatObjectsFile ) : QStringLiteral( "-" ) );
+		add( p + "stampNormals", b( c.stampNormals ) );
 		add( p + "terrainObjectAo", b( c.terrainObjectAo ) );
 		add( p + "terrainObjectAoStrength", f( c.terrainObjectAoStrength ) );
 		add( p + "terrainObjectAoSlab", b( c.terrainObjectAoSlab ) );
+		add( p + "skyObjects", b( c.skyObjects ) );
 	};
 
 	add( "generator", n( kLodgenGeneratorRevision ) );
@@ -767,7 +784,6 @@ QStringList lodgenIdentityDump( const LodgenChunkPassOptions & pass, const Lodge
 	add( "terrain.dim", n( t.dim ) );
 	add( "terrain.water", b( t.water ) );
 	add( "terrain.waterSubdiv", n( t.waterSubdiv ) );
-	add( "terrain.waterChannels", b( t.waterChannels ) );
 	add( "terrain.waterCullBuried", b( t.waterCullBuried ) );
 	add( "terrain.shoreDenser", b( t.shoreDenser ) );
 	add( "terrain.shoreDensity", n( t.shoreDensity ) );
@@ -821,6 +837,12 @@ QStringList lodgenIdentityDump( const LodgenChunkPassOptions & pass, const Lodge
 	add( "land.sheetFormat", n( lodgenSheetFormat() ) );
 	add( "blend.edges", n( lodgenBlendEdges() ) );
 	add( "blend.margin", f( lodgenBlendMargin() ) );
+	/* lane TILING5: named only when ON, so a ledger written without them is
+	 * the rung's bytes and an incremental run still sees them change */
+	if ( lodgenLandHeightBlend() )
+		add( "land.heightBlend", b( true ) );
+	if ( lodgenLandMacro() )
+		add( "land.macro", b( true ) );
 
 	add( "run.atlas", b( x.atlas ) );
 	add( "run.arrays", b( x.arrays ) );
@@ -855,6 +877,11 @@ QStringList lodgenIdentityDump( const LodgenChunkPassOptions & pass, const Lodge
 	add( "native.scrappable", b( x.scrappable ) );
 	add( "native.identityJoinLegacy", b( x.identityJoinLegacy ) );
 	add( "native.identityJoinGap", f( x.identityJoinGap ) );
+	// IDENT1: named only when ON, so the off bake's identity word is the old one exactly
+	if ( x.identityJoinContact )
+		add( "native.identityJoinContact", b( true ) );
+	if ( x.occluderBuilding )
+		add( "native.occluderBuilding", b( true ) );
 	add( "native.aggregate", b( x.aggregate ) );
 	add( "native.aggregateMin", n( x.aggMin ) );
 	add( "native.aggregateTile", n( x.aggTile ) );

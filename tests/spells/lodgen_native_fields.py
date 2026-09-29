@@ -455,13 +455,20 @@ def main():
 
     # ---- j. the NATIVE1c words: each WRITTEN and each MOVING -------------
     print('j. the v4/v5 words (lane NATIVE1c)')
-    ck.check('j0 the .lodo is at version 6 (SWAP1) and the .lodi at 3, 4, 5, 6, 7, 8, 9 or 10 (%d / %d)'
+    # GROUND1 (2026-09-27): a far .lodi is v12 when it carries the per-vertex ground-contact stream
+    # (the default); 11 stays the near library's alone
+    ck.check('j0 the .lodo is at version 6 (SWAP1) and the .lodi at 3, 4, 5, 6, 7, 8, 9, 10 or 12 (%d / %d)'
              % (h['version'], ih['version']),
-             h['version'] == 6 and ih['version'] in (3, 4, 5, 6, 7, 8, 9, 10))
-    # v10 (lane BAKE2): bit 7 appears in a v10 file and only there, and a v10 file carries at least one
+             h['version'] == 6 and ih['version'] in (3, 4, 5, 6, 7, 8, 9, 10, 12))
+    # v10 (lane BAKE2): bit 7 appears in a v10 file and only there, and a v10 file carries at least one.
+    # v12 (GROUND1) is decided after v10 and keeps its bits: a v12 file may carry bit 7 or not
     wide = sum(1 for r in T['instances'] if r['flags'] & 0x80)
-    ck.check('j0b the wide-scale bit (0x80) is set on %d instance(s): > 0 exactly when the .lodi is version 10 (%d)'
-             % (wide, ih['version']), (wide > 0) == (ih['version'] == 10))
+    ck.check('j0b the wide-scale bit (0x80) is set on %d instance(s): > 0 exactly when the .lodi is version 10, '
+             'or either way at version 12 (%d)' % (wide, ih['version']),
+             ih['version'] == 12 or (wide > 0) == (ih['version'] == 10))
+    gnd = bool(T.get('vertexGroundFirst'))
+    ck.check('j0d the per-vertex ground-contact stream is present exactly when the .lodi is version 12 '
+             '(present %s, version %d)' % (gnd, ih['version']), gnd == (ih['version'] == 12))
     # NEAR1 (2026-09-26): .lodo v7 (NEAR flag 16, material features) and .lodi v11 (instance bit 8,
     # INITIALLY_DISABLED) belong to the near library alone; a far file never carries either
     disabled = sum(1 for r in T['instances'] if r['flags'] & 0x100)

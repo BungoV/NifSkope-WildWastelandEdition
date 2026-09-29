@@ -76,6 +76,11 @@ constexpr int H_OFF_VSKY = 0x110, H_VSKYBYTES = 0x118, H_RESERVED_11C = 0x11C;
  *  `--lodi-v7` -- the module off -- writes the version-7 file byte for byte. */
 constexpr int H_OFF_VHOR = 0x11C, H_VHORBYTES = 0x124, H_HORAZ = 0x128;
 constexpr int H_HORSTEPS = 0x12A, H_HORREACH = 0x12C, H_RESERVED_130 = 0x130;
+/*! v12 (2026-09-27, lane GROUND1): the per-vertex ground-contact stream, s4.16.
+ *  0x130 its offset, 0x138 its size; the pad is then 0x13C..0x1FF. Placed AFTER
+ *  v8's retired words rather than on top of them, so no header offset ever means
+ *  two things across versions. */
+constexpr int H_OFF_VGND = 0x130, H_VGNDBYTES = 0x138, H_RESERVED_13C = 0x13C;
 constexpr float SQRT_HALF = 0.70710678118654752f;
 
 //! Bit pattern of a float, for the header's two f32 words.
@@ -470,7 +475,7 @@ bool lodiWrite( const QString & path, const LodiSrcSet & set, LodiHeader * heade
 			const LodiSrcInstance & r = set.instances[order[i]];
 			if ( !r.hasOccluder )
 				continue;
-			const float qs = lodiScaleQuantised( r.scale );
+			const float qs = r.occWorld ? 1.0f : lodiScaleQuantised( r.scale );
 			const double vol = 8.0 * double( r.occHalf[0] * qs ) * double( r.occHalf[1] * qs ) * double( r.occHalf[2] * qs );
 			if ( !( vol > 0.0 ) )
 				continue;
@@ -497,6 +502,21 @@ bool lodiWrite( const QString & path, const LodiSrcSet & set, LodiHeader * heade
 				const float qs = lodiScaleQuantised( r.scale );
 				LodiOccluder b;
 				std::memset( &b, 0, sizeof( b ) );
+				if ( r.occWorld ) {
+					/* IDENT1: a building group's box, already world-placed; the
+					 * placement only carries it (it is in this cell, and so is the
+					 * box's listing). The same 0.999 pull-in for the same reason. */
+					for ( int k = 0; k < 3; k++ ) {
+						b.centre[k] = r.occCentre[k];
+						b.halfExtent[k] = r.occHalf[k] * 0.999f;
+					}
+					lodiPackRotation( r.occWorldRot, b.rot );
+					b.flags = 1;        // fitted inside the object's own solid (docs 4.5)
+					b.instanceIndex = ii;
+					b.meshId = r.occMeshId;
+					occ.push_back( b );
+					continue;
+				}
 				for ( int k = 0; k < 3; k++ ) {
 					b.centre[k] = r.pos[k] + qs * ( r.rot[k * 3] * r.occCentre[0]
 						+ r.rot[k * 3 + 1] * r.occCentre[1] + r.rot[k * 3 + 2] * r.occCentre[2] );
@@ -723,6 +743,32 @@ bool lodiWrite( const QString & path, const LodiSrcSet & set, LodiHeader * heade
 			cursor += quint32( r.vertexSky.size() );
 		}
 	}
+	/* v12: THE VERTEX-GROUND STREAM, s4.10's layout byte for byte, and one
+	 * vertex population with the AO stream exactly as the sky stream is. */
+	std::vector<quint8> vgnd;
+	if ( set.vertexGround ) {
+		if ( !set.vertexAo )
+			return fail( QStringLiteral( "vertex ground contact without vertex AO: the stream shares the AO stream's vertex population" ) );
+		quint64 total = 0;
+		for ( size_t i = 0; i < n; i++ )
+			total += set.instances[order[i]].vertexGround.size();
+		if ( total > 0xFFFFFFFFull - 4ull * ( n + 1 ) )
+			return fail( QString( "vertex-ground stream of %1 bytes does not fit a u32 size word" ).arg( total ) );
+		vgnd.resize( 4 * ( n + 1 ) + size_t( total ) );
+		quint32 cursor = 0;
+		for ( size_t i = 0; i <= n; i++ ) {
+			std::memcpy( &vgnd[4 * i], &cursor, 4 );
+			if ( i == n )
+				break;
+			const LodiSrcInstance & r = set.instances[order[i]];
+			if ( !r.vertexGround.empty() && r.vertexGround.size() != r.vertexAo.size() )
+				return fail( QString( "instance %1 (%2) has %3 ground bytes but %4 AO bytes; the two streams are one vertex population" )
+					.arg( i ).arg( r.baseName ).arg( r.vertexGround.size() ).arg( r.vertexAo.size() ) );
+			if ( !r.vertexGround.empty() )
+				std::memcpy( &vgnd[4 * ( n + 1 ) + cursor], r.vertexGround.data(), r.vertexGround.size() );
+			cursor += quint32( r.vertexGround.size() );
+		}
+	}
 	/* THE VERSION IS DECIDED BY WHAT THE FILE CARRIES (the contract's version
 	 * table, docs/LODGEN_NATIVE_LODO_LODI.md s3.7 and its
 	 * Deviation 6): no aggregate row means version 3 and a header pad that
@@ -820,6 +866,17 @@ bool lodiWrite( const QString & path, const LodiSrcSet & set, LodiHeader * heade
 				.arg( disabledWritten ).arg( LODI_VERSION_INITIALLY_DISABLED ).arg( h.version ) );
 		h.version = LODI_VERSION_INITIALLY_DISABLED;
 	}
+	/* v12, THE VERTEX-GROUND STREAM (lane GROUND1, 2026-09-27). Decided LAST, so
+	 * the v9/v10/v11 rules above -- each of which assigns its own number -- can
+	 * never lower it; v12 keeps bits 6-8. It needs v7's header block. */
+	if ( set.vertexGround ) {
+		if ( h.version < LODI_VERSION_GROUP_SKY )
+			return fail( QString( "the vertex-ground stream needs version %1 (the v7 header block); this set asked "
+				"for a version-%2 file (--lodi-v6?). Refused, not dropped" )
+				.arg( LODI_VERSION_VERTEX_GROUND ).arg( h.version ) );
+		h.version = LODI_VERSION_VERTEX_GROUND;
+		h.vertexGroundBytes = quint32( vgnd.size() );
+	}
 	const quint32 headerBytes = lodiHeaderBytes( h.version );
 	QByteArray file;
 	file.resize( qsizetype( headerBytes ) );
@@ -857,6 +914,9 @@ bool lodiWrite( const QString & path, const LodiSrcSet & set, LodiHeader * heade
 		h.offGroup = payload( grp.data(), quint64( grp.size() ) * sizeof( quint16 ) );
 	if ( !vsky.empty() )
 		h.offVertexSky = payload( vsky.data(), quint64( vsky.size() ) );
+	// v12: the ground stream after everything, so nothing moves
+	if ( !vgnd.empty() )
+		h.offVertexGround = payload( vgnd.data(), quint64( vgnd.size() ) );
 	h.fileBytes = quint64( file.size() );
 	h.indexCrc32 = lodvCrc32( reinterpret_cast<const unsigned char *>( chunks.data() ), qsizetype( chunks.size() * sizeof( LodiChunk ) ) );
 	h.indexCrc32 = lodvCrc32( reinterpret_cast<const unsigned char *>( cells.data() ), qsizetype( cells.size() * sizeof( LodiCellRange ) ), h.indexCrc32 );
@@ -877,6 +937,8 @@ bool lodiWrite( const QString & path, const LodiSrcSet & set, LodiHeader * heade
 	 * absent, zero bytes fold in and a v3..v6 file's CRC does not move. */
 	h.indexCrc32 = lodvCrc32( reinterpret_cast<const unsigned char *>( grp.data() ), qsizetype( grp.size() * sizeof( quint16 ) ), h.indexCrc32 );
 	h.indexCrc32 = lodvCrc32( reinterpret_cast<const unsigned char *>( vsky.data() ), qsizetype( vsky.size() ), h.indexCrc32 );
+	// v12: the ground stream joins after the sky stream; absent, zero bytes fold in
+	h.indexCrc32 = lodvCrc32( reinterpret_cast<const unsigned char *>( vgnd.data() ), qsizetype( vgnd.size() ), h.indexCrc32 );
 
 	putLE<quint32>( file, H_MAGIC, LODI_MAGIC );
 	putLE<quint32>( file, H_VERSION, h.version );
@@ -938,6 +1000,10 @@ bool lodiWrite( const QString & path, const LodiSrcSet & set, LodiHeader * heade
 		putLE<quint64>( file, H_OFF_VSKY, h.offVertexSky );
 		putLE<quint32>( file, H_VSKYBYTES, h.vertexSkyBytes );
 	}
+	if ( !vgnd.empty() ) {
+		putLE<quint64>( file, H_OFF_VGND, h.offVertexGround );
+		putLE<quint32>( file, H_VGNDBYTES, h.vertexGroundBytes );
+	}
 	/* The crc window is 0x10 .. headerBytes - 1. On a v3..v6 file headerBytes is
 	 * 256 and the window is the one it always was, which is what keeps a v6
 	 * bake byte-identical across this lane. */
@@ -978,6 +1044,11 @@ bool lodiWrite( const QString & path, const LodiSrcSet & set, LodiHeader * heade
 		for ( size_t i = 0; i < n; i++ )
 			if ( !set.instances[i].vertexSky.empty() )
 				stats->vertexSkyPlacements++;
+		stats->vertexGroundBytes = h.vertexGroundBytes;
+		stats->vertexGroundPlacements = 0;
+		for ( size_t i = 0; i < n; i++ )
+			if ( !set.instances[i].vertexGround.empty() )
+				stats->vertexGroundPlacements++;
 		stats->version = h.version;
 	}
 	return true;
@@ -1025,12 +1096,9 @@ bool lodiRead( const QString & path, LodiHeader * header, LodiTable * table,
 		&& h.version != LODI_VERSION_PLACEMENT_AO && h.version != LODI_VERSION_VERTEX_AO
 		&& h.version != LODI_VERSION_GROUP_SKY && h.version != LODI_VERSION_HORIZON
 		&& h.version != LODI_VERSION_SCRAPPABLE && h.version != LODI_VERSION_WIDE_SCALE
-		&& h.version != LODI_VERSION_INITIALLY_DISABLED )
-		return refuse( QString( "version %1; this reader knows %2, %3, %4, %5, %6, %7, %8 and %9" )
-			.arg( h.version ).arg( LODI_VERSION ).arg( LODI_VERSION_AGGREGATE )
-			.arg( LODI_VERSION_PLACEMENT_AO ).arg( LODI_VERSION_VERTEX_AO )
-			.arg( LODI_VERSION_GROUP_SKY ).arg( LODI_VERSION_HORIZON )
-			.arg( LODI_VERSION_SCRAPPABLE ).arg( LODI_VERSION_WIDE_SCALE ) );
+		&& h.version != LODI_VERSION_INITIALLY_DISABLED && h.version != LODI_VERSION_VERTEX_GROUND )
+		return refuse( QString( "version %1; this reader knows %2 to %3" )
+			.arg( h.version ).arg( LODI_VERSION ).arg( LODI_VERSION_VERTEX_GROUND ) );
 	/* v7's header BLOCK is 512 bytes. On every older version this is still 256
 	 * and the crc window below is the one it always was. */
 	const quint32 headerBytes = lodiHeaderBytes( h.version );
@@ -1103,9 +1171,11 @@ bool lodiRead( const QString & path, LodiHeader * header, LodiTable * table,
 	 * carries the stream (lane HORIZONOUT, 2026-09-19). v9 is the v7 layout plus
 	 * the scrappable flag bit and carries no stream, so it is v7-shaped here. */
 	const bool v8 = ( h.version == LODI_VERSION_HORIZON );
+	// v12 = the v11 layout + the ground-contact stream at 0x130 (NOT a superset of the retired v8)
+	const bool v12 = ( h.version == LODI_VERSION_VERTEX_GROUND );
 	const bool v7 = ( h.version == LODI_VERSION_GROUP_SKY ) || v8
 		|| ( h.version == LODI_VERSION_SCRAPPABLE ) || ( h.version == LODI_VERSION_WIDE_SCALE )
-		|| ( h.version == LODI_VERSION_INITIALLY_DISABLED );
+		|| ( h.version == LODI_VERSION_INITIALLY_DISABLED ) || v12;
 	const bool v6 = ( h.version == LODI_VERSION_VERTEX_AO ) || v7;
 	const bool v5 = ( h.version == LODI_VERSION_PLACEMENT_AO ) || v6;
 	const int padFrom = v5 ? H_RESERVED_F1
@@ -1196,9 +1266,29 @@ bool lodiRead( const QString & path, LodiHeader * header, LodiTable * table,
 				 * name, and "reserved header byte at 0x11c" would send the next
 				 * person looking at the wrong feature. */
 				return refuse( QString( "version %1 carrying version-8 header words (horizon stream at 0x11C = %2, "
-					"%3 bytes, %4 azimuths at 0x128). Versions 7 and 9 reserve 0x11C..0x1FF and write zeros there" )
+					"%3 bytes, %4 azimuths at 0x128). Versions 7 and 9 to 12 reserve 0x11C..0x12F and write zeros there" )
 					.arg( h.version ).arg( getLE<quint64>( p + H_OFF_VHOR ) )
 					.arg( getLE<quint32>( p + H_VHORBYTES ) ).arg( getLE<quint16>( p + H_HORAZ ) ) );
+			}
+			if ( v12 ) {
+				/* v12: the vertex-ground stream. Version 12 IS the stream: a bake
+				 * without it is written at 7, 9, 10 or 11, which is what makes
+				 * WW_LODGEN_NO_VERTEX_GROUND=1 byte-identical. It shares the AO
+				 * stream's vertex population, so a v12 file without one is refused. */
+				h.offVertexGround = getLE<quint64>( p + H_OFF_VGND );
+				h.vertexGroundBytes = getLE<quint32>( p + H_VGNDBYTES );
+				if ( h.offVertexGround == 0 )
+					return refuse( QStringLiteral( "version 12 with no vertex-ground stream (header 0x130 is 0). "
+						"The stream is what version 12 IS: a bake without it is written at version 7, 9, 10 or 11" ) );
+				if ( h.vertexGroundBytes < 4ull * ( quint64( h.instanceCount ) + 1 ) )
+					return refuse( QString( "vertex-ground stream of %1 bytes cannot hold its own %2 offset words" )
+						.arg( h.vertexGroundBytes ).arg( quint64( h.instanceCount ) + 1 ) );
+			} else if ( getLE<quint64>( p + H_OFF_VGND ) != 0 || getLE<quint32>( p + H_VGNDBYTES ) != 0 ) {
+				/* An older v7-block file carrying the v12 words: named, not left to
+				 * the pad sweep's bare offset. */
+				return refuse( QString( "version %1 carrying version-12 header words (vertex-ground stream at 0x130 = %2, "
+					"%3 bytes at 0x138). The ground-contact stream is a version-12 payload" )
+					.arg( h.version ).arg( getLE<quint64>( p + H_OFF_VGND ) ).arg( getLE<quint32>( p + H_VGNDBYTES ) ) );
 			}
 		} else if ( getLE<quint64>( p + H_OFF_GROUP ) != 0 || getLE<quint64>( p + H_OFF_VSKY ) != 0 ) {
 			/* A v5 or v6 file whose header block ends at 0x100 cannot be
@@ -1275,7 +1365,7 @@ bool lodiRead( const QString & path, LodiHeader * header, LodiTable * table,
 			return refuse( QString( "reserved header byte at 0x%1 is not zero" ).arg( i, 2, 16, QChar( '0' ) ) );
 	if ( v7 )
 		for ( int i = v8 ? H_RESERVED_130 : H_RESERVED_11C; i < int( LODI_HEADER_BYTES_V7 ); i++ )
-			if ( p[i] != 0 )
+			if ( !( v12 && i >= H_OFF_VGND && i < H_RESERVED_13C ) && p[i] != 0 )   // v12: 0x130..0x13B are its words
 				return refuse( QString( "reserved header byte at 0x%1 is not zero" ).arg( i, 3, 16, QChar( '0' ) ) );
 	if ( h.fileBytes != quint64( file.size() ) )
 		return refuse( QString( "fileBytes %1 but the file is %2 bytes" ).arg( h.fileBytes ).arg( file.size() ) );
@@ -1303,7 +1393,7 @@ bool lodiRead( const QString & path, LodiHeader * header, LodiTable * table,
 		{ "cold blob", h.offCold, quint64( h.instanceCount ) * sizeof( LodiCold ) },
 		{ "occluder table", h.offOccluders, quint64( h.occluderCount ) * sizeof( LodiOccluder ) },
 		{ "occluder range blob", h.offOccluderRanges, occRangeBytes } };
-	int iAgg = -1, iPao = -1, iVao = -1, iGrp = -1, iVsky = -1, iVhor = -1;   //!< where the optional payloads landed in `tabs`, or -1
+	int iAgg = -1, iPao = -1, iVao = -1, iGrp = -1, iVsky = -1, iVhor = -1, iVgnd = -1;   //!< where the optional payloads landed in `tabs`, or -1
 	if ( h.version == LODI_VERSION_AGGREGATE || ( v5 && h.aggregateCount ) ) {
 		iAgg = int( tabs.size() );
 		tabs.push_back( { "aggregate table", h.offAggregates,
@@ -1333,6 +1423,11 @@ bool lodiRead( const QString & path, LodiHeader * header, LodiTable * table,
 	if ( v8 && h.offVertexHorizon ) {
 		iVhor = int( tabs.size() );
 		tabs.push_back( { "vertex-horizon stream", h.offVertexHorizon, quint64( h.vertexHorizonBytes ) } );
+	}
+	// v12: the ground stream after the sky stream, as the writer laid it
+	if ( v12 && h.offVertexGround ) {
+		iVgnd = int( tabs.size() );
+		tabs.push_back( { "vertex-ground stream", h.offVertexGround, quint64( h.vertexGroundBytes ) } );
 	}
 	quint64 prevEnd = headerBytes;
 	for ( const Tab & t : tabs ) {
@@ -1376,6 +1471,9 @@ bool lodiRead( const QString & path, LodiHeader * header, LodiTable * table,
 		// v8: the horizon stream joins after the sky stream, as the writer folds it
 		if ( iVhor >= 0 )
 			icrc = lodvCrc32( p + tabs[iVhor].off, qsizetype( tabs[iVhor].bytes ), icrc );
+		// v12: the ground stream joins after the sky stream, as the writer folds it
+		if ( iVgnd >= 0 )
+			icrc = lodvCrc32( p + tabs[iVgnd].off, qsizetype( tabs[iVgnd].bytes ), icrc );
 		if ( icrc != h.indexCrc32 )
 			return refuse( QString( "indexCrc32 0x%1 does not match the chunk table + cell ranges + occluders%2%3 (0x%4)" )
 				.arg( h.indexCrc32, 8, 16, QChar( '0' ) )
@@ -1489,6 +1587,32 @@ bool lodiRead( const QString & path, LodiHeader * header, LodiTable * table,
 					return refuse( QString( "instance %1 has %2 sky bytes but %3 AO bytes; the two streams are "
 						"one vertex population" ).arg( i ).arg( sn ).arg( an ) );
 			}
+	}
+	if ( iVgnd >= 0 ) {
+		/* v12: s4.8's three offset rules, asked of the ground-contact stream in
+		 * the same words, then the one-population rule against the AO stream. */
+		const size_t nOff = size_t( h.instanceCount ) + 1;
+		T.vertexGroundFirst.resize( nOff );
+		const unsigned char * gb = p + h.offVertexGround;
+		for ( size_t i = 0; i < nOff; i++ ) {
+			T.vertexGroundFirst[i] = getLE<quint32>( gb + 4 * i );
+			if ( i && T.vertexGroundFirst[i] < T.vertexGroundFirst[i - 1] )
+				return refuse( QString( "vertex-ground offset %1 (%2) is below offset %3 (%4)" )
+					.arg( i ).arg( T.vertexGroundFirst[i] ).arg( i - 1 ).arg( T.vertexGroundFirst[i - 1] ) );
+		}
+		const quint64 dataBytes = quint64( h.vertexGroundBytes ) - 4ull * nOff;
+		if ( T.vertexGroundFirst[0] != 0 || quint64( T.vertexGroundFirst[nOff - 1] ) != dataBytes )
+			return refuse( QString( "vertex-ground offsets run %1..%2 but the stream carries %3 ground bytes after its %4 offsets" )
+				.arg( T.vertexGroundFirst[0] ).arg( T.vertexGroundFirst[nOff - 1] ).arg( dataBytes ).arg( nOff ) );
+		T.vertexGround.resize( size_t( dataBytes ) );
+		if ( dataBytes ) std::memcpy( T.vertexGround.data(), gb + 4 * nOff, size_t( dataBytes ) );
+		for ( size_t i = 0; i < size_t( h.instanceCount ); i++ ) {
+			const quint32 gn = T.vertexGroundFirst[i + 1] - T.vertexGroundFirst[i];
+			const quint32 an = iVao >= 0 ? T.vertexAoFirst[i + 1] - T.vertexAoFirst[i] : 0;
+			if ( gn && gn != an )
+				return refuse( QString( "instance %1 has %2 ground-contact bytes but %3 AO bytes; the two streams are "
+					"one vertex population" ).arg( i ).arg( gn ).arg( an ) );
+		}
 	}
 	if ( iVhor >= 0 ) {
 		/* v8's RETIRED per-vertex horizon stream, SKIPPED BY LENGTH (lane
@@ -1845,6 +1969,8 @@ QStringList lodiDescribe( const LodiHeader & h, const LodiTable * table )
 		<< QString( "horizonAzimuths %1" ).arg( h.horizonAzimuths )
 		<< QString( "horizonSteps %1" ).arg( h.horizonSteps )
 		<< QString( "horizonReach %1" ).arg( double( h.horizonReach ), 0, 'f', 1 )
+		<< QString( "offVertexGround %1" ).arg( h.offVertexGround )
+		<< QString( "vertexGroundBytes %1" ).arg( h.vertexGroundBytes )
 		<< QString( "occluderStride %1" ).arg( h.occluderStride )
 		<< QString( "maxOccludersPerCell %1" ).arg( h.maxOccludersPerCell )
 		<< QString( "offAggregates %1" ).arg( h.offAggregates )
@@ -1997,6 +2123,26 @@ QStringList lodiDescribe( const LodiHeader & h, const LodiTable * table )
 				<< QString( "vertexSkyBytesTotal %1" ).arg( table->vertexSky.size() )
 				<< QString( "vertexSkyMean %1" ).arg( table->vertexSky.empty() ? 0.0 : sSum / double( table->vertexSky.size() ), 0, 'f', 2 )
 				<< QString( "vertexSkyOpen %1" ).arg( open );
+		}
+		/* v12: the vertex-ground stream, the same numbers, plus the two ends of
+		 * the ramp (at the terrain = 255, 256 u or more above it = 0). */
+		if ( !table->vertexGroundFirst.empty() ) {
+			quint32 withRange = 0;
+			quint64 full = 0, zero = 0;
+			double gSum = 0.0;
+			for ( size_t i = 0; i + 1 < table->vertexGroundFirst.size(); i++ )
+				if ( table->vertexGroundFirst[i + 1] > table->vertexGroundFirst[i] )
+					withRange++;
+			for ( quint8 v : table->vertexGround ) {
+				gSum += v;
+				full += ( v == 255 );
+				zero += ( v == 0 );
+			}
+			out << QString( "vertexGroundPlacements %1" ).arg( withRange )
+				<< QString( "vertexGroundBytesTotal %1" ).arg( table->vertexGround.size() )
+				<< QString( "vertexGroundMean %1" ).arg( table->vertexGround.empty() ? 0.0 : gSum / double( table->vertexGround.size() ), 0, 'f', 2 )
+				<< QString( "vertexGroundFull %1" ).arg( full )
+				<< QString( "vertexGroundZero %1" ).arg( zero );
 		}
 		/* v8's retired horizon stream is not read into the table any more (lane
 		 * HORIZONOUT), so there is nothing here to read back. The five header

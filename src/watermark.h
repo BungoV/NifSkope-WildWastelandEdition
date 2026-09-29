@@ -399,6 +399,7 @@ private:
 	QHash<int, Field *> fields;      //!< body id -> solved field, empty until solve()
 	Plane idPlane, flowPlane, shorePlane;
 	Plane dyePlane;
+	Plane surfacePlane;              //!< lane WATER1: carried through verbatim, rebased
 	QByteArray originalTable;        //!< the table's bytes as read, for the repack gate
 	/*! The body table as it was READ.  flowX, flowY, flowSource, confidence,
 	 *  source, outlet and flag bit 1 are DERIVED from the strokes, so every
@@ -412,6 +413,7 @@ private:
 	// the tail's own header fields, read at open
 	quint64 oBody = 0, oName = 0, oId = 0, oFlow = 0, oShore = 0, oStroke = 0;
 	quint64 oDye = 0;
+	quint64 oSurface = 0;            //!< lane WATER1: the u64 at 0xF8, 0 when absent
 	quint32 nameLen = 0, strokeLen = 0, bodyStride = 0;
 	quint32 idRate = 0, flowRate = 0, shoreRate = 0, shoreQuantum = 32, flowEnc = 0;
 	quint32 sect = 0;

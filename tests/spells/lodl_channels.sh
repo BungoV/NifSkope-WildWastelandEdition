@@ -55,6 +55,8 @@
 set -u
 
 . "$(dirname "$0")/_harness.sh" 2>/dev/null || true
+# lane WATER1: the viewer's flat water is left out; this gate measures channels
+export WW_LODL_WATER=0
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 EXE="${EXE:-$ROOT/release/NifSkope.exe}"
 # ---- settings scope (lane FIX1 fix 4, 2026-09-26) ----------------------------
@@ -157,7 +159,7 @@ shot() {
 }
 
 shot default    -   1 0 0
-for c in identity placement identityraw sky ground seed sway selfao ao \
+for c in identity placement placement-lowbyte sky ground seed sway selfao ao \
 	mask-r mask-g mask-b mask-a; do
 	shot "$c" "$c" 1 0 0
 done

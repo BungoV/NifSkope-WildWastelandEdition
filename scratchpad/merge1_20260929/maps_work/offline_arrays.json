@@ -1,0 +1,817 @@
+{
+ "arrays": {
+  "LodgenArrays.128x128": {
+   "layers": 29,
+   "dxgi_d_n_gsaos_g": [
+    77,
+    77,
+    77,
+    0
+   ],
+   "covered_texels": 428186,
+   "n_R_mean_cov": 128.02,
+   "n_G_mean_cov": 126.73,
+   "n_B_values_cov": {
+    "132": 428186
+   },
+   "n_A_range_cov": [
+    0,
+    0,
+    0.0
+   ],
+   "gsaos_mean_cov": [
+    102.5,
+    57.5,
+    255.0,
+    41.2
+   ],
+   "gsaos_B_range_cov": [
+    255,
+    255
+   ],
+   "g_max": 0,
+   "g_nonblack_texels": 0
+  },
+  "LodgenArrays.128x512": {
+   "layers": 1,
+   "dxgi_d_n_gsaos_g": [
+    77,
+    77,
+    77,
+    0
+   ],
+   "covered_texels": 65536,
+   "n_R_mean_cov": 122.98,
+   "n_G_mean_cov": 123.33,
+   "n_B_values_cov": {
+    "132": 65536
+   },
+   "n_A_range_cov": [
+    0,
+    0,
+    0.0
+   ],
+   "gsaos_mean_cov": [
+    53.2,
+    29.6,
+    255.0,
+    0.0
+   ],
+   "gsaos_B_range_cov": [
+    255,
+    255
+   ],
+   "g_max": 0,
+   "g_nonblack_texels": 0
+  },
+  "LodgenArrays.256x256": {
+   "layers": 100,
+   "dxgi_d_n_gsaos_g": [
+    77,
+    77,
+    77,
+    0
+   ],
+   "covered_texels": 5512424,
+   "n_R_mean_cov": 127.33,
+   "n_G_mean_cov": 127.07,
+   "n_B_values_cov": {
+    "132": 5512424
+   },
+   "n_A_range_cov": [
+    0,
+    0,
+    0.0
+   ],
+   "gsaos_mean_cov": [
+    84.9,
+    55.9,
+    255.0,
+    49.4
+   ],
+   "gsaos_B_range_cov": [
+    255,
+    255
+   ],
+   "g_max": 0,
+   "g_nonblack_texels": 0
+  },
+  "LodgenArrays.256x512": {
+   "layers": 2,
+   "dxgi_d_n_gsaos_g": [
+    77,
+    77,
+    77,
+    0
+   ],
+   "covered_texels": 262144,
+   "n_R_mean_cov": 122.88,
+   "n_G_mean_cov": 124.02,
+   "n_B_values_cov": {
+    "132": 262144
+   },
+   "n_A_range_cov": [
+    0,
+    0,
+    0.0
+   ],
+   "gsaos_mean_cov": [
+    25.1,
+    125.8,
+    255.0,
+    0.0
+   ],
+   "gsaos_B_range_cov": [
+    255,
+    255
+   ],
+   "g_max": 0,
+   "g_nonblack_texels": 0
+  },
+  "LodgenArrays.512x2048": {
+   "layers": 1,
+   "dxgi_d_n_gsaos_g": [
+    77,
+    77,
+    77,
+    0
+   ],
+   "covered_texels": 1048576,
+   "n_R_mean_cov": 126.69,
+   "n_G_mean_cov": 127.25,
+   "n_B_values_cov": {
+    "132": 1048576
+   },
+   "n_A_range_cov": [
+    0,
+    0,
+    0.0
+   ],
+   "gsaos_mean_cov": [
+    40.2,
+    29.6,
+    255.0,
+    0.0
+   ],
+   "gsaos_B_range_cov": [
+    255,
+    255
+   ],
+   "g_max": 0,
+   "g_nonblack_texels": 0
+  },
+  "LodgenArrays.512x512": {
+   "layers": 20,
+   "dxgi_d_n_gsaos_g": [
+    77,
+    77,
+    77,
+    0
+   ],
+   "covered_texels": 1277291,
+   "n_R_mean_cov": 126.56,
+   "n_G_mean_cov": 125.64,
+   "n_B_values_cov": {
+    "132": 1277291
+   },
+   "n_A_range_cov": [
+    0,
+    0,
+    0.0
+   ],
+   "gsaos_mean_cov": [
+    89.6,
+    28.1,
+    255.0,
+    255.0
+   ],
+   "gsaos_B_range_cov": [
+    255,
+    255
+   ],
+   "g_max": 0,
+   "g_nonblack_texels": 0
+  },
+  "LodgenArrays.64x256": {
+   "layers": 1,
+   "dxgi_d_n_gsaos_g": [
+    77,
+    77,
+    77,
+    0
+   ],
+   "covered_texels": 16384,
+   "n_R_mean_cov": 131.88,
+   "n_G_mean_cov": 128.97,
+   "n_B_values_cov": {
+    "132": 16384
+   },
+   "n_A_range_cov": [
+    0,
+    0,
+    0.0
+   ],
+   "gsaos_mean_cov": [
+    46.8,
+    35.7,
+    255.0,
+    0.0
+   ],
+   "gsaos_B_range_cov": [
+    255,
+    255
+   ],
+   "g_max": 0,
+   "g_nonblack_texels": 0
+  },
+  "LodgenArrays.64x64": {
+   "layers": 1,
+   "dxgi_d_n_gsaos_g": [
+    77,
+    77,
+    77,
+    0
+   ],
+   "covered_texels": 2765,
+   "n_R_mean_cov": 128.64,
+   "n_G_mean_cov": 120.25,
+   "n_B_values_cov": {
+    "132": 2765
+   },
+   "n_A_range_cov": [
+    0,
+    0,
+    0.0
+   ],
+   "gsaos_mean_cov": [
+    96.7,
+    111.6,
+    255.0,
+    0.0
+   ],
+   "gsaos_B_range_cov": [
+    255,
+    255
+   ],
+   "g_max": 0,
+   "g_nonblack_texels": 0
+  }
+ },
+ "cards": {
+  "LodgenCards.legacy.1024x2048": {
+   "layers": 5,
+   "dxgi_d_n_gsaos_g": [
+    77,
+    98,
+    77,
+    0
+   ],
+   "covered_texels": 1990917,
+   "n_R_mean_cov": 126.44,
+   "n_G_mean_cov": 117.24,
+   "n_B_values_cov": [
+    52,
+    207,
+    118.1
+   ],
+   "n_A_range_cov": [
+    0,
+    255,
+    90.81
+   ],
+   "gsaos_mean_cov": [
+    34.8,
+    20.0,
+    196.1,
+    255.0
+   ],
+   "gsaos_B_range_cov": [
+    0,
+    255
+   ],
+   "g_max": 0,
+   "g_nonblack_texels": 0
+  },
+  "LodgenCards.legacy.1152x2048": {
+   "layers": 1,
+   "dxgi_d_n_gsaos_g": [
+    77,
+    98,
+    77,
+    0
+   ],
+   "covered_texels": 320424,
+   "n_R_mean_cov": 127.58,
+   "n_G_mean_cov": 117.62,
+   "n_B_values_cov": [
+    65,
+    207,
+    123.9
+   ],
+   "n_A_range_cov": [
+    0,
+    255,
+    62.52
+   ],
+   "gsaos_mean_cov": [
+    15.8,
+    24.8,
+    202.6,
+    255.0
+   ],
+   "gsaos_B_range_cov": [
+    0,
+    255
+   ],
+   "g_max": 0,
+   "g_nonblack_texels": 0
+  },
+  "LodgenCards.legacy.1280x2048": {
+   "layers": 4,
+   "dxgi_d_n_gsaos_g": [
+    77,
+    98,
+    77,
+    0
+   ],
+   "covered_texels": 2161047,
+   "n_R_mean_cov": 127.09,
+   "n_G_mean_cov": 117.96,
+   "n_B_values_cov": [
+    48,
+    211,
+    119.9
+   ],
+   "n_A_range_cov": [
+    0,
+    255,
+    86.81
+   ],
+   "gsaos_mean_cov": [
+    37.7,
+    19.3,
+    190.8,
+    255.0
+   ],
+   "gsaos_B_range_cov": [
+    0,
+    255
+   ],
+   "g_max": 0,
+   "g_nonblack_texels": 0
+  },
+  "LodgenCards.legacy.128x1024": {
+   "layers": 1,
+   "dxgi_d_n_gsaos_g": [
+    77,
+    98,
+    77,
+    0
+   ],
+   "covered_texels": 20600,
+   "n_R_mean_cov": 128.39,
+   "n_G_mean_cov": 115.67,
+   "n_B_values_cov": [
+    79,
+    182,
+    132.2
+   ],
+   "n_A_range_cov": [
+    0,
+    158,
+    26.51
+   ],
+   "gsaos_mean_cov": [
+    88.0,
+    12.7,
+    239.8,
+    255.0
+   ],
+   "gsaos_B_range_cov": [
+    0,
+    255
+   ],
+   "g_max": 0,
+   "g_nonblack_texels": 0
+  },
+  "LodgenCards.legacy.128x512": {
+   "layers": 8,
+   "dxgi_d_n_gsaos_g": [
+    77,
+    98,
+    77,
+    71
+   ],
+   "covered_texels": 98884,
+   "n_R_mean_cov": 127.92,
+   "n_G_mean_cov": 112.7,
+   "n_B_values_cov": [
+    90,
+    166,
+    128.4
+   ],
+   "n_A_range_cov": [
+    0,
+    255,
+    34.96
+   ],
+   "gsaos_mean_cov": [
+    59.9,
+    31.2,
+    226.5,
+    255.0
+   ],
+   "gsaos_B_range_cov": [
+    0,
+    255
+   ],
+   "g_max": 4,
+   "g_nonblack_texels": 0
+  },
+  "LodgenCards.legacy.2048x2048": {
+   "layers": 6,
+   "dxgi_d_n_gsaos_g": [
+    77,
+    98,
+    77,
+    0
+   ],
+   "covered_texels": 6488329,
+   "n_R_mean_cov": 126.82,
+   "n_G_mean_cov": 123.2,
+   "n_B_values_cov": [
+    48,
+    206,
+    121.3
+   ],
+   "n_A_range_cov": [
+    0,
+    255,
+    74.3
+   ],
+   "gsaos_mean_cov": [
+    37.3,
+    20.0,
+    177.6,
+    255.0
+   ],
+   "gsaos_B_range_cov": [
+    0,
+    255
+   ],
+   "g_max": 0,
+   "g_nonblack_texels": 0
+  },
+  "LodgenCards.legacy.256x1024": {
+   "layers": 8,
+   "dxgi_d_n_gsaos_g": [
+    77,
+    98,
+    77,
+    0
+   ],
+   "covered_texels": 275960,
+   "n_R_mean_cov": 126.85,
+   "n_G_mean_cov": 112.19,
+   "n_B_values_cov": [
+    74,
+    206,
+    130.2
+   ],
+   "n_A_range_cov": [
+    0,
+    255,
+    33.5
+   ],
+   "gsaos_mean_cov": [
+    46.7,
+    24.0,
+    230.3,
+    243.5
+   ],
+   "gsaos_B_range_cov": [
+    0,
+    255
+   ],
+   "g_max": 0,
+   "g_nonblack_texels": 0
+  },
+  "LodgenCards.legacy.256x512": {
+   "layers": 6,
+   "dxgi_d_n_gsaos_g": [
+    77,
+    98,
+    77,
+    0
+   ],
+   "covered_texels": 91834,
+   "n_R_mean_cov": 127.44,
+   "n_G_mean_cov": 130.9,
+   "n_B_values_cov": [
+    97,
+    162,
+    126.5
+   ],
+   "n_A_range_cov": [
+    0,
+    255,
+    35.54
+   ],
+   "gsaos_mean_cov": [
+    42.3,
+    37.9,
+    218.5,
+    246.7
+   ],
+   "gsaos_B_range_cov": [
+    0,
+    255
+   ],
+   "g_max": 0,
+   "g_nonblack_texels": 0
+  },
+  "LodgenCards.legacy.384x1024": {
+   "layers": 9,
+   "dxgi_d_n_gsaos_g": [
+    77,
+    98,
+    77,
+    71
+   ],
+   "covered_texels": 599499,
+   "n_R_mean_cov": 127.34,
+   "n_G_mean_cov": 144.35,
+   "n_B_values_cov": [
+    66,
+    189,
+    126.7
+   ],
+   "n_A_range_cov": [
+    0,
+    255,
+    27.17
+   ],
+   "gsaos_mean_cov": [
+    36.0,
+    18.3,
+    214.6,
+    243.4
+   ],
+   "gsaos_B_range_cov": [
+    0,
+    255
+   ],
+   "g_max": 8,
+   "g_nonblack_texels": 0
+  },
+  "LodgenCards.legacy.384x512": {
+   "layers": 1,
+   "dxgi_d_n_gsaos_g": [
+    77,
+    98,
+    77,
+    0
+   ],
+   "covered_texels": 22772,
+   "n_R_mean_cov": 128.01,
+   "n_G_mean_cov": 121.17,
+   "n_B_values_cov": [
+    99,
+    156,
+    128.2
+   ],
+   "n_A_range_cov": [
+    0,
+    246,
+    39.39
+   ],
+   "gsaos_mean_cov": [
+    5.2,
+    4.9,
+    225.2,
+    255.0
+   ],
+   "gsaos_B_range_cov": [
+    0,
+    255
+   ],
+   "g_max": 0,
+   "g_nonblack_texels": 0
+  },
+  "LodgenCards.legacy.512x1024": {
+   "layers": 5,
+   "dxgi_d_n_gsaos_g": [
+    77,
+    98,
+    77,
+    0
+   ],
+   "covered_texels": 628162,
+   "n_R_mean_cov": 126.45,
+   "n_G_mean_cov": 143.84,
+   "n_B_values_cov": [
+    56,
+    201,
+    124.1
+   ],
+   "n_A_range_cov": [
+    0,
+    255,
+    21.62
+   ],
+   "gsaos_mean_cov": [
+    36.8,
+    15.9,
+    181.4,
+    238.5
+   ],
+   "gsaos_B_range_cov": [
+    0,
+    255
+   ],
+   "g_max": 0,
+   "g_nonblack_texels": 0
+  },
+  "LodgenCards.legacy.512x2048": {
+   "layers": 1,
+   "dxgi_d_n_gsaos_g": [
+    77,
+    98,
+    77,
+    0
+   ],
+   "covered_texels": 287195,
+   "n_R_mean_cov": 127.69,
+   "n_G_mean_cov": 173.64,
+   "n_B_values_cov": [
+    48,
+    211,
+    122.7
+   ],
+   "n_A_range_cov": [
+    0,
+    74,
+    16.15
+   ],
+   "gsaos_mean_cov": [
+    29.0,
+    19.1,
+    195.9,
+    222.9
+   ],
+   "gsaos_B_range_cov": [
+    0,
+    255
+   ],
+   "g_max": 0,
+   "g_nonblack_texels": 0
+  },
+  "LodgenCards.legacy.512x512": {
+   "layers": 6,
+   "dxgi_d_n_gsaos_g": [
+    77,
+    98,
+    77,
+    0
+   ],
+   "covered_texels": 400483,
+   "n_R_mean_cov": 127.56,
+   "n_G_mean_cov": 120.98,
+   "n_B_values_cov": [
+    89,
+    156,
+    124.4
+   ],
+   "n_A_range_cov": [
+    0,
+    255,
+    57.82
+   ],
+   "gsaos_mean_cov": [
+    61.6,
+    16.4,
+    187.7,
+    248.8
+   ],
+   "gsaos_B_range_cov": [
+    0,
+    255
+   ],
+   "g_max": 0,
+   "g_nonblack_texels": 0
+  },
+  "LodgenCards.legacy.640x1024": {
+   "layers": 4,
+   "dxgi_d_n_gsaos_g": [
+    77,
+    98,
+    77,
+    0
+   ],
+   "covered_texels": 516428,
+   "n_R_mean_cov": 127.88,
+   "n_G_mean_cov": 128.28,
+   "n_B_values_cov": [
+    60,
+    199,
+    124.1
+   ],
+   "n_A_range_cov": [
+    0,
+    255,
+    17.66
+   ],
+   "gsaos_mean_cov": [
+    36.6,
+    16.8,
+    182.6,
+    216.9
+   ],
+   "gsaos_B_range_cov": [
+    0,
+    255
+   ],
+   "g_max": 0,
+   "g_nonblack_texels": 0
+  },
+  "LodgenCards.legacy.768x1024": {
+   "layers": 8,
+   "dxgi_d_n_gsaos_g": [
+    77,
+    98,
+    77,
+    0
+   ],
+   "covered_texels": 1863003,
+   "n_R_mean_cov": 128.91,
+   "n_G_mean_cov": 107.92,
+   "n_B_values_cov": [
+    69,
+    189,
+    118.0
+   ],
+   "n_A_range_cov": [
+    0,
+    255,
+    86.9
+   ],
+   "gsaos_mean_cov": [
+    81.9,
+    21.9,
+    176.1,
+    255.0
+   ],
+   "gsaos_B_range_cov": [
+    0,
+    255
+   ],
+   "g_max": 0,
+   "g_nonblack_texels": 0
+  },
+  "LodgenCards.legacy.896x1024": {
+   "layers": 6,
+   "dxgi_d_n_gsaos_g": [
+    77,
+    98,
+    77,
+    0
+   ],
+   "covered_texels": 1381385,
+   "n_R_mean_cov": 127.13,
+   "n_G_mean_cov": 114.99,
+   "n_B_values_cov": [
+    73,
+    190,
+    122.0
+   ],
+   "n_A_range_cov": [
+    0,
+    255,
+    63.83
+   ],
+   "gsaos_mean_cov": [
+    89.7,
+    42.9,
+    178.6,
+    246.2
+   ],
+   "gsaos_B_range_cov": [
+    0,
+    255
+   ],
+   "g_max": 0,
+   "g_nonblack_texels": 0
+  }
+ },
+ "card_silhouette_refuter": {
+  "left_edge_texels": 1664227,
+  "left_mean_normalX": -0.116,
+  "left_share_X_negative": 0.578,
+  "right_edge_texels": 1664227,
+  "right_mean_normalX": 0.101,
+  "right_share_X_positive": 0.567,
+  "top_edge_mean_normalY": 0.017,
+  "bottom_edge_mean_normalY": -0.014,
+  "wrong_axis_left_mean_normalY": -0.017
+ }
+}

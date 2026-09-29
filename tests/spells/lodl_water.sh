@@ -59,7 +59,8 @@ fi
 
 # --- G1: the module OFF is byte-identical ------------------------------
 echo "== G1  the module OFF writes the bytes it always wrote =="
-"$NS" -no-gui lodgen "$ESM" --worldspace 3C --lodl "$W/off" > "$W/off.txt" 2>&1 \
+# the module is ON by default since lane WATER1, so OFF is spelled out
+"$NS" -no-gui lodgen "$ESM" --worldspace 3C --lodl "$W/off" --no-water-bodies > "$W/off.txt" 2>&1 \
 	|| { bad "the version-2 write (module off)"; sed 's/^/  /' "$W/off.txt" | tail -5; }
 # the .lodl moved under FO4CSLOD/<ws>/ (lane LAYOUT1, 2026-09-16)
 OFF="$W/off/FO4CSLOD/Commonwealth/Commonwealth.lodl"

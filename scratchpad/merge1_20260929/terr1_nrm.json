@@ -1,0 +1,61 @@
+{
+ "G1": {
+  "texels": 9437184,
+  "stamped": 2607793,
+  "stamped_moved_share": 0.9183351592706936,
+  "stamped_mean_angle_deg": 11.824871136114384,
+  "stamped_moved_mean_angle_deg": 12.867563962508838,
+  "unstamped_moved_share": 0.010230048330810171,
+  "moved_total": 2464693
+ },
+ "G2": {
+  "blocks": 627264,
+  "msn_blocks_differ": 178906,
+  "violations": 324
+ },
+ "G2_refuter": {
+  "tile": [
+   0,
+   0
+  ],
+  "block": [
+   0,
+   1
+  ],
+  "violations_with_plant": 5
+ },
+ "G3": {
+  "all": {
+   "R_east": 149.17114861607067,
+   "R_west": 106.21846741175854,
+   "B_north": 153.40663327148218,
+   "B_south": 102.79944725522621,
+   "n": [
+    2175653,
+    1775441,
+    2555059,
+    1707117
+   ]
+  },
+  "stamped": {
+   "R_east": 135.53534753524272,
+   "R_west": 124.81279285551501,
+   "B_north": 135.4666985879052,
+   "B_south": 123.64581364230112,
+   "n": [
+    515142,
+    399301,
+    595215,
+    376652
+   ]
+  },
+  "refuter_flipped": {
+   "R_east": 105.82885138392933,
+   "R_west": 148.78153258824148
+  }
+ },
+ "G4_identical_roles": {
+  "1": true,
+  "4": true
+ }
+}

@@ -789,11 +789,38 @@ The census reports it: `ground_shapes` and `ground_texels` on the census line,
 | sheet | touched | why |
 |---|---|---|
 | colour (role 1) | yes | measured: vanilla carries the road there |
-| `_msn` normal (role 2) | no | measured: vanilla's `_msn` is the heightmap's on the road too |
+| `_msn` normal (role 2) | yes, from lane TERR1 (2026-09-27) | vanilla's `_msn` is the heightmap's on the road too (measured), but bungo overruled that parity: the object's own normal map is stamped in, section 1a.6b |
 | mask (role 5, RMAOS) | alpha only | the ground-cover byte is suppressed under the road; R/G/B untouched |
 | emissive (role 6) | no | a road emits nothing |
 | height (role 4) | no | the road is not the ground's height |
 | retired `data` plane and the `.btr` `_data.DDS` | alpha only | the same cover byte, the same reason |
+
+### 1a.6b The normal stamp (lane TERR1, 2026-09-27)
+
+bungo: "normal map on the ground has no details baked from the objects (roads, railway tracks, concrete pieces,
+decals, etc)". So on the pyramid path the `_msn` sheet now carries, wherever the colour sheet was stamped from a
+flat object (a road, a rail, a sleeper, a kerb, a pavement slab, a decal), that object's OWN normal map:
+
+* **Which map.** The BGSM's normal slot, `textures()[1]`. A BGEM or effect-shader shape (`litNormal = false`) is
+  colour only -- its normal slot, if any, lights a glow, not a surface.
+* **Into world space.** Per triangle, dP/du and dP/dv from the world positions and the UVs (the material's UV scale
+  included), Gram-Schmidt against the interpolated vertex normal turned to +z; the texel is
+  `n = x * dP/du + y * dP/dv + z * N` with x = 2R-1, y = 2G-1, z = sqrt(1 - x^2 - y^2): the renderer's order
+  (Bitangent = dP/du, Tangent = dP/dv). The NIF's own tangents are read only to COUNT agreement with that frame
+  (`stampNormalFrame agree N flip M`).
+* **The same mask and alpha as the colour.** The normal is composited in the rasteriser beside the colour, by the
+  colour's own rule (max-z or blend), order and coverage, and a normal texel whose colour came out transparent is
+  dropped. The weight is set inside the colour lerp itself: `w = min(raGeom, lit coverage) * roadOpacity`.
+* **Over the height normal.** After the sheet's height normal is final (and after the upscaled-sheet replacement),
+  `n = normalize(hN + (oN - hN) * w)`. A texel with `w = 0` is not written: off the stamped mask the sheet is the
+  heights' normal byte for byte.
+* **The format does not change.** R east, G up, B north, BC1, no version bump.
+* **Not stamped:** the stock chunk path's `.btr` `_msn`.
+* **Census.** `stampNormals`, `stampNormalShapeTiles`, `stampNormalNoMap` (a lit shape whose material names no normal
+  map, or whose map did not load: it stamps colour only), `stampNormalUnlit`, `stampNormalFrame agree/flip`,
+  `stampNormalTexels` (content texels moved).
+* **Way back.** `--no-stamp-normals` (command line only; `--roads-legacy` implies it unless `--stamp-normals` is
+  named). Settings digest key `cover.stampNormals`.
 
 ### 1a.7 The census
 
@@ -978,6 +1005,53 @@ With `--terrain-object-ao` this byte carries a SECOND visibility fraction
 multiplied into the first, from the placed objects rather than from the
 ground's own horizon (section 2.5h). Without the switch the byte is exactly
 what it was.
+
+**From lane TERR1 (2026-09-27) the byte sees the objects by default (`skyObjects`,
+`--no-sky-objects` is the way back, command line only).** Per direction the
+terrain march's slope and the object height field of 2.5h are ONE blocked
+measure, not a product:
+
+* the march starts from the ground's visible SURFACE: a low cover over the
+  texel's own 128-unit square (top within 128 units of the terrain: a road, a
+  pavement slab, rubble) lifts the sample to its top (`lodgenSkySurface`);
+* the lattice is read every 64 units out to 1,458 (23 reads), not at the
+  terrain's seven steps, which step over a street's far wall;
+* a square whose lowest surface is less than 128 units over the surface is a
+  WALL up to its top; one a cell or more up is a CEILING (2.5h(2)'s slab law);
+* per direction the objects take away the COSINE-WEIGHTED sky they hide beyond
+  the terrain horizon: `extra = min(1, P(max(terrain slope, wall)) + ceiling
+  term) - P(terrain slope)`, with P(t) = t^2/(1+t^2) = sin^2 of the elevation and
+  the ceiling term 1/(1+open^2) = cos^2 of the opening's elevation;
+* `vis = vis_terrain - sum(extra) / 8`, where `vis_terrain` is the terrain
+  march's own `1 - 1.6 * sum F(slope) / 8`, F(t) = t/(1+t).
+
+Why cosine: the sky that lights a horizontal patch of ground is the
+cosine-weighted hemisphere about +Z (the object sky stream's convention, 4.10);
+the band between elevations a and b weighs sin^2 b - sin^2 a, so a street wall
+hiding the low sky hides little light. The first TERR1 law (2026-09-27 morning)
+summed F(max(slope, wall)) under the terrain's `1 - 1.6 * sum / 8` and read the
+Theater District street floor 12-16 against a physical cosine-weighted ray cast
+of 84-92 (lane GATES) -- 3-7x too dark.
+
+No strength dial: the terrain part is the terrain march, so any dial would move
+ground with no building near it. Where no object square rises above the terrain
+horizon and no ceiling is seen, `extra` is exactly 0 and the byte is the terrain
+march's own, bit for bit. It supersedes GROUND1's product on
+the VT sheets (both on would count the objects twice); the chunk path's `.btr`
+and the `.lodl` AO plane stay terrain-only. **The `.lodl` plane is where the
+terrain-only term is kept** (it is recomputed from the stored heights by
+`--refresh-ao`, see the refusal in `nifcli.cpp`); FO4CS needs no separate
+terrain-only sheet channel.
+
+Scored offline against a physical cosine-weighted ray cast (224 rays a texel,
+reach 1,458, terrain + every level-0 LOD triangle of the Boston box; 312 texels;
+TERR1 `physlaw.py` / `lawfit.py`, skill `ww-canyon-sky-physical-check`): street
+canyons 88.2 vs 98.8 (the F law 45.4), decks 43.8 vs 44.1 (6.5), near a
+building 169.0 vs 166.8 (149.7); all texels MAE 30.6 levels, bias -4.8, corr
+0.864 (F law 42.3 / -32.6 / 0.865). These are offline predictions from the law's
+own inputs; the baked numbers are in the TERR1 report.
+The census: `skyObjects 1`, and `objAoTexels` / `objAoMeanDark` then count the
+union's darkening against the terrain-only march.
 
 **The blend is the colour's blend, exactly.** Per texel: the quadrant's base
 layer, then each painted layer by the same bilinear opacity the diffuse
@@ -2387,15 +2461,62 @@ cells y ∈ [ north − (ty+1)·levelDim + 1 ,  north − ty·levelDim ]
 |---|---|---|
 | 0x00 | u64 | `offset` — absolute; **0 exactly when the tile is absent** |
 | 0x08 | u32 | `storedBytes` — on disk, after compression |
-| 0x0C | u32 | `rawBytes` — after inflate; must equal the size the header + this entry's `COVER` bit imply |
+| 0x0C | u32 | `rawBytes` — after inflate; must equal the size the header + this entry's `COVER` bit + its one-value bits imply |
 | 0x10 | u32 | `crc32` — over the `storedBytes` on disk |
-| 0x14 | u16 | `flags` — bit 0 `PRESENT`, bit 1 `COVER`, bits 2..15 zero |
+| 0x14 | u16 | `flags` — bit 0 `PRESENT`, bit 1 `COVER`, **bit 2+k `UNIFORM` for sheet k** (k < `sheetCount`, §3.2a), every bit above zero |
 | 0x16 | u16 | `reserved` — 0 |
 
 **An absent tile's 24 bytes are all zero**, not just `offset`: the other five
 fields are validated only when `PRESENT` is set, so without this a reader
 summing `storedBytes` over the table would sum garbage. The explicit present
 flag exists because "offset 0" is exactly the sentinel that gets misread.
+
+### 3.2a One-value sheets (lane FLAT2, 2026-09-27)
+
+bungo, 2026-09-27: *"If there is a single color on the whole map, it gets
+reduced in size? Since it doesn't need to render 1024 for a whole one color
+mask"* / *"on the whole chunk I mean"*. Open sea and landless cells bake sheets
+that are one value over every texel of every mip, and each was stored in full.
+
+**The rule.** A present tile whose sheet k is one value sets flag bit `2 + k`.
+That sheet's mips are then **not stored**: in their place, at the same position
+in the sheet-major order, the payload holds a **16-byte record** = the sheet's
+one repeating UNIT followed by zeros. The unit is the sheet's native form:
+
+| sheet format | unit | record |
+|---|---|---|
+| BC1 (71/72) | the 8-byte block | block + 8 zero bytes |
+| BC3 (77/78) | the 16-byte block | the block |
+| R16 (height, role 4) | the 2-byte texel | texel + 14 zero bytes |
+| R8G8B8A8 (role 7, retired) | the 4-byte texel | texel + 12 zero bytes |
+
+**Expanding a record gives the uncollapsed sheet back byte for byte**: repeat
+the unit over the sheet's full size (every stored mip, `lodvSheetMipBytes`
+summed). A reader that expands first sees exactly the bytes a
+`--no-collapse-uniform` bake wrote, so nothing downstream of the read moves.
+A reader that does not want the bytes decodes the one block (or takes the one
+texel) and draws that value everywhere, including every mip: that is what the
+collapse test guarantees (below).
+
+**When a sheet collapses** (writer, `lodvCollapseUniform`): every unit of every
+mip is the same bytes, AND for a block format that block decodes to one value
+under ANY decoder's convention, judged from its indices rather than a decode —
+all 16 indices equal, or both endpoints equal with no index that selects a
+constant of the mode (BC1's index 3 when `c0 <= c1`; the BC3 alpha's 6 and 7
+when `a0 <= a1`; BC3's colour half is treated like BC1, since a decoder that
+does so exists). So case (b) of the brief -- a sheet uniform only within the
+codec's error -- is never collapsed; the whole-map measurement found 0 such
+sheets on the installed bake. A sheet smaller than two units is never collapsed.
+
+**Sizes.** `rawBytes` = the sum over sheets of (16 if the sheet's bit is set,
+else its full size). The writer collapses by default; `--no-collapse-uniform`
+(command line only) writes every sheet in full, byte-identical to a bake from
+before this section.
+
+**Version.** None raised -- the precedent of `mipSkip` and role 7 (§3.1). A
+reader that predates the bits refuses such a tile by rule 16 (an unknown flag
+bit) rather than misparsing it, and a file with no bit set is exactly a v2 file
+as before. `.lodt` stays v2; `.lodi` (v12) and `.lodl` (v3) are untouched.
 
 ### 3.3 Payload
 
@@ -2538,8 +2659,9 @@ Refuse — **by name, with the field that failed** — on any of:
     `sheetCount` that is not all zero (its `mipSkip` included)
 14. `compression ∉ {0,1}`
 15. `tileTableOffset < 256` or not 8-aligned; `tileTableOffset + 24·tileCount > payloadOffset`; `payloadOffset > fileBytes` or not 4096-aligned
-16. any entry where `PRESENT` disagrees with `offset != 0`; any absent entry whose 24 bytes are not all zero; or, if present: an unknown flag bit, a non-zero `reserved`, `offset < payloadOffset`, `offset % 4096 != 0`, `offset + storedBytes > fileBytes`, `storedBytes == 0`, `rawBytes` != the size the header and the `COVER` bit imply, or `compression == 0 && storedBytes != rawBytes`
+16. any entry where `PRESENT` disagrees with `offset != 0`; any absent entry whose 24 bytes are not all zero; or, if present: an unknown flag bit (any bit above `2 + sheetCount − 1`; bits 2.. are the one-value sheets, §3.2a), a non-zero `reserved`, `offset < payloadOffset`, `offset % 4096 != 0`, `offset + storedBytes > fileBytes`, `storedBytes == 0`, `rawBytes` != the size the header, the `COVER` bit and the one-value bits imply, or `compression == 0 && storedBytes != rawBytes`
 16b. `compression == 1` and a present tile whose first two bytes are not a valid zlib header with CM = 8, CINFO ≤ 7, FDICT clear and `% 31 == 0`
+16c. (payload check, `compression == 0`) a one-value record whose bytes after the unit are not zero, or whose block does not pass the writer's one-value test (§3.2a)
 17. every tile present-flagged 0 (a level with no tiles is a broken bake, not an empty world)
 18. **`vhgtCorpusHash` or `paintCorpusHash` != the consumer's own hash** of the worldspace it is loading — the same refusal a stale heightmap already earns. *This is the one rule the file-local validator cannot make: it needs the plugin. `lodgen --corpus-hash` prints both hashes for the comparison.*
 19. `flags` bit 0 (`ROW_ORDER_NORTH_UP`) clear — no other row order is defined

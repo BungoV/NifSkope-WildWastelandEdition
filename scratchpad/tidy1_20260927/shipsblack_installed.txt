@@ -1,0 +1,64 @@
+file                                                      bytes   new   gate  lit(new) lit(gate) 
+Commonwealth.LodgenArrays.128x128_g.DDS                  360508  DROP  black         0         0 all-zero-bytes
+Commonwealth.LodgenArrays.128x512_g.DDS                   43828  DROP  black         0         0 all-zero-bytes
+Commonwealth.LodgenArrays.256x256_g.DDS                 4718452  DROP  black         0         0 all-zero-bytes
+Commonwealth.LodgenArrays.256x512_g.DDS                  262276  DROP  black         0         0 all-zero-bytes
+Commonwealth.LodgenArrays.512x2048_g.DDS                 699188  DROP  black         0         0 all-zero-bytes
+Commonwealth.LodgenArrays.512x512_g.DDS                 3495348  DROP  black         0         0 all-zero-bytes
+Commonwealth.LodgenArrays.64x256_g.DDS                    11060  DROP  black         0         0 all-zero-bytes
+Commonwealth.LodgenArrays.64x64_g.DDS                      2876  DROP  black         0         0 all-zero-bytes
+Commonwealth.LodgenCards.legacy.1024x2048_g.DDS         6881428  DROP  black         0         0 all-zero-bytes
+Commonwealth.LodgenCards.legacy.1152x2048_g.DDS         1548436  DROP  black         0         0 all-zero-bytes
+Commonwealth.LodgenCards.legacy.1280x2048_g.DDS         6881428  DROP  black         0         0 all-zero-bytes
+Commonwealth.LodgenCards.legacy.128x1024_g.DDS            65684  DROP  black         0         0 all-zero-bytes
+Commonwealth.LodgenCards.legacy.128x512_g.DDS            262292  KEEP    lit         6         6 
+Commonwealth.LodgenCards.legacy.2048x2048_g.DDS        16711828  DROP  black         0         0 all-zero-bytes
+Commonwealth.LodgenCards.legacy.256x1024_g.DDS          1048724  DROP  black         0         0 all-zero-bytes
+Commonwealth.LodgenCards.legacy.256x512_g.DDS            393364  DROP  black         0         0 all-zero-bytes
+Commonwealth.LodgenCards.legacy.384x1024_g.DDS          2211988  KEEP    lit        46        46 
+Commonwealth.LodgenCards.legacy.384x512_g.DDS            123028  DROP  black         0         0 all-zero-bytes
+Commonwealth.LodgenCards.legacy.512x1024_g.DDS          1638548  DROP  black         0         0 all-zero-bytes
+Commonwealth.LodgenCards.legacy.512x2048_g.DDS           655508  DROP  black         0         0 all-zero-bytes
+Commonwealth.LodgenCards.legacy.512x512_g.DDS            983188  DROP  black         0         0 all-zero-bytes
+Commonwealth.LodgenCards.legacy.640x1024_g.DDS          1638548  DROP  black         0         0 all-zero-bytes
+Commonwealth.LodgenCards.legacy.768x1024_g.DDS          3932308  DROP  black         0         0 all-zero-bytes
+Commonwealth.LodgenCards.legacy.896x1024_g.DDS          3612820  DROP  black         0         0 all-zero-bytes
+DLC03FarHarbor.LodgenArrays.128x128_g.DDS                131188  DROP  black         0         0 all-zero-bytes
+DLC03FarHarbor.LodgenArrays.256x256_g.DDS               2883556  DROP  black         0         0 all-zero-bytes
+DLC03FarHarbor.LodgenArrays.256x512_g.DDS                 87524  DROP  black         0         0 all-zero-bytes
+DLC03FarHarbor.LodgenArrays.512x512_g.DDS               1048708  DROP  black         0         0 all-zero-bytes
+DLC03FarHarbor.LodgenCards.legacy.1024x1024_g.DDS        688276  DROP  black         0         0 all-zero-bytes
+DLC03FarHarbor.LodgenCards.legacy.1024x2048_g.DDS       1376404  DROP  black         0         0 all-zero-bytes
+DLC03FarHarbor.LodgenCards.legacy.1280x2048_g.DDS       1720468  DROP  black         0         0 all-zero-bytes
+DLC03FarHarbor.LodgenCards.legacy.128x1024_g.DDS          65684  DROP  black         0         0 all-zero-bytes
+DLC03FarHarbor.LodgenCards.legacy.128x512_g.DDS          196756  KEEP    lit         6         6 
+DLC03FarHarbor.LodgenCards.legacy.2048x2048_g.DDS       2785428  DROP  black         0         0 all-zero-bytes
+DLC03FarHarbor.LodgenCards.legacy.256x1024_g.DDS        1048724  DROP  black         0         0 all-zero-bytes
+DLC03FarHarbor.LodgenCards.legacy.256x512_g.DDS          262292  DROP  black         0         0 all-zero-bytes
+DLC03FarHarbor.LodgenCards.legacy.384x1024_g.DDS         983188  KEEP    lit        46        46 
+DLC03FarHarbor.LodgenCards.legacy.512x1024_g.DDS        1638548  DROP  black         0         0 all-zero-bytes
+DLC03FarHarbor.LodgenCards.legacy.512x512_g.DDS          491668  DROP  black         0         0 all-zero-bytes
+DLC03FarHarbor.LodgenCards.legacy.640x1024_g.DDS        1638548  DROP  black         0         0 all-zero-bytes
+DLC03FarHarbor.LodgenCards.legacy.768x1024_g.DDS         491668  DROP  black         0         0 all-zero-bytes
+DLC03FarHarbor.LodgenCards.legacy.768x2048_g.DDS         983188  DROP  black         0         0 all-zero-bytes
+DLC03FarHarbor.LodgenCards.legacy.896x1024_g.DDS         602260  DROP  black         0         0 all-zero-bytes
+DLC03FarHarbor.LodgenCards.legacy.896x2048_g.DDS        1204372  DROP  black         0         0 all-zero-bytes
+NukaWorld.LodgenArrays.128x128_g.DDS                     305908  DROP  black         0         0 all-zero-bytes
+NukaWorld.LodgenArrays.256x256_g.DDS                    3582564  DROP  black         0         0 all-zero-bytes
+NukaWorld.LodgenArrays.256x512_g.DDS                      87524  DROP  black         0         0 all-zero-bytes
+NukaWorld.LodgenArrays.512x512_g.DDS                     699188  DROP  black         0         0 all-zero-bytes
+NukaWorld.LodgenArrays.64x64_g.DDS                         2876  DROP  black         0         0 all-zero-bytes
+NukaWorld.LodgenCards.legacy.1024x2048_g.DDS            1376404  DROP  black         0         0 all-zero-bytes
+NukaWorld.LodgenCards.legacy.1280x2048_g.DDS            1720468  DROP  black         0         0 all-zero-bytes
+NukaWorld.LodgenCards.legacy.128x1024_g.DDS               65684  DROP  black         0         0 all-zero-bytes
+NukaWorld.LodgenCards.legacy.128x512_g.DDS               163988  DROP  black         0         0 all-zero-bytes
+NukaWorld.LodgenCards.legacy.2048x2048_g.DDS            2785428  DROP  black         0         0 all-zero-bytes
+NukaWorld.LodgenCards.legacy.256x1024_g.DDS              917652  DROP  black         0         0 all-zero-bytes
+NukaWorld.LodgenCards.legacy.256x512_g.DDS               196756  DROP  black         0         0 all-zero-bytes
+NukaWorld.LodgenCards.legacy.384x1024_g.DDS              983188  KEEP    lit        46        46 
+NukaWorld.LodgenCards.legacy.512x1024_g.DDS              655508  DROP  black         0         0 all-zero-bytes
+NukaWorld.LodgenCards.legacy.640x1024_g.DDS              409748  DROP  black         0         0 all-zero-bytes
+SanctuaryHillsWorld.LodgenArrays.256x256_g.DDS           917596  DROP  black         0         0 all-zero-bytes
+SanctuaryHillsWorld.LodgenArrays.512x512_g.DDS          1572988  DROP  black         0         0 all-zero-bytes
+new rule: 56 of 61 dropped, 90317160 B; kept: Commonwealth.LodgenCards.legacy.128x512_g.DDS, Commonwealth.LodgenCards.legacy.384x1024_g.DDS, DLC03FarHarbor.LodgenCards.legacy.128x512_g.DDS, DLC03FarHarbor.LodgenCards.legacy.384x1024_g.DDS, NukaWorld.LodgenCards.legacy.384x1024_g.DDS
+agree with gates.py on every file: True

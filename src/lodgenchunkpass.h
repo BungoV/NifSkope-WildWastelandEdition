@@ -268,8 +268,11 @@ QString lodgenSwitchDigestOf( const QStringList & argv );
  *  see a constant that lives inside lodgen.cpp, and this number is how a lane
  *  says so.
  *  2: lane ROADS1 (2026-09-26) -- the road stamp applies the material swap and
- *     paints has-LOD ground pieces (river road, park pavements). */
-constexpr int kLodgenGeneratorRevision = 2;
+ *     paints has-LOD ground pieces (river road, park pavements).
+ *  3: lane WATER1 (2026-09-27) -- the water shape's depth tint is gone: no
+ *     vertex colours on water, vanilla's 8-byte water vertex at every
+ *     subdivision (the `terrain.waterChannels` line left the dump with it). */
+constexpr int kLodgenGeneratorRevision = 3;
 
 /*! What the front end adds to the pass's own options: the whole-region steps,
  *  the far-ring cut, the pyramid and the native modules. Every field is set by
@@ -286,6 +289,10 @@ struct LodgenIdentityExtras
 	bool placementAo = false, vertexAo = false, lodiV7 = false, scrappable = false;
 	bool identityJoinLegacy = false;
 	float identityJoinGap = 0.0f;
+	/*! IDENT1 (2026-09-27): the contact join and the building occluder. The
+	 *  identity dump names them only when ON, so a bake with both off hashes the
+	 *  exact words a bake from before the lane did. */
+	bool identityJoinContact = false, occluderBuilding = false;
 	bool aggregate = false;
 	int aggMin = 0, aggTile = 0, aggViews = 0;
 	QStringList more;           //!< further `key=value` lines a front end owns (sorted before use)

@@ -1,0 +1,70 @@
+{
+ "msn_20tiles": {
+  "texels": 5242880,
+  "R": 132.0,
+  "G": 255.0,
+  "B": 132.0,
+  "Rmin": 132,
+  "Rmax": 132,
+  "Gmin": 255
+ },
+ "mask_25tiles": {
+  "texels": 6553600,
+  "R": 163.70024566650392,
+  "Rrange": [
+   115,
+   181
+  ],
+  "G": 0.0,
+  "Grange": [
+   0,
+   0
+  ],
+  "B": 253.794832611084,
+  "Brange": [
+   156,
+   255
+  ],
+  "A": "BC1 somewhere",
+  "Arange": [
+   -1,
+   -1
+  ],
+  "formats": [
+   71
+  ]
+ },
+ "height_raw": {
+  "min": 32723,
+  "max": 32723,
+  "p0.5": 32723.0,
+  "p99.5": 32723.0
+ },
+ "corr_R_vs_minus_dhdx": NaN,
+ "corr_B_vs_minus_dhdnorth": NaN,
+ "corr_R_vs_minus_dhdnorth_wrongaxis": NaN,
+ "steep_east_facing": {
+  "texels": 0,
+  "meanR": NaN
+ },
+ "steep_west_facing": {
+  "texels": 0,
+  "meanR": NaN
+ },
+ "steep_north_facing": {
+  "texels": 0,
+  "meanB": NaN
+ },
+ "steep_south_facing": {
+  "texels": 0,
+  "meanB": NaN
+ },
+ "flat_texels": {
+  "texels": 4177936,
+  "meanRGB": [
+   132.0,
+   255.0,
+   132.0
+  ]
+ }
+}

@@ -1,4 +1,4 @@
-# `.lodo` v6 (v4..v7) + `.lodi` v7 (v3..v11) — the FO4CS-native far field (and the v7/v11 near library)
+# `.lodo` v6 (v4..v7) + `.lodi` v12 (v3..v12) — the FO4CS-native far field (and the v7/v11 near library)
 
 > **NEAR LIBRARY (lane NEAR1, 2026-09-26).** `lodgen --near-library <dir>` writes
 > `<ws>.near.lodo` at **version 7** (§3.9: header flag `NEAR` 16 + the material
@@ -824,7 +824,7 @@ version, which is the right answer: a near library is not a far field.
 | off | type | field |
 |---|---|---|
 | 0x00 | char[4] | magic `LODI` |
-| 0x04 | u32 | **version = 3, or 4 when the file carries aggregates (§4.6), 5 when it carries the placement-AO blob (§4.7), 6 when it carries the per-vertex AO stream (§4.8), 7 when it carries a group table (§4.9) or a per-vertex sky stream (§4.10), or 9 when it carries the workshop-scrappable bit (§4.12), or 10 when any instance carries the wide-scale bit (§4.14)**; versions 1 and 2 are refused by name. **Version 8 is RETIRED** (§4.11): no exe in this tree writes one, v9 is a superset of **v7** and not of v8, and the reader opens a v8 file met in the wild |
+| 0x04 | u32 | **version = 3, or 4 when the file carries aggregates (§4.6), 5 when it carries the placement-AO blob (§4.7), 6 when it carries the per-vertex AO stream (§4.8), 7 when it carries a group table (§4.9) or a per-vertex sky stream (§4.10), or 9 when it carries the workshop-scrappable bit (§4.12), or 10 when any instance carries the wide-scale bit (§4.14), or 11 when any instance carries the initially-disabled bit (§4.15), or 12 when it carries the per-vertex ground-contact stream (§4.16) — decided last, so 12 wins over 9, 10 and 11 and keeps their bits**; versions 1 and 2 are refused by name. **Version 8 is RETIRED** (§4.11): no exe in this tree writes one, v9 is a superset of **v7** and not of v8, and the reader opens a v8 file met in the wild |
 | 0x08 | u32 | flags — bit0 `ROW_ORDER_NORTH_UP` (**clear = refusal**), bit1 `PARTIAL`, bit2 `NOLIB` |
 | 0x0C | u32 | `headerCrc32` — over `0x10 … headerBytes − 1`, so it covers **256 bytes on a v3…v6 file and 512 on a v7 one**, and a v6 file's CRC is the byte-for-byte same number it was before v7 existed |
 | 0x10 | u64 | `pluginCorpusHash` — must equal the `.lodo`'s |
@@ -870,7 +870,10 @@ version, which is the right answer: a near library is not a far field.
 | **0x10C** | **u16** | **`groupStride` = 2 (v7); any other value is refused by name** |
 | **0x110** | **u64** | **offset: per-vertex sky stream (v7, §4.10)** |
 | **0x118** | **u32** | **`vertexSkyBytes` (v7) — the whole stream, offsets included; must be ≥ 4 × (`instanceCount` + 1)** |
-| 0x11C…0x1FF | — | reserved, zero (v7) |
+| 0x11C…0x12F | — | reserved, zero (v7, v9…v12); the retired v8's horizon words lived here (§4.11) |
+| **0x130** | **u64** | **offset: per-vertex ground-contact stream (v12, §4.16), written LAST so no existing offset moves** |
+| **0x138** | **u32** | **`vertexGroundBytes` (v12) — the whole stream, offsets included; must be ≥ 4 × (`instanceCount` + 1). A v7…v11 file carrying anything at 0x130…0x13B is refused by version name** |
+| 0x13C…0x1FF | — | reserved, zero (v7 on) |
 | — | — | the pad starts at 0xF1 on a v5 file, 0xD4 on a v4 file and 0xB0 on a v3 file; a v3 or v4 file carrying anything at 0xE4…0xF0, or a v3…v5 file carrying anything at 0xF4…0xFF, is refused BY VERSION NAME. **A version-3…6 file carrying anything at 0x100…0x11F is refused by version name too: those versions have a 256-byte header and END at 0x100.** |
 
 **THE HEADER BLOCK GREW, and that is a deviation stated out loud.** The 256-byte
@@ -1260,6 +1263,45 @@ checks:
 | cells with none | 60 |
 | instances in the region | 33,123 |
 
+#### 4.5.4 One box a building, and the probe (lane IDENT1, 2026-09-28)
+
+**The default is now one box a BUILDING (`--occluder-fit building`); the rule
+above is `--occluder-fit piece`, the way back.** The emitter takes each object
+group of §4.9 whose pieces are buildings, places every member's DRAWN level-0
+triangles (`bases[baseId].rep[mnamSlot]`), and fits one box in the building's
+own yaw frame (`fitBuildingBox`, `src/nativeemit.cpp`):
+
+1. voxelise the placed triangles at 16 u or coarser; a surface voxel counts as
+   solid, the inside is filled along the rays `WW_LODI_OCC_RAYS` (default
+   `xXyYz`: both ways on X and Y, down on Z);
+2. take the largest solid box in the voxels and shave one voxel off each face;
+3. **THE PROBE** (new): the 9 × 9 × 9 lattice of the box, faces and corners
+   included, is ray-tested against the triangles along the same rays. While more
+   than 0.5 percent of it is out of the walls, shrink half a voxel a face (never
+   under 16 u), at most 4 times; after that the building gets no box, and the
+   census counts it.
+
+The row is unchanged (§4.5.1): the carrier is one member placement, and the
+row's `meshId` is the carrier's drawn mesh.
+
+**Measured on the whole Commonwealth (bake `b_after`, 2026-09-28):** 1,232
+building groups; 565 fitted, 627 too thin for a 16 u box, **40 refused by the
+probe**, 62 shrunk to pass it; **511 boxes written** (54 dropped by the 4-a-cell
+cap). The gate `tests/spells/lodi_occluder_building.py --gate` (every box at
+most 1 percent out of its building, measured against the mesh each member
+DRAWS; the same boxes grown 1.25× must leave): **5 of 511 over 1 percent,
+worst 0.1605, volume-weighted 0.0004; the grown boxes: 510 of 511 over.** The
+gate FAILS on those 5, and says why: in boxes 142, 408 and 486 the box's
+centre lattice plane lies exactly on the joint between two stacked wall pieces
+(moving the box 0.25 u off it gives 0.000); box 323 is part joint, part real
+overhang; box 493 is 9 edge points (0.000 after a 0.5 u shrink). Before the
+probe the same code wrote 537 boxes with 102 over 1 percent.
+
+**Street-level coverage** (three street eyes in Boston, a 360° panorama each,
+`scratchpad/ident1_20260927/coverage.py`): the share of skyline pixels an
+occluder box hides went from **0.029 (one box a piece) to 0.560**; a
+conservative Hi-Z test would cull 0.728 of the placements in view.
+
 ---
 
 ### 4.6 The aggregate ring-3 impostors (v4)
@@ -1567,6 +1609,58 @@ the right places?"*. Two measured causes, two changes; the ray law itself
    `WW_AO_PATCH_DEG` (default 1, < 0 = off, bytes as step 4) and
    `WW_AO_PATCH_FIT=vertex` (the corner fit) are the research knobs; which fit
    ships is bungo's pick.
+6. *Kit pieces* (the tower round, bungo on the round tower's flat wall: *"a hard
+   AO cutoff, then the next face is totally white"*, and a black roof tile under
+   a catwalk on the left tower). A wall or roof built of kit pieces is several
+   placements, and steps 3-5 worked inside one placement only, so two pieces
+   meeting at one point drew two values (the tower: 115 against 251 at one
+   corner; Boston: 21,515 co-located cross-placement pairs with normals within
+   1°, mean jump 0.1 in the installed bake, 19.8 after step 5, 19% above 32).
+   It was not a missing value, a 255 clamp, or the weld failing inside a mesh:
+   each piece averaged only its own samples, and the tall panel's samples hit the
+   back of an opaque stain overlay 5 u in front of it. Steps 3-5 now run over
+   every receiver of the chunk and ring at once: step 3 pools the corners of
+   DIFFERENT placements at one point (0.5 u, within 30°); a flat patch still
+   grows inside one placement only, so a street or roof of many tiles keeps its
+   detail; the final re-pool makes the pieces agree at every shared corner. A
+   long piece with no corner where a short neighbour's corner touches its edge
+   (a T-junction: the tall panel beside two stacked window panels) still drew a
+   step, because its edge interpolates its own two corners; the corner lying on
+   the edge (within 0.5 u, off both ends, normal within 1°) now takes the edge's
+   value, settled in place until nothing moves by 0.1 byte (Boston: 16,571
+   such corners). Cost: inside one piece the linear field is bent where its
+   corners now follow the neighbours, coplanar kink mean 7.5 → 10.0 bytes
+   (share above 16: 7.7% → 13.5%). `WW_AO_WELD_ACROSS=0` keeps steps 3-5
+   inside each placement (bytes as the step-5 bake).
+7. *See-through casters* (the decal round, bungo on the same tower: *"why are
+   these faces on the tower darkened? Is it because there's a decal in front of
+   them?"*). The stain sheets (HitExtAStains*_LOD) stand 5 u in front of the
+   walls. In game they are drips over the wall, but the caster took every
+   triangle as solid, so about three of a panel's eight rays met a stain's back
+   face. The LOD NIF carries no alpha property; the see-through switch is in
+   its LOD BGSM (HitTechStain_LOD: alpha blend, alpha test at 134). A shape is
+   now SEE-THROUGH when its material blends (NIF alpha property bit 0, or the
+   BGSM/BGEM switch) or is a decal that tests. A material row is see-through
+   only when every shape on it is. A see-through triangle enters the scene with
+   its UVs and its diffuse's level-0 alpha (`LodgenAoAlpha`, src/lodgenao.h),
+   and the face caster counts a hit on it only where that alpha is at or above
+   the material's own test cutoff (128 for a blend without a test).
+
+   The switches alone do not decide it. A flag-only rule was measured first and
+   rejected: Wrhs01LOD (warehouse walls) is a decal, and SkyBrigde_LOD_01 (the
+   skybridges) blends, yet their drawn surfaces are 100% and 54% opaque, against
+   27-32% for the stains. Where the alpha passes the ray, the ray goes through;
+   where it is opaque, the ray is blocked, as the pixels are. Alpha-TESTED-only
+   rows (fences, tree cards) still cast as solid, as before; the census counts
+   them. The library `selfAO` casts see-through shapes the same way.
+
+   Boston: 9 see-through rows, 10,241 triangles over 2,704 placement-rings;
+   64 alpha-tested rows, 403,568 triangles over 20,839 placement-rings. The
+   rule is in memory only (the .lodo carries no such bit), so a vertex-AO bake
+   does not reuse an earlier library. `WW_AO_OVERLAY_CASTERS=1` casts every
+   row as solid (the refuter: the .lodi and .lodo come out as the step-6 bake's).
+   The stock caster (`rayHit`: the chunk pass and `WW_SELFAO_FACE=0`) is
+   unchanged and still takes every triangle as solid.
 
 The library `selfAO` (§3, 0x0F) uses steps 2 and 3 as well (not step 4: the
 library has no ground). The Charles bridge deck (Bridge01End01) read 38 from one
@@ -1651,8 +1745,41 @@ the writer knows the sort and the chunk partition. **A component cut by a chunk
 border becomes two groups, one a side**, which is the same rule the rest of the
 format lives under.
 
-**THE DEFAULT RULE: THE PROXIMITY JOIN (bungo's ruling 2026-09-19; lane
-IDENTPROX measured it, lane HORIZONOUT shipped it).** Three clauses, in order:
+**THE DEFAULT RULE: THE CONTACT JOIN (lane IDENT1, 2026-09-28;
+`--identity-join contact`).** Three clauses, in order:
+
+1. a SCOL part's group is its SCOL reference's group;
+2. every placement that is not a tree and has a drawn LOD mesh joins every
+   other one whose placed level-0 TRIANGLES come within **32 u**
+   (`GroupKnobs::contactTol`), taking the pairs nearest first;
+3. **a join is refused when the joined group would be wider than 4,096 u on
+   X or on Y** (`GroupKnobs::groupCap`, one cell). Trees and card-only
+   placements stay alone.
+
+The two numbers come from a sweep over the whole Commonwealth's touching pairs
+(tolerance 0 / 0.5 / 1 / 2 / 4 / 8 / 16 / 32 u, cap none / 2,048 / 4,096 /
+8,192 u; `scratchpad/ident1_20260927/sweep.py`). **The cap:** 3,840 u is the
+first that keeps every landmark core whole (the west Hub tower is 3,781 u
+wide); above 4,096 u Diamond City welds to the blocks around it. **The
+tolerance:** at cap 4,096 the two Hub towers are 53 / 44 groups at 2 u, 9 / 6
+at 16 u and 1 / 4 at 32 u, and the pieces a tower takes in that are not the
+tower (its shacks, catwalks, the structure LODs) do not grow from 8 u to 32 u.
+Whole-Commonwealth after bake: 69,806 placements, 42,306 eligible, every one
+with a group (0 bad roots); **21,140 groups** (1 piece: 16,042; 2-4: 4,474;
+5-16: 300; 17-64: 149; 65-256: 134; 257-1,024: 41; over 1,024: 0; largest 928);
+the widest joined group 4,096 × 3,376 u, none over the cap; 31 single pieces
+are wider than the cap on their own. Hub tower east 1 group, west 4 (the other
+3 are lone pieces), Trinity 1, **Diamond City 15** (no cap that stops the
+welding keeps the stadium whole), **the row houses 1** (54 pieces, 3,109 ×
+2,144 u: the terraces share walls at 0 u, and the cap cuts by width only).
+The ids stay per chunk (u16): 188 joined groups cross a 16,384 u chunk line
+and get one id a side. `WW_LODI_CONTACT_TOL`, `WW_LODI_GROUP_CAP` and
+`WW_LODI_GROUP_DUMP` are the measuring surface. `--identity-join proximity`
+is the way back, byte-identical to the 2026-09-27 files.
+
+**THE PROXIMITY JOIN (the default 2026-09-19 .. 2026-09-27; bungo's ruling
+2026-09-19; lane IDENTPROX measured it, lane HORIZONOUT shipped it;
+`--identity-join proximity`).** Three clauses, in order:
 
 1. a SCOL part's group is its SCOL reference's group;
 2. every placement that is **not a tree** and **has a drawn LOD mesh** joins a
@@ -1670,11 +1797,10 @@ already welds 286 placements across 9 Creation Kit layers into one
 18,121-unit identity: the elevated highway deck's axis-aligned box hangs over
 four South Boston city blocks, and no gap fixes that (`src/nativeemit.cpp`,
 the `(ii) THE JOIN` comment). 128 u is the last gap at which no identity holds
-two different reference buildings. **Chunk 4.4.-12: 167 groups at the default
+two different reference buildings. **Chunk 4.4.-12: 167 groups under this rule
 against 588 under the legacy rule** (read from the two `.lodi` headers' 0x108
 word, `scratchpad/horizonout_20260919/join/{prox,legacy}`); 2,387 grouped,
-largest 206, 62 singletons. `--identity-join proximity` says the default out
-loud; `--identity-join legacy` is the way back.
+largest 206, 62 singletons. `--identity-join proximity` selects this rule; `--identity-join legacy` is the way back.
 
 **THE LEGACY RULE (`--identity-join legacy`, the shipped rule until
 2026-09-19, and the gate's red control: it must reproduce 588 groups on chunk
@@ -1735,7 +1861,7 @@ the base, not the boxes. That is the open question for the ruling, not a defect
 in the table.
 
 **Census.** `groups`, `groupedPlacements`, `largestGroup`, `singletonGroups`.
-Chunk 4.4.-12 under the LEGACY rule (the default gives 167, above): 588 groups
+Chunk 4.4.-12 under the LEGACY rule (the proximity join gives 167, above): 588 groups
 over 2,449 placements, 1,981 grouped, largest 205
 (a single kit-built house of 205 distinct refs — `DecoMainA1x1Wall01` ×43,
 `DecoRoof1x1Str01` ×24, garage floors — spanning 0.7 × 0.4 of a cell), 468
@@ -2004,6 +2130,71 @@ hidden object). Readers: bit 8 below version 11 is refused by name
 (`tests/spells/near_format_selftest.py` relabels a v11 file 10 and requires it).
 **The FO4CS reader owes the same** (version 11 accepted, bit 8 = hidden).
 
+### 4.16 The per-vertex ground-contact stream (`.lodi` v12, lane GROUND1, 2026-09-27)
+
+bungo, 2026-09-27: *"Ground contact on buildings, does that look right to you,
+it's a texture map that is not usable?"* §4.1's `ground` (0x12) is ONE byte a
+placement: the MEAN of a ramp that is defined per vertex
+(`docs/LODGEN_VERTEX_PACKING.md`: 1 at the terrain surface, 0 by 256 world units
+above it). A wall whose foot is in the ground and whose top is in the air drew
+as one flat grey; the map review (audit1 §2.1) found 24% of Boston's placements
+span at least half the ramp inside themselves.
+
+**Layout mirrors §4.10 exactly.** `offVertexGround` (0x130) points at
+`u32 first[instanceCount + 1]` in instance order, then one byte a library vertex
+of the mesh the placement draws (`bases[baseId].rep[mnamSlot]`), in that mesh's
+vertex order; `vertexGroundBytes` (0x138) is the whole stream, offsets included.
+`first[0] == 0`, monotone, `first[n] == vertexGroundBytes − 4 (n + 1)`. **It is
+the AO stream's vertex population**: a non-empty slice whose length is not the AO
+slice's is refused by name, by the writer and by both readers. An empty slice
+(a card-drawn placement, a chunk with no land) means "no stream here"; a viewer
+draws the 0x12 byte for it.
+
+**The value.** `byte = round(255 × clamp(1 − (z − g) / 256, 0, 1))`, z the vertex's
+placed world height, g the BILINEAR ESM heightfield under it (128-unit posts) —
+the same terrain and the same law `lodgenNativeLighting` averages into the 0x12
+byte (`src/lodgen.cpp`, `CONTACT_RANGE`). It is evaluated at the vertex itself,
+not at the across-the-face samples the AO stream pools: the ramp is geometry,
+not a cast, so there is nothing to integrate. Computed in the chunk's miniature
+units inside the v6 pass (`src/nativeemit.cpp`), so it costs no extra walk.
+
+**Why a new version and why 0x130.** A v11 reader must be able to tell that the
+header words are there, and the version word is the only thing that tells it.
+The words go at 0x130, AFTER the retired v8's 0x11C…0x12F, so no header offset
+means two things across versions. v12 is the v11 layout plus the stream (bits
+6–8 keep their meaning); it is decided AFTER the v9/v10/v11 rules so they never
+lower it, and it needs the v7 header block and the v6 AO stream (a `--lodi-v6`
+set asking for it is refused, not dropped).
+
+**The 0x12 byte is kept**, written exactly as before, for older readers and as
+the fallback above.
+
+**Way back** (the byte-identity gate only, not a feature switch):
+`WW_LODGEN_NO_VERTEX_GROUND=1` writes the v7/v9/v10/v11 file this exe wrote
+before, byte for byte, and the census leaves the clause out.
+
+**Census**, in the `native-ladder:` line: `vertex ground contact ON: N placements
+streamed (B bytes, mean M, F at the terrain = 255, Z at 256 u or more above it = 0,
+S placement(s) spanning half the ramp or more)`. `--native-verify`'s describe adds
+`vertexGroundPlacements / BytesTotal / Mean / Full / Zero`.
+
+**Measured** (Boston box −8 −12 3 −1, 46,205 placements / 999,977 vertices; lane
+GROUND1's report, `scratchpad/ground1_20260927/DONE.md` §4): an independent
+recompute agrees within 1 level on 99.998% of vertices (99.62% exact); every
+vertex more than 256 u above the terrain reads 0 (768,197); every vertex 0–5 u
+above reads ≥ 250 (101,893). Each placement's stream mean is within 2 levels of
+its 0x12 byte on 98.35% of placements (correlation 0.99992): the byte averages
+the stock `.BTO` ring's vertices and the stream the `.lodo` library mesh's, so
+tall trees spanning the ramp differ most. Cost: the stream is the AO stream's
+size; Boston's `.lodi` grows 25%, the whole Commonwealth's about 40% (~13.9 MB).
+
+**The FO4CS reader owes** version 12 in its whitelist. A reader that does not
+draw the stream still reads the file: every v11 payload is where it was, the
+stream is after all of them, so such a reader bounds it by 0x130/0x138, folds its
+bytes into `indexCrc32` LAST (after the sky stream) if it checks that CRC, and
+otherwise ignores it. A reader that draws it takes the
+slice exactly as it takes the sky slice (§4.10).
+
 ### 4.13 The card link (lane CARDLINK1, 2026-09-24) -- `cardLayer`, `cardCount`, `cardCorpusHash`, FORCE_CARD
 
 **Status: the `cardCorpusHash` definition below is PROPOSED (R19).** bungo has
@@ -2045,6 +2236,14 @@ manifests.
    `textures` object gives, last path component): the lower-cased file name's
    UTF-8 bytes, the file size as a little-endian u64, then every byte of the
    file. 0 when no set is linked. One byte of one card sheet moves it.
+   **A set whose `.lodm` names no emissive hashes four files** (`.lodm`,
+   colour, normal, mask). Since lane TIDY1 (2026-09-27) a card array whose
+   emissive sheet decodes black on every layer (as BC1, which turns 1-7/255
+   into 0) writes no `_g`/`_e` and names none --
+   14 of the 16 Boston card sets; the other 2 hold TreeAspen01-03, whose full
+   models emit 0.05, and keep their sheet. The
+   hash of a set that does name one is unchanged; colour, normal and mask
+   stay required and a set missing one is still refused.
    `tests/spells/lodgen_cardlink.py hash <pair dir>` recomputes it outside the
    exe.
 5. **FORCE_CARD** (`.lodi` instance flags bit 1) is set on a placement whose
@@ -2803,10 +3002,10 @@ never shown.
 | name | what it paints | the byte, and where it is stored |
 |---|---|---|
 | `identity` | **the GROUP**, hashed with the stock channel-1 palette -- one colour a house (v7). On a file with no group table it falls back to the per-placement identity **and the note line says so by name**, rather than drawing the fallback silently | `.lodi` group table (§4.9) |
-| `placement` | every placement its own colour -- **what `identity` drew before v7** | `.lodi` instance identity (§4.1c) |
-| `identityraw` | that identity's low byte as grey | `.lodi` instance identity & 0xFF |
+| `placement` | one colour per placed kit piece -- **what `identity` drew before v7**; not a building map | `.lodi` instance identity (§4.1c) |
+| `placement-lowbyte` | the low byte of each placed kit piece's id, as grey: a debug view, not a building map (was `identityraw` until IDENT1, 2026-09-27) | `.lodi` instance identity & 0xFF |
 | `sky` | sky visibility: the **per-vertex stream** on a v7 file (§4.10), the flat per-placement byte on a v6 one. The note line names WHICH served, with its own count -- `per-vertex stream, N bytes over M slices` against `placement byte, N placements` -- and both numbers are read back from what was uploaded | `.lodi` sky stream (§4.10), else instance byte 0x11 |
-| `ground` | ground-contact blend -- PLACEMENTS and TERRAIN in one grey ramp | `.lodi` instance byte 0x12; the terrain is drawn at the ramp's value at the surface, which is the constant 255, and the note line says so |
+| `ground` | ground-contact blend -- PLACEMENTS and TERRAIN in one grey ramp | **per vertex from the `.lodi` v12 stream (§4.16) when the file carries it**, else instance byte 0x12 (one flat value a placement); the note line says which of the two it drew; the terrain is drawn at the ramp's value at the surface, which is the constant 255, and the note line says so |
 | `seed` | per-placement tree seed hashed to colour; **0 = not a tree = black** | `.lodi` instance byte 0x13 (§4.3) |
 | `sway` | per-vertex wind-sway weight | `.lodo` library vertex byte 0x0E (§3.1) |
 | `selfao` | per-vertex self-AO | `.lodo` library vertex byte 0x0F (§3.1) |
@@ -2817,6 +3016,17 @@ never shown.
 | `mask-a` | terrain **ground cover** | role-5 sheet, A. **A BC1 sheet has no alpha at all**; the switch then says `ABSENT on this bake -- tile x,y is BC1 (dxgi N): it carries no alpha` and draws the default view |
 | `emissive` | the role-6 emissive sheet bound as the terrain's base colour, texturing ON | `.lodt` role 6. Absent containers say `emissive sheet ABSENT -- <file> carries no sheet with role 6` |
 | `normal` | the role-2 MSN sheet bound as the terrain's base colour, texturing ON | `.lodt` role 2 (the model-space normal map of the section above) |
+
+**Aliases, not extra maps (lane TIDY1, 2026-09-27).** `ao` is another name for
+`WW_LODL_AO=1`: a picture set renders ONE of them, never both (the 2026-09-27 map review
+rendered both and got two identical pictures, 16 and 22). Likewise `sky` from above is the
+same data as `sky` from the default angle, and the `.lodl` v3 file's `height`, `cellflags`,
+`waterheight` and `watertype` planes are the v2 planes carried forward unchanged: render them
+once. The `.lodl` plane `colour` is the terrain's VERTEX TINT (VCLR), which multiplies the
+ground textures and is near white; the ground's colour is the VT colour sheet. The plane
+`groundcover` is empty on every Fallout 4 file (no GCVR records); the Fallout 4 cover is
+`mask-a`. The plane `cellrange` is the per-cell min/max height (the culling table, one value
+per 4096-unit cell), not a picture of the ground.
 
 `sky`, `ground`, `sway`, `selfao` and the four `mask-*` are a single byte written into all
 three colour components, so the picture is a grey ramp and byte 128 is 128 grey. `identity`

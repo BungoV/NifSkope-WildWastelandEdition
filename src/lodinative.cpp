@@ -418,7 +418,9 @@ struct ChannelName
 const ChannelName CHANNEL_NAMES[] = {
 	{ "identity", LodlChannel::Identity },
 	{ "placement", LodlChannel::Placement },
-	{ "identityraw", LodlChannel::IdentityRaw },
+	/* IDENT1 (2026-09-27): was `identityraw`. bungo read it as an object map ("05 is unusable"); it is only the
+	 * low byte of the placed piece's id, so the name says that now. */
+	{ "placement-lowbyte", LodlChannel::IdentityRaw },
 	{ "sky", LodlChannel::Sky },
 	{ "ground", LodlChannel::Ground },
 	{ "seed", LodlChannel::Seed },
@@ -599,10 +601,18 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 	 * in front of you). */
 	const bool skyPerVertex = ( channel == LodlChannel::Sky ) && !table.vertexSkyFirst.empty()
 		&& !table.vertexSky.empty();
+	/* v12 (lane GROUND1): `ground` the same way -- the per-vertex ground-contact
+	 * stream when the file carries it, the 0x12 placement byte when it does not. */
+	const bool groundPerVertex = ( channel == LodlChannel::Ground ) && !table.vertexGroundFirst.empty()
+		&& !table.vertexGround.empty();
+	//! the one per-vertex stream this view draws (sky or ground), found and gated the same way
+	const bool streamPerVertex = skyPerVertex || groundPerVertex;
+	const std::vector<quint32> & streamFirst = groundPerVertex ? table.vertexGroundFirst : table.vertexSkyFirst;
+	const std::vector<quint8> & streamBytes = groundPerVertex ? table.vertexGround : table.vertexSky;
 	const bool objectChannel = channel == LodlChannel::Identity
 		|| channel == LodlChannel::Placement
 		|| channel == LodlChannel::IdentityRaw || ( channel == LodlChannel::Sky && !skyPerVertex )
-		|| channel == LodlChannel::Ground || channel == LodlChannel::Seed
+		|| ( channel == LodlChannel::Ground && !groundPerVertex ) || channel == LodlChannel::Seed
 		|| channel == LodlChannel::Sway || channel == LodlChannel::SelfAo
 		|| channel == LodlChannel::Scrappable;
 	//! v7 read-back: how many placements `identity` had to fall back on, and how many drew a group
@@ -926,9 +936,9 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 			 * here rather than drawn as somebody else's numbers. */
 			const quint8 * vskSlice = nullptr;
 			quint32 vskFirstVertex = 0;
-			if ( skyPerVertex && ii + 1 < table.vertexSkyFirst.size() ) {
-				const quint32 f = table.vertexSkyFirst[ii], l = table.vertexSkyFirst[ii + 1];
-				if ( l > f && l <= table.vertexSky.size() ) {
+			if ( streamPerVertex && ii + 1 < streamFirst.size() ) {
+				const quint32 f = streamFirst[ii], l = streamFirst[ii + 1];
+				if ( l > f && l <= streamBytes.size() ) {
 					auto rit = meshRange.find( meshId );
 					if ( rit == meshRange.end() ) {
 						quint32 lo = 0xFFFFFFFFu, hi = 0;
@@ -940,7 +950,7 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 						rit = meshRange.insert( meshId, qMakePair( lo, hi > lo ? hi - lo : 0u ) );
 					}
 					if ( rit.value().second == l - f ) {
-						vskSlice = table.vertexSky.data() + f;
+						vskSlice = streamBytes.data() + f;
 						vskFirstVertex = rit.value().first;
 						skyVertSlices++;
 						skyVertBytes += qint64( l - f );
@@ -1012,7 +1022,7 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 						nb.emissiveScale = mat.emissiveScale;
 						nb.layer = ( mat.layer == LODO_NO_LAYER ) ? -1 : int( mat.layer );
 					}
-					nb.withColour = wantAo || objectChannel || skyPerVertex;
+					nb.withColour = wantAo || objectChannel || streamPerVertex;
 					bit = buckets.insert( bkey, nb );
 				}
 				Bucket & bk = bit.value();
@@ -1057,12 +1067,13 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 					} else if ( objectChannel ) {
 						for ( int k = 0; k < 3; k++ )
 							o.chan[k] = placeChan[k];
-					} else if ( skyPerVertex ) {
+					} else if ( streamPerVertex ) {
 						/* v7: one byte a library vertex. A placement with no
 						 * slice draws its flat 0x11 byte rather than white, so
 						 * an absent slice reads as "no stream here", not as
-						 * "fully open sky". */
-						const quint8 sk = vskSlice ? vskSlice[sv.libIndex - vskFirstVertex] : inst.sky;
+						 * "fully open sky". v12 ground: likewise its 0x12 byte. */
+						const quint8 sk = vskSlice ? vskSlice[sv.libIndex - vskFirstVertex]
+							: ( groundPerVertex ? inst.ground : inst.sky );
 						o.chan[0] = o.chan[1] = o.chan[2] = float( sk ) / 255.0f;
 						chanSeen( int( sk ) );
 					} else if ( vaoSlice ) {
@@ -1180,6 +1191,22 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 		note << QString( "WW_LODL_CHANNEL=sky: no per-vertex stream in %1 (a version-%2 file), so the "
 				"PLACEMENT BYTE (.lodi 0x11) served it" )
 			.arg( QFileInfo( lodiPath ).fileName() ).arg( ih.version );
+	if ( groundPerVertex )
+		note << QString( "WW_LODL_CHANNEL=ground: the PER-VERTEX GROUND-CONTACT STREAM (.lodi v12 0x130) from %1, "
+				"%L2 bytes over %L3 slices, %L4 values read; %5%6" )
+			.arg( QFileInfo( lodiPath ).fileName() )
+			.arg( skyVertBytes ).arg( skyVertSlices ).arg( chanCount )
+			.arg( chanCount == 0 ? QStringLiteral( "nothing was drawn" )
+				: chanLo == chanHi
+					? QString( "constant %1" ).arg( chanLo )
+					: QString( "min %1, max %2, mean %3" ).arg( chanLo ).arg( chanHi )
+						.arg( chanSum / double( chanCount ), 0, 'f', 3 ) )
+			.arg( skyVertMismatch ? QString( "; %1 slice(s) did not match the drawn mesh and drew the 0x12 byte" )
+				.arg( skyVertMismatch ) : QString() );
+	if ( channel == LodlChannel::Ground && !groundPerVertex )
+		note << QString( "WW_LODL_CHANNEL=ground: no per-vertex stream in %1 (a version-%2 file), so the "
+				"PLACEMENT BYTE (.lodi 0x12) served it -- one flat value a placement" )
+			.arg( QFileInfo( lodiPath ).fileName() ).arg( ih.version );
 	if ( channel == LodlChannel::Scrappable && ih.version < LODI_VERSION_SCRAPPABLE )
 		note << QString( "WW_LODL_CHANNEL=scrappable: %1 is a version-%2 file and version %3 is the one "
 				"that carries the bit -- every placement is drawn grey because the FILE says nothing, "
@@ -1200,11 +1227,11 @@ bool nifAppendLodiObjects( NifModel * nif, const QModelIndex & iRoot,
 				: channel == LodlChannel::SelfAo
 					? QStringLiteral( "the per-vertex self-AO (.lodo 0x0F)" )
 				: channel == LodlChannel::Identity
-					? QStringLiteral( "the group, hashed to colour (the stock channel 1 palette)" )
+					? QStringLiteral( "one colour per object group (a building; the .lodi group table, cut at chunk lines), hashed" )
 				: channel == LodlChannel::Placement
-					? QStringLiteral( "the placement identity, hashed to colour (the stock channel 1 palette)" )
+					? QStringLiteral( "one colour per placed kit piece (the placement identity, hashed; not a building map)" )
 				: channel == LodlChannel::IdentityRaw
-					? QStringLiteral( "the placement identity's low byte as grey" )
+					? QStringLiteral( "the low byte of each placed kit piece's id, as grey (a debug view, not a building map)" )
 				: channel == LodlChannel::Sky
 					? QStringLiteral( "the per-placement sky visibility (.lodi 0x11)" )
 				: channel == LodlChannel::Ground

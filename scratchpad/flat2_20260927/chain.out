@@ -1,0 +1,47 @@
+21:21:04 FLAT2 waiting on: 53332|E:\Projects\NifskopeWWE-tiling5\scratchpad\tiling5_20260927\run_rung\NifSkope.exe lock:TILING5
+turn taken by FLAT2 at 21:21:19
+control rc=1
+gpu: GPU path -- setting Use GPU on; NVIDIA GeForce RTX 5070 Ti/PCIe/SSE2, OpenGL 4.3; BC7 self-check 1024 blocks, error GPU 26082378 <= CPU 26090366
+lodt ok 0
+lodt could not open doctored/control.lodt
+gpu: bc7 0 image(s), 0 block(s) on the GPU in 0 ms; 0 image(s) fell back to the CPU
+R2_block rc=1
+gpu: GPU path -- setting Use GPU on; NVIDIA GeForce RTX 5070 Ti/PCIe/SSE2, OpenGL 4.3; BC7 self-check 1024 blocks, error GPU 26082378 <= CPU 26090366
+lodt ok 0
+lodt could not open doctored/R2_block.lodt
+gpu: bc7 0 image(s), 0 block(s) on the GPU in 0 ms; 0 image(s) fell back to the CPU
+R3_pad rc=1
+gpu: GPU path -- setting Use GPU on; NVIDIA GeForce RTX 5070 Ti/PCIe/SSE2, OpenGL 4.3; BC7 self-check 1024 blocks, error GPU 26082378 <= CPU 26090366
+lodt ok 0
+lodt could not open doctored/R3_pad.lodt
+gpu: bc7 0 image(s), 0 block(s) on the GPU in 0 ms; 0 image(s) fell back to the CPU
+released by FLAT2 21:21:31
+=== render
+21:21:42 FLAT2 waiting on: 52700|E:\Projects\NifskopeWWE-flat2\scratchpad\flat2_20260927\run_rung\NifSkope.exe lock:
+21:21:57 FLAT2 waiting on: 48776|E:\Projects\NifskopeWWE-tiling5\scratchpad\tiling5_20260927\run_rung\NifSkope.exe lock:TILING5
+21:22:13 FLAT2 waiting on: 41072|E:\Projects\NifskopeWWE-tiling5\scratchpad\tiling5_20260927\run_rung\NifSkope.exe lock:TILING5
+turn taken by FLAT2 at 21:22:28
+released by FLAT2 21:22:54
+NO FILE /e/Projects/NifskopeWWE-flat2/scratchpad/flat2_20260927/pics/F8_sea_edge_inapp_before.png rc=0
+21:23:07 FLAT2 waiting on: 15084|E:\Projects\NifskopeWWE-flat2\scratchpad\flat2_20260927\run_new\NifSkope.exe lock:
+21:23:22 FLAT2 waiting on: 21436|E:\Projects\NifskopeWWE-tiling5\scratchpad\tiling5_20260927\run_rung\NifSkope.exe lock:TILING5
+21:23:38 FLAT2 waiting on: 27888|E:\Projects\NifskopeWWE-tiling5\scratchpad\tiling5_20260927\run_rung\NifSkope.exe lock:TILING5
+turn taken by FLAT2 at 21:23:54
+released by FLAT2 21:24:23
+OK F9_sea_edge_inapp_after.png 1491802 B rc=0
+=== nw
+turn taken by FLAT2 at 21:24:23
+released by FLAT2 21:25:30
+rc=0 67 s  21:25:30
+vt: levels 3 tiles 64 present 64 coverTiles 0 bytes 78128416 cover 1 coverIn mask sheets 4 emissive none maskPbrm 0 maskLegacyInverted 4 maskNoneDefault 0 maskRoughMaps 4 maskMetalMaps 0 maskEmissiveMaps 0 maskDistinctLtex 4 maskLayerRefs 395 vanillaFill overlapCells=39 ringCells=39 fitTiles=24 gain
+nw_off 0
+turn taken by FLAT2 at 21:25:31
+released by FLAT2 21:26:37
+rc=0 66 s  21:26:37
+vt: levels 3 tiles 64 present 64 coverTiles 0 bytes 52581664 cover 1 coverIn mask sheets 4 emissive none maskPbrm 0 maskLegacyInverted 4 maskNoneDefault 0 maskRoughMaps 4 maskMetalMaps 0 maskEmissiveMaps 0 maskDistinctLtex 4 maskLayerRefs 395 vanillaFill overlapCells=39 ringCells=39 fitTiles=24 gain
+nw_on 0
+turn taken by FLAT2 at 21:26:37
+released by FLAT2 21:27:46
+rc=0 68 s  21:27:46
+vt: levels 3 tiles 64 present 64 coverTiles 0 bytes 78128416 cover 1 coverIn mask sheets 4 emissive none maskPbrm 0 maskLegacyInverted 4 maskNoneDefault 0 maskRoughMaps 4 maskMetalMaps 0 maskEmissiveMaps 0 maskDistinctLtex 4 maskLayerRefs 395 vanillaFill overlapCells=39 ringCells=39 fitTiles=24 gain
+nw_rung 0

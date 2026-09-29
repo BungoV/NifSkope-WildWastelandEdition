@@ -7,6 +7,7 @@ BSD License - see nifskope.h
 #include "lodbfile.h"
 #include "lodgen.h"
 #include "lodgenchunkpass.h"
+#include "lodgengpu.h"
 #include "lodgenparallel.h"
 #include "lodgenlayout.h"
 #include "lodgenloadorder.h"
@@ -462,6 +463,16 @@ public:
 			if ( moveds || kept )
 				qDebug() << "LOD Generation: 2026-09-12 defaults applied to" << moveds
 					<< "saved rows," << kept << "left as they were set";
+		}
+		/* The same once-only sweep for the water bodies (lane WATER1,
+		 * 2026-09-27): they are ON by default now, and a panel saved before
+		 * holds the old default `false` for the row. Only that exact old value
+		 * moves; the marker makes it once. */
+		if ( !settings.value( QStringLiteral( "LodGeneration/water1Applied" ), false ).toBool() ) {
+			const QString k = QStringLiteral( "LodGeneration/waterBodies" );
+			if ( settings.contains( k ) && !settings.value( k ).toBool() )
+				settings.setValue( k, true );
+			settings.setValue( QStringLiteral( "LodGeneration/water1Applied" ), true );
 		}
 
 		/* One label | field grid per section, the field column stretching so
@@ -1253,7 +1264,7 @@ public:
 			terrainIdCheck->setObjectName( QStringLiteral( "LodgenTerrainIdentityCheck" ) );
 			// OFF since 2026-09-12 (lane DEFAULTS1, bungo's 15:53 ruling)
 			terrainIdCheck->setChecked( false );
-			terrainIdCheck->setToolTip( tr( "Material class, wetness and water depth in the chunk's vertex colours, for FO4CS.\n"
+			terrainIdCheck->setToolTip( tr( "Material class and wetness in the chunk's vertex colours, for FO4CS.\n"
 				"Off, the .BTR carries vanilla's vertex layout.\nCommand line: --terrain-identity" ) );
 			geomorphCheck = new QCheckBox( tr( "Geomorph weights" ), page );
 			geomorphCheck->setChecked( false );
@@ -1708,15 +1719,16 @@ public:
 		}
 
 		// ---- Water bodies in the landscape file -----------------------------
-		/* A module of the `.lodl` writer, off by default: unarmed, the file is
-		 * the one the same bake wrote before the module existed. */
+		/* A module of the `.lodl` writer, ON by default since lane WATER1
+		 * (2026-09-27): the file says where water is, body by body. Unticked,
+		 * the file is the version-2 one the same bake wrote before. */
 		waterBodiesCheck = new QCheckBox( tr( "Water bodies in the landscape file" ), page );
 		waterBodiesCheck->setObjectName( QStringLiteral( "LodgenWaterBodiesCheck" ) );
 		waterBodiesCheck->setChecked(
-			settings.value( QStringLiteral( "LodGeneration/waterBodies" ), false ).toBool() );
+			settings.value( QStringLiteral( "LodGeneration/waterBodies" ), true ).toBool() );
 		waterBodiesCheck->setToolTip( tr( "Writes each connected body of water, its shore and its flow into the\n"
-			".lodl beside the landscape.\nCommand line: --water-bodies" ) );
-		extras.insert( QStringLiteral( "waterBodies" ), WwExtraRow{ waterBodiesCheck, false } );
+			".lodl beside the landscape.\nCommand line: on by default; --no-water-bodies turns it off" ) );
+		extras.insert( QStringLiteral( "waterBodies" ), WwExtraRow{ waterBodiesCheck, true } );
 		waterBodiesSection = new LodgenSection( waterBodiesCheck, QStringLiteral( "WaterBodies" ), false, page );
 		layout->addWidget( waterBodiesSection );
 		{
@@ -1995,7 +2007,6 @@ public:
 			previewBox->addItem( tr( "Tree sway / shore proximity (A)" ), 4 );
 			previewBox->addItem( tr( "Terrain material class (R, hashed)" ), 5 );
 			previewBox->addItem( tr( "Terrain wetness (G)" ), 6 );
-			previewBox->addItem( tr( "Water depth (R)" ), 7 );
 			previewBox->setToolTip( tr( "Draw one generated vertex channel flat, with no textures or lighting.\nOnly for an open .bto or .btr - on any other mesh these channels mean\nsomething else." ) );
 			wwMatchFieldStyle( previewBox );
 			f.g->addWidget( previewLabel, f.row, 0 );
@@ -3081,6 +3092,9 @@ private:
 		// the process-wide generator settings, from their rows, before any
 		// stage reads one of them (lane PANEL1)
 		applyGeneratorSettings();
+		// GPU or CPU for this run, from Settings > NIF > LOD bake > Use GPU (src/lodgengpu.h)
+		lodgenGpuConfigure( false );
+		qInfo().noquote() << lodgenGpuReport();
 		// the four stage times start at zero for every run, so a stage that
 		// does not run this time reads 0 and not the last run's number
 		msLandscape = msMeshes = msTextures = msImpostors = 0;
@@ -3165,16 +3179,24 @@ private:
 				LodtOptions o;
 				o.aoSamples = job.aoSamples;
 				o.overviewSamples = job.overviewSamples;
-				/* The water-body module of the .lodl writer, off by default:
-				 * unarmed, the file is the one this bake wrote before the
-				 * module existed. */
+				/* The water-body module of the .lodl writer, ON by default
+				 * since lane WATER1; unticked, the file is the version-2 one
+				 * this bake wrote before. A worldspace the module cannot
+				 * classify (no water above its ground) falls back to version 2
+				 * and says so, instead of failing the bake. */
 				o.water.enabled = xb( "waterBodies" );
+				o.water.fallbackV2 = true;
 				o.water.bridgeGap = xi( "waterBridge" );
 				o.water.nearTexels = xi( "waterNear" );
 				o.water.bodySamples = xi( "waterBodySamples" );
 				o.water.flowSamples = xi( "waterFlowSamples" );
 				o.water.shore = xb( "waterShore" );
 				o.water.velocityPlugin = xs( "waterVelocities" );
+				/* The WATR NAM0 fallback floor, from the plugins this bake
+				 * loads -- what the command line has always done, so the panel
+				 * and the command line write the same flow. */
+				if ( o.water.enabled && o.water.velocityPlugin.isEmpty() )
+					o.water.velocityPlugin = job.plugins;
 				o.progress = [this, post]( int phase, int done, int total, int level, int i, int j ) {
 					post( [this, phase, done, total, level, i, j]() {
 						if ( phase == 0 ) {
@@ -3196,6 +3218,36 @@ private:
 					const QString fillWs = w.worldspaceEdid();
 					o.landFill = [fillWs]( int cx, int cy, float * h ) {
 						return lodgenVanillaCellHeights( fillWs, cx, cy, h );
+					};
+				}
+				/* Lane WATER1 (sloped water): the placed water meshes' triangles,
+				 * model space, 9 floats a triangle, through the object bake's own
+				 * NIF reader. An EMPTY data root = the session's resource stack,
+				 * as for the native pair below. Same loader as the command line
+				 * (src/nifcli.cpp), so the panel and the CLI write the same file. */
+				if ( o.water.enabled ) {
+					lodgenWarmSharedIndices();
+					o.placedWaterModel = []( const QString & model, std::vector<float> & tris ) {
+						std::vector<NativeSrcShape> shapes;
+						QString root;
+						if ( !lodgenNativeLoadModelOnce( &root, model, nullptr, &shapes ) )
+							return false;
+						tris.clear();
+						for ( const NativeSrcShape & s : shapes ) {
+							const std::vector<float> & p = s.geom.pos;
+							const size_t nv = p.size() / 3;
+							for ( size_t t = 0; t + 2 < s.geom.tris.size(); t += 3 ) {
+								const quint32 a = s.geom.tris[t], b = s.geom.tris[t + 1], c = s.geom.tris[t + 2];
+								if ( a >= nv || b >= nv || c >= nv )
+									continue;
+								for ( quint32 v : { a, b, c } ) {
+									tris.push_back( p[v * 3] );
+									tris.push_back( p[v * 3 + 1] );
+									tris.push_back( p[v * 3 + 2] );
+								}
+							}
+						}
+						return true;
 					};
 				}
 				QString written;
@@ -3357,7 +3409,7 @@ private:
 				incRun.region[2] = x1Spin->value();
 				incRun.region[3] = y1Spin->value();
 				incRun.switches = lodgenSwitchesWithIdentity(
-					lodgenSwitchDigestOf( { QStringLiteral( "--panel" ) } ), word );
+					lodgenSwitchDigestOf( { QStringLiteral( "--panel" ) } ), word + lodgenGpuDigestWord() );
 				incRun.regionProducts = objectPassOn()
 					&& ( arraysCheck->isChecked() || idx.atlas || !cardSourceDir().isEmpty() );
 				incRun.nativeCache = true;

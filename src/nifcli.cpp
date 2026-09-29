@@ -25,6 +25,7 @@ See the LICENSE.md file for the full license text.
 #include "esmweather.h"
 #include "lodgen.h"
 #include "lodgenchunkpass.h"
+#include "lodgengpu.h"
 #include "lodgenloadorder.h"
 #include "lodgenlayout.h"
 #include "lodgenparallel.h"
@@ -2611,10 +2612,21 @@ static bool cmdLodgenVtEstimate( const EsmWorld & world, const LodgenVtOptions &
 /*! The `.lodl` water-body module's switches, filled by the argument loop.
  *
  *  `cmdLodgen` already carries forty-five parameters; five more for one
- *  optional section would be churn nobody reads. Default-constructed means the
- *  module is OFF, which is the state every run that does not name
- *  `--water-bodies` is in. */
-static LodtWaterOptions gLodlWater;
+ *  optional section would be churn nobody reads.
+ *
+ *  ON BY DEFAULT since lane WATER1 (2026-09-27): a `.lodl` says where water is,
+ *  body by body (version 3). `--no-water-bodies` is the way back, byte for
+ *  byte, to the version-2 file. On by default the module FALLS BACK to version 2
+ *  and says why when it cannot classify a worldspace (no water above its
+ *  ground); an explicit `--water-bodies` keeps the old strict refusal. */
+static LodtWaterOptions lodlWaterDefaults()
+{
+	LodtWaterOptions o;
+	o.enabled = true;
+	o.fallbackV2 = true;
+	return o;
+}
+static LodtWaterOptions gLodlWater = lodlWaterDefaults();
 
 /*! INCREMENTAL REGENERATION (lane INCR1, 2026-09-12), filled by the argument
  *  loop for the same reason gLodlWater is: cmdLodgen already carries
@@ -2722,7 +2734,8 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 	const QString & nativeVerifyLodi, const QString & nativeFixture, const QString & nativeMeshReport,
 	bool nativeVerifyCorpus, bool nativeLadder, bool nativeOccluders,
 	bool libraryNear, bool ladderFoliage, float silhouetteMin, bool placementAo, bool vertexAo, bool lodiV7,
-	bool scrappable, bool identityJoinLegacy, float identityJoinGap, bool treesOnly,
+	bool scrappable, bool identityJoinLegacy, float identityJoinGap, bool identityJoinContact,
+	bool occluderBuilding, bool treesOnly,
 	bool aggregate, int aggMin, int aggTile, int aggViews )
 {
 	/* The layout clause starts blank for this run and is filled by the writers
@@ -3481,9 +3494,8 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 		LodtOptions lopts;
 		/* The water module's switches. They ride a file-scope struct rather
 		 * than five more parameters on a function that already takes
-		 * forty-five; what matters is that they are OFF unless the command line
-		 * said otherwise, so a run that did not ask for bodies writes the bytes
-		 * it always wrote. */
+		 * forty-five. ON by default since lane WATER1; --no-water-bodies
+		 * writes the version-2 bytes this run always wrote before. */
 		lopts.water = gLodlWater;
 		if ( lopts.water.enabled && lopts.water.velocityPlugin.isEmpty() )
 			lopts.water.velocityPlugin = file;   // the WATR NAM0 fallback floor
@@ -3518,6 +3530,37 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 				const QString fillWs = world.worldspaceEdid();
 				lopts.landFill = [fillWs]( int cx, int cy, float * h ) {
 					return lodgenVanillaCellHeights( fillWs, cx, cy, h );
+				};
+			}
+			/* Lane WATER1 (sloped water): the writer asks for each placed water
+			 * mesh's triangles through this loader, in model space, 9 floats a
+			 * triangle. The same NIF reader the object bake uses; false = the
+			 * model did not load, and the writer counts it. */
+			if ( lopts.water.enabled ) {
+				const QString waterDataRoot = dataRoot.isEmpty()
+					? QStringLiteral( "E:/Tools/Fallout 4/DataUnpacked/Data" ) : dataRoot;
+				lodgenWarmSharedIndices();
+				lopts.placedWaterModel = [waterDataRoot]( const QString & model, std::vector<float> & tris ) {
+					std::vector<NativeSrcShape> shapes;
+					QString rootCopy = waterDataRoot;
+					if ( !lodgenNativeLoadModelOnce( &rootCopy, model, nullptr, &shapes ) )
+						return false;
+					tris.clear();
+					for ( const NativeSrcShape & s : shapes ) {
+						const std::vector<float> & p = s.geom.pos;
+						const size_t nv = p.size() / 3;
+						for ( size_t t = 0; t + 2 < s.geom.tris.size(); t += 3 ) {
+							const quint32 a = s.geom.tris[t], b = s.geom.tris[t + 1], c = s.geom.tris[t + 2];
+							if ( a >= nv || b >= nv || c >= nv )
+								continue;
+							for ( quint32 v : { a, b, c } ) {
+								tris.push_back( p[v * 3] );
+								tris.push_back( p[v * 3 + 1] );
+								tris.push_back( p[v * 3 + 2] );
+							}
+						}
+					}
+					return true;
 				};
 			}
 			QElapsedTimer landscapeTimer;
@@ -3917,6 +3960,7 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 			lodgenNativeLodiV7Option( lodiV7 );
 			lodgenNativeScrappableOption( scrappable );
 			lodgenNativeIdentityJoinOption( identityJoinLegacy, identityJoinGap );
+			lodgenNativeIdentityContactOption( identityJoinContact, occluderBuilding );
 			/* `--native` NAMES A MOD FOLDER from today (lane LAYOUT1,
 			 * 2026-09-16), exactly as `--vt` and `--lodl` already did: the pair
 			 * lands at `<MODFOLDER>/FO4CSLOD/<ws>/`, not in the directory
@@ -4074,6 +4118,8 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 		idx.scrappable = scrappable;
 		idx.identityJoinLegacy = identityJoinLegacy;
 		idx.identityJoinGap = identityJoinGap;
+		idx.identityJoinContact = identityJoinContact && !identityJoinLegacy;
+		idx.occluderBuilding = occluderBuilding;
 		idx.aggregate = aggregate;
 		idx.aggMin = aggMin;
 		idx.aggTile = aggTile;
@@ -4126,7 +4172,7 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 			out() << "card sets: " << rel.size() << " file(s) under " << impostors << ", digest "
 				  << cardsWord.mid( 7, 12 ) << Qt::endl;
 		}
-		inc.switches = lodgenSwitchesWithIdentity( gLgSwitchDigest, idWord + cardsWord );
+		inc.switches = lodgenSwitchesWithIdentity( gLgSwitchDigest, idWord + cardsWord + lodgenGpuDigestWord() );
 		inc.regionProducts = atlas || arrays || !impostors.isEmpty();
 		inc.nativeCache = gLgNativeCache;
 		/* the raw chunk cache rides on the .lodj one: `--no-native-cache` turns both off */
@@ -6251,6 +6297,12 @@ int usage()
 		  << "  lodl <file.lodl> --water-mark-selftest  the MARKING tool's gates. It\n"
 		  << "                                          REWRITES the file it is given,\n"
 		  << "                                          so give it a copy\n"
+		  << "  lodl <out.lodl> --water-slope-selftest [--water-slope-flat <flat.lodl>]\n"
+		  << "                                          sloped-water known-answer test: it\n"
+		  << "                                          WRITES <out.lodl> (a tilted river\n"
+		  << "                                          ribbon) and checks the surface plane;\n"
+		  << "                                          --water-slope-flat keeps the\n"
+		  << "                                          flat-steps comparison file too\n"
 		  << "  lodl <file.lodl> [--region X0 Y0 X1 Y1] [--lod N] [--plane KEY] [-o OUT.nif]\n"
 		  << "                                          build the region as BSTriShape\n"
 		  << "                                          geometry, painted with one stored\n"
@@ -6284,6 +6336,11 @@ int usage()
 		  << "                                          the vanilla sheet for vanilla BTOs)\n"
 		  << "  lodgen <file.esm> --worldspace HEX --objects X Y [--dim 4]\n"
 		  << "         [--data-root DIR] [--identity] [--no-identity] [--no-ao] [--arrays]\n"
+		  << "         [--no-gpu]                       (this run on the CPU; the GPU is\n"
+		  << "                                          used when Settings > NIF > LOD bake\n"
+		  << "                                          > Use GPU is on, the default; its\n"
+		  << "                                          card normal BC7 is as good, not\n"
+		  << "                                          the same bytes)\n"
 		  << "         [--no-merge]                     (shapes merge per material after\n"
 		  << "                                          the atlas; --no-merge keeps one\n"
 		  << "                                          shape per source material)\n"
@@ -6459,12 +6516,17 @@ int usage()
 	  << "  lodgen ... --native <dir> --lodi-v6\n"
 	  << "  lodgen ... --native <dir> --lodi-v7\n"
 	  << "  lodgen ... --native <dir> --scrappable  (off by default; .lodi v9 instance bit 6)\n"
-	  << "  lodgen ... --native <dir> --identity-join-gap 64 | --identity-join legacy\n"
-	  << "                                          v7 GROUPING: a non-tree placement joins\n"
-	  << "                                          a group when its LOD MESH is within the\n"
-	  << "                                          gap of another's (bungo 2026-09-19);\n"
-	  << "                                          `legacy` is the old architecture-only\n"
-	  << "                                          16-unit BOX rule, byte for byte\n"
+	  << "  lodgen ... --native <dir> --identity-join contact | proximity | legacy\n"
+	  << "                                          v7 GROUPING: `contact` (the default,\n"
+	  << "                                          lane IDENT1) joins pieces whose placed\n"
+	  << "                                          triangles touch, plus SCOL parts, under\n"
+	  << "                                          a size cap; `proximity` is the 64-unit\n"
+	  << "                                          mesh gap (--identity-join-gap) of\n"
+	  << "                                          2026-09-19; `legacy` is the old\n"
+	  << "                                          architecture-only 16-unit BOX rule\n"
+	  << "  lodgen ... --native <dir> --occluder-fit building | piece\n"
+	  << "                                          one occluder box a building group (the\n"
+	  << "                                          default) or one a piece (the way back)\n"
 	  << "                                          write no group table and no\n"
 	  << "                                          per-vertex sky stream; the\n"
 	  << "                                          .lodi stays at version 6,\n"
@@ -6520,7 +6582,20 @@ int usage()
 		  << "                                          hex tiling (256 units, bias -0.22)\n"
 		  << "                                          with the warp amplitude forced to 0;\n"
 		  << "                                          warp = lane TILING3's domain warp,\n"
-		  << "                                          kept for the record\n"
+		  << "                                          kept for the record; relief = the\n"
+		  << "                                          sampler unchanged plus both switches\n"
+		  << "                                          below\n"
+		  << "  lodgen ... --terrain-region ... [--land-height-blend on|off]\n"
+		  << "                                 [--land-macro on|off]\n"
+		  << "                                          lane TILING5, both OFF by default (off\n"
+		  << "                                          = the same bytes). height-blend: each\n"
+		  << "                                          land texture's relief, integrated from\n"
+		  << "                                          its normal map, decides the hex joins\n"
+		  << "                                          and the layer transitions (raised wins)\n"
+		  << "                                          instead of a crossfade. macro: a smooth\n"
+		  << "                                          58 m - 1 km world field that moves the\n"
+		  << "                                          land colour's brightness and hue\n"
+		  << "                                          slightly; saturation only ever rises\n"
 		  << "  lodgen ... --terrain-region ... [--blend-edges off|quadrant]\n"
 		  << "                                          the 2,048-unit quadrant lines of the\n"
 		  << "                                          land colour. DEFAULT quadrant since\n"
@@ -6787,6 +6862,26 @@ int usage()
 		  << "                                          writes <ws>.flat_objects_report.txt\n"
 		  << "                                          beside the sheets (terrain VT bake).\n"
 		  << "                                          --roads-legacy turns them off.\n"
+		  << "  lodgen ... [--stamp-normals] [--no-stamp-normals]\n"
+		  << "                                          THE NORMAL STAMP (on by default,\n"
+		  << "                                          terrain VT bake): where a road or a\n"
+		  << "                                          flat object paints the colour sheet,\n"
+		  << "                                          its normal map is stamped into the\n"
+		  << "                                          msn sheet too, in world space, with\n"
+		  << "                                          the colour's own mask and weight.\n"
+		  << "                                          --no-stamp-normals (or\n"
+		  << "                                          --roads-legacy) is the old msn.\n"
+		  << "  lodgen ... [--sky-objects] [--no-sky-objects]\n"
+		  << "                                          THE GROUND'S SKY WITH THE OBJECTS\n"
+		  << "                                          (on by default, terrain VT bake):\n"
+		  << "                                          the mask sheet's sky AO is the\n"
+		  << "                                          terrain march and the placed objects'\n"
+		  << "                                          height field as one union per\n"
+		  << "                                          direction, so street canyons and the\n"
+		  << "                                          ground under decks read darker.\n"
+		  << "                                          Supersedes --terrain-object-ao on the\n"
+		  << "                                          VT sheets. --no-sky-objects is the\n"
+		  << "                                          old mask B.\n"
 		  << "  lodgen ... [--terrain-object-ao]\n"
 		  << "             [--terrain-object-ao-strength 0..4, default 0.5]\n"
 		  << "             [--terrain-object-ao-slab 0|1, default 1; 0 = the old\n"
@@ -6890,6 +6985,12 @@ int usage()
 		  << "                                          sheet descriptor byte 6 says so); the\n"
 		  << "                                          colour keeps the full density. OFF by\n"
 		  << "                                          default; needs --vt-mips 2 or more.\n"
+		  << "         [--no-collapse-uniform]          store a tile sheet that is ONE value\n"
+		  << "                                          (open sea, flat ground) in full, as\n"
+		  << "                                          before 2026-09-27. By default such a\n"
+		  << "                                          sheet is a 16-byte record and a tile\n"
+		  << "                                          flag bit; no texel changes. For the\n"
+		  << "                                          byte-identity gate only.\n"
 		  << "                                          With --msn-cache set, the pyramid's\n"
 		  << "                                          NORMAL is that folder's sheets, box-\n"
 		  << "                                          filtered as vectors to each level;\n"
@@ -7174,6 +7275,8 @@ int nifskopeCliMain( const QStringList & args )
 	bool lodtWaterCensusOnly = false;
 	bool lodtWaterSelfTestOnly = false;
 	bool lodtWaterMarkSelfTestOnly = false;
+	bool lodtWaterSlopeSelfTestOnly = false;
+	QString lodtWaterSlopeFlat;
 	bool lgListWorldspaces = false;
 	quint32 lgWorldspace = 0;
 	bool lgHaveCell = false;
@@ -7197,6 +7300,7 @@ int nifskopeCliMain( const QStringList & args )
 	// The AO bake is the identity channel's B. Off leaves it at 255, which is
 	// what makes each object ONE flat colour -- the index and nothing else.
 	bool lgBakeAO = true;
+	bool lgNoGpu = false;
 	bool lgCullBuried = false;
 	float lgCullMargin = 128.0f;
 	bool lgAoGrey = false;
@@ -7229,7 +7333,7 @@ int nifskopeCliMain( const QStringList & args )
 	bool lgRoadGroundPaintSet = false;
 	bool lgRoadDetailSet = false, lgRoadRaisedSet = false,
 		lgRoadSidewalksSet = false, lgRoadsLegacy = false,
-		lgRoadOpacitySet = false, lgFlatObjectsSet = false;
+		lgRoadOpacitySet = false, lgFlatObjectsSet = false, lgStampNormalsSet = false;
 	/* The terrain virtual texture (lodgen.h). OFF by default; --vt names the
 	 * mod folder to write Terrain/ under. */
 	LodgenVtOptions lgVt;
@@ -7277,8 +7381,13 @@ int nifskopeCliMain( const QStringList & args )
  *                             buildings. Trees never join.
  *   --identity-join legacy    the way back: the pre-2026-09-19 rule, only an
  *                             `architecture`-pathed placement, joined on a WORLD
- *                             AXIS-ALIGNED BOX gap of 16 u. `--identity-join
- *                             proximity` says the default out loud. */
+ *                             AXIS-ALIGNED BOX gap of 16 u.
+ *   --identity-join contact   the default since lane IDENT1 (2026-09-27): pieces
+ *                             whose placed level-0 triangles touch, plus SCOL
+ *                             parts, under a size cap. `--identity-join
+ *                             proximity` is the 2026-09-19 rule, byte for byte.
+ *   --occluder-fit building   IDENT1's default: one occluder box a building
+ *                             group; `piece` is the one-box-a-piece way back. */
 	bool lgLibraryNear = false;
 	bool lgNativeLadderFoliage = LODO_LADDER_FOLIAGE_DEFAULT;
 	float lgNativeSilhouette = LODO_SILHOUETTE_MIN_DEFAULT;
@@ -7296,6 +7405,8 @@ int nifskopeCliMain( const QStringList & args )
 	 * RULING, not a module, and the rule it replaces is the way back. */
 	bool lgIdentityJoinLegacy = false;
 	float lgIdentityJoinGap = 64.0f;
+	bool lgIdentityJoinContact = true;     // IDENT1: `--identity-join proximity` is the way back
+	bool lgOccluderBuilding = true;        // IDENT1: `--occluder-fit piece` is the way back
 	/* THE AGGREGATE MODULE, AND IT SHIPS OFF. Aggregation is
 	 * a module, and CONSTITUTION 10 makes its off value the exact way back --
 	 * with it off the .lodi is written at version 3 and every output file is
@@ -7443,6 +7554,8 @@ int nifskopeCliMain( const QStringList & args )
 		else if ( t == QLatin1String( "--water-census" ) ) lodtWaterCensusOnly = true;
 		else if ( t == QLatin1String( "--water-selftest" ) ) lodtWaterSelfTestOnly = true;
 		else if ( t == QLatin1String( "--water-mark-selftest" ) ) lodtWaterMarkSelfTestOnly = true;
+		else if ( t == QLatin1String( "--water-slope-selftest" ) ) lodtWaterSlopeSelfTestOnly = true;
+		else if ( t == QLatin1String( "--water-slope-flat" ) ) lodtWaterSlopeFlat = next();
 		else if ( t == QLatin1String( "--list-worldspaces" ) ) lgListWorldspaces = true;
 		else if ( t == QLatin1String( "--worldspace" ) ) lgWorldspace = next().toUInt( nullptr, 16 );
 		else if ( t == QLatin1String( "--cell" ) ) {
@@ -7489,6 +7602,10 @@ int nifskopeCliMain( const QStringList & args )
 		else if ( t == QLatin1String( "--identity" ) ) lgIdentity = true;
 		else if ( t == QLatin1String( "--no-identity" ) ) lgIdentity = false;
 		else if ( t == QLatin1String( "--no-ao" ) ) lgBakeAO = false;
+		/* `--no-gpu`: this run on the CPU whatever Settings > NIF > LOD bake >
+		 * Use GPU says (src/lodgengpu.h). The path taken, not this token, goes
+		 * into the chunk digest (lodgenGpuDigestWord). */
+		else if ( t == QLatin1String( "--no-gpu" ) ) lgNoGpu = true;
 		/* THE THREAD BUDGET, and the exact way back. `--threads 1` runs the
 		 * generator on one core the way it always ran: one world, one cache
 		 * set, one chunk at a time, written inline. 0 or absent = the
@@ -7545,7 +7662,20 @@ int nifskopeCliMain( const QStringList & args )
 				lodgenSetLandWarpOctaves( 1 );
 				lodgenSetLandMipBias( -1.0f );
 			}
+			/* `relief` (lane TILING5) leaves the sampler exactly as it is --
+			 * today's default hex + flatwarp -- and turns on the height-aware
+			 * blend and the large-scale variation together. */
+			else if ( v == QLatin1String( "relief" ) ) {
+				lodgenSetLandHeightBlend( true );
+				lodgenSetLandMacro( true );
+			}
 		}
+		/* THE TWO HALVES OF `relief`, individually (lane TILING5); both OFF by
+		 * default and off is the rung's bytes. */
+		else if ( t == QLatin1String( "--land-height-blend" ) )
+			lodgenSetLandHeightBlend( next().toLower() == QLatin1String( "on" ) );
+		else if ( t == QLatin1String( "--land-macro" ) )
+			lodgenSetLandMacro( next().toLower() == QLatin1String( "on" ) );
 		else if ( t == QLatin1String( "--land-detail" ) ) lodgenSetLandDetail( next().toFloat() );
 		/* THE FOUR NUMBERS OF THE STOCHASTIC SAMPLE, individually (lane
 		 * TILING3). Since 2026-09-12 the DEFAULTS are bungo's pick -- amplitude
@@ -7765,9 +7895,11 @@ int nifskopeCliMain( const QStringList & args )
 		else if ( t == QLatin1String( "--verify-only" ) ) lgLodtVerify = true;
 		else if ( t == QLatin1String( "--refresh-ao" ) ) lgRefreshAo = true;
 		/* The water-body module (docs/LODGEN_BTD_FORMAT.md, version 3). It is
-		 * the ONLY thing that raises the written version to 3, so a run without
-		 * it is byte-identical to what this writer produced before. */
-		else if ( t == QLatin1String( "--water-bodies" ) ) gLodlWater.enabled = true;
+		 * the ONLY thing that raises the written version to 3. ON by default
+		 * since lane WATER1; a run with --no-water-bodies is byte-identical to
+		 * what this writer produced before. */
+		else if ( t == QLatin1String( "--water-bodies" ) ) { gLodlWater.enabled = true; gLodlWater.fallbackV2 = false; }
+		else if ( t == QLatin1String( "--no-water-bodies" ) ) gLodlWater.enabled = false;
 		else if ( t == QLatin1String( "--water-bridge" ) ) gLodlWater.bridgeGap = next().toInt();
 		else if ( t == QLatin1String( "--water-near" ) ) gLodlWater.nearTexels = next().toInt();
 		else if ( t == QLatin1String( "--water-body-samples" ) ) gLodlWater.bodySamples = next().toInt();
@@ -7883,6 +8015,19 @@ int nifskopeCliMain( const QStringList & args )
 			lgFlatObjectsSet = true;
 		}
 		else if ( t == QLatin1String( "--flat-objects-file" ) ) lgCover.flatObjectsFile = next();
+		else if ( t == QLatin1String( "--stamp-normals" ) ) {
+			lgCover.stampNormals = true;
+			lgStampNormalsSet = true;
+		}
+		else if ( t == QLatin1String( "--no-stamp-normals" ) ) {
+			lgCover.stampNormals = false;
+			lgStampNormalsSet = true;
+		}
+		/* lane TERR1: the sky union (lodgen.h `skyObjects`), on by default. */
+		else if ( t == QLatin1String( "--sky-objects" ) )
+			lgCover.skyObjects = true;
+		else if ( t == QLatin1String( "--no-sky-objects" ) )
+			lgCover.skyObjects = false;
 		else if ( t == QLatin1String( "--roads-legacy" ) ) {
 			lgRoadsLegacy = true;
 			lgCover.roadComposite = LodgenCoverOptions::RoadMaxZ;
@@ -7899,6 +8044,7 @@ int nifskopeCliMain( const QStringList & args )
 		}
 		else if ( t == QLatin1String( "--vt-density" ) ) lgVtDensity = qMax( -1, next().toInt() );
 		else if ( t == QLatin1String( "--vt-half-aux" ) ) lgVt.halfAux = true;
+		else if ( t == QLatin1String( "--no-collapse-uniform" ) ) lgVt.collapseUniform = false;
 		else if ( t == QLatin1String( "--vt-border" ) ) lgVt.border = next().toInt();
 		else if ( t == QLatin1String( "--vt-mips" ) ) lgVt.mips = next().toInt();
 		else if ( t == QLatin1String( "--vt-compress" ) ) {
@@ -7964,10 +8110,26 @@ int nifskopeCliMain( const QStringList & args )
 			const QString v = next().toLower();
 			if ( v == QLatin1String( "legacy" ) ) {
 				lgIdentityJoinLegacy = true;
+				lgIdentityJoinContact = false;
 			} else if ( v == QLatin1String( "proximity" ) ) {
 				lgIdentityJoinLegacy = false;
+				lgIdentityJoinContact = false;
+			} else if ( v == QLatin1String( "contact" ) ) {
+				lgIdentityJoinLegacy = false;
+				lgIdentityJoinContact = true;
 			} else {
-				err() << "error: --identity-join takes proximity or legacy, not '" << v << "'" << Qt::endl;
+				err() << "error: --identity-join takes contact, proximity or legacy, not '" << v << "'" << Qt::endl;
+				return 2;
+			}
+		}
+		else if ( t == QLatin1String( "--occluder-fit" ) ) {
+			const QString v = next().toLower();
+			if ( v == QLatin1String( "building" ) ) {
+				lgOccluderBuilding = true;
+			} else if ( v == QLatin1String( "piece" ) ) {
+				lgOccluderBuilding = false;
+			} else {
+				err() << "error: --occluder-fit takes building or piece, not '" << v << "'" << Qt::endl;
 				return 2;
 			}
 		}
@@ -8126,6 +8288,9 @@ int nifskopeCliMain( const QStringList & args )
 		/* ROADS1 painted no flat ground objects. */
 		if ( !lgFlatObjectsSet )
 			lgCover.flatObjects = false;
+		/* ROADS1 stamped no normals (lane TERR1). */
+		if ( !lgStampNormalsSet )
+			lgCover.stampNormals = false;
 	}
 
 	if ( cmd == QLatin1String( "new" ) ) {
@@ -8576,6 +8741,16 @@ int nifskopeCliMain( const QStringList & args )
 			if ( !ok && !werr.isEmpty() )
 				err() << "error: " << werr << Qt::endl;
 			rc = ok ? 0 : 1;
+		} else if ( lodtWaterSlopeSelfTestOnly ) {
+			/* --water-slope-selftest (lane WATER1) WRITES <file> itself: a
+			 * made-up world with a tilted river ribbon, baked through the
+			 * real writer and read back through the real reader. */
+			QString report, werr;
+			const bool ok = lodtWaterSlopeSelfTest( file, lodtWaterSlopeFlat, &report, &werr );
+			out() << report << Qt::endl;
+			if ( !ok && !werr.isEmpty() )
+				err() << "error: " << werr << Qt::endl;
+			rc = ok ? 0 : 1;
 		} else {
 			rc = cmdLodt( file, btdInfo, btdHaveRegion,
 				btdRegion[0], btdRegion[1], btdRegion[2], btdRegion[3], btdLod,
@@ -8617,7 +8792,12 @@ int nifskopeCliMain( const QStringList & args )
 	 *
 	 * So the sheets carry the object term and the .lodl keeps the bytes it has.
 	 * A run that asks for both is refused here rather than quietly writing one
-	 * of them without it. */
+	 * of them without it.
+	 *
+	 * Lane TERR1's `skyObjects` (on by default) is NOT refused with --lodl: it is
+	 * a default, not an ask, and the .lodl plane stays the TERRAIN-ONLY sky term
+	 * by the contract above -- the one place that term is kept (docs VT 2.2,
+	 * mask B). */
 		if ( lgCover.terrainObjectAo && !lgLodtDir.isEmpty() ) {
 			err() << "refused: --terrain-object-ao writes the object occlusion into the "
 					 "terrain SHEETS, while the .lodl's own AO plane is computed from the "
@@ -8651,6 +8831,8 @@ int nifskopeCliMain( const QStringList & args )
 				return 2;
 			}
 		}
+		lodgenGpuConfigure( lgNoGpu );
+		out() << lodgenGpuReport() << Qt::endl;
 		rc = cmdLodgen( file, lgListWorldspaces, lgWorldspace,
 			lgHaveCell, lgCell[0], lgCell[1],
 			lgHaveTerrain, lgChunk[0], lgChunk[1], lgDim, outFile,
@@ -8666,8 +8848,9 @@ int nifskopeCliMain( const QStringList & args )
 			lgCardAuxDiv, lgNativeDir, lgNativeVerifyLodo, lgNativeVerifyLodi, lgNativeFixture,
 			lgNativeMeshReport, lgNativeVerifyCorpus, lgNativeLadder, lgNativeOccluders,
 			lgLibraryNear, lgNativeLadderFoliage, lgNativeSilhouette, lgNativePlacementAo, lgNativeVertexAo, lgLodiV7,
-			lgScrappable, lgIdentityJoinLegacy, lgIdentityJoinGap,
+			lgScrappable, lgIdentityJoinLegacy, lgIdentityJoinGap, lgIdentityJoinContact, lgOccluderBuilding,
 			lgTreesOnly, lgAggregate, lgAggMin, lgAggTile, lgAggViews );
+		out() << lodgenGpuSummary() << Qt::endl;
 	}
 	else if ( cmd == QLatin1String( "anim-setup" ) )
 		rc = cmdAnimSetup( file, block, controllers, sequence, newSequence,

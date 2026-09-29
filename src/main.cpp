@@ -31,6 +31,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ***** END LICENCE BLOCK *****/
 
 #include "lodgen.h"
+#include "lodgengpu.h"
 #include "nifcli.h"
 #include "nifskope.h"
 #include "version.h"
@@ -75,6 +76,12 @@ QCoreApplication * createApplication( int &argc, char *argv[] )
 	for ( int i = 1; i < argc; ++i ) {
 		// -no-gui: start as core app without all the GUI overhead
 		if ( !qstrcmp( argv[i], "-no-gui" ) ) {
+			/* A headless LOD bake that may use the GPU needs the GUI platform for
+			 * its offscreen OpenGL context (src/lodgengpu.h); it still opens no
+			 * window, and a QGuiApplication is not a QApplication, so main()
+			 * below still takes the headless path. */
+			if ( lodgenGpuWantedForArgs( argc, argv ) )
+				return new QGuiApplication( argc, argv );
 			return new QCoreApplication( argc, argv );
 		}
 	}

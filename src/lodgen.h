@@ -228,6 +228,58 @@ void lodgenSetLandMipBias( float bias );         // 0 = off = the rung's bytes
 float lodgenLandHexSize();
 void lodgenSetLandHexSize( float units );        // 0 = off = the rung's bytes
 
+/* --- HEIGHT-AWARE LAND BLENDING + LARGE-SCALE VARIATION (lane TILING5) -----
+ *
+ * bungo 2026-09-27: "terrain blending on lods / lod terrain patterning could
+ * use an improvement".  Two independent switches, both OFF by default and
+ * both off BY RETURN, so a bake without them is the rung's bytes:
+ *
+ * HEIGHT BLEND (`--land-height-blend on`).  Every land texture's relief is
+ * integrated back out of its own normal map (Frankot-Chellappa on the periodic
+ * grid, <= 256 texels, unit SD per mip) -- FO4 ships no height maps, and the
+ * lane measured the free stand-ins against that relief: diffuse luminance
+ * correlates 0.196 with it, diffuse alpha 0.314 and is flat on a fifth of the
+ * ground.  The relief is used twice, with ONE sharpness constant:
+ *   * at the hex joins the three barycentric weights become
+ *     w_k exp(beta h_k), renormalised -- the raised tap wins, and a weight that
+ *     is zero at a lattice edge stays zero, so no seam is introduced;
+ *   * between LTEX layers each sample splits into its texture's repeat average
+ *     and the detail about it; the averages crossfade with the painted opacity
+ *     a as before, the details with sigma( logit(a) + beta (h_layer -
+ *     h_below) ), which keeps a = 0 and a = 1 exactly where they were and gives
+ *     the transition one texture's grain, the raised one's, instead of the
+ *     average of two.  The pyramid writer blends roughness, metalness and
+ *     emissive with the height opacity.
+ * A texture with no readable normal map has h = 0, which is the linear blend.
+ * Mean-bias correction: choosing the raised texel also chose the brighter one
+ * (relief and colour correlate inside a texture), which brightened every
+ * sheet.  Per texture and relief level the colour's slope on the relief,
+ * G = cov(colour, h), is measured once; both choices above then blend the
+ * relief-predicted part G h with the PAINTED weights and select only the
+ * residual, so the mean colour is today's under the linear model.
+ *
+ * MACRO VARIATION (`--land-macro on`).  A smooth world-space field (value-noise
+ * fBm on 4,096 / 16,384 / 65,536-unit lattices, its own hash keys, so it is
+ * independent of the 256-unit hex patches) that moves the land colour's
+ * brightness and hue slightly and its saturation only UP: per texel the
+ * saturation is never below the unmodified colour's.  A pure function of
+ * world position -- no seam, no thread-count dependence.  Applied LAST, after
+ * the grade and before quantisation, so the saturation hold compares against
+ * the colour the texel would store without it.
+ * Its three amplitudes are 0 by measurement (lodgen.cpp LODGEN_MACRO_AMP):
+ * vanilla's own sheets leave no large-scale brightness room at Boston and no
+ * colour room in the west-central hills, so today `--land-macro on` stores
+ * the same colour as off and only adds its ledger key.
+ *
+ * The sharpness constant beta = 2.0 (lodgen.cpp LODGEN_LAND_HEIGHT_BETA) is
+ * the largest the lane's sweep found inside TILING4's grain bar.
+ *
+ * `--land-sample relief` turns both on and leaves the sampler as it is. */
+bool lodgenLandHeightBlend();
+void lodgenSetLandHeightBlend( bool on );        // false = off = the rung's bytes
+bool lodgenLandMacro();
+void lodgenSetLandMacro( bool on );              // false = off = the rung's bytes
+
 /* --- TERRAIN-GUIDED LAND SAMPLING (lane LAND1, bungo 2026-09-12) ----------
  *
  * bungo, after the warp sweep picture: "what is used for the land sample
@@ -530,18 +582,6 @@ struct LodgenTerrainOptions
 	 *  and distant, so vertices spent there buy nothing.
 	 */
 	int waterSubdiv = 3;
-	/*! Per-vertex water channels, in vertex COLORS on the water shape.
-	 *
-	 *  Only meaningful with subdivision on: at waterSubdiv 0 the mesh is
-	 *  one quad per wet cell and four corner values 4096 units apart can
-	 *  describe no shoreline, so the channels stay off there and the
-	 *  output remains byte-identical to vanilla.
-	 *
-	 *  R = depth (water height minus terrain), G = distance to land.
-	 *  B and A are free. The mesh is welded and T-junction-free, which is
-	 *  what lets a channel cross every edge without seaming.
-	 */
-	bool waterChannels = true;
 	/*! Drop water leaves that lie entirely under terrain.
 	 *
 	 *  Vanilla culls water per CELL, so a 4096-unit cell with a hill in it
@@ -791,6 +831,10 @@ QString lodgenStageTimeLine( qint64 msLandscape, qint64 msMeshes, qint64 msTextu
 	const QString & librarySplit = QString() );
 struct NativeSrcShape;
 bool lodgenNativeLoadModel( void * user, const QString & model, std::vector<NativeSrcShape> * out );
+/*! Lane AO2 (overlay casters): the level-0 alpha of a diffuse texture as the AO
+ *  caster tests it (alpha >= ref blocks a ray), from a process-wide cache that
+ *  lives until exit. Null when the texture does not load. Thread-safe. */
+const struct LodgenAoAlpha * lodgenAoAlphaMap( const QString & dataRoot, const QString & texPath, quint8 ref );
 
 /*! MATERIAL SWAPS (lane SWAP1, 2026-09-25). One MSWP substitution as the
  *  loader applies it: `first` is the ORIGINAL material and `second` the
@@ -1117,6 +1161,20 @@ struct LodgenCoverOptions
 	 *  written by one (created, header only, when the default is missing). */
 	QString flatObjectsFile;
 
+	/*! THE NORMAL STAMP (lane TERR1, 2026-09-27; bungo: "normal map on the
+	 *  ground has no details baked from the objects"). Wherever the colour sheet
+	 *  is stamped from a road or a flat object, the object's normal map is
+	 *  stamped into the VT `msn` too: sampled at the fragment's own UV, carried
+	 *  to world space through the triangle's UV frame and its vertex normal,
+	 *  composited by the colour's rule, and folded over the surface normal with
+	 *  the colour lerp's own weight (lodgenVtStampMsn). An effect (unlit) shape
+	 *  paints colour and no normal. The VT path only; the stock chunk path's
+	 *  `_msn` is not stamped.
+	 *
+	 *  ON by default; `--no-stamp-normals` is the off switch (CLI only), and off
+	 *  is the previous bake's bytes (the stamp only reads the colour pass). */
+	bool stampNormals = true;
+
 	/*! THE FAR TERRAIN RECEIVES AMBIENT OCCLUSION FROM THE PLACED OBJECTS
 	 *  (lane GROUND1, bungo 2026-09-11 15:4x: "Okay, so the AO can be acurate
 	 *  from objects").
@@ -1207,6 +1265,20 @@ struct LodgenCoverOptions
 	 *  `lodgenObjectSkyVis`, where the wall branch is the whole of the old
 	 *  loop and the ceiling term is never even added. */
 	bool terrainObjectAoSlab = true;
+
+	/*! THE GROUND'S SKY WITH THE OBJECTS IN IT (lane TERR1, 2026-09-27). The
+	 *  VT mask sheet's B (sky AO) is the terrain march and the object lattice
+	 *  as ONE per-direction union (`lodgenSkyDirBlocked`), the lattice read
+	 *  every 64 units: street canyons and the ground under decks darken, open
+	 *  ground keeps the terrain march's byte exactly. Supersedes GROUND1's
+	 *  product on the VT sheets (both on would count the objects twice); the
+	 *  stock chunk path and the .lodl AO plane stay terrain-only (the .lodl
+	 *  plane is the terrain-only term, recomputed by `--refresh-ao` from the
+	 *  stored heights alone). Uses `terrainObjectAoSlab`, not the strength.
+	 *
+	 *  ON by default; `--no-sky-objects` is the off switch (CLI only) and off
+	 *  is the previous bake's bytes. */
+	bool skyObjects = true;
 
 	/*! Write the object height lattice itself to a file, so the term can be
 	 *  audited against something other than its own output.
@@ -1335,7 +1407,15 @@ struct LodgenRoadCensus
 	int flatTexels = 0;         //!< texels a flat object wrote last (tile content only)
 	int flatDecalTexels = 0;    //!< of those, by a decal / blended / alpha-tested shape
 	int flatRefusedNoTexture = 0; //!< flat shapes whose diffuse would not resolve
-	QStringList refusals;       //!< "<reason> <name>", deduplicated, capped at 16
+	/* Lane TERR1: THE NORMAL STAMP (LodgenCoverOptions::stampNormals). All zero
+	 * when the stamp is off. */
+	int nrmShapes = 0;          //!< stamped shapes (road + flat) whose normal map read
+	int nrmNoMap = 0;           //!< stamped shapes with no readable normal map: their vertex normal is stamped
+	int nrmUnlit = 0;           //!< effect (unlit) flat shapes: colour only, no normal
+	int nrmFrameAgree = 0;      //!< triangles whose NIF Tangent points along the UV frame's dP/dv
+	int nrmFrameFlip = 0;       //!< triangles whose NIF Tangent points against it
+	int nrmTexels = 0;          //!< tile-content texels whose msn the stamp rewrote
+	QStringList refusals;      //!< "<reason> <name>", deduplicated, capped at 16
 	void addRefusal( const char * why, const QString & name );
 	void add( const LodgenRoadCensus & o );
 	//! ONE physical line, `key=value` tokens, never parsed by field position.
@@ -1486,6 +1566,13 @@ struct LodgenVtOptions
 	 *  store half the texels a side (their mip 0 is dropped, descriptor byte 6
 	 *  says so). OFF by default and byte-identical when off. */
 	bool halfAux = false;
+	/*! ONE-VALUE SHEETS (lane FLAT2, 2026-09-27, bungo: "it doesn't need to
+	 *  render 1024 for a whole one color mask"). A tile sheet that is one value
+	 *  over every texel of every mip is stored as a 16-byte record and a tile
+	 *  flag bit instead of its mips (docs/LODGEN_TERRAIN_VT.md 3.2). ON by
+	 *  default: it is a size fix and changes no texel. `--no-collapse-uniform`
+	 *  (CLI only, for the byte-identity gate) writes today's bytes. */
+	bool collapseUniform = true;
 	/* THE TERRAIN HORIZON SHEET (lane HORIZON1, 2026-09-18), `.lodt` role 7,
 	 * REMOVED 2026-09-19 by lane HORIZONOUT on bungo's "horizon goes bye bye
 	 * now, we're back to identity". No bake writes a role-7 sheet any more and

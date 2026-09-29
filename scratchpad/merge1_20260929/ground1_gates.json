@@ -1,0 +1,238 @@
+{
+ "identity.files_rung": 254,
+ "identity.files_off": 254,
+ "identity.red_flip (both,differ,onlyA,onlyB,first)": [
+  254,
+  27,
+  0,
+  0,
+  "mod/FO4CSLOD/Commonwealth/Commonwealth.flat_objects_report.txt"
+ ],
+ "identity.red_drop": [
+  253,
+  26,
+  1,
+  0,
+  "mod/FO4CSLOD/Commonwealth/Commonwealth.flat_objects_report.txt"
+ ],
+ "identity.red_controls_fail_as_they_must": true,
+ "identity.off_vs_rung (both,differ,onlyA,onlyB,first)": [
+  254,
+  26,
+  0,
+  0,
+  "mod/FO4CSLOD/Commonwealth/Commonwealth.flat_objects_report.txt"
+ ],
+ "GATE identity": "FAIL",
+ "decode.on_version": 12,
+ "decode.rung_version": 7,
+ "decode.rung_has_stream": false,
+ "decode.instances": 69806,
+ "decode.stream_bytes_payload": 1005166,
+ "placement byte 0x12 unchanged vs rung": true,
+ "stream slice lengths == AO slice lengths": true,
+ "terrain.lodl_cells": [
+  -96,
+  -96,
+  95,
+  95
+ ],
+ "terrain.window": [
+  -18,
+  -18,
+  16,
+  2
+ ],
+ "terrain.samples": 754433,
+ "placements.measured": 46205,
+ "placements.empty_slice": 23274,
+ "placements.skipped_ambiguous_slot": 327,
+ "placements.skipped_no_mesh_match": 0,
+ "placements.skipped_outside_terrain_window": 0,
+ "vertices.measured": 999977,
+ "stream.recompute share |d|<=1": 0.999984,
+ "stream.recompute share |d|==0": 0.996222,
+ "stream.recompute max |d|": 7.0,
+ "stream.recompute vertices |d|>1": 16,
+ "stream.phys vertices |dz|<=16": 20827,
+ "stream.phys  of those reading >=250": 101893,
+ "stream.phys vertices 0<=dz<=16 (above, within 16)": 10165,
+ "stream.phys  of those reading >=239 (the law at 16 u)": 10165,
+ "stream.phys vertices dz<=5 (the law gives >=250 there)": 101893,
+ "stream.phys vertices dz>256": 768197,
+ "stream.phys  of those reading 0": 768197,
+ "GATE recompute >=99.9% within 1": "PASS",
+ "GATE physical >256 u reads 0": "PASS",
+ "GATE physical law (dz<=5 >=250, 0..16 >=239)": "PASS",
+ "GATE physical as briefed (|dz|<=16 >=250)": "FAIL",
+ "placement mean vs 0x12: share within 2": 0.98353,
+ "placement mean vs 0x12: share within 4": 0.992988,
+ "placement mean vs 0x12: mean |d|": 0.1955,
+ "placement mean vs 0x12: max |d|": 15.043,
+ "placement mean vs 0x12: corr": 0.999917,
+ "placement level-0 mean vs 0x12: share within 2": 0.98353,
+ "placement level-0 mean vs 0x12: mean |d|": 0.1955,
+ "GATE placement mean within 2 of 0x12 (all)": "FAIL",
+ "placements whose stream spans >=128 levels": 12092,
+ "placements off by more than 2": 761,
+ "  of those spanning >=128 levels": 756,
+ "  share of all placements spanning >=128 that are off by >2": 0.0625,
+ "  of those with stream all 0 or all 255 (flat)": 0,
+ "off-by->2 models (count, mean |d|)": [
+  [
+   "TreeMapleForest1.nif",
+   122,
+   3.6
+  ],
+  [
+   "TreeMaple06Green.nif",
+   92,
+   3.8
+  ],
+  [
+   "TreeMapleblasted04.nif",
+   83,
+   6.9
+  ],
+  [
+   "TreeMapleblasted02.nif",
+   74,
+   3.1
+  ],
+  [
+   "TreeMapleblasted05.nif",
+   50,
+   8.4
+  ],
+  [
+   "TreeMapleblasted01.nif",
+   37,
+   2.6
+  ],
+  [
+   "TreeBlasted01.nif",
+   35,
+   9.8
+  ],
+  [
+   "TreeMapleForest7.nif",
+   29,
+   11.3
+  ],
+  [
+   "BlastedForestBurntTreeUpright02.nif",
+   27,
+   3.2
+  ],
+  [
+   "TreeMapleblasted07.nif",
+   22,
+   8.8
+  ],
+  [
+   "BldgBrick4Story1x1ComA.nif",
+   22,
+   2.4
+  ],
+  [
+   "TreeMaple03Green.nif",
+   21,
+   2.2
+  ]
+ ],
+ "worst placements (inst, verts, stream mean, byte, span)": [
+  [
+   25112,
+   23,
+   101.0,
+   116,
+   255
+  ],
+  [
+   5282,
+   24,
+   131.7,
+   145,
+   255
+  ],
+  [
+   47421,
+   23,
+   84.8,
+   98,
+   255
+  ],
+  [
+   25150,
+   23,
+   86.8,
+   100,
+   255
+  ],
+  [
+   24493,
+   23,
+   88.1,
+   101,
+   255
+  ],
+  [
+   47616,
+   24,
+   107.2,
+   120,
+   255
+  ],
+  [
+   24501,
+   24,
+   95.2,
+   108,
+   255
+  ],
+  [
+   4084,
+   23,
+   81.4,
+   94,
+   255
+  ]
+ ],
+ "red_old.recompute share |d|<=1": 0.34861,
+ "red_old.recompute share |d|==0": 0.343956,
+ "red_old.recompute max |d|": 253.0,
+ "red_old.recompute vertices |d|>1": 651375,
+ "red_old.phys vertices |dz|<=16": 20827,
+ "red_old.phys  of those reading >=250": 7114,
+ "red_old.phys vertices 0<=dz<=16 (above, within 16)": 10165,
+ "red_old.phys  of those reading >=239 (the law at 16 u)": 1873,
+ "red_old.phys vertices dz<=5 (the law gives >=250 there)": 101893,
+ "red_old.phys vertices dz>256": 768197,
+ "red_old.phys  of those reading 0": 339401,
+ "RED old value fails recompute": true,
+ "RED old value fails >256 reads 0": true,
+ "RED old value fails law": true,
+ "red_plus2.recompute share |d|<=1": 0.101322,
+ "red_plus2.recompute share |d|==0": 0.098864,
+ "red_plus2.recompute max |d|": 5.0,
+ "red_plus2.recompute vertices |d|>1": 898657,
+ "red_plus2.phys vertices |dz|<=16": 20827,
+ "red_plus2.phys  of those reading >=250": 101893,
+ "red_plus2.phys vertices 0<=dz<=16 (above, within 16)": 10165,
+ "red_plus2.phys  of those reading >=239 (the law at 16 u)": 10165,
+ "red_plus2.phys vertices dz<=5 (the law gives >=250 there)": 101893,
+ "red_plus2.phys vertices dz>256": 768197,
+ "red_plus2.phys  of those reading 0": 0,
+ "RED stream+2 fails recompute": true,
+ "size.lodi_off": 5089578,
+ "size.lodi_on": 6379818,
+ "size.cost_bytes": 1290240,
+ "size.cost_share_of_lodi": 0.2535,
+ "size.header_vertexGroundBytes": 1284394,
+ "size.header_vertexAoBytes": 1284394,
+ "size.whole_map_lodi": 34371499,
+ "size.whole_map_lodi_version": 7,
+ "size.whole_map_vertexAoBytes (= the stream estimate)": 13866923,
+ "size.whole_map_estimate_cost_bytes (4096-aligned)": 13869056,
+ "size.whole_map_estimate_share": 0.4035
+}

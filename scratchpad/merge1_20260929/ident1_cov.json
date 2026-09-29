@@ -1,0 +1,64 @@
+{
+ "file": "E:/Projects/NifskopeWWE-night/scratchpad/merge1_20260929/g/on/mod/FO4CSLOD/Commonwealth/Commonwealth",
+ "region": [
+  -8,
+  -12,
+  3,
+  -1
+ ],
+ "eyes": [
+  {
+   "eye": [
+    -8900,
+    -24700,
+    2000
+   ],
+   "nearestPiece": "lod\\architecture\\diamondcity\\dext\\dextstands1x2str01_lod_0.nif",
+   "nearestDist": 0,
+   "piecesWhoseFootprintHoldsTheEye": 2,
+   "skylinePixels": 256380,
+   "occludedPixels": 63932,
+   "occludedShare": 0.2494,
+   "boxesSeen": 506,
+   "placements": 21100,
+   "culledPlacements": 14010,
+   "culledShare": 0.664
+  },
+  {
+   "eye": [
+    700,
+    -27200,
+    1643
+   ],
+   "nearestPiece": "lod\\buildings\\bldgbrick5story1x3endcoma_lod.nif",
+   "nearestDist": 0,
+   "piecesWhoseFootprintHoldsTheEye": 1,
+   "skylinePixels": 254157,
+   "occludedPixels": 164447,
+   "occludedShare": 0.647,
+   "boxesSeen": 498,
+   "placements": 21275,
+   "culledPlacements": 16821,
+   "culledShare": 0.7906
+  },
+  {
+   "eye": [
+    -20500,
+    -21600,
+    1706
+   ],
+   "nearestPiece": "lod\\neighborhoods\\fens\\fens02_bld04lod.nif",
+   "nearestDist": 0,
+   "piecesWhoseFootprintHoldsTheEye": 4,
+   "skylinePixels": 223097,
+   "occludedPixels": 123069,
+   "occludedShare": 0.5516,
+   "boxesSeen": 503,
+   "placements": 21167,
+   "culledPlacements": 15153,
+   "culledShare": 0.7159
+  }
+ ],
+ "meanOccludedShare": 0.4827,
+ "meanCulledShare": 0.7235
+}

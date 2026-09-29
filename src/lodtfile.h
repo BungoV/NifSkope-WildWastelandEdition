@@ -15,6 +15,7 @@ BSD License - see nifskope.h
 #include <QVector>
 
 #include <functional>
+#include <vector>
 
 class EsmWorld;
 
@@ -49,6 +50,13 @@ constexpr quint32 LODL_SECT_STROKE      = 1u << 7;   //!< stroke store
  *  the version stays 3 and no existing offset moves; a reader checks this
  *  bit, never the word. */
 constexpr quint32 LODL_SECT_DYE         = 1u << 8;   //!< dye plane
+/*! The SURFACE plane (lane WATER1, 2026-09-27): water that is not flat. One
+ *  float32 a sample at the body plane's rate, the surface height MINUS the
+ *  body's one waterHeight, so a sloped river's surface is `waterHeight +
+ *  delta`. It comes from placed non-flat water meshes (ACTI with a WNAM); a
+ *  worldspace without any writes the plane all uniform 0. The version-3 header
+ *  grew from 0xF8 to 0x100 for its u64 offset at 0xF8; the version stays 3. */
+constexpr quint32 LODL_SECT_SURFACE     = 1u << 9;   //!< surface plane
 
 /*! One water BODY: a connected sheet of water with one plane height, one WATR
  *  form and one flow, addressed by the body-ID plane.
@@ -85,10 +93,20 @@ struct LodtWaterBody
  *
  *  With `enabled` false the writer emits version 2 and the bytes are what they
  *  were; that is the zero-effort way back, and it is what `WW_LODL_VERSION=2`
- *  reaches without a rebuild. */
+ *  reaches without a rebuild.
+ *
+ *  The STRUCT default stays off (a library caller that says nothing gets the
+ *  bytes it always got); the two front ends turn it ON (lane WATER1,
+ *  2026-09-27): the command line unless `--no-water-bodies`, the panel row
+ *  ticked unless unticked. */
 struct LodtWaterOptions
 {
-	bool enabled = false;        //!< --water-bodies
+	bool enabled = false;        //!< on in both front ends; --no-water-bodies
+	/*! When the classifier REFUSES the worldspace (no water above its ground,
+	 *  or a grid too large to hold), write version 2 and say why in the census
+	 *  instead of failing the whole file. Set by the front ends' default; an
+	 *  explicit `--water-bodies` clears it and keeps the strict refusal. */
+	bool fallbackV2 = false;
 	int bridgeGap = 2;           //!< --water-bridge N, texels; 0 = no bridging
 	int nearTexels = 64;         //!< the drainage proximity, texels
 	int bodySamples = 0;         //!< body-ID plane rate; 0 = the file's own
@@ -152,13 +170,15 @@ struct LodtOptions
 	 *  environment variable WW_LODL_VERSION overrides it, so the fallback is
 	 *  reachable without a rebuild (WW_LODT_VERSION is refused by name).
 	 *
-	 *  Version 3 appends the water-body sections. It is NOT the default: the
-	 *  writer raises the version to 3 only when the water module is switched
-	 *  on, so a file nobody asked new sections of is byte-identical to the one
-	 *  this writer produced before the module existed. */
+	 *  Version 3 appends the water-body sections. The writer raises the
+	 *  version to 3 only when the water module is switched on, so a file
+	 *  nobody asked new sections of is byte-identical to the one this writer
+	 *  produced before the module existed. Since lane WATER1 (2026-09-27) the
+	 *  CLI and the panel switch it on by default; `--no-water-bodies` is the
+	 *  way back to these version-2 bytes. */
 	int headerVersion = 2;
 
-	//! Water bodies, flow and shore -- OFF by default; see LodtWaterOptions.
+	//! Water bodies, flow and shore -- off in the struct, on in both front ends.
 	LodtWaterOptions water;
 
 	/*! THE LANDLESS-CELL HEIGHT FILL (lane FIX1, 2026-09-26). Empty by default,
@@ -170,6 +190,15 @@ struct LodtOptions
 	 *  rule: real terrain wins over any fill. lodgenVanillaCellHeights (the
 	 *  game's own terrain LOD, read as input) is the one filler today. */
 	std::function<bool( int cx, int cy, float * h33x33 )> landFill;
+
+	/*! PLACED WATER MESHES (lane WATER1, 2026-09-27). Empty by default, and
+	 *  then placed water is not gathered at all and the census says so. Set,
+	 *  it is asked once per distinct model path of a placed ACTI that carries
+	 *  a water type (WNAM), for that model's triangles in MODEL space: nine
+	 *  floats a triangle (three xyz corners). False = the mesh did not load;
+	 *  that is counted, never fatal. The front ends answer it with the lodgen
+	 *  NIF loader, so this file never includes the loader itself. */
+	std::function<bool( const QString & model, std::vector<float> & tris )> placedWaterModel;
 
 	/*! Progress, for a GUI: phase 0 = pass one (done = cell rows, total =
 	 *  cell rows), phase 1 = blocks (done = blocks emitted, total = blocks;
@@ -226,6 +255,16 @@ bool lodtWaterCensus( const QString & path, QString * text, QString * error );
  *  writes real files, with the type-blind REFUTER beside it so the check is seen
  *  to fail on the other side of the floor. False = the control did not hold. */
 bool lodtWaterSelfTest( QString * text, QString * error );
+
+/*! The SLOPED-water known-answer test (`lodl <out.lodl> --water-slope-selftest`,
+ *  lane WATER1). Writes a real .lodl at `outPath` through the same writer from
+ *  a synthetic valley with a flat sea and one sloped ribbon of placed water,
+ *  reads it back with LodtFile and checks the surface against the ribbon's
+ *  analytic height. When `flatPath` is not empty the refuter's file (the same
+ *  valley with the ribbon forced flat) is kept there so both can be drawn.
+ *  False = the test did not pass; `text` holds the ok/FAIL lines either way. */
+bool lodtWaterSlopeSelfTest( const QString & outPath, const QString & flatPath,
+	QString * text, QString * error );
 
 /*! Reader. Nothing verifies a format writer except an independent reader --
  *  a file can be self-consistently wrong, which is exactly how a DDS header
@@ -309,6 +348,16 @@ public:
 	quint8 shoreAt( int sx, int sy ) const;
 	//! Dye word at a sample of the DYE plane's own grid; 0 = no dye here.
 	quint32 dyeWordAt( int dx, int dy ) const;
+
+	/*! The surface plane (LODL_SECT_SURFACE): samples per cell edge, 0 when
+	 *  absent; always the body plane's rate. `surfaceDeltaAt` is the float
+	 *  stored at a BODY-plane sample -- the water surface minus that texel's
+	 *  body waterHeight, 0 for flat water and when the plane is absent.
+	 *  `waterSurfaceAt` is the answer a renderer wants: the body's height plus
+	 *  the delta; false (z untouched) where there is no body. */
+	int surfacePlaneSamples() const { return surfS; }
+	float surfaceDeltaAt( int bx, int by ) const;
+	bool waterSurfaceAt( int bx, int by, float & z ) const;
 
 	//! How many strokes the store holds; 0 when there is no store.
 	int strokeCount() const { return nStrokes; }
@@ -401,6 +450,7 @@ private:
 	int bodyS = 0, flowS = 0, shoreS = 0;
 	int dyeS = 0;
 	quint64 dyeAt = 0;
+	int surfS = 0;
 	float shoreQ = 32.0f;
 	quint32 flowEnc = 0;
 	int nStrokes = 0;
@@ -415,6 +465,7 @@ private:
 	};
 	PlaneStore idStore, flowStore, shoreStore;
 	PlaneStore dyeStore;
+	PlaneStore surfStore;
 	//! Read a plane container's head and directory; refuses by name.
 	bool readPlaneStore( quint64 at, int bytesPerSample, PlaneStore & s,
 		QString * error ) const;

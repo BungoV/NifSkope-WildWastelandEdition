@@ -94,14 +94,61 @@ class Lodv(object):
 		return sum(self.sheetMipBytes(s, m, cover)
 				   for s in range(self.sheetCount) for m in range(self.mips))
 
+	# ONE-VALUE SHEETS (lane FLAT2, docs/LODGEN_TERRAIN_VT.md 3.2): tile flag bit
+	# 2+k set = sheet k is one value; it is stored as a 16-byte record (its one
+	# repeating unit -- a BC block, an R16 or an RGBA8 texel -- then zeros) in
+	# place of all its mips. Expanding it gives back the full sheet byte for byte.
+	def uniformMask(self, e):
+		return (e['flags'] >> 2) & ((1 << self.sheetCount) - 1)
+
+	def unitBytes(self, s, cover):
+		role = self.sheets[s]['role']
+		if role == 4:
+			return 2
+		if role == 7:
+			return 4
+		sd = self.sheets[s]
+		fmt = sd['dxgiCover'] if (cover and sd['dxgiCover'] != sd['dxgi']) else sd['dxgi']
+		return 16 if fmt in (77, 78) else 8
+
+	def sheetStoredBytes(self, s, cover, mask):
+		if mask & (1 << s):
+			return 16
+		return sum(self.sheetMipBytes(s, m, cover) for m in range(self.mips))
+
+	def rawBytesFor(self, e):
+		cover = bool(e['flags'] & 2)
+		mask = self.uniformMask(e)
+		return sum(self.sheetStoredBytes(s, cover, mask) for s in range(self.sheetCount))
+
+	def expand(self, e, d):
+		cover = bool(e['flags'] & 2)
+		mask = self.uniformMask(e)
+		if not mask:
+			return d
+		out = []
+		o = 0
+		for s in range(self.sheetCount):
+			n = self.sheetStoredBytes(s, cover, mask)
+			if mask & (1 << s):
+				u = self.unitBytes(s, cover)
+				full = sum(self.sheetMipBytes(s, m, cover) for m in range(self.mips))
+				out.append(d[o:o + u] * (full // u))
+			else:
+				out.append(d[o:o + n])
+			o += n
+		return b''.join(out)
+
 	def payload(self, index):
+		"""The tile's payload as the full, uncollapsed sheets (a one-value sheet
+		is expanded), so every reader below sees today's layout."""
 		e = self.table[index]
 		if not (e['flags'] & 1):
 			return None
 		d = self.b[e['offset']:e['offset'] + e['stored']]
 		if self.compression == 1:
 			d = zlib.decompress(d)
-		return d
+		return self.expand(e, d)
 
 	def sheetOffset(self, cover, sheet, mip):
 		o = 0
@@ -258,9 +305,12 @@ def cmd_tiles(path):
 	rawBad = 0
 	for i in present:
 		e = v.table[i]
-		want = v.rawBytes(bool(e['flags'] & 2))
+		want = v.rawBytesFor(e)
 		sizes.add(e['raw'])
 		if e['raw'] != want:
+			rawBad += 1
+		# bits 2 .. 2+sheetCount-1 are the one-value sheets; any bit above is unknown
+		if e['flags'] >> (2 + v.sheetCount):
 			rawBad += 1
 		if v.compression == 0 and e['stored'] != e['raw']:
 			rawBad += 1
@@ -270,7 +320,8 @@ def cmd_tiles(path):
 	inflBad = 0
 	for i in present[:64]:
 		d = v.payload(i)
-		if d is None or len(d) != v.table[i]['raw']:
+		# payload() expands the one-value sheets, so it is the full size, not raw
+		if d is None or len(d) != v.rawBytes(bool(v.table[i]['flags'] & 2)):
 			inflBad += 1
 	check('V5 the payloads really are that long when read', inflBad == 0,
 		  'first 64 present tiles')

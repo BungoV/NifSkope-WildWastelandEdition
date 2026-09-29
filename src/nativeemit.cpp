@@ -28,6 +28,7 @@ BSD License - see nifskope.h
 #include <QJsonObject>
 #include <QMap>
 #include <QSet>
+#include <QTextStream>
 
 #include <algorithm>
 #include <cmath>
@@ -124,6 +125,11 @@ struct State
 	 *  is the exact way back to the shipped architecture/box rule. */
 	bool identityJoinLegacy = false;
 	float identityJoinGap = 64.0f;
+	/*! IDENT1 (2026-09-27): the CONTACT join (touching triangles, SCOL, a size
+	 *  cap) and the one-box-per-building occluder. `--identity-join proximity`
+	 *  and `--occluders piece` are the exact ways back. */
+	bool identityJoinContact = true;
+	bool occluderBuilding = true;
 	QHash<QPair<quint32, int>, int> byKey;        //!< (ref, part) -> arrival index
 	std::vector<Arrival> arrivals;
 	std::map<std::tuple<int, int, int, int>, int> byObject;   //!< (chunkX, chunkY, dim, objectIndex) -> arrival
@@ -171,6 +177,8 @@ struct NativeLadderOptions
 	bool scrappable = false;            //!< v9: mark workshop-scrappable placements; off = .lodi v7
 	bool identityJoinLegacy = false;    //!< v7 grouping: the pre-2026-09-19 architecture/box rule
 	float identityJoinGap = 64.0f;      //!< v7 grouping: the MESH-to-MESH gap two placements join at
+	bool identityJoinContact = true;    //!< IDENT1: the contact join (off = the proximity rule above)
+	bool occluderBuilding = true;       //!< IDENT1: one occluder a building group (off = one a piece)
 };
 
 NativeLadderOptions & ladderOpts()
@@ -400,6 +408,375 @@ NativeOccRefusal fitOccluderBox( const std::vector<float> & pos, const std::vect
 	return NATIVE_OCC_OK;
 }
 
+/* ---- IDENT1 (2026-09-27): the EXACT triangle-to-triangle distance, for the
+ * CONTACT join. Two triangles that do not cross are nearest either between two
+ * edges or between a corner and the other face (Ericson, Real-Time Collision
+ * Detection 5.1.5 and 5.1.9); two that cross have an edge of one through the
+ * face of the other. Doubles, because a placed Boston vertex is 1e5 u from the
+ * origin and a float there resolves 0.008 u. */
+inline void dsub( const double a[3], const double b[3], double o[3] ) { o[0] = a[0] - b[0]; o[1] = a[1] - b[1]; o[2] = a[2] - b[2]; }
+inline double ddot( const double a[3], const double b[3] ) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
+inline double dclamp01( double v ) { return v < 0.0 ? 0.0 : ( v > 1.0 ? 1.0 : v ); }
+
+//! Squared distance between segments p1q1 and p2q2.
+double segSegDist2( const double p1[3], const double q1[3], const double p2[3], const double q2[3] )
+{
+	double d1[3], d2[3], r[3];
+	dsub( q1, p1, d1 ); dsub( q2, p2, d2 ); dsub( p1, p2, r );
+	const double a = ddot( d1, d1 ), e = ddot( d2, d2 ), f = ddot( d2, r );
+	double s = 0.0, t = 0.0;
+	const double EPS = 1e-12;
+	if ( a <= EPS && e <= EPS ) {
+		s = t = 0.0;
+	} else if ( a <= EPS ) {
+		s = 0.0; t = dclamp01( f / e );
+	} else {
+		const double c = ddot( d1, r );
+		if ( e <= EPS ) {
+			t = 0.0; s = dclamp01( -c / a );
+		} else {
+			const double b = ddot( d1, d2 ), den = a * e - b * b;
+			s = ( den > EPS ) ? dclamp01( ( b * f - c * e ) / den ) : 0.0;
+			t = ( b * s + f ) / e;
+			if ( t < 0.0 ) { t = 0.0; s = dclamp01( -c / a ); }
+			else if ( t > 1.0 ) { t = 1.0; s = dclamp01( ( b - c ) / a ); }
+		}
+	}
+	double c1[3], c2[3], w[3];
+	for ( int k = 0; k < 3; k++ ) { c1[k] = p1[k] + d1[k] * s; c2[k] = p2[k] + d2[k] * t; }
+	dsub( c1, c2, w );
+	return ddot( w, w );
+}
+
+//! Squared distance from p to triangle abc.
+double pointTriDist2( const double p[3], const double a[3], const double b[3], const double c[3] )
+{
+	double ab[3], ac[3], ap[3], q[3];
+	dsub( b, a, ab ); dsub( c, a, ac ); dsub( p, a, ap );
+	auto out = [&]( const double x[3] ) { double w[3]; dsub( p, x, w ); return ddot( w, w ); };
+	const double d1 = ddot( ab, ap ), d2 = ddot( ac, ap );
+	if ( d1 <= 0.0 && d2 <= 0.0 ) return out( a );
+	double bp[3]; dsub( p, b, bp );
+	const double d3 = ddot( ab, bp ), d4 = ddot( ac, bp );
+	if ( d3 >= 0.0 && d4 <= d3 ) return out( b );
+	const double vc = d1 * d4 - d3 * d2;
+	if ( vc <= 0.0 && d1 >= 0.0 && d3 <= 0.0 ) {
+		const double v = d1 / ( d1 - d3 );
+		for ( int k = 0; k < 3; k++ ) q[k] = a[k] + v * ab[k];
+		return out( q );
+	}
+	double cp[3]; dsub( p, c, cp );
+	const double d5 = ddot( ab, cp ), d6 = ddot( ac, cp );
+	if ( d6 >= 0.0 && d5 <= d6 ) return out( c );
+	const double vb = d5 * d2 - d1 * d6;
+	if ( vb <= 0.0 && d2 >= 0.0 && d6 <= 0.0 ) {
+		const double w = d2 / ( d2 - d6 );
+		for ( int k = 0; k < 3; k++ ) q[k] = a[k] + w * ac[k];
+		return out( q );
+	}
+	const double va = d3 * d6 - d5 * d4;
+	if ( va <= 0.0 && ( d4 - d3 ) >= 0.0 && ( d5 - d6 ) >= 0.0 ) {
+		const double w = ( d4 - d3 ) / ( ( d4 - d3 ) + ( d5 - d6 ) );
+		for ( int k = 0; k < 3; k++ ) q[k] = b[k] + w * ( c[k] - b[k] );
+		return out( q );
+	}
+	const double den = 1.0 / ( va + vb + vc );
+	const double v = vb * den, w = vc * den;
+	for ( int k = 0; k < 3; k++ ) q[k] = a[k] + ab[k] * v + ac[k] * w;
+	return out( q );
+}
+
+//! Does segment pq pass through triangle abc (endpoints included)?
+bool segThroughTri( const double p[3], const double q[3], const double a[3], const double b[3], const double c[3] )
+{
+	double d[3], e1[3], e2[3], h[3], sv[3], qv[3];
+	dsub( q, p, d ); dsub( b, a, e1 ); dsub( c, a, e2 );
+	h[0] = d[1] * e2[2] - d[2] * e2[1]; h[1] = d[2] * e2[0] - d[0] * e2[2]; h[2] = d[0] * e2[1] - d[1] * e2[0];
+	const double det = ddot( e1, h );
+	if ( std::fabs( det ) < 1e-12 )
+		return false;           // parallel: a coplanar crossing is caught by the edge-edge distance
+	const double inv = 1.0 / det;
+	dsub( p, a, sv );
+	const double u = ddot( sv, h ) * inv;
+	if ( u < 0.0 || u > 1.0 )
+		return false;
+	qv[0] = sv[1] * e1[2] - sv[2] * e1[1]; qv[1] = sv[2] * e1[0] - sv[0] * e1[2]; qv[2] = sv[0] * e1[1] - sv[1] * e1[0];
+	const double v = ddot( d, qv ) * inv;
+	if ( v < 0.0 || u + v > 1.0 )
+		return false;
+	const double t = ddot( e2, qv ) * inv;
+	return t >= 0.0 && t <= 1.0;
+}
+
+//! Squared distance between two triangles given as nine floats each; 0 when they cross.
+double triTriDist2( const float * A, const float * B )
+{
+	double a[3][3], b[3][3];
+	for ( int v = 0; v < 3; v++ )
+		for ( int k = 0; k < 3; k++ ) { a[v][k] = A[v * 3 + k]; b[v][k] = B[v * 3 + k]; }
+	for ( int e = 0; e < 3; e++ ) {
+		if ( segThroughTri( a[e], a[( e + 1 ) % 3], b[0], b[1], b[2] ) )
+			return 0.0;
+		if ( segThroughTri( b[e], b[( e + 1 ) % 3], a[0], a[1], a[2] ) )
+			return 0.0;
+	}
+	double best = 1e300;
+	for ( int i = 0; i < 3; i++ )
+		for ( int j = 0; j < 3; j++ )
+			best = std::min( best, segSegDist2( a[i], a[( i + 1 ) % 3], b[j], b[( j + 1 ) % 3] ) );
+	for ( int v = 0; v < 3; v++ ) {
+		best = std::min( best, pointTriDist2( a[v], b[0], b[1], b[2] ) );
+		best = std::min( best, pointTriDist2( b[v], a[0], a[1], a[2] ) );
+	}
+	return best;
+}
+
+/* ---- IDENT1 (2026-09-27): ONE OCCLUDER BOX A BUILDING.
+ *
+ * The box is fitted in the building's own frame (turned by `yaw` about +Z)
+ * over a voxel grid of the group's placed triangles:
+ *   1. SURFACE voxels: every triangle sampled at half a voxel.
+ *   2. ENCLOSED voxels: a voxel with, along every direction `rays` names, a
+ *      surface voxel somewhere beyond it (x/X = +/-X, y/Y = +/-Y, z/Z = up/down).
+ *   3. SOLID = surface or enclosed; the largest solid box by volume
+ *      (every z-slab range, the largest rectangle of their AND);
+ *   4. one whole voxel shaved off every face, because a surface voxel is only
+ *      partly inside.
+ *   5. THE PROBE (IDENT1 resume, 2026-09-28): the voxels are coarse (16 u or
+ *      more), so a box of whole voxels can still stand partly outside the
+ *      walls -- 84 of 599 boxes did by more than 1 percent in the Boston box.
+ *      The box is checked against the TRIANGLES the way the file's gate
+ *      (tests/spells/lodi_occluder_building.py) checks it: a 9 x 9 x 9 lattice
+ *      over the box, faces and corners included, and a point is inside when a
+ *      ray along every named direction meets a triangle. Over half a percent
+ *      outside, every face comes in by half a voxel and the box is probed
+ *      again, BLD_OCC_PROBE_ROUNDS times; still out, the box is refused.
+ * A building whose walls do not close gets nothing: its solid is a shell one
+ * voxel thick, and the shave removes it. */
+enum BuildingOccResult { BLD_OCC_OK = 0, BLD_OCC_NO_SOLID, BLD_OCC_TOO_THIN, BLD_OCC_PROBE_FAILED };
+static const int BLD_OCC_PROBE_GRID = 9;                // the gate's lattice, 729 points
+static const double BLD_OCC_PROBE_MAX_OUT = 0.005;      // half the gate's 1 percent: room for the file's quantisation
+static const int BLD_OCC_PROBE_ROUNDS = 4;
+
+/*! The share of the box [lo, hi] (the fit's own frame) whose lattice points
+ *  are NOT enclosed by the triangles `f` along every direction in needMask
+ *  (bit 2 axis = +axis, bit 2 axis + 1 = -axis). The lattice's points share
+ *  columns along each axis, so one pass over the triangles per column gives
+ *  the nearest surface on both sides of every point in it. */
+static double bldProbeOutside( const std::vector<double> & f, size_t nt, const double lo[3], const double hi[3], int needMask )
+{
+	const int G = BLD_OCC_PROBE_GRID;
+	auto lat = [&]( int k, int i ) { return lo[k] + ( hi[k] - lo[k] ) * double( i ) / double( G - 1 ); };
+	std::vector<unsigned char> ok( size_t( G ) * G * G, 1 );
+	for ( int ax = 0; ax < 3; ax++ ) {
+		const bool wantPos = ( needMask & ( 1 << ( 2 * ax ) ) ) != 0, wantNeg = ( needMask & ( 1 << ( 2 * ax + 1 ) ) ) != 0;
+		if ( !wantPos && !wantNeg )
+			continue;
+		const int o1 = ( ax + 1 ) % 3, o2 = ( ax + 2 ) % 3;
+		std::vector<size_t> keep;
+		for ( size_t t = 0; t < nt; t++ ) {
+			const double * A = &f[t * 9], * B = &f[t * 9 + 3], * C = &f[t * 9 + 6];
+			const double d = ( B[o1] - A[o1] ) * ( C[o2] - A[o2] ) - ( C[o1] - A[o1] ) * ( B[o2] - A[o2] );
+			if ( std::fabs( d ) <= 1e-9 )
+				continue;
+			if ( std::max( { A[o1], B[o1], C[o1] } ) < lo[o1] || std::min( { A[o1], B[o1], C[o1] } ) > hi[o1]
+				|| std::max( { A[o2], B[o2], C[o2] } ) < lo[o2] || std::min( { A[o2], B[o2], C[o2] } ) > hi[o2] )
+				continue;
+			keep.push_back( t );
+		}
+		for ( int i1 = 0; i1 < G; i1++ )
+			for ( int i2 = 0; i2 < G; i2++ ) {
+				const double px = lat( o1, i1 ), py = lat( o2, i2 );
+				double tMin = 1e300, tMax = -1e300;
+				for ( size_t t : keep ) {
+					const double * A = &f[t * 9], * B = &f[t * 9 + 3], * C = &f[t * 9 + 6];
+					const double d = ( B[o1] - A[o1] ) * ( C[o2] - A[o2] ) - ( C[o1] - A[o1] ) * ( B[o2] - A[o2] );
+					const double w1 = ( ( B[o1] - px ) * ( C[o2] - py ) - ( C[o1] - px ) * ( B[o2] - py ) ) / d;
+					const double w2 = ( ( C[o1] - px ) * ( A[o2] - py ) - ( A[o1] - px ) * ( C[o2] - py ) ) / d;
+					const double w3 = 1.0 - w1 - w2;
+					if ( w1 < 0.0 || w2 < 0.0 || w3 < 0.0 )
+						continue;
+					const double tv = w1 * A[ax] + w2 * B[ax] + w3 * C[ax];
+					tMin = std::min( tMin, tv );
+					tMax = std::max( tMax, tv );
+				}
+				for ( int ia = 0; ia < G; ia++ ) {
+					const double pa = lat( ax, ia );
+					int p[3];
+					p[ax] = ia; p[o1] = i1; p[o2] = i2;
+					if ( ( wantPos && !( tMax > pa ) ) || ( wantNeg && !( tMin < pa ) ) )
+						ok[( size_t( p[2] ) * G + p[1] ) * G + p[0]] = 0;
+				}
+			}
+	}
+	size_t out = 0;
+	for ( unsigned char o : ok )
+		out += o ? 0 : 1;
+	return double( out ) / double( ok.size() );
+}
+
+int fitBuildingBox( const std::vector<float> & tris, double yaw, const QByteArray & rays,
+	float centre[3], float half[3], float rot[9], int * shrinkRounds = nullptr )
+{
+	if ( tris.size() < 9 )
+		return BLD_OCC_NO_SOLID;
+	const double c = std::cos( yaw ), s = std::sin( yaw );
+	const double px = tris[0], py = tris[1], pz = tris[2];     // pivot, for precision
+	const size_t nt = tris.size() / 9;
+	std::vector<double> f( tris.size() );
+	double mn[3] = { 1e300, 1e300, 1e300 }, mx[3] = { -1e300, -1e300, -1e300 };
+	for ( size_t v = 0; v < nt * 3; v++ ) {
+		const double x = double( tris[v * 3] ) - px, y = double( tris[v * 3 + 1] ) - py, z = double( tris[v * 3 + 2] ) - pz;
+		f[v * 3] = c * x + s * y;
+		f[v * 3 + 1] = -s * x + c * y;
+		f[v * 3 + 2] = z;
+		for ( int k = 0; k < 3; k++ ) { mn[k] = std::min( mn[k], f[v * 3 + k] ); mx[k] = std::max( mx[k], f[v * 3 + k] ); }
+	}
+	const double maxExt = std::max( { mx[0] - mn[0], mx[1] - mn[1], mx[2] - mn[2] } );
+	const double vs = std::max( maxExt / 64.0, 16.0 );
+	int n[3];
+	for ( int k = 0; k < 3; k++ )
+		n[k] = std::max( 1, std::min( 64, int( std::ceil( ( mx[k] - mn[k] ) / vs ) ) ) );
+	if ( n[0] < 3 || n[1] < 3 || n[2] < 3 )
+		return BLD_OCC_TOO_THIN;
+	const int NX = n[0], NY = n[1], NZ = n[2];
+	auto at = [&]( int x, int y, int z ) { return ( size_t( z ) * NY + y ) * NX + x; };
+	std::vector<unsigned char> surf( size_t( NX ) * NY * NZ, 0 );
+	auto cellOf = [&]( double v, int k ) { return std::max( 0, std::min( n[k] - 1, int( std::floor( ( v - mn[k] ) / vs ) ) ) ); };
+	for ( size_t t = 0; t < nt; t++ ) {
+		const double * A = &f[t * 9], * B = &f[t * 9 + 3], * C = &f[t * 9 + 6];
+		double e = 0.0;
+		for ( int k = 0; k < 3; k++ )
+			e = std::max( { e, std::fabs( B[k] - A[k] ), std::fabs( C[k] - A[k] ), std::fabs( C[k] - B[k] ) } );
+		const int m = std::max( 1, int( std::ceil( e / ( 0.5 * vs ) ) ) );
+		for ( int a = 0; a <= m; a++ )
+			for ( int b = 0; b <= m - a; b++ ) {
+				const double fa = double( a ) / m, fb = double( b ) / m;
+				int ix[3];
+				for ( int k = 0; k < 3; k++ )
+					ix[k] = cellOf( A[k] + ( B[k] - A[k] ) * fa + ( C[k] - A[k] ) * fb, k );
+				surf[at( ix[0], ix[1], ix[2] )] = 1;
+			}
+	}
+	// ENCLOSED: per direction, "a surface voxel lies strictly beyond"
+	std::vector<unsigned char> need( surf.size(), 0 ), got( surf.size(), 0 );
+	struct Dir { char ch; int axis; int sign; };
+	const Dir dirs[6] = { { 'x', 0, 1 }, { 'X', 0, -1 }, { 'y', 1, 1 }, { 'Y', 1, -1 }, { 'z', 2, 1 }, { 'Z', 2, -1 } };
+	int needMask = 0;
+	for ( int d = 0; d < 6; d++ )
+		if ( rays.contains( dirs[d].ch ) )
+			needMask |= 1 << d;
+	std::vector<unsigned char> hits( surf.size(), 0 );
+	for ( int d = 0; d < 6; d++ ) {
+		if ( !( needMask & ( 1 << d ) ) )
+			continue;
+		const int ax = dirs[d].axis, sg = dirs[d].sign;
+		const int o1 = ( ax + 1 ) % 3, o2 = ( ax + 2 ) % 3;
+		for ( int j2 = 0; j2 < n[o2]; j2++ )
+			for ( int j1 = 0; j1 < n[o1]; j1++ ) {
+				bool seen = false;
+				for ( int step = 0; step < n[ax]; step++ ) {
+					const int i = ( sg > 0 ) ? n[ax] - 1 - step : step;
+					int p[3];
+					p[ax] = i; p[o1] = j1; p[o2] = j2;
+					const size_t idx = at( p[0], p[1], p[2] );
+					if ( seen )
+						hits[idx] |= quint8( 1 << d );
+					if ( surf[idx] )
+						seen = true;
+				}
+			}
+	}
+	std::vector<unsigned char> solid( surf.size(), 0 );
+	for ( size_t i = 0; i < surf.size(); i++ )
+		solid[i] = ( surf[i] || ( needMask && ( hits[i] & needMask ) == needMask ) ) ? 1 : 0;
+	// the largest solid box: every z range, the largest rectangle of the slabs' AND
+	std::vector<unsigned char> andm( size_t( NX ) * NY );
+	std::vector<int> hgt( NX + 1 );
+	double bestVol = 0.0;
+	int b0[3] = { 0, 0, 0 }, b1[3] = { -1, -1, -1 };
+	for ( int z0 = 0; z0 < NZ; z0++ ) {
+		for ( int y = 0; y < NY; y++ )
+			for ( int x = 0; x < NX; x++ )
+				andm[size_t( y ) * NX + x] = 1;
+		for ( int z1 = z0; z1 < NZ; z1++ ) {
+			bool any = false;
+			for ( int y = 0; y < NY; y++ )
+				for ( int x = 0; x < NX; x++ ) {
+					unsigned char & m = andm[size_t( y ) * NX + x];
+					m = m & solid[at( x, y, z1 )];
+					any = any || m;
+				}
+			if ( !any )
+				break;
+			const int dz = z1 - z0 + 1;
+			if ( double( NX ) * NY * dz <= bestVol )
+				continue;           // cannot beat the best even if the whole slab were solid
+			std::fill( hgt.begin(), hgt.end(), 0 );
+			for ( int y = 0; y < NY; y++ ) {
+				for ( int x = 0; x < NX; x++ )
+					hgt[x] = andm[size_t( y ) * NX + x] ? hgt[x] + 1 : 0;
+				// largest rectangle in the histogram hgt[0..NX-1] (stack method)
+				std::vector<int> st;
+				for ( int x = 0; x <= NX; x++ ) {
+					const int h = ( x < NX ) ? hgt[x] : 0;
+					while ( !st.empty() && hgt[st.back()] >= h ) {
+						const int top = st.back();
+						st.pop_back();
+						const int ht = hgt[top];
+						if ( ht == 0 )
+							continue;
+						const int left = st.empty() ? 0 : st.back() + 1;
+						const int w = x - left;
+						const double vol = double( w ) * ht * dz;
+						if ( vol > bestVol ) {
+							bestVol = vol;
+							b0[0] = left; b1[0] = x - 1;
+							b0[1] = y - ht + 1; b1[1] = y;
+							b0[2] = z0; b1[2] = z1;
+						}
+					}
+					if ( x < NX )
+						st.push_back( x );
+				}
+			}
+		}
+	}
+	if ( b1[0] < 0 )
+		return BLD_OCC_NO_SOLID;
+	double lo[3], hi[3];
+	for ( int k = 0; k < 3; k++ ) {
+		lo[k] = mn[k] + double( b0[k] + 1 ) * vs;
+		hi[k] = mn[k] + double( b1[k] ) * vs;
+		if ( !( hi[k] > lo[k] ) )
+			return BLD_OCC_TOO_THIN;
+	}
+	// 5. the probe against the triangles; shrink by half a voxel a face, or refuse
+	{
+		int round = 0;
+		while ( bldProbeOutside( f, nt, lo, hi, needMask ) > BLD_OCC_PROBE_MAX_OUT ) {
+			if ( ++round > BLD_OCC_PROBE_ROUNDS )
+				return BLD_OCC_PROBE_FAILED;
+			for ( int k = 0; k < 3; k++ )
+				if ( hi[k] - lo[k] - vs >= 16.0 ) {     // never thinner than the voxel floor
+					lo[k] += 0.5 * vs;
+					hi[k] -= 0.5 * vs;
+				}
+		}
+		if ( shrinkRounds )
+			*shrinkRounds = round;
+	}
+	const double cu = 0.5 * ( lo[0] + hi[0] ), cv = 0.5 * ( lo[1] + hi[1] ), cw = 0.5 * ( lo[2] + hi[2] );
+	centre[0] = float( px + c * cu - s * cv );
+	centre[1] = float( py + s * cu + c * cv );
+	centre[2] = float( pz + cw );
+	for ( int k = 0; k < 3; k++ )
+		half[k] = float( 0.5 * ( hi[k] - lo[k] ) );
+	const float R[9] = { float( c ), float( -s ), 0.0f, float( s ), float( c ), 0.0f, 0.0f, 0.0f, 1.0f };
+	std::memcpy( rot, R, sizeof( R ) );
+	return BLD_OCC_OK;
+}
+
 bool shapeEmits( const NativeSrcShape & s )
 {
 	return s.ownEmit && ( s.emitColor[0] > 0.0f || s.emitColor[1] > 0.0f || s.emitColor[2] > 0.0f );
@@ -591,6 +968,8 @@ void lodgenNativeBegin( const EsmWorld * world, const QString & outDir, NativeMo
 	s.scrappable = o.scrappable;
 	s.identityJoinLegacy = o.identityJoinLegacy;
 	s.identityJoinGap = o.identityJoinGap;
+	s.identityJoinContact = o.identityJoinContact && !o.identityJoinLegacy;
+	s.occluderBuilding = o.occluderBuilding;
 }
 
 void lodgenNativeLadderOptions( bool libraryNear, bool ladderFoliage, float silhouetteMin, bool placementAo )
@@ -628,6 +1007,12 @@ void lodgenNativeIdentityJoinOption( bool legacy, float gapWorld )
 	ladderOpts().identityJoinLegacy = legacy;
 	if ( gapWorld > 0.0f )
 		ladderOpts().identityJoinGap = gapWorld;
+}
+
+void lodgenNativeIdentityContactOption( bool contact, bool occluderBuilding )
+{
+	ladderOpts().identityJoinContact = contact;
+	ladderOpts().occluderBuilding = occluderBuilding;
 }
 
 bool lodgenNativeActive()
@@ -668,7 +1053,8 @@ void lodgenNativeOfferLibraryReuse( const NativeReuseOffer & offer )
  *   3. cardCorpusHash = FNV-1a 64 from the offset basis over, for each set in
  *      that order, its five files in the order .lodm, colour, normal, mask,
  *      emissive: the lower-cased file name's UTF-8 bytes, the file size as a
- *      little-endian u64, then every byte of the file.
+ *      little-endian u64, then every byte of the file. A set that names no
+ *      emissive sheet (black everywhere, lane TIDY1) hashes the first four.
  *   4. Every layer's `id` is the base's formID in 8 hex digits; a base in two
  *      layers is refused, and so is a `C` line whose (array, layer) is not
  *      the layer its base's id names. */
@@ -810,6 +1196,12 @@ bool lodgenNativeLinkCards( const QStringList & btoPaths, const QString & cardAr
 		const QString sheets[4] = { m.color, m.normal, m.mask, m.emissive };
 		static const char * const sheetRole[4] = { "colour", "normal", "mask", "emissive" };
 		for ( int k = 0; k < 4; k++ ) {
+			/* A set whose emissive is black on every layer names no emissive
+			 * sheet (lane TIDY1, 2026-09-27; vanilla LOD has no glow source):
+			 * it hashes four files, not five. Colour, normal and mask stay
+			 * required. */
+			if ( k == 3 && sheets[k].isEmpty() )
+				continue;
 			if ( sheets[k].isEmpty() )
 				return fail( QString( "%1 names no %2 sheet" ).arg( name ).arg( QLatin1String( sheetRole[k] ) ) );
 			if ( !hashFile( lastComponent( sheets[k] ), &why ) )
@@ -1449,6 +1841,28 @@ struct GroupKnobs
 	bool useBox = true;
 	//! Spatial-hash cell, world units. 33k instances makes the O(n^2) pair walk impossible.
 	float gridCell = 1024.0f;
+	/*! IDENT1 (2026-09-27), the CONTACT join: two pieces are one building when
+	 *  their placed level-0 TRIANGLES come within this many world units of each
+	 *  other (0 = they cross or touch). Chosen 2026-09-28 from the Boston-box
+	 *  sweep (lane IDENT1 DONE.md, "R1"): abutting pieces touch at 0 u, so the
+	 *  tolerance only decides whether trim floating off a wall joins it. The
+	 *  Hub towers are 53 / 44 groups at 2 u, 9 / 6 at 16 u, 1 / 4 at 32 u,
+	 *  and the pieces joined into the landmarks from outside them do not grow
+	 *  from 8 u to 32 u. 32 is also the widest distance the pair walk
+	 *  measures (the dump's `measure 32`). */
+	float contactTol = 32.0f;
+	/*! IDENT1: no group grows wider than this on X or Y (world axis-aligned
+	 *  box of its pieces' triangles), so a street of touching houses cannot
+	 *  become one building. 0 = no cap. Chosen 2026-09-28: with no cap the
+	 *  contact join welds 1,507 pieces over 22,810 x 22,283 u; 3,840 u is the
+	 *  first cap that leaves every landmark's joined core whole (Hub tower
+	 *  west is 3,781 u wide), and 4,096 u is one exterior cell. Above it the
+	 *  Diamond City groups take in pieces that are not Diamond City. */
+	float groupCap = 4096.0f;
+	/*! IDENT1, the building occluder's fill test: a voxel counts as solid
+	 *  when a ray along EVERY direction named here meets the building's own
+	 *  surface (x = +X, X = -X, y, Y, z = up, Z = down). */
+	QByteArray occRays = "xXyYz";
 
 	/*! The knobs are also readable from the environment, and that is a
 	 *  MEASURING surface, not a feature: the rule is a proposal, so the table
@@ -1476,6 +1890,15 @@ struct GroupKnobs
 		const float g = qgetenv( "WW_LODI_GROUP_GRID" ).toFloat( &okv );
 		if ( okv && g > 0.0f )
 			gridCell = g;
+		const float ct = qgetenv( "WW_LODI_CONTACT_TOL" ).toFloat( &okv );
+		if ( okv && ct >= 0.0f )
+			contactTol = ct;
+		const float cap = qgetenv( "WW_LODI_GROUP_CAP" ).toFloat( &okv );
+		if ( okv && cap >= 0.0f )
+			groupCap = cap;
+		const QByteArray rays = qgetenv( "WW_LODI_OCC_RAYS" );
+		if ( !rays.isEmpty() )
+			occRays = rays;
 	}
 };
 //! The one instance. Every knob turned here, nowhere else.
@@ -1577,6 +2000,17 @@ bool lodgenNativeWrite( QString * report, QString * error )
 	 * materials have no palette path) and the census names as a defect;
 	 * `swapCnamNoPalette` the rows the game ignores. */
 	int swapCnamApplied = 0, swapCnamNoPalette = 0, swapCnamUnset = 0;
+	/* Lane AO2 (overlay casters): per WRITTEN material row, how its shapes
+	 * treat what is behind them. 0 = solid, 1 = OVERLAY (every shape on the
+	 * row blends, or is a decal that tests: a stain sheet, a skybridge's glass;
+	 * its texture alpha decides where it blocks a ray), 2 = alpha-TESTED only
+	 * (fences, cards: they cast as solid, as before). Built from the shapes' own
+	 * material facts -- the NIF alpha property and the BGSM/BGEM switches --
+	 * never from a name. In memory only: the .lodo does not carry it, so a
+	 * vertex-AO bake does not reuse a previous library (the reuse test below). */
+	std::vector<quint8> matCaster;
+	std::vector<const LodgenAoAlpha *> matAlpha;    //!< per row: the see-through row's alpha, else null
+	int matOverlayRows = 0, matOverlayMixed = 0, matTestOnlyRows = 0, matOverlayModels = 0, matOverlayNoTex = 0;
 	QHash<QString, QSet<QString>> modelSwapKeys;     // plain model key -> its shapes' folded material keys
 	int modelsLoaded = 0, modelsFailed = 0;
 	int basesWritten = 0, basesWithoutMesh = 0;
@@ -1593,6 +2027,8 @@ bool lodgenNativeWrite( QString * report, QString * error )
 			libraryWhy = QStringLiteral( "not offered: this is not an incremental bake" );
 		else if ( s.occluders )
 			libraryWhy = QStringLiteral( "occluders are on and the per-model box is in neither file" );
+		else if ( s.vertexAo && s.placementAo && s.world && qEnvironmentVariable( "WW_AO_OVERLAY_CASTERS" ) != QStringLiteral( "1" ) )
+			libraryWhy = QStringLiteral( "vertex AO is on and which materials are see-through (blend, or a decal that tests) is in neither file" );
 		else if ( offer.loadOrderHex != hex16( world.loadOrderHash() ) )
 			libraryWhy = QStringLiteral( "the load order moved" );
 		else if ( offer.pluginCorpusHex != hex16( world.vhgtCorpusHash() ) )
@@ -2113,6 +2549,70 @@ bool lodgenNativeWrite( QString * report, QString * error )
 				if ( it.value().loaded )
 					ladderModels.push_back( &it.value() );
 
+			/* Lane AO2 (overlay casters): which rows are SEE-THROUGH, serially,
+			 * before the fan-out. A shape is see-through when its material blends
+			 * (NIF alpha property bit 0, or the BGSM/BGEM switch) or is a decal that
+			 * tests; its diffuse alpha then decides, texel by texel, where it blocks
+			 * a ray (src/lodgenao.h, LodgenAoAlpha). One row can gather shapes of
+			 * several models (the key has no blend bit), so a row is see-through only
+			 * when EVERY shape on it is; a row with both kinds stays solid and is
+			 * counted. A row whose texture does not load stays solid and is counted. */
+			const bool overlayCastLib = qEnvironmentVariable( "WW_AO_OVERLAY_CASTERS" ) == QStringLiteral( "1" );
+			{
+				std::vector<quint8> anyOver( lib.materials.size(), 0 ), anySolid( lib.materials.size(), 0 ), anyTest( lib.materials.size(), 0 );
+				std::vector<const NativeSrcShape *> first( lib.materials.size(), nullptr );
+				for ( const Model * pm : ladderModels )
+					for ( const NativeSrcShape & sh : pm->shapes ) {
+						const quint16 mid = materialId.value( materialKey( sh ), 0xFFFF );
+						if ( mid >= lib.materials.size() )
+							continue;
+						const NearShapeFacts & f = sh.nearFacts;
+						if ( f.alphaBlend || ( f.decal && f.alphaTest ) ) {
+							anyOver[mid] = 1;
+							if ( !first[mid] )
+								first[mid] = &sh;
+						} else {
+							anySolid[mid] = 1;
+						}
+						if ( f.alphaTest )
+							anyTest[mid] = 1;
+					}
+				const QString * dataRoot = s.loader == lodgenNativeLoadModel ? static_cast<const QString *>( s.user ) : nullptr;
+				matCaster.assign( lib.materials.size(), 0 );
+				matAlpha.assign( lib.materials.size(), nullptr );
+				for ( size_t i = 0; i < lib.materials.size(); i++ ) {
+					if ( anyOver[i] && !anySolid[i] ) {
+						const NativeSrcShape & sh = *first[i];
+						const QString tex = sh.tex0.isEmpty() ? sh.effectTex0 : sh.tex0;
+						const quint8 ref = sh.nearFacts.alphaTest ? sh.nearFacts.alphaRef : quint8( 128 );
+						matAlpha[i] = ( dataRoot && !overlayCastLib ) ? lodgenAoAlphaMap( *dataRoot, tex, ref ) : nullptr;
+						if ( matAlpha[i] ) {
+							matCaster[i] = 1;
+							matOverlayRows++;
+							continue;
+						}
+						if ( !overlayCastLib )
+							matOverlayNoTex++;
+					} else if ( anyOver[i] ) {
+						matOverlayMixed++;
+					}
+					if ( anyTest[i] ) {
+						matCaster[i] = 2;
+						matTestOnlyRows++;
+					}
+				}
+				// the models whose own selfAO the rule reaches: see-through AND solid shapes in one model
+				for ( const Model * pm : ladderModels ) {
+					bool o = false, so = false;
+					for ( const NativeSrcShape & sh : pm->shapes ) {
+						const quint16 mid = materialId.value( materialKey( sh ), 0xFFFF );
+						( mid < matCaster.size() && matCaster[mid] == 1 ? o : so ) = true;
+					}
+					if ( o && so )
+						matOverlayModels++;
+				}
+			}
+
 			struct LadderJob
 			{
 				LodoLibrary staged;
@@ -2134,6 +2634,8 @@ bool lodgenNativeWrite( QString * report, QString * error )
 					src.reserve( m.shapes.size() );
 					for ( NativeSrcShape & sh : m.shapes ) {
 						sh.geom.materialId = materialId.value( materialKey( sh ) );
+						// lane AO2: a see-through row blocks the model's own selfAO rays only where it is opaque
+						sh.geom.aoAlpha = sh.geom.materialId < matAlpha.size() ? matAlpha[sh.geom.materialId] : nullptr;
 						src.push_back( sh.geom );
 					}
 					j.ok = lodoStageMesh( j.staged, proto, src, m.path, &j.err, &j.ms );
@@ -2370,6 +2872,12 @@ bool lodgenNativeWrite( QString * report, QString * error )
 	quint32 joinEligible = 0;
 	quint64 joinSamples = 0, joinPairs = 0;
 	qint64 joinMs = 0;
+	//! IDENT1: the CONTACT join's own census (candidate pairs, touching pairs, unions the cap refused)
+	quint64 contactCandidates = 0, contactTouching = 0, contactCapRefused = 0, contactTriTests = 0;
+	//! IDENT1: the building occluders' census
+	quint32 bldOccGroups = 0, bldOccFitted = 0, bldOccNoSolid = 0, bldOccTooThin = 0, bldOccProbeFailed = 0, bldOccShrunk = 0;
+	qint64 bldOccMs = 0;
+	std::vector<float> bldOccThin;      //!< each fitted box's smallest full extent, world units
 	set.placementAo = s.placementAo;
 	QVector<LodgenAggTree> aggTrees;
 	/* SWAP1 census over the placements this write is given (docs 3.9):
@@ -2604,23 +3112,35 @@ bool lodgenNativeWrite( QString * report, QString * error )
 	int vskyInstances = 0;
 	quint64 vskyBytes = 0, vskyOpen = 0;
 	double vskySum = 0.0;
+	// v12 (lane GROUND1): the ground-contact stream's census
+	int vgndInstances = 0, vgndSpan = 0;
+	quint64 vgndBytes = 0, vgndFull = 0, vgndZero = 0;
+	double vgndSum = 0.0;
 	// lane AO2: the face cast's census
+	bool vaoWeldAcross = false;
 	float vaoFaceStep = 0.0f, vskyReach = 0.0f, vaoWeldDeg = -1.0f, vaoUnderTol = -1.0f, vaoPatchDeg = -1.0f;
-	bool vaoPatchSamples = false;
+	bool vaoPatchSamples = false, vaoOverlayCast = false;
 	int vaoFaceMax = 0, vaoScenes = 0;
 	double vaoCastSeconds = 0.0;
-	quint64 vaoSamples = 0, vaoBuried = 0, vaoAtVertex = 0, vaoRingLeftOut = 0, vaoWelded = 0, vaoUnder = 0, vaoPatches = 0, vaoPatchTris = 0, vaoPatchSampleFit = 0;
+	quint64 vaoSamples = 0, vaoBuried = 0, vaoAtVertex = 0, vaoRingLeftOut = 0, vaoWelded = 0, vaoAcross = 0, vaoTJoin = 0, vaoOverTris = 0, vaoOverInst = 0, vaoTestTris = 0, vaoTestInst = 0, vaoUnder = 0, vaoPatches = 0, vaoPatchTris = 0, vaoPatchSampleFit = 0;
 	std::array<quint64, 8> vskyHist{};
 	if ( s.vertexAo && s.placementAo && s.world ) {
 		set.vertexAo = true;
 		// v7: the sky stream rides the SAME loop, the same scene, the same reach
 		set.vertexSky = s.lodiV7;
+		/* v12 (lane GROUND1): the per-vertex ground-contact stream rides the same
+		 * loop and reads the same ESM heightfield. ON by default; the env switch is
+		 * the byte-identity gate's way back and nothing else. */
+		set.vertexGround = s.lodiV7 && qEnvironmentVariable( "WW_LODGEN_NO_VERTEX_GROUND" ) != QStringLiteral( "1" );
 		// the library meshes decoded once: vertex range, positions, normals, level-0 triangles
 		struct DecodedMesh {
 			quint32 first = 0, count = 0;
 			bool contiguous = true;
 			std::vector<float> pos, nrm;      // 3 a vertex, mesh space at scale 1
 			std::vector<quint32> tris;        // level-0 triangles, indices into the range
+			std::vector<quint8> cast;         // per triangle: its row's matCaster (0 solid, 1 see-through, 2 alpha-tested)
+			std::vector<const LodgenAoAlpha *> alpha;   // per triangle: the see-through row's alpha, else null
+			std::vector<float> uv;            // 2 a vertex, filled only for a mesh with a see-through triangle
 		};
 		std::vector<DecodedMesh> dm( lib.meshes.size() );
 		for ( size_t m = 0; m < lib.meshes.size(); m++ ) {
@@ -2662,7 +3182,15 @@ bool lodgenNativeWrite( QString * report, QString * error )
 					d.tris.push_back( cl.vertexBase + a - lo );
 					d.tris.push_back( cl.vertexBase + b - lo );
 					d.tris.push_back( cl.vertexBase + cc - lo );
+					d.cast.push_back( cl.materialId < matCaster.size() ? matCaster[cl.materialId] : quint8( 0 ) );
+					d.alpha.push_back( cl.materialId < matAlpha.size() ? matAlpha[cl.materialId] : nullptr );
 				}
+			}
+			if ( std::any_of( d.alpha.begin(), d.alpha.end(), []( const LodgenAoAlpha * a ) { return a != nullptr; } ) ) {
+				d.uv.resize( size_t( d.count ) * 2 );
+				for ( quint32 v = 0; v < d.count; v++ )
+					for ( int k = 0; k < 2; k++ )
+						d.uv[size_t( v ) * 2 + k] = lodoDequantU16( lib.vertices[lo + v].uv[k], mesh.uvMin[k], mesh.uvExtent[k] );
 			}
 		}
 		// which mesh each instance draws, and which chunk lit it
@@ -2744,6 +3272,10 @@ bool lodgenNativeWrite( QString * report, QString * error )
 		if ( qEnvironmentVariableIsSet( "WW_AO_WELD_DEG" ) )
 			weldDeg = qMin( 180.0f, qEnvironmentVariable( "WW_AO_WELD_DEG" ).toFloat() );
 		vaoWeldDeg = weldDeg;
+		const bool weldAcross = qEnvironmentVariable( "WW_AO_WELD_ACROSS" ) != QStringLiteral( "0" );
+		vaoWeldAcross = weldAcross;
+		const bool overlayCast = qEnvironmentVariable( "WW_AO_OVERLAY_CASTERS" ) == QStringLiteral( "1" );
+		vaoOverlayCast = overlayCast;
 		/* A sample more than underTol world u below the chunk's ground (the ESM
 		 * heightfield the rays march) is on a part of the mesh the terrain hides:
 		 * a foundation or the buried foot of a wall. All its rays meet the ground
@@ -2777,7 +3309,7 @@ bool lodgenNativeWrite( QString * report, QString * error )
 					probe[k] = pl[k].toFloat();
 		}
 		QMutex probeLock;
-		std::atomic<quint64> aSamples{ 0 }, aBuried{ 0 }, aAtVertex{ 0 }, aRingLeftOut{ 0 }, aWelded{ 0 }, aUnder{ 0 }, aPatches{ 0 }, aPatchTris{ 0 }, aPatchSampleFit{ 0 };
+		std::atomic<quint64> aAcross{ 0 }, aTJoin{ 0 }, aOverTris{ 0 }, aOverInst{ 0 }, aTestTris{ 0 }, aTestInst{ 0 }, aSamples{ 0 }, aBuried{ 0 }, aAtVertex{ 0 }, aRingLeftOut{ 0 }, aWelded{ 0 }, aUnder{ 0 }, aPatches{ 0 }, aPatchTris{ 0 }, aPatchSampleFit{ 0 };
 		std::atomic<int> aScenes{ 0 };
 		std::array<std::atomic<quint64>, 8> aSkyHist;
 		for ( auto & h : aSkyHist )
@@ -2869,14 +3401,48 @@ bool lodgenNativeWrite( QString * report, QString * error )
 					}
 					const DecodedMesh & d = dm[mid];
 					placed( r, d, wp );
+					/* Lane AO2 (overlay casters): a triangle on a SEE-THROUGH row (it blends,
+					 * or is a decal that tests: the stain sheet 5 u in front of a wall) blocks
+					 * a ray only where its texture is opaque at the hit. It is still a receiver
+					 * below. Alpha-TESTED rows cast as solid, as before, and are counted.
+					 * WW_AO_OVERLAY_CASTERS=1 casts every row as solid (the refuter). */
+					quint64 over = 0, tested = 0;
 					if ( probe[3] > 0 )
 						triOwner.resize( scene.tri.size() / 9 + d.tris.size() / 3, quint32( i ) );
-					for ( size_t t = 0; t + 2 < d.tris.size(); t += 3 )
+					for ( size_t t = 0; t + 2 < d.tris.size(); t += 3 ) {
+						const size_t k = t / 3;
+						const LodgenAoAlpha * al = k < d.alpha.size() && !d.uv.empty() ? d.alpha[k] : nullptr;
+						if ( al ) {
+							over++;
+							scene.addTriangleAlpha( wp[d.tris[t]], wp[d.tris[t + 1]], wp[d.tris[t + 2]], &d.uv[size_t( d.tris[t] ) * 2],
+								&d.uv[size_t( d.tris[t + 1] ) * 2], &d.uv[size_t( d.tris[t + 2] ) * 2], al );
+							continue;
+						}
+						if ( k < d.cast.size() && d.cast[k] == 2 )
+							tested++;
 						scene.addTriangle( wp[d.tris[t]], wp[d.tris[t + 1]], wp[d.tris[t + 2]] );
+					}
+					if ( over ) {
+						aOverTris += over;
+						aOverInst++;
+					}
+					if ( tested ) {
+						aTestTris += tested;
+						aTestInst++;
+					}
 				}
 				const bool wantSky = set.vertexSky;
 				std::vector<Vector3> wn;
 				std::vector<double> aoAcc, skyAcc, wAcc, aoU, skyU, wU;
+				// steps 4-5 run over EVERY receiver of this chunk and ring at once (lane AO2, the tower round):
+				// their corners, triangles, sums and samples are appended here, receiver after receiver
+				std::vector<Vector3> cP, cN;
+				std::vector<quint32> cT, cOwner, cRecv, cFirst;
+				std::vector<double> cAo, cSk, cW, cAoU, cSkU, cWU;
+				std::vector<size_t> cSTri;
+				std::vector<Vector3> cSP;
+				std::vector<float> cSAo, cSSk;
+				std::vector<double> cSW;
 				// step 5's fit data: the above-ground samples of each triangle, [sTri[t], sTri[t + 1])
 				std::vector<size_t> sTri;
 				std::vector<Vector3> sP;
@@ -2999,6 +3565,75 @@ bool lodgenNativeWrite( QString * report, QString * error )
 						}
 					}
 					sTri[d.tris.size() / 3] = sP.size();
+					{
+						const quint32 base = quint32( cP.size() );
+						const size_t sBase = cSP.size();
+						cRecv.push_back( i );
+						cFirst.push_back( base );
+						for ( quint32 v = 0; v < d.count; v++ ) {
+							cP.push_back( wp[v] );
+							cN.push_back( wn[v] );
+							cOwner.push_back( quint32( cRecv.size() - 1 ) );
+							cAo.push_back( aoAcc[v] );
+							cSk.push_back( skyAcc[v] );
+							cW.push_back( wAcc[v] );
+							cAoU.push_back( aoU[v] );
+							cSkU.push_back( skyU[v] );
+							cWU.push_back( wU[v] );
+						}
+						for ( quint32 x : d.tris )
+							cT.push_back( base + x );
+						for ( size_t t = 0; t < d.tris.size() / 3; t++ )
+							cSTri.push_back( sBase + sTri[t] );
+						cSP.insert( cSP.end(), sP.begin(), sP.end() );
+						cSAo.insert( cSAo.end(), sAo.begin(), sAo.end() );
+						cSSk.insert( cSSk.end(), sSk.begin(), sSk.end() );
+						cSW.insert( cSW.end(), sW.begin(), sW.end() );
+					}
+				}
+				/* Steps 4 and 5 over the whole chunk and ring (lane AO2, bungo 2026-09-26 on the
+				 * right round tower: "a hard AO cutoff, then the next face is totally white").
+				 * A wall built of kit pieces is several placements; each piece averaged only its
+				 * own samples, so two pieces meeting at one corner drew two values (136 bytes
+				 * apart there). Corners of DIFFERENT placements at one point now pool as the
+				 * copies inside one mesh do (0.5 u, within weldDeg). A flat patch still grows
+				 * inside one placement only, so a street or a roof of many tiles keeps its
+				 * detail; the final re-pool makes the pieces agree at every shared corner.
+				 * WW_AO_WELD_ACROSS=0 keeps the pooling inside each placement (the refuter). */
+				if ( !cRecv.empty() ) {
+					cSTri.push_back( cSP.size() );
+					struct { quint32 count; std::vector<quint32> tris; } d;
+					d.count = quint32( cP.size() );
+					d.tris.swap( cT );
+					wp.swap( cP );
+					wn.swap( cN );
+					aoAcc.swap( cAo );
+					skyAcc.swap( cSk );
+					wAcc.swap( cW );
+					aoU.swap( cAoU );
+					skyU.swap( cSkU );
+					wU.swap( cWU );
+					sTri.swap( cSTri );
+					// weldNodes over each placement's own corners, as before this round
+					auto weldSlices = [&]( float cosW, std::vector<quint32> & out ) {
+						out.resize( d.count );
+						quint64 pooled = 0;
+						std::vector<Vector3> sp, sn;
+						std::vector<quint32> so;
+						for ( size_t k = 0; k < cRecv.size(); k++ ) {
+							const quint32 b0 = cFirst[k], b1 = k + 1 < cRecv.size() ? cFirst[k + 1] : d.count;
+							sp.assign( wp.begin() + b0, wp.begin() + b1 );
+							sn.assign( wn.begin() + b0, wn.begin() + b1 );
+							pooled += LodgenAoScene::weldNodes( sp, sn, double( dim ) * 2.0, cosW, so );
+							for ( quint32 v = 0; v < b1 - b0; v++ )
+								out[b0 + v] = b0 + so[v];
+						}
+						return pooled;
+					};
+					sP.swap( cSP );
+					sAo.swap( cSAo );
+					sSk.swap( cSSk );
+					sW.swap( cSW );
 					/* 4. ONE VALUE PER SURFACE POINT (lane AO2, bungo 2026-09-26: "These
 					 * split lines", on the ballpark roof, the tower faces and a lone box).
 					 * A mesh splits a corner into copies for its UVs or its smoothing;
@@ -3015,7 +3650,14 @@ bool lodgenNativeWrite( QString * report, QString * error )
 					 * pooling off (the refuter: bytes as ee52efc0). */
 					std::vector<quint32> node;
 					if ( weldDeg >= 0.0f && d.count > 1 ) {
-						aWelded += LodgenAoScene::weldNodes( wp, wn, double( dim ) * 2.0, std::cos( weldDeg * 3.14159265f / 180.0f ), node );
+						const float cosW = std::cos( weldDeg * 3.14159265f / 180.0f );
+						if ( weldAcross ) {
+							aWelded += LodgenAoScene::weldNodes( wp, wn, double( dim ) * 2.0, cosW, node );
+							for ( quint32 v = 0; v < d.count; v++ )
+								if ( cOwner[node[v]] != cOwner[v] )
+									aAcross++;
+						} else
+							aWelded += weldSlices( cosW, node );
 						std::vector<double> aoN( d.count, 0.0 ), skyN( d.count, 0.0 ), wN( d.count, 0.0 );
 						std::vector<double> aoUN( d.count, 0.0 ), skyUN( d.count, 0.0 ), wUN( d.count, 0.0 );
 						for ( quint32 v = 0; v < d.count; v++ ) {
@@ -3054,7 +3696,6 @@ bool lodgenNativeWrite( QString * report, QString * error )
 							aAtVertex++;
 							if ( buried )
 								aBuried++;
-							probeSample( wp[v], wn[v], ao, sk, buried );
 						}
 						aoV[v] = ao;
 						skV[v] = sk;
@@ -3076,7 +3717,7 @@ bool lodgenNativeWrite( QString * report, QString * error )
 					const size_t nt = d.tris.size() / 3;
 					if ( patchDeg >= 0.0f && nt >= 2 ) {
 						std::vector<quint32> pnode;
-						LodgenAoScene::weldNodes( wp, wn, double( dim ) * 2.0, -2.0f, pnode );
+						weldSlices( -2.0f, pnode );
 						std::vector<Vector3> fnT( nt );
 						std::vector<double> arT( nt, 0.0 );
 						for ( size_t t = 0; t < nt; t++ ) {
@@ -3127,7 +3768,8 @@ bool lodgenNativeWrite( QString * report, QString * error )
 								stack.pop_back();
 								members.push_back( t );
 								for ( quint32 t2 : nbr[t] ) {
-									if ( patch[t2] >= 0 || !( arT[t2] > 0.0 ) || Vector3::dotproduct( fnT[t2], n0 ) < cosP )
+									if ( patch[t2] >= 0 || !( arT[t2] > 0.0 ) || cOwner[d.tris[3 * size_t( t2 )]] != cOwner[d.tris[3 * t0]]
+										|| Vector3::dotproduct( fnT[t2], n0 ) < cosP )
 										continue;
 									bool onPlane = true;
 									for ( size_t c = 0; c < 3; c++ )
@@ -3276,13 +3918,134 @@ bool lodgenNativeWrite( QString * report, QString * error )
 								skV[v] = float( fSk[v] / fW[v] );
 							}
 					}
-					r.vertexAo.resize( d.count );
-					if ( wantSky )
-						r.vertexSky.resize( d.count );
-					for ( quint32 v = 0; v < d.count; v++ ) {
-						r.vertexAo[v] = quint8( std::lround( std::min( 1.0f, std::max( 0.0f, aoV[v] ) ) * 255.0f ) );
+					/* 6. T-JUNCTIONS BETWEEN PLACEMENTS (lane AO2, the same tower). After step 4 the
+					 * kit pieces agree at every corner they share, but a long piece often has no corner
+					 * where a short neighbour's corner touches its edge (the tall wall panel beside a
+					 * stack of two window panels). Its edge draws the straight line between its own two
+					 * corners while the short piece's corner there draws its own value (63 bytes apart
+					 * at the tower): a hard step along the panel boundary. The long piece cannot gain a
+					 * vertex (authored meshes are never edited), so the corner lying on the edge takes
+					 * the edge's value, the usual repair of a T-junction in baked vertex values. Only a
+					 * coplanar contact counts: the corner within 0.5 world u of the edge and off both of
+					 * its ends, its normal within 1 deg of the other face.
+					 * Off with WW_AO_WELD_ACROSS=0. */
+					if ( weldAcross && nt >= 1 ) {
+						const float cell = 256.0f / float( dim ), tolT = 0.5f / float( dim );
+						const float cosT = std::cos( 1.0f * 3.14159265f / 180.0f );
+						auto cellOf = [&]( float x ) { return qint64( std::floor( x / cell ) ); };
+						auto key = []( qint64 x, qint64 y, qint64 z ) {
+							return ( quint64( x + ( 1 << 20 ) ) << 42 ) | ( quint64( y + ( 1 << 20 ) ) << 21 ) | quint64( z + ( 1 << 20 ) );
+						};
+						std::unordered_map<quint64, std::vector<quint32>> grid;
+						std::vector<Vector3> fnJ( nt );
+						for ( size_t t = 0; t < nt; t++ ) {
+							const Vector3 & pa = wp[d.tris[3 * t]], & pb = wp[d.tris[3 * t + 1]], & pc = wp[d.tris[3 * t + 2]];
+							Vector3 fn = Vector3::crossproduct( pb - pa, pc - pa );
+							const float len = fn.length();
+							if ( !( len > 1e-12f ) )
+								continue;
+							fnJ[t] = fn / len;
+							qint64 lo[3], hi[3];
+							for ( int a = 0; a < 3; a++ ) {
+								lo[a] = cellOf( std::min( { pa[a], pb[a], pc[a] } ) - tolT );
+								hi[a] = cellOf( std::max( { pa[a], pb[a], pc[a] } ) + tolT );
+							}
+							for ( qint64 x = lo[0]; x <= hi[0]; x++ )
+								for ( qint64 y = lo[1]; y <= hi[1]; y++ )
+									for ( qint64 z = lo[2]; z <= hi[2]; z++ )
+										grid[key( x, y, z )].push_back( quint32( t ) );
+						}
+						// the contacts once: corner (its welded representative) on edge a-b at s
+						struct TJoin { quint32 v, a, b; float s; };
+						std::vector<TJoin> joins;
+						auto rep = [&]( quint32 x ) { return node.empty() ? x : node[x]; };
+						for ( quint32 v = 0; v < d.count; v++ ) {
+							if ( rep( v ) != v )
+								continue;
+							const Vector3 & p = wp[v];
+							const auto it = grid.find( key( cellOf( p[0] ), cellOf( p[1] ), cellOf( p[2] ) ) );
+							if ( it == grid.end() )
+								continue;
+							for ( quint32 t : it->second ) {
+								const quint32 * tv = &d.tris[3 * size_t( t )];
+								if ( cOwner[tv[0]] == cOwner[v] || Vector3::dotproduct( fnJ[t], wn[v] ) < cosT
+										|| std::fabs( Vector3::dotproduct( p - wp[tv[0]], fnJ[t] ) ) > tolT )
+									continue;
+								for ( int e = 0; e < 3; e++ ) {
+									const quint32 a = tv[e], b = tv[( e + 1 ) % 3];
+									const Vector3 ab = wp[b] - wp[a];
+									const float L2 = Vector3::dotproduct( ab, ab );
+									if ( !( L2 > 16.0f * tolT * tolT ) )
+										continue;
+									const float s = Vector3::dotproduct( p - wp[a], ab ) / L2, L = std::sqrt( L2 );
+									if ( s * L <= tolT || ( 1.0f - s ) * L <= tolT || ( p - wp[a] - ab * s ).length() > tolT )
+										continue;
+									joins.push_back( { v, rep( a ), rep( b ), s } );
+								}
+							}
+						}
+						/* A corner on an edge whose own end is on a third piece's edge forms a chain;
+							 * the values are settled in place (Gauss-Seidel) until no corner moves by more
+							 * than a tenth of a byte, at most 64 sweeps. */
+						if ( !joins.empty() ) {
+							std::vector<quint8> jN( d.count, 0 );
+							for ( int sweep = 0; sweep < 64; sweep++ ) {
+								float moved = 0.0f;
+								for ( size_t j0 = 0; j0 < joins.size(); ) {
+									size_t j1 = j0;
+									double sa = 0.0, ss = 0.0;
+									for ( ; j1 < joins.size() && joins[j1].v == joins[j0].v; j1++ ) {
+										const TJoin & J = joins[j1];
+										sa += double( aoV[J.a] + J.s * ( aoV[J.b] - aoV[J.a] ) );
+										ss += double( skV[J.a] + J.s * ( skV[J.b] - skV[J.a] ) );
+									}
+									const quint32 v = joins[j0].v;
+									const float na = float( sa / double( j1 - j0 ) ), ns = float( ss / double( j1 - j0 ) );
+									moved = std::max( moved, std::fabs( na - aoV[v] ) );
+									aoV[v] = na;
+									skV[v] = ns;
+									j0 = j1;
+								}
+								if ( moved * 255.0f < 0.1f )
+									break;
+							}
+							for ( const TJoin & J : joins )
+								jN[J.v] = 1;
+							for ( quint32 v = 0; v < d.count; v++ ) {
+								const quint32 r = rep( v );
+								if ( jN[r] ) {
+									aoV[v] = aoV[r];
+									skV[v] = skV[r];
+									if ( r == v )
+										aTJoin++;
+								}
+							}
+						}
+					}
+					for ( size_t k = 0; k < cRecv.size(); k++ ) {
+						LodiSrcInstance & r = set.instances[cRecv[k]];
+						const quint32 b0 = cFirst[k], n = ( k + 1 < cRecv.size() ? cFirst[k + 1] : d.count ) - b0;
+						r.vertexAo.resize( n );
 						if ( wantSky )
-							r.vertexSky[v] = quint8( std::lround( std::min( 1.0f, std::max( 0.0f, skV[v] ) ) * 255.0f ) );
+							r.vertexSky.resize( n );
+						if ( set.vertexGround )
+							r.vertexGround.resize( n );
+						for ( quint32 v = 0; v < n; v++ ) {
+							r.vertexAo[v] = quint8( std::lround( std::min( 1.0f, std::max( 0.0f, aoV[b0 + v] ) ) * 255.0f ) );
+							if ( wantSky )
+								r.vertexSky[v] = quint8( std::lround( std::min( 1.0f, std::max( 0.0f, skV[b0 + v] ) ) * 255.0f ) );
+							if ( set.vertexGround ) {
+								/* v12: the stock ground-contact law at THIS vertex (src/lodgen.cpp,
+								 * CONTACT_RANGE): 1 at or below the bilinear ESM surface, 0 by
+								 * 256 world u above it. The vertex's own placed position, not
+								 * the across-face samples the AO pools: the ramp is geometry,
+								 * not a cast, and has nothing to average. Miniature units. */
+								const Vector3 & q = wp[b0 + v];
+								const float g = ground.groundHeight( q[0], q[1] );
+								const float gb = std::min( 1.0f, std::max( 0.0f, 1.0f - ( q[2] - g ) / ( 256.0f * inv ) ) );
+								r.vertexGround[v] = quint8( std::lround( gb * 255.0f ) );
+							}
+						}
 					}
 				}
 			}
@@ -3295,6 +4058,12 @@ bool lodgenNativeWrite( QString * report, QString * error )
 		vaoAtVertex = aAtVertex;
 		vaoRingLeftOut = aRingLeftOut;
 		vaoWelded = aWelded;
+		vaoAcross = aAcross;
+		vaoTJoin = aTJoin;
+		vaoOverTris = aOverTris;
+		vaoOverInst = aOverInst;
+		vaoTestTris = aTestTris;
+		vaoTestInst = aTestInst;
 		vaoUnder = aUnder;
 		vaoPatches = aPatches;
 		vaoPatchTris = aPatchTris;
@@ -3328,6 +4097,22 @@ bool lodgenNativeWrite( QString * report, QString * error )
 				if ( v >= 128 )
 					vskyOpen++;
 			}
+		}
+		for ( const LodiSrcInstance & r : set.instances ) {
+			if ( r.vertexGround.empty() )
+				continue;
+			vgndInstances++;
+			vgndBytes += r.vertexGround.size();
+			quint8 lo = 255, hi = 0;
+			for ( quint8 v : r.vertexGround ) {
+				vgndSum += v;
+				vgndFull += ( v == 255 );
+				vgndZero += ( v == 0 );
+				lo = std::min( lo, v );
+				hi = std::max( hi, v );
+			}
+			if ( hi - lo >= 128 )
+				vgndSpan++;   // the placements one flat byte could never draw: half the ramp or more inside them
 		}
 	}
 	/* ---- v7: THE GROUPING. bungo 2026-09-18: "The houses should be one object
@@ -3442,6 +4227,86 @@ bool lodgenNativeWrite( QString * report, QString * error )
 			}
 			arch.push_back( quint32( i ) );
 		}
+		/* IDENT1 (2026-09-27): every non-tree placement's PLACED level-0
+		 * triangles, nine floats each, with a bound per triangle, for the contact
+		 * join and the building occluders. Built only when one of them runs, so
+		 * the two ways back cost what they always cost. */
+		const bool wantPlaced = s.identityJoinContact || ( s.occluders && s.occluderBuilding );
+		std::vector<quint32> ptFirst( ni, 0 ), ptCount( ni, 0 );
+		std::vector<float> ptw, ptb;            // 9 floats a triangle; 6 a triangle (lo xyz, hi xyz)
+		std::vector<Box> tbox( ni );
+		if ( wantPlaced ) {
+			std::unordered_map<quint32, std::vector<float>> meshTri;
+			auto localTris = [&]( quint16 mid ) -> const std::vector<float> & {
+				auto it = meshTri.find( quint32( mid ) );
+				if ( it != meshTri.end() )
+					return it->second;
+				std::vector<float> out;
+				const LodoMesh & me = lib.meshes[mid];
+				const quint32 c1 = me.clusterFirst + me.clusterCount;
+				for ( quint32 cc = me.clusterFirst; cc < c1 && cc < lib.clusters.size(); cc++ ) {
+					if ( cc >= lib.clusterLods.size() || lib.clusterLods[cc].level != 0 )
+						continue;
+					const LodoCluster & cl = lib.clusters[cc];
+					float lv[48][3];
+					int nv = 0;
+					for ( int n = 0; n < int( cl.vertexCount ) && n < 48; n++ ) {
+						const size_t vi = size_t( cl.vertexBase ) + size_t( n );
+						if ( vi >= lib.vertices.size() )
+							break;
+						const LodoVertex & vv = lib.vertices[vi];
+						for ( int k = 0; k < 3; k++ )
+							lv[n][k] = me.aabbMin[k] + float( vv.pos[k] ) / 65535.0f * me.aabbExtent[k];
+						nv++;
+					}
+					const size_t li = size_t( cc ) * 48;
+					for ( int t = 0; t < int( cl.triangleCount ); t++ ) {
+						if ( li + size_t( t ) * 3 + 2 >= lib.localIndices.size() )
+							break;
+						const int ix[3] = { lib.localIndices[li + size_t( t ) * 3 + 0],
+							lib.localIndices[li + size_t( t ) * 3 + 1], lib.localIndices[li + size_t( t ) * 3 + 2] };
+						if ( ix[0] >= nv || ix[1] >= nv || ix[2] >= nv )
+							continue;
+						for ( int v = 0; v < 3; v++ )
+							for ( int k = 0; k < 3; k++ )
+								out.push_back( lv[ix[v]][k] );
+					}
+				}
+				return meshTri.emplace( quint32( mid ), std::move( out ) ).first->second;
+			};
+			for ( size_t i = 0; i < ni; i++ ) {
+				const LodiSrcInstance & r = set.instances[i];
+				const quint16 mid = meshOf[i];
+				if ( mid == LODO_NO_MESH || mid >= lib.meshes.size() )
+					continue;
+				if ( r.baseId < lib.bases.size() && ( lib.bases[r.baseId].flags & LODO_BASE_TREE ) != 0 )
+					continue;
+				const std::vector<float> & lt = localTris( mid );
+				ptFirst[i] = quint32( ptw.size() / 9 );
+				Box & b = tbox[i];
+				bool first = true;
+				for ( size_t p = 0; p + 2 < lt.size(); p += 3 ) {
+					// the same placement arithmetic as the join's samples: scale, rotation, position
+					const float x = lt[p] * r.scale, y = lt[p + 1] * r.scale, z = lt[p + 2] * r.scale;
+					const float w[3] = { r.rot[0] * x + r.rot[1] * y + r.rot[2] * z + r.pos[0],
+						r.rot[3] * x + r.rot[4] * y + r.rot[5] * z + r.pos[1],
+						r.rot[6] * x + r.rot[7] * y + r.rot[8] * z + r.pos[2] };
+					for ( int k = 0; k < 3; k++ ) {
+						ptw.push_back( w[k] );
+						b.lo[k] = first ? w[k] : std::min( b.lo[k], w[k] );
+						b.hi[k] = first ? w[k] : std::max( b.hi[k], w[k] );
+					}
+					first = false;
+				}
+				ptCount[i] = quint32( ptw.size() / 9 ) - ptFirst[i];
+			}
+			ptb.resize( ptw.size() / 9 * 6 );
+			for ( size_t t = 0; t < ptw.size() / 9; t++ )
+				for ( int k = 0; k < 3; k++ ) {
+					ptb[t * 6 + k] = std::min( { ptw[t * 9 + k], ptw[t * 9 + 3 + k], ptw[t * 9 + 6 + k] } );
+					ptb[t * 6 + 3 + k] = std::max( { ptw[t * 9 + k], ptw[t * 9 + 3 + k], ptw[t * 9 + 6 + k] } );
+				}
+		}
 		if ( legacyJoin ) {
 			const float T = KNOB.touchTolerance, G = KNOB.gridCell;
 			std::unordered_map<quint64, std::vector<quint32>> grid;
@@ -3469,6 +4334,188 @@ bool lodgenNativeWrite( QString * report, QString * error )
 						if ( touch )
 							join( v[a], v[b2] );
 					}
+			}
+		} else if ( s.identityJoinContact ) {
+			/* THE CONTACT JOIN (lane IDENT1, 2026-09-27; bungo: "object id needs to
+			 * be per building"). Two pieces are one building when their PLACED
+			 * level-0 triangles come within `KNOB.contactTol` of each other -- the
+			 * exact triangle-to-triangle distance, 0 when they cross -- and the
+			 * union does not make the group wider than `KNOB.groupCap` on X or Y.
+			 * SCOL parts joined above, before any cap.
+			 *
+			 * THE ORDER IS THE RULE when the cap bites: the touching pairs are
+			 * taken nearest first, then by the two placement indices, so the same
+			 * set always makes the same groups. */
+			QElapsedTimer joinClock;
+			joinClock.start();
+			const float TOL = KNOB.contactTol, CAP = KNOB.groupCap;
+			const QByteArray dumpPath = qgetenv( "WW_LODI_GROUP_DUMP" );
+			// the dump measures every pair out to 32 u, so the tolerance can be chosen from it
+			const float MEAS = dumpPath.isEmpty() ? TOL : std::max( TOL, 32.0f );
+			joinEligible = quint32( arch.size() );
+			joinSamples = quint64( ptw.size() / 9 );
+			const float G = KNOB.gridCell;
+			auto gapOk = [MEAS]( const float * alo, const float * ahi, const float * blo, const float * bhi ) {
+				for ( int k = 0; k < 3; k++ )
+					if ( blo[k] - ahi[k] > MEAS || alo[k] - bhi[k] > MEAS )
+						return false;
+				return true;
+			};
+			std::unordered_map<quint64, std::vector<quint32>> grid;
+			auto keyOf = []( int gx, int gy ) {
+				return ( quint64( quint32( gx ) ) << 32 ) | quint32( gy );
+			};
+			for ( quint32 i : arch ) {
+				if ( !ptCount[i] )
+					continue;
+				const Box & b = tbox[i];
+				const float h = MEAS * 0.5f + 0.01f;
+				const int gx0 = int( std::floor( ( b.lo[0] - h ) / G ) ), gx1 = int( std::floor( ( b.hi[0] + h ) / G ) );
+				const int gy0 = int( std::floor( ( b.lo[1] - h ) / G ) ), gy1 = int( std::floor( ( b.hi[1] + h ) / G ) );
+				for ( int gy = gy0; gy <= gy1; gy++ )
+					for ( int gx = gx0; gx <= gx1; gx++ )
+						grid[keyOf( gx, gy )].push_back( i );
+			}
+			std::vector<quint64> cand;
+			for ( auto & cellIt : grid ) {
+				const std::vector<quint32> & v = cellIt.second;
+				for ( size_t a = 0; a < v.size(); a++ )
+					for ( size_t b2 = a + 1; b2 < v.size(); b2++ ) {
+						const quint32 i = std::min( v[a], v[b2] ), j = std::max( v[a], v[b2] );
+						if ( gapOk( tbox[i].lo, tbox[i].hi, tbox[j].lo, tbox[j].hi ) )
+							cand.push_back( ( quint64( i ) << 32 ) | j );
+					}
+			}
+			std::sort( cand.begin(), cand.end() );
+			cand.erase( std::unique( cand.begin(), cand.end() ), cand.end() );
+			contactCandidates = cand.size();
+			struct Ct { float d; quint32 i, j; };
+			std::vector<Ct> near;
+			{
+				/* One pair per task, spread over the cores; each pair's answer is a
+				 * pure function of the two triangle lists, so the thread count
+				 * cannot change a byte. */
+				std::vector<float> dist( cand.size(), -1.0f );
+				std::atomic<quint64> tests( 0 );
+				lodgenParallelFor( int( cand.size() ), [&]( int ci ) {
+					const quint32 i = quint32( cand[size_t( ci )] >> 32 ), j = quint32( cand[size_t( ci )] & 0xFFFFFFFFu );
+					std::vector<quint32> fa, fb;
+					for ( quint32 t = ptFirst[i]; t < ptFirst[i] + ptCount[i]; t++ )
+						if ( gapOk( &ptb[size_t( t ) * 6], &ptb[size_t( t ) * 6 + 3], tbox[j].lo, tbox[j].hi ) )
+							fa.push_back( t );
+					if ( fa.empty() )
+						return;
+					for ( quint32 t = ptFirst[j]; t < ptFirst[j] + ptCount[j]; t++ )
+						if ( gapOk( &ptb[size_t( t ) * 6], &ptb[size_t( t ) * 6 + 3], tbox[i].lo, tbox[i].hi ) )
+							fb.push_back( t );
+					if ( fb.empty() )
+						return;
+					double best2 = double( MEAS ) * double( MEAS );
+					bool found = false;
+					quint64 n = 0;
+					for ( size_t a = 0; a < fa.size() && !( found && best2 == 0.0 ); a++ ) {
+						const float * A = &ptb[size_t( fa[a] ) * 6];
+						for ( size_t b = 0; b < fb.size(); b++ ) {
+							const float * B = &ptb[size_t( fb[b] ) * 6];
+							double g2 = 0.0;
+							for ( int k = 0; k < 3; k++ ) {
+								const double g = std::max( { 0.0, double( B[k] ) - double( A[3 + k] ), double( A[k] ) - double( B[3 + k] ) } );
+								g2 += g * g;
+							}
+							if ( g2 > best2 )
+								continue;
+							n++;
+							const double d2 = triTriDist2( &ptw[size_t( fa[a] ) * 9], &ptw[size_t( fb[b] ) * 9] );
+							if ( d2 <= best2 ) {
+								best2 = d2;
+								found = true;
+								if ( best2 == 0.0 )
+									break;
+							}
+						}
+					}
+					tests += n;
+					if ( found )
+						dist[size_t( ci )] = float( std::sqrt( best2 ) );
+				} );
+				contactTriTests = tests.load();
+				for ( size_t ci = 0; ci < cand.size(); ci++ )
+					if ( dist[ci] >= 0.0f )
+						near.push_back( { dist[ci], quint32( cand[ci] >> 32 ), quint32( cand[ci] & 0xFFFFFFFFu ) } );
+			}
+			std::sort( near.begin(), near.end(), []( const Ct & a, const Ct & b ) {
+				return a.d != b.d ? a.d < b.d : ( a.i != b.i ? a.i < b.i : a.j < b.j );
+			} );
+			// each group's world X/Y extent, carried on its root, for the cap
+			std::vector<float> gb( ni * 4 );
+			for ( size_t i = 0; i < ni; i++ ) {
+				const bool hasT = ptCount[i] != 0;
+				const LodiSrcInstance & r = set.instances[i];
+				gb[i * 4 + 0] = hasT ? tbox[i].lo[0] : r.pos[0];
+				gb[i * 4 + 1] = hasT ? tbox[i].lo[1] : r.pos[1];
+				gb[i * 4 + 2] = hasT ? tbox[i].hi[0] : r.pos[0];
+				gb[i * 4 + 3] = hasT ? tbox[i].hi[1] : r.pos[1];
+			}
+			for ( size_t i = 0; i < ni; i++ ) {
+				const quint32 rt = find( quint32( i ) );
+				if ( rt == i )
+					continue;
+				gb[rt * 4 + 0] = std::min( gb[rt * 4 + 0], gb[i * 4 + 0] );
+				gb[rt * 4 + 1] = std::min( gb[rt * 4 + 1], gb[i * 4 + 1] );
+				gb[rt * 4 + 2] = std::max( gb[rt * 4 + 2], gb[i * 4 + 2] );
+				gb[rt * 4 + 3] = std::max( gb[rt * 4 + 3], gb[i * 4 + 3] );
+			}
+			std::vector<char> joinedEdge( near.size(), 0 );
+			for ( size_t e = 0; e < near.size(); e++ ) {
+				if ( near[e].d > TOL )
+					break;
+				contactTouching++;
+				const quint32 ra = find( near[e].i ), rb = find( near[e].j );
+				if ( ra == rb )
+					continue;
+				const float x0 = std::min( gb[ra * 4 + 0], gb[rb * 4 + 0] ), y0 = std::min( gb[ra * 4 + 1], gb[rb * 4 + 1] );
+				const float x1 = std::max( gb[ra * 4 + 2], gb[rb * 4 + 2] ), y1 = std::max( gb[ra * 4 + 3], gb[rb * 4 + 3] );
+				if ( CAP > 0.0f && ( x1 - x0 > CAP || y1 - y0 > CAP ) ) {
+					contactCapRefused++;
+					joinedEdge[e] = 2;
+					continue;
+				}
+				join( ra, rb );
+				const quint32 nr = std::min( ra, rb );
+				gb[nr * 4 + 0] = x0; gb[nr * 4 + 1] = y0; gb[nr * 4 + 2] = x1; gb[nr * 4 + 3] = y1;
+				joinPairs++;
+				joinedEdge[e] = 1;
+			}
+			joinMs = joinClock.elapsed();
+			/* THE DUMP, a measuring surface and not a feature: one `P` line a
+			 * placement and one `C` line a pair whose triangles come within 32 u,
+			 * so the tolerance and the cap are chosen from data. */
+			if ( !dumpPath.isEmpty() ) {
+				QFile df( QString::fromLocal8Bit( dumpPath ) );
+				if ( df.open( QIODevice::WriteOnly | QIODevice::Truncate ) ) {
+					QTextStream ts( &df );
+					ts << "# IDENT1 group dump v1: tol " << TOL << " cap " << CAP << " measure " << MEAS << "\n";
+					ts << "# P i ref part base tree tris x y z lox loy loz hix hiy hiz root name\n";
+					ts << "# C i j dist joined(1 joined, 2 refused by the cap, 0 already one or past tol)\n";
+					for ( size_t i = 0; i < ni; i++ ) {
+						const LodiSrcInstance & r = set.instances[i];
+						const quint32 bf = r.baseId < lib.bases.size() ? lib.bases[r.baseId].formId : 0u;
+						const bool tree = r.baseId < lib.bases.size() && ( lib.bases[r.baseId].flags & LODO_BASE_TREE ) != 0;
+						const Box & b = tbox[i];
+						ts << "P " << i << ' ' << QString::number( r.refFormId, 16 ) << ' ' << r.scolPart << ' '
+						   << QString::number( bf, 16 ) << ' ' << ( tree ? 1 : 0 ) << ' ' << ptCount[i] << ' '
+						   << QString::number( r.pos[0], 'f', 1 ) << ' ' << QString::number( r.pos[1], 'f', 1 ) << ' '
+						   << QString::number( r.pos[2], 'f', 1 );
+						for ( int k = 0; k < 3; k++ )
+							ts << ' ' << QString::number( ptCount[i] ? b.lo[k] : r.pos[k], 'f', 1 );
+						for ( int k = 0; k < 3; k++ )
+							ts << ' ' << QString::number( ptCount[i] ? b.hi[k] : r.pos[k], 'f', 1 );
+						ts << ' ' << find( quint32( i ) ) << ' ' << r.baseName << "\n";
+					}
+					for ( size_t e = 0; e < near.size(); e++ )
+						ts << "C " << near[e].i << ' ' << near[e].j << ' ' << QString::number( near[e].d, 'f', 3 )
+						   << ' ' << int( joinedEdge[e] ) << "\n";
+				}
 			}
 		} else {
 			/* THE MESH-TO-MESH JOIN, in three steps and no approximation of the
@@ -3555,8 +4602,10 @@ bool lodgenNativeWrite( QString * report, QString * error )
 					continue;
 				const LodiSrcInstance & r = set.instances[i];
 				const std::vector<float> & lp = samplesOf( meshOf[i] );
-				pts.reserve( pts.size() + lp.size() );
-				owner.reserve( owner.size() + lp.size() / 3 );
+				/* No reserve( size() + n ) here: an exact reserve per placement defeats the
+				 * vector's doubling, so every placement copied the whole array again --
+				 * 42,306 copies of up to 23 MB, ~100 s of Boston's 103 s join (lane GPU1,
+				 * measured offline on the bake's own join input: the walk is 0.5 s). */
 				for ( size_t p = 0; p + 2 < lp.size(); p += 3 ) {
 					/* The SAME placement arithmetic the box above uses: scale on the
 					 * local point, then the row-major rotation, then the position. */
@@ -3579,30 +4628,93 @@ bool lodgenNativeWrite( QString * report, QString * error )
 					| ( ( quint64( quint32( gy ) ) & 0x1FFFFFull ) << 21 )
 					| ( quint64( quint32( gz ) ) & 0x1FFFFFull );
 			};
-			std::unordered_map<quint64, std::vector<quint32>> pgrid;
-			pgrid.reserve( owner.size() / 4 + 16 );
+			/* GROUPED BY (CELL, PLACEMENT) (lane GPU1, 2026-09-26). The first walk
+			 * went sample by sample: every sample looked at every sample of the 27
+			 * cells around it and paid a `find` on each one of another placement --
+			 * 1,330 s of the whole-map bake, the largest single stage after the
+			 * terrain pyramid. The samples of one placement in one cell are now ONE
+			 * group, and the walk goes group pair by group pair: one `find` per pair,
+			 * a box test that can only ever SKIP pairs no sample pair of which is
+			 * within the gap (it keeps a margin, so rounding cannot make it skip a
+			 * pair the sample test would join), then the same sample test as before
+			 * until the first hit.
+			 *
+			 * WHY THE BYTES CANNOT MOVE. The groups a bake writes are the connected
+			 * components of "some sample of A is within the gap of some sample of B".
+			 * The old walk and this one test the same sample pairs with the same
+			 * float expression, differ only in which pairs they skip because the two
+			 * placements are ALREADY in one set (which never changes a component),
+			 * and the union keeps the smaller index as the root whatever the order.
+			 * `joinPairs` counts successful unions, which is (placements joined) minus
+			 * (components they form) in any order. */
+			struct Smp { quint64 key; quint32 own; quint32 p; };
+			std::vector<Smp> smp( owner.size() );
 			for ( size_t p = 0; p < owner.size(); p++ )
-				pgrid[keyOf3( cellOf( pts[p * 3] ), cellOf( pts[p * 3 + 1] ), cellOf( pts[p * 3 + 2] ) )]
-					.push_back( quint32( p ) );
+				smp[p] = { keyOf3( cellOf( pts[p * 3] ), cellOf( pts[p * 3 + 1] ), cellOf( pts[p * 3 + 2] ) ),
+					owner[p], quint32( p ) };
+			std::sort( smp.begin(), smp.end(), []( const Smp & a, const Smp & b ) {
+				return a.key != b.key ? a.key < b.key : ( a.own != b.own ? a.own < b.own : a.p < b.p );
+			} );
+			struct Grp { quint64 key; quint32 own, first, count; float lo[3], hi[3]; int gx, gy, gz; };
+			std::vector<Grp> grp;
+			std::vector<quint32> cellFirst;      // per cell: its first group; cellFirst.back() = end
+			std::unordered_map<quint64, quint32> cellIndex;
+			for ( size_t a = 0; a < smp.size(); ) {
+				size_t b = a;
+				while ( b < smp.size() && smp[b].key == smp[a].key && smp[b].own == smp[a].own )
+					b++;
+				if ( grp.empty() || grp.back().key != smp[a].key ) {
+					cellIndex.emplace( smp[a].key, quint32( cellFirst.size() ) );
+					cellFirst.push_back( quint32( grp.size() ) );
+				}
+				Grp g;
+				g.key = smp[a].key; g.own = smp[a].own; g.first = quint32( a ); g.count = quint32( b - a );
+				const quint32 p0 = smp[a].p;
+				for ( int k = 0; k < 3; k++ ) { g.lo[k] = pts[size_t( p0 ) * 3 + k]; g.hi[k] = g.lo[k]; }
+				for ( size_t c = a + 1; c < b; c++ )
+					for ( int k = 0; k < 3; k++ ) {
+						const float v = pts[size_t( smp[c].p ) * 3 + k];
+						g.lo[k] = std::min( g.lo[k], v ); g.hi[k] = std::max( g.hi[k], v );
+					}
+				g.gx = cellOf( pts[size_t( p0 ) * 3] ); g.gy = cellOf( pts[size_t( p0 ) * 3 + 1] );
+				g.gz = cellOf( pts[size_t( p0 ) * 3 + 2] );
+				grp.push_back( g );
+				a = b;
+			}
+			cellFirst.push_back( quint32( grp.size() ) );
 			const float T2 = T * T;
-			for ( size_t p = 0; p < owner.size(); p++ ) {
-				const int gx = cellOf( pts[p * 3] ), gy = cellOf( pts[p * 3 + 1] ), gz = cellOf( pts[p * 3 + 2] );
+			const float boxSkip = T * 1.001f + 0.001f;     // a gap past this is past T for every sample pair
+			for ( size_t gi = 0; gi < grp.size(); gi++ ) {
+				const Grp & A = grp[gi];
 				for ( int dz = -1; dz <= 1; dz++ )
 					for ( int dy = -1; dy <= 1; dy++ )
 						for ( int dx = -1; dx <= 1; dx++ ) {
-							auto cit = pgrid.find( keyOf3( gx + dx, gy + dy, gz + dz ) );
-							if ( cit == pgrid.end() )
+							auto cit = cellIndex.find( keyOf3( A.gx + dx, A.gy + dy, A.gz + dz ) );
+							if ( cit == cellIndex.end() )
 								continue;
-							for ( quint32 q : cit->second ) {
-								if ( owner[q] == owner[p] )
+							const quint32 h1 = cellFirst[cit->second + 1];
+							for ( quint32 hi = std::max( cellFirst[cit->second], quint32( gi + 1 ) ); hi < h1; hi++ ) {
+								const Grp & B = grp[hi];      // every unordered pair once: B after A
+								if ( B.own == A.own )
 									continue;
-								if ( find( owner[p] ) == find( owner[q] ) )
+								bool far = false;
+								for ( int k = 0; k < 3 && !far; k++ )
+									far = ( B.lo[k] - A.hi[k] > boxSkip ) || ( A.lo[k] - B.hi[k] > boxSkip );
+								if ( far || find( A.own ) == find( B.own ) )
 									continue;
-								const float ex = pts[p * 3] - pts[size_t( q ) * 3];
-								const float ey = pts[p * 3 + 1] - pts[size_t( q ) * 3 + 1];
-								const float ez = pts[p * 3 + 2] - pts[size_t( q ) * 3 + 2];
-								if ( ex * ex + ey * ey + ez * ez <= T2 ) {
-									join( owner[p], owner[q] );
+								bool hit = false;
+								for ( quint32 ia = A.first; ia < A.first + A.count && !hit; ia++ ) {
+									const size_t p = smp[ia].p;
+									for ( quint32 ib = B.first; ib < B.first + B.count; ib++ ) {
+										const size_t q = smp[ib].p;
+										const float ex = pts[p * 3] - pts[q * 3];
+										const float ey = pts[p * 3 + 1] - pts[q * 3 + 1];
+										const float ez = pts[p * 3 + 2] - pts[q * 3 + 2];
+										if ( ex * ex + ey * ey + ez * ez <= T2 ) { hit = true; break; }
+									}
+								}
+								if ( hit ) {
+									join( A.own, B.own );
 									joinPairs++;
 								}
 							}
@@ -3619,6 +4731,82 @@ bool lodgenNativeWrite( QString * report, QString * error )
 		for ( size_t i = 0; i < ni; i++ ) {
 			const quint32 root = find( quint32( i ) );
 			set.instances[i].groupKey = ( members[root] <= 1 ) ? LODI_GROUP_ALONE : root;
+		}
+		/* IDENT1 (2026-09-27): ONE OCCLUDER BOX A BUILDING GROUP, replacing the
+		 * box a piece (median 5 u thick in the audit: a wall slab hides nothing).
+		 * The box turns with the building -- the group's dominant piece yaw,
+		 * folded to a quarter turn, weighted by footprint -- and is fitted inside
+		 * the group's enclosed volume (fitBuildingBox). It rides on the member
+		 * nearest its centre, whose cell lists it. Trees are no part of any. */
+		if ( s.occluders && s.occluderBuilding ) {
+			QElapsedTimer oc;
+			oc.start();
+			for ( LodiSrcInstance & r : set.instances )
+				r.hasOccluder = false;
+			std::map<quint32, std::vector<quint32>> byRoot;
+			for ( size_t i = 0; i < ni; i++ )
+				if ( ptCount[i] )
+					byRoot[find( quint32( i ) )].push_back( quint32( i ) );
+			std::vector<std::pair<quint32, std::vector<quint32>>> jobs( byRoot.begin(), byRoot.end() );
+			struct Fit { int res = BLD_OCC_NO_SOLID; float c[3], h[3], R[9]; quint32 carrier = 0; int shrink = 0; };
+			std::vector<Fit> fits( jobs.size() );
+			lodgenParallelFor( int( jobs.size() ), [&]( int gi ) {
+				const std::vector<quint32> & mem = jobs[size_t( gi )].second;
+				std::vector<float> gt;
+				double hist[90] = { 0.0 };
+				std::vector<std::pair<double, double>> yw;     // (folded yaw degrees, weight)
+				for ( quint32 m : mem ) {
+					gt.insert( gt.end(), ptw.begin() + size_t( ptFirst[m] ) * 9,
+						ptw.begin() + size_t( ptFirst[m] + ptCount[m] ) * 9 );
+					const LodiSrcInstance & r = set.instances[m];
+					double yd = std::atan2( double( r.rot[3] ), double( r.rot[0] ) ) * 57.29577951308232;
+					yd = std::fmod( std::fmod( yd, 90.0 ) + 90.0, 90.0 );
+					const double w = 1.0 + double( tbox[m].hi[0] - tbox[m].lo[0] ) * double( tbox[m].hi[1] - tbox[m].lo[1] );
+					hist[int( yd ) % 90] += w;
+					yw.push_back( { yd, w } );
+				}
+				int peak = 0;
+				for ( int b = 1; b < 90; b++ )
+					if ( hist[b] > hist[peak] )
+						peak = b;
+				// refine: the weighted mean of the yaws within 1.5 degrees of the peak bin's centre, on the circle of 90
+				const double pc = peak + 0.5;
+				double sw = 0.0, sd = 0.0;
+				for ( const auto & p : yw ) {
+					double d = p.first - pc;
+					d -= 90.0 * std::round( d / 90.0 );
+					if ( std::fabs( d ) <= 1.5 ) { sw += p.second; sd += p.second * d; }
+				}
+				const double yaw = ( pc + ( sw > 0.0 ? sd / sw : 0.0 ) ) / 57.29577951308232;
+				Fit & f = fits[size_t( gi )];
+				f.res = fitBuildingBox( gt, yaw, KNOB.occRays, f.c, f.h, f.R, &f.shrink );
+				if ( f.res != BLD_OCC_OK )
+					return;
+				double bestD = 1e300;
+				for ( quint32 m : mem ) {
+					const double dx = double( set.instances[m].pos[0] ) - f.c[0], dy = double( set.instances[m].pos[1] ) - f.c[1];
+					const double d = dx * dx + dy * dy;
+					if ( d < bestD ) { bestD = d; f.carrier = m; }
+				}
+			} );
+			for ( size_t gi = 0; gi < jobs.size(); gi++ ) {
+				bldOccGroups++;
+				const Fit & f = fits[gi];
+				if ( f.res == BLD_OCC_NO_SOLID ) { bldOccNoSolid++; continue; }
+				if ( f.res == BLD_OCC_TOO_THIN ) { bldOccTooThin++; continue; }
+				if ( f.res == BLD_OCC_PROBE_FAILED ) { bldOccProbeFailed++; continue; }
+				if ( f.shrink > 0 )
+					bldOccShrunk++;
+				LodiSrcInstance & r = set.instances[f.carrier];
+				r.hasOccluder = true;
+				r.occWorld = true;
+				for ( int k = 0; k < 3; k++ ) { r.occCentre[k] = f.c[k]; r.occHalf[k] = f.h[k]; }
+				std::memcpy( r.occWorldRot, f.R, sizeof( f.R ) );
+				r.occMeshId = meshOf[f.carrier];
+				bldOccFitted++;
+				bldOccThin.push_back( 2.0f * std::min( { f.h[0], f.h[1], f.h[2] } ) );
+			}
+			bldOccMs = oc.elapsed();
 		}
 	}
 	// a region bake is PARTIAL when its chunks do not span the worldspace's cells
@@ -3935,6 +5123,8 @@ bool lodgenNativeWrite( QString * report, QString * error )
 					.arg( vaoCastSeconds, 0, 'f', 1 )
 					.arg( ( vaoWeldDeg >= 0.0f ? QString( "%1 split vertex copies pooled with a co-located copy within %2 deg (one value a surface point)" )
 							.arg( vaoWelded ).arg( double( vaoWeldDeg ), 0, 'f', 0 )
+							+ ( vaoWeldAcross ? QString( ", %1 of them joined to another placement's corner (kit pieces), %2 corner(s) on another placement's edge took that edge's value" ).arg( vaoAcross ).arg( vaoTJoin )
+								: QStringLiteral( ", inside each placement only (WW_AO_WELD_ACROSS=0)" ) )
 						: QStringLiteral( "split copies NOT pooled (WW_AO_WELD_DEG < 0)" ) )
 						+ ( vaoUnderTol >= 0.0f ? QString( "; %1 sample(s) more than %2 u under the ground set aside" )
 							.arg( vaoUnder ).arg( double( vaoUnderTol ), 0, 'f', 0 )
@@ -3943,7 +5133,14 @@ bool lodgenNativeWrite( QString * report, QString * error )
 							.arg( vaoPatches ).arg( vaoPatchTris ).arg( double( vaoPatchDeg ), 0, 'f', 1 )
 							+ ( vaoPatchSamples ? QString( ", %1 fitted to their samples, the rest to their corners" ).arg( vaoPatchSampleFit )
 								: QStringLiteral( ", fitted to their corners" ) )
-						: QStringLiteral( "; flat patches NOT fitted (WW_AO_PATCH_DEG < 0)" ) ) )
+						: QStringLiteral( "; flat patches NOT fitted (WW_AO_PATCH_DEG < 0)" ) )
+						+ QString( "; casters: %1 see-through material row(s) (alpha-blended, or a decal that tests; %2 mixed row(s) kept solid; %7 model(s) mix see-through and solid shapes in their own selfAO), %3 alpha-tested row(s)%4, "
+							"%5 alpha-tested triangle(s) of %6 placement-ring(s) cast" )
+							.arg( matOverlayRows ).arg( matOverlayMixed ).arg( matTestOnlyRows )
+							.arg( vaoOverlayCast ? QStringLiteral( "; every row cast as solid (WW_AO_OVERLAY_CASTERS=1)" )
+								: QString( "; %1 see-through triangle(s) of %2 placement-ring(s) block rays only where their texture is opaque"
+									" (%3 see-through row(s) without a loadable texture kept solid)" ).arg( vaoOverTris ).arg( vaoOverInst ).arg( matOverlayNoTex ) )
+							.arg( vaoTestTris ).arg( vaoTestInst ).arg( matOverlayModels ) )
 				: QStringLiteral( "OFF (--native-no-vertex-ao)" ) );
 		/* v7 (2026-09-18, lane LODIV7). Both halves state their OFF value by
 		 * the switch that turns them off, so a reader of the census never has
@@ -3960,6 +5157,14 @@ bool lodgenNativeWrite( QString * report, QString * error )
 					.arg( vskyHist[0] ).arg( vskyHist[1] ).arg( vskyHist[2] ).arg( vskyHist[3] )
 					.arg( vskyHist[4] ).arg( vskyHist[5] ).arg( vskyHist[6] ).arg( vskyHist[7] )
 				: QStringLiteral( "OFF (--lodi-v6)" ) );
+		/* v12 (lane GROUND1): named only when it ran, so the report of a bake with
+		 * the stream off is the report it was before this lane, word for word. */
+		if ( vgndInstances || vgndBytes )
+			ladderLine += QString( "; vertex ground contact ON: %1 placements streamed (%2 bytes, mean %3, %4 at the terrain = 255, "
+				"%5 at 256 u or more above it = 0, %6 placement(s) spanning half the ramp or more)" )
+				.arg( vgndInstances ).arg( vgndBytes )
+				.arg( vgndBytes ? vgndSum / double( vgndBytes ) : 0.0, 0, 'f', 1 )
+				.arg( vgndFull ).arg( vgndZero ).arg( vgndSpan );
 		ladderLine += QString( "; groups %1" )
 			.arg( s.lodiV7
 				? QString( "%1 over %2 placements (%3 grouped, largest %4, %5 singleton), %6 placement(s) whose BASE model path has a `%7` component" )
@@ -3981,6 +5186,16 @@ bool lodgenNativeWrite( QString * report, QString * error )
 						"path component and a WORLD AXIS-ALIGNED BOX gap of %2 u. %3 eligible placement(s)." )
 						.arg( QLatin1String( KNOB.archComponent ) )
 						.arg( double( KNOB.touchTolerance ), 0, 'f', 1 ).arg( archPlacements )
+					: s.identityJoinContact
+					? QString( "CONTACT (the default since lane IDENT1; --identity-join proximity is the way back): "
+						"every NON-TREE placement with a drawn LOD mesh joins another whose placed level-0 "
+						"TRIANGLES come within %1 u, SCOL parts always, no group wider than %2 u on X or Y. "
+						"%3 eligible placement(s), %L4 placed triangle(s), %L5 candidate pair(s), %L6 triangle "
+						"pair test(s), %L7 touching pair(s), %L8 union(s), %L9 refused by the cap, %10 ms." )
+						.arg( double( KNOB.contactTol ), 0, 'f', 1 )
+						.arg( KNOB.groupCap > 0.0f ? QString::number( double( KNOB.groupCap ), 'f', 0 ) : QStringLiteral( "(no cap)" ) )
+						.arg( joinEligible ).arg( joinSamples ).arg( contactCandidates ).arg( contactTriTests )
+						.arg( contactTouching ).arg( joinPairs ).arg( contactCapRefused ).arg( joinMs )
 					: QString( "PROXIMITY (the default; --identity-join legacy is the way back): every "
 						"NON-TREE placement with a drawn LOD mesh, MESH-TO-MESH gap %1 u "
 						"(--identity-join-gap). %2 eligible placement(s), %L3 mesh sample point(s) "
@@ -4096,6 +5311,22 @@ bool lodgenNativeWrite( QString * report, QString * error )
 			.arg( occFit ).arg( occNotWatertight ).arg( occTooSmall ).arg( double( NATIVE_OCC_MIN_DIAG ), 0, 'f', 0 )
 			.arg( occNoInterior ).arg( occTooThin ).arg( double( NATIVE_OCC_MIN_FILL * 100.0f ), 0, 'f', 0 )
 			.arg( occProbeFailed ).arg( NATIVE_OCC_PROBES );
+		if ( s.occluders && s.occluderBuilding && s.lodiV7 ) {
+			std::vector<float> th = bldOccThin;
+			std::sort( th.begin(), th.end() );
+			occLine += QString( "\n  native-occluders-building: ON (lane IDENT1; --occluder-fit piece is the way back): "
+				"one box a building group -- the per-piece fits above are NOT offered; groups %1, fitted %2, "
+				"no solid volume %3, too thin %4, %10 still out of the walls after %11 half-voxel shrinks "
+				"(%12 of the fitted shrunk to pass the %13-point probe, <= %14 percent out); fill rays `%5`; "
+				"smallest full extent median %6 u (min %7, max %8); %9 ms" )
+				.arg( bldOccGroups ).arg( bldOccFitted ).arg( bldOccNoSolid ).arg( bldOccTooThin )
+				.arg( QString::fromLatin1( KNOB.occRays ) )
+				.arg( th.empty() ? 0.0 : double( th[th.size() / 2] ), 0, 'f', 1 )
+				.arg( th.empty() ? 0.0 : double( th.front() ), 0, 'f', 1 )
+				.arg( th.empty() ? 0.0 : double( th.back() ), 0, 'f', 1 ).arg( bldOccMs )
+				.arg( bldOccProbeFailed ).arg( BLD_OCC_PROBE_ROUNDS ).arg( bldOccShrunk )
+				.arg( BLD_OCC_PROBE_GRID * BLD_OCC_PROBE_GRID * BLD_OCC_PROBE_GRID ).arg( BLD_OCC_PROBE_MAX_OUT * 100.0, 0, 'f', 1 );
+		}
 		quint64 aggCovered = 0, aggTexels = 0;
 		int hSpanMin = 0, hSpanMax = 0;
 		double hSpanSum = 0.0;

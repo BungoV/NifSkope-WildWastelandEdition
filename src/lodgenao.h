@@ -22,6 +22,29 @@ BSD License - see nifskope.h
 
 #include <QtGlobal>
 
+/* Lane AO2 (overlay casters, 2026-09-26): the alpha of a see-through material.
+ * bungo on the round tower: "why are these faces on the tower darkened? Is it
+ * because there's a decal in front of them?" -- a stain sheet 5 u in front of a
+ * wall, drawn alpha-blended and alpha-tested, blocked every ray as if solid. A
+ * triangle that carries one of these blocks a ray only where the texture is
+ * opaque at the hit: alpha >= `ref` (the material's own test cutoff, or 128 for
+ * a blend without a test). Level 0 of the diffuse, nearest texel, UV wrapped. */
+struct LodgenAoAlpha
+{
+	int w = 0, h = 0;
+	quint8 ref = 128;
+	std::vector<quint8> a;              // w * h, row-major, v down as the DDS stores it
+	bool opaque( float u, float v ) const
+	{
+		if ( w <= 0 || h <= 0 )
+			return true;
+		u -= std::floor( u );
+		v -= std::floor( v );
+		const int x = qBound( 0, int( u * float( w ) ), w - 1 ), y = qBound( 0, int( v * float( h ) ), h - 1 );
+		return a[size_t( y ) * size_t( w ) + size_t( x )] >= ref;
+	}
+};
+
 /* CPU ambient-occlusion over the assembled chunk: a uniform XY grid of
  * triangle bins plus the terrain heightfield. Per vertex, a fixed cosine
  * hemisphere (rotated to the vertex normal) is sampled; ray hits against
@@ -48,6 +71,38 @@ struct LodgenAoScene
 	std::vector<float> binZ;            // 2 a bin: lowest, highest z of the triangles listed in it
 	float triZMin = 3.4e38f, triZMax = -3.4e38f;
 	float groundZMax = 3.4e38f;         // +inf until prepareGround(): no early out
+	// lane AO2 (overlay casters): per triangle, its alpha (null = solid) and 6 UV floats.
+	// EMPTY until the first triangle with an alpha is added, so a scene without one casts as before.
+	std::vector<const LodgenAoAlpha *> triAlpha;
+	std::vector<float> triUv;
+
+	//! A triangle of a see-through material: it blocks a ray only where `alpha` is opaque at the hit.
+	void addTriangleAlpha( const Vector3 & a, const Vector3 & b, const Vector3 & c, const float * uv0,
+		const float * uv1, const float * uv2, const LodgenAoAlpha * alpha )
+	{
+		const size_t t = tri.size() / 9;
+		addTriangle( a, b, c );
+		if ( !alpha )
+			return;
+		triAlpha.resize( t + 1, nullptr );
+		triUv.resize( ( t + 1 ) * 6, 0.0f );
+		triAlpha[t] = alpha;
+		const float * uvs[3] = { uv0, uv1, uv2 };
+		for ( int k = 0; k < 3; k++ ) {
+			triUv[t * 6 + size_t( k ) * 2] = uvs[k][0];
+			triUv[t * 6 + size_t( k ) * 2 + 1] = uvs[k][1];
+		}
+	}
+
+	//! True when triangle `ti` lets the ray through at barycentric (u, v) (a transparent texel).
+	bool passes( int ti, float u, float v ) const
+	{
+		if ( size_t( ti ) >= triAlpha.size() || !triAlpha[size_t( ti )] )
+			return false;
+		const float * q = triUv.data() + size_t( ti ) * 6;
+		const float w0 = 1.0f - u - v;
+		return !triAlpha[size_t( ti )]->opaque( q[0] * w0 + q[2] * u + q[4] * v, q[1] * w0 + q[3] * u + q[5] * v );
+	}
 
 	void addTriangle( const Vector3 & a, const Vector3 & b, const Vector3 & c )
 	{
@@ -140,6 +195,7 @@ struct LodgenAoScene
 				if ( vv < 0.0f || u + vv > 1.0f )
 					continue;
 				const float hitT = Vector3::dotproduct( e2, qv ) * inv;
+				// the stock caster: no scene it serves carries an alpha (lane AO2 keeps it byte for byte)
 				if ( hitT > 1.0f && hitT < maxT )
 					return true;
 			}
@@ -297,7 +353,7 @@ struct LodgenAoScene
 							if ( vv < 0.0f || u + vv > 1.0f )
 								continue;
 							const float hitT = Vector3::dotproduct( e2, qv ) * inv;
-							if ( hitT > 1.0f && hitT < maxT && hitT < best ) {
+							if ( hitT > 1.0f && hitT < maxT && hitT < best && !passes( ti, u, vv ) ) {
 								if ( !hit )
 									return true;
 								best = hitT;
