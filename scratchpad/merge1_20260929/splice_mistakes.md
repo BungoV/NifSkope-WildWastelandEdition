@@ -88,3 +88,8 @@
 - 2026-09-29 03:3x MERGE1: FLAT2's gate script was first pointed at bake folders its path masking does not know
   (g/sea_* instead of bakes/<name>), so two lines went red on folder names; reran through a `bakes/` junction.
   Rule: read a gate's path-masking rule before choosing where its inputs live.
+- 2026-09-29 03:4x MERGE1: a Python heredoc holding a Windows path (`\N...`) died with a unicode-escape
+  SyntaxError (no damage), and the first splice script rewrote every line ending of WW_CHANGES.md (mixed CRLF/LF)
+  by picking the majority ending: a 13,318-line diff. Caught on `git diff --stat` before commit; the file was
+  restored from HEAD and the splice redone inserting bytes only. Rule: never re-encode a whole ledger to insert
+  an entry -- insert bytes at the offset and assert the bytes before and after are unchanged.

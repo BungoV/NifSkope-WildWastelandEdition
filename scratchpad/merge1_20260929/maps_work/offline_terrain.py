@@ -23,11 +23,14 @@ SHEET = os.environ['MAPS_CW'] + '/Commonwealth.VT.2.lodt'
 v = V.Lodv(SHEET)
 ROLE = {v.sheets[i]['role']: i for i in range(v.sheetCount)}
 D, B, C = v.stored, v.border, v.content
+TX0, TY0 = int(os.environ.get('MAPS_TX0', '44')), int(os.environ.get('MAPS_TY0', '48'))
 
 
 def tile(tx, ty, role):
     """content texels of one tile, one sheet, mip 0: (C, C, 4) uint8 or (C, C) uint16 for height."""
-    idx = ty * v.tilesX + tx
+    # MERGE1: MAPS1's tile numbers are the Boston region bake's (west -8, north -1); on the whole-map sheet the same
+    # tiles sit 44 east and 48 south (vt_tile_map.py: all 20 height sheets identical at that offset).
+    idx = (ty + TY0) * v.tilesX + (tx + TX0)
     e = v.table[idx]
     p = v.payload(idx)
     si = ROLE[role]
