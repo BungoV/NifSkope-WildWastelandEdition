@@ -1,70 +1,70 @@
 {
  "msn_20tiles": {
   "texels": 5242880,
-  "R": 132.0,
-  "G": 255.0,
-  "B": 132.0,
-  "Rmin": 132,
-  "Rmax": 132,
-  "Gmin": 255
+  "R": 129.3579158782959,
+  "G": 250.32819480895995,
+  "B": 133.01874313354492,
+  "Rmin": 0,
+  "Rmax": 255,
+  "Gmin": 85
  },
  "mask_25tiles": {
   "texels": 6553600,
-  "R": 163.70024566650392,
+  "R": 172.22492095947266,
   "Rrange": [
-   115,
-   181
+   0,
+   247
   ],
   "G": 0.0,
   "Grange": [
    0,
    0
   ],
-  "B": 253.794832611084,
+  "B": 115.1624137878418,
   "Brange": [
-   156,
+   0,
    255
   ],
-  "A": "BC1 somewhere",
+  "A": 31.504342193603517,
   "Arange": [
-   -1,
-   -1
+   0,
+   191
   ],
   "formats": [
-   71
+   77
   ]
  },
  "height_raw": {
-  "min": 32723,
-  "max": 32723,
-  "p0.5": 32723.0,
-  "p99.5": 32723.0
+  "min": 32676,
+  "max": 33091,
+  "p0.5": 32711.0,
+  "p99.5": 33024.0
  },
- "corr_R_vs_minus_dhdx": NaN,
- "corr_B_vs_minus_dhdnorth": NaN,
- "corr_R_vs_minus_dhdnorth_wrongaxis": NaN,
+ "corr_R_vs_minus_dhdx": 0.6029870099639398,
+ "corr_B_vs_minus_dhdnorth": 0.6887806062281107,
+ "corr_R_vs_minus_dhdnorth_wrongaxis": -0.080067444270852,
  "steep_east_facing": {
-  "texels": 0,
-  "meanR": NaN
+  "texels": 21021,
+  "meanR": 187.83316683316684
  },
  "steep_west_facing": {
-  "texels": 0,
-  "meanR": NaN
+  "texels": 15484,
+  "meanR": 70.69994833376388
  },
  "steep_north_facing": {
-  "texels": 0,
-  "meanB": NaN
+  "texels": 22672,
+  "meanB": 210.18802928722653
  },
  "steep_south_facing": {
-  "texels": 0,
-  "meanB": NaN
+  "texels": 13823,
+  "meanB": 45.19199884250886
  },
  "flat_texels": {
-  "texels": 4177936,
+  "texels": 3481269,
   "meanRGB": [
-   132.0,
-   255.0,
-   132.0
+   129.3197693140059,
+   252.49894593034895,
+   131.51816880568552
   ]
  }
 }
