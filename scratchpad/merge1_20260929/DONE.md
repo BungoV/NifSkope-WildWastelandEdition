@@ -159,3 +159,57 @@ FLAT2's gates.py, run through a `bakes/` junction to my g/ folder (its path mask
     v3 header is 0x100 now. "0x08..0x44 identical" also fails; which field moved was not diagnosed.
   - G7 (independent decoder, 353 bodies, every rule) PASS; G8 byte-identical second write PASS.
   Owed to WATER1's owner: teach lodl_water.sh the sloped bodies and the 0x100 header. Not loosened.
+
+## 7. Maps (one picture per map, full size, 60 px title bar; no contact sheet)
+- Folder: E:\Projects\NifskopeWWE-night\scratchpad\merge1_20260929\maps\ -- 70 pictures (not in git).
+- 35 renders of the installed-equal stage bake at MAPS1's Boston camera (view 8 ortho, cells -5..2 x -10..-3,
+  1600x1600), merged run exe, turn MERGE1, second monitor, ports 47302+; all 35 rc 0. List = MAPS1's with TIDY1's
+  label fixes; `F_identityraw` is now `F_placement-lowbyte`; the v3 water views come from the bake's own .lodl and
+  are drawn as flat water; `P_depth` is the one non-flat water view.
+- 35 offline panels (objects, texture arrays / cards, terrain sheets, whole-Commonwealth water). Three fixes to the
+  copied MAPS1 scripts, each forced by a merged lane, none changing what a panel means:
+  - offline_objects.py reads .lodi v12 through the night tree's decoder (the old one stops at v11);
+  - offline_arrays.py treats a missing `_g` glow file as all-black glow (TIDY1 no longer writes black ones);
+  - offline_terrain.py: MAPS1's tile numbers were the Boston region bake's; on the whole-map sheet the same tiles sit
+    44 east / 48 south. Proved by vt_tile_map.py: all 20 Boston height tiles byte-identical at that offset. The first
+    run without it drew the empty NW corner (height all 0, normal one colour) and maps_check.py caught it.
+- maps_check.py (red control: an all-grey picture reads blank): 70 pictures, 3 blank, each blank by design --
+  39 P_groundcover (Fallout 76 only), 56 S_C2048_emissive_g (the tree-card array has no glow file; TIDY1),
+  67 WC_v2_cellflags (the --no-water-bodies v2 file flags every cell, AUDIT1's finding; the v3 views are the fix).
+- Terrain normal vs height-gradient correlation now 0.60 / 0.69 (MAPS1 had 0.80 / 0.83): TERR1 stamps road, rail and
+  kerb normals into the ground normal sheet, which the height gradient does not carry.
+
+## 8. Main
+- night-20260927 b177294f (this lane's scripts + report + the leg-3 check fix) merged into main: merge commit
+  b918dc0b, no conflicts (`git merge-tree` checked first). Ledgers spliced in 6ea1e898 (by path: HANDOFF.md,
+  WW_CHANGES.md, MISTAKES.md). Pushed: origin/main = 6ea1e898.
+- HANDOFF: new top block (written 2026-09-29 03:49) + one line per lane (AO2, GPU1, CELL1, VAN1, MAPS1, AUDIT1,
+  WATER1, GROUND1, TIDY1, IDENT1, TERR1, TILING5, FLAT2). The 09-27 14:28 block is now "HISTORY (was the top block)",
+  and the uncommitted 09-27 19:43 and 20:02 lines sit in it under "Later the same day".
+- WW_CHANGES / MISTAKES: new entries on top, inserted as bytes (the rest of each file unchanged).
+- Left uncommitted in main, not mine: scratchpad/incr_gate_work/* (6 files modified before this lane).
+
+## 9. Main's deployed exe
+- E:\Projects\NifskopeWildWastelandEdition\release\NifSkope.exe, sha1 bde2a4ba91388637340b7096d439a854bfcb9556,
+  built 03:50-03:55 by build_main.sh (qmake, revision objects deleted, tools/ww_build.sh): BUILD-RC 0, exe newer
+  than every changed source, link-time copies in step, revision 6ea1e89 in the exe, new switch strings present.
+- No NifSkope window was holding it. bungo: restart any open NifSkope to get the merged build.
+
+## 10. Owed
+1. FO4CS readers (FO4CS last, by standing order): .lodl v3 (0x100 header, water bodies, sloped plane), .lodi v12,
+   texture sets with no glow, collapsed .lodt tiles. The installed bake needs the first two; restore the backup
+   FO4CSLOD_before_MERGE1_20260929 to fly the old one.
+2. IDENT1 ruling from bungo: Diamond City 15 groups, row houses 1 group, 5-6 boxes poke > 1%.
+3. lodgen_native leg 5: give INCR2's `products` a key group in lodgen_btofree_ledger.py (a decision).
+4. lodl_water.sh: teach the oracle WATER1's sloped bodies and the G8 lines the 0x100 header.
+5. TERR1 deepest canyons (Theater 53.9 vs 92.3); TERR1 g2gate not re-run (needs its diagnostic exe).
+6. CELL1: bungo's InstaLOD runs.
+7. Nothing flown in game.
+
+## 11. Skills
+- Loaded: deepseek-offload, nifskope-ww-worktree-build, nifskope-ww-build-verify, ww-gui-launch-silent-exit,
+  ww-lodl-offline-census, ww-lodi-drawn-mesh, ww-lodt-offline-decode-compare.
+- Wished for: one page on "a lane's gate on a merged tree" (path masking, decoder versions, the lane's exact
+  arguments) -- now written.
+- Written: nifskope-ww-campaign-merge (E:\Projects\Claude\.claude\skills\nifskope-ww-campaign-merge\SKILL.md).
+- DeepSeek: 1 job (AUDIT1/MAPS1/VAN1/CELL1 ledger texts, 66 s, $0.0227).
