@@ -1,6 +1,139 @@
 # Handoff — NifSkope, Wild Wasteland Edition
 
-## TOP BLOCK -- written 2026-09-29 03:49 (`date`-read) by lane MERGE1: the LOD map-fix campaign is MERGED into main, baked whole-map, installed; NOT flown
+## TOP BLOCK -- written 2026-09-29 14:09 (`date`-read) by lane MERGE2: IDENT2 + TERRLIVE1 MERGED into main, main's exe rebuilt; NOT re-baked, NOT flown
+
+bungo's word (2026-09-29, after both lanes' final pictures): merge "Yes". Done by MERGE2. Report:
+scratchpad/merge2_20260929/DONE.md (every gate with its numbers, the red controls, the scripts beside it).
+
+### State of main now (75a7fb01 (the merge of IDENT2 + TERRLIVE1) + the MERGE2 ledger commit)
+- **LOD terrain options: HYBRID (default) and DYNAMIC. FULL is ditched** (gone from CLI, panel and help).
+  `--terrain-option hybrid|dynamic`, panel row "Terrain". HYBRID bakes only the 64/128/256 u texture levels and
+  draws near/mid live from the .lodl; DYNAMIC bakes no terrain texture.
+- **Outside paint: Vanilla (default) / Rule.** Vanilla (law 2): outside our painted ground the far terrain is
+  vanilla's own dim-4 LOD diffuse, untouched; ours rises over it across an 8,192 u per-texel band inside our edge (no
+  whole-cell steps, no dirt outline). Rule (`--outside-paint rule`, panel row "Outside paint", ships OFF): the outside
+  is painted with the worldspace's own landscape textures by slope, height and best match to vanilla's colour.
+- **`.lodi` version 13: group ids are file-wide** (u32, dense from 0), so a group that crosses a chunk line (Diamond
+  City) is one id in the file. Older v3..v12 files still load. `WW_LODI_GROUPS_PER_CHUNK=1` writes the v12 file.
+- **Landmarks are one group each** (res/lodgen_landmarks.txt: Diamond City, Hub towers east and west, Trinity Church;
+  `--landmarks <file>|none`), with their footprint: a piece inside a landmark's outline joins it (<= 512 u out).
+  Occluder boxes: probe fix (0 of 517 poke > 1%), and a group wider than 4,096 u gets one box per 4,096 u square.
+- **New files:** `.lodd` + `.lodg` = projected road / flat-object decals, written by EVERY bake (`--decal-check`);
+  `.lodr` = the rule paint map, only with `--outside-paint rule` (`--rule-check`). The `.lodb` records the terrain
+  option (`terrain hybrid|dynamic`) and, when on, `outside rule`.
+- `--terrain-preview <spec.json>` renders and times the options offscreen.
+
+### The installed bake is the DITCHED one -- owed a re-bake
+mods\FO4CSLOD still holds MERGE1's whole-map bake of 2026-09-29 00:58-02:52: the FULL option (every .lodt level)
+with law 1 (the old per-cell fill: whole-cell steps, dirt outline), `.lodi` v12, no decals, `.lodl` v3. It was not
+touched by this lane. It is owed a whole-map HYBRID re-bake + install, AFTER the rock tuning lane (the rule paint
+picks rock less often than Bethesda painted it). The MERGE1 backup folder
+(E:\Projects\Fallout 4 Mods\backups\FO4CSLOD_before_MERGE1_20260929) is still the way back to the pre-campaign install.
+
+### Merge
+- Branch merge2-20260929 from origin/main bc8f6f7e (bungo's rulings commits d07c52e4..bc8f6f7e kept): ident2-20260929
+  @ 9597d868, then terrlive1-20260929 @ d2dad00b. **Both merges clean, no conflicts.** The two lanes share one source
+  file, src/nifcli.cpp, in hunks that do not touch; IDENT2 never touches lodgen.cpp / lodgenmanager.cpp / the terrain
+  doc. MISTAKES.md (main appended at the end, IDENT2 at the top) auto-merged.
+- main fast-forwarded to the merge, then this ledger splice.
+
+### Gates on the merged exe (sha1 1e961ba5bdb6; only those the merge reaches)
+- IDENT2 (reached: the emitter, the .lodi reader/writer and the landmark list): LIGHT Boston bake = IDENT2's own b_v13
+  byte for byte (SAME, 107 files). Pixel gate PASS, 0 wrong pixels in all 4 landmark outlines. Group dump: Diamond City
+  ONE file-wide id (1178) over 2 chunks, 404 pieces; Hub east, west, Trinity one id each. Poke gate ok: 517 boxes, 0 over
+  1 %, worst 0.0041 (floor: grown 1.25x -> 511 over). Coverage at the lane's three eyes 0.5877 (= the lane's).
+- Both ways back at once on the Boston box (full recipe): TERRLIVE1's head exe vs the merged exe, both with
+  `--identity-join proximity --occluder-fit piece`, merged + WW_LODI_GROUPS_PER_CHUNK=1, outside paint default: SAME,
+  232 files (red controls: flipped byte -> DIFF, removed .lodo -> MISSING). This is the outside-paint OFF byte gate.
+- TERRLIVE1 (reached: the terrain VT, decal and rule-paint code), whole map with the lane's recipe: OFF bake = the
+  lane's head bake, all 7 files sha1-identical; RULE bake = the lane's rule bake, all 8 files incl. the .lodr; red half
+  (off vs rule) RED as expected. Edge gate vanilla PASS (outside 1.39 / 1.48, dip 0.00 / 0.27); edge gate rule PASS
+  (dip 0.00 / 0.54, step 0.78 / 0.10). --decal-check: 2,818 pieces, 0 CRC mismatches, 80,577 placements, all bad
+  counts 0, pair matched. --rule-check OK (2,359,296 samples, palette 36).
+- lodgen_native.sh: 34 checks, 1 failure = the known leg-5 .lodb ledger line, word for word the line IDENT2's run
+  fails (owner: tests/spells/lodgen_btofree_ledger.py, INCR2's rows; a decision). Legs 4, 6, 13 (280 of 280), 13c (312
+  boxes, 0 over) ok.
+- Not run (the merge does not reach them): IDENT2's row-house far-shadow harness (never set up for its chunk);
+  TERRLIVE1's preview GPU timings and pictures (no preview code changed by IDENT2).
+
+### Main's deployed exe
+- E:\Projects\NifskopeWildWastelandEdition\release\NifSkope.exe, sha1 6eb5d495919ae350db50a313a9f71ebab215ddcd, built
+  2026-09-29 14:08 from main 75a7fb01 (qmake + tools/ww_build.sh RC 0; make -n afterwards 0). **bungo's open NifSkope
+  window needs a restart to pick it up.**
+
+### bungo's rulings (carried from MERGE1's block; status after MERGE2 below them)
+1. Diamond City: LANDMARK RULE -- named landmarks ignore the 4096 u group cap and become one group. Lane IDENT2
+   (also settles the poking occluder boxes).
+2. Row houses: a terrace stays ONE group. Reason (his): far shadows must not bring back the flat-wall self-shadow
+   artifact; per-piece ids would put it back along kit-panel seams (identity rule, D = 64 u, plan s9.2a).
+3. TERR1 deep canyons too dark: FIX (lane TERR2) -- waits on TERRLIVE1, the fix lands in whichever path paints the ground.
+4. TILING5: KEEP TUNING (lane TILING6), switches stay OFF until it hits its targets.
+   bungo 2026-09-29 08:15 (clock read): the anti-repeat must reach BOTH hybrid and full -- TILING6 fixes it in the live
+   ground shader AND in the baker (one Commonwealth re-bake), and FO4CS does the same for its hybrid and full presets.
+   bungo 2026-09-29 (after TERRLIVE1's whole-map renders): FULL IS DITCHED -- the baked ground outside the playable
+   area is made-up fill with a repeating pattern. Options are now HYBRID (default) and DYNAMIC; the anti-repeat ruling above
+   applies to those two. bungo: outside our painted area hybrid shows VANILLA's LOD diffuse, blended smoothly into ours
+   (s2.6 --vt-fill-vanilla, already on in MERGE1's bake). Defects he circled: whole-cell stair-steps (bandCells=2) and a
+   dirt outline on the west edge -- TERRLIVE1 resumed to measure the cause and make the blend per-texel.
+   bungo 2026-09-29 09:49: OPTIONAL bake setting (ships OFF = vanilla diffuse outside): paint the ground OUTSIDE the painted
+   area with our landscape textures by rule (slope, height, best match to vanilla's colour there), drawn live -- TERRLIVE1.
+5. THREE LOD TERRAIN RENDER OPTIONS, the same three as FO4CS presets:
+   - FULL TEXTURE: every baked .lodt level (~16 GB; tonight's installed bake IS this option's data and is KEPT).
+   - HYBRID (the DEFAULT): live splat from the .lodl LTEX weights near/mid + projected road/flat-object decals +
+     only the 64/128/256 u baked levels far (~1.6 GB).
+   - FULLY DYNAMIC: no .lodt; live splat + decals at every distance (~0.6 GB).
+   A bake serves every preset at or below what it holds; every bake carries the decals. Decals are PREBAKED in
+   NifSkope from the road geometry (one top-down picture per distinct piece: 359 road meshes / 18,727 road
+   placements, 61,850 flat objects) and drawn as projected (deferred) decals, not alpha-tested planes.
+   Lane TERRLIVE1: NifSkope bake + preview FIRST, adds files ADDITIVELY beside tonight's bake (no whole-map
+   rebake; a forced format change = stop and ask); measures size, GPU ms (incl. a whole-map view) and look for all
+   three; the live/baked crossover distance is measured. Open: close-range object AO (46 cm AO map / AO decals / SSAO).
+6. FO4CS readers are written as soon as the TERRLIVE1 decal bake exists (not before): .lodl v3, .lodi v12,
+   no-glow texture sets, collapsed tiles, decals, live splat.
+7. BAKEGPU1 (terrain textures on the GPU) DROPPED for now: the hybrid default removes most of that 85-minute stage.
+8. Account B takes lanes until it is drained (90% stop retired).
+Lane order: TERRLIVE1, IDENT2, TILING6 (in-session, max 3), then TERR2.
+Status after MERGE2: 1 (landmark rule) and the IDENT1 box pokes: DONE by IDENT2, merged. 3 (TERR2) no longer waits on
+TERRLIVE1. 4 (TILING6) hooks into `ltexFetch()` in src/terrainpreview.cpp. 5: the options are HYBRID + DYNAMIC now
+(FULL ditched, see above); decals exist (.lodd/.lodg). 6: the decal bake now exists, so the FO4CS readers are due.
+
+### Owed (pick up in this order)
+1. bungo: restart NifSkope (his open window runs the old exe); look at TERRLIVE1's pics2/ + pics3/ and IDENT2's pics/.
+2. Rock tuning lane (the rule paint picks rock too rarely), then the whole-map HYBRID re-bake and install (above).
+3. FO4CS readers (FO4CS last, by standing order): `.lodl` v3, `.lodi` v12 AND v13 (u32 file-wide group word),
+   `.lodd`/`.lodg` decals, `.lodr` rule paint, texture sets with no emissive, collapsed one-value tiles, live splat.
+4. TERRLIVE1's open items: the "draw vanilla here" reader contract for the 577 MB of all-vanilla HYBRID tiles
+   (bungo's call); live-splat colour (live 3-5 lum darker than baked deep inside, dark blocky patches); box culling at
+   eye level; a black L-shaped line in the west close-up (before and after, not chased); 2 quadrants painted only by a
+   NULL LTEX (bake 15,893 vs .lodl 15,891); close-range AO choice; LTEX 000464c5 has no texture path.
+5. IDENT2's open item: the row-house far-shadow check, when that harness is next set up for a new chunk.
+6. lodgen_native.sh leg 5 ("unaccounted: products", INCR2's .lodb rows have no group in
+   tests/spells/lodgen_btofree_ledger.py): needs a decision which group they belong to.
+7. Lanes TILING6, then TERR2; the rest of MERGE1's queue (FO4CS near-ground anti-tiling, SHADOW1 parked, speed lane).
+
+### Lane lines (spliced by MERGE2 from each lane's DELIVERABLE_TEXT; newest first)
+- **TERRLIVE1** (branch terrlive1-20260929 @ d2dad00b, merged): two terrain options (HYBRID default, DYNAMIC); FULL
+  ditched. Law 2 at the painted edge, cause measured (the old fill was per cell, so empty quadrants of edge cells and
+  the first 2-4 km outside kept the engine-default ground, lum ~67 against vanilla's ~80): now per quadrant, outside =
+  vanilla untouched, ours rises over an 8,192 u per-texel band (one constant LODGEN_VT_FILL_BAND for bake and preview).
+  Edge gate (edge/gate_law2.py): outside |ours - vanilla| 1.39 / 1.48 lum, outline dip 0.00 / 0.27 (north / west) PASS;
+  law 1 read 6.61 / 6.45 and 10.55 / 9.53 FAIL. Whole map HYBRID 913.8 MB (.lodt 749.5 MB + decals 164.3 MB), bake
+  1,332 s; DYNAMIC ships the decals only and reads vanilla's sheets live. Preview GPU ms HYBRID / DYNAMIC: Boston 0.107
+  / 0.146, street 0.184 / 0.195, whole 0.405 / 0.534. Live/baked crossover on wholly-ours ground: oblique 30,720 u.
+  Rule paint outside (optional): .lodr 2.6 MB (512 u samples, 2 textures a sample from the worldspace's own 36 LTEX);
+  +214 s HYBRID bake (+38 s DYNAMIC), GPU up to +0.06 ms whole map live, +0.11 ms on a low view over outside ground;
+  edge gate with the rule clauses PASS (dip 0.00 / 0.54, step 0.78 / 0.10); drift from vanilla outside mean 5.1 lum
+  (p95 21), far hills lose some grey rock to brown/olive. OFF = law 2 byte for byte (all 7 whole-map files).
+- **IDENT2** (branch ident2-20260929 @ 9597d868, merged): named landmarks one group each, no size cap, with their
+  footprint (convex hull of the named pieces; per piece, <= 512 u out joins, trees never). Boston: Diamond City 15 ->
+  1 group (404 pieces), west Hub 4 -> 1, east and Trinity 1; row houses stay 1 group of 54. `.lodi` v13 file-wide u32
+  group ids: Diamond City one id (1178) over both chunks; all groups 4,613 -> 4,527. Occluder probe fix + split:
+  517 boxes, 0 over 1 % (was 5 of 511), street coverage 0.560 -> 0.588. Pixel gate 0 wrong pixels in all 4 outlines
+  (red control, the v12 file: 49,904). Way back (`--identity-join proximity --occluder-fit piece` +
+  WW_LODI_GROUPS_PER_CHUNK=1) = main's bytes, 233 files. Refusals for v13 (id past groupCount, unused id,
+  groupCount+1, stride 2, no group table) refused by both readers; old v12 files load.
+
+## HISTORY (was the top block) -- written 2026-09-29 03:49 (`date`-read) by lane MERGE1: the LOD map-fix campaign is MERGED into main, baked whole-map, installed; NOT flown
 
 bungo's order (09-26): "we fix all the maps that are broken, overnight" / "after you're done with fixing bakes, merge
 it, then render the bakes for me, this time fixed". Done by MERGE1 on 2026-09-29. Report:

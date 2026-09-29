@@ -1,0 +1,34 @@
+
+diamond_city: outline 19 points, 165 named pieces, 5586 triangles inside from 402 instances; own id per chunk (-2, -2):1178 (-1, -2):1178
+  view top  :  241318 pixels covered,      0 not the landmark's colour
+  view az45 :  201893 pixels covered,      0 not the landmark's colour
+  view az135:  206658 pixels covered,      0 not the landmark's colour
+  view az225:  197233 pixels covered,      0 not the landmark's colour
+  view az315:  205438 pixels covered,      0 not the landmark's colour
+  diamond_city: 0 wrong pixels over 5 views
+
+hub_tower_east: outline 14 points, 732 named pieces, 3717 triangles inside from 749 instances; own id per chunk (0, -2):1419
+  view top  :   14599 pixels covered,      0 not the landmark's colour
+  view az45 :   58427 pixels covered,      0 not the landmark's colour
+  view az135:   59040 pixels covered,      0 not the landmark's colour
+  view az225:   60213 pixels covered,      0 not the landmark's colour
+  view az315:   56488 pixels covered,      0 not the landmark's colour
+  hub_tower_east: 0 wrong pixels over 5 views
+
+hub_tower_west: outline 14 points, 731 named pieces, 4123 triangles inside from 747 instances; own id per chunk (-1, -2):1336
+  view top  :   27185 pixels covered,      0 not the landmark's colour
+  view az45 :   61709 pixels covered,      0 not the landmark's colour
+  view az135:   69649 pixels covered,      0 not the landmark's colour
+  view az225:   65578 pixels covered,      0 not the landmark's colour
+  view az315:   65299 pixels covered,      0 not the landmark's colour
+  hub_tower_west: 0 wrong pixels over 5 views
+
+trinity_church: outline 11 points, 25 named pieces, 855 triangles inside from 25 instances; own id per chunk (0, -2):1420
+  view top  :   10300 pixels covered,      0 not the landmark's colour
+  view az45 :   15571 pixels covered,      0 not the landmark's colour
+  view az135:   15615 pixels covered,      0 not the landmark's colour
+  view az225:   15560 pixels covered,      0 not the landmark's colour
+  view az315:   15726 pixels covered,      0 not the landmark's colour
+  trinity_church: 0 wrong pixels over 5 views
+
+PIXEL GATE PASS: 0 wrong pixels

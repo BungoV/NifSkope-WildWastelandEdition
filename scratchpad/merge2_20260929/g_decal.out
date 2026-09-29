@@ -1,0 +1,3 @@
+lodd: 2818 piece(s) (roads 642, flat 1627, flat-over 549), 59802112 mip-0 texel(s) (39201813 covered), 160694592 picture byte(s), 161076176 byte(s) on disk, 4 u a texel, 2774 with a normal stamp, 0 CRC mismatch(es)
+lodg: 80577 placement(s) (roads 18727, flat 29314, flat-over 32536) over cells -96..95 x -96..95, 96963 index entr(ies), 2857 cell(s) used, busiest 311, 3261484 byte(s); bad piece 0, bad class 0, bad scale 0, unnormalised rotation 0, draw-order breaks 0, bad index 0, unsorted index 0
+pair: matched (lodg names table crc f34c4cd6, lodd has f34c4cd6); 0 picture decode failure(s)

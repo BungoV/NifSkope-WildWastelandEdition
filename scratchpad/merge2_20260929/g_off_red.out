@@ -1,0 +1,13 @@
+FO4CSLOD/Commonwealth/Commonwealth.VT.16.lodt           DIFF    134597104  539e8f039631
+FO4CSLOD/Commonwealth/Commonwealth.VT.32.lodt           DIFF     42224736  cac982524819
+FO4CSLOD/Commonwealth/Commonwealth.VT.8.lodt            DIFF    572673120  40e80988775a
+FO4CSLOD/Commonwealth/Commonwealth.VT.lodm              SAME         2109  8206eaf3f377
+FO4CSLOD/Commonwealth/Commonwealth.flat_objects_report.txt SAME      1503552  02467fe7d7f5
+FO4CSLOD/Commonwealth/Commonwealth.lodd                 SAME    161076176  248edbe21d33
+FO4CSLOD/Commonwealth/Commonwealth.lodg                 SAME      3261484  02b1915d2324
+findings: 4
+  differs: FO4CSLOD/Commonwealth/Commonwealth.VT.16.lodt (134597104 vs 134597104 bytes)
+  differs: FO4CSLOD/Commonwealth/Commonwealth.VT.32.lodt (42224736 vs 42224736 bytes)
+  differs: FO4CSLOD/Commonwealth/Commonwealth.VT.8.lodt (572673120 vs 572673120 bytes)
+  new in candidate: FO4CSLOD/Commonwealth/Commonwealth.lodr (2687771 bytes)
+VERDICT: RED (expected red)

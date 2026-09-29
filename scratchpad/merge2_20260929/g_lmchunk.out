@@ -1,0 +1,22 @@
+file bakes/m_light/mod/FO4CSLOD/Commonwealth/Commonwealth instances 46532 group table 46532
+
+diamond_city: 165 pieces in the dump, 1 emitter group(s)
+  group root 3267: 404 members (165 landmark), 404 file instances in 2 chunk(s)
+    chunk (-2, -2): 53 instances, file group id(s) 1178:53, other instances sharing the id 0
+    chunk (-1, -2): 351 instances, file group id(s) 1178:351, other instances sharing the id 0
+  FILE-WIDE: 1 id(s) over 2 chunk(s) 1178:404; other instances sharing them anywhere 0  [ONE ID]
+
+hub_tower_east: 732 pieces in the dump, 1 emitter group(s)
+  group root 9680: 749 members (732 landmark), 749 file instances in 1 chunk(s)
+    chunk (0, -2): 749 instances, file group id(s) 1419:749, other instances sharing the id 0
+  FILE-WIDE: 1 id(s) over 1 chunk(s) 1419:749; other instances sharing them anywhere 0  [ONE ID]
+
+hub_tower_west: 731 pieces in the dump, 1 emitter group(s)
+  group root 5754: 758 members (731 landmark), 758 file instances in 1 chunk(s)
+    chunk (-1, -2): 758 instances, file group id(s) 1336:758, other instances sharing the id 0
+  FILE-WIDE: 1 id(s) over 1 chunk(s) 1336:758; other instances sharing them anywhere 0  [ONE ID]
+
+trinity_church: 25 pieces in the dump, 1 emitter group(s)
+  group root 11543: 25 members (25 landmark), 25 file instances in 1 chunk(s)
+    chunk (0, -2): 25 instances, file group id(s) 1420:25, other instances sharing the id 0
+  FILE-WIDE: 1 id(s) over 1 chunk(s) 1420:25; other instances sharing them anywhere 0  [ONE ID]

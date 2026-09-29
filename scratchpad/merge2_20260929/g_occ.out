@@ -1,0 +1,178 @@
+ok   every box pokes out of its building by <= 1 percent: 517 boxes, 0 over, worst 0.0041
+ok   FLOOR the same boxes grown 1.25x leave their buildings: 511 of 517 over 1 percent
+{
+ "file": "bakes/m_light/mod/FO4CSLOD/Commonwealth/Commonwealth",
+ "dump": "dump_m2.txt",
+ "inflate": 1.0,
+ "rays": "xXyYz",
+ "grid": 9,
+ "boxes": 517,
+ "boxesOver1pct": 0,
+ "pokeMax": 0.0041,
+ "pokeVolumeWeighted": 3.9099858635266335e-05,
+ "thickMedian": 387.3,
+ "thickMin": 16.0,
+ "thickMax": 1332.1,
+ "halfMedian": [
+  348.8,
+  340.5,
+  315.5
+ ],
+ "worst": [
+  {
+   "box": 470,
+   "carrier": 44971,
+   "members": 3,
+   "tris": 138,
+   "poke": 0.0041,
+   "thick": 151.3,
+   "vol": 80853406.86579366,
+   "centre": [
+    6456,
+    -57657,
+    750
+   ],
+   "half": [
+    529.6,
+    252.2,
+    75.7
+   ]
+  },
+  {
+   "box": 85,
+   "carrier": 4059,
+   "members": 1,
+   "tris": 297,
+   "poke": 0.0027,
+   "thick": 94.2,
+   "vol": 29756320.29717168,
+   "centre": [
+    2668,
+    -8025,
+    -14
+   ],
+   "half": [
+    314.1,
+    251.3,
+    47.1
+   ]
+  },
+  {
+   "box": 167,
+   "carrier": 17398,
+   "members": 3,
+   "tris": 3064,
+   "poke": 0.0027,
+   "thick": 216.0,
+   "vol": 79399071.07190754,
+   "centre": [
+    51989,
+    -10095,
+    3828
+   ],
+   "half": [
+    108.0,
+    378.1,
+    243.0
+   ]
+  },
+  {
+   "box": 181,
+   "carrier": 18170,
+   "members": 102,
+   "tris": 572,
+   "poke": 0.0027,
+   "thick": 644.1,
+   "vol": 558492207.0143732,
+   "centre": [
+    -18188,
+    -20143,
+    1627
+   ],
+   "half": [
+    322.1,
+    611.9,
+    354.3
+   ]
+  },
+  {
+   "box": 353,
+   "carrier": 37335,
+   "members": 2,
+   "tris": 397,
+   "poke": 0.0027,
+   "thick": 223.4,
+   "vol": 109319356.53780675,
+   "centre": [
+    -22375,
+    -37361,
+    1781
+   ],
+   "half": [
+    782.0,
+    156.4,
+    111.7
+   ]
+  },
+  {
+   "box": 361,
+   "carrier": 38115,
+   "members": 54,
+   "tris": 404,
+   "poke": 0.0027,
+   "thick": 698.1,
+   "vol": 457719005.22368896,
+   "centre": [
+    -14424,
+    -36375,
+    2170
+   ],
+   "half": [
+    363.6,
+    349.0,
+    450.8
+   ]
+  },
+  {
+   "box": 30,
+   "carrier": 1179,
+   "members": 2,
+   "tris": 403,
+   "poke": 0.0014,
+   "thick": 174.8,
+   "vol": 195952134.3371778,
+   "centre": [
+    -16910,
+    -10716,
+    -254
+   ],
+   "half": [
+    874.2,
+    320.5,
+    87.4
+   ]
+  },
+  {
+   "box": 55,
+   "carrier": 2653,
+   "members": 1,
+   "tris": 501,
+   "poke": 0.0014,
+   "thick": 64.0,
+   "vol": 12635925.991617661,
+   "centre": [
+    -319,
+    -5851,
+    410
+   ],
+   "half": [
+    149.3,
+    330.6,
+    32.0
+   ]
+  }
+ ],
+ "membersSkippedRepSlotsDisagree": 0,
+ "carriersWhereTheDumpRuleMissesTheRowMeshId": 4,
+ "floorGrown1.25Over1pct": 511
+}
