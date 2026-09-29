@@ -16424,6 +16424,16 @@ static bool lodgenRuleBuild( const EsmWorld & world, const QString & dataRoot, L
 	auto fineBin = [&]( float h ) { return qBound( 0, int( std::floor( ( h - hFine0 ) / 256.0f ) ), NHF - 1 ); };
 	std::vector<float> hS( N, 0.0f ), sS( N, 0.0f ), vS( N * 3, 0.0f );
 	std::vector<quint8> vHave( N, 0 );
+	/* WW_RULE_DUMP=<file>: a DEBUG dump of every sample (vanilla colour, slope,
+	 * height, our true mix) plus the palette and the choice, for tuning offline.
+	 * Nothing reads it back; no shipped format. */
+	const QString dumpPath = QString::fromLocal8Bit( qgetenv( "WW_RULE_DUMP" ) );
+	std::vector<quint8> dMixId;
+	std::vector<float> dMixW;
+	if ( !dumpPath.isEmpty() ) {
+		dMixId.assign( N * 8, 0xFF );
+		dMixW.assign( N * 8, 0.0f );
+	}
 	QHash<quint32, int> formIdx;
 	QVector<quint32> forms;
 	std::vector<double> fine( size_t( NS ) * NHF * MAXT, 0.0 );   // [slope][fine height][form]
@@ -16525,6 +16535,10 @@ static bool lodgenRuleBuild( const EsmWorld & world, const QString & dataRoot, L
 						const int fi = formOf( id[u] );
 						if ( fi < 0 || wt[u] <= 0.0f )
 							continue;
+						if ( !dMixId.empty() ) {
+							dMixId[s * 8 + size_t( u )] = quint8( fi );
+							dMixW[s * 8 + size_t( u )] = wt[u];
+						}
 						fine[( size_t( sb ) * NHF + hb ) * MAXT + fi] += wt[u];
 						area[size_t( fi )] += wt[u];
 					}
@@ -16750,6 +16764,44 @@ static bool lodgenRuleBuild( const EsmWorld & world, const QString & dataRoot, L
 			.arg( P ).arg( dropShare ).arg( dropTex ).arg( formsDropped )
 			.arg( [&] { QStringList e; for ( int k = 0; k < NHB - 1; k++ ) e << QString::number( hFine0 + 256.0f * hEdge[k], 'f', 0 ); return e.join( ',' ); }() )
 			.arg( pl.join( ' ' ) );
+	}
+	if ( !dumpPath.isEmpty() ) {
+		QFile df( dumpPath );
+		if ( df.open( QIODevice::WriteOnly ) ) {
+			auto u32 = [&]( quint32 v ) { df.write( reinterpret_cast<const char *>( &v ), 4 ); };
+			auto raw = [&]( const void * p, size_t n ) { df.write( reinterpret_cast<const char *>( p ), qint64( n ) ); };
+			u32( 0x504D4452u );   // "RDMP"
+			u32( 1 );
+			u32( quint32( NX ) );
+			u32( quint32( NY ) );
+			u32( quint32( forms.size() ) );
+			u32( quint32( P ) );
+			raw( vS.data(), N * 12 );
+			raw( sS.data(), N * 4 );
+			raw( hS.data(), N * 4 );
+			raw( vHave.data(), N );
+			raw( dMixId.data(), N * 8 );
+			raw( dMixW.data(), N * 32 );
+			for ( int t = 0; t < forms.size(); t++ ) {
+				QString d, nrm;
+				world.ltexTextures( forms[t], d, nrm );
+				const QByteArray pb = d.toUtf8();
+				u32( forms[t] );
+				const double ar = area[size_t( t )];
+				raw( &ar, 8 );
+				u32( quint32( pb.size() ) );
+				raw( pb.constData(), size_t( pb.size() ) );
+			}
+			for ( int p = 0; p < P; p++ ) {
+				u32( quint32( palFrom[p] ) );
+				raw( palCol[p].data(), 12 );
+			}
+			raw( m.a.data(), N );
+			raw( m.b.data(), N );
+			raw( m.w.data(), N );
+			if ( log )
+				*log << QString( "outsideRule dump=%1 bytes=%2" ).arg( dumpPath ).arg( df.size() );
+		}
 	}
 	return true;
 }
