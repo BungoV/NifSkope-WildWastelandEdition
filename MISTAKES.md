@@ -1725,3 +1725,9 @@ measured it: lodinative.cpp's fallback branch still multiplies the library self-
 carries a .lodo v5 colour stream (bridge deck self-AO 38/255; colour stream white; texture flat). Rule: a
 claim about what a view draws is read from the code path that writes the vertex colour, not from what the
 log says was loaded. Fix handed to lane AO2 with a gate that fails on the current code.
+
+### 2026-09-29 08:19 -- TERRLIVE1 brief baked hybrid's far levels over the whole map, not only the playable area
+My brief said hybrid's far = the 64/128/256 u baked levels, everywhere. Outside the playable area the land has no real
+ground textures, so the baker invents a fill with a repeating pattern, and hybrid's far view carried it exactly like
+full. bungo: hybrid was meant to draw live wherever the bake has nothing true to say. Rule: a baked level is written
+only where it holds real source data; a brief that names a baked layer says where it stops.
