@@ -1,0 +1,126 @@
+{
+ "lodl": "E:/Projects/NifskopeWWE-terrlive1/scratchpad/terrlive1_20260929/bakes/full/mod/FO4CSLOD/Commonwealth/Commonwealth.lodl",
+ "fade": [
+  8192.0,
+  12288.0
+ ],
+ "frames": 30,
+ "ltex_side": 512,
+ "decal_normals": true,
+ "views": [
+  {
+   "cells": [
+    -8,
+    -12,
+    3,
+    -1
+   ],
+   "stride": 1,
+   "lodt_full": "E:/Projects/NifskopeWWE-terrlive1/scratchpad/terrlive1_20260929/bakes/full/mod/FO4CSLOD/Commonwealth/Commonwealth.VT.2.lodt",
+   "lodt_far": "E:/Projects/NifskopeWWE-terrlive1/scratchpad/terrlive1_20260929/whole_hybrid/mod/FO4CSLOD/Commonwealth/Commonwealth.VT.8.lodt",
+   "decals": "E:/Projects/NifskopeWWE-terrlive1/scratchpad/terrlive1_20260929/bakes/hybrid/mod/FO4CSLOD/Commonwealth/Commonwealth.lodd",
+   "name": "street",
+   "eye": [
+    -4096.0,
+    -30720.0,
+    150.0
+   ],
+   "at": [
+    -4096.0,
+    -22000.0,
+    0.0
+   ],
+   "fov": 70.0,
+   "width": 1920,
+   "height": 1080,
+   "renders": [
+    {
+     "options": [
+      "full"
+     ],
+     "ao": 1,
+     "ao_lod": 0.0,
+     "out": "pics/ao_street_full_ao16.png",
+     "titles": [
+      "street -- FULL + AO 16 u (reference)"
+     ]
+    },
+    {
+     "options": [
+      "hybrid"
+     ],
+     "ao": 1,
+     "ao_lod": 1.0,
+     "out": "pics/ao_street_a_map32.png",
+     "titles": [
+      "street -- HYBRID + (a) AO map 32 u"
+     ]
+    },
+    {
+     "options": [
+      "hybrid"
+     ],
+     "ao": 0,
+     "out": "pics/ao_street_c_none.png",
+     "titles": [
+      "street -- HYBRID + (b)/(c) no ground AO map"
+     ]
+    }
+   ]
+  },
+  {
+   "cells": [
+    -8,
+    -12,
+    3,
+    -1
+   ],
+   "stride": 1,
+   "lodt_full": "E:/Projects/NifskopeWWE-terrlive1/scratchpad/terrlive1_20260929/bakes/full/mod/FO4CSLOD/Commonwealth/Commonwealth.VT.2.lodt",
+   "lodt_far": "E:/Projects/NifskopeWWE-terrlive1/scratchpad/terrlive1_20260929/whole_hybrid/mod/FO4CSLOD/Commonwealth/Commonwealth.VT.8.lodt",
+   "decals": "E:/Projects/NifskopeWWE-terrlive1/scratchpad/terrlive1_20260929/bakes/hybrid/mod/FO4CSLOD/Commonwealth/Commonwealth.lodd",
+   "name": "boston",
+   "ortho": [
+    -4096.0,
+    -24576.0,
+    16384.0
+   ],
+   "width": 1200,
+   "height": 1200,
+   "renders": [
+    {
+     "options": [
+      "full"
+     ],
+     "ao": 1,
+     "ao_lod": 0.0,
+     "out": "pics/ao_boston_full_ao16.png",
+     "titles": [
+      "boston -- FULL + AO 16 u (reference)"
+     ]
+    },
+    {
+     "options": [
+      "hybrid"
+     ],
+     "ao": 1,
+     "ao_lod": 1.0,
+     "out": "pics/ao_boston_a_map32.png",
+     "titles": [
+      "boston -- HYBRID + (a) AO map 32 u"
+     ]
+    },
+    {
+     "options": [
+      "hybrid"
+     ],
+     "ao": 0,
+     "out": "pics/ao_boston_c_none.png",
+     "titles": [
+      "boston -- HYBRID + (b)/(c) no ground AO map"
+     ]
+    }
+   ]
+  }
+ ]
+}

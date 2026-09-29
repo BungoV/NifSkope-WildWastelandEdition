@@ -102,6 +102,11 @@ void        lodbNoteCensus( const QString & block );
 QStringList lodbCensusLines();
 //! True when `line`'s first word is a registered census keyword. Public so the gate's floor can use it.
 bool        lodbIsCensusLine( const QString & line );
+/*! Lane TERRLIVE1: the bake's terrain option ("full", "hybrid", "dynamic"),
+ *  written as a `terrain <option>` row after the switches; empty = no row
+ *  (a bake that wrote no terrain texture decision). */
+void        lodbSetTerrainOption( const QString & option );
+QString     lodbTerrainOption();
 
 /*! The exe that baked the record: `WW_EDITION_VERSION+<build rev>`, composed
  *  the same way `src/main.cpp` composes the window title (build_rev.txt beside

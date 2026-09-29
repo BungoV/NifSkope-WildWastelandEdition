@@ -21,6 +21,8 @@ BSD License - see nifskope.h
 #include "io/material.h"
 #include "io/lodmfile.h"
 #include "io/lodvfile.h"
+#include "io/loddecal.h"
+#include <QElapsedTimer>
 #include "io/pbrmfile.h"
 #include "io/pbrmresolve.h"
 #include <QJsonArray>
@@ -10001,6 +10003,7 @@ public:
 		raised = includeRaised;
 		sidewalks = includeSidewalks;
 		flatCands.clear();
+		decalPl.clear();
 		QSet<QString> loaded;
 		for ( int cy = cy0 - margin; cy <= cy1 + margin; cy++ ) {
 			for ( int cx = cx0 - margin; cx <= cx1 + margin; cx++ ) {
@@ -10057,6 +10060,31 @@ public:
 	/*! Lane FLAT1: the per-bake report -- one row per base model the flat rule
 	 *  looked at. Written beside the bake output by the caller. */
 	QString flatReport( const QString & title ) const;
+
+	/*! Lane TERRLIVE1: one placement that produced shapes, as the decal
+	 *  library sees it -- its shapes' range in `shapes` (a road) or
+	 *  `flatShapes` (a painted flat object) and the transform that put them in
+	 *  world space. Recorded as the shapes are appended; reading it changes
+	 *  nothing the paint does. */
+	struct DecalPlacement
+	{
+		int first = 0, count = 0;
+		bool flat = false;
+		Vector3 pos;
+		Matrix rot;
+		float scale = 1.0f;
+		quint32 refr = 0, mswp = 0;
+		QString model;
+	};
+	const QVector<DecalPlacement> & decalPlacements() const { return decalPl; }
+	const QVector<LodgenRoadShape> & roadShapeList() const { return shapes; }
+	const QVector<LodgenFlatShape> & flatShapeList() const { return flatShapes; }
+	//! A set that holds exactly these shapes (a decal piece in its own frame).
+	void adoptShapes( const QVector<LodgenRoadShape> & r, const QVector<LodgenFlatShape> & f )
+	{
+		shapes = r;
+		flatShapes = f;
+	}
 
 	/*! Scan-convert into a grid: `S` texels over [wx0,wy0]..[wx0+S*upt, ...],
 	 *  row 0 NORTH, texel centres at +0.5. `colour` receives 0x00000000 where
@@ -10717,6 +10745,7 @@ private:
 			loaded.insert( key );
 			cen.meshes++;
 		}
+		const int decalFirst = shapes.size();
 		for ( const LodSrcShape & s : src ) {
 			if ( s.tris.isEmpty() || s.pos.isEmpty() )
 				continue;
@@ -10763,6 +10792,19 @@ private:
 			out.meanZ = float( zsum / double( out.pos.size() ) );
 			out.raisedModel = lodgenIsRaisedRoadModel( lb.model );
 			shapes.append( out );
+		}
+		// lane TERRLIVE1: the decal library's record of this placement
+		if ( shapes.size() > decalFirst ) {
+			DecalPlacement d;
+			d.first = decalFirst;
+			d.count = shapes.size() - decalFirst;
+			d.pos = pos;
+			d.rot = rot;
+			d.scale = scale;
+			d.refr = refr;
+			d.mswp = mswp;
+			d.model = lb.model.toLower();
+			decalPl.append( d );
 		}
 	}
 
@@ -10971,7 +11013,7 @@ private:
 			rec.squares = int( ghi.size() );
 			if ( ghi.empty() ) {
 				rec.why = "no land under it";
-				finishFlat( rec, recIndex, src, wv, world, c.rot );
+				finishFlat( rec, recIndex, src, wv, world, c.rot, &c );
 				continue;
 			}
 			rec.measured = true;
@@ -11029,7 +11071,7 @@ private:
 				rec.why = "stands up";
 			else if ( upvis <= 0.0 )
 				rec.why = "no top surface";
-			finishFlat( rec, recIndex, src, wv, world, c.rot );
+			finishFlat( rec, recIndex, src, wv, world, c.rot, &c );
 		}
 		flatRecTexels.assign( size_t( flatRecs.size() ), 0 );
 		flatCands.clear();
@@ -11038,7 +11080,8 @@ private:
 
 	//! The decision (the rule, then an override line), and the shapes when painted.
 	void finishFlat( LodgenFlatRec & rec, int recIndex, const QVector<LodSrcShape> & src,
-		const QVector<QVector<Vector3>> & wv, const EsmWorld & world, const Matrix & rot )
+		const QVector<QVector<Vector3>> & wv, const EsmWorld & world, const Matrix & rot,
+		const LodgenFlatCand * cand = nullptr )
 	{
 		rec.rulePaint = rec.measured && rec.why[0] == 0;
 		rec.painted = rec.rulePaint;
@@ -11054,6 +11097,7 @@ private:
 		cen.flatPainted++;
 		if ( rec.hasLod )
 			cen.flatHasLod++;
+		const int decalFirst = flatShapes.size();
 		for ( int si = 0; si < src.size(); si++ ) {
 			const LodSrcShape & s = src[si];
 			if ( s.tris.isEmpty() || wv[si].isEmpty() )
@@ -11115,6 +11159,20 @@ private:
 			}
 			fs.meanZ = float( zsum / double( fs.pos.size() ) );
 			flatShapes.append( fs );
+		}
+		// lane TERRLIVE1: the decal library's record of this placement
+		if ( cand && flatShapes.size() > decalFirst ) {
+			DecalPlacement d;
+			d.first = decalFirst;
+			d.count = flatShapes.size() - decalFirst;
+			d.flat = true;
+			d.pos = cand->pos;
+			d.rot = cand->rot;
+			d.scale = cand->scale;
+			d.refr = cand->refr;
+			d.mswp = cand->mswp;
+			d.model = rec.model.toLower();
+			decalPl.append( d );
 		}
 	}
 
@@ -11224,6 +11282,7 @@ private:
 	QVector<LodgenFlatCand> flatCands;
 	QVector<LodgenFlatRec> flatRecs;
 	QVector<LodgenFlatShape> flatShapes;
+	QVector<DecalPlacement> decalPl;        //!< lane TERRLIVE1
 	//! texels each report row wrote last, tile content only (the tiles run in turn)
 	mutable std::vector<qint64> flatRecTexels;
 	int flatG2p = 0;
@@ -16060,6 +16119,503 @@ static QString lodgenVtFillReport( const LodgenVtFill & F )
 		.arg( F.gridX ).arg( F.gridY ).arg( F.gridSource ).arg( lodgenVanillaLodRoot() );
 }
 
+/* ===== THE TERRAIN OPTION AND THE GROUND DECALS (lane TERRLIVE1, 2026-09-29) =====
+ *
+ * The option names what of the terrain's colour is baked; the decals are
+ * written by every option. See lodgen.h and io/loddecal.h. */
+
+QString lodgenTerrainOptionName( LodgenTerrainOption o )
+{
+	switch ( o ) {
+	case LodgenTerrainOption::Full: return QStringLiteral( "full" );
+	case LodgenTerrainOption::Dynamic: return QStringLiteral( "dynamic" );
+	default: return QStringLiteral( "hybrid" );
+	}
+}
+
+bool lodgenTerrainOptionParse( const QString & s, LodgenTerrainOption * out )
+{
+	const QString t = s.trimmed().toLower();
+	LodgenTerrainOption o;
+	if ( t == QLatin1String( "full" ) )
+		o = LodgenTerrainOption::Full;
+	else if ( t == QLatin1String( "hybrid" ) )
+		o = LodgenTerrainOption::Hybrid;
+	else if ( t == QLatin1String( "dynamic" ) )
+		o = LodgenTerrainOption::Dynamic;
+	else
+		return false;
+	if ( out )
+		*out = o;
+	return true;
+}
+
+QString lodgenTerrainOptionApply( LodgenTerrainOption o, LodgenVtOptions & opts )
+{
+	if ( o != LodgenTerrainOption::Hybrid )
+		return QString();
+	/* The .btr chunk sheets are assembled from the pyramid's dim-4 level while
+	 * its staging is live (assembleChunkRow); a pyramid that starts at dim 8
+	 * has none, so a bake that asks for them keeps its finest level. */
+	if ( !opts.btrTexDir.isEmpty() && ( opts.btrDims.contains( 4 ) || opts.btrDims.contains( 8 ) ) ) {
+		opts.writeFinestDim = 8;
+		return QStringLiteral( "terrain: hybrid stages the levels below dim 8 for the .btr chunk sheets "
+			"and writes none of them" );
+	}
+	opts.finestDim = 8;
+	return QString();
+}
+
+namespace
+{
+
+//! One distinct piece while the library is built.
+struct LodgenDecalBuild
+{
+	QString key;                    //!< model|mswp
+	int placement = -1;             //!< the placement whose shapes are the picture
+	int cls = LODD_CLASS_ROAD;
+};
+
+//! Box-filter one mip: RGB weighted by coverage (premultiplied), A averaged.
+void lodgenDecalHalve( const std::vector<quint32> & src, int w, int h,
+	std::vector<quint32> & dst, int dw, int dh )
+{
+	dst.assign( size_t( dw ) * size_t( dh ), 0U );
+	for ( int y = 0; y < dh; y++ )
+		for ( int x = 0; x < dw; x++ ) {
+			double r = 0, g = 0, b = 0, a = 0;
+			int n = 0;
+			for ( int dy = 0; dy < 2; dy++ )
+				for ( int dx = 0; dx < 2; dx++ ) {
+					const int sx = qMin( 2 * x + dx, w - 1 ), sy = qMin( 2 * y + dy, h - 1 );
+					const quint32 p = src[size_t( sy ) * w + size_t( sx )];
+					const double pa = double( p >> 24 ) / 255.0;
+					r += pa * double( ( p >> 16 ) & 0xFF );
+					g += pa * double( ( p >> 8 ) & 0xFF );
+					b += pa * double( p & 0xFF );
+					a += pa;
+					n++;
+				}
+			const double A = a / double( n );
+			quint32 o = quint32( qBound( 0, int( std::lround( A * 255.0 ) ), 255 ) ) << 24;
+			if ( a > 0.0 )
+				o |= ( quint32( qBound( 0, int( std::lround( r / a ) ), 255 ) ) << 16 )
+					| ( quint32( qBound( 0, int( std::lround( g / a ) ), 255 ) ) << 8 )
+					| quint32( qBound( 0, int( std::lround( b / a ) ), 255 ) );
+			dst[size_t( y ) * dw + size_t( x )] = o;
+		}
+}
+
+/* A texel no fragment covered carries the piece's mean covered colour, so a BC
+ * block that straddles the piece's edge does not pull its endpoints to black
+ * (a filtered read at the edge then fades to the piece's colour, not to dark). */
+void lodgenDecalFillEmpty( std::vector<quint32> & img, quint32 fallbackRgb )
+{
+	double r = 0, g = 0, b = 0, a = 0;
+	for ( quint32 p : img ) {
+		const double pa = double( p >> 24 );
+		r += pa * double( ( p >> 16 ) & 0xFF );
+		g += pa * double( ( p >> 8 ) & 0xFF );
+		b += pa * double( p & 0xFF );
+		a += pa;
+	}
+	const quint32 fill = a > 0.0
+		? ( ( quint32( std::lround( r / a ) ) << 16 ) | ( quint32( std::lround( g / a ) ) << 8 )
+			| quint32( std::lround( b / a ) ) )
+		: fallbackRgb;
+	for ( quint32 & p : img )
+		if ( ( p >> 24 ) == 0 )
+			p = fill;
+}
+
+//! A mip chain, each level BC3, concatenated.
+QByteArray lodgenDecalChain( std::vector<quint32> img, int w, int h, int mips, quint32 fallbackRgb )
+{
+	QByteArray out;
+	for ( int m = 0; m < mips; m++ ) {
+		std::vector<quint32> enc = img;
+		lodgenDecalFillEmpty( enc, fallbackRgb );
+		lodgenVtEncodeBlocks( enc, w, h, true, out );
+		if ( m + 1 < mips ) {
+			const int dw = qMax( 1, w >> 1 ), dh = qMax( 1, h >> 1 );
+			std::vector<quint32> next;
+			lodgenDecalHalve( img, w, h, next, dw, dh );
+			img.swap( next );
+			w = dw;
+			h = dh;
+		}
+	}
+	return out;
+}
+
+//! Matrix (row-major, v' = M v) -> unit quaternion x y z w.
+void lodgenDecalQuat( const Matrix & m, float q[4] )
+{
+	Quat k = m.toQuat();
+	float x = k[1], y = k[2], z = k[3], w = k[0];
+	const float n = std::sqrt( x * x + y * y + z * z + w * w );
+	if ( n > 0.0f ) {
+		x /= n; y /= n; z /= n; w /= n;
+	}
+	if ( w < 0.0f ) {
+		x = -x; y = -y; z = -z; w = -w;
+	}
+	q[0] = x; q[1] = y; q[2] = z; q[3] = w;
+}
+
+//! The inverse: the matrix a consumer builds from the stored quaternion.
+Matrix lodgenDecalQuatMatrix( const float q[4] )
+{
+	const float x = q[0], y = q[1], z = q[2], w = q[3];
+	Matrix m;
+	m( 0, 0 ) = 1 - 2 * ( y * y + z * z ); m( 0, 1 ) = 2 * ( x * y - z * w ); m( 0, 2 ) = 2 * ( x * z + y * w );
+	m( 1, 0 ) = 2 * ( x * y + z * w ); m( 1, 1 ) = 1 - 2 * ( x * x + z * z ); m( 1, 2 ) = 2 * ( y * z - x * w );
+	m( 2, 0 ) = 2 * ( x * z - y * w ); m( 2, 1 ) = 2 * ( y * z + x * w ); m( 2, 2 ) = 1 - 2 * ( x * x + y * y );
+	return m;
+}
+
+template <typename S> void lodgenDecalLocalise( S & sh, const Vector3 & pos, const Matrix & inv, float invScale )
+{
+	double zsum = 0.0;
+	for ( int k = 0; k < sh.pos.size(); k++ ) {
+		sh.pos[k] = inv * ( ( sh.pos[k] - pos ) * invScale );
+		zsum += double( sh.pos[k][2] );
+	}
+	for ( Vector3 & n : sh.nrm )
+		n = inv * n;
+	for ( Vector3 & t : sh.tan )
+		t = inv * t;
+	sh.bx0 = sh.bx1 = sh.pos.isEmpty() ? 0.0f : sh.pos[0][0];
+	sh.by0 = sh.by1 = sh.pos.isEmpty() ? 0.0f : sh.pos[0][1];
+	for ( const Vector3 & v : sh.pos ) {
+		sh.bx0 = qMin( sh.bx0, v[0] ); sh.bx1 = qMax( sh.bx1, v[0] );
+		sh.by0 = qMin( sh.by0, v[1] ); sh.by1 = qMax( sh.by1, v[1] );
+	}
+	sh.meanZ = sh.pos.isEmpty() ? 0.0f : float( zsum / double( sh.pos.size() ) );
+}
+
+} // namespace
+
+bool lodgenBakeDecals( const EsmWorld & world, const QString & dataRoot,
+	const QString & outDir, const LodgenVtOptions & opts, LodgenBakeCaches * caches,
+	QString * report, QString * error )
+{
+	QElapsedTimer timer;
+	timer.start();
+	auto fail = [error]( const QString & m ) {
+		if ( error )
+			*error = m;
+		return false;
+	};
+	const QString ws = world.worldspaceEdid();
+	if ( ws.isEmpty() || ws.size() > 31 )
+		return fail( QStringLiteral( "decals: the worldspace EDID does not fit the 32-byte field" ) );
+	int cx0 = 0, cy0 = 0, cx1 = 0, cy1 = 0;
+	world.cellBounds( cx0, cy0, cx1, cy1 );
+	if ( opts.haveRegion ) {
+		cx0 = qMax( cx0, qMin( opts.region[0], opts.region[2] ) );
+		cx1 = qMin( cx1, qMax( opts.region[0], opts.region[2] ) );
+		cy0 = qMax( cy0, qMin( opts.region[1], opts.region[3] ) );
+		cy1 = qMin( cy1, qMax( opts.region[1], opts.region[3] ) );
+	}
+	if ( cx1 < cx0 || cy1 < cy0 )
+		return fail( QStringLiteral( "decals: the region holds no cell of the worldspace" ) );
+
+	LodgenBakeCaches * ownCaches = caches ? nullptr : lodgenCreateBakeCaches();
+	struct CacheGuard
+	{
+		LodgenBakeCaches * p;
+		~CacheGuard() { if ( p ) lodgenDestroyBakeCaches( p ); }
+	} cacheGuard{ ownCaches };
+	LodgenBakeCaches & bc = caches ? *caches : *ownCaches;
+
+	const float baseUpt = 4.0f;
+	const int maxSide = 1024;
+	const float boxPad = 128.0f;
+	const LodgenCoverOptions & cov = opts.cover;
+
+	LodgenRoadSet set;
+	if ( cov.roads ) {
+		set.setFlat( cov.flatObjects, cov.flatObjectsFile );
+		set.gather( world, dataRoot, cx0, cy0, cx1, cy1, cov.roadRaised, cov.roadSidewalks );
+	}
+	const qint64 msGather = timer.elapsed();
+	const QVector<LodgenRoadSet::DecalPlacement> & pl = set.decalPlacements();
+	const QVector<LodgenRoadShape> & rs = set.roadShapeList();
+	const QVector<LodgenFlatShape> & fsh = set.flatShapeList();
+
+	// the pieces, first placement of each key; and each placement's world mean Z
+	QHash<QString, int> pieceOf;
+	QVector<LodgenDecalBuild> build;
+	QVector<int> plPiece( pl.size(), -1 );
+	QVector<float> plMeanZ( pl.size(), 0.0f );
+	for ( int i = 0; i < pl.size(); i++ ) {
+		const LodgenRoadSet::DecalPlacement & p = pl[i];
+		double z = 0.0;
+		bool opaque = false;
+		for ( int k = p.first; k < p.first + p.count; k++ ) {
+			if ( p.flat ) {
+				const LodgenFlatShape & s = fsh[k];
+				z += double( s.meanZ );
+				opaque = opaque || !( s.decal || s.alphaBlend || s.alphaTest );
+			} else
+				z += double( rs[k].meanZ );
+		}
+		plMeanZ[i] = float( z / double( qMax( 1, p.count ) ) );
+		const QString key = p.model + QChar( '|' ) + QString( "%1" ).arg( p.mswp, 8, 16, QChar( '0' ) );
+		auto it = pieceOf.find( key );
+		if ( it == pieceOf.end() ) {
+			LodgenDecalBuild b;
+			b.key = key;
+			b.placement = i;
+			b.cls = !p.flat ? LODD_CLASS_ROAD : ( opaque ? LODD_CLASS_FLAT : LODD_CLASS_FLAT_OVER );
+			it = pieceOf.insert( key, build.size() );
+			build.append( b );
+		}
+		plPiece[i] = *it;
+	}
+
+	// every piece's pictures, scan-converted in its own frame
+	QVector<LoddPiece> pieces( build.size() );
+	LodgenRoadCensus scratch;
+	int capped = 0;
+	qint64 texels = 0;
+	for ( int pi = 0; pi < build.size(); pi++ ) {
+		const LodgenRoadSet::DecalPlacement & p = pl[build[pi].placement];
+		const Matrix inv = p.rot.inverted();
+		const float invScale = p.scale > 0.0f ? 1.0f / p.scale : 1.0f;
+		QVector<LodgenRoadShape> lr;
+		QVector<LodgenFlatShape> lf;
+		for ( int k = p.first; k < p.first + p.count; k++ ) {
+			if ( p.flat ) {
+				LodgenFlatShape s = fsh[k];
+				lodgenDecalLocalise( s, p.pos, inv, invScale );
+				/* The picture paints every fragment: a flat object's "buried" test
+				 * needs the ground under ONE placement, and the ground hides what
+				 * is under it at draw time. `rec` -1 keeps the report's counts. */
+				s.rise.fill( 0.0f );
+				s.rec = -1;
+				lf.append( s );
+			} else {
+				LodgenRoadShape s = rs[k];
+				lodgenDecalLocalise( s, p.pos, inv, invScale );
+				lr.append( s );
+			}
+		}
+		float x0 = 1e30f, y0 = 1e30f, z0 = 1e30f, x1 = -1e30f, y1 = -1e30f, z1 = -1e30f;
+		auto grow = [&]( const QVector<Vector3> & v ) {
+			for ( const Vector3 & q : v ) {
+				x0 = qMin( x0, q[0] ); x1 = qMax( x1, q[0] );
+				y0 = qMin( y0, q[1] ); y1 = qMax( y1, q[1] );
+				z0 = qMin( z0, q[2] ); z1 = qMax( z1, q[2] );
+			}
+		};
+		for ( const LodgenRoadShape & s : lr )
+			grow( s.pos );
+		for ( const LodgenFlatShape & s : lf )
+			grow( s.pos );
+		const float ext = qMax( x1 - x0, y1 - y0 );
+		float upt = baseUpt;
+		if ( ext / upt > float( maxSide ) ) {
+			upt = ext / float( maxSide );
+			capped++;
+		}
+		auto side = [upt]( float e ) {
+			int n = int( std::ceil( double( e ) / double( upt ) ) );
+			n = qMax( 4, ( n + 3 ) & ~3 );
+			return n;
+		};
+		const int w = qMin( side( x1 - x0 ), maxSide ), h = qMin( side( y1 - y0 ), maxSide );
+		const int S = qMax( w, h );
+		LodgenRoadSet local;
+		local.adoptShapes( lr, lf );
+		std::vector<quint32> plane;
+		std::vector<float> nplane;
+		local.rasterise( x0, y0 + float( h ) * upt, upt, S, plane, bc, dataRoot, scratch,
+			cov.roadComposite, cov.roadDetail, cov.roadGroundPaint, 0,
+			cov.stampNormals ? &nplane : nullptr );
+		std::vector<quint32> col( size_t( w ) * size_t( h ) ), nrm( size_t( w ) * size_t( h ) );
+		quint32 covered = 0;
+		bool stamped = false;
+		for ( int y = 0; y < h; y++ )
+			for ( int x = 0; x < w; x++ ) {
+				const size_t si = size_t( y ) * size_t( S ) + size_t( x ), di = size_t( y ) * size_t( w ) + size_t( x );
+				col[di] = plane[si];
+				if ( plane[si] >> 24 )
+					covered++;
+				quint32 n = ( 128U << 16 ) | ( 128U << 8 ) | 255U;
+				if ( !nplane.empty() ) {
+					const float * q = &nplane[si * 4];
+					if ( q[3] > 0.0f ) {
+						Vector3 v( q[0], q[1], q[2] );
+						if ( v.length() > 1e-6f )
+							v.normalize();
+						else
+							v = Vector3( 0.0f, 0.0f, 1.0f );
+						auto b = []( float c ) { return quint32( qBound( 0, int( std::lround( ( c * 0.5f + 0.5f ) * 255.0f ) ), 255 ) ); };
+						n = ( quint32( qBound( 0, int( std::lround( q[3] * 255.0f ) ), 255 ) ) << 24 )
+							| ( b( v[0] ) << 16 ) | ( b( v[1] ) << 8 ) | b( v[2] );
+						stamped = true;
+					}
+				}
+				nrm[di] = n;
+			}
+		int mips = 1;
+		while ( ( qMin( w, h ) >> mips ) >= 4 )
+			mips++;
+		LoddPiece & o = pieces[pi];
+		o.x0 = x0;
+		o.y0 = y0;
+		o.x1 = x0 + float( w ) * upt;
+		o.y1 = y0 + float( h ) * upt;
+		o.z0 = z0;
+		o.z1 = z1;
+		o.width = w;
+		o.height = h;
+		o.mips = mips;
+		o.cls = build[pi].cls;
+		o.flags = stamped ? 1u : 0u;
+		o.covered = covered;
+		o.name = build[pi].key;
+		o.colourBc3 = lodgenDecalChain( col, w, h, mips, 0x808080U );
+		o.normalBc3 = lodgenDecalChain( nrm, w, h, mips, ( 128U << 16 ) | ( 128U << 8 ) | 255U );
+	}
+	const qint64 msPictures = timer.elapsed() - msGather;
+
+	// the placements: draw order, their world XY boxes, kept where they touch the region
+	QVector<int> order;
+	QVector<QVector<float>> boxOf( pl.size() );
+	const float rx0 = float( cx0 ) * 4096.0f, ry0 = float( cy0 ) * 4096.0f;
+	const float rx1 = float( cx1 + 1 ) * 4096.0f, ry1 = float( cy1 + 1 ) * 4096.0f;
+	float quatErr = 0.0f;
+	QVector<LodgRecord> recAll( pl.size() );
+	for ( int i = 0; i < pl.size(); i++ ) {
+		const LodgenRoadSet::DecalPlacement & p = pl[i];
+		const LoddPiece & pc = pieces[plPiece[i]];
+		LodgRecord & r = recAll[i];
+		r.pos[0] = p.pos[0]; r.pos[1] = p.pos[1]; r.pos[2] = p.pos[2];
+		lodgenDecalQuat( p.rot, r.quat );
+		const Matrix back = lodgenDecalQuatMatrix( r.quat );
+		for ( int a = 0; a < 3; a++ )
+			for ( int b = 0; b < 3; b++ )
+				quatErr = qMax( quatErr, std::fabs( back( a, b ) - p.rot( a, b ) ) );
+		r.scale = p.scale;
+		r.piece = plPiece[i];
+		r.cls = pc.cls;
+		r.refr = p.refr;
+		float bx0 = 1e30f, by0 = 1e30f, bx1 = -1e30f, by1 = -1e30f;
+		for ( int c = 0; c < 8; c++ ) {
+			const Vector3 lc( ( c & 1 ) ? pc.x1 : pc.x0, ( c & 2 ) ? pc.y1 : pc.y0,
+				( c & 4 ) ? pc.z1 + boxPad : pc.z0 - boxPad );
+			const Vector3 wc = p.pos + p.rot * ( lc * p.scale );
+			bx0 = qMin( bx0, wc[0] ); bx1 = qMax( bx1, wc[0] );
+			by0 = qMin( by0, wc[1] ); by1 = qMax( by1, wc[1] );
+		}
+		boxOf[i] = { bx0, by0, bx1, by1 };
+		if ( bx1 < rx0 || bx0 > rx1 || by1 < ry0 || by0 > ry1 )
+			continue;
+		order.append( i );
+	}
+	std::stable_sort( order.begin(), order.end(), [&]( int a, int b ) {
+		if ( recAll[a].cls != recAll[b].cls )
+			return recAll[a].cls < recAll[b].cls;
+		return plMeanZ[a] < plMeanZ[b];
+	} );
+
+	// drop the pieces no kept placement uses, renumbering
+	QVector<int> used( pieces.size(), 0 );
+	for ( int i : order )
+		used[recAll[i].piece] = 1;
+	QVector<int> remap( pieces.size(), -1 );
+	QVector<LoddPiece> kept;
+	for ( int k = 0; k < pieces.size(); k++ )
+		if ( used[k] ) {
+			remap[k] = kept.size();
+			kept.append( pieces[k] );
+		}
+	QVector<LodgRecord> records;
+	QVector<QVector<float>> boxes;
+	int cls[3] = { 0, 0, 0 };
+	for ( int i : order ) {
+		LodgRecord r = recAll[i];
+		r.piece = remap[r.piece];
+		cls[qBound( 0, r.cls, 2 )]++;
+		records.append( r );
+		boxes.append( boxOf[i] );
+	}
+	if ( kept.size() > 65535 )
+		return fail( QString( "decals: %1 distinct pieces; the placement record's piece field is 16 bits" )
+			.arg( kept.size() ) );
+
+	const QString dir = lodgenFo4csWorldDir( outDir, ws );
+	if ( !QDir().mkpath( dir ) )
+		return fail( QString( "decals: cannot create %1" ).arg( dir ) );
+	const QString lodd = QDir( dir ).filePath( ws + QStringLiteral( ".lodd" ) );
+	const QString lodg = QDir( dir ).filePath( ws + QStringLiteral( ".lodg" ) );
+	quint32 tcrc = 0;
+	QString werr;
+	if ( !loddWrite( lodd, ws, baseUpt, maxSide, kept, &tcrc, &werr ) )
+		return fail( QStringLiteral( "decals: " ) + werr );
+	if ( !lodgWrite( lodg, ws, cx0, cy0, cx1, cy1, boxPad, kept.size(), tcrc, records, boxes, &werr ) )
+		return fail( QStringLiteral( "decals: " ) + werr );
+	// read back by their own reader
+	QString rb, rbErr;
+	const bool rbOk = loddCheckPair( lodd, &rb, &rbErr );
+	if ( !rbOk )
+		return fail( QStringLiteral( "decals: the files do not read back: " ) + rbErr );
+	int kc[3] = { 0, 0, 0 };
+	for ( const LoddPiece & k : kept ) {
+		kc[qBound( 0, k.cls, 2 )]++;
+		texels += qint64( k.width ) * k.height;
+	}
+	if ( report )
+		*report = QString( "decals: %1 piece(s) (roads %2, flat %3, flat-over %4; %5 capped at %6 texels), "
+			"%7 placement(s) (roads %8, flat %9, flat-over %10) over cells %11..%12 x %13..%14, "
+			"%15 mip-0 texel(s), library %16 bytes, placements %17 bytes, rotation round trip max %18, "
+			"gather %19 ms, pictures %20 ms, total %21 ms; read back: %22" )
+			.arg( kept.size() ).arg( kc[0] ).arg( kc[1] ).arg( kc[2] ).arg( capped ).arg( maxSide )
+			.arg( records.size() ).arg( cls[0] ).arg( cls[1] ).arg( cls[2] )
+			.arg( cx0 ).arg( cx1 ).arg( cy0 ).arg( cy1 )
+			.arg( texels ).arg( QFileInfo( lodd ).size() ).arg( QFileInfo( lodg ).size() )
+			.arg( double( quatErr ), 0, 'g', 3 ).arg( msGather ).arg( msPictures ).arg( timer.elapsed() )
+			.arg( rb.simplified() );
+	return true;
+}
+
+bool lodgenLtexPicture( const EsmWorld & world, const QString & dataRoot, LodgenBakeCaches * caches,
+	quint32 ltexForm, int side, std::vector<quint32> & rgba, QString * path )
+{
+	rgba.clear();
+	QString d, n;
+	world.ltexTextures( ltexForm, d, n );
+	if ( path )
+		*path = d;
+	if ( d.isEmpty() || side < 1 )
+		return false;
+	LodgenBakeCaches * ownCaches = caches ? nullptr : lodgenCreateBakeCaches();
+	struct CacheGuard {
+		LodgenBakeCaches * p;
+		~CacheGuard() { if ( p ) lodgenDestroyBakeCaches( p ); }
+	} guard{ ownCaches };
+	LodgenBakeCaches & bc = caches ? *caches : *ownCaches;
+	const DDSTexture16 * tex = lodgenCachedTexture( bc, dataRoot, d );
+	if ( !tex )
+		return false;
+	// the mip whose width is nearest `side`, never finer than it
+	const float mip = qBound( 0.0f, std::log2( qMax( 1.0f, float( tex->getWidth() ) / float( side ) ) ),
+		float( tex->getMaxMipLevel() ) );
+	rgba.resize( size_t( side ) * size_t( side ) );
+	for ( int y = 0; y < side; y++ )
+		for ( int x = 0; x < side; x++ ) {
+			const FloatVector4 c = tex->getPixelT( ( float( x ) + 0.5f ) / float( side ),
+				( float( y ) + 0.5f ) / float( side ), mip );
+			auto b = []( float v ) { return quint32( qBound( 0, int( v * 255.0f + 0.5f ), 255 ) ); };
+			rgba[size_t( y ) * side + x] = ( 255u << 24 ) | ( b( c[0] ) << 16 ) | ( b( c[1] ) << 8 ) | b( c[2] );
+		}
+	return true;
+}
+
 bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 	const QString & outDir, const LodgenVtOptions & opts, LodgenBakeCaches * caches,
 	QString * report, QString * error )
@@ -16158,6 +16714,13 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 		wantEmissive = maskCache.withEmissive > 0;
 	}
 
+	/* lane TERRLIVE1: levels below `writeFinestDim` are staged, not written;
+	 * the written ones carry the header a pyramid starting there would carry. */
+	int firstW = 0;
+	if ( opts.writeFinestDim > 0 )
+		while ( firstW < nLevels && levels[firstW].dim < opts.writeFinestDim )
+			firstW++;
+	const int nWritten = nLevels - firstW;
 	std::vector<std::unique_ptr<LodvWriter>> writers;
 	std::vector<QString> paths;
 	std::vector<LodvHeaderFields> headers;      // the one-value test reads the sheet set
@@ -16177,8 +16740,8 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 		h.worldSouth = qint16( wS );
 		h.worldNorth = qint16( wN );
 		h.levelDim = quint16( levels[l].dim );
-		h.levelIndex = quint16( l );
-		h.levelCount = quint16( nLevels );
+		h.levelIndex = quint16( qMax( 0, l - firstW ) );
+		h.levelCount = quint16( nWritten );
 		h.tilesX = quint16( levels[l].tilesX );
 		h.tilesY = quint16( levels[l].tilesY );
 		h.contentTexels = quint16( content );
@@ -16198,8 +16761,8 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 		h.compression = quint8( opts.compression );
 		h.coverNormalisation = opts.cover.coverFull;
 		h.tintStrength = opts.cover.tintStrength;
-		for ( int i = 0; i < nLevels && i < 8; i++ )
-			h.levelDims[i] = quint16( levels[i].dim );
+		for ( int i = 0; i < nWritten && i < 8; i++ )
+			h.levelDims[i] = quint16( levels[firstW + i].dim );
 		const quint16 colorCoverFmt = opts.coverInColor ? LODV_DXGI_BC3_UNORM : LODV_DXGI_BC1_UNORM;
 		const quint16 maskCoverFmt = opts.coverInColor ? LODV_DXGI_BC1_UNORM : LODV_DXGI_BC3_UNORM;
 		h.sheets[0] = { LODV_DXGI_BC1_UNORM, colorCoverFmt, LODV_ROLE_COLOR, 1 };
@@ -16217,6 +16780,12 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 			for ( int i = 1; i < nextSheet; i++ )
 				h.sheets[i].mipSkip = 1;
 		const QString path = QString( "%1/%2.VT.%3.lodt" ).arg( dir ).arg( ws ).arg( levels[l].dim );
+		if ( l < firstW ) {
+			writers.push_back( nullptr );
+			paths.push_back( QString() );
+			headers.push_back( h );
+			continue;
+		}
 		auto w = std::make_unique<LodvWriter>();
 		QString werr;
 		if ( !w->begin( path, h, &werr ) )
@@ -16330,7 +16899,12 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 	 * 16-byte record instead of the sheet, and the raw bytes that saved. */
 	qint64 uniformCount[LODV_MAX_SHEETS] = {};
 	qint64 uniformSaved = 0;
+	qint64 stagedOnly = 0;
 	auto writeTile = [&]( int lv, const LodgenVtStage & st ) -> bool {
+		if ( !writers[size_t( lv )] ) {
+			stagedOnly++;
+			return true;
+		}
 		const QByteArray raw = lodgenVtEncodeTile( st, stored, mips, opts.height,
 			wantEmissive, opts.coverInColor, opts.halfAux );
 		QString werr;
@@ -16516,7 +17090,7 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 	}
 
 	qint64 fileBytesTotal = 0;
-	for ( int l = 0; l < nLevels; l++ ) {
+	for ( int l = firstW; l < nLevels; l++ ) {
 		QString werr;
 		if ( !writers[size_t( l )]->finish( &werr ) )
 			return fail( QString( "%1: %2" ).arg( paths[size_t( l )] ).arg( werr ) );
@@ -16529,7 +17103,7 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 	 * that ignore `kind` can never open it. `family` is vestigial here -- it
 	 * carries the legacy/PBR MATERIAL split and a tile pyramid is neither --
 	 * and `kind` is the discriminator. */
-	{
+	if ( nWritten > 0 ) {
 		QJsonObject root;
 		root.insert( QStringLiteral( "lodm" ), 1 );
 		/* THE FAMILY WORD IS REAL NOW, and it MEANS it (bungo, 2026-09-11
@@ -16687,9 +17261,9 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 		if ( opts.haveRegion )
 			t.insert( QStringLiteral( "partial" ), true );
 		QJsonArray ls;
-		for ( int l = 0; l < nLevels; l++ ) {
+		for ( int l = firstW; l < nLevels; l++ ) {
 			QJsonObject o;
-			o.insert( QStringLiteral( "index" ), l );
+			o.insert( QStringLiteral( "index" ), l - firstW );
 			o.insert( QStringLiteral( "dim" ), levels[l].dim );
 			o.insert( QStringLiteral( "tilesX" ), levels[l].tilesX );
 			o.insert( QStringLiteral( "tilesY" ), levels[l].tilesY );
@@ -16720,7 +17294,10 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 	if ( report ) {
 		QStringList r;
 		r << QStringLiteral( "vt:" );
-		r << QString( "levels %1" ).arg( nLevels );
+		r << QString( "levels %1" ).arg( nWritten );
+		if ( firstW > 0 )
+			r << QString( "stagedOnly %1 levels %2 tiles (dims below %3: the .btr chunk sheets only, not written)" )
+				.arg( firstW ).arg( stagedOnly ).arg( opts.writeFinestDim );
 		r << QString( "tiles %1" ).arg( presentTotal );
 		r << QString( "present %1" ).arg( presentTotal );
 		r << QString( "coverTiles %1" ).arg( coverTiles );

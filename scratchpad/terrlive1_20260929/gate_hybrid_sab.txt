@@ -1,0 +1,20 @@
+files rung 232  new 231
+  .bto       same     17  differ     0  onlyRung    0  onlyNew    0
+  .btr       same     17  differ     0  onlyRung    0  onlyNew    0
+  .dds       same     98  differ     0  onlyRung    0  onlyNew    0
+  .key       same     17  differ     0  onlyRung    0  onlyNew    0
+  .lodb      same      0  differ     1  onlyRung    0  onlyNew    0
+  .lodi      same      1  differ     0  onlyRung    0  onlyNew    0
+  .lodj      same     17  differ     0  onlyRung    0  onlyNew    0
+  .lodl      same      1  differ     0  onlyRung    0  onlyNew    0
+  .lodm      same     23  differ     0  onlyRung    1  onlyNew    0
+  .lodo      same      1  differ     0  onlyRung    0  onlyNew    0
+  .lodt      same      0  differ     0  onlyRung    2  onlyNew    0
+  .txt       same     36  differ     0  onlyRung    0  onlyNew    0
+  onlyRung mod/FO4CSLOD/Commonwealth/Commonwealth.VT.2.lodt
+  onlyRung mod/FO4CSLOD/Commonwealth/Commonwealth.VT.4.lodt
+  onlyRung mod/FO4CSLOD/Commonwealth/Commonwealth.VT.lodm
+  DIFF-lodb mod/FO4CSLOD/Commonwealth/Commonwealth.lodb ['census\tvt: levels 0 stagedOnly 2 levels 45 tiles (dims below 8: the .btr chunk sheets only, not written) tiles 0 present 0 coverTiles 0 bytes 0 cover 1 coverIn mask sheets 4 emissive none maskPbrm 0 maskLegacyInverted 45 maskNoneDefault 0 maskRoughMaps 44 maskMetalMaps 0 maskEmissiveMaps 0 maskDistinctLtex 45 maskLayerRefs 2795 vanillaFill off: fewer than 2 overlap cells with a vanilla tile to 
+new files (additive): mod/FO4CSLOD/Commonwealth/Commonwealth.lodd 51991408 bytes, mod/FO4CSLOD/Commonwealth/Commonwealth.lodg 370756 bytes
+equal only after the mask (.lodb/.key/.txt): 18
+GATE RED: 228 same, 4 finding(s)

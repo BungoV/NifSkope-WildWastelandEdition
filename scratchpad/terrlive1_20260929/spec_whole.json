@@ -1,0 +1,55 @@
+{
+ "lodl": "E:/Projects/NifskopeWWE-night/scratchpad/merge1_20260929/stage/mod/FO4CSLOD/Commonwealth/Commonwealth.lodl",
+ "fade": [
+  8192.0,
+  12288.0
+ ],
+ "frames": 30,
+ "ltex_side": 512,
+ "decal_normals": true,
+ "views": [
+  {
+   "name": "whole",
+   "cells": [
+    -96,
+    -96,
+    95,
+    95
+   ],
+   "stride": 4,
+   "ortho": [
+    0.0,
+    0.0,
+    393216.0
+   ],
+   "width": 1600,
+   "height": 1600,
+   "lodt_full": "E:/Projects/NifskopeWWE-night/scratchpad/merge1_20260929/stage/mod/FO4CSLOD/Commonwealth/Commonwealth.VT.32.lodt",
+   "lodt_far": "E:/Projects/NifskopeWWE-terrlive1/scratchpad/terrlive1_20260929/whole_hybrid/mod/FO4CSLOD/Commonwealth/Commonwealth.VT.32.lodt",
+   "decals": "E:/Projects/NifskopeWWE-terrlive1/scratchpad/terrlive1_20260929/whole_hybrid/mod/FO4CSLOD/Commonwealth/Commonwealth.lodd",
+   "renders": [
+    {
+     "option": "full",
+     "out": "pics/whole_full.png"
+    },
+    {
+     "option": "hybrid",
+     "out": "pics/whole_hybrid.png"
+    },
+    {
+     "option": "dynamic",
+     "out": "pics/whole_dynamic.png"
+    },
+    {
+     "options": [
+      "full",
+      "hybrid",
+      "dynamic"
+     ],
+     "out": "pics/whole_side_by_side.png"
+    }
+   ],
+   "box_count": true
+  }
+ ]
+}

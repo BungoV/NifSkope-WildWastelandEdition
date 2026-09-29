@@ -1532,6 +1532,10 @@ void lodgenBakeCacheCounts( const LodgenBakeCaches * caches, int * nifReads, int
 struct LodgenVtOptions
 {
 	int finestDim = 2;              //!< cells per tile at the finest level, 1 or 2
+	/*! Lane TERRLIVE1 (terrain option hybrid): levels finer than this dim are
+	 *  STAGED -- the .btr chunk sheets are assembled from them -- but never
+	 *  encoded or written. 0 = every level is written (today's bake). */
+	int writeFinestDim = 0;
 	int content = 256;
 	int border = 8;
 	int mips = 2;
@@ -1627,6 +1631,51 @@ bool lodgenVtEstimateBounds( int worldWest, int worldSouth, int worldEast, int w
 bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 	const QString & outDir, const LodgenVtOptions & opts, LodgenBakeCaches * caches,
 	QString * report, QString * error );
+
+/*! THE TERRAIN OPTION (lane TERRLIVE1, 2026-09-29). Which part of the LOD
+ *  terrain's colour is baked and which the consumer builds live:
+ *
+ *   Full     today's texture pyramid, every level (VT.2 up), unchanged.
+ *   Hybrid   the pyramid from dim 8 up (64 world units a texel at content
+ *            512), baked directly, so VT.2 and VT.4 are never computed; near
+ *            and mid distance are the consumer's live splat from the .lodl.
+ *   Dynamic  no pyramid at all; the live splat everywhere.
+ *
+ *  Every option also writes the ground decals (`<ws>.lodd` + `<ws>.lodg`,
+ *  io/loddecal.h). Hybrid is the default (bungo's ruling). */
+enum class LodgenTerrainOption : int
+{
+	Full = 0,
+	Hybrid = 1,
+	Dynamic = 2
+};
+
+//! "full", "hybrid", "dynamic".
+QString lodgenTerrainOptionName( LodgenTerrainOption o );
+//! Parses the three names (any case); false on anything else.
+bool lodgenTerrainOptionParse( const QString & s, LodgenTerrainOption * out );
+/*! What the option does to the pyramid's options: Hybrid sets the finest level
+ *  to dim 8. Returns a one-line note when it could not (the .btr chunk sheets
+ *  are assembled from level 4 and need it), else empty. */
+QString lodgenTerrainOptionApply( LodgenTerrainOption o, LodgenVtOptions & opts );
+
+/*! THE GROUND DECALS: every road placement and every painted flat object in
+ *  the region (opts.region when opts.haveRegion, else the worldspace) as one
+ *  projected decal, one picture set per distinct piece. Writes `<ws>.lodd` and
+ *  `<ws>.lodg` into lodgenFo4csWorldDir( outDir, ws ), reads both back with
+ *  their own reader, and returns a `decals:` census line in `report`.
+ *  Uses opts.cover for the road / flat-object rules, the same ones the
+ *  pyramid's paint follows. */
+bool lodgenBakeDecals( const EsmWorld & world, const QString & dataRoot,
+	const QString & outDir, const LodgenVtOptions & opts, LodgenBakeCaches * caches,
+	QString * report, QString * error );
+
+/*! Lane TERRLIVE1 (the live-splat preview): one LTEX record's diffuse as
+ *  `side` x `side` texels, 0xAARRGGBB, row 0 = v 0 (the bake's own lookup),
+ *  resampled from the mip nearest `side`. False when the record names no
+ *  texture or it does not load; `path` gets the texture path either way. */
+bool lodgenLtexPicture( const EsmWorld & world, const QString & dataRoot, LodgenBakeCaches * caches,
+	quint32 ltexForm, int side, std::vector<quint32> & rgba, QString * path = nullptr );
 
 bool lodgenBakeTerrainTextures( const EsmWorld & world, int chunkX, int chunkY,
 	int dim, const QString & dataRoot, const QString & outDir,

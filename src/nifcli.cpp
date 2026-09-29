@@ -35,6 +35,8 @@ See the LICENSE.md file for the full license text.
 #include "lodifile.h"
 #include "lodofile.h"
 #include "lodbfile.h"
+#include "io/loddecal.h"
+#include "terrainpreview.h"
 #include <QDateTime>
 #include <QDirIterator>
 #include "lodtfile.h"
@@ -2657,6 +2659,13 @@ static bool gLgAllRings = false;
  *  apart. Off = the layout every gate pins. */
 static bool gLgOneRoot = false;
 
+/*! Lane TERRLIVE1: the terrain option (lodgen.h, LodgenTerrainOption) --
+ *  `--terrain-option full|hybrid|dynamic`, hybrid the default. A global for
+ *  the reason the others here are. */
+static LodgenTerrainOption gLgTerrainOption = LodgenTerrainOption::Hybrid;
+//! lane TERRLIVE1: `--terrain-preview <spec.json>` (src/terrainpreview.h)
+static QString gLgTerrainPreview;
+
 /*! The argument vector verbatim and the resource stack as the run was given
  *  them (lane BAKEREC1, 2026-09-17). Globals for the same reason the two above
  *  are: `cmdLodgen` already carries forty-five parameters. The record writes
@@ -3886,6 +3895,17 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 		}
 		return saveNif( nif, outFile ) ? 0 : 1;
 	}
+	if ( !gLgTerrainPreview.isEmpty() ) {
+		EsmWorld pvWorld;
+		QString perr;
+		if ( !pvWorld.load( file, worldspace ? worldspace : 0x3CU, &perr ) ) {
+			err() << "error: " << perr << Qt::endl;
+			return 1;
+		}
+		return terrainPreviewRun( pvWorld,
+			dataRoot.isEmpty() ? QStringLiteral( "E:/Tools/Fallout 4/DataUnpacked/Data" ) : dataRoot,
+			gLgTerrainPreview );
+	}
 	if ( ( !vtDir.isEmpty() || vtEstimate ) && !haveRegion ) {
 		EsmWorld vtWorld;
 		QString verr;
@@ -3903,10 +3923,23 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 			vo.btrTexDir = texDir;
 			vo.btrDims = QVector<int>{ 4, 8, 16, 32 };
 		}
+		// lane TERRLIVE1: the terrain option and the decals, as the region bake does
+		const QString vRoot = dataRoot.isEmpty() ? QStringLiteral( "E:/Tools/Fallout 4/DataUnpacked/Data" ) : dataRoot;
+		const QString note = lodgenTerrainOptionApply( gLgTerrainOption, vo );
+		if ( !note.isEmpty() )
+			censusOut( note );
+		QString dReport;
+		if ( !lodgenBakeDecals( vtWorld, vRoot, vtDir, vo, nullptr, &dReport, &verr ) ) {
+			err() << "error: " << verr << Qt::endl;
+			return 1;
+		}
+		censusOut( dReport );
+		if ( gLgTerrainOption == LodgenTerrainOption::Dynamic ) {
+			censusOut( QStringLiteral( "vt: none -- terrain option dynamic writes no pyramid" ) );
+			return 0;
+		}
 		QString vtReport;
-		if ( !lodgenBakeTerrainVt( vtWorld,
-			dataRoot.isEmpty() ? QStringLiteral( "E:/Tools/Fallout 4/DataUnpacked/Data" ) : dataRoot,
-			vtDir, vo, nullptr, &vtReport, &verr ) ) {
+		if ( !lodgenBakeTerrainVt( vtWorld, vRoot, vtDir, vo, nullptr, &vtReport, &verr ) ) {
 			err() << "error: " << verr << Qt::endl;
 			return 1;
 		}
@@ -3943,7 +3976,7 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 		 * (lodgenStageTimeLine). A region bake writes no `.lodl`, so its
 		 * landscape stage is 0 by construction -- the `--lodt-dir` run is where
 		 * that one moves, and it prints the same line. */
-		qint64 msLandscape = 0, msMeshes = 0, msTextures = 0, msImpostors = 0;
+		qint64 msLandscape = 0, msMeshes = 0, msTextures = 0, msImpostors = 0, msDecals = 0;
 		struct StageTimer
 		{
 			qint64 * acc;
@@ -4236,6 +4269,8 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 			&& inc.unknownChunks == 0 && inc.productsLost == 0;
 		if ( vtSkip && !vtDir.isEmpty() )
 			censusOut( QStringLiteral( "vt: kept -- no chunk input moved and every VT level is intact" ) );
+		if ( !vtDir.isEmpty() )
+			lodbSetTerrainOption( lodgenTerrainOptionName( gLgTerrainOption ) );
 		if ( !vtDir.isEmpty() && !vtSkip ) {
 			LodgenVtOptions vo = vtOpts;
 			vo.haveRegion = true;
@@ -4246,9 +4281,32 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 				vo.btrTexDir = texDir;
 				vo.btrDims = QVector<int>{ 4, 8, 16, 32 };
 			}
-			QString vtReport, vterr;
-			bool vtOk = false;
+			/* THE TERRAIN OPTION (lane TERRLIVE1). The decals are written by
+			 * every option, as their own stage; the pyramid by full and hybrid. */
 			{
+				const QString note = lodgenTerrainOptionApply( gLgTerrainOption, vo );
+				if ( !note.isEmpty() )
+					censusOut( note );
+				QString dReport, derr;
+				bool dOk = false;
+				{
+					StageTimer st( &msDecals );
+					dOk = lodgenBakeDecals( world,
+						dataRoot.isEmpty() ? QStringLiteral( "E:/Tools/Fallout 4/DataUnpacked/Data" ) : dataRoot,
+						vtDir, vo, bakeCaches, &dReport, &derr );
+				}
+				if ( !dOk ) {
+					err() << "error: " << derr << Qt::endl;
+					return 1;
+				}
+				censusOut( dReport );
+				out().flush();
+			}
+			QString vtReport, vterr;
+			bool vtOk = gLgTerrainOption == LodgenTerrainOption::Dynamic;
+			if ( vtOk )
+				censusOut( QStringLiteral( "vt: none -- terrain option dynamic writes no pyramid" ) );
+			else {
 				StageTimer st( &msTextures );		// the pyramid is a TEXTURE stage
 				vtOk = lodgenBakeTerrainVt( world,
 					dataRoot.isEmpty() ? QStringLiteral( "E:/Tools/Fallout 4/DataUnpacked/Data" ) : dataRoot,
@@ -6970,6 +7028,14 @@ int usage()
 		  << "                                          default and reads no directory.\n"
 		  << "  lodgen <file.esm> --worldspace HEX --vt MODFOLDER [--tex-dir DIR]\n"
 		  << "         [--vt-finest 2] [--vt-content 256] [--vt-border 8] [--vt-mips 2]\n"
+		  << "         [--terrain-option full|hybrid|dynamic]  full = every pyramid level;\n"
+		  << "                                          hybrid (default) = levels from dim 8\n"
+		  << "                                          up, baked directly (no VT.2/VT.4);\n"
+		  << "                                          dynamic = no pyramid. Every option\n"
+		  << "                                          writes the ground decals <ws>.lodd +\n"
+		  << "                                          <ws>.lodg beside the pyramid.\n"
+		  << "  lodgen --decal-check <file.lodd|.lodg|dir>  read a decal pair back\n"
+		  << "  lodgen --terrain-preview <spec.json>  render the LOD terrain options offscreen, with GPU times\n"
 		  << "         [--vt-density 32|16|8]           the finest level's texel size in\n"
 		  << "                                          world units, as one word: 32 =\n"
 		  << "                                          --vt-finest 2 --vt-content 256 (the\n"
@@ -8032,6 +8098,15 @@ int nifskopeCliMain( const QStringList & args )
 			lgRoadsLegacy = true;
 			lgCover.roadComposite = LodgenCoverOptions::RoadMaxZ;
 		}
+		else if ( t == QLatin1String( "--terrain-option" ) ) {
+			const QString v = next();
+			if ( !lodgenTerrainOptionParse( v, &gLgTerrainOption ) ) {
+				err() << "error: --terrain-option takes full, hybrid or dynamic, not \"" << v << "\""
+					  << Qt::endl;
+				err().flush();
+				return 2;
+			}
+		}
 		else if ( t == QLatin1String( "--vt" ) ) lgVtDir = next();
 		else if ( t == QLatin1String( "--no-vt" ) ) lgVtDir.clear();
 		else if ( t == QLatin1String( "--vt-finest" ) ) {
@@ -8160,6 +8235,19 @@ int nifskopeCliMain( const QStringList & args )
 		else if ( t == QLatin1String( "--aggregate-tile" ) ) lgAggTile = next().toInt();
 		else if ( t == QLatin1String( "--aggregate-views" ) ) lgAggViews = next().toInt();
 		else if ( t == QLatin1String( "--lodt-check" ) ) lgLodvCheck = next();
+		/* lane TERRLIVE1: the ground decal pair, read back by its own reader
+		 * (io/loddecal.h): a .lodd, a .lodg, or the folder holding them. */
+		else if ( t == QLatin1String( "--terrain-preview" ) ) gLgTerrainPreview = next();
+		else if ( t == QLatin1String( "--decal-check" ) ) {
+			QString rep, e;
+			const bool ok = loddCheckPair( next(), &rep, &e );
+			out() << rep << Qt::endl;
+			out().flush();
+			if ( !ok )
+				err() << "error: " << e << Qt::endl;
+			err().flush();
+			return ok ? 0 : 1;
+		}
 		else if ( t == QLatin1String( "--lodv-check" ) ) {
 			err() << "error: --lodv-check is retired: the terrain texture sheets are "
 					 ".lodt now -- use --lodt-check <file.lodt>" << Qt::endl;

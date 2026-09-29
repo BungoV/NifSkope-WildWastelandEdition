@@ -1,0 +1,104 @@
+{
+ "lodl": "E:/Projects/NifskopeWWE-terrlive1/scratchpad/terrlive1_20260929/bakes/full/mod/FO4CSLOD/Commonwealth/Commonwealth.lodl",
+ "fade": [
+  8192.0,
+  12288.0
+ ],
+ "frames": 30,
+ "ltex_side": 512,
+ "decal_normals": true,
+ "views": [
+  {
+   "cells": [
+    -8,
+    -12,
+    3,
+    -1
+   ],
+   "stride": 1,
+   "lodt_full": "E:/Projects/NifskopeWWE-terrlive1/scratchpad/terrlive1_20260929/bakes/full/mod/FO4CSLOD/Commonwealth/Commonwealth.VT.2.lodt",
+   "lodt_far": "E:/Projects/NifskopeWWE-terrlive1/scratchpad/terrlive1_20260929/whole_hybrid/mod/FO4CSLOD/Commonwealth/Commonwealth.VT.8.lodt",
+   "decals": "E:/Projects/NifskopeWWE-terrlive1/scratchpad/terrlive1_20260929/bakes/hybrid/mod/FO4CSLOD/Commonwealth/Commonwealth.lodd",
+   "name": "boston",
+   "ortho": [
+    -4096.0,
+    -24576.0,
+    16384.0
+   ],
+   "width": 1200,
+   "height": 1200,
+   "renders": [
+    {
+     "option": "full",
+     "out": "pics/boston_full.png"
+    },
+    {
+     "option": "hybrid",
+     "out": "pics/boston_hybrid.png"
+    },
+    {
+     "option": "dynamic",
+     "out": "pics/boston_dynamic.png"
+    },
+    {
+     "options": [
+      "full",
+      "hybrid",
+      "dynamic"
+     ],
+     "out": "pics/boston_side_by_side.png"
+    }
+   ],
+   "box_count": true
+  },
+  {
+   "cells": [
+    -8,
+    -12,
+    3,
+    -1
+   ],
+   "stride": 1,
+   "lodt_full": "E:/Projects/NifskopeWWE-terrlive1/scratchpad/terrlive1_20260929/bakes/full/mod/FO4CSLOD/Commonwealth/Commonwealth.VT.2.lodt",
+   "lodt_far": "E:/Projects/NifskopeWWE-terrlive1/scratchpad/terrlive1_20260929/whole_hybrid/mod/FO4CSLOD/Commonwealth/Commonwealth.VT.8.lodt",
+   "decals": "E:/Projects/NifskopeWWE-terrlive1/scratchpad/terrlive1_20260929/bakes/hybrid/mod/FO4CSLOD/Commonwealth/Commonwealth.lodd",
+   "name": "street",
+   "eye": [
+    -4096.0,
+    -30720.0,
+    150.0
+   ],
+   "at": [
+    -4096.0,
+    -22000.0,
+    0.0
+   ],
+   "fov": 70.0,
+   "width": 1920,
+   "height": 1080,
+   "renders": [
+    {
+     "option": "full",
+     "out": "pics/street_full.png"
+    },
+    {
+     "option": "hybrid",
+     "out": "pics/street_hybrid.png"
+    },
+    {
+     "option": "dynamic",
+     "out": "pics/street_dynamic.png"
+    },
+    {
+     "options": [
+      "full",
+      "hybrid",
+      "dynamic"
+     ],
+     "out": "pics/street_side_by_side.png"
+    }
+   ],
+   "box_count": true
+  }
+ ]
+}

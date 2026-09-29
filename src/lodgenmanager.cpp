@@ -1331,6 +1331,21 @@ public:
 		layout->addWidget( vtSection );
 		{
 			Form f = form( 24 );
+			/* THE TERRAIN OPTION (lane TERRLIVE1, 2026-09-29): full / hybrid /
+			 * dynamic, hybrid the default. Label and control only. */
+			terrainBox = new QComboBox( page );
+			terrainBox->setObjectName( QStringLiteral( "LodgenTerrainOptionBox" ) );
+			terrainBox->addItem( tr( "Full" ), int( LodgenTerrainOption::Full ) );
+			terrainBox->addItem( tr( "Hybrid" ), int( LodgenTerrainOption::Hybrid ) );
+			terrainBox->addItem( tr( "Dynamic" ), int( LodgenTerrainOption::Dynamic ) );
+			{
+				LodgenTerrainOption o = LodgenTerrainOption::Hybrid;
+				lodgenTerrainOptionParse( settings.value( QStringLiteral( "LodGeneration/terrainOption" ),
+					QStringLiteral( "hybrid" ) ).toString(), &o );
+				terrainBox->setCurrentIndex( int( o ) );
+			}
+			wwMatchFieldStyle( terrainBox );
+			terrainLabel = f.add( page, tr( "Terrain" ), terrainBox );
 			vtFinestBox = new QComboBox( page );
 			vtFinestBox->setObjectName( QStringLiteral( "LodgenVtFinestBox" ) );
 			/* THE FINEST TEXEL DENSITY, ONE ROW (lane VTNORMAL1, bungo's ruling
@@ -1410,7 +1425,7 @@ public:
 			vtSummary->setStyleSheet( QStringLiteral( "color: %1;" ).arg( wwSkinColor( "textMuted" ) ) );
 			f.span( vtSummary );
 			vtSection->body()->setLayout( f.g );
-			vtSub = { vtFinestBox, vtFinestLabel, vtBtrCheck, vtSummary };
+			vtSub = { terrainBox, terrainLabel, vtFinestBox, vtFinestLabel, vtBtrCheck, vtSummary };
 			// the pyramid's own numbers grey with it too
 			for ( const char * k : { "vtBorder", "vtMips", "vtCompress",
 					"vtHeight", "vtFillVanilla", "vtCover", "vtCoverInColor", "vtHalfAux" } ) {
@@ -2165,7 +2180,7 @@ public:
 		connect( lodtAoOnlyRadio, &QRadioButton::toggled, this, [this]( bool ) { refreshSummary(); } );
 		for ( QSpinBox * s : { x0Spin, x1Spin, y0Spin, y1Spin } )
 			connect( s, QOverload<int>::of( &QSpinBox::valueChanged ), this, [this]( int ) { refreshSummary(); } );
-		for ( QComboBox * c : { dimBox, heightmapSizeBox, vtFinestBox } )
+		for ( QComboBox * c : { dimBox, heightmapSizeBox, vtFinestBox, terrainBox } )
 			connect( c, QOverload<int>::of( &QComboBox::currentIndexChanged ), this, [this]( int ) { refreshSummary(); } );
 		connect( outEdit, &QLineEdit::textChanged, this, [this]( const QString & ) { refreshSummary(); } );
 
@@ -2646,10 +2661,17 @@ private:
 	 *  bounds when they are known; otherwise the chunk range, said out loud,
 	 *  so the section always carries a number that MOVES with its settings
 	 *  rather than a sentence that cannot. */
+	LodgenTerrainOption terrainOption() const
+	{
+		return LodgenTerrainOption( terrainBox ? terrainBox->currentData().toInt()
+			: int( LodgenTerrainOption::Hybrid ) );
+	}
 	bool vtEstimateNow( LodgenVtEstimateOut * e, bool * fromRange = nullptr ) const
 	{
-		const LodgenVtOptions vo = vtOptions();
+		LodgenVtOptions vo = vtOptions();
 		const bool alsoBtr = btrCheck->isChecked() && texCheck->isChecked();
+		if ( !( alsoBtr && vtBtrCheck->isChecked() ) )
+			lodgenTerrainOptionApply( terrainOption(), vo );
 		if ( fromRange )
 			*fromRange = !haveBounds;
 		if ( haveBounds )
@@ -3027,6 +3049,7 @@ private:
 		s.setValue( QStringLiteral( "LodGeneration/grassTint" ), tintSpin->value() );
 		s.setValue( QStringLiteral( "LodGeneration/vt" ), vtCheck->isChecked() );
 		s.setValue( QStringLiteral( "LodGeneration/vtDensity" ), vtFinestBox->currentData().toInt() );
+		s.setValue( QStringLiteral( "LodGeneration/terrainOption" ), lodgenTerrainOptionName( terrainOption() ) );
 		s.setValue( QStringLiteral( "LodGeneration/vtBtr" ), vtBtrCheck->isChecked() );
 		s.setValue( QStringLiteral( "LodGeneration/impostors" ), impostorEdit->text() );
 		s.setValue( QStringLiteral( "LodGeneration/impostorFromLevel" ), impostorLevelBox->currentData().toInt() );
@@ -3558,7 +3581,22 @@ private:
 			vo.progress = &LodgenPanel::vtProgressThunk;
 			vo.progressUser = this;
 			QString rep, verr;
-			if ( lodgenBakeTerrainVt( *world, QString(), outputDir(), vo, bakeCaches, &rep, &verr ) )
+			/* THE TERRAIN OPTION (lane TERRLIVE1): the decals for every option,
+			 * the pyramid for full and hybrid. */
+			const LodgenTerrainOption to = terrainOption();
+			lodbSetTerrainOption( lodgenTerrainOptionName( to ) );
+			const QString note = lodgenTerrainOptionApply( to, vo );
+			if ( !note.isEmpty() )
+				lodbNoteCensus( note );
+			QString drep;
+			if ( lodgenBakeDecals( *world, QString(), outputDir(), vo, bakeCaches, &drep, &verr ) ) {
+				lodbNoteCensus( drep );
+				lastReport = drep;
+			} else
+				lastReport = tr( "ground decals: %1" ).arg( verr );
+			if ( to == LodgenTerrainOption::Dynamic )
+				vtSuppliesTex = false;		// no pyramid, so no chunk sheets from it
+			else if ( lodgenBakeTerrainVt( *world, QString(), outputDir(), vo, bakeCaches, &rep, &verr ) )
 				lastReport = rep;
 			else
 				lastReport = tr( "terrain virtual texture: %1" ).arg( verr );
@@ -4093,6 +4131,8 @@ private:
 	QCheckBox * vtCheck = nullptr, * vtBtrCheck = nullptr;
 	QComboBox * vtFinestBox = nullptr;
 	QLabel * vtSummary = nullptr, * vtFinestLabel = nullptr;
+	QComboBox * terrainBox = nullptr;       //!< lane TERRLIVE1
+	QLabel * terrainLabel = nullptr;
 	QList<QWidget *> vtSub;
 	/*! ONE REGISTRY FOR THE ROWS LANE PANEL1 ADDED (2026-09-12).
 	 *
