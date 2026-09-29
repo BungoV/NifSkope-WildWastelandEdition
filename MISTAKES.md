@@ -1728,6 +1728,7 @@ log says was loaded. Fix handed to lane AO2 with a gate that fails on the curren
 
 ### 2026-09-29 08:19 -- TERRLIVE1 brief baked hybrid's far levels over the whole map, not only the playable area
 My brief said hybrid's far = the 64/128/256 u baked levels, everywhere. Outside the playable area the land has no real
-ground textures, so the baker invents a fill with a repeating pattern, and hybrid's far view carried it exactly like
-full. bungo: hybrid was meant to draw live wherever the bake has nothing true to say. Rule: a baked level is written
-only where it holds real source data; a brief that names a baked layer says where it stops.
+ground paint; I then told bungo the baker 'invents a fill' there. Wrong twice: the bake ran --vt-fill-vanilla, so the
+outside IS Bethesda's dim-4 LOD diffuse, tone-matched (gain 0.62, +33.5, saturation x1.84, band 2 whole cells). bungo:
+the blend between vanilla diffuse and ours was the design; the defects are the hard cell steps and a dirt outline.
+Rule: read the bake log's vanillaFill line before describing what a terrain area is made of.
