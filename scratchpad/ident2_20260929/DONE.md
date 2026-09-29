@@ -245,3 +245,8 @@ line, not only colour as one; group ids file-wide; and win back the coverage (0.
   j0e: u32 stride 4, 1,997 groups). Leg 13 ok: 280 of 280 boxes hold. Leg 13c ok: 312 boxes, 0 over 1 percent,
   worst 0.0041, grown 1.25x -> 306 over.
 - Pictures: waiting on the turn (TERRLIVE1 took it between my shots at 11:01).
+- Pictures (11:01-11:49, the turn released after each shot; TERRLIVE1 baked in between): pics/dc_v13.png (one
+  colour over both chunks, no violet strip), hub_v13.png, west_v13.png, westclose_v13.png (same cameras as the
+  _fp set), and dc_v12load.png = the NEW exe drawing the OLD v12 bake b_fp3: it loads, and shows the old
+  per-chunk strip, as that file's ids say.
+- Commit 92feb2c4 (code, readers, doc, skill, WW_CHANGES), pushed; this section and DELIVERABLE_TEXT follow.

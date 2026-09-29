@@ -79,6 +79,35 @@ hub_fp is a separate building 2,100-2,750 u behind it (BackBay21 and two brick b
 Owed: (a) file-wide group ids, so DC reads as one id across the chunk line (violet strip); (b) more than one
 occluder box per landmark; (c) row-house far-shadow check; (d) bungo's look; merge is his call.
 
+## Third job (2026-09-29): file-wide group ids + more than one box a landmark
+
+Calls:
+- Group id width: u32, file-wide, dense from 0. The bound is the placement count (69,806 in a whole bake; the
+  near library and --identity-join none give one group a placement), so u16 cannot promise it. .lodi version 13.
+- Occluder split: a group wider than 4,096 u (only a landmark) is cut by a 4,096 u world grid, by each member's
+  box centre; each square gets its own box. Boston: Diamond City and the west Hub tower (4,100 u) -> 13 boxes.
+
+Gates (LIGHT bake b_v13, commit 92feb2c4):
+- Pixel gate: 0 wrong pixels, all 4 landmarks. PASS. Red control (v12 file b_fp3): 49,904, all Diamond City's
+  14 pieces in chunk (-2,-2) = the violet strip.
+- Group dump / file: Diamond City = 1 id (1178) over both chunks, 404 pieces, 0 other instances. Red control:
+  2 ids. Hub east, west and Trinity 1 id each. All groups 4,613 -> 4,527 (86 had been counted once a side).
+- Poke gate: 517 boxes, 0 over 1 percent, worst 0.0041; grown 1.25x -> 511 over. ok.
+- Coverage: 0.558 -> 0.588 (target 0.570). Trinity eye 0.578 -> 0.587, Hub 0.730 -> 0.760, DC 0.368 -> 0.416.
+- Refusals: id past groupCount, unused id, groupCount+1, stride 2, no group table -> refused by both readers;
+  controls load. The old v12 file loads in the new exe.
+- lodgen_native.sh: 34 checks, 1 failure = the known leg-5 .lodb line (fails before this change too). Legs 4,
+  13 (280 of 280), 13c (312 boxes, 0 over) ok.
+- Way back, with WW_LODI_GROUPS_PER_CHUNK=1: SAME, 233 files vs main. Without it: only the .lodi (and the .lodb's
+  digest of it) differ: version 12 -> 13, stride 2 -> 4, group table 139,612 -> 279,224 bytes, groupCount
+  20,954 -> 20,818, sky/ground offsets +139,264, fileBytes, 2 CRCs. Every other table byte-identical; the new
+  groups only merge old groups of different chunks.
+
+Pictures (pics/): dc_v13, hub_v13, west_v13, westclose_v13 (same cameras), and dc_v12load (the new exe drawing
+the old v12 bake).
+
+Owed: row-house far-shadow check; bungo's look; merge is his call.
+
 ## WW_CHANGES text
 Already in the branch (top of WW_CHANGES.md, "Building groups: named landmarks are one group; occluder boxes
 stay inside their walls").
