@@ -105,3 +105,30 @@ DIFF 1 of 233; the .lodo removed -> DIFF 1 (names it). Re-run owed on the final 
   **SAME, 233 files**; .lodi 4f913d6d4b4c, .lodo b144e9aff92d (same digests as build 1's run).
 - Red controls on the same comparator (06:12): one flipped byte in the .lodi -> DIFF naming the .lodi; the .lodo
   removed -> MISSING naming the .lodo.
+
+## 11. Commit and push (07:04)
+- 02e70e33 on ident2-20260929, pushed, not merged (source, list, docs, WW_CHANGES, MISTAKES, lane tools).
+- Skill written: ww-lodgen-landmark-add (Claude skills + AISkills).
+- lodgen_native.sh (legs 4/13/13c) and the pictures wait on the turn (TERRLIVE1 holds it since 06:13).
+
+## 12. lodgen_native.sh, final exe 358b9abc5f93 (turn 07:17-07:5x; no leg selector, all legs run)
+- Leg 4 (Sanctuary region bake): ok, all 10 checks.
+- Leg 13 (piece fit, downtown Boston): ok; 280 boxes, 280 of 280 hold all 100 points; floor 280 of 280 leak.
+- **Leg 13c (default building fit): ok (was FAIL in IDENT1: 302 boxes, 6 over, worst 0.1605). Now 313 boxes,
+  0 over 1 percent, worst 0.0041; floor 1.25x -> 307 of 313 over.**
+- 34 checks, 1 failure: leg 5 "every field of the record is one this comparison has decided about (unaccounted:
+  products)" -- the same line fails in IDENT1's log (h_lodgen_native.log:84); a .lodb field from another lane, no
+  IDENT2 change touches the .lodb writer. Leg 3 passes this run.
+- Log: h_lodgen_native.log. The kept bake (h_native) deleted after reading.
+
+## 13. Pictures (08:05; shot.sh under the turn, second monitor, ports 51871-51878, all rc=0)
+- View 8, 1600x1600, LV=2 SLOT=0 SDIM=2, WW_RENDER_FLAT=1 WW_LODL_CHANNEL=identity. Before = run_rung + b_main,
+  after = run_new + b_after3.
+- pics/dc_before|after.png: region -5 -8 -2 -5, ortho 6144. 15 colours -> one lilac mass.
+- pics/hub_before|after.png: region -2 -9 1 -5, ortho 10240 (6144 cut the tower tops off; retaken). West tower =
+  the right one.
+- pics/west_before|after.png: region -2 -8 -1 -8, ortho 4096. The 4 base pieces (3 extra groups before, up to
+  990 u) take the tower's colour after. A sign band stays its own group: not in the hitext prefix, and the west
+  group (4,100 u) is over the cap, so contact cannot add it.
+- 08:06: deleted b_off_rung, b_off_new3, b_nolm and the sheet cache (digests and outputs logged above). Kept b_main + b_after3
+  (114 MB each) so the pictures can be re-shot.
