@@ -188,8 +188,10 @@ def cases(lodo, lodi):
     add('v2 lodi version back to 1', 'lodi', lambda b: put(b, 0x04, 'I', 1), True, 'version 1')
     add('v3 lodo reserved byte at 0xCE', 'lodo', lambda b: put(b, 0xCE, 'B', 1), True, '0xCE')
     add('v3 lodi reserved byte at 0xB0', 'lodi', lambda b: put(b, 0xB0, 'B', 1), True, '0xB0')
+    # 0x20 = the lowest bit outside LODO_FLAGS_KNOWN (0x1F). It was 0x10 until lane NEAR1 (09-26) made bit 4 the
+    # NEAR flag; from then this mutation was refused by the NEAR rule, not as an unknown bit (MERGE1, 2026-09-29).
     add('v3 lodo unknown header flag bit', 'lodo',
-        lambda b: put(b, 0x08, 'I', get(b, 0x08, 'I')[0] | 0x10), True, 'reserved flag')
+        lambda b: put(b, 0x08, 'I', get(b, 0x08, 'I')[0] | 0x20), True, 'reserved flag')
     add('v2 loadOrderHash in the .lodo only', 'lodo',
         lambda b: put(b, 0xB8, 'Q', get(b, 0xB8, 'Q')[0] ^ 1), True, 'loadOrderHash')
     add('v2 loadOrderHash in the .lodi only', 'lodi',

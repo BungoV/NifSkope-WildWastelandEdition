@@ -1,0 +1,16 @@
+{
+ "texels": 9437184,
+ "free_texels": 61760,
+ "free_blocks": 3860,
+ "free_block_texels": 61760,
+ "violations": 0,
+ "refuter_planted": 1,
+ "coupled_free_texels": 0,
+ "coupled_moved": 0,
+ "coupled_max_absdiff": 0,
+ "near_texels": 9375424,
+ "near_moved": 8196122,
+ "near_darker": 8189692,
+ "near_brighter": 6430,
+ "gate": "PASS"
+}

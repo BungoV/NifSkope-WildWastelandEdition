@@ -1,0 +1,29 @@
+{
+ "placements": 11416,
+ "vertices": 213939,
+ "triangles": 104770,
+ "colourMeshPlacements": 199,
+ "occludersInRegion": 143,
+ "occludersTotal": 3861,
+ "normal_face_cos_mean": 0.9712934654964425,
+ "normal_face_cos_share_gt_0.9": 0.8814921583413675,
+ "normal_face_cos_share_lt_0": 0.0003531848684147727,
+ "roofTriangles_nz_gt_0.95": 9860,
+ "wallTriangles_abs_nz_lt_0.2": 63517,
+ "flagClassTriangles": {
+  "0": 72188,
+  "1": 1453,
+  "4": 26114,
+  "16": 5015
+ },
+ "normal_panel_pixels": 965605,
+ "normal_panel_share_flat_roof_128_128_255": 0.5374526851041574,
+ "sky_upfacing_open": {
+  "triangles": 8132,
+  "mean": 183.50971470732907
+ },
+ "sky_upfacing_covered_300plus": {
+  "triangles": 1680,
+  "mean": 52.69781746031746
+ }
+}

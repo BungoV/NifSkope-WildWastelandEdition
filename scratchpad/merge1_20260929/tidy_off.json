@@ -1,0 +1,1449 @@
+{
+ "root": "g/off",
+ "files": {
+  ".lodl_done": [
+   0,
+   "da39a3ee5e6b4b0d3255bfef95601890afd80709"
+  ],
+  "fo4cslod/commonwealth/commonwealth.16.-16.-16.bto.manifest.txt": [
+   1668484,
+   "3a282a082254cdb1e1085d0b9cfff87c43cfa605"
+  ],
+  "fo4cslod/commonwealth/commonwealth.16.-16.-16.lodj": [
+   1968035,
+   "f5dc7fd3e11abcf5e24c795a3822a134857f1e68"
+  ],
+  "fo4cslod/commonwealth/commonwealth.16.0.-16.bto.manifest.txt": [
+   350775,
+   "fcf712dc70f356b3a601893bb6b59716839ecba0"
+  ],
+  "fo4cslod/commonwealth/commonwealth.16.0.-16.lodj": [
+   508544,
+   "f0e317969f6e57aeeee341d25b7e69dbdd1f4b5a"
+  ],
+  "fo4cslod/commonwealth/commonwealth.32.-32.-32.bto.manifest.txt": [
+   5816462,
+   "66f2ba717e0d342abae570b1cf21ac7fc58ddf99"
+  ],
+  "fo4cslod/commonwealth/commonwealth.32.-32.-32.lodj": [
+   5431538,
+   "1374b8b6fe8145ed3d08801153605d55ce8314c0"
+  ],
+  "fo4cslod/commonwealth/commonwealth.32.0.-32.bto.manifest.txt": [
+   1266166,
+   "0ed0bea0bb9337b53ed887c23c435480d18bf891"
+  ],
+  "fo4cslod/commonwealth/commonwealth.32.0.-32.lodj": [
+   1193585,
+   "a2d708c24b2d2a25a67676a6709b8877d591e7da"
+  ],
+  "fo4cslod/commonwealth/commonwealth.4.-4.-12.bto.manifest.txt": [
+   104680,
+   "3d194831b7f4297546ccd254c71a724089485d33"
+  ],
+  "fo4cslod/commonwealth/commonwealth.4.-4.-12.lodj": [
+   373169,
+   "d718e66d450aa8e9aab8040302813282d07b4f48"
+  ],
+  "fo4cslod/commonwealth/commonwealth.4.-4.-4.bto.manifest.txt": [
+   166190,
+   "09bf8bbc1187b52bc64d7d76c686e1e4f0b191f9"
+  ],
+  "fo4cslod/commonwealth/commonwealth.4.-4.-4.lodj": [
+   581775,
+   "0121ef78f6c2988a4699a71e2757620422d5ce59"
+  ],
+  "fo4cslod/commonwealth/commonwealth.4.-4.-8.bto.manifest.txt": [
+   259525,
+   "cb4f68a593dc6c0cecf16602175dba429961be0f"
+  ],
+  "fo4cslod/commonwealth/commonwealth.4.-4.-8.lodj": [
+   937593,
+   "cb77f8a80a65d714d0ed7bd453ad5bf2dad0ff09"
+  ],
+  "fo4cslod/commonwealth/commonwealth.4.-8.-12.bto.manifest.txt": [
+   95035,
+   "50c9931cbd39a8f06aaf706061adbf0af3d6330c"
+  ],
+  "fo4cslod/commonwealth/commonwealth.4.-8.-12.lodj": [
+   332569,
+   "532bfc72be1d337ba7df864e4f799dc000204636"
+  ],
+  "fo4cslod/commonwealth/commonwealth.4.-8.-4.bto.manifest.txt": [
+   98722,
+   "5c533978f407e69617bc6fff47c82589e837da24"
+  ],
+  "fo4cslod/commonwealth/commonwealth.4.-8.-4.lodj": [
+   342869,
+   "241023fc98f658443c8d008730eb81871542836e"
+  ],
+  "fo4cslod/commonwealth/commonwealth.4.-8.-8.bto.manifest.txt": [
+   201071,
+   "6497aacf091ed14e6be9731037d503731bb949f3"
+  ],
+  "fo4cslod/commonwealth/commonwealth.4.-8.-8.lodj": [
+   709904,
+   "e5ef871fabe1168e189dbfcb218f122d360d1a91"
+  ],
+  "fo4cslod/commonwealth/commonwealth.4.0.-12.bto.manifest.txt": [
+   46636,
+   "41153eb636e58ba1f41e557bdf7242dd5f70e568"
+  ],
+  "fo4cslod/commonwealth/commonwealth.4.0.-12.lodj": [
+   161807,
+   "c043742de1ea4d1dae9a74a9ffba1feb18163e9f"
+  ],
+  "fo4cslod/commonwealth/commonwealth.4.0.-4.bto.manifest.txt": [
+   265667,
+   "15af5c0ca5d520b63123c04c54038d763e29094f"
+  ],
+  "fo4cslod/commonwealth/commonwealth.4.0.-4.lodj": [
+   961824,
+   "c0592039dcccc55d1cb996aba7c3b65412d666e8"
+  ],
+  "fo4cslod/commonwealth/commonwealth.4.0.-8.bto.manifest.txt": [
+   492977,
+   "0a9989780d0c8d837fc6a6d14b2dcac32672737b"
+  ],
+  "fo4cslod/commonwealth/commonwealth.4.0.-8.lodj": [
+   1792479,
+   "e72cca2b551602a1f401c1978b6b9ed4bbdafdcc"
+  ],
+  "fo4cslod/commonwealth/commonwealth.8.-8.-16.bto.manifest.txt": [
+   569346,
+   "1695fd1bbf15d74e9d1d4163fef525835e808d77"
+  ],
+  "fo4cslod/commonwealth/commonwealth.8.-8.-16.lodj": [
+   1537478,
+   "1fc436b32ce1c30bc223e44c7b263c6df2f9ac0a"
+  ],
+  "fo4cslod/commonwealth/commonwealth.8.-8.-8.bto.manifest.txt": [
+   745150,
+   "e06afc1a6867a446f5cac79eed9e7e83fa7302f5"
+  ],
+  "fo4cslod/commonwealth/commonwealth.8.-8.-8.lodj": [
+   2570686,
+   "62d289482ed1af96c78cc488864bf6b5407095eb"
+  ],
+  "fo4cslod/commonwealth/commonwealth.8.0.-16.bto.manifest.txt": [
+   419241,
+   "03ee41af616b9c48bb6044789a0eb1eef3b8117a"
+  ],
+  "fo4cslod/commonwealth/commonwealth.8.0.-16.lodj": [
+   1324555,
+   "aafb109c6d6ef03229379dfb99b336e33fbc4f90"
+  ],
+  "fo4cslod/commonwealth/commonwealth.8.0.-8.bto.manifest.txt": [
+   2174572,
+   "eea4c94de0a986719ea0215878493812c8bb4d1c"
+  ],
+  "fo4cslod/commonwealth/commonwealth.8.0.-8.lodj": [
+   8023841,
+   "1180079c57eb8572bc05660a7a01662e8be67357"
+  ],
+  "fo4cslod/commonwealth/commonwealth.flat_objects_report.txt": [
+   874583,
+   "368c648a762f3e50826806413434e5745fd5965c"
+  ],
+  "fo4cslod/commonwealth/commonwealth.lodb": [
+   37909,
+   "0a41c27813e7f1af9fe5d278e71f32be4064763b"
+  ],
+  "fo4cslod/commonwealth/commonwealth.lodi": [
+   5089578,
+   "df507bc6e5eecb1f8cc377035231ad83050ceff1"
+  ],
+  "fo4cslod/commonwealth/commonwealth.lodl": [
+   36014342,
+   "b4466203c9875dcc659707bfcd2f03ee91382618"
+  ],
+  "fo4cslod/commonwealth/commonwealth.lodo": [
+   7945888,
+   "07638f76e6c0ef241bdc386bd9f142299ea829b7"
+  ],
+  "fo4cslod/commonwealth/commonwealth.vt.2.lodt": [
+   50283776,
+   "b6a9633b5ef9120bde31e9b0c87b390b90db3cf0"
+  ],
+  "fo4cslod/commonwealth/commonwealth.vt.4.lodt": [
+   12571904,
+   "88886372191a6e642c94d44e186d4bb2af968ddb"
+  ],
+  "fo4cslod/commonwealth/commonwealth.vt.lodm": [
+   1910,
+   "48d88615a34b0ef950c1c397a8a492225a3254e9"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgenarrays.128x128.lodm": [
+   1155,
+   "c0c96ed96efc858c2bf4ff4194f8ce6c90256bcd"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgenarrays.128x128_d.dds": [
+   436948,
+   "3c6d3515250d812b12361cb10e2be055ddc97cad"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgenarrays.128x128_g.dds": [
+   218548,
+   "d00458cd3fe077da15955d694b3f4d734b5eccee"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgenarrays.128x128_gsaos.dds": [
+   436948,
+   "229bd6fd73cd99b2bb649ea6ef595ceee8260de0"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgenarrays.128x128_n.dds": [
+   436948,
+   "90e69ac424d367a63ee602ab373580fae86ce77c"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgenarrays.256x256.lodm": [
+   3097,
+   "3f060b332a45dc71e7003de24a00c0733ce7fe34"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgenarrays.256x256_d.dds": [
+   6465972,
+   "6e23030e3ef7e8d78fcb7c0ffec3ea0a5e1a12e8"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgenarrays.256x256_g.dds": [
+   3233060,
+   "214e6729f179fafeba46c0734474a7c409820037"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgenarrays.256x256_gsaos.dds": [
+   6465972,
+   "d7cdda60ef37d15cc392a34f39d81c564c568a75"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgenarrays.256x256_n.dds": [
+   6465972,
+   "eee3286cc8ae6270b7b2e7e613ba136473640e3d"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgenarrays.256x512.lodm": [
+   630,
+   "91144348c5a12fa9c9ac0843763b3b006e23754a"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgenarrays.256x512_d.dds": [
+   524404,
+   "64ecaad11bdf7973006a3a51b032f41d961169b8"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgenarrays.256x512_g.dds": [
+   262276,
+   "960c1b37e25d0f608ef7060fb65a8ebb23b16707"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgenarrays.256x512_gsaos.dds": [
+   524404,
+   "0e5ae3a3a194de8359b167dc812662f7f0e2d02a"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgenarrays.256x512_n.dds": [
+   524404,
+   "6c0132adfd7122e5e50f39a1119fc5b6cfc0bb4c"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgenarrays.512x2048.lodm": [
+   548,
+   "cdad60949c85a02be7f8d2c9c81334e10f9cdc72"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgenarrays.512x2048_d.dds": [
+   1398228,
+   "e2b47a2bba6e7b9a412abd808607a1654f9d8095"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgenarrays.512x2048_g.dds": [
+   699188,
+   "382017229b531843dd69553194c4f8140a0b6950"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgenarrays.512x2048_gsaos.dds": [
+   1398228,
+   "f64689142e45b9d5d85539dbae535d77ac912154"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgenarrays.512x2048_n.dds": [
+   1398228,
+   "692b825d357654b0769200f08b1206e835202f9b"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgenarrays.512x512.lodm": [
+   1322,
+   "2f459acf00862cc51fd4565d2db0797dfdf71593"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgenarrays.512x512_d.dds": [
+   4893428,
+   "e36213c2d46e415fdfe87dbe9769b1beb4e496f6"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgenarrays.512x512_g.dds": [
+   2446788,
+   "579cf5a4263c9259ba366ee8d294edb37457543c"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgenarrays.512x512_gsaos.dds": [
+   4893428,
+   "a2c8e4f10ec4476cf132dc8d4ffb22adaf8c475b"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgenarrays.512x512_n.dds": [
+   4893428,
+   "855c9bb8c95b2f55fddb5dd4876133298f36c0f0"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgenarrays.64x256.lodm": [
+   542,
+   "a76185eb022bd88f1ed5a2454d30a2161d007879"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgenarrays.64x256_d.dds": [
+   21972,
+   "648af53d9d13affff1369599b22ba65aee4538bd"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgenarrays.64x256_g.dds": [
+   11060,
+   "2bdf9130f3797cf3dcfe71fef9e708fa48c0db26"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgenarrays.64x256_gsaos.dds": [
+   21972,
+   "3e1d88124013a840bfa9746b7b10910a9a30451d"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgenarrays.64x256_n.dds": [
+   21972,
+   "dd25e203cefd627b07c472f4aaab3a94773275be"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgenarrays.64x64.lodm": [
+   518,
+   "8de9975d3645414c211656528f66304a832c2d8e"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgenarrays.64x64_d.dds": [
+   5604,
+   "83b2dfaa182bb673eca7d3e5e94607c9c6102dc1"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgenarrays.64x64_g.dds": [
+   2876,
+   "1064e2a39bdd293ddb8ad43ab3a72e726c83242d"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgenarrays.64x64_gsaos.dds": [
+   5604,
+   "eab2d12607b51ee2870a94e23f0b999a6519b3a0"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgenarrays.64x64_n.dds": [
+   5604,
+   "68f0a709888688e398d22bc3716004ee62c76297"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgenarrays.txt": [
+   28854,
+   "2e73d43eb4bba51587c8aa370686eb52c20197b8"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.1024x2048.lodm": [
+   14220,
+   "d0101ab09a725e80b9a6d5babec47c90f8307b6e"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.1024x2048_d.dds": [
+   13762708,
+   "2738a6542192c63a7ea1005ac85777663ab01643"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.1024x2048_g.dds": [
+   6881428,
+   "31e17e8718034d51b9c1432774215225c4fd00eb"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.1024x2048_gsaos.dds": [
+   13762708,
+   "bb3c5037929e3a21e3e632e1a8095aef19899621"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.1024x2048_n.dds": [
+   13762708,
+   "5afb0f75466c9ff63c8898b0355a6c0879745b7f"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.1152x2048.lodm": [
+   3375,
+   "a866ae9c7404559f8c3a4a943da63f9503b32abe"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.1152x2048_d.dds": [
+   3096724,
+   "dd88ed5d18bcdf2614a8d54191b40ae6ec6a0da3"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.1152x2048_g.dds": [
+   1548436,
+   "8735ee96a4a21c4c476183e8ecbf0a04aa62f1a2"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.1152x2048_gsaos.dds": [
+   3096724,
+   "36696ea05895d50aa4c0b65e06baf8388b7137e4"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.1152x2048_n.dds": [
+   3096724,
+   "b23d85c3d4c6a45dcc9b1799b37683620dc3df6f"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.1280x2048.lodm": [
+   8812,
+   "cb65dbc8d654c4c63619ca4d13101aa486a3db8c"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.1280x2048_d.dds": [
+   10322068,
+   "5978627a4bebb885a6bd0f7152c161700e002eeb"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.1280x2048_g.dds": [
+   5161108,
+   "d7e83390dfa6f4dd72d29dd2c1a0befaf6c2286f"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.1280x2048_gsaos.dds": [
+   10322068,
+   "b6f32cbffd4ff897f425c1ed17bae76b53c091e2"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.1280x2048_n.dds": [
+   10322068,
+   "4de364cb0ff792781659e7db5fb6b8467fe0d691"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.128x1024.lodm": [
+   3307,
+   "438e9bdb90224aeb28764a517e718f39cda2f61e"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.128x1024_d.dds": [
+   131220,
+   "682d166a9a0d0c4de57ddde050f9349221307249"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.128x1024_g.dds": [
+   65684,
+   "3a2f00c915546777e43c2ca802e9f87e5c194f29"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.128x1024_gsaos.dds": [
+   131220,
+   "6dfdae6ed1965fef84857739647eda71700e2014"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.128x1024_n.dds": [
+   131220,
+   "5f60195ff099dbc8dcfc66946ddd04eb6f5df21f"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.128x512.lodm": [
+   22085,
+   "a88f8f8c3bb4ba3619977d28fcd1f3c9ce933260"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.128x512_d.dds": [
+   524436,
+   "4cf476c5a5e76c82bd2eae3c6531ae1ab45bc70d"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.128x512_g.dds": [
+   262292,
+   "49aa418cbe1219dc34300e729e2641c410a204c9"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.128x512_gsaos.dds": [
+   524436,
+   "305914117d5716c084654109bb443e1827fe88bc"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.128x512_n.dds": [
+   524436,
+   "5eb10bf8e2440f9e67f812312b0d1de4ab5b4452"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.2048x2048.lodm": [
+   16822,
+   "c66763023acd1234ca622a4e77a7870b172fad39"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.2048x2048_d.dds": [
+   33423508,
+   "93420796e0b404c1c98a5cacde4faf1e89e92c72"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.2048x2048_g.dds": [
+   16711828,
+   "4e976d92b3f1b71258551f909116364e126de7cf"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.2048x2048_gsaos.dds": [
+   33423508,
+   "a5fa8b5726c4d5ff2e208f6a97da5a303469a4fa"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.2048x2048_n.dds": [
+   33423508,
+   "3446b176a24be94c6cf36f08fb8562c88775a579"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.256x1024.lodm": [
+   22235,
+   "467fe41c9b600304d102383d32380632ebfc4718"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.256x1024_d.dds": [
+   2097300,
+   "df26e9955c1b2f0910e9d504c7f8f107dd9cdf51"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.256x1024_g.dds": [
+   1048724,
+   "b4ea9d65195a7eba45dfc9266d08f0bd2a30f2cf"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.256x1024_gsaos.dds": [
+   2097300,
+   "10a8699096ed67a509a579fe9a998b271cafd0a8"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.256x1024_n.dds": [
+   2097300,
+   "87d71891ae986ff90df3b74a77deab08713acd12"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.256x512.lodm": [
+   16812,
+   "e1b94ebc4bbd8106d25a3795103f01cc416cad98"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.256x512_d.dds": [
+   786580,
+   "60bbc79bef0119e0c9e58b7efb74def40becbe8d"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.256x512_g.dds": [
+   393364,
+   "a2d01fd29625db1df57d891a6444700c7912a0ff"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.256x512_gsaos.dds": [
+   786580,
+   "6abc956455d5a4d1b12f39a8915858e6dbd555d1"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.256x512_n.dds": [
+   786580,
+   "f8c1d54d1ca6e2cdaf05d0d22bb068f2f5a3fe4c"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.384x1024.lodm": [
+   24905,
+   "9c1731fc9a2172ba7c7ed3bc32a7fab19c89ca55"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.384x1024_d.dds": [
+   4423828,
+   "483d1aa5594dbf19947afad9f3105179b3aa4cf2"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.384x1024_g.dds": [
+   2211988,
+   "c9535e8158442c2f35f3813606775c2a57826b09"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.384x1024_gsaos.dds": [
+   4423828,
+   "3ddf469630a6f9b94585e7db28aa78b997a116b4"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.384x1024_n.dds": [
+   4423828,
+   "907f20c144bad9468ea697e69b1246bb26a3a99a"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.384x512.lodm": [
+   3243,
+   "cdc064664daf35ca6dd6974c28e6a0e004f182ec"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.384x512_d.dds": [
+   245908,
+   "20caf3b18afdf8380d921e52bfe70e3aeb4f2102"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.384x512_g.dds": [
+   123028,
+   "4437c07df94db1ac60e2e81f7295c0ea91411644"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.384x512_gsaos.dds": [
+   245908,
+   "545aae05773488544b5685214d002e35ea75a948"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.384x512_n.dds": [
+   245908,
+   "6eafa24c3e4a2e17253c235153371bf9472c12a2"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.512x1024.lodm": [
+   13929,
+   "03cf643afb5fe6b15f398385b6344e365722938b"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.512x1024_d.dds": [
+   3276948,
+   "6c2df29d95bba8c7689b13aa2f621474dd3a774b"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.512x1024_g.dds": [
+   1638548,
+   "ffe752d996725fa497b684412320b1081cc6f495"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.512x1024_gsaos.dds": [
+   3276948,
+   "2e200712b817baf8ef259260a5d4e6739ffa059a"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.512x1024_n.dds": [
+   3276948,
+   "6d1f750be94b8e905fdb0d3af29482aa07ae1d0e"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.512x2048.lodm": [
+   3324,
+   "6d59c94b47dd93422331921fbf2ec877df396fde"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.512x2048_d.dds": [
+   1310868,
+   "bc0642e80021cb785000a16c0b6554f4d9b3a566"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.512x2048_g.dds": [
+   655508,
+   "b221f03d0ca54091e1f01d92751e61a4edb0b3fc"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.512x2048_gsaos.dds": [
+   1310868,
+   "93cb46f42d998903e90b5e9cbebdbc746c5c86e1"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.512x2048_n.dds": [
+   1310868,
+   "3f20935a4b4230052ed765d7978abb89027bf021"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.512x512.lodm": [
+   16685,
+   "f18f7098fac962bf06ef653f3802953cfb8d9dea"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.512x512_d.dds": [
+   1966228,
+   "da0da405a4d40bb4337138e4c3b907ad5abaada6"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.512x512_g.dds": [
+   983188,
+   "53e757d56cad4b4f55dc432b6723b3f3ba6c4147"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.512x512_gsaos.dds": [
+   1966228,
+   "9280814ea192c3b150e257f27dc12ebc6685aa3a"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.512x512_n.dds": [
+   1966228,
+   "9338162ce0114517912b8fc6e3e0451ff42d03ce"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.640x1024.lodm": [
+   11365,
+   "7cc9b0a80ce64384ff5704662d7e98858e6a77a1"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.640x1024_d.dds": [
+   3276948,
+   "c3586e347b46cb7144800d674edf273c3d3625fb"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.640x1024_g.dds": [
+   1638548,
+   "c7fbe747fd12ec7f7b9d238fc7a6ffd869f61ca5"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.640x1024_gsaos.dds": [
+   3276948,
+   "0bd5d6c8f19cf2066bd9eb6b070058f9d89cdb77"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.640x1024_n.dds": [
+   3276948,
+   "460cd2c10665b7644010fd9a9fdc3f76c269abd9"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.768x1024.lodm": [
+   22366,
+   "ef81f8a39c15fd98d22736bab1f345d8a4c95a98"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.768x1024_d.dds": [
+   7864468,
+   "8ed8eff177b52646db35887cc87d9db80ec475c4"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.768x1024_g.dds": [
+   3932308,
+   "3c7b14143df29230724043a61d085e5d7b2f0799"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.768x1024_gsaos.dds": [
+   7864468,
+   "c64cb71e8c81a1edb8acaeafa64a2c0176187226"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.768x1024_n.dds": [
+   7864468,
+   "e057a0f619a0d80eb85e59e2e4a0601b4332afe1"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.896x1024.lodm": [
+   11501,
+   "c950847903890bb5549e4d4da0316aef03941103"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.896x1024_d.dds": [
+   4817044,
+   "895520b97a6a4ebfa70302770e0d275a9284c56e"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.896x1024_g.dds": [
+   2408596,
+   "cdfc68644bb0ea624e599861930257d555b5dc23"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.896x1024_gsaos.dds": [
+   4817044,
+   "848d816001d4dd41c8ff2823f397ddc3b462ecae"
+  ],
+  "fo4cslod/commonwealth/objects/commonwealth.lodgencards.legacy.896x1024_n.dds": [
+   4817044,
+   "fc60c48c5ea91187007b2ee213601008fe13c027"
+  ]
+ },
+ "sources": {
+  "c:\\projects\\fallout4\\build\\pc\\data\\materials\\lod\\bldgbricklargelod.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.128x128.lodm",
+   "layer": 0,
+   "texels": "abb42374506e5551675436d65af2c5256c3cd1bb",
+   "emissive": "black"
+  },
+  "c:\\projects\\fallout4\\build\\pc\\data\\materials\\lod\\decolargelod.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.128x128.lodm",
+   "layer": 1,
+   "texels": "aefc24c31b5ecaee8ce4dfa2af0f1c9016199ba2",
+   "emissive": "black"
+  },
+  "c:\\projects\\fallout4\\build\\pc\\data\\materials\\lod\\decolobbylod.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.128x128.lodm",
+   "layer": 2,
+   "texels": "78ee5253ea3f06d918b0a8759303baded417548e",
+   "emissive": "black"
+  },
+  "c:\\projects\\fallout4\\build\\pc\\data\\materials\\lod\\decolobbymarblelod.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.128x128.lodm",
+   "layer": 3,
+   "texels": "70f2dad6744389f108d8cc94b8e1ed2c421b47b5",
+   "emissive": "black"
+  },
+  "c:\\projects\\fallout4\\build\\pc\\data\\materials\\lod\\hittechstructurelargelod.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.128x128.lodm",
+   "layer": 4,
+   "texels": "97206155d586ecc6757eda951909c854e9e6bf81",
+   "emissive": "black"
+  },
+  "c:\\projects\\fallout4\\build\\pc\\data\\materials\\lod\\landscape\\ground\\driedgrass01_lod.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.128x128.lodm",
+   "layer": 5,
+   "texels": "65025a7cdc318b4776423740b16183e455129458",
+   "emissive": "black"
+  },
+  "c:\\projects\\fallout4\\build\\pc\\data\\materials\\lod\\metalkitbaremetalloda.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.128x128.lodm",
+   "layer": 6,
+   "texels": "f932075d325b2e7928c17d1c25ff19e004b9c88b",
+   "emissive": "black"
+  },
+  "c:\\projects\\fallout4\\build\\pc\\data\\materials\\lod\\metalkitbaremetallodb.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.128x128.lodm",
+   "layer": 7,
+   "texels": "6bac9bc18f57d07ae87a34cfc04c11a76036fa03",
+   "emissive": "black"
+  },
+  "c:\\projects\\fallout4\\build\\pc\\data\\materials\\lod\\metalkitlod01.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.128x128.lodm",
+   "layer": 8,
+   "texels": "e0124bd189978a1a7910b6d567a9b4d17e99304e",
+   "emissive": "black"
+  },
+  "c:\\projects\\fallout4\\build\\pc\\data\\materials\\lod\\metalkitlod02.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.128x128.lodm",
+   "layer": 9,
+   "texels": "044d72af1c360d5bc884b06a1f173692ee465304",
+   "emissive": "black"
+  },
+  "c:\\projects\\fallout4\\build\\pc\\data\\materials\\lod\\ncalargelod.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.128x128.lodm",
+   "layer": 10,
+   "texels": "6a2fc95988c54eecffbcf4e02d01a40138ae88f6",
+   "emissive": "black"
+  },
+  "materials\\lod\\architecture\\bunkers\\radiotowermetal01_lod.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.128x128.lodm",
+   "layer": 11,
+   "texels": "1b90b5d747379f93d2cbd27f5a18d36a5120dc95",
+   "emissive": "black"
+  },
+  "materials\\lod\\bldgbricklargelod.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.128x128.lodm",
+   "layer": 12,
+   "texels": "abb42374506e5551675436d65af2c5256c3cd1bb",
+   "emissive": "black"
+  },
+  "materials\\lod\\decolargelod.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.128x128.lodm",
+   "layer": 13,
+   "texels": "aefc24c31b5ecaee8ce4dfa2af0f1c9016199ba2",
+   "emissive": "black"
+  },
+  "materials\\lod\\greebslarge01lod.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.128x128.lodm",
+   "layer": 14,
+   "texels": "b736b05d6311dec0bcc3734e2f1f58c77059c6b1",
+   "emissive": "black"
+  },
+  "materials\\lod\\hittechstructurelargelod.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.128x128.lodm",
+   "layer": 15,
+   "texels": "4531c08787c3c0dc94f747da6231f8c7031069f0",
+   "emissive": "black"
+  },
+  "materials\\lod\\ncalargelod.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.128x128.lodm",
+   "layer": 16,
+   "texels": "6a2fc95988c54eecffbcf4e02d01a40138ae88f6",
+   "emissive": "black"
+  },
+  "materials\\lod\\pierkitlod01.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.128x128.lodm",
+   "layer": 17,
+   "texels": "1e655a38fb2090153a1fb6c1f860ae4c34d7b7a7",
+   "emissive": "black"
+  },
+  "materials\\lod\\resncalargelod.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.128x128.lodm",
+   "layer": 18,
+   "texels": "d57cdc0b9b28df91696ca22e9e86cebe1f6165ae",
+   "emissive": "black"
+  },
+  "materials\\lod\\rrtrackstrbridgelod01.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.128x128.lodm",
+   "layer": 19,
+   "texels": "2528f53b79807af54b1cff379fff97e8667e5656",
+   "emissive": "black"
+  },
+  "c:\\projects\\fallout4\\build\\pc\\data\\materials\\lod\\billboard02lod.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 0,
+   "texels": "e7ec612072549aa0d79099e0870c5ee5a9ecf29f",
+   "emissive": "black"
+  },
+  "c:\\projects\\fallout4\\build\\pc\\data\\materials\\lod\\bldg01lod.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 1,
+   "texels": "a281f40bc1709bcd6a87c4de6ddc1fec79c06f63",
+   "emissive": "black"
+  },
+  "c:\\projects\\fallout4\\build\\pc\\data\\materials\\lod\\bldg05lod.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 2,
+   "texels": "ab1992f329897bf2954ad636ad2ab982599cd656",
+   "emissive": "black"
+  },
+  "c:\\projects\\fallout4\\build\\pc\\data\\materials\\lod\\churchstonelod.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 3,
+   "texels": "e0c70af776bf551f330cae0e59576cd26a6f382a",
+   "emissive": "black"
+  },
+  "c:\\projects\\fallout4\\build\\pc\\data\\materials\\lod\\coastcliff01wetlod.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 4,
+   "texels": "f4b9ab2b17f1099d36ba488c17cc4d7a6357f63f",
+   "emissive": "black"
+  },
+  "c:\\projects\\fallout4\\build\\pc\\data\\materials\\lod\\decomainblod.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 5,
+   "texels": "6300e0119d97810691ed3424a8d22de63c190c89",
+   "emissive": "black"
+  },
+  "c:\\projects\\fallout4\\build\\pc\\data\\materials\\lod\\decomainlod.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 6,
+   "texels": "b60bb579c0bfaafc6ac7084fe593c48cc11c708f",
+   "emissive": "black"
+  },
+  "c:\\projects\\fallout4\\build\\pc\\data\\materials\\lod\\dextlod01.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 7,
+   "texels": "7a945461cbabdf16f3500cce2aed0abd9b39d485",
+   "emissive": "black"
+  },
+  "c:\\projects\\fallout4\\build\\pc\\data\\materials\\lod\\hittechext03lod.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 8,
+   "texels": "80170a003c473a096a2806ad64932530c60f16d1",
+   "emissive": "black"
+  },
+  "c:\\projects\\fallout4\\build\\pc\\data\\materials\\lod\\hittechextalargelod.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 9,
+   "texels": "5e10a4e968fce6f47762a63e5ee2569c86190ded",
+   "emissive": "black"
+  },
+  "c:\\projects\\fallout4\\build\\pc\\data\\materials\\lod\\hittechextalod01.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 10,
+   "texels": "fa42243a8928da3e0e959d858d0a8ec17373d1a3",
+   "emissive": "black"
+  },
+  "c:\\projects\\fallout4\\build\\pc\\data\\materials\\lod\\hittechextalod03.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 11,
+   "texels": "766609b6749ce0443888748ef001ce720e57472d",
+   "emissive": "black"
+  },
+  "c:\\projects\\fallout4\\build\\pc\\data\\materials\\lod\\hittechextalod07.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 12,
+   "texels": "792e6689a2282b3623149c878c7a9dc99bd7d4c1",
+   "emissive": "black"
+  },
+  "c:\\projects\\fallout4\\build\\pc\\data\\materials\\lod\\hittechextblod01.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 13,
+   "texels": "32066656e5ca241e6c54a025d08ee42b5657fe3e",
+   "emissive": "black"
+  },
+  "c:\\projects\\fallout4\\build\\pc\\data\\materials\\lod\\hittechstain_lod.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 14,
+   "texels": "dedbbd8d478be8e21bf34cb614531a8a071187ad",
+   "emissive": "black"
+  },
+  "c:\\projects\\fallout4\\build\\pc\\data\\materials\\lod\\hwoverpasslod.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 15,
+   "texels": "dd3c857a15eb88b356c6daff3fe92172be59fadf",
+   "emissive": "black"
+  },
+  "c:\\projects\\fallout4\\build\\pc\\data\\materials\\lod\\masscaplod01.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 16,
+   "texels": "a0dfcfe88b99701091908530a06514b5fc984552",
+   "emissive": "black"
+  },
+  "c:\\projects\\fallout4\\build\\pc\\data\\materials\\lod\\metalindbeamslod01.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 17,
+   "texels": "73035bbe69c24c0c84f84d4c07401db6d4e71820",
+   "emissive": "black"
+  },
+  "c:\\projects\\fallout4\\build\\pc\\data\\materials\\lod\\neoclassicalstonelod.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 18,
+   "texels": "e447bad7bb61b4ae87c57789698623d4c6359605",
+   "emissive": "black"
+  },
+  "c:\\projects\\fallout4\\build\\pc\\data\\materials\\lod\\pgaragelod01.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 19,
+   "texels": "a3e1ebf4059d6ddc52a6bfb8ec682ef8564a7730",
+   "emissive": "black"
+  },
+  "c:\\projects\\fallout4\\build\\pc\\data\\materials\\lod\\residentialneoclassicalstonelod.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 20,
+   "texels": "84255609a5d26f4fe70f560cd122d83deb306a4f",
+   "emissive": "black"
+  },
+  "c:\\projects\\fallout4\\build\\pc\\data\\materials\\lod\\rwriverlod.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 21,
+   "texels": "f28be02ffb6af17c786882c956cc52d8c832fb74",
+   "emissive": "black"
+  },
+  "c:\\projects\\fallout4\\build\\pc\\data\\materials\\lod\\sidingkitalod.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 22,
+   "texels": "f1aa779b068b08c1f0426240da93665588c45b00",
+   "emissive": "black"
+  },
+  "c:\\projects\\fallout4\\build\\pc\\data\\materials\\lod\\whitemarblebldlod.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 23,
+   "texels": "9de6700c85884da86942f2fbdaffb206e7f65f02",
+   "emissive": "black"
+  },
+  "materials\\architecture\\shacks\\shacklod01.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 24,
+   "texels": "812863a1a4c9bbb5b74b898c1f60618374646fcb",
+   "emissive": "black"
+  },
+  "materials\\bns\\lod\\landscape\\trees\\evergreen\\firtreebranches01.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 25,
+   "texels": "8fa157e92817f8e1ea64b14a48f01e1d84f8d82d",
+   "emissive": "black"
+  },
+  "materials\\bns\\lod\\landscape\\trees\\redpine\\redpinebark01lod.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 26,
+   "texels": "b5809763b2db42589dd0a19f0bf5fcd0ab4c1bfa",
+   "emissive": "black"
+  },
+  "materials\\bns\\lod\\landscape\\trees\\redpine\\redpinebranches01lod.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 27,
+   "texels": "9a93786f950a56b5c9b2b55a57a6b0c36bc1a743",
+   "emissive": "black"
+  },
+  "materials\\lod\\airport01_lod.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 28,
+   "texels": "5c616017ac1a0bd7fa986b242803a17e2398cb57",
+   "emissive": "black"
+  },
+  "materials\\lod\\amphitheater01lod.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 29,
+   "texels": "c6c4a6b54c07034dd49aa7cf0dd48d86a8a8f1fa",
+   "emissive": "black"
+  },
+  "materials\\lod\\architecture\\unique\\bathhouse\\bathhouselod.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 30,
+   "texels": "dbc66d21da926fde39c1d58001fe4662c915dbdf",
+   "emissive": "black"
+  },
+  "materials\\lod\\billboard02lod.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 31,
+   "texels": "e7ec612072549aa0d79099e0870c5ee5a9ecf29f",
+   "emissive": "black"
+  },
+  "materials\\lod\\bridgelod.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 32,
+   "texels": "1313319d0c7fb26f2d7887e5bbfe646124f8b71b",
+   "emissive": "black"
+  },
+  "materials\\lod\\concretewalllod01.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 33,
+   "texels": "1470a78367c0c73b400101429e085c78344d8434",
+   "emissive": "black"
+  },
+  "materials\\lod\\corrugatedmetallod02.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 34,
+   "texels": "7fb280ca106248931b62476aef8bfa12582920ff",
+   "emissive": "black"
+  },
+  "materials\\lod\\futurmetallod.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 35,
+   "texels": "92c7e1c35538bc15eeb7a2eac69775f230265ee6",
+   "emissive": "black"
+  },
+  "materials\\lod\\hittechextalargelod.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 36,
+   "texels": "5e10a4e968fce6f47762a63e5ee2569c86190ded",
+   "emissive": "black"
+  },
+  "materials\\lod\\hittechstain_lod.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 37,
+   "texels": "1dceb89adfb4a98ad550e51b1d6c14abae291a07",
+   "emissive": "black"
+  },
+  "materials\\lod\\hwoverpasslod.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 38,
+   "texels": "6c4baaa99cd569c12b1a62bfffcc40d205acb365",
+   "emissive": "black"
+  },
+  "materials\\lod\\lodairplanedebris01.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 39,
+   "texels": "d87280cfb835ef7ea66406718d501dd85d77c7fa",
+   "emissive": "black"
+  },
+  "materials\\lod\\lodboatfishingblack01.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 40,
+   "texels": "fd91aea7885ded4af06fa50412da65f515d6b321",
+   "emissive": "black"
+  },
+  "materials\\lod\\lodboatfishingred01.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 41,
+   "texels": "a067c16f65a4b1e2d016c42b7dbc3488417b5148",
+   "emissive": "black"
+  },
+  "materials\\lod\\lodboattug01.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 42,
+   "texels": "d4f31596beebef4ec1e10ed111e5921c232311af",
+   "emissive": "black"
+  },
+  "materials\\lod\\metalcatwalklod01.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 43,
+   "texels": "22cbd9b26bb53e51d6b415a1a84f15f73271be7b",
+   "emissive": "black"
+  },
+  "materials\\lod\\metalindbeamsredlod01.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 44,
+   "texels": "db2755fa586ff0fdace9ad2ce46c10f7f14676d7",
+   "emissive": "black"
+  },
+  "materials\\lod\\metalindbgpipeslod01.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 45,
+   "texels": "a48facdc6209bcac213cbad1b348ad1a457e9cfe",
+   "emissive": "black"
+  },
+  "materials\\lod\\metalindbgpipesrustlod01.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 46,
+   "texels": "e8075d39e4a243ef64395c547e7aba8e8c7676d4",
+   "emissive": "black"
+  },
+  "materials\\lod\\metalsiloplateslod01.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 47,
+   "texels": "615779295d4261effcbfa52866141d9377d8f47b",
+   "emissive": "black"
+  },
+  "materials\\lod\\rockslab01lod.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 48,
+   "texels": "d55df2f59a752af7d909474e3b6ffdc97af3d98d",
+   "emissive": "black"
+  },
+  "materials\\lod\\rockslab02lod.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 49,
+   "texels": "33a6eaaab9ab25afa9050ae07bdbebe8366149e8",
+   "emissive": "black"
+  },
+  "materials\\lod\\rwriverlod.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 50,
+   "texels": "e78d1d1d664caed4796a2ffa7572c907ca08441b",
+   "emissive": "black"
+  },
+  "materials\\lod\\trees\\blastedforestset01lodlv2.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 51,
+   "texels": "72908beecd431d06eca260f39284b5b7fe9d44cc",
+   "emissive": "black"
+  },
+  "materials\\lod\\trees\\blastedforesttrunkslod.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 52,
+   "texels": "8553f890beb120c831b20787306161a58980c591",
+   "emissive": "black"
+  },
+  "materials\\lod\\trees\\elmset01lodlv2.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 53,
+   "texels": "acf44badc805b5caec9383a3e5cff4e2d7146773",
+   "emissive": "black"
+  },
+  "materials\\lod\\trees\\elmset02lodlv2.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 54,
+   "texels": "102d6f54063399a955a72763c9981baf91330414",
+   "emissive": "black"
+  },
+  "materials\\lod\\trees\\herolodlv2.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 55,
+   "texels": "4fe190802c4ca63ab9ac4fb35de5501c7fbf781d",
+   "emissive": "black"
+  },
+  "materials\\lod\\trees\\maplebrancheslod.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 56,
+   "texels": "90edd4e18a5fa6e0c8a7881300bae5695ca020f5",
+   "emissive": "black"
+  },
+  "materials\\lod\\trees\\maplepostwarset01lodlv2.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 57,
+   "texels": "3ab07455d0f6c274a07473d9f36eb62938b367b8",
+   "emissive": "black"
+  },
+  "materials\\lod\\trees\\maplepostwarset02lodlv2.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 58,
+   "texels": "9cc9100ef7dba4b2f29802728727526a737b1dae",
+   "emissive": "black"
+  },
+  "materials\\lod\\trees\\mapletrunkslod.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 59,
+   "texels": "d78acaa57f0fb710175a5cf94658f93e5b33e904",
+   "emissive": "black"
+  },
+  "materials\\lod\\ussconstitutionlod.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 60,
+   "texels": "31b436349ff81e48bc822581d5805f902163d33a",
+   "emissive": "black"
+  },
+  "materials\\lod\\whitemarblebldlod.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 61,
+   "texels": "62c640f5c65274759ca2079ec29d9137ecc1de58",
+   "emissive": "black"
+  },
+  "materials\\lod\\wrhs01lod.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 62,
+   "texels": "2ede6fdbb1ee1ab998d3c74641e8a8f90fec4104",
+   "emissive": "black"
+  },
+  "textures\\lod\\billboard01lod_d.dds": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 63,
+   "texels": "416116628862bc0f126f6e4b4d40de66ee4c327c",
+   "emissive": "black"
+  },
+  "textures\\lod\\brickahouselod_d.dds": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 64,
+   "texels": "022bc864b5066dabc94c499bfa41e2700151792e",
+   "emissive": "black"
+  },
+  "textures\\lod\\brickbhouselod_d.dds": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 65,
+   "texels": "c6b746265bd7c239b98a1eb08d873935c8daf097",
+   "emissive": "black"
+  },
+  "textures\\lod\\commonwealthrockslab01lod_d.dds": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 66,
+   "texels": "d55df2f59a752af7d909474e3b6ffdc97af3d98d",
+   "emissive": "black"
+  },
+  "textures\\lod\\commonwealthrockslab02lod_d.dds": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 67,
+   "texels": "33a6eaaab9ab25afa9050ae07bdbebe8366149e8",
+   "emissive": "black"
+  },
+  "textures\\lod\\plutoniumwell_lod_d.dds": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 68,
+   "texels": "080d739435906fe5ce2c981357d2162beb1f3a82",
+   "emissive": "black"
+  },
+  "textures\\lod\\prybase01_lod_d.dds": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 69,
+   "texels": "90137d2bd0486564b2c99439c5d7f70e79f63288",
+   "emissive": "black"
+  },
+  "textures\\lod\\redrocket_lod_d.dds": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 70,
+   "texels": "70cc442db3a22d89749ea5f58af092f563ee04b6",
+   "emissive": "black"
+  },
+  "textures\\lod\\rwstone01lod_d.dds": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 71,
+   "texels": "f703684e39fdbc96c6f9c6e211fb4857ff7de147",
+   "emissive": "black"
+  },
+  "textures\\lod\\sidingahouselod_d.dds": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 72,
+   "texels": "a8dd7d11514eada14b6ab1077293f97fd72a4542",
+   "emissive": "black"
+  },
+  "textures\\lod\\wrhs01lod_d.dds": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x256.lodm",
+   "layer": 73,
+   "texels": "fcd68eaeb5ada8cd5066987b312149d40a559829",
+   "emissive": "black"
+  },
+  "materials\\bns\\lod\\landscape\\trees\\elm\\elmtrunkslod.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x512.lodm",
+   "layer": 0,
+   "texels": "c16ae131c70cd12f6abcf25200c2d88dcaa92016",
+   "emissive": "black"
+  },
+  "materials\\bns\\lod\\landscape\\trees\\maple\\mapletrunkslod.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x512.lodm",
+   "layer": 1,
+   "texels": "ecb91fc6f49a6bf09bac315e2f4bc7a71f88f1db",
+   "emissive": "black"
+  },
+  "materials\\lod\\trees\\elmtrunkslod.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.256x512.lodm",
+   "layer": 2,
+   "texels": "c16ae131c70cd12f6abcf25200c2d88dcaa92016",
+   "emissive": "black"
+  },
+  "materials\\bns\\landscape\\trees\\evergreen\\firtreebark01.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.512x2048.lodm",
+   "layer": 0,
+   "texels": "60bf0a8f616bfe6a84fc812ea6e913c192814096",
+   "emissive": "black"
+  },
+  "materials\\bns\\lod\\landscape\\trees\\elm\\elmgrlod.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.512x512.lodm",
+   "layer": 0,
+   "texels": "12ce5ace206b71e6fdd00802ff3b27153c7c0aa1",
+   "emissive": "black"
+  },
+  "materials\\bns\\lod\\landscape\\trees\\evergreen\\treefirforest01lodsetlvl2.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.512x512.lodm",
+   "layer": 1,
+   "texels": "401088c92190b5ee03b53c5d52eaa1e190d81c7b",
+   "emissive": "black"
+  },
+  "materials\\bns\\lod\\landscape\\trees\\evergreen\\treefirforest02lodsetlvl2.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.512x512.lodm",
+   "layer": 2,
+   "texels": "68e59f46db2541286da44b0a36d3abef84f36653",
+   "emissive": "black"
+  },
+  "materials\\bns\\lod\\landscape\\trees\\evergreen\\treefirforest03lodsetlvl2.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.512x512.lodm",
+   "layer": 3,
+   "texels": "aaf5d33afafa13df504ae22b513c70d7a8ec6e61",
+   "emissive": "black"
+  },
+  "materials\\bns\\lod\\landscape\\trees\\evergreen\\treefirforest04lodsetlvl2.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.512x512.lodm",
+   "layer": 4,
+   "texels": "72af7e67026c9de8d1c7fcd9ba6ec9ab4a791025",
+   "emissive": "black"
+  },
+  "materials\\bns\\lod\\landscape\\trees\\evergreen\\treefirforest05lodsetlvl2.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.512x512.lodm",
+   "layer": 5,
+   "texels": "2fcd4d989720fa18bb7ab701b1c61589d4d90eb5",
+   "emissive": "black"
+  },
+  "materials\\bns\\lod\\landscape\\trees\\maple\\maplebrlod.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.512x512.lodm",
+   "layer": 6,
+   "texels": "2ec8c300692cfe3b2dade8c650502239ff7496a7",
+   "emissive": "black"
+  },
+  "materials\\bns\\lod\\landscape\\trees\\maple\\maplegrlod.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.512x512.lodm",
+   "layer": 7,
+   "texels": "c3a3ef264cae60f5d078bfb58130183073792920",
+   "emissive": "black"
+  },
+  "materials\\bns\\lod\\landscape\\trees\\maple\\mapleorlod.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.512x512.lodm",
+   "layer": 8,
+   "texels": "1bcaec7962c3ce4aa97d8925ca38399cf284ae66",
+   "emissive": "black"
+  },
+  "materials\\bns\\lod\\landscape\\trees\\maple\\maplerdlod.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.512x512.lodm",
+   "layer": 9,
+   "texels": "b016a94585996c2b79d5cd78b39350ca667b9b6b",
+   "emissive": "black"
+  },
+  "materials\\bns\\lod\\landscape\\trees\\redpine\\redpinefulllodsetlvl2.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.512x512.lodm",
+   "layer": 10,
+   "texels": "072c1d9d86c285d0579ebfde5d181b41fc2f240b",
+   "emissive": "black"
+  },
+  "materials\\bns\\lod\\landscape\\trees\\redpine\\redpinehalflodsetlvl2.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.512x512.lodm",
+   "layer": 11,
+   "texels": "65bdddd359722c0fbd44a7e731c390f78592c10c",
+   "emissive": "black"
+  },
+  "materials\\bns\\lod\\landscape\\trees\\redpine\\redpinesmalllodsetlvl2.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.512x512.lodm",
+   "layer": 12,
+   "texels": "658fe4659f7173d035248a87f2bf25dd3a70834f",
+   "emissive": "black"
+  },
+  "materials\\lod\\trees\\elmbrancheslod.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.512x512.lodm",
+   "layer": 13,
+   "texels": "b454b666098dd5053a0184211c6a2319d677c7a2",
+   "emissive": "black"
+  },
+  "materials\\bns\\lod\\landscape\\trees\\evergreen\\firtreebark01.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.64x256.lodm",
+   "layer": 0,
+   "texels": "8cde70a415347248be23f3dd69e0cc7819f3e6d1",
+   "emissive": "black"
+  },
+  "c:\\projects\\fallout4\\build\\pc\\data\\materials\\lod\\neoclassicalwindowslod.bgsm": {
+   "lodm": "data\\fo4cslod\\commonwealth\\objects\\commonwealth.lodgenarrays.64x64.lodm",
+   "layer": 0,
+   "texels": "16efd114cf59a9111459bc32746e789efd69b651",
+   "emissive": "black"
+  }
+ },
+ "layers": 114,
+ "alias": {},
+ "aLines": 647,
+ "aOk": 647,
+ "aBad": [],
+ "emissiveFiles": {
+  "commonwealth.lodgenarrays.128x128_g.dds": {
+   "size": 218548,
+   "black": true,
+   "cards": false
+  },
+  "commonwealth.lodgenarrays.256x256_g.dds": {
+   "size": 3233060,
+   "black": true,
+   "cards": false
+  },
+  "commonwealth.lodgenarrays.256x512_g.dds": {
+   "size": 262276,
+   "black": true,
+   "cards": false
+  },
+  "commonwealth.lodgenarrays.512x2048_g.dds": {
+   "size": 699188,
+   "black": true,
+   "cards": false
+  },
+  "commonwealth.lodgenarrays.512x512_g.dds": {
+   "size": 2446788,
+   "black": true,
+   "cards": false
+  },
+  "commonwealth.lodgenarrays.64x256_g.dds": {
+   "size": 11060,
+   "black": true,
+   "cards": false
+  },
+  "commonwealth.lodgenarrays.64x64_g.dds": {
+   "size": 2876,
+   "black": true,
+   "cards": false
+  },
+  "commonwealth.lodgencards.legacy.1024x2048_g.dds": {
+   "size": 6881428,
+   "black": true,
+   "cards": true
+  },
+  "commonwealth.lodgencards.legacy.1152x2048_g.dds": {
+   "size": 1548436,
+   "black": true,
+   "cards": true
+  },
+  "commonwealth.lodgencards.legacy.1280x2048_g.dds": {
+   "size": 5161108,
+   "black": true,
+   "cards": true
+  },
+  "commonwealth.lodgencards.legacy.128x1024_g.dds": {
+   "size": 65684,
+   "black": true,
+   "cards": true
+  },
+  "commonwealth.lodgencards.legacy.128x512_g.dds": {
+   "size": 262292,
+   "black": false,
+   "cards": true
+  },
+  "commonwealth.lodgencards.legacy.2048x2048_g.dds": {
+   "size": 16711828,
+   "black": true,
+   "cards": true
+  },
+  "commonwealth.lodgencards.legacy.256x1024_g.dds": {
+   "size": 1048724,
+   "black": true,
+   "cards": true
+  },
+  "commonwealth.lodgencards.legacy.256x512_g.dds": {
+   "size": 393364,
+   "black": true,
+   "cards": true
+  },
+  "commonwealth.lodgencards.legacy.384x1024_g.dds": {
+   "size": 2211988,
+   "black": false,
+   "cards": true
+  },
+  "commonwealth.lodgencards.legacy.384x512_g.dds": {
+   "size": 123028,
+   "black": true,
+   "cards": true
+  },
+  "commonwealth.lodgencards.legacy.512x1024_g.dds": {
+   "size": 1638548,
+   "black": true,
+   "cards": true
+  },
+  "commonwealth.lodgencards.legacy.512x2048_g.dds": {
+   "size": 655508,
+   "black": true,
+   "cards": true
+  },
+  "commonwealth.lodgencards.legacy.512x512_g.dds": {
+   "size": 983188,
+   "black": true,
+   "cards": true
+  },
+  "commonwealth.lodgencards.legacy.640x1024_g.dds": {
+   "size": 1638548,
+   "black": true,
+   "cards": true
+  },
+  "commonwealth.lodgencards.legacy.768x1024_g.dds": {
+   "size": 3932308,
+   "black": true,
+   "cards": true
+  },
+  "commonwealth.lodgencards.legacy.896x1024_g.dds": {
+   "size": 2408596,
+   "black": true,
+   "cards": true
+  }
+ }
+}
