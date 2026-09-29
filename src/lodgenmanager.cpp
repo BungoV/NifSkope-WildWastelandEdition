@@ -1346,6 +1346,18 @@ public:
 			}
 			wwMatchFieldStyle( terrainBox );
 			terrainLabel = f.add( page, tr( "Terrain" ), terrainBox );
+			/* THE RULE PAINT OUTSIDE (lane TERRLIVE1, 2026-09-29, bungo: "make
+			 * it optional in the baking settings"): Vanilla (the default) or
+			 * Rule. Label and control only. Rule brings the vanilla-colour
+			 * fill with it, since the rule matches vanilla's colour. */
+			outsideBox = new QComboBox( page );
+			outsideBox->setObjectName( QStringLiteral( "LodgenOutsidePaintBox" ) );
+			outsideBox->addItem( tr( "Vanilla" ), 0 );
+			outsideBox->addItem( tr( "Rule" ), 1 );
+			outsideBox->setCurrentIndex( settings.value( QStringLiteral( "LodGeneration/outsidePaint" ),
+				QStringLiteral( "vanilla" ) ).toString() == QLatin1String( "rule" ) ? 1 : 0 );
+			wwMatchFieldStyle( outsideBox );
+			outsideLabel = f.add( page, tr( "Outside paint" ), outsideBox );
 			vtFinestBox = new QComboBox( page );
 			vtFinestBox->setObjectName( QStringLiteral( "LodgenVtFinestBox" ) );
 			/* THE FINEST TEXEL DENSITY, ONE ROW (lane VTNORMAL1, bungo's ruling
@@ -1425,7 +1437,7 @@ public:
 			vtSummary->setStyleSheet( QStringLiteral( "color: %1;" ).arg( wwSkinColor( "textMuted" ) ) );
 			f.span( vtSummary );
 			vtSection->body()->setLayout( f.g );
-			vtSub = { terrainBox, terrainLabel, vtFinestBox, vtFinestLabel, vtBtrCheck, vtSummary };
+			vtSub = { terrainBox, terrainLabel, outsideBox, outsideLabel, vtFinestBox, vtFinestLabel, vtBtrCheck, vtSummary };
 			// the pyramid's own numbers grey with it too
 			for ( const char * k : { "vtBorder", "vtMips", "vtCompress",
 					"vtHeight", "vtFillVanilla", "vtCover", "vtCoverInColor", "vtHalfAux" } ) {
@@ -2180,7 +2192,7 @@ public:
 		connect( lodtAoOnlyRadio, &QRadioButton::toggled, this, [this]( bool ) { refreshSummary(); } );
 		for ( QSpinBox * s : { x0Spin, x1Spin, y0Spin, y1Spin } )
 			connect( s, QOverload<int>::of( &QSpinBox::valueChanged ), this, [this]( int ) { refreshSummary(); } );
-		for ( QComboBox * c : { dimBox, heightmapSizeBox, vtFinestBox, terrainBox } )
+		for ( QComboBox * c : { dimBox, heightmapSizeBox, vtFinestBox, terrainBox, outsideBox } )
 			connect( c, QOverload<int>::of( &QComboBox::currentIndexChanged ), this, [this]( int ) { refreshSummary(); } );
 		connect( outEdit, &QLineEdit::textChanged, this, [this]( const QString & ) { refreshSummary(); } );
 
@@ -2828,6 +2840,9 @@ private:
 		o.compression = xi( "vtCompress" );
 		o.height = xb( "vtHeight" );
 		o.vanillaFill = xb( "vtFillVanilla" );
+		o.outsideRule = outsideBox && outsideBox->currentData().toInt() == 1;
+		if ( o.outsideRule )
+			o.vanillaFill = true;       // the rule matches vanilla's colour, so it needs the fill
 		o.coverInColor = xb( "vtCoverInColor" );
 		o.cover = coverOptions();
 		return o;
@@ -3050,6 +3065,8 @@ private:
 		s.setValue( QStringLiteral( "LodGeneration/vt" ), vtCheck->isChecked() );
 		s.setValue( QStringLiteral( "LodGeneration/vtDensity" ), vtFinestBox->currentData().toInt() );
 		s.setValue( QStringLiteral( "LodGeneration/terrainOption" ), lodgenTerrainOptionName( terrainOption() ) );
+		s.setValue( QStringLiteral( "LodGeneration/outsidePaint" ),
+			outsideBox && outsideBox->currentData().toInt() == 1 ? QStringLiteral( "rule" ) : QStringLiteral( "vanilla" ) );
 		s.setValue( QStringLiteral( "LodGeneration/vtBtr" ), vtBtrCheck->isChecked() );
 		s.setValue( QStringLiteral( "LodGeneration/impostors" ), impostorEdit->text() );
 		s.setValue( QStringLiteral( "LodGeneration/impostorFromLevel" ), impostorLevelBox->currentData().toInt() );
@@ -3585,6 +3602,7 @@ private:
 			 * the pyramid for full and hybrid. */
 			const LodgenTerrainOption to = terrainOption();
 			lodbSetTerrainOption( lodgenTerrainOptionName( to ) );
+			lodbSetOutsideRule( vo.outsideRule );
 			const QString note = lodgenTerrainOptionApply( to, vo );
 			if ( !note.isEmpty() )
 				lodbNoteCensus( note );
@@ -3594,8 +3612,17 @@ private:
 				lastReport = drep;
 			} else
 				lastReport = tr( "ground decals: %1" ).arg( verr );
-			if ( to == LodgenTerrainOption::Dynamic )
+			if ( to == LodgenTerrainOption::Dynamic ) {
 				vtSuppliesTex = false;		// no pyramid, so no chunk sheets from it
+				if ( vo.outsideRule ) {     // DYNAMIC's half of the rule paint: the map alone
+					QStringList rlog;
+					if ( lodgenBakeOutsideRule( *world, QString(), outputDir(), vo, &rlog, &verr ) )
+						for ( const QString & l : rlog )
+							lodbNoteCensus( l );
+					else
+						lastReport = tr( "outside paint: %1" ).arg( verr );
+				}
+			}
 			else if ( lodgenBakeTerrainVt( *world, QString(), outputDir(), vo, bakeCaches, &rep, &verr ) )
 				lastReport = rep;
 			else
@@ -4133,6 +4160,8 @@ private:
 	QLabel * vtSummary = nullptr, * vtFinestLabel = nullptr;
 	QComboBox * terrainBox = nullptr;       //!< lane TERRLIVE1
 	QLabel * terrainLabel = nullptr;
+	QComboBox * outsideBox = nullptr;       //!< lane TERRLIVE1: the rule paint outside
+	QLabel * outsideLabel = nullptr;
 	QList<QWidget *> vtSub;
 	/*! ONE REGISTRY FOR THE ROWS LANE PANEL1 ADDED (2026-09-12).
 	 *

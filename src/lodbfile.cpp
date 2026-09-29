@@ -124,6 +124,20 @@ QString lodbTerrainOption()
 	return g_terrainOption;
 }
 
+static bool g_outsideRule = false;
+
+void lodbSetOutsideRule( bool on )
+{
+	QMutexLocker lock( &g_censusMutex );
+	g_outsideRule = on;
+}
+
+bool lodbOutsideRule()
+{
+	QMutexLocker lock( &g_censusMutex );
+	return g_outsideRule;
+}
+
 void lodbClearCensus()
 {
 	QMutexLocker lock( &g_censusMutex );
@@ -413,6 +427,9 @@ bool lodgenWriteLedger( const QString & path, const LodgenLedger & led, QString 
 		const QString to = lodbTerrainOption();
 		if ( !to.isEmpty() )
 			row( { QStringLiteral( "terrain" ), to } );
+		// the rule paint outside our ground (`--outside-paint rule`); no row when off
+		if ( lodbOutsideRule() )
+			row( { QStringLiteral( "outside" ), QStringLiteral( "rule" ) } );
 	}
 
 	/* 6. the chunks. The rows are sorted by (cy,cx) -- never by the order the

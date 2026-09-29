@@ -1,0 +1,160 @@
+{
+ "lodl": "E:/Projects/NifskopeWWE-terrlive1/scratchpad/terrlive1_20260929/bakes/full/mod/FO4CSLOD/Commonwealth/Commonwealth.lodl",
+ "ws": "Commonwealth",
+ "fade": [
+  8192.0,
+  12288.0
+ ],
+ "frames": 30,
+ "ltex_side": 512,
+ "decal_normals": true,
+ "rule": "E:/Projects/NifskopeWWE-terrlive1/scratchpad/terrlive1_20260929/whole_rule/mod/FO4CSLOD/Commonwealth/Commonwealth.lodr",
+ "views": [
+  {
+   "name": "boston_off",
+   "cells": [
+    -8,
+    -12,
+    3,
+    -1
+   ],
+   "stride": 1,
+   "lodt_far": "E:/Projects/NifskopeWWE-terrlive1/scratchpad/terrlive1_20260929/whole_off/mod/FO4CSLOD/Commonwealth/Commonwealth.VT.8.lodt",
+   "renders": [
+    {
+     "options": [
+      "hybrid",
+      "dynamic"
+     ],
+     "titles": [
+      "Boston -- HYBRID far levels, baked -- outside paint VANILLA (switch off)",
+      "Boston -- DYNAMIC, live -- outside paint VANILLA (switch off)"
+     ],
+     "out": "pics3/gpu_boston_off.png"
+    }
+   ],
+   "rule": false,
+   "ortho": [
+    -4096.0,
+    -24576.0,
+    16384.0
+   ],
+   "width": 1200,
+   "height": 1200,
+   "decals": "E:/Projects/NifskopeWWE-terrlive1/scratchpad/terrlive1_20260929/bakes/hybrid/mod/FO4CSLOD/Commonwealth/Commonwealth.lodd",
+   "box_count": true
+  },
+  {
+   "name": "street_off",
+   "cells": [
+    -8,
+    -12,
+    3,
+    -1
+   ],
+   "stride": 1,
+   "lodt_far": "E:/Projects/NifskopeWWE-terrlive1/scratchpad/terrlive1_20260929/whole_off/mod/FO4CSLOD/Commonwealth/Commonwealth.VT.8.lodt",
+   "renders": [
+    {
+     "options": [
+      "hybrid",
+      "dynamic"
+     ],
+     "titles": [
+      "street -- HYBRID far levels, baked -- outside paint VANILLA (switch off)",
+      "street -- DYNAMIC, live -- outside paint VANILLA (switch off)"
+     ],
+     "out": "pics3/gpu_street_off.png"
+    }
+   ],
+   "rule": false,
+   "eye": [
+    -4096.0,
+    -30720.0,
+    150.0
+   ],
+   "at": [
+    -4096.0,
+    -22000.0,
+    0.0
+   ],
+   "fov": 70.0,
+   "width": 1920,
+   "height": 1080,
+   "decals": "E:/Projects/NifskopeWWE-terrlive1/scratchpad/terrlive1_20260929/bakes/hybrid/mod/FO4CSLOD/Commonwealth/Commonwealth.lodd",
+   "box_count": true
+  },
+  {
+   "name": "boston_on",
+   "cells": [
+    -8,
+    -12,
+    3,
+    -1
+   ],
+   "stride": 1,
+   "lodt_far": "E:/Projects/NifskopeWWE-terrlive1/scratchpad/terrlive1_20260929/whole_rule/mod/FO4CSLOD/Commonwealth/Commonwealth.VT.8.lodt",
+   "renders": [
+    {
+     "options": [
+      "hybrid",
+      "dynamic"
+     ],
+     "titles": [
+      "Boston -- HYBRID far levels, baked -- outside paint RULE (switch on)",
+      "Boston -- DYNAMIC, live -- outside paint RULE (switch on)"
+     ],
+     "out": "pics3/gpu_boston_on.png"
+    }
+   ],
+   "ortho": [
+    -4096.0,
+    -24576.0,
+    16384.0
+   ],
+   "width": 1200,
+   "height": 1200,
+   "decals": "E:/Projects/NifskopeWWE-terrlive1/scratchpad/terrlive1_20260929/bakes/hybrid/mod/FO4CSLOD/Commonwealth/Commonwealth.lodd",
+   "box_count": true
+  },
+  {
+   "name": "street_on",
+   "cells": [
+    -8,
+    -12,
+    3,
+    -1
+   ],
+   "stride": 1,
+   "lodt_far": "E:/Projects/NifskopeWWE-terrlive1/scratchpad/terrlive1_20260929/whole_rule/mod/FO4CSLOD/Commonwealth/Commonwealth.VT.8.lodt",
+   "renders": [
+    {
+     "options": [
+      "hybrid",
+      "dynamic"
+     ],
+     "titles": [
+      "street -- HYBRID far levels, baked -- outside paint RULE (switch on)",
+      "street -- DYNAMIC, live -- outside paint RULE (switch on)"
+     ],
+     "out": "pics3/gpu_street_on.png"
+    }
+   ],
+   "eye": [
+    -4096.0,
+    -30720.0,
+    150.0
+   ],
+   "at": [
+    -4096.0,
+    -22000.0,
+    0.0
+   ],
+   "fov": 70.0,
+   "width": 1920,
+   "height": 1080,
+   "decals": "E:/Projects/NifskopeWWE-terrlive1/scratchpad/terrlive1_20260929/bakes/hybrid/mod/FO4CSLOD/Commonwealth/Commonwealth.lodd",
+   "box_count": true
+  }
+ ]
+}

@@ -6,7 +6,10 @@ Boxes: bungo's two circled spots (north steps, west outline). Per box:
   dip      = the band profile (luminance by signed distance to the painted edge, 1 km bins, -12..+12 km):
              how far it sinks below the lower of its two ends, less vanilla's own such sink (an outline is a dip)
   edge     = mean lum in the first km inside and the first km outside, next to V's
-PASS: outside <= 2.0 and dip <= 1.0 in both boxes. The law-1 bake must FAIL (sabotage proof)."""
+PASS: outside <= 2.0 and dip <= 1.0 in both boxes. The law-1 bake must FAIL (sabotage proof).
+With --rule (the bake had --outside-paint rule, lane TERRLIVE1 section 16): the outside is the rule paint by
+design, so `outside` is reported as the drift from vanilla and not gated; PASS = dip <= 1.0 and the edge step
+|first km inside - first km outside| <= 2.0 in both boxes (law 1: dips 10.55 / 9.53, must still FAIL)."""
 import sys, os
 import numpy as np
 from PIL import Image
@@ -14,6 +17,7 @@ from scipy import ndimage
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import vtread
 path, label = sys.argv[1], sys.argv[2]
+RULE = '--rule' in sys.argv
 VAN = 'E:/Tools/Fallout 4/DataUnpacked/Data/Textures/Terrain/Commonwealth'
 H = os.path.dirname(os.path.abspath(__file__))
 d = np.load(os.path.join(H, 'cells.npz')); realq, minX, minY = d['realq'], int(d['minX']), int(d['minY'])
@@ -55,11 +59,13 @@ for name, (cx0, cy0, cx1, cy1) in (('north_steps', (8, 26, 32, 40)), ('west_outl
     dipOf = lambda q: max(0.0, min(q[0], q[-1]) - min(q))
     dip = max(0.0, dipOf(prof) - dipOf(profV))
     k_in, k_out = list(bins).index(-1024), list(bins).index(0)
-    box_ok = outside <= 2.0 and dip <= 1.0
+    step = abs(prof[k_in] - prof[k_out])
+    box_ok = (dip <= 1.0 and step <= 2.0) if RULE else (outside <= 2.0 and dip <= 1.0)
     ok = ok and box_ok
     print(f'{label} {name}: outside |ours-V| {outside:.2f} over {int(out.sum())} texels; dip {dip:.2f}; '
-          f'first km inside {prof[k_in]:.1f} (V {profV[k_in]:.1f}), first km outside {prof[k_out]:.1f} (V {profV[k_out]:.1f}) '
+          f'step {step:.2f}; first km inside {prof[k_in]:.1f} (V {profV[k_in]:.1f}), first km outside {prof[k_out]:.1f} (V {profV[k_out]:.1f}) '
           f'-> {"PASS" if box_ok else "FAIL"}')
     print(f'   profile -12..+12 km: ' + ' '.join(f'{v:.1f}' for v in prof))
     print(f'   vanilla            : ' + ' '.join(f'{v:.1f}' for v in profV))
-print(f'{label}: {"PASS" if ok else "FAIL"}')
+print(f'{label}: {"PASS" if ok else "FAIL"}' + (' (rule clauses: dip <= 1.0, step <= 2.0; outside = drift, reported)' if RULE else ''))
+sys.exit(0 if ok else 1)

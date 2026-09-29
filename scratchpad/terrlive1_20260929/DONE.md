@@ -462,3 +462,129 @@ under 2000 px skipped):**
     draw-order breaks, bad or unsorted index all **0**.
   - pair matched (names table CRC f34c4cd6 on both).
 - Branch terrlive1-20260929: rework commit a843685b pushed (not merged); this section follows it.
+
+## 16. Optional rule paint outside our ground (bungo: "Yes, option 2, make it optional in the baking settings")
+
+Design calls, logged 2026-09-29 10:00 before any code:
+
+- **Switch.** CLI `--outside-paint vanilla|rule` (default vanilla = today's law 2, byte for byte). `rule`
+  needs `--vt-fill-vanilla` (the rule reads vanilla's diffuse to choose). Panel row "Outside paint"
+  (Vanilla / Rule), label and control only. The .lodb gains an `outside rule` row only when on, so an
+  OFF .lodb is unchanged.
+- **Where the rule applies.** Colour only. The unpainted quadrants (w = 0 in law 2) take the rule colour R
+  instead of vanilla V; the 8,192 u band inside our ground blends ours into R (c = R + (ours - R) w).
+  Normals, mask, cover, height outside stay as today.
+- **Texture set.** The LTEX records the worldspace's own LAND uses (base textures + layers, counted by area),
+  keeping those with at least 0.5 % of the painted area and a loadable diffuse. Each one's colour for
+  matching = its 1x1 mip (the repeat average) times the land grade.
+- **The rule, per 512 u sample** (8 per cell): V = vanilla's mean over the sample's 16 x 16 vanilla texels;
+  height and slope from the LAND heights (vanilla's LOD heights where a cell has no LAND). A prior
+  P(texture | slope bin, height bin) is counted over OUR painted quadrants (so rock goes on steep ground,
+  as Bethesda's own layers put it). The 8 most likely textures for the sample's bin are tried alone and in
+  pairs; a pair's mix weight is the least-squares fit to V, clamped to 0..1; score = colour error (8-bit
+  units) - 2 x log prior. Lowest score wins.
+- **Layers per texel.** 2 per sample (A, B and A's weight); a texel reads its 4 surrounding samples
+  bilinearly, so up to 8 textures meet at one texel, usually 2-4 (duplicates merge).
+- **Storage.** A small id/weight map in a NEW file `<ws>.lodr` next to the VT files: 64-byte header
+  ("LODR", version, cell extent, samples per cell, palette count, band, sizes, CRC32), the palette as
+  LTEX form ids, then zlib-compressed planes A, B, W (u8, 255 = no sample). Not computed live from
+  height + vanilla colour, because the choice needs the whole-map texture statistics and vanilla's
+  sheets; the renderer should only read ids and weights, exactly like the .lodl's splat. No existing
+  format changes.
+- **Hybrid's far baked levels CARRY the rule paint.** They are box-filtered from the finest level, which the
+  fill already rewrites, so they cost no extra bytes and the near (live) and far (baked) ground show the
+  same textures at the switch-over distance; stopping them at the painted edge would put a vanilla/rule
+  seam exactly at the fade.
+- **DYNAMIC** writes only the .lodr (it bakes no VT colour); the live draw reads it.
+- **TILING6 hook.** The live rule ground calls ltexFetch like the live splat does (one splat function,
+  fed either grid).
+- **Edge gate with the switch on.** The skill's clause "outside within 2.0 of vanilla" measures "vanilla
+  untouched", which the switch gives up on purpose. Kept: the dip clause (<= 1.0); added: the step
+  across the painted edge (first km inside vs first km outside, <= 2.0), and the drift outside is
+  reported, not gated. The law-1 stage must still fail the adapted gate.
+
+### 16.1 Build 6 (written 10:19)
+- All sources compiled first time (build 6, 10:16-10:17, BUILD-RC=0, exe df981d25). Copied to run_rule/.
+- Chain 6 started: whole-map HYBRID bake with the switch OFF (the byte gate against the law-2 head bake),
+  then the same bake with `--outside-paint rule`.
+
+### 16.2 Switch OFF = the head's bytes (written 11:23)
+- The turn was held by IDENT2 from 10:18 to 11:01; chain 6 ran from 11:01.
+- whole_off (build 6, switch off, the head's whole-map HYBRID recipe): rc 0, 1,299 s.
+- `edge/gate_off.py whole_hybrid_law2/mod whole_off/mod` -> all 7 files SAME by sha1 (VT.8/16/32, .lodm, flat
+  report with its "# Override file:" row masked, .lodd, .lodg), no new file: **GREEN** (gate_off_green.txt).
+  The red half of the proof is run on the rule bake below.
+
+### 16.3 The whole-map bake with the switch on (written 11:50)
+- whole_rule (`--outside-paint rule`, else the same recipe): rc 0, **1,513 s against 1,299 s off: +214 s (+16%)**.
+  Of that, building the rule map is 67.6 s (buildMs); the rest is the rule colour per outside texel in the tiles.
+- **Bytes added, whole map: 2,687,771 (the .lodr, 2.6 MB).** The VT levels keep their sizes (stored uncompressed,
+  same tiles); only their colour outside changes. Nothing else changes (.lodm, .lodd, .lodg, flat report SAME).
+- The rule census: grid 1536 x 1536 at 512 u, all 2,359,296 samples set (no vanilla or height gaps), 254,288 of
+  them on painted ground (the statistics), 1,941,958 pairs + 417,338 singles; mean colour error to vanilla at the
+  samples 7.24 (8-bit RGB), luminance 2.96. Palette 36 textures (64 dropped under the 0.5% share, 1 with no
+  loadable texture); 10 of the 36 end up unused. The default land set (no LTEX, ffffffff) is one of them (10.4%).
+- **Red half of the OFF gate:** `gate_off.py whole_hybrid_law2/mod whole_rule/mod --expect-red` -> VT.8/16/32 differ,
+  a new .lodr: RED as expected (gate_off_red.txt). So the gate sees the switch.
+- **Read-back:** `--rule-check` on the .lodr: OK, cells -96,-96 + 192x192, grid 1536x1536 at 512 u, samples 2,359,296
+  (pairs 1,941,958), palette 36 (unused 10), band 8192 u. Damaged copies are refused: one flipped bit -> "CRC
+  mismatch", a wrong magic -> "not a .lodr", cut at 1,000 bytes -> "file is 1000 bytes, the header says 2687771".
+- **Edge gate with the switch on** (`gate_law2.py VT.8 --rule`, now exits 1 on FAIL):
+  whole_rule north_steps dip 0.00, step 0.78 -> PASS; west_outline dip 0.54, step 0.10 -> PASS.
+  Sabotage: the law-1 bake under the same clauses: dips 9.47 / 8.69, steps 7.38 / 1.62 -> FAIL (exit 1).
+- **Drift from vanilla outside** (`edge/drift.py` OFF vs ON; OFF's outside is vanilla's dim-4 diffuse), mean |d lum|:
+  | zone | VT.32 (256 u) | VT.8 (64 u) | signed (VT.8) | p95 (VT.8) |
+  |---|---|---|---|---|
+  | band 0-8 km outside | 6.20 | 7.20 | +1.96 | 20.3 |
+  | near 8-32 km | 6.65 | 7.45 | +1.62 | 22.3 |
+  | far > 32 km | 4.34 | 4.97 | -0.78 | 20.6 |
+  | all outside | 4.50 | 5.14 | -0.60 | 20.8 |
+  Inside our painted ground it moves 0.58-0.66 on the average: that is the inner 8 km band, which now blends to
+  the rule paint instead of vanilla. In the gate boxes: north steps 3.35, west outline 7.02 (the rule ground reads
+  ~4.5 lum darker than vanilla there: 76.6 against 81.0 in the first km outside).
+
+### 16.4 DYNAMIC and the .lodb row (written 12:01)
+- DYNAMIC with the switch (`--terrain-option dynamic --outside-paint rule`, VT-only path): rc 0, 381 s; it writes
+  the .lodr (2,687,771 bytes, sha1 7626cd4f, **byte-identical to HYBRID's**) beside the decals and no VT level. The
+  rule step is 38 s of it (buildMs 38,155; HYBRID's was 67.6 s while the tile workers shared the CPU).
+  So DYNAMIC adds 2.6 MB and ~38 s.
+- Small region bake, cells -32..-25 x 8..15 on the west edge (bake_small.sh), off and on:
+  - on: the .lodb gains `switch --outside-paint rule`, the row `outside	rule` after `terrain	hybrid`, and
+    `product	Commonwealth.lodr	<sha1>`; off has none of the three. The rest of the diff is time stamps, run paths,
+    the VT.8 product hash and the stage times.
+  - The region's .lodr reads back: cells -32,8 + 8x8, grid 64x64, 4,096 samples (3,802 pairs), palette 10, 6,536 bytes.
+    A region bake takes its texture statistics from the region's own painted ground (10 textures here).
+
+### 16.5 GPU, pictures and the look in view (written 12:04)
+Preview with run_rule (build 6), specs from make_spec_rule.py: spec_rule_gpu.json (Boston, street: the section-14
+cameras) and spec_rule_pics.json (whole, low hills view, the two close-ups). OFF views read the OFF bake's levels
+with "rule": false; ON views read the rule bake's levels and its .lodr. Total GPU ms, median of 30 frames:
+
+| view | HYBRID off | HYBRID on | DYNAMIC off | DYNAMIC on |
+|---|---|---|---|---|
+| Boston (ortho, 1200 px) | 0.106 | 0.118 | 0.145 | 0.166 |
+| street (eye level) | 0.183 | 0.190 | 0.194 | 0.201 |
+| whole map (1600 px) | 0.409 | 0.396 | 0.449 | 0.513 |
+| low view over the outside hills | 0.187 | 0.243 | 0.198 | 0.306 |
+
+- Cost: up to +0.06 ms on the whole map live (DYNAMIC) and +0.06 / +0.11 ms on the hills view, where most of the
+  screen is outside ground drawn live. HYBRID's whole map is flat (0.409 -> 0.396, noise): its far levels already
+  hold the rule colour, so nothing extra is fetched.
+- Pictures (60 px title bars; left panel HYBRID baked, right DYNAMIC live): pics3/whole_off.png, whole_on.png,
+  north_steps_on.png, west_outline_on.png, hills_off.png, hills_on.png (+ gpu_boston_*, gpu_street_*).
+- Look in view (`edge/pic_drift.py` off vs on, same camera):
+  - whole map: mean |d lum| 3.75 (HYBRID) / 3.37 (DYNAMIC); mean colour off (80, 74, 64) -> on (80, 74, 61) baked:
+    the rule ground is a touch more olive (blue -3 to -4).
+  - low hills view: far half |d lum| 7.62 baked / 12.50 live, near half 0.28 / 1.74. What changes: vanilla's grey
+    rock on the far slopes becomes brown and olive ground; the rule picks rock less often than Bethesda painted it.
+- Seen in the close-ups, the same off and on: the quadrant-shaped edge of the yellow ground at the north steps
+  (the law-2 picture of section 14 shows it too). The switch does not add or remove it.
+
+### 16.6 Docs, skill, commit (written 12:06)
+- docs/LODGEN_TERRAIN_VT.md §2.6c (the switch, texture set, rule, layers, .lodr layout, HYBRID/DYNAMIC, measures).
+- Skill ww-terrain-edge-measure: section 7 (the --rule gate clause, drift.py, gate_off.py, --rule-check), in
+  E:/Projects/Claude/.claude/skills and E:/Tools/AISkills (identical).
+- New scratch tools: edge/gate_off.py, edge/drift.py, edge/pic_drift.py, make_spec_rule.py, chain6.sh, chain7.sh,
+  bake_small.sh, build.sh; the patch scripts and rule_impl.cpp.txt kept as the record of the source edits.
+- DELIVERABLE_TEXT.md: HANDOFF / WW_CHANGES / MISTAKES lines for the rule paint.
+- Pictures stay local (pics3/*.png, not committed, like pics2).

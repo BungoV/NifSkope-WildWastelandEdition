@@ -107,6 +107,10 @@ bool        lodbIsCensusLine( const QString & line );
  *  (a bake that wrote no terrain texture decision). */
 void        lodbSetTerrainOption( const QString & option );
 QString     lodbTerrainOption();
+/*! Lane TERRLIVE1: `--outside-paint rule` was on; written as an `outside rule`
+ *  row after the terrain row, and only when on, so an OFF record is unchanged. */
+void        lodbSetOutsideRule( bool on );
+bool        lodbOutsideRule();
 
 /*! The exe that baked the record: `WW_EDITION_VERSION+<build rev>`, composed
  *  the same way `src/main.cpp` composes the window title (build_rev.txt beside

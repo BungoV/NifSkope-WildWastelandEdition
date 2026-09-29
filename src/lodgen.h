@@ -1554,6 +1554,14 @@ struct LodgenVtOptions
 	 *  those cells, tone-matched on the overlap. Read at bake time only. OFF by
 	 *  default; a bake without it is byte-identical to one before it existed. */
 	bool vanillaFill = false;
+	/*! THE RULE PAINT OUTSIDE (lane TERRLIVE1, 2026-09-29, bungo: "Yes, option
+	 *  2, make it optional in the baking settings"; `--outside-paint rule`,
+	 *  panel row "Outside paint"). Needs `vanillaFill`. The unpainted ground
+	 *  takes the worldspace's own landscape textures, chosen by slope, height
+	 *  and the best colour match to vanilla's diffuse, instead of that diffuse;
+	 *  the choice is written to `<ws>.lodr` (lodgenRuleWrite). OFF by default
+	 *  and byte-identical when off. */
+	bool outsideRule = false;
 	/*! Where the ground-cover byte lives (bungo's open question, 2026-09-11
 	 *  09:5x: the mask's A, mirroring the object family's subsurface slot, or
 	 *  the colour sheet's A, the object family's `coverage` slot).
@@ -1657,6 +1665,47 @@ bool lodgenTerrainOptionParse( const QString & s, LodgenTerrainOption * out );
  *  INSIDE the painted ground over which our colour rises from vanilla's
  *  diffuse (0) to ours (1). One number for the bake and the live preview. */
 constexpr float LODGEN_VT_FILL_BAND = 8192.0f;
+/*! THE RULE PAINT MAP, `<ws>.lodr` (lane TERRLIVE1, docs/LODGEN_TERRAIN_VT.md
+ *  2.6c). A NEW file; no other format changes. One sample every 512 world units
+ *  (8 a cell), sample (sx, sy) centred at world ( (cellMinX * 8 + sx + 0.5) * 512,
+ *  (cellMinY * 8 + sy + 0.5) * 512 ), row 0 = south. Each sample names two
+ *  palette entries A and B and A's weight W (B's is 255 - W); 255 in A = no
+ *  sample (no vanilla colour there). The palette is LTEX form ids.
+ *
+ *  Layout, little-endian: 64-byte header
+ *    0 "LODR"  4 u32 version (1)  8 u32 header bytes (64)
+ *   12 i32 cellMinX  16 i32 cellMinY  20 i32 cellsX  24 i32 cellsY
+ *   28 u32 samples per cell (8)  32 u32 palette count  36 f32 band (world units)
+ *   40 u32 payload bytes (zlib)  44 u32 raw bytes (3 * nx * ny)
+ *   48 u32 CRC32 of palette + payload  52 u32 flags (0)  56..63 zero
+ *  then palette count x u32 LTEX forms, then the zlib stream of planes A, B, W
+ *  (u8, nx * ny each, row 0 south). */
+struct LodgenRuleMap
+{
+	int cellMinX = 0, cellMinY = 0, cellsX = 0, cellsY = 0, spc = 8;
+	float band = 0.0f;
+	QVector<quint32> palette;
+	std::vector<quint8> a, b, w;          //!< nx * ny each
+	int nx() const { return cellsX * spc; }
+	int ny() const { return cellsY * spc; }
+	float spacing() const { return 4096.0f / float( spc ); }
+	float originX() const { return ( float( cellMinX ) * float( spc ) + 0.5f ) * spacing(); }
+	float originY() const { return ( float( cellMinY ) * float( spc ) + 0.5f ) * spacing(); }
+	/*! The bilinear mix at world (wx, wy): up to 8 (palette index, weight)
+	 *  pairs, merged, weights summing to 1 over the samples that exist; the
+	 *  count, 0 where no surrounding sample exists. */
+	int mixAt( float wx, float wy, quint8 * ids, float * wts ) const;
+};
+//! Write `m` to `path`; the byte count, or -1 (and `why`).
+qint64 lodgenRuleWrite( const QString & path, const LodgenRuleMap & m, QString * why );
+//! Read and check a `.lodr` (magic, sizes, CRC, ids within the palette); false and `why` on any fault.
+bool lodgenRuleRead( const QString & path, LodgenRuleMap & m, QString * why );
+/*! DYNAMIC's half of the rule paint: build the rule map over the worldspace (or
+ *  the region in `opts`) and write `<outDir>/<ws>.lodr`. Needs a vanilla LOD
+ *  root. `log` gets the census lines. */
+bool lodgenBakeOutsideRule( const EsmWorld & world, const QString & dataRoot,
+	const QString & outDir, const LodgenVtOptions & opts, QStringList * log, QString * why );
+
 /*! What the option does to the pyramid's options: Hybrid sets the finest level
  *  to dim 8. Returns a one-line note when it could not (the .btr chunk sheets
  *  are assembled from level 4 and need it), else empty. */

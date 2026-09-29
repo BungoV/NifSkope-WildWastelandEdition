@@ -1,4 +1,4 @@
-# TERRLIVE1 deliverable text (2026-09-29 08:13, rework 09:30) -- lines for the overseer to splice
+# TERRLIVE1 deliverable text (2026-09-29 08:13, rework 09:30, rule paint 12:05) -- lines for the overseer to splice
 
 ## HANDOFF
 - TERRLIVE1 (branch terrlive1-20260929, not merged). Rework 2026-09-29 (coordinator 08:19 + correction):
@@ -29,6 +29,16 @@
     - 2 quadrants painted only by a NULL LTEX (bake 15,893 vs .lodl 15,891)
     - AO choice; TILING6 = `ltexFetch()` in terrainpreview.cpp; LTEX 000464c5 has no texture path
 
+  - Optional rule paint outside (2026-09-29 10:00-12:05, bungo "option 2, make it optional"):
+    - `--outside-paint vanilla|rule` + the panel row "Outside paint"; ships vanilla (= law 2, byte for byte: all 7
+      whole-map files sha1-identical to the law-2 bake; the gate goes red on the rule bake).
+    - On: a new file `<ws>.lodr` (2.6 MB, 512 u samples, 2 textures a sample from the worldspace's own 36 LTEX,
+      chosen by slope, height and the best colour match to vanilla's dim-4 diffuse); HYBRID's far levels carry it,
+      DYNAMIC draws it live through ltexFetch. `--rule-check` reads it back. The .lodb records `outside rule`.
+    - Cost: +214 s HYBRID bake (+38 s DYNAMIC), GPU up to +0.06 ms whole map live, +0.11 ms on a low view over
+      outside ground. Edge gate with the rule clauses PASS (dip 0.00 / 0.54, step 0.78 / 0.10); law-1 FAIL.
+    - Drift from vanilla outside: mean 5.1 lum (p95 21); far hills lose some of vanilla's grey rock to brown/olive.
+    - Owed: bungo's eye on pics3/*.png; FO4CS readers for the .lodr; whether the rule should pick rock more often.
 ## WW_CHANGES
 - LOD terrain options (lane TERRLIVE1, branch terrlive1-20260929):
   - `--terrain-option hybrid|dynamic` and a Terrain row in the LOD panel. HYBRID (default) keeps the 64/128/256 u
@@ -38,6 +48,9 @@
   - Every bake writes projected decals (.lodd/.lodg); `--decal-check` reads them back.
   - `--terrain-preview <spec.json>` renders and times the options offscreen, with the same blend to vanilla.
 
+  - `--outside-paint vanilla|rule` and an "Outside paint" row in the LOD panel: optionally paint the ground outside
+    our painted area with the worldspace's own landscape textures (chosen by slope, height and vanilla's colour),
+    stored in a new `<ws>.lodr`; `--rule-check` reads it back. Off by default.
 ## MISTAKES
 - 2026-09-29 TERRLIVE1: an ad-hoc preview run with a relative spec path failed, and its turn was not
   released: held idle 07:52-08:02, blocking IDENT2.
@@ -48,7 +61,7 @@
   - Fix: stage those levels without writing them (build 2).
   - Lesson: check an option's saving in the recipe that ships, not the bare one.
 - 2026-09-29 TERRLIVE1: timestamps typed ahead of the clock three times in DONE.md (05:17/05:16,
-  06:01/05:59, 05:40/05:39). Corrected each time.
+  06:01/05:59, 05:40/05:39, and 12:10/12:04 in this file's header). Corrected each time.
   - Rule: run `date` in the same command that writes the line.
 - 2026-09-29 TERRLIVE1: a Bash heredoc turned the Python regex `\b` into a backspace. The gate's
   seconds mask then matched nothing and the gate went red for the wrong reason.
@@ -66,3 +79,11 @@
 - 2026-09-29 TERRLIVE1: my first "outline dip" metric read 0.13 / 0.44 on the old bake, i.e. it did not see
   the outline it was written for. Redefined (sink below both ends, net of vanilla's) and proven: old 10.55 /
   9.53 FAIL, new 0.00 / 0.27 PASS.
+- 2026-09-29 TERRLIVE1: the rule patch anchored on `auto sampleLtex`, which matches two lambdas. My sed fallback
+  then moved the wrong one (the chunk writer's) and printed nothing. Caught by the move check, reverted that one
+  file, re-anchored at `static bool lodgenBakeVtTile(`.
+  - Rule: an anchor must be asserted unique, and a fallback edit must assert too; never a bare sed.
+- 2026-09-29 TERRLIVE1: again a Bash heredoc changed Python escapes (`\n` became real newlines), so the nifcli
+  anchors did not match (it failed loudly, no harm). Patch scripts now go through the Write tool with raw strings.
+- 2026-09-29 TERRLIVE1: a waiter grepped build6.log for "rc=", which the build script prints to its task output,
+  not the log; it would never have ended. Stopped it. Wait on the line the log itself writes.
