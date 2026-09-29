@@ -1,44 +1,42 @@
-# TERRLIVE1 deliverable text (2026-09-29 08:13) -- lines for the overseer to splice
+# TERRLIVE1 deliverable text (2026-09-29 08:13, rework 09:30) -- lines for the overseer to splice
 
 ## HANDOFF
-- TERRLIVE1 (branch terrlive1-20260929, not merged).
-  - Three terrain options:
-    - `--terrain-option full|hybrid|dynamic`, and the same in the panel (label + control). HYBRID is the default.
-    - The .lodb records the option.
-    - Every bake also writes projected decals (.lodd + .lodg, additive; no existing format touched).
-  - FULL is byte-identical to today's bake on Boston: 232/232 files, 213 sha1-equal, 19 equal after named
-    environment masks. The sabotage runs go red.
-  - HYBRID writes no VT.2/VT.4:
-    - the shipped recipe saves 62.9 MB on Boston (12%) and no time
-    - the pyramid-only recipe saves 36.7 s (4.3%)
-    - the whole-map .lodt is 0.75 GB against the staged FULL's 15.2 GB
-  - Preview (`lodgen --terrain-preview`), total GPU ms:
-    - Boston: 0.065 / 0.097 / 0.129
-    - street: 0.042 / 0.176 / 0.187
-    - whole map: 0.394 / 0.403 / 0.564
-  - Crossover (baked 64 u level within 4/255 of FULL):
-    - street view: from 6,144 u; fade set to 8,192-12,288
-    - oblique view: 34,816 u (plateau 4-5.4)
+- TERRLIVE1 (branch terrlive1-20260929, not merged). Rework 2026-09-29 (coordinator 08:19 + correction):
+  - Two terrain options: `--terrain-option hybrid|dynamic` and the panel's Terrain row. HYBRID is the default.
+    FULL is ditched (CLI, panel, help); its byte gate is retired and its skill marked HISTORICAL.
+  - Every bake writes projected decals (.lodd + .lodg, additive; no existing format touched). The .lodb records
+    the option.
+  - The blend to vanilla (law 2), for bungo's "square steps" and "dirt outline":
+    - cause, measured: the old fill was painted per cell, so empty quadrants of edge cells and the first 2-4 km
+      outside kept the engine-default ground (lum ~67 against vanilla's ~80), cut on cell/quadrant lines;
+    - now: painted per quadrant; outside = vanilla's own dim-4 LOD diffuse, untouched; inside, ours rises over an
+      8,192 u per-texel band (smoothstep); one constant (LODGEN_VT_FILL_BAND) for the bake and the live preview;
+    - gate (edge/gate_law2.py): outside |ours - vanilla| 1.39 / 1.48 lum, outline dip 0.00 / 0.27 (north / west)
+      -> PASS; the old stage bake reads 6.61 / 6.45 and 10.55 / 9.53 -> FAIL.
+  - Whole map HYBRID: 913.8 MB (.lodt 749.5 MB + decals 164.3 MB), bake 1,332 s. 577 MB of the .lodt sits on
+    tiles that are all vanilla now; dropping them needs a reader contract (bungo's call).
+  - DYNAMIC: decals 164.3 MB shipped + vanilla's sheets read live (whole map 2,304 sheets, 805.7 MB, game files).
+  - Preview total GPU ms (HYBRID / DYNAMIC): Boston 0.107 / 0.146, street 0.184 / 0.195, whole 0.405 / 0.534.
+  - Crossover on ground wholly ours: oblique 30,720 u; street not measurable (too little wholly-ours ground past
+    6 km). Preview fade unchanged at 8,192-12,288 u.
   - Owed:
-    - bungo's eye on pics/*.png
-    - live-splat colour work (tint/erosion/fill; the live splat is 7-16/255 from FULL)
-    - box culling at eye level
-    - dynamic's missing .btr chunk sheets
-    - AO choice: (a) a 32 u map is 4-7/255 from the 16 u reference, at 1.6 MB for Boston and 403 MB for the
-      whole map
+    - bungo's eye on pics2/*.png
     - FO4CS readers
-    - TILING6 = `ltexFetch()` in terrainpreview.cpp
-    - LTEX 000464c5 has no texture path
+    - the "draw vanilla here" reader contract for the 577 MB of all-vanilla tiles
+    - live-splat colour work (live 3-5 lum darker than baked deep inside; the dark blocky patches)
+    - box culling at eye level
+    - a black L-shaped line in the west close-up, present before and after (not chased)
+    - 2 quadrants painted only by a NULL LTEX (bake 15,893 vs .lodl 15,891)
+    - AO choice; TILING6 = `ltexFetch()` in terrainpreview.cpp; LTEX 000464c5 has no texture path
 
 ## WW_CHANGES
 - LOD terrain options (lane TERRLIVE1, branch terrlive1-20260929):
-  - `--terrain-option full|hybrid|dynamic` and a Terrain row in the LOD panel.
-  - HYBRID drops the two finest texture levels (16/32 u) and keeps 64/128/256 u; near and mid distance are
-    drawn live from the .lodl.
-  - DYNAMIC writes no terrain textures.
-  - Every bake writes projected decals (.lodd/.lodg).
-  - `--decal-check` reads them back.
-  - `--terrain-preview <spec.json>` renders and times the three options offscreen.
+  - `--terrain-option hybrid|dynamic` and a Terrain row in the LOD panel. HYBRID (default) keeps the 64/128/256 u
+    texture levels; near and mid distance are drawn live from the .lodl. DYNAMIC writes no terrain textures.
+  - The painted ground now blends into vanilla's own LOD diffuse over 8 km inside its edge, per texel; outside
+    it, vanilla's colour is left untouched. No more dark outline or square steps at the painted edge.
+  - Every bake writes projected decals (.lodd/.lodg); `--decal-check` reads them back.
+  - `--terrain-preview <spec.json>` renders and times the options offscreen, with the same blend to vanilla.
 
 ## MISTAKES
 - 2026-09-29 TERRLIVE1: an ad-hoc preview run with a relative spec path failed, and its turn was not
@@ -58,3 +56,13 @@
 - 2026-09-29 TERRLIVE1: the preview mapped an empty .lodl base slot (0xFFFF) to grey instead of the engine
   default land set, and the first live-splat pictures had big grey patches.
   - Caught from the picture, then measured: 20-28 fell to 6-10/255 per bin once fixed.
+- 2026-09-29 TERRLIVE1: I read the ground outside our painted area as invented colour. It was vanilla's own
+  dim-4 LOD diffuse (--vt-fill-vanilla, census line in every bake). bungo had to say it.
+  - Lesson: read the bake's own census line for what fills an area before describing it.
+- 2026-09-29 TERRLIVE1: `bash chain4.sh &` inside a foreground call kept running, and I launched a second
+  background run; two whole-map bakes raced for one folder. The kill of my own duplicate was refused.
+  - No harm: the duplicate failed at once and released the turn. Rule: background only via run_in_background,
+    never `&` in a foreground call.
+- 2026-09-29 TERRLIVE1: my first "outline dip" metric read 0.13 / 0.44 on the old bake, i.e. it did not see
+  the outline it was written for. Redefined (sink below both ends, net of vanilla's) and proven: old 10.55 /
+  9.53 FAIL, new 0.00 / 0.27 PASS.

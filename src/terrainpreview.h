@@ -18,10 +18,16 @@ class EsmWorld;
  *   - the BAKED LEVELS: a `.lodt`'s colour sheet, decoded once to one texture;
  *   - the CROSS-FADE between live and baked, by distance from the eye.
  *
- *  Options: full (the finest FULL level everywhere, no decals), hybrid (live +
- *  decals near, the hybrid's baked level far, cross-faded), dynamic (live +
- *  decals everywhere), live (live splat only), baked (the hybrid's baked level
- *  everywhere, no decals).
+ *  Options: hybrid (live + decals near, the hybrid's baked level far,
+ *  cross-faded), dynamic (live + decals everywhere); and for measuring only:
+ *  full (a reference level everywhere, e.g. an old 16 u bake; the FULL terrain
+ *  option itself was ditched 2026-09-29), live (live splat only), baked (the
+ *  hybrid's baked level everywhere, no decals).
+ *
+ *  THE BLEND TO VANILLA (law 2, docs/LODGEN_TERRAIN_VT.md 2.6a): with a
+ *  --vanilla-lod-root, the live ground is mix( vanilla's dim-4 diffuse, live
+ *  splat, w ), w from the .lodl's painted quadrants and LODGEN_VT_FILL_BAND --
+ *  the bake's own law. Spec key "blend": false turns it off.
  *
  *  GL timer queries around the terrain, decal and lighting passes; a box-layer
  *  count pass; the live/baked crossover by distance. Every number is printed

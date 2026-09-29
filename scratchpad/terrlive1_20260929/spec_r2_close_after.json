@@ -1,0 +1,81 @@
+{
+ "lodl": "E:/Projects/NifskopeWWE-night/scratchpad/merge1_20260929/stage/mod/FO4CSLOD/Commonwealth/Commonwealth.lodl",
+ "ws": "Commonwealth",
+ "fade": [
+  8192.0,
+  12288.0
+ ],
+ "frames": 30,
+ "ltex_side": 512,
+ "decal_normals": true,
+ "views": [
+  {
+   "name": "north_steps",
+   "cells": [
+    4,
+    24,
+    38,
+    44
+   ],
+   "stride": 1,
+   "ortho": [
+    86016.0,
+    137216.0,
+    61440.0
+   ],
+   "width": 1600,
+   "height": 1000,
+   "lodt_far": "E:/Projects/NifskopeWWE-terrlive1/scratchpad/terrlive1_20260929/whole_hybrid_law2/mod/FO4CSLOD/Commonwealth/Commonwealth.VT.8.lodt",
+   "renders": [
+    {
+     "option": "baked",
+     "out": "pics2/close_north_steps_after_baked.png",
+     "titles": [
+      "north_steps AFTER -- HYBRID far levels, baked (law 2, band 8192 u)"
+     ]
+    },
+    {
+     "option": "dynamic",
+     "out": "pics2/close_north_steps_after_dynamic.png",
+     "titles": [
+      "north_steps AFTER -- DYNAMIC, live (law 2, band 8192 u)"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "west_outline",
+   "cells": [
+    -40,
+    -12,
+    -18,
+    34
+   ],
+   "stride": 1,
+   "ortho": [
+    -112640.0,
+    49152.0,
+    43008.0
+   ],
+   "width": 1000,
+   "height": 1600,
+   "lodt_far": "E:/Projects/NifskopeWWE-terrlive1/scratchpad/terrlive1_20260929/whole_hybrid_law2/mod/FO4CSLOD/Commonwealth/Commonwealth.VT.8.lodt",
+   "renders": [
+    {
+     "option": "baked",
+     "out": "pics2/close_west_outline_after_baked.png",
+     "titles": [
+      "west_outline AFTER -- HYBRID far levels, baked (law 2, band 8192 u)"
+     ]
+    },
+    {
+     "option": "dynamic",
+     "out": "pics2/close_west_outline_after_dynamic.png",
+     "titles": [
+      "west_outline AFTER -- DYNAMIC, live (law 2, band 8192 u)"
+     ]
+    }
+   ]
+  }
+ ]
+}

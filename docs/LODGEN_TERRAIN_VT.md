@@ -2331,6 +2331,39 @@ the height or the emissive. It does not follow a plugin that reshapes terrain:
 vanilla's colour belongs to vanilla's ground, so a worldspace whose heights moved
 should leave it off (as `vanilla-blend` exists for the normal, §2.5d).
 
+### 2.6a Law 2: the blend runs inside our ground, and vanilla stays vanilla (lane TERRLIVE1, 2026-09-29)
+
+**Why law 1 was replaced.** bungo, 2026-09-29, on the MERGE1 whole-map picture: "why is there a dirt outline
+here?" and "The blend was meant to be between the vanilla diffuse and our baked areas". Measured (lane
+TERRLIVE1 DONE.md section 11): law 1 decides "painted" per CELL, so the empty quadrants of an edge cell keep
+the engine-default land colour (luminance ~67 against vanilla's ~80), and its band starts at w = 0 on the
+painted cell edge and runs OUTWARD, so the first 2-4 km outside are mostly the same default ground. That strip
+is the dark outline; cut on cell and quadrant lines, it is also the square steps (colour jump 12.4 at the cell
+grid against 8.5-8.8 with the grid shifted 1024 u). Heightfield and AO were measured and ruled out.
+
+**The law, per finest-level texel, after 2.5's whole composite (replaces the table above):**
+
+    painted quadrant  a LAND quadrant with a BTXT or any ATXT layer (the .lodl's own grain)
+    d                 distance from the texel INSIDE the painted quadrants to the nearest unpainted
+                      quadrant square; 0 on unpainted ground and on cells with no LAND
+    w                 smoothstep(0, LODGEN_VT_FILL_BAND, d), band = 8192 u (lodgen.h)
+    colour            V + (ours - V) * w          (RGB; alpha untouched)
+    V                 Bethesda's dim-4 LOD diffuse, UNTOUCHED (no tone match), Mitchell as before
+
+* Outside our painted ground the colour is vanilla's own; deep inside it is ours byte for byte; the join is
+  one smooth band laid on OUR side, per texel, never per cell.
+* The tone fit (T) still runs, for its census line only; it no longer changes a texel.
+* The census line adds `law=2 band=8192 paintedQuads=<n> texelsVanilla=<n>`.
+* The live preview (`--terrain-preview`) follows the same law from the .lodl's quadrant slots and reads V
+  live from the same sheets; HYBRID's live ground and DYNAMIC = mix(V, live splat, w). A reader that draws
+  the live ground must do the same, with the same band.
+* The band was chosen on the real data before the C++ (edge/model.py): 4096, 8192, 12288 u all leave the
+  profile flat against vanilla (worst sink 0.2-0.4 luminance); 8192 keeps the ramp half as steep as 4096
+  where ours and vanilla differ most (north: 89 against 75).
+* Gate (edge/gate_law2.py): on unpainted ground >= 256 u from ours, mean |lum - lum(V)| <= 2.0; the -12..+12 km
+  profile may not sink below its ends by more than vanilla's own sink + 1.0. The law-1 stage bake reads
+  6.6 / 6.5 and 10.6 / 9.5 -> red.
+
 ### 2.6b The landless-cell height fill (lane FIX1, 2026-09-26) -- `--land-fill-vanilla`, OFF by default
 
 **What it is for.** A cell with no LAND record has no height of its own, and the

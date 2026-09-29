@@ -16,6 +16,8 @@
 #include "io/loddecal.h"
 #include "io/lodvfile.h"
 
+#include "ddstxt16.hpp"
+
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
@@ -114,6 +116,12 @@ uniform vec4 uFarMap;
 uniform int uOption;
 uniform vec2 uFade;
 uniform vec3 uEye;
+// law 2 (lane TERRLIVE1): vanilla's dim-4 diffuse and our weight against it
+uniform sampler2D uVan;
+uniform sampler2D uBlendW;
+uniform vec4 uVanMap;
+uniform vec4 uBlendMap;
+uniform int uLaw2;
 
 // THE ANTI-REPEAT HOOK (lane TILING6 replaces this body): one LTEX layer at a
 // world-tiled uv, with the caller's gradients.
@@ -159,10 +167,27 @@ vec3 splat( vec2 wdx, vec2 wdy )
 	return acc * vc;
 }
 
-vec3 baked( sampler2D s, vec4 m, vec2 wdx, vec2 wdy )
+vec4 baked4( sampler2D s, vec4 m, vec2 wdx, vec2 wdy )
 {
 	vec2 uv = vec2( ( vWorld.x - m.x ) * m.z, ( m.y - vWorld.y ) * m.w );
-	return textureGrad( s, uv, vec2( wdx.x * m.z, -wdx.y * m.w ), vec2( wdy.x * m.z, -wdy.y * m.w ) ).rgb;
+	return textureGrad( s, uv, vec2( wdx.x * m.z, -wdx.y * m.w ), vec2( wdy.x * m.z, -wdy.y * m.w ) );
+}
+
+vec3 baked( sampler2D s, vec4 m, vec2 wdx, vec2 wdy )
+{
+	return baked4( s, m, wdx, wdy ).rgb;
+}
+
+// our weight against vanilla (0 = vanilla untouched, 1 = ours); a texel with no vanilla sheet stays ours
+float oursWeight( vec2 wdx, vec2 wdy, out vec3 V )
+{
+	V = vec3( 0.0 );
+	if ( uLaw2 == 0 )
+		return 1.0;
+	vec4 v = baked4( uVan, uVanMap, wdx, wdy );
+	V = v.rgb;
+	float w = textureLod( uBlendW, vec2( ( vWorld.x - uBlendMap.x ) * uBlendMap.z, ( uBlendMap.y - vWorld.y ) * uBlendMap.w ), 0.0 ).r;
+	return 1.0 - ( 1.0 - w ) * v.a;
 }
 
 vec3 terrainNormal()
@@ -188,8 +213,12 @@ void main()
 		col = baked( uFar, uFarMap, wdx, wdy );
 	else {
 		vec3 L = vec3( 0.0 ), B = vec3( 0.0 );
-		if ( wl > 0.0 )
-			L = splat( wdx, wdy );
+		if ( wl > 0.0 ) {
+			vec3 V;
+			float wo = oursWeight( wdx, wdy, V );
+			L = wo > 0.0 ? splat( wdx, wdy ) : vec3( 0.0 );
+			L = mix( V, L, wo );
+		}
 		if ( wl < 1.0 )
 			B = baked( uFar, uFarMap, wdx, wdy );
 		col = mix( B, L, wl );
@@ -760,6 +789,190 @@ bool buildGrid( GL * gl, const LodtFile & L, int cx0, int cy0, int cx1, int cy1,
 	return true;
 }
 
+/* ---- the blend to vanilla (law 2, lane TERRLIVE1 2026-09-29) --------------
+ *
+ * The same law as the bake's vanilla-colour fill (lodgen.cpp,
+ * lodgenVtFillTile): painted per QUADRANT, our weight
+ * w = smoothstep( 0, LODGEN_VT_FILL_BAND, distance inside the painted ground to
+ * the nearest unpainted quadrant square ), colour = mix( vanilla, ours, w ).
+ * Here the painted test reads the .lodl's quadrant slots (a real base or any
+ * real layer) and vanilla's dim-4 diffuse is read live from the game's sheets,
+ * so the live ground and the baked far levels follow one rule. */
+struct Blend
+{
+	GLuint wTex = 0, vTex = 0;
+	float wMap[4] = { 0, 0, 1, 1 }, vMap[4] = { 0, 0, 1, 1 };
+	int wn = 0, hn = 0;
+	float res = 128.0f, x0 = 0.0f, yN = 0.0f;
+	std::vector<float> w;
+	qint64 paintedQuads = 0, vanSheets = 0, vanMissing = 0, vanBytes = 0;
+	int vanMip = 0;
+	float weightAt( float wx, float wy ) const
+	{
+		if ( w.empty() )
+			return 1.0f;
+		const int i = qBound( 0, int( std::floor( ( wx - x0 ) / res ) ), wn - 1 );
+		const int j = qBound( 0, int( std::floor( ( yN - wy ) / res ) ), hn - 1 );
+		return w[size_t( j ) * wn + i];
+	}
+};
+
+int floorDiv( int a, int b )
+{
+	return ( a >= 0 ) ? a / b : -( ( -a + b - 1 ) / b );
+}
+
+bool buildBlend( GL * gl, const LodtFile & L, int cx0, int cy0, int cx1, int cy1, const QString & ws, Blend & B, QString * why )
+{
+	cx0 = qMax( cx0, L.cellMinX() );
+	cy0 = qMax( cy0, L.cellMinY() );
+	cx1 = qMin( cx1, L.cellMaxX() );
+	cy1 = qMin( cy1, L.cellMaxY() );
+	const int nl = L.ltexCount();
+	const float band = LODGEN_VT_FILL_BAND;
+	const int R = int( std::ceil( band / 2048.0f ) ) + 1;
+	// the painted quadrants over the view plus the band's reach
+	const int qx0 = 2 * cx0 - R, qy0 = 2 * cy0 - R, qx1 = 2 * cx1 + 1 + R, qy1 = 2 * cy1 + 1 + R;
+	const int qw = qx1 - qx0 + 1, qh = qy1 - qy0 + 1;
+	std::vector<quint8> pq( size_t( qw ) * qh, 0 );
+	for ( int qy = qy0; qy <= qy1; qy++ )
+		for ( int qx = qx0; qx <= qx1; qx++ ) {
+			const int cx = floorDiv( qx, 2 ), cy = floorDiv( qy, 2 );
+			if ( cx < L.cellMinX() || cy < L.cellMinY() || cx > L.cellMaxX() || cy > L.cellMaxY() )
+				continue;
+			quint16 q[6];
+			L.quadrantSlots( cx, cy, ( ( qy - 2 * cy ) << 1 ) | ( qx - 2 * cx ), q );
+			bool p = false;
+			for ( int k = 0; k < 6; k++ )
+				p = p || q[k] < nl;
+			pq[size_t( qy - qy0 ) * qw + ( qx - qx0 )] = p ? 1 : 0;
+			if ( p && cx >= cx0 && cx <= cx1 && cy >= cy0 && cy <= cy1 )
+				B.paintedQuads++;
+		}
+	auto painted = [&]( int qx, int qy ) {
+		if ( qx < qx0 || qy < qy0 || qx > qx1 || qy > qy1 )
+			return false;
+		return pq[size_t( qy - qy0 ) * qw + ( qx - qx0 )] != 0;
+	};
+	// the weight map
+	const float extent = float( qMax( cx1 - cx0 + 1, cy1 - cy0 + 1 ) ) * 4096.0f;
+	B.res = 128.0f;
+	while ( extent / B.res > 4096.0f )
+		B.res *= 2.0f;
+	B.x0 = float( cx0 ) * 4096.0f;
+	B.yN = float( cy1 + 1 ) * 4096.0f;
+	B.wn = int( std::ceil( float( cx1 - cx0 + 1 ) * 4096.0f / B.res ) );
+	B.hn = int( std::ceil( float( cy1 - cy0 + 1 ) * 4096.0f / B.res ) );
+	B.w.assign( size_t( B.wn ) * B.hn, 1.0f );
+	std::vector<std::vector<std::pair<float, float>>> nb( size_t( qw ) * qh );
+	std::vector<quint8> nbDone( size_t( qw ) * qh, 0 );
+	for ( int j = 0; j < B.hn; j++ ) {
+		const float wy = B.yN - ( float( j ) + 0.5f ) * B.res;
+		const int qy = int( std::floor( wy / 2048.0f ) );
+		for ( int i = 0; i < B.wn; i++ ) {
+			const float wx = B.x0 + ( float( i ) + 0.5f ) * B.res;
+			const int qx = int( std::floor( wx / 2048.0f ) );
+			float & out = B.w[size_t( j ) * B.wn + i];
+			if ( !painted( qx, qy ) ) {
+				out = 0.0f;
+				continue;
+			}
+			const size_t o = size_t( qy - qy0 ) * qw + ( qx - qx0 );
+			if ( !nbDone[o] ) {
+				nbDone[o] = 1;
+				for ( int dy = -R; dy <= R; dy++ )
+					for ( int dx = -R; dx <= R; dx++ )
+						if ( !painted( qx + dx, qy + dy ) )
+							nb[o].emplace_back( float( qx + dx ) * 2048.0f, float( qy + dy ) * 2048.0f );
+			}
+			float best = 1e30f;
+			for ( const auto & c : nb[o] ) {
+				const float ex = qMax( qMax( c.first - wx, wx - ( c.first + 2048.0f ) ), 0.0f );
+				const float ey = qMax( qMax( c.second - wy, wy - ( c.second + 2048.0f ) ), 0.0f );
+				best = qMin( best, std::sqrt( ex * ex + ey * ey ) );
+			}
+			const float t = qBound( 0.0f, best / band, 1.0f );
+			out = t * t * ( 3.0f - 2.0f * t );
+		}
+	}
+	gl->glGenTextures( 1, &B.wTex );
+	gl->glBindTexture( GL_TEXTURE_2D, B.wTex );
+	gl->glPixelStorei( GL_UNPACK_ALIGNMENT, 4 );
+	gl->glTexImage2D( GL_TEXTURE_2D, 0, GL_R32F, B.wn, B.hn, 0, GL_RED, GL_FLOAT, B.w.data() );
+	gl->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
+	gl->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+	gl->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+	gl->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+	B.wMap[0] = B.x0;
+	B.wMap[1] = B.yN;
+	B.wMap[2] = 1.0f / ( float( B.wn ) * B.res );
+	B.wMap[3] = 1.0f / ( float( B.hn ) * B.res );
+
+	// vanilla's dim-4 diffuse, on the worldspace's own grid (the LODSettings file, as the bake reads it)
+	int gridX = 0, gridY = 0;
+	{
+		QFile lf( QDir( lodgenVanillaLodRoot() ).filePath( QStringLiteral( "LODSettings/%1.LOD" ).arg( ws ) ) );
+		if ( !lodgenVanillaLodRoot().isEmpty() && lf.open( QIODevice::ReadOnly ) ) {
+			const QByteArray b = lf.read( 4 );
+			if ( b.size() >= 4 ) {
+				gridX = ( ( qint16( quint8( b[0] ) | ( quint8( b[1] ) << 8 ) ) % 4 ) + 4 ) % 4;
+				gridY = ( ( qint16( quint8( b[2] ) | ( quint8( b[3] ) << 8 ) ) % 4 ) + 4 ) % 4;
+			}
+		}
+	}
+	const int k0 = floorDiv( cx0 - gridX, 4 ), k1 = floorDiv( cx1 - gridX, 4 );
+	const int m0 = floorDiv( cy0 - gridY, 4 ), m1 = floorDiv( cy1 - gridY, 4 );
+	const int ncx = k1 - k0 + 1, ncy = m1 - m0 + 1;
+	B.vanMip = 0;
+	while ( ( 512 >> B.vanMip ) * qMax( ncx, ncy ) > 8192 )
+		B.vanMip++;
+	const int P = 512 >> B.vanMip;
+	std::vector<quint32> img( size_t( ncx * P ) * size_t( ncy * P ), 0x00808080u );
+	for ( int m = m0; m <= m1; m++ )
+		for ( int k = k0; k <= k1; k++ ) {
+			const int chunkX = gridX + 4 * k, chunkY = gridY + 4 * m;
+			QByteArray bytes;
+			if ( !lodgenReadVanillaSheet( ws, 4, chunkX, chunkY, QString(), bytes ) ) {
+				B.vanMissing++;
+				continue;
+			}
+			try {
+				DDSTexture16 t( reinterpret_cast<const unsigned char *>( bytes.constData() ), size_t( bytes.size() ) );
+				int top = 0;
+				while ( ( t.getWidth() >> top ) > 512 )
+					top++;
+				const int mip = top + B.vanMip;
+				if ( ( t.getWidth() >> top ) != 512 || mip > t.getMaxMipLevel() ) {
+					B.vanMissing++;
+					continue;
+				}
+				const int ox = ( k - k0 ) * P, oy = ( m1 - m ) * P;   // row 0 = north
+				for ( int y = 0; y < P; y++ )
+					for ( int x = 0; x < P; x++ ) {
+						const FloatVector4 c = FloatVector4::convertFloat16( t.getPixelC( x, y, mip ) );
+						const quint32 r = quint32( qBound( 0, int( c[0] * 255.0f + 0.5f ), 255 ) );
+						const quint32 g = quint32( qBound( 0, int( c[1] * 255.0f + 0.5f ), 255 ) );
+						const quint32 b = quint32( qBound( 0, int( c[2] * 255.0f + 0.5f ), 255 ) );
+						img[size_t( oy + y ) * size_t( ncx * P ) + size_t( ox + x )] = 0xFF000000u | ( r << 16 ) | ( g << 8 ) | b;
+					}
+				B.vanSheets++;
+				B.vanBytes += bytes.size();
+			} catch ( ... ) {
+				B.vanMissing++;
+			}
+		}
+	B.vTex = uploadRgba( gl, img, ncx * P, ncy * P, true );
+	B.vMap[0] = float( gridX + 4 * k0 ) * 4096.0f;
+	B.vMap[1] = float( gridY + 4 * m1 + 4 ) * 4096.0f;
+	B.vMap[2] = 1.0f / ( float( ncx ) * 16384.0f );
+	B.vMap[3] = 1.0f / ( float( ncy ) * 16384.0f );
+	if ( !B.vanSheets ) {
+		*why = QStringLiteral( "no vanilla dim-4 sheet under the vanilla LOD root " ) + lodgenVanillaLodRoot();
+		return false;
+	}
+	return true;
+}
+
 struct Camera
 {
 	bool ortho = true;
@@ -959,6 +1172,26 @@ int terrainPreviewRun( const EsmWorld & world, const QString & dataRoot, const Q
 		}
 		say( QString( "view %1: sheets decoded in %2 ms" ).arg( vname ).arg( tm.elapsed() ) );
 
+		// law 2: the blend to vanilla's diffuse, unless the spec turns it off (a "before" picture)
+		Blend blend;
+		bool haveBlend = false;
+		if ( V.value( "blend" ).toBool( true ) && !lodgenVanillaLodRoot().isEmpty() ) {
+			tm.restart();
+			haveBlend = buildBlend( gl, L, cells.at( 0 ).toInt(), cells.at( 1 ).toInt(), cells.at( 2 ).toInt(),
+				cells.at( 3 ).toInt(), spec.value( "ws" ).toString( QStringLiteral( "Commonwealth" ) ), blend, &why );
+			if ( haveBlend )
+				say( QString( "view %1: blend to vanilla: band %2 u, weight map %3 x %4 at %5 u, painted quadrants %6; "
+						"vanilla dim-4 diffuse read live: %7 sheet(s), %8 bytes (game files, not shipped), %9 missing, "
+						"mip %10; built in %11 ms" )
+					.arg( vname ).arg( double( LODGEN_VT_FILL_BAND ) ).arg( blend.wn ).arg( blend.hn ).arg( double( blend.res ) )
+					.arg( blend.paintedQuads ).arg( blend.vanSheets ).arg( blend.vanBytes ).arg( blend.vanMissing )
+					.arg( blend.vanMip ).arg( tm.elapsed() ) );
+			else
+				say( QString( "view %1: blend to vanilla: REFUSED: %2" ).arg( vname, why ) );
+		} else
+			say( QString( "view %1: blend to vanilla: off (%2)" ).arg( vname,
+				lodgenVanillaLodRoot().isEmpty() ? QStringLiteral( "no --vanilla-lod-root" ) : QStringLiteral( "the spec's \"blend\": false" ) ) );
+
 		DecalSet ds;
 		const QString decalPath = V.value( "decals" ).toString();
 		if ( !decalPath.isEmpty() ) {
@@ -1129,6 +1362,11 @@ int terrainPreviewRun( const EsmWorld & world, const QString & dataRoot, const Q
 			bindTex( pTerrain, "uLtex", 4, GL_TEXTURE_2D_ARRAY, ltexArr );
 			bindTex( pTerrain, "uFull", 5, GL_TEXTURE_2D, texFull );
 			bindTex( pTerrain, "uFar", 6, GL_TEXTURE_2D, texFar );
+			gl->glUniform1i( U( gl, pTerrain, "uLaw2" ), haveBlend ? 1 : 0 );
+			gl->glUniform4fv( U( gl, pTerrain, "uVanMap" ), 1, blend.vMap );
+			gl->glUniform4fv( U( gl, pTerrain, "uBlendMap" ), 1, blend.wMap );
+			bindTex( pTerrain, "uVan", 7, GL_TEXTURE_2D, blend.vTex );
+			bindTex( pTerrain, "uBlendW", 8, GL_TEXTURE_2D, blend.wTex );
 			gl->glBindVertexArray( grid.vao );
 			gl->glDrawElements( GL_TRIANGLES, grid.indexCount, GL_UNSIGNED_INT, nullptr );
 			if ( timed )
@@ -1185,7 +1423,7 @@ int terrainPreviewRun( const EsmWorld & world, const QString & dataRoot, const Q
 		};
 
 		// per-pixel world distance from the eye, from the depth buffer (-1 = sky)
-		auto distances = [&]() {
+		auto distances = [&]( bool oursOnly ) {
 			std::vector<float> d( size_t( W ) * H );
 			gl->glBindFramebuffer( GL_FRAMEBUFFER, fbo[0] );
 			gl->glReadPixels( 0, 0, W, H, GL_DEPTH_COMPONENT, GL_FLOAT, d.data() );
@@ -1198,8 +1436,11 @@ int terrainPreviewRun( const EsmWorld & world, const QString & dataRoot, const Q
 					const QVector4D ndc( ( float( x ) + 0.5f ) / float( W ) * 2.0f - 1.0f,
 						( float( y ) + 0.5f ) / float( H ) * 2.0f - 1.0f, z * 2.0f - 1.0f, 1.0f );
 					const QVector4D w = cam.inv * ndc;
+					const QVector3D wp = w.toVector3D() / w.w();
+					if ( oursOnly && haveBlend && blend.weightAt( wp.x(), wp.y() ) < 0.999f )
+						continue;
 					// image rows run top-down after the mirror
-					out[size_t( H - 1 - y ) * W + x] = ( w.toVector3D() / w.w() - cam.eye ).length();
+					out[size_t( H - 1 - y ) * W + x] = ( wp - cam.eye ).length();
 				}
 			return out;
 		};
@@ -1299,7 +1540,7 @@ int terrainPreviewRun( const EsmWorld & world, const QString & dataRoot, const Q
 				gl->glFinish();
 				std::vector<float> rg( size_t( W ) * H * 2 );
 				gl->glReadPixels( 0, 0, W, H, GL_RG, GL_FLOAT, rg.data() );
-				const std::vector<float> dist = distances();
+				const std::vector<float> dist = distances( false );
 				double frag = 0, inside = 0, ground = 0, maxLayers = 0;
 				for ( size_t i = 0; i < dist.size(); i++ ) {
 					// rg is bottom-up, dist top-down
@@ -1330,7 +1571,7 @@ int terrainPreviewRun( const EsmWorld & world, const QString & dataRoot, const Q
 			const QImage imBaked = render( OptBaked, 0, 0.0f, &a, &b, &c, &t, &boxes );
 			const QImage imDyn = render( OptDynamic, 0, 0.0f, &a, &b, &c, &t, &boxes );
 			const QImage imLive = render( OptLive, 0, 0.0f, &a, &b, &c, &t, &boxes );
-			const std::vector<float> dist = distances();
+			const std::vector<float> dist = distances( true );   // ground that is wholly ours
 			float dmax = 0.0f;
 			for ( float d : dist )
 				dmax = qMax( dmax, d );
@@ -1391,11 +1632,11 @@ int terrainPreviewRun( const EsmWorld & world, const QString & dataRoot, const Q
 				if ( cnt[size_t( k )] >= 200 )
 					row << QString( "%1:%2/%3" ).arg( k * bin / 1024.0, 0, 'f', 0 )
 						.arg( sB[size_t( k )] / cnt[size_t( k )], 0, 'f', 1 ).arg( sD[size_t( k )] / cnt[size_t( k )], 0, 'f', 1 );
-			say( QString( "view %1: crossover (mean |baked hybrid level - FULL| per pixel, 0..255, bins of %2 u): "
+			say( QString( "view %1: crossover on ground wholly ours (mean |baked hybrid level - the 16 u reference| per pixel, 0..255, bins of %2 u): "
 					"%3; threshold %4 -> %5" )
 				.arg( vname ).arg( bin ).arg( crossBin >= 0 ? QString( "met from %1 u on" ).arg( crossBin * bin ) : QString( "never met" ) )
 				.arg( thr ).arg( csv.isEmpty() ? QString( "no csv" ) : csv ) );
-			say( QString( "view %1: per bin (k-units: baked/dynamic vs FULL): %2" ).arg( vname, row.join( ' ' ) ) );
+			say( QString( "view %1: per bin (k-units: baked/dynamic vs the 16 u reference): %2" ).arg( vname, row.join( ' ' ) ) );
 		}
 
 		// cleanup
@@ -1403,8 +1644,8 @@ int terrainPreviewRun( const EsmWorld & world, const QString & dataRoot, const Q
 		gl->glDeleteFramebuffers( 4, fbo );
 		GLuint tt[5] = { tAlb, tNrm, tDepth, tOut, tCount };
 		gl->glDeleteTextures( 5, tt );
-		GLuint bt[5] = { texFull, texFar, texAo, ds.atlasC, ds.atlasN };
-		gl->glDeleteTextures( 5, bt );
+		GLuint bt[7] = { texFull, texFar, texAo, ds.atlasC, ds.atlasN, blend.vTex, blend.wTex };
+		gl->glDeleteTextures( 7, bt );
 		freeGrid( gl, grid );
 	}
 	ctx.doneCurrent();

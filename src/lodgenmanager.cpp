@@ -1331,18 +1331,18 @@ public:
 		layout->addWidget( vtSection );
 		{
 			Form f = form( 24 );
-			/* THE TERRAIN OPTION (lane TERRLIVE1, 2026-09-29): full / hybrid /
-			 * dynamic, hybrid the default. Label and control only. */
+			/* THE TERRAIN OPTION (lane TERRLIVE1, 2026-09-29): hybrid (the
+			 * default) or dynamic; full was ditched (bungo, 08:19). Label and
+			 * control only. */
 			terrainBox = new QComboBox( page );
 			terrainBox->setObjectName( QStringLiteral( "LodgenTerrainOptionBox" ) );
-			terrainBox->addItem( tr( "Full" ), int( LodgenTerrainOption::Full ) );
 			terrainBox->addItem( tr( "Hybrid" ), int( LodgenTerrainOption::Hybrid ) );
 			terrainBox->addItem( tr( "Dynamic" ), int( LodgenTerrainOption::Dynamic ) );
 			{
 				LodgenTerrainOption o = LodgenTerrainOption::Hybrid;
 				lodgenTerrainOptionParse( settings.value( QStringLiteral( "LodGeneration/terrainOption" ),
 					QStringLiteral( "hybrid" ) ).toString(), &o );
-				terrainBox->setCurrentIndex( int( o ) );
+				terrainBox->setCurrentIndex( qMax( 0, terrainBox->findData( int( o ) ) ) );
 			}
 			wwMatchFieldStyle( terrainBox );
 			terrainLabel = f.add( page, tr( "Terrain" ), terrainBox );

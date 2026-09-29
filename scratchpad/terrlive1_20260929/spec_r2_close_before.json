@@ -1,0 +1,83 @@
+{
+ "lodl": "E:/Projects/NifskopeWWE-night/scratchpad/merge1_20260929/stage/mod/FO4CSLOD/Commonwealth/Commonwealth.lodl",
+ "ws": "Commonwealth",
+ "fade": [
+  8192.0,
+  12288.0
+ ],
+ "frames": 30,
+ "ltex_side": 512,
+ "decal_normals": true,
+ "views": [
+  {
+   "name": "north_steps",
+   "cells": [
+    4,
+    24,
+    38,
+    44
+   ],
+   "stride": 1,
+   "ortho": [
+    86016.0,
+    137216.0,
+    61440.0
+   ],
+   "width": 1600,
+   "height": 1000,
+   "lodt_full": "E:/Projects/NifskopeWWE-night/scratchpad/merge1_20260929/stage/mod/FO4CSLOD/Commonwealth/Commonwealth.VT.8.lodt",
+   "lodt_far": "E:/Projects/NifskopeWWE-terrlive1/scratchpad/terrlive1_20260929/whole_hybrid_law1/mod/FO4CSLOD/Commonwealth/Commonwealth.VT.8.lodt",
+   "renders": [
+    {
+     "option": "full",
+     "out": "pics2/close_north_steps_before_baked.png",
+     "titles": [
+      "north_steps BEFORE -- baked (MERGE1 stage, law 1)"
+     ]
+    },
+    {
+     "option": "dynamic",
+     "out": "pics2/close_north_steps_before_dynamic.png",
+     "titles": [
+      "north_steps BEFORE -- DYNAMIC (build 4 live ground)"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "west_outline",
+   "cells": [
+    -40,
+    -12,
+    -18,
+    34
+   ],
+   "stride": 1,
+   "ortho": [
+    -112640.0,
+    49152.0,
+    43008.0
+   ],
+   "width": 1000,
+   "height": 1600,
+   "lodt_full": "E:/Projects/NifskopeWWE-night/scratchpad/merge1_20260929/stage/mod/FO4CSLOD/Commonwealth/Commonwealth.VT.8.lodt",
+   "lodt_far": "E:/Projects/NifskopeWWE-terrlive1/scratchpad/terrlive1_20260929/whole_hybrid_law1/mod/FO4CSLOD/Commonwealth/Commonwealth.VT.8.lodt",
+   "renders": [
+    {
+     "option": "full",
+     "out": "pics2/close_west_outline_before_baked.png",
+     "titles": [
+      "west_outline BEFORE -- baked (MERGE1 stage, law 1)"
+     ]
+    },
+    {
+     "option": "dynamic",
+     "out": "pics2/close_west_outline_before_dynamic.png",
+     "titles": [
+      "west_outline BEFORE -- DYNAMIC (build 4 live ground)"
+     ]
+    }
+   ]
+  }
+ ]
+}

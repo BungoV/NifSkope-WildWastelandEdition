@@ -2660,7 +2660,7 @@ static bool gLgAllRings = false;
 static bool gLgOneRoot = false;
 
 /*! Lane TERRLIVE1: the terrain option (lodgen.h, LodgenTerrainOption) --
- *  `--terrain-option full|hybrid|dynamic`, hybrid the default. A global for
+ *  `--terrain-option hybrid|dynamic`, hybrid the default. A global for
  *  the reason the others here are. */
 static LodgenTerrainOption gLgTerrainOption = LodgenTerrainOption::Hybrid;
 //! lane TERRLIVE1: `--terrain-preview <spec.json>` (src/terrainpreview.h)
@@ -7028,8 +7028,7 @@ int usage()
 		  << "                                          default and reads no directory.\n"
 		  << "  lodgen <file.esm> --worldspace HEX --vt MODFOLDER [--tex-dir DIR]\n"
 		  << "         [--vt-finest 2] [--vt-content 256] [--vt-border 8] [--vt-mips 2]\n"
-		  << "         [--terrain-option full|hybrid|dynamic]  full = every pyramid level;\n"
-		  << "                                          hybrid (default) = levels from dim 8\n"
+		  << "         [--terrain-option hybrid|dynamic]  hybrid (default) = levels from dim 8\n"
 		  << "                                          up, baked directly (no VT.2/VT.4);\n"
 		  << "                                          dynamic = no pyramid. Every option\n"
 		  << "                                          writes the ground decals <ws>.lodd +\n"
@@ -8101,7 +8100,7 @@ int nifskopeCliMain( const QStringList & args )
 		else if ( t == QLatin1String( "--terrain-option" ) ) {
 			const QString v = next();
 			if ( !lodgenTerrainOptionParse( v, &gLgTerrainOption ) ) {
-				err() << "error: --terrain-option takes full, hybrid or dynamic, not \"" << v << "\""
+				err() << "error: --terrain-option takes hybrid or dynamic, not \"" << v << "\""
 					  << Qt::endl;
 				err().flush();
 				return 2;

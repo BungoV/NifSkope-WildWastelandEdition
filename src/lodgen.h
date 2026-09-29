@@ -1635,7 +1635,6 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 /*! THE TERRAIN OPTION (lane TERRLIVE1, 2026-09-29). Which part of the LOD
  *  terrain's colour is baked and which the consumer builds live:
  *
- *   Full     today's texture pyramid, every level (VT.2 up), unchanged.
  *   Hybrid   the pyramid from dim 8 up (64 world units a texel at content
  *            512), baked directly, so VT.2 and VT.4 are never computed; near
  *            and mid distance are the consumer's live splat from the .lodl.
@@ -1645,15 +1644,19 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
  *  io/loddecal.h). Hybrid is the default (bungo's ruling). */
 enum class LodgenTerrainOption : int
 {
-	Full = 0,
+	// 0 was Full (today's whole pyramid), ditched 2026-09-29 08:19; the numbers stay
 	Hybrid = 1,
 	Dynamic = 2
 };
 
-//! "full", "hybrid", "dynamic".
+//! "hybrid", "dynamic".
 QString lodgenTerrainOptionName( LodgenTerrainOption o );
-//! Parses the three names (any case); false on anything else.
+//! Parses the two names (any case); false on anything else ("full" included: ditched).
 bool lodgenTerrainOptionParse( const QString & s, LodgenTerrainOption * out );
+/*! The vanilla-colour fill's blend band (law 2, lane TERRLIVE1): world units
+ *  INSIDE the painted ground over which our colour rises from vanilla's
+ *  diffuse (0) to ours (1). One number for the bake and the live preview. */
+constexpr float LODGEN_VT_FILL_BAND = 8192.0f;
 /*! What the option does to the pyramid's options: Hybrid sets the finest level
  *  to dim 8. Returns a one-line note when it could not (the .btr chunk sheets
  *  are assembled from level 4 and need it), else empty. */

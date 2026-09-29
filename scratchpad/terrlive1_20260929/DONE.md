@@ -291,3 +291,165 @@ Skills:
   - E:\Projects\Claude\.claude\skills\ww-terrain-preview
 - wished for: a turn-lock wrapper skill that ALWAYS releases (trap on exit); pv.sh does this for the preview
   only. Also a "compare two PNGs by region mask" helper; I wrote the AO split inline.
+
+## 11. Rework (coordinator 08:19 and its correction): why the squares and the dirt outline (written 2026-09-29 08:30)
+bungo's rulings:
+- FULL is ditched.
+- Outside our painted area, HYBRID shows vanilla's own dim-4 LOD diffuse.
+- One blend joins ours and vanilla.
+
+He circled two spots in whole_full.png: (a) square steps at the north edge (px 890-1060, 540-620), and (b) a
+dark dirt outline along the west edge (px 540-600, 620-900).
+
+Everything below was measured before any code change. Scripts are in `edge/`.
+
+**Measured on the staged MERGE1 bake, VT.8 (64 u a texel), against vanilla's own
+`Textures/Terrain/Commonwealth/Commonwealth.4.x.y.DDS`.**
+- `edge/cells.py` classes the cells from the .lodl's quadrant slots: 4,086 cells have an LTEX slot, 32,778 have
+  land and none, 0 have no land.
+- `edge/why.py` gives luminance, 0..255, in bands of signed distance to the painted cells (negative = inside).
+
+| band (u) | ours, north | vanilla V, north | ours, west | V, west | lit picture, west |
+|---|---|---|---|---|---|
+| -16384..-8192 | 80.1 | 80.4 | 76.9 | 79.6 | 82.3 |
+| -2048..-1024 | 70.9 | 79.1 | 69.3 | 80.4 | 74.1 |
+| -1024..0 | 68.1 | 79.3 | 67.5 | 80.3 | 72.4 |
+| 0..+1024 | 67.1 | 80.7 | 67.1 | 80.8 | 72.1 |
+| +1024..+2048 | 68.4 | 81.1 | 68.4 | 80.0 | 73.7 |
+| +4096..+6144 | 76.6 | 79.0 | 77.3 | 80.6 | 84.3 |
+| +8192..+12288 | 82.0 | 79.3 | 83.5 | 81.9 | 92.7 |
+
+* **(b) The dirt outline is in our baked colour, not in vanilla, the light or the heights.**
+  - Our colour dips to about 67 over roughly 4 km either side of the edge. Vanilla stays flat at 79-81 through it.
+  - The lit picture follows the colour: lit / colour = 1.07 at the edge and 1.07-1.11 on both sides. So the
+    light adds no step, which refutes a heightfield edge.
+  - 67.0 is our engine-default land texture exactly. `edge/why_quad.py` shows the empty quadrants of edge cells
+    read 66.9-67.2 at every depth.
+  - Object AO would sit under objects, not on a constant-67 strip, so AO is refuted.
+  - Two sources make the strip:
+    1. The fill's "painted" is per CELL. The empty QUADRANTS of a painted edge cell keep our default ground and
+       are never filled: 38,254 of the 61,478 texels in the first 1 km inside the west edge.
+    2. The fill band starts at weight 0 on the painted cell's edge. The first 2 km outside the edge is still
+       mostly our default ground: w = smoothstep(0, 8192, d) is 0.16 at 2048 u.
+  - The painted quadrants at the fringe are also darker than deep inside (68.5 at 0-1 km, 76.6 deep inside,
+    west). That is his LAND paint thinning out.
+* **(a) The squares are the same default ground, cut on cell and quadrant lines.**
+  - The fill band is per texel (lodgenVtFillDistance), so it is not the whole-cell band. Its start, and the
+    untouched empty quadrants, follow the 4096 u cells and 2048 u quadrants.
+  - Measured on the render: the colour jump across the painted-cell boundary is 12.4 with the class map where it
+    is. Shifted by ±1024 u it is 8.5-8.8, and any 2 px pair is 9.2. So the step sits on the cell grid within one
+    pixel (492 u), in both x and y.
+* **The tone match pushes vanilla hard on saturation, lightly on brightness.**
+  - T(V) is 2.5-3.4 lum over V.
+  - Its saturation is x1.9 (mean |rgb - lum| 6.5 -> 12.3).
+  - The gain of 0.62 flattens vanilla's own relief by 38%.
+  - Deep inside, our colour is within -2.7..+0.4 of UNTOUCHED vanilla (both regions). So untouched vanilla needs
+    no tone match to meet us.
+
+## 12. The fix: law 2, and FULL ditched (written 08:48, build 5 at 08:42)
+
+- **Offline model first** (edge/model.py, staged VT.8 as ours, vanilla sheets as V): colour = mix(V, ours, w),
+  w = smoothstep(0, B, distance INSIDE the painted quadrants to the nearest unpainted quadrant).
+  West box, luminance by signed distance (-16k..+4k u):
+  - V: 79.0 ... 80.9 80.0 80.2 80.3; old ours: 76.6 ... 68.7 67.0 67.5 69.2 76.1 (the outline).
+  - B = 4096: worst dip 0.21, 6.6% of our painted texels blended; B = 8192: 0.24, 12.6%; B = 12288: 0.20, 18.3%.
+  - North box: the same, dips 0.25-0.37.
+  - Chosen: **B = 8192 u (2 cells)**, the old census band; 4096 is as flat but the ramp is twice as steep
+    (north: ours is 89 against vanilla's 75 deep inside, a 14-point ramp).
+- **Code** (lodgen.cpp, lodgenVtFillTile): painted per QUADRANT (the .lodl's own grain); outside the painted
+  quadrants the texel is vanilla's diffuse UNTOUCHED (no tone match); inside, ours rises over 8192 u.
+  The tone fit still runs for its census line only. Census line gains "law=2 band=8192 paintedQuads= texelsVanilla=".
+  The band is one constant, LODGEN_VT_FILL_BAND in lodgen.h, read by the bake and the preview.
+- **Preview** (terrainpreview.cpp): the same law live. It builds the painted-quadrant weight map from the .lodl
+  and reads vanilla's dim-4 diffuse live from the game's sheets (the "blend to vanilla" line prints band,
+  sheets, bytes). HYBRID near and DYNAMIC = mix(vanilla, live splat, w). The crossover counts only ground that
+  is wholly ours (w = 1). Spec key "blend": false turns it off.
+- **DYNAMIC's outside (my call, logged):** vanilla's own dim-4 diffuse, read live, the same sheets as the bake's
+  fill. Its bytes are counted (game files, not shipped).
+- **Not done:** replacing HYBRID's all-vanilla far tiles by one-value records that tell a reader "draw vanilla
+  here". That needs a reader contract (a format meaning), so it stays out; the saving is estimated below.
+- **FULL ditched:** removed from --terrain-option (the parser says "takes hybrid or dynamic"), the help text and the
+  panel's Terrain row (the combo now finds its item by data, not index). The enum keeps Hybrid = 1, Dynamic = 2.
+  The byte-gate skill is marked HISTORICAL.
+- **Gate written before the bake, proven red on the old file** (edge/gate_law2.py; outside <= 2.0, dip <= 1.0):
+  law-1 stage VT.8: north outside 6.61, dip 10.55; west outside 6.45, dip 9.53 -> FAIL.
+
+## 13. The whole-map HYBRID rebake under law 2, and its gate (written 09:07)
+
+- Build 5 (run_new), chain4.sh: whole map, VT only, the chain-3 recipe, --terrain-option hybrid. **1,332 s**
+  (law 1 on build 4: 1,337 s; the same within noise). rc 0.
+  - Census: law=2 band=8192 paintedQuads=15893 (the .lodl says 15,891: 2 quadrants whose only layer is a NULL
+    LTEX count as painted in the bake and not in the .lodl; logged, not chased) texelsVanilla=142,883,264
+    texelsNoVanilla=405,248 vanillaChunksMissing=196 (sea chunks with no vanilla sheet keep ours).
+- **Gate (edge/gate_law2.py) PASS**, against the law-1 stage FAIL:
+  | box | outside mean abs lum(ours) - lum(vanilla) | outline dip | first km inside / outside (vanilla) |
+  |---|---|---|---|
+  | north steps, law 1 | 6.61 | 10.55 | 74.8 / 67.2 (76.2 / 75.4) |
+  | north steps, law 2 | **1.39** | **0.00** | 75.8 / 74.9 (76.2 / 75.4) |
+  | west outline, law 1 | 6.45 | 9.53 | 68.7 / 67.0 (81.1 / 81.0) |
+  | west outline, law 2 | **1.48** | **0.27** | 80.5 / 80.5 (81.1 / 81.0) |
+  - The look difference against vanilla's own diffuse outside: mean 1.4-1.5 luminance (BC1 and resampling);
+    the profile outside sits 0.4-0.5 under vanilla's everywhere, the same offset on both sides of the edge.
+  - North: ours is 89 deep inside against vanilla's 75; law 2 ramps 89 -> 76 over the 8 km band, no sink.
+- **Bytes, whole map, HYBRID:** .lodt levels 749,494,960 (VT.8 572.7 MB, VT.16 134.6 MB, VT.32 42.2 MB; the same
+  as law 1, the tiles are fixed-size) + decals .lodd 161,076,176 + .lodg 3,261,484 = **913.8 MB**.
+  - 577.4 MB (77%) of the pyramid sits on tiles with no painted quadrant (edge/vanilla_tiles.py). Their colour is
+    vanilla's now, so a reader could draw it from vanilla's sheets instead; that is a reader contract (a
+    format meaning), so it is not done here. Owed as bungo's call.
+
+## 14. Pictures, GPU, crossover, live-vs-baked parity, step check (written 09:29)
+
+**Pictures** (one per view, 60 px title bar), E:\Projects\NifskopeWWE-terrlive1\scratchpad\terrlive1_20260929\pics2\:
+- bungo's circled spots, before and after: close_north_steps_{before,after}_{baked,dynamic}.png,
+  close_west_outline_{before,after}_{baked,dynamic}.png. "before baked" = the MERGE1 stage (law 1), "after baked"
+  = the law-2 whole-map bake, "dynamic" = the live ground on build 4 (before) and build 5 (after).
+- whole_{hybrid,dynamic}.png, boston_{hybrid,dynamic}.png, street_{hybrid,dynamic}.png.
+
+**GPU ms (terrain / decals / lighting / total), median of 30 frames, RTX 5070 Ti, build 5 with the live blend:**
+| view | HYBRID | DYNAMIC |
+|---|---|---|
+| Boston ortho 1200x1200 | 0.083 / 0.014 / 0.009 / **0.107** (3,095 boxes) | 0.112 / 0.025 / 0.009 / **0.146** (10,061) |
+| street 1920x1080 | 0.127 / 0.046 / 0.011 / **0.184** (2,564) | 0.128 / 0.056 / 0.011 / **0.195** (10,061) |
+| whole map 1600x1600 | 0.374 / 0.008 / 0.023 / **0.405** (2,383) | 0.404 / 0.105 / 0.025 / **0.534** (80,577) |
+- Against build 4 (section 7) the live vanilla read costs +0.01 ms (Boston, street) and nothing measurable on the
+  whole map.
+
+**DYNAMIC's bytes:** decals (the same .lodd/.lodg as HYBRID, 164.3 MB) + vanilla's dim-4 sheets read live from the
+game (not shipped): whole map 2,304 sheets, 805,662,720 bytes, 0 missing (read at mip 2 for the 8192 mosaic);
+Boston/street 9 sheets 3.1 MB; north close-up 54 sheets 18.9 MB; west 72 sheets 25.2 MB.
+Building the whole-map blend (weight map 3072x3072 + 2,304 sheet decodes) took 15.8 s at view load.
+
+**Live vs baked now agree on the outside and in the band** (edge/parity.py, per-pixel |lum baked - lum live|
+on the close-ups, split by quadrant class):
+| spot | vanilla outside | painted, in the 8 km band | painted, deeper |
+|---|---|---|---|
+| north steps | 1.03 | 2.01 | 3.67 |
+| west outline | 0.95 | 3.05 | 5.25 |
+- The deeper difference is not the blend: live after vs live before (build 4, no blend) is 0.03 (north) and 1.07
+  (west) on deep painted ground. It is the live splat being 3-5 lum darker than the baked levels (the colour work
+  the brief says to leave alone). The dark blocky patches in close_west_outline_after_dynamic.png are that: the
+  six darkest quadrants are all painted, 4-24 km inside, and live 17-21 lum under baked; they are the same in the
+  before picture.
+- Whole map: DYNAMIC is 1.84 from HYBRID (mean |diff|, lum 73.7 vs 74.1); in phase 1 it was 9.95 from FULL
+  (lum 70.1): the vanilla outside is what DYNAMIC was missing.
+
+**Step check (edge/step_align.py on the whole-map pictures, the colour jump across the painted-cell edge, shifted
+class map):**
+| box (px) | picture | any 2 px pair | shift 0 | shift -1024 u (x / y) | shift +1024 u (x / y) |
+|---|---|---|---|---|---|
+| north 890-1060 x 540-620 | before (pics/whole_full.png) | 10.09 | **16.24** | 9.70 / 13.21 | 10.37 / 12.47 |
+| north | after HYBRID | 10.16 | 10.36 | 9.76 / 9.58 | 9.74 / 11.30 |
+| north | after DYNAMIC | 11.12 | 10.24 | 9.66 / 9.30 | 9.56 / 11.18 |
+| west 540-600 x 620-900 | before | 9.96 | 6.94 | 6.64 / 7.07 | 7.08 / 6.55 |
+| west | after HYBRID | 12.05 | 13.17 | 12.36 / 12.56 | 12.13 / 12.87 |
+- North: the shift-0 peak (16.2 against ~10) is gone (10.4 against 9.6-11.3). West never had a grid-cut step (its
+  fault was the dark band, which the dip gate measures); after, it carries vanilla's own relief (pair 12.1).
+
+**Crossover (baked 64 u level vs the 16 u reference, on ground wholly ours, w = 1; 4/255, 2048 u bins, bins
+under 2000 px skipped):**
+- Oblique (eye 1,500 u): met from **30,720 u** (phase 1, all ground: 34,816 u). Bins 2-14 k: 3.6-4.2; 16-28 k:
+  4.2-5.3; 30 k on: 2.0-3.9.
+- Street (eye 150 u): **not measurable**. Only the 0-4 km bins have 2000+ px of wholly-ours ground (8.1, 8.7,
+  5.2); beyond 6 km the street view sees 2-1,443 px a bin of it (the rest is in the band or vanilla).
+- So on wholly-ours ground the 64 u level stays 3.5-5 from the 16 u one out to ~30 km. The preview fade stays
+  8,192..12,288 u (unchanged); a hand-over there shows a step of about 4-5/255.
