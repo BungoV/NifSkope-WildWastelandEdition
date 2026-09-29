@@ -6,6 +6,30 @@ bungo's order (09-26): "we fix all the maps that are broken, overnight" / "after
 it, then render the bakes for me, this time fixed". Done by MERGE1 on 2026-09-29. Report:
 scratchpad/merge1_20260929/DONE.md (every gate line with its numbers).
 
+### bungo's rulings during MERGE1 (2026-09-29 00:27-03:49, clock read) -- NEXT LANES
+1. Diamond City: LANDMARK RULE -- named landmarks ignore the 4096 u group cap and become one group. Lane IDENT2
+   (also settles the poking occluder boxes).
+2. Row houses: a terrace stays ONE group. Reason (his): far shadows must not bring back the flat-wall self-shadow
+   artifact; per-piece ids would put it back along kit-panel seams (identity rule, D = 64 u, plan s9.2a).
+3. TERR1 deep canyons too dark: FIX (lane TERR2) -- waits on TERRLIVE1, the fix lands in whichever path paints the ground.
+4. TILING5: KEEP TUNING (lane TILING6), switches stay OFF until it hits its targets.
+5. THREE LOD TERRAIN RENDER OPTIONS, the same three as FO4CS presets:
+   - FULL TEXTURE: every baked .lodt level (~16 GB; tonight's installed bake IS this option's data and is KEPT).
+   - HYBRID (the DEFAULT): live splat from the .lodl LTEX weights near/mid + projected road/flat-object decals +
+     only the 64/128/256 u baked levels far (~1.6 GB).
+   - FULLY DYNAMIC: no .lodt; live splat + decals at every distance (~0.6 GB).
+   A bake serves every preset at or below what it holds; every bake carries the decals. Decals are PREBAKED in
+   NifSkope from the road geometry (one top-down picture per distinct piece: 359 road meshes / 18,727 road
+   placements, 61,850 flat objects) and drawn as projected (deferred) decals, not alpha-tested planes.
+   Lane TERRLIVE1: NifSkope bake + preview FIRST, adds files ADDITIVELY beside tonight's bake (no whole-map
+   rebake; a forced format change = stop and ask); measures size, GPU ms (incl. a whole-map view) and look for all
+   three; the live/baked crossover distance is measured. Open: close-range object AO (46 cm AO map / AO decals / SSAO).
+6. FO4CS readers are written as soon as the TERRLIVE1 decal bake exists (not before): .lodl v3, .lodi v12,
+   no-glow texture sets, collapsed tiles, decals, live splat.
+7. BAKEGPU1 (terrain textures on the GPU) DROPPED for now: the hybrid default removes most of that 85-minute stage.
+8. Account B takes lanes until it is drained (90% stop retired).
+Lane order: TERRLIVE1, IDENT2, TILING6 (in-session, max 3), then TERR2.
+
 ### What landed (main merge b918dc0b = night-20260927 @ b177294f)
 Lanes WATER1, GROUND1, TIDY1, IDENT1, TERR1, TILING5 (switches OFF), FLAT2, GPU1, AO2 -- one line each below under
 "Lane lines". Merges into night were clean (no conflicts); night into main was clean.
