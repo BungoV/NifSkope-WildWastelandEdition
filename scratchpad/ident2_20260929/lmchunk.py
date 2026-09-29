@@ -78,3 +78,8 @@ for name, pre, cen in rules:
                         others += 1
             print('    chunk %s: %d instances, file group id(s) %s, other instances sharing the id %d' % (
                 ch, len(v), ' '.join('%d:%d' % kv for kv in sorted(ids.items())), others))
+        allids = collections.Counter(grp[ii] for ii in iis)
+        foreign = sum(1 for jj in range(len(grp)) if jj not in mine and grp[jj] in allids)
+        print('  FILE-WIDE: %d id(s) over %d chunk(s) %s; other instances sharing them anywhere %d  [%s]' % (
+            len(allids), len(per), ' '.join('%d:%d' % kv for kv in sorted(allids.items())), foreign,
+            'ONE ID' if len(allids) == 1 and foreign == 0 else 'NOT ONE ID'))

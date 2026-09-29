@@ -98,28 +98,19 @@ def main():
 		if not grp:
 			print('  no group table (version %d); nothing to cross' % h['version'])
 			continue
-		# THE IDS ARE DENSE PER CHUNK, NOT GLOBAL (`src/lodifile.cpp:646`): a
-		# chunk holding C groups uses exactly {0 .. C-1}, and the header's
-		# `groupCount` is those per-chunk counts SUMMED. Counting the raw u16
-		# globally therefore merges chunk 0's group 3 with chunk 1's group 3 and
-		# reports fewer groups than the file holds -- on chunk 4.4.-12, 586 for
-		# a file whose header says 588, because the region also carries two
-		# one- and two-placement chunks. The identity is (chunk, id).
-		key = [None] * len(grp)
-		for ci, c in enumerate(T['chunks']):
-			a = c['instanceFirst']
-			for i in range(a, min(a + c['instanceCount'], len(grp))):
-				key[i] = (ci, grp[i])
-		for i, k in enumerate(key):
-			if k is None:                      # an instance no chunk claims
-				key[i] = (-1, grp[i])
+		# THE IDS ARE FILE-WIDE AS THE DECODER HANDS THEM (IDENT2, 2026-09-29).
+		# A v13 file stores one u32 id a placement, dense over the whole file; a
+		# v7..v12 file stores a u16 dense per CHUNK, which the decoder offsets by
+		# the earlier chunks' counts (lodgen_native_decode.py). Either way the id
+		# alone is the identity, and a group crossing a chunk line (v13) is ONE.
+		key = list(grp)
 		members = Counter(key)
 		print('  placements %d, groups %d, singletons %d, largest %d'
 			  % (len(grp), len(members), sum(1 for v in members.values() if v == 1),
 				 max(members.values())))
 		if len(members) != h['groupCount']:
 			print('  NOTE: the header says groupCount %d and the table holds %d '
-				  '(chunk, id) pair(s) -- one of the two is wrong'
+				  'id(s) -- one of the two is wrong'
 				  % (h['groupCount'], len(members)))
 
 		names = []
@@ -142,8 +133,8 @@ def main():
 		print('  groups spanning more than one layer: %d of %d'
 			  % (len(spanning), len(members)))
 		for n, k, v in spanning[:top]:
-			print('    chunk %d group %-6d %2d layers, %4d placements: %s'
-				  % (k[0], k[1], n, members[k], ', '.join(x[:26] for x in v[:6])))
+			print('    group %-6d %2d layers, %4d placements: %s'
+				  % (k, n, members[k], ', '.join(x[:26] for x in v[:6])))
 	return 0
 
 

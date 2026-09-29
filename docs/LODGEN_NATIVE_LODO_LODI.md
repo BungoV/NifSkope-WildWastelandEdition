@@ -824,7 +824,7 @@ version, which is the right answer: a near library is not a far field.
 | off | type | field |
 |---|---|---|
 | 0x00 | char[4] | magic `LODI` |
-| 0x04 | u32 | **version = 3, or 4 when the file carries aggregates (§4.6), 5 when it carries the placement-AO blob (§4.7), 6 when it carries the per-vertex AO stream (§4.8), 7 when it carries a group table (§4.9) or a per-vertex sky stream (§4.10), or 9 when it carries the workshop-scrappable bit (§4.12), or 10 when any instance carries the wide-scale bit (§4.14), or 11 when any instance carries the initially-disabled bit (§4.15), or 12 when it carries the per-vertex ground-contact stream (§4.16) — decided last, so 12 wins over 9, 10 and 11 and keeps their bits**; versions 1 and 2 are refused by name. **Version 8 is RETIRED** (§4.11): no exe in this tree writes one, v9 is a superset of **v7** and not of v8, and the reader opens a v8 file met in the wild |
+| 0x04 | u32 | **version = 3, or 4 when the file carries aggregates (§4.6), 5 when it carries the placement-AO blob (§4.7), 6 when it carries the per-vertex AO stream (§4.8), 7 when it carries a group table (§4.9) or a per-vertex sky stream (§4.10), or 9 when it carries the workshop-scrappable bit (§4.12), or 10 when any instance carries the wide-scale bit (§4.14), or 11 when any instance carries the initially-disabled bit (§4.15), or 12 when it carries the per-vertex ground-contact stream (§4.16) — decided after 9, 10 and 11, so 12 wins over them and keeps their bits — or **13 when its group table is FILE-WIDE (§4.9), decided last of all, so 13 wins over 12 and keeps every bit and stream of 7…12 (the ground stream becomes optional: `offVertexGround` 0 = none)**; versions 1 and 2 are refused by name. **Version 8 is RETIRED** (§4.11): no exe in this tree writes one, v9 is a superset of **v7** and not of v8, and the reader opens a v8 file met in the wild |
 | 0x08 | u32 | flags — bit0 `ROW_ORDER_NORTH_UP` (**clear = refusal**), bit1 `PARTIAL`, bit2 `NOLIB` |
 | 0x0C | u32 | `headerCrc32` — over `0x10 … headerBytes − 1`, so it covers **256 bytes on a v3…v6 file and 512 on a v7 one**, and a v6 file's CRC is the byte-for-byte same number it was before v7 existed |
 | 0x10 | u64 | `pluginCorpusHash` — must equal the `.lodo`'s |
@@ -866,8 +866,8 @@ version, which is the right answer: a near library is not a far field.
 | **0xF4** | **u64** | **offset: vertex-AO stream (v6), written LAST so no existing offset moves** |
 | **0xFC** | **u32** | **`vertexAoBytes` (v6) — the whole stream, offsets included; must be ≥ 4 × (`instanceCount` + 1)** |
 | **0x100** | **u64** | **offset: group table (v7, §4.9), written LAST so no existing offset moves** |
-| **0x108** | **u32** | **`groupCount` (v7) — the chunks' group counts SUMMED; the reader adds them up itself and refuses a header word that disagrees** |
-| **0x10C** | **u16** | **`groupStride` = 2 (v7); any other value is refused by name** |
+| **0x108** | **u32** | **`groupCount` (v7) — the chunks' group counts SUMMED; the reader adds them up itself and refuses a header word that disagrees. v13: the file's group count, every id below it used** |
+| **0x10C** | **u16** | **`groupStride` = 2 (v7…v12, u16 ids) or 4 (v13, u32 ids); any other value for the version is refused by name** |
 | **0x110** | **u64** | **offset: per-vertex sky stream (v7, §4.10)** |
 | **0x118** | **u32** | **`vertexSkyBytes` (v7) — the whole stream, offsets included; must be ≥ 4 × (`instanceCount` + 1)** |
 | 0x11C…0x12F | — | reserved, zero (v7, v9…v12); the retired v8's horizon words lived here (§4.11) |
@@ -1021,7 +1021,8 @@ objects is a wrong shadow; pieces of one object sharing a group is the point.
 
 There are now three words, and the difference matters:
 
-* **The caster identity is the GROUP**, `u16 group[i]` (§4.9), dense per chunk.
+* **The caster identity is the GROUP**, `group[i]` (§4.9): a u32 dense over the
+  file in v13, a u16 dense per chunk before it (the readers offset those to file-wide ids).
   It is the only one of the three the far-shadow pass may key on.
 
 * **The per-placement identity is the instance INDEX**, a u32, unique across
@@ -1323,8 +1324,23 @@ Street coverage **0.560 -> 0.570** (Hi-Z 0.728 -> 0.736). Split on the same
 exe with `--landmarks none`: the probe alone gives 0.588; the landmark rule
 takes 0.018 of it back, nearly all at the Diamond City eye (0.454 -> 0.380):
 the stadium is one ring-shaped group now, and one box a group fits less of a
-ring than its 15 fragments did. More than one box for a landmark group is not
-done here.
+ring than its 15 fragments did.
+
+**More than one box a landmark (lane IDENT2, 2026-09-29).** A building group
+wider than the cap (`GroupKnobs::groupCap`, 4,096 u) on X or Y -- which only a
+landmark can be, the contact join refuses every other -- is fitted as SEVERAL
+boxes: its members are cut by a world grid of cap-sized squares, each member by
+the centre of its placed box, and each square's members are fitted exactly as a
+group is above (yaw, voxel fit, probe, shrink), riding on their own carrier. So
+no box stands for more ground than any other building's box may. The IDENTITY
+is untouched: every part's carrier is in the one group. The census `occluders`
+line counts the parts as groups and says how many groups were cut (`IDENT2: N
+group(s) wider than 4096 u cut ... into M part(s)`). `WW_LODI_OCC_SPLIT=<u>`
+(>= 256) moves the square, for measuring only. **Boston bake b_v13:** 2 groups
+cut (Diamond City and the west Hub tower, 4,100 u wide) into 13 parts; 517
+boxes, 0 over 1 percent, worst 0.0041; **street coverage 0.558 -> 0.588**
+(Trinity eye 0.578 -> 0.587, Hub 0.730 -> 0.760, Diamond City 0.368 -> 0.416),
+past the 0.570 the landmark rule had cost.
 
 ---
 
@@ -1752,22 +1768,42 @@ gate passes unchanged, and the group is a parallel table. The viewer's
 `identity` channel now DRAWS the group and the new name `placement` draws what
 `identity` drew before (§8).
 
-**Layout.** `offGroup` (0x100) points at `u16 group[instanceCount]`, in instance
-(sorted table) order — one word a placement, stride 2 (`groupStride`, 0x10C).
-Ids are **dense per CHUNK from 0**: a chunk holding *C* groups uses exactly
+**Layout, v13 (IDENT2, 2026-09-29; the file-wide group word).** `offGroup`
+(0x100) points at `u32 group[instanceCount]`, in instance (sorted table)
+order — one word a placement, stride 4 (`groupStride`, 0x10C). Ids are
+**dense over the WHOLE FILE from 0**, numbered in sorted instance order of
+first use; `groupCount` (0x108) is the file's count, and a reader that finds
+an id at or past it, or an id below it that no placement uses, refuses by
+name. **So a group crossing a chunk line keeps ONE id** (bungo, 2026-09-29, on
+the violet strip at Diamond City's west side: *"Think it's part of diamond
+city"* -- the stadium was two ids, one a chunk). **Why u32:** the bound on the group count is the
+placement count (`--identity-join none` and the near library give one group a
+placement), and a whole-Commonwealth bake already holds 69,806 placements
+(21,248 groups under the contact join); a u16 cannot promise that. Two bytes a
+placement more (Boston LIGHT bake: 46,532 placements, 4,527 groups, was 4,613 as
+per-chunk ids -- 86 groups had crossed a chunk line and were counted a side).
+The near library keeps the per-chunk v11 table (its groups are single
+placements and its bytes are another gate).
+
+**Layout, v7…v12 (the way back, `WW_LODI_GROUPS_PER_CHUNK=1`).** `offGroup`
+points at `u16 group[instanceCount]`, stride 2. Ids are **dense per CHUNK from 0**: a chunk holding *C* groups uses exactly
 {0 … C−1}, and a reader that finds a hole, or an id at or past the chunk's own
 placement count, refuses by name. `groupCount` (0x108) is the chunks' counts
 SUMMED, and the reader adds them up itself rather than trusting the word. Per
 chunk and not globally, because a full Commonwealth can hold more than 65,536
 groups and the word is a u16; the writer refuses by name if one chunk ever does.
+**Both readers (`src/lodifile.cpp`, `tests/spells/lodgen_native_decode.py`)
+hand every consumer FILE-WIDE ids whatever the version:** a v7…v12 chunk's ids
+are offset by the earlier chunks' counts on load, so the viewer, the identity
+view, the far-shadow harness and the census tools read one kind of id.
 
 **Who assigns what.** The emitter (`src/nativeemit.cpp`) computes a global u32
 `groupKey` per placement, with the sentinel `LODI_GROUP_ALONE` for a placement
 that ended up by itself — "alone" is a stated state, not a coincidence of
-numbering. The WRITER turns those keys into dense per-chunk ids, because only
-the writer knows the sort and the chunk partition. **A component cut by a chunk
-border becomes two groups, one a side**, which is the same rule the rest of the
-format lives under.
+numbering. The WRITER turns those keys into dense ids, because only the
+writer knows the sort. **v13: one id a key over the whole file, so a
+component crossing a chunk border is ONE group.** v7…v12: dense per chunk, so
+it became two groups, one a side.
 
 **THE DEFAULT RULE: THE CONTACT JOIN (lane IDENT1, 2026-09-28;
 `--identity-join contact`).** Three clauses, in order:
@@ -1796,8 +1832,8 @@ are wider than the cap on their own. Hub tower east 1 group, west 4 (the other
 3 are lone pieces), Trinity 1, **Diamond City 15** (no cap that stops the
 welding keeps the stadium whole), **the row houses 1** (54 pieces, 3,109 ×
 2,144 u: the terraces share walls at 0 u, and the cap cuts by width only).
-The ids stay per chunk (u16): 188 joined groups cross a 16,384 u chunk line
-and get one id a side. `WW_LODI_CONTACT_TOL`, `WW_LODI_GROUP_CAP` and
+Under v7…v12 the ids were per chunk (u16): 188 joined groups crossed a 16,384 u
+chunk line and got one id a side; v13 gives each one id. `WW_LODI_CONTACT_TOL`, `WW_LODI_GROUP_CAP` and
 `WW_LODI_GROUP_DUMP` are the measuring surface. `--identity-join proximity`
 is the way back, byte-identical to the 2026-09-27 files.
 
@@ -1830,8 +1866,7 @@ across a chunk line:** the group word is a u16 dense PER CHUNK, so Diamond
 City -- one group in the emitter -- is id 85 in chunk (-2,-2) (14 pieces) and
 id 30 in chunk (-1,-2) (151 pieces); no other instance of either chunk carries
 those ids (`scratchpad/ident2_20260929/lmchunk.py` reads it back from the
-file). One id across chunks would need a file-wide group word: a format
-change, not made.
+file). **v13 (below) makes it one id:** the file-wide group word.
 
 **THE FOOTPRINT (IDENT2 follow-up, 2026-09-29; bungo on the after pictures:
 "the landmarks are not whole yet").** A landmark is its name prefixes PLUS the
@@ -1858,9 +1893,11 @@ tower 731 + 27 (2 refused: backbay15_bld01lod, backbay18_bld02lod); east
 732 + 17; Trinity 25 + 0. The gate is a pixel count read from the file
 (`scratchpad/ident2_20260929/pixgate.py`): the triangles inside each outline,
 trees excluded, point-splatted from straight down and four 35-degree obliques,
-count the pixels whose (chunk, group id) is not the landmark's: **0 in all
-four** (the pre-footprint file: 291,974). Street coverage 0.570 -> 0.558: the
-footprint pieces lose their own occluder boxes to the landmark's one.
+count the pixels whose group id is not the landmark's ONE file-wide id: **0 in
+all four** (the pre-footprint file: 291,974; the v12 footprint file: 49,904, all
+Diamond City's 14 pieces in chunk (-2,-2), the violet strip). Street coverage
+0.570 -> 0.558: the footprint pieces lose their own occluder boxes to the
+landmark's one; the split (§4.5.4) takes it to 0.588.
 
 **THE PROXIMITY JOIN (the default 2026-09-19 .. 2026-09-27; bungo's ruling
 2026-09-19; lane IDENTPROX measured it, lane HORIZONOUT shipped it;
@@ -1953,7 +1990,16 @@ over 2,449 placements, 1,981 grouped, largest 205
 singletons, 1,877 architecture placements.
 
 **Way back.** `--lodi-v6` writes a v6 file with no group table, byte-identical
-to what the writer wrote before v7 existed.
+to what the writer wrote before v7 existed. `WW_LODI_GROUPS_PER_CHUNK=1` writes
+the per-chunk u16 table and the version the file would have had before v13
+(7…12) -- byte-identical to the pre-v13 exe: a whole Boston bake with
+`--identity-join proximity --occluder-fit piece` and the switch compares SAME,
+233 files. Without the switch the same bake differs in the `.lodi` alone (and
+the `.lodb`'s digest of it): version 12 -> 13, `groupStride` 2 -> 4, the group
+table 139,612 -> 279,224 bytes, `groupCount` 20,954 -> 20,818, `offVertexSky`
+and `offVertexGround` moved by the wider table (+139,264), `fileBytes`,
+`indexCrc32`, `headerCrc32`; every other table is byte-identical, and the new
+partition only merges old groups of different chunks (127 ids, 136 folded).
 
 ### 4.10 The per-vertex sky stream (v7)
 
@@ -2382,7 +2428,7 @@ first time any mod is installed or removed after a bake.
 
 | class | keys | generator | consumer |
 |---|---|---|---|
-| **hard: both files** | magic, **version (see the per-file rows)**, `vertexStride`, `instanceStride`, **`groupStride` (v7), a group id that is not dense per chunk, a `groupCount` that disagrees with the chunks' sum, a sky slice whose length disagrees with the same placement's AO slice, a version-3…6 file carrying version-7 header words,** `clusterMaxTris`, **`clusterLodStride`**, **`occluderStride`**, a set reserved bit, `ROW_ORDER_NORTH_UP` clear, `chunkCount` over cap, a zero `lodoIdentity` without `NOLIB`, **a `scale` of 0**, **a `drawKey` out of order or not the base's rank**, **a cluster whose `geometricError` exceeds its `parentError`**, **a `CONE_OPEN` cluster carrying a cone (or the reverse)**, **an occluder naming an instance outside its own cell**, any CRC mismatch | refuse, name the field | **refuse to load, and never hide the engine's own LOD tree** |
+| **hard: both files** | magic, **version (see the per-file rows)**, `vertexStride`, `instanceStride`, **`groupStride` (v7), a group id that is not dense per chunk, a `groupCount` that disagrees with the chunks' sum, **a v13 id at or past `groupCount` or a v13 id left unused, a v13 file without a group table**, a sky slice whose length disagrees with the same placement's AO slice, a version-3…6 file carrying version-7 header words,** `clusterMaxTris`, **`clusterLodStride`**, **`occluderStride`**, a set reserved bit, `ROW_ORDER_NORTH_UP` clear, `chunkCount` over cap, a zero `lodoIdentity` without `NOLIB`, **a `scale` of 0**, **a `drawKey` out of order or not the base's rank**, **a cluster whose `geometricError` exceeds its `parentError`**, **a `CONE_OPEN` cluster carrying a cone (or the reverse)**, **an occluder naming an instance outside its own cell**, any CRC mismatch | refuse, name the field | **refuse to load, and never hide the engine's own LOD tree** |
 | **hard: pairing** (between the two files) | the two files name different worldspaces; `pluginCorpusHash` or `objectCorpusHash` differs **between the `.lodo` and the `.lodi`**; `loadOrderHash` differs **between the two files** (§4 row 0x90); `lodoIdentity` does not name this `.lodo` (unless `NOLIB`) — `src/nativeemit.cpp`, every `pairing:` refusal | refuse, name the field | **refuse to load, and never hide the engine's own LOD tree** |
 | **hard: `.lodo`** (`lodoRead`) | versions **1, 2 and 3 refused by name**, anything but 4, 5, 6 or 7; (v7) the `NEAR` flag without version 7 or version 7 without it, a material `features` byte with bits 5..7 set, or non-zero below v7 (§3.9); (v6) the base table not sorted by `(formId, materialSwap)` strictly, the SWAPPED flag disagreeing with `materialSwap`, a variant row with no plain row of its base before it (§3.8); the `LADDER` flag disagreeing with `ladderGroup` / `levelMax`, `levelMax` > 15; `cardCount` > `baseCount`; `cardCount` not equal to the base rows naming a card layer, or rows naming one while `cardCorpusHash` is 0 (CARDLINK1, §4.13); a base's `fullTriangles` that its own meshes do not recount to, or non-zero on a base with no mesh; mesh flags beyond ALPHA / SWAY / WATERTIGHT (plus VERTEX_COLOUR / VERTEX_ALPHA on v5); VERTEX_ALPHA without VERTEX_COLOUR; `colourVertexCount` and `offColours` not both zero or both set, a count over `vertexCount`, a flagged mesh whose vertices are not one contiguous range, or flagged rows that do not add up to the count (v5); reserved header bytes 0xCE…0xCF and 0xD4…0xFF (0xE0…0xFF on v5) | refuse, name the field | as above |
 | **hard: `.lodi`** (`lodiRead`) | versions **1 and 2 refused by name**, anything outside 3…11; a version whose defining table is missing (v5 without the placement-AO blob, v6 without the vertex-AO blob, v7/v9 with neither group table nor sky stream, v8 without the horizon stream); a file carrying a LATER version's header words (v3/v4 with placement-AO words, v3–v6 with v7 words at 0x100/0x110, v7/v9 with v8 words at 0x11C); reserved header bytes by version (from 0xB0 on v3, 0xD4 on v4, 0xF1…0xFF on v5, 0xF1…0xF3 on v6 and later, plus 0x11C…0x1FF on v7/v9, 0x130…0x1FF on v8); instance flag bit 6 below v9 (§4.1); instance flag bit 7 below v10 (§4.14); instance flag bit 8 below v11 (§4.15); a stored cell outside the quantisation band (§4.1, `lodiCellAgrees`); the vertex-AO, sky and horizon offset tables and their slice lengths; the aggregate rows and their covered list (§4.6) | refuse, name the field | as above |

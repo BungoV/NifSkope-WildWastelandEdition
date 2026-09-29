@@ -658,8 +658,15 @@ what stops two buildings welding across a street. `--identity-join legacy`
 restores the pre-2026-09-19 rule (an `architecture` path component and a world
 axis-aligned box gap of 16 u) and is the red control every gate uses.
 
-**THE GROUP IDS ARE DENSE PER CHUNK, NOT GLOBAL** (`src/lodifile.cpp:646`, and
-the reader enforces it at `:1394`). A chunk holding C groups uses exactly
+**SINCE `.lodi` v13 (IDENT2, 2026-09-29) THE GROUP IDS ARE FILE-WIDE**: a u32
+a placement (stride 4), dense over the whole file, so a group crossing a chunk
+line keeps one id, and BOTH readers (`src/lodifile.cpp`, `lodgen_native_decode.py`)
+offset an older file's per-chunk ids to file-wide ones on load -- a consumer keys
+on the id alone. `WW_LODI_GROUPS_PER_CHUNK=1` writes the old table. What follows
+is the v7..v12 layout, for reading raw bytes of an old file.
+
+**v7..v12: THE GROUP IDS ARE DENSE PER CHUNK, NOT GLOBAL** (the writer's per-chunk
+branch in `src/lodifile.cpp`, enforced by the reader). A chunk holding C groups uses exactly
 {0 .. C-1}, and the header's `groupCount` (0x108) is those per-chunk counts
 SUMMED -- so the identity of a group is the pair **(chunk, id)**, never the u16
 alone. Any independent reader that counts the raw u16 over the whole table

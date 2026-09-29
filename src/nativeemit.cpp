@@ -3102,6 +3102,8 @@ bool lodgenNativeWrite( QString * report, QString * error )
 	//! IDENT1: the CONTACT join's own census (candidate pairs, touching pairs, unions the cap refused)
 	quint64 contactCandidates = 0, contactTouching = 0, contactCapRefused = 0, contactTriTests = 0;
 	//! IDENT1: the building occluders' census
+	quint32 bldOccSplitGroups = 0, bldOccSplitParts = 0;
+	float bldOccSplitU = 0.0f;
 	quint32 bldOccGroups = 0, bldOccFitted = 0, bldOccNoSolid = 0, bldOccTooThin = 0, bldOccProbeFailed = 0, bldOccShrunk = 0;
 	qint64 bldOccMs = 0;
 	std::vector<float> bldOccThin;      //!< each fitted box's smallest full extent, world units
@@ -4358,6 +4360,10 @@ bool lodgenNativeWrite( QString * report, QString * error )
 	 * group is a SECOND word beside it (docs s4.9). */
 	if ( s.lodiV7 ) {
 		set.group = true;
+		/* v13 (lane IDENT2, 2026-09-29): the writer makes the group ids FILE-WIDE
+		 * (a u32 a placement), so a group cut by a chunk line keeps one id.
+		 * WW_LODI_GROUPS_PER_CHUNK=1 is the exact way back: v7..v12's u16 per chunk. */
+		set.groupPerChunk = qEnvironmentVariable( "WW_LODI_GROUPS_PER_CHUNK" ) == QStringLiteral( "1" );
 		const size_t ni = set.instances.size();
 		std::vector<quint32> uf( ni );
 		for ( size_t i = 0; i < ni; i++ )
@@ -4967,7 +4973,9 @@ bool lodgenNativeWrite( QString * report, QString * error )
 					.arg( double( x1 - x0 ), 0, 'f', 0 ).arg( double( y1 - y0 ), 0, 'f', 0 )
 					.arg( chunks.size() ).arg( cl.join( QChar( ' ' ) ) )
 					.arg( chunks.size() > 1
-						? QStringLiteral( " -- CROSSES A CHUNK LINE: the file's per-chunk u16 group word gives it one id in each chunk" )
+						? ( set.groupPerChunk
+							? QStringLiteral( " -- CROSSES A CHUNK LINE: the per-chunk u16 group word (WW_LODI_GROUPS_PER_CHUNK=1) gives it one id in each chunk" )
+							: QStringLiteral( " -- crosses a chunk line; the v13 file-wide group word keeps it one id" ) )
 						: QString() ) );
 			}
 			/* THE DUMP, a measuring surface and not a feature: one `P` line a
@@ -5234,7 +5242,46 @@ bool lodgenNativeWrite( QString * report, QString * error )
 			for ( size_t i = 0; i < ni; i++ )
 				if ( ptCount[i] )
 					byRoot[find( quint32( i ) )].push_back( quint32( i ) );
-			std::vector<std::pair<quint32, std::vector<quint32>>> jobs( byRoot.begin(), byRoot.end() );
+			/* IDENT2 (2026-09-29): MORE THAN ONE BOX A LANDMARK. A group wider than
+			 * the cap on X or Y -- which only a landmark can be, the contact join
+			 * refuses every other -- is fitted as SEVERAL boxes: its members are cut
+			 * by a world grid of cap-sized squares (by the centre of each member's
+			 * placed box) and each square's members are fitted on their own, riding
+			 * on their own carrier. So no box is wider than a group the cap allows,
+			 * which is what every other building's box already is; one box a ring
+			 * (Diamond City) fitted less than its fragments did (docs s4.5.4). The
+			 * IDENTITY is untouched: every part's carrier is in the one group.
+			 * WW_LODI_OCC_SPLIT=<u> moves the square (measuring only). */
+			float splitU = KNOB.groupCap > 0.0f ? KNOB.groupCap : 4096.0f;
+			{
+				bool ok = false;
+				const float e = qEnvironmentVariable( "WW_LODI_OCC_SPLIT" ).toFloat( &ok );
+				if ( ok && e >= 256.0f )
+					splitU = e;
+			}
+			bldOccSplitU = splitU;
+			std::vector<std::pair<quint32, std::vector<quint32>>> jobs;
+			for ( auto & kv : byRoot ) {
+				float x0 = 3.4e38f, y0 = 3.4e38f, x1 = -3.4e38f, y1 = -3.4e38f;
+				for ( quint32 m : kv.second ) {
+					x0 = std::min( x0, tbox[m].lo[0] ); y0 = std::min( y0, tbox[m].lo[1] );
+					x1 = std::max( x1, tbox[m].hi[0] ); y1 = std::max( y1, tbox[m].hi[1] );
+				}
+				if ( kv.second.size() < 2 || ( x1 - x0 <= splitU && y1 - y0 <= splitU ) ) {
+					jobs.push_back( kv );
+					continue;
+				}
+				std::map<std::pair<qint64, qint64>, std::vector<quint32>> cut;
+				for ( quint32 m : kv.second ) {
+					const double cx = 0.5 * ( double( tbox[m].lo[0] ) + double( tbox[m].hi[0] ) );
+					const double cy = 0.5 * ( double( tbox[m].lo[1] ) + double( tbox[m].hi[1] ) );
+					cut[{ qint64( std::floor( cx / splitU ) ), qint64( std::floor( cy / splitU ) ) }].push_back( m );
+				}
+				bldOccSplitGroups++;
+				bldOccSplitParts += quint32( cut.size() );
+				for ( auto & c : cut )
+					jobs.push_back( { kv.first, std::move( c.second ) } );
+			}
 			struct Fit { int res = BLD_OCC_NO_SOLID; float c[3], h[3], R[9]; quint32 carrier = 0; int shrink = 0; int nudge = 0; };
 			std::vector<Fit> fits( jobs.size() );
 			lodgenParallelFor( int( jobs.size() ), [&]( int gi ) {
@@ -5827,6 +5874,9 @@ bool lodgenNativeWrite( QString * report, QString * error )
 				.arg( bldOccProbeFailed ).arg( BLD_OCC_PROBE_ROUNDS ).arg( bldOccShrunk )
 				.arg( BLD_OCC_PROBE_GRID * BLD_OCC_PROBE_GRID * BLD_OCC_PROBE_GRID ).arg( BLD_OCC_PROBE_MAX_OUT * 100.0, 0, 'f', 1 )
 				.arg( BLD_OCC_SEAM_U, 0, 'f', 2 ).arg( bldOccNudged );
+			occLine += QString( "; IDENT2: %1 group(s) wider than %2 u cut by a %2 u world grid into %3 part(s), "
+				"each fitted as its own box (the `groups` count above counts parts)" )
+				.arg( bldOccSplitGroups ).arg( double( bldOccSplitU ), 0, 'f', 0 ).arg( bldOccSplitParts );
 		}
 		quint64 aggCovered = 0, aggTexels = 0;
 		int hSpanMin = 0, hSpanMax = 0;

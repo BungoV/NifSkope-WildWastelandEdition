@@ -190,3 +190,58 @@ Sign band joins the tower. Gate: pixel count of non-landmark colour inside each 
   `--identity-join proximity --occluder-fit piece`: SAME, 233 files.** Red controls on copies: one flipped .lodi
   byte -> DIFF 1 of 233; the .lodo removed -> MISSING (file lists differ). Turn lock released 09:37:05.
 - Skill ww-lodgen-landmark-add: footprint + pixel gate + north-first chunk rows added (both copies).
+
+## 18. Third job: file-wide group ids + more than one box a landmark (started 09:50; written 09:59)
+Ask (coordinator, bungo circled the violet strip in dc_fp.png): Diamond City must BE one group across the chunk
+line, not only colour as one; group ids file-wide; and win back the coverage (0.558 -> at least 0.570).
+- Measured for the width call: whole-Commonwealth bake b_fp2 holds 21,248 groups over 69,806 placements; the
+  bound is the placement count (`--identity-join none`, the near library: one id a placement), already past
+  65,535 here. **Call: a u32 group word, file-wide, dense from 0 (stride 4). Version 13.** 2 bytes a placement more.
+- v13 = v12's layout with that one table changed; the ground stream becomes optional there. Way back:
+  `WW_LODI_GROUPS_PER_CHUNK=1` writes the v7..v12 u16-per-chunk table and version, byte for byte.
+- Readers: src/lodifile.cpp reads 13 (and still 3..12); a v7..v12 file's per-chunk ids are offset chunk by
+  chunk into file-wide ids in memory, so every consumer sees one kind of id (viewer identity colour, cell
+  identity index, dump stats). tests/spells/lodgen_native_decode.py the same. cellidentity keys on the id.
+- Near library (src/nearlib.cpp): stays per chunk (groupPerChunk = true). Every one of its groups is one
+  placement, no chunk line can cut one, and its bytes are another lane's gate. Call logged here.
+- Occluder split (my call): a group wider than the cap (4,096 u; only a landmark can be) is cut by a 4,096 u
+  world grid, by each member's box centre, and each square's members get their own box and carrier. No box is
+  then wider than a group the cap allows. WW_LODI_OCC_SPLIT=<u> moves the square for measuring.
+- Gate tools: pixgate.py now demands ONE file-wide id a landmark; lmchunk.py prints a FILE-WIDE verdict.
+  **Red controls on the previous build (b_fp3, v12): pixel gate FAIL 49,904 wrong pixels, all Diamond City,
+  all chunk (-2,-2) (the violet strip; named pieces split 14 / 151 over two ids); lmchunk: DC "2 id(s) over 2
+  chunk(s) [NOT ONE ID]".**
+
+## 19. Built and gated (build 10:00-10:02, turn lock released 10:01:59; written 10:08)
+- Build: tools/ww_build.sh, BUILD-RC=0, exe newer than the 6 edited sources; the exe holds the new strings
+  (WW_LODI_GROUPS_PER_CHUNK, WW_LODI_OCC_SPLIT, the split census). Run copy run_v13 (sha1 6ed1af11).
+- LIGHT bake b_v13 (10:02-10:07, like b_fp3): .lodi version 13, stride 4, 4,527 groups over 46,532 placements
+  (b_fp3: v12, 4,613 -- the 86 fewer are groups that crossed a chunk line and were counted once a side).
+- **Pixel gate: PASS, 0 wrong pixels in all four outlines** (red control b_fp3: FAIL 49,904).
+- **lmchunk: Diamond City FILE-WIDE 1 id (1178) over 2 chunks, 404 pieces, 0 other instances [ONE ID]**; both
+  Hub towers and Trinity ONE ID. Census: "crosses a chunk line; the v13 file-wide group word keeps it one id".
+  (red control b_fp3: 2 ids over 2 chunks, NOT ONE ID).
+- **Poke gate (lodi_occluder_building.py --gate): ok, 517 boxes, 0 over 1 percent, worst 0.0041**; its floor
+  (boxes grown 1.25x) goes red on 511 of 517.
+- **Occluder split: 2 groups wider than 4,096 u (Diamond City, west Hub tower at 4,100 u) cut into 13 parts.
+  Street coverage 0.5877** (b_fp3 0.5583, the no-split control): eyes Trinity 0.578 -> 0.587, Hub 0.730 ->
+  0.760, Diamond City 0.368 -> 0.416. Target was >= 0.570: met without moving the square.
+- Refusals for v13 (v13mut.py, re-signed CRCs so the rule answers): id at groupCount, an unused id,
+  groupCount+1, stride 2, no group table -> all refused by the Python decoder; the re-signed control loads.
+  The C++ reader on the same files: post4.sh (below).
+- **Way back (10:07-10:16): proximity + piece + WW_LODI_GROUPS_PER_CHUNK=1 (b_off_v13pc) vs main exe
+  (b_off_rung): SAME, 233 files** (cmp_off_v13pc.out; .lodi version 12, stride 2, 20,954 groups).
+- **Way back WITHOUT the switch (b_off_v13, proximity + piece, 10:16-10:26) vs b_off_rung: DIFF 2 of 233.**
+  The .lodb differs only in its `product Commonwealth.lodi` digest. The .lodi (lodidiff.py, lodidiff_off_v13.out):
+  version 12 -> 13; groupStride 2 -> 4; the group table 139,612 -> 279,224 bytes (u16 -> u32); groupCount
+  20,954 -> 20,818; offVertexSky and offVertexGround +139,264 (the wider table, 4096-aligned); fileBytes;
+  indexCrc32 and headerCrc32. Every other table (chunks, cells, instances, cold, occluders, AO, sky, ground) is
+  byte-identical. The group partition only merges: 0 old groups split, 127 new ids hold 2+ old ones (136
+  folded), and every merge joins old groups of DIFFERENT chunks -- exactly the chunk-line groups.
+- C++ reader (--native-verify, v13 exe, 10:26): the 5 v13mut files -> rc 1 each; the re-signed control, the
+  b_v13 file and the OLD v12 file b_fp3 -> rc 0 (old files still load).
+- **lodgen_native.sh (10:26-11:00, h_lodgen_native_v13.log): 34 checks, 1 failure = the same leg-5 .lodb ledger
+  line that fails on IDENT1's and my earlier runs (not this change).** Leg 4 ok (the Sanctuary .lodi is v13,
+  j0e: u32 stride 4, 1,997 groups). Leg 13 ok: 280 of 280 boxes hold. Leg 13c ok: 312 boxes, 0 over 1 percent,
+  worst 0.0041, grown 1.25x -> 306 over.
+- Pictures: waiting on the turn (TERRLIVE1 took it between my shots at 11:01).

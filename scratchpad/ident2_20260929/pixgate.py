@@ -4,8 +4,10 @@ For every landmark: the outline = convex hull (X/Y) of the name-matched pieces' 
 Every non-tree file instance in the chunks the outline touches is placed (level-0 triangles of its drawn mesh);
 a triangle is kept when its centroid lies inside the outline. The kept triangles are point-splatted into a
 z-buffer (orthographic) from 5 views: straight down, and 35 degrees down from azimuth 45/135/225/315. Every
-covered pixel carries the nearest instance's FILE identity (chunk, group id) -- what the identity view colours.
-A pixel is WRONG when that identity is not the landmark's own id in that chunk. Prints per landmark and view
+covered pixel carries the nearest instance's FILE group id -- what the identity view colours. The decoder
+hands every version's ids over FILE-WIDE (v7..v12 per-chunk ids offset chunk by chunk; v13 writes them so).
+A pixel is WRONG when its id is not the landmark's ONE id: the id most of its named pieces carry, over the
+whole file (IDENT2 third job: a landmark cut by a chunk line in two ids FAILS, the violet strip). Prints per landmark and view
 the covered and wrong pixel counts, then each instance owning a wrong pixel, by name. Exit 1 when any wrong.
 Trees and plants are never drawn (tree flag in the dump, or a vegetation model path)."""
 import sys, os, math, collections
@@ -77,8 +79,12 @@ for rule in rules:
     for p in mem:
         for ii in key_to_ii.get((p['ref'], p['part']), []):
             own[chunk_of[ii]][grp[ii]] += 1
-    own_id = {ch: c.most_common(1)[0][0] for ch, c in own.items()}
-    split = {ch: dict(c) for ch, c in own.items() if len(c) > 1}
+    whole = collections.Counter()
+    for c in own.values():
+        whole.update(c)
+    one = whole.most_common(1)[0][0]
+    own_id = {ch: one for ch in own}
+    split = dict(whole) if len(whole) > 1 else {}
     hx0, hy0 = min(q[0] for q in Hl), min(q[1] for q in Hl)
     hx1, hy1 = max(q[0] for q in Hl), max(q[1] for q in Hl)
     tris, owner = [], []
@@ -108,7 +114,7 @@ for rule in rules:
         print('%s: no triangles inside the outline' % name)
         continue
     tris = np.concatenate(tris); owner = np.concatenate(owner)
-    ok_inst = np.array([own_id.get(chunk_of[ii]) == grp[ii] for ii in range(len(cold))])
+    ok_inst = np.array([grp[ii] == one for ii in range(len(cold))])
     print('\n%s: outline %d points, %d named pieces, %d triangles inside from %d instances; own id per chunk %s%s' % (
         name, len(Hl), len(mem), len(tris), len(set(owner.tolist())),
         ' '.join('%s:%d' % (ch, g) for ch, g in sorted(own_id.items())),
@@ -154,6 +160,6 @@ for rule in rules:
     bad_total += lm_bad
     print('  %s: %d wrong pixels over 5 views' % (name, lm_bad))
     for ii, k in wrong_by.most_common():
-        print('    %6d px  chunk %s id %d (own %s)  %s' % (k, chunk_of[ii], grp[ii], own_id.get(chunk_of[ii]), name_of(ii)))
+        print('    %6d px  chunk %s id %d (own %d)  %s' % (k, chunk_of[ii], grp[ii], one, name_of(ii)))
 print('\nPIXEL GATE %s: %d wrong pixels' % ('PASS' if bad_total == 0 else 'FAIL', bad_total))
 sys.exit(0 if bad_total == 0 else 1)

@@ -176,7 +176,9 @@ constexpr quint32 LODI_VERSION_VERTEX_AO = 6;
  *  and not per file because a whole Commonwealth would run past 65,536 groups;
  *  the price is that a house cut by a chunk line is two groups, one a side, and
  *  that is the honest answer rather than a fabricated join across a seam the
- *  bake never sees whole.
+ *  bake never sees whole. SUPERSEDED BY v13 (LODI_VERSION_GROUP_FILE): the
+ *  emitter's key is global -- it does see the house whole -- so v13 writes
+ *  one file-wide u32 id a group and a chunk line no longer cuts it.
  *
  *  (b) THE VERTEX-SKY STREAM, header 0x110 (u64 offset) / 0x118 (u32 bytes):
  *  the SAME layout as v6's vertex-AO blob at 0xF4, byte for byte -- u32
@@ -341,6 +343,31 @@ constexpr quint32 LODI_VERSION_INITIALLY_DISABLED = 11;
  *  byte-identity gate only). The FO4CS reader owes the version and may skip the
  *  stream by its two header words. */
 constexpr quint32 LODI_VERSION_VERTEX_GROUND = 12;
+/*! v13 (lane IDENT2, 2026-09-29, bungo circling the violet strip on Diamond
+ *  City's west side: "Think it's part of diamond city"): THE FILE-WIDE GROUP
+ *  WORD. The v7 group table held a u16 an instance, dense PER CHUNK, so a
+ *  group cut by a 16,384 u chunk line was two ids, one a side -- the stadium
+ *  was ids 85 and 30. v13 widens the word to a u32 (`groupStride` = 4) and
+ *  makes the ids dense over the FILE from 0, in instance (sorted table) order
+ *  of first use: a group is ONE id wherever its pieces stand.
+ *
+ *  WHY A u32 AND NOT A FILE-WIDE u16. Measured: the whole-Commonwealth bake
+ *  holds 21,248 groups (69,806 placements), but the bound is the placement
+ *  count -- `--identity-join none` and the near library (every placement its
+ *  own group) write one id a placement -- and that is already past 65,535 on
+ *  this map. A u16 would be a refusal waiting for the next mod list. The cost
+ *  is 2 bytes a placement (140 KB on the whole Commonwealth).
+ *
+ *  v13 is the v12 layout with that one table changed; the ground-contact
+ *  stream at 0x130 becomes OPTIONAL (0 = absent), because v13 is decided by
+ *  the group word and a set without the stream still writes the group table.
+ *  Bits 6-8 keep their meaning. It is decided LAST, after v12. Needs v7's
+ *  header block. `WW_LODI_GROUPS_PER_CHUNK=1` is the exact way back: the
+ *  v7..v12 file, u16 per chunk, byte for byte. A reader meeting a v7..v12 file
+ *  turns its per-chunk ids into file-wide ones (chunk by chunk, each chunk's
+ *  ids offset by the groups of the chunks before it), so every consumer sees
+ *  one kind of id; a group cut by a chunk line in such a file stays two. */
+constexpr quint32 LODI_VERSION_GROUP_FILE = 13;
 /*! WHAT A VERSION-8 FILE'S BYTES MEAN (contract s4.11). No writer in this tree
  *  produces such a file any more (see LODI_VERSION_HORIZON above) and there is
  *  no longer a switch that moves these; they stay because a reader that meets
@@ -360,7 +387,8 @@ constexpr float LODI_HORIZON_SOFT_DEG = 1.0f;
 constexpr float LODI_HORIZON_DEG_PER_STEP = 90.0f / 255.0f;
 constexpr quint32 LODI_HEADER_BYTES = 256;
 constexpr quint32 LODI_HEADER_BYTES_V7 = 512;
-constexpr quint16 LODI_GROUP_STRIDE = 2;
+constexpr quint16 LODI_GROUP_STRIDE = 2;         //!< v7..v12: u16, dense per chunk
+constexpr quint16 LODI_GROUP_STRIDE_FILE = 4;    //!< v13: u32, dense over the file
 //! The emitter's "this placement is its own group" key; never written to a file.
 constexpr quint32 LODI_GROUP_ALONE = 0xFFFFFFFFu;
 constexpr quint32 LODI_PAYLOAD_ALIGN = 4096;
@@ -651,9 +679,9 @@ struct LodiHeader
 	quint8 placementAoStride = 0;           //!< v5, 0xF0; 1 when present, 0 when absent
 	quint64 offVertexAo = 0;                //!< v6, 0xF4: the vertex-AO blob (u32 first[n+1] then the bytes)
 	quint32 vertexAoBytes = 0;              //!< v6, 0xFC: the whole blob's size, offsets included
-	quint64 offGroup = 0;                   //!< v7, 0x100: the group table, one u16 an instance
-	quint32 groupCount = 0;                 //!< v7, 0x108: distinct groups over the FILE (the chunks' counts summed)
-	quint16 groupStride = 0;                //!< v7, 0x10C: 2 when present, 0 when absent
+	quint64 offGroup = 0;                   //!< v7, 0x100: the group table, one u16 (v7..v12) or u32 (v13) an instance
+	quint32 groupCount = 0;                 //!< v7, 0x108: v7..v12 the chunks' counts summed; v13 the file's distinct groups
+	quint16 groupStride = 0;                //!< v7, 0x10C: 2 (v7..v12) or 4 (v13) when present, 0 when absent
 	quint64 offVertexSky = 0;               //!< v7, 0x110: the vertex-sky stream, s4.8's layout exactly
 	quint32 vertexSkyBytes = 0;             //!< v7, 0x118: the whole stream's size, offsets included
 	quint64 offVertexHorizon = 0;           //!< v8, 0x11C: the per-vertex horizon stream, s4.11
@@ -783,6 +811,10 @@ struct LodiSrcSet
 	bool vertexSky = false;
 	//! v12. FALSE is the off value (WW_LODGEN_NO_VERTEX_GROUND=1). Needs `vertexAo` and the v7 block.
 	bool vertexGround = false;
+	/*! v13's way back (WW_LODI_GROUPS_PER_CHUNK=1): write the group table as
+	 *  v7..v12 did, a u16 dense per chunk, and leave the version to the v12
+	 *  rules -- the file byte for byte what the tree wrote before v13. */
+	bool groupPerChunk = false;
 };
 
 //! The whole table in memory, as the reader gives it.
@@ -799,7 +831,7 @@ struct LodiTable
 	std::vector<quint8> placementAo;                //!< v5, parallel to `instances`; 0xFF = not measured
 	std::vector<quint32> vertexAoFirst;             //!< v6, instanceCount + 1 entries into `vertexAo`
 	std::vector<quint8> vertexAo;                   //!< v6, one byte a library vertex an instance
-	std::vector<quint16> group;                     //!< v7, parallel to `instances`; dense per chunk from 0
+	std::vector<quint32> group;                     //!< v7, parallel to `instances`; FILE-WIDE ids dense from 0 (a v7..v12 file's per-chunk ids are offset by the reader)
 	std::vector<quint32> vertexSkyFirst;            //!< v7, instanceCount + 1 entries into `vertexSky`
 	std::vector<quint8> vertexSky;                  //!< v7, one byte a library vertex an instance
 	std::vector<quint32> vertexGroundFirst;         //!< v12, instanceCount + 1 entries into `vertexGround`

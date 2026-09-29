@@ -130,14 +130,16 @@ class Placements(object):
         # scolPart lives in the COLD table, not the hot instance row
         self.scol = np.array([T['cold'][i]['scolPart'] for i in range(n)], dtype=np.int64)
         self.refid = np.array([T['cold'][i]['refFormId'] for i in range(n)], dtype=np.int64)
-        # ---- today's shipped group ids, made globally unique per chunk
+        # ---- today's shipped group ids. The decoder hands them FILE-WIDE
+        # (IDENT2, 2026-09-29): a v13 file stores them so, a v7..v12 file's
+        # per-chunk u16 is offset by the earlier chunks' counts. So the id is
+        # unique as it stands; +1 keeps 0 free for 'no group' here.
         g = np.array(T['group'], dtype=np.int64)
         ch = np.zeros(n, dtype=np.int64)
         for ci, c in enumerate(T['chunks']):
             ch[c['instanceFirst']:c['instanceFirst'] + c['instanceCount']] = ci
-        self.shipped = ch * 100000 + g + 1
-        self.chunk = ch          # v7 group ids are dense PER CHUNK, so an
-        # identity can never span two chunks whatever the geometry says
+        self.shipped = g + 1
+        self.chunk = ch          # v7..v12 ids never span two chunks; v13 ids may
         # ---- world AABB, OBB and the mesh sample sets
         lo = np.full((n, 3), np.nan)
         hi = np.full((n, 3), np.nan)

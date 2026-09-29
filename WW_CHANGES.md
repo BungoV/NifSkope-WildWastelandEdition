@@ -19,6 +19,12 @@
 - One occluder box a building: the fit now checks the box exactly as the file stores it, treats a hit next to
   a seam between pieces as a miss, and moves one face in when that clears a seam. Boston: 0 of 520 boxes stick
   out of their building by more than 1 % (was 5 of 511); street coverage 0.560 -> 0.570.
+- One group id across the whole file (bungo circled Diamond City's violet strip): a group that crosses a map-chunk
+  line now keeps ONE id, so Diamond City is one group in the file, not one a chunk. The `.lodi` group table is
+  now 4 bytes a placement (it was 2, counted per chunk); the file says version 13. Older files still open: their
+  ids are renumbered across the file on load. Boston: 4,613 groups -> 4,527 (86 were counted once a side).
+- More than one occluder box for a landmark: a group wider than 4,096 u (Diamond City, the west Hub tower) is cut
+  into 4,096 u squares and each square gets its own box (13 boxes for the two). Street coverage 0.558 -> 0.588.
 - `--identity-join proximity --occluder-fit piece` still writes byte-identical files to main's.
 
 ## LOD map fixes merged: water, ground contact, tidy sheets, building groups, ground normals and sky, one-value tiles (lanes WATER1, GROUND1, TIDY1, IDENT1, TERR1, TILING5, FLAT2, GPU1; merged by MERGE1, 2026-09-29)
