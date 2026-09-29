@@ -93,6 +93,35 @@ struct HkxClipEntry
 	//! blendHint ADDITIVE: the transforms are deltas, composed on `saved`
 	bool additive = false;
 	bool bound = false;
+
+	/* ---- lane MORPHCYC1: a GENERATED preview clip (src/morphcycle.h).
+	 *
+	 * Built in memory from the chargen tables, never read from a file, and
+	 * NEVER a game clip: skeleton.hkx has no *_skin and no skin_bone_* bones,
+	 * so no Fallout 4 .hkx can carry what these clips move. `generated` names
+	 * the kind in words; while it is non-empty every export path refuses with
+	 * HkxPlayback::generatedRefusal() and the workspace's edits are refused.
+	 *
+	 * `clip.frames` holds each track's posed transform in its SKELETON-LOCAL
+	 * frame with a per-axis scale (HkxTransform::scale is three floats), and
+	 * applyLocal() plays it by `genMode`:
+	 *   GenLocalScale    out = saved * T * R * diag(scale)  -- the body build
+	 *                    panel's own fold (bodybuildpanel.cpp, R * S on the
+	 *                    saved local), per-axis scale kept in the 3x3 basis;
+	 *   GenSkeletonSpace the track's posed GLOBAL is composed down the
+	 *                    skeleton chain the clip was built from
+	 *                    (G = parentG * T * R * diag(scale)), taken relative to
+	 *                    that bone's rest global, and written as the local that
+	 *                    puts the NIF's node there. Needed because the head
+	 *                    NIFs are flat under HEAD while skeleton_faceBones.nif
+	 *                    chains the same bones under C_MasterBot/.../Nose. */
+	enum GenMode { GenNone = 0, GenLocalScale = 1, GenSkeletonSpace = 2 };
+	QString generated;					//!< "" = a real clip; else the preview's kind, in words
+	int genMode = GenNone;
+	QVector<int> genParentTrack;		//!< GenSkeletonSpace: per track, its parent's track or -1
+	QVector<Transform> genParentRest;	//!< ...and when -1, that parent's rest global
+	QVector<Transform> genRestInv;		//!< per track, the inverse of its own rest global
+	bool isGenerated() const { return !generated.isEmpty(); }
 };
 
 /*! Every .hkx clip loaded into one Scene, and the pose of the one that plays.
@@ -217,6 +246,11 @@ public:
 	//! Hold a list of bone names against the scene's named nodes.
 	static HkxMapping mapNames( const Scene * scene, const QStringList & boneNames );
 
+	/*! lane MORPHCYC1: the one sentence every export path refuses a generated
+	 *  preview clip with ("" for a real clip or null). One string, so the
+	 *  workspace's Save, Save as, its edits and the glTF export cannot drift. */
+	static QString generatedRefusal( const HkxClipEntry * e );
+
 	//! The last sentence this playback produced -- what a tooltip or a log shows.
 	const QString & summary() const { return lastSummary; }
 	/*! The same thing in a few words -- what the panel's LABEL shows (lane UI6).
@@ -239,6 +273,9 @@ private:
 	void resolveNames( HkxClipEntry & e );
 	bool namesFromSkeletons( HkxClipEntry & e );
 	bool loadSkeletonBeside( const QString & clipPath );
+	//! lane MORPHCYC1: the local a generated clip puts on this node at time t
+	bool generatedPose( const HkxClipEntry & e, const Node * node, int track, float t,
+						Transform & out ) const;
 
 	Scene * scene = nullptr;
 	QVector<HkxClipEntry> clips;

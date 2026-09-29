@@ -157,6 +157,12 @@ predecessor:
   again, and read the controller they were given.
 - **Freeze Animation** — collapse a sequence to a still pose.
 - `anim-setup`, the CLI's animation rigging command.
+- **Chargen preview** (Rigging Manager): pick Male or Female, then **Body Shape
+  Cycle** (thin to muscular to fat to thin on the `*_skin` bones, from the RACE
+  bone scale table) or **Facebones Cycle** (every face-region slider in turn:
+  0, max, min, 0). Each lands in the animations list like a loaded .hkx and
+  plays on the ordinary transport. Preview only: no game .hkx can carry these
+  bones, so save and export refuse them.
 
 ## 7. Pose and skeleton
 

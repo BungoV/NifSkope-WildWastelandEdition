@@ -1,5 +1,23 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Chargen preview clips: body shape cycle and facebones cycle, male and female (lane MORPHCYC1, 2026-09-29)
+
+- Rigging Manager, new section **Chargen preview**: a Gender selector (Male / Female) and two buttons,
+  **Body Shape Cycle** and **Facebones Cycle**. Each builds a clip in memory and puts it in the animations
+  list beside loaded .hkx clips, active, so the normal transport plays, loops and scrubs it. Pressing again
+  replaces the clip rather than adding a copy; Delete in the list unloads it and restores the rest pose.
+- Body Shape Cycle: thin, muscular, fat, thin over 6 s (181 frames at 30 fps) on every `*_skin` bone, from
+  HumanRace's bone scale table in Fallout4.esm, folded the Body Build panel's way. Exact at the three
+  corners; the curve between corners is not proven.
+- Facebones Cycle: every live chargen face-region channel (pos X/Y/Z, rot X/Y/Z, one scale slider) goes
+  0, max, min, 0, 24 frames each at 24 fps, with each channel's start as a named marker. Male: 32 regions,
+  103 channels, 2473 frames. Female: 32 regions, 104 channels, 2497 frames. Data: HumanRaceFacialBoneRegions
+  Male/Female.txt and skeleton_faceBones.nif / skeleton_female_faceBones.nif from the game archives.
+  The rotation sign is not proven (one in-game slider would settle it).
+- Neither clip is a game clip (skeleton.hkx has no `_skin` or `skin_bone_*` bones). Save, Save As, clip
+  edits and glTF export refuse them in words.
+- Harness: `bash tests/spells/morphcyc.sh` (WW_MORPHCYC_TEST).
+
 ## LOD map fixes merged: water, ground contact, tidy sheets, building groups, ground normals and sky, one-value tiles (lanes WATER1, GROUND1, TIDY1, IDENT1, TERR1, TILING5, FLAT2, GPU1; merged by MERGE1, 2026-09-29)
 
 bungo reviewed the 79 LOD map pictures on 09-26 and called most of them broken; lane AUDIT1 listed the faults, and

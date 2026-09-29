@@ -120,6 +120,13 @@ public:
 	QString renameEntry( GLView * ogl, const QString & entryName, const QString & newName );
 	//! Paste: a copy of an entry taken earlier, placed at `atIndex`.
 	QString pasteEntry( GLView * ogl, const HkxClipEntry & e, int atIndex, QString * newName = nullptr );
+	/*! lane MORPHCYC1: put a GENERATED preview clip (src/morphcycle.h) at the
+	 *  end of the animations list and play it -- the same list, the same
+	 *  transport, the same activate() measurement as a loaded .hkx. A clip of
+	 *  the same name is replaced, so pressing the button twice does not stack
+	 *  copies. Returns the sentence for the status line (never empty);
+	 *  `refusal` says whether it is one. */
+	QString addGenerated( GLView * ogl, const HkxClipEntry & e, bool * refusal = nullptr );
 	//! The loaded clips in this order (a drag-and-drop reorder). True when it moved.
 	bool setEntryOrder( GLView * ogl, const QStringList & entryNames );
 	//! The clip behind a row, for a copy; null for a refused row or a sequence.

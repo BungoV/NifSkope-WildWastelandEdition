@@ -8822,6 +8822,11 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		wwBodyBuildHarness( skope );
 		wwGltfExportDialogHarness( skope );
 	}
+	{
+		// lane MORPHCYC1: WW_MORPHCYC_TEST, src/morphcyctest.cpp
+		extern void wwMorphCycleHarness( NifSkope * );
+		wwMorphCycleHarness( skope );
+	}
 
 	// TEST HARNESS (WW_UIALIGN_TEST=1): lane BUILD9's bar-alignment gate --
 	// the dock's tab strip and the viewport toolbar are ONE row, and the dock's

@@ -203,6 +203,7 @@ HEADERS += \
 	src/gltfexportdialog.h \
 	src/bodybuild.h \
 	src/bodybuildpanel.h \
+	src/morphcycle.h \
 	src/gltfimport.h \
 	src/hkxplayback.h \
 	src/hkxanimui.h \
@@ -389,6 +390,8 @@ SOURCES += \
 	src/hkxmodel.cpp \
 	src/hkxmodeltest.cpp \
 	src/hkxplaybacktest.cpp \
+	src/morphcycle.cpp \
+	src/morphcyctest.cpp \
 	src/skeloverlaytest.cpp \
 	src/hkxanimui.cpp \
 	src/hkxanimuitest.cpp \

@@ -825,7 +825,10 @@ bool HkxPlayback::setActive( const QString & clipName )
 	activeIndex = want;
 	lastSummary = e.mapping.summary( e.name );
 	lastShort = e.mapping.summaryShort();
-	if ( e.additive ) {
+	if ( e.isGenerated() ) {
+		lastSummary += QObject::tr( " Generated preview (%1), not a game clip: skeleton.hkx has "
+									"no _skin / skin_bone_* bones." ).arg( e.generated );
+	} else if ( e.additive ) {
 		lastSummary += QObject::tr( " Additive clip: composed on the pose the NIF was in." );
 	}
 	if ( rootMotion && e.rootNode >= 0 ) {
@@ -878,6 +881,14 @@ void HkxPlayback::applyLocal( Node * node ) const
 	const float t = scene->time;
 	Transform out = node->local;
 
+	// lane MORPHCYC1: a generated preview clip plays by its own rule, and has no
+	// root motion to add
+	if ( e.genMode != HkxClipEntry::GenNone ) {
+		if ( track >= 0 && generatedPose( e, node, track, t, out ) )
+			node->local = out;
+		return;
+	}
+
 	if ( track >= 0 ) {
 		HkxTransform x;
 		if ( HkxPlayback::sampleTrack( e.clip, track, t, x ) ) {
@@ -925,6 +936,90 @@ void HkxPlayback::applyLocal( Node * node ) const
 
 
 /*
+ *  lane MORPHCYC1: generated preview clips (the design is in hkxplayback.h,
+ *  beside HkxClipEntry::generated, and in src/morphcycle.h)
+ */
+
+QString HkxPlayback::generatedRefusal( const HkxClipEntry * e )
+{
+	if ( !e || !e->isGenerated() )
+		return QString();
+	return QObject::tr( "%1 is a generated preview, not a game clip: skeleton.hkx has no "
+						"_skin / skin_bone_* bones, so no Fallout 4 .hkx can carry it. "
+						"It plays here only and is never saved or exported." ).arg( e->name );
+}
+
+//! T * R * diag(scale): a per-axis scale folded into the 3x3 basis, scale field 1
+static Transform hkxTrsPerAxis( const HkxTransform & x )
+{
+	Transform p;
+	Matrix r;
+	r.fromQuat( x.rotation );
+	Matrix s;
+	s( 0, 0 ) = x.scale[0];
+	s( 1, 1 ) = x.scale[1];
+	s( 2, 2 ) = x.scale[2];
+	p.rotation = r * s;
+	p.translation = x.translation;
+	p.scale = 1.0f;
+	return p;
+}
+
+//! A generated track's posed global in the skeleton it was built from.
+static Transform hkxGenGlobal( const HkxClipEntry & e, int track, float t, int depth )
+{
+	HkxTransform x;
+	if ( !HkxPlayback::sampleTrack( e.clip, track, t, x ) )
+		return Transform();
+	const Transform local = hkxTrsPerAxis( x );
+	const int pt = e.genParentTrack.value( track, -1 );
+	if ( pt >= 0 && pt != track && depth < 256 )
+		return hkxGenGlobal( e, pt, t, depth + 1 ) * local;
+	return e.genParentRest.value( track ) * local;
+}
+
+//! A node's world transform as it was BEFORE this clip posed anything: the
+//! saved local of every posed node up the chain, the live world of the first
+//! node the clip does not pose.
+static Transform hkxRestWorld( const HkxClipEntry & e, const Node * n, int depth )
+{
+	auto it = e.saved.constFind( n->id() );
+	if ( it == e.saved.constEnd() || depth > 256 )
+		return n->worldTrans();
+	const Node * p = n->parentNode();
+	return p ? hkxRestWorld( e, p, depth + 1 ) * it.value() : it.value();
+}
+
+bool HkxPlayback::generatedPose( const HkxClipEntry & e, const Node * node, int track, float t,
+								 Transform & out ) const
+{
+	if ( e.genMode == HkxClipEntry::GenLocalScale ) {
+		HkxTransform x;
+		if ( !sampleTrack( e.clip, track, t, x ) )
+			return false;
+		auto it = e.saved.constFind( node->id() );
+		const Transform p = hkxTrsPerAxis( x );
+		out = ( it != e.saved.constEnd() ) ? ( it.value() * p ) : p;
+		return true;
+	}
+	if ( e.genMode == HkxClipEntry::GenSkeletonSpace ) {
+		if ( track >= e.genRestInv.count() )
+			return false;
+		/* posedWorld = restWorld(node) * restGlobal^-1 * posedGlobal: the bone's
+		 * move measured in ITS OWN rest frame of the skeleton, carried onto the
+		 * node wherever the NIF put it. At rest the middle term is the identity
+		 * and this writes back the saved local exactly (up to one inverse). */
+		const Transform delta = e.genRestInv.at( track ) * hkxGenGlobal( e, track, t, 0 );
+		const Transform target = hkxRestWorld( e, node, 0 ) * delta;
+		const Node * p = node->parentNode();
+		out = p ? ( p->worldTrans().inverted() * target ) : target;
+		return true;
+	}
+	return false;
+}
+
+
+/*
  *  The scene's own life cycle
  */
 
@@ -956,6 +1051,10 @@ QString HkxPlayback::replaceClip( const QString & clipName, const HkxAnimClip & 
 	const int i = indexOf( clipName );
 	if ( i < 0 )
 		return QObject::tr( "%1 is not a loaded clip." ).arg( clipName );
+	// lane MORPHCYC1: a generated preview is not an editable clip -- an edit
+	// would be the first step to saving it as the .hkx it can never be
+	if ( clips.at( i ).isGenerated() )
+		return generatedRefusal( &clips.at( i ) );
 	if ( clip.numFrames < 1 || clip.numTracks < 1 || clip.frames.count() != clip.numFrames )
 		return QObject::tr( "The edited clip is malformed: %1 tracks, %2 frames, %3 frame rows." )
 			.arg( clip.numTracks ).arg( clip.numFrames ).arg( clip.frames.count() );

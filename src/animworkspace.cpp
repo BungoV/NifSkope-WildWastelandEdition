@@ -3089,6 +3089,15 @@ void AnimWorkspace::saveClip()
 	const HkxClipDocument * d = document();
 	if ( !d )
 		return;
+	// lane MORPHCYC1: a generated preview (body shape / facebones cycle) is never
+	// written as an .hkx -- skeleton.hkx has none of the bones it moves
+	if ( HkxPlayback * pb = playback() ) {
+		const QString no = HkxPlayback::generatedRefusal( pb->find( curEntry ) );
+		if ( !no.isEmpty() ) {
+			say( no, true );
+			return;
+		}
+	}
 	if ( d->sourcePath.isEmpty() || !d->sourcePath.endsWith( QStringLiteral( ".hkx" ), Qt::CaseInsensitive ) ) {
 		saveClipAs();
 		return;
@@ -3119,6 +3128,15 @@ void AnimWorkspace::saveClipAs()
 	const HkxClipDocument * d = document();
 	if ( !d )
 		return;
+	// lane MORPHCYC1: a generated preview (body shape / facebones cycle) is never
+	// written as an .hkx -- skeleton.hkx has none of the bones it moves
+	if ( HkxPlayback * pb = playback() ) {
+		const QString no = HkxPlayback::generatedRefusal( pb->find( curEntry ) );
+		if ( !no.isEmpty() ) {
+			say( no, true );
+			return;
+		}
+	}
 	const QString path = QFileDialog::getSaveFileName( this, tr( "Save animation as" ),
 		d->sourcePath.isEmpty() ? curEntry + QStringLiteral( ".hkx" ) : d->sourcePath,
 		tr( "Havok animation (*.hkx)" ) );

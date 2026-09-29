@@ -329,6 +329,37 @@ QString WwHkxAnimHub::pasteEntry( GLView * ogl, const HkxClipEntry & e, int atIn
 	return QString();
 }
 
+QString WwHkxAnimHub::addGenerated( GLView * ogl, const HkxClipEntry & e, bool * refusal )
+{
+	auto answer = [this, refusal]( const QString & text, bool bad, const QString & shortText = QString() ) {
+		say( text, bad, shortText );
+		if ( refusal )
+			*refusal = bad;
+		return text;
+	};
+	Scene * sc = sceneOf( ogl );
+	if ( !sc || !sc->hkx )
+		return answer( tr( "There is no 3D scene open, so there is nothing for %1 to play on." )
+					   .arg( e.name ), true );
+	if ( sc->getNodes().isEmpty() )
+		return answer( tr( "Nothing is open to animate. Open a NIF first, then press it again." ), true );
+
+	// pressed again: the fresh clip replaces the old one instead of stacking "(2)"
+	if ( sc->hkx->has( e.name ) )
+		unload( ogl, e.name );
+
+	QString made;
+	const QString why = sc->hkx->insertClip( e, sc->hkx->count(), &made );
+	if ( !why.isEmpty() )
+		return answer( why, true );
+	sc->hkx->setRootMotion( states[sc].rootMotion );
+	emit ogl->sequencesUpdated();
+	const bool plays = activate( ogl, made );
+	emit clipsChanged();
+	ogl->update();
+	return answer( sc->hkx->summary(), !plays, sc->hkx->summaryShort() );
+}
+
 QString WwHkxAnimHub::renameEntry( GLView * ogl, const QString & entryName, const QString & newName )
 {
 	Scene * sc = sceneOf( ogl );
