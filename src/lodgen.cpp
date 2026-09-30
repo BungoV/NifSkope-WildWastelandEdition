@@ -6892,7 +6892,7 @@ void lodgenSetLandTiling( float unitsPerRepeat )
 static bool  g_landSampleAverage = false;
 static float g_landDetail        = 0.0f;
 static int   g_blendEdges        = 1;
-static float g_blendMargin       = 128.0f;
+static float g_blendMargin       = 1024.0f;   // TERRLIVE2: was 128 (one far texel); 1024 = half a quadrant, no hard squares at LOD distance
 
 bool lodgenLandSampleAverage()
 {
@@ -6934,7 +6934,7 @@ float lodgenBlendMargin()
 void lodgenSetBlendMargin( float units )
 {
 	if ( units > 0.0f )
-		g_blendMargin = units;
+		g_blendMargin = qMin( units, 1024.0f );  // half a quadrant: two fades never overlap
 }
 
 /* --- THE STOCHASTIC-PHASE LAND SAMPLE (lane TILING3) ------------------------
@@ -14354,7 +14354,8 @@ static bool lodgenBakeVtTile( const EsmWorld & world, const QString & dataRoot,
 	const LodgenObjectHeightField * objField = nullptr,
 	LodgenObjectAoCensus * objCensus = nullptr,
 	const LodgenRuleMap * rule = nullptr,
-	const std::function<bool( float, float )> * ruleNeed = nullptr )
+	const std::function<bool( float, float )> * ruleNeed = nullptr,
+	const std::function<bool( int, int )> * aoOnly = nullptr )
 {
 	const int S = content + 2 * border;
 	const float upt = float( dim ) * 4096.0f / float( content );
@@ -14366,7 +14367,7 @@ static bool lodgenBakeVtTile( const EsmWorld & world, const QString & dataRoot,
 	 * identically in both tiles' content and in both tiles' borders. Empty when
 	 * the feature is off, and then the per-texel branch below is never taken. */
 	std::vector<quint32> roadPlane;
-	if ( roads && coverOpts.roads ) {
+	if ( roads && coverOpts.roads && !aoOnly ) {
 		const float wx0 = float( cellX0 ) * 4096.0f - float( border ) * upt;
 		const float wyTop = float( cellY0 + dim ) * 4096.0f + float( border ) * upt;
 		LodgenRoadCensus local;
@@ -14469,7 +14470,7 @@ static bool lodgenBakeVtTile( const EsmWorld & world, const QString & dataRoot,
 	 * the old per-chunk dominant base is what put the chunk grid into the VT. */
 	const quint32 dominantBase = ESM_LTEX_ENGINE_DEFAULT;
 
-	const bool doCover = coverOpts.cover;
+	const bool doCover = coverOpts.cover && !aoOnly;
 	const float coverFull = qMax( 1.0f, coverOpts.coverFull );
 	std::vector<LodgenVtQuadCover> quadCover;
 	std::vector<float> aCover;
@@ -14511,8 +14512,9 @@ static bool lodgenBakeVtTile( const EsmWorld & world, const QString & dataRoot,
 
 	std::vector<quint8> tMat, tWet, tAo2, tMat2, tShore;
 	std::vector<float> tSky;
-	lodgenTerrainChannels( world, rx0, ry0, rdim, hgt,
-		tMat, tWet, tAo2, tSky, tMat2, tShore, nullptr );
+	if ( !aoOnly )
+		lodgenTerrainChannels( world, rx0, ry0, rdim, hgt,
+			tMat, tWet, tAo2, tSky, tMat2, tShore, nullptr );
 
 	// both taps are the shared one; the tile's coordinates are already
 	// RING-local, so they carry no offset of their own
@@ -14525,6 +14527,63 @@ static bool lodgenBakeVtTile( const EsmWorld & world, const QString & dataRoot,
 	static const float dirs[8][2] = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 },
 		{ 0.7071f, 0.7071f }, { 0.7071f, -0.7071f },
 		{ -0.7071f, 0.7071f }, { -0.7071f, -0.7071f } };
+	/* THE SKY AO of one texel (terrain horizon, and the objects' sky union or
+	 * product), one lambda for the tile's mask sheet and the 32-unit AO map
+	 * (lane TERRLIVE2, lodgenBakeAoMap), so the two cannot drift. `inContent`
+	 * gates the census: tiles overlap by `border`. */
+	auto skyAo = [&]( float wx, float wy, float lx, float ly, bool inContent ) -> quint32 {
+		const float h0 = heightAt( lx, ly );
+		float occl = 0.0f;
+		/* `occlU`: the cosine-weighted sky the objects hide beyond the
+		 * terrain horizon, summed over the directions (lodgenSkyDirBlocked,
+		 * lane TERR1). `occl` stays the terrain-only term: the census
+		 * measures the darkening against it. */
+		const bool skyUnion = objField && coverOpts.skyObjects;
+		const float h0s = skyUnion ? lodgenSkySurface( *objField, wx, wy, h0 ) : h0;
+		float occlU = 0.0f;
+		for ( const auto & d : dirs ) {
+			float maxSlope = 0.0f;
+			for ( float dist = 128.0f; dist <= 2048.0f; dist *= 1.5f ) {
+				const float dh = heightAt( lx + d[0] * dist, ly + d[1] * dist ) - h0;
+				if ( dh > 0.0f )
+					maxSlope = qMax( maxSlope, dh / dist );
+			}
+			occl += maxSlope / ( 1.0f + maxSlope );
+			if ( skyUnion )
+				occlU += lodgenSkyDirBlocked( *objField, wx, wy, h0s, d[0], d[1],
+					maxSlope, coverOpts.terrainObjectAoSlab );
+		}
+		const float vis = qBound( 0.0f, 1.0f - occl / 8.0f * 1.6f, 1.0f );
+		quint32 ao8 = quint32( qBound( 0.0f, vis * 255.0f + 0.5f, 255.0f ) );
+		if ( skyUnion ) {
+			const float visU = qBound( 0.0f, vis - occlU / 8.0f, 1.0f );
+			const quint32 a2 = quint32( qBound( 0.0f, visU * 255.0f + 0.5f, 255.0f ) );
+			if ( objCensus && a2 < ao8 && inContent ) {
+				objCensus->texels++;
+				objCensus->darkSum += double( ao8 - a2 );
+			}
+			ao8 = a2;
+		}
+		/* THE OBJECT TERM (lane GROUND1). `wx`/`wy` on this path are already
+		 * WORLD coordinates, so the field is read with them unchanged. The
+		 * census counts CONTENT texels only: tiles overlap by `border` and a
+		 * texel counted twice is not a texel. Superseded on the VT sheets by
+		 * the union above while `skyObjects` is on (a product over the union
+		 * would count the objects twice). */
+		else if ( objField && coverOpts.terrainObjectAo ) {
+			const float vo = lodgenObjectSkyVis( *objField, wx, wy, h0, dirs,
+				coverOpts.terrainObjectAoStrength,
+				coverOpts.terrainObjectAoSlab );
+			const quint32 a2 = quint32( qBound( 0.0f,
+				vis * vo * 255.0f + 0.5f, 255.0f ) );
+			if ( objCensus && a2 < ao8 && inContent ) {
+				objCensus->texels++;
+				objCensus->darkSum += double( ao8 - a2 );
+			}
+			ao8 = a2;
+		}
+		return ao8;
+	};
 
 	out.colour.assign( size_t( S ) * S, 0xFF808080U );
 	out.msn.assign( size_t( S ) * S, LODGEN_MSN_FLAT );
@@ -14541,6 +14600,24 @@ static bool lodgenBakeVtTile( const EsmWorld & world, const QString & dataRoot,
 	const float tileN = float( cellY0 + dim ) * 4096.0f;
 	const float ringW = float( rx0 ) * 4096.0f;
 	const float ringS = float( ry0 ) * 4096.0f;
+
+	/* AO ONLY (lane TERRLIVE2, the 32-unit AO map): the mask's B and nothing
+	 * else, and only on the quadrants `aoOnly` names (the painted ones); the
+	 * heights above are the tile's own, so the value is the sheet's. */
+	if ( aoOnly ) {
+		for ( int j = 0; j < S; j++ ) {
+			const float wy = tileN - ( float( j ) - float( border ) + 0.5f ) * upt;
+			const int qy = int( std::floor( wy / 2048.0f ) );
+			for ( int i = 0; i < S; i++ ) {
+				const float wx = tileW + ( float( i ) - float( border ) + 0.5f ) * upt;
+				if ( !( *aoOnly )( int( std::floor( wx / 2048.0f ) ), qy ) )
+					continue;
+				out.mask[size_t( j ) * S + i] = 0x00FF0000U | skyAo( wx, wy, wx - ringW, wy - ringS,
+					i >= border && i < S - border && j >= border && j < S - border );
+			}
+		}
+		return true;
+	}
 
 	/* THE EROSION LATTICE (lane GROUND1 Part B), the pyramid's own copy of the
 	 * SAME class the chunk baker builds -- the lattice is world-aligned and
@@ -15059,14 +15136,14 @@ static bool lodgenBakeVtTile( const EsmWorld & world, const QString & dataRoot,
 			 * No cover tint and no vertex colour: the ground outside has none. */
 			if ( rule && ( !ruleNeed || ( *ruleNeed )( wx, wy ) ) ) {
 				quint8 rIds[8];
-				float rW[8];
-				const int rn = rule->mixAt( wx, wy, rIds, rW );
+				float rW[8], rGain = 1.0f;
+				const int rn = rule->mixAt( wx, wy, rIds, rW, &rGain );
 				if ( rn > 0 ) {
 					float rc[3] = { 0.0f, 0.0f, 0.0f };
 					for ( int k = 0; k < rn; k++ ) {
 						const FloatVector4 t = sampleLtex( rule->palette.at( rIds[k] ), nullptr, nullptr, nullptr );
 						for ( int ch = 0; ch < 3; ch++ )
-							rc[ch] += t[ch] * rW[k];
+							rc[ch] += t[ch] * rW[k] * rGain;
 					}
 					FloatVector4 rcol( rc[0], rc[1], rc[2], 1.0f );
 					if ( eroField && g_landShade != 0.0f ) {
@@ -15089,57 +15166,8 @@ static bool lodgenBakeVtTile( const EsmWorld & world, const QString & dataRoot,
 
 			// R AO, G wetness, B shore proximity, A cover
 			const float h0 = heightAt( lx, ly );
-			float occl = 0.0f;
-			/* `occlU`: the cosine-weighted sky the objects hide beyond the
-			 * terrain horizon, summed over the directions (lodgenSkyDirBlocked,
-			 * lane TERR1). `occl` stays the terrain-only term: the census
-			 * measures the darkening against it. */
-			const bool skyUnion = objField && coverOpts.skyObjects;
-			const float h0s = skyUnion ? lodgenSkySurface( *objField, wx, wy, h0 ) : h0;
-			float occlU = 0.0f;
-			for ( const auto & d : dirs ) {
-				float maxSlope = 0.0f;
-				for ( float dist = 128.0f; dist <= 2048.0f; dist *= 1.5f ) {
-					const float dh = heightAt( lx + d[0] * dist, ly + d[1] * dist ) - h0;
-					if ( dh > 0.0f )
-						maxSlope = qMax( maxSlope, dh / dist );
-				}
-				occl += maxSlope / ( 1.0f + maxSlope );
-				if ( skyUnion )
-					occlU += lodgenSkyDirBlocked( *objField, wx, wy, h0s, d[0], d[1],
-						maxSlope, coverOpts.terrainObjectAoSlab );
-			}
-			const float vis = qBound( 0.0f, 1.0f - occl / 8.0f * 1.6f, 1.0f );
-			quint32 ao8 = quint32( qBound( 0.0f, vis * 255.0f + 0.5f, 255.0f ) );
-			if ( skyUnion ) {
-				const float visU = qBound( 0.0f, vis - occlU / 8.0f, 1.0f );
-				const quint32 a2 = quint32( qBound( 0.0f, visU * 255.0f + 0.5f, 255.0f ) );
-				if ( objCensus && a2 < ao8 && i >= border && i < S - border
-					&& j >= border && j < S - border ) {
-					objCensus->texels++;
-					objCensus->darkSum += double( ao8 - a2 );
-				}
-				ao8 = a2;
-			}
-			/* THE OBJECT TERM (lane GROUND1). `wx`/`wy` on this path are already
-			 * WORLD coordinates, so the field is read with them unchanged. The
-			 * census counts CONTENT texels only: tiles overlap by `border` and a
-			 * texel counted twice is not a texel. Superseded on the VT sheets by
-			 * the union above while `skyObjects` is on (a product over the union
-			 * would count the objects twice). */
-			else if ( objField && coverOpts.terrainObjectAo ) {
-				const float vo = lodgenObjectSkyVis( *objField, wx, wy, h0, dirs,
-					coverOpts.terrainObjectAoStrength,
-					coverOpts.terrainObjectAoSlab );
-				const quint32 a2 = quint32( qBound( 0.0f,
-					vis * vo * 255.0f + 0.5f, 255.0f ) );
-				if ( objCensus && a2 < ao8 && i >= border && i < S - border
-					&& j >= border && j < S - border ) {
-					objCensus->texels++;
-					objCensus->darkSum += double( ao8 - a2 );
-				}
-				ao8 = a2;
-			}
+			const quint32 ao8 = skyAo( wx, wy, lx, ly, i >= border && i < S - border
+				&& j >= border && j < S - border );
 			const quint32 wet8 = quint32( qBound( 0.0f, sampleU8( tWet, lx, ly ) + 0.5f, 255.0f ) );
 			const quint32 sho8 = quint32( qBound( 0.0f, sampleU8( tShore, lx, ly ) + 0.5f, 255.0f ) );
 			out.data[size_t( j ) * S + i] =
@@ -15664,6 +15692,154 @@ static qint64 lodgenVtMsnFromSheets( LodgenVtMsnSheets & sh, int cellX0, int cel
 static const int LODGEN_VT_FILL_RING = 3;
 static const int LODGEN_VT_FILL_MAX_BAND = 8;
 
+/* THE ROUNDED OUTLINE (lane TERRLIVE2): see LodgenOutlineField in lodgen.h. */
+float lodgenOutlineOffset()
+{
+	// the blur's worst shift (mean of a Rayleigh, sigma sqrt(pi/2)) + two 512-unit half-diagonals
+	return LODGEN_OUTLINE_SIGMA * 1.2533141f + 2.0f * 362.03867f;
+}
+
+int lodgenOutlineReachQuads( float band )
+{
+	return int( std::ceil( ( band + 2.0f * lodgenOutlineOffset() ) / 2048.0f ) ) + 1;
+}
+
+//! Felzenszwalb's 1-D squared distance transform, in place over `n` values at `stride`.
+static void lodgenOutlineEdt1( float * f, int n, int stride, std::vector<float> & d, std::vector<int> & v,
+	std::vector<float> & z )
+{
+	d.resize( n );
+	v.resize( n );
+	z.resize( n + 1 );
+	auto at = [&]( int q ) { return double( f[size_t( q ) * stride] ) + double( q ) * q; };
+	int k = 0;
+	v[0] = 0;
+	z[0] = -1e30f;
+	z[1] = 1e30f;
+	for ( int q = 1; q < n; q++ ) {
+		double s = ( at( q ) - at( v[k] ) ) / double( 2 * ( q - v[k] ) );
+		while ( s <= double( z[k] ) ) {
+			k--;
+			s = ( at( q ) - at( v[k] ) ) / double( 2 * ( q - v[k] ) );
+		}
+		k++;
+		v[k] = q;
+		z[k] = float( s );
+		z[k + 1] = 1e30f;
+	}
+	k = 0;
+	for ( int q = 0; q < n; q++ ) {
+		while ( z[k + 1] < float( q ) )
+			k++;
+		const float dq = float( q - v[k] );
+		d[q] = dq * dq + f[size_t( v[k] ) * stride];
+	}
+	for ( int q = 0; q < n; q++ )
+		f[size_t( q ) * stride] = d[q];
+}
+
+//! Squared grid distance to the nearest point with `seed[o] != 0` (1e20 with none).
+static void lodgenOutlineEdt( const std::vector<quint8> & seed, int nx, int ny, std::vector<float> & out )
+{
+	out.assign( size_t( nx ) * ny, 0.0f );
+	for ( size_t o = 0; o < out.size(); o++ )
+		out[o] = seed[o] ? 0.0f : 1e20f;
+	std::vector<float> d, z;
+	std::vector<int> v;
+	for ( int j = 0; j < ny; j++ )
+		lodgenOutlineEdt1( out.data() + size_t( j ) * nx, nx, 1, d, v, z );
+	for ( int i = 0; i < nx; i++ )
+		lodgenOutlineEdt1( out.data() + i, ny, nx, d, v, z );
+}
+
+static float lodgenOutlineCap( float band )
+{
+	return band + 2.0f * lodgenOutlineOffset() + 3.0f * LODGEN_OUTLINE_SIGMA;
+}
+
+int lodgenOutlineWindowQuads( float band )
+{
+	return int( std::ceil( ( lodgenOutlineCap( band ) + 3.0f * LODGEN_OUTLINE_SIGMA ) / 2048.0f ) ) + 1;
+}
+
+void lodgenOutlineBuild( const std::function<bool( int, int )> & paintedQ, int qx0, int qy0, int qx1, int qy1,
+	float band, LodgenOutlineField & out )
+{
+	out = LodgenOutlineField();
+	if ( qx1 < qx0 || qy1 < qy0 )
+		return;
+	const float res = LODGEN_OUTLINE_RES;
+	const int nx = ( qx1 - qx0 + 1 ) * 4, ny = ( qy1 - qy0 + 1 ) * 4;
+	std::vector<quint8> in( size_t( nx ) * ny ), outside( size_t( nx ) * ny );
+	for ( int j = 0; j < ny; j++ )
+		for ( int i = 0; i < nx; i++ ) {
+			const bool p = paintedQ( qx0 + i / 4, qy0 + j / 4 );
+			in[size_t( j ) * nx + i] = p ? 1 : 0;
+			outside[size_t( j ) * nx + i] = p ? 0 : 1;
+		}
+	// signed distance to the staircase: a grid point sits 256 units (half a step) from the line at best
+	std::vector<float> dOut, dIn;
+	lodgenOutlineEdt( outside, nx, ny, dOut );  // painted points: to the nearest unpainted point
+	lodgenOutlineEdt( in, nx, ny, dIn );         // unpainted points: to the nearest painted point
+	std::vector<float> raw( size_t( nx ) * ny );
+	const float half = 0.5f * res, cap = lodgenOutlineCap( band );
+	for ( size_t o = 0; o < raw.size(); o++ )
+		raw[o] = in[o] ? qMin( std::sqrt( dOut[o] ) * res - half, cap )
+		               : -qMin( std::sqrt( dIn[o] ) * res - half, cap );
+	// separable Gaussian, clamped at the grid's edge (the edge rows are the reach's own margin)
+	const float sg = LODGEN_OUTLINE_SIGMA / res;
+	const int rad = int( std::ceil( 3.0f * sg ) );
+	std::vector<float> ker( size_t( 2 * rad + 1 ) );
+	float ks = 0.0f;
+	for ( int t = -rad; t <= rad; t++ )
+		ks += ker[size_t( t + rad )] = std::exp( -0.5f * float( t * t ) / ( sg * sg ) );
+	for ( float & k : ker )
+		k /= ks;
+	std::vector<float> tmp( raw.size() );
+	for ( int j = 0; j < ny; j++ )
+		for ( int i = 0; i < nx; i++ ) {
+			float a = 0.0f;
+			for ( int t = -rad; t <= rad; t++ )
+				a += ker[size_t( t + rad )] * raw[size_t( j ) * nx + qBound( 0, i + t, nx - 1 )];
+			tmp[size_t( j ) * nx + i] = a;
+		}
+	out.f.assign( raw.size(), 0.0f );
+	for ( int j = 0; j < ny; j++ )
+		for ( int i = 0; i < nx; i++ ) {
+			float a = 0.0f;
+			for ( int t = -rad; t <= rad; t++ )
+				a += ker[size_t( t + rad )] * tmp[size_t( qBound( 0, j + t, ny - 1 ) ) * nx + i];
+			out.f[size_t( j ) * nx + i] = a;
+			if ( !in[size_t( j ) * nx + i] )
+				out.maxUnpainted = qMax( out.maxUnpainted, a );
+		}
+	out.qx0 = qx0;
+	out.qy0 = qy0;
+	out.nx = nx;
+	out.ny = ny;
+}
+
+float LodgenOutlineField::at( float wx, float wy ) const
+{
+	const float gx = wx / LODGEN_OUTLINE_RES - float( qx0 * 4 ) - 0.5f;
+	const float gy = wy / LODGEN_OUTLINE_RES - float( qy0 * 4 ) - 0.5f;
+	const float cx = qBound( 0.0f, gx, float( nx - 1 ) ), cy = qBound( 0.0f, gy, float( ny - 1 ) );
+	const int i0 = qMin( int( cx ), nx - 2 < 0 ? 0 : nx - 2 ), j0 = qMin( int( cy ), ny - 2 < 0 ? 0 : ny - 2 );
+	const int i1 = qMin( i0 + 1, nx - 1 ), j1 = qMin( j0 + 1, ny - 1 );
+	const float fx = cx - float( i0 ), fy = cy - float( j0 );
+	const float a = f[size_t( j0 ) * nx + i0] + ( f[size_t( j0 ) * nx + i1] - f[size_t( j0 ) * nx + i0] ) * fx;
+	const float b = f[size_t( j1 ) * nx + i0] + ( f[size_t( j1 ) * nx + i1] - f[size_t( j1 ) * nx + i0] ) * fx;
+	return a + ( b - a ) * fy;
+}
+
+float LodgenOutlineField::weight( float wx, float wy, float band ) const
+{
+	if ( f.empty() )
+		return 1.0f;
+	const float t = qBound( 0.0f, ( at( wx, wy ) - lodgenOutlineOffset() ) / qMax( band, 1.0f ), 1.0f );
+	return t * t * ( 3.0f - 2.0f * t );
+}
+
 struct LodgenVtFill
 {
 	bool on = false;
@@ -15683,6 +15859,7 @@ struct LodgenVtFill
 	std::vector<quint8> paintedQ;               //!< (2w x 2h) quadrants from (2 x0, 2 y0); 1 = base or a layer
 	qint64 paintedQuads = 0, texelsVanilla = 0;
 	qint64 texelsRule = 0;                      //!< lane TERRLIVE1: texels that blended toward the rule colour
+	LodgenOutlineField outline;                 //!< lane TERRLIVE2: the rounded outline the band reads
 	int gridX = 0, gridY = 0;                   //!< vanilla dim-4 grid phase, cells 0..3 (LODSettings SW cell mod 4)
 	QString gridSource = QStringLiteral( "default" );
 	QSet<qint64> vanillaMissing;
@@ -15903,6 +16080,9 @@ static void lodgenVtFillPainted( const EsmWorld & world, LodgenVtFill & F, int w
 			F.painted[size_t( cy - F.y0 ) * F.w + ( cx - F.x0 )] = p ? 1 : 0;
 		}
 	}
+	// the rounded outline (lane TERRLIVE2), once for the whole bake
+	lodgenOutlineBuild( [&F]( int qx, int qy ) { return F.isPaintedQ( qx, qy ); }, 2 * F.x0, 2 * F.y0,
+		2 * ( F.x0 + F.w ) - 1, 2 * ( F.y0 + F.h ) - 1, qMax( F.band, LODGEN_VT_FILL_BAND ), F.outline );  // law 2 sets the band after this
 }
 
 /*! LAW 2 (lane TERRLIVE1, 2026-09-29, bungo: "The blend was meant to be
@@ -15917,34 +16097,13 @@ static void lodgenVtFillPainted( const EsmWorld & world, LodgenVtFill & F, int w
  *    d       = per texel, the distance INSIDE the painted ground to the nearest
  *              unpainted quadrant square (0 on unpainted ground);
  *    w       = smoothstep( 0, band, d );
+ *              (lane TERRLIVE2: d is now the ROUNDED field, LodgenOutlineField,
+ *              less its offset, so the band no longer follows the staircase)
  *    colour  = V + ( ours - V ) * w, V = vanilla's diffuse UNTOUCHED.
  *
  *  So outside the painted ground the colour is Bethesda's own (w = 0, no tone
  *  change), deep inside it is ours byte for byte, and the join is one smooth
  *  band laid on our side. A texel with no vanilla sheet keeps ours (counted). */
-
-//! The unpainted quadrant squares within `r` quadrants of quadrant (qx, qy), as SW corners.
-static void lodgenVtFillQuadNeighbours( const LodgenVtFill & F, int qx, int qy, int r,
-	std::vector<std::pair<float, float>> & out )
-{
-	out.clear();
-	for ( int dy = -r; dy <= r; dy++ )
-		for ( int dx = -r; dx <= r; dx++ )
-			if ( !F.isPaintedQ( qx + dx, qy + dy ) )
-				out.emplace_back( float( qx + dx ) * 2048.0f, float( qy + dy ) * 2048.0f );
-}
-
-//! Distance, world units, from (wx, wy) to the nearest of those squares (side `side`); 1e30 if none.
-static float lodgenVtFillDistance( const std::vector<std::pair<float, float>> & sq, float side, float wx, float wy )
-{
-	float best = 1e30f;
-	for ( const auto & c : sq ) {
-		const float ex = qMax( qMax( c.first - wx, wx - ( c.first + side ) ), 0.0f );
-		const float ey = qMax( qMax( c.second - wy, wy - ( c.second + side ) ), 0.0f );
-		best = qMin( best, std::sqrt( ex * ex + ey * ey ) );
-	}
-	return best;
-}
 
 //! Apply the fill to one finest-level tile (colour plane only).
 static void lodgenVtFillTile( LodgenVtFill & F, int cellX0, int cellY0, int dim, int content, int border, LodgenVtStage & out )
@@ -15953,7 +16112,7 @@ static void lodgenVtFillTile( LodgenVtFill & F, int cellX0, int cellY0, int dim,
 	const float upt = float( dim ) * 4096.0f / float( content );
 	const float tileW = float( cellX0 ) * 4096.0f;
 	const float tileN = float( cellY0 + dim ) * 4096.0f;
-	const int R = int( std::ceil( F.band / 2048.0f ) ) + 1;
+	const int R = lodgenOutlineReachQuads( F.band );
 	// the quadrants the tile (with its border) reaches
 	const int bq0 = int( std::floor( ( tileW - border * upt ) / 2048.0f ) );
 	const int bq1 = int( std::floor( ( tileW + ( content + border ) * upt - 1.0f ) / 2048.0f ) );
@@ -15975,16 +16134,17 @@ static void lodgenVtFillTile( LodgenVtFill & F, int cellX0, int cellY0, int dim,
 	std::vector<quint8> have;
 	F.window( gx0, gy0, gx1, gy1, rgb, have );
 	const int ww = gx1 - gx0 + 1, wh = gy1 - gy0 + 1;
-	// per quadrant of the reach: painted, and (painted) its unpainted neighbours
+	// per quadrant of the reach: painted, and (painted) whether an unpainted one is within reach
 	const int nqx = bq1 - bq0 + 1, nqy = rq1 - rq0 + 1;
-	std::vector<std::vector<std::pair<float, float>>> nb( size_t( nqx ) * nqy );
+	std::vector<quint8> qNear( size_t( nqx ) * nqy );
 	std::vector<quint8> qPainted( size_t( nqx ) * nqy );
 	for ( int qy = rq0; qy <= rq1; qy++ )
 		for ( int qx = bq0; qx <= bq1; qx++ ) {
 			const size_t o = size_t( qy - rq0 ) * nqx + ( qx - bq0 );
 			qPainted[o] = F.isPaintedQ( qx, qy ) ? 1 : 0;
-			if ( qPainted[o] )
-				lodgenVtFillQuadNeighbours( F, qx, qy, R, nb[o] );
+			for ( int dy = -R; dy <= R && qPainted[o] && !qNear[o]; dy++ )
+				for ( int dx = -R; dx <= R && !qNear[o]; dx++ )
+					qNear[o] = F.isPaintedQ( qx + dx, qy + dy ) ? 0 : 1;
 		}
 	bool touched = false;
 	for ( int j = 0; j < S; j++ ) {
@@ -15996,10 +16156,10 @@ static void lodgenVtFillTile( LodgenVtFill & F, int cellX0, int cellY0, int dim,
 			const size_t qo = size_t( qy - rq0 ) * nqx + ( qx - bq0 );
 			float wgt = 0.0f;       // unpainted ground: vanilla's colour, untouched
 			if ( qPainted[qo] ) {
-				if ( nb[qo].empty() )
+				if ( !qNear[qo] )
 					continue;       // deep in his paint: byte-identical
-				const float t = qBound( 0.0f, lodgenVtFillDistance( nb[qo], 2048.0f, wx, wy ) / F.band, 1.0f );
-				wgt = t * t * ( 3.0f - 2.0f * t );
+				// the rounded outline (lane TERRLIVE2): a smoothed distance, not the staircase's
+				wgt = F.outline.weight( wx, wy, F.band );
 				if ( wgt >= 1.0f )
 					continue;
 			}
@@ -16199,7 +16359,7 @@ static QString lodgenVtFillReport( const LodgenVtFill & F )
 		"sat=%7 cshift=%8,%9,%10 bar=%11 p95=%12 bandCells=%13 tilesTouched=%14 texelsFilled=%15 "
 		"texelsNoVanilla=%16 vanillaChunksMissing=%17 vanillaSheetsRead=%18 noLandCells=%19 "
 		"noLandRingCells=%20 texelsNoLand=%21 grid=%22,%23(%24) root=%25 law=2 band=%26 paintedQuads=%27 "
-		"texelsVanilla=%28" )
+		"texelsVanilla=%28 outline=rounded sigma=%29 offset=%30 maxUnpaintedField=%31" )
 		.arg( F.overlapCells ).arg( F.ringCells ).arg( F.fitTiles )
 		.arg( double( F.gain ), 0, 'f', 4 ).arg( double( F.rawGain ), 0, 'f', 4 )
 		.arg( double( F.offset * 255.0f ), 0, 'f', 3 ).arg( double( F.sat ), 0, 'f', 4 )
@@ -16209,7 +16369,9 @@ static QString lodgenVtFillReport( const LodgenVtFill & F )
 		.arg( F.tilesTouched ).arg( F.texelsFilled ).arg( F.texelsNoVanilla ).arg( F.vanillaMissing.size() )
 		.arg( F.vanillaLoaded ).arg( F.noLandCells ).arg( F.noLandRingCells ).arg( F.texelsNoLand )
 		.arg( F.gridX ).arg( F.gridY ).arg( F.gridSource ).arg( lodgenVanillaLodRoot() )
-		.arg( double( F.band ), 0, 'f', 0 ).arg( F.paintedQuads ).arg( F.texelsVanilla );
+		.arg( double( F.band ), 0, 'f', 0 ).arg( F.paintedQuads ).arg( F.texelsVanilla )
+		.arg( double( LODGEN_OUTLINE_SIGMA ), 0, 'f', 0 ).arg( double( lodgenOutlineOffset() ), 0, 'f', 0 )
+		.arg( double( F.outline.maxUnpainted ), 0, 'f', 0 );
 }
 
 /* ===== THE RULE PAINT OUTSIDE (lane TERRLIVE1, 2026-09-29) =====
@@ -16223,7 +16385,7 @@ static QString lodgenVtFillReport( const LodgenVtFill & F )
  * NEW file (`<ws>.lodr`, lodgen.h); the bake and the live draw both read it.
  * docs/LODGEN_TERRAIN_VT.md 2.6c has the calls and their reasons. */
 
-int LodgenRuleMap::mixAt( float wx, float wy, quint8 * ids, float * wts ) const
+int LodgenRuleMap::mixAt( float wx, float wy, quint8 * ids, float * wts, float * gain ) const
 {
 	const int NX = nx(), NY = ny();
 	if ( NX <= 0 || NY <= 0 || a.size() != size_t( NX ) * size_t( NY ) )
@@ -16232,7 +16394,7 @@ int LodgenRuleMap::mixAt( float wx, float wy, quint8 * ids, float * wts ) const
 	const float fx0 = std::floor( gx ), fy0 = std::floor( gy );
 	const float fx = gx - fx0, fy = gy - fy0;
 	int n = 0;
-	float tot = 0.0f;
+	float tot = 0.0f, gsum = 0.0f;
 	auto add = [&]( quint8 id, float wgt ) {
 		if ( wgt <= 0.0f )
 			return;
@@ -16256,6 +16418,7 @@ int LodgenRuleMap::mixAt( float wx, float wy, quint8 * ids, float * wts ) const
 		if ( a[s] == 0xFF )
 			continue;
 		tot += bw;
+		gsum += bw * gainOf( s );
 		add( a[s], bw * float( w[s] ) / 255.0f );
 		add( b[s], bw * float( 255 - w[s] ) / 255.0f );
 	}
@@ -16263,6 +16426,8 @@ int LodgenRuleMap::mixAt( float wx, float wy, quint8 * ids, float * wts ) const
 		return 0;
 	for ( int k = 0; k < n; k++ )
 		wts[k] /= tot;
+	if ( gain )
+		*gain = gsum / tot;
 	return n;
 }
 
@@ -16283,16 +16448,17 @@ static quint32 lodgenRuleGet32( const QByteArray & b, int at )
 qint64 lodgenRuleWrite( const QString & path, const LodgenRuleMap & m, QString * why )
 {
 	const size_t N = size_t( m.nx() ) * size_t( m.ny() );
-	if ( N == 0 || m.a.size() != N || m.b.size() != N || m.w.size() != N || m.palette.size() > 255 ) {
+	if ( N == 0 || m.a.size() != N || m.b.size() != N || m.w.size() != N || m.g.size() != N || m.palette.size() > 255 ) {
 		if ( why )
 			*why = QStringLiteral( "the rule map is inconsistent" );
 		return -1;
 	}
 	QByteArray raw;
-	raw.reserve( int( 3 * N ) );
+	raw.reserve( int( 4 * N ) );
 	raw.append( reinterpret_cast<const char *>( m.a.data() ), int( N ) );
 	raw.append( reinterpret_cast<const char *>( m.b.data() ), int( N ) );
 	raw.append( reinterpret_cast<const char *>( m.w.data() ), int( N ) );
+	raw.append( reinterpret_cast<const char *>( m.g.data() ), int( N ) );
 	const QByteArray payload = qCompress( raw, 9 ).mid( 4 );   // Qt's 4-byte size prefix off: a plain zlib stream
 	QByteArray pal( m.palette.size() * 4, '\0' );
 	for ( int k = 0; k < m.palette.size(); k++ )
@@ -16300,7 +16466,7 @@ qint64 lodgenRuleWrite( const QString & path, const LodgenRuleMap & m, QString *
 	const QByteArray body = pal + payload;
 	QByteArray h( 64, '\0' );
 	h[0] = 'L'; h[1] = 'O'; h[2] = 'D'; h[3] = 'R';
-	lodgenRulePut32( h, 4, 1 );
+	lodgenRulePut32( h, 4, 2 );
 	lodgenRulePut32( h, 8, 64 );
 	lodgenRulePut32( h, 12, quint32( m.cellMinX ) );
 	lodgenRulePut32( h, 16, quint32( m.cellMinY ) );
@@ -16338,8 +16504,8 @@ bool lodgenRuleRead( const QString & path, LodgenRuleMap & m, QString * why )
 	const QByteArray all = f.readAll();
 	if ( all.size() < 64 || !all.startsWith( "LODR" ) )
 		return fail( QStringLiteral( "not a .lodr (magic)" ) );
-	if ( lodgenRuleGet32( all, 4 ) != 1 || lodgenRuleGet32( all, 8 ) != 64 )
-		return fail( QString( "version %1 / header %2: this reader knows version 1, header 64" )
+	if ( lodgenRuleGet32( all, 4 ) != 2 || lodgenRuleGet32( all, 8 ) != 64 )
+		return fail( QString( "version %1 / header %2: this reader knows version 2, header 64" )
 			.arg( lodgenRuleGet32( all, 4 ) ).arg( lodgenRuleGet32( all, 8 ) ) );
 	for ( int k = 52; k < 64; k++ )
 		if ( all[k] != '\0' )
@@ -16357,8 +16523,8 @@ bool lodgenRuleRead( const QString & path, LodgenRuleMap & m, QString * why )
 		|| np == 0 || np > 255 )
 		return fail( QStringLiteral( "header values out of range" ) );
 	const qint64 N = qint64( m.nx() ) * m.ny();
-	if ( qint64( rbytes ) != 3 * N )
-		return fail( QString( "raw size %1, the grid needs %2" ).arg( rbytes ).arg( 3 * N ) );
+	if ( qint64( rbytes ) != 4 * N )
+		return fail( QString( "raw size %1, the grid needs %2" ).arg( rbytes ).arg( 4 * N ) );
 	if ( qint64( all.size() ) != 64 + qint64( np ) * 4 + qint64( pbytes ) )
 		return fail( QString( "file is %1 bytes, the header says %2" ).arg( all.size() )
 			.arg( 64 + qint64( np ) * 4 + qint64( pbytes ) ) );
@@ -16373,12 +16539,13 @@ bool lodgenRuleRead( const QString & path, LodgenRuleMap & m, QString * why )
 	z[2] = char( ( rbytes >> 8 ) & 0xFF );
 	z[3] = char( rbytes & 0xFF );
 	const QByteArray raw = qUncompress( z + body.mid( int( 4 * np ) ) );
-	if ( qint64( raw.size() ) != 3 * N )
+	if ( qint64( raw.size() ) != 4 * N )
 		return fail( QStringLiteral( "payload does not inflate to the grid" ) );
 	const quint8 * p = reinterpret_cast<const quint8 *>( raw.constData() );
 	m.a.assign( p, p + N );
 	m.b.assign( p + N, p + 2 * N );
 	m.w.assign( p + 2 * N, p + 3 * N );
+	m.g.assign( p + 3 * N, p + 4 * N );
 	for ( qint64 s = 0; s < N; s++ ) {
 		if ( m.a[size_t( s )] == 0xFF )
 			continue;
@@ -16424,6 +16591,16 @@ static bool lodgenRuleBuild( const EsmWorld & world, const QString & dataRoot, L
 	auto fineBin = [&]( float h ) { return qBound( 0, int( std::floor( ( h - hFine0 ) / 256.0f ) ), NHF - 1 ); };
 	std::vector<float> hS( N, 0.0f ), sS( N, 0.0f ), vS( N * 3, 0.0f );
 	std::vector<quint8> vHave( N, 0 );
+	/* WW_RULE_DUMP=<file>: a DEBUG dump of every sample (vanilla colour, slope,
+	 * height, our true mix) plus the palette and the choice, for tuning offline.
+	 * Nothing reads it back; no shipped format. */
+	const QString dumpPath = QString::fromLocal8Bit( qgetenv( "WW_RULE_DUMP" ) );
+	std::vector<quint8> dMixId;
+	std::vector<float> dMixW;
+	if ( !dumpPath.isEmpty() ) {
+		dMixId.assign( N * 8, 0xFF );
+		dMixW.assign( N * 8, 0.0f );
+	}
 	QHash<quint32, int> formIdx;
 	QVector<quint32> forms;
 	std::vector<double> fine( size_t( NS ) * NHF * MAXT, 0.0 );   // [slope][fine height][form]
@@ -16525,6 +16702,10 @@ static bool lodgenRuleBuild( const EsmWorld & world, const QString & dataRoot, L
 						const int fi = formOf( id[u] );
 						if ( fi < 0 || wt[u] <= 0.0f )
 							continue;
+						if ( !dMixId.empty() ) {
+							dMixId[s * 8 + size_t( u )] = quint8( fi );
+							dMixW[s * 8 + size_t( u )] = wt[u];
+						}
 						fine[( size_t( sb ) * NHF + hb ) * MAXT + fi] += wt[u];
 						area[size_t( fi )] += wt[u];
 					}
@@ -16642,8 +16823,9 @@ static bool lodgenRuleBuild( const EsmWorld & world, const QString & dataRoot, L
 	m.a.assign( N, 0xFF );
 	m.b.assign( N, 0xFF );
 	m.w.assign( N, 0 );
-	qint64 nPair = 0, nSingle = 0, nNone = 0;
-	double errSum = 0.0, errLumSum = 0.0;
+	m.g.assign( N, 128 );
+	qint64 nPair = 0, nSingle = 0, nNone = 0, nGainClamped = 0;
+	double errSum = 0.0, errLumSum = 0.0, gainSum = 0.0;
 	std::vector<qint64> use( P, 0 );
 	std::vector<int> top( K );
 	for ( size_t s = 0; s < N; s++ ) {
@@ -16684,9 +16866,18 @@ static bool lodgenRuleBuild( const EsmWorld & world, const QString & dataRoot, L
 					}
 					wgt = den > 1e-9f ? qBound( 0.0f, num / den, 1.0f ) : 1.0f;
 				}
+				/* Brightness counts half (TERRLIVE2): vanilla's far diffuse is brighter than
+				 * every palette colour on steep ground, so a full-weight error chose
+				 * yellow dirt over grey-brown rock there. Hue decides; measured on the
+				 * whole-map dump: rock share at 14-22 deg 0.12 -> 0.27, above 45 deg
+				 * 0.01 -> 0.63, hue error down in every slope bin. */
+				float dc[3];
+				for ( int ch = 0; ch < 3; ch++ )
+					dc[ch] = 255.0f * ( V[ch] - ( cb[ch] + ( ca[ch] - cb[ch] ) * wgt ) );
+				const float lum = 0.299f * dc[0] + 0.587f * dc[1] + 0.114f * dc[2];
 				float e2 = 0.0f;
 				for ( int ch = 0; ch < 3; ch++ ) {
-					const float d = 255.0f * ( V[ch] - ( cb[ch] + ( ca[ch] - cb[ch] ) * wgt ) );
+					const float d = dc[ch] - 0.5f * lum;
 					e2 += d * d;
 				}
 				const float err = std::sqrt( e2 );
@@ -16730,16 +16921,28 @@ static bool lodgenRuleBuild( const EsmWorld & world, const QString & dataRoot, L
 			mixL += lw[ch] * ( cb[ch] + ( ca[ch] - cb[ch] ) * bestW );
 			vL += lw[ch] * V[ch];
 		}
+		/* THE BRIGHTNESS GAIN (TERRLIVE2): the palette has nothing as bright as
+		 * vanilla's far diffuse on steep ground (7-28 levels short above 30 deg),
+		 * so hue picks the textures and this per-sample gain carries the
+		 * brightness: vanilla's luminance over the mix's, clamped 0.5..2. */
+		float gain = mixL > 1e-4f ? vL / mixL : 1.0f;
+		if ( gain < 0.5f || gain > 2.0f )
+			nGainClamped++;
+		gain = qBound( 0.5f, gain, 2.0f );
+		m.g[s] = quint8( qBound( 64, int( gain * 128.0f + 0.5f ), 255 ) );
+		gainSum += double( m.gainOf( s ) );
+		mixL *= m.gainOf( s );
 		errLumSum += 255.0 * std::fabs( double( mixL - vL ) );
 	}
 	if ( log ) {
 		const qint64 chosen = nPair + nSingle;
 		*log << QString( "outsideRule grid=%1x%2 spacing=512 samples=%3 noVanilla=%4 noHeight=%5 paintedSamples=%6 "
-				"pairs=%7 singles=%8 meanColourError8bit=%9 meanLumError8bit=%10 K=%11 lambda=%12 kappa=%13" )
+				"pairs=%7 singles=%8 meanColourError8bit=%9 meanLumError8bit=%10 K=%11 lambda=%12 kappa=%13 "
+				"meanGain=%14 gainClamped=%15" )
 			.arg( NX ).arg( NY ).arg( qint64( N ) ).arg( nNone ).arg( noHeight ).arg( paintedSamples )
 			.arg( nPair ).arg( nSingle ).arg( chosen ? errSum / chosen : 0.0, 0, 'f', 2 )
 			.arg( chosen ? errLumSum / chosen : 0.0, 0, 'f', 2 ).arg( K ).arg( double( lambda ), 0, 'f', 1 )
-			.arg( kappa, 0, 'f', 1 );
+			.arg( kappa, 0, 'f', 1 ).arg( chosen ? gainSum / chosen : 1.0, 0, 'f', 3 ).arg( nGainClamped );
 		QStringList pl;
 		for ( int p = 0; p < P; p++ )
 			pl << QString( "%1:%2%:%3,%4,%5:used%6" ).arg( m.palette[p], 8, 16, QChar( '0' ) )
@@ -16750,6 +16953,44 @@ static bool lodgenRuleBuild( const EsmWorld & world, const QString & dataRoot, L
 			.arg( P ).arg( dropShare ).arg( dropTex ).arg( formsDropped )
 			.arg( [&] { QStringList e; for ( int k = 0; k < NHB - 1; k++ ) e << QString::number( hFine0 + 256.0f * hEdge[k], 'f', 0 ); return e.join( ',' ); }() )
 			.arg( pl.join( ' ' ) );
+	}
+	if ( !dumpPath.isEmpty() ) {
+		QFile df( dumpPath );
+		if ( df.open( QIODevice::WriteOnly ) ) {
+			auto u32 = [&]( quint32 v ) { df.write( reinterpret_cast<const char *>( &v ), 4 ); };
+			auto raw = [&]( const void * p, size_t n ) { df.write( reinterpret_cast<const char *>( p ), qint64( n ) ); };
+			u32( 0x504D4452u );   // "RDMP"
+			u32( 1 );
+			u32( quint32( NX ) );
+			u32( quint32( NY ) );
+			u32( quint32( forms.size() ) );
+			u32( quint32( P ) );
+			raw( vS.data(), N * 12 );
+			raw( sS.data(), N * 4 );
+			raw( hS.data(), N * 4 );
+			raw( vHave.data(), N );
+			raw( dMixId.data(), N * 8 );
+			raw( dMixW.data(), N * 32 );
+			for ( int t = 0; t < forms.size(); t++ ) {
+				QString d, nrm;
+				world.ltexTextures( forms[t], d, nrm );
+				const QByteArray pb = d.toUtf8();
+				u32( forms[t] );
+				const double ar = area[size_t( t )];
+				raw( &ar, 8 );
+				u32( quint32( pb.size() ) );
+				raw( pb.constData(), size_t( pb.size() ) );
+			}
+			for ( int p = 0; p < P; p++ ) {
+				u32( quint32( palFrom[p] ) );
+				raw( palCol[p].data(), 12 );
+			}
+			raw( m.a.data(), N );
+			raw( m.b.data(), N );
+			raw( m.w.data(), N );
+			if ( log )
+				*log << QString( "outsideRule dump=%1 bytes=%2" ).arg( dumpPath ).arg( df.size() );
+		}
 	}
 	return true;
 }
@@ -16812,6 +17053,245 @@ bool lodgenBakeOutsideRule( const EsmWorld & world, const QString & dataRoot,
 		*log << QString( "outsideRule file=%1 bytes=%2 buildMs=%3 vanillaSheetsRead=%4 grid=%5,%6(%7)" )
 			.arg( path ).arg( bytes ).arg( t.elapsed() ).arg( F.vanillaLoaded ).arg( F.gridX ).arg( F.gridY )
 			.arg( F.gridSource );
+	return true;
+}
+
+/* ===== THE AO MAP (lane TERRLIVE2, 2026-09-30) -- see lodgen.h ===== */
+
+void LodgenAoMap::rebuildIndex()
+{
+	index.clear();
+	index.reserve( int( quads.size() ) );
+	for ( size_t k = 0; k < quads.size(); k++ )
+		index.insert( key( quads[k].first, quads[k].second ), int( k ) );
+}
+
+const quint8 * LodgenAoMap::block( int qx, int qy ) const
+{
+	const auto it = index.constFind( key( qx, qy ) );
+	if ( it == index.constEnd() )
+		return nullptr;
+	return ao.data() + size_t( it.value() ) * LODGEN_AO_QUAD * LODGEN_AO_QUAD;
+}
+
+qint64 lodgenAoWrite( const QString & path, const LodgenAoMap & m, QString * why )
+{
+	const size_t Q = size_t( LODGEN_AO_QUAD ) * LODGEN_AO_QUAD;
+	if ( m.quads.empty() || m.ao.size() != m.quads.size() * Q ) {
+		if ( why )
+			*why = QStringLiteral( "the AO map is empty or inconsistent" );
+		return -1;
+	}
+	QByteArray idx( int( m.quads.size() * 4 ), '\0' );
+	int qMinX = INT_MAX, qMinY = INT_MAX, qMaxX = INT_MIN, qMaxY = INT_MIN;
+	for ( size_t k = 0; k < m.quads.size(); k++ ) {
+		const int qx = m.quads[k].first, qy = m.quads[k].second;
+		lodgenRulePut32( idx, int( 4 * k ), ( quint32( quint16( qx ) ) ) | ( quint32( quint16( qy ) ) << 16 ) );
+		qMinX = qMin( qMinX, qx );
+		qMinY = qMin( qMinY, qy );
+		qMaxX = qMax( qMaxX, qx );
+		qMaxY = qMax( qMaxY, qy );
+	}
+	const QByteArray raw = QByteArray::fromRawData( reinterpret_cast<const char *>( m.ao.data() ), int( m.ao.size() ) );
+	const QByteArray payload = qCompress( raw, 9 ).mid( 4 );   // a plain zlib stream, as the .lodr's
+	const QByteArray body = idx + payload;
+	QByteArray h( 64, '\0' );
+	h[0] = 'L'; h[1] = 'O'; h[2] = 'D'; h[3] = 'A';
+	lodgenRulePut32( h, 4, 1 );
+	lodgenRulePut32( h, 8, 64 );
+	lodgenRulePut32( h, 12, LODGEN_AO_QUAD );
+	lodgenRulePut32( h, 16, quint32( m.quads.size() ) );
+	lodgenRulePut32( h, 20, quint32( qMinX ) );
+	lodgenRulePut32( h, 24, quint32( qMinY ) );
+	lodgenRulePut32( h, 28, quint32( qMaxX ) );
+	lodgenRulePut32( h, 32, quint32( qMaxY ) );
+	lodgenRulePut32( h, 36, quint32( payload.size() ) );
+	lodgenRulePut32( h, 40, quint32( raw.size() ) );
+	lodgenRulePut32( h, 44, lodvCrc32( reinterpret_cast<const unsigned char *>( body.constData() ), body.size() ) );
+	QFile f( path );
+	if ( !f.open( QIODevice::WriteOnly | QIODevice::Truncate ) || f.write( h + body ) != qint64( h.size() + body.size() ) ) {
+		if ( why )
+			*why = QStringLiteral( "could not write " ) + path;
+		return -1;
+	}
+	f.close();
+	return qint64( h.size() + body.size() );
+}
+
+bool lodgenAoRead( const QString & path, LodgenAoMap & m, QString * why )
+{
+	auto fail = [why]( const QString & s ) {
+		if ( why )
+			*why = s;
+		return false;
+	};
+	m = LodgenAoMap();
+	QFile f( path );
+	if ( !f.open( QIODevice::ReadOnly ) )
+		return fail( QStringLiteral( "cannot open " ) + path );
+	const QByteArray all = f.readAll();
+	if ( all.size() < 64 || !all.startsWith( "LODA" ) )
+		return fail( QStringLiteral( "not a .loda (magic)" ) );
+	if ( lodgenRuleGet32( all, 4 ) != 1 || lodgenRuleGet32( all, 8 ) != 64 )
+		return fail( QString( "version %1 / header %2: this reader knows version 1, header 64" )
+			.arg( lodgenRuleGet32( all, 4 ) ).arg( lodgenRuleGet32( all, 8 ) ) );
+	if ( lodgenRuleGet32( all, 12 ) != quint32( LODGEN_AO_QUAD ) )
+		return fail( QString( "%1 texels a quadrant side; this reader knows %2" ).arg( lodgenRuleGet32( all, 12 ) )
+			.arg( LODGEN_AO_QUAD ) );
+	for ( int k = 48; k < 64; k++ )
+		if ( all[k] != '\0' )
+			return fail( QStringLiteral( "reserved bytes are not zero" ) );
+	const quint32 n = lodgenRuleGet32( all, 16 );
+	const int qMinX = qint32( lodgenRuleGet32( all, 20 ) ), qMinY = qint32( lodgenRuleGet32( all, 24 ) );
+	const int qMaxX = qint32( lodgenRuleGet32( all, 28 ) ), qMaxY = qint32( lodgenRuleGet32( all, 32 ) );
+	const quint32 pbytes = lodgenRuleGet32( all, 36 ), rbytes = lodgenRuleGet32( all, 40 );
+	const qint64 Q = qint64( LODGEN_AO_QUAD ) * LODGEN_AO_QUAD;
+	if ( n == 0 || n > 4000000u || qMinX > qMaxX || qMinY > qMaxY )
+		return fail( QStringLiteral( "header values out of range" ) );
+	if ( qint64( rbytes ) != qint64( n ) * Q )
+		return fail( QString( "raw size %1, %2 quadrants need %3" ).arg( rbytes ).arg( n ).arg( qint64( n ) * Q ) );
+	if ( qint64( all.size() ) != 64 + qint64( n ) * 4 + qint64( pbytes ) )
+		return fail( QString( "file is %1 bytes, the header says %2" ).arg( all.size() )
+			.arg( 64 + qint64( n ) * 4 + qint64( pbytes ) ) );
+	const QByteArray body = all.mid( 64 );
+	if ( lodvCrc32( reinterpret_cast<const unsigned char *>( body.constData() ), body.size() ) != lodgenRuleGet32( all, 44 ) )
+		return fail( QStringLiteral( "CRC mismatch" ) );
+	m.quads.resize( n );
+	for ( quint32 k = 0; k < n; k++ ) {
+		const quint32 v = lodgenRuleGet32( body, int( 4 * k ) );
+		const int qx = qint16( quint16( v & 0xFFFF ) ), qy = qint16( quint16( v >> 16 ) );
+		if ( qx < qMinX || qx > qMaxX || qy < qMinY || qy > qMaxY )
+			return fail( QString( "quadrant %1 (%2,%3) lies outside the header's bounds" ).arg( k ).arg( qx ).arg( qy ) );
+		if ( k > 0 && ( qy < m.quads[k - 1].second || ( qy == m.quads[k - 1].second && qx <= m.quads[k - 1].first ) ) )
+			return fail( QString( "index not sorted at %1" ).arg( k ) );
+		m.quads[k] = { qint16( qx ), qint16( qy ) };
+	}
+	QByteArray z( 4, '\0' );
+	z[0] = char( ( rbytes >> 24 ) & 0xFF );
+	z[1] = char( ( rbytes >> 16 ) & 0xFF );
+	z[2] = char( ( rbytes >> 8 ) & 0xFF );
+	z[3] = char( rbytes & 0xFF );
+	const QByteArray raw = qUncompress( z + body.mid( int( 4 * n ) ) );
+	if ( qint64( raw.size() ) != qint64( rbytes ) )
+		return fail( QStringLiteral( "payload does not inflate to the index" ) );
+	const quint8 * p = reinterpret_cast<const quint8 *>( raw.constData() );
+	m.ao.assign( p, p + raw.size() );
+	m.rebuildIndex();
+	return true;
+}
+
+bool lodgenBakeAoMap( const EsmWorld & world, const QString & dataRoot,
+	const QString & outDir, const LodgenVtOptions & opts, QStringList * log, QString * why )
+{
+	auto fail = [why]( const QString & s ) {
+		if ( why )
+			*why = s;
+		return false;
+	};
+	QElapsedTimer t;
+	t.start();
+	LodgenVtLevel levels[8];
+	int coarsest = 0, wW = 0, wS = 0, wE = 0, wN = 0;
+	if ( lodgenVtBuildLevels( world, opts, levels, 8, &coarsest, &wW, &wS, &wE, &wN ) < 1 )
+		return fail( QStringLiteral( "the worldspace has no indexed cells" ) );
+	const QString ws = world.worldspaceEdid();
+	const int west = levels[0].west, south = levels[0].south, east = levels[0].east, north = levels[0].north;
+	// painted, per quadrant: the fill's own test (a base texture or any layer)
+	LodgenVtFill F;
+	F.ws = ws;
+	F.band = LODGEN_VT_FILL_BAND;
+	lodgenVtFillPainted( world, F, west, south, east, north );
+	const std::function<bool( int, int )> painted = [&F]( int qx, int qy ) { return F.isPaintedQ( qx, qy ); };
+	// the objects' height lattice, as the pyramid gathers it
+	std::unique_ptr<LodgenObjectHeightField> objField;
+	if ( opts.cover.terrainObjectAo || opts.cover.skyObjects ) {
+		objField.reset( new LodgenObjectHeightField );
+		objField->gather( world, dataRoot, west, south, east, north );
+	}
+	const qint64 gatherMs = t.elapsed();
+	LodgenBakeCaches * bc = lodgenCreateBakeCaches();
+	LodgenVtLandCache landCache;
+	LodgenVtMaskCache maskCache;
+	/* Tiles of 4 cells at 512 texels: 32 units a texel, the pyramid's dim-4
+	 * level. Walked north to south, west to east (the land cache keeps rows). */
+	const int dim = 4, content = int( 4.0f * 4096.0f / LODGEN_AO_UNITS );
+	const int tx0 = lodgenVtFloorTo( west, dim ), ty0 = lodgenVtFloorTo( south, dim );
+	LodgenAoMap m;
+	qint64 tiles = 0, tilesBaked = 0;
+	QHash<qint64, std::vector<quint8>> blocks;
+	for ( int cy = lodgenVtFloorTo( north, dim ); cy >= ty0; cy -= dim ) {
+		for ( int cx = tx0; cx <= east; cx += dim ) {
+			tiles++;
+			bool any = false;
+			for ( int qy = 2 * cy; qy < 2 * ( cy + dim ) && !any; qy++ )
+				for ( int qx = 2 * cx; qx < 2 * ( cx + dim ) && !any; qx++ )
+					any = F.isPaintedQ( qx, qy );
+			if ( !any )
+				continue;
+			LodgenVtStage st;
+			if ( !lodgenBakeVtTile( world, dataRoot, *bc, opts.cover, landCache, maskCache, false,
+					cx, cy, dim, content, 0, st, nullptr, nullptr, objField.get(), nullptr, nullptr, nullptr,
+					&painted ) ) {
+				lodgenDestroyBakeCaches( bc );
+				return fail( QString( "could not bake the AO of tile (%1,%2)" ).arg( cx ).arg( cy ) );
+			}
+			tilesBaked++;
+			const float tileN = float( cy + dim ) * 4096.0f;
+			for ( int qy = 2 * cy; qy < 2 * ( cy + dim ); qy++ )
+				for ( int qx = 2 * cx; qx < 2 * ( cx + dim ); qx++ ) {
+					if ( !F.isPaintedQ( qx, qy ) )
+						continue;
+					std::vector<quint8> b( size_t( LODGEN_AO_QUAD ) * LODGEN_AO_QUAD );
+					for ( int v = 0; v < LODGEN_AO_QUAD; v++ ) {
+						// texel row v (south up) of the quadrant = tile row j (north down)
+						const int j = int( tileN / LODGEN_AO_UNITS ) - ( qy * LODGEN_AO_QUAD + v ) - 1;
+						for ( int u = 0; u < LODGEN_AO_QUAD; u++ ) {
+							const int i = ( qx - 2 * cx ) * LODGEN_AO_QUAD + u;
+							b[size_t( v ) * LODGEN_AO_QUAD + u] = quint8( st.mask[size_t( j ) * content + i] & 0xFF );
+						}
+					}
+					blocks.insert( LodgenAoMap::key( qx, qy ), std::move( b ) );
+				}
+		}
+	}
+	lodgenDestroyBakeCaches( bc );
+	if ( blocks.isEmpty() )
+		return fail( QStringLiteral( "no painted quadrant: no AO map" ) );
+	std::vector<std::pair<qint16, qint16>> qs;
+	qs.reserve( size_t( blocks.size() ) );
+	for ( auto it = blocks.constBegin(); it != blocks.constEnd(); ++it )
+		qs.emplace_back( qint16( qint32( quint32( it.key() & 0xFFFFFFFF ) ) ), qint16( it.key() >> 32 ) );
+	std::sort( qs.begin(), qs.end(), []( const std::pair<qint16, qint16> & a, const std::pair<qint16, qint16> & b ) {
+		return a.second != b.second ? a.second < b.second : a.first < b.first;
+	} );
+	m.quads = qs;
+	m.ao.reserve( qs.size() * size_t( LODGEN_AO_QUAD ) * LODGEN_AO_QUAD );
+	qint64 dark = 0;
+	double darkSum = 0.0;
+	for ( const auto & q : qs ) {
+		const std::vector<quint8> & b = blocks[LodgenAoMap::key( q.first, q.second )];
+		for ( quint8 a : b ) {
+			if ( a < 255 ) {
+				dark++;
+				darkSum += 255.0 - a;
+			}
+		}
+		m.ao.insert( m.ao.end(), b.begin(), b.end() );
+	}
+	const QString dir = lodgenFo4csWorldDir( outDir, ws );
+	if ( !QDir().mkpath( dir ) )
+		return fail( QString( "could not create %1" ).arg( dir ) );
+	const QString path = dir + QStringLiteral( "/" ) + ws + QStringLiteral( ".loda" );
+	QString wwhy;
+	const qint64 bytes = lodgenAoWrite( path, m, &wwhy );
+	if ( bytes < 0 )
+		return fail( wwhy );
+	if ( log )
+		*log << QString( "aoMap file=%1 bytes=%2 quads=%3 rawBytes=%4 tiles=%5 tilesBaked=%6 unitsPerTexel=%7 "
+			"texelsShaded=%8 meanDarkening=%9 gatherMs=%10 buildMs=%11" )
+			.arg( path ).arg( bytes ).arg( qs.size() ).arg( m.ao.size() ).arg( tiles ).arg( tilesBaked )
+			.arg( double( LODGEN_AO_UNITS ), 0, 'f', 0 ).arg( dark )
+			.arg( dark ? darkSum / double( dark ) : 0.0, 0, 'f', 2 ).arg( gatherMs ).arg( t.elapsed() );
 	return true;
 }
 
@@ -17612,7 +18092,7 @@ bool lodgenBakeTerrainVt( const EsmWorld & world, const QString & dataRoot,
 		ruleLog << QString( "outsideRule file=%1 bytes=%2 buildMs=%3" ).arg( QFileInfo( rpath ).fileName() )
 			.arg( rbytes ).arg( rt.elapsed() );
 		ruleOn = true;
-		const int rq = int( std::ceil( fill.band / 2048.0f ) ) + 1;
+		const int rq = lodgenOutlineReachQuads( fill.band );
 		struct Memo { qint64 key = 0; bool valid = false; bool need = false; };
 		auto memo = std::make_shared<Memo>();
 		ruleNeed = [&fill, rq, memo]( float wx, float wy ) -> bool {
