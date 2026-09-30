@@ -5,6 +5,32 @@ Written the moment a mistake is recognised, unprompted (CONSTITUTION rule 2).
 Format: date -- what was done -- what was true -- how it was found -- the rule.
 Newest at the top.
 
+## 2026-09-30 -- PRTPPLACE: counted openings before looking at what the rays hit; a ray box test that missed faces
+
+- What was done: I tuned the opening rules against Concord's counts (234 "windows", 112 room to room) before
+  looking at a picture of the soup. The soup held a distant-cloud sky mesh (a sheet over the whole town) and
+  every tree's leaf cards; both acted as roofs. Separately, the placer's BVH box test scaled by 1e300 when
+  the ray is flat in an axis. A ray lying exactly on a box face became 0 * 1e300 = 0 and the triangle was
+  never tested.
+- What was true: the rules were fine; the input was wrong (cloud and leaves out: 234 -> 40 windows). The
+  box bug moved real wall probes in the Museum interior.
+- The rule: look at the input (render the soup) before tuning a rule on its output. Run a replica gate on
+  more than one real cell: an exterior alone did not hit the face case.
+
+## 2026-09-30 -- PRTPPLACE: the interior rule measured clearance on the floor; three hypotheses tested at once
+
+- Floor clearance: the first room rule measured each cell's distance to a wall with a floor-level flood.
+  Tables, beds and display bases counted as walls, every museum room read as a hallway, and it placed
+  2,774 probes. Measured at EYE height with 8 rays: 975. Rule: measure a room where a person stands.
+- Crawlspaces: Concord's "rooms" included the hollows under house floors (ceiling 90-120 over the probe).
+  Only the pictures showed it. Rule: a room needs a way in (door, open side, drop); render every new class.
+- A Python replace of C++ text with escape sequences failed its count check; build such text with chr(92)
+  or use the Edit tool.
+- The panel's census lagged one build: the builder rings sceneChanged INSIDE the build, before the open
+  path stores the notes. Found only because the harness asserted the counts right after Place.
+- Several render fixes (beams, rims, paint) were first guessed as one cause; they were three (the 16-bit
+  bucket wrap, the swap, the vertex colors). Rule: test one hypothesis per run.
+
 ## 2026-09-30 -- PRTP plan and answers written without reading FO4CS's own probe campaign
 
 - What was done: docs/PRTP_PLAN.md, and my answers to bungo on dynamics, doors and probe placement, were written from

@@ -1,5 +1,21 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## PRTP probe placement: FO4CS's lattice, openings, rooms and hallways; the PRTP band; cell view fixes (lane PRTPPLACE, 2026-09-30)
+
+- Probe placement for the PRTP bake (docs/PRTP_PLAN.md 2c-2e). The lattice, column and wall probes follow FO4CS's
+  in-game bake exactly (Concord: 1892 column probes, the same as FO4CS).
+- A probe in every opening between spaces, found from the geometry alone: doorway, window or breach, with or without
+  a door, at any wall angle. A door standing in one only tags it.
+- Interiors: rooms split at their openings. Every enclosed room gets a probe at its widest spot; every spot a probe
+  cannot see within 200 (70 in a hallway, so hallway probes stand at most 140 apart) gets one. Sealed hollows and
+  furniture tops get none. Museum of Freedom: 609 -> 975 probes. Concord 3x3: 3,679 -> 4,335.
+- The PRTP band in the Cell workspace: Show probes, Place (counts per kind, colored like the markers), Bake (off
+  until the bake exists).
+- Cell view: material swaps drawn (the ref's XMSP, else the base's MODS) with their CNAM paint; the mesh's own
+  vertex colors drawn; a block over 65,536 vertices per material no longer wraps (missing porch rails, roof trim,
+  hubcaps). The workspace panel re-reads the notes after a rebuild (it showed the build before).
+- "Colour" label in the View band is now "Color".
+
 ## Interior cells open in the cell view, with every placed light read (lane PRTP1, 2026-09-30; merged 2026-09-30)
 
 - The cell view opens interiors by EDID or form id. Their own lighting (XCLL) and lighting template are read.

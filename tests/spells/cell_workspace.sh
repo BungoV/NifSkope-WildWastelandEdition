@@ -98,6 +98,7 @@ env WW_CELL_DATAROOT="$DATA" \
 	WW_CELL_OPEN="$ESM|$WORLD|$CELLX,$CELLY|1" \
 	WW_CELL_REFDUMP="$(winpath "$REFDUMP")" \
 	WW_CELLWS_TEST="$(winpath "$REPORT")" \
+	WW_CELLWS_PRTP=1 \
 	WW_CELLWS_SHOTS="$(winpath "$IMG")" \
 	timeout 900 "$EXE" --port "$PORT" "$(winpath "$SPEC")" > "$NOTES" 2>&1
 
@@ -122,7 +123,11 @@ list, the two selection doors, the Show popover and the layout bytes)" \
 		"a viewport pick of the same reference selects the same row" \
 		"the NIF workspace layout is byte-identical after a cell round trip" \
 		"the workspace list is the old one with Cell APPENDED" \
-		"no Show popover exists anywhere else in the window"; do
+		"no Show popover exists anywhere else in the window" \
+		"PRTP: Place fills the kind rows (8 kinds + All)" \
+		"PRTP: the kinds add up to All" \
+		"PRTP: the markers are drawn" \
+		"PRTP: Show probes off draws no markers"; do
 		check "report row present and green: $want" \
 			"$(grep -Fq "PASS  $want" "$REPORT" && echo 1 || echo 0)"
 	done

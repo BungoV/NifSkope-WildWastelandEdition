@@ -18,6 +18,8 @@ class GLView;
 class NifModel;
 class NifSkope;
 class QAction;
+class QCheckBox;
+class QPushButton;
 class QToolButton;
 class QComboBox;
 class QLabel;
@@ -135,6 +137,12 @@ public:
 	bool showRowChecked( int i ) const;
 	//! Flip a Show row by index, exactly as clicking it would.
 	void setShowRow( int i, bool on );
+	//! The PRTP band: its kind rows as "name count" (empty until probes are placed).
+	QStringList probeKindRows() const;
+	bool probesShown() const;
+	//! Click Place / flip Show probes, exactly as the mouse would.
+	void placeProbes();
+	void setProbesShown( bool on );
 
 public slots:
 	//! A cell scene was built, or the document changed: rebuild everything.
@@ -189,6 +197,15 @@ private:
 	 *  reference is which. */
 	QVector<int> pickForRef;
 	QTreeWidget * legend = nullptr;
+	/*! THE PRTP BAND (lane PRTPPLACE, 2026-09-30; bungo: in the Cell workspace, not a
+	 *  new one, named PRTP). Place re-opens the cell with the probes placed; the
+	 *  kind rows are READ from the builder's notes, like the legend. Bake waits
+	 *  for PRTP6. */
+	QCheckBox * probesShow = nullptr;
+	QPushButton * probesPlace = nullptr;
+	QPushButton * probesBake = nullptr;
+	QTreeWidget * probeKinds = nullptr;
+	void rebuildProbeKinds();
 	QLabel * census = nullptr;
 	QLabel * note = nullptr;
 	bool noteRefusal = false;

@@ -1414,6 +1414,7 @@ struct LodSrcShape
 	 * which the game reads an MSWP CNAM (it writes the index to the
 	 * material's fLookupScale only on such a property). Read-only fact. */
 	bool g2pFlag = false;
+	float g2pScale = 1.0f;      //!< lane PRTPPLACE: the palette row the material names, which a CNAM replaces
 	float smoothness = 1.0f, specMult = 1.0f;
 	/* And what it EMITS: the Own-Emit bit, the emissive colour and the
 	 * emissive multiple, from the same place - the BGSM when the shape names
@@ -2341,6 +2342,7 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 				s.smoothness = src.get<float>( iShader, "Smoothness" );
 				s.specMult = src.get<float>( iShader, "Specular Strength" );
 				s.g2pFlag = ( src.get<quint32>( iShader, "Shader Flags 1" ) & ( 1U << 4 ) ) != 0;
+				s.g2pScale = src.get<float>( iShader, "Grayscale to Palette Scale" );
 				s.emitColor = src.get<Color3>( iShader, "Emissive Color" );
 				s.emitMult = src.get<float>( iShader, "Emissive Multiple" );
 				s.ownEmit = ( src.get<quint32>( iShader, "Shader Flags 1" )
@@ -2412,6 +2414,7 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 							s.smoothness = sm.smoothness();
 							s.specMult = sm.specularStrength();
 							s.g2pFlag = ( sm.commonShaderFlags1() & 0x8000U ) != 0;
+							s.g2pScale = sm.grayscaleToPaletteScale();
 							// the BGSM's emittance wins the same way, as the renderer's does
 							s.emitColor = sm.emittanceColor();
 							s.emitMult = sm.emittanceMultiple();
@@ -2611,6 +2614,7 @@ static bool nativeLoadModelImpl( void * user, const QString & model, const Lodge
 		n.tex0 = s.tex0; n.tex1 = s.tex1; n.tex7 = s.tex7; n.matName = s.matName;
 		n.effectTex0 = s.effectTex0; n.matUnreadable = s.matUnreadable;
 		n.g2p = s.g2pFlag;
+		n.g2pScale = s.g2pScale;
 		n.smoothness = s.smoothness; n.specMult = s.specMult;
 		n.emitColor[0] = s.emitColor.red(); n.emitColor[1] = s.emitColor.green(); n.emitColor[2] = s.emitColor.blue();
 		n.emitMult = s.emitMult; n.ownEmit = s.ownEmit;

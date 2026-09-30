@@ -37,7 +37,7 @@ the `.loda` AO map. Probes happen here.
    `WW_CELL_DUMP`; XCLL/LGTM read; ground textured through the terrain splat.
    Gate: the dump against an independent Python walk of Fallout4.esm, whole
    plugin, lights included (vanilla corpus is the gate).
-   DONE 2026-09-30 on branch prtp1-20260930 (not merged): interiors, XCLL,
+   DONE 2026-09-30, merged to main: interiors, XCLL,
    LTMP and every placed light read; gate tests/spells/cell_lights.sh, 10
    interiors / 3,945 lights PASS, red control fails. Still open: the ground
    through the terrain splat.
@@ -90,6 +90,68 @@ What the game-side bake never achieved, and why NifSkope takes the bake over:
   gathering, M-16 distant tier.
 Output: `.tbk` v3 ('TBK1', 64-byte header, surfels 32 B, probes 144 B, links 12 B, one file per cell,
 sector_%+05d_%+05d.tbk) is what FO4CS's relight already reads. PRTP6 writes it (door ids on links need a v4).
+
+## 2c. Probe placement -- lane PRTPPLACE (2026-09-30)
+
+`src/probeplace.{h,cpp}`; the cell view places probes when `WW_CELL_PROBES=<tsv>` is set
+(`WW_CELL_PROBES_N` = middle NxN cells, `WW_CELL_PROBE_SOUP=<psp>` dumps its triangles); the CLI
+`nifskope -no-gui probeplace --soup <psp> --rect minX,minY,maxX,maxY --out <tsv>` re-runs a dumped soup.
+Spells: `tests/spells/cell_probes.sh` (bake + photos), `tests/spells/probe_place.py synth|retrace`.
+
+- The lattice, the column descent and the wall stacks are FO4CS's B2f/B2n, number for number (2b above).
+- Divergences: rays hit the render triangles of statics, not Havok collision; the column runs from the soup's
+  top + 16 to its bottom - 16 (FO4CS: player z + 2048 / - 8192); no probe cap.
+- The soup: STAT MSTT TREE FURN CONT ACTI TERM FLOR LIGH + LAND. Left out: disabled refs, markers, clutter
+  types, Sky\ meshes (distant clouds roofed all of Concord), Water\ planes (no collision in game), effect/
+  glass/decal shapes, alpha-tested shapes under Landscape\ (leaf and grass cards). DOOR = box only.
+- Openings (the ruling in 2b, built): the soup voxelized at 35 u; an opening is a straight-through neck in a
+  thin wall (jambs, lintel, sill all present), with a roof on at least one side, not into a pocket shorter
+  than 140. Searched at 4 wall angles (0, 22.5, 45, 67.5 degrees: Concord stands at 45). Classes: breach
+  if wider or taller than 400, doorway if the sill is within 60 and it is 140 tall, else window. A door
+  standing in it only tags it (its ref). One probe per opening (dedupe 105 u), at sill + min(120, h/2).
+- Gates: synth (7 known openings incl. a 45-degree house, 4 traps, every lattice probe re-traced) and
+  retrace on a real cell's soup (300 columns re-traced exactly, wall probes must still see their wall).
+  Reds `--red wall|aperture|frames` and a `--red wall` retrace must FAIL; all do.
+- Numbers, Concord 3x3 around (-15,17): first-hit 1892 (FO4CS 1892), interior 691 (FO4CS 1502), wall 923
+  (FO4CS 1513), openings 173 (doorway 46, window 121, breach 6). The interior/wall gap is the physics vs
+  render-triangle difference plus FO4CS's clutter and its taller column; not chased. Museum of Freedom
+  interior (ConcordMuseum01, spacing 280): 609 probes, 110 openings, 8 with a door in them.
+- Limits: walls between the 4 angles by more than 11.25 degrees; openings under 70 u; interior spacing is
+  still 280 (FO4CS's ~2 m candidate is `WW_CELL_PROBES_SPACING`). A doorway as wide as the hallway at the
+  hallway's END is not found: its jamb is the hallway's own wall, too long to read as a thin jamb.
+- Glass (bungo 2026-09-30): left out of placement (it is not a wall to a probe), and in PRTP6 it passes
+  light, tinted by its material when the material has a tint. Not an occluder, not a surfel.
+
+## 2d. The interior rule -- lane PRTPPLACE (bungo 2026-09-30: "some rooms are tight and separated")
+
+The lattice alone leaves small rooms and hallways without a probe. On top of it, from the 0-degree voxel frame:
+- Walkable cell = air standing on solid with at least 4 air voxels (140 u) above it. Covered = solid above it
+  before the grid top. Every walkable cell inside an opening's slab is CUT, so the openings split rooms.
+- Room = covered walkable cells, 4-connected, joined across one voxel of height. Each room edge is classed:
+  door (next to a cut cell, or under a window), open (next to uncovered walkable air), drop (no floor next to
+  it). Filters in order: under 4 cells = too small; no door, open or drop edge = SEALED (crawlspaces under
+  house floors, hollows in walls: no probe); drop on half the edges or more = LEDGE (furniture tops, shelves);
+  open + drop over 30% of the edges = OPEN (porches, awnings: the lattice covers them). The rest are enclosed.
+- Clearance per cell = the nearest wall along 8 horizontal rays at EYE height (capped 600). Measured at eye
+  height, not on the floor: tables, beds and display bases are not walls (the floor measure put 2,774
+  probes in the museum). Hallway cell = the narrowest wall-to-wall span through it is 210 or less.
+- Room probe at the enclosed room's widest cell (skipped if a probe already stands within 70 of it).
+- Cover fill, widest cells first: a cell that sees no probe (line of sight, at the cell's sample height)
+  within 200 -- or within 70 in a hallway, so hallway probes stand at most 140 apart -- gets a probe, at
+  the real floor + min(eye, half the ceiling height).
+- Numbers: Museum of Freedom 609 -> 975 probes (room 25, cover 341; 32 enclosed rooms, 7 sealed);
+  Concord 3x3 3,679 -> 4,335 (room 131, cover 525; 144 enclosed, 173 sealed). Rooms step 144 / 332 ms.
+- Gates (synth building E: a hallway and two rooms behind doorways): every room gets a probe; every 35 u
+  floor point at eye height sees a probe within its radius + 45; hallway probes no more than 175 apart.
+  `--red coverage` (the fill off) must FAIL: 58 blind points, a 280 gap. It does.
+
+## 2e. The PRTP band (Cell workspace; bungo: in the Cell workspace, named PRTP)
+
+Show probes | Place | Bake. Place re-opens the cell with the probes placed over the whole loaded block
+(`CellSceneSpec::probes`); the kind rows (first hit, interior, wall, doorway, window, breach, room, cover,
+All) are read from the placer's census lines in the builder's notes, their swatches from the one color
+table the markers draw with (`cellProbeKinds()`). Show probes off = placed and counted, not drawn. Bake is
+off until PRTP6. Gate: `WW_CELLWS_PRTP=1` on tests/spells/cell_workspace.sh's run: 11 PRTP rows.
 
 ## 3. Open
 
