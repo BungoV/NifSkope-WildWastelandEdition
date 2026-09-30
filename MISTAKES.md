@@ -1793,3 +1793,9 @@ ground paint; I then told bungo the baker 'invents a fill' there. Wrong twice: t
 outside IS Bethesda's dim-4 LOD diffuse, tone-matched (gain 0.62, +33.5, saturation x1.84, band 2 whole cells). bungo:
 the blend between vanilla diffuse and ours was the design; the defects are the hard cell steps and a dirt outline.
 Rule: read the bake log's vanillaFill line before describing what a terrain area is made of.
+
+### 2026-09-30 08:34 -- TERRLIVE2 started a bake on the stale run_new exe
+build.sh does not refresh run_new; I launched chain.sh right after a build without copying, so the dynamic
+rule/AO bake dyn05 ran the pre-outline exe. Stopping its bash left the NifSkope child running and holding
+the turn. Rule: `cmp release/NifSkope.exe run_new/NifSkope.exe` in the same command that starts a bake, and
+abort on differ (chain.sh now takes EXE=<folder>).
