@@ -157,13 +157,19 @@ struct CellSceneSpec
 	bool terrain = true;
 	bool water = true;
 	bool grid = true;       //!< the cell grid overlay
+	/* Lane PRTP1 (2026-09-30): an INTERIOR cell instead of an exterior block.
+	 * Spec line `plugins|interior|<EDID or hex form>[|overlay]`. No LAND, no
+	 * grid, no worldspace water; `world` holds the word "interior". */
+	bool interior = false;
+	QString interiorCell;
 	bool valid = false;
 
 	//! The inclusive cell rectangle `n` asks for around (cx, cy).
 	void rect( int & x0, int & y0, int & x1, int & y1 ) const;
 };
 
-//! Parse `plugins|world|x,y|n[|overlay]`. False (with `*error`) on a bad line.
+//! Parse `plugins|world|x,y|n[|overlay]` or `plugins|interior|<cell>[|overlay]`.
+//! False (with `*error`) on a bad line.
 bool cellSpecFromLine( const QString & line, CellSceneSpec & spec, QString * error );
 //! Read a `.wwcell` file's first non-comment line.
 bool cellSpecFromFile( const QString & path, CellSceneSpec & spec, QString * error );

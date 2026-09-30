@@ -500,6 +500,13 @@ QVector<EsmRefr> EsmWorld::refrsInGroup( quint32 groupID ) const
 					} else if ( f == "XMSP" && f.size() >= 4 ) {
 						// lane SWAP1: the placement's material swap (MSWP)
 						ref.materialSwap = esm->mapFormID( *r, f.readUInt32() );
+					} else if ( f == "XRDS" && f.size() >= 4 ) {
+						ref.radius = f.readFloat();      // lane PRTP1
+						ref.hasRadius = true;
+					} else if ( f == "XLIG" && f.size() >= 4 ) {
+						ref.xligCount = qMin( 6, int( f.size() / 4 ) );
+						for ( int i = 0; i < ref.xligCount; i++ )
+							ref.xlig[i] = f.readFloat();
 					}
 				}
 				if ( ref.base ) {
@@ -1404,5 +1411,212 @@ QVector<QPair<quint32, QString>> EsmWorld::listWorldspaces( const QString & esmP
 		if ( error )
 			*error = QString::fromLatin1( e.what() );
 	}
+	return out;
+}
+
+
+// ------------------------------------------------------ lane PRTP1: lights, interiors
+
+QString EsmLight::typeName() const
+{
+	if ( flags & 0x400 )
+		return QStringLiteral( "shadow spot" );
+	if ( flags & 0x800 )
+		return QStringLiteral( "shadow hemi" );
+	if ( flags & 0x1000 )
+		return QStringLiteral( "shadow omni" );
+	if ( flags & 0x4000 )
+		return QStringLiteral( "spot" );
+	if ( flags & 0x20000 )
+		return QStringLiteral( "box" );
+	return QStringLiteral( "omni" );
+}
+
+const EsmLight & EsmWorld::light( quint32 formID ) const
+{
+	auto it = lightCache.find( formID );
+	if ( it != lightCache.end() )
+		return *it;
+	EsmLight L;
+	const ESMFile::ESMRecord * r = esm ? esm->findRecord( formID ) : nullptr;
+	if ( r && r->type != GRUP && *r == "LIGH" ) {
+		L.exists = true;
+		ESMFile::ESMField f( *esm, *r );
+		while ( f.next() ) {
+			if ( f == "EDID" ) {
+				L.edid = fieldString( f );
+			} else if ( f == "DATA" && f.size() >= 16 ) {
+				// Time, Radius, Color (4 bytes: R G B unused), Flags, then from
+				// 28 bytes on: falloff exponent, FOV, near clip
+				L.time = f.readInt32();
+				L.radius = f.readUInt32();
+				const quint32 rgba = f.readUInt32();
+				L.color[0] = quint8( rgba & 0xFF );
+				L.color[1] = quint8( ( rgba >> 8 ) & 0xFF );
+				L.color[2] = quint8( ( rgba >> 16 ) & 0xFF );
+				L.flags = f.readUInt32();
+				if ( f.size() >= 28 ) {
+					L.falloff = f.readFloat();
+					L.fov = f.readFloat();
+					L.nearClip = f.readFloat();
+				}
+				if ( f.size() >= 52 ) {
+					for ( int i = 0; i < 3; i++ )
+						(void) f.readFloat();       // flicker period, intensity, movement
+					L.constant = f.readFloat();
+					L.scalar = f.readFloat();
+					L.exponent = f.readFloat();
+					L.hasAttenuation = true;
+				}
+			} else if ( f == "FNAM" && f.size() >= 4 ) {
+				L.fade = f.readFloat();
+			} else if ( f == "NAM0" ) {
+				L.gobo = fieldString( f );
+			}
+		}
+	}
+	return *lightCache.insert( formID, L );
+}
+
+namespace
+{
+//! Walk the top-level CELL group's blocks and subblocks; cb(record) per CELL.
+void walkInteriorCells( const ESMFile & esm, const std::function<bool( const ESMFile::ESMRecord & )> & cb )
+{
+	const quint32 labelCell = quint32( 'C' ) | ( quint32( 'E' ) << 8 ) | ( quint32( 'L' ) << 16 ) | ( quint32( 'L' ) << 24 );
+	const ESMFile::ESMRecord * r0 = esm.findRecord( 0U );
+	std::function<bool( unsigned int, int )> walk = [&]( unsigned int id, int depth ) -> bool {
+		while ( id ) {
+			const ESMFile::ESMRecord * r = esm.findRecord( id );
+			if ( !r )
+				return true;
+			if ( r->type == GRUP ) {
+				// depth 0: only the top-level CELL group; below it blocks (2) and
+				// subblocks (3). Cell-children groups (6) hold REFRs, not cells.
+				const bool enter = depth == 0 ? ( r->formID == 0 && r->flags == labelCell )
+				                              : ( r->formID == 2 || r->formID == 3 );
+				if ( enter && r->children && !walk( r->children, depth + 1 ) )
+					return false;
+			} else if ( depth > 0 && *r == "CELL" ) {
+				if ( !cb( *r ) )
+					return false;
+			}
+			id = r->next;
+		}
+		return true;
+	};
+	if ( r0 )
+		walk( r0->next, 0 );
+}
+}
+
+QVector<QPair<quint32, QString>> EsmWorld::listInteriors( const QString & esmPath, QString * error )
+{
+	QVector<QPair<quint32, QString>> out;
+	try {
+		ESMFile esm( esmPath.toLocal8Bit().constData() );
+		walkInteriorCells( esm, [&]( const ESMFile::ESMRecord & r ) {
+			QString edid;
+			ESMFile::ESMField f( esm, r );
+			while ( f.next() )
+				if ( f == "EDID" )
+					edid = fieldString( f );
+			out.append( qMakePair( quint32( r.formID ), edid ) );
+			return true;
+		} );
+		if ( error )
+			error->clear();
+	} catch ( std::exception & e ) {
+		if ( error )
+			*error = QString::fromLatin1( e.what() );
+	}
+	return out;
+}
+
+bool EsmWorld::loadInterior( const QString & esmPath, const QString & cell, QString * error )
+{
+	auto fail = [error]( const QString & m ) {
+		if ( error )
+			*error = m;
+		return false;
+	};
+	srcPath = esmPath;
+	try {
+		esm = std::make_unique<ESMFile>( esmPath.toLocal8Bit().constData() );
+		wsForm = 0;
+		wsEdid.clear();
+		cellIndex.clear();
+		interiorCell = EsmInteriorCell();
+		interiorGroups.clear();
+		bool isHex = false;
+		const quint32 wantForm = cell.trimmed().toUInt( &isHex, 16 );
+		const ESMFile::ESMRecord * found = nullptr;
+		walkInteriorCells( *esm, [&]( const ESMFile::ESMRecord & r ) {
+			if ( isHex && r.formID == wantForm ) {
+				found = &r;
+				return false;
+			}
+			ESMFile::ESMField f( *esm, r );
+			while ( f.next() )
+				if ( f == "EDID" && fieldString( f ).compare( cell.trimmed(), Qt::CaseInsensitive ) == 0 ) {
+					found = &r;
+					return false;
+				}
+			return true;
+		} );
+		if ( !found )
+			return fail( QStringLiteral( "no interior cell \"%1\" in %2" ).arg( cell, esmPath ) );
+		EsmInteriorCell & ic = interiorCell;
+		ic.cellForm = found->formID;
+		ESMFile::ESMField f( *esm, *found );
+		while ( f.next() ) {
+			if ( f == "EDID" ) {
+				ic.edid = fieldString( f );
+			} else if ( f == "LTMP" && f.size() >= 4 ) {
+				ic.lightingTemplate = esm->mapFormID( *found, f.readUInt32() );
+			} else if ( f == "XCLW" && f.size() >= 4 ) {
+				ic.waterHeight = f.readFloat();
+				ic.hasWater = ic.waterHeight < 2.0e9f;     // the no-water sentinel
+			} else if ( f == "XCLL" && f.size() >= 20 ) {
+				const unsigned char * d = f.data();
+				ic.xcll = QByteArray( reinterpret_cast<const char *>( d ), int( f.size() ) );
+				for ( int k = 0; k < 3; k++ ) {
+					ic.ambient[k] = d[k];
+					ic.directional[k] = d[4 + k];
+					ic.fogNearColor[k] = d[8 + k];
+				}
+				std::memcpy( &ic.fogNear, d + 12, 4 );
+				std::memcpy( &ic.fogFar, d + 16, 4 );
+				if ( f.size() >= 92 )
+					std::memcpy( &ic.inherits, d + 88, 4 );
+			}
+		}
+		// the cell's own child group follows it; later plugins' groups are
+		// linked to nothing (see indexWorldspace, lane BAKE1) -- find them the same way
+		const ESMFile::ESMRecord * cg = found->next ? esm->findRecord( found->next ) : nullptr;
+		if ( cg && cg->type == GRUP && cg->flags == found->formID )
+			interiorGroups.append( found->next );
+		for ( quint32 k = 0; k < 0x7FFFFFFFU; k++ ) {
+			const quint32 id = 0x80000000U | k;
+			const ESMFile::ESMRecord * g = esm->findRecord( id );
+			if ( !g )
+				break;
+			if ( g->type == GRUP && g->formID == 6 && g->flags == found->formID && !interiorGroups.contains( id ) )
+				interiorGroups.append( id );
+		}
+		ic.valid = true;
+		if ( error )
+			error->clear();
+		return true;
+	} catch ( std::exception & e ) {
+		return fail( QString::fromLatin1( e.what() ) );
+	}
+}
+
+QVector<EsmRefr> EsmWorld::interiorRefrs() const
+{
+	QVector<EsmRefr> out;
+	for ( quint32 g : interiorGroups )
+		out += refrsInGroup( g );
 	return out;
 }
