@@ -22930,7 +22930,36 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 
 					bool	timeOk = false;
 					float	t = qEnvironmentVariable( "WW_RENDER_TIME" ).toFloat( &timeOk );
-					skope->ogl->setSceneTime( timeOk ? t : 1.0f );
+					const float shotT = timeOk ? t : 1.0f;
+
+					/* WW_RENDER_FRAMES=<n> [WW_RENDER_FPS=<f>, default 30]: an
+					 * animated series, out_000.png .. out_<n-1>.png, 1/f s apart
+					 * from WW_RENDER_TIME (2026-09-30, BoSInfantry jetpack preview).
+					 *
+					 * The CPU particle sim advances by the time DIFFERENCE between
+					 * paints, capped at 0.25 s, and restarts on any backward jump.
+					 * The single jump to WW_RENDER_TIME therefore leaves an FO4
+					 * emitter with nothing alive: census "0 live particles" on
+					 * vanilla JetpackFX.nif CharFXOnLoop at 1.5 s and at 20 s. With
+					 * frames asked, playback is stopped (wall-clock time would
+					 * otherwise move the sim between steps) and the sim is pre-rolled
+					 * from 0 in 1/f steps. Unset keeps the one-jump shot, so no
+					 * existing baseline changes. */
+					const int renderFrames = qEnvironmentVariableIntValue( "WW_RENDER_FRAMES" );
+					float renderFps = qEnvironmentVariable( "WW_RENDER_FPS" ).toFloat();
+					if ( !( renderFps > 0.0f ) )
+						renderFps = 30.0f;
+					if ( renderFrames > 0 ) {
+						// View > Animations is a saved preference; a series with the
+						// controllers off would be n copies of one frame.
+						skope->ogl->setAnimationEnabled( true );
+						skope->ogl->setAnimSpeed( 0.0f );
+						for ( int k = 0; float( k ) / renderFps < shotT; k++ ) {
+							skope->ogl->setSceneTime( float( k ) / renderFps );
+							qApp->processEvents();
+						}
+					}
+					skope->ogl->setSceneTime( shotT );
 
 					// grabFramebuffer() reads the CURRENT buffer without
 					// repainting — pump twice or the grab is a stale frame.
@@ -22990,7 +23019,25 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 					const QImage shotImage = renderSS > 0
 						? skope->ogl->grabSupersampled( renderSS )
 						: skope->ogl->grabFramebuffer();
-					shotImage.save( out );
+					if ( renderFrames > 0 ) {
+						const QFileInfo fi( out );
+						auto frameName = [&fi]( int k ) {
+							return fi.path() + QLatin1Char( '/' ) + fi.completeBaseName()
+								+ QString::asprintf( "_%03d.", k ) + fi.suffix();
+						};
+						shotImage.save( frameName( 0 ) );
+						for ( int k = 1; k < renderFrames; k++ ) {
+							skope->ogl->setSceneTime( shotT + float( k ) / renderFps );
+							for ( int i = 0; i < 2; i++ ) {
+								skope->ogl->update();
+								qApp->processEvents();
+							}
+							( renderSS > 0 ? skope->ogl->grabSupersampled( renderSS )
+										   : skope->ogl->grabFramebuffer() ).save( frameName( k ) );
+						}
+					} else {
+						shotImage.save( out );
+					}
 					// TEMP DIAGNOSTIC (WW_GRID_PROBE): bracket the grab so the log
 					// shows which paintGL frames precede it, and whether any grid
 					// draw belongs to the frame actually captured.

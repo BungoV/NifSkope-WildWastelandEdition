@@ -1,5 +1,14 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Render harness: animated frame series with live particles (2026-09-30)
+
+- `WW_RENDER_FRAMES=<n>` (and `WW_RENDER_FPS`, default 30) makes the headless render shot write n frames,
+  `<shot>_000.png` onward, 1/fps apart from `WW_RENDER_TIME`. Unset, the shot is unchanged.
+- In this mode animation is switched on, playback is paused, and the particle preview is stepped from 0 up
+  to the shot time. Before this, FO4 particle effects rendered empty in the harness (vanilla JetpackFX.nif:
+  "0 live particles"): the saved View > Animations preference was off, and the single jump to the shot time
+  gives the particle preview nothing to step through.
+
 ## LOD terrain options: HYBRID (default) and DYNAMIC; painted ground blends into vanilla; projected decals; optional rule paint outside (lane TERRLIVE1, 2026-09-29; merged by MERGE2, 2026-09-29)
 
 - `--terrain-option hybrid|dynamic` and a Terrain row in the LOD panel. HYBRID (default) keeps the 64/128/256 u
