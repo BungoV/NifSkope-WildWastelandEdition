@@ -1,6 +1,27 @@
 # Handoff — NifSkope, Wild Wasteland Edition
 
-## TOP BLOCK -- written 2026-09-29 14:09 (`date`-read) by lane MERGE2: IDENT2 + TERRLIVE1 MERGED into main, main's exe rebuilt; NOT re-baked, NOT flown
+## TOP BLOCK -- written 2026-09-30 12:28 (`date`-read): TERRLIVE2 and PRTP1 done on their branches, NOT merged
+
+### TERRLIVE2 -- branch terrlive2-20260929 @ a2b06497, pushed, NOT merged (brief: no merge)
+Report: E:\Projects\NifskopeWWE-terrlive2\scratchpad\terrlive2_20260929\DONE.md (last two sections).
+- **Rock**: brightness gain plane in .lodr. Hills far-slope drift HYBRID 7.62 -> 5.67, DYNAMIC 12.50 -> 5.98.
+- **Rounded outline**: LodgenOutlineField, sigma 3072. outline_gate GREEN (0.166 vs bar 0.244; the old staircase
+  0.561 FAILS; sigma 2048 measured 0.305). gate_law2 PASS with outside paint rule and vanilla. Cost: the blend band
+  starts ~4.6 km inside our paint.
+- **AO map `.loda`** (ground sky visibility, 32 u, painted ground + fade band, HYBRID and DYNAMIC, no switch):
+  vs the old baked AO corr 0.989, mean diff 7.5/255; +0.002 ms GPU. Probes/surfels wait for PRTP (bungo's ruling).
+- Docs: docs/LODGEN_TERRAIN_VT.md 2.6d, 2.6e. Whole-map bakes in that scratch: final_on (rule), final_off.
+- **Next**: bungo's merge word -> merge, rebuild main, install a whole-map HYBRID bake (the installed one is still
+  the ditched FULL, section below).
+
+### PRTP1 -- branch prtp1-20260930 @ eba27f52, pushed, NOT merged
+Interiors open in the cell view (`<plugins>|interior|<EDID or form>`); XCLL kept whole, LTMP read; every placed
+light read (LIGH DATA, XRDS, XLIG, initially disabled) and dumped by WW_CELL_LIGH2026-09-30 12:28. Gate
+tests/spells/cell_lights.sh: 10 interiors, 3,945 lights, all match an independent Python walk; `--red` fails.
+Lights are read, not yet drawn. Open from the plan's PRTP1 list: ground through the terrain splat.
+- **Next**: PRTP2 = vanilla light model research, PDB first (DeepSeek never sees the PDB).
+
+## PREVIOUS BLOCK -- written 2026-09-29 14:09 (`date`-read) by lane MERGE2: IDENT2 + TERRLIVE1 MERGED into main, main's exe rebuilt; NOT re-baked, NOT flown
 
 bungo's word (2026-09-29, after both lanes' final pictures): merge "Yes". Done by MERGE2. Report:
 scratchpad/merge2_20260929/DONE.md (every gate with its numbers, the red controls, the scripts beside it).
