@@ -42,9 +42,9 @@ the `.loda` AO map. Probes happen here.
    interiors / 3,945 lights PASS, red control fails. Still open: the ground
    through the terrain splat.
 2. **PRTP2 -- vanilla light model, research.** How the stock game lights a
-   pixel: point/spot falloff, DALC, interior ambient, fog. PDB FIRST, RVA per
+   pixel: point/spot falloff, DALC, interior ambient, fog. Todd's treat FIRST, RVA per
    build, plus the stock shader bytecode. Written down per term before any
-   renderer edit. (DeepSeek never sees the PDB.)
+   renderer edit. (DeepSeek never sees Todd's treat.)
    WRITTEN 2026-09-30: docs/PRTP2_LIGHT_MODEL.md (point, spot, sun, DALC, fog,
    fade, summation). Open: the fog packing and the spot half-angle, both for
    the PRTP4 capture.
