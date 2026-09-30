@@ -11,6 +11,7 @@ See the LICENSE.md file for the full license text.
 
 #include "nifcli.h"
 #include "probeplace.h"
+#include "probebake.h"
 
 #include "freezeanim.h"
 #include "gamemanager.h"
@@ -7353,6 +7354,14 @@ int nifskopeCliMain( const QStringList & args )
 	// (lane PRTPPLACE; src/probeplace.cpp)
 	if ( cmd == QLatin1String( "probeplace" ) ) {
 		const int rc = probePlaceCli( a );
+		out().flush();
+		err().flush();
+		return rc;
+	}
+	// `probebake` places, then bakes the probes to FO4CS `.tbk` v3 sector files
+	// (lane PRTPBAKE; src/probebake.cpp)
+	if ( cmd == QLatin1String( "probebake" ) ) {
+		const int rc = probeBakeCli( a );
 		out().flush();
 		err().flush();
 		return rc;

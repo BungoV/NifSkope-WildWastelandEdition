@@ -70,6 +70,7 @@ void cellWorkspaceApplyOverrides( CellSceneSpec & spec )
 	spec.showDisabled = g_over.showDisabled;
 	spec.probes = g_over.probes;
 	spec.probesShow = g_over.probesShow;
+	spec.probesBake = g_over.probesBake;
 }
 
 void cellWorkspaceNoteOpened( const QString & path, const CellSceneSpec & spec,
@@ -78,6 +79,9 @@ void cellWorkspaceNoteOpened( const QString & path, const CellSceneSpec & spec,
 	g_path = path;
 	g_spec = spec;
 	g_notes = notes;
+	// lane PRTPBAKE: a bake is one click, not a mode -- the next rebuild does not bake again
+	g_spec.probesBake = false;
+	g_over.probesBake = false;
 	if ( !g_haveOverrides ) {
 		// The first cell of the session seeds the rows from the file itself, so
 		// a row shows what is actually drawn before anybody touches one.
@@ -412,7 +416,6 @@ void CellWorkspacePanel::buildUi()
 	probesBake = new QPushButton( tr( "Bake" ), prtpRow );
 	probesBake->setObjectName( QStringLiteral( "CellWorkspaceProbesBake" ) );
 	probesBake->setStyleSheet( wwBoxedButtonQss( QStringLiteral( "3px 10px" ) ) );
-	probesBake->setEnabled( false );   // the bake is lane PRTP6
 	pl->addWidget( probesShow );
 	pl->addStretch( 1 );
 	pl->addWidget( probesPlace );
@@ -438,6 +441,7 @@ void CellWorkspacePanel::buildUi()
 	page->addWidget( probeKinds );
 
 	connect( probesPlace, &QPushButton::clicked, this, &CellWorkspacePanel::placeProbes );
+	connect( probesBake, &QPushButton::clicked, this, &CellWorkspacePanel::bakeProbes );
 	connect( probesShow, &QCheckBox::toggled, this, [this]( bool on ) {
 		QSettings().setValue( QString( "%1/probes" ).arg( QLatin1String( CELL_SHOW_GROUP ) ), on );
 		if ( syncing || g_path.isEmpty() || !g_spec.probes )
@@ -907,6 +911,21 @@ void CellWorkspacePanel::placeProbes()
 	emit reopenRequested( g_path );
 }
 
+void CellWorkspacePanel::bakeProbes()
+{
+	if ( g_path.isEmpty() ) {
+		say( tr( "no cell is open" ), true );
+		return;
+	}
+	g_over = g_spec;
+	g_over.probes = true;
+	g_over.probesBake = true;
+	g_over.probesShow = probesShow && probesShow->isChecked();
+	g_haveOverrides = true;
+	say( tr( "baking probes in %1 ..." ).arg( QFileInfo( g_path ).fileName() ), false );
+	emit reopenRequested( g_path );
+}
+
 void CellWorkspacePanel::setProbesShown( bool on )
 {
 	if ( probesShow )
@@ -967,6 +986,18 @@ void CellWorkspacePanel::rebuildProbeKinds()
 	total->setText( 0, tr( "All" ) );
 	total->setData( 1, Qt::DisplayRole, QVariant( ma.captured( 1 ).toInt() ) );
 	probeKinds->setVisible( true );
+	// lane PRTPBAKE: what the bake wrote, read from its own census lines
+	static const QRegularExpression reBake( QStringLiteral(
+		"bake: surfels (\\d+), links (\\d+),[^\\n]*sectors (\\d+)" ) );
+	static const QRegularExpression reDir( QStringLiteral( "bake folder ([^\\n]*)" ) );
+	static const QRegularExpression reBakeRefused( QStringLiteral( "bake REFUSED: ([^\\n]*)" ) );
+	const QRegularExpressionMatch mb = reBake.match( g_notes ), md = reDir.match( g_notes );
+	const QRegularExpressionMatch mx = reBakeRefused.match( g_notes );
+	if ( mx.hasMatch() )
+		say( tr( "bake refused: %1" ).arg( mx.captured( 1 ).trimmed() ), true );
+	else if ( mb.hasMatch() && md.hasMatch() )
+		say( tr( "baked %1 files, %2 surfels, %3 links: %4" ).arg( mb.captured( 3 ), mb.captured( 1 ),
+			mb.captured( 2 ), md.captured( 1 ).trimmed() ), false );
 }
 
 void CellWorkspacePanel::say( const QString & text, bool refusal )

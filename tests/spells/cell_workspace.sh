@@ -75,7 +75,8 @@ say "cell: $WORLD $CELLX,$CELLY"
 newer=1
 for s in src/cellworkspace.cpp src/cellworkspace.h src/cellworkspacetest.cpp \
          src/cellrefs.cpp src/cellrefs.h src/cellview.cpp src/cellclick.cpp \
-         src/esmdata.cpp src/nifskope.cpp src/nifskope_ui.cpp src/nifskope.h; do
+         src/esmdata.cpp src/nifskope.cpp src/nifskope_ui.cpp src/nifskope.h \
+         src/probebake.cpp src/probealbedo.cpp src/probeplace.cpp; do
 	if [ ! -f "$REPO/$s" ] || [ "$REPO/$s" -nt "$EXE" ]; then
 		say "  $s is missing or NEWER than the exe"
 		newer=0
@@ -89,7 +90,9 @@ check "the exe is newer than every source this gate covers" "$newer"
 REPORT="$OUT/ww_cellws.report"
 REFDUMP="$OUT/ww_cellws.refdump"
 NOTES="$OUT/ww_cellws.notes"
+BAKE="$OUT/prtp_bake_gate"
 rm -f "$REPORT" "$REFDUMP" "$NOTES"
+rm -f "$BAKE"/sector_*.tbk
 
 IMG="${IMG:-$REPO/scratchpad/cellwork1_20260919/pictures}"
 mkdir -p "$IMG"
@@ -99,6 +102,7 @@ env WW_CELL_DATAROOT="$DATA" \
 	WW_CELL_REFDUMP="$(winpath "$REFDUMP")" \
 	WW_CELLWS_TEST="$(winpath "$REPORT")" \
 	WW_CELLWS_PRTP=1 \
+	WW_CELL_PROBE_BAKE_DIR="$(winpath "$BAKE")" \
 	WW_CELLWS_SHOTS="$(winpath "$IMG")" \
 	timeout 900 "$EXE" --port "$PORT" "$(winpath "$SPEC")" > "$NOTES" 2>&1
 
@@ -127,7 +131,13 @@ list, the two selection doors, the Show popover and the layout bytes)" \
 		"PRTP: Place fills the kind rows (8 kinds + All)" \
 		"PRTP: the kinds add up to All" \
 		"PRTP: the markers are drawn" \
-		"PRTP: Show probes off draws no markers"; do
+		"PRTP: Show probes off draws no markers" \
+		"PRTP: Bake is on" \
+		"PRTP: Place alone does not bake" \
+		"PRTP: Bake says what it wrote" \
+		"PRTP: the folder holds .tbk sector files, each starting TBK1" \
+		"PRTP: the note's file count is the folder's" \
+		"PRTP: Bake keeps the kind rows"; do
 		check "report row present and green: $want" \
 			"$(grep -Fq "PASS  $want" "$REPORT" && echo 1 || echo 0)"
 	done

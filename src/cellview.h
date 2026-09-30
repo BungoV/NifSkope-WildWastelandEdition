@@ -167,6 +167,11 @@ struct CellSceneSpec
 	 * file); `probesShow` draws them. */
 	bool probes = false;
 	bool probesShow = true;
+	/* Lane PRTPBAKE (2026-09-30): the band's Bake. Places the probes, then bakes them
+	 * into FO4CS `.tbk` sector files in `bakeDir` (empty = `<app>/prtp_bake/<world or
+	 * cell>`). One-shot: the workspace clears it once the build is noted. */
+	bool probesBake = false;
+	QString bakeDir;
 	bool valid = false;
 
 	//! The inclusive cell rectangle `n` asks for around (cx, cy).

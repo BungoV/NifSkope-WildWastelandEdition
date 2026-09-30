@@ -16,6 +16,8 @@ BSD License - see nifskope.h
 #include "lodgen.h"
 #include "nativeemit.h"
 #include "probeplace.h"		// lane PRTPPLACE
+#include "probebake.h"		// lane PRTPBAKE
+#include "probealbedo.h"		// lane PRTPBAKE
 
 #include <limits>
 
@@ -29,9 +31,13 @@ BSD License - see nifskope.h
 #include <QHash>
 #include <QSet>
 #include <QStringList>
+#include <QCoreApplication>
+#include <QDir>
+#include <QRegularExpression>
 #include <QTextStream>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstring>
 #include <vector>
@@ -1113,6 +1119,15 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 	const bool probing = !probeOut.isEmpty() || spec.probes;   // the env, or the PRTP band's Place
 	ProbeSoup probeSoup;
 	int soupRefs = 0, soupShapesDropped = 0;
+	/* lane PRTPBAKE: the bake's albedo, one per soup triangle -- the band's Bake, or
+	 * WW_CELL_PROBE_BAKE=<folder> (every probing build bakes there, for a headless run).
+	 * WW_CELL_PROBE_BAKE_DIR=<folder> only moves the Bake button's folder. */
+	const QString bakeEnv = QString::fromLocal8Bit( qgetenv( "WW_CELL_PROBE_BAKE" ) );
+	const QString bakeDirEnv = QString::fromLocal8Bit( qgetenv( "WW_CELL_PROBE_BAKE_DIR" ) );
+	const bool baking = probing && ( spec.probesBake || !bakeEnv.isEmpty() );
+	ProbeAlbedo probeAlb( dataRoot );
+	int albTextured = 0, albUntextured = 0, albLandSplat = 0, albLandFlat = 0;
+	QHash<qint64, std::array<float, 3>> landAlb;   // 128-unit ground quad -> gamma color, from the splat
 	QHash<QString, int> soupSkippedTypes;
 	auto soupRole = []( const QString & t ) -> int {   // 0 left out, 1 in the soup, 2 a door
 		static const QSet<QString> in { QStringLiteral( "STAT" ), QStringLiteral( "MSTT" ),
@@ -1388,8 +1403,31 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 							w[k][1] = wp[1];
 							w[k][2] = wp[2];
 						}
-						if ( okTri )
+						if ( okTri && baking ) {
+							// the map at the triangle's UV centroid, times its vertex color
+							float uv[2] = { 0.5f, 0.5f }, vc[3] = { 1, 1, 1 }, lin[3];
+							const size_t i0 = size_t( s.geom.tris[t] ), i1 = size_t( s.geom.tris[t + 1] ),
+								i2 = size_t( s.geom.tris[t + 2] );
+							if ( s.geom.uv.size() >= nv * 2 )
+								for ( int k = 0; k < 2; k++ )
+									uv[k] = ( s.geom.uv[i0 * 2 + size_t( k )] + s.geom.uv[i1 * 2 + size_t( k )]
+										+ s.geom.uv[i2 * 2 + size_t( k )] ) / 3.0f;
+							if ( s.geom.rgba.size() == nv * 4 )
+								for ( int k = 0; k < 3; k++ )
+									vc[k] = ( s.geom.rgba[i0 * 4 + size_t( k )] + s.geom.rgba[i1 * 4 + size_t( k )]
+										+ s.geom.rgba[i2 * 4 + size_t( k )] ) / ( 3.0f * 255.0f );
+							quint8 rgb[3] = { 128, 128, 128 };
+							if ( probeAlb.sample( s.tex0, uv[0], uv[1], vc, lin ) ) {
+								albTextured++;
+								for ( int k = 0; k < 3; k++ )
+									rgb[k] = quint8( std::lround( std::clamp( lin[k], 0.0f, 1.0f ) * 255.0f ) );
+							} else {
+								albUntextured++;
+							}
+							probeSoup.addTri( w[0], w[1], w[2], rgb );
+						} else if ( okTri ) {
 							probeSoup.addTri( w[0], w[1], w[2] );
+						}
 					}
 				}
 			}
@@ -1550,6 +1588,41 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 					CELL_GROUND_TILING, sb, &serr ) && !sb.quads.empty() ) {
 					landsDrawn = sb.cells;
 					groundNote = cellSplatLegend( sb ) + splatNote;
+					if ( baking ) {
+						/* lane PRTPBAKE: the ground's albedo per 128-unit quad -- each pass's map
+						 * mean times its VCLR, laid over the one below by the pass's mean opacity,
+						 * in the splat's draw order (buckets are emitted in it) */
+						std::vector<size_t> order( sb.quads.size() );
+						for ( size_t qi = 0; qi < order.size(); qi++ )
+							order[qi] = qi;
+						std::stable_sort( order.begin(), order.end(), [&sb]( size_t a, size_t b ) {
+							return sb.quads[a].bucket < sb.quads[b].bucket;
+						} );
+						for ( size_t qi : order ) {
+							const CellSplatQuad & q = sb.quads[qi];
+							if ( q.bucket < 0 || q.bucket >= sb.buckets.size() )
+								continue;
+							float m[3];
+							if ( !probeAlb.meanGamma( sb.buckets.at( q.bucket ).diffuse, m ) )
+								continue;
+							float wv = 0, vc[3] = { 0, 0, 0 };
+							for ( int k = 0; k < 4; k++ ) {
+								wv += q.v[k].w * 0.25f;
+								for ( int c = 0; c < 3; c++ )
+									vc[c] += q.v[k].rgb[c] * 0.25f;
+							}
+							const qint64 gx = qint64( std::lround( ( q.v[0].p[0] + origin[0] ) / 128.0f ) );
+							const qint64 gy = qint64( std::lround( ( q.v[0].p[1] + origin[1] ) / 128.0f ) );
+							const qint64 key = ( gx << 32 ) ^ ( gy & 0xffffffffll );
+							auto it = landAlb.find( key );
+							const bool base = !sb.buckets.at( q.bucket ).blend || it == landAlb.end();
+							std::array<float, 3> & col = landAlb[key];
+							for ( int c = 0; c < 3; c++ ) {
+								const float layer = m[c] * vc[c];
+								col[c] = base ? layer : col[c] + ( layer - col[c] ) * std::clamp( wv, 0.0f, 1.0f );
+							}
+						}
+					}
 					splatNote.clear();
 					groundBuckets.resize( sb.buckets.size() );
 					for ( int bi = 0; bi < sb.buckets.size(); bi++ ) {
@@ -1779,8 +1852,32 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 							const float b[3] = { ox + ( c + 1 ) * st, oy + r * st, l.heights[r][c + 1] };
 							const float cc[3] = { ox + ( c + 1 ) * st, oy + ( r + 1 ) * st, l.heights[r + 1][c + 1] };
 							const float d[3] = { ox + c * st, oy + ( r + 1 ) * st, l.heights[r + 1][c] };
-							probeSoup.addTri( a, b, cc );
-							probeSoup.addTri( a, cc, d );
+							if ( baking ) {
+								/* the splat's composite; without one, a stated dirt tone (sRGB 110, 100, 85)
+								 * times the cell's VCLR */
+								const qint64 gx = qint64( std::lround( a[0] / 128.0f ) ), gy = qint64( std::lround( a[1] / 128.0f ) );
+								const auto it = landAlb.constFind( ( gx << 32 ) ^ ( gy & 0xffffffffll ) );
+								float g[3] = { 110.0f / 255.0f, 100.0f / 255.0f, 85.0f / 255.0f };
+								if ( it != landAlb.constEnd() ) {
+									for ( int k = 0; k < 3; k++ )
+										g[k] = ( *it )[size_t( k )];
+									albLandSplat++;
+								} else {
+									if ( l.hasColors )
+										for ( int k = 0; k < 3; k++ )
+											g[k] *= ( l.colors[r][c][k] + l.colors[r][c + 1][k] + l.colors[r + 1][c + 1][k]
+												+ l.colors[r + 1][c][k] ) / ( 4.0f * 255.0f );
+									albLandFlat++;
+								}
+								quint8 rgb[3];
+								for ( int k = 0; k < 3; k++ )
+									rgb[k] = quint8( std::lround( ProbeAlbedo::srgbToLinear( g[k] ) * 255.0f ) );
+								probeSoup.addTri( a, b, cc, rgb );
+								probeSoup.addTri( a, cc, d, rgb );
+							} else {
+								probeSoup.addTri( a, b, cc );
+								probeSoup.addTri( a, cc, d );
+							}
 						}
 				}
 		}
@@ -1836,6 +1933,36 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 			else
 				for ( const QString & line : probeCensusText( pr ).split( '\n', Qt::SkipEmptyParts ) )
 					t << "  " << line << "\n";
+			/* lane PRTPBAKE: the bake, into FO4CS's .tbk sector files. The folder is never the
+			 * game's own (Documents/My Games/Fallout4/F4SE/TransportBake): copying there is a
+			 * choice the user makes. */
+			if ( baking && placed ) {
+				QString dir = !bakeEnv.isEmpty() ? bakeEnv : !bakeDirEnv.isEmpty() ? bakeDirEnv : spec.bakeDir;
+				if ( dir.isEmpty() ) {
+					QString name = spec.interior ? spec.interiorCell : spec.world;
+					name.replace( QRegularExpression( QStringLiteral( "[^A-Za-z0-9_+-]" ) ), QStringLiteral( "_" ) );
+					dir = QCoreApplication::applicationDirPath() + QStringLiteral( "/prtp_bake/" )
+						+ ( name.isEmpty() ? QStringLiteral( "cell" ) : name );
+				}
+				ProbeBakeSpec bs;
+				const QByteArray br = qgetenv( "WW_CELL_PROBE_BAKE_RAYS" );
+				if ( br.toInt() > 0 )
+					bs.rays = br.toInt();
+				bs.red = QString::fromLatin1( qgetenv( "WW_PROBE_BAKE_RED" ) );
+				bs.noSky = spec.interior;   // an interior's misses are void, never sky
+				ProbeBakeResult bres;
+				t << "  bake albedo: object triangles from their map " << albTextured << ", grey (no map read) "
+				  << albUntextured << ", ground quads from the splat " << albLandSplat << ", flat tone x VCLR "
+				  << albLandFlat << ", maps read " << probeAlb.texturesRead << ", missing " << probeAlb.texturesMissing
+				  << "\n";
+				if ( !probeBake( probeSoup, pr.probes, bs, QDir::cleanPath( dir ), &bres ) ) {
+					t << "  bake REFUSED: " << bres.error << "\n";
+				} else {
+					for ( const QString & line : probeBakeCensusText( bres ).split( '\n', Qt::SkipEmptyParts ) )
+						t << "  " << line << "\n";
+					t << "  bake folder " << QDir::toNativeSeparators( QDir::cleanPath( dir ) ) << "\n";
+				}
+			}
 		}
 		// the markers: one small box each, colored by class, split under the 16-bit index limit
 		int bucketNo = 0;

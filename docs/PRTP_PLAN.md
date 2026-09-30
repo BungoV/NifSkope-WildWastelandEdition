@@ -63,6 +63,8 @@ the `.loda` AO map. Probes happen here.
 6. **PRTP6 -- the probe bake.** Section 1's rows from "G-buffer" down. Output
    format: proposed = the FO4CS in-game baker's `.tbk` so the game already reads
    it (bungo's call; the FO4CS reader otherwise comes last by standing order).
+   BAKE WRITTEN 2026-09-30 (lane PRTPBAKE): section 2g. The band's Bake writes
+   `.tbk` v3 sector files; gate tests/spells/probe_bake.py (independent re-trace).
 
 ## 2b. Inherited from FO4CS's in-game bake (read 2026-09-30; MISTAKES: this plan was first written without it)
 
@@ -153,8 +155,10 @@ The lattice alone leaves small rooms and hallways without a probe. On top of it,
 Show probes | Place | Bake. Place re-opens the cell with the probes placed over the whole loaded block
 (`CellSceneSpec::probes`); the kind rows (first hit, interior, wall, doorway, window, breach, room, cover,
 All) are read from the placer's census lines in the builder's notes, their swatches from the one color
-table the markers draw with (`cellProbeKinds()`). Show probes off = placed and counted, not drawn. Bake is
-off until PRTP6. Gate: `WW_CELLWS_PRTP=1` on tests/spells/cell_workspace.sh's run: 11 PRTP rows.
+table the markers draw with (`cellProbeKinds()`). Show probes off = placed and counted, not drawn. Bake
+(lane PRTPBAKE) places and bakes in one re-open; the note line then says "baked N files, S surfels, L links:
+<folder>". Gate: `WW_CELLWS_PRTP=1` on tests/spells/cell_workspace.sh's run: 17 PRTP rows (stage 3 opens the
+written files and checks their magic and count).
 
 ## 2f. The froxels (FO4CS Volumetric Air, read only 2026-09-30; bungo: "how do the froxels get placed on areas that are covered from all probes?")
 
@@ -180,7 +184,50 @@ What PRTP gives it (FO4CS's lane, after PRTP6 ships a bake):
   probe's room). A doorway probe belongs to both rooms.
 - Nothing here changes FO4CS code from this repo: the v4 fields are additive (a v3 reader skips them).
 
+## 2g. The bake -- lane PRTPBAKE (2026-09-30)
+
+Output: FO4CS's own `.tbk` v3 (`src/TransportBake` in FO4CS, read only): 64-byte header, 32-byte surfels,
+144-byte probes, 12-byte links, `sector_%+05d_%+05d.tbk` per 4096-unit sector, keys by float floor
+division, surfel cell 70. Every sector file carries each surfel its probes link to, so a file reads alone.
+The folder is `<NifSkope>/prtp_bake/<world or cell>`; copying it into the game's TransportBake folder is the
+user's step, never done by NifSkope. `WW_CELL_PROBE_BAKE_DIR` moves it; `WW_CELL_PROBE_BAKE=<folder>` bakes
+on every probing build (headless runs).
+
+How (src/probebake.cpp, CLI `probebake --soup ...`):
+- Rays: a Fibonacci sphere of N (default 2048), each worth 4pi/N, from each probe through the soup's BVH
+  (src/probebvh.h, shared with the placer). A miss is sky, per octant; a hit lands in a 70-unit cell.
+- Pass 1 settles each cell's surfel: hits sorted into six bins by the side they face (normal turned toward
+  the ray's probe). The cell keeps the side most rays saw plus every side not opposed to it: mean position
+  (kept inside the cell), mean normal, mean albedo.
+- Pass 2 per probe: sky and surface per octant, mean distance and RMS, one link per cell hit with weight
+  = its solid angle / 4pi and the mean direction.
+- THE THIN-WALL RULE. A 70-unit cell can hold both faces of a wall. `.tbk` v3 has one surfel per cell,
+  so a probe on the far side would link to a surfel facing away and pull light through the wall. Such a
+  link is refused and its weight goes to `unlinkedWeight`, which FO4CS's relight already takes out of the
+  gather domain (effectiveCoverage = coverage - unlinked - unresolved) and renormalizes over. Cost on the
+  Museum block: about 13% of the sphere lands on refused back faces. A v4 with two sides per cell would
+  get it back. Then the links are sorted (weight, then key) and capped at 256; the rest is unlinked too.
+- Deterministic: fixed chunks merged in chunk order; 1 thread and all threads give byte-identical files.
+- Albedo (src/probealbedo.cpp), LINEAR like FO4CS's G-buffer surfels. Objects: the diffuse map at a
+  coarse mip (<= 64 texels) at the triangle's UV centroid, times its vertex color in gamma, then decoded.
+  Ground: the terrain splat per 128-unit quad, each pass's map mean times its VCLR, laid in draw order by
+  its mean opacity; without a splat, a stated dirt tone (sRGB 110, 100, 85) times VCLR. No map = grey 128.
+- Glass is not in the soup today, so rays pass it untinted. Tint is open.
+- Interior cells have no sky (`ProbeBakeSpec::noSky`, set from the cell view for an interior): a ray that
+  leaves through an opening meets the unloaded void, so its weight is unlinked and every octant's sky is 0.
+  Settled in-lane (FO4CS documents exterior bakes only; its Volumetric Air refuses interiors, 2f).
+
+Gate: tests/spells/probe_bake.py. `synth` bakes a scene of known answer (ground plane plus a closed room)
+with 1 thread and all threads (must match byte for byte), then re-traces every probe in numpy with its own
+Moller-Trumbore and its own model of the surfel sides: sky per octant, distances, link weights (L1),
+directions, the unlinked budget, room probes see no sky, ground probes see the sky turned away from the
+room, albedo, and no link faces away. Two reds (`--red octant`, `--red normal`) must FAIL. `check <dir>`
+runs the structure and budget checks on any baked folder. A `--no-sky` leg re-bakes the synth scene and requires
+the same links, zero sky and the sky's weight in unlinked. Sanctuary -20,7 (256 probes), Concord -15,17 (658) and
+the Museum interior (975, sky 0) pass.
+
 ## 3. Open
 
-- `.tbk` compatibility vs a new NifSkope format (proposal above).
+- `.tbk` v4: two surfel sides per cell (gives back the refused thin-wall weight), room ids (2f).
+- Glass tint in the bake.
 - Save names for the PRTP4 capture flights.

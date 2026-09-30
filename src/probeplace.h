@@ -42,11 +42,26 @@ struct ProbeSoup
 		float hi[3] = { 0, 0, 0 };
 	};
 	std::vector<Door> doors;
+	/*! Lane PRTPBAKE: 3 bytes a triangle, LINEAR albedo x 255 (the texture's sRGB decoded,
+	 *  times the vertex color), what the bake's surfels store. Empty = no albedo known
+	 *  (the placer never reads it); the soup file carries it as an optional 'ALB1' tail. */
+	std::vector<quint8> alb;
 	void addTri( const float a[3], const float b[3], const float c[3] )
 	{
 		tris.insert( tris.end(), a, a + 3 );
 		tris.insert( tris.end(), b, b + 3 );
 		tris.insert( tris.end(), c, c + 3 );
+		if ( !alb.empty() )
+			alb.resize( tris.size() / 3, 128 );   // keep 3 bytes a triangle once any triangle has one
+	}
+	void addTri( const float a[3], const float b[3], const float c[3], const quint8 rgb[3] )
+	{
+		if ( alb.size() != tris.size() / 3 )
+			alb.resize( tris.size() / 3, 128 );   // earlier triangles had none: mid grey
+		tris.insert( tris.end(), a, a + 3 );
+		tris.insert( tris.end(), b, b + 3 );
+		tris.insert( tris.end(), c, c + 3 );
+		alb.insert( alb.end(), rgb, rgb + 3 );
 	}
 	qint64 triCount() const { return qint64( tris.size() / 9 ); }
 };

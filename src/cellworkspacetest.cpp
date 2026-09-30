@@ -142,9 +142,10 @@ int probeShapes( NifSkope * skope )
 	return n;
 }
 
-/* ---- lane PRTPPLACE: THE PRTP BAND (WW_CELLWS_PRTP=1). Place and Show probes each
- * re-open the cell, so each stage runs on the NEXT completeLoading. Returns true
- * when the run is finished and the report can be written. */
+/* ---- lane PRTPPLACE: THE PRTP BAND (WW_CELLWS_PRTP=1). Place, Show probes and Bake
+ * each re-open the cell, so each stage runs on the NEXT completeLoading. Returns true
+ * when the run is finished and the report can be written. Stage 3 (lane PRTPBAKE)
+ * checks the bake's files; set WW_CELL_PROBE_BAKE_DIR to keep them out of release/. */
 bool runPrtpStage( NifSkope * skope, int stage )
 {
 	auto add = []( const QString & what, bool ok, const QString & detail = QString() ) {
@@ -175,7 +176,7 @@ bool runPrtpStage( NifSkope * skope, int stage )
 				&& dCell->findChild<QWidget *>( QStringLiteral( "CellWorkspaceProbesPlace" ) )
 				&& dCell->findChild<QWidget *>( QStringLiteral( "CellWorkspaceProbesBake" ) ) );
 		QWidget * bake = dCell->findChild<QWidget *>( QStringLiteral( "CellWorkspaceProbesBake" ) );
-		add( "PRTP: Bake is off until the bake exists", bake && !bake->isEnabled() );
+		add( "PRTP: Bake is on", bake && bake->isEnabled() );
 		add( "PRTP: no kind rows before Place", panel->probeKindRows().isEmpty(),
 			panel->probeKindRows().join( QLatin1Char( '|' ) ) );
 		add( "PRTP: no probe markers before Place", probeShapes( skope ) == 0,
@@ -198,19 +199,52 @@ bool runPrtpStage( NifSkope * skope, int stage )
 			add( "picture: the PRTP band after Place", sz.width() > 800,
 				QStringLiteral( "cell_prtp_placed  %1x%2" ).arg( sz.width() ).arg( sz.height() ) );
 		}
+		add( "PRTP: Place alone does not bake", !panel->noteText().startsWith( QLatin1String( "baked" ) ),
+			panel->noteText() );
 		g_rows.append( Row{ true, QStringLiteral( "PRTP: kept for stage 2" ), rows.join( QLatin1Char( '|' ) ) } );
 		panel->setProbesShown( false );
 		return false;
 	}
-	// stage 2: Show probes off -- counted, not drawn
 	QString keptRows;
 	for ( const Row & r : g_rows )
 		if ( r.what == QLatin1String( "PRTP: kept for stage 2" ) )
 			keptRows = r.detail;
-	const QStringList rows = panel->probeKindRows();
-	add( "PRTP: Show probes off keeps the counts", !rows.isEmpty() && rows.join( QLatin1Char( '|' ) ) == keptRows,
-		rows.join( QLatin1Char( '|' ) ) );
-	add( "PRTP: Show probes off draws no markers", probeShapes( skope ) == 0, QString::number( probeShapes( skope ) ) );
+	if ( stage == 2 ) {
+		// stage 2: Show probes off -- counted, not drawn
+		const QStringList rows = panel->probeKindRows();
+		add( "PRTP: Show probes off keeps the counts", !rows.isEmpty() && rows.join( QLatin1Char( '|' ) ) == keptRows,
+			rows.join( QLatin1Char( '|' ) ) );
+		add( "PRTP: Show probes off draws no markers", probeShapes( skope ) == 0, QString::number( probeShapes( skope ) ) );
+		// lane PRTPBAKE: Bake re-opens once more; stage 3 reads what it wrote
+		panel->bakeProbes();
+		return false;
+	}
+	// stage 3: Bake wrote .tbk sector files, and the note says where
+	const QString note = panel->noteText();
+	add( "PRTP: Bake says what it wrote", note.startsWith( QLatin1String( "baked " ) ), note );
+	const int colon = note.indexOf( QLatin1String( ": " ) );
+	const QString dir = colon > 0 ? note.mid( colon + 2 ).trimmed() : QString();
+	const QStringList tbks = dir.isEmpty() ? QStringList()
+		: QDir( dir ).entryList( { QStringLiteral( "sector_*.tbk" ) }, QDir::Files, QDir::Name );
+	int good = 0;
+	for ( const QString & f : tbks ) {
+		QFile fh( QDir( dir ).filePath( f ) );
+		if ( fh.open( QIODevice::ReadOnly ) && fh.read( 4 ) == QByteArray( "TBK1" ) )
+			good++;
+	}
+	add( "PRTP: the folder holds .tbk sector files, each starting TBK1", !tbks.isEmpty() && good == tbks.size(),
+		QStringLiteral( "%1 of %2 in %3" ).arg( good ).arg( tbks.size() ).arg( dir ) );
+	const int filesSaid = note.section( QLatin1Char( ' ' ), 1, 1 ).toInt();
+	add( "PRTP: the note's file count is the folder's", filesSaid > 0 && filesSaid == tbks.size(),
+		QStringLiteral( "%1 vs %2" ).arg( filesSaid ).arg( tbks.size() ) );
+	add( "PRTP: Bake keeps the kind rows", panel->probeKindRows().join( QLatin1Char( '|' ) ) == keptRows,
+		panel->probeKindRows().join( QLatin1Char( '|' ) ) );
+	const QString shotDir = QString::fromLocal8Bit( qgetenv( "WW_CELLWS_SHOTS" ) );
+	if ( !shotDir.isEmpty() ) {
+		const QSize sz = composeWindowShot( skope, shotDir + QStringLiteral( "/cell_prtp_baked.png" ) );
+		add( "picture: the PRTP band after Bake", sz.width() > 800,
+			QStringLiteral( "cell_prtp_baked  %1x%2" ).arg( sz.width() ).arg( sz.height() ) );
+	}
 	return true;
 }
 

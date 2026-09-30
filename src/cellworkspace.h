@@ -142,6 +142,8 @@ public:
 	bool probesShown() const;
 	//! Click Place / flip Show probes, exactly as the mouse would.
 	void placeProbes();
+	//! Click Bake (lane PRTPBAKE): place, then write the `.tbk` sector files.
+	void bakeProbes();
 	void setProbesShown( bool on );
 
 public slots:
@@ -200,7 +202,8 @@ private:
 	/*! THE PRTP BAND (lane PRTPPLACE, 2026-09-30; bungo: in the Cell workspace, not a
 	 *  new one, named PRTP). Place re-opens the cell with the probes placed; the
 	 *  kind rows are READ from the builder's notes, like the legend. Bake waits
-	 *  for PRTP6. */
+	 *  for PRTP6. Bake (lane PRTPBAKE) places and bakes in one rebuild; the band's
+	 *  note line then says what was written and where. */
 	QCheckBox * probesShow = nullptr;
 	QPushButton * probesPlace = nullptr;
 	QPushButton * probesBake = nullptr;

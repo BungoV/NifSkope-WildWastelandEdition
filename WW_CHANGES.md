@@ -1,5 +1,19 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## PRTP probe bake: FO4CS .tbk files from the Cell workspace (lane PRTPBAKE, 2026-09-30)
+
+- Bake in the PRTP band works: it places the probes, then writes FO4CS transport-bake files (`.tbk` v3, one per
+  4096-unit sector) to `<NifSkope>/prtp_bake/<world or cell>`. The note line says how many files, surfels and links,
+  and where. Copying them into the game is your step.
+- Each probe casts 2048 rays: sky per octant, a surfel per 70-unit cell hit, links weighted by solid angle.
+- Thin walls: a cell holding both faces of a wall keeps the side most rays saw; a probe behind it gets no link
+  through the wall (that weight is left out, and the game renormalizes over the rest).
+- Surfel color comes from the real textures: the diffuse map times vertex color for objects, the terrain splat for
+  the ground. Sanctuary: 96,701 object triangles textured, 0 maps missing.
+- Same result on 1 thread or all threads, byte for byte. Checked by an independent re-trace
+  (tests/spells/probe_bake.py) that fails on two broken builds.
+- Command line: `NifSkope probebake --soup <file> --rect ... --out <folder>`.
+
 ## PRTP probe placement: FO4CS's lattice, openings, rooms and hallways; the PRTP band; cell view fixes (lane PRTPPLACE, 2026-09-30)
 
 - Probe placement for the PRTP bake (docs/PRTP_PLAN.md 2c-2e). The lattice, column and wall probes follow FO4CS's
@@ -9,8 +23,8 @@
 - Interiors: rooms split at their openings. Every enclosed room gets a probe at its widest spot; every spot a probe
   cannot see within 200 (70 in a hallway, so hallway probes stand at most 140 apart) gets one. Sealed hollows and
   furniture tops get none. Museum of Freedom: 609 -> 975 probes. Concord 3x3: 3,679 -> 4,335.
-- The PRTP band in the Cell workspace: Show probes, Place (counts per kind, colored like the markers), Bake (off
-  until the bake exists).
+- The PRTP band in the Cell workspace: Show probes, Place (counts per kind, colored like the markers), Bake (the
+  bake is lane PRTPBAKE, above).
 - Cell view: material swaps drawn (the ref's XMSP, else the base's MODS) with their CNAM paint; the mesh's own
   vertex colors drawn; a block over 65,536 vertices per material no longer wraps (missing porch rails, roof trim,
   hubcaps). The workspace panel re-reads the notes after a rebuild (it showed the build before).

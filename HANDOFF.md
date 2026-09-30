@@ -1,6 +1,28 @@
 # Handoff — NifSkope, Wild Wasteland Edition
 
-## TOP BLOCK -- written 2026-09-30 18:01 (`date`-read): PRTPPLACE (probe placement + interior rule + PRTP band) MERGED to main
+## TOP BLOCK -- written 2026-09-30 19:00 (`date`-read): PRTPBAKE (the probe bake, PRTP6) MERGED to main
+
+### PRTPBAKE -- branch prtpbake-20260930 (worktree E:\Projects\NifskopeWWE-prtpplace)
+Plan: docs/PRTP_PLAN.md 2g. Code: src/probebake.{h,cpp} (bake + `.tbk` v3 writer + CLI `probebake`),
+src/probebvh.h (BVH shared with the placer), src/probealbedo.{h,cpp} (surfel albedo from the maps),
+cellview.cpp (albedo per soup triangle, splat composite for the ground, bake after placement), the band's Bake
+in cellworkspace.cpp, harness stage 3 in cellworkspacetest.cpp.
+- Output = FO4CS's own `.tbk` v3, `<NifSkope>/prtp_bake/<world or cell>`; never written into the game.
+  `WW_CELL_PROBE_BAKE_DIR` moves the Bake folder; `WW_CELL_PROBE_BAKE=<dir>` bakes every probing build (headless).
+- Thin-wall rule: one surfel side per 70-unit cell; a link to a surfel facing away is refused into unlinked.
+  Interior cells (`noSky`): misses are void, unlinked, sky 0 (my call, logged: FO4CS documents exterior bakes only).
+- Gates: `python tests/spells/probe_bake.py synth <exe> <dir>` PASS (independent numpy re-trace, 1 vs all threads
+  byte-identical, --no-sky leg); `--red octant|normal` each FAIL. `check <dir>`: Sanctuary -20,7 (256 probes),
+  Concord -15,17 (658), Museum interior (975, sky 0) all PASS. probe_place.py synth PASS.
+  tests/spells/cell_workspace.sh: 50 in-window rows, 0 failures (17 PRTP rows incl. the bake's); the same 3
+  pre-existing FAILs as PRTPPLACE (two stale CELLWORK1 git-HEAD controls, animws fixture main-tree only).
+- Albedo census: Sanctuary 96,701 textured tris / 0 maps missing; Museum 1,272,784 / 1 missing (4 grey tris).
+- Pictures (4 views each: surfel albedo, sky per probe, bounce color, one probe's links):
+  scratchpad/prtpbake_20260930/g/{sanctuary_bake,concord_bake,museum_bake}.png, drawn by bake_pictures.py there.
+- Open: `.tbk` v4 (two sides per cell -- Museum loses ~13% of the sphere to refused back faces; room ids),
+  glass tint, how FO4CS finds an interior cell's files. **Next**: PRTP3 viewport lights, PRTP4 captures, PRTP5 walk.
+
+## PREVIOUS BLOCK -- written 2026-09-30 18:01 (`date`-read): PRTPPLACE (probe placement + interior rule + PRTP band) MERGED to main
 
 ### PRTPPLACE -- branch prtpplace-20260930 (worktree E:\Projects\NifskopeWWE-prtpplace)
 Plan: docs/PRTP_PLAN.md 2c (openings), 2d (interior rule), 2e (PRTP band). Code: src/probeplace.{h,cpp},

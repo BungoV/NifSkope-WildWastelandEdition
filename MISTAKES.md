@@ -5,6 +5,22 @@ Written the moment a mistake is recognised, unprompted (CONSTITUTION rule 2).
 Format: date -- what was done -- what was true -- how it was found -- the rule.
 Newest at the top.
 
+## 2026-09-30 -- PRTPBAKE: a gate scene with a coplanar twin; a changelog edit that rewrote every line ending; a harness env that changed what Place does
+
+- What was done: (1) the bake gate's room box had a bottom face lying on the ground plane; 156 surfels then
+  differed from the gate's model, and I first looked for a bake bug. (2) Editing WW_CHANGES.md, the script
+  normalized CRLF to LF and back, so the diff was the whole file (13,544 lines). (3) The harness set
+  `WW_CELL_PROBE_BAKE`, which bakes on every probing build, so Place baked too and the "Place alone does not
+  bake" row failed.
+- What was true: (1) two coincident faces make the winner a tie-break between two implementations, not a
+  measurement; the scene was wrong, not the bake. (2) WW_CHANGES.md mixes CRLF and LF; only a byte-level
+  insert keeps it. (3) a harness variable must not change the behavior under test.
+- How it was found: (1) the mismatches sat exactly on the room's floor; (2) `git diff --stat` before commit;
+  (3) the new harness row itself.
+- The rule: gate scenes have no coplanar faces. Measure a file's endings before a scripted edit and never
+  normalize a mixed file. A harness names folders with its own variable (`WW_CELL_PROBE_BAKE_DIR`); it does not
+  reuse a switch that changes behavior.
+
 ## 2026-09-30 -- PRTP2: a root-wide find in the FO4CS folder; two DeepSeek jobs waited on a spent plan
 
 - What was done: looking for the Volumetric Air shaders, I ran `find` from the Fo4CommunityShaders root
