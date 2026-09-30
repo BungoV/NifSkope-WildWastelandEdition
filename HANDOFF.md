@@ -1,6 +1,28 @@
 # Handoff — NifSkope, Wild Wasteland Edition
 
-## TOP BLOCK -- written 2026-09-30 12:28 (`date`-read): TERRLIVE2 and PRTP1 done on their branches, NOT merged
+## TOP BLOCK -- written 2026-09-30 18:01 (`date`-read): PRTPPLACE (probe placement + interior rule + PRTP band) MERGED to main
+
+### PRTPPLACE -- branch prtpplace-20260930 (worktree E:\Projects\NifskopeWWE-prtpplace)
+Plan: docs/PRTP_PLAN.md 2c (openings), 2d (interior rule), 2e (PRTP band). Code: src/probeplace.{h,cpp},
+hooks in cellview.cpp / nifcli.cpp, the band in cellworkspace.{h,cpp}, its rows in cellworkspacetest.cpp.
+- Placement: FO4CS's lattice / column / wall rules number for number; openings from voxelized air at 4 angles;
+  interior rule: rooms split at openings, room probe at the widest spot, cover fill 200 u (hallway 70 u),
+  sealed / ledge / open rooms skipped. Museum 609 -> 975, Concord 3x3 3,679 -> 4,335.
+- Gates: `python tests/spells/probe_place.py synth <exe> <dir>` PASS; `--red wall|aperture|frames|coverage`
+  each FAIL. `retrace <psp> <tsv>`: Concord PASS, Museum PASS (1 edge tie). tests/spells/cell_workspace.sh:
+  44 in-window rows, 0 failures (11 PRTP rows); its 3 FAILs are pre-existing (two CELLWORK1 "git HEAD" controls
+  that only held before that lane merged; animws.sh needs fixtures/human_male_vanilla.nif, main tree only).
+- Baseline gate: FAILS identically on main's exe (8 files, arrays _g.DDS): pre-existing drift since the
+  2026-09-24 pin, not this branch. Logs baseline_check*.log in the lane scratch.
+- Cell view fixes: MSWP swaps + CNAM paint, mesh vertex colors, 32-bit bucket triangles (rails/trim/rims).
+  The Concord pickup = PickUpTruck02A_Static drawn with its rusted-white swap (ask bungo what he sees in game).
+  The olive "wall" in the street shots = the cell grid curtains (NOGRID for pictures).
+- Maps: scratchpad/prtpplace_20260930/cells/{museum_rooms_before_after,concord11_after,concord11_after_crop}.png.
+- Froxels (FO4CS Volumetric Air, read only): see PRTP_PLAN 2f.
+- **Next**: PRTP2 = vanilla light model research, PDB first, RVA per build in private notes (DeepSeek never
+  sees the PDB). Then PRTP3 viewport lights.
+
+## PREVIOUS BLOCK -- written 2026-09-30 12:28 (`date`-read): TERRLIVE2 and PRTP1 done on their branches, NOT merged
 
 ### TERRLIVE2 -- branch terrlive2-20260929 @ a2b06497, pushed, NOT merged (brief: no merge)
 Report: E:\Projects\NifskopeWWE-terrlive2\scratchpad\terrlive2_20260929\DONE.md (last two sections).
@@ -25,7 +47,7 @@ tests/spells/cell_lights.sh: 10 interiors, 3,945 lights, all match an independen
 Lights are read, not yet drawn. Open from the plan's PRTP1 list: ground through the terrain splat.
 - **Next**: PRTP2 = vanilla light model research, PDB first (DeepSeek never sees the PDB).
 
-## PREVIOUS BLOCK -- written 2026-09-29 14:09 (`date`-read) by lane MERGE2: IDENT2 + TERRLIVE1 MERGED into main, main's exe rebuilt; NOT re-baked, NOT flown
+## OLDER BLOCK -- written 2026-09-29 14:09 (`date`-read) by lane MERGE2: IDENT2 + TERRLIVE1 MERGED into main, main's exe rebuilt; NOT re-baked, NOT flown
 
 bungo's word (2026-09-29, after both lanes' final pictures): merge "Yes". Done by MERGE2. Report:
 scratchpad/merge2_20260929/DONE.md (every gate with its numbers, the red controls, the scripts beside it).
