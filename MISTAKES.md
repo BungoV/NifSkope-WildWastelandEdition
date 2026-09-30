@@ -5,6 +5,18 @@ Written the moment a mistake is recognised, unprompted (CONSTITUTION rule 2).
 Format: date -- what was done -- what was true -- how it was found -- the rule.
 Newest at the top.
 
+## 2026-09-30 -- PRTP plan and answers written without reading FO4CS's own probe campaign
+
+- What was done: docs/PRTP_PLAN.md, and my answers to bungo on dynamics, doors and probe placement, were written from
+  the Division deck alone. I proposed "bake doors closed, big doors twice".
+- What was true: FO4CS ran the whole in-game Division bake campaign on 2026-08-03..08-07 (TransportBake, `.tbk`,
+  lanes B1..B2o, Codex/division-*.md, rulings in Codex/HANDOFF.md ~17350-18680). bungo had already ruled doors:
+  bake with doors EXCLUDED (aperture open), tag links crossing a door's aperture with the door id, the runtime
+  attenuates them by door state; apertures are detected without a door ("there's not always a door in a doorway").
+- How it was found: bungo asked "Did you read the rules from fo4cs for our probes? ... Or the code".
+- The rule: before planning or answering on any subsystem, read the project's own prior campaign on it (reports,
+  rulings, code) -- check existing first, across sibling projects too.
+
 ## 2026-09-29 -- TERRLIVE1 lane text and MERGE2 (spliced by MERGE2)
 
 ### TERRLIVE1
