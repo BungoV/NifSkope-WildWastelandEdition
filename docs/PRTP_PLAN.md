@@ -24,7 +24,7 @@ the `.loda` AO map. Probes happen here.
 | Lit like the game ("lighting on") | weather sun, ambient, DALC 6-axis via lookdev (lookdevstage.cpp, esmweather.cpp) | placed point/spot lights with vanilla falloff; interior ambient; fog; proof against game captures |
 | G-buffer from 6 faces per probe: albedo, normal, depth (s16) | none | offscreen 6-face capture of the cell scene |
 | Placement: 4 m raycast grid, a probe at EVERY hit, wall probes, <= 1000 per sector (s21-22) | none | CPU raycast over the welded scene (collision not needed: render geometry) |
-| Sky visibility: misses = sky (s18) | none | from the capture depth |
+| Sky visibility: misses = sky (s18) | GROUND ONLY: the `.loda` AO map (TERRLIVE2) is sky visibility over our painted ground at 32 u -- one up-facing scalar per texel, the same "misses = sky" quantity | probes still need their own, per face (6 directions): under bridges and beside walls one up-facing number is wrong. `.loda` also feeds far-field snow/wetness placement |
 | Surfels: 1 m cells keyed by position AND principal normal axis (s24) | none | FO4CS lacks the normal key (their M-04): do it right here |
 | 4 m irradiance bricks, probes gather from bricks (s25) | none | FO4CS lacks bricks (their M-03): do it right here |
 | Layout probes -> brick factors (6 face weights) -> bricks -> surfels, per sector (s26-32) | none | one file per cell (sector = cell, 4096 u) |
