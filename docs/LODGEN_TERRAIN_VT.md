@@ -2402,12 +2402,14 @@ samples bilinearly, so up to 8 textures, usually 2-4.
 **Storage: `<ws>.lodr`, a new file** next to the VT levels (lodgen.h `LodgenRuleMap`,
 `lodgenRuleWrite` / `lodgenRuleRead`):
 - a 64-byte header:
-  - "LODR", version 1, header size;
+  - "LODR", version 2 (TERRLIVE2), header size;
   - cell min X/Y, cells X/Y, samples a cell;
   - palette count, band (f32);
   - payload and raw sizes, CRC32 of palette + payload;
 - the palette as LTEX form ids;
-- a zlib stream of the planes A, B, W (u8; A = 255 means no sample).
+- a zlib stream of the planes A, B, W, G (u8; A = 255 means no sample; G = brightness gain x128,
+  clamped 0.5..2, TERRLIVE2: the textures are chosen by hue with brightness counted half, and G
+  carries vanilla's luminance -- the palette has nothing as bright as vanilla's steep ground).
 
 The map is stored, not computed live, because the choice needs whole-map statistics and vanilla's
 sheets; the reader only fetches ids and weights, like the `.lodl` splat. No existing format changes.
@@ -2456,6 +2458,31 @@ Normals, mask, cover and heights are as in §2.6a.
   | street | 0.183 -> 0.190 | 0.194 -> 0.201 |
   | whole | 0.409 -> 0.396 | 0.449 -> 0.513 |
   | hills | 0.187 -> 0.243 | 0.198 -> 0.306 |
+
+### 2.6d The rounded outline (lane TERRLIVE2, 2026-09-29/30)
+
+Law 2's `d` is the distance to the nearest unpainted quadrant SQUARE, so the band followed the 2,048-unit
+staircase step for step. `d` is now a smoothed signed distance (`LodgenOutlineField`, lodgen.h): the exact
+signed distance to the staircase on a 512-unit grid, blurred with a Gaussian of sigma
+`LODGEN_OUTLINE_SIGMA` = 3072 u, then `w = smoothstep(0, band, f - offset)`, offset = sigma * sqrt(pi/2) +
+two grid half-diagonals (a blur moves a distance by at most that, so unpainted ground keeps w = 0; the callers
+also hold w = 0 on unpainted quadrants outright). One field for the bake and the live preview.
+
+* Gate (edge/outline_gate.py, on the preview's `WW_BLEND_DUMP`): the share of the band's gradient that runs
+  within 5 degrees of a grid axis must be <= the coast's own share (the painted mask blurred 4096 u) + 0.05,
+  with no weight on unpainted ground; law 2 rebuilt from the same quadrants must FAIL. North steps view:
+  coast 0.194, bar 0.244; law 2 0.561 FAIL (the proof); sigma 2048 0.305 FAIL; sigma 3072 0.166 PASS.
+* Cost: the band starts about 4.6 km inside our paint (3.3 km at sigma 2048).
+
+### 2.6e The AO map, `<ws>.loda` (lane TERRLIVE2, 2026-09-29/30)
+
+HYBRID's and DYNAMIC's live splat has no shading; the old FULL levels carried the sky AO (terrain horizon +
+the objects' sky union) in the mask sheet's B. The `.loda` is that value -- ground sky visibility -- baked at
+32 u over our painted quadrants only (the fade band lies inside them); outside, vanilla's diffuse already
+carries its shading. Part of HYBRID and DYNAMIC, no switch; the live splat multiplies OUR colour by it before
+the blend to vanilla. Format: lodgen.h (`LodgenAoMap`). Commonwealth: 15,893 quadrants, 48.0 MB. Preview GPU
+cost, Boston 1200 x 1200: 0.135 ms off, 0.136 ms on. It is ground-only: probes (docs/PRTP_PLAN.md) need
+their own per-face sky visibility.
 
 ### 2.6b The landless-cell height fill (lane FIX1, 2026-09-26) -- `--land-fill-vanilla`, OFF by default
 

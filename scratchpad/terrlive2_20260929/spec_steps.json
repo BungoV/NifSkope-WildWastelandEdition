@@ -1,0 +1,89 @@
+{
+ "lodl": "E:/Projects/Fallout 4 Mods/mods/FO4CSLOD/FO4CSLOD/Commonwealth/Commonwealth.lodl",
+ "ws": "Commonwealth",
+ "fade": [
+  8192.0,
+  12288.0
+ ],
+ "frames": 30,
+ "ltex_side": 512,
+ "decal_normals": true,
+ "rule": "E:/Projects/NifskopeWWE-terrlive2/scratchpad/terrlive2_20260929/final_on/mod/FO4CSLOD/Commonwealth/Commonwealth.lodr",
+ "views": [
+  {
+   "name": "north_steps_on",
+   "cells": [
+    4,
+    24,
+    38,
+    44
+   ],
+   "stride": 1,
+   "ortho": [
+    86016.0,
+    137216.0,
+    61440.0
+   ],
+   "width": 1600,
+   "height": 1000,
+   "lodt_far": "E:/Projects/NifskopeWWE-terrlive2/scratchpad/terrlive2_20260929/final_on/mod/FO4CSLOD/Commonwealth/Commonwealth.VT.8.lodt",
+   "loda": false,
+   "renders": [
+    {
+     "option": "baked",
+     "loda": false,
+     "out": "pics/steps_after_baked_on.png",
+     "titles": [
+      "north steps AFTER (rounded outline) -- HYBRID far levels, baked -- outside paint RULE (on)"
+     ]
+    },
+    {
+     "option": "dynamic",
+     "loda": false,
+     "out": "pics/steps_after_dynamic_on.png",
+     "titles": [
+      "north steps AFTER (rounded outline) -- DYNAMIC, live -- outside paint RULE (on)"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "north_steps_off",
+   "cells": [
+    4,
+    24,
+    38,
+    44
+   ],
+   "stride": 1,
+   "ortho": [
+    86016.0,
+    137216.0,
+    61440.0
+   ],
+   "width": 1600,
+   "height": 1000,
+   "lodt_far": "E:/Projects/NifskopeWWE-terrlive2/scratchpad/terrlive2_20260929/final_off/mod/FO4CSLOD/Commonwealth/Commonwealth.VT.8.lodt",
+   "loda": false,
+   "renders": [
+    {
+     "option": "baked",
+     "loda": false,
+     "out": "pics/steps_after_baked_off.png",
+     "titles": [
+      "north steps AFTER (rounded outline) -- HYBRID far levels, baked -- outside paint VANILLA (off)"
+     ]
+    },
+    {
+     "option": "dynamic",
+     "loda": false,
+     "out": "pics/steps_after_dynamic_off.png",
+     "titles": [
+      "north steps AFTER (rounded outline) -- DYNAMIC, live -- outside paint VANILLA (off)"
+     ]
+    }
+   ],
+   "rule": false
+  }
+ ]
+}

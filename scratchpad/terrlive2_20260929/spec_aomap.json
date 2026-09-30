@@ -1,0 +1,149 @@
+{
+ "lodl": "E:/Projects/Fallout 4 Mods/mods/FO4CSLOD/FO4CSLOD/Commonwealth/Commonwealth.lodl",
+ "ws": "Commonwealth",
+ "fade": [
+  8192.0,
+  12288.0
+ ],
+ "frames": 30,
+ "ltex_side": 512,
+ "decal_normals": true,
+ "rule": "E:/Projects/NifskopeWWE-terrlive2/scratchpad/terrlive2_20260929/final_on/mod/FO4CSLOD/Commonwealth/Commonwealth.lodr",
+ "loda": "E:/Projects/NifskopeWWE-terrlive2/scratchpad/terrlive2_20260929/final_on/mod/FO4CSLOD/Commonwealth/Commonwealth.loda",
+ "views": [
+  {
+   "cells": [
+    -8,
+    -12,
+    3,
+    -1
+   ],
+   "stride": 1,
+   "lodt_full": "E:/Projects/NifskopeWWE-terrlive2/scratchpad/terrlive2_20260929/ref16/mod/FO4CSLOD/Commonwealth/Commonwealth.VT.8.lodt",
+   "lodt_far": "E:/Projects/NifskopeWWE-terrlive2/scratchpad/terrlive2_20260929/final_on/mod/FO4CSLOD/Commonwealth/Commonwealth.VT.8.lodt",
+   "decals": "E:/Projects/NifskopeWWE-terrlive2/scratchpad/terrlive2_20260929/final_on/mod/FO4CSLOD/Commonwealth/Commonwealth.lodd",
+   "name": "street",
+   "eye": [
+    -4096.0,
+    -30720.0,
+    150.0
+   ],
+   "at": [
+    -4096.0,
+    -22000.0,
+    0.0
+   ],
+   "fov": 70.0,
+   "width": 1920,
+   "height": 1080,
+   "renders": [
+    {
+     "options": [
+      "hybrid"
+     ],
+     "loda": false,
+     "out": "pics/ao_street_off.png",
+     "titles": [
+      "street -- HYBRID, AO map OFF"
+     ]
+    },
+    {
+     "options": [
+      "hybrid"
+     ],
+     "loda": true,
+     "out": "pics/ao_street_on.png",
+     "titles": [
+      "street -- HYBRID, AO map ON (32 u, painted ground only)"
+     ]
+    },
+    {
+     "options": [
+      "dynamic"
+     ],
+     "loda": true,
+     "out": "pics/ao_street_dyn_on.png",
+     "titles": [
+      "street -- DYNAMIC, AO map ON (32 u, painted ground only)"
+     ]
+    },
+    {
+     "options": [
+      "full"
+     ],
+     "ao": 1,
+     "ao_lod": 0.0,
+     "loda": false,
+     "out": "pics/ao_street_ref64.png",
+     "titles": [
+      "street -- old FULL + baked AO 64 u (reference)"
+     ]
+    }
+   ]
+  },
+  {
+   "cells": [
+    -8,
+    -12,
+    3,
+    -1
+   ],
+   "stride": 1,
+   "lodt_full": "E:/Projects/NifskopeWWE-terrlive2/scratchpad/terrlive2_20260929/ref16/mod/FO4CSLOD/Commonwealth/Commonwealth.VT.8.lodt",
+   "lodt_far": "E:/Projects/NifskopeWWE-terrlive2/scratchpad/terrlive2_20260929/final_on/mod/FO4CSLOD/Commonwealth/Commonwealth.VT.8.lodt",
+   "decals": "E:/Projects/NifskopeWWE-terrlive2/scratchpad/terrlive2_20260929/final_on/mod/FO4CSLOD/Commonwealth/Commonwealth.lodd",
+   "name": "boston",
+   "ortho": [
+    -4096.0,
+    -24576.0,
+    16384.0
+   ],
+   "width": 1200,
+   "height": 1200,
+   "renders": [
+    {
+     "options": [
+      "hybrid"
+     ],
+     "loda": false,
+     "out": "pics/ao_boston_off.png",
+     "titles": [
+      "boston -- HYBRID, AO map OFF"
+     ]
+    },
+    {
+     "options": [
+      "hybrid"
+     ],
+     "loda": true,
+     "out": "pics/ao_boston_on.png",
+     "titles": [
+      "boston -- HYBRID, AO map ON (32 u, painted ground only)"
+     ]
+    },
+    {
+     "options": [
+      "dynamic"
+     ],
+     "loda": true,
+     "out": "pics/ao_boston_dyn_on.png",
+     "titles": [
+      "boston -- DYNAMIC, AO map ON (32 u, painted ground only)"
+     ]
+    },
+    {
+     "options": [
+      "full"
+     ],
+     "ao": 1,
+     "ao_lod": 0.0,
+     "loda": false,
+     "out": "pics/ao_boston_ref64.png",
+     "titles": [
+      "boston -- old FULL + baked AO 64 u (reference)"
+     ]
+    }
+   ]
+  }
+ ]
+}

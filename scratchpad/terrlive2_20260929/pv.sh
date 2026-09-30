@@ -1,6 +1,7 @@
 #!/bin/bash
 # TERRLIVE1: run one --terrain-preview spec under the NifSkope turn. usage: pv.sh <name> (spec_<name>.json -> pv_<name>.log)
 D=/e/Projects/NifskopeWWE-terrlive2/scratchpad/terrlive2_20260929
+mkdir -p $D/tmp; export TEMP="$(cygpath -w $D/tmp)" TMP="$(cygpath -w $D/tmp)"   # scratch on E:, never C: (2026-09-30)
 TURN=/e/Projects/NifskopeWWE-fix1/scratchpad/fix1_20260926/turn.sh
 if tasklist //FI "IMAGENAME eq Fallout4.exe" 2>/dev/null | grep -q Fallout4.exe; then echo "GAME UP"; exit 1; fi
 bash $TURN acquire TERRLIVE1 | tail -1

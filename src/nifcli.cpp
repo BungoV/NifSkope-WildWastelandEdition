@@ -3938,6 +3938,17 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 			err() << "error: --outside-paint rule needs --vt-fill-vanilla" << Qt::endl;
 			return 2;
 		}
+		/* THE AO MAP (lane TERRLIVE2): part of HYBRID and DYNAMIC, no switch. */
+		auto bakeAo = [&]() -> bool {
+			QStringList alog;
+			if ( !lodgenBakeAoMap( vtWorld, vRoot, vtDir, vo, &alog, &verr ) ) {
+				err() << "error: AO map: " << verr << Qt::endl;
+				return false;
+			}
+			for ( const QString & l : alog )
+				censusOut( l );
+			return true;
+		};
 		if ( gLgTerrainOption == LodgenTerrainOption::Dynamic ) {
 			censusOut( QStringLiteral( "vt: none -- terrain option dynamic writes no pyramid" ) );
 			if ( vo.outsideRule ) {
@@ -3949,7 +3960,7 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 				for ( const QString & l : rlog )
 					censusOut( l );
 			}
-			return 0;
+			return bakeAo() ? 0 : 1;
 		}
 		QString vtReport;
 		if ( !lodgenBakeTerrainVt( vtWorld, vRoot, vtDir, vo, nullptr, &vtReport, &verr ) ) {
@@ -3957,7 +3968,7 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 			return 1;
 		}
 		censusOut( vtReport );
-		return 0;
+		return bakeAo() ? 0 : 1;
 	}
 	if ( haveRegion ) {
 		if ( outDir.isEmpty() ) {
@@ -4340,6 +4351,18 @@ int cmdLodgen( const QString & file, bool listWorldspaces, quint32 worldspace,
 				vtOk = lodgenBakeTerrainVt( world,
 					dataRoot.isEmpty() ? QStringLiteral( "E:/Tools/Fallout 4/DataUnpacked/Data" ) : dataRoot,
 					vtDir, vo, bakeCaches, &vtReport, &vterr );
+			}
+			/* THE AO MAP (lane TERRLIVE2): part of HYBRID and DYNAMIC, no switch. */
+			if ( vtOk ) {
+				StageTimer st( &msTextures );
+				QStringList alog;
+				vtOk = lodgenBakeAoMap( world,
+					dataRoot.isEmpty() ? QStringLiteral( "E:/Tools/Fallout 4/DataUnpacked/Data" ) : dataRoot,
+					vtDir, vo, &alog, &vterr );
+				for ( const QString & l : alog )
+					censusOut( l );
+				if ( !vtOk )
+					vterr = QStringLiteral( "AO map: " ) + vterr;
 			}
 			if ( !vtOk ) {
 				err() << "error: " << vterr << Qt::endl;
@@ -6692,7 +6715,7 @@ int usage()
 		  << "                                          the 2,048-unit quadrant lines of the\n"
 		  << "                                          land colour. DEFAULT quadrant since\n"
 		  << "                                          2026-09-23 (bungo): cross-faded over\n"
-		  << "                                          --blend-margin units (default 128)\n"
+		  << "                                          --blend-margin units (default 1024)\n"
 		  << "                                          either side; colour sheets only.\n"
 		  << "                                          off = hard lines, the exact way back\n"
 		  << "  lodgen ... --terrain-region ... [--land-hex UNITS]\n"
@@ -7069,6 +7092,7 @@ int usage()
 		  << "                                          <ws>.lodg beside the pyramid.\n"
 		  << "  lodgen --decal-check <file.lodd|.lodg|dir>  read a decal pair back\n"
 		  << "  lodgen --rule-check <file.lodr|dir>   read a rule paint map back\n"
+		  << "  lodgen --ao-check <file.loda|dir>     read the 32-unit AO map back\n"
 		  << "  lodgen --terrain-preview <spec.json>  render the LOD terrain options offscreen, with GPU times\n"
 		  << "         [--vt-density 32|16|8]           the finest level's texel size in\n"
 		  << "                                          world units, as one word: 32 =\n"
@@ -8322,11 +8346,16 @@ int nifskopeCliMain( const QStringList & args )
 				return 1;
 			}
 			qint64 set = 0, pairs = 0;
+			double gSum = 0.0;
+			int gLo = 255, gHi = 0;
 			QVector<qint64> use( m.palette.size(), 0 );
 			for ( size_t s = 0; s < m.a.size(); s++ ) {
 				if ( m.a[s] == 0xFF )
 					continue;
 				set++;
+				gSum += m.gainOf( s );
+				gLo = qMin( gLo, int( m.g[s] ) );
+				gHi = qMax( gHi, int( m.g[s] ) );
 				use[m.a[s]]++;
 				if ( m.b[s] != m.a[s] && m.w[s] != 255 ) {
 					pairs++;
@@ -8339,8 +8368,38 @@ int nifskopeCliMain( const QStringList & args )
 			out() << "rule-check " << path << ": OK, cells " << m.cellMinX << "," << m.cellMinY << " + "
 				  << m.cellsX << "x" << m.cellsY << ", grid " << m.nx() << "x" << m.ny() << " at "
 				  << m.spacing() << " u, samples set " << set << " (pairs " << pairs << "), palette "
-				  << m.palette.size() << " (unused " << unused << "), band " << m.band << " u, "
+				  << m.palette.size() << " (unused " << unused << "), band " << m.band << " u, gain mean "
+				  << ( set ? gSum / double( set ) : 1.0 ) << " range " << gLo / 128.0 << ".." << gHi / 128.0 << ", "
 				  << QFileInfo( path ).size() << " bytes" << Qt::endl;
+			out().flush();
+			return 0;
+		}
+		/* Lane TERRLIVE2: read the AO map (`<ws>.loda`) back -- magic, sizes,
+		 * CRC, the sorted index inside its bounds (lodgenAoRead) -- and its census. */
+		else if ( t == QLatin1String( "--ao-check" ) ) {
+			QString path = next();
+			if ( QFileInfo( path ).isDir() ) {
+				const QStringList f = QDir( path ).entryList( { QStringLiteral( "*.loda" ) }, QDir::Files, QDir::Name );
+				path = f.isEmpty() ? QString() : QDir( path ).filePath( f.first() );
+			}
+			LodgenAoMap m;
+			QString e;
+			if ( path.isEmpty() || !lodgenAoRead( path, m, &e ) ) {
+				err() << "error: " << ( path.isEmpty() ? QStringLiteral( "no .loda in that folder" ) : e ) << Qt::endl;
+				err().flush();
+				return 1;
+			}
+			qint64 shaded = 0, hist[4] = { 0, 0, 0, 0 };
+			int lo = 255;
+			for ( quint8 a : m.ao ) {
+				shaded += a < 255 ? 1 : 0;
+				lo = qMin( lo, int( a ) );
+				hist[a >= 250 ? 0 : a >= 200 ? 1 : a >= 128 ? 2 : 3]++;
+			}
+			out() << "ao-check " << path << ": OK, quadrants " << m.quads.size() << " at " << LODGEN_AO_UNITS
+				  << " u (" << LODGEN_AO_QUAD << "x" << LODGEN_AO_QUAD << "), texels " << m.ao.size() << ", shaded "
+				  << shaded << ", darkest " << lo << ", >=250 " << hist[0] << " 200-249 " << hist[1] << " 128-199 "
+				  << hist[2] << " <128 " << hist[3] << ", " << QFileInfo( path ).size() << " bytes" << Qt::endl;
 			out().flush();
 			return 0;
 		}

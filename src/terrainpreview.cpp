@@ -125,10 +125,22 @@ uniform int uLaw2;
 // the rule paint outside (lane TERRLIVE1, `--outside-paint rule`): the .lodr's ids and weights
 uniform usampler2D uRIdx;
 uniform sampler2D uRW;
+uniform sampler2D uRG;
 uniform vec2 uROrigin;
 uniform float uRSpacing;
 uniform ivec2 uRGrid;
 uniform int uRule;
+// the AO map (lane TERRLIVE2, `<ws>.loda`): 32 u sky visibility over our painted ground, 1 elsewhere
+uniform sampler2D uLoda;
+uniform vec4 uLodaMap;
+uniform int uLodaOn;
+
+float lodaAo()
+{
+	if ( uLodaOn == 0 )
+		return 1.0;
+	return textureLod( uLoda, vec2( ( vWorld.x - uLodaMap.x ) * uLodaMap.z, ( uLodaMap.y - vWorld.y ) * uLodaMap.w ), 0.0 ).r;
+}
 
 // THE ANTI-REPEAT HOOK (lane TILING6 replaces this body): one LTEX layer at a
 // world-tiled uv, with the caller's gradients.
@@ -188,6 +200,24 @@ vec3 splat( vec2 wdx, vec2 wdy )
 	return acc * vc;
 }
 
+// the rule map's brightness gain (TERRLIVE2, .lodr v2 plane G, x128), bilinear over the samples
+// that exist -- LodgenRuleMap::mixAt's weighting
+float ruleGain( vec2 g )
+{
+	vec2 g0 = floor( g ), f = g - g0;
+	float s = 0.0, t = 0.0;
+	for ( int c = 0; c < 4; c++ ) {
+		ivec2 o = ivec2( c & 1, c >> 1 );
+		ivec2 p = clamp( ivec2( g0 ) + o, ivec2( 0 ), uRGrid - 1 );
+		float bw = ( o.x == 1 ? f.x : 1.0 - f.x ) * ( o.y == 1 ? f.y : 1.0 - f.y );
+		if ( bw <= 0.0 || texelFetch( uRIdx, p, 0 ).x == 65535u )
+			continue;
+		s += bw * texelFetch( uRG, p, 0 ).r;
+		t += bw;
+	}
+	return t > 0.0 ? s / t * ( 255.0 / 128.0 ) : 1.0;
+}
+
 // the rule paint: the map's textures through the same hook, no vertex colour (the bake's rule);
 // false where no rule sample reaches
 bool ruleSplat( vec2 wdx, vec2 wdy, out vec3 R )
@@ -198,6 +228,7 @@ bool ruleSplat( vec2 wdx, vec2 wdy, out vec3 R )
 	if ( cover <= 0.0 )
 		return false;
 	R /= cover;
+	R *= ruleGain( g );
 	return true;
 }
 
@@ -258,7 +289,7 @@ void main()
 		if ( wl > 0.0 ) {
 			vec3 V;
 			float wo = oursWeight( wdx, wdy, V );
-			L = wo > 0.0 ? splat( wdx, wdy ) : vec3( 0.0 );
+			L = wo > 0.0 ? splat( wdx, wdy ) * lodaAo() : vec3( 0.0 );
 			L = mix( V, L, wo );
 		}
 		if ( wl < 1.0 )
@@ -738,34 +769,87 @@ bool buildGrid( GL * gl, const LodtFile & L, int cx0, int cy0, int cx1, int cy1,
 			g.z[s] = zz;
 			g.zMin = qMin( g.zMin, zz );
 			g.zMax = qMax( g.zMax, zz );
-			const int cx = L.cellMinX() + gx / spc, cy = L.cellMinY() + gy / spc;
-			const int quad = ( ( gy % spc ) >= spc / 2 ? 2 : 0 ) | ( ( gx % spc ) >= spc / 2 ? 1 : 0 );
-			quint16 q[6];
-			L.quadrantSlots( cx, cy, quad, q );
-			// the file's compositing: the base, then slots 4..0 over it (slot 0 on top)
-			quint16 id[6];
-			float w[6];
+			quint16 id[24];
+			float w[24];
 			int k = 0;
-			// an empty base (no BTXT) is the engine's default land set, layer `nl` of the array
-			id[k] = ( q[5] < nl ) ? q[5] : quint16( nl );
-			w[k++] = 1.0f;
-			const quint16 aw = L.alphaWord( gx, gy );
-			for ( int layer = 4; layer >= 0; layer-- ) {
-				const int a = ( aw >> ( 3 * layer ) ) & 7;
-				if ( !a || q[layer] >= nl )
-					continue;
-				const float t = float( a ) / 7.0f;
-				for ( int m = 0; m < k; m++ )
-					w[m] *= 1.0f - t;
-				int m = 0;
-				while ( m < k && id[m] != q[layer] )
-					m++;
-				if ( m == k ) {
-					id[k] = q[layer];
-					w[k++] = 0.0f;
+			// the file's compositing of the quadrant that owns sample (sx_, sy_), added into id/w at weight f
+			auto addQuad = [&]( int sx_, int sy_, float f ) {
+				const int qcx = L.cellMinX() + sx_ / spc, qcy = L.cellMinY() + sy_ / spc;
+				const int quad = ( ( sy_ % spc ) >= spc / 2 ? 2 : 0 ) | ( ( sx_ % spc ) >= spc / 2 ? 1 : 0 );
+				quint16 q[6];
+				L.quadrantSlots( qcx, qcy, quad, q );
+				// the base, then slots 4..0 over it (slot 0 on top)
+				quint16 qi[6];
+				float qw[6];
+				int qk = 0;
+				// an empty base (no BTXT) is the engine's default land set, layer `nl` of the array
+				qi[qk] = ( q[5] < nl ) ? q[5] : quint16( nl );
+				qw[qk++] = 1.0f;
+				const quint16 aw = L.alphaWord( sx_, sy_ );
+				for ( int layer = 4; layer >= 0; layer-- ) {
+					const int a = ( aw >> ( 3 * layer ) ) & 7;
+					if ( !a || q[layer] >= nl )
+						continue;
+					const float t = float( a ) / 7.0f;
+					for ( int m = 0; m < qk; m++ )
+						qw[m] *= 1.0f - t;
+					int m = 0;
+					while ( m < qk && qi[m] != q[layer] )
+						m++;
+					if ( m == qk ) {
+						qi[qk] = q[layer];
+						qw[qk++] = 0.0f;
+					}
+					qw[m] += t;
 				}
-				w[m] += t;
+				for ( int u = 0; u < qk; u++ ) {
+					int m = 0;
+					while ( m < k && id[m] != qi[u] )
+						m++;
+					if ( m == k ) {
+						id[k] = qi[u];
+						w[k++] = 0.0f;
+					}
+					w[m] += f * qw[u];
+				}
+			};
+			/* THE QUADRANT CROSS-FADE (TERRLIVE2), the live twin of the baker's
+			 * (lodgenBakeVtTile, same margin, same halved quintic): within
+			 * `margin` of a 2,048-unit quadrant line the neighbour quadrant's
+			 * composite, read at its edge sample, is mixed in -- 0.5 at the line.
+			 * Without it every quadrant's base texture ends in a hard square. */
+			const int hq = spc / 2, lxs = gx % hq, lys = gy % hq;
+			const float margin = lodgenBlendMargin();
+			auto ease = []( float t ) -> float {
+				const float u2 = qBound( 0.0f, t, 1.0f );
+				return 0.5f * u2 * u2 * u2 * ( u2 * ( u2 * 6.0f - 15.0f ) + 10.0f );
+			};
+			int nx_ = gx, ny_ = gy;
+			float wxN = 0.0f, wyN = 0.0f;
+			if ( lodgenBlendEdges() == 1 ) {
+				const float lxq = float( lxs ) * 128.0f, lyq = float( lys ) * 128.0f;
+				if ( lxq < margin && gx - lxs - 1 >= 0 ) {
+					nx_ = gx - lxs - 1;
+					wxN = ease( 1.0f - lxq / margin );
+				} else if ( 2048.0f - lxq < margin && gx + ( hq - lxs ) <= lastX ) {
+					nx_ = gx + ( hq - lxs );
+					wxN = ease( 1.0f - ( 2048.0f - lxq ) / margin );
+				}
+				if ( lyq < margin && gy - lys - 1 >= 0 ) {
+					ny_ = gy - lys - 1;
+					wyN = ease( 1.0f - lyq / margin );
+				} else if ( 2048.0f - lyq < margin && gy + ( hq - lys ) <= lastY ) {
+					ny_ = gy + ( hq - lys );
+					wyN = ease( 1.0f - ( 2048.0f - lyq ) / margin );
+				}
 			}
+			addQuad( gx, gy, ( 1.0f - wxN ) * ( 1.0f - wyN ) );
+			if ( wxN > 0.0f )
+				addQuad( nx_, gy, wxN * ( 1.0f - wyN ) );
+			if ( wyN > 0.0f )
+				addQuad( gx, ny_, ( 1.0f - wxN ) * wyN );
+			if ( wxN > 0.0f && wyN > 0.0f )
+				addQuad( nx_, ny_, wxN * wyN );
 			// the four heaviest, renormalised
 			for ( int a = 0; a < k; a++ )
 				for ( int b = a + 1; b < k; b++ )
@@ -839,7 +923,8 @@ bool buildGrid( GL * gl, const LodtFile & L, int cx0, int cy0, int cx1, int cy1,
  * the nearest unpainted quadrant square ), colour = mix( vanilla, ours, w ).
  * Here the painted test reads the .lodl's quadrant slots (a real base or any
  * real layer) and vanilla's dim-4 diffuse is read live from the game's sheets,
- * so the live ground and the baked far levels follow one rule. */
+ * so the live ground and the baked far levels follow one rule. Lane TERRLIVE2:
+ * the distance is the ROUNDED field (LodgenOutlineField), the bake's own. */
 struct Blend
 {
 	GLuint wTex = 0, vTex = 0;
@@ -872,8 +957,9 @@ bool buildBlend( GL * gl, const LodtFile & L, int cx0, int cy0, int cx1, int cy1
 	cy1 = qMin( cy1, L.cellMaxY() );
 	const int nl = L.ltexCount();
 	const float band = LODGEN_VT_FILL_BAND;
-	const int R = int( std::ceil( band / 2048.0f ) ) + 1;
-	// the painted quadrants over the view plus the band's reach
+	// the rounded outline's window (lane TERRLIVE2): far enough that the field matches the bake's
+	const int R = lodgenOutlineWindowQuads( band );
+	// the painted quadrants over the view plus the field's reach
 	const int qx0 = 2 * cx0 - R, qy0 = 2 * cy0 - R, qx1 = 2 * cx1 + 1 + R, qy1 = 2 * cy1 + 1 + R;
 	const int qw = qx1 - qx0 + 1, qh = qy1 - qy0 + 1;
 	std::vector<quint8> pq( size_t( qw ) * qh, 0 );
@@ -906,35 +992,36 @@ bool buildBlend( GL * gl, const LodtFile & L, int cx0, int cy0, int cx1, int cy1
 	B.wn = int( std::ceil( float( cx1 - cx0 + 1 ) * 4096.0f / B.res ) );
 	B.hn = int( std::ceil( float( cy1 - cy0 + 1 ) * 4096.0f / B.res ) );
 	B.w.assign( size_t( B.wn ) * B.hn, 1.0f );
-	std::vector<std::vector<std::pair<float, float>>> nb( size_t( qw ) * qh );
-	std::vector<quint8> nbDone( size_t( qw ) * qh, 0 );
+	// the same rounded field the bake reads (LodgenOutlineField), built over this window
+	LodgenOutlineField field;
+	lodgenOutlineBuild( painted, qx0, qy0, qx1, qy1, band, field );
 	for ( int j = 0; j < B.hn; j++ ) {
 		const float wy = B.yN - ( float( j ) + 0.5f ) * B.res;
 		const int qy = int( std::floor( wy / 2048.0f ) );
 		for ( int i = 0; i < B.wn; i++ ) {
 			const float wx = B.x0 + ( float( i ) + 0.5f ) * B.res;
 			const int qx = int( std::floor( wx / 2048.0f ) );
-			float & out = B.w[size_t( j ) * B.wn + i];
-			if ( !painted( qx, qy ) ) {
-				out = 0.0f;
-				continue;
-			}
-			const size_t o = size_t( qy - qy0 ) * qw + ( qx - qx0 );
-			if ( !nbDone[o] ) {
-				nbDone[o] = 1;
-				for ( int dy = -R; dy <= R; dy++ )
-					for ( int dx = -R; dx <= R; dx++ )
-						if ( !painted( qx + dx, qy + dy ) )
-							nb[o].emplace_back( float( qx + dx ) * 2048.0f, float( qy + dy ) * 2048.0f );
-			}
-			float best = 1e30f;
-			for ( const auto & c : nb[o] ) {
-				const float ex = qMax( qMax( c.first - wx, wx - ( c.first + 2048.0f ) ), 0.0f );
-				const float ey = qMax( qMax( c.second - wy, wy - ( c.second + 2048.0f ) ), 0.0f );
-				best = qMin( best, std::sqrt( ex * ex + ey * ey ) );
-			}
-			const float t = qBound( 0.0f, best / band, 1.0f );
-			out = t * t * ( 3.0f - 2.0f * t );
+			B.w[size_t( j ) * B.wn + i] = painted( qx, qy ) ? field.weight( wx, wy, band ) : 0.0f;
+		}
+	}
+	/* WW_BLEND_DUMP=<file> (lane TERRLIVE2's outline gate): "BLDW" v1, then i32 wn hn,
+	 * f32 res x0 yN, i32 qx0 qy0 qw qh, then wn*hn f32 weights (row 0 = north), then
+	 * qw*qh u8 painted quadrants (row 0 = south). */
+	const QByteArray dumpPath = qgetenv( "WW_BLEND_DUMP" );
+	if ( !dumpPath.isEmpty() ) {
+		QFile df( QString::fromLocal8Bit( dumpPath ) );
+		if ( df.open( QIODevice::WriteOnly ) ) {
+			const qint32 hi[2] = { B.wn, B.hn };
+			const float hf[3] = { B.res, B.x0, B.yN };
+			const qint32 hq[4] = { qx0, qy0, qw, qh };
+			df.write( "BLDW", 4 );
+			const qint32 ver = 1;
+			df.write( reinterpret_cast<const char *>( &ver ), 4 );
+			df.write( reinterpret_cast<const char *>( hi ), 8 );
+			df.write( reinterpret_cast<const char *>( hf ), 12 );
+			df.write( reinterpret_cast<const char *>( hq ), 16 );
+			df.write( reinterpret_cast<const char *>( B.w.data() ), qint64( B.w.size() * 4 ) );
+			df.write( reinterpret_cast<const char *>( pq.data() ), qint64( pq.size() ) );
 		}
 	}
 	gl->glGenTextures( 1, &B.wTex );
@@ -1181,7 +1268,7 @@ int terrainPreviewRun( const EsmWorld & world, const QString & dataRoot, const Q
 		.arg( tm.elapsed() ) );
 
 	drainErrors( gl, QStringLiteral( "the LTEX array" ) );
-	GLuint ruleIdx = 0, ruleW = 0;
+	GLuint ruleIdx = 0, ruleW = 0, ruleG = 0;
 	if ( haveRule ) {
 		const int rnx = rule.nx(), rny = rule.ny();
 		std::vector<quint16> ri( size_t( rnx ) * rny * 4, 0xFFFFu );
@@ -1208,7 +1295,27 @@ int terrainPreviewRun( const EsmWorld & world, const QString & dataRoot, const Q
 		};
 		ruleIdx = mk( GL_RGBA16UI, GL_RGBA_INTEGER, GL_UNSIGNED_SHORT, ri.data() );
 		ruleW = mk( GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, rw.data() );
+		ruleG = mk( GL_R8, GL_RED, GL_UNSIGNED_BYTE, rule.g.data() );
 		drainErrors( gl, QStringLiteral( "the rule map" ) );
+	}
+	/* ---- the AO map (lane TERRLIVE2): the spec's "loda", else the .loda beside the "rule" ---- */
+	LodgenAoMap loda;
+	bool haveLoda = false;
+	{
+		QString lp = spec.value( "loda" ).toString();
+		if ( lp.isEmpty() && haveRule ) {
+			const QDir rd = QFileInfo( spec.value( "rule" ).toString() ).absoluteDir();
+			const QStringList f = rd.entryList( { QStringLiteral( "*.loda" ) }, QDir::Files, QDir::Name );
+			if ( !f.isEmpty() )
+				lp = rd.filePath( f.first() );
+		}
+		if ( !lp.isEmpty() ) {
+			if ( !lodgenAoRead( lp, loda, &why ) )
+				return fail( QStringLiteral( ".loda: " ) + why );
+			haveLoda = true;
+			say( QString( "AO map: %1: %2 quadrant(s) at %3 u, %4 bytes" ).arg( lp ).arg( loda.quads.size() )
+				.arg( double( LODGEN_AO_UNITS ) ).arg( QFileInfo( lp ).size() ) );
+		}
 	}
 	const QJsonArray fadeA = spec.value( "fade" ).toArray();
 	const float fade0 = float( fadeA.at( 0 ).toDouble( 8192.0 ) ), fade1 = float( fadeA.at( 1 ).toDouble( 12288.0 ) );
@@ -1294,6 +1401,55 @@ int terrainPreviewRun( const EsmWorld & world, const QString & dataRoot, const Q
 		} else
 			say( QString( "view %1: blend to vanilla: off (%2)" ).arg( vname,
 				lodgenVanillaLodRoot().isEmpty() ? QStringLiteral( "no --vanilla-lod-root" ) : QStringLiteral( "the spec's \"blend\": false" ) ) );
+
+		// the AO map over the view's cells, north row first, 255 (no shading) outside painted ground
+		GLuint lodaTex = 0;
+		float lodaMap[4] = { 0, 0, 1, 1 };
+		if ( haveLoda ) {
+			const int qx0 = 2 * cells.at( 0 ).toInt(), qy0 = 2 * cells.at( 1 ).toInt();
+			const int qx1 = 2 * cells.at( 2 ).toInt() + 1, qy1 = 2 * cells.at( 3 ).toInt() + 1;
+			const int Q = LODGEN_AO_QUAD;
+			const int nx = ( qx1 - qx0 + 1 ) * Q, ny = ( qy1 - qy0 + 1 ) * Q;
+			int step = 1;       // a whole-map view is box-filtered down to at most 8192 texels a side
+			while ( qMax( nx, ny ) / step > 8192 )
+				step *= 2;
+			const int tw = nx / step, th = ny / step;
+			std::vector<quint8> t( size_t( tw ) * th, 255 );
+			qint64 hit = 0;
+			for ( int qy = qy0; qy <= qy1; qy++ )
+				for ( int qx = qx0; qx <= qx1; qx++ ) {
+					const quint8 * b = loda.block( qx, qy );
+					if ( !b )
+						continue;
+					hit++;
+					for ( int v = 0; v < Q; v += step )
+						for ( int u = 0; u < Q; u += step ) {
+							int s = 0;
+							for ( int dv = 0; dv < step; dv++ )
+								for ( int du = 0; du < step; du++ )
+									s += b[( v + dv ) * Q + u + du];
+							const int r = ( ( qy1 - qy ) * Q + ( Q - 1 - v - ( step - 1 ) ) ) / step;
+							const int col = ( ( qx - qx0 ) * Q + u ) / step;
+							t[size_t( r ) * tw + col] = quint8( ( s + step * step / 2 ) / ( step * step ) );
+						}
+				}
+			gl->glGenTextures( 1, &lodaTex );
+			gl->glBindTexture( GL_TEXTURE_2D, lodaTex );
+			gl->glPixelStorei( GL_UNPACK_ALIGNMENT, 1 );
+			gl->glTexImage2D( GL_TEXTURE_2D, 0, GL_R8, tw, th, 0, GL_RED, GL_UNSIGNED_BYTE, t.data() );
+			gl->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
+			gl->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+			gl->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+			gl->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+			lodaMap[0] = float( qx0 ) * 2048.0f;
+			lodaMap[1] = float( qy1 + 1 ) * 2048.0f;
+			lodaMap[2] = 1.0f / ( float( nx ) * LODGEN_AO_UNITS );
+			lodaMap[3] = 1.0f / ( float( ny ) * LODGEN_AO_UNITS );
+			drainErrors( gl, QStringLiteral( "the AO map" ) );
+			say( QString( "view %1: AO map %2 x %3 texels at %4 u, %5 painted quadrant(s) in view" )
+				.arg( vname ).arg( tw ).arg( th ).arg( double( LODGEN_AO_UNITS ) * step ).arg( hit ) );
+		}
+		int lodaOn = 0;     // per render: the spec's "loda" (default on when the map is loaded)
 
 		DecalSet ds;
 		const QString decalPath = V.value( "decals" ).toString();
@@ -1478,6 +1634,10 @@ int terrainPreviewRun( const EsmWorld & world, const QString & dataRoot, const Q
 			gl->glUniform2i( U( gl, pTerrain, "uRGrid" ), qMax( 1, rule.nx() ), qMax( 1, rule.ny() ) );
 			bindTex( pTerrain, "uRIdx", 9, GL_TEXTURE_2D, ruleIdx );
 			bindTex( pTerrain, "uRW", 10, GL_TEXTURE_2D, ruleW );
+			bindTex( pTerrain, "uRG", 12, GL_TEXTURE_2D, ruleG );
+			gl->glUniform1i( U( gl, pTerrain, "uLodaOn" ), lodaTex ? lodaOn : 0 );
+			gl->glUniform4fv( U( gl, pTerrain, "uLodaMap" ), 1, lodaMap );
+			bindTex( pTerrain, "uLoda", 11, GL_TEXTURE_2D, lodaTex );
 			gl->glBindVertexArray( grid.vao );
 			gl->glDrawElements( GL_TRIANGLES, grid.indexCount, GL_UNSIGNED_INT, nullptr );
 			if ( timed )
@@ -1592,6 +1752,7 @@ int terrainPreviewRun( const EsmWorld & world, const QString & dataRoot, const Q
 				opts << R.value( "option" ).toString();
 			const int aoMode = R.value( "ao" ).toInt( 0 );
 			const float aoLod = float( R.value( "ao_lod" ).toDouble( 0.0 ) );
+			lodaOn = R.value( "loda" ).toBool( true ) ? 1 : 0;
 			QList<QImage> panels;
 			QStringList titles;
 			for ( const QString & os : opts ) {
@@ -1607,12 +1768,13 @@ int terrainPreviewRun( const EsmWorld & world, const QString & dataRoot, const Q
 				const GLenum err = gl->glGetError();
 				say( QString( "view %1 option %2%3: %4 x %5 px, GPU ms terrain %6, decals %7, lighting %8, total %9 "
 						"(median of %10 frames); %11 decal box(es) drawn%12" )
-					.arg( vname, optionName( option ), aoMode ? QString( " ao %1 lod %2" ).arg( aoMode ).arg( double( aoLod ) ) : QString() )
+					.arg( vname, optionName( option ), ( aoMode ? QString( " ao %1 lod %2" ).arg( aoMode ).arg( double( aoLod ) ) : QString() )
+						+ ( lodaTex ? ( lodaOn ? QStringLiteral( " loda on" ) : QStringLiteral( " loda off" ) ) : QString() ) )
 					.arg( W ).arg( H ).arg( a, 0, 'f', 3 ).arg( b, 0, 'f', 3 ).arg( c, 0, 'f', 3 ).arg( t, 0, 'f', 3 )
 					.arg( frames ).arg( boxes ).arg( err ? QString( "; GL ERROR 0x%1" ).arg( err, 0, 16 ) : QString() ) );
 				if ( err )
 					failures++;
-				shots.insert( QString( "%1|%2|%3" ).arg( option ).arg( aoMode ).arg( double( aoLod ) ), img );
+				shots.insert( QString( "%1|%2|%3|%4" ).arg( option ).arg( aoMode ).arg( double( aoLod ) ).arg( lodaOn ), img );
 				panels << img;
 				const QStringList tl = R.value( "titles" ).toVariant().toStringList();
 				titles << ( tl.value( int( panels.size() ) - 1 ).isEmpty()
@@ -1755,13 +1917,13 @@ int terrainPreviewRun( const EsmWorld & world, const QString & dataRoot, const Q
 		gl->glDeleteFramebuffers( 4, fbo );
 		GLuint tt[5] = { tAlb, tNrm, tDepth, tOut, tCount };
 		gl->glDeleteTextures( 5, tt );
-		GLuint bt[7] = { texFull, texFar, texAo, ds.atlasC, ds.atlasN, blend.vTex, blend.wTex };
-		gl->glDeleteTextures( 7, bt );
+		GLuint bt[8] = { texFull, texFar, texAo, ds.atlasC, ds.atlasN, blend.vTex, blend.wTex, lodaTex };
+		gl->glDeleteTextures( 8, bt );
 		freeGrid( gl, grid );
 	}
 	if ( haveRule ) {
-		GLuint rt[2] = { ruleIdx, ruleW };
-		gl->glDeleteTextures( 2, rt );
+		GLuint rt[3] = { ruleIdx, ruleW, ruleG };
+		gl->glDeleteTextures( 3, rt );
 	}
 	ctx.doneCurrent();
 	say( failures ? QString( "%1 failure(s)" ).arg( failures ) : QStringLiteral( "done, no failures" ) );

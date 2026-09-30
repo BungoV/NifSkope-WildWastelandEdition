@@ -10,6 +10,7 @@ BSD License - see nifskope.h
 #include "lodgenaggregate.h"
 #include "lodbfile.h"       // LodbPlugin / LodbResource: the record's v2 rows
 
+#include <functional>
 #include <QHash>
 #include <QPair>
 #include <QString>
@@ -1665,27 +1666,66 @@ bool lodgenTerrainOptionParse( const QString & s, LodgenTerrainOption * out );
  *  INSIDE the painted ground over which our colour rises from vanilla's
  *  diffuse (0) to ours (1). One number for the bake and the live preview. */
 constexpr float LODGEN_VT_FILL_BAND = 8192.0f;
+/*! THE ROUNDED OUTLINE (lane TERRLIVE2, bungo 2026-09-29: "Sure"). Painted is
+ *  decided per 2,048-unit quadrant, so the painted/unpainted line is a
+ *  staircase; law 2's band followed it step for step. The band now reads a
+ *  SMOOTHED signed distance instead: the exact signed distance to that line
+ *  (+ inside the painted ground) on a 512-unit grid, blurred with a Gaussian of
+ *  sigma LODGEN_OUTLINE_SIGMA, then
+ *      w = smoothstep( 0, band, f - lodgenOutlineOffset() ).
+ *  A blur moves a distance by at most E|Y| = sigma * sqrt(pi/2); the offset is
+ *  that plus two grid half-diagonals, so every unpainted point keeps w = 0
+ *  (the callers also hold w = 0 on unpainted quadrants outright) and the
+ *  corners of the staircase come out round. One field for the bake and the
+ *  live preview. Sigma 3072 (was 2048, 2026-09-30): at 2048 the band still
+ *  ran 0.31 along the grid axes against the coast's own 0.19 (outline_gate
+ *  RED); 3072 measures 0.17. Cost: the band starts ~4.6 km inside our paint. */
+constexpr float LODGEN_OUTLINE_SIGMA = 3072.0f;
+constexpr float LODGEN_OUTLINE_RES = 512.0f;
+float lodgenOutlineOffset();
+//! Quadrants from a point within which an unpainted one can pull w below 1.
+int lodgenOutlineReachQuads( float band );
+struct LodgenOutlineField
+{
+	int qx0 = 0, qy0 = 0;      //!< SW quadrant; grid point (i, j) at world ((qx0 * 4 + i + 0.5) * 512, (qy0 * 4 + j + 0.5) * 512)
+	int nx = 0, ny = 0;
+	std::vector<float> f;      //!< blurred signed distance, world units, row 0 = south
+	float maxUnpainted = -1e30f;  //!< census: the largest f at an unpainted grid point (must stay below the offset)
+	bool empty() const { return f.empty(); }
+	float at( float wx, float wy ) const;
+	//! Our paint's weight 0..1 at a world point (1 when the field is empty).
+	float weight( float wx, float wy, float band ) const;
+};
+//! Builds the field over quadrants [qx0, qx1] x [qy0, qy1] (inclusive). The raw distance is capped at
+//! band + 2 offset + 3 sigma (w = 1 either side of it), so any window reaching
+//! lodgenOutlineWindowQuads( band ) quadrants past what it samples gives the same field as the whole map.
+void lodgenOutlineBuild( const std::function<bool( int, int )> & paintedQ, int qx0, int qy0, int qx1, int qy1,
+	float band, LodgenOutlineField & out );
+int lodgenOutlineWindowQuads( float band );
 /*! THE RULE PAINT MAP, `<ws>.lodr` (lane TERRLIVE1, docs/LODGEN_TERRAIN_VT.md
  *  2.6c). A NEW file; no other format changes. One sample every 512 world units
  *  (8 a cell), sample (sx, sy) centred at world ( (cellMinX * 8 + sx + 0.5) * 512,
  *  (cellMinY * 8 + sy + 0.5) * 512 ), row 0 = south. Each sample names two
  *  palette entries A and B and A's weight W (B's is 255 - W); 255 in A = no
- *  sample (no vanilla colour there). The palette is LTEX form ids.
+ *  sample (no vanilla colour there). The palette is LTEX form ids. G is the
+ *  sample's brightness gain x128 (128 = 1, clamped 0.5..2, TERRLIVE2 v2): the
+ *  textures are picked by hue, G carries vanilla's brightness.
  *
  *  Layout, little-endian: 64-byte header
- *    0 "LODR"  4 u32 version (1)  8 u32 header bytes (64)
+ *    0 "LODR"  4 u32 version (2)  8 u32 header bytes (64)
  *   12 i32 cellMinX  16 i32 cellMinY  20 i32 cellsX  24 i32 cellsY
  *   28 u32 samples per cell (8)  32 u32 palette count  36 f32 band (world units)
- *   40 u32 payload bytes (zlib)  44 u32 raw bytes (3 * nx * ny)
+ *   40 u32 payload bytes (zlib)  44 u32 raw bytes (4 * nx * ny)
  *   48 u32 CRC32 of palette + payload  52 u32 flags (0)  56..63 zero
- *  then palette count x u32 LTEX forms, then the zlib stream of planes A, B, W
+ *  then palette count x u32 LTEX forms, then the zlib stream of planes A, B, W, G
  *  (u8, nx * ny each, row 0 south). */
 struct LodgenRuleMap
 {
 	int cellMinX = 0, cellMinY = 0, cellsX = 0, cellsY = 0, spc = 8;
 	float band = 0.0f;
 	QVector<quint32> palette;
-	std::vector<quint8> a, b, w;          //!< nx * ny each
+	std::vector<quint8> a, b, w, g;       //!< nx * ny each
+	float gainOf( size_t s ) const { return g.empty() ? 1.0f : float( g[s] ) / 128.0f; }
 	int nx() const { return cellsX * spc; }
 	int ny() const { return cellsY * spc; }
 	float spacing() const { return 4096.0f / float( spc ); }
@@ -1693,8 +1733,9 @@ struct LodgenRuleMap
 	float originY() const { return ( float( cellMinY ) * float( spc ) + 0.5f ) * spacing(); }
 	/*! The bilinear mix at world (wx, wy): up to 8 (palette index, weight)
 	 *  pairs, merged, weights summing to 1 over the samples that exist; the
-	 *  count, 0 where no surrounding sample exists. */
-	int mixAt( float wx, float wy, quint8 * ids, float * wts ) const;
+	 *  count, 0 where no surrounding sample exists. `gain`, when given, gets
+	 *  the bilinear brightness gain over the same samples. */
+	int mixAt( float wx, float wy, quint8 * ids, float * wts, float * gain = nullptr ) const;
 };
 //! Write `m` to `path`; the byte count, or -1 (and `why`).
 qint64 lodgenRuleWrite( const QString & path, const LodgenRuleMap & m, QString * why );
@@ -1704,6 +1745,43 @@ bool lodgenRuleRead( const QString & path, LodgenRuleMap & m, QString * why );
  *  the region in `opts`) and write `<outDir>/<ws>.lodr`. Needs a vanilla LOD
  *  root. `log` gets the census lines. */
 bool lodgenBakeOutsideRule( const EsmWorld & world, const QString & dataRoot,
+	const QString & outDir, const LodgenVtOptions & opts, QStringList * log, QString * why );
+
+/*! THE AO MAP (lane TERRLIVE2, bungo 2026-09-29: "Do what you think will
+ *  improve things"). HYBRID and DYNAMIC draw our ground near and mid with the
+ *  live splat, which has no shading of its own; the baked levels carried the
+ *  sky AO (terrain horizon + the objects' sky union) in the mask sheet's B.
+ *  This is that same value, computed by the tile bake itself (AO-only mode),
+ *  at 32 units, ONLY over our painted quadrants (a base or any layer; the fade
+ *  band lies inside them). Outside, nothing: vanilla's far diffuse already
+ *  carries its shading. Part of HYBRID and DYNAMIC, no switch; the live splat
+ *  multiplies OUR colour by it before the blend to vanilla.
+ *
+ *  `<ws>.loda`, little-endian, 64-byte header:
+ *    0 "LODA" | 4 u32 version 1 | 8 u32 header 64 | 12 u32 texels per quadrant side (64)
+ *    16 u32 quadrant count | 20 i32 qMinX | 24 qMinY | 28 qMaxX | 32 qMaxY
+ *    36 u32 payload bytes (zlib) | 40 u32 raw bytes (count x 4096)
+ *    44 u32 CRC32 of index + payload | 48..63 zero
+ *  then the index, count x (i16 qx, i16 qy) sorted by qy then qx, then ONE
+ *  zlib stream of the quadrants' 64 x 64 u8 AO in index order, row 0 = south.
+ *  Texel (u, v) of quadrant (qx, qy) is centred at world
+ *  ((qx * 64 + u + 0.5) * 32, (qy * 64 + v + 0.5) * 32). */
+constexpr int LODGEN_AO_QUAD = 64;
+constexpr float LODGEN_AO_UNITS = 32.0f;
+struct LodgenAoMap
+{
+	std::vector<std::pair<qint16, qint16>> quads;   //!< (qx, qy), sorted by qy then qx
+	std::vector<quint8> ao;                         //!< quads.size() x 64 x 64
+	QHash<qint64, int> index;                       //!< filled by lodgenAoRead / rebuildIndex
+	static qint64 key( int qx, int qy ) { return ( qint64( qy ) << 32 ) | quint32( qx ); }
+	void rebuildIndex();
+	//! The quadrant's 64 x 64 block, or nullptr (not painted: no AO of ours).
+	const quint8 * block( int qx, int qy ) const;
+};
+qint64 lodgenAoWrite( const QString & path, const LodgenAoMap & m, QString * why );
+bool lodgenAoRead( const QString & path, LodgenAoMap & m, QString * why );
+//! Bake `<outDir>/<ws>.loda` over the worldspace (or opts' region); `log` gets the census.
+bool lodgenBakeAoMap( const EsmWorld & world, const QString & dataRoot,
 	const QString & outDir, const LodgenVtOptions & opts, QStringList * log, QString * why );
 
 /*! What the option does to the pyramid's options: Hybrid sets the finest level

@@ -1,0 +1,89 @@
+{
+ "lodl": "E:/Projects/Fallout 4 Mods/mods/FO4CSLOD/FO4CSLOD/Commonwealth/Commonwealth.lodl",
+ "ws": "Commonwealth",
+ "fade": [
+  8192.0,
+  12288.0
+ ],
+ "frames": 30,
+ "ltex_side": 512,
+ "decal_normals": true,
+ "rule": "E:/Projects/NifskopeWWE-terrlive2/scratchpad/terrlive2_20260929/final_on/mod/FO4CSLOD/Commonwealth/Commonwealth.lodr",
+ "views": [
+  {
+   "name": "hills_off",
+   "cells": [
+    -60,
+    -5,
+    -20,
+    45
+   ],
+   "stride": 2,
+   "lodt_far": "E:/Projects/NifskopeWWE-terrlive2/scratchpad/terrlive2_20260929/final_off/mod/FO4CSLOD/Commonwealth/Commonwealth.VT.8.lodt",
+   "renders": [
+    {
+     "options": [
+      "hybrid",
+      "dynamic"
+     ],
+     "titles": [
+      "low view west over the outside hills -- HYBRID far levels, baked -- outside paint VANILLA (switch off)",
+      "low view west over the outside hills -- DYNAMIC, live -- outside paint VANILLA (switch off)"
+     ],
+     "out": "pics/hills_off.png"
+    }
+   ],
+   "rule": false,
+   "eye": [
+    -106496.0,
+    20480.0,
+    1500.0
+   ],
+   "at": [
+    -200000.0,
+    20480.0,
+    0.0
+   ],
+   "fov": 70.0,
+   "width": 1920,
+   "height": 1080
+  },
+  {
+   "name": "hills_on",
+   "cells": [
+    -60,
+    -5,
+    -20,
+    45
+   ],
+   "stride": 2,
+   "lodt_far": "E:/Projects/NifskopeWWE-terrlive2/scratchpad/terrlive2_20260929/final_on/mod/FO4CSLOD/Commonwealth/Commonwealth.VT.8.lodt",
+   "renders": [
+    {
+     "options": [
+      "hybrid",
+      "dynamic"
+     ],
+     "titles": [
+      "low view west over the outside hills -- HYBRID far levels, baked -- outside paint RULE (switch on)",
+      "low view west over the outside hills -- DYNAMIC, live -- outside paint RULE (switch on)"
+     ],
+     "out": "pics/hills_on.png"
+    }
+   ],
+   "eye": [
+    -106496.0,
+    20480.0,
+    1500.0
+   ],
+   "at": [
+    -200000.0,
+    20480.0,
+    0.0
+   ],
+   "fov": 70.0,
+   "width": 1920,
+   "height": 1080
+  }
+ ]
+}
