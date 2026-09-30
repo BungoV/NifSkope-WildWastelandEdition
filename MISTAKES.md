@@ -5,6 +5,17 @@ Written the moment a mistake is recognised, unprompted (CONSTITUTION rule 2).
 Format: date -- what was done -- what was true -- how it was found -- the rule.
 Newest at the top.
 
+## 2026-09-30 -- PRTP2: a root-wide find in the FO4CS folder; two DeepSeek jobs waited on a spent plan
+
+- What was done: looking for the Volumetric Air shaders, I ran `find` from the Fo4CommunityShaders root
+  (60 worktrees). It ran past its timeout. Then two DeepSeek survey jobs (froxels, light model) sat 12+
+  minutes with empty event files; I kept waiting on them.
+- What was true: the files were one folder down (`<worktree>/res/Effects/VolumetricAir`). The Go plan hit
+  its usage limit at 17:23; opencode retries silently and the bridge only times out at 20 minutes
+  (opencode.log: "Go usage limit exceeded").
+- The rule: scope every search to one worktree. When a DeepSeek job's events.jsonl stays empty for over 2
+  minutes, grep ~/.local/share/opencode/log/opencode.log for "usage limit" and do the read directly.
+
 ## 2026-09-30 -- PRTPPLACE: counted openings before looking at what the rays hit; a ray box test that missed faces
 
 - What was done: I tuned the opening rules against Concord's counts (234 "windows", 112 room to room) before

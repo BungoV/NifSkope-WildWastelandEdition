@@ -45,6 +45,9 @@ the `.loda` AO map. Probes happen here.
    pixel: point/spot falloff, DALC, interior ambient, fog. PDB FIRST, RVA per
    build, plus the stock shader bytecode. Written down per term before any
    renderer edit. (DeepSeek never sees the PDB.)
+   WRITTEN 2026-09-30: docs/PRTP2_LIGHT_MODEL.md (point, spot, sun, DALC, fog,
+   fade, summation). Open: the fog packing and the spot half-angle, both for
+   the PRTP4 capture.
 3. **PRTP3 -- viewport lights.** The cell view drawn with the cell's lights,
    sun/DALC or interior ambient, fog, per PRTP2. Renderer work.
 4. **PRTP4 -- ground truth.** RenderDoc captures of the stock game at named
@@ -152,6 +155,30 @@ Show probes | Place | Bake. Place re-opens the cell with the probes placed over 
 All) are read from the placer's census lines in the builder's notes, their swatches from the one color
 table the markers draw with (`cellProbeKinds()`). Show probes off = placed and counted, not drawn. Bake is
 off until PRTP6. Gate: `WW_CELLWS_PRTP=1` on tests/spells/cell_workspace.sh's run: 11 PRTP rows.
+
+## 2f. The froxels (FO4CS Volumetric Air, read only 2026-09-30; bungo: "how do the froxels get placed on areas that are covered from all probes?")
+
+What FO4CS does today (wave 101, `res/Effects/VolumetricAir/`, `src/Effects/VolumetricAir.cpp`):
+- The froxel grid is camera-space (screen tiles x depth slices), not placed in the world. Froxels behind
+  the column's nearest depth are zero (MaterialCS).
+- It reads NO probes. Per froxel, light = sun x Henyey-Greenstein phase x shadow cascade x cloud mask x
+  far-field mask, plus ONE sky term: the weather's directional ambient (DALC) evaluated at world up, the
+  same value for every froxel (LightScatteringCS 171-229, VolumetricAirCommon 164-179). No point lights.
+- Interior cells: the pass refuses (`Refusal::Interior`, "interior-no-sun"); no air indoors at all.
+- The skylighting probe volume (skylighting_probe.hlsli) feeds surfaces only (ambient IBL, sun, tiled
+  ambient); nothing in the air includes it.
+So under a roof or porch in an exterior, the air gets the full open-sky term: the sky leaks in.
+
+What PRTP gives it (FO4CS's lane, after PRTP6 ships a bake):
+- Sky term per froxel: interpolate the nearest baked probes' sky visibility (SH) at the froxel's world
+  position instead of the global up value. Covered air then darkens exactly as the surfaces under it do.
+- Interiors: the same lookup with the room's probes lets the pass run indoors (lamps x probe irradiance)
+  instead of refusing.
+- A froxel between probes of two rooms must not blend across a wall. That needs the room tag: `.tbk` v4
+  adds a room id per probe and the door ids on links (2c); the lookup keeps only the probes whose room
+  matches the froxel's (found by a point-in-room test on the room boxes the bake writes, else the nearest
+  probe's room). A doorway probe belongs to both rooms.
+- Nothing here changes FO4CS code from this repo: the v4 fields are additive (a v3 reader skips them).
 
 ## 3. Open
 
