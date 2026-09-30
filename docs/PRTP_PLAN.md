@@ -53,6 +53,10 @@ the `.loda` AO map. Probes happen here.
 5. **PRTP5 -- render each cell.** A harness walks every exterior cell and every
    interior, renders it lit, writes a census row per cell (drawn, lights,
    refusals). This is the prerequisite bungo named, done for the whole game.
+   RULED (bungo, 2026-09-30): the whole world is never loaded at once. Each
+   exterior cell is rendered and baked with the 5x5 block around it at full
+   detail (the game's own loaded grid) and LOD beyond; the walk covers the map.
+   Interiors: the whole cell, alone.
 6. **PRTP6 -- the probe bake.** Section 1's rows from "G-buffer" down. Output
    format: proposed = the FO4CS in-game baker's `.tbk` so the game already reads
    it (bungo's call; the FO4CS reader otherwise comes last by standing order).
