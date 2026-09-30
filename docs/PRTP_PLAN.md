@@ -37,6 +37,10 @@ the `.loda` AO map. Probes happen here.
    `WW_CELL_DUMP`; XCLL/LGTM read; ground textured through the terrain splat.
    Gate: the dump against an independent Python walk of Fallout4.esm, whole
    plugin, lights included (vanilla corpus is the gate).
+   DONE 2026-09-30 on branch prtp1-20260930 (not merged): interiors, XCLL,
+   LTMP and every placed light read; gate tests/spells/cell_lights.sh, 10
+   interiors / 3,945 lights PASS, red control fails. Still open: the ground
+   through the terrain splat.
 2. **PRTP2 -- vanilla light model, research.** How the stock game lights a
    pixel: point/spot falloff, DALC, interior ambient, fog. PDB FIRST, RVA per
    build, plus the stock shader bytecode. Written down per term before any
