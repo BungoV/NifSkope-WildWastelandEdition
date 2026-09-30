@@ -14,7 +14,13 @@ BSD License - see nifskope.h
 
 #include "model/nifmodel.h"
 
+#include "cellview.h"
+
 #include <QAction>
+#include <QCheckBox>
+#include <QIcon>
+#include <QPixmap>
+#include <QPushButton>
 #include <QCoreApplication>
 #include <QMenu>
 #include <QSettings>
@@ -62,6 +68,8 @@ void cellWorkspaceApplyOverrides( CellSceneSpec & spec )
 	spec.grid = g_over.grid;
 	spec.showMarkers = g_over.showMarkers;
 	spec.showDisabled = g_over.showDisabled;
+	spec.probes = g_over.probes;
+	spec.probesShow = g_over.probesShow;
 }
 
 void cellWorkspaceNoteOpened( const QString & path, const CellSceneSpec & spec,
@@ -75,6 +83,11 @@ void cellWorkspaceNoteOpened( const QString & path, const CellSceneSpec & spec,
 		// a row shows what is actually drawn before anybody touches one.
 		g_over = spec;
 	}
+	/* THE PANEL READS THE NEW NOTES NOW (lane PRTPPLACE, 2026-09-30). The builder's
+	 * own sceneChanged fires inside nifCreateCellScene, BEFORE this stores its notes,
+	 * so after a rebuild the legend, census and PRTP counts showed the build
+	 * before it. A second ring once the notes are stored. */
+	emit CellPickBus::instance()->sceneChanged();
 }
 
 QString cellWorkspacePath()
@@ -332,7 +345,7 @@ void CellWorkspacePanel::buildUi()
 	QHBoxLayout * vl = new QHBoxLayout( viewRow );
 	vl->setContentsMargins( 0, 0, 0, 0 );
 	vl->setSpacing( 4 );
-	QLabel * overlayName = new QLabel( tr( "Colour" ), viewRow );
+	QLabel * overlayName = new QLabel( tr( "Color" ), viewRow );
 	overlayBox = new QComboBox( viewRow );
 	overlayBox->setObjectName( QStringLiteral( "CellWorkspaceOverlay" ) );
 	/* The names are the enum's own spellings (`cellOverlayName`), so the row,
@@ -383,7 +396,60 @@ void CellWorkspacePanel::buildUi()
 	showButton->setMenu( showMenu );
 	vl->addWidget( showButton );
 
-	// ---- band 3: the legend
+	// ---- band 3: PRTP (Precomputed Radiance Transfer Probes) -- label + control only
+	page->addWidget( wwHeading( tr( "PRTP" ), this ) );
+	QWidget * prtpRow = new QWidget( this );
+	QHBoxLayout * pl = new QHBoxLayout( prtpRow );
+	pl->setContentsMargins( 0, 0, 0, 0 );
+	pl->setSpacing( 4 );
+	probesShow = new QCheckBox( tr( "Show probes" ), prtpRow );
+	probesShow->setObjectName( QStringLiteral( "CellWorkspaceProbesShow" ) );
+	probesShow->setChecked( QSettings().value(
+		QString( "%1/probes" ).arg( QLatin1String( CELL_SHOW_GROUP ) ), true ).toBool() );
+	probesPlace = new QPushButton( tr( "Place" ), prtpRow );
+	probesPlace->setObjectName( QStringLiteral( "CellWorkspaceProbesPlace" ) );
+	probesPlace->setStyleSheet( wwBoxedButtonQss( QStringLiteral( "3px 10px" ) ) );
+	probesBake = new QPushButton( tr( "Bake" ), prtpRow );
+	probesBake->setObjectName( QStringLiteral( "CellWorkspaceProbesBake" ) );
+	probesBake->setStyleSheet( wwBoxedButtonQss( QStringLiteral( "3px 10px" ) ) );
+	probesBake->setEnabled( false );   // the bake is lane PRTP6
+	pl->addWidget( probesShow );
+	pl->addStretch( 1 );
+	pl->addWidget( probesPlace );
+	pl->addWidget( probesBake );
+	page->addWidget( prtpRow );
+
+	probeKinds = new QTreeWidget( this );
+	probeKinds->setObjectName( QStringLiteral( "CellWorkspaceProbeKinds" ) );
+	probeKinds->setColumnCount( 2 );
+	probeKinds->setHeaderLabels( { tr( "Kind" ), tr( "Probes" ) } );
+	probeKinds->setRootIsDecorated( false );
+	probeKinds->setUniformRowHeights( true );
+	probeKinds->setSelectionMode( QAbstractItemView::NoSelection );
+	probeKinds->setEditTriggers( QAbstractItemView::NoEditTriggers );
+	probeKinds->setMinimumHeight( 222 );    // nine rows and the header, no scrolling
+	probeKinds->setMaximumHeight( 222 );
+	probeKinds->setVerticalScrollBarPolicy( Qt::ScrollBarAlwaysOff );
+	probeKinds->setHorizontalScrollBarPolicy( Qt::ScrollBarAlwaysOff );
+	probeKinds->header()->setSectionResizeMode( 0, QHeaderView::Stretch );
+	probeKinds->header()->setSectionResizeMode( 1, QHeaderView::ResizeToContents );
+	probeKinds->setStyleSheet( wwSelectionTreeQss() );
+	probeKinds->setVisible( false );
+	page->addWidget( probeKinds );
+
+	connect( probesPlace, &QPushButton::clicked, this, &CellWorkspacePanel::placeProbes );
+	connect( probesShow, &QCheckBox::toggled, this, [this]( bool on ) {
+		QSettings().setValue( QString( "%1/probes" ).arg( QLatin1String( CELL_SHOW_GROUP ) ), on );
+		if ( syncing || g_path.isEmpty() || !g_spec.probes )
+			return;     // nothing placed: the choice waits for Place
+		g_over = g_spec;
+		g_over.probesShow = on;
+		g_haveOverrides = true;
+		say( tr( "rebuilding %1 ..." ).arg( QFileInfo( g_path ).fileName() ), false );
+		emit reopenRequested( g_path );
+	} );
+
+	// ---- band 4: the legend
 	page->addWidget( wwHeading( tr( "Legend" ), this ) );
 	legend = new QTreeWidget( this );
 	legend->setObjectName( QStringLiteral( "CellWorkspaceLegend" ) );
@@ -801,6 +867,7 @@ void CellWorkspacePanel::rebuildLegendAndCensus()
 	if ( g_path.isEmpty() && refs == 0 ) {
 		census->setText( QString() );
 		say( tr( "no cell is open" ), true );
+		rebuildProbeKinds();
 		return;
 	}
 
@@ -821,6 +888,85 @@ void CellWorkspacePanel::rebuildLegendAndCensus()
 		say( refusal, true );
 	else
 		say( tr( "%1 references" ).arg( refs ), false );
+	rebuildProbeKinds();
+}
+
+// ---- the PRTP band
+
+void CellWorkspacePanel::placeProbes()
+{
+	if ( g_path.isEmpty() ) {
+		say( tr( "no cell is open" ), true );
+		return;
+	}
+	g_over = g_spec;
+	g_over.probes = true;
+	g_over.probesShow = probesShow && probesShow->isChecked();
+	g_haveOverrides = true;
+	say( tr( "placing probes in %1 ..." ).arg( QFileInfo( g_path ).fileName() ), false );
+	emit reopenRequested( g_path );
+}
+
+void CellWorkspacePanel::setProbesShown( bool on )
+{
+	if ( probesShow )
+		probesShow->setChecked( on );
+}
+
+bool CellWorkspacePanel::probesShown() const
+{
+	return probesShow && probesShow->isChecked();
+}
+
+QStringList CellWorkspacePanel::probeKindRows() const
+{
+	QStringList out;
+	if ( !probeKinds || probeKinds->isHidden() )
+		return out;
+	for ( int i = 0; i < probeKinds->topLevelItemCount(); i++ )
+		out << probeKinds->topLevelItem( i )->text( 0 ) + QLatin1Char( ' ' )
+			+ probeKinds->topLevelItem( i )->data( 1, Qt::DisplayRole ).toString();
+	return out;
+}
+
+/* THE COUNTS ARE READ, NOT COUNTED. They come out of the placer's own census
+ * lines in the builder's notes (probeCensusText), the way the legend does. */
+void CellWorkspacePanel::rebuildProbeKinds()
+{
+	if ( !probeKinds )
+		return;
+	probeKinds->clear();
+	static const QRegularExpression reAll( QStringLiteral(
+		"probes: (\\d+) = first-hit (\\d+) \\+ interior (\\d+) \\+ wall (\\d+) \\+ aperture \\d+ \\+ room (\\d+) \\+ cover (\\d+)" ) );
+	static const QRegularExpression reOpen( QStringLiteral(
+		"openings: doorway (\\d+), window (\\d+), breach (\\d+)" ) );
+	static const QRegularExpression reRefused( QStringLiteral( "probes REFUSED: ([^\\n]*)" ) );
+	const QRegularExpressionMatch ma = reAll.match( g_notes ), mo = reOpen.match( g_notes );
+	const QRegularExpressionMatch mr = reRefused.match( g_notes );
+	if ( mr.hasMatch() )
+		say( tr( "probes refused: %1" ).arg( mr.captured( 1 ).trimmed() ), true );
+	if ( !ma.hasMatch() || !mo.hasMatch() ) {
+		probeKinds->setVisible( false );
+		return;
+	}
+	// in cellProbeKinds() order: first hit, interior, wall, doorway, window, breach, room, cover
+	const int counts[8] = { ma.captured( 2 ).toInt(), ma.captured( 3 ).toInt(), ma.captured( 4 ).toInt(),
+		mo.captured( 1 ).toInt(), mo.captured( 2 ).toInt(), mo.captured( 3 ).toInt(),
+		ma.captured( 5 ).toInt(), ma.captured( 6 ).toInt() };
+	int nk = 0;
+	const CellProbeKind * kinds = cellProbeKinds( &nk );
+	for ( int k = 0; k < nk && k < 8; k++ ) {
+		QTreeWidgetItem * item = new QTreeWidgetItem( probeKinds );
+		item->setText( 0, tr( kinds[k].name ) );
+		item->setData( 1, Qt::DisplayRole, QVariant( counts[k] ) );
+		QPixmap sw( 12, 12 );
+		sw.fill( QColor::fromRgbF( kinds[k].rgb[0], kinds[k].rgb[1], kinds[k].rgb[2] ) );
+		item->setIcon( 0, QIcon( sw ) );
+	}
+	QTreeWidgetItem * total = new QTreeWidgetItem( probeKinds );
+	total->setText( 0, tr( "All" ) );
+	total->setData( 1, Qt::DisplayRole, QVariant( ma.captured( 1 ).toInt() ) );
+	probeKinds->setVisible( true );
 }
 
 void CellWorkspacePanel::say( const QString & text, bool refusal )

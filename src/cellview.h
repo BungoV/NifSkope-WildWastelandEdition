@@ -162,6 +162,11 @@ struct CellSceneSpec
 	 * grid, no worldspace water; `world` holds the word "interior". */
 	bool interior = false;
 	QString interiorCell;
+	/* Lane PRTPPLACE (2026-09-30): the Cell workspace's PRTP band. `probes` places the
+	 * bake's probes over the whole loaded block (as WW_CELL_PROBES does, without the
+	 * file); `probesShow` draws them. */
+	bool probes = false;
+	bool probesShow = true;
 	bool valid = false;
 
 	//! The inclusive cell rectangle `n` asks for around (cx, cy).
@@ -180,6 +185,16 @@ bool cellSpecFromFile( const QString & path, CellSceneSpec & spec, QString * err
 bool cellSpecFromEnv( CellSceneSpec & spec, QString * error );
 //! Apply only the modifier variables to an existing spec (see above).
 void cellApplyEnvModifiers( CellSceneSpec & spec );
+
+//! Lane PRTPPLACE: one probe marker kind -- its name in the PRTP band and its draw color.
+struct CellProbeKind
+{
+	const char * name;
+	float rgb[3];
+};
+
+//! The marker kinds in the PRTP band's order; the markers draw with the same table.
+const CellProbeKind * cellProbeKinds( int * count );
 
 /*! Build the document. `notes` receives what the scene MEASURED -- refs read,
  *  refs drawn, refs hidden, skipped counts per record type, distinct models,

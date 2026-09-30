@@ -82,6 +82,8 @@ struct NativeSrcShape
 	bool matUnreadable = false;
 	//! Lane FIX1: Greyscale_To_PaletteColor on this shape (BGSM wins) -- where an MSWP CNAM would reach it.
 	bool g2p = false;
+	//! Lane PRTPPLACE: that material's palette row (BGSM wins); the cell view replaces it with a CNAM.
+	float g2pScale = 1.0f;
 	bool hasAlpha = false;
 	quint8 alphaThreshold = 128;
 	bool ownEmit = false;

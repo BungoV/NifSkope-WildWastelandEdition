@@ -323,6 +323,7 @@ HEADERS += \
 	src/cellpanel.h \
 	src/cellpicktest.h \
 	src/cellview.h \
+	src/probeplace.h \
 	src/cellrefs.h \
 	src/cellworkspace.h \
 	src/lodinative.h \
@@ -548,6 +549,7 @@ SOURCES += \
 	src/cellpanel.cpp \
 	src/cellpicktest.cpp \
 	src/cellview.cpp \
+	src/probeplace.cpp \
 	src/cellrefs.cpp \
 	src/cellworkspace.cpp \
 	src/cellworkspacetest.cpp \

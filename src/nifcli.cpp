@@ -10,6 +10,7 @@ See the LICENSE.md file for the full license text.
 ***** END LICENCE BLOCK *****/
 
 #include "nifcli.h"
+#include "probeplace.h"
 
 #include "freezeanim.h"
 #include "gamemanager.h"
@@ -7348,6 +7349,14 @@ int nifskopeCliMain( const QStringList & args )
 	}
 	// `weather` reads WTHR/CLMT records from a plugin load list: no NIF, no model
 	// layer (lane PBRR2B, the W1 gates; src/esmweather.cpp)
+	// `probeplace` places PRTP probes over a dumped soup: no NIF, no model layer
+	// (lane PRTPPLACE; src/probeplace.cpp)
+	if ( cmd == QLatin1String( "probeplace" ) ) {
+		const int rc = probePlaceCli( a );
+		out().flush();
+		err().flush();
+		return rc;
+	}
 	if ( cmd == QLatin1String( "weather" ) ) {
 		out().flush();
 		const int rc = cmdWeather( a );

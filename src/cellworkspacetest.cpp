@@ -26,6 +26,7 @@ BSD License - see nifskope.h
 #include "cellrefs.h"
 #include "glview.h"
 #include "nifskope.h"
+#include "model/nifmodel.h"
 
 #include <QAction>
 #include <QCoreApplication>
@@ -103,9 +104,119 @@ QSize composeWindowShot( NifSkope * skope, const QString & path )
 	return window.size() / window.devicePixelRatio();
 }
 
+QVector<Row> g_rows;     //!< the whole run's rows: the PRTP stages append after each re-open
+
+void writeReport( const QString & reportPath )
+{
+	const QVector<Row> & rows = g_rows;
+	int failures = 0;
+	for ( const Row & r : rows )
+		if ( !r.ok )
+			failures++;
+	QFile f( reportPath );
+	if ( f.open( QIODevice::WriteOnly | QIODevice::Text ) ) {
+		QTextStream s( &f );
+		s << "# WW_CELLWS_TEST -- lane CELLWORK1\n";
+		for ( const Row & r : rows ) {
+			s << ( r.ok ? "PASS  " : "FAIL  " ) << r.what;
+			if ( !r.detail.isEmpty() )
+				s << "   [" << r.detail << "]";
+			s << "\n";
+		}
+		s << "rows " << rows.size() << " failures " << failures << "\n";
+	}
+}
+
+//! Probe marker shapes in the open document (the builder names their buckets "probes").
+int probeShapes( NifSkope * skope )
+{
+	NifModel * nif = skope ? skope->getNifModel() : nullptr;
+	if ( !nif )
+		return -1;
+	int n = 0;
+	for ( qint32 b = 0; b < nif->getBlockCount(); b++ ) {
+		const QModelIndex iShape = nif->getBlockIndex( b, "BSTriShape" );
+		if ( iShape.isValid() && nif->get<QString>( iShape, "Name" ).startsWith( QLatin1String( "probes" ) ) )
+			n++;
+	}
+	return n;
+}
+
+/* ---- lane PRTPPLACE: THE PRTP BAND (WW_CELLWS_PRTP=1). Place and Show probes each
+ * re-open the cell, so each stage runs on the NEXT completeLoading. Returns true
+ * when the run is finished and the report can be written. */
+bool runPrtpStage( NifSkope * skope, int stage )
+{
+	auto add = []( const QString & what, bool ok, const QString & detail = QString() ) {
+		g_rows.append( Row{ ok, what, detail } );
+	};
+	CellWorkspacePanel * panel = skope->findChild<CellWorkspacePanel *>();
+	QDockWidget * dCell = skope->findChild<QDockWidget *>( QStringLiteral( "CellWorkspaceDock" ) );
+	if ( !panel || !dCell ) {
+		add( "PRTP: the panel exists", false );
+		return true;
+	}
+	auto sum = []( const QStringList & rows, QString * all ) {
+		int s = 0;
+		for ( const QString & r : rows ) {
+			const int at = r.lastIndexOf( QLatin1Char( ' ' ) );
+			if ( r.startsWith( QLatin1String( "All " ) ) ) {
+				if ( all )
+					*all = r.mid( at + 1 );
+				continue;
+			}
+			s += r.mid( at + 1 ).toInt();
+		}
+		return s;
+	};
+	if ( stage == 0 ) {
+		add( "PRTP: the band's controls are inside the Cell workspace dock",
+			dCell->findChild<QWidget *>( QStringLiteral( "CellWorkspaceProbesShow" ) )
+				&& dCell->findChild<QWidget *>( QStringLiteral( "CellWorkspaceProbesPlace" ) )
+				&& dCell->findChild<QWidget *>( QStringLiteral( "CellWorkspaceProbesBake" ) ) );
+		QWidget * bake = dCell->findChild<QWidget *>( QStringLiteral( "CellWorkspaceProbesBake" ) );
+		add( "PRTP: Bake is off until the bake exists", bake && !bake->isEnabled() );
+		add( "PRTP: no kind rows before Place", panel->probeKindRows().isEmpty(),
+			panel->probeKindRows().join( QLatin1Char( '|' ) ) );
+		add( "PRTP: no probe markers before Place", probeShapes( skope ) == 0,
+			QString::number( probeShapes( skope ) ) );
+		panel->setProbesShown( true );
+		panel->placeProbes();
+		return false;
+	}
+	if ( stage == 1 ) {
+		const QStringList rows = panel->probeKindRows();
+		QString all;
+		const int s = sum( rows, &all );
+		add( "PRTP: Place fills the kind rows (8 kinds + All)", rows.size() == 9, rows.join( QLatin1Char( '|' ) ) );
+		add( "PRTP: the kinds add up to All", s > 0 && QString::number( s ) == all,
+			QStringLiteral( "%1 vs %2" ).arg( s ).arg( all ) );
+		add( "PRTP: the markers are drawn", probeShapes( skope ) > 0, QString::number( probeShapes( skope ) ) );
+		const QString shotDir = QString::fromLocal8Bit( qgetenv( "WW_CELLWS_SHOTS" ) );
+		if ( !shotDir.isEmpty() ) {
+			const QSize sz = composeWindowShot( skope, shotDir + QStringLiteral( "/cell_prtp_placed.png" ) );
+			add( "picture: the PRTP band after Place", sz.width() > 800,
+				QStringLiteral( "cell_prtp_placed  %1x%2" ).arg( sz.width() ).arg( sz.height() ) );
+		}
+		g_rows.append( Row{ true, QStringLiteral( "PRTP: kept for stage 2" ), rows.join( QLatin1Char( '|' ) ) } );
+		panel->setProbesShown( false );
+		return false;
+	}
+	// stage 2: Show probes off -- counted, not drawn
+	QString keptRows;
+	for ( const Row & r : g_rows )
+		if ( r.what == QLatin1String( "PRTP: kept for stage 2" ) )
+			keptRows = r.detail;
+	const QStringList rows = panel->probeKindRows();
+	add( "PRTP: Show probes off keeps the counts", !rows.isEmpty() && rows.join( QLatin1Char( '|' ) ) == keptRows,
+		rows.join( QLatin1Char( '|' ) ) );
+	add( "PRTP: Show probes off draws no markers", probeShapes( skope ) == 0, QString::number( probeShapes( skope ) ) );
+	return true;
+}
+
 void runCellWorkspaceTest( NifSkope * skope, const QString & reportPath )
 {
-	QVector<Row> rows;
+	QVector<Row> & rows = g_rows;
 	auto add = [&rows]( const QString & what, bool ok, const QString & detail = QString() ) {
 		rows.append( Row{ ok, what, detail } );
 	};
@@ -137,16 +248,7 @@ void runCellWorkspaceTest( NifSkope * skope, const QString & reportPath )
 		names.join( QLatin1Char( '|' ) ) );
 
 	if ( cellWs < 0 || !dCell || !panel || !list ) {
-		QFile f( reportPath );
-		if ( f.open( QIODevice::WriteOnly | QIODevice::Text ) ) {
-			QTextStream s( &f );
-			s << "# WW_CELLWS_TEST -- lane CELLWORK1\n";
-			for ( const Row & r : rows )
-				s << ( r.ok ? "PASS  " : "FAIL  " ) << r.what << "\n";
-			s << "rows " << rows.size() << " failures "
-			  << std::count_if( rows.begin(), rows.end(),
-				[]( const Row & r ) { return !r.ok; } ) << "\n";
-		}
+		writeReport( reportPath );
 		return;
 	}
 
@@ -339,23 +441,7 @@ void runCellWorkspaceTest( NifSkope * skope, const QString & reportPath )
 		skope->setWorkspace( cellWs );
 	}
 
-	int failures = 0;
-	for ( const Row & r : rows )
-		if ( !r.ok )
-			failures++;
-
-	QFile f( reportPath );
-	if ( f.open( QIODevice::WriteOnly | QIODevice::Text ) ) {
-		QTextStream s( &f );
-		s << "# WW_CELLWS_TEST -- lane CELLWORK1\n";
-		for ( const Row & r : rows ) {
-			s << ( r.ok ? "PASS  " : "FAIL  " ) << r.what;
-			if ( !r.detail.isEmpty() )
-				s << "   [" << r.detail << "]";
-			s << "\n";
-		}
-		s << "rows " << rows.size() << " failures " << failures << "\n";
-	}
+	writeReport( reportPath );
 }
 
 } // namespace
@@ -371,8 +457,39 @@ void wwCellWorkspaceHarness( NifSkope * skope )
 	 * filled by opening the cell. */
 	QObject::connect( skope, &NifSkope::completeLoading, skope,
 		[skope, reportPath]( bool, QString & ) {
-			runCellWorkspaceTest( skope, reportPath );
-			if ( !qgetenv( "WW_CELLWS_STAY" ).isEmpty() )
+			/* Lane PRTPPLACE: with WW_CELLWS_PRTP set, the PRTP band's stages run on
+			 * the re-opens its own buttons cause; the report is written after each. */
+			static int stage = -1;
+			const bool prtp = !qgetenv( "WW_CELLWS_PRTP" ).isEmpty();
+			bool done = true;
+			if ( stage < 0 ) {
+				runCellWorkspaceTest( skope, reportPath );
+				stage = 0;
+				if ( prtp ) {
+					// after this slot returns: Place starts a re-open of its own
+					QTimer::singleShot( 0, skope, [skope, reportPath]() {
+						stage = 1;     // first: Place may re-open before it returns
+						const bool noCell = cellWorkspacePath().isEmpty();
+						runPrtpStage( skope, 0 );
+						if ( noCell )   // Place refuses: no re-open is coming, so end here
+							g_rows.append( Row{ false, QStringLiteral( "PRTP: a cell is open to place in" ), QString() } );
+						writeReport( reportPath );
+						if ( noCell && qgetenv( "WW_CELLWS_STAY" ).isEmpty() )
+							QTimer::singleShot( 0, qApp, &QCoreApplication::quit );
+					} );
+					return;
+				}
+			} else if ( prtp ) {
+				const int now = stage++;
+				QTimer::singleShot( 0, skope, [skope, reportPath, now]() {
+					const bool fin = runPrtpStage( skope, now );
+					writeReport( reportPath );
+					if ( fin && qgetenv( "WW_CELLWS_STAY" ).isEmpty() )
+						QTimer::singleShot( 0, qApp, &QCoreApplication::quit );
+				} );
+				return;
+			}
+			if ( !done || !qgetenv( "WW_CELLWS_STAY" ).isEmpty() )
 				return;		// leave the window up for a picture
 			QTimer::singleShot( 0, qApp, &QCoreApplication::quit );
 		} );

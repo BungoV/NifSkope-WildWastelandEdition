@@ -15,6 +15,9 @@ BSD License - see nifskope.h
 #include "esmdata.h"
 #include "lodgen.h"
 #include "nativeemit.h"
+#include "probeplace.h"		// lane PRTPPLACE
+
+#include <limits>
 
 #include "model/nifmodel.h"
 #include "spells/blocks.h"
@@ -56,6 +59,18 @@ constexpr std::uint64_t CELL_VERTEX_DESC = 0x0041B00000650407ULL;
 constexpr float CELL_UNITS = 4096.0f;       //!< one exterior cell, game units
 constexpr int LAND_GRID = 33;               //!< LAND heights per side
 
+/* A BUCKET TRIANGLE IS 32-BIT (lane PRTPPLACE, 2026-09-30). Triangle holds quint16, and a
+ * bucket welds every shape of one material across the whole block: Concord 5x5 passes 65,536
+ * vertices on the shared trim and siding materials, the offset wrapped, and later pieces drew
+ * with earlier pieces' vertices -- missing porch rails and roof trim, grey wedges over the
+ * town (bungo 2026-09-30). The writer cuts each bucket into <= MAX_SHAPE_VERTS shapes and
+ * remaps to 16 bits there, per shape, where it fits. */
+struct BucketTri
+{
+	quint32 v[3];
+	quint32 operator[]( int k ) const { return v[k]; }
+};
+
 struct OutVert
 {
 	Vector3 pos, nrm, tan, bit;
@@ -82,7 +97,7 @@ struct Bucket
 	float emissiveScale = 1.0f;
 	bool withColour = false;
 	std::vector<OutVert> verts;
-	std::vector<Triangle> tris;
+	std::vector<BucketTri> tris;   // 32-bit: a bucket welds far more than 65,536 vertices
 };
 
 /*! IS THIS STRING SOMETHING THE SHADER PROPERTY'S **Name** CAN RESOLVE?
@@ -254,7 +269,7 @@ bool emitBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b,
 		for ( ; i < b.tris.size(); i++ ) {
 			if ( pv.size() + 3 > size_t( MAX_SHAPE_VERTS ) )
 				break;
-			const Triangle & t = b.tris[i];
+			const BucketTri & t = b.tris[i];
 			quint16 idx[3];
 			for ( int k = 0; k < 3; k++ ) {
 				const int src = int( t[k] );
@@ -424,8 +439,8 @@ void appendQuad( Bucket & b, const Vector3 & a, const Vector3 & c,
 		v.chan[2] = rgb[2];
 		b.verts.push_back( v );
 	}
-	b.tris.push_back( Triangle( quint16( base ), quint16( base + 1 ), quint16( base + 2 ) ) );
-	b.tris.push_back( Triangle( quint16( base ), quint16( base + 2 ), quint16( base + 3 ) ) );
+	b.tris.push_back( BucketTri{ { quint32( base ), quint32( base + 1 ), quint32( base + 2 ) } } );
+	b.tris.push_back( BucketTri{ { quint32( base ), quint32( base + 2 ), quint32( base + 3 ) } } );
 }
 
 } // namespace
@@ -606,6 +621,39 @@ bool cellSpecFromEnv( CellSceneSpec & spec, QString * error )
 
 // --------------------------------------------------------------- the build
 
+/* Lane PRTPPLACE (2026-09-30): the probe marker kinds. ONE table: the markers draw
+ * with it and the Cell workspace's PRTP band paints its swatches from it. */
+static const CellProbeKind g_probeKinds[] = {
+	{ "First hit", { 0.2f, 0.85f, 0.25f } },
+	{ "Interior",  { 1.0f, 0.55f, 0.1f } },
+	{ "Wall",      { 0.2f, 0.45f, 1.0f } },
+	{ "Doorway",   { 1.0f, 0.2f, 0.9f } },
+	{ "Window",    { 0.1f, 0.9f, 0.95f } },
+	{ "Breach",    { 1.0f, 0.1f, 0.1f } },
+	{ "Room",      { 1.0f, 0.95f, 0.1f } },
+	{ "Cover",     { 0.95f, 0.95f, 0.95f } }
+};
+
+const CellProbeKind * cellProbeKinds( int * count )
+{
+	if ( count )
+		*count = int( sizeof( g_probeKinds ) / sizeof( g_probeKinds[0] ) );
+	return g_probeKinds;
+}
+
+static int cellProbeKindOf( const ProbePoint & q )
+{
+	switch ( q.cls ) {
+	case ProbeClass::FirstHit: return 0;
+	case ProbeClass::Interior: return 1;
+	case ProbeClass::Wall:     return 2;
+	case ProbeClass::Room:     return 6;
+	case ProbeClass::Cover:    return 7;
+	default:
+		return q.kind == ApertureKind::Doorway ? 3 : q.kind == ApertureKind::Window ? 4 : 5;
+	}
+}
+
 bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 	QString * error, QString * notes )
 {
@@ -687,6 +735,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 		float scale = 1.0f;
 		quint32 ref = 0;
 		int part = -1;
+		quint32 swap = 0;   //!< lane PRTPPLACE: the MSWP this placement draws with (ref XMSP, else the base's MODS)
 		int cellX = 0, cellY = 0;
 		bool persistent = false;
 		bool disabled = false;
@@ -845,6 +894,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 					out.enableParentForm = r.enableParent;
 					out.enableParentOppositeFlag = r.enableParentOpposite;
 #endif
+					out.swap = r.materialSwap ? r.materialSwap : world.lodBase( part.base ).materialSwap;
 					placements.append( out );
 				}
 			}
@@ -868,6 +918,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 		out.enableParentForm = r.enableParent;
 		out.enableParentOppositeFlag = r.enableParentOpposite;
 #endif
+		out.swap = r.materialSwap ? r.materialSwap : lb.materialSwap;
 		placements.append( out );
 	};
 
@@ -994,6 +1045,19 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 	// lane CELLVIEW3: the two material facts the census now states outright
 	int shapesFromEffectMat = 0;            //!< drawn from a `.bgem`'s base map
 	int shapesUnreadableMat = 0;            //!< named a material, nothing resolved: neutral grey
+	int shapesVertexColor = 0;              //!< lane PRTPPLACE: drawn with the mesh's own vertex colors
+	int placementsSwapped = 0;              //!< lane PRTPPLACE: drawn with a material swap
+	int skyCardsHidden = 0;                 //!< lane PRTPPLACE: sky cards left to the sky layer
+	/*! Lane PRTPPLACE: one resolved swap per MSWP form -- the material substitution, and the
+	 *  CNAM color remapping index per folded ORIGINAL material (self rows included). */
+	struct SwapUse
+	{
+		LodgenMaterialSubst sub;
+		QHash<QString, float> cnam;
+	};
+	QHash<quint32, SwapUse> swapCache;
+	int shapesRepainted = 0;                //!< lane PRTPPLACE: palette row replaced by a CNAM
+	int cnamNoPalette = 0;                  //!< lane PRTPPLACE: a CNAM on a material with no palette (the game ignores it)
 	QStringList unreadableMatNames;
 	qint64 srcTris = 0;
 
@@ -1039,6 +1103,27 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 
 	const bool colouring = spec.overlay != CellOverlay::None;
 
+	/* ---- lane PRTPPLACE: THE PROBE SOUP. What the transfer probes see is the
+	 * STATIC world only (docs/PRTP_PLAN.md 2b): actors, havok clutter, FX and
+	 * workshop builds are receivers, never occluders. Doors are left out too --
+	 * baked open -- and only their boxes are kept, to tag the openings they
+	 * stand in. Per shape, effect shaders, alpha-blended glass and decals are
+	 * dropped: light passes through all three. */
+	const QString probeOut = QString::fromLocal8Bit( qgetenv( "WW_CELL_PROBES" ) );
+	const bool probing = !probeOut.isEmpty() || spec.probes;   // the env, or the PRTP band's Place
+	ProbeSoup probeSoup;
+	int soupRefs = 0, soupShapesDropped = 0;
+	QHash<QString, int> soupSkippedTypes;
+	auto soupRole = []( const QString & t ) -> int {   // 0 left out, 1 in the soup, 2 a door
+		static const QSet<QString> in { QStringLiteral( "STAT" ), QStringLiteral( "MSTT" ),
+			QStringLiteral( "TREE" ), QStringLiteral( "FURN" ), QStringLiteral( "CONT" ),
+			QStringLiteral( "ACTI" ), QStringLiteral( "TERM" ), QStringLiteral( "FLOR" ),
+			QStringLiteral( "LIGH" ) };
+		if ( t == QLatin1String( "DOOR" ) )
+			return 2;
+		return in.contains( t ) ? 1 : 0;
+	};
+
 	for ( const Placement & p : placements ) {
 		const EsmLodBase & lb = world.lodBase( p.base );
 		const QString model = lb.model;
@@ -1046,19 +1131,104 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 			skippedByType[CellPickTable::typeName( lb.type )]++;
 			continue;
 		}
-		auto mit = modelCache.find( model );
+		/* SKY CARDS ARE NOT WORLD GEOMETRY (lane PRTPPLACE, 2026-09-30). The distant cloud
+		 * cards (Sky\CloudDistant*) are placed STATs the game draws in its sky layer, behind
+		 * everything. Drawn as world geometry, one card hid the whole of Concord behind a grey
+		 * sheet (bungo's "wedges"; measured: hiding it alone uncovers the town). Hidden and
+		 * counted; WW_CELL_SKY=1 draws them again. */
+		static const bool showSky = !qgetenv( "WW_CELL_SKY" ).isEmpty();
+		if ( !showSky && QString( model ).replace( '/', '\\' ).startsWith( QLatin1String( "sky\\" ), Qt::CaseInsensitive ) ) {
+			skyCardsHidden++;
+			continue;
+		}
+		/* THE MATERIAL SWAP (lane PRTPPLACE, 2026-09-30): the ref's XMSP, else the base's
+		 * MODS, applied at load exactly as the LOD bake does (lodgen.cpp swapFor: first row
+		 * per key wins, a self-swap is dropped). Without it every car drew its default
+		 * rust paint (bungo, the Concord pickup). The cache key carries the swap. */
+		const LodgenMaterialSubst * subst = nullptr;
+		const QHash<QString, float> * cnamOf = nullptr;
+		if ( p.swap ) {
+			auto sit = swapCache.constFind( p.swap );
+			if ( sit == swapCache.constEnd() ) {
+				SwapUse use;
+				const EsmMaterialSwap & mw = world.materialSwap( p.swap );
+				if ( mw.exists ) {
+					QSet<QString> seen;
+					for ( const EsmMaterialSubst & row : mw.rows ) {
+						const QString k = lodgenMaterialSwapKey( row.original );
+						if ( k.isEmpty() || row.replacement.isEmpty() || seen.contains( k ) )
+							continue;
+						seen.insert( k );
+						// the engine takes the index only below FLT_MAX (unset = FLT_MAX)
+						if ( row.hasColorRemap && row.colorRemap < std::numeric_limits<float>::max() )
+							use.cnam.insert( k, row.colorRemap );
+						if ( lodgenMaterialSwapKey( row.replacement ) != k )
+							use.sub.append( qMakePair( k, row.replacement ) );
+					}
+				}
+				sit = swapCache.insert( p.swap, use );
+			}
+			if ( !sit->sub.isEmpty() )
+				subst = &sit->sub;
+			if ( !sit->cnam.isEmpty() )
+				cnamOf = &sit->cnam;
+		}
+		const QString mkey = subst
+			? QStringLiteral( "%1|%2" ).arg( model ).arg( p.swap, 8, 16, QChar( '0' ) ) : model;
+		auto mit = modelCache.find( mkey );
 		if ( mit == modelCache.end() ) {
-			if ( modelsFailed.contains( model ) )
+			if ( modelsFailed.contains( mkey ) )
 				continue;
 			std::vector<NativeSrcShape> shapes;
-			// ONE LOAD PER DISTINCT MODEL -- the whole block shares this cache.
-			if ( !lodgenNativeLoadModel( const_cast<QString *>( &dataRoot ), model, &shapes )
-				|| shapes.empty() ) {
-				modelsFailed.insert( model );
+			// ONE LOAD PER DISTINCT MODEL AND SWAP -- the whole block shares this cache.
+			const bool okLoad = subst
+				? lodgenNativeLoadModelSwapped( const_cast<QString *>( &dataRoot ), model, *subst, &shapes )
+				: lodgenNativeLoadModel( const_cast<QString *>( &dataRoot ), model, &shapes );
+			if ( !okLoad || shapes.empty() ) {
+				modelsFailed.insert( mkey );
 				continue;
 			}
 			modelLoads++;
-			mit = modelCache.insert( model, shapes );
+			mit = modelCache.insert( mkey, shapes );
+		}
+		placementsSwapped += subst ? 1 : 0;
+		/* THE PAINT (lane PRTPPLACE, 2026-09-30). An MSWP row's CNAM color remapping index
+		 * replaces the material's palette row, and only on a Greyscale_To_PaletteColor
+		 * material (engine 1.10.155, lane FIX1's reading, nativeemit.cpp). The row is found by
+		 * the shape's ORIGINAL material, so the plain load gives each shape's original name
+		 * (a swap changes materials only: the shape lists line up). The renderer samples the
+		 * palette at paletteScale * vertex R, so the index goes in as R = CNAM / scale. */
+		const std::vector<NativeSrcShape> * plainShapes = nullptr;
+		if ( cnamOf ) {
+			auto pit = subst ? modelCache.find( model ) : mit;
+			if ( pit == modelCache.end() && !modelsFailed.contains( model ) ) {
+				std::vector<NativeSrcShape> shapes;
+				if ( lodgenNativeLoadModel( const_cast<QString *>( &dataRoot ), model, &shapes ) && !shapes.empty() ) {
+					modelLoads++;
+					pit = modelCache.insert( model, shapes );
+					mit = modelCache.find( mkey );   // an insert may rehash
+				} else {
+					modelsFailed.insert( model );
+				}
+			}
+			if ( pit != modelCache.end() && pit.value().size() == mit.value().size() )
+				plainShapes = &pit.value();
+		}
+		/* WW_CELL_SWAPLOG=<model substring>: every shape of a matching placement, its material
+		 * before and after the swap and what the paint rule decided -- to stderr. */
+		static const QString swapLog = QString::fromLocal8Bit( qgetenv( "WW_CELL_SWAPLOG" ) );
+		if ( !swapLog.isEmpty() && model.contains( swapLog, Qt::CaseInsensitive ) ) {
+			fprintf( stderr, "SWAPLOG ref %08x model %s swap %08x subst %d cnam %d\n", p.ref,
+				qPrintable( model ), p.swap, subst ? int( subst->size() ) : 0, cnamOf ? int( cnamOf->size() ) : 0 );
+			if ( cnamOf )
+				for ( auto c = cnamOf->cbegin(); c != cnamOf->cend(); ++c )
+					fprintf( stderr, "SWAPLOG   cnam %s = %g\n", qPrintable( c.key() ), double( c.value() ) );
+			for ( size_t si = 0; si < mit.value().size(); si++ ) {
+				const NativeSrcShape & s = mit.value()[si];
+				fprintf( stderr, "SWAPLOG   shape %d mat %s orig %s g2p %d scale %g\n", int( si ),
+					qPrintable( s.matName ), plainShapes ? qPrintable( ( *plainShapes )[si].matName ) : "-",
+					int( s.g2p ), double( s.g2pScale ) );
+			}
 		}
 
 		// the overlay key for THIS placement
@@ -1170,12 +1340,80 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 		pick.enableParentOpposite = p.enableParentOppositeFlag;
 #endif
 		Vector3 lo( 3.4e38f, 3.4e38f, 3.4e38f ), hi( -3.4e38f, -3.4e38f, -3.4e38f );
+		int role = 0;   // lane PRTPPLACE
+		bool soupFoliage = false;   // alpha-tested leaves and grass cards never roof or wall a probe
+		if ( probing && !p.disabled && !pick.marker ) {
+			QString tn = CellPickTable::typeName( lb.type );
+			role = soupRole( tn );
+			// Sky meshes (distant clouds) are kilometer sheets over the town: a false roof everywhere.
+			// Water planes have no collision, so FO4CS's rays pass them too.
+			const QString ml = QString( model ).replace( '/', '\\' ).toLower();
+			if ( role == 1 && ml.startsWith( QLatin1String( "sky\\" ) ) ) {
+				role = 0;
+				tn = QStringLiteral( "sky" );
+			} else if ( role == 1 && ml.startsWith( QLatin1String( "water\\" ) ) ) {
+				role = 0;
+				tn = QStringLiteral( "water" );
+			}
+			soupFoliage = ml.startsWith( QLatin1String( "landscape\\" ) );
+			if ( role == 0 )
+				soupSkippedTypes[tn]++;
+			else if ( role == 1 )
+				soupRefs++;
+		}
 
-		for ( const NativeSrcShape & s : mit.value() ) {
+		for ( size_t si = 0; si < mit.value().size(); si++ ) {
+			const NativeSrcShape & s = mit.value()[si];
 			const size_t nv = s.geom.pos.size() / 3;
 			if ( !nv || s.geom.tris.empty() )
 				continue;
-			Bucket & b = bucketFor( s, colouring );
+			if ( role == 1 ) {
+				if ( s.nearFacts.effectShader || !s.effectTex0.isEmpty() || s.nearFacts.alphaBlend
+					|| s.nearFacts.decal || ( soupFoliage && s.nearFacts.alphaTest ) ) {
+					soupShapesDropped++;
+				} else {
+					for ( size_t t = 0; t + 2 < s.geom.tris.size(); t += 3 ) {
+						float w[3][3];
+						bool okTri = true;
+						for ( int k = 0; k < 3; k++ ) {
+							const size_t vi = size_t( s.geom.tris[t + size_t( k )] );
+							if ( vi >= nv ) {
+								okTri = false;
+								break;
+							}
+							const Vector3 lp( s.geom.pos[vi * 3 + 0], s.geom.pos[vi * 3 + 1],
+								s.geom.pos[vi * 3 + 2] );
+							const Vector3 wp = p.pos + p.rot * ( lp * p.scale );
+							w[k][0] = wp[0];
+							w[k][1] = wp[1];
+							w[k][2] = wp[2];
+						}
+						if ( okTri )
+							probeSoup.addTri( w[0], w[1], w[2] );
+					}
+				}
+			}
+			/* THE MESH'S OWN VERTEX COLORS (lane PRTPPLACE, 2026-09-30): the loader kept them
+			 * (geom.rgba, only where the game applies them) and this view never drew them -- the
+			 * Concord pickup came out bare rust orange (bungo). An overlay still wins. RGB only:
+			 * the alpha channel's meaning varies by material and this view has no use for it. */
+			const bool ownColor = !colouring && s.geom.rgba.size() == nv * 4;
+			shapesVertexColor += ownColor ? 1 : 0;
+			float paletteR = 1.0f;
+			bool repaint = false;
+			if ( plainShapes && !colouring ) {
+				auto cit = cnamOf->constFind( lodgenMaterialSwapKey( ( *plainShapes )[si].matName ) );
+				if ( cit != cnamOf->constEnd() ) {
+					if ( s.g2p && s.g2pScale > 1.0e-6f ) {
+						repaint = true;
+						paletteR = cit.value() / s.g2pScale;
+						shapesRepainted++;
+					} else {
+						cnamNoPalette++;
+					}
+				}
+			}
+			Bucket & b = bucketFor( s, colouring || ownColor || repaint );
 			/* COUNTED, NOT GUESSED (lane CELLVIEW3). A shape drawn neutral
 			 * because its material would not read is a fact the census has to
 			 * state, or "no magenta in the picture" would just mean the failure
@@ -1209,9 +1447,10 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 				o.uv = s.geom.uv.size() >= ( v + 1 ) * 2
 					? Vector2( s.geom.uv[v * 2 + 0], s.geom.uv[v * 2 + 1] )
 					: Vector2( 0.0f, 0.0f );
-				o.chan[0] = rgb[0];
-				o.chan[1] = rgb[1];
-				o.chan[2] = rgb[2];
+				for ( int c = 0; c < 3; c++ )
+					o.chan[c] = ownColor ? float( s.geom.rgba[v * 4 + size_t( c )] ) / 255.0f : rgb[c];
+				if ( repaint )
+					o.chan[0] *= paletteR;
 				b.verts.push_back( o );
 				for ( int k = 0; k < 3; k++ ) {
 					lo[k] = qMin( lo[k], wp[k] );
@@ -1219,9 +1458,9 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 				}
 			}
 			for ( size_t t = 0; t + 2 < s.geom.tris.size(); t += 3 ) {
-				b.tris.push_back( Triangle( quint16( base + int( s.geom.tris[t + 0] ) ),
-					quint16( base + int( s.geom.tris[t + 1] ) ),
-					quint16( base + int( s.geom.tris[t + 2] ) ) ) );
+				b.tris.push_back( BucketTri{ { quint32( base + int( s.geom.tris[t + 0] ) ),
+					quint32( base + int( s.geom.tris[t + 1] ) ),
+					quint32( base + int( s.geom.tris[t + 2] ) ) } } );
 			}
 			pick.triangles += quint32( s.geom.tris.size() / 3 );
 			srcTris += qint64( s.geom.tris.size() / 3 );
@@ -1230,6 +1469,15 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 			for ( int k = 0; k < 3; k++ ) {
 				pick.bmin[k] = lo[k];
 				pick.bmax[k] = hi[k];
+			}
+			if ( role == 2 ) {   // lane PRTPPLACE: a door only tags an opening
+				ProbeSoup::Door d;
+				d.ref = p.ref;
+				for ( int k = 0; k < 3; k++ ) {
+					d.lo[k] = lo[k];
+					d.hi[k] = hi[k];
+				}
+				probeSoup.doors.push_back( d );
 			}
 			picks.append( pick );
 			drawn++;
@@ -1337,10 +1585,10 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 							o.chan[3] = q.v[k].w;
 							gbk.verts.push_back( o );
 						}
-						gbk.tris.push_back( Triangle( quint16( base ), quint16( base + 1 ),
-							quint16( base + 2 ) ) );
-						gbk.tris.push_back( Triangle( quint16( base ), quint16( base + 2 ),
-							quint16( base + 3 ) ) );
+						gbk.tris.push_back( BucketTri{ { quint32( base ), quint32( base + 1 ),
+							quint32( base + 2 ) } } );
+						gbk.tris.push_back( BucketTri{ { quint32( base ), quint32( base + 2 ),
+							quint32( base + 3 ) } } );
 					}
 				}
 			} else if ( splatVerts > splatCap ) {
@@ -1401,10 +1649,10 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 					}
 					// the same quint16 index pair appendQuad writes; emitBucket does
 					// the splitting, on triangle boundaries
-					gbk.tris.push_back( Triangle( quint16( base ), quint16( base + 1 ),
-						quint16( base + 2 ) ) );
-					gbk.tris.push_back( Triangle( quint16( base ), quint16( base + 2 ),
-						quint16( base + 3 ) ) );
+					gbk.tris.push_back( BucketTri{ { quint32( base ), quint32( base + 1 ),
+						quint32( base + 2 ) } } );
+					gbk.tris.push_back( BucketTri{ { quint32( base ), quint32( base + 2 ),
+						quint32( base + 3 ) } } );
 				}
 			} else {
 				groundNote = QStringLiteral( "ground: the painted mosaic REFUSED (%1) -- the vertex-colour sheet was drawn instead" )
@@ -1513,6 +1761,121 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 			buckets.insert( QStringLiteral( "\x01grid" ), gridB );
 	}
 
+	// ---- lane PRTPPLACE: place the probes, write them, draw them
+	QString probeNotes;
+	if ( probing ) {
+		if ( !spec.interior ) {
+			// the ground is part of what a column ray meets, painted or not
+			for ( int y = y0; y <= y1; y++ )
+				for ( int x = x0; x <= x1; x++ ) {
+					EsmLand l;
+					if ( !world.land( x, y, l ) )
+						continue;
+					const float ox = float( x ) * CELL_UNITS, oy = float( y ) * CELL_UNITS;
+					const float st = CELL_UNITS / float( LAND_GRID - 1 );
+					for ( int r = 0; r + 1 < LAND_GRID; r++ )
+						for ( int c = 0; c + 1 < LAND_GRID; c++ ) {
+							const float a[3] = { ox + c * st, oy + r * st, l.heights[r][c] };
+							const float b[3] = { ox + ( c + 1 ) * st, oy + r * st, l.heights[r][c + 1] };
+							const float cc[3] = { ox + ( c + 1 ) * st, oy + ( r + 1 ) * st, l.heights[r + 1][c + 1] };
+							const float d[3] = { ox + c * st, oy + ( r + 1 ) * st, l.heights[r + 1][c] };
+							probeSoup.addTri( a, b, cc );
+							probeSoup.addTri( a, cc, d );
+						}
+				}
+		}
+		ProbePlaceSpec ps;
+		if ( spec.interior ) {
+			float mn[2] = { 3.4e38f, 3.4e38f }, mx[2] = { -3.4e38f, -3.4e38f };
+			for ( size_t i = 0; i < probeSoup.tris.size(); i += 3 )
+				for ( int k = 0; k < 2; k++ ) {
+					mn[k] = qMin( mn[k], probeSoup.tris[i + size_t( k )] );
+					mx[k] = qMax( mx[k], probeSoup.tris[i + size_t( k )] );
+				}
+			ps.minX = mn[0];
+			ps.minY = mn[1];
+			ps.maxX = mx[0];
+			ps.maxY = mx[1];
+		} else {
+			// the probed block: the middle N x N of what is loaded (default the center cell)
+			// (the PRTP band's Place, with no variable set: the whole loaded block)
+			int pn = qEnvironmentVariableIntValue( "WW_CELL_PROBES_N" );
+			pn = qBound( 1, pn > 0 ? pn : ( spec.probes ? spec.n : 1 ), qMax( 1, spec.n ) );
+			const int ph = ( pn - 1 ) / 2;
+			ps.minX = float( spec.cx - ph ) * CELL_UNITS;
+			ps.maxX = float( spec.cx + ph + 1 ) * CELL_UNITS;
+			ps.minY = float( spec.cy - ph ) * CELL_UNITS;
+			ps.maxY = float( spec.cy + ph + 1 ) * CELL_UNITS;
+		}
+		const QByteArray sp = qgetenv( "WW_CELL_PROBES_SPACING" );
+		if ( !sp.isEmpty() && sp.toFloat() > 1.0f )
+			ps.spacing = sp.toFloat();
+		ps.red = QString::fromLatin1( qgetenv( "WW_PROBE_RED" ) );
+		const QByteArray soupDump = qgetenv( "WW_CELL_PROBE_SOUP" );
+		QString perr;
+		if ( !soupDump.isEmpty() && !probeSoupWrite( QString::fromLocal8Bit( soupDump ), probeSoup, &perr ) )
+			qWarning() << "WW_CELL_PROBE_SOUP:" << perr;
+		ProbePlaceResult pr;
+		const bool placed = probePlace( probeSoup, ps, &pr );
+		if ( placed && !probeOut.isEmpty() && !probeWriteTsv( probeOut, ps, pr, &perr ) )
+			qWarning() << "WW_CELL_PROBES:" << perr;
+		{
+			QTextStream t( &probeNotes );
+			t << "  probe rect " << ps.minX << "," << ps.minY << " .. " << ps.maxX << "," << ps.maxY
+			  << ", spacing " << ps.spacing << ( ps.red.isEmpty() ? QString() : QStringLiteral( ", RED " ) + ps.red )
+			  << "\n";
+			t << "  probe soup refs " << soupRefs << ", doors " << int( probeSoup.doors.size() )
+			  << ", shapes left out (effect, glass, decal, leaves) " << soupShapesDropped << ", refs left out by type";
+			QStringList sk = soupSkippedTypes.keys();
+			std::sort( sk.begin(), sk.end() );
+			for ( const QString & k : sk )
+				t << " " << k << " " << soupSkippedTypes.value( k );
+			t << "\n";
+			if ( !placed )
+				t << "  probes REFUSED: " << pr.error << "\n";
+			else
+				for ( const QString & line : probeCensusText( pr ).split( '\n', Qt::SkipEmptyParts ) )
+					t << "  " << line << "\n";
+		}
+		// the markers: one small box each, colored by class, split under the 16-bit index limit
+		int bucketNo = 0;
+		Bucket pb;
+		pb.name = QStringLiteral( "probes" );
+		pb.withColour = true;
+		auto flush = [&]() {
+			if ( pb.verts.empty() )
+				return;
+			buckets.insert( QStringLiteral( "\x01probes%1" ).arg( bucketNo++, 2, 10, QLatin1Char( '0' ) ), pb );
+			pb.verts.clear();
+			pb.tris.clear();
+		};
+		auto box = [&]( const Vector3 & c, float h, const float rgb[3] ) {
+			if ( pb.verts.size() + 24 > 60000 )
+				flush();
+			const Vector3 X( h, 0, 0 ), Y( 0, h, 0 ), Z( 0, 0, h );
+			appendQuad( pb, c - X - Y + Z, c + X - Y + Z, c + X + Y + Z, c - X + Y + Z, Vector3( 0, 0, 1 ), rgb );
+			appendQuad( pb, c - X + Y - Z, c + X + Y - Z, c + X - Y - Z, c - X - Y - Z, Vector3( 0, 0, -1 ), rgb );
+			appendQuad( pb, c + X - Y - Z, c + X + Y - Z, c + X + Y + Z, c + X - Y + Z, Vector3( 1, 0, 0 ), rgb );
+			appendQuad( pb, c - X + Y - Z, c - X - Y - Z, c - X - Y + Z, c - X + Y + Z, Vector3( -1, 0, 0 ), rgb );
+			appendQuad( pb, c + X + Y - Z, c - X + Y - Z, c - X + Y + Z, c + X + Y + Z, Vector3( 0, 1, 0 ), rgb );
+			appendQuad( pb, c - X - Y - Z, c + X - Y - Z, c + X - Y + Z, c - X - Y + Z, Vector3( 0, -1, 0 ), rgb );
+		};
+		for ( const ProbePoint & q : pr.probes ) {
+			if ( !spec.probesShow )
+				break;      // placed and counted, not drawn (the PRTP band's Show probes off)
+			const float * rgb = g_probeKinds[cellProbeKindOf( q )].rgb;
+			const Vector3 c( q.pos[0] - origin[0], q.pos[1] - origin[1], q.pos[2] - origin[2] );
+			if ( q.cls == ProbeClass::Aperture ) {
+				box( c, 16.0f, rgb );
+				// a smaller box on the open side shows which way the opening faces
+				box( c + Vector3( q.nrm[0], q.nrm[1], q.nrm[2] ) * 36.0f, 7.0f, rgb );
+			} else {
+				box( c, q.cls == ProbeClass::Room ? 14.0f : 10.0f, rgb );
+			}
+		}
+		flush();
+	}
+
 	// ---- emit
 	qint64 shapes = 0, verts = 0, tris = 0;
 	bool ok = true;
@@ -1525,6 +1888,14 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 	 * enables is by BLOCK NUMBER: the land buckets are keyed "\x01land%03d"
 	 * in bucket order, the keys are sorted here, so the shapes are created in
 	 * paint order and their block numbers ascend in paint order with them. */
+	// lane PRTPPLACE: how many buckets needed the 32-bit BucketTri (more than 16-bit indices hold)
+	int bucketsWide = 0;
+	size_t bucketMaxVerts = 0;
+	for ( const QString & k : keys ) {
+		const size_t nvb = buckets.value( k ).verts.size();
+		bucketsWide += nvb > 65536 ? 1 : 0;
+		bucketMaxVerts = qMax( bucketMaxVerts, nvb );
+	}
 	QPersistentModelIndex iGround;
 	for ( const QString & k : keys ) {
 		QModelIndex iParent = iRoot;
@@ -1629,6 +2000,12 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 				sk.append( QStringLiteral( "%1 %2" ).arg( t ).arg( skippedByType.value( t ) ) );
 			s << "  skipped, no model on the base: " << sk.join( QLatin1String( ", " ) ) << "\n";
 		}
+		s << "  buckets over 65,536 vertices " << bucketsWide << " (largest " << qulonglong( bucketMaxVerts )
+		  << "), shapes drawn with their own vertex colors " << shapesVertexColor
+		  << ", placements drawn with a material swap " << placementsSwapped
+		  << ", shapes repainted by a CNAM " << shapesRepainted
+		  << ", CNAMs on a material with no palette " << cnamNoPalette
+		  << ", sky cards hidden " << skyCardsHidden << "\n";
 		s << "  distinct models loaded " << modelLoads << ", failed to load "
 		  << modelsFailed.size() << "\n";
 		s << "  source triangles " << srcTris << ", welded shapes " << shapes
@@ -1711,6 +2088,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 		  << refModel.countOfFate( CellRefFate::Disabled ) << ", deleted "
 		  << refModel.countOfFate( CellRefFate::Deleted ) << ", no base "
 		  << refModel.countOfFate( CellRefFate::NoBase ) << ")\n";
+		s << probeNotes;   // lane PRTPPLACE, empty unless WW_CELL_PROBES
 		s << "  built in " << clock.elapsed() << " ms\n";
 #ifndef ESM_HAS_CELL_FIELDS
 		s << "  NOTE: built without the esmdata cell fields (XLYR, XESP, editor ids and "
