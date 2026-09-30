@@ -489,6 +489,27 @@ bool cellSpecFromLine( const QString & line, CellSceneSpec & spec, QString * err
 		return false;
 	};
 	const QStringList parts = line.trimmed().split( QLatin1Char( '|' ) );
+	/* lane PRTP1: `plugins|interior|<EDID or hex form>[|overlay]` */
+	if ( parts.size() >= 3 && parts[1].trimmed().compare( QLatin1String( "interior" ), Qt::CaseInsensitive ) == 0 ) {
+		spec.plugins = parts[0].trimmed();
+		spec.world = QStringLiteral( "interior" );
+		spec.interior = true;
+		spec.interiorCell = parts[2].trimmed();
+		spec.cx = spec.cy = 0;
+		spec.n = 1;
+		spec.terrain = spec.water = spec.grid = false;
+		if ( parts.size() >= 4 ) {
+			bool known = false;
+			spec.overlay = cellOverlayFromName( parts[3], &known );
+			if ( !known )
+				return fail( QStringLiteral( "\"%1\" is not an overlay; try one of: %2" )
+					.arg( parts[3].trimmed(), cellOverlayNames() ) );
+		}
+		if ( spec.plugins.isEmpty() || spec.interiorCell.isEmpty() )
+			return fail( QStringLiteral( "expected plugins|interior|<cell>, got \"%1\"" ).arg( line.trimmed() ) );
+		spec.valid = true;
+		return true;
+	}
 	if ( parts.size() < 4 )
 		return fail( QStringLiteral( "expected plugins|worldspace|x,y|n, got \"%1\"" )
 			.arg( line.trimmed() ) );
@@ -601,35 +622,41 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 	QElapsedTimer clock;
 	clock.start();
 
-	// ---- the worldspace
-	const QString firstPlugin = spec.plugins.split( QLatin1Char( ',' ) ).first().trimmed();
-	QString wsError;
-	const QVector<QPair<quint32, QString>> worlds =
-		EsmWorld::listWorldspaces( spec.plugins, &wsError );
-	if ( worlds.isEmpty() )
-		return fail( wsError.isEmpty()
-			? QStringLiteral( "%1 names no worldspace" ).arg( firstPlugin ) : wsError );
-	quint32 wsForm = 0;
-	for ( const QPair<quint32, QString> & w : worlds ) {
-		if ( w.second.compare( spec.world, Qt::CaseInsensitive ) == 0 ) {
-			wsForm = w.first;
-			break;
-		}
-	}
-	if ( !wsForm ) {
-		QStringList names;
-		for ( int i = 0; i < worlds.size() && i < 12; i++ )
-			names.append( worlds[i].second );
-		return fail( QStringLiteral( "no worldspace called \"%1\"; this load order has %2 "
-			"(first: %3)" ).arg( spec.world ).arg( worlds.size() )
-			.arg( names.join( QLatin1String( ", " ) ) ) );
-	}
-
+	// ---- the worldspace, or (lane PRTP1) one interior cell
 	EsmWorld world;
 	QString loadError;
-	if ( !world.load( spec.plugins, wsForm, &loadError ) )
-		return fail( loadError.isEmpty()
-			? QStringLiteral( "could not index %1" ).arg( spec.world ) : loadError );
+	if ( spec.interior ) {
+		if ( !world.loadInterior( spec.plugins, spec.interiorCell, &loadError ) )
+			return fail( loadError.isEmpty()
+				? QStringLiteral( "could not open interior %1" ).arg( spec.interiorCell ) : loadError );
+	} else {
+		const QString firstPlugin = spec.plugins.split( QLatin1Char( ',' ) ).first().trimmed();
+		QString wsError;
+		const QVector<QPair<quint32, QString>> worlds =
+			EsmWorld::listWorldspaces( spec.plugins, &wsError );
+		if ( worlds.isEmpty() )
+			return fail( wsError.isEmpty()
+				? QStringLiteral( "%1 names no worldspace" ).arg( firstPlugin ) : wsError );
+		quint32 wsForm = 0;
+		for ( const QPair<quint32, QString> & w : worlds ) {
+			if ( w.second.compare( spec.world, Qt::CaseInsensitive ) == 0 ) {
+				wsForm = w.first;
+				break;
+			}
+		}
+		if ( !wsForm ) {
+			QStringList names;
+			for ( int i = 0; i < worlds.size() && i < 12; i++ )
+				names.append( worlds[i].second );
+			return fail( QStringLiteral( "no worldspace called \"%1\"; this load order has %2 "
+				"(first: %3)" ).arg( spec.world ).arg( worlds.size() )
+				.arg( names.join( QLatin1String( ", " ) ) ) );
+		}
+
+		if ( !world.load( spec.plugins, wsForm, &loadError ) )
+			return fail( loadError.isEmpty()
+				? QStringLiteral( "could not index %1" ).arg( spec.world ) : loadError );
+	}
 
 	/* WHERE MODELS COME FROM. The spec's data root when it names one, else the
 	 * FIRST entry of the resource stack the LOD panel already set -- one
@@ -693,8 +720,15 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 	 * throw away every row this build had just recorded. */
 	cellRefTableMutable().clear();
 
+	/* lane PRTP1: the cell's LIGHTS. Every placed LIGH that is not deleted, whether
+	 * or not it has a model and whether or not it starts disabled -- the light
+	 * list is what the cell CONTAINS, as the ref table is. WW_CELL_LIGHTS dumps it
+	 * and the gate compares it with an independent walk of the plugin. */
+	QVector<EsmRefr> lightRefs;
 	auto pushRefr = [&]( const EsmRefr & r, int cellX, int cellY, bool persistent ) {
 		refsRead++;
+		if ( !r.deleted && std::memcmp( &r.baseType, "LIGH", 4 ) == 0 )
+			lightRefs.append( r );
 
 		/* THE REFERENCE MODEL (lane CELLWORK1, bungo: "view all the technical
 		 * placed objects ... do everything creation kit does with cell
@@ -838,43 +872,56 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 	};
 
 	int cellsWithData = 0;
-	for ( int y = y0; y <= y1; y++ ) {
-		for ( int x = x0; x <= x1; x++ ) {
-			if ( !world.hasCell( x, y ) )
-				continue;
-			cellsWithData++;
+	if ( spec.interior ) {
+		// lane PRTP1: one interior cell, persistent and temporary refs together
+		cellsWithData = 1;
+		CellBlockEntry block;
+		block.cx = 0;
+		block.cy = 0;
+		block.cellForm = world.interior().cellForm;
+		block.edid = world.interior().edid;
+		cellRefTableMutable().addCell( block );
+		for ( const EsmRefr & r : world.interiorRefrs() )
+			pushRefr( r, 0, 0, false );
+	} else {
+		for ( int y = y0; y <= y1; y++ ) {
+			for ( int x = x0; x <= x1; x++ ) {
+				if ( !world.hasCell( x, y ) )
+					continue;
+				cellsWithData++;
 
-			/* lane CELLWORK1: the loaded-cells list. The view has always loaded
-			 * a BLOCK (spec.n is 1, 3 or 5), so "more than one cell" is not new
-			 * -- what was missing is that nothing recorded WHICH cells those
-			 * were or what each carried. One row per grid position that has a
-			 * CELL record, named by its EDID. Today's single cell is a list of
-			 * one, which is the shape a streaming lane needs. */
-			CellBlockEntry block;
-			block.cx = x;
-			block.cy = y;
-			block.cellForm = world.cellForm( x, y );
-			block.edid = world.cellEditorId( x, y );
-			cellRefTableMutable().addCell( block );
+				/* lane CELLWORK1: the loaded-cells list. The view has always loaded
+				 * a BLOCK (spec.n is 1, 3 or 5), so "more than one cell" is not new
+				 * -- what was missing is that nothing recorded WHICH cells those
+				 * were or what each carried. One row per grid position that has a
+				 * CELL record, named by its EDID. Today's single cell is a list of
+				 * one, which is the shape a streaming lane needs. */
+				CellBlockEntry block;
+				block.cx = x;
+				block.cy = y;
+				block.cellForm = world.cellForm( x, y );
+				block.edid = world.cellEditorId( x, y );
+				cellRefTableMutable().addCell( block );
 
-			for ( const EsmRefr & r : world.refrs( x, y ) ) {
-				seenRefs.insert( r.formID );
-				pushRefr( r, x, y, false );
+				for ( const EsmRefr & r : world.refrs( x, y ) ) {
+					seenRefs.insert( r.formID );
+					pushRefr( r, x, y, false );
+				}
 			}
 		}
-	}
-	// the worldspace's persistent cell, grid-filtered to the block
-	{
-		const float minX = float( x0 ) * CELL_UNITS;
-		const float minY = float( y0 ) * CELL_UNITS;
-		const float maxX = float( x1 + 1 ) * CELL_UNITS;
-		const float maxY = float( y1 + 1 ) * CELL_UNITS;
-		for ( const EsmRefr & r : world.persistentRefrsIn( minX, minY, maxX, maxY ) ) {
-			if ( seenRefs.contains( r.formID ) )
-				continue;
-			const int cx = int( std::floor( r.pos[0] / CELL_UNITS ) );
-			const int cy = int( std::floor( r.pos[1] / CELL_UNITS ) );
-			pushRefr( r, cx, cy, true );
+		// the worldspace's persistent cell, grid-filtered to the block
+		{
+			const float minX = float( x0 ) * CELL_UNITS;
+			const float minY = float( y0 ) * CELL_UNITS;
+			const float maxX = float( x1 + 1 ) * CELL_UNITS;
+			const float maxY = float( y1 + 1 ) * CELL_UNITS;
+			for ( const EsmRefr & r : world.persistentRefrsIn( minX, minY, maxX, maxY ) ) {
+				if ( seenRefs.contains( r.formID ) )
+					continue;
+				const int cx = int( std::floor( r.pos[0] / CELL_UNITS ) );
+				const int cy = int( std::floor( r.pos[1] / CELL_UNITS ) );
+				pushRefr( r, cx, cy, true );
+			}
 		}
 	}
 
@@ -912,8 +959,17 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 	nif->set<quint32>( iRoot, "Flags", 14 );
 	nif->set<float>( iRoot, "Scale", 1.0f );
 
-	const Vector3 origin( float( spec.cx ) * CELL_UNITS + CELL_UNITS * 0.5f,
+	Vector3 origin( float( spec.cx ) * CELL_UNITS + CELL_UNITS * 0.5f,
 		float( spec.cy ) * CELL_UNITS + CELL_UNITS * 0.5f, 0.0f );
+	if ( spec.interior && !placements.isEmpty() ) {
+		// lane PRTP1: an interior has no grid; centre the welded scene on its placements
+		double sx = 0, sy = 0;
+		for ( const Placement & p : placements ) {
+			sx += p.pos[0];
+			sy += p.pos[1];
+		}
+		origin = Vector3( float( sx / placements.size() ), float( sy / placements.size() ), 0.0f );
+	}
 
 	CellPickTable & picks = cellPickTableMutable();
 	picks.clear();
@@ -1512,9 +1568,19 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 	if ( notes ) {
 		QString n;
 		QTextStream s( &n );
-		s << "cell view " << spec.world << " " << spec.cx << "," << spec.cy
-		  << " block " << spec.n << "x" << spec.n
-		  << " (cells " << x0 << "," << y0 << " .. " << x1 << "," << y1 << ")\n";
+		if ( spec.interior ) {
+			const EsmInteriorCell & ic = world.interior();
+			s << "cell view interior " << ic.edid << " form 0x"
+			  << QString::number( ic.cellForm, 16 ).rightJustified( 8, '0' )
+			  << " (no LAND, no grid; XCLL " << ( ic.xcll.isEmpty() ? QStringLiteral( "absent" )
+			     : QStringLiteral( "%1 bytes" ).arg( ic.xcll.size() ) )
+			  << ", lighting template 0x" << QString::number( ic.lightingTemplate, 16 ).rightJustified( 8, '0' )
+			  << ", inherits 0x" << QString::number( ic.inherits, 16 ) << ")\n";
+		} else {
+			s << "cell view " << spec.world << " " << spec.cx << "," << spec.cy
+			  << " block " << spec.n << "x" << spec.n
+			  << " (cells " << x0 << "," << y0 << " .. " << x1 << "," << y1 << ")\n";
+		}
 		s << "  plugins: " << spec.plugins << "\n";
 		s << "  data root: " << ( dataRoot.isEmpty() ? QStringLiteral( "(none)" ) : dataRoot )
 		  << " -- from " << dataRootSource << "\n";
@@ -1538,6 +1604,23 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 		  << ", drawn " << drawn << "\n";
 		s << "  hidden: disabled " << refsHidden << ", markers " << refsMarker
 		  << ", deleted " << refsDeleted << ", no base " << refsNoBase << "\n";
+		{
+			// lane PRTP1: the lights census -- read, not yet lit (PRTP3 lights them)
+			QMap<QString, int> byType;
+			int withXrds = 0, withXlig = 0, off = 0;
+			for ( const EsmRefr & r : lightRefs ) {
+				byType[world.light( r.base ).typeName()]++;
+				withXrds += r.hasRadius ? 1 : 0;
+				withXlig += r.xligCount > 0 ? 1 : 0;
+				off += r.initiallyDisabled ? 1 : 0;
+			}
+			QStringList bt;
+			for ( auto it = byType.constBegin(); it != byType.constEnd(); ++it )
+				bt.append( QStringLiteral( "%1 %2" ).arg( it.key() ).arg( it.value() ) );
+			s << "  lights: " << lightRefs.size() << " placed (" << bt.join( QLatin1String( ", " ) )
+			  << "); XRDS " << withXrds << ", XLIG " << withXlig << ", initially disabled " << off
+			  << " -- read, not lit\n";
+		}
 		if ( !skippedByType.isEmpty() ) {
 			QStringList sk;
 			QStringList st = skippedByType.keys();
@@ -1674,6 +1757,33 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 			}
 		} else {
 			qWarning() << "WW_CELL_DUMP: could not write" << dump;
+		}
+	}
+
+	/* WW_CELL_LIGHTS (lane PRTP1): one row per placed light, the columns the
+	 * independent walk (scratchpad/prtp1_20260930/light_census.py) writes, so the
+	 * gate is a diff. Sorted by ref form. */
+	const QByteArray lightDump = qgetenv( "WW_CELL_LIGHTS" );
+	if ( !lightDump.isEmpty() ) {
+		QFile f( QString::fromLocal8Bit( lightDump ) );
+		if ( f.open( QIODevice::WriteOnly | QIODevice::Text ) ) {
+			QTextStream s( &f );
+			s << "ref\tbase\tbaseEdid\tx\ty\tz\tradius\txrds\txlig\tinitDisabled\ttype\tcolor\n";
+			QVector<EsmRefr> sorted = lightRefs;
+			std::sort( sorted.begin(), sorted.end(),
+				[]( const EsmRefr & a, const EsmRefr & b ) { return a.formID < b.formID; } );
+			auto hex8 = []( quint32 v ) { return QString::number( v, 16 ).toUpper().rightJustified( 8, '0' ); };
+			for ( const EsmRefr & r : sorted ) {
+				const EsmLight & L = world.light( r.base );
+				s << hex8( r.formID ) << "\t" << hex8( r.base ) << "\t" << L.edid << "\t"
+				  << QString::number( r.pos[0], 'f', 1 ) << "\t" << QString::number( r.pos[1], 'f', 1 ) << "\t"
+				  << QString::number( r.pos[2], 'f', 1 ) << "\t" << L.radius << "\t"
+				  << ( r.hasRadius ? QString::number( r.radius, 'f', 1 ) : QString() ) << "\t"
+				  << ( r.xligCount > 0 ? 1 : 0 ) << "\t" << ( r.initiallyDisabled ? 1 : 0 ) << "\t"
+				  << L.typeName() << "\t" << L.color[0] << "," << L.color[1] << "," << L.color[2] << "\n";
+			}
+		} else {
+			qWarning() << "WW_CELL_LIGHTS: could not write" << lightDump;
 		}
 	}
 

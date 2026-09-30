@@ -59,6 +59,60 @@ struct EsmRefr
 	 * Creation Kit applies it to the LOD model when it builds vanilla's .bto,
 	 * so a LOD bake that ignores it draws the wrong colourway. */
 	quint32 materialSwap = 0;
+	/* Lane PRTP1 (2026-09-30): what a placed LIGH overrides. XRDS is the
+	 * radius, when `hasRadius` (else the base's DATA radius stands; the plugin
+	 * stores NEGATIVE values too -- 2,080 of the gate's 3,945 rows -- so no sentinel). XLIG is six
+	 * floats, optional from the fifth (wbDefinitionsFO4): FOV delta, fade
+	 * delta, end-distance cap, shadow depth bias, near clip, volumetric
+	 * intensity; `xligCount` says how many the record carried. */
+	bool hasRadius = false;
+	float radius = 0.0f;
+	int xligCount = 0;
+	float xlig[6] = { 0, 0, 0, 0, 0, 0 };
+};
+
+/* Lane PRTP1: one LIGH record (wbDefinitionsFO4 LIGH DATA + FNAM). The
+ * light's TYPE is in the flags: 0x400 shadow spot, 0x800 shadow hemisphere,
+ * 0x1000 shadow omni, 0x4000 non-shadow spot, 0x20000 non-shadow box, none of
+ * those = omni. Nothing here evaluates the light -- PRTP2 owns how the game
+ * does that. */
+struct EsmLight
+{
+	bool exists = false;
+	QString edid;
+	qint32 time = 0;
+	quint32 radius = 0;
+	quint8 color[3] = { 0, 0, 0 };  //!< R, G, B as stored
+	quint32 flags = 0;
+	float falloff = 1.0f;           //!< falloff exponent
+	float fov = 90.0f;
+	float nearClip = 10.0f;
+	float constant = 0.0f, scalar = 0.0f, exponent = 0.0f;  //!< present from DATA's 11th member
+	bool hasAttenuation = false;
+	float fade = 1.0f;              //!< FNAM
+	QString gobo;                   //!< NAM0
+	//! "omni", "spot", "hemi", "box", with "shadow " in front when it casts one
+	QString typeName() const;
+};
+
+/* Lane PRTP1: an interior cell -- no LAND, no grid, its own lighting (XCLL,
+ * wbDefinitionsFO4 layout) and an optional lighting template (LTMP -> LGTM).
+ * The XCLL payload is kept whole: PRTP2 decides what the game reads from it,
+ * so nothing is interpreted here beyond the named colours and distances. */
+struct EsmInteriorCell
+{
+	bool valid = false;
+	quint32 cellForm = 0;
+	QString edid;
+	quint32 lightingTemplate = 0;   //!< LTMP, 0 when absent
+	QByteArray xcll;                //!< raw, empty when absent
+	quint8 ambient[3] = { 0, 0, 0 };
+	quint8 directional[3] = { 0, 0, 0 };
+	quint8 fogNearColor[3] = { 0, 0, 0 };
+	float fogNear = 0.0f, fogFar = 0.0f;
+	quint32 inherits = 0;           //!< XCLL "Inherits" flags: which fields come from LTMP
+	bool hasWater = false;
+	float waterHeight = 0.0f;       //!< XCLW, valid when hasWater
 };
 
 //! Lane SWAP1: one MSWP substitution row, BNAM -> SNAM (+ CNAM when present).
@@ -467,6 +521,21 @@ public:
 	//! All worldspaces in the file: formID -> EDID (static convenience).
 	static QVector<QPair<quint32, QString>> listWorldspaces( const QString & esmPath, QString * error );
 
+	/*! Lane PRTP1: every INTERIOR cell of a load order: formID -> EDID, in
+	 *  file order. Walks the top-level CELL group only (blocks, subblocks). */
+	static QVector<QPair<quint32, QString>> listInteriors( const QString & esmPath, QString * error );
+
+	/*! Lane PRTP1: open a load order for ONE interior cell instead of a
+	 *  worldspace. `cell` is its EDID or its form id in hex. After this the
+	 *  exterior queries answer nothing; interior() and interiorRefrs() do. */
+	bool loadInterior( const QString & esmPath, const QString & cell, QString * error );
+	const EsmInteriorCell & interior() const { return interiorCell; }
+	//! The interior's REFRs, persistent and temporary, later plugins' groups joined.
+	QVector<EsmRefr> interiorRefrs() const;
+
+	//! Lane PRTP1: one LIGH record, cached. Never null; `exists` false when not a LIGH.
+	const EsmLight & light( quint32 formID ) const;
+
 private:
 	std::unique_ptr<ESMFile> esm;
 	quint32 wsForm = 0;
@@ -507,6 +576,9 @@ private:
 	mutable int grasReads = 0;
 	mutable QVector<EsmRefr> persistentCache;
 	mutable bool persistentCacheBuilt = false;
+	EsmInteriorCell interiorCell;           //!< lane PRTP1
+	QVector<quint32> interiorGroups;        //!< its type-6 groups, load order
+	mutable QHash<quint32, EsmLight> lightCache;
 
 	void indexWorldspace();
 	QVector<EsmRefr> refrsInGroup( quint32 groupID ) const;
