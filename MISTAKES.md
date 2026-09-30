@@ -1793,3 +1793,9 @@ ground paint; I then told bungo the baker 'invents a fill' there. Wrong twice: t
 outside IS Bethesda's dim-4 LOD diffuse, tone-matched (gain 0.62, +33.5, saturation x1.84, band 2 whole cells). bungo:
 the blend between vanilla diffuse and ours was the design; the defects are the hard cell steps and a dirt outline.
 Rule: read the bake log's vanillaFill line before describing what a terrain area is made of.
+
+### 2026-09-30 12:24 -- PRTP1 used -1 as "no XRDS" and Fallout4.esm stores negative light radii
+EsmRefr::radius defaulted to -1 and "radius >= 0" meant "the ref overrides the radius". The light gate's first run
+matched every row's presence but mismatched 2,080 of 3,945 lights: vanilla XRDS values are often negative (-17.1,
+-214.3). Fixed with an explicit hasRadius flag. Rule: never pick an in-band sentinel for a record field whose range
+has not been measured on the corpus; use a presence flag.
