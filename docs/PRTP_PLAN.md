@@ -72,6 +72,12 @@ Codex/division-deck-coverage-matrix.md (M-01..M-22). Its rulings bind PRTP:
   the runtime attenuates tagged links by door state (closed = zero). No per-state rebakes. Huge movers: same.
 - Apertures without doors ("there's not always a door in a doorway"): door REFRs + interior portals + geometric
   opening detection (wall interruption at walkable height; windows the same); a probe at every aperture.
+  PREFERRED (bungo 2026-08-07): "is there a gap between two volumes" -- label the AIR cells of the bake volume
+  into connected components, mark each interior/exterior by sky visibility, and the narrow NECKS where
+  components meet are the apertures (position, size, facing; no REFRs). Height band + size classify it:
+  walkable = doorway, raised = window, huge = collapsed wall; boarded = no gap = no probe. Windows get probes
+  only; doors also get gated links. The labels are the interior bit for thin-wall leaks. NEVER BUILT in FO4CS
+  (wall probes shipped B2f; aperture spawns queued, then parked). Interior cells: finer spacing (~2 m candidate).
 - Placement: sector = cell; 280 u (4 m) global-lattice columns; multi-hit column descent (probe per air gap
   >= 140 u, <= 6 levels); wall probes (4 dirs, 96 u standoff, every 240 u up to 960 u), every level ray-verified.
 - The bake stores zero lighting; sun, sky and placed lights are evaluated live through the baked transport.
