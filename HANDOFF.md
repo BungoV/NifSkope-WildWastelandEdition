@@ -11,8 +11,12 @@ Report: E:\Projects\NifskopeWWE-terrlive2\scratchpad\terrlive2_20260929\DONE.md 
 - **AO map `.loda`** (ground sky visibility, 32 u, painted ground + fade band, HYBRID and DYNAMIC, no switch):
   vs the old baked AO corr 0.989, mean diff 7.5/255; +0.002 ms GPU. Probes/surfels wait for PRTP (bungo's ruling).
 - Docs: docs/LODGEN_TERRAIN_VT.md 2.6d, 2.6e. Whole-map bakes in that scratch: final_on (rule), final_off.
-- **Next**: bungo's merge word -> merge, rebuild main, install a whole-map HYBRID bake (the installed one is still
-  the ditched FULL, section below).
+- **MERGED + INSTALLED 2026-09-30 12:59** (bungo's yes): merge 8993f9d7, main rebuilt (BUILD-RC 0). Installed final_off (outside
+  paint Vanilla = default) into mods\FO4CSLOD\FO4CSLOD\Commonwealth: VT.8/16/32.lodt, VT.lodm, flat report, NEW
+  .loda .lodd .lodg; 8/8 sha1 OK; Commonwealth folder now 1.6 GB. Replaced files (VT.2 + VT.4 = the FULL levels,
+  ~14 GB, and the old 8/16/32, lodm, report) MOVED to E:\Projects\Fallout 4 Modsackups\FO4CSLOD_replaced_TERRLIVE2_20260930.
+  Objects (.lodl v3, .lodi v12, .lodo, .lodb, arrays, cards) untouched. Proof: main exe renders the installed files,
+  pics installed_street/boston_hybrid.png in the terrlive2 scratch, mean diff 0.01 vs the approved renders.
 
 ### PRTP1 -- branch prtp1-20260930 @ eba27f52, pushed, NOT merged
 Interiors open in the cell view (`<plugins>|interior|<EDID or form>`); XCLL kept whole, LTMP read; every placed
@@ -44,7 +48,7 @@ scratchpad/merge2_20260929/DONE.md (every gate with its numbers, the red control
   option (`terrain hybrid|dynamic`) and, when on, `outside rule`.
 - `--terrain-preview <spec.json>` renders and times the options offscreen.
 
-### The installed bake is the DITCHED one -- owed a re-bake
+### (SUPERSEDED 2026-09-30 12:59: terrain re-baked HYBRID and installed, see top block) The installed bake is the DITCHED one -- owed a re-bake
 mods\FO4CSLOD still holds MERGE1's whole-map bake of 2026-09-29 00:58-02:52: the FULL option (every .lodt level)
 with law 1 (the old per-cell fill: whole-cell steps, dirt outline), `.lodi` v12, no decals, `.lodl` v3. It was not
 touched by this lane. It is owed a whole-map HYBRID re-bake + install, AFTER the rock tuning lane (the rule paint
