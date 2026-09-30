@@ -61,6 +61,30 @@ the `.loda` AO map. Probes happen here.
    format: proposed = the FO4CS in-game baker's `.tbk` so the game already reads
    it (bungo's call; the FO4CS reader otherwise comes last by standing order).
 
+## 2b. Inherited from FO4CS's in-game bake (read 2026-09-30; MISTAKES: this plan was first written without it)
+
+FO4CS ran the Division bake in game, 2026-08-03..08-07: code fallout4-community-shaders/src/TransportBake +
+WorldProbes, reports Codex/division-bake-b1..b2o-*.md, rulings Codex/HANDOFF.md ~17350-18680, gap list
+Codex/division-deck-coverage-matrix.md (M-01..M-22). Its rulings bind PRTP:
+- The deck is authoritative; diverge only if it does not work in FO4 or a divergence measurably wins.
+- Statics only. Actors, havok clutter, projectiles, movables, FX: receivers only. Workshop builds: receivers only.
+- Doors: baked EXCLUDED (aperture open); every probe-surfel link crossing a door's aperture carries that door's id;
+  the runtime attenuates tagged links by door state (closed = zero). No per-state rebakes. Huge movers: same.
+- Apertures without doors ("there's not always a door in a doorway"): door REFRs + interior portals + geometric
+  opening detection (wall interruption at walkable height; windows the same); a probe at every aperture.
+- Placement: sector = cell; 280 u (4 m) global-lattice columns; multi-hit column descent (probe per air gap
+  >= 140 u, <= 6 levels); wall probes (4 dirs, 96 u standoff, every 240 u up to 960 u), every level ray-verified.
+- The bake stores zero lighting; sun, sky and placed lights are evaluated live through the baked transport.
+What the game-side bake never achieved, and why NifSkope takes the bake over:
+- Its capture read the engine's G-buffer, so it baked EVERYTHING drawn: no statics filter, no door exclusion
+  (grep: none in TransportBake/). NifSkope draws only what we pick.
+- ~100 ms per probe, display-bound, camera-arrival refusals; the bake had to run in game, unfocused.
+- Last gate (B2m/B2n) FAILED: 19.8-46.2% of receivers got exactly zero fill in cell-sized blocks; interiors 4x
+  over-lit. B2o deployed, never gated. Parked load-bearers: M-03 bricks, D-16 sun shadow, D-17 per-sector light
+  gathering, M-16 distant tier.
+Output: `.tbk` v3 ('TBK1', 64-byte header, surfels 32 B, probes 144 B, links 12 B, one file per cell,
+sector_%+05d_%+05d.tbk) is what FO4CS's relight already reads. PRTP6 writes it (door ids on links need a v4).
+
 ## 3. Open
 
 - `.tbk` compatibility vs a new NifSkope format (proposal above).
