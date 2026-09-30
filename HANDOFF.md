@@ -18,7 +18,7 @@ Report: E:\Projects\NifskopeWWE-terrlive2\scratchpad\terrlive2_20260929\DONE.md 
   Objects (.lodl v3, .lodi v12, .lodo, .lodb, arrays, cards) untouched. Proof: main exe renders the installed files,
   pics installed_street/boston_hybrid.png in the terrlive2 scratch, mean diff 0.01 vs the approved renders.
 
-### PRTP1 -- branch prtp1-20260930 @ eba27f52, pushed, NOT merged
+### PRTP1 -- MERGED 2026-09-30 13:2x (merge 4392c348), main rebuilt, cell_lights.sh 10/10 PASS on the merged exe
 Interiors open in the cell view (`<plugins>|interior|<EDID or form>`); XCLL kept whole, LTMP read; every placed
 light read (LIGH DATA, XRDS, XLIG, initially disabled) and dumped by WW_CELL_LIGH2026-09-30 12:28. Gate
 tests/spells/cell_lights.sh: 10 interiors, 3,945 lights, all match an independent Python walk; `--red` fails.

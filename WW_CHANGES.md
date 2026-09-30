@@ -1,13 +1,13 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
-## Interior cells open in the cell view, with every placed light read (lane PRTP1, 2026-09-30; branch, not merged)
+## Interior cells open in the cell view, with every placed light read (lane PRTP1, 2026-09-30; merged 2026-09-30)
 
 - The cell view opens interiors by EDID or form id. Their own lighting (XCLL) and lighting template are read.
 - Every placed light is read: radius, color, flags, the reference's own radius and light overrides, initially
   disabled. `WW_CELL_LIGHTS=<file>` writes them as a table. They are not drawn yet.
 - Checked on 10 interiors (3,945 lights) against an independent walk of Fallout4.esm.
 
-## LOD terrain: rock drift, rounded painted-area outline, AO map (lane TERRLIVE2, 2026-09-30; branch, not merged)
+## LOD terrain: rock drift, rounded painted-area outline, AO map (lane TERRLIVE2, 2026-09-30; merged 2026-09-30)
 
 - Rock on far slopes no longer drifts brighter with distance (drift 7.6 -> 5.7 HYBRID, 12.5 -> 6.0 DYNAMIC).
 - The edge where painted ground blends into vanilla is rounded; the cell-grid staircase is gone.
