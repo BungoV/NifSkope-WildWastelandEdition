@@ -5,6 +5,14 @@ Written the moment a mistake is recognised, unprompted (CONSTITUTION rule 2).
 Format: date -- what was done -- what was true -- how it was found -- the rule.
 Newest at the top.
 
+## 2026-10-01 -- BASE1: "the 09-24 exe also differs from the lodgen baseline", written without the control run
+- HANDOFF (04:09 block) said the stock lodgen baseline differed for the 09-24 exe as well as the current one, which
+  read as game data having moved. The 09-24 exe still gives its own baseline 25 of 25; only the code moved (lane
+  TIDY1's black-glow drop and duplicate-layer merge, 09-27). Found by lane BASE1 running the old exe. Rule: a
+  "the data drifted" claim needs the old exe run against its own baseline, and the result quoted.
+- BASE1 ran the old exe with a relative output path; it wrote under the main tree's release\scratchpad\ (moved back
+  out). Rule: old exes get absolute output paths.
+
 ## 2026-10-01 -- EFX2: "effects should take the room's light", guessed; a comparison render with the chain off
 - The first plan for the Vault's white steam haze was to light the effects with the cell's lights. The game's
   effect vertex shader sums no light at all; its only "lighting" is a script-set emit colour, white when unset.

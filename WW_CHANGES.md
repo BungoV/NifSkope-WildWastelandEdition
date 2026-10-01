@@ -1,5 +1,11 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## LOD bake reference hashes current again (2026-10-01)
+
+- The LOD bake's reference list of file hashes (`tests/baselines/stock_baseline.sha256`) is current again. Its 8
+  differences were all the 09-27 cleanup that stopped writing black glow textures and merged duplicate texture
+  layers; nothing else had moved. Gate `tests/spells/lodgen_native_baseline.sh --check`: 24 of 24 identical.
+
 ## Cell view: "Ambient Only" lights no longer light surfaces (2026-10-01)
 
 - Lights marked Ambient Only in the plugin (names like "AmbientModifierDarkGrey01Amb") only adjust the room's
