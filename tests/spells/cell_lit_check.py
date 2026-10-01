@@ -107,7 +107,7 @@ def lights_of(esm, cell_edid):
         radius, = struct.unpack_from('<I', d, 4)
         col = np.array(list(d[8:11]), float)
         lf, = struct.unpack_from('<I', d, 12)
-        if lf & 0x20:
+        if lf & 0x20 or lf & 0x100000:  # off; Ambient Only (no direct light in game, lane AMBO1)
             continue
         falloff, fov = struct.unpack_from('<2f', d, 16) if len(d) >= 28 else (1.0, 90.0)
         bse = struct.unpack_from('<3f', d, 40) if len(d) >= 52 else (0.0, 1.0, 2.0)

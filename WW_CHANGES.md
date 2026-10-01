@@ -1,5 +1,12 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Cell view: "Ambient Only" lights no longer light surfaces (2026-10-01)
+
+- Lights marked Ambient Only in the plugin (names like "AmbientModifierDarkGrey01Amb") only adjust the room's
+  ambient in game; they never light a surface directly. The cell view drew them as ordinary lights; it now skips
+  them (Vault 111 has three). The status line counts them as `ambientonly=N`.
+- `tests/spells/cell_lit.sh --red ambientlit` draws them again and must FAIL.
+
 ## Cell view: effects drawn the game's way (2026-10-01)
 
 - With Cell lights on, effects (steam, mist, glows) now draw the way the game's effect shader does. They no

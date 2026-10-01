@@ -745,13 +745,19 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 	for ( int k = 0; k < 3; k++ )
 		L.center[k] = center[k];
 	const bool axisRed = ( wwCellLightsRed() & 2 ) != 0;
-	int omni = 0, spot = 0, off = 0, noRadius = 0, dark = 0;
+	int omni = 0, spot = 0, off = 0, noRadius = 0, dark = 0, ambientOnly = 0;
 	for ( const EsmRefr & r : lightRefs ) {
 		const EsmLight & b = world.light( r.base );
 		if ( !b.exists )
 			continue;
 		if ( r.initiallyDisabled || ( b.flags & 0x20 ) ) {
 			off++;
+			continue;
+		}
+		// lane AMBO1: an Ambient Only light (0x100000) adds no light of its own in game; it scales the cell's
+		// ambient where it applies (docs/PRTP_PLAN.md 3, not drawn yet)
+		if ( ( b.flags & 0x100000 ) && !( wwCellLightsRed() & 128 ) ) {
+			ambientOnly++;
 			continue;
 		}
 		WwCellLight l;
@@ -973,6 +979,7 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 		+ QStringLiteral( " norim=%1 ignorerough=%2" )	// lane RIM1: the lights whose shader drops the back-light
 			.arg( std::count_if( L.lights.cbegin(), L.lights.cend(), []( const WwCellLight & l ) { return l.noRim; } ) )
 			.arg( std::count_if( L.lights.cbegin(), L.lights.cend(), []( const WwCellLight & l ) { return l.ignoreRoughness; } ) )
+		+ QStringLiteral( " ambientonly=%1" ).arg( ambientOnly )	// lane AMBO1: skipped, no direct light in game
 		+ QStringLiteral( " imagespace=%1" ).arg( isNote )
 		+ QStringLiteral( " fog=%1" ).arg( L.fogNote.isEmpty() ? QStringLiteral( "none (exterior: the Lookdev weather fog)" ) : L.fogNote );
 	wwCellLightsPublish( nif, L );

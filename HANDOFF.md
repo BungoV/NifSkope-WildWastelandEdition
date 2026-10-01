@@ -1,6 +1,15 @@
 # Handoff — NifSkope, Wild Wasteland Edition
 
-## TOP BLOCK -- written 2026-10-01 18:32 (`date`-read): EXPO1 + EFX2, effects drawn the game's way
+## TOP BLOCK -- written 2026-10-01 18:52 (`date`-read): AMBO1, Ambient Only lights skipped
+
+- AMBO1: lights with LIGH flag 0x100000 are dropped from the direct lights (cellview.cpp cellPublishLighting,
+  summary "ambientonly=N"; Vault111Cryo 3). Red WW_CELL_LIT_RED=ambientlit (s.red 128) draws them again;
+  cell_lit_check.py skips them independently. Exe 18:44: cell_lit green PASS (Vault 99.9%, Solomon 100%),
+  red ambientlit FAIL (86.0%). The ambient scale they apply in game is NOT drawn yet: open question in
+  PRTP_PLAN 3 (zone vs on screen), settle in game.
+- NEXT unchanged from the block below, minus ambient-only.
+
+## Block -- written 2026-10-01 18:32 (`date`-read): EXPO1 + EFX2, effects drawn the game's way
 
 - EXPO1: effects now draw into the imagespace measure (red WW_CELL_IS_RED=nofx). EFX2: cell-lit effects use
   fo4_effectcell.prog (fo4_effectshader.frag + WW_CELLLIGHTS + WW_CELL_FX), swapped by name in renderer.cpp's

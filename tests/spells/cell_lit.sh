@@ -15,8 +15,9 @@
 # RED CONTROLS (each must FAIL):  --red linear   the radial curve without its 2.2
 #                                 --red axis     spots aimed along local -Z
 #                                 --red off      the row off: no probe is served at all
+#                                 --red ambientlit  the Ambient Only lights drawn as ordinary lights
 #
-# USAGE  bash tests/spells/cell_lit.sh [--red linear|axis|off]
+# USAGE  bash tests/spells/cell_lit.sh [--red linear|axis|off|ambientlit]
 #        CELLS="..." to pick interiors; the camera stands at CAM_<cell> (x,y,z look-at) if set.
 
 set -u

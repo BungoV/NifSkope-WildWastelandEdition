@@ -476,6 +476,16 @@ measure (Vault: the steam leaves 4% of the frame as opaque cell-lit pixels to co
 
 - `.tbk` v4: two surfel sides per cell (gives back the refused thin-wall weight), room ids (2f).
 - Glass tint in the bake.
+- Ambient Only lights (LIGH flag 0x100000; 39 placed, names like "AmbientModifierDarkGrey01Amb"): read from the
+  game's shaders, such a light does not light anything directly. When it heads the light list of the deferred
+  ambient pass, the cell's directional ambient is scaled by its colour (2.2-decoded) x dimmer before the pass's own
+  2.2 (dimmer 0.5 -> about 0.22 of the ambient). The ambient pass is full screen, so the open question is how the
+  light gets into that list: camera inside its sphere (a zone) or its sphere on screen. Vault111Cryo has three
+  (-1011,1911,-69 r1118; -2410,32,30 r291; -3594,-222,157 r779), none near the walkway. Settle in game: stand
+  inside / outside one and compare. Lane AMBO1 (2026-10-01) drops them from the direct lights (summary
+  "ambientonly=N"; red WW_CELL_LIT_RED=ambientlit draws them again and FAILS cell_lit, 86.0% vs 99.9%); the ambient
+  scale itself waits on that question. List:
+  scratchpad/ltype1_20261001/ambient_only.py, ambient_refs.py.
 - Save names for the PRTP4 capture flights.
 - FraternalPost11501 seen from straight above (center 553,2170,400, distance 600) and PickmanGallery01 (562,440,150):
   probe 8 and the diffuse check part on 13% / 9% of clean pixels, flags honoured or not. The Fraternal patch

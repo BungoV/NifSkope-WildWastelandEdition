@@ -115,6 +115,8 @@ ClState & st()
 			s.red = 32;	// lane RIM1: the back-light rim term dropped
 		else if ( red == "rimflags" )
 			s.red = 64;	// lane RIM1: the lights' No Rim / Ignore Roughness flags ignored
+		else if ( red == "ambientlit" )
+			s.red = 128;	// lane AMBO1: the Ambient Only lights drawn as ordinary lights
 	}
 	return s;
 }

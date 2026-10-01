@@ -28,7 +28,8 @@ BSD License - see nifskope.h
  * fragment writes raw: 1 the placed lights' irradiance / 4, 2 the world position's high bytes,
  * 3 its low bytes (each over the 65536-unit box centred on the published centre), 4 the world
  * normal * 0.5 + 0.5), WW_CELL_LIT_RED=<red>: "linear" (the radial curve without its 2.2 power),
- * "axis" (spots shine along -Z), "nodalc" (the interior ambient dropped). Probe 5 (lane PRTPGI): the
+ * "axis" (spots shine along -Z), "nodalc" (the interior ambient dropped), "ambientlit" (the Ambient Only
+ * lights, which add no direct light in game, drawn as ordinary lights; lane AMBO1). Probe 5 (lane PRTPGI): the
  * bounce's irradiance E(N) / pi, raw. */
 
 #include <QString>
