@@ -43,6 +43,9 @@ LINK = np.dtype([('delta', '<i2', 3), ('dir', '<i2', 2), ('w', '<u2')])
 assert SURFEL.itemsize == 32 and PROBE.itemsize == 144 and LINK.itemsize == 12
 
 
+MAX_LINKS = 1024   # src/probebake.h ProbeBakeSpec::maxLinks
+
+
 def floordiv(v, s):
     # the reader's key: float32 division, then floor
     return int(math.floor(float(np.float32(v) / np.float32(s))))
@@ -238,9 +241,15 @@ def hits_of(tris, o, dirs, cell):
     return tt, k, hit, use, hp, kc
 
 
-def model_surfels(tris, alb, probes, dirs, cell):
+def zyx(k):
+    return (k[2], k[1], k[0])   # the bake's Key order
+
+
+def model_surfels(tris, alb, probes, dirs, cell, spill=True):
     """Every probe's hits into per-cell bins by facing side; each cell keeps the side
-    most rays saw plus the faces not opposed to it. Returns key -> (normal, albedo, samples)."""
+    most rays saw plus the faces not opposed to it. The opposed faces (a thin wall's
+    second side) move to the free neighbour most along their normal, within 45 deg,
+    in key order. Returns (key -> (normal, albedo, samples), key -> second side's key)."""
     fn = np.cross(tris[:, 1] - tris[:, 0], tris[:, 2] - tris[:, 0])
     fn /= np.linalg.norm(fn, axis=1)[:, None]
     bins = {}
@@ -256,15 +265,42 @@ def model_surfels(tris, alb, probes, dirs, cell):
             b[0] += 1
             b[1] += nv
             b[2] += np.array(alb[k[j]], dtype=np.float64) / 255.0
-    out = {}
+    def final(n, nv, al):
+        return (nv / np.linalg.norm(nv), tuple(int(round(min(max(x / n, 0), 1) * 255)) for x in al), n)
+
+    out, backs = {}, []
     for key, bs in bins.items():
         w = max(range(6), key=lambda i: (bs[i][0], -i))
         n, nv, al = 0, np.zeros(3), np.zeros(3)
+        bn, bv, ba = 0, np.zeros(3), np.zeros(3)
         for b in bs:
-            if b[0] and np.dot(b[1], bs[w][1]) >= 0:
+            if not b[0]:
+                continue
+            if np.dot(b[1], bs[w][1]) >= 0:
                 n += b[0]; nv += b[1]; al += b[2]
-        out[key] = (nv / np.linalg.norm(nv), tuple(int(round(min(max(x / n, 0), 1) * 255)) for x in al), n)
-    return out
+            else:
+                bn += b[0]; bv += b[1]; ba += b[2]
+        out[key] = final(n, nv, al)
+        if bn and spill:
+            backs.append((key, bn, bv, ba))
+    alt = {}
+    for key, bn, bv, ba in sorted(backs, key=lambda e: zyx(e[0])):
+        bl = np.linalg.norm(bv)
+        if bl <= 0:
+            continue
+        tries = []
+        for d in ((x, y, z) for x in (-1, 0, 1) for y in (-1, 0, 1) for z in (-1, 0, 1) if (x, y, z) != (0, 0, 0)):
+            c = float(np.dot(d, bv)) / (bl * math.sqrt(d[0] ** 2 + d[1] ** 2 + d[2] ** 2))
+            tries.append((c, tuple(key[a] + d[a] for a in range(3))))
+        tries.sort(key=lambda e: (-e[0], zyx(e[1])))
+        for c, nb in tries:
+            if c < 0.7071 - 1e-6:
+                break
+            if nb not in bins and nb not in out:
+                out[nb] = final(bn, bv, ba)
+                alt[key] = nb
+                break
+    return out, alt
 
 
 def retrace(tbks, tris, alb, n, fails):
@@ -276,7 +312,7 @@ def retrace(tbks, tris, alb, n, fails):
               phys_bad=[], alb_bad=0, alb_n=0, nrm_bad=0, sf_missing=0, sf_n=0, turned=0)
     cell = tbks[0][1]['cell'] if tbks else 70.0
     allp = [pr['pos'].astype(np.float64) for _, t in tbks for pr in t['probes']]
-    model = model_surfels(tris, alb, allp, dirs, cell)
+    model, alt = model_surfels(tris, alb, allp, dirs, cell)
     for f, t in tbks:
         s, keys = t['surfels'], t['keys']
         for sp in s:
@@ -313,12 +349,16 @@ def retrace(tbks, tris, alb, n, fails):
             for kk, c in cells.items():
                 m = model.get(kk)
                 if m is None or np.dot(c[1], m[0]) >= 0:
+                    nb = alt.get(kk)
+                    if nb is not None and np.dot(c[1], model[nb][0]) < 0:
+                        kept[nb] = c   # the second side, housed next door
+                        continue
                     turned += c[0]
                     st['turned'] += 1
                 else:
                     kept[kk] = c
             order = sorted(kept.items(), key=lambda e: (-e[1][0], e[0][2], e[0][1], e[0][0]))
-            cap = sum(c[0] for _, c in order[256:])
+            cap = sum(c[0] for _, c in order[MAX_LINKS:])
             want_unl = (turned + cap) / FOUR_PI
             got = {}
             for l in L:
@@ -332,7 +372,7 @@ def retrace(tbks, tris, alb, n, fails):
             if l1 > cap / FOUR_PI + q + 4.0 / n:
                 st['link_bad'] += 1
             for kk, (w, d) in got.items():
-                c = cells.get(kk)
+                c = kept.get(kk, cells.get(kk))
                 if c is None or np.linalg.norm(c[1]) == 0:
                     continue
                 st['dirs'] += 1

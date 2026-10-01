@@ -218,6 +218,7 @@ struct Chunk
 	SurfelMap surfels;
 	std::vector<ProbeOut> probes;
 	qint64 hits = 0, misses = 0;
+	qint64 spilled = 0;         // links sent to a second side instead of refused
 	qint64 turned = 0;          // links refused by the facing rule
 };
 
@@ -340,6 +341,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probes, 
 	};
 
 	FinalMap fin;
+	std::unordered_map<Key, Key, KeyHash> alt;   // a two-sided cell -> the neighbour holding its second side
 
 	// pass 2: the probe records, linking only surfels that face the probe
 	auto probeChunk = [&]( Chunk & ch ) {
@@ -411,6 +413,16 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probes, 
 				double v[3];
 				unpackDir( cd.dir, v );
 				if ( f == fin.end() || v[0] * f->second.n[0] + v[1] * f->second.n[1] + v[2] * f->second.n[2] > -1.0e-4 ) {
+					const auto a = alt.find( e.first );
+					if ( a != alt.end() ) {
+						const double * an = fin.find( a->second )->second.n;
+						if ( v[0] * an[0] + v[1] * an[1] + v[2] * an[2] < -1.0e-4 ) {
+							cd.k = a->second;
+							ord.push_back( cd );
+							ch.spilled++;
+							continue;
+						}
+					}
 					turned += e.second.w;
 					ch.turned++;
 					continue;
@@ -487,39 +499,21 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probes, 
 		SurfelMap().swap( ch.surfels );
 	}
 	fin.reserve( all.size() );
-	for ( const auto & e : all ) {
-		const SurfelBins & sb = e.second;
-		int w = 0;
-		for ( int i = 1; i < 6; i++ )
-			if ( sb.b[i].n > sb.b[w].n )
-				w = i;
-		if ( !sb.b[w].n )
-			continue;
-		Bin a;
-		bool split = false;
-		for ( int i = 0; i < 6; i++ ) {
-			const Bin & bi = sb.b[i];
-			if ( !bi.n )
-				continue;
-			if ( bi.nrm[0] * sb.b[w].nrm[0] + bi.nrm[1] * sb.b[w].nrm[1] + bi.nrm[2] * sb.b[w].nrm[2] < 0 ) {
-				split = true;
-				continue;
-			}
-			a.add( bi );
-		}
-		R.twoSided += split ? 1 : 0;
+	// one surfel record from a side's summed samples, its position kept inside `home`
+	// (the reader keys a surfel by where it is, so a mean outside would land elsewhere)
+	auto makeFinal = [&]( const Bin & a, const Key & home ) {
 		Final f;
 		TbkSurfel & sr = f.rec;
 		std::memset( &sr, 0, sizeof sr );
-		const qint32 kk[3] = { e.first.x, e.first.y, e.first.z };
+		const qint32 kk[3] = { home.x, home.y, home.z };
 		const double nl = std::sqrt( a.nrm[0] * a.nrm[0] + a.nrm[1] * a.nrm[1] + a.nrm[2] * a.nrm[2] );
 		for ( int c = 0; c < 3; c++ ) {
-			// the mean stays inside its own cell, or the reader would key it to a neighbour
-			float p = float( a.pos[c] / a.n );
-			const float lo = float( kk[c] ) * cellS, hi = float( kk[c] + 1 ) * cellS;
-			for ( int g = 0; g < 8 && floorDiv( p, cellS ) != kk[c]; g++ )
-				p = floorDiv( p, cellS ) < kk[c] ? std::nextafter( std::max( p, lo ), hi )
-				                                  : std::nextafter( std::min( p, hi ), lo );
+			// a side housed next door has its mean ON the shared face: clamp a hair
+			// inside (1/1000 of the cell), and take the centre if float32 still disagrees
+			const float lo = float( kk[c] ) * cellS, hi = float( kk[c] + 1 ) * cellS, m = 0.001f * cellS;
+			float p = std::clamp( float( a.pos[c] / a.n ), lo + m, hi - m );
+			if ( floorDiv( p, cellS ) != kk[c] )
+				p = ( float( kk[c] ) + 0.5f ) * cellS;
 			sr.position[c] = p;
 			const double nc = nl > 0 ? a.nrm[c] / nl : ( c == 2 ? 1.0 : 0.0 );
 			sr.normal[c] = qint16( std::lround( std::clamp( nc, -1.0, 1.0 ) * 32767.0 ) );
@@ -530,7 +524,80 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probes, 
 			+ double( sr.normal[2] ) * sr.normal[2] );
 		for ( int c = 0; c < 3; c++ )
 			f.n[c] = ql > 0 ? sr.normal[c] / ql : 0.0;
-		fin.emplace( e.first, f );
+		return f;
+	};
+	std::vector<std::pair<Key, Bin>> backs;   // the second sides, housed below in key order
+	for ( const auto & e : all ) {
+		const SurfelBins & sb = e.second;
+		int w = 0;
+		for ( int i = 1; i < 6; i++ )
+			if ( sb.b[i].n > sb.b[w].n )
+				w = i;
+		if ( !sb.b[w].n )
+			continue;
+		Bin a, back;
+		bool split = false;
+		for ( int i = 0; i < 6; i++ ) {
+			const Bin & bi = sb.b[i];
+			if ( !bi.n )
+				continue;
+			if ( bi.nrm[0] * sb.b[w].nrm[0] + bi.nrm[1] * sb.b[w].nrm[1] + bi.nrm[2] * sb.b[w].nrm[2] < 0 ) {
+				split = true;
+				back.add( bi );
+				continue;
+			}
+			a.add( bi );
+		}
+		R.twoSided += split ? 1 : 0;
+		if ( split && spec.spill )
+			backs.emplace_back( e.first, back );
+		fin.emplace( e.first, makeFinal( a, e.first ) );
+	}
+	/* THE SECOND SIDE'S HOME: a neighbour on the side the back face looks into --
+	 * the 26 around the cell, tried from the one most along the back normal (the
+	 * face neighbour first) down to 45 degrees off it. Only a cell nothing was ever
+	 * hit in (no surfel of its own) and that no earlier back side took; key order,
+	 * so the claim does not depend on hash order. Otherwise the old refusal stands
+	 * for that cell. */
+	std::sort( backs.begin(), backs.end(), []( const std::pair<Key, Bin> & x, const std::pair<Key, Bin> & y ) {
+		return x.first < y.first;
+	} );
+	for ( const auto & kb : backs ) {
+		const Bin & bk = kb.second;
+		const double bl = std::sqrt( bk.nrm[0] * bk.nrm[0] + bk.nrm[1] * bk.nrm[1] + bk.nrm[2] * bk.nrm[2] );
+		if ( bl <= 0 )
+			continue;
+		std::pair<double, Key> try26[26];
+		int nt = 0;
+		for ( int dx = -1; dx <= 1; dx++ )
+			for ( int dy = -1; dy <= 1; dy++ )
+				for ( int dz = -1; dz <= 1; dz++ ) {
+					if ( !dx && !dy && !dz )
+						continue;
+					const double c = ( dx * bk.nrm[0] + dy * bk.nrm[1] + dz * bk.nrm[2] )
+						/ ( bl * std::sqrt( double( dx * dx + dy * dy + dz * dz ) ) );
+					Key nb = kb.first;
+					nb.x += dx; nb.y += dy; nb.z += dz;
+					try26[nt++] = { c, nb };
+				}
+		std::sort( try26, try26 + nt, []( const std::pair<double, Key> & x, const std::pair<double, Key> & y ) {
+			if ( x.first != y.first )
+				return x.first > y.first;
+			return x.second < y.second;
+		} );
+		Key nb = kb.first;
+		bool found = false;
+		for ( int i = 0; i < nt && try26[i].first >= 0.7071 - 1.0e-6; i++ )
+			if ( !all.count( try26[i].second ) && !fin.count( try26[i].second ) ) {
+				nb = try26[i].second;
+				found = true;
+				break;
+			}
+		if ( !found )
+			continue;
+		fin.emplace( nb, makeFinal( bk, nb ) );
+		alt.emplace( kb.first, nb );
+		R.spilled++;
 	}
 	SurfelMap().swap( all );
 	runAll( probeChunk );
@@ -538,6 +605,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probes, 
 		R.hits += ch.hits;
 		R.misses += ch.misses;
 		R.linksTurned += ch.turned;
+		R.linksSpilled += ch.spilled;
 	}
 	R.msRays = double( tm.nsecsElapsed() ) / 1e6;
 	tm.restart();
@@ -626,7 +694,8 @@ QString probeBakeCensusText( const ProbeBakeResult & r )
 	t << "\n";
 	t << "bake: surfels " << r.surfels << ", links " << r.links << ", probes over the link cap " << r.probesCapped
 	  << ", unlinked mean " << QString::number( r.unlinkedMean, 'f', 4 ) << ", sectors " << r.sectors << "\n";
-	t << "bake: two-sided cells " << r.twoSided << " (one side kept), links refused as turned away " << r.linksTurned
+	t << "bake: two-sided cells " << r.twoSided << " (second side housed next door " << r.spilled
+	  << ", links to it " << r.linksSpilled << "), links refused as turned away " << r.linksTurned
 	  << " (mean " << QString::number( r.turnedMean, 'f', 4 ) << " of the sphere)"
 	  << ", albedo " << ( r.albedoKnown ? "from the textures" : "GREY (the soup carried none)" ) << "\n";
 	t << "bake time ms: rays " << qRound( r.msRays ) << ", write " << qRound( r.msWrite ) << "\n";
@@ -649,13 +718,15 @@ int probeBakeCli( const QStringList & args )
 		else if ( a == QLatin1String( "--threads" ) ) { bs.threads = nx.toInt(); i++; }
 		else if ( a == QLatin1String( "--red" ) ) { bs.red = nx; i++; }
 		else if ( a == QLatin1String( "--no-sky" ) ) { bs.noSky = true; }
+		else if ( a == QLatin1String( "--no-spill" ) ) { bs.spill = false; }
+		else if ( a == QLatin1String( "--max-links" ) ) { bs.maxLinks = quint32( qBound( 8, nx.toInt(), 4096 ) ); i++; }
 		else if ( a == QLatin1String( "--no-openings" ) ) { ps.apertures = false; }
 		else if ( a == QLatin1String( "--no-rooms" ) ) { ps.coverage = false; }
 	}
 	const QStringList rc = rect.split( ',' );
 	if ( soupPath.isEmpty() || outDir.isEmpty() || rc.size() != 4 ) {
 		std::fprintf( stderr, "usage: probebake --soup <file> --rect minX,minY,maxX,maxY --out <dir> "
-			"[--rays n] [--threads n] [--spacing s] [--red octant|normal] [--no-sky] [--no-openings] [--no-rooms]\n" );
+			"[--rays n] [--threads n] [--spacing s] [--red octant|normal] [--no-sky] [--no-spill] [--max-links n] [--no-openings] [--no-rooms]\n" );
 		return 2;
 	}
 	ps.minX = rc[0].toFloat();

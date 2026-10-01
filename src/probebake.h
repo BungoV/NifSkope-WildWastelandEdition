@@ -33,13 +33,21 @@ struct ProbeBakeSpec
 {
 	int rays = 2048;            //!< per probe, Fibonacci sphere
 	float surfelCell = 70.0f;   //!< FO4CS's surfel cell (header surfelCellSize)
-	quint32 maxLinks = 256;     //!< FO4CS BakeConfig::maxLinksPerProbe
+	quint32 maxLinks = 1024;    //!< FO4CS's in-game bake keeps 256 (BakeConfig::maxLinksPerProbe); the
+	                            //!< relight reads any count. 256 drops 0.04 of the sphere on busy probes
+	                            //!< (the reference gate's irradiance error: 0.111 at 256, 0.059 at 1024)
 	float rayMax = 131072.0f;   //!< a ray that meets nothing this far is sky
 	int threads = 0;            //!< 0 = the machine's
 	/*! An interior cell: no sky. A ray that meets nothing left through an opening
 	 *  into the unloaded void, so its weight is unlinked (the relight renormalizes
 	 *  over the surfaces), and every octant's sky visibility is 0. */
 	bool noSky = false;
+	/*! 2026-10-01: THE SECOND SIDE, inside v3. A cell seen from both sides of a thin
+	 *  wall keeps one side; the other side's surfel goes into the EMPTY neighbour cell
+	 *  on its own side (the reader keys a surfel by its position, so the position is
+	 *  nudged across the boundary, under one cell). A probe the kept side faces away
+	 *  from links that surfel instead of being refused. Off = the old refusal. */
+	bool spill = true;
 	/*! A deliberate defect for the gate's refuters: "octant" swaps the octant
 	 *  bits (x negative -> bit 2), "normal" stores the triangle normal unflipped.
 	 *  Empty in every real run. */
@@ -55,6 +63,8 @@ struct ProbeBakeResult
 	int twoSided = 0;                       //!< surfel cells seen from opposite sides (a thin wall): one side kept
 	qint64 linksTurned = 0;                 //!< probe -> cell links refused: the cell's surfel faces away
 	double turnedMean = 0;                  //!< over probes: the sphere share those refusals unlinked
+	int spilled = 0;                        //!< second sides housed in an empty neighbour cell
+	qint64 linksSpilled = 0;                //!< links that reached a second side instead of a refusal
 	bool noSky = false;                     //!< the spec's: misses went to unlinked, not sky
 	double voidMean = 0;                    //!< over probes, noSky only: the sphere share that met nothing
 	int albedoKnown = 0;                    //!< 1 when the soup carried albedo, else every surfel is grey

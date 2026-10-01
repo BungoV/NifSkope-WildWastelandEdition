@@ -1,0 +1,228 @@
+// prtp_reference -- the brute-force reference for the PRTP probe bake (2026-10-01).
+//
+// Shares NO code with src/probebake.cpp: no BVH (every ray is tested against
+// every triangle), no Fibonacci set (jittered equal-area strata from a fixed
+// seed), its own Moller-Trumbore. tests/spells/prtp_reference.py compares what
+// this sees from each probe against what the probe's .tbk links reconstruct.
+//
+//   prtp_reference <soup.psp> <probes.txt> <rays> <sx> <sy> <sz> <out.tsv>
+//
+// probes.txt: one "x y z" per line. The radiance field is a test field, not
+// light: a hit surface gives albedo * (0.25 + 0.75 * max(0, n . s)), n turned
+// toward the probe; a miss (sky) gives 0, as in FO4CS's relight. Per probe and
+// octant (bit0 x<0, bit1 y<0, bit2 z<0) the out line holds the sky share, the
+// surface share and the summed radiance (r g b), each as a fraction of the
+// FULL sphere; then the grey field's 9 real SH coefficients (bands 0-2).
+#include <algorithm>
+#include <atomic>
+#include <cmath>
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
+#include <thread>
+#include <vector>
+
+namespace {
+
+struct Soup
+{
+	std::vector<float> ox, oy, oz, ax, ay, az, bx, by, bz;   // v0, e1 = v1-v0, e2 = v2-v0
+	std::vector<float> nx, ny, nz;                         // unit geometric normal
+	std::vector<float> alb;                                // linear, 3 per triangle
+};
+
+bool readSoup( const char * path, Soup & s )
+{
+	FILE * f = std::fopen( path, "rb" );
+	if ( !f )
+		return false;
+	uint32_t head[3];
+	if ( std::fread( head, 4, 3, f ) != 3 || head[0] != 0x31505350u ) {
+		std::fclose( f );
+		return false;
+	}
+	const size_t n = head[1];
+	std::vector<float> v( n * 9 );
+	if ( std::fread( v.data(), 4, v.size(), f ) != v.size() ) {
+		std::fclose( f );
+		return false;
+	}
+	std::fseek( f, long( head[2] ) * 28, SEEK_CUR );   // doors: ref + lo + hi
+	uint32_t tail[2] = { 0, 0 };
+	std::vector<uint8_t> a;
+	if ( std::fread( tail, 4, 2, f ) == 2 && tail[0] == 0x31424C41u && tail[1] == n ) {
+		a.resize( n * 3 );
+		if ( std::fread( a.data(), 1, a.size(), f ) != a.size() )
+			a.clear();
+	}
+	std::fclose( f );
+	if ( a.empty() )
+		return false;   // the test field needs the albedo the bake used
+	auto res = [&]( std::vector<float> & x ) { x.resize( n ); };
+	for ( auto * x : { &s.ox, &s.oy, &s.oz, &s.ax, &s.ay, &s.az, &s.bx, &s.by, &s.bz, &s.nx, &s.ny, &s.nz } )
+		res( *x );
+	s.alb.resize( n * 3 );
+	for ( size_t i = 0; i < n; i++ ) {
+		const float * t = &v[i * 9];
+		s.ox[i] = t[0]; s.oy[i] = t[1]; s.oz[i] = t[2];
+		s.ax[i] = t[3] - t[0]; s.ay[i] = t[4] - t[1]; s.az[i] = t[5] - t[2];
+		s.bx[i] = t[6] - t[0]; s.by[i] = t[7] - t[1]; s.bz[i] = t[8] - t[2];
+		double cx = double( s.ay[i] ) * s.bz[i] - double( s.az[i] ) * s.by[i];
+		double cy = double( s.az[i] ) * s.bx[i] - double( s.ax[i] ) * s.bz[i];
+		double cz = double( s.ax[i] ) * s.by[i] - double( s.ay[i] ) * s.bx[i];
+		const double l = std::sqrt( cx * cx + cy * cy + cz * cz );
+		if ( l > 0 ) {
+			cx /= l; cy /= l; cz /= l;
+		}
+		s.nx[i] = float( cx ); s.ny[i] = float( cy ); s.nz[i] = float( cz );
+		for ( int k = 0; k < 3; k++ )
+			s.alb[i * 3 + k] = a[i * 3 + k] / 255.0f;
+	}
+	return true;
+}
+
+// Jittered equal-area strata: rows in z = cos(theta), columns in phi.
+void directions( int rays, std::vector<float> & dx, std::vector<float> & dy, std::vector<float> & dz )
+{
+	int rows = std::max( 1, int( std::lround( std::sqrt( rays / 2.0 ) ) ) );
+	int cols = std::max( 1, rays / rows );
+	uint64_t st = 0x9E3779B97F4A7C15ull;
+	auto rnd = [&]() {
+		st ^= st << 13; st ^= st >> 7; st ^= st << 17;
+		return double( st >> 11 ) / double( 1ull << 53 );
+	};
+	for ( int r = 0; r < rows; r++ )
+		for ( int c = 0; c < cols; c++ ) {
+			const double z = 1.0 - 2.0 * ( r + rnd() ) / rows;
+			const double ph = 2.0 * 3.14159265358979323846 * ( c + rnd() ) / cols;
+			const double s = std::sqrt( std::max( 0.0, 1.0 - z * z ) );
+			dx.push_back( float( s * std::cos( ph ) ) );
+			dy.push_back( float( s * std::sin( ph ) ) );
+			dz.push_back( float( z ) );
+		}
+}
+
+}   // namespace
+
+int main( int argc, char ** argv )
+{
+	if ( argc != 8 ) {
+		std::fprintf( stderr, "usage: prtp_reference <soup.psp> <probes.txt> <rays> <sx> <sy> <sz> <out.tsv>\n" );
+		return 2;
+	}
+	Soup s;
+	if ( !readSoup( argv[1], s ) ) {
+		std::fprintf( stderr, "soup %s: unreadable or no ALB1 albedo\n", argv[1] );
+		return 1;
+	}
+	std::vector<float> P;
+	if ( FILE * f = std::fopen( argv[2], "r" ) ) {
+		float x, y, z;
+		while ( std::fscanf( f, "%f %f %f", &x, &y, &z ) == 3 ) {
+			P.push_back( x ); P.push_back( y ); P.push_back( z );
+		}
+		std::fclose( f );
+	}
+	double sx = std::atof( argv[4] ), sy = std::atof( argv[5] ), sz = std::atof( argv[6] );
+	const double sl = std::sqrt( sx * sx + sy * sy + sz * sz );
+	sx /= sl; sy /= sl; sz /= sl;
+	std::vector<float> dx, dy, dz;
+	directions( std::atoi( argv[3] ), dx, dy, dz );
+	const size_t M = dx.size(), T = s.ox.size(), NP = P.size() / 3;
+
+	FILE * out = std::fopen( argv[7], "w" );
+	if ( !out )
+		return 1;
+	std::fprintf( out, "# prtp_reference rays %zu tris %zu sun %.4f %.4f %.4f\n", M, T, sx, sy, sz );
+	const unsigned nth = std::max( 1u, std::thread::hardware_concurrency() );
+	for ( size_t p = 0; p < NP; p++ ) {
+		const float px = P[p * 3], py = P[p * 3 + 1], pz = P[p * 3 + 2];
+		std::vector<float> bestT( M, 1.0e30f );
+		std::vector<int> bestI( M, -1 );
+		std::atomic<size_t> next( 0 );
+		const size_t PK = 64;   // a packet of rays stays in cache while every triangle streams past
+		auto work = [&]() {
+			for ( ;; ) {
+				const size_t r0 = next.fetch_add( PK );
+				if ( r0 >= M )
+					return;
+				const size_t r1 = std::min( M, r0 + PK );
+				float tb[PK]; int ib[PK];
+				for ( size_t r = r0; r < r1; r++ ) {
+					tb[r - r0] = 1.0e30f; ib[r - r0] = -1;
+				}
+				for ( size_t i = 0; i < T; i++ ) {
+					const float ex = s.ax[i], ey = s.ay[i], ez = s.az[i];
+					const float fx = s.bx[i], fy = s.by[i], fz = s.bz[i];
+					const float tx = px - s.ox[i], ty = py - s.oy[i], tz = pz - s.oz[i];
+					// q = t x e1 is ray-independent
+					const float qx = ty * ez - tz * ey, qy = tz * ex - tx * ez, qz = tx * ey - ty * ex;
+					const float tq = fx * qx + fy * qy + fz * qz;   // e2 . q
+					for ( size_t r = r0; r < r1; r++ ) {
+						const float ux = dx[r], uy = dy[r], uz = dz[r];
+						const float hx = uy * fz - uz * fy, hy = uz * fx - ux * fz, hz = ux * fy - uy * fx;
+						const float det = ex * hx + ey * hy + ez * hz;
+						if ( std::fabs( det ) < 1.0e-12f )
+							continue;
+						const float inv = 1.0f / det;
+						const float u = ( tx * hx + ty * hy + tz * hz ) * inv;
+						if ( u < 0.0f || u > 1.0f )
+							continue;
+						const float v = ( ux * qx + uy * qy + uz * qz ) * inv;
+						if ( v < 0.0f || u + v > 1.0f )
+							continue;
+						const float t = tq * inv;
+						if ( t > 0.01f && t < tb[r - r0] ) {
+							tb[r - r0] = t;
+							ib[r - r0] = int( i );
+						}
+					}
+				}
+				for ( size_t r = r0; r < r1; r++ ) {
+					bestT[r] = tb[r - r0];
+					bestI[r] = ib[r - r0];
+				}
+			}
+		};
+		std::vector<std::thread> th;
+		for ( unsigned k = 0; k < nth; k++ )
+			th.emplace_back( work );
+		for ( auto & t : th )
+			t.join();
+		double sky[8] = {}, surf[8] = {}, L[8][3] = {}, sh[9] = {};
+		for ( size_t r = 0; r < M; r++ ) {
+			const int o = ( dx[r] < 0 ) | ( ( dy[r] < 0 ) << 1 ) | ( ( dz[r] < 0 ) << 2 );
+			const int i = bestI[r];
+			if ( i < 0 ) {
+				sky[o] += 1.0 / M;
+				continue;
+			}
+			surf[o] += 1.0 / M;
+			double nx = s.nx[i], ny = s.ny[i], nz = s.nz[i];
+			if ( nx * dx[r] + ny * dy[r] + nz * dz[r] > 0 ) {   // turn it toward the probe
+				nx = -nx; ny = -ny; nz = -nz;
+			}
+			const double g = 0.25 + 0.75 * std::max( 0.0, nx * sx + ny * sy + nz * sz );
+			double grey = 0;
+			for ( int k = 0; k < 3; k++ ) {
+				L[o][k] += s.alb[size_t( i ) * 3 + k] * g / M;
+				grey += s.alb[size_t( i ) * 3 + k] * g / 3.0;
+			}
+			// real SH to band 2 (what the relight stores), weight 4pi/M per ray
+			const double x = dx[r], y = dy[r], z = dz[r], w = grey * 4.0 * 3.14159265358979323846 / M;
+			const double Y[9] = { 0.282095, 0.488603 * y, 0.488603 * z, 0.488603 * x, 1.092548 * x * y,
+				1.092548 * y * z, 0.315392 * ( 3 * z * z - 1 ), 1.092548 * x * z, 0.546274 * ( x * x - y * y ) };
+			for ( int c = 0; c < 9; c++ )
+				sh[c] += Y[c] * w;
+		}
+		std::fprintf( out, "%zu", p );
+		for ( int o = 0; o < 8; o++ )
+			std::fprintf( out, "\t%.6f\t%.6f\t%.6f\t%.6f\t%.6f", sky[o], surf[o], L[o][0], L[o][1], L[o][2] );
+		for ( int c = 0; c < 9; c++ )
+			std::fprintf( out, "\t%.7f", sh[c] );
+		std::fprintf( out, "\n" );
+		std::fflush( out );
+	}
+	std::fclose( out );
+	return 0;
+}

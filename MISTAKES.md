@@ -5,6 +5,13 @@ Written the moment a mistake is recognised, unprompted (CONSTITUTION rule 2).
 Format: date -- what was done -- what was true -- how it was found -- the rule.
 Newest at the top.
 
+## 2026-10-01 -- PRTP reference: "next I'm..." then the turn ended; spill landed before the synth gate ran
+- I told bungo what I would do next and ended the turn without doing it ("You're not doing anything now?").
+  Rule: a turn ends with work done, not a promise; the next step is a tool call, not a sentence.
+- The second-side spill was measured on the reference gate first; the synth gate then found a surfel keyed
+  twice (a mean on the shared face rounds next door in float32). Rule: run the format's own gate on the same
+  build before reading quality numbers off it.
+
 ## 2026-10-01 -- PRTP: a gate picture sent with every texture magenta; the red truck called "faithful"; a grep across lib/
 
 - What was done: (1) I sent bungo the Cell workspace gate's "after Bake" picture without looking at it. The gate

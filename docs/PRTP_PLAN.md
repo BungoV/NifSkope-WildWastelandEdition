@@ -203,10 +203,23 @@ How (src/probebake.cpp, CLI `probebake --soup ...`):
   = its solid angle / 4pi and the mean direction.
 - THE THIN-WALL RULE. A 70-unit cell can hold both faces of a wall. `.tbk` v3 has one surfel per cell,
   so a probe on the far side would link to a surfel facing away and pull light through the wall. Such a
-  link is refused and its weight goes to `unlinkedWeight`, which FO4CS's relight already takes out of the
-  gather domain (effectiveCoverage = coverage - unlinked - unresolved) and renormalizes over. Cost on the
-  Museum block: about 13% of the sphere lands on refused back faces. A v4 with two sides per cell would
-  get it back. Then the links are sorted (weight, then key) and capped at 256; the rest is unlinked too.
+  link was refused and its weight went to `unlinkedWeight` (the relight renormalizes over the rest).
+  SINCE 2026-10-01 THE SECOND SIDE IS HOUSED NEXT DOOR, still v3: the opposed faces become their own
+  surfel in a free neighbor cell (nothing hit there, nothing claimed), tried from the neighbor most along
+  their normal down to 45 degrees off it, in key order; a refused link goes to it instead. The surfel's
+  position is kept 1/1000 of a cell inside its home (on the shared face float32 can key it next door).
+  Concord: 6197 of 10362 two-sided cells housed; refused weight 0.150 -> 0.063 of the sphere. Then the
+  links are sorted (weight, then key) and capped at 1024 (the relight reads any count; FO4CS's own
+  in-game bake keeps 256, which cost Concord 0.04 of the sphere on busy probes); the rest is unlinked.
+- THE REFERENCE GATE (tests/spells/prtp_reference.py + tests/prtp_reference.cpp, 2026-10-01). The synth
+  gate proves the bake re-traces itself; this proves what a probe's links reconstruct matches what the
+  probe sees, on a real cell. A brute-force tracer that shares no code with the bake (every triangle per
+  ray, its own jittered directions) traces K probes under a test field (albedo x (0.25 + 0.75 max(0,n.s)),
+  sky 0 as in the relight). Gated: sky per octant (worst 0.01), the total (median 10%, p95 25%) and the
+  band-2 SH irradiance over 26 normals, what a surface reads (median 10%, p95 25%). Concord, 96 probes:
+  sky 0.003, total 0.038 / 0.118, irradiance 0.065 / 0.173 PASS; shuffled albedo and mirrored directions
+  FAIL. Before the second side and the cap: irradiance 0.160 / 0.296 FAIL. The tracer is built by hand:
+  g++ -O3 -std=c++17 -static -pthread tests/prtp_reference.cpp, passed with --ref.
 - Deterministic: fixed chunks merged in chunk order; 1 thread and all threads give byte-identical files.
 - Albedo (src/probealbedo.cpp), LINEAR like FO4CS's G-buffer surfels. Objects: the diffuse map at a
   coarse mip (<= 64 texels) at the triangle's UV centroid, times its vertex color in gamma, then decoded.

@@ -1,5 +1,20 @@
 # Handoff — NifSkope, Wild Wasteland Edition
 
+## TOP BLOCK -- written 2026-10-01 04:09 (`date`-read): glass + the probe bake's reference gate, on main
+
+- Glass (7d515209): blended materials blend in the cell view (BGEM/BGSM bAlphaBlend + fAlpha, NiAlphaProperty).
+  The checked-in lodgen_native_baseline is STALE (8 region/arrays files differ for the 09-24 exe AND the new one);
+  the glass change was proven against a baseline written with the pre-change exe (24/24 identical). Rewrite it.
+- Reference gate (docs/PRTP_PLAN.md 2g): `python tests/spells/prtp_reference.py <soup.psp> <bakedir> --probes 96
+  --ref <prtp_reference.exe>`; build the tracer by hand (g++ line in the plan). Soups with albedo come from
+  `WW_CELL_PROBE_SOUP` with `WW_CELL_PROBE_BAKE` set. Concord PASS (irradiance 0.065 / 0.173), reds FAIL.
+- Thin walls keep both sides (second side housed in a free neighbor cell, v3); link cap 1024. synth PASS,
+  reds FAIL; check PASS on Concord. `.tbk` v4 is no longer needed for the second side (room ids still open).
+- bungo's ask 2026-10-01 04:0x: "the top down bakes from the division games for far areas ... so that GI works
+  on areas far from you" = Division slide 57 distant shading (FO4CS matrix G20/M-16, unbuilt). NEXT LANE PRTPFAR.
+- The analytic cases I promised (closed box, plane under sky) are the synth gate's physics checks already
+  (room probes: sky 0, coverage 1; ground probes: the open octant 1.0, the lower half 0).
+
 ## TOP BLOCK -- written 2026-09-30 19:00 (`date`-read): PRTPBAKE (the probe bake, PRTP6) MERGED to main
 
 ### PRTPBAKE -- branch prtpbake-20260930 (worktree E:\Projects\NifskopeWWE-prtpplace)

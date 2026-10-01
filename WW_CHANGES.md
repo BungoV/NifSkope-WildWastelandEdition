@@ -1,5 +1,16 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Probe bake checked against a brute-force reference; thin walls keep both sides (2026-10-01)
+
+- New gate `tests/spells/prtp_reference.py` + `tests/prtp_reference.cpp`: a separate brute-force tracer
+  measures what each probe really sees, and the bake's links must reconstruct it (sky, total, and the
+  irradiance a surface reads). Concord, 96 probes: PASS; both broken-on-purpose runs FAIL.
+- A thin wall's far side is no longer dropped: it becomes its own surfel in a free neighboring cell
+  (still `.tbk` v3). Refused weight on Concord fell from 15% to 6% of the sphere.
+- Link cap per probe 256 -> 1024 (the reader takes any count). `probebake --max-links n`, `--no-spill`.
+- Surfel positions now sit just inside their cell, fixing a cell-boundary rounding duplicate.
+- The synth gate models the second side (PASS, both reds FAIL).
+
 ## Cell view glass is see-through (2026-10-01)
 
 - Blended materials (NiAlphaProperty blend bit, a BGSM's or a BGEM's bAlphaBlend) now blend in the cell view at the
