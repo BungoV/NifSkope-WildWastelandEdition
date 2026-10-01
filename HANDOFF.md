@@ -21,6 +21,15 @@ in cellworkspace.cpp, harness stage 3 in cellworkspacetest.cpp.
   scratchpad/prtpbake_20260930/g/{sanctuary_bake,concord_bake,museum_bake}.png, drawn by bake_pictures.py there.
 - Open: `.tbk` v4 (two sides per cell -- Museum loses ~13% of the sphere to refused back faces; room ids),
   glass tint, how FO4CS finds an interior cell's files. **Next**: PRTP3 viewport lights, PRTP4 captures, PRTP5 walk.
+- **2026-10-01 02:09 follow-up (bungo: "Everything is purple", "the vertex painted truck"):** the cell view and the bake
+  read the base's MODC (color remapping index) for Greyscale_To_PaletteColor materials when no swap row gives a
+  CNAM; the bake samples the palette (map green = column, index = row; `ProbeAlbedo::samplePalette`, shape field
+  `g2pTex` = texture slot 3, BGSM wins). Museum pickup = MSTT PickUpTruck08, MODC 0.235: red in view and bake
+  (its surfels 52,49,45 -> 68,29,22; Concord 31,506 triangles through a palette). cell_workspace.sh now gives
+  every window a seeded settings scope (its pictures were magenta). Gates: cell_workspace 50/50 rows (same 3
+  pre-existing FAILs), lodgen_native_baseline identical to its pre-change result (7 known drifted files).
+  Pictures: scratchpad/prtpplace_20260930/cells/truck_modc_before_after.png,
+  scratchpad/prtpbake_20260930/g/concord_paint_before_after.png.
 
 ## PREVIOUS BLOCK -- written 2026-09-30 18:01 (`date`-read): PRTPPLACE (probe placement + interior rule + PRTP band) MERGED to main
 

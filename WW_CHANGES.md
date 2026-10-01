@@ -1,5 +1,15 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Cell view paint and the bake's palette colors; the workspace gate's own settings (2026-10-01)
+
+- The cell view reads a base record's MODC (its model's color remapping index) and paints Greyscale_To_PaletteColor
+  materials with it when no material swap row gives a CNAM. The Concord museum pickup (PickUpTruck08, MODC 0.235)
+  is red again instead of bare rust. Concord: 12 shapes painted by MODC.
+- The probe bake colors palette materials as the game does: the diffuse map's green picks the palette column, the
+  paint index (or palette scale x vertex red) the row. So the red truck bounces red in the bake.
+- tests/spells/cell_workspace.sh runs every window in its own seeded settings scope: its pictures were drawing
+  every texture magenta (no game folder in the default profile).
+
 ## PRTP probe bake: FO4CS .tbk files from the Cell workspace (lane PRTPBAKE, 2026-09-30)
 
 - Bake in the PRTP band works: it places the probes, then writes FO4CS transport-bake files (`.tbk` v3, one per

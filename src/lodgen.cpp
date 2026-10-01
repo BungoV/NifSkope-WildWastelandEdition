@@ -1415,6 +1415,7 @@ struct LodSrcShape
 	 * material's fLookupScale only on such a property). Read-only fact. */
 	bool g2pFlag = false;
 	float g2pScale = 1.0f;      //!< lane PRTPPLACE: the palette row the material names, which a CNAM replaces
+	QString g2pTex;             //!< 2026-10-01: the palette map (texture slot 3, BGSM wins), for the probe bake's albedo
 	float smoothness = 1.0f, specMult = 1.0f;
 	/* And what it EMITS: the Own-Emit bit, the emissive colour and the
 	 * emissive multiple, from the same place - the BGSM when the shape names
@@ -2370,6 +2371,8 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 						s.tex1 = src.get<QString>( src.getIndex( iArr, 1 ) );
 						if ( src.get<int>( iTexSet, "Num Textures" ) > 7 )
 							s.tex7 = src.get<QString>( src.getIndex( iArr, 7 ) );
+						if ( src.get<int>( iTexSet, "Num Textures" ) > 3 )
+							s.g2pTex = src.get<QString>( src.getIndex( iArr, 3 ) );
 						const int nTex = src.get<int>( iTexSet, "Num Textures" );
 						for ( int t = 0; t < nTex; t++ )
 							nf.textures.append( src.get<QString>( src.getIndex( iArr, t ) ) );
@@ -2415,6 +2418,8 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 							s.specMult = sm.specularStrength();
 							s.g2pFlag = ( sm.commonShaderFlags1() & 0x8000U ) != 0;
 							s.g2pScale = sm.grayscaleToPaletteScale();
+							if ( t.size() > 3 && !t[3].isEmpty() )
+								s.g2pTex = t[3];
 							// the BGSM's emittance wins the same way, as the renderer's does
 							s.emitColor = sm.emittanceColor();
 							s.emitMult = sm.emittanceMultiple();
@@ -2615,6 +2620,7 @@ static bool nativeLoadModelImpl( void * user, const QString & model, const Lodge
 		n.effectTex0 = s.effectTex0; n.matUnreadable = s.matUnreadable;
 		n.g2p = s.g2pFlag;
 		n.g2pScale = s.g2pScale;
+		n.g2pTex = s.g2pTex;
 		n.smoothness = s.smoothness; n.specMult = s.specMult;
 		n.emitColor[0] = s.emitColor.red(); n.emitColor[1] = s.emitColor.green(); n.emitColor[2] = s.emitColor.blue();
 		n.emitMult = s.emitMult; n.ownEmit = s.ownEmit;

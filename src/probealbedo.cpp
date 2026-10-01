@@ -120,6 +120,23 @@ bool ProbeAlbedo::sample( const QString & tex, float u, float v, const float vc[
 	return true;
 }
 
+bool ProbeAlbedo::samplePalette( const QString & tex, const QString & palette, float u, float v, float row,
+	float out[3] )
+{
+	const DDSTexture16 * t = tex.isEmpty() ? nullptr : load( tex );
+	const DDSTexture16 * p = palette.isEmpty() ? nullptr : load( palette );
+	if ( !t || !p )
+		return false;
+	u -= std::floor( u );
+	v -= std::floor( v );
+	const float g0 = t->getPixelB( u, v, 0 )[1];
+	const float g = std::clamp( t->isSRGBTexture() ? linearToSrgb( g0 ) : g0, 0.0f, 1.0f );
+	const FloatVector4 c = p->getPixelB( g, std::clamp( row, 0.0f, 1.0f ), 0 );
+	for ( int k = 0; k < 3; k++ )
+		out[k] = p->isSRGBTexture() ? std::clamp( c[size_t( k )], 0.0f, 1.0f ) : srgbToLinear( c[size_t( k )] );
+	return true;
+}
+
 bool ProbeAlbedo::meanGamma( const QString & tex, float out[3] )
 {
 	const DDSTexture16 * t = tex.isEmpty() ? nullptr : load( tex );

@@ -84,6 +84,8 @@ struct NativeSrcShape
 	bool g2p = false;
 	//! Lane PRTPPLACE: that material's palette row (BGSM wins); the cell view replaces it with a CNAM.
 	float g2pScale = 1.0f;
+	//! 2026-10-01: that material's palette map (texture slot 3, BGSM wins); the probe bake samples it.
+	QString g2pTex;
 	bool hasAlpha = false;
 	quint8 alphaThreshold = 128;
 	bool ownEmit = false;

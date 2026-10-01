@@ -5,6 +5,25 @@ Written the moment a mistake is recognised, unprompted (CONSTITUTION rule 2).
 Format: date -- what was done -- what was true -- how it was found -- the rule.
 Newest at the top.
 
+## 2026-10-01 -- PRTP: a gate picture sent with every texture magenta; the red truck called "faithful"; a grep across lib/
+
+- What was done: (1) I sent bungo the Cell workspace gate's "after Bake" picture without looking at it. The gate
+  ran in the default settings profile, which had no game folder for drawing, so every texture was magenta.
+  (2) bungo said the Concord museum pickup "doesn't display its vertex paint"; I reported it as a faithful
+  rusted-white swap and asked him what he sees in game. (3) Hunting the BGSM reader, I grepped `src lib`
+  recursively, past the tool timeout.
+- What was true: (1) the bake reads textures through `WW_CELL_DATAROOT`, the renderer through the profile's
+  game folders; only the picture was wrong. (2) that truck is MSTT PickUpTruck08, not the STAT I had looked
+  at; its record carries MODC 0.235, the color remapping index that picks the red row of its
+  Greyscale_To_PaletteColor palette, and the cell view only read CNAM from swap rows. The mesh has no vertex
+  colors at all; "vertex paint" was his word for that paint. (3) `git ls-files | grep` found the file at once.
+- How it was found: (1) bungo, "Everything is purple here"; (2) bungo asked again, and the REFR positions put
+  PickUpTruck08 at the camera; (3) the timeout.
+- The rule: look at every picture before sending it. A gate that draws gets its own seeded settings scope
+  (`cell_workspace.sh` now uses `fresh_scope` like the other cell gates). Before calling a render "faithful",
+  identify the exact REFR by position and dump its base record's every paint field (MODS, MODC, XMSP).
+  Find files with `git ls-files`, never a recursive grep over lib/.
+
 ## 2026-09-30 -- PRTPBAKE: a gate scene with a coplanar twin; a changelog edit that rewrote every line ending; a harness env that changed what Place does
 
 - What was done: (1) the bake gate's room box had a bottom face lying on the ground plane; 156 surfels then

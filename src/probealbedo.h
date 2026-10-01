@@ -55,6 +55,11 @@ public:
 
 	//! The map at (u, v), times `vc` (0..1, gamma), as linear 0..1. False = no map read.
 	bool sample( const QString & tex, float u, float v, const float vc[3], float out[3] );
+	/*! A Greyscale_To_PaletteColor surface, as the game paints it: the map's green at (u, v)
+	 *  picks the column and `row` (the palette scale x vertex red, or a CNAM/MODC index) the
+	 *  row of `palette`; the palette color replaces the albedo (no vertex color on top). Linear
+	 *  0..1. False = either map unread. */
+	bool samplePalette( const QString & tex, const QString & palette, float u, float v, float row, float out[3] );
 	//! The map's mean, GAMMA space (its coarsest mip). False = no map read.
 	bool meanGamma( const QString & tex, float out[3] );
 

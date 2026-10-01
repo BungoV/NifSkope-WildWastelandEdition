@@ -54,6 +54,24 @@ LOG="$OUT/ww_cell_workspace.log"
 PORT="${PORT:-14741}"
 SPEC="$REPO/tests/fixtures/empty.wwcell"
 NIF="${NIF:-$REPO/tests/fixtures/empty.nif}"
+# Each window gets its own settings scope (the pattern of cell_open.sh), seeded with this
+# machine's Fallout 4 folders: without one the gate inherited whatever the default profile
+# held, and on 2026-09-30 that drew every texture magenta in the PRTP pictures.
+SCOPE="${SCOPE:-cell_workspace}"
+REGKEY="HKCU\\Software\\NifTools\\NifSkope 2.0 $SCOPE"
+wipe_scope() { reg delete "$REGKEY" //f > /dev/null 2>&1 || true; }
+fresh_scope() {
+	wipe_scope
+	reg add "$REGKEY\\Settings" //v Version //t REG_SZ //d 1 //f > /dev/null 2>&1 || true
+	reg add "$REGKEY" //v "Game Manager Version" //t REG_DWORD //d 2 //f > /dev/null 2>&1 || true
+	local gm; gm="$(mktemp)"
+	python "$(dirname "$0")/settings_scope_game.py" "$SCOPE" "$(cygpath -w "$gm")" > /dev/null 2>&1 \
+		&& reg import "$(cygpath -w "$gm")" > /dev/null 2>&1
+	rm -f "$gm"
+	printf '%s' "$SCOPE"
+}
+wipe_scope
+trap wipe_scope EXIT
 
 : > "$LOG"
 say() { echo "$@" | tee -a "$LOG"; }
@@ -104,7 +122,7 @@ env WW_CELL_DATAROOT="$DATA" \
 	WW_CELLWS_PRTP=1 \
 	WW_CELL_PROBE_BAKE_DIR="$(winpath "$BAKE")" \
 	WW_CELLWS_SHOTS="$(winpath "$IMG")" \
-	timeout 900 "$EXE" --port "$PORT" "$(winpath "$SPEC")" > "$NOTES" 2>&1
+	WW_SETTINGS_SCOPE="$(fresh_scope)" timeout 900 "$EXE" --port "$PORT" "$(winpath "$SPEC")" > "$NOTES" 2>&1
 
 if [ -s "$REPORT" ]; then
 	cat "$REPORT" >> "$LOG"
@@ -154,7 +172,7 @@ RED_REPORT="$OUT/ww_cellws_nocell.report"
 rm -f "$RED_REPORT"
 env WW_CELL_DATAROOT="$DATA" \
 	WW_CELLWS_TEST="$(winpath "$RED_REPORT")" \
-	timeout 900 "$EXE" --port "$PORT" "$(winpath "$SPEC")" > "$OUT/ww_cellws_nocell.notes" 2>&1
+	WW_SETTINGS_SCOPE="$(fresh_scope)" timeout 900 "$EXE" --port "$PORT" "$(winpath "$SPEC")" > "$OUT/ww_cellws_nocell.notes" 2>&1
 if [ -s "$RED_REPORT" ]; then
 	nf=$(sed -n 's/^rows [0-9]* failures \([0-9]*\)$/\1/p' "$RED_REPORT" | tail -1)
 	say "  with no cell scene: ${nf:-?} failures"
@@ -227,7 +245,7 @@ env WW_CELL_DATAROOT="$DATA" \
 	WW_CELL_OPEN="$ESM|$WORLD|$NCELLX,$NCELLY|1" \
 	WW_CELL_REFDUMP="$(winpath "$NREFDUMP")" \
 	WW_CELLWS_TEST="$(winpath "$OUT/ww_cellws_named.report")" \
-	timeout 900 "$EXE" --port "$PORT" "$(winpath "$SPEC")" \
+	WW_SETTINGS_SCOPE="$(fresh_scope)" timeout 900 "$EXE" --port "$PORT" "$(winpath "$SPEC")" \
 	> "$OUT/ww_cellws_named.notes" 2>&1
 if [ -s "$NREFDUMP" ]; then
 	say "  $(grep -m1 '^# cell ' "$NREFDUMP")"
@@ -261,7 +279,7 @@ if [ -n "$LODI" ] && [ -f "$LODI" ]; then
 		WW_CELLWS_TEST="$(winpath "$IDREPORT")" \
 		WW_CELLWS_SHOTS="$(winpath "$IMG")" \
 		WW_CELLWS_SHOTTAG=cell_workspace_identity \
-		timeout 900 "$EXE" --port "$PORT" "$(winpath "$SPEC")" \
+		WW_SETTINGS_SCOPE="$(fresh_scope)" timeout 900 "$EXE" --port "$PORT" "$(winpath "$SPEC")" \
 		> "$OUT/ww_cellws_identity.notes" 2>&1
 	say "  $(grep -m1 'picture: the Cell workspace' "$IDREPORT" 2>/dev/null || echo 'the identity run wrote no picture row')"
 	check "the identity-overlay picture was written, at window size" \

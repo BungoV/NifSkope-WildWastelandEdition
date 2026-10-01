@@ -13,6 +13,7 @@ BSD License - see nifskope.h
 #include <climits>
 #include <cmath>
 #include <cstring>
+#include <limits>
 #include <functional>
 #include <algorithm>
 #include <QFileInfo>
@@ -629,6 +630,11 @@ const EsmLodBase & EsmWorld::lodBase( quint32 baseFormID ) const
 				 * MODL group (wbDefinitionsFO4 wbMODL). The first one wins: it is
 				 * the only one a STAT, SCOL or TREE carries. */
 				b.materialSwap = esm->mapFormID( *br, f.readUInt32() );
+			} else if ( f == "MODC" && f.size() >= 4 && !b.hasColorRemap ) {
+				/* the MODL group's color remapping index (wbDefinitionsFO4 wbMODL: MODC);
+				 * the first one is the base's own model, the rest belong to later groups */
+				b.colorRemap = f.readFloat();
+				b.hasColorRemap = b.colorRemap < std::numeric_limits<float>::max();
 			} else if ( f == "MODL" && !( *br == "TREE" || *br == "STAT" )
 				&& b.model.isEmpty() ) {
 				/* CELLVIEW1: every record type the cell view draws -- MSTT,

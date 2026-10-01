@@ -1064,6 +1064,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 	QHash<quint32, SwapUse> swapCache;
 	int shapesRepainted = 0;                //!< lane PRTPPLACE: palette row replaced by a CNAM
 	int cnamNoPalette = 0;                  //!< lane PRTPPLACE: a CNAM on a material with no palette (the game ignores it)
+	int modcShapes = 0;                     //!< 2026-10-01: palette row taken from the base's MODC
 	QStringList unreadableMatNames;
 	qint64 srcTris = 0;
 
@@ -1126,7 +1127,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 	const QString bakeDirEnv = QString::fromLocal8Bit( qgetenv( "WW_CELL_PROBE_BAKE_DIR" ) );
 	const bool baking = probing && ( spec.probesBake || !bakeEnv.isEmpty() );
 	ProbeAlbedo probeAlb( dataRoot );
-	int albTextured = 0, albUntextured = 0, albLandSplat = 0, albLandFlat = 0;
+	int albTextured = 0, albUntextured = 0, albLandSplat = 0, albLandFlat = 0, albPalette = 0;
 	QHash<qint64, std::array<float, 3>> landAlb;   // 128-unit ground quad -> gamma color, from the splat
 	QHash<QString, int> soupSkippedTypes;
 	auto soupRole = []( const QString & t ) -> int {   // 0 left out, 1 in the soup, 2 a door
@@ -1233,8 +1234,9 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 		 * before and after the swap and what the paint rule decided -- to stderr. */
 		static const QString swapLog = QString::fromLocal8Bit( qgetenv( "WW_CELL_SWAPLOG" ) );
 		if ( !swapLog.isEmpty() && model.contains( swapLog, Qt::CaseInsensitive ) ) {
-			fprintf( stderr, "SWAPLOG ref %08x model %s swap %08x subst %d cnam %d\n", p.ref,
-				qPrintable( model ), p.swap, subst ? int( subst->size() ) : 0, cnamOf ? int( cnamOf->size() ) : 0 );
+			fprintf( stderr, "SWAPLOG ref %08x model %s swap %08x subst %d cnam %d modc %g\n", p.ref,
+				qPrintable( model ), p.swap, subst ? int( subst->size() ) : 0, cnamOf ? int( cnamOf->size() ) : 0,
+				lb.hasColorRemap ? double( lb.colorRemap ) : -1.0 );
 			if ( cnamOf )
 				for ( auto c = cnamOf->cbegin(); c != cnamOf->cend(); ++c )
 					fprintf( stderr, "SWAPLOG   cnam %s = %g\n", qPrintable( c.key() ), double( c.value() ) );
@@ -1382,6 +1384,24 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 			const size_t nv = s.geom.pos.size() / 3;
 			if ( !nv || s.geom.tris.empty() )
 				continue;
+			/* THE PAINT ROW this shape takes: the swap row's CNAM for its original material, else
+			 * the base's own MODC (2026-10-01: the museum pickup's paint lives there, bungo's
+			 * "vertex paint"). Only a Greyscale_To_PaletteColor material takes one. */
+			bool cnamHere = false, havePaint = false;
+			float paintIndex = 0.0f;
+			if ( plainShapes ) {
+				auto cit = cnamOf->constFind( lodgenMaterialSwapKey( ( *plainShapes )[si].matName ) );
+				if ( cit != cnamOf->constEnd() ) {
+					cnamHere = havePaint = true;
+					paintIndex = cit.value();
+				}
+			}
+			if ( !havePaint && lb.hasColorRemap ) {
+				havePaint = true;
+				paintIndex = lb.colorRemap;
+			}
+			const bool palette = s.g2p && s.g2pScale > 1.0e-6f;
+			const bool painted = palette && havePaint;
 			if ( role == 1 ) {
 				if ( s.nearFacts.effectShader || !s.effectTex0.isEmpty() || s.nearFacts.alphaBlend
 					|| s.nearFacts.decal || ( soupFoliage && s.nearFacts.alphaTest ) ) {
@@ -1417,7 +1437,13 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 									vc[k] = ( s.geom.rgba[i0 * 4 + size_t( k )] + s.geom.rgba[i1 * 4 + size_t( k )]
 										+ s.geom.rgba[i2 * 4 + size_t( k )] ) / ( 3.0f * 255.0f );
 							quint8 rgb[3] = { 128, 128, 128 };
-							if ( probeAlb.sample( s.tex0, uv[0], uv[1], vc, lin ) ) {
+							/* a palette material is painted as the game paints it: the map's green
+							 * picks the column, the paint index (or scale x vertex red) the row */
+							const bool viaPalette = s.g2p && !s.g2pTex.isEmpty()
+								&& probeAlb.samplePalette( s.tex0, s.g2pTex, uv[0], uv[1],
+									painted ? paintIndex : s.g2pScale * vc[0], lin );
+							albPalette += viaPalette ? 1 : 0;
+							if ( viaPalette || probeAlb.sample( s.tex0, uv[0], uv[1], vc, lin ) ) {
 								albTextured++;
 								for ( int k = 0; k < 3; k++ )
 									rgb[k] = quint8( std::lround( std::clamp( lin[k], 0.0f, 1.0f ) * 255.0f ) );
@@ -1439,16 +1465,14 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 			shapesVertexColor += ownColor ? 1 : 0;
 			float paletteR = 1.0f;
 			bool repaint = false;
-			if ( plainShapes && !colouring ) {
-				auto cit = cnamOf->constFind( lodgenMaterialSwapKey( ( *plainShapes )[si].matName ) );
-				if ( cit != cnamOf->constEnd() ) {
-					if ( s.g2p && s.g2pScale > 1.0e-6f ) {
-						repaint = true;
-						paletteR = cit.value() / s.g2pScale;
-						shapesRepainted++;
-					} else {
-						cnamNoPalette++;
-					}
+			if ( !colouring ) {
+				if ( painted ) {
+					repaint = true;
+					paletteR = paintIndex / s.g2pScale;
+					shapesRepainted++;
+					modcShapes += cnamHere ? 0 : 1;
+				} else if ( cnamHere ) {
+					cnamNoPalette++;   // a swap row's CNAM the game ignores; a MODC on an unpainted part is normal
 				}
 			}
 			Bucket & b = bucketFor( s, colouring || ownColor || repaint );
@@ -1951,7 +1975,8 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 				bs.red = QString::fromLatin1( qgetenv( "WW_PROBE_BAKE_RED" ) );
 				bs.noSky = spec.interior;   // an interior's misses are void, never sky
 				ProbeBakeResult bres;
-				t << "  bake albedo: object triangles from their map " << albTextured << ", grey (no map read) "
+				t << "  bake albedo: object triangles from their map " << albTextured << " (of them through a paint palette "
+				  << albPalette << "), grey (no map read) "
 				  << albUntextured << ", ground quads from the splat " << albLandSplat << ", flat tone x VCLR "
 				  << albLandFlat << ", maps read " << probeAlb.texturesRead << ", missing " << probeAlb.texturesMissing
 				  << "\n";
@@ -2132,6 +2157,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 		  << ", placements drawn with a material swap " << placementsSwapped
 		  << ", shapes repainted by a CNAM " << shapesRepainted
 		  << ", CNAMs on a material with no palette " << cnamNoPalette
+		  << ", shapes painted by their base's MODC " << modcShapes
 		  << ", sky cards hidden " << skyCardsHidden << "\n";
 		s << "  distinct models loaded " << modelLoads << ", failed to load "
 		  << modelsFailed.size() << "\n";

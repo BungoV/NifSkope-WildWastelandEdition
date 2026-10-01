@@ -143,6 +143,11 @@ struct EsmLodBase
 	bool hasLod = false;
 	QString edid;               //!< EDID, for the cell view's pick panel
 	quint32 materialSwap = 0;   //!< lane SWAP1: MODS, the base's default material swap (MSWP), 0 = none
+	/* 2026-10-01: MODC, the model's color remapping index -- the paint row a
+	 * Greyscale_To_PaletteColor material takes (the Concord museum pickup, MSTT
+	 * PickUpTruck08, is 0.235). An MSWP row's own CNAM wins for its material. */
+	bool hasColorRemap = false;
+	float colorRemap = 0.0f;
 	/* Lane NEAR1 (2026-09-26): the record header's flag word (STAT bit 23 = Is
 	 * Marker, 0x00800000) and whether the record carries destructible data
 	 * (a DEST or DSTD subrecord). Read-only facts for the near-library bake. */
