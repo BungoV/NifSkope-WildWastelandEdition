@@ -104,6 +104,12 @@ struct Bucket
 	 *  this every car window was drawn as an opaque sheet. */
 	bool blend = false;
 	float alpha = 1.0f;
+	/* A BGEM shape (shattered car glass, 2026-10-01): drawn through a
+	 * BSEffectShaderProperty that names the BGEM, with the source property's flags,
+	 * so the renderer applies the material's palette alpha -- the holes -- and the
+	 * vertex alpha the way the game does. Empty for every other bucket. */
+	QString effectMat;
+	quint32 effSF1 = 0, effSF2 = 0;
 	bool emits = false;
 	float emissiveScale = 1.0f;
 	bool withColour = false;
@@ -368,6 +374,23 @@ bool emitBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b,
 		 * write (src/lodgen.cpp ~4189, src/lodinative.cpp ~316): the same block
 		 * pair, the same ten slots, the BGSM in the shader's Name so the
 		 * renderer resolves it exactly as it does for a `.BTO` shape. */
+		if ( !b.effectMat.isEmpty() ) {
+			QModelIndex iShader = nif->insertNiBlock( QStringLiteral( "BSEffectShaderProperty" ) );
+			nif->set<QString>( iShader, "Name", materialNameFor( b.effectMat ) );
+			nif->set<quint32>( iShader, "Shader Flags 1", b.effSF1 );
+			// Vertex_Colors only when this shape really carries them
+			nif->set<quint32>( iShader, "Shader Flags 2", b.withColour ? b.effSF2 : ( b.effSF2 & ~0x20U ) );
+			nif->set<QString>( iShader, "Source Texture", b.matString );
+			nif->setLink( iShape, "Shader Property", nif->getBlockNumber( iShader ) );
+			if ( b.hasAlpha ) {
+				QModelIndex iAlpha = nif->insertNiBlock( QStringLiteral( "NiAlphaProperty" ) );
+				nif->set<int>( iAlpha, "Flags", b.alphaThreshold ? 4844 : 4333 );
+				nif->set<int>( iAlpha, "Threshold", int( b.alphaThreshold ) );
+				nif->setLink( iShape, "Alpha Property", nif->getBlockNumber( iAlpha ) );
+			}
+			addLink( nif, iRoot, QStringLiteral( "Children" ), nif->getBlockNumber( iShape ) );
+			continue;
+		}
 		QModelIndex iShader = nif->insertNiBlock( QStringLiteral( "BSLightingShaderProperty" ) );
 		nif->set<quint32>( iShader, "Shader Type", 0 );
 		nif->set<quint32>( iShader, "Shader Flags 1",
@@ -1059,6 +1082,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 	int shapesFromEffectMat = 0;            //!< drawn from a `.bgem`'s base map
 	int shapesUnreadableMat = 0;            //!< named a material, nothing resolved: neutral grey
 	int blendBuckets = 0;                   //!< 2026-10-01: blended (glass) buckets
+	int effectBuckets = 0;                  //!< 2026-10-01: BGEM buckets drawn by the effect shader
 	int shapesVertexColor = 0;              //!< lane PRTPPLACE: drawn with the mesh's own vertex colors
 	int placementsSwapped = 0;              //!< lane PRTPPLACE: drawn with a material swap
 	int skyCardsHidden = 0;                 //!< lane PRTPPLACE: sky cards left to the sky layer
@@ -1094,7 +1118,11 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 			mat = s.tex0;
 		const bool blend = s.nearFacts.alphaBlend || s.effectBlend;
 		const float alpha = blend ? qBound( 0.0f, s.matAlpha, 1.0f ) : 1.0f;
-		const QString key = QStringLiteral( "%1|%2|%3|%4|%5|%6|%7" ).arg( mat )
+		const bool effect = s.nearFacts.effectShader && s.effectMatRead && spec.overlay == CellOverlay::None;
+		const QString key = QStringLiteral( "%1%2|%3|%4|%5|%6|%7|%8" )
+			.arg( effect ? QStringLiteral( "E|%1|%2|%3|" ).arg( s.matName ).arg( s.shaderSF1 ).arg( s.shaderSF2 )
+			             : QString() )
+			.arg( mat )
 			.arg( ( s.hasAlpha || blend ) ? 1 : 0 ).arg( blend ? 0 : int( s.alphaThreshold ) )
 			.arg( s.ownEmit ? 1 : 0 ).arg( withColour ? 1 : 0 )
 			.arg( ( mat.isEmpty() && s.matUnreadable ) ? 1 : 0 ).arg( double( alpha ) );
@@ -1121,6 +1149,12 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 		b.emits = s.ownEmit;
 		b.emissiveScale = s.emitMult;
 		b.withColour = withColour;
+		if ( effect ) {
+			b.effectMat = s.matName;
+			b.effSF1 = s.shaderSF1;
+			b.effSF2 = s.shaderSF2;
+			effectBuckets++;
+		}
 		return buckets.insert( key, b ).value();
 	};
 
@@ -1529,6 +1563,8 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 					o.chan[c] = ownColor ? float( s.geom.rgba[v * 4 + size_t( c )] ) / 255.0f : rgb[c];
 				if ( repaint )
 					o.chan[0] *= paletteR;
+				if ( ownColor && !b.effectMat.isEmpty() )
+					o.chan[3] = float( s.geom.rgba[v * 4 + 3] ) / 255.0f;   // the effect shader's vertex alpha
 				b.verts.push_back( o );
 				for ( int k = 0; k < 3; k++ ) {
 					lo[k] = qMin( lo[k], wp[k] );
@@ -2186,7 +2222,8 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 		s << "  materials: " << shapesFromEffectMat
 		  << " shapes textured from a `.bgem` effect material, "
 		  << shapesUnreadableMat << " drawn neutral grey because a named material "
-		     "resolved to nothing, " << blendBuckets << " blended (glass) buckets";
+		     "resolved to nothing, " << blendBuckets << " blended (glass) buckets, "
+		  << effectBuckets << " drawn by the effect shader (BGEM)";
 		if ( !unreadableMatNames.isEmpty() )
 			s << " (" << unreadableMatNames.join( QLatin1String( ", " ) ) << ")";
 		s << "\n";

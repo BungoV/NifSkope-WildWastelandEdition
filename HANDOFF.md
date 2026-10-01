@@ -1,5 +1,12 @@
 # Handoff — NifSkope, Wild Wasteland Edition
 
+## TOP BLOCK -- written 2026-10-01 04:23 (`date`-read): shattered glass drawn by the effect shader
+
+- bungo: "doesn't that glass have holes in it" / "the black areas on the glass?". Cell view BGEM shapes now go
+  through a BSEffectShaderProperty (Name = BGEM, source SF1/SF2, vertex alpha in chan[3]); bucket key prefixed
+  `E|`. Pickup windows: dark share 0.64/0.78 -> 0.03/0.02 (scratchpad/glass_20261001/cab_before_after.png).
+  lodgen baseline vs the pre-glass exe: 24/24 identical. Still open: glass tint in the probe bake. NEXT: PRTPFAR.
+
 ## TOP BLOCK -- written 2026-10-01 04:09 (`date`-read): glass + the probe bake's reference gate, on main
 
 - Glass (7d515209): blended materials blend in the cell view (BGEM/BGSM bAlphaBlend + fAlpha, NiAlphaProperty).

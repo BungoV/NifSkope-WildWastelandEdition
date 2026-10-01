@@ -1408,6 +1408,8 @@ struct LodSrcShape
 	/*! 2026-10-01: the BGEM's own bAlphaBlend and its fAlpha (a BGSM's fAlpha too).
 	 *  Read by the cell view's glass only; nothing gated reads them. */
 	bool effectBlend = false;
+	bool effectMatRead = false;          //!< the BGEM read (cell view effect buckets)
+	quint32 shaderSF1 = 0, shaderSF2 = 0; //!< the source shader property's flags
 	float matAlpha = 1.0f;
 	/*! The shape named a material and NOTHING resolved from it -- no texture
 	 *  set, no BGSM, no BGEM. The viewer draws such a shape neutral and COUNTS
@@ -2357,6 +2359,8 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 				{
 					const quint32 sf1 = src.get<quint32>( iShader, "Shader Flags 1" );
 					const quint32 sf2 = src.get<quint32>( iShader, "Shader Flags 2" );
+					s.shaderSF1 = sf1;
+					s.shaderSF2 = sf2;
 					nf.effectShader = src.blockInherits( iShader, "BSEffectShaderProperty" );
 					nf.decal = ( sf1 & ( ( 1U << 26 ) | ( 1U << 27 ) ) ) != 0;
 					nf.treeAnim = ( sf2 & ( 1U << 29 ) ) != 0;
@@ -2481,6 +2485,7 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 								s.effectTex0 = t[0];
 							s.effectBlend = em.hasAlphaBlend();
 							s.matAlpha = em.alpha();
+							s.effectMatRead = true;
 						}
 					}
 					/* The property's own Source Texture is the fallback, exactly as
@@ -2626,6 +2631,7 @@ static bool nativeLoadModelImpl( void * user, const QString & model, const Lodge
 		n.tex0 = s.tex0; n.tex1 = s.tex1; n.tex7 = s.tex7; n.matName = s.matName;
 		n.effectTex0 = s.effectTex0; n.matUnreadable = s.matUnreadable;
 		n.effectBlend = s.effectBlend; n.matAlpha = s.matAlpha;
+		n.effectMatRead = s.effectMatRead; n.shaderSF1 = s.shaderSF1; n.shaderSF2 = s.shaderSF2;
 		n.g2p = s.g2pFlag;
 		n.g2pScale = s.g2pScale;
 		n.g2pTex = s.g2pTex;

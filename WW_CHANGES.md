@@ -1,5 +1,12 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Shattered car glass: holes and no black panes (2026-10-01)
+
+- Cell view: shapes with a `.bgem` effect material are now drawn through the effect shader that names the
+  BGEM, with the source shape's own shader flags and vertex alpha. The material's greyscale palette cuts the
+  shattered holes, and the panes no longer come out black (dark pixels on the pickup's windows: 64-78% -> 2-3%).
+- The census line counts these buckets ("drawn by the effect shader (BGEM)"). LOD output unchanged (24/24 identical).
+
 ## Probe bake checked against a brute-force reference; thin walls keep both sides (2026-10-01)
 
 - New gate `tests/spells/prtp_reference.py` + `tests/prtp_reference.cpp`: a separate brute-force tracer

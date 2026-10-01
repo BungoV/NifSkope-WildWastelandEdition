@@ -79,6 +79,11 @@ struct NativeSrcShape
 	 *  refuter. Only the cell viewer reads this. */
 	QString effectTex0;
 	bool effectBlend = false;  //!< the BGEM's bAlphaBlend (cell view glass, 2026-10-01)
+	/*! The BGEM read (cell view shattered glass, 2026-10-01): the cell view draws the
+	 *  shape through a BSEffectShaderProperty naming it, with the source property's
+	 *  own flags, so the palette alpha (holes) and vertex alpha reach the renderer. */
+	bool effectMatRead = false;
+	quint32 shaderSF1 = 0, shaderSF2 = 0;
 	float matAlpha = 1.0f;     //!< the BGSM/BGEM fAlpha
 	//! The shape named a material and NOTHING resolved: drawn neutral and counted, not magenta.
 	bool matUnreadable = false;
