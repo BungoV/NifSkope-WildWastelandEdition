@@ -245,7 +245,7 @@ WwSkyClock wwSkyClock( double hour, const unsigned char tnam[4], const WwSkyGmst
 	c.lightDir[1] = ny / l;
 	c.lightDir[2] = z / l;
 
-	// the stars alpha (Stars::Update)
+	// the stars alpha (the engine's)
 	{
 		const double ext = g.colorExt;
 		const double rise1 = tnam[1] / 6.0, set0 = tnam[2] / 6.0;

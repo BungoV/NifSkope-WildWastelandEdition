@@ -5,6 +5,14 @@ Written the moment a mistake is recognised, unprompted (CONSTITUTION rule 2).
 Format: date -- what was done -- what was true -- how it was found -- the rule.
 Newest at the top.
 
+## 2026-10-01 -- engine function names and addresses in public source comments
+- The sky / fog / ambient lanes (PBRWX1, PBRR3, FOG1) wrote the engine's own function names with exe addresses into
+  src/esmweather.h/.cpp, src/gl/lookdevstage.h/.cpp and res/shaders/pbrm_default.frag, against the repo rule
+  (no PDB-derived names; stand-in "Todd's treat"). Found during the FOG2 commit's pre-commit scan. Those files are
+  scrubbed (a76006f7 + the next commit: its own scan printed a leftover and the chain committed anyway). About
+  120 older hits in other files (docs, HKX, body build) and the git history remain. Rule: scan the staged diff
+  AND the touched files for `Name::Name`, `RVA`, `0x...@155`; the scan must gate the commit, not just print.
+
 ## 2026-10-01 -- ON1: a red that "failed" on a data shortage
 - cell_oren.sh's `normalised` red (the textbook azimuth cosine) was counted as failing because Solomon's view had
   2 lit legacy pixels and the checker called that FAIL; the Vault, where the data was, PASSed it at 99.9%.
