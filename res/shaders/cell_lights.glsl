@@ -220,10 +220,31 @@ float cellSpecGame( vec3 N, vec3 L, vec3 V, float gloss )
 	return min( D * G * F * 0.25, 15.0 ) * 3.141593;
 }
 
-// the placed lights at world point P, world normal N: diffuse irradiance and the specular sum
-void cellSumLights( vec3 P, vec3 N, vec3 Vw, float gloss, out vec3 diff, out vec3 spec )
+/* Lane ON1: the game's legacy diffuse (the same shaders, the spec / gloss branch, and its sun): Oren-Nayar
+ * with sigma = 1 - gloss, A = 1 - 0.5 s2 / (s2 + 0.57), B = 0.45 s2 / (s2 + 0.09), the azimuth cosine from the
+ * UNnormalised tangent-plane projections, x sinL sinV / max(NdotL, NdotV). The factor that multiplies NdotL. */
+float cellOren( vec3 N, vec3 L, vec3 V, float NdotL, float gloss )
+{
+	if ( ( cellRed & 8 ) != 0 )
+		return 1.0;	// WW_CELL_LIT_RED=lambert
+	float s2 = ( 1.0 - gloss ) * ( 1.0 - gloss );
+	float A = 1.0 - 0.5 * s2 / ( s2 + 0.57 );
+	float B = 0.45 * s2 / ( s2 + 0.09 );
+	float NdotV = dot( N, V );
+	vec3 tV = V - N * NdotV, tL = L - N * NdotL;
+	float cosPhi = dot( tV, tL );
+	if ( ( cellRed & 16 ) != 0 )
+		cosPhi /= max( length( tV ) * length( tL ), 1e-6 );	// WW_CELL_LIT_RED=normalised: the textbook azimuth
+	float geom = sqrt( clamp( ( 1.0 - NdotL * NdotL ) * ( 1.0 - NdotV * NdotV ), 0.0, 1.0 ) ) / max( max( NdotL, NdotV ), 1e-4 );
+	return max( cosPhi, 0.0 ) * B * geom + A;
+}
+
+/* the placed lights at world point P, world normal N: the irradiance (Lambert, what the GI, the reflection and
+ * probe 1 read), the game's Oren-Nayar diffuse (what the albedo takes) and the specular sum */
+void cellSumLights( vec3 P, vec3 N, vec3 Vw, float gloss, out vec3 diff, out vec3 diffOn, out vec3 spec )
 {
 	diff = vec3( 0.0 );
+	diffOn = vec3( 0.0 );
 	spec = vec3( 0.0 );
 	for ( int i = 0; i < cellLightCount; i++ ) {
 		vec4 t0 = texelFetch( cellLights, i * 5 );
@@ -248,6 +269,7 @@ void cellSumLights( vec3 P, vec3 N, vec3 Vw, float gloss, out vec3 diff, out vec
 			a *= cellShadowF( i, P, N );	// lane SHADOW1
 		vec3 E = t1.rgb * a * NdotL;
 		diff += E;
+		diffOn += E * cellOren( N, L, Vw, NdotL, gloss );
 		if ( t3.w < 0.5 )
 			spec += E * cellSpecGame( N, L, Vw, gloss );
 	}
@@ -274,21 +296,31 @@ vec3 cellLit( vec3 color, vec3 albedo, vec3 normalView, vec3 posView, vec3 Vview
 	vec3 P = cellWorldPos( posView );
 	vec3 N = cellWorldDir( normalView );
 	vec3 Vw = cellWorldDir( Vview );
-	vec3 diff, spec;
-	cellSumLights( P, N, Vw, 1.0 - sqrt( alphaR ), diff, spec );	// the program's rough = 1 - gloss, alphaR = rough^2
+	vec3 diff, diffOn, spec;
+	float gloss = 1.0 - sqrt( alphaR );	// the program's rough = 1 - gloss, alphaR = rough^2
+	cellSumLights( P, N, Vw, gloss, diff, diffOn, spec );
 	vec3 alb = albedo * albedo;
 	vec3 gi = cellGiOn ? cellGiE( P, N ) * 0.31830989 : vec3( 0.0 );
-	vec3 add = alb * ( diff + gi ) + spec * specMask * specCol;	// Lambert: albedo x E / pi
+	vec3 add = alb * ( diffOn + gi ) + spec * specMask * specCol;	// albedo x the game's diffuse; the GI stays Lambert
 	if ( !cellInterior )
 		return sqrt( color * color + add );
 	// the light reaching this point (a white surface would show it): the cubemap reflection is lit by it,
 	// so a dark corner's reflection is dark (the viewport path scales it by its own light the same way)
 	vec3 E = diff + gi;
-	if ( cellHasDalc )
-		E += cellAmbient( N );
-	if ( cellHasDir )
-		E += cellDirColor * max( dot( N, normalize( cellDirTo ) ), 0.0 );
-	vec3 lin = alb * E + spec * specMask * specCol + envSpec * envSpec * E;
+	vec3 Ed = diffOn + gi;	// what the albedo takes: the direct terms through Oren-Nayar (lane ON1)
+	if ( cellHasDalc ) {
+		vec3 amb = cellAmbient( N );
+		E += amb;
+		Ed += amb;
+	}
+	if ( cellHasDir ) {
+		vec3 Ld = normalize( cellDirTo );
+		float nl = dot( N, Ld );
+		vec3 dir = cellDirColor * max( nl, 0.0 );
+		E += dir;
+		Ed += dir * cellOren( N, Ld, Vw, nl, gloss );
+	}
+	vec3 lin = alb * Ed + spec * specMask * specCol + envSpec * envSpec * E;
 	return sqrt( max( lin, vec3( 0.0 ) ) ) + emissive;
 }
 
@@ -299,11 +331,14 @@ vec3 cellProbeOut( vec3 normalView, vec3 posView, float alphaR, float kSmith )
 	vec3 N = cellWorldDir( normalView );
 	if ( cellProbe == 5 )
 		return cellGiOn ? clamp( cellGiE( P, N ) * 0.31830989, 0.0, 1.0 ) : vec3( 0.0 );
-	if ( cellProbe == 1 ) {
-		vec3 diff, spec;
-		cellSumLights( P, N, N, 1.0 - sqrt( alphaR ), diff, spec );
-		return clamp( diff * 0.25, 0.0, 1.0 );
+	if ( cellProbe == 1 || cellProbe == 8 ) {
+		// 1: the irradiance / 4; 8 (lane ON1): the game's Oren-Nayar diffuse / 4, seen from the camera
+		vec3 diff, diffOn, spec;
+		cellSumLights( P, N, cellProbe == 8 ? cellWorldDir( -posView ) : N, 1.0 - sqrt( alphaR ), diff, diffOn, spec );
+		return clamp( ( cellProbe == 8 ? diffOn : diff ) * 0.25, 0.0, 1.0 );
 	}
+	if ( cellProbe == 9 )
+		return vec3( 1.0 - sqrt( alphaR ), 0.0, 0.0 );	// lane ON1: the gloss the diffuse used
 	if ( cellProbe == 7 )
 		return cellShadowProbe( P, N );
 	// the position, 16 bits an axis over the 65536-unit box around the centre

@@ -1,5 +1,28 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## The game's diffuse on cell lights (2026-10-01)
+
+- With Cell lights on, the regular (non-PBR) materials now take light the way the game's shaders do
+  (Oren-Nayar) instead of the plain textbook falloff (Lambert). Rough surfaces facing a lamp read darker, and
+  brighter where the lamp sits behind them at a grazing angle. Glossy surfaces barely change.
+- It covers the placed lights and the cell's directional light. The ambient, the bounce and the PBR materials
+  are unchanged.
+- Gate `tests/spells/cell_oren.sh` rebuilds each pixel's light from the plugin with its own copy of the
+  formula, in two Vault 111 views. Red `lambert` must FAIL. A view with too little to judge reports SKIP, which
+  fails the gate but never counts as a red failing. (The textbook variant of the formula differs from the game's
+  by under the 8-bit tolerance there, so it is not used as a red.)
+
+## Interior fog (2026-10-01)
+
+- With Cell lights on, an interior now has the game's fog: its distance, density, height bands and four colors
+  come from the cell, or from its lighting template for each field the cell marks as inherited. The game's
+  own fixes for missing values apply (no far distance reads 163840; no near distance reads 0.17 of far, which is
+  most interiors). Same fog formula as the Lookdev weather fog.
+- Interiors fog without the sun's glow term (the game has no sun indoors).
+- Gate `tests/spells/cell_fog.sh` reads the fog from the plugin on its own and checks it pixel by pixel in
+  three cells (Vault111Cryo, DmndSolomonsHouse01, GoodneighborWarehouse01). Reds `noclamp`, `nogamma` and
+  `noinherit` must FAIL.
+
 ## Cell light shadows (2026-10-01)
 
 - Cell lights now cast shadows. The lights the game marks as shadow casters (shadow spot, shadow hemisphere,

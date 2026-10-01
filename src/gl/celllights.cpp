@@ -64,6 +64,7 @@ struct ClState
 	bool shadowOn = true;   // lane SHADOW1: WW_CELL_SHADOW=0 turns the maps off (the harness's unshadowed pass)
 	bool shadowRed = false; // WW_CELL_SHADOW_RED=noshadow: the maps rendered, every factor read as 1
 	QString shadowLast = QStringLiteral( "none yet" );
+	int fogProbe = 0;       // lane FOG2: WW_CELL_FOG_PROBE=6 (alpha, height blend) | 7 (fog colour ^ 1/2.2) | 8 (its d, z), per fragment
 };
 
 ClState & st()
@@ -97,6 +98,7 @@ ClState & st()
 		s.isRed = isRed == "nolut" ? 1 : isRed == "noexp" ? 2 : isRed == "nograde" ? 4 : isRed == "nobloom" ? 8 : 0;
 		s.shadowOn = qgetenv( "WW_CELL_SHADOW" ).trimmed() != "0";
 		s.shadowRed = qgetenv( "WW_CELL_SHADOW_RED" ).trimmed() == "noshadow";
+		s.fogProbe = qEnvironmentVariableIntValue( "WW_CELL_FOG_PROBE" );
 		const QByteArray red = qgetenv( "WW_CELL_LIT_RED" ).trimmed();
 		if ( red == "linear" )
 			s.red = 1;
@@ -104,6 +106,10 @@ ClState & st()
 			s.red = 2;
 		else if ( red == "nodalc" )
 			s.red = 4;
+		else if ( red == "lambert" )
+			s.red = 8;	// lane ON1: the diffuse back to Lambert
+		else if ( red == "normalised" )
+			s.red = 16;	// lane ON1: the textbook (normalised) Oren-Nayar azimuth
 	}
 	return s;
 }
@@ -382,10 +388,12 @@ void wwCellLightsUniforms( Scene * scene )
 	// world = R^T (posView - t) / sc  (lookdevstage.cpp's fog uses the same inverse)
 	const Transform & vt = scene->view;
 	const float sc = vt.scale != 0.0f ? vt.scale : 1.0f;
+	float cellRowW[3];	// the camera, world (WW_CELL_CAM_DUMP)
 	for ( int k = 0; k < 3; k++ ) {
 		float w = 0.0f;
 		for ( int j = 0; j < 3; j++ )
 			w -= vt.rotation( j, k ) * vt.translation[j];
+		cellRowW[k] = w / sc;
 		prog->uni4f_l( prog->uniLocation( "cellRow[%d]", k ), FloatVector4( vt.rotation( 0, k ) / sc,
 			vt.rotation( 1, k ) / sc, vt.rotation( 2, k ) / sc, w / sc ) );
 	}
@@ -407,6 +415,38 @@ void wwCellLightsUniforms( Scene * scene )
 	prog->uni3f( "cellCenter", L->center[0], L->center[1], L->center[2] );
 	prog->uni1i( "cellProbe", s.measuring ? 6 : s.probe );
 	prog->uni1i( "cellRed", s.red );
+	// WW_CELL_CAM_DUMP=<file>: the camera in world units, rewritten when it moves (the fog and diffuse gates measure from it)
+	static const QString camDump = QString::fromLocal8Bit( qgetenv( "WW_CELL_CAM_DUMP" ) );
+	static QString camLast;
+	if ( !camDump.isEmpty() ) {
+		const QString line = QStringLiteral( "cam=%1,%2,%3 fogprobe=%4 probe=%5\n" ).arg( double( cellRowW[0] ), 0, 'f', 2 )
+			.arg( double( cellRowW[1] ), 0, 'f', 2 ).arg( double( cellRowW[2] ), 0, 'f', 2 ).arg( s.fogProbe ).arg( s.probe );
+		QFile f( camDump );
+		if ( line != camLast && f.open( QIODevice::WriteOnly | QIODevice::Truncate ) ) {
+			f.write( line.toUtf8() );
+			camLast = line;
+		}
+	}
+	/* lane FOG2: an interior's fog in place of the Lookdev weather fog (whose uniforms ran just before): the
+	 * same formula, the cell's packing, height = world z. No fog sun indoors (INFERRED: the game's directional
+	 * fog term follows the sun, which an interior lacks). */
+	if ( L->hasFog && prog->uniLocation( "fogOn" ) >= 0 ) {
+		prog->uni1b( "fogOn", true );
+		for ( int k = 0; k < 6; k++ )
+			prog->uni4f_l( prog->uniLocation( "fogK[%d]", k ),
+				FloatVector4( L->fogK[k][0], L->fogK[k][1], L->fogK[k][2], L->fogK[k][3] ) );
+		float zr[4] = { 0, 0, 0, 0 };
+		for ( int k = 0; k < 3; k++ ) {
+			zr[k] = vt.rotation( k, 2 ) / sc;
+			zr[3] -= vt.rotation( k, 2 ) * vt.translation[k] / sc;
+		}
+		prog->uni4f( "fogView", FloatVector4( zr[0], zr[1], zr[2], zr[3] ) );
+		prog->uni1f( "fogDistScale", 1.0f / sc );
+		prog->uni4f( "fogSun", FloatVector4( 0.0f, 0.0f, 1.0f, 0.0f ) );
+		prog->uni4f( "fogSunColour", FloatVector4( 0.0f, 0.0f, 0.0f, 1.0f ) );
+		prog->uni4f( "fogProbe", FloatVector4( 0.0f, 0.0f, float( s.fogProbe ), 0.0f ) );
+		prog->uni1i( "fogRed", 0 );
+	}
 }
 
 bool wwCellImageSpaceOn()

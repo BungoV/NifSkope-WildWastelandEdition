@@ -13,6 +13,7 @@ BSD License - see nifskope.h
 #include "cellsplat.h"		// lane CELLVIEW4
 #include "cellidentity.h"	// lane CELLVIEW2
 #include "esmdata.h"
+#include "esmweather.h"		// lane FOG2: the fog packing
 #include "lodgen.h"
 #include "nativeemit.h"
 #include "probeplace.h"		// lane PRTPPLACE
@@ -831,6 +832,61 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 					.arg( dfade, 0, 'f', 2 ).arg( s32( rSrc, 20 ) ).arg( s32( rSrc, 24 ) )
 				: QStringLiteral( "black" );
 		}
+		/* lane FOG2: the fog (celllights.h WwCellLighting::hasFog). Pin WW_CELL_FOG=0 publishes none;
+		 * WW_CELL_FOG_RED=noclamp|nogamma|noinherit are the gate's refuters. */
+		const QByteArray fogPin = qgetenv( "WW_CELL_FOG" ).trimmed();
+		const QByteArray fogRed = qgetenv( "WW_CELL_FOG_RED" ).trimmed();
+		auto fT = [&]( quint32 flag ) { return fogRed == "noinherit" ? ( haveT && x.isEmpty() ) : fromT( flag ); };
+		const QByteArray & cS = fT( 0x4 ) ? tData : x;
+		const QByteArray & nS = fT( 0x8 ) ? tData : x;
+		const QByteArray & farS = fT( 0x10 ) ? tData : x;
+		const QByteArray & pS = fT( 0x100 ) ? tData : x;
+		const QByteArray & mS = fT( 0x200 ) ? tData : x;
+		if ( fogPin == "0" ) {
+			L.fogNote = QStringLiteral( "off (WW_CELL_FOG=0)" );
+		} else if ( nS.size() < 20 || farS.size() < 20 ) {
+			L.fogNote = QStringLiteral( "none (no XCLL, no template)" );
+		} else {
+			auto fOr = [&]( const QByteArray & a, int o, float d ) { return a.size() >= o + 4 ? f32( a, o ) : d; };
+			WwFog F;
+			F.fogFar = f32( farS, 16 );
+			F.fogNear = f32( nS, 12 );
+			if ( fogRed != "noclamp" ) {
+				if ( !( F.fogFar > 0.0f ) || F.fogFar > 163840.0f )
+					F.fogFar = 163840.0f;
+				if ( !( F.fogNear > 0.0f ) || F.fogNear > F.fogFar )
+					F.fogNear = F.fogFar * 0.17f;
+			}
+			F.power = fOr( pS, 36, 1.0f );
+			F.maxv = fOr( mS, 76, 1.0f );
+			F.nMid = fOr( cS, 92, 0.0f );
+			F.nRange = fOr( cS, 96, 10000.0f );
+			F.hds = fOr( cS, 108, 1.0f );
+			F.fMid = fOr( cS, 128, 0.0f );
+			F.fRange = fOr( cS, 132, 10000.0f );
+			// near 8 x 112, far 72 x 116, high near 100 x 120, high far 104 x 124
+			const int at[4] = { 8, 72, 100, 104 };
+			float * dst[4] = { F.nearLow, F.farLow, F.nearHigh, F.farHigh };
+			for ( int k = 0; k < 4; k++ ) {
+				F.scale[k] = fOr( cS, 112 + 4 * k, 1.0f );
+				for ( int c = 0; c < 3; c++ ) {
+					const float v = std::max( 0.0f, ( cS.size() >= at[k] + 3 ? u8( cS, at[k] + c ) : 0 ) / 255.0f * F.scale[k] );
+					dst[k][c] = fogRed == "nogamma" ? v : std::pow( v, 2.2f );
+				}
+			}
+			wwFogPackK( F );
+			std::memcpy( L.fogK, F.K, sizeof( F.K ) );
+			L.hasFog = true;
+			auto src = [&]( const QByteArray & a ) { return QChar( &a == &tData ? 'T' : 'X' ); };
+			L.fogNote = QStringLiteral( "near=%1 far=%2 power=%3 max=%4 hds=%5 nmid=%6 nrange=%7 fmid=%8 frange=%9" )
+				.arg( double( F.fogNear ), 0, 'f', 1 ).arg( double( F.fogFar ), 0, 'f', 1 ).arg( double( F.power ), 0, 'f', 4 )
+				.arg( double( F.maxv ), 0, 'f', 4 ).arg( double( F.hds ), 0, 'f', 4 ).arg( double( F.nMid ), 0, 'f', 1 )
+				.arg( double( F.nRange ), 0, 'f', 1 ).arg( double( F.fMid ), 0, 'f', 1 ).arg( double( F.fRange ), 0, 'f', 1 )
+				+ QStringLiteral( " scale=%1,%2,%3,%4 src=%5%6%7%8%9 xcll=%10%11" )
+				.arg( double( F.scale[0] ) ).arg( double( F.scale[1] ) ).arg( double( F.scale[2] ) ).arg( double( F.scale[3] ) )
+				.arg( src( cS ) ).arg( src( nS ) ).arg( src( farS ) ).arg( src( pS ) ).arg( src( mS ) ).arg( x.size() )
+				.arg( fogRed.isEmpty() ? QString() : QStringLiteral( " red=" ) + QString::fromLatin1( fogRed ) );
+		}
 	}
 	/* lane IMGS1: the cell's imagespace (XCIM -> IMGS) and its LUT strip. The strip is a 256x16 B8G8R8
 	 * DDS: x = r + 16 b, y = g (MEASURED: ColorLUT_BaseInteriorAdjusted sits 19/255 off the identity in
@@ -888,7 +944,8 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 	L.summary = QStringLiteral( "lights=%1 (omni %2, spot %3; skipped: off %4, no radius %5, black %6) ambient=%7 directional=%8 center=%9" )
 		.arg( L.lights.size() ).arg( omni ).arg( spot ).arg( off ).arg( noRadius ).arg( dark ).arg( amb, dir )
 		.arg( QStringLiteral( "%1,%2,%3" ).arg( center[0], 0, 'f', 1 ).arg( center[1], 0, 'f', 1 ).arg( center[2], 0, 'f', 1 ) )
-		+ QStringLiteral( " imagespace=%1" ).arg( isNote );
+		+ QStringLiteral( " imagespace=%1" ).arg( isNote )
+		+ QStringLiteral( " fog=%1" ).arg( L.fogNote.isEmpty() ? QStringLiteral( "none (exterior: the Lookdev weather fog)" ) : L.fogNote );
 	wwCellLightsPublish( nif, L );
 }
 

@@ -5,6 +5,26 @@ Written the moment a mistake is recognised, unprompted (CONSTITUTION rule 2).
 Format: date -- what was done -- what was true -- how it was found -- the rule.
 Newest at the top.
 
+## 2026-10-01 -- ON1: a red that "failed" on a data shortage
+- cell_oren.sh's `normalised` red (the textbook azimuth cosine) was counted as failing because Solomon's view had
+  2 lit legacy pixels and the checker called that FAIL; the Vault, where the data was, PASSed it at 99.9%.
+  Measured afterwards: the textbook-vs-game gap peaks at half the 8-bit tolerance, so no check at this precision
+  can fail it. Found by reading the per-cell lines, not the gate's tally. Rule: "too little data" is SKIP, never
+  FAIL; a red counts only on a real FAIL; before naming a red, measure that its gap exceeds the tolerance.
+
+## 2026-10-01 -- FOG2: a gate read an echo that never prints; probes joined across different top surfaces
+- cell_fog.sh's first run expected the camera ("cam=") in the shot notes, but wwCellLightsEcho is never
+  printed there: all three cells FAILed on a missing line. Rule: before a checker parses a line, grep one real
+  notes file for it; a value the checker needs gets its own dump file (now WW_CELL_CAM_DUMP).
+- The checker joined probes 2/3 (positions) with fog probes 6/7 pixel by pixel, assuming one top surface.
+  A surface over Solomon's house and the Vault (a translucent card by its look; which program draws it is not
+  yet named) serves the fog probe opaquely but not the position probes, so
+  the fog of the card was compared with the geometry under it: 74-83% agreement, failing only beyond ~2000
+  units. Found by echoing the shader's own distance/height (fog probe 5) next to the decoded one. Rule: when a
+  checker joins two passes, one pass must echo the geometry it used and the join keeps only the matches.
+- A grep over the whole scratchpad and docs folders went to the background and timed out (search-lean rule,
+  again). Rule: one named folder, never a tree root.
+
 ## 2026-10-01 -- SHADOW1: a checker trusted the probe's "0"; a repo-root grep; sed patches
 - cell_shadow_check.py took any nonzero probe-7 pixel as "in reach". Effect meshes' glow spills 1..11 into the
   probe, so out-of-reach pixels read as "shadowed": the Vault's slot 0 failed (lit agree 0/595) and Solomon's

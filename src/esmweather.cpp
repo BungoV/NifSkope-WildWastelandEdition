@@ -1039,7 +1039,12 @@ WwFog wwFogAt( const WwWeatherData & w, double hour, const unsigned char tnam[4]
 			dst[k][c] = noGamma ? v : std::pow( v, 2.2f );
 		}
 	}
+	wwFogPackK( o );
+	return o;
+}
 
+void wwFogPackK( WwFog & o )
+{
 	// cb12[41..46]
 	float fn = o.fogNear, ff = o.fogFar;
 	if ( fn == 0.0f && ff == 0.0f ) {
@@ -1060,7 +1065,6 @@ WwFog wwFogAt( const WwWeatherData & w, double hour, const unsigned char tnam[4]
 		{ 1.0f / ( 2.0f * nR ), 1.0f / ( 2.0f * fR ), ( o.nMid - nR ) / ( 2.0f * nR ), ( o.fMid - fR ) / ( 2.0f * fR ) },
 	};
 	std::memcpy( o.K, K, sizeof( K ) );
-	return o;
 }
 
 WwFogSample wwFogSample( const WwFog & fog, float d, float z )

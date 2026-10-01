@@ -74,6 +74,14 @@ struct WwCellLighting
 	float isTint[4] = { 0, 1, 1, 1 };
 	QString isName, isLutPath;
 	std::vector<unsigned char> isLut;
+	/* lane FOG2: the interior's fog, packed as the weather fog (esmweather.h wwFogPackK, lookdev_fog.glsl):
+	 * each field from XCLL or, by its Inherits flag, the lighting template (0x4 colours, scales, heights and
+	 * high density; 0x8 near; 0x10 far; 0x100 power; 0x200 max). The game's clamps: far <= 0 or > 163840
+	 * reads 163840, near <= 0 or > far reads 0.17 far, so an interior always fogs. Colours byte / 255 x their
+	 * scale, then pow 2.2. Heights are world z. */
+	bool hasFog = false;
+	float fogK[6][4] = {};
+	QString fogNote;
 	QString summary;                    //!< one census line
 };
 

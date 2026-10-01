@@ -8,6 +8,9 @@
 #ifdef WW_CELLLIGHTS
 #define WW_CELL_PBR 1
 #include "cell_lights.glsl"
+#define WW_CELL_FOGGED cellOn	// lane FOG2: a cell-lit draw fogged before its imagespace
+#else
+#define WW_CELL_FOGGED false
 #endif
 
 // PBRM (PBR Material Editor) metallic/roughness path.
@@ -633,6 +636,9 @@ void main()
 	}
 
 #ifdef WW_CELLLIGHTS
+	// lane FOG2: a cell-lit draw fogs here, once (the interior's fog, or the Lookdev weather's outdoors)
+	if ( cellOn && fogOn )
+		color.rgb = wwFog( max( color.rgb, vec3( 0.0 ) ), -ViewDir );
 	// lane IMGS1: the cell's imagespace in place of the viewer's curve; probe 6 writes the linear colour raw
 	vec3 cellHdr = max( color.rgb, vec3( 0.0 ) );
 	if ( cellOn && cellIsOn )
@@ -640,7 +646,7 @@ void main()
 	else
 #endif
 	if ( sceneMode >= 1 ) {
-		if ( sceneMode == 2 )
+		if ( sceneMode == 2 && !WW_CELL_FOGGED )
 			color.rgb = wwFog( color.rgb, -ViewDir );	// lane FOG1: linear, before the exposure
 		if ( studioProbe >= 0.0 )
 			color.rgb = vec3( studioProbe );

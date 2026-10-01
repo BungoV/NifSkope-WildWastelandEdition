@@ -347,6 +347,50 @@ reach and facing the light count: effect glow spills 1..11 into the probe's "0".
 98.6% / 99.2% of 7,738, DmndSolomonsHouse01 100% / 98.5% of 908.
 Red noshadow (factors read as 1) FAILS. `cell_lit.sh` now pins WW_CELL_SHADOW=0 (its PRTP2 sum is unshadowed).
 
+### 2l. The interior fog (lane FOG2, 2026-10-01)
+
+The game fogs an interior with the weather fog's formula and packing (FOG1, `lookdev_fog.glsl`), fed from the
+cell instead of the weather (a room's lighting template would win; we have no rooms yet). Read from the game
+code (private notes), every field per its own Inherits flag (XCLL 88): from the lighting template (LTMP ->
+LGTM DATA, the same layout) when the flag is set, else from XCLL; a cell without XCLL reads the template.
+| Field | XCLL | Inherits |
+|---|---|---|
+| near, far | 12, 16 | 0x8, 0x10 |
+| power, max | 36, 76 | 0x100, 0x200 |
+| colours near / far / high near / high far | 8 / 72 / 100 / 104 | 0x4 |
+| their scales | 112 / 116 / 120 / 124 | 0x4 |
+| height mid, range (near band, far band), high density | 92, 96, 128, 132, 108 | 0x4 |
+Clamps after the read: far <= 0 or > 163840 reads 163840; near <= 0 or > far reads 0.17 far. So no interior is
+fog-free; 756 of Fallout4.esm's 964 interiors store no near and get 0.17 far. Colours are byte / 255 x scale,
+written straight to the sky's fog colours (no time-of-day blend), then pow 2.2 at packing like the weather's.
+Height is world z. No fog sun indoors (INFERRED: the directional fog term follows the sun).
+Both cell programs fog once, linear, before the imagespace (the PBR program skips its weather-fog line on a
+cell-lit draw). Pin WW_CELL_FOG=0 publishes none; the census echoes the fields and where each came from.
+Gate: `tests/spells/cell_fog.sh` + `cell_fog_check.py`: its own plugin walk and its own copy of the formula,
+against fog probe 6 (alpha, height blend) and 7 (colour) at positions from probes 2 + 3, the camera from
+WW_CELL_CAM_DUMP. Fog probe 8 echoes the distance and height each fragment's fog read; only pixels where that
+matches the position probes count (at least 60% must), since some surface over Solomon's house and the Vault
+serves the fog probes and not the position ones (named in MISTAKES.md; which program draws it is still open).
+Reds noclamp / nogamma / noinherit must each FAIL in at least one of the three cells.
+
+### 2m. The game's diffuse: Oren-Nayar (lane ON1, 2026-10-01)
+
+The game's legacy (spec / gloss) light shaders and its sun do not use Lambert: their diffuse is Oren-Nayar
+(read from the FO4CS transcription of the shipped deferred light shaders, which was itself read op for op):
+sigma = 1 - gloss, A = 1 - 0.5 s2 / (s2 + 0.57), B = 0.45 s2 / (s2 + 0.09), the azimuth cosine taken from the
+UNnormalised tangent-plane projections of V and L (a quirk of the game's code; the textbook form normalises
+them), x sinL sinV / max(NdotL, NdotV); diffuse = (max(cosPhi, 0) B geom + A) x NdotL. A rough surface lit
+head-on reads about a third darker than under Lambert, and brighter toward grazing back-light.
+`cell_lights.glsl` cellOren multiplies each placed light's diffuse and the cell's directional light on the legacy
+program; the ambient, the bounce and the reflection's lighting stay as before. The PBR program is unchanged.
+Probe 1 stays the Lambert irradiance (cell_lit.sh); probe 8 is the Oren-Nayar sum / 4 seen from the camera, probe 9
+the gloss it used. Gate `tests/spells/cell_oren.sh` + `cell_oren_check.py` (lights from cell_lit_check.py's walk,
+the diffuse written out again), two Vault111Cryo views (CELLS entries "EDID@x,y,z"; Solomon's house was dropped,
+its view holds 2 lit legacy pixels). Red `lambert` must FAIL in at least one view; too little data is SKIP (a
+green failure, never a red's). `WW_CELL_LIT_RED=normalised` (the textbook cosPhi) stays a lever but is not a red:
+measured, its gap to the game's form peaks at about half the 8-bit tolerance in the Vault (p99 0.53x), so no
+check at this precision can fail it.
+
 ## 3. Open
 
 - `.tbk` v4: two surfel sides per cell (gives back the refused thin-wall weight), room ids (2f).

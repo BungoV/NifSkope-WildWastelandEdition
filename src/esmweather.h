@@ -267,6 +267,8 @@ struct WwFog
 //! Sky::UpdateFog's day weight: linear ramps rb..re up, sb..se down (rb, se widened by ext)
 float wwFogDayWeight( double hour, const unsigned char tnam[4], double ext );
 WwFog wwFogAt( const WwWeatherData & w, double hour, const unsigned char tnam[4], const WwSkyGmst & g );
+//! K from the scalars and the (linear) colours above; wwFogAt's tail, shared with the interior fog (lane FOG2)
+void wwFogPackK( WwFog & o );
 //! one fragment through the engine fog formula (spec_fog.md 2.4, before the sun term), from the packed K
 struct WwFogSample
 {

@@ -1,5 +1,25 @@
 # Handoff — NifSkope, Wild Wasteland Edition
 
+## TOP BLOCK -- written 2026-10-01 12:23 (`date`-read): FOG2 interior fog + ON1 the game's diffuse
+
+- FOG2: interiors fog from XCLL / the lighting template (Inherits flags; far 0 -> 163840, near 0 -> 0.17 far;
+  colors byte/255 x scale^2.2; no sun term). Same wwFogEval as Lookdev. Fog probes 5-8 (8 = geometry echo for
+  the join guard). Gate cell_fog.sh: 3 cells PASS; reds noclamp/nogamma/noinherit FAIL. WW_CELL_CAM_DUMP=<file>
+  writes the camera + probe ids (the shot notes never carry the echo).
+- ON1: cell_lights.glsl cellOren = the game's legacy diffuse (Oren-Nayar, unnormalised cosPhi) on placed lights
+  and the cell's directional; Lambert kept for envSpec, GI, PBR. Probes 8 (Oren sum / 4) and 9 (gloss, legacy
+  only). Gate cell_oren.sh, two Vault views ("EDID@x,y,z" entries): 100% / 100%; red lambert FAILs view 1
+  (lit 73%). SKIP = too little data (green fail, never a red's). `normalised` is not a red (gap < tolerance).
+- OPEN: an unnamed translucent surface over Solomon's house / the Vault serves the fog probe but not the
+  position probes (fog gate keeps only same-surface pixels, 74-83%). Identify its program.
+- NEXT, ranked by a flag census of Fallout4.esm (scratchpad/ltype1_20261001/flag_census.py): RIM1 = the game's
+  back-light rim term on every light and the sun: diffuse += E x sat(dot(V,-L)) x (1-NdotV)^0.01 x NdotL x
+  (1 - gloss) (FO4CS F4FX/Lighting bsdf_light_deferred.hlsl / bsdf_light_spot.hlsl); goes into cellOren's factor,
+  red `norim` in cell_oren.sh. Then ambient-only (39 placed), ignore-roughness (56), hemisphere (17); box and
+  attenuation-only are never placed (0). Flicker (11,193 placed) is animation, not a still-frame term.
+  After: cube scale, room ids, glass tint in the bake, lodgen baseline, PRTP4/5, sky term, far-map trees,
+  FO4CS reader last. Still waiting on his save name.
+
 ## TOP BLOCK -- written 2026-10-01 10:29 (`date`-read): SHADOW1, shadows for the shadow-casting cell lights
 
 - Part of the "Cell lights" row (no row of its own). celllights.cpp wwCellShadowPass (glview.cpp, after the sun
