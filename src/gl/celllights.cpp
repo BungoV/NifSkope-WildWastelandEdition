@@ -24,7 +24,8 @@ namespace
 {
 
 constexpr int kTextureUnit = 14;		// TexCache allocates from unit 0 upward; 15 is the CSM map
-constexpr int kTexelsPerLight = 5;		// lane SHADOW1 added the 5th: shadow slot, kind, near clip, XLIG bias
+constexpr int kTexelsPerLight = 8;		// lane SHADOW1 added the 5th: shadow slot, kind, near clip, XLIG bias;
+										// lane HEMI1 the 6th to 8th: the box rows (cell_lights.glsl CELL_TPL)
 constexpr int kGiUnit = 13;			// lane PRTPGI: the bounce grid (sampler3D)
 constexpr int kLutUnit = 12;		// lane IMGS1: the imagespace LUT (sampler3D)
 constexpr int kBloomUnit = 11;		// lane BLOOM1: the imagespace bloom (sampler2D, a quarter of the view)
@@ -117,6 +118,8 @@ ClState & st()
 			s.red = 64;	// lane RIM1: the lights' No Rim / Ignore Roughness flags ignored
 		else if ( red == "ambientlit" )
 			s.red = 128;	// lane AMBO1: the Ambient Only lights drawn as ordinary lights
+		else if ( red == "hemiomni" )
+			s.red = 256;	// lane HEMI1: hemisphere and box lights drawn as plain omni lights (the cell view applies it)
 	}
 	return s;
 }
@@ -255,18 +258,23 @@ void wwCellLightsUniforms( Scene * scene )
 		for ( qsizetype i = 0; i < L->lights.size(); i++ ) {
 			const WwCellLight & l = L->lights.at( i );
 			float dir[3] = { l.dir[0], l.dir[1], l.dir[2] };
-			const float tex[20] = {
+			// lane HEMI1: texel 1.w = cos(FOV / 2) for a spot, else the shape: -2 omni, -3 hemisphere, -4 box
+			const float shape = l.spot ? l.cosOuter : l.shape == 1 ? -3.0f : l.shape == 2 ? -4.0f : -2.0f;
+			const float tex[kTexelsPerLight * 4] = {
 				l.pos[0], l.pos[1], l.pos[2], l.radius,
-				l.color[0], l.color[1], l.color[2], l.spot ? l.cosOuter : -2.0f,
+				l.color[0], l.color[1], l.color[2], shape,
 				dir[0], dir[1], dir[2], l.cone,
 				l.bias, l.scale, l.exponent,
 				float( ( l.noSpecular ? 1 : 0 ) | ( l.noRim ? 2 : 0 ) | ( l.ignoreRoughness ? 4 : 0 ) ),	// lane RIM1
-				slotOf[size_t( i )], float( l.shadow ), l.nearClip, l.shadowBias };
-			t.insert( t.end(), tex, tex + 20 );
+				slotOf[size_t( i )], float( l.shadow ), l.nearClip, l.shadowBias,
+				l.box[0][0], l.box[0][1], l.box[0][2], l.box[0][3],
+				l.box[1][0], l.box[1][1], l.box[1][2], l.box[1][3],
+				l.box[2][0], l.box[2][1], l.box[2][2], l.box[2][3] };
+			t.insert( t.end(), tex, tex + kTexelsPerLight * 4 );
 		}
 		g.bufShStamp = g.shStamp;
 		if ( t.empty() )
-			t.assign( 20, 0.0f );	// a buffer texture must have a store
+			t.assign( kTexelsPerLight * 4, 0.0f );	// a buffer texture must have a store
 		if ( !g.buf ) {
 			fn->glGenBuffers( 1, &g.buf );
 			fn->glGenTextures( 1, &g.tex );

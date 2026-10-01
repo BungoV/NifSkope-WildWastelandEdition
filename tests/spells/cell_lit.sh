@@ -16,9 +16,12 @@
 #                                 --red axis     spots aimed along local -Z
 #                                 --red off      the row off: no probe is served at all
 #                                 --red ambientlit  the Ambient Only lights drawn as ordinary lights
+#                                 --red hemiomni    hemisphere and box lights drawn as plain omni lights
+#                                                   (lane HEMI1; fails on the pixels the shapes decide)
 #
-# USAGE  bash tests/spells/cell_lit.sh [--red linear|axis|off|ambientlit]
-#        CELLS="..." to pick interiors; the camera stands at CAM_<cell> (x,y,z look-at) if set.
+# USAGE  bash tests/spells/cell_lit.sh [--red linear|axis|off|ambientlit|hemiomni]
+#        CELLS="..." to pick interiors; the camera stands at CAM_<cell> (x,y,z look-at) if set,
+#        DIST_<cell> / VIEW_<cell> (lane HEMI1) override DIST / VIEW for that cell.
 
 set -u
 
@@ -50,10 +53,13 @@ LOG="$OUT/cell_lit.log"
 PORT="${PORT:-14741}"
 SPEC="$REPO/tests/fixtures/empty.wwcell"
 SIZE="${SIZE:-960x600}"
-CELLS="${CELLS:-Vault111Cryo DmndSolomonsHouse01}"
+CELLS="${CELLS:-Vault111Cryo DmndSolomonsHouse01 DmndRadio01}"
 # looking down on light clusters (the whole-cell framing leaves too few pixels); the Vault's west end
 # holds its big aimed spots, so --red axis has something to break
 : "${CAM_Vault111Cryo:=-4600,-280,0}" "${CAM_DmndSolomonsHouse01:=1450,-20,150}"
+# lane HEMI1: the radio booth's two hemisphere lamps (refs 00139F49, 00187B03) face down; a level look
+# across the booth from inside shows the walls above their plane, which the half space leaves dark
+: "${CAM_DmndRadio01:=1617,99,230}" "${VIEW_DmndRadio01:=4}" "${DIST_DmndRadio01:=250}"
 
 mkdir -p "$OUT"
 : > "$LOG"
@@ -72,13 +78,14 @@ shoot() {   # shoot <cell> <tag> <env...>
 	local cell="$1" tag="$2"; shift 2
 	local shot="$OUT/$cell.$tag.png" notes="$OUT/$cell.$tag.notes"
 	rm -f "$shot" "$notes"
-	local camvar="CAM_$cell" cam=()
-	[ -n "${!camvar:-}" ] && cam=( WW_RENDER_CENTER="${!camvar}" WW_RENDER_DIST="${DIST:-1400}" WW_RENDER_FOV=70 )
+	local camvar="CAM_$cell" distvar="DIST_$cell" viewvar="VIEW_$cell" cam=()
+	[ -n "${!camvar:-}" ] && cam=( WW_RENDER_CENTER="${!camvar}" WW_RENDER_DIST="${!distvar:-${DIST:-1400}}" WW_RENDER_FOV=70 )
+	local view="${!viewvar:-${VIEW:-1}}"
 	# WW_CELL_SHADOW=0: the PRTP2 evaluation is unshadowed (tests/spells/cell_shadow.sh judges the shadows)
 	env WW_CELL_SHADOW=0 "$@" "${cam[@]}" \
 		WW_CELL_OPEN="$ESM|interior|$cell" WW_CELL_DATAROOT="$DATA" \
 		WW_RENDER_SHOT="$(winpath "$shot")" WW_RENDER_SIZE="$SIZE" \
-		WW_RENDER_VIEW="${VIEW:-1}" WW_RENDER_CLEAN=1 \
+		WW_RENDER_VIEW="$view" WW_RENDER_CLEAN=1 \
 		WW_SETTINGS_SCOPE="$(fresh_scope)" timeout 900 "$EXE" --port "$PORT" "$(winpath "$SPEC")" > "$notes" 2>&1
 	[ -s "$shot" ] && echo 1 || echo 0
 }
@@ -99,10 +106,17 @@ for cell in $CELLS; do
 	say "  $line"
 	if [ "$RED" = "axis" ] && [ "${line#*no spot-lit pixels}" != "$line" ]; then
 		say "  skip  $cell: no spot-lit pixels in frame, the axis red has nothing to break"
+	elif [ "$RED" = "hemiomni" ] && [ "${line#*too few shape-decided pixels}" != "$line" ]; then
+		say "  skip  $cell: no hemisphere or box light decides a pixel in frame, the hemiomni red has nothing to break"
 	elif [ -n "$RED" ]; then
 		check "$cell: the red control FAILS the check" "$([ "${line#*FAIL}" != "$line" ] && echo 1 || echo 0)"
 	else
 		check "$cell: the probes match the independent PRTP2 evaluation" "$([ "${line#*PASS}" != "$line" ] && echo 1 || echo 0)"
+	fi
+	# lane HEMI1: the hemisphere view must keep its hemisphere-decided pixels (a reframing cannot hide them)
+	if [ "$cell" = "DmndRadio01" ] && [ -z "$RED" ]; then
+		nh="$(printf '%s' "$line" | sed -n 's/.*(\([0-9]*\) by a hemisphere).*/\1/p')"
+		check "$cell: the frame holds 200+ pixels a hemisphere's plane decides (${nh:-0})" "$([ "${nh:-0}" -ge 200 ] && echo 1 || echo 0)"
 	fi
 done
 say ""

@@ -29,12 +29,23 @@ BSD License - see nifskope.h
  * 3 its low bytes (each over the 65536-unit box centred on the published centre), 4 the world
  * normal * 0.5 + 0.5), WW_CELL_LIT_RED=<red>: "linear" (the radial curve without its 2.2 power),
  * "axis" (spots shine along -Z), "nodalc" (the interior ambient dropped), "ambientlit" (the Ambient Only
- * lights, which add no direct light in game, drawn as ordinary lights; lane AMBO1). Probe 5 (lane PRTPGI): the
- * bounce's irradiance E(N) / pi, raw. */
+ * lights, which add no direct light in game, drawn as ordinary lights; lane AMBO1), "hemiomni" (hemisphere
+ * and box lights drawn as plain omni lights again; lane HEMI1). Probe 5 (lane PRTPGI): the bounce's irradiance
+ * E(N) / pi, raw.
+ *
+ * LIGHT SHAPES (lane HEMI1, from the game's code and shaders, docs/PRTP_PLAN.md 2x). The type comes from the
+ * LIGH flags first: 0x800 hemisphere, else 0x400 / 0x4000 spot, else a box when the ref links, by keyword
+ * 00115705 LightBoxLink, to a ref carrying an XPRM primitive; else omni. Flag 0x20000 is never read. A
+ * hemisphere and a box draw the omni curve (the same radial term from the light's own position and radius),
+ * clipped by a volume: a pixel is lit only where its surface point lies inside it.
+ *   hemisphere = the half ball on the light's local +X side: (P - pos) . dir >= 0
+ *   box        = the linked ref's box: centered on its position, half extents = XPRM bounds as stored,
+ *                axes from its rotation (the light's own radius and curve still apply inside) */
 
 #include <QString>
 #include <QVector>
 
+#include <cmath>
 #include <vector>
 
 class Scene;
@@ -55,7 +66,21 @@ struct WwCellLight
 	int shadow = 0;                 //!< lane SHADOW1: 0 none, 1 spot (0x400), 2 hemisphere (0x800), 3 omni (0x1000)
 	float nearClip = 10.0f;         //!< DATA Near Clip + XLIG Near Clip delta: casters nearer the light cast nothing
 	float shadowBias = 0.0f;        //!< XLIG Shadow Depth Bias (read and echoed; its scale is unread, not applied)
+	int shape = 0;                  //!< lane HEMI1: 0 omni (or spot), 1 hemisphere (dir = its plane normal), 2 box
+	float box[3][4] = {};           //!< lane HEMI1: box local coordinate k = dot(box[k].xyz, P) + box[k].w, inside |k| <= 1
 };
+
+//! lane HEMI1: world point (x, y, z) lies inside light l's volume (always for an omni or spot light)
+inline bool wwCellLightShapeIn( const WwCellLight & l, double x, double y, double z )
+{
+	if ( l.shape == 1 )
+		return ( x - l.pos[0] ) * l.dir[0] + ( y - l.pos[1] ) * l.dir[1] + ( z - l.pos[2] ) * l.dir[2] >= 0.0;
+	if ( l.shape == 2 )
+		for ( int k = 0; k < 3; k++ )
+			if ( std::abs( l.box[k][0] * x + l.box[k][1] * y + l.box[k][2] * z + l.box[k][3] ) > 1.0 )
+				return false;
+	return true;
+}
 
 struct WwCellLighting
 {
