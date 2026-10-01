@@ -49,6 +49,9 @@ struct WwCellLight
 	float bias = 0.0f, scale = 1.0f, exponent = 2.0f;   //!< DATA Constant, Scalar, Exponent
 	float cone = 1.0f;              //!< DATA Falloff Exponent (the spot edge)
 	bool noSpecular = false;        //!< flag 0x8000
+	int shadow = 0;                 //!< lane SHADOW1: 0 none, 1 spot (0x400), 2 hemisphere (0x800), 3 omni (0x1000)
+	float nearClip = 10.0f;         //!< DATA Near Clip + XLIG Near Clip delta: casters nearer the light cast nothing
+	float shadowBias = 0.0f;        //!< XLIG Shadow Depth Bias (read and echoed; its scale is unread, not applied)
 };
 
 struct WwCellLighting
@@ -137,5 +140,21 @@ void wwCellImageSpaceSetAdapted( Scene * scene, float lum, int pixels );
  *  the shader adds it (bilinear, a quarter of the view) to the HDR before the exposure */
 void wwCellImageSpaceSetBloom( Scene * scene, const float * rgba, int w, int h, int step );
 QString wwCellImageSpaceEcho( Scene * scene );
+
+/*! THE SHADOWS (lane SHADOW1, docs/PRTP_PLAN.md 2k): every shadow-casting light (LIGH flags 0x400 spot,
+ *  0x800 hemisphere, 0x1000 omni) within reach, up to kShadowSlots of them nearest the camera, gets a depth
+ *  cube: its distance to the nearest opaque caster over its radius, 6 faces of kShadowFace texels, rendered
+ *  from the document's own shapes (opaque, depth-writing, not alpha-tested; casters nearer the light than its
+ *  near clip cast nothing). The shader compares its own distance - a slope bias, 3x3 taps a texel apart, /9;
+ *  a hemisphere light lights nothing behind its plane (its local +X, like a spot). Drawn before the frame;
+ *  re-rendered only when the document, its lights or the slot set change. The game's map is a (dual)
+ *  paraboloid with its resolution halved per 750 units of distance; ours is a cube face of 512 (the
+ *  paraboloid's centre texel at 1024) at any distance.
+ *  Part of the Cell lights row (no row of its own: a light's shadow is part of the light).
+ *  Pins: WW_CELL_SHADOW=0 (the harness's unshadowed pass), WW_CELL_SHADOW_RED=noshadow (every
+ *  factor 1: the gate's refuter). Probe 7: the shadow factors of slots 0, 1, 2 in r, g, b (0.5 / 255 marks a
+ *  pixel out of that light's reach). */
+void wwCellShadowPass( Scene * scene );
+QString wwCellShadowEcho( Scene * scene );
 
 #endif

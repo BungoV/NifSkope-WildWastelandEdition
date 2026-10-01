@@ -317,6 +317,36 @@ P the picture vs the numpy chain + bloom over the full-size dump on opaque cell-
 3x3 range +-3/255). Reds nolut / noexp / nograde / nobloom FAIL P (nobloom on cells whose bloom moves >= 5%).
 Not yet: adaptation over time, exteriors (the weather's imagespace).
 
+### 2k. The lights' shadows (lane SHADOW1, 2026-10-01)
+
+Which lights: LIGH flags 0x400 (shadow spot), 0x800 (shadow hemisphere), 0x1000 (shadow omni). Fallout4.esm
+places 750, 17 and 407 of them. The game's receiver (the shipped shader archive's shadow-mask shaders): a spot
+compares its perspective depth minus a bias with 9 taps (3x3, a texel apart) / 9; a hemisphere uses a
+paraboloid (radial distance / radius minus the bias), with everything behind its plane at 0; an omni uses a
+dual paraboloid (not located yet). The default map is 2048, halved per 750 units of distance.
+What we draw (no row of its own: part of Cell lights):
+1. **Maps.** A depth cube for each of the 16 shadow lights whose reach is nearest the camera (512 a face edge,
+   D16, a cube-map array on unit 10). Depth = distance to the light / radius, written by
+   `cell_shadowdepth.frag`. The casters are the sun map's (opaque, depth-writing, no effects) minus the
+   alpha-tested ones. Casters nearer the light than its near clip (DATA + XLIG delta) cast nothing. A map is
+   re-rendered only when its slot gets a new light or the document changes.
+2. **Receiver.** `cellShadowF`: the point lifted 1.5 texels along its normal, its distance minus 1 unit,
+   3x3 taps a texel apart (each a hardware 2x2 compare) / 9. It multiplies the light in both programs.
+   A hemisphere is 0 behind its plane. Its plane faces local +X: 14 of the 17 placed aim it down (measured,
+   `scratchpad/shadow1_20261001/hemi_axis.py`).
+3. **Light buffer.** A 5th texel per light: slot (-1 none), kind, near clip, XLIG Shadow Depth Bias.
+Divergences: a cube instead of a (dual) paraboloid, so the texel at 512 matches a 2048 paraboloid's centre
+texel at 1024. No distance halving. The game's shadow budget is unread (we do 16, then unshadowed). The XLIG
+bias is read but not applied (the engine's scale for it is unread). Alpha-tested casters
+cast nothing (the game alpha-tests them).
+Gate: `tests/spells/cell_shadow.sh` + `cell_shadow_check.py`. Probe 7 writes slots 0..2's factors. The check
+re-traces each sampled point's ray to the light with its own Moller-Trumbore over the cell's probe soup
+(no NifSkope code). It needs >= 85% agreement on re-traced shadowed points and on lit ones, >= 40 of each
+(Solomon's frame holds ~50 shadowed; 40 of 40 bounds the share over 92%). Only points the check itself finds in
+reach and facing the light count: effect glow spills 1..11 into the probe's "0". First green: Vault111Cryo
+98.6% / 99.2% of 7,738, DmndSolomonsHouse01 100% / 98.5% of 908.
+Red noshadow (factors read as 1) FAILS. `cell_lit.sh` now pins WW_CELL_SHADOW=0 (its PRTP2 sum is unshadowed).
+
 ## 3. Open
 
 - `.tbk` v4: two surfel sides per cell (gives back the refused thin-wall weight), room ids (2f).

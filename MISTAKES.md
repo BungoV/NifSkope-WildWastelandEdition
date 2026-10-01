@@ -5,6 +5,14 @@ Written the moment a mistake is recognised, unprompted (CONSTITUTION rule 2).
 Format: date -- what was done -- what was true -- how it was found -- the rule.
 Newest at the top.
 
+## 2026-10-01 -- SHADOW1: a checker trusted the probe's "0"; a repo-root grep; sed patches
+- cell_shadow_check.py took any nonzero probe-7 pixel as "in reach". Effect meshes' glow spills 1..11 into the
+  probe, so out-of-reach pixels read as "shadowed": the Vault's slot 0 failed (lit agree 0/595) and Solomon's
+  first PASS stood on 494 of 535 noise points. Found by decoding the points (1,600-4,500 units from a light of
+  radius 436). Rule: a checker decides reach and facing itself; the probe supplies only the factor.
+- A grep from the repo root went to the background and timed out (search-lean rule). Rule: one folder.
+- Two `sed -i` edits on tests/spells/cell_shadow_check.py (the sample count, the floor). Rule: the Edit tool.
+
 ## 2026-10-01 -- IMGS1: heredoc patches again; the Edit tool flipped glview.cpp's endings; the measure was impure
 - I patched files with `python - <<EOF` heredocs again (three times, the last on cell_is.sh), after the PRTPGI
   entry below. Rule: patch with the Edit/Write tools; a scratch script goes in a file first.

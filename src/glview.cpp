@@ -3916,6 +3916,8 @@ void GLView::paintGL()
 	 * A no-op with the Shadows row off (the default): no map, no program swap. */
 	if ( wwLookdevActive() )
 		wwSunShadowPass( scene );
+	// lane SHADOW1: the cell lights' depth cubes (a no-op unless the document draws cell-lit)
+	wwCellShadowPass( scene );
 
 	if ( perspectiveMode ) {
 		// Lookdev: the lookdev cube background replaces the (FO76+) skybox

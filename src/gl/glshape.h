@@ -135,6 +135,8 @@ public:
 	//! lane CSM1: an opaque, depth-writing, non-effect shape goes into the sun's shadow map
 	bool wwCastsSunShadow() const { return !drawInSecondPass && !translucent && depthWrite && !bsesp; }
 	bool wwDoubleSided() const { return isDoubleSided; }
+	//! lane SHADOW1: the shape alpha-tests (its depth-only caster would cast a solid card)
+	bool wwAlphaTested() const;
 	//! the GPU applies the bone transforms to this shape (the caster pass skins it on the CPU)
 	bool wwGpuSkinned() const { return isSkinned && !transformRigid && !boneTransforms.empty(); }
 protected:

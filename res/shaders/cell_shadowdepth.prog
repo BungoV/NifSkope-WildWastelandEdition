@@ -1,0 +1,4 @@
+# The cell lights' shadow caster pass (lane SHADOW1): one face of a light's depth cube per draw,
+# the caster's distance to the light over its radius. Selected by name from gl/celllights.cpp.
+
+shaders cell_shadowdepth.vert cell_shadowdepth.frag

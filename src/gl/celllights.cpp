@@ -6,9 +6,13 @@ BSD License - see nifskope.h
 
 #include "celllights.h"
 
+#include "gl/glnode.h"
 #include "gl/glscene.h"
+#include "gl/glshape.h"
 #include "gl/renderer.h"
 
+#include <QElapsedTimer>
+#include <QFile>
 #include <QHash>
 #include <QSettings>
 
@@ -20,10 +24,13 @@ namespace
 {
 
 constexpr int kTextureUnit = 14;		// TexCache allocates from unit 0 upward; 15 is the CSM map
-constexpr int kTexelsPerLight = 4;
+constexpr int kTexelsPerLight = 5;		// lane SHADOW1 added the 5th: shadow slot, kind, near clip, XLIG bias
 constexpr int kGiUnit = 13;			// lane PRTPGI: the bounce grid (sampler3D)
 constexpr int kLutUnit = 12;		// lane IMGS1: the imagespace LUT (sampler3D)
 constexpr int kBloomUnit = 11;		// lane BLOOM1: the imagespace bloom (sampler2D, a quarter of the view)
+constexpr int kShadowUnit = 10;		// lane SHADOW1: the lights' depth cubes (samplerCubeArrayShadow)
+constexpr int kShadowSlots = 16;	// shadowed lights at once, the nearest the camera
+constexpr int kShadowFace = 512;	// texels a cube face edge (the game's 2048 paraboloid's centre texel at 1024)
 
 //! one bloom per document: the blurred bright pass, rgb floats, w x h (rows bottom-up, as read back)
 struct ClBloom
@@ -54,6 +61,9 @@ struct ClState
 	QHash<const void *, int> adaptedPixels;
 	QHash<const void *, ClBloom> bloom;     // lane BLOOM1: the last measure's bloom per document
 	int nextBloomVersion = 1;
+	bool shadowOn = true;   // lane SHADOW1: WW_CELL_SHADOW=0 turns the maps off (the harness's unshadowed pass)
+	bool shadowRed = false; // WW_CELL_SHADOW_RED=noshadow: the maps rendered, every factor read as 1
+	QString shadowLast = QStringLiteral( "none yet" );
 };
 
 ClState & st()
@@ -85,6 +95,8 @@ ClState & st()
 		}
 		const QByteArray isRed = qgetenv( "WW_CELL_IS_RED" ).trimmed();
 		s.isRed = isRed == "nolut" ? 1 : isRed == "noexp" ? 2 : isRed == "nograde" ? 4 : isRed == "nobloom" ? 8 : 0;
+		s.shadowOn = qgetenv( "WW_CELL_SHADOW" ).trimmed() != "0";
+		s.shadowRed = qgetenv( "WW_CELL_SHADOW_RED" ).trimmed() == "noshadow";
 		const QByteArray red = qgetenv( "WW_CELL_LIT_RED" ).trimmed();
 		if ( red == "linear" )
 			s.red = 1;
@@ -112,6 +124,14 @@ struct Gpu
 	GLuint bloomTex = 0;
 	const void * bloomDoc = nullptr;
 	int bloomVersion = 0;
+	// lane SHADOW1: the depth cube array, the light each slot holds (-1 free), and a stamp the light
+	// buffer re-uploads on (a light's slot is its 5th texel)
+	GLuint shTex = 0, shFbo = 0;
+	const void * shDoc = nullptr;
+	int shVersion = 0;
+	int shSlot[kShadowSlots];
+	int shStamp = 1, bufShStamp = 0;
+	Gpu() { std::fill( shSlot, shSlot + kShadowSlots, -1 ); }
 };
 QHash<const void *, Gpu> & gpus()
 {
@@ -201,20 +221,29 @@ void wwCellLightsUniforms( Scene * scene )
 	ClState & s = st();
 	Gpu & g = gpus()[r];
 	const WwCellLighting * L = on ? wwCellLightsFor( scene->nifModel ) : nullptr;
-	if ( L && ( g.doc != scene->nifModel || g.version != s.version.value( scene->nifModel ) ) ) {
+	if ( L && ( g.doc != scene->nifModel || g.version != s.version.value( scene->nifModel ) || g.bufShStamp != g.shStamp ) ) {
+		// lane SHADOW1: the slot each light holds (the slots belong to the document the shadow pass last saw)
+		std::vector<float> slotOf( size_t( L->lights.size() ), -1.0f );
+		if ( g.shDoc == scene->nifModel && g.shVersion == s.version.value( scene->nifModel ) )
+			for ( int k = 0; k < kShadowSlots; k++ )
+				if ( g.shSlot[k] >= 0 && g.shSlot[k] < L->lights.size() )
+					slotOf[size_t( g.shSlot[k] )] = float( k );
 		std::vector<float> t;
-		t.reserve( size_t( L->lights.size() ) * kTexelsPerLight * 4 + 16 );
-		for ( const WwCellLight & l : L->lights ) {
+		t.reserve( size_t( L->lights.size() ) * kTexelsPerLight * 4 + 20 );
+		for ( qsizetype i = 0; i < L->lights.size(); i++ ) {
+			const WwCellLight & l = L->lights.at( i );
 			float dir[3] = { l.dir[0], l.dir[1], l.dir[2] };
-			const float tex[16] = {
+			const float tex[20] = {
 				l.pos[0], l.pos[1], l.pos[2], l.radius,
 				l.color[0], l.color[1], l.color[2], l.spot ? l.cosOuter : -2.0f,
 				dir[0], dir[1], dir[2], l.cone,
-				l.bias, l.scale, l.exponent, l.noSpecular ? 1.0f : 0.0f };
-			t.insert( t.end(), tex, tex + 16 );
+				l.bias, l.scale, l.exponent, l.noSpecular ? 1.0f : 0.0f,
+				slotOf[size_t( i )], float( l.shadow ), l.nearClip, l.shadowBias };
+			t.insert( t.end(), tex, tex + 20 );
 		}
+		g.bufShStamp = g.shStamp;
 		if ( t.empty() )
-			t.assign( 16, 0.0f );	// a buffer texture must have a store
+			t.assign( 20, 0.0f );	// a buffer texture must have a store
 		if ( !g.buf ) {
 			fn->glGenBuffers( 1, &g.buf );
 			fn->glGenTextures( 1, &g.tex );
@@ -324,6 +353,14 @@ void wwCellLightsUniforms( Scene * scene )
 		prog->uni4f_l( prog->uniLocation( "cellIsBloomRect" ), FloatVector4( float( vp[0] ), float( vp[1] ),
 			1.0f / float( std::max( vp[2], 1 ) ), 1.0f / float( std::max( vp[3], 1 ) ) ) );
 	}
+	// lane SHADOW1: the depth cubes, bound (a sampler left on unit 0 beside BaseMap would be a type clash)
+	const bool shadowDraw = L && s.shadowOn && !s.shadowRed && g.shTex && g.shDoc == scene->nifModel;
+	fn->glActiveTexture( GLenum( GL_TEXTURE0 + kShadowUnit ) );
+	fn->glBindTexture( GL_TEXTURE_CUBE_MAP_ARRAY, shadowDraw ? g.shTex : 0 );
+	fn->glActiveTexture( GLenum( prevActive ) );
+	prog->uni1i( "cellShadow", kShadowUnit );
+	prog->uni1b( "cellShadowOn", shadowDraw );
+	prog->uni1f( "cellShadowTexel", 2.0f / float( kShadowFace ) );
 	prog->uni1i( "cellIsLut", kLutUnit );
 	prog->uni1b( "cellIsOn", isDraw );
 	prog->uni1b( "cellIsLutOn", lutDraw );
@@ -527,5 +564,290 @@ QString wwCellLightsEcho( Scene * scene )
 		o += QStringLiteral( " probe=%1" ).arg( s.probe );
 	if ( s.red )
 		o += QStringLiteral( " red=%1" ).arg( s.red );
+	return o + QLatin1Char( ' ' ) + wwCellShadowEcho( scene );
+}
+
+//! WW_CELL_SHADOW_DUMP=<file>: the echo, rewritten whenever the slots change (the gate's light list)
+static void shadowDump( Scene * scene )
+{
+	static const QString path = QString::fromLocal8Bit( qgetenv( "WW_CELL_SHADOW_DUMP" ) );
+	if ( path.isEmpty() )
+		return;
+	QFile f( path );
+	if ( f.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
+		f.write( ( wwCellShadowEcho( scene ) + QLatin1Char( '\n' ) ).toUtf8() );
+}
+
+/* lane SHADOW1: the depth cubes (celllights.h). Each face: world relative to the light, GL's cube face
+ * axes (major m, s = u.r, t = v.r over |m.r|), 90 degrees; depth = distance / radius (the fragment stage). */
+void wwCellShadowPass( Scene * scene )
+{
+	if ( !wwCellLightsWanted( scene ) )
+		return;
+	ClState & s = st();
+	const WwCellLighting * L = wwCellLightsFor( scene->nifModel );
+	if ( !L )
+		return;
+	Renderer * r = scene->renderer;
+	Gpu & g = gpus()[r];
+	const int ver = s.version.value( scene->nifModel );
+	if ( g.shDoc != scene->nifModel || g.shVersion != ver ) {
+		std::fill( g.shSlot, g.shSlot + kShadowSlots, -1 );
+		g.shDoc = scene->nifModel;
+		g.shVersion = ver;
+		g.shStamp++;
+	}
+	if ( !s.shadowOn ) {
+		s.shadowLast = QStringLiteral( "off(WW_CELL_SHADOW=0)" );
+		return;
+	}
+	// the camera in the world (the view's inverse, as cellRow)
+	const Transform & vt = scene->view;
+	const float sc = vt.scale != 0.0f ? vt.scale : 1.0f;
+	float cam[3];
+	for ( int k = 0; k < 3; k++ ) {
+		float w = 0.0f;
+		for ( int j = 0; j < 3; j++ )
+			w -= vt.rotation( j, k ) * vt.translation[j];
+		cam[k] = w / sc;
+	}
+	// the wanted set: the shadow lights whose reach comes nearest the camera
+	std::vector<std::pair<float, int>> cand;
+	for ( qsizetype i = 0; i < L->lights.size(); i++ ) {
+		const WwCellLight & l = L->lights.at( i );
+		if ( !l.shadow )
+			continue;
+		const float dx = l.pos[0] - cam[0], dy = l.pos[1] - cam[1], dz = l.pos[2] - cam[2];
+		cand.emplace_back( std::max( 0.0f, std::sqrt( dx * dx + dy * dy + dz * dz ) - l.radius ), int( i ) );
+	}
+	const int want = std::min( int( cand.size() ), kShadowSlots );
+	std::partial_sort( cand.begin(), cand.begin() + want, cand.end() );
+	std::vector<char> wanted( size_t( L->lights.size() ), 0 ), held( size_t( L->lights.size() ), 0 );
+	for ( int i = 0; i < want; i++ )
+		wanted[size_t( cand[size_t( i )].second )] = 1;
+	bool changed = false;
+	for ( int k = 0; k < kShadowSlots; k++ ) {
+		const int i = g.shSlot[k];
+		if ( i < 0 )
+			continue;
+		if ( i >= L->lights.size() || !wanted[size_t( i )] ) {
+			g.shSlot[k] = -1;
+			changed = true;
+		} else {
+			held[size_t( i )] = 1;
+		}
+	}
+	std::vector<int> dirty;
+	for ( int i = 0; i < want; i++ ) {
+		const int li = cand[size_t( i )].second;
+		if ( held[size_t( li )] )
+			continue;
+		for ( int k = 0; k < kShadowSlots; k++ ) {
+			if ( g.shSlot[k] < 0 ) {
+				g.shSlot[k] = li;
+				dirty.push_back( k );
+				break;
+			}
+		}
+	}
+	if ( changed || !dirty.empty() )
+		g.shStamp++;
+	if ( dirty.empty() ) {
+		if ( changed )
+			shadowDump( scene );
+		return;
+	}
+
+	QElapsedTimer timer;
+	timer.start();
+	auto fn = r->fn;
+	GLint prevActive = 0;
+	fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
+	if ( !g.shTex ) {
+		fn->glGenTextures( 1, &g.shTex );
+		fn->glActiveTexture( GLenum( GL_TEXTURE0 + kShadowUnit ) );
+		fn->glBindTexture( GL_TEXTURE_CUBE_MAP_ARRAY, g.shTex );
+		fn->glTexImage3D( GL_TEXTURE_CUBE_MAP_ARRAY, 0, GL_DEPTH_COMPONENT16, kShadowFace, kShadowFace, 6 * kShadowSlots, 0,
+			GL_DEPTH_COMPONENT, GL_UNSIGNED_SHORT, nullptr );
+		fn->glTexParameteri( GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
+		fn->glTexParameteri( GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+		fn->glTexParameteri( GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+		fn->glTexParameteri( GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+		fn->glTexParameteri( GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE );
+		fn->glTexParameteri( GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE );
+		fn->glTexParameteri( GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL );
+		fn->glBindTexture( GL_TEXTURE_CUBE_MAP_ARRAY, 0 );
+		fn->glActiveTexture( GLenum( prevActive ) );
+		fn->glGenFramebuffers( 1, &g.shFbo );
+	}
+
+	// the casters: what the sun's map takes (opaque, depth-writing, no effect), less the alpha-tested
+	struct ShCaster
+	{
+		const Shape * sh;
+		Vector3 c;
+		float rad;
+		Matrix4 mv;
+	};
+	std::vector<ShCaster> casters;
+	for ( Node * node : scene->nodes.list() ) {
+		const Shape * sh = dynamic_cast<const Shape *>( node );
+		if ( !sh || !sh->isVisible() || !sh->wwCastsSunShadow() || sh->wwAlphaTested() )
+			continue;
+		if ( sh->verts.isEmpty() || sh->triangles.isEmpty() )
+			continue;
+		const BoundSphere b = sh->bounds();
+		casters.push_back( { sh, b.center, b.radius, sh->viewTrans().toMatrix4() } );
+	}
+
+	NifSkopeOpenGLContext::Program * prog = r->useProgram( "cell_shadowdepth.prog" );
+	if ( !prog ) {
+		for ( int k : dirty )
+			g.shSlot[k] = -1;
+		g.shStamp++;
+		s.shadowLast = QStringLiteral( "refused(no cell_shadowdepth.prog)" );
+		return;
+	}
+	// save what the pass touches
+	GLint prevRead = 0, prevDraw = 0, vp[4], polyMode[2], depthFunc = 0;
+	GLboolean depthMask = GL_TRUE;
+	fn->glGetIntegerv( GL_READ_FRAMEBUFFER_BINDING, &prevRead );
+	fn->glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &prevDraw );
+	fn->glGetIntegerv( GL_VIEWPORT, vp );
+	fn->glGetIntegerv( GL_POLYGON_MODE, polyMode );
+	fn->glGetIntegerv( GL_DEPTH_FUNC, &depthFunc );
+	fn->glGetBooleanv( GL_DEPTH_WRITEMASK, &depthMask );
+	const bool wasCull = fn->glIsEnabled( GL_CULL_FACE ), wasOffset = fn->glIsEnabled( GL_POLYGON_OFFSET_FILL );
+	const bool wasDepth = fn->glIsEnabled( GL_DEPTH_TEST ), wasScissor = fn->glIsEnabled( GL_SCISSOR_TEST );
+	const bool wasBlend = fn->glIsEnabled( GL_BLEND );
+
+	fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, g.shFbo );
+	fn->glDrawBuffer( GL_NONE );
+	fn->glReadBuffer( GL_NONE );
+	fn->glDisable( GL_SCISSOR_TEST );
+	fn->glDisable( GL_BLEND );
+	fn->glDisable( GL_CULL_FACE );			// both sides cast (a cube face mirrors the winding anyway)
+	fn->glDisable( GL_POLYGON_OFFSET_FILL );	// the depth is written by hand: the receiver biases
+	fn->glEnable( GL_DEPTH_TEST );
+	fn->glDepthFunc( GL_LEQUAL );
+	fn->glDepthMask( GL_TRUE );
+	fn->glPolygonMode( GL_FRONT_AND_BACK, GL_FILL );
+	fn->glViewport( 0, 0, kShadowFace, kShadowFace );
+
+	// GL's cube faces: major axis m, s along u, t along v (the spec's sc / tc table)
+	static const float M[6][3] = { { 1, 0, 0 }, { -1, 0, 0 }, { 0, 1, 0 }, { 0, -1, 0 }, { 0, 0, 1 }, { 0, 0, -1 } };
+	static const float U[6][3] = { { 0, 0, -1 }, { 0, 0, 1 }, { 1, 0, 0 }, { 1, 0, 0 }, { 1, 0, 0 }, { -1, 0, 0 } };
+	static const float V[6][3] = { { 0, -1, 0 }, { 0, -1, 0 }, { 0, 0, 1 }, { 0, 0, -1 }, { 0, -1, 0 }, { 0, -1, 0 } };
+	const int lRel = prog->uniLocation( "shRelFromView" ), lClip = prog->uniLocation( "shClipFromRel" );
+	const int lRn = prog->uniLocation( "shRadiusNear" );
+	bool complete = true;
+	qint64 drawn = 0;
+	for ( int k : dirty ) {
+		if ( !complete )
+			break;
+		const WwCellLight & l = L->lights.at( g.shSlot[k] );
+		float rel[16];
+		for ( int row = 0; row < 3; row++ ) {
+			for ( int j = 0; j < 3; j++ )
+				rel[j * 4 + row] = vt.rotation( j, row ) / sc;
+			rel[12 + row] = cam[row] - l.pos[row];
+		}
+		rel[3] = rel[7] = rel[11] = 0.0f;
+		rel[15] = 1.0f;
+		if ( lRel >= 0 )
+			fn->glUniformMatrix4fv( lRel, 1, GL_FALSE, rel );
+		if ( lRn >= 0 )
+			fn->glUniform2f( lRn, l.radius, l.nearClip );
+		const float n = 1.0f, f = l.radius * 1.01f + 2.0f;
+		const float A = ( f + n ) / ( f - n ), B = -2.0f * f * n / ( f - n );
+		std::vector<const ShCaster *> mine;
+		for ( const ShCaster & c : casters ) {
+			const float dx = c.c[0] - l.pos[0], dy = c.c[1] - l.pos[1], dz = c.c[2] - l.pos[2];
+			const float reach = c.rad + l.radius;
+			if ( dx * dx + dy * dy + dz * dz < reach * reach )
+				mine.push_back( &c );
+		}
+		for ( int face = 0; face < 6; face++ ) {
+			fn->glFramebufferTextureLayer( GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, g.shTex, 0, 6 * k + face );
+			if ( fn->glCheckFramebufferStatus( GL_DRAW_FRAMEBUFFER ) != GL_FRAMEBUFFER_COMPLETE ) {
+				complete = false;
+				break;
+			}
+			fn->glClearDepth( 1.0 );
+			fn->glClear( GL_DEPTH_BUFFER_BIT );
+			float clip[16];
+			for ( int c = 0; c < 3; c++ ) {
+				clip[c * 4 + 0] = U[face][c];
+				clip[c * 4 + 1] = V[face][c];
+				clip[c * 4 + 2] = A * M[face][c];
+				clip[c * 4 + 3] = M[face][c];
+			}
+			clip[12] = clip[13] = clip[15] = 0.0f;
+			clip[14] = B;
+			if ( lClip >= 0 )
+				fn->glUniformMatrix4fv( lClip, 1, GL_FALSE, clip );
+			for ( const ShCaster * c : mine ) {
+				prog->uni4m( "modelViewMatrix", c->mv );
+				const float * attrs = &( c->sh->verts.constFirst()[0] );
+				r->drawShape( (unsigned int) ( c->sh->verts.size() ), 3, (unsigned int) ( c->sh->triangles.size() * 3 ),
+					GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, c->sh->triangles.constData() );
+				drawn++;
+			}
+		}
+	}
+	r->stopProgram();
+
+	// restore
+	fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( prevRead ) );
+	fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, GLuint( prevDraw ) );
+	fn->glViewport( vp[0], vp[1], vp[2], vp[3] );
+	fn->glPolygonMode( GL_FRONT_AND_BACK, GLenum( polyMode[0] ) );
+	fn->glDepthFunc( GLenum( depthFunc ) );
+	fn->glDepthMask( depthMask );
+	wasCull ? fn->glEnable( GL_CULL_FACE ) : fn->glDisable( GL_CULL_FACE );
+	wasOffset ? fn->glEnable( GL_POLYGON_OFFSET_FILL ) : fn->glDisable( GL_POLYGON_OFFSET_FILL );
+	wasDepth ? fn->glEnable( GL_DEPTH_TEST ) : fn->glDisable( GL_DEPTH_TEST );
+	wasScissor ? fn->glEnable( GL_SCISSOR_TEST ) : fn->glDisable( GL_SCISSOR_TEST );
+	wasBlend ? fn->glEnable( GL_BLEND ) : fn->glDisable( GL_BLEND );
+
+	if ( !complete ) {
+		for ( int k : dirty )
+			g.shSlot[k] = -1;
+		g.shStamp++;
+		s.shadowLast = QStringLiteral( "refused(shadow framebuffer incomplete)" );
+		return;
+	}
+	s.shadowLast = QStringLiteral( "on shadowLights=%1 rendered=%2 casters=%3 draws=%4 ms=%5 face=%6" )
+		.arg( cand.size() ).arg( dirty.size() ).arg( casters.size() ).arg( drawn ).arg( timer.elapsed() ).arg( kShadowFace );
+	shadowDump( scene );
+}
+
+QString wwCellShadowEcho( Scene * scene )
+{
+	ClState & s = st();
+	QString o = QStringLiteral( "shadow=%1" ).arg( s.shadowLast );
+	if ( s.shadowRed )
+		o += QStringLiteral( " red=noshadow" );
+	if ( !scene || !scene->renderer || !scene->nifModel )
+		return o;
+	const WwCellLighting * L = wwCellLightsFor( scene->nifModel );
+	const Gpu & g = gpus()[scene->renderer];
+	if ( !L || g.shDoc != scene->nifModel )
+		return o;
+	int used = 0;
+	for ( int k = 0; k < kShadowSlots; k++ )
+		used += g.shSlot[k] >= 0 ? 1 : 0;
+	o += QStringLiteral( " slots=%1/%2" ).arg( used ).arg( kShadowSlots );
+	// the gate's three: position, radius, kind, near clip, direction (a hemisphere's plane)
+	for ( int k = 0; k < 3; k++ ) {
+		const int i = g.shSlot[k];
+		if ( i < 0 || i >= L->lights.size() )
+			continue;
+		const WwCellLight & l = L->lights.at( i );
+		o += QStringLiteral( " slot%1=%2,%3,%4,%5,%6,%7,%8,%9,%10" ).arg( k )
+			.arg( double( l.pos[0] ), 0, 'f', 3 ).arg( double( l.pos[1] ), 0, 'f', 3 ).arg( double( l.pos[2] ), 0, 'f', 3 )
+			.arg( double( l.radius ), 0, 'f', 3 ).arg( l.shadow ).arg( double( l.nearClip ), 0, 'f', 3 )
+			.arg( double( l.dir[0] ), 0, 'f', 5 ).arg( double( l.dir[1] ), 0, 'f', 5 ).arg( double( l.dir[2] ), 0, 'f', 5 );
+	}
 	return o;
 }

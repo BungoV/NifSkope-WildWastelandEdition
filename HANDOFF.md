@@ -1,5 +1,17 @@
 # Handoff — NifSkope, Wild Wasteland Edition
 
+## TOP BLOCK -- written 2026-10-01 10:29 (`date`-read): SHADOW1, shadows for the shadow-casting cell lights
+
+- Part of the "Cell lights" row (no row of its own). celllights.cpp wwCellShadowPass (glview.cpp, after the sun
+  pass): 16 slots of a D16 cube-map array (512, unit 10) for the shadow lights nearest the camera; depth =
+  distance / radius, casters nearer than the near clip dropped; re-rendered only when a slot gets a new light.
+  cell_lights.glsl cellShadowF: 1.5-texel normal offset, 3x3 taps; a hemisphere (0x800) lights nothing behind
+  its plane (its local +X, measured). Pins WW_CELL_SHADOW=0, WW_CELL_SHADOW_RED=noshadow,
+  WW_CELL_SHADOW_DUMP=<file>; probe 7. docs/PRTP_PLAN.md 2k (divergences listed there).
+- Gate tests/spells/cell_shadow.sh: the checker re-traces each point over the probe soup. Vault111Cryo 98.6% /
+  99.2% of 7,700 points, DmndSolomonsHouse01 100% / 98.5%; red noshadow FAILs. cell_lit.sh pins shadows off.
+- Parity gaps left: interior fog, Oren-Nayar, hemi/box/ambient-only, cube scale. Still waiting on his save name.
+
 ## TOP BLOCK -- written 2026-10-01 09:54 (`date`-read): BLOOM1, the imagespace bloom
 
 - celllights.cpp wwCellImageSpaceSetBloom: from the measure pass's floats (glview.cpp, after the adapted mean),

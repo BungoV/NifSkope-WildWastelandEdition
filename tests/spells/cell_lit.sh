@@ -73,7 +73,8 @@ shoot() {   # shoot <cell> <tag> <env...>
 	rm -f "$shot" "$notes"
 	local camvar="CAM_$cell" cam=()
 	[ -n "${!camvar:-}" ] && cam=( WW_RENDER_CENTER="${!camvar}" WW_RENDER_DIST="${DIST:-1400}" WW_RENDER_FOV=70 )
-	env "$@" "${cam[@]}" \
+	# WW_CELL_SHADOW=0: the PRTP2 evaluation is unshadowed (tests/spells/cell_shadow.sh judges the shadows)
+	env WW_CELL_SHADOW=0 "$@" "${cam[@]}" \
 		WW_CELL_OPEN="$ESM|interior|$cell" WW_CELL_DATAROOT="$DATA" \
 		WW_RENDER_SHOT="$(winpath "$shot")" WW_RENDER_SIZE="$SIZE" \
 		WW_RENDER_VIEW="${VIEW:-1}" WW_RENDER_CLEAN=1 \

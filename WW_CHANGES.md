@@ -1,5 +1,18 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Cell light shadows (2026-10-01)
+
+- Cell lights now cast shadows. The lights the game marks as shadow casters (shadow spot, shadow hemisphere,
+  shadow omni) block light behind the cell's solid geometry, softened over 9 taps like the game's.
+- Up to 16 of them at once, the ones nearest the camera. Each gets a depth cube rendered from the cell's own
+  shapes, only when its slot changes. Things closer to a light than its near clip (the bulb, its fixture)
+  do not shadow it.
+- A hemisphere light lights nothing behind its plane, as in the game.
+- Not the game's exact maps yet: a cube instead of a paraboloid, no lower resolution with distance, and
+  alpha-tested shapes (fences, grates) cast no shadow yet.
+- Gate `tests/spells/cell_shadow.sh` re-traces the shadows with its own rays through the cell's geometry;
+  red `noshadow` FAILS. `cell_lit.sh` now measures with shadows off.
+
 ## Imagespace bloom (2026-10-01)
 
 - The Imagespace row now adds the game's bloom: bright light past the imagespace's bloom threshold glows

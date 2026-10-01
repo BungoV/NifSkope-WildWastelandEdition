@@ -243,6 +243,11 @@ QString Shape::boneNameAt( int i ) const
 		scene->nifModel->getBlockIndex( boneData.at( i ).bone ), "Name" );
 }
 
+bool Shape::wwAlphaTested() const
+{
+	return alphaProperty && alphaProperty->hasAlphaTest();
+}
+
 Vector3 Shape::skinVertex( int vertexIndex, const Vector3 & local ) const
 {
 	Matrix4 m;

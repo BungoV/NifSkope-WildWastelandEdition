@@ -3,7 +3,8 @@
 // (fo4_cell.frag); src/gl/celllights.cpp sets every uniform.
 
 uniform bool cellOn;
-uniform samplerBuffer cellLights;	// 4 texels a light: pos+radius, color+cosOuter (-2 omni), dir+cone, bias scale exponent noSpec
+uniform samplerBuffer cellLights;	// 5 texels a light: pos+radius, color+cosOuter (-2 omni), dir+cone, bias scale exponent noSpec,
+									// shadow slot (-1 none) kind near-clip xlig-bias
 uniform int cellLightCount;
 uniform vec4 cellRow[3];			// world = (dot(row.xyz, posView) + row.w), the view's inverse
 uniform bool cellHasDalc;
@@ -37,6 +38,10 @@ uniform int cellIsRed;				// 1 nolut, 2 noexp, 4 nograde, 8 nobloom (the CPU dro
 uniform bool cellIsBloomOn;
 uniform sampler2D cellIsBloom;
 uniform vec4 cellIsBloomRect;
+// lane SHADOW1: one depth cube a shadow-casting light (distance to the caster / radius); texel = 2 / face
+uniform bool cellShadowOn;
+uniform samplerCubeArrayShadow cellShadow;
+uniform float cellShadowTexel;
 
 // sqrt-of-linear in (this program's convention), display out. Shaders011.fxp, the tonemap PS and the LUT PS.
 vec3 cellImageSpace( vec3 sqrtColor )
@@ -81,6 +86,52 @@ float cellRadial( float d, float r, vec3 bse )
 	return ( cellRed & 1 ) != 0 ? k : pow( k, 2.2 );
 }
 
+/* lane SHADOW1: light i's shadow factor at P (normal N, facing it): 1 lit, 0 shadowed. The point lifted
+ * 1.5 texels along N (the slope bias), then its distance - 1 unit against 3x3 taps a texel apart (each
+ * a hardware 2x2 compare), / 9, as the game's 9 taps. A hemisphere lights nothing behind its plane. */
+float cellShadowF( int i, vec3 P, vec3 N )
+{
+	vec4 t4 = texelFetch( cellLights, i * 5 + 4 );
+	if ( !cellShadowOn || t4.y < 0.5 )
+		return 1.0;
+	vec4 t0 = texelFetch( cellLights, i * 5 );
+	if ( t4.y > 1.5 && t4.y < 2.5 && dot( P - t0.xyz, texelFetch( cellLights, i * 5 + 2 ).xyz ) < 0.0 )
+		return 0.0;	// the mask's paraboloid: behind the hemisphere's plane is unlit (in a slot or not)
+	if ( t4.x < -0.5 )
+		return 1.0;	// a shadow light beyond the slot budget: unshadowed (the game's budget is unread)
+	vec3 r = P - t0.xyz;
+	vec3 rn = r + N * ( 1.5 * length( r ) * cellShadowTexel );
+	float d = length( rn );
+	float ref = ( d - 1.0 ) / max( t0.w, 0.001 );
+	vec3 a = rn / max( d, 0.001 );
+	vec3 u = normalize( cross( a, abs( a.z ) < 0.9 ? vec3( 0.0, 0.0, 1.0 ) : vec3( 1.0, 0.0, 0.0 ) ) );
+	vec3 v = cross( a, u );
+	float s = 0.0;
+	for ( int y = -1; y <= 1; y++ )
+		for ( int x = -1; x <= 1; x++ )
+			s += texture( cellShadow, vec4( a + ( float( x ) * u + float( y ) * v ) * cellShadowTexel, t4.x ), ref );
+	return s / 9.0;
+}
+
+/* probe 7: the factors of shadow slots 0, 1, 2 in r, g, b as 2/255 + f x 253/255; 0 where that light is out
+ * of reach or faces away (N.L under 0.05), or no light holds the slot */
+vec3 cellShadowProbe( vec3 P, vec3 N )
+{
+	vec3 o = vec3( 0.0 );
+	for ( int i = 0; i < cellLightCount; i++ ) {
+		float slot = texelFetch( cellLights, i * 5 + 4 ).x;
+		if ( slot < -0.5 || slot > 2.5 )
+			continue;
+		vec4 t0 = texelFetch( cellLights, i * 5 );
+		vec3 Lv = t0.xyz - P;
+		float d = length( Lv );
+		if ( d >= t0.w || dot( N, Lv / max( d, 0.001 ) ) < 0.05 )
+			continue;
+		o[int( slot + 0.5 )] = ( 2.0 + cellShadowF( i, P, N ) * 253.0 ) / 255.0;
+	}
+	return o;
+}
+
 // the bounce's irradiance at P, normal N: the three facing slabs blended by n^2, sampled half a
 // voxel off the surface (the grid's voxels behind a wall are its other room's)
 vec3 cellGiE( vec3 P, vec3 N )
@@ -100,21 +151,23 @@ vec3 cellGiE( vec3 P, vec3 N )
  * the direction to it; zero when out of reach or behind the surface. The PBR path's per-light term. */
 vec3 cellLightE( int i, vec3 P, vec3 N, out vec3 L, out bool noSpec )
 {
-	vec4 t0 = texelFetch( cellLights, i * 4 );
+	vec4 t0 = texelFetch( cellLights, i * 5 );
 	vec3 Lv = t0.xyz - P;
 	float d = length( Lv );
 	L = Lv / max( d, 0.001 );
 	noSpec = true;
 	if ( d >= t0.w || dot( N, L ) <= 0.0 )
 		return vec3( 0.0 );
-	vec4 t1 = texelFetch( cellLights, i * 4 + 1 );
-	vec4 t3 = texelFetch( cellLights, i * 4 + 3 );
+	vec4 t1 = texelFetch( cellLights, i * 5 + 1 );
+	vec4 t3 = texelFetch( cellLights, i * 5 + 3 );
 	float a = cellRadial( d, t0.w, t3.xyz );
 	if ( t1.w > -1.5 ) {
-		vec4 t2 = texelFetch( cellLights, i * 4 + 2 );
+		vec4 t2 = texelFetch( cellLights, i * 5 + 2 );
 		float base = clamp( 1.0 - ( 1.0 - dot( -L, t2.xyz ) ) / max( 1.0 - t1.w, 1e-4 ), 0.0, 1.0 );
 		a *= min( pow( base, max( t2.w, 1e-3 ) ), 1.0 );
 	}
+	if ( a > 0.0 )
+		a *= cellShadowF( i, P, N );
 	noSpec = t3.w >= 0.5;
 	return t1.rgb * a;
 }
@@ -134,6 +187,8 @@ vec3 cellProbeRaw( vec3 P, vec3 N )
 		}
 		return clamp( E * 0.25, 0.0, 1.0 );
 	}
+	if ( cellProbe == 7 )
+		return cellShadowProbe( P, N );
 	vec3 q = clamp( floor( P - cellCenter + 32768.0 ), 0.0, 65535.0 );
 	if ( cellProbe == 2 )
 		return floor( q / 256.0 ) / 255.0;
@@ -171,7 +226,7 @@ void cellSumLights( vec3 P, vec3 N, vec3 Vw, float gloss, out vec3 diff, out vec
 	diff = vec3( 0.0 );
 	spec = vec3( 0.0 );
 	for ( int i = 0; i < cellLightCount; i++ ) {
-		vec4 t0 = texelFetch( cellLights, i * 4 );
+		vec4 t0 = texelFetch( cellLights, i * 5 );
 		vec3 Lv = t0.xyz - P;
 		float d = length( Lv );
 		if ( d >= t0.w )
@@ -180,15 +235,17 @@ void cellSumLights( vec3 P, vec3 N, vec3 Vw, float gloss, out vec3 diff, out vec
 		float NdotL = dot( N, L );
 		if ( NdotL <= 0.0 )
 			continue;
-		vec4 t1 = texelFetch( cellLights, i * 4 + 1 );
-		vec4 t3 = texelFetch( cellLights, i * 4 + 3 );
+		vec4 t1 = texelFetch( cellLights, i * 5 + 1 );
+		vec4 t3 = texelFetch( cellLights, i * 5 + 3 );
 		float a = cellRadial( d, t0.w, t3.xyz );
 		if ( t1.w > -1.5 ) {
 			// PRTP2 section 2: base = saturate(1 - (1 - dot(-L, dir)) / (1 - cosOuter)), cone = min(base^falloff, 1)
-			vec4 t2 = texelFetch( cellLights, i * 4 + 2 );
+			vec4 t2 = texelFetch( cellLights, i * 5 + 2 );
 			float base = clamp( 1.0 - ( 1.0 - dot( -L, t2.xyz ) ) / max( 1.0 - t1.w, 1e-4 ), 0.0, 1.0 );
 			a *= min( pow( base, max( t2.w, 1e-3 ) ), 1.0 );
 		}
+		if ( a > 0.0 )
+			a *= cellShadowF( i, P, N );	// lane SHADOW1
 		vec3 E = t1.rgb * a * NdotL;
 		diff += E;
 		if ( t3.w < 0.5 )
@@ -247,6 +304,8 @@ vec3 cellProbeOut( vec3 normalView, vec3 posView, float alphaR, float kSmith )
 		cellSumLights( P, N, N, 1.0 - sqrt( alphaR ), diff, spec );
 		return clamp( diff * 0.25, 0.0, 1.0 );
 	}
+	if ( cellProbe == 7 )
+		return cellShadowProbe( P, N );
 	// the position, 16 bits an axis over the 65536-unit box around the centre
 	vec3 q = clamp( floor( P - cellCenter + 32768.0 ), 0.0, 65535.0 );
 	if ( cellProbe == 2 )

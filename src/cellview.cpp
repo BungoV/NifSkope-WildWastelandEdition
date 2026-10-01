@@ -751,6 +751,17 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 		}
 		l.noSpecular = ( b.flags & 0x8000 ) != 0;
 		l.spot = ( b.flags & ( 0x400 | 0x4000 ) ) != 0;
+		// lane SHADOW1: the shadow kind, near clip (DATA + XLIG delta) and XLIG Shadow Depth Bias
+		l.shadow = ( b.flags & 0x400 ) ? 1 : ( b.flags & 0x800 ) ? 2 : ( b.flags & 0x1000 ) ? 3 : 0;
+		l.nearClip = std::max( b.nearClip + ( r.xligCount >= 5 ? r.xlig[4] : 0.0f ), 0.0f );
+		l.shadowBias = r.xligCount >= 4 ? r.xlig[3] : 0.0f;
+		if ( l.spot || l.shadow == 2 ) {
+			Matrix rm;
+			rm.fromEuler( -r.rot[0], -r.rot[1], -r.rot[2] );
+			const Vector3 d = rm * ( axisRed ? Vector3( 0, 0, -1 ) : Vector3( 1, 0, 0 ) );
+			for ( int k = 0; k < 3; k++ )
+				l.dir[k] = d[k];   // a hemisphere faces its local +X too: 14 of the 17 placed aim it down (measured)
+		}
 		if ( l.spot ) {
 			const float fov = b.fov + ( r.xligCount >= 1 ? r.xlig[0] : 0.0f );
 			l.cosOuter = std::cos( fov * 0.5f * 3.14159265f / 180.0f );
