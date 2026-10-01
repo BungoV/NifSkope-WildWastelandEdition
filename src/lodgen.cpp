@@ -1411,6 +1411,7 @@ struct LodSrcShape
 	bool effectMatRead = false;          //!< the BGEM read (cell view effect buckets)
 	QByteArray effectBlock;              //!< lane EFX1: a BGEM-less effect property, serialized (cell view only)
 	quint32 shaderSF1 = 0, shaderSF2 = 0; //!< the source shader property's flags
+	float refractStrength = 0.0f;        //!< lane EFX1: the lighting property's Refraction Strength (cell view only)
 	float matAlpha = 1.0f;
 	/*! The shape named a material and NOTHING resolved from it -- no texture
 	 *  set, no BGSM, no BGEM. The viewer draws such a shape neutral and COUNTS
@@ -2363,6 +2364,8 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 					s.shaderSF1 = sf1;
 					s.shaderSF2 = sf2;
 					nf.effectShader = src.blockInherits( iShader, "BSEffectShaderProperty" );
+					if ( !nf.effectShader && ( sf1 & ( 1U << 15 ) ) )
+						s.refractStrength = src.get<float>( iShader, "Refraction Strength" );
 					nf.decal = ( sf1 & ( ( 1U << 26 ) | ( 1U << 27 ) ) ) != 0;
 					nf.treeAnim = ( sf2 & ( 1U << 29 ) ) != 0;
 					nf.twoSided = ( sf2 & ( 1U << 4 ) ) != 0;
@@ -2685,6 +2688,7 @@ static bool nativeLoadModelImpl( void * user, const QString & model, const Lodge
 		n.effectBlend = s.effectBlend; n.matAlpha = s.matAlpha;
 		n.effectMatRead = s.effectMatRead; n.shaderSF1 = s.shaderSF1; n.shaderSF2 = s.shaderSF2;
 		n.effectBlock = s.effectBlock; n.alphaFlags = s.hasAlpha ? s.alphaFlags : 0;	// lane EFX1
+		n.refractStrength = s.refractStrength;
 		n.g2p = s.g2pFlag;
 		n.g2pScale = s.g2pScale;
 		n.g2pTex = s.g2pTex;

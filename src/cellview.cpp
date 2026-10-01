@@ -119,6 +119,11 @@ struct Bucket
 	 * block serialized and written back whole, with the source's NiAlphaProperty flags. */
 	QByteArray effectBlock;
 	quint16 effAlphaFlags = 0;
+	/* Lane EFX1: a Refraction-flagged lighting shape (the walkway's splash rings): written back
+	 * with Shader Flags 1 bit 15 and its strength, so the screen-space refraction preview bends
+	 * what lies behind it. */
+	bool refract = false;
+	float refractStrength = 0.0f;
 	bool emits = false;
 	float emissiveScale = 1.0f;
 	bool withColour = false;
@@ -411,8 +416,13 @@ bool emitBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b,
 		}
 		QModelIndex iShader = nif->insertNiBlock( QStringLiteral( "BSLightingShaderProperty" ) );
 		nif->set<quint32>( iShader, "Shader Type", 0 );
+		/* Lane EFX1: a Refraction bucket keeps Shader Flags 1 bit 15 and its strength, so the
+		 * screen-space refraction preview (src/gl/renderer.cpp) bends the scene behind it the
+		 * way the game does, instead of showing its normal-map diffuse as a solid swirled disk. */
 		nif->set<quint32>( iShader, "Shader Flags 1",
-			b.emits ? 2151677953U : ( 2151677953U & ~0x400000U ) );
+			( b.emits ? 2151677953U : ( 2151677953U & ~0x400000U ) ) | ( b.refract ? 0x8000U : 0U ) );
+		if ( b.refract )
+			nif->set<float>( iShader, "Refraction Strength", b.refractStrength );
 		nif->set<quint32>( iShader, "Shader Flags 2", b.withColour ? 0x25U : 5U );
 		QModelIndex iTexSet = nif->insertNiBlock( QStringLiteral( "BSShaderTextureSet" ) );
 		nif->setLink( iShader, "Texture Set", nif->getBlockNumber( iTexSet ) );
@@ -1362,7 +1372,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 	int blendBuckets = 0;                   //!< 2026-10-01: blended (glass) buckets
 	int effectBuckets = 0;                  //!< 2026-10-01: BGEM buckets drawn by the effect shader
 	int inlineFxBuckets = 0;                //!< lane EFX1: BGEM-less effect buckets, the source block written back
-	int refractShapesSkipped = 0;           //!< lane EFX1: refraction-only lighting shapes left out
+	int refractBuckets = 0;                 //!< lane EFX1: Refraction-flagged buckets, drawn by the refraction preview
 	int shapesVertexColor = 0;              //!< lane PRTPPLACE: drawn with the mesh's own vertex colors
 	int placementsSwapped = 0;              //!< lane PRTPPLACE: drawn with a material swap
 	int skyCardsHidden = 0;                 //!< lane PRTPPLACE: sky cards left to the sky layer
@@ -1402,10 +1412,14 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 		// lane EFX1: an effect property with no BGEM, keyed by its own bytes
 		const bool inlineFx = s.nearFacts.effectShader && !s.effectMatRead && !s.effectBlock.isEmpty()
 			&& spec.overlay == CellOverlay::None;
+		// lane EFX1: a Refraction-flagged lighting shape, drawn as the bend it is
+		const bool refract = !s.nearFacts.effectShader && ( s.shaderSF1 & ( 1U << 15 ) )
+			&& spec.overlay == CellOverlay::None;
 		const QString key = QStringLiteral( "%1%2|%3|%4|%5|%6|%7|%8" )
 			.arg( effect ? QStringLiteral( "E|%1|%2|%3|" ).arg( s.matName ).arg( s.shaderSF1 ).arg( s.shaderSF2 )
 			    : inlineFx ? QStringLiteral( "I|%1|%2|%3|%4|" ).arg( QString::fromLatin1( s.effectBlock.toHex() ) )
 			                     .arg( s.shaderSF1 ).arg( s.shaderSF2 ).arg( s.alphaFlags )
+			    : refract ? QStringLiteral( "R|%1|" ).arg( double( s.refractStrength ) )
 			             : QString() )
 			.arg( mat )
 			.arg( ( s.hasAlpha || blend ) ? 1 : 0 ).arg( blend ? 0 : int( s.alphaThreshold ) )
@@ -1446,6 +1460,10 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 			b.effAlphaFlags = s.alphaFlags;
 			b.name = QStringLiteral( "effect (in the NIF)" );
 			inlineFxBuckets++;
+		} else if ( refract ) {
+			b.refract = true;
+			b.refractStrength = s.refractStrength;
+			refractBuckets++;
 		}
 		return buckets.insert( key, b ).value();
 	};
@@ -1726,14 +1744,6 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 			const size_t nv = s.geom.pos.size() / 3;
 			if ( !nv || s.geom.tris.empty() )
 				continue;
-			/* Lane EFX1: a lighting shape flagged Refraction (Shader Flags 1 bit 15) shows only as a
-			 * bend in what lies behind it -- the splash drips' scrolling ring takes a normal map as
-			 * its diffuse. This view has no refraction pass, and drawing it lit put a solid swirled
-			 * disk on the Vault 111 walkway (bungo, 2026-10-01). Left out, and counted. */
-			if ( !s.nearFacts.effectShader && ( s.shaderSF1 & ( 1U << 15 ) ) ) {
-				refractShapesSkipped++;
-				continue;
-			}
 			/* THE PAINT ROW this shape takes: the swap row's CNAM for its original material, else
 			 * the base's own MODC (2026-10-01: the museum pickup's paint lives there, bungo's
 			 * "vertex paint"). Only a Greyscale_To_PaletteColor material takes one. */
@@ -2562,7 +2572,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 		     "resolved to nothing, " << blendBuckets << " blended (glass) buckets, "
 		  << effectBuckets << " drawn by the effect shader (BGEM), "
 		  << inlineFxBuckets << " by the effect shader as the NIF sets it (lane EFX1), "
-		  << refractShapesSkipped << " refraction-only shapes left out";
+		  << refractBuckets << " refraction buckets (lane EFX1)";
 		if ( !unreadableMatNames.isEmpty() )
 			s << " (" << unreadableMatNames.join( QLatin1String( ", " ) ) << ")";
 		s << "\n";

@@ -431,8 +431,12 @@ cell view only); cellview writes it back as the bucket's effect property with it
 welded scene holds one frame, so a looping float controller on it (Base Color Scale, falloff opacities, alpha)
 is drawn at its time-weighted mean over the keys. Vault111Cryo: 107 such buckets.
 A BSLightingShaderProperty with Shader Flags 1 bit 15 (Refraction) shows in game only as a bend of what is behind
-it; WaterSplashDrips.nif's scrolling ring takes a normal map as its diffuse. With no refraction pass here it drew
-as a solid swirled disk on the walkway; it is left out and counted (Vault111Cryo: 21 shapes).
+it; WaterSplashDrips.nif's scrolling ring takes a normal map as its diffuse. Drawn lit, it was a solid swirled
+disk on the walkway. lodgen keeps the source's Refraction Strength (LodSrcShape refractStrength); cellview keys
+such shapes into their own buckets ("R|strength") and writes bit 15 and the strength back, so the viewer's
+screen-space refraction preview (renderer.cpp, second pass) bends the scene behind them (Vault111Cryo: 3 buckets).
+Measured: WW_RENDER_REFRACTION=0 on the same camera brings the solid disks back (36k px differ at 1920x1080),
+so the preview, not a skip, is what hides them. A probe pass skips them like the effects (bsshape.cpp).
 The effect program takes no cell uniforms, so in a harness probe pass (WW_CELL_LIT_PROBE, WW_CELL_FOG_PROBE) an
 effect wrote its own colour over the surface measured; bsshape.cpp skips effect shapes there (wwCellProbePass).
 Pictures keep every effect. lodgen: the block is read after every field the bake uses, so the bake is unchanged

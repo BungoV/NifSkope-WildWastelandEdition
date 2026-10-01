@@ -5,6 +5,13 @@ Written the moment a mistake is recognised, unprompted (CONSTITUTION rule 2).
 Format: date -- what was done -- what was true -- how it was found -- the rule.
 Newest at the top.
 
+## 2026-10-01 -- EFX1: "this view has no refraction pass", asserted without looking
+- EFX1 left the walkway's refraction rings out of the cell view, and its code comment, WW_CHANGES and PRTP_PLAN 2o
+  said the view had no refraction pass. The viewer has had a screen-space refraction preview since 2026-07-06
+  (renderer.cpp, gate tests/spells/refraction.sh); the cell bucket writer simply dropped Shader Flags 1 bit 15.
+  Found while listing the render knobs (WW_RENDER_REFRACTION) for the vanilla comparison. Rule: before writing
+  "the viewer cannot do X", grep the renderer and WW_CHANGES for X; a missing feature is a claim to be measured.
+
 ## 2026-10-01 -- ON1: a gate view that passed on the wrong surface
 - cell_oren.sh's second Vault view passed 100% in ON1, but its clean pixels were mostly the ground steam, drawn
   untextured through the lit program (gloss mean 0.97). Once the steam drew as an effect it covered the probes

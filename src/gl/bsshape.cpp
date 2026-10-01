@@ -282,8 +282,8 @@ void BSShape::drawShapes( NodeList * secondPass )
 		return;
 	}
 
-	if ( !selectionFlags && bsesp && wwCellProbePass( scene ) )
-		return;	// lane EFX1: a harness probe pass measures the surfaces, not the effects over them
+	if ( !selectionFlags && ( bsesp || ( bslsp && bslsp->hasRefraction ) ) && wwCellProbePass( scene ) )
+		return;	// lane EFX1: a harness probe pass measures the surfaces, not the effects or glass over them
 
 	// Render polygon fill slightly behind alpha transparency and wireframe
 	glEnable( GL_POLYGON_OFFSET_FILL );

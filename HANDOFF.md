@@ -1,6 +1,18 @@
 # Handoff — NifSkope, Wild Wasteland Edition
 
-## TOP BLOCK -- written 2026-10-01 16:34 (`date`-read): RIM1 the back-light + EFX1 effects in the cell view
+## TOP BLOCK -- written 2026-10-01 17:34 (`date`-read): EFX1 refraction drawn, then the vanilla gaps
+
+- 17:34 EFX1 correction: the "no refraction pass" skip was wrong (MISTAKES). Refraction lighting shapes now
+  bucket as "R|strength" and are written with SF1 bit 15 + Refraction Strength (lodgen refractStrength), so
+  the screen-space refraction preview draws them (Vault: 3 buckets); probe passes skip them (bsshape.cpp).
+  WW_RENDER_REFRACTION=0 brings the solid disks back (36k px, scratchpad/rim1_20261001/refr_A). Gates (exe
+  17:18): cell_oren 100% / 100% (rim 100 / 99.1), cell_fog 3/3 PASS.
+- bungo's vanilla side-by-side (walkway, vanilla camera on the C8-end platform, looking down): ours brighter /
+  lower contrast; far haze white vs blue-teal; no lamp highlight pools on the floor; no AO; pod-base glow
+  spill. Next: WW_CELL_IS_DUMP at camera A (scratchpad/rim1_20261001/is_dump.sh) for adapted/exposure --
+  the measure counts cell-lit fragments only, the game's HDR mean includes effects/glow.
+
+## Earlier block -- written 2026-10-01 16:34: RIM1 the back-light + EFX1 effects in the cell view
 
 - RIM1: cell_lights.glsl cellRim = sat(V.-L) (1-NdotV)^0.01 (1-gloss), x NdotL x the light, on placed lights
   and the cell's directional (legacy only). LIGH 0x80000 No Rim / 0x40000 Ignore Roughness packed in light

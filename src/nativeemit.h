@@ -88,6 +88,7 @@ struct NativeSrcShape
 	 *  block serialized, and the shape's NiAlphaProperty flags (0 = none). Cell view only. */
 	QByteArray effectBlock;
 	quint16 alphaFlags = 0;
+	float refractStrength = 0.0f;  //!< lane EFX1: a Refraction-flagged lighting property's strength
 	float matAlpha = 1.0f;     //!< the BGSM/BGEM fAlpha
 	//! The shape named a material and NOTHING resolved: drawn neutral and counted, not magenta.
 	bool matUnreadable = false;

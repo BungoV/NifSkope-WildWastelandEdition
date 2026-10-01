@@ -18,8 +18,8 @@
   draw as flat dark solid shapes. They now draw as the see-through effects they are, with the mesh's own
   settings. An animated fade or tint is drawn at its average over the loop.
 - Surfaces that only bend what is behind them (refraction, like the ring under the dripping water in
-  Vault 111) used to draw as solid swirled disks. This view has no refraction pass, so they are left out; the
-  cell notes count them.
+  Vault 111) used to draw as solid swirled disks. They now draw through the viewer's refraction preview, as a
+  faint ripple in the floor the way the game shows them; the cell notes count them.
 
 ## The game's diffuse on cell lights (2026-10-01)
 
