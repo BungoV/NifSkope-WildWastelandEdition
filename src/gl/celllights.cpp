@@ -20,6 +20,7 @@ namespace
 
 constexpr int kTextureUnit = 14;		// TexCache allocates from unit 0 upward; 15 is the CSM map
 constexpr int kTexelsPerLight = 4;
+constexpr int kGiUnit = 13;			// lane PRTPGI: the bounce grid (sampler3D)
 
 struct ClState
 {
@@ -31,6 +32,9 @@ struct ClState
 	QHash<const void *, WwCellLighting> docs;
 	QHash<const void *, int> version;
 	int nextVersion = 1;
+	bool giOn = false, giPinned = false;
+	QHash<const void *, WwCellGi> gi;
+	QHash<const void *, int> giVersion;
 };
 
 ClState & st()
@@ -44,6 +48,13 @@ ClState & st()
 			s.on = pin.trimmed() != "0";
 		} else {
 			s.on = QSettings().value( QStringLiteral( "WW/CellLights" ), false ).toBool();
+		}
+		const QByteArray giPin = qgetenv( "WW_CELL_GI" );
+		if ( !giPin.isEmpty() ) {
+			s.giPinned = true;
+			s.giOn = giPin.trimmed() != "0";
+		} else {
+			s.giOn = QSettings().value( QStringLiteral( "WW/CellGi" ), false ).toBool();
 		}
 		s.probe = qEnvironmentVariableIntValue( "WW_CELL_LIT_PROBE" );
 		const QByteArray red = qgetenv( "WW_CELL_LIT_RED" ).trimmed();
@@ -64,6 +75,9 @@ struct Gpu
 	const void * doc = nullptr;
 	int version = 0;
 	int count = 0;
+	GLuint giTex = 0;
+	const void * giDoc = nullptr;
+	int giVersion = 0;
 };
 QHash<const void *, Gpu> & gpus()
 {
@@ -85,6 +99,34 @@ const WwCellLighting * wwCellLightsFor( const void * nif )
 	ClState & s = st();
 	auto it = s.docs.constFind( nif );
 	return it == s.docs.constEnd() ? nullptr : &*it;
+}
+
+void wwCellGiPublish( const void * nif, const WwCellGi & gi )
+{
+	ClState & s = st();
+	s.gi.insert( nif, gi );
+	s.giVersion.insert( nif, s.nextVersion++ );
+}
+
+const WwCellGi * wwCellGiFor( const void * nif )
+{
+	ClState & s = st();
+	auto it = s.gi.constFind( nif );
+	return it == s.gi.constEnd() ? nullptr : &*it;
+}
+
+bool wwCellGiOn()
+{
+	return st().giOn;
+}
+
+void wwCellGiSetOn( bool on )
+{
+	ClState & s = st();
+	if ( s.giPinned )
+		return;
+	s.giOn = on;
+	QSettings().setValue( QStringLiteral( "WW/CellGi" ), on );
 }
 
 bool wwCellLightsOn()
@@ -161,7 +203,35 @@ void wwCellLightsUniforms( Scene * scene )
 	} else {
 		fn->glBindTexture( GL_TEXTURE_BUFFER, 0 );
 	}
+	// lane PRTPGI: the bounce grid, bound (like the buffer above) whether or not this draw uses it
+	const WwCellGi * G = on && s.giOn ? wwCellGiFor( scene->nifModel ) : nullptr;
+	if ( G && !G->rgba.empty() && ( g.giDoc != scene->nifModel || g.giVersion != s.giVersion.value( scene->nifModel ) ) ) {
+		if ( !g.giTex )
+			fn->glGenTextures( 1, &g.giTex );
+		fn->glActiveTexture( GLenum( GL_TEXTURE0 + kGiUnit ) );
+		fn->glBindTexture( GL_TEXTURE_3D, g.giTex );
+		fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
+		fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+		fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+		fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+		fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE );
+		fn->glPixelStorei( GL_UNPACK_ALIGNMENT, 4 );
+		fn->glTexImage3D( GL_TEXTURE_3D, 0, GL_RGBA16F, G->dims[0], G->dims[1], G->dims[2] * 6, 0, GL_RGBA, GL_FLOAT,
+			G->rgba.data() );
+		g.giDoc = scene->nifModel;
+		g.giVersion = s.giVersion.value( scene->nifModel );
+	}
+	const bool giDraw = G && g.giTex && g.giDoc == scene->nifModel;
+	fn->glActiveTexture( GLenum( GL_TEXTURE0 + kGiUnit ) );
+	fn->glBindTexture( GL_TEXTURE_3D, giDraw ? g.giTex : 0 );
 	fn->glActiveTexture( GLenum( prevActive ) );
+	prog->uni1i( "cellGi", kGiUnit );
+	prog->uni1b( "cellGiOn", giDraw );
+	if ( giDraw ) {
+		prog->uni3f( "cellGiOrigin", G->origin[0], G->origin[1], G->origin[2] );
+		prog->uni1f( "cellGiVoxel", G->voxel );
+		prog->uni3f( "cellGiDims", float( G->dims[0] ), float( G->dims[1] ), float( G->dims[2] ) );
+	}
 	prog->uni1i( "cellLights", kTextureUnit );
 	if ( !L )
 		return;
@@ -211,6 +281,9 @@ QString wwCellLightsEcho( Scene * scene )
 		o += QStringLiteral( " %1" ).arg( L->summary );
 	else
 		o += QStringLiteral( " (no cell lighting published for this document)" );
+	const WwCellGi * G = scene && scene->nifModel ? wwCellGiFor( scene->nifModel ) : nullptr;
+	o += QStringLiteral( " gi=%1(asked=%2%3)" ).arg( wwCellLightsWanted( scene ) && s.giOn && G ? "on" : "off" )
+		.arg( s.giOn ? 1 : 0 ).arg( G ? QStringLiteral( ", %1" ).arg( G->summary ) : QStringLiteral( ", none published" ) );
 	if ( s.probe )
 		o += QStringLiteral( " probe=%1" ).arg( s.probe );
 	if ( s.red )

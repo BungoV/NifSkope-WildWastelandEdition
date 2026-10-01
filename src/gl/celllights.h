@@ -28,10 +28,13 @@ BSD License - see nifskope.h
  * fragment writes raw: 1 the placed lights' irradiance / 4, 2 the world position's high bytes,
  * 3 its low bytes (each over the 65536-unit box centred on the published centre), 4 the world
  * normal * 0.5 + 0.5), WW_CELL_LIT_RED=<red>: "linear" (the radial curve without its 2.2 power),
- * "axis" (spots shine along -Z), "nodalc" (the interior ambient dropped). */
+ * "axis" (spots shine along -Z), "nodalc" (the interior ambient dropped). Probe 5 (lane PRTPGI): the
+ * bounce's irradiance E(N) / pi, raw. */
 
 #include <QString>
 #include <QVector>
+
+#include <vector>
 
 class Scene;
 
@@ -64,6 +67,23 @@ struct WwCellLighting
 //! the cell view publishes the lighting of the document it just built (replacing that document's last)
 void wwCellLightsPublish( const void * nif, const WwCellLighting & lighting );
 const WwCellLighting * wwCellLightsFor( const void * nif );
+
+/*! THE BOUNCE (lane PRTPGI, src/probegi.h): the bake relit by these lights, as a voxel grid of
+ *  probe ambient cubes. Six slabs (+X -X +Y -Y +Z -Z) of dims[2] each, x fastest, (rgb x valid,
+ *  valid) a voxel; the shader adds albedo x E(N) / pi, E blended over the three facing slabs by n^2. */
+struct WwCellGi
+{
+	float origin[3] = { 0, 0, 0 };
+	float voxel = 64.0f;
+	int dims[3] = { 0, 0, 0 };
+	std::vector<float> rgba;
+	QString summary;
+};
+void wwCellGiPublish( const void * nif, const WwCellGi & gi );
+const WwCellGi * wwCellGiFor( const void * nif );
+//! the GI row (ships off); the pin WW_CELL_GI wins. Draws only while the Cell lights row is on.
+bool wwCellGiOn();
+void wwCellGiSetOn( bool on );
 
 //! the Cell lights row (ships off); the pin WW_CELL_LIT wins
 bool wwCellLightsOn();

@@ -5,6 +5,10 @@
 #ifdef WW_SUNSHADOW
 #include "ww_sunshadow.glsl"
 #endif
+#ifdef WW_CELLLIGHTS
+#define WW_CELL_PBR 1
+#include "cell_lights.glsl"
+#endif
 
 // PBRM (PBR Material Editor) metallic/roughness path.
 //
@@ -551,6 +555,59 @@ void main()
 			outSpec += cube * cube * envReflection * Espec * s.ao;
 		}
 	}
+#ifdef WW_CELLLIGHTS
+	/* lane PRTPGI: the cell's own lights through this BRDF, irradiance colour x curve x PI (the
+	 * sun's convention above: a white Lambert surface reads what the legacy cell path reads), and
+	 * the bake's bounce. Interior: they replace the viewport light and ambient, the DALC ambient
+	 * standing in for the environment cube; exterior: they add. */
+	if ( cellOn ) {
+		vec3 Pw = cellWorldPos( -ViewDir );
+		Surface sw = s;
+		sw.N = cellWorldDir( s.N );
+		vec3 Vw = cellWorldDir( V );
+		vec3 cDiff = vec3( 0.0 ), cSpec = vec3( 0.0 ), cE = vec3( 0.0 );
+		for ( int i = 0; i < cellLightCount; i++ ) {
+			vec3 Lw;
+			bool noSpec;
+			vec3 E = cellLightE( i, Pw, sw.N, Lw, noSpec );
+			if ( E.r + E.g + E.b <= 0.0 )
+				continue;
+			vec3 dD, dS;
+			directLight( sw, Lw, Vw, ms, dD, dS );
+			cE += E * max( dot( sw.N, Lw ), 0.0 );
+			cDiff += dD * E * M_PI;
+			if ( !noSpec )
+				cSpec += dS * E * M_PI;
+		}
+		vec3 giE = cellGiOn ? cellGiE( Pw, sw.N ) / M_PI : vec3( 0.0 );
+		vec3 giDiff = rho * keepInd * giE;
+		if ( cellInterior ) {
+			outDiff = cDiff + giDiff;
+			outSpec = cSpec;
+			cE += giE;
+			if ( cellHasDalc ) {
+				outDiff += cellAmbient( sw.N ) * rho * keepInd * s.ao;
+				outSpec += cellAmbient( reflect( -Vw, sw.N ) ) * Espec * s.ao;
+				cE += cellAmbient( sw.N );
+			}
+			if ( cellHasDir ) {
+				vec3 dD, dS;
+				directLight( sw, normalize( cellDirTo ), Vw, ms, dD, dS );
+				outDiff += dD * cellDirColor * M_PI;
+				outSpec += dS * cellDirColor * M_PI;
+				cE += cellDirColor * max( dot( sw.N, normalize( cellDirTo ) ), 0.0 );
+			}
+			// the material's cubemap, lit by the light reaching this point (a dark corner reflects dark)
+			if ( hasCubeMap ) {
+				vec3 cube = textureLod( CubeMap, reflMatrix * R, s.rough * 8.0 ).rgb;
+				outSpec += cube * cube * envReflection * Espec * s.ao * cE;
+			}
+		} else {
+			outDiff += cDiff + giDiff;
+			outSpec += cSpec;
+		}
+	}
+#endif
 	color.rgb = ( r3Term == 1 ) ? outDiff : ( r3Term == 2 ) ? outSpec : outDiff + outSpec;
 	if ( r3Term == 3 )	// gate s1b: the surface Fresnel at N.V
 		color.rgb = surfaceF( s, NdotV );
@@ -591,6 +648,10 @@ void main()
 		color.rgb *= color.a;
 
 	fragColor = color;
+#ifdef WW_CELLLIGHTS
+	if ( cellOn && cellProbe > 0 )
+		fragColor = vec4( cellProbeRaw( cellWorldPos( -ViewDir ), cellWorldDir( s.N ) ), 1.0 );
+#endif
 	vec3 fogProbeOut;
 	if ( wwFogProbe( -ViewDir, fogProbeOut ) )
 		fragColor = vec4( fogProbeOut, 1.0 );

@@ -5,6 +5,16 @@ Written the moment a mistake is recognised, unprompted (CONSTITUTION rule 2).
 Format: date -- what was done -- what was true -- how it was found -- the rule.
 Newest at the top.
 
+## 2026-10-01 -- PRTPGI: a repo-root grep; a heredoc ate the escapes; a quoted backslash path
+- I grepped the repo root for a name (search-lean says one folder). Stopped it; used `git grep -- src tools res`.
+  Rule: scope every search to the folder that can hold the answer.
+- A Python heredoc turned the `\n` in my replace strings into real newlines, so the C++ literals broke.
+  Rule: write edit scripts with a placeholder for backslashes (chr(92)) or into a file, never inline.
+- `"$W\$tag.png"` wrote a file literally named `run1$tag.png`. Rule: in bash use `cygpath -m` and `/`.
+- I edited tests/spells/cell_gi.sh (two lines inside its cell loop) while a green run of it was executing. bash reads
+  a script by byte offset, so the text after the loop shifts under it. Found right after the edit. Rule: never edit a
+  running gate script; copy it first or wait, and judge that run by its per-cell check.txt, not its last line.
+
 ## 2026-10-01 -- PRTP3: a gate cell picked by name; a gate launched before its checker existed; whole-cell framing
 - The first gate cell, PackInCZSpotlightMainStorageCell, is a pack-in preview: one spotlight, nothing to light.
   Found on its first picture. Rule: before naming a gate cell, read its census (lights, shapes) and pick by it.

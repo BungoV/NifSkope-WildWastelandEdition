@@ -17,6 +17,7 @@ BSD License - see nifskope.h
 #include "nativeemit.h"
 #include "probeplace.h"		// lane PRTPPLACE
 #include "probebake.h"		// lane PRTPBAKE
+#include "probegi.h"		// lane PRTPGI
 #include "probealbedo.h"		// lane PRTPBAKE
 
 #include <limits>
@@ -630,6 +631,8 @@ void cellApplyEnvModifiers( CellSceneSpec & spec )
 		spec.showDisabled = true;
 	if ( !qgetenv( "WW_CELL_MARKERS" ).isEmpty() )
 		spec.showMarkers = true;
+	if ( !qgetenv( "WW_CELL_PROBES_HIDE" ).isEmpty() )
+		spec.probesShow = false;    // lane PRTPGI: placed and baked, the markers not drawn (clean pictures)
 	if ( !qgetenv( "WW_CELL_NOTERRAIN" ).isEmpty() )
 		spec.terrain = false;
 	if ( !qgetenv( "WW_CELL_NOWATER" ).isEmpty() )
@@ -2045,6 +2048,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 
 	// ---- lane PRTPPLACE: place the probes, write them, draw them
 	QString probeNotes;
+	QString giBakeDir;      // lane PRTPGI: the folder the bake just wrote, relit once the lights are read
 	if ( probing ) {
 		if ( !spec.interior ) {
 			// the ground is part of what a column ray meets, painted or not
@@ -2145,8 +2149,11 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 			/* lane PRTPBAKE: the bake, into FO4CS's .tbk sector files. The folder is never the
 			 * game's own (Documents/My Games/Fallout4/F4SE/TransportBake): copying there is a
 			 * choice the user makes. */
+			// lane PRTPGI: WW_CELL_GI_FROM=<bake folder> relights a bake already on disk (no new bake)
+			if ( !baking && placed && !qgetenv( "WW_CELL_GI_FROM" ).isEmpty() )
+				giBakeDir = QDir::cleanPath( QString::fromLocal8Bit( qgetenv( "WW_CELL_GI_FROM" ) ) );
 			if ( baking && placed ) {
-				QString dir = !bakeEnv.isEmpty() ? bakeEnv : !bakeDirEnv.isEmpty() ? bakeDirEnv : spec.bakeDir;
+				QString dir =!bakeEnv.isEmpty() ? bakeEnv : !bakeDirEnv.isEmpty() ? bakeDirEnv : spec.bakeDir;
 				if ( dir.isEmpty() ) {
 					QString name = spec.interior ? spec.interiorCell : spec.world;
 					name.replace( QRegularExpression( QStringLiteral( "[^A-Za-z0-9_+-]" ) ), QStringLiteral( "_" ) );
@@ -2171,6 +2178,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 					for ( const QString & line : probeBakeCensusText( bres ).split( '\n', Qt::SkipEmptyParts ) )
 						t << "  " << line << "\n";
 					t << "  bake folder " << QDir::toNativeSeparators( QDir::cleanPath( dir ) ) << "\n";
+					giBakeDir = QDir::cleanPath( dir );
 				}
 			}
 		}
@@ -2274,6 +2282,34 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 
 	// lane PRTP3: the renderer lights this document with the cell's own lights (the Cell lights row)
 	cellPublishLighting( nif, world, spec, lightRefs, origin );
+
+	/* lane PRTPGI: the bake just written, relit by those lights (src/probegi.h), for the GI row.
+	 * WW_CELL_GI_DUMP=<folder> writes the gate's copies; WW_CELL_GI_RED=<red> its refuters. */
+	if ( !giBakeDir.isEmpty() ) {
+		if ( const WwCellLighting * L = wwCellLightsFor( nif ) ) {
+			ProbeGiSpec gs;
+			gs.red = QString::fromLatin1( qgetenv( "WW_CELL_GI_RED" ) ).trimmed();
+			ProbeGiResult gr;
+			const bool ok = probeGiRelight( probeSoup, giBakeDir, *L, gs, &gr );
+			probeNotes += QStringLiteral( "  %1\n" ).arg( probeGiCensusText( gr ) );
+			if ( ok ) {
+				WwCellGi gi;
+				for ( int k = 0; k < 3; k++ ) {
+					gi.origin[k] = gr.origin[k];
+					gi.dims[k] = gr.dims[k];
+				}
+				gi.voxel = gr.voxel;
+				gi.summary = QStringLiteral( "grid %1x%2x%3 voxel %4" ).arg( gr.dims[0] ).arg( gr.dims[1] ).arg( gr.dims[2] )
+					.arg( double( gr.voxel ), 0, 'f', 1 );
+				const QString dump = QString::fromLocal8Bit( qgetenv( "WW_CELL_GI_DUMP" ) );
+				QString derr;
+				if ( !dump.isEmpty() && !probeGiDump( gr, gs, dump, &derr ) )
+					probeNotes += QStringLiteral( "  gi dump FAILED: %1\n" ).arg( derr );
+				gi.rgba = std::move( gr.grid );
+				wwCellGiPublish( nif, gi );
+			}
+		}
+	}
 
 	// ---- the census
 	if ( notes ) {

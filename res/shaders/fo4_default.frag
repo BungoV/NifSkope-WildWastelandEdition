@@ -490,6 +490,7 @@ void main()
 	// Environment
 	vec4 cube = textureLod( CubeMap, reflectedWS, 8.0 - smoothness * 8.0 );
 	vec4 env = texture( EnvironmentMap, offset );
+	vec3 envSpec = vec3( 0.0 );	// lane PRTPGI: the reflection before the viewport light, for the cell path
 	if ( hasCubeMap ) {
 		cube.rgb *= envReflection * specStrength;
 		if ( hasEnvMask ) {
@@ -498,6 +499,7 @@ void main()
 			cube.rgb *= s;
 		}
 
+		envSpec = cube.rgb;
 		spec += cube.rgb * diffuse;
 	}
 
@@ -550,7 +552,7 @@ void main()
 	// lane PRTP3: the cell's own lights (src/gl/celllights.h)
 	if ( cellOn )
 		color.rgb = cellLit( color.rgb, albedo, normal, -ViewDir, V, specMask, specColor, alphaR, kSmith,
-		                     emissive * glowScaleSRGB );
+		                     emissive * glowScaleSRGB, envSpec );
 #endif
 
 	// lane FOG1 (Lookdev weather fog): this colour is sqrt of linear light (tonemap squares it),

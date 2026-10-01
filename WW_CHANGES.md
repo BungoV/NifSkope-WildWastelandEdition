@@ -1,5 +1,23 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Bounce light (GI) from the probe bake (2026-10-01)
+
+- New "GI" row beside "Cell lights" in the PRTP band (ships off). After a probe bake, the cell's own lights
+  relight the baked surfels (with shadow rays through the cell's geometry), each probe gathers that light
+  through its links into a six-direction ambient cube, and a voxel grid blends the probes into the view.
+- Leak guard: a voxel only takes probes it can see (a ray from the voxel to the probe), and only voxels next
+  to a surface are filled, so a probe in the next room does not light this one through the wall.
+- PBR mode: a cell-lit draw now uses `pbrm_cell.prog`, so the cell's lights and the bounce reach the PBR
+  materials too (through the PBR BRDF; interiors swap the viewport light/ambient for the cell's own).
+- Gate `tests/spells/cell_gi.sh` + `cell_gi_check.py` rebuild every stage independently (A surfel light,
+  B probe gather, C voxel grid, D the picture). Reds noshadow / flip / novis / off each fail their stage.
+- Interiors keep the material's cubemap reflection (both modes), lit by the light reaching the point.
+- Legacy cell lights use the game's own light specular (normalized Blinn-Phong, Fresnel 0.2, x pi; read from
+  the shipped light shaders), not the viewport's 4% GGX: highlights about 15x brighter, as in game.
+- PBR mode keeps a vanilla material's alpha test (grates, decals drew solid). Gate
+  `tests/spells/pbr_alpha_vanilla.sh`: 99.05% same coverage as Legacy; red `--red` 92.62% FAIL.
+- Not yet: room ids (the second leak guard), the sky term outdoors (waits for the weather reader).
+
 ## Cell view lit by the cell's own lights (2026-10-01)
 
 - New "Cell lights" row in the PRTP band (ships off). On, the cell view draws every placed light that is on

@@ -273,6 +273,24 @@ roofline (each probe at least the hoist over every soup vertex in its cell), col
 structure check, and the reference gate. PASS; `--red shift` (heights a cell off), `--red hoist` (under the
 roofs) and `--red manifest` (no far.txt) FAIL. The FO4CS reader comes last, by standing order.
 
+## 2i. The bounce, relit by the cell's lights -- lane PRTPGI (2026-10-01)
+
+bungo: "simulate the GI for me with lights ... based on the surfels and sky visibility generated".
+`src/probegi.{h,cpp}`, run by the cell view after a bake (or `WW_CELL_GI_FROM=<bake folder>`):
+1. **Surfels.** Each unique surfel takes the cell's lights (PRTP2 radial ^2.2, spot cone, N.L) with a shadow
+   ray from P + 2N to the light, stopping 24 units short (the fixture). Interior directional: unshadowed.
+   B = albedo_linear x E.
+2. **Probes.** Every link: radiance B over its solid angle w x scale x 4pi, into a six-axis ambient cube
+   (E per axis = sum B Omega max(axis.dir, 0)), renormalised by (linked + unlinked) / linked.
+3. **Grid.** Voxels (48 units up, <= 400k) next to a surface only; each blends the probes within
+   2 x the median probe spacing by (1 - d^2/r^2)^2, **only probes it can see** (a ray voxel -> probe).
+   Uploaded as six z-slabs (one per cube axis) of RGBA16F, rgb = E x weight, a = weight.
+4. **View.** Legacy: + albedo x E(N) / pi. PBR (`pbrm_cell.prog`): rho x keepInd x E(N) / pi, and the cell's
+   lights go through the PBR BRDF (irradiance colour x curve x pi, the sun's convention).
+Gate: `tests/spells/cell_gi.sh` (A/B/C/D, independent rebuild; reds noshadow/flip/novis/off).
+Open: room ids (a probe and a voxel in different rooms never mix even when a ray slips through a gap); the
+sky term outdoors (waits for the weather reader); the bake still ignores glass tint.
+
 ## 3. Open
 
 - `.tbk` v4: two surfel sides per cell (gives back the refused thin-wall weight), room ids (2f).

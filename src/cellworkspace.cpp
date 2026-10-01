@@ -421,7 +421,11 @@ void CellWorkspacePanel::buildUi()
 	cellLights->setObjectName( QStringLiteral( "CellWorkspaceCellLights" ) );
 	cellLights->setChecked( wwCellLightsOn() );
 	pl->addWidget( probesShow );
+	cellGi = new QCheckBox( tr( "GI" ), prtpRow );
+	cellGi->setObjectName( QStringLiteral( "CellWorkspaceCellGi" ) );
+	cellGi->setChecked( wwCellGiOn() );
 	pl->addWidget( cellLights );
+	pl->addWidget( cellGi );
 	pl->addStretch( 1 );
 	pl->addWidget( probesPlace );
 	pl->addWidget( probesBake );
@@ -450,6 +454,12 @@ void CellWorkspacePanel::buildUi()
 	// a shader switch, not a rebuild: the next frame draws with (or without) the cell's lights
 	connect( cellLights, &QCheckBox::toggled, this, [this]( bool on ) {
 		wwCellLightsSetOn( on );
+		if ( glView )
+			glView->update();
+	} );
+	// lane PRTPGI: the bounce of the last bake, drawn while Cell lights is on
+	connect( cellGi, &QCheckBox::toggled, this, [this]( bool on ) {
+		wwCellGiSetOn( on );
 		if ( glView )
 			glView->update();
 	} );

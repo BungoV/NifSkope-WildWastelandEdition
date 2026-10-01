@@ -138,7 +138,8 @@ static NifSkopeOpenGLContext::Program * wwProgramCensus( const NifModel * nif, S
 		// Read the uploaded pbrF0 back from the program (lane PBRR1): the row's
 		// f0= is what the GPU holds, not what the law says it should be.
 		float	f0 = std::numeric_limits<float>::quiet_NaN();
-		if ( program && ( served == QLatin1StringView( "pbrm_default.prog" ) || served == QLatin1StringView( "pbrm_csm.prog" ) ) ) {
+		if ( program && ( served == QLatin1StringView( "pbrm_default.prog" ) || served == QLatin1StringView( "pbrm_csm.prog" )
+			|| served == QLatin1StringView( "pbrm_cell.prog" ) ) ) {
 			const int	l = program->uniLocation( "pbrF0" );
 			if ( l >= 0 ) {
 				GLfloat	v = -1.0f;
@@ -282,7 +283,10 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 		/* Cascaded sun shadows (lane CSM1) are their own program, pbrm_csm.prog: the
 		 * same pbrm_default.frag with WW_SUNSHADOW defined, chosen only while the
 		 * shadow map was built this frame -- Shadows off runs the pre-CSM shader. */
-		if ( Program * program = useProgram( wwSunShadowWanted( mesh->scene ) ? "pbrm_csm.prog" : "pbrm_default.prog" ) ) {
+		/* lane PRTPGI: a cell-lit draw takes pbrm_cell.prog (the cell's lights + the bounce) */
+		const char * pbrmWant = wwCellLightsWanted( mesh->scene ) ? "pbrm_cell.prog"
+			: wwSunShadowWanted( mesh->scene ) ? "pbrm_csm.prog" : "pbrm_default.prog";
+		if ( Program * program = useProgram( pbrmWant ) ) {
 			pbrmProgramSeen = program;
 			if ( setupProgramPBRM( nif, program, mesh ) )
 				return wwProgramCensus( nif, mesh, wwSp, wwKind, wwMsn, wwLodLand, program,
@@ -330,7 +334,8 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 	 * either of those programs is stale. */
 	const bool stalePbrmHint = hint
 		&& ( ( pbrmProgramSeen && hint == pbrmProgramSeen ) || ( routeProgramSeen && hint == routeProgramSeen )
-			|| hint->name == std::string_view( "pbrm_csm.prog" ) );	// lane CSM1: the shadow variant is never a hint
+			|| hint->name == std::string_view( "pbrm_csm.prog" )	// lane CSM1: the shadow variant is never a hint
+			|| hint->name == std::string_view( "pbrm_cell.prog" ) );	// lane PRTPGI: nor the cell-lit one
 	/* Weather fog (lane FOG1) has its own program, fo4_fog.prog: the same
 	 * fo4_default.frag with WW_FOG defined. With the fog code merely present and
 	 * fogOn false, the driver compiled fo4_default differently -- 783 px of the
@@ -908,6 +913,11 @@ bool Renderer::setupProgramPBRM( const NifModel * nif, Program * prog, Shape * m
 		// sample them; there is no legacy RMAOS or emissive-intensity map, so
 		// those bits stay clear and the constants above apply.
 		derived.features = PbrmMaterial::BaseColorTexture | PbrmMaterial::NormalTexture;
+		// The diffuse alpha is coverage exactly where the legacy program reads it: the alpha
+		// property's test/blend (alphaFlags), which the shader still gates on. Without the bit a
+		// vanilla grate drew solid in PBR mode (lane PRTPGI, 2026-10-01). Red "noopacity" drops it.
+		if ( !wwR2aRed( "noopacity" ) )
+			derived.features |= PbrmMaterial::OpacityTexture;
 	}
 	const PbrmMaterial & m = lsp->pbrmValid ? lsp->pbrm : derived;
 
@@ -1195,6 +1205,7 @@ bool Renderer::setupProgramPBRM( const NifModel * nif, Program * prog, Shape * m
 	}
 	wwLookdevFogUniforms( scene );	// lane FOG1: fogOn is false outside Lookdev
 	wwSunShadowUniforms( scene );	// lane CSM1: a no-op unless this is pbrm_csm.prog
+	wwCellLightsUniforms( scene );	// lane PRTPGI: a no-op unless this is pbrm_cell.prog
 
 	// Per-draw GL state, same as the spec/gloss path ends with. Omitting it made
 	// the shape inherit whatever blend/depth state the previous program left

@@ -1,0 +1,5 @@
+# pbrm_default with the cell's own lights and the bake's bounce compiled in (lane PRTPGI;
+# src/gl/celllights.h). No conditions: the condition scan never picks it; Renderer::setupProgram
+# swaps it in by name for pbrm_default.prog while the draw is cell-lit.
+
+shaders fo4_default.vert pbrm_cell.frag

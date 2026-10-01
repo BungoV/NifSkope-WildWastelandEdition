@@ -1,5 +1,22 @@
 # Handoff — NifSkope, Wild Wasteland Edition
 
+## TOP BLOCK -- written 2026-10-01 06:53 (`date`-read): PRTPGI, the bounce from the cell's lights
+
+- "GI" row beside "Cell lights" (ships off). src/probegi.{h,cpp}: the cell's lights relight the baked surfels
+  (shadow rays), probes gather through their links, a visibility-tested voxel grid (unit 13, six z-slabs) feeds
+  the view. Runs after a bake, or from WW_CELL_GI_FROM=<bake folder>. docs/PRTP_PLAN.md 2i.
+- Gate tests/spells/cell_gi.sh: Vault111Cryo + DmndSolomonsHouse01 PASS (A/B/C/D); reds noshadow/flip/novis/off
+  each FAIL their stage (Solomon's off red skipped: no bounce in frame).
+- PBR: res/shaders/pbrm_cell.{frag,prog} = pbrm_default with WW_CELLLIGHTS; renderer picks it for a cell-lit
+  draw. cell_lights.glsl: cellLightE/cellProbeRaw shared; legacy-only parts under #ifndef WW_CELL_PBR.
+- Also: interior cubemap kept (both modes, x local light); Legacy cell specular = the game's formula
+  (cellSpecGame); PBR derived material sets OpacityTexture (vanilla alpha test; gate pbr_alpha_vanilla.sh).
+- bungo asked "how far from in-game parity": gaps = imagespace (tonemap/bloom/adaptation), shadows for the
+  shadow-casting lights, interior fog, Oren-Nayar diffuse + hemi/box/ambient-only, cube scale unmeasured.
+  Asked him for a save near a lit interior for a side-by-side measure.
+- Next: room ids (leak guard 2), glass tint in the bake, lodgen baseline, PRTP4/5, fog + hemi/box shapes, sky
+  term outdoors (weather reader), far-map trees, FO4CS reader last.
+
 ## TOP BLOCK -- written 2026-10-01 06:00 (`date`-read): PRTP3 viewport lights, on main aab18166
 
 - PRTP band "Cell lights" row (ships off) -> fo4_cell.prog; src/gl/celllights.{h,cpp}, res/shaders/cell_lights.glsl,

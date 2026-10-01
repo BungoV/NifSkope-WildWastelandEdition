@@ -15,6 +15,13 @@ uniform bool cellInterior;
 uniform vec3 cellCenter;
 uniform int cellProbe;
 uniform int cellRed;				// 1 linear: the radial curve without its 2.2
+// lane PRTPGI: the bake relit by these lights (src/probegi.h), six axis slabs of dims.z each, x fastest;
+// rgb = irradiance x valid, a = valid (so a filtered sample divides by its own valid)
+uniform bool cellGiOn;
+uniform sampler3D cellGi;
+uniform vec3 cellGiOrigin;
+uniform float cellGiVoxel;
+uniform vec3 cellGiDims;
 
 vec3 cellWorldPos( vec3 posView )
 {
@@ -36,12 +43,95 @@ float cellRadial( float d, float r, vec3 bse )
 	return ( cellRed & 1 ) != 0 ? k : pow( k, 2.2 );
 }
 
+// the bounce's irradiance at P, normal N: the three facing slabs blended by n^2, sampled half a
+// voxel off the surface (the grid's voxels behind a wall are its other room's)
+vec3 cellGiE( vec3 P, vec3 N )
+{
+	vec3 g = ( P + N * ( 0.5 * cellGiVoxel ) - cellGiOrigin ) / cellGiVoxel;
+	vec2 xy = g.xy / cellGiDims.xy;
+	float z = clamp( g.z, 0.5, cellGiDims.z - 0.5 );
+	float depth = 6.0 * cellGiDims.z;
+	vec3 n2 = N * N;
+	vec4 s = n2.x * texture( cellGi, vec3( xy, ( z + ( N.x >= 0.0 ? 0.0 : 1.0 ) * cellGiDims.z ) / depth ) )
+	       + n2.y * texture( cellGi, vec3( xy, ( z + ( N.y >= 0.0 ? 2.0 : 3.0 ) * cellGiDims.z ) / depth ) )
+	       + n2.z * texture( cellGi, vec3( xy, ( z + ( N.z >= 0.0 ? 4.0 : 5.0 ) * cellGiDims.z ) / depth ) );
+	return s.a > 0.01 ? max( s.rgb / s.a, vec3( 0.0 ) ) : vec3( 0.0 );
+}
+
+/* light i at world point P, normal N: its colour x the radial curve x the spot cone (no N.L), and
+ * the direction to it; zero when out of reach or behind the surface. The PBR path's per-light term. */
+vec3 cellLightE( int i, vec3 P, vec3 N, out vec3 L, out bool noSpec )
+{
+	vec4 t0 = texelFetch( cellLights, i * 4 );
+	vec3 Lv = t0.xyz - P;
+	float d = length( Lv );
+	L = Lv / max( d, 0.001 );
+	noSpec = true;
+	if ( d >= t0.w || dot( N, L ) <= 0.0 )
+		return vec3( 0.0 );
+	vec4 t1 = texelFetch( cellLights, i * 4 + 1 );
+	vec4 t3 = texelFetch( cellLights, i * 4 + 3 );
+	float a = cellRadial( d, t0.w, t3.xyz );
+	if ( t1.w > -1.5 ) {
+		vec4 t2 = texelFetch( cellLights, i * 4 + 2 );
+		float base = clamp( 1.0 - ( 1.0 - dot( -L, t2.xyz ) ) / max( 1.0 - t1.w, 1e-4 ), 0.0, 1.0 );
+		a *= min( pow( base, max( t2.w, 1e-3 ) ), 1.0 );
+	}
+	noSpec = t3.w >= 0.5;
+	return t1.rgb * a;
+}
+
+// the harness probes for a program without the legacy BRDF helpers (pbrm_cell)
+vec3 cellProbeRaw( vec3 P, vec3 N )
+{
+	if ( cellProbe == 5 )
+		return cellGiOn ? clamp( cellGiE( P, N ) * 0.31830989, 0.0, 1.0 ) : vec3( 0.0 );
+	if ( cellProbe == 1 ) {
+		vec3 E = vec3( 0.0 );
+		for ( int i = 0; i < cellLightCount; i++ ) {
+			vec3 L;
+			bool ns;
+			vec3 c = cellLightE( i, P, N, L, ns );
+			E += c * max( dot( N, L ), 0.0 );
+		}
+		return clamp( E * 0.25, 0.0, 1.0 );
+	}
+	vec3 q = clamp( floor( P - cellCenter + 32768.0 ), 0.0, 65535.0 );
+	if ( cellProbe == 2 )
+		return floor( q / 256.0 ) / 255.0;
+	if ( cellProbe == 3 )
+		return mod( q, 256.0 ) / 255.0;
+	return N * 0.5 + 0.5;
+}
+
+#ifndef WW_CELL_PBR
+/* The game's own light specular (the shipped deferred point/spot light shaders, read op for op):
+ * normalized Blinn-Phong, n = 2^(gloss x 10 + 1), D = NdotH^n (n + 2) / 2pi, Schlick Fresnel with
+ * F0 = 0.2, a Cook-Torrance geometry select with the 1/NdotV folded in, x 1/4, clamped at 15, x pi.
+ * The caller multiplies the light's irradiance (N.L inside) and the material's mask and colour. */
+float cellSpecGame( vec3 N, vec3 L, vec3 V, float gloss )
+{
+	float n = exp2( gloss * 10.0 + 1.0 );
+	vec3 H = normalize( V + L );
+	float NdotL = clamp( dot( N, L ), 0.0, 1.0 );
+	float NdotV = clamp( dot( N, V ), 0.0, 1.0 );
+	float VdotH = clamp( dot( V, H ), 0.0, 1.0 );
+	float NdotH = clamp( dot( N, H ), 0.0, 1.0 );
+	float D = pow( NdotH, n ) * ( n + 2.0 ) * 0.159155;
+	float m = min( NdotL, NdotV );
+	float G = ( VdotH >= 2.0 * NdotH * m ) ? 2.0 * NdotH * ( NdotV == m ? 1.0 : NdotL / max( NdotV, 1e-4 ) ) / max( VdotH, 1e-4 )
+	                                       : 1.0 / max( NdotV, 1e-4 );
+	float f1 = 1.0 - VdotH;
+	float f4 = f1 * f1 * f1 * f1;
+	float F = min( ( 1.0 - f1 * f4 ) * 0.2 + f4 * f1, 1.0 );
+	return min( D * G * F * 0.25, 15.0 ) * 3.141593;
+}
+
 // the placed lights at world point P, world normal N: diffuse irradiance and the specular sum
-void cellSumLights( vec3 P, vec3 N, vec3 Vw, float alphaR, float kSmith, out vec3 diff, out vec3 spec )
+void cellSumLights( vec3 P, vec3 N, vec3 Vw, float gloss, out vec3 diff, out vec3 spec )
 {
 	diff = vec3( 0.0 );
 	spec = vec3( 0.0 );
-	float NdotV = max( dot( N, Vw ), 1e-4 );
 	for ( int i = 0; i < cellLightCount; i++ ) {
 		vec4 t0 = texelFetch( cellLights, i * 4 );
 		vec3 Lv = t0.xyz - P;
@@ -63,15 +153,13 @@ void cellSumLights( vec3 P, vec3 N, vec3 Vw, float alphaR, float kSmith, out vec
 		}
 		vec3 E = t1.rgb * a * NdotL;
 		diff += E;
-		if ( t3.w < 0.5 ) {
-			vec3 H = normalize( L + Vw );
-			float NdotH = max( dot( N, H ), 1e-4 );
-			float F = fresnelSchlick( max( dot( Vw, H ), 1e-4 ), 0.04 );
-			spec += E * ( D_GGX( NdotH, alphaR ) * G1( NdotL, kSmith ) * G1( NdotV, kSmith ) * F
-			              / max( 4.0 * NdotL * NdotV, 0.001 ) );
-		}
+		if ( t3.w < 0.5 )
+			spec += E * cellSpecGame( N, L, Vw, gloss );
 	}
 }
+
+
+#endif
 
 // PRTP2 section 4: ambient(n) = pow(max(dot(row, (n, 1)), 0), 2.2) per channel
 vec3 cellAmbient( vec3 N )
@@ -80,26 +168,32 @@ vec3 cellAmbient( vec3 N )
 	return pow( max( vec3( dot( cellDalc[0], n1 ), dot( cellDalc[1], n1 ), dot( cellDalc[2], n1 ) ), vec3( 0.0 ) ), vec3( 2.2 ) );
 }
 
+#ifndef WW_CELL_PBR
+
 /* The lit colour, in the program's sqrt-of-linear space. Interior: the cell's ambient, directional
  * and placed lights replace the viewport light. Exterior: the placed lights add to what the
  * viewport (or the Lookdev sun) already lit. */
 vec3 cellLit( vec3 color, vec3 albedo, vec3 normalView, vec3 posView, vec3 Vview, float specMask, vec3 specCol,
-              float alphaR, float kSmith, vec3 emissive )
+              float alphaR, float kSmith, vec3 emissive, vec3 envSpec )
 {
 	vec3 P = cellWorldPos( posView );
 	vec3 N = cellWorldDir( normalView );
 	vec3 Vw = cellWorldDir( Vview );
 	vec3 diff, spec;
-	cellSumLights( P, N, Vw, alphaR, kSmith, diff, spec );
+	cellSumLights( P, N, Vw, 1.0 - sqrt( alphaR ), diff, spec );	// the program's rough = 1 - gloss, alphaR = rough^2
 	vec3 alb = albedo * albedo;
-	vec3 add = alb * diff + spec * specMask * specCol;
+	vec3 gi = cellGiOn ? cellGiE( P, N ) * 0.31830989 : vec3( 0.0 );
+	vec3 add = alb * ( diff + gi ) + spec * specMask * specCol;	// Lambert: albedo x E / pi
 	if ( !cellInterior )
 		return sqrt( color * color + add );
-	vec3 lin = add;
+	// the light reaching this point (a white surface would show it): the cubemap reflection is lit by it,
+	// so a dark corner's reflection is dark (the viewport path scales it by its own light the same way)
+	vec3 E = diff + gi;
 	if ( cellHasDalc )
-		lin += alb * cellAmbient( N );
+		E += cellAmbient( N );
 	if ( cellHasDir )
-		lin += alb * cellDirColor * max( dot( N, normalize( cellDirTo ) ), 0.0 );
+		E += cellDirColor * max( dot( N, normalize( cellDirTo ) ), 0.0 );
+	vec3 lin = alb * E + spec * specMask * specCol + envSpec * envSpec * E;
 	return sqrt( max( lin, vec3( 0.0 ) ) ) + emissive;
 }
 
@@ -108,9 +202,11 @@ vec3 cellProbeOut( vec3 normalView, vec3 posView, float alphaR, float kSmith )
 {
 	vec3 P = cellWorldPos( posView );
 	vec3 N = cellWorldDir( normalView );
+	if ( cellProbe == 5 )
+		return cellGiOn ? clamp( cellGiE( P, N ) * 0.31830989, 0.0, 1.0 ) : vec3( 0.0 );
 	if ( cellProbe == 1 ) {
 		vec3 diff, spec;
-		cellSumLights( P, N, N, alphaR, kSmith, diff, spec );
+		cellSumLights( P, N, N, 1.0 - sqrt( alphaR ), diff, spec );
 		return clamp( diff * 0.25, 0.0, 1.0 );
 	}
 	// the position, 16 bits an axis over the 65536-unit box around the centre
@@ -121,3 +217,4 @@ vec3 cellProbeOut( vec3 normalView, vec3 posView, float alphaR, float kSmith )
 		return mod( q, 256.0 ) / 255.0;
 	return N * 0.5 + 0.5;
 }
+#endif
