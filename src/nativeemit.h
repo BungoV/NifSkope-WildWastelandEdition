@@ -78,6 +78,8 @@ struct NativeSrcShape
 	 *  BY CONSTRUCTION -- `tests/spells/lodgen_native_baseline --check` is the
 	 *  refuter. Only the cell viewer reads this. */
 	QString effectTex0;
+	bool effectBlend = false;  //!< the BGEM's bAlphaBlend (cell view glass, 2026-10-01)
+	float matAlpha = 1.0f;     //!< the BGSM/BGEM fAlpha
 	//! The shape named a material and NOTHING resolved: drawn neutral and counted, not magenta.
 	bool matUnreadable = false;
 	//! Lane FIX1: Greyscale_To_PaletteColor on this shape (BGSM wins) -- where an MSWP CNAM would reach it.

@@ -99,6 +99,11 @@ struct Bucket
 	bool matUnreadable = false;
 	bool hasAlpha = false;
 	quint8 alphaThreshold = 128;
+	/*! 2026-10-01: GLASS. A blended source (NiAlphaProperty bit 0, a BGSM's or a
+	 *  BGEM's bAlphaBlend) blends here too, at the material's fAlpha -- before
+	 *  this every car window was drawn as an opaque sheet. */
+	bool blend = false;
+	float alpha = 1.0f;
 	bool emits = false;
 	float emissiveScale = 1.0f;
 	bool withColour = false;
@@ -410,6 +415,8 @@ bool emitBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b,
 		}
 		if ( b.emits )
 			nif->set<float>( iShader, "Emissive Multiple", b.emissiveScale );
+		if ( b.blend )
+			nif->set<float>( iShader, "Alpha", b.alpha );
 		nif->setLink( iShape, "Shader Property", nif->getBlockNumber( iShader ) );
 		if ( b.hasAlpha ) {
 			QModelIndex iAlpha = nif->insertNiBlock( QStringLiteral( "NiAlphaProperty" ) );
@@ -1051,6 +1058,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 	// lane CELLVIEW3: the two material facts the census now states outright
 	int shapesFromEffectMat = 0;            //!< drawn from a `.bgem`'s base map
 	int shapesUnreadableMat = 0;            //!< named a material, nothing resolved: neutral grey
+	int blendBuckets = 0;                   //!< 2026-10-01: blended (glass) buckets
 	int shapesVertexColor = 0;              //!< lane PRTPPLACE: drawn with the mesh's own vertex colors
 	int placementsSwapped = 0;              //!< lane PRTPPLACE: drawn with a material swap
 	int skyCardsHidden = 0;                 //!< lane PRTPPLACE: sky cards left to the sky layer
@@ -1084,10 +1092,12 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 			mat = s.effectTex0;
 		else
 			mat = s.tex0;
-		const QString key = QStringLiteral( "%1|%2|%3|%4|%5|%6" ).arg( mat )
-			.arg( s.hasAlpha ? 1 : 0 ).arg( int( s.alphaThreshold ) )
+		const bool blend = s.nearFacts.alphaBlend || s.effectBlend;
+		const float alpha = blend ? qBound( 0.0f, s.matAlpha, 1.0f ) : 1.0f;
+		const QString key = QStringLiteral( "%1|%2|%3|%4|%5|%6|%7" ).arg( mat )
+			.arg( ( s.hasAlpha || blend ) ? 1 : 0 ).arg( blend ? 0 : int( s.alphaThreshold ) )
 			.arg( s.ownEmit ? 1 : 0 ).arg( withColour ? 1 : 0 )
-			.arg( ( mat.isEmpty() && s.matUnreadable ) ? 1 : 0 );
+			.arg( ( mat.isEmpty() && s.matUnreadable ) ? 1 : 0 ).arg( double( alpha ) );
 		auto it = buckets.find( key );
 		if ( it != buckets.end() )
 			return it.value();
@@ -1100,8 +1110,14 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 		b.matUnreadable = mat.isEmpty() && s.matUnreadable;
 		b.normalTex = s.tex1;
 		b.specTex = s.tex7;
-		b.hasAlpha = s.hasAlpha;
-		b.alphaThreshold = s.alphaThreshold;
+		/* A blended bucket takes threshold 0, which the writer turns into the
+		 * blend flags (4333); the tested buckets keep their cutoff. */
+		b.hasAlpha = s.hasAlpha || blend;
+		b.alphaThreshold = blend ? 0 : s.alphaThreshold;
+		b.blend = blend;
+		b.alpha = alpha;
+		if ( blend )
+			blendBuckets++;
 		b.emits = s.ownEmit;
 		b.emissiveScale = s.emitMult;
 		b.withColour = withColour;
@@ -2170,7 +2186,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 		s << "  materials: " << shapesFromEffectMat
 		  << " shapes textured from a `.bgem` effect material, "
 		  << shapesUnreadableMat << " drawn neutral grey because a named material "
-		     "resolved to nothing";
+		     "resolved to nothing, " << blendBuckets << " blended (glass) buckets";
 		if ( !unreadableMatNames.isEmpty() )
 			s << " (" << unreadableMatNames.join( QLatin1String( ", " ) ) << ")";
 		s << "\n";

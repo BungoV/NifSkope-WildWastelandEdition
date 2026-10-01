@@ -1,5 +1,12 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Cell view glass is see-through (2026-10-01)
+
+- Blended materials (NiAlphaProperty blend bit, a BGSM's or a BGEM's bAlphaBlend) now blend in the cell view at the
+  material's own alpha. Before, car glass (Car_Glass01.BGEM) was drawn as an opaque dark sheet. Concord: 24 blended
+  groups; on the museum pickup only the cab's window pixels change (1,462 px), and the cab shows through them.
+- The far-LOD bake does not read the new fields.
+
 ## Cell view paint and the bake's palette colors; the workspace gate's own settings (2026-10-01)
 
 - The cell view reads a base record's MODC (its model's color remapping index) and paints Greyscale_To_PaletteColor

@@ -1405,6 +1405,10 @@ struct LodSrcShape
 	 * should draw effect shapes textured too is a real question and a separate
 	 * lane's -- it is NOT answered by making this field `tex0`. */
 	QString effectTex0;
+	/*! 2026-10-01: the BGEM's own bAlphaBlend and its fAlpha (a BGSM's fAlpha too).
+	 *  Read by the cell view's glass only; nothing gated reads them. */
+	bool effectBlend = false;
+	float matAlpha = 1.0f;
 	/*! The shape named a material and NOTHING resolved from it -- no texture
 	 *  set, no BGSM, no BGEM. The viewer draws such a shape neutral and COUNTS
 	 *  it; magenta stays reserved for a genuinely missing file. */
@@ -2429,6 +2433,7 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 							s.matDecal = sm.hasDecal();
 							s.matAlphaTest = sm.hasAlphaTest();
 							s.matAlphaBlend = sm.hasAlphaBlend();
+							s.matAlpha = sm.alpha();
 							s.matAlphaRef = sm.alphaTestThreshold();
 							/* Lane NEAR1: the same material's switches, OR'd onto the
 							 * property's bits; read by the near bake only. */
@@ -2474,6 +2479,8 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 							const QStringList & t = em.textures();
 							if ( t.size() > 0 && !t[0].isEmpty() )
 								s.effectTex0 = t[0];
+							s.effectBlend = em.hasAlphaBlend();
+							s.matAlpha = em.alpha();
 						}
 					}
 					/* The property's own Source Texture is the fallback, exactly as
@@ -2618,6 +2625,7 @@ static bool nativeLoadModelImpl( void * user, const QString & model, const Lodge
 		}
 		n.tex0 = s.tex0; n.tex1 = s.tex1; n.tex7 = s.tex7; n.matName = s.matName;
 		n.effectTex0 = s.effectTex0; n.matUnreadable = s.matUnreadable;
+		n.effectBlend = s.effectBlend; n.matAlpha = s.matAlpha;
 		n.g2p = s.g2pFlag;
 		n.g2pScale = s.g2pScale;
 		n.g2pTex = s.g2pTex;
