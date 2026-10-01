@@ -589,9 +589,9 @@ void main()
 			outSpec = cSpec;
 			cE += giE;
 			if ( cellHasDalc ) {
-				outDiff += cellAmbient( sw.N ) * rho * keepInd * s.ao;
-				outSpec += cellAmbient( reflect( -Vw, sw.N ) ) * Espec * s.ao;
-				cE += cellAmbient( sw.N );
+				outDiff += cellAmbient( sw.N, Pw ) * rho * keepInd * s.ao;	// lane AMBO2: P picks the Ambient Only volume
+				outSpec += cellAmbient( reflect( -Vw, sw.N ), Pw ) * Espec * s.ao;
+				cE += cellAmbient( sw.N, Pw );
 			}
 			if ( cellHasDir ) {
 				vec3 dD, dS;
