@@ -1,5 +1,18 @@
 # Handoff — NifSkope, Wild Wasteland Edition
 
+## TOP BLOCK -- written 2026-10-01 09:34 (`date`-read): IMGS1, the cell's imagespace
+
+- "Imagespace" row (ships off): CELL XCIM -> IMGS read in esmdata; celllights holds the state; glview.cpp
+  wwCellImageSpaceMeasurePass = RGBA32F redraw (1/4 size), renderer.cpp wwProgramCensus masks non-cell programs
+  and writes the stencil (bit0 cell-lit landed, bit1 blended/not cell); mean over bit0. Shaders apply exposure,
+  Hable, grade, LUT. docs/PRTP_PLAN.md 2j.
+- Gate tests/spells/cell_is.sh (VIEW 5, DIST 350, close CAMs): 3 cells PASS A+P; reds nolut/noexp/nograde FAIL P.
+- An interruption zero-filled 78 release/ files; restored (scratchpad/imgs1_20261001/zero_restore.py).
+- Parity gaps left: bloom (post pass), shadows for shadow-casting lights, interior fog, Oren-Nayar,
+  hemi/box/ambient-only, cube scale. Still waiting on his save name for an in-game side-by-side.
+- Next after those: room ids, glass tint in the bake, lodgen baseline, PRTP4/5, sky term, far-map trees,
+  FO4CS reader last.
+
 ## TOP BLOCK -- written 2026-10-01 06:53 (`date`-read): PRTPGI, the bounce from the cell's lights
 
 - "GI" row beside "Cell lights" (ships off). src/probegi.{h,cpp}: the cell's lights relight the baked surfels

@@ -25,6 +25,7 @@ BSD License - see nifskope.h
 #include "model/nifmodel.h"
 #include "spells/blocks.h"
 #include "gl/celllights.h"
+#include "gamemanager.h"	// lane IMGS1: the imagespace LUT
 
 #include <QDebug>
 #include <QElapsedTimer>
@@ -820,9 +821,63 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 				: QStringLiteral( "black" );
 		}
 	}
+	/* lane IMGS1: the cell's imagespace (XCIM -> IMGS) and its LUT strip. The strip is a 256x16 B8G8R8
+	 * DDS: x = r + 16 b, y = g (MEASURED: ColorLUT_BaseInteriorAdjusted sits 19/255 off the identity in
+	 * that order, 63 with g flipped, 71 with r and b swapped); the shaders sample it as a 16^3 3D LUT. */
+	QString isNote = QStringLiteral( "none" );
+	if ( spec.interior && world.interior().imageSpace ) {
+		QByteArray h, c, t;
+		QString edid, lut;
+		if ( world.imageSpace( world.interior().imageSpace, edid, h, c, t, lut ) && h.size() >= 36 ) {
+			L.hasImageSpace = true;
+			L.isName = edid;
+			std::memcpy( L.isHdr, h.constData(), 36 );
+			if ( c.size() >= 12 )
+				std::memcpy( L.isCine, c.constData(), 12 );
+			if ( t.size() >= 16 )
+				std::memcpy( L.isTint, t.constData(), 16 );
+			L.isLutPath = lut;
+			QString lutNote = QStringLiteral( "no LUT" );
+			if ( !lut.isEmpty() ) {
+				QByteArray dds;
+				bool got = Game::GameManager::get_file( dds, Game::FALLOUT_4, lut, "textures", ".dds" );
+				if ( !got && !spec.dataRoot.isEmpty() ) {
+					QFile lf( spec.dataRoot + QStringLiteral( "/Textures/" ) + QString( lut ).replace( QLatin1Char( '\\' ), QLatin1Char( '/' ) ) );
+					got = lf.open( QIODevice::ReadOnly ) && !( dds = lf.readAll() ).isEmpty();
+				}
+				auto u32 = [&]( int o ) { quint32 v = 0; std::memcpy( &v, dds.constData() + o, 4 ); return v; };
+				// DDS: height 12, width 16, pixel format flags 80 (0x40 RGB), bit count 88, R mask 92
+				if ( got && dds.size() >= 128 + 256 * 16 * 3 && dds.startsWith( "DDS " ) && u32( 12 ) == 16 && u32( 16 ) == 256
+					&& ( u32( 80 ) & 0x40 ) && u32( 88 ) == 24 && u32( 92 ) == 0xff0000 ) {
+					const unsigned char * px = reinterpret_cast<const unsigned char *>( dds.constData() ) + 128;
+					L.isLut.resize( 16 * 16 * 16 * 3 );
+					for ( int b = 0; b < 16; b++ )
+						for ( int g = 0; g < 16; g++ )
+							for ( int r = 0; r < 16; r++ ) {
+								const unsigned char * q = px + ( g * 256 + b * 16 + r ) * 3;
+								unsigned char * o = &L.isLut[size_t( ( ( b * 16 + g ) * 16 + r ) * 3 )];
+								o[0] = q[2];
+								o[1] = q[1];
+								o[2] = q[0];
+							}
+					lutNote = QStringLiteral( "LUT %1" ).arg( lut );
+				} else {
+					lutNote = got ? QStringLiteral( "LUT %1 UNREAD (not a 256x16 B8G8R8 strip)" ).arg( lut )
+						: QStringLiteral( "LUT %1 NOT FOUND" ).arg( lut );
+				}
+			}
+			isNote = QStringLiteral( "%1 hdr %2 cine %3,%4,%5 tint %6 %7" ).arg( edid )
+				.arg( [&] { QStringList v; for ( float f : L.isHdr ) v << QString::number( double( f ), 'g', 4 ); return v.join( ',' ); }() )
+				.arg( double( L.isCine[0] ) ).arg( double( L.isCine[1] ) ).arg( double( L.isCine[2] ) )
+				.arg( double( L.isTint[0] ) ).arg( lutNote );
+		} else {
+			isNote = QStringLiteral( "XCIM %1 is not a readable IMGS" ).arg( world.interior().imageSpace, 8, 16, QLatin1Char( '0' ) );
+		}
+	}
 	L.summary = QStringLiteral( "lights=%1 (omni %2, spot %3; skipped: off %4, no radius %5, black %6) ambient=%7 directional=%8 center=%9" )
 		.arg( L.lights.size() ).arg( omni ).arg( spot ).arg( off ).arg( noRadius ).arg( dark ).arg( amb, dir )
-		.arg( QStringLiteral( "%1,%2,%3" ).arg( center[0], 0, 'f', 1 ).arg( center[1], 0, 'f', 1 ).arg( center[2], 0, 'f', 1 ) );
+		.arg( QStringLiteral( "%1,%2,%3" ).arg( center[0], 0, 'f', 1 ).arg( center[1], 0, 'f', 1 ).arg( center[2], 0, 'f', 1 ) )
+		+ QStringLiteral( " imagespace=%1" ).arg( isNote );
 	wwCellLightsPublish( nif, L );
 }
 

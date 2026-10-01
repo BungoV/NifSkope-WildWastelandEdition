@@ -128,6 +128,22 @@ static NifSkopeOpenGLContext::Program * wwProgramCensus( const NifModel * nif, S
 	int msn, int lodLand, NifSkopeOpenGLContext::Program * program,
 	const FloatVector4 & lightViewDir )
 {
+	/* lane IMGS1: the imagespace's measure pass holds only the cell-lit fragments' linear light. Any
+	 * other program (effect shaders, sky, debug) writes neither colour nor depth there; glview.cpp
+	 * restores both masks after the pass. The stencil: bit 0 = a cell-lit fragment landed here (the
+	 * pixels the mean counts; the void around a model is not in the game's frame), bit 1 = the last
+	 * fragment was blended or not cell-lit (the gate compares the picture where the value is 1 only). */
+	if ( wwCellImageSpaceIsMeasuring() ) {
+		const bool cell = program && ( program->name == std::string_view( "fo4_cell.prog" )
+			|| program->name == std::string_view( "pbrm_cell.prog" ) );
+		glColorMask( cell, cell, cell, cell );
+		if ( !cell )
+			glDepthMask( GL_FALSE );
+		glEnable( GL_STENCIL_TEST );
+		glStencilMask( cell ? 0x03 : 0x02 );
+		glStencilFunc( GL_ALWAYS, !cell ? 2 : glIsEnabled( GL_BLEND ) ? 3 : 1, 0xFF );
+		glStencilOp( GL_KEEP, GL_KEEP, GL_REPLACE );
+	}
 	/* WW_PBRM_CENSUS (lane PBRR0) rides the same exits: every return of
 	 * setupProgram passes through here with the program it actually bound,
 	 * so the route it prints is the served one. Pick renders (wwKind null) are skipped. */

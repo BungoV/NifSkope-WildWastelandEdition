@@ -1,5 +1,15 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Cell imagespace (2026-10-01)
+
+- New "Imagespace" row in the PRTP band (ships off; works with Cell lights). An interior now goes through the
+  game's own picture chain from its imagespace record: eye adaptation (shown settled), exposure, the filmic
+  tonemap, the cinematic grade (saturation, tint, brightness, contrast) and the color lookup table.
+- The eye adapts to the lit surfaces only: effects, sky and the empty space around a model do not count.
+- Gate `tests/spells/cell_is.sh` + `cell_is_check.py` rebuild the chain from the game files independently;
+  Vault111Cryo, DmndSolomonsHouse01, GoodneighborTheThirdRail PASS. Reds nolut / noexp / nograde each FAIL.
+- Not yet: bloom, adaptation over time, exteriors.
+
 ## Bounce light (GI) from the probe bake (2026-10-01)
 
 - New "GI" row beside "Cell lights" in the PRTP band (ships off). After a probe bake, the cell's own lights

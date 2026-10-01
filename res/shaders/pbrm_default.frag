@@ -632,6 +632,13 @@ void main()
 		color.rgb += ecol * emask * pbrEmissiveIntensity * ( ( r4Red & 8 ) != 0 ? 100.0 : 1.0 );
 	}
 
+#ifdef WW_CELLLIGHTS
+	// lane IMGS1: the cell's imagespace in place of the viewer's curve; probe 6 writes the linear colour raw
+	vec3 cellHdr = max( color.rgb, vec3( 0.0 ) );
+	if ( cellOn && cellIsOn )
+		color.rgb = cellImageSpace( sqrt( cellHdr ) );
+	else
+#endif
 	if ( sceneMode >= 1 ) {
 		if ( sceneMode == 2 )
 			color.rgb = wwFog( color.rgb, -ViewDir );	// lane FOG1: linear, before the exposure
@@ -650,7 +657,8 @@ void main()
 	fragColor = color;
 #ifdef WW_CELLLIGHTS
 	if ( cellOn && cellProbe > 0 )
-		fragColor = vec4( cellProbeRaw( cellWorldPos( -ViewDir ), cellWorldDir( s.N ) ), 1.0 );
+		fragColor = cellProbe == 6 ? vec4( cellHdr, color.a )
+			: vec4( cellProbeRaw( cellWorldPos( -ViewDir ), cellWorldDir( s.N ) ), 1.0 );
 #endif
 	vec3 fogProbeOut;
 	if ( wwFogProbe( -ViewDir, fogProbeOut ) )

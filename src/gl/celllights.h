@@ -61,6 +61,16 @@ struct WwCellLighting
 	float dirColor[3] = { 0, 0, 0 };    //!< linear
 	float dirTo[3] = { 0, 0, 1 };       //!< world, TO the light
 	float center[3] = { 0, 0, 0 };      //!< the probe modes' position box centre
+	/* lane IMGS1: the cell's imagespace (XCIM -> IMGS, wbDefinitionsFO4 layout), empty when the cell has none.
+	 * hdr = HNAM: eye adapt speed, tonemap E, bloom threshold, bloom scale, exposure max, exposure min, sunlight
+	 * scale, sky scale, middle gray; cine = CNAM saturation, brightness, contrast; tint = TNAM amount, r, g, b;
+	 * lut = the TX00 3D LUT, 16x16x16 RGB8 (r fastest), empty when the strip was not found. */
+	bool hasImageSpace = false;
+	float isHdr[9] = { 3, 7, 0.6f, 0.5f, 0.15f, 0.15f, 1.8f, 1.5f, 3 };
+	float isCine[3] = { 1, 1, 1 };
+	float isTint[4] = { 0, 1, 1, 1 };
+	QString isName, isLutPath;
+	std::vector<unsigned char> isLut;
 	QString summary;                    //!< one census line
 };
 
@@ -97,5 +107,30 @@ void wwCellLightsUniforms( Scene * scene );
 QString wwCellLightsEcho( Scene * scene );
 //! the red bits (1 linear, 2 axis, 4 nodalc); the cell view applies "axis" when it publishes
 int wwCellLightsRed();
+
+/*! THE IMAGESPACE (lane IMGS1): the game's own HDR -> display chain, transcribed from the shipped shaders
+ *  (Fallout4 - Shaders.ba2, Shaders011.fxp; docs/PRTP_PLAN.md 2j):
+ *    adapted  = the frame's mean luminance (0.2125, 0.7154, 0.0721), Inf/NaN read as 0 (the downsample
+ *               chain and its adaptation step; a still view is the converged value)
+ *    exposure = clamp( middle gray / (adapted + 0.001), exposure min, exposure max )
+ *    x        = exposure * hdr;  Hable (A .15, B .5, C .1, D .2, E = tonemap E, F .3), W 11.2, x2 in
+ *    grade    = mix(luma, c, saturation) -> mix(.., luma * tint, amount) -> contrast * (brightness * c -
+ *               adapted) + adapted
+ *    display  = LUT( pow(grade, 1 / 2.2) * 15/16 + 1/32 )
+ *  Bloom is not drawn (no post pass). The measure: the frame drawn raw (probe 6) into a float target at a
+ *  quarter size, read back. Row ships off; the pin WW_CELL_IS wins. WW_CELL_IS_DUMP=<file> writes the
+ *  measure (full size) and the numbers; WW_CELL_IS_RED=nolut|noexp|nograde its refuters. */
+bool wwCellImageSpaceOn();
+void wwCellImageSpaceSetOn( bool on );
+//! the cell view draws through the imagespace: cell-lit, the row on, the document's cell has one
+bool wwCellImageSpaceWanted( Scene * scene );
+//! the measure pass's switch: while true every cell-lit fragment writes its raw linear colour
+void wwCellImageSpaceMeasuring( bool on );
+//! true inside the measure pass: the renderer masks every program that is not cell-lit (effects, sky, debug
+//! draw nothing there -- the game's adapted value is the lit surfaces' light, ours have no linear output)
+bool wwCellImageSpaceIsMeasuring();
+//! the measured mean luminance of the last measure (negative before any)
+void wwCellImageSpaceSetAdapted( Scene * scene, float lum, int pixels );
+QString wwCellImageSpaceEcho( Scene * scene );
 
 #endif

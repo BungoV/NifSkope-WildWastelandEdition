@@ -5,6 +5,19 @@ Written the moment a mistake is recognised, unprompted (CONSTITUTION rule 2).
 Format: date -- what was done -- what was true -- how it was found -- the rule.
 Newest at the top.
 
+## 2026-10-01 -- IMGS1: heredoc patches again; the Edit tool flipped glview.cpp's endings; the measure was impure
+- I patched files with `python - <<EOF` heredocs again (three times, the last on cell_is.sh), after the PRTPGI
+  entry below. Rule: patch with the Edit/Write tools; a scratch script goes in a file first.
+- An Edit on glview.cpp (mixed endings: 23954 CRLF, 81 LF) rewrote every line to one ending. Found by the diff
+  size. Restored HEAD's endings per line with a script. Rule: after editing glview.cpp, check
+  `git diff --stat` shows only the lines meant; restore endings before building.
+- The first measure pass let effect shaders draw into the adapted mean (an opaque volume raised it 0.046 ->
+  0.059) and counted the empty void as black (exposure pinned at max on small views). Found by gate P failing.
+  Rule: a measure holds only what the game's measure holds; mask everything else and prove it with the gate.
+- A crash during the session zero-filled 78 files under release/. Restored from res/shaders, MSYS2 and sibling
+  worktrees only where every candidate agreed byte for byte. Rule: after an interruption, sweep release/ for
+  zero-filled files before trusting a run.
+
 ## 2026-10-01 -- PRTPGI: a repo-root grep; a heredoc ate the escapes; a quoted backslash path
 - I grepped the repo root for a name (search-lean says one folder). Stopped it; used `git grep -- src tools res`.
   Rule: scope every search to the folder that can hold the answer.

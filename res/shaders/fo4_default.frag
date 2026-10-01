@@ -561,6 +561,13 @@ void main()
 	if ( fogOn )
 		color.rgb = sqrt( max( wwFog( color.rgb * color.rgb, -ViewDir ), vec3( 0.0 ) ) );
 #endif
+#ifdef WW_CELLLIGHTS
+	// lane IMGS1: the cell's imagespace in place of the viewer's curve; probe 6 writes the linear colour raw
+	vec3 cellHdr = color.rgb * color.rgb;
+	if ( cellOn && cellIsOn )
+		color.rgb = cellImageSpace( color.rgb );
+	else
+#endif
 	color.rgb = tonemap( color.rgb );
 
 	if ( doRefraction ) {
@@ -613,7 +620,7 @@ void main()
 	fragColor = color;
 #ifdef WW_CELLLIGHTS
 	if ( cellOn && cellProbe > 0 )
-		fragColor = vec4( cellProbeOut( normal, -ViewDir, alphaR, kSmith ), 1.0 );
+		fragColor = cellProbe == 6 ? vec4( cellHdr, color.a ) : vec4( cellProbeOut( normal, -ViewDir, alphaR, kSmith ), 1.0 );
 #endif
 #ifdef WW_FOG
 	vec3 fogProbeOut;

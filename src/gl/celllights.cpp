@@ -12,6 +12,7 @@ BSD License - see nifskope.h
 #include <QHash>
 #include <QSettings>
 
+#include <algorithm>
 #include <cmath>
 #include <vector>
 
@@ -21,6 +22,7 @@ namespace
 constexpr int kTextureUnit = 14;		// TexCache allocates from unit 0 upward; 15 is the CSM map
 constexpr int kTexelsPerLight = 4;
 constexpr int kGiUnit = 13;			// lane PRTPGI: the bounce grid (sampler3D)
+constexpr int kLutUnit = 12;		// lane IMGS1: the imagespace LUT (sampler3D)
 
 struct ClState
 {
@@ -35,6 +37,10 @@ struct ClState
 	bool giOn = false, giPinned = false;
 	QHash<const void *, WwCellGi> gi;
 	QHash<const void *, int> giVersion;
+	bool isOn = false, isPinned = false, measuring = false;
+	int isRed = 0;          // 1 nolut, 2 noexp, 4 nograde
+	QHash<const void *, float> adapted;     // lane IMGS1: the last measure per document
+	QHash<const void *, int> adaptedPixels;
 };
 
 ClState & st()
@@ -57,6 +63,15 @@ ClState & st()
 			s.giOn = QSettings().value( QStringLiteral( "WW/CellGi" ), false ).toBool();
 		}
 		s.probe = qEnvironmentVariableIntValue( "WW_CELL_LIT_PROBE" );
+		const QByteArray isPin = qgetenv( "WW_CELL_IS" );
+		if ( !isPin.isEmpty() ) {
+			s.isPinned = true;
+			s.isOn = isPin.trimmed() != "0";
+		} else {
+			s.isOn = QSettings().value( QStringLiteral( "WW/CellImageSpace" ), false ).toBool();
+		}
+		const QByteArray isRed = qgetenv( "WW_CELL_IS_RED" ).trimmed();
+		s.isRed = isRed == "nolut" ? 1 : isRed == "noexp" ? 2 : isRed == "nograde" ? 4 : 0;
 		const QByteArray red = qgetenv( "WW_CELL_LIT_RED" ).trimmed();
 		if ( red == "linear" )
 			s.red = 1;
@@ -78,6 +93,9 @@ struct Gpu
 	GLuint giTex = 0;
 	const void * giDoc = nullptr;
 	int giVersion = 0;
+	GLuint lutTex = 0;
+	const void * lutDoc = nullptr;
+	int lutVersion = 0;
 };
 QHash<const void *, Gpu> & gpus()
 {
@@ -232,6 +250,45 @@ void wwCellLightsUniforms( Scene * scene )
 		prog->uni1f( "cellGiVoxel", G->voxel );
 		prog->uni3f( "cellGiDims", float( G->dims[0] ), float( G->dims[1] ), float( G->dims[2] ) );
 	}
+	// lane IMGS1: the imagespace, once this document has a measure; its LUT bound like the grid above
+	const float adapted = s.adapted.value( scene->nifModel, -1.0f );
+	const bool isDraw = L && !s.measuring && adapted >= 0.0f && wwCellImageSpaceWanted( scene );
+	if ( isDraw && L->isLut.size() == 16 * 16 * 16 * 3
+		&& ( g.lutDoc != scene->nifModel || g.lutVersion != s.version.value( scene->nifModel ) ) ) {
+		if ( !g.lutTex )
+			fn->glGenTextures( 1, &g.lutTex );
+		fn->glActiveTexture( GLenum( GL_TEXTURE0 + kLutUnit ) );
+		fn->glBindTexture( GL_TEXTURE_3D, g.lutTex );
+		fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
+		fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+		fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+		fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+		fn->glTexParameteri( GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE );
+		fn->glPixelStorei( GL_UNPACK_ALIGNMENT, 1 );
+		fn->glTexImage3D( GL_TEXTURE_3D, 0, GL_RGB8, 16, 16, 16, 0, GL_RGB, GL_UNSIGNED_BYTE, L->isLut.data() );
+		fn->glPixelStorei( GL_UNPACK_ALIGNMENT, 4 );
+		g.lutDoc = scene->nifModel;
+		g.lutVersion = s.version.value( scene->nifModel );
+	}
+	const bool lutDraw = isDraw && g.lutTex && g.lutDoc == scene->nifModel && L->isLut.size() == 16 * 16 * 16 * 3;
+	fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
+	fn->glActiveTexture( GLenum( GL_TEXTURE0 + kLutUnit ) );
+	fn->glBindTexture( GL_TEXTURE_3D, lutDraw ? g.lutTex : 0 );
+	fn->glActiveTexture( GLenum( prevActive ) );
+	prog->uni1i( "cellIsLut", kLutUnit );
+	prog->uni1b( "cellIsOn", isDraw );
+	prog->uni1b( "cellIsLutOn", lutDraw );
+	if ( isDraw ) {
+		const float * h = L->isHdr;
+		// the tonemap PS: max( mid / (lum + 0.001), cb.y ) then min( .., cb.x ); cb (x, y) = HNAM (max, min)
+		const float e = std::min( std::max( h[8] / ( adapted + 0.001f ), h[5] ), h[4] );
+		prog->uni1f( "cellIsExposure", e );
+		prog->uni1f( "cellIsE", h[1] );
+		prog->uni1f( "cellIsAdapted", adapted );
+		prog->uni3f( "cellIsCine", L->isCine[0], L->isCine[1], L->isCine[2] );
+		prog->uni4f_l( prog->uniLocation( "cellIsTint" ), FloatVector4( L->isTint[0], L->isTint[1], L->isTint[2], L->isTint[3] ) );
+		prog->uni1i( "cellIsRed", s.isRed );
+	}
 	prog->uni1i( "cellLights", kTextureUnit );
 	if ( !L )
 		return;
@@ -262,8 +319,66 @@ void wwCellLightsUniforms( Scene * scene )
 	prog->uni3f( "cellDirTo", L->dirTo[0], L->dirTo[1], L->dirTo[2] );
 	prog->uni1b( "cellInterior", L->interior );
 	prog->uni3f( "cellCenter", L->center[0], L->center[1], L->center[2] );
-	prog->uni1i( "cellProbe", s.probe );
+	prog->uni1i( "cellProbe", s.measuring ? 6 : s.probe );
 	prog->uni1i( "cellRed", s.red );
+}
+
+bool wwCellImageSpaceOn()
+{
+	return st().isOn;
+}
+
+void wwCellImageSpaceSetOn( bool on )
+{
+	ClState & s = st();
+	if ( s.isPinned )
+		return;
+	s.isOn = on;
+	QSettings().setValue( QStringLiteral( "WW/CellImageSpace" ), on );
+}
+
+bool wwCellImageSpaceWanted( Scene * scene )
+{
+	if ( !st().isOn || !wwCellLightsWanted( scene ) )
+		return false;
+	const WwCellLighting * L = wwCellLightsFor( scene->nifModel );
+	return L && L->hasImageSpace;
+}
+
+void wwCellImageSpaceMeasuring( bool on )
+{
+	st().measuring = on;
+}
+
+bool wwCellImageSpaceIsMeasuring()
+{
+	return st().measuring;
+}
+
+void wwCellImageSpaceSetAdapted( Scene * scene, float lum, int pixels )
+{
+	if ( !scene || !scene->nifModel )
+		return;
+	st().adapted.insert( scene->nifModel, lum );
+	st().adaptedPixels.insert( scene->nifModel, pixels );
+}
+
+QString wwCellImageSpaceEcho( Scene * scene )
+{
+	ClState & s = st();
+	const WwCellLighting * L = scene && scene->nifModel ? wwCellLightsFor( scene->nifModel ) : nullptr;
+	QString o = QStringLiteral( "imagespace=%1(asked=%2)" ).arg( wwCellImageSpaceWanted( scene ) ? "on" : "off" ).arg( s.isOn ? 1 : 0 );
+	if ( !L || !L->hasImageSpace )
+		return o + QStringLiteral( " (the cell has none)" );
+	const float a = s.adapted.value( scene->nifModel, -1.0f );
+	const float * h = L->isHdr;
+	const float e = std::min( std::max( h[8] / ( a + 0.001f ), h[5] ), h[4] );
+	o += QStringLiteral( " %1 adapted=%2 over %3 px exposure=%4 tonemapE=%5 lut=%6" ).arg( L->isName )
+		.arg( double( a ), 0, 'g', 7 ).arg( s.adaptedPixels.value( scene->nifModel ) ).arg( double( e ), 0, 'g', 7 )
+		.arg( double( h[1] ), 0, 'g', 4 ).arg( L->isLut.empty() ? QStringLiteral( "none" ) : L->isLutPath );
+	if ( s.isRed )
+		o += QStringLiteral( " red=%1" ).arg( s.isRed );
+	return o;
 }
 
 int wwCellLightsRed()

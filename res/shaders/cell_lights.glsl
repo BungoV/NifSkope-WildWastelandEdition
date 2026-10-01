@@ -23,6 +23,37 @@ uniform vec3 cellGiOrigin;
 uniform float cellGiVoxel;
 uniform vec3 cellGiDims;
 
+// lane IMGS1: the cell's imagespace, the game's own HDR -> display chain (src/gl/celllights.h)
+uniform bool cellIsOn;
+uniform float cellIsExposure;		// clamp( middle gray / (adapted + 0.001), min, max ), the CPU's
+uniform float cellIsE;				// HNAM Tonemap E: the curve's toe numerator
+uniform float cellIsAdapted;		// the frame's mean luminance, the contrast pivot
+uniform vec3 cellIsCine;			// CNAM saturation, brightness, contrast
+uniform vec4 cellIsTint;			// TNAM amount, r, g, b
+uniform bool cellIsLutOn;
+uniform sampler3D cellIsLut;
+uniform int cellIsRed;				// 1 nolut, 2 noexp, 4 nograde
+
+// sqrt-of-linear in (this program's convention), display out. Shaders011.fxp, the tonemap PS and the LUT PS.
+vec3 cellImageSpace( vec3 sqrtColor )
+{
+	vec3 x = max( sqrtColor, vec3( 0.0 ) );
+	x = x * x * ( ( cellIsRed & 2 ) != 0 ? 1.0 : cellIsExposure ) * 2.0;
+	float E = cellIsE;
+	vec3 c = ( x * ( 0.15 * x + 0.05 ) + 0.2 * E ) / ( x * ( 0.15 * x + 0.5 ) + 0.06 ) - E / 0.3;
+	c /= ( 0.2 * E + 19.376 ) * 0.040856 - E / 0.3;		// the curve at W 11.2
+	if ( ( cellIsRed & 4 ) == 0 ) {
+		float luma = dot( c, vec3( 0.2125, 0.7154, 0.0721 ) );
+		c = mix( vec3( luma ), c, cellIsCine.x );
+		c = mix( c, luma * cellIsTint.yzw, cellIsTint.x );
+		c = cellIsCine.z * ( cellIsCine.y * c - cellIsAdapted ) + cellIsAdapted;
+	}
+	c = pow( max( c, vec3( 0.0 ) ), vec3( 1.0 / 2.2 ) );
+	if ( cellIsLutOn && ( cellIsRed & 1 ) == 0 )
+		c = texture( cellIsLut, c * 0.9375 + 0.03125 ).rgb;
+	return c;
+}
+
 vec3 cellWorldPos( vec3 posView )
 {
 	vec4 p = vec4( posView, 1.0 );

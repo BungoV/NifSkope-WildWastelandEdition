@@ -1502,6 +1502,34 @@ bool EsmWorld::lightingTemplate( quint32 formID, QByteArray & data, QByteArray &
 	return true;
 }
 
+bool EsmWorld::imageSpace( quint32 formID, QString & edid, QByteArray & hnam, QByteArray & cnam, QByteArray & tnam,
+	QString & lut ) const
+{
+	edid.clear();
+	lut.clear();
+	hnam.clear();
+	cnam.clear();
+	tnam.clear();
+	const ESMFile::ESMRecord * r = esm ? esm->findRecord( formID ) : nullptr;
+	if ( !r || r->type == GRUP || !( *r == "IMGS" ) )
+		return false;
+	ESMFile::ESMField f( *esm, *r );
+	while ( f.next() ) {
+		const char * d = reinterpret_cast<const char *>( f.data() );
+		if ( f == "HNAM" )
+			hnam = QByteArray( d, int( f.size() ) );
+		else if ( f == "CNAM" )
+			cnam = QByteArray( d, int( f.size() ) );
+		else if ( f == "TNAM" )
+			tnam = QByteArray( d, int( f.size() ) );
+		else if ( f == "EDID" )
+			edid = fieldString( f );
+		else if ( f == "TX00" )
+			lut = fieldString( f );
+	}
+	return true;
+}
+
 namespace
 {
 //! Walk the top-level CELL group's blocks and subblocks; cb(record) per CELL.
@@ -1598,6 +1626,8 @@ bool EsmWorld::loadInterior( const QString & esmPath, const QString & cell, QStr
 				ic.edid = fieldString( f );
 			} else if ( f == "LTMP" && f.size() >= 4 ) {
 				ic.lightingTemplate = esm->mapFormID( *found, f.readUInt32() );
+			} else if ( f == "XCIM" && f.size() >= 4 ) {
+				ic.imageSpace = esm->mapFormID( *found, f.readUInt32() );
 			} else if ( f == "XCLW" && f.size() >= 4 ) {
 				ic.waterHeight = f.readFloat();
 				ic.hasWater = ic.waterHeight < 2.0e9f;     // the no-water sentinel

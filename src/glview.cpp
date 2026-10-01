@@ -129,6 +129,7 @@ private:
 #include <QOpenGLContext>
 #include <QOpenGLFunctions>
 #include <QOpenGLFramebufferObject>
+#include "gl/celllights.h"	// lane IMGS1: the imagespace measure
 
 // NOTE: The FPS define is a frame limiter,
 //	NOT the guaranteed FPS in the viewport.
@@ -3579,6 +3580,84 @@ static qint64 wwPaintNanos = 0;
 quint64 wwGlPaintCount() { return wwPaintCounter; }
 qint64 wwGlPaintNanos() { return wwPaintNanos; }
 
+/* lane IMGS1: the imagespace's measure (src/gl/celllights.h). The frame drawn once more, every cell-lit
+ * fragment writing its raw linear colour (probe 6), into a float target a quarter the size; the mean
+ * luminance read back is the eye's adapted value (the game's downsample chain is an arithmetic mean,
+ * Inf/NaN read as 0, and a still view is its converged value), over the pixels a cell-lit fragment
+ * reached. WW_CELL_IS_DUMP=<file> measures at full size and writes the float RGBA (<file>: w h header,
+ * the floats, then the w*h stencil bytes) and the echo (<file>.txt) for the gate. */
+static void wwCellImageSpaceMeasurePass( Scene * scene )
+{
+	if ( !wwCellImageSpaceWanted( scene ) || !scene->renderer )
+		return;
+	auto fn = scene->renderer->fn;
+	static const QString dump = QString::fromLocal8Bit( qgetenv( "WW_CELL_IS_DUMP" ) );
+	GLint prevFbo = 0, vp[4] = { 0, 0, 0, 0 };
+	glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &prevFbo );
+	glGetIntegerv( GL_VIEWPORT, vp );
+	const int div = dump.isEmpty() ? 4 : 1;
+	const int w = std::max( 1, vp[2] / div ), h = std::max( 1, vp[3] / div );
+	static std::unique_ptr<QOpenGLFramebufferObject> fbo;
+	if ( !fbo || fbo->width() != w || fbo->height() != h ) {
+		QOpenGLFramebufferObjectFormat fmt;
+		fmt.setInternalTextureFormat( GL_RGBA32F );
+		fmt.setAttachment( QOpenGLFramebufferObject::Attachment::CombinedDepthStencil );
+		fbo = std::make_unique<QOpenGLFramebufferObject>( w, h, fmt );
+	}
+	if ( !fbo->isValid() )
+		return;
+	GLfloat prevClear[4];
+	glGetFloatv( GL_COLOR_CLEAR_VALUE, prevClear );
+	fbo->bind();
+	glViewport( 0, 0, w, h );
+	glClearColor( 0.0f, 0.0f, 0.0f, 0.0f );
+	glClear( GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT );
+	glDisable( GL_BLEND );
+	wwCellImageSpaceMeasuring( true );
+	scene->draw();
+	wwCellImageSpaceMeasuring( false );
+	glColorMask( GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE );	// the renderer masked every non-cell-lit draw
+	glDepthMask( GL_TRUE );
+	glDisable( GL_STENCIL_TEST );
+	std::vector<float> px( size_t( w ) * size_t( h ) * 4 );
+	// the stencil (renderer.cpp): bit 0 a cell-lit fragment landed, bit 1 the last one was blended/not cell-lit
+	std::vector<unsigned char> cover( size_t( w ) * size_t( h ) );
+	fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, fbo->handle() );
+	glPixelStorei( GL_PACK_ALIGNMENT, 4 );
+	glReadPixels( 0, 0, w, h, GL_RGBA, GL_FLOAT, px.data() );
+	glPixelStorei( GL_PACK_ALIGNMENT, 1 );
+	glReadPixels( 0, 0, w, h, GL_STENCIL_INDEX, GL_UNSIGNED_BYTE, cover.data() );
+	glPixelStorei( GL_PACK_ALIGNMENT, 4 );
+	fn->glBindFramebuffer( GL_FRAMEBUFFER, GLuint( prevFbo ) );
+	glViewport( vp[0], vp[1], vp[2], vp[3] );
+	glClearColor( prevClear[0], prevClear[1], prevClear[2], prevClear[3] );
+	// the mean over the pixels a cell-lit fragment reached: the void around a model is not in the game's frame
+	const double wgt[3] = { 0.2125, 0.7154, 0.0721 };
+	double sum = 0.0;
+	int counted = 0;
+	for ( size_t i = 0; i < cover.size(); i++ ) {
+		if ( !( cover[i] & 1 ) )
+			continue;
+		counted++;
+		for ( int c = 0; c < 3; c++ )
+			if ( std::isfinite( px[i * 4 + c] ) )
+				sum += wgt[c] * px[i * 4 + c];
+	}
+	wwCellImageSpaceSetAdapted( scene, float( sum / double( std::max( counted, 1 ) ) ), counted );
+	if ( !dump.isEmpty() ) {
+		QFile f( dump );
+		if ( f.open( QIODevice::WriteOnly ) ) {
+			const qint32 hd[2] = { w, h };
+			f.write( reinterpret_cast<const char *>( hd ), sizeof( hd ) );
+			f.write( reinterpret_cast<const char *>( px.data() ), qint64( px.size() * sizeof( float ) ) );
+			f.write( reinterpret_cast<const char *>( cover.data() ), qint64( cover.size() ) );
+		}
+		QFile t( dump + QStringLiteral( ".txt" ) );
+		if ( t.open( QIODevice::WriteOnly | QIODevice::Text ) )
+			QTextStream( &t ) << wwCellImageSpaceEcho( scene ) << "\n";
+	}
+}
+
 void GLView::paintGL()
 {
 	wwPaintCounter++;
@@ -3946,6 +4025,9 @@ void GLView::paintGL()
 	// that scene-by-scene made a refractive primary copy the framebuffer before
 	// Loaded NIFs behind it had been drawn. In a workspace, collect every opaque
 	// node first and use one globally sorted transparent/refraction pass.
+	if ( !scene->selecting && workspaceDrawScenes.isEmpty() )
+		wwCellImageSpaceMeasurePass( scene );	// lane IMGS1
+
 	glDisable( GL_BLEND );
 	const bool collisionOnly = Scene::collisionOnlySetting
 		&& scene->hasOption( Scene::ShowCollision );

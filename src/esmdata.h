@@ -105,6 +105,7 @@ struct EsmInteriorCell
 	quint32 cellForm = 0;
 	QString edid;
 	quint32 lightingTemplate = 0;   //!< LTMP, 0 when absent
+	quint32 imageSpace = 0;         //!< XCIM, the cell's IMGS (lane IMGS1), 0 when absent
 	QByteArray xcll;                //!< raw, empty when absent
 	quint8 ambient[3] = { 0, 0, 0 };
 	quint8 directional[3] = { 0, 0, 0 };
@@ -544,6 +545,10 @@ public:
 	 *  the Light Fade distances), `dalc` = its DALC (6 axis colours, specular, scale). False when
 	 *  the form is not an LGTM. */
 	bool lightingTemplate( quint32 formID, QByteArray & data, QByteArray & dalc ) const;
+	//! lane IMGS1: an IMGS record's EDID, HNAM (HDR, 9 floats), CNAM (cinematic, 3), TNAM (tint, 4) raw and its
+	//! TX00 LUT path; false when not an IMGS
+	bool imageSpace( quint32 formID, QString & edid, QByteArray & hnam, QByteArray & cnam, QByteArray & tnam,
+		QString & lut ) const;
 
 private:
 	std::unique_ptr<ESMFile> esm;

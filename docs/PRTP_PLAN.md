@@ -291,6 +291,26 @@ Gate: `tests/spells/cell_gi.sh` (A/B/C/D, independent rebuild; reds noshadow/fli
 Open: room ids (a probe and a voxel in different rooms never mix even when a ray slips through a gap); the
 sky term outdoors (waits for the weather reader); the bake still ignores glass tint.
 
+### 2j. The cell's imagespace (lane IMGS1, 2026-10-01)
+
+The game's chain after lighting, transcribed from the shipped shader archive (tonemap PS, luminance downsample,
+LUT PS), applied to an interior from its CELL XCIM -> IMGS (HNAM, CNAM, TNAM, TX00). Row "Imagespace" in the
+PRTP band (ships off; needs Cell lights).
+1. **Adapted.** A measure pass redraws the frame into an RGBA32F target (1/4 size) with cell-lit fragments
+   writing raw linear light; every other program writes nothing there (renderer.cpp masks it). Mean luma
+   (0.2125, 0.7154, 0.0721) over the pixels a cell-lit fragment reached (stencil bit 0), Inf/NaN as 0. The
+   game adapts over time; we show the converged value.
+2. **Exposure.** clamp(HNAM[8] / (adapted + 0.001), HNAM[5], HNAM[4]); x = 2 x exposure x hdr.
+3. **Tonemap.** Hable, E = HNAM[1], white 11.2.
+4. **Grade.** Saturation around luma, tint mix (luma x tint, amount), contrast x (brightness x c - adapted) +
+   adapted.
+5. **Display.** pow 1/2.2, then the 16^3 LUT (256x16 strip, x = r + 16 b, y = g) at c x 0.9375 + 0.03125.
+Gate: `tests/spells/cell_is.sh` + `cell_is_check.py` (A the adapted mean + exposure from an independent ESM
+and archive read, rel 1e-4; P the picture vs the numpy chain over the full-size dump on opaque cell-lit pixels,
+>= 97% inside the 3x3 range +-3/255). Reds nolut / noexp / nograde FAIL P.
+Not yet: bloom (threshold HNAM[2], scale HNAM[3]; needs a post pass), adaptation over time, exteriors (the
+weather's imagespace).
+
 ## 3. Open
 
 - `.tbk` v4: two surfel sides per cell (gives back the refused thin-wall weight), room ids (2f).

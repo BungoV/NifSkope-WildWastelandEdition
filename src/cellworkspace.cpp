@@ -424,8 +424,12 @@ void CellWorkspacePanel::buildUi()
 	cellGi = new QCheckBox( tr( "GI" ), prtpRow );
 	cellGi->setObjectName( QStringLiteral( "CellWorkspaceCellGi" ) );
 	cellGi->setChecked( wwCellGiOn() );
+	cellIs = new QCheckBox( tr( "Imagespace" ), prtpRow );
+	cellIs->setObjectName( QStringLiteral( "CellWorkspaceCellImageSpace" ) );
+	cellIs->setChecked( wwCellImageSpaceOn() );
 	pl->addWidget( cellLights );
 	pl->addWidget( cellGi );
+	pl->addWidget( cellIs );
 	pl->addStretch( 1 );
 	pl->addWidget( probesPlace );
 	pl->addWidget( probesBake );
@@ -460,6 +464,12 @@ void CellWorkspacePanel::buildUi()
 	// lane PRTPGI: the bounce of the last bake, drawn while Cell lights is on
 	connect( cellGi, &QCheckBox::toggled, this, [this]( bool on ) {
 		wwCellGiSetOn( on );
+		if ( glView )
+			glView->update();
+	} );
+	// lane IMGS1: the game's exposure, curve, grade and LUT in place of the viewer's curve
+	connect( cellIs, &QCheckBox::toggled, this, [this]( bool on ) {
+		wwCellImageSpaceSetOn( on );
 		if ( glView )
 			glView->update();
 	} );
