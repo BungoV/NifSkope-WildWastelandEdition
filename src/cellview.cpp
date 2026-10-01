@@ -23,6 +23,7 @@ BSD License - see nifskope.h
 
 #include "model/nifmodel.h"
 #include "spells/blocks.h"
+#include "gl/celllights.h"
 
 #include <QDebug>
 #include <QElapsedTimer>
@@ -688,6 +689,138 @@ static int cellProbeKindOf( const ProbePoint & q )
 	default:
 		return q.kind == ApertureKind::Doorway ? 3 : q.kind == ApertureKind::Window ? 4 : 5;
 	}
+}
+
+/* LANE PRTP3 -- THE CELL'S LIGHTING, for the renderer (src/gl/celllights.h).
+ *
+ * Every placed light that is on at load: not initially disabled, not "Off By Default" (0x20).
+ *   radius   = the base's DATA radius + the ref's XRDS. XRDS is a DELTA, measured: 2,080 of the
+ *              3,853 XRDS in the PRTP1 gate's ten interiors are negative, and as base + XRDS only 9
+ *              reach zero or below (those 9 draw nothing); as an absolute radius over half the
+ *              lights in the game would have none.
+ *   color    = pow(byte / 255, 2.2) x (FNAM fade + XLIG fade delta)          PRTP2 sections 0, 1
+ *   curve    = DATA Constant / Scalar / Exponent, (0, 1, 2) when DATA is short
+ *   spot     = flags 0x400 / 0x4000: FOV (+ XLIG FOV delta), Falloff Exponent the edge, aimed along
+ *              the ref's local +X (measured, celllights.h)
+ * An interior adds its ambient and directional light: each field from XCLL, or from the lighting
+ * template (LTMP -> LGTM) when the cell has no XCLL or its Inherits flag names that field.
+ *   DALC     = XCLL Ambient Colors (offset 40) / the LGTM's DALC; the flat Ambient Color on all six
+ *              axes when neither is there
+ *   direct.  = Directional Color x Directional Fade; its direction from Rotation XY (elevation) and
+ *              Z (azimuth from +Y, clockwise), degrees -- ASSUMED, the PRTP4 capture is the refuter */
+static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, const CellSceneSpec & spec,
+	const QVector<EsmRefr> & lightRefs, const Vector3 & center )
+{
+	WwCellLighting L;
+	L.interior = spec.interior;
+	for ( int k = 0; k < 3; k++ )
+		L.center[k] = center[k];
+	const bool axisRed = ( wwCellLightsRed() & 2 ) != 0;
+	int omni = 0, spot = 0, off = 0, noRadius = 0, dark = 0;
+	for ( const EsmRefr & r : lightRefs ) {
+		const EsmLight & b = world.light( r.base );
+		if ( !b.exists )
+			continue;
+		if ( r.initiallyDisabled || ( b.flags & 0x20 ) ) {
+			off++;
+			continue;
+		}
+		WwCellLight l;
+		l.radius = float( b.radius ) + ( r.hasRadius ? r.radius : 0.0f );
+		if ( !( l.radius > 0.0f ) ) {
+			noRadius++;
+			continue;
+		}
+		const float fade = b.fade + ( r.xligCount >= 2 ? r.xlig[1] : 0.0f );
+		for ( int c = 0; c < 3; c++ )
+			l.color[c] = std::pow( float( b.color[c] ) / 255.0f, 2.2f ) * fade;
+		if ( l.color[0] <= 0.0f && l.color[1] <= 0.0f && l.color[2] <= 0.0f ) {
+			dark++;
+			continue;
+		}
+		for ( int k = 0; k < 3; k++ )
+			l.pos[k] = r.pos[k];
+		if ( b.hasAttenuation ) {
+			l.bias = b.constant;
+			l.scale = b.scalar;
+			l.exponent = b.exponent;
+		}
+		l.noSpecular = ( b.flags & 0x8000 ) != 0;
+		l.spot = ( b.flags & ( 0x400 | 0x4000 ) ) != 0;
+		if ( l.spot ) {
+			const float fov = b.fov + ( r.xligCount >= 1 ? r.xlig[0] : 0.0f );
+			l.cosOuter = std::cos( fov * 0.5f * 3.14159265f / 180.0f );
+			l.cone = b.falloff;
+			Matrix rm;
+			rm.fromEuler( -r.rot[0], -r.rot[1], -r.rot[2] );
+			const Vector3 d = rm * ( axisRed ? Vector3( 0, 0, -1 ) : Vector3( 1, 0, 0 ) );
+			for ( int k = 0; k < 3; k++ )
+				l.dir[k] = d[k];
+			spot++;
+		} else {
+			omni++;
+		}
+		L.lights.append( l );
+	}
+	QString amb = QStringLiteral( "none (exterior: the viewport light)" ), dir = QStringLiteral( "none" );
+	if ( spec.interior ) {
+		const EsmInteriorCell & ic = world.interior();
+		QByteArray tData, tDalc;
+		const bool haveT = ic.lightingTemplate && world.lightingTemplate( ic.lightingTemplate, tData, tDalc );
+		const QByteArray & x = ic.xcll;
+		// a field comes from the template when the cell has no XCLL or inherits it
+		auto fromT = [&]( quint32 flag ) { return haveT && ( x.isEmpty() || ( ic.inherits & flag ) ); };
+		auto u8 = [&]( const QByteArray & a, int o ) { return quint8( a.at( o ) ); };
+		auto f32 = [&]( const QByteArray & a, int o ) { float v; std::memcpy( &v, a.constData() + o, 4 ); return v; };
+		auto s32 = [&]( const QByteArray & a, int o ) { qint32 v; std::memcpy( &v, a.constData() + o, 4 ); return v; };
+		// ambient (Inherits 0x1)
+		const QByteArray & aSrc = fromT( 0x1 ) ? tData : x;
+		const bool aT = fromT( 0x1 );
+		if ( aT && tDalc.size() >= 24 ) {
+			for ( int a = 0; a < 6; a++ )
+				for ( int c = 0; c < 3; c++ )
+					L.dalc[a][c] = u8( tDalc, a * 4 + c ) / 255.0f;
+			L.hasDalc = true;
+			amb = QStringLiteral( "DALC from the template" );
+		} else if ( !aT && x.size() >= 64 ) {
+			for ( int a = 0; a < 6; a++ )
+				for ( int c = 0; c < 3; c++ )
+					L.dalc[a][c] = u8( x, 40 + a * 4 + c ) / 255.0f;
+			L.hasDalc = true;
+			amb = QStringLiteral( "DALC from XCLL" );
+		} else if ( aSrc.size() >= 4 ) {
+			for ( int a = 0; a < 6; a++ )
+				for ( int c = 0; c < 3; c++ )
+					L.dalc[a][c] = u8( aSrc, c ) / 255.0f;
+			L.hasDalc = true;
+			amb = QStringLiteral( "flat Ambient Color from %1" ).arg( aT ? "the template" : "XCLL" );
+		} else {
+			amb = QStringLiteral( "none (no XCLL, no template)" );
+		}
+		// directional (Inherits 0x2 colour, 0x20 rotation, 0x40 fade)
+		const QByteArray & cSrc = fromT( 0x2 ) ? tData : x;
+		const QByteArray & rSrc = fromT( 0x20 ) ? tData : x;
+		const QByteArray & fSrc = fromT( 0x40 ) ? tData : x;
+		if ( cSrc.size() >= 8 && rSrc.size() >= 28 ) {
+			const float dfade = fSrc.size() >= 32 ? f32( fSrc, 28 ) : 1.0f;
+			for ( int c = 0; c < 3; c++ )
+				L.dirColor[c] = std::pow( u8( cSrc, 4 + c ) / 255.0f, 2.2f ) * dfade;
+			const float el = float( s32( rSrc, 20 ) ) * 3.14159265f / 180.0f;
+			const float az = float( s32( rSrc, 24 ) ) * 3.14159265f / 180.0f;
+			L.dirTo[0] = std::cos( el ) * std::sin( az );
+			L.dirTo[1] = std::cos( el ) * std::cos( az );
+			L.dirTo[2] = std::sin( el );
+			L.hasDirectional = L.dirColor[0] > 0.0f || L.dirColor[1] > 0.0f || L.dirColor[2] > 0.0f;
+			dir = L.hasDirectional
+				? QStringLiteral( "%1,%2,%3 x%4 rot %5,%6" ).arg( u8( cSrc, 4 ) ).arg( u8( cSrc, 5 ) ).arg( u8( cSrc, 6 ) )
+					.arg( dfade, 0, 'f', 2 ).arg( s32( rSrc, 20 ) ).arg( s32( rSrc, 24 ) )
+				: QStringLiteral( "black" );
+		}
+	}
+	L.summary = QStringLiteral( "lights=%1 (omni %2, spot %3; skipped: off %4, no radius %5, black %6) ambient=%7 directional=%8 center=%9" )
+		.arg( L.lights.size() ).arg( omni ).arg( spot ).arg( off ).arg( noRadius ).arg( dark ).arg( amb, dir )
+		.arg( QStringLiteral( "%1,%2,%3" ).arg( center[0], 0, 'f', 1 ).arg( center[1], 0, 'f', 1 ).arg( center[2], 0, 'f', 1 ) );
+	wwCellLightsPublish( nif, L );
 }
 
 bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
@@ -2139,6 +2272,9 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 	nif->holdUpdates( false );
 	nif->updateModel();
 
+	// lane PRTP3: the renderer lights this document with the cell's own lights (the Cell lights row)
+	cellPublishLighting( nif, world, spec, lightRefs, origin );
+
 	// ---- the census
 	if ( notes ) {
 		QString n;
@@ -2193,8 +2329,9 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 			for ( auto it = byType.constBegin(); it != byType.constEnd(); ++it )
 				bt.append( QStringLiteral( "%1 %2" ).arg( it.key() ).arg( it.value() ) );
 			s << "  lights: " << lightRefs.size() << " placed (" << bt.join( QLatin1String( ", " ) )
-			  << "); XRDS " << withXrds << ", XLIG " << withXlig << ", initially disabled " << off
-			  << " -- read, not lit\n";
+			  << "); XRDS " << withXrds << ", XLIG " << withXlig << ", initially disabled " << off << "\n";
+			if ( const WwCellLighting * cl = wwCellLightsFor( nif ) )
+				s << "  cell lighting: " << cl->summary << "\n";
 		}
 		if ( !skippedByType.isEmpty() ) {
 			QStringList sk;

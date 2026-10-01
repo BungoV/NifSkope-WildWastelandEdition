@@ -205,6 +205,7 @@ private:
 	 *  for PRTP6. Bake (lane PRTPBAKE) places and bakes in one rebuild; the band's
 	 *  note line then says what was written and where. */
 	QCheckBox * probesShow = nullptr;
+	QCheckBox * cellLights = nullptr;   // lane PRTP3: light the view with the cell's own lights
 	QPushButton * probesPlace = nullptr;
 	QPushButton * probesBake = nullptr;
 	QTreeWidget * probeKinds = nullptr;

@@ -79,3 +79,14 @@ above (shadowed by the bake's own rays) + sky from the DALC/sky model, with no f
 - Fog packing (section 5): capture.
 - The LIGH color's exact 1/255 constant and the Negative branch: read once more with a PE reader.
 - Specular: stock Blinn-Phong vs FO4CS PBR; the bake does not need it.
+
+## 9. Measured while building PRTP3 (2026-10-01)
+- XRDS is a DELTA added to the base radius, not an override: 2,080 of the 3,853 XRDS in the PRTP1
+  gate's ten interiors are negative; as base + XRDS only 9 reach zero (those draw nothing).
+- A spot shines along its ref's local +X under the engine euler (-x, -y, -z): of 2,396 spots,
+  1,177 aim down and 581 up along +X; along -Z the split is 608/131 (scratchpad/prtp1_20260930/spot_axis.py).
+- FO4's LIGH flag list has no Negative flag (section 0's note is from older games); not drawn.
+- DALC orientation: section 4 lights up-facing normals with the +Z color. The Lookdev stage assumed
+  the opposite; the two disagree until the PRTP4 capture rules.
+- Interior directional direction: dirTo = (cos el sin az, cos el cos az, sin el), el = Rotation XY,
+  az = Rotation Z, degrees. ASSUMED; refuter = the PRTP4 capture.

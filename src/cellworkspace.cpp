@@ -15,6 +15,7 @@ BSD License - see nifskope.h
 #include "model/nifmodel.h"
 
 #include "cellview.h"
+#include "gl/celllights.h"
 
 #include <QAction>
 #include <QCheckBox>
@@ -416,7 +417,11 @@ void CellWorkspacePanel::buildUi()
 	probesBake = new QPushButton( tr( "Bake" ), prtpRow );
 	probesBake->setObjectName( QStringLiteral( "CellWorkspaceProbesBake" ) );
 	probesBake->setStyleSheet( wwBoxedButtonQss( QStringLiteral( "3px 10px" ) ) );
+	cellLights = new QCheckBox( tr( "Cell lights" ), prtpRow );
+	cellLights->setObjectName( QStringLiteral( "CellWorkspaceCellLights" ) );
+	cellLights->setChecked( wwCellLightsOn() );
 	pl->addWidget( probesShow );
+	pl->addWidget( cellLights );
 	pl->addStretch( 1 );
 	pl->addWidget( probesPlace );
 	pl->addWidget( probesBake );
@@ -442,6 +447,12 @@ void CellWorkspacePanel::buildUi()
 
 	connect( probesPlace, &QPushButton::clicked, this, &CellWorkspacePanel::placeProbes );
 	connect( probesBake, &QPushButton::clicked, this, &CellWorkspacePanel::bakeProbes );
+	// a shader switch, not a rebuild: the next frame draws with (or without) the cell's lights
+	connect( cellLights, &QCheckBox::toggled, this, [this]( bool on ) {
+		wwCellLightsSetOn( on );
+		if ( glView )
+			glView->update();
+	} );
 	connect( probesShow, &QCheckBox::toggled, this, [this]( bool on ) {
 		QSettings().setValue( QString( "%1/probes" ).arg( QLatin1String( CELL_SHOW_GROUP ) ), on );
 		if ( syncing || g_path.isEmpty() || !g_spec.probes )

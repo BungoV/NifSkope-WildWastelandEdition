@@ -41,6 +41,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/scenelighting.h"
 #include "gl/lookdevstage.h"
 #include "gl/sunshadow.h"
+#include "gl/celllights.h"
 #include "esmweather.h"
 #include "io/material.h"
 #include "model/nifmodel.h"
@@ -337,14 +338,18 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 	 * So fo4_default.prog stays the pre-fog shader, and the fog program is swapped
 	 * in by name only while this draw fogs (a hint is swapped either way). */
 	auto fogVariant = [&]( Program * p ) -> Program * {
-		const bool isFog = p->name == std::string_view( "fo4_fog.prog" );
-		if ( !isFog && p->name != std::string_view( "fo4_default.prog" ) )
+		if ( p->name != std::string_view( "fo4_fog.prog" ) && p->name != std::string_view( "fo4_default.prog" )
+			&& p->name != std::string_view( "fo4_cell.prog" ) )
 			return p;
 		// red fognoswap: never swap, so the legacy path cannot fog
-		const bool want = wwLookdevFogWanted( mesh->scene ) && !wwLookdevRed( "fognoswap" );
-		if ( want == isFog )
+		const bool fog = wwLookdevFogWanted( mesh->scene ) && !wwLookdevRed( "fognoswap" );
+		/* lane PRTP3: a cell-lit draw takes fo4_cell.prog (the same shader with the cell's lights,
+		 * and the fog, compiled in); the row off never reaches it */
+		const char * want = wwCellLightsWanted( mesh->scene ) ? "fo4_cell.prog"
+			: fog ? "fo4_fog.prog" : "fo4_default.prog";
+		if ( p->name == std::string_view( want ) )
 			return p;
-		Program * q = useProgram( want ? "fo4_fog.prog" : "fo4_default.prog" );
+		Program * q = useProgram( want );
 		return q ? q : p;
 	};
 	if ( hint && hint->status && !stalePbrmHint ) [[likely]] {
@@ -1754,6 +1759,7 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 	glPolygonMode( GL_FRONT_AND_BACK, GL_FILL );
 
 	wwLookdevFogUniforms( scene );	// lane FOG1: fo4_default reads it; fogOn is false outside Lookdev
+	wwCellLightsUniforms( scene );	// lane PRTP3: a no-op unless this is fo4_cell.prog
 	return true;
 }
 

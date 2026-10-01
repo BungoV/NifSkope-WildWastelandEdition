@@ -1484,6 +1484,24 @@ const EsmLight & EsmWorld::light( quint32 formID ) const
 	return *lightCache.insert( formID, L );
 }
 
+bool EsmWorld::lightingTemplate( quint32 formID, QByteArray & data, QByteArray & dalc ) const
+{
+	data.clear();
+	dalc.clear();
+	const ESMFile::ESMRecord * r = esm ? esm->findRecord( formID ) : nullptr;
+	if ( !r || r->type == GRUP || !( *r == "LGTM" ) )
+		return false;
+	ESMFile::ESMField f( *esm, *r );
+	while ( f.next() ) {
+		const char * d = reinterpret_cast<const char *>( f.data() );
+		if ( f == "DATA" )
+			data = QByteArray( d, int( f.size() ) );
+		else if ( f == "DALC" )
+			dalc = QByteArray( d, int( f.size() ) );
+	}
+	return true;
+}
+
 namespace
 {
 //! Walk the top-level CELL group's blocks and subblocks; cb(record) per CELL.

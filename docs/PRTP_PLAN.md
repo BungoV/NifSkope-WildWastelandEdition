@@ -50,6 +50,12 @@ the `.loda` AO map. Probes happen here.
    the PRTP4 capture.
 3. **PRTP3 -- viewport lights.** The cell view drawn with the cell's lights,
    sun/DALC or interior ambient, fog, per PRTP2. Renderer work.
+   LANDED 2026-10-01: the PRTP band's "Cell lights" row (ships off) swaps the
+   cell view to fo4_cell.prog: every placed light on at load (omni + spot),
+   interior DALC and directional from XCLL / the lighting template. Gate
+   tests/spells/cell_lit.sh (probes vs an independent walk of the ESM; reds:
+   linear, axis, off). Not yet: fog, hemisphere/box shapes (drawn as omni),
+   Ambient Only, the PBR (pbrm) and effect shaders.
 4. **PRTP4 -- ground truth.** RenderDoc captures of the stock game at named
    cells (flights when the game is down; bungo names the saves); one pixel gate
    per term, measured, not eyeballed.

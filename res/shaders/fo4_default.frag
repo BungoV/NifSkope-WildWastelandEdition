@@ -254,6 +254,10 @@ vec3 tonemap(vec3 x)
 }
 
 
+#ifdef WW_CELLLIGHTS
+#include "cell_lights.glsl"
+#endif
+
 void main()
 {
 	vec2 offset = texCoord.st * uvScale + uvOffset;
@@ -542,6 +546,12 @@ void main()
 	color.rgb += A.rgb * specMask * fresnelSchlick( VdotH, 0.04 ) * (1.0 - NdotV) * D.rgb;
 	// Emissive
 	color.rgb += emissive * glowScaleSRGB;
+#ifdef WW_CELLLIGHTS
+	// lane PRTP3: the cell's own lights (src/gl/celllights.h)
+	if ( cellOn )
+		color.rgb = cellLit( color.rgb, albedo, normal, -ViewDir, V, specMask, specColor, alphaR, kSmith,
+		                     emissive * glowScaleSRGB );
+#endif
 
 	// lane FOG1 (Lookdev weather fog): this colour is sqrt of linear light (tonemap squares it),
 	// so the fog runs on its square, before the exposure and the curve
@@ -599,6 +609,10 @@ void main()
 	}
 
 	fragColor = color;
+#ifdef WW_CELLLIGHTS
+	if ( cellOn && cellProbe > 0 )
+		fragColor = vec4( cellProbeOut( normal, -ViewDir, alphaR, kSmith ), 1.0 );
+#endif
 #ifdef WW_FOG
 	vec3 fogProbeOut;
 	if ( wwFogProbe( -ViewDir, fogProbeOut ) )

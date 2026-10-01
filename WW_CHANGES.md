@@ -1,5 +1,16 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Cell view lit by the cell's own lights (2026-10-01)
+
+- New "Cell lights" row in the PRTP band (ships off). On, the cell view draws every placed light that is on
+  at load (omni and spot), and an interior's ambient (DALC) and directional light from its XCLL or lighting
+  template, per docs/PRTP2_LIGHT_MODEL.md. Off, the view draws exactly as before (its own program, untouched).
+- Spots aim along the ref's local +X; XRDS adds to the base radius (both measured, PRTP2 section 9).
+- The census lights line now ends with the lighting summary instead of "read, not lit".
+- Gate `tests/spells/cell_lit.sh` + `cell_lit_check.py`: the shader's probes against an independent walk of
+  Fallout4.esm; reds linear, axis, off.
+- Not yet: fog, hemisphere/box shapes (drawn as omni), Ambient Only, PBR (pbrm) and effect shaders.
+
 ## The far map: GI for places far from you (2026-10-01)
 
 - New `probefar` command: one probe per cell, hoisted over the roofs, for the whole worldspace, baked from the

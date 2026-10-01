@@ -5,6 +5,20 @@ Written the moment a mistake is recognised, unprompted (CONSTITUTION rule 2).
 Format: date -- what was done -- what was true -- how it was found -- the rule.
 Newest at the top.
 
+## 2026-10-01 -- PRTP3: a gate cell picked by name; a gate launched before its checker existed; whole-cell framing
+- The first gate cell, PackInCZSpotlightMainStorageCell, is a pack-in preview: one spotlight, nothing to light.
+  Found on its first picture. Rule: before naming a gate cell, read its census (lights, shapes) and pick by it.
+- The first run called tests/spells/cell_lit_check.py before the file was written; its check step could only
+  fail. Rule: write the checker first, then launch the shots it reads.
+- The default (whole-cell) camera left 1,268 clean pixels in the Vault and 419 lit ones in Solomon's House,
+  and 29 spots among 843 lights could not move a whole-frame score, so --red axis could not fail there.
+  Rule: frame the gate on the term it judges (here the spot cluster), and give that term its own verdict.
+- Stopping a background chain (TaskStop) ended only its outer shell: the cell_lit.sh inside kept launching shots
+  on port 14741, so the next run's NifSkope handed its file to that instance and exited 0 with empty notes
+  (four FAILs that were not the code). Killing the orphan is denied. Rule: never stop a chain mid-gate; if one
+  must stop, list `bash.exe ... cell_lit.sh` and NifSkope.exe and wait for both to be gone before relaunching,
+  with a wait loop whose own command line does not match its pattern.
+
 ## 2026-10-01 -- PRTP reference: "next I'm..." then the turn ended; spill landed before the synth gate ran
 - I told bungo what I would do next and ended the turn without doing it ("You're not doing anything now?").
   Rule: a turn ends with work done, not a promise; the next step is a tool call, not a sentence.

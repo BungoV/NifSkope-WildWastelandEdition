@@ -1,0 +1,5 @@
+# fo4_default with the cell's own lights compiled in (lane PRTP3; src/gl/celllights.h). No
+# conditions: the condition scan never picks it; Renderer::setupProgram swaps it in by name for
+# fo4_default.prog (or fo4_fog.prog) while the draw is cell-lit.
+
+shaders fo4_default.vert fo4_cell.frag

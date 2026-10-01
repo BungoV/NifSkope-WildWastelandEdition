@@ -540,6 +540,10 @@ public:
 
 	//! Lane PRTP1: one LIGH record, cached. Never null; `exists` false when not a LIGH.
 	const EsmLight & light( quint32 formID ) const;
+	/*! Lane PRTP3: one LGTM (lighting template) record, raw: `data` = DATA (the XCLL layout through
+	 *  the Light Fade distances), `dalc` = its DALC (6 axis colours, specular, scale). False when
+	 *  the form is not an LGTM. */
+	bool lightingTemplate( quint32 formID, QByteArray & data, QByteArray & dalc ) const;
 
 private:
 	std::unique_ptr<ESMFile> esm;
