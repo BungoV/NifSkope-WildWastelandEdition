@@ -755,9 +755,21 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 			continue;
 		}
 		// lane AMBO1: an Ambient Only light (0x100000) adds no light of its own in game; it scales the cell's
-		// ambient where it applies (docs/PRTP_PLAN.md 3, not drawn yet)
+		// ambient where it applies. Lane AMBO2: inside a sphere of 1.22077 x its radius, each channel of the
+		// ambient's affine sum x pow(byte / 255, 2.2) x fade (celllights.h). A black one still darkens.
 		if ( ( b.flags & 0x100000 ) && !( wwCellLightsRed() & 128 ) ) {
 			ambientOnly++;
+			const float radius = float( b.radius ) + ( r.hasRadius ? r.radius : 0.0f );
+			if ( radius > 0.0f ) {
+				WwCellAmbientLight a;
+				const float fade = b.fade + ( r.xligCount >= 2 ? r.xlig[1] : 0.0f );
+				for ( int k = 0; k < 3; k++ ) {
+					a.pos[k] = r.pos[k];
+					a.k[k] = std::pow( float( b.color[k] ) / 255.0f, 2.2f ) * fade;
+				}
+				a.volume = 1.22077f * radius;
+				L.ambientLights.append( a );
+			}
 			continue;
 		}
 		WwCellLight l;
@@ -980,6 +992,7 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 			.arg( std::count_if( L.lights.cbegin(), L.lights.cend(), []( const WwCellLight & l ) { return l.noRim; } ) )
 			.arg( std::count_if( L.lights.cbegin(), L.lights.cend(), []( const WwCellLight & l ) { return l.ignoreRoughness; } ) )
 		+ QStringLiteral( " ambientonly=%1" ).arg( ambientOnly )	// lane AMBO1: skipped, no direct light in game
+		+ QStringLiteral( " ambientvolumes=%1" ).arg( L.ambientLights.size() )	// lane AMBO2: they scale the ambient
 		+ QStringLiteral( " imagespace=%1" ).arg( isNote )
 		+ QStringLiteral( " fog=%1" ).arg( L.fogNote.isEmpty() ? QStringLiteral( "none (exterior: the Lookdev weather fog)" ) : L.fogNote );
 	wwCellLightsPublish( nif, L );

@@ -15,6 +15,11 @@ uniform vec3 cellDirTo;				// world, TO the light
 uniform bool cellInterior;
 uniform vec3 cellCenter;
 uniform int cellProbe;
+// lane AMBO2: the Ambient Only volumes (src/gl/celllights.h): world centre + 1.22077 x radius, and the
+// per-channel scale of the ambient's affine sum; the first in plugin order that holds a point wins
+uniform int cellAmboCount;
+uniform vec4 cellAmbo[16];
+uniform vec4 cellAmboK[16];
 uniform int cellRed;				// 1 linear: the radial curve without its 2.2; 8 lambert, 16 normalised, 32 norim,
 									// 64 rimflags (the lights' rim / roughness flags ignored)
 // lane PRTPGI: the bake relit by these lights (src/probegi.h), six axis slabs of dims.z each, x fastest;
@@ -298,11 +303,28 @@ void cellSumLights( vec3 P, vec3 N, vec3 Vw, float gloss, out vec3 diff, out vec
 
 #endif
 
-// PRTP2 section 4: ambient(n) = pow(max(dot(row, (n, 1)), 0), 2.2) per channel
-vec3 cellAmbient( vec3 N )
+// lane AMBO2: the scale an Ambient Only volume puts on the ambient at P (1 outside every volume)
+vec3 cellAmboScale( vec3 P )
+{
+	for ( int i = 0; i < cellAmboCount; i++ ) {
+		vec3 d = P - cellAmbo[i].xyz;
+		if ( dot( d, d ) < cellAmbo[i].w * cellAmbo[i].w )
+			return cellAmboK[i].rgb;
+	}
+	return vec3( 1.0 );
+}
+
+// the ambient's affine sum per channel, before its power (lane AMBO2: scaled inside an Ambient Only volume)
+vec3 cellAmbientSum( vec3 N, vec3 P )
 {
 	vec4 n1 = vec4( N, 1.0 );
-	return pow( max( vec3( dot( cellDalc[0], n1 ), dot( cellDalc[1], n1 ), dot( cellDalc[2], n1 ) ), vec3( 0.0 ) ), vec3( 2.2 ) );
+	return vec3( dot( cellDalc[0], n1 ), dot( cellDalc[1], n1 ), dot( cellDalc[2], n1 ) ) * cellAmboScale( P );
+}
+
+// PRTP2 section 4: ambient(n) = pow(max(dot(row, (n, 1)), 0), 2.2) per channel
+vec3 cellAmbient( vec3 N, vec3 P )
+{
+	return pow( max( cellAmbientSum( N, P ), vec3( 0.0 ) ), vec3( 2.2 ) );
 }
 
 #if !defined( WW_CELL_PBR ) && !defined( WW_CELL_FX )
@@ -329,7 +351,7 @@ vec3 cellLit( vec3 color, vec3 albedo, vec3 normalView, vec3 posView, vec3 Vview
 	vec3 E = diff + gi;
 	vec3 Ed = diffOn + gi;	// what the albedo takes: the direct terms through Oren-Nayar (lane ON1)
 	if ( cellHasDalc ) {
-		vec3 amb = cellAmbient( N );
+		vec3 amb = cellAmbient( N, P );
 		E += amb;
 		Ed += amb;
 	}
@@ -362,6 +384,8 @@ vec3 cellProbeOut( vec3 normalView, vec3 posView, float alphaR, float kSmith )
 	}
 	if ( cellProbe == 9 )
 		return vec3( 1.0 - sqrt( alphaR ), 0.0, 0.0 );	// lane ON1: the gloss the diffuse used
+	if ( cellProbe == 11 )	// lane AMBO2: the interior ambient's affine sum before its 2.2, x 8 (it is dim)
+		return cellHasDalc ? clamp( cellAmbientSum( N, P ) * 8.0, 0.0, 1.0 ) : vec3( 0.0 );
 	if ( cellProbe == 7 )
 		return cellShadowProbe( P, N );
 	// the position, 16 bits an axis over the 65536-unit box around the centre
