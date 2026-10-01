@@ -110,6 +110,10 @@ ClState & st()
 			s.red = 8;	// lane ON1: the diffuse back to Lambert
 		else if ( red == "normalised" )
 			s.red = 16;	// lane ON1: the textbook (normalised) Oren-Nayar azimuth
+		else if ( red == "norim" )
+			s.red = 32;	// lane RIM1: the back-light rim term dropped
+		else if ( red == "rimflags" )
+			s.red = 64;	// lane RIM1: the lights' No Rim / Ignore Roughness flags ignored
 	}
 	return s;
 }
@@ -213,6 +217,15 @@ bool wwCellLightsWanted( Scene * scene )
 	return scene->hasOption( Scene::DoLighting ) && scene->renderer->globalUniforms->projectionMatrix[3][3] != 1.0f;
 }
 
+/* Lane EFX1: the effect program takes no cell uniforms, so in a probe pass a see-through effect (the Vault 111
+ * steam, once it drew as itself) wrote its own colour over the surface the probes measure: Vault view 2's legacy
+ * share fell from 23.1% to 14.7%. Probe passes are harness-only; the pictures bungo looks at keep every effect. */
+bool wwCellProbePass( Scene * scene )
+{
+	const ClState & s = st();
+	return ( s.probe > 0 || s.fogProbe > 0 ) && wwCellLightsWanted( scene );
+}
+
 void wwCellLightsUniforms( Scene * scene )
 {
 	if ( !scene || !scene->renderer )
@@ -243,7 +256,8 @@ void wwCellLightsUniforms( Scene * scene )
 				l.pos[0], l.pos[1], l.pos[2], l.radius,
 				l.color[0], l.color[1], l.color[2], l.spot ? l.cosOuter : -2.0f,
 				dir[0], dir[1], dir[2], l.cone,
-				l.bias, l.scale, l.exponent, l.noSpecular ? 1.0f : 0.0f,
+				l.bias, l.scale, l.exponent,
+				float( ( l.noSpecular ? 1 : 0 ) | ( l.noRim ? 2 : 0 ) | ( l.ignoreRoughness ? 4 : 0 ) ),	// lane RIM1
 				slotOf[size_t( i )], float( l.shadow ), l.nearClip, l.shadowBias };
 			t.insert( t.end(), tex, tex + 20 );
 		}

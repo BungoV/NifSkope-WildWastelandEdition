@@ -3,14 +3,20 @@
 
   cell_oren_check.py <Fallout4.esm> <interior EDID> <shot dir> [label: the shots' prefix, default the EDID]
 
-Reads <cell>.probe2/3/4/8/9.png, their .cam dumps and <cell>.probe8.notes from the shot dir. The lights come
+Reads <cell>.probe2/3/4/8/9/10.png, their .cam dumps and <cell>.probe8.notes from the shot dir. The lights come
 from tests/spells/cell_lit_check.py's own walk of the plugin (gated there); this check adds the game's
 legacy-branch diffuse, written out again from its reading of the shipped point / spot light shaders:
   sigma = 1 - gloss, s2 = sigma^2, A = 1 - 0.5 s2 / (s2 + 0.57), B = 0.45 s2 / (s2 + 0.09)
   cosPhi = dot(V - N NdotV, L - N NdotL)            (NOT normalised: the asm's own quirk)
   geom = sqrt(sat((1 - NdotL^2)(1 - NdotV^2))) / max(NdotL, NdotV)
-  diffuse = (max(cosPhi, 0) B geom + A) x NdotL x the light's radial / cone weight x its colour
+  rim = sat(dot(V, -L)) (1 - NdotV)^0.01 (1 - gloss)          (lane RIM1: the back-light term)
+  diffuse = (max(cosPhi, 0) B geom + A + rim) x NdotL x the light's radial / cone weight x its colour
+  a light flagged No Rim Lighting (LIGH 0x80000) drops the rim; one flagged Ignore Roughness (0x40000) drops
+  the rim and takes 1 for the Oren-Nayar factor (the shipped shader variants with those bits, lane RIM1)
 V runs from each pixel to the camera (the .cam dump), the gloss is probe 9's red. Probe 8 = that sum / 4.
+Probe 10 = the rim part alone x 4: in probe 8 the flagged lights' rim sits under the 8-bit tolerance almost
+everywhere (6 of 18,029 lit Institute pixels move), sixteen times larger it moves 12,178 of Vault view 1's.
+It gets its own verdict over the pixels where either side shows a rim.
 One verdict line; exit 0 on PASS.
 """
 import os
@@ -24,7 +30,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from cell_lit_check import lights_of  # noqa: E402
 
 
-def oren_sum(lights, P, N, V, gloss, normalised=False):
+def oren_sum(lights, P, N, V, gloss, normalised=False, flags=True, rim_only=False):
     E = np.zeros_like(P)
     s2 = (1.0 - gloss) ** 2
     A = 1.0 - 0.5 * s2 / (s2 + 0.57)
@@ -49,6 +55,13 @@ def oren_sum(lights, P, N, V, gloss, normalised=False):
             cphi = cphi / np.maximum(np.linalg.norm(tv, axis=1) * np.linalg.norm(tl, axis=1), 1e-6)
         geom = np.sqrt(np.clip((1 - nl * nl) * (1 - nv * nv), 0, 1)) / np.maximum(np.maximum(nl, nv), 1e-4)
         oren = np.maximum(cphi, 0) * B * geom + A
+        if flags and L['rough']:
+            oren = np.ones_like(oren)
+        if rim_only:        # probe 10
+            oren = np.zeros_like(oren)
+        # lane RIM1: the back-light term every light adds to the legacy diffuse, unless the light opts out
+        if not (flags and (L['norim'] or L['rough'])):
+            oren = oren + np.clip(-np.einsum('ij,ij->i', V, Ld), 0, 1) * np.clip(1 - nv, 0, 1) ** 0.01 * (1 - gloss)
         w = np.where((d < L['r']) & (nl > 0), a * nl * oren, 0.0)
         E += w[:, None] * L['c'][None, :]
     return E
@@ -56,7 +69,7 @@ def oren_sum(lights, P, N, V, gloss, normalised=False):
 
 def main(esm, cell, shots, label=None):
     label = label or cell   # the shots' file prefix (a cell seen from two cameras has two)
-    tags = (2, 3, 4, 8, 9)
+    tags = (2, 3, 4, 8, 9, 10)
     img = {p: np.asarray(Image.open(os.path.join(shots, '%s.probe%d.png' % (label, p))).convert('RGB'), float)
            for p in tags}
     notes = open(os.path.join(shots, label + '.probe8.notes'), encoding='utf-8', errors='replace').read()
@@ -88,9 +101,12 @@ def main(esm, cell, shots, label=None):
     ok &= (img[9][..., 1] == 0) & (img[9][..., 2] == 0)
     for dy, dx in ((0, 1), (1, 0), (0, -1), (-1, 0)):
         ok &= np.linalg.norm(P - np.roll(P, (dy, dx), (0, 1)), axis=2) < 40
-        # a smooth normal and gloss too: an 8-bit normal on a crease is not the fragment's normal
+        # a smooth normal and gloss too: an 8-bit normal on a crease is not the fragment's normal. The gloss
+        # step is 12/255, not 2: a gloss map varies texel to texel, and at 2 only flat-gloss surfaces were left
+        # (Vault view 2 kept 443 lit pixels once the steam stopped covering the probes; lane EFX1). Measured on
+        # those shots: with no gloss limit at all the pixels still agree 99.9%; 12 still drops material seams.
         ok &= np.linalg.norm(N - np.roll(N, (dy, dx), (0, 1)), axis=2) < 0.06
-        ok &= np.abs(img[9][..., 0] - np.roll(img[9][..., 0], (dy, dx), (0, 1))) <= 2
+        ok &= np.abs(img[9][..., 0] - np.roll(img[9][..., 0], (dy, dx), (0, 1))) <= 12
     ok[0, :] = ok[-1, :] = ok[:, 0] = ok[:, -1] = False
     ys, xs = np.nonzero(ok)
     if len(ys) < 2000:     # too little to judge: SKIP, so a red cannot "fail" on a data shortage
@@ -122,11 +138,20 @@ def main(esm, cell, shots, label=None):
     quirk = lit & np.any(np.abs(exp - expn) > 2 * tol, axis=1)
     quirk_share = good[quirk].mean() if quirk.any() else 1.0
     quirk_ok = quirk.sum() < 200 or quirk_share >= 0.95
-    verdict = share >= 0.97 and lit_share >= 0.95 and quirk_ok
-    return ('oren %s %s: %d lights; %d clean pixels sampled, %d lit; agree %.1f%% (lit %.1f%%; quirk %d px, %s); '
-            'gloss mean %.2f, A mean %.3f; mean |err| %.4f, p99 %.4f'
+    # lane RIM1: the rim alone (probe 10), judged where either side shows one, so a rim the flags should have
+    # dropped counts against it
+    exp_r = np.clip(oren_sum(lights, Pp, Np, V, gloss, rim_only=True) * 4.0, 0, 1)
+    got_r = img[10][ys, xs] / 255.0
+    rim = (exp_r.max(axis=1) > 0.02) | (got_r.max(axis=1) > 0.02)
+    good_r = np.all(np.abs(got_r - exp_r) <= 3.0 / 255 + 0.05 * exp_r, axis=1)
+    rim_share = good_r[rim].mean() if rim.any() else 1.0
+    rim_ok = rim.sum() < 200 or rim_share >= 0.95
+    verdict = share >= 0.97 and lit_share >= 0.95 and quirk_ok and rim_ok
+    return ('oren %s %s: %d lights; %d clean pixels sampled, %d lit; agree %.1f%% (lit %.1f%%; quirk %d px, %s; '
+            'rim %d px, %s); gloss mean %.2f, A mean %.3f; mean |err| %.4f, p99 %.4f'
             % ('PASS' if verdict else 'FAIL', label, len(lights), len(ys), lit.sum(), 100 * share, 100 * lit_share,
                quirk.sum(), ('%.1f%%' % (100 * quirk_share)) if quirk.sum() >= 200 else 'too few to judge',
+               rim.sum(), ('%.1f%%' % (100 * rim_share)) if rim.sum() >= 200 else 'too few to judge',
                gloss.mean(), a_mean, err.mean(), np.percentile(err, 99)))
 
 

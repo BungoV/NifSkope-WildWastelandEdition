@@ -1,5 +1,26 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## The game's back-light on cell lights (2026-10-01)
+
+- With Cell lights on, regular (non-PBR) materials now also get the game's back-light term: a rough surface
+  looked at toward a lamp, or toward the cell's directional light, picks up extra light the way it does in game.
+  Shadows dim it like the rest of the light. PBR materials are unchanged (the game drops it for them too).
+- Lights marked "No Rim Lighting" skip it, as in game (half or more of the lights in most interiors). Lights
+  marked "Ignore Roughness" skip it and also take the plain textbook falloff; their shine is unchanged.
+  The cell notes count both kinds.
+- Gate `tests/spells/cell_oren.sh` now includes it; reds `norim` (the term dropped everywhere) and `rimflags`
+  (the two light marks ignored) must FAIL. The marks are too faint to see in the full light sum, so a new
+  harness view (probe 10) shows the back-light alone, four times brighter.
+
+## Cell view: effects set in the mesh, refraction-only surfaces (2026-10-01)
+
+- Effects whose look is set inside the mesh (no .bgem file), such as the ground steam in Vault 111, used to
+  draw as flat dark solid shapes. They now draw as the see-through effects they are, with the mesh's own
+  settings. An animated fade or tint is drawn at its average over the loop.
+- Surfaces that only bend what is behind them (refraction, like the ring under the dripping water in
+  Vault 111) used to draw as solid swirled disks. This view has no refraction pass, so they are left out; the
+  cell notes count them.
+
 ## The game's diffuse on cell lights (2026-10-01)
 
 - With Cell lights on, the regular (non-PBR) materials now take light the way the game's shaders do

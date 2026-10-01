@@ -124,7 +124,10 @@ def lights_of(esm, cell_edid):
         spot = bool(lf & 0x4400)
         cos_outer = math.cos(math.radians(fov + (xlig[0] if xlig else 0.0)) / 2) if spot else -2.0
         aim = euler(-rot[0], -rot[1], -rot[2]) @ np.array([1.0, 0.0, 0.0])
-        out.append(dict(pos=np.array(pos), r=r, c=c, spot=spot, cos=cos_outer, aim=aim, cone=falloff, bse=bse))
+        # lane RIM1: No Rim Lighting (0x80000) drops the back-light; Ignore Roughness (0x40000) also turns the
+        # diffuse to Lambert
+        out.append(dict(pos=np.array(pos), r=r, c=c, spot=spot, cos=cos_outer, aim=aim, cone=falloff, bse=bse,
+                        norim=bool(lf & 0x80000), rough=bool(lf & 0x40000), flags=lf))
     return out
 
 

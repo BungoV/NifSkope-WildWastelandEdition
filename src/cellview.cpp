@@ -28,6 +28,7 @@ BSD License - see nifskope.h
 #include "gl/celllights.h"
 #include "gamemanager.h"	// lane IMGS1: the imagespace LUT
 
+#include <QBuffer>
 #include <QDebug>
 #include <QElapsedTimer>
 #include <QFile>
@@ -114,6 +115,10 @@ struct Bucket
 	 * vertex alpha the way the game does. Empty for every other bucket. */
 	QString effectMat;
 	quint32 effSF1 = 0, effSF2 = 0;
+	/* Lane EFX1: an effect property with no BGEM (the Vault's ground steam), the source
+	 * block serialized and written back whole, with the source's NiAlphaProperty flags. */
+	QByteArray effectBlock;
+	quint16 effAlphaFlags = 0;
 	bool emits = false;
 	float emissiveScale = 1.0f;
 	bool withColour = false;
@@ -378,17 +383,26 @@ bool emitBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b,
 		 * write (src/lodgen.cpp ~4189, src/lodinative.cpp ~316): the same block
 		 * pair, the same ten slots, the BGSM in the shader's Name so the
 		 * renderer resolves it exactly as it does for a `.BTO` shape. */
-		if ( !b.effectMat.isEmpty() ) {
+		if ( !b.effectMat.isEmpty() || !b.effectBlock.isEmpty() ) {
 			QModelIndex iShader = nif->insertNiBlock( QStringLiteral( "BSEffectShaderProperty" ) );
-			nif->set<QString>( iShader, "Name", materialNameFor( b.effectMat ) );
+			if ( !b.effectBlock.isEmpty() ) {
+				// lane EFX1: the source property whole; its controller (UV scroll) is not welded
+				QByteArray eb = b.effectBlock;
+				QBuffer buf( &eb );
+				if ( buf.open( QIODevice::ReadOnly ) )
+					nif->loadIndex( buf, iShader );
+				nif->setLink( iShader, "Controller", -1 );
+			} else {
+				nif->set<QString>( iShader, "Name", materialNameFor( b.effectMat ) );
+				nif->set<QString>( iShader, "Source Texture", b.matString );
+			}
 			nif->set<quint32>( iShader, "Shader Flags 1", b.effSF1 );
 			// Vertex_Colors only when this shape really carries them
 			nif->set<quint32>( iShader, "Shader Flags 2", b.withColour ? b.effSF2 : ( b.effSF2 & ~0x20U ) );
-			nif->set<QString>( iShader, "Source Texture", b.matString );
 			nif->setLink( iShape, "Shader Property", nif->getBlockNumber( iShader ) );
 			if ( b.hasAlpha ) {
 				QModelIndex iAlpha = nif->insertNiBlock( QStringLiteral( "NiAlphaProperty" ) );
-				nif->set<int>( iAlpha, "Flags", b.alphaThreshold ? 4844 : 4333 );
+				nif->set<int>( iAlpha, "Flags", b.effAlphaFlags ? int( b.effAlphaFlags ) : b.alphaThreshold ? 4844 : 4333 );
 				nif->set<int>( iAlpha, "Threshold", int( b.alphaThreshold ) );
 				nif->setLink( iShape, "Alpha Property", nif->getBlockNumber( iAlpha ) );
 			}
@@ -751,6 +765,8 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 			l.exponent = b.exponent;
 		}
 		l.noSpecular = ( b.flags & 0x8000 ) != 0;
+		l.noRim = ( b.flags & 0x80000 ) != 0;
+		l.ignoreRoughness = ( b.flags & 0x40000 ) != 0;
 		l.spot = ( b.flags & ( 0x400 | 0x4000 ) ) != 0;
 		// lane SHADOW1: the shadow kind, near clip (DATA + XLIG delta) and XLIG Shadow Depth Bias
 		l.shadow = ( b.flags & 0x400 ) ? 1 : ( b.flags & 0x800 ) ? 2 : ( b.flags & 0x1000 ) ? 3 : 0;
@@ -944,6 +960,9 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 	L.summary = QStringLiteral( "lights=%1 (omni %2, spot %3; skipped: off %4, no radius %5, black %6) ambient=%7 directional=%8 center=%9" )
 		.arg( L.lights.size() ).arg( omni ).arg( spot ).arg( off ).arg( noRadius ).arg( dark ).arg( amb, dir )
 		.arg( QStringLiteral( "%1,%2,%3" ).arg( center[0], 0, 'f', 1 ).arg( center[1], 0, 'f', 1 ).arg( center[2], 0, 'f', 1 ) )
+		+ QStringLiteral( " norim=%1 ignorerough=%2" )	// lane RIM1: the lights whose shader drops the back-light
+			.arg( std::count_if( L.lights.cbegin(), L.lights.cend(), []( const WwCellLight & l ) { return l.noRim; } ) )
+			.arg( std::count_if( L.lights.cbegin(), L.lights.cend(), []( const WwCellLight & l ) { return l.ignoreRoughness; } ) )
 		+ QStringLiteral( " imagespace=%1" ).arg( isNote )
 		+ QStringLiteral( " fog=%1" ).arg( L.fogNote.isEmpty() ? QStringLiteral( "none (exterior: the Lookdev weather fog)" ) : L.fogNote );
 	wwCellLightsPublish( nif, L );
@@ -1342,6 +1361,8 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 	int shapesUnreadableMat = 0;            //!< named a material, nothing resolved: neutral grey
 	int blendBuckets = 0;                   //!< 2026-10-01: blended (glass) buckets
 	int effectBuckets = 0;                  //!< 2026-10-01: BGEM buckets drawn by the effect shader
+	int inlineFxBuckets = 0;                //!< lane EFX1: BGEM-less effect buckets, the source block written back
+	int refractShapesSkipped = 0;           //!< lane EFX1: refraction-only lighting shapes left out
 	int shapesVertexColor = 0;              //!< lane PRTPPLACE: drawn with the mesh's own vertex colors
 	int placementsSwapped = 0;              //!< lane PRTPPLACE: drawn with a material swap
 	int skyCardsHidden = 0;                 //!< lane PRTPPLACE: sky cards left to the sky layer
@@ -1378,8 +1399,13 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 		const bool blend = s.nearFacts.alphaBlend || s.effectBlend;
 		const float alpha = blend ? qBound( 0.0f, s.matAlpha, 1.0f ) : 1.0f;
 		const bool effect = s.nearFacts.effectShader && s.effectMatRead && spec.overlay == CellOverlay::None;
+		// lane EFX1: an effect property with no BGEM, keyed by its own bytes
+		const bool inlineFx = s.nearFacts.effectShader && !s.effectMatRead && !s.effectBlock.isEmpty()
+			&& spec.overlay == CellOverlay::None;
 		const QString key = QStringLiteral( "%1%2|%3|%4|%5|%6|%7|%8" )
 			.arg( effect ? QStringLiteral( "E|%1|%2|%3|" ).arg( s.matName ).arg( s.shaderSF1 ).arg( s.shaderSF2 )
+			    : inlineFx ? QStringLiteral( "I|%1|%2|%3|%4|" ).arg( QString::fromLatin1( s.effectBlock.toHex() ) )
+			                     .arg( s.shaderSF1 ).arg( s.shaderSF2 ).arg( s.alphaFlags )
 			             : QString() )
 			.arg( mat )
 			.arg( ( s.hasAlpha || blend ) ? 1 : 0 ).arg( blend ? 0 : int( s.alphaThreshold ) )
@@ -1413,6 +1439,13 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 			b.effSF1 = s.shaderSF1;
 			b.effSF2 = s.shaderSF2;
 			effectBuckets++;
+		} else if ( inlineFx ) {
+			b.effectBlock = s.effectBlock;
+			b.effSF1 = s.shaderSF1;
+			b.effSF2 = s.shaderSF2;
+			b.effAlphaFlags = s.alphaFlags;
+			b.name = QStringLiteral( "effect (in the NIF)" );
+			inlineFxBuckets++;
 		}
 		return buckets.insert( key, b ).value();
 	};
@@ -1693,6 +1726,14 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 			const size_t nv = s.geom.pos.size() / 3;
 			if ( !nv || s.geom.tris.empty() )
 				continue;
+			/* Lane EFX1: a lighting shape flagged Refraction (Shader Flags 1 bit 15) shows only as a
+			 * bend in what lies behind it -- the splash drips' scrolling ring takes a normal map as
+			 * its diffuse. This view has no refraction pass, and drawing it lit put a solid swirled
+			 * disk on the Vault 111 walkway (bungo, 2026-10-01). Left out, and counted. */
+			if ( !s.nearFacts.effectShader && ( s.shaderSF1 & ( 1U << 15 ) ) ) {
+				refractShapesSkipped++;
+				continue;
+			}
 			/* THE PAINT ROW this shape takes: the swap row's CNAM for its original material, else
 			 * the base's own MODC (2026-10-01: the museum pickup's paint lives there, bungo's
 			 * "vertex paint"). Only a Greyscale_To_PaletteColor material takes one. */
@@ -1822,7 +1863,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 					o.chan[c] = ownColor ? float( s.geom.rgba[v * 4 + size_t( c )] ) / 255.0f : rgb[c];
 				if ( repaint )
 					o.chan[0] *= paletteR;
-				if ( ownColor && !b.effectMat.isEmpty() )
+				if ( ownColor && ( !b.effectMat.isEmpty() || !b.effectBlock.isEmpty() ) )
 					o.chan[3] = float( s.geom.rgba[v * 4 + 3] ) / 255.0f;   // the effect shader's vertex alpha
 				b.verts.push_back( o );
 				for ( int k = 0; k < 3; k++ ) {
@@ -2519,7 +2560,9 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 		  << " shapes textured from a `.bgem` effect material, "
 		  << shapesUnreadableMat << " drawn neutral grey because a named material "
 		     "resolved to nothing, " << blendBuckets << " blended (glass) buckets, "
-		  << effectBuckets << " drawn by the effect shader (BGEM)";
+		  << effectBuckets << " drawn by the effect shader (BGEM), "
+		  << inlineFxBuckets << " by the effect shader as the NIF sets it (lane EFX1), "
+		  << refractShapesSkipped << " refraction-only shapes left out";
 		if ( !unreadableMatNames.isEmpty() )
 			s << " (" << unreadableMatNames.join( QLatin1String( ", " ) ) << ")";
 		s << "\n";

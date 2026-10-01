@@ -1,5 +1,6 @@
 #include "bsshape.h"
 
+#include "gl/celllights.h"
 #include "gl/glnode.h"
 #include "gl/glscene.h"
 #include "gl/renderer.h"
@@ -280,6 +281,9 @@ void BSShape::drawShapes( NodeList * secondPass )
 		drawVerts();
 		return;
 	}
+
+	if ( !selectionFlags && bsesp && wwCellProbePass( scene ) )
+		return;	// lane EFX1: a harness probe pass measures the surfaces, not the effects over them
 
 	// Render polygon fill slightly behind alpha transparency and wireframe
 	glEnable( GL_POLYGON_OFFSET_FILL );

@@ -84,6 +84,10 @@ struct NativeSrcShape
 	 *  own flags, so the palette alpha (holes) and vertex alpha reach the renderer. */
 	bool effectMatRead = false;
 	quint32 shaderSF1 = 0, shaderSF2 = 0;
+	/*! Lane EFX1: an effect property that names no BGEM (its look is in the NIF), the
+	 *  block serialized, and the shape's NiAlphaProperty flags (0 = none). Cell view only. */
+	QByteArray effectBlock;
+	quint16 alphaFlags = 0;
 	float matAlpha = 1.0f;     //!< the BGSM/BGEM fAlpha
 	//! The shape named a material and NOTHING resolved: drawn neutral and counted, not magenta.
 	bool matUnreadable = false;

@@ -1409,6 +1409,7 @@ struct LodSrcShape
 	 *  Read by the cell view's glass only; nothing gated reads them. */
 	bool effectBlend = false;
 	bool effectMatRead = false;          //!< the BGEM read (cell view effect buckets)
+	QByteArray effectBlock;              //!< lane EFX1: a BGEM-less effect property, serialized (cell view only)
 	quint32 shaderSF1 = 0, shaderSF2 = 0; //!< the source shader property's flags
 	float matAlpha = 1.0f;
 	/*! The shape named a material and NOTHING resolved from it -- no texture
@@ -2494,6 +2495,57 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 					 * carries. */
 					if ( s.effectTex0.isEmpty() )
 						s.effectTex0 = src.get<QString>( iShader, "Source Texture" );
+				} else if ( nf.effectShader ) {
+					/* Lane EFX1: an effect property that names no BGEM carries its whole look
+					 * in the NIF (falloff, base color, greyscale map, soft depth): the Vault's
+					 * ground steam is one. The cell view had only the BGEM path, so these drew
+					 * through the lit program with no texture -- solid grey sheets. The block
+					 * is kept as is and written back into the cell scene. tex0 and effectTex0
+					 * are untouched, so the far-LOD bake is unchanged by construction.
+					 *
+					 * The welded scene holds one frame and drops the controllers, so a looping
+					 * float animation on the property is drawn at its mean over the keys rather
+					 * than at the stored rest value, which can be a fade's fully opaque end the game
+					 * only passes through. UV scrolls are left at rest. Setting a mean is idempotent,
+					 * so a shared block is safe. */
+					for ( QModelIndex iCtl = src.getBlockIndex( src.getLink( iShader, "Controller" ) ); iCtl.isValid();
+						iCtl = src.getBlockIndex( src.getLink( iCtl, "Next Controller" ) ) ) {
+						if ( !src.blockInherits( iCtl, "BSEffectShaderPropertyFloatController" ) )
+							continue;
+						const QModelIndex iInt = src.getBlockIndex( src.getLink( iCtl, "Interpolator" ) );
+						const QModelIndex iDat = iInt.isValid() ? src.getBlockIndex( src.getLink( iInt, "Data" ) ) : QModelIndex();
+						const QModelIndex keys = iDat.isValid() ? src.getIndex( src.getIndex( iDat, "Data" ), "Keys" ) : QModelIndex();
+						const int nk = keys.isValid() ? src.rowCount( keys ) : 0;
+						if ( nk == 0 )
+							continue;
+						float t0 = src.get<float>( src.getIndex( keys, 0 ), "Time" );
+						float v0 = src.get<float>( src.getIndex( keys, 0 ), "Value" );
+						double area = 0.0, span = 0.0;
+						for ( int k = 1; k < nk; k++ ) {
+							const float t1 = src.get<float>( src.getIndex( keys, k ), "Time" );
+							const float v1 = src.get<float>( src.getIndex( keys, k ), "Value" );
+							area += double( t1 - t0 ) * double( v0 + v1 ) / 2.0;
+							span += double( t1 - t0 );
+							t0 = t1;
+							v0 = v1;
+						}
+						const float mean = span > 0.0 ? float( area / span ) : v0;
+						switch ( src.get<int>( iCtl, "Controlled Variable" ) ) {
+						case 0: src.set<float>( iShader, "Base Color Scale", mean ); break;
+						case 3: src.set<float>( iShader, "Falloff Start Opacity", mean ); break;
+						case 4: src.set<float>( iShader, "Falloff Stop Opacity", mean ); break;
+						case 5: {
+							Color4 c = src.get<Color4>( iShader, "Base Color" );
+							c.setAlpha( mean );
+							src.set<Color4>( iShader, "Base Color", c );
+							break;
+						}
+						default: break;
+						}
+					}
+					QBuffer eb( &s.effectBlock );
+					if ( !( eb.open( QIODevice::WriteOnly ) && src.saveIndex( eb, iShader ) ) )
+						s.effectBlock.clear();
 				}
 				/* A shape that NAMED a material and got nothing out of it, out of
 				 * any of the three sources. It is counted and drawn neutral rather
@@ -2632,6 +2684,7 @@ static bool nativeLoadModelImpl( void * user, const QString & model, const Lodge
 		n.effectTex0 = s.effectTex0; n.matUnreadable = s.matUnreadable;
 		n.effectBlend = s.effectBlend; n.matAlpha = s.matAlpha;
 		n.effectMatRead = s.effectMatRead; n.shaderSF1 = s.shaderSF1; n.shaderSF2 = s.shaderSF2;
+		n.effectBlock = s.effectBlock; n.alphaFlags = s.hasAlpha ? s.alphaFlags : 0;	// lane EFX1
 		n.g2p = s.g2pFlag;
 		n.g2pScale = s.g2pScale;
 		n.g2pTex = s.g2pTex;

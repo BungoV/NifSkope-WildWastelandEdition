@@ -1,5 +1,27 @@
 # Handoff — NifSkope, Wild Wasteland Edition
 
+## TOP BLOCK -- written 2026-10-01 16:34 (`date`-read): RIM1 the back-light + EFX1 effects in the cell view
+
+- RIM1: cell_lights.glsl cellRim = sat(V.-L) (1-NdotV)^0.01 (1-gloss), x NdotL x the light, on placed lights
+  and the cell's directional (legacy only). LIGH 0x80000 No Rim / 0x40000 Ignore Roughness packed in light
+  texel 3's w (1 noSpec, 2 noRim, 4 ignoreRough); notes echo `norim=N ignorerough=N`. Probe 10 = the placed
+  lights' rim alone x 4 (probe 8 cannot see the flags: 0-126 px over 22 shot sets). cell_oren.sh shoots it;
+  checker's rim verdict (>= 95% where either side shows a rim). Reds lambert / norim / rimflags.
+- EFX1: BGEM-less BSEffectShaderProperty kept as its serialized block (lodgen effectBlock -> cellview writes it
+  back, controller cut, float controllers at their key mean): the Vault steam drew as dark solid shapes.
+  Lighting shapes with SF1 bit 15 (Refraction) left out (the walkway disks; Vault: 21). Probe passes
+  (WW_CELL_LIT_PROBE / WW_CELL_FOG_PROBE) skip effect shapes (bsshape.cpp, wwCellProbePass): the steam had
+  covered Vault view 2's probes (legacy share 23.1% -> 14.7%, the view went SKIP).
+- Gates (exe 16:34): cell_oren green 100% / 100% (rim 100% / 99.1%), reds rimflags / norim / lambert FAIL;
+  checker gloss-neighbour limit 2 -> 12 (view 2 had passed on steam sheets). cell_fog 3/3 PASS, same-surface
+  100% (the old "translucent surface" open item = the steam: RESOLVED). lodgen_native_baseline: the same 8
+  stale files as before (rewrite it is still on the list).
+- Walkway cameras (playable, measured): A center 350,-512,40 VIEW 4 DIST 450; B 300,-512,40 VIEW 3 DIST 500.
+  Scripts: scratchpad/rim1_20261001/shoot1.sh, vault_pair.sh.
+- NEXT: ambient-only (39), hemisphere (17), cube scale, room ids, glass tint in the bake, PRTP4/5, sky term,
+  far-map trees, FO4CS reader last; Fraternal Post overhead mismatch (PRTP_PLAN 3). Still waiting on his save
+  name for an in-game side-by-side.
+
 ## TOP BLOCK -- written 2026-10-01 12:23 (`date`-read): FOG2 interior fog + ON1 the game's diffuse
 
 - FOG2: interiors fog from XCLL / the lighting template (Inherits flags; far 0 -> 163840, near 0 -> 0.17 far;

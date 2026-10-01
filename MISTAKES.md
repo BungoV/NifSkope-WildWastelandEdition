@@ -5,6 +5,28 @@ Written the moment a mistake is recognised, unprompted (CONSTITUTION rule 2).
 Format: date -- what was done -- what was true -- how it was found -- the rule.
 Newest at the top.
 
+## 2026-10-01 -- ON1: a gate view that passed on the wrong surface
+- cell_oren.sh's second Vault view passed 100% in ON1, but its clean pixels were mostly the ground steam, drawn
+  untextured through the lit program (gloss mean 0.97). Once the steam drew as an effect it covered the probes
+  and the view fell to SKIP; the checker's gloss-smoothness limit (2/255) had been keeping only such flat
+  sheets. Rule: when a gate view passes, look at WHICH surfaces its sampled pixels are on (a probe-9 / albedo
+  map of the kept pixels), not only at the share.
+
+## 2026-10-01 -- RIM1: a before/after sent from behind a wall
+- The rim before/after for the Vault was shot from a camera picked by distance from the cell's center, not by
+  where a player can stand. It sat behind the cryo wall, outside the playable area (bungo: "You sent me a pic
+  from behind a wall"). Its foreground also held the steam drawn as dark solid shapes, which nobody had looked
+  for. Rule: a picture for bungo is shot from where the player stands (pick the camera from the placed refs:
+  the walkway between the pods, not the cell center) and is looked at whole before it is sent.
+
+## 2026-10-01 -- RIM1: "the No Rim flag does not gate the rim" from one transcribed shader
+- PRTP_PLAN 2n first said the LIGH "No Rim Lighting" flag does not remove the back-light term, because the FO4CS
+  transcription of the light shader computes it unconditionally. A transcription is ONE compiled variant; the
+  game builds a variant per light switch. Comparing the shipped variants with and without the bit showed the
+  flag removes exactly the rim (and "Ignore Roughness" removes the rim and the Oren-Nayar shaping), on ~15,000
+  placed lights, half or more of most interiors. Rule: what a flag does is read from the variants that differ
+  by that flag, never from one variant's source.
+
 ## 2026-10-01 -- engine function names and addresses in public source comments
 - The sky / fog / ambient lanes (PBRWX1, PBRR3, FOG1) wrote the engine's own function names with exe addresses into
   src/esmweather.h/.cpp, src/gl/lookdevstage.h/.cpp and res/shaders/pbrm_default.frag, against the repo rule

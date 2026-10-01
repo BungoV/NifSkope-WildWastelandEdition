@@ -3,8 +3,8 @@
 // (fo4_cell.frag); src/gl/celllights.cpp sets every uniform.
 
 uniform bool cellOn;
-uniform samplerBuffer cellLights;	// 5 texels a light: pos+radius, color+cosOuter (-2 omni), dir+cone, bias scale exponent noSpec,
-									// shadow slot (-1 none) kind near-clip xlig-bias
+uniform samplerBuffer cellLights;	// 5 texels a light: pos+radius, color+cosOuter (-2 omni), dir+cone, bias scale exponent flags
+									// (1 noSpec, 2 noRim, 4 ignoreRoughness), shadow slot (-1 none) kind near-clip xlig-bias
 uniform int cellLightCount;
 uniform vec4 cellRow[3];			// world = (dot(row.xyz, posView) + row.w), the view's inverse
 uniform bool cellHasDalc;
@@ -15,7 +15,8 @@ uniform vec3 cellDirTo;				// world, TO the light
 uniform bool cellInterior;
 uniform vec3 cellCenter;
 uniform int cellProbe;
-uniform int cellRed;				// 1 linear: the radial curve without its 2.2
+uniform int cellRed;				// 1 linear: the radial curve without its 2.2; 8 lambert, 16 normalised, 32 norim,
+									// 64 rimflags (the lights' rim / roughness flags ignored)
 // lane PRTPGI: the bake relit by these lights (src/probegi.h), six axis slabs of dims.z each, x fastest;
 // rgb = irradiance x valid, a = valid (so a filtered sample divides by its own valid)
 uniform bool cellGiOn;
@@ -168,7 +169,7 @@ vec3 cellLightE( int i, vec3 P, vec3 N, out vec3 L, out bool noSpec )
 	}
 	if ( a > 0.0 )
 		a *= cellShadowF( i, P, N );
-	noSpec = t3.w >= 0.5;
+	noSpec = ( int( t3.w + 0.5 ) & 1 ) != 0;
 	return t1.rgb * a;
 }
 
@@ -239,12 +240,25 @@ float cellOren( vec3 N, vec3 L, vec3 V, float NdotL, float gloss )
 	return max( cosPhi, 0.0 ) * B * geom + A;
 }
 
+/* Lane RIM1: the game's back-light term, added to the diffuse by every light and the sun (legacy materials; the
+ * PBR branch drops it): saturate(dot(V, -L)) x (1 - NdotV)^0.01 x (1 - gloss), times NdotL and the light like the
+ * diffuse (the shadow scales it too). Bright where the camera looks toward the lamp across a rough surface. */
+float cellRim( vec3 N, vec3 L, vec3 V, float gloss )
+{
+	if ( ( cellRed & ( 8 | 32 ) ) != 0 )
+		return 0.0;	// WW_CELL_LIT_RED=lambert / norim
+	float edge = pow( clamp( 1.0 - dot( N, V ), 0.0, 1.0 ), 0.01 );
+	return clamp( dot( V, -L ), 0.0, 1.0 ) * edge * ( 1.0 - gloss );
+}
+
 /* the placed lights at world point P, world normal N: the irradiance (Lambert, what the GI, the reflection and
  * probe 1 read), the game's Oren-Nayar diffuse (what the albedo takes) and the specular sum */
+vec3 cellRimSum;	// lane RIM1: the rim part of diffOn alone, for probe 10 (set by cellSumLights)
 void cellSumLights( vec3 P, vec3 N, vec3 Vw, float gloss, out vec3 diff, out vec3 diffOn, out vec3 spec )
 {
 	diff = vec3( 0.0 );
 	diffOn = vec3( 0.0 );
+	cellRimSum = vec3( 0.0 );
 	spec = vec3( 0.0 );
 	for ( int i = 0; i < cellLightCount; i++ ) {
 		vec4 t0 = texelFetch( cellLights, i * 5 );
@@ -269,8 +283,12 @@ void cellSumLights( vec3 P, vec3 N, vec3 Vw, float gloss, out vec3 diff, out vec
 			a *= cellShadowF( i, P, N );	// lane SHADOW1
 		vec3 E = t1.rgb * a * NdotL;
 		diff += E;
-		diffOn += E * cellOren( N, L, Vw, NdotL, gloss );
-		if ( t3.w < 0.5 )
+		// lane RIM1: No Rim Lighting (2) drops the back-light; Ignore Roughness (4) also takes Lambert's diffuse
+		int fl = int( t3.w + 0.5 ) & ( ( cellRed & 64 ) != 0 ? 1 : 7 );	// WW_CELL_LIT_RED=rimflags
+		float rim = ( fl & 6 ) != 0 ? 0.0 : cellRim( N, L, Vw, gloss );
+		diffOn += E * ( ( ( fl & 4 ) != 0 ? 1.0 : cellOren( N, L, Vw, NdotL, gloss ) ) + rim );
+		cellRimSum += E * rim;
+		if ( ( fl & 1 ) == 0 )
 			spec += E * cellSpecGame( N, L, Vw, gloss );
 	}
 }
@@ -318,7 +336,7 @@ vec3 cellLit( vec3 color, vec3 albedo, vec3 normalView, vec3 posView, vec3 Vview
 		float nl = dot( N, Ld );
 		vec3 dir = cellDirColor * max( nl, 0.0 );
 		E += dir;
-		Ed += dir * cellOren( N, Ld, Vw, nl, gloss );
+		Ed += dir * ( cellOren( N, Ld, Vw, nl, gloss ) + cellRim( N, Ld, Vw, gloss ) );
 	}
 	vec3 lin = alb * Ed + spec * specMask * specCol + envSpec * envSpec * E;
 	return sqrt( max( lin, vec3( 0.0 ) ) ) + emissive;
@@ -331,10 +349,13 @@ vec3 cellProbeOut( vec3 normalView, vec3 posView, float alphaR, float kSmith )
 	vec3 N = cellWorldDir( normalView );
 	if ( cellProbe == 5 )
 		return cellGiOn ? clamp( cellGiE( P, N ) * 0.31830989, 0.0, 1.0 ) : vec3( 0.0 );
-	if ( cellProbe == 1 || cellProbe == 8 ) {
-		// 1: the irradiance / 4; 8 (lane ON1): the game's Oren-Nayar diffuse / 4, seen from the camera
+	if ( cellProbe == 1 || cellProbe == 8 || cellProbe == 10 ) {
+		// 1: the irradiance / 4; 8 (lanes ON1, RIM1): the game's diffuse (Oren-Nayar + rim) / 4, seen from the camera;
+		// 10 (lane RIM1): the rim alone x 4, sixteen times probe 8's reach, so the per-light rim flags show
 		vec3 diff, diffOn, spec;
-		cellSumLights( P, N, cellProbe == 8 ? cellWorldDir( -posView ) : N, 1.0 - sqrt( alphaR ), diff, diffOn, spec );
+		cellSumLights( P, N, cellProbe == 1 ? N : cellWorldDir( -posView ), 1.0 - sqrt( alphaR ), diff, diffOn, spec );
+		if ( cellProbe == 10 )
+			return clamp( cellRimSum * 4.0, 0.0, 1.0 );
 		return clamp( ( cellProbe == 8 ? diffOn : diff ) * 0.25, 0.0, 1.0 );
 	}
 	if ( cellProbe == 9 )

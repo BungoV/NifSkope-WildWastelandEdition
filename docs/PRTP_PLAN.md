@@ -370,7 +370,9 @@ Gate: `tests/spells/cell_fog.sh` + `cell_fog_check.py`: its own plugin walk and 
 against fog probe 6 (alpha, height blend) and 7 (colour) at positions from probes 2 + 3, the camera from
 WW_CELL_CAM_DUMP. Fog probe 8 echoes the distance and height each fragment's fog read; only pixels where that
 matches the position probes count (at least 60% must), since some surface over Solomon's house and the Vault
-serves the fog probes and not the position ones (named in MISTAKES.md; which program draws it is still open).
+served the fog probes and not the position ones (named in MISTAKES.md). Found in lane EFX1: the effect shapes
+(the Vault's steam), which take no cell uniforms; probe passes now skip them (2o) and the same-surface share is
+100% in all three cells (was 74-83%).
 Reds noclamp / nogamma / noinherit must each FAIL in at least one of the three cells.
 
 ### 2m. The game's diffuse: Oren-Nayar (lane ON1, 2026-10-01)
@@ -391,8 +393,58 @@ green failure, never a red's). `WW_CELL_LIT_RED=normalised` (the textbook cosPhi
 measured, its gap to the game's form peaks at about half the 8-bit tolerance in the Vault (p99 0.53x), so no
 check at this precision can fail it.
 
+### 2n. The game's back-light rim term (lane RIM1, 2026-10-01)
+
+Every legacy light shader (point, shadowed point, spot) and the sun add a second diffuse term next to the BRDF:
+rim = saturate(dot(V, -L)) x (1 - NdotV)^0.01 x (1 - gloss), times NdotL and the light, so the shadow and the
+radial / cone weight scale it like the diffuse (read from the FO4CS transcription of the shipped light shaders;
+the PBR branch drops it). The (1 - NdotV)^0.01 is about 1 except exactly head-on. It is bright where the camera
+looks toward a lamp across a rough surface. `cell_lights.glsl` cellRim adds it to cellOren's factor for the
+placed lights and the cell's directional light; probe 8 carries the sum. Red `norim` (WW_CELL_LIT_RED, bit 32)
+drops it; measured before the build, 7.9% of Vault view 1's lit pixels move past the tolerance (lit share falls
+to about 92%, under the 95% bar). Gate: cell_oren.sh, reds `lambert` and `norim`.
+Two LIGH flags opt a light out. The game compiles a separate light-shader variant for each, and the shipped
+variants were compared pairwise (same variant with and without the bit, instructions diffed):
+"No Rim Lighting" (0x80000, 15,208 placed refs) removes exactly the rim and nothing else; "Ignore Roughness"
+(0x40000, 56 refs) removes the rim AND the Oren-Nayar shaping (the diffuse is max(NdotL, 0)), and leaves the
+specular as it was. No shipped variant with either bit carries the rim. Most interiors are 50-70% No-Rim lights
+(Institute Concourse 1,125 of 1,753); Vault111Cryo is the outlier at 42 of 843. celllights.cpp packs the two
+flags with No Specular into the light's 4th texel's w (1 noSpec, 2 noRim, 4 ignoreRoughness); the notes echo
+`norim=N ignorerough=N`. Red `rimflags` (bit 64) ignores the two flags.
+Probe 8 cannot see them: over 22 shot sets, the pixels where honoring the flags moves probe 8 by more than twice
+the tolerance were 0-126 (InstituteConcourse 6 of 18,029 lit), and the red passed. A no-rim light's rim is
+small beside the whole diffuse at /4. Probe 10 writes the placed lights' rim alone x 4 (cellRimSum, set by
+cellSumLights); offline, from the position / normal / gloss probes already shot, honoring the flags moves it past
+twice the tolerance on 12,178 of Vault view 1's 180,685 clean pixels and 1,157 of the Institute's 29,446.
+cell_oren_check.py judges it over the pixels where either side shows a rim (at least 95% within tolerance).
+Result (exe 2026-10-01 16:34): green 100% / 100% (rim 100% / 99.1%); red rimflags FAILs view 1 (rim 43.4%),
+norim and lambert FAIL both views (rim 0%). The checker's neighbour-gloss limit went from 2/255 to 12/255:
+at 2 only flat-gloss surfaces survived, and view 2 had passed on the untextured steam sheets (gloss 0.97);
+with no limit at all its pixels still agree 99.9%.
+
+### 2o. Effects set in the NIF; refraction-only shapes (lane EFX1, 2026-10-01)
+
+A BSEffectShaderProperty that names no .bgem keeps its whole look in the NIF. The cell view drew those through
+the lit program, untextured: the Vault 111 ground steam (MistGroundWaterSteam02Mini.nif) came out as flat dark
+shapes on the cryo floor (bungo, circled). lodgen keeps the property's serialized block (LodSrcShape effectBlock,
+cell view only); cellview writes it back as the bucket's effect property with its controller link cut. The
+welded scene holds one frame, so a looping float controller on it (Base Color Scale, falloff opacities, alpha)
+is drawn at its time-weighted mean over the keys. Vault111Cryo: 107 such buckets.
+A BSLightingShaderProperty with Shader Flags 1 bit 15 (Refraction) shows in game only as a bend of what is behind
+it; WaterSplashDrips.nif's scrolling ring takes a normal map as its diffuse. With no refraction pass here it drew
+as a solid swirled disk on the walkway; it is left out and counted (Vault111Cryo: 21 shapes).
+The effect program takes no cell uniforms, so in a harness probe pass (WW_CELL_LIT_PROBE, WW_CELL_FOG_PROBE) an
+effect wrote its own colour over the surface measured; bsshape.cpp skips effect shapes there (wwCellProbePass).
+Pictures keep every effect. lodgen: the block is read after every field the bake uses, so the bake is unchanged
+by construction; lodgen_native_baseline --check shows the same 8 stale region / arrays files as before.
+
 ## 3. Open
 
 - `.tbk` v4: two surfel sides per cell (gives back the refused thin-wall weight), room ids (2f).
 - Glass tint in the bake.
 - Save names for the PRTP4 capture flights.
+- FraternalPost11501 seen from straight above (center 553,2170,400, distance 600) and PickmanGallery01 (562,440,150):
+  probe 8 and the diffuse check part on 13% / 9% of clean pixels, flags honoured or not. The Fraternal patch
+  is a wall strip beside two lamps; probe 8 reads about 2x the model there and 0.2x on the floor under them.
+  No single light's removal explains it, and the pixels are front-facing. Overlay sheets (dirt / decal cards over
+  the walls) are the suspect. Not a gate view until named (diag: scratchpad/rim1_20261001/green_diag.py).

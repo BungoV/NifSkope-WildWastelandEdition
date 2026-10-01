@@ -8,17 +8,23 @@
 #   probe 2/3  every cell-lit fragment writes its world position (high, low bytes), 4 its world normal
 #   probe 8    ... the placed lights' Oren-Nayar diffuse / 4, seen from the camera, raw
 #   probe 9    ... the gloss that diffuse used (red; the legacy program only)
+#   probe 10   ... the placed lights' rim alone x 4 (lane RIM1: big enough for the per-light rim flags to show)
 # Then tests/spells/cell_oren_check.py rebuilds each sampled pixel's sum from the plugin's lights (the
 # cell_lit_check.py walk) with the game's diffuse written out again, V from the camera dump, and compares.
 #
 # RED CONTROL (must FAIL in at least one view; a view with too little data says SKIP, never FAIL):
 #   --red lambert     the diffuse factor read as 1 (what PRTP3 drew)
+#   --red norim       the game's back-light rim term dropped (lane RIM1; measured before it was built: 7.9% of
+#                     Vault view 1's lit pixels move past the tolerance)
+#   --red rimflags    the lights' No Rim Lighting / Ignore Roughness flags ignored (lane RIM1; in probe 8 only 6
+#                     of 18,029 lit Institute pixels move, so probe 10 judges it: 12,178 of Vault view 1's clean
+#                     pixels move past twice the tolerance there, measured before it was built)
 # (WW_CELL_LIT_RED=normalised, the textbook azimuth cosine, is NOT a red: measured 2026-10-01 its gap to the
 # game's form peaks at about half the 8-bit tolerance in the Vault, so no check at this precision can fail it.)
 #
 # CELLS entries are "EDID" or "EDID@x,y,z" (a second camera in the same cell; the shots are named EDID@x,y,z).
 #
-# USAGE  bash tests/spells/cell_oren.sh [--red lambert]
+# USAGE  bash tests/spells/cell_oren.sh [--red lambert|norim|rimflags]
 
 set -u
 
@@ -96,7 +102,7 @@ for entry in $CELLS; do
 		[ "$(shoot "$entry" lit WW_CELL_LIT=1)" = 1 ] || ok=0
 		[ "$(shoot "$entry" lambert WW_CELL_LIT=1 WW_CELL_LIT_RED=lambert)" = 1 ] || ok=0
 	fi
-	for p in 2 3 4 8 9; do
+	for p in 2 3 4 8 9 10; do
 		[ "$(shoot "$entry" probe$p WW_CELL_LIT=1 WW_CELL_LIT_PROBE=$p "${redenv[@]}")" = 1 ] || ok=0
 	done
 	check "$entry: pictures written" "$ok"
