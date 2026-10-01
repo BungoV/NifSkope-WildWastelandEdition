@@ -206,7 +206,7 @@ WwSkyClock wwSkyClock( double hour, const unsigned char tnam[4], const WwSkyGmst
 	c.C = ssMid - hh;
 	c.D = ssMid + hh;
 
-	// the disc alpha (Sun::Update)
+	// the disc alpha (the engine's)
 	if ( t < c.A || t > c.D )
 		c.sunAlpha = 0.0f;
 	else if ( t < c.B )
@@ -696,7 +696,7 @@ bool EsmWeather::read( quint32 formID, WwWeatherData & out, QString * why )
 			*why = QString::fromLatin1( e.what() );
 		return false;
 	}
-	// TESWeather::Load: an FNAM that is not 0x48 bytes gets the near height pair copied into the far pair
+	// the engine's weather load: an FNAM that is not 0x48 bytes gets the near height pair copied into the far pair
 	if ( out.fogFnamSize != 72 )
 		std::copy( out.fog + 8, out.fog + 12, out.fog + 14 );
 	out.nam0Size = out.nam0.size();
@@ -981,9 +981,9 @@ float EsmWeather::cloudSpeed( quint8 b, const WwSkyGmst & g )
 
 /* ------------------------------------------------------------------------
  * The engine fog (lane FOG1). The law: scratchpad/pbrprep1_20260924/spec_fog.md
- * (Sky::UpdateFog 0x64f940@155 for the day weight, Sky::SetColor + UpdateColors
- * for the colours, SetPerFrameConstants 0x1d11150@155 for the packing, the
- * engine composite shader for the formula), checked against fog_model.py.
+ * (the engine's fog update for the day weight, its color blend for the colours,
+ * its per-frame constants for the packing, the engine composite shader for the
+ * formula), checked against fog_model.py.
  * ---------------------------------------------------------------------- */
 
 float wwFogDayWeight( double h, const unsigned char tnam[4], double ext )

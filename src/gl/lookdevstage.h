@@ -24,8 +24,8 @@ BSD License - see nifskope.h
  * DALC axis orientation is an ASSUMPTION from physics, not a measurement: the
  * axis name is the light's travel direction, so the Z- colour (the bright sky
  * blue) lights UP-facing normals. The discriminator is the engine function that
- * builds the directional-ambient matrix (Todd's treat candidate Sky::SetDirectionalAmbientBlend,
- * 1.10.155 RVA 0x652F30) -- owed. Red "dalcflip" swaps the sign convention.
+ * builds the directional-ambient matrix (a Todd's treat candidate is known) -- owed.
+ * Red "dalcflip" swaps the sign convention.
  *
  * Harness pins (read once): WW_LOOKDEV=1 (mode Lookdev), WW_LOOKDEV_PLUGINS=<a,b,..>
  * (load list; bare names resolve in the Data folder), WW_LOOKDEV_PLUGIN=<one plugin,
@@ -53,7 +53,7 @@ BSD License - see nifskope.h
  *
  * The weather fog (lane FOG1): one Fog row, ships OFF, live. The engine fog of
  * the picked WTHR at the hour (esmweather.h WwFog: FNAM day/night on
- * Sky::UpdateFog's weight, the NAM0 fog colours in CIELab x NAM4, pow 2.2),
+ * the engine's fog day weight, the NAM0 fog colours in CIELab x NAM4, pow 2.2),
  * the composite formula in res/shaders/lookdev_fog.glsl, applied to scene
  * geometry (ground, PBR, legacy fo4_default) in LINEAR light before the
  * exposure and the view transform; the dome, moon, sun and clouds are never

@@ -533,8 +533,8 @@ void main()
 		vec3 irr = texture( IrradianceMap, reflMatrix * s.N ).rgb;
 		if ( sceneMode == 2 ) {
 			// Lookdev: the weather's DALC 6-axis ambient on the WORLD normal (Z up).
-			// An up-facing normal takes the Z- colour: MEASURED (lane PBRR3, 1.10.155
-			// BSShaderManager::SetDirectionalAmbientColors RVA 0x27D64D0 builds the Z
+			// An up-facing normal takes the Z- colour: MEASURED (lane PBRR3, the engine
+			// builds the Z
 			// row as 0.5 (Z- - Z+), dotted with the normal, never negated). The engine
 			// blends linearly in the normal, in gamma space; this n^2 pick owes that.
 			vec3 wn = envMapRotation * s.N;

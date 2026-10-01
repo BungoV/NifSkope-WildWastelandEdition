@@ -27,9 +27,9 @@ BSD License - see nifskope.h
  *     a compressed record).
  *   - the climate clock: CLMT TNAM (10-minute units), DefaultClimate 0000015F
  *     unless another is named.
- *   - the time-of-day blend (engine GetTimes: 0.5 h extension, four-quarter
- *     ramps; FO4CS docs/RE/solar-daynight.md) and the vanilla sun: the tent arc
- *     of Sun::Update (fSunXExtreme 400, fSunYExtreme 25) and the light's bias and
+ *   - the time-of-day blend (the engine's: 0.5 h extension, four-quarter
+ *     ramps; FO4CS docs/RE/solar-daynight.md) and the vanilla sun: the engine's
+ *     tent arc (fSunXExtreme 400, fSunYExtreme 25) and the light's bias and
  *     floor (fSunShadowScale -15 as Fallout4.esm sets it, fSunShadowMinAngle 30,
  *     both through the engine's DEG_TO_RAD; FO4CS src/Sky/SolarPosition.h).
  *
@@ -50,16 +50,15 @@ BSD License - see nifskope.h
  * PBRPREP1 specs (scratchpad/pbrprep1_20260924/spec_weather_sky.md,
  * spec_clouds.md, spec_moon.md):
  *   - the sky GMSTs read from the loaded plugins by EditorID (last plugin
- *     wins), the 1.10.155 .data values when none sets them (WwSkyGmst);
- *   - Sun::Update's arc: midpoint windows A..D, the night branch, the disc
+ *     wins), the game's defaults when none sets them (WwSkyGmst);
+ *   - the engine's sun arc: midpoint windows A..D, the night branch, the disc
  *     fade over fSunAlphaTransTime, the light's bias and floor (WwSkyClock);
- *   - the time-of-day colour blend in CIELab, exactly as Sky::SetColor
- *     0x6510e0@155 does it (ColorRGBtoCIELab 0x657ac0, ColorCIELabToRGB
- *     0x657880, constants read from the exe);
+ *   - the time-of-day colour blend in CIELab, as the engine does it (its own
+ *     RGB <-> CIELab conversions and constants);
  *   - the WTHR cloud layers (x0TX, LNAM, NAM1, PNAM, JNAM, QNAM, RNAM, ONAM),
  *     the sun-glare byte (DATA[4]) and the IMGS Sky Scale (IMSP -> HNAM[7]);
- *   - the moon: phase from the game day (Moon::UpdatePhase), alpha by the
- *     angle fades (Moon::Update), position = the sun's (same arc).
+ *   - the moon: phase from the game day, alpha by the angle fades, position =
+ *     the sun's (same arc).
  * More red controls (the engine clock's gates, tests/spells/pbr_wx1_gates.sh):
  *   exegmst       the plugins' GMSTs ignored, the exe values used
  *   rgbblend      the ToD colour blend on bytes instead of CIELab
@@ -120,7 +119,7 @@ struct WwTodKeys
  *  LateSunset -> Night. Linear t inside a quarter. */
 WwTodKeys wwTodKeys( double hour, const unsigned char tnam[4], double ext = 0.5 );
 
-//! the vanilla sun disc position (Sun::Update tent arc), not normalised; z < 0 below the horizon
+//! the vanilla sun disc position (the engine's tent arc), not normalised; z < 0 below the horizon
 void wwVanillaSunPos( double hour, const unsigned char tnam[4], float pos[3] );
 //! the direction TO the light (unit), the engine's biased and floored copy of the disc direction
 void wwVanillaSunLightDir( double hour, const unsigned char tnam[4], float dir[3] );
@@ -152,7 +151,7 @@ struct WwSkyGmst
 	QString describe() const;
 };
 
-//! the engine's sky clock at one hour (Sun::Update / Moon::Update / Stars::Update)
+//! the engine's sky clock at one hour (sun, moon, stars)
 struct WwSkyClock
 {
 	double hour = 12.0;
@@ -160,26 +159,26 @@ struct WwSkyClock
 	float sunPos[3] = {};	// SunPos (x*X, Y, |X| - |x*X|), not normalised; the moon sits on it too
 	float lightDir[3] = {};	// TO the light, unit: normalised, z + fSunShadowScale, floored at fSunShadowMinAngle
 	float sunAlpha = 0.0f;	// the disc alpha
-	float starsAlpha = 0.0f;	// Stars::Update's alpha (the moon shadow disc takes min with it)
+	float starsAlpha = 0.0f;	// the stars' alpha (the moon shadow disc takes min with it)
 	WwTodKeys keys;	// the colour keys, fDaytimeColorExtension
 };
 WwSkyClock wwSkyClock( double hour, const unsigned char tnam[4], const WwSkyGmst & g );
-//! Moon::Update's alpha: fades in after D, out before A, by fAngleFadeStart/End x T/2
+//! the moon's alpha: fades in after D, out before A, by fAngleFadeStart/End x T/2
 float wwMoonAlpha( const WwSkyClock & c, const WwSkyGmst & g, float fadeStart, float fadeEnd );
-//! Moon::UpdatePhase: (int(days) mod 8L) / L, L = moons & 0x3F; -1 when L is 0 (no phase change)
+//! the moon phase: (int(days) mod 8L) / L, L = moons & 0x3F; -1 when L is 0 (no phase change)
 int wwMoonPhase( double gameDays, unsigned char moons );
-//! the Moon::Phase suffix: full, three_wan, half_wan, one_wan, new, one_wax, half_wax, three_wax
+//! the phase's texture suffix: full, three_wan, half_wan, one_wan, new, one_wax, half_wax, three_wax
 const char * wwMoonPhaseSuffix( int phase );
-//! the cloud scroll offset: fract(speed * 0.1 * seconds), REAL seconds (Clouds::Update, 0.1 at 0x2c5442c@155)
+//! the cloud scroll offset: fract(speed * 0.1 * seconds), REAL seconds (the engine's constant 0.1)
 float wwCloudOffset( float speed, double seconds );
 //! elevation / azimuth of a sky vector, degrees (azimuth = atan2(x, y) mod 360: the numbers of spec_moon.md s2 / moon_model_out.txt, 180 at 01:00; its prose says -y, its table does not)
 void wwSkyAngles( const float v[3], double * elevDeg, double * azimDeg );
 
-//! the engine's CIELab conversions, 0..1 RGB (ColorRGBtoCIELab 0x657ac0 / ColorCIELabToRGB 0x657880 @155)
+//! the engine's CIELab conversions, 0..1 RGB
 void wwRgbToLab( const float rgb[3], float lab[3] );
-//! Lab -> RGB with the engine's sRGB encode and clamp (NiColor::Clamp)
+//! Lab -> RGB with the engine's sRGB encode and clamp
 void wwLabToRgb( const float lab[3], float rgb[3] );
-//! Sky::SetColor: two keys blended in CIELab; bytes in, 0..1 out
+//! the engine's color blend: two keys blended in CIELab; bytes in, 0..1 out
 void wwLabBlend( const unsigned char a[3], const unsigned char b[3], float t, float rgb[3] );
 
 //! the climate the engine clock reads: TNAM 6 bytes (TNAM[5] = moons / phase length), FNAM, GNAM
@@ -246,7 +245,7 @@ struct WwWeatherData
 };
 
 /*! The engine fog at one hour (lane FOG1, spec_fog.md 2.1-2.3): the FNAM floats
- *  blended day <-> night on Sky::UpdateFog's weight, the four NAM0 fog colours
+ *  blended day <-> night on the engine's fog day weight, the four NAM0 fog colours
  *  (rows 1 / 12 / 17 / 18) blended in CIELab on the colour keys, times the NAM4
  *  scale blended on the same keys, then pow 2.2; and the cb12 packing the
  *  shader reads (K = cb12[41..46]). */
@@ -264,7 +263,7 @@ struct WwFog
 	float K[6][4] = {};	// cb12[41..46]
 	QString describe() const;
 };
-//! Sky::UpdateFog's day weight: linear ramps rb..re up, sb..se down (rb, se widened by ext)
+//! the engine's fog day weight: linear ramps rb..re up, sb..se down (rb, se widened by ext)
 float wwFogDayWeight( double hour, const unsigned char tnam[4], double ext );
 WwFog wwFogAt( const WwWeatherData & w, double hour, const unsigned char tnam[4], const WwSkyGmst & g );
 //! K from the scalars and the (linear) colours above; wwFogAt's tail, shared with the interior fog (lane FOG2)
@@ -317,12 +316,12 @@ public:
 	//! blend helper: linear-interpolated bytes (0..255 floats) of a colour row
 	static void blendRow( const WwWeatherData & w, int row, const WwTodKeys & k, float rgb[3] );
 	static void blendDalc( const WwWeatherData & w, int axis, const WwTodKeys & k, float rgb[3] );
-	//! the engine's blend of a NAM0 row: CIELab (Sky::SetColor), 0..255 floats out
+	//! the engine's blend of a NAM0 row: CIELab, 0..255 floats out
 	static void blendRowLab( const WwWeatherData & w, int row, const WwTodKeys & k, float rgb[3] );
 	/*! one cloud layer at the keys: colour (CIELab, 0..255 floats) and alpha (float blend).
-	 *  A layer >= LNAM reads layer 0 (GetCloudColor / GetCloudAlpha clamp). */
+	 *  A layer >= LNAM reads layer 0 (the engine clamps the index). */
 	static void blendCloud( const WwWeatherData & w, int layer, const WwTodKeys & k, float rgb[3], float * alpha );
-	//! the IMGS Sky Scale at the keys (linear blend, Sky::UpdateHDRValues)
+	//! the IMGS Sky Scale at the keys (linear blend, as the engine's)
 	static float blendSkyScale( const WwWeatherData & w, const WwTodKeys & k );
 	//! a cloud speed byte -> uv speed: fWeatherCloudSpeedMax * (2b/254 - 1)
 	static float cloudSpeed( quint8 b, const WwSkyGmst & g );

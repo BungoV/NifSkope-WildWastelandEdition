@@ -925,7 +925,7 @@ const SkyMesh * domeMesh( Scene * scene, QString * why )
 	return m.domeOk ? &m.dome : nullptr;
 }
 
-//! Clouds.nif: root child k that is a shape = layer k (Clouds::Init), capped at 32
+//! Clouds.nif: root child k that is a shape = layer k (as the engine loads them), capped at 32
 const QVector<SkyMesh> * cloudMeshes( Scene * scene, QString * why )
 {
 	SkyMeshes & m = skyMeshes();
