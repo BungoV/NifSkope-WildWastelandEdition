@@ -12,6 +12,7 @@ See the LICENSE.md file for the full license text.
 #include "nifcli.h"
 #include "probeplace.h"
 #include "probebake.h"
+#include "probefar.h"		// lane PRTPFAR
 
 #include "freezeanim.h"
 #include "gamemanager.h"
@@ -7362,6 +7363,14 @@ int nifskopeCliMain( const QStringList & args )
 	// (lane PRTPBAKE; src/probebake.cpp)
 	if ( cmd == QLatin1String( "probebake" ) ) {
 		const int rc = probeBakeCli( a );
+		out().flush();
+		err().flush();
+		return rc;
+	}
+	// `probefar` bakes the far map: one hoisted probe per cell from the world's LOD files
+	// (lane PRTPFAR; src/probefar.cpp)
+	if ( cmd == QLatin1String( "probefar" ) ) {
+		const int rc = probeFarCli( a );
 		out().flush();
 		err().flush();
 		return rc;

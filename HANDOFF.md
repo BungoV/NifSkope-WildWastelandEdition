@@ -1,5 +1,13 @@
 # Handoff — NifSkope, Wild Wasteland Edition
 
+## TOP BLOCK -- written 2026-10-01 04:49 (`date`-read): PRTPFAR, the far map, on main
+
+- `probefar` (src/probefar.cpp, docs/PRTP_PLAN.md 2h): whole Commonwealth from the installed FO4CSLOD
+  Commonwealth.lodl/.lodi/.VT.32.lodt -> 36864 hoisted probes, 265 MB, 51 s. Gate probe_far.py PASS, 3 reds FAIL.
+  Map picture: scratchpad/far_20261001/far_map.png (bounce colour | sky share). Not done: the FO4CS reader
+  (last, standing order); objects other than occluder boxes (trees, small props) are not in the far soup.
+- Next: PRTP3 viewport lights, glass tint in the bake, the stale lodgen_native_baseline.
+
 ## TOP BLOCK -- written 2026-10-01 04:23 (`date`-read): shattered glass drawn by the effect shader
 
 - bungo: "doesn't that glass have holes in it" / "the black areas on the glass?". Cell view BGEM shapes now go

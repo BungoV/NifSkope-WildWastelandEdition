@@ -36,6 +36,7 @@ struct ProbeBakeSpec
 	quint32 maxLinks = 1024;    //!< FO4CS's in-game bake keeps 256 (BakeConfig::maxLinksPerProbe); the
 	                            //!< relight reads any count. 256 drops 0.04 of the sphere on busy probes
 	                            //!< (the reference gate's irradiance error: 0.111 at 256, 0.059 at 1024)
+	float sector = 4096.0f;     //!< a `.tbk` file's square (FO4CS: one exterior cell); the far map keeps it
 	float rayMax = 131072.0f;   //!< a ray that meets nothing this far is sky
 	int threads = 0;            //!< 0 = the machine's
 	/*! An interior cell: no sky. A ray that meets nothing left through an opening

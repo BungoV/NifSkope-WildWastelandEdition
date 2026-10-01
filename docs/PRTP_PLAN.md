@@ -239,6 +239,34 @@ runs the structure and budget checks on any baked folder. A `--no-sky` leg re-ba
 the same links, zero sky and the sky's weight in unlinked. Sanctuary -20,7 (256 probes), Concord -15,17 (658) and
 the Museum interior (975, sky 0) pass.
 
+## 2h. The far map -- lane PRTPFAR (2026-10-01)
+
+bungo: "the top down bakes from the division games for far areas ... so that GI works on areas far from you".
+The Division's distant shading (slide 57) and FO4CS's own charter for its far tier ("one sky-lit probe hoisted
+above each sector's roofline ... stored per sector ... relit with the same live sun/sky feeds", Codex HANDOFF):
+a place with no near probes loaded still gets measured bounce light.
+
+`NifSkope -no-gui probefar --lodl <world>.lodl --lodi <world>.lodi --out <dir>` (src/probefar.cpp). Built from
+the worldspace's LOD files, never from loaded cells:
+- Ground: the `.lodl` heightfield every 8 samples (1024-unit quads), colour = the mean of the `.VT.32.lodt`
+  colour sheet over the quad (sRGB decoded to linear). Water: the cell's water plane over quads below it.
+- Buildings: the `.lodi` occluder boxes (fitted INSIDE each object's own LOD mesh, so never too big). A box
+  raises the roofline of every cell its footprint crosses (a long building over a border first stood
+  1583 units over its neighbour's probe; the gate caught it).
+- One probe per cell at the cell's middle, 512 units over the roofline (ground top, water, boxes).
+- The same bake as the near probes (2g), surfel cell 1024, one `.tbk` v3 file per 16 x 16 cells
+  (`sector_X_Y.tbk`, X = floor(x / 16384)); the folder's `far.txt` states the square, the surfel cell and the
+  hoist, because the `.tbk` header does not carry the square.
+- Sizes measured on the whole Commonwealth (36864 probes, 1.9M triangles): surfel 512 / a file a cell = 731 MB;
+  1024 / 16 x 16 = 265 MB, 51 s; 2048 = 161 MB. Irradiance against the brute-force reference (Concord block,
+  48 probes): 512 -> 0.011 / 0.026, 1024 -> 0.027 / 0.046, 2048 -> 0.053 / 0.094 (median / p95). 1024 kept.
+
+Gate: `tests/spells/probe_far.py <exe> <lodl> <lodi> <workdir> --ref <prtp_reference.exe>` on an 11 x 11 block
+around Concord: heights (every sample inside its cell's stored range), one probe per cell at its middle, the
+roofline (each probe at least the hoist over every soup vertex in its cell), colour from the sheet, the
+structure check, and the reference gate. PASS; `--red shift` (heights a cell off), `--red hoist` (under the
+roofs) and `--red manifest` (no far.txt) FAIL. The FO4CS reader comes last, by standing order.
+
 ## 3. Open
 
 - `.tbk` v4: two surfel sides per cell (gives back the refused thin-wall weight), room ids (2f).

@@ -325,6 +325,7 @@ HEADERS += \
 	src/cellview.h \
 	src/probealbedo.h \
 	src/probebake.h \
+	src/probefar.h \
 	src/probebvh.h \
 	src/probeplace.h \
 	src/cellrefs.h \
@@ -554,6 +555,7 @@ SOURCES += \
 	src/cellview.cpp \
 	src/probealbedo.cpp \
 	src/probebake.cpp \
+	src/probefar.cpp \
 	src/probeplace.cpp \
 	src/cellrefs.cpp \
 	src/cellworkspace.cpp \

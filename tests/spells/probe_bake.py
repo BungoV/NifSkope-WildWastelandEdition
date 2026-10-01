@@ -152,6 +152,13 @@ def in_room(p, pad=0.0):
 def structure(files, fails):
     """Parse every file; per-file invariants. Returns [(file, tbk)]."""
     out = []
+    sector = 4096.0
+    if files:   # the far map states its own square (src/probefar.cpp far.txt); FO4CS's near bake is a cell
+        man = os.path.join(os.path.dirname(files[0]), 'far.txt')
+        if os.path.isfile(man):
+            for line in open(man):
+                if line.startswith('sector '):
+                    sector = float(line.split()[1])
     for f in files:
         try:
             t = read_tbk(f)
@@ -178,7 +185,7 @@ def structure(files, fails):
                 fails.append('%s: probe %d links %d+%d (expected offset %d of %d)' % (name, i, pr['off'], pr['cnt'], nxt, len(lk)))
                 break
             nxt += pr['cnt']
-            if (floordiv(pr['pos'][0], 4096.0), floordiv(pr['pos'][1], 4096.0)) != (t['cx'], t['cy']):
+            if (floordiv(pr['pos'][0], sector), floordiv(pr['pos'][1], sector)) != (t['cx'], t['cy']):
                 fails.append('%s: probe %d stands in another sector' % (name, i))
                 break
         if nxt != len(lk):

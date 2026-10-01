@@ -51,7 +51,6 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 namespace {
 
 constexpr double kFourPi = 12.566370614359172;
-constexpr float kSector = 4096.0f;
 
 /* ---- the `.tbk` v3 records, laid out exactly as the reader's (natural alignment,
  * little-endian; the SectorRecord's two bytes after pad0 are alignment padding). */
@@ -470,8 +469,8 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probes, 
 				}
 			}
 			r.linkCount = quint32( po.links.size() );
-			po.sx = floorDiv( pp.pos[0], kSector );
-			po.sy = floorDiv( pp.pos[1], kSector );
+			po.sx = floorDiv( pp.pos[0], spec.sector );
+			po.sy = floorDiv( pp.pos[1], spec.sector );
 			ch.probes.push_back( std::move( po ) );
 		}
 	};

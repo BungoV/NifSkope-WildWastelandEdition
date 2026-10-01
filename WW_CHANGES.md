@@ -1,5 +1,13 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## The far map: GI for places far from you (2026-10-01)
+
+- New `probefar` command: one probe per cell, hoisted over the roofs, for the whole worldspace, baked from the
+  world's own LOD files (terrain heights + colour, water, building boxes). The Division's "distant shading".
+- Whole Commonwealth: 36864 probes in 51 s, 265 MB in 2304 files. Within 2.7% (median) of a brute-force
+  reference. Gate `tests/spells/probe_far.py`; its three broken-on-purpose runs fail.
+- `ProbeBakeSpec::sector` (the bake's file square, default one cell as before).
+
 ## Shattered car glass: holes and no black panes (2026-10-01)
 
 - Cell view: shapes with a `.bgem` effect material are now drawn through the effect shader that names the
