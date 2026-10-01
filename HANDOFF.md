@@ -1,5 +1,17 @@
 # Handoff — NifSkope, Wild Wasteland Edition
 
+## TOP BLOCK -- written 2026-10-01 06:00 (`date`-read): PRTP3 viewport lights, on main aab18166
+
+- PRTP band "Cell lights" row (ships off) -> fo4_cell.prog; src/gl/celllights.{h,cpp}, res/shaders/cell_lights.glsl,
+  cellview.cpp cellPublishLighting (summary + center= in the census). Gate tests/spells/cell_lit.sh: Vault111Cryo +
+  DmndSolomonsHouse01 PASS; reds linear/axis/off FAIL (axis skipped where no spots). Picture:
+  scratchpad/prtp3_20261001/vault_before_after.png.
+- Not yet: fog, hemi/box shapes, Ambient Only, pbrm + effect shaders; interior directional rotation ASSUMED.
+- bungo 05:5x: "simulate the GI for me with lights ... based on the surfels and sky visibility generated" = NEXT:
+  light the baked surfels with these cell lights, probes gather through their links + sky visibility (sky 0 in
+  interiors), viewport samples probes with a visibility test (his question: indoor/outdoor bleed; room ids open).
+- CORE ask logged (LANES a1933656): propane tank = its own mini-nuke load; junk = damaged mini nuke.
+
 ## TOP BLOCK -- written 2026-10-01 04:49 (`date`-read): PRTPFAR, the far map, on main
 
 - `probefar` (src/probefar.cpp, docs/PRTP_PLAN.md 2h): whole Commonwealth from the installed FO4CSLOD
