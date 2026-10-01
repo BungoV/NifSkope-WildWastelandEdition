@@ -1,5 +1,14 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Cell view: effects drawn the game's way (2026-10-01)
+
+- With Cell lights on, effects (steam, mist, glows) now draw the way the game's effect shader does. They no
+  longer take the viewer's light, they fade out where they meet a surface or come close to the camera ("Soft"
+  effects), they sit in the cell's fog, and their colour goes through the same exposure and color grade as the
+  rest of the cell. In Vault 111 this removes the white haze that hung over the cryo walkway.
+- The imagespace's exposure now counts the effects too, as the game's does.
+- New gate `tests/spells/cell_fx.sh`; reds `legacy` (the old effect shader) and `nosoft` (no fades) must FAIL.
+
 ## The game's back-light on cell lights (2026-10-01)
 
 - With Cell lights on, regular (non-PBR) materials now also get the game's back-light term: a rough surface

@@ -562,9 +562,103 @@ void Scene::collectShapes( NodeList & secondPass )
 	}
 }
 
+bool Scene::grabEffectDepth()
+{
+	if ( fxDepthPass != fxDepthPassNow ) {
+		fxDepthPass = fxDepthPassNow;
+		fxDepthState = 0;
+	}
+	if ( fxDepthState != 0 )
+		return fxDepthState > 0;
+	fxDepthState = -1;
+	if ( !renderer )
+		return false;
+	auto fn = renderer->fn;
+
+	GLint vp[4];
+	glGetIntegerv( GL_VIEWPORT, vp );
+	int w = vp[2], h = vp[3];
+	if ( w < 1 || h < 1 )
+		return false;
+
+	GLint prevRead = 0, prevDraw = 0, prevTex = 0;
+	fn->glGetIntegerv( GL_READ_FRAMEBUFFER_BINDING, &prevRead );
+	fn->glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &prevDraw );
+
+	// a depth blit needs the destination in the source's own format: read it off the bound framebuffer
+	GLint depthBits = 0, stencilBits = 0, compType = 0;
+	const GLenum att = prevDraw ? GL_DEPTH_ATTACHMENT : GL_DEPTH;
+	fn->glGetFramebufferAttachmentParameteriv( GL_DRAW_FRAMEBUFFER, att, GL_FRAMEBUFFER_ATTACHMENT_DEPTH_SIZE, &depthBits );
+	fn->glGetFramebufferAttachmentParameteriv( GL_DRAW_FRAMEBUFFER, prevDraw ? GL_STENCIL_ATTACHMENT : GL_STENCIL,
+		GL_FRAMEBUFFER_ATTACHMENT_STENCIL_SIZE, &stencilBits );
+	fn->glGetFramebufferAttachmentParameteriv( GL_DRAW_FRAMEBUFFER, att, GL_FRAMEBUFFER_ATTACHMENT_COMPONENT_TYPE, &compType );
+	GLenum fmt = 0, pixFmt = GL_DEPTH_STENCIL, pixType = GL_UNSIGNED_INT_24_8;
+	if ( compType == GL_FLOAT && depthBits == 32 ) {
+		fmt = stencilBits ? GL_DEPTH32F_STENCIL8 : GL_DEPTH_COMPONENT32F;
+		pixType = stencilBits ? GL_FLOAT_32_UNSIGNED_INT_24_8_REV : GL_FLOAT;
+	} else if ( depthBits == 24 ) {
+		fmt = stencilBits ? GL_DEPTH24_STENCIL8 : GL_DEPTH_COMPONENT24;
+		pixType = stencilBits ? GL_UNSIGNED_INT_24_8 : GL_UNSIGNED_INT;
+	} else if ( depthBits == 16 && !stencilBits ) {
+		fmt = GL_DEPTH_COMPONENT16;
+		pixType = GL_UNSIGNED_SHORT;
+	}
+	if ( !stencilBits )
+		pixFmt = GL_DEPTH_COMPONENT;
+	if ( !fmt ) {
+		static bool said = false;
+		if ( !said )
+			qWarning() << "lane EFX2: no soft effects, the framebuffer depth is" << depthBits << "bits," << stencilBits
+				<< "stencil, type" << compType;
+		said = true;
+		return false;
+	}
+
+	while ( glGetError() != GL_NO_ERROR ) {}
+	if ( !fxDepthTexId || fxDepthTexW != w || fxDepthTexH != h ) {
+		if ( !fxDepthTexId )
+			fn->glGenTextures( 1, &fxDepthTexId );
+		fn->glGetIntegerv( GL_TEXTURE_BINDING_2D, &prevTex );
+		fn->glBindTexture( GL_TEXTURE_2D, fxDepthTexId );
+		fn->glTexImage2D( GL_TEXTURE_2D, 0, GLint( fmt ), w, h, 0, pixFmt, pixType, nullptr );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_NONE );
+		if ( stencilBits )
+			fn->glTexParameteri( GL_TEXTURE_2D, GL_DEPTH_STENCIL_TEXTURE_MODE, GL_DEPTH_COMPONENT );
+		fn->glBindTexture( GL_TEXTURE_2D, GLuint( prevTex ) );
+		if ( !fxDepthFbo )
+			fn->glGenFramebuffers( 1, &fxDepthFbo );
+		fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, fxDepthFbo );
+		fn->glFramebufferTexture2D( GL_DRAW_FRAMEBUFFER, stencilBits ? GL_DEPTH_STENCIL_ATTACHMENT : GL_DEPTH_ATTACHMENT,
+			GL_TEXTURE_2D, fxDepthTexId, 0 );
+		fxDepthTexW = w;
+		fxDepthTexH = h;
+	} else {
+		fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, fxDepthFbo );
+	}
+	fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( prevDraw ) );
+	fn->glBlitFramebuffer( vp[0], vp[1], vp[0] + w, vp[1] + h, 0, 0, w, h, GL_DEPTH_BUFFER_BIT, GL_NEAREST );
+	const GLenum err = glGetError();
+	fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( prevRead ) );
+	fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, GLuint( prevDraw ) );
+	if ( err != GL_NO_ERROR ) {
+		static bool said = false;
+		if ( !said )
+			qWarning() << "lane EFX2: no soft effects, the depth blit failed with GL error" << err;
+		said = true;
+		return false;
+	}
+	fxDepthState = 1;
+	return true;
+}
+
 void Scene::drawDeferredShapes( NodeList & secondPass )
 {
 	secondPass.alphaSort();
+	++fxDepthPassNow;	// lane EFX2: the opaque depth is grabbed again at this pass's first Soft effect
 
 	// Particle systems are additive VFX: draw them after every other transparent
 	// shape, including transparent shapes from other workspace documents.

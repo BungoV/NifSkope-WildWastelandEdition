@@ -2102,6 +2102,7 @@ void BSEffectShaderProperty::resetParams()
 	falloff.startOpacity = 1.0f;
 	falloff.stopOpacity = 0.0f;
 	falloff.softDepth = 1.0f;
+	soft = false;
 
 	lumEmittance = 0.0;
 
@@ -2166,6 +2167,7 @@ void BSEffectShaderProperty::updateParams( const NifModel * nif )
 		falloff.startOpacity = m->fFalloffStartOpacity;
 		falloff.stopOpacity = m->fFalloffStopOpacity;
 		falloff.softDepth = m->fSoftDepth;
+		soft = m->bSoftEnabled;
 
 	} else { // m == nullptr
 
@@ -2210,6 +2212,7 @@ void BSEffectShaderProperty::updateParams( const NifModel * nif )
 		falloff.startOpacity = nif->get<float>( esp, "Falloff Start Opacity" );
 		falloff.stopOpacity = nif->get<float>( esp, "Falloff Stop Opacity" );
 		falloff.softDepth = nif->get<float>( esp, "Soft Falloff Depth" );
+		soft = hasSF1( ShaderFlags::SLSF1_Soft_Effect );
 	}
 }
 

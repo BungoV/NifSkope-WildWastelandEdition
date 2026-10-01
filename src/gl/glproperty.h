@@ -935,6 +935,7 @@ public:
 
 		float softDepth = 1.0f;
 	};
+	bool soft = false;	//!< lane EFX2: BGEM Soft Enabled / Shader Flags 1 Soft_Effect (fades near surfaces and the eye)
 	Falloff falloff;
 
 	float lumEmittance = 0.0;

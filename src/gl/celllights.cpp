@@ -56,7 +56,7 @@ struct ClState
 	QHash<const void *, WwCellGi> gi;
 	QHash<const void *, int> giVersion;
 	bool isOn = false, isPinned = false, measuring = false;
-	int isRed = 0;          // 1 nolut, 2 noexp, 4 nograde, 8 nobloom
+	int isRed = 0;          // 1 nolut, 2 noexp, 4 nograde, 8 nobloom, 16 nofx
 	QHash<const void *, float> adapted;     // lane IMGS1: the last measure per document
 	QHash<const void *, int> adaptedPixels;
 	QHash<const void *, ClBloom> bloom;     // lane BLOOM1: the last measure's bloom per document
@@ -95,7 +95,8 @@ ClState & st()
 			s.isOn = QSettings().value( QStringLiteral( "WW/CellImageSpace" ), false ).toBool();
 		}
 		const QByteArray isRed = qgetenv( "WW_CELL_IS_RED" ).trimmed();
-		s.isRed = isRed == "nolut" ? 1 : isRed == "noexp" ? 2 : isRed == "nograde" ? 4 : isRed == "nobloom" ? 8 : 0;
+		s.isRed = isRed == "nolut" ? 1 : isRed == "noexp" ? 2 : isRed == "nograde" ? 4 : isRed == "nobloom" ? 8
+			: isRed == "nofx" ? 16 : 0;
 		s.shadowOn = qgetenv( "WW_CELL_SHADOW" ).trimmed() != "0";
 		s.shadowRed = qgetenv( "WW_CELL_SHADOW_RED" ).trimmed() == "noshadow";
 		s.fogProbe = qEnvironmentVariableIntValue( "WW_CELL_FOG_PROBE" );
@@ -402,6 +403,7 @@ void wwCellLightsUniforms( Scene * scene )
 	// world = R^T (posView - t) / sc  (lookdevstage.cpp's fog uses the same inverse)
 	const Transform & vt = scene->view;
 	const float sc = vt.scale != 0.0f ? vt.scale : 1.0f;
+	prog->uni1f( "fxDistScale", 1.0f / sc );	// lane EFX2: view units -> game units for the soft fades
 	float cellRowW[3];	// the camera, world (WW_CELL_CAM_DUMP)
 	for ( int k = 0; k < 3; k++ ) {
 		float w = 0.0f;
@@ -493,6 +495,22 @@ void wwCellImageSpaceMeasuring( bool on )
 bool wwCellImageSpaceIsMeasuring()
 {
 	return st().measuring;
+}
+
+bool wwCellImageSpaceMeasuresEffects()
+{
+	return !( st().isRed & 16 );
+}
+
+int wwCellFxRed()
+{
+	static const int red = [] {
+		int r = 0;
+		for ( const QByteArray & t : qgetenv( "WW_CELL_FX_RED" ).split( ',' ) )
+			r |= t == "legacy" ? 1 : t == "nosoft" ? 2 : t == "nolin" ? 4 : t == "hide" ? 8 : 0;
+		return r;
+	}();
+	return red;
 }
 
 void wwCellImageSpaceSetAdapted( Scene * scene, float lum, int pixels )

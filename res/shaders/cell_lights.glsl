@@ -49,8 +49,10 @@ vec3 cellImageSpace( vec3 sqrtColor )
 {
 	vec3 x = max( sqrtColor, vec3( 0.0 ) );
 	x = x * x;
+#ifndef WW_CELL_FX	// lane EFX2: an effect blends over a surface that already took the bloom
 	if ( cellIsBloomOn )	// the tonemap PS adds the bloom target before its exposure multiply
 		x += texture( cellIsBloom, ( gl_FragCoord.xy - cellIsBloomRect.xy ) * cellIsBloomRect.zw ).rgb;
+#endif
 	x = x * ( ( cellIsRed & 2 ) != 0 ? 1.0 : cellIsExposure ) * 2.0;
 	float E = cellIsE;
 	vec3 c = ( x * ( 0.15 * x + 0.05 ) + 0.2 * E ) / ( x * ( 0.15 * x + 0.5 ) + 0.06 ) - E / 0.3;
@@ -198,7 +200,7 @@ vec3 cellProbeRaw( vec3 P, vec3 N )
 	return N * 0.5 + 0.5;
 }
 
-#ifndef WW_CELL_PBR
+#if !defined( WW_CELL_PBR ) && !defined( WW_CELL_FX )	// lane EFX2: the effect program takes none of the surface lobes
 /* The game's own light specular (the shipped deferred point/spot light shaders, read op for op):
  * normalized Blinn-Phong, n = 2^(gloss x 10 + 1), D = NdotH^n (n + 2) / 2pi, Schlick Fresnel with
  * F0 = 0.2, a Cook-Torrance geometry select with the 1/NdotV folded in, x 1/4, clamped at 15, x pi.
@@ -303,7 +305,7 @@ vec3 cellAmbient( vec3 N )
 	return pow( max( vec3( dot( cellDalc[0], n1 ), dot( cellDalc[1], n1 ), dot( cellDalc[2], n1 ) ), vec3( 0.0 ) ), vec3( 2.2 ) );
 }
 
-#ifndef WW_CELL_PBR
+#if !defined( WW_CELL_PBR ) && !defined( WW_CELL_FX )
 
 /* The lit colour, in the program's sqrt-of-linear space. Interior: the cell's ambient, directional
  * and placed lights replace the viewport light. Exterior: the placed lights add to what the

@@ -135,16 +135,26 @@ int wwCellLightsRed();
  *  bloom    = added to hdr before the exposure (lane BLOOM1, wwCellImageSpaceSetBloom below)
  *  The measure: the frame drawn raw (probe 6) into a float target at a quarter size, read back. Row ships
  *  off; the pin WW_CELL_IS wins. WW_CELL_IS_DUMP=<file> writes the measure (full size) and the numbers;
- *  WW_CELL_IS_RED=nolut|noexp|nograde|nobloom its refuters. */
+ *  WW_CELL_IS_RED=nolut|noexp|nograde|nobloom|nofx its refuters. */
 bool wwCellImageSpaceOn();
 void wwCellImageSpaceSetOn( bool on );
 //! the cell view draws through the imagespace: cell-lit, the row on, the document's cell has one
 bool wwCellImageSpaceWanted( Scene * scene );
 //! the measure pass's switch: while true every cell-lit fragment writes its raw linear colour
 void wwCellImageSpaceMeasuring( bool on );
-//! true inside the measure pass: the renderer masks every program that is not cell-lit (effects, sky, debug
-//! draw nothing there -- the game's adapted value is the lit surfaces' light, ours have no linear output)
+//! true inside the measure pass: the renderer masks every program that is neither cell-lit nor an effect
+//! (sky, debug draw nothing there)
 bool wwCellImageSpaceIsMeasuring();
+//! lane EXPO1: effect shaders write their colour into the measure, as the game's effects land in the HDR
+//! target its adaptation and bloom read (false under WW_CELL_IS_RED=nofx)
+bool wwCellImageSpaceMeasuresEffects();
+/*! THE EFFECTS (lane EFX2, docs/PRTP_PLAN.md 2q): a cell-lit effect draws with fo4_effectcell.prog, the game's
+ *  effect shader (Shaders011.fxp, the effect group) transcribed: no room light (its only "lighting" is a
+ *  script-set emit colour, white when unset), colour linear (texture and base colour decoded with 2.2), alpha x the
+ *  soft fade x the near fade for a Soft effect, the fog, then the cell's imagespace (no bloom: the frame has it).
+ *  WW_CELL_FX_RED=legacy (the viewer's effect shader, as before), nosoft (both fades 1), nolin (no 2.2 decode),
+ *  hide (the gate's reference: cell-lit effects draw nothing), comma-separated. tests/spells/cell_fx.sh gates it. */
+int wwCellFxRed();
 //! the measured mean luminance of the last measure (negative before any)
 void wwCellImageSpaceSetAdapted( Scene * scene, float lum, int pixels );
 /*! lane BLOOM1: the bloom from the measure's float RGBA (w x h, step 4 when it is full size: box-averaged to a

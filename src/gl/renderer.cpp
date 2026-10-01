@@ -128,15 +128,21 @@ static NifSkopeOpenGLContext::Program * wwProgramCensus( const NifModel * nif, S
 	int msn, int lodLand, NifSkopeOpenGLContext::Program * program,
 	const FloatVector4 & lightViewDir )
 {
-	/* lane IMGS1: the imagespace's measure pass holds only the cell-lit fragments' linear light. Any
-	 * other program (effect shaders, sky, debug) writes neither colour nor depth there; glview.cpp
+	/* lane IMGS1: the imagespace's measure pass holds the cell-lit fragments' linear light. Any
+	 * other program (sky, debug) writes neither colour nor depth there; glview.cpp
 	 * restores both masks after the pass. The stencil: bit 0 = a cell-lit fragment landed here (the
 	 * pixels the mean counts; the void around a model is not in the game's frame), bit 1 = the last
-	 * fragment was blended or not cell-lit (the gate compares the picture where the value is 1 only). */
+	 * fragment was blended or not cell-lit (the gate compares the picture where the value is 1 only).
+	 * Lane EXPO1: the FO4 effect shader writes its colour too, blended as drawn: fo4_effectcell (lane EFX2)
+	 * writes the game's linear effect value (texture x vertex colour x base colour, decoded, faded, fogged),
+	 * as the game draws its effects into the HDR target its adaptation and bloom read (INFERRED from the
+	 * glows blooming in game). Measured on the walkway, see docs/PRTP_PLAN.md 2p. */
 	if ( wwCellImageSpaceIsMeasuring() ) {
 		const bool cell = program && ( program->name == std::string_view( "fo4_cell.prog" )
 			|| program->name == std::string_view( "pbrm_cell.prog" ) );
-		glColorMask( cell, cell, cell, cell );
+		const bool fx = program && ( program->name == std::string_view( "fo4_effectshader.prog" )
+			|| program->name == std::string_view( "fo4_effectcell.prog" ) ) && wwCellImageSpaceMeasuresEffects();
+		glColorMask( cell || fx, cell || fx, cell || fx, cell || fx );
 		if ( !cell )
 			glDepthMask( GL_FALSE );
 		glEnable( GL_STENCIL_TEST );
@@ -359,6 +365,16 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 	 * So fo4_default.prog stays the pre-fog shader, and the fog program is swapped
 	 * in by name only while this draw fogs (a hint is swapped either way). */
 	auto fogVariant = [&]( Program * p ) -> Program * {
+		/* lane EFX2: a cell-lit effect draw takes fo4_effectcell.prog (the effect shader the game's way: unlit,
+		 * linear, soft and near fades, fog, the cell's imagespace); red legacy keeps the viewer's effect shader */
+		if ( p->name == std::string_view( "fo4_effectshader.prog" ) || p->name == std::string_view( "fo4_effectcell.prog" ) ) {
+			const char * want = wwCellLightsWanted( mesh->scene ) && !( wwCellFxRed() & 1 )
+				? "fo4_effectcell.prog" : "fo4_effectshader.prog";
+			if ( p->name == std::string_view( want ) )
+				return p;
+			Program * q = useProgram( want );
+			return q ? q : p;
+		}
 		if ( p->name != std::string_view( "fo4_fog.prog" ) && p->name != std::string_view( "fo4_default.prog" )
 			&& p->name != std::string_view( "fo4_cell.prog" ) )
 			return p;
@@ -1594,6 +1610,19 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 
 		prog->uni1f( "falloffDepth", esp->falloff.softDepth );
 
+		/* lane EFX2 (fo4_effectcell only): a Soft effect fades where it nears the opaque surface behind it and
+		 * near the eye, from the depth of the opaque pass, grabbed once per second pass */
+		if ( prog->uniLocation( "fxSoft" ) >= 0 ) {
+			const bool soft = esp->soft && esp->falloff.softDepth > 0.0f && !( wwCellFxRed() & 2 )
+				&& scene->grabEffectDepth();
+			prog->uni1b( "fxSoft", soft );
+			prog->uni1f( "fxSoftDepth", std::max( esp->falloff.softDepth, 1.0f ) );
+			fn->glActiveTexture( GL_TEXTURE0 + texunit );
+			fn->glBindTexture( GL_TEXTURE_2D, soft ? scene->fxDepthTexId : 0 );
+			prog->uni1i_l( prog->uniLocation( "fxDepth" ), texunit++ );
+			prog->uni1i( "fxRed", wwCellFxRed() );
+		}
+
 		// BSEffectShader textures (FIXME: should implement using error color?)
 
 		prog->uniSampler( bsprop, "BaseMap", 0, texunit, white, clamp,
@@ -1787,6 +1816,12 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 
 	wwLookdevFogUniforms( scene );	// lane FOG1: fo4_default reads it; fogOn is false outside Lookdev
 	wwCellLightsUniforms( scene );	// lane PRTP3: a no-op unless this is fo4_cell.prog
+	if ( prog->uniLocation( "fxAdditive" ) >= 0 ) {
+		// lane EFX2: an additive effect is dimmed by the fog, a blended one fogged toward its colour (the game's two PS)
+		GLint dst = 0;
+		glGetIntegerv( GL_BLEND_DST_RGB, &dst );
+		prog->uni1b( "fxAdditive", glIsEnabled( GL_BLEND ) && dst == GL_ONE );
+	}
 	return true;
 }
 

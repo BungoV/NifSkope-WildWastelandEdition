@@ -1,6 +1,22 @@
 # Handoff — NifSkope, Wild Wasteland Edition
 
-## TOP BLOCK -- written 2026-10-01 17:34 (`date`-read): EFX1 refraction drawn, then the vanilla gaps
+## TOP BLOCK -- written 2026-10-01 18:32 (`date`-read): EXPO1 + EFX2, effects drawn the game's way
+
+- EXPO1: effects now draw into the imagespace measure (red WW_CELL_IS_RED=nofx). EFX2: cell-lit effects use
+  fo4_effectcell.prog (fo4_effectshader.frag + WW_CELLLIGHTS + WW_CELL_FX), swapped by name in renderer.cpp's
+  program lambda: no view light, Soft + near fades from the opaque depth (Scene::grabEffectDepth, once per
+  transparent pass), fog, linear decode, the cell imagespace without bloom. Reds WW_CELL_FX_RED=legacy|nosoft|
+  nolin|hide. PRTP_PLAN 2p/2q.
+- Gates (exe 18:19): new cell_fx.sh green PASS (walkway ratio 0.394, far end 0.857), reds legacy (H) and nosoft
+  (S) FAIL as required; cell_is 3/3 PASS. cell_oren / cell_fog not rerun: probe passes skip effects and the
+  surface programs' source is unchanged outside #if WW_CELL_FX.
+- The haze was the missing Soft fade (nosoft keeps the ratio at 0.999). Walkway render pair:
+  scratchpad/efx2_20261001/walkB (green / legacy / nosoft, imagespace on).
+- NEXT: bungo's vanilla side-by-side again with this exe (asked him to save the vanilla shot to
+  scratchpad/vanilla/); floor highlight pools, AO, pod glow spill; then ambient-only (39), hemisphere (17),
+  cube scale, room ids, glass tint, lodgen baseline rewrite, PRTP4/5, sky term, far-map trees, FO4CS last.
+
+## Earlier block -- written 2026-10-01 17:34: EFX1 refraction drawn, then the vanilla gaps
 
 - 17:34 EFX1 correction: the "no refraction pass" skip was wrong (MISTAKES). Refraction lighting shapes now
   bucket as "R|strength" and are written with SF1 bit 15 + Refraction Strength (lodgen refractStrength), so

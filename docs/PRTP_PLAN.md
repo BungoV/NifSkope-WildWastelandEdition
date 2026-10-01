@@ -442,6 +442,36 @@ effect wrote its own colour over the surface measured; bsshape.cpp skips effect 
 Pictures keep every effect. lodgen: the block is read after every field the bake uses, so the bake is unchanged
 by construction; lodgen_native_baseline --check shows the same 8 stale region / arrays files as before.
 
+### 2p. Effects in the exposure measure (lane EXPO1, 2026-10-01)
+
+The game's effects land in the HDR target that its eye adaptation and bloom read. The measure pass (probe 6) masked
+every program that was not cell-lit, so the steam never raised the exposure. The renderer now lets the effect
+programs draw into the measure too (wwCellImageSpaceMeasuresEffects); the cell-lit effect program writes its
+linear colour there (2q). Red: WW_CELL_IS_RED=nofx (the effects masked out of the measure, as before).
+
+### 2q. Effects drawn the game's way (lane EFX2, 2026-10-01)
+
+The Vault's cryo walkway showed a white haze the game frame does not have. The game's effect shaders (the effect
+groups of Shaders011.fxp, transcribed) say why:
+- No room light. The effect vertex shader sums no light; the pixel shader's only lighting term is
+  mix( c, c x emit, lighting influence ), emit a colour scripts set (white when unset). The viewer's effect shader
+  multiplied by its own view light (D). Dropped in the cell view.
+- Soft effects (BGEM Soft / SF1 Soft Effect): alpha x saturate( (scene depth - depth) / soft depth ) x a near fade
+  smoothstep( 0.075, 0.5, depth / soft depth ), depths in game units. For a greyscale-to-palette effect the fade
+  scales the palette's row, not the alpha. The game subtracts a near term inside the near fade; it is inferred to
+  be about one unit and read as none. The opaque depth is blitted once per transparent pass (Scene::grabEffectDepth).
+- Fog: the surface fog formula; a blended effect mixes toward the fog colour, an additive one is scaled by (1 - f).
+- Linear colour (texture and base colour decoded with 2.2), then the cell's imagespace on its own pixel; the bloom
+  is not added again (the frame under it already has it). Approximation: the game blends in HDR and tonemaps the
+  sum; we tonemap each effect pixel before the blend. A later lane could composite from a linear frame.
+The cell-lit variant is fo4_effectcell.prog (fo4_effectshader.frag compiled with WW_CELLLIGHTS + WW_CELL_FX); the
+renderer swaps it in by name when cell lights are on. Reds: WW_CELL_FX_RED=legacy | nosoft | nolin | hide.
+Gate tests/spells/cell_fx.sh (imagespace off, two Vault111Cryo cameras): nothing but the effects moves, the fades
+only take away, and the effects' mean change is 0.39x (walkway) and 0.86x (far end) the viewer shader's.
+Under the nosoft red that ratio is 0.999 / 0.998: the Soft fade, not the dropped light or the fog, removes the
+haze. Walkway, imagespace on: frame mean 109.6 -> 93.6 (out of 255). cell_is.sh 3/3 PASS with the effects in the
+measure (Vault: the steam leaves 4% of the frame as opaque cell-lit pixels to compare, 99.71% within 3/255).
+
 ## 3. Open
 
 - `.tbk` v4: two surfel sides per cell (gives back the refused thin-wall weight), room ids (2f).

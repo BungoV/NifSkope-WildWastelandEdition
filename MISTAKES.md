@@ -5,6 +5,16 @@ Written the moment a mistake is recognised, unprompted (CONSTITUTION rule 2).
 Format: date -- what was done -- what was true -- how it was found -- the rule.
 Newest at the top.
 
+## 2026-10-01 -- EFX2: "effects should take the room's light", guessed; a comparison render with the chain off
+- The first plan for the Vault's white steam haze was to light the effects with the cell's lights. The game's
+  effect vertex shader sums no light at all; its only "lighting" is a script-set emit colour, white when unset.
+  The haze came from the viewer's own light on the effects, no Soft fades, no fog and no linear decode. Found by
+  transcribing the effect pixel and vertex shaders before writing any code. Rule: for any "the game does X to
+  this shader family", read that family's shader first; a family resemblance to the surfaces is not evidence.
+- A walkway render for bungo's vanilla side-by-side went out with the imagespace and the bounce off, while the
+  game frame has both. Rule: a picture set beside vanilla runs every shipped term the cell view has (WW_CELL_IS=1,
+  the bounce on), and says so in the caption.
+
 ## 2026-10-01 -- EFX1: "this view has no refraction pass", asserted without looking
 - EFX1 left the walkway's refraction rings out of the cell view, and its code comment, WW_CHANGES and PRTP_PLAN 2o
   said the view had no refraction pass. The viewer has had a screen-space refraction preview since 2026-07-06

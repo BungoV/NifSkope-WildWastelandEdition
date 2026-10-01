@@ -421,6 +421,16 @@ public:
 	//! Returns false if the copy is not possible.
 	bool grabRefractionSource();
 
+	// --- lane EFX2: the opaque pass's depth, read by a cell-lit Soft effect ---
+	unsigned int fxDepthTexId = 0;
+	unsigned int fxDepthFbo = 0;
+	int fxDepthTexW = 0, fxDepthTexH = 0;
+	int fxDepthState = 0;   //!< 0 not grabbed this second pass, 1 grabbed, -1 the blit failed (no soft fade)
+	int fxDepthPass = -1;   //!< the second pass fxDepthState belongs to
+	static inline int fxDepthPassNow = 0;	//!< bumped by drawDeferredShapes (static: it draws every scene's pass)
+	//! Blit the framebuffer's depth into fxDepthTexId, once per second pass (translucent draws write no depth).
+	bool grabEffectDepth();
+
 	FloatVector4 currentGLColor;
 	float currentGLLineWidth;
 	float currentGLPointSize;
