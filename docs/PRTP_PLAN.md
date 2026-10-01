@@ -305,11 +305,17 @@ PRTP band (ships off; needs Cell lights).
 4. **Grade.** Saturation around luma, tint mix (luma x tint, amount), contrast x (brightness x c - adapted) +
    adapted.
 5. **Display.** pow 1/2.2, then the 16^3 LUT (256x16 strip, x = r + 16 b, y = g) at c x 0.9375 + 0.03125.
+6. **Bloom** (lane BLOOM1). The tonemap PS adds a quarter-size bloom target (bilinear) to the HDR before the
+   exposure. That target: a quarter-size copy of the HDR, per tap HNAM[3] x max(0, c - HNAM[2]), a 15-tap
+   blur (radius 7, weights exp(-2 x^2 / 49) normalized, integer texel offsets) vertical with the bright pass
+   then horizontal plain. Built on the CPU from the measure pass (already a quarter size; a full-size dump is
+   box-averaged 4x4), uploaded on unit 11. ASSUMED: the game fills its quarter copy with a 4x4 average (not
+   read yet). Only cell-lit fragments receive it (glass/effects get no spill).
 Gate: `tests/spells/cell_is.sh` + `cell_is_check.py` (A the adapted mean + exposure from an independent ESM
-and archive read, rel 1e-4; P the picture vs the numpy chain over the full-size dump on opaque cell-lit pixels,
->= 97% inside the 3x3 range +-3/255). Reds nolut / noexp / nograde FAIL P.
-Not yet: bloom (threshold HNAM[2], scale HNAM[3]; needs a post pass), adaptation over time, exteriors (the
-weather's imagespace).
+and archive read, rel 1e-4; B the bloom's size, texels past the threshold and peak vs the checker's own;
+P the picture vs the numpy chain + bloom over the full-size dump on opaque cell-lit pixels, >= 97% inside the
+3x3 range +-3/255). Reds nolut / noexp / nograde / nobloom FAIL P (nobloom on cells whose bloom moves >= 5%).
+Not yet: adaptation over time, exteriors (the weather's imagespace).
 
 ## 3. Open
 

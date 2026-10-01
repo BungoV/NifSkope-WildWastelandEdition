@@ -8,15 +8,19 @@
 # Misc archive itself and runs the game's chain in numpy over the dump:
 #   A  the adapted luminance and the exposure NifSkope used = the mean luma of the dump over the pixels a
 #      cell-lit fragment reached (stencil bit 0, written after the floats), the HNAM clamp
-#   P  the picture = the chain over the dump on opaque cell-lit pixels (stencil == 1): >= 97% inside the 3x3
-#      range of the rebuild +-3/255 (the shot is antialiased, the dump is not), at least 5000 px
+#   B  the bloom (lane BLOOM1) NifSkope echoed = the checker's own from the dump (4x4 box, bright pass,
+#      15-tap Gaussian vertical then horizontal)
+#   P  the picture = the chain over the dump + the bloom on opaque cell-lit pixels (stencil == 1): >= 97%
+#      inside the 3x3 range of the rebuild +-3/255 (the shot is antialiased, the dump is not), >= 5000 px
 # The cameras stand close (VIEW 5, DIST 350): a far view leaves the cell a few percent of the frame.
 #
 # RED CONTROLS (each must FAIL stage P):  --red nolut    the LUT skipped
 #                                         --red noexp    exposure 1
 #                                         --red nograde  the cinematic grade skipped (grade cells only)
+#                                         --red nobloom  the bloom not added (cells whose bloom reach
+#                                                        is >= 5% of the compared pixels only)
 #
-# USAGE  bash tests/spells/cell_is.sh [--red nolut|noexp|nograde]
+# USAGE  bash tests/spells/cell_is.sh [--red nolut|noexp|nograde|nobloom]
 #        CELLS="..." to pick interiors; the camera stands at CAM_<cell> (x,y,z look-at) if set.
 
 set -u
@@ -88,6 +92,8 @@ for cell in $CELLS; do
 	sed 's/^/  /' "$run/check.txt" | tee -a "$LOG"
 	if [ "$RED" = nograde ] && ! echo " $GRADED " | grep -q " $cell "; then
 		say "  skip  $cell: identity grade, the nograde red has nothing to remove"
+	elif [ "$RED" = nobloom ] && ! awk '/^bloom reach/ { exit !($3 + 0 >= 5) }' "$run/check.txt"; then
+		say "  skip  $cell: the bloom moves under 5% of the compared pixels, the nobloom red has little to remove"
 	elif [ -n "$RED" ]; then
 		check "$cell: the red control FAILS stage P" "$(grep -q "^P FAIL" "$run/check.txt" && echo 1 || echo 0)"
 	else

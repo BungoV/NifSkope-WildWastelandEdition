@@ -3644,6 +3644,8 @@ static void wwCellImageSpaceMeasurePass( Scene * scene )
 				sum += wgt[c] * px[i * 4 + c];
 	}
 	wwCellImageSpaceSetAdapted( scene, float( sum / double( std::max( counted, 1 ) ) ), counted );
+	// lane BLOOM1: the game blooms a quarter-size copy of the HDR; a full-size (dump) measure is averaged 4x4
+	wwCellImageSpaceSetBloom( scene, px.data(), w, h, div == 1 ? 4 : 1 );
 	if ( !dump.isEmpty() ) {
 		QFile f( dump );
 		if ( f.open( QIODevice::WriteOnly ) ) {

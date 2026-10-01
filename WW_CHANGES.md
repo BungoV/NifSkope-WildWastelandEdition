@@ -1,5 +1,13 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Imagespace bloom (2026-10-01)
+
+- The Imagespace row now adds the game's bloom: bright light past the imagespace's bloom threshold glows
+  out over its surroundings, at the strength its record sets (Vault 111's cryo lamps are the clear case).
+- Same blur as the game: a quarter-size picture, 15 taps down then across.
+- Gate `cell_is.sh` checks the bloom against its own rebuild from the dump (stage B) and the picture with it;
+  red `nobloom` FAILS on Vault111Cryo. Glass and effects do not receive the glow yet.
+
 ## Cell imagespace (2026-10-01)
 
 - New "Imagespace" row in the PRTP band (ships off; works with Cell lights). An interior now goes through the
@@ -8,7 +16,7 @@
 - The eye adapts to the lit surfaces only: effects, sky and the empty space around a model do not count.
 - Gate `tests/spells/cell_is.sh` + `cell_is_check.py` rebuild the chain from the game files independently;
   Vault111Cryo, DmndSolomonsHouse01, GoodneighborTheThirdRail PASS. Reds nolut / noexp / nograde each FAIL.
-- Not yet: bloom, adaptation over time, exteriors.
+- Not yet: adaptation over time, exteriors (bloom landed above).
 
 ## Bounce light (GI) from the probe bake (2026-10-01)
 

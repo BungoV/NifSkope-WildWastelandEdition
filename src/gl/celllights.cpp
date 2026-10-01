@@ -23,6 +23,17 @@ constexpr int kTextureUnit = 14;		// TexCache allocates from unit 0 upward; 15 i
 constexpr int kTexelsPerLight = 4;
 constexpr int kGiUnit = 13;			// lane PRTPGI: the bounce grid (sampler3D)
 constexpr int kLutUnit = 12;		// lane IMGS1: the imagespace LUT (sampler3D)
+constexpr int kBloomUnit = 11;		// lane BLOOM1: the imagespace bloom (sampler2D, a quarter of the view)
+
+//! one bloom per document: the blurred bright pass, rgb floats, w x h (rows bottom-up, as read back)
+struct ClBloom
+{
+	int w = 0, h = 0;
+	std::vector<float> rgb;
+	int version = 0;
+	double peak = 0.0;      // the brightest bloom texel's max channel (the echo)
+	int lit = 0;            // texels the bright pass passed (the echo)
+};
 
 struct ClState
 {
@@ -38,9 +49,11 @@ struct ClState
 	QHash<const void *, WwCellGi> gi;
 	QHash<const void *, int> giVersion;
 	bool isOn = false, isPinned = false, measuring = false;
-	int isRed = 0;          // 1 nolut, 2 noexp, 4 nograde
+	int isRed = 0;          // 1 nolut, 2 noexp, 4 nograde, 8 nobloom
 	QHash<const void *, float> adapted;     // lane IMGS1: the last measure per document
 	QHash<const void *, int> adaptedPixels;
+	QHash<const void *, ClBloom> bloom;     // lane BLOOM1: the last measure's bloom per document
+	int nextBloomVersion = 1;
 };
 
 ClState & st()
@@ -71,7 +84,7 @@ ClState & st()
 			s.isOn = QSettings().value( QStringLiteral( "WW/CellImageSpace" ), false ).toBool();
 		}
 		const QByteArray isRed = qgetenv( "WW_CELL_IS_RED" ).trimmed();
-		s.isRed = isRed == "nolut" ? 1 : isRed == "noexp" ? 2 : isRed == "nograde" ? 4 : 0;
+		s.isRed = isRed == "nolut" ? 1 : isRed == "noexp" ? 2 : isRed == "nograde" ? 4 : isRed == "nobloom" ? 8 : 0;
 		const QByteArray red = qgetenv( "WW_CELL_LIT_RED" ).trimmed();
 		if ( red == "linear" )
 			s.red = 1;
@@ -96,6 +109,9 @@ struct Gpu
 	GLuint lutTex = 0;
 	const void * lutDoc = nullptr;
 	int lutVersion = 0;
+	GLuint bloomTex = 0;
+	const void * bloomDoc = nullptr;
+	int bloomVersion = 0;
 };
 QHash<const void *, Gpu> & gpus()
 {
@@ -275,6 +291,39 @@ void wwCellLightsUniforms( Scene * scene )
 	fn->glActiveTexture( GLenum( GL_TEXTURE0 + kLutUnit ) );
 	fn->glBindTexture( GL_TEXTURE_3D, lutDraw ? g.lutTex : 0 );
 	fn->glActiveTexture( GLenum( prevActive ) );
+	// lane BLOOM1: the measure's bloom, a quarter of the view, sampled at the fragment's place in the view
+	const ClBloom * B = nullptr;
+	if ( isDraw ) {
+		auto it = s.bloom.constFind( scene->nifModel );
+		if ( it != s.bloom.constEnd() )
+			B = &*it;
+	}
+	if ( B && B->w > 0 && ( g.bloomDoc != scene->nifModel || g.bloomVersion != B->version ) ) {
+		if ( !g.bloomTex )
+			fn->glGenTextures( 1, &g.bloomTex );
+		fn->glActiveTexture( GLenum( GL_TEXTURE0 + kBloomUnit ) );
+		fn->glBindTexture( GL_TEXTURE_2D, g.bloomTex );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+		fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+		fn->glPixelStorei( GL_UNPACK_ALIGNMENT, 4 );
+		fn->glTexImage2D( GL_TEXTURE_2D, 0, GL_RGB32F, B->w, B->h, 0, GL_RGB, GL_FLOAT, B->rgb.data() );
+		g.bloomDoc = scene->nifModel;
+		g.bloomVersion = B->version;
+	}
+	const bool bloomDraw = B && B->w > 0 && g.bloomTex && g.bloomDoc == scene->nifModel && !( s.isRed & 8 );
+	fn->glActiveTexture( GLenum( GL_TEXTURE0 + kBloomUnit ) );
+	fn->glBindTexture( GL_TEXTURE_2D, bloomDraw ? g.bloomTex : 0 );
+	fn->glActiveTexture( GLenum( prevActive ) );
+	prog->uni1i( "cellIsBloom", kBloomUnit );
+	prog->uni1b( "cellIsBloomOn", bloomDraw );
+	if ( bloomDraw ) {
+		GLint vp[4] = { 0, 0, 1, 1 };
+		fn->glGetIntegerv( GL_VIEWPORT, vp );
+		prog->uni4f_l( prog->uniLocation( "cellIsBloomRect" ), FloatVector4( float( vp[0] ), float( vp[1] ),
+			1.0f / float( std::max( vp[2], 1 ) ), 1.0f / float( std::max( vp[3], 1 ) ) ) );
+	}
 	prog->uni1i( "cellIsLut", kLutUnit );
 	prog->uni1b( "cellIsOn", isDraw );
 	prog->uni1b( "cellIsLutOn", lutDraw );
@@ -363,6 +412,78 @@ void wwCellImageSpaceSetAdapted( Scene * scene, float lum, int pixels )
 	st().adaptedPixels.insert( scene->nifModel, pixels );
 }
 
+void wwCellImageSpaceSetBloom( Scene * scene, const float * rgba, int w, int h, int step )
+{
+	if ( !scene || !scene->nifModel || !rgba || w <= 0 || h <= 0 || step < 1 )
+		return;
+	const WwCellLighting * L = wwCellLightsFor( scene->nifModel );
+	if ( !L || !L->hasImageSpace )
+		return;
+	ClState & s = st();
+	ClBloom & B = s.bloom[scene->nifModel];
+	// the source: the measure at a quarter of the view (a full-size measure box-averaged step x step)
+	const int bw = std::max( 1, w / step ), bh = std::max( 1, h / step );
+	const float thresh = L->isHdr[2], scale = L->isHdr[3];
+	std::vector<float> src( size_t( bw ) * size_t( bh ) * 3 );
+	B.lit = 0;
+	for ( int y = 0; y < bh; y++ )
+		for ( int x = 0; x < bw; x++ )
+			for ( int c = 0; c < 3; c++ ) {
+				double sum = 0.0;
+				for ( int j = 0; j < step; j++ )
+					for ( int i = 0; i < step; i++ ) {
+						const float v = rgba[( size_t( y * step + j ) * size_t( w ) + size_t( x * step + i ) ) * 4 + size_t( c )];
+						if ( std::isfinite( v ) )
+							sum += v;
+					}
+				src[( size_t( y ) * size_t( bw ) + size_t( x ) ) * 3 + size_t( c )] = float( sum / double( step * step ) );
+			}
+	// the game's blur: radius 7, 15 taps exp(-2 x^2 / 49), normalised; vertical with the bright pass
+	// scale * max(0, c - threshold) per tap, then horizontal plain (docs/PRTP_PLAN.md 2j)
+	constexpr int r = 7;
+	float wt[2 * r + 1];
+	float wsum = 0.0f;
+	for ( int x = -r; x <= r; x++ )
+		wsum += ( wt[x + r] = std::exp( -2.0f * float( x * x ) / float( r * r ) ) );
+	for ( float & v : wt )
+		v /= wsum;
+	for ( size_t i = 0; i < src.size(); i += 3 ) {
+		bool any = false;
+		for ( int c = 0; c < 3; c++ ) {
+			src[i + size_t( c )] = scale * std::max( 0.0f, src[i + size_t( c )] - thresh );
+			any = any || src[i + size_t( c )] > 0.0f;
+		}
+		B.lit += any ? 1 : 0;
+	}
+	std::vector<float> mid( src.size() );
+	for ( int y = 0; y < bh; y++ )
+		for ( int x = 0; x < bw; x++ )
+			for ( int c = 0; c < 3; c++ ) {
+				float a = 0.0f;
+				for ( int k = -r; k <= r; k++ ) {
+					const int yy = std::min( std::max( y + k, 0 ), bh - 1 );
+					a += wt[k + r] * src[( size_t( yy ) * size_t( bw ) + size_t( x ) ) * 3 + size_t( c )];
+				}
+				mid[( size_t( y ) * size_t( bw ) + size_t( x ) ) * 3 + size_t( c )] = a;
+			}
+	B.rgb.assign( src.size(), 0.0f );
+	B.peak = 0.0;
+	for ( int y = 0; y < bh; y++ )
+		for ( int x = 0; x < bw; x++ )
+			for ( int c = 0; c < 3; c++ ) {
+				float a = 0.0f;
+				for ( int k = -r; k <= r; k++ ) {
+					const int xx = std::min( std::max( x + k, 0 ), bw - 1 );
+					a += wt[k + r] * mid[( size_t( y ) * size_t( bw ) + size_t( xx ) ) * 3 + size_t( c )];
+				}
+				B.rgb[( size_t( y ) * size_t( bw ) + size_t( x ) ) * 3 + size_t( c )] = a;
+				B.peak = std::max( B.peak, double( a ) );
+			}
+	B.w = bw;
+	B.h = bh;
+	B.version = s.nextBloomVersion++;
+}
+
 QString wwCellImageSpaceEcho( Scene * scene )
 {
 	ClState & s = st();
@@ -376,6 +497,9 @@ QString wwCellImageSpaceEcho( Scene * scene )
 	o += QStringLiteral( " %1 adapted=%2 over %3 px exposure=%4 tonemapE=%5 lut=%6" ).arg( L->isName )
 		.arg( double( a ), 0, 'g', 7 ).arg( s.adaptedPixels.value( scene->nifModel ) ).arg( double( e ), 0, 'g', 7 )
 		.arg( double( h[1] ), 0, 'g', 4 ).arg( L->isLut.empty() ? QStringLiteral( "none" ) : L->isLutPath );
+	const ClBloom bl = s.bloom.value( scene->nifModel );
+	o += QStringLiteral( " bloom=%1x%2 threshold=%3 scale=%4 lit=%5 peak=%6" ).arg( bl.w ).arg( bl.h )
+		.arg( double( h[2] ), 0, 'g', 7 ).arg( double( h[3] ), 0, 'g', 7 ).arg( bl.lit ).arg( bl.peak, 0, 'g', 6 );
 	if ( s.isRed )
 		o += QStringLiteral( " red=%1" ).arg( s.isRed );
 	return o;

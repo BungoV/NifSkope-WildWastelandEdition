@@ -7,8 +7,9 @@ NifSkope dumped (WW_CELL_IS_DUMP, the measure pass at full size).
 
   A  the adapted luminance and the exposure NifSkope echoed = the mean luma of its own dump over the pixels
      a cell-lit fragment reached, the exposure clamp from OUR read of HNAM (rel 1e-4)
-  P  the picture = our chain over the dump, on the pixels that end on an opaque cell-lit surface: >= 97%
-     within 3/255 of the rebuild's 3x3 neighbourhood range (the shot is antialiased, the dump is not)
+  B  the bloom NifSkope echoed (lane BLOOM1: size, texels past the threshold, peak) = ours from the dump
+  P  the picture = our chain over the dump + our bloom, on the pixels that end on an opaque cell-lit surface:
+     >= 97% within 3/255 of the rebuild's 3x3 neighbourhood range (the shot is antialiased, the dump is not)
 
 usage  cell_is_check.py <Fallout4.esm> <cell EDID> <run dir> [nolut|noexp|nograde]
        (run dir holds on.png, on.hdr, on.hdr.txt; the optional word rebuilds WITHOUT that stage: a self-check
@@ -106,6 +107,32 @@ def chain(hdr, im, adapted, lut, red=''):
     return c
 
 
+def bloom_of(px_up, hnam):
+    """lane BLOOM1: the game's bloom from the full-size dump (rows bottom-up, as GL reads them): a 4x4 box to a
+    quarter (target 0x45 is w>>2 x h>>2), scale * max(0, c - threshold), 15 taps exp(-2 x^2 / 49) normalised,
+    vertical then horizontal, clamped at the edges. Returns the quarter texels and the full-size bilinear read
+    (texel centres, clamped), both bottom-up."""
+    h, w = px_up.shape[:2]
+    bw, bh = w // 4, h // 4
+    q = px_up[:bh * 4, :bw * 4].reshape(bh, 4, bw, 4, 3).mean((1, 3))
+    q = hnam[3] * np.maximum(q - hnam[2], 0.0)
+    lit = int((q > 0).any(-1).sum())
+    x = np.arange(-7, 8)
+    wt = np.exp(-2.0 * x * x / 49.0)
+    wt /= wt.sum()
+    v = sum(wt[k + 7] * q[np.clip(np.arange(bh) + k, 0, bh - 1)] for k in x)
+    b = sum(wt[k + 7] * v[:, np.clip(np.arange(bw) + k, 0, bw - 1)] for k in x)
+    ty = np.clip((np.arange(h) + 0.5) / h * bh - 0.5, 0, bh - 1)
+    tx = np.clip((np.arange(w) + 0.5) / w * bw - 0.5, 0, bw - 1)
+    y0 = np.minimum(np.floor(ty).astype(int), bh - 2) if bh > 1 else np.zeros(h, int)
+    x0 = np.minimum(np.floor(tx).astype(int), bw - 2) if bw > 1 else np.zeros(w, int)
+    fy, fx = (ty - y0)[:, None, None], (tx - x0)[None, :, None]
+    y1, x1 = np.minimum(y0 + 1, bh - 1), np.minimum(x0 + 1, bw - 1)
+    up = ((1 - fy) * ((1 - fx) * b[y0][:, x0] + fx * b[y0][:, x1])
+          + fy * ((1 - fx) * b[y1][:, x0] + fx * b[y1][:, x1]))
+    return b, up, lit
+
+
 def main(esm, cell, run, red=''):
     im = imgs_of(esm, cell)
     if im is None:
@@ -132,6 +159,21 @@ def main(esm, cell, run, red=''):
     okA = abs(ea - mine) <= 1e-4 * max(mine, 1e-6) and abs(ee - my_e) <= 1e-4 * my_e
     print('A %s  adapted %.7g (echo %.7g) over %d of %dx%d px, exposure %.6g (echo %.6g)' % (
         'PASS' if okA else 'FAIL', mine, ea, int(lit.sum()), w, h, my_e, ee))
+    # B: the bloom NifSkope built (its echo: texels past the threshold, the brightest texel) = ours from the dump
+    up_rgb = np.where(np.isfinite(px[::-1, :, :3]), px[::-1, :, :3], 0.0)
+    bq, bup, blit = bloom_of(up_rgb, h9)
+    bloom = bup[::-1]
+    m = re.search(r'bloom=(\d+)x(\d+) threshold=\S+ scale=\S+ lit=(\d+) peak=(\S+)', echo)
+    if m:
+        elit, epeak, mpeak = int(m.group(3)), float(m.group(4)), float(bq.max()) if bq.size else 0.0
+        okB = ((int(m.group(1)), int(m.group(2))) == (w // 4, h // 4) and abs(elit - blit) <= max(2, blit // 1000)
+               and abs(epeak - mpeak) <= 1e-3 * max(mpeak, 1e-6) + 1e-7)
+        print('B %s  bloom %dx%d (echo %sx%s), %d texels past threshold %g (echo %d), peak %.6g (echo %.6g), scale %g'
+              % ('PASS' if okB else 'FAIL', w // 4, h // 4, m.group(1), m.group(2), blit, h9[2], elit, mpeak, epeak,
+                 h9[3]))
+    else:
+        okB = False
+        print('B FAIL  the echo has no bloom')
     pic = np.asarray(Image.open(os.path.join(run, 'on.png')).convert('RGB'), np.float64) / 255.0
     if pic.shape[:2] != (h, w):
         print('P FAIL  the picture is %dx%d, the dump %dx%d' % (pic.shape[1], pic.shape[0], w, h))
@@ -139,7 +181,11 @@ def main(esm, cell, run, red=''):
     # compared where the pixel ends on an opaque cell-lit surface; the picture is antialiased and the dump is
     # not, so a pixel passes inside the 3x3 range of the rebuilt neighbours (+-3/255): an edge pixel is a mix
     geo = cover == 1
-    want = chain(rgb, im, mine, lut, red)
+    want = chain(rgb + bloom, im, mine, lut, red)
+    # how much of the picture the bloom moves past the tolerance (the nobloom red needs some to refute)
+    reach = np.abs(want - chain(rgb, im, mine, lut, red)).max(-1)[geo]
+    print('bloom reach %.2f%% of the opaque cell-lit pixels move > 3/255 (max %.1f/255)' % (
+        100 * float((reach > 3.0 / 255.0).mean()) if reach.size else 0.0, 255 * float(reach.max()) if reach.size else 0))
     pad = np.pad(want, ((1, 1), (1, 1), (0, 0)), mode='edge')
     nb = [pad[1 + dy:1 + dy + h, 1 + dx:1 + dx + w] for dy in (-1, 0, 1) for dx in (-1, 0, 1)]
     lo, hi = np.min(nb, 0), np.max(nb, 0)
@@ -152,7 +198,7 @@ def main(esm, cell, run, red=''):
               'PASS' if okP else 'FAIL', 100 * frac, d.size, 100.0 * d.size / (w * h),
               100 * float((strict <= 3.0 / 255.0).mean()) if d.size else 0.0,
               255 * float(np.median(strict)) if d.size else 0.0))
-    ok = okA and okP
+    ok = okA and okB and okP
     print('imagespace %s' % ('PASS' if ok else 'FAIL'))
     return 0 if ok else 1
 

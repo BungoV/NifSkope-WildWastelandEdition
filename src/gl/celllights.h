@@ -117,9 +117,10 @@ int wwCellLightsRed();
  *    grade    = mix(luma, c, saturation) -> mix(.., luma * tint, amount) -> contrast * (brightness * c -
  *               adapted) + adapted
  *    display  = LUT( pow(grade, 1 / 2.2) * 15/16 + 1/32 )
- *  Bloom is not drawn (no post pass). The measure: the frame drawn raw (probe 6) into a float target at a
- *  quarter size, read back. Row ships off; the pin WW_CELL_IS wins. WW_CELL_IS_DUMP=<file> writes the
- *  measure (full size) and the numbers; WW_CELL_IS_RED=nolut|noexp|nograde its refuters. */
+ *  bloom    = added to hdr before the exposure (lane BLOOM1, wwCellImageSpaceSetBloom below)
+ *  The measure: the frame drawn raw (probe 6) into a float target at a quarter size, read back. Row ships
+ *  off; the pin WW_CELL_IS wins. WW_CELL_IS_DUMP=<file> writes the measure (full size) and the numbers;
+ *  WW_CELL_IS_RED=nolut|noexp|nograde|nobloom its refuters. */
 bool wwCellImageSpaceOn();
 void wwCellImageSpaceSetOn( bool on );
 //! the cell view draws through the imagespace: cell-lit, the row on, the document's cell has one
@@ -131,6 +132,10 @@ void wwCellImageSpaceMeasuring( bool on );
 bool wwCellImageSpaceIsMeasuring();
 //! the measured mean luminance of the last measure (negative before any)
 void wwCellImageSpaceSetAdapted( Scene * scene, float lum, int pixels );
+/*! lane BLOOM1: the bloom from the measure's float RGBA (w x h, step 4 when it is full size: box-averaged to a
+ *  quarter first), HNAM bloom scale * max(0, c - bloom threshold), blurred 15 taps vertical then horizontal;
+ *  the shader adds it (bilinear, a quarter of the view) to the HDR before the exposure */
+void wwCellImageSpaceSetBloom( Scene * scene, const float * rgba, int w, int h, int step );
 QString wwCellImageSpaceEcho( Scene * scene );
 
 #endif

@@ -32,13 +32,20 @@ uniform vec3 cellIsCine;			// CNAM saturation, brightness, contrast
 uniform vec4 cellIsTint;			// TNAM amount, r, g, b
 uniform bool cellIsLutOn;
 uniform sampler3D cellIsLut;
-uniform int cellIsRed;				// 1 nolut, 2 noexp, 4 nograde
+uniform int cellIsRed;				// 1 nolut, 2 noexp, 4 nograde, 8 nobloom (the CPU drops cellIsBloomOn)
+// lane BLOOM1: the measure's blurred bright pass, a quarter of the view; rect = viewport origin, 1 / size
+uniform bool cellIsBloomOn;
+uniform sampler2D cellIsBloom;
+uniform vec4 cellIsBloomRect;
 
 // sqrt-of-linear in (this program's convention), display out. Shaders011.fxp, the tonemap PS and the LUT PS.
 vec3 cellImageSpace( vec3 sqrtColor )
 {
 	vec3 x = max( sqrtColor, vec3( 0.0 ) );
-	x = x * x * ( ( cellIsRed & 2 ) != 0 ? 1.0 : cellIsExposure ) * 2.0;
+	x = x * x;
+	if ( cellIsBloomOn )	// the tonemap PS adds the bloom target before its exposure multiply
+		x += texture( cellIsBloom, ( gl_FragCoord.xy - cellIsBloomRect.xy ) * cellIsBloomRect.zw ).rgb;
+	x = x * ( ( cellIsRed & 2 ) != 0 ? 1.0 : cellIsExposure ) * 2.0;
 	float E = cellIsE;
 	vec3 c = ( x * ( 0.15 * x + 0.05 ) + 0.2 * E ) / ( x * ( 0.15 * x + 0.5 ) + 0.06 ) - E / 0.3;
 	c /= ( 0.2 * E + 19.376 ) * 0.040856 - E / 0.3;		// the curve at W 11.2

@@ -1,5 +1,15 @@
 # Handoff — NifSkope, Wild Wasteland Edition
 
+## TOP BLOCK -- written 2026-10-01 09:54 (`date`-read): BLOOM1, the imagespace bloom
+
+- celllights.cpp wwCellImageSpaceSetBloom: from the measure pass's floats (glview.cpp, after the adapted mean),
+  quarter size (a dump is 4x4 box-averaged), HNAM[3] x max(0, c - HNAM[2]), 15-tap exp(-2x^2/49) V then H;
+  unit 11, cell_lights.glsl adds it before the exposure. PRTP_PLAN 2j item 6. ASSUMED: the game's 4x4 average.
+- Gate cell_is.sh: stage B (bloom echo vs the checker's own) + P with the bloom; 3 cells PASS; red nobloom
+  FAILs P on Vault111Cryo (reach 23%), skips cells under 5% reach.
+- Parity gaps left: shadows (LIGH flags 0x400 spot / 0x800 hemi / 0x1000 omni; XLIG shadow depth bias),
+  interior fog, Oren-Nayar, hemi/box/ambient-only, cube scale.
+
 ## TOP BLOCK -- written 2026-10-01 09:34 (`date`-read): IMGS1, the cell's imagespace
 
 - "Imagespace" row (ships off): CELL XCIM -> IMGS read in esmdata; celllights holds the state; glview.cpp
