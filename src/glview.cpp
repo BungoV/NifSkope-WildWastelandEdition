@@ -50,6 +50,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "model/undocommands.h"
 #include "data/nifitem.h"
 #include "nifsnapshot.h"
+#include "probesky.h"	// lane SKY1: one call a frame
 #include "shortcutregistry.h"
 #include "wwskin.h"
 #include "spells/animationsetup.h"
@@ -3918,6 +3919,7 @@ void GLView::paintGL()
 		wwSunShadowPass( scene );
 	// lane SHADOW1: the cell lights' depth cubes (a no-op unless the document draws cell-lit)
 	wwCellShadowPass( scene );
+	probeSkyTick( scene->nifModel, this );	// lane SKY1: an exterior's bounce follows the weather
 
 	if ( perspectiveMode ) {
 		// Lookdev: the lookdev cube background replaces the (FO76+) skybox

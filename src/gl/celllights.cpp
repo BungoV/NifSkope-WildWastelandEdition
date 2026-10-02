@@ -321,6 +321,7 @@ void wwCellLightsUniforms( Scene * scene )
 	fn->glActiveTexture( GLenum( prevActive ) );
 	prog->uni1i( "cellGi", kGiUnit );
 	prog->uni1b( "cellGiOn", giDraw );
+	prog->uni1b( "cellGiSky", giDraw && G->sky );	// lane SKY1
 	if ( giDraw ) {
 		prog->uni3f( "cellGiOrigin", G->origin[0], G->origin[1], G->origin[2] );
 		prog->uni1f( "cellGiVoxel", G->voxel );

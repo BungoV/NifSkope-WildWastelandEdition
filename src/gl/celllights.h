@@ -115,6 +115,7 @@ struct WwCellGi
 	int dims[3] = { 0, 0, 0 };
 	std::vector<float> rgba;
 	QString summary;
+	bool sky = false;   //!< lane SKY1: the grid holds the weather's sky; it stands in for the weather's ambient
 };
 void wwCellGiPublish( const void * nif, const WwCellGi & gi );
 const WwCellGi * wwCellGiFor( const void * nif );

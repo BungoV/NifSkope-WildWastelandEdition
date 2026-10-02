@@ -11,13 +11,14 @@
  *       B = albedo (linear) x E, the surfel's outgoing light in the viewport's units
  *    2. every probe gathers its links: E_axis = sum B x solid angle x max(axis . dir, 0) on the six
  *       world axes (an ambient cube), the unlinked share renormalized over the surfaces (FO4CS's
- *       relight rule). Sky: an interior has none; an exterior's sky waits for the weather reader.
+ *       relight rule). Sky: an interior has none; a weather-lit exterior's sky and sun: src/probesky.h.
  *    3. a voxel grid over the surfaces: each voxel blends the probes within `radius` that it can
  *       SEE (a ray voxel -> probe through the soup), weight (1 - (d / radius)^2)^2. A probe behind a
  *       wall never lights the voxel: the guard against indoor/outdoor bleed.
  *  The renderer samples the grid (src/gl/celllights.cpp, unit 13) and adds albedo x E / pi. */
 
 #include "probeplace.h"
+#include "probesky.h"
 
 #include <QString>
 
@@ -44,6 +45,16 @@ struct ProbeGiResult
 	std::vector<float> probeCube;       //!< per probe: pos[3] + 6 x rgb
 	std::vector<float> surfelOut;       //!< per unique surfel: pos[3] nrm[3] albedo[3] B[3]
 	double msLight = 0, msGather = 0, msGrid = 0;
+	// lane SKY1 (src/probesky.h): the sky and the sun of a weather-lit exterior
+	bool sky = false;                   //!< the relight took them (the grid's sky then stands in for the weather's ambient)
+	QString skyLabel;
+	int surfelsSun = 0;                 //!< surfels the sun reaches
+	qint64 sunRays = 0, sunBlocked = 0;
+	int probesSky = 0;                  //!< probes that see any sky
+	double skyVisMean = 0;              //!< over probes: the mean of the eight octants' sky share
+	int probesTinted = 0;               //!< probes with a tinted octant (sky seen through glass)
+	std::vector<float> probeSky;        //!< per probe: 6 x rgb, the sky's part of probeCube
+	std::vector<float> surfelSun;       //!< per unique surfel: rgb, the sun's part of B
 };
 
 struct ProbeGiSpec
@@ -55,6 +66,11 @@ struct ProbeGiSpec
 	/*! deliberate defects for the gate's refuters: "noshadow" (no shadow rays), "novis" (the grid
 	 *  ignores visibility), "flip" (links gathered from the opposite direction). Empty in real runs. */
 	QString red;
+	/*! lane SKY1: the weather light of an exterior (off = none: an interior, or a view the weather
+	 *  does not light), and its refuters (WW_CELL_SKY_RED): "off" neither sky nor sun, "novis" every
+	 *  octant sees the sky, "notint" the glass tint is ignored, "sunthrough" the sun has no shadow ray. */
+	ProbeSkyLight sky;
+	QString skyRed;
 };
 
 //! Relight the bake in `bakeDir` (its sector_*.tbk) with `lighting`, shadowed through `soup`.

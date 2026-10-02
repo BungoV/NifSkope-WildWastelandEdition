@@ -2627,6 +2627,13 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 		if ( const WwCellLighting * L = wwCellLightsFor( nif ) ) {
 			ProbeGiSpec gs;
 			gs.red = QString::fromLatin1( qgetenv( "WW_CELL_GI_RED" ) ).trimmed();
+			// lane SKY1: outdoors, the weather's sky and sun (src/probesky.h); WW_CELL_SKY_RED its refuters
+			if ( !spec.interior ) {
+				gs.sky = probeSkyLightNow();
+				gs.skyRed = QString::fromLatin1( qgetenv( "WW_CELL_SKY_RED" ) ).trimmed();
+				if ( !gs.sky.on )
+					probeNotes += QStringLiteral( "  gi sky: none (the view is not weather-lit; Scene mode Lookdev lights it with the weather)\n" );
+			}
 			ProbeGiResult gr;
 			const bool ok = probeGiRelight( probeSoup, giBakeDir, *L, gs, &gr );
 			probeNotes += QStringLiteral( "  %1\n" ).arg( probeGiCensusText( gr ) );
@@ -2644,7 +2651,10 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 				if ( !dump.isEmpty() && !probeGiDump( gr, gs, dump, &derr ) )
 					probeNotes += QStringLiteral( "  gi dump FAILED: %1\n" ).arg( derr );
 				gi.rgba = std::move( gr.grid );
+				gi.sky = gr.sky && gs.skyRed != QLatin1String( "keepamb" );   // lane SKY1
 				wwCellGiPublish( nif, gi );
+				if ( !spec.interior )
+					probeSkyKeep( nif, probeSoup, giBakeDir, gs );   // a later change of weather relights it
 			}
 		}
 	}

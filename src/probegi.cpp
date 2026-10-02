@@ -77,6 +77,14 @@ struct TbkLinkExt
 };
 static_assert( sizeof( TbkLinkExt ) == 8, "tbk link ext" );
 
+// lane SKY1: the v4 tail's probe record (src/probebake.cpp's TbkProbeExt)
+struct TbkProbeExt
+{
+	quint8 skyTint[8][3];   //!< per octant, the sky seen through glass (255 = clear)
+	quint32 room[2];
+};
+static_assert( sizeof( TbkProbeExt ) == 32, "tbk probe ext" );
+
 struct Tbk
 {
 	QString name;
@@ -86,6 +94,7 @@ struct Tbk
 	std::vector<TbkLink> links;
 	std::vector<TbkSurfel> back;      //!< v4: the cells' second sides
 	std::vector<TbkLinkExt> lext;     //!< v4: one per link
+	std::vector<TbkProbeExt> pext;    //!< v4: one per probe (lane SKY1 reads its sky tint)
 };
 
 bool readTbk( const QString & path, Tbk & t, QString * err )
@@ -128,12 +137,16 @@ bool readTbk( const QString & path, Tbk & t, QString * err )
 	p += t.links.size() * 12;
 	t.back.clear();
 	t.lext.clear();
+	t.pext.clear();
 	if ( v4 ) {
 		t.back.resize( t.h.reserved[0] );
 		std::memcpy( t.back.data(), p, t.back.size() * 32 );
 		p += t.back.size() * 32;
 		t.lext.resize( t.h.linkCount );
 		std::memcpy( t.lext.data(), p, t.lext.size() * 8 );
+		p += t.lext.size() * 8;
+		t.pext.resize( t.h.probeCount );
+		std::memcpy( t.pext.data(), p, t.pext.size() * 32 );
 	}
 	t.name = QFileInfo( path ).fileName();
 	return true;
@@ -227,6 +240,15 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 	const bool redNoShadow = spec.red == QLatin1String( "noshadow" );
 	const bool redNoVis = spec.red == QLatin1String( "novis" );
 	const bool redFlip = spec.red == QLatin1String( "flip" );
+	// lane SKY1: the weather's sky and sun, outdoors only
+	const bool skyOn = spec.sky.on && !lighting.interior && spec.skyRed != QLatin1String( "off" );
+	const bool redSkyNoVis = spec.skyRed == QLatin1String( "novis" );
+	const bool redSkyNoTint = spec.skyRed == QLatin1String( "notint" );
+	const bool redSunThrough = spec.skyRed == QLatin1String( "sunthrough" );
+	const bool sunOn = skyOn && spec.sky.sunTo[2] > 0.0f
+		&& ( spec.sky.sun[0] > 0.0f || spec.sky.sun[1] > 0.0f || spec.sky.sun[2] > 0.0f );
+	R.sky = skyOn;
+	R.skyLabel = spec.sky.label;
 
 	// ---- the bake's files, by name (the gate reads them in the same order)
 	const QStringList names = QDir( bakeDir ).entryList( { QStringLiteral( "sector_*.tbk" ) }, QDir::Files, QDir::Name );
@@ -277,7 +299,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 	// ---- 1. the surfels, one per position + normal across the files, lit
 	std::unordered_map<SurfKey, int, SurfKeyHash> uniq;
 	std::vector<std::vector<int>> fileSurfel( tbks.size() ), fileBack( tbks.size() );   // lane BAKE4: + v4 back surfels
-	struct US { double p[3], n[3], a[3]; double B[3]; };
+	struct US { double p[3], n[3], a[3]; double B[3]; double S[3] = { 0, 0, 0 }; };   // S: the sun's part of B (lane SKY1)
 	std::vector<US> us;
 	for ( size_t f = 0; f < tbks.size(); f++ ) {
 		for ( size_t si = 0; si < tbks[f].surfels.size() + tbks[f].back.size(); si++ ) {
@@ -316,6 +338,8 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 	const QVector<WwCellLight> & lights = lighting.lights;
 	std::atomic<qint64> rays( 0 ), shadowed( 0 );
 	std::atomic<int> lit( 0 );
+	std::atomic<qint64> sunRays( 0 ), sunBlocked( 0 );
+	std::atomic<int> sunLit( 0 );
 	parallelFor( us.size(), [&]( size_t i ) {
 		US & u = us[i];
 		const double o[3] = { u.p[0] + u.n[0] * 2.0, u.p[1] + u.n[1] * 2.0, u.p[2] + u.n[2] * 2.0 };
@@ -360,6 +384,29 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 				for ( int c = 0; c < 3; c++ )
 					E[c] += lighting.dirColor[c] * nl;
 		}
+		// lane SKY1: the sun, behind one ray through the soup (to beyond anything loaded)
+		if ( sunOn ) {
+			const double nl = u.n[0] * spec.sky.sunTo[0] + u.n[1] * spec.sky.sunTo[1] + u.n[2] * spec.sky.sunTo[2];
+			if ( nl > 0.0 ) {
+				bool hit = false;
+				if ( !redSunThrough ) {
+					const double reach = 400000.0;
+					const double q[3] = { o[0] + spec.sky.sunTo[0] * reach, o[1] + spec.sky.sunTo[1] * reach,
+						o[2] + spec.sky.sunTo[2] * reach };
+					sunRays++;
+					hit = blocked( o, q, 0.0 );
+					if ( hit )
+						sunBlocked++;
+				}
+				if ( !hit ) {
+					sunLit++;
+					for ( int c = 0; c < 3; c++ ) {
+						u.S[c] = u.a[c] * spec.sky.sun[c] * nl;
+						E[c] += spec.sky.sun[c] * nl;
+					}
+				}
+			}
+		}
 		for ( int c = 0; c < 3; c++ )
 			u.B[c] = u.a[c] * E[c];
 		rays += nr;
@@ -370,11 +417,15 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 	R.shadowRays = rays;
 	R.shadowBlocked = shadowed;
 	R.surfelsLit = lit;
+	R.surfelsSun = sunLit;
+	R.sunRays = sunRays;
+	R.sunBlocked = sunBlocked;
 	R.msLight = clock.nsecsElapsed() / 1e6;
 
 	// ---- 2. every probe's ambient cube from its links
-	struct UP { double p[3]; double E[6][3]; };
+	struct UP { double p[3]; double E[6][3]; double S[6][3]; };   // S: the sky's part of E (lane SKY1)
 	std::vector<UP> up;
+	double skyVisSum = 0.0;
 	for ( size_t f = 0; f < tbks.size(); f++ ) {
 		const Tbk & t = tbks[f];
 		const float cs = t.h.surfelCellSize;
@@ -392,6 +443,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 			for ( int c = 0; c < 3; c++ )
 				P.p[c] = pr.position[c];
 			std::memset( P.E, 0, sizeof P.E );
+			std::memset( P.S, 0, sizeof P.S );
 			const Key3 pk { floorDiv( pr.position[0], cs ), floorDiv( pr.position[1], cs ), floorDiv( pr.position[2], cs ) };
 			double linked = 0.0;
 			for ( quint32 j = 0; j < pr.linkCount; j++ ) {
@@ -432,10 +484,30 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 					for ( double & c : e )
 						c *= k;
 			}
+			// lane SKY1: the sky this probe sees, beside what its surfaces send (src/probesky.h)
+			if ( skyOn ) {
+				const size_t pi = size_t( &pr - t.probes.data() );
+				const TbkProbeExt * px = pi < t.pext.size() ? &t.pext[pi] : nullptr;
+				probeSkyCube( pr.skyVis, px ? px->skyTint : nullptr, spec.sky, redSkyNoVis, redSkyNoTint, P.S );
+				double vs = 0.0;
+				bool tinted = false;
+				for ( int o = 0; o < 8; o++ ) {
+					vs += pr.skyVis[o];
+					if ( px && pr.skyVis[o] > 0.0f )
+						tinted = tinted || px->skyTint[o][0] != 255 || px->skyTint[o][1] != 255 || px->skyTint[o][2] != 255;
+				}
+				skyVisSum += vs / 8.0;
+				R.probesSky += vs > 0.0 ? 1 : 0;
+				R.probesTinted += tinted ? 1 : 0;
+				for ( int a = 0; a < 6; a++ )
+					for ( int c = 0; c < 3; c++ )
+						P.E[a][c] += P.S[a][c];
+			}
 			up.push_back( P );
 		}
 	}
 	R.probes = int( up.size() );
+	R.skyVisMean = up.empty() ? 0.0 : skyVisSum / double( up.size() );
 	R.msGather = clock.nsecsElapsed() / 1e6 - R.msLight;
 
 	// ---- 3. the voxel grid, each voxel blending the probes it can see
@@ -583,8 +655,28 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 			for ( int c = 0; c < 3; c++ )
 				R.probeCube.push_back( float( P.E[a][c] ) );
 	}
+	if ( skyOn ) {   // lane SKY1: the sky's and the sun's parts, for the gate
+		R.probeSky.reserve( up.size() * 18 );
+		for ( const UP & P : up )
+			for ( int a = 0; a < 6; a++ )
+				for ( int c = 0; c < 3; c++ )
+					R.probeSky.push_back( float( P.S[a][c] ) );
+		R.surfelSun.reserve( us.size() * 3 );
+		for ( const US & u : us )
+			for ( int c = 0; c < 3; c++ )
+				R.surfelSun.push_back( float( u.S[c] ) );
+	}
 	R.ok = true;
 	return true;
+}
+
+// lane SKY1: the census line of a weather-lit exterior
+static QString skyCensusText( const ProbeGiResult & r )
+{
+	return QStringLiteral( "gi sky: %1; %2 of %3 probes see sky (mean share %4), %5 through glass; sun reaches %6 of %7 surfels "
+		"(%8 rays, %9 blocked)" )
+		.arg( r.skyLabel ).arg( r.probesSky ).arg( r.probes ).arg( r.skyVisMean, 0, 'f', 3 ).arg( r.probesTinted )
+		.arg( r.surfelsSun ).arg( r.surfels ).arg( r.sunRays ).arg( r.sunBlocked );
 }
 
 QString probeGiCensusText( const ProbeGiResult & r )
@@ -597,7 +689,8 @@ QString probeGiCensusText( const ProbeGiResult & r )
 		.arg( r.files ).arg( r.surfels ).arg( r.surfelsLit ).arg( r.probes ).arg( r.links ).arg( r.linksUnresolved )
 		.arg( r.shadowRays ).arg( r.shadowBlocked ).arg( r.dims[0] ).arg( r.dims[1] ).arg( r.dims[2] )
 		.arg( double( r.voxel ), 0, 'f', 1 ).arg( double( r.radius ), 0, 'f', 1 ).arg( r.voxelsNear ).arg( r.voxelsValid )
-		.arg( r.visRays ).arg( r.visBlocked ).arg( r.msLight, 0, 'f', 0 ).arg( r.msGather, 0, 'f', 0 ).arg( r.msGrid, 0, 'f', 0 );
+		.arg( r.visRays ).arg( r.visBlocked ).arg( r.msLight, 0, 'f', 0 ).arg( r.msGather, 0, 'f', 0 ).arg( r.msGrid, 0, 'f', 0 )
+		+ ( r.sky ? QStringLiteral( "\n  " ) + skyCensusText( r ) : QString() );
 }
 
 /* The dump (little-endian):
@@ -629,6 +722,30 @@ bool probeGiDump( const ProbeGiResult & r, const ProbeGiSpec & spec, const QStri
 		+ i32( r.dims[0] ) + i32( r.dims[1] ) + i32( r.dims[2] );
 	if ( !put( QStringLiteral( "gi_grid.bin" ), gh, r.grid ) )
 		return false;
+	/* lane SKY1, a weather-lit exterior only:
+	 *   gi_sky.bin   int32 n, then n x 18 float32: the sky's part of each probe's E (same order)
+	 *   gi_sun.bin   int32 n, then n x 3 float32: the sun's part of each surfel's B (same order)
+	 *   gi_sky.txt   the light the relight used: amb (six rows, a surface facing +X -X +Y -Y +Z -Z),
+	 *                sunTo, sun, the label, the red */
+	if ( r.sky ) {
+		if ( !put( QStringLiteral( "gi_sky.bin" ), i32( r.probes ), r.probeSky ) )
+			return false;
+		if ( !put( QStringLiteral( "gi_sun.bin" ), i32( r.surfels ), r.surfelSun ) )
+			return false;
+		QFile s( QDir( dir ).filePath( QStringLiteral( "gi_sky.txt" ) ) );
+		if ( s.open( QIODevice::WriteOnly ) ) {
+			QString t;
+			for ( int a = 0; a < 6; a++ )
+				t += QStringLiteral( "amb %1 %2 %3 %4\n" ).arg( a ).arg( double( spec.sky.amb[a][0] ), 0, 'g', 9 )
+					.arg( double( spec.sky.amb[a][1] ), 0, 'g', 9 ).arg( double( spec.sky.amb[a][2] ), 0, 'g', 9 );
+			t += QStringLiteral( "sunTo %1 %2 %3\nsun %4 %5 %6\nlabel %7\nskyRed %8\n" )
+				.arg( double( spec.sky.sunTo[0] ), 0, 'g', 9 ).arg( double( spec.sky.sunTo[1] ), 0, 'g', 9 )
+				.arg( double( spec.sky.sunTo[2] ), 0, 'g', 9 ).arg( double( spec.sky.sun[0] ), 0, 'g', 9 )
+				.arg( double( spec.sky.sun[1] ), 0, 'g', 9 ).arg( double( spec.sky.sun[2] ), 0, 'g', 9 )
+				.arg( spec.sky.label, spec.skyRed.isEmpty() ? QStringLiteral( "-" ) : spec.skyRed );
+			s.write( t.toUtf8() );
+		}
+	}
 	QFile m( QDir( dir ).filePath( QStringLiteral( "gi_meta.txt" ) ) );
 	if ( m.open( QIODevice::WriteOnly ) )
 		m.write( QStringLiteral( "fixtureClear %1\nradiusScale %2\nred %3\n%4\n" ).arg( double( spec.fixtureClear ) )
