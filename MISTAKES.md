@@ -5,6 +5,15 @@ Written the moment a mistake is recognised, unprompted (CONSTITUTION rule 2).
 Format: date -- what was done -- what was true -- how it was found -- the rule.
 Newest at the top.
 
+## 2026-10-01 -- AMBO1/AMBO2: the ambient pass called full screen; radii written as XRDS alone; a sed -i edit
+- AMBO1's notes called the game's ambient pass full screen and framed the open question as a camera zone. It is a
+  world-space sphere (1.22077 x the radius) drawn only when the pass has lights; AMBO2 found it by reading the
+  pass's transform setup. Rule: read a pass's transform setup before calling its coverage.
+- AMBO1 listed the Vault spheres' radii as XRDS alone (1118, 291, 779); the radius is base 256 + XRDS (XRDS is a
+  delta). Rule: a radius quoted from a ref is base + XRDS, said so.
+- AMBO2 changed a docstring in tests/spells/cell_lit_check.py with sed -i (lane rules: Edit/Write only on tracked
+  files); EOL-restored, diff clean.
+
 ## 2026-10-01 -- BASE1: "the 09-24 exe also differs from the lodgen baseline", written without the control run
 - HANDOFF (04:09 block) said the stock lodgen baseline differed for the 09-24 exe as well as the current one, which
   read as game data having moved. The 09-24 exe still gives its own baseline 25 of 25; only the code moved (lane

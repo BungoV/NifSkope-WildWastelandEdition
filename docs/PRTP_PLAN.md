@@ -472,20 +472,26 @@ Under the nosoft red that ratio is 0.999 / 0.998: the Soft fade, not the dropped
 haze. Walkway, imagespace on: frame mean 109.6 -> 93.6 (out of 255). cell_is.sh 3/3 PASS with the effects in the
 measure (Vault: the steam leaves 4% of the frame as opaque cell-lit pixels to compare, 99.71% within 3/255).
 
+### 2r. Ambient Only lights scale the ambient (lanes AMBO1 + AMBO2, 2026-10-01)
+
+A light with LIGH flag 0x100000 lights nothing directly (AMBO1 drops it from the direct lights). It changes the
+cell ambient inside a sphere of 1.22077 x its radius, radius = base + XRDS (XRDS is a delta). Inside, each
+channel's ambient sum (the DALC rows dotted with (N,1)) is multiplied by pow(color/255, 2.2) x dimmer before the
+ambient's own 2.2; dimmer 0.5 leaves about 0.22 of the ambient. Per pixel: the first light in plugin order that
+holds the point wins, and it replaces the ambient, never adds. No edge fade, no camera rule. The game culls the
+light by its plain radius against the view; not modelled (a screen-edge strip only). Vault111Cryo's three spheres:
+(-1011,1911,-69) 1677, (-2410,32,30) 668, (-3594,-222,157) 1264 (the radii first written here were XRDS alone).
+Census: 39 placed in 23 cells, at most 5 in one cell; the shader takes 16. Summary "ambientonly=N
+ambientvolumes=N". Reds WW_CELL_LIT_RED=ambientlit (drawn as direct lights again; run with CELLS=Vault111Cryo,
+Solomon has none) and ambientfull (the scale ignored). Gate cell_lit.sh's Ambient Only view (look-at
+-4200,-250,0, eye 800 away; probe 11 = the ambient sum x 8): inside 100.0% of 410,294 px, outside 99.9%; red
+ambientfull 0.0%.
+
 ## 3. Open
 
 - `.tbk` v4: two surfel sides per cell (gives back the refused thin-wall weight), room ids (2f).
 - Glass tint in the bake.
-- Ambient Only lights (LIGH flag 0x100000; 39 placed, names like "AmbientModifierDarkGrey01Amb"): read from the
-  game's shaders, such a light does not light anything directly. When it heads the light list of the deferred
-  ambient pass, the cell's directional ambient is scaled by its colour (2.2-decoded) x dimmer before the pass's own
-  2.2 (dimmer 0.5 -> about 0.22 of the ambient). The ambient pass is full screen, so the open question is how the
-  light gets into that list: camera inside its sphere (a zone) or its sphere on screen. Vault111Cryo has three
-  (-1011,1911,-69 r1118; -2410,32,30 r291; -3594,-222,157 r779), none near the walkway. Settle in game: stand
-  inside / outside one and compare. Lane AMBO1 (2026-10-01) drops them from the direct lights (summary
-  "ambientonly=N"; red WW_CELL_LIT_RED=ambientlit draws them again and FAILS cell_lit, 86.0% vs 99.9%); the ambient
-  scale itself waits on that question. List:
-  scratchpad/ltype1_20261001/ambient_only.py, ambient_refs.py.
+- Ambient Only lights: done in 2r. Optional: compare in game at Vault 111's west end.
 - Save names for the PRTP4 capture flights.
 - FraternalPost11501 seen from straight above (center 553,2170,400, distance 600) and PickmanGallery01 (562,440,150):
   probe 8 and the diffuse check part on 13% / 9% of clean pixels, flags honoured or not. The Fraternal patch
