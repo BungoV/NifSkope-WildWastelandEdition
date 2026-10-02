@@ -2580,6 +2580,11 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 		  << ", sky cards hidden " << skyCardsHidden << "\n";
 		s << "  distinct models loaded " << modelLoads << ", failed to load "
 		  << modelsFailed.size() << "\n";
+		if ( !modelsFailed.isEmpty() ) {   // lane PRTP5: their names, for the cell census
+			QStringList mf( modelsFailed.cbegin(), modelsFailed.cend() );
+			std::sort( mf.begin(), mf.end() );
+			s << "  models failed: " << mf.mid( 0, 12 ).join( QLatin1String( ", " ) ) << "\n";
+		}
 		s << "  source triangles " << srcTris << ", welded shapes " << shapes
 		  << ", vertices " << verts << ", triangles " << tris << "\n";
 		/* THE MATERIAL LINE (lane CELLVIEW3). Magenta in this viewer means one

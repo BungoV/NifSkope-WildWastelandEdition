@@ -8857,6 +8857,11 @@ NifSkope * NifSkope::createWindow( const QString & fname, bool background )
 		wwLightAnglesHarness( skope );
 	}
 	{
+		// lane PRTP5: WW_CELL_CENSUS_TEST (the cell-by-cell walk), src/cellcensustest.cpp
+		extern void wwCellCensusHarness( NifSkope * );
+		wwCellCensusHarness( skope );
+	}
+	{
 		// lane PBRR2A: WW_SCENE_TEST, src/scenetest.cpp
 		extern void wwSceneHarness( NifSkope * );
 		wwSceneHarness( skope );

@@ -564,6 +564,7 @@ SOURCES += \
 	src/cellrefs.cpp \
 	src/cellworkspace.cpp \
 	src/cellworkspacetest.cpp \
+	src/cellcensustest.cpp \
 	src/lodinative.cpp \
 	src/lodtsheets.cpp \
 	src/lodgenaggregate.cpp \
