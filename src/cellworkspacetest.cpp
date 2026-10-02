@@ -29,6 +29,7 @@ BSD License - see nifskope.h
 #include "model/nifmodel.h"
 
 #include <QAction>
+#include <QComboBox>
 #include <QCoreApplication>
 #include <QDir>
 #include <QDockWidget>
@@ -177,6 +178,14 @@ bool runPrtpStage( NifSkope * skope, int stage )
 				&& dCell->findChild<QWidget *>( QStringLiteral( "CellWorkspaceProbesBake" ) ) );
 		QWidget * bake = dCell->findChild<QWidget *>( QStringLiteral( "CellWorkspaceProbesBake" ) );
 		add( "PRTP: Bake is on", bake && bake->isEnabled() );
+		// lane PROBEVIEW1: the Pass drop-down, its five entries, off until a bake is relit
+		QComboBox * pass = dCell->findChild<QComboBox *>( QStringLiteral( "CellWorkspaceCellPass" ) );
+		QStringList items;
+		for ( int i = 0; pass && i < pass->count(); i++ )
+			items << pass->itemText( i );
+		add( "PRTP: the Pass drop-down holds Combined, GI, Sky visibility, Surfel color, Surfel light",
+			items == QStringList{ "Combined", "GI", "Sky visibility", "Surfel color", "Surfel light" }, items.join( QLatin1Char( '|' ) ) );
+		add( "PRTP: Pass is off before a bake", pass && !pass->isEnabled() );
 		add( "PRTP: no kind rows before Place", panel->probeKindRows().isEmpty(),
 			panel->probeKindRows().join( QLatin1Char( '|' ) ) );
 		add( "PRTP: no probe markers before Place", probeShapes( skope ) == 0,
@@ -239,6 +248,10 @@ bool runPrtpStage( NifSkope * skope, int stage )
 		QStringLiteral( "%1 vs %2" ).arg( filesSaid ).arg( tbks.size() ) );
 	add( "PRTP: Bake keeps the kind rows", panel->probeKindRows().join( QLatin1Char( '|' ) ) == keptRows,
 		panel->probeKindRows().join( QLatin1Char( '|' ) ) );
+	{	// lane PROBEVIEW1: the bake relit, the Pass drop-down is live
+		QComboBox * pass = dCell->findChild<QComboBox *>( QStringLiteral( "CellWorkspaceCellPass" ) );
+		add( "PRTP: Pass is on after Bake", pass && pass->isEnabled() );
+	}
 	const QString shotDir = QString::fromLocal8Bit( qgetenv( "WW_CELLWS_SHOTS" ) );
 	if ( !shotDir.isEmpty() ) {
 		const QSize sz = composeWindowShot( skope, shotDir + QStringLiteral( "/cell_prtp_baked.png" ) );

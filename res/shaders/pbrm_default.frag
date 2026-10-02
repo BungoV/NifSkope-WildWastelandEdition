@@ -681,6 +681,8 @@ void main()
 			: vec4( cellProbeRaw( cellWorldPos( -ViewDir ), cellWorldDir( s.N ) ), 1.0 );
 	if ( cellOn && cellProbe >= 50 && cellProbe <= 53 )	// lane CUBE1
 		fragColor = vec4( cellProbe == 50 ? clamp( cubeK * 0.25, 0.0, 1.0 ) : cellCubeProbe( offset, s.N ), 1.0 );
+	if ( cellOn && cellPass > 0 && cellProbe == 0 )	// lane PROBEVIEW1: the PRTP band's Pass
+		fragColor = vec4( cellPassOut( cellWorldPos( -ViewDir ), cellWorldDir( s.N ) ), 1.0 );
 #endif
 	vec3 fogProbeOut;
 	if ( wwFogProbe( -ViewDir, fogProbeOut ) )

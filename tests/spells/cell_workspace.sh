@@ -155,7 +155,10 @@ list, the two selection doors, the Show popover and the layout bytes)" \
 		"PRTP: Bake says what it wrote" \
 		"PRTP: the folder holds .tbk sector files, each starting TBK1" \
 		"PRTP: the note's file count is the folder's" \
-		"PRTP: Bake keeps the kind rows"; do
+		"PRTP: Bake keeps the kind rows" \
+		"PRTP: the Pass drop-down holds Combined, GI, Sky visibility, Surfel color, Surfel light" \
+		"PRTP: Pass is off before a bake" \
+		"PRTP: Pass is on after Bake"; do
 		check "report row present and green: $want" \
 			"$(grep -Fq "PASS  $want" "$REPORT" && echo 1 || echo 0)"
 	done

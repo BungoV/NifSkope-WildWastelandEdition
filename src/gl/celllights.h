@@ -44,6 +44,7 @@ BSD License - see nifskope.h
  *                axes from its rotation (the light's own radius and curve still apply inside) */
 
 #include <QString>
+#include <QStringList>
 #include <QVector>
 
 #include <cmath>
@@ -143,9 +144,21 @@ struct WwCellGi
 	float voxel = 64.0f;
 	int dims[3] = { 0, 0, 0 };
 	std::vector<float> rgba;
+	std::vector<float> sky;	// lane PROBEVIEW1: the same layout, rgb = the probes' open-sky share, a = valid
 	QString summary;
 };
 void wwCellGiPublish( const void * nif, const WwCellGi & gi );
+
+/*! lane PROBEVIEW1: the PRTP band's Pass (Division deck, s18/s40/s65 views). 0 Combined (the frame as drawn),
+ *  1 GI (the probe grid's E / pi on the surface's normal), 2 Sky visibility (the probes' open-sky share on the
+ *  normal), 3 Surfel color, 4 Surfel light (src/gl/cellprobeview.h draws the surfels over a magenta frame).
+ *  Stored as WW/CellPass; the pin WW_CELL_PASS (number or entry name) wins. WW_CELL_PV_RED=direct|nonormal|open. */
+QStringList wwCellPassNames();
+int wwCellPass();
+//! the Pass this document draws: the stored one once its bake is relit (a GI grid published), else Combined
+int wwCellPassFor( const void * nif );
+void wwCellSetPass( int pass );
+int wwCellPassRed();
 const WwCellGi * wwCellGiFor( const void * nif );
 //! the GI row (ships off); the pin WW_CELL_GI wins. Draws only while the Cell lights row is on.
 bool wwCellGiOn();
