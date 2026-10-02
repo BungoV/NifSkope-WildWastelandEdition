@@ -53,13 +53,17 @@ LOG="$OUT/cell_lit.log"
 PORT="${PORT:-14741}"
 SPEC="$REPO/tests/fixtures/empty.wwcell"
 SIZE="${SIZE:-960x600}"
-CELLS="${CELLS:-Vault111Cryo DmndSolomonsHouse01 DmndRadio01}"
+CELLS="${CELLS:-Vault111Cryo DmndSolomonsHouse01 DmndRadio01 CabotHouse01}"
 # looking down on light clusters (the whole-cell framing leaves too few pixels); the Vault's west end
 # holds its big aimed spots, so --red axis has something to break
 : "${CAM_Vault111Cryo:=-4600,-280,0}" "${CAM_DmndSolomonsHouse01:=1450,-20,150}"
 # lane HEMI1: the radio booth's two hemisphere lamps (refs 00139F49, 00187B03) face down; a level look
 # across the booth from inside shows the walls above their plane, which the half space leaves dark
 : "${CAM_DmndRadio01:=1617,99,230}" "${VIEW_DmndRadio01:=4}" "${DIST_DmndRadio01:=250}"
+# ... and Cabot House's ground floor under its upstairs lamps (at 765,91,546 and 798,589,560, radius 337):
+# their boxes end at the upper floor, so down here they light nothing, while the room's own box light
+# (795,378,47) still does -- both sides of a box in one frame
+: "${CAM_CabotHouse01:=765,91,380}" "${VIEW_CabotHouse01:=4}" "${DIST_CabotHouse01:=250}"
 
 mkdir -p "$OUT"
 : > "$LOG"
@@ -115,8 +119,15 @@ for cell in $CELLS; do
 	fi
 	# lane HEMI1: the hemisphere view must keep its hemisphere-decided pixels (a reframing cannot hide them)
 	if [ "$cell" = "DmndRadio01" ] && [ -z "$RED" ]; then
-		nh="$(printf '%s' "$line" | sed -n 's/.*(\([0-9]*\) by a hemisphere).*/\1/p')"
+		nh="$(printf '%s' "$line" | sed -n 's/.*(\([0-9]*\) by a hemisphere.*/\1/p')"
 		check "$cell: the frame holds 200+ pixels a hemisphere's plane decides (${nh:-0})" "$([ "${nh:-0}" -ge 200 ] && echo 1 || echo 0)"
+	fi
+	# ... and the box view its box-decided pixels
+	if [ "$cell" = "CabotHouse01" ] && [ -z "$RED" ]; then
+		nb="$(printf '%s' "$line" | sed -n 's/.* \([0-9]*\) by a box.*/\1/p')"
+		ni="$(printf '%s' "$line" | sed -n 's/.* \([0-9]*\) lit inside a box.*/\1/p')"
+		check "$cell: the frame holds 200+ pixels a light's box cuts off (${nb:-0})" "$([ "${nb:-0}" -ge 200 ] && echo 1 || echo 0)"
+		check "$cell: ... and 200+ a box light still lights inside its box (${ni:-0})" "$([ "${ni:-0}" -ge 200 ] && echo 1 || echo 0)"
 	fi
 done
 say ""

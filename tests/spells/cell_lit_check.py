@@ -249,13 +249,21 @@ def main(esm, cell, shots):
     hemi_dec = decided & (np.abs(np.clip(irradiance(hemis, Pp, Np, False) / 4.0, 0, 1)
                                  - np.clip(irradiance(hemis, Pp, Np) / 4.0, 0, 1)).max(axis=1) > 0.02) if hemis \
         else np.zeros(len(ys), bool)
+    # the box lights on their own: the pixels their boxes cut off, and the pixels they still light inside
+    boxes = [L for L in lights if L['box'] is not None]
+    box_dec, box_in = np.zeros(len(ys), bool), np.zeros(len(ys), bool)
+    if boxes:
+        kept = np.clip(irradiance(boxes, Pp, Np) / 4.0, 0, 1)
+        box_dec = decided & (np.abs(np.clip(irradiance(boxes, Pp, Np, False) / 4.0, 0, 1) - kept).max(axis=1) > 0.02)
+        box_in = kept.max(axis=1) > 0.02
     shape_txt = 'shapes: %d hemisphere, %d box; too few shape-decided pixels in frame (%d, under 200)' % (
-        len(hemis), sum(L['box'] is not None for L in lights), decided.sum())
+        len(hemis), len(boxes), decided.sum())
     if decided.sum() >= 200:
         shape_share = good[decided].mean()
         verdict = verdict and shape_share >= 0.95
-        shape_txt = 'shapes: %d hemisphere, %d box; %d shape-decided (%d by a hemisphere), agree %.1f%%' % (
-            len(hemis), sum(L['box'] is not None for L in lights), decided.sum(), hemi_dec.sum(), 100 * shape_share)
+        shape_txt = ('shapes: %d hemisphere, %d box; %d shape-decided (%d by a hemisphere, %d by a box; %d lit inside '
+                     'a box), agree %.1f%%' % (len(hemis), len(boxes), decided.sum(), hemi_dec.sum(), box_dec.sum(),
+                                               box_in.sum(), 100 * shape_share))
     return ('lit %s %s: %d lights; %d clean pixels sampled, %d lit by them; agree %.1f%% (lit %.1f%%); %s; %s; '
             'mean |err| %.4f, p99 %.4f' % ('PASS' if verdict else 'FAIL', cell, len(lights), len(ys), lit.sum(),
                                            100 * share, 100 * lit_share, spot_txt, shape_txt, err.mean(),
