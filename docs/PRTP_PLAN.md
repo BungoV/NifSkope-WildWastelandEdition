@@ -596,6 +596,69 @@ spaced angles stand in for the game's continuous random angle (closed form vs fr
 Open: compare one in-game still against the viewer at the Vault 111 cryo walkway; these three assumptions are
 what such a capture would settle.
 
+### 2v. Placed models drop their root transform; a cell opens in its first-load state (lane MISS1, 2026-10-02)
+
+bungo circled two spots on the Vault 111 cryo walkway where geometry was missing. Located first (camera of the
+marked shot: look-at 384,-480,60, view 3, distance 260, FOV 70; both marks lie on the plane z = -74):
+- Mark A, world about (124,-699,-74): ref 0000194b STAT V111RPit2WallMid02
+  (Interiors\Vault\Vault111\Rooms\V111RPit2WallMid02.nif), shape "V111RPit2WallMid02:25", the alpha-tested
+  floor grate quad.
+- Mark B, world about (310..446,-347,-74): ref 0000192f, same model, shapes ":25" (grate) and ":18" (trim).
+Every other shape the plugin puts in the two boxes (16 references each) was already drawn in place. No decal
+lies in either mark (one TXST reference within 60 units of mark B, none at A); no actor within 60 units.
+
+The rule. A placed model's ROOT node takes the reference's transform; the transform stored on the root in the
+model file is not applied. V111RPit2WallMid02 stores a half turn about Z there, so the cell view drew the wall
+piece turned around (its box 150.5 units off) and the grate landed under the wall. Proof from the game's own
+data: the cell's combined meshes (Fallout4 - MeshesExtra.ba2, meshes\precombined\<cell form>_<hash>_oc.nif)
+store each instance's transform and world bound; over Vault111Cryo 57 shapes of root-carrying models fit only
+"root dropped", 0 fit only "root kept" (4 either, 5 neither); InstituteConcourse 16 / 0 (139 either).
+Game-wide 305 of 19,912 loose placeable models carry a root transform.
+
+The start state. A reference with an enable parent (XESP) starts shown when the PARENT's start state differs
+from the XESP "opposite" bit; the parent's own state comes from its initially-disabled flag or its own parent.
+The cell view used only the reference's own flag and the bit. Vault111Cryo: 88 parented, 86 change (parents
+002075e4 and 000481d4, both initially disabled; all in the pod room and the entrance). InstituteConcourse:
+1939 parented, 1592 change (XMarker 00248509 alone holds 900 the old view drew and the game starts hidden).
+
+Built (commit 0e82541b on miss1-20261002; main 5431a9f2 merged in as 8f224946, rebuilt, every gate below
+run on the merged exe):
+- src/lodgen.cpp/.h: lodgenNativeLoadModelPlaced(), the node chain without the root. src/cellview.cpp loads
+  placed references through it and follows the enable-parent chain (a parent outside the loaded block counts
+  as enabled). Markers\BlackPlane01.nif is drawn (no marker flag on its base; all 19 references are in the
+  cell's combined list). src/esmdata.cpp: a clothing record's world model is MOD2 / swap MO2S.
+- The marker flag (0x00800000) is honoured for ACTI, DOOR, FURN, STAT only, as the record definitions have it.
+- Gate tests/spells/cell_refs.sh + cell_refs_drawn_check.py (own plugin walk, own model reader). Per cell five
+  rows: census (plugin = viewer's list), drawn (every reference with a model the game shows at start is
+  drawn), hidden (none of the others is), placed (each drawn box against a box rebuilt from the model file
+  without its root, bar 0.05 units), anchor (the combined meshes side with "root dropped").
+  Green, 14 rows: Vault111Cryo 3087 references, 1397 / 1397 drawn, 1690 others 0 drawn, 1394 boxes worst
+  0.001; DmndSolomonsHouse01 200, 193 / 193, 7; InstituteConcourse 6714, 3960 / 3960, 2753, 3954 boxes worst
+  0.001. Named SKIPs: Dmnd has no root-carrying model (anchor); platformhelperfree01 not judged.
+  Reds on Vault111Cryo, each FAILS: WW_CELL_REFS_RED=root (the old placement) fails the placed row, worst
+  error 150.485 against the 0.05 bar, 12 boxes over it, the three V111RPit2WallMid02 references first;
+  WW_CELL_REFS_RED=parent (the old start rule) fails the drawn row (19 the game shows are not drawn: ceiling
+  lamps, light beams, fixtures of the pod room) and the hidden row (7 the game hides are drawn).
+- tests/spells/cell_open_check.py and cell_glow_check.py mirror the root rule, the black plane and the
+  enable-parent rule. Existing gates re-run green on the merged exe: cell_open.sh (placement boxes, its own
+  copy of the rules), cell_glow.sh (the cards' transform now comes from the root-less chain; stage K reads
+  167 turned, 0 on references that start disabled, where the old rule gave 165 + 2), cell_fx.sh (effect meshes
+  go through the new load), cell_lit.sh (the lit room whose walls moved). cell_lights.sh is not reached: the
+  light list is unchanged.
+
+Open:
+- The light list's on/off rule still ignores enable parents: Vault111Cryo 28 of 849 placed lights are lit by
+  the view and off at the game's start; InstituteConcourse 1265 of 1776. One rule, one place (the light
+  list in src/cellview.cpp); left to the light lanes.
+- The LOD bake and the near bake still compose the root transform.
+- Weapons assembled from parts (the 10mm pistol in Vault111Cryo), particle-only effects (FXDripsBig,
+  FXSteamVent01), decals and actors are not drawn.
+- "A parent outside the loaded block counts as enabled" has no test: no such reference in the three gate
+  cells or Vault75.
+- The cell view has no way to show a later quest state (the roughly 1,600 Institute references that wait on
+  a quest are now hidden). A view option is bungo's call.
+- 5 shapes in Vault111Cryo's combined meshes fit neither rule; not explained.
+
 ## 3. Open
 
 - `.tbk` v4: two surfel sides per cell (gives back the refused thin-wall weight), room ids (2f).
