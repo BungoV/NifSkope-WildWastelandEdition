@@ -1412,6 +1412,10 @@ struct LodSrcShape
 	QByteArray effectBlock;              //!< lane EFX1: a BGEM-less effect property, serialized (cell view only)
 	quint32 shaderSF1 = 0, shaderSF2 = 0; //!< the source shader property's flags
 	float refractStrength = 0.0f;        //!< lane EFX1: the lighting property's Refraction Strength (cell view only)
+	//! Lane GLOW1: the nearest NiBillboardNode above the shape, its model-space transform and mode (cell view only).
+	bool billboard = false;
+	Transform bbXf;
+	int bbMode = 0;
 	float matAlpha = 1.0f;
 	/*! The shape named a material and NOTHING resolved from it -- no texture
 	 *  set, no BGSM, no BGEM. The viewer draws such a shape neutral and COUNTS
@@ -2283,6 +2287,16 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 			const Transform xf = lodgenWorldTransform( &src, iShape );
 			LodSrcShape s;
 			s.colStream = hasColors;
+			// lane GLOW1: the game turns a billboard's subtree to the camera; the geometry stays as authored
+			for ( int blk = src.getParent( b ), hop = 0; blk >= 0 && hop < 64; blk = src.getParent( blk ), hop++ ) {
+				const QModelIndex iUp = src.getBlockIndex( blk );
+				if ( src.blockInherits( iUp, "NiBillboardNode" ) ) {
+					s.billboard = true;
+					s.bbXf = lodgenWorldTransform( &src, iUp );
+					s.bbMode = src.get<int>( iUp, "Billboard Mode" );
+					break;
+				}
+			}
 			QModelIndex iVD = src.getIndex( iShape, "Vertex Data" );
 			if ( !iVD.isValid() )
 				continue;
@@ -2689,6 +2703,16 @@ static bool nativeLoadModelImpl( void * user, const QString & model, const Lodge
 		n.effectMatRead = s.effectMatRead; n.shaderSF1 = s.shaderSF1; n.shaderSF2 = s.shaderSF2;
 		n.effectBlock = s.effectBlock; n.alphaFlags = s.hasAlpha ? s.alphaFlags : 0;	// lane EFX1
 		n.refractStrength = s.refractStrength;
+		if ( s.billboard ) {   // lane GLOW1
+			n.billboard = true;
+			n.bbMode = s.bbMode;
+			n.bbScale = s.bbXf.scale;
+			for ( int r = 0; r < 3; r++ ) {
+				n.bbPos[r] = s.bbXf.translation[r];
+				for ( int c = 0; c < 3; c++ )
+					n.bbRot[r * 3 + c] = s.bbXf.rotation( r, c );
+			}
+		}
 		n.g2p = s.g2pFlag;
 		n.g2pScale = s.g2pScale;
 		n.g2pTex = s.g2pTex;
