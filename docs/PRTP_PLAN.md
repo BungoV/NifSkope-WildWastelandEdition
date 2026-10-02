@@ -517,6 +517,39 @@ For section 3 (Open), one line:
 - Vault 111 pod bases: the glow cards are drawn (2?) but add under 2%; compare in game beside a pod whether the
   spill is the haze or the lit floor (lights + bloom).
 
+### 2t. The walkway's highlight pools; the lights' specular held by a gate (lane POOL1, 2026-10-02)
+
+The bright pools on the Vault 111 cryo walkway floor in the game are not the placed lights' specular. Read from
+the game's shipped shaders:
+- A light flagged Non Specular (LIGH 0x8000) is drawn with the light shader variant that writes zero to its
+  specular target. Of the 29 lights nearest the walkway 14 carry the flag; the rest add a broad, weak specular
+  (floor gloss about 0.43: mean 0.023 linear before the 0.37 mask), in the game and in the cell view alike.
+- The pools are the composite's env term: out += refl x envI x envScale x D, with
+  envI = mask x 3 x min(sqrt(sat(gloss - 0.3)), 1), envScale = the material's env mask scale (at most 50),
+  D = 3 x the pixel's own diffuse light (no albedo), and
+  refl = lerp(cube, screen-space reflection colour x a scale, min(its confidence x a scale, 1)).
+  The floor's material (V111HallFloor01) has screen-space reflections on, env scale 1.5, _s red mean 0.37, green
+  mean 0.433: a full-confidence reflection adds about 0.6 x the reflected scene colour x D, against about
+  0.004 x D from its dim cube map. Because of D it peaks under each lamp: the pools. The neighbouring materials
+  (V111Concrete02, V111Metal04) have the reflections off.
+- The reflection chain in the shipped shaders: a ray setup pass (the view ray reflected about the gbuffer normal,
+  only where the material's flag is set); a 32-step march over a depth pyramid (starts 4 mips down, a 4x4 dither
+  on the start, confidence = centre-of-screen fade x ray-length fade over half a screen x depth-gap fade,
+  squared); a 5-tap blur run twice (weights 0.0939 0.2042 0.3040 0.3040 0.0939, taps without a hit skipped);
+  then the composite above.
+Not built: the cell view draws no screen-space reflections. Open before a lane can build them: what fills the
+pass's four scale constants (colour scale, the ray's facing gate, the normal's vertical scale, the confidence
+scale), and whether the reflected colour is this frame's or the last one's. The result enters through the env
+term (lane CUBE1's).
+Built: nothing drawn changes. The Non Specular flag (already honoured) is held by a gate. tests/spells/
+cell_spec.sh: probe 30 = the placed lights' specular / 4 before the mask; cell_spec_check.py rebuilds it per pixel
+from the plugin's lights with the game's form (n = 2^(10 gloss + 1), D = NdotH^n (n + 2) / 2 pi, the geometry
+select, Schlick at 0.2, min(D G F / 4, 15) x pi). Two views of the walkway: agree 100.0% / 100.0% (where a
+highlight shows 100.0% of 871 px / 99.8% of 412 px), viewer total / expected total 0.998 / 1.003 (bar 5%). Red
+WW_CELL_SPEC_RED=nonspec (the flag ignored): 85.4% / 61.0% where shown, totals 1.117 / 1.341, FAIL in both
+views. Left open: the cell view multiplies the lights' specular by the material's specular colour; the game's
+deferred lights read only the specular scale (white on this floor).
+
 ## 3. Open
 
 - `.tbk` v4: two surfel sides per cell (gives back the refused thin-wall weight), room ids (2f).

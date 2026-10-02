@@ -1,5 +1,15 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Cell view: why the Vault 111 walkway has no bright pools on the floor (2026-10-02)
+
+Nothing
+looks different after this change. The bright pools the game shows on the cryo walkway floor are the game's
+screen-space reflections: the floor mirrors the lit room, strongest right under each lamp. They are not
+highlights from the lamps; half of the lamps there are marked Non Specular in the plugin and add no highlight
+at all, in the game and in the cell view alike. The cell view does not draw screen-space reflections yet, so the
+pools are still missing. New test tests/spells/cell_spec.sh holds the lamps' highlight to the game's formula and
+fails if a Non Specular lamp ever adds one (env WW_CELL_SPEC_RED=nonspec is its control).
+
 ## Cell view: glow cards face you, as in the game (2026-10-02)
 
 - Some effect meshes are flat cards the game always turns to face the camera (the soft glow discs on the

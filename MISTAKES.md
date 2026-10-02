@@ -5,6 +5,25 @@ Written the moment a mistake is recognised, unprompted (CONSTITUTION rule 2).
 Format: date -- what was done -- what was true -- how it was found -- the rule.
 Newest at the top.
 
+## 2026-10-02 -- POOL1: a one-probe tolerance, a search by shape, a shared probe number, flattened endings
+- **A checker's tolerance covered the rounding of one probe only (POOL1, 2026-10-01).** cell_spec_check.py
+  rebuilds a sharp highlight from 8-bit probes; its tolerance took half a step of the gloss but not of the normal
+  or the position, and the green gate failed at 94.1% beside one lamp. Then a x1.3 scale error passed one view
+  pixel by pixel because dim highlights sit inside the fixed floor. Rule: a checker that rebuilds a sharp
+  function takes the spread over every rounded input, and carries a second bar that a wrong scale cannot pass
+  (here the total over the highlight pixels within 5%); prove it with scaled mutants.
+- **"Not in the shader dump" claimed after searching by shape (POOL1, 2026-10-01).** The reflection march was
+  looked for among shaders with loops; it is unrolled (32 steps written out), so it was missed and the lane
+  first reported it absent. Rule: look for a shader by what it reads and writes, not by how it is written,
+  before saying it is not there.
+- **Two lanes picked probe 11 in parallel (POOL1 / AMBO2, 2026-10-01).** Found only at the merge; POOL1 moved to
+  30. Rule: a brief hands out probe numbers the way it hands out red bits.
+- **The Edit tool flattened mixed line endings during a merge (POOL1, 2026-10-02).** Resolving a conflict with
+  Edit rewrote cell_lights.glsl and celllights.cpp as all LF (153 and 450 lines), and eol_restore.py compares to
+  HEAD only, so it cannot give main's lines their endings back in a merge. Rule: after every Edit inside a merge,
+  compare each line's ending with both parents before staging (a merge-aware eol_restore is owed to the lanes
+  folder; the scratch one is scratchpad/pool1_20261001/eol_merge_restore.py).
+
 ## 2026-10-02, lane GLOW1: the cause was named before its size was measured
 
 - What happened: the lane found glow cards lying flat at the pod bases and called them the cause of the missing
