@@ -245,11 +245,64 @@ void wwRestoreSrgbDecode()
 	}
 	glBindTexture( GL_TEXTURE_2D, GLuint( prev ) );
 }
+
+/* lane CUBE1: the game's interior reflection samples its cube map as plain UNORM and decodes it after the
+ * filter. The loader tags a DX10 B8G8R8A8 cube as sRGB (the sampler would decode first, then the shader again:
+ * measured, the gate's first run sat at 0.35 of the expected), so the cell term skips the hardware decode on
+ * that cube for its draw, undone at the next program setup as above. Called with the cube bound on the active
+ * unit; returns the shader's cube mode: 1 = decode in the shader, 3 = the sampler already decodes (no extension) */
+QVector<QPair<const void *, GLuint>> & wwSkippedCubeDecode()
+{
+	static QVector<QPair<const void *, GLuint>> v;
+	return v;
+}
+
+void wwRestoreCubeDecode()
+{
+	auto & v = wwSkippedCubeDecode();
+	if ( v.isEmpty() )
+		return;
+	const void * ctx = QOpenGLContext::currentContext();
+	GLint prev = 0;
+	glGetIntegerv( GL_TEXTURE_BINDING_CUBE_MAP, &prev );
+	for ( int i = int( v.size() ) - 1; i >= 0; i-- ) {
+		if ( v[i].first != ctx )
+			continue;
+		if ( glIsTexture( v[i].second ) ) {
+			glBindTexture( GL_TEXTURE_CUBE_MAP, v[i].second );
+			glTexParameteri( GL_TEXTURE_CUBE_MAP, 0x8A48, 0x8A49 );	// TEXTURE_SRGB_DECODE_EXT = DECODE_EXT
+		}
+		v.remove( i );
+	}
+	glBindTexture( GL_TEXTURE_CUBE_MAP, GLuint( prev ) );
+}
+
+float wwCellCubeDecodeMode()
+{
+	if ( wwCellLightsRed() & 512 )
+		return 1.0f;	// red cubeold: the old law, the sampler left as it was
+	GLint tex = 0;
+	glGetIntegerv( GL_TEXTURE_BINDING_CUBE_MAP, &tex );
+	if ( !tex )
+		return 1.0f;
+	GLint f = 0;
+	glGetTexLevelParameteriv( GL_TEXTURE_CUBE_MAP_POSITIVE_X, 0, GL_TEXTURE_INTERNAL_FORMAT, &f );
+	if ( f != 0x8C40 && f != 0x8C41 && f != 0x8C42 && f != 0x8C43 && ( f < 0x8C48 || f > 0x8C4F ) && f != 0x8E8D )
+		return 1.0f;	// not sRGB-tagged: the sampler returns the stored bytes
+	if ( QOpenGLContext * c = QOpenGLContext::currentContext();
+		c && c->hasExtension( QByteArrayLiteral( "GL_EXT_texture_sRGB_decode" ) ) ) {
+		glTexParameteri( GL_TEXTURE_CUBE_MAP, 0x8A48, 0x8A4A );	// TEXTURE_SRGB_DECODE_EXT = SKIP_DECODE_EXT
+		wwSkippedCubeDecode().append( { c, GLuint( tex ) } );
+		return 1.0f;
+	}
+	return 3.0f;
+}
 } // namespace
 
 NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program * hint )
 {
 	wwRestoreSrgbDecode();
+	wwRestoreCubeDecode();	// lane CUBE1
 	const NifModel *	nif = mesh->scene->nifModel;
 
 	/* Read here, not inside wwProgramCensus: `Shape::bslsp` is protected and
@@ -1043,6 +1096,9 @@ bool Renderer::setupProgramPBRM( const NifModel * nif, Program * prog, Shape * m
 		bindPath( "SpecColorMap", QString(), white, false );
 		bindPath( "TintMaskMap", QString(), black, false );
 	}
+	// lane CUBE1: the cell's cube term reads a legacy material's specular map as the game does (the legacy slot;
+	// white = the scalars alone). Only the cell program declares it; the PBR shading keeps its own derivation
+	prog->uniSampler( lsp, "CellSpecMap", 7, texunit, white, lsp->clampMode );
 
 	/* sRGB tag (lane PBRR2A, docs s5.2 "decoded as sRGB regardless of the DXGI
 	 * tag"): a texture whose DXGI format is _SRGB was created with a GL sRGB
@@ -1182,6 +1238,19 @@ bool Renderer::setupProgramPBRM( const NifModel * nif, Program * prog, Shape * m
 	}
 	prog->uni1i( "hasCubeMap", hasCubeMap );
 	prog->uni1f( "envReflection", lsp->environmentReflection );
+	/* lane CUBE1: as the legacy program's (res/shaders/cell_lights.glsl cellCubeGame); a .pbrm shape is no legacy
+	 * material, so mode 2 keeps its own PBR cube law there. PBR mode reads no specular map: the scalars stand */
+	if ( prog->uniLocation( "cellCubeMat" ) >= 0 ) {
+		Material * cm = lsp->getMaterial();
+		const bool specOn = ( cm && cm->isShaderMaterial() ) ? static_cast<ShaderMaterial *>( cm )->specularEnabled()
+			: lsp->hasSF1( ShaderFlags::SLSF1_Specular );
+		const bool specView = scene->hasOption( Scene::DoSpecular ) && scene->hasOption( Scene::DoLighting );
+		if ( hasCubeMap && uniCubeMap >= 0 && !lsp->pbrmValid )
+			fn->glActiveTexture( GL_TEXTURE0 + GLenum( texunit - 1 ) );	// the cube's unit, for the decode query
+		const float mode = !hasCubeMap ? 0.0f : lsp->pbrmValid ? 2.0f : wwCellCubeDecodeMode();
+		prog->uni4f( "cellCubeMat", FloatVector4( specOn && specView ? lsp->specularStrength : 0.0f, lsp->specularGloss,
+			mode, float( mode == 1.0f || mode == 3.0f ? wwCellCubeTag( lsp->getName() ) : 0 ) ) );
+	}
 
 	/* Scene lighting (lane PBRR2A, docs s5.2). Studio binds the SFCubeMapCache
 	 * pair of the ONE Studio cube (the FO4 default outdoor cube until R2b's
@@ -1521,6 +1590,7 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 		prog->uni1f( "envReflection", refl );
 
 		// Always bind cube regardless of shader settings
+		bool	ownCube = false;	// lane CUBE1: the material's own env map bound (not the default cube)
 		GLint uniCubeMap = prog->uniLocation( "CubeMap" );
 		if ( uniCubeMap < 0 ) {
 			hasCubeMap = false;
@@ -1532,6 +1602,7 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 				cube = ( nifVersion < 151 ? ( nifVersion < 128 ? &cube_sk : &cube_fo4 ) : &cfg.cubeMapPathFO76 );
 				hasCubeMap = scene->bindCube( *cube );
 			}
+			ownCube = hasCubeMap && cube == &fname;
 			if ( !hasCubeMap ) [[unlikely]]
 				scene->bindCube( grayCube, 1 );
 			fn->glUniform1i( uniCubeMap, texunit++ );
@@ -1545,6 +1616,16 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 			}
 		}
 		prog->uni1i( "hasCubeMap", hasCubeMap );
+		/* lane CUBE1: what the game's interior reflection reads (res/shaders/cell_lights.glsl cellCubeGame): the
+		 * specular scale (0 with the material's specular switch off), the smoothness, 1 when the material's own
+		 * env map is bound (indoors the game has no default cube), and the gate's material number */
+		if ( prog->uniLocation( "cellCubeMat" ) >= 0 ) {
+			const bool specOn = ( mat && mat->isShaderMaterial() ) ? static_cast<ShaderMaterial *>( mat )->specularEnabled()
+				: lsp->hasSF1( ShaderFlags::SLSF1_Specular );
+			const bool specView = scene->hasOption( Scene::DoSpecular ) && scene->hasOption( Scene::DoLighting );
+			prog->uni4f( "cellCubeMat", FloatVector4( specOn && specView ? lsp->specularStrength : 0.0f, lsp->specularGloss,
+				ownCube ? wwCellCubeDecodeMode() : 0.0f, float( ownCube ? wwCellCubeTag( lsp->getName() ) : 0 ) ) );
+		}
 
 		// Screen-space refraction preview (SLSF1_Refraction): the shape draws
 		// in the second pass, so the framebuffer already holds the scene

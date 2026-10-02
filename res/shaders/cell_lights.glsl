@@ -16,7 +16,7 @@ uniform bool cellInterior;
 uniform vec3 cellCenter;
 uniform int cellProbe;
 uniform int cellRed;				// 1 linear: the radial curve without its 2.2; 8 lambert, 16 normalised, 32 norim,
-									// 64 rimflags (the lights' rim / roughness flags ignored)
+									// 64 rimflags (the lights' rim / roughness flags ignored); 512 cubeold (lane CUBE1)
 // lane PRTPGI: the bake relit by these lights (src/probegi.h), six axis slabs of dims.z each, x fastest;
 // rgb = irradiance x valid, a = valid (so a filtered sample divides by its own valid)
 uniform bool cellGiOn;
@@ -305,13 +305,57 @@ vec3 cellAmbient( vec3 N )
 	return pow( max( vec3( dot( cellDalc[0], n1 ), dot( cellDalc[1], n1 ), dot( cellDalc[2], n1 ) ), vec3( 0.0 ) ), vec3( 2.2 ) );
 }
 
+#ifndef WW_CELL_FX
+/* lane CUBE1: per draw (src/gl/renderer.cpp): the material's specular scale (0 with its specular switch off),
+ * its smoothness, 1 when its OWN env map is bound (2: a .pbrm shape, which keeps the PBR law; 3: own, but the
+ * sampler already decodes sRGB), the gate's number */
+uniform vec4 cellCubeMat;
+
+bool cellCubeGameOn()
+{
+	return abs( cellCubeMat.z - 1.0 ) < 0.5 || abs( cellCubeMat.z - 3.0 ) < 0.5;
+}
+
+/* lane CUBE1: the game's interior env reflection before the light (its deferred composite, read op for op).
+ * Indoors only the material's own env map reflects (no default cube). sRGB texel at mip (1 - gloss) x 6 + view
+ * depth / 512 on a 128 cube, x 3 x saturate(spec) x min(sqrt(saturate(gloss - 0.3)), 1) x min(env scale, 50).
+ * No fresnel, no specular colour, no env mask. Linear; the caller multiplies the diffuse light. */
+vec3 cellCubeGame( samplerCube cube, vec3 dir, float gloss, float spec, float envScale, vec3 posView )
+{
+	if ( !cellCubeGameOn() )
+		return vec3( 0.0 );
+	float g = clamp( gloss, 0.0, 1.0 );
+	float depth = abs( posView.z ) * length( cellRow[0].xyz );	// view units -> game units
+	float lod = ( 1.0 - g ) * 6.0 + depth * 0.001953 + log2( float( textureSize( cube, 0 ).x ) / 128.0 );
+	vec3 c = textureLod( cube, dir, max( lod, 0.0 ) ).rgb;
+	if ( cellCubeMat.z < 2.0 )	// decoded after the filter, as the game's composite does
+		c = mix( c / 12.92, pow( ( c + 0.055 ) / 1.055, vec3( 2.4 ) ), step( vec3( 0.04045 ), c ) );
+	float k = 3.0 * clamp( spec, 0.0, 1.0 ) * min( sqrt( clamp( g - 0.3, 0.0, 1.0 ) ), 1.0 ) * clamp( envScale, 0.0, 50.0 );
+	return c * k;
+}
+
+/* lane CUBE1's gate probes: 50 the reflection above / 4 (the caller's), 51 (u hi, u lo, number), 52 (v hi, v lo,
+ * number) of the texture coordinate's fraction, 53 probe 4's normal rounding residual (16 bits a component) */
+vec3 cellCubeProbe( vec2 uv, vec3 normalView )
+{
+	vec2 f = clamp( floor( fract( uv ) * 65535.0 + 0.5 ), 0.0, 65535.0 );
+	float tag = cellCubeMat.w / 255.0;
+	if ( cellProbe == 51 )
+		return vec3( floor( f.x / 256.0 ) / 255.0, mod( f.x, 256.0 ) / 255.0, tag );
+	if ( cellProbe == 52 )
+		return vec3( floor( f.y / 256.0 ) / 255.0, mod( f.y, 256.0 ) / 255.0, tag );
+	vec3 n = ( cellWorldDir( normalView ) * 0.5 + 0.5 ) * 255.0;
+	return n - floor( n + 0.5 ) + 0.5;
+}
+#endif
+
 #if !defined( WW_CELL_PBR ) && !defined( WW_CELL_FX )
 
 /* The lit colour, in the program's sqrt-of-linear space. Interior: the cell's ambient, directional
  * and placed lights replace the viewport light. Exterior: the placed lights add to what the
  * viewport (or the Lookdev sun) already lit. */
 vec3 cellLit( vec3 color, vec3 albedo, vec3 normalView, vec3 posView, vec3 Vview, float specMask, vec3 specCol,
-              float alphaR, float kSmith, vec3 emissive, vec3 envSpec )
+              float alphaR, float kSmith, vec3 emissive, vec3 cubeK )
 {
 	vec3 P = cellWorldPos( posView );
 	vec3 N = cellWorldDir( normalView );
@@ -340,7 +384,8 @@ vec3 cellLit( vec3 color, vec3 albedo, vec3 normalView, vec3 posView, vec3 Vview
 		E += dir;
 		Ed += dir * ( cellOren( N, Ld, Vw, nl, gloss ) + cellRim( N, Ld, Vw, gloss ) );
 	}
-	vec3 lin = alb * Ed + spec * specMask * specCol + envSpec * envSpec * E;
+	// lane CUBE1: the game multiplies its cube term by the diffuse light (Ed); the old law took the Lambert sum
+	vec3 lin = alb * Ed + spec * specMask * specCol + cubeK * ( ( cellRed & 512 ) != 0 ? E : Ed );
 	return sqrt( max( lin, vec3( 0.0 ) ) ) + emissive;
 }
 

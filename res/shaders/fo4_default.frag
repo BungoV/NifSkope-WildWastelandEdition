@@ -502,6 +502,15 @@ void main()
 		envSpec = cube.rgb;
 		spec += cube.rgb * diffuse;
 	}
+#ifdef WW_CELLLIGHTS
+	// lane CUBE1: the reflection the cell path adds before its light, linear: the game's term, or the old one
+	// (squared, x Lambert, the default cube too) under WW_CELL_LIT_RED=cubeold
+	vec3 cubeK = envSpec * envSpec;
+	if ( cellOn && ( cellRed & 512 ) == 0 )
+		cubeK = hasCubeMap ? cellCubeGame( CubeMap, reflectedWS, cellCubeMat.y * ( hasSpecularMap ? specMap.g : 1.0 ),
+		                                   cellCubeMat.x * ( hasSpecularMap ? specMap.r : 1.0 ), envReflection, -ViewDir )
+		                   : vec3( 0.0 );
+#endif
 
 	vec3 backlight = vec3(0.0);
 	if ( backlightPower > 0.0 ) {
@@ -552,7 +561,7 @@ void main()
 	// lane PRTP3: the cell's own lights (src/gl/celllights.h)
 	if ( cellOn )
 		color.rgb = cellLit( color.rgb, albedo, normal, -ViewDir, V, specMask, specColor, alphaR, kSmith,
-		                     emissive * glowScaleSRGB, envSpec );
+		                     emissive * glowScaleSRGB, cubeK );
 #endif
 
 	// lane FOG1 (Lookdev weather fog): this colour is sqrt of linear light (tonemap squares it),
@@ -621,6 +630,8 @@ void main()
 #ifdef WW_CELLLIGHTS
 	if ( cellOn && cellProbe > 0 )
 		fragColor = cellProbe == 6 ? vec4( cellHdr, color.a ) : vec4( cellProbeOut( normal, -ViewDir, alphaR, kSmith ), 1.0 );
+	if ( cellOn && cellProbe >= 50 && cellProbe <= 53 )	// lane CUBE1
+		fragColor = vec4( cellProbe == 50 ? clamp( cubeK * 0.25, 0.0, 1.0 ) : cellCubeProbe( offset, normal ), 1.0 );
 #endif
 #ifdef WW_FOG
 	vec3 fogProbeOut;

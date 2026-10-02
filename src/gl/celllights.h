@@ -123,6 +123,8 @@ bool wwCellProbePass( Scene * scene );
 QString wwCellLightsEcho( Scene * scene );
 //! the red bits (1 linear, 2 axis, 4 nodalc); the cell view applies "axis" when it publishes
 int wwCellLightsRed();
+//! lane CUBE1: a material's number for the cube gate's probe (WW_CELL_CUBE_DUMP set), else 0
+int wwCellCubeTag( const QString & material );
 
 /*! THE IMAGESPACE (lane IMGS1): the game's own HDR -> display chain, transcribed from the shipped shaders
  *  (Fallout4 - Shaders.ba2, Shaders011.fxp; docs/PRTP_PLAN.md 2j):

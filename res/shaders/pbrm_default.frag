@@ -9,6 +9,7 @@
 #define WW_CELL_PBR 1
 #include "cell_lights.glsl"
 #define WW_CELL_FOGGED cellOn	// lane FOG2: a cell-lit draw fogged before its imagespace
+uniform sampler2D CellSpecMap;	// lane CUBE1: a legacy material's specular map (R scale, G smoothness), for the cube term
 #else
 #define WW_CELL_FOGGED false
 #endif
@@ -563,6 +564,7 @@ void main()
 	 * sun's convention above: a white Lambert surface reads what the legacy cell path reads), and
 	 * the bake's bounce. Interior: they replace the viewport light and ambient, the DALC ambient
 	 * standing in for the environment cube; exterior: they add. */
+	vec3 cubeK = vec3( 0.0 );	// lane CUBE1: the interior cube reflection before its light (probe 50)
 	if ( cellOn ) {
 		vec3 Pw = cellWorldPos( -ViewDir );
 		Surface sw = s;
@@ -601,9 +603,17 @@ void main()
 				cE += cellDirColor * max( dot( sw.N, normalize( cellDirTo ) ), 0.0 );
 			}
 			// the material's cubemap, lit by the light reaching this point (a dark corner reflects dark)
+			// lane CUBE1: a legacy material takes the game's term (with its own specular map, CellSpecMap);
+			// a .pbrm shape, and WW_CELL_LIT_RED=cubeold, the old law
 			if ( hasCubeMap ) {
-				vec3 cube = textureLod( CubeMap, reflMatrix * R, s.rough * 8.0 ).rgb;
-				outSpec += cube * cube * envReflection * Espec * s.ao * cE;
+				if ( cellCubeGameOn() && ( cellRed & 512 ) == 0 ) {
+					vec2 sg = texture( CellSpecMap, offset ).rg;
+					cubeK = cellCubeGame( CubeMap, reflMatrix * R, cellCubeMat.y * sg.g, cellCubeMat.x * sg.r, envReflection, -ViewDir );
+				} else {
+					vec3 cube = textureLod( CubeMap, reflMatrix * R, s.rough * 8.0 ).rgb;
+					cubeK = cube * cube * envReflection * Espec * s.ao;
+				}
+				outSpec += cubeK * cE;
 			}
 		} else {
 			outDiff += cDiff + giDiff;
@@ -665,6 +675,8 @@ void main()
 	if ( cellOn && cellProbe > 0 )
 		fragColor = cellProbe == 6 ? vec4( cellHdr, color.a )
 			: vec4( cellProbeRaw( cellWorldPos( -ViewDir ), cellWorldDir( s.N ) ), 1.0 );
+	if ( cellOn && cellProbe >= 50 && cellProbe <= 53 )	// lane CUBE1
+		fragColor = vec4( cellProbe == 50 ? clamp( cubeK * 0.25, 0.0, 1.0 ) : cellCubeProbe( offset, s.N ), 1.0 );
 #endif
 	vec3 fogProbeOut;
 	if ( wwFogProbe( -ViewDir, fogProbeOut ) )
