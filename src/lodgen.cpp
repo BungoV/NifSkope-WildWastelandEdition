@@ -1410,7 +1410,7 @@ struct LodSrcShape
 	bool effectBlend = false;
 	bool effectMatRead = false;          //!< the BGEM read (cell view effect buckets)
 	bool effectLit = false;              //!< lane FXLIT1: the effect-lighting flag, the BGEM's or the property's (cell view only)
-	QByteArray effectBlock;             //!< lane EFX1: a BGEM-less effect property, serialized (cell view only)
+	QByteArray effectBlock;              //!< lane EFX1: a BGEM-less effect property, serialized (cell view only)
 	quint32 shaderSF1 = 0, shaderSF2 = 0; //!< the source shader property's flags
 	float refractStrength = 0.0f;        //!< lane EFX1: the lighting property's Refraction Strength (cell view only)
 	//! Lane GLOW1: the nearest NiBillboardNode above the shape, its model-space transform and mode (cell view only).
@@ -1418,6 +1418,11 @@ struct LodSrcShape
 	Transform bbXf;
 	int bbMode = 0;
 	float matAlpha = 1.0f;
+	/*! Lane BAKE4: blending, its factors, environment mapping and an effect's soft fade, the material's
+	 *  where one read, else the NIF's own. Read by the cell view's probe bake only (glass panes). */
+	bool bakeBlend = false, bakeEnv = false, bakeSoft = false;
+	quint8 bakeBlendSrc = 0, bakeBlendDst = 0;
+	float bakeColor[3] = { 1.0f, 1.0f, 1.0f };   //!< an effect material's base color x its scale
 	/*! The shape named a material and NOTHING resolved from it -- no texture
 	 *  set, no BGSM, no BGEM. The viewer draws such a shape neutral and COUNTS
 	 *  it; magenta stays reserved for a genuinely missing file. */
@@ -2348,6 +2353,9 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 				s.hasAlpha = true;
 				s.alphaFlags = quint16( src.get<int>( iAlpha, "Flags" ) );
 				nf.alphaBlend = ( s.alphaFlags & 0x0001 ) != 0;
+				s.bakeBlend = nf.alphaBlend;   // lane BAKE4: the NIF's own blend, until a material says otherwise
+				s.bakeBlendSrc = quint8( ( s.alphaFlags >> 1 ) & 0xF );
+				s.bakeBlendDst = quint8( ( s.alphaFlags >> 5 ) & 0xF );
 				nf.alphaTest = ( s.alphaFlags & 0x0200 ) != 0;
 				nf.alphaRef = quint8( src.get<int>( iAlpha, "Threshold" ) );
 				/* NOT the source's threshold: near-tree materials test at
@@ -2404,6 +2412,8 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 					nf.twoSided = ( sf2 & ( 1U << 4 ) ) != 0;
 					nf.parallax = ( sf2 & ( 1U << 24 ) ) != 0;
 					nf.envMap = ( sf1 & ( 1U << 7 ) ) != 0;
+					s.bakeEnv = nf.envMap;   // lane BAKE4
+					s.bakeSoft = nf.effectShader && ( sf1 & ( 1U << 30 ) ) != 0;
 					nf.greyscale = ( sf1 & ( 1U << 4 ) ) != 0;
 					nf.modelSpaceNormals = ( sf1 & ( 1U << 12 ) ) != 0;
 				}
@@ -2476,6 +2486,11 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 							s.matAlphaBlend = sm.hasAlphaBlend();
 							s.matAlpha = sm.alpha();
 							s.matAlphaRef = sm.alphaTestThreshold();
+							s.bakeBlend = sm.hasAlphaBlend();   // lane BAKE4: the material's blend wins
+							s.bakeBlendSrc = quint8( sm.alphaSourceBlend() );
+							s.bakeBlendDst = quint8( sm.alphaDestinationBlend() );
+							s.bakeEnv = sm.hasEnvironmentMapping();
+							s.bakeSoft = false;
 							/* Lane NEAR1: the same material's switches, OR'd onto the
 							 * property's bits; read by the near bake only. */
 							nf.bgsmRead = true;
@@ -2525,6 +2540,13 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 							s.effectMatRead = true;
 							// lane FXLIT1: lit by the placed lights in the game (cell view only)
 							s.effectLit = ( em.effectShaderFlags2() & 0x0004U ) && em.lightingInfluence() > 0.0f;
+							s.bakeBlend = em.hasAlphaBlend();   // lane BAKE4: the material's blend wins
+							s.bakeBlendSrc = quint8( em.alphaSourceBlend() );
+							s.bakeBlendDst = quint8( em.alphaDestinationBlend() );
+							s.bakeEnv = em.hasEnvironmentMapping();
+							s.bakeSoft = ( em.effectShaderFlags2() & 0x0040U ) != 0;
+							for ( int k = 0; k < 3; k++ )
+								s.bakeColor[k] = em.baseColor()[k] * em.baseColorScale();
 						}
 					}
 					/* The property's own Source Texture is the fallback, exactly as
@@ -2735,6 +2757,10 @@ static bool nativeLoadModelImpl( void * user, const QString & model, const Lodge
 		n.effectLit = s.effectLit;	// lane FXLIT1
 		n.effectBlock = s.effectBlock; n.alphaFlags = s.hasAlpha ? s.alphaFlags : 0;	// lane EFX1
 		n.refractStrength = s.refractStrength;
+		n.bakeBlend = s.bakeBlend; n.bakeBlendSrc = s.bakeBlendSrc; n.bakeBlendDst = s.bakeBlendDst;	// lane BAKE4
+		n.bakeEnv = s.bakeEnv; n.bakeSoft = s.bakeSoft;
+		for ( int k = 0; k < 3; k++ )
+			n.bakeColor[k] = s.bakeColor[k];
 		if ( s.billboard ) {   // lane GLOW1
 			n.billboard = true;
 			n.bbMode = s.bbMode;

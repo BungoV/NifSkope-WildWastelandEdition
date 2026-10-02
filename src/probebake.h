@@ -22,7 +22,12 @@
  *  one side (the one most rays saw, plus faces not opposed to it), and a probe
  *  never links a surfel turned away from it: that weight goes to unlinkedWeight,
  *  which FO4CS's relight leaves out of the gather domain. Linking it would light
- *  a room with the sunlit outside of its own wall. */
+ *  a room with the sunlit outside of its own wall.
+ *
+ *  Lane BAKE4 (2026-10-01): v4 (the default; spec.tbkVersion) keeps both sides of a
+ *  thin wall in their own cell, tags every link with its side, the glass tint on its
+ *  way and the door it crossed, and every probe with its sky tint and rooms. The v3
+ *  writer above is unchanged byte for byte (tbkVersion 3). */
 
 #include "probeplace.h"
 
@@ -49,8 +54,17 @@ struct ProbeBakeSpec
 	 *  nudged across the boundary, under one cell). A probe the kept side faces away
 	 *  from links that surfel instead of being refused. Off = the old refusal. */
 	bool spill = true;
+	/*! Lane BAKE4: the file version. 4 (default) = the v3 body plus a tail: a cell seen from
+	 *  both sides of a thin wall keeps BOTH sides in itself (a back surfel; each ray links
+	 *  the side whose face it hit), every link's side, glass tint and door, every probe's
+	 *  sky tint per octant and rooms, and the room boxes. FO4CS's reader takes v3 only
+	 *  (it refuses any other version and size), so 3 writes its file exactly (the second
+	 *  side spilled next door, as above). */
+	int tbkVersion = 4;
 	/*! A deliberate defect for the gate's refuters: "octant" swaps the octant
-	 *  bits (x negative -> bit 2), "normal" stores the triangle normal unflipped.
+	 *  bits (x negative -> bit 2), "normal" stores the triangle normal unflipped;
+	 *  lane BAKE4 (v4): "oneside" drops the back surfels (their links refused, the
+	 *  old rule), "rooms" writes no room ids or boxes, "glass" bakes as if no glass.
 	 *  Empty in every real run. */
 	QString red;
 };
@@ -69,14 +83,22 @@ struct ProbeBakeResult
 	bool noSky = false;                     //!< the spec's: misses went to unlinked, not sky
 	double voidMean = 0;                    //!< over probes, noSky only: the sphere share that met nothing
 	int albedoKnown = 0;                    //!< 1 when the soup carried albedo, else every surfel is grey
+	// lane BAKE4
+	int version = 3;                        //!< the `.tbk` version written
+	int backSurfels = 0, backWritten = 0;   //!< v4: second sides kept in their own cell; written (summed over files)
+	qint64 linksBack = 0, linksDoor = 0, linksTinted = 0;   //!< v4 links: to a back surfel, through a door, through glass
+	int doors = 0, glassTris = 0;           //!< the soup's door boxes and glass triangles
+	double glassMean = 0;                   //!< over probes: the sphere share seen through glass
+	int probesRoomed = 0, boxesWritten = 0; //!< probes standing in an enclosed room; room boxes written (summed over files)
 	double msRays = 0, msWrite = 0;
 	QStringList files;
 	QString error;
 };
 
 //! Bake the probes into `outDir` (created). False on an unusable input or an unwritable folder.
+//! `roomBoxes` (the placer's) go into the v4 files whose probes name their rooms.
 bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probes, const ProbeBakeSpec & spec,
-	const QString & outDir, ProbeBakeResult * out );
+	const QString & outDir, ProbeBakeResult * out, const std::vector<ProbeRoomBox> * roomBoxes = nullptr );
 //! The census as notes lines (cell view notes, CLI stdout).
 QString probeBakeCensusText( const ProbeBakeResult & r );
 //! `nifskope -no-gui probebake --soup <f> --rect minX,minY,maxX,maxY --out <dir>
