@@ -259,6 +259,10 @@ QString overlayKeyLabel( quint64 key )
 bool isMarkerModel( const QString & model )
 {
 	const QString m = model.toLower();
+	// lane MISS1: the black plane lives in the markers folder and is no marker -- the game draws it, in every
+	// cell's own combined meshes (its editor-only copy is a shape named EditorMarker, dropped by the loader)
+	if ( m.endsWith( QLatin1String( "\\blackplane01.nif" ) ) )
+		return false;
 	return m.contains( QLatin1String( "\\marker" ) )
 		|| m.contains( QLatin1String( "marker_" ) )
 		|| m.endsWith( QLatin1String( "markerx.nif" ) )
@@ -1125,6 +1129,36 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 	 * list is what the cell CONTAINS, as the ref table is. WW_CELL_LIGHTS dumps it
 	 * and the gate compares it with an independent walk of the plugin. */
 	QVector<EsmRefr> lightRefs;
+	/* lane MISS1: a reference with an enable parent starts in the PARENT's state, inverted when it is
+	 * "opposite"; the parent's own starting state is a plugin fact (its initially-disabled flag, or its own
+	 * parent in turn). A parent outside the loaded block counts as enabled. WW_CELL_REFS_RED=parent is the
+	 * gate's red control: the old rule, which never looked at the parent. */
+	struct EnableFact { bool off; quint32 parent; bool opposite; };
+	QHash<quint32, EnableFact> enableFacts;
+	const QByteArray refsRed = qgetenv( "WW_CELL_REFS_RED" );
+	auto startsDisabled = [&]( const EsmRefr & r ) {
+		bool off = r.initiallyDisabled;
+#ifdef ESM_HAS_CELL_FIELDS
+		if ( refsRed == "parent" )
+			return r.enableParent && r.enableParentOpposite ? !off : off;
+		bool flip = false, opposite = r.enableParentOpposite;
+		quint32 up = r.enableParent;
+		for ( int hop = 0; up && hop < 16; hop++ ) {
+			flip ^= opposite;
+			const auto it = enableFacts.constFind( up );
+			if ( it == enableFacts.constEnd() ) {
+				off = false;
+				break;
+			}
+			off = it->off;
+			up = it->parent;
+			opposite = it->opposite;
+		}
+		if ( r.enableParent )
+			off = off != flip;
+#endif
+		return off;
+	};
 	auto pushRefr = [&]( const EsmRefr & r, int cellX, int cellY, bool persistent ) {
 		refsRead++;
 		if ( !r.deleted && std::memcmp( &r.baseType, "LIGH", 4 ) == 0 )
@@ -1176,16 +1210,9 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 			cellRefTableMutable().setFate( refRow, CellRefFate::NoBase );
 			return;
 		}
-		bool disabled = r.initiallyDisabled;
-#ifdef ESM_HAS_CELL_FIELDS
-		/* An enable parent in the OPPOSITE state means the ref's visible state
-		 * is the parent's inverted. We do not simulate the parent's state -- it
-		 * is a runtime fact -- so the rule here is the CK's own default view:
-		 * a ref with an opposite-state parent starts the other way round from
-		 * its own flag. The panel shows both facts so the guess is inspectable. */
-		if ( r.enableParent && r.enableParentOpposite )
-			disabled = !disabled;
-#endif
+		// lane MISS1: the state the plugin starts the reference in (startsDisabled above); what a quest does
+		// to an enable marker later is a runtime fact and is not simulated. The panel shows both facts.
+		const bool disabled = startsDisabled( r );
 		if ( disabled && !spec.showDisabled ) {
 			refsHidden++;
 			cellRefTableMutable().setFate( refRow, CellRefFate::Disabled );
@@ -1272,6 +1299,28 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 		out.swap = r.materialSwap ? r.materialSwap : lb.materialSwap;
 		placements.append( out );
 	};
+
+	// lane MISS1: every reference's enable facts, before the first one is placed (a parent may come later)
+	{
+		auto note = [&]( const QVector<EsmRefr> & refs ) {
+#ifdef ESM_HAS_CELL_FIELDS
+			for ( const EsmRefr & r : refs )
+				enableFacts.insert( r.formID, EnableFact{ r.initiallyDisabled, r.enableParent, r.enableParentOpposite } );
+#else
+			Q_UNUSED( refs );
+#endif
+		};
+		if ( spec.interior ) {
+			note( world.interiorRefrs() );
+		} else {
+			for ( int y = y0; y <= y1; y++ )
+				for ( int x = x0; x <= x1; x++ )
+					if ( world.hasCell( x, y ) )
+						note( world.refrs( x, y ) );
+			note( world.persistentRefrsIn( float( x0 ) * CELL_UNITS, float( y0 ) * CELL_UNITS,
+				float( x1 + 1 ) * CELL_UNITS, float( y1 + 1 ) * CELL_UNITS ) );
+		}
+	}
 
 	int cellsWithData = 0;
 	if ( spec.interior ) {
@@ -1590,7 +1639,11 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 				continue;
 			std::vector<NativeSrcShape> shapes;
 			// ONE LOAD PER DISTINCT MODEL AND SWAP -- the whole block shares this cache.
-			const bool okLoad = subst
+			// lane MISS1: a placed model's root node takes the reference's transform; the file's own is left out.
+			// WW_CELL_REFS_RED=root is the gate's red control: the old load, root transform composed.
+			const bool okLoad = refsRed != "root"
+				? lodgenNativeLoadModelPlaced( const_cast<QString *>( &dataRoot ), model, subst, &shapes )
+				: subst
 				? lodgenNativeLoadModelSwapped( const_cast<QString *>( &dataRoot ), model, *subst, &shapes )
 				: lodgenNativeLoadModel( const_cast<QString *>( &dataRoot ), model, &shapes );
 			if ( !okLoad || shapes.empty() ) {
@@ -1612,7 +1665,9 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 			auto pit = subst ? modelCache.find( model ) : mit;
 			if ( pit == modelCache.end() && !modelsFailed.contains( model ) ) {
 				std::vector<NativeSrcShape> shapes;
-				if ( lodgenNativeLoadModel( const_cast<QString *>( &dataRoot ), model, &shapes ) && !shapes.empty() ) {
+				if ( ( refsRed != "root"
+						? lodgenNativeLoadModelPlaced( const_cast<QString *>( &dataRoot ), model, nullptr, &shapes )
+						: lodgenNativeLoadModel( const_cast<QString *>( &dataRoot ), model, &shapes ) ) && !shapes.empty() ) {
 					modelLoads++;
 					pit = modelCache.insert( model, shapes );
 					mit = modelCache.find( mkey );   // an insert may rehash
