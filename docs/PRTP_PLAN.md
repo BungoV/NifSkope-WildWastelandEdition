@@ -773,6 +773,117 @@ Open.
   depth write) draws a hard-edged bright streak at 332..342, 430..480 of bungo's frame, the same before and
   after this change.
 
+### 2y. `.tbk` v4: both sides of a thin wall, room ids, glass tint; the bake sees the fixed world only (lane BAKE4, 2026-10-02)
+
+The rule: the bake sees the fixed world only; items, actors, corpses, decals and effects are receivers.
+
+What changed. A cell of the surfel grid (70 units) seen from both sides of a thin wall used to keep one side;
+the other side's light was refused as "turned away" or housed in the next cell (2f). Version 4 keeps the second
+side in the same cell as a back surfel, and each ray links the side whose face it hit. Every probe names its
+room; a probe in an opening names both sides. Light passing a glass pane is tinted by it. v3 is still read by
+the cell view; `probebake --tbk 3` writes the old file byte for byte; the far map (2h) stays on v3.
+
+The file (little endian; the v3 body is unchanged):
+- header, 64 bytes: int32 magic, version (4), kind, cellX, cellY; float surfel cell size (70); uint32 surfel
+  count ns, probe count np, link count nl, flags; uint32 reserved[6]. reserved[0] = back surfel count nb,
+  reserved[1] = room box count nx, reserved[2] = what was modelled (bit 1 sides, 2 rooms, 4 doors, 8 glass).
+- v3 body: ns surfels x 32 bytes, np probes x 144, nl links x 12.
+- v4 tail, in this order:
+  1. nb back surfels x 32 bytes, same layout as a surfel, keyed by the same cell as the front one;
+  2. nl link records x 8 bytes, one per link in link order: u8 side (0 = the cell's surfel, 1 = its back
+     surfel), u8 tint[3] (the glass on the way, 255 = clear), u32 door (the door reference the link passes, 0 = none);
+  3. np probe records x 32 bytes, one per probe in probe order: u8 skyTint[8][3] (per octant, the sky seen
+     through glass, 255 = clear), u32 room[2] (room[0] = the probe's room, 0 = none; room[1] = 0xFFFFFFFF, except
+     a probe in an opening, which names the room on the other side there, 0 = outdoors);
+  4. nx room boxes x 32 bytes: u32 room, float lo[3], float hi[3], u32 reserved.
+- size = 64 + 32 ns + 144 np + 12 nl + 32 nb + 8 nl + 32 np + 32 nx.
+- a room id = (hash of the bake rectangle << 16) | (n + 1), so ids of two bakes do not collide.
+
+What a reader (FO4CS, last by standing order; read-only for this lane) must change for v4:
+1. accept version 4; the size check adds 32 x reserved[0] + 8 x linkCount + 32 x probeCount + 32 x reserved[1];
+2. a link whose side is 1 resolves against the back surfels (their own table, same cell key), not the front ones;
+3. multiply a link's radiance by tint / 255; multiply an octant's sky by skyTint / 255;
+4. which room a point is in: the room boxes first, else the nearest probe's room; a froxel between probes of
+   two rooms does not blend them (the open line of 2f);
+5. the door reference is information only for now (a later step can drop a link while its door is shut);
+   nothing else moves: surfel, probe and link layouts and the keying are v3's.
+A v3 reader that checks the exact size refuses a v4 file. Until the reader is updated, bake for it with `--tbk 3`.
+
+Rooms. The placer's enclosed rooms (2e) are named; a probe takes the room of the cell it stands in. Two defects
+were found by the gate and removed: an opening's cut cells took whichever side reached them first (now decided
+by the opening's plane), and a probe standing in a solid cell took the first air neighbour in a fixed order (the
+far side of a thin wall; now the neighbour the probe can see).
+
+Glass. A pane is a shape WITH A MATERIAL FILE READ whose material says: blending on, source alpha over
+(factors 6 / 7), not a decal, environment mapped, not soft, opacity above 0. Per triangle the light let through is
+T = 1 - a (1 - c): a = opacity x map alpha x vertex alpha, c = the map's linear color x vertex color (effect
+shader: opacity is the material's alpha squared, c times base color and scale). A pane never stops a ray; a
+link's tint is the weighted mean T over the rays that land in the surfel's cell; a two-sided pane counts once.
+Why the material file is required: in Vault111Cryo, with the shape's own NIF flags allowed to stand in, 33 of
+the 37 shapes fed were drip splashes (15), lamp covers (14) and klaxon shells (4). Why environment mapped and
+not soft: all 6899 archive materials were read; 122 effect and 5 lighting materials are panes; mist, beams and
+glow cards are blended over but soft and not environment mapped (39), additive materials add light and take
+none (48). The first feed took every blended shape: Solomon's house's one "pane" was a 480-unit mist sphere tinting
+29% of the link weight; Vault111Cryo fed 133,145 triangles and tinted 47%.
+
+The fixed world. The soup takes placed STAT MSTT TREE FURN CONT ACTI TERM FLOR LIGH (a static collection's
+parts by their own types) and doors as boxes only. Pick-up items and actors are left out by type, effect shapes
+and decals per shape. The cell view may draw more (clothing ground models, placed actors, decals); none of it
+reaches the soup, the albedo, the `.tbk` or the room ids. Stage T below holds this.
+
+Gates (exe of the last merge; numbers are the green run unless marked red):
+- `tests/spells/probe_bake.py rooms` (a built scene: 7 rooms, 2 doors, 8 panes): PASS, 272 probes re-traced at
+  1024 rays, 64671 links (back side 10964, through a door 1184, tinted 1287), 80 probes named in 7 known rooms.
+  Reds: `--red oneside` FAIL (0 back links, unlinked mean 0.1200 against 0.0138), `--red rooms` FAIL (0 probes
+  named), `--red glass` FAIL.
+- `tests/spells/probe_bake.py synth`: PASS (265 probes, 66796 links, 2256 to a back side; `--tbk 3` byte-identical
+  to the exe from before the lane). Reds oneside / octant / normal FAIL.
+- `tests/spells/prtp_reference.py` (an independent brute-force tracer, extended for v4 on its own): rooms PASS
+  (96 probes x 8192 rays: total median 0.022 p95 0.072, sky through glass worst 0.0033); reds glass (sky through
+  glass 0.0265 over 0.01) and oneside (0.049 / 0.507 over 0.10 / 0.25) FAIL. Concord PASS (658 probes, 246772
+  links, 65592 to a back side: total median 0.025 p95 0.082); red oneside FAIL (0.076 / 0.386); a Concord bake
+  with one side only FAILS the reference (0.082 / 0.381, unlinked mean 0.1745 against 0.0181).
+- `tests/spells/probe_glass.sh` (real cells; the checker reads the plugin and every material file itself):
+  stage A census, B the soup's panes, C the light, T the reference types.
+  Vault111Cryo: 4 panes (108 triangles, mean T 0.67) of 1085 blended or effect shapes; 1275 of 279905 links
+  tinted; C seen 0.980, mass 0.893, clear 1.0000; T 1349 references, 0 outside the list.
+  NorthEndMeanPastries: 15 panes (348 triangles: a diner window and 14 counter sneeze guards), 465 of 12864
+  links tinted (3% of the link weight); C seen 0.938, mass 0.860, clear 0.9986; T 238 references, 0 outside.
+  DmndSolomonsHouse01: 0 panes, 0 of 4614 links tinted; T 157 references, 0 outside.
+  Bars (set before the real cells were run, never moved): seen >= 0.80, mass 0.75..1.33, clear >= 0.97.
+  Reds: `--red haze` (every blended shape) FAIL A, 704 shapes wrongly fed, 177,984 triangles;
+  `--red ignored` FAIL A and B (0 fed, the checker has 108); `--red items` (pick-up items let into the soup)
+  FAIL T: 47 references outside the list in Vault111Cryo (MISC 35, ALCH 4, AMMO 4, WEAP 3, ARMO 1), 36 in
+  DmndSolomonsHouse01 (MISC 22, ALCH 14).
+- `tests/spells/cell_gi.sh` (the relight reads v4): Vault111Cryo and Solomon PASS, every stage 99.7% or better;
+  `--red flip` FAILS stage B (58.1%). `cell_lit.sh` PASS. `lodgen_native_baseline.sh --check` PASS (the loader
+  edit moves no far-LOD byte).
+- `tests/spells/probe_far.py` (the far map stays v3): PASS, 121 probes over 121 cells; `--red shift` FAILS (842
+  heights outside their cell). Give it the exe as an absolute Windows path: it starts the exe as given.
+What v4 gives one real cell (Vault111Cryo, same soup): links 259698 -> 279905; the sphere share refused as
+turned away 0.0341 -> 0; unlinked mean 0.2089 -> 0.1982; 10745 second sides kept in their own cell (7068 were
+housed next door in v3). The relit picture moves by 2 levels or more on 26% of the pixels in the gear-door room
+and 9.5% in the pod room (by 8 levels or more on 3.4% and 0.2%); the glass itself takes 0.012% of the light
+there (the Vault has four small panes), 1.3% in NorthEndMeanPastries.
+
+Not modelled: a pane's view-angle falloff (54 of the 122 pane materials use it) and palette alpha (7); a
+blended shape with no material file is never a pane; frost films (blended over, no environment map) take no
+light; one pane material name exists twice with different content (materials/shared/glasstile01.bgem is
+additive, materials/interiors/hightech/glasstile01.bgem is a pane), so the rule goes by the full path.
+
+Question for bungo, no behavior changed: movable statics (MSTT) are in the soup. The record cannot tell a
+fixed one from a simulated one: its flags and fields carry no such thing; whether the object is physics-driven
+is in the model's collision data. Vault111Cryo places 371: 323 are effects (mist, glow cards, drips, beams;
+already left out per shape), 45 are knock-about set dressing (oxygen tanks, folding chairs, cardboard boxes,
+vault suit boxes, traffic cones), 3 are fixed machinery (the gear room gate, two generators). Keep them all,
+drop the type, or decide per model from its collision?
+
+For section 3 (Open):
+- remove the line "`.tbk` v4: two surfel sides per cell (gives back the refused thin-wall weight), room ids (2f)": done here.
+- add: FO4CS's reader takes `.tbk` v3 only; the five changes for v4 are listed in this section; until then bake with `--tbk 3`.
+- add: glass in the bake has no view-angle falloff and no palette alpha; frost films and blended shapes without a material file take no light.
+- add: MSTT in the bake: fixed and simulated cannot be told apart from the record (bungo's call).
+
 ## 3. Open
 
 - `.tbk` v4: two surfel sides per cell (gives back the refused thin-wall weight), room ids (2f).
