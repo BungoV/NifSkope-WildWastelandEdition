@@ -1641,6 +1641,37 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 			return 1;
 		return in.contains( t ) ? 1 : 0;
 	};
+	/* lane SPEED1: A HEADLESS BAKE READS THE SOUP ONLY. With WW_CELL_PROBE_BAKE set and no lit picture asked
+	 * (WW_CELL_LIT, WW_CELL_GI_DUMP), a placement the soup leaves out is neither loaded nor drawn: the same
+	 * rule as the role below (disabled, marker, a type soupRole leaves out, sky, water), counted the same.
+	 * WW_CELL_SPEED_RED=nolean loads them all again -- the bake's files must be the same bytes either way. */
+	const bool bakeLean = probing && !bakeEnv.isEmpty() && qEnvironmentVariableIsEmpty( "WW_CELL_LIT" )
+		&& qEnvironmentVariableIsEmpty( "WW_CELL_GI_DUMP" ) && qgetenv( "WW_CELL_SPEED_RED" ) != "nolean";
+	int leanSkipped = 0;
+	auto soupLeavesOut = [&]( const Placement & p, bool counted ) -> bool {
+		const EsmLodBase & lb = world.lodBase( p.base );
+		if ( lb.model.isEmpty() )
+			return false;   // the loop's own row counts it
+		if ( p.disabled || isMarkerModel( lb.model ) )
+			return true;
+		QString tn = CellPickTable::typeName( lb.type );
+		int role = soupRole( tn );
+		const QString ml = QString( lb.model ).replace( '/', '\\' ).toLower();
+		if ( role == 1 && ml.startsWith( QLatin1String( "sky\\" ) ) ) {
+			role = 0;
+			tn = QStringLiteral( "sky" );
+		} else if ( role == 1 && ml.startsWith( QLatin1String( "water\\" ) ) ) {
+			role = 0;
+			tn = QStringLiteral( "water" );
+		}
+		// the gate's red control (WW_CELL_SPEED_RED=leanred): every second reference the soup DOES take is skipped too
+		static const bool leanRed = qgetenv( "WW_CELL_SPEED_RED" ) == "leanred";
+		if ( leanRed && role == 1 && ( p.ref & 1 ) )
+			return true;
+		if ( role == 0 && counted )
+			soupSkippedTypes[tn]++;
+		return role == 0;
+	};
 
 	CellSpeed::mark( "references gathered" );
 	/* Lane SPEED1, the gate's second red control (WW_CELL_SPEED_RED=transform): the model placed most often
@@ -1675,7 +1706,8 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 	// lane SPEED1: every model the loop below will ask for, read and parsed on worker threads first
 	CellModelAhead modelsAhead( dataRoot, refsRed != "root" );
 	for ( const Placement & p : placements )
-		modelsAhead.want( world, p.base, p.swap );
+		if ( !bakeLean || !soupLeavesOut( p, false ) )
+			modelsAhead.want( world, p.base, p.swap );
 	modelsAhead.load();
 	CellSpeed::mark( "models read ahead" );
 	for ( const Placement & p : placements ) {
@@ -1693,6 +1725,10 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 		static const bool showSky = !qgetenv( "WW_CELL_SKY" ).isEmpty();
 		if ( !showSky && QString( model ).replace( '/', '\\' ).startsWith( QLatin1String( "sky\\" ), Qt::CaseInsensitive ) ) {
 			skyCardsHidden++;
+			continue;
+		}
+		if ( bakeLean && soupLeavesOut( p, true ) ) {   // lane SPEED1
+			leanSkipped++;
 			continue;
 		}
 		/* THE MATERIAL SWAP (lane PRTPPLACE, 2026-09-30): the ref's XMSP, else the base's
@@ -2537,6 +2573,8 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 			for ( const QString & k : sk )
 				t << " " << k << " " << soupSkippedTypes.value( k );
 			t << "\n";
+			if ( bakeLean )   // lane SPEED1
+				t << "  headless bake: " << leanSkipped << " placements the soup leaves out were not loaded\n";
 			if ( baking ) {   // lane BAKE4
 				t << "  bake glass: " << soupGlassShapes << " panes, " << int( probeSoup.glassT.size() / 3 )
 				  << " triangles\n";
