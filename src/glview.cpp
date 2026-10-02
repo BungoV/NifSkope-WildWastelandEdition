@@ -31,6 +31,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ***** END LICENCE BLOCK *****/
 
 #include "glview.h"
+#include "cellspeed.h"
+#include "celltexahead.h"
 
 #include "rdccapture.h"
 
@@ -131,6 +133,7 @@ private:
 #include <QOpenGLFramebufferObject>
 #include "gl/celllights.h"	// lane IMGS1: the imagespace measure
 #include "gl/cellprobeview.h"	// lane PROBEVIEW1: the Pass overlays
+#include "gl/cellssr.h"
 
 // NOTE: The FPS define is a frame limiter,
 //	NOT the guaranteed FPS in the viewport.
@@ -3663,6 +3666,8 @@ static void wwCellImageSpaceMeasurePass( Scene * scene )
 
 void GLView::paintGL()
 {
+	CellSpeed::Acc speedAcc( "frames painted (paintGL, with first-use uploads)" );   // lane SPEED1
+	CellTexAhead::Frame texAheadFrame;   // lane SPEED1: a frame that loads no texture ends the read-ahead
 	wwPaintCounter++;
 	QElapsedTimer wwPaintClock;
 	wwPaintClock.start();
@@ -4032,6 +4037,7 @@ void GLView::paintGL()
 	// node first and use one globally sorted transparent/refraction pass.
 	// lane AO1: the obscurance first; the measure reads the obscured light, as the game's adaptation does
 	wwCellAoPass( scene, !scene->selecting && workspaceDrawScenes.isEmpty() );
+	wwCellSsrPass( scene, !scene->selecting && workspaceDrawScenes.isEmpty() );	// lane SSR1: needs that pass's depth
 	if ( !scene->selecting && workspaceDrawScenes.isEmpty() )
 		wwCellImageSpaceMeasurePass( scene );	// lane IMGS1
 

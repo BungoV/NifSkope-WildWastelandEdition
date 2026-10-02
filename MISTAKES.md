@@ -5,6 +5,194 @@ Written the moment a mistake is recognised, unprompted (CONSTITUTION rule 2).
 Format: date -- what was done -- what was true -- how it was found -- the rule.
 Newest at the top.
 
+## 2026-10-02, lane PRTP5 (going through the game cell by cell)
+
+- eol_restore.py on a NEW file. I ran it on the untracked src/cellcensustest.cpp after each edit, as COMMON.md says
+  for tracked files. It gives every line with no HEAD counterpart a CRLF, so the whole new file became CRLF, and the
+  lines I added to four LF-only files (NifSkope.pro, nifskope_ui.cpp, gltex.h, gltex.cpp) became CRLF too. Caught
+  before the commit by counting CRs against HEAD per file. Rule: eol_restore.py is for files that HAVE CRs at HEAD
+  (mixed files such as cellview.cpp). A new file, or a file with 0 CRs at HEAD, stays LF: do not run it there, and
+  count CRs (`git show HEAD:<f> | tr -cd '\r' | wc -c` against the working file) before `git add`.
+- A time budget that only stops NEW cells is not a hold limit. My first hold was meant to be 7 minutes and lasted 13:
+  the budget ran out while Sanctuary's 5x5 block (5 minutes in that window) had just started. A hold's length is the
+  budget PLUS the longest single item.
+- Three waiters, then none. With the lock a lottery I queued three waiters; when the lock became a queue the overseer
+  asked for one. TaskStop ended the shells but not the waiters, stopping them by process was refused, and so was
+  queuing a fourth. Rule: one waiter per lane from the start, and what a waiter runs should be a scratch script that
+  can be told to do nothing.
+- A comment that claimed a measurement. I wrote "about 62 ms and 2 MB a reference, measured" into the harness from one
+  run in a window already holding 10 GB; the fresh-window number is 23.8 ms. Removed before the build. A number goes
+  into a source comment only with the run that made it.
+- The design that loaded everything 25 times. The first runner opened every exterior cell as the 5x5 around itself,
+  because that is what the cell view's door takes, and I reported "5 days" as the cost of the game instead of the
+  cost of my design. bungo: "Do all the optimizations it needs". Tiles that do not overlap give the same rows from
+  one load per 25 cells (estimate 11 h). Rule: before reporting a whole-game cost, divide the work read by the work
+  that exists (here 17.5 million references read for 0.7 million placed) and fix a factor that is not near 1.
+- A file name built in two places. The gate handed the window the PART file's name and the window added the part
+  suffix again (`sample.part1of2.part1of2.tsv`), so the gate saw no rows and said INCOMPLETE after a hold that had
+  in fact worked. Found on the first run of 2 slices; the files were renamed, nothing was re-run. Rule: one side
+  owns a derived name; the other passes the stem. The offline proof had built its own file names, so it could not
+  see this: a proof that skips the launcher does not prove the launcher.
+- A resume path nobody had run. With every unit of a slice already written, the window found nothing to load,
+  wrote its log, asked to quit and stayed open until `timeout` ended it: 12 minutes of the NifSkope lock, in a hold
+  that then ran 32 minutes against the 20-minute rule (13:39-14:11). Every earlier window had loaded something. The
+  runner now tells the event loop to end every two seconds after its quit request until it does (rebuilt 14:13),
+  and the reds' hold times a window with nothing to do first. Rule: a resumable harness is run once on a FINISHED
+  file before it is queued for a resume; and a window's timeout is sized from what it has left to do, not from the
+  budget.
+- The sample met the memory ceiling inside one hold. Slice 2 stopped after 7 loads at 8000 MB with 4 units left and
+  the gate exited INCOMPLETE; the next hold was an hour of queue away. The gate now starts up to 3 windows per slice
+  in the same hold. Rule: when a queue turn costs an hour, the gate does the resume itself.
+- Timed beside another window. The second hold ran in the second lock slot while another lane's window was working:
+  the same kind of load took 1.7 to 2.5 times as long (tile -23,7: 280 s for 4928 references; tile -18,7 an hour
+  earlier: 122 s for 3602). Those rows are kept out of the estimate's fit and given as their own line. Rule: every
+  timing row says which slot it ran in.
+- A gate row that grepped for a line the window never writes. The version read-back check looked for the window's
+  PASS line, but the window prints only its failures, so the green bake run FAILED on that row alone (hold 4,
+  16:09). The window now prints "bake version read back: N visits, files .tbk vX" and the gate reads N.
+  Rule: before a gate greps a program's log for success, find the line in a real log, not in the source's check text.
+
+## 2026-10-02 -- SPEED1: the cell view's load was not where anyone thought, and five of my own slips
+
+1. THE BRIEF'S SUSPICION WAS WRONG, AND SO WAS MY FIRST GUESS. "Each placement loads its own copy of its
+   model" -- measured: no. 1455 placements make 295 model loads, 3687 make 1020, 3591 make 671; the loader
+   already shares by model + material swap. The seconds and the memory were in two places nobody had named:
+   every welded vertex written as a row of the document (9-10 s and ~1.5 kB per vertex where 72 bytes do), and
+   every texture read and decoded on the drawing thread during the first paint (9-23 s).
+   RULE: phase 0 is a table of stage times and memory steps from timers inside the exe, before one line of
+   the fix is written. The first candidate on a brief is a guess until the table says so.
+
+2. A SIZE FIELD COUNTED FROM ROWS THAT WERE NO LONGER THERE. With the rows kept beside the document, the
+   document's own header pass still summed each block's size from its rows: every waiting shape was stated
+   as empty, and a save would have written a file whose block sizes were wrong. The first build passed the
+   picture and the counts; only the byte comparison of a saved file against the old path's file showed it.
+   RULE: when data moves out of a container, list every place that DERIVES a number from it (sizes, counts,
+   bounds), not only the places that read it. Gate the derived numbers: here the saved file, byte for byte.
+
+3. 186 READERS I HAD NOT COUNTED. The document's rows are read by name ("Vertex Data", "Triangles") from 186
+   places in 36 files (spells, exporters, the inspector). I had covered the two I knew. An audit by search
+   found the rest; covering them one by one was not an option, so the cover went under them: the model's
+   by-name lookup writes a waiting shape's rows the moment anything asks for them. The gate asks half the
+   shapes by name before the save and demands the same file; the red (net off) fails it.
+   RULE: before moving data another reader can reach, count the readers by search first. If there are more
+   than a handful, put ONE guard where they all pass, and gate the guard with a reader that is not yours.
+
+4. A CHECKER PREFIX THAT MATCHED NOTHING, AND A BOUND FROM ONE PAIR. The independent checker read the cell's
+   count lines by a prefix the exe never prints (so "same counts" compared two empty lists and passed), and
+   its picture bound was exactly the two reference runs' own difference -- the third run was 3 pixels over.
+   RULE: a checker prints how many lines it compared and fails on zero. A noise bound measured from two runs
+   gets a stated margin (here 4 x the pair's count + 64 pixels, step 2 x + 2) and the red must still fail it
+   by orders of magnitude (it does: the red moves tens of thousands of pixels).
+
+5. "KNOWN TO GAIN AT MOST 1.3x" WITH NO SOURCE IN MY NOTES. I wrote that parsing models on worker threads was
+   known to gain little, and decided against it, from memory. The source exists (an earlier lane's measured
+   ladder in src/nativeemit.cpp: best at 2 threads, slower past 4, "mechanism not proven") but I had not
+   opened it when I wrote the sentence, and "mechanism not proven" is not "cannot be fixed".
+   RULE: a number in a decision carries its file and line, or it is marked INFERRED. A decision NOT to do a
+   candidate needs the same evidence as a decision to do it.
+
+6. SOURCES EDITED WHILE A GATE WAS QUEUED. I kept editing gate-covered sources while the hold for the
+   previous build waited an hour in the queue; the gate's "exe newer than every source" row would have
+   failed for the exe it was about to test. Caught before the hold started; fixed by building again and
+   pointing the queued script at the newest exe copy through a marker file.
+   RULE: a queued hold names its exe through a marker file, not a fixed name, so the build that finishes
+   last before the window arrives is the one that flies.
+
+7. HELPER THREADS TOLD THE WRONG NAMES, AND BYTES THROWN AWAY THAT WERE STILL WANTED. The texture read-ahead
+   took its list from the material's full texture list, not from what the renderer asks for slot by slot, and
+   at its memory bound it dropped the oldest read bytes. Measured on three cells: 94-145 files a cell that
+   nobody had announced and 38-106 read and then dropped, so 1.7-3.1 s of file reading stayed on the drawing
+   thread -- inside a change that already passed its gate, because the gate's floor was still far away.
+   Fixed by asking the renderer's own question (fileName per slot) and making the workers wait at the bound
+   (after: 0 unannounced, 0 dropped, 0.6-0.7 s).
+   RULE: a read-ahead prints its own hit and miss counts in the timer table from its first build. A gate
+   that passes says the change is good enough, not that it does what it was built to do.
+
+8. A PATCH BY SCRIPT INTO A SOURCE FILE. I patched my own new .cpp with a Python here-document; the shell
+   turned the escapes inside C string literals into real tabs and newlines and the build failed. The rule
+   (Edit or Write only for tracked files) exists for exactly this.
+   RULE: no exceptions for "my own new file". Edit tool, then build.
+
+9. THE PUBLIC-REPO CHECK STOPPED MY COMMIT ON MY OWN NAMES. Four added lines carried a name with two "::" in
+   it (a namespace, a class and a function of NifSkope's own, and one from the standard library); the check
+   cannot tell them from the names it guards against. Rewritten with a using-declaration and a free function.
+   RULE: run the check on the staged diff BEFORE the build that precedes a gate round, not at commit time:
+   the rewrite touched three sources and cost one more build.
+
+10. THE LINE-ENDING RESTORE RUN ON A FILE THAT HAS ONE ENDING. eol_restore.py gives every new line CRLF; run on
+    my LF-only checker it left five CRLF lines in an LF file. Found by counting bytes, fixed by bytes.
+    RULE: eol_restore.py is for files that came from main with mixed endings. For a file of my own, count
+    the endings by bytes after the edit and do nothing else.
+
+11. A SINGLE RUN REPORTED AS WHAT A CHANGE IS WORTH -- NEARLY. The one "model workers off" run of hold 3 read
+    42 s against 10 s. The timer table showed 22 s of it were file reads stalled by another window; the stage
+    itself costs 4.6 s on one thread (phase 0) and 1.1-1.3 s on eight. I did not report the 42.
+    RULE: an attribution number comes from the stage's own timer row, or from at least two runs; a wall-clock
+    figure from one run on a shared machine is not evidence either way.
+12. A CHECKER THAT HASHED A STOPWATCH. The bake gate compared probes.tsv byte for byte, and its header carries the
+    probe stage's milliseconds: two of three cells FAILED with identical probes. Same gate, same hold: it demanded
+    the soup's "left out by type" row read the same in both runs, but the full run never counts a placement whose
+    model does not load. RULE: before a same-bytes check, diff two runs of the SAME path once and strip what
+    differs there; and know where a count is taken before demanding it match.
+13. A RUN-TO-RUN DIFFERENCE INHERITED FROM MAIN. After merging the placed decals, the speed gate's two reference
+    runs (the old path) differed from each other. Attributed before touching anything: decals off -> all PASS;
+    main's own exe twice -> different vertex counts. Cause: decal receivers taken in a seeded hash's order.
+
+## 2026-10-02 -- SSR1: a goal built on a deduction nobody had measured; a harness hold lost to a relative path; four gate slips caught offline
+
+What happened, in the order it cost time:
+
+1. **The lane's goal rested on "the floor pools are the screen-space reflections".** That came from an earlier
+   lane reading the game's composite: reflection x diffuse light. True, but the term is
+   `lerp(cube, reflection, confidence)`: where the march finds nothing the cube map stands in, and the cube
+   term was already drawn. Measured once the pass ran (Vault111Cryo, eye height, 1280x720): mean confidence
+   0.008, the picture changes on 6.7% of its pixels by 0.55/255 on average. The pools were in the frame before
+   the pass. A full day's lane was approved on a sentence that one what-if in numpy (the march over a dumped
+   depth buffer) would have tested in an hour.
+   Rule: before a lane is launched to "add the pass that makes X", estimate X's size from data already on disk
+   (a depth dump and thirty lines of numpy), and write the estimate in the brief.
+
+2. **The first picture hold wedged: the scratch launcher passed the scene file as a relative path.** The
+   window opened, loaded nothing and waited (3 s of CPU, no picture) while holding the shared lock. It was
+   freed by sending the window `NifSkope::open <absolute path>` on its own port, never by a kill.
+   Rule: every harness launch passes the scene file as an absolute path (`$(winpath "$PWD/...")`); a scratch
+   launcher is copied from a gate script, not typed from memory.
+
+3. **`eol_restore.py` was run on new files and on `NifSkope.pro`.** It gives every line the ending of the
+   file's neighbors at HEAD; a new file has none, and an LF-only file must stay LF. All eight new files and two
+   lines of the project file came out CRLF. Caught by the byte count before the first commit.
+   Rule: `eol_restore.py` only for files that have CRs at HEAD. New files and LF-only files: count the CRs,
+   expect 0.
+
+4. **The "nothing reflects" view reflected.** A top-down camera was meant to start no ray; its first
+   placement had the stairs in frame (3473 rays). Found by counting ray starts in the dump before the gate was
+   written around it; the camera moved to bare floor.
+   Rule: a "must be zero" view is proven zero in the dump (count the starts), not by argument.
+
+5. **The checker's first tolerance (8% of the value) let two mutants pass**: a march without the 50-unit
+   refusal, and a box blur. The viewer really sits within 0.0012 of the rebuild on 99.9% of pixels; the bar
+   became 0.002 + 2%, agreement 99%. The no-refusal mutant then fails at 92.6% and 95.9%.
+   Rule (again): measure the real error first, set the tolerance from it, then run every mutant.
+
+6. **The gate probe wrote opaque black from blended draws.** Floor decals drew black over the floor's
+   reflection value in the probe picture (agreement 96-97%, total 0.98). A blended draw now writes alpha 0 in
+   that probe and the floor's value stands.
+   Rule: a probe that encodes a per-surface value must say what a blended draw over that surface writes.
+
+7. **Other lanes' probes would have read the reflection.** The cube-term probe is taken after the mix; with
+   the pass on, its gate would have compared cube against cube-or-reflection. Caught by reading the sibling
+   gate before re-running it: the reflection is now read only by the picture and by this lane's own probe.
+   Rule: when a term is inserted into a chain other gates probe, list which probes sit downstream of the
+   insertion before re-running them.
+
+8. **The nogap red passed live (100.0% agreement) although it failed offline (94.7%).** The offline mutant
+   changed the EXPECTATION (the rebuild without the refusal adds hits the viewer lacks: inside the mask); the
+   live red changed the VIEWER (it adds hits the rebuild lacks: outside a mask taken from the expectation
+   alone). The 16:12 hold showed it; the checker now judges where the rebuild OR the viewer shows a value, and
+   the same dumps then fail the red at 94.7% / 95.4% (bar 99).
+   Rule: an offline mutant proves a red only when it moves the same side the live red moves; a mask built from
+   one side is blind to light the other side adds.
+
 ## 2026-10-02 -- FRAT1: a mismatch filed as open that a commit of the same day had already cured; lights fitted before the probe bytes were compared; a gate comment written before its run; one 67-minute lock hold
 
 ### 2026-10-01 -- the mismatch was measured on a stale exe and filed as an open item

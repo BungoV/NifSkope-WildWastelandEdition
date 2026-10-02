@@ -178,6 +178,7 @@ INCLUDEPATH += src lib
 
 HEADERS += \
 	src/data/nifitem.h \
+	src/data/nifitemcache.h \
 	src/data/niftypes.h \
 	src/data/nifvalue.h \
 	src/gl/BSMesh.h \
@@ -224,6 +225,7 @@ HEADERS += \
 	src/gl/sunshadow.h \
 	src/gl/celllights.h \
 	src/gl/cellprobeview.h \
+	src/gl/cellssr.h \
 	src/ui/scenewindow.h \
 	src/gl/impostordraw.h \
 	src/impostoroct.h \
@@ -325,6 +327,10 @@ HEADERS += \
 	src/cellpanel.h \
 	src/cellpicktest.h \
 	src/cellview.h \
+	src/cellmesh.h \
+	src/cellspeed.h \
+	src/celltexahead.h \
+	src/cellmodelahead.h \
 	src/probealbedo.h \
 	src/probebake.h \
 	src/probefar.h \
@@ -432,6 +438,7 @@ SOURCES += \
 	src/gl/sunshadow.cpp \
 	src/gl/celllights.cpp \
 	src/gl/cellprobeview.cpp \
+	src/gl/cellssr.cpp \
 	src/ui/scenewindow.cpp \
 	src/io/materialfile.cpp \
 	src/io/pbrmfile.cpp \
@@ -561,6 +568,10 @@ SOURCES += \
 	src/cellpanel.cpp \
 	src/cellpicktest.cpp \
 	src/cellview.cpp \
+	src/cellmesh.cpp \
+	src/cellspeed.cpp \
+	src/celltexahead.cpp \
+	src/cellmodelahead.cpp \
 	src/probealbedo.cpp \
 	src/probebake.cpp \
 	src/probegi.cpp \
@@ -572,6 +583,7 @@ SOURCES += \
 	src/esmplaced.cpp \
 	src/cellworkspace.cpp \
 	src/cellworkspacetest.cpp \
+	src/cellcensustest.cpp \
 	src/lodinative.cpp \
 	src/lodtsheets.cpp \
 	src/lodgenaggregate.cpp \

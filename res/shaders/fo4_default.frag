@@ -257,6 +257,7 @@ vec3 tonemap(vec3 x)
 #ifdef WW_CELLLIGHTS
 #include "cell_lights.glsl"
 #include "cell_ao.glsl"
+#include "cell_ssr.glsl"
 #endif
 
 void main()
@@ -511,6 +512,10 @@ void main()
 		cubeK = hasCubeMap ? cellCubeGame( CubeMap, reflectedWS, cellCubeMat.y * ( hasSpecularMap ? specMap.g : 1.0 ),
 		                                   cellCubeMat.x * ( hasSpecularMap ? specMap.r : 1.0 ), envReflection, -ViewDir )
 		                   : vec3( 0.0 );
+	// lane SSR1: the screen-space reflection over the cube term, by the march's confidence (cell_ssr.glsl)
+	if ( cellOn )
+		cubeK = cellSsrMix( cubeK, cellCubeMat.y * ( hasSpecularMap ? specMap.g : 1.0 ),
+		                    cellCubeMat.x * ( hasSpecularMap ? specMap.r : 1.0 ), envReflection );
 #endif
 
 	vec3 backlight = vec3(0.0);
@@ -563,6 +568,7 @@ void main()
 	if ( cellOn )
 		color.rgb = cellLit( color.rgb, albedo, normal, -ViewDir, V, specMask, specColor, alphaR, kSmith,
 		                     emissive * glowScaleSRGB, cubeK );
+	vec3 cellSsrScene = color.rgb * color.rgb;	// lane SSR1: what the reflections' march samples (probe 60)
 	// lane AO1: the ambient obscurance on the whole lit colour (linear, so its root here), before the fog
 	if ( cellOn )
 		color.rgb *= sqrt( cellAoFactor() );
@@ -647,5 +653,7 @@ void main()
 #ifdef WW_CELLLIGHTS
 	if ( cellOn && cellProbe == 20 )
 		fragColor = cellAoPassOut( normal, -ViewDir );	// lane AO1
+	if ( cellOn && ( cellProbe == 60 || cellProbe == 61 ) )
+		fragColor = cellSsrProbeOut( cellSsrScene );	// lane SSR1
 #endif
 }

@@ -51,6 +51,7 @@ int wwLodMaskByTree = 0;
 #include <cmath>
 #include <limits>
 #include "gamemanager.h"
+#include "celltexahead.h"
 #include "libfo76utils/src/ddstxt16.hpp"
 #include "glview.h"
 #include "renderer.h"
@@ -1002,6 +1003,12 @@ void BSShaderLightingProperty::setMaterial( const NifModel * nif, const QModelIn
 		delete newMaterial;
 	else
 		material = newMaterial;
+	if ( CellTexAhead::armedFor( nif ) ) {   // lane SPEED1: a cell's texture files are read ahead
+		QStringList names;                   // what the renderer will ask this property for, slot by slot
+		for ( int i = 0; i < 10; i++ )
+			names << fileName( i );
+		CellTexAhead::want( nif, names );
+	}
 
 	resolvePbrm( nif, index );
 }

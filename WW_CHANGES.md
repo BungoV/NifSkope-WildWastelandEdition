@@ -1,5 +1,81 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Cell view: a NifSkope window that goes through the game cell by cell, checks each cell and can bake its probes (2026-10-02)
+
+- NifSkope can now go through a whole plugin by itself, a piece at a time, without ever loading the whole world:
+  every interior alone, and the outdoor map as tiles of 5x5 cells that do not overlap, each tile loaded once.
+  (The first version opened every outdoor cell with the 5x5 around it, so everything was loaded 25 times.)
+- What it does at each stop is a list of steps, done on the one load:
+  - the per-cell check-up (what loaded, what is missing): one line per cell in a plain tab-separated file under
+    `release/cell_census/` (opens in a spreadsheet): references, shapes, triangles, lights placed / lit / skipped and
+    why, the models and textures that could not be loaded, seconds, memory;
+  - the probe bake for the same cells (the existing headless bake), into a folder you name.
+  Start it with `WW_CELL_CENSUS_TEST=<file>`, `WW_CELL_CENSUS_PLUGINS=<plugin>`, and for the bake
+  `WW_CELL_CENSUS_STEPS=census,bake WW_CELL_CENSUS_BAKE=<folder>`. Nothing new in the menus.
+- For the bake it can load a ring of neighbor cells around each tile (`WW_CELL_CENSUS_MARGIN=1`), because a probe
+  only sees what is loaded with it: without the ring, probes at a tile's edge take the neighbor's buildings for sky.
+- A stretch of map with nothing placed in it gets its lines without loading anything (25 cells in 3 ms).
+- It can be stopped at any time and goes on where it stopped. A tile that is too big, or that crashed the window,
+  is opened cell by cell the next time, and the line says so.
+- Several windows can share the work: each takes its own slice (`WW_CELL_CENSUS_SLICE=1/2`, `2/2`, any number) and
+  writes its own file; `tests/spells/cell_census_merge.py` joins them. No cell is done twice or left out.
+- New gate `tests/spells/cell_census.sh`: a second, independent reader of the plugin checks that every cell has
+  exactly one line and that each line's reference and light counts are the plugin's. Five red controls
+  (`--red stale | dropcell | dropslice | doubleslice | nobake`) must FAIL.
+- Measured on a sample (20 interiors, 75 outdoor cells): an interior about 14 seconds, a 5x5 tile around Sanctuary
+  about 2 minutes (5 seconds a cell). Estimated for all of Fallout4.esm, one window: the check-up alone about 11
+  hours (it was about 5 days); with the probe bake and a one-cell ring about 2 days. The whole-game run has not
+  been started.
+- Pick-up items are 3.4% and actors 0.6% of everything placed in the game (counted from the plugin), so leaving
+  them out of the bake saves little time.
+
+## Cell view: a cell opens in a quarter of the time and little more than half the memory (2026-10-02)
+
+- Opening a cell is three to four times faster and takes 37-45% less memory, with the same picture and the
+  same counts. Measured on three cells, the old way against the new in the same program, same machine, one
+  other NifSkope window open:
+
+  | cell | seconds before | seconds now | peak memory before | now | processor cores busy |
+  |---|---|---|---|---|---|
+  | Vault 111 (cryo), 1455 placed objects | 23.8 | 6.8 | 4.4 GB | 2.5 GB | 1.0 -> 2.4 |
+  | Boston mayoral shelter, 3687 objects | 40.5 | 10.1 | 7.9 GB | 5.0 GB | 1.0 -> 3.3 |
+  | Commonwealth -21,6, a 3x3 block, 3591 objects | 38.3 | 9.1 | 7.6 GB | 4.1 GB | 1.0 -> 3.1 |
+
+  (Seconds include starting the program and the 2.5 s the test waits before its picture.)
+- What changed, in the order it mattered:
+  1. The cell's geometry is no longer written into the document row by row. It is kept beside the document
+     and drawn from there; the rows appear the moment something asks for them (a save, a spell, the block
+     inspector). A saved cell is the same file as before, byte for byte.
+  2. Texture files are read by helper threads while the cell is being put together, instead of one at a time
+     on the drawing thread during the first picture.
+  3. Model files are read on up to eight helper threads before the cell is assembled.
+- Models were already shared between copies of the same object (1455 placed objects = 295 model reads); that
+  was suspected to be the problem and is not.
+- A bake run without a lit picture (`WW_CELL_PROBE_BAKE`) no longer loads the things the light bake ignores
+  anyway (pick-up items, placed people and creatures, disabled references, markers). The bake's files are the same, byte for byte.
+  Vault111Cryo: 17.5 s -> 11.1 s, 3.0 -> 2.5 GB.
+- No new menu row, setting or INI key. Nothing to switch on.
+- Still open: opening four cells one after another in one window ends at 4.7, 5.2, 5.3 and 4.8 GB (it levels
+  off rather than adding up); the old path's figure for the same walk was not measured. A 5x5 block was not re-timed today (it needs 15+ GB free and a quiet machine).
+  About 2.7 GB of the shelter's 5 GB is texture memory held by the graphics driver.
+- Gate: `tests/spells/cell_speed.sh` (three cells: picture, counts, saved file, seconds and memory with a floor of
+  50% / 33%; four red controls) and `tests/spells/cell_speed_bake.sh` (the bake's files; one red control).
+- Decals land the same way every time a cell opens (before, which of two touching surfaces a decal took could
+  change from one opening to the next).
+
+## Cell view: the game's floor reflections (screen-space reflections) (2026-10-02)
+
+The game mirrors what stands around a shiny floor in the floor itself: it looks across the picture it has
+already drawn and, where a reflected ray meets something, uses that instead of the material's cube map. The
+cell view now does the same, the way the game's own shaders do it: only materials with an environment map
+and the "Screen Space Reflections" switch on in their material file reflect, only indoors, and the result
+blends with the cube map reflection by how sure the march is that it found something.
+
+What you will see: very little. Measured in the Vault 111 cryo walkway at eye height, the picture changes on
+about 7% of its pixels, by about half a shade on average (at most 25 shades in a few spots). The bright pools
+under the walkway lamps were already in the picture before this (they come from the lamps and the cube map
+reflection, not from this pass). Nothing to switch on: it rides the Cell lights row. No new settings.
+
 ## Cell view: the light check now also watches two misty rooms (2026-10-02)
 
 Nothing you see changes. Two rooms looked at from straight above, Fraternal Post 115 and Pickman Gallery, used

@@ -1098,6 +1098,252 @@ Open.
 - The rule this rests on is wider than these probes: nothing blended may draw into a pass that writes data as
   colour. Any later data pass (a new probe number, a bake pass) has to ask `wwCellProbePass()` or its like.
 
+### 2ac. The game's screen-space reflections (lane SSR1, 2026-10-02)
+
+(Letter: the next free one after 2z; renumber at splice if another lane lands first.)
+
+Why: the Vault 111 cryo walkway shows bright pools under its lamps in the game. Lane POOL1 (2t) read them as
+the game's screen-space reflections. Built and measured here: the pass is the game's, but at eye height it
+adds little. The pools are already in the opaque lit frame (the placed lights and lane CUBE1's cube term).
+
+The chain, read from the game's shaders and their setup code:
+- The game draws its opaque frame WITHOUT the env term, then at half the view: a ray per flagged pixel (the
+  view ray mirrored about the normal, the normal's world z doubled first; kept when it points more than 0.2
+  into the view), a march of at most 32 steps over the min-of-2x2 depth mips (4 levels; at the finest level a
+  ray 50 units or more behind the surface is refused, and a refusal is a miss), the hit's color with a
+  confidence c = screen-edge fade x travelled-distance fade x sat(1 - 25 x depth gained / (far - near)),
+  stored as c squared; a 5-tap blur across, then down, where taps without confidence hand their weight on.
+- Its composite takes lerp(cube term, reflection x the same factor, min(confidence, 1)) x the diffuse light.
+  So where the march finds nothing the cube term stands, and the result is never larger than the reflected
+  color can make it.
+- The four scales: color 1.0, angle gate 0.2, normal z 2.0, confidence 1.0 (the defaults; bungo's INIs
+  override none). near = 15; far = the cell's clip distance (XCLL, or its lighting template's when it
+  inherits), capped by the far LOD distance. Vault111Cryo: 10000.
+- The march samples THIS frame before the env term (no feedback: a reflection never holds a reflection).
+- The flag: an environment-mapped material whose material file has "Screen Space Reflections" on.
+
+Here: `src/gl/cellssr.{h,cpp}` + `res/shaders/cell_ssr.{frag,vert,prog,glsl}`. wwCellSsrPass draws the
+frame's opaque cell-lit fragments once more (probe 60: linear lit color without reflection, obscurance and
+fog; alpha = the flag) into a full-size float target, runs the four stages over it and lane AO1's depth
+pyramid (one pyramid, not two), and the two cell programs (fo4_default.frag, pbrm_default.frag) mix the
+result into their cube term: `cellSsrMix` in cell_ssr.glsl is the one place it enters the picture.
+Interiors only; rides the Cell lights row; needs the obscurance pass (WW_CELL_AO=0 leaves none). Texture
+unit 17. With another lane's probe on (WW_CELL_LIT_PROBE other than 61) the reflection stays out, so those
+probes compare their own term.
+ASSUMED: the constant rows' order (implied by every use); the pyramid the march loads is the obscurance's;
+point-sampled ray inputs; a bilinear composite read. DEVIATIONS: float targets (the game keeps 8 bits); a
+NIF-only material (no material file) carries no flag; exteriors not done; the march reads linear light before
+the cell view's per-fragment tone map.
+Pins: WW_CELL_SSR_RED=off | nogap | nofade; WW_CELL_SSR_DUMP=<file>; probe 61 (the reflection a draw read).
+
+Gate `tests/spells/cell_ssr.sh` + `cell_ssr_check.py`: the checker re-does ray, march and blur in numpy from
+the viewer's dumped depth, normals and scene color with the constants above and the plugin's own clip
+distance. Stages F (far plane), M (march), B (blur), P (probe picture), L (the picture gains light only where
+the rebuild has reflections), Z (a view where nothing may reflect: probe black, on equals off byte for byte).
+Bars: agree >= 99% (M, B) / 95% (P) within 0.002 + 2%, over the pixels where the rebuild OR the viewer shows a
+value, and viewer / expected total within 5%. Views: walkway (eye height), walkway_far, topdown (zero).
+Result (exe 2026-10-02 22:34, main 34a7ab60 merged, branch head 28d06fb4): green PASS 3 of 3 views:
+M 100.0 / 100.0%, B 100.0 / 100.0%, P 98.8 / 99.2%, totals 0.998 / 0.999; L: the picture changes on 4731 /
+5458 pixels by +0.40 / +0.28 of 255 on average, 0 pixels away from a reflection; topdown Z: 876800 flagged
+pixels, 0 rays, picture identical. Reds FAIL on both walkway views: off P 0.0 / 0.0%; nogap M 94.7 / 95.4%
+(bar 99); nofade M 0.3 / 1.7%, totals x11.3 / x10.9.
+Measured size (Vault111Cryo, 1280x720, eye height): mean confidence 0.008; on vs off differ on 6.7% of the
+pixels by 0.55/255 on average (max +25/255); the pass costs about 50 ms a frame here.
+Sibling gates rerun: cell_spec (the cube/specular chain the mix sits in), cell_cube (its probe sits after the
+mix), cell_lit and cell_ao (the pass reuses the obscurance's pyramid and targets).
+
+### 2ad. A cell opens in a quarter of the time: geometry beside the document, files read ahead (lane SPEED1, 2026-10-02)
+
+The rule: nothing about the picture, the counts or the saved file may change. Only where the bytes wait, and
+which thread fetches them.
+
+Where the time and the memory went (measured first, timers behind `WW_CELL_SPEED_DUMP=<file>`; shelter, 49 s):
+- welded shapes written into the document one row at a time: 9.9 s, and +3.4 GB (about 1.5 kB a vertex for rows
+  that need 72 bytes);
+- texture files read one by one on the drawing thread during the first picture: 22.9 s (1261 files);
+- model files read and parsed, one thread: 4.6 s;
+- drawing itself: 0.2-0.3 s. One core busy.
+Models were already shared between placements (3687 placed objects = 1020 model reads). That suspicion was wrong.
+
+What changed.
+1. Side geometry store (`src/cellmesh.h/.cpp`). The welded vertex and triangle arrays of a cell's shapes are
+   kept beside the document, and the renderer draws from them (`gl/bsshape.cpp`). The document's two row arrays
+   of such a shape stay empty ("waiting"). They are written the moment something needs rows:
+   - a save (all waiting shapes, in block order: the file is the same bytes as before);
+   - any reader that asks for the array by name: one net in `BaseModel::getItemInternal`, which writes that
+     shape's rows before handing out an empty array (186 by-name readers in 36 files are covered by it, not by
+     186 edits);
+   - `NifModel::updateHeader` leaves a waiting shape's arrays alone and adds the waiting bytes to its block
+     size, so the header is right without the rows.
+   A plain open forces 0 shapes.
+2. Texture read-ahead (`src/celltexahead.h/.cpp`). When a material of a cell document is resolved, the names
+   the renderer will ask for (its own `fileName(slot)` for slots 0-9) go to up to 8 worker threads that find
+   and read the FILE BYTES. Decode and hand-off to the graphics card stay on the drawing thread. The drawing
+   thread takes ready bytes, waits when a worker is on that file, and reads itself otherwise. At the bound on
+   held bytes (384 MB) the workers WAIT; nothing read is thrown away.
+3. Model read-ahead (`src/cellmodelahead.h/.cpp`). The distinct model + swap pairs of the cell are parsed on
+   up to 8 workers (`qBound(1, cores - 2, 8)`), each under its own run of item slots
+   (`src/data/nifitemcache.h`); the builder takes the answers in its own order, so the document is the same
+   as a one-thread build.
+4. A bake run with no lit picture (`WW_CELL_PROBE_BAKE` set, `WW_CELL_LIT` and `WW_CELL_GI_DUMP` not set)
+   neither reads nor draws the placements the probe soup leaves out (2y's rule: disabled references, markers,
+   the types `soupRole` gives 0, `sky\` and `water\` models, placed actors). The list is `soupRole` itself, not
+   a copy. Measured (hold 6, merged tree, one run each way, OS counters): Vault111Cryo 63 of 1455 placements not
+   loaded, 17.5 -> 11.1 s, 2999 -> 2478 MB; NorthEndMeanPastries 52, 7.9 -> 5.5 s; DmndSolomonsHouse01 37,
+   6.2 -> 5.5 s. The bake's files are the same bytes. The soup's "left out by type" row may read higher in the
+   lean run where the full run lost a placement to a model that does not load (Vault: WEAP +2, failed 5 -> 4).
+
+Measured (hold 3, merged tree with 2w-2y; the old path is the same program with `WW_CELL_SPEED_RED=slow`;
+fastest of 2 old runs against the median of 3 new; OS counters; one other NifSkope window open):
+
+| cell | seconds old -> new | peak memory old -> new | cores busy | picture | counts |
+|---|---|---|---|---|---|
+| Vault111Cryo | 23.8 -> 6.8 (71% fewer) | 4444 -> 2477 MB (44% less) | 1.0 -> 2.4 | 50 px differ (two old runs: 30; allowed 184) | 20 lines same |
+| BostonMayoralShelter01 | 40.5 -> 10.1 (75%) | 7890 -> 4954 MB (37%) | 1.0 -> 3.3 | 0 px | 20 lines same |
+| Commonwealth -21,6, 3x3 | 38.3 -> 9.1 (76%) | 7596 -> 4146 MB (45%) | 1.0 -> 3.1 | 124 px (old: 68; allowed 336) | 28 lines same |
+
+Seconds include program start and the 2.5 s the test waits before its picture. In-process: 4.5 / 7.2-7.8 /
+6.2-7.2 s. Model workers on the shelter: 1 thread 4.6 s, 2: 2.8, 4: 2.3, 8: 1.1-1.3, 14: 1.65 (the summed
+parse time grows with the workers; inferred: the allocator). Texture bytes on the drawing thread: 0.6-0.7 s.
+
+Not done, and why.
+- GPU instancing: drawing is 0.2-0.3 s of a 7-10 s load (under 5%).
+- The largest stage left is the hand-off of textures to the graphics card on the drawing thread (about 3 s on
+  the shelter). It needs a second GL context or compressed uploads off-thread; not in this lane.
+- Memory hand-back (candidate d): four cells opened one after another in one window (WW_CELL_SPEED_REOPEN,
+  hold 4) ended at 4685, 5213, 5277, 4825 MB with a peak of 5922 MB: it levels off. The old path's walk was not
+  measured (did not fit a hold); nothing was changed for d.
+- A 5x5 block was not re-timed (needs 15+ GB free and a quiet machine).
+
+Gate. `tests/spells/cell_speed.sh` + `cell_speed_check.py` (reads the pictures, the count lines, the saved
+file and the OS counters itself): PICTURE (differing pixels within 4 x the old path's own run-to-run
+difference + 64), COUNTS (every census line the same), SAVE (same bytes; every second waiting shape asked by
+name first, all must have rows), GAIN (floors: 50% of the seconds, 33% of the peak memory). Reds, each seen
+failing: `slow` (the old path against itself fails the floor), `transform` (one placement moved: 261,827 px),
+`rows` (waiting rows not written at save: different bytes), `nonet` (the by-name net off: 0 of 256).
+`tests/spells/cell_speed_bake.sh` + `cell_speed_bake_check.py`: the bake's files with and without the skip are
+the same bytes; red `leanred` (skips half of what the soup DOES take) must differ.
+
+Measurement-only environment variables (no INI key, no menu row): `WW_CELL_SPEED_DUMP`, `_TAG`, `_RED`,
+`_THREADS`, `_REOPEN`.
+
+Decal receivers in key order (round 3): after main's placed decals came in, the same program welded Vault111Cryo
+to 2975079..2975085 vertices across five runs (main's own exe twice: 2975083 vs 2975079); with decals off all
+counts and the saved bytes matched. The receivers were taken in the bucket hash's order, which is seeded per run.
+They are now taken in key order.
+
+### 2ae. Going through the game cell by cell: one visit, a list of steps (lane PRTP5, 2026-10-02)
+
+Step 5's runner. Its end product is BAKED PROBES; the per-cell check-up (what loaded, what is missing) is the first
+step it knows, the probe bake is the second, and one visit does both, so the game is opened once. Source
+`src/cellcensustest.cpp`; nothing in the menus, no INI key; everything is `WW_CELL_CENSUS_*` environment.
+
+WHAT A VISIT IS. An interior is visited whole and alone. The exterior grid is cut into TILES of 5x5 cells that do not
+overlap (`WW_CELL_CENSUS_BLOCK`, odd; the tile of cell v is centred on `floor(v/5)*5 + 2`), and a tile is loaded
+ONCE through the cell view's own door (the `.wwcell` spec). Before, every exterior cell was opened as the 5x5 around
+itself, so each cell's references were built 25 times. The whole world is never loaded.
+
+THE STEPS (`WW_CELL_CENSUS_STEPS`, default `census`):
+- `census`: one tab-separated row PER CELL of the tile (which cell a placed object belongs to comes from the
+  plugin). 46 columns: key kind world x y form edid block tile slice status refs refs_drawn refs_block placements
+  shapes verts tris lights_cell lights_block lit omni spot skip_off skip_noradius skip_black ambient_only light_types
+  lights_approx models_loaded models_failed tex_asked tex_missing mats_unreadable far cover_px fb steps bake_probes
+  bake_files build_ms bake_ms render_ms total_ms rss_mb note. The load's own figures (shapes, lights lit, seconds,
+  memory, the names of what failed) stand on the tile's first row; the other rows carry `^` there. The file lives
+  under the NifSkope folder (`release/cell_census/`), never in the repo.
+- `bake`: the headless probe bake as it is on main (`WW_CELL_PROBE_BAKE`), into `WW_CELL_CENSUS_BAKE=<folder>`
+  (`<folder>/I_<FORM>` or `<folder>/<worldspace>`), probes only in the tile's own cells. The runner sets the bake's
+  variables per load and counts the files it left; the bake code itself is untouched (lane BAKE4 owns it).
+  FILE VERSION: `WW_CELL_CENSUS_TBK` = 4 (default: both sides of a thin wall, room ids, glass tint) or 3 (what
+  FO4CS reads today). The runner hands the builder `WW_CELL_PROBE_BAKE_TBK` and then READS THE VERSION BACK from
+  every file the visit wrote; another version fails the visit. OPEN: the cell view's bake call does not read that
+  variable (it always writes the writer's default, v4). The four lines that would make it listen go into
+  `src/cellview.cpp` after `bs.red = ...`; my edit of that file was refused by the permission system (text in
+  notes\prtp5\STATUS.md), so a v3 run FAILS its own check today instead of handing FO4CS v4 files. bungo decides.
+
+THE RING (`WW_CELL_CENSUS_MARGIN`, 0 to 4 cells). A tile T is loaded as T + 2M cells; rows and probes are only for the
+tile's own cells. The check-up needs no ring. THE EXTERIOR BAKE DOES: a probe sees only what is loaded in its visit
+(the bake traces its rays against the loaded scene; `src/probebake.h` `rayMax = 131072`, 32 cells, beyond which a
+ray is sky), so a probe at a tile's edge with nothing loaded next door takes the neighbor's buildings for open sky.
+How wide the ring must be is a look decision (1 cell = 4096 units); it sets the cost below.
+
+NOTHING PLACED = NO SCENE. A tile (with its ring) in which the plugin places nothing gets its rows without a load:
+1356 of the Commonwealth's 1600 tiles. Measured: 25 rows in 3 ms. With the bake step on, such a tile IS loaded (its
+ground still needs probes).
+
+TOO BIG, OR IT KILLED THE WINDOW. A tile holding more than `WW_CELL_CENSUS_REFS_MAX` references (12000) is opened
+cell by cell, and so is a tile a window died on (`<file>.pending` names the load in progress; `<file>.split` keeps
+the tiles to split). Each row's note says which. From the plugin: 12 of the 1600 tiles are over 12000.
+
+MEMORY. A window does not hand back what a big load took (measured 1.48 MB a reference kept; tile -18,7 with 3602
+references took the window from 5.8 to 13.5 GB). It stops starting loads past `WW_CELL_CENSUS_RSS_MAX` (8000 MB) or
+`WW_CELL_CENSUS_BUDGET` seconds; the next window goes on where the file ends. A long pass is a chain of windows.
+
+SEVERAL WINDOWS. `WW_CELL_CENSUS_SLICE=i/N`: the visits (an interior, a tile) are dealt out in plan order, window i
+takes every N-th, writes `<file>.part<i>of<N>.tsv`; `tests/spells/cell_census_merge.py` joins the parts (it joins
+and never tidies, so a doubled cell stays doubled for the checker to see). Built for any N, proven with 2. A cell is
+in exactly one slice because a tile is.
+
+GATE `tests/spells/cell_census.sh` + `cell_census_check.py` (its own group walk of the plugin, its own tile and
+slice arithmetic, no NifSkope code): every cell of every visited unit has EXACTLY ONE row, no row is outside the
+plan, each row's references and placed lights match the plugin (the cell's own and the load's), a count-only row
+stands only where the plugin places nothing, a row opened alone says why and the plugin agrees. Sample: 20 interiors
+spread over the plugin (Vault111Cryo, CabotHouse01 among them), the two 5x5 tiles the 3x3 around Sanctuary falls in,
+one tile with nothing placed. Then three more windows: the bake proof, the split rule, the ring.
+`--slices N`, `--slice i/N` + `--merge` (for windows run by different lock holders), `--cells FILE`, `--whole` (not
+run: after the wave).
+
+MEASURED 2026-10-02 (the sample, the split and the timings on the exe of 11:18 / 14:13, main a1e25b20 merged in;
+the bake proof and the ring again on the exe of 15:17 with main 37b5451d merged in, see the last line):
+- Sample GREEN: 95 rows from 23 visits (20 interiors, 3 tiles = 75 cells), slices 60 + 35 rows, 0 refused, 0
+  crashed; the windows' own checks 190 of 190 over 4 windows; the checker 539 of 539.
+- Bake proof (one small interior, SanctuaryBasementJahani, 217 references): ONE visit wrote the row and the bake's
+  2 files (48,260 bytes), 16 probes; the bake took 2.2 s inside that load. Checker 5 of 5 and 11 of 11.
+- Split: a 3x3 tile with the limit pulled to 1000 (1785 references) and a small tile with a planted dead-run file:
+  18 cells opened alone, 9 notes of each kind; window 128 of 128, checker 148 of 148.
+- Ring: cell -20,7 loaded as 3x3 (1785 references for 150 of its own), one row, 259 probes baked in the same visit
+  (1 file, 2.4 MB), the bake 0.8 s inside a 30.3 s load, the visit 41.5 s. Checker 13 of 13 and 5 of 5.
+- Seconds, first lock slot (12:23-12:30): 17 interiors 14.2 s each (fit 3.5 s + 19.0 ms a reference); tile -18,7
+  (25 cells, 3602 references) 122 s = 4.9 s a cell; a tile with nothing placed 0.003 s. The 18 lone cells: 4.8 s each.
+- Seconds, second slot with another lane's window running (13:51-14:00): tile -23,7 (4928 references) 280 s, of it
+  the build 102 s; Vault111Cryo 148 s. Per reference 1.7 to 2.5 times the first slot's figure.
+- Reds, each run inside NifSkope (14:57-15:05, 8 minutes for all five), 5 of 5 FAILED as they must: `dropcell`
+  (checker 1 failure of 9 checks, 8 s), `stale` (6 of 41, 229 s), `dropslice` (4 of 35, 52 s), `doubleslice` (2 of
+  35, 102 s), `nobake` (the window's own check AND the checker fail, 21 s). The finished sample run again: PASS in
+  75 s, both windows found nothing to load and closed by themselves.
+<<BAKE4>>
+
+WHOLE-GAME ESTIMATE (INFERRED: the measured fit laid over the plugin's own counts; `scratchpad/.../projection2.py`).
+Fallout4.esm: 1195 interiors (527,390 references), Commonwealth 36,864 cells (701,769 references).
+- The check-up alone, 5x5 tiles, no ring: 532 loads for the exteriors 7.1 h, interiors 4.4 h: 11.4 h in one window
+  (15.8 h if every load were as slow as the second-slot ones). The old design by the same fit: 175 h for the
+  exteriors alone.
+- With the bake, ring of 1 cell: 5x5 tiles (7x7 loads) 51 h = 2.1 days in one window; 3x3 tiles (5x5 loads) 48.5 h
+  = 2.0 days; lone cells (3x3 loads) 3.9 days. Of that the bake itself is 8.2 h (0.8 s a cell, measured on ONE
+  cell) and the interiors' bake 0.4 x their load (ONE cell). Ring of 2 cells: 6.6 days at 5x5.
+- Why the ring costs so much more than 7x7 / 5x5 = 2 times: 26 tiles (downtown) are over the limit with their ring
+  and fall to lone cells, each a 3x3 load, so their references are read 9 times; over the whole map every reference
+  is read 5.3 times. NEXT: let a too-big tile fall to smaller tiles before lone cells, and raise the limit once lane
+  SPEED1's lighter load is in; the floor is 2 times.
+- Two windows at once: NOT measured as a pair of bake runs (one worktree holds one lock slot). If they did not slow
+  each other the times halve (5.7 h; 1.1 days). What was measured is my window beside another lane's: loads 1.7 to
+  2.5 times as slow, which would leave two windows no faster than one. Treat the halved figures as the best case.
+
+ITEMS AND ACTORS (offline, from the plugin, `cell_census_check.py share`; MEASURED). Of 1,238,037 placed records in
+the plan: pick-up items 41,738 (3.4%), actors 7,501 (0.6%), everything else 95.9%. Interiors: items 5.3%, actors
+0.7%. Exteriors: items 1.9%, actors 0.5%. Per cell (items + actors): interiors median 2.3%, nine in ten under 63.6%;
+exteriors median 0%, nine in ten under 3.6%, most 27.6%. So leaving them out of the bake saves about 4% of what is
+read (inferred: about 20 minutes of the 11.4 h, 1 to 2 h of the 2.1 days); the cell view does not load actors
+today anyway.
+
+WHAT THE SAMPLE'S CHECK-UP FOUND: 10 of 95 cells could not load something. Models not on disk: crow markers,
+StaticCollectionPivotDummy, autoloadmarker01, drips / steam / fire / leaf effects, Deathclaw_AmbushWallslideFX,
+VaultUnderLightAnimatedFlicker, 10mmRecieverDummy. Textures missing: Default_n, Gray, GrognakJanBack_n/_s,
+ModelKitBase_n/_s, AmbientBeams02_d, testpond01_s. Materials unreadable: 1 to 3 in four cells. One light in
+CabotHouse01 drawn as omni. Lights over the sample: 1545 placed = 1530 lit + 9 off + 3 black + 3 ambient only
+(Vault111Cryo 849 = 840 + 4 + 2 + 3). The placed-armor garbage names of the first report are gone (lane MISS1).
+Every exterior row still says `far=none`: the cell view draws nothing beyond what is loaded.
+
 ## 3. Open
 
 - `.tbk` v4: two surfel sides per cell (gives back the refused thin-wall weight), room ids (2f).
