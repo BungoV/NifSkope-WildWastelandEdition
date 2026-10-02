@@ -19,6 +19,13 @@ Per probe:
 Exterior cells only: an interior's misses are unlinked (unknown), not zero.
 `--red albedo` shuffles the surfels' albedo, `--red dir` mirrors the link directions;
 each must FAIL. One verdict line; exit 0 on PASS.
+
+Lane BAKE4 (`.tbk` v4): a link names its side (the cell's back surfel) and the glass
+tint on its way, a probe its sky tint per octant. The field a link carries is then
+its surfel's, times the tint, per channel; the reference (rebuilt with its own glass,
+tests/prtp_reference.cpp) traces the panes itself. With glass in the soup it also gates
+  tsky -- worst octant |bake sky share x sky tint - reference sky share through glass|
+`--red oneside` reads every link as the front side, `--red glass` ignores the tints.
 """
 import math
 import os
@@ -28,7 +35,7 @@ import sys
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from probe_bake import files_in, floordiv, structure, unpack_dir  # noqa: E402
+from probe_bake import files_in, floordiv, structure, surfel_of, unpack_dir  # noqa: E402
 
 SUN = np.array([0.3, -0.5, 0.81])
 SUN /= np.linalg.norm(SUN)
@@ -58,6 +65,11 @@ def irradiance(c):
 
 def field(alb, nrm):
     return alb * (0.25 + 0.75 * max(0.0, float(np.dot(nrm, SUN))))
+
+
+def surfel_alb(sf):
+    # the surfel's albedo, per channel (v3 files: a grey field read as its mean was the same sum)
+    return sf['alb'].astype(np.float64) / 255.0
 
 
 def octant_of(v):
@@ -98,7 +110,8 @@ def main(a):
         return 1
     R = np.loadtxt(out, comments='#', ndmin=2)
 
-    sky_err, tot_err, dir_err, irr_err = [], [], [], []
+    sky_err, tot_err, dir_err, irr_err, tsky_err = [], [], [], [], []
+    glassy = R.shape[1] >= 74
     for (t, i), row in zip(pick, R):
         pr = t['probes'][i]
         ref_sky = row[1:41:5]
@@ -108,18 +121,25 @@ def main(a):
         pk = tuple(floordiv(pr['pos'][c], t['cell']) for c in range(3))
         T = np.zeros(8)
         C = np.zeros(9)
-        for l in t['links'][pr['off']:pr['off'] + pr['cnt']]:
-            j = t['keys'].get(tuple(int(pk[c]) + int(l['delta'][c]) for c in range(3)))
-            if j is None:
+        a, b = int(pr['off']), int(pr['off'] + pr['cnt'])
+        for l, x in zip(t['links'][a:b], t['lext'][a:b]):
+            sf = surfel_of(t, pk, l, x, ignore_side=(red == 'oneside'))
+            if sf is None:
                 continue
-            sf = t['surfels'][j]
             n = sf['nrm'].astype(np.float64) / 32767.0
             d = unpack_dir(l['dir'])
             if red == 'dir':
                 d = -d
-            v = float(l['w']) * float(pr['scale']) * field(float(np.mean(sf['alb'])) / 255.0, n)
+            tint = np.ones(3) if red == 'glass' else x['tint'].astype(np.float64) / 255.0
+            v = float(l['w']) * float(pr['scale']) * field(float(np.mean(surfel_alb(sf) * tint)), n)
             T[octant_of(d)] += v
             C += sh9(d) * v * 4 * np.pi
+        if glassy:
+            st = t['pext'][i]['skytint'].astype(np.float64).mean(1) / 255.0
+            if red == 'glass':
+                st = np.ones(8)
+            ref_tsky = row[50:74].reshape(8, 3).mean(1)
+            tsky_err.append(float(np.max(np.abs(pr['sky'].astype(np.float64) / 8.0 * st - ref_tsky))))
         eff = max(float(pr['cov']) - float(pr['unl']), 1e-3)
         T /= eff
         C /= eff
@@ -130,9 +150,14 @@ def main(a):
             dir_err.append(float(np.abs(T - ref_L).sum()) / e_ref)
             ir = irradiance(ref_sh)
             irr_err.append(float(np.abs(irradiance(C) - ir).mean() / max(ir.mean(), 1e-6)))
-    sky_err, tot_err, dir_err, irr_err = map(np.array, (sky_err, tot_err, dir_err, irr_err))
+    sky_err, tot_err, dir_err, irr_err, tsky_err = map(np.array, (sky_err, tot_err, dir_err, irr_err, tsky_err))
     if sky_err.max() > SKY_MAX:
         fails.append('sky worst %.4f > %.2f' % (sky_err.max(), SKY_MAX))
+    tsky = ''
+    if glassy and len(tsky_err):
+        tsky = '; sky through glass worst %.4f' % tsky_err.max()
+        if tsky_err.max() > SKY_MAX:
+            fails.append('sky through glass worst %.4f > %.2f' % (tsky_err.max(), SKY_MAX))
     tm, tp = np.median(tot_err), np.percentile(tot_err, 95)
     dm, dp = np.median(dir_err), np.percentile(dir_err, 95)
     if tm > TOT_MED or tp > TOT_P95:
@@ -141,10 +166,10 @@ def main(a):
     if im > IRR_MED or ip > IRR_P95:
         fails.append('irradiance median %.3f / p95 %.3f over %.2f / %.2f' % (im, ip, IRR_MED, IRR_P95))
     worst = int(np.argmax(tot_err))
-    print('reference %s%s: %d probes x %d rays (brute force, every triangle); sky worst %.4f; total median %.3f '
+    print('reference %s%s: %d probes x %d rays (brute force, every triangle); sky worst %.4f%s; total median %.3f '
           'p95 %.3f worst %.3f (probe %d); irradiance median %.3f p95 %.3f; octant split median %.3f p95 %.3f; %s'
           % ('PASS' if not fails else 'FAIL', ' [red ' + red + ']' if red else '', len(pick), rays,
-             sky_err.max(), tm, tp, tot_err.max(), worst, im, ip, dm, dp, '; '.join(fails) if fails else 'sound'))
+             sky_err.max(), tsky, tm, tp, tot_err.max(), worst, im, ip, dm, dp, '; '.join(fails) if fails else 'sound'))
     with open(os.path.join(work, 'per_probe%s.tsv' % ('_' + red if red else '')), 'w') as f:
         f.write('n\tx\ty\tz\tsky\ttotal\tdir\tirr\n')
         for n, ((t, i), s, te, de, ie) in enumerate(zip(pick, sky_err, tot_err, dir_err, irr_err)):

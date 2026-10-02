@@ -13,6 +13,13 @@
 // octant (bit0 x<0, bit1 y<0, bit2 z<0) the out line holds the sky share, the
 // surface share and the summed radiance (r g b), each as a fraction of the
 // FULL sphere; then the grey field's 9 real SH coefficients (bands 0-2).
+//
+// Lane BAKE4: GLASS. The soup's optional GLS1 tail (panes + an rgb transmittance
+// each) never stops a ray; every pane a ray crosses before its hit (or, for sky,
+// at all) multiplies what it carries, per channel. A crossing is counted strictly
+// between 0.01 and the hit's t - 0.01, and one within 0.01 of the crossing before
+// it is that pane's twin face (counted once). The radiance columns carry it; 24 more
+// columns follow the SH: the sky share seen through the glass, per octant, r g b.
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -29,6 +36,8 @@ struct Soup
 	std::vector<float> ox, oy, oz, ax, ay, az, bx, by, bz;   // v0, e1 = v1-v0, e2 = v2-v0
 	std::vector<float> nx, ny, nz;                         // unit geometric normal
 	std::vector<float> alb;                                // linear, 3 per triangle
+	std::vector<double> glass;                             // panes: 9 per pane
+	std::vector<double> glassT;                            // 3 per pane, 0..1
 };
 
 bool readSoup( const char * path, Soup & s )
@@ -54,6 +63,15 @@ bool readSoup( const char * path, Soup & s )
 		a.resize( n * 3 );
 		if ( std::fread( a.data(), 1, a.size(), f ) != a.size() )
 			a.clear();
+	}
+	if ( std::fread( tail, 4, 2, f ) == 2 && tail[0] == 0x31534C47u ) {   // 'GLS1'
+		std::vector<float> g( size_t( tail[1] ) * 9 );
+		std::vector<uint8_t> gt( size_t( tail[1] ) * 3 );
+		if ( std::fread( g.data(), 4, g.size(), f ) == g.size() && std::fread( gt.data(), 1, gt.size(), f ) == gt.size() ) {
+			s.glass.assign( g.begin(), g.end() );
+			for ( uint8_t c : gt )
+				s.glassT.push_back( c / 255.0 );
+		}
 	}
 	std::fclose( f );
 	if ( a.empty() )
@@ -100,6 +118,46 @@ void directions( int rays, std::vector<float> & dx, std::vector<float> & dy, std
 			dy.push_back( float( s * std::sin( ph ) ) );
 			dz.push_back( float( z ) );
 		}
+}
+
+// What the glass between the probe and tEnd lets through: every pane hit tested
+// (double precision, its own ray-plane-barycentric test), sorted, twins merged.
+void throughGlass( const Soup & s, const double o[3], const double d[3], double tEnd, double T[3] )
+{
+	T[0] = T[1] = T[2] = 1.0;
+	std::vector<std::pair<double, size_t>> hits;
+	for ( size_t i = 0; i * 9 < s.glass.size(); i++ ) {
+		const double * v = &s.glass[i * 9];
+		const double e1[3] = { v[3] - v[0], v[4] - v[1], v[5] - v[2] }, e2[3] = { v[6] - v[0], v[7] - v[1], v[8] - v[2] };
+		const double n[3] = { e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0] };
+		const double dn = n[0] * d[0] + n[1] * d[1] + n[2] * d[2];
+		if ( std::fabs( dn ) < 1e-12 )
+			continue;
+		const double t = ( n[0] * ( v[0] - o[0] ) + n[1] * ( v[1] - o[1] ) + n[2] * ( v[2] - o[2] ) ) / dn;
+		if ( !( t > 0.01 && t < tEnd - 0.01 ) )
+			continue;
+		// barycentrics of the plane point
+		const double p[3] = { o[0] + d[0] * t - v[0], o[1] + d[1] * t - v[1], o[2] + d[2] * t - v[2] };
+		const double d00 = e1[0] * e1[0] + e1[1] * e1[1] + e1[2] * e1[2], d01 = e1[0] * e2[0] + e1[1] * e2[1] + e1[2] * e2[2];
+		const double d11 = e2[0] * e2[0] + e2[1] * e2[1] + e2[2] * e2[2];
+		const double d20 = p[0] * e1[0] + p[1] * e1[1] + p[2] * e1[2], d21 = p[0] * e2[0] + p[1] * e2[1] + p[2] * e2[2];
+		const double den = d00 * d11 - d01 * d01;
+		if ( std::fabs( den ) < 1e-18 )
+			continue;
+		const double b1 = ( d11 * d20 - d01 * d21 ) / den, b2 = ( d00 * d21 - d01 * d20 ) / den;
+		if ( b1 < 0 || b2 < 0 || b1 + b2 > 1 )
+			continue;
+		hits.push_back( { t, i } );
+	}
+	std::sort( hits.begin(), hits.end() );
+	double last = -1.0;
+	for ( const auto & h : hits ) {
+		if ( last >= 0 && h.first - last <= 0.01 )
+			continue;
+		for ( int c = 0; c < 3; c++ )
+			T[c] *= s.glassT[h.second * 3 + size_t( c )];
+		last = h.first;
+	}
 }
 
 }   // namespace
@@ -189,12 +247,19 @@ int main( int argc, char ** argv )
 			th.emplace_back( work );
 		for ( auto & t : th )
 			t.join();
-		double sky[8] = {}, surf[8] = {}, L[8][3] = {}, sh[9] = {};
+		double sky[8] = {}, surf[8] = {}, L[8][3] = {}, sh[9] = {}, skyT[8][3] = {};
 		for ( size_t r = 0; r < M; r++ ) {
 			const int o = ( dx[r] < 0 ) | ( ( dy[r] < 0 ) << 1 ) | ( ( dz[r] < 0 ) << 2 );
 			const int i = bestI[r];
+			double Tg[3] = { 1.0, 1.0, 1.0 };
+			if ( !s.glass.empty() ) {
+				const double po[3] = { px, py, pz }, pd[3] = { dx[r], dy[r], dz[r] };
+				throughGlass( s, po, pd, i < 0 ? 1.0e30 : double( bestT[r] ), Tg );
+			}
 			if ( i < 0 ) {
 				sky[o] += 1.0 / M;
+				for ( int k = 0; k < 3; k++ )
+					skyT[o][k] += Tg[k] / M;
 				continue;
 			}
 			surf[o] += 1.0 / M;
@@ -205,8 +270,8 @@ int main( int argc, char ** argv )
 			const double g = 0.25 + 0.75 * std::max( 0.0, nx * sx + ny * sy + nz * sz );
 			double grey = 0;
 			for ( int k = 0; k < 3; k++ ) {
-				L[o][k] += s.alb[size_t( i ) * 3 + k] * g / M;
-				grey += s.alb[size_t( i ) * 3 + k] * g / 3.0;
+				L[o][k] += s.alb[size_t( i ) * 3 + k] * g * Tg[k] / M;
+				grey += s.alb[size_t( i ) * 3 + k] * g * Tg[k] / 3.0;
 			}
 			// real SH to band 2 (what the relight stores), weight 4pi/M per ray
 			const double x = dx[r], y = dy[r], z = dz[r], w = grey * 4.0 * 3.14159265358979323846 / M;
@@ -220,6 +285,8 @@ int main( int argc, char ** argv )
 			std::fprintf( out, "\t%.6f\t%.6f\t%.6f\t%.6f\t%.6f", sky[o], surf[o], L[o][0], L[o][1], L[o][2] );
 		for ( int c = 0; c < 9; c++ )
 			std::fprintf( out, "\t%.7f", sh[c] );
+		for ( int o = 0; o < 8; o++ )
+			std::fprintf( out, "\t%.6f\t%.6f\t%.6f", skyT[o][0], skyT[o][1], skyT[o][2] );
 		std::fprintf( out, "\n" );
 		std::fflush( out );
 	}

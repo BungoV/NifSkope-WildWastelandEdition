@@ -5,6 +5,51 @@ Written the moment a mistake is recognised, unprompted (CONSTITUTION rule 2).
 Format: date -- what was done -- what was true -- how it was found -- the rule.
 Newest at the top.
 
+## 2026-10-02, lane BAKE4: what went wrong on the way to .tbk v4 and the glass tint
+
+- Fog taken for glass. The first glass feed took every "blended over" shape of a real cell as a tinting pane.
+  Solomon's house: its one "pane" was a 480-unit mist sphere tinting 29% of the link weight. Vault111Cryo: 341
+  shapes, 133,145 triangles, 47% of the link weight tinted. Rule: before a class of shapes is given a physical
+  role, survey the whole population (all 6899 materials here) and name the fields that separate the classes
+  (environment map on, soft fade off), then gate with a checker that reads the files itself.
+- Then splashes and lamp covers taken for glass. The material rule let a shape's own NIF flags stand in when it
+  named no material file. In Vault111Cryo 33 of the 37 shapes fed were drip splashes, lamp covers and klaxon
+  shells. The gate's census stage PASSED, because the checker carried the same stand-in. It was found only by
+  reading the 37 rows by name. Rule: a checker that copies the code's fallback proves nothing about the
+  fallback; before a rule is called right, print the names of what it selected in one real cell and read them.
+- The checker walked to the wrong end. Stage C compared each link's stored tint with the panes on the segment
+  "probe + stored direction x distance". That point is not the surfel (a surfel is its cell's average, the
+  direction is one ray's), so 100 links "crossed" a pane the bake had stored clear and the first real cell
+  FAILED at 0.656 against a bar of 0.80. To the surfel's stored position the same files read 0.993. The bars
+  were not moved. Two synthetic scenes had passed either way. Rule: a checker walks the geometry the consumer
+  uses, and a bar set on synthetic scenes is run on one real cell before the gate is queued.
+- A red run held a NifSkope window for 48 minutes. On the haze red the cell fed 175,360 triangles and the
+  checker's light stage walked all 262,355 links through them, after stage A had already failed. Rule: a
+  checker's cost is estimated on its reds, a later stage is not run once an earlier one failed, and the
+  triangle test is culled per probe.
+- Room ids, two defects in one night: an opening's cut cells took whichever side reached them first, and a
+  probe standing in a solid voxel took the first air neighbour in a fixed order (the far side of a thin wall).
+  Rule: a side is decided by the opening's plane and by what the probe can see, never by search order.
+- Two commits went in before their own full gate run: part 1 (the lock queue was 60 to 90 minutes a turn) and
+  part 2 (the merge of main needed a clean tree, and there is no stash). Both commit messages say so and the
+  numbers belong to the merge commit that follows each. Rule unchanged: say it in the message, never imply a
+  gate that did not run on that source.
+- The glass checker failed two green cells for its own reasons, after it was committed. (1) Its type list did
+  not know static collections: the cell view places a collection's parts under the collection's reference, so
+  29 rows in Vault111Cryo and 76 in NorthEndMeanPastries read "outside the list". (2) It measured the light a
+  pane takes along one segment per link. In NorthEndMeanPastries that segment threads several small counter
+  panes the surfel's cell mostly misses: 0.586 against a bar of 0.75. Over nine fixed segments per link the same
+  files read 0.860; the bar was not moved and the one-segment figure is still printed. Rule: a checker is run on
+  every gate cell's saved files before it is committed, and one sample per stored record is not a measurement
+  of a cell's average.
+- A gate never ran until the last hour: the far map's (probe_far.py). My run script gave it the exe as
+  "release/NifSkope.exe"; Python hands that to Windows as it is and Windows cannot find it. Every other gate
+  made the path absolute itself, so the difference was invisible. Rule: a run script gives every gate an
+  absolute exe path, and a gate listed in the plan is read in the log by name, not assumed from "rc 0" of the
+  script around it.
+- Two waiters from one lane sat in the lock queue: stopping the shell does not stop a queued waiter. Rule: turn
+  the old script into a stub that returns at once; never kill.
+
 ## 2026-10-02 -- FXD1: a checker threshold picked before the defect's own size was measured
 
 What happened: the first draft of the haze-hole checker called a pixel a hole when it kept under 0.35 of its
