@@ -44,6 +44,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/sunshadow.h"
 #include "gl/glparticles.h"
 #include "gl/renderer.h"
+#include "gl/cellhdr.h"
 #include "impostorchunk.h"
 #include "impostorpreviewtest.h"
 #include "gl/glshape.h"
@@ -4053,7 +4054,11 @@ void GLView::paintGL()
 		// without touching GL state.
 		ImpostorChunk::draw( scene, ImpostorDraw::Options() );
 		if ( !wwImpostorPreviewSuppressScene() ) {
+			// lane HDR1: the cell's draw into one linear frame, tone-mapped once (gl/cellhdr.h)
+			const bool hdr = workspaceDrawScenes.isEmpty() && wwCellHdrBegin( scene );
 			scene->draw();
+			if ( hdr )
+				wwCellHdrEnd( scene );
 			for ( Scene * ws : std::as_const( workspaceDrawScenes ) )
 				ws->draw();
 		}

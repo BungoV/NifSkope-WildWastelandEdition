@@ -663,7 +663,7 @@ void main()
 	// lane IMGS1: the cell's imagespace in place of the viewer's curve; probe 6 writes the linear colour raw
 	vec3 cellHdr = max( color.rgb, vec3( 0.0 ) );
 	if ( cellOn && cellIsOn )
-		color.rgb = cellImageSpace( sqrt( cellHdr ) );
+		color.rgb = cellIsLinear ? cellHdr : cellImageSpace( sqrt( cellHdr ) );	// lane HDR1: linear into the HDR frame
 	else
 #endif
 	if ( sceneMode >= 1 ) {

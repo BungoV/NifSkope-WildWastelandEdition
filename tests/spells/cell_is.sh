@@ -12,16 +12,23 @@
 #      15-tap Gaussian vertical then horizontal)
 #   P  the picture = the chain over the dump + the bloom on opaque cell-lit pixels (stencil == 1): >= 97%
 #      inside the 3x3 range of the rebuild +-3/255 (the shot is antialiased, the dump is not), >= 5000 px
-# The cameras stand close (VIEW 5, DIST 350): a far view leaves the cell a few percent of the frame.
+#   Q  (lane HDR1) the blended pixels (stencil == 3: effects, glass over a cell-lit surface) = the chain over
+#      the dump's linear sum + the bloom, the same tolerance, >= 95% (>= 2000 px, else skipped): one tone map
+# The cameras stand close (VIEW 5, DIST 350): a far view leaves the cell a few percent of the frame. The
+# entry Vault111Cryo@walk is bungo's walkway camera (VIEW 4, DIST 450), where the haze cards stack.
 #
 # RED CONTROLS (each must FAIL stage P):  --red nolut    the LUT skipped
 #                                         --red noexp    exposure 1
 #                                         --red nograde  the cinematic grade skipped (grade cells only)
 #                                         --red nobloom  the bloom not added (cells whose bloom reach
 #                                                        is >= 5% of the compared pixels only)
+#              (must FAIL stage Q):       --red perfrag  every fragment tone-mapped as drawn, the blends in
+#                                                        display space (cameras whose blended pixels are
+#                                                        >= 10% of the frame: one layer alone barely parts)
 #
-# USAGE  bash tests/spells/cell_is.sh [--red nolut|noexp|nograde|nobloom]
-#        CELLS="..." to pick interiors; the camera stands at CAM_<cell> (x,y,z look-at) if set.
+# USAGE  bash tests/spells/cell_is.sh [--red nolut|noexp|nograde|nobloom|perfrag]
+#        CELLS="..." to pick interiors (cell or cell@tag); the camera stands at CAM_<cell>[_<tag>] (x,y,z
+#        look-at) if set, VIEW_<cell>_<tag> / DIST_<cell>_<tag> per tagged entry.
 
 set -u
 
@@ -53,47 +60,61 @@ LOG="$OUT/cell_is.log"
 PORT="${PORT:-14746}"
 SPEC="$REPO/tests/fixtures/empty.wwcell"
 SIZE="${SIZE:-960x600}"
-CELLS="${CELLS:-Vault111Cryo DmndSolomonsHouse01 GoodneighborTheThirdRail}"
+CELLS="${CELLS:-Vault111Cryo Vault111Cryo@walk DmndSolomonsHouse01 GoodneighborTheThirdRail}"
 GRADED="${GRADED:-GoodneighborTheThirdRail}"   # cells whose IMGS grade is not identity (CNAM/TNAM)
 : "${CAM_Vault111Cryo:=-4600,-280,120}" "${CAM_DmndSolomonsHouse01:=1450,-20,150}" "${CAM_GoodneighborTheThirdRail:=2932,-636,100}"
+: "${CAM_Vault111Cryo_walk:=350,-512,40}" "${VIEW_Vault111Cryo_walk:=4}" "${DIST_Vault111Cryo_walk:=450}"
 
 mkdir -p "$OUT"
 : > "$LOG"
 say() { echo "$@" | tee -a "$LOG"; }
 fails=0
+qmeasured=0
 check() { if [ "$2" = "1" ]; then say "  PASS  $1"; else say "  FAIL  $1"; fails=$((fails+1)); fi; }
 [ -x "$EXE" ] || { echo "no NifSkope.exe at $EXE"; exit 2; }
 say "cell_is.sh  $(date '+%Y-%m-%d %H:%M:%S')${RED:+   RED CONTROL: $RED}"
 newer=1
 for s in src/gl/celllights.cpp src/gl/celllights.h src/cellview.cpp src/esmdata.cpp src/glview.cpp src/gl/renderer.cpp \
-	res/shaders/cell_lights.glsl res/shaders/fo4_default.frag res/shaders/pbrm_default.frag; do
+	res/shaders/cell_lights.glsl res/shaders/fo4_default.frag res/shaders/pbrm_default.frag \
+	src/gl/cellhdr.cpp res/shaders/cell_hdr.frag res/shaders/fo4_effectshader.frag; do
 	[ "$REPO/$s" -nt "$EXE" ] && { say "  $s is NEWER than the exe"; newer=0; }
 done
 check "the exe is newer than every source this gate covers" "$newer"
 
-for cell in $CELLS; do
-	say "== $cell"
-	run="$OUT/$cell"
+for entry in $CELLS; do
+	# lane HDR1: an entry is a cell or cell@tag (a second camera in the same cell)
+	cell="${entry%@*}"; key="$cell"; [ "$entry" != "$cell" ] && key="${cell}_${entry#*@}"
+	say "== $entry"
+	run="$OUT/$key"
 	mkdir -p "$run"
 	rm -f "$run/on.png" "$run/on.hdr" "$run/on.hdr.txt" "$run/on.notes"
-	camvar="CAM_$cell"; cam=()
-	[ -n "${!camvar:-}" ] && cam=( WW_RENDER_CENTER="${!camvar}" WW_RENDER_DIST="${DIST:-350}" WW_RENDER_FOV=70 )
-	redenv=(); [ -n "$RED" ] && redenv=( WW_CELL_IS_RED="$RED" )
+	camvar="CAM_$key"; viewvar="VIEW_$key"; distvar="DIST_$key"; cam=()
+	[ -n "${!camvar:-}" ] && cam=( WW_RENDER_CENTER="${!camvar}" WW_RENDER_DIST="${!distvar:-${DIST:-350}}" WW_RENDER_FOV=70 )
+	redenv=()
+	case "$RED" in
+		perfrag) redenv=( WW_CELL_HDR_RED=perfrag ) ;;
+		?*) redenv=( WW_CELL_IS_RED="$RED" ) ;;
+	esac
 	env "${redenv[@]}" "${cam[@]}" \
 		WW_CELL_OPEN="$ESM|interior|$cell" WW_CELL_DATAROOT="$DATA" WW_CELL_LIT=1 WW_CELL_GI=0 \
 		WW_CELL_IS=1 WW_CELL_IS_DUMP="$(winpath "$run/on.hdr")" \
 		WW_RENDER_SHOT="$(winpath "$run/on.png")" WW_RENDER_SIZE="$SIZE" \
-		WW_RENDER_VIEW="${VIEW:-5}" WW_RENDER_CLEAN=1 \
+		WW_RENDER_VIEW="${!viewvar:-${VIEW:-5}}" WW_RENDER_CLEAN=1 \
 		WW_SETTINGS_SCOPE="$(fresh_scope)" timeout 900 "$EXE" --port "$PORT" "$(winpath "$SPEC")" > "$run/on.notes" 2>&1
 	check "$cell: the picture and the dump written" \
 		"$([ -s "$run/on.png" ] && [ -s "$run/on.hdr" ] && [ -s "$run/on.hdr.txt" ] && echo 1 || echo 0)"
 	sed 's/^/  echo /' "$run/on.hdr.txt" 2>/dev/null | tee -a "$LOG"
 	python "$(dirname "$0")/cell_is_check.py" "$ESM" "$cell" "$run" > "$run/check.txt" 2>&1
 	sed 's/^/  /' "$run/check.txt" | tee -a "$LOG"
+	grep -q "^Q \(PASS\|FAIL\)" "$run/check.txt" && qmeasured=$((qmeasured+1))
 	if [ "$RED" = nograde ] && ! echo " $GRADED " | grep -q " $cell "; then
 		say "  skip  $cell: identity grade, the nograde red has nothing to remove"
 	elif [ "$RED" = nobloom ] && ! awk '/^bloom reach/ { exit !($3 + 0 >= 5) }' "$run/check.txt"; then
 		say "  skip  $cell: the bloom moves under 5% of the compared pixels, the nobloom red has little to remove"
+	elif [ "$RED" = perfrag ] && ! grep -q "^Q blend share [0-9.]*% stacked" "$run/check.txt"; then
+		say "  skip  $entry: blended pixels under 10% of the frame, the perfrag red has little to refute"
+	elif [ "$RED" = perfrag ]; then
+		check "$entry: the red control FAILS stage Q" "$(grep -q "^Q FAIL" "$run/check.txt" && echo 1 || echo 0)"
 	elif [ -n "$RED" ]; then
 		check "$cell: the red control FAILS stage P" "$(grep -q "^P FAIL" "$run/check.txt" && echo 1 || echo 0)"
 	else
@@ -101,6 +122,7 @@ for cell in $CELLS; do
 			"$(grep -q "^imagespace PASS" "$run/check.txt" && echo 1 || echo 0)"
 	fi
 done
+case "$RED" in ""|perfrag) check "stage Q measured on at least one camera ($qmeasured)" "$([ "$qmeasured" -ge 1 ] && echo 1 || echo 0)" ;; esac
 say ""
 if [ "$fails" = "0" ]; then say "PASS"; else say "FAIL ($fails)"; fi
 exit "$fails"

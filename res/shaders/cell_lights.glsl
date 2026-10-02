@@ -39,6 +39,7 @@ uniform int cellPassRed;			// the gate's reds: 1 direct (the lights leak into GI
 
 // lane IMGS1: the cell's imagespace, the game's own HDR -> display chain (src/gl/celllights.h)
 uniform bool cellIsOn;
+uniform bool cellIsLinear;			// lane HDR1: write linear light, the frame is tone-mapped once (cell_hdr.frag)
 uniform float cellIsExposure;		// clamp( middle gray / (adapted + 0.001), min, max ), the CPU's
 uniform float cellIsE;				// HNAM Tonemap E: the curve's toe numerator
 uniform float cellIsAdapted;		// the frame's mean luminance, the contrast pivot
@@ -61,7 +62,8 @@ vec3 cellImageSpace( vec3 sqrtColor )
 {
 	vec3 x = max( sqrtColor, vec3( 0.0 ) );
 	x = x * x;
-#ifndef WW_CELL_FX	// lane EFX2: an effect blends over a surface that already took the bloom
+// lane EFX2: an effect blends over a surface that already took the bloom; lane HDR1: the one tone map takes it
+#if !defined( WW_CELL_FX ) || defined( WW_CELL_HDR )
 	if ( cellIsBloomOn )	// the tonemap PS adds the bloom target before its exposure multiply
 		x += texture( cellIsBloom, ( gl_FragCoord.xy - cellIsBloomRect.xy ) * cellIsBloomRect.zw ).rgb;
 #endif
@@ -213,6 +215,8 @@ vec3 cellLightE( int i, vec3 P, vec3 N, out vec3 L, out bool noSpec )
 // the harness probes for a program without the legacy BRDF helpers (pbrm_cell)
 vec3 cellProbeRaw( vec3 P, vec3 N )
 {
+	if ( cellProbe >= 70 && cellProbe <= 74 )	// lane FXLIT1's probes: the lit effects alone, a surface writes black
+		return vec3( 0.0 );
 	if ( cellProbe == 5 )
 		return cellGiOn ? clamp( cellGiE( P, N ) * 0.31830989, 0.0, 1.0 ) : vec3( 0.0 );
 	if ( cellProbe == 1 ) {
@@ -483,6 +487,8 @@ vec3 cellProbeOut( vec3 normalView, vec3 posView, float alphaR, float kSmith )
 {
 	vec3 P = cellWorldPos( posView );
 	vec3 N = cellWorldDir( normalView );
+	if ( cellProbe >= 70 && cellProbe <= 74 )	// lane FXLIT1's probes: the lit effects alone, a surface writes black
+		return vec3( 0.0 );
 	if ( cellProbe == 5 )
 		return cellGiOn ? clamp( cellGiE( P, N ) * 0.31830989, 0.0, 1.0 ) : vec3( 0.0 );
 	if ( cellProbe == 1 || cellProbe == 8 || cellProbe == 10 || cellProbe == 30 ) {

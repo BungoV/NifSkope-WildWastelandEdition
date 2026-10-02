@@ -224,6 +224,8 @@ HEADERS += \
 	src/gl/lookdevstage.h \
 	src/gl/sunshadow.h \
 	src/gl/celllights.h \
+	src/gl/cellfxlit.h \
+	src/gl/cellhdr.h \
 	src/gl/cellprobeview.h \
 	src/gl/cellssr.h \
 	src/ui/scenewindow.h \
@@ -437,6 +439,8 @@ SOURCES += \
 	src/gl/lookdevstage.cpp \
 	src/gl/sunshadow.cpp \
 	src/gl/celllights.cpp \
+	src/gl/cellfxlit.cpp \
+	src/gl/cellhdr.cpp \
 	src/gl/cellprobeview.cpp \
 	src/gl/cellssr.cpp \
 	src/ui/scenewindow.cpp \

@@ -417,6 +417,7 @@ public:
 	unsigned int refractionTexId = 0;   //!< copy of the framebuffer behind the shape
 	unsigned int refractionFbo = 0;
 	int refractionTexW = 0, refractionTexH = 0;
+	unsigned int refractionTexFormat = 0;	//!< lane HDR1: RGBA8, or RGBA16F while the cell's linear frame draws
 	//! Resolve-blit the current framebuffer into refractionTexId (MSAA-safe).
 	//! Returns false if the copy is not possible.
 	bool grabRefractionSource();

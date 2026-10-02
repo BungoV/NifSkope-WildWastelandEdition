@@ -32,6 +32,7 @@ BSD License - see nifskope.h
 #include "spells/blocks.h"
 #include "gl/celllights.h"
 #include "gl/cellprobeview.h"	// lane PROBEVIEW1
+#include "gl/cellfxlit.h"
 #include "gamemanager.h"	// lane IMGS1: the imagespace LUT
 
 #include <QBuffer>
@@ -140,6 +141,8 @@ struct Bucket
 	Vector3 bbPos;
 	float bbScale = 1.0f;
 	int bbMode = 0;
+	//! Lane FXLIT1: one placement's lit effect shapes; the placed model's serial in src/gl/cellfxlit.h, -1 = none.
+	int fxLit = -1;
 	bool decal = false;   // lane PLACED1: a placed decal's pieces (src/celldecal.h): Decal flag, no depth write
 	std::vector<OutVert> verts;
 	std::vector<BucketTri> tris;   // 32-bit: a bucket welds far more than 65,536 vertices
@@ -385,6 +388,8 @@ bool emitBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b,
 				.arg( CELL_MAX_TOTAL_VERTS ) );
 
 		QModelIndex iShape = nif->insertNiBlock( QStringLiteral( "BSTriShape" ) );
+		if ( b.fxLit >= 0 )   // lane FXLIT1: the renderer asks for this shape's four lights by block
+			wwCellFxLitShape( nif, nif->getBlockNumber( iShape ), b.fxLit );
 		nif->set<QString>( iShape, "Name", part > 1
 			? QString( "%1 #%2" ).arg( b.name ).arg( part ) : b.name );
 		nif->set<quint32>( iShape, "Flags", 14 );
@@ -940,6 +945,7 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 			}
 		}
 		L.lights.append( l );
+		wwCellFxLitNoOffset( nif, L.lights.size() - 1, fade > 0.0f ? b.fade / fade : 1.0f );   // lane FXLIT1: a red control's data
 	}
 	QString amb = QStringLiteral( "none (exterior: the viewport light)" ), dir = QStringLiteral( "none" );
 	if ( spec.interior ) {
@@ -1610,6 +1616,13 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 	const bool glowRed = qEnvironmentVariableIntValue( "WW_CELL_GLOW_RED" ) != 0;
 	const int glowCap = 8192;
 	int billboardShapes = 0, billboardFlat = 0;
+	/* Lane FXLIT1: in an interior a lit effect shape (the effect-lighting flag) takes a bucket per placement,
+	 * because the game lights it with its MODEL's four placed lights (src/gl/cellfxlit.h). */
+	const bool fxLitOn = spec.interior && spec.overlay == CellOverlay::None;
+	const int fxLitCap = 4096;
+	int fxLitModels = 0, fxLitShapes = 0;
+	QHash<QString, std::array<float, 4>> fxLitBound;   // a loaded model's bounding sphere, model space
+	wwCellFxLitBegin( nif );
 	int shapesVertexColor = 0;              //!< lane PRTPPLACE: drawn with the mesh's own vertex colors
 	int placementsSwapped = 0;              //!< lane PRTPPLACE: drawn with a material swap
 	int skyCardsHidden = 0;                 //!< lane PRTPPLACE: sky cards left to the sky layer
@@ -2058,6 +2071,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 		pick.enableParentOpposite = p.enableParentOppositeFlag;
 #endif
 		Vector3 lo( 3.4e38f, 3.4e38f, 3.4e38f ), hi( -3.4e38f, -3.4e38f, -3.4e38f );
+		int fxLitSerial = -1;   // lane FXLIT1: this placement's model in the lit-effect table, once a shape needs it
 		int role = 0;   // lane PRTPPLACE
 		bool soupFoliage = false;   // alpha-tested leaves and grass cards never roof or wall a probe
 		if ( probing && !p.disabled && !pick.marker ) {
@@ -2199,9 +2213,39 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 				bbInvScale = s.bbScale > 1.0e-6f ? 1.0f / s.bbScale : 1.0f;
 				bbOwn = QStringLiteral( "|BB|%1" ).arg( billboardShapes++ );
 			}
+			/* Lane FXLIT1: a lit effect shape joins its placement's own bucket. The model's bound is the
+			 * merge of its shapes' spheres, as a scene node merges its children's, placed by the reference. */
+			if ( fxLitOn && s.effectLit && s.nearFacts.effectShader && !p.disabled
+				&& ( fxLitSerial >= 0 || fxLitModels < fxLitCap ) ) {
+				if ( fxLitSerial < 0 ) {
+					auto bit = fxLitBound.constFind( mkey );
+					if ( bit == fxLitBound.constEnd() ) {
+						std::array<float, 4> all = { 0.0f, 0.0f, 0.0f, -1.0f };
+						for ( const NativeSrcShape & o : mit.value() ) {
+							float one[4];
+							wwCellFxLitSphere( o.geom.pos.data(), o.geom.pos.size() / 3, one );
+							wwCellFxLitMerge( all.data(), one );
+						}
+						bit = fxLitBound.insert( mkey, all );
+					}
+					const Vector3 wc = p.pos + p.rot * ( Vector3( bit.value()[0], bit.value()[1], bit.value()[2] ) * p.scale );
+					WwFxLitModel m;
+					for ( int k = 0; k < 3; k++ )
+						m.center[k] = wc[k];
+					m.radius = std::max( bit.value()[3], 0.0f ) * p.scale;
+					m.ref = p.ref;
+					m.model = model;
+					fxLitSerial = wwCellFxLitModel( nif, m );
+					fxLitModels++;
+				}
+				bbOwn += QStringLiteral( "|FL|%1" ).arg( fxLitSerial );
+				fxLitShapes++;
+			}
 			if ( isActor )
 				bbOwn += QLatin1String( "|ACTOR" );   // lane PLACED1: own buckets; no decal lands on an actor
 			Bucket & b = bucketFor( s, colouring || ownColor || repaint, bbOwn );
+			if ( fxLitSerial >= 0 && bbOwn.contains( QLatin1String( "|FL|" ) ) )
+				b.fxLit = fxLitSerial;
 			if ( bb ) {
 				b.billboard = true;
 				b.bbPos = p.pos + p.rot * ( bbPivot * p.scale );
@@ -2934,6 +2978,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 
 	// lane PRTP3: the renderer lights this document with the cell's own lights (the Cell lights row)
 	cellPublishLighting( nif, world, spec, lightRefs, primRefs, origin );
+	wwCellFxLitPick( nif );   // lane FXLIT1: each lit effect model's four placed lights
 
 	/* lane PRTPGI: the bake just written, relit by those lights (src/probegi.h), for the GI row.
 	 * WW_CELL_GI_DUMP=<folder> writes the gate's copies; WW_CELL_GI_RED=<red> its refuters. */
@@ -3075,6 +3120,9 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 		// lane GLOW1
 		s << "  billboards: " << billboardShapes << " shapes turned to the camera, "
 		  << billboardFlat << " welded flat" << ( glowRed ? " (WW_CELL_GLOW_RED)" : "" ) << "\n";
+		// lane FXLIT1
+		s << "  lit effects: " << fxLitShapes << " shapes of " << fxLitModels
+		  << " placed models take their four placed lights\n";
 		if ( groundNote.isEmpty() ) {   // lane CELLVIEW2
 			s << "  ground: " << landsDrawn << " LAND cells, vertex colour only"
 			  << " (the splat layers are NOT sampled -- that is the terrain bake's compositor)\n";

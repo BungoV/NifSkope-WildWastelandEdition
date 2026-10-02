@@ -11,6 +11,7 @@ BSD License - see nifskope.h
 #include "gl/glscene.h"
 #include "gl/glshape.h"
 #include "gl/renderer.h"
+#include "gl/cellhdr.h"
 
 #include <QElapsedTimer>
 #include <QFile>
@@ -486,6 +487,7 @@ void wwCellLightsUniforms( Scene * scene )
 	prog->uni1f( "cellShadowTexel", 2.0f / float( kShadowFace ) );
 	prog->uni1i( "cellIsLut", kLutUnit );
 	prog->uni1b( "cellIsOn", isDraw );
+	prog->uni1b( "cellIsLinear", isDraw && wwCellHdrActive() );	// lane HDR1: write linear light, tone-mapped once
 	prog->uni1b( "cellIsLutOn", lutDraw );
 	if ( isDraw ) {
 		const float * h = L->isHdr;
