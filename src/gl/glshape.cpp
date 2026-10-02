@@ -37,6 +37,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "model/nifmodel.h"
 #include "io/material.h"
 #include "gl/renderer.h"
+#include "gl/celllights.h"
 #include "gl/glmesh.h"
 #include "glview.h"
 
@@ -607,6 +608,13 @@ void Shape::resetSkeletonData()
 	partitions.clear();
 }
 
+bool Shape::wwDecalDrawsFirst() const
+{
+	// lane FXD1: the game draws its decals before its sorted blended pass. Red control WW_CELL_FXD_RED=late: never
+	static const bool late = qgetenv( "WW_CELL_FXD_RED" ) == "late";
+	return surfaceDecal && drawInSecondPass && !late && wwCellLightsWanted( scene );
+}
+
 void Shape::updateShader()
 {
 	if ( bslsp )
@@ -637,6 +645,11 @@ void Shape::updateShader()
 			}
 		}
 	}
+
+	// lane FXD1: a decal of the lighting shader, by its flags or by its material file
+	surfaceDecal = bslsp && !bslsp->hasRefraction
+		&& ( bslsp->hasSF1( ShaderFlags::SF1( ShaderFlags::SLSF1_Decal | ShaderFlags::SLSF1_Dynamic_Decal ) )
+			|| ( bslsp->getMaterial() && bslsp->getMaterial()->hasDecal() ) );
 
 	if ( bssp ) {
 		depthTest = bssp->depthTest;
