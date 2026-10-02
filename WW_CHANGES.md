@@ -1,5 +1,48 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Cell view: the haze is lit like the game's, and the picture is tone-mapped once (lanes FXLIT1 + HDR1, 2026-10-03)
+
+### Lit effects (lane FXLIT1)
+
+- Cell view: an effect material with the effect-lighting flag is now lit the game's way. Its value is
+  multiplied by mix(1, directional + the placed model's (up to) four lights, lighting influence), per pixel.
+  Each light's term is color x pow(1 - sat(d/r)^2, 2.2) x cone. Effects without the flag keep their old
+  path; the gate proves that pixel for pixel against the exe from before the lane.
+- Gate tests/spells/cell_fx.sh stage L, with probes 70..74 (model, position, multiplier). The independent
+  checker tests/spells/cell_fxlit_check.py reads the plugin and the models itself, and it applies material
+  swaps (the placement's swap, else the base's first) before reading a BGEM.
+  - Vault walkway: 99.9% of 516027 px agree, total ratio 1.000.
+  - Third Rail: 99.9% of 3580 px agree, total ratio 1.000.
+  - Reds white / nofade / all / nopower each FAIL L.
+- Stage U (unflagged effects unchanged) is judged at the Third Rail, where 513 px of unflagged effects show
+  and 0 px differ from the exe before. Every Vault effect carries the flag, so U skips there.
+- Stage N now keeps a 3 px margin around anything the nosoft shot touches. The dimmer lit cards' rims had
+  turned 94 px at camera 1 into "effect-free" pixels. The exe from before the lane skipped N at that camera
+  too (102 px).
+- Probes write depth (nearest card wins). Without it, layered mist cards gave the five probe runs different
+  cards.
+- Dump-only telemetry (WW_CELL_FXLIT_DUMP): one line per probed shape with the influence and the material
+  the shader drew with.
+
+### One tone map (lane HDR1)
+
+- Cell view: with the imagespace on, surfaces and effects are summed in linear light (a multisampled float
+  frame) and tone-mapped once, as the game does. The bloom is added once, at that pass. Stacked haze cards
+  no longer each add their own tone-mapped value, so the walkway's far door no longer goes white.
+- Gate tests/spells/cell_is.sh stage Q, judged on blended pixels:
+  - Green: 97.7-99.9% at four cameras, including bungo's walkway camera.
+  - Red WW_CELL_HDR_RED=perfrag (the old per-fragment path) fails at 72-81%.
+- No setting of its own: it is part of the Cell lights row.
+
+### Merge of main into FXLIT1 + HDR1 (2026-10-03)
+
+- The lit-effect light sum now reads the cell light buffer through HEMI1's stride (CELL_TPL, 8 texels a
+  light). The literal 5 it had read the wrong texels after the merge: no light on any effect.
+- Stage U's exe from before the lane must be a main build after each merge of main. The pre-merge one
+  showed main's decals and actors as differences.
+- cell_ssr stage L on the merged build: 3 and 15 px of main's placed decals differ run to run. With SSR1's
+  pending fix (decals off in both shots), it passes.
+
 ## PRTP Pass drop-down (lane PROBEVIEW1, 2026-10-03)
 
 The PRTP band gains one row: **Pass**, beside GI. It previews what the probe bake holds, the Division deck's debug views:

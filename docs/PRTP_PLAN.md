@@ -1361,6 +1361,48 @@ What this proves for FO4CS: the sky grid is the same 6-slab layout as the GI gri
 
 Still open (proposals only; the ranked list is in notes/deck1/DECK_MATRIX.md section F): BOUNCE2 (multi-bounce), ROOMCLAMP1 (doorways), BRICK1, SKYPIC1, FOGGI1, GPURELIGHT1 and STATICCACHE1. Each one is judged in a Pass view.
 
+### 2ag. Lit effects and the one tone map (lanes FXLIT1 + HDR1, 2026-10-03)
+
+#### Lit effects (FXLIT1)
+- What it does: an effect material that sets the effect-lighting flag is multiplied, per pixel, by
+  mix(1, directional + sum over the placed model's up to four lights of color x pow(1 - sat(d/r)^2, 2.2)
+  x cone, lightingInfluence).
+- Which four lights: the viewer picks them by the game's rule, per model, once at cell open
+  (src/gl/cellfxlit.h).
+- Effects without the flag are unchanged, pixel for pixel.
+- Material swaps decide the influence. A placement's swap record (else its base's first swap) can replace
+  the BGEM. In the Vault, the dusty mist (0.95, gradient) becomes the bright mist (1.0, no gradient). Any
+  checker that reads placed materials must apply the swap.
+- Gate tests/spells/cell_fx.sh:
+  - Stage L uses probes 70..74 (model serial, position, multiplier). The probes write depth so that the
+    nearest card wins.
+    - Vault walkway: 99.9% of 516027 px agree, total ratio 1.000.
+    - Third Rail: 99.9% of 3580 px agree, total ratio 1.000.
+    - Reds white / nofade / all / nopower FAIL at both cameras.
+  - Stage U (unflagged effects unchanged against the exe before) is judged at the Third Rail (513 px).
+  - Stage N keeps a 3 px margin around anything the nosoft shot touches.
+
+#### One tone map (HDR1)
+- The game sums surfaces and effects in its linear HDR target and runs the imagespace once. The cell view
+  used to tone-map each fragment and blend the effects in display space, so stacked haze cards each added
+  their own tone-mapped value (the walkway's far door went white).
+- Now, while the cell's imagespace draws, the main draw goes into a multisampled RGBA16F frame
+  (src/gl/cellhdr.h):
+  - Cell programs and cell effects write linear light (cellIsLinear).
+  - The stencil marks the last writer: 1 cell, 2 other.
+  - cell_hdr.prog then runs the imagespace (bloom once, exposure, curve, grade, LUT) on the 1s and copies
+    the 2s as written.
+  - Depth and stencil are blitted back first. The refraction copy follows the frame's format.
+- Gate tests/spells/cell_is.sh stage Q: on blended pixels (stencil 3), the picture equals the chain over
+  the dump's linear sum + bloom, >= 95% within 3x3 +-3/255.
+  - Green: Cryo 99.69%, walkway 97.73%, Solomon 99.94%, Third Rail 98.38%. Stage P is unchanged.
+  - Red WW_CELL_HDR_RED=perfrag FAILS Q where blends cover >= 10% of the frame: 80.6 / 78.5 / 72.4%.
+  - bungo's walkway camera (350,-512,40 view 4 dist 450) is a gate entry (Vault111Cryo@walk).
+- Not covered: workspace frames (several scenes) and pick / probe / measure passes keep the old path.
+- After the merge of main (HEMI1), the lit-effect sum reads the light buffer through CELL_TPL. Stage U's
+  BEFORE exe is a main build. The merged build is green on cell_fx, cell_fxdepth, cell_is (Q 99.69 / 97.92 /
+  99.94 / 98.94), cell_spec and cell_lit.
+
 ## 3. Open
 
 - `.tbk` v4: two surfel sides per cell (gives back the refused thin-wall weight), room ids (2f).

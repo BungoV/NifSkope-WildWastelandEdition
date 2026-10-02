@@ -5,6 +5,38 @@ Written the moment a mistake is recognised, unprompted (CONSTITUTION rule 2).
 Format: date -- what was done -- what was true -- how it was found -- the rule.
 Newest at the top.
 
+## 2026-10-03 -- FXLIT1 + HDR1: a checker that skipped material swaps; a hand-copied light stride
+
+### FXLIT1 (2026-10-02/03): blamed the viewer's parse for a checker that skipped material swaps
+
+- What happened: stage L sat at 40-61%. Two causes were real (the five probe runs kept different layered
+  mist cards because the probes wrote no depth; the gate expected the "strong" light pick while the viewer
+  defaults to the game's rule). The third was mine: I took the remaining gap for a viewer bug in how the
+  effect's lighting influence is read and wrote an emit-side change in three files. It was wrong. The Vault's
+  dusty mist placements carry a material swap (the placement's swap record, else the base's first swap) that
+  trades the dusty BGEM (influence 0.95, gradient) for a bright one (influence 1.0, no gradient). The viewer
+  applied the swap; the independent checker did not.
+- How it was found: a dump-only telemetry line per probed shape (WW_CELL_FXLIT_DUMP: the influence and the
+  material the shader actually drew with) disagreed with the checker's read of the same model.
+- Rule: before blaming a parse, (1) dump what the shader drew with and (2) check the placement for a
+  material swap (XMSP, else the base's MODS -> MSWP BNAM/SNAM). Every independent checker that reads a
+  placed model's materials must apply the swap. Reverting the wrong edit: restore the file to HEAD
+  (git checkout -- file), never Edit it back by hand and run the EOL restore over a half-reverted file
+  (that joined lines).
+- Stage N, camera 1 of cell_fx: pre-existing. The exe from before the lane also skipped N there (102 px).
+
+### FXLIT1 (2026-10-03): a hand-copied light stride broke on the merge of main
+
+- What happened: the lit-effect sum in fo4_effectshader.frag read the cell light buffer with a literal
+  stride, i * 5. Main's HEMI1 grew each light to 8 texels (CELL_TPL). After the merge, every light lookup
+  read the wrong texels. L's viewer multiplier fell to 0.000 and fxdepth's haze vanished (R judged 0 px).
+  The build was clean, and nothing in the merge conflicted.
+- Rule: read a shared buffer through its named stride (CELL_TPL), never a literal copied from another
+  shader. After a merge of main, rerun the gates the merge reaches before committing it.
+- Also: stage U compares against the exe from before the lane. After merging main, that exe must be
+  rebuilt from main too. The old one lacked main's decals and actors, so U flagged 29178 px that were not
+  the lane's doing.
+
 ## 2026-10-03 PROBEVIEW1: a position-matched check for a splat overlay (F/L at 47%)
 
 Mistake: the Surfel color / Surfel light gate matched each pixel to "a surfel within 0.75 cell of the surface position under it". A splat is a flat card one surfel cell wide. On curved or stepped surfaces it floats off the geometry, so the surface under a pixel is not the splat's surfel. Half the pixels failed while the picture was right.
