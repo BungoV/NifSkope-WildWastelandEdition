@@ -659,6 +659,56 @@ Open:
   a quest are now hidden). A view option is bungo's call.
 - 5 shapes in Vault111Cryo's combined meshes fit neither rule; not explained.
 
+### 2w. The interior cube map reflection at the game's strength (lane CUBE1, 2026-10-02)
+
+Indoors the game adds the environment cube map in its final composite, not in the material's light pass, and
+it is far weaker and far less "mirror" than the viewer drew it. Read op for op from the game's composite
+shader (the same listing lane EXPO1 worked from):
+reflection = cube(R, mip) x 3 x spec x min(sqrt(sat(gloss - 0.3)), 1) x min(envScale^2 x 50, 50) x D,
+where spec = the material's specular scale x the _s map's red (saturated), gloss = the material's smoothness
+x the _s map's green, envScale the material's "Environment Mapping Mask Scale" as the game packs it, and D
+the DIFFUSE light that reached the pixel (ambient + lights, shadows included). mip = (1 - gloss) x 6 +
+view depth x 0.001953. So: a surface in the dark reflects nothing; a surface with gloss under 0.3 reflects
+nothing; there is no fresnel, no specular color and no env mask texture in it. Only a material that names its
+own env map reflects: indoors there is no cell-wide fallback cube, so a material without one gets none (the
+viewer used to give those the default cube).
+The game keeps its env cubes in an sRGB array (128 x 128, 8 mips), so its sampler decodes each texel BEFORE
+the filter and the shader decodes nothing. renderer.cpp wwCellCubeDecodeMode reads the bound cube's internal
+format: an sRGB-tagged cube is mode 3 (the sampler decodes: the game's order), an untagged one mode 1 (decoded
+in the shader after the filter, the nearest an untagged texture allows). `cellCubeMat` carries (spec scale,
+smoothness, mode, env scale); mode 2 = a .pbrm shape, which keeps the PBR program's own image-based law, 0 =
+no own cube. `cell_lights.glsl` cellCubeGame returns the term's factor K and cellLit adds K x the diffuse
+light (Ed). Both programs take it: fo4_default.frag (legacy) and pbrm_default.frag (a BGSM drawn through the
+PBR program, WW_CELL_PBR); the PBR program got the _s map on a new sampler `CellSpecMap` for this. The effect
+program is untouched (the block is compiled out under WW_CELL_FX).
+Red `cubeold` (WW_CELL_LIT_RED, bit 512) is the old law: texel squared x env scale x the Lambert sum, and the
+default cube on materials without their own.
+Probes (WW_CELL_PROBE): 50 = K / 4; 51 / 52 = the uv's fraction in 16 bits (u, v) with the material tag in
+blue; 53 = the normal's rounding residual. `WW_CELL_CUBE_DUMP=<file>` writes `tag|material` rows so a checker
+can name each pixel's material.
+Gate `tests/spells/cell_cube.sh` + `cell_cube_check.py`: the checker shares no code with the viewer (its own
+BGSM reader, its own BA2 / DX10 reader, BC5 decode, cube face table, mip chain and trilinear filter); it
+rebuilds K per pixel from the position / normal / uv probes and the material files and compares it with probe
+50. Bars: at least 500 steady pixels (fewer = SKIP), 200 lit, 97% within 3/255 + 5%, 95% of the lit ones.
+Two Vault111Cryo views x both programs. A start that comes up without the game's archives (seen once in 70)
+is shot once more and noted in the log.
+Result (exe 2026-10-02 11:11, main a1e25b20 merged in, branch head 4a9ebe9b): green PASS in 4 of 4 views,
+agree 99.9 / 99.9 / 99.9 / 100.0% (lit 99.8 / 99.9 / 99.9 / 100.0%), viewer/expected 0.996 / 0.995 / 0.984 /
+0.992, over 18,508 / 10,497 / 4,523 / 4,506 steady pixels (view 1 legacy, view 1 PBR, view 2 legacy, view 2 PBR).
+Red cubeold FAILS 4 of 4: agree 31.8 / 32.7 / 31.9 / 2.2% (lit 0.4 / 0.4 / 0.4 / 0.0%), viewer/expected 0.157 /
+0.078 / 0.154 / 0.082: the old law drew about a tenth of the game's reflection on lit metal.
+The obscurance (lane AO1) multiplies the lit colour after cellLit, so it scales this reflection too, as the
+game's does; probes 50-53 write the output after that multiply and are not touched by it.
+With the lane merged, cell_lit.sh, cell_oren.sh and cell_spec.sh stay PASS (run on main 5431a9f2 merged).
+Not a red: the decode order. The checker with decode-before-filter still passes shots drawn with
+decode-after-filter (agree 99.0-99.9%, viewer/expected 0.964-0.993): on these 128-pixel cubes at the mips the
+Vault's materials use, the two orders differ by less than the 8-bit tolerance. The order follows the game's
+texture format, not the gate.
+Open: (1) an untagged cube (not seen in the Vault; a mod's uncompressed cube without the sRGB format) is
+decoded after the filter; (2) the env scale's packing (x^2 x 50, capped at 50) is read from the composite, the
+material side that writes it was read in lane notes only; (3) exteriors are out of scope: there the game also
+blends a cell / sky cube, which this lane does not draw.
+
 ## 3. Open
 
 - `.tbk` v4: two surfel sides per cell (gives back the refused thin-wall weight), room ids (2f).
