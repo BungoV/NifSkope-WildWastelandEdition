@@ -935,6 +935,169 @@ Open:
 - Ambient Only lights linked to a box fill the box (2z): from how the game builds lights, not from a frame.
   Capture Vault111Cryo standing at about (-4500,-250,0): ambient full there = box, dimmed = sphere.
 
+### 2aa. Placed decals and placed actors are drawn in the cell view (lane PLACED1, 2026-10-02)
+
+bungo asked whether decals, props and skeletons are in the cell view. Two kinds of placed content were not:
+projected decals (a reference whose base is a texture set carrying decal data) and placed actors (their own
+reference record type, which the cell view never read). Both are drawn now, whenever a cell is shown: no menu
+row, no INI key; environment variables only for the red controls.
+
+Part 1, decals. The game's side was read first (private notes); the repo says "the game's decal pass".
+- The box. Frame = the reference's rotation as a placed model uses it. Width along local +X, height along local
+  -Z, projection along local +Y. With a box primitive on the reference: centre = the reference position, sizes =
+  twice the primitive's bounds (they are half extents; width x, height z, depth y), no ray. Without one: a ray
+  from the reference along +Y, 1000 units; no hit = no decal; centre = the hit, width and height = the decal
+  record's sizes times the reference's own size scales, depth = the record's depth. The reference scale is not
+  read.
+- Which surfaces. A surface takes the decal where its face normal against the projection is >= 0.3; below that it
+  fades with the shading normal, saturate((dot - 0.3) / 0.25); alpha under 4/255 is dropped. The game applies
+  decals before lighting with one blend for the whole pass, so the material file's own blend and test are not
+  used and a decal is lit like the surface under it.
+- How the cell view does it. The game projects in screen space; the cell view clips the welded opaque triangles
+  inside each box on the CPU (same box, same angle rule per triangle instead of per pixel) and draws the pieces
+  blended, with no depth write, through the lit program, so cell lights and their shadows fall on them. Named
+  differences: the ray runs against the drawn opaque triangles instead of the collision, and starts 1 unit
+  behind the reference (a decal placed exactly on its surface otherwise misses it); no distance fade.
+- Refused by name, counted in the census line: a size the game rolls (min != max without a box) or a picture it
+  picks from a 2x2 sheet at random; nothing opaque in the box.
+- Numbers: Vault111Cryo 540 read, 513 drawn (34 by their box, 479 by a ray; 442,701 triangles), 26 dice,
+  1 no surface. MiltonGeneral01 185 read, 185 drawn. Vault81 121 / 121. MaldenCenter01 41 read, 23 drawn, 18 dice.
+- Sources: src/esmplaced.cpp/.h (the decal records), src/celldecal.cpp/.h (box, ray, clip), a small hunk in
+  src/cellview.cpp (intake in the reference funnel, the pieces after the weld, the census line).
+- Gate tests/spells/cell_decal.sh + cell_decal_check.py (own plugin walk, own model reader, own ray). Stages:
+  K census against the walk; G every drawn box against the walk's (centre 1 unit, sizes 0.5%); N pixels outside
+  every projected box equal the decal-less shot; C every decal the camera sees changes pixels inside its own box.
+  Green, three cameras: a Vault111Cryo corridor K G PASS (513 of 513 boxes), C 17 of 17 decals in sight (78,513
+  pixels changed; the boxes cover the frame, no N); a MiltonGeneral01 ward K G PASS (185 of 185), C 3 of 3; the
+  Vault111Cryo walkway bungo named K G PASS, N 99.997% of 273,114 (no decal within 900 units in sight: no C).
+  Reds (WW_CELL_DECAL_RED), each FAILS: none (no decal drawn) fails K and C (0 of 17, 0 of 3 in sight; 0 of 513
+  and 0 of 185 drawn); wide (twice the width and height) fails G in all three (0 of 513, 0 of 185) and N at the
+  walkway (94.973%); axis (projects along -Z) fails G DECAL_AXIS_NUMBERS.
+  The Milton camera does not carry N: green keeps 100.000% of its 209,744 outside pixels, but the wide red moves
+  only 115 of them (99.945%), so that camera cannot tell wide from right; N is judged at the walkway.
+
+Part 2, actors (interiors).
+- The chain, from the published record layouts: the placed actor's base; the record its looks come from (the
+  template chain while the "traits" template flag is set; a leveled list on the way is a dice roll unless it has
+  one always-taken entry); race -> skeleton for the sex, skin, height; the skin's armor addons for that race;
+  the outfit's armors (a leveled item list only when it is not a dice roll); a skin addon is hidden when an
+  outfit armor wears one of its body slots; the pre-built face mesh by the looks record's form id, hair and
+  facial hair hidden by the slots that cover them. Scale = reference scale x race height x the middle of the
+  record's height range.
+- The pose. Every part is skinned on the CPU onto the skeleton's bind pose and placed by the reference
+  transform; the triangles go into the cell's own buckets (key "ACTOR"), so they are lit and shadowed like any
+  surface. No rig per actor: the cell lights' shadow pass does not skin.
+- Refused by name in the census line: leveled list (a dice roll), no body model (robots are built from parts),
+  no race, no skeleton, no geometry, not an actor. Dead-on-start actors ragdoll in the game; they are drawn
+  standing in bind pose and the line says how many. Outfit pieces that are a dice roll are left off and counted
+  ("short of outfit pieces"): such an actor stands in its underwear.
+- Numbers: Vault81 33 read, 31 drawn (all 31 hide a skin part), 1 not shown, 1 no body model. MaldenCenter01 47
+  read, 24 drawn (23 dead on start; 20 human, 4 first-generation synths; all 24 short of outfit pieces), 8 not
+  shown, 14 leveled, 1 no body model. Vault111Cryo 27 read, 13 drawn (11 pod occupants, 2 radroaches), 2 not
+  shown, 12 leveled. Creatures come through the same route (the radroach); robots do not.
+- Sources: src/cellactor.cpp/.h (records, chain, skinning), a small hunk in src/cellview.cpp (the actor loop,
+  the census line, the dump WW_CELL_ACTOR_DUMP).
+- Gate tests/spells/cell_actor.sh + cell_actor_check.py (own plugin walk, own skinning). Stages: K census; F
+  every placed actor's fate, looks record, race, sex, skeleton, position, rotation, scale; P models, hidden skin
+  parts, face mesh; G posed bounds within 0.1 unit and the same triangle count; N nothing moves outside the
+  posed triangles; C the actors show inside them.
+  Green, three cameras: Vault81 (living, 8 on screen) K F P G PASS, N 99.999% of 526,589, C 81.3% of 11,151;
+  MaldenCenter01 (corpses, 10 on screen; no P, nothing hidden) K F G PASS, N 100.000% of 522,771, C 72.9% of
+  12,817; Vault111Cryo (a radroach) K F P G PASS, N 100.000% of 534,881, C 60.2% of 4,987.
+  Reds (WW_CELL_ACTOR_RED), each FAILS: none (no actor drawn) fails K, F and C in all three (C 0 px);
+  ACTOR_SHIFT_NUMBERS
+  nohide (the outfit hides nothing) fails P: 0 of 31 in Vault81, 2 of 13 in Vault111Cryo; not run in Malden
+  (nothing is hidden there, named in the gate).
+
+After main's MISS1 (merged before the gate runs above).
+- Start state: actors and decals follow the enable-parent chain like every reference (decals through the same
+  intake; the actor loop asks the same function, and actors are in the table since an actor can be a parent).
+  Malden Center moved from 1 not shown / 21 leveled to 8 / 14. Both checkers carry their own chain over every
+  placed record of the plugin; the viewer's table holds the cell only (a parent outside counts as enabled): on
+  every reference of the four gate cells the two rules agree (0 of 3114, 3760, 4653, 3141 differ).
+- Root transform: the decal checker's receivers drop the root as the viewer's do. Actors are not reached: of 65
+  skeleton and part files one root carries a transform, and all its shapes are skinned.
+
+The bake. Placed actors, corpses, their gear and decals are drawn and are receivers only. The probe soup is
+filled in the placement loop by base type; actors ride that loop, so their soup role is forced to "out" by name
+(not only by type); decal pieces are cut after the loop and no soup call sits on that path. The bake's albedo,
+the room ids and the .tbk come from the soup; the LOD and near bakes are another program path that includes
+none of this lane's sources. Why: the game's bakes hold no actors and no projected decals.
+Measured in Vault111Cryo with probing on, the lane's actors + decals on against both off: soup references 1339
+and 1339, soup triangles 1,451,459 and 1,451,459, doors 36 and 36, and the two soup files are the same bytes.
+With actors on, the notes line names them among the references left out by type ("NPC_ 13").
+
+Existing gates re-run on the merged exe, and why each is reached:
+GATES_RERUN
+
+Open.
+- Exterior cells show no actors (the exterior reference gate demands every row be an ordinary reference).
+- Actors are not in the reference list or the pick table: they cannot be selected.
+- Corpses stand; nobody is animated; robots are refused; dice outfits are left off.
+- The face meshes, the hidden-part rule and the decal look have not been compared with the game on screen.
+- Decals: no distance fade, no parallax variant, the ray against drawn triangles instead of collision.
+
+### 2ab. The Fraternal Post / Pickman Gallery mismatch: mist cards in the probe pictures (lane FRAT1, 2026-10-02)
+
+Section 3 carried this as open: seen from straight above, FraternalPost11501 (center 553,2170,400, distance
+600) and PickmanGallery01 (562,440,150) parted from the diffuse check on 13% / 9% of the clean pixels, with
+"overlay sheets over the walls" as the suspect. Asked: per pixel, which side is wrong, the viewer or the
+checker?
+
+Neither formula. The picture that was wrong was the POSITION probe the checker reads, and it was already
+repaired when the lane was cut.
+
+What covers the rejected pixels. 99% of Fraternal Post's "wall strip" (it is the flat TOPS of the wall kit,
+z = 128, normal straight up, not a wall face) lies inside three placements of
+`Effects\Ambient\MistLargeRoundDusty01.nif` (refs 0017D953, 0017D94F, 0015184B), a blended effect-shader card
+(`AmbBeamMistRoundDusty.BGEM`) hanging 491 units over the room; 55% of the floor group lies inside 0015184B.
+The cell has 33 such placements, Pickman Gallery 72 (56 MistLargeRoundDusty01 + 16 MistLargeRound01); read
+from the plugin, independent of the viewer. No decal and no dirt sheet is involved.
+
+The mechanism, per pixel (the same exe and camera, the probe passes with and without the effect shapes):
+
+| | Fraternal Post | Pickman Gallery |
+|---|---|---|
+| clean pixels / rejected, effects in the probes | 69,885 / 6,629 (9.5%) | 66,058 / 1,399 (2.1%) |
+| clean pixels / rejected, effects out | 83,647 / 0 | 71,080 / 0 |
+| of the rejected: position high byte changed | 100% | 100% |
+| ... by exactly one level down on x, y and z | 82.5% | 92-98% |
+| of the rejected: probe 8 (the diffuse) changed | 0.1% | 0.0% |
+| decoded position off the true surface | over 40 units on 100%, median 445 | same |
+
+The card is about 1% opaque (a blend fit over probes 2 / 3 / 4 gives a median of 0.01). That cannot move a dark
+diffuse value by one 8-bit level, but it lowers any byte near 127 by one, and the position probe's high byte is
+such a byte. One level is 256 units on each axis, 443 in all. The neighbours shift together, so the checker's
+"clean" filter (position step under 40) keeps them, and the checker evaluates its correct formula 443 units
+away from the surface. "2.2x on the wall tops, 0.66x on the floor" was the model at the wrong place. Where the
+card is thicker every probe carries its colour and the clean filter drops most of those pixels.
+
+So: the viewer's diffuse was right, the checker's formula was right, the picture bungo looks at was right (there
+the mist is meant to blend). The 13% / 9% were measured by lane RIM1 on an exe from before 347742a2 (lane EFX1,
+2026-10-01 17:06: no effect or refraction shape is drawn in a probe pass). With that commit the same cameras
+agree on every clean pixel. Nothing in the drawing changed in this lane.
+
+What the lane adds, so that it cannot come back unseen:
+- `WW_CELL_LIT_RED=probefx` (check-only, red bit 4096): `wwCellProbePass()` answers false, the effect and
+  refraction shapes are drawn into the probe passes again.
+- `tests/spells/cell_oren.sh`: three more gate views, `FraternalPost11501@553,2170,400~600`,
+  `PickmanGallery01@562,440,150~600`, `PickmanGallery01@470,475,150~450`; a CELLS entry may end `~<distance>`;
+  `--red probefx`. The checker (`cell_oren_check.py`) is unchanged.
+- Green [first merge], agree 100.0% in all five views: Vault 7,180 lit (rim 99.7%), Vault second camera 4,682
+  (rim 99.2%), Fraternal Post 8,770 (rim 99.8%), Pickman from 600 above 11,526, Pickman closer camera 10,577 of
+  12,896 clean.
+- Red `--red probefx` [first merge], bar 97%: FAILS in 4 of the 5 views. Fraternal Post 90.8% (rim 17.9%),
+  Pickman closer camera 45.3%, Vault 98.3% with the rim at 82.4% (the rim bar fails it), Vault second camera
+  95.4%. Pickman from 600 above only drops to 98.0% and passes: its rejected pixels are one patch at
+  468,478,504, which is why the closer camera over that patch is in the list.
+- Re-run on the same exe: `cell_lit.sh` PASS (Vault 99.9%, lit 99.8%; Solomon's house 100.0%; the Ambient Only
+  view 100.0%), `cell_spec.sh` PASS (100.0%, viewer / expected 1.010 and 1.016).
+
+Open.
+- The Pickman view from 600 above does not fail the red by itself (98.0%); it is in the gate for the green.
+- The rule this rests on is wider than these probes: nothing blended may draw into a pass that writes data as
+  colour. Any later data pass (a new probe number, a bake pass) has to ask `wwCellProbePass()` or its like.
+
 ## 3. Open
 
 - `.tbk` v4: two surfel sides per cell (gives back the refused thin-wall weight), room ids (2f).

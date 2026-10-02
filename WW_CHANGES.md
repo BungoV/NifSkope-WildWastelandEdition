@@ -1,5 +1,47 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Cell view: the light check now also watches two misty rooms (2026-10-02)
+
+Nothing you see changes. Two rooms looked at from straight above, Fraternal Post 115 and Pickman Gallery, used
+to disagree with the automatic check of the placed lights on about one pixel in ten. The lights were drawn
+right. The check reads where each pixel is in the room from a helper picture, and the faint ceiling mist in
+those rooms had been drawn into that helper picture, which moved the reading by a few hundred units. That was
+repaired the day before (mist and other effects are left out of the helper pictures); this change only proves
+it and keeps it proven:
+
+- Both rooms are now part of the light check (three views), and agree on every checked pixel.
+- A check-only switch puts the mist back into the helper pictures; the check then fails in four of its five
+  views, so the check is known to notice if this ever returns. The switch is an environment variable for the
+  test script, not a menu row or a setting.
+
+## Cell view: decals and the people of a cell are drawn (2026-10-02)
+
+Two kinds of placed content were missing from the cell view. Both are cell content, so they show whenever a cell
+is open: no new menu row, no setting.
+
+- Decals. The stains, moss, grime, puddles and scorch marks a level designer projects onto walls and floors are
+  now drawn, each on the surfaces inside its own box and facing it, the way the game projects them, and lit by
+  the cell's lights like the surface underneath. The Vault 111 cryo room has 540 of them; 513 are drawn. 26 are
+  left out because the game rolls dice for their size or picks one of four pictures at random, and the cell view
+  does not guess; 1 finds no surface to land on. The general store in Milton has 185, all drawn.
+- Actors. Settlers, vault residents, corpses and creatures placed in an interior are drawn standing at their
+  placed spot: the race's body, the outfit over it (with the body parts the outfit covers hidden), the head the
+  game pre-built for that person, hair and skin. Vault 81's atrium cell shows 31 of its 33 residents; the cryo
+  room shows the 11 frozen neighbors in their pods and 2 radroaches; Malden Center shows 24 of 47 (23 of them
+  are corpses).
+
+What is not there, and is counted by name in the cell's census line instead:
+- Actors the game picks by dice ("leveled" raiders, ghouls, synths): 14 in Malden Center, 12 in the cryo room.
+- Robots built from parts (Mr. Handy, Protectron, Assaultron): 1 each in Vault 81 and Malden Center.
+- Corpses lie where they fell in the game (ragdoll). The cell view cannot simulate that: a corpse stands upright
+  in its rest pose at its placed spot. The census line says how many.
+- Nobody is animated; everyone stands in the skeleton's rest pose (upright, arms held a little away from the
+  body). Outfit pieces the game picks by dice are left off, so such a person stands in their underwear (all 24
+  drawn in Malden Center).
+- Exterior cells show no actors yet. Actors cannot be picked or listed in the reference list yet.
+- Decals and actors are never part of a bake: the probe bake, the far map and the LOD bakes see the same cell with
+  or without them.
+
 ## Cell view: half-sphere lights and boxed lights light only their own space (2026-10-02)
 
 Some of the game's lights are not round. A "hemisphere" light shines to one side only (a ceiling lamp that must
