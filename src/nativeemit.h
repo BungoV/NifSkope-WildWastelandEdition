@@ -98,6 +98,21 @@ struct NativeSrcShape
 	float bbScale = 1.0f;
 	int bbMode = 0;
 	float matAlpha = 1.0f;     //!< the BGSM/BGEM fAlpha
+	/*! Lane BAKE4: the blend facts the probe bake tells a glass pane from a haze card by: the
+	 *  material's where one read, else the NIF's own (alpha property, shader flags). Cell view only. */
+	bool bakeBlend = false;                     //!< blending on
+	quint8 bakeBlendSrc = 0, bakeBlendDst = 0;  //!< its factors (6 / 7 = source alpha over)
+	bool bakeEnv = false;                       //!< environment mapped
+	bool bakeSoft = false;                      //!< an effect's soft depth fade (mist, beams, glow cards)
+	float bakeColor[3] = { 1.0f, 1.0f, 1.0f };  //!< an effect material's base color x its scale (the shader's tint)
+	//! A pane: a material file read, blended over, not a decal, environment mapped, not soft, some opacity.
+	//! A blended shape with no material file is never one (drip splashes, lamp covers, klaxon shells).
+	bool bakePane() const
+	{
+		const bool mat = nearFacts.effectShader ? effectMatRead : nearFacts.bgsmRead;
+		return mat && bakeBlend && bakeBlendSrc == 6 && bakeBlendDst == 7 && !nearFacts.decal && bakeEnv
+			&& !bakeSoft && matAlpha > 0.0f;
+	}
 	//! The shape named a material and NOTHING resolved: drawn neutral and counted, not magenta.
 	bool matUnreadable = false;
 	//! Lane FIX1: Greyscale_To_PaletteColor on this shape (BGSM wins) -- where an MSWP CNAM would reach it.

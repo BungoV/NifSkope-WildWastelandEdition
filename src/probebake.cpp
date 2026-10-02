@@ -96,6 +96,33 @@ struct TbkProbe
 };
 static_assert( sizeof( TbkProbe ) == 144, "tbk probe" );
 
+/* ---- lane BAKE4: the `.tbk` v4 tail, after the v3 body (header version 4; reserved[0] =
+ * back surfels, reserved[1] = room boxes, reserved[2] = what was modelled: 1 sides,
+ * 2 rooms, 4 doors, 8 glass). Order: back surfels, one ext per link, one ext per probe,
+ * the room boxes. */
+struct TbkLinkExt
+{
+	quint8 side;        // 0 = the cell's surfel, 1 = its back surfel
+	quint8 tint[3];     // unorm8 transmittance of the glass on the way (255 = clear)
+	quint32 door;       // the door ref the link passes through, 0 = none
+};
+static_assert( sizeof( TbkLinkExt ) == 8, "tbk link ext" );
+
+struct TbkProbeExt
+{
+	quint8 skyTint[8][3];   // per octant, the sky seen through glass (255 = clear)
+	quint32 room[2];        // the probe's room; an opening's second room (0xFFFFFFFF = none)
+};
+static_assert( sizeof( TbkProbeExt ) == 32, "tbk probe ext" );
+
+struct TbkRoomBox
+{
+	quint32 room;
+	float lo[3], hi[3];
+	quint32 reserved;
+};
+static_assert( sizeof( TbkRoomBox ) == 32, "tbk room box" );
+
 // The reader's own key: float division, then floor (its FloorDiv).
 inline qint32 floorDiv( float v, float s )
 {
@@ -206,9 +233,34 @@ struct ProbeOut
 	TbkProbe rec;
 	std::vector<TbkLink> links;
 	std::vector<Key> linkKeys;  // absolute surfel keys, same order as links
+	std::vector<TbkLinkExt> ext;   // v4: side, tint, door per link
+	TbkProbeExt pext;
 	int sx = 0, sy = 0;         // sector
 	bool capped = false;
 	double sky = 0, turned = 0, voidShare = 0;
+	double glassShare = 0;      // v4: the sphere share seen through glass
+};
+
+// v4: a link's identity -- the cell, the side of it, the door on the way
+struct LKey
+{
+	Key k;
+	quint32 door;
+	quint8 side;
+	bool operator==( const LKey & o ) const { return k == o.k && door == o.door && side == o.side; }
+	bool operator<( const LKey & o ) const
+	{
+		if ( !( k == o.k ) )
+			return k < o.k;
+		return side != o.side ? side < o.side : door < o.door;
+	}
+};
+struct LKeyHash
+{
+	size_t operator()( const LKey & l ) const
+	{
+		return KeyHash()( l.k ) ^ ( size_t( l.door ) * 0x9E3779B97F4A7C15ull ) ^ ( size_t( l.side ) << 7 );
+	}
 };
 
 struct Chunk
@@ -219,12 +271,13 @@ struct Chunk
 	qint64 hits = 0, misses = 0;
 	qint64 spilled = 0;         // links sent to a second side instead of refused
 	qint64 turned = 0;          // links refused by the facing rule
+	qint64 back = 0, door = 0, tinted = 0;   // v4 links: to a back surfel, through a door, through glass
 };
 
 } // namespace
 
 bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probes, const ProbeBakeSpec & spec,
-	const QString & outDir, ProbeBakeResult * out )
+	const QString & outDir, ProbeBakeResult * out, const std::vector<ProbeRoomBox> * roomBoxes )
 {
 	ProbeBakeResult & R = *out;
 	R = ProbeBakeResult();
@@ -238,6 +291,15 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probes, 
 	R.albedoKnown = albKnown ? 1 : 0;
 	const bool redOct = spec.red == QLatin1String( "octant" );
 	const bool redNrm = spec.red == QLatin1String( "normal" );
+	// lane BAKE4: v4 = both sides of a cell, rooms, doors, glass; v3 = FO4CS's file exactly
+	const bool v4 = spec.tbkVersion >= 4;
+	R.version = v4 ? 4 : 3;
+	const bool redOneSide = spec.red == QLatin1String( "oneside" );
+	const bool redRooms = spec.red == QLatin1String( "rooms" );
+	const bool redGlass = spec.red == QLatin1String( "glass" );
+	const bool glassOn = v4 && !redGlass && !soup.glass.empty() && soup.glassT.size() * 3 == soup.glass.size();
+	R.glassTris = int( soup.glass.size() / 9 );
+	R.doors = int( soup.doors.size() );
 
 	// local origin (the probes' center, z 0), as the placer does: float precision
 	// must not depend on how far from the world origin the block is
@@ -259,6 +321,31 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probes, 
 		bvh.t[i + 2] = soup.tris[i + 2];
 	}
 	bvh.build();
+	// lane BAKE4: the glass in its own tree (it holds no surfel and stops no ray), the doors local
+	probebvh::Bvh gbvh;
+	if ( glassOn ) {
+		gbvh.t.resize( soup.glass.size() );
+		for ( size_t i = 0; i < soup.glass.size(); i += 3 ) {
+			gbvh.t[i + 0] = float( double( soup.glass[i + 0] ) - O[0] );
+			gbvh.t[i + 1] = float( double( soup.glass[i + 1] ) - O[1] );
+			gbvh.t[i + 2] = soup.glass[i + 2];
+		}
+		gbvh.build();
+	}
+	struct DoorBox { double lo[3], hi[3]; quint32 ref; };
+	std::vector<DoorBox> doorBoxes;
+	if ( v4 )
+		for ( const ProbeSoup::Door & dr : soup.doors ) {
+			if ( !dr.ref )
+				continue;
+			DoorBox b;
+			b.ref = dr.ref;
+			for ( int k = 0; k < 3; k++ ) {
+				b.lo[k] = double( dr.lo[k] ) - ( k < 2 ? O[k] : 0.0 );
+				b.hi[k] = double( dr.hi[k] ) - ( k < 2 ? O[k] : 0.0 );
+			}
+			doorBoxes.push_back( b );
+		}
 
 	// the ray set: a Fibonacci sphere, 4 pi / N steradians each
 	std::vector<double> dirs( size_t( N ) * 3 );
@@ -297,6 +384,78 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probes, 
 		hw[1] = float( o[1] + d[1] * t + O[1] );
 		hw[2] = float( o[2] + d[2] * t );
 	};
+	// the hit face's normal, turned toward the probe, and its facing bin (-1: a degenerate face)
+	auto binOf = [&]( int tri, const double * d, double n[3] ) -> int {
+		const float * p = &soup.tris[size_t( tri ) * 9];
+		const double e1[3] = { double( p[3] ) - p[0], double( p[4] ) - p[1], double( p[5] ) - p[2] };
+		const double e2[3] = { double( p[6] ) - p[0], double( p[7] ) - p[1], double( p[8] ) - p[2] };
+		n[0] = e1[1] * e2[2] - e1[2] * e2[1];
+		n[1] = e1[2] * e2[0] - e1[0] * e2[2];
+		n[2] = e1[0] * e2[1] - e1[1] * e2[0];
+		const double nl = std::sqrt( n[0] * n[0] + n[1] * n[1] + n[2] * n[2] );
+		if ( !( nl > 0 ) )
+			return -1;
+		for ( int k = 0; k < 3; k++ )
+			n[k] /= nl;
+		if ( !redNrm && n[0] * d[0] + n[1] * d[1] + n[2] * d[2] > 0 )
+			for ( int k = 0; k < 3; k++ )
+				n[k] = -n[k];
+		int ax = 0;
+		for ( int k = 1; k < 3; k++ )
+			if ( std::fabs( n[k] ) > std::fabs( n[ax] ) )
+				ax = k;
+		return ax * 2 + ( n[ax] < 0 ? 1 : 0 );
+	};
+	/* lane BAKE4: what the glass between the probe and tEnd lets through, per channel: the
+	 * product over every pane crossed. A pane is crossed once (the next search starts a
+	 * hundredth of a unit past it, so a two-sided pane's twin faces count once); glass on
+	 * the hit surface itself (within a hundredth) is not crossed. */
+	auto transmit = [&]( const double o[3], const double * d, double tEnd, double T[3] ) -> bool {
+		T[0] = T[1] = T[2] = 1.0;
+		bool any = false;
+		double s = 0.01;
+		for ( int n = 0; n < 32; n++ ) {
+			const double so[3] = { o[0] + d[0] * s, o[1] + d[1] * s, o[2] + d[2] * s };
+			double tg = 0;
+			int gt = -1;
+			if ( tEnd - s <= 0.01 || !gbvh.ray( so, d, tEnd - s, &tg, &gt ) || gt < 0 )
+				break;
+			s += tg;
+			if ( s >= tEnd - 0.01 )
+				break;
+			for ( int c = 0; c < 3; c++ )
+				T[c] *= soup.glassT[size_t( gt ) * 3 + size_t( c )] / 255.0;
+			any = true;
+			s += 0.01;
+		}
+		return any;
+	};
+	// lane BAKE4: the door the segment o + d [0, t] passes through first (0 = none)
+	auto doorOn = [&]( const double o[3], const double * d, double t ) -> quint32 {
+		quint32 best = 0;
+		double bestT = 1e300;
+		for ( const DoorBox & b : doorBoxes ) {
+			double t0 = 0.0, t1 = t;
+			bool in = true;
+			for ( int k = 0; k < 3 && in; k++ ) {
+				if ( std::fabs( d[k] ) < 1e-12 ) {
+					in = o[k] >= b.lo[k] && o[k] <= b.hi[k];
+					continue;
+				}
+				double a = ( b.lo[k] - o[k] ) / d[k], c = ( b.hi[k] - o[k] ) / d[k];
+				if ( a > c )
+					std::swap( a, c );
+				t0 = std::max( t0, a );
+				t1 = std::min( t1, c );
+				in = t0 <= t1;
+			}
+			if ( in && ( t0 < bestT || ( t0 == bestT && b.ref < best ) ) ) {
+				bestT = t0;
+				best = b.ref;
+			}
+		}
+		return best;
+	};
 
 	// pass 1: the surfels, from every probe's hits
 	auto surfelChunk = [&]( Chunk & ch ) {
@@ -311,24 +470,11 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probes, 
 					continue;
 				float hw[3];
 				hitPoint( o, d, t, hw );
-				// the face's normal, turned toward the probe
-				const float * p = &soup.tris[size_t( tri ) * 9];
-				const double e1[3] = { double( p[3] ) - p[0], double( p[4] ) - p[1], double( p[5] ) - p[2] };
-				const double e2[3] = { double( p[6] ) - p[0], double( p[7] ) - p[1], double( p[8] ) - p[2] };
-				double n[3] = { e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0] };
-				const double nl = std::sqrt( n[0] * n[0] + n[1] * n[1] + n[2] * n[2] );
-				if ( !( nl > 0 ) )
+				double n[3];
+				const int bin = binOf( tri, d, n );
+				if ( bin < 0 )
 					continue;
-				for ( double & v : n )
-					v /= nl;
-				if ( !redNrm && n[0] * d[0] + n[1] * d[1] + n[2] * d[2] > 0 )
-					for ( double & v : n )
-						v = -v;
-				int ax = 0;
-				for ( int k = 1; k < 3; k++ )
-					if ( std::fabs( n[k] ) > std::fabs( n[ax] ) )
-						ax = k;
-				Bin & s = ch.surfels[keyFor( hw, cellS )].b[ax * 2 + ( n[ax] < 0 ? 1 : 0 )];
+				Bin & s = ch.surfels[keyFor( hw, cellS )].b[bin];
 				for ( int k = 0; k < 3; k++ ) {
 					s.pos[k] += hw[k];
 					s.nrm[k] += n[k];
@@ -341,26 +487,36 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probes, 
 
 	FinalMap fin;
 	std::unordered_map<Key, Key, KeyHash> alt;   // a two-sided cell -> the neighbour holding its second side
+	FinalMap backFin;                            // v4: a two-sided cell's second side, in the cell itself
+	std::unordered_map<Key, quint8, KeyHash> backMask;   // v4: the facing bins that make up that side
 
 	// pass 2: the probe records, linking only surfels that face the probe
 	auto probeChunk = [&]( Chunk & ch ) {
-		struct Cell { double w = 0, dir[3] = { 0, 0, 0 }; };
-		std::unordered_map<Key, Cell, KeyHash> cells;
+		struct Cell { double w = 0, dir[3] = { 0, 0, 0 }, tw[3] = { 0, 0, 0 }; };
+		std::unordered_map<LKey, Cell, LKeyHash> cells;
 		for ( int pi = ch.first; pi < ch.first + ch.count; pi++ ) {
 			const ProbePoint & pp = probes[size_t( pi )];
 			const double o[3] = { double( pp.pos[0] ) - O[0], double( pp.pos[1] ) - O[1], double( pp.pos[2] ) };
 			cells.clear();
 			double oSky[8] = {}, oSurf[8] = {}, oD[8] = {}, oD2[8] = {}, total = 0, voidW = 0;
+			double skyT[8][3] = {}, glassW = 0;
 			for ( int i = 0; i < N; i++ ) {
 				const double * d = &dirs[size_t( i ) * 3];
 				double t = 0;
 				int tri;
 				const int oc = octantOf( d );
-				if ( !cast( o, d, &t, &tri ) ) {
+				const bool hit = cast( o, d, &t, &tri );
+				double T[3] = { 1.0, 1.0, 1.0 };
+				if ( glassOn && transmit( o, d, hit ? t : double( spec.rayMax ), T ) )
+					glassW += omega;
+				if ( !hit ) {
 					if ( spec.noSky )
 						voidW += omega;   // an interior: out through an opening, into nothing
-					else
+					else {
 						oSky[oc] += omega;
+						for ( int c = 0; c < 3; c++ )
+							skyT[oc][c] += omega * T[c];
+					}
 					total += omega;
 					ch.misses++;
 					continue;
@@ -370,10 +526,24 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probes, 
 					continue;
 				float hw[3];
 				hitPoint( o, d, t, hw );
-				Cell & cl = cells[keyFor( hw, cellS )];
+				LKey lk{ keyFor( hw, cellS ), 0u, quint8( 0 ) };
+				if ( v4 ) {
+					// the side this ray sees: its face's bin, as pass 1 sorted it
+					const auto bm = backMask.find( lk.k );
+					if ( bm != backMask.end() ) {
+						double n[3];
+						const int bin = binOf( tri, d, n );
+						lk.side = quint8( bin >= 0 && ( ( bm->second >> bin ) & 1 ) ? 1 : 0 );
+					}
+					if ( !doorBoxes.empty() )
+						lk.door = doorOn( o, d, t );
+				}
+				Cell & cl = cells[lk];
 				cl.w += omega;
-				for ( int a = 0; a < 3; a++ )
+				for ( int a = 0; a < 3; a++ ) {
 					cl.dir[a] += d[a] * omega;
+					cl.tw[a] += T[a] * omega;
+				}
 				oSurf[oc] += omega;
 				oD[oc] += t * omega;
 				oD2[oc] += t * t * omega;
@@ -397,22 +567,43 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probes, 
 				}
 			}
 			po.sky = skyAll / kFourPi;
+			po.glassShare = glassW / kFourPi;
 			r.placementClass = quint32( int( pp.cls ) );
 			r.placementLevel = quint32( qMax( 0, pp.level ) );
+			// v4: the sky through glass per octant, and the probe's rooms
+			std::memset( &po.pext, 0, sizeof po.pext );
+			for ( int oc = 0; oc < 8; oc++ )
+				for ( int c = 0; c < 3; c++ )
+					po.pext.skyTint[oc][c] = quint8( oSky[oc] > 0 ? std::lround( std::clamp( skyT[oc][c] / oSky[oc], 0.0, 1.0 ) * 255.0 ) : 255 );
+			po.pext.room[0] = redRooms ? 0u : pp.room[0];
+			po.pext.room[1] = redRooms ? kProbeRoomNone : pp.room[1];
 			// the facing rule: a surfel turned away from the probe is the far side of a
 			// thin wall; its weight is unlinked (the relight renormalizes over the rest)
-			struct Cand { Key k; const Cell * c; qint16 dir[2]; };
+			struct Cand { Key k; const Cell * c; qint16 dir[2]; quint8 side; quint32 door; };
 			std::vector<Cand> ord;
 			ord.reserve( cells.size() );
 			double turned = 0;
 			for ( const auto & e : cells ) {
-				Cand cd{ e.first, &e.second, { 0, 0 } };
+				Cand cd{ e.first.k, &e.second, { 0, 0 }, e.first.side, e.first.door };
 				packDir( e.second.dir, cd.dir );
-				const auto f = fin.find( e.first );
 				double v[3];
 				unpackDir( cd.dir, v );
+				if ( v4 ) {
+					// v4: the side the rays saw, in the cell itself; refused only when that side
+					// is missing (the oneside red) or still faces away
+					const FinalMap & fm = cd.side ? backFin : fin;
+					const auto f = fm.find( cd.k );
+					if ( f == fm.end() || v[0] * f->second.n[0] + v[1] * f->second.n[1] + v[2] * f->second.n[2] > -1.0e-4 ) {
+						turned += e.second.w;
+						ch.turned++;
+						continue;
+					}
+					ord.push_back( cd );
+					continue;
+				}
+				const auto f = fin.find( e.first.k );
 				if ( f == fin.end() || v[0] * f->second.n[0] + v[1] * f->second.n[1] + v[2] * f->second.n[2] > -1.0e-4 ) {
-					const auto a = alt.find( e.first );
+					const auto a = alt.find( e.first.k );
 					if ( a != alt.end() ) {
 						const double * an = fin.find( a->second )->second.n;
 						if ( v[0] * an[0] + v[1] * an[1] + v[2] * an[2] < -1.0e-4 ) {
@@ -431,7 +622,9 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probes, 
 			std::sort( ord.begin(), ord.end(), []( const Cand & a, const Cand & b ) {
 				if ( a.c->w != b.c->w )
 					return a.c->w > b.c->w;
-				return a.k < b.k;
+				if ( !( a.k == b.k ) )
+					return a.k < b.k;
+				return a.side != b.side ? a.side < b.side : a.door < b.door;
 			} );
 			const size_t keep = qMin( size_t( spec.maxLinks ), ord.size() );
 			po.capped = ord.size() > keep;
@@ -466,6 +659,18 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probes, 
 					l.weight = quint16( qMin<qint64>( q, 65535 ) );
 					po.links.push_back( l );
 					po.linkKeys.push_back( k );
+					TbkLinkExt x;
+					x.side = ord[i].side;
+					x.door = ord[i].door;
+					bool tinted = false;
+					for ( int c = 0; c < 3; c++ ) {
+						x.tint[c] = quint8( std::lround( std::clamp( ord[i].c->tw[c] / ord[i].c->w, 0.0, 1.0 ) * 255.0 ) );
+						tinted |= x.tint[c] != 255;
+					}
+					ch.tinted += tinted ? 1 : 0;
+					ch.back += x.side ? 1 : 0;
+					ch.door += x.door ? 1 : 0;
+					po.ext.push_back( x );
 				}
 			}
 			r.linkCount = quint32( po.links.size() );
@@ -536,6 +741,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probes, 
 			continue;
 		Bin a, back;
 		bool split = false;
+		quint8 mask = 0;
 		for ( int i = 0; i < 6; i++ ) {
 			const Bin & bi = sb.b[i];
 			if ( !bi.n )
@@ -543,12 +749,20 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probes, 
 			if ( bi.nrm[0] * sb.b[w].nrm[0] + bi.nrm[1] * sb.b[w].nrm[1] + bi.nrm[2] * sb.b[w].nrm[2] < 0 ) {
 				split = true;
 				back.add( bi );
+				mask |= quint8( 1u << i );
 				continue;
 			}
 			a.add( bi );
 		}
 		R.twoSided += split ? 1 : 0;
-		if ( split && spec.spill )
+		if ( split && v4 ) {
+			// lane BAKE4: v4 keeps the second side in its own cell (the oneside red drops it)
+			backMask.emplace( e.first, mask );
+			if ( !redOneSide ) {
+				backFin.emplace( e.first, makeFinal( back, e.first ) );
+				R.backSurfels++;
+			}
+		} else if ( split && spec.spill )
 			backs.emplace_back( e.first, back );
 		fin.emplace( e.first, makeFinal( a, e.first ) );
 	}
@@ -605,6 +819,9 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probes, 
 		R.misses += ch.misses;
 		R.linksTurned += ch.turned;
 		R.linksSpilled += ch.spilled;
+		R.linksBack += ch.back;
+		R.linksDoor += ch.door;
+		R.linksTinted += ch.tinted;
 	}
 	R.msRays = double( tm.nsecsElapsed() ) / 1e6;
 	tm.restart();
@@ -620,7 +837,10 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probes, 
 			R.turnedMean += po.turned;
 			R.voidMean += po.voidShare;
 			R.probesCapped += po.capped ? 1 : 0;
+			R.glassMean += po.glassShare;
+			R.probesRoomed += po.pext.room[0] ? 1 : 0;
 		}
+	R.glassMean /= qMax( 1, R.probes );
 	R.skyMean /= qMax( 1, R.probes );
 	R.unlinkedMean /= qMax( 1, R.probes );
 	R.turnedMean /= qMax( 1, R.probes );
@@ -635,22 +855,57 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probes, 
 	for ( const auto & sec : sectors ) {
 		std::vector<TbkProbe> prs;
 		std::vector<TbkLink> lks;
-		std::map<Key, int> used;
+		std::vector<TbkLinkExt> lex;
+		std::vector<TbkProbeExt> pex;
+		std::map<Key, int> used, usedBack;
+		std::map<quint32, int> roomsHere;
 		for ( const ProbeOut * po : sec.second ) {
 			TbkProbe r = po->rec;
 			r.linkOffset = quint32( lks.size() );
 			lks.insert( lks.end(), po->links.begin(), po->links.end() );
-			for ( const Key & k : po->linkKeys )
-				used[k] = 0;
+			for ( size_t i = 0; i < po->linkKeys.size(); i++ )
+				( v4 && po->ext[i].side ? usedBack : used )[po->linkKeys[i]] = 0;
 			prs.push_back( r );
+			if ( v4 ) {
+				lex.insert( lex.end(), po->ext.begin(), po->ext.end() );
+				pex.push_back( po->pext );
+				for ( const quint32 rm : po->pext.room )
+					if ( rm && rm != kProbeRoomNone )
+						roomsHere[rm] = 0;
+			}
 		}
-		std::vector<TbkSurfel> sfs;
+		std::vector<TbkSurfel> sfs, bks;
 		for ( const auto & u : used ) {
 			const auto it = fin.find( u.first );
 			if ( it != fin.end() )
 				sfs.push_back( it->second.rec );
 		}
+		for ( const auto & u : usedBack ) {
+			const auto it = backFin.find( u.first );
+			if ( it != backFin.end() )
+				bks.push_back( it->second.rec );
+		}
+		std::vector<TbkRoomBox> bxs;
+		if ( v4 && roomBoxes && !redRooms )
+			for ( const ProbeRoomBox & b : *roomBoxes )
+				if ( roomsHere.count( b.room ) ) {
+					TbkRoomBox x;
+					x.room = b.room;
+					for ( int k = 0; k < 3; k++ ) {
+						x.lo[k] = b.lo[k];
+						x.hi[k] = b.hi[k];
+					}
+					x.reserved = 0;
+					bxs.push_back( x );
+				}
 		TbkHeader h;
+		if ( v4 ) {
+			h.version = 4u;
+			h.reserved[0] = quint32( bks.size() );
+			h.reserved[1] = quint32( bxs.size() );
+			h.reserved[2] = ( redOneSide ? 0u : 1u ) | ( roomBoxes && !redRooms ? 2u : 0u ) | ( doorBoxes.empty() ? 0u : 4u )
+				| ( glassOn ? 8u : 0u );
+		}
 		h.cellX = sec.first.first;
 		h.cellY = sec.first.second;
 		h.surfelCellSize = cellS;
@@ -670,10 +925,18 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probes, 
 		f.write( reinterpret_cast<const char *>( sfs.data() ), qint64( sfs.size() * sizeof( TbkSurfel ) ) );
 		f.write( reinterpret_cast<const char *>( prs.data() ), qint64( prs.size() * sizeof( TbkProbe ) ) );
 		f.write( reinterpret_cast<const char *>( lks.data() ), qint64( lks.size() * sizeof( TbkLink ) ) );
+		if ( v4 ) {
+			f.write( reinterpret_cast<const char *>( bks.data() ), qint64( bks.size() * sizeof( TbkSurfel ) ) );
+			f.write( reinterpret_cast<const char *>( lex.data() ), qint64( lex.size() * sizeof( TbkLinkExt ) ) );
+			f.write( reinterpret_cast<const char *>( pex.data() ), qint64( pex.size() * sizeof( TbkProbeExt ) ) );
+			f.write( reinterpret_cast<const char *>( bxs.data() ), qint64( bxs.size() * sizeof( TbkRoomBox ) ) );
+		}
 		f.close();
 		R.files.append( path );
 		R.sectors++;
 		R.surfels += int( sfs.size() );
+		R.backWritten += int( bks.size() );
+		R.boxesWritten += int( bxs.size() );
 		R.links += int( lks.size() );
 	}
 	R.msWrite = double( tm.nsecsElapsed() ) / 1e6;
@@ -697,6 +960,14 @@ QString probeBakeCensusText( const ProbeBakeResult & r )
 	  << ", links to it " << r.linksSpilled << "), links refused as turned away " << r.linksTurned
 	  << " (mean " << QString::number( r.turnedMean, 'f', 4 ) << " of the sphere)"
 	  << ", albedo " << ( r.albedoKnown ? "from the textures" : "GREY (the soup carried none)" ) << "\n";
+	if ( r.version >= 4 )   // lane BAKE4
+		t << "bake: .tbk v4: second sides kept in their own cell " << r.backSurfels << " (written " << r.backWritten
+		  << ", links to them " << r.linksBack << "); doors " << r.doors << " (links through one " << r.linksDoor
+		  << "); glass " << r.glassTris << " triangles (links tinted " << r.linksTinted << ", sphere seen through glass mean "
+		  << QString::number( r.glassMean, 'f', 4 ) << "); probes in a room " << r.probesRoomed << ", room boxes "
+		  << r.boxesWritten << "\n";
+	else
+		t << "bake: .tbk v3 (FO4CS's own format; no back sides, rooms, doors or glass)\n";
 	t << "bake time ms: rays " << qRound( r.msRays ) << ", write " << qRound( r.msWrite ) << "\n";
 	return s;
 }
@@ -718,6 +989,7 @@ int probeBakeCli( const QStringList & args )
 		else if ( a == QLatin1String( "--red" ) ) { bs.red = nx; i++; }
 		else if ( a == QLatin1String( "--no-sky" ) ) { bs.noSky = true; }
 		else if ( a == QLatin1String( "--no-spill" ) ) { bs.spill = false; }
+		else if ( a == QLatin1String( "--tbk" ) ) { bs.tbkVersion = nx.toInt() >= 4 ? 4 : 3; i++; }
 		else if ( a == QLatin1String( "--max-links" ) ) { bs.maxLinks = quint32( qBound( 8, nx.toInt(), 4096 ) ); i++; }
 		else if ( a == QLatin1String( "--no-openings" ) ) { ps.apertures = false; }
 		else if ( a == QLatin1String( "--no-rooms" ) ) { ps.coverage = false; }
@@ -725,7 +997,8 @@ int probeBakeCli( const QStringList & args )
 	const QStringList rc = rect.split( ',' );
 	if ( soupPath.isEmpty() || outDir.isEmpty() || rc.size() != 4 ) {
 		std::fprintf( stderr, "usage: probebake --soup <file> --rect minX,minY,maxX,maxY --out <dir> "
-			"[--rays n] [--threads n] [--spacing s] [--red octant|normal] [--no-sky] [--no-spill] [--max-links n] [--no-openings] [--no-rooms]\n" );
+			"[--rays n] [--threads n] [--spacing s] [--red octant|normal|oneside|rooms|glass] [--no-sky] [--no-spill] [--tbk 3|4] "
+			"[--max-links n] [--no-openings] [--no-rooms]\n" );
 		return 2;
 	}
 	ps.minX = rc[0].toFloat();
@@ -744,7 +1017,7 @@ int probeBakeCli( const QStringList & args )
 		return 1;
 	}
 	ProbeBakeResult br;
-	if ( !probeBake( soup, pr.probes, bs, outDir, &br ) ) {
+	if ( !probeBake( soup, pr.probes, bs, outDir, &br, &pr.roomBoxes ) ) {
 		std::fprintf( stderr, "probebake: %s\n", qPrintable( br.error ) );
 		return 1;
 	}

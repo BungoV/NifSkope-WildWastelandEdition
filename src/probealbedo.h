@@ -54,7 +54,8 @@ public:
 	ProbeAlbedo & operator=( const ProbeAlbedo & ) = delete;
 
 	//! The map at (u, v), times `vc` (0..1, gamma), as linear 0..1. False = no map read.
-	bool sample( const QString & tex, float u, float v, const float vc[3], float out[3] );
+	//! lane BAKE4: `alpha` (optional) takes the map's alpha there (glass coverage).
+	bool sample( const QString & tex, float u, float v, const float vc[3], float out[3], float * alpha = nullptr );
 	/*! A Greyscale_To_PaletteColor surface, as the game paints it: the map's green at (u, v)
 	 *  picks the column and `row` (the palette scale x vertex red, or a CNAM/MODC index) the
 	 *  row of `palette`; the palette color replaces the albedo (no vertex color on top). Linear
@@ -73,5 +74,26 @@ private:
 	QString root;
 	QHash<QString, DDSTexture16 *> cache;
 };
+
+struct NativeSrcShape;
+struct ProbeSoup;
+class Vector3;
+class Matrix;
+
+/*! Lane BAKE4: GLASS FROM A REAL CELL. One placed shape (world = pos + rot * model * scale) goes
+ *  into the soup as panes when it is one (NativeSrcShape::bakePane(): a material file read that
+ *  says blended over, not a decal, environment mapped, not soft -- the game's windows and car
+ *  glass; its mist, beams and glow cards are soft and not environment mapped, and take no light
+ *  away; a blended shape with no material file is a splash or a lamp cover). Per triangle the
+ *  transmittance is T = 1 - a (1 - c): a = the material's opacity x the map's alpha x the vertex
+ *  alpha, c = the map's linear color x the vertex color (the vertex color alone with no map). An
+ *  effect material's opacity counts twice (its shader multiplies it in twice) and its base color
+ *  x scale tints c. Not modelled: the view-angle falloff and a palette's alpha.
+ *  Returns the triangles fed (0 = not a pane). `census`, when given, takes one tab-separated row
+ *  for every blended or effect shape met (tests/spells/probe_glass_check.py re-decides each from
+ *  the material file). WW_CELL_PROBE_GLASS_RED = haze (every blended shape is a pane) | ignored
+ *  (none is): the gate's reds. */
+int probeGlassFeed( ProbeSoup & soup, ProbeAlbedo & alb, const NativeSrcShape & s, const Vector3 & pos,
+	const Matrix & rot, float scale, quint32 ref, const QString & model, QString * census );
 
 #endif // PROBEALBEDO_H
