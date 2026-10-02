@@ -29,20 +29,27 @@ like glass are water drip splashes, lamp covers and klaxon shells.
   C light     per link, the pane product along the segment from the probe to the surfel's stored
               position (the checker's own triangle test) against the link's stored tint:
                 seen   of the link weight whose segment crosses a pane, the share the bake tinted
-                mass   bake attenuation / segment attenuation, summed over all links
+                mass   bake attenuation / bundle attenuation, summed over all links; a link's
+                       bundle is nine segments: to the stored position and to the centers of the
+                       eight octants of the surfel's cell (a link gathers every ray that lands in
+                       its cell, so its tint is a mean over the cell, not the center's)
                 clear  of the link weight whose segment is clear, the share the bake left clear
-Gates, set before the first run: seen >= 0.80, mass in [0.75, 1.33], clear >= 0.97.
+Gates, set before the first run and never moved: seen >= 0.80, mass in [0.75, 1.33], clear >= 0.97.
 C is not run (and fails) when A failed: a wrong census is not worth an hour of segments.
-The first real cell (Vault111Cryo, 2026-10-02) failed C at seen 0.656, mass 0.748 while the segment
-ran along the link's stored direction to the surfel's distance. That end point is not the surfel:
-100 links "crossed" a pane the bake stored clear, and for all 100 the segment to the surfel's own
-position is clear too. To the surfel's position the same bake reads 0.993 and 1.151. The gates did
-not move.
+Two corrections of the checker's own walk, both after a real cell failed and both measured:
+* Vault111Cryo failed at seen 0.656, mass 0.748 while the segment ran along the link's stored
+  direction to the surfel's distance. That end point is not the surfel: 100 links "crossed" a pane
+  the bake stored clear, and for all 100 the segment to the surfel's own position is clear too.
+* NorthEndMeanPastries (seven sneeze guards in a row, 12 triangles each) failed at mass 0.586 with
+  the center segment alone as the denominator: a center that threads two or three small panes
+  reads T 0.18 where the cell's mean is 0.46. With the bundle the same files read 0.860 (and
+  Vault111Cryo 0.893, was 1.053). The center alone is still printed.
 
   T types     (with --esm and --cell) THE BAKE SEES THE FIXED WORLD ONLY. Every reference in
               souprefs.tsv is looked up in the plugin by the gates' own reader; its base record's
               type must be one of STAT MSTT TREE FURN CONT ACTI TERM FLOR LIGH (role 1, triangles)
-              or DOOR (role 2, a box). Pick-up items, actors and everything else: zero.
+              or DOOR (role 2, a box), or a static collection (SCOL) whose every part is one of
+              the first list. Pick-up items, actors and everything else: zero.
 One verdict line per stage, then `glass PASS` or `glass FAIL`; exit 0 on PASS.
 """
 import os
@@ -57,6 +64,7 @@ from probe_bake import (ALB_MAGIC, GLS_MAGIC, SOUP_MAGIC, files_in, floordiv, gl
                         surfel_of)
 
 SEEN_MIN, MASS_LO, MASS_HI, CLEAR_MIN = 0.80, 0.75, 1.33, 0.97
+OCTANTS = [(x, y, z) for x in (0.25, 0.75) for y in (0.25, 0.75) for z in (0.25, 0.75)]
 SOUP_TYPES = ('STAT', 'MSTT', 'TREE', 'FURN', 'CONT', 'ACTI', 'TERM', 'FLOR', 'LIGH')
 PLACED = (b'REFR', b'ACHR', b'PGRE', b'PMIS', b'PHZD', b'PARW', b'PBAR', b'PBEA', b'PCON', b'PFLA')
 COLS = ('ref', 'model', 'block', 'name', 'material', 'kind', 'matread', 'blend', 'src', 'dst', 'decal', 'env',
@@ -173,7 +181,7 @@ def read_soup_glass(path):
 
 def soup_types(run, esm, cell):
     """Stage T: (ok, verdict line)."""
-    from cell_lit_check import record, walk   # the gates' own plugin reader (python, no NifSkope)
+    from cell_lit_check import fields, record, walk   # the gates' own plugin reader (python, no NifSkope)
     rows = []
     try:
         for line in open(os.path.join(run, 'souprefs.tsv'), encoding='utf-8', errors='replace'):
@@ -184,7 +192,7 @@ def soup_types(run, esm, cell):
         return False, 'T FAIL: no reference list (%s)' % e
     buf = open(esm, 'rb').read()
     want = {r[0] for r in rows}
-    kind, ref_at, cell_form, placed = {}, {}, None, []
+    kind, at, ref_at, cell_form, placed = {}, {}, {}, None, []
     for t, form, off, stack in walk(buf):
         if t in PLACED:
             if form in want:
@@ -196,34 +204,53 @@ def soup_types(run, esm, cell):
             if record(buf, off)[1].get(b'EDID', b'').split(b'\0')[0].decode('cp1252', 'replace') == cell:
                 cell_form = form
         kind[form] = t.decode('latin1')
+        if t == b'SCOL':
+            at[form] = off
 
-    def base_type(t, off):
+    def base_of(t, off):
+        """(base type, the types of its parts when it is a static collection)."""
         if t != b'REFR':
-            return t.decode('latin1')
+            return t.decode('latin1'), None
         f = record(buf, off)[1]
         if b'NAME' not in f:
-            return 'no base'
-        return kind.get(struct.unpack_from('<I', f[b'NAME'])[0], 'unknown')
+            return 'no base', None
+        b = struct.unpack_from('<I', f[b'NAME'])[0]
+        bt = kind.get(b, 'unknown')
+        if bt != 'SCOL':
+            return bt, None
+        size, flags = struct.unpack_from('<II', buf, at[b] + 4)
+        data = buf[at[b] + 24:at[b] + 24 + size]
+        if flags & 0x00040000:
+            data = zlib.decompress(data[4:])
+        return bt, {kind.get(struct.unpack_from('<I', p)[0], 'unknown') for ft, p in fields(data) if ft == b'ONAM'}
 
     def fmt(d):
         return ' '.join('%s %d' % kv for kv in sorted(d.items())) or 'none'
 
-    in_soup, outside, said_off = {}, [], 0
+    # one row per placed model: a static collection gives one per part, under the collection's reference
+    in_soup, outside, said_off, done = {}, [], 0, {}
     for form, role, said in rows:
-        bt = base_type(*ref_at[form]) if form in ref_at else 'not in the plugin'
-        in_soup[bt] = in_soup.get(bt, 0) + 1
-        if (role == 1 and bt not in SOUP_TYPES) or (role == 2 and bt != 'DOOR') or role not in (1, 2):
+        if form not in done:
+            done[form] = base_of(*ref_at[form]) if form in ref_at else ('not in the plugin', None)
+            in_soup[done[form][0]] = in_soup.get(done[form][0], 0) + 1
+        bt, parts = done[form]
+        if parts is not None:   # a collection is fixed world when every part is; a row names the part's type
+            good = role == 1 and bool(parts) and all(p in SOUP_TYPES for p in parts)
+            said_off += said not in parts
+        else:
+            good = (role == 1 and bt in SOUP_TYPES) or (role == 2 and bt == 'DOOR')
+            said_off += bt != said
+        if not good:
             outside.append('%08X %s' % (form, bt))
-        said_off += bt != said
     cell_types = {}
     for t, off in placed:
-        bt = base_type(t, off)
+        bt = base_of(t, off)[0]
         cell_types[bt] = cell_types.get(bt, 0) + 1
     ok = bool(rows) and not outside and not said_off and cell_form is not None
-    return ok, ('T %s: %d references in the soup, by the plugin\'s own base records: %s; outside the fixed-world '
-                'list: %d%s%s; the cell places %d: %s' % (
-                    'PASS' if ok else 'FAIL', len(rows), fmt(in_soup), len(outside),
-                    (' (%s)' % ', '.join(outside[:4])) if outside else '',
+    return ok, ('T %s: %d references in the soup (%d placed models), by the plugin\'s own base records: %s; outside '
+                'the fixed-world list: %d%s%s; the cell places %d: %s' % (
+                    'PASS' if ok else 'FAIL', len(done), len(rows), fmt(in_soup), len(set(outside)),
+                    (' (%s)' % ', '.join(sorted(set(outside))[:4])) if outside else '',
                     ('; %d rows name another type than the plugin' % said_off) if said_off else '',
                     len(placed), fmt(cell_types) if cell_form is not None else 'CELL NOT FOUND'))
 
@@ -374,7 +401,7 @@ def main(a):
     gc = gtris.mean(1) if len(gtris) else np.zeros((0, 3))
     gr = np.linalg.norm(gtris - gc[:, None, :], axis=2).max(1) if len(gtris) else np.zeros(0)
     w_cross = w_cross_seen = w_clear = w_clear_ok = 0.0
-    att_bake = att_seg = w_all = 0.0
+    att_bake = att_seg = att_center = w_all = 0.0
     n_links = n_tinted = 0
     for _, t in tbks:
         for i, pr in enumerate(t['probes']):
@@ -393,23 +420,36 @@ def main(a):
                 tint.append(x['tint'].astype(np.float64) / 255.0)
             if not ends:
                 continue
-            w, tint = np.array(w), np.array(tint)
-            seg = np.array(ends) - o
-            tend = np.linalg.norm(seg, axis=1)
-            dirs = seg / np.maximum(tend, 1e-9)[:, None]
-            near = np.linalg.norm(gc - o, axis=1) <= tend.max() + gr   # the panes this probe's segments can reach
+            w, tint, ends = np.array(w), np.array(tint), np.array(ends)
+            cell = float(t['cell'])
+            reach = np.linalg.norm(ends - o, axis=1).max() + 2.0 * cell
+            near = np.linalg.norm(gc - o, axis=1) <= reach + gr   # the panes this probe's segments can reach
             nt, nT = gtris[near], gT[near]
             step = max(1, 1500000 // max(1, len(nt)))   # rays per pass: the test is rays x panes
-            Tc = np.concatenate([glass_through(nt, nT, o, dirs[j:j + step], tend[j:j + step])[0]
-                                 for j in range(0, len(dirs), step)])
-            tc, tb = Tc.mean(1), tint.mean(1)
+
+            def through(to):
+                seg = to - o
+                tend = np.linalg.norm(seg, axis=1)
+                dirs = seg / np.maximum(tend, 1e-9)[:, None]
+                return np.concatenate([glass_through(nt, nT, o, dirs[j:j + step], tend[j:j + step])[0]
+                                       for j in range(0, len(dirs), step)]).mean(1)
+
+            tc, tb = through(ends), tint.mean(1)
+            # the bundle: the stored position and the centers of the eight octants of the surfel's cell
+            tm = tc.copy()
+            if len(nt):
+                base = np.floor(ends / cell) * cell
+                for q in OCTANTS:
+                    tm += through(base + np.array(q) * cell)
+                tm /= 9.0
             cross = tc < 0.98
             w_cross += w[cross].sum()
             w_cross_seen += w[cross & (tb < 0.995)].sum()
             w_clear += w[~cross].sum()
             w_clear_ok += w[~cross & (tb >= 0.75)].sum()
             att_bake += float((w * (1.0 - tb)).sum())
-            att_seg += float((w * (1.0 - tc)).sum())
+            att_seg += float((w * (1.0 - tm)).sum())
+            att_center += float((w * (1.0 - tc)).sum())
             w_all += w.sum()
             n_links += len(w)
             n_tinted += int((tb < 0.995).sum())
@@ -422,11 +462,11 @@ def main(a):
         clear = w_clear_ok / w_clear if w_clear > 0 else 0.0
         c_ok = w_cross > 0 and seen_share >= SEEN_MIN and MASS_LO <= mass <= MASS_HI and clear >= CLEAR_MIN
         print('C %s: %d links, %d tinted; a pane lies on %.2f%% of the link weight by the checker\'s own segments; '
-              'seen %.3f (>= %.2f), mass %.3f (%.2f..%.2f; light taken %.3f%% bake, %.3f%% segments), '
-              'clear %.4f (>= %.2f)' % (
+              'seen %.3f (>= %.2f), mass %.3f (%.2f..%.2f; light taken %.3f%% bake, %.3f%% the nine-segment bundles, '
+              '%.3f%% the center segments alone), clear %.4f (>= %.2f)' % (
                   'PASS' if c_ok else 'FAIL', n_links, n_tinted, 100.0 * w_cross / max(w_all, 1e-9), seen_share,
                   SEEN_MIN, mass, MASS_LO, MASS_HI, 100.0 * att_bake / max(w_all, 1e-9),
-                  100.0 * att_seg / max(w_all, 1e-9), clear, CLEAR_MIN))
+                  100.0 * att_seg / max(w_all, 1e-9), 100.0 * att_center / max(w_all, 1e-9), clear, CLEAR_MIN))
     bad += not c_ok
     return done()
 
