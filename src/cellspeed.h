@@ -11,6 +11,7 @@
  *
  * A measuring instrument, not a feature: no menu row, no INI key. */
 
+#include <QString>
 #include <QtGlobal>
 
 namespace CellSpeed
@@ -27,6 +28,11 @@ void count( const char * what, qint64 n );
 //! Appends the table; also runs by itself when the process ends with a table open.
 void end();
 qint64 nowNs();
+/*! WW_CELL_SPEED_REOPEN=<spec>[;<spec>...] (with the dump on): once a cell has opened and drawn for five
+ *  seconds, the next spec is opened in the same window, and after the last the window quits -- one table
+ *  per cell, so the tables say what a closed cell leaves behind. 1 = open `fname` again now (WW_CELL_OPEN
+ *  has been set to the next spec), 0 = quit, -1 = not asked. */
+int reopenStep( const QString & fname );
 
 //! Scope timer for add(). Costs one bool test when the dump is off.
 class Acc

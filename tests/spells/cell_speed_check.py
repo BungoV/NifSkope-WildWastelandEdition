@@ -25,11 +25,11 @@ import sys
 import numpy as np
 from PIL import Image
 
-# The floors the gate holds (fractions of the reference). Measured 2026-10-02, see the lane's table in
-# WW_CHANGES.md; set well under the measured gain so machine noise does not trip them and well over zero
-# so the old path (--red slow) cannot pass.
-FLOOR_S = 0.25
-FLOOR_MB = 0.40
+# The floors the gate holds (fractions of the reference). Measured 2026-10-02 on three cells (the lane's
+# table in WW_CHANGES.md): 63-70% fewer seconds, 41-49% less peak memory. Set under the measured gain so
+# machine noise does not trip them and far over zero so the old path (--red slow, 0%) cannot pass.
+FLOOR_S = 0.50
+FLOOR_MB = 0.33
 
 # The picture's margin over the two reference runs' own difference. Measured 2026-10-02 with exes that
 # draw the same thing: Vault111Cryo references differ by 30-47 pixels of step 1, a third run by 42; the 3x3

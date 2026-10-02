@@ -205,6 +205,18 @@ void count( const char * what, qint64 n )
 	s.counts.push_back( c );
 }
 
+int reopenStep( const QString & fname )
+{
+	static QList<QByteArray> next = qgetenv( "WW_CELL_SPEED_REOPEN" ).split( ';' );
+	static const bool asked = !qgetenv( "WW_CELL_SPEED_REOPEN" ).isEmpty();
+	if ( !asked || !on() || !fname.endsWith( QLatin1String( ".wwcell" ), Qt::CaseInsensitive ) )
+		return -1;
+	if ( next.isEmpty() )
+		return 0;
+	qputenv( "WW_CELL_OPEN", next.takeFirst() );
+	return 1;
+}
+
 void end()
 {
 	if ( !on() )

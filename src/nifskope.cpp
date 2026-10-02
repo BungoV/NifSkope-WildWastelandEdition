@@ -10590,6 +10590,8 @@ void NifSkope::load()
 	emit completeLoading( loaded, fname );
 	perfMark( "completeLoading consumers" );
 	CellSpeed::mark( "views rebuilt (completeLoading)" );
+	if ( const int step = CellSpeed::reopenStep( fname ); step >= 0 )   // lane SPEED1: measurement only
+		QTimer::singleShot( 5000, this, [this, step, fname]() { if ( step ) loadFile( fname ); else qApp->quit(); } );
 	// reframe on the new contents, after the scene has been rebuilt
 	if ( loaded && ogl )
 		ogl->setOrientation( ogl->viewState(), true );
