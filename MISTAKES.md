@@ -5,6 +5,28 @@ Written the moment a mistake is recognised, unprompted (CONSTITUTION rule 2).
 Format: date -- what was done -- what was true -- how it was found -- the rule.
 Newest at the top.
 
+## 2026-10-02 -- HEMI1: a gate view the new rule never decided; lights assumed round; a reached gate run last; five merges chasing main
+
+- **A gate frame that holds the lights is not a gate frame the lights decide (HEMI1).** The first box-light gate
+  ran in Vault111Cryo because its frame holds 66 box lights; no pixel there is cut by a box, so the box clip
+  passed unproven and the red could not fail on it. Rule: before a view enters a gate, count the pixels the new
+  rule DECIDES (differs from the old rule) with the checker offline; require a floor on that count in the gate.
+- **A new light rule was written for spheres without asking which shape those lights have (AMBO2 / HEMI1).**
+  The Ambient Only volumes were drawn as spheres; 29 of the 39 placed are linked to a box, including all three
+  in the gate cell. The gate agreed 100% because its checker made the same assumption. Rule: when a rule covers
+  a set of placed records, run the shape census over that set first (flags + linked refs), and have the checker
+  derive the volume from the plugin, not from the lane's own summary.
+- **A source was changed and the gate that covers it was never run (HEMI1).** The lane clipped the bounce
+  relight (src/probegi.cpp) by the light's shape on day one and ran cell_lit and cell_shadow only; cell_gi.sh,
+  whose checker still summed every light as an omni, was first run at the very end. It would still have passed
+  (5 of 400 surfels differ, bar 97%), which is exactly why nobody saw it. Rule: list every gate whose
+  "covered sources" loop names a file you edited (grep the file name in tests/spells/*.sh) and run each once.
+- **Chasing main cost five merges (HEMI1).** main moved five times while the lane waited for the shared window
+  (waits of 90, 84, 56, 73 and 36 minutes); each merge wanted a rebuild and a gate. Rule: gate in ONE short job
+  per merge (own gate first), check `git log MERGE_HEAD..main` before queueing and before committing, and report
+  as soon as the own gate is green on the newest main; the commit message says which gates ran on which merge
+  (ba7e8bdb was never gated on its own; c9d8588f ran cell_lit and cell_refs only).
+
 ## 2026-10-02, lane BAKE4: what went wrong on the way to .tbk v4 and the glass tint
 
 - Fog taken for glass. The first glass feed took every "blended over" shape of a real cell as a tinting pane.
