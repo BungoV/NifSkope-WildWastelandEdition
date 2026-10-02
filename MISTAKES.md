@@ -5,6 +5,25 @@ Written the moment a mistake is recognised, unprompted (CONSTITUTION rule 2).
 Format: date -- what was done -- what was true -- how it was found -- the rule.
 Newest at the top.
 
+## 2026-10-02 -- FXD1: a checker threshold picked before the defect's own size was measured
+
+What happened: the first draft of the haze-hole checker called a pixel a hole when it kept under 0.35 of its
+neighbours' lift. That number was a guess. On the old order it caught 2 of bungo's 6 marks, and the frame with
+the fix still "failed" with 162 pixels that had nothing to do with the defect (1-px lines on silhouettes, and
+the frost on a cryo pod's window).
+
+Why: the defect is partial. A decal with alpha a keeps (1 - a) of the haze, so most of the 735 pixels the fix
+changes kept 0.55 to 0.82 of their neighbours' lift, not under 0.35. And the two false-positive classes were
+never measured on a clean frame before the bar was written.
+
+Rule: before fixing a threshold, print the distribution of the measured quantity over the pixels the fix
+changes (old order against fixed), and list what the checker flags on the FIXED frame by group with its world
+position. Each group that is not the defect gets a named exclusion with its own count (silhouettes: 89 px ->
+0), not a looser bar.
+
+Also: `Scene::drawDeferredShapes` is static; the first build failed on a per-scene test written inside it
+(one wasted build under the lock). A per-scene test belongs on the Shape.
+
 ## 2026-10-02 -- CUBE1: a decode order written without checking the texture format; a gate run on a start without the archives; a stopped gate whose lock waiter lived on; a merge gated after main had moved
 
 ### 2026-10-02 05:29 -- CUBE1 wrote "the game decodes the cube after the filter" without checking the texture format

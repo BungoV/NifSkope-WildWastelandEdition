@@ -709,6 +709,70 @@ decoded after the filter; (2) the env scale's packing (x^2 x 50, capped at 50) i
 material side that writes it was read in lane notes only; (3) exteriors are out of scope: there the game also
 blends a cell / sky cube, which this lane does not draw.
 
+### 2x. Decals draw before the blended pass: no dark marks in the haze (lane FXD1, 2026-10-02)
+
+bungo circled dark spots "passing through the particles" at the far door of the Vault 111 cryo walkway (camera
+of the marked shot: look-at 384,-480,60, view 3, distance 260, FOV 70, 1600x1000; eye 644,-480,60). Located
+first, with the effects hidden and shown and the two position probes (lift = shown - hidden, summed over RGB):
+
+| mark | pixel | world | distance | lift before -> after (neighbours) | shape under it |
+|---|---|---|---|---|---|
+| upper left | 730,410 | -491,-594,178 | 1147 | 18 -> 410 (411) | ref 00001932 V111RWallEx01.nif, its decal shapes ":14" (V111GreebsAlpha01DECAL.BGSM) and ":34" (V111LabelSet02.BGSM) |
+| mid left | 707,447 | -461,-628,116 | 1116 | 7 -> 257 (261) | same wall |
+| upper right | 852,420 | -463,-396,160 | 1115 | 0 -> 428 (426) | same wall |
+| mid right | 839,446 | -494,-415,120 | 1142 | 168 -> 351 (352) | same wall |
+| lower right | 883,511 | -455,-347,14 | 1108 | 60 -> 217 (222) | ref 00001931 V111RWallCrL01.nif ":34" |
+| lower left | 672,511 | -455,-683,14 | 1119 | 60 -> 156 (156) | ref 00001933 V111RWallCrR01.nif ":14", ":34" |
+
+Every one is a decal of the lighting shader with alpha blend (vent slits, stencilled labels), on an opaque
+wall about 1100 units away, behind all the walkway's haze. The same holds for the floor stripes
+(V111FloorStripeRestricted03, V111LabelSet03.BGSM) and the cryo pods' label decals nearer the eye. It is not
+the soft fade: `WW_CELL_FX_RED=nosoft` and `legacy` leave the marks as they are.
+
+The mechanism. A cell welds each material's shapes into one bucket and every bucket has the same origin. The
+second pass sorts by the origin's view depth with a stable sort, so in a cell it keeps the buckets in the order
+they were made: effect buckets first, material-named buckets after. A blended decal therefore drew after every
+haze card and laid the bare wall colour (times its alpha) over the haze in front of it.
+
+The game's order (Todd's treat): decals, opaque and blended, are drawn before the sorted blended pass. So nothing was changed about depth writes or the sort;
+`Scene::drawDeferredShapes` now draws the lighting shader's second-pass decals first
+(`Shape::wwDecalDrawsFirst()`: decal by the shader flags or by the material file, not refraction; Cell lights
+on only, so a plain NIF view is untouched). On bungo's frame 725 pixels change and every one gets brighter;
+with the imagespace on, the upper-left mark goes [59 60 49] -> [207 206 196]. In a bright room the same rule
+dims a decal by what the haze takes from its neighbours of equal brightness (held-out camera -4600,-280,120
+view 5: 444 pixels, all darker; band by band of surface brightness their lift is within 3 levels of the
+unchanged neighbours', e.g. -30 against -30 and -34 against -32).
+
+Gate `tests/spells/cell_fxdepth.sh` + `cell_fxdepth_check.py` (independent, no shape list). Per camera: effects
+hidden, the run under test, probes 2 and 3. A pixel's peers are the pixels within 12 px whose surface is at
+the same distance from the eye (within 4 %); a nearer surface is no peer, which is how the checker leaves out
+the geometry in front of the haze. A judged pixel is a hole when it keeps under 0.6 of its peers' median lift.
+Not judged: silhouettes (3 x 3 distance spread over 2 %; the picture is smoothed there and the probe is not --
+89 false pixels without this rule), pixels brighter than their peers, and places where the peers disagree
+(lower quartile under 0.85 of the median: an effect lying on the surface, such as the pod's frosted pane).
+- R: enough judged pixels. 306,192 and 178,032 (>= 20,000).
+- D: hole pixels in groups of >= 3. Green 0 and 0 (bar 0). Red `--red late` (`WW_CELL_FXD_RED=late`, the old
+  order): 65 px in 9 groups and 44 px in 5 groups, FAIL on both cameras (the red must reach 20).
+- Thresholds were set on the two cameras before the gate ran; the clean frames stay at 0 up to 0.75. A third
+  camera never used for that (-4600,-280,120) is clean too (0 holes, 106,976 judged) but has no subject for
+  the red, so it is not in the gate.
+Re-run on the same exe: `cell_fx.sh` PASS (it shoots the haze through the changed pass), `cell_is.sh` PASS
+(the final picture of the same room), `cell_glow.sh` PASS (K 167; the glow cards share the second pass).
+
+Open.
+- The red catches four of the six marks; the two label marks are brighter than their neighbours without the
+  haze, and the checker does not judge brighter pixels.
+- Census of Vault111Cryo's blended lighting-shader shapes (269 models, 1423 placements): 301 placed shapes carry
+  the decal flag and a material file (drawn first when the file says decal, as for every mark above), 58 carry the decal flag on the model only, with no material
+  file (NpcPipboyGroundTake01 "ScreenDust:0", V111GearDoorConsole01 "Lid:1", ...), 0 are plain glass. The
+  cell's lighting bucket writes fixed shader flags without the decal bits (src/cellview.cpp, the bucket
+  writer), so those 58 are not known as decals and stay in bucket order after the haze. The gate finds no hole on
+  the three cameras. Carrying the flag into the bucket changes bucket keys, so it was left for a lane that owns
+  the bucket writer.
+- Seen, not judged: the cryo pod's window frost (CryoPod02 "Window:9", CryopodFrost.BGEM, effect shader with
+  depth write) draws a hard-edged bright streak at 332..342, 430..480 of bungo's frame, the same before and
+  after this change.
+
 ## 3. Open
 
 - `.tbk` v4: two surfel sides per cell (gives back the refused thin-wall weight), room ids (2f).
