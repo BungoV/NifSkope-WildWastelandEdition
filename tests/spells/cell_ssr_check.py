@@ -256,8 +256,10 @@ def light(x):
 
 
 def judge(name, got, exp, tol_abs, shows_at, spread=None, bar=0.99):
-    """agree where the expectation shows, and the totals' ratio; returns (verdict, line)."""
-    shows = exp > shows_at
+    """agree where the expectation OR the viewer shows, and the totals' ratio; returns (verdict, line)."""
+    # both sides: a march that skips the 50-unit refusal adds hits where the rebuild has none, and a mask taken
+    # from the expectation alone never looks there (the live nogap red passed at 100.0% before this)
+    shows = (exp > shows_at) | (got > shows_at)
     npx = int(shows.sum())
     if npx < MIN_PIXELS:
         return 'SKIP', '%s SKIP (%d pixels show the value, under %d)' % (name, npx, MIN_PIXELS)

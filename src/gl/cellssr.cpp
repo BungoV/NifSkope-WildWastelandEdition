@@ -33,6 +33,7 @@ struct SsrState
 {
 	bool loaded = false;
 	int red = 0;			// 1 off (computed, not applied), 2 nogap, 4 nofade
+	int probe = 0;			// WW_CELL_LIT_PROBE: another lane's probe reads its own term, without the reflection
 	QString dump;			// WW_CELL_SSR_DUMP
 	bool pass = false;		// the scene pass is drawing
 	bool flagged = false;	// the draw being set up carries the flag
@@ -46,6 +47,7 @@ SsrState & ssr()
 		const QByteArray red = qgetenv( "WW_CELL_SSR_RED" ).trimmed();
 		s.red = red == "off" ? 1 : red == "nogap" ? 2 : red == "nofade" ? 4 : 0;
 		s.dump = QString::fromLocal8Bit( qgetenv( "WW_CELL_SSR_DUMP" ) );
+		s.probe = qEnvironmentVariableIntValue( "WW_CELL_LIT_PROBE" );
 	}
 	return s;
 }
@@ -337,7 +339,7 @@ void wwCellSsrDraw( Scene * scene, bool cellProgram )
 		return;
 	SsrGpu & g = ssrGpus()[r];
 	const bool on = g.ready && g.doc == scene->nifModel && g.unit > 0 && !( s.red & 1 ) && s.flagged
-		&& !glIsEnabled( GL_BLEND ) && wwCellLightsWanted( scene );
+		&& !glIsEnabled( GL_BLEND ) && wwCellLightsWanted( scene ) && ( s.probe == 0 || s.probe == 61 );
 	prog->uni1b( "cellSsrOn", on );
 	prog->uni1b( "cellSsrMat", s.flagged );
 	if ( g.unit <= 0 )
