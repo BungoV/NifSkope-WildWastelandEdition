@@ -13,7 +13,7 @@
 # Not judged by eye. Per camera, one window per pass, the same camera each time:
 #   probe 2/3  every cell-lit fragment writes its world position (high, low bytes), 4 its world normal
 #   probe 9    ... the gloss the lights used (red; the legacy program only)
-#   probe 11   ... the placed lights' specular / 4, before the material's mask, raw
+#   probe 30   ... the placed lights' specular / 4, before the material's mask, raw
 # Then tests/spells/cell_spec_check.py rebuilds each sampled pixel's sum from the plugin's lights (the
 # cell_lit_check.py walk) with the game's specular written out again, V from the camera dump, and compares.
 #
@@ -95,7 +95,7 @@ for entry in $CELLS; do
 	say "== $entry"
 	redenv=(); [ -n "$RED" ] && redenv=( WW_CELL_SPEC_RED="$RED" )
 	ok=1
-	for p in 2 3 4 9 11; do
+	for p in 2 3 4 9 30; do
 		[ "$(shoot "$entry" probe$p WW_CELL_LIT=1 WW_CELL_LIT_PROBE=$p "${redenv[@]}")" = 1 ] || ok=0
 	done
 	check "$entry: pictures written" "$ok"

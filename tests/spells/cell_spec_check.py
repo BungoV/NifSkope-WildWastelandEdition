@@ -3,7 +3,7 @@
 
   cell_spec_check.py <Fallout4.esm> <interior EDID> <shot dir> [label: the shots' prefix, default the EDID]
 
-Reads <label>.probe2/3/4/9/11.png, their .cam dumps and <label>.probe11.notes from the shot dir. The lights come
+Reads <label>.probe2/3/4/9/30.png, their .cam dumps and <label>.probe30.notes from the shot dir. The lights come
 from tests/spells/cell_lit_check.py's own walk of the plugin (gated there). The specular is written out again
 here from a reading of the game's shipped deferred point light shader (the variant with the specular bit;
 the one without it writes zero to its specular target, so a light flagged Non Specular, LIGH 0x8000, adds none):
@@ -12,7 +12,7 @@ the one without it writes zero to its specular target, so a light flagged Non Sp
   m = min(NdotL, NdotV); G = VdotH >= 2 NdotH m ? 2 NdotH (NdotV == m ? 1 : NdotL / NdotV) / VdotH : 1 / NdotV
   f = 1 - VdotH; F = min((1 - f^5) 0.2 + f^5, 1)
   specular = min(D G F / 4, 15) pi x NdotL x the light's radial / cone weight x its colour   (x the gbuffer mask)
-V runs from each pixel to the camera (the .cam dump), the gloss is probe 9's red. Probe 11 = the sum / 4,
+V runs from each pixel to the camera (the .cam dump), the gloss is probe 9's red. Probe 30 = the sum / 4,
 before the mask. Judged over the clean pixels, and again over the pixels where either side shows a specular;
 the tolerance is 3/255 + 8% + the spread of the expected value over half a step of the probes' gloss, normal
 and position (the lobe is sharp; the lamps a Non Specular flag hides are not in that spread). The viewer's
@@ -73,10 +73,10 @@ def spec_sum(lights, P, N, V, gloss, honour_flag=True):
 
 def main(esm, cell, shots, label=None):
     label = label or cell
-    tags = (2, 3, 4, 9, 11)
+    tags = (2, 3, 4, 9, 30)
     img = {p: np.asarray(Image.open(os.path.join(shots, '%s.probe%d.png' % (label, p))).convert('RGB'), float)
            for p in tags}
-    notes = open(os.path.join(shots, label + '.probe11.notes'), encoding='utf-8', errors='replace').read()
+    notes = open(os.path.join(shots, label + '.probe30.notes'), encoding='utf-8', errors='replace').read()
     m = re.search(r'cell lighting: .*center=(-?[\d.]+),(-?[\d.]+),(-?[\d.]+)', notes)
     if not m:
         return 'spec FAIL %s: no "cell lighting ... center=" line in the notes' % label
@@ -117,7 +117,7 @@ def main(esm, cell, shots, label=None):
     gloss = img[9][ys, xs, 0] / 255.0
     lights = lights_of(esm, cell)
     exp = np.clip(spec_sum(lights, Pp, Np, V, gloss) / 4.0, 0, 1)
-    got = img[11][ys, xs] / 255.0
+    got = img[30][ys, xs] / 255.0
     # the lobe is sharp, and the probes carry the gloss and the normal in 8 bits and the position in whole units:
     # the tolerance takes the spread of the expected value over half a step of each (measured 2026-10-02: with
     # the gloss alone 51 of 871 highlight pixels missed, all beside a lamp; with all three none did, and the
