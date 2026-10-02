@@ -85,6 +85,8 @@ def is_marker_model(model):
     of this function can no longer pass quietly.
     """
     m = model.lower().replace('/', '\\')
+    if m.endswith('\\blackplane01.nif'):    # lane MISS1: no marker, the game draws it
+        return False
     return ('\\marker' in m or 'marker_' in m
             or m.endswith('markerx.nif') or m.startswith('marker')
             or '\\editor\\' in m)
@@ -167,15 +169,22 @@ def read_hierarchy(data, blocks):
     return xform, parent
 
 
-def chain_of(block, xform, parent):
-    """The transforms from a block's parent outwards, innermost first."""
+def chain_of(block, xform, parent, placed=False):
+    """The transforms from a block's parent outwards, innermost first.
+
+    placed (lane MISS1): leave out the ROOT, the node with no parent. The game
+    gives a placed model's root the reference's own transform, so what the file
+    stores there is never seen -- measured on the game's own combined meshes
+    (V111RPit2WallMid02 carries a half turn on its root and is combined with the
+    same rotation as V111RPit2WallMid01, which carries none).
+    """
     out = []
     seen = set()
     i = block
     while i in parent and i not in seen:
         seen.add(i)
         i = parent[i]
-        if i in xform:
+        if i in xform and not (placed and i not in parent):
             out.append(xform[i])
     return out
 
@@ -242,7 +251,7 @@ def model_points(data_root, model, cache):
                     blk = parent[blk]
                 if marker:
                     continue
-                chain = chain_of(i, xform, parent)
+                chain = chain_of(i, xform, parent, placed=True)
                 o = start + 4                       # name
                 ne = struct.unpack_from('<I', data, o)[0]
                 o += 4 + 4 * ne                     # extra data list

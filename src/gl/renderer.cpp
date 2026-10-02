@@ -123,6 +123,8 @@ void Renderer::updateSettings()
  */
 void wwPbrmCensusNoteUploadF0( float f0 );	// src/gl/glproperty.cpp
 
+static Scene * wwAoScene = nullptr;	// lane AO1: the drawing scene, set by setupProgram (Shape::scene is protected)
+
 static NifSkopeOpenGLContext::Program * wwProgramCensus( const NifModel * nif, Shape * mesh,
 	const BSShaderLightingProperty * wwSp, const char * wwKind,
 	int msn, int lodLand, NifSkopeOpenGLContext::Program * program,
@@ -150,6 +152,11 @@ static NifSkopeOpenGLContext::Program * wwProgramCensus( const NifModel * nif, S
 		glStencilFunc( GL_ALWAYS, !cell ? 2 : glIsEnabled( GL_BLEND ) ? 3 : 1, 0xFF );
 		glStencilOp( GL_KEEP, GL_KEEP, GL_REPLACE );
 	}
+	// lane AO1: the obscurance's opaque pass (normal + depth from the opaque cell-lit draws only), and every
+	// other cell-lit draw reads this frame's obscurance (celllights.h)
+	if ( mesh && wwAoScene )
+		wwCellAoDraw( wwAoScene, program && ( program->name == std::string_view( "fo4_cell.prog" )
+			|| program->name == std::string_view( "pbrm_cell.prog" ) ) );
 	/* WW_PBRM_CENSUS (lane PBRR0) rides the same exits: every return of
 	 * setupProgram passes through here with the program it actually bound,
 	 * so the route it prints is the served one. Pick renders (wwKind null) are skipped. */
@@ -269,6 +276,7 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 {
 	wwRestoreSrgbDecode();
 	const NifModel *	nif = mesh->scene->nifModel;
+	wwAoScene = mesh->scene;	// lane AO1
 
 	/* Read here, not inside wwProgramCensus: `Shape::bslsp` is protected and
 	 * only a Shape's friends -- Renderer's own members -- may read it. */

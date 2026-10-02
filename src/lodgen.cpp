@@ -1412,6 +1412,10 @@ struct LodSrcShape
 	QByteArray effectBlock;              //!< lane EFX1: a BGEM-less effect property, serialized (cell view only)
 	quint32 shaderSF1 = 0, shaderSF2 = 0; //!< the source shader property's flags
 	float refractStrength = 0.0f;        //!< lane EFX1: the lighting property's Refraction Strength (cell view only)
+	//! Lane GLOW1: the nearest NiBillboardNode above the shape, its model-space transform and mode (cell view only).
+	bool billboard = false;
+	Transform bbXf;
+	int bbMode = 0;
 	float matAlpha = 1.0f;
 	/*! The shape named a material and NOTHING resolved from it -- no texture
 	 *  set, no BGSM, no BGEM. The viewer draws such a shape neutral and COUNTS
@@ -1469,6 +1473,22 @@ Transform lodgenWorldTransform( const NifModel * nif, const QModelIndex & block 
 	while ( parent.isValid() && nif->blockInherits( parent, "NiAVObject" ) ) {
 		t = Transform( nif, parent ) * t;
 		parent = nif->getBlockIndex( nif->getParent( nif->getBlockNumber( parent ) ) );
+	}
+	return t;
+}
+
+// lane MISS1: the same chain for a PLACED model. The game gives a placed model's root node the reference's
+// own transform, so whatever the file's root carries is never seen; the root is the block with no parent.
+static Transform lodgenPlacedTransform( const NifModel * nif, const QModelIndex & block )
+{
+	Transform t;
+	QModelIndex at = block;
+	while ( at.isValid() && nif->blockInherits( at, "NiAVObject" ) ) {
+		const QModelIndex up = nif->getBlockIndex( nif->getParent( nif->getBlockNumber( at ) ) );
+		if ( !up.isValid() )
+			break;
+		t = Transform( nif, at ) * t;
+		at = up;
 	}
 	return t;
 }
@@ -2191,11 +2211,13 @@ namespace
 //! BEFORE it is resolved (lodgenNativeLoadModelSwapped); the cache key carries it.
 const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 	const QString & meshPath, QHash<QString, QVector<LodSrcShape>> & cache,
-	const LodgenMaterialSubst * swap = nullptr )
+	const LodgenMaterialSubst * swap = nullptr, bool placed = false )
 {
 	if ( swap && swap->isEmpty() )
 		swap = nullptr;
 	QString key = meshPath.toLower();
+	if ( placed )
+		key += QStringLiteral( "|placed" );   // lane MISS1: the root-less load is its own cache entry
 	if ( swap )
 		for ( const auto & sw : *swap )
 			key += QStringLiteral( "|" ) + sw.first + QStringLiteral( ">" ) + sw.second;
@@ -2280,9 +2302,19 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 			const quint16 flags = quint16( ( desc.Value() >> 44 ) & 0xFFFF );
 			const bool fullPrec = ( flags & 0x400 ) != 0;
 			const bool hasColors = ( flags & 0x20 ) != 0;
-			const Transform xf = lodgenWorldTransform( &src, iShape );
+			const Transform xf = placed ? lodgenPlacedTransform( &src, iShape ) : lodgenWorldTransform( &src, iShape );
 			LodSrcShape s;
 			s.colStream = hasColors;
+			// lane GLOW1: the game turns a billboard's subtree to the camera; the geometry stays as authored
+			for ( int blk = src.getParent( b ), hop = 0; blk >= 0 && hop < 64; blk = src.getParent( blk ), hop++ ) {
+				const QModelIndex iUp = src.getBlockIndex( blk );
+				if ( src.blockInherits( iUp, "NiBillboardNode" ) ) {
+					s.billboard = true;
+					s.bbXf = placed ? lodgenPlacedTransform( &src, iUp ) : lodgenWorldTransform( &src, iUp );
+					s.bbMode = src.get<int>( iUp, "Billboard Mode" );
+					break;
+				}
+			}
 			QModelIndex iVD = src.getIndex( iShape, "Vertex Data" );
 			if ( !iVD.isValid() )
 				continue;
@@ -2615,11 +2647,18 @@ QString lodgenMaterialSwapKey( const QString & material )
 }
 
 static bool nativeLoadModelImpl( void * user, const QString & model, const LodgenMaterialSubst * swap,
-	std::vector<NativeSrcShape> * out, bool keepInCache = true );
+	std::vector<NativeSrcShape> * out, bool keepInCache = true, bool placed = false );
 
 bool lodgenNativeLoadModel( void * user, const QString & model, std::vector<NativeSrcShape> * out )
 {
 	return nativeLoadModelImpl( user, model, nullptr, out );
+}
+
+// lane MISS1: the load for a placed reference -- the file's root node transform is left out, as in game
+bool lodgenNativeLoadModelPlaced( void * user, const QString & model, const LodgenMaterialSubst * swap,
+	std::vector<NativeSrcShape> * out )
+{
+	return nativeLoadModelImpl( user, model, swap, out, true, true );
 }
 
 bool lodgenNativeLoadModelOnce( void * user, const QString & model, const LodgenMaterialSubst * swap,
@@ -2635,7 +2674,7 @@ bool lodgenNativeLoadModelSwapped( void * user, const QString & model, const Lod
 }
 
 static bool nativeLoadModelImpl( void * user, const QString & model, const LodgenMaterialSubst * swap,
-	std::vector<NativeSrcShape> * out, bool keepInCache )
+	std::vector<NativeSrcShape> * out, bool keepInCache, bool placed )
 {
 	/* PER THREAD, NOT PER PROCESS (lane PERF1, 2026-09-17). lodgenLoadModel
 	 * hands back a REFERENCE INTO this hash, so a `static` here is the exact
@@ -2656,7 +2695,7 @@ static bool nativeLoadModelImpl( void * user, const QString & model, const Lodge
 	 * twice, and keeps none of them -- a per-call cache, dropped on return. */
 	QHash<QString, QVector<LodSrcShape>> once;
 	const QString & dataRoot = *static_cast<const QString *>( user );
-	const QVector<LodSrcShape> & shapes = lodgenLoadModel( dataRoot, model, keepInCache ? cache : once, swap );
+	const QVector<LodSrcShape> & shapes = lodgenLoadModel( dataRoot, model, keepInCache ? cache : once, swap, placed );
 	out->clear();
 	for ( const LodSrcShape & s : shapes ) {
 		if ( s.pos.isEmpty() || s.tris.isEmpty() )
@@ -2689,6 +2728,16 @@ static bool nativeLoadModelImpl( void * user, const QString & model, const Lodge
 		n.effectMatRead = s.effectMatRead; n.shaderSF1 = s.shaderSF1; n.shaderSF2 = s.shaderSF2;
 		n.effectBlock = s.effectBlock; n.alphaFlags = s.hasAlpha ? s.alphaFlags : 0;	// lane EFX1
 		n.refractStrength = s.refractStrength;
+		if ( s.billboard ) {   // lane GLOW1
+			n.billboard = true;
+			n.bbMode = s.bbMode;
+			n.bbScale = s.bbXf.scale;
+			for ( int r = 0; r < 3; r++ ) {
+				n.bbPos[r] = s.bbXf.translation[r];
+				for ( int c = 0; c < 3; c++ )
+					n.bbRot[r * 3 + c] = s.bbXf.rotation( r, c );
+			}
+		}
 		n.g2p = s.g2pFlag;
 		n.g2pScale = s.g2pScale;
 		n.g2pTex = s.g2pTex;

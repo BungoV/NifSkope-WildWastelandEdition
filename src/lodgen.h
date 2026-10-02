@@ -862,6 +862,12 @@ bool lodgenNativeLoadModelSwapped( void * user, const QString & model, const Lod
 bool lodgenNativeLoadModelOnce( void * user, const QString & model, const LodgenMaterialSubst * swap,
 	std::vector<NativeSrcShape> * out );
 
+/*! Lane MISS1 (2026-10-02): the load for a PLACED reference, swap optional. The game gives a placed
+ *  model's root node the reference's own transform, so the transform the file's root carries is left
+ *  out here; every node below the root is composed as before. The bakes keep their own loads. */
+bool lodgenNativeLoadModelPlaced( void * user, const QString & model, const LodgenMaterialSubst * swap,
+	std::vector<NativeSrcShape> * out );
+
 /*! Lane NEAR1 (2026-09-26): a texture's format and size WITHOUT decoding it, for
  *  the near library's texture-array sidecar. A BA2 texture record carries the
  *  DXGI code, width, height and mip count in its own index entry, so no chunk is

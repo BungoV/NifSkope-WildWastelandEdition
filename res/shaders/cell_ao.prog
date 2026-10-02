@@ -1,0 +1,4 @@
+# The cell view's screen-space ambient obscurance (lane AO1; src/gl/celllights.h). Full-screen passes
+# over the half-size buffers. No conditions: never picked for a shape; celllights.cpp selects it by name.
+
+shaders cell_ao.vert cell_ao.frag
