@@ -550,6 +550,11 @@ public:
 	bool imageSpace( quint32 formID, QString & edid, QByteArray & hnam, QByteArray & cnam, QByteArray & tnam,
 		QString & lut ) const;
 
+	//! lane PLACED1: the plugin itself, for readers kept in their own files (src/esmplaced.cpp)
+	ESMFile * plugin() const { return esm.get(); }
+	//! lane PLACED1: the open interior's child groups, load order (empty for a worldspace)
+	const QVector<quint32> & interiorChildGroups() const { return interiorGroups; }
+
 private:
 	std::unique_ptr<ESMFile> esm;
 	quint32 wsForm = 0;

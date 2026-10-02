@@ -12,6 +12,7 @@ BSD License - see nifskope.h
 #include "cellground.h"		// lane CELLVIEW2
 #include "cellsplat.h"		// lane CELLVIEW4
 #include "cellidentity.h"	// lane CELLVIEW2
+#include "celldecal.h"		// lane PLACED1
 #include "esmdata.h"
 #include "esmweather.h"		// lane FOG2: the fog packing
 #include "lodgen.h"
@@ -134,6 +135,7 @@ struct Bucket
 	Vector3 bbPos;
 	float bbScale = 1.0f;
 	int bbMode = 0;
+	bool decal = false;   // lane PLACED1: a placed decal's pieces (src/celldecal.h): Decal flag, no depth write
 	std::vector<OutVert> verts;
 	std::vector<BucketTri> tris;   // 32-bit: a bucket welds far more than 65,536 vertices
 };
@@ -427,10 +429,11 @@ bool emitBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b,
 		 * screen-space refraction preview (src/gl/renderer.cpp) bends the scene behind it the
 		 * way the game does, instead of showing its normal-map diffuse as a solid swirled disk. */
 		nif->set<quint32>( iShader, "Shader Flags 1",
-			( b.emits ? 2151677953U : ( 2151677953U & ~0x400000U ) ) | ( b.refract ? 0x8000U : 0U ) );
+			( b.emits ? 2151677953U : ( 2151677953U & ~0x400000U ) ) | ( b.refract ? 0x8000U : 0U )
+			| ( b.decal ? 0x04000000U : 0U ) );   // lane PLACED1: Decal
 		if ( b.refract )
 			nif->set<float>( iShader, "Refraction Strength", b.refractStrength );
-		nif->set<quint32>( iShader, "Shader Flags 2", b.withColour ? 0x25U : 5U );
+		nif->set<quint32>( iShader, "Shader Flags 2", ( b.withColour ? 0x25U : 5U ) & ( b.decal ? ~1U : ~0U ) );
 		QModelIndex iTexSet = nif->insertNiBlock( QStringLiteral( "BSShaderTextureSet" ) );
 		nif->setLink( iShader, "Texture Set", nif->getBlockNumber( iTexSet ) );
 		nif->set<uint>( iTexSet, "Num Textures", 10 );
@@ -1125,6 +1128,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 	 * list is what the cell CONTAINS, as the ref table is. WW_CELL_LIGHTS dumps it
 	 * and the gate compares it with an independent walk of the plugin. */
 	QVector<EsmRefr> lightRefs;
+	std::vector<CellDecalRef> decalRefs;   // lane PLACED1: placed decals, projected after the weld
 	auto pushRefr = [&]( const EsmRefr & r, int cellX, int cellY, bool persistent ) {
 		refsRead++;
 		if ( !r.deleted && std::memcmp( &r.baseType, "LIGH", 4 ) == 0 )
@@ -1193,6 +1197,18 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 		}
 		const EsmLodBase & lb = world.lodBase( r.base );
 		const bool isScol = std::memcmp( &r.baseType, "SCOL", 4 ) == 0;
+		if ( std::memcmp( &r.baseType, "TXST", 4 ) == 0 ) {   // lane PLACED1: a decal; its fate is set after the weld
+			CellDecalRef d;
+			d.form = r.formID;
+			d.base = r.base;
+			for ( int k = 0; k < 3; k++ ) {
+				d.pos[k] = r.pos[k];
+				d.rot[k] = r.rot[k];
+			}
+			d.refRow = refRow;
+			decalRefs.push_back( d );
+			return;
+		}
 		if ( !isScol && lb.model.isEmpty() ) {
 			skippedByType[CellPickTable::typeName( r.baseType )]++;
 			cellRefTableMutable().setFate( refRow, CellRefFate::NoModel );
@@ -2283,6 +2299,67 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 			buckets.insert( QStringLiteral( "\x01grid" ), gridB );
 	}
 
+	/* ---- lane PLACED1: THE PLACED DECALS. Each one is clipped out of the opaque surfaces welded
+	 * above (src/celldecal.h has the rule) and drawn as a blended surface with the Decal flag, so
+	 * the lit program lights it like the surface it lies on. The pieces never enter the probe soup:
+	 * the game has no bake that sees its decals. */
+	CellDecalResult decalResult;
+	if ( !decalRefs.empty() ) {
+		std::vector<CellDecalReceiver> receivers;
+		for ( auto it = buckets.constBegin(); it != buckets.constEnd(); ++it ) {
+			const Bucket & b = it.value();
+			if ( b.blend || b.hasAlpha || b.billboard || b.refract || !b.effectMat.isEmpty()
+				|| !b.effectBlock.isEmpty() || b.verts.empty() || b.tris.empty()
+				|| it.key() == QLatin1String( "\x01water" ) || it.key() == QLatin1String( "\x01grid" ) )
+				continue;
+			CellDecalReceiver rc;
+			rc.pos = &b.verts[0].pos[0];
+			rc.nrm = &b.verts[0].nrm[0];
+			rc.stride = sizeof( OutVert );
+			rc.numVerts = b.verts.size();
+			rc.tris = &b.tris[0].v[0];
+			rc.numTris = b.tris.size();
+			receivers.push_back( rc );
+		}
+		const float org[3] = { origin[0], origin[1], origin[2] };
+		cellProjectDecals( world, dataRoot, decalRefs, receivers, org, decalResult,
+			QString::fromLocal8Bit( qgetenv( "WW_CELL_DECAL_DUMP" ) ) );
+		for ( const CellDecalMesh & m : decalResult.meshes ) {
+			if ( m.tris.empty() )
+				continue;
+			Bucket b;
+			b.name = m.name;
+			b.matString = m.diffuse;
+			b.normalTex = m.normal;
+			b.specTex = m.spec;
+			b.decal = true;
+			b.hasAlpha = true;       // blended; the vertex alpha carries the angle fade
+			b.alphaThreshold = 0;
+			b.withColour = true;
+			b.verts.reserve( m.verts.size() );
+			for ( const CellDecalVert & v : m.verts ) {
+				OutVert o;
+				o.pos = Vector3( v.pos[0], v.pos[1], v.pos[2] );
+				o.nrm = Vector3( v.nrm[0], v.nrm[1], v.nrm[2] );
+				o.tan = Vector3( v.tan[0], v.tan[1], v.tan[2] );
+				o.bit = Vector3( v.bit[0], v.bit[1], v.bit[2] );
+				o.uv = Vector2( v.uv[0], v.uv[1] );
+				o.chan[3] = v.alpha;
+				b.verts.push_back( o );
+			}
+			for ( size_t t = 0; t + 2 < m.tris.size(); t += 3 )
+				b.tris.push_back( BucketTri{ { m.tris[t], m.tris[t + 1], m.tris[t + 2] } } );
+			buckets.insert( QStringLiteral( "\x02" ) + m.name, b );
+		}
+		for ( size_t i = 0; i < decalRefs.size(); i++ ) {
+			const CellDecalFate f = decalResult.fates[i];
+			if ( f == CellDecalFate::NoDecalData )
+				skippedByType[QStringLiteral( "TXST" )]++;   // a texture set that is not a decal: as before
+			cellRefTableMutable().setFate( decalRefs[i].refRow, f == CellDecalFate::Drawn ? CellRefFate::Projected
+				: ( f == CellDecalFate::NoDecalData ? CellRefFate::NoModel : CellRefFate::Refused ) );
+		}
+	}
+
 	// ---- lane PRTPPLACE: place the probes, write them, draw them
 	QString probeNotes;
 	QString giBakeDir;      // lane PRTPGI: the folder the bake just wrote, relit once the lights are read
@@ -2629,6 +2706,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 				sk.append( QStringLiteral( "%1 %2" ).arg( t ).arg( skippedByType.value( t ) ) );
 			s << "  skipped, no model on the base: " << sk.join( QLatin1String( ", " ) ) << "\n";
 		}
+		s << cellDecalCensusLine( decalResult );   // lane PLACED1
 		s << "  buckets over 65,536 vertices " << bucketsWide << " (largest " << qulonglong( bucketMaxVerts )
 		  << "), shapes drawn with their own vertex colors " << shapesVertexColor
 		  << ", placements drawn with a material swap " << placementsSwapped
