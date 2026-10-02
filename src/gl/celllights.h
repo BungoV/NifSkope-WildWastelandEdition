@@ -218,4 +218,23 @@ QString wwCellImageSpaceEcho( Scene * scene );
 void wwCellShadowPass( Scene * scene );
 QString wwCellShadowEcho( Scene * scene );
 
+/*! THE AMBIENT OBSCURANCE (lane AO1, docs/PRTP_PLAN.md "ambient obscurance"): the game's screen-space obscurance, from its own
+ *  shaders. Its settings are the INI's, never the cell's (radius 108.2, bias 0.6, intensity 7.1 game units, on
+ *  in every cell). The game computes it at half the view from the opaque pass's depth and normals: 5 taps over
+ *  2 turns, a disc of radius x 100 / depth pixels, the depth read from a min-of-2x2 mip by the tap's reach,
+ *  1 - intensity x sum f^3 max((v.n - bias') / (v.v + 0.01), 0) / r^6 with f = max(r^2 - v.v, 0), the bias
+ *  growing past 0.3 of 7000 units and toward the screen edge; turned by a random angle each frame and kept
+ *  0.99 of the history, which starts over from a frame at 0.95 or more when it is under 0.7 (a still view =
+ *  that history's time average, over kAoAngles angles here); then a 7-tap bilateral blur across and down. It multiplies EVERYTHING its deferred composite writes (the lights, the
+ *  ambient, the specular, emissive, reflections) before the fog; nothing drawn blended (forward) or as an effect.
+ *  Here: wwCellAoPass draws the frame's opaque cell-lit fragments once more (probe 20: view normal, linear
+ *  depth) into a full-size float target, runs res/shaders/cell_ao.frag over it, and the cell programs multiply
+ *  their lit colour by the bilinear sample before their fog. Part of the Cell lights row.
+ *  Pins: WW_CELL_AO=0 (none computed), WW_CELL_AO_RED=off (computed, not applied) | radius (half the radius)
+ *  | noblur (the raw value applied) | noreset (the plain mean over the angles), WW_CELL_AO_DUMP=<file> (the
+ *  opaque pass, the raw and the final obscurance, the numbers; tests/spells/cell_ao.sh). */
+void wwCellAoPass( Scene * scene, bool run );
+//! called with every program setupProgram binds: the opaque pass's masks, and the obscurance a cell-lit draw reads
+void wwCellAoDraw( Scene * scene, bool cellProgram );
+
 #endif

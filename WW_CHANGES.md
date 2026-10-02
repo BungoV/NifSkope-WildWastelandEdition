@@ -1,5 +1,37 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Cell view: corners and creases darken the way the game's do (2026-10-02)
+
+- With Cell lights on, the cell view now has the game's ambient occlusion: the soft darkening in corners, in
+  creases, under pipes and where clutter meets the floor. It uses the game's own settings, the same in every
+  cell, and darkens the same things the game does: all the light on solid surfaces. Glass, steam and other
+  see-through surfaces are not darkened, and fog is laid over it, as in game.
+- There is no new menu row and no new setting; it comes with the Cell lights row.
+- New gate `tests/spells/cell_ao.sh`; reds `off`, `radius`, `noblur` and `noreset` must each FAIL.
+
+## Cell view: why the Vault 111 walkway has no bright pools on the floor (2026-10-02)
+
+Nothing
+looks different after this change. The bright pools the game shows on the cryo walkway floor are the game's
+screen-space reflections: the floor mirrors the lit room, strongest right under each lamp. They are not
+highlights from the lamps; half of the lamps there are marked Non Specular in the plugin and add no highlight
+at all, in the game and in the cell view alike. The cell view does not draw screen-space reflections yet, so the
+pools are still missing. New test tests/spells/cell_spec.sh holds the lamps' highlight to the game's formula and
+fails if a Non Specular lamp ever adds one (env WW_CELL_SPEC_RED=nonspec is its control).
+
+## Cell view: glow cards face you, as in the game (2026-10-02)
+
+- Some effect meshes are flat cards the game always turns to face the camera (the soft glow discs on the
+  Vault 111 cryo pod bases are the example: 165 of them in that cell). The cell view used to lay them flat on
+  the floor, so from eye height you looked at them edge-on and saw nothing. They now turn to face you.
+- Expect a faint haze, not a spotlight: each card is under 2% opaque by its own material, the same as in the
+  game. The light on the floor under the pods comes from the small lights placed there and from bloom, which
+  the cell view already drew.
+- Part of the "Cell lights" row; no new setting.
+- Gate `tests/spells/cell_glow.sh`: the count matches an independent walk of the plugin (165), nothing outside
+  the cards moves (99.999%), 5 of 33 cards measurably brighten their spot from the walkway's start. With the
+  cards laid flat again (the red control) the gate fails, as it must.
+
 ## Cell view: "Ambient Only" lights now dim the room's ambient where they sit (2026-10-01)
 
 - An Ambient Only light changes the room's soft fill light inside a sphere around it, the way the game does.

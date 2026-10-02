@@ -123,6 +123,9 @@ ClState & st()
 			s.red = 256;	// lane HEMI1: hemisphere and box lights drawn as plain omni lights (the cell view applies it)
 		else if ( red == "ambientfull" )
 			s.red = 1024;	// lane AMBO2: the Ambient Only lights' ambient adjustment ignored
+		// lane POOL1: the lights' Non Specular flag ignored (a bit clear of WW_CELL_LIT_RED's)
+		if ( qgetenv( "WW_CELL_SPEC_RED" ).trimmed() == "nonspec" )
+			s.red |= 65536;
 	}
 	return s;
 }
@@ -943,4 +946,323 @@ QString wwCellShadowEcho( Scene * scene )
 			.arg( double( l.dir[0] ), 0, 'f', 5 ).arg( double( l.dir[1] ), 0, 'f', 5 ).arg( double( l.dir[2] ), 0, 'f', 5 );
 	}
 	return o;
+}
+
+/* ---- lane AO1: the ambient obscurance (celllights.h, res/shaders/cell_ao.frag) ---- */
+namespace
+{
+
+constexpr int kAoUnit = 16;			// the obscurance (sampler2D, half the view); 9 on a GPU with only 16 units
+constexpr int kAoAngles = 8;		// a still view's mean over the game's per-frame angle in [0, pi)
+constexpr float kAoRadius = 108.2f, kAoBias = 0.6f, kAoIntensity = 7.1f;	// the game's INI defaults, game units
+
+struct AoState
+{
+	bool loaded = false;
+	bool on = true;			// WW_CELL_AO=0: none computed
+	int red = 0;			// 1 off (computed, not applied), 2 radius (halved), 4 noblur, 8 noreset
+	QString dump;			// WW_CELL_AO_DUMP
+	bool pass = false;		// the opaque pass is drawing
+	QString last = QStringLiteral( "none yet" );
+};
+
+AoState & ao()
+{
+	static AoState a;
+	if ( !a.loaded ) {
+		a.loaded = true;
+		a.on = qgetenv( "WW_CELL_AO" ).trimmed() != "0";
+		const QByteArray red = qgetenv( "WW_CELL_AO_RED" ).trimmed();
+		a.red = red == "off" ? 1 : red == "radius" ? 2 : red == "noblur" ? 4 : red == "noreset" ? 8 : 0;
+		a.dump = QString::fromLocal8Bit( qgetenv( "WW_CELL_AO_DUMP" ) );
+	}
+	return a;
+}
+
+struct AoTarget
+{
+	GLuint tex = 0, fbo = 0;
+	int w = 0, h = 0;
+};
+
+struct AoGpu
+{
+	AoTarget gbuf;			// full size: view normal + linear depth (RGBA32F), with a depth-stencil buffer
+	GLuint gbufDepth = 0;
+	AoTarget mip[5];		// 1..4: the min-of-2x2 depth (R32F)
+	AoTarget raw, across, fin;	// half size: (A, key) RG32F, then the blurs; fin R32F, bilinear
+	const void * doc = nullptr;
+	bool ready = false;
+	int unit = -1;
+};
+
+QHash<const void *, AoGpu> & aoGpus()
+{
+	static QHash<const void *, AoGpu> g;
+	return g;
+}
+
+void aoAlloc( NifSkopeOpenGLContext::GLFunctions * fn, AoTarget & t, int w, int h, GLenum ifmt, GLenum fmt, bool linear )
+{
+	if ( t.tex && t.w == w && t.h == h )
+		return;
+	if ( !t.tex ) {
+		fn->glGenTextures( 1, &t.tex );
+		fn->glGenFramebuffers( 1, &t.fbo );
+	}
+	fn->glBindTexture( GL_TEXTURE_2D, t.tex );
+	fn->glTexImage2D( GL_TEXTURE_2D, 0, GLint( ifmt ), w, h, 0, fmt, GL_FLOAT, nullptr );
+	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, linear ? GL_LINEAR : GL_NEAREST );
+	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, linear ? GL_LINEAR : GL_NEAREST );
+	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
+	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
+	fn->glTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0 );
+	fn->glBindTexture( GL_TEXTURE_2D, 0 );
+	fn->glBindFramebuffer( GL_FRAMEBUFFER, t.fbo );
+	fn->glFramebufferTexture2D( GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, t.tex, 0 );
+	t.w = w;
+	t.h = h;
+}
+
+bool aoIsCellProgram( const NifSkopeOpenGLContext::Program * p )
+{
+	return p && ( p->name == std::string_view( "fo4_cell.prog" ) || p->name == std::string_view( "pbrm_cell.prog" ) );
+}
+
+}	// namespace
+
+void wwCellAoPass( Scene * scene, bool run )
+{
+	if ( !scene || !scene->renderer )
+		return;
+	AoState & a = ao();
+	Renderer * r = scene->renderer;
+	AoGpu & g = aoGpus()[r];
+	g.ready = false;
+	if ( !run || !a.on || !wwCellLightsWanted( scene ) )
+		return;
+	QElapsedTimer timer;
+	timer.start();
+	auto fn = r->fn;
+	if ( g.unit < 0 ) {
+		GLint units = 0;
+		fn->glGetIntegerv( GL_MAX_TEXTURE_IMAGE_UNITS, &units );
+		g.unit = units > kAoUnit ? kAoUnit : 9;
+	}
+	GLint prevFbo = 0, prevRead = 0, vp[4] = { 0, 0, 1, 1 }, prevActive = 0;
+	GLboolean depthMask = GL_TRUE, colorMask[4] = { GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE };
+	fn->glGetIntegerv( GL_DRAW_FRAMEBUFFER_BINDING, &prevFbo );
+	fn->glGetIntegerv( GL_READ_FRAMEBUFFER_BINDING, &prevRead );
+	fn->glGetIntegerv( GL_VIEWPORT, vp );
+	fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
+	fn->glGetBooleanv( GL_DEPTH_WRITEMASK, &depthMask );
+	fn->glGetBooleanv( GL_COLOR_WRITEMASK, colorMask );
+	const bool wasDepth = fn->glIsEnabled( GL_DEPTH_TEST ), wasCull = fn->glIsEnabled( GL_CULL_FACE );
+	const bool wasBlend = fn->glIsEnabled( GL_BLEND ), wasScissor = fn->glIsEnabled( GL_SCISSOR_TEST );
+	const bool wasStencil = fn->glIsEnabled( GL_STENCIL_TEST );
+	const int W = std::max( vp[2], 1 ), H = std::max( vp[3], 1 );
+	const int hw = ( W + 1 ) / 2, hh = ( H + 1 ) / 2;
+	int ms[5][2] = { { W, H } };
+	for ( int m = 1; m < 5; m++ ) {
+		ms[m][0] = std::max( ms[m - 1][0] / 2, 1 );
+		ms[m][1] = std::max( ms[m - 1][1] / 2, 1 );
+	}
+
+	// the targets
+	aoAlloc( fn, g.gbuf, W, H, GL_RGBA32F, GL_RGBA, false );
+	if ( !g.gbufDepth )
+		fn->glGenRenderbuffers( 1, &g.gbufDepth );
+	fn->glBindRenderbuffer( GL_RENDERBUFFER, g.gbufDepth );
+	GLint rbw = 0, rbh = 0;
+	fn->glGetRenderbufferParameteriv( GL_RENDERBUFFER, GL_RENDERBUFFER_WIDTH, &rbw );
+	fn->glGetRenderbufferParameteriv( GL_RENDERBUFFER, GL_RENDERBUFFER_HEIGHT, &rbh );
+	if ( rbw != W || rbh != H )
+		fn->glRenderbufferStorage( GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, W, H );
+	fn->glBindRenderbuffer( GL_RENDERBUFFER, 0 );
+	fn->glBindFramebuffer( GL_FRAMEBUFFER, g.gbuf.fbo );
+	fn->glFramebufferRenderbuffer( GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, g.gbufDepth );
+	for ( int m = 1; m < 5; m++ )
+		aoAlloc( fn, g.mip[m], ms[m][0], ms[m][1], GL_R32F, GL_RED, false );
+	aoAlloc( fn, g.raw, hw, hh, GL_RG32F, GL_RG, false );
+	aoAlloc( fn, g.across, hw, hh, GL_RG32F, GL_RG, false );
+	aoAlloc( fn, g.fin, hw, hh, GL_R32F, GL_RED, true );
+
+	// 1. the opaque cell-lit fragments: the view normal and the linear depth (probe 20); the background far away
+	fn->glBindFramebuffer( GL_FRAMEBUFFER, g.gbuf.fbo );
+	const bool complete = fn->glCheckFramebufferStatus( GL_FRAMEBUFFER ) == GL_FRAMEBUFFER_COMPLETE;
+	NifSkopeOpenGLContext::Program * prog = complete ? r->useProgram( "cell_ao.prog" ) : nullptr;
+	if ( prog )
+		r->stopProgram();
+	if ( !prog ) {
+		fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, GLuint( prevFbo ) );
+		fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( prevRead ) );
+		a.last = complete ? QStringLiteral( "refused(no cell_ao.prog)" ) : QStringLiteral( "refused(target incomplete)" );
+		return;
+	}
+	fn->glViewport( 0, 0, W, H );
+	fn->glDisable( GL_SCISSOR_TEST );
+	fn->glColorMask( GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE );
+	fn->glDepthMask( GL_TRUE );
+	const GLfloat far4[4] = { 0.0f, 0.0f, 0.0f, 1.0e6f };
+	fn->glClearBufferfv( GL_COLOR, 0, far4 );
+	fn->glClear( GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT );
+	fn->glDisable( GL_BLEND );
+	fn->glColorMask( GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE );	// wwCellAoDraw opens it for the opaque cell-lit draws
+	a.pass = true;
+	{
+		NodeList second;
+		scene->collectShapes( second );
+		Scene::drawDeferredShapes( second );
+		scene->drawShapeEffects();
+	}
+	a.pass = false;
+	fn->glColorMask( GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE );
+	fn->glDepthMask( GL_TRUE );
+	fn->glDisable( GL_STENCIL_TEST );
+	fn->glDisable( GL_POLYGON_OFFSET_FILL );
+
+	// 2. the full-screen passes (cell_ao.frag)
+	prog = r->useProgram( "cell_ao.prog" );
+	fn->glDisable( GL_DEPTH_TEST );
+	fn->glDisable( GL_CULL_FACE );
+	fn->glDisable( GL_BLEND );
+	fn->glDepthMask( GL_FALSE );
+	fn->glPolygonMode( GL_FRONT_AND_BACK, GL_FILL );
+	const AoTarget * bound[6] = { &g.gbuf, &g.mip[1], &g.mip[2], &g.mip[3], &g.mip[4], nullptr };
+	for ( int u = 0; u < 5; u++ ) {
+		fn->glActiveTexture( GLenum( GL_TEXTURE0 + u ) );
+		fn->glBindTexture( GL_TEXTURE_2D, bound[u]->tex );
+	}
+	prog->uni1i( "gbuf", 0 );
+	prog->uni1i( "zMip1", 1 );
+	prog->uni1i( "zMip2", 2 );
+	prog->uni1i( "zMip3", 3 );
+	prog->uni1i( "zMip4", 4 );
+	prog->uni1i( "src", 5 );
+	fn->glUniform2i( prog->uniLocation( "fullSize" ), W, H );
+	fn->glUniform2i( prog->uniLocation( "halfSize" ), hw, hh );
+	for ( int m = 0; m < 5; m++ )
+		fn->glUniform2i( prog->uniLocation( "mipSize[%d]", m ), ms[m][0], ms[m][1] );
+	const auto & pm = r->globalUniforms->projectionMatrix;
+	const float p00 = pm[0][0], p11 = pm[1][1];
+	const float radius = kAoRadius * ( ( a.red & 2 ) ? 0.5f : 1.0f );
+	prog->uni2f( "proj", p00, p11 );
+	prog->uni3f( "aoParams", radius, kAoBias, kAoIntensity );
+	prog->uni1i( "aoAngles", kAoAngles );
+	prog->uni1b( "aoNoBlur", ( a.red & 4 ) != 0 );
+	prog->uni1b( "aoNoReset", ( a.red & 8 ) != 0 );
+	static const float quad[12] = { -1, -1, 0, 1, -1, 0, -1, 1, 0, 1, 1, 0 };
+	static const std::uint16_t idx[6] = { 0, 1, 2, 2, 1, 3 };
+	const float * attrs = quad;
+	auto pass = [&]( int stage, const AoTarget & out, const AoTarget * in ) {
+		fn->glActiveTexture( GL_TEXTURE5 );
+		fn->glBindTexture( GL_TEXTURE_2D, in ? in->tex : 0 );
+		prog->uni1i( "aoStage", stage );
+		fn->glBindFramebuffer( GL_FRAMEBUFFER, out.fbo );
+		fn->glViewport( 0, 0, out.w, out.h );
+		r->drawShape( 4, 3, 6, GL_TRIANGLES, GL_UNSIGNED_SHORT, &attrs, idx );
+	};
+	for ( int m = 1; m < 5; m++ ) {
+		prog->uni1i( "mipLevel", m );
+		pass( 1, g.mip[m], m > 1 ? &g.mip[m - 1] : nullptr );
+	}
+	pass( 2, g.raw, nullptr );
+	pass( 3, g.across, &g.raw );
+	pass( 4, g.fin, &g.across );
+	r->stopProgram();
+	for ( int u = 0; u < 6; u++ ) {
+		fn->glActiveTexture( GLenum( GL_TEXTURE0 + u ) );
+		fn->glBindTexture( GL_TEXTURE_2D, 0 );
+	}
+	fn->glActiveTexture( GLenum( prevActive ) );
+
+	g.ready = true;
+	g.doc = scene->nifModel;
+	a.last = QStringLiteral( "on %1x%2 half %3x%4 radius %5 bias %6 intensity %7 angles %8 p00 %9 p11 %10 p20 %11 p21 %12 "
+		"unit %13 red %14 ms %15" ).arg( W ).arg( H ).arg( hw ).arg( hh ).arg( double( radius ), 0, 'f', 2 )
+		.arg( double( kAoBias ), 0, 'f', 2 ).arg( double( kAoIntensity ), 0, 'f', 2 ).arg( kAoAngles )
+		.arg( double( p00 ), 0, 'f', 6 ).arg( double( p11 ), 0, 'f', 6 ).arg( double( pm[2][0] ), 0, 'f', 6 )
+		.arg( double( pm[2][1] ), 0, 'f', 6 ).arg( g.unit ).arg( a.red ).arg( timer.elapsed() );
+
+	// WW_CELL_AO_DUMP=<file>: int32 W H hw hh, the opaque pass (W x H RGBA float, bottom row first), the raw
+	// (A, key) and the final obscurance (hw x hh, top row first); <file>.txt the numbers
+	if ( !a.dump.isEmpty() ) {
+		std::vector<float> gb( size_t( W ) * size_t( H ) * 4 ), raw( size_t( hw ) * size_t( hh ) * 2 ),
+			fin( size_t( hw ) * size_t( hh ) );
+		fn->glPixelStorei( GL_PACK_ALIGNMENT, 4 );
+		fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, g.gbuf.fbo );
+		fn->glReadPixels( 0, 0, W, H, GL_RGBA, GL_FLOAT, gb.data() );
+		fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, g.raw.fbo );
+		fn->glReadPixels( 0, 0, hw, hh, GL_RG, GL_FLOAT, raw.data() );
+		fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, g.fin.fbo );
+		fn->glReadPixels( 0, 0, hw, hh, GL_RED, GL_FLOAT, fin.data() );
+		double mean = 0.0;
+		for ( float v : fin )
+			mean += double( v );
+		mean /= double( std::max<size_t>( fin.size(), 1 ) );
+		a.last += QStringLiteral( " mean %1" ).arg( mean, 0, 'f', 4 );
+		QFile f( a.dump );
+		if ( f.open( QIODevice::WriteOnly ) ) {
+			const qint32 hd[4] = { W, H, hw, hh };
+			f.write( reinterpret_cast<const char *>( hd ), sizeof( hd ) );
+			f.write( reinterpret_cast<const char *>( gb.data() ), qint64( gb.size() * sizeof( float ) ) );
+			f.write( reinterpret_cast<const char *>( raw.data() ), qint64( raw.size() * sizeof( float ) ) );
+			f.write( reinterpret_cast<const char *>( fin.data() ), qint64( fin.size() * sizeof( float ) ) );
+		}
+		QFile t( a.dump + QStringLiteral( ".txt" ) );
+		if ( t.open( QIODevice::WriteOnly | QIODevice::Text ) )
+			t.write( ( QStringLiteral( "ao: " ) + a.last + QStringLiteral( "\n" ) ).toUtf8() );
+	}
+
+	fn->glBindFramebuffer( GL_DRAW_FRAMEBUFFER, GLuint( prevFbo ) );
+	fn->glBindFramebuffer( GL_READ_FRAMEBUFFER, GLuint( prevRead ) );
+	fn->glViewport( vp[0], vp[1], vp[2], vp[3] );
+	fn->glColorMask( colorMask[0], colorMask[1], colorMask[2], colorMask[3] );
+	fn->glDepthMask( depthMask );
+	if ( wasDepth ) fn->glEnable( GL_DEPTH_TEST ); else fn->glDisable( GL_DEPTH_TEST );
+	if ( wasCull ) fn->glEnable( GL_CULL_FACE ); else fn->glDisable( GL_CULL_FACE );
+	if ( wasBlend ) fn->glEnable( GL_BLEND ); else fn->glDisable( GL_BLEND );
+	if ( wasScissor ) fn->glEnable( GL_SCISSOR_TEST ); else fn->glDisable( GL_SCISSOR_TEST );
+	if ( wasStencil ) fn->glEnable( GL_STENCIL_TEST ); else fn->glDisable( GL_STENCIL_TEST );
+}
+
+void wwCellAoDraw( Scene * scene, bool cellProgram )
+{
+	if ( !scene || !scene->renderer )
+		return;
+	AoState & a = ao();
+	Renderer * r = scene->renderer;
+	NifSkopeOpenGLContext::Program * prog = r->getCurrentProgram();
+	cellProgram = cellProgram && aoIsCellProgram( prog );
+	if ( a.pass ) {
+		// the game's opaque (deferred) pass: no blended draw, no effect, nothing that is not cell-lit
+		const bool opaque = cellProgram && !glIsEnabled( GL_BLEND );
+		glColorMask( opaque, opaque, opaque, opaque );
+		if ( !opaque )
+			glDepthMask( GL_FALSE );
+		if ( cellProgram ) {
+			prog->uni1i( "cellProbe", 20 );
+			prog->uni1b( "cellAoOn", false );
+		}
+		return;
+	}
+	if ( !cellProgram || prog->uniLocation( "cellAoOn" ) < 0 )
+		return;
+	AoGpu & g = aoGpus()[r];
+	const bool on = g.ready && g.doc == scene->nifModel && g.unit >= 0 && !( a.red & 1 ) && !glIsEnabled( GL_BLEND )
+		&& wwCellLightsWanted( scene );
+	// bound whether or not this draw reads it (a sampler left on unit 0 would sit beside BaseMap)
+	GLint prevActive = 0;
+	r->fn->glGetIntegerv( GL_ACTIVE_TEXTURE, &prevActive );
+	r->fn->glActiveTexture( GLenum( GL_TEXTURE0 + std::max( g.unit, 0 ) ) );
+	r->fn->glBindTexture( GL_TEXTURE_2D, on ? g.fin.tex : 0 );
+	r->fn->glActiveTexture( GLenum( prevActive ) );
+	prog->uni1i( "cellAo", std::max( g.unit, 0 ) );
+	prog->uni1b( "cellAoOn", on );
+	if ( on ) {
+		GLint vp[4] = { 0, 0, 1, 1 };
+		glGetIntegerv( GL_VIEWPORT, vp );
+		prog->uni4f_l( prog->uniLocation( "cellAoRect" ), FloatVector4( float( vp[0] ), float( vp[1] ),
+			1.0f / float( std::max( vp[2], 1 ) ), 1.0f / float( std::max( vp[3], 1 ) ) ) );
+	}
 }

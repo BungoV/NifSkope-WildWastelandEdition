@@ -5,6 +5,51 @@ Written the moment a mistake is recognised, unprompted (CONSTITUTION rule 2).
 Format: date -- what was done -- what was true -- how it was found -- the rule.
 Newest at the top.
 
+## 2026-10-02 -- AO1: a green gate that judged 4% of the picture; a coverage floor that measured the camera; a shader rule left out as a footnote
+- The first agent's one green run judged "the light the picture got" on 20,260 px, 4% of the frame: the check
+  reads only pixels that end on a solid surface, and steam and glow cards (even their clear texels) lay over 96%
+  of that Vault 111 view. The pass printed PASS and nobody read the pixel count. Found by the second agent
+  reading the count. The gate now hides the effects in both windows and fails under 50% of the geometry.
+  Rule: a PASS line carries its sample size, and the gate fails when the sample is a sliver.
+- The second agent's first floor was "30% of the frame". The Third Rail view is 79% empty space, so a correct
+  build failed it. The floor is now a share of the geometry. Rule: a coverage floor counts what the code can
+  cover, not what the camera frames.
+- The first agent's notes said the game's history restart rule was "not modeled" and left it out of the gate.
+  It moves 0.4-0.5% of pixels by 0.2 on average. It is modeled and gated now (red `noreset`). Rule: a rule
+  read from the shader and left out is listed as open with its measured size, not as a footnote.
+
+## 2026-10-02 -- POOL1: a one-probe tolerance, a search by shape, a shared probe number, flattened endings
+- **A checker's tolerance covered the rounding of one probe only (POOL1, 2026-10-01).** cell_spec_check.py
+  rebuilds a sharp highlight from 8-bit probes; its tolerance took half a step of the gloss but not of the normal
+  or the position, and the green gate failed at 94.1% beside one lamp. Then a x1.3 scale error passed one view
+  pixel by pixel because dim highlights sit inside the fixed floor. Rule: a checker that rebuilds a sharp
+  function takes the spread over every rounded input, and carries a second bar that a wrong scale cannot pass
+  (here the total over the highlight pixels within 5%); prove it with scaled mutants.
+- **"Not in the shader dump" claimed after searching by shape (POOL1, 2026-10-01).** The reflection march was
+  looked for among shaders with loops; it is unrolled (32 steps written out), so it was missed and the lane
+  first reported it absent. Rule: look for a shader by what it reads and writes, not by how it is written,
+  before saying it is not there.
+- **Two lanes picked probe 11 in parallel (POOL1 / AMBO2, 2026-10-01).** Found only at the merge; POOL1 moved to
+  30. Rule: a brief hands out probe numbers the way it hands out red bits.
+- **The Edit tool flattened mixed line endings during a merge (POOL1, 2026-10-02).** Resolving a conflict with
+  Edit rewrote cell_lights.glsl and celllights.cpp as all LF (153 and 450 lines), and eol_restore.py compares to
+  HEAD only, so it cannot give main's lines their endings back in a merge. Rule: after every Edit inside a merge,
+  compare each line's ending with both parents before staging (a merge-aware eol_restore is owed to the lanes
+  folder; the scratch one is scratchpad/pool1_20261001/eol_merge_restore.py).
+
+## 2026-10-02, lane GLOW1: the cause was named before its size was measured
+
+- What happened: the lane found glow cards lying flat at the pod bases and called them the cause of the missing
+  spill, then built the fix. Only afterwards was the card's strength measured: under 2% opaque, +0.03 to
+  +0.4/255 beside a pod. The fix is correct (the game does turn them) but it cannot be the spill that was asked
+  about. The notes also carried "opacity <= 9%": the effect shader applies the material alpha twice, the real
+  figure is 1.8%.
+- Rule: when a candidate is "something we do not draw", estimate what it would add (alpha x color, in levels)
+  BEFORE building it. If the number is below what the eye would report, keep looking and say so.
+- Second one, same lane: a gate camera was moved and the gate queued without that camera ever being rendered
+  and judged once. The first real run failed on it. Rule: a gate is not written until every one of its cameras
+  has been through the checker once, green and red.
+
 ## 2026-10-01 -- AMBO1/AMBO2: the ambient pass called full screen; radii written as XRDS alone; a sed -i edit
 - AMBO1's notes called the game's ambient pass full screen and framed the open question as a camera zone. It is a
   world-space sphere (1.22077 x the radius) drawn only when the pass has lights; AMBO2 found it by reading the
