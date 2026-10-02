@@ -487,6 +487,36 @@ Solomon has none) and ambientfull (the scale ignored). Gate cell_lit.sh's Ambien
 -4200,-250,0, eye 800 away; probe 11 = the ambient sum x 8): inside 100.0% of 410,294 px, outside 99.9%; red
 ambientfull 0.0%.
 
+### 2s. Camera-facing glow cards (lane GLOW1, 2026-10-02)
+
+A shape below an NiBillboardNode is turned to the camera by the game. The cell view welded it into the cell
+flat: the Vault's GlowFillCloudy discs on the cryo pod bases (Effects\Ambient\GlowFillCloudy.nif, node
+GlowMesh128, mode 4; material AmbGlowFillCloudyHalf.bgem through a material swap) lay horizontal, edge-on from
+eye height. Now the generator's loader records the nearest billboard ancestor per shape (transform and mode;
+geometry untouched, bakes do not move: lodgen_native_baseline.sh --check 24 of 24 identical), and the cell view gives each
+such shape, per placement, its own bucket under its own NiBillboardNode (translation = the world pivot, scale =
+placement x node), which the viewer turns to the camera. Every mode is turned the same way (card plane = screen
+plane). Cap 8192 per cell, the rest welded flat and counted. Census line "billboards: N shapes turned to the
+camera, M welded flat". Vault111Cryo: 165 (167 on 10 models, 2 under an opposite-state enable parent).
+Rides the Cell lights row. Red WW_CELL_GLOW_RED=1 (welded flat as before).
+How much it shows: little. The material's alpha is 0.2 and the effect shader applies it twice (0.04), the base
+texture's alpha is at most 115/255, so a card is under 2% opaque. Measured over the flat reference, imagespace
+off: from the walkway's start (cards 700 to 930 units away, overlapping) the best circle gains a mean +1.93/255;
+beside a pod (220 to 430 units) the best gains +0.32. Holding the Soft fades at 1 does not change the near
+figure (+0.040 against +0.029 over the frame). With the imagespace on the frame moves by about one level
+(the exposure measure sees the cards). So this is the haze, not a pool of light on the floor: the floor under
+each base is lit by the placed lights there (radius 46 fade 7.82, radius 72 fade 2.34, radius 97 fade 1.88,
+all drawn since 2a) and by the bloom (bloom on - off beside a pod: max +88/255, >= 8 levels on 0.62% of the
+frame).
+Gate tests/spells/cell_glow.sh (checker's own plugin and mesh walk; each camera names its stages): K the
+census count = the walk's (165 = 167 - 2), N 99.999% of 235,914 px outside the predicted circles unmoved (near
+camera), C 5 of 33 circles gain >= 0.5/255 (far camera). Red flat: K 0 turned, C 0 of 33.
+Not done: the references' emittance (XEMI) tint on the cards (white is used; it can only tint or darken).
+
+For section 3 (Open), one line:
+- Vault 111 pod bases: the glow cards are drawn (2?) but add under 2%; compare in game beside a pod whether the
+  spill is the haze or the lit floor (lights + bloom).
+
 ## 3. Open
 
 - `.tbk` v4: two surfel sides per cell (gives back the refused thin-wall weight), room ids (2f).

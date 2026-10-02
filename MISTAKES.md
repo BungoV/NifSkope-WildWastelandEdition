@@ -5,6 +5,19 @@ Written the moment a mistake is recognised, unprompted (CONSTITUTION rule 2).
 Format: date -- what was done -- what was true -- how it was found -- the rule.
 Newest at the top.
 
+## 2026-10-02, lane GLOW1: the cause was named before its size was measured
+
+- What happened: the lane found glow cards lying flat at the pod bases and called them the cause of the missing
+  spill, then built the fix. Only afterwards was the card's strength measured: under 2% opaque, +0.03 to
+  +0.4/255 beside a pod. The fix is correct (the game does turn them) but it cannot be the spill that was asked
+  about. The notes also carried "opacity <= 9%": the effect shader applies the material alpha twice, the real
+  figure is 1.8%.
+- Rule: when a candidate is "something we do not draw", estimate what it would add (alpha x color, in levels)
+  BEFORE building it. If the number is below what the eye would report, keep looking and say so.
+- Second one, same lane: a gate camera was moved and the gate queued without that camera ever being rendered
+  and judged once. The first real run failed on it. Rule: a gate is not written until every one of its cameras
+  has been through the checker once, green and red.
+
 ## 2026-10-01 -- AMBO1/AMBO2: the ambient pass called full screen; radii written as XRDS alone; a sed -i edit
 - AMBO1's notes called the game's ambient pass full screen and framed the open question as a camera zone. It is a
   world-space sphere (1.22077 x the radius) drawn only when the pass has lights; AMBO2 found it by reading the
