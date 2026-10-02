@@ -256,6 +256,7 @@ vec3 tonemap(vec3 x)
 
 #ifdef WW_CELLLIGHTS
 #include "cell_lights.glsl"
+#include "cell_ao.glsl"
 #endif
 
 void main()
@@ -553,6 +554,9 @@ void main()
 	if ( cellOn )
 		color.rgb = cellLit( color.rgb, albedo, normal, -ViewDir, V, specMask, specColor, alphaR, kSmith,
 		                     emissive * glowScaleSRGB, envSpec );
+	// lane AO1: the ambient obscurance on the whole lit colour (linear, so its root here), before the fog
+	if ( cellOn )
+		color.rgb *= sqrt( cellAoFactor() );
 #endif
 
 	// lane FOG1 (Lookdev weather fog): this colour is sqrt of linear light (tonemap squares it),
@@ -626,5 +630,9 @@ void main()
 	vec3 fogProbeOut;
 	if ( wwFogProbe( -ViewDir, fogProbeOut ) )
 		fragColor = vec4( fogProbeOut, 1.0 );
+#endif
+#ifdef WW_CELLLIGHTS
+	if ( cellOn && cellProbe == 20 )
+		fragColor = cellAoPassOut( normal, -ViewDir );	// lane AO1
 #endif
 }
