@@ -1409,7 +1409,8 @@ struct LodSrcShape
 	 *  Read by the cell view's glass only; nothing gated reads them. */
 	bool effectBlend = false;
 	bool effectMatRead = false;          //!< the BGEM read (cell view effect buckets)
-	QByteArray effectBlock;              //!< lane EFX1: a BGEM-less effect property, serialized (cell view only)
+	bool effectLit = false;              //!< lane FXLIT1: the effect-lighting flag, the BGEM's or the property's (cell view only)
+	QByteArray effectBlock;             //!< lane EFX1: a BGEM-less effect property, serialized (cell view only)
 	quint32 shaderSF1 = 0, shaderSF2 = 0; //!< the source shader property's flags
 	float refractStrength = 0.0f;        //!< lane EFX1: the lighting property's Refraction Strength (cell view only)
 	//! Lane GLOW1: the nearest NiBillboardNode above the shape, its model-space transform and mode (cell view only).
@@ -2522,6 +2523,8 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 							s.effectBlend = em.hasAlphaBlend();
 							s.matAlpha = em.alpha();
 							s.effectMatRead = true;
+							// lane FXLIT1: lit by the placed lights in the game (cell view only)
+							s.effectLit = ( em.effectShaderFlags2() & 0x0004U ) && em.lightingInfluence() > 0.0f;
 						}
 					}
 					/* The property's own Source Texture is the fallback, exactly as
@@ -2581,6 +2584,9 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 					QBuffer eb( &s.effectBlock );
 					if ( !( eb.open( QIODevice::WriteOnly ) && src.saveIndex( eb, iShader ) ) )
 						s.effectBlock.clear();
+					// lane FXLIT1: Shader Flags 2 bit 30, Effect Lighting
+					s.effectLit = ( src.get<quint32>( iShader, "Shader Flags 2" ) & 0x40000000U )
+						&& src.get<quint8>( iShader, "Lighting Influence" ) > 0;
 				}
 				/* A shape that NAMED a material and got nothing out of it, out of
 				 * any of the three sources. It is counted and drawn neutral rather
@@ -2726,6 +2732,7 @@ static bool nativeLoadModelImpl( void * user, const QString & model, const Lodge
 		n.effectTex0 = s.effectTex0; n.matUnreadable = s.matUnreadable;
 		n.effectBlend = s.effectBlend; n.matAlpha = s.matAlpha;
 		n.effectMatRead = s.effectMatRead; n.shaderSF1 = s.shaderSF1; n.shaderSF2 = s.shaderSF2;
+		n.effectLit = s.effectLit;	// lane FXLIT1
 		n.effectBlock = s.effectBlock; n.alphaFlags = s.hasAlpha ? s.alphaFlags : 0;	// lane EFX1
 		n.refractStrength = s.refractStrength;
 		if ( s.billboard ) {   // lane GLOW1

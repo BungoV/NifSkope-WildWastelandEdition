@@ -1,6 +1,7 @@
 #include "bsshape.h"
 
 #include "gl/celllights.h"
+#include "gl/cellfxlit.h"
 #include "gl/glnode.h"
 #include "gl/glscene.h"
 #include "gl/renderer.h"
@@ -282,7 +283,8 @@ void BSShape::drawShapes( NodeList * secondPass )
 		return;
 	}
 
-	if ( !selectionFlags && ( bsesp || ( bslsp && bslsp->hasRefraction ) ) && wwCellProbePass( scene ) )
+	if ( !selectionFlags && ( bsesp || ( bslsp && bslsp->hasRefraction ) ) && wwCellProbePass( scene )
+		&& !( bsesp && wwCellFxLitProbeShape( scene, id() ) ) )	// lane FXLIT1: its own probes (70..74) draw the lit effects alone
 		return;	// lane EFX1: a harness probe pass measures the surfaces, not the effects or glass over them
 
 	// Render polygon fill slightly behind alpha transparency and wireframe

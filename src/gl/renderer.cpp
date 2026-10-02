@@ -42,6 +42,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/lookdevstage.h"
 #include "gl/sunshadow.h"
 #include "gl/celllights.h"
+#include "gl/cellfxlit.h"
 #include "esmweather.h"
 #include "io/material.h"
 #include "model/nifmodel.h"
@@ -1675,6 +1676,7 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 			fn->glBindTexture( GL_TEXTURE_2D, soft ? scene->fxDepthTexId : 0 );
 			prog->uni1i_l( prog->uniLocation( "fxDepth" ), texunit++ );
 			prog->uni1i( "fxRed", wwCellFxRed() );
+			wwCellFxLitUniforms( scene, mesh->id() );	// lane FXLIT1: a lit effect's four placed lights
 		}
 
 		// BSEffectShader textures (FIXME: should implement using error color?)
@@ -1875,6 +1877,8 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 		GLint dst = 0;
 		glGetIntegerv( GL_BLEND_DST_RGB, &dst );
 		prog->uni1b( "fxAdditive", glIsEnabled( GL_BLEND ) && dst == GL_ONE );
+		if ( wwCellFxLitProbeShape( scene, mesh->id() ) )
+			glDisable( GL_BLEND );	// lane FXLIT1: its probes write the lit effects opaque
 	}
 	return true;
 }
