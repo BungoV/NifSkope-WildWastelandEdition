@@ -8,6 +8,7 @@
 #ifdef WW_CELLLIGHTS
 #define WW_CELL_PBR 1
 #include "cell_lights.glsl"
+#include "cell_ao.glsl"
 #define WW_CELL_FOGGED cellOn	// lane FOG2: a cell-lit draw fogged before its imagespace
 #else
 #define WW_CELL_FOGGED false
@@ -636,6 +637,9 @@ void main()
 	}
 
 #ifdef WW_CELLLIGHTS
+	// lane AO1: the ambient obscurance on the whole lit colour, before the fog
+	if ( cellOn )
+		color.rgb *= cellAoFactor();
 	// lane FOG2: a cell-lit draw fogs here, once (the interior's fog, or the Lookdev weather's outdoors)
 	if ( cellOn && fogOn )
 		color.rgb = wwFog( max( color.rgb, vec3( 0.0 ) ), -ViewDir );
@@ -673,5 +677,9 @@ void main()
 	vec3 csmProbeOut;
 	if ( wwSunShadowProbe( -ViewDir, fragColor.rgb, csmProbeOut ) )
 		fragColor = vec4( csmProbeOut, 1.0 );
+#endif
+#ifdef WW_CELLLIGHTS
+	if ( cellOn && cellProbe == 20 )
+		fragColor = cellAoPassOut( s.N, -ViewDir );	// lane AO1
 #endif
 }

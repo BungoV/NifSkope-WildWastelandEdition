@@ -98,9 +98,9 @@ public:
 
 	/*! Resolve and build one placed actor. True when it is drawn: `key` is what
 	 *  shapes() answers to and `scale` the whole scale to place it with. False
-	 *  = not shown (deleted, no base, initially disabled) or a named refusal,
-	 *  counted either way. */
-	bool place( const EsmRefr & r, bool showDisabled, QString & key, float & scale );
+	 *  = not shown (deleted, no base, or `hidden`: the caller found it disabled
+	 *  at the start) or a named refusal, counted either way. */
+	bool place( const EsmRefr & r, bool hidden, QString & key, float & scale );
 
 	//! The built actor, actor space, bind pose.
 	bool shapes( const QString & key, std::vector<NativeSrcShape> * out ) const;

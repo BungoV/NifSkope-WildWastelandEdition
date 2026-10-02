@@ -4029,6 +4029,8 @@ void GLView::paintGL()
 	// that scene-by-scene made a refractive primary copy the framebuffer before
 	// Loaded NIFs behind it had been drawn. In a workspace, collect every opaque
 	// node first and use one globally sorted transparent/refraction pass.
+	// lane AO1: the obscurance first; the measure reads the obscured light, as the game's adaptation does
+	wwCellAoPass( scene, !scene->selecting && workspaceDrawScenes.isEmpty() );
 	if ( !scene->selecting && workspaceDrawScenes.isEmpty() )
 		wwCellImageSpaceMeasurePass( scene );	// lane IMGS1
 

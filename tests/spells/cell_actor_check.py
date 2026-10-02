@@ -20,7 +20,8 @@ places is resolved and posed again from the published record layouts (the xEdit 
            skin-to-bone transform) * vertex; a bone the skeleton does not name keeps the part's own node.
   PLACE    world = position + R * (vertex * scale), R = euler(-rx, -ry, -rz),
            scale = XSCL * race height for the sex * the middle of the actor's own height range.
-  NOT SHOWN  deleted, no base, or initially disabled (an enable parent with the opposite flag inverts it).
+  NOT SHOWN  deleted, no base, or disabled at the start (its own flag; with an enable parent, the parent's
+             start state turned round by the "opposite" bit, the parent looked up in the whole plugin).
 
 Stages (the gate names the ones each camera carries):
   K  the census line's counts against the walk: read, drawn, not shown, refused by reason
@@ -51,6 +52,7 @@ from cell_lit_check import euler, walk  # noqa: E402  (the plugin walk only)
 from gltf_nifread import Nif  # noqa: E402
 
 TYPES = (b'NPC_', b'LVLN', b'LVLI', b'RACE', b'ARMO', b'ARMA', b'OTFT', b'HDPT')
+PLACED_TYPES = (b'REFR', b'ACHR', b'PGRE', b'PMIS', b'PHZD', b'PARW', b'PBAR', b'PBEA', b'PCON', b'PFLA')
 GTOL = 0.1
 CSHARE = 0.25
 REASONS = {'leveled': 'leveled list (a dice roll)', 'notactor': 'base is no actor record',
@@ -72,7 +74,10 @@ class Plugin:
         self.buf = buf = open(path, 'rb').read()
         self.name = os.path.basename(path)
         self.at, self.refs, cell = {}, [], None
+        self.placed, self._starts = {}, {}   # every placed reference of the plugin, for the enable parents
         for t, form, off, stack in walk(buf):
+            if t in PLACED_TYPES:
+                self.placed[form] = off
             if t in TYPES:
                 self.at[form] = (t, off)
             elif t == b'ACHR':
@@ -110,6 +115,24 @@ class Plugin:
             out.append((name, d[o + 6:o + 6 + n]))
             o += 6 + n
         return out
+
+    def starts_enabled(self, form, depth=0):
+        """The state the plugin starts a reference in: its own initially-disabled flag when it has no enable
+        parent; with one, the parent's start state (found the same way), turned round by the "opposite" bit.
+        None when the form is no placed reference."""
+        if form in self._starts:
+            return self._starts[form]
+        at = self.placed.get(form)
+        if at is None:
+            return None
+        res = not struct.unpack_from('<I', self.buf, at + 8)[0] & 0x800
+        x = dict(self.fields(at)[::-1]).get(b'XESP')
+        if x is not None and len(x) >= 8 and depth < 16:
+            above = self.starts_enabled(u32(x), depth + 1)
+            if above is not None:
+                res = above != bool(u32(x, 4) & 1)
+        self._starts[form] = res
+        return res
 
     def kind(self, form):
         return self.at[form][0] if form in self.at else None
@@ -250,15 +273,12 @@ def mesh_file(data, model):
     return os.path.join(data, m)
 
 
-def resolve(pl, data, flags, f):
+def resolve(pl, data, form, flags, f):
     """One placed actor -> a dict with 'fate' and, when drawn, what is drawn."""
     out = dict(fate='hidden', dead=bool(flags & 0x200))
     if flags & 0x20 or b'NAME' not in f or b'DATA' not in f or not u32(f[b'NAME']):
         return out
-    off = bool(flags & 0x800)
-    if b'XESP' in f and len(f[b'XESP']) >= 8 and u32(f[b'XESP']) and u32(f[b'XESP'], 4) & 1:
-        off = not off
-    if off:
+    if not pl.starts_enabled(form):
         return out
     base = u32(f[b'NAME'])
     looks = pl.owner(base, 0)
@@ -419,7 +439,7 @@ def walk_cell(esm, data, cell):
     for form, off in pl.refs:
         flags = struct.unpack_from('<I', pl.buf, off + 8)[0]
         f = dict(pl.fields(off)[::-1])
-        a = resolve(pl, data, flags, f)
+        a = resolve(pl, data, form, flags, f)
         a['form'] = form
         if a['fate'] == 'drawn':
             v, t = posed_actor(pl, data, a)

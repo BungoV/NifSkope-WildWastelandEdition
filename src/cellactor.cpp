@@ -606,17 +606,14 @@ QVector<EsmRefr> CellActors::references()
 	return out;
 }
 
-bool CellActors::place( const EsmRefr & r, bool showDisabled, QString & key, float & scale )
+bool CellActors::place( const EsmRefr & r, bool hidden, QString & key, float & scale )
 {
 	auto rit = rowOf.constFind( r.formID );
 	if ( rit == rowOf.constEnd() )
 		return false;
 	CellActorRow & row = d->rows[*rit];
-	// the cell view's own rule for a reference: an opposite-state enable parent inverts the flag
-	bool off = r.initiallyDisabled;
-	if ( r.enableParent && r.enableParentOpposite )
-		off = !off;
-	if ( r.deleted || !r.base || ( off && !showDisabled ) )
+	// `hidden`: the cell view's own verdict on the start state (the enable-parent chain, as for any reference)
+	if ( r.deleted || !r.base || hidden )
 		return false;   // the row keeps the fate Hidden
 	auto refuse = [&]( CellActorFate f ) {
 		row.fate = f;

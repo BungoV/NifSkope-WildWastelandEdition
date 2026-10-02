@@ -8,8 +8,9 @@ The shot dir holds off.png (WW_CELL_DECAL_RED=none: no decal drawn, the referenc
 on.notes (its census), on.decals.txt (WW_CELL_DECAL_DUMP) and cam.txt (WW_CELL_CAM_DUMP: "cam=x,y,z").
 Everything else is this file's OWN read of the plugin and the loose meshes (nothing shared with src/):
 
-  THE DECALS  every REFR of the cell whose base is a TXST carrying DODT, not deleted, shown (the initially
-              disabled flag, turned round by an opposite-state enable parent, as the cell view shows refs).
+  THE DECALS  every REFR of the cell whose base is a TXST carrying DODT, not deleted, enabled at the start (its
+              own initially-disabled flag, or with an enable parent the parent's start state turned round by
+              the "opposite" bit; the parent is looked up in the whole plugin).
   THE BOX     the reference's frame, world = R * local with R = euler(-rx, -ry, -rz): projection axis local +Y,
               width axis local +X, height axis local -Z.
               With an XPRM box: centre = the reference position, width = 2 * bounds.x, height = 2 * bounds.z,
@@ -185,13 +186,18 @@ def model_shapes(data, model):
                 mat = (bool(fl & 1), bool(fl & 0x200))
         if mat[0] or mat[1]:
             continue
-        # the chain to the root: hidden nodes and editor markers carry nothing
+        # the chain to the root: hidden nodes and editor markers carry nothing. A placed model's ROOT (the
+        # block with no parent) takes the reference's transform in the game: what the file stores on it is
+        # never seen (lane MISS1, 2026-10-02), so the root's own transform is left out of the chain.
         xf, k, skip = rec['xf'], parent.get(i), rec['name'].lower().startswith('editormarker') or rec['flags'] & 1
+        if k is None:
+            xf = (np.eye(3), np.zeros(3), 1.0)
         while k is not None and not skip:
             n = info[k]
             skip = n['name'].lower().startswith('editormarker') or n['flags'] & 1
-            ra, ta, sa = n['xf']
-            xf = (ra @ xf[0], ra @ xf[1] * sa + ta, sa * xf[2])
+            if parent.get(k) is not None:
+                ra, ta, sa = n['xf']
+                xf = (ra @ xf[0], ra @ xf[1] * sa + ta, sa * xf[2])
             k = parent.get(k)
         if skip:
             continue
@@ -214,7 +220,10 @@ def model_shapes(data, model):
 def cell_walk(esm, cell_edid):
     buf = open(esm, 'rb').read()
     cell_form, txst, base_at, refs = None, {}, {}, []
+    _placed.clear()
     for t, form, off, stack in walk(buf):
+        if t in PLACED_TYPES:
+            _placed[form] = off
         if t == b'REFR':
             if cell_form is not None and any(g[1] == cell_form and g[2] in (6, 8, 9) for g in stack):
                 flags, f = record(buf, off)
@@ -235,13 +244,35 @@ def cell_walk(esm, cell_edid):
     return buf, txst, base_at, refs
 
 
-def shown(flags, f):
+PLACED_TYPES = (b'REFR', b'ACHR', b'PGRE', b'PMIS', b'PHZD', b'PARW', b'PBAR', b'PBEA', b'PCON', b'PFLA')
+_placed, _starts = {}, {}   # every placed reference of the plugin: form -> offset; form -> starts enabled
+
+
+def starts_enabled(buf, form, depth=0):
+    """The state the plugin starts a reference in: its own initially-disabled flag when it has no enable
+    parent; with one, the parent's start state (found the same way), turned round by the "opposite" bit.
+    None when the form is no placed reference. What a quest does later is not in the plugin."""
+    if form in _starts:
+        return _starts[form]
+    at = _placed.get(form)
+    if at is None:
+        return None
+    flags, f = record(buf, at)
+    res = not flags & 0x800
+    x = f.get(b'XESP')
+    if x is not None and len(x) >= 8 and depth < 16:
+        up, bits = struct.unpack_from('<II', x)
+        above = starts_enabled(buf, up, depth + 1)
+        if above is not None:
+            res = above != bool(bits & 1)
+    _starts[form] = res
+    return res
+
+
+def shown(buf, form, flags, f):
     if flags & 0x20 or b'NAME' not in f or b'DATA' not in f:
         return False
-    off = bool(flags & 0x800)
-    if b'XESP' in f and len(f[b'XESP']) >= 8 and struct.unpack_from('<I', f[b'XESP'], 4)[0] & 1:
-        off = not off
-    return not off
+    return bool(starts_enabled(buf, form))
 
 
 def is_marker(model):
@@ -286,7 +317,7 @@ def receivers_of(buf, data, base_at, refs):
             tri_n.append((n @ R.T)[tris])
 
     for _form, flags, f in refs:
-        if not shown(flags, f):
+        if not shown(buf, _form, flags, f):
             continue
         b = struct.unpack_from('<I', f[b'NAME'])[0]
         base(b)
@@ -407,7 +438,7 @@ def decals_of(esm, data, cell):
     soup = Soup(tp, tn)
     out = []
     for form, flags, f in refs:
-        if not shown(flags, f):
+        if not shown(buf, form, flags, f):
             continue
         b = struct.unpack_from('<I', f[b'NAME'])[0]
         if b not in txst:

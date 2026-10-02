@@ -1477,6 +1477,22 @@ Transform lodgenWorldTransform( const NifModel * nif, const QModelIndex & block 
 	return t;
 }
 
+// lane MISS1: the same chain for a PLACED model. The game gives a placed model's root node the reference's
+// own transform, so whatever the file's root carries is never seen; the root is the block with no parent.
+static Transform lodgenPlacedTransform( const NifModel * nif, const QModelIndex & block )
+{
+	Transform t;
+	QModelIndex at = block;
+	while ( at.isValid() && nif->blockInherits( at, "NiAVObject" ) ) {
+		const QModelIndex up = nif->getBlockIndex( nif->getParent( nif->getBlockNumber( at ) ) );
+		if ( !up.isValid() )
+			break;
+		t = Transform( nif, at ) * t;
+		at = up;
+	}
+	return t;
+}
+
 /*! Read an asset the way the game does: a loose folder first when one was
  *  given (the CLI's --data-root), then the game manager's data folders and
  *  archives (Settings > Resources). The panel passes no loose root - bungo,
@@ -2195,11 +2211,13 @@ namespace
 //! BEFORE it is resolved (lodgenNativeLoadModelSwapped); the cache key carries it.
 const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 	const QString & meshPath, QHash<QString, QVector<LodSrcShape>> & cache,
-	const LodgenMaterialSubst * swap = nullptr )
+	const LodgenMaterialSubst * swap = nullptr, bool placed = false )
 {
 	if ( swap && swap->isEmpty() )
 		swap = nullptr;
 	QString key = meshPath.toLower();
+	if ( placed )
+		key += QStringLiteral( "|placed" );   // lane MISS1: the root-less load is its own cache entry
 	if ( swap )
 		for ( const auto & sw : *swap )
 			key += QStringLiteral( "|" ) + sw.first + QStringLiteral( ">" ) + sw.second;
@@ -2284,7 +2302,7 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 			const quint16 flags = quint16( ( desc.Value() >> 44 ) & 0xFFFF );
 			const bool fullPrec = ( flags & 0x400 ) != 0;
 			const bool hasColors = ( flags & 0x20 ) != 0;
-			const Transform xf = lodgenWorldTransform( &src, iShape );
+			const Transform xf = placed ? lodgenPlacedTransform( &src, iShape ) : lodgenWorldTransform( &src, iShape );
 			LodSrcShape s;
 			s.colStream = hasColors;
 			// lane GLOW1: the game turns a billboard's subtree to the camera; the geometry stays as authored
@@ -2292,7 +2310,7 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 				const QModelIndex iUp = src.getBlockIndex( blk );
 				if ( src.blockInherits( iUp, "NiBillboardNode" ) ) {
 					s.billboard = true;
-					s.bbXf = lodgenWorldTransform( &src, iUp );
+					s.bbXf = placed ? lodgenPlacedTransform( &src, iUp ) : lodgenWorldTransform( &src, iUp );
 					s.bbMode = src.get<int>( iUp, "Billboard Mode" );
 					break;
 				}
@@ -2629,11 +2647,18 @@ QString lodgenMaterialSwapKey( const QString & material )
 }
 
 static bool nativeLoadModelImpl( void * user, const QString & model, const LodgenMaterialSubst * swap,
-	std::vector<NativeSrcShape> * out, bool keepInCache = true );
+	std::vector<NativeSrcShape> * out, bool keepInCache = true, bool placed = false );
 
 bool lodgenNativeLoadModel( void * user, const QString & model, std::vector<NativeSrcShape> * out )
 {
 	return nativeLoadModelImpl( user, model, nullptr, out );
+}
+
+// lane MISS1: the load for a placed reference -- the file's root node transform is left out, as in game
+bool lodgenNativeLoadModelPlaced( void * user, const QString & model, const LodgenMaterialSubst * swap,
+	std::vector<NativeSrcShape> * out )
+{
+	return nativeLoadModelImpl( user, model, swap, out, true, true );
 }
 
 bool lodgenNativeLoadModelOnce( void * user, const QString & model, const LodgenMaterialSubst * swap,
@@ -2649,7 +2674,7 @@ bool lodgenNativeLoadModelSwapped( void * user, const QString & model, const Lod
 }
 
 static bool nativeLoadModelImpl( void * user, const QString & model, const LodgenMaterialSubst * swap,
-	std::vector<NativeSrcShape> * out, bool keepInCache )
+	std::vector<NativeSrcShape> * out, bool keepInCache, bool placed )
 {
 	/* PER THREAD, NOT PER PROCESS (lane PERF1, 2026-09-17). lodgenLoadModel
 	 * hands back a REFERENCE INTO this hash, so a `static` here is the exact
@@ -2670,7 +2695,7 @@ static bool nativeLoadModelImpl( void * user, const QString & model, const Lodge
 	 * twice, and keeps none of them -- a per-call cache, dropped on return. */
 	QHash<QString, QVector<LodSrcShape>> once;
 	const QString & dataRoot = *static_cast<const QString *>( user );
-	const QVector<LodSrcShape> & shapes = lodgenLoadModel( dataRoot, model, keepInCache ? cache : once, swap );
+	const QVector<LodSrcShape> & shapes = lodgenLoadModel( dataRoot, model, keepInCache ? cache : once, swap, placed );
 	out->clear();
 	for ( const LodSrcShape & s : shapes ) {
 		if ( s.pos.isEmpty() || s.tris.isEmpty() )
