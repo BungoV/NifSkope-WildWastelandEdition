@@ -1,5 +1,41 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Cell view: why the Vault 111 walkway has no bright pools on the floor (2026-10-02)
+
+Nothing
+looks different after this change. The bright pools the game shows on the cryo walkway floor are the game's
+screen-space reflections: the floor mirrors the lit room, strongest right under each lamp. They are not
+highlights from the lamps; half of the lamps there are marked Non Specular in the plugin and add no highlight
+at all, in the game and in the cell view alike. The cell view does not draw screen-space reflections yet, so the
+pools are still missing. New test tests/spells/cell_spec.sh holds the lamps' highlight to the game's formula and
+fails if a Non Specular lamp ever adds one (env WW_CELL_SPEC_RED=nonspec is its control).
+
+## Cell view: glow cards face you, as in the game (2026-10-02)
+
+- Some effect meshes are flat cards the game always turns to face the camera (the soft glow discs on the
+  Vault 111 cryo pod bases are the example: 165 of them in that cell). The cell view used to lay them flat on
+  the floor, so from eye height you looked at them edge-on and saw nothing. They now turn to face you.
+- Expect a faint haze, not a spotlight: each card is under 2% opaque by its own material, the same as in the
+  game. The light on the floor under the pods comes from the small lights placed there and from bloom, which
+  the cell view already drew.
+- Part of the "Cell lights" row; no new setting.
+- Gate `tests/spells/cell_glow.sh`: the count matches an independent walk of the plugin (165), nothing outside
+  the cards moves (99.999%), 5 of 33 cards measurably brighten their spot from the walkway's start. With the
+  cards laid flat again (the red control) the gate fails, as it must.
+
+## Cell view: "Ambient Only" lights now dim the room's ambient where they sit (2026-10-01)
+
+- An Ambient Only light changes the room's soft fill light inside a sphere around it, the way the game does.
+  Vault 111's three make their areas darker. Outside the sphere nothing changes, and the edge is sharp, as in game.
+- The status line counts them as `ambientvolumes=N`.
+- `tests/spells/cell_lit.sh` adds a view from inside one; `--red ambientfull` ignores the change and must FAIL.
+
+## LOD bake reference hashes current again (2026-10-01)
+
+- The LOD bake's reference list of file hashes (`tests/baselines/stock_baseline.sha256`) is current again. Its 8
+  differences were all the 09-27 cleanup that stopped writing black glow textures and merged duplicate texture
+  layers; nothing else had moved. Gate `tests/spells/lodgen_native_baseline.sh --check`: 24 of 24 identical.
+
 ## Cell view: "Ambient Only" lights no longer light surfaces (2026-10-01)
 
 - Lights marked Ambient Only in the plugin (names like "AmbientModifierDarkGrey01Amb") only adjust the room's

@@ -29,8 +29,9 @@ BSD License - see nifskope.h
  * 3 its low bytes (each over the 65536-unit box centred on the published centre), 4 the world
  * normal * 0.5 + 0.5), WW_CELL_LIT_RED=<red>: "linear" (the radial curve without its 2.2 power),
  * "axis" (spots shine along -Z), "nodalc" (the interior ambient dropped), "ambientlit" (the Ambient Only
- * lights, which add no direct light in game, drawn as ordinary lights; lane AMBO1). Probe 5 (lane PRTPGI): the
- * bounce's irradiance E(N) / pi, raw. */
+ * lights, which add no direct light in game, drawn as ordinary lights; lane AMBO1), "ambientfull" (the Ambient
+ * Only lights' ambient adjustment ignored; lane AMBO2). Probe 5 (lane PRTPGI): the bounce's irradiance E(N) / pi,
+ * raw. Probe 11 (lane AMBO2): the interior ambient's per-channel affine sum before its 2.2, x 8, clamped to 0..1. */
 
 #include <QString>
 #include <QVector>
@@ -57,10 +58,22 @@ struct WwCellLight
 	float shadowBias = 0.0f;        //!< XLIG Shadow Depth Bias (read and echoed; its scale is unread, not applied)
 };
 
+/* lane AMBO2: an Ambient Only light (LIGH flag 0x100000) as the game draws it: a sphere volume of 1.22077 x its
+ * radius (base + XRDS) at the light; the cell ambient of every surface inside it has each channel's affine sum
+ * (before the 2.2) scaled by k = pow(byte / 255, 2.2) x fade. The first light in plugin order that holds a
+ * point wins; it replaces the cell ambient there, never adds. No fade at the edge, no camera rule. */
+struct WwCellAmbientLight
+{
+	float pos[3] = { 0, 0, 0 };     //!< world
+	float volume = 0.0f;            //!< 1.22077 x radius
+	float k[3] = { 1, 1, 1 };       //!< per channel, folded into the ambient before its power
+};
+
 struct WwCellLighting
 {
 	bool interior = false;
 	QVector<WwCellLight> lights;
+	QVector<WwCellAmbientLight> ambientLights;  //!< lane AMBO2, in plugin order (the first that holds a point wins)
 	bool hasDalc = false;
 	float dalc[6][3] = {};          //!< byte / 255 as stored (PRTP2 powers AFTER the affine sum), X+ X- Y+ Y- Z+ Z-
 	bool hasDirectional = false;

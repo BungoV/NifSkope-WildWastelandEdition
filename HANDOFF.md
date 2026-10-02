@@ -1,6 +1,43 @@
 # Handoff — NifSkope, Wild Wasteland Edition
 
-## TOP BLOCK -- written 2026-10-01 18:52 (`date`-read): AMBO1, Ambient Only lights skipped
+## TOP BLOCK -- written 2026-10-02 03:02 (`date`-read): parity wave cut off by the weekly limit, six lanes uncommitted
+
+- 2026-10-01 ~19:35, on bungo's "Do all": eight in-session lanes, the Vault 111 walkway gaps against the game.
+  Ledger and lane rules: E:\Projects\Claude\notes\lanes_20261001\ (LEDGER.md, COMMON.md, withlock.sh).
+  Every lane stopped between 21:47 and 22:38 on the account's weekly usage limit. None wrote a final report.
+- On main: BASE1 (0cba3760 + 881de80c) and AMBO2 (f04faaa0, merge 840f33e0). Main exe 21:06; cell_lit.sh after
+  the merge PASS, red ambientfull FAIL (notes\lanes_20261001\verify_ambo2.log). AMBO2's docs (WW_CHANGES,
+  MISTAKES, PRTP_PLAN 2r) are committed with this block.
+- HEMI1: committed dcf7f3f8 on hemi1-20261001 at 21:30, NOT merged. The lane kept trying CabotHouse01 views
+  until 22:36 (its scratchpad try_cabot.log), so its gate result is unknown: rerun green + red before merging.
+  Findings: notes\hemi1\FINDINGS.md.
+- Uncommitted, each in E:\Projects\NifskopeWWE-<lane> with a built exe there and scratch in
+  scratchpad/<lane>_20261001/ (nothing here is gated by the overseer yet):
+  - POOL1 (floor highlight pools): cell_lights.glsl, celllights.cpp, new cell_spec.sh + checker (staged).
+    Scratch: gate_green.out, gate_red.out, runall.out 22:25.
+  - AO1 (ambient occlusion): new cell_ao.frag/.vert/.glsl/.prog, cell_ao.sh + checker; fo4_default.frag,
+    pbrm_default.frag, celllights.cpp/.h, renderer.cpp, glview.cpp. Findings notes\ao1\FINDINGS.md 20:04.
+    Scratch: try1.log 22:37. No gate output seen.
+  - CUBE1 (cube map scale): cell_lights.glsl, both .frag, celllights.cpp/.h, renderer.cpp, new cell_cube.sh +
+    checker. Scratch: gate, gate_red_cubeold, red2.log 22:06.
+  - GLOW1 (pod glow spill): cellview.cpp, lodgen.cpp, nativeemit.h, new cell_glow.sh + checker. Scratch:
+    gate_green.out, gate_red.out 22:38. It touches lodgen.cpp: the lodgen baseline gate is in reach.
+  - FRAT1 (Fraternal Post mismatch): celllights.cpp, tests/spells/cell_oren.sh. No findings file. Scratch:
+    g_new.log 22:06.
+  - BAKE4 (.tbk v4, two sides + room ids, then glass tint): 13 files (cellview, probealbedo, probebake,
+    probefar and more). Scratch: prtp_reference_v4.exe, run4.log 22:02.
+- Each lane's full transcript (brief, every step): C:\Users\bungo\.claude\projects\E--Projects-Claude\
+  6b94e90a-da02-4884-b365-32e898e917da\subagents\agent-<id>*.jsonl; ids POOL1 a6424574, GLOW1 a308c477,
+  CUBE1 a230efc4, HEMI1 a55ee773, BAKE4 a05a32c9, AO1 a0a0b583, FRAT1 ae9a8b5b.
+- Pick up in this order: per lane, read its scratch gate output, rerun its green and its red under the lock,
+  commit in the lane; then merge one lane at a time into main, rebuild, rerun the reached gates, splice its
+  docs. Files more than one lane edited: celllights.cpp (POOL1, AO1, CUBE1, FRAT1), cell_lights.glsl (POOL1,
+  CUBE1), fo4_default.frag + pbrm_default.frag + renderer.cpp (AO1, CUBE1), cellview.cpp (GLOW1, BAKE4).
+  Suggested order: HEMI1, POOL1, CUBE1, AO1, FRAT1, GLOW1, BAKE4.
+- After the wave: SKY1 (sky term outdoors), TREE1 (far-map trees) once BAKE4 lands, PRTP5 (render every cell);
+  PRTP4 needs save names from bungo; the FO4CS reader comes last.
+
+## Block -- written 2026-10-01 18:52 (`date`-read): AMBO1, Ambient Only lights skipped
 
 - AMBO1: lights with LIGH flag 0x100000 are dropped from the direct lights (cellview.cpp cellPublishLighting,
   summary "ambientonly=N"; Vault111Cryo 3). Red WW_CELL_LIT_RED=ambientlit (s.red 128) draws them again;
