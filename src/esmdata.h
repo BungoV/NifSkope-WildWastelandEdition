@@ -69,6 +69,12 @@ struct EsmRefr
 	float radius = 0.0f;
 	int xligCount = 0;
 	float xlig[6] = { 0, 0, 0, 0, 0, 0 };
+	/* lane HEMI1: a light's box. `lightBox` = the XLKR target under KYWD 00115705 LightBoxLink
+	 * (0 when none); a primitive ref carries XPRM: its type (1 Box) and half extents as stored. */
+	quint32 lightBox = 0;
+	bool hasPrim = false;
+	quint32 primType = 0;
+	float primHalf[3] = { 0, 0, 0 };
 };
 
 /* Lane PRTP1: one LIGH record (wbDefinitionsFO4 LIGH DATA + FNAM). The
