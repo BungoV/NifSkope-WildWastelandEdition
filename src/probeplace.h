@@ -64,7 +64,32 @@ struct ProbeSoup
 		alb.insert( alb.end(), rgb, rgb + 3 );
 	}
 	qint64 triCount() const { return qint64( tris.size() / 9 ); }
+	/*! Lane BAKE4: blended glass (BGSM/BGEM bAlphaBlend, NiAlphaProperty blend), 9 floats a
+	 *  triangle, kept apart from `tris`: the placer never sees it and it holds no surfel. The
+	 *  bake tints the light that passes through it by glassT, 3 bytes a triangle, the
+	 *  per-channel transmittance x 255 (1 - a (1 - c): the blend read as a filter). The
+	 *  soup file carries it as an optional 'GLS1' tail after 'ALB1'. */
+	std::vector<float> glass;
+	std::vector<quint8> glassT;
+	void addGlass( const float a[3], const float b[3], const float c[3], const quint8 t[3] )
+	{
+		glass.insert( glass.end(), a, a + 3 );
+		glass.insert( glass.end(), b, b + 3 );
+		glass.insert( glass.end(), c, c + 3 );
+		glassT.insert( glassT.end(), t, t + 3 );
+	}
 };
+
+//! Lane BAKE4: one box of an enclosed room's air (world units), what `.tbk` v4 writes for the
+//! point-in-room test. A room is many boxes (merged runs of its air columns).
+struct ProbeRoomBox
+{
+	quint32 room = 0;
+	float lo[3] = { 0, 0, 0 };
+	float hi[3] = { 0, 0, 0 };
+};
+//! No room in this slot (a probe in one room, or none).
+constexpr quint32 kProbeRoomNone = 0xFFFFFFFFu;
 
 //! Room: the point of an enclosed room farthest from its walls. Cover: a spot no
 //! other probe saw (lane PRTPPLACE's interior rule, bungo 2026-09-30).
@@ -83,6 +108,10 @@ struct ProbePoint
 	float width = 0, height = 0, sill = 0;
 	quint32 doorRef = 0;        //!< the DOOR ref standing in it, 0 = none
 	bool roomToRoom = false;    //!< both sides roofed: the normal is only the pass axis
+	/*! Lane BAKE4: the enclosed room the probe stands in (0 = none: outdoors, a porch, a
+	 *  ledge); an opening's probe gets the rooms on both sides (room[1] = kProbeRoomNone
+	 *  for every other probe). Ids are this placement's: (rect hash << 16) | (n + 1). */
+	quint32 room[2] = { 0, kProbeRoomNone };
 };
 
 struct ProbePlaceSpec
@@ -138,6 +167,9 @@ struct ProbePlaceResult
 	int rooms = 0, roomsOpen = 0, roomsLedge = 0, roomsSealed = 0, roomsTiny = 0, room = 0, cover = 0, roomNear = 0;
 	int walkCells = 0, coverCells = 0, hallCells = 0, cutCells = 0, blindLeft = 0;
 	bool gridClamped = false;
+	//! lane BAKE4: the air of every enclosed room a probe stands in, and the probes given a room
+	std::vector<ProbeRoomBox> roomBoxes;
+	int roomIds = 0, probesInRoom = 0, apertureRooms = 0;
 	qint64 soupTris = 0;
 	double msBvh = 0, msColumns = 0, msVoxel = 0, msApertures = 0, msCoverage = 0;
 	QString error;

@@ -1,5 +1,43 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Cell view: half-sphere lights and boxed lights light only their own space (2026-10-02)
+
+Some of the game's lights are not round. A "hemisphere" light shines to one side only (a ceiling lamp that must
+not light the floor above it), and many ordinary lights are tied to a box in the Creation Kit so they stop at a
+wall or a floor instead of leaking into the next room. The cell view used to draw all of them as full round
+lights, so rooms picked up light through walls and ceilings. Now:
+
+- Hemisphere lights (17 placed in the game) light only the side they face.
+- Lights linked to a box (1877 placed) light only inside that box. Example: in Cabot House the ground floor no
+  longer catches the two upstairs lamps (about a fifth of that view gets darker, nothing gets brighter).
+- "Ambient Only" lights linked to a box (29 of the 39) now dim the room's ambient inside that box instead of
+  inside a big sphere. In Vault 111 this moves where the dimmed zones end. This one follows how the game sets
+  lights up and has not yet been compared with a game screenshot.
+
+The bounce light (GI) follows the same shapes. Nothing to switch on: it rides the Cell lights row. No new
+settings.
+
+## Probe bake: both sides of a thin wall, rooms, and glass (2026-10-02)
+
+- The light bake (the probe files, `.tbk`) now keeps BOTH faces of a thin wall. A wall thinner than one bake
+  cell (70 units) used to keep one face only; the light arriving from the other face was refused or spilled
+  into the next cell. The new file (version 4) keeps the second face in the same cell.
+- Every probe now names the room it stands in (none when it stands under open sky), and a probe in a doorway
+  names the rooms on both sides. The file also carries the rooms' boxes, so a later step can tell which room
+  any point is in and stop light blending through a wall.
+- Glass tints the light that passes through it. A window, a display case or car glass takes away the share of
+  light its material says (opacity, color, texture); mist, light beams, glow cards, decals and additive glass
+  take none. Which shapes are glass is decided from the material file alone, the same for every cell.
+- The bake looks at the fixed world only: statics, furniture, containers, activators, terminals, plants and
+  lamps, and doors as boxes. Things you can pick up, actors and decals never enter it; they only receive
+  the light.
+- Old version 3 files are still read. `probebake --tbk 3` still writes the old file byte for byte; FO4CS reads
+  only that one until its reader is updated.
+- No new setting and no new menu row.
+- Gates: `tests/spells/probe_bake.py` (rooms scene, both sides, room names), `prtp_reference.py` (an
+  independent tracer), `tests/spells/probe_glass.sh` (real cells: the checker reads every material file and
+  the plugin itself). Each has red controls that fail as they must; numbers in PRTP_PLAN.
+
 ## Cell view: no dark marks showing through the mist (2026-10-02)
 
 With Cell lights on, small dark marks stood out of the mist at the far end of the Vault 111 cryo walkway: the

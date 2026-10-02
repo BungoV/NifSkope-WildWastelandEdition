@@ -749,14 +749,48 @@ static int cellProbeKindOf( const ProbePoint & q )
  *   direct.  = Directional Color x Directional Fade; its direction from Rotation XY (elevation) and
  *              Z (azimuth from +Y, clockwise), degrees -- ASSUMED, the PRTP4 capture is the refuter */
 static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, const CellSceneSpec & spec,
-	const QVector<EsmRefr> & lightRefs, const Vector3 & center )
+	const QVector<EsmRefr> & lightRefs, const QHash<quint32, EsmRefr> & primRefs, const Vector3 & center )
 {
 	WwCellLighting L;
 	L.interior = spec.interior;
 	for ( int k = 0; k < 3; k++ )
 		L.center[k] = center[k];
 	const bool axisRed = ( wwCellLightsRed() & 2 ) != 0;
-	int omni = 0, spot = 0, off = 0, noRadius = 0, dark = 0, ambientOnly = 0;
+	const bool shapeRed = ( wwCellLightsRed() & 256 ) != 0;	// lane HEMI1: WW_CELL_LIT_RED=hemiomni
+	int omni = 0, spot = 0, off = 0, noRadius = 0, dark = 0, ambientOnly = 0, hemi = 0, box = 0, boxLost = 0;
+	int ambientBox = 0;
+	/* lane HEMI1: the box of primitive ref p for a light of scale `scale` (celllights.h): rotation
+	 * Rz(-z) Rx(-x) Ry(-y) of the primitive's own angles, axis k = column k, half extent k = |XPRM bound k| x scale. */
+	auto boxRows = []( const EsmRefr & p, float scale, float out[3][4] ) {
+		auto rot = []( int ax, float a, double m[3][3] ) {
+			const double c = std::cos( a ), s = std::sin( a );
+			const int i = ( ax + 1 ) % 3, j = ( ax + 2 ) % 3;
+			for ( int u = 0; u < 3; u++ )
+				for ( int v = 0; v < 3; v++ )
+					m[u][v] = u == v ? 1.0 : 0.0;
+			m[i][i] = c; m[i][j] = -s; m[j][i] = s; m[j][j] = c;
+		};
+		auto mul = []( const double a[3][3], const double b2[3][3], double o[3][3] ) {
+			for ( int u = 0; u < 3; u++ )
+				for ( int v = 0; v < 3; v++ )
+					o[u][v] = a[u][0] * b2[0][v] + a[u][1] * b2[1][v] + a[u][2] * b2[2][v];
+		};
+		double rz[3][3], rx[3][3], ry[3][3], t[3][3], m[3][3];
+		rot( 2, -p.rot[2], rz );
+		rot( 0, -p.rot[0], rx );
+		rot( 1, -p.rot[1], ry );
+		mul( rz, rx, t );
+		mul( t, ry, m );
+		for ( int k = 0; k < 3; k++ ) {
+			const double h = std::max( double( std::abs( p.primHalf[k] ) ) * double( scale ), 1e-3 );
+			double w = 0.0;
+			for ( int c = 0; c < 3; c++ ) {
+				out[k][c] = float( m[c][k] / h );
+				w -= m[c][k] / h * double( p.pos[c] );
+			}
+			out[k][3] = float( w );
+		}
+	};
 	for ( const EsmRefr & r : lightRefs ) {
 		const EsmLight & b = world.light( r.base );
 		if ( !b.exists )
@@ -779,6 +813,17 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 					a.k[k] = std::pow( float( b.color[k] ) / 255.0f, 2.2f ) * fade;
 				}
 				a.volume = 1.22077f * radius;
+				// lane HEMI1: linked to a box, it fills the box instead (WW_CELL_LIT_RED=hemiomni: the sphere again)
+				if ( r.lightBox && !( b.flags & ( 0x800 | 0x400 | 0x4000 ) ) ) {
+					const auto it = primRefs.constFind( r.lightBox );
+					if ( it == primRefs.cend() ) {
+						boxLost++;
+					} else {
+						ambientBox++;
+						a.hasBox = !shapeRed;
+						boxRows( it.value(), r.scale, a.box );
+					}
+				}
 				L.ambientLights.append( a );
 			}
 			continue;
@@ -806,12 +851,12 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 		l.noSpecular = ( b.flags & 0x8000 ) != 0;
 		l.noRim = ( b.flags & 0x80000 ) != 0;
 		l.ignoreRoughness = ( b.flags & 0x40000 ) != 0;
-		l.spot = ( b.flags & ( 0x400 | 0x4000 ) ) != 0;
+		l.spot = !( b.flags & 0x800 ) && ( b.flags & ( 0x400 | 0x4000 ) ) != 0;	// lane HEMI1: the hemisphere flag wins
 		// lane SHADOW1: the shadow kind, near clip (DATA + XLIG delta) and XLIG Shadow Depth Bias
 		l.shadow = ( b.flags & 0x400 ) ? 1 : ( b.flags & 0x800 ) ? 2 : ( b.flags & 0x1000 ) ? 3 : 0;
 		l.nearClip = std::max( b.nearClip + ( r.xligCount >= 5 ? r.xlig[4] : 0.0f ), 0.0f );
 		l.shadowBias = r.xligCount >= 4 ? r.xlig[3] : 0.0f;
-		if ( l.spot || l.shadow == 2 ) {
+		if ( l.spot || ( b.flags & 0x800 ) ) {
 			Matrix rm;
 			rm.fromEuler( -r.rot[0], -r.rot[1], -r.rot[2] );
 			const Vector3 d = rm * ( axisRed ? Vector3( 0, 0, -1 ) : Vector3( 1, 0, 0 ) );
@@ -830,6 +875,22 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 			spot++;
 		} else {
 			omni++;
+		}
+		/* lane HEMI1: the shape (celllights.h). A hemisphere is clipped to its +X half space (dir above); a
+		 * light linked by LightBoxLink to a primitive ref to that ref's box: rotation Rz(-z) Rx(-x) Ry(-y) of
+		 * the primitive's own angles, axis k = column k, half extent k = |XPRM bound k| x the light's scale. */
+		if ( b.flags & 0x800 ) {
+			hemi++;
+			l.shape = shapeRed ? 0 : 1;
+		} else if ( !l.spot && r.lightBox ) {
+			const auto it = primRefs.constFind( r.lightBox );
+			if ( it == primRefs.cend() ) {
+				boxLost++;
+			} else {
+				box++;
+				boxRows( it.value(), r.scale, l.box );
+				l.shape = shapeRed ? 0 : 2;
+			}
 		}
 		L.lights.append( l );
 	}
@@ -1004,6 +1065,8 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 			.arg( std::count_if( L.lights.cbegin(), L.lights.cend(), []( const WwCellLight & l ) { return l.ignoreRoughness; } ) )
 		+ QStringLiteral( " ambientonly=%1" ).arg( ambientOnly )	// lane AMBO1: skipped, no direct light in game
 		+ QStringLiteral( " ambientvolumes=%1" ).arg( L.ambientLights.size() )	// lane AMBO2: they scale the ambient
+		+ QStringLiteral( " shapes=hemisphere %1 box %2 (box link unresolved %3) ambientboxes=%4" ).arg( hemi ).arg( box )
+			.arg( boxLost ).arg( ambientBox )	// lane HEMI1
 		+ QStringLiteral( " imagespace=%1" ).arg( isNote )
 		+ QStringLiteral( " fog=%1" ).arg( L.fogNote.isEmpty() ? QStringLiteral( "none (exterior: the Lookdev weather fog)" ) : L.fogNote );
 	wwCellLightsPublish( nif, L );
@@ -1129,6 +1192,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 	 * list is what the cell CONTAINS, as the ref table is. WW_CELL_LIGHTS dumps it
 	 * and the gate compares it with an independent walk of the plugin. */
 	QVector<EsmRefr> lightRefs;
+	QHash<quint32, EsmRefr> primRefs;	// lane HEMI1: the refs carrying a primitive (a light's LightBoxLink target)
 	/* lane MISS1: a reference with an enable parent starts in the PARENT's state, inverted when it is
 	 * "opposite"; the parent's own starting state is a plugin fact (its initially-disabled flag, or its own
 	 * parent in turn). A parent outside the loaded block counts as enabled. WW_CELL_REFS_RED=parent is the
@@ -1163,6 +1227,8 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 		refsRead++;
 		if ( !r.deleted && std::memcmp( &r.baseType, "LIGH", 4 ) == 0 )
 			lightRefs.append( r );
+		if ( !r.deleted && r.hasPrim )
+			primRefs.insert( r.formID, r );
 
 		/* THE REFERENCE MODEL (lane CELLWORK1, bungo: "view all the technical
 		 * placed objects ... do everything creation kit does with cell
@@ -1569,6 +1635,13 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 	const QString bakeDirEnv = QString::fromLocal8Bit( qgetenv( "WW_CELL_PROBE_BAKE_DIR" ) );
 	const bool baking = probing && ( spec.probesBake || !bakeEnv.isEmpty() );
 	ProbeAlbedo probeAlb( dataRoot );
+	// lane BAKE4: glass panes into the bake's soup; WW_CELL_PROBE_GLASS=<tsv> dumps the census
+	QString glassCensus;
+	const QByteArray glassDump = qgetenv( "WW_CELL_PROBE_GLASS" );
+	int soupGlassShapes = 0;
+	// lane BAKE4: WW_CELL_PROBE_SOUP_REFS=<tsv> lists every reference the soup took (form, role, base type)
+	QString soupRefList;
+	const QByteArray soupRefDump = qgetenv( "WW_CELL_PROBE_SOUP_REFS" );
 	int albTextured = 0, albUntextured = 0, albLandSplat = 0, albLandFlat = 0, albPalette = 0;
 	QHash<qint64, std::array<float, 3>> landAlb;   // 128-unit ground quad -> gamma color, from the splat
 	QHash<QString, int> soupSkippedTypes;
@@ -1579,6 +1652,14 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 			QStringLiteral( "LIGH" ) };
 		if ( t == QLatin1String( "DOOR" ) )
 			return 2;
+		// lane BAKE4: the bake sees the fixed world only. WW_CELL_PROBE_SOUP_RED=items is the gate's red
+		// control: pick-up items let into the soup.
+		static const bool itemsRed = qgetenv( "WW_CELL_PROBE_SOUP_RED" ) == "items";
+		static const QSet<QString> items { QStringLiteral( "ARMO" ), QStringLiteral( "WEAP" ),
+			QStringLiteral( "MISC" ), QStringLiteral( "ALCH" ), QStringLiteral( "AMMO" ),
+			QStringLiteral( "BOOK" ), QStringLiteral( "KEYM" ), QStringLiteral( "NOTE" ) };
+		if ( itemsRed && items.contains( t ) )
+			return 1;
 		return in.contains( t ) ? 1 : 0;
 	};
 
@@ -1825,6 +1906,8 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 				soupSkippedTypes[tn]++;
 			else if ( role == 1 )
 				soupRefs++;
+			if ( role != 0 && !soupRefDump.isEmpty() )   // lane BAKE4
+				soupRefList += QStringLiteral( "%1\t%2\t%3\n" ).arg( p.ref, 8, 16, QLatin1Char( '0' ) ).arg( role ).arg( tn );
 		}
 
 		for ( size_t si = 0; si < mit.value().size(); si++ ) {
@@ -1851,6 +1934,9 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 			const bool palette = s.g2p && s.g2pScale > 1.0e-6f;
 			const bool painted = palette && havePaint;
 			if ( role == 1 ) {
+				if ( baking && probeGlassFeed( probeSoup, probeAlb, s, p.pos, p.rot, p.scale, p.ref, model,
+						glassDump.isEmpty() ? nullptr : &glassCensus ) )
+					soupGlassShapes++;   // lane BAKE4
 				if ( s.nearFacts.effectShader || !s.effectTex0.isEmpty() || s.nearFacts.alphaBlend
 					|| s.nearFacts.decal || ( soupFoliage && s.nearFacts.alphaTest ) ) {
 					soupShapesDropped++;
@@ -2433,6 +2519,16 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 			for ( const QString & k : sk )
 				t << " " << k << " " << soupSkippedTypes.value( k );
 			t << "\n";
+			if ( baking ) {   // lane BAKE4
+				t << "  bake glass: " << soupGlassShapes << " panes, " << int( probeSoup.glassT.size() / 3 )
+				  << " triangles\n";
+				QFile gf( QString::fromLocal8Bit( glassDump ) );
+				if ( !glassDump.isEmpty() && gf.open( QIODevice::WriteOnly ) )
+					gf.write( glassCensus.toUtf8() );
+				QFile rf( QString::fromLocal8Bit( soupRefDump ) );
+				if ( !soupRefDump.isEmpty() && rf.open( QIODevice::WriteOnly ) )
+					rf.write( soupRefList.toUtf8() );
+			}
 			if ( !placed )
 				t << "  probes REFUSED: " << pr.error << "\n";
 			else
@@ -2464,7 +2560,8 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 				  << albUntextured << ", ground quads from the splat " << albLandSplat << ", flat tone x VCLR "
 				  << albLandFlat << ", maps read " << probeAlb.texturesRead << ", missing " << probeAlb.texturesMissing
 				  << "\n";
-				if ( !probeBake( probeSoup, pr.probes, bs, QDir::cleanPath( dir ), &bres ) ) {
+				// lane BAKE4: the placer's room boxes go into the `.tbk` v4 files
+				if ( !probeBake( probeSoup, pr.probes, bs, QDir::cleanPath( dir ), &bres, &pr.roomBoxes ) ) {
 					t << "  bake REFUSED: " << bres.error << "\n";
 				} else {
 					for ( const QString & line : probeBakeCensusText( bres ).split( '\n', Qt::SkipEmptyParts ) )
@@ -2588,7 +2685,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 	nif->updateModel();
 
 	// lane PRTP3: the renderer lights this document with the cell's own lights (the Cell lights row)
-	cellPublishLighting( nif, world, spec, lightRefs, origin );
+	cellPublishLighting( nif, world, spec, lightRefs, primRefs, origin );
 
 	/* lane PRTPGI: the bake just written, relit by those lights (src/probegi.h), for the GI row.
 	 * WW_CELL_GI_DUMP=<folder> writes the gate's copies; WW_CELL_GI_RED=<red> its refuters. */

@@ -9,7 +9,7 @@ pictures probe2..5.png + lit.notes. Every stage is rebuilt here from the files a
 its own reader, tracer and light walk (cell_lit_check.lights_of), nothing taken from NifSkope's code:
 
   A  surfel light   the dumped surfels are exactly the bake's (position, normal, albedo); 400 of them
-                    relit: each light within its radius, facing, PRTP2 curve and cone, behind a shadow
+                    relit: each light within its radius and shape, facing, PRTP2 curve and cone, behind a shadow
                     segment from 2 units off the surface to `fixtureClear` short of the light
   B  probe gather   every probe's six-axis cube from its links (octahedral direction, weight x scale x
                     4 pi, max(axis . dir, 0)), the unlinked share renormalized over the linked
@@ -29,7 +29,7 @@ import numpy as np
 from PIL import Image
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from cell_lit_check import lights_of  # noqa: E402
+from cell_lit_check import lights_of, inside  # noqa: E402
 from probe_bake import read_tbk, unpack_dir, floordiv  # noqa: E402
 
 SURF_OFF = 2.0      # the relight's shadow segment starts this far off the surface (probegi.cpp)
@@ -116,7 +116,7 @@ def read_dump(d):
     return S, P, dict(origin=np.array([ox, oy, oz], float), voxel=float(vox), radius=float(rad), dims=dims, grid=G), clear
 
 
-def surfel_light(lights, p, n, soup, clear):
+def surfel_light(lights, p, n, soup, clear, shapes=True):
     E = np.zeros(3)
     o = p + n * SURF_OFF
     blocked = 0
@@ -124,6 +124,8 @@ def surfel_light(lights, p, n, soup, clear):
         v = L['pos'] - p
         d = float(np.linalg.norm(v))
         if d >= L['r']:
+            continue
+        if shapes and not inside(L, p[None, :])[0]:   # lane HEMI1: a hemisphere or box light lights only its volume
             continue
         Ld = v / max(d, 1e-3)
         nl = float(n @ Ld)
@@ -152,7 +154,7 @@ def stage_a(esm, cell, tbks, S, soup, clear):
     # the dump's surfels are the bake's, one per (position, normal)
     want = {}
     for _, t in tbks:
-        for s in t['surfels']:
+        for s in list(t['surfels']) + list(t['back']):   # lane BAKE4: v4's back sides are surfels too
             k = tuple(np.float32(s['pos']).tobytes() for _ in (0,)) + (tuple(int(c) for c in s['nrm']),)
             want[k] = (np.array(s['nrm'], float), np.array(s['alb'], float) / 255.0)
     got = {}
@@ -177,17 +179,20 @@ def stage_a(esm, cell, tbks, S, soup, clear):
     lights = lights_of(esm, cell)
     rng = np.random.default_rng(7)
     pick = rng.choice(len(S), size=min(400, len(S)), replace=False)
-    good, lit, shadowed = 0, 0, 0
+    good, lit, shadowed, shaped = 0, 0, 0, 0
     for i in pick:
         E, nb = surfel_light(lights, S[i, 0:3], S[i, 3:6], soup, clear)
         B = S[i, 6:9] * E
+        # lane HEMI1: the surfels a light's shape decides (the same sum with every light an omni differs)
+        shaped += int(not close(B, S[i, 6:9] * surfel_light(lights, S[i, 0:3], S[i, 3:6], soup, clear, False)[0]))
         shadowed += nb
         lit += int(B.max() > 1e-3)
         good += int(close(S[i, 9:12], B))
     share = good / len(pick)
     ok = share >= 0.97 and shadowed >= 20 and lit >= 50
-    return ('A %s surfel light: %d lights; %d surfels relit, %d lit, %d shadow segments blocked; agree %.1f%%'
-            % ('PASS' if ok else 'FAIL', len(lights), len(pick), lit, shadowed, 100 * share)), row_of
+    return ('A %s surfel light: %d lights; %d surfels relit, %d lit, %d shadow segments blocked, %d decided by a '
+            'light\'s shape; agree %.1f%%'
+            % ('PASS' if ok else 'FAIL', len(lights), len(pick), lit, shadowed, shaped, 100 * share)), row_of
 
 
 def stage_b(tbks, S, P, row_of):
@@ -195,20 +200,26 @@ def stage_b(tbks, S, P, row_of):
     unresolved = 0
     for _, t in tbks:
         cs = float(t['cell'])
-        keys = {}
-        for j, s in enumerate(t['surfels']):
-            keys.setdefault(tuple(floordiv(s['pos'][a], cs) for a in range(3)), j)
+        keys = ({}, {})   # lane BAKE4: the front sides, the v4 back sides
+        for side, arr in enumerate((t['surfels'], t['back'])):
+            for j, s in enumerate(arr):
+                keys[side].setdefault(tuple(floordiv(s['pos'][a], cs) for a in range(3)), j)
         for pr in t['probes']:
             pk = [floordiv(pr['pos'][a], cs) for a in range(3)]
             E = np.zeros((6, 3))
             linked = 0.0
-            for lk in t['links'][pr['off']:pr['off'] + pr['cnt']]:
-                j = keys.get(tuple(int(pk[a]) + int(lk['delta'][a]) for a in range(3)))
+            a0 = int(pr['off'])
+            for li, lk in enumerate(t['links'][pr['off']:pr['off'] + pr['cnt']]):
+                x = t['lext'][a0 + li]
+                side = int(x['side'])
+                j = keys[side].get(tuple(int(pk[a]) + int(lk['delta'][a]) for a in range(3)))
                 if j is None:
                     unresolved += 1
                     continue
-                s = t['surfels'][j]
-                B = S[row_of[(np.float32(s['pos']).tobytes(), tuple(int(c) for c in s['nrm']))], 9:12]
+                s = (t['surfels'], t['back'])[side][j]
+                # the glass on the way tints what the link carries
+                B = S[row_of[(np.float32(s['pos']).tobytes(), tuple(int(c) for c in s['nrm']))], 9:12] \
+                    * (x['tint'].astype(np.float64) / 255.0)
                 d = unpack_dir(lk['dir'])
                 w = float(lk['w']) * float(pr['scale'])
                 linked += w

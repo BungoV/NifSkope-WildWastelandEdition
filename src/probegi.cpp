@@ -68,6 +68,15 @@ struct TbkProbe
 };
 static_assert( sizeof( TbkProbe ) == 144, "tbk probe" );
 
+// lane BAKE4: the v4 tail's link record (src/probebake.cpp's TbkLinkExt)
+struct TbkLinkExt
+{
+	quint8 side;      //!< 1 = the cell's back surfel
+	quint8 tint[3];   //!< glass transmittance on the way, 255 = clear
+	quint32 door;
+};
+static_assert( sizeof( TbkLinkExt ) == 8, "tbk link ext" );
+
 struct Tbk
 {
 	QString name;
@@ -75,6 +84,8 @@ struct Tbk
 	std::vector<TbkSurfel> surfels;
 	std::vector<TbkProbe> probes;
 	std::vector<TbkLink> links;
+	std::vector<TbkSurfel> back;      //!< v4: the cells' second sides
+	std::vector<TbkLinkExt> lext;     //!< v4: one per link
 };
 
 bool readTbk( const QString & path, Tbk & t, QString * err )
@@ -90,11 +101,17 @@ bool readTbk( const QString & path, Tbk & t, QString * err )
 		return false;
 	}
 	std::memcpy( &t.h, b.constData(), 64 );
-	if ( t.h.magic != 0x314B4254u || t.h.version != 3u || t.h.recordKind != 1u ) {
-		*err = QStringLiteral( "%1: not a v3 resolved-albedo .tbk" ).arg( path );
+	// lane BAKE4: v4 = the v3 body + a tail (back surfels, link and probe extensions, room boxes)
+	if ( t.h.magic != 0x314B4254u || ( t.h.version != 3u && t.h.version != 4u ) || t.h.recordKind != 1u ) {
+		*err = QStringLiteral( "%1: not a v3 or v4 resolved-albedo .tbk" ).arg( path );
 		return false;
 	}
-	const qint64 need = 64 + 32 * qint64( t.h.surfelCount ) + 144 * qint64( t.h.probeCount ) + 12 * qint64( t.h.linkCount );
+	const qint64 body = 64 + 32 * qint64( t.h.surfelCount ) + 144 * qint64( t.h.probeCount ) + 12 * qint64( t.h.linkCount );
+	const bool v4 = t.h.version == 4u;
+	const qint64 need = body
+		+ ( v4 ? 32 * qint64( t.h.reserved[0] ) + 8 * qint64( t.h.linkCount ) + 32 * qint64( t.h.probeCount )
+				+ 32 * qint64( t.h.reserved[1] )
+			   : 0 );
 	if ( b.size() != need ) {
 		*err = QStringLiteral( "%1: %2 bytes, the counts say %3" ).arg( path ).arg( b.size() ).arg( need );
 		return false;
@@ -108,6 +125,16 @@ bool readTbk( const QString & path, Tbk & t, QString * err )
 	p += t.probes.size() * 144;
 	t.links.resize( t.h.linkCount );
 	std::memcpy( t.links.data(), p, t.links.size() * 12 );
+	p += t.links.size() * 12;
+	t.back.clear();
+	t.lext.clear();
+	if ( v4 ) {
+		t.back.resize( t.h.reserved[0] );
+		std::memcpy( t.back.data(), p, t.back.size() * 32 );
+		p += t.back.size() * 32;
+		t.lext.resize( t.h.linkCount );
+		std::memcpy( t.lext.data(), p, t.lext.size() * 8 );
+	}
 	t.name = QFileInfo( path ).fileName();
 	return true;
 }
@@ -249,11 +276,13 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 
 	// ---- 1. the surfels, one per position + normal across the files, lit
 	std::unordered_map<SurfKey, int, SurfKeyHash> uniq;
-	std::vector<std::vector<int>> fileSurfel( tbks.size() );
+	std::vector<std::vector<int>> fileSurfel( tbks.size() ), fileBack( tbks.size() );   // lane BAKE4: + v4 back surfels
 	struct US { double p[3], n[3], a[3]; double B[3]; };
 	std::vector<US> us;
 	for ( size_t f = 0; f < tbks.size(); f++ ) {
-		for ( const TbkSurfel & s : tbks[f].surfels ) {
+		for ( size_t si = 0; si < tbks[f].surfels.size() + tbks[f].back.size(); si++ ) {
+			const bool isBack = si >= tbks[f].surfels.size();
+			const TbkSurfel & s = isBack ? tbks[f].back[si - tbks[f].surfels.size()] : tbks[f].surfels[si];
 			SurfKey k;
 			std::memcpy( k.v, s.position, 12 );
 			k.v[3] = quint32( quint16( s.normal[0] ) );
@@ -280,7 +309,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 			} else {
 				idx = it->second;
 			}
-			fileSurfel[f].push_back( idx );
+			( isBack ? fileBack : fileSurfel )[f].push_back( idx );
 		}
 	}
 	R.surfels = int( us.size() );
@@ -296,7 +325,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 		for ( const WwCellLight & l : lights ) {
 			const double Lv[3] = { l.pos[0] - u.p[0], l.pos[1] - u.p[1], l.pos[2] - u.p[2] };
 			const double d = std::sqrt( Lv[0] * Lv[0] + Lv[1] * Lv[1] + Lv[2] * Lv[2] );
-			if ( d >= l.radius )
+			if ( d >= l.radius || !wwCellLightShapeIn( l, u.p[0], u.p[1], u.p[2] ) )	// lane HEMI1: the volume
 				continue;
 			const double inv = 1.0 / std::max( d, 0.001 );
 			const double L[3] = { Lv[0] * inv, Lv[1] * inv, Lv[2] * inv };
@@ -349,10 +378,14 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 	for ( size_t f = 0; f < tbks.size(); f++ ) {
 		const Tbk & t = tbks[f];
 		const float cs = t.h.surfelCellSize;
-		std::unordered_map<Key3, int, Key3Hash> keys;
+		std::unordered_map<Key3, int, Key3Hash> keys, keysBack;   // lane BAKE4: the back side's own map
 		for ( size_t i = 0; i < t.surfels.size(); i++ ) {
 			const TbkSurfel & s = t.surfels[i];
 			keys.emplace( Key3 { floorDiv( s.position[0], cs ), floorDiv( s.position[1], cs ), floorDiv( s.position[2], cs ) }, int( i ) );
+		}
+		for ( size_t i = 0; i < t.back.size(); i++ ) {
+			const TbkSurfel & s = t.back[i];
+			keysBack.emplace( Key3 { floorDiv( s.position[0], cs ), floorDiv( s.position[1], cs ), floorDiv( s.position[2], cs ) }, int( i ) );
 		}
 		for ( const TbkProbe & pr : t.probes ) {
 			UP P;
@@ -364,12 +397,20 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 			for ( quint32 j = 0; j < pr.linkCount; j++ ) {
 				const TbkLink & lk = t.links[size_t( pr.linkOffset + j )];
 				R.links++;
-				auto it = keys.find( Key3 { pk.x + lk.cellDelta[0], pk.y + lk.cellDelta[1], pk.z + lk.cellDelta[2] } );
-				if ( it == keys.end() ) {
+				// lane BAKE4: a v4 link names its side and carries the glass tint on its way
+				const size_t li = size_t( pr.linkOffset + j );
+				const bool sideBack = li < t.lext.size() && t.lext[li].side;
+				const auto & km = sideBack ? keysBack : keys;
+				auto it = km.find( Key3 { pk.x + lk.cellDelta[0], pk.y + lk.cellDelta[1], pk.z + lk.cellDelta[2] } );
+				if ( it == km.end() ) {
 					R.linksUnresolved++;
 					continue;
 				}
-				const US & u = us[size_t( fileSurfel[f][size_t( it->second )] )];
+				const US & u = us[size_t( ( sideBack ? fileBack : fileSurfel )[f][size_t( it->second )] )];
+				double tint[3] = { 1, 1, 1 };
+				if ( li < t.lext.size() )
+					for ( int c = 0; c < 3; c++ )
+						tint[c] = t.lext[li].tint[c] / 255.0;
 				double dir[3];
 				unpackOct( lk.dir, dir );
 				if ( redFlip )
@@ -381,7 +422,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 				for ( int a = 0; a < 6; a++ ) {
 					const double cosA = std::max( kAxes[a][0] * dir[0] + kAxes[a][1] * dir[1] + kAxes[a][2] * dir[2], 0.0 );
 					for ( int c = 0; c < 3; c++ )
-						P.E[a][c] += u.B[c] * omega * cosA;
+						P.E[a][c] += u.B[c] * tint[c] * omega * cosA;
 				}
 			}
 			// the unlinked share (void, dropped links) sees what the linked surfaces see on average
