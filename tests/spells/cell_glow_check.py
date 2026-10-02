@@ -16,9 +16,10 @@ Stages:
      opposite-state enable parent, which the cell view does not draw; printed apart)
   N  nothing else moves: outside the predicted circles (x1.15 + 4 px), |on - flat| <= 3/255 on >= 99.5%
   C  the cards show: >= 3 cards (>= 500 pixels on screen) each brighten their own circle over flat by a mean
-     >= 0.5/255, with >= 30% of its pixels changed. The material is a faint haze by design (fAlpha 0.2 times a
-     base alpha of at most 115/255, soft-faded within 75 units of what lies behind it), so a card adds a few
-     levels, not tens; the render's own run-to-run noise sits near a mean of 0.1/255.
+     >= 0.5/255, with >= 30% of its pixels changed. The material is a faint haze by design (fAlpha 0.2, which
+     the effect shader applies twice, times a base alpha of at most 115/255: under 2% opaque), so the circles
+     gain a level or two where many cards overlap, not tens; the render's own run-to-run noise sits near a
+     mean of 0.1/255.
 A stage the shot does not name is measured and printed as "n/a", and does not count: beside a pod the same
 cards add under 0.5/255 (measured +0.03 to +0.41 at 220 to 430 units), so a near camera cannot carry C, and
 the far camera that carries C has no pixel outside the circles for N.
