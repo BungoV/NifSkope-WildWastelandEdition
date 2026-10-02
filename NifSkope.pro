@@ -178,6 +178,7 @@ INCLUDEPATH += src lib
 
 HEADERS += \
 	src/data/nifitem.h \
+	src/data/nifitemcache.h \
 	src/data/niftypes.h \
 	src/data/nifvalue.h \
 	src/gl/BSMesh.h \
@@ -325,6 +326,10 @@ HEADERS += \
 	src/cellpanel.h \
 	src/cellpicktest.h \
 	src/cellview.h \
+	src/cellmesh.h \
+	src/cellspeed.h \
+	src/celltexahead.h \
+	src/cellmodelahead.h \
 	src/probealbedo.h \
 	src/probebake.h \
 	src/probefar.h \
@@ -561,6 +566,10 @@ SOURCES += \
 	src/cellpanel.cpp \
 	src/cellpicktest.cpp \
 	src/cellview.cpp \
+	src/cellmesh.cpp \
+	src/cellspeed.cpp \
+	src/celltexahead.cpp \
+	src/cellmodelahead.cpp \
 	src/probealbedo.cpp \
 	src/probebake.cpp \
 	src/probegi.cpp \
