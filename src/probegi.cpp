@@ -325,7 +325,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 		for ( const WwCellLight & l : lights ) {
 			const double Lv[3] = { l.pos[0] - u.p[0], l.pos[1] - u.p[1], l.pos[2] - u.p[2] };
 			const double d = std::sqrt( Lv[0] * Lv[0] + Lv[1] * Lv[1] + Lv[2] * Lv[2] );
-			if ( d >= l.radius )
+			if ( d >= l.radius || !wwCellLightShapeIn( l, u.p[0], u.p[1], u.p[2] ) )	// lane HEMI1: the volume
 				continue;
 			const double inv = 1.0 / std::max( d, 0.001 );
 			const double L[3] = { Lv[0] * inv, Lv[1] * inv, Lv[2] * inv };
