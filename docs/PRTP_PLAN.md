@@ -550,6 +550,115 @@ WW_CELL_SPEC_RED=nonspec (the flag ignored): 85.4% / 61.0% where shown, totals 1
 views. Left open: the cell view multiplies the lights' specular by the material's specular colour; the game's
 deferred lights read only the specular scale (white on this floor).
 
+### 2u. The game's screen-space ambient obscurance (lane AO1, 2026-10-02)
+
+The game darkens creases, corners and the ground under clutter with a screen-space pass. Its settings are the
+INI's, the same in every cell: radius 108.2, bias 0.6, intensity 7.1 (game units). Nothing comes from the cell,
+its imagespace or its lighting template. It runs at half the view from the opaque pass's depth and normals:
+- depth mips, each the min of 2x2 of the one above (5 levels);
+- per pixel 5 taps over 2 turns (angle step 2.512) on a disc of radius x 100 / depth pixels, each tap's depth
+  read from the mip floor(log2 reach) - 3; A = max(0, 1 - intensity x sum f^3 max((v.n - bias') / (v.v + 0.01),
+  0) / r^6), f = max(r^2 - v.v, 0), bias' = bias + 10 max(d - 0.3, 0) + 5 |ndc|^2, d = depth / 7000;
+- the tap pattern turns by a random angle each frame (only up to depth 3500) and the game keeps 0.99 of the
+  history, so a still view shows a time average. The history starts over from the frame's value when that is
+  0.95 or more and the history is under 0.7;
+- a bilateral blur across, then down: 7 taps 2 pixels apart (0.153170, 0.444893, 0.422649, 0.392902), cut by
+  2000 x the depth-key difference.
+It multiplies everything the game's deferred composite writes (direct light, ambient, specular, emissive,
+reflections) before the fog. Blended surfaces and effects are drawn after it and do not take it.
+
+In the viewer (part of the Cell lights row, no menu row, no INI key): wwCellAoPass draws the opaque cell-lit
+shapes once more (probe 20: view normal + depth in game units) into a full-size float target, cell_ao.frag runs
+the mips, the raw pass and the two blurs at half size, and the cell programs multiply their lit color by the
+bilinear sample before their fog (never when blending is on). A still view = the mean over 8 evenly spaced
+angles, plus the history restart as a closed-form average (it can fire on 0.4-0.5% of pixels and lifts them by
+about 0.2). Cost 3-22 ms a frame at 960x600. The texture sits on unit 16 of the cell programs.
+
+Pins: WW_CELL_AO=0 (none computed), WW_CELL_AO_RED=off (computed, not applied) | radius (half) | noblur |
+noreset (the plain mean), WW_CELL_AO_DUMP=<file>.
+
+Gate tests/spells/cell_ao.sh + cell_ao_check.py (an independent numpy rebuild from the dumped depth and
+normals, effects hidden in both windows), Vault111Cryo / DmndSolomonsHouse01 / GoodneighborTheThirdRail:
+- E the dumped normals belong to the dumped depth's surface: 97.4 / 93.7 / 83.9% (x unmirrored: 58.7 / 64.2 / 56.2%)
+- A the raw obscurance within 0.01: 100% each
+- R the history restart vs a frame-by-frame run: mean |d| 0.0061 / 0.0047 (third cell: 4 px, not judged)
+- B the blur within 0.01: 100% each
+- C the light the picture got (with / without) vs the rebuild, within 0.02: 100.00% of 523,868 / 482,695 /
+  112,773 px = 97 / 92 / 99% of the geometry
+Reds on Vault111Cryo, each fails its stage: off -> C 48.89%, radius -> A 56.22%, noblur -> B 58.59%,
+noreset -> R mean |d| 0.1939.
+
+With the imagespace on, the obscurance lowers the measured light and the exposure rises a little, as in game
+(the door-room picture's mean goes 61.2 -> 61.5 of 255 while its creases darken).
+
+Assumed, not measured: the depth mips are point sampled, the composite's upsample is bilinear, and 8 evenly
+spaced angles stand in for the game's continuous random angle (closed form vs frame-by-frame: max 0.068).
+Open: compare one in-game still against the viewer at the Vault 111 cryo walkway; these three assumptions are
+what such a capture would settle.
+
+### 2v. Placed models drop their root transform; a cell opens in its first-load state (lane MISS1, 2026-10-02)
+
+bungo circled two spots on the Vault 111 cryo walkway where geometry was missing. Located first (camera of the
+marked shot: look-at 384,-480,60, view 3, distance 260, FOV 70; both marks lie on the plane z = -74):
+- Mark A, world about (124,-699,-74): ref 0000194b STAT V111RPit2WallMid02
+  (Interiors\Vault\Vault111\Rooms\V111RPit2WallMid02.nif), shape "V111RPit2WallMid02:25", the alpha-tested
+  floor grate quad.
+- Mark B, world about (310..446,-347,-74): ref 0000192f, same model, shapes ":25" (grate) and ":18" (trim).
+Every other shape the plugin puts in the two boxes (16 references each) was already drawn in place. No decal
+lies in either mark (one TXST reference within 60 units of mark B, none at A); no actor within 60 units.
+
+The rule. A placed model's ROOT node takes the reference's transform; the transform stored on the root in the
+model file is not applied. V111RPit2WallMid02 stores a half turn about Z there, so the cell view drew the wall
+piece turned around (its box 150.5 units off) and the grate landed under the wall. Proof from the game's own
+data: the cell's combined meshes (Fallout4 - MeshesExtra.ba2, meshes\precombined\<cell form>_<hash>_oc.nif)
+store each instance's transform and world bound; over Vault111Cryo 57 shapes of root-carrying models fit only
+"root dropped", 0 fit only "root kept" (4 either, 5 neither); InstituteConcourse 16 / 0 (139 either).
+Game-wide 305 of 19,912 loose placeable models carry a root transform.
+
+The start state. A reference with an enable parent (XESP) starts shown when the PARENT's start state differs
+from the XESP "opposite" bit; the parent's own state comes from its initially-disabled flag or its own parent.
+The cell view used only the reference's own flag and the bit. Vault111Cryo: 88 parented, 86 change (parents
+002075e4 and 000481d4, both initially disabled; all in the pod room and the entrance). InstituteConcourse:
+1939 parented, 1592 change (XMarker 00248509 alone holds 900 the old view drew and the game starts hidden).
+
+Built (commit 0e82541b on miss1-20261002; main 5431a9f2 merged in as 8f224946, rebuilt, every gate below
+run on the merged exe):
+- src/lodgen.cpp/.h: lodgenNativeLoadModelPlaced(), the node chain without the root. src/cellview.cpp loads
+  placed references through it and follows the enable-parent chain (a parent outside the loaded block counts
+  as enabled). Markers\BlackPlane01.nif is drawn (no marker flag on its base; all 19 references are in the
+  cell's combined list). src/esmdata.cpp: a clothing record's world model is MOD2 / swap MO2S.
+- The marker flag (0x00800000) is honoured for ACTI, DOOR, FURN, STAT only, as the record definitions have it.
+- Gate tests/spells/cell_refs.sh + cell_refs_drawn_check.py (own plugin walk, own model reader). Per cell five
+  rows: census (plugin = viewer's list), drawn (every reference with a model the game shows at start is
+  drawn), hidden (none of the others is), placed (each drawn box against a box rebuilt from the model file
+  without its root, bar 0.05 units), anchor (the combined meshes side with "root dropped").
+  Green, 14 rows: Vault111Cryo 3087 references, 1397 / 1397 drawn, 1690 others 0 drawn, 1394 boxes worst
+  0.001; DmndSolomonsHouse01 200, 193 / 193, 7; InstituteConcourse 6714, 3960 / 3960, 2753, 3954 boxes worst
+  0.001. Named SKIPs: Dmnd has no root-carrying model (anchor); platformhelperfree01 not judged.
+  Reds on Vault111Cryo, each FAILS: WW_CELL_REFS_RED=root (the old placement) fails the placed row, worst
+  error 150.485 against the 0.05 bar, 12 boxes over it, the three V111RPit2WallMid02 references first;
+  WW_CELL_REFS_RED=parent (the old start rule) fails the drawn row (19 the game shows are not drawn: ceiling
+  lamps, light beams, fixtures of the pod room) and the hidden row (7 the game hides are drawn).
+- tests/spells/cell_open_check.py and cell_glow_check.py mirror the root rule, the black plane and the
+  enable-parent rule. Existing gates re-run green on the merged exe: cell_open.sh (placement boxes, its own
+  copy of the rules), cell_glow.sh (the cards' transform now comes from the root-less chain; stage K reads
+  167 turned, 0 on references that start disabled, where the old rule gave 165 + 2), cell_fx.sh (effect meshes
+  go through the new load), cell_lit.sh (the lit room whose walls moved). cell_lights.sh is not reached: the
+  light list is unchanged.
+
+Open:
+- The light list's on/off rule still ignores enable parents: Vault111Cryo 28 of 849 placed lights are lit by
+  the view and off at the game's start; InstituteConcourse 1265 of 1776. One rule, one place (the light
+  list in src/cellview.cpp); left to the light lanes.
+- The LOD bake and the near bake still compose the root transform.
+- Weapons assembled from parts (the 10mm pistol in Vault111Cryo), particle-only effects (FXDripsBig,
+  FXSteamVent01), decals and actors are not drawn.
+- "A parent outside the loaded block counts as enabled" has no test: no such reference in the three gate
+  cells or Vault75.
+- The cell view has no way to show a later quest state (the roughly 1,600 Institute references that wait on
+  a quest are now hidden). A view option is bungo's call.
+- 5 shapes in Vault111Cryo's combined meshes fit neither rule; not explained.
+
 ## 3. Open
 
 - `.tbk` v4: two surfel sides per cell (gives back the refused thin-wall weight), room ids (2f).

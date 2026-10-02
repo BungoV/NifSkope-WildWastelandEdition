@@ -1,5 +1,43 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Cell view: floor grates and wall pieces sit where the game puts them; a cell opens in its first-load state (2026-10-02)
+
+Three things change in what the cell view draws.
+
+- Some models were drawn turned around or shifted. A model can store a transform on its top node; the game
+  ignores it when the model is placed in a cell, the cell view applied it. In the Vault 111 cryo room that turned
+  three wall pieces (V111RPit2WallMid02) half way round, so the perforated floor grate beside the walkway ended
+  up under the wall and the trough with its lamps lay open. Two hall alcoves, a door console and a few smaller
+  models in that room moved too. About 300 of the game's 19,900 placeable models are affected; the cell view now
+  places all of them the way the game does. The LOD bake and the near bake are not changed.
+- References that start disabled. A reference can be tied to an "enable parent"; whether it starts shown depends
+  on the PARENT's own start state. The cell view did not look at the parent, so it drew things the game hides
+  until a quest turns them on, and hid a few it shows. It now opens a cell the way the game first loads it.
+  In the Institute concourse about 1,600 references change (most disappear: they wait on a quest); in the cryo
+  vault 86 change, all in the player's pod room and the entrance. The lights list is not changed yet: it still
+  lights some lamps the game starts switched off (28 in the cryo vault, 1,265 in the concourse).
+- Two smaller ones: the black backdrop planes (BlackPlane01) were hidden because their model sits in the
+  Markers folder; the game draws them, so the cell view does too. Clothing lying in a cell (the eyeglasses in the
+  cryo vault) now shows its ground model.
+
+Still not drawn: weapons the game assembles from parts (the 10mm pistol in the cryo vault), effects made only of
+particles (drips, a steam vent), decals and actors.
+
+New test tests/spells/cell_refs.sh walks the plugin with its own reader and requires every reference that has a
+model and is shown at the game's start to be drawn, in the right place, in three interiors (Vault111Cryo,
+DmndSolomonsHouse01, InstituteConcourse). It also checks placement against the game's own combined meshes.
+Controls: env WW_CELL_REFS_RED=root (the old placement) and WW_CELL_REFS_RED=parent (the old start rule); each
+makes the test fail.
+
+## Cell view: corners and creases darken the way the game's do (2026-10-02)
+
+- With Cell lights on, the cell view now has the game's ambient occlusion: the soft darkening in corners, in
+  creases, under pipes and where clutter meets the floor. It uses the game's own settings, the same in every
+  cell, and darkens the same things the game does: all the light on solid surfaces. Glass, steam and other
+  see-through surfaces are not darkened, and fog is laid over it, as in game.
+- There is no new menu row and no new setting; it comes with the Cell lights row.
+- New gate `tests/spells/cell_ao.sh`; reds `off`, `radius`, `noblur` and `noreset` must each FAIL.
+
 ## Cell view: why the Vault 111 walkway has no bright pools on the floor (2026-10-02)
 
 Nothing

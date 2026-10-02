@@ -12,8 +12,8 @@ of the plugin and the meshes (nothing shared with src/lodgen.cpp or src/cellview
   reference's: the card's frame is the camera's, so it projects to an exact circle,
   center = the projected pivot + the in-frame offset, radius = focal x r / depth, focal = (H/2) / tan(35 deg).
 Stages:
-  K  the census says as many shapes turned to the camera as this walk finds (less the refs under an
-     opposite-state enable parent, which the cell view does not draw; printed apart)
+  K  the census says as many shapes turned to the camera as this walk finds (less the refs that start
+     disabled -- own flag, or the enable parent's state followed up its chain -- printed apart)
   N  nothing else moves: outside the predicted circles (x1.15 + 4 px), |on - flat| <= 3/255 on >= 99.5%
   C  the cards show: >= 3 cards (>= 500 pixels on screen) each brighten their own circle over flat by a mean
      >= 0.5/255, with >= 30% of its pixels changed. The material is a faint haze by design (fAlpha 0.2, which
@@ -173,6 +173,16 @@ def billboard_cards(path):
 def cards_of(esm, data, cell_edid):
     buf = open(esm, 'rb').read()
     cell_form, models, refs = None, {}, []
+    start = {}      # lane MISS1: ref form -> (initially disabled, enable parent, opposite), in the order of refs
+
+    def hidden(form, depth=0):
+        # the game's start state: the enable parent's own state (its flag, or its parent's in turn), inverted
+        # when "opposite"; a parent outside the cell counts as enabled, as in the cell view
+        off, parent, opposite = start[form]
+        if parent and depth < 16:
+            off = (hidden(parent, depth + 1) if parent in start else False) == (not opposite)
+        return off
+
     for t, form, off, stack in walk(buf):
         if t == b'CELL' and cell_form is None and all(g[2] != 1 for g in stack):
             _, f = record(buf, off)
@@ -181,13 +191,16 @@ def cards_of(esm, data, cell_edid):
         elif t == b'REFR':
             if cell_form is not None and any(g[1] == cell_form and g[2] in (6, 8, 9) for g in stack):
                 refs.append(record(buf, off))
+                x = refs[-1][1].get(b'XESP', b'')
+                x = struct.unpack_from('<II', x) if len(x) >= 8 else (0, 0)
+                start[form] = (bool(refs[-1][0] & 0x800), x[0], bool(x[1] & 1))
         elif t in (b'STAT', b'MSTT', b'ACTI', b'FURN', b'DOOR', b'MISC', b'CONT', b'FLOR', b'TERM', b'IDLM'):
             _, f = record(buf, off)
             m = f.get(b'MODL', b'').split(b'\0')[0].decode('cp1252', 'replace')
             if m:
                 models[form] = m
     cache, cards, shapes = {}, [], 0
-    for flags, f in refs:
+    for (flags, f), form in zip(refs, start):
         if flags & 0x20 or b'NAME' not in f or b'DATA' not in f:
             continue
         m = models.get(struct.unpack_from('<I', f[b'NAME'])[0])
@@ -205,8 +218,8 @@ def cards_of(esm, data, cell_edid):
         rot = struct.unpack_from('<3f', f[b'DATA'], 12)
         scale = struct.unpack_from('<f', f[b'XSCL'])[0] if b'XSCL' in f else 1.0
         R = euler(-rot[0], -rot[1], -rot[2])
-        # an enable parent in the opposite state: the cell view does not draw these (counted apart, see K)
-        opp = b'XESP' in f and bool(struct.unpack_from('<I', f[b'XESP'], 4)[0] & 1)
+        # a reference that starts disabled: the cell view does not draw these (counted apart, see K)
+        opp = hidden(form)
         for pivot, nscale, center, rad in cache[m]:
             shapes += 1
             cards.append(dict(pivot=pos + R @ pivot * scale, ws=scale * nscale, center=center, rad=rad,
@@ -240,7 +253,7 @@ def main():
     k_ok = turned == shapes - opp and shapes > opp
     print(f"K {'PASS' if k_ok else 'FAIL'}  census turned {turned} (welded flat {m.group(2) if m else '?'}), "
           f"this walk finds {shapes} billboard shapes on {len({c['model'] for c in cards})} models, "
-          f"{opp} of them on refs with an opposite-state enable parent (not drawn by the cell view)")
+          f"{opp} of them on refs that start disabled (not drawn by the cell view)")
     ok &= k_ok
     cards = [c for c in cards if not c['opposite']]
 
