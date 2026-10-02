@@ -331,6 +331,9 @@ HEADERS += \
 	src/probegi.h \
 	src/probeplace.h \
 	src/cellrefs.h \
+	src/cellactor.h \
+	src/celldecal.h \
+	src/esmplaced.h \
 	src/cellworkspace.h \
 	src/lodinative.h \
 	src/lodtsheets.h \
@@ -562,6 +565,9 @@ SOURCES += \
 	src/probefar.cpp \
 	src/probeplace.cpp \
 	src/cellrefs.cpp \
+	src/cellactor.cpp \
+	src/celldecal.cpp \
+	src/esmplaced.cpp \
 	src/cellworkspace.cpp \
 	src/cellworkspacetest.cpp \
 	src/cellcensustest.cpp \
