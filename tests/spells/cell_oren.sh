@@ -21,9 +21,12 @@
 #                     pixels move past twice the tolerance there, measured before it was built)
 #   --red probefx     lane FRAT1: effect and refraction shapes drawn into the probe passes again (as before lane
 #                     EFX1). A mist card about 1% opaque lowers the position probe's high byte one level, so the
-#                     check reads a point 256 units off on each axis. Measured 2026-10-02: Fraternal Post agrees
-#                     90.7% (bar 97%; 6,629 of 69,885 clean pixels rejected, probe 8 itself unchanged on 99.9% of
-#                     them) and FAILS; Pickman Gallery drops to 97.9% and still passes; the Vault has no such card.
+#                     check reads a point 256 units off on each axis (Fraternal Post: 6,629 of 69,885 clean
+#                     pixels rejected, probe 8 itself unchanged on 99.9% of them). Measured 2026-10-02, bar 97%:
+#                     FAILS in 4 of the 5 views: Vault 98.3% with the rim at 82.4%, Vault second camera 95.4%,
+#                     Fraternal Post 90.8%, Pickman Gallery's closer camera 45.3%. Pickman Gallery from 600
+#                     above only drops to 98.0% and passes (its rejected pixels are one patch at 468,478,504),
+#                     hence the closer camera over that patch.
 # (WW_CELL_LIT_RED=normalised, the textbook azimuth cosine, is NOT a red: measured 2026-10-01 its gap to the
 # game's form peaks at about half the 8-bit tolerance in the Vault, so no check at this precision can fail it.)
 #
@@ -31,6 +34,7 @@
 # "EDID@x,y,z~d" pins that view's distance (lane FRAT1; the others use DIST, 1400).
 # The Fraternal Post and Pickman Gallery views look straight down through ceiling mist cards (33 and 72
 # placements): they are in the list so that an effect drawn into a probe pass shows as a mismatch again.
+# Each of these cameras was judged alone, green and red, before the gate first ran with it in the list.
 #
 # USAGE  bash tests/spells/cell_oren.sh [--red lambert|norim|rimflags|probefx]
 
@@ -65,7 +69,7 @@ PORT="${PORT:-14745}"
 SPEC="$REPO/tests/fixtures/empty.wwcell"
 SIZE="${SIZE:-960x600}"
 # Solomon's house was dropped 2026-10-01: its view has 2 lit legacy pixels (the rest is PBR or unlit)
-CELLS="${CELLS:-Vault111Cryo Vault111Cryo@-15,-421,345 FraternalPost11501@553,2170,400~600 PickmanGallery01@562,440,150~600}"
+CELLS="${CELLS:-Vault111Cryo Vault111Cryo@-15,-421,345 FraternalPost11501@553,2170,400~600 PickmanGallery01@562,440,150~600 PickmanGallery01@470,475,150~450}"
 : "${CAM_Vault111Cryo:=-4600,-280,0}"
 
 mkdir -p "$OUT"
