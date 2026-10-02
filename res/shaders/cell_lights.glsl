@@ -32,6 +32,10 @@ uniform sampler3D cellGi;
 uniform vec3 cellGiOrigin;
 uniform float cellGiVoxel;
 uniform vec3 cellGiDims;
+// lane PROBEVIEW1: the PRTP band's Pass (0 Combined, 1 GI, 2 Sky visibility, 3 Surfel color, 4 Surfel light).
+// In the Sky visibility pass the CPU binds the sky grid on cellGi (same layout, rgb = the probes' sky share).
+uniform int cellPass;
+uniform int cellPassRed;			// the gate's reds: 1 direct (the lights leak into GI), 2 nonormal (sampled facing up)
 
 // lane IMGS1: the cell's imagespace, the game's own HDR -> display chain (src/gl/celllights.h)
 uniform bool cellIsOn;
@@ -145,7 +149,7 @@ vec3 cellShadowProbe( vec3 P, vec3 N )
 
 // the bounce's irradiance at P, normal N: the three facing slabs blended by n^2, sampled half a
 // voxel off the surface (the grid's voxels behind a wall are its other room's)
-vec3 cellGiE( vec3 P, vec3 N )
+vec4 cellGiSample( vec3 P, vec3 N )
 {
 	vec3 g = ( P + N * ( 0.5 * cellGiVoxel ) - cellGiOrigin ) / cellGiVoxel;
 	vec2 xy = g.xy / cellGiDims.xy;
@@ -155,6 +159,12 @@ vec3 cellGiE( vec3 P, vec3 N )
 	vec4 s = n2.x * texture( cellGi, vec3( xy, ( z + ( N.x >= 0.0 ? 0.0 : 1.0 ) * cellGiDims.z ) / depth ) )
 	       + n2.y * texture( cellGi, vec3( xy, ( z + ( N.y >= 0.0 ? 2.0 : 3.0 ) * cellGiDims.z ) / depth ) )
 	       + n2.z * texture( cellGi, vec3( xy, ( z + ( N.z >= 0.0 ? 4.0 : 5.0 ) * cellGiDims.z ) / depth ) );
+	return s;
+}
+
+vec3 cellGiE( vec3 P, vec3 N )
+{
+	vec4 s = cellGiSample( P, N );
 	return s.a > 0.01 ? max( s.rgb / s.a, vec3( 0.0 ) ) : vec3( 0.0 );
 }
 
@@ -223,6 +233,33 @@ vec3 cellProbeRaw( vec3 P, vec3 N )
 	if ( cellProbe == 3 )
 		return mod( q, 256.0 ) / 255.0;
 	return N * 0.5 + 0.5;
+}
+
+/* lane PROBEVIEW1: a probe pass's picture on a white surface (the deck's s40 / s18): no albedo, no direct light,
+ * no fog, no imagespace. GI = E(N) / pi, the GI row's own sample; Sky visibility = the sky grid read the same way.
+ * Display: pow(clamp(x), 1 / 2.2), a fixed curve so two bakes compare. Magenta = no probe reaches here (s65);
+ * in the surfel passes every surface is magenta and the surfel tiles draw over it (src/gl/cellprobeview.h). */
+vec3 cellPassOut( vec3 P, vec3 N )
+{
+	const vec3 none = vec3( 1.0, 0.0, 1.0 );
+	if ( cellPass >= 3 || !cellGiOn )
+		return none;
+	vec4 s = cellGiSample( P, ( cellPassRed & 2 ) != 0 ? vec3( 0.0, 0.0, 1.0 ) : N );
+	if ( s.a <= 0.01 )
+		return none;
+	vec3 v = max( s.rgb / s.a, vec3( 0.0 ) );
+	if ( cellPass == 1 ) {
+		v *= 0.31830989;
+		if ( ( cellPassRed & 1 ) != 0 ) {	// red "direct": the cell's lights leak into the pass
+			for ( int i = 0; i < cellLightCount; i++ ) {
+				vec3 L;
+				bool ns;
+				vec3 c = cellLightE( i, P, N, L, ns );
+				v += c * max( dot( N, L ), 0.0 );
+			}
+		}
+	}
+	return pow( clamp( v, 0.0, 1.0 ), vec3( 1.0 / 2.2 ) );
 }
 
 #if !defined( WW_CELL_PBR ) && !defined( WW_CELL_FX )	// lane EFX2: the effect program takes none of the surface lobes

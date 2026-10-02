@@ -31,6 +31,7 @@ BSD License - see nifskope.h
 #include "model/nifmodel.h"
 #include "spells/blocks.h"
 #include "gl/celllights.h"
+#include "gl/cellprobeview.h"	// lane PROBEVIEW1
 #include "gamemanager.h"	// lane IMGS1: the imagespace LUT
 
 #include <QBuffer>
@@ -2957,7 +2958,17 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 				if ( !dump.isEmpty() && !probeGiDump( gr, gs, dump, &derr ) )
 					probeNotes += QStringLiteral( "  gi dump FAILED: %1\n" ).arg( derr );
 				gi.rgba = std::move( gr.grid );
+				gi.sky = std::move( gr.gridSky );	// lane PROBEVIEW1: the Pass drop-down's Sky visibility
 				wwCellGiPublish( nif, gi );
+				WwCellProbeView pv;	// lane PROBEVIEW1: the surfel and probe previews
+				pv.surfelCell = gr.surfelCell;
+				pv.probesShown = spec.probesShow;
+				pv.surfels = std::move( gr.surfelOut );
+				pv.probes = std::move( gr.probeCube );
+				pv.probeSky = std::move( gr.probeSky );
+				pv.linkStart = std::move( gr.probeLinkStart );
+				pv.links = std::move( gr.probeLinks );
+				wwCellProbeViewPublish( nif, pv );
 			}
 		}
 	}

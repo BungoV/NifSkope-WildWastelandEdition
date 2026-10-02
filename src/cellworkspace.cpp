@@ -427,8 +427,15 @@ void CellWorkspacePanel::buildUi()
 	cellIs = new QCheckBox( tr( "Imagespace" ), prtpRow );
 	cellIs->setObjectName( QStringLiteral( "CellWorkspaceCellImageSpace" ) );
 	cellIs->setChecked( wwCellImageSpaceOn() );
+	// lane PROBEVIEW1: the Pass (Division deck s18/s40/s65), live once a bake is relit
+	cellPass = new QComboBox( prtpRow );
+	cellPass->setObjectName( QStringLiteral( "CellWorkspaceCellPass" ) );
+	cellPass->addItems( wwCellPassNames() );
+	cellPass->setCurrentIndex( wwCellPass() );
+	cellPass->setEnabled( false );
 	pl->addWidget( cellLights );
 	pl->addWidget( cellGi );
+	pl->addWidget( cellPass );
 	pl->addWidget( cellIs );
 	pl->addStretch( 1 );
 	pl->addWidget( probesPlace );
@@ -464,6 +471,11 @@ void CellWorkspacePanel::buildUi()
 	// lane PRTPGI: the bounce of the last bake, drawn while Cell lights is on
 	connect( cellGi, &QCheckBox::toggled, this, [this]( bool on ) {
 		wwCellGiSetOn( on );
+		if ( glView )
+			glView->update();
+	} );
+	connect( cellPass, qOverload<int>( &QComboBox::currentIndexChanged ), this, [this]( int i ) {
+		wwCellSetPass( i );
 		if ( glView )
 			glView->update();
 	} );
@@ -597,6 +609,8 @@ void CellWorkspacePanel::onSceneChanged()
 {
 	rebuildList();
 	rebuildLegendAndCensus();
+	if ( cellPass )	// lane PROBEVIEW1: a Pass needs this document's bake relit
+		cellPass->setEnabled( nif && wwCellGiFor( nif ) );
 }
 
 void CellWorkspacePanel::rebuildList()
