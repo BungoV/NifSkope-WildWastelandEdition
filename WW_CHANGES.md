@@ -1,5 +1,14 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Cell view: corners and creases darken the way the game's do (2026-10-02)
+
+- With Cell lights on, the cell view now has the game's ambient occlusion: the soft darkening in corners, in
+  creases, under pipes and where clutter meets the floor. It uses the game's own settings, the same in every
+  cell, and darkens the same things the game does: all the light on solid surfaces. Glass, steam and other
+  see-through surfaces are not darkened, and fog is laid over it, as in game.
+- There is no new menu row and no new setting; it comes with the Cell lights row.
+- New gate `tests/spells/cell_ao.sh`; reds `off`, `radius`, `noblur` and `noreset` must each FAIL.
+
 ## Cell view: why the Vault 111 walkway has no bright pools on the floor (2026-10-02)
 
 Nothing

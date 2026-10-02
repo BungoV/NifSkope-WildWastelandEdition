@@ -550,6 +550,52 @@ WW_CELL_SPEC_RED=nonspec (the flag ignored): 85.4% / 61.0% where shown, totals 1
 views. Left open: the cell view multiplies the lights' specular by the material's specular colour; the game's
 deferred lights read only the specular scale (white on this floor).
 
+### 2u. The game's screen-space ambient obscurance (lane AO1, 2026-10-02)
+
+The game darkens creases, corners and the ground under clutter with a screen-space pass. Its settings are the
+INI's, the same in every cell: radius 108.2, bias 0.6, intensity 7.1 (game units). Nothing comes from the cell,
+its imagespace or its lighting template. It runs at half the view from the opaque pass's depth and normals:
+- depth mips, each the min of 2x2 of the one above (5 levels);
+- per pixel 5 taps over 2 turns (angle step 2.512) on a disc of radius x 100 / depth pixels, each tap's depth
+  read from the mip floor(log2 reach) - 3; A = max(0, 1 - intensity x sum f^3 max((v.n - bias') / (v.v + 0.01),
+  0) / r^6), f = max(r^2 - v.v, 0), bias' = bias + 10 max(d - 0.3, 0) + 5 |ndc|^2, d = depth / 7000;
+- the tap pattern turns by a random angle each frame (only up to depth 3500) and the game keeps 0.99 of the
+  history, so a still view shows a time average. The history starts over from the frame's value when that is
+  0.95 or more and the history is under 0.7;
+- a bilateral blur across, then down: 7 taps 2 pixels apart (0.153170, 0.444893, 0.422649, 0.392902), cut by
+  2000 x the depth-key difference.
+It multiplies everything the game's deferred composite writes (direct light, ambient, specular, emissive,
+reflections) before the fog. Blended surfaces and effects are drawn after it and do not take it.
+
+In the viewer (part of the Cell lights row, no menu row, no INI key): wwCellAoPass draws the opaque cell-lit
+shapes once more (probe 20: view normal + depth in game units) into a full-size float target, cell_ao.frag runs
+the mips, the raw pass and the two blurs at half size, and the cell programs multiply their lit color by the
+bilinear sample before their fog (never when blending is on). A still view = the mean over 8 evenly spaced
+angles, plus the history restart as a closed-form average (it can fire on 0.4-0.5% of pixels and lifts them by
+about 0.2). Cost 3-22 ms a frame at 960x600. The texture sits on unit 16 of the cell programs.
+
+Pins: WW_CELL_AO=0 (none computed), WW_CELL_AO_RED=off (computed, not applied) | radius (half) | noblur |
+noreset (the plain mean), WW_CELL_AO_DUMP=<file>.
+
+Gate tests/spells/cell_ao.sh + cell_ao_check.py (an independent numpy rebuild from the dumped depth and
+normals, effects hidden in both windows), Vault111Cryo / DmndSolomonsHouse01 / GoodneighborTheThirdRail:
+- E the dumped normals belong to the dumped depth's surface: 97.4 / 93.7 / 83.9% (x unmirrored: 58.7 / 64.2 / 56.2%)
+- A the raw obscurance within 0.01: 100% each
+- R the history restart vs a frame-by-frame run: mean |d| 0.0061 / 0.0047 (third cell: 4 px, not judged)
+- B the blur within 0.01: 100% each
+- C the light the picture got (with / without) vs the rebuild, within 0.02: 100.00% of 523,868 / 482,695 /
+  112,773 px = 97 / 92 / 99% of the geometry
+Reds on Vault111Cryo, each fails its stage: off -> C 48.89%, radius -> A 56.22%, noblur -> B 58.59%,
+noreset -> R mean |d| 0.1939.
+
+With the imagespace on, the obscurance lowers the measured light and the exposure rises a little, as in game
+(the door-room picture's mean goes 61.2 -> 61.5 of 255 while its creases darken).
+
+Assumed, not measured: the depth mips are point sampled, the composite's upsample is bilinear, and 8 evenly
+spaced angles stand in for the game's continuous random angle (closed form vs frame-by-frame: max 0.068).
+Open: compare one in-game still against the viewer at the Vault 111 cryo walkway; these three assumptions are
+what such a capture would settle.
+
 ## 3. Open
 
 - `.tbk` v4: two surfel sides per cell (gives back the refused thin-wall weight), room ids (2f).
