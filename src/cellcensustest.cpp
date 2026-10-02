@@ -79,6 +79,14 @@ BSD License - see nifskope.h
  *   WW_CELL_CENSUS_SLICE     i/N: walk slice i of N (default 1/1)
  *   WW_CELL_CENSUS_STEPS     what a visit does: `census` or `census,bake`
  *   WW_CELL_CENSUS_BAKE      the bake's folder (required by the bake step)
+ *   WW_CELL_CENSUS_TBK       the `.tbk` version the bake step asks for: 4
+ *                            (default) or 3. The builder is handed it as
+ *                            WW_CELL_PROBE_BAKE_TBK, and every file a visit
+ *                            wrote is read back: another version fails the
+ *                            visit. On 2026-10-02 the cell view's bake does not
+ *                            read that variable yet and writes its default (4),
+ *                            so a run that asks for 3 FAILS here, on purpose,
+ *                            instead of handing a v3 reader v4 files
  *   WW_CELL_CENSUS_MARGIN    cells of ring loaded around an exterior tile (0)
  *   WW_CELL_CENSUS_PLAN      write the whole walk plan here (key, form, EDID,
  *                            unit, place among the units walked, slice)
@@ -230,6 +238,7 @@ struct Walk
 	QString stepNames;          //!< `census` or `census+bake`
 	bool needScene = false;     //!< some step needs the scene even where nothing is placed
 	QString bakeDir;            //!< the bake step's folder
+	int tbk = 4;                //!< the `.tbk` version the bake step asks for (WW_CELL_CENSUS_TBK)
 	qint64 loadStartMs = 0;     //!< wall clock when the load was opened (the bake step's files are newer)
 	QVector<CensusCell> plan;   //!< every cell of the walk, plugin order
 	QVector<CensusUnit> units;  //!< every unit, in the order its first cell is planned
@@ -246,6 +255,7 @@ struct Walk
 	int done = 0, loads = 0, ok = 0, refused = 0, rows = 0, countOnly = 0, crashedRows = 0;
 	int splitUnits = 0, diedTiles = 0;
 	int checks = 0, failures = 0;
+	int versionRead = 0;        //!< visits whose bake files were read back as the version asked for
 	QStringList failLines;
 	QElapsedTimer wall, cell;
 	qint64 buildMs = 0;
@@ -567,6 +577,21 @@ void stepBakeBefore( const CensusLoad & ld )
 	qputenv( "WW_CELL_PROBE_BAKE", QDir::toNativeSeparators( dir ).toLocal8Bit() );
 	qputenv( "WW_CELL_PROBES_N", QByteArray::number( ld.own ) );     // the load's own cells, never the ring
 	qputenv( "WW_CELL_PROBES_HIDE", "1" );      // the markers are not part of the cell: the frame stays the check-up's
+	// the file version is the run's choice (WW_CELL_CENSUS_TBK, default 4). The builder is told here; whether it
+	// listened is read from the files in stepBakeAfter, so a run never says one version and writes another.
+	qputenv( "WW_CELL_PROBE_BAKE_TBK", QByteArray::number( g.tbk ) );
+}
+
+//! The version a `.tbk` sector file says it is (its second 32-bit word), or -1.
+int tbkVersionOf( const QString & path )
+{
+	QFile f( path );
+	if ( !f.open( QIODevice::ReadOnly ) )
+		return -1;
+	const QByteArray h = f.read( 8 );
+	if ( h.size() < 8 || h.left( 4 ) != QByteArray( "TBK1" ) )
+		return -1;
+	return int( quint8( h[4] ) ) | ( int( quint8( h[5] ) ) << 8 ) | ( int( quint8( h[6] ) ) << 16 ) | ( int( quint8( h[7] ) ) << 24 );
 }
 
 void stepBakeAfter( const CensusLoad & ld, CensusRow & r )
@@ -575,6 +600,7 @@ void stepBakeAfter( const CensusLoad & ld, CensusRow & r )
 	qunsetenv( "WW_CELL_PROBE_BAKE" );
 	qunsetenv( "WW_CELL_PROBES_N" );
 	qunsetenv( "WW_CELL_PROBES_HIDE" );
+	qunsetenv( "WW_CELL_PROBE_BAKE_TBK" );
 	const QString leadKey = g.plan.at( ld.cells.first() ).key;
 	r.bakeProbes = noteNumber( "bake: (\\d+) probes" );
 	// what the bake cost inside the build: placing the probes, the rays, the files
@@ -592,11 +618,24 @@ void stepBakeAfter( const CensusLoad & ld, CensusRow & r )
 	r.bakeMs = timed ? ms : -1;
 	// the files: the sector files in the load's folder that this load wrote
 	const QString dir = bakeFolder( ld );
-	qint64 files = 0;
+	qint64 files = 0, otherVersion = 0;
+	int seenVersion = -1;
 	for ( const QFileInfo & fi : QDir( dir ).entryInfoList( { QStringLiteral( "sector_*.tbk" ) }, QDir::Files ) )
-		if ( fi.size() > 0 && fi.lastModified().toMSecsSinceEpoch() >= g.loadStartMs - 2000 )
+		if ( fi.size() > 0 && fi.lastModified().toMSecsSinceEpoch() >= g.loadStartMs - 2000 ) {
 			files++;
+			const int v = tbkVersionOf( fi.absoluteFilePath() );
+			if ( v != g.tbk ) {
+				otherVersion++;
+				seenVersion = v;
+			}
+		}
 	r.bakeFiles = files;
+	if ( files > 0 )
+		check( otherVersion == 0, QStringLiteral( "%1: the bake's files are the version the run asked for (.tbk v%2)" ).arg( leadKey ).arg( g.tbk ),
+			QStringLiteral( "%1 of %2 files say another version (v%3): the builder did not take WW_CELL_PROBE_BAKE_TBK" )
+				.arg( otherVersion ).arg( files ).arg( seenVersion ) );
+	if ( files > 0 && otherVersion == 0 )
+		g.versionRead++;
 	const qint64 sectors = noteNumber( "unlinked mean [0-9.]+, sectors (\\d+)" );
 	const bool named = g.notes.contains( QLatin1String( "bake folder " ) );
 	check( named && r.bakeProbes > 0 && files > 0 && files == sectors,
@@ -830,7 +869,7 @@ void refuseLoad( const QString & why )
 	r.block = ld.block;
 	r.steps = g.stepNames;
 	// a refused load built nothing: what the steps asked of the builder must not follow into the next
-	for ( const char * v : { "WW_CELL_PROBES", "WW_CELL_PROBE_BAKE", "WW_CELL_PROBES_N", "WW_CELL_PROBES_HIDE" } )
+	for ( const char * v : { "WW_CELL_PROBES", "WW_CELL_PROBE_BAKE", "WW_CELL_PROBES_N", "WW_CELL_PROBES_HIDE", "WW_CELL_PROBE_BAKE_TBK" } )
 		qunsetenv( v );
 	r.buildMs = g.buildMs;
 	r.note = why.isEmpty() ? QStringLiteral( "refused, and the builder gave no reason" ) : why;
@@ -1069,6 +1108,8 @@ void finishWalk( const QString & why )
 			  << " (" << g.nExterior << " loads, " << g.nExteriorCells << " cells)\n";
 			for ( const QString & l : g.failLines )
 				s << "FAIL  " << l << "\n";
+			if ( !g.bakeDir.isEmpty() )   // the gate reads this line: a passed check prints nothing above
+				s << "bake version read back: " << g.versionRead << " visits, files .tbk v" << g.tbk << "\n";
 			s << g.checks << " checks, " << g.failures << " failures\n";
 			s << ( g.failures == 0 ? "PASS" : "FAIL" ) << "\n";
 			s << "done\n";
@@ -1266,6 +1307,8 @@ void startWalk()
 		err = QStringLiteral( "WW_CELL_CENSUS_SLICE must be i/N with 1 <= i <= N; got %1/%2" ).arg( g.sliceI ).arg( g.sliceN );
 	else if ( g.margin < 0 || g.margin > 4 )
 		err = QStringLiteral( "the ring must be 0 to 4 cells; got %1" ).arg( g.margin );
+	else if ( g.tbk != 3 && g.tbk != 4 )
+		err = QStringLiteral( "the bake's file version must be 3 or 4; got %1" ).arg( g.tbk );
 	else if ( !stepsFromNames( envStr( "WW_CELL_CENSUS_STEPS", QStringLiteral( "census" ) ), &err ) )
 		;   // err says which step is not one
 	else
@@ -1346,7 +1389,8 @@ void startWalk()
 			"refs, refs_drawn and lights_cell are the cell's own; refs_block to rss_mb are the whole load's, written on the "
 			"load's first row and ^ on its other rows; build_ms is the whole load and bake_ms the part of it the bake took; "
 			"far=none: nothing beyond the block is drawn; settle %5 ms is inside total_ms" )
-			.arg( g.plugins ).arg( g.block ).arg( g.sliceI ).arg( g.sliceN ).arg( g.settleMs ).arg( g.margin ).arg( g.stepNames ),
+			.arg( g.plugins ).arg( g.block ).arg( g.sliceI ).arg( g.sliceN ).arg( g.settleMs ).arg( g.margin )
+			.arg( g.bakeDir.isEmpty() ? g.stepNames : QStringLiteral( "%1 (bake files .tbk v%2)" ).arg( g.stepNames ).arg( g.tbk ) ),
 			QString::fromLatin1( kColumns ) } );
 	}
 	for ( const QString & t : keysOfFile( g.splitPath ) )
@@ -1455,6 +1499,7 @@ void wwCellCensusHarness( NifSkope * skope )
 	g.refsMax = envInt( "WW_CELL_CENSUS_REFS_MAX", 12000 );
 	g.margin = envInt( "WW_CELL_CENSUS_MARGIN", 0 );
 	g.bakeDir = QDir::fromNativeSeparators( envStr( "WW_CELL_CENSUS_BAKE" ) );
+	g.tbk = envInt( "WW_CELL_CENSUS_TBK", 4 );
 	QFile::remove( g.logPath );
 
 	QObject::connect( skope, &NifSkope::completeLoading, skope,

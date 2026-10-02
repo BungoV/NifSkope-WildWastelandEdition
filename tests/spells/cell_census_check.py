@@ -39,7 +39,7 @@ loaded once; the load's figures are on the load's first row and `^` on its other
         every cell of every unit the keys are in: exactly one row, and the row against the plugin
   cell_census_check.py check <plugin> <census file> <plan file> <keys file> [same options]
         both
-  cell_census_check.py bake <plugin> <census file> <key> <bake folder>
+  cell_census_check.py bake <plugin> <census file> <key> <bake folder> [--tbk 4|3]
         the row says the bake step ran in the same visit, and its files are on disk
 
 Each check prints `PASS  ...` or `FAIL  ...`; the last line is `cell_census_check: N checks,
@@ -639,7 +639,16 @@ def do_rows(m, t, census_path, keys_path, plan_path, block, margin, slices):
     t.check(ok_rows > 0, "at least one sampled cell was drawn", "%d of %d (%d count only)" % (ok_rows, len(keys), count_only))
 
 
-def do_bake(t, census_path, key, folder):
+def tbk_version(path):
+    """The version a .tbk sector file says it is: 4 bytes `TBK1`, then a little-endian 32-bit number."""
+    with open(path, "rb") as f:
+        head = f.read(8)
+    if len(head) < 8 or head[:4] != b"TBK1":
+        return None
+    return struct.unpack("<I", head[4:8])[0]
+
+
+def do_bake(t, census_path, key, folder, tbk=4):
     rows = [r for r in read_rows(census_path) if r["key"] == key]
     t.check(len(rows) == 1, "%s: exactly one census row" % key, "%d rows" % len(rows))
     if len(rows) != 1:
@@ -653,6 +662,10 @@ def do_bake(t, census_path, key, folder):
     t.check(len(files) > 0 and num(r, "bake_files") == len(files),
             "%s: the bake's files are on disk, as many as the row says" % key,
             "on disk %d (%d bytes), row %s" % (len(files), sum(os.path.getsize(f) for f in files), r.get("bake_files")))
+    versions = sorted(set(str(tbk_version(f)) for f in files))
+    t.check(len(files) > 0 and versions == [str(tbk)],
+            "%s: every bake file is the version the run asked for (.tbk v%d)" % (key, tbk),
+            "the files say v%s" % ", v".join(versions))
     t.check((num(r, "bake_probes") or 0) > 0 and len(probes) == 1 and os.path.getsize(probes[0]) > 0,
             "%s: probes were placed and listed" % key, "row %s probes, %d probe lists" % (r.get("bake_probes"), len(probes)))
     bake, build = num(r, "bake_ms"), num(r, "build_ms")
@@ -777,7 +790,7 @@ def main(argv):
         return 2
     mode, plugin = argv[1], argv[2]
     rest, opts = [], {"--world": "Commonwealth", "--interiors": "18", "--center": "-20,7", "--block": "5",
-                      "--margin": "0", "--slices": "1", "--only": "", "--plan": ""}
+                      "--margin": "0", "--slices": "1", "--only": "", "--plan": "", "--tbk": "4"}
     small = False
     i = 3
     while i < len(argv):
@@ -792,7 +805,7 @@ def main(argv):
     block, margin, slices = int(opts["--block"]), int(opts["--margin"]), int(opts["--slices"])
     if mode == "bake" and len(rest) >= 3:
         t = Tally()
-        do_bake(t, rest[0], rest[1], rest[2])
+        do_bake(t, rest[0], rest[1], rest[2], int(opts["--tbk"]))
         return t.end()
     m = Model(plugin, opts["--world"])
     cx, cy = [int(v) for v in opts["--center"].split(",")]

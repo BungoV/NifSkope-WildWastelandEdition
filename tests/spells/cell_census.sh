@@ -29,9 +29,12 @@
 # A window also stops at WW_CELL_CENSUS_RSS_MAX MB (8000): NifSkope does not hand back what a big load
 # took, so a long pass is a chain of short-lived windows, each resuming.
 #
-# AFTER THE SAMPLE (--extras alone runs just these; --sample skips them):
+# AFTER THE SAMPLE (--extras alone runs just these; --sample skips them; --bake runs bake and ring only):
 #   bake   one small interior, visited once with the steps `census,bake`: the row is written AND the
-#          bake's files are on disk, from the same visit; the bake's seconds are printed beside the load's
+#          bake's files are on disk, from the same visit; the bake's seconds are printed beside the load's.
+#          The files' version is the run's choice (TBK=4, the default, or TBK=3): the window reads it
+#          back from every file it wrote, the checker reads it again, and the checker is then told to
+#          expect the other version and must FAIL
 #   split  a 3x3 tile with the limit pulled down to 1000 references is opened cell by cell and each row
 #          says why (the checker confirms, from the plugin, that the tile is over the limit); and a small
 #          tile the gate says a dead run was on (a planted .pending) is opened cell by cell too
@@ -51,7 +54,7 @@
 #
 # (tests/spells/cell_census.py is another thing: lane CELLVIEW1's budget table for one open cell.)
 #
-# USAGE  bash tests/spells/cell_census.sh [--fresh] [--sample|--extras] [--slices N] [--slice i/N] [--merge]
+# USAGE  [TBK=4|3] bash tests/spells/cell_census.sh [--fresh] [--sample|--extras|--bake] [--slices N] [--slice i/N] [--merge]
 #                                         [--red NAME] [--whole] [--cells FILE]
 
 set -u
@@ -77,6 +80,7 @@ while [ $# -gt 0 ]; do
 		--merge) MERGE=1 ;;
 		--sample) PART="sample" ;;
 		--extras) PART="extras" ;;
+		--bake) PART="bake" ;;
 	esac
 	shift
 done
@@ -135,6 +139,11 @@ trap wipe_scope EXIT
 # made 539): a run that checked less than this did not check the sample.
 FLOOR_WALK="${FLOOR_WALK:-184}"
 FLOOR_CHECK="${FLOOR_CHECK:-539}"
+# The bake step's file version is the run's choice: 4 (the writer's default: both sides of a thin wall,
+# room ids, glass tint) or 3 (what a reader that only knows v3 takes). TBK=3 bash cell_census.sh --bake
+TBK="${TBK:-4}"
+case "$TBK" in 3|4) ;; *) echo "TBK must be 3 or 4; got $TBK"; exit 2 ;; esac
+tbk_other=$((7 - TBK))
 
 mkdir -p "$OUT" "$(dirname "$CENSUS")"
 : > "$LOG"
@@ -184,7 +193,7 @@ ledger_pass() {   # <part file> <run log>
 # =====================================================================================================
 # THE SAMPLE (or the named cells, or the whole game)
 # =====================================================================================================
-if [ "$PART" != "extras" ]; then
+if [ "$PART" != "extras" ] && [ "$PART" != "bake" ]; then
 
 KEYS="$OUT/sample.keys"
 small=(); case "$RED" in stale|dropslice|doubleslice) small=( --small ) ;; esac
@@ -371,10 +380,10 @@ BAKEKEY="$(cut -f1 "$OUT/bake.keys" | head -1)"
 check "the checker named a small interior to bake ($(tr '\t' ' ' < "$OUT/bake.keys"))" "$([ -n "$BAKEKEY" ] && echo 1 || echo 0)"
 XC="${CENSUS%.tsv}_bake.tsv"; rm -f "$XC" "$XC.pending" "$XC.split"
 rm -rf "$OUT/bake"; mkdir -p "$OUT/bake"
-bakeenv=( WW_CELL_CENSUS_WORLD=none WW_CELL_CENSUS_STEPS=census,bake WW_CELL_CENSUS_BAKE="$(winpath "$OUT/bake")" )
+bakeenv=( WW_CELL_CENSUS_WORLD=none WW_CELL_CENSUS_STEPS=census,bake WW_CELL_CENSUS_BAKE="$(winpath "$OUT/bake")" WW_CELL_CENSUS_TBK="$TBK" )
 [ "$RED" = "nobake" ] && bakeenv+=( WW_CELL_CENSUS_RED=nobake )
 extra_window bake "$OUT/bake.keys" "${bakeenv[@]}"
-checker bake bake "$ESM" "$XC" "$BAKEKEY" "$OUT/bake"
+checker bake bake "$ESM" "$XC" "$BAKEKEY" "$OUT/bake" --tbk "$TBK"
 if [ "$RED" = "nobake" ]; then
 	check "RED nobake: the window FAILS its own check that the bake wrote its files in this visit" \
 		"$(grep -q '^FAIL  .*the bake step wrote its files in this visit' "$XL" && echo 1 || echo 0)"
@@ -385,6 +394,13 @@ fi
 check "bake: the window ran, and its own checks pass ($(grep -E '^[0-9]+ checks' "$XL" | tail -1))" "$(window_ok)"
 check "bake: the row and the files on disk are from the one visit (the checker)" "$(checker_ok)"
 bakeout="$XOUT"
+vread="$(sed -n "s/^bake version read back: \([0-9]*\) visits, files \.tbk v$TBK\$/\1/p" "$XL" | tail -1)"
+check "bake: the window read the version back from its files (${vread:-no line} visits, .tbk v$TBK)" \
+	"$( [ "${vread:-0}" -ge 1 ] && echo 1 || echo 0)"
+# the version check must be able to fail: the same files, the checker told to expect the other version
+checker bake_wrongversion bake "$ESM" "$XC" "$BAKEKEY" "$OUT/bake" --tbk "$tbk_other"
+check "bake: the checker FAILS these v$TBK files when told to expect v$tbk_other (its version check can fail)" \
+	"$(echo "$XOUT" | grep -q "^FAIL  .*every bake file is the version the run asked for (.tbk v$tbk_other)" && echo 1 || echo 0)"
 checker bake_rows rows "$ESM" "$XC" "$OUT/bake.keys" --world "$WORLD" --block "$BLOCK"
 check "bake: the same visit's row still matches the plugin" "$(checker_ok)"
 say "  bake: $(echo "$bakeout" | grep 'files are on disk' | sed 's/^PASS  //' | cut -c1-200)"
@@ -392,6 +408,7 @@ say "  bake: $BAKEKEY with the bake: load $(col "$XC" "$BAKEKEY" build_ms) ms, o
 [ -f "$CENSUS" ] && say "  bake: the same cell with the check-up alone (the sample): load $(col "$CENSUS" "$BAKEKEY" build_ms) ms; the visit $(col "$CENSUS" "$BAKEKEY" total_ms) ms"
 
 # ---- THE SPLIT RULE: a tile over the limit, and a tile a dead run was on
+if [ "$PART" != "bake" ]; then
 say "  --- a tile that is too big, or that a run died on, is opened cell by cell"
 python "$CHECK" splitkeys "$ESM" --world "$WORLD" --block 3 --center "$CENTER" > "$OUT/split.all" 2> "$OUT/split.err"
 grep '^E:' "$OUT/split.all" > "$OUT/split.keys"
@@ -412,6 +429,7 @@ check "split: the checker agrees, from the plugin, why each was opened alone ($n
 	"$([ "$nwhy" = "$((nover + ndied))" ] && [ "$(checker_ok)" = "1" ] && echo 1 || echo 0)"
 check "split: $nover rows say the tile is over the limit, $ndied say a run died on it" \
 	"$([ "$(grep -c 'over the walk.s limit of 1000' "$XC")" = "$nover" ] && [ "$(grep -c 'the walk died on this tile as 3x3' "$XC")" = "$ndied" ] && echo 1 || echo 0)"
+fi   # the split
 
 # ---- THE RING: one exterior cell with its neighbors loaded around it, checked up and baked in one visit
 say "  --- one exterior cell with a ring of neighbors loaded around it (what a bake's probes must see)"
@@ -420,15 +438,15 @@ echo "$RINGKEY" > "$OUT/ring.keys"
 XC="${CENSUS%.tsv}_ring.tsv"; rm -f "$XC" "$XC.pending" "$XC.split"
 rm -rf "$OUT/bake_ring"; mkdir -p "$OUT/bake_ring"
 extra_window ring "$OUT/ring.keys" WW_CELL_CENSUS_BLOCK=1 WW_CELL_CENSUS_MARGIN=1 WW_CELL_CENSUS_NOINTERIORS=1 \
-	WW_CELL_CENSUS_STEPS=census,bake WW_CELL_CENSUS_BAKE="$(winpath "$OUT/bake_ring")"
+	WW_CELL_CENSUS_STEPS=census,bake WW_CELL_CENSUS_BAKE="$(winpath "$OUT/bake_ring")" WW_CELL_CENSUS_TBK="$TBK"
 check "ring: the window ran, and its own checks pass ($(grep -E '^[0-9]+ checks' "$XL" | tail -1))" "$(window_ok)"
 check "ring: one row, the middle cell's, from a 3x3 load ($(grep -c '^E:' "$XC" 2>/dev/null) rows, block $(col "$XC" "$RINGKEY" block))" \
 	"$([ "$(grep -c '^E:' "$XC" 2>/dev/null)" = "1" ] && [ "$(col "$XC" "$RINGKEY" block)" = "3" ] && echo 1 || echo 0)"
 checker ring rows "$ESM" "$XC" "$OUT/ring.keys" --world "$WORLD" --block 1 --margin 1
 check "ring: the row counts the middle cell as its own and the 3x3 as the load (the checker)" \
 	"$([ "$(echo "$XOUT" | grep -c '^PASS  .*: loaded as its 1x1 tile with a ring of 1')" = "1" ] && [ "$(checker_ok)" = "1" ] && echo 1 || echo 0)"
-checker ring_bake bake "$ESM" "$XC" "$RINGKEY" "$OUT/bake_ring"
-check "ring: the middle cell was baked in the same visit, its files on disk (the checker)" "$(checker_ok)"
+checker ring_bake bake "$ESM" "$XC" "$RINGKEY" "$OUT/bake_ring" --tbk "$TBK"
+check "ring: the middle cell was baked in the same visit, its files on disk and .tbk v$TBK (the checker)" "$(checker_ok)"
 say "  ring: $RINGKEY with one cell of neighbors: load $(col "$XC" "$RINGKEY" build_ms) ms, of which the bake $(col "$XC" "$RINGKEY" bake_ms) ms ($(col "$XC" "$RINGKEY" bake_probes) probes, $(col "$XC" "$RINGKEY" bake_files) files, $(col "$XC" "$RINGKEY" refs_block) references loaded for $(col "$XC" "$RINGKEY" refs) of its own); the visit $(col "$XC" "$RINGKEY" total_ms) ms"
 
 fi   # the extras
