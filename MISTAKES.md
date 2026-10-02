@@ -5,6 +5,101 @@ Written the moment a mistake is recognised, unprompted (CONSTITUTION rule 2).
 Format: date -- what was done -- what was true -- how it was found -- the rule.
 Newest at the top.
 
+## 2026-10-02, lane BAKE4: what went wrong on the way to .tbk v4 and the glass tint
+
+- Fog taken for glass. The first glass feed took every "blended over" shape of a real cell as a tinting pane.
+  Solomon's house: its one "pane" was a 480-unit mist sphere tinting 29% of the link weight. Vault111Cryo: 341
+  shapes, 133,145 triangles, 47% of the link weight tinted. Rule: before a class of shapes is given a physical
+  role, survey the whole population (all 6899 materials here) and name the fields that separate the classes
+  (environment map on, soft fade off), then gate with a checker that reads the files itself.
+- Then splashes and lamp covers taken for glass. The material rule let a shape's own NIF flags stand in when it
+  named no material file. In Vault111Cryo 33 of the 37 shapes fed were drip splashes, lamp covers and klaxon
+  shells. The gate's census stage PASSED, because the checker carried the same stand-in. It was found only by
+  reading the 37 rows by name. Rule: a checker that copies the code's fallback proves nothing about the
+  fallback; before a rule is called right, print the names of what it selected in one real cell and read them.
+- The checker walked to the wrong end. Stage C compared each link's stored tint with the panes on the segment
+  "probe + stored direction x distance". That point is not the surfel (a surfel is its cell's average, the
+  direction is one ray's), so 100 links "crossed" a pane the bake had stored clear and the first real cell
+  FAILED at 0.656 against a bar of 0.80. To the surfel's stored position the same files read 0.993. The bars
+  were not moved. Two synthetic scenes had passed either way. Rule: a checker walks the geometry the consumer
+  uses, and a bar set on synthetic scenes is run on one real cell before the gate is queued.
+- A red run held a NifSkope window for 48 minutes. On the haze red the cell fed 175,360 triangles and the
+  checker's light stage walked all 262,355 links through them, after stage A had already failed. Rule: a
+  checker's cost is estimated on its reds, a later stage is not run once an earlier one failed, and the
+  triangle test is culled per probe.
+- Room ids, two defects in one night: an opening's cut cells took whichever side reached them first, and a
+  probe standing in a solid voxel took the first air neighbour in a fixed order (the far side of a thin wall).
+  Rule: a side is decided by the opening's plane and by what the probe can see, never by search order.
+- Two commits went in before their own full gate run: part 1 (the lock queue was 60 to 90 minutes a turn) and
+  part 2 (the merge of main needed a clean tree, and there is no stash). Both commit messages say so and the
+  numbers belong to the merge commit that follows each. Rule unchanged: say it in the message, never imply a
+  gate that did not run on that source.
+- The glass checker failed two green cells for its own reasons, after it was committed. (1) Its type list did
+  not know static collections: the cell view places a collection's parts under the collection's reference, so
+  29 rows in Vault111Cryo and 76 in NorthEndMeanPastries read "outside the list". (2) It measured the light a
+  pane takes along one segment per link. In NorthEndMeanPastries that segment threads several small counter
+  panes the surfel's cell mostly misses: 0.586 against a bar of 0.75. Over nine fixed segments per link the same
+  files read 0.860; the bar was not moved and the one-segment figure is still printed. Rule: a checker is run on
+  every gate cell's saved files before it is committed, and one sample per stored record is not a measurement
+  of a cell's average.
+- A gate never ran until the last hour: the far map's (probe_far.py). My run script gave it the exe as
+  "release/NifSkope.exe"; Python hands that to Windows as it is and Windows cannot find it. Every other gate
+  made the path absolute itself, so the difference was invisible. Rule: a run script gives every gate an
+  absolute exe path, and a gate listed in the plan is read in the log by name, not assumed from "rc 0" of the
+  script around it.
+- Two waiters from one lane sat in the lock queue: stopping the shell does not stop a queued waiter. Rule: turn
+  the old script into a stub that returns at once; never kill.
+
+## 2026-10-02 -- FXD1: a checker threshold picked before the defect's own size was measured
+
+What happened: the first draft of the haze-hole checker called a pixel a hole when it kept under 0.35 of its
+neighbours' lift. That number was a guess. On the old order it caught 2 of bungo's 6 marks, and the frame with
+the fix still "failed" with 162 pixels that had nothing to do with the defect (1-px lines on silhouettes, and
+the frost on a cryo pod's window).
+
+Why: the defect is partial. A decal with alpha a keeps (1 - a) of the haze, so most of the 735 pixels the fix
+changes kept 0.55 to 0.82 of their neighbours' lift, not under 0.35. And the two false-positive classes were
+never measured on a clean frame before the bar was written.
+
+Rule: before fixing a threshold, print the distribution of the measured quantity over the pixels the fix
+changes (old order against fixed), and list what the checker flags on the FIXED frame by group with its world
+position. Each group that is not the defect gets a named exclusion with its own count (silhouettes: 89 px ->
+0), not a looser bar.
+
+Also: `Scene::drawDeferredShapes` is static; the first build failed on a per-scene test written inside it
+(one wasted build under the lock). A per-scene test belongs on the Shape.
+
+## 2026-10-02 -- CUBE1: a decode order written without checking the texture format; a gate run on a start without the archives; a stopped gate whose lock waiter lived on; a merge gated after main had moved
+
+### 2026-10-02 05:29 -- CUBE1 wrote "the game decodes the cube after the filter" without checking the texture format
+The lane's first agent toggled the cube's sRGB decode off per draw and decoded in the shader, with a comment
+saying the game samples the cube as plain bytes. The composite listing has no decode after the cube sample,
+and our own capture note already listed the cube array as an sRGB format: the sampler decodes, before the
+filter. The gate could not catch it (the two orders differ by less than its tolerance). Fixed by reading the
+bound cube's format and letting the sampler decode. Rule: when a shader listing shows no decode, look up the
+texture's format before deciding where the decode happens; a claim the gate cannot fail needs its source
+written next to it.
+
+### 2026-10-01 21:45 -- CUBE1's gate failed on a NifSkope start that came up without the game's archives
+One start in 70 resolved no material (358 "not found in archives" lines against 2), the gate reported "no
+material tags dumped" and the lane's last run before the usage limit read as a product failure. Fixed: the gate
+counts those lines, shoots that view once more and logs a NOTE. Rule: a gate that depends on a fresh settings
+scope checks that the scope actually resolved the game's data before it judges the picture.
+
+### 2026-10-02 05:31 -- CUBE1 stopped a queued gate and its lock waiter lived on
+A background gate launch was stopped to change plan; the stop ended the outer shell but left the lock waiter
+alive, and killing it was refused. The run then took the lock anyway and had to be allowed to finish before
+any shader could be edited. Rule: decide before queueing behind the lock; a queued run is a commitment.
+(What worked afterwards: the queued command is a scratch script of the lane's own, with a first line that
+exits at once unless a READY file exists; removing the file withdraws the run without stopping anything.)
+
+### 2026-10-02 08:25 -- CUBE1 merged main once and gated nothing before main had moved three more times
+The lane merged main at 06:05 and then waited for the NifSkope lock; by the time a gate could run, main had
+taken GLOW1 and POOL1, then AO1 (same two shader files: a real conflict), then MISS1. Each time the uncommitted
+merge was dropped and redone (four merges, four builds, two gate rounds). Rule: look at `git log HEAD..main`
+right before queueing gates and again when the lock arrives; keep the merge uncommitted until its gate has
+run, so a stale one costs `git merge --abort` and not a second merge commit.
+
 ## 2026-10-02 -- MISS1: Python with a backslash typed into a bash heredoc, twice; a source edited while its build ran; probe output that printed the whole population
 
 - What was done: (1) A scratch script written through a bash heredoc contained `mdl.replace('\\', os.sep)`;

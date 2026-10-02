@@ -1,5 +1,50 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Probe bake: both sides of a thin wall, rooms, and glass (2026-10-02)
+
+- The light bake (the probe files, `.tbk`) now keeps BOTH faces of a thin wall. A wall thinner than one bake
+  cell (70 units) used to keep one face only; the light arriving from the other face was refused or spilled
+  into the next cell. The new file (version 4) keeps the second face in the same cell.
+- Every probe now names the room it stands in (none when it stands under open sky), and a probe in a doorway
+  names the rooms on both sides. The file also carries the rooms' boxes, so a later step can tell which room
+  any point is in and stop light blending through a wall.
+- Glass tints the light that passes through it. A window, a display case or car glass takes away the share of
+  light its material says (opacity, color, texture); mist, light beams, glow cards, decals and additive glass
+  take none. Which shapes are glass is decided from the material file alone, the same for every cell.
+- The bake looks at the fixed world only: statics, furniture, containers, activators, terminals, plants and
+  lamps, and doors as boxes. Things you can pick up, actors and decals never enter it; they only receive
+  the light.
+- Old version 3 files are still read. `probebake --tbk 3` still writes the old file byte for byte; FO4CS reads
+  only that one until its reader is updated.
+- No new setting and no new menu row.
+- Gates: `tests/spells/probe_bake.py` (rooms scene, both sides, room names), `prtp_reference.py` (an
+  independent tracer), `tests/spells/probe_glass.sh` (real cells: the checker reads every material file and
+  the plugin itself). Each has red controls that fail as they must; numbers in PRTP_PLAN.
+
+## Cell view: no dark marks showing through the mist (2026-10-02)
+
+With Cell lights on, small dark marks stood out of the mist at the far end of the Vault 111 cryo walkway: the
+vent slits and the stencilled labels on the wall around the exit door, the warning stripes on the floor and the
+labels on the pods. They are decals, thin painted layers that sit on a wall. The cell view drew them after the
+mist, so each one painted a patch of clear, un-misted wall over the mist in front of it.
+
+The game draws its decals before anything see-through. The cell view now does the same: decals first, then
+mist, glow and glass. A decal far down the room is now as misted as the wall it sits on. On the marked shot
+about 730 pixels change, all of them from "clear" to "misted"; nothing else in the picture moves.
+
+Nothing to switch on: it rides the existing Cell lights row. A single model opened on its own draws as before.
+
+## Cell view: reflections on metal at the game's strength (2026-10-02)
+
+- With Cell lights on, the reflection on Vault metal, tanks, grates and floors is now as strong as in game. It
+  was drawn far too faint on lit metal (about a tenth of the game's). In game the reflection is tied to how
+  much light reaches the surface: a lit tank picks up a clear sheen, a panel in the dark does not shine.
+- Dull surfaces (concrete, cloth) no longer get a reflection at all, and a material that has no reflection
+  map of its own gets none, as in game.
+- Works for both regular materials and regular materials drawn through the PBR renderer. Your own .pbrm
+  materials are unchanged.
+- New gate `tests/spells/cell_cube.sh`; `--red cubeold` draws the old reflection and must FAIL.
+
 ## Cell view: floor grates and wall pieces sit where the game puts them; a cell opens in its first-load state (2026-10-02)
 
 Three things change in what the cell view draws.

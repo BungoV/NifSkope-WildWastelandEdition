@@ -659,6 +659,231 @@ Open:
   a quest are now hidden). A view option is bungo's call.
 - 5 shapes in Vault111Cryo's combined meshes fit neither rule; not explained.
 
+### 2w. The interior cube map reflection at the game's strength (lane CUBE1, 2026-10-02)
+
+Indoors the game adds the environment cube map in its final composite, not in the material's light pass, and
+it is far weaker and far less "mirror" than the viewer drew it. Read op for op from the game's composite
+shader (the same listing lane EXPO1 worked from):
+reflection = cube(R, mip) x 3 x spec x min(sqrt(sat(gloss - 0.3)), 1) x min(envScale^2 x 50, 50) x D,
+where spec = the material's specular scale x the _s map's red (saturated), gloss = the material's smoothness
+x the _s map's green, envScale the material's "Environment Mapping Mask Scale" as the game packs it, and D
+the DIFFUSE light that reached the pixel (ambient + lights, shadows included). mip = (1 - gloss) x 6 +
+view depth x 0.001953. So: a surface in the dark reflects nothing; a surface with gloss under 0.3 reflects
+nothing; there is no fresnel, no specular color and no env mask texture in it. Only a material that names its
+own env map reflects: indoors there is no cell-wide fallback cube, so a material without one gets none (the
+viewer used to give those the default cube).
+The game keeps its env cubes in an sRGB array (128 x 128, 8 mips), so its sampler decodes each texel BEFORE
+the filter and the shader decodes nothing. renderer.cpp wwCellCubeDecodeMode reads the bound cube's internal
+format: an sRGB-tagged cube is mode 3 (the sampler decodes: the game's order), an untagged one mode 1 (decoded
+in the shader after the filter, the nearest an untagged texture allows). `cellCubeMat` carries (spec scale,
+smoothness, mode, env scale); mode 2 = a .pbrm shape, which keeps the PBR program's own image-based law, 0 =
+no own cube. `cell_lights.glsl` cellCubeGame returns the term's factor K and cellLit adds K x the diffuse
+light (Ed). Both programs take it: fo4_default.frag (legacy) and pbrm_default.frag (a BGSM drawn through the
+PBR program, WW_CELL_PBR); the PBR program got the _s map on a new sampler `CellSpecMap` for this. The effect
+program is untouched (the block is compiled out under WW_CELL_FX).
+Red `cubeold` (WW_CELL_LIT_RED, bit 512) is the old law: texel squared x env scale x the Lambert sum, and the
+default cube on materials without their own.
+Probes (WW_CELL_PROBE): 50 = K / 4; 51 / 52 = the uv's fraction in 16 bits (u, v) with the material tag in
+blue; 53 = the normal's rounding residual. `WW_CELL_CUBE_DUMP=<file>` writes `tag|material` rows so a checker
+can name each pixel's material.
+Gate `tests/spells/cell_cube.sh` + `cell_cube_check.py`: the checker shares no code with the viewer (its own
+BGSM reader, its own BA2 / DX10 reader, BC5 decode, cube face table, mip chain and trilinear filter); it
+rebuilds K per pixel from the position / normal / uv probes and the material files and compares it with probe
+50. Bars: at least 500 steady pixels (fewer = SKIP), 200 lit, 97% within 3/255 + 5%, 95% of the lit ones.
+Two Vault111Cryo views x both programs. A start that comes up without the game's archives (seen once in 70)
+is shot once more and noted in the log.
+Result (exe 2026-10-02 11:11, main a1e25b20 merged in, branch head 4a9ebe9b): green PASS in 4 of 4 views,
+agree 99.9 / 99.9 / 99.9 / 100.0% (lit 99.8 / 99.9 / 99.9 / 100.0%), viewer/expected 0.996 / 0.995 / 0.984 /
+0.992, over 18,508 / 10,497 / 4,523 / 4,506 steady pixels (view 1 legacy, view 1 PBR, view 2 legacy, view 2 PBR).
+Red cubeold FAILS 4 of 4: agree 31.8 / 32.7 / 31.9 / 2.2% (lit 0.4 / 0.4 / 0.4 / 0.0%), viewer/expected 0.157 /
+0.078 / 0.154 / 0.082: the old law drew about a tenth of the game's reflection on lit metal.
+The obscurance (lane AO1) multiplies the lit colour after cellLit, so it scales this reflection too, as the
+game's does; probes 50-53 write the output after that multiply and are not touched by it.
+With the lane merged, cell_lit.sh, cell_oren.sh and cell_spec.sh stay PASS (run on main 5431a9f2 merged).
+Not a red: the decode order. The checker with decode-before-filter still passes shots drawn with
+decode-after-filter (agree 99.0-99.9%, viewer/expected 0.964-0.993): on these 128-pixel cubes at the mips the
+Vault's materials use, the two orders differ by less than the 8-bit tolerance. The order follows the game's
+texture format, not the gate.
+Open: (1) an untagged cube (not seen in the Vault; a mod's uncompressed cube without the sRGB format) is
+decoded after the filter; (2) the env scale's packing (x^2 x 50, capped at 50) is read from the composite, the
+material side that writes it was read in lane notes only; (3) exteriors are out of scope: there the game also
+blends a cell / sky cube, which this lane does not draw.
+
+### 2x. Decals draw before the blended pass: no dark marks in the haze (lane FXD1, 2026-10-02)
+
+bungo circled dark spots "passing through the particles" at the far door of the Vault 111 cryo walkway (camera
+of the marked shot: look-at 384,-480,60, view 3, distance 260, FOV 70, 1600x1000; eye 644,-480,60). Located
+first, with the effects hidden and shown and the two position probes (lift = shown - hidden, summed over RGB):
+
+| mark | pixel | world | distance | lift before -> after (neighbours) | shape under it |
+|---|---|---|---|---|---|
+| upper left | 730,410 | -491,-594,178 | 1147 | 18 -> 410 (411) | ref 00001932 V111RWallEx01.nif, its decal shapes ":14" (V111GreebsAlpha01DECAL.BGSM) and ":34" (V111LabelSet02.BGSM) |
+| mid left | 707,447 | -461,-628,116 | 1116 | 7 -> 257 (261) | same wall |
+| upper right | 852,420 | -463,-396,160 | 1115 | 0 -> 428 (426) | same wall |
+| mid right | 839,446 | -494,-415,120 | 1142 | 168 -> 351 (352) | same wall |
+| lower right | 883,511 | -455,-347,14 | 1108 | 60 -> 217 (222) | ref 00001931 V111RWallCrL01.nif ":34" |
+| lower left | 672,511 | -455,-683,14 | 1119 | 60 -> 156 (156) | ref 00001933 V111RWallCrR01.nif ":14", ":34" |
+
+Every one is a decal of the lighting shader with alpha blend (vent slits, stencilled labels), on an opaque
+wall about 1100 units away, behind all the walkway's haze. The same holds for the floor stripes
+(V111FloorStripeRestricted03, V111LabelSet03.BGSM) and the cryo pods' label decals nearer the eye. It is not
+the soft fade: `WW_CELL_FX_RED=nosoft` and `legacy` leave the marks as they are.
+
+The mechanism. A cell welds each material's shapes into one bucket and every bucket has the same origin. The
+second pass sorts by the origin's view depth with a stable sort, so in a cell it keeps the buckets in the order
+they were made: effect buckets first, material-named buckets after. A blended decal therefore drew after every
+haze card and laid the bare wall colour (times its alpha) over the haze in front of it.
+
+The game's order (Todd's treat): decals, opaque and blended, are drawn before the sorted blended pass. So nothing was changed about depth writes or the sort;
+`Scene::drawDeferredShapes` now draws the lighting shader's second-pass decals first
+(`Shape::wwDecalDrawsFirst()`: decal by the shader flags or by the material file, not refraction; Cell lights
+on only, so a plain NIF view is untouched). On bungo's frame 725 pixels change and every one gets brighter;
+with the imagespace on, the upper-left mark goes [59 60 49] -> [207 206 196]. In a bright room the same rule
+dims a decal by what the haze takes from its neighbours of equal brightness (held-out camera -4600,-280,120
+view 5: 444 pixels, all darker; band by band of surface brightness their lift is within 3 levels of the
+unchanged neighbours', e.g. -30 against -30 and -34 against -32).
+
+Gate `tests/spells/cell_fxdepth.sh` + `cell_fxdepth_check.py` (independent, no shape list). Per camera: effects
+hidden, the run under test, probes 2 and 3. A pixel's peers are the pixels within 12 px whose surface is at
+the same distance from the eye (within 4 %); a nearer surface is no peer, which is how the checker leaves out
+the geometry in front of the haze. A judged pixel is a hole when it keeps under 0.6 of its peers' median lift.
+Not judged: silhouettes (3 x 3 distance spread over 2 %; the picture is smoothed there and the probe is not --
+89 false pixels without this rule), pixels brighter than their peers, and places where the peers disagree
+(lower quartile under 0.85 of the median: an effect lying on the surface, such as the pod's frosted pane).
+- R: enough judged pixels. 306,192 and 178,032 (>= 20,000).
+- D: hole pixels in groups of >= 3. Green 0 and 0 (bar 0). Red `--red late` (`WW_CELL_FXD_RED=late`, the old
+  order): 65 px in 9 groups and 44 px in 5 groups, FAIL on both cameras (the red must reach 20).
+- Thresholds were set on the two cameras before the gate ran; the clean frames stay at 0 up to 0.75. A third
+  camera never used for that (-4600,-280,120) is clean too (0 holes, 106,976 judged) but has no subject for
+  the red, so it is not in the gate.
+Re-run on the same exe: `cell_fx.sh` PASS (it shoots the haze through the changed pass), `cell_is.sh` PASS
+(the final picture of the same room), `cell_glow.sh` PASS (K 167; the glow cards share the second pass).
+
+Open.
+- The red catches four of the six marks; the two label marks are brighter than their neighbours without the
+  haze, and the checker does not judge brighter pixels.
+- Census of Vault111Cryo's blended lighting-shader shapes (269 models, 1423 placements): 301 placed shapes carry
+  the decal flag and a material file (drawn first when the file says decal, as for every mark above), 58 carry the decal flag on the model only, with no material
+  file (NpcPipboyGroundTake01 "ScreenDust:0", V111GearDoorConsole01 "Lid:1", ...), 0 are plain glass. The
+  cell's lighting bucket writes fixed shader flags without the decal bits (src/cellview.cpp, the bucket
+  writer), so those 58 are not known as decals and stay in bucket order after the haze. The gate finds no hole on
+  the three cameras. Carrying the flag into the bucket changes bucket keys, so it was left for a lane that owns
+  the bucket writer.
+- Seen, not judged: the cryo pod's window frost (CryoPod02 "Window:9", CryopodFrost.BGEM, effect shader with
+  depth write) draws a hard-edged bright streak at 332..342, 430..480 of bungo's frame, the same before and
+  after this change.
+
+### 2y. `.tbk` v4: both sides of a thin wall, room ids, glass tint; the bake sees the fixed world only (lane BAKE4, 2026-10-02)
+
+The rule: the bake sees the fixed world only; items, actors, corpses, decals and effects are receivers.
+
+What changed. A cell of the surfel grid (70 units) seen from both sides of a thin wall used to keep one side;
+the other side's light was refused as "turned away" or housed in the next cell (2f). Version 4 keeps the second
+side in the same cell as a back surfel, and each ray links the side whose face it hit. Every probe names its
+room; a probe in an opening names both sides. Light passing a glass pane is tinted by it. v3 is still read by
+the cell view; `probebake --tbk 3` writes the old file byte for byte; the far map (2h) stays on v3.
+
+The file (little endian; the v3 body is unchanged):
+- header, 64 bytes: int32 magic, version (4), kind, cellX, cellY; float surfel cell size (70); uint32 surfel
+  count ns, probe count np, link count nl, flags; uint32 reserved[6]. reserved[0] = back surfel count nb,
+  reserved[1] = room box count nx, reserved[2] = what was modelled (bit 1 sides, 2 rooms, 4 doors, 8 glass).
+- v3 body: ns surfels x 32 bytes, np probes x 144, nl links x 12.
+- v4 tail, in this order:
+  1. nb back surfels x 32 bytes, same layout as a surfel, keyed by the same cell as the front one;
+  2. nl link records x 8 bytes, one per link in link order: u8 side (0 = the cell's surfel, 1 = its back
+     surfel), u8 tint[3] (the glass on the way, 255 = clear), u32 door (the door reference the link passes, 0 = none);
+  3. np probe records x 32 bytes, one per probe in probe order: u8 skyTint[8][3] (per octant, the sky seen
+     through glass, 255 = clear), u32 room[2] (room[0] = the probe's room, 0 = none; room[1] = 0xFFFFFFFF, except
+     a probe in an opening, which names the room on the other side there, 0 = outdoors);
+  4. nx room boxes x 32 bytes: u32 room, float lo[3], float hi[3], u32 reserved.
+- size = 64 + 32 ns + 144 np + 12 nl + 32 nb + 8 nl + 32 np + 32 nx.
+- a room id = (hash of the bake rectangle << 16) | (n + 1), so ids of two bakes do not collide.
+
+What a reader (FO4CS, last by standing order; read-only for this lane) must change for v4:
+1. accept version 4; the size check adds 32 x reserved[0] + 8 x linkCount + 32 x probeCount + 32 x reserved[1];
+2. a link whose side is 1 resolves against the back surfels (their own table, same cell key), not the front ones;
+3. multiply a link's radiance by tint / 255; multiply an octant's sky by skyTint / 255;
+4. which room a point is in: the room boxes first, else the nearest probe's room; a froxel between probes of
+   two rooms does not blend them (the open line of 2f);
+5. the door reference is information only for now (a later step can drop a link while its door is shut);
+   nothing else moves: surfel, probe and link layouts and the keying are v3's.
+A v3 reader that checks the exact size refuses a v4 file. Until the reader is updated, bake for it with `--tbk 3`.
+
+Rooms. The placer's enclosed rooms (2e) are named; a probe takes the room of the cell it stands in. Two defects
+were found by the gate and removed: an opening's cut cells took whichever side reached them first (now decided
+by the opening's plane), and a probe standing in a solid cell took the first air neighbour in a fixed order (the
+far side of a thin wall; now the neighbour the probe can see).
+
+Glass. A pane is a shape WITH A MATERIAL FILE READ whose material says: blending on, source alpha over
+(factors 6 / 7), not a decal, environment mapped, not soft, opacity above 0. Per triangle the light let through is
+T = 1 - a (1 - c): a = opacity x map alpha x vertex alpha, c = the map's linear color x vertex color (effect
+shader: opacity is the material's alpha squared, c times base color and scale). A pane never stops a ray; a
+link's tint is the weighted mean T over the rays that land in the surfel's cell; a two-sided pane counts once.
+Why the material file is required: in Vault111Cryo, with the shape's own NIF flags allowed to stand in, 33 of
+the 37 shapes fed were drip splashes (15), lamp covers (14) and klaxon shells (4). Why environment mapped and
+not soft: all 6899 archive materials were read; 122 effect and 5 lighting materials are panes; mist, beams and
+glow cards are blended over but soft and not environment mapped (39), additive materials add light and take
+none (48). The first feed took every blended shape: Solomon's house's one "pane" was a 480-unit mist sphere tinting
+29% of the link weight; Vault111Cryo fed 133,145 triangles and tinted 47%.
+
+The fixed world. The soup takes placed STAT MSTT TREE FURN CONT ACTI TERM FLOR LIGH (a static collection's
+parts by their own types) and doors as boxes only. Pick-up items and actors are left out by type, effect shapes
+and decals per shape. The cell view may draw more (clothing ground models, placed actors, decals); none of it
+reaches the soup, the albedo, the `.tbk` or the room ids. Stage T below holds this.
+
+Gates (exe of the last merge; numbers are the green run unless marked red):
+- `tests/spells/probe_bake.py rooms` (a built scene: 7 rooms, 2 doors, 8 panes): PASS, 272 probes re-traced at
+  1024 rays, 64671 links (back side 10964, through a door 1184, tinted 1287), 80 probes named in 7 known rooms.
+  Reds: `--red oneside` FAIL (0 back links, unlinked mean 0.1200 against 0.0138), `--red rooms` FAIL (0 probes
+  named), `--red glass` FAIL.
+- `tests/spells/probe_bake.py synth`: PASS (265 probes, 66796 links, 2256 to a back side; `--tbk 3` byte-identical
+  to the exe from before the lane). Reds oneside / octant / normal FAIL.
+- `tests/spells/prtp_reference.py` (an independent brute-force tracer, extended for v4 on its own): rooms PASS
+  (96 probes x 8192 rays: total median 0.022 p95 0.072, sky through glass worst 0.0033); reds glass (sky through
+  glass 0.0265 over 0.01) and oneside (0.049 / 0.507 over 0.10 / 0.25) FAIL. Concord PASS (658 probes, 246772
+  links, 65592 to a back side: total median 0.025 p95 0.082); red oneside FAIL (0.076 / 0.386); a Concord bake
+  with one side only FAILS the reference (0.082 / 0.381, unlinked mean 0.1745 against 0.0181).
+- `tests/spells/probe_glass.sh` (real cells; the checker reads the plugin and every material file itself):
+  stage A census, B the soup's panes, C the light, T the reference types.
+  Vault111Cryo: 4 panes (108 triangles, mean T 0.67) of 1085 blended or effect shapes; 1275 of 279905 links
+  tinted; C seen 0.980, mass 0.893, clear 1.0000; T 1349 references, 0 outside the list.
+  NorthEndMeanPastries: 15 panes (348 triangles: a diner window and 14 counter sneeze guards), 465 of 12864
+  links tinted (3% of the link weight); C seen 0.938, mass 0.860, clear 0.9986; T 238 references, 0 outside.
+  DmndSolomonsHouse01: 0 panes, 0 of 4614 links tinted; T 157 references, 0 outside.
+  Bars (set before the real cells were run, never moved): seen >= 0.80, mass 0.75..1.33, clear >= 0.97.
+  Reds: `--red haze` (every blended shape) FAIL A, 704 shapes wrongly fed, 177,984 triangles;
+  `--red ignored` FAIL A and B (0 fed, the checker has 108); `--red items` (pick-up items let into the soup)
+  FAIL T: 47 references outside the list in Vault111Cryo (MISC 35, ALCH 4, AMMO 4, WEAP 3, ARMO 1), 36 in
+  DmndSolomonsHouse01 (MISC 22, ALCH 14).
+- `tests/spells/cell_gi.sh` (the relight reads v4): Vault111Cryo and Solomon PASS, every stage 99.7% or better;
+  `--red flip` FAILS stage B (58.1%). `cell_lit.sh` PASS. `lodgen_native_baseline.sh --check` PASS (the loader
+  edit moves no far-LOD byte).
+- `tests/spells/probe_far.py` (the far map stays v3): PASS, 121 probes over 121 cells; `--red shift` FAILS (842
+  heights outside their cell). Give it the exe as an absolute Windows path: it starts the exe as given.
+What v4 gives one real cell (Vault111Cryo, same soup): links 259698 -> 279905; the sphere share refused as
+turned away 0.0341 -> 0; unlinked mean 0.2089 -> 0.1982; 10745 second sides kept in their own cell (7068 were
+housed next door in v3). The relit picture moves by 2 levels or more on 26% of the pixels in the gear-door room
+and 9.5% in the pod room (by 8 levels or more on 3.4% and 0.2%); the glass itself takes 0.012% of the light
+there (the Vault has four small panes), 1.3% in NorthEndMeanPastries.
+
+Not modelled: a pane's view-angle falloff (54 of the 122 pane materials use it) and palette alpha (7); a
+blended shape with no material file is never a pane; frost films (blended over, no environment map) take no
+light; one pane material name exists twice with different content (materials/shared/glasstile01.bgem is
+additive, materials/interiors/hightech/glasstile01.bgem is a pane), so the rule goes by the full path.
+
+Question for bungo, no behavior changed: movable statics (MSTT) are in the soup. The record cannot tell a
+fixed one from a simulated one: its flags and fields carry no such thing; whether the object is physics-driven
+is in the model's collision data. Vault111Cryo places 371: 323 are effects (mist, glow cards, drips, beams;
+already left out per shape), 45 are knock-about set dressing (oxygen tanks, folding chairs, cardboard boxes,
+vault suit boxes, traffic cones), 3 are fixed machinery (the gear room gate, two generators). Keep them all,
+drop the type, or decide per model from its collision?
+
+For section 3 (Open):
+- remove the line "`.tbk` v4: two surfel sides per cell (gives back the refused thin-wall weight), room ids (2f)": done here.
+- add: FO4CS's reader takes `.tbk` v3 only; the five changes for v4 are listed in this section; until then bake with `--tbk 3`.
+- add: glass in the bake has no view-angle falloff and no palette alpha; frost films and blended shapes without a material file take no light.
+- add: MSTT in the bake: fixed and simulated cannot be told apart from the record (bungo's call).
+
 ## 3. Open
 
 - `.tbk` v4: two surfel sides per cell (gives back the refused thin-wall weight), room ids (2f).
