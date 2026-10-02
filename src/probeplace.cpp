@@ -42,6 +42,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <map>
 #include <unordered_map>
 
 /* The project builds with -march=haswell, where GCC fuses a * b + c into one
@@ -768,7 +769,10 @@ bool probePlace( const ProbeSoup & soup, const ProbePlaceSpec & spec, ProbePlace
 	// the cut: every walkable cell inside an opening's slab belongs to no room; a cell under
 	// a window's slab is lit (its room has a way in, so it is no sealed hollow)
 	std::vector<quint8> lit( W.size(), 0 );
+	std::vector<int> cutBy( W.size(), -1 );   // lane BAKE4: the opening (index into kept) that cut the cell
+	int cutAp = -1;
 	for ( const ApCandidate * a : kept ) {
+		cutAp++;
 		const double n[2] = { a->nrm[0], a->nrm[1] }, t[2] = { -double( a->nrm[1] ), a->nrm[0] };
 		const double bot = double( a->pos[2] ) - std::min( double( spec.eye ), double( a->height ) * 0.5 );
 		const double reach = double( a->width ) * 0.5 + v;
@@ -784,6 +788,7 @@ bool probePlace( const ProbeSoup & soup, const ProbePlaceSpec & spec, ProbePlace
 					const double fz = G.o[2] + W[size_t( k )].z * v;
 					if ( fz >= bot - 2.0 * v && fz <= bot + a->height && W[size_t( k )].comp != -2 ) {
 						W[size_t( k )].comp = -2;
+						cutBy[size_t( k )] = cutAp;
 						R.cutCells++;
 					} else if ( fz < bot - 2.0 * v && fz + W[size_t( k )].head * v > bot ) {
 						lit[size_t( k )] = 1;
@@ -1001,6 +1006,198 @@ bool probePlace( const ProbeSoup & soup, const ProbePlaceSpec & spec, ProbePlace
 		place( c, ProbeClass::Cover, roomNo[size_t( c.comp )] );
 		R.cover++;
 	}
+
+	/* ---- lane BAKE4: ROOM IDS (`.tbk` v4, docs/PRTP_PLAN.md 2f). A room's air is its
+	 * walkable cells' air columns (floor up to the first solid). A covered cell that is no
+	 * room of its own (a table top, a counter, a shelf: too small or mostly a drop) takes
+	 * the enclosed room under it in its column when that room's air ends at most 3 voxels
+	 * below it (the furniture's thickness). An opening's cut is split at the opening's plane:
+	 * each half is the room (or the outdoors) on its side. */
+	{
+		quint32 h = 2166136261u;
+		for ( const float f : { spec.minX, spec.minY, spec.maxX, spec.maxY } ) {
+			quint32 b;
+			std::memcpy( &b, &f, 4 );
+			for ( int i = 0; i < 4; i++ ) {
+				h ^= ( b >> ( i * 8 ) ) & 0xFFu;
+				h *= 16777619u;
+			}
+		}
+		const quint32 salt = qMax<quint32>( 1u, ( ( h >> 16 ) ^ h ) & 0xFFFFu ) << 16;
+		std::vector<quint32> rid( rooms.size(), 0 );
+		for ( size_t id = 0; id < rooms.size(); id++ )
+			if ( enclosed[id] && R.roomIds < 0xFFFE )
+				rid[id] = salt | quint32( ++R.roomIds );
+		std::vector<quint32> lab( W.size(), 0 );
+		for ( size_t k = 0; k < W.size(); k++ )
+			if ( W[k].comp >= 0 )
+				lab[k] = rid[size_t( W[k].comp )];
+		for ( size_t c = 0; c + 1 < colStart.size(); c++ )
+			for ( int k = colStart[c] + 1; k < colStart[c + 1]; k++ ) {
+				const WCell & w = W[size_t( k )];
+				if ( lab[size_t( k )] || !w.covered || w.comp < 0 )
+					continue;
+				const int j = k - 1;   // the column's cells run upward
+				if ( lab[size_t( j )] && w.z - ( W[size_t( j )].z + W[size_t( j )].head ) <= 3 )
+					lab[size_t( k )] = lab[size_t( j )];
+			}
+		auto cellOfVoxel = [&]( int x, int y, int z ) -> int {
+			if ( x < 0 || y < 0 || x >= G.nx || y >= G.ny )
+				return -1;
+			const size_t c = size_t( y ) * size_t( G.nx ) + size_t( x );
+			for ( int k = colStart[c]; k < colStart[c + 1]; k++ )
+				if ( z >= W[size_t( k )].z && z < W[size_t( k )].z + W[size_t( k )].head )
+					return k;
+			return -1;
+		};
+		// the walkable cell whose air holds local point p (-1 = none: outside the grid, or air
+		// over no walkable floor, which is outdoors). A point in a solid voxel (a probe against
+		// a wall or furniture) takes the nearest air voxel around it that it can SEE: the next
+		// voxel in a fixed order can be the far side of a thin wall.
+		auto cellAtPoint = [&]( const double p[3] ) -> int {
+			const int x = int( std::floor( ( p[0] - G.o[0] ) / v ) ), y = int( std::floor( ( p[1] - G.o[1] ) / v ) );
+			const int z = int( std::floor( ( p[2] - G.o[2] ) / v ) );
+			const int s = G.at( x, y, z );
+			if ( s < 0 )
+				return -1;
+			if ( s == 0 )
+				return cellOfVoxel( x, y, z );
+			int bx = 0, by = 0, bz = 0;
+			double bd = 1e300;
+			for ( int dz = -1; dz <= 1; dz++ )
+				for ( int dy = -1; dy <= 1; dy++ )
+					for ( int dx = -1; dx <= 1; dx++ ) {
+						if ( G.at( x + dx, y + dy, z + dz ) != 0 )
+							continue;
+						const double c[3] = { G.o[0] + ( x + dx + 0.5 ) * v, G.o[1] + ( y + dy + 0.5 ) * v, G.o[2] + ( z + dz + 0.5 ) * v };
+						const double d2 = ( c[0] - p[0] ) * ( c[0] - p[0] ) + ( c[1] - p[1] ) * ( c[1] - p[1] ) + ( c[2] - p[2] ) * ( c[2] - p[2] );
+						if ( d2 >= bd || castRay( p, c, nullptr ) )
+							continue;
+						bd = d2;
+						bx = x + dx;
+						by = y + dy;
+						bz = z + dz;
+					}
+			return bd < 1e300 ? cellOfVoxel( bx, by, bz ) : -1;
+		};
+		/* An opening's cut cells stand in the room on their side of the opening's plane. Per
+		 * opening, the room on each side: step along its normal, half a voxel at a time, up to
+		 * 4 voxels, to the first room cell that no opening cut (side 0 = against the normal). */
+		auto sidesOf = [&]( const double p[3], const float n[3], quint32 sideRoom[2] ) {
+			for ( int side = 0; side < 2; side++ ) {
+				const double sg = side ? 1.0 : -1.0;
+				sideRoom[side] = 0;
+				for ( int st = 1; st <= 8; st++ ) {
+					const double q[3] = { p[0] + sg * n[0] * st * 0.5 * v, p[1] + sg * n[1] * st * 0.5 * v, p[2] };
+					const int k = cellAtPoint( q );
+					if ( k >= 0 && W[size_t( k )].comp != -2 && lab[size_t( k )] ) {
+						sideRoom[side] = lab[size_t( k )];
+						break;
+					}
+				}
+			}
+		};
+		std::vector<quint32> apSide( kept.size() * 2, 0 );
+		for ( size_t i = 0; i < kept.size(); i++ ) {
+			const double p[3] = { kept[i]->pos[0], kept[i]->pos[1], kept[i]->pos[2] };
+			sidesOf( p, kept[i]->nrm, &apSide[i * 2] );
+		}
+		// the side of opening `ap` that local point (x, y) stands on
+		auto sideOf = [&]( int ap, double x, double y ) -> int {
+			const ApCandidate & a = *kept[size_t( ap )];
+			return ( x - a.pos[0] ) * a.nrm[0] + ( y - a.pos[1] ) * a.nrm[1] >= 0 ? 1 : 0;
+		};
+		// the room at local point p (0 = none); in a cut, by the point's own side of the plane
+		auto roomAt = [&]( const double p[3] ) -> quint32 {
+			const int k = cellAtPoint( p );
+			if ( k < 0 )
+				return 0;
+			const int ap = cutBy[size_t( k )];
+			if ( W[size_t( k )].comp != -2 || ap < 0 )
+				return lab[size_t( k )];
+			return apSide[size_t( ap ) * 2 + size_t( sideOf( ap, p[0], p[1] ) )];
+		};
+		std::map<quint32, int> used;
+		for ( ProbePoint & pp : R.probes ) {
+			const double p[3] = { double( pp.pos[0] ) - O[0], double( pp.pos[1] ) - O[1], double( pp.pos[2] ) };
+			pp.room[0] = 0;
+			pp.room[1] = kProbeRoomNone;
+			if ( pp.cls == ProbeClass::Aperture ) {
+				quint32 sideRoom[2] = { 0, 0 };
+				sidesOf( p, pp.nrm, sideRoom );
+				if ( sideRoom[0] == sideRoom[1] ) {
+					pp.room[0] = sideRoom[0];         // one room on both sides (or outdoors both)
+				} else if ( !sideRoom[0] ) {
+					pp.room[0] = sideRoom[1];         // the room first, outdoors (0) second
+					pp.room[1] = 0;
+				} else {
+					pp.room[0] = sideRoom[0];
+					pp.room[1] = sideRoom[1];
+				}
+				R.apertureRooms += pp.room[0] ? 1 : 0;
+			} else {
+				pp.room[0] = roomAt( p );
+			}
+			R.probesInRoom += pp.room[0] ? 1 : 0;
+			for ( const quint32 r : pp.room )
+				if ( r && r != kProbeRoomNone )
+					used[r] = 1;
+		}
+		// a cut cell's air goes to the room on its center's side of the plane
+		for ( size_t k = 0; k < W.size(); k++ )
+			if ( W[k].comp == -2 && cutBy[k] >= 0 )
+				lab[k] = apSide[size_t( cutBy[k] ) * 2
+					+ size_t( sideOf( cutBy[k], G.o[0] + ( W[k].x + 0.5 ) * v, G.o[1] + ( W[k].y + 0.5 ) * v ) )];
+		// the boxes of every room a probe names: column air, merged along x, then along y
+		struct Run { quint32 r; int z, h, y, x0, x1; };
+		std::vector<Run> runs;
+		for ( int y = 0; y < G.ny; y++ ) {
+			std::vector<Run> row;
+			for ( int x = 0; x < G.nx; x++ ) {
+				const size_t c = size_t( y ) * size_t( G.nx ) + size_t( x );
+				for ( int k = colStart[c]; k < colStart[c + 1]; k++ )
+					if ( lab[size_t( k )] && used.count( lab[size_t( k )] ) )
+						row.push_back( { lab[size_t( k )], W[size_t( k )].z, W[size_t( k )].head, y, x, x + 1 } );
+			}
+			std::stable_sort( row.begin(), row.end(), []( const Run & a, const Run & b ) {
+				return a.r != b.r ? a.r < b.r : a.z != b.z ? a.z < b.z : a.h != b.h ? a.h < b.h : a.x0 < b.x0;
+			} );
+			const size_t first = runs.size();
+			for ( const Run & e : row ) {
+				if ( runs.size() > first ) {
+					Run & l = runs.back();
+					if ( l.r == e.r && l.z == e.z && l.h == e.h && l.x1 == e.x0 ) {
+						l.x1 = e.x1;
+						continue;
+					}
+				}
+				runs.push_back( e );
+			}
+		}
+		std::stable_sort( runs.begin(), runs.end(), []( const Run & a, const Run & b ) {
+			return a.r != b.r ? a.r < b.r : a.z != b.z ? a.z < b.z : a.h != b.h ? a.h < b.h
+				: a.x0 != b.x0 ? a.x0 < b.x0 : a.x1 != b.x1 ? a.x1 < b.x1 : a.y < b.y;
+		} );
+		for ( size_t i = 0; i < runs.size(); ) {
+			size_t j = i + 1;
+			int y1 = runs[i].y + 1;
+			while ( j < runs.size() && runs[j].r == runs[i].r && runs[j].z == runs[i].z && runs[j].h == runs[i].h
+				&& runs[j].x0 == runs[i].x0 && runs[j].x1 == runs[i].x1 && runs[j].y == y1 ) {
+				y1++;
+				j++;
+			}
+			ProbeRoomBox b;
+			b.room = runs[i].r;
+			b.lo[0] = float( G.o[0] + runs[i].x0 * v + O[0] );
+			b.lo[1] = float( G.o[1] + runs[i].y * v + O[1] );
+			b.lo[2] = float( G.o[2] + runs[i].z * v );
+			b.hi[0] = float( G.o[0] + runs[i].x1 * v + O[0] );
+			b.hi[1] = float( G.o[1] + y1 * v + O[1] );
+			b.hi[2] = float( G.o[2] + ( runs[i].z + runs[i].h ) * v );
+			R.roomBoxes.push_back( b );
+			i = j;
+		}
+	}
 	R.msCoverage = double( tm.nsecsElapsed() ) / 1e6;
 	return true;
 }
@@ -1046,6 +1243,8 @@ QString probeCensusText( const ProbePlaceResult & r )
 	  << r.roomsOpen << " open to the ground or a drop, " << r.roomsLedge << " mostly a drop (furniture tops, ledges), " << r.roomsSealed << " sealed (hollows), " << r.roomsTiny << " too small; walkable cells " << r.walkCells
 	  << ", in enclosed rooms " << r.coverCells << " (hallway " << r.hallCells << "), cut at openings " << r.cutCells
 	  << "; blind cells left " << r.blindLeft << "\n";
+	t << "room ids: " << r.roomIds << " enclosed rooms named, probes in a room " << r.probesInRoom
+	  << " (openings " << r.apertureRooms << "), room boxes " << r.roomBoxes.size() << "\n";
 	t << "probe soup: " << r.soupTris << " triangles; voxel grid " << r.gridX << " x " << r.gridY << " x "
 	  << r.gridZ << ( r.gridClamped ? " (height capped)" : "" ) << ", searched at " << r.apFrames
 	  << " wall angles\n";
@@ -1108,6 +1307,13 @@ bool probeSoupWrite( const QString & path, const ProbeSoup & soup, QString * err
 		f.write( reinterpret_cast<const char *>( tail ), sizeof tail );
 		f.write( reinterpret_cast<const char *>( soup.alb.data() ), qint64( soup.alb.size() ) );
 	}
+	// lane BAKE4: the glass and its transmittance
+	if ( !soup.glass.empty() && soup.glassT.size() * 3 == soup.glass.size() ) {
+		const quint32 tail[2] = { 0x31534C47u /* 'GLS1' */, quint32( soup.glass.size() / 9 ) };
+		f.write( reinterpret_cast<const char *>( tail ), sizeof tail );
+		f.write( reinterpret_cast<const char *>( soup.glass.data() ), qint64( soup.glass.size() * sizeof( float ) ) );
+		f.write( reinterpret_cast<const char *>( soup.glassT.data() ), qint64( soup.glassT.size() ) );
+	}
 	return true;
 }
 
@@ -1142,12 +1348,26 @@ bool probeSoupRead( const QString & path, ProbeSoup * soup, QString * error )
 		}
 	}
 	soup->alb.clear();
+	soup->glass.clear();
+	soup->glassT.clear();
 	quint32 tail[2];
-	if ( f.read( reinterpret_cast<char *>( tail ), sizeof tail ) == qint64( sizeof tail ) && tail[0] == 0x31424C41u
-		&& tail[1] == head[1] ) {
+	bool more = f.read( reinterpret_cast<char *>( tail ), sizeof tail ) == qint64( sizeof tail );
+	if ( more && tail[0] == 0x31424C41u && tail[1] == head[1] ) {
 		soup->alb.resize( size_t( tail[1] ) * 3 );
 		if ( f.read( reinterpret_cast<char *>( soup->alb.data() ), qint64( soup->alb.size() ) ) != qint64( soup->alb.size() ) )
 			soup->alb.clear();
+		more = f.read( reinterpret_cast<char *>( tail ), sizeof tail ) == qint64( sizeof tail );
+	}
+	// lane BAKE4: the optional glass tail
+	if ( more && tail[0] == 0x31534C47u ) {
+		soup->glass.resize( size_t( tail[1] ) * 9 );
+		soup->glassT.resize( size_t( tail[1] ) * 3 );
+		const qint64 gw = qint64( soup->glass.size() * sizeof( float ) );
+		if ( f.read( reinterpret_cast<char *>( soup->glass.data() ), gw ) != gw
+			|| f.read( reinterpret_cast<char *>( soup->glassT.data() ), qint64( soup->glassT.size() ) ) != qint64( soup->glassT.size() ) ) {
+			soup->glass.clear();
+			soup->glassT.clear();
+		}
 	}
 	return true;
 }

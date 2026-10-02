@@ -54,7 +54,8 @@ public:
 	ProbeAlbedo & operator=( const ProbeAlbedo & ) = delete;
 
 	//! The map at (u, v), times `vc` (0..1, gamma), as linear 0..1. False = no map read.
-	bool sample( const QString & tex, float u, float v, const float vc[3], float out[3] );
+	//! lane BAKE4: `alpha` (optional) takes the map's alpha there (glass coverage).
+	bool sample( const QString & tex, float u, float v, const float vc[3], float out[3], float * alpha = nullptr );
 	/*! A Greyscale_To_PaletteColor surface, as the game paints it: the map's green at (u, v)
 	 *  picks the column and `row` (the palette scale x vertex red, or a CNAM/MODC index) the
 	 *  row of `palette`; the palette color replaces the albedo (no vertex color on top). Linear

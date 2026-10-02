@@ -2353,7 +2353,8 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 				  << albUntextured << ", ground quads from the splat " << albLandSplat << ", flat tone x VCLR "
 				  << albLandFlat << ", maps read " << probeAlb.texturesRead << ", missing " << probeAlb.texturesMissing
 				  << "\n";
-				if ( !probeBake( probeSoup, pr.probes, bs, QDir::cleanPath( dir ), &bres ) ) {
+				// lane BAKE4: the placer's room boxes go into the `.tbk` v4 files
+				if ( !probeBake( probeSoup, pr.probes, bs, QDir::cleanPath( dir ), &bres, &pr.roomBoxes ) ) {
 					t << "  bake REFUSED: " << bres.error << "\n";
 				} else {
 					for ( const QString & line : probeBakeCensusText( bres ).split( '\n', Qt::SkipEmptyParts ) )

@@ -152,7 +152,7 @@ def stage_a(esm, cell, tbks, S, soup, clear):
     # the dump's surfels are the bake's, one per (position, normal)
     want = {}
     for _, t in tbks:
-        for s in t['surfels']:
+        for s in list(t['surfels']) + list(t['back']):   # lane BAKE4: v4's back sides are surfels too
             k = tuple(np.float32(s['pos']).tobytes() for _ in (0,)) + (tuple(int(c) for c in s['nrm']),)
             want[k] = (np.array(s['nrm'], float), np.array(s['alb'], float) / 255.0)
     got = {}
@@ -195,20 +195,26 @@ def stage_b(tbks, S, P, row_of):
     unresolved = 0
     for _, t in tbks:
         cs = float(t['cell'])
-        keys = {}
-        for j, s in enumerate(t['surfels']):
-            keys.setdefault(tuple(floordiv(s['pos'][a], cs) for a in range(3)), j)
+        keys = ({}, {})   # lane BAKE4: the front sides, the v4 back sides
+        for side, arr in enumerate((t['surfels'], t['back'])):
+            for j, s in enumerate(arr):
+                keys[side].setdefault(tuple(floordiv(s['pos'][a], cs) for a in range(3)), j)
         for pr in t['probes']:
             pk = [floordiv(pr['pos'][a], cs) for a in range(3)]
             E = np.zeros((6, 3))
             linked = 0.0
-            for lk in t['links'][pr['off']:pr['off'] + pr['cnt']]:
-                j = keys.get(tuple(int(pk[a]) + int(lk['delta'][a]) for a in range(3)))
+            a0 = int(pr['off'])
+            for li, lk in enumerate(t['links'][pr['off']:pr['off'] + pr['cnt']]):
+                x = t['lext'][a0 + li]
+                side = int(x['side'])
+                j = keys[side].get(tuple(int(pk[a]) + int(lk['delta'][a]) for a in range(3)))
                 if j is None:
                     unresolved += 1
                     continue
-                s = t['surfels'][j]
-                B = S[row_of[(np.float32(s['pos']).tobytes(), tuple(int(c) for c in s['nrm']))], 9:12]
+                s = (t['surfels'], t['back'])[side][j]
+                # the glass on the way tints what the link carries
+                B = S[row_of[(np.float32(s['pos']).tobytes(), tuple(int(c) for c in s['nrm']))], 9:12] \
+                    * (x['tint'].astype(np.float64) / 255.0)
                 d = unpack_dir(lk['dir'])
                 w = float(lk['w']) * float(pr['scale'])
                 linked += w

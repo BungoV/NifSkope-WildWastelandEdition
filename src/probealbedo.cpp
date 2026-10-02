@@ -105,7 +105,7 @@ const DDSTexture16 * ProbeAlbedo::load( const QString & texIn )
 	return tex;
 }
 
-bool ProbeAlbedo::sample( const QString & tex, float u, float v, const float vc[3], float out[3] )
+bool ProbeAlbedo::sample( const QString & tex, float u, float v, const float vc[3], float out[3], float * alpha )
 {
 	const DDSTexture16 * t = tex.isEmpty() ? nullptr : load( tex );
 	if ( !t )
@@ -117,6 +117,8 @@ bool ProbeAlbedo::sample( const QString & tex, float u, float v, const float vc[
 		const float g = t->isSRGBTexture() ? linearToSrgb( c[size_t( k )] ) : c[size_t( k )];
 		out[k] = srgbToLinear( g * vc[k] );
 	}
+	if ( alpha )   // lane BAKE4: alpha is linear in every format
+		*alpha = std::clamp( c[3], 0.0f, 1.0f );
 	return true;
 }
 
