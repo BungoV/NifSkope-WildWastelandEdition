@@ -31,6 +31,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ***** END LICENCE BLOCK *****/
 
 #include "glview.h"
+#include "cellspeed.h"
+#include "celltexahead.h"
 
 #include "rdccapture.h"
 
@@ -3662,6 +3664,8 @@ static void wwCellImageSpaceMeasurePass( Scene * scene )
 
 void GLView::paintGL()
 {
+	CellSpeed::Acc speedAcc( "frames painted (paintGL, with first-use uploads)" );   // lane SPEED1
+	CellTexAhead::Frame texAheadFrame;   // lane SPEED1: a frame that loads no texture ends the read-ahead
 	wwPaintCounter++;
 	QElapsedTimer wwPaintClock;
 	wwPaintClock.start();

@@ -20,6 +20,9 @@ BSD License - see nifskope.h
 #include "probebake.h"		// lane PRTPBAKE
 #include "probegi.h"		// lane PRTPGI
 #include "probealbedo.h"		// lane PRTPBAKE
+#include "cellmodelahead.h"	// lane SPEED1: models parsed on worker threads
+#include "cellmesh.h"		// lane SPEED1: the welded geometry beside the document
+#include "cellspeed.h"		// lane SPEED1: stage timers (WW_CELL_SPEED_DUMP)
 
 #include <limits>
 
@@ -279,6 +282,41 @@ bool isMarkerModel( const QString & model )
 		|| m.contains( QLatin1String( "\\editor\\" ) );
 }
 
+//! Lane SPEED1: one welded shape's arrays, handed to src/cellmesh.h instead of being written into the document
+//! row by row. The values are the ones the rows would hold (the document keeps floats), so the scene reads the
+//! same numbers either way; `lo`/`hi` come back for the bounding sphere.
+void cellMeshEmit( NifModel * nif, const QModelIndex & iShape, const std::vector<OutVert> & pv,
+	const std::vector<Triangle> & pt, bool withColour, Vector3 & lo, Vector3 & hi )
+{
+	QSharedPointer<CellMesh> m( new CellMesh );
+	const int nv = int( pv.size() );
+	m->withColour = withColour;
+	m->verts.resize( nv );
+	m->norms.resize( nv );
+	m->tangents.resize( nv );
+	m->bitangents.resize( nv );
+	m->coords.resize( nv );
+	m->colors.fill( Color4( 0.0f, 0.0f, 0.0f, 1.0f ), nv );
+	for ( int v = 0; v < nv; v++ ) {
+		const OutVert & o = pv[size_t( v )];
+		m->verts[v] = o.pos;
+		m->norms[v] = o.nrm;
+		m->tangents[v] = o.tan;
+		m->bitangents[v] = o.bit;
+		m->coords[v] = o.uv;
+		if ( withColour )
+			m->colors[v] = ByteColor4( FloatVector4( o.chan[0], o.chan[1], o.chan[2], o.chan[3] ) );
+		for ( int k = 0; k < 3; k++ ) {
+			lo[k] = qMin( lo[k], o.pos[k] );
+			hi[k] = qMax( hi[k], o.pos[k] );
+		}
+	}
+	m->triangles.reserve( int( pt.size() ) );
+	for ( const Triangle & t : pt )
+		m->triangles.append( t );
+	cellMeshPut( nif, iShape, m );
+}
+
 //! Write one bucket as one or more BSTriShapes under `iRoot`. Splits at
 //! MAX_SHAPE_VERTS on TRIANGLE boundaries, so no triangle points across a cut.
 bool emitBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b,
@@ -356,9 +394,13 @@ bool emitBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b,
 
 		nif->setState( BaseModel::Processing );
 		QModelIndex iVertexData = nif->getIndex( iShape, "Vertex Data" );
-		nif->updateArraySize( iVertexData );
+		const bool sideMesh = cellMeshOn();   // lane SPEED1: the rows stay unwritten, the arrays go beside the document
+		if ( !sideMesh )
+			nif->updateArraySize( iVertexData );
 		Vector3 lo( 3.4e38f, 3.4e38f, 3.4e38f ), hi( -3.4e38f, -3.4e38f, -3.4e38f );
-		for ( size_t v = 0; v < pv.size(); v++ ) {
+		if ( sideMesh )
+			cellMeshEmit( nif, iShape, pv, pt, b.withColour, lo, hi );
+		for ( size_t v = 0; !sideMesh && v < pv.size(); v++ ) {
 			QModelIndex row = nif->index( int( v ), 0, iVertexData );
 			const OutVert & o = pv[v];
 			nif->set<Vector3>( row, "Vertex", o.pos );
@@ -377,9 +419,9 @@ bool emitBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b,
 				hi[k] = qMax( hi[k], o.pos[k] );
 			}
 		}
-		QModelIndex iTriangles = nif->getIndex( iShape, "Triangles" );
-		nif->updateArraySize( iTriangles );
-		{
+		if ( !sideMesh ) {
+			QModelIndex iTriangles = nif->getIndex( iShape, "Triangles" );
+			nif->updateArraySize( iTriangles );
 			QVector<Triangle> qt;
 			qt.reserve( int( pt.size() ) );
 			for ( const Triangle & t : pt )
@@ -1024,6 +1066,8 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 
 	QElapsedTimer clock;
 	clock.start();
+	CellSpeed::begin();   // lane SPEED1
+	cellMeshClear( nif );
 
 	// ---- the worldspace, or (lane PRTP1) one interior cell
 	EsmWorld world;
@@ -1080,6 +1124,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 
 	int x0, y0, x1, y1;
 	spec.rect( x0, y0, x1, y1 );
+	CellSpeed::mark( "plugin index" );
 
 	// ---- the placements
 	struct Placement
@@ -1582,6 +1627,42 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 		return in.contains( t ) ? 1 : 0;
 	};
 
+	CellSpeed::mark( "references gathered" );
+	/* Lane SPEED1, the gate's second red control (WW_CELL_SPEED_RED=transform): the model placed most often
+	 * loses its per-placement transform -- every copy stands where the first one does. The picture check of
+	 * tests/spells/cell_speed.sh must see it. */
+	if ( qgetenv( "WW_CELL_SPEED_RED" ) == "transform" ) {
+		QHash<QString, int> uses;
+		for ( const Placement & p : placements )
+			uses[world.lodBase( p.base ).model]++;
+		QString worst;
+		int most = 0;
+		for ( auto it = uses.constBegin(); it != uses.constEnd(); ++it ) {
+			if ( !it.key().isEmpty() && ( it.value() > most || ( it.value() == most && it.key() < worst ) ) ) {
+				worst = it.key();
+				most = it.value();
+			}
+		}
+		const Placement * first = nullptr;
+		for ( Placement & p : placements ) {
+			if ( world.lodBase( p.base ).model != worst )
+				continue;
+			if ( first ) {
+				p.pos = first->pos;
+				p.rot = first->rot;
+				p.scale = first->scale;
+			} else {
+				first = &p;
+			}
+		}
+		fprintf( stderr, "cell speed red: %d placements of %s stand on the first one\n", most, qPrintable( worst ) );
+	}
+	// lane SPEED1: every model the loop below will ask for, read and parsed on worker threads first
+	CellModelAhead modelsAhead( dataRoot, refsRed != "root" );
+	for ( const Placement & p : placements )
+		modelsAhead.want( world, p.base, p.swap );
+	modelsAhead.load();
+	CellSpeed::mark( "models read ahead" );
 	for ( const Placement & p : placements ) {
 		const EsmLodBase & lb = world.lodBase( p.base );
 		const QString model = lb.model;
@@ -1638,10 +1719,12 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 			if ( modelsFailed.contains( mkey ) )
 				continue;
 			std::vector<NativeSrcShape> shapes;
+			CellSpeed::Acc speedLoad( "model loads" );
 			// ONE LOAD PER DISTINCT MODEL AND SWAP -- the whole block shares this cache.
 			// lane MISS1: a placed model's root node takes the reference's transform; the file's own is left out.
 			// WW_CELL_REFS_RED=root is the gate's red control: the old load, root transform composed.
-			const bool okLoad = refsRed != "root"
+			bool okAhead = false;   // lane SPEED1: the answer read ahead, else the load as before
+			const bool okLoad = modelsAhead.take( model, subst, &shapes, &okAhead ) ? okAhead : refsRed != "root"
 				? lodgenNativeLoadModelPlaced( const_cast<QString *>( &dataRoot ), model, subst, &shapes )
 				: subst
 				? lodgenNativeLoadModelSwapped( const_cast<QString *>( &dataRoot ), model, *subst, &shapes )
@@ -2025,6 +2108,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 			drawn++;
 		}
 	}
+	CellSpeed::mark( "models loaded and placements welded" );
 
 	// ---- the ground, the water and the grid
 	int landsDrawn = 0, waterCells = 0;
@@ -2514,6 +2598,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 	}
 
 	// ---- emit
+	CellSpeed::mark( "ground, water, lights, probes" );
 	qint64 shapes = 0, verts = 0, tris = 0;
 	bool ok = true;
 	QStringList keys = buckets.keys();
@@ -2583,9 +2668,11 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 		const float hlOrigin[3] = { origin[0], origin[1], origin[2] };
 		cellHighlightCreate( nif, iRoot, hlOrigin );
 	}
+	CellSpeed::mark( "welded shapes written to the document" );
 
 	nif->holdUpdates( false );
 	nif->updateModel();
+	CellSpeed::mark( "document updateModel" );
 
 	// lane PRTP3: the renderer lights this document with the cell's own lights (the Cell lights row)
 	cellPublishLighting( nif, world, spec, lightRefs, origin );
@@ -2788,6 +2875,18 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 #endif
 		*notes = n;
 	}
+	if ( CellSpeed::on() ) {   // lane SPEED1: what was shared, in numbers
+		CellSpeed::count( "placements", placements.size() );
+		CellSpeed::count( "placements drawn", drawn );
+		CellSpeed::count( "model loads", modelLoads );
+		CellSpeed::count( "models failed", modelsFailed.size() );
+		CellSpeed::count( "shapes written", shapes );
+		CellSpeed::count( "vertices written", verts );
+		CellSpeed::count( "triangles written", tris );
+		CellSpeed::count( "document blocks", nif->getBlockCount() );
+		CellSpeed::mark( "lighting, GI, census" );
+	}
+	cellMeshSaveIfAsked( nif );   // lane SPEED1: WW_CELL_SPEED_SAVE, the gate's saved-file check
 
 	// ---- the placement dump: a gate cannot count placements in welded geometry
 	const QByteArray dump = qgetenv( "WW_CELL_DUMP" );

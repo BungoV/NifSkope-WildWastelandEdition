@@ -31,6 +31,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ***** END LICENCE BLOCK *****/
 
 #include "gltex.h"
+#include "cellspeed.h"
 
 #include "message.h"
 #include "gl/glscene.h"
@@ -385,6 +386,7 @@ bool TexCache::bindCube( const QString & fname, const NifModel * nif, bool useSe
 std::uint16_t TexCache::loadTex( Tex & tx, const NifModel * nif )
 {
 	Tex::ImageInfo *	i = tx.imageInfo;
+	CellSpeed::Acc speedAcc( "texture loads (find, decode, upload)" );   // lane SPEED1
 
 	if ( !isSupported( i->filename ) ) {
 		tx.id[0] = GLuint( -1 );

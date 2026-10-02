@@ -9,6 +9,7 @@ BSD License - see nifskope.h
 #include "lodgenbc7.h"
 #include "lodgengpu.h"
 #include "lodgenao.h"
+#include "cellspeed.h"
 
 #include <QMutex>
 #include <QCoreApplication>
@@ -2250,9 +2251,14 @@ const QVector<LodSrcShape> & lodgenLoadModel( const QString & dataRoot,
 	NifModel src;
 	QByteArray bytes;
 	QBuffer dev( &bytes );
+	const qint64 speedT0 = CellSpeed::nowNs();   // lane SPEED1: stage timers, off unless WW_CELL_SPEED_DUMP
 	const bool found = lodgenReadAsset( dataRoot, path, "meshes", ".nif", bytes );
+	const qint64 speedT1 = CellSpeed::nowNs();
 	const bool loaded = found && dev.open( QIODevice::ReadOnly )
 		&& src.load( dev, path.toLocal8Bit().constData() );
+	CellSpeed::add( "model file read", speedT1 - speedT0 );
+	CellSpeed::add( "model parse", CellSpeed::nowNs() - speedT1 );
+	CellSpeed::Acc speedExtract( "model extract (vertices, materials)" );
 	/* load() leaves the model in its Loading state; loadFromFile() clears it
 	 * and this path must too, or index lookups below answer as they do
 	 * mid-load and every model comes back shapeless - seen as "no
@@ -2659,6 +2665,13 @@ bool lodgenNativeLoadModelPlaced( void * user, const QString & model, const Lodg
 	std::vector<NativeSrcShape> * out )
 {
 	return nativeLoadModelImpl( user, model, swap, out, true, true );
+}
+
+// lane SPEED1: the same load with nothing kept in this thread's cache (the cell view's workers, cellmodelahead.h)
+bool lodgenNativeLoadModelPlacedOnce( void * user, const QString & model, const LodgenMaterialSubst * swap,
+	std::vector<NativeSrcShape> * out )
+{
+	return nativeLoadModelImpl( user, model, swap, out, false, true );
 }
 
 bool lodgenNativeLoadModelOnce( void * user, const QString & model, const LodgenMaterialSubst * swap,

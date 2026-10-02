@@ -32,6 +32,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "spellbook.h"
 
+#include "cellmesh.h"
+
 #include <QCache>
 #include <QDir>
 #include <QMessageBox>
@@ -131,6 +133,7 @@ void SpellBook::cast( NifModel * nif, const QModelIndex & index, SpellPtr spell 
 {
 	if ( !spell || !spell->isApplicable( nif, index ) )
 		return;
+	cellMeshMaterializeAll( nif );   // lane SPEED1: a spell works on the document, so a cell's welded rows are written first
 
 	// Cast non-modifying spells
 	if ( spell->constant() ) {
@@ -499,6 +502,7 @@ SpellPtr SpellBook::instant( const NifModel * nif, const QModelIndex & index )
 
 QModelIndex SpellBook::sanitize( NifModel * nif )
 {
+	cellMeshMaterializeAll( nif );   // lane SPEED1
 	QPersistentModelIndex ridx;
 
 	for ( SpellPtr spell : sanitizers() ) {

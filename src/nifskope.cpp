@@ -34,6 +34,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "ui_nifskope.h"
 
 #include "bakegeom.h"
+#include "cellmesh.h"
+#include "cellspeed.h"
 #include "ui/widgets/wwnumberfield.h"
 #include "freezeanim.h"
 #include "glview.h"
@@ -7803,6 +7805,7 @@ void NifSkope::select( const QModelIndex & index )
 
 	QModelIndex prevIdx = currentIdx;
 	currentIdx = idx;
+	cellMeshMaterialize( nif, idx );	// lane SPEED1: a cell's welded shape gets its rows when it is looked at
 
 	// TEMP DIAGNOSTIC (WW_PERF_TEST): stage timing for the slow click-select
 	QElapsedTimer perfT;
@@ -10582,9 +10585,11 @@ void NifSkope::load()
 		setWindowModified( false );
 	}
 	perfMark( "loadFromFile (views detached)" );
+	CellSpeed::mark( "back in the loader" );   // lane SPEED1
 
 	emit completeLoading( loaded, fname );
 	perfMark( "completeLoading consumers" );
+	CellSpeed::mark( "views rebuilt (completeLoading)" );
 	// reframe on the new contents, after the scene has been rebuilt
 	if ( loaded && ogl )
 		ogl->setOrientation( ogl->viewState(), true );
