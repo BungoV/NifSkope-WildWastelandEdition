@@ -224,6 +224,7 @@ HEADERS += \
 	src/gl/sunshadow.h \
 	src/gl/celllights.h \
 	src/gl/cellfxlit.h \
+	src/gl/cellhdr.h \
 	src/ui/scenewindow.h \
 	src/gl/impostordraw.h \
 	src/impostoroct.h \
@@ -429,6 +430,7 @@ SOURCES += \
 	src/gl/sunshadow.cpp \
 	src/gl/celllights.cpp \
 	src/gl/cellfxlit.cpp \
+	src/gl/cellhdr.cpp \
 	src/ui/scenewindow.cpp \
 	src/io/materialfile.cpp \
 	src/io/pbrmfile.cpp \

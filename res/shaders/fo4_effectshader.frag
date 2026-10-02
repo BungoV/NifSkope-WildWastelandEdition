@@ -270,7 +270,8 @@ void main()
 		if ( cellProbe == 6 )
 			fragColor = vec4( lin, color.a );
 		else
-			fragColor = vec4( cellIsOn ? cellImageSpace( sqrt( lin ) ) : pow( lin, vec3( 1.0 / 2.2 ) ), color.a );
+			fragColor = vec4( cellIsLinear ? lin	// lane HDR1: linear, summed in the HDR frame, tone-mapped once
+				: cellIsOn ? cellImageSpace( sqrt( lin ) ) : pow( lin, vec3( 1.0 / 2.2 ) ), color.a );
 		return;
 	}
 #endif

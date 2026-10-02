@@ -32,6 +32,7 @@ uniform vec3 cellGiDims;
 
 // lane IMGS1: the cell's imagespace, the game's own HDR -> display chain (src/gl/celllights.h)
 uniform bool cellIsOn;
+uniform bool cellIsLinear;			// lane HDR1: write linear light, the frame is tone-mapped once (cell_hdr.frag)
 uniform float cellIsExposure;		// clamp( middle gray / (adapted + 0.001), min, max ), the CPU's
 uniform float cellIsE;				// HNAM Tonemap E: the curve's toe numerator
 uniform float cellIsAdapted;		// the frame's mean luminance, the contrast pivot
@@ -54,7 +55,8 @@ vec3 cellImageSpace( vec3 sqrtColor )
 {
 	vec3 x = max( sqrtColor, vec3( 0.0 ) );
 	x = x * x;
-#ifndef WW_CELL_FX	// lane EFX2: an effect blends over a surface that already took the bloom
+// lane EFX2: an effect blends over a surface that already took the bloom; lane HDR1: the one tone map takes it
+#if !defined( WW_CELL_FX ) || defined( WW_CELL_HDR )
 	if ( cellIsBloomOn )	// the tonemap PS adds the bloom target before its exposure multiply
 		x += texture( cellIsBloom, ( gl_FragCoord.xy - cellIsBloomRect.xy ) * cellIsBloomRect.zw ).rgb;
 #endif

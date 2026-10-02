@@ -1,0 +1,4 @@
+# The cell view's one tone map (lane HDR1; src/gl/cellhdr.h): a full-screen pass over the linear frame.
+# No conditions: never picked for a shape; cellhdr.cpp selects it by name.
+
+shaders cell_ao.vert cell_hdr.frag

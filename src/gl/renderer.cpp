@@ -48,6 +48,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "model/nifmodel.h"
 #include "ui/settingsdialog.h"
 #include "gl/BSMesh.h"
+#include "gl/cellhdr.h"
 #include "libfo76utils/src/ddstxt16.hpp"
 #include "glview.h"
 
@@ -151,6 +152,15 @@ static NifSkopeOpenGLContext::Program * wwProgramCensus( const NifModel * nif, S
 		glEnable( GL_STENCIL_TEST );
 		glStencilMask( cell ? 0x03 : 0x02 );
 		glStencilFunc( GL_ALWAYS, !cell ? 2 : glIsEnabled( GL_BLEND ) ? 3 : 1, 0xFF );
+		glStencilOp( GL_KEEP, GL_KEEP, GL_REPLACE );
+	} else if ( wwCellHdrActive() ) {
+		// lane HDR1: the linear frame (cellhdr.h). The stencil keeps who wrote a pixel last: 1 a cell program or a
+		// cell effect (linear light, tone-mapped once at the end), 2 any other program (its value as written)
+		const bool lin = program && ( program->name == std::string_view( "fo4_cell.prog" )
+			|| program->name == std::string_view( "pbrm_cell.prog" ) || program->name == std::string_view( "fo4_effectcell.prog" ) );
+		glEnable( GL_STENCIL_TEST );
+		glStencilMask( 0x03 );
+		glStencilFunc( GL_ALWAYS, lin ? 1 : 2, 0xFF );
 		glStencilOp( GL_KEEP, GL_KEEP, GL_REPLACE );
 	}
 	// lane AO1: the obscurance's opaque pass (normal + depth from the opaque cell-lit draws only), and every
