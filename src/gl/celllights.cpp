@@ -120,6 +120,9 @@ ClState & st()
 			s.red = 128;	// lane AMBO1: the Ambient Only lights drawn as ordinary lights
 		else if ( red == "ambientfull" )
 			s.red = 1024;	// lane AMBO2: the Ambient Only lights' ambient adjustment ignored
+		// lane POOL1: the lights' Non Specular flag ignored (a bit clear of WW_CELL_LIT_RED's)
+		if ( qgetenv( "WW_CELL_SPEC_RED" ).trimmed() == "nonspec" )
+			s.red |= 65536;
 	}
 	return s;
 }
