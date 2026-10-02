@@ -1,5 +1,16 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Cell view: reflections on metal at the game's strength (2026-10-02)
+
+- With Cell lights on, the reflection on Vault metal, tanks, grates and floors is now as strong as in game. It
+  was drawn far too faint on lit metal (about a tenth of the game's). In game the reflection is tied to how
+  much light reaches the surface: a lit tank picks up a clear sheen, a panel in the dark does not shine.
+- Dull surfaces (concrete, cloth) no longer get a reflection at all, and a material that has no reflection
+  map of its own gets none, as in game.
+- Works for both regular materials and regular materials drawn through the PBR renderer. Your own .pbrm
+  materials are unchanged.
+- New gate `tests/spells/cell_cube.sh`; `--red cubeold` draws the old reflection and must FAIL.
+
 ## Cell view: floor grates and wall pieces sit where the game puts them; a cell opens in its first-load state (2026-10-02)
 
 Three things change in what the cell view draws.
