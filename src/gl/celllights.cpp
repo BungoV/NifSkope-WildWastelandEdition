@@ -32,6 +32,7 @@ constexpr int kBloomUnit = 11;		// lane BLOOM1: the imagespace bloom (sampler2D,
 constexpr int kShadowUnit = 10;		// lane SHADOW1: the lights' depth cubes (samplerCubeArrayShadow)
 constexpr int kShadowSlots = 16;	// shadowed lights at once, the nearest the camera
 constexpr int kShadowFace = 512;	// texels a cube face edge (the game's 2048 paraboloid's centre texel at 1024)
+constexpr int kAmbientSlots = 16;	// lane AMBO2: Ambient Only volumes a cell (Fallout4.esm's most in one cell: 5, measured)
 
 //! one bloom per document: the blurred bright pass, rgb floats, w x h (rows bottom-up, as read back)
 struct ClBloom
@@ -120,6 +121,8 @@ ClState & st()
 			s.red = 128;	// lane AMBO1: the Ambient Only lights drawn as ordinary lights
 		else if ( red == "hemiomni" )
 			s.red = 256;	// lane HEMI1: hemisphere and box lights drawn as plain omni lights (the cell view applies it)
+		else if ( red == "ambientfull" )
+			s.red = 1024;	// lane AMBO2: the Ambient Only lights' ambient adjustment ignored
 	}
 	return s;
 }
@@ -433,6 +436,14 @@ void wwCellLightsUniforms( Scene * scene )
 		prog->uni4f_l( prog->uniLocation( "cellDalc[%d]", c ), FloatVector4(
 			( L->dalc[0][c] - L->dalc[1][c] ) * 0.5f, ( L->dalc[2][c] - L->dalc[3][c] ) * 0.5f,
 			( L->dalc[4][c] - L->dalc[5][c] ) * 0.5f, mean ) );
+	}
+	// lane AMBO2: the Ambient Only volumes, in plugin order (the shader takes the first that holds a point)
+	const int ambo = ( dalc && !( s.red & 1024 ) ) ? std::min( int( L->ambientLights.size() ), kAmbientSlots ) : 0;
+	prog->uni1i( "cellAmboCount", ambo );
+	for ( int i = 0; i < ambo; i++ ) {
+		const WwCellAmbientLight & a = L->ambientLights[i];
+		prog->uni4f_l( prog->uniLocation( "cellAmbo[%d]", i ), FloatVector4( a.pos[0], a.pos[1], a.pos[2], a.volume ) );
+		prog->uni4f_l( prog->uniLocation( "cellAmboK[%d]", i ), FloatVector4( a.k[0], a.k[1], a.k[2], 0.0f ) );
 	}
 	prog->uni1b( "cellHasDir", L->hasDirectional );
 	prog->uni3f( "cellDirColor", L->dirColor[0], L->dirColor[1], L->dirColor[2] );
