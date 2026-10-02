@@ -1,5 +1,29 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Cell view: no dark marks showing through the mist (2026-10-02)
+
+With Cell lights on, small dark marks stood out of the mist at the far end of the Vault 111 cryo walkway: the
+vent slits and the stencilled labels on the wall around the exit door, the warning stripes on the floor and the
+labels on the pods. They are decals, thin painted layers that sit on a wall. The cell view drew them after the
+mist, so each one painted a patch of clear, un-misted wall over the mist in front of it.
+
+The game draws its decals before anything see-through. The cell view now does the same: decals first, then
+mist, glow and glass. A decal far down the room is now as misted as the wall it sits on. On the marked shot
+about 730 pixels change, all of them from "clear" to "misted"; nothing else in the picture moves.
+
+Nothing to switch on: it rides the existing Cell lights row. A single model opened on its own draws as before.
+
+## Cell view: reflections on metal at the game's strength (2026-10-02)
+
+- With Cell lights on, the reflection on Vault metal, tanks, grates and floors is now as strong as in game. It
+  was drawn far too faint on lit metal (about a tenth of the game's). In game the reflection is tied to how
+  much light reaches the surface: a lit tank picks up a clear sheen, a panel in the dark does not shine.
+- Dull surfaces (concrete, cloth) no longer get a reflection at all, and a material that has no reflection
+  map of its own gets none, as in game.
+- Works for both regular materials and regular materials drawn through the PBR renderer. Your own .pbrm
+  materials are unchanged.
+- New gate `tests/spells/cell_cube.sh`; `--red cubeold` draws the old reflection and must FAIL.
+
 ## Cell view: floor grates and wall pieces sit where the game puts them; a cell opens in its first-load state (2026-10-02)
 
 Three things change in what the cell view draws.
