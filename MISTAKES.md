@@ -5,6 +5,19 @@ Written the moment a mistake is recognised, unprompted (CONSTITUTION rule 2).
 Format: date -- what was done -- what was true -- how it was found -- the rule.
 Newest at the top.
 
+## 2026-10-02 -- AO1: a green gate that judged 4% of the picture; a coverage floor that measured the camera; a shader rule left out as a footnote
+- The first agent's one green run judged "the light the picture got" on 20,260 px, 4% of the frame: the check
+  reads only pixels that end on a solid surface, and steam and glow cards (even their clear texels) lay over 96%
+  of that Vault 111 view. The pass printed PASS and nobody read the pixel count. Found by the second agent
+  reading the count. The gate now hides the effects in both windows and fails under 50% of the geometry.
+  Rule: a PASS line carries its sample size, and the gate fails when the sample is a sliver.
+- The second agent's first floor was "30% of the frame". The Third Rail view is 79% empty space, so a correct
+  build failed it. The floor is now a share of the geometry. Rule: a coverage floor counts what the code can
+  cover, not what the camera frames.
+- The first agent's notes said the game's history restart rule was "not modeled" and left it out of the gate.
+  It moves 0.4-0.5% of pixels by 0.2 on average. It is modeled and gated now (red `noreset`). Rule: a rule
+  read from the shader and left out is listed as open with its measured size, not as a footnote.
+
 ## 2026-10-02 -- POOL1: a one-probe tolerance, a search by shape, a shared probe number, flattened endings
 - **A checker's tolerance covered the rounding of one probe only (POOL1, 2026-10-01).** cell_spec_check.py
   rebuilds a sharp highlight from 8-bit probes; its tolerance took half a step of the gloss but not of the normal
