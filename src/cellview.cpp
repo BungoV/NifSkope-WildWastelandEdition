@@ -12,6 +12,8 @@ BSD License - see nifskope.h
 #include "cellground.h"		// lane CELLVIEW2
 #include "cellsplat.h"		// lane CELLVIEW4
 #include "cellidentity.h"	// lane CELLVIEW2
+#include "cellactor.h"		// lane PLACED1
+#include "celldecal.h"		// lane PLACED1
 #include "esmdata.h"
 #include "esmweather.h"		// lane FOG2: the fog packing
 #include "lodgen.h"
@@ -134,6 +136,7 @@ struct Bucket
 	Vector3 bbPos;
 	float bbScale = 1.0f;
 	int bbMode = 0;
+	bool decal = false;   // lane PLACED1: a placed decal's pieces (src/celldecal.h): Decal flag, no depth write
 	std::vector<OutVert> verts;
 	std::vector<BucketTri> tris;   // 32-bit: a bucket welds far more than 65,536 vertices
 };
@@ -431,10 +434,11 @@ bool emitBucket( NifModel * nif, const QModelIndex & iRoot, const Bucket & b,
 		 * screen-space refraction preview (src/gl/renderer.cpp) bends the scene behind it the
 		 * way the game does, instead of showing its normal-map diffuse as a solid swirled disk. */
 		nif->set<quint32>( iShader, "Shader Flags 1",
-			( b.emits ? 2151677953U : ( 2151677953U & ~0x400000U ) ) | ( b.refract ? 0x8000U : 0U ) );
+			( b.emits ? 2151677953U : ( 2151677953U & ~0x400000U ) ) | ( b.refract ? 0x8000U : 0U )
+			| ( b.decal ? 0x04000000U : 0U ) );   // lane PLACED1: Decal
 		if ( b.refract )
 			nif->set<float>( iShader, "Refraction Strength", b.refractStrength );
-		nif->set<quint32>( iShader, "Shader Flags 2", b.withColour ? 0x25U : 5U );
+		nif->set<quint32>( iShader, "Shader Flags 2", ( b.withColour ? 0x25U : 5U ) & ( b.decal ? ~1U : ~0U ) );
 		QModelIndex iTexSet = nif->insertNiBlock( QStringLiteral( "BSShaderTextureSet" ) );
 		nif->setLink( iShader, "Texture Set", nif->getBlockNumber( iTexSet ) );
 		nif->set<uint>( iTexSet, "Num Textures", 10 );
@@ -1175,6 +1179,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 		 *  With it the two are different buckets and different colours, so a
 		 *  real defect cannot hide inside the expected one. */
 		bool expectLod = false;
+		QString actorKey;   //!< lane PLACED1: a placed actor (src/cellactor.h); its shapes come from there
 	};
 	QVector<Placement> placements;
 	QHash<QString, int> skippedByType;
@@ -1192,6 +1197,9 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 	 * list is what the cell CONTAINS, as the ref table is. WW_CELL_LIGHTS dumps it
 	 * and the gate compares it with an independent walk of the plugin. */
 	QVector<EsmRefr> lightRefs;
+	std::vector<CellDecalRef> decalRefs;   // lane PLACED1: placed decals, projected after the weld
+	CellActors actors( world, dataRoot );  // lane PLACED1: placed actors, built at rest
+	int actorPlacements = 0;
 	QHash<quint32, EsmRefr> primRefs;	// lane HEMI1: the refs carrying a primitive (a light's LightBoxLink target)
 	/* lane MISS1: a reference with an enable parent starts in the PARENT's state, inverted when it is
 	 * "opposite"; the parent's own starting state is a plugin fact (its initially-disabled flag, or its own
@@ -1286,6 +1294,18 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 		}
 		const EsmLodBase & lb = world.lodBase( r.base );
 		const bool isScol = std::memcmp( &r.baseType, "SCOL", 4 ) == 0;
+		if ( std::memcmp( &r.baseType, "TXST", 4 ) == 0 ) {   // lane PLACED1: a decal; its fate is set after the weld
+			CellDecalRef d;
+			d.form = r.formID;
+			d.base = r.base;
+			for ( int k = 0; k < 3; k++ ) {
+				d.pos[k] = r.pos[k];
+				d.rot[k] = r.rot[k];
+			}
+			d.refRow = refRow;
+			decalRefs.push_back( d );
+			return;
+		}
 		if ( !isScol && lb.model.isEmpty() ) {
 			skippedByType[CellPickTable::typeName( r.baseType )]++;
 			cellRefTableMutable().setFate( refRow, CellRefFate::NoModel );
@@ -1366,6 +1386,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 		placements.append( out );
 	};
 
+	const QVector<EsmRefr> actorRefs = spec.interior ? actors.references() : QVector<EsmRefr>();   // lane PLACED1
 	// lane MISS1: every reference's enable facts, before the first one is placed (a parent may come later)
 	{
 		auto note = [&]( const QVector<EsmRefr> & refs ) {
@@ -1378,6 +1399,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 		};
 		if ( spec.interior ) {
 			note( world.interiorRefrs() );
+			note( actorRefs );   // lane PLACED1: a placed actor has a start state too, and may be a parent
 		} else {
 			for ( int y = y0; y <= y1; y++ )
 				for ( int x = x0; x <= x1; x++ )
@@ -1400,6 +1422,21 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 		cellRefTableMutable().addCell( block );
 		for ( const EsmRefr & r : world.interiorRefrs() )
 			pushRefr( r, 0, 0, false );
+		/* lane PLACED1: the placed actors. They are not REFRs: they stay out of the reference
+		 * list, the REFR counts and the placement dump, and have their own census line. */
+		for ( const EsmRefr & r : actorRefs ) {
+			Placement out;
+			if ( !actors.place( r, startsDisabled( r ) && !spec.showDisabled, out.actorKey, out.scale ) )
+				continue;
+			out.base = r.base;
+			out.pos = Vector3( r.pos[0], r.pos[1], r.pos[2] );
+			out.rot.fromEuler( -r.rot[0], -r.rot[1], -r.rot[2] );
+			out.ref = r.formID;
+			for ( int k = 0; k < 3; k++ )
+				out.storedRot[k] = r.rot[k];
+			placements.append( out );
+			actorPlacements++;
+		}
 	} else {
 		for ( int y = y0; y <= y1; y++ ) {
 			for ( int x = x0; x <= x1; x++ ) {
@@ -1478,14 +1515,17 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 
 	Vector3 origin( float( spec.cx ) * CELL_UNITS + CELL_UNITS * 0.5f,
 		float( spec.cy ) * CELL_UNITS + CELL_UNITS * 0.5f, 0.0f );
-	if ( spec.interior && !placements.isEmpty() ) {
+	if ( spec.interior && placements.size() > actorPlacements ) {
 		// lane PRTP1: an interior has no grid; centre the welded scene on its placements
 		double sx = 0, sy = 0;
 		for ( const Placement & p : placements ) {
+			if ( !p.actorKey.isEmpty() )
+				continue;   // lane PLACED1: the centre stays where the REFRs put it
 			sx += p.pos[0];
 			sy += p.pos[1];
 		}
-		origin = Vector3( float( sx / placements.size() ), float( sy / placements.size() ), 0.0f );
+		const int n = int( placements.size() ) - actorPlacements;
+		origin = Vector3( float( sx / n ), float( sy / n ), 0.0f );
 	}
 
 	CellPickTable & picks = cellPickTableMutable();
@@ -1665,7 +1705,8 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 
 	for ( const Placement & p : placements ) {
 		const EsmLodBase & lb = world.lodBase( p.base );
-		const QString model = lb.model;
+		const bool isActor = !p.actorKey.isEmpty();   // lane PLACED1
+		const QString model = isActor ? p.actorKey : lb.model;
 		if ( model.isEmpty() ) {
 			skippedByType[CellPickTable::typeName( lb.type )]++;
 			continue;
@@ -1722,7 +1763,8 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 			// ONE LOAD PER DISTINCT MODEL AND SWAP -- the whole block shares this cache.
 			// lane MISS1: a placed model's root node takes the reference's transform; the file's own is left out.
 			// WW_CELL_REFS_RED=root is the gate's red control: the old load, root transform composed.
-			const bool okLoad = refsRed != "root"
+			// lane PLACED1: a placed actor's shapes come posed from src/cellactor.cpp, not from a model file.
+			const bool okLoad = isActor ? actors.shapes( model, &shapes ) : refsRed != "root"
 				? lodgenNativeLoadModelPlaced( const_cast<QString *>( &dataRoot ), model, subst, &shapes )
 				: subst
 				? lodgenNativeLoadModelSwapped( const_cast<QString *>( &dataRoot ), model, *subst, &shapes )
@@ -1731,7 +1773,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 				modelsFailed.insert( mkey );
 				continue;
 			}
-			modelLoads++;
+			modelLoads += isActor ? 0 : 1;
 			mit = modelCache.insert( mkey, shapes );
 		}
 		placementsSwapped += subst ? 1 : 0;
@@ -1890,7 +1932,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 		bool soupFoliage = false;   // alpha-tested leaves and grass cards never roof or wall a probe
 		if ( probing && !p.disabled && !pick.marker ) {
 			QString tn = CellPickTable::typeName( lb.type );
-			role = soupRole( tn );
+			role = isActor ? 0 : soupRole( tn );   // lane PLACED1: an actor never enters the probe soup
 			// Sky meshes (distant clouds) are kilometer sheets over the town: a false roof everywhere.
 			// Water planes have no collision, so FO4CS's rays pass them too.
 			const QString ml = QString( model ).replace( '/', '\\' ).toLower();
@@ -2027,6 +2069,8 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 				bbInvScale = s.bbScale > 1.0e-6f ? 1.0f / s.bbScale : 1.0f;
 				bbOwn = QStringLiteral( "|BB|%1" ).arg( billboardShapes++ );
 			}
+			if ( isActor )
+				bbOwn += QLatin1String( "|ACTOR" );   // lane PLACED1: own buckets; no decal lands on an actor
 			Bucket & b = bucketFor( s, colouring || ownColor || repaint, bbOwn );
 			if ( bb ) {
 				b.billboard = true;
@@ -2108,7 +2152,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 				probeSoup.doors.push_back( d );
 			}
 			picks.append( pick );
-			drawn++;
+			drawn += isActor ? 0 : 1;
 		}
 	}
 
@@ -2422,6 +2466,68 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 			buckets.insert( QStringLiteral( "\x01water" ), waterB );
 		if ( !gridB.verts.empty() )
 			buckets.insert( QStringLiteral( "\x01grid" ), gridB );
+	}
+
+	/* ---- lane PLACED1: THE PLACED DECALS. Each one is clipped out of the opaque surfaces welded
+	 * above (src/celldecal.h has the rule) and drawn as a blended surface with the Decal flag, so
+	 * the lit program lights it like the surface it lies on. The pieces never enter the probe soup:
+	 * the game has no bake that sees its decals. */
+	CellDecalResult decalResult;
+	if ( !decalRefs.empty() ) {
+		std::vector<CellDecalReceiver> receivers;
+		for ( auto it = buckets.constBegin(); it != buckets.constEnd(); ++it ) {
+			const Bucket & b = it.value();
+			if ( b.blend || b.hasAlpha || b.billboard || b.refract || !b.effectMat.isEmpty()
+				|| !b.effectBlock.isEmpty() || b.verts.empty() || b.tris.empty()
+				|| it.key() == QLatin1String( "\x01water" ) || it.key() == QLatin1String( "\x01grid" )
+				|| it.key().contains( QLatin1String( "|ACTOR" ) ) )
+				continue;
+			CellDecalReceiver rc;
+			rc.pos = &b.verts[0].pos[0];
+			rc.nrm = &b.verts[0].nrm[0];
+			rc.stride = sizeof( OutVert );
+			rc.numVerts = b.verts.size();
+			rc.tris = &b.tris[0].v[0];
+			rc.numTris = b.tris.size();
+			receivers.push_back( rc );
+		}
+		const float org[3] = { origin[0], origin[1], origin[2] };
+		cellProjectDecals( world, dataRoot, decalRefs, receivers, org, decalResult,
+			QString::fromLocal8Bit( qgetenv( "WW_CELL_DECAL_DUMP" ) ) );
+		for ( const CellDecalMesh & m : decalResult.meshes ) {
+			if ( m.tris.empty() )
+				continue;
+			Bucket b;
+			b.name = m.name;
+			b.matString = m.diffuse;
+			b.normalTex = m.normal;
+			b.specTex = m.spec;
+			b.decal = true;
+			b.hasAlpha = true;       // blended; the vertex alpha carries the angle fade
+			b.alphaThreshold = 0;
+			b.withColour = true;
+			b.verts.reserve( m.verts.size() );
+			for ( const CellDecalVert & v : m.verts ) {
+				OutVert o;
+				o.pos = Vector3( v.pos[0], v.pos[1], v.pos[2] );
+				o.nrm = Vector3( v.nrm[0], v.nrm[1], v.nrm[2] );
+				o.tan = Vector3( v.tan[0], v.tan[1], v.tan[2] );
+				o.bit = Vector3( v.bit[0], v.bit[1], v.bit[2] );
+				o.uv = Vector2( v.uv[0], v.uv[1] );
+				o.chan[3] = v.alpha;
+				b.verts.push_back( o );
+			}
+			for ( size_t t = 0; t + 2 < m.tris.size(); t += 3 )
+				b.tris.push_back( BucketTri{ { m.tris[t], m.tris[t + 1], m.tris[t + 2] } } );
+			buckets.insert( QStringLiteral( "\x02" ) + m.name, b );
+		}
+		for ( size_t i = 0; i < decalRefs.size(); i++ ) {
+			const CellDecalFate f = decalResult.fates[i];
+			if ( f == CellDecalFate::NoDecalData )
+				skippedByType[QStringLiteral( "TXST" )]++;   // a texture set that is not a decal: as before
+			cellRefTableMutable().setFate( decalRefs[i].refRow, f == CellDecalFate::Drawn ? CellRefFate::Projected
+				: ( f == CellDecalFate::NoDecalData ? CellRefFate::NoModel : CellRefFate::Refused ) );
+		}
 	}
 
 	// ---- lane PRTPPLACE: place the probes, write them, draw them
@@ -2751,7 +2857,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 				  << " references " << c.references << ", drawn " << c.drawn << "\n";
 			}
 		}
-		s << "  refrs read " << refsRead << ", placements " << placements.size()
+		s << "  refrs read " << refsRead << ", placements " << placements.size() - actorPlacements
 		  << ", drawn " << drawn << "\n";
 		s << "  hidden: disabled " << refsHidden << ", markers " << refsMarker
 		  << ", deleted " << refsDeleted << ", no base " << refsNoBase << "\n";
@@ -2781,6 +2887,9 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 				sk.append( QStringLiteral( "%1 %2" ).arg( t ).arg( skippedByType.value( t ) ) );
 			s << "  skipped, no model on the base: " << sk.join( QLatin1String( ", " ) ) << "\n";
 		}
+		s << cellDecalCensusLine( decalResult );   // lane PLACED1
+		s << actors.censusLine();
+		actors.dump( QString::fromLocal8Bit( qgetenv( "WW_CELL_ACTOR_DUMP" ) ) );
 		s << "  buckets over 65,536 vertices " << bucketsWide << " (largest " << qulonglong( bucketMaxVerts )
 		  << "), shapes drawn with their own vertex colors " << shapesVertexColor
 		  << ", placements drawn with a material swap " << placementsSwapped
@@ -2901,6 +3010,8 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 			     "bminx bminy bminz bmaxx bmaxy bmaxz model\n";
 			for ( int i = 0; i < picks.size(); i++ ) {
 				const CellPickEntry & e = picks.at( i );
+				if ( std::memcmp( &e.baseType, "NPC_", 4 ) == 0 || std::memcmp( &e.baseType, "LVLN", 4 ) == 0 )
+					continue;   // lane PLACED1: a placed actor has its own dump (WW_CELL_ACTOR_DUMP)
 				s << CellPickTable::formName( e.refForm ) << " "
 				  << CellPickTable::formName( e.baseForm ) << " "
 				  << CellPickTable::typeName( e.baseType ) << " " << e.scolPart << " "

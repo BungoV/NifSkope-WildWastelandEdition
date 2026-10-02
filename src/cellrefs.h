@@ -73,7 +73,9 @@ enum class CellRefFate
 	NoBase,         //!< no base object at all
 	Disabled,       //!< initially disabled (or enable parent inverted), row off
 	NoModel,        //!< the base carries no MODL: lights, sounds, primitives
-	Marker          //!< an editor marker model, and the Markers row is off
+	Marker,         //!< an editor marker model, and the Markers row is off
+	Projected,      //!< lane PLACED1: a decal, drawn on the surfaces under it (no shape of its own to pick)
+	Refused         //!< lane PLACED1: placed content this view names and does not draw (the census says why)
 };
 
 /*! ONE LOADED CELL (lane CELLWORK1, bungo: "the viewed cells should include
