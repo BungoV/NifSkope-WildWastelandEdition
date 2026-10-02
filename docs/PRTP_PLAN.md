@@ -54,7 +54,7 @@ the `.loda` AO map. Probes happen here.
    cell view to fo4_cell.prog: every placed light on at load (omni + spot),
    interior DALC and directional from XCLL / the lighting template. Gate
    tests/spells/cell_lit.sh (probes vs an independent walk of the ESM; reds:
-   linear, axis, off). Not yet: fog, hemisphere/box shapes (drawn as omni),
+   linear, axis, off). Not yet: fog (light shapes: see 2z),
    Ambient Only, the PBR (pbrm) and effect shaders.
 4. **PRTP4 -- ground truth.** RenderDoc captures of the stock game at named
    cells (flights when the game is down; bungo names the saves); one pixel gate
@@ -475,7 +475,7 @@ measure (Vault: the steam leaves 4% of the frame as opaque cell-lit pixels to co
 ### 2r. Ambient Only lights scale the ambient (lanes AMBO1 + AMBO2, 2026-10-01)
 
 A light with LIGH flag 0x100000 lights nothing directly (AMBO1 drops it from the direct lights). It changes the
-cell ambient inside a sphere of 1.22077 x its radius, radius = base + XRDS (XRDS is a delta). Inside, each
+cell ambient inside a sphere of 1.22077 x its radius (or inside its linked box, 2z), radius = base + XRDS (XRDS is a delta). Inside, each
 channel's ambient sum (the DALC rows dotted with (N,1)) is multiplied by pow(color/255, 2.2) x dimmer before the
 ambient's own 2.2; dimmer 0.5 leaves about 0.22 of the ambient. Per pixel: the first light in plugin order that
 holds the point wins, and it replaces the ambient, never adds. No edge fade, no camera rule. The game culls the
@@ -883,6 +883,57 @@ For section 3 (Open):
 - add: FO4CS's reader takes `.tbk` v3 only; the five changes for v4 are listed in this section; until then bake with `--tbk 3`.
 - add: glass in the bake has no view-angle falloff and no palette alpha; frost films and blended shapes without a material file take no light.
 - add: MSTT in the bake: fixed and simulated cannot be told apart from the record (bungo's call).
+
+### 2z. Light shapes: hemisphere and box lights (lane HEMI1, 2026-10-02)
+
+A placed light has one of four shapes, decided in this order: LIGH flag 0x800 = hemisphere; else 0x400 / 0x4000 =
+spot; else, if the reference carries a linked ref under keyword LightBoxLink (XLKR, KYWD 00115705) to a
+reference that has primitive bounds (XPRM) = box; else omni. A hemisphere and a box are the omni light (same
+radial curve, same color) cut by a volume, with no fade at the cut:
+- hemisphere: lit only where (P - light) . axis >= 0; the axis is the light's local +X under its placed rotation
+  (14 of the 17 placed aim it down).
+- box: lit only inside the LINKED reference's box (its position, its rotation, half extents = |XPRM bounds| x the
+  light's scale). The light's own position and radius still give the falloff; the box only cuts.
+The cell view drew both as plain omni lights (2a "Not yet"). Now the light buffer carries the shape (8 texels a
+light: texel 1.w = -3 hemisphere, -4 box; texels 5-7 the box's three rows), and the cell shader, the shadow
+pass's light list and the bounce relight (2i) all cut by it.
+Census (Fallout4.esm): 17 hemisphere lights placed (8 LIGH bases), 1877 box-linked omni lights, 2 box-linked
+spots (the spot wins, the box is ignored). Summary note "shapes=hemisphere N box N (box link unresolved N)
+ambientboxes=N".
+
+Ambient Only lights (corrects 2r): the shape rule never looks at the Ambient Only flag, so an Ambient Only light
+linked to a box scales the ambient inside that BOX, whatever its radius, not inside the sphere of 1.22077 x
+radius. 29 of the 39 placed are box-linked (10 keep the sphere), among them all three in Vault111Cryo:
+001EF28A box centre (-1025,1848,-72) half (757,780,1374); 001EF2A4 (-2377,25,27) half (440,232,547); 002097B0
+(-3626,-271,322) half (811,648,641). 2r's three spheres are no longer drawn there. ASSUMED from how the game
+builds the light, NOT measured on a game frame: one capture in Vault111Cryo at about (-4500,-250,0) settles it
+(inside the old sphere, west of the box face at x = -4437: full ambient if the box is right).
+
+Red WW_CELL_LIT_RED=hemiomni (bit 256): every hemisphere and box drawn as the omni it was, and the Ambient Only
+boxes as spheres again.
+Gate tests/spells/cell_lit.sh (the checker reads the plugin itself: flags, linked ref, bounds, rotation):
+- DmndRadio01, look-at (1617,99,230) eye 250 away: 2 hemispheres in the cell, 606 pixels a hemisphere's plane
+  decides (floor 200), agree 99.9%; all pixels 100.0%.
+- CabotHouse01, look-at (765,91,380) eye 250 away (ground floor under two upstairs lamps whose boxes end at the
+  upper floor): 33 box lights in the cell, 3934 pixels cut off by a box and 1415 lit inside one (floor 200
+  each), agree 100.0%.
+- the Ambient Only view of 2r: 3 boxes; inside 100.0% of 312,232 px, outside 99.9% of 123,453; 96,490 px where
+  box and sphere differ (floor 1000) agree 100.0%.
+- red hemiomni: all three views FAIL. DmndRadio01 shape-decided agree 0.3%, CabotHouse01 0.1%, Ambient Only
+  box-decided 0.0% (outside 21.8%). Red ambientfull still fails the Ambient Only view (inside 0.0%).
+Also rerun: cell_shadow.sh (Vault 96.9% / 99.7%, Solomon 89.4% / 99.2%), cell_spec.sh (100.0%), cell_oren.sh
+(100.0%), cell_ao.sh (3 cells), cell_refs.sh on Vault111Cryo (1397 drawn of 1397), all PASS.
+The bounce (2i): cell_gi_check.py's surfel relight now cuts by the shape too and counts the surfels a shape
+decides: Vault111Cryo stage A 400 surfels, 5 decided by a light's shape, agree 100.0% (the same dump against
+an omni-only sum agrees 98.8%, still over the 97% bar, so five surfels cannot carry a red of their own; the clip
+itself is held by cell_lit's hemiomni red). Stages B-E unchanged: 100.0 / 100.0 / 100.0 / 99.9%.
+Not done: cell_spec_check.py and cell_oren_check.py still treat every light as omni; in their views the shapes
+decide at most 0.25% of the sampled pixels (240 of 99,549), far under their pass bars. cell_cube.sh and
+cell_fxdepth.sh were not run by this lane.
+
+Open:
+- Ambient Only lights linked to a box fill the box (2z): from how the game builds lights, not from a frame.
+  Capture Vault111Cryo standing at about (-4500,-250,0): ambient full there = box, dimmed = sphere.
 
 ## 3. Open
 

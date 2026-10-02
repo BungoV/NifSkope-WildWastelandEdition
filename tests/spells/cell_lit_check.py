@@ -9,8 +9,14 @@ OWN walk of the plugin (nothing shared with src/esmdata.cpp or src/cellview.cpp)
   "Off By Default"; radius = DATA radius + XRDS; colour = (byte / 255)^2.2 x (FNAM + XLIG fade delta);
   spots (0x400 / 0x4000) shine along the ref's local +X under the engine euler (-x, -y, -z), cone
   half-angle (FOV + XLIG FOV delta) / 2, edge exponent = DATA Falloff Exponent.
+  lane HEMI1, the light shapes (the game's light builder and its stencil volumes): the hemisphere flag
+  0x800 wins (never a spot) and lights only the half space in front of the ref's local +X; otherwise a
+  non-spot light with an XLKR under keyword 00115705 (LightBoxLink) to a ref carrying XPRM lights only
+  inside that ref's box: centre = its DATA position, half extents = |XPRM bounds| x the light's XSCL,
+  frame = Rz(-z) Rx(-x) Ry(-y) of its DATA angles. Inside either volume the light is the omni curve.
 Then, at every clean sampled pixel (position decoded from probes 2 + 3, normal from probe 4), the
-docs/PRTP2_LIGHT_MODEL.md diffuse sum against probe 1 (irradiance / 4).
+docs/PRTP2_LIGHT_MODEL.md diffuse sum against probe 1 (irradiance / 4). The pixels the shapes decide
+(where the shaped and the unclipped sums differ) must agree on their own too, as the spots do.
 One verdict line; exit 0 on PASS.
 
   cell_lit_check.py <Fallout4.esm> <interior EDID> <shot dir> ambient      (lane AMBO2)
@@ -104,9 +110,10 @@ def lights_of(esm, cell_edid):
                 ligh[form] = f
         elif t == b'REFR' and cell_form is not None and any(g[1] == cell_form and g[2] in (6, 8, 9) for g in stack):
             flags, f = record(buf, off)
-            refs.append((form, flags, f))
+            refs.append((form, flags, f, off))
+    byform = {form: f for form, flags, f, off in refs if not flags & 0x20}
     out = []
-    for form, flags, f in refs:
+    for form, flags, f, roff in refs:
         if flags & 0x20 or flags & 0x800 or b'NAME' not in f:
             continue
         b = ligh.get(struct.unpack_from('<I', f[b'NAME'])[0])
@@ -130,17 +137,54 @@ def lights_of(esm, cell_edid):
             continue
         pos = struct.unpack_from('<3f', f[b'DATA'], 0)
         rot = struct.unpack_from('<3f', f[b'DATA'], 12)
-        spot = bool(lf & 0x4400)
+        hemi = bool(lf & 0x800)
+        spot = bool(lf & 0x4400) and not hemi
         cos_outer = math.cos(math.radians(fov + (xlig[0] if xlig else 0.0)) / 2) if spot else -2.0
         aim = euler(-rot[0], -rot[1], -rot[2]) @ np.array([1.0, 0.0, 0.0])
+        box = None
+        if not hemi and not spot:
+            box = light_box(buf, roff, byform, struct.unpack_from('<f', f[b'XSCL'])[0] if b'XSCL' in f else 1.0)
         # lane RIM1: No Rim Lighting (0x80000) drops the back-light; Ignore Roughness (0x40000) also turns the
         # diffuse to Lambert
         out.append(dict(pos=np.array(pos), r=r, c=c, spot=spot, cos=cos_outer, aim=aim, cone=falloff, bse=bse,
-                        norim=bool(lf & 0x80000), rough=bool(lf & 0x40000), flags=lf))
+                        norim=bool(lf & 0x80000), rough=bool(lf & 0x40000), flags=lf, hemi=hemi, box=box))
     return out
 
 
-def irradiance(lights, P, N):
+def light_box(buf, off, byform, scale):
+    """lane HEMI1: (centre, frame columns, half extents) of the ref's LightBoxLink primitive, or None."""
+    size, flags = struct.unpack_from('<II', buf, off + 4)
+    data = buf[off + 24:off + 24 + size]
+    if flags & 0x00040000:
+        data = zlib.decompress(data[4:])
+    for t, p in fields(data):   # every XLKR, not only the first
+        if t != b'XLKR' or len(p) < 8:
+            continue
+        kw, to = struct.unpack_from('<II', p)
+        tf = byform.get(to)
+        if kw != 0x00115705 or tf is None or b'XPRM' not in tf:
+            continue
+        d = struct.unpack_from('<6f', tf[b'DATA'])
+        x, y, z = d[3:]
+        rz = np.array([[math.cos(-z), -math.sin(-z), 0], [math.sin(-z), math.cos(-z), 0], [0, 0, 1]])
+        rx = np.array([[1, 0, 0], [0, math.cos(-x), -math.sin(-x)], [0, math.sin(-x), math.cos(-x)]])
+        ry = np.array([[math.cos(-y), 0, math.sin(-y)], [0, 1, 0], [-math.sin(-y), 0, math.cos(-y)]])
+        half = np.abs(np.array(struct.unpack_from('<3f', tf[b'XPRM']))) * scale
+        return np.array(d[:3]), rz @ rx @ ry, half
+    return None
+
+
+def inside(L, P):
+    """lane HEMI1: the pixels inside light L's volume (all of them for an omni or spot light)."""
+    if L['hemi']:
+        return (P - L['pos']) @ L['aim'] >= 0
+    if L['box'] is not None:
+        c, m, h = L['box']
+        return np.all(np.abs((P - c) @ m) <= h[None, :], axis=1)
+    return np.ones(len(P), bool)
+
+
+def irradiance(lights, P, N, shapes=True):
     E = np.zeros_like(P)
     for L in lights:
         v = L['pos'] - P
@@ -155,6 +199,8 @@ def irradiance(lights, P, N):
             base = np.clip(1 - (1 - (-Ld @ L['aim'])) / max(1 - L['cos'], 1e-4), 0, 1)
             a = a * np.minimum(base ** max(L['cone'], 1e-3), 1)
         w = np.where((d < L['r']) & (nl > 0), a * nl, 0.0)
+        if shapes:
+            w = np.where(inside(L, P), w, 0.0)
         E += w[:, None] * L['c'][None, :]
     return E
 
@@ -186,7 +232,8 @@ def surface(cell, shots, probes):
 
 
 def ambient_of(esm, cell_edid):
-    """lane AMBO2: (3 x 4 ambient rows, where from, [Ambient Only spheres in plugin order]) from our own walk."""
+    """lane AMBO2: (3 x 4 ambient rows, where from, [Ambient Only volumes in plugin order]) from our own walk.
+    Lane HEMI1: a volume is the light's linked box when it has one ('box'), else the sphere."""
     buf = open(esm, 'rb').read()
     cell_form, cellf, ligh, lgtm, refs = None, None, {}, {}, []
     for t, form, off, stack in walk(buf):
@@ -202,7 +249,8 @@ def ambient_of(esm, cell_edid):
             lgtm[form] = record(buf, off)[1]
         elif t == b'REFR' and cell_form is not None and any(g[1] == cell_form and g[2] in (6, 8, 9) for g in stack):
             flags, f = record(buf, off)
-            refs.append((flags, f))
+            refs.append((flags, f, form, off))
+    byform = {form: f for flags, f, form, off in refs if not flags & 0x20}
     if cellf is None:
         return None, 'no such cell', []
     x = cellf.get(b'XCLL', b'')
@@ -223,7 +271,7 @@ def ambient_of(esm, cell_edid):
     d = np.array(six, float) / 255.0          # [axis][channel]
     rows = np.stack([(d[0] - d[1]) / 2, (d[2] - d[3]) / 2, (d[4] - d[5]) / 2, d.mean(axis=0)], axis=1)  # [channel][4]
     spheres = []
-    for flags, f in refs:
+    for flags, f, form, roff in refs:
         if flags & 0x20 or flags & 0x800 or b'NAME' not in f:
             continue
         b = ligh.get(struct.unpack_from('<I', f[b'NAME'])[0])
@@ -233,13 +281,16 @@ def ambient_of(esm, cell_edid):
         lf, = struct.unpack_from('<I', dd, 12)
         if lf & 0x20 or not lf & 0x100000:
             continue
+        box = None
+        if not lf & 0x4C00:     # the shape rule of every light: a hemisphere or a spot is never a box
+            box = light_box(buf, roff, byform, struct.unpack_from('<f', f[b'XSCL'])[0] if b'XSCL' in f else 1.0)
         r = struct.unpack_from('<I', dd, 4)[0] + (struct.unpack_from('<f', f[b'XRDS'])[0] if b'XRDS' in f else 0.0)
         if r <= 0:
             continue
         fade = struct.unpack_from('<f', b[b'FNAM'])[0] if b'FNAM' in b else 1.0
         xlig = struct.unpack_from('<%df' % (len(f[b'XLIG']) // 4), f[b'XLIG']) if b'XLIG' in f else ()
         k = (np.array(list(dd[8:11]), float) / 255.0) ** 2.2 * (fade + (xlig[1] if len(xlig) >= 2 else 0.0))
-        spheres.append(dict(pos=np.array(struct.unpack_from('<3f', f[b'DATA'], 0)), R=1.22077 * r, k=k))
+        spheres.append(dict(pos=np.array(struct.unpack_from('<3f', f[b'DATA'], 0)), R=1.22077 * r, k=k, box=box))
     return rows, src, spheres
 
 
@@ -258,14 +309,24 @@ def main_ambient(esm, cell, shots):
     k = np.ones((len(ys), 3))
     which = np.full(len(ys), -1)
     near_edge = np.zeros(len(ys), bool)
+    # lane HEMI1: the pixels the box decides: inside a box light's sphere and outside its box, or the reverse
+    which_ball = np.full(len(ys), -1)
     for i, S in enumerate(spheres):
-        dist = np.linalg.norm(Pp - S['pos'], axis=1)
-        near_edge |= np.abs(dist - S['R']) < 4.0      # the probe's position is quantised to a unit
-        take = (which < 0) & (dist < S['R'])
+        ball = np.linalg.norm(Pp - S['pos'], axis=1) - S['R']     # signed distance to the volume's face
+        sd = ball
+        if S['box'] is not None:
+            c, m, h = S['box']
+            sd = (np.abs((Pp - c) @ m) - h[None, :]).max(axis=1)
+            near_edge |= np.abs(ball) < 4.0
+        near_edge |= np.abs(sd) < 4.0      # the probe's position is quantised to a unit
+        take = (which < 0) & (sd < 0)
         k[take] = S['k']
         which[take] = i
+        which_ball[(which_ball < 0) & (ball < 0)] = i
+    by_box = which != which_ball
     keep = ~near_edge
-    ys, xs, Pp, Np, k, which = ys[keep], xs[keep], Pp[keep], Np[keep], k[keep], which[keep]
+    ys, xs, Pp, Np, k, which, by_box = ys[keep], xs[keep], Pp[keep], Np[keep], k[keep], which[keep], by_box[keep]
+    n_box = sum(1 for S in spheres if S['box'] is not None)
     n1 = np.concatenate([Np, np.ones((len(Np), 1))], axis=1)
     # probe 11 writes the sum x 8 (an interior's ambient is dim; 8 bits would hide the scale)
     exp = np.clip((n1 @ rows.T) * k * 8.0, 0, 1)
@@ -279,13 +340,19 @@ def main_ambient(esm, cell, shots):
     ag_in = good[inside].mean() if n_in else 0.0
     ag_out = good[~inside].mean() if n_out else 1.0
     ag_moved = good[moved].mean() if moved.any() else 0.0
-    # both sides of a sphere's edge in frame: the scale must stop where the volume stops
+    # both sides of a volume's edge in frame: the scale must stop where the volume stops
     verdict = (n_in >= 2000 and n_out >= 1000 and moved.sum() >= 1000 and ag_in >= 0.97 and ag_out >= 0.97
                and ag_moved >= 0.97)
-    return ('ambient %s %s: ambient from %s; %d Ambient Only spheres; %d clean pixels, %d inside (agree %.1f%%; '
-            '%d where the scale shows, agree %.1f%%), %d outside (agree %.1f%%); mean |err| %.4f, p99 %.4f'
-            % ('PASS' if verdict else 'FAIL', cell, src, len(spheres), len(ys), n_in, 100 * ag_in, moved.sum(),
-               100 * ag_moved, n_out, 100 * ag_out, err.mean(), np.percentile(err, 99) if len(err) else 0.0))
+    # lane HEMI1: with a box light in the cell, the pixels its box decides must be in frame and agree
+    ag_box = good[by_box].mean() if by_box.any() else 0.0
+    if n_box:
+        verdict = verdict and by_box.sum() >= 1000 and ag_box >= 0.97
+    return ('ambient %s %s: ambient from %s; %d Ambient Only volumes (%d boxes, %d spheres); %d clean pixels, '
+            '%d inside (agree %.1f%%; %d where the scale shows, agree %.1f%%), %d outside (agree %.1f%%); '
+            '%d box-decided, agree %.1f%%; mean |err| %.4f, p99 %.4f'
+            % ('PASS' if verdict else 'FAIL', cell, src, len(spheres), n_box, len(spheres) - n_box, len(ys), n_in,
+               100 * ag_in, moved.sum(), 100 * ag_moved, n_out, 100 * ag_out, by_box.sum(), 100 * ag_box, err.mean(),
+               np.percentile(err, 99) if len(err) else 0.0))
 
 
 def main(esm, cell, shots):
@@ -317,9 +384,32 @@ def main(esm, cell, shots):
         spot_share = good[spot_lit].mean()
         verdict = verdict and spot_share >= 0.95
         spot_txt = '%d spot-lit, agree %.1f%%' % (spot_lit.sum(), 100 * spot_share)
-    return ('lit %s %s: %d lights; %d clean pixels sampled, %d lit by them; agree %.1f%% (lit %.1f%%); %s; '
+    # lane HEMI1: the pixels the shapes decide -- where the unclipped (all omni) sum differs from the shaped one
+    omni = np.clip(irradiance(lights, Pp, Np, shapes=False) / 4.0, 0, 1)
+    decided = np.abs(omni - exp).max(axis=1) > 3.0 / 255 + 0.05 * exp.max(axis=1)
+    hemis = [L for L in lights if L['hemi']]
+    hemi_dec = decided & (np.abs(np.clip(irradiance(hemis, Pp, Np, False) / 4.0, 0, 1)
+                                 - np.clip(irradiance(hemis, Pp, Np) / 4.0, 0, 1)).max(axis=1) > 0.02) if hemis \
+        else np.zeros(len(ys), bool)
+    # the box lights on their own: the pixels their boxes cut off, and the pixels they still light inside
+    boxes = [L for L in lights if L['box'] is not None]
+    box_dec, box_in = np.zeros(len(ys), bool), np.zeros(len(ys), bool)
+    if boxes:
+        kept = np.clip(irradiance(boxes, Pp, Np) / 4.0, 0, 1)
+        box_dec = decided & (np.abs(np.clip(irradiance(boxes, Pp, Np, False) / 4.0, 0, 1) - kept).max(axis=1) > 0.02)
+        box_in = kept.max(axis=1) > 0.02
+    shape_txt = 'shapes: %d hemisphere, %d box; too few shape-decided pixels in frame (%d, under 200)' % (
+        len(hemis), len(boxes), decided.sum())
+    if decided.sum() >= 200:
+        shape_share = good[decided].mean()
+        verdict = verdict and shape_share >= 0.95
+        shape_txt = ('shapes: %d hemisphere, %d box; %d shape-decided (%d by a hemisphere, %d by a box; %d lit inside '
+                     'a box), agree %.1f%%' % (len(hemis), len(boxes), decided.sum(), hemi_dec.sum(), box_dec.sum(),
+                                               box_in.sum(), 100 * shape_share))
+    return ('lit %s %s: %d lights; %d clean pixels sampled, %d lit by them; agree %.1f%% (lit %.1f%%); %s; %s; '
             'mean |err| %.4f, p99 %.4f' % ('PASS' if verdict else 'FAIL', cell, len(lights), len(ys), lit.sum(),
-                                           100 * share, 100 * lit_share, spot_txt, err.mean(), np.percentile(err, 99)))
+                                           100 * share, 100 * lit_share, spot_txt, shape_txt, err.mean(),
+                                           np.percentile(err, 99)))
 
 
 if __name__ == '__main__':

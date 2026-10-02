@@ -1,5 +1,22 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Cell view: half-sphere lights and boxed lights light only their own space (2026-10-02)
+
+Some of the game's lights are not round. A "hemisphere" light shines to one side only (a ceiling lamp that must
+not light the floor above it), and many ordinary lights are tied to a box in the Creation Kit so they stop at a
+wall or a floor instead of leaking into the next room. The cell view used to draw all of them as full round
+lights, so rooms picked up light through walls and ceilings. Now:
+
+- Hemisphere lights (17 placed in the game) light only the side they face.
+- Lights linked to a box (1877 placed) light only inside that box. Example: in Cabot House the ground floor no
+  longer catches the two upstairs lamps (about a fifth of that view gets darker, nothing gets brighter).
+- "Ambient Only" lights linked to a box (29 of the 39) now dim the room's ambient inside that box instead of
+  inside a big sphere. In Vault 111 this moves where the dimmed zones end. This one follows how the game sets
+  lights up and has not yet been compared with a game screenshot.
+
+The bounce light (GI) follows the same shapes. Nothing to switch on: it rides the Cell lights row. No new
+settings.
+
 ## Probe bake: both sides of a thin wall, rooms, and glass (2026-10-02)
 
 - The light bake (the probe files, `.tbk`) now keeps BOTH faces of a thin wall. A wall thinner than one bake
