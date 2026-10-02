@@ -12,6 +12,15 @@ OWN walk of the plugin (nothing shared with src/esmdata.cpp or src/cellview.cpp)
 Then, at every clean sampled pixel (position decoded from probes 2 + 3, normal from probe 4), the
 docs/PRTP2_LIGHT_MODEL.md diffuse sum against probe 1 (irradiance / 4).
 One verdict line; exit 0 on PASS.
+
+  cell_lit_check.py <Fallout4.esm> <interior EDID> <shot dir> ambient      (lane AMBO2)
+
+The Ambient Only lights (LIGH flag 0x100000) as the game draws them: each is a sphere of 1.22077 x
+(DATA radius + XRDS) at the ref; a surface inside the FIRST such sphere (plugin order) has each channel of
+the cell ambient's affine sum scaled by (byte / 255)^2.2 x (FNAM + XLIG fade delta) before the 2.2.
+The ambient from the cell's own XCLL or, by Inherits 0x1 (or no XCLL), its LTMP template (LGTM DALC, else
+the flat LGTM DATA ambient); per channel row = ((X+ - X-)/2, (Y+ - Y-)/2, (Z+ - Z-)/2, mean of the six).
+Checked against probe 11 (that affine sum x 8, clamped 0..1) at clean pixels inside and outside the spheres.
 """
 import math
 import os
@@ -150,9 +159,10 @@ def irradiance(lights, P, N):
     return E
 
 
-def main(esm, cell, shots):
+def surface(cell, shots, probes):
+    """(img, P, N, nlen, ok) from probes 2, 3, 4 (+ the others asked for), or a FAIL string."""
     img = {p: np.asarray(Image.open(os.path.join(shots, '%s.probe%d.png' % (cell, p))).convert('RGB'), float)
-           for p in (1, 2, 3, 4)}
+           for p in probes}
     notes = open(os.path.join(shots, cell + '.lit.notes'), encoding='utf-8', errors='replace').read()
     m = re.search(r'cell lighting: .*center=(-?[\d.]+),(-?[\d.]+),(-?[\d.]+)', notes)
     if not m:
@@ -172,6 +182,117 @@ def main(esm, cell, shots):
     for dy, dx in ((0, 1), (1, 0), (0, -1), (-1, 0)):
         ok &= np.linalg.norm(P - np.roll(P, (dy, dx), (0, 1)), axis=2) < 40
     ok[0, :] = ok[-1, :] = ok[:, 0] = ok[:, -1] = False
+    return img, P, N, nlen, ok
+
+
+def ambient_of(esm, cell_edid):
+    """lane AMBO2: (3 x 4 ambient rows, where from, [Ambient Only spheres in plugin order]) from our own walk."""
+    buf = open(esm, 'rb').read()
+    cell_form, cellf, ligh, lgtm, refs = None, None, {}, {}, []
+    for t, form, off, stack in walk(buf):
+        if t == b'CELL' and cell_form is None and all(g[2] != 1 for g in stack):
+            _, f = record(buf, off)
+            if f.get(b'EDID', b'').split(b'\0')[0].decode('cp1252', 'replace') == cell_edid:
+                cell_form, cellf = form, f
+        elif t == b'LIGH':
+            _, f = record(buf, off)
+            if b'DATA' in f:
+                ligh[form] = f
+        elif t == b'LGTM':
+            lgtm[form] = record(buf, off)[1]
+        elif t == b'REFR' and cell_form is not None and any(g[1] == cell_form and g[2] in (6, 8, 9) for g in stack):
+            flags, f = record(buf, off)
+            refs.append((flags, f))
+    if cellf is None:
+        return None, 'no such cell', []
+    x = cellf.get(b'XCLL', b'')
+    inherits = struct.unpack_from('<I', x, 88)[0] if len(x) >= 92 else 0
+    t = lgtm.get(struct.unpack_from('<I', cellf[b'LTMP'])[0]) if b'LTMP' in cellf else None
+    six = None
+    if t is not None and (not x or inherits & 1):
+        if len(t.get(b'DALC', b'')) >= 24:
+            six, src = [list(t[b'DALC'][a * 4:a * 4 + 3]) for a in range(6)], 'template DALC'
+        elif len(t.get(b'DATA', b'')) >= 4:
+            six, src = [list(t[b'DATA'][0:3])] * 6, 'template flat ambient'
+    elif len(x) >= 64:
+        six, src = [list(x[40 + a * 4:43 + a * 4]) for a in range(6)], 'XCLL DALC'
+    elif len(x) >= 4:
+        six, src = [list(x[0:3])] * 6, 'XCLL flat ambient'
+    if six is None:
+        return None, 'no ambient', []
+    d = np.array(six, float) / 255.0          # [axis][channel]
+    rows = np.stack([(d[0] - d[1]) / 2, (d[2] - d[3]) / 2, (d[4] - d[5]) / 2, d.mean(axis=0)], axis=1)  # [channel][4]
+    spheres = []
+    for flags, f in refs:
+        if flags & 0x20 or flags & 0x800 or b'NAME' not in f:
+            continue
+        b = ligh.get(struct.unpack_from('<I', f[b'NAME'])[0])
+        if b is None:
+            continue
+        dd = b[b'DATA']
+        lf, = struct.unpack_from('<I', dd, 12)
+        if lf & 0x20 or not lf & 0x100000:
+            continue
+        r = struct.unpack_from('<I', dd, 4)[0] + (struct.unpack_from('<f', f[b'XRDS'])[0] if b'XRDS' in f else 0.0)
+        if r <= 0:
+            continue
+        fade = struct.unpack_from('<f', b[b'FNAM'])[0] if b'FNAM' in b else 1.0
+        xlig = struct.unpack_from('<%df' % (len(f[b'XLIG']) // 4), f[b'XLIG']) if b'XLIG' in f else ()
+        k = (np.array(list(dd[8:11]), float) / 255.0) ** 2.2 * (fade + (xlig[1] if len(xlig) >= 2 else 0.0))
+        spheres.append(dict(pos=np.array(struct.unpack_from('<3f', f[b'DATA'], 0)), R=1.22077 * r, k=k))
+    return rows, src, spheres
+
+
+def main_ambient(esm, cell, shots):
+    s = surface(cell, shots, (2, 3, 4, 11))
+    if isinstance(s, str):
+        return s.replace('lit FAIL', 'ambient FAIL')
+    img, P, N, nlen, ok = s
+    rows, src, spheres = ambient_of(esm, cell)
+    if rows is None:
+        return 'ambient FAIL %s: %s' % (cell, src)
+    if not spheres:
+        return 'ambient FAIL %s: no Ambient Only light in the cell' % cell
+    ys, xs = np.nonzero(ok)
+    Pp, Np = P[ys, xs], N[ys, xs] / nlen[ys, xs][:, None]
+    k = np.ones((len(ys), 3))
+    which = np.full(len(ys), -1)
+    near_edge = np.zeros(len(ys), bool)
+    for i, S in enumerate(spheres):
+        dist = np.linalg.norm(Pp - S['pos'], axis=1)
+        near_edge |= np.abs(dist - S['R']) < 4.0      # the probe's position is quantised to a unit
+        take = (which < 0) & (dist < S['R'])
+        k[take] = S['k']
+        which[take] = i
+    keep = ~near_edge
+    ys, xs, Pp, Np, k, which = ys[keep], xs[keep], Pp[keep], Np[keep], k[keep], which[keep]
+    n1 = np.concatenate([Np, np.ones((len(Np), 1))], axis=1)
+    # probe 11 writes the sum x 8 (an interior's ambient is dim; 8 bits would hide the scale)
+    exp = np.clip((n1 @ rows.T) * k * 8.0, 0, 1)
+    got = img[11][ys, xs] / 255.0
+    err = np.abs(got - exp)
+    good = np.all(err <= 3.0 / 255, axis=1)
+    inside = which >= 0
+    # the adjustment must be visible where it is checked: inside pixels whose scaled and unscaled sums differ
+    moved = inside & (np.abs(np.clip(n1 @ rows.T * 8.0, 0, 1) - exp).max(axis=1) > 8.0 / 255)
+    n_in, n_out = int(inside.sum()), int((~inside).sum())
+    ag_in = good[inside].mean() if n_in else 0.0
+    ag_out = good[~inside].mean() if n_out else 1.0
+    ag_moved = good[moved].mean() if moved.any() else 0.0
+    # both sides of a sphere's edge in frame: the scale must stop where the volume stops
+    verdict = (n_in >= 2000 and n_out >= 1000 and moved.sum() >= 1000 and ag_in >= 0.97 and ag_out >= 0.97
+               and ag_moved >= 0.97)
+    return ('ambient %s %s: ambient from %s; %d Ambient Only spheres; %d clean pixels, %d inside (agree %.1f%%; '
+            '%d where the scale shows, agree %.1f%%), %d outside (agree %.1f%%); mean |err| %.4f, p99 %.4f'
+            % ('PASS' if verdict else 'FAIL', cell, src, len(spheres), len(ys), n_in, 100 * ag_in, moved.sum(),
+               100 * ag_moved, n_out, 100 * ag_out, err.mean(), np.percentile(err, 99) if len(err) else 0.0))
+
+
+def main(esm, cell, shots):
+    s = surface(cell, shots, (1, 2, 3, 4))
+    if isinstance(s, str):
+        return s
+    img, P, N, nlen, ok = s
     ys, xs = np.nonzero(ok)
     if len(ys) < 2000:
         return 'lit FAIL %s: %d clean cell-lit pixels, under 2000 (no probe served, or the camera is too far)' % (cell, len(ys))
@@ -205,6 +326,6 @@ if __name__ == '__main__':
     if len(sys.argv) < 4:
         print(__doc__)
         sys.exit(2)
-    line = main(*sys.argv[1:4])
+    line = main_ambient(*sys.argv[1:4]) if sys.argv[4:5] == ['ambient'] else main(*sys.argv[1:4])
     print(line)
     sys.exit(0 if ' PASS ' in line else 1)
