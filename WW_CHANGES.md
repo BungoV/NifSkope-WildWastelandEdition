@@ -1,5 +1,66 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Cell view: floor grates and wall pieces sit where the game puts them; a cell opens in its first-load state (2026-10-02)
+
+Three things change in what the cell view draws.
+
+- Some models were drawn turned around or shifted. A model can store a transform on its top node; the game
+  ignores it when the model is placed in a cell, the cell view applied it. In the Vault 111 cryo room that turned
+  three wall pieces (V111RPit2WallMid02) half way round, so the perforated floor grate beside the walkway ended
+  up under the wall and the trough with its lamps lay open. Two hall alcoves, a door console and a few smaller
+  models in that room moved too. About 300 of the game's 19,900 placeable models are affected; the cell view now
+  places all of them the way the game does. The LOD bake and the near bake are not changed.
+- References that start disabled. A reference can be tied to an "enable parent"; whether it starts shown depends
+  on the PARENT's own start state. The cell view did not look at the parent, so it drew things the game hides
+  until a quest turns them on, and hid a few it shows. It now opens a cell the way the game first loads it.
+  In the Institute concourse about 1,600 references change (most disappear: they wait on a quest); in the cryo
+  vault 86 change, all in the player's pod room and the entrance. The lights list is not changed yet: it still
+  lights some lamps the game starts switched off (28 in the cryo vault, 1,265 in the concourse).
+- Two smaller ones: the black backdrop planes (BlackPlane01) were hidden because their model sits in the
+  Markers folder; the game draws them, so the cell view does too. Clothing lying in a cell (the eyeglasses in the
+  cryo vault) now shows its ground model.
+
+Still not drawn: weapons the game assembles from parts (the 10mm pistol in the cryo vault), effects made only of
+particles (drips, a steam vent), decals and actors.
+
+New test tests/spells/cell_refs.sh walks the plugin with its own reader and requires every reference that has a
+model and is shown at the game's start to be drawn, in the right place, in three interiors (Vault111Cryo,
+DmndSolomonsHouse01, InstituteConcourse). It also checks placement against the game's own combined meshes.
+Controls: env WW_CELL_REFS_RED=root (the old placement) and WW_CELL_REFS_RED=parent (the old start rule); each
+makes the test fail.
+
+## Cell view: corners and creases darken the way the game's do (2026-10-02)
+
+- With Cell lights on, the cell view now has the game's ambient occlusion: the soft darkening in corners, in
+  creases, under pipes and where clutter meets the floor. It uses the game's own settings, the same in every
+  cell, and darkens the same things the game does: all the light on solid surfaces. Glass, steam and other
+  see-through surfaces are not darkened, and fog is laid over it, as in game.
+- There is no new menu row and no new setting; it comes with the Cell lights row.
+- New gate `tests/spells/cell_ao.sh`; reds `off`, `radius`, `noblur` and `noreset` must each FAIL.
+
+## Cell view: why the Vault 111 walkway has no bright pools on the floor (2026-10-02)
+
+Nothing
+looks different after this change. The bright pools the game shows on the cryo walkway floor are the game's
+screen-space reflections: the floor mirrors the lit room, strongest right under each lamp. They are not
+highlights from the lamps; half of the lamps there are marked Non Specular in the plugin and add no highlight
+at all, in the game and in the cell view alike. The cell view does not draw screen-space reflections yet, so the
+pools are still missing. New test tests/spells/cell_spec.sh holds the lamps' highlight to the game's formula and
+fails if a Non Specular lamp ever adds one (env WW_CELL_SPEC_RED=nonspec is its control).
+
+## Cell view: glow cards face you, as in the game (2026-10-02)
+
+- Some effect meshes are flat cards the game always turns to face the camera (the soft glow discs on the
+  Vault 111 cryo pod bases are the example: 165 of them in that cell). The cell view used to lay them flat on
+  the floor, so from eye height you looked at them edge-on and saw nothing. They now turn to face you.
+- Expect a faint haze, not a spotlight: each card is under 2% opaque by its own material, the same as in the
+  game. The light on the floor under the pods comes from the small lights placed there and from bloom, which
+  the cell view already drew.
+- Part of the "Cell lights" row; no new setting.
+- Gate `tests/spells/cell_glow.sh`: the count matches an independent walk of the plugin (165), nothing outside
+  the cards moves (99.999%), 5 of 33 cards measurably brighten their spot from the walkway's start. With the
+  cards laid flat again (the red control) the gate fails, as it must.
+
 ## Cell view: "Ambient Only" lights now dim the room's ambient where they sit (2026-10-01)
 
 - An Ambient Only light changes the room's soft fill light inside a sphere around it, the way the game does.
