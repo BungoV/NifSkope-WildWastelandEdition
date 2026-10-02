@@ -5,6 +5,56 @@ Written the moment a mistake is recognised, unprompted (CONSTITUTION rule 2).
 Format: date -- what was done -- what was true -- how it was found -- the rule.
 Newest at the top.
 
+## 2026-10-02 -- FXD1: a checker threshold picked before the defect's own size was measured
+
+What happened: the first draft of the haze-hole checker called a pixel a hole when it kept under 0.35 of its
+neighbours' lift. That number was a guess. On the old order it caught 2 of bungo's 6 marks, and the frame with
+the fix still "failed" with 162 pixels that had nothing to do with the defect (1-px lines on silhouettes, and
+the frost on a cryo pod's window).
+
+Why: the defect is partial. A decal with alpha a keeps (1 - a) of the haze, so most of the 735 pixels the fix
+changes kept 0.55 to 0.82 of their neighbours' lift, not under 0.35. And the two false-positive classes were
+never measured on a clean frame before the bar was written.
+
+Rule: before fixing a threshold, print the distribution of the measured quantity over the pixels the fix
+changes (old order against fixed), and list what the checker flags on the FIXED frame by group with its world
+position. Each group that is not the defect gets a named exclusion with its own count (silhouettes: 89 px ->
+0), not a looser bar.
+
+Also: `Scene::drawDeferredShapes` is static; the first build failed on a per-scene test written inside it
+(one wasted build under the lock). A per-scene test belongs on the Shape.
+
+## 2026-10-02 -- CUBE1: a decode order written without checking the texture format; a gate run on a start without the archives; a stopped gate whose lock waiter lived on; a merge gated after main had moved
+
+### 2026-10-02 05:29 -- CUBE1 wrote "the game decodes the cube after the filter" without checking the texture format
+The lane's first agent toggled the cube's sRGB decode off per draw and decoded in the shader, with a comment
+saying the game samples the cube as plain bytes. The composite listing has no decode after the cube sample,
+and our own capture note already listed the cube array as an sRGB format: the sampler decodes, before the
+filter. The gate could not catch it (the two orders differ by less than its tolerance). Fixed by reading the
+bound cube's format and letting the sampler decode. Rule: when a shader listing shows no decode, look up the
+texture's format before deciding where the decode happens; a claim the gate cannot fail needs its source
+written next to it.
+
+### 2026-10-01 21:45 -- CUBE1's gate failed on a NifSkope start that came up without the game's archives
+One start in 70 resolved no material (358 "not found in archives" lines against 2), the gate reported "no
+material tags dumped" and the lane's last run before the usage limit read as a product failure. Fixed: the gate
+counts those lines, shoots that view once more and logs a NOTE. Rule: a gate that depends on a fresh settings
+scope checks that the scope actually resolved the game's data before it judges the picture.
+
+### 2026-10-02 05:31 -- CUBE1 stopped a queued gate and its lock waiter lived on
+A background gate launch was stopped to change plan; the stop ended the outer shell but left the lock waiter
+alive, and killing it was refused. The run then took the lock anyway and had to be allowed to finish before
+any shader could be edited. Rule: decide before queueing behind the lock; a queued run is a commitment.
+(What worked afterwards: the queued command is a scratch script of the lane's own, with a first line that
+exits at once unless a READY file exists; removing the file withdraws the run without stopping anything.)
+
+### 2026-10-02 08:25 -- CUBE1 merged main once and gated nothing before main had moved three more times
+The lane merged main at 06:05 and then waited for the NifSkope lock; by the time a gate could run, main had
+taken GLOW1 and POOL1, then AO1 (same two shader files: a real conflict), then MISS1. Each time the uncommitted
+merge was dropped and redone (four merges, four builds, two gate rounds). Rule: look at `git log HEAD..main`
+right before queueing gates and again when the lock arrives; keep the merge uncommitted until its gate has
+run, so a stale one costs `git merge --abort` and not a second merge commit.
+
 ## 2026-10-02 -- MISS1: Python with a backslash typed into a bash heredoc, twice; a source edited while its build ran; probe output that printed the whole population
 
 - What was done: (1) A scratch script written through a bash heredoc contained `mdl.replace('\\', os.sep)`;
