@@ -12,6 +12,7 @@ BSD License - see nifskope.h
 #include "cellground.h"		// lane CELLVIEW2
 #include "cellsplat.h"		// lane CELLVIEW4
 #include "cellidentity.h"	// lane CELLVIEW2
+#include "cellactor.h"		// lane PLACED1
 #include "celldecal.h"		// lane PLACED1
 #include "esmdata.h"
 #include "esmweather.h"		// lane FOG2: the fog packing
@@ -1111,6 +1112,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 		 *  With it the two are different buckets and different colours, so a
 		 *  real defect cannot hide inside the expected one. */
 		bool expectLod = false;
+		QString actorKey;   //!< lane PLACED1: a placed actor (src/cellactor.h); its shapes come from there
 	};
 	QVector<Placement> placements;
 	QHash<QString, int> skippedByType;
@@ -1129,6 +1131,8 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 	 * and the gate compares it with an independent walk of the plugin. */
 	QVector<EsmRefr> lightRefs;
 	std::vector<CellDecalRef> decalRefs;   // lane PLACED1: placed decals, projected after the weld
+	CellActors actors( world, dataRoot );  // lane PLACED1: placed actors, built at rest
+	int actorPlacements = 0;
 	auto pushRefr = [&]( const EsmRefr & r, int cellX, int cellY, bool persistent ) {
 		refsRead++;
 		if ( !r.deleted && std::memcmp( &r.baseType, "LIGH", 4 ) == 0 )
@@ -1301,6 +1305,21 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 		cellRefTableMutable().addCell( block );
 		for ( const EsmRefr & r : world.interiorRefrs() )
 			pushRefr( r, 0, 0, false );
+		/* lane PLACED1: the placed actors. They are not REFRs: they stay out of the reference
+		 * list, the REFR counts and the placement dump, and have their own census line. */
+		for ( const EsmRefr & r : actors.references() ) {
+			Placement out;
+			if ( !actors.place( r, spec.showDisabled, out.actorKey, out.scale ) )
+				continue;
+			out.base = r.base;
+			out.pos = Vector3( r.pos[0], r.pos[1], r.pos[2] );
+			out.rot.fromEuler( -r.rot[0], -r.rot[1], -r.rot[2] );
+			out.ref = r.formID;
+			for ( int k = 0; k < 3; k++ )
+				out.storedRot[k] = r.rot[k];
+			placements.append( out );
+			actorPlacements++;
+		}
 	} else {
 		for ( int y = y0; y <= y1; y++ ) {
 			for ( int x = x0; x <= x1; x++ ) {
@@ -1379,14 +1398,17 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 
 	Vector3 origin( float( spec.cx ) * CELL_UNITS + CELL_UNITS * 0.5f,
 		float( spec.cy ) * CELL_UNITS + CELL_UNITS * 0.5f, 0.0f );
-	if ( spec.interior && !placements.isEmpty() ) {
+	if ( spec.interior && placements.size() > actorPlacements ) {
 		// lane PRTP1: an interior has no grid; centre the welded scene on its placements
 		double sx = 0, sy = 0;
 		for ( const Placement & p : placements ) {
+			if ( !p.actorKey.isEmpty() )
+				continue;   // lane PLACED1: the centre stays where the REFRs put it
 			sx += p.pos[0];
 			sy += p.pos[1];
 		}
-		origin = Vector3( float( sx / placements.size() ), float( sy / placements.size() ), 0.0f );
+		const int n = int( placements.size() ) - actorPlacements;
+		origin = Vector3( float( sx / n ), float( sy / n ), 0.0f );
 	}
 
 	CellPickTable & picks = cellPickTableMutable();
@@ -1551,7 +1573,8 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 
 	for ( const Placement & p : placements ) {
 		const EsmLodBase & lb = world.lodBase( p.base );
-		const QString model = lb.model;
+		const bool isActor = !p.actorKey.isEmpty();   // lane PLACED1
+		const QString model = isActor ? p.actorKey : lb.model;
 		if ( model.isEmpty() ) {
 			skippedByType[CellPickTable::typeName( lb.type )]++;
 			continue;
@@ -1606,14 +1629,14 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 				continue;
 			std::vector<NativeSrcShape> shapes;
 			// ONE LOAD PER DISTINCT MODEL AND SWAP -- the whole block shares this cache.
-			const bool okLoad = subst
+			const bool okLoad = isActor ? actors.shapes( model, &shapes ) : subst
 				? lodgenNativeLoadModelSwapped( const_cast<QString *>( &dataRoot ), model, *subst, &shapes )
 				: lodgenNativeLoadModel( const_cast<QString *>( &dataRoot ), model, &shapes );
 			if ( !okLoad || shapes.empty() ) {
 				modelsFailed.insert( mkey );
 				continue;
 			}
-			modelLoads++;
+			modelLoads += isActor ? 0 : 1;
 			mit = modelCache.insert( mkey, shapes );
 		}
 		placementsSwapped += subst ? 1 : 0;
@@ -1902,6 +1925,8 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 				bbInvScale = s.bbScale > 1.0e-6f ? 1.0f / s.bbScale : 1.0f;
 				bbOwn = QStringLiteral( "|BB|%1" ).arg( billboardShapes++ );
 			}
+			if ( isActor )
+				bbOwn += QLatin1String( "|ACTOR" );   // lane PLACED1: own buckets; no decal lands on an actor
 			Bucket & b = bucketFor( s, colouring || ownColor || repaint, bbOwn );
 			if ( bb ) {
 				b.billboard = true;
@@ -1983,7 +2008,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 				probeSoup.doors.push_back( d );
 			}
 			picks.append( pick );
-			drawn++;
+			drawn += isActor ? 0 : 1;
 		}
 	}
 
@@ -2310,7 +2335,8 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 			const Bucket & b = it.value();
 			if ( b.blend || b.hasAlpha || b.billboard || b.refract || !b.effectMat.isEmpty()
 				|| !b.effectBlock.isEmpty() || b.verts.empty() || b.tris.empty()
-				|| it.key() == QLatin1String( "\x01water" ) || it.key() == QLatin1String( "\x01grid" ) )
+				|| it.key() == QLatin1String( "\x01water" ) || it.key() == QLatin1String( "\x01grid" )
+				|| it.key().contains( QLatin1String( "|ACTOR" ) ) )
 				continue;
 			CellDecalReceiver rc;
 			rc.pos = &b.verts[0].pos[0];
@@ -2676,7 +2702,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 				  << " references " << c.references << ", drawn " << c.drawn << "\n";
 			}
 		}
-		s << "  refrs read " << refsRead << ", placements " << placements.size()
+		s << "  refrs read " << refsRead << ", placements " << placements.size() - actorPlacements
 		  << ", drawn " << drawn << "\n";
 		s << "  hidden: disabled " << refsHidden << ", markers " << refsMarker
 		  << ", deleted " << refsDeleted << ", no base " << refsNoBase << "\n";
@@ -2707,6 +2733,8 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 			s << "  skipped, no model on the base: " << sk.join( QLatin1String( ", " ) ) << "\n";
 		}
 		s << cellDecalCensusLine( decalResult );   // lane PLACED1
+		s << actors.censusLine();
+		actors.dump( QString::fromLocal8Bit( qgetenv( "WW_CELL_ACTOR_DUMP" ) ) );
 		s << "  buckets over 65,536 vertices " << bucketsWide << " (largest " << qulonglong( bucketMaxVerts )
 		  << "), shapes drawn with their own vertex colors " << shapesVertexColor
 		  << ", placements drawn with a material swap " << placementsSwapped
@@ -2827,6 +2855,8 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 			     "bminx bminy bminz bmaxx bmaxy bmaxz model\n";
 			for ( int i = 0; i < picks.size(); i++ ) {
 				const CellPickEntry & e = picks.at( i );
+				if ( std::memcmp( &e.baseType, "NPC_", 4 ) == 0 || std::memcmp( &e.baseType, "LVLN", 4 ) == 0 )
+					continue;   // lane PLACED1: a placed actor has its own dump (WW_CELL_ACTOR_DUMP)
 				s << CellPickTable::formName( e.refForm ) << " "
 				  << CellPickTable::formName( e.baseForm ) << " "
 				  << CellPickTable::typeName( e.baseType ) << " " << e.scolPart << " "
