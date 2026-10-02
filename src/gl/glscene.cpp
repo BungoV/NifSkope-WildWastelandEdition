@@ -660,13 +660,25 @@ void Scene::drawDeferredShapes( NodeList & secondPass )
 	secondPass.alphaSort();
 	++fxDepthPassNow;	// lane EFX2: the opaque depth is grabbed again at this pass's first Soft effect
 
+	/* lane FXD1: with Cell lights on, the lighting shader's decals go first, as the game draws its decals before
+	 * its sorted blended pass. A cell's welded buckets share one origin, so the depth sort above leaves them in
+	 * bucket order, and a wall's blended decal drew over the haze card in front of it (dark marks in the haze). */
+	auto isDecal = []( Node * node ) {
+		Shape * s = dynamic_cast<Shape *>( node );
+		return s && s->wwDecalDrawsFirst();
+	};
+	for ( Node * node : secondPass.list() ) {
+		if ( isDecal( node ) )
+			node->drawShapes();
+	}
+
 	// Particle systems are additive VFX: draw them after every other transparent
 	// shape, including transparent shapes from other workspace documents.
 	QVector<Node *> deferredParticles;
 	for ( Node * node : secondPass.list() ) {
 		if ( dynamic_cast<Particles *>( node ) )
 			deferredParticles.append( node );
-		else
+		else if ( !isDecal( node ) )
 			node->drawShapes();
 	}
 	for ( Node * node : deferredParticles )

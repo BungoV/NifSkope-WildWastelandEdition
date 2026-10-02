@@ -118,6 +118,8 @@ ClState & st()
 			s.red = 64;	// lane RIM1: the lights' No Rim / Ignore Roughness flags ignored
 		else if ( red == "ambientlit" )
 			s.red = 128;	// lane AMBO1: the Ambient Only lights drawn as ordinary lights
+		else if ( red == "cubeold" )
+			s.red = 512;	// lane CUBE1: the interior cube map at its old scale (squared, x Lambert, default cube)
 		else if ( red == "ambientfull" )
 			s.red = 1024;	// lane AMBO2: the Ambient Only lights' ambient adjustment ignored
 		else if ( red == "probefx" )
@@ -637,6 +639,27 @@ QString wwCellImageSpaceEcho( Scene * scene )
 int wwCellLightsRed()
 {
 	return st().red;
+}
+
+int wwCellCubeTag( const QString & material )
+{
+	// lane CUBE1: WW_CELL_CUBE_DUMP=<file> numbers each env-mapped material (1..255) and writes "tag|material"
+	static const QString dump = QString::fromLocal8Bit( qgetenv( "WW_CELL_CUBE_DUMP" ) );
+	static QHash<QString, int> tags;
+	if ( dump.isEmpty() || material.isEmpty() )
+		return 0;
+	const QString key = material.toLower().replace( QLatin1Char( '\\' ), QLatin1Char( '/' ) );
+	auto it = tags.constFind( key );
+	if ( it != tags.constEnd() )
+		return it.value();
+	if ( tags.size() >= 255 )
+		return 0;
+	const int tag = int( tags.size() ) + 1;
+	tags.insert( key, tag );
+	QFile f( dump );
+	if ( f.open( QIODevice::WriteOnly | ( tag == 1 ? QIODevice::Truncate : QIODevice::Append ) ) )
+		f.write( QStringLiteral( "cubetag=%1|%2\n" ).arg( tag ).arg( key ).toUtf8() );
+	return tag;
 }
 
 QString wwCellLightsEcho( Scene * scene )
