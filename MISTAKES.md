@@ -5,6 +5,127 @@ Written the moment a mistake is recognised, unprompted (CONSTITUTION rule 2).
 Format: date -- what was done -- what was true -- how it was found -- the rule.
 Newest at the top.
 
+## 2026-10-02 -- FRAT1: a mismatch filed as open that a commit of the same day had already cured; lights fitted before the probe bytes were compared; a gate comment written before its run; one 67-minute lock hold
+
+### 2026-10-01 -- the mismatch was measured on a stale exe and filed as an open item
+What happened: lane RIM1 measured Fraternal Post and Pickman Gallery parting from the diffuse check (13% / 9%)
+with an exe built before 347742a2 (no effects in a probe pass, landed 17:06 the same day), and the item went
+into PRTP_PLAN section 3 with a suspect ("overlay sheets"). A lane was cut for it. On the current exe the same
+cameras agreed on every clean pixel.
+Rule: before an open item gets a lane, shoot its views once with the current exe. An open item's text names
+the commit of the exe it was measured on.
+
+### 2026-10-01 19:50 -- FRAT1's first agent fitted lights for its whole session and left no notes
+What happened: it moved and scaled single lights (best 95.3%), tested flipped normals, and only then looked at
+which placement covers the rejected pixels. It wrote nothing down; the session died at the usage limit and the
+second agent rebuilt its findings from the transcript's tool output.
+Rule: when a patch disagrees with a probe checker, compare the probe BYTES of a set that agrees with the set
+that does not before touching the lights (skill ww-cell-probe-checker, section 6, probe_bytes_diff.py). Notes
+are written when a finding lands, not at the end.
+
+### 2026-10-02 06:58 -- FRAT1 wrote down a mechanism it had not measured
+What happened: the status file said the mist "makes probe 8 (1 - a) x the surface + a x the mist's colour,
+brighter where the surface is dark". The per-pixel comparison then showed probe 8 unchanged on 99.9% of the
+rejected pixels; it was the position probe's high byte, one level down. It was corrected before the commit.
+Rule: a mechanism is written as a guess until the per-pixel table exists; the table comes before the prose.
+
+### 2026-10-02 11:41 -- FRAT1 put a camera into a gate's default list before it was judged
+What happened: the closer Pickman camera was chosen by arithmetic (a re-projection of the saved shot) and
+written into `cell_oren.sh`'s default list, uncommitted, before any shot of it existed. The hold script judged
+it alone first and would have fallen back to the four judged views; it judged green PASS / red FAIL, so
+nothing was lost. The prediction itself was far off in size (13.3% rejected predicted, 54.7% measured; 68,708
+clean pixels predicted, 12,896 measured).
+Rule: a camera enters a gate's list after it has been judged, green and red, with `CELLS=` on the command line.
+
+### 2026-10-02 11:36 -- FRAT1 wrote "the Vault has no such card" into the gate's header before the red ran there
+What happened: the red control had only been run on the two mist rooms. The header (committed in 0b8099f3,
+corrected in a33af5c5) and a skill said the Vault views could not see the defect. The full run showed the
+Vault failing the red too (98.3% with the rim at 82.4%; 95.4%).
+Rule: a gate header states only what its own run printed; "view X does not see this" needs X's red line.
+
+### 2026-10-02 12:30 -- FRAT1 held a NifSkope window for 67 minutes in one hold
+What happened: six gate runs (about 110 launches) were queued as one script. The limit is about 20 minutes a
+hold. Trimming the running script in place was refused, so it ran to the end while other lanes waited.
+Rule: size the hold before queueing: at most about 15 launches, a chain of holds, each its own place in the
+queue (skill lane-build-lock; the second merge's gates ran that way).
+
+### 2026-10-02 05:29 -- FRAT1 queued a gate directly; the stopped waiter lived on and ran it hours later
+What happened: the first two-view judge was queued as the gate itself. After the lock became first-come it was
+"stopped" (TaskStop) and queued again as a script; the old waiter survived, could not be removed, and ran the
+judge at 11:14. Its replacement was made a no-op on the old run's output folder, so nothing ran twice.
+Rule: never queue a gate directly; queue a guarded scratch script (READY file, run-once folder).
+
+## 2026-10-02 -- PLACED1: a queue of single shots behind an hour-long lock, and other self-inflicted waits
+
+- **Shots queued one by one behind the shared NifSkope lock.** With eight lanes each lock wait was 60 to 90
+  minutes. I queued single renders, then stopped them to batch, which left two orphan `withlock.sh` waiters I
+  was not allowed to kill (they later take the lock for one stale shot each). Rule: before the FIRST queue,
+  write ONE scratch script holding every render the next decision needs (green on every candidate camera, every
+  red, the before/after pair) and queue that once. A queued script is read when the lock is won, so it can be
+  edited while it waits; a queued command line cannot.
+- **Patched files with Python heredocs twice** (src/esmplaced.cpp, tests/spells/cell_decal_check.py) against
+  the Edit/Write-only rule; caught by the line-ending restore. Rule stands: Edit/Write only, then eol_restore.
+- **Read the box primitive's bounds as full sizes.** They are HALF extents (the decal came out half as wide).
+  Found by the independent walk disagreeing with the first dump, not by eye.
+- **Assumed the projection axis.** A placed decal projects along its local +Y, not -Z; settled by reading the
+  game's side first, then checked by the walk (along +Y, 508 of the Vault's 514 dice-free decals find a surface).
+- **A decal placed exactly on its surface misses its own ray.** 26 of the Vault's ray decals found no surface
+  until the ray started 1 unit behind the reference. The checker carries the same 1 unit; named as a difference.
+- **Routed the actors through the REFR funnel in the first design.** That would have put actor rows into the
+  reference list, the REFR counts and the placement dump, which five existing gates compare with their own REFR
+  walk. Caught before the build by listing every consumer of the placement list. Actors now have their own
+  intake, census line and dump.
+- **Doubted the camera frame from one word in the notes.** The "cell lighting" line prints `center=`; I took it
+  for an offset between the camera's units and the world, "corrected" both checkers in scratch and converted a
+  whole set of candidate cameras the wrong way: seven actor renders and twelve red renders looked at nothing.
+  The source says it in one line (every welded shape carries Translation = the cell centre, so the camera pin
+  and the camera dump are WORLD units). The evidence was already on disk too: with the unchanged checker 3,949
+  of 3,951 changed pixels sat inside the boxes, with my "fix" 3,347. Rule: when a checker that passed starts to
+  look wrong, find where the quantity is SET in the source before touching the checker; and a mask that "looks
+  plausible" in a picture proves nothing, the inside/outside count does.
+- **Picked gate cameras from an average of positions.** The first actor cameras looked at a point between two
+  floors; the first decal camera (the walkway bungo named) sees no decal within 900 units. Cameras are now
+  picked by a ray test against the cell's own opaque triangles (clear line from the eye to the thing).
+- **Judged decal visibility as a share of all pixels inside all boxes.** Boxes reach through walls (395 boxes
+  cover half the frame, 1.5% of it changes), so the first green run "failed" stage C on a correct picture and I
+  went looking for a draw defect that was not there. Stage C now counts decals the camera can see.
+- **Named a C++ member `slots`** in a Qt source: a Qt macro, one failed build.
+- **Held a NifSkope slot for 52 minutes (09:42-10:34)** with one script that carried every shot. The rule is
+  under ~20 minutes. Now: holds of at most about 20 launches chained behind one waiter, each taking its own
+  place in the queue (skill lane-build-lock, section "One waiter, several short holds").
+- **Measured the gate's cameras and reds before merging main.** MISS1 landed meanwhile and changed which
+  references start shown (a reference follows its enable parent) and how a placed model's root is treated. Every
+  count measured on the pre-merge exe (508 decals, Malden 21 leveled) had to be measured again. Rule: merge main
+  BEFORE the gate holds, not before the report; a hold spent on an exe that will be rebuilt is a wasted turn.
+- **Wrote scratch Python through a bash heredoc again**: the heredoc halves a backslash, `'\\'` became `'\'`
+  and the file did not parse. Python with a backslash goes in with the Write tool.
+- **Started Part 2 edits before the Part 1 commit** (the lock wait for Part 1's reds was an hour). The Part 1
+  state was saved and committed on its own, but the order in the brief was commit first.
+- **Wrote the lane's research into a file the tool layer refuses** (a subagent cannot write FINDINGS.md or
+  REPORT.md). The record is research_notes.txt + STATUS.md.
+
+## 2026-10-02 -- HEMI1: a gate view the new rule never decided; lights assumed round; a reached gate run last; five merges chasing main
+
+- **A gate frame that holds the lights is not a gate frame the lights decide (HEMI1).** The first box-light gate
+  ran in Vault111Cryo because its frame holds 66 box lights; no pixel there is cut by a box, so the box clip
+  passed unproven and the red could not fail on it. Rule: before a view enters a gate, count the pixels the new
+  rule DECIDES (differs from the old rule) with the checker offline; require a floor on that count in the gate.
+- **A new light rule was written for spheres without asking which shape those lights have (AMBO2 / HEMI1).**
+  The Ambient Only volumes were drawn as spheres; 29 of the 39 placed are linked to a box, including all three
+  in the gate cell. The gate agreed 100% because its checker made the same assumption. Rule: when a rule covers
+  a set of placed records, run the shape census over that set first (flags + linked refs), and have the checker
+  derive the volume from the plugin, not from the lane's own summary.
+- **A source was changed and the gate that covers it was never run (HEMI1).** The lane clipped the bounce
+  relight (src/probegi.cpp) by the light's shape on day one and ran cell_lit and cell_shadow only; cell_gi.sh,
+  whose checker still summed every light as an omni, was first run at the very end. It would still have passed
+  (5 of 400 surfels differ, bar 97%), which is exactly why nobody saw it. Rule: list every gate whose
+  "covered sources" loop names a file you edited (grep the file name in tests/spells/*.sh) and run each once.
+- **Chasing main cost five merges (HEMI1).** main moved five times while the lane waited for the shared window
+  (waits of 90, 84, 56, 73 and 36 minutes); each merge wanted a rebuild and a gate. Rule: gate in ONE short job
+  per merge (own gate first), check `git log MERGE_HEAD..main` before queueing and before committing, and report
+  as soon as the own gate is green on the newest main; the commit message says which gates ran on which merge
+  (ba7e8bdb was never gated on its own; c9d8588f ran cell_lit and cell_refs only).
+
 ## 2026-10-02, lane BAKE4: what went wrong on the way to .tbk v4 and the glass tint
 
 - Fog taken for glass. The first glass feed took every "blended over" shape of a real cell as a tinting pane.
