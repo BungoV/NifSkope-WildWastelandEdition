@@ -31,8 +31,10 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ***** END LICENCE BLOCK *****/
 
 #include "nifitem.h"
+#include "nifitemcache.h"
 #include "model/basemodel.h"
 
+#include <atomic>
 #include <new>
 #include <mutex>
 #include <vector>
@@ -52,6 +54,20 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 // the pool lives for the process. The mutex is uncontended outside the XML
 // checker's worker threads.
 namespace {
+
+// lane SPEED1: one thread's own run of free slots (nifitemcache.h). Plain data: nothing to destroy at exit.
+struct ThreadSlots {
+	void * head;
+	void * tail;
+	int on;	// NifItemThreadCache objects alive on this thread
+	void push( void * p )
+	{
+		*static_cast<void **>( p ) = head;
+		if ( !head )
+			tail = p;
+		head = p;
+	}
+};
 
 struct NifItemPool {
 	static constexpr std::size_t slotAlign = alignof( std::max_align_t ) > 16
@@ -108,6 +124,30 @@ struct NifItemPool {
 		freeList = p;
 	}
 
+	// lane SPEED1: a run for one thread's own list -- what the shared list holds, up to a chunk's worth
+	// (allocate() makes the chunk when the list is empty, and its first slot comes along)
+	void takeRun( ThreadSlots & t, std::size_t size )
+	{
+		t.push( allocate( size ) );
+		std::lock_guard<std::mutex> lock( mutex );
+		for ( std::size_t got = 1; freeList && got < chunkSlotCount; got++ ) {
+			void * p = freeList;
+			freeList = *static_cast<void **>( p );
+			t.push( p );
+		}
+	}
+
+	// ... and everything that thread holds, back onto the shared list in one splice
+	void giveBack( ThreadSlots & t ) noexcept
+	{
+		if ( !t.head )
+			return;
+		std::lock_guard<std::mutex> lock( mutex );
+		*static_cast<void **>( t.tail ) = freeList;
+		freeList = t.head;
+		t.head = t.tail = nullptr;
+	}
+
 #ifdef _WIN32
 	static void freeAligned( void * p ) { _aligned_free( p ); }
 #endif
@@ -119,17 +159,57 @@ NifItemPool & nifItemPool()
 	return pool;
 }
 
+// lane SPEED1: threads with a run of their own right now, process-wide. Zero (always, outside a model fan-out)
+// means new and delete below never look at the thread's list: one relaxed load is all they pay.
+std::atomic<int> threadCachesOn{ 0 };
+thread_local ThreadSlots tlsSlots = { nullptr, nullptr, 0 };
+
 }	// namespace
+
+NifItemThreadCache::NifItemThreadCache()
+{
+	(void) nifItemPool();
+	if ( tlsSlots.on++ == 0 )
+		threadCachesOn.fetch_add( 1 );
+}
+
+NifItemThreadCache::~NifItemThreadCache()
+{
+	if ( --tlsSlots.on == 0 ) {
+		nifItemPool().giveBack( tlsSlots );
+		threadCachesOn.fetch_sub( 1 );
+	}
+}
 
 void * NifItem::operator new( std::size_t size )
 {
+	if ( threadCachesOn.load( std::memory_order_relaxed ) > 0 ) {
+		ThreadSlots & t = tlsSlots;
+		if ( t.on > 0 ) {
+			if ( !t.head )
+				nifItemPool().takeRun( t, size );
+			void * p = t.head;
+			t.head = *static_cast<void **>( p );
+			if ( !t.head )
+				t.tail = nullptr;
+			return p;
+		}
+	}
 	return nifItemPool().allocate( size );
 }
 
 void NifItem::operator delete( void * p ) noexcept
 {
-	if ( p )
-		nifItemPool().deallocate( p );
+	if ( !p )
+		return;
+	if ( threadCachesOn.load( std::memory_order_relaxed ) > 0 ) {
+		ThreadSlots & t = tlsSlots;
+		if ( t.on > 0 ) {
+			t.push( p );
+			return;
+		}
+	}
+	nifItemPool().deallocate( p );
 }
 
 bool NifData::compareStrings( const QChar * s, const char * t, size_t l )

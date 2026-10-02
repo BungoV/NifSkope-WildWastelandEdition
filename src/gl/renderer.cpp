@@ -43,6 +43,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "gl/sunshadow.h"
 #include "gl/celllights.h"
 #include "gl/cellfxlit.h"
+#include "gl/cellssr.h"
 #include "esmweather.h"
 #include "io/material.h"
 #include "model/nifmodel.h"
@@ -168,6 +169,10 @@ static NifSkopeOpenGLContext::Program * wwProgramCensus( const NifModel * nif, S
 	if ( mesh && wwAoScene )
 		wwCellAoDraw( wwAoScene, program && ( program->name == std::string_view( "fo4_cell.prog" )
 			|| program->name == std::string_view( "pbrm_cell.prog" ) ) );
+	// lane SSR1: the reflections' scene pass, and the reflection a flagged opaque draw reads (cellssr.h)
+	if ( mesh && wwAoScene )
+		wwCellSsrDraw( wwAoScene, program && ( program->name == std::string_view( "fo4_cell.prog" )
+			|| program->name == std::string_view( "pbrm_cell.prog" ) ) );
 	/* WW_PBRM_CENSUS (lane PBRR0) rides the same exits: every return of
 	 * setupProgram passes through here with the program it actually bound,
 	 * so the route it prints is the served one. Pick renders (wwKind null) are skipped. */
@@ -288,6 +293,10 @@ NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program *
 	wwRestoreSrgbDecode();
 	const NifModel *	nif = mesh->scene->nifModel;
 	wwAoScene = mesh->scene;	// lane AO1
+	{	// lane SSR1: the draw's reflection flag (an environment-mapped material file with its reflections switch on)
+		const Material * sm = mesh->bslsp ? mesh->bslsp->getMaterial() : nullptr;
+		wwCellSsrNote( sm && sm->isShaderMaterial() && sm->bEnvironmentMapping && sm->bScreenSpaceReflections );
+	}
 
 	/* Read here, not inside wwProgramCensus: `Shape::bslsp` is protected and
 	 * only a Shape's friends -- Renderer's own members -- may read it. */

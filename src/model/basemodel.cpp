@@ -31,6 +31,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ***** END LICENCE BLOCK *****/
 
 #include "basemodel.h"
+#include "cellmesh.h"
 #include "nifmodel.h"
 #include "qt5compat.hpp"
 
@@ -631,11 +632,20 @@ void BaseModel::refreshFileInfo( const QString & f )
  *  searching
  */
 
+// lane SPEED1: a welded cell shape's rows may wait beside the document (cellmesh.h); an empty array handed out
+// by name while any wait gets them written first. One atomic load when no cell is open.
+static inline const NifItem * foundByName( const BaseModel * model, const NifItem * parent, const NifItem * item )
+{
+	if ( cellMeshWaiting.load( std::memory_order_relaxed ) > 0 && item->childCount() == 0 && item->isArray() )
+		cellMeshRowsAsked( model, parent, item );
+	return item;
+}
+
 const NifItem * BaseModel::getItemInternal( const NifItem * parent, const QString & name, bool reportErrors ) const
 {
 	for ( auto item : parent->children() ) {
 		if ( item->hasName(name) && evalCondition(item) )
-			return item;
+			return foundByName( this, parent, item );
 	}
 
 	if ( reportErrors )
@@ -647,7 +657,7 @@ const NifItem * BaseModel::getItemInternal( const NifItem * parent, const QLatin
 {
 	for ( auto item : parent->children() ) {
 		if ( item->hasName(name) && evalCondition(item) )
-			return item;
+			return foundByName( this, parent, item );
 	}
 
 	if ( reportErrors )

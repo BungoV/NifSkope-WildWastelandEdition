@@ -34,6 +34,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "message.h"
 #include "model/nifmodel.h"
+#include "cellspeed.h"
+#include "celltexahead.h"
 
 #include "libfo76utils/src/filebuf.hpp"
 #include "libfo76utils/src/pbr_lut.hpp"
@@ -1239,17 +1241,19 @@ GLuint TexCache::texLoad( const NifModel * nif, const QString & filepath,
 		else
 			return texLoadColor( nif, filepath, target, width, height, data, id );
 	} else {
+		CellSpeed::Acc speedAcc( "  texture file bytes (taken ready, or read here)" );   // lane SPEED1
 		bool	fileFound;
 		if ( !nif )
 			fileFound = Game::GameManager::get_file( data, Game::OTHER, filepath, "textures", "" );
-		else
-			fileFound = nif->getResourceFile( data, filepath, "textures", "" );
+		else   // lane SPEED1: a cell's files are read ahead by worker threads (celltexahead.h)
+			fileFound = CellTexAhead::take( nif, filepath, data ) || nif->getResourceFile( data, filepath, "textures", "" );
 		if ( !fileFound )
 			throw QString( "could not open file" );
 	}
 
 	if ( data.isEmpty() )
 		return 0;
+	CellSpeed::Acc speedAcc( "  texture handed to the graphics card (decode, upload, queries)" );   // lane SPEED1
 
 	if ( filepath.endsWith( QLatin1StringView(".dds"), Qt::CaseInsensitive )
 		|| ( filepath.endsWith( QLatin1StringView(".hdr"), Qt::CaseInsensitive )

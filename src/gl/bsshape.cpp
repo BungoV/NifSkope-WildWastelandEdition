@@ -2,6 +2,8 @@
 
 #include "gl/celllights.h"
 #include "gl/cellfxlit.h"
+#include "cellmesh.h"
+#include "cellspeed.h"
 #include "gl/glnode.h"
 #include "gl/glscene.h"
 #include "gl/renderer.h"
@@ -22,6 +24,7 @@ void BSShape::updateImpl( const NifModel * nif, const QModelIndex & index )
 
 void BSShape::updateData( const NifModel * nif )
 {
+	CellSpeed::Acc speedAcc( "shape data read from the document" );   // lane SPEED1
 	auto vertexFlags = nif->get<BSVertexDesc>(iBlock, "Vertex Desc");
 
 	isDynamic = nif->blockInherits(iBlock, "BSDynamicTriShape");
@@ -54,6 +57,25 @@ void BSShape::updateData( const NifModel * nif )
 
 	// Fill vertex data
 	resetVertexData();
+	// lane SPEED1: a welded cell shape's arrays wait beside the document (src/cellmesh.h) in the values the
+	// document would hand back; taken as they are (shared, not copied)
+	if ( const QSharedPointer<CellMesh> cm = cellMeshFor( nif, iBlock ) ) {
+		{
+			CellMeshQuiet quiet;   // the empty array's index is wanted, not its rows
+			iData = nif->getIndex( iBlock, "Vertex Data" );
+		}
+		verts = cm->verts;
+		norms = cm->norms;
+		colors = cm->colors;
+		tangents = cm->tangents;
+		bitangents = cm->bitangents;
+		coords.append( cm->coords );
+		resetSkeletonData();
+		triangles = cm->triangles;
+		removeInvalidIndices();
+		updateLodLevel();
+		return;
+	}
 	int numVerts = 0;
 	if ( isSkinned && iSkinPart.isValid() ) {
 		// For skinned geometry, the vertex data is stored in the NiSkinPartition

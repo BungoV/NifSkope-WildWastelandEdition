@@ -6,6 +6,7 @@ BSD License - see nifskope.h
 
 #include "celllights.h"
 
+#include "gl/cellssr.h"
 #include "gl/glnode.h"
 #include "gl/glscene.h"
 #include "gl/glshape.h"
@@ -25,7 +26,8 @@ namespace
 {
 
 constexpr int kTextureUnit = 14;		// TexCache allocates from unit 0 upward; 15 is the CSM map
-constexpr int kTexelsPerLight = 5;		// lane SHADOW1 added the 5th: shadow slot, kind, near clip, XLIG bias
+constexpr int kTexelsPerLight = 8;		// lane SHADOW1 added the 5th: shadow slot, kind, near clip, XLIG bias;
+										// lane HEMI1 the 6th to 8th: the box rows (cell_lights.glsl CELL_TPL)
 constexpr int kGiUnit = 13;			// lane PRTPGI: the bounce grid (sampler3D)
 constexpr int kLutUnit = 12;		// lane IMGS1: the imagespace LUT (sampler3D)
 constexpr int kBloomUnit = 11;		// lane BLOOM1: the imagespace bloom (sampler2D, a quarter of the view)
@@ -119,10 +121,14 @@ ClState & st()
 			s.red = 64;	// lane RIM1: the lights' No Rim / Ignore Roughness flags ignored
 		else if ( red == "ambientlit" )
 			s.red = 128;	// lane AMBO1: the Ambient Only lights drawn as ordinary lights
+		else if ( red == "hemiomni" )
+			s.red = 256;	// lane HEMI1: hemisphere and box lights drawn as plain omni lights (the cell view applies it)
 		else if ( red == "cubeold" )
 			s.red = 512;	// lane CUBE1: the interior cube map at its old scale (squared, x Lambert, default cube)
 		else if ( red == "ambientfull" )
 			s.red = 1024;	// lane AMBO2: the Ambient Only lights' ambient adjustment ignored
+		else if ( red == "probefx" )
+			s.red = 4096;	// lane FRAT1: effects and refraction shapes drawn into the probe passes again
 		// lane POOL1: the lights' Non Specular flag ignored (a bit clear of WW_CELL_LIT_RED's)
 		if ( qgetenv( "WW_CELL_SPEC_RED" ).trimmed() == "nonspec" )
 			s.red |= 65536;
@@ -235,6 +241,8 @@ bool wwCellLightsWanted( Scene * scene )
 bool wwCellProbePass( Scene * scene )
 {
 	const ClState & s = st();
+	if ( s.red & 4096 )
+		return false;	// lane FRAT1: WW_CELL_LIT_RED=probefx, the effects write over the probes (as before lane EFX1)
 	return ( s.probe > 0 || s.fogProbe > 0 ) && wwCellLightsWanted( scene );
 }
 
@@ -264,18 +272,23 @@ void wwCellLightsUniforms( Scene * scene )
 		for ( qsizetype i = 0; i < L->lights.size(); i++ ) {
 			const WwCellLight & l = L->lights.at( i );
 			float dir[3] = { l.dir[0], l.dir[1], l.dir[2] };
-			const float tex[20] = {
+			// lane HEMI1: texel 1.w = cos(FOV / 2) for a spot, else the shape: -2 omni, -3 hemisphere, -4 box
+			const float shape = l.spot ? l.cosOuter : l.shape == 1 ? -3.0f : l.shape == 2 ? -4.0f : -2.0f;
+			const float tex[kTexelsPerLight * 4] = {
 				l.pos[0], l.pos[1], l.pos[2], l.radius,
-				l.color[0], l.color[1], l.color[2], l.spot ? l.cosOuter : -2.0f,
+				l.color[0], l.color[1], l.color[2], shape,
 				dir[0], dir[1], dir[2], l.cone,
 				l.bias, l.scale, l.exponent,
 				float( ( l.noSpecular ? 1 : 0 ) | ( l.noRim ? 2 : 0 ) | ( l.ignoreRoughness ? 4 : 0 ) ),	// lane RIM1
-				slotOf[size_t( i )], float( l.shadow ), l.nearClip, l.shadowBias };
-			t.insert( t.end(), tex, tex + 20 );
+				slotOf[size_t( i )], float( l.shadow ), l.nearClip, l.shadowBias,
+				l.box[0][0], l.box[0][1], l.box[0][2], l.box[0][3],
+				l.box[1][0], l.box[1][1], l.box[1][2], l.box[1][3],
+				l.box[2][0], l.box[2][1], l.box[2][2], l.box[2][3] };
+			t.insert( t.end(), tex, tex + kTexelsPerLight * 4 );
 		}
 		g.bufShStamp = g.shStamp;
 		if ( t.empty() )
-			t.assign( 20, 0.0f );	// a buffer texture must have a store
+			t.assign( kTexelsPerLight * 4, 0.0f );	// a buffer texture must have a store
 		if ( !g.buf ) {
 			fn->glGenBuffers( 1, &g.buf );
 			fn->glGenTextures( 1, &g.tex );
@@ -442,7 +455,11 @@ void wwCellLightsUniforms( Scene * scene )
 	for ( int i = 0; i < ambo; i++ ) {
 		const WwCellAmbientLight & a = L->ambientLights[i];
 		prog->uni4f_l( prog->uniLocation( "cellAmbo[%d]", i ), FloatVector4( a.pos[0], a.pos[1], a.pos[2], a.volume ) );
-		prog->uni4f_l( prog->uniLocation( "cellAmboK[%d]", i ), FloatVector4( a.k[0], a.k[1], a.k[2], 0.0f ) );
+		// lane HEMI1: K.w = 1 marks a box volume, its three rows in cellAmboBox
+		prog->uni4f_l( prog->uniLocation( "cellAmboK[%d]", i ), FloatVector4( a.k[0], a.k[1], a.k[2], a.hasBox ? 1.0f : 0.0f ) );
+		for ( int k = 0; k < 3 && a.hasBox; k++ )
+			prog->uni4f_l( prog->uniLocation( "cellAmboBox[%d]", i * 3 + k ),
+				FloatVector4( a.box[k][0], a.box[k][1], a.box[k][2], a.box[k][3] ) );
 	}
 	prog->uni1b( "cellHasDir", L->hasDirectional );
 	prog->uni3f( "cellDirColor", L->dirColor[0], L->dirColor[1], L->dirColor[2] );
@@ -1241,6 +1258,26 @@ void wwCellAoPass( Scene * scene, bool run )
 	if ( wasBlend ) fn->glEnable( GL_BLEND ); else fn->glDisable( GL_BLEND );
 	if ( wasScissor ) fn->glEnable( GL_SCISSOR_TEST ); else fn->glDisable( GL_SCISSOR_TEST );
 	if ( wasStencil ) fn->glEnable( GL_STENCIL_TEST ); else fn->glDisable( GL_STENCIL_TEST );
+}
+
+// lane SSR1: this frame's opaque pass and depth pyramid, for the reflections' march (src/gl/cellssr.h)
+bool wwCellAoTargets( Scene * scene, WwCellAoTargets & out )
+{
+	if ( !scene || !scene->renderer || !aoGpus().contains( scene->renderer ) )
+		return false;
+	const AoGpu & g = aoGpus()[scene->renderer];
+	if ( !g.ready || g.doc != scene->nifModel )
+		return false;
+	out.gbuf = g.gbuf.tex;
+	out.depthRb = g.gbufDepth;
+	out.w = g.gbuf.w;
+	out.h = g.gbuf.h;
+	for ( int m = 1; m < 5; m++ ) {
+		out.mip[m] = g.mip[m].tex;
+		out.mipW[m] = g.mip[m].w;
+		out.mipH[m] = g.mip[m].h;
+	}
+	return true;
 }
 
 void wwCellAoDraw( Scene * scene, bool cellProgram )

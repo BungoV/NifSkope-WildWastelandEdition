@@ -81,8 +81,8 @@ uniform vec3 fxLitId;			// probe 70: the model's serial + 1, 24 bits
 // one placed light on a lit effect at world point P, as the game's lit effect shader sums it
 vec3 cellFxLight( int i, vec3 P )
 {
-	vec4 t0 = texelFetch( cellLights, i * 5 );
-	vec4 t1 = texelFetch( cellLights, i * 5 + 1 );
+	vec4 t0 = texelFetch( cellLights, i * CELL_TPL );	// lane FXLIT1: the stride is HEMI1's 8 texels a light
+	vec4 t1 = texelFetch( cellLights, i * CELL_TPL + 1 );
 	vec3 Lv = t0.xyz - P;
 	float d = length( Lv );
 	float q = clamp( d / max( t0.w, 0.001 ), 0.0, 1.0 );
@@ -90,7 +90,7 @@ vec3 cellFxLight( int i, vec3 P )
 	if ( ( fxLitMode & 4 ) == 0 )
 		a = pow( a, 2.2 );
 	if ( t1.w > -1.5 ) {	// a spot: the game's cone, its cosine + 0.001
-		vec4 t2 = texelFetch( cellLights, i * 5 + 2 );
+		vec4 t2 = texelFetch( cellLights, i * CELL_TPL + 2 );
 		float c = clamp( dot( -Lv / max( d, 0.001 ), t2.xyz ), 0.0, 1.0 );
 		float base = clamp( 1.0 - ( 1.0 - c ) / max( 1.0 - ( t1.w + 0.001 ), 1e-4 ), 0.0, 1.0 );
 		a *= min( pow( base, max( t2.w, 1e-3 ) ), 1.0 );

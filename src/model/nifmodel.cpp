@@ -31,6 +31,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ***** END LICENCE BLOCK *****/
 
 #include "nifmodel.h"
+#include "cellmesh.h"
 #include "wwskin.h"
 
 #include "xml/xmlconfig.h"
@@ -571,7 +572,26 @@ void NifModel::updateHeader()
 			}
 			blockTypeIndices.append( iBlockType );
 
-			if ( itemBlockSizes ) {
+			// lane SPEED1: a welded cell shape whose rows wait beside the document (cellmesh.h) keeps its two
+			// row arrays empty; sizing them here would write every row as zeros. Its size counts the rows' bytes.
+			const int waitingRows = itemBlockSizes ? cellMeshWaitingBytes( this, itemBlock ) : -1;
+			if ( waitingRows >= 0 ) {
+				int size = waitingRows;
+				NifSStream stream( this );
+				for ( auto child : itemBlock->children() ) {
+					if ( !evalCondition( child ) || child->hasName( "Vertex Data" ) || child->hasName( "Triangles" ) )
+						continue;
+					if ( child->isArray() )
+						updateArraySize( child );
+					if ( child->childCount() > 0 )
+						updateChildArraySizes( child );
+					if ( child->isAbstract() )
+						continue;
+					size += ( child->isArray() || child->childCount() > 0 )
+						? blockSize( child, stream ) : stream.size( child->value() );
+				}
+				blockSizes.append( size );
+			} else if ( itemBlockSizes ) {
 				updateChildArraySizes( itemBlock );
 				blockSizes.append( blockSize( itemBlock ) );
 			}
@@ -2382,6 +2402,8 @@ bool NifModel::load( QIODevice & device, const char* fileName )
 
 bool NifModel::save( QIODevice & device ) const
 {
+	// lane SPEED1: a cell view's welded shapes keep their rows beside the document until asked; a save asks
+	cellMeshMaterializeAll( const_cast<NifModel *>( this ) );
 	NifOStream stream( this, &device );
 
 	setState( Saving );

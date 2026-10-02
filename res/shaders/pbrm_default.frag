@@ -9,6 +9,7 @@
 #define WW_CELL_PBR 1
 #include "cell_lights.glsl"
 #include "cell_ao.glsl"
+#include "cell_ssr.glsl"
 #define WW_CELL_FOGGED cellOn	// lane FOG2: a cell-lit draw fogged before its imagespace
 uniform sampler2D CellSpecMap;	// lane CUBE1: a legacy material's specular map (R scale, G smoothness), for the cube term
 #else
@@ -614,8 +615,13 @@ void main()
 					vec3 cube = textureLod( CubeMap, reflMatrix * R, s.rough * 8.0 ).rgb;
 					cubeK = cube * cube * envReflection * Espec * s.ao;
 				}
-				outSpec += cubeK * cE;
 			}
+			// lane SSR1: the screen-space reflection over the cube term, by the march's confidence (cell_ssr.glsl)
+			if ( cellSsrOn || cellProbe == 60 ) {
+				vec2 sg = texture( CellSpecMap, offset ).rg;
+				cubeK = cellSsrMix( cubeK, cellCubeMat.y * sg.g, cellCubeMat.x * sg.r, envReflection );
+			}
+			outSpec += cubeK * cE;
 		} else {
 			outDiff += cDiff + giDiff;
 			outSpec += cSpec;
@@ -647,6 +653,7 @@ void main()
 	}
 
 #ifdef WW_CELLLIGHTS
+	vec3 cellSsrScene = color.rgb;	// lane SSR1: what the reflections' march samples (probe 60)
 	// lane AO1: the ambient obscurance on the whole lit colour, before the fog
 	if ( cellOn )
 		color.rgb *= cellAoFactor();
@@ -693,5 +700,7 @@ void main()
 #ifdef WW_CELLLIGHTS
 	if ( cellOn && cellProbe == 20 )
 		fragColor = cellAoPassOut( s.N, -ViewDir );	// lane AO1
+	if ( cellOn && ( cellProbe == 60 || cellProbe == 61 ) )
+		fragColor = cellSsrProbeOut( cellSsrScene );	// lane SSR1
 #endif
 }

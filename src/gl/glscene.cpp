@@ -31,6 +31,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ***** END LICENCE BLOCK *****/
 
 #include "glscene.h"
+#include "cellspeed.h"
 
 #include "hkxplayback.h"
 
@@ -296,6 +297,7 @@ void Scene::updateLodLevel( int level )
 
 void Scene::make( NifModel * nif, bool flushTextures )
 {
+	CellSpeed::Acc speedAcc( "scene made from the document (Scene::make)" );   // lane SPEED1
 	clear( flushTextures );
 
 	if ( !nif )
