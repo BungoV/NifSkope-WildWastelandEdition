@@ -125,6 +125,8 @@ ClState & st()
 			s.red = 512;	// lane CUBE1: the interior cube map at its old scale (squared, x Lambert, default cube)
 		else if ( red == "ambientfull" )
 			s.red = 1024;	// lane AMBO2: the Ambient Only lights' ambient adjustment ignored
+		else if ( red == "probefx" )
+			s.red = 4096;	// lane FRAT1: effects and refraction shapes drawn into the probe passes again
 		// lane POOL1: the lights' Non Specular flag ignored (a bit clear of WW_CELL_LIT_RED's)
 		if ( qgetenv( "WW_CELL_SPEC_RED" ).trimmed() == "nonspec" )
 			s.red |= 65536;
@@ -237,6 +239,8 @@ bool wwCellLightsWanted( Scene * scene )
 bool wwCellProbePass( Scene * scene )
 {
 	const ClState & s = st();
+	if ( s.red & 4096 )
+		return false;	// lane FRAT1: WW_CELL_LIT_RED=probefx, the effects write over the probes (as before lane EFX1)
 	return ( s.probe > 0 || s.fogProbe > 0 ) && wwCellLightsWanted( scene );
 }
 
