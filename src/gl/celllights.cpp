@@ -117,6 +117,9 @@ ClState & st()
 			s.red = 64;	// lane RIM1: the lights' No Rim / Ignore Roughness flags ignored
 		else if ( red == "ambientlit" )
 			s.red = 128;	// lane AMBO1: the Ambient Only lights drawn as ordinary lights
+		// lane POOL1: the lights' Non Specular flag ignored (a bit clear of WW_CELL_LIT_RED's)
+		if ( qgetenv( "WW_CELL_SPEC_RED" ).trimmed() == "nonspec" )
+			s.red |= 65536;
 	}
 	return s;
 }

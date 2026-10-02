@@ -290,7 +290,8 @@ void cellSumLights( vec3 P, vec3 N, vec3 Vw, float gloss, out vec3 diff, out vec
 		float rim = ( fl & 6 ) != 0 ? 0.0 : cellRim( N, L, Vw, gloss );
 		diffOn += E * ( ( ( fl & 4 ) != 0 ? 1.0 : cellOren( N, L, Vw, NdotL, gloss ) ) + rim );
 		cellRimSum += E * rim;
-		if ( ( fl & 1 ) == 0 )
+		// lane POOL1: Non Specular (1) has no specular in the game's light shaders either
+		if ( ( fl & 1 ) == 0 || ( cellRed & 65536 ) != 0 )	// WW_CELL_SPEC_RED=nonspec
 			spec += E * cellSpecGame( N, L, Vw, gloss );
 	}
 }
@@ -351,13 +352,15 @@ vec3 cellProbeOut( vec3 normalView, vec3 posView, float alphaR, float kSmith )
 	vec3 N = cellWorldDir( normalView );
 	if ( cellProbe == 5 )
 		return cellGiOn ? clamp( cellGiE( P, N ) * 0.31830989, 0.0, 1.0 ) : vec3( 0.0 );
-	if ( cellProbe == 1 || cellProbe == 8 || cellProbe == 10 ) {
+	if ( cellProbe == 1 || cellProbe == 8 || cellProbe == 10 || cellProbe == 11 ) {
 		// 1: the irradiance / 4; 8 (lanes ON1, RIM1): the game's diffuse (Oren-Nayar + rim) / 4, seen from the camera;
 		// 10 (lane RIM1): the rim alone x 4, sixteen times probe 8's reach, so the per-light rim flags show
 		vec3 diff, diffOn, spec;
 		cellSumLights( P, N, cellProbe == 1 ? N : cellWorldDir( -posView ), 1.0 - sqrt( alphaR ), diff, diffOn, spec );
 		if ( cellProbe == 10 )
 			return clamp( cellRimSum * 4.0, 0.0, 1.0 );
+		if ( cellProbe == 11 )
+			return clamp( spec * 0.25, 0.0, 1.0 );	// lane POOL1: the placed lights' specular / 4, before the mask
 		return clamp( ( cellProbe == 8 ? diffOn : diff ) * 0.25, 0.0, 1.0 );
 	}
 	if ( cellProbe == 9 )
