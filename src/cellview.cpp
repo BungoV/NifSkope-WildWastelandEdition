@@ -754,6 +754,39 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 	const bool axisRed = ( wwCellLightsRed() & 2 ) != 0;
 	const bool shapeRed = ( wwCellLightsRed() & 256 ) != 0;	// lane HEMI1: WW_CELL_LIT_RED=hemiomni
 	int omni = 0, spot = 0, off = 0, noRadius = 0, dark = 0, ambientOnly = 0, hemi = 0, box = 0, boxLost = 0;
+	int ambientBox = 0;
+	/* lane HEMI1: the box of primitive ref p for a light of scale `scale` (celllights.h): rotation
+	 * Rz(-z) Rx(-x) Ry(-y) of the primitive's own angles, axis k = column k, half extent k = |XPRM bound k| x scale. */
+	auto boxRows = []( const EsmRefr & p, float scale, float out[3][4] ) {
+		auto rot = []( int ax, float a, double m[3][3] ) {
+			const double c = std::cos( a ), s = std::sin( a );
+			const int i = ( ax + 1 ) % 3, j = ( ax + 2 ) % 3;
+			for ( int u = 0; u < 3; u++ )
+				for ( int v = 0; v < 3; v++ )
+					m[u][v] = u == v ? 1.0 : 0.0;
+			m[i][i] = c; m[i][j] = -s; m[j][i] = s; m[j][j] = c;
+		};
+		auto mul = []( const double a[3][3], const double b2[3][3], double o[3][3] ) {
+			for ( int u = 0; u < 3; u++ )
+				for ( int v = 0; v < 3; v++ )
+					o[u][v] = a[u][0] * b2[0][v] + a[u][1] * b2[1][v] + a[u][2] * b2[2][v];
+		};
+		double rz[3][3], rx[3][3], ry[3][3], t[3][3], m[3][3];
+		rot( 2, -p.rot[2], rz );
+		rot( 0, -p.rot[0], rx );
+		rot( 1, -p.rot[1], ry );
+		mul( rz, rx, t );
+		mul( t, ry, m );
+		for ( int k = 0; k < 3; k++ ) {
+			const double h = std::max( double( std::abs( p.primHalf[k] ) ) * double( scale ), 1e-3 );
+			double w = 0.0;
+			for ( int c = 0; c < 3; c++ ) {
+				out[k][c] = float( m[c][k] / h );
+				w -= m[c][k] / h * double( p.pos[c] );
+			}
+			out[k][3] = float( w );
+		}
+	};
 	for ( const EsmRefr & r : lightRefs ) {
 		const EsmLight & b = world.light( r.base );
 		if ( !b.exists )
@@ -776,6 +809,17 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 					a.k[k] = std::pow( float( b.color[k] ) / 255.0f, 2.2f ) * fade;
 				}
 				a.volume = 1.22077f * radius;
+				// lane HEMI1: linked to a box, it fills the box instead (WW_CELL_LIT_RED=hemiomni: the sphere again)
+				if ( r.lightBox && !( b.flags & ( 0x800 | 0x400 | 0x4000 ) ) ) {
+					const auto it = primRefs.constFind( r.lightBox );
+					if ( it == primRefs.cend() ) {
+						boxLost++;
+					} else {
+						ambientBox++;
+						a.hasBox = !shapeRed;
+						boxRows( it.value(), r.scale, a.box );
+					}
+				}
 				L.ambientLights.append( a );
 			}
 			continue;
@@ -840,35 +884,7 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 				boxLost++;
 			} else {
 				box++;
-				const EsmRefr & p = it.value();
-				auto rot = []( int ax, float a, double m[3][3] ) {
-					const double c = std::cos( a ), s = std::sin( a );
-					const int i = ( ax + 1 ) % 3, j = ( ax + 2 ) % 3;
-					for ( int u = 0; u < 3; u++ )
-						for ( int v = 0; v < 3; v++ )
-							m[u][v] = u == v ? 1.0 : 0.0;
-					m[i][i] = c; m[i][j] = -s; m[j][i] = s; m[j][j] = c;
-				};
-				auto mul = []( const double a[3][3], const double b2[3][3], double o[3][3] ) {
-					for ( int u = 0; u < 3; u++ )
-						for ( int v = 0; v < 3; v++ )
-							o[u][v] = a[u][0] * b2[0][v] + a[u][1] * b2[1][v] + a[u][2] * b2[2][v];
-				};
-				double rz[3][3], rx[3][3], ry[3][3], t[3][3], m[3][3];
-				rot( 2, -p.rot[2], rz );
-				rot( 0, -p.rot[0], rx );
-				rot( 1, -p.rot[1], ry );
-				mul( rz, rx, t );
-				mul( t, ry, m );
-				for ( int k = 0; k < 3; k++ ) {
-					const double h = std::max( double( std::abs( p.primHalf[k] ) ) * double( r.scale ), 1e-3 );
-					double w = 0.0;
-					for ( int c = 0; c < 3; c++ ) {
-						l.box[k][c] = float( m[c][k] / h );
-						w -= m[c][k] / h * double( p.pos[c] );
-					}
-					l.box[k][3] = float( w );
-				}
+				boxRows( it.value(), r.scale, l.box );
 				l.shape = shapeRed ? 0 : 2;
 			}
 		}
@@ -1045,7 +1061,8 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 			.arg( std::count_if( L.lights.cbegin(), L.lights.cend(), []( const WwCellLight & l ) { return l.ignoreRoughness; } ) )
 		+ QStringLiteral( " ambientonly=%1" ).arg( ambientOnly )	// lane AMBO1: skipped, no direct light in game
 		+ QStringLiteral( " ambientvolumes=%1" ).arg( L.ambientLights.size() )	// lane AMBO2: they scale the ambient
-		+ QStringLiteral( " shapes=hemisphere %1 box %2 (box link unresolved %3)" ).arg( hemi ).arg( box ).arg( boxLost )	// lane HEMI1
+		+ QStringLiteral( " shapes=hemisphere %1 box %2 (box link unresolved %3) ambientboxes=%4" ).arg( hemi ).arg( box )
+			.arg( boxLost ).arg( ambientBox )	// lane HEMI1
 		+ QStringLiteral( " imagespace=%1" ).arg( isNote )
 		+ QStringLiteral( " fog=%1" ).arg( L.fogNote.isEmpty() ? QStringLiteral( "none (exterior: the Lookdev weather fog)" ) : L.fogNote );
 	wwCellLightsPublish( nif, L );

@@ -22,6 +22,7 @@ uniform int cellProbe;
 uniform int cellAmboCount;
 uniform vec4 cellAmbo[16];
 uniform vec4 cellAmboK[16];
+uniform vec4 cellAmboBox[48];		// lane HEMI1: where cellAmboK[i].w is 1 the volume is a box, rows i * 3 .. i * 3 + 2
 uniform int cellRed;				// 1 linear: the radial curve without its 2.2; 8 lambert, 16 normalised, 32 norim,
 									// 64 rimflags (the lights' rim / roughness flags ignored)
 // lane PRTPGI: the bake relit by these lights (src/probegi.h), six axis slabs of dims.z each, x fastest;
@@ -329,6 +330,13 @@ void cellSumLights( vec3 P, vec3 N, vec3 Vw, float gloss, out vec3 diff, out vec
 vec3 cellAmboScale( vec3 P )
 {
 	for ( int i = 0; i < cellAmboCount; i++ ) {
+		if ( cellAmboK[i].w > 0.5 ) {	// lane HEMI1: linked to a box, it fills the box (not the sphere)
+			vec4 b0 = cellAmboBox[i * 3], b1 = cellAmboBox[i * 3 + 1], b2 = cellAmboBox[i * 3 + 2];
+			vec3 k = vec3( dot( b0.xyz, P ) + b0.w, dot( b1.xyz, P ) + b1.w, dot( b2.xyz, P ) + b2.w );
+			if ( all( lessThan( abs( k ), vec3( 1.0 ) ) ) )
+				return cellAmboK[i].rgb;
+			continue;
+		}
 		vec3 d = P - cellAmbo[i].xyz;
 		if ( dot( d, d ) < cellAmbo[i].w * cellAmbo[i].w )
 			return cellAmboK[i].rgb;

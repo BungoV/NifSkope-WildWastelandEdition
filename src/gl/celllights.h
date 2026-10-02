@@ -34,7 +34,7 @@ BSD License - see nifskope.h
  * adjustment ignored; lane AMBO2). Probe 5 (lane PRTPGI): the bounce's irradiance E(N) / pi, raw. Probe 11
  * (lane AMBO2): the interior ambient's per-channel affine sum before its 2.2, x 8, clamped to 0..1.
  *
- * LIGHT SHAPES (lane HEMI1, from the game's code and shaders, docs/PRTP_PLAN.md 2x). The type comes from the
+ * LIGHT SHAPES (lane HEMI1, from the game's code and shaders, docs/PRTP_PLAN.md "light shapes"). The type comes from the
  * LIGH flags first: 0x800 hemisphere, else 0x400 / 0x4000 spot, else a box when the ref links, by keyword
  * 00115705 LightBoxLink, to a ref carrying an XPRM primitive; else omni. Flag 0x20000 is never read. A
  * hemisphere and a box draw the omni curve (the same radial term from the light's own position and radius),
@@ -86,12 +86,16 @@ inline bool wwCellLightShapeIn( const WwCellLight & l, double x, double y, doubl
 /* lane AMBO2: an Ambient Only light (LIGH flag 0x100000) as the game draws it: a sphere volume of 1.22077 x its
  * radius (base + XRDS) at the light; the cell ambient of every surface inside it has each channel's affine sum
  * (before the 2.2) scaled by k = pow(byte / 255, 2.2) x fade. The first light in plugin order that holds a
- * point wins; it replaces the cell ambient there, never adds. No fade at the edge, no camera rule. */
+ * point wins; it replaces the cell ambient there, never adds. No fade at the edge, no camera rule.
+ * Lane HEMI1: the game gives an Ambient Only light its shape like any other light, so one linked to a box
+ * (LIGHT SHAPES above; 29 of the 39 placed) fills that box instead of the sphere, whatever its radius. */
 struct WwCellAmbientLight
 {
 	float pos[3] = { 0, 0, 0 };     //!< world
 	float volume = 0.0f;            //!< 1.22077 x radius
 	float k[3] = { 1, 1, 1 };       //!< per channel, folded into the ambient before its power
+	bool hasBox = false;            //!< lane HEMI1: the volume is `box`, not the sphere
+	float box[3][4] = {};           //!< lane HEMI1: as WwCellLight::box, inside |k| < 1
 };
 
 struct WwCellLighting

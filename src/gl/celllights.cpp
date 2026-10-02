@@ -446,7 +446,11 @@ void wwCellLightsUniforms( Scene * scene )
 	for ( int i = 0; i < ambo; i++ ) {
 		const WwCellAmbientLight & a = L->ambientLights[i];
 		prog->uni4f_l( prog->uniLocation( "cellAmbo[%d]", i ), FloatVector4( a.pos[0], a.pos[1], a.pos[2], a.volume ) );
-		prog->uni4f_l( prog->uniLocation( "cellAmboK[%d]", i ), FloatVector4( a.k[0], a.k[1], a.k[2], 0.0f ) );
+		// lane HEMI1: K.w = 1 marks a box volume, its three rows in cellAmboBox
+		prog->uni4f_l( prog->uniLocation( "cellAmboK[%d]", i ), FloatVector4( a.k[0], a.k[1], a.k[2], a.hasBox ? 1.0f : 0.0f ) );
+		for ( int k = 0; k < 3 && a.hasBox; k++ )
+			prog->uni4f_l( prog->uniLocation( "cellAmboBox[%d]", i * 3 + k ),
+				FloatVector4( a.box[k][0], a.box[k][1], a.box[k][2], a.box[k][3] ) );
 	}
 	prog->uni1b( "cellHasDir", L->hasDirectional );
 	prog->uni3f( "cellDirColor", L->dirColor[0], L->dirColor[1], L->dirColor[2] );

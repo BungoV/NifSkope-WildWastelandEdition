@@ -23,8 +23,11 @@
 # THE AMBIENT ONLY VIEW (lane AMBO2): Vault111Cryo again, the eye inside an Ambient Only light's sphere
 # (AMBO_CAM look-at, AMBO_DIST eye distance), probes 2, 3, 4 and 11 (the ambient's affine sum x 8); the
 # checker's "ambient" mode rebuilds it from its own walk (XCLL / template DALC, the spheres, their scale).
-# It runs on green, --red ambientfull (the only red it must FAIL) and --red off; the other reds skip it,
-# and --red ambientfull skips the CELLS views (it does not touch them).
+# It runs on green, --red ambientfull, --red hemiomni (both must FAIL it) and --red off; the other reds skip
+# it, and --red ambientfull skips the CELLS views (it does not touch them).
+# Lane HEMI1: an Ambient Only light linked to a box fills the box, not the sphere (all three of the Vault's
+# are); the view's frame holds the surfaces inside the sphere and outside the box, which only the box decides.
+# --red hemiomni draws the spheres again.
 #
 # USAGE  bash tests/spells/cell_lit.sh [--red linear|axis|off|ambientlit|hemiomni|ambientfull]
 #        CELLS="..." to pick interiors; the camera stands at CAM_<cell> (x,y,z look-at) if set,
@@ -143,10 +146,10 @@ for cell in $CELLS; do
 	fi
 done
 # lane AMBO2: the Ambient Only view (its own folder, so the CELLS pictures of the same cell stay)
-if [ -z "$RED" ] || [ "$RED" = "ambientfull" ] || [ "$RED" = "off" ]; then
+if [ -z "$RED" ] || [ "$RED" = "ambientfull" ] || [ "$RED" = "hemiomni" ] || [ "$RED" = "off" ]; then
 	say "== Vault111Cryo, Ambient Only view (look-at $AMBO_CAM, eye $AMBO_DIST away)"
 	lit=1; [ "$RED" = "off" ] && lit=0
-	redenv=(); [ "$RED" = "ambientfull" ] && redenv=( WW_CELL_LIT_RED="$RED" )
+	redenv=(); { [ "$RED" = "ambientfull" ] || [ "$RED" = "hemiomni" ]; } && redenv=( WW_CELL_LIT_RED="$RED" )
 	mkdir -p "$OUT/ambo"
 	ok=1
 	[ "$(OUT="$OUT/ambo" CAM_Vault111Cryo="$AMBO_CAM" DIST="$AMBO_DIST" shoot Vault111Cryo lit WW_CELL_LIT=$lit "${redenv[@]}")" = 1 ] || ok=0
@@ -154,13 +157,16 @@ if [ -z "$RED" ] || [ "$RED" = "ambientfull" ] || [ "$RED" = "off" ]; then
 		[ "$(OUT="$OUT/ambo" CAM_Vault111Cryo="$AMBO_CAM" DIST="$AMBO_DIST" shoot Vault111Cryo probe$p WW_CELL_LIT=$lit WW_CELL_LIT_PROBE=$p "${redenv[@]}")" = 1 ] || ok=0
 	done
 	check "Ambient Only view: five pictures written" "$ok"
-	grep -h "cell lighting:" "$OUT/ambo/Vault111Cryo.lit.notes" | head -1 | grep -o "ambientonly=[0-9]* ambientvolumes=[0-9]*" | sed 's/^/  /' | tee -a "$LOG"
+	grep -h "cell lighting:" "$OUT/ambo/Vault111Cryo.lit.notes" | head -1 | grep -o "ambientonly=[0-9]* ambientvolumes=[0-9]*\|ambientboxes=[0-9]*" | tr '\n' ' ' | sed 's/^/  /; s/ $/\n/' | tee -a "$LOG"
 	line="$(python "$(dirname "$0")/cell_lit_check.py" "$ESM" Vault111Cryo "$OUT/ambo" ambient 2>&1 | tail -1)"
 	say "  $line"
 	if [ -n "$RED" ]; then
 		check "Ambient Only view: the red control FAILS the check" "$([ "${line#*FAIL}" != "$line" ] && echo 1 || echo 0)"
 	else
 		check "Ambient Only view: probe 11 matches the independent ambient evaluation" "$([ "${line#*PASS}" != "$line" ] && echo 1 || echo 0)"
+		# lane HEMI1: the view must keep the pixels the lights' boxes decide
+		nb="$(printf '%s' "$line" | sed -n 's/.* \([0-9]*\) box-decided.*/\1/p')"
+		check "Ambient Only view: the frame holds 1000+ pixels an Ambient Only light's box decides (${nb:-0})" "$([ "${nb:-0}" -ge 1000 ] && echo 1 || echo 0)"
 	fi
 fi
 say ""
