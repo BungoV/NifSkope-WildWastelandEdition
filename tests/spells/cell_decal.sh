@@ -61,10 +61,11 @@ SIZE="${SIZE:-960x600}"
 # judged green and red before it was written here:
 #   1  a Vault 111 corridor full of rust and grime (17 decals in sight). Their boxes cover the whole frame, so
 #      there is no "outside" to judge: no N.
-#   2  a ward of Milton General (box decals, 4 in sight, 209,744 pixels outside every box): all four stages.
+#   2  a ward of Milton General (box decals, 3 in sight). No N: green keeps 100.000% of its 209,744 outside
+#      pixels, but the wide red moves only 115 of them (99.945%), so this camera cannot tell wide from right.
 #   3  the Vault's cryo walkway bungo named. No decal within 900 units is in sight (moss on the far wall
-#      only), so no C; 273,497 pixels outside the boxes carry N.
-SHOTS="${SHOTS:-Vault111Cryo:-5218,-110,265:5:250:KGC MiltonGeneral01:-1270,2107,731:5:250:KGNC Vault111Cryo:384,-480,60:3:260:KGN}"
+#      only), so no C; 273,114 pixels outside the boxes carry N (green 99.997%, the wide red 94.973%).
+SHOTS="${SHOTS:-Vault111Cryo:-5218,-110,265:5:250:KGC MiltonGeneral01:-1270,2107,731:5:250:KGC Vault111Cryo:384,-480,60:3:260:KGN}"
 
 mkdir -p "$OUT"
 : > "$LOG"
