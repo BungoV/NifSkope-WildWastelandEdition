@@ -2601,7 +2601,13 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 	CellDecalResult decalResult;
 	if ( !decalRefs.empty() ) {
 		std::vector<CellDecalReceiver> receivers;
-		for ( auto it = buckets.constBegin(); it != buckets.constEnd(); ++it ) {
+		// lane SPEED1: in key order. A hash's own order changes from run to run (its seed), and with it
+		// which of two equal crossings a decal's ray keeps: measured, the same cell welded 2975079 to
+		// 2975085 vertices in five runs of one program.
+		QStringList receiverKeys = buckets.keys();
+		std::sort( receiverKeys.begin(), receiverKeys.end() );
+		for ( const QString & key : receiverKeys ) {
+			const auto it = buckets.constFind( key );
 			const Bucket & b = it.value();
 			if ( b.blend || b.hasAlpha || b.billboard || b.refract || !b.effectMat.isEmpty()
 				|| !b.effectBlock.isEmpty() || b.verts.empty() || b.tris.empty()
