@@ -1,5 +1,18 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Cell view: "Ambient Only" lights now dim the room's ambient where they sit (2026-10-01)
+
+- An Ambient Only light changes the room's soft fill light inside a sphere around it, the way the game does.
+  Vault 111's three make their areas darker. Outside the sphere nothing changes, and the edge is sharp, as in game.
+- The status line counts them as `ambientvolumes=N`.
+- `tests/spells/cell_lit.sh` adds a view from inside one; `--red ambientfull` ignores the change and must FAIL.
+
+## LOD bake reference hashes current again (2026-10-01)
+
+- The LOD bake's reference list of file hashes (`tests/baselines/stock_baseline.sha256`) is current again. Its 8
+  differences were all the 09-27 cleanup that stopped writing black glow textures and merged duplicate texture
+  layers; nothing else had moved. Gate `tests/spells/lodgen_native_baseline.sh --check`: 24 of 24 identical.
+
 ## Cell view: "Ambient Only" lights no longer light surfaces (2026-10-01)
 
 - Lights marked Ambient Only in the plugin (names like "AmbientModifierDarkGrey01Amb") only adjust the room's

@@ -16,8 +16,15 @@
 #                                 --red axis     spots aimed along local -Z
 #                                 --red off      the row off: no probe is served at all
 #                                 --red ambientlit  the Ambient Only lights drawn as ordinary lights
+#                                 --red ambientfull the Ambient Only lights' ambient scale ignored (lane AMBO2)
 #
-# USAGE  bash tests/spells/cell_lit.sh [--red linear|axis|off|ambientlit]
+# THE AMBIENT ONLY VIEW (lane AMBO2): Vault111Cryo again, the eye inside an Ambient Only light's sphere
+# (AMBO_CAM look-at, AMBO_DIST eye distance), probes 2, 3, 4 and 11 (the ambient's affine sum x 8); the
+# checker's "ambient" mode rebuilds it from its own walk (XCLL / template DALC, the spheres, their scale).
+# It runs on green, --red ambientfull (the only red it must FAIL) and --red off; the other reds skip it,
+# and --red ambientfull skips the CELLS views (it does not touch them).
+#
+# USAGE  bash tests/spells/cell_lit.sh [--red linear|axis|off|ambientlit|ambientfull]
 #        CELLS="..." to pick interiors; the camera stands at CAM_<cell> (x,y,z look-at) if set.
 
 set -u
@@ -54,6 +61,11 @@ CELLS="${CELLS:-Vault111Cryo DmndSolomonsHouse01}"
 # looking down on light clusters (the whole-cell framing leaves too few pixels); the Vault's west end
 # holds its big aimed spots, so --red axis has something to break
 : "${CAM_Vault111Cryo:=-4600,-280,0}" "${CAM_DmndSolomonsHouse01:=1450,-20,150}"
+# lane AMBO2: the Ambient Only view's camera: the eye 884 units from the light at (-3594,-222,157), inside its
+# 1264-unit sphere, the frame crossing the sphere's west edge (the scale must stop there). CELLS=none skips the
+# CELLS views; --red ambientfull does too (it does not touch them)
+: "${AMBO_CAM:=-4200,-250,0}" "${AMBO_DIST:=800}"
+{ [ "$RED" = "ambientfull" ] || [ "$CELLS" = "none" ]; } && CELLS=""
 
 mkdir -p "$OUT"
 : > "$LOG"
@@ -105,6 +117,27 @@ for cell in $CELLS; do
 		check "$cell: the probes match the independent PRTP2 evaluation" "$([ "${line#*PASS}" != "$line" ] && echo 1 || echo 0)"
 	fi
 done
+# lane AMBO2: the Ambient Only view (its own folder, so the CELLS pictures of the same cell stay)
+if [ -z "$RED" ] || [ "$RED" = "ambientfull" ] || [ "$RED" = "off" ]; then
+	say "== Vault111Cryo, Ambient Only view (look-at $AMBO_CAM, eye $AMBO_DIST away)"
+	lit=1; [ "$RED" = "off" ] && lit=0
+	redenv=(); [ "$RED" = "ambientfull" ] && redenv=( WW_CELL_LIT_RED="$RED" )
+	mkdir -p "$OUT/ambo"
+	ok=1
+	[ "$(OUT="$OUT/ambo" CAM_Vault111Cryo="$AMBO_CAM" DIST="$AMBO_DIST" shoot Vault111Cryo lit WW_CELL_LIT=$lit "${redenv[@]}")" = 1 ] || ok=0
+	for p in 2 3 4 11; do
+		[ "$(OUT="$OUT/ambo" CAM_Vault111Cryo="$AMBO_CAM" DIST="$AMBO_DIST" shoot Vault111Cryo probe$p WW_CELL_LIT=$lit WW_CELL_LIT_PROBE=$p "${redenv[@]}")" = 1 ] || ok=0
+	done
+	check "Ambient Only view: five pictures written" "$ok"
+	grep -h "cell lighting:" "$OUT/ambo/Vault111Cryo.lit.notes" | head -1 | grep -o "ambientonly=[0-9]* ambientvolumes=[0-9]*" | sed 's/^/  /' | tee -a "$LOG"
+	line="$(python "$(dirname "$0")/cell_lit_check.py" "$ESM" Vault111Cryo "$OUT/ambo" ambient 2>&1 | tail -1)"
+	say "  $line"
+	if [ -n "$RED" ]; then
+		check "Ambient Only view: the red control FAILS the check" "$([ "${line#*FAIL}" != "$line" ] && echo 1 || echo 0)"
+	else
+		check "Ambient Only view: probe 11 matches the independent ambient evaluation" "$([ "${line#*PASS}" != "$line" ] && echo 1 || echo 0)"
+	fi
+fi
 say ""
 if [ "$fails" = "0" ]; then say "PASS"; else say "FAIL ($fails)"; fi
 exit "$fails"
