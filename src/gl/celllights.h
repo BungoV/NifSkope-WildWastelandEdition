@@ -125,6 +125,7 @@ struct WwCellLighting
 	 * reads 163840, near <= 0 or > far reads 0.17 far, so an interior always fogs. Colours byte / 255 x their
 	 * scale, then pow 2.2. Heights are world z. */
 	bool hasFog = false;
+	float clipDist = 0.0f;              //!< lane SSR1: an interior's clip distance (XCLL offset 32; Inherits 0x80), 0 = none
 	float fogK[6][4] = {};
 	QString fogNote;
 	QString summary;                    //!< one census line
