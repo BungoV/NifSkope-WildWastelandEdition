@@ -304,6 +304,7 @@ int probeFarCli( const QStringList & args )
 	 * reference; 2048 = 161 MB at 0.053 / 0.094. */
 	bs.surfelCell = 1024.0f;
 	bs.sector = 16384.0f;
+	bs.tbkVersion = 3;   // lane BAKE4: the far map stays FO4CS's v3 (no rooms or glass at this scale)
 	QString outDir, soupOut, probesOut;
 	for ( int i = 0; i < args.size(); i++ ) {
 		const QString & a = args[i];

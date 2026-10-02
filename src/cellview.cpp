@@ -1614,6 +1614,13 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 	const QString bakeDirEnv = QString::fromLocal8Bit( qgetenv( "WW_CELL_PROBE_BAKE_DIR" ) );
 	const bool baking = probing && ( spec.probesBake || !bakeEnv.isEmpty() );
 	ProbeAlbedo probeAlb( dataRoot );
+	// lane BAKE4: glass panes into the bake's soup; WW_CELL_PROBE_GLASS=<tsv> dumps the census
+	QString glassCensus;
+	const QByteArray glassDump = qgetenv( "WW_CELL_PROBE_GLASS" );
+	int soupGlassShapes = 0;
+	// lane BAKE4: WW_CELL_PROBE_SOUP_REFS=<tsv> lists every reference the soup took (form, role, base type)
+	QString soupRefList;
+	const QByteArray soupRefDump = qgetenv( "WW_CELL_PROBE_SOUP_REFS" );
 	int albTextured = 0, albUntextured = 0, albLandSplat = 0, albLandFlat = 0, albPalette = 0;
 	QHash<qint64, std::array<float, 3>> landAlb;   // 128-unit ground quad -> gamma color, from the splat
 	QHash<QString, int> soupSkippedTypes;
@@ -1624,6 +1631,14 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 			QStringLiteral( "LIGH" ) };
 		if ( t == QLatin1String( "DOOR" ) )
 			return 2;
+		// lane BAKE4: the bake sees the fixed world only. WW_CELL_PROBE_SOUP_RED=items is the gate's red
+		// control: pick-up items let into the soup.
+		static const bool itemsRed = qgetenv( "WW_CELL_PROBE_SOUP_RED" ) == "items";
+		static const QSet<QString> items { QStringLiteral( "ARMO" ), QStringLiteral( "WEAP" ),
+			QStringLiteral( "MISC" ), QStringLiteral( "ALCH" ), QStringLiteral( "AMMO" ),
+			QStringLiteral( "BOOK" ), QStringLiteral( "KEYM" ), QStringLiteral( "NOTE" ) };
+		if ( itemsRed && items.contains( t ) )
+			return 1;
 		return in.contains( t ) ? 1 : 0;
 	};
 
@@ -1908,6 +1923,8 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 				soupSkippedTypes[tn]++;
 			else if ( role == 1 )
 				soupRefs++;
+			if ( role != 0 && !soupRefDump.isEmpty() )   // lane BAKE4
+				soupRefList += QStringLiteral( "%1\t%2\t%3\n" ).arg( p.ref, 8, 16, QLatin1Char( '0' ) ).arg( role ).arg( tn );
 		}
 
 		for ( size_t si = 0; si < mit.value().size(); si++ ) {
@@ -1934,6 +1951,9 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 			const bool palette = s.g2p && s.g2pScale > 1.0e-6f;
 			const bool painted = palette && havePaint;
 			if ( role == 1 ) {
+				if ( baking && probeGlassFeed( probeSoup, probeAlb, s, p.pos, p.rot, p.scale, p.ref, model,
+						glassDump.isEmpty() ? nullptr : &glassCensus ) )
+					soupGlassShapes++;   // lane BAKE4
 				if ( s.nearFacts.effectShader || !s.effectTex0.isEmpty() || s.nearFacts.alphaBlend
 					|| s.nearFacts.decal || ( soupFoliage && s.nearFacts.alphaTest ) ) {
 					soupShapesDropped++;
@@ -2517,6 +2537,16 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 			for ( const QString & k : sk )
 				t << " " << k << " " << soupSkippedTypes.value( k );
 			t << "\n";
+			if ( baking ) {   // lane BAKE4
+				t << "  bake glass: " << soupGlassShapes << " panes, " << int( probeSoup.glassT.size() / 3 )
+				  << " triangles\n";
+				QFile gf( QString::fromLocal8Bit( glassDump ) );
+				if ( !glassDump.isEmpty() && gf.open( QIODevice::WriteOnly ) )
+					gf.write( glassCensus.toUtf8() );
+				QFile rf( QString::fromLocal8Bit( soupRefDump ) );
+				if ( !soupRefDump.isEmpty() && rf.open( QIODevice::WriteOnly ) )
+					rf.write( soupRefList.toUtf8() );
+			}
 			if ( !placed )
 				t << "  probes REFUSED: " << pr.error << "\n";
 			else
@@ -2548,7 +2578,8 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 				  << albUntextured << ", ground quads from the splat " << albLandSplat << ", flat tone x VCLR "
 				  << albLandFlat << ", maps read " << probeAlb.texturesRead << ", missing " << probeAlb.texturesMissing
 				  << "\n";
-				if ( !probeBake( probeSoup, pr.probes, bs, QDir::cleanPath( dir ), &bres ) ) {
+				// lane BAKE4: the placer's room boxes go into the `.tbk` v4 files
+				if ( !probeBake( probeSoup, pr.probes, bs, QDir::cleanPath( dir ), &bres, &pr.roomBoxes ) ) {
 					t << "  bake REFUSED: " << bres.error << "\n";
 				} else {
 					for ( const QString & line : probeBakeCensusText( bres ).split( '\n', Qt::SkipEmptyParts ) )
