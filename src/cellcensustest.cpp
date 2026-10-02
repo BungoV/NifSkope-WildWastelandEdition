@@ -9,49 +9,97 @@ BSD License - see nifskope.h
  * "render each cell"), run INSIDE the running application.
  *
  * THE WALK. Every interior of the plugin and every exterior cell of the named
- * worldspace(s), ONE CELL AT A TIME in this one window: the cell is opened
- * through the same `.wwcell` door File > Open uses (a scratch spec file and
- * NifSkope::openFile), the Cell lights row is forced on, the frame is drawn
- * and grabbed, one row is appended to the census file, the texture cache is
- * flushed, and the next cell replaces it. The whole world is never loaded: an
- * exterior cell is opened as the block around it (WW_CELL_CENSUS_BLOCK, 5),
- * an interior whole and alone.
+ * worldspace(s), in this one window, through the same `.wwcell` door
+ * File > Open uses (a scratch spec file and NifSkope::openFile). The Cell
+ * lights row is forced on, the frame is drawn and grabbed, the census rows are
+ * appended, the texture cache is flushed, and the next load replaces this one.
+ * The whole world is never loaded.
+ *
+ * ONE LOAD, ONE ROW PER CELL. An interior is a load of its own. The exterior
+ * grid is cut into TILES that do not overlap (WW_CELL_CENSUS_BLOCK cells a
+ * side, 5; a tile's cells are x in [k*5, k*5+4], so its centre is k*5+2): a
+ * tile is loaded ONCE, as the block around its centre cell, and every cell in
+ * it gets its own row from that one load. The cell a placed object belongs to
+ * comes from the plugin (the reference model keeps it per reference). Before
+ * this (v1) each cell was opened as the block around itself, so every cell was
+ * loaded 25 times.
+ *
+ * WHAT A ROW HOLDS. `refs`, `refs_drawn` and `lights_cell` are the CELL's own.
+ * Everything from `refs_block` to `rss_mb` is the LOAD's (what the builder
+ * said about the tile, what the texture cache was asked for, the frame, the
+ * times): it is written on the load's first row and is `^` on the load's
+ * other rows, so a column summed over the census is a true total.
+ *
+ * A VISIT IS A LIST OF STEPS (WW_CELL_CENSUS_STEPS, default `census`). The
+ * game is gone through ONCE, and each visit of a load does every step asked
+ * for: a step says what the builder must do while the load is built (`before`)
+ * and reads what that left behind into the row (`after`). Two steps today:
+ *   census  the per-cell check-up: the frame, the builder's counts, what could
+ *           not be loaded. Always on -- its rows are also what makes the pass
+ *           resumable.
+ *   bake    the probe bake as the cell view's headless path does it
+ *           (WW_CELL_PROBES + WW_CELL_PROBE_BAKE, set here per load): the
+ *           probes of the tile's own cells are placed and baked into
+ *           WW_CELL_CENSUS_BAKE/<worldspace or I_<form>>/, and the row carries
+ *           the probes, the files written and the bake's milliseconds.
+ *
+ * THE RING (WW_CELL_CENSUS_MARGIN, default 0). A probe sees only what is
+ * loaded in its visit: a ray that meets nothing is sky. So a bake of exterior
+ * cells needs their neighbors loaded around them, and the check-up does not.
+ * With a ring of M cells a tile of T is opened as the block of T + 2M around
+ * its centre; rows and probes are still the tile's own cells only, so cells
+ * are loaded more than once but never probed or counted twice.
+ *
+ * A TILE THAT IS TOO BIG SPLITS. A tile holding more references than
+ * WW_CELL_CENSUS_REFS_MAX is opened cell by cell, each alone, and each row
+ * says so; so is a tile the walk died on (it is named in `<census>.split`).
+ *
+ * A TILE WITH NOTHING PLACED IS NOT BUILT, when the check-up is the only step.
+ * Its rows are counts (all zero) and need no scene: they are written from the
+ * plugin and say `count only`. A bake needs the ground, so with the bake step
+ * on every tile is built.
  *
  * RESUMABLE. Rows are APPENDED; a cell whose key is already in the file is
- * skipped. The key of the cell being opened sits in `<census>.pending` while
- * it is open, so a walk that died names the cell it died on: the next run
- * writes that cell a `crashed` row and goes on past it.
+ * skipped. The keys of the load in progress sit in `<census>.pending`, so a
+ * walk that died names what it died on: the next run writes a lone cell a
+ * `crashed` row, and marks a tile to be opened cell by cell.
  *
- * THE ROW is what the builder itself said about the cell (its notes and its
- * refusal text, taken from the application's own "cell view:" log lines), the
- * reference model's count for the cell, the lights the shader was handed, and
- * what the texture cache was asked for and could not load. Nothing here is
- * judged from the picture except that a picture came back.
+ * SEVERAL WALKERS. WW_CELL_CENSUS_SLICE=i/N: the walk's units (an interior, a
+ * tile) are numbered in plan order and unit u belongs to slice (u mod N) + 1.
+ * Walker i walks only its slice and writes its own part file
+ * (`<census>.part<i>of<N>.tsv`, with its own pending, split, spec and log
+ * files), so N windows can run at once; tests/spells/cell_census_merge.py
+ * joins the parts.
  *
  *   WW_CELL_CENSUS_PLUGINS   the load order, as a `.wwcell` names it (required)
  *   WW_CELL_CENSUS_WORLD     worldspace EDIDs, comma separated; `all`; `none`
  *                            (default Commonwealth)
  *   WW_CELL_CENSUS_NOINTERIORS=1   exteriors only
- *   WW_CELL_CENSUS_BLOCK     exterior block size, odd (default 5)
- *   WW_CELL_CENSUS_PLAN      write the whole walk plan here (key, form, EDID)
- *   WW_CELL_CENSUS_ONLY      a file of keys: walk only these (a sample)
- *   WW_CELL_CENSUS_BUDGET    seconds after which no new cell is started (480)
- *   WW_CELL_CENSUS_MAX       at most this many cells this run
- *   WW_CELL_CENSUS_RSS_MAX   MB of memory held after which no new cell is
+ *   WW_CELL_CENSUS_BLOCK     cells a side of an exterior tile, odd (default 5)
+ *   WW_CELL_CENSUS_SLICE     i/N: walk slice i of N (default 1/1)
+ *   WW_CELL_CENSUS_STEPS     what a visit does: `census` or `census,bake`
+ *   WW_CELL_CENSUS_BAKE      the bake's folder (required by the bake step)
+ *   WW_CELL_CENSUS_MARGIN    cells of ring loaded around an exterior tile (0)
+ *   WW_CELL_CENSUS_PLAN      write the whole walk plan here (key, form, EDID,
+ *                            unit, place among the units walked, slice)
+ *   WW_CELL_CENSUS_ONLY      a file of keys: walk only the units these are in
+ *   WW_CELL_CENSUS_BUDGET    seconds after which no new load is started (480)
+ *   WW_CELL_CENSUS_MAX       at most this many units this run
+ *   WW_CELL_CENSUS_RSS_MAX   MB of memory held after which no new load is
  *                            started (8000; 0 = no ceiling)
- *   WW_CELL_CENSUS_REFS_MAX  an exterior block holding more references than
- *                            this is opened as 3x3, then as the cell alone,
- *                            and its row says so (12000; 0 = never shrink)
+ *   WW_CELL_CENSUS_REFS_MAX  a tile holding more references than this is
+ *                            opened cell by cell (12000; 0 = never split)
  *   WW_CELL_CENSUS_SETTLE_MS wait between the load and the frame (250)
- *   WW_CELL_CENSUS_SHOTS     a folder: `<key>.png` and `<key>.notes` per cell
- *   WW_CELL_CENSUS_RED       stale | dropcell -- the gate's red controls
+ *   WW_CELL_CENSUS_SHOTS     a folder: `<key>.png` and `<key>.notes` per load
+ *   WW_CELL_CENSUS_RED       stale | dropcell | dropslice | doubleslice |
+ *                            nobake -- the gate's red controls
  *   WW_CELL_DATAROOT         as for any cell (the builder reads it)
  *
- * WW_CELL_OPEN must NOT be set: it overrides every spec file, so every cell
+ * WW_CELL_OPEN must NOT be set: it overrides every spec file, so every load
  * of the walk would be the same cell. The harness refuses to start if it is.
  *
  * A harness FORCES the state it measures: the Cell lights row is switched on
- * here for every cell, and a row whose lights were not on fails its check.
+ * here for every load, and a load whose lights were not on fails its check.
  * --------------------------------------------------------------------------- */
 
 #include "cellrefs.h"
@@ -67,6 +115,7 @@ BSD License - see nifskope.h
 
 #include <QCheckBox>
 #include <QCoreApplication>
+#include <QDateTime>
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
@@ -102,16 +151,44 @@ struct CensusCell
 	int x = 0, y = 0;
 	quint32 form = 0;
 	QString edid;
+	int unit = -1;          //!< the unit (interior, or exterior tile) the cell is in
 };
 
-//! What was counted for one cell. -1 = the builder did not say.
+//! One unit of the walk: an interior, or one exterior tile. A unit is what a slice owns.
+struct CensusUnit
+{
+	bool interior = true;
+	QString world;
+	int tx = 0, ty = 0;     //!< an exterior tile's centre cell
+	QVector<int> cells;     //!< plan indices, plan order
+	bool wanted = true;     //!< false when a sample file names none of its cells
+	int order = -1;         //!< its place among the wanted units
+	int slice = 0;          //!< the slice that owns it, 1..N
+};
+
+//! One load of the window: an interior, a whole tile, or one cell of a split tile.
+struct CensusLoad
+{
+	int unit = -1;
+	QVector<int> cells;     //!< plan indices this load writes rows for
+	int block = 1;          //!< what it is opened as (the cells it is for, plus the ring)
+	int own = 1;            //!< exterior: the middle `own` x `own` cells are the load's own
+	int cx = 0, cy = 0;     //!< exterior: the centre cell of what is opened
+	qint64 refs = -1;       //!< exterior: the walk's own count of what the load reads
+	QString note;           //!< why a cell of a split tile is opened alone
+};
+
+//! What was counted for one row. -1 = the builder did not say.
 struct CensusRow
 {
 	QString status = QStringLiteral( "ok" );
-	int block = 1;                  //!< the block the cell was opened as
-	qint64 refs = -1, refsDrawn = -1, refsBlock = -1, placements = -1;
+	int block = 1;                  //!< what the load was opened as
+	// ---- the cell's own
+	qint64 refs = -1, refsDrawn = -1, lightsCell = -1;
+	// ---- the load's
+	qint64 refsBlock = -1, placements = -1;
 	qint64 shapes = -1, verts = -1, tris = -1;
-	qint64 lightsCell = -1, lightsBlock = -1, lit = -1, omni = -1, spot = -1;
+	qint64 lightsBlock = -1, lit = -1, omni = -1, spot = -1;
 	qint64 skipOff = -1, skipNoRadius = -1, skipBlack = -1, ambientOnly = -1;
 	QString lightTypes;
 	qint64 lightsApprox = -1;       //!< hemisphere and box lights: read, drawn as plain omnis
@@ -120,39 +197,67 @@ struct CensusRow
 	qint64 matsUnreadable = -1;
 	qint64 coverPx = -1;
 	QString fb;
-	qint64 buildMs = -1, renderMs = -1, totalMs = -1;
+	QString steps;                  //!< the steps this visit did, `+` joined
+	qint64 bakeProbes = -1, bakeFiles = -1;
+	qint64 buildMs = -1;            //!< the whole load, the bake inside it
+	qint64 bakeMs = -1;             //!< of buildMs: placing the probes, the rays, the files
+	qint64 renderMs = -1, totalMs = -1;
 	double rssMb = -1.0;
 	QString note;
+};
+
+/*! ONE STEP OF A VISIT. `before` runs before the load is opened and says what
+ *  the builder must do while it builds; `after` runs once the load is built
+ *  and reads what the step left behind into the row. A new product of the
+ *  whole-game pass is a new entry in kSteps, not a second pass. */
+struct VisitStep
+{
+	const char * name;
+	bool needsScene;        //!< false: rows about nothing placed need no load for it
+	void ( *before )( const CensusLoad & ld );
+	void ( *after )( const CensusLoad & ld, CensusRow & r );
 };
 
 struct Walk
 {
 	NifSkope * skope = nullptr;
-	QString censusPath, planPath, shotDir, logPath, specPath, pendingPath;
+	QString censusPath, planPath, shotDir, logPath, specPath, pendingPath, splitPath;
 	QString plugins, red;
-	int block = 5, settleMs = 250, budgetS = 480, maxCells = -1, rssMaxMb = 8000;
+	int block = 5, settleMs = 250, budgetS = 480, maxUnits = -1, rssMaxMb = 8000;
+	int margin = 0;             //!< cells of ring loaded around an exterior tile
+	int sliceI = 1, sliceN = 1;
+	QVector<const VisitStep *> steps;   //!< what a visit does, in order
+	QString stepNames;          //!< `census` or `census+bake`
+	bool needScene = false;     //!< some step needs the scene even where nothing is placed
+	QString bakeDir;            //!< the bake step's folder
+	qint64 loadStartMs = 0;     //!< wall clock when the load was opened (the bake step's files are newer)
 	QVector<CensusCell> plan;   //!< every cell of the walk, plugin order
-	QVector<int> todo;          //!< plan indices still to do this run
+	QVector<CensusUnit> units;  //!< every unit, in the order its first cell is planned
+	QVector<int> todo;          //!< unit indices still to do this run
+	QVector<CensusLoad> queue;  //!< the loads of the unit being walked
+	CensusLoad load;            //!< the load that is open
+	QSet<QString> have;         //!< keys with a row in this census file
+	QSet<QString> splitTiles;   //!< tiles the walk died on: opened cell by cell
 	int planInteriors = 0, planExteriors = 0;
 	int onlyNamed = 0, onlyUnknown = 0;
-	int already = 0, at = -1;
+	int unitsWanted = 0, unitsMine = 0;
+	int already = 0;
 	bool waiting = false, finished = false;
-	int done = 0, ok = 0, refused = 0, crashedRows = 0;
+	int done = 0, loads = 0, ok = 0, refused = 0, rows = 0, countOnly = 0, crashedRows = 0;
+	int splitUnits = 0, diedTiles = 0;
 	int checks = 0, failures = 0;
 	QStringList failLines;
 	QElapsedTimer wall, cell;
 	qint64 buildMs = 0;
 	qint64 msInterior = 0, msExterior = 0;
-	int nInterior = 0, nExterior = 0;
-	QString notes, error;       //!< the builder's own words for the cell being opened
-	CensusRow prev;             //!< the last cell's true row (the stale red writes it again)
+	int nInterior = 0, nExterior = 0, nExteriorCells = 0;
+	QString notes, error;       //!< the builder's own words for the load being opened
+	qint64 prevRefs = -1, prevDrawn = -1, prevLights = -1;  //!< the last cell's own counts (the stale red)
 	bool havePrev = false;
-	/* THE BLOCK A CELL IS OPENED AS. 5x5 is the ruling; a block that holds more
-	 * references than refsMax is opened as 3x3, then as the cell alone, because
-	 * the window's memory grows with the references it reads and a downtown
-	 * block holds nine times what the Sanctuary one does. The row says so. */
-	int refsMax = 12000, useBlock = 5;
-	qint64 overRefs = -1;       //!< the asked-for block's count, when it was over
+	/* A TILE THAT IS TOO BIG SPLITS. The window's memory grows with the
+	 * references it reads and a downtown tile holds nine times what the
+	 * Sanctuary one does, so a tile over refsMax is opened cell by cell. */
+	int refsMax = 12000;
 	std::map<QString, std::unique_ptr<EsmWorld>> worlds;
 };
 
@@ -160,10 +265,11 @@ Walk g;
 QtMessageHandler g_prevHandler = nullptr;
 
 const char * const kColumns =
-	"key\tkind\tworld\tx\ty\tform\tedid\tblock\tstatus\trefs\trefs_drawn\trefs_block\tplacements"
+	"key\tkind\tworld\tx\ty\tform\tedid\tblock\ttile\tslice\tstatus\trefs\trefs_drawn\trefs_block\tplacements"
 	"\tshapes\tverts\ttris\tlights_cell\tlights_block\tlit\tomni\tspot\tskip_off\tskip_noradius\tskip_black"
 	"\tambient_only\tlight_types\tlights_approx\tmodels_loaded\tmodels_failed\ttex_asked\ttex_missing"
-	"\tmats_unreadable\tfar\tcover_px\tfb\tbuild_ms\trender_ms\ttotal_ms\trss_mb\tnote";
+	"\tmats_unreadable\tfar\tcover_px\tfb\tsteps\tbake_probes\tbake_files\tbuild_ms\tbake_ms\trender_ms\ttotal_ms"
+	"\trss_mb\tnote";
 
 QString envStr( const char * name, const QString & def = QString() )
 {
@@ -183,14 +289,34 @@ QString hex8( quint32 v )
 	return QString::number( v, 16 ).rightJustified( 8, QLatin1Char( '0' ) ).toUpper();
 }
 
+//! Floor of a / b, for a positive b (C++ division rounds toward zero).
+int floorDiv( int a, int b )
+{
+	int q = a / b;
+	if ( ( a % b ) != 0 && a < 0 )
+		q--;
+	return q;
+}
+
+//! The centre cell of the tile this cell is in, along one axis.
+int tileCentre( int v, int block )
+{
+	return floorDiv( v, block ) * block + block / 2;
+}
+
+QString tileId( const QString & world, int tx, int ty )
+{
+	return QStringLiteral( "%1:%2,%3" ).arg( world ).arg( tx ).arg( ty );
+}
+
 //! One field of a row: no tabs, no line breaks.
 QString flat( QString s )
 {
 	s.replace( QLatin1Char( '\t' ), QLatin1Char( ' ' ) );
 	s.replace( QLatin1Char( '\r' ), QLatin1Char( ' ' ) );
 	s.replace( QLatin1Char( '\n' ), QLatin1String( " / " ) );
-	/* plain ASCII only: a base whose "model" is not a name (a placed armor's is
-	 * a form id) reaches the notes as raw bytes, and the census is a text file */
+	/* plain ASCII only: a base whose "model" is not a name reaches the notes as
+	 * raw bytes, and the census is a text file */
 	QString out;
 	out.reserve( s.size() );
 	for ( const QChar ch : s ) {
@@ -216,7 +342,7 @@ double rssMb()
 /* THE BUILDER'S OWN WORDS. The `.wwcell` door prints the census as
  * `qInfo() << "cell view:\n" << notes` and a refusal as
  * `qWarning() << "cell view:" << error`; both are caught here, on the GUI
- * thread, for the cell that is being opened, and everything else is passed on. */
+ * thread, for the load that is being opened, and everything else is passed on. */
 void captureMessages( QtMsgType type, const QMessageLogContext & ctx, const QString & str )
 {
 	if ( g.waiting && str.startsWith( QLatin1String( "cell view:" ) )
@@ -224,7 +350,7 @@ void captureMessages( QtMsgType type, const QMessageLogContext & ctx, const QStr
 		QString body = str.mid( 10 ).trimmed();
 		if ( type == QtInfoMsg ) {
 			g.notes = body;
-			return;     // forty lines a cell would bury the run's log; the census is the record
+			return;     // forty lines a load would bury the run's log; the census is the record
 		}
 		if ( body.size() >= 2 && body.startsWith( QLatin1Char( '"' ) ) && body.endsWith( QLatin1Char( '"' ) ) )
 			body = body.mid( 1, body.size() - 2 );
@@ -257,26 +383,49 @@ QString noteText( const char * pattern )
 	return m.hasMatch() ? m.captured( 1 ) : QString();
 }
 
-void appendLine( const QString & path, const QString & line )
+//! Append whole lines in one write, so the rows of a load land together or not at all.
+void appendLines( const QString & path, const QStringList & lines )
 {
 	QFile f( path );
 	if ( f.open( QIODevice::Append | QIODevice::Text ) ) {
 		QTextStream s( &f );
-		s << line << "\n";
+		s << lines.join( QLatin1Char( '\n' ) ) << "\n";
 	}
 }
 
-void writeRow( const CensusCell & c, const CensusRow & r )
+/*! One census row. `lead` is the load's first row: it carries the load's
+ *  figures; the load's other rows carry `^` there. */
+QString rowLine( const CensusCell & c, const CensusRow & r, bool lead )
 {
 	QStringList f;
 	auto n = [&f]( qint64 v ) { f.append( v < 0 ? QStringLiteral( "-" ) : QString::number( v ) ); };
+	const QString same = QStringLiteral( "^" );
+	const CensusUnit * u = ( c.unit >= 0 && c.unit < g.units.size() ) ? &g.units.at( c.unit ) : nullptr;
 	f << c.key << ( c.interior ? QStringLiteral( "interior" ) : QStringLiteral( "exterior" ) )
 	  << ( c.interior ? QStringLiteral( "-" ) : c.world )
 	  << ( c.interior ? QStringLiteral( "-" ) : QString::number( c.x ) )
 	  << ( c.interior ? QStringLiteral( "-" ) : QString::number( c.y ) )
 	  << hex8( c.form ) << ( c.edid.isEmpty() ? QStringLiteral( "-" ) : flat( c.edid ) )
-	  << QString::number( c.interior ? 1 : r.block ) << r.status;
-	n( r.refs ); n( r.refsDrawn ); n( r.refsBlock ); n( r.placements );
+	  << QString::number( c.interior ? 1 : r.block )
+	  << ( ( c.interior || !u ) ? QStringLiteral( "-" ) : QStringLiteral( "%1,%2" ).arg( u->tx ).arg( u->ty ) )
+	  << QStringLiteral( "%1/%2" ).arg( g.sliceI ).arg( g.sliceN )
+	  << r.status;
+	n( r.refs ); n( r.refsDrawn );
+	if ( !lead ) {
+		// refs_block placements shapes verts tris
+		for ( int i = 0; i < 5; i++ )
+			f << same;
+		n( r.lightsCell );
+		// lights_block .. mats_unreadable (15), far, cover_px .. rss_mb (10)
+		for ( int i = 0; i < 15; i++ )
+			f << same;
+		f << ( c.interior ? QStringLiteral( "-" ) : QStringLiteral( "none" ) );
+		for ( int i = 0; i < 10; i++ )
+			f << same;
+		f << ( r.note.isEmpty() ? QStringLiteral( "-" ) : flat( r.note ) );
+		return f.join( QLatin1Char( '\t' ) );
+	}
+	n( r.refsBlock ); n( r.placements );
 	n( r.shapes ); n( r.verts ); n( r.tris );
 	n( r.lightsCell ); n( r.lightsBlock ); n( r.lit ); n( r.omni ); n( r.spot );
 	n( r.skipOff ); n( r.skipNoRadius ); n( r.skipBlack ); n( r.ambientOnly );
@@ -289,10 +438,12 @@ void writeRow( const CensusCell & c, const CensusRow & r )
 	f << ( c.interior ? QStringLiteral( "-" ) : QStringLiteral( "none" ) );
 	n( r.coverPx );
 	f << ( r.fb.isEmpty() ? QStringLiteral( "-" ) : r.fb );
-	n( r.buildMs ); n( r.renderMs ); n( r.totalMs );
+	f << ( r.steps.isEmpty() ? QStringLiteral( "-" ) : r.steps );
+	n( r.bakeProbes ); n( r.bakeFiles );
+	n( r.buildMs ); n( r.bakeMs ); n( r.renderMs ); n( r.totalMs );
 	f << ( r.rssMb < 0.0 ? QStringLiteral( "-" ) : QString::number( r.rssMb, 'f', 0 ) );
 	f << ( r.note.isEmpty() ? QStringLiteral( "-" ) : flat( r.note ) );
-	appendLine( g.censusPath, f.join( QLatin1Char( '\t' ) ) );
+	return f.join( QLatin1Char( '\t' ) );
 }
 
 void closeMessageBoxes()
@@ -316,7 +467,7 @@ void markClean()
 
 void flushTextures()
 {
-	// one cell's textures at a time: the cache is not emptied by a new document
+	// one load's textures at a time: the cache is not emptied by a new document
 	if ( GLView * ogl = g.skope->getGLView() ) {
 		ogl->makeCurrent();
 		ogl->flush();
@@ -327,40 +478,144 @@ void flushTextures()
 void finishWalk( const QString & why );
 void openNext();
 
-//! About how many references opening this block reads: each cell's own, summed.
+/*! How many references opening this block reads, counted the way the builder
+ *  reads them: every cell's own, then the worldspace's persistent references
+ *  that stand inside the block and were not among those. */
 qint64 blockRefs( const EsmWorld & w, int cx, int cy, int block )
 {
 	const int h = block / 2;
+	QSet<quint32> seen;
 	qint64 n = 0;
 	for ( int y = cy - h; y <= cy + h; y++ ) {
 		for ( int x = cx - h; x <= cx + h; x++ ) {
-			if ( w.hasCell( x, y ) )
-				n += w.refrs( x, y ).size();
+			if ( !w.hasCell( x, y ) )
+				continue;
+			for ( const EsmRefr & r : w.refrs( x, y ) ) {
+				seen.insert( r.formID );
+				n++;
+			}
 		}
+	}
+	const float u = 4096.0f;
+	for ( const EsmRefr & r : w.persistentRefrsIn( float( cx - h ) * u, float( cy - h ) * u,
+			float( cx + h + 1 ) * u, float( cy + h + 1 ) * u ) ) {
+		if ( !seen.contains( r.formID ) )
+			n++;
 	}
 	return n;
 }
 
-void closeCell( const CensusCell & c, const CensusRow & r )
+//! The placed lights of what is loaded (deleted ones left out), and how many stand in each grid square.
+qint64 placedLights( QHash<QPair<int, int>, qint64> & byGrid )
+{
+	const CellRefTable & table = cellRefTable();
+	const quint32 kLigh = quint32( 'L' ) | ( quint32( 'I' ) << 8 ) | ( quint32( 'G' ) << 16 ) | ( quint32( 'H' ) << 24 );
+	qint64 n = 0;
+	for ( int i = 0; i < table.size(); i++ ) {
+		const CellRefEntry & e = table.at( i );
+		if ( e.baseType != kLigh || e.fate == CellRefFate::Deleted )
+			continue;
+		n++;
+		byGrid[qMakePair( e.cellX, e.cellY )]++;
+	}
+	return n;
+}
+
+//! The load is over (rows written or not): the next one, from the event loop.
+void closeLoad( qint64 totalMs )
 {
 	QFile::remove( g.pendingPath );
-	g.done++;
-	( c.interior ? g.msInterior : g.msExterior ) += r.totalMs;
-	( c.interior ? g.nInterior : g.nExterior )++;
+	g.loads++;
+	const bool interior = g.units.at( g.load.unit ).interior;
+	( interior ? g.msInterior : g.msExterior ) += totalMs;
+	( interior ? g.nInterior : g.nExterior )++;
+	if ( !interior )
+		g.nExteriorCells += g.load.cells.size();
+	if ( g.queue.isEmpty() )
+		g.done++;
 	QTimer::singleShot( 0, g.skope, []() { openNext(); } );
 }
 
-//! The cell is built and its first frames are queued: draw it, read it, write its row.
-void measureCell()
+QString loadFileBase( const CensusLoad & ld )
 {
-	const CensusCell & c = g.plan.at( g.at );
+	QString base = g.plan.at( ld.cells.first() ).key;
+	base.replace( QLatin1Char( ':' ), QLatin1Char( '_' ) );
+	base.replace( QLatin1Char( ',' ), QLatin1Char( '_' ) );
+	return base;
+}
+
+/*! Where the bake step puts a load's files: sector files are named by position,
+ *  and every interior has its own origin, so an interior gets its own folder
+ *  and a worldspace one for all its tiles. */
+QString bakeFolder( const CensusLoad & ld )
+{
+	const CensusUnit & u = g.units.at( ld.unit );
+	return g.bakeDir + QLatin1Char( '/' )
+		+ ( u.interior ? QStringLiteral( "I_%1" ).arg( hex8( g.plan.at( ld.cells.first() ).form ) ) : u.world );
+}
+
+/* ---- STEP `bake`: the probe bake, by the cell view's own headless path. The
+ * builder reads these three variables every time it builds, so setting them
+ * here per load is all the hook there is; nothing of the bake is done here. */
+void stepBakeBefore( const CensusLoad & ld )
+{
+	if ( g.red == QLatin1String( "nobake" ) )
+		return;     // RED `nobake` (the gate's control): the row says bake, the builder was never told
+	const QString dir = bakeFolder( ld );
+	QDir().mkpath( dir );
+	qputenv( "WW_CELL_PROBES", QDir::toNativeSeparators( dir + QStringLiteral( "/probes_%1.tsv" ).arg( loadFileBase( ld ) ) ).toLocal8Bit() );
+	qputenv( "WW_CELL_PROBE_BAKE", QDir::toNativeSeparators( dir ).toLocal8Bit() );
+	qputenv( "WW_CELL_PROBES_N", QByteArray::number( ld.own ) );     // the load's own cells, never the ring
+	qputenv( "WW_CELL_PROBES_HIDE", "1" );      // the markers are not part of the cell: the frame stays the check-up's
+}
+
+void stepBakeAfter( const CensusLoad & ld, CensusRow & r )
+{
+	qunsetenv( "WW_CELL_PROBES" );
+	qunsetenv( "WW_CELL_PROBE_BAKE" );
+	qunsetenv( "WW_CELL_PROBES_N" );
+	qunsetenv( "WW_CELL_PROBES_HIDE" );
+	const QString leadKey = g.plan.at( ld.cells.first() ).key;
+	r.bakeProbes = noteNumber( "bake: (\\d+) probes" );
+	// what the bake cost inside the build: placing the probes, the rays, the files
+	qint64 ms = 0;
+	bool timed = false;
+	for ( const char * pat : { "probe time ms: bvh (\\d+)", "probe time ms: [^\\n]*columns (\\d+)", "probe time ms: [^\\n]*voxels (\\d+)",
+			"probe time ms: [^\\n]*openings (\\d+)", "probe time ms: [^\\n]*rooms (\\d+)",
+			"bake time ms: rays (\\d+)", "bake time ms: rays \\d+, write (\\d+)" } ) {
+		const qint64 v = noteNumber( pat );
+		if ( v >= 0 ) {
+			ms += v;
+			timed = true;
+		}
+	}
+	r.bakeMs = timed ? ms : -1;
+	// the files: the sector files in the load's folder that this load wrote
+	const QString dir = bakeFolder( ld );
+	qint64 files = 0;
+	for ( const QFileInfo & fi : QDir( dir ).entryInfoList( { QStringLiteral( "sector_*.tbk" ) }, QDir::Files ) )
+		if ( fi.size() > 0 && fi.lastModified().toMSecsSinceEpoch() >= g.loadStartMs - 2000 )
+			files++;
+	r.bakeFiles = files;
+	const qint64 sectors = noteNumber( "unlinked mean [0-9.]+, sectors (\\d+)" );
+	const bool named = g.notes.contains( QLatin1String( "bake folder " ) );
+	check( named && r.bakeProbes > 0 && files > 0 && files == sectors,
+		QStringLiteral( "%1: the bake step wrote its files in this visit" ).arg( leadKey ),
+		QStringLiteral( "notes name the folder: %1; probes %2; sector files written now %3, the notes say %4; folder %5" )
+			.arg( named ? QStringLiteral( "yes" ) : QStringLiteral( "no" ) ).arg( r.bakeProbes ).arg( files ).arg( sectors ).arg( dir ) );
+}
+
+/* ---- STEP `census`: the per-cell check-up. The frame, the builder's own
+ * counts, what the texture cache could not load, and the checks a visit
+ * stands on. */
+void stepCensusAfter( const CensusLoad & ld, CensusRow & r )
+{
+	const CensusUnit & unit = g.units.at( ld.unit );
+	const QString leadKey = g.plan.at( ld.cells.first() ).key;
 	NifSkope * skope = g.skope;
 	GLView * ogl = skope->getGLView();
 	NifModel * nif = skope->getNifModel();
 	Scene * scene = ogl ? ogl->getScene() : nullptr;
-	CensusRow r;
-	r.buildMs = g.buildMs;
-	r.block = c.interior ? 1 : g.useBlock;
 
 	// THE STATE THIS MEASURES, FORCED: the Cell lights row, on
 	if ( QCheckBox * row = skope->findChild<QCheckBox *>( QStringLiteral( "CellWorkspaceCellLights" ) ) ) {
@@ -375,7 +630,7 @@ void measureCell()
 	QImage fb;
 	if ( ogl ) {
 		/* setOrientation returns early when the view is already the one asked
-		 * for, so from the second cell on it would not refit: center() asks
+		 * for, so from the second load on it would not refit: center() asks
 		 * for the fit by itself, and the fit runs inside the next paint. */
 		ogl->setOrientation( GLView::ViewTop, true );
 		ogl->center();
@@ -402,7 +657,7 @@ void measureCell()
 		r.fb = QStringLiteral( "%1x%2" ).arg( img.width() ).arg( img.height() );
 	}
 
-	// ---- the builder's notes
+	// ---- the builder's notes: the load's figures
 	r.refsBlock = noteNumber( "refrs read (\\d+)" );
 	r.placements = noteNumber( "placements (\\d+)" );
 	r.shapes = noteNumber( "welded shapes (\\d+)" );
@@ -430,31 +685,11 @@ void measureCell()
 		r.lightsApprox = r.lightsBlock < 0 ? -1 : approx;
 	}
 
-	// ---- the reference model: this cell's own count, and its own lights
-	const CellRefTable & table = cellRefTable();
-	const quint32 kLigh = quint32( 'L' ) | ( quint32( 'I' ) << 8 ) | ( quint32( 'G' ) << 16 ) | ( quint32( 'H' ) << 24 );
-	int centre = -1;
-	for ( int i = 0; i < table.cellCount(); i++ ) {
-		const CellBlockEntry & e = table.cellAt( i );
-		if ( c.interior ? ( e.cellForm == c.form ) : ( e.cx == c.x && e.cy == c.y ) )
-			centre = i;
-	}
-	qint64 lightsTable = 0, lightsCentre = 0;
-	for ( int i = 0; i < table.size(); i++ ) {
-		const CellRefEntry & e = table.at( i );
-		if ( e.baseType != kLigh || e.fate == CellRefFate::Deleted )
-			continue;
-		lightsTable++;
-		if ( c.interior || ( e.cellX == c.x && e.cellY == c.y ) )
-			lightsCentre++;
-	}
-	if ( centre >= 0 ) {
-		r.refs = table.cellAt( centre ).references;
-		r.refsDrawn = table.cellAt( centre ).drawn;
-		r.lightsCell = lightsCentre;
-	}
+	// ---- the reference model: the load's placed lights
+	QHash<QPair<int, int>, qint64> lightsByGrid;
+	const qint64 lightsTable = placedLights( lightsByGrid );
 
-	// ---- the texture cache: what this cell's frames asked for
+	// ---- the texture cache: what this load's frames asked for
 	QStringList texNames;
 	if ( scene && scene->textures )
 		scene->textures->wwAskedAndMissing( r.texAsked, r.texMissing, &texNames );
@@ -473,94 +708,247 @@ void measureCell()
 		note.append( QStringLiteral( "materials unreadable: %1" ).arg( r.matsUnreadable ) );
 	if ( r.lightsApprox > 0 )
 		note.append( QStringLiteral( "lights drawn as omni: %1" ).arg( r.lightsApprox ) );
-	if ( !c.interior && g.useBlock < g.block )
-		note.append( QStringLiteral( "opened as %1x%1: the %2x%2 block holds about %3 references, over the walk's limit of %4" )
-			.arg( g.useBlock ).arg( g.block ).arg( g.overRefs ).arg( g.refsMax ) );
+	if ( !ld.note.isEmpty() )
+		note.append( ld.note );
 	for ( const QString & line : g.notes.split( QLatin1Char( '\n' ) ) )
 		if ( line.contains( QLatin1String( "REFUSED" ) ) )
 			note.append( line.trimmed() );
 	r.note = note.join( QLatin1String( "; " ) );
 
-	// ---- the rows this run stands on
+	// ---- the checks this load stands on
 	const QString head = g.notes.section( QLatin1Char( '\n' ), 0, 0 );
-	const QString wantHead = c.interior
-		? QStringLiteral( "form 0x%1 " ).arg( hex8( c.form ).toLower() )
-		: QStringLiteral( "cell view %1 %2,%3 block %4x%4 " ).arg( c.world ).arg( c.x ).arg( c.y ).arg( g.useBlock );
-	check( head.contains( wantHead ), QStringLiteral( "%1: the builder's notes are for the cell asked for" ).arg( c.key ), head );
-	check( centre >= 0 && table.cellAt( centre ).cellForm == c.form,
-		QStringLiteral( "%1: the reference model holds this cell, by form" ).arg( c.key ),
-		centre >= 0 ? hex8( table.cellAt( centre ).cellForm ) : QStringLiteral( "no such cell in the model" ) );
+	const QString wantHead = unit.interior
+		? QStringLiteral( "form 0x%1 " ).arg( hex8( g.plan.at( ld.cells.first() ).form ).toLower() )
+		: QStringLiteral( "cell view %1 %2,%3 block %4x%4 " ).arg( unit.world ).arg( ld.cx ).arg( ld.cy ).arg( ld.block );
+	check( head.contains( wantHead ), QStringLiteral( "%1: the builder's notes are for the load asked for" ).arg( leadKey ), head );
 	check( wwCellLightsOn() && scene && wwCellLightsWanted( scene ),
-		QStringLiteral( "%1: the Cell lights row is on for the frame" ).arg( c.key ) );
+		QStringLiteral( "%1: the Cell lights row is on for the frame" ).arg( leadKey ) );
 	{
 		const WwCellLighting * L = nif ? wwCellLightsFor( nif ) : nullptr;
 		check( L && qint64( L->lights.size() ) == r.lit,
-			QStringLiteral( "%1: the lights handed to the shader are the ones the notes count" ).arg( c.key ),
+			QStringLiteral( "%1: the lights handed to the shader are the ones the notes count" ).arg( leadKey ),
 			QStringLiteral( "%1 vs %2" ).arg( L ? L->lights.size() : -1 ).arg( r.lit ) );
 	}
 	check( lightsTable == r.lightsBlock,
-		QStringLiteral( "%1: the reference model's placed lights equal the builder's lights line" ).arg( c.key ),
+		QStringLiteral( "%1: the reference model's placed lights equal the builder's lights line" ).arg( leadKey ),
 		QStringLiteral( "%1 vs %2" ).arg( lightsTable ).arg( r.lightsBlock ) );
 	check( !fb.isNull() && ( r.shapes <= 0 || r.coverPx > 0 ),
-		QStringLiteral( "%1: a frame came back, and it is not empty when shapes were drawn" ).arg( c.key ),
+		QStringLiteral( "%1: a frame came back, and it is not empty when shapes were drawn" ).arg( leadKey ),
 		QStringLiteral( "%1 cover %2 shapes %3" ).arg( r.fb ).arg( r.coverPx ).arg( r.shapes ) );
+	if ( !unit.interior )
+		check( ld.refs == r.refsBlock,
+			QStringLiteral( "%1: the builder read as many references as the walk counted before it opened the block" ).arg( leadKey ),
+			QStringLiteral( "walk %1, builder %2" ).arg( ld.refs ).arg( r.refsBlock ) );
 
 	if ( !g.shotDir.isEmpty() ) {
-		QString base = c.key;
-		base.replace( QLatin1Char( ':' ), QLatin1Char( '_' ) );
-		base.replace( QLatin1Char( ',' ), QLatin1Char( '_' ) );
+		const QString base = loadFileBase( ld );
 		if ( !fb.isNull() )
 			fb.save( g.shotDir + QLatin1Char( '/' ) + base + QStringLiteral( ".png" ) );
 		QFile nf( g.shotDir + QLatin1Char( '/' ) + base + QStringLiteral( ".notes" ) );
 		if ( nf.open( QIODevice::WriteOnly | QIODevice::Text ) )
 			nf.write( g.notes.toUtf8() );
 	}
+}
+
+/* THE STEPS A VISIT CAN DO, in the order a visit does them. */
+const VisitStep kSteps[] = {
+	{ "census", false, nullptr, stepCensusAfter },
+	{ "bake", true, stepBakeBefore, stepBakeAfter },
+};
+
+//! The load is built and its first frames are queued: every step reads it, then its rows are written.
+void measureLoad()
+{
+	const CensusLoad & ld = g.load;
+	CensusRow r;
+	r.buildMs = g.buildMs;
+	r.block = ld.block;
+	r.steps = g.stepNames;
+	for ( const VisitStep * st : g.steps )
+		if ( st->after )
+			st->after( ld, r );
 
 	flushTextures();
 	r.totalMs = g.cell.elapsed();
 	r.rssMb = rssMb();
 	g.ok++;
 
-	/* RED `stale` (the gate's control): the row carries the cell BEFORE it --
-	 * what a one-window walk writes if it reads the window before the new cell
-	 * has replaced the old one. Only an outside reader of the plugin can tell. */
-	if ( g.red == QLatin1String( "stale" ) && g.havePrev ) {
-		CensusRow s = g.prev;
-		s.buildMs = r.buildMs;
-		s.renderMs = r.renderMs;
-		s.totalMs = r.totalMs;
-		writeRow( c, s );
-	} else {
-		writeRow( c, r );
+	// ---- one row per cell of the load: the cell's own counts, from the reference model
+	const CellRefTable & table = cellRefTable();
+	QHash<QPair<int, int>, qint64> lightsByGrid;
+	const qint64 lightsTable = placedLights( lightsByGrid );
+	QStringList lines;
+	bool lead = true;
+	for ( int pi : ld.cells ) {
+		const CensusCell & c = g.plan.at( pi );
+		int at = -1;
+		for ( int i = 0; i < table.cellCount(); i++ ) {
+			const CellBlockEntry & e = table.cellAt( i );
+			if ( c.interior ? ( e.cellForm == c.form ) : ( e.cx == c.x && e.cy == c.y ) )
+				at = i;
+		}
+		check( at >= 0 && table.cellAt( at ).cellForm == c.form,
+			QStringLiteral( "%1: the reference model holds this cell, by form" ).arg( c.key ),
+			at >= 0 ? hex8( table.cellAt( at ).cellForm ) : QStringLiteral( "no such cell in the model" ) );
+		CensusRow cr = r;
+		if ( !lead )
+			cr.note.clear();
+		if ( at >= 0 ) {
+			cr.refs = table.cellAt( at ).references;
+			cr.refsDrawn = table.cellAt( at ).drawn;
+			cr.lightsCell = c.interior ? lightsTable : lightsByGrid.value( qMakePair( c.x, c.y ), 0 );
+		}
+		const qint64 trueRefs = cr.refs, trueDrawn = cr.refsDrawn, trueLights = cr.lightsCell;
+		/* RED `stale` (the gate's control): the row carries the counts of the
+		 * cell BEFORE it -- what a one-window walk writes if it reads the window
+		 * before the new load has replaced the old one. Only an outside reader
+		 * of the plugin can tell. */
+		if ( g.red == QLatin1String( "stale" ) && g.havePrev ) {
+			cr.refs = g.prevRefs;
+			cr.refsDrawn = g.prevDrawn;
+			cr.lightsCell = g.prevLights;
+		}
+		g.prevRefs = trueRefs;
+		g.prevDrawn = trueDrawn;
+		g.prevLights = trueLights;
+		g.havePrev = true;
+		lines.append( rowLine( c, cr, lead ) );
+		g.have.insert( c.key );
+		g.rows++;
+		lead = false;
 	}
-	g.prev = r;
-	g.havePrev = true;
-	closeCell( c, r );
+	appendLines( g.censusPath, lines );
+	closeLoad( r.totalMs );
 }
 
-//! The builder refused the cell: the row carries its reason.
-void refuseCell( const QString & why )
+//! The builder refused the load: every row of it carries the reason.
+void refuseLoad( const QString & why )
 {
-	const CensusCell & c = g.plan.at( g.at );
+	const CensusLoad & ld = g.load;
 	CensusRow r;
 	r.status = QStringLiteral( "refused" );
-	r.block = c.interior ? 1 : g.useBlock;
+	r.block = ld.block;
+	r.steps = g.stepNames;
+	// a refused load built nothing: what the steps asked of the builder must not follow into the next
+	for ( const char * v : { "WW_CELL_PROBES", "WW_CELL_PROBE_BAKE", "WW_CELL_PROBES_N", "WW_CELL_PROBES_HIDE" } )
+		qunsetenv( v );
 	r.buildMs = g.buildMs;
 	r.note = why.isEmpty() ? QStringLiteral( "refused, and the builder gave no reason" ) : why;
 	closeMessageBoxes();
 	r.totalMs = g.cell.elapsed();
 	r.rssMb = rssMb();
-	check( !why.isEmpty(), QStringLiteral( "%1: a refusal carries its reason" ).arg( c.key ) );
+	check( !why.isEmpty(), QStringLiteral( "%1: a refusal carries its reason" ).arg( g.plan.at( ld.cells.first() ).key ) );
 	g.refused++;
-	writeRow( c, r );
-	closeCell( c, r );
+	QStringList lines;
+	bool lead = true;
+	for ( int pi : ld.cells ) {
+		lines.append( rowLine( g.plan.at( pi ), r, lead ) );
+		g.have.insert( g.plan.at( pi ).key );
+		g.rows++;
+		lead = false;
+	}
+	appendLines( g.censusPath, lines );
+	closeLoad( r.totalMs );
+}
+
+/*! Turn a unit into the loads that walk it. A tile with nothing placed gets its
+ *  rows here and no load at all. */
+void prepareUnit( int ui )
+{
+	const CensusUnit & u = g.units.at( ui );
+	QVector<int> need;
+	for ( int pi : u.cells )
+		if ( !g.have.contains( g.plan.at( pi ).key ) )
+			need.append( pi );
+	if ( need.isEmpty() ) {
+		g.done++;
+		return;
+	}
+	if ( u.interior ) {
+		CensusLoad ld;
+		ld.unit = ui;
+		ld.cells = need;
+		g.queue.append( ld );
+		return;
+	}
+	const auto wi = g.worlds.find( u.world );
+	if ( wi == g.worlds.end() ) {
+		g.done++;
+		return;
+	}
+	const EsmWorld & w = *wi->second;
+	QElapsedTimer ct;
+	ct.start();
+	const int ring = 2 * g.margin;
+	const qint64 n = blockRefs( w, u.tx, u.ty, g.block + ring );
+	if ( n == 0 && !g.needScene ) {
+		/* COUNT ONLY. Nothing is placed in what would be loaded, so every figure
+		 * a row holds about placed objects is zero and is known from the plugin:
+		 * the scene (terrain and water, nothing else) is not built for it. Only
+		 * when no step needs the scene: a bake needs the ground. */
+		CensusRow r;
+		r.block = g.block + ring;
+		r.steps = QStringLiteral( "census" );
+		r.refs = r.refsDrawn = r.lightsCell = 0;
+		r.refsBlock = 0;
+		r.lightsBlock = 0;
+		r.totalMs = ct.elapsed();
+		r.note = QStringLiteral( "count only: nothing is placed in the tile, so the scene was not built" );
+		QStringList lines;
+		bool lead = true;
+		for ( int pi : need ) {
+			CensusRow cr = r;
+			if ( !lead )
+				cr.note.clear();
+			lines.append( rowLine( g.plan.at( pi ), cr, lead ) );
+			g.have.insert( g.plan.at( pi ).key );
+			g.rows++;
+			g.countOnly++;
+			lead = false;
+		}
+		appendLines( g.censusPath, lines );
+		g.done++;
+		return;
+	}
+	const QString id = tileId( u.world, u.tx, u.ty );
+	const bool died = g.splitTiles.contains( id );
+	const bool over = ( g.refsMax > 0 && n > g.refsMax );
+	if ( g.block > 1 && ( died || over ) ) {
+		g.splitUnits++;
+		for ( int pi : need ) {
+			const CensusCell & c = g.plan.at( pi );
+			CensusLoad ld;
+			ld.unit = ui;
+			ld.cells = { pi };
+			ld.block = 1 + ring;
+			ld.own = 1;
+			ld.cx = c.x;
+			ld.cy = c.y;
+			ld.refs = blockRefs( w, c.x, c.y, 1 + ring );
+			ld.note = over
+				? QStringLiteral( "opened alone: the %1x%1 tile holds %2 references, over the walk's limit of %3" )
+					.arg( g.block ).arg( n ).arg( g.refsMax )
+				: QStringLiteral( "opened alone: the walk died on this tile as %1x%1" ).arg( g.block );
+			g.queue.append( ld );
+		}
+		return;
+	}
+	CensusLoad ld;
+	ld.unit = ui;
+	ld.cells = need;
+	ld.block = g.block + ring;
+	ld.own = g.block;
+	ld.cx = u.tx;
+	ld.cy = u.ty;
+	ld.refs = n;
+	g.queue.append( ld );
 }
 
 void openNext()
 {
 	if ( g.finished )
 		return;
-	if ( g.todo.isEmpty() ) {
+	if ( g.queue.isEmpty() && g.todo.isEmpty() ) {
 		finishWalk( QStringLiteral( "every cell named is in the census" ) );
 		return;
 	}
@@ -568,61 +956,68 @@ void openNext()
 		finishWalk( QStringLiteral( "the time budget of %1 s is spent" ).arg( g.budgetS ) );
 		return;
 	}
-	/* the window does not hand back what a big cell took (measured: 0.4 GB at
+	/* the window does not hand back what a big load took (measured: 0.4 GB at
 	 * the start, 13.8 GB twenty-one cells later), so a pass ends at a ceiling
-	 * and the next pass, a new window, resumes. Never before one cell is done. */
-	if ( g.rssMaxMb > 0 && g.done > 0 && rssMb() > double( g.rssMaxMb ) ) {
+	 * and the next pass, a new window, resumes. Never before one load is done. */
+	if ( g.rssMaxMb > 0 && g.loads > 0 && rssMb() > double( g.rssMaxMb ) ) {
 		finishWalk( QStringLiteral( "the memory ceiling of %1 MB is passed" ).arg( g.rssMaxMb ) );
 		return;
 	}
-	if ( g.maxCells >= 0 && g.done >= g.maxCells ) {
-		finishWalk( QStringLiteral( "the cell limit of %1 is reached" ).arg( g.maxCells ) );
-		return;
-	}
-	g.at = g.todo.takeFirst();
-	const CensusCell & c = g.plan.at( g.at );
-	g.useBlock = g.block;
-	g.overRefs = -1;
-	if ( !c.interior && g.refsMax > 0 ) {
-		const auto wi = g.worlds.find( c.world );
-		while ( wi != g.worlds.end() && g.useBlock > 1 ) {
-			const qint64 n = blockRefs( *wi->second, c.x, c.y, g.useBlock );
-			if ( n <= g.refsMax )
-				break;
-			if ( g.overRefs < 0 )
-				g.overRefs = n;
-			g.useBlock -= 2;
+	if ( g.queue.isEmpty() ) {
+		if ( g.maxUnits >= 0 && g.done >= g.maxUnits ) {
+			finishWalk( QStringLiteral( "the unit limit of %1 is reached" ).arg( g.maxUnits ) );
+			return;
+		}
+		prepareUnit( g.todo.takeFirst() );
+		if ( g.queue.isEmpty() ) {
+			// rows without a load (a tile with nothing placed): on to the next unit
+			QTimer::singleShot( 0, g.skope, []() { openNext(); } );
+			return;
 		}
 	}
+	g.load = g.queue.takeFirst();
+	const CensusLoad & ld = g.load;
+	const CensusUnit & u = g.units.at( ld.unit );
+	const QString leadKey = g.plan.at( ld.cells.first() ).key;
 	{
 		QFile sf( g.specPath );
 		if ( sf.open( QIODevice::WriteOnly | QIODevice::Text ) ) {
 			QTextStream s( &sf );
-			s << "# the cell census walk's scratch spec (lane PRTP5): " << c.key << "\n";
-			if ( c.interior )
-				s << g.plugins << "|interior|" << hex8( c.form ) << "\n";
+			s << "# the cell census walk's scratch spec (lane PRTP5): " << leadKey << "\n";
+			if ( u.interior )
+				s << g.plugins << "|interior|" << hex8( g.plan.at( ld.cells.first() ).form ) << "\n";
 			else
-				s << g.plugins << "|" << c.world << "|" << c.x << "," << c.y << "|" << g.useBlock << "\n";
+				s << g.plugins << "|" << u.world << "|" << ld.cx << "," << ld.cy << "|" << ld.block << "\n";
 		}
 	}
 	{
+		// what a walk that dies here died on: how many cells a side the load was for, and its cells
 		QFile pf( g.pendingPath );
-		if ( pf.open( QIODevice::WriteOnly | QIODevice::Text ) )
-			pf.write( c.key.toUtf8() + "\n" );
+		if ( pf.open( QIODevice::WriteOnly | QIODevice::Text ) ) {
+			QTextStream s( &pf );
+			s << "block " << ( u.interior ? 1 : ld.own ) << "\n";
+			for ( int pi : ld.cells )
+				s << g.plan.at( pi ).key << "\n";
+		}
 	}
 	g.notes.clear();
 	g.error.clear();
 	markClean();
-	// a Show row flipped in one cell must not follow the walk into the next
+	// a Show row flipped in one load must not follow the walk into the next
 	if ( cellWorkspaceHasOverrides() )
 		cellWorkspaceForget();
 	g.buildMs = 0;
 	g.cell.start();
+	g.loadStartMs = QDateTime::currentMSecsSinceEpoch();
+	// every step says what the builder must do while it builds this load
+	for ( const VisitStep * st : g.steps )
+		if ( st->before )
+			st->before( ld );
 	g.waiting = true;
 	QString path = g.specPath;
 	if ( !g.skope->openFile( path ) ) {
 		g.waiting = false;
-		refuseCell( QStringLiteral( "the window would not open the spec file" ) );
+		refuseLoad( QStringLiteral( "the window would not open the spec file" ) );
 	}
 }
 
@@ -636,10 +1031,10 @@ void onLoaded( bool ok, const QString & fname )
 	g.buildMs = g.cell.elapsed();
 	if ( !ok ) {
 		const QString why = g.error;
-		QTimer::singleShot( 0, g.skope, [why]() { refuseCell( why ); } );
+		QTimer::singleShot( 0, g.skope, [why]() { refuseLoad( why ); } );
 		return;
 	}
-	QTimer::singleShot( g.settleMs, g.skope, []() { measureCell(); } );
+	QTimer::singleShot( g.settleMs, g.skope, []() { measureLoad(); } );
 }
 
 void finishWalk( const QString & why )
@@ -648,6 +1043,7 @@ void finishWalk( const QString & why )
 		return;
 	g.finished = true;
 	const double runS = double( g.wall.elapsed() ) / 1000.0;
+	const int left = g.todo.size() + ( g.queue.isEmpty() ? 0 : 1 );
 	{
 		QFile f( g.logPath );
 		if ( f.open( QIODevice::WriteOnly | QIODevice::Text ) ) {
@@ -655,18 +1051,22 @@ void finishWalk( const QString & why )
 			s << "# WW_CELL_CENSUS_TEST -- lane PRTP5\n";
 			s << "census " << g.censusPath << "\n";
 			s << "plan " << g.plan.size() << " cells: interiors " << g.planInteriors
-			  << ", exterior " << g.planExteriors << ", exterior block " << g.block << "\n";
+			  << ", exterior " << g.planExteriors << ", exterior tile " << g.block << "x" << g.block
+			  << "; units " << g.units.size() << "\n";
 			if ( g.onlyNamed > 0 )
 				s << "sample " << g.onlyNamed << " keys named, " << g.onlyUnknown << " not in the plan\n";
+			s << "slice " << g.sliceI << " of " << g.sliceN << ": " << g.unitsMine << " of "
+			  << g.unitsWanted << " units to walk\n";
 			s << "already in the census " << g.already << "\n";
-			s << "this run: " << g.done << " cells, ok " << g.ok << ", refused " << g.refused
-			  << "; crashed rows written " << g.crashedRows << "; left " << g.todo.size()
-			  << " (" << why << ")\n";
+			s << "this run: " << g.done << " units in " << g.loads << " loads (ok " << g.ok << ", refused " << g.refused
+			  << "), " << g.rows << " rows written (" << g.countOnly << " count only); tiles split " << g.splitUnits
+			  << "; crashed rows written " << g.crashedRows << "; tiles a dead walk left to split " << g.diedTiles
+			  << "; left " << left << " (" << why << ")\n";
 			s << "seconds: run " << QString::number( runS, 'f', 1 )
 			  << "; per interior " << ( g.nInterior ? QString::number( double( g.msInterior ) / 1000.0 / g.nInterior, 'f', 2 ) : QStringLiteral( "-" ) )
-			  << " (" << g.nInterior << "); per exterior "
+			  << " (" << g.nInterior << "); per exterior load "
 			  << ( g.nExterior ? QString::number( double( g.msExterior ) / 1000.0 / g.nExterior, 'f', 2 ) : QStringLiteral( "-" ) )
-			  << " (" << g.nExterior << ")\n";
+			  << " (" << g.nExterior << " loads, " << g.nExteriorCells << " cells)\n";
 			for ( const QString & l : g.failLines )
 				s << "FAIL  " << l << "\n";
 			s << g.checks << " checks, " << g.failures << " failures\n";
@@ -678,11 +1078,19 @@ void finishWalk( const QString & why )
 		markClean();
 		closeMessageBoxes();
 	}
-	if ( qgetenv( "WW_CELL_CENSUS_STAY" ).isEmpty() )
+	if ( qgetenv( "WW_CELL_CENSUS_STAY" ).isEmpty() ) {
 		QTimer::singleShot( 0, qApp, &QCoreApplication::quit );
+		// lane PRTP5: quit() is a request: it closes the windows first and a window may refuse, and asked
+		// before the event loop runs it is lost. A window that found nothing left to load sat until its
+		// timeout, 12 minutes of the NifSkope lock (2026-10-02 13:39). So every two seconds after that
+		// the event loop is told to end without asking anybody, until it does.
+		QTimer * again = new QTimer( qApp );
+		QObject::connect( again, &QTimer::timeout, qApp, []() { QCoreApplication::exit( 0 ); } );
+		again->start( 2000 );
+	}
 }
 
-//! Every interior, then every exterior cell of each worldspace asked for.
+//! Every interior, then every exterior cell of each worldspace asked for; then the units.
 bool buildPlan( QString * err )
 {
 	const bool dropRed = ( g.red == QLatin1String( "dropcell" ) );
@@ -725,7 +1133,7 @@ bool buildPlan( QString * err )
 			if ( !all && !want.contains( ws.second, Qt::CaseInsensitive ) )
 				continue;
 			want.removeAll( ws.second );
-			// kept for the walk: openNext counts a block's references before it opens it
+			// kept for the walk: a tile's references are counted before it is opened
 			std::unique_ptr<EsmWorld> & kept = g.worlds[ws.second];
 			kept = std::make_unique<EsmWorld>();
 			EsmWorld & w = *kept;
@@ -763,6 +1171,33 @@ bool buildPlan( QString * err )
 			}
 		}
 	}
+
+	// ---- the units: an interior each, and the exterior tiles, in the order their first cell is planned
+	QHash<QString, int> tileUnit;
+	for ( int i = 0; i < g.plan.size(); i++ ) {
+		CensusCell & c = g.plan[i];
+		if ( c.interior ) {
+			CensusUnit u;
+			u.cells.append( i );
+			c.unit = g.units.size();
+			g.units.append( u );
+			continue;
+		}
+		const int tx = tileCentre( c.x, g.block ), ty = tileCentre( c.y, g.block );
+		const QString id = tileId( c.world, tx, ty );
+		auto it = tileUnit.constFind( id );
+		if ( it == tileUnit.constEnd() ) {
+			CensusUnit u;
+			u.interior = false;
+			u.world = c.world;
+			u.tx = tx;
+			u.ty = ty;
+			it = tileUnit.insert( id, g.units.size() );
+			g.units.append( u );
+		}
+		c.unit = it.value();
+		g.units[it.value()].cells.append( i );
+	}
 	return true;
 }
 
@@ -787,17 +1222,52 @@ QSet<QString> keysOfFile( const QString & path, bool * existed = nullptr )
 	return keys;
 }
 
+/*! The steps of a visit, from their names. `census` is always first: its rows
+ *  are what a pass resumes from, whatever else the visit does. */
+bool stepsFromNames( const QString & names, QString * err )
+{
+	QStringList want = names.toLower().split( QRegularExpression( QStringLiteral( "[,+ ]+" ) ), Qt::SkipEmptyParts );
+	if ( !want.contains( QStringLiteral( "census" ) ) )
+		want.prepend( QStringLiteral( "census" ) );
+	QStringList done;
+	for ( const VisitStep & st : kSteps ) {
+		const QString n = QString::fromLatin1( st.name );
+		if ( !want.contains( n ) )
+			continue;
+		want.removeAll( n );
+		g.steps.append( &st );
+		g.needScene = g.needScene || st.needsScene;
+		done.append( n );
+	}
+	g.stepNames = done.join( QLatin1Char( '+' ) );
+	if ( !want.isEmpty() ) {
+		*err = QStringLiteral( "WW_CELL_CENSUS_STEPS names a step this walk does not have: %1" ).arg( want.join( QLatin1String( ", " ) ) );
+		return false;
+	}
+	if ( done.contains( QStringLiteral( "bake" ) ) && g.bakeDir.isEmpty() ) {
+		*err = QStringLiteral( "the bake step needs WW_CELL_CENSUS_BAKE, the folder it bakes into" );
+		return false;
+	}
+	return true;
+}
+
 void startWalk()
 {
 	g.wall.start();
 	g_prevHandler = qInstallMessageHandler( captureMessages );
 	QString err;
 	if ( !qgetenv( "WW_CELL_OPEN" ).isEmpty() )
-		err = QStringLiteral( "WW_CELL_OPEN is set: it overrides every spec file, so every cell of the walk would be the same cell" );
+		err = QStringLiteral( "WW_CELL_OPEN is set: it overrides every spec file, so every load of the walk would be the same cell" );
 	else if ( g.plugins.isEmpty() )
 		err = QStringLiteral( "WW_CELL_CENSUS_PLUGINS is not set" );
 	else if ( g.block < 1 || ( g.block % 2 ) == 0 )
-		err = QStringLiteral( "the block size must be odd (1, 3, 5); got %1" ).arg( g.block );
+		err = QStringLiteral( "the tile size must be odd (1, 3, 5); got %1" ).arg( g.block );
+	else if ( g.sliceN < 1 || g.sliceI < 1 || g.sliceI > g.sliceN )
+		err = QStringLiteral( "WW_CELL_CENSUS_SLICE must be i/N with 1 <= i <= N; got %1/%2" ).arg( g.sliceI ).arg( g.sliceN );
+	else if ( g.margin < 0 || g.margin > 4 )
+		err = QStringLiteral( "the ring must be 0 to 4 cells; got %1" ).arg( g.margin );
+	else if ( !stepsFromNames( envStr( "WW_CELL_CENSUS_STEPS", QStringLiteral( "census" ) ), &err ) )
+		;   // err says which step is not one
 	else
 		buildPlan( &err );
 	if ( !err.isEmpty() ) {
@@ -806,48 +1276,11 @@ void startWalk()
 		return;
 	}
 
-	if ( !g.planPath.isEmpty() ) {
-		QFile pf( g.planPath );
-		if ( pf.open( QIODevice::WriteOnly | QIODevice::Text ) ) {
-			QTextStream s( &pf );
-			s << "# cell census plan (lane PRTP5): " << g.plugins << "\n";
-			for ( const CensusCell & c : g.plan )
-				s << c.key << "\t" << hex8( c.form ) << "\t" << ( c.edid.isEmpty() ? QStringLiteral( "-" ) : c.edid ) << "\n";
-		}
-	}
-
-	// ---- what is already there, and the cell a dead walk died on
-	QDir().mkpath( QFileInfo( g.censusPath ).absolutePath() );
-	bool existed = false;
-	QSet<QString> have = keysOfFile( g.censusPath, &existed );
-	if ( !existed ) {
-		appendLine( g.censusPath, QStringLiteral( "# WW cell census v1 (lane PRTP5): one row per cell; plugins=%1; exterior block=%2 (the block column is what a row was opened as); "
-			"refs, refs_drawn and lights_cell are the cell's own, the *_block columns and the drawn counts are the whole block's; "
-			"far=none: nothing beyond the block is drawn; settle %3 ms is inside total_ms" )
-			.arg( g.plugins ).arg( g.block ).arg( g.settleMs ) );
-		appendLine( g.censusPath, QString::fromLatin1( kColumns ) );
-	}
 	QHash<QString, int> byKey;
 	for ( int i = 0; i < g.plan.size(); i++ )
 		byKey.insert( g.plan.at( i ).key, i );
-	{
-		QFile pf( g.pendingPath );
-		if ( pf.open( QIODevice::ReadOnly | QIODevice::Text ) ) {
-			const QString k = QString::fromUtf8( pf.readLine() ).trimmed();
-			pf.close();
-			if ( !k.isEmpty() && !have.contains( k ) && byKey.contains( k ) ) {
-				CensusRow r;
-				r.block = g.block;
-				r.status = QStringLiteral( "crashed" );
-				r.note = QStringLiteral( "the walk died while this cell was open" );
-				writeRow( g.plan.at( byKey.value( k ) ), r );
-				have.insert( k );
-				g.crashedRows++;
-			}
-			QFile::remove( g.pendingPath );
-		}
-	}
 
+	// ---- the sample, if one is named: the units its keys are in
 	QSet<QString> only;
 	const QString onlyPath = envStr( "WW_CELL_CENSUS_ONLY" );
 	if ( !onlyPath.isEmpty() ) {
@@ -860,15 +1293,116 @@ void startWalk()
 		check( g.onlyUnknown == 0, QStringLiteral( "every sampled key is a cell of the plan" ),
 			QStringLiteral( "%1 unknown" ).arg( g.onlyUnknown ) );
 	}
-	for ( int i = 0; i < g.plan.size(); i++ ) {
-		const QString & k = g.plan.at( i ).key;
-		if ( !onlyPath.isEmpty() && !only.contains( k ) )
+
+	/* ---- THE SLICES. The wanted units are numbered in plan order, and unit u
+	 * belongs to slice (u mod N) + 1: next-door tiles go to different walkers,
+	 * so a heavy district is shared out.
+	 * RED `dropslice` (the gate's control): the walkers count the slices one
+	 * too many, so one unit in N + 1 belongs to nobody and every walker still
+	 * says it is done.
+	 * RED `doubleslice`: this walker also walks one unit in five that is not
+	 * its own. */
+	const bool dropSlice = ( g.red == QLatin1String( "dropslice" ) );
+	const bool doubleSlice = ( g.red == QLatin1String( "doubleslice" ) );
+	QVector<bool> mine( g.units.size(), false );
+	for ( int ui = 0; ui < g.units.size(); ui++ ) {
+		CensusUnit & u = g.units[ui];
+		u.wanted = onlyPath.isEmpty();
+		for ( int pi : u.cells )
+			u.wanted = u.wanted || only.contains( g.plan.at( pi ).key );
+		if ( !u.wanted )
 			continue;
-		if ( have.contains( k ) ) {
-			g.already++;
-			continue;
+		u.order = g.unitsWanted++;
+		u.slice = u.order % ( dropSlice ? g.sliceN + 1 : g.sliceN ) + 1;
+		mine[ui] = ( u.slice == g.sliceI ) || ( doubleSlice && ( u.order % 5 ) == 2 );
+		if ( mine.at( ui ) )
+			g.unitsMine++;
+	}
+
+	if ( !g.planPath.isEmpty() ) {
+		QFile pf( g.planPath );
+		if ( pf.open( QIODevice::WriteOnly | QIODevice::Text ) ) {
+			QTextStream s( &pf );
+			s << "# cell census plan (lane PRTP5): " << g.plugins << "; exterior tile " << g.block << "x" << g.block
+			  << "; " << g.sliceN << " slices; columns: key, form, EDID, unit, place among the units walked, slice\n";
+			for ( const CensusCell & c : g.plan ) {
+				const CensusUnit & u = g.units.at( c.unit );
+				s << c.key << "\t" << hex8( c.form ) << "\t" << ( c.edid.isEmpty() ? QStringLiteral( "-" ) : c.edid )
+				  << "\t" << ( u.interior ? c.key : QStringLiteral( "T:%1" ).arg( tileId( u.world, u.tx, u.ty ) ) )
+				  << "\t" << ( u.wanted ? QString::number( u.order ) : QStringLiteral( "-" ) )
+				  << "\t" << ( u.wanted ? QString::number( u.slice ) : QStringLiteral( "-" ) ) << "\n";
+			}
 		}
-		g.todo.append( i );
+	}
+
+	// ---- what is already there, and what a dead walk died on
+	QDir().mkpath( QFileInfo( g.censusPath ).absolutePath() );
+	bool existed = false;
+	g.have = keysOfFile( g.censusPath, &existed );
+	if ( !existed ) {
+		appendLines( g.censusPath, { QStringLiteral( "# WW cell census v2 (lane PRTP5): one row per cell; plugins=%1; exterior tile=%2x%2 "
+			"(tiles do not overlap; `tile` is the tile's centre cell, `block` what the load was opened as, ring %6 included); "
+			"slice %3 of %4; steps %7; "
+			"refs, refs_drawn and lights_cell are the cell's own; refs_block to rss_mb are the whole load's, written on the "
+			"load's first row and ^ on its other rows; build_ms is the whole load and bake_ms the part of it the bake took; "
+			"far=none: nothing beyond the block is drawn; settle %5 ms is inside total_ms" )
+			.arg( g.plugins ).arg( g.block ).arg( g.sliceI ).arg( g.sliceN ).arg( g.settleMs ).arg( g.margin ).arg( g.stepNames ),
+			QString::fromLatin1( kColumns ) } );
+	}
+	for ( const QString & t : keysOfFile( g.splitPath ) )
+		g.splitTiles.insert( t );
+	{
+		QFile pf( g.pendingPath );
+		if ( pf.open( QIODevice::ReadOnly | QIODevice::Text ) ) {
+			QStringList lines = QString::fromUtf8( pf.readAll() ).split( QLatin1Char( '\n' ), Qt::SkipEmptyParts );
+			pf.close();
+			int diedBlock = 1;
+			if ( !lines.isEmpty() && lines.first().startsWith( QLatin1String( "block " ) ) )
+				diedBlock = lines.takeFirst().mid( 6 ).trimmed().toInt();
+			QStringList crashed;
+			for ( const QString & raw : lines ) {
+				const QString k = raw.trimmed();
+				if ( k.isEmpty() || g.have.contains( k ) || !byKey.contains( k ) )
+					continue;
+				const CensusCell & c = g.plan.at( byKey.value( k ) );
+				const CensusUnit & u = g.units.at( c.unit );
+				if ( !c.interior && diedBlock > 1 ) {
+					// a tile: not lost, opened cell by cell from here on
+					const QString id = tileId( u.world, u.tx, u.ty );
+					if ( !g.splitTiles.contains( id ) ) {
+						g.splitTiles.insert( id );
+						appendLines( g.splitPath, { id } );
+						g.diedTiles++;
+					}
+					continue;
+				}
+				CensusRow r;
+				r.block = 1 + 2 * g.margin;
+				r.steps = g.stepNames;
+				r.status = QStringLiteral( "crashed" );
+				r.note = QStringLiteral( "the walk died while this cell was open alone" );
+				crashed.append( rowLine( c, r, true ) );
+				g.have.insert( k );
+				g.crashedRows++;
+			}
+			if ( !crashed.isEmpty() )
+				appendLines( g.censusPath, crashed );
+			QFile::remove( g.pendingPath );
+		}
+	}
+
+	for ( int ui = 0; ui < g.units.size(); ui++ ) {
+		if ( !mine.at( ui ) )
+			continue;
+		int lacking = 0;
+		for ( int pi : g.units.at( ui ).cells ) {
+			if ( g.have.contains( g.plan.at( pi ).key ) )
+				g.already++;
+			else
+				lacking++;
+		}
+		if ( lacking > 0 )
+			g.todo.append( ui );
 	}
 	if ( !g.shotDir.isEmpty() )
 		QDir().mkpath( g.shotDir );
@@ -883,16 +1417,32 @@ void startWalk()
 void wwCellCensusHarness( NifSkope * skope )
 {
 	static bool armed = false;
-	const QString census = envStr( "WW_CELL_CENSUS_TEST" );
+	QString census = envStr( "WW_CELL_CENSUS_TEST" );
 	if ( census.isEmpty() || !skope || armed )
 		return;
 	armed = true;
 
 	g.skope = skope;
-	g.censusPath = QDir::fromNativeSeparators( census );
+	{
+		// `i/N`: this walker's slice. With more than one slice it writes its own part file.
+		const QStringList sl = envStr( "WW_CELL_CENSUS_SLICE", QStringLiteral( "1/1" ) ).trimmed().split( QLatin1Char( '/' ) );
+		g.sliceI = sl.value( 0 ).trimmed().toInt();
+		g.sliceN = sl.value( 1 ).trimmed().toInt();
+	}
+	QString part;
+	census = QDir::fromNativeSeparators( census );
+	if ( g.sliceN > 1 ) {
+		part = QStringLiteral( ".part%1of%2" ).arg( g.sliceI ).arg( g.sliceN );
+		if ( census.endsWith( QLatin1String( ".tsv" ), Qt::CaseInsensitive ) )
+			census = census.left( census.size() - 4 ) + part + QStringLiteral( ".tsv" );
+		else
+			census += part;
+	}
+	g.censusPath = census;
 	g.pendingPath = g.censusPath + QStringLiteral( ".pending" );
+	g.splitPath = g.censusPath + QStringLiteral( ".split" );
 	g.specPath = g.censusPath + QStringLiteral( ".walk.wwcell" );
-	g.logPath = QCoreApplication::applicationDirPath() + QStringLiteral( "/ww_cell_census_test.log" );
+	g.logPath = QCoreApplication::applicationDirPath() + QStringLiteral( "/ww_cell_census_test%1.log" ).arg( part );
 	g.planPath = QDir::fromNativeSeparators( envStr( "WW_CELL_CENSUS_PLAN" ) );
 	g.shotDir = QDir::fromNativeSeparators( envStr( "WW_CELL_CENSUS_SHOTS" ) );
 	g.plugins = envStr( "WW_CELL_CENSUS_PLUGINS" ).trimmed();
@@ -900,9 +1450,11 @@ void wwCellCensusHarness( NifSkope * skope )
 	g.block = envInt( "WW_CELL_CENSUS_BLOCK", 5 );
 	g.settleMs = qBound( 0, envInt( "WW_CELL_CENSUS_SETTLE_MS", 250 ), 60000 );
 	g.budgetS = envInt( "WW_CELL_CENSUS_BUDGET", 480 );
-	g.maxCells = envInt( "WW_CELL_CENSUS_MAX", -1 );
+	g.maxUnits = envInt( "WW_CELL_CENSUS_MAX", -1 );
 	g.rssMaxMb = envInt( "WW_CELL_CENSUS_RSS_MAX", 8000 );
 	g.refsMax = envInt( "WW_CELL_CENSUS_REFS_MAX", 12000 );
+	g.margin = envInt( "WW_CELL_CENSUS_MARGIN", 0 );
+	g.bakeDir = QDir::fromNativeSeparators( envStr( "WW_CELL_CENSUS_BAKE" ) );
 	QFile::remove( g.logPath );
 
 	QObject::connect( skope, &NifSkope::completeLoading, skope,
