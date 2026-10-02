@@ -117,6 +117,8 @@ ClState & st()
 			s.red = 64;	// lane RIM1: the lights' No Rim / Ignore Roughness flags ignored
 		else if ( red == "ambientlit" )
 			s.red = 128;	// lane AMBO1: the Ambient Only lights drawn as ordinary lights
+		else if ( red == "probefx" )
+			s.red = 4096;	// lane FRAT1: effects and refraction shapes drawn into the probe passes again
 	}
 	return s;
 }
@@ -226,6 +228,8 @@ bool wwCellLightsWanted( Scene * scene )
 bool wwCellProbePass( Scene * scene )
 {
 	const ClState & s = st();
+	if ( s.red & 4096 )
+		return false;	// lane FRAT1: WW_CELL_LIT_RED=probefx, the effects write over the probes (as before lane EFX1)
 	return ( s.probe > 0 || s.fogProbe > 0 ) && wwCellLightsWanted( scene );
 }
 

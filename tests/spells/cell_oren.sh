@@ -19,12 +19,20 @@
 #   --red rimflags    the lights' No Rim Lighting / Ignore Roughness flags ignored (lane RIM1; in probe 8 only 6
 #                     of 18,029 lit Institute pixels move, so probe 10 judges it: 12,178 of Vault view 1's clean
 #                     pixels move past twice the tolerance there, measured before it was built)
+#   --red probefx     lane FRAT1: effect and refraction shapes drawn into the probe passes again (as before lane
+#                     EFX1). A mist card about 1% opaque lowers the position probe's high byte one level, so the
+#                     check reads a point 256 units off on each axis. Measured 2026-10-02: Fraternal Post agrees
+#                     90.7% (bar 97%; 6,629 of 69,885 clean pixels rejected, probe 8 itself unchanged on 99.9% of
+#                     them) and FAILS; Pickman Gallery drops to 97.9% and still passes; the Vault has no such card.
 # (WW_CELL_LIT_RED=normalised, the textbook azimuth cosine, is NOT a red: measured 2026-10-01 its gap to the
 # game's form peaks at about half the 8-bit tolerance in the Vault, so no check at this precision can fail it.)
 #
 # CELLS entries are "EDID" or "EDID@x,y,z" (a second camera in the same cell; the shots are named EDID@x,y,z).
+# "EDID@x,y,z~d" pins that view's distance (lane FRAT1; the others use DIST, 1400).
+# The Fraternal Post and Pickman Gallery views look straight down through ceiling mist cards (33 and 72
+# placements): they are in the list so that an effect drawn into a probe pass shows as a mismatch again.
 #
-# USAGE  bash tests/spells/cell_oren.sh [--red lambert|norim|rimflags]
+# USAGE  bash tests/spells/cell_oren.sh [--red lambert|norim|rimflags|probefx]
 
 set -u
 
@@ -57,7 +65,7 @@ PORT="${PORT:-14745}"
 SPEC="$REPO/tests/fixtures/empty.wwcell"
 SIZE="${SIZE:-960x600}"
 # Solomon's house was dropped 2026-10-01: its view has 2 lit legacy pixels (the rest is PBR or unlit)
-CELLS="${CELLS:-Vault111Cryo Vault111Cryo@-15,-421,345}"
+CELLS="${CELLS:-Vault111Cryo Vault111Cryo@-15,-421,345 FraternalPost11501@553,2170,400~600 PickmanGallery01@562,440,150~600}"
 : "${CAM_Vault111Cryo:=-4600,-280,0}"
 
 mkdir -p "$OUT"
@@ -77,13 +85,15 @@ check "the exe and its shaders are current" "$newer"
 
 shoot() {   # shoot <entry> <tag> <env...>
 	local entry="$1" tag="$2"; shift 2
-	local cell="${entry%%@*}" at="" cam=()
+	local cell="${entry%%@*}" at="" cam=() dist="${DIST:-1400}"
 	[ "$entry" != "$cell" ] && at="${entry#*@}"
+	# lane FRAT1: "EDID@x,y,z~d" pins that view's distance
+	case "$at" in *~*) dist="${at#*~}"; at="${at%%~*}" ;; esac
 	local shot="$OUT/$entry.$tag.png" notes="$OUT/$entry.$tag.notes"
 	rm -f "$shot" "$notes" "$OUT/$entry.$tag.cam"
 	local camvar="CAM_$cell"
 	[ -z "$at" ] && at="${!camvar:-}"
-	[ -n "$at" ] && cam=( WW_RENDER_CENTER="$at" WW_RENDER_DIST="${DIST:-1400}" WW_RENDER_FOV=70 )
+	[ -n "$at" ] && cam=( WW_RENDER_CENTER="$at" WW_RENDER_DIST="$dist" WW_RENDER_FOV=70 )
 	# unshadowed and unfogged: the sum is the placed lights alone (cell_shadow.sh / cell_fog.sh judge those)
 	env WW_CELL_SHADOW=0 WW_CELL_FOG=0 "$@" "${cam[@]}" WW_CELL_CAM_DUMP="$(winpath "$OUT/$entry.$tag.cam")" \
 		WW_CELL_OPEN="$ESM|interior|$cell" WW_CELL_DATAROOT="$DATA" \
