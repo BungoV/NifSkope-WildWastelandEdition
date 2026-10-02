@@ -9,6 +9,9 @@ and that multiplier / 4 in 16 bits (73 / 74). This script computes the multiplie
 models on disk, with none of NifSkope's code: its own walk of the cell's references, its own reading of each
 light record and of the placement's fade offset, each model's stored bounds and material, and the game's rule
 for which four lights a model takes (written again here from the notes, not from the viewer's source).
+A material swap (the reference's XMSP, else its base's MODS: an MSWP of original -> replacement material rows)
+replaces the material a shape names before its lighting flag and influence are read: the Vault's dusty mist
+placements swap a 0.95 material for a 1.0 one, and a checker without the swap disagrees on every one of them.
 
 Bars, per view: the share of pixels whose multiplier agrees (the tolerance holds the spread of the expectation
 over +-0.5 unit of position per axis), and the viewer's total over the expected total.
@@ -23,12 +26,13 @@ import os
 import re
 import struct
 import sys
+import zlib
 
 import numpy as np
 from PIL import Image
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from cell_lit_check import euler, record, walk  # noqa: E402  (the plugin walk only)
+from cell_lit_check import euler, fields, record, walk  # noqa: E402  (the plugin walk only)
 from cell_glow_check import NODES, apply, av_object, compose, nif_read  # noqa: E402  (the NIF header and nodes)
 
 PLACED = (b'STAT', b'MSTT', b'ACTI', b'FURN', b'DOOR', b'MISC', b'CONT', b'FLOR', b'TERM', b'IDLM', b'LIGH')
@@ -75,8 +79,15 @@ def merge(a, c):
     return a[0] + (c[0] - a[0]) * ((r - a[1]) / d), r
 
 
-def model_facts(path, data):
-    """(bound sphere of the whole model in model space, [lighting influence of each lit effect shape])."""
+def mat_key(name):
+    """a material path as the swap rows compare it: lower case, forward slashes, no leading materials/."""
+    k = name.replace('\\', '/').strip().lower()
+    return k[len('materials/'):] if k.startswith('materials/') else k
+
+
+def model_facts(path, data, swap=()):
+    """(bound sphere of the whole model in model space, [lighting influence of each lit effect shape]);
+    swap = the placement's material swap rows ((original, replacement), ...)."""
     b, blocks, strings, _ = nif_read(path)
     info, parent = {}, {}
     for i, (t, off, _size) in enumerate(blocks):
@@ -119,6 +130,10 @@ def model_facts(path, data):
         o += 4 + n
         fact = (bool(sf2 & 0x40000000), b[o + 1] / 255.0)
         name = strings[name_i] if 0 <= name_i < len(strings) else ''
+        for orig, repl in swap:
+            if repl and mat_key(orig) == mat_key(name):
+                name = repl
+                break
         if name.lower().endswith('.bgem'):
             rel = name.replace('\\', '/')
             if not rel.lower().startswith('materials/'):
@@ -133,7 +148,22 @@ def cell_of(esm, cell_edid):
     """(lights in record order, {reference: placement}) of an interior cell, from our own walk of the plugin."""
     buf = open(esm, 'rb').read()
     cell_form, ligh, models, refs, start = None, {}, {}, [], {}
+    mods, mswp = {}, {}     # a base's own material swap; each swap's (original, replacement) rows
     for t, form, off, stack in walk(buf):
+        if t == b'MSWP':
+            size, rflags = struct.unpack_from('<II', buf, off + 4)
+            raw = buf[off + 24:off + 24 + size]
+            if rflags & 0x00040000:
+                raw = zlib.decompress(raw[4:])
+            rows = []
+            for tag, p in fields(raw):
+                s = p.split(b'\0')[0].decode('cp1252', 'replace')
+                if tag == b'BNAM':
+                    rows.append([s, ''])
+                elif tag == b'SNAM' and rows:
+                    rows[-1][1] = s
+            mswp[form] = tuple((a, b) for a, b in rows)
+            continue
         if t == b'CELL' and cell_form is None and all(g[2] != 1 for g in stack):
             _, f = record(buf, off)
             if f.get(b'EDID', b'').split(b'\0')[0].decode('cp1252', 'replace') == cell_edid:
@@ -150,6 +180,8 @@ def cell_of(esm, cell_edid):
             m = f.get(b'MODL', b'').split(b'\0')[0].decode('cp1252', 'replace')
             if m:
                 models[form] = m
+            if len(f.get(b'MODS', b'')) >= 4:
+                mods[form] = struct.unpack_from('<I', f[b'MODS'])[0]
             if t == b'LIGH' and b'DATA' in f:
                 ligh[form] = f
 
@@ -168,8 +200,9 @@ def cell_of(esm, cell_edid):
         rot = struct.unpack_from('<3f', f[b'DATA'], 12)
         R = euler(-rot[0], -rot[1], -rot[2])
         if base in models:
+            sw = struct.unpack_from('<I', f[b'XMSP'])[0] if len(f.get(b'XMSP', b'')) >= 4 else mods.get(base, 0)
             placed[form] = dict(pos=pos, R=R, scale=struct.unpack_from('<f', f[b'XSCL'])[0] if b'XSCL' in f else 1.0,
-                                model=models[base], hidden=hidden(form))
+                                model=models[base], hidden=hidden(form), swap=mswp.get(sw, ()))
         b = ligh.get(base)
         if b is None or flags & 0x800:
             continue
@@ -317,13 +350,14 @@ def main():
     # ---- our own list of lit models, and the viewer's against it
     cache, ours = {}, {}
     for form, p in placed.items():
-        if p['model'] not in cache:
+        key = (p['model'], p['swap'])
+        if key not in cache:
             path = os.path.join(data, 'Meshes', p['model'].replace('\\', '/'))
             try:
-                cache[p['model']] = model_facts(path, data) if os.path.isfile(path) else (None, [])
+                cache[key] = model_facts(path, data, p['swap']) if os.path.isfile(path) else (None, [])
             except (struct.error, IndexError, ValueError):
-                cache[p['model']] = (None, [])
-        bound, lit = cache[p['model']]
+                cache[key] = (None, [])
+        bound, lit = cache[key]
         if bound is None or not lit or p['hidden']:
             continue
         c = p['pos'] + p['R'] @ bound[0] * p['scale']

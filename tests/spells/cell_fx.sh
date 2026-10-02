@@ -18,7 +18,8 @@
 # tests/spells/cell_fxlit_check.py computes the multiplier itself from the plugin and the models on disk:
 #   L  the share of pixels that agree >= 95%, and the viewer's total over the expected total within 5%
 #   U  outside the lit effects, every pixel equals the exe before the lane (BEFORE=<exe>; SKIP without one):
-#      the shapes without the flag keep their path
+#      the shapes without the flag keep their path. A camera whose frame shows under 300 such pixels skips U
+#      (every Vault effect carries the flag); U must PASS on at least one camera (the Third Rail's)
 #
 # RED CONTROLS:  --red legacy   the viewer's effect shader (must FAIL stage H)
 #                --red nosoft   the fades held at 1 (must FAIL stage S)
@@ -66,8 +67,8 @@ SIZE="${SIZE:-960x600}"
 # the Vault's cryo walkway (the ground steam, bungo's side-by-side) and its far end
 SHOTS="${SHOTS:-Vault111Cryo:300,-512,40:3:500:0.6 Vault111Cryo:-4600,-280,120:5:350:0.95}"
 # lane FXLIT1: the cryo walkway from bungo's eye (644,-480,60) to the far door
-LSHOTS="${LSHOTS:-Vault111Cryo:384,-480,60:3:260}"
-LPICK="strong"		# the viewer's default pick (src/gl/cellfxlit.cpp)
+LSHOTS="${LSHOTS:-Vault111Cryo:384,-480,60:3:260 GoodneighborTheThirdRail:2932,-636,100:5:350}"
+LPICK="rule"		# the viewer's default pick: the game's rule (src/gl/cellfxlit.cpp)
 LBASE="${LBASE:-$REPO/scratchpad/efx2_20261001/gate}"
 BEFORE="${BEFORE:-$REPO/release/NifSkope.before_fxlit1.exe}"
 case "$RED" in white|nofade|all|nopower) LRED="$RED" ;; *) LRED="" ;; esac
@@ -76,6 +77,7 @@ mkdir -p "$OUT"
 : > "$LOG"
 say() { echo "$@" | tee -a "$LOG"; }
 fails=0
+upassed=0
 check() { if [ "$2" = "1" ]; then say "  PASS  $1"; else say "  FAIL  $1"; fails=$((fails+1)); fi; }
 [ -x "$EXE" ] || { echo "no NifSkope.exe at $EXE"; exit 2; }
 say "cell_fx.sh  $(date '+%Y-%m-%d %H:%M:%S')${RED:+   RED CONTROL: $RED}"
@@ -174,8 +176,14 @@ for shot in $LSHOTS; do
 	shoot "$run" hide "$EXE" WW_CELL_FX_RED=hide
 	python "$(dirname "$0")/cell_fxlit_check.py" --unlit "$run" >"$run/unlit.txt" 2>&1
 	sed 's/^/  /' "$run/unlit.txt" | tee -a "$LOG"
-	check "$cell L$i: outside the lit effects nothing moved" "$(grep -q "^U PASS" "$run/unlit.txt" && echo 1 || echo 0)"
+	if grep -q "^U SKIP" "$run/unlit.txt"; then
+		say "  skip  $cell L$i: too few unflagged effects in view for stage U"
+	else
+		check "$cell L$i: outside the lit effects nothing moved" "$(grep -q "^U PASS" "$run/unlit.txt" && echo 1 || echo 0)"
+		upassed=$((upassed+1))
+	fi
 done
+[ -z "$RED" ] && [ -n "$LSHOTS" ] && [ -x "$BEFORE" ] && check "stage U judged on at least one camera ($upassed)" "$([ "$upassed" -ge 1 ] && echo 1 || echo 0)"
 say ""
 if [ "$fails" = "0" ]; then say "PASS"; else say "FAIL ($fails)"; fi
 exit "$fails"

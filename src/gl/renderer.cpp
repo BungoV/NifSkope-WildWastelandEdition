@@ -1688,6 +1688,22 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 		if ( nifVersion >= 130 ) {
 
 			prog->uni1f( "lightingInfluence", esp->lightingInfluence );
+			if ( wwCellFxLitProbeShape( scene, mesh->id() ) && qEnvironmentVariableIsSet( "WW_CELL_FXLIT_DUMP" ) ) {
+				// lane FXLIT1: what each lit effect's probe drew with, once per shape (the gate's dump)
+				static QSet<int> said;
+				if ( !said.contains( mesh->id() ) ) {
+					said.insert( mesh->id() );
+					int serial = -1;
+					wwCellFxLitFor( scene->nifModel, mesh->id(), &serial );
+					qInfo().noquote() << "cell fxlit: shape" << mesh->id() << "model" << serial << "influence"
+						<< esp->lightingInfluence << "material" << ( esp->getMaterial() ? "read" : "none" )
+						<< "shape name" << mesh->getName();
+					if ( Material * fm = esp->getMaterial(); fm && fm->isEffectMaterial() )
+						qInfo().noquote() << "cell fxlit:   its material: influence"
+							<< static_cast<EffectMaterial *>( fm )->lightingInfluence() << "flags2"
+							<< static_cast<EffectMaterial *>( fm )->effectShaderFlags2() << "textures" << fm->textures().join( "," );
+				}
+			}
 
 			prog->uni1i( "hasNormalMap", esp->hasNormalMap && scene->hasOption(Scene::DoLighting)
 						&& scene->hasOption(Scene::DoNormalMap) );
@@ -1877,8 +1893,14 @@ bool Renderer::setupProgramCE1( const NifModel * nif, Program * prog, Shape * me
 		GLint dst = 0;
 		glGetIntegerv( GL_BLEND_DST_RGB, &dst );
 		prog->uni1b( "fxAdditive", glIsEnabled( GL_BLEND ) && dst == GL_ONE );
-		if ( wwCellFxLitProbeShape( scene, mesh->id() ) )
-			glDisable( GL_BLEND );	// lane FXLIT1: its probes write the lit effects opaque
+		if ( wwCellFxLitProbeShape( scene, mesh->id() ) ) {
+			// lane FXLIT1: its probes write the lit effects opaque, the nearest card winning: layered cards drawn
+			// without a depth write leave the last one drawn, which differed between the five probe runs
+			glDisable( GL_BLEND );
+			glEnable( GL_DEPTH_TEST );
+			glDepthFunc( GL_LEQUAL );
+			glDepthMask( GL_TRUE );
+		}
 	}
 	return true;
 }
