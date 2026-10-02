@@ -1344,6 +1344,23 @@ CabotHouse01 drawn as omni. Lights over the sample: 1545 placed = 1530 lit + 9 o
 (Vault111Cryo 849 = 840 + 4 + 2 + 3). The placed-armor garbage names of the first report are gone (lane MISS1).
 Every exterior row still says `far=none`: the cell view draws nothing beyond what is loaded.
 
+### 2af. Probe previews: the deck's debug views, built (lane PROBEVIEW1, 2026-10-03)
+
+The Division deck shows its probe system through debug views: the GI result alone, sky visibility, the surfels and a probe's links. NifSkope now has all of them behind one Pass drop-down in the PRTP band:
+
+| Pass | What it shows | Source |
+|---|---|---|
+| Combined | the normal frame | - |
+| GI | grid irradiance on the normal, E / pi | the relit six-axis grid (unit 13) |
+| Sky visibility | the probes' open-sky share on the normal | a second grid of the same voxels, blended with the same weights from each probe's 8 octants averaged to 6 axes |
+| Surfel color | each surfel's albedo as a splat | the bake's surfels |
+| Surfel light | each surfel's outgoing light B / pi | the relight's B |
+| + picked probe | lines to every linked surfel | the bake's links, resolved per probe |
+
+What this proves for FO4CS: the sky grid is the same 6-slab layout as the GI grid and needs no new sampler. The links resolve per probe from the stored deltas.
+
+Still open (proposals only; the ranked list is in notes/deck1/DECK_MATRIX.md section F): BOUNCE2 (multi-bounce), ROOMCLAMP1 (doorways), BRICK1, SKYPIC1, FOGGI1, GPURELIGHT1 and STATICCACHE1. Each one is judged in a Pass view.
+
 ## 3. Open
 
 - `.tbk` v4: two surfel sides per cell (gives back the refused thin-wall weight), room ids (2f).

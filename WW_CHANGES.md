@@ -1,5 +1,19 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## PRTP Pass drop-down (lane PROBEVIEW1, 2026-10-03)
+
+The PRTP band gains one row: **Pass**, beside GI. It previews what the probe bake holds, the Division deck's debug views:
+
+- **Combined** - the ordinary picture (unchanged, byte-for-byte against the pre-lane exe).
+- **GI** - every surface shows the probe grid's irradiance on its normal (E / pi, display curve 1/2.2), with no lights, no albedo and no image space. Magenta marks surfaces no probe reaches.
+- **Sky visibility** - the same for each probe's open-sky share (the bake's eight octants, averaged to six axes and blended into a second grid). Interiors read black.
+- **Surfel color / Surfel light** - every surfel drawn as a splat on its surface, colored by its albedo or by its outgoing light B / pi. Bare surface stays magenta, so holes in the surfel cover show.
+- With Show probes on, each probe draws as a box whose six faces carry its own value. Click a probe to draw a line to every surfel it links (yellow outline on the picked box). Click empty space to clear.
+
+The row is off until the document's bake is relit. Harness switches: WW_CELL_PASS (number or name), WW_CELL_PV_PROBE, WW_CELL_PV_DUMP, WW_CELL_PV_ID, WW_CELL_PV_RED.
+
+Gate: tests/spells/cell_pass.sh + cell_pass_check.py. It rebuilds every value from the .tbk files and the collision soup with its own reader and sampler. Three red controls must fail: direct, nonormal and open.
+
 ## Cell view: a NifSkope window that goes through the game cell by cell, checks each cell and can bake its probes (2026-10-02)
 
 - NifSkope can now go through a whole plugin by itself, a piece at a time, without ever loading the whole world:

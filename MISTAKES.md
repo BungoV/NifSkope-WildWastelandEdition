@@ -5,6 +5,16 @@ Written the moment a mistake is recognised, unprompted (CONSTITUTION rule 2).
 Format: date -- what was done -- what was true -- how it was found -- the rule.
 Newest at the top.
 
+## 2026-10-03 PROBEVIEW1: a position-matched check for a splat overlay (F/L at 47%)
+
+Mistake: the Surfel color / Surfel light gate matched each pixel to "a surfel within 0.75 cell of the surface position under it". A splat is a flat card one surfel cell wide. On curved or stepped surfaces it floats off the geometry, so the surface under a pixel is not the splat's surfel. Half the pixels failed while the picture was right.
+
+Fix: an ID render (WW_CELL_PV_ID=1, each splat's color = its index + 1 in 24 bits). The checker reads the exact surfel under each pixel and compares the value-pass picture there. Splats shrank to 0.6 of a cell.
+
+Rule: when a gate checks an overlay drawn by the app itself, have the app render an ID buffer of that overlay. Don't infer the identity from the scene geometry under it.
+
+Second: `${!cv}` in a loop body that never set cv gave "invalid indirect expansion". Set the indirection variable where it is used.
+
 ## 2026-10-02, lane PRTP5 (going through the game cell by cell)
 
 - eol_restore.py on a NEW file. I ran it on the untracked src/cellcensustest.cpp after each edit, as COMMON.md says
