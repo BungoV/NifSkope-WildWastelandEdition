@@ -5,6 +5,78 @@ Written the moment a mistake is recognised, unprompted (CONSTITUTION rule 2).
 Format: date -- what was done -- what was true -- how it was found -- the rule.
 Newest at the top.
 
+## 2026-10-02 -- MISS1: Python with a backslash typed into a bash heredoc, twice; a source edited while its build ran; probe output that printed the whole population
+
+- What was done: (1) A scratch script written through a bash heredoc contained `mdl.replace('\\', os.sep)`;
+  the heredoc halved the backslashes and Python stopped with a syntax error. Later the same day an inline
+  `python -c` searched the exe for `'\\blackplane01.nif'`; the shell turned `\b` into a backspace, the search
+  matched nothing and printed 0, and for a minute the build looked as if the edit had not landed. (2) I edited
+  src/cellview.cpp (the marker rule) while the first build of the lane was still compiling, so I could not say
+  whether that hunk was in the exe, and paid for a second build to be sure. (3) Two probes printed their whole
+  population (86 lines of differing references, 60 grep lines, later a 70-line shape listing) where one verdict
+  line was wanted.
+- Why it was wrong: (1) is the trap the commit skill names in its first section; a search that matches nothing
+  is indistinguishable from a real zero. (2) breaks "one build, then verify": an exe of unknown content is not a
+  result. (3) spends the context the lane is budgeted on.
+- Rule: Python that contains a backslash goes into a script FILE written with the Write tool (or uses chr(92)),
+  never a heredoc or `python -c`. A zero from a search is believed only after the same search finds a string
+  known to be there. No edit to a source file between the start of a build and its return code. A probe prints
+  a count and at most six examples; the full list goes to a file in the scratch folder.
+
+## 2026-10-02 -- AO1: a green gate that judged 4% of the picture; a coverage floor that measured the camera; a shader rule left out as a footnote
+- The first agent's one green run judged "the light the picture got" on 20,260 px, 4% of the frame: the check
+  reads only pixels that end on a solid surface, and steam and glow cards (even their clear texels) lay over 96%
+  of that Vault 111 view. The pass printed PASS and nobody read the pixel count. Found by the second agent
+  reading the count. The gate now hides the effects in both windows and fails under 50% of the geometry.
+  Rule: a PASS line carries its sample size, and the gate fails when the sample is a sliver.
+- The second agent's first floor was "30% of the frame". The Third Rail view is 79% empty space, so a correct
+  build failed it. The floor is now a share of the geometry. Rule: a coverage floor counts what the code can
+  cover, not what the camera frames.
+- The first agent's notes said the game's history restart rule was "not modeled" and left it out of the gate.
+  It moves 0.4-0.5% of pixels by 0.2 on average. It is modeled and gated now (red `noreset`). Rule: a rule
+  read from the shader and left out is listed as open with its measured size, not as a footnote.
+
+## 2026-10-02 -- POOL1: a one-probe tolerance, a search by shape, a shared probe number, flattened endings
+- **A checker's tolerance covered the rounding of one probe only (POOL1, 2026-10-01).** cell_spec_check.py
+  rebuilds a sharp highlight from 8-bit probes; its tolerance took half a step of the gloss but not of the normal
+  or the position, and the green gate failed at 94.1% beside one lamp. Then a x1.3 scale error passed one view
+  pixel by pixel because dim highlights sit inside the fixed floor. Rule: a checker that rebuilds a sharp
+  function takes the spread over every rounded input, and carries a second bar that a wrong scale cannot pass
+  (here the total over the highlight pixels within 5%); prove it with scaled mutants.
+- **"Not in the shader dump" claimed after searching by shape (POOL1, 2026-10-01).** The reflection march was
+  looked for among shaders with loops; it is unrolled (32 steps written out), so it was missed and the lane
+  first reported it absent. Rule: look for a shader by what it reads and writes, not by how it is written,
+  before saying it is not there.
+- **Two lanes picked probe 11 in parallel (POOL1 / AMBO2, 2026-10-01).** Found only at the merge; POOL1 moved to
+  30. Rule: a brief hands out probe numbers the way it hands out red bits.
+- **The Edit tool flattened mixed line endings during a merge (POOL1, 2026-10-02).** Resolving a conflict with
+  Edit rewrote cell_lights.glsl and celllights.cpp as all LF (153 and 450 lines), and eol_restore.py compares to
+  HEAD only, so it cannot give main's lines their endings back in a merge. Rule: after every Edit inside a merge,
+  compare each line's ending with both parents before staging (a merge-aware eol_restore is owed to the lanes
+  folder; the scratch one is scratchpad/pool1_20261001/eol_merge_restore.py).
+
+## 2026-10-02, lane GLOW1: the cause was named before its size was measured
+
+- What happened: the lane found glow cards lying flat at the pod bases and called them the cause of the missing
+  spill, then built the fix. Only afterwards was the card's strength measured: under 2% opaque, +0.03 to
+  +0.4/255 beside a pod. The fix is correct (the game does turn them) but it cannot be the spill that was asked
+  about. The notes also carried "opacity <= 9%": the effect shader applies the material alpha twice, the real
+  figure is 1.8%.
+- Rule: when a candidate is "something we do not draw", estimate what it would add (alpha x color, in levels)
+  BEFORE building it. If the number is below what the eye would report, keep looking and say so.
+- Second one, same lane: a gate camera was moved and the gate queued without that camera ever being rendered
+  and judged once. The first real run failed on it. Rule: a gate is not written until every one of its cameras
+  has been through the checker once, green and red.
+
+## 2026-10-01 -- AMBO1/AMBO2: the ambient pass called full screen; radii written as XRDS alone; a sed -i edit
+- AMBO1's notes called the game's ambient pass full screen and framed the open question as a camera zone. It is a
+  world-space sphere (1.22077 x the radius) drawn only when the pass has lights; AMBO2 found it by reading the
+  pass's transform setup. Rule: read a pass's transform setup before calling its coverage.
+- AMBO1 listed the Vault spheres' radii as XRDS alone (1118, 291, 779); the radius is base 256 + XRDS (XRDS is a
+  delta). Rule: a radius quoted from a ref is base + XRDS, said so.
+- AMBO2 changed a docstring in tests/spells/cell_lit_check.py with sed -i (lane rules: Edit/Write only on tracked
+  files); EOL-restored, diff clean.
+
 ## 2026-10-01 -- BASE1: "the 09-24 exe also differs from the lodgen baseline", written without the control run
 - HANDOFF (04:09 block) said the stock lodgen baseline differed for the 09-24 exe as well as the current one, which
   read as game data having moved. The 09-24 exe still gives its own baseline 25 of 25; only the code moved (lane

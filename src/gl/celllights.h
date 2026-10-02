@@ -29,8 +29,9 @@ BSD License - see nifskope.h
  * 3 its low bytes (each over the 65536-unit box centred on the published centre), 4 the world
  * normal * 0.5 + 0.5), WW_CELL_LIT_RED=<red>: "linear" (the radial curve without its 2.2 power),
  * "axis" (spots shine along -Z), "nodalc" (the interior ambient dropped), "ambientlit" (the Ambient Only
- * lights, which add no direct light in game, drawn as ordinary lights; lane AMBO1). Probe 5 (lane PRTPGI): the
- * bounce's irradiance E(N) / pi, raw. */
+ * lights, which add no direct light in game, drawn as ordinary lights; lane AMBO1), "ambientfull" (the Ambient
+ * Only lights' ambient adjustment ignored; lane AMBO2). Probe 5 (lane PRTPGI): the bounce's irradiance E(N) / pi,
+ * raw. Probe 11 (lane AMBO2): the interior ambient's per-channel affine sum before its 2.2, x 8, clamped to 0..1. */
 
 #include <QString>
 #include <QVector>
@@ -57,10 +58,22 @@ struct WwCellLight
 	float shadowBias = 0.0f;        //!< XLIG Shadow Depth Bias (read and echoed; its scale is unread, not applied)
 };
 
+/* lane AMBO2: an Ambient Only light (LIGH flag 0x100000) as the game draws it: a sphere volume of 1.22077 x its
+ * radius (base + XRDS) at the light; the cell ambient of every surface inside it has each channel's affine sum
+ * (before the 2.2) scaled by k = pow(byte / 255, 2.2) x fade. The first light in plugin order that holds a
+ * point wins; it replaces the cell ambient there, never adds. No fade at the edge, no camera rule. */
+struct WwCellAmbientLight
+{
+	float pos[3] = { 0, 0, 0 };     //!< world
+	float volume = 0.0f;            //!< 1.22077 x radius
+	float k[3] = { 1, 1, 1 };       //!< per channel, folded into the ambient before its power
+};
+
 struct WwCellLighting
 {
 	bool interior = false;
 	QVector<WwCellLight> lights;
+	QVector<WwCellAmbientLight> ambientLights;  //!< lane AMBO2, in plugin order (the first that holds a point wins)
 	bool hasDalc = false;
 	float dalc[6][3] = {};          //!< byte / 255 as stored (PRTP2 powers AFTER the affine sum), X+ X- Y+ Y- Z+ Z-
 	bool hasDirectional = false;
@@ -179,5 +192,24 @@ QString wwCellImageSpaceEcho( Scene * scene );
  *  pixel out of that light's reach). */
 void wwCellShadowPass( Scene * scene );
 QString wwCellShadowEcho( Scene * scene );
+
+/*! THE AMBIENT OBSCURANCE (lane AO1, docs/PRTP_PLAN.md "ambient obscurance"): the game's screen-space obscurance, from its own
+ *  shaders. Its settings are the INI's, never the cell's (radius 108.2, bias 0.6, intensity 7.1 game units, on
+ *  in every cell). The game computes it at half the view from the opaque pass's depth and normals: 5 taps over
+ *  2 turns, a disc of radius x 100 / depth pixels, the depth read from a min-of-2x2 mip by the tap's reach,
+ *  1 - intensity x sum f^3 max((v.n - bias') / (v.v + 0.01), 0) / r^6 with f = max(r^2 - v.v, 0), the bias
+ *  growing past 0.3 of 7000 units and toward the screen edge; turned by a random angle each frame and kept
+ *  0.99 of the history, which starts over from a frame at 0.95 or more when it is under 0.7 (a still view =
+ *  that history's time average, over kAoAngles angles here); then a 7-tap bilateral blur across and down. It multiplies EVERYTHING its deferred composite writes (the lights, the
+ *  ambient, the specular, emissive, reflections) before the fog; nothing drawn blended (forward) or as an effect.
+ *  Here: wwCellAoPass draws the frame's opaque cell-lit fragments once more (probe 20: view normal, linear
+ *  depth) into a full-size float target, runs res/shaders/cell_ao.frag over it, and the cell programs multiply
+ *  their lit colour by the bilinear sample before their fog. Part of the Cell lights row.
+ *  Pins: WW_CELL_AO=0 (none computed), WW_CELL_AO_RED=off (computed, not applied) | radius (half the radius)
+ *  | noblur (the raw value applied) | noreset (the plain mean over the angles), WW_CELL_AO_DUMP=<file> (the
+ *  opaque pass, the raw and the final obscurance, the numbers; tests/spells/cell_ao.sh). */
+void wwCellAoPass( Scene * scene, bool run );
+//! called with every program setupProgram binds: the opaque pass's masks, and the obscurance a cell-lit draw reads
+void wwCellAoDraw( Scene * scene, bool cellProgram );
 
 #endif

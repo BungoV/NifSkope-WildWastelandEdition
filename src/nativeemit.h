@@ -89,6 +89,14 @@ struct NativeSrcShape
 	QByteArray effectBlock;
 	quint16 alphaFlags = 0;
 	float refractStrength = 0.0f;  //!< lane EFX1: a Refraction-flagged lighting property's strength
+	/*! Lane GLOW1: the shape hangs under an NiBillboardNode (the Vault's pod-base glow cards).
+	 *  `geom` stays model space as authored, so no bake moves; the cell view reads the node's
+	 *  model-space transform (rotation row-major, model = R * local * scale + pos) and mode. */
+	bool billboard = false;
+	float bbPos[3] = { 0.0f, 0.0f, 0.0f };
+	float bbRot[9] = { 1, 0, 0, 0, 1, 0, 0, 0, 1 };
+	float bbScale = 1.0f;
+	int bbMode = 0;
 	float matAlpha = 1.0f;     //!< the BGSM/BGEM fAlpha
 	//! The shape named a material and NOTHING resolved: drawn neutral and counted, not magenta.
 	bool matUnreadable = false;

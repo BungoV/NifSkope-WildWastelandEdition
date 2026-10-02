@@ -472,20 +472,198 @@ Under the nosoft red that ratio is 0.999 / 0.998: the Soft fade, not the dropped
 haze. Walkway, imagespace on: frame mean 109.6 -> 93.6 (out of 255). cell_is.sh 3/3 PASS with the effects in the
 measure (Vault: the steam leaves 4% of the frame as opaque cell-lit pixels to compare, 99.71% within 3/255).
 
+### 2r. Ambient Only lights scale the ambient (lanes AMBO1 + AMBO2, 2026-10-01)
+
+A light with LIGH flag 0x100000 lights nothing directly (AMBO1 drops it from the direct lights). It changes the
+cell ambient inside a sphere of 1.22077 x its radius, radius = base + XRDS (XRDS is a delta). Inside, each
+channel's ambient sum (the DALC rows dotted with (N,1)) is multiplied by pow(color/255, 2.2) x dimmer before the
+ambient's own 2.2; dimmer 0.5 leaves about 0.22 of the ambient. Per pixel: the first light in plugin order that
+holds the point wins, and it replaces the ambient, never adds. No edge fade, no camera rule. The game culls the
+light by its plain radius against the view; not modelled (a screen-edge strip only). Vault111Cryo's three spheres:
+(-1011,1911,-69) 1677, (-2410,32,30) 668, (-3594,-222,157) 1264 (the radii first written here were XRDS alone).
+Census: 39 placed in 23 cells, at most 5 in one cell; the shader takes 16. Summary "ambientonly=N
+ambientvolumes=N". Reds WW_CELL_LIT_RED=ambientlit (drawn as direct lights again; run with CELLS=Vault111Cryo,
+Solomon has none) and ambientfull (the scale ignored). Gate cell_lit.sh's Ambient Only view (look-at
+-4200,-250,0, eye 800 away; probe 11 = the ambient sum x 8): inside 100.0% of 410,294 px, outside 99.9%; red
+ambientfull 0.0%.
+
+### 2s. Camera-facing glow cards (lane GLOW1, 2026-10-02)
+
+A shape below an NiBillboardNode is turned to the camera by the game. The cell view welded it into the cell
+flat: the Vault's GlowFillCloudy discs on the cryo pod bases (Effects\Ambient\GlowFillCloudy.nif, node
+GlowMesh128, mode 4; material AmbGlowFillCloudyHalf.bgem through a material swap) lay horizontal, edge-on from
+eye height. Now the generator's loader records the nearest billboard ancestor per shape (transform and mode;
+geometry untouched, bakes do not move: lodgen_native_baseline.sh --check 24 of 24 identical), and the cell view gives each
+such shape, per placement, its own bucket under its own NiBillboardNode (translation = the world pivot, scale =
+placement x node), which the viewer turns to the camera. Every mode is turned the same way (card plane = screen
+plane). Cap 8192 per cell, the rest welded flat and counted. Census line "billboards: N shapes turned to the
+camera, M welded flat". Vault111Cryo: 165 (167 on 10 models, 2 under an opposite-state enable parent).
+Rides the Cell lights row. Red WW_CELL_GLOW_RED=1 (welded flat as before).
+How much it shows: little. The material's alpha is 0.2 and the effect shader applies it twice (0.04), the base
+texture's alpha is at most 115/255, so a card is under 2% opaque. Measured over the flat reference, imagespace
+off: from the walkway's start (cards 700 to 930 units away, overlapping) the best circle gains a mean +1.93/255;
+beside a pod (220 to 430 units) the best gains +0.32. Holding the Soft fades at 1 does not change the near
+figure (+0.040 against +0.029 over the frame). With the imagespace on the frame moves by about one level
+(the exposure measure sees the cards). So this is the haze, not a pool of light on the floor: the floor under
+each base is lit by the placed lights there (radius 46 fade 7.82, radius 72 fade 2.34, radius 97 fade 1.88,
+all drawn since 2a) and by the bloom (bloom on - off beside a pod: max +88/255, >= 8 levels on 0.62% of the
+frame).
+Gate tests/spells/cell_glow.sh (checker's own plugin and mesh walk; each camera names its stages): K the
+census count = the walk's (165 = 167 - 2), N 99.999% of 235,914 px outside the predicted circles unmoved (near
+camera), C 5 of 33 circles gain >= 0.5/255 (far camera). Red flat: K 0 turned, C 0 of 33.
+Not done: the references' emittance (XEMI) tint on the cards (white is used; it can only tint or darken).
+
+For section 3 (Open), one line:
+- Vault 111 pod bases: the glow cards are drawn (2?) but add under 2%; compare in game beside a pod whether the
+  spill is the haze or the lit floor (lights + bloom).
+
+### 2t. The walkway's highlight pools; the lights' specular held by a gate (lane POOL1, 2026-10-02)
+
+The bright pools on the Vault 111 cryo walkway floor in the game are not the placed lights' specular. Read from
+the game's shipped shaders:
+- A light flagged Non Specular (LIGH 0x8000) is drawn with the light shader variant that writes zero to its
+  specular target. Of the 29 lights nearest the walkway 14 carry the flag; the rest add a broad, weak specular
+  (floor gloss about 0.43: mean 0.023 linear before the 0.37 mask), in the game and in the cell view alike.
+- The pools are the composite's env term: out += refl x envI x envScale x D, with
+  envI = mask x 3 x min(sqrt(sat(gloss - 0.3)), 1), envScale = the material's env mask scale (at most 50),
+  D = 3 x the pixel's own diffuse light (no albedo), and
+  refl = lerp(cube, screen-space reflection colour x a scale, min(its confidence x a scale, 1)).
+  The floor's material (V111HallFloor01) has screen-space reflections on, env scale 1.5, _s red mean 0.37, green
+  mean 0.433: a full-confidence reflection adds about 0.6 x the reflected scene colour x D, against about
+  0.004 x D from its dim cube map. Because of D it peaks under each lamp: the pools. The neighbouring materials
+  (V111Concrete02, V111Metal04) have the reflections off.
+- The reflection chain in the shipped shaders: a ray setup pass (the view ray reflected about the gbuffer normal,
+  only where the material's flag is set); a 32-step march over a depth pyramid (starts 4 mips down, a 4x4 dither
+  on the start, confidence = centre-of-screen fade x ray-length fade over half a screen x depth-gap fade,
+  squared); a 5-tap blur run twice (weights 0.0939 0.2042 0.3040 0.3040 0.0939, taps without a hit skipped);
+  then the composite above.
+Not built: the cell view draws no screen-space reflections. Open before a lane can build them: what fills the
+pass's four scale constants (colour scale, the ray's facing gate, the normal's vertical scale, the confidence
+scale), and whether the reflected colour is this frame's or the last one's. The result enters through the env
+term (lane CUBE1's).
+Built: nothing drawn changes. The Non Specular flag (already honoured) is held by a gate. tests/spells/
+cell_spec.sh: probe 30 = the placed lights' specular / 4 before the mask; cell_spec_check.py rebuilds it per pixel
+from the plugin's lights with the game's form (n = 2^(10 gloss + 1), D = NdotH^n (n + 2) / 2 pi, the geometry
+select, Schlick at 0.2, min(D G F / 4, 15) x pi). Two views of the walkway: agree 100.0% / 100.0% (where a
+highlight shows 100.0% of 871 px / 99.8% of 412 px), viewer total / expected total 0.998 / 1.003 (bar 5%). Red
+WW_CELL_SPEC_RED=nonspec (the flag ignored): 85.4% / 61.0% where shown, totals 1.117 / 1.341, FAIL in both
+views. Left open: the cell view multiplies the lights' specular by the material's specular colour; the game's
+deferred lights read only the specular scale (white on this floor).
+
+### 2u. The game's screen-space ambient obscurance (lane AO1, 2026-10-02)
+
+The game darkens creases, corners and the ground under clutter with a screen-space pass. Its settings are the
+INI's, the same in every cell: radius 108.2, bias 0.6, intensity 7.1 (game units). Nothing comes from the cell,
+its imagespace or its lighting template. It runs at half the view from the opaque pass's depth and normals:
+- depth mips, each the min of 2x2 of the one above (5 levels);
+- per pixel 5 taps over 2 turns (angle step 2.512) on a disc of radius x 100 / depth pixels, each tap's depth
+  read from the mip floor(log2 reach) - 3; A = max(0, 1 - intensity x sum f^3 max((v.n - bias') / (v.v + 0.01),
+  0) / r^6), f = max(r^2 - v.v, 0), bias' = bias + 10 max(d - 0.3, 0) + 5 |ndc|^2, d = depth / 7000;
+- the tap pattern turns by a random angle each frame (only up to depth 3500) and the game keeps 0.99 of the
+  history, so a still view shows a time average. The history starts over from the frame's value when that is
+  0.95 or more and the history is under 0.7;
+- a bilateral blur across, then down: 7 taps 2 pixels apart (0.153170, 0.444893, 0.422649, 0.392902), cut by
+  2000 x the depth-key difference.
+It multiplies everything the game's deferred composite writes (direct light, ambient, specular, emissive,
+reflections) before the fog. Blended surfaces and effects are drawn after it and do not take it.
+
+In the viewer (part of the Cell lights row, no menu row, no INI key): wwCellAoPass draws the opaque cell-lit
+shapes once more (probe 20: view normal + depth in game units) into a full-size float target, cell_ao.frag runs
+the mips, the raw pass and the two blurs at half size, and the cell programs multiply their lit color by the
+bilinear sample before their fog (never when blending is on). A still view = the mean over 8 evenly spaced
+angles, plus the history restart as a closed-form average (it can fire on 0.4-0.5% of pixels and lifts them by
+about 0.2). Cost 3-22 ms a frame at 960x600. The texture sits on unit 16 of the cell programs.
+
+Pins: WW_CELL_AO=0 (none computed), WW_CELL_AO_RED=off (computed, not applied) | radius (half) | noblur |
+noreset (the plain mean), WW_CELL_AO_DUMP=<file>.
+
+Gate tests/spells/cell_ao.sh + cell_ao_check.py (an independent numpy rebuild from the dumped depth and
+normals, effects hidden in both windows), Vault111Cryo / DmndSolomonsHouse01 / GoodneighborTheThirdRail:
+- E the dumped normals belong to the dumped depth's surface: 97.4 / 93.7 / 83.9% (x unmirrored: 58.7 / 64.2 / 56.2%)
+- A the raw obscurance within 0.01: 100% each
+- R the history restart vs a frame-by-frame run: mean |d| 0.0061 / 0.0047 (third cell: 4 px, not judged)
+- B the blur within 0.01: 100% each
+- C the light the picture got (with / without) vs the rebuild, within 0.02: 100.00% of 523,868 / 482,695 /
+  112,773 px = 97 / 92 / 99% of the geometry
+Reds on Vault111Cryo, each fails its stage: off -> C 48.89%, radius -> A 56.22%, noblur -> B 58.59%,
+noreset -> R mean |d| 0.1939.
+
+With the imagespace on, the obscurance lowers the measured light and the exposure rises a little, as in game
+(the door-room picture's mean goes 61.2 -> 61.5 of 255 while its creases darken).
+
+Assumed, not measured: the depth mips are point sampled, the composite's upsample is bilinear, and 8 evenly
+spaced angles stand in for the game's continuous random angle (closed form vs frame-by-frame: max 0.068).
+Open: compare one in-game still against the viewer at the Vault 111 cryo walkway; these three assumptions are
+what such a capture would settle.
+
+### 2v. Placed models drop their root transform; a cell opens in its first-load state (lane MISS1, 2026-10-02)
+
+bungo circled two spots on the Vault 111 cryo walkway where geometry was missing. Located first (camera of the
+marked shot: look-at 384,-480,60, view 3, distance 260, FOV 70; both marks lie on the plane z = -74):
+- Mark A, world about (124,-699,-74): ref 0000194b STAT V111RPit2WallMid02
+  (Interiors\Vault\Vault111\Rooms\V111RPit2WallMid02.nif), shape "V111RPit2WallMid02:25", the alpha-tested
+  floor grate quad.
+- Mark B, world about (310..446,-347,-74): ref 0000192f, same model, shapes ":25" (grate) and ":18" (trim).
+Every other shape the plugin puts in the two boxes (16 references each) was already drawn in place. No decal
+lies in either mark (one TXST reference within 60 units of mark B, none at A); no actor within 60 units.
+
+The rule. A placed model's ROOT node takes the reference's transform; the transform stored on the root in the
+model file is not applied. V111RPit2WallMid02 stores a half turn about Z there, so the cell view drew the wall
+piece turned around (its box 150.5 units off) and the grate landed under the wall. Proof from the game's own
+data: the cell's combined meshes (Fallout4 - MeshesExtra.ba2, meshes\precombined\<cell form>_<hash>_oc.nif)
+store each instance's transform and world bound; over Vault111Cryo 57 shapes of root-carrying models fit only
+"root dropped", 0 fit only "root kept" (4 either, 5 neither); InstituteConcourse 16 / 0 (139 either).
+Game-wide 305 of 19,912 loose placeable models carry a root transform.
+
+The start state. A reference with an enable parent (XESP) starts shown when the PARENT's start state differs
+from the XESP "opposite" bit; the parent's own state comes from its initially-disabled flag or its own parent.
+The cell view used only the reference's own flag and the bit. Vault111Cryo: 88 parented, 86 change (parents
+002075e4 and 000481d4, both initially disabled; all in the pod room and the entrance). InstituteConcourse:
+1939 parented, 1592 change (XMarker 00248509 alone holds 900 the old view drew and the game starts hidden).
+
+Built (commit 0e82541b on miss1-20261002; main 5431a9f2 merged in as 8f224946, rebuilt, every gate below
+run on the merged exe):
+- src/lodgen.cpp/.h: lodgenNativeLoadModelPlaced(), the node chain without the root. src/cellview.cpp loads
+  placed references through it and follows the enable-parent chain (a parent outside the loaded block counts
+  as enabled). Markers\BlackPlane01.nif is drawn (no marker flag on its base; all 19 references are in the
+  cell's combined list). src/esmdata.cpp: a clothing record's world model is MOD2 / swap MO2S.
+- The marker flag (0x00800000) is honoured for ACTI, DOOR, FURN, STAT only, as the record definitions have it.
+- Gate tests/spells/cell_refs.sh + cell_refs_drawn_check.py (own plugin walk, own model reader). Per cell five
+  rows: census (plugin = viewer's list), drawn (every reference with a model the game shows at start is
+  drawn), hidden (none of the others is), placed (each drawn box against a box rebuilt from the model file
+  without its root, bar 0.05 units), anchor (the combined meshes side with "root dropped").
+  Green, 14 rows: Vault111Cryo 3087 references, 1397 / 1397 drawn, 1690 others 0 drawn, 1394 boxes worst
+  0.001; DmndSolomonsHouse01 200, 193 / 193, 7; InstituteConcourse 6714, 3960 / 3960, 2753, 3954 boxes worst
+  0.001. Named SKIPs: Dmnd has no root-carrying model (anchor); platformhelperfree01 not judged.
+  Reds on Vault111Cryo, each FAILS: WW_CELL_REFS_RED=root (the old placement) fails the placed row, worst
+  error 150.485 against the 0.05 bar, 12 boxes over it, the three V111RPit2WallMid02 references first;
+  WW_CELL_REFS_RED=parent (the old start rule) fails the drawn row (19 the game shows are not drawn: ceiling
+  lamps, light beams, fixtures of the pod room) and the hidden row (7 the game hides are drawn).
+- tests/spells/cell_open_check.py and cell_glow_check.py mirror the root rule, the black plane and the
+  enable-parent rule. Existing gates re-run green on the merged exe: cell_open.sh (placement boxes, its own
+  copy of the rules), cell_glow.sh (the cards' transform now comes from the root-less chain; stage K reads
+  167 turned, 0 on references that start disabled, where the old rule gave 165 + 2), cell_fx.sh (effect meshes
+  go through the new load), cell_lit.sh (the lit room whose walls moved). cell_lights.sh is not reached: the
+  light list is unchanged.
+
+Open:
+- The light list's on/off rule still ignores enable parents: Vault111Cryo 28 of 849 placed lights are lit by
+  the view and off at the game's start; InstituteConcourse 1265 of 1776. One rule, one place (the light
+  list in src/cellview.cpp); left to the light lanes.
+- The LOD bake and the near bake still compose the root transform.
+- Weapons assembled from parts (the 10mm pistol in Vault111Cryo), particle-only effects (FXDripsBig,
+  FXSteamVent01), decals and actors are not drawn.
+- "A parent outside the loaded block counts as enabled" has no test: no such reference in the three gate
+  cells or Vault75.
+- The cell view has no way to show a later quest state (the roughly 1,600 Institute references that wait on
+  a quest are now hidden). A view option is bungo's call.
+- 5 shapes in Vault111Cryo's combined meshes fit neither rule; not explained.
+
 ## 3. Open
 
 - `.tbk` v4: two surfel sides per cell (gives back the refused thin-wall weight), room ids (2f).
 - Glass tint in the bake.
-- Ambient Only lights (LIGH flag 0x100000; 39 placed, names like "AmbientModifierDarkGrey01Amb"): read from the
-  game's shaders, such a light does not light anything directly. When it heads the light list of the deferred
-  ambient pass, the cell's directional ambient is scaled by its colour (2.2-decoded) x dimmer before the pass's own
-  2.2 (dimmer 0.5 -> about 0.22 of the ambient). The ambient pass is full screen, so the open question is how the
-  light gets into that list: camera inside its sphere (a zone) or its sphere on screen. Vault111Cryo has three
-  (-1011,1911,-69 r1118; -2410,32,30 r291; -3594,-222,157 r779), none near the walkway. Settle in game: stand
-  inside / outside one and compare. Lane AMBO1 (2026-10-01) drops them from the direct lights (summary
-  "ambientonly=N"; red WW_CELL_LIT_RED=ambientlit draws them again and FAILS cell_lit, 86.0% vs 99.9%); the ambient
-  scale itself waits on that question. List:
-  scratchpad/ltype1_20261001/ambient_only.py, ambient_refs.py.
+- Ambient Only lights: done in 2r. Optional: compare in game at Vault 111's west end.
 - Save names for the PRTP4 capture flights.
 - FraternalPost11501 seen from straight above (center 553,2170,400, distance 600) and PickmanGallery01 (562,440,150):
   probe 8 and the diffuse check part on 13% / 9% of clean pixels, flags honoured or not. The Fraternal patch

@@ -127,6 +127,13 @@ struct Bucket
 	bool emits = false;
 	float emissiveScale = 1.0f;
 	bool withColour = false;
+	/* Lane GLOW1: one placement's billboard shapes, emitted under their own NiBillboardNode at
+	 * bbPos (world) and bbScale, vertices in the node's frame, so the renderer turns them to the
+	 * camera as the game does. Welded flat they lie edge-on to the eye: the pods' missing glow. */
+	bool billboard = false;
+	Vector3 bbPos;
+	float bbScale = 1.0f;
+	int bbMode = 0;
 	std::vector<OutVert> verts;
 	std::vector<BucketTri> tris;   // 32-bit: a bucket welds far more than 65,536 vertices
 };
@@ -252,6 +259,10 @@ QString overlayKeyLabel( quint64 key )
 bool isMarkerModel( const QString & model )
 {
 	const QString m = model.toLower();
+	// lane MISS1: the black plane lives in the markers folder and is no marker -- the game draws it, in every
+	// cell's own combined meshes (its editor-only copy is a shape named EditorMarker, dropped by the loader)
+	if ( m.endsWith( QLatin1String( "\\blackplane01.nif" ) ) )
+		return false;
 	return m.contains( QLatin1String( "\\marker" ) )
 		|| m.contains( QLatin1String( "marker_" ) )
 		|| m.endsWith( QLatin1String( "markerx.nif" ) )
@@ -755,9 +766,21 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 			continue;
 		}
 		// lane AMBO1: an Ambient Only light (0x100000) adds no light of its own in game; it scales the cell's
-		// ambient where it applies (docs/PRTP_PLAN.md 3, not drawn yet)
+		// ambient where it applies. Lane AMBO2: inside a sphere of 1.22077 x its radius, each channel of the
+		// ambient's affine sum x pow(byte / 255, 2.2) x fade (celllights.h). A black one still darkens.
 		if ( ( b.flags & 0x100000 ) && !( wwCellLightsRed() & 128 ) ) {
 			ambientOnly++;
+			const float radius = float( b.radius ) + ( r.hasRadius ? r.radius : 0.0f );
+			if ( radius > 0.0f ) {
+				WwCellAmbientLight a;
+				const float fade = b.fade + ( r.xligCount >= 2 ? r.xlig[1] : 0.0f );
+				for ( int k = 0; k < 3; k++ ) {
+					a.pos[k] = r.pos[k];
+					a.k[k] = std::pow( float( b.color[k] ) / 255.0f, 2.2f ) * fade;
+				}
+				a.volume = 1.22077f * radius;
+				L.ambientLights.append( a );
+			}
 			continue;
 		}
 		WwCellLight l;
@@ -980,6 +1003,7 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 			.arg( std::count_if( L.lights.cbegin(), L.lights.cend(), []( const WwCellLight & l ) { return l.noRim; } ) )
 			.arg( std::count_if( L.lights.cbegin(), L.lights.cend(), []( const WwCellLight & l ) { return l.ignoreRoughness; } ) )
 		+ QStringLiteral( " ambientonly=%1" ).arg( ambientOnly )	// lane AMBO1: skipped, no direct light in game
+		+ QStringLiteral( " ambientvolumes=%1" ).arg( L.ambientLights.size() )	// lane AMBO2: they scale the ambient
 		+ QStringLiteral( " imagespace=%1" ).arg( isNote )
 		+ QStringLiteral( " fog=%1" ).arg( L.fogNote.isEmpty() ? QStringLiteral( "none (exterior: the Lookdev weather fog)" ) : L.fogNote );
 	wwCellLightsPublish( nif, L );
@@ -1105,6 +1129,36 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 	 * list is what the cell CONTAINS, as the ref table is. WW_CELL_LIGHTS dumps it
 	 * and the gate compares it with an independent walk of the plugin. */
 	QVector<EsmRefr> lightRefs;
+	/* lane MISS1: a reference with an enable parent starts in the PARENT's state, inverted when it is
+	 * "opposite"; the parent's own starting state is a plugin fact (its initially-disabled flag, or its own
+	 * parent in turn). A parent outside the loaded block counts as enabled. WW_CELL_REFS_RED=parent is the
+	 * gate's red control: the old rule, which never looked at the parent. */
+	struct EnableFact { bool off; quint32 parent; bool opposite; };
+	QHash<quint32, EnableFact> enableFacts;
+	const QByteArray refsRed = qgetenv( "WW_CELL_REFS_RED" );
+	auto startsDisabled = [&]( const EsmRefr & r ) {
+		bool off = r.initiallyDisabled;
+#ifdef ESM_HAS_CELL_FIELDS
+		if ( refsRed == "parent" )
+			return r.enableParent && r.enableParentOpposite ? !off : off;
+		bool flip = false, opposite = r.enableParentOpposite;
+		quint32 up = r.enableParent;
+		for ( int hop = 0; up && hop < 16; hop++ ) {
+			flip ^= opposite;
+			const auto it = enableFacts.constFind( up );
+			if ( it == enableFacts.constEnd() ) {
+				off = false;
+				break;
+			}
+			off = it->off;
+			up = it->parent;
+			opposite = it->opposite;
+		}
+		if ( r.enableParent )
+			off = off != flip;
+#endif
+		return off;
+	};
 	auto pushRefr = [&]( const EsmRefr & r, int cellX, int cellY, bool persistent ) {
 		refsRead++;
 		if ( !r.deleted && std::memcmp( &r.baseType, "LIGH", 4 ) == 0 )
@@ -1156,16 +1210,9 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 			cellRefTableMutable().setFate( refRow, CellRefFate::NoBase );
 			return;
 		}
-		bool disabled = r.initiallyDisabled;
-#ifdef ESM_HAS_CELL_FIELDS
-		/* An enable parent in the OPPOSITE state means the ref's visible state
-		 * is the parent's inverted. We do not simulate the parent's state -- it
-		 * is a runtime fact -- so the rule here is the CK's own default view:
-		 * a ref with an opposite-state parent starts the other way round from
-		 * its own flag. The panel shows both facts so the guess is inspectable. */
-		if ( r.enableParent && r.enableParentOpposite )
-			disabled = !disabled;
-#endif
+		// lane MISS1: the state the plugin starts the reference in (startsDisabled above); what a quest does
+		// to an enable marker later is a runtime fact and is not simulated. The panel shows both facts.
+		const bool disabled = startsDisabled( r );
 		if ( disabled && !spec.showDisabled ) {
 			refsHidden++;
 			cellRefTableMutable().setFate( refRow, CellRefFate::Disabled );
@@ -1252,6 +1299,28 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 		out.swap = r.materialSwap ? r.materialSwap : lb.materialSwap;
 		placements.append( out );
 	};
+
+	// lane MISS1: every reference's enable facts, before the first one is placed (a parent may come later)
+	{
+		auto note = [&]( const QVector<EsmRefr> & refs ) {
+#ifdef ESM_HAS_CELL_FIELDS
+			for ( const EsmRefr & r : refs )
+				enableFacts.insert( r.formID, EnableFact{ r.initiallyDisabled, r.enableParent, r.enableParentOpposite } );
+#else
+			Q_UNUSED( refs );
+#endif
+		};
+		if ( spec.interior ) {
+			note( world.interiorRefrs() );
+		} else {
+			for ( int y = y0; y <= y1; y++ )
+				for ( int x = x0; x <= x1; x++ )
+					if ( world.hasCell( x, y ) )
+						note( world.refrs( x, y ) );
+			note( world.persistentRefrsIn( float( x0 ) * CELL_UNITS, float( y0 ) * CELL_UNITS,
+				float( x1 + 1 ) * CELL_UNITS, float( y1 + 1 ) * CELL_UNITS ) );
+		}
+	}
 
 	int cellsWithData = 0;
 	if ( spec.interior ) {
@@ -1380,6 +1449,11 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 	int effectBuckets = 0;                  //!< 2026-10-01: BGEM buckets drawn by the effect shader
 	int inlineFxBuckets = 0;                //!< lane EFX1: BGEM-less effect buckets, the source block written back
 	int refractBuckets = 0;                 //!< lane EFX1: Refraction-flagged buckets, drawn by the refraction preview
+	/* Lane GLOW1: billboard shapes turned to the camera, and those welded flat (the red
+	 * WW_CELL_GLOW_RED=1 welds all of them, as before; past the cap the rest weld flat too). */
+	const bool glowRed = qEnvironmentVariableIntValue( "WW_CELL_GLOW_RED" ) != 0;
+	const int glowCap = 8192;
+	int billboardShapes = 0, billboardFlat = 0;
 	int shapesVertexColor = 0;              //!< lane PRTPPLACE: drawn with the mesh's own vertex colors
 	int placementsSwapped = 0;              //!< lane PRTPPLACE: drawn with a material swap
 	int skyCardsHidden = 0;                 //!< lane PRTPPLACE: sky cards left to the sky layer
@@ -1397,7 +1471,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 	QStringList unreadableMatNames;
 	qint64 srcTris = 0;
 
-	auto bucketFor = [&]( const NativeSrcShape & s, bool withColour ) -> Bucket & {
+	auto bucketFor = [&]( const NativeSrcShape & s, bool withColour, const QString & own = QString() ) -> Bucket & {
 		/* WHICH STRING DESCRIBES THIS SHAPE'S SURFACE (lane CELLVIEW3).
 		 *
 		 * Order: a `.bgsm` (the shader Name resolves it), else the BGEM's own
@@ -1431,7 +1505,8 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 			.arg( mat )
 			.arg( ( s.hasAlpha || blend ) ? 1 : 0 ).arg( blend ? 0 : int( s.alphaThreshold ) )
 			.arg( s.ownEmit ? 1 : 0 ).arg( withColour ? 1 : 0 )
-			.arg( ( mat.isEmpty() && s.matUnreadable ) ? 1 : 0 ).arg( double( alpha ) );
+			.arg( ( mat.isEmpty() && s.matUnreadable ) ? 1 : 0 ).arg( double( alpha ) )
+			+ own;   // lane GLOW1: a billboard placement's own bucket
 		auto it = buckets.find( key );
 		if ( it != buckets.end() )
 			return it.value();
@@ -1564,7 +1639,11 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 				continue;
 			std::vector<NativeSrcShape> shapes;
 			// ONE LOAD PER DISTINCT MODEL AND SWAP -- the whole block shares this cache.
-			const bool okLoad = subst
+			// lane MISS1: a placed model's root node takes the reference's transform; the file's own is left out.
+			// WW_CELL_REFS_RED=root is the gate's red control: the old load, root transform composed.
+			const bool okLoad = refsRed != "root"
+				? lodgenNativeLoadModelPlaced( const_cast<QString *>( &dataRoot ), model, subst, &shapes )
+				: subst
 				? lodgenNativeLoadModelSwapped( const_cast<QString *>( &dataRoot ), model, *subst, &shapes )
 				: lodgenNativeLoadModel( const_cast<QString *>( &dataRoot ), model, &shapes );
 			if ( !okLoad || shapes.empty() ) {
@@ -1586,7 +1665,9 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 			auto pit = subst ? modelCache.find( model ) : mit;
 			if ( pit == modelCache.end() && !modelsFailed.contains( model ) ) {
 				std::vector<NativeSrcShape> shapes;
-				if ( lodgenNativeLoadModel( const_cast<QString *>( &dataRoot ), model, &shapes ) && !shapes.empty() ) {
+				if ( ( refsRed != "root"
+						? lodgenNativeLoadModelPlaced( const_cast<QString *>( &dataRoot ), model, nullptr, &shapes )
+						: lodgenNativeLoadModel( const_cast<QString *>( &dataRoot ), model, &shapes ) ) && !shapes.empty() ) {
 					modelLoads++;
 					pit = modelCache.insert( model, shapes );
 					mit = modelCache.find( mkey );   // an insert may rehash
@@ -1842,7 +1923,31 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 					cnamNoPalette++;   // a swap row's CNAM the game ignores; a MODC on an unpainted part is normal
 				}
 			}
-			Bucket & b = bucketFor( s, colouring || ownColor || repaint );
+			/* Lane GLOW1: a billboard shape takes a bucket of its own, its vertices in the
+			 * billboard node's frame; the game drops the node's (and the reference's) rotation
+			 * and faces the camera, which is what the viewer's NiBillboardNode does. */
+			const bool bb = s.billboard && !glowRed && billboardShapes < glowCap;
+			billboardFlat += ( s.billboard && !bb ) ? 1 : 0;
+			Matrix bbInv;
+			Vector3 bbPivot( s.bbPos[0], s.bbPos[1], s.bbPos[2] );
+			float bbInvScale = 1.0f;
+			QString bbOwn;
+			if ( bb ) {
+				Matrix bbRot;
+				for ( int r = 0; r < 3; r++ )
+					for ( int c = 0; c < 3; c++ )
+						bbRot( r, c ) = s.bbRot[r * 3 + c];
+				bbInv = bbRot.inverted();
+				bbInvScale = s.bbScale > 1.0e-6f ? 1.0f / s.bbScale : 1.0f;
+				bbOwn = QStringLiteral( "|BB|%1" ).arg( billboardShapes++ );
+			}
+			Bucket & b = bucketFor( s, colouring || ownColor || repaint, bbOwn );
+			if ( bb ) {
+				b.billboard = true;
+				b.bbPos = p.pos + p.rot * ( bbPivot * p.scale );
+				b.bbScale = p.scale * s.bbScale;
+				b.bbMode = s.bbMode;
+			}
 			/* COUNTED, NOT GUESSED (lane CELLVIEW3). A shape drawn neutral
 			 * because its material would not read is a fact the census has to
 			 * state, or "no magenta in the picture" would just mean the failure
@@ -1867,9 +1972,15 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 					: Vector3( 1.0f, 0.0f, 0.0f ) );
 				OutVert o;
 				const Vector3 wp = p.pos + p.rot * ( lp * p.scale );
-				o.pos = wp - origin;
-				o.nrm = p.rot * ln;
-				o.tan = p.rot * lt;
+				if ( bb ) {   // lane GLOW1: the billboard node's own frame
+					o.pos = bbInv * ( lp - bbPivot ) * bbInvScale;
+					o.nrm = bbInv * ln;
+					o.tan = bbInv * lt;
+				} else {
+					o.pos = wp - origin;
+					o.nrm = p.rot * ln;
+					o.tan = p.rot * lt;
+				}
 				o.bit = Vector3::crossproduct( o.nrm, o.tan );
 				if ( o.bit.length() < 1.0e-6f )
 					o.bit = Vector3( 0.0f, 0.0f, 1.0f );
@@ -2437,7 +2548,22 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 			}
 			iParent = iGround;
 		}
-		if ( !emitBucket( nif, iParent, buckets.value( k ), origin, shapes, verts, tris, error ) ) {
+		const Bucket & bk = buckets[k];
+		if ( bk.billboard ) {   // lane GLOW1: its own node at the card's pivot, no rotation
+			QModelIndex iB = nif->insertNiBlock( QStringLiteral( "NiBillboardNode" ) );
+			nif->set<QString>( iB, "Name", QStringLiteral( "billboard " ) + bk.name );
+			nif->set<quint32>( iB, "Flags", 14 );
+			nif->set<Vector3>( iB, "Translation", bk.bbPos );
+			nif->set<float>( iB, "Scale", bk.bbScale );
+			nif->set<int>( iB, "Billboard Mode", bk.bbMode );
+			addLink( nif, iRoot, QStringLiteral( "Children" ), nif->getBlockNumber( iB ) );
+			if ( !emitBucket( nif, iB, bk, Vector3( 0.0f, 0.0f, 0.0f ), shapes, verts, tris, error ) ) {
+				ok = false;
+				break;
+			}
+			continue;
+		}
+		if ( !emitBucket( nif, iParent, bk, origin, shapes, verts, tris, error ) ) {
 			ok = false;
 			break;
 		}
@@ -2583,6 +2709,9 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 		if ( !unreadableMatNames.isEmpty() )
 			s << " (" << unreadableMatNames.join( QLatin1String( ", " ) ) << ")";
 		s << "\n";
+		// lane GLOW1
+		s << "  billboards: " << billboardShapes << " shapes turned to the camera, "
+		  << billboardFlat << " welded flat" << ( glowRed ? " (WW_CELL_GLOW_RED)" : "" ) << "\n";
 		if ( groundNote.isEmpty() ) {   // lane CELLVIEW2
 			s << "  ground: " << landsDrawn << " LAND cells, vertex colour only"
 			  << " (the splat layers are NOT sampled -- that is the terrain bake's compositor)\n";
