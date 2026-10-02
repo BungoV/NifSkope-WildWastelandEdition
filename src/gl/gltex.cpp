@@ -266,6 +266,23 @@ const TexCache::Tex::ImageInfo * TexCache::getTextureInfo( const QStringView & f
 	return nullptr;
 }
 
+// lane PRTP5 (the cell census): what the frames since the last flush asked this cache for
+void TexCache::wwAskedAndMissing( int & asked, int & missing, QStringList * names ) const
+{
+	asked = missing = 0;
+	for ( size_t i = 0; i <= textureHashMask; i++ ) {
+		const Tex &	tx = textures[i];
+		if ( !tx.nameLen || !tx.imageInfo )
+			continue;
+		asked++;
+		if ( tx.mipmaps )
+			continue;
+		missing++;
+		if ( names )
+			names->append( tx.imageInfo->filename );
+	}
+}
+
 static inline const QString & convertToQString( const QString & s )
 {
 	return s;
