@@ -223,6 +223,7 @@ HEADERS += \
 	src/gl/lookdevstage.h \
 	src/gl/sunshadow.h \
 	src/gl/celllights.h \
+	src/gl/cellssr.h \
 	src/ui/scenewindow.h \
 	src/gl/impostordraw.h \
 	src/impostoroct.h \
@@ -427,6 +428,7 @@ SOURCES += \
 	src/gl/lookdevstage.cpp \
 	src/gl/sunshadow.cpp \
 	src/gl/celllights.cpp \
+	src/gl/cellssr.cpp \
 	src/ui/scenewindow.cpp \
 	src/io/materialfile.cpp \
 	src/io/pbrmfile.cpp \

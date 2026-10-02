@@ -889,6 +889,10 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 		}
 		/* lane FOG2: the fog (celllights.h WwCellLighting::hasFog). Pin WW_CELL_FOG=0 publishes none;
 		 * WW_CELL_FOG_RED=noclamp|nogamma|noinherit are the gate's refuters. */
+		{	// lane SSR1: the clip distance (the reflections' far plane, src/gl/cellssr.h)
+			const QByteArray & clS = fromT( 0x80 ) ? tData : x;
+			L.clipDist = clS.size() >= 36 ? f32( clS, 32 ) : 0.0f;
+		}
 		const QByteArray fogPin = qgetenv( "WW_CELL_FOG" ).trimmed();
 		const QByteArray fogRed = qgetenv( "WW_CELL_FOG_RED" ).trimmed();
 		auto fT = [&]( quint32 flag ) { return fogRed == "noinherit" ? ( haveT && x.isEmpty() ) : fromT( flag ); };

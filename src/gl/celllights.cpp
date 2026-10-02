@@ -6,6 +6,7 @@ BSD License - see nifskope.h
 
 #include "celllights.h"
 
+#include "gl/cellssr.h"
 #include "gl/glnode.h"
 #include "gl/glscene.h"
 #include "gl/glshape.h"
@@ -1239,6 +1240,26 @@ void wwCellAoPass( Scene * scene, bool run )
 	if ( wasBlend ) fn->glEnable( GL_BLEND ); else fn->glDisable( GL_BLEND );
 	if ( wasScissor ) fn->glEnable( GL_SCISSOR_TEST ); else fn->glDisable( GL_SCISSOR_TEST );
 	if ( wasStencil ) fn->glEnable( GL_STENCIL_TEST ); else fn->glDisable( GL_STENCIL_TEST );
+}
+
+// lane SSR1: this frame's opaque pass and depth pyramid, for the reflections' march (src/gl/cellssr.h)
+bool wwCellAoTargets( Scene * scene, WwCellAoTargets & out )
+{
+	if ( !scene || !scene->renderer || !aoGpus().contains( scene->renderer ) )
+		return false;
+	const AoGpu & g = aoGpus()[scene->renderer];
+	if ( !g.ready || g.doc != scene->nifModel )
+		return false;
+	out.gbuf = g.gbuf.tex;
+	out.depthRb = g.gbufDepth;
+	out.w = g.gbuf.w;
+	out.h = g.gbuf.h;
+	for ( int m = 1; m < 5; m++ ) {
+		out.mip[m] = g.mip[m].tex;
+		out.mipW[m] = g.mip[m].w;
+		out.mipH[m] = g.mip[m].h;
+	}
+	return true;
 }
 
 void wwCellAoDraw( Scene * scene, bool cellProgram )
