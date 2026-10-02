@@ -246,41 +246,13 @@ void wwRestoreSrgbDecode()
 	glBindTexture( GL_TEXTURE_2D, GLuint( prev ) );
 }
 
-/* lane CUBE1: the game's interior reflection samples its cube map as plain UNORM and decodes it after the
- * filter. The loader tags a DX10 B8G8R8A8 cube as sRGB (the sampler would decode first, then the shader again:
- * measured, the gate's first run sat at 0.35 of the expected), so the cell term skips the hardware decode on
- * that cube for its draw, undone at the next program setup as above. Called with the cube bound on the active
- * unit; returns the shader's cube mode: 1 = decode in the shader, 3 = the sampler already decodes (no extension) */
-QVector<QPair<const void *, GLuint>> & wwSkippedCubeDecode()
-{
-	static QVector<QPair<const void *, GLuint>> v;
-	return v;
-}
-
-void wwRestoreCubeDecode()
-{
-	auto & v = wwSkippedCubeDecode();
-	if ( v.isEmpty() )
-		return;
-	const void * ctx = QOpenGLContext::currentContext();
-	GLint prev = 0;
-	glGetIntegerv( GL_TEXTURE_BINDING_CUBE_MAP, &prev );
-	for ( int i = int( v.size() ) - 1; i >= 0; i-- ) {
-		if ( v[i].first != ctx )
-			continue;
-		if ( glIsTexture( v[i].second ) ) {
-			glBindTexture( GL_TEXTURE_CUBE_MAP, v[i].second );
-			glTexParameteri( GL_TEXTURE_CUBE_MAP, 0x8A48, 0x8A49 );	// TEXTURE_SRGB_DECODE_EXT = DECODE_EXT
-		}
-		v.remove( i );
-	}
-	glBindTexture( GL_TEXTURE_CUBE_MAP, GLuint( prev ) );
-}
-
+/* lane CUBE1: the game keeps its env cubes in an sRGB array, so its sampler decodes each texel BEFORE the filter
+ * and its shader decodes nothing. The loader tags a DX10 B8G8R8A8 cube as sRGB: the same order, and the cell term
+ * must not decode it again (measured: decoded twice, the gate's first run sat at 0.35 of the expected). Called
+ * with the cube bound on the active unit; returns the shader's cube mode: 3 = the sampler decodes, 1 = an
+ * untagged cube, decoded in the shader (after the filter: the nearest an untagged texture allows) */
 float wwCellCubeDecodeMode()
 {
-	if ( wwCellLightsRed() & 512 )
-		return 1.0f;	// red cubeold: the old law, the sampler left as it was
 	GLint tex = 0;
 	glGetIntegerv( GL_TEXTURE_BINDING_CUBE_MAP, &tex );
 	if ( !tex )
@@ -289,12 +261,6 @@ float wwCellCubeDecodeMode()
 	glGetTexLevelParameteriv( GL_TEXTURE_CUBE_MAP_POSITIVE_X, 0, GL_TEXTURE_INTERNAL_FORMAT, &f );
 	if ( f != 0x8C40 && f != 0x8C41 && f != 0x8C42 && f != 0x8C43 && ( f < 0x8C48 || f > 0x8C4F ) && f != 0x8E8D )
 		return 1.0f;	// not sRGB-tagged: the sampler returns the stored bytes
-	if ( QOpenGLContext * c = QOpenGLContext::currentContext();
-		c && c->hasExtension( QByteArrayLiteral( "GL_EXT_texture_sRGB_decode" ) ) ) {
-		glTexParameteri( GL_TEXTURE_CUBE_MAP, 0x8A48, 0x8A4A );	// TEXTURE_SRGB_DECODE_EXT = SKIP_DECODE_EXT
-		wwSkippedCubeDecode().append( { c, GLuint( tex ) } );
-		return 1.0f;
-	}
 	return 3.0f;
 }
 } // namespace
@@ -302,7 +268,6 @@ float wwCellCubeDecodeMode()
 NifSkopeOpenGLContext::Program * Renderer::setupProgram( Shape * mesh, Program * hint )
 {
 	wwRestoreSrgbDecode();
-	wwRestoreCubeDecode();	// lane CUBE1
 	const NifModel *	nif = mesh->scene->nifModel;
 
 	/* Read here, not inside wwProgramCensus: `Shape::bslsp` is protected and

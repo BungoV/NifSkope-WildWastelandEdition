@@ -15,7 +15,8 @@ rebuilt here, from the files, without the viewer's code:
   * the game's interior env term (the deferred composite, read from the game's shader; notes in the lane):
       g = sat(smoothness x _s.g), spec = sat(specular multiplier x _s.r) (0 when the specular switch is off)
       K = 3 x spec x min(sqrt(sat(g - 0.3)), 1) x clamp(env map scale, 0, 50) x lin(cube(R, mip))
-      mip = (1 - g) x 6 + view depth / 512 (on a 128 cube), lin = the sRGB decode, R = the mirrored view
+      mip = (1 - g) x 6 + view depth / 512 (on a 128 cube), R = the mirrored view; lin = the sRGB decode of
+      each texel BEFORE the filter (the game keeps its env cubes in an sRGB array: its sampler decodes)
   * the PBR program (pbr) takes the same term for a shape with no .pbrm (a .pbrm shape keeps the PBR law
     and writes no material number, so it is not judged); a material with no _s map reads _s.r = _s.g = 1.
 Probe 50 = K / 4 (light-free: the light it is multiplied by is cell_lit.sh's). A pixel is judged only where
@@ -307,6 +308,7 @@ def main(esm, shots, label, target, mode='legacy'):
         if cube is None:
             skipped.append('%s (cube %s unreadable)' % (os.path.basename(path), mt['envmap']))
             continue
+        cube = [[srgb_lin(lv) for lv in face] for face in cube]     # decoded texel by texel, then filtered
         if not mt['smoothspec']:
             sch = None
         else:
@@ -338,7 +340,7 @@ def main(esm, shots, label, target, mode='legacy'):
             lod = (1 - g) * 6 + depth / 512.0 + math.log2(len(cube[0][0]) / 128.0)
             c, inside = cube_sample(cube, d, lod)
             inside_all &= inside
-            vals.append(np.clip(srgb_lin(c) * k[:, None] / 4.0, 0, 1))
+            vals.append(np.clip(c * k[:, None] / 4.0, 0, 1))
         vals = np.stack(vals)
         lo, hi = vals.min(0), vals.max(0)
         steady = inside_all & np.all(hi - lo <= 6.0 / 255 + 0.05 * hi, axis=1)

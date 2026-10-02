@@ -307,8 +307,8 @@ vec3 cellAmbient( vec3 N )
 
 #ifndef WW_CELL_FX
 /* lane CUBE1: per draw (src/gl/renderer.cpp): the material's specular scale (0 with its specular switch off),
- * its smoothness, 1 when its OWN env map is bound (2: a .pbrm shape, which keeps the PBR law; 3: own, but the
- * sampler already decodes sRGB), the gate's number */
+ * its smoothness, 3 when its OWN env map is bound and the sampler decodes its sRGB (1: own, but untagged, decoded
+ * here; 2: a .pbrm shape, which keeps the PBR law), the gate's number */
 uniform vec4 cellCubeMat;
 
 bool cellCubeGameOn()
@@ -328,7 +328,7 @@ vec3 cellCubeGame( samplerCube cube, vec3 dir, float gloss, float spec, float en
 	float depth = abs( posView.z ) * length( cellRow[0].xyz );	// view units -> game units
 	float lod = ( 1.0 - g ) * 6.0 + depth * 0.001953 + log2( float( textureSize( cube, 0 ).x ) / 128.0 );
 	vec3 c = textureLod( cube, dir, max( lod, 0.0 ) ).rgb;
-	if ( cellCubeMat.z < 2.0 )	// decoded after the filter, as the game's composite does
+	if ( cellCubeMat.z < 2.0 )	// an untagged cube: the game's sampler decodes sRGB before the filter, this after
 		c = mix( c / 12.92, pow( ( c + 0.055 ) / 1.055, vec3( 2.4 ) ), step( vec3( 0.04045 ), c ) );
 	float k = 3.0 * clamp( spec, 0.0, 1.0 ) * min( sqrt( clamp( g - 0.3, 0.0, 1.0 ) ), 1.0 ) * clamp( envScale, 0.0, 50.0 );
 	return c * k;
