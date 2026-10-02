@@ -649,6 +649,13 @@ const EsmLodBase & EsmWorld::lodBase( quint32 baseFormID ) const
 				 * the first one is the base's own model, the rest belong to later groups */
 				b.colorRemap = f.readFloat();
 				b.hasColorRemap = b.colorRemap < std::numeric_limits<float>::max();
+			} else if ( *br == "ARMO" && ( f == "MODL" || f == "MOD2" || f == "MO2S" ) ) {
+				// lane MISS1: a piece of clothing lies in the world as its MOD2 model (MO2S its swap); an
+				// ARMO's MODL is the form id of its worn piece, four bytes that were being read as a path
+				if ( f == "MOD2" && b.model.isEmpty() )
+					b.model = fieldString( f );
+				else if ( f == "MO2S" && f.size() >= 4 && !b.materialSwap )
+					b.materialSwap = esm->mapFormID( *br, f.readUInt32() );
 			} else if ( f == "MODL" && !( *br == "TREE" || *br == "STAT" )
 				&& b.model.isEmpty() ) {
 				/* CELLVIEW1: every record type the cell view draws -- MSTT,
