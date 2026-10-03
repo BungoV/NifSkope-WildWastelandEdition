@@ -1710,6 +1710,28 @@ bungo: "I don't want it to keep showing the low res cubemap instead."
   vanilla weather records (colour rows, Sky Scale, clock) the physical model will later replace; nothing here
   adds a hand dial.
 
+### 2am. Rooms clamp, load doors, back faces (lane ROOMCLAMP1, 2026-10-03)
+- Load doors (REFR with XTEL) are solid in the probe soup, not openings: from CAPTURE1's Museum cube probe 0 of
+  395 rays escape through the exit door (red: 146).
+- Back faces: the placer stands probes only on up-facing or two-sided faces; the bake moves a probe whose rays
+  mostly (> 25%) meet one-sided backs to the nearest clear lattice point under it, else drops it. Roof tops 76 -> 0
+  in the Museum; Cryo 720 -> 573 probes (137 stood above the vault ceiling). Room and cover probes with a one-sided
+  back within 200 below are refused too (PrydwenHull01: 29 stood in the void between its rooms and its outer skin).
+- Rooms (src/proberooms): a grid of cell 16 (raised x1.25 until <= 8M cells) marked solid by the soup, an
+  EDT, cores farther than 48 from solid, a 6-connected flood, a watershed out to the walls, pockets as rooms.
+  Openings and glass name two rooms. Room 0 = air reaching the grid border (the outdoors).
+- GI grid: two slots a voxel, the two rooms its surfaces read most (known rooms first). A slot gathers only its
+  room's probes, from the voxel centre if the centre's cell names that room, else from its eye.
+- Shader (cellGiRoomSample): a surface reads its room at P + N x 0.75 cell, else 1.75; inside a wall's cells
+  the nearest air cell round either read whose blend has weight. It blends only the voxels holding that room,
+  weights renormalized; an empty slot (no probe of its room reached the voxel) weighs nothing; a room no voxel holds (a pocket behind a pipe) -> the nearest neighbour room with weight;
+  none -> the plain trilinear.
+- Gates: tests/spells/cell_rooms.sh synth (5 scenes, 0.2 s each) and cells (Museum, Cryo, Old North Church,
+  Prydwen). Stage H: on the dump's surfels the rooms uncover nothing the plain grid covers.
+  Reds: noclamp, conn26, boxes, glasswall; open, backface, backmax, floor, emptyslot.
+- Open: the bake's surfel cell (70) straddles thin walls, so the dark room's probes carry ~10% of the lit side
+  before the grid; split surfels by room in the bake (proposed lane).
+
 ## 3. Open
 
 - `.tbk` v4: two surfel sides per cell (gives back the refused thin-wall weight), room ids (2f).

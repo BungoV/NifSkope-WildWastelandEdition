@@ -25,6 +25,12 @@
   Gate: `tests/spells/cell_wsrestore.sh` (real close/relaunch in a scratch settings key; 17 checks, 0 failures;
   red control 7 failures, same 7 on the build before the fix).
 
+- **Light stays in its room** (lane ROOMCLAMP1). The cell view's bounce light no longer bleeds through thin walls:
+  each room is found from the cell's own geometry, and a surface takes bounce light only from the probes of its
+  own room (a 2-unit wall: the dark side went from 108% of the lit side to the dark room's own level).
+  Load doors count as closed, and probes no longer stand on roof tops or the backs of one-sided walls.
+  The Vault 111 scanner door no longer shows magenta in the GI pass.
+
 ## Probe bake: drip splashes no longer bake as solid swirls; two more ways to take a surface's color (lane CAPTURE1, 2026-10-03)
 
 - The water drips on the Vault 111 walkway (and other glass and water that only bends what is behind it) are no

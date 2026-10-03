@@ -56,6 +56,28 @@ Newest at the top.
   cc1plus at 1.7 GB; the build died with no error line. A make failure with no `error:` = check the
   memguard run logs for KILL before reading code.
 
+- Qt's `slots` macro: a variable named `slots` broke the build (moc keyword). Name it otherwise.
+- Heredoc with `\"` inside a quoted Python string: escapes doubled; write patches as files.
+- Most vexing parse: `Foo f( Bar() );` declared a function. Use braces.
+- The back-face rule first widened the coverage hole (dropped probes left GI voxels with no gather) until the
+  eye + 2x radius + neighbour fallbacks landed.
+- Guessed EDIDs (OldNorthChurchInt01, Prydwen01) do not exist; parse the compressed CELL records.
+- A floor on a cell boundary: both room reads land in solid cells beside a thin wall -> the unclamped fallback
+  -> 108% leak. Fixed with the in-plane neighbour fallback.
+- Inner corners: the in-plane fallback's nearest air was the outdoors across the wall -> black corner strips
+  (8 of 1592 samples). The first gate never sampled corners. Fixed by taking the nearest candidate whose blend has
+  weight; the gate now samples the corners.
+- Pockets: a surface whose room no nearby voxel held (air behind a pipe) blended nothing and drew black on every
+  pipe in Vault111Cryo; stage D agreed because the Python twin drew black too. Caught only by the render. Fixed:
+  the read room, else the nearest neighbour room with weight, else the plain trilinear.
+- Empty slots: a slot naming a room no probe of that room reached held zero weight and still counted; pipes
+  drew black (lit) and magenta (pass) in Vault111Cryo even after the pocket fix (231 of 2944 covered surfels).
+  Stage D and the synth agreed (every synth room has probes). Caught by the render again; stage H now measures it
+  on the real dump.
+- The Prydwen refusal first required nothing above the probe; the 29 had the hull above them. Match the gate's
+  rule, not a story about the geometry.
+- Slot 1 held label -1 (voxels lit with no room) until known rooms ranked first.
+
 ## 2026-10-03 BOUNCE2: a gate script edited while a runner was executing it
 
 - What: cell_gi.sh was edited (Edit tool) while gates.sh was running `bash tests/spells/cell_gi.sh --red grow`
