@@ -3,6 +3,9 @@
 # THE BAKE RELIT BY THE CELL'S LIGHTS (lane PRTPGI, 2026-10-01; src/probegi.h).
 #
 # Not judged by eye. Per cell:
+# lane BAKEBLOCK1 (block rule): Concord is asked n=1; its bake loads the 5x5 + far LOD by itself (the exe
+#   promotes every exterior bake and every relight of one), so every Concord run here is the ruled block.
+#
 #   bake     one window places + bakes the probes, relights the bake (WW_CELL_GI_DUMP writes every
 #            stage's numbers) and shoots the picture with Cell lights + GI on (lit.png)
 #   nogi     the same view, GI off (the picture without the bounce)
@@ -156,7 +159,11 @@ for cell in $CELLS; do
 		# lane BOUNCE2: the one-pass pin against the exe from before the lane, and the 1-pass / settled pairs
 		[ "$(shoot "$run" "$cell" one WW_CELL_GI=1 WW_CELL_GI_PASSES=1 "${from[@]}" WW_CELL_ROOMCLAMP_PIN=off \
 			WW_CELL_GI_DUMP="$(winpath "$run/dump_one")")" = 1 ] || ok=0
-		if [ -x "$BEFORE" ]; then
+		if is_ext "$cell"; then
+			# lane BAKEBLOCK1: the relight now loads the 5x5 + far LOD the bake traced; the exe before BOUNCE2
+			# relights one cell, so this rung holds on the interiors only (the one-pass rebuild above still runs)
+			say "  skip  $cell: the one-pass rung against $BEFORE (it cannot load the 5x5 + far LOD)"
+		elif [ -x "$BEFORE" ]; then
 			[ "$(XE="$BEFORE" shoot "$run" "$cell" before WW_CELL_GI=1 "${from[@]}" \
 				WW_CELL_GI_DUMP="$(winpath "$run/dump_before")")" = 1 ] || ok=0
 			same=1; n=0

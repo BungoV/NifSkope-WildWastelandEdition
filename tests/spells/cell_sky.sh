@@ -1,5 +1,8 @@
 #!/bin/bash
 #
+# lane BAKEBLOCK1 (block rule): the cells are asked n=1; each bake loads the 5x5 + far LOD by itself (the exe
+#   promotes every exterior bake). The pictures stay one cell.
+#
 # THE SKY AND THE SUN IN THE BOUNCE ROW, OUTDOORS (lane SKY1, 2026-10-02; src/probesky.h).
 #
 # Not judged by eye. Per exterior cell (Scene mode Lookdev pinned: weather, hour, the plain sun arc):

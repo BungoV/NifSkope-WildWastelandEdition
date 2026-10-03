@@ -1,5 +1,8 @@
 #!/bin/bash
 #
+# lane BAKEBLOCK1 (block rule): the cell alone (n=1) on purpose -- an edit-mark view test, no bake; a bake there
+#   would load the 5x5 + far LOD by itself (tests/spells/cell_bakeblock.sh).
+#
 # EDITOR-ONLY SHAPES IN THE CELL VIEW (lane FXREST1, 2026-10-03; src/lodgen.cpp lodgenLoadModel, docs/PRTP_PLAN.md 2an).
 #
 # The game removes every node or shape whose name holds the word "EditorMarker" anywhere, any case. The viewer

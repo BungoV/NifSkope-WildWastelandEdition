@@ -1,5 +1,7 @@
 #!/bin/bash
 #
+# lane BAKEBLOCK1 (block rule): the cell is asked n=1; the panel's Bake loads the 5x5 + far LOD by itself.
+#
 # LANE CELLWORK1's gate: THE CELL WORKSPACE.
 #
 # bungo, 2026-09-19 20:40: "Cell viewing will be a new workspace btw".
