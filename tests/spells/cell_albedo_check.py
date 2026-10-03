@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The bake's three albedo ways, judged (lane CAPTURE1, 2026-10-03; tests/spells/cell_albedo.sh).
+"""The bake's three albedo ways, judged (lane CAPTURE1, 2026-10-03).
 
 WW_CELL_BAKE_ALBEDO = tri (default) | hit | cube changes ONE thing in the `.tbk` files: each surfel's
 albedo and normal. Everything here reads the files with probe_bake.py's own reader and the soup with
@@ -21,6 +21,12 @@ its own parser; nothing from NifSkope.
       numbers per way against the judge (the cube way at 256 px a face): per surfel, the largest channel
       difference in 8-bit sRGB, and the normal angle in degrees (median / p90), over every surfel and over
       the surfels on big flat walls (soup triangles of 20000+ square units, their plane within 2 units)
+  cell_albedo_check.py refract <main run> <repaired run>
+      the refraction-only repair (Shader Flags 1 bit 15 shapes leave the soup in every way):
+      R  the repaired soup lost triangles against main's and gained none (the keep red loses none: FAIL)
+      P  the same probe count; a probe the placer moved stands within 3 cells of a lost triangle
+      X  outside the zone (the lost triangles' cells + 1 around, and every cell a moved probe links) every
+         surfel and every unmoved probe's link is main's bytes
 One line a stage, then "albedo PASS|FAIL"; exit 0 on PASS.
 """
 import glob
@@ -31,7 +37,7 @@ import sys
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from probe_bake import read_tbk  # noqa: E402
+from probe_bake import SURFEL, floordiv, read_tbk  # noqa: E402
 
 def files(d):
     return sorted(os.path.basename(f) for f in glob.glob(os.path.join(d, '*.tbk')))
@@ -216,7 +222,137 @@ def judge(jrun, ways):
     return rows
 
 
+def bake_maps(run):
+    """Per bake: surfel bytes by (side, key) (first copy), probes by position -> {(side, key): (w, dir)}."""
+    surf, probes, cell = {}, {}, None
+    for f in files(os.path.join(run, 'bake')):
+        t = read_tbk(os.path.join(run, 'bake', f))
+        cell = t['cell']
+        for side, arr in ((0, t['surfels']), (1, t['back'])):
+            for s in arr:
+                k = (side,) + tuple(floordiv(s['pos'][i], cell) for i in range(3))
+                surf.setdefault(k, s.tobytes())
+        for pr in t['probes']:
+            pk = [floordiv(pr['pos'][i], cell) for i in range(3)]
+            a0, a1 = int(pr['off']), int(pr['off'] + pr['cnt'])
+            lx = t['lext'][a0:a1] if len(t['lext']) else [None] * (a1 - a0)
+            lk = {}
+            for l, x in zip(t['links'][a0:a1], lx):
+                side = int(x['side']) if x is not None else 0
+                lk[(side,) + tuple(pk[i] + int(l['delta'][i]) for i in range(3))] = (float(l['w']), l['dir'].tobytes())
+            probes[tuple(np.round(np.array(pr['pos'], float), 3))] = lk
+    return surf, probes, cell
+
+
+def stage_refract(main_run, new_run):
+    """lane CAPTURE1: the refraction-only repair, against main's bake of the same cell. Every difference
+    must trace back to a lost triangle: its own cells, a probe the placer moved, a ray that now passes
+    where a lost triangle stood (the probe's sphere changed: its other weights renormalize by one common
+    factor), and the cells those changed spheres sample (their surfel and its side for every linker)."""
+    def rows(t):
+        return {r.tobytes() for r in t.reshape(len(t), 9).astype('<f4')}
+    sm = rows(read_soup_tris(os.path.join(main_run, 'soup.psp')))
+    sn = rows(read_soup_tris(os.path.join(new_run, 'soup.psp')))
+    lost, gained = sm - sn, sn - sm
+    out = []
+    okr = len(lost) > 0 and not gained
+    out.append('R %s soup lost %d triangles against main, gained %d (bar: lost > 0, gained 0)' % (
+        'PASS' if okr else 'FAIL', len(lost), len(gained)))
+    surf_m, pr_m, cell = bake_maps(main_run)
+    surf_n, pr_n, _ = bake_maps(new_run)
+    tri = [np.frombuffer(x, '<f4').reshape(3, 3).astype(float) for x in lost]
+    lv = np.array([t.mean(0) for t in tri]) if tri else np.zeros((0, 3))
+    lr = np.array([np.sqrt(((t - t.mean(0)) ** 2).sum(1)).max() for t in tri]) if tri else np.zeros(0)
+    # 1. the lost triangles' own cells, one cell around
+    zone = set()
+    for t in tri:
+        lo = [floordiv(t[:, i].min(), cell) - 1 for i in range(3)]
+        hi = [floordiv(t[:, i].max(), cell) + 1 for i in range(3)]
+        for x in range(lo[0], hi[0] + 1):
+            for y in range(lo[1], hi[1] + 1):
+                for z in range(lo[2], hi[2] + 1):
+                    zone.add((x, y, z))
+    # 2. probes the placer moved (it stands on the same soup): only near a lost triangle
+    moved = set(pr_m) ^ set(pr_n)
+    far = [p for p in moved if not len(lv) or np.sqrt(((lv - np.array(p)) ** 2).sum(1)).min() > 3 * cell]
+    okp = len(pr_m) == len(pr_n) and not far
+    out.append('P %s %d probes; %d moved, %d of them farther than 3 cells from a lost triangle' % (
+        'PASS' if okp else 'FAIL', len(pr_n), len(set(pr_m) - set(pr_n)), len(far)))
+
+    def through(p, k):   # the probe's segment to the cell's center passes a lost triangle's sphere
+        a, b = np.array(p, float), (np.array(k, float) + 0.5) * cell
+        d = b - a
+        t = ((lv - a) @ d) / max(d @ d, 1e-9)
+        r = np.sqrt((((a + np.clip(t, 0, 1)[:, None] * d) - lv) ** 2).sum(1))
+        return bool(len(lv)) and bool(((r <= 0.87 * cell + lr) & (t > 0) & (t < 1)).any())
+    # 3. changed spheres: moved probes, and unmoved probes with a changed link into the zone or through
+    changed_sphere = set(moved)
+    for p in set(pr_m) & set(pr_n):
+        lm, ln = pr_m[p], pr_n[p]
+        if any(lm.get(k) != ln.get(k) and (k[1:] in zone or through(p, k[1:])) for k in set(lm) | set(ln)):
+            changed_sphere.add(p)
+    # 4. the cells a changed sphere samples (main or repaired) may change their surfel and side
+    reach = set(zone)
+    for p in changed_sphere:
+        for prs in (pr_m, pr_n):
+            for k in prs.get(p, ()):
+                reach.add(k[1:])
+    keys = set(surf_m) | set(surf_n)
+    diff_s = [k for k in keys if surf_m.get(k) != surf_n.get(k)]
+    out_s = [k for k in diff_s if k[1:] not in reach]
+    # 5. a cell left over that keeps its surfel's place, normal and sample count byte for byte had the same
+    # rays hit the same points: only the triangle taken there changed. The soup's tree is rebuilt without
+    # the lost triangles, so where two triangles meet a ray at the same distance (coincident surfaces, a
+    # shared edge) it may take the other one, with its own albedo bytes
+    def tie(k):
+        a, b = surf_m.get(k), surf_n.get(k)
+        if a is None or b is None:
+            return False
+        x, y = np.frombuffer(a, SURFEL)[0], np.frombuffer(b, SURFEL)[0]
+        return (x['pos'].tobytes() == y['pos'].tobytes() and x['nrm'].tobytes() == y['nrm'].tobytes()
+                and x['samples'] == y['samples'])
+    ties = sum(1 for k in out_s if tie(k))
+    out_s = [k for k in out_s if not tie(k)]
+    # what is left is the same tie on a thinly sampled cell (a few rays, one taking another triangle moves
+    # it far): bounded at half a per mille of the cell's surfels -- any wider change (a wrong shape dropped, a
+    # way's albedo) fails
+    bad_s = len(out_s)
+    cap_s = int(0.0005 * len(keys))
+    for k in sorted(out_s)[:6]:   # what moved there, and how far from the nearest lost triangle
+        c = (np.array(k[1:], float) + 0.5) * cell
+        out.append('  outside: side %d cell %s main %s repaired %s, %.0f units from a lost triangle' % (
+            k[0], k[1:], k in surf_m, k in surf_n, np.sqrt(((lv - c) ** 2).sum(1)).min()))
+    bad_l = rescaled = 0
+    for p in set(pr_m) & set(pr_n):
+        lm, ln = pr_m[p], pr_n[p]
+        ratios = []
+        for k in set(lm) | set(ln):
+            if lm.get(k) == ln.get(k) or k[1:] in reach:
+                continue
+            if p in changed_sphere and k in lm and k in ln and lm[k][1] == ln[k][1]:
+                ratios.append(ln[k][0] / max(lm[k][0], 1e-30))
+            else:
+                bad_l += 1
+        if ratios and max(ratios) - min(ratios) <= 1e-4 * max(ratios):
+            rescaled += len(ratios)
+        else:
+            bad_l += len(ratios)
+    okx = bad_s <= cap_s and not bad_l
+    out.append('X %s %d surfels differ from main, %d of them outside the reach (bar %d) (lost cells + 1 around: %d cells; '
+               'every cell a changed probe sphere links: %d cells; %d spheres changed, %d of them moved; a tie '
+               'outside it, the same hits on another triangle (albedo only): %d); links outside it: %d differ, %d rescaled by their '
+               'probe\'s one common factor' % (
+                   'PASS' if okx else 'FAIL', len(diff_s), bad_s, cap_s, len(zone), len(reach), len(changed_sphere),
+                   len(moved) // 2, ties, bad_l, rescaled))
+    return okr and okp and okx, out
+
+
 def main(a):
+    if a and a[0] == 'refract':
+        ok, lines = stage_refract(a[1], a[2])
+        print('\n'.join(lines))
+        print('albedo', 'PASS' if ok else 'FAIL')
+        return 0 if ok else 1
     if a and a[0] == 'same':
         ok, line = stage_same(a[1], a[2])
         print(line)

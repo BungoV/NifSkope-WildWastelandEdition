@@ -1759,6 +1759,13 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 	const QString albRed = qEnvironmentVariable( "WW_CELL_BAKE_ALBEDO_RED" );
 	const bool wantMat = baking && ( albWay == QLatin1String( "hit" ) || albWay == QLatin1String( "cube" ) );
 	const bool wantExtra = wantMat && albWay == QLatin1String( "cube" ) && albRed == QLatin1String( "nofilter" );
+	/* lane CAPTURE1 (docs/PRTP_PLAN.md 2o, EFX1): a Refraction-flagged lighting shape (Shader Flags 1 bit
+	 * 15: the walkway's drip-splash rings) only bends what is behind it in game; its diffuse slot holds a
+	 * normal map. It is no surface: it leaves the bake's soup (every albedo way, the cube included) and
+	 * is counted. WW_CELL_BAKE_REFRACT_RED=keep keeps it as a solid surface (the gate's red only). */
+	const bool refractKeepRed = qEnvironmentVariable( "WW_CELL_BAKE_REFRACT_RED" ) == QLatin1String( "keep" );
+	int soupRefractShapes = 0, soupRefractTris = 0;
+	QMap<QString, int> soupRefractModels;
 	QHash<QString, int> matTexIdx;
 	auto matTexOf = [&]( const QString & tex ) -> qint32 {
 		if ( tex.isEmpty() )
@@ -2184,7 +2191,13 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 				if ( baking && probeGlassFeed( probeSoup, probeAlb, s, p.pos, p.rot, p.scale, p.ref, model,
 						glassDump.isEmpty() ? nullptr : &glassCensus ) )
 					soupGlassShapes++;   // lane BAKE4
-				if ( s.nearFacts.effectShader || !s.effectTex0.isEmpty() || s.nearFacts.alphaBlend
+				const bool refractOnly = !s.nearFacts.effectShader && ( s.shaderSF1 & ( 1U << 15 ) ) && !refractKeepRed;
+				if ( refractOnly ) {   // lane CAPTURE1: refraction-only, no surface
+					soupRefractShapes++;
+					soupRefractTris += int( s.geom.tris.size() / 3 );
+					soupRefractModels[model]++;
+				}
+				if ( refractOnly || s.nearFacts.effectShader || !s.effectTex0.isEmpty() || s.nearFacts.alphaBlend
 					|| s.nearFacts.decal || ( soupFoliage && s.nearFacts.alphaTest ) ) {
 					soupShapesDropped++;
 					if ( wantExtra )   // lane CAPTURE1 red nofilter: the cube sees what the soup leaves out
@@ -2888,6 +2901,12 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 			std::sort( sk.begin(), sk.end() );
 			for ( const QString & k : sk )
 				t << " " << k << " " << soupSkippedTypes.value( k );
+			t << "\n";
+			// lane CAPTURE1: refraction-only shapes left out of the soup, per model
+			t << "  probe soup refraction-only shapes left out " << soupRefractShapes << " (" << soupRefractTris
+			  << " triangles)" << ( refractKeepRed ? " RED keep: kept as surfaces" : "" );
+			for ( auto it = soupRefractModels.cbegin(); it != soupRefractModels.cend(); ++it )
+				t << "; " << it.key() << " x" << it.value();
 			t << "\n";
 			if ( bakeLean )   // lane SPEED1
 				t << "  headless bake: " << leanSkipped << " placements the soup leaves out were not loaded\n";
