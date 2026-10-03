@@ -240,12 +240,15 @@ static NifSkopeOpenGLContext::Program * wwProgramCensus( const NifModel * nif, S
  * a UNORM one, so both tags take one path -- filter, then decode -- and render
  * byte-identically. Letting the hardware decode the tagged one (decode, then
  * filter) left up to 3/255 on minified texels: measured, gate srgbtag. The
- * texture object is shared with the legacy programs, which expect the decode,
- * so every skip is undone at the start of the next shape's program setup. */
+ * texture object is shared with the other programs, so every change is undone
+ * at the start of the next shape's program setup -- back to the state the
+ * texture had (lane SRGBTAG1: a Fallout 4 file texture already loads SKIPPED,
+ * TexCache::wwFo4SrgbTagAsUnorm, and must stay so; other textures decode). */
 namespace {
-QVector<QPair<const void *, GLuint>> & wwSkippedDecode()
+struct WwDecodeChange { const void * ctx; GLuint tex; GLint prevMode; };
+QVector<WwDecodeChange> & wwSkippedDecode()
 {
-	static QVector<QPair<const void *, GLuint>> v;
+	static QVector<WwDecodeChange> v;
 	return v;
 }
 
@@ -258,11 +261,11 @@ void wwRestoreSrgbDecode()
 	GLint prev = 0;
 	glGetIntegerv( GL_TEXTURE_BINDING_2D, &prev );
 	for ( int i = int( v.size() ) - 1; i >= 0; i-- ) {
-		if ( v[i].first != ctx )
+		if ( v[i].ctx != ctx )
 			continue;
-		if ( glIsTexture( v[i].second ) ) {
-			glBindTexture( GL_TEXTURE_2D, v[i].second );
-			glTexParameteri( GL_TEXTURE_2D, 0x8A48, 0x8A49 );	// TEXTURE_SRGB_DECODE_EXT = DECODE_EXT
+		if ( glIsTexture( v[i].tex ) ) {
+			glBindTexture( GL_TEXTURE_2D, v[i].tex );
+			glTexParameteri( GL_TEXTURE_2D, 0x8A48, v[i].prevMode );	// TEXTURE_SRGB_DECODE_EXT, as it was
 		}
 		v.remove( i );
 	}
@@ -1098,9 +1101,11 @@ bool Renderer::setupProgramPBRM( const NifModel * nif, Program * prog, Shape * m
 	 * internal format, so the sampler already returns linear; any other is decoded
 	 * in the shader. Read off the bound texture itself (the GL truth), not guessed
 	 * from the file name. Red "srgbtag": always decode, so the sRGB twin is decoded
-	 * twice. */
+	 * twice (lane SRGBTAG1: a Fallout 4 texture now loads with the decode
+	 * skipped, so the red forces it back on for the draw). */
+	const bool srgbRed = wwR2aRed( "srgbtag" );
 	auto srgbAt = [&]( int unit ) -> bool {
-		if ( unit < 0 || wwR2aRed( "srgbtag" ) )
+		if ( unit < 0 )
 			return false;
 		fn->glActiveTexture( GL_TEXTURE0 + GLenum( unit ) );
 		GLint tex = 0;
@@ -1129,11 +1134,17 @@ bool Renderer::setupProgramPBRM( const NifModel * nif, Program * prog, Shape * m
 		// one (see wwRestoreSrgbDecode); without the extension the sampler decodes
 		if ( QOpenGLContext * c = QOpenGLContext::currentContext();
 			c && c->hasExtension( QByteArrayLiteral( "GL_EXT_texture_sRGB_decode" ) ) ) {
-			glTexParameteri( GL_TEXTURE_2D, 0x8A48, 0x8A4A );	// TEXTURE_SRGB_DECODE_EXT = SKIP_DECODE_EXT
-			wwSkippedDecode().append( { c, GLuint( tex ) } );
+			// SKIP_DECODE_EXT, or DECODE_EXT under the red; noted only when it changes
+			const GLint want = srgbRed ? 0x8A49 : 0x8A4A;
+			GLint cur = 0x8A49;
+			glGetTexParameteriv( GL_TEXTURE_2D, 0x8A48, &cur );
+			if ( cur != want ) {
+				glTexParameteri( GL_TEXTURE_2D, 0x8A48, want );	// TEXTURE_SRGB_DECODE_EXT
+				wwSkippedDecode().append( { c, GLuint( tex ), cur } );
+			}
 			return false;
 		}
-		return true;
+		return !srgbRed;
 	};
 	prog->uni1i( "baseIsSrgbTex", srgbAt( baseUnit ) );
 	prog->uni1i( "emissiveIsSrgbTex", srgbAt( emissiveUnit ) );

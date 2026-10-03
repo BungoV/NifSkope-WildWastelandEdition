@@ -240,6 +240,8 @@ public:
 	 */
 	GLuint texLoad( const NifModel * nif, const QString & filepath, TexFmt & format,
 					GLenum & target, GLuint & width, GLuint & height, GLuint * id );
+	//! lane SRGBTAG1: a Fallout 4 file texture GL holds as sRGB is read as stored (UNORM), as the game does
+	static void wwFo4SrgbTagAsUnorm( const NifModel * nif, const QString & filepath, GLenum target, GLint internalFormat );
 
 	/*! A function for loading textures.
 	 *
