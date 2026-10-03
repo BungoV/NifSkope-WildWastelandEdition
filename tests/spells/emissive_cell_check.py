@@ -6,12 +6,15 @@ tails, dump/gi_probes.bin) and, with --off, the same cell baked with WW_CELL_EMI
   MAPS   each glow map named in EMT1 is decoded HERE from the loose DDS (impostor_bc_decode's BC1 colour decoder;
          BC3's colour half; Pillow for BC7 at mip 0) at the rule's mip (the largest of at most 1024 texels) and
          compared with the RGB bytes the exe wrote: >= 99% of texels within 3 levels, per map read here
-  SURF   every glowing surfel of the bake re-estimated here: the soup's triangles in the surfel's 70-unit cell
-         that face its side, sampled on a 6 x 6 barycentric grid (area-weighted, alpha-test holes dropped), each
-         sample's Le = (glowColor x glowMult x glowMap.rgb)^2 sampled HERE (nearest texel, wrapped) and 0 for a
-         triangle that does not glow. The bake's estimate is the mean over its ray hits, the twin's over area, so
-         the gate is on the sums: sum(bake) / sum(twin) in [0.6, 1.6]; and no glowing surfel lies in a cell with
-         no glowing triangle (ORPHAN = 0)
+  SURF   every surfel of the bake next to a glowing triangle (its 70-unit cell within one cell of one), glowing
+         in the bake or not (the bake writes Le only where a hit glowed and its bins hold a few hits, so the glowing
+         ones alone are a sample biased high), re-estimated here: the soup's triangles in the surfel's cell sampled
+         on a 6 x 6 barycentric grid, each sample's Le = (glowColor x glowMult x glowMap.rgb)^2 sampled HERE
+         (nearest texel, wrapped), 0 for a triangle that does not glow; alpha-test holes dropped; each sample
+         weighted as the nearest 16 probes' uniform rays land on it (area x |cos| / d^2, in the surfel's normal
+         bin = dominant axis of the face normal turned toward the probe, the segment to the probe tested against
+         the neighbourhood's triangles with rays through their holes). Gate on the sums: sum(bake) / sum(twin) in
+         [0.6, 1.6]; and no glowing surfel lies away from every glowing triangle (ORPHAN = 0)
   GAIN   the probes within 400 units of a glowing triangle: their irradiance (the 6-axis sum) with the glow
          against --off: the share that gains > 0.1% and the mean gain; must gain (share >= 0.5)
   OFF    the --off run: no 'EMT1' tail, no glowing surfel in any .tbk
@@ -151,11 +154,15 @@ def sample(img, u, v):
     return img[y, x]
 
 
-def surfels_of(run):
-    """the glowing surfels (deduplicated by position + normal) and every surfel's key"""
+def surfels_of(run, every=False):
+    """the glowing surfels (deduplicated by position + normal); every=True: every surfel, Le 0 where none glowed"""
     glow = {}
     for f in sorted(glob.glob(os.path.join(run, 'bake', '*.tbk'))):
         t = read_tbk(f)
+        if every:
+            for lst in (t['surfels'], t['back']):
+                for s in lst:
+                    glow[(tuple(np.round(s['pos'], 2)), tuple(int(x) for x in s['nrm']))] = np.zeros(3)
         for e in t['emits']:
             lst = t['back'] if e['surfel'] & 0x80000000 else t['surfels']
             s = lst[e['surfel'] & 0x7fffffff]
@@ -251,38 +258,111 @@ def main():
     ck = np.floor(cen / CELL).astype(np.int64)
     glow_keys = {tuple(k) for k in ck[rec['tri']]}
 
+    Q = probes(run)[:, :3]
+    REACH, NPROBE = 2000.0, 16
+
+    def blocked_local(O, q, Ts, own, tsel):
+        """segments O -> q against the triangles Ts (= tris[tsel], Moller-Trumbore); own = each point's own
+        triangle (index into Ts), skipped; a hit on an alpha-test hole goes on through, as in the bake"""
+        out = np.zeros(len(O), bool)
+        e1 = Ts[:, 1] - Ts[:, 0]
+        e2 = Ts[:, 2] - Ts[:, 0]
+        for k in range(0, len(O), 512):
+            o = O[k:k + 512]
+            d = q[None] - o                                         # t in (eps, 1)
+            pv = np.cross(d[:, None], e2[None])                    # (n, T, 3)
+            det = (e1[None] * pv).sum(-1)
+            okd = np.abs(det) > 1e-9
+            inv = np.where(okd, 1.0 / np.where(okd, det, 1.0), 0.0)
+            tv = o[:, None] - Ts[None, :, 0]
+            u = (tv * pv).sum(-1) * inv
+            qv = np.cross(tv, e1[None])
+            v = (d[:, None] * qv).sum(-1) * inv
+            t = (e2[None] * qv).sum(-1) * inv
+            h = okd & (u >= 0) & (v >= 0) & (u + v <= 1) & (t > 1e-3) & (t < 1 - 1e-3)
+            h[np.arange(len(o)), own[k:k + 512]] = False
+            if am_of is not None:
+                r, c = np.nonzero(h & (am_of[tsel] >= 0)[None, :])
+                if len(r):
+                    ar = am['rec'][am_of[tsel[c]]]
+                    uv = ar['uv'].astype(np.float64)
+                    b1, b2 = u[r, c], v[r, c]
+                    b0 = 1.0 - b1 - b2
+                    uu = b0 * uv[:, 0] + b1 * uv[:, 2] + b2 * uv[:, 4]
+                    vv = b0 * uv[:, 1] + b1 * uv[:, 3] + b2 * uv[:, 5]
+                    hole = np.zeros(len(r), bool)
+                    for mi in np.unique(ar['map']):
+                        g = ar['map'] == mi
+                        hole[g] = sample(am['maps'][mi], uu[g], vv[g]) < ar['thr'][g]
+                    h[r[hole], c[hole]] = False
+            out[k:k + 512] = h.any(1)
+        return out
+
+    gk = np.array(sorted(glow_keys), np.int64)
+
     def judge(runx, tag):
-        glow = surfels_of(runx)
-        if not glow:
+        # every surfel next to a glowing triangle, glowing in the bake or not: the bake writes Le only where a
+        # hit glowed, and its bins hold a handful of hits, so judging the glowing ones alone is biased high
+        glow = surfels_of(runx, every=True)
+        if not any(le.any() for le in glow.values()):
             say('  SURF %s: no glowing surfel in the bake' % tag)
             return None, 0
         bake_sum = np.zeros(3)
         twin_sum = np.zeros(3)
-        orphan = 0
+        orphan = judged = 0
         for (pos, nq), le in glow.items():
             key = np.floor(np.array(pos) / CELL).astype(np.int64)
             n = np.array(nq, np.float64)
             n /= max(np.linalg.norm(n), 1e-9)
+            if not np.any(np.all(np.abs(gk - key) <= 1, axis=1)):
+                if le.any():
+                    orphan += 1
+                    bake_sum += le
+                continue
+            judged += 1
             near = np.all(np.abs(ck - key) <= 1, axis=1)
             sel = np.nonzero(near)[0]
-            if not any(tuple(k) in glow_keys for k in ck[sel]):
-                orphan += 1
-                bake_sum += le
-                continue
             P, w, L, solid, tn = twin_le(sel)
             inside = np.all(np.floor(P / CELL).astype(np.int64) == key, axis=2)
-            facing = (tn @ n) > 0
-            m = inside & solid & facing[:, None]
-            W = (w[:, None] * m)
+            # the bake bins a hit by the dominant axis of the face normal turned toward the probe, and its
+            # hits fall on a point as a probe's uniform rays do: |cos| / d^2 from each probe (no occlusion here)
+            ax = int(np.argmax(np.abs(n)))
+            sg = 1.0 if n[ax] >= 0 else -1.0
+            tax = np.argmax(np.abs(tn), axis=1)
+            Wp = np.zeros(P.shape[:2])
+            dq = np.linalg.norm(Q - np.array(pos), axis=1)
+            near_p = Q[np.argsort(dq)[:NPROBE]]
+            near_p = near_p[np.linalg.norm(near_p - np.array(pos), axis=1) < REACH]
+            Ts = tris[sel].reshape(-1, 3, 3)
+            live = inside & solid
+            for q in near_p:
+                D = P - q[None, None]
+                d2 = np.maximum((D * D).sum(-1), 1.0)
+                c = (D * tn[:, None]).sum(-1)                       # tn . (P - q)
+                fn_ax = -np.sign(c) * tn[np.arange(len(tn)), tax][:, None]   # the turned normal's sign on its axis
+                ok_bin = (tax[:, None] == ax) & (fn_ax * sg > 0) & live
+                ww = np.where(ok_bin, np.abs(c) / np.sqrt(d2) / d2, 0.0)
+                if ok_bin.any():   # the cell's own neighbourhood occludes (a tube in front of its backing board)
+                    ii = np.nonzero(ok_bin)
+                    ww[ii] *= ~blocked_local(P[ii], q, Ts, ii[0], sel)
+                Wp += ww
+            m = inside & solid
+            W = (w[:, None] * m * Wp)
             if W.sum() <= 0:
-                orphan += 1
+                orphan += int(le.any())
                 bake_sum += le
                 continue
-            twin_sum += (W[..., None] * L).sum((0, 1)) / W.sum()
+            tw = (W[..., None] * L).sum((0, 1)) / W.sum()
+            if os.environ.get('EMC_DEBUG'):
+                gshare = (W * (L.sum(-1) > 0)).sum() / W.sum()
+                print('    surfel %s n%s bake %s twin %s glowing share %.3f samples %d'
+                      % (np.round(pos), nq, np.round(le, 3), np.round(tw, 3), gshare, int((W > 0).sum())))
+            twin_sum += tw
             bake_sum += le
         ratio = bake_sum.sum() / max(twin_sum.sum(), 1e-12)
-        say('  SURF %s: glowing surfels %d, Le summed bake %.4g twin %.4g, ratio %.3f, ORPHAN %d'
-            % (tag, len(glow), bake_sum.sum(), twin_sum.sum(), ratio, orphan))
+        say('  SURF %s: surfels next to a glowing triangle %d (glowing in the bake %d), Le summed bake %.4g twin %.4g, '
+            'ratio %.3f, ORPHAN %d' % (tag, judged, sum(1 for le in glow.values() if le.any()), bake_sum.sum(),
+                                       twin_sum.sum(), ratio, orphan))
         return ratio, orphan
 
     ratio, orphan = judge(run, 'green')
