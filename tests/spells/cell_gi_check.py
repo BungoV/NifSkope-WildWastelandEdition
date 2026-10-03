@@ -226,6 +226,17 @@ def stage_a(esm, cell, tbks, S, soup, clear, light=True):
             row_of[(pb, nk)] = hit
     if bad:
         return 'A FAIL surfels: %d of the bake\'s surfels are not in the dump' % bad, None
+    # lane EMISSIVEGI1: a glowing surfel's B carries its own Le (the .tbk emissive tail), added once
+    Le = np.zeros((len(S), 3))
+    nglow = 0
+    for _, t in tbks:
+        for e in t.get('emits', ()):
+            j = int(e['surfel'])
+            s = (t['back'] if j & 0x80000000 else t['surfels'])[j & 0x7fffffff]
+            k = (np.float32(s['pos']).tobytes(), tuple(int(c) for c in s['nrm']))
+            if k in row_of:
+                Le[row_of[k]] = np.array(e['le'], float)
+                nglow += 1
     if not light:   # lane BOUNCE2: an exterior (its light is cell_sky's to check): the surfels only
         return 'A PASS surfels: the dump\'s %d are the bake\'s (light not checked here)' % len(S), row_of
     lights = lights_of(esm, cell)
@@ -234,9 +245,9 @@ def stage_a(esm, cell, tbks, S, soup, clear, light=True):
     good, lit, shadowed, shaped = 0, 0, 0, 0
     for i in pick:
         E, nb = surfel_light(lights, S[i, 0:3], S[i, 3:6], soup, clear)
-        B = S[i, 6:9] * E
+        B = S[i, 6:9] * E + Le[i]
         # lane HEMI1: the surfels a light's shape decides (the same sum with every light an omni differs)
-        shaped += int(not close(B, S[i, 6:9] * surfel_light(lights, S[i, 0:3], S[i, 3:6], soup, clear, False)[0]))
+        shaped += int(not close(B, S[i, 6:9] * surfel_light(lights, S[i, 0:3], S[i, 3:6], soup, clear, False)[0] + Le[i]))
         shadowed += nb
         lit += int(B.max() > 1e-3)
         good += int(close(S[i, 9:12], B))

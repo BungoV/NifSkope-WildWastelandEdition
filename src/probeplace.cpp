@@ -1422,6 +1422,36 @@ bool probeSoupWrite( const QString & path, const ProbeSoup & soup, QString * err
 			f.write( reinterpret_cast<const char *>( t.uv ), 24 );
 		}
 	}
+	/* lane EMISSIVEGI1: the glowing triangles (written only when any glows): the glow maps (name, w, h, w*h*3 RGB
+	 * bytes as stored), the emitters (3 f32 glowColor x glowMult, i32 map or -1 = the whole surface), then 32 bytes
+	 * a glowing triangle (u32 triangle, i32 emitter, 6 f32 uv) */
+	if ( !soup.glow.empty() ) {
+		auto u32 = [&]( quint32 v ) { f.write( reinterpret_cast<const char *>( &v ), 4 ); };
+		const quint32 tail[2] = { 0x31544D45u /* 'EMT1' */, quint32( soup.glow.tris.size() ) };
+		f.write( reinterpret_cast<const char *>( tail ), sizeof tail );
+		u32( quint32( soup.glow.maps.size() ) );
+		for ( size_t m = 0; m < soup.glow.maps.size(); m++ ) {
+			const std::string nm = m < soup.glow.mapNames.size() ? soup.glow.mapNames[m] : std::string();
+			u32( quint32( nm.size() ) );
+			f.write( nm.data(), qint64( nm.size() ) );
+			u32( quint32( soup.glow.maps[m].w ) );
+			u32( quint32( soup.glow.maps[m].h ) );
+			f.write( reinterpret_cast<const char *>( soup.glow.maps[m].rgb.data() ), qint64( soup.glow.maps[m].rgb.size() ) );
+		}
+		u32( quint32( soup.glow.emitters.size() ) );
+		for ( const ProbeEmit::Emitter & em : soup.glow.emitters ) {
+			f.write( reinterpret_cast<const char *>( em.e ), 12 );
+			u32( quint32( em.map ) );
+		}
+		for ( size_t i = 0; i < soup.glow.triOf.size(); i++ ) {
+			if ( soup.glow.triOf[i] < 0 )
+				continue;
+			const ProbeEmit::Tri & t = soup.glow.tris[size_t( soup.glow.triOf[i] )];
+			u32( quint32( i ) );
+			u32( quint32( t.emitter ) );
+			f.write( reinterpret_cast<const char *>( t.uv ), 24 );
+		}
+	}
 	return true;
 }
 
@@ -1548,6 +1578,64 @@ bool probeSoupRead( const QString & path, ProbeSoup * soup, QString * error )
 		}
 		if ( ok )
 			soup->amask = std::move( am );
+		more = ok && f.read( reinterpret_cast<char *>( tail ), sizeof tail ) == qint64( sizeof tail );
+	}
+	// lane EMISSIVEGI1: the optional glowing triangles (a short or broken tail leaves nothing glowing)
+	soup->glow = ProbeEmit();
+	if ( more && tail[0] == 0x31544D45u ) {
+		ProbeEmit ge;
+		bool ok = true;
+		auto u32 = [&]( quint32 * v ) { ok = ok && f.read( reinterpret_cast<char *>( v ), 4 ) == 4; return *v; };
+		quint32 nm = 0;
+		u32( &nm );
+		for ( quint32 m = 0; ok && m < nm; m++ ) {
+			quint32 n = 0, w = 0, h = 0;
+			u32( &n );
+			if ( !ok || n > 4096 ) {
+				ok = false;
+				break;
+			}
+			std::string name( n, '\0' );
+			ok = f.read( name.data(), qint64( n ) ) == qint64( n );
+			u32( &w );
+			u32( &h );
+			if ( !ok || !w || !h || w > 16384 || h > 16384 ) {
+				ok = false;
+				break;
+			}
+			ProbeEmit::Map mp;
+			mp.w = int( w );
+			mp.h = int( h );
+			mp.rgb.resize( size_t( w ) * h * 3 );
+			ok = f.read( reinterpret_cast<char *>( mp.rgb.data() ), qint64( mp.rgb.size() ) ) == qint64( mp.rgb.size() );
+			ge.maps.push_back( std::move( mp ) );
+			ge.mapNames.push_back( name );
+		}
+		quint32 ne = 0;
+		u32( &ne );
+		for ( quint32 i = 0; ok && i < ne; i++ ) {
+			ProbeEmit::Emitter em;
+			quint32 map = 0;
+			ok = f.read( reinterpret_cast<char *>( em.e ), 12 ) == 12;
+			u32( &map );
+			em.map = int( map );
+			ok = ok && em.map < int( nm );
+			ge.emitters.push_back( em );
+		}
+		for ( quint32 i = 0; ok && i < tail[1]; i++ ) {
+			quint32 tri = 0, emi = 0;
+			u32( &tri );
+			u32( &emi );
+			float uv[6];
+			ok = ok && f.read( reinterpret_cast<char *>( uv ), 24 ) == 24 && tri < head[1] && emi < ne;
+			if ( !ok )
+				break;
+			ge.markLast( tri, int( emi ), uv );
+		}
+		if ( ok ) {
+			ge.triOf.resize( size_t( head[1] ), -1 );
+			soup->glow = std::move( ge );
+		}
 	}
 	return true;
 }

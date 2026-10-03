@@ -118,6 +118,10 @@ struct ProbeBakeResult
 	int doors = 0, glassTris = 0;           //!< the soup's door boxes and glass triangles
 	double glassMean = 0;                   //!< over probes: the sphere share seen through glass
 	int probesRoomed = 0, boxesWritten = 0; //!< probes standing in an enclosed room; room boxes written (summed over files)
+	// lane EMISSIVEGI1: glowing surfaces
+	int emitTris = 0, emitSurfels = 0, emitDropped = 0;   //!< the soup's glowing triangles; surfels written with Le; lost to v3
+	qint64 emitHits = 0;                    //!< pass-1 hits on a glowing triangle
+	double emitLeSum[3] = { 0, 0, 0 };      //!< the written surfels' Le, summed
 	double msRays = 0, msWrite = 0;
 	// lane ROOMCLAMP1: probes outside the shell
 	bool backRule = false;

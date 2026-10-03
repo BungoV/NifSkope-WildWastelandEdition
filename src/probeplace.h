@@ -31,6 +31,7 @@
 #include <QtGlobal>
 #include <vector>
 
+#include "probeemit.h"
 #include "probemask.h"
 
 //! The triangles the probes see, plus the door boxes that only tag apertures.
@@ -133,6 +134,9 @@ struct ProbeSoup
 		amask.triOf.back() = int( amask.tris.size() );
 		amask.tris.push_back( t );
 	}
+	/*! lane EMISSIVEGI1: the triangles that glow (probeemit.h). Written as the optional 'EMT1' tail (only when any
+	 *  triangle glows), so a soup with nothing glowing stays byte for byte as before. */
+	ProbeEmit glow;   // not "emit": a Qt macro
 };
 
 //! Lane BAKE4: one box of an enclosed room's air (world units), what `.tbk` v4 writes for the

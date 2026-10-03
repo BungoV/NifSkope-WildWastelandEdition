@@ -152,6 +152,27 @@ bool ProbeAlbedo::alphaBytes( const QString & tex, int * w, int * h, std::vector
 	return true;
 }
 
+bool ProbeAlbedo::rgbBytes( const QString & tex, int * w, int * h, std::vector<unsigned char> * rgb )
+{
+	if ( tex.isEmpty() )
+		return false;
+	DDSTexture16 * t = decode( tex, 1024 );
+	if ( !t )
+		return false;
+	*w = t->getWidth();
+	*h = t->getHeight();
+	rgb->assign( size_t( *w ) * size_t( *h ) * 3, 0 );
+	for ( int y = 0; y < *h; y++ )
+		for ( int x = 0; x < *w; x++ ) {
+			const FloatVector4 c = FloatVector4::convertFloat16( t->getPixelN( x, y, 0 ) );
+			for ( int k = 0; k < 3; k++ )
+				( *rgb )[( size_t( y ) * size_t( *w ) + size_t( x ) ) * 3 + size_t( k )]
+					= (unsigned char)( std::lround( std::clamp( c[k], 0.0f, 1.0f ) * 255.0f ) );
+		}
+	delete t;
+	return true;
+}
+
 void ProbeAlbedo::sizeOf( const DDSTexture16 * t, int * w, int * h )
 {
 	*w = t ? t->getWidth() : 1;

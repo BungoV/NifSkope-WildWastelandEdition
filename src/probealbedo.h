@@ -83,6 +83,10 @@ public:
 	 *  1024 texels across, decoded once and dropped (the bake's alpha-test masks). False = no map read.
 	 *  `minA` takes the smallest alpha (a map whose every texel passes the test needs no mask). */
 	bool alphaBytes( const QString & tex, int * w, int * h, std::vector<unsigned char> * a, int * minA );
+	/*! Lane EMISSIVEGI1: the map's RGB as stored (0..255, not sRGB-decoded: the glow map the shader adds in
+	 *  sqrt-of-linear space), 3 bytes a texel, row 0 = v 0, at its largest mip of at most 1024 texels across.
+	 *  False = no map read. */
+	bool rgbBytes( const QString & tex, int * w, int * h, std::vector<unsigned char> * rgb );
 
 	int texturesRead = 0, texturesMissing = 0;
 	int finesRead = 0;

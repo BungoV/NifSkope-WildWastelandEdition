@@ -1799,6 +1799,31 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 	const bool alphaPin = qgetenv( "WW_CELL_ALPHATEST_PIN" ).trimmed() == "off";
 	// Measurement pin only: WW_CELL_ALPHATEST_FOLIAGE=keep puts landscape\ alpha-tested cards in the soup with their mask.
 	const bool foliageKeep = qgetenv( "WW_CELL_ALPHATEST_FOLIAGE" ).trimmed() == "keep";
+	/* lane EMISSIVEGI1: glowing surfaces light the bake (probeemit.h). WW_CELL_EMISSIVE_PIN=off (gates only, never
+	 * a user toggle) lists no glowing triangle: byte for byte the exe from before the lane. WW_CELL_EMISSIVE_RED =
+	 * nomask (the glow map ignored: the whole surface glows) | noflag (Own-Emit ignored): the gate's reds. */
+	const bool emitPin = qgetenv( "WW_CELL_EMISSIVE_PIN" ).trimmed() == "off";
+	const QByteArray emitRed = qgetenv( "WW_CELL_EMISSIVE_RED" ).trimmed();
+	QHash<QString, int> glowMapOf;   // lower-case path -> into probeSoup.glow.maps; -1 = unread
+	QHash<QString, int> emitterOf;
+	int emShapes = 0, emShapesBlack = 0, emShapesUnread = 0, emShapesNoUv = 0, emOffShapes = 0;
+	QSet<quint32> emRefs, emRefsNearLight, emNearLights;
+	QString emModels;   // census: model, material, map, color x mult, lights within 256 units
+	auto glowMapIdx = [&]( const QString & tex ) -> int {
+		const QString k = tex.toLower();
+		auto it = glowMapOf.constFind( k );
+		if ( it != glowMapOf.constEnd() )
+			return *it;
+		ProbeEmit::Map mp;
+		int idx = -1;
+		if ( probeAlb.rgbBytes( tex, &mp.w, &mp.h, &mp.rgb ) ) {
+			idx = int( probeSoup.glow.maps.size() );
+			probeSoup.glow.maps.push_back( std::move( mp ) );
+			probeSoup.glow.mapNames.push_back( tex.toStdString() );
+		}
+		glowMapOf.insert( k, idx );
+		return idx;
+	};
 	struct MaskInfo { int map = -1; int minA = 255; };
 	QHash<QString, MaskInfo> maskOfTex;
 	QHash<QString, int> maskModelIdx;
@@ -2290,6 +2315,55 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 							amModel = *mit2;
 						}
 					}
+					/* lane EMISSIVEGI1: does this shape glow, as the renderer draws it (fo4_default.frag: emissive =
+					 * hasEmit ? glowColor x glowMult x (hasGlowMap ? glowMap.rgb : 1) : 0)? -1 = no */
+					int emIdx = -1;
+					const float emC[3] = { s.emitColor[0] * s.emitMult, s.emitColor[1] * s.emitMult, s.emitColor[2] * s.emitMult };
+					const bool emColor = emC[0] > 0.0f || emC[1] > 0.0f || emC[2] > 0.0f;
+					if ( !emitPin && emColor && !s.ownEmit )
+						emOffShapes++;
+					if ( !emitPin && emColor && ( s.ownEmit || emitRed == "noflag" ) ) {
+						const bool useMap = s.glowFlag && emitRed != "nomask";
+						int gm = -1;
+						if ( useMap && s.glowTex.isEmpty() ) {
+							emShapesBlack++;   // the flag with no map: the shader's sampler reads black
+						} else if ( useMap && s.geom.uv.size() < nv * 2 ) {
+							emShapesNoUv++;
+						} else if ( useMap && ( gm = glowMapIdx( s.glowTex ) ) < 0 ) {
+							emShapesUnread++;
+						} else {
+							const QString ek = QStringLiteral( "%1|%2|%3|%4" ).arg( double( emC[0] ) ).arg( double( emC[1] ) )
+								.arg( double( emC[2] ) ).arg( gm );
+							auto eit = emitterOf.constFind( ek );
+							if ( eit == emitterOf.constEnd() ) {
+								ProbeEmit::Emitter em;
+								for ( int k = 0; k < 3; k++ )
+									em.e[k] = emC[k];
+								em.map = gm;
+								eit = emitterOf.insert( ek, int( probeSoup.glow.emitters.size() ) );
+								probeSoup.glow.emitters.push_back( em );
+							}
+							emIdx = *eit;
+							emShapes++;
+							emRefs.insert( p.ref );
+							// the double-count census: placed lights within 256 units of this placement
+							int near = 0;
+							for ( const EsmRefr & lr : lightRefs ) {
+								const float dx = lr.pos[0] - p.pos[0], dy = lr.pos[1] - p.pos[1], dz = lr.pos[2] - p.pos[2];
+								if ( dx * dx + dy * dy + dz * dz <= 256.0f * 256.0f && !startsDisabled( lr ) ) {
+									near++;
+									emNearLights.insert( lr.formID );
+								}
+							}
+							if ( emShapes <= 200 )
+								emModels += QStringLiteral( "    %1 | %2 | %3 | e %4,%5,%6 | lights within 256: %7\n" )
+								.arg( model, s.matName, useMap ? s.glowTex : QStringLiteral( "(whole surface)" ) )
+								.arg( double( emC[0] ), 0, 'f', 3 ).arg( double( emC[1] ), 0, 'f', 3 ).arg( double( emC[2] ), 0, 'f', 3 )
+								.arg( near );
+							if ( near )
+								emRefsNearLight.insert( p.ref );
+						}
+					}
 					const int amFirst = probeSoup.triCount();
 					for ( size_t t = 0; t + 2 < s.geom.tris.size(); t += 3 ) {
 						float w[3][3];
@@ -2372,6 +2446,16 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 								tuv[k * 2 + 1] = s.geom.uv[vi * 2 + 1];
 							}
 							probeSoup.markLastMasked( amMap, amThr, tuv, amModel );
+						}
+						if ( okTri && emIdx >= 0 ) {   // lane EMISSIVEGI1
+							float tuv[6] = { 0, 0, 0, 0, 0, 0 };
+							if ( s.geom.uv.size() >= nv * 2 )
+								for ( int k = 0; k < 3; k++ ) {
+									const size_t vi = size_t( s.geom.tris[t + size_t( k )] );
+									tuv[k * 2] = s.geom.uv[vi * 2];
+									tuv[k * 2 + 1] = s.geom.uv[vi * 2 + 1];
+								}
+							probeSoup.glow.markLast( probeSoup.triCount() - 1, emIdx, tuv );
 						}
 					}
 					if ( !soupShapesPath.isEmpty() && probeSoup.triCount() > amFirst )
@@ -3022,6 +3106,14 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 			  << amShapes << ", triangles " << int( probeSoup.amask.tris.size() ) << ", maps " << int( probeSoup.amask.maps.size() )
 			  << "; alpha-tested shapes left solid: map with no texel under the threshold " << amShapesNoHole
 			  << ", map unread " << amShapesUnread << "; triangle colors read off a centroid hole " << amAlbMoved << "\n";
+			// lane EMISSIVEGI1: the glowing surfaces
+			t << "  probe soup emissive" << ( emitPin ? " PIN off (nothing glows)" : "" )
+			  << ( emitRed.isEmpty() ? "" : " RED " ) << emitRed.constData() << ": shapes glowing " << emShapes
+			  << " (placements " << emRefs.size() << ", with a placed light lit within 256 units " << emRefsNearLight.size()
+			  << ", those lights " << emNearLights.size() << "), triangles " << int( probeSoup.glow.tris.size() )
+			  << ", emitters " << int( probeSoup.glow.emitters.size() ) << ", glow maps " << int( probeSoup.glow.maps.size() )
+			  << "; left dark: glow flag with no map " << emShapesBlack << ", map unread " << emShapesUnread << ", no UVs "
+			  << emShapesNoUv << "; a color without Own-Emit " << emOffShapes << "\n" << emModels;
 			// lane CAPTURE1: refraction-only shapes left out of the soup, per model
 			t << "  probe soup refraction-only shapes left out " << soupRefractShapes << " (" << soupRefractTris
 			  << " triangles)" << ( refractKeepRed ? " RED keep: kept as surfaces" : "" );

@@ -338,6 +338,7 @@ HEADERS += \
 	src/probefar.h \
 	src/probebvh.h \
 	src/probemask.h \
+	src/probeemit.h \
 	src/probegi.h \
 	src/proberooms.h \
 	src/probesky.h \
