@@ -15,7 +15,14 @@
  *    3. a voxel grid over the surfaces: each voxel blends the probes within `radius` that it can
  *       SEE (a ray voxel -> probe through the soup), weight (1 - (d / radius)^2)^2. A probe behind a
  *       wall never lights the voxel: the guard against indoor/outdoor bleed.
- *  The renderer samples the grid (src/gl/celllights.cpp, unit 13) and adds albedo x E / pi. */
+ *  The renderer samples the grid (src/gl/celllights.cpp, unit 13) and adds albedo x E / pi.
+ *
+ *  Lane BOUNCE2 (2026-10-03, plan 2aj): more than one bounce, the still viewer's twin of the deck's "each surfel
+ *  adds its probe's light from the previous frame". Between 2 and 3 the relight repeats: every surfel reads the
+ *  probes it can see from its own point (within the blend radius, the step-3 weights, the n^2 blend of the six
+ *  axes; none in the radius: the closest it can see within twice it), never a probe behind its wall nor, when
+ *  its room is known (the .tbk v4 room boxes), one in another room; B = albedo x (E_direct + E_probes / pi);
+ *  the probes gather again. Until the largest change is under a thousandth of the brightest surfel. */
 
 #include "probeplace.h"
 #include "probesky.h"
@@ -61,6 +68,20 @@ struct ProbeGiResult
 	int probesTinted = 0;               //!< probes with a tinted octant (sky seen through glass)
 	std::vector<float> probeSkyE;       //!< per probe: 6 x rgb, the sky's part of probeCube
 	std::vector<float> surfelSun;       //!< per unique surfel: rgb, the sun's part of B
+	// lane BOUNCE2: the passes (surfelOut keeps pass 1's B; probeCube and the grid are the last pass's)
+	int passes = 1;                     //!< passes run (1 = one bounce)
+	bool settled = true;                //!< the last pass changed no surfel by more than the bar
+	int surfelsFed = 0, fedClosest = 0; //!< surfels that read a probe; of them, by the closest-probe fallback
+	int surfelsRoomed = 0;              //!< surfels whose room the room boxes name
+	qint64 feedRays = 0, feedBlocked = 0, feedOtherRoom = 0;
+	double gain = 1.0;                  //!< sum of B, last pass over pass 1
+	std::vector<double> passLog;        //!< per pass: largest change of a surfel's B, sum of B, largest B
+	std::vector<float> surfelBounce;    //!< per unique surfel: rgb, the last pass's B
+	std::vector<int> feedStart;         //!< surfel i reads feedProbe/feedWeight[start[i] .. start[i + 1])
+	std::vector<int> feedProbe;
+	std::vector<float> feedWeight;
+	std::vector<int> surfelRoom;        //!< per unique surfel: its room, -1 = not known
+	double msBounce = 0;
 };
 
 struct ProbeGiSpec
@@ -77,6 +98,12 @@ struct ProbeGiSpec
 	 *  octant sees the sky, "notint" the glass tint is ignored, "sunthrough" the sun has no shadow ray. */
 	ProbeSkyLight sky;
 	QString skyRed;
+	/*! lane BOUNCE2: 0 = repeat until settled (at most maxPasses), n = exactly n passes (1 = one bounce; the gates
+	 *  that measure one bounce pin it, WW_CELL_GI_PASSES). Refuters in `red`: "rooms" (a surfel reads every probe
+	 *  in the radius, walls and rooms ignored), "grow" (the feedback's albedo is 1.5: gain above one). */
+	int passes = 0;
+	int maxPasses = 64;
+	double settle = 1e-3;
 };
 
 //! Relight the bake in `bakeDir` (its sector_*.tbk) with `lighting`, shadowed through `soup`.

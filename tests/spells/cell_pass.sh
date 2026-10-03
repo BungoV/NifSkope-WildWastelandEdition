@@ -94,7 +94,8 @@ shoot() {   # shoot <exe> <run dir> <cell> <tag> <env...>
 	else
 		open=( WW_CELL_OPEN="$ESM|interior|$cell" )
 	fi
-	env "$@" "${open[@]}" WW_RENDER_CENTER="${!cv}" WW_RENDER_DIST="${!dv}" WW_RENDER_FOV=70 \
+	# lane BOUNCE2: one bounce pinned (this gate rebuilds one pass and compares with a one-pass exe)
+	env WW_CELL_GI_PASSES=1 "$@" "${open[@]}" WW_RENDER_CENTER="${!cv}" WW_RENDER_DIST="${!dv}" WW_RENDER_FOV=70 \
 		WW_CELL_DATAROOT="$DATA" WW_CELL_GI_FROM="$(winpath "$run/bake")" \
 		WW_CELL_PROBES="$(winpath "$run/probes.tsv")" WW_CELL_PROBES_HIDE=1 \
 		WW_RENDER_SHOT="$(winpath "$shot")" WW_RENDER_SIZE="$SIZE" \

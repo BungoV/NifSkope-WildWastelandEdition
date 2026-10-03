@@ -2986,6 +2986,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 		if ( const WwCellLighting * L = wwCellLightsFor( nif ) ) {
 			ProbeGiSpec gs;
 			gs.red = QString::fromLatin1( qgetenv( "WW_CELL_GI_RED" ) ).trimmed();
+			gs.passes = qEnvironmentVariableIntValue( "WW_CELL_GI_PASSES" );   // lane BOUNCE2: a gate's pin (1 = one bounce)
 			// lane SKY1: outdoors, the weather's sky and sun (src/probesky.h); WW_CELL_SKY_RED its refuters
 			if ( !spec.interior ) {
 				gs.sky = probeSkyLightNow();

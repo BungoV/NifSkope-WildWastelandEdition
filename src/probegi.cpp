@@ -26,6 +26,7 @@ BSD License - see nifskope.h
 namespace {
 
 constexpr double kFourPi = 12.566370614359172;
+constexpr double kPi = 3.141592653589793;
 
 // ---- the `.tbk` v3 records (src/probebake.cpp writes them; the layouts are FO4CS's reader's)
 struct TbkHeader
@@ -85,6 +86,15 @@ struct TbkProbeExt
 };
 static_assert( sizeof( TbkProbeExt ) == 32, "tbk probe ext" );
 
+// lane BOUNCE2: the v4 tail's room box (src/probebake.cpp's TbkRoomBox), a room's air
+struct TbkRoomBox
+{
+	quint32 room;
+	float lo[3], hi[3];
+	quint32 reserved;
+};
+static_assert( sizeof( TbkRoomBox ) == 32, "tbk room box" );
+
 struct Tbk
 {
 	QString name;
@@ -95,6 +105,7 @@ struct Tbk
 	std::vector<TbkSurfel> back;      //!< v4: the cells' second sides
 	std::vector<TbkLinkExt> lext;     //!< v4: one per link
 	std::vector<TbkProbeExt> pext;    //!< v4: one per probe (lane SKY1 reads its sky tint)
+	std::vector<TbkRoomBox> boxes;    //!< v4: the rooms' air (lane BOUNCE2)
 };
 
 bool readTbk( const QString & path, Tbk & t, QString * err )
@@ -138,6 +149,7 @@ bool readTbk( const QString & path, Tbk & t, QString * err )
 	t.back.clear();
 	t.lext.clear();
 	t.pext.clear();
+	t.boxes.clear();
 	if ( v4 ) {
 		t.back.resize( t.h.reserved[0] );
 		std::memcpy( t.back.data(), p, t.back.size() * 32 );
@@ -147,6 +159,9 @@ bool readTbk( const QString & path, Tbk & t, QString * err )
 		p += t.lext.size() * 8;
 		t.pext.resize( t.h.probeCount );
 		std::memcpy( t.pext.data(), p, t.pext.size() * 32 );
+		p += t.pext.size() * 32;
+		t.boxes.resize( t.h.reserved[1] );
+		std::memcpy( t.boxes.data(), p, t.boxes.size() * 32 );
 	}
 	t.name = QFileInfo( path ).fileName();
 	return true;
@@ -425,8 +440,10 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 	R.msLight = clock.nsecsElapsed() / 1e6;
 
 	// ---- 2. every probe's ambient cube from its links
-	struct UP { double p[3]; double E[6][3]; double sky[6]; double S[6][3]; };   // S: the sky's part of E (lane SKY1)
+	struct UP { double p[3]; double E[6][3]; double sky[6]; double S[6][3]; double kUnl = 1.0; quint32 room[2] = { 0, 0xFFFFFFFFu }; };   // S: the sky's part of E (lane SKY1)
 	std::vector<UP> up;
+	struct LK { double omega, cosA[6], tint[3]; };   // lane BOUNCE2: a resolved link, for the later passes' gathers
+	std::vector<LK> lks;
 	double skyVisSum = 0.0;
 	R.probeLinkStart.assign( 1, 0 );	// lane PROBEVIEW1
 	for ( size_t f = 0; f < tbks.size(); f++ ) {
@@ -486,18 +503,32 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 				const double w = double( lk.weight ) * pr.linkWeightScale;
 				linked += w;
 				const double omega = w * kFourPi;
+				LK rec;
+				rec.omega = omega;
+				for ( int c = 0; c < 3; c++ )
+					rec.tint[c] = tint[c];
 				for ( int a = 0; a < 6; a++ ) {
 					const double cosA = std::max( kAxes[a][0] * dir[0] + kAxes[a][1] * dir[1] + kAxes[a][2] * dir[2], 0.0 );
+					rec.cosA[a] = cosA;
 					for ( int c = 0; c < 3; c++ )
 						P.E[a][c] += u.B[c] * tint[c] * omega * cosA;
 				}
+				lks.push_back( rec );
 			}
 			// the unlinked share (void, dropped links) sees what the linked surfaces see on average
 			if ( linked > 0.0 && pr.unlinkedWeight > 0.0f ) {
 				const double k = ( linked + pr.unlinkedWeight ) / linked;
+				P.kUnl = k;
 				for ( auto & e : P.E )
 					for ( double & c : e )
 						c *= k;
+			}
+			{	// lane BOUNCE2: the probe's room, and an opening's second room
+				const size_t pi = size_t( &pr - t.probes.data() );
+				if ( pi < t.pext.size() ) {
+					P.room[0] = t.pext[pi].room[0];
+					P.room[1] = t.pext[pi].room[1];
+				}
 			}
 			// lane SKY1: the sky this probe sees, beside what its surfaces send (src/probesky.h)
 			if ( skyOn ) {
@@ -580,6 +611,177 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 	for ( size_t i = 0; i < up.size(); i++ )
 		ph[Key3 { floorDiv( float( up[i].p[0] ), float( rad ) ), floorDiv( float( up[i].p[1] ), float( rad ) ),
 			floorDiv( float( up[i].p[2] ), float( rad ) ) }].push_back( int( i ) );
+
+	/* ---- lane BOUNCE2: more than one bounce (probegi.h). What each surfel reads: the probes within the radius
+	 * it can see from its own point and that stand in its room, else the closest such within twice the radius. */
+	const double msBefore = clock.nsecsElapsed() / 1e6;
+	const bool redRooms = spec.red == QLatin1String( "rooms" );
+	const bool redGrow = spec.red == QLatin1String( "grow" );
+	{
+		std::vector<TbkRoomBox> boxes;
+		for ( const Tbk & t : tbks )
+			boxes.insert( boxes.end(), t.boxes.begin(), t.boxes.end() );
+		R.surfelRoom.assign( us.size(), -1 );
+		R.feedStart.assign( us.size() + 1, 0 );
+		std::vector<std::vector<std::pair<int, float>>> feed( us.size() );
+		std::atomic<qint64> fr( 0 ), fb( 0 ), fo( 0 );
+		std::atomic<int> roomed( 0 ), closest( 0 );
+		parallelFor( us.size(), [&]( size_t i ) {
+			const US & u = us[i];
+			// the room: the nearest room box to the surfel's air (17.5 units out), within one placement voxel (35)
+			const double qa[3] = { u.p[0] + u.n[0] * 17.5, u.p[1] + u.n[1] * 17.5, u.p[2] + u.n[2] * 17.5 };
+			double best = 35.0 * 35.0;
+			qint64 room = -1;
+			for ( const TbkRoomBox & b : boxes ) {
+				double d2 = 0.0;
+				for ( int c = 0; c < 3; c++ ) {
+					const double e = std::max( std::max( double( b.lo[c] ) - qa[c], qa[c] - double( b.hi[c] ) ), 0.0 );
+					d2 += e * e;
+				}
+				if ( d2 <= best ) {
+					best = d2;
+					room = qint64( b.room );
+				}
+			}
+			R.surfelRoom[i] = int( room );
+			if ( room >= 0 )
+				roomed++;
+			const double o[3] = { u.p[0] + u.n[0] * 2.0, u.p[1] + u.n[1] * 2.0, u.p[2] + u.n[2] * 2.0 };
+			const Key3 ck { floorDiv( float( o[0] ), float( rad ) ), floorDiv( float( o[1] ), float( rad ) ), floorDiv( float( o[2] ), float( rad ) ) };
+			std::vector<std::pair<double, int>> cand;
+			for ( int dz = -2; dz <= 2; dz++ )
+				for ( int dy = -2; dy <= 2; dy++ )
+					for ( int dx = -2; dx <= 2; dx++ ) {
+						auto it = ph.find( Key3 { ck.x + dx, ck.y + dy, ck.z + dz } );
+						if ( it == ph.end() )
+							continue;
+						for ( int j : it->second ) {
+							double d2 = 0.0;
+							for ( int a = 0; a < 3; a++ )
+								d2 += ( up[size_t( j )].p[a] - o[a] ) * ( up[size_t( j )].p[a] - o[a] );
+							if ( d2 < 4.0 * rad * rad )
+								cand.emplace_back( d2, j );
+						}
+					}
+			std::sort( cand.begin(), cand.end() );
+			qint64 nr = 0, nb = 0, no = 0;
+			for ( const auto & c : cand ) {
+				const bool inRadius = c.first < rad * rad;
+				if ( !inRadius && !feed[i].empty() )
+					break;
+				const UP & P = up[size_t( c.second )];
+				if ( !redRooms ) {
+					if ( room >= 0 && quint32( room ) != P.room[0] && quint32( room ) != P.room[1] ) {
+						no++;
+						continue;
+					}
+					nr++;
+					if ( blocked( o, P.p, 0.0 ) ) {
+						nb++;
+						continue;
+					}
+				}
+				if ( inRadius ) {
+					const double t = 1.0 - c.first / ( rad * rad );
+					feed[i].emplace_back( c.second, float( t * t ) );
+				} else {
+					feed[i].emplace_back( c.second, 1.0f );
+					closest++;
+					break;
+				}
+			}
+			fr += nr;
+			fb += nb;
+			fo += no;
+		} );
+		R.surfelsRoomed = roomed;
+		R.fedClosest = closest;
+		R.feedRays = fr;
+		R.feedBlocked = fb;
+		R.feedOtherRoom = fo;
+		for ( size_t i = 0; i < us.size(); i++ ) {
+			R.surfelsFed += feed[i].empty() ? 0 : 1;
+			for ( const auto & e : feed[i] ) {
+				R.feedProbe.push_back( e.first );
+				R.feedWeight.push_back( e.second );
+			}
+			R.feedStart[i + 1] = int( R.feedProbe.size() );
+		}
+	}
+	// the passes: pass 1 is the relight above; pass k re-lights every surfel with its probes' light of pass k - 1
+	std::vector<double> Bk( us.size() * 3 );
+	for ( size_t i = 0; i < us.size(); i++ )
+		for ( int c = 0; c < 3; c++ )
+			Bk[i * 3 + size_t( c )] = us[i].B[c];
+	double sum1 = 0.0, max1 = 0.0;
+	for ( double b : Bk ) {
+		sum1 += b;
+		max1 = std::max( max1, b );
+	}
+	R.passLog = { 0.0, sum1, max1 };
+	const int cap = spec.passes > 0 ? spec.passes : std::max( 1, spec.maxPasses );
+	R.passes = 1;
+	R.settled = spec.passes > 0;
+	for ( int pass = 2; pass <= cap; pass++ ) {
+		std::vector<double> Bn( Bk.size() );
+		parallelFor( us.size(), [&]( size_t i ) {
+			const US & u = us[i];
+			double E[3] = { 0, 0, 0 }, ws = 0.0;
+			for ( int k = R.feedStart[i]; k < R.feedStart[i + 1]; k++ ) {
+				const UP & P = up[size_t( R.feedProbe[size_t( k )] )];
+				const double w = R.feedWeight[size_t( k )];
+				ws += w;
+				// the shader's sample: the facing axis of each pair, weighted by n^2
+				for ( int a = 0; a < 3; a++ ) {
+					const int ax = 2 * a + ( u.n[a] >= 0.0 ? 0 : 1 );
+					for ( int c = 0; c < 3; c++ )
+						E[c] += w * u.n[a] * u.n[a] * P.E[ax][c];
+				}
+			}
+			for ( int c = 0; c < 3; c++ ) {
+				const double a = redGrow ? 1.5 : u.a[c];
+				Bn[i * 3 + size_t( c )] = u.B[c] + ( ws > 0.0 ? a * ( E[c] / ws ) / kPi : 0.0 );
+			}
+		} );
+		double ch = 0.0, sum = 0.0, mx = 0.0;
+		for ( size_t k = 0; k < Bn.size(); k++ ) {
+			ch = std::max( ch, std::fabs( Bn[k] - Bk[k] ) );
+			sum += Bn[k];
+			mx = std::max( mx, Bn[k] );
+		}
+		Bk.swap( Bn );
+		// every probe gathers its links again (the expression of step 2, in its order)
+		size_t li = 0;
+		for ( size_t j = 0; j < up.size(); j++ ) {
+			UP & P = up[j];
+			std::memset( P.E, 0, sizeof P.E );
+			for ( int k = R.probeLinkStart[j]; k < R.probeLinkStart[j + 1]; k++, li++ ) {
+				const LK & L = lks[li];
+				const double * B = &Bk[size_t( R.probeLinks[size_t( k )] ) * 3];
+				for ( int a = 0; a < 6; a++ )
+					for ( int c = 0; c < 3; c++ )
+						P.E[a][c] += B[c] * L.tint[c] * L.omega * L.cosA[a];
+			}
+			if ( P.kUnl != 1.0 )
+				for ( auto & e : P.E )
+					for ( double & c : e )
+						c *= P.kUnl;
+			if ( skyOn )
+				for ( int a = 0; a < 6; a++ )
+					for ( int c = 0; c < 3; c++ )
+						P.E[a][c] += P.S[a][c];
+		}
+		R.passes = pass;
+		R.passLog.insert( R.passLog.end(), { ch, sum, mx } );
+		if ( spec.passes <= 0 && ch <= spec.settle * mx ) {
+			R.settled = true;
+			break;
+		}
+	}
+	R.gain = sum1 > 0.0 ? R.passLog[R.passLog.size() - 2] / sum1 : 1.0;
+	R.surfelBounce.assign( Bk.begin(), Bk.end() );
+	R.msBounce = clock.nsecsElapsed() / 1e6 - msBefore;
+
 	// the voxels a fragment on a surfel's surface samples (the shader's normal offset, then +-1)
 	const size_t nVox = size_t( dims[0] ) * size_t( dims[1] ) * size_t( dims[2] );
 	std::vector<quint8> near( nVox, 0 );
@@ -661,7 +863,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 	R.visRays = vr;
 	R.visBlocked = vb;
 	R.voxelsValid = valid;
-	R.msGrid = clock.nsecsElapsed() / 1e6 - R.msLight - R.msGather;
+	R.msGrid = clock.nsecsElapsed() / 1e6 - R.msLight - R.msGather - R.msBounce;
 
 	// the gate's copies
 	R.surfelOut.reserve( us.size() * 12 );
@@ -703,6 +905,18 @@ static QString skyCensusText( const ProbeGiResult & r )
 		.arg( r.surfelsSun ).arg( r.surfels ).arg( r.sunRays ).arg( r.sunBlocked );
 }
 
+// lane BOUNCE2: the passes
+static QString bounceCensusText( const ProbeGiResult & r )
+{
+	const size_t n = r.passLog.size();
+	return QStringLiteral( "gi bounce: %1 passes (%2), last change %3 of the brightest %4, gain %5; %6 of %7 surfels read a "
+		"probe (%8 the closest only), %9 in a known room; feed rays %10 (%11 blocked), %12 probes in another room refused; ms %13" )
+		.arg( r.passes ).arg( r.settled ? QStringLiteral( "settled" ) : QStringLiteral( "NOT settled" ) )
+		.arg( n >= 3 ? r.passLog[n - 3] : 0.0, 0, 'g', 4 ).arg( n >= 3 ? r.passLog[n - 1] : 0.0, 0, 'g', 4 )
+		.arg( r.gain, 0, 'f', 4 ).arg( r.surfelsFed ).arg( r.surfels ).arg( r.fedClosest ).arg( r.surfelsRoomed )
+		.arg( r.feedRays ).arg( r.feedBlocked ).arg( r.feedOtherRoom ).arg( r.msBounce, 0, 'f', 0 );
+}
+
 QString probeGiCensusText( const ProbeGiResult & r )
 {
 	if ( !r.ok )
@@ -714,7 +928,8 @@ QString probeGiCensusText( const ProbeGiResult & r )
 		.arg( r.shadowRays ).arg( r.shadowBlocked ).arg( r.dims[0] ).arg( r.dims[1] ).arg( r.dims[2] )
 		.arg( double( r.voxel ), 0, 'f', 1 ).arg( double( r.radius ), 0, 'f', 1 ).arg( r.voxelsNear ).arg( r.voxelsValid )
 		.arg( r.visRays ).arg( r.visBlocked ).arg( r.msLight, 0, 'f', 0 ).arg( r.msGather, 0, 'f', 0 ).arg( r.msGrid, 0, 'f', 0 )
-		+ ( r.skyLit ? QStringLiteral( "\n  " ) + skyCensusText( r ) : QString() );
+		+ ( r.skyLit ? QStringLiteral( "\n  " ) + skyCensusText( r ) : QString() )
+		+ QStringLiteral( "\n  " ) + bounceCensusText( r );
 }
 
 /* The dump (little-endian):
@@ -787,6 +1002,39 @@ bool probeGiDump( const ProbeGiResult & r, const ProbeGiSpec & spec, const QStri
 		f.write( i32( r.probes ) );
 		f.write( reinterpret_cast<const char *>( r.probeLinkStart.data() ), qint64( r.probeLinkStart.size() * 4 ) );
 		f.write( reinterpret_cast<const char *>( r.probeLinks.data() ), qint64( r.probeLinks.size() * 4 ) );
+	}
+	/* lane BOUNCE2: the passes
+	 *   gi_bounce.bin  int32 n, int32 passes, then n x 3 float32: each surfel's B after the last pass
+	 *   gi_feed.bin    int32 n, int32 start[n + 1], then per entry int32 probe (gi_probes.bin order) + float32
+	 *                  weight, then int32 room per surfel (-1 = not known)
+	 *   gi_passes.txt  per pass: "pass k change sumB maxB" (change = the largest change of a surfel's B) */
+	{
+		QFile f( QDir( dir ).filePath( QStringLiteral( "gi_bounce.bin" ) ) );
+		if ( !f.open( QIODevice::WriteOnly ) ) {
+			*err = QStringLiteral( "cannot write %1" ).arg( f.fileName() );
+			return false;
+		}
+		f.write( i32( r.surfels ) + i32( r.passes ) );
+		f.write( reinterpret_cast<const char *>( r.surfelBounce.data() ), qint64( r.surfelBounce.size() * sizeof( float ) ) );
+		QFile g( QDir( dir ).filePath( QStringLiteral( "gi_feed.bin" ) ) );
+		if ( !g.open( QIODevice::WriteOnly ) ) {
+			*err = QStringLiteral( "cannot write %1" ).arg( g.fileName() );
+			return false;
+		}
+		g.write( i32( r.surfels ) );
+		g.write( reinterpret_cast<const char *>( r.feedStart.data() ), qint64( r.feedStart.size() * 4 ) );
+		for ( size_t k = 0; k < r.feedProbe.size(); k++ )
+			g.write( i32( r.feedProbe[k] ) + f32( r.feedWeight[k] ) );
+		g.write( reinterpret_cast<const char *>( r.surfelRoom.data() ), qint64( r.surfelRoom.size() * 4 ) );
+		QFile t( QDir( dir ).filePath( QStringLiteral( "gi_passes.txt" ) ) );
+		if ( t.open( QIODevice::WriteOnly ) ) {
+			QString s = QStringLiteral( "passes %1 settled %2 red %3\n" ).arg( r.passes ).arg( r.settled ? 1 : 0 )
+				.arg( spec.red.isEmpty() ? QStringLiteral( "-" ) : spec.red );
+			for ( size_t k = 0; k + 2 < r.passLog.size(); k += 3 )
+				s += QStringLiteral( "pass %1 %2 %3 %4\n" ).arg( k / 3 + 1 ).arg( r.passLog[k], 0, 'g', 9 )
+					.arg( r.passLog[k + 1], 0, 'g', 12 ).arg( r.passLog[k + 2], 0, 'g', 9 );
+			t.write( s.toUtf8() );
+		}
 	}
 	QFile m( QDir( dir ).filePath( QStringLiteral( "gi_meta.txt" ) ) );
 	if ( m.open( QIODevice::WriteOnly ) )

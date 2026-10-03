@@ -107,7 +107,8 @@ shoot() {   # shoot <exe> <WW_CELL_OPEN tail> <probes.tsv> <shot.png> <cx,cy,cz/
 	else
 		camenv=( WW_RENDER_VIEW=1 )
 	fi
-	env WW_CELL_IS=0 "$@" "${camenv[@]}" \
+	# lane BOUNCE2: one bounce pinned (this gate's gather twin and its before/after interior are one pass)
+	env WW_CELL_IS=0 WW_CELL_GI_PASSES=1 "$@" "${camenv[@]}" \
 		WW_CELL_OPEN="$ESM|$open" WW_CELL_DATAROOT="$DATA" \
 		WW_CELL_PROBES="$(winpath "$tsv")" WW_CELL_PROBES_HIDE=1 WW_CELL_LIT=1 \
 		WW_RENDER_SHOT="$(winpath "$shot")" WW_RENDER_SIZE="$SIZE" WW_RENDER_CLEAN=1 \
