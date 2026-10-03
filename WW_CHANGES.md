@@ -16,6 +16,15 @@
   turning with the days). The blurry cube only shows when the sky mesh can't be found, and the status line says
   why. Closed interiors show no sky; interiors with Show Sky show it through their windows.
 
+- **The block list no longer vanishes after closing NifSkope in the Cell workspace** (lane WSRESTORE1, 2026-10-03)
+  Closing NifSkope while the Cell workspace was open saved that layout, with the left column (Blocks, block
+  details, Header) hidden. The next launch opens in the Default workspace, and nothing brought the column back.
+  Now a close in Cell saves the layout you had before entering Cell, and on launch the left column is always shown
+  (and the Cell panel hidden) unless you are in the Cell workspace. A layout already saved the old way fixes
+  itself on the first launch of this build -- nothing to reset.
+  Gate: `tests/spells/cell_wsrestore.sh` (real close/relaunch in a scratch settings key; 17 checks, 0 failures;
+  red control 7 failures, same 7 on the build before the fix).
+
 ## Probe bake: drip splashes no longer bake as solid swirls; two more ways to take a surface's color (lane CAPTURE1, 2026-10-03)
 
 - The water drips on the Vault 111 walkway (and other glass and water that only bends what is behind it) are no

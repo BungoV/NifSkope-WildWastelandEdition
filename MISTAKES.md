@@ -45,6 +45,17 @@ Newest at the top.
   Sanctuary hill (flat olive / brown frames). Sky shots use dist 20 so the eye stays at the open look-at. Look at
   a gate's frames before trusting its pixel stages.
 
+- 2026-10-03 WSRESTORE1: the Cell workspace kept its "way back" layout only in memory, and saveUi saved
+  whatever was on screen. Any state a workspace switch keeps in memory must also decide what a close saves.
+- 2026-10-03 WSRESTORE1: a gate reading `ws=` with `grep -oE "ws=[0-9]+"` also matched `cellws=` and failed its
+  own floor. Anchor field reads on the separator (`" ws="`).
+- 2026-10-03 WSRESTORE1: the worktree's copied objects came from main at 08b13525 while the branch base was
+  ff50b8e5; the first link failed on `probegi.o` needing a source the branch lacks. Check main's HEAD equals the
+  branch base before trusting copied objects; delete the objects of every file in the diff (and includers).
+- 2026-10-03 WSRESTORE1: another lane's memory watchdog (old version: kill every new process) killed this lane's
+  cc1plus at 1.7 GB; the build died with no error line. A make failure with no `error:` = check the
+  memguard run logs for KILL before reading code.
+
 ## 2026-10-03 BOUNCE2: a gate script edited while a runner was executing it
 
 - What: cell_gi.sh was edited (Edit tool) while gates.sh was running `bash tests/spells/cell_gi.sh --red grow`
