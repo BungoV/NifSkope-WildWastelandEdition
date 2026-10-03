@@ -1,5 +1,12 @@
 # NifSkope — Wild Wasteland Edition: Change Log
 
+## Probes drawn as spheres (2026-10-03)
+
+- The probe view draws each probe as a sphere, as the probe view in the GI deck does, instead of a box. A point on the
+  sphere shows the probe's six stored directions blended by its normal (n.x^2 of the +-x value, and so on), so on each
+  axis it shows that axis's value exactly and between axes it blends smoothly. Clicking a probe hits the sphere.
+- cell_pass PASS on the new build (all stages; Z 1 px against the previous build).
+
 ## Trees in the far map (2026-10-02)
 
 - The far map (the bounce light baked for places far from you, `probefar`) now has the trees in it. Until now a

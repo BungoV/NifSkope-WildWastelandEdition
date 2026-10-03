@@ -33,7 +33,8 @@ PvState & pv()
 	return s;
 }
 
-constexpr float kBoxHalf = 18.0f;	// the lit box, around the largest marker (16)
+constexpr float kBoxHalf = 18.0f;	// the probe sphere's radius (and the picked outline), around the largest marker (16)
+constexpr int kSphereRings = 10, kSphereSegs = 16;	// the probe sphere: rings from pole to pole, segments around
 const float kAxes[6][3] = { { 1, 0, 0 }, { -1, 0, 0 }, { 0, 1, 0 }, { 0, -1, 0 }, { 0, 0, 1 }, { 0, 0, -1 } };
 
 // the GI pass's curve (cell_lights.glsl cellPassOut): clamp, then 1 / 2.2
@@ -81,22 +82,16 @@ bool wwCellProbeViewPick( Scene * scene, const float origin[3], const float dir[
 	float bestT = 1e30f;
 	for ( size_t i = 0; i * 21 + 2 < v->probes.size(); i++ ) {
 		const float * c = &v->probes[i * 21];
-		// the ray against the lit box (slabs)
-		float t0 = 0.0f, t1 = 1e30f;
-		bool hit = true;
-		for ( int a = 0; a < 3 && hit; a++ ) {
-			const float lo = c[a] - kBoxHalf - origin[a], hi = c[a] + kBoxHalf - origin[a];
-			if ( std::fabs( dir[a] ) < 1e-9f ) {
-				hit = lo <= 0.0f && hi >= 0.0f;
-				continue;
-			}
-			float ta = lo / dir[a], tb = hi / dir[a];
-			if ( ta > tb )
-				std::swap( ta, tb );
-			t0 = std::max( t0, ta );
-			t1 = std::min( t1, tb );
-			hit = t0 <= t1;
-		}
+		// the ray against the probe sphere
+		const Vector3 oc( origin[0] - c[0], origin[1] - c[1], origin[2] - c[2] );
+		const float bq = oc[0] * dir[0] + oc[1] * dir[1] + oc[2] * dir[2];
+		const float cq = oc[0] * oc[0] + oc[1] * oc[1] + oc[2] * oc[2] - kBoxHalf * kBoxHalf;
+		const float dd = dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2];
+		const float disc = bq * bq - dd * cq;
+		const bool hit = disc >= 0.0f && dd > 1e-12f;
+		const float t0 = hit ? std::max( 0.0f, ( -bq - std::sqrt( disc ) ) / dd ) : 0.0f;
+		if ( hit && ( -bq + std::sqrt( disc ) ) < 0.0f )
+			continue;	// behind the eye
 		if ( hit && t0 < bestT ) {
 			bestT = t0;
 			best = int( i );
@@ -153,31 +148,47 @@ void wwCellProbeViewDraw( Scene * scene, const Transform & viewTrans )
 			tiles++;
 		}
 	}
-	// the probes, each face its own value on that axis
+	// the probes, as spheres (the deck's probe view): each point shows the probe's six axis values blended by its
+	// normal, n.x^2 E(+-x) + n.y^2 E(+-y) + n.z^2 E(+-z) -- on an axis the sphere shows that axis's value exactly
 	if ( v->probesShown ) {
+		auto axisValue = [&]( size_t i, const float * p, int a ) {
+			if ( pass == 2 ) {
+				const float k = i * 6 + 5 < v->probeSky.size() ? v->probeSky[i * 6 + size_t( a )] : 0.0f;
+				return FloatVector4( k, k, k, 1.0f );
+			}
+			const float * e = p + 3 + a * 3;
+			return FloatVector4( e[0] * 0.31830989f, e[1] * 0.31830989f, e[2] * 0.31830989f, 1.0f );
+		};
+		std::vector<Vector3> ring( size_t( ( kSphereRings + 1 ) * ( kSphereSegs + 1 ) ) );
+		for ( int r = 0; r <= kSphereRings; r++ ) {
+			const float th = 3.14159265f * float( r ) / float( kSphereRings );
+			for ( int g = 0; g <= kSphereSegs; g++ ) {
+				const float ph = 6.28318531f * float( g ) / float( kSphereSegs );
+				ring[size_t( r * ( kSphereSegs + 1 ) + g )] = Vector3( std::sin( th ) * std::cos( ph ), std::sin( th ) * std::sin( ph ), std::cos( th ) );
+			}
+		}
 		for ( size_t i = 0; i * 21 + 20 < v->probes.size(); i++ ) {
 			const float * p = &v->probes[i * 21];
 			const Vector3 c( p[0], p[1], p[2] );
-			for ( int a = 0; a < 6; a++ ) {
-				const Vector3 n( kAxes[a][0], kAxes[a][1], kAxes[a][2] );
-				const Vector3 u = a < 2 ? Vector3( 0, 1, 0 ) : Vector3( 1, 0, 0 );
-				const Vector3 w = Vector3::crossproduct( n, u );
-				const Vector3 m = c + n * kBoxHalf;
-				const Vector3 q[4] = { m - u * kBoxHalf - w * kBoxHalf, m + u * kBoxHalf - w * kBoxHalf,
-					m + u * kBoxHalf + w * kBoxHalf, m - u * kBoxHalf + w * kBoxHalf };
-				FloatVector4 col;
-				if ( pass == 2 ) {
-					const float k = i * 6 + 5 < v->probeSky.size() ? shown( v->probeSky[i * 6 + size_t( a )] ) : 0.0f;
-					col = FloatVector4( k, k, k, 1.0f );
-				} else {
-					const float * e = p + 3 + a * 3;
-					col = FloatVector4( shown( e[0] * 0.31830989f ), shown( e[1] * 0.31830989f ), shown( e[2] * 0.31830989f ), 1.0f );
+			FloatVector4 ax[6];
+			for ( int a = 0; a < 6; a++ )
+				ax[a] = axisValue( i, p, a );
+			auto colorAt = [&]( const Vector3 & n ) {
+				FloatVector4 e = ax[n[0] >= 0.0f ? 0 : 1] * ( n[0] * n[0] ) + ax[n[1] >= 0.0f ? 2 : 3] * ( n[1] * n[1] )
+					+ ax[n[2] >= 0.0f ? 4 : 5] * ( n[2] * n[2] );
+				return FloatVector4( shown( e[0] ), shown( e[1] ), shown( e[2] ), 1.0f );
+			};
+			for ( int r = 0; r < kSphereRings; r++ )
+				for ( int g = 0; g < kSphereSegs; g++ ) {
+					const Vector3 & n00 = ring[size_t( r * ( kSphereSegs + 1 ) + g )];
+					const Vector3 & n01 = ring[size_t( r * ( kSphereSegs + 1 ) + g + 1 )];
+					const Vector3 & n10 = ring[size_t( ( r + 1 ) * ( kSphereSegs + 1 ) + g )];
+					const Vector3 & n11 = ring[size_t( ( r + 1 ) * ( kSphereSegs + 1 ) + g + 1 )];
+					for ( const Vector3 * n : { &n00, &n10, &n11, &n00, &n11, &n01 } ) {
+						tp.push_back( c + *n * kBoxHalf );
+						tc.push_back( colorAt( *n ) );
+					}
 				}
-				for ( int k : { 0, 1, 2, 0, 2, 3 } ) {
-					tp.push_back( q[k] );
-					tc.push_back( col );
-				}
-			}
 			boxes++;
 		}
 	}
