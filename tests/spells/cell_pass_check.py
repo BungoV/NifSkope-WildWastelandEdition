@@ -374,8 +374,11 @@ def stage_z(run):
         return None
     # the floor: the pre-lane exe shot twice (same settings) differs from itself by a few 1-LSB pixels
     floor = diff('combined_gi1_old2', 'combined_gi1_old') or (0, 0)
-    cap = max(3 * floor[0], 20) if floor[0] else 0
-    ok = all(n <= cap and m <= floor[1] for n, m in lines)
+    # lane ROOMCLAMP1: a floor of 0 (the old exe twice, no noise that time) left no room for the GPU's own
+    # 1-LSB noise, so one 1-level pixel failed it (scratch v5: GI on and GI off one pixel each, at different spots);
+    # cell_gi measured the same noise and allows 1 level, so the cap is never below 20 pixels at 1 level
+    cap = max(3 * floor[0], 20)
+    ok = all(n <= cap and m <= max(floor[1], 1) for n, m in lines)
     return ('Z %s Combined: against the pre-lane exe, differing pixels GI on %d (max %d), GI off %d (max %d); '
             'the old exe against itself %d (max %d), allowed %d of at most that size'
             % ('PASS' if ok else 'FAIL', lines[0][0], lines[0][1], lines[1][0], lines[1][1], floor[0], floor[1], cap))

@@ -645,17 +645,20 @@ def stage_f(tbks, S, row_of, soup, G, bn, sky):
     ch = log[1:, 0]
     falls = bool(np.all(ch[1:] < ch[:-1])) if len(ch) > 1 else True
     rate = float((ch[-1] / ch[0]) ** (1.0 / (len(ch) - 1))) if len(ch) > 1 and ch[0] > 0 else 0.0
+    # lane ROOMCLAMP1: a red prelane dump (the WW_CELL_ROOMCLAMP_PIN=off twin) is the exe before the rooms clamp;
+    # its probes may read through walls, so the wall and room rule is printed but not judged
+    prelane = bn.get('red') == 'prelane'
     ok = (bn['passes'] == passes and log_ok and good_B >= 0.97 and agree >= 0.97 * len(pick)
-          and leak_room == 0 and leak_wall == 0)
+          and (prelane or (leak_room == 0 and leak_wall == 0)))
     if pin <= 0:
         ok = ok and bn.get('settled') == 1 and passes < CAP and falls and sgain <= bound
     return ('F %s bounce: %d passes (this file %d%s), largest change per pass %s, rate %.3f, gain %.4f (over the '
             'source %.4f, the albedo series bound %.4f, albedo %.3f); last B agree %.1f%%; probes read: %d of %d sampled lists agree, %d of '
-            '%d surfels fed, %d in a known room; reads from another room %d, through a wall %d (sampled)'
+            '%d surfels fed, %d in a known room; reads from another room %d, through a wall %d (sampled)%s'
             % ('PASS' if ok else 'FAIL', bn['passes'], passes, ' pinned' if pin > 0 else '',
                ' '.join('%.3g' % c for c in ch[:6]) + (' ...' if len(ch) > 6 else ''), rate, gain, sgain, bound, aw,
                100 * good_B, agree, len(pick), int(np.sum(np.diff(st) > 0)), n, int(np.sum(room >= 0)),
-               leak_room, leak_wall))
+               leak_room, leak_wall, ', not judged (red prelane)' if prelane else ''))
 
 
 def sample_grid(G, Pw, Nw):
