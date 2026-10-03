@@ -157,7 +157,7 @@ for cell in $CELLS; do
 	fi
 	if [ -z "$RED" ]; then
 		# lane BOUNCE2: the one-pass pin against the exe from before the lane, and the 1-pass / settled pairs
-		[ "$(shoot "$run" "$cell" one WW_CELL_GI=1 WW_CELL_GI_PASSES=1 "${from[@]}" WW_CELL_ROOMCLAMP_PIN=off \
+		[ "$(shoot "$run" "$cell" one WW_CELL_GI=1 WW_CELL_GI_PASSES=1 "${from[@]}" WW_CELL_ROOMCLAMP_PIN=off WW_CELL_GI_FILL=0 \
 			WW_CELL_GI_DUMP="$(winpath "$run/dump_one")")" = 1 ] || ok=0
 		if is_ext "$cell"; then
 			# lane BAKEBLOCK1: the relight now loads the 5x5 + far LOD the bake traced; the exe before BOUNCE2

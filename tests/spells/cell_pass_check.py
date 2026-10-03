@@ -235,7 +235,7 @@ def stage_t(G, K, ppos, own_sky, soup, rooms=None, dump=None):
             % ('PASS' if ok else 'FAIL', len(pick), rays, blocked, 100 * share))
 
 
-def judge_pass(run, tag, label, what, G, srf, scale, interior_black=False, rooms=None):
+def judge_pass(run, tag, label, what, G, srf, scale, interior_black=False, rooms=None, fill=False):
     path = os.path.join(run, tag + '.png')
     if not os.path.exists(path):
         return None
@@ -249,7 +249,7 @@ def judge_pass(run, tag, label, what, G, srf, scale, interior_black=False, rooms
         s = sample(G, Pw, Nw)
     else:
         GG = rooms['K' if label == 'K' else 'G']
-        s = np.array([cell_rooms_check.gi_sample(GG, rooms['R'], Pw[i], Nw[i]) for i in range(len(Pw))])
+        s = np.array([cell_rooms_check.gi_sample(GG, rooms['R'], Pw[i], Nw[i], fill=fill) for i in range(len(Pw))])
     valid = s[:, 3] > 0.01
     v = np.where(valid[:, None], np.maximum(s[:, 0:3] / np.maximum(s[:, 3:4], 1e-9), 0), 0) * scale
     exp = np.where(valid[:, None], shown(v), MAGENTA[None, :])
@@ -408,7 +408,8 @@ def main(cell, run):
     lines.append(stage_t(G, K, ppos, own_sky, Soup(os.path.join(run, 'soup.psp')), rooms, dump))
     srf = surface(run)
     interior = cell != 'concord'
-    for ln in (judge_pass(run, 'pass1', 'G', 'GI pass', G, srf, 1.0 / math.pi, rooms=rooms),
+    for ln in (judge_pass(run, 'pass1', 'G', 'GI pass', G, srf, 1.0 / math.pi, rooms=rooms,
+                          fill=interior),   # lane GICAL1: the gap fill (the GI grid of an interior only)
                judge_pass(run, 'pass2', 'K', 'Sky visibility', K, srf, 1.0, interior_black=interior, rooms=rooms)):
         if ln:
             lines.append(ln)

@@ -71,6 +71,11 @@ struct ProbeSoup
 	 *  soup file carries it as an optional 'GLS1' tail after 'ALB1'. */
 	std::vector<float> glass;
 	std::vector<quint8> glassT;
+	/*! Lane GICAL1: the decals and alpha-blended surfaces the soup leaves out (they stop no ray), folded into the
+	 *  albedo of the surface under them: 9 floats a triangle, and its alpha-weighted mean albedo (linear x 255) +
+	 *  its mean coverage (x 255). Bake only, in memory: the soup file does not carry them. */
+	std::vector<float> decal;
+	std::vector<quint8> decalA;
 	void addGlass( const float a[3], const float b[3], const float c[3], const quint8 t[3] )
 	{
 		glass.insert( glass.end(), a, a + 3 );

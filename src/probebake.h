@@ -116,6 +116,8 @@ struct ProbeBakeResult
 	int backSurfels = 0, backWritten = 0;   //!< v4: second sides kept in their own cell; written (summed over files)
 	qint64 linksBack = 0, linksDoor = 0, linksTinted = 0;   //!< v4 links: to a back surfel, through a door, through glass
 	int doors = 0, glassTris = 0;           //!< the soup's door boxes and glass triangles
+	int decalTris = 0;                      //!< lane GICAL1: decal triangles folded into the albedo
+	qint64 decalHits = 0, surfelHits = 0;   //!< lane GICAL1: surfel hits a decal covered; all surfel hits
 	double glassMean = 0;                   //!< over probes: the sphere share seen through glass
 	int probesRoomed = 0, boxesWritten = 0; //!< probes standing in an enclosed room; room boxes written (summed over files)
 	double msRays = 0, msWrite = 0;

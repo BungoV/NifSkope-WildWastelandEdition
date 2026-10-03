@@ -1858,6 +1858,12 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 	 * normal map. It is no surface: it leaves the bake's soup (every albedo way, the cube included) and
 	 * is counted. WW_CELL_BAKE_REFRACT_RED=keep keeps it as a solid surface (the gate's red only). */
 	const bool refractKeepRed = qEnvironmentVariable( "WW_CELL_BAKE_REFRACT_RED" ) == QLatin1String( "keep" );
+	/* lane GICAL1: the decals and alpha-blended surfaces the soup leaves out still color the surface under them in
+	 * game (Vault111Cryo view w1: they change 36% of the surface pixels and darken the drawn albedo by 12%).
+	 * They, and the placed decals (TXST, projected below), are folded into the surfel albedo (ProbeSoup::decal).
+ * WW_CELL_BAKE_DECALS=0 leaves them out, as before. */
+	const bool decalFold = qEnvironmentVariable( "WW_CELL_BAKE_DECALS" ) != QLatin1String( "0" );
+	int soupDecalShapes = 0, soupPlacedDecals = 0, soupPlacedDecalTris = 0;
 	int soupRefractShapes = 0, soupRefractTris = 0;
 	QMap<QString, int> soupRefractModels;
 	QHash<QString, int> matTexIdx;
@@ -2307,6 +2313,61 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 				if ( refractOnly || s.nearFacts.effectShader || !s.effectTex0.isEmpty() || s.nearFacts.alphaBlend
 					|| s.nearFacts.decal || ( soupFoliage && s.nearFacts.alphaTest ) ) {
 					soupShapesDropped++;
+					if ( baking && decalFold && !refractOnly && !s.nearFacts.effectShader && s.effectTex0.isEmpty()
+						&& ( s.nearFacts.alphaBlend || s.nearFacts.decal ) && !( soupFoliage && s.nearFacts.alphaTest ) ) {
+						soupDecalShapes++;   // lane GICAL1: its albedo and coverage, the mean of 10 points a triangle
+						for ( size_t t = 0; t + 2 < s.geom.tris.size(); t += 3 ) {
+							size_t vi[3];
+							bool okTri = true;
+							float w[9];
+							for ( int k = 0; k < 3; k++ ) {
+								vi[k] = size_t( s.geom.tris[t + size_t( k )] );
+								okTri = okTri && vi[k] < nv;
+								if ( !okTri )
+									break;
+								const Vector3 wp = p.pos + p.rot * ( Vector3( s.geom.pos[vi[k] * 3], s.geom.pos[vi[k] * 3 + 1],
+									s.geom.pos[vi[k] * 3 + 2] ) * p.scale );
+								for ( int c = 0; c < 3; c++ )
+									w[k * 3 + c] = wp[c];
+							}
+							if ( !okTri )
+								continue;
+							double sum[3] = { 0, 0, 0 }, sa = 0;
+							int got = 0;
+							for ( int i = 0; i < 4; i++ )
+								for ( int j = 0; i + j < 4; j++ ) {
+									const float b1 = ( float( i ) + 1.0f / 3.0f ) / 4.0f, b2 = ( float( j ) + 1.0f / 3.0f ) / 4.0f;
+									const float bw[3] = { 1.0f - b1 - b2, b1, b2 };
+									float uv[2] = { 0.5f, 0.5f }, vc[3] = { 1, 1, 1 }, va = 1.0f, lin[3], ta = 1.0f;
+									if ( s.geom.uv.size() >= nv * 2 )
+										for ( int k = 0; k < 2; k++ )
+											uv[k] = bw[0] * s.geom.uv[vi[0] * 2 + size_t( k )] + bw[1] * s.geom.uv[vi[1] * 2 + size_t( k )]
+												+ bw[2] * s.geom.uv[vi[2] * 2 + size_t( k )];
+									if ( s.geom.rgba.size() == nv * 4 ) {
+										for ( int k = 0; k < 3; k++ )
+											vc[k] = ( bw[0] * s.geom.rgba[vi[0] * 4 + size_t( k )] + bw[1] * s.geom.rgba[vi[1] * 4 + size_t( k )]
+												+ bw[2] * s.geom.rgba[vi[2] * 4 + size_t( k )] ) / 255.0f;
+										va = ( bw[0] * s.geom.rgba[vi[0] * 4 + 3] + bw[1] * s.geom.rgba[vi[1] * 4 + 3]
+											+ bw[2] * s.geom.rgba[vi[2] * 4 + 3] ) / 255.0f;
+									}
+									if ( !probeAlb.sample( s.tex0, uv[0], uv[1], vc, lin, &ta ) )
+										continue;
+									const double a = double( std::clamp( ta * va, 0.0f, 1.0f ) );
+									for ( int k = 0; k < 3; k++ )
+										sum[k] += lin[k] * a;
+									sa += a;
+									got++;
+								}
+							if ( !got || !( sa > 0 ) )
+								continue;   // no map read, or nothing covered
+							quint8 q[4];
+							for ( int k = 0; k < 3; k++ )
+								q[k] = quint8( std::lround( std::clamp( sum[k] / sa, 0.0, 1.0 ) * 255.0 ) );
+							q[3] = quint8( std::lround( std::clamp( sa / got, 0.0, 1.0 ) * 255.0 ) );
+							probeSoup.decal.insert( probeSoup.decal.end(), w, w + 9 );
+							probeSoup.decalA.insert( probeSoup.decalA.end(), q, q + 4 );
+						}
+					}
 					if ( wantExtra )   // lane CAPTURE1 red nofilter: the cube sees what the soup leaves out
 						for ( size_t t = 0; t + 2 < s.geom.tris.size(); t += 3 ) {
 							bool okTri = true;
@@ -2906,6 +2967,55 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 			for ( size_t t = 0; t + 2 < m.tris.size(); t += 3 )
 				b.tris.push_back( BucketTri{ { m.tris[t], m.tris[t + 1], m.tris[t + 2] } } );
 			buckets.insert( QStringLiteral( "\x02" ) + m.name, b );
+			/* lane GICAL1: the placed decals cover the surfaces they were clipped from, so they fold into the
+			 * bake's albedo too (same rule as the dropped decal shapes: mean color and coverage, 10 points a
+			 * triangle; coverage = the texture's alpha x the angle fade, as the visible draw blends it) */
+			if ( baking && decalFold ) {
+				soupPlacedDecals += m.decals;
+				for ( size_t t = 0; t + 2 < m.tris.size(); t += 3 ) {
+					const CellDecalVert * dv[3];
+					bool okTri = true;
+					float w[9];
+					for ( int k = 0; k < 3; k++ ) {
+						const size_t vi = size_t( m.tris[t + size_t( k )] );
+						okTri = okTri && vi < m.verts.size();
+						if ( !okTri )
+							break;
+						dv[k] = &m.verts[vi];
+						for ( int c = 0; c < 3; c++ )
+							w[k * 3 + c] = dv[k]->pos[c] + origin[c];
+					}
+					if ( !okTri )
+						continue;
+					double sum[3] = { 0, 0, 0 }, sa = 0;
+					int got = 0;
+					for ( int i = 0; i < 4; i++ )
+						for ( int j = 0; i + j < 4; j++ ) {
+							const float b1 = ( float( i ) + 1.0f / 3.0f ) / 4.0f, b2 = ( float( j ) + 1.0f / 3.0f ) / 4.0f;
+							const float bw[3] = { 1.0f - b1 - b2, b1, b2 };
+							float uv[2], vc[3] = { 1, 1, 1 }, lin[3], ta = 1.0f;
+							for ( int k = 0; k < 2; k++ )
+								uv[k] = bw[0] * dv[0]->uv[k] + bw[1] * dv[1]->uv[k] + bw[2] * dv[2]->uv[k];
+							const float va = bw[0] * dv[0]->alpha + bw[1] * dv[1]->alpha + bw[2] * dv[2]->alpha;
+							if ( !probeAlb.sample( m.diffuse, uv[0], uv[1], vc, lin, &ta ) )
+								continue;
+							const double a = double( std::clamp( ta * va, 0.0f, 1.0f ) );
+							for ( int k = 0; k < 3; k++ )
+								sum[k] += lin[k] * a;
+							sa += a;
+							got++;
+						}
+					if ( !got || !( sa > 0 ) )
+						continue;
+					quint8 q[4];
+					for ( int k = 0; k < 3; k++ )
+						q[k] = quint8( std::lround( std::clamp( sum[k] / sa, 0.0, 1.0 ) * 255.0 ) );
+					q[3] = quint8( std::lround( std::clamp( sa / got, 0.0, 1.0 ) * 255.0 ) );
+					probeSoup.decal.insert( probeSoup.decal.end(), w, w + 9 );
+					probeSoup.decalA.insert( probeSoup.decalA.end(), q, q + 4 );
+					soupPlacedDecalTris++;
+				}
+			}
 		}
 		for ( size_t i = 0; i < decalRefs.size(); i++ ) {
 			const CellDecalFate f = decalResult.fates[i];
@@ -3033,6 +3143,9 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 			if ( baking ) {   // lane BAKE4
 				t << "  bake glass: " << soupGlassShapes << " panes, " << int( probeSoup.glassT.size() / 3 )
 				  << " triangles\n";
+				if ( decalFold )   // lane GICAL1 (the pin WW_CELL_BAKE_DECALS=0 prints nothing new)
+					t << "  bake decals: folded into the albedo, "
+					  << soupDecalShapes << " shapes and " << soupPlacedDecals << " placed decals (" << soupPlacedDecalTris << " of their triangles), " << int( probeSoup.decalA.size() / 4 ) << " triangles\n";	// lane GICAL1
 				QFile gf( QString::fromLocal8Bit( glassDump ) );
 				if ( !glassDump.isEmpty() && gf.open( QIODevice::WriteOnly ) )
 					gf.write( glassCensus.toUtf8() );
