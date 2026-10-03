@@ -1608,6 +1608,52 @@ Gate: tests/spells/cell_sky.sh skyint arm (stages V N I W U S T B + prtp_referen
 WW_CELL_SKYINT_RED=noflag and =all. Bake time unchanged (rays 2228 -> 2162 ms); the relight takes
 +19% (451 -> 535 ms) because the extra light needs 7 bounce passes to settle instead of 4.
 
+### 2al. Surfel albedo and normal: three ways, side by side (lane CAPTURE1, 2026-10-03)
+
+What a surfel stores as its albedo and normal decides what color the bounce light takes. Until now one way
+existed: the average of the per-triangle albedo bytes over the bake rays that hit the cell, and the face normal
+(tri). This lane adds two more behind WW_CELL_BAKE_ALBEDO, the .tbk format unchanged, and lays all three out for
+bungo to choose from. Nothing was picked; tri stays the default.
+
+- tri (default): unchanged but for the refraction repair below. With that repair held back
+  (WW_CELL_BAKE_REFRACT_RED=keep) it is byte for byte the pre-lane bake (`cell_albedo_check.py same`); with it,
+  `refract` bounds every difference to the lost triangles' reach.
+- hit: each bake ray's own hit samples the texture at its barycentric UV, at the mip its footprint asks for,
+  times the vertex color; the normal is the vertex normal there. Free in time (inside the ray pass).
+- cube (WW_CELL_BAKE_CUBE_FACE 64/128/256): each probe traces a G-buffer cube of the soup (the bake has no GL
+  context) and every surfel takes the mean of the pixels that land in it.
+- Facing: a way's smooth normal may face away from a probe that links the surfel (the links were decided on
+  the face normal). Such normals are bisected toward the face normal until they face every linker; the census
+  counts them ("normals leaned to face their links"). probe_bake.py check: 0 facing away on every way.
+- Repair in all ways (no key): refraction-only shapes (lighting shader, Shader Flags 1 bit 15, no effect
+  shader) leave the probe soup and the cube capture. Their diffuse slot holds a normal map; in game they only
+  bend what is behind them. Vault111Cryo: 21 shapes, 3614 triangles (Effects\WaterSplashDrips.nif x15, the gear
+  door's glass, two sinks, the fountain x2). Concord: 1 shape, 16 triangles (a barrel fire grating).
+
+Numbers, judge = cube256 (it favors the cube way; read with that in mind). Albedo error sRGB8 med/p90, normal
+error degrees med/p90, all surfels | big flat walls:
+
+| Cell | Way | Albedo all | Albedo walls | Normal all | Normal walls | Bake wall s / cpu s / peak MB |
+|---|---|---|---|---|---|---|
+| Vault | tri | 4.5/16.4 | 4.4/22.0 | 2.7/15.0 | 0.3/7.2 | 14.0 / 27.8 / 2533 |
+| Vault | hit | 4.3/24.3 | 1.6/8.2 | 2.2/14.0 | 0.0/6.6 | 14.2 / 29.1 / 2560 |
+| Vault | cube64 | 1.7/9.7 | 0.9/3.9 | 0.6/5.1 | 0.0/2.9 | 15.9 / 59.3 / 2548 |
+| Vault | cube128 | 1.0/4.2 | 0.6/2.0 | 0.3/2.8 | 0.0/1.3 | 22.8 / 142.8 / 2518 |
+| Vault | cube256 | judge | judge | judge | judge | 49.6 / 457 / 2581 |
+| Concord | tri | 6.7/20.5 | 9.6/23.5 | 0.9/10.0 | 0.3/2.5 | 7.9 / 21.8 / 2272 |
+| Concord | hit | 3.9/12.5 | 4.9/12.6 | 0.5/8.2 | 0.0/1.7 | 8.9 / 23.5 / 2285 |
+| Concord | cube64 | 1.9/6.5 | 2.4/7.0 | 0.1/2.0 | 0.0/0.4 | 13.1 / 55.9 / 2267 |
+| Concord | cube128 | 1.3/3.4 | 1.4/3.6 | 0.0/1.0 | 0.0/0.2 | 20.3 / 143 / 2279 |
+
+No way bakes faster than tri; peak memory is the cell load (~2.3-2.6 GB) whatever the way. The lit picture moves
+little: combined views differ from tri by 0.1-0.7 levels mean, p99 at most 2.
+
+Gates (tests/spells/cell_albedo_check.py): same (B), way (S same set, D it did something, C the cube sees the
+soup), judge, refract (R soup lost triangles and gained none, P probes moved only beside them, X every other
+difference is in a lost triangle's reach, a same-hits triangle tie in the rebuilt tree, or under half a per
+mille). Reds: the centroid and nofilter cube reds fail C; WW_CELL_BAKE_REFRACT_RED=keep fails R; a hit bake
+against main fails X.
+
 ## 3. Open
 
 - `.tbk` v4: two surfel sides per cell (gives back the refused thin-wall weight), room ids (2f).

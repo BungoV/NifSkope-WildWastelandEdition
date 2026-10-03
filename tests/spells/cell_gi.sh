@@ -109,7 +109,9 @@ shoot() {   # [XE=<exe>] [XCAM=x,y,z/view/dist] shoot <run dir> <cell> <tag> <en
 	else
 		open=( WW_CELL_OPEN="$ESM|interior|$cell" )
 	fi
-	env WW_CELL_LIT=1 "${open[@]}" "$@" "${cam[@]}" WW_CELL_DATAROOT="$DATA" \
+	# lane CAPTURE1 drops refraction-only shapes from the soup (cell_albedo_check.py refract gates that); kept
+	# here so the one-pass run stays byte for byte the pre-BOUNCE2 exe (which ignores the key)
+	env WW_CELL_LIT=1 WW_CELL_BAKE_REFRACT_RED=keep "${open[@]}" "$@" "${cam[@]}" WW_CELL_DATAROOT="$DATA" \
 		WW_CELL_PROBES="$(winpath "$run/probes.tsv")" WW_CELL_PROBES_HIDE=1 \
 		WW_RENDER_SHOT="$(winpath "$shot")" WW_RENDER_SIZE="$SIZE" WW_RENDER_CLEAN=1 \
 		WW_SETTINGS_SCOPE="$(fresh_scope)" timeout 1500 "$exe" --port "$PORT" "$(winpath "$SPEC")" > "$notes" 2>&1

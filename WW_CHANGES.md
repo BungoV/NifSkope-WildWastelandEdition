@@ -6,6 +6,19 @@
   houses) are exactly as before. The sun shines in only for cells with Use Sky Lighting and Sunlight Shadows
   both set (none in the base game). (lane SKYINT1)
 
+## Probe bake: drip splashes no longer bake as solid swirls; two more ways to take a surface's color (lane CAPTURE1, 2026-10-03)
+
+- The water drips on the Vault 111 walkway (and other glass and water that only bends what is behind it) are no
+  longer baked as solid surfaces. Their texture slot holds a normal map, so the bake used to see them as
+  olive-green swirled discs and tinted the bounce light there. They now leave the bake in every way. Vault
+  111 cryo: 21 such shapes, 3614 triangles. Concord: 1 shape, 16 triangles. Nothing to switch on: rebake.
+- For comparison only, the bake can take a surface's color and direction in two more ways, set by
+  WW_CELL_BAKE_ALBEDO: "hit" reads the texture where each bake ray lands, and "cube" photographs the cell
+  from every probe and averages what each surface patch shows (WW_CELL_BAKE_CUBE_FACE 64, 128 or 256 pixels a
+  face). The default stays as it was, byte for byte. Side-by-side sheets: notes\capture1.
+- Bake time: hit costs nothing extra; cube 128 roughly doubles a cell's bake time (Vault 14 s to 23 s);
+  memory is unchanged.
+
 ## The bounce light bounces more than once (2026-10-03)
 
 - The cell view's GI row used to bounce the light once: lamps (and outdoors the sun) light the surfaces, the

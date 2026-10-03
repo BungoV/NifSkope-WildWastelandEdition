@@ -13,6 +13,17 @@ Newest at the top.
 - 2026-10-03 SKYINT1: the brief said the worktree had scratchpad/before_main; it did not, and the interior
   arm FAILed on "no exe". Check the BEFORE path exists before reading a FAIL count.
 
+- 2026-10-03 CAPTURE1: a new surfel normal (vertex normal, cube mean) was stored without checking it against the
+  links, which were decided on the face normal: 1061 (hit) and 2737 (cube) links faced away and probe_bake check
+  failed. Rule: any change to a stored normal re-checks facing against every linking probe (lean toward f.n).
+- 2026-10-03 CAPTURE1: the bake's fixed-world filter kept refraction-only shapes (Shader Flags 1 bit 15,
+  normal map in the diffuse slot) as solid surfaces; bungo saw the walkway drips as swirled discs on the cube
+  sheet. Rule: a shape the renderer draws as a refraction bucket never enters the probe soup; check the soup's
+  drop list against the renderer's buckets when a filter changes.
+- 2026-10-03 CAPTURE1: a gate that wanted byte-identical files outside a repair's reach failed on ties: the
+  soup's tree is rebuilt, so a ray meeting two coincident triangles may take the other one. Rule: when a soup
+  changes, compare hits (place, normal, sample count) before albedo bytes, and bound what is left.
+
 ## 2026-10-03 BOUNCE2: a gate script edited while a runner was executing it
 
 - What: cell_gi.sh was edited (Edit tool) while gates.sh was running `bash tests/spells/cell_gi.sh --red grow`
