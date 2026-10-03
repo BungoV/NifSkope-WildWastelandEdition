@@ -25,6 +25,7 @@ BSD License - see nifskope.h
 #include "cellpick.h"
 #include "cellrefs.h"
 #include "glview.h"
+#include "harnesswindow.h"	// lane WSRESTORE1: the scratch settings scope
 #include "nifskope.h"
 #include "model/nifmodel.h"
 
@@ -540,4 +541,101 @@ void wwCellWorkspaceHarness( NifSkope * skope )
 				return;		// leave the window up for a picture
 			QTimer::singleShot( 0, qApp, &QCoreApplication::quit );
 		} );
+}
+
+
+/* ---------------------------------------------------------------------------
+ * lane WSRESTORE1: THE LEFT COLUMN AFTER A CLOSE (bungo 2026-10-03: the block
+ * list was gone after a launch).
+ *
+ * The bug lives across TWO processes -- a close writes the layout, the next
+ * launch reads it -- so this driver does one process's half: it runs the steps
+ * it is given (WW_CELL_WSRESTORE_STEPS, comma separated), probes the dock state
+ * as it goes, and ends with a REAL close so saveUi() runs. The script relaunches
+ * and reads the next report. Steps:
+ *   probe    one report line: workspace, left column up, Cell dock up
+ *   cell     enter the Cell workspace;  ws:N  enter workspace N
+ *   poison   hide the left column and show the Cell dock outside Cell -- the
+ *            layout an older build saved when it was closed in Cell
+ *   close    write the report and close the window (saveUi runs)
+ * The run starts and ends with a probe. It writes the layout only into a
+ * scratch WW_SETTINGS_SCOPE (wwWorkspaceRestoreSavesUi); without one it refuses.
+ * --------------------------------------------------------------------------- */
+bool wwWorkspaceRestoreSavesUi()
+{
+	return !qEnvironmentVariable( "WW_CELL_WSRESTORE" ).isEmpty()
+		&& !wwHarnessSettingsSuffix().isEmpty();
+}
+
+namespace {
+
+void wsRestoreProbe( NifSkope * skope, QStringList & lines, const QString & tag )
+{
+	QDockWidget * left = skope->findChild<QDockWidget *>( QStringLiteral( "LeftColumnDock" ) );
+	QDockWidget * cell = skope->findChild<QDockWidget *>( QStringLiteral( "CellWorkspaceDock" ) );
+	lines << QStringLiteral( "probe %1 ws=%2 cellws=%3 left=%4 celldock=%5" )
+		.arg( tag ).arg( skope->currentWorkspace() ).arg( skope->cellWorkspaceIndex() )
+		.arg( left && left->isVisible() ? 1 : 0 ).arg( cell && cell->isVisible() ? 1 : 0 );
+}
+
+void wsRestoreWrite( const QString & path, const QStringList & lines )
+{
+	QFile f( path );
+	if ( f.open( QIODevice::WriteOnly | QIODevice::Text ) ) {
+		QTextStream s( &f );
+		s << "# WW_CELL_WSRESTORE -- lane WSRESTORE1\n";
+		for ( const QString & l : lines )
+			s << l << "\n";
+	}
+}
+
+} // namespace
+
+void wwWorkspaceRestoreHarness( NifSkope * skope )
+{
+	const QString reportPath = qEnvironmentVariable( "WW_CELL_WSRESTORE" );
+	if ( reportPath.isEmpty() || !skope )
+		return;
+	if ( wwHarnessSettingsSuffix().isEmpty() ) {
+		wsRestoreWrite( reportPath, { QStringLiteral( "refused: no WW_SETTINGS_SCOPE" ) } );
+		QTimer::singleShot( 0, qApp, &QCoreApplication::quit );
+		return;
+	}
+	const QStringList steps = qEnvironmentVariable( "WW_CELL_WSRESTORE_STEPS" )
+		.split( QLatin1Char( ',' ), Qt::SkipEmptyParts );
+	// After the window is up: restoreUi() and show() have both run by then.
+	QTimer::singleShot( 1500, skope, [skope, reportPath, steps]() {
+		QStringList lines;
+		wsRestoreProbe( skope, lines, QStringLiteral( "launch" ) );
+		bool closed = false;
+		for ( int i = 0; i < steps.size(); i++ ) {
+			const QString st = steps.at( i ).trimmed();
+			if ( st == QLatin1String( "probe" ) ) {
+				wsRestoreProbe( skope, lines, QString::number( i ) );
+			} else if ( st == QLatin1String( "cell" ) ) {
+				skope->setWorkspace( skope->cellWorkspaceIndex() );
+			} else if ( st.startsWith( QLatin1String( "ws:" ) ) ) {
+				skope->setWorkspace( st.mid( 3 ).toInt() );
+			} else if ( st == QLatin1String( "poison" ) ) {
+				if ( auto * d = skope->findChild<QDockWidget *>( QStringLiteral( "LeftColumnDock" ) ) )
+					d->hide();
+				if ( auto * d = skope->findChild<QDockWidget *>( QStringLiteral( "CellWorkspaceDock" ) ) )
+					d->show();
+			} else if ( st == QLatin1String( "close" ) ) {
+				wsRestoreProbe( skope, lines, QStringLiteral( "close" ) );
+				wsRestoreWrite( reportPath, lines );
+				closed = true;
+				skope->close();
+				break;
+			} else {
+				lines << QStringLiteral( "unknown step %1" ).arg( st );
+			}
+			qApp->processEvents();
+		}
+		if ( !closed ) {
+			wsRestoreProbe( skope, lines, QStringLiteral( "end" ) );
+			wsRestoreWrite( reportPath, lines );
+		}
+		QTimer::singleShot( 0, qApp, &QCoreApplication::quit );
+	} );
 }

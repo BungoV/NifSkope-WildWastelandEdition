@@ -29642,6 +29642,8 @@ void NifSkope::initDockWidgets()
 		// the switch, the dock hiding and the layout round trip from inside the
 		// running window. It forces every state it measures.
 		wwCellWorkspaceHarness( this );
+		// lane WSRESTORE1: switch, close, relaunch -- the left column after a close.
+		wwWorkspaceRestoreHarness( this );
 	}
 
 	// Set Inspect widget
@@ -32994,16 +32996,25 @@ void NifSkope::saveUi() const
 	// this session alone made roughly thirty harness launches across a dozen WW_*
 	// harnesses, several of which hide docks, switch modes or resize the window.
 	// None of them should ever leave a trace in the user's UI settings.
+	// lane WSRESTORE1: the one exception is its own close/relaunch gate, which
+	// may only ever write into a scratch WW_SETTINGS_SCOPE key.
 	const QStringList envKeys = QProcessEnvironment::systemEnvironment().keys();
 	for ( const QString & key : envKeys ) {
-		if ( key.startsWith( QLatin1String( "WW_" ) ) )
+		if ( key.startsWith( QLatin1String( "WW_" ) ) && !wwWorkspaceRestoreSavesUi() )
 			return;
 	}
 
 	QSettings settings;
 	// 0x074 replaces four tabified core docks with one permanent three-mode
 	// left editor. The schema key lets restoreUi migrate one old 0x073 layout.
-	settings.setValue( "Window State"_uip, saveState( 0x074 ) );
+	/* lane WSRESTORE1: closed inside a workspace that hides the NIF column
+	 * (Cell), save the layout from BEFORE it -- the bytes setWorkspace keeps for
+	 * the way back. Saving the Cell layout left the next launch, which always
+	 * opens Default, with no block list and nothing to bring it back (bungo
+	 * 2026-10-03). WW_CELL_WSRESTORE_RED is the gate's red control only. */
+	const bool wsRed = qEnvironmentVariableIsSet( "WW_CELL_WSRESTORE_RED" );
+	settings.setValue( "Window State"_uip, ( workspaceLayoutSaved && !wsRed )
+		? workspaceLayoutBefore : saveState( 0x074 ) );
 	settings.setValue( "Window Geometry"_uip, saveGeometry() );
 	settings.setValue( "LeftColumn/LayoutSchema"_uip, 2 );
 	settings.setValue( "LeftColumn/Mode"_uip, int( leftColumnMode ) );
@@ -33110,6 +33121,23 @@ void NifSkope::restoreUi()
 		if ( dockWidgetArea( dLeft ) == Qt::NoDockWidgetArea )
 			addDockWidget( Qt::LeftDockWidgetArea, dLeft );
 		dLeft->show();
+	}
+	/* lane WSRESTORE1: THE LEFT COLUMN HAS NO CLOSE BUTTON, so outside a
+	 * workspace that hides it, it is always up. A layout saved by a close in
+	 * the Cell workspace (every build before this lane) replays it hidden, with
+	 * the Cell dock up, into a window that opens in Default; put both right so
+	 * such a saved layout heals on its own. */
+	if ( dLeft && !qEnvironmentVariableIsSet( "WW_CELL_WSRESTORE_RED" ) ) {
+		const bool hiding = workspaceIndex >= 0 && workspaceIndex < workspaceDefs.size()
+			&& workspaceDefs.at( workspaceIndex ).hideNifDocks;
+		if ( !hiding ) {
+			for ( const WorkspaceDef & d : workspaceDefs )
+				if ( d.hideNifDocks && d.dock )
+					d.dock->hide();
+			if ( dockWidgetArea( dLeft ) == Qt::NoDockWidgetArea )
+				addDockWidget( Qt::LeftDockWidgetArea, dLeft );
+			dLeft->show();
+		}
 	}
 	/* A HARNESS RUN DOES NOT INHERIT A WINDOW (lane HARNESSWIN1,
 	 * 2026-09-19).  saveUi() has refused to PERSIST from a WW_* run

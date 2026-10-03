@@ -222,4 +222,12 @@ private:
  *  application (src/cellworkspacetest.cpp). Does nothing unless it is set. */
 void wwCellWorkspaceHarness( NifSkope * skope );
 
+/*! lane WSRESTORE1: WW_CELL_WSRESTORE=<report path> drives workspace switches
+ *  and a real close from inside the window (steps in WW_CELL_WSRESTORE_STEPS),
+ *  so a close in the Cell workspace can be relaunched and measured. Refuses
+ *  without a scratch WW_SETTINGS_SCOPE; does nothing unless it is set. */
+void wwWorkspaceRestoreHarness( NifSkope * skope );
+//! True when this run may persist its layout: the driver above, in a scratch scope.
+bool wwWorkspaceRestoreSavesUi();
+
 #endif // CELLWORKSPACE_H
