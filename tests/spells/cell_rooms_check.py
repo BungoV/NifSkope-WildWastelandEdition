@@ -497,10 +497,13 @@ def surface_reads(R, P, N):
     return L, cand
 
 
-def gi_sample(G, R, P, N):
+def gi_sample(G, R, P, N, fill=None):
     """cellGiSample: with rooms the blend of the 8 voxels' slots of the surface's room (renormalized); without
-    (R None) the hardware trilinear of the one grid. Returns rgba (cellGiE divides by a)."""
+    (R None) the hardware trilinear of the one grid. Returns rgba (cellGiE divides by a).
+    fill (lane GICAL1; None = GI_FILL[0]): the gap fill (gi_fill) where the blend has no valid weight. The shader
+    fills the GI grid of a grid that is not sky lit only: pass fill=False for a sky grid or the sky-share grid."""
     P, N = np.asarray(P, float), np.asarray(N, float)
+    fill = GI_FILL[0] if fill is None else fill
     dm = G['dims']
     g = (P + N * 0.5 * G['voxel'] - G['origin']) / G['voxel'] - 0.5
     i0 = np.floor(g).astype(int)
@@ -512,26 +515,80 @@ def gi_sample(G, R, P, N):
         # air neighbours the nearest whose blend has weight (an inner corner's nearest air is the outdoors across the
         # wall, which no voxel there holds; a pocket behind a pipe no voxel holds); none: the plain trilinear
         L, cand = surface_reads(R, P, N)
+        out, Ls = None, L
         if L is not None:
             s, ws = gi_blend(G, L, i0, f, sl, n2)
             if ws > 0:
-                return s / ws
-        best, out = 3.0, None
-        for d, c in cand:
-            if d >= best:
-                continue
-            s, ws = gi_blend(G, c, i0, f, sl, n2)
-            if ws > 0:
-                best, out = d, s / ws
-        if out is not None:
+                out = s / ws
+        if out is None:
+            best, best_any = 3.0, 3.0
+            for d, c in cand:
+                if L is None and d < best_any:
+                    best_any, Ls = d, c   # lane GICAL1: the nearest air cell, with weight or not (the fill's room)
+                if d >= best:
+                    continue
+                s, ws = gi_blend(G, c, i0, f, sl, n2)
+                if ws > 0:
+                    best, out = d, s / ws
+        if out is not None and (out[3] > 0.01 or not fill):
             return out
+        if fill:
+            fo = gi_fill(G, Ls, P, N, True)
+            if fo[3] > 0.01:
+                GI_FILLED[0] += 1
+                return fo
+            if out is not None:
+                return out
         GI_PLAIN[0] += 1
     s, ws = gi_blend(G, None, i0, f, sl, n2)
+    if fill and R is None and s[3] <= 0.01:
+        fo = gi_fill(G, None, P, N, False)
+        if fo[3] > 0.01:
+            GI_FILLED[0] += 1
+            return fo
     return s
+
+
+def gi_fill(G, L, P, N, rooms):
+    """cellGiFillAt (lane GICAL1): the weighted mean of the valid voxels of the 4x4x4 block round the sample (within
+    2.5 voxels, weight (1 - d / 2.5)^2), of room L's slots when the grid has rooms (L None there: nothing)."""
+    dm = np.array(G['dims'])
+    g = (P + N * 0.5 * G['voxel'] - G['origin']) / G['voxel'] - 0.5
+    i0 = np.floor(g).astype(int)
+    sl = (0 if N[0] >= 0 else 1, 2 if N[1] >= 0 else 3, 4 if N[2] >= 0 else 5)
+    n2 = N * N
+    s, ws = np.zeros(4), 0.0
+    if rooms and L is None:
+        return s
+    for k in range(64):
+        c = i0 + np.array([k & 3, (k >> 2) & 3, (k >> 4) & 3]) - 1
+        if (c < 0).any() or (c >= dm).any():
+            continue
+        w = 1.0 - float(np.linalg.norm(c - g)) / 2.5
+        if w <= 0:
+            continue
+        src = G['g']
+        if rooms:
+            S = G['slots'][c[2], c[1], c[0]]
+            if S[0] >= 0 and S[0] in L:
+                src = G['g']
+            elif S[1] >= 0 and S[1] in L:
+                src = G['g2']
+            else:
+                continue
+        v = sum(n2[a] * src[sl[a], c[2], c[1], c[0]] for a in range(3))
+        if v[3] <= 0:
+            continue
+        w *= w
+        s += w * v
+        ws += w
+    return s / ws if ws > 0 else np.zeros(4)
 
 
 RED_EMPTY = [False]   # red emptyslot: the twin weighs a room's empty slots (the old shader: black, magenta)
 GI_PLAIN = [0]     # samples that found rooms but no room with weight: the shader's plain (unclamped) trilinear
+GI_FILL = [os.environ.get('GI_CHECK_FILL', '1') != '0']   # lane GICAL1: the gap fill (GI_CHECK_FILL=0: the shader pin WW_CELL_GI_FILL=0)
+GI_FILLED = [0]    # samples the fill answered
 
 
 def gi_blend(G, L, i0, f, sl, n2):
@@ -812,7 +869,7 @@ def holes_cmd(run, sample, red):
     cov = holes = 0
     for i in pick:
         P, N = S[i, 0:3], S[i, 3:6]
-        if gi_sample(G, None, P, N)[3] <= COVER_MIN:
+        if gi_sample(G, None, P, N, fill=False)[3] <= COVER_MIN:   # the plain grid as it was
             continue
         cov += 1
         holes += gi_sample(G, R, P, N)[3] <= COVER_MIN

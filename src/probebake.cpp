@@ -279,6 +279,7 @@ struct Chunk
 	qint64 spilled = 0;         // links sent to a second side instead of refused
 	qint64 turned = 0;          // links refused by the facing rule
 	qint64 back = 0, door = 0, tinted = 0;   // v4 links: to a back surfel, through a door, through glass
+	qint64 decal = 0, surfHits = 0;          // lane GICAL1: surfel hits under a decal; all surfel hits
 };
 
 } // namespace
@@ -310,6 +311,9 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 	const bool redGlass = spec.red == QLatin1String( "glass" );
 	const bool glassOn = v4 && !redGlass && !soup.glass.empty() && soup.glassT.size() * 3 == soup.glass.size();
 	R.glassTris = int( soup.glass.size() / 9 );
+	// lane GICAL1: decals folded into the albedo (the tri way's)
+	const bool decalOn = albKnown && !soup.decal.empty() && soup.decalA.size() * 9 == soup.decal.size() * 4;
+	R.decalTris = decalOn ? int( soup.decal.size() / 9 ) : 0;
 	R.doors = int( soup.doors.size() );
 	// lane CAPTURE1: the albedo way (tri = today; hit and cube need the soup's per-triangle material)
 	const bool matOk = albKnown && qint64( soup.mat.size() ) == soup.triCount();
@@ -351,6 +355,16 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 			gbvh.t[i + 2] = soup.glass[i + 2];
 		}
 		gbvh.build();
+	}
+	probebvh::Bvh dbvh;   // lane GICAL1: the decals in their own tree
+	if ( decalOn ) {
+		dbvh.t.resize( soup.decal.size() );
+		for ( size_t i = 0; i < soup.decal.size(); i += 3 ) {
+			dbvh.t[i + 0] = float( double( soup.decal[i + 0] ) - O[0] );
+			dbvh.t[i + 1] = float( double( soup.decal[i + 1] ) - O[1] );
+			dbvh.t[i + 2] = soup.decal[i + 2];
+		}
+		dbvh.build();
 	}
 	struct DoorBox { double lo[3], hi[3]; quint32 ref; };
 	std::vector<DoorBox> doorBoxes;
@@ -713,10 +727,23 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 				if ( bin < 0 )
 					continue;
 				Bin & s = ch.surfels[keyFor( hw, cellS )].b[bin];
+				/* lane GICAL1: a decal lying on the hit surface (within 2 units in front of it, 0.25 behind) covers it
+				 * by its mean coverage, over its own albedo (the game blends it over the surface) */
+				double dA = 0;
+				int dt = -1;
+				double td = 0;
+				const double ts = std::max( t - 2.0, 1.0e-3 );
+				const double o2[3] = { o[0] + d[0] * ts, o[1] + d[1] * ts, o[2] + d[2] * ts };
+				if ( decalOn && dbvh.ray( o2, d, t + 0.25 - ts, &td, &dt ) && dt >= 0 ) {
+					dA = soup.decalA[size_t( dt ) * 4 + 3] / 255.0;
+					ch.decal++;
+				}
+				ch.surfHits++;
 				for ( int k = 0; k < 3; k++ ) {
 					s.pos[k] += hw[k];
 					s.nrm[k] += n[k];
-					s.alb[k] += albKnown ? soup.alb[size_t( tri ) * 3 + size_t( k )] / 255.0 : 0.5;
+					const double a0 = albKnown ? soup.alb[size_t( tri ) * 3 + size_t( k )] / 255.0 : 0.5;
+					s.alb[k] += dA > 0 ? a0 * ( 1.0 - dA ) + soup.decalA[size_t( dt ) * 4 + size_t( k )] / 255.0 * dA : a0;
 				}
 				s.n++;
 				if ( wayHit ) {   // lane CAPTURE1: the hit's own point
@@ -1083,6 +1110,8 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 		R.linksBack += ch.back;
 		R.linksDoor += ch.door;
 		R.linksTinted += ch.tinted;
+		R.decalHits += ch.decal;
+		R.surfelHits += ch.surfHits;
 	}
 	R.msRays = double( tm.nsecsElapsed() ) / 1e6;
 	tm.restart();
@@ -1509,6 +1538,9 @@ QString probeBakeCensusText( const ProbeBakeResult & r )
 		  << r.boxesWritten << "\n";
 	else
 		t << "bake: .tbk v3 (FO4CS's own format; no back sides, rooms, doors or glass)\n";
+	if ( r.decalTris > 0 )   // lane GICAL1
+		t << "bake: decals folded into the albedo: " << r.decalTris << " triangles, " << r.decalHits << " of " << r.surfelHits
+		  << " surfel hits under one\n";
 	// lane ROOMCLAMP1: probes outside the shell
 	t << "bake: outside the shell (back-face share over " << QString::number( r.backMax, 'f', 2 )
 	  << ( r.backRule ? "" : ", RULE OFF" ) << "): moved " << r.backMoved << ", dropped " << r.backDropped

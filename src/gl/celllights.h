@@ -183,6 +183,9 @@ bool wwCellLightsWanted( Scene * scene );
 void wwCellLightsUniforms( Scene * scene );
 //! a harness probe pass (WW_CELL_LIT_PROBE or WW_CELL_FOG_PROBE) on a cell-lit scene: effect shapes are not drawn
 bool wwCellProbePass( Scene * scene );
+//! lane GICAL1: probe 80 (the albedo as drawn) on that pass -- it leaves out the second-pass shapes too (alpha
+//! blend and decals: drawn opaque in a probe pass, and the bake leaves them out of its soup)
+bool wwCellAlbedoProbePass( Scene * scene );
 //! census echo: "celllit=on lights=N dalc=.. dir=.. probe=.. red=.."
 QString wwCellLightsEcho( Scene * scene );
 //! the red bits (1 linear, 2 axis, 4 nodalc); the cell view applies "axis" when it publishes

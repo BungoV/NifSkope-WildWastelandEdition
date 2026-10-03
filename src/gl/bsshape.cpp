@@ -308,6 +308,8 @@ void BSShape::drawShapes( NodeList * secondPass )
 	if ( !selectionFlags && ( bsesp || ( bslsp && bslsp->hasRefraction ) ) && wwCellProbePass( scene )
 		&& !( bsesp && wwCellFxLitProbeShape( scene, id() ) ) )	// lane FXLIT1: its own probes (70..74) draw the lit effects alone
 		return;	// lane EFX1: a harness probe pass measures the surfaces, not the effects or glass over them
+	if ( !selectionFlags && drawInSecondPass && wwCellAlbedoProbePass( scene ) )
+		return;	// lane GICAL1: probe 80 compares the surfaces with the bake's, which leaves blends and decals out
 
 	// Render polygon fill slightly behind alpha transparency and wireframe
 	glEnable( GL_POLYGON_OFFSET_FILL );

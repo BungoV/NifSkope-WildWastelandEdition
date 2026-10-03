@@ -143,7 +143,7 @@ for cell in $CELLS; do
 				WW_CELL_PV_DUMP="$(winpath "$run/links.pv.txt")")" = 1 ] || ok=0
 			for g in 1 0; do
 				[ "$(shoot "$EXE" "$run" "$cell" combined_gi${g}_new WW_CELL_LIT=1 WW_CELL_GI=$g WW_CELL_PASS=0 \
-					WW_CELL_ROOMCLAMP_PIN=off)" = 1 ] || ok=0
+					WW_CELL_ROOMCLAMP_PIN=off WW_CELL_GI_FILL=0)" = 1 ] || ok=0   # lane GICAL1: its gap fill off too
 				[ "$(shoot "$BEFORE_EXE" "$run" "$cell" combined_gi${g}_old WW_CELL_LIT=1 WW_CELL_GI=$g)" = 1 ] || ok=0
 			done
 			# the pre-lane exe against itself: the run-to-run floor Z is judged by

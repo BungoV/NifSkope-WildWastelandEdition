@@ -74,6 +74,8 @@ struct ClState
 	int pass = 0;           // lane PROBEVIEW1: the PRTP band's Pass (WwCellPass); WW_CELL_PASS pins it
 	bool passPinned = false;
 	int passRed = 0;        // WW_CELL_PV_RED: 1 direct, 2 nonormal (the shader), 4 open (every sky direction open)
+	int giAmb = 0;          // lane GICAL1: WW_CELL_GI_AMB = keep (0) | replace | off | max | asgi (the measure's red)
+	bool giFill = true;     // lane GICAL1: WW_CELL_GI_FILL=0 leaves the GI's gaps black (as before the lane)
 };
 
 ClState & st()
@@ -109,6 +111,9 @@ ClState & st()
 		s.shadowOn = qgetenv( "WW_CELL_SHADOW" ).trimmed() != "0";
 		s.shadowRed = qgetenv( "WW_CELL_SHADOW_RED" ).trimmed() == "noshadow";
 		s.fogProbe = qEnvironmentVariableIntValue( "WW_CELL_FOG_PROBE" );
+		const QByteArray giAmb = qgetenv( "WW_CELL_GI_AMB" ).trimmed();	// lane GICAL1
+		s.giAmb = giAmb == "replace" ? 1 : giAmb == "off" ? 2 : giAmb == "max" ? 3 : giAmb == "asgi" ? 4 : 0;
+		s.giFill = qgetenv( "WW_CELL_GI_FILL" ).trimmed() != "0";
 		const QByteArray red = qgetenv( "WW_CELL_LIT_RED" ).trimmed();
 		if ( red == "linear" )
 			s.red = 1;
@@ -272,6 +277,11 @@ bool wwCellProbePass( Scene * scene )
 	if ( s.red & 4096 )
 		return false;	// lane FRAT1: WW_CELL_LIT_RED=probefx, the effects write over the probes (as before lane EFX1)
 	return ( s.probe > 0 || s.fogProbe > 0 || ( scene && wwCellPassFor( scene->nifModel ) > 0 ) ) && wwCellLightsWanted( scene );
+}
+
+bool wwCellAlbedoProbePass( Scene * scene )
+{
+	return st().probe == 80 && wwCellProbePass( scene );
 }
 
 int wwCellPassFor( const void * nif )
@@ -462,6 +472,8 @@ void wwCellLightsUniforms( Scene * scene )
 	prog->uni1i( "cellGi", kGiUnit );
 	prog->uni1b( "cellGiOn", giDraw );
 	prog->uni1b( "cellGiSky", giDraw && !skyDraw && G->skyLit );	// lane SKY1 (never on the sky-share grid)
+	prog->uni1i( "cellGiAmb", s.giAmb );	// lane GICAL1
+	prog->uni1b( "cellGiFill", s.giFill && !skyDraw );	// the gap fill is the GI grid's, never the sky share's
 	prog->uni1i( "cellPass", pass );	// lane PROBEVIEW1
 	prog->uni1i( "cellPassRed", s.passRed & 11 );	// lane ROOMCLAMP1: + 8 noclamp
 	if ( giDraw ) {
@@ -821,6 +833,8 @@ QString wwCellLightsEcho( Scene * scene )
 		.arg( s.giOn ? 1 : 0 ).arg( G ? QStringLiteral( ", %1" ).arg( G->summary ) : QStringLiteral( ", none published" ) );
 	if ( s.probe )
 		o += QStringLiteral( " probe=%1" ).arg( s.probe );
+	o += QStringLiteral( " giamb=%1 gifill=%2" ).arg( QStringList{ "keep", "replace", "off", "max", "asgi" }.value( s.giAmb ) )
+		.arg( s.giFill ? 1 : 0 );	// lane GICAL1
 	if ( s.red )
 		o += QStringLiteral( " red=%1" ).arg( s.red );
 	if ( s.pass > 0 )	// lane PROBEVIEW1
