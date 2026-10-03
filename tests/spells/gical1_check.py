@@ -510,6 +510,29 @@ def evaluate(results, mode):
     return rows
 
 
+def peak_mb():
+    """this process's peak memory in MB, portable (lane GICAL1: the cloud run measured it with resource.getrusage,
+    which Windows has not): Windows = PeakWorkingSetSize, else ru_maxrss (KB on Linux, bytes on macOS)."""
+    if os.name == 'nt':
+        import ctypes
+        from ctypes import wintypes
+
+        class PMC(ctypes.Structure):
+            _fields_ = [('cb', wintypes.DWORD), ('PageFaultCount', wintypes.DWORD)] + [(f, ctypes.c_size_t) for f in ('PeakWorkingSetSize', 'WorkingSetSize', 'QuotaPeakPagedPoolUsage',
+                        'QuotaPagedPoolUsage', 'QuotaPeakNonPagedPoolUsage', 'QuotaNonPagedPoolUsage', 'PagefileUsage',
+                        'PeakPagefileUsage')]
+        k = ctypes.WinDLL('kernel32')
+        k.GetCurrentProcess.restype = wintypes.HANDLE
+        k.K32GetProcessMemoryInfo.argtypes = [wintypes.HANDLE, ctypes.POINTER(PMC), wintypes.DWORD]
+        m = PMC(); m.cb = ctypes.sizeof(PMC)
+        if not k.K32GetProcessMemoryInfo(k.GetCurrentProcess(), ctypes.byref(m), m.cb):
+            return float('nan')
+        return m.PeakWorkingSetSize / 2.0 ** 20
+    import resource
+    r = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    return r / 2.0 ** 20 if sys.platform == 'darwin' else r / 1024.0
+
+
 def main():
     t0 = time.time()
     red = os.environ.get('GICAL1_RED', '').strip()
@@ -538,7 +561,7 @@ def main():
         for name, ok, msg in rows:
             print('%s %s  %s' % ('PASS' if ok else 'FAIL', name, msg))
         verdicts[mode] = all(ok for _, ok, _ in rows)
-    print('--- verdict (%.1f s)' % (time.time() - t0))
+    print('--- verdict (%.1f s, peak memory %.0f MB)' % (time.time() - t0, peak_mb()))
     if red:
         print('red %s: %s' % (red, 'PASS (the red did NOT fail: the check is blind)' if verdicts[red] else 'FAIL (as it must)'))
         return 0 if verdicts[red] else 1

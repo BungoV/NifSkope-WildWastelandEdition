@@ -1096,8 +1096,13 @@ def main(argv):
         print(ln)
     bad = [ln for ln in lines if ' FAIL' in ln.split(':')[0]]
     judged = [ln for ln in lines if ' PASS' in ln.split(':')[0]]
-    ok = not bad and len(judged) >= 5
-    print('sky %s  (%d stages pass, %d fail)' % ('PASS' if ok else 'FAIL', len(judged), len(bad)))
+    # lane GICAL1: a cell given no camera (VIEWS_<tag> unset) runs no picture stage; W U S B are all it can judge
+    # (T only with outdoor glass), so it needs 4, not 5 -- Goodneighbor gn:5,-3 read FAIL with 4 PASS and 0 FAIL
+    need = 5 if specs else 4
+    shot = [ln for ln in judged if ln.startswith('D ')]   # a camera given must be judged on its pictures
+    ok = not bad and len(judged) >= need and (not specs or bool(shot))
+    print('sky %s  (%d stages pass, %d fail%s)' % ('PASS' if ok else 'FAIL', len(judged), len(bad),
+                                                   '' if specs else '; no camera given, picture stages not run'))
     return 0 if ok else 1
 
 
