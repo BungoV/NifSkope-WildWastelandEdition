@@ -133,7 +133,7 @@ glowScaleSRGB` and g is the glow map's stored value. The bake must therefore:
    Hits on non-emissive triangles add nothing but still count in `n`, so the cell mean is an area mean.
    `makeFinal` stores `le / n`.
 4. **File.** `.tbk` v4 gets one more tail block:
-   - `reserved[2]` holds its count;
+   - `reserved[3]` holds its count (as built: `reserved[2]` already holds what BAKE4 modelled);
    - each entry is 16 bytes, `{ u32 surfel index (top bit = back side), float Le[3] }`;
    - it is written **only when the count is > 0**;
    - v3 (FO4CS's reader) never carries it.
@@ -324,3 +324,20 @@ emissivegi1 PASS (green PASS, reds all fail) in 18.8 s
    game: is the wall lit as much?
 5. **Re-run** cell_gi.sh, probe_bake.py synth and rooms, and cell_pass.sh. Their fixtures have no emissive
    material, so no change is expected.
+
+## 9. As built (local lane, 2026-10-04)
+
+- The `.tbk` count sits in `reserved[3]` (section 4 is corrected): `reserved[2]` already held BAKE4's flags.
+- Census (item 8.1/8.2): Goodneighbor 5,-3 at 23:00, 56 glowing shapes (7,710 triangles, 6 emitters, 3 glow
+  maps), 49 of 52 placements with a lit placed light within 256 units; Vault111Cryo 251 shapes, 157 of 157
+  placements; The Third Rail 20 shapes (19 of 19); The Memory Den 22 shapes (17 of 17). No glow flag without a
+  map, no unread map, no shape without UVs.
+- Open question 3 and item 8.2: the physical sum is baked and the placed lights stay. The glow adds a mean
+  +2.8% to the probes within 400 units of the Goodneighbor neon (99th percentile +17.7%, most +45%, none
+  darker); the placed lights also give the game's direct light, which the bake cannot remove.
+- Real-cell gate: tests/spells/emissive_cell_check.py (MAPS, SURF, GAIN, OFF, red nomask). Its SURF twin judges
+  every surfel next to a glowing triangle, weighted as the probes' rays land, with local occlusion through
+  alpha-test holes: bake/twin 1.466 (bar 0.6-1.6), red 4.373.
+- Byte gate (E3 on a real cell): Vault111Cryo with WW_CELL_EMISSIVE_PIN=off: soup, cube dump and all six .tbk
+  identical to the exe before the lane.
+- Not done: the game comparison (item 8.4) beside a neon sign.
