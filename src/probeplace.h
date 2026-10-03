@@ -78,6 +78,33 @@ struct ProbeSoup
 		glass.insert( glass.end(), c, c + 3 );
 		glassT.insert( glassT.end(), t, t + 3 );
 	}
+	/*! Lane CAPTURE1: what the hit and cube albedo ways read at a point of a triangle (the tri way,
+	 *  the default, never fills it). One per triangle of `tris` when filled; tex = -1 (the ground, a
+	 *  shape with no map) keeps `alb` and the face normal. ~70 bytes a triangle. In memory only:
+	 *  the soup file does not carry it. */
+	struct TriMat
+	{
+		qint32 tex = -1;            //!< into matTex
+		qint32 pal = -1;            //!< a palette map (Greyscale_To_PaletteColor), into matTex
+		float row = -1.0f;          //!< the palette row; < 0 = rowScale x the vertex red
+		float rowScale = 0.0f;
+		float uv[6] = { 0, 0, 0, 0, 0, 0 };
+		quint8 vc[9] = { 255, 255, 255, 255, 255, 255, 255, 255, 255 };   //!< vertex colors, gamma
+		qint16 n[9] = { 0, 0, 0, 0, 0, 0, 0, 0, 0 };   //!< world vertex normals, snorm16
+	};
+	std::vector<TriMat> mat;
+	std::vector<QString> matTex;
+	std::vector<const void *> matTexPtr;   //!< the loaded maps (DDSTexture16), resolved before the bake
+	//! Lane CAPTURE1 red "nofilter": the triangles the soup leaves out (effects, decals, blended,
+	//! leaves), seen by the cube way only. Empty in every real run.
+	std::vector<float> cubeExtra;
+	std::vector<TriMat> cubeExtraMat;
+	//! the material of the triangle just added (pads the triangles before it that had none)
+	void setLastMat( const TriMat & m )
+	{
+		mat.resize( size_t( triCount() ) - 1 );
+		mat.push_back( m );
+	}
 };
 
 //! Lane BAKE4: one box of an enclosed room's air (world units), what `.tbk` v4 writes for the

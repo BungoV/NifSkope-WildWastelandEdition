@@ -67,6 +67,22 @@ struct ProbeBakeSpec
 	 *  old rule), "rooms" writes no room ids or boxes, "glass" bakes as if no glass.
 	 *  Empty in every real run. */
 	QString red;
+	/*! Lane CAPTURE1: where a surfel's albedo and normal come from (positions, sides, links, sky
+	 *  and glass are the same in all three; only those two values differ):
+	 *    "tri" (default)  one albedo per triangle (its centroid UV, coarse map), the face normal
+	 *    "hit"            each ray hit's own point: UV -> texel at a mip from the ray's footprint,
+	 *                     interpolated vertex color and vertex normal (needs soup.mat)
+	 *    "cube"           every probe traces a cube of cubeFace^2 pixels a face (the deck's G-buffer
+	 *                     capture); a surfel takes the mean albedo + normal of the pixels in its cell
+	 *  albedoRed: "centroid" (hit reads the triangle's own tri value: equals tri), "nofilter" (the
+	 *  cube also sees soup.cubeExtra). Empty in every real run. */
+	QString albedoWay = QStringLiteral( "tri" );
+	int cubeFace = 128;
+	QString albedoRed;
+	//! cube: these probes' six faces (rgb u8 linear, dist f32, facing f32, nrm f32x3 a pixel, the
+	//! notes\probecap tracer's layout) are written to cubeDump
+	QString cubeDump;
+	std::vector<int> cubeDumpProbes;
 };
 
 struct ProbeBakeResult
@@ -83,6 +99,14 @@ struct ProbeBakeResult
 	bool noSky = false;                     //!< the spec's: misses went to unlinked, not sky
 	double voidMean = 0;                    //!< over probes, noSky only: the sphere share that met nothing
 	int albedoKnown = 0;                    //!< 1 when the soup carried albedo, else every surfel is grey
+	// lane CAPTURE1: the albedo way's census
+	QString albedoWay;
+	qint64 albSamples = 0;                  //!< hit: ray hits read at their point; cube: pixels that landed on a surfel
+	qint64 albDropped = 0;                  //!< cube: pixels on a cell with no surfel (or sky)
+	qint64 albExtra = 0;                    //!< cube red nofilter: pixels on a left-out shape
+	int albSurfels = 0, albKept = 0;        //!< surfels the way rewrote; kept their tri value (no sample)
+	int albLeaned = 0;                      //!< normals leaned toward the face normal to face every probe linking them
+	double msAlbedo = 0;
 	// lane BAKE4
 	int version = 3;                        //!< the `.tbk` version written
 	int backSurfels = 0, backWritten = 0;   //!< v4: second sides kept in their own cell; written (summed over files)

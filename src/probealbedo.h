@@ -67,12 +67,25 @@ public:
 	static float srgbToLinear( float c );
 	static float linearToSrgb( float c );
 
+	/*! Lane CAPTURE1: the map at up to 512 texels across, for the hit and cube albedo ways (they
+	 *  choose a mip by the sample's footprint). Null = no map read. */
+	const DDSTexture16 * loadFine( const QString & tex );
+	/*! Lane CAPTURE1, thread-safe (reads loaded maps only): `t` at (u, v), mip `lod` (trilinear,
+	 *  clamped to the map's), times `vc` (gamma), as linear 0..1; with `pal`, the palette's color at
+	 *  (the map's green, `row`) instead, as samplePalette(). */
+	static void sampleLod( const DDSTexture16 * t, const DDSTexture16 * pal, float u, float v, float lod, float row,
+		const float vc[3], float out[3] );
+	//! the map's mip-0 size (texels), for the footprint's mip choice
+	static void sizeOf( const DDSTexture16 * t, int * w, int * h );
+
 	int texturesRead = 0, texturesMissing = 0;
+	int finesRead = 0;
 
 private:
-	const DDSTexture16 * load( const QString & tex );
+	const DDSTexture16 * load( const QString & tex, int cap = 64 );
 	QString root;
 	QHash<QString, DDSTexture16 *> cache;
+	QHash<QString, DDSTexture16 *> fine;   // lane CAPTURE1
 };
 
 struct NativeSrcShape;

@@ -53,6 +53,7 @@ ProbeAlbedo::ProbeAlbedo( const QString & dataRoot ) : root( dataRoot )
 ProbeAlbedo::~ProbeAlbedo()
 {
 	qDeleteAll( cache );
+	qDeleteAll( fine );
 }
 
 float ProbeAlbedo::srgbToLinear( float c )
@@ -67,8 +68,9 @@ float ProbeAlbedo::linearToSrgb( float c )
 	return c <= 0.0031308f ? c * 12.92f : 1.055f * std::pow( c, 1.0f / 2.4f ) - 0.055f;
 }
 
-const DDSTexture16 * ProbeAlbedo::load( const QString & texIn )
+const DDSTexture16 * ProbeAlbedo::load( const QString & texIn, int cap )
 {
+	QHash<QString, DDSTexture16 *> & cache = cap > 64 ? fine : this->cache;   // lane CAPTURE1: two sizes
 	const QString key = texIn.toLower();
 	const auto it = cache.constFind( key );
 	if ( it != cache.constEnd() )
@@ -98,7 +100,7 @@ const DDSTexture16 * ProbeAlbedo::load( const QString & texIn )
 		quint32 dxgi = 0, w = 0, h = 0, mips = 0;
 		int off = 0;
 		if ( lodgenTextureInfo( root, path, &dxgi, &w, &h, &mips ) && mips > 1 )
-			while ( off + 1 < int( mips ) && ( std::max( w, h ) >> ( off + 1 ) ) >= 64 )
+			while ( off + 1 < int( mips ) && ( std::max( w, h ) >> ( off + 1 ) ) >= quint32( cap ) )
 				off++;
 		try {
 			tex = new DDSTexture16( reinterpret_cast<const unsigned char *>( dds.constData() ), size_t( dds.size() ), off );
@@ -106,9 +108,43 @@ const DDSTexture16 * ProbeAlbedo::load( const QString & texIn )
 			tex = nullptr;
 		}
 	}
-	( tex ? texturesRead : texturesMissing )++;
+	if ( cap > 64 )
+		finesRead += tex ? 1 : 0;
+	else
+		( tex ? texturesRead : texturesMissing )++;
 	cache.insert( key, tex );
 	return tex;
+}
+
+const DDSTexture16 * ProbeAlbedo::loadFine( const QString & tex )
+{
+	return tex.isEmpty() ? nullptr : load( tex, 512 );
+}
+
+void ProbeAlbedo::sizeOf( const DDSTexture16 * t, int * w, int * h )
+{
+	*w = t ? t->getWidth() : 1;
+	*h = t ? t->getHeight() : 1;
+}
+
+void ProbeAlbedo::sampleLod( const DDSTexture16 * t, const DDSTexture16 * pal, float u, float v, float lod, float row,
+	const float vc[3], float out[3] )
+{
+	u -= std::floor( u );
+	v -= std::floor( v );
+	lod = std::clamp( lod, 0.0f, float( t->getMaxMipLevel() ) );
+	const FloatVector4 c = t->getPixelT( u, v, lod );
+	if ( pal ) {
+		const float g = std::clamp( t->isSRGBTexture() ? linearToSrgb( c[1] ) : c[1], 0.0f, 1.0f );
+		const FloatVector4 p = pal->getPixelB( g, std::clamp( row, 0.0f, 1.0f ), 0 );
+		for ( int k = 0; k < 3; k++ )
+			out[k] = pal->isSRGBTexture() ? std::clamp( p[size_t( k )], 0.0f, 1.0f ) : srgbToLinear( p[size_t( k )] );
+		return;
+	}
+	for ( int k = 0; k < 3; k++ ) {
+		const float g = t->isSRGBTexture() ? linearToSrgb( c[size_t( k )] ) : c[size_t( k )];
+		out[k] = srgbToLinear( g * vc[k] );
+	}
 }
 
 bool ProbeAlbedo::sample( const QString & tex, float u, float v, const float vc[3], float out[3], float * alpha )

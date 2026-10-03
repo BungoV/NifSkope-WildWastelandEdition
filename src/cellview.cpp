@@ -1750,6 +1750,28 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 	const QString bakeDirEnv = QString::fromLocal8Bit( qgetenv( "WW_CELL_PROBE_BAKE_DIR" ) );
 	const bool baking = probing && ( spec.probesBake || !bakeEnv.isEmpty() );
 	ProbeAlbedo probeAlb( dataRoot );
+	/* lane CAPTURE1: WW_CELL_BAKE_ALBEDO = tri (default, today) | hit | cube picks where the surfels'
+	 * albedo and normal come from (ProbeBakeSpec::albedoWay); hit and cube need every object
+	 * triangle's UVs, vertex colors, vertex normals and maps in the soup. WW_CELL_BAKE_ALBEDO_RED =
+	 * centroid | nofilter, WW_CELL_BAKE_CUBE_FACE = pixels a face (128), WW_CELL_BAKE_CUBE_DUMP=<file>
+	 * + WW_CELL_BAKE_CUBE_PROBES=x,y,z;... (the nearest probes' faces): gate and sheet only. */
+	const QString albWay = qEnvironmentVariable( "WW_CELL_BAKE_ALBEDO", QStringLiteral( "tri" ) );
+	const QString albRed = qEnvironmentVariable( "WW_CELL_BAKE_ALBEDO_RED" );
+	const bool wantMat = baking && ( albWay == QLatin1String( "hit" ) || albWay == QLatin1String( "cube" ) );
+	const bool wantExtra = wantMat && albWay == QLatin1String( "cube" ) && albRed == QLatin1String( "nofilter" );
+	QHash<QString, int> matTexIdx;
+	auto matTexOf = [&]( const QString & tex ) -> qint32 {
+		if ( tex.isEmpty() )
+			return -1;
+		const QString k = tex.toLower();
+		auto it = matTexIdx.constFind( k );
+		if ( it != matTexIdx.constEnd() )
+			return *it;
+		const int i = int( probeSoup.matTex.size() );
+		probeSoup.matTex.push_back( tex );
+		matTexIdx.insert( k, i );
+		return i;
+	};
 	// lane BAKE4: glass panes into the bake's soup; WW_CELL_PROBE_GLASS=<tsv> dumps the census
 	QString glassCensus;
 	const QByteArray glassDump = qgetenv( "WW_CELL_PROBE_GLASS" );
@@ -2131,6 +2153,33 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 			}
 			const bool palette = s.g2p && s.g2pScale > 1.0e-6f;
 			const bool painted = palette && havePaint;
+			// lane CAPTURE1: a triangle's material for the hit and cube albedo ways
+			auto triMat = [&]( size_t t, const QString & tex, bool withPalette ) {
+				ProbeSoup::TriMat m;
+				m.tex = matTexOf( tex );
+				if ( withPalette && s.g2p && !s.g2pTex.isEmpty() ) {
+					m.pal = matTexOf( s.g2pTex );
+					m.row = painted ? paintIndex : -1.0f;
+					m.rowScale = s.g2pScale;
+				}
+				for ( int i = 0; i < 3; i++ ) {
+					const size_t vi = size_t( s.geom.tris[t + size_t( i )] );
+					if ( s.geom.uv.size() >= nv * 2 ) {
+						m.uv[i * 2] = s.geom.uv[vi * 2];
+						m.uv[i * 2 + 1] = s.geom.uv[vi * 2 + 1];
+					}
+					if ( s.geom.rgba.size() == nv * 4 )
+						for ( int k = 0; k < 3; k++ )
+							m.vc[i * 3 + k] = s.geom.rgba[vi * 4 + size_t( k )];
+					if ( s.geom.nrm.size() >= nv * 3 ) {
+						const Vector3 wn = p.rot * Vector3( s.geom.nrm[vi * 3], s.geom.nrm[vi * 3 + 1], s.geom.nrm[vi * 3 + 2] );
+						const float l = wn.length();
+						for ( int k = 0; k < 3; k++ )
+							m.n[i * 3 + k] = l > 1e-6f ? qint16( std::lround( std::clamp( wn[k] / l, -1.0f, 1.0f ) * 32767.0f ) ) : 0;
+					}
+				}
+				return m;
+			};
 			if ( role == 1 ) {
 				if ( baking && probeGlassFeed( probeSoup, probeAlb, s, p.pos, p.rot, p.scale, p.ref, model,
 						glassDump.isEmpty() ? nullptr : &glassCensus ) )
@@ -2138,6 +2187,26 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 				if ( s.nearFacts.effectShader || !s.effectTex0.isEmpty() || s.nearFacts.alphaBlend
 					|| s.nearFacts.decal || ( soupFoliage && s.nearFacts.alphaTest ) ) {
 					soupShapesDropped++;
+					if ( wantExtra )   // lane CAPTURE1 red nofilter: the cube sees what the soup leaves out
+						for ( size_t t = 0; t + 2 < s.geom.tris.size(); t += 3 ) {
+							bool okTri = true;
+							float w[9];
+							for ( int k = 0; k < 3 && okTri; k++ ) {
+								const size_t vi = size_t( s.geom.tris[t + size_t( k )] );
+								okTri = vi < nv;
+								if ( !okTri )
+									break;
+								const Vector3 wp = p.pos + p.rot * ( Vector3( s.geom.pos[vi * 3], s.geom.pos[vi * 3 + 1],
+									s.geom.pos[vi * 3 + 2] ) * p.scale );
+								for ( int c = 0; c < 3; c++ )
+									w[k * 3 + c] = wp[c];
+							}
+							if ( !okTri )
+								continue;
+							probeSoup.cubeExtra.insert( probeSoup.cubeExtra.end(), w, w + 9 );
+							probeSoup.cubeExtraMat.push_back( triMat( t,
+								s.nearFacts.effectShader || !s.effectTex0.isEmpty() ? s.effectTex0 : s.tex0, false ) );
+						}
 				} else {
 					for ( size_t t = 0; t + 2 < s.geom.tris.size(); t += 3 ) {
 						float w[3][3];
@@ -2183,6 +2252,8 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 								albUntextured++;
 							}
 							probeSoup.addTri( w[0], w[1], w[2], rgb );
+							if ( wantMat )
+								probeSoup.setLastMat( triMat( t, s.tex0, true ) );
 						} else if ( okTri ) {
 							probeSoup.addTri( w[0], w[1], w[2] );
 						}
@@ -2857,6 +2928,39 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 				// an interior's misses are void, never sky -- unless its cell shows the sky (lane SKYINT1, the deck's
 				// rule: a ray that meets nothing sees the sky)
 				bs.noSky = spec.interior && !( cellInteriorFlags( world.interior() ) & 0x0080u );
+				if ( wantMat ) {   // lane CAPTURE1: the albedo way, its maps loaded once (the bake reads them from threads)
+					bs.albedoWay = albWay;
+					bs.albedoRed = albRed;
+					const int cf = qEnvironmentVariableIntValue( "WW_CELL_BAKE_CUBE_FACE" );
+					if ( cf > 0 )
+						bs.cubeFace = cf;
+					probeSoup.mat.resize( size_t( probeSoup.triCount() ) );   // the ground: its tri value
+					probeSoup.matTexPtr.clear();
+					for ( const QString & tx : probeSoup.matTex )
+						probeSoup.matTexPtr.push_back( probeAlb.loadFine( tx ) );
+					bs.cubeDump = qEnvironmentVariable( "WW_CELL_BAKE_CUBE_DUMP" );
+					for ( const QString & q : qEnvironmentVariable( "WW_CELL_BAKE_CUBE_PROBES" ).split( ';', Qt::SkipEmptyParts ) ) {
+						const QStringList c = q.split( ',' );
+						if ( c.size() != 3 )
+							continue;
+						int best = -1;
+						double bd = 1e300;
+						for ( size_t i = 0; i < pr.probes.size(); i++ ) {
+							double dd = 0;
+							for ( int k = 0; k < 3; k++ )
+								dd += std::pow( double( pr.probes[i].pos[k] ) - c[k].toDouble(), 2 );
+							if ( dd < bd ) {
+								bd = dd;
+								best = int( i );
+							}
+						}
+						if ( best >= 0 )
+							bs.cubeDumpProbes.push_back( best );
+					}
+					t << "  bake albedo way " << albWay << ( albRed.isEmpty() ? QString() : QStringLiteral( " RED " ) + albRed )
+					  << ": " << probeSoup.matTex.size() << " maps, " << probeAlb.finesRead << " read at up to 512 texels; "
+					  << probeSoup.cubeExtra.size() / 9 << " left-out triangles for the cube\n";
+				}
 				ProbeBakeResult bres;
 				t << "  bake albedo: object triangles from their map " << albTextured << " (of them through a paint palette "
 				  << albPalette << "), grey (no map read) "

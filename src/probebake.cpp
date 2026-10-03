@@ -31,6 +31,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ***** END LICENSE BLOCK *****/
 
 #include "probebake.h"
+#include "probealbedo.h"
 #include "probebvh.h"
 
 #include <QDir>
@@ -39,6 +40,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QTextStream>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cmath>
 #include <cstdio>
@@ -185,14 +187,19 @@ struct Bin
 {
 	double pos[3] = { 0, 0, 0 }, nrm[3] = { 0, 0, 0 }, alb[3] = { 0, 0, 0 };
 	quint32 n = 0;
+	double alb2[3] = { 0, 0, 0 }, nrm2[3] = { 0, 0, 0 };   // lane CAPTURE1: the hit way's samples
+	quint32 n2 = 0;
 	void add( const Bin & o )
 	{
 		for ( int k = 0; k < 3; k++ ) {
 			pos[k] += o.pos[k];
 			nrm[k] += o.nrm[k];
 			alb[k] += o.alb[k];
+			alb2[k] += o.alb2[k];
+			nrm2[k] += o.nrm2[k];
 		}
 		n += o.n;
+		n2 += o.n2;
 	}
 };
 struct SurfelBins
@@ -300,6 +307,15 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probes, 
 	const bool glassOn = v4 && !redGlass && !soup.glass.empty() && soup.glassT.size() * 3 == soup.glass.size();
 	R.glassTris = int( soup.glass.size() / 9 );
 	R.doors = int( soup.doors.size() );
+	// lane CAPTURE1: the albedo way (tri = today; hit and cube need the soup's per-triangle material)
+	const bool matOk = albKnown && qint64( soup.mat.size() ) == soup.triCount();
+	const bool wayHit = matOk && spec.albedoWay == QLatin1String( "hit" );
+	const bool wayCube = matOk && spec.albedoWay == QLatin1String( "cube" );
+	const bool redCentroid = spec.albedoRed == QLatin1String( "centroid" );
+	const bool redNoFilter = spec.albedoRed == QLatin1String( "nofilter" );
+	R.albedoWay = wayHit ? QStringLiteral( "hit" ) : wayCube ? QStringLiteral( "cube" ) : QStringLiteral( "tri" );
+	if ( spec.albedoWay != R.albedoWay )
+		R.albedoWay += QStringLiteral( " (asked %1; the soup carries no per-triangle material)" ).arg( spec.albedoWay );
 
 	// local origin (the probes' center, z 0), as the placer does: float precision
 	// must not depend on how far from the world origin the block is
@@ -406,6 +422,68 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probes, 
 				ax = k;
 		return ax * 2 + ( n[ax] < 0 ? 1 : 0 );
 	};
+	/* lane CAPTURE1: the material at a point of a triangle (T: its 9 local floats, m its material,
+	 * a3 its tri-way albedo bytes), for the hit and cube ways. p = the local hit point, dist and
+	 * omegaS = the sample's distance and solid angle (its footprint picks the mip), fn = the face
+	 * normal turned toward the probe. Albedo linear 0..1; the normal is the interpolated vertex
+	 * normal on fn's side (fn when the mesh has none). */
+	auto matAt = [&]( const float * T, const ProbeSoup::TriMat & m, const quint8 * a3, const double p[3],
+		double dist, double omegaS, const double fn[3], const double * d, double alb[3], double nrm[3] ) {
+		for ( int k = 0; k < 3; k++ ) {
+			alb[k] = a3 ? a3[k] / 255.0 : 0.5;
+			nrm[k] = fn[k];
+		}
+		if ( redCentroid )
+			return;
+		const double e1[3] = { double( T[3] ) - T[0], double( T[4] ) - T[1], double( T[5] ) - T[2] };
+		const double e2[3] = { double( T[6] ) - T[0], double( T[7] ) - T[1], double( T[8] ) - T[2] };
+		const double v[3] = { p[0] - T[0], p[1] - T[1], p[2] - T[2] };
+		auto dot = []( const double * a, const double * b ) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; };
+		const double d00 = dot( e1, e1 ), d01 = dot( e1, e2 ), d11 = dot( e2, e2 ), d20 = dot( v, e1 ),
+			d21 = dot( v, e2 ), den = d00 * d11 - d01 * d01;
+		if ( !( std::fabs( den ) > 0 ) )
+			return;
+		double w1 = ( d11 * d20 - d01 * d21 ) / den, w2 = ( d00 * d21 - d01 * d20 ) / den;
+		w1 = std::clamp( w1, 0.0, 1.0 );
+		w2 = std::clamp( w2, 0.0, 1.0 - w1 );
+		const double w[3] = { 1.0 - w1 - w2, w1, w2 };
+		double sn[3] = { 0, 0, 0 };
+		for ( int i = 0; i < 3; i++ )
+			for ( int k = 0; k < 3; k++ )
+				sn[k] += w[i] * m.n[i * 3 + k] / 32767.0;
+		const double sl = std::sqrt( dot( sn, sn ) );
+		if ( sl > 1e-6 ) {
+			const double s = dot( sn, fn ) < 0 ? -1.0 / sl : 1.0 / sl;
+			for ( int k = 0; k < 3; k++ )
+				nrm[k] = sn[k] * s;
+		}
+		const DDSTexture16 * tx = m.tex >= 0 ? static_cast<const DDSTexture16 *>( soup.matTexPtr[size_t( m.tex )] ) : nullptr;
+		if ( !tx )
+			return;
+		const DDSTexture16 * pl = m.pal >= 0 ? static_cast<const DDSTexture16 *>( soup.matTexPtr[size_t( m.pal )] ) : nullptr;
+		float uv[2] = { 0, 0 }, vc[3] = { 0, 0, 0 };
+		for ( int i = 0; i < 3; i++ ) {
+			uv[0] += float( w[i] ) * m.uv[i * 2];
+			uv[1] += float( w[i] ) * m.uv[i * 2 + 1];
+			for ( int k = 0; k < 3; k++ )
+				vc[k] += float( w[i] ) * m.vc[i * 3 + k] / 255.0f;
+		}
+		// the footprint: t^2 omega / cos on the surface, in texels of this map's mip 0
+		const double cr[3] = { e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0] };
+		const double aw = 0.5 * std::sqrt( dot( cr, cr ) );
+		const double auv = 0.5 * std::fabs( double( m.uv[2] - m.uv[0] ) * ( m.uv[5] - m.uv[1] )
+			- double( m.uv[4] - m.uv[0] ) * ( m.uv[3] - m.uv[1] ) );
+		int tw = 1, th = 1;
+		ProbeAlbedo::sizeOf( tx, &tw, &th );
+		const double cosI = std::max( std::fabs( dot( fn, d ) ), 0.1 );
+		const double texels = aw > 0 ? dist * dist * omegaS / cosI * auv * tw * th / aw : 0.0;
+		const float lod = texels > 1.0 ? float( 0.5 * std::log2( texels ) ) : 0.0f;
+		const float row = m.row >= 0.0f ? m.row : m.rowScale * vc[0];
+		float out[3];
+		ProbeAlbedo::sampleLod( tx, pl, uv[0], uv[1], lod, row, vc, out );
+		for ( int k = 0; k < 3; k++ )
+			alb[k] = out[k];
+	};
 	/* lane BAKE4: what the glass between the probe and tEnd lets through, per channel: the
 	 * product over every pane crossed. A pane is crossed once (the next search starts a
 	 * hundredth of a unit past it, so a two-sided pane's twin faces count once); glass on
@@ -481,6 +559,17 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probes, 
 					s.alb[k] += albKnown ? soup.alb[size_t( tri ) * 3 + size_t( k )] / 255.0 : 0.5;
 				}
 				s.n++;
+				if ( wayHit ) {   // lane CAPTURE1: the hit's own point
+					const double p[3] = { o[0] + d[0] * t, o[1] + d[1] * t, o[2] + d[2] * t };
+					double a2[3], n2[3];
+					matAt( &bvh.t[size_t( tri ) * 9], soup.mat[size_t( tri )], &soup.alb[size_t( tri ) * 3], p, t, omega,
+						n, d, a2, n2 );
+					for ( int k = 0; k < 3; k++ ) {
+						s.alb2[k] += a2[k];
+						s.nrm2[k] += n2[k];
+					}
+					s.n2++;
+				}
 			}
 		}
 	};
@@ -728,6 +817,18 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probes, 
 			+ double( sr.normal[2] ) * sr.normal[2] );
 		for ( int c = 0; c < 3; c++ )
 			f.n[c] = ql > 0 ? sr.normal[c] / ql : 0.0;
+		/* lane CAPTURE1: the hit way rewrites the stored albedo and normal only; f.n (the facing
+		 * rule's) stays the face normal's, so the links are the tri way's */
+		if ( wayHit && a.n2 ) {
+			R.albSurfels++;
+			R.albSamples += a.n2;
+			const double l2 = std::sqrt( a.nrm2[0] * a.nrm2[0] + a.nrm2[1] * a.nrm2[1] + a.nrm2[2] * a.nrm2[2] );
+			for ( int c = 0; c < 3; c++ ) {
+				sr.albedo[c] = quint8( std::lround( std::clamp( a.alb2[c] / a.n2, 0.0, 1.0 ) * 255.0 ) );
+				if ( l2 > 1e-9 )
+					sr.normal[c] = qint16( std::lround( std::clamp( a.nrm2[c] / l2, -1.0, 1.0 ) * 32767.0 ) );
+			}
+		}
 		return f;
 	};
 	std::vector<std::pair<Key, Bin>> backs;   // the second sides, housed below in key order
@@ -825,6 +926,286 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probes, 
 	}
 	R.msRays = double( tm.nsecsElapsed() ) / 1e6;
 	tm.restart();
+
+	/* lane CAPTURE1: THE CUBE WAY (the deck's G-buffer capture). Every probe traces six F x F faces
+	 * through the same soup (the notes tracer's face layout: +X -Y -X +Y, then +Z, -Z); each pixel's
+	 * hit lands in a surfel cell and side by the bake's own rules (keyFor, the face bin, the v4 back
+	 * mask) and adds its albedo (the map at the pixel's footprint) and vertex normal there. A surfel
+	 * then stores the mean of its pixels; one no pixel reached keeps its tri value. The surfel set,
+	 * the links, sky and glass are untouched. */
+	if ( wayCube ) {
+		const int F = qBound( 8, spec.cubeFace, 1024 );
+		const size_t NP = size_t( 6 ) * size_t( F ) * size_t( F );
+		std::vector<double> cdir( NP * 3 ), com( NP );
+		for ( size_t px = 0; px < NP; px++ ) {
+			const int face = int( px / size_t( F * F ) ), r = int( px % size_t( F * F ) ), x = r % F, y = r / F;
+			const double u = 2.0 * ( x + 0.5 ) / F - 1.0, v = 1.0 - 2.0 * ( y + 0.5 ) / F;
+			static const double FW[4][3] = { { 1, 0, 0 }, { 0, -1, 0 }, { -1, 0, 0 }, { 0, 1, 0 } };
+			double f[3], rr[3], up[3];
+			if ( face < 4 ) {
+				for ( int k = 0; k < 3; k++ )
+					f[k] = FW[face][k];
+				rr[0] = f[1]; rr[1] = -f[0]; rr[2] = 0; up[0] = 0; up[1] = 0; up[2] = 1;
+			} else if ( face == 4 ) {
+				f[0] = 0; f[1] = 0; f[2] = 1; rr[0] = 0; rr[1] = -1; rr[2] = 0; up[0] = -1; up[1] = 0; up[2] = 0;
+			} else {
+				f[0] = 0; f[1] = 0; f[2] = -1; rr[0] = 0; rr[1] = -1; rr[2] = 0; up[0] = 1; up[1] = 0; up[2] = 0;
+			}
+			double q[3], l2 = 0;
+			for ( int k = 0; k < 3; k++ ) {
+				q[k] = f[k] + u * rr[k] + v * up[k];
+				l2 += q[k] * q[k];
+			}
+			const double l = std::sqrt( l2 );
+			for ( int k = 0; k < 3; k++ )
+				cdir[px * 3 + size_t( k )] = q[k] / l;
+			com[px] = ( 4.0 / ( double( F ) * F ) ) / ( l2 * l );   // the pixel's solid angle
+		}
+		// the red: the shapes the soup leaves out, seen by the cube only
+		probebvh::Bvh xbvh;
+		const bool extraOn = redNoFilter && !soup.cubeExtra.empty() && soup.cubeExtraMat.size() * 9 == soup.cubeExtra.size();
+		if ( extraOn ) {
+			xbvh.t.resize( soup.cubeExtra.size() );
+			for ( size_t i = 0; i < soup.cubeExtra.size(); i += 3 ) {
+				xbvh.t[i + 0] = float( double( soup.cubeExtra[i + 0] ) - O[0] );
+				xbvh.t[i + 1] = float( double( soup.cubeExtra[i + 1] ) - O[1] );
+				xbvh.t[i + 2] = soup.cubeExtra[i + 2];
+			}
+			xbvh.build();
+		}
+		auto faceN = []( const float * p, const double * d, double n[3] ) -> int {
+			const double e1[3] = { double( p[3] ) - p[0], double( p[4] ) - p[1], double( p[5] ) - p[2] };
+			const double e2[3] = { double( p[6] ) - p[0], double( p[7] ) - p[1], double( p[8] ) - p[2] };
+			n[0] = e1[1] * e2[2] - e1[2] * e2[1];
+			n[1] = e1[2] * e2[0] - e1[0] * e2[2];
+			n[2] = e1[0] * e2[1] - e1[1] * e2[0];
+			const double nl = std::sqrt( n[0] * n[0] + n[1] * n[1] + n[2] * n[2] );
+			if ( !( nl > 0 ) )
+				return -1;
+			const double s = n[0] * d[0] + n[1] * d[1] + n[2] * d[2] > 0 ? -1.0 / nl : 1.0 / nl;
+			int ax = 0;
+			for ( int k = 0; k < 3; k++ )
+				n[k] *= s;
+			for ( int k = 1; k < 3; k++ )
+				if ( std::fabs( n[k] ) > std::fabs( n[ax] ) )
+					ax = k;
+			return ax * 2 + ( n[ax] < 0 ? 1 : 0 );
+		};
+		struct Acc { double alb[3] = { 0, 0, 0 }, nrm[3] = { 0, 0, 0 }; quint32 n = 0; };
+		typedef std::unordered_map<Key, Acc, KeyHash> AccMap;
+		std::vector<AccMap> accF( chunks.size() ), accB( chunks.size() );
+		std::vector<qint64> cSamp( chunks.size(), 0 ), cDrop( chunks.size(), 0 ), cExtra( chunks.size(), 0 );
+		std::vector<std::vector<char>> dumps( spec.cubeDumpProbes.size() );
+		auto cubeChunk = [&]( Chunk & ch ) {
+			const size_t ci = size_t( &ch - chunks.data() );
+			for ( int pi = ch.first; pi < ch.first + ch.count; pi++ ) {
+				const ProbePoint & pp = probes[size_t( pi )];
+				const double o[3] = { double( pp.pos[0] ) - O[0], double( pp.pos[1] ) - O[1], double( pp.pos[2] ) };
+				int slot = -1;
+				for ( size_t s = 0; s < spec.cubeDumpProbes.size(); s++ )
+					if ( spec.cubeDumpProbes[s] == pi )
+						slot = int( s );
+				std::vector<quint8> drgb;
+				std::vector<float> ddist, dfac, dnrm;
+				if ( slot >= 0 ) {
+					drgb.assign( NP * 3, 0 );
+					ddist.assign( NP, -1.0f );
+					dfac.assign( NP, 0.0f );
+					dnrm.assign( NP * 3, 0.0f );
+				}
+				for ( size_t px = 0; px < NP; px++ ) {
+					const double * d = &cdir[px * 3];
+					double t = 0;
+					int tri = -1;
+					bool hit = cast( o, d, &t, &tri ) && t > 1.0e-3;
+					bool extra = false;
+					double tx = 0;
+					int xt = -1;
+					if ( extraOn && xbvh.ray( o, d, spec.rayMax, &tx, &xt ) && xt >= 0 && tx > 1.0e-3 && ( !hit || tx < t ) ) {
+						extra = hit = true;
+						t = tx;
+						tri = xt;
+					}
+					if ( !hit ) {
+						cDrop[ci]++;
+						continue;
+					}
+					const float * T = extra ? &xbvh.t[size_t( tri ) * 9] : &bvh.t[size_t( tri ) * 9];
+					double fn[3];
+					const int bin = extra ? faceN( T, d, fn ) : binOf( tri, d, fn );   // the bake's own bin
+					if ( bin < 0 ) {
+						cDrop[ci]++;
+						continue;
+					}
+					const double p[3] = { o[0] + d[0] * t, o[1] + d[1] * t, o[2] + d[2] * t };
+					static const quint8 grey[3] = { 128, 128, 128 };
+					double a[3], nn[3];
+					matAt( T, extra ? soup.cubeExtraMat[size_t( tri )] : soup.mat[size_t( tri )],
+						extra ? grey : &soup.alb[size_t( tri ) * 3], p, t, com[px], fn, d, a, nn );
+					if ( slot >= 0 ) {
+						for ( int k = 0; k < 3; k++ ) {
+							drgb[px * 3 + size_t( k )] = quint8( std::lround( std::clamp( a[k], 0.0, 1.0 ) * 255.0 ) );
+							dnrm[px * 3 + size_t( k )] = float( nn[k] );
+						}
+						ddist[px] = float( t );
+						dfac[px] = float( -( fn[0] * d[0] + fn[1] * d[1] + fn[2] * d[2] ) );
+					}
+					if ( extra )
+						cExtra[ci]++;
+					float hw[3];
+					hitPoint( o, d, t, hw );
+					const Key k = keyFor( hw, cellS );
+					bool back = false;
+					if ( v4 ) {
+						const auto bm = backMask.find( k );
+						back = bm != backMask.end() && ( bm->second >> bin & 1u );
+					}
+					const FinalMap & fm = back ? backFin : fin;
+					const auto it = fm.find( k );
+					if ( it == fm.end() || ( !v4 && it->second.n[0] * fn[0] + it->second.n[1] * fn[1] + it->second.n[2] * fn[2] < 0 ) ) {
+						cDrop[ci]++;
+						continue;
+					}
+					Acc & ac = ( back ? accB : accF )[ci][k];
+					for ( int c = 0; c < 3; c++ ) {
+						ac.alb[c] += a[c];
+						ac.nrm[c] += nn[c];
+					}
+					ac.n++;
+					cSamp[ci]++;
+				}
+				if ( slot >= 0 ) {
+					std::vector<char> & b = dumps[size_t( slot )];
+					auto put = [&b]( const void * src, size_t n ) {
+						b.insert( b.end(), static_cast<const char *>( src ), static_cast<const char *>( src ) + n );
+					};
+					put( drgb.data(), drgb.size() );
+					put( ddist.data(), ddist.size() * 4 );
+					put( dfac.data(), dfac.size() * 4 );
+					put( dnrm.data(), dnrm.size() * 4 );
+				}
+			}
+		};
+		runAll( cubeChunk );
+		// merge in chunk order (the same sums whatever ran where), then rewrite albedo + normal only
+		AccMap allF, allB;
+		for ( size_t c = 0; c < chunks.size(); c++ ) {
+			R.albSamples += cSamp[c];
+			R.albDropped += cDrop[c];
+			R.albExtra += cExtra[c];
+			for ( const auto & e : accF[c] ) {
+				Acc & z = allF[e.first];
+				for ( int k = 0; k < 3; k++ ) {
+					z.alb[k] += e.second.alb[k];
+					z.nrm[k] += e.second.nrm[k];
+				}
+				z.n += e.second.n;
+			}
+			for ( const auto & e : accB[c] ) {
+				Acc & z = allB[e.first];
+				for ( int k = 0; k < 3; k++ ) {
+					z.alb[k] += e.second.alb[k];
+					z.nrm[k] += e.second.nrm[k];
+				}
+				z.n += e.second.n;
+			}
+		}
+		auto rewrite = [&]( FinalMap & fm, const AccMap & am ) {
+			for ( auto & e : fm ) {
+				const auto it = am.find( e.first );
+				if ( it == am.end() || !it->second.n ) {
+					R.albKept++;
+					continue;
+				}
+				const Acc & z = it->second;
+				TbkSurfel & sr = e.second.rec;
+				const double l = std::sqrt( z.nrm[0] * z.nrm[0] + z.nrm[1] * z.nrm[1] + z.nrm[2] * z.nrm[2] );
+				for ( int c = 0; c < 3; c++ ) {
+					sr.albedo[c] = quint8( std::lround( std::clamp( z.alb[c] / z.n, 0.0, 1.0 ) * 255.0 ) );
+					if ( l > 1e-9 )
+						sr.normal[c] = qint16( std::lround( std::clamp( z.nrm[c] / l, -1.0, 1.0 ) * 32767.0 ) );
+				}
+				R.albSurfels++;
+			}
+		};
+		rewrite( fin, allF );
+		rewrite( backFin, allB );
+		if ( !spec.cubeDump.isEmpty() ) {
+			QFile df( spec.cubeDump );
+			if ( df.open( QIODevice::WriteOnly ) )
+				for ( const std::vector<char> & b : dumps )
+					df.write( b.data(), qint64( b.size() ) );
+			QFile tf( spec.cubeDump + QStringLiteral( ".txt" ) );
+			if ( tf.open( QIODevice::WriteOnly | QIODevice::Text ) ) {
+				QTextStream ts( &tf );
+				for ( const int pi : spec.cubeDumpProbes )
+					if ( pi >= 0 && size_t( pi ) < probes.size() )
+						ts << pi << "\t" << probes[size_t( pi )].pos[0] << "\t" << probes[size_t( pi )].pos[1] << "\t"
+						   << probes[size_t( pi )].pos[2] << "\t" << F << "\n";
+			}
+		}
+		R.msAlbedo = double( tm.nsecsElapsed() ) / 1e6;
+		tm.restart();
+	}
+	/* lane CAPTURE1: a way's own normal (smooth, or a cube mean) can turn a hair away from a probe
+	 * the face normal linked (a curved edge seen at a grazing angle). Such a surfel's normal leans
+	 * toward its face normal just far enough to face every probe that links it (bisection; the
+	 * face normal itself always does), so the links stay the tri way's and every link faces. */
+	if ( wayHit || wayCube ) {
+		typedef std::unordered_map<Key, std::vector<std::array<double, 3>>, KeyHash> DirMap;
+		DirMap dF, dB;
+		for ( const Chunk & ch : chunks )
+			for ( const ProbeOut & po : ch.probes )
+				for ( size_t i = 0; i < po.links.size(); i++ ) {
+					std::array<double, 3> d;
+					unpackDir( po.links[i].dir, d.data() );
+					( v4 && po.ext[i].side ? dB : dF )[po.linkKeys[i]].push_back( d );
+				}
+		auto quant = []( const double n[3], qint16 q[3] ) {
+			const double l = std::sqrt( n[0] * n[0] + n[1] * n[1] + n[2] * n[2] );
+			for ( int c = 0; c < 3; c++ )
+				q[c] = qint16( std::lround( std::clamp( l > 0 ? n[c] / l : 0.0, -1.0, 1.0 ) * 32767.0 ) );
+		};
+		auto faces = []( const qint16 q[3], const std::vector<std::array<double, 3>> & ds ) {
+			for ( const auto & d : ds )
+				if ( ( q[0] * d[0] + q[1] * d[1] + q[2] * d[2] ) / 32767.0 > -1.0e-4 )
+					return false;
+			return true;
+		};
+		auto lean = [&]( FinalMap & fm, const DirMap & dm ) {
+			for ( auto & e : fm ) {
+				const auto it = dm.find( e.first );
+				if ( it == dm.end() )
+					continue;
+				TbkSurfel & sr = e.second.rec;
+				if ( faces( sr.normal, it->second ) )
+					continue;
+				const double nv[3] = { sr.normal[0] / 32767.0, sr.normal[1] / 32767.0, sr.normal[2] / 32767.0 };
+				const double * nf = e.second.n;
+				auto mix = [&]( double s, double m[3] ) {
+					for ( int c = 0; c < 3; c++ )
+						m[c] = ( 1 - s ) * nv[c] + s * nf[c];
+				};
+				double lo = 0.0, hi = 1.0, m[3];
+				qint16 q[3];
+				for ( int k = 0; k < 20; k++ ) {
+					const double s = 0.5 * ( lo + hi );
+					mix( s, m );
+					quant( m, q );
+					( faces( q, it->second ) ? hi : lo ) = s;
+				}
+				mix( hi, m );
+				quant( m, q );
+				if ( !faces( q, it->second ) )
+					quant( nf, q );   // the face normal: what decided the links
+				for ( int c = 0; c < 3; c++ )
+					sr.normal[c] = q[c];
+				R.albLeaned++;
+			}
+		};
+		lean( fin, dF );
+		lean( backFin, dB );
+	}
 
 	// group by sector: each file = its probes, their links, and every surfel they link
 	std::map<std::pair<int, int>, std::vector<const ProbeOut *>> sectors;
@@ -969,6 +1350,10 @@ QString probeBakeCensusText( const ProbeBakeResult & r )
 	else
 		t << "bake: .tbk v3 (FO4CS's own format; no back sides, rooms, doors or glass)\n";
 	t << "bake time ms: rays " << qRound( r.msRays ) << ", write " << qRound( r.msWrite ) << "\n";
+	if ( r.albedoWay != QLatin1String( "tri" ) && !r.albedoWay.isEmpty() )   // lane CAPTURE1
+		t << "bake albedo way: " << r.albedoWay << "; samples " << r.albSamples << ", pixels dropped " << r.albDropped
+		  << ", on left-out shapes " << r.albExtra << "; surfels rewritten " << r.albSurfels << ", kept tri "
+		  << r.albKept << "; normals leaned to face their links " << r.albLeaned << "; ms " << qRound( r.msAlbedo ) << "\n";
 	return s;
 }
 
