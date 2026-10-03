@@ -2003,6 +2003,9 @@ struct LodgenLedger
  *  Deterministic: no timestamp, no path outside the game's own naming, no
  *  iteration over a hash.  Two runs on an unchanged tree produce the same hex.
  */
+//! lane BAKEINCR1: the generator's own asset reader (stack, data root, archives), for the probe check
+bool lodgenReadAssetBytes( const QString & dataRoot, const QString & relPath, const char * archiveFolder,
+	const char * extension, QByteArray & out );
 QString lodgenChunkInputDigest( const EsmWorld & world, int dim, int cx, int cy,
 	const QString & dataRoot );
 

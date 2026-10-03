@@ -54,6 +54,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <QUdpSocket>
 #include <QUrl>
 
+#include "probeincr.h"
+
 
 QCoreApplication * createApplication( int &argc, char *argv[] )
 {
@@ -220,6 +222,12 @@ int main( int argc, char * argv[] )
 				Game::GameManager::close_resources();
 			}
 		}
+
+		/* lane BAKEINCR1: WW_CELL_BAKEINCR_CHECK=... is the incremental probe bake's check: it runs here,
+		 * after the game manager and the resource stack are set exactly as a bake sets them, and before
+		 * any window, then exits (src/probeincr.cpp). */
+		if ( !qEnvironmentVariableIsEmpty( "WW_CELL_BAKEINCR_CHECK" ) )
+			return ProbeIncr::checkMain();
 
 		int port = NIFSKOPE_IPC_PORT;
 

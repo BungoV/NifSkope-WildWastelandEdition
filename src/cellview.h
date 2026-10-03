@@ -205,6 +205,9 @@ const CellProbeKind * cellProbeKinds( int * count );
  *  refs drawn, refs hidden, skipped counts per record type, distinct models,
  *  shapes, vertices, triangles, the ground and water facts, the overlay legend
  *  and the load time -- so a picture is never the only evidence. */
+//! lane BAKEINCR1: sha1 of the far soup a bake of (cx, cy) with a (2 half + 1)^2 block appends; "none" without LOD
+QString cellBakeFarDigest( const QString & world, const QString & dataRoot, int cx, int cy, int half );
+
 bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 	QString * error, QString * notes = nullptr );
 
