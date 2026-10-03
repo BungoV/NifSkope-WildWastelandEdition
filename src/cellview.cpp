@@ -22,6 +22,7 @@ BSD License - see nifskope.h
 #include "probebake.h"		// lane PRTPBAKE
 #include "probegi.h"		// lane PRTPGI
 #include "probealbedo.h"		// lane PRTPBAKE
+#include "probefar.h"		// lane BAKEBLOCK1: the far soup beyond the loaded block
 #include "cellmodelahead.h"	// lane SPEED1: models parsed on worker threads
 #include "cellmesh.h"		// lane SPEED1: the welded geometry beside the document
 #include "cellspeed.h"		// lane SPEED1: stage timers (WW_CELL_SPEED_DUMP)
@@ -46,6 +47,7 @@ BSD License - see nifskope.h
 #include <QCoreApplication>
 #include <QDir>
 #include <QRegularExpression>
+#include <QSettings>
 #include <QTextStream>
 
 #include <algorithm>
@@ -1142,9 +1144,98 @@ static void cellPublishLighting( const NifModel * nif, const EsmWorld & world, c
 	wwCellLightsPublish( nif, L );
 }
 
-bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
+/* lane BAKEBLOCK1: the worldspace's far LOD (`FO4CSLOD/<ws>/<ws>.lodl`, its `.lodi` beside it), looked for in
+ * WW_CELL_FAR_LOD (a folder or the .lodl), the data root, the LOD panel's resources and output folder, then
+ * every mod of the Mod Organizer mods folder the panel uses. `searched` names where it looked. */
+static QString cellFarLodl( const QString & ws, const QString & dataRoot, QStringList & searched )
+{
+	const QString rel = QStringLiteral( "FO4CSLOD/%1/%1.lodl" ).arg( ws );
+	auto hit = [&]( const QString & root, const QString & r ) {
+		searched << root;
+		const QString p = QDir( root ).filePath( r );
+		return QFileInfo( p ).isFile() ? QDir::cleanPath( p ) : QString();
+	};
+	const QString env = qEnvironmentVariable( "WW_CELL_FAR_LOD" );
+	if ( !env.isEmpty() ) {
+		if ( QFileInfo( env ).isFile() )
+			return QDir::cleanPath( env );
+		for ( const QString & r : { QStringLiteral( "%1.lodl" ).arg( ws ), rel } ) {
+			const QString p = hit( env, r );
+			if ( !p.isEmpty() )
+				return p;
+		}
+	}
+	QSettings cfg;
+	QStringList roots { dataRoot };
+	roots << lodgenResources() << cfg.value( QStringLiteral( "LodGeneration/output" ) ).toString();
+	for ( const QString & r : roots ) {
+		const QString p = r.isEmpty() ? QString() : hit( r, rel );
+		if ( !p.isEmpty() )
+			return p;
+	}
+	QString mods = cfg.value( QStringLiteral( "LodGeneration/mo2Mods" ) ).toString();
+	if ( mods.isEmpty() )   // the LOD panel's own default
+		mods = QStringLiteral( "E:/Projects/Fallout 4 Mods/mods" );
+	QStringList names = QDir( mods ).entryList( QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name );
+	if ( names.removeAll( QStringLiteral( "FO4CSLOD" ) ) )
+		names.prepend( QStringLiteral( "FO4CSLOD" ) );
+	for ( const QString & m : names ) {
+		const QString p = QFileInfo( QDir( mods ).filePath( m + QLatin1Char( '/' ) + rel ) ).isFile()
+			? QDir::cleanPath( QDir( mods ).filePath( m + QLatin1Char( '/' ) + rel ) ) : QString();
+		if ( !p.isEmpty() )
+			return p;
+	}
+	searched << mods + QStringLiteral( "/*" );
+	return QString();
+}
+
+/* lane BAKEBLOCK1: append the far soup around the bake's block; the census line it returns says what went in */
+static QString cellBakeFarSoup( const CellSceneSpec & spec, const QString & dataRoot, const QByteArray & red,
+	ProbeSoup & soup )
+{
+	if ( !red.isEmpty() )
+		return QStringLiteral( "far soup: none (RED %1)" ).arg( QString::fromLatin1( red ) );
+	QElapsedTimer t;
+	t.start();
+	QStringList searched;
+	const QString lodl = cellFarLodl( spec.world, dataRoot, searched );
+	if ( lodl.isEmpty() ) {
+		const QString why = QStringLiteral( "far soup: NONE -- no FO4CSLOD/%1/%1.lodl in %2" )
+			.arg( spec.world, searched.join( QLatin1String( "; " ) ) );
+		qWarning() << qPrintable( why );
+		return why;
+	}
+	const QFileInfo li( lodl );
+	const QString lodi = li.absoluteDir().filePath( li.completeBaseName() + QStringLiteral( ".lodi" ) );
+	const int radius = int( std::ceil( ProbeBakeSpec().rayMax / CELL_UNITS ) );
+	const qint64 before = soup.triCount();
+	ProbeFarResult r;
+	if ( !probeFarAppendRing( lodl, QFileInfo( lodi ).isFile() ? lodi : QString(), spec.cx, spec.cy, ( spec.n - 1 ) / 2,
+			radius, soup, &r ) ) {
+		qWarning() << "far soup:" << r.error;
+		return QStringLiteral( "far soup: REFUSED -- %1" ).arg( r.error );
+	}
+	return QStringLiteral( "far soup %1 out to %2 cells: ground quads %3 (colour %4), water quads %5, boxes %6, "
+		"trees %7, triangles +%8, %9 ms" ).arg( QDir::toNativeSeparators( lodl ) ).arg( radius ).arg( r.quads )
+		.arg( r.albedoQuads ).arg( r.waterQuads ).arg( r.boxes ).arg( r.trees ).arg( soup.triCount() - before )
+		.arg( t.elapsed() );
+}
+
+bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & specAsked,
 	QString * error, QString * notes )
 {
+	/* lane BAKEBLOCK1 (bungo, PRTP_PLAN item 5): an exterior BAKE loads the game's own 5x5 block around the
+	 * cell at full detail (uGridsToLoad), and the far soup from the LOD files beyond it (below); the probes
+	 * stay the asked block's. WW_CELL_BAKEBLOCK_RED=n1 (the asked block, no far) | nolod (5x5, no far):
+	 * the gate's red controls only. A relight of a bake on disk (WW_CELL_GI_FROM) traces its shadow, sun and
+	 * feed rays against the soup too, so it loads the same block + far the bake did. */
+	CellSceneSpec spec = specAsked;
+	const QByteArray blockRed = qgetenv( "WW_CELL_BAKEBLOCK_RED" );
+	const bool bakeExterior = !spec.interior && ( !qEnvironmentVariableIsEmpty( "WW_CELL_PROBES" ) || spec.probes )
+		&& ( spec.probesBake || !qEnvironmentVariableIsEmpty( "WW_CELL_PROBE_BAKE" )
+			|| !qEnvironmentVariableIsEmpty( "WW_CELL_GI_FROM" ) );
+	if ( bakeExterior && blockRed != "n1" )
+		spec.n = qMax( spec.n, 5 );
 	auto fail = [error]( const QString & m ) {
 		if ( error )
 			*error = m;
@@ -2872,7 +2963,7 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 			// the probed block: the middle N x N of what is loaded (default the center cell)
 			// (the PRTP band's Place, with no variable set: the whole loaded block)
 			int pn = qEnvironmentVariableIntValue( "WW_CELL_PROBES_N" );
-			pn = qBound( 1, pn > 0 ? pn : ( spec.probes ? spec.n : 1 ), qMax( 1, spec.n ) );
+			pn = qBound( 1, pn > 0 ? pn : ( spec.probes ? specAsked.n : 1 ), qMax( 1, spec.n ) );
 			const int ph = ( pn - 1 ) / 2;
 			ps.minX = float( spec.cx - ph ) * CELL_UNITS;
 			ps.maxX = float( spec.cx + ph + 1 ) * CELL_UNITS;
@@ -2883,12 +2974,15 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 		if ( !sp.isEmpty() && sp.toFloat() > 1.0f )
 			ps.spacing = sp.toFloat();
 		ps.red = QString::fromLatin1( qgetenv( "WW_PROBE_RED" ) );
+		ProbePlaceResult pr;
+		const bool placed = probePlace( probeSoup, ps, &pr );
+		// lane BAKEBLOCK1: past the loaded block, out to the bake's ray reach, the LOD files' far soup
+		// (after the placing, which the loaded block decides; before the dump, so the gates see it)
+		const QString farLine = bakeExterior && placed ? cellBakeFarSoup( spec, dataRoot, blockRed, probeSoup ) : QString();
 		const QByteArray soupDump = qgetenv( "WW_CELL_PROBE_SOUP" );
 		QString perr;
 		if ( !soupDump.isEmpty() && !probeSoupWrite( QString::fromLocal8Bit( soupDump ), probeSoup, &perr ) )
 			qWarning() << "WW_CELL_PROBE_SOUP:" << perr;
-		ProbePlaceResult pr;
-		const bool placed = probePlace( probeSoup, ps, &pr );
 		if ( placed && !probeOut.isEmpty() && !probeWriteTsv( probeOut, ps, pr, &perr ) )
 			qWarning() << "WW_CELL_PROBES:" << perr;
 		{
@@ -2896,6 +2990,10 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 			t << "  probe rect " << ps.minX << "," << ps.minY << " .. " << ps.maxX << "," << ps.maxY
 			  << ", spacing " << ps.spacing << ( ps.red.isEmpty() ? QString() : QStringLiteral( ", RED " ) + ps.red )
 			  << "\n";
+			if ( bakeExterior )   // lane BAKEBLOCK1
+				t << "  bake block " << spec.n << "x" << spec.n << " (asked " << specAsked.n << "x" << specAsked.n
+				  << ( blockRed.isEmpty() ? QString() : QStringLiteral( ", RED " ) + QString::fromLatin1( blockRed ) )
+				  << "); " << farLine << "\n";
 			t << "  probe soup refs " << soupRefs << ", doors " << int( probeSoup.doors.size() )
 			  << ", shapes left out (effect, glass, decal, leaves) " << soupShapesDropped << ", refs left out by type";
 			QStringList sk = soupSkippedTypes.keys();

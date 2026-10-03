@@ -9,7 +9,10 @@ code under test.
   S  sky      every exterior shot with no pins drew the dome (no "cube:" in its sky line) and names the
               sun, clouds, moon and stars passes (drawn, hidden or none -- each by name)
   B  back     no pins != all four rows pinned OFF: >= 20% of the upper third differs (the cube is gone)
-  O  off      all four rows pinned OFF on this exe = the exe from before the lane (no pins), byte for byte
+  O  off      all four rows pinned OFF on this exe = the exe from before the lane (no pins), within that exe's own
+              run-to-run noise (lane BAKEBLOCK1, cell_pass's rule: rung2_ shoots the old exe again; allowed
+              max(3 x its differing pixels, 20), no pixel off by more than 3 x its largest step, at least 1).
+              SKYFULL_RED=level1 lifts pin0_ one level over 160x160 px first: it must FAIL
   T  stars    the echo's stars alpha = the clock's (+-0.002); 12:00 hidden; 23:00 drawn with the turn
               360 fmod(day + h/24, fStarsRotateDays) / fStarsRotateDays (+-0.1 deg; the exe default 4
               when the plugin has no fStarsRotateDays); the Night Stars row is not black
@@ -124,8 +127,27 @@ def main():
         if a is None or b is None:
             rec("%s: the pinned-off and before pictures" % c, False, "missing")
             continue
-        n = sum(1 for p, q in zip(a.getdata(), b.getdata()) if p != q) if a.size == b.size else -1
-        rec("%s: all four rows pinned OFF = the exe before the lane, byte for byte" % c, n == 0, "%d px differ" % n)
+        # lane BAKEBLOCK1: byte for byte flaked (9 px on Sanctuary, rerun PASS); judged against the old exe's own noise
+        if os.environ.get("SKYFULL_RED") == "level1":
+            a = a.copy()
+            px = a.load()
+            for y in range(160):
+                for x in range(160):
+                    r, g, bb = px[x, y]
+                    px[x, y] = (min(r + 1, 255) if r < 255 else r - 1, g, bb)
+
+        def diff(u, v):
+            if u is None or v is None or u.size != v.size:
+                return 10 ** 9, 255
+            d = [max(abs(x - y) for x, y in zip(p, q)) for p, q in zip(u.getdata(), v.getdata()) if p != q]
+            return len(d), max(d) if d else 0
+        n, m = diff(a, b)
+        fn, fm = diff(load(os.path.join(out, "rung2_%s.png" % c)), b)
+        cap_n, cap_m = max(3 * fn, 20), 3 * max(fm, 1)
+        rec("%s: all four rows pinned OFF = the exe before the lane, within its own noise x3" % c,
+            fn < 10 ** 9 and n <= cap_n and m <= cap_m,
+            "%d px differ (largest %d); the old exe against itself %d (largest %d); allowed %d px, step %d"
+            % (n, m, fn, fm, cap_n, cap_m))
 
     say("T  stars")
     night = W.row("stars", TI["Night"])

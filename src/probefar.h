@@ -42,6 +42,10 @@ struct ProbeFarSpec
 	 *  the tree gate: "notrees" leaves the trees out, "treebox" puts a solid box a tree, "treeshift"
 	 *  stands every tree one cell east, "canopy" leaves the roofline under the trees. */
 	QString red;
+	/*! lane BAKEBLOCK1: cells hx0..hx1, hy0..hy1 (inclusive) are loaded at full detail by the caller; their
+	 *  ground, boxes and trees stay out of the soup (an object goes by the cell of its middle). */
+	bool hole = false;
+	int hx0 = 0, hy0 = 0, hx1 = -1, hy1 = -1;
 };
 
 struct ProbeFarResult
@@ -65,6 +69,10 @@ struct ProbeFarResult
 bool probeFarBuild( const ProbeFarSpec & spec, ProbeSoup & soup, std::vector<ProbePoint> & probes,
 	ProbeFarResult * out );
 QString probeFarCensusText( const ProbeFarResult & r );
+/*! lane BAKEBLOCK1: the far soup around an exterior bake. Everything the LOD files hold within `radius`
+ *  cells of cell (cx, cy), minus the loaded block `half` cells around it, appended to `soup` (no probes). */
+bool probeFarAppendRing( const QString & lodl, const QString & lodi, int cx, int cy, int half, int radius,
+	ProbeSoup & soup, ProbeFarResult * out );
 int probeFarCli( const QStringList & args );
 
 #endif

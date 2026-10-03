@@ -410,6 +410,10 @@ bool probeFarBuild( const ProbeFarSpec & spec, ProbeSoup & soup, std::vector<Pro
 	const int gx0 = std::max( f.cellMinX(), x0 - ring ), gy0 = std::max( f.cellMinY(), y0 - ring );
 	const int gx1 = std::min( f.cellMaxX(), x1 + ring ), gy1 = std::min( f.cellMaxY(), y1 + ring );
 	const int W = gx1 - gx0 + 1, H = gy1 - gy0 + 1;
+	// lane BAKEBLOCK1: the caller's full-detail block
+	auto inHole = [&]( int cx, int cy ) {
+		return spec.hole && cx >= spec.hx0 && cx <= spec.hx1 && cy >= spec.hy0 && cy <= spec.hy1;
+	};
 
 	std::vector<CellRec> cells( size_t( W ) * size_t( H ) );
 	auto at = [&]( int cx, int cy ) -> CellRec & { return cells[size_t( cy - gy0 ) * size_t( W ) + size_t( cx - gx0 )]; };
@@ -458,7 +462,7 @@ bool probeFarBuild( const ProbeFarSpec & spec, ProbeSoup & soup, std::vector<Pro
 	std::map<std::pair<int, int>, std::vector<std::pair<int, int>>> byTile;
 	for ( int cy = gy0; cy <= gy1; cy++ )
 		for ( int cx = gx0; cx <= gx1; cx++ ) {
-			if ( !at( cx, cy ).ok )
+			if ( !at( cx, cy ).ok || inHole( cx, cy ) )
 				continue;
 			int tx = -1, ty = -1;
 			if ( haveSheet && !sheets.tileOfCell( cx, cy, &tx, &ty ) )
@@ -570,6 +574,8 @@ bool probeFarBuild( const ProbeFarSpec & spec, ProbeSoup & soup, std::vector<Pro
 			const int cy0 = std::max( gy0, int( std::floor( lo[1] / kCell ) ) ), cy1 = std::min( gy1, int( std::floor( hi[1] / kCell ) ) );
 			if ( cx0 > cx1 || cy0 > cy1 )
 				continue;
+			if ( inHole( int( std::floor( 0.5f * ( lo[0] + hi[0] ) / kCell ) ), int( std::floor( 0.5f * ( lo[1] + hi[1] ) / kCell ) ) ) )
+				continue;
 			for ( const auto & fc : F ) {
 				soup.addTri( v[fc[0]], v[fc[1]], v[fc[2]], kBuilding );
 				soup.addTri( v[fc[0]], v[fc[2]], v[fc[3]], kBuilding );
@@ -617,7 +623,7 @@ bool probeFarBuild( const ProbeFarSpec & spec, ProbeSoup & soup, std::vector<Pro
 					float pos[3];
 					lodiDecodePosition( lh, ci, ch, inst, pos );
 					const int tx = int( std::floor( pos[0] / kCell ) ), ty = int( std::floor( pos[1] / kCell ) );
-					if ( tx < gx0 || tx > gx1 || ty < gy0 || ty > gy1 )
+					if ( tx < gx0 || tx > gx1 || ty < gy0 || ty > gy1 || inHole( tx, ty ) )
 						continue;
 					R.treesPlaced++;
 					const TreeModel & tm = trees.model( inst.baseId, ( inst.flags & LODI_INST_MIRRORED ) != 0 );
@@ -699,6 +705,27 @@ bool probeFarBuild( const ProbeFarSpec & spec, ProbeSoup & soup, std::vector<Pro
 	if ( out )
 		*out = R;
 	return true;
+}
+
+bool probeFarAppendRing( const QString & lodl, const QString & lodi, int cx, int cy, int half, int radius,
+	ProbeSoup & soup, ProbeFarResult * out )
+{
+	ProbeFarSpec fs;
+	fs.lodl = lodl;
+	fs.lodi = lodi;
+	fs.region = true;
+	fs.ringCells = 0.0f;
+	fs.x0 = cx - radius;
+	fs.y0 = cy - radius;
+	fs.x1 = cx + radius;
+	fs.y1 = cy + radius;
+	fs.hole = true;
+	fs.hx0 = cx - half;
+	fs.hy0 = cy - half;
+	fs.hx1 = cx + half;
+	fs.hy1 = cy + half;
+	std::vector<ProbePoint> unused;
+	return probeFarBuild( fs, soup, unused, out );
 }
 
 QString probeFarCensusText( const ProbeFarResult & r )

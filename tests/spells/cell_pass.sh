@@ -91,6 +91,9 @@ shoot() {   # shoot <exe> <run dir> <cell> <tag> <env...>
 	if [ "$cell" = concord ]; then
 		open=( WW_CELL_OPEN="$ESM|Commonwealth|-15,17|1" WW_LOOKDEV=1 WW_LOOKDEV_WEATHER=CommonwealthClear
 			WW_LOOKDEV_HOUR=12 WW_LOOKDEV_SUN=0 WW_LOOKDEV_GROUND=0 WW_LOOKDEV_PLUGINS="$ESM" WW_CELL_IS=0
+# lane BAKEBLOCK1 (block rule): Concord opens n=1 on purpose -- the Pass views relight a copied bake (no bake
+#   here) and the Combined stage compares with an exe that opens one cell; bakes load the 5x5 + far LOD.
+#
 			WW_LOOKDEV_SKY=0 WW_LOOKDEV_CLOUDS=0 WW_LOOKDEV_MOON=0 )	# lane SKYFULL1: the rows ship ON; pinned OFF here
 	else
 		open=( WW_CELL_OPEN="$ESM|interior|$cell" )

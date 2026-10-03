@@ -12,6 +12,10 @@
 #   <cell>_<h>_cube    all four rows pinned OFF: the old picture
 #   <cell>_23_nostars  WW_LOOKDEV_RED=nostars: the same night without the stars (the N comparator)
 #   pin0_/rung_<cell>  no pitch, noon: this exe pinned OFF vs the exe before the lane (BEFORE=) unpinned
+#   rung2_<cell>       the exe before the lane shot again: its own run-to-run noise, the floor stage O allows
+# lane BAKEBLOCK1 (block rule): n=1 on purpose -- a sky test (no bake), compared with the exe before SKYFULL1.
+#
+#                      3x of (lane BAKEBLOCK1, cell_pass's rule; byte for byte flaked, 9 px on Sanctuary)
 #   int_cryo/museum    Vault111Cryo (closed) and ConcordMuseum01 (Show Sky), no pins
 # Then tests/spells/cell_skyfull_check.py (stages S B O T N I; its header says what each is).
 #
@@ -20,6 +24,7 @@
 #   --red nodome       WW_LOOKDEV_RED=nodome: the dome's file never resolves (cube fallback) S B
 #   --red nostars      WW_LOOKDEV_RED=nostars: the stars go missing without a word         S T N
 #   --red interiorsky  WW_LOOKDEV_RED=interiorsky: the closed vault draws the sky            I
+#   --red level1       the green pictures judged with pin0_ one level brighter over 160x160 px O
 #
 # USAGE  bash tests/spells/cell_skyfull.sh [--red off|nodome|nostars|interiorsky]
 #        CELLS="sanctuary concord" HOURS="12 19 23" RECHECK=1 (judge the files already shot)
@@ -67,6 +72,7 @@ AFTER=()
 case "$RED" in
 	off) AFTER=( "${PINOFF[@]}" ) ;;
 	nodome|nostars|interiorsky) AFTER=( WW_LOOKDEV_RED="$RED" ) ;;
+	level1) RECHECK=1 ;;   # lane BAKEBLOCK1: a judge red, no shots (the green run's pictures, copied below)
 	"") ;;
 	*) echo "unknown red $RED"; exit 2 ;;
 esac
@@ -89,7 +95,7 @@ shoot() {   # shoot <exe> <tag> <open tail> <look-at or ''> <view> <pitch> <hour
 mkdir -p "$OUT"
 GREEN="$REPO/scratchpad/skyfull1_20261003/gate"
 # a red re-shoots only what it sabotages; the comparators (and the stages it does not aim at) come from the green run
-[ -n "$RED" ] && [ "$RECHECK" != 1 ] && cp -n "$GREEN"/*.png "$GREEN"/*.notes "$OUT"/ 2>/dev/null
+[ -n "$RED" ] && { [ "$RECHECK" != 1 ] || [ "$RED" = level1 ]; } && cp -n "$GREEN"/*.png "$GREEN"/*.notes "$OUT"/ 2>/dev/null
 echo "cell_skyfull.sh $(date '+%F %T')${RED:+  RED CONTROL: $RED}  out: $OUT"
 if [ "$RECHECK" != 1 ]; then
 	[ -x "$EXE" ] || { echo "no exe $EXE"; exit 2; }
@@ -107,6 +113,7 @@ if [ "$RECHECK" != 1 ]; then
 		if [ -z "$RED" ]; then
 			shoot "$EXE" "pin0_$c" "$open" "${AT[$c]}" "${VIEW[12]}" 0 12 "${PINOFF[@]}"
 			shoot "$BEFORE" "rung_$c" "$open" "${AT[$c]}" "${VIEW[12]}" 0 12
+			shoot "$BEFORE" "rung2_$c" "$open" "${AT[$c]}" "${VIEW[12]}" 0 12
 		fi
 	done
 	if [ -z "$RED" ] || [ "$RED" = interiorsky ]; then
@@ -114,4 +121,4 @@ if [ "$RECHECK" != 1 ]; then
 		shoot "$EXE" int_museum "interior|ConcordMuseum01" "" 1 0 12 "${AFTER[@]}"
 	fi
 fi
-python "$REPO/tests/spells/cell_skyfull_check.py" "$OUT"
+SKYFULL_RED="$RED" python "$REPO/tests/spells/cell_skyfull_check.py" "$OUT"

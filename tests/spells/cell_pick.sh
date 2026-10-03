@@ -1,5 +1,7 @@
 #!/bin/bash
 #
+# lane BAKEBLOCK1 (block rule): n=1 on purpose -- a picking test, no bake.
+#
 # LANE CELLVIEW2's gate: CLICKING a reference, the `.lodi` IDENTITY overlay,
 # the PAINTED ground, and the MAGENTA repair.
 #
