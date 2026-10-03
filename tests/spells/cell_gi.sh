@@ -15,7 +15,8 @@
 #
 # lane BOUNCE2 (2026-10-03): the relight repeats until it settles (more than one bounce). Also per cell:
 #   one      the bake relit with WW_CELL_GI_PASSES=1 (dump_one/): byte-identical to the exe from before the
-#            lane (BEFORE, before.png + dump_before/), and checked again (B C F at one pass)
+#            lane (BEFORE, before.png + dump_before/), and checked again (B C F at one pass). Lane ROOMCLAMP1:
+#            pinned with WW_CELL_ROOMCLAMP_PIN=off (the rooms clamp off; a gate key, never a toggle)
 #   pairs    pairs/<name>/: the Pass view's GI (pass_one|pass_set) and the Combined picture (comb_one|comb_set),
 #            one pass against settled, at the cell's camera and at PAIRS_<cell> (name=x,y,z/view/dist)
 #   stage F  the passes repeated by the checker's own twin; stage P the pairs (settled never darker)
@@ -153,7 +154,7 @@ for cell in $CELLS; do
 	fi
 	if [ -z "$RED" ]; then
 		# lane BOUNCE2: the one-pass pin against the exe from before the lane, and the 1-pass / settled pairs
-		[ "$(shoot "$run" "$cell" one WW_CELL_GI=1 WW_CELL_GI_PASSES=1 "${from[@]}" \
+		[ "$(shoot "$run" "$cell" one WW_CELL_GI=1 WW_CELL_GI_PASSES=1 "${from[@]}" WW_CELL_ROOMCLAMP_PIN=off \
 			WW_CELL_GI_DUMP="$(winpath "$run/dump_one")")" = 1 ] || ok=0
 		if [ -x "$BEFORE" ]; then
 			[ "$(XE="$BEFORE" shoot "$run" "$cell" before WW_CELL_GI=1 "${from[@]}" \

@@ -789,7 +789,8 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 	std::vector<quint8> near( nVox, 0 );
 	// lane ROOMCLAMP1: the rooms (src/proberooms.h), rebuilt from the soup; red "noclamp": none (every surface,
 	// probe and slot then has the room -1 and the blend is the one before the lane)
-	R.roomsOn = spec.red != QLatin1String( "noclamp" ) && probeRoomsBuild( soup, spec.rooms, &R.rooms );
+	R.roomsOn = spec.red != QLatin1String( "noclamp" ) && spec.red != QLatin1String( "prelane" )
+		&& probeRoomsBuild( soup, spec.rooms, &R.rooms );   // "prelane": the gates' pin (WW_CELL_ROOMCLAMP_PIN=off)
 	const ProbeRooms & RM = R.rooms;
 	// every probe's rooms: its cell's, or in a solid cell the nearest air cell's within two cells
 	std::vector<std::array<int, 2>> probeRoom( up.size(), { { -1, -1 } } );
@@ -885,7 +886,7 @@ bool probeGiRelight( const ProbeSoup & soup, const QString & bakeDir, const WwCe
 			b1 = -1;
 		slotOf[i] = { b0, b1 };
 	}
-	const bool redNoEye = spec.red == QLatin1String( "noeye" );
+	const bool redNoEye = spec.red == QLatin1String( "noeye" ) || spec.red == QLatin1String( "prelane" );
 	std::atomic<int> nEye( 0 ), nFar( 0 ), nBare( 0 ), nTwo( 0 ), nTwoBare( 0 ), nElse( 0 );
 	std::vector<size_t> todo;
 	for ( size_t i = 0; i < nVox; i++ )

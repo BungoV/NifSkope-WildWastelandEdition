@@ -369,14 +369,16 @@ def surfel_rooms(R, S):
     return out
 
 
-def stage_c_rooms(S, P, G, soup, sp, g, eye_rule):
+def stage_c_rooms(S, P, G, soup, sp, g, eye_rule, vals=None, grids=None, kset=(0, 1), tag='C', what='voxel grid'):
     """lane ROOMCLAMP1: with rooms each voxel keeps two slots, the two rooms its surfaces read most. A slot gathers
     only the probes of its room (gi_proberooms.bin, room or second room), from the voxel's centre when the centre
     stands in that room, else from the slot's eye (the nearest sample point of a surface of that room); then from
-    the eye, then twice the radius; still none: the mean of the same room's valid slots among the neighbours."""
+    the eye, then twice the radius; still none: the mean of the same room's valid slots among the neighbours.
+    vals / grids / kset / tag (cell_pass_check's stage T): the probes' own values (n x 6 x 3) and the grids they
+    fill (the sky grid and its slot 1, gi_slots.bin's tail)."""
     v, o, dims, rad = G['voxel'], G['origin'], G['dims'], G['radius']
     R, slots, prooms = G['R'], G['slots'], G['prooms']
-    grids = (G['grid'], G['grid2'])
+    grids = grids if grids is not None else (G['grid'], G['grid2'])
     SR = surfel_rooms(R, S)
     near = np.zeros((dims[2], dims[1], dims[0]), bool)
     for dz in (-1, 0, 1):
@@ -386,7 +388,7 @@ def stage_c_rooms(S, P, G, soup, sp, g, eye_rule):
                 m = np.all((q >= 0) & (q < np.array(dims)), 1)
                 near[q[m, 2], q[m, 1], q[m, 0]] = True
     fails = []
-    for k in (0, 1):
+    for k in kset:
         stray = (grids[k][0, :, :, :, 3] > 0.5) & ~near
         if np.any(stray):
             fails.append('%d slot-%d voxels away from every surface hold light' % (int(stray.sum()), k))
@@ -395,14 +397,14 @@ def stage_c_rooms(S, P, G, soup, sp, g, eye_rule):
             fails.append('%d slot-1 voxels hold light with no room' % int(nolab.sum()))
     rng = np.random.default_rng(11)
     pick = []
-    for k in (0, 1):
+    for k in kset:
         valid = grids[k][0, :, :, :, 3] > 0.5
         vz = np.argwhere(valid)
         ez = np.argwhere(near & ~valid & (slots[:, :, :, k] >= -1 if k == 0 else slots[:, :, :, k] >= 0))
         nv, ne = (150, 100) if k == 0 else (100, 50)
         pick += [(tuple(c), True, k) for c in vz[rng.choice(len(vz), size=min(nv, len(vz)), replace=False)]] if len(vz) else []
         pick += [(tuple(c), False, k) for c in ez[rng.choice(len(ez), size=min(ne, len(ez)), replace=False)]] if len(ez) else []
-    pp, cube = P[:, 0:3], P[:, 3:21].reshape(-1, 6, 3)
+    pp, cube = P[:, 0:3], (P[:, 3:21].reshape(-1, 6, 3) if vals is None else vals)
     good, rays, blocked, leak = 0, 0, 0, 0
     ways = {'centre': 0, 'elsewhere': 0, 'eye': 0, 'far': 0, 'grown': 0, 'empty': 0}
 
@@ -440,22 +442,22 @@ def stage_c_rooms(S, P, G, soup, sp, g, eye_rule):
                 way = 'far'
         got = np.stack([grids[k][a, z, y, x, 0:3] for a in range(6)])
         if ws == 0.0:
-            vals = []
+            nb = []
             for a in (-1, 0, 1):
                 for b in (-1, 0, 1):
                     for c2 in (-1, 0, 1):
                         zz, yy, xx = z + a, y + b, x + c2
                         if (a, b, c2) == (0, 0, 0) or not (0 <= zz < dims[2] and 0 <= yy < dims[1] and 0 <= xx < dims[0]):
                             continue
-                        for sj in (0, 1):
+                        for sj in kset:
                             if slots[zz, yy, xx, sj] == lab and grids[sj][0, zz, yy, xx, 3] > 0.5:
-                                vals.append(np.stack([grids[sj][s, zz, yy, xx, 0:3] for s in range(6)]))
+                                nb.append(np.stack([grids[sj][s, zz, yy, xx, 0:3] for s in range(6)]))
             if not isvalid:
                 ways['empty'] += 1
                 good += 1
-            elif eye_rule and vals:
+            elif eye_rule and nb:
                 ways['grown'] += 1
-                lo, hi = np.min(vals, 0), np.max(vals, 0)
+                lo, hi = np.min(nb, 0), np.max(nb, 0)
                 good += int(np.all(got >= lo - 1e-4 * (1 + np.abs(lo))) and np.all(got <= hi + 1e-4 * (1 + np.abs(hi))))
             continue
         ways[way] += 1
@@ -464,10 +466,10 @@ def stage_c_rooms(S, P, G, soup, sp, g, eye_rule):
             good += int(ok)
     share = good / max(len(pick), 1)
     ok = share >= 0.97 and blocked >= 20 and not fails
-    return ('C %s voxel grid (rooms %d): %d slots (%d lit, %d empty; %d of them slot 1), %d probe segments, %d blocked; '
+    return ('%s %s %s (rooms %d): %d slots (%d lit, %d empty; %d of them slot 1), %d probe segments, %d blocked; '
             'agree %.1f%% (from the centre %d, the eye with the centre in another room %d, the eye %d, twice the radius '
             '%d, neighbours %d, empty %d)%s'
-            % ('PASS' if ok else 'FAIL', R['rooms'], len(pick), sum(1 for _, a, _k in pick if a),
+            % (tag, 'PASS' if ok else 'FAIL', what, R['rooms'], len(pick), sum(1 for _, a, _k in pick if a),
                sum(1 for _, a, _k in pick if not a), sum(1 for _, _a, k in pick if k == 1), rays, blocked, 100 * share,
                ways['centre'], ways['elsewhere'], ways['eye'], ways['far'], ways['grown'], ways['empty'],
                ('; ' + '; '.join(fails)) if fails else ''))
@@ -760,7 +762,8 @@ def main(esm, cell, run, stages='ABCDEFP'):
         lines.append(stage_b(tbks, S, P, row_of, bn['B'] if bn else None, sky))
         if 'F' in stages:
             lines.append(stage_f(tbks, S, row_of, soup, G, bn, sky) if bn else 'F FAIL bounce: no gi_bounce.bin in the dump')
-    lines.append(stage_c(S, P, G, soup))
+    # lane ROOMCLAMP1: the pin (WW_CELL_ROOMCLAMP_PIN=off, red prelane) is the grid from before the lane: no eye rule
+    lines.append(stage_c(S, P, G, soup, eye_rule=not (bn and bn.get('red') == 'prelane')))
     if 'D' in stages and os.path.exists(os.path.join(run, 'probe5.png')):
         lines.append(stage_d(run, cell, G))
     if 'E' in stages and os.path.exists(os.path.join(run, 'pbr', 'probe5.png')):

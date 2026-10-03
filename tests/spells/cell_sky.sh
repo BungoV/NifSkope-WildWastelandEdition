@@ -274,15 +274,18 @@ if [ -z "$RED" ] && { has interior || has check; }; then
 			rm -rf "$idir"; mkdir -p "$idir/before" "$idir/after"
 			iopen="interior|$INTERIOR"; icam="$INTERIOR_CAM/1/1400"; ok=1
 			ifrom=( WW_CELL_GI=1 WW_CELL_GI_FROM="$(winpath "$idir/bake")" )
+			# lane ROOMCLAMP1: this exe relights with its rooms clamp off (a gate key, never a user toggle), so the
+			# pre-lane relight of the same bake stays byte for byte
+			pin=( WW_CELL_ROOMCLAMP_PIN=off )
 			[ "$(shoot "$BEFORE" "$iopen" "$idir/probes.tsv" "$idir/before/lit.png" "$icam" "${menv[@]}" WW_CELL_GI=1 \
 				WW_CELL_PROBE_SOUP="$(winpath "$idir/soup.psp")" WW_CELL_PROBE_BAKE="$(winpath "$idir/bake")" \
 				WW_CELL_GI_DUMP="$(winpath "$idir/before/dump")")" = 1 ] || ok=0
 			[ "$(shoot "$BEFORE" "$iopen" "$idir/probes.tsv" "$idir/before/probe5.png" "$icam" "${menv[@]}" "${ifrom[@]}" WW_CELL_LIT_PROBE=5)" = 1 ] || ok=0
 			[ "$(shoot "$BEFORE" "$iopen" "$idir/probes.tsv" "$idir/before/lit2.png" "$icam" "${menv[@]}" "${ifrom[@]}" \
 				WW_CELL_GI_DUMP="$(winpath "$idir/before/dump")")" = 1 ] || ok=0
-			[ "$(shoot "$EXE" "$iopen" "$idir/probes.tsv" "$idir/after/lit.png" "$icam" "${menv[@]}" "${ifrom[@]}" \
+			[ "$(shoot "$EXE" "$iopen" "$idir/probes.tsv" "$idir/after/lit.png" "$icam" "${menv[@]}" "${ifrom[@]}" "${pin[@]}" \
 				WW_CELL_GI_DUMP="$(winpath "$idir/after/dump")")" = 1 ] || ok=0
-			[ "$(shoot "$EXE" "$iopen" "$idir/probes.tsv" "$idir/after/probe5.png" "$icam" "${menv[@]}" "${ifrom[@]}" WW_CELL_LIT_PROBE=5)" = 1 ] || ok=0
+			[ "$(shoot "$EXE" "$iopen" "$idir/probes.tsv" "$idir/after/probe5.png" "$icam" "${menv[@]}" "${ifrom[@]}" "${pin[@]}" WW_CELL_LIT_PROBE=5)" = 1 ] || ok=0
 			cp -f "$idir/before/lit2.png" "$idir/before/lit.png" 2>/dev/null   # both sides relit from the files
 			check "$INTERIOR ($mode): the pictures written" "$ok"
 		fi

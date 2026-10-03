@@ -1787,7 +1787,11 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 	const QByteArray glassDump = qgetenv( "WW_CELL_PROBE_GLASS" );
 	int soupGlassShapes = 0;
 	int soupLoadDoors = 0;   // lane ROOMCLAMP1
-	const bool loadDoorRed = qEnvironmentVariable( "WW_CELL_PROBE_LOADDOOR_RED" ) == QLatin1String( "open" );
+	/* lane ROOMCLAMP1: WW_CELL_ROOMCLAMP_PIN=off (gates only, never a user toggle) turns every rule of the lane off
+	 * (load doors open, the placer's old floors, no probe moved off a back face, no rooms, no eye fallbacks): the
+	 * output is byte for byte the exe from before the lane, which the before/after gates compare against. */
+	const bool roomclampPin = qgetenv( "WW_CELL_ROOMCLAMP_PIN" ).trimmed() == "off";
+	const bool loadDoorRed = roomclampPin || qEnvironmentVariable( "WW_CELL_PROBE_LOADDOOR_RED" ) == QLatin1String( "open" );
 	// lane BAKE4: WW_CELL_PROBE_SOUP_REFS=<tsv> lists every reference the soup took (form, role, base type)
 	QString soupRefList;
 	const QByteArray soupRefDump = qgetenv( "WW_CELL_PROBE_SOUP_REFS" );
@@ -2896,6 +2900,8 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 		if ( !sp.isEmpty() && sp.toFloat() > 1.0f )
 			ps.spacing = sp.toFloat();
 		ps.red = QString::fromLatin1( qgetenv( "WW_PROBE_RED" ) );
+		if ( roomclampPin && ps.red.isEmpty() )
+			ps.red = QStringLiteral( "floor" );   // lane ROOMCLAMP1 pin: the old floors
 		const QByteArray soupDump = qgetenv( "WW_CELL_PROBE_SOUP" );
 		QString perr;
 		if ( !soupDump.isEmpty() && !probeSoupWrite( QString::fromLocal8Bit( soupDump ), probeSoup, &perr ) )
@@ -2960,6 +2966,8 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 				if ( br.toInt() > 0 )
 					bs.rays = br.toInt();
 				bs.red = QString::fromLatin1( qgetenv( "WW_PROBE_BAKE_RED" ) );
+				if ( roomclampPin && bs.red.isEmpty() )
+					bs.red = QStringLiteral( "backface" );   // lane ROOMCLAMP1 pin: no probe moved
 				// lane ROOMCLAMP1: the outside-the-shell threshold (gate red: 1 = off) and the gate's list
 				if ( qEnvironmentVariableIsSet( "WW_CELL_PROBE_BACKMAX" ) )
 					bs.backMax = qEnvironmentVariable( "WW_CELL_PROBE_BACKMAX" ).toFloat();
@@ -3143,6 +3151,8 @@ bool nifCreateCellScene( NifModel * nif, const CellSceneSpec & spec,
 		if ( const WwCellLighting * L = wwCellLightsFor( nif ) ) {
 			ProbeGiSpec gs;
 			gs.red = QString::fromLatin1( qgetenv( "WW_CELL_GI_RED" ) ).trimmed();
+			if ( gs.red.isEmpty() && qgetenv( "WW_CELL_ROOMCLAMP_PIN" ).trimmed() == "off" )
+				gs.red = QStringLiteral( "prelane" );   // lane ROOMCLAMP1 pin: no rooms, no eye fallbacks
 			gs.passes = qEnvironmentVariableIntValue( "WW_CELL_GI_PASSES" );   // lane BOUNCE2: a gate's pin (1 = one bounce)
 			gs.rooms.red = QString::fromLatin1( qgetenv( "WW_CELL_ROOMS_RED" ) ).trimmed();   // lane ROOMCLAMP1: the rooms' refuters
 			// lane SKY1: outdoors, the weather's sky and sun (src/probesky.h); WW_CELL_SKY_RED its refuters

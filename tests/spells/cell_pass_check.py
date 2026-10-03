@@ -11,10 +11,13 @@ gi_skygrid, gi_probesky, gi_links) and the pictures cell_pass.sh shot. Every val
   S  probe sky       each probe's sky share on the six axes = the mean of the bake's four octants on that
                      side (octant = x<0 | (y<0)<<1 | (z<0)<<2) against gi_probesky.bin
   T  sky grid        gi_skygrid.bin holds exactly gi_grid.bin's voxels; 250 of them rebuilt from S's own
-                     shares: the probes within the radius the voxel can see, weight (1 - d^2 / r^2)^2
+                     shares: the probes within the radius the voxel can see, weight (1 - d^2 / r^2)^2. With
+                     rooms (gi_slots.bin; lane ROOMCLAMP1) both slots by cell_gi_check's stage C rule (a slot
+                     gathers its room's probes only, the eye / twice the radius / neighbour fallbacks)
   G  GI pass         pass1.png at every clean pixel (position from probes 2 + 3, normal from probe 4)
                      against this file's sample of gi_grid.bin: (E / pi) clamped, ^ (1 / 2.2); magenta
-                     where no probe reaches
+                     where no probe reaches. With rooms, cell_rooms_check's gi_sample (the shader's room
+                     blend) on 20000 of the pixels instead of the plain trilinear
   K  Sky visibility  pass2.png the same against gi_skygrid.bin (an interior: no sky anywhere it is valid)
   F  Surfel color    pass3id.png (WW_CELL_PV_ID=1) names the surfel under each pixel; pass3.png carries that
                      surfel's own albedo (this file's read of the bake) ^ (1 / 2.2) on every splat-interior
@@ -39,6 +42,8 @@ from scipy.spatial import cKDTree
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from cell_gi_check import Soup  # noqa: E402  (a segment test over the soup, no NifSkope code)
 from probe_bake import read_tbk, floordiv  # noqa: E402
+import cell_gi_check  # noqa: E402  (lane ROOMCLAMP1: stage C's rooms rule, rebuilt for the sky grid)
+import cell_rooms_check  # noqa: E402  (lane ROOMCLAMP1: the shader's room blend)
 
 MAGENTA = np.array([1.0, 0.0, 1.0])
 
@@ -175,11 +180,37 @@ def stage_s(own_sky, dumped):
             % ('PASS' if err < 1e-5 else 'FAIL', len(own_sky), open_, err))
 
 
-def stage_t(G, K, ppos, own_sky, soup):
+def read_rooms(dump, G, K):
+    """lane ROOMCLAMP1: with rooms the dump also holds gi_rooms.bin, gi_slots.bin (labels, slot 1's grid, slot 1's
+    sky grid) and gi_proberooms.bin. None: no rooms (the plain one-value grid)."""
+    if not all(os.path.exists(os.path.join(dump, f)) for f in ('gi_rooms.bin', 'gi_slots.bin', 'gi_proberooms.bin')):
+        return None
+    dims = G['dims']
+    nv = dims[0] * dims[1] * dims[2]
+    s = open(os.path.join(dump, 'gi_slots.bin'), 'rb').read()
+    shp = (6, dims[2], dims[1], dims[0], 4)
+    slots = np.frombuffer(s, '<i4', 2 * nv, 32).reshape(dims[2], dims[1], dims[0], 2)
+    g2 = np.frombuffer(s, '<f4', 6 * nv * 4, 32 + 8 * nv).reshape(shp)
+    k2 = np.frombuffer(s, '<f4', 6 * nv * 4, 32 + 8 * nv + 6 * nv * 16).reshape(shp)
+    R = cell_rooms_check.read_rooms(os.path.join(dump, 'gi_rooms.bin'))
+
+    def two(grid, second):
+        return {'origin': G['origin'], 'voxel': G['voxel'], 'dims': dims, 'g': grid, 'g2': second, 'slots': slots}
+    return {'R': R, 'sky2': k2, 'G': two(G['grid'], g2), 'K': two(K['grid'], k2)}
+
+
+def stage_t(G, K, ppos, own_sky, soup, rooms=None, dump=None):
     v, o, dims, rad = K['voxel'], K['origin'], K['dims'], K['radius']
     gv, kv = G['grid'][0, :, :, :, 3] > 0.5, K['grid'][0, :, :, :, 3] > 0.5
     if gv.shape != kv.shape or np.any(gv != kv):
         return 'T FAIL sky grid: its valid voxels are not the GI grid\'s'
+    if rooms is not None:
+        # lane ROOMCLAMP1: the sky grid's two slots by the GI grid's rule, the probes' own sky shares as the values
+        S, P, D, _clear = cell_gi_check.read_dump(dump)
+        sp = S[:, 0:3] + S[:, 3:6] * D['voxel'] * 0.5
+        g = np.floor((sp - D['origin']) / D['voxel']).astype(int)
+        return cell_gi_check.stage_c_rooms(S, P, D, soup, sp, g, True, vals=np.repeat(own_sky[:, :, None], 3, 2),
+                                           grids=(K['grid'], rooms['sky2']), tag='T', what='sky grid')
     rng = np.random.default_rng(17)
     vz = np.argwhere(kv)
     pick = vz[rng.choice(len(vz), size=min(250, len(vz)), replace=False)]
@@ -204,13 +235,21 @@ def stage_t(G, K, ppos, own_sky, soup):
             % ('PASS' if ok else 'FAIL', len(pick), rays, blocked, 100 * share))
 
 
-def judge_pass(run, tag, label, what, G, srf, scale, interior_black=False):
+def judge_pass(run, tag, label, what, G, srf, scale, interior_black=False, rooms=None):
     path = os.path.join(run, tag + '.png')
     if not os.path.exists(path):
         return None
     ys, xs, Pw, Nw = srf
+    if rooms is not None and len(ys) > 20000:
+        # lane ROOMCLAMP1: the room blend is a per-pixel walk here; 20000 pixels, a fixed draw
+        keep = np.sort(np.random.default_rng(23).choice(len(ys), 20000, replace=False))
+        ys, xs, Pw, Nw = ys[keep], xs[keep], Pw[keep], Nw[keep]
     got = np.asarray(Image.open(path).convert('RGB'), float)[ys, xs] / 255.0
-    s = sample(G, Pw, Nw)
+    if rooms is None:
+        s = sample(G, Pw, Nw)
+    else:
+        GG = rooms['K' if label == 'K' else 'G']
+        s = np.array([cell_rooms_check.gi_sample(GG, rooms['R'], Pw[i], Nw[i]) for i in range(len(Pw))])
     valid = s[:, 3] > 0.01
     v = np.where(valid[:, None], np.maximum(s[:, 0:3] / np.maximum(s[:, 3:4], 1e-9), 0), 0) * scale
     exp = np.where(valid[:, None], shown(v), MAGENTA[None, :])
@@ -362,11 +401,12 @@ def main(cell, run):
     K = read_grid(os.path.join(dump, 'gi_skygrid.bin'))
     S = read_n(os.path.join(dump, 'gi_surfels.bin'), 12)
     lines = [stage_s(own_sky, read_n(os.path.join(dump, 'gi_probesky.bin'), 6))]
-    lines.append(stage_t(G, K, ppos, own_sky, Soup(os.path.join(run, 'soup.psp'))))
+    rooms = read_rooms(dump, G, K)
+    lines.append(stage_t(G, K, ppos, own_sky, Soup(os.path.join(run, 'soup.psp')), rooms, dump))
     srf = surface(run)
     interior = cell != 'concord'
-    for ln in (judge_pass(run, 'pass1', 'G', 'GI pass', G, srf, 1.0 / math.pi),
-               judge_pass(run, 'pass2', 'K', 'Sky visibility', K, srf, 1.0, interior_black=interior)):
+    for ln in (judge_pass(run, 'pass1', 'G', 'GI pass', G, srf, 1.0 / math.pi, rooms=rooms),
+               judge_pass(run, 'pass2', 'K', 'Sky visibility', K, srf, 1.0, interior_black=interior, rooms=rooms)):
         if ln:
             lines.append(ln)
     sP, sN, sA = own_surfels(tbks)

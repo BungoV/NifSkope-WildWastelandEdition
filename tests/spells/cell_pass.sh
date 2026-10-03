@@ -8,7 +8,8 @@
 #   probe2-4   the position and normal at every cell-lit pixel (WW_CELL_LIT_PROBE)
 #   pass1-4    WW_CELL_PASS=1..4 with the Cell lights and GI rows OFF (a Pass draws on its own)
 #   links      Pass 3 with one probe picked (WW_CELL_PV_PROBE), the overlay's dump (WW_CELL_PV_DUMP)
-#   combined   Pass 0 against the pre-lane exe (BEFORE_EXE), GI on and off: byte-identical
+#   combined   Pass 0 against the pre-lane exe (BEFORE_EXE), GI on and off: byte-identical (lane ROOMCLAMP1:
+#              this exe pinned with WW_CELL_ROOMCLAMP_PIN=off, its rooms clamp off; a gate key, never a toggle)
 # Then tests/spells/cell_pass_check.py rebuilds every value from the .tbk files, the soup and its own
 # trilinear sampler (stages S T G K F L N Z, its docstring).
 #
@@ -138,7 +139,8 @@ for cell in $CELLS; do
 			[ "$(shoot "$EXE" "$run" "$cell" links WW_CELL_LIT=0 WW_CELL_GI=0 WW_CELL_PASS=3 WW_CELL_PV_PROBE="$k" \
 				WW_CELL_PV_DUMP="$(winpath "$run/links.pv.txt")")" = 1 ] || ok=0
 			for g in 1 0; do
-				[ "$(shoot "$EXE" "$run" "$cell" combined_gi${g}_new WW_CELL_LIT=1 WW_CELL_GI=$g WW_CELL_PASS=0)" = 1 ] || ok=0
+				[ "$(shoot "$EXE" "$run" "$cell" combined_gi${g}_new WW_CELL_LIT=1 WW_CELL_GI=$g WW_CELL_PASS=0 \
+					WW_CELL_ROOMCLAMP_PIN=off)" = 1 ] || ok=0
 				[ "$(shoot "$BEFORE_EXE" "$run" "$cell" combined_gi${g}_old WW_CELL_LIT=1 WW_CELL_GI=$g)" = 1 ] || ok=0
 			done
 			# the pre-lane exe against itself: the run-to-run floor Z is judged by

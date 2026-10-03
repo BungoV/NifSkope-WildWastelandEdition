@@ -19,10 +19,13 @@ Nothing here calls NifSkope. The stages, each from the files on disk:
   B  every probe's total: this file's own gather of the links (own sun part + the dump's placed-light part)
      + its own sky, against gi_probes.bin
   C  the voxel grid at the voxels the views look at, blended from this file's own probe totals with its own
-     sight lines, against gi_grid.bin
+     sight lines, against gi_grid.bin. With rooms (gi_slots.bin; lane ROOMCLAMP1) cell_gi_check's stage C
+     rule instead (a slot gathers its room's probes only; the eye, twice the radius, the neighbours), fed this
+     file's own probe totals
   D  per view, the picture: probe 5 (the bounce a surface takes / pi) and probe 90 (the share of the weather
      ambient the grid replaced) against this file's own grid: agree %, and the viewer's total over the
-     expected total (0.95 .. 1.05)
+     expected total (0.95 .. 1.05). With rooms the expected is cell_rooms_check's gi_sample (the shader's
+     room blend) of the dumped grid, which C has checked against this file's own totals
   O  open against covered: the sky the probes around each view's look-at point see, straight from the .tbk
   R  the replacement in the finished picture: lit.png against lit_keepamb.png (the weather ambient left in)
 
@@ -44,6 +47,8 @@ from PIL import Image
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from cell_gi_check import Soup, read_dump  # noqa: E402   (the checker's own soup and dump readers)
 from probe_bake import read_tbk  # noqa: E402              (the checker's own .tbk reader)
+import cell_gi_check  # noqa: E402   (lane ROOMCLAMP1: stage C's rooms rule)
+import cell_rooms_check  # noqa: E402   (lane ROOMCLAMP1: the shader's room blend)
 
 AXES = np.array([[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]], float)
 SURF_OFF = 2.0          # the sun ray starts this far off the surface
@@ -704,6 +709,24 @@ def view_expect(run, name, G, near, soup, pp, cubes, fresh):
                 rays=int(z['rays']), blocked=int(z['blocked']))
 
 
+def room_expect(X, G):
+    """lane ROOMCLAMP1: with rooms, what probe 5 and probe 90 show is the shader's room blend of the dumped grid
+    (cellGiSample: the surface's room's slots, renormalized; no room with weight: the plain trilinear). The sky
+    grid's sample keeps rgb = E x share (no division), a = the share."""
+    GG = {'origin': G['origin'], 'voxel': G['voxel'], 'dims': G['dims'], 'g': G['grid'], 'g2': G['grid2'],
+          'slots': G['slots']}
+    res = []
+    for p_, n_ in variants(X['P'], X['N']):
+        s = np.array([cell_rooms_check.gi_sample(GG, G['R'], p_[i], n_[i]) for i in range(len(p_))])
+        res.append((np.clip(np.maximum(s[:, 0:3], 0) / math.pi, 0, 1), np.clip(s[:, 3], 0, 1)))
+    e5, e90 = res[0]
+    X = dict(X)
+    X['e5'], X['e90'] = e5, e90
+    X['s5'] = np.max([np.abs(r[0] - e5) for r in res[1:]], 0)
+    X['s90'] = np.max([np.abs(r[1] - e90) for r in res[1:]], 0)
+    return X
+
+
 def judge(got, exp, spread):
     tol = 3.0 / 255 + 0.05 * exp + spread
     good = np.abs(got - exp) <= tol
@@ -1054,7 +1077,14 @@ def main(argv):
                 lines.append('D %s FAIL no clean pixel' % name)
                 continue
             views[name] = X
-        lines.append(stage_c(views, G))
+        if 'R' in G:
+            # lane ROOMCLAMP1: the grid by the rooms rule from this file's own totals, the pictures by the room blend
+            sp = S[:, 0:3] + S[:, 3:6] * G['voxel'] * 0.5
+            g = np.floor((sp - G['origin']) / G['voxel']).astype(int)
+            lines.append(cell_gi_check.stage_c_rooms(S, P, G, soup, sp, g, True, vals=cubes))
+            views = {name: room_expect(X, G) for name, X in views.items()}
+        else:
+            lines.append(stage_c(views, G))
         for name, X in views.items():
             lines += stage_d(name, X, sub)
             for tag in ('R', 'RP'):
