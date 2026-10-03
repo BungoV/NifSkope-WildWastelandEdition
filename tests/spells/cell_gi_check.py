@@ -266,8 +266,8 @@ def stage_b(tbks, S, P, row_of, Bsrc=None, sky=None):
     unresolved = 0
     for _, t in tbks:
         cs = float(t['cell'])
-        keys = ({}, {})   # lane BAKE4: the front sides, the v4 back sides
-        for side, arr in enumerate((t['surfels'], t['back'])):
+        keys = tuple({} for _ in t['bysides'])   # lane BAKE4 front|back; lane SIDES6 v5: six
+        for side, arr in enumerate(t['bysides']):
             for j, s in enumerate(arr):
                 keys[side].setdefault(tuple(floordiv(s['pos'][a], cs) for a in range(3)), j)
         for pr in t['probes']:
@@ -282,7 +282,7 @@ def stage_b(tbks, S, P, row_of, Bsrc=None, sky=None):
                 if j is None:
                     unresolved += 1
                     continue
-                s = (t['surfels'], t['back'])[side][j]
+                s = t['bysides'][side][j]
                 # the glass on the way tints what the link carries
                 B = Bsrc[row_of[(np.float32(s['pos']).tobytes(), tuple(int(c) for c in s['nrm']))]] \
                     * (x['tint'].astype(np.float64) / 255.0)
@@ -627,8 +627,8 @@ def stage_f(tbks, S, row_of, soup, G, bn, sky):
     k = 0
     for _, t in tbks:
         cs = float(t['cell'])
-        keys = ({}, {})
-        for side, arr in enumerate((t['surfels'], t['back'])):
+        keys = tuple({} for _ in t['bysides'])
+        for side, arr in enumerate(t['bysides']):
             for j, s in enumerate(arr):
                 keys[side].setdefault(tuple(floordiv(s['pos'][a], cs) for a in range(3)), j)
         for pr in t['probes']:
@@ -639,7 +639,7 @@ def stage_f(tbks, S, row_of, soup, G, bn, sky):
                 j = keys[int(x['side'])].get(tuple(int(pk[a]) + int(lk['delta'][a]) for a in range(3)))
                 if j is None:
                     continue
-                s = (t['surfels'], t['back'])[int(x['side'])][j]
+                s = t['bysides'][int(x['side'])][j]
                 w = float(lk['w']) * float(pr['scale'])
                 linked += w
                 rows.append((row_of[(np.float32(s['pos']).tobytes(), tuple(int(c) for c in s['nrm']))],

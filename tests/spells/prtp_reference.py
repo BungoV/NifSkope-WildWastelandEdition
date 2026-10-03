@@ -26,6 +26,11 @@ its surfel's, times the tint, per channel; the reference (rebuilt with its own g
 tests/prtp_reference.cpp) traces the panes itself. With glass in the soup it also gates
   tsky -- worst octant |bake sky share x sky tint - reference sky share through glass|
 `--red oneside` reads every link as the front side, `--red glass` ignores the tints.
+
+Lane SIDES6 (`.tbk` v5, six sides a cell): `--corners` picks the K probes with the most link weight on
+corner cells (two sides of a v5 cell more than 45 deg apart, not opposed); `--compare <bakedir>` reads a
+second bake of the same probes (e.g. `--tbk 4`) and FAILS unless this bake's irradiance error is below it
+(median and p95). The red is the swap: the v4 bake compared against the v5 one.
 """
 import math
 import os
@@ -76,40 +81,40 @@ def octant_of(v):
     return int(v[0] < 0) | (int(v[1] < 0) << 1) | (int(v[2] < 0) << 2)
 
 
-def main(a):
-    soup, bake = a[0], a[1]
-    k = int(a[a.index('--probes') + 1]) if '--probes' in a else 32
-    rays = int(a[a.index('--rays') + 1]) if '--rays' in a else 8192
-    red = a[a.index('--red') + 1] if '--red' in a else ''
-    here = os.path.dirname(os.path.abspath(__file__))
-    ref = a[a.index('--ref') + 1] if '--ref' in a else os.path.join(here, '..', '..', 'release', 'prtp_reference.exe')
-    fails = []
-    tbks = structure(files_in(bake), fails)
-    if fails or not tbks:
-        print('reference FAIL: the bake does not read (%s)' % '; '.join(fails[:3] or ['no .tbk']))
-        return 1
-    rows = [(t, i) for _, t in tbks for i in range(len(t['probes']))]
-    pick = [rows[int(j)] for j in np.linspace(0, len(rows) - 1, min(k, len(rows)))]
-    rng = np.random.default_rng(7)
-    if red == 'albedo':
-        for _, t in tbks:
-            s = t['surfels'].copy()
-            s['alb'] = s['alb'][rng.permutation(len(s))]
-            t['surfels'] = s
+def corner_cells(t):
+    """lane SIDES6: a v5 file's corner cells -- two of its sides more than 45 deg apart and not opposed
+    (dot >= 0: the old front merged them into one surfel)."""
+    c45 = math.cos(math.radians(45))
+    out = set()
+    if t['ver'] < 5:
+        return out
+    byk = {}
+    for arr in t['bysides']:
+        for s in arr:
+            k = tuple(floordiv(s['pos'][c], t['cell']) for c in range(3))
+            v = s['nrm'].astype(np.float64)
+            byk.setdefault(k, []).append(v / max(np.linalg.norm(v), 1e-9))
+    for k, ns in byk.items():
+        if any(0 <= float(np.dot(ns[x], ns[y])) < c45 for x in range(len(ns)) for y in range(x + 1, len(ns))):
+            out.add(k)
+    return out
 
-    work = os.path.join(bake, '_reference')
-    os.makedirs(work, exist_ok=True)
-    pf = os.path.join(work, 'probes.txt')
-    with open(pf, 'w') as f:
-        for t, i in pick:
-            f.write('%.4f %.4f %.4f\n' % tuple(float(v) for v in t['probes'][i]['pos']))
-    out = os.path.join(work, 'reference.tsv')
-    r = subprocess.run([ref, soup, pf, str(rays), *('%g' % v for v in SUN), out], capture_output=True, text=True)
-    if r.returncode != 0:
-        print('reference FAIL: the tracer said rc %d %s' % (r.returncode, r.stderr.strip()[:200]))
-        return 1
-    R = np.loadtxt(out, comments='#', ndmin=2)
 
+def corner_share(t, i, cc):
+    """the probe's link weight on corner cells, over its linked weight"""
+    pr = t['probes'][i]
+    pk = [floordiv(pr['pos'][c], t['cell']) for c in range(3)]
+    L = t['links'][int(pr['off']):int(pr['off'] + pr['cnt'])]
+    tot = float(L['w'].astype(np.float64).sum())
+    on = sum(float(l['w']) for l in L if tuple(int(pk[c]) + int(l['delta'][c]) for c in range(3)) in cc)
+    return on / max(tot, 1e-12)
+
+
+def pos_key(t, i):
+    return tuple(np.round(t['probes'][i]['pos'].astype(np.float64), 2))
+
+
+def evaluate(pick, R, red):
     sky_err, tot_err, dir_err, irr_err, tsky_err = [], [], [], [], []
     glassy = R.shape[1] >= 74
     for (t, i), row in zip(pick, R):
@@ -150,7 +155,78 @@ def main(a):
             dir_err.append(float(np.abs(T - ref_L).sum()) / e_ref)
             ir = irradiance(ref_sh)
             irr_err.append(float(np.abs(irradiance(C) - ir).mean() / max(ir.mean(), 1e-6)))
-    sky_err, tot_err, dir_err, irr_err, tsky_err = map(np.array, (sky_err, tot_err, dir_err, irr_err, tsky_err))
+    return tuple(map(np.array, (sky_err, tot_err, dir_err, irr_err, tsky_err)))
+
+
+def main(a):
+    soup, bake = a[0], a[1]
+    k = int(a[a.index('--probes') + 1]) if '--probes' in a else 32
+    rays = int(a[a.index('--rays') + 1]) if '--rays' in a else 8192
+    red = a[a.index('--red') + 1] if '--red' in a else ''
+    # lane SIDES6: --corners picks the K probes with the most link weight on corner cells (of the v5 bake: this
+    # one, or --compare's); --compare <bakedir> evaluates a second bake of the same probes and gates that THIS
+    # bake's irradiance error is below the other's (median and p95)
+    corners = '--corners' in a
+    other = a[a.index('--compare') + 1] if '--compare' in a else ''
+    here = os.path.dirname(os.path.abspath(__file__))
+    ref = a[a.index('--ref') + 1] if '--ref' in a else os.path.join(here, '..', '..', 'release', 'prtp_reference.exe')
+    fails = []
+    tbks = structure(files_in(bake), fails)
+    if fails or not tbks:
+        print('reference FAIL: the bake does not read (%s)' % '; '.join(fails[:3] or ['no .tbk']))
+        return 1
+    rows = [(t, i) for _, t in tbks for i in range(len(t['probes']))]
+    otb = structure(files_in(other), fails) if other else []
+    if other and (fails or not otb):
+        print('reference FAIL: the compared bake does not read (%s)' % '; '.join(fails[:3] or ['no .tbk']))
+        return 1
+    orows = {pos_key(t, i): (t, i) for _, t in otb for i in range(len(t['probes']))}
+    share = None
+    if corners:
+        src = rows if any(t['ver'] >= 5 for _, t in tbks) else list(orows.values())
+        cc = {}
+        for t, _ in src:
+            if id(t) not in cc:
+                cc[id(t)] = corner_cells(t)
+        if not any(cc.values()):
+            print('reference FAIL: --corners needs a v5 bake (this one or --compare)')
+            return 1
+        sh = {pos_key(t, i): corner_share(t, i, cc[id(t)]) for t, i in src}
+        keyed = sorted(((sh.get(pos_key(t, i), 0.0), n) for n, (t, i) in enumerate(rows)), key=lambda v: (-v[0], v[1]))
+        pick = [rows[n] for _, n in keyed[:k]]
+        share = np.array([v for v, _ in keyed[:k]])
+    else:
+        pick = [rows[int(j)] for j in np.linspace(0, len(rows) - 1, min(k, len(rows)))]
+    opick = []
+    for t, i in (pick if other else ()):
+        m = orows.get(pos_key(t, i))
+        if m is None:
+            print('reference FAIL: probe %s is not in the compared bake (not the same placement)' % (t['probes'][i]['pos'],))
+            return 1
+        opick.append(m)
+    rng = np.random.default_rng(7)
+    if red == 'albedo':
+        for _, t in tbks:
+            s = t['surfels'].copy()
+            s['alb'] = s['alb'][rng.permutation(len(s))]
+            t['surfels'] = s
+            t['bysides'] = tuple(s[s['pad0'] == b] for b in range(6)) if t['ver'] >= 5 else (s, t['back'])
+
+    work = os.path.join(bake, '_reference')
+    os.makedirs(work, exist_ok=True)
+    pf = os.path.join(work, 'probes.txt')
+    with open(pf, 'w') as f:
+        for t, i in pick:
+            f.write('%.4f %.4f %.4f\n' % tuple(float(v) for v in t['probes'][i]['pos']))
+    out = os.path.join(work, 'reference.tsv')
+    r = subprocess.run([ref, soup, pf, str(rays), *('%g' % v for v in SUN), out], capture_output=True, text=True)
+    if r.returncode != 0:
+        print('reference FAIL: the tracer said rc %d %s' % (r.returncode, r.stderr.strip()[:200]))
+        return 1
+    R = np.loadtxt(out, comments='#', ndmin=2)
+
+    sky_err, tot_err, dir_err, irr_err, tsky_err = evaluate(pick, R, red)
+    glassy = R.shape[1] >= 74
     if sky_err.max() > SKY_MAX:
         fails.append('sky worst %.4f > %.2f' % (sky_err.max(), SKY_MAX))
     tsky = ''
@@ -165,12 +241,25 @@ def main(a):
     im, ip = np.median(irr_err), np.percentile(irr_err, 95)
     if im > IRR_MED or ip > IRR_P95:
         fails.append('irradiance median %.3f / p95 %.3f over %.2f / %.2f' % (im, ip, IRR_MED, IRR_P95))
+    cmp = ''
+    if other:
+        _, ot, od, oi, _ = evaluate(opick, R, '')
+        om, op = np.median(oi), np.percentile(oi, 95)
+        cmp = ('; vs %s: irradiance median %.3f p95 %.3f (this %.3f / %.3f), total median %.3f (this %.3f), '
+               'octant split median %.3f (this %.3f)' % (os.path.basename(os.path.normpath(other)), om, op, im, ip,
+                                                          np.median(ot), tm, np.median(od), dm))
+        if not (im < om and ip <= op):
+            fails.append('corner irradiance error not below the compared bake (median %.3f vs %.3f, p95 %.3f vs %.3f)'
+                         % (im, om, ip, op))
+    csh = '' if share is None else '; corner probes: link weight on corner cells median %.2f min %.2f' % (
+        np.median(share), share.min())
     worst = int(np.argmax(tot_err))
     print('reference %s%s: %d probes x %d rays (brute force, every triangle); sky worst %.4f%s; total median %.3f '
-          'p95 %.3f worst %.3f (probe %d); irradiance median %.3f p95 %.3f; octant split median %.3f p95 %.3f; %s'
+          'p95 %.3f worst %.3f (probe %d); irradiance median %.3f p95 %.3f; octant split median %.3f p95 %.3f%s%s; %s'
           % ('PASS' if not fails else 'FAIL', ' [red ' + red + ']' if red else '', len(pick), rays,
-             sky_err.max(), tsky, tm, tp, tot_err.max(), worst, im, ip, dm, dp, '; '.join(fails) if fails else 'sound'))
-    with open(os.path.join(work, 'per_probe%s.tsv' % ('_' + red if red else '')), 'w') as f:
+             sky_err.max(), tsky, tm, tp, tot_err.max(), worst, im, ip, dm, dp, csh, cmp,
+             '; '.join(fails) if fails else 'sound'))
+    with open(os.path.join(work, 'per_probe%s%s.tsv' % ('_' + red if red else '', '_corners' if corners else '')), 'w') as f:
         f.write('n\tx\ty\tz\tsky\ttotal\tdir\tirr\n')
         for n, ((t, i), s, te, de, ie) in enumerate(zip(pick, sky_err, tot_err, dir_err, irr_err)):
             p = t['probes'][i]['pos']

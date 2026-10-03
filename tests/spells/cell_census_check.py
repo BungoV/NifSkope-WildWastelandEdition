@@ -39,7 +39,7 @@ loaded once; the load's figures are on the load's first row and `^` on its other
         every cell of every unit the keys are in: exactly one row, and the row against the plugin
   cell_census_check.py check <plugin> <census file> <plan file> <keys file> [same options]
         both
-  cell_census_check.py bake <plugin> <census file> <key> <bake folder> [--tbk 4|3]
+  cell_census_check.py bake <plugin> <census file> <key> <bake folder> [--tbk 5|4|3]
         the row says the bake step ran in the same visit, and its files are on disk
 
 Each check prints `PASS  ...` or `FAIL  ...`; the last line is `cell_census_check: N checks,
@@ -648,7 +648,7 @@ def tbk_version(path):
     return struct.unpack("<I", head[4:8])[0]
 
 
-def do_bake(t, census_path, key, folder, tbk=4):
+def do_bake(t, census_path, key, folder, tbk=5):
     rows = [r for r in read_rows(census_path) if r["key"] == key]
     t.check(len(rows) == 1, "%s: exactly one census row" % key, "%d rows" % len(rows))
     if len(rows) != 1:
@@ -790,7 +790,7 @@ def main(argv):
         return 2
     mode, plugin = argv[1], argv[2]
     rest, opts = [], {"--world": "Commonwealth", "--interiors": "18", "--center": "-20,7", "--block": "5",
-                      "--margin": "0", "--slices": "1", "--only": "", "--plan": "", "--tbk": "4"}
+                      "--margin": "0", "--slices": "1", "--only": "", "--plan": "", "--tbk": "5"}
     small = False
     i = 3
     while i < len(argv):

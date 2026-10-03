@@ -101,7 +101,12 @@ static_assert( sizeof( TbkProbe ) == 144, "tbk probe" );
 /* ---- lane BAKE4: the `.tbk` v4 tail, after the v3 body (header version 4; reserved[0] =
  * back surfels, reserved[1] = room boxes, reserved[2] = what was modelled: 1 sides,
  * 2 rooms, 4 doors, 8 glass). Order: back surfels, one ext per link, one ext per probe,
- * the room boxes. */
+ * the room boxes.
+ * Lane SIDES6: v5 = v4's tail exactly, but a cell keeps up to SIX surfels, one per facing bin
+ * (bin = axis * 2 + negative: 0 +X, 1 -X, 2 +Y, 3 -Y, 4 +Z, 5 -Z, of the hit face's normal turned
+ * toward the probe), all in the one surfel table, ordered by cell (z, y, x) then bin; a surfel's
+ * pad0 is its bin; reserved[0] (back surfels) is 0; a link's ext side is the bin it links;
+ * reserved[2] adds 16 (six sides); an emissive index is a plain index into the one table. */
 struct TbkLinkExt
 {
 	quint8 side;        // 0 = the cell's surfel, 1 = its back surfel
@@ -295,6 +300,7 @@ struct Chunk
 	qint64 back = 0, door = 0, tinted = 0;   // v4 links: to a back surfel, through a door, through glass
 	qint64 decal = 0, surfHits = 0;          // lane GICAL1: surfel hits under a decal; all surfel hits
 	qint64 emitHits = 0;        // lane EMISSIVEGI1: pass-1 hits on a glowing triangle
+	double hitW = 0, offW = 0, cornerW = 0;   // lane SIDES6 measure: ray weight on a surfel; > 45 deg off it; on a corner
 };
 
 } // namespace
@@ -320,7 +326,9 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 	const bool redNrm = spec.red == QLatin1String( "normal" );
 	// lane BAKE4: v4 = both sides of a cell, rooms, doors, glass; v3 = FO4CS's file exactly
 	const bool v4 = spec.tbkVersion >= 4;
-	R.version = v4 ? 4 : 3;
+	// lane SIDES6: v5 = v4 with up to six surfels a cell, one per facing bin (the deck's s24 key)
+	const bool v5 = spec.tbkVersion >= 5;
+	R.version = v5 ? 5 : v4 ? 4 : 3;
 	const bool redOneSide = spec.red == QLatin1String( "oneside" );
 	const bool redRooms = spec.red == QLatin1String( "rooms" );
 	const bool redGlass = spec.red == QLatin1String( "glass" );
@@ -801,10 +809,24 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 		}
 	};
 
-	FinalMap fin;
+	/* lane SIDES6: a cell's surfels by side. v3/v4: [0] the front (fin), [1] v4's back (backFin);
+	 * v5: [bin], one per facing bin (axis * 2 + negative; pad0 of the record says which) */
+	FinalMap sideFin[6];
+	FinalMap & fin = sideFin[0];
 	std::unordered_map<Key, Key, KeyHash> alt;   // a two-sided cell -> the neighbour holding its second side
-	FinalMap backFin;                            // v4: a two-sided cell's second side, in the cell itself
+	FinalMap & backFin = sideFin[1];             // v4: a two-sided cell's second side, in the cell itself
 	std::unordered_map<Key, quint8, KeyHash> backMask;   // v4: the facing bins that make up that side
+	// lane SIDES6: the side a ray's face bin lands on in cell k (v5: the bin; v4: back mask; v3: 0; 6 = none)
+	auto slotOf = [&]( const Key & k, int bin ) -> int {
+		if ( v5 )
+			return bin >= 0 ? bin : 6;
+		if ( !v4 )
+			return 0;
+		const auto bm = backMask.find( k );
+		return bm != backMask.end() && bin >= 0 && ( ( bm->second >> bin ) & 1 ) ? 1 : 0;
+	};
+	// lane SIDES6 measure: cells whose kept front merges unopposed faces > 45 degrees apart (a corner)
+	std::unordered_map<Key, quint8, KeyHash> cornerKeys;
 
 	// pass 2: the probe records, linking only surfels that face the probe
 	auto probeChunk = [&]( Chunk & ch ) {
@@ -844,15 +866,23 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 				hitPoint( o, d, t, hw );
 				LKey lk{ keyFor( hw, cellS ), 0u, quint8( 0 ) };
 				if ( v4 ) {
-					// the side this ray sees: its face's bin, as pass 1 sorted it
-					const auto bm = backMask.find( lk.k );
-					if ( bm != backMask.end() ) {
-						double n[3];
-						const int bin = binOf( tri, d, n );
-						lk.side = quint8( bin >= 0 && ( ( bm->second >> bin ) & 1 ) ? 1 : 0 );
-					}
+					// the side this ray sees: its face's bin, as pass 1 sorted it (lane SIDES6: v5 = the bin itself)
+					double n[3];
+					const int bin = binOf( tri, d, n );
+					const int slot = slotOf( lk.k, bin );
+					lk.side = quint8( slot );
 					if ( !doorBoxes.empty() )
 						lk.door = doorOn( o, d, t );
+					/* lane SIDES6 measure: the ray weight whose surfel's normal is over 45 degrees off the face
+					 * it hit (a corner's blend), and the weight landing on a corner cell (counters only) */
+					if ( bin >= 0 && slot < 6 ) {
+						ch.hitW += omega;
+						const auto f = sideFin[slot].find( lk.k );
+						if ( f != sideFin[slot].end() && n[0] * f->second.n[0] + n[1] * f->second.n[1] + n[2] * f->second.n[2] < 0.70710678 )
+							ch.offW += omega;
+						if ( cornerKeys.count( lk.k ) )
+							ch.cornerW += omega;
+					}
 				}
 				Cell & cl = cells[lk];
 				cl.w += omega;
@@ -907,7 +937,12 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 				if ( v4 ) {
 					// v4: the side the rays saw, in the cell itself; refused only when that side
 					// is missing (the oneside red) or still faces away
-					const FinalMap & fm = cd.side ? backFin : fin;
+					if ( cd.side > 5 ) {   // lane SIDES6: a degenerate face (no bin, no surfel)
+						turned += e.second.w;
+						ch.turned++;
+						continue;
+					}
+					const FinalMap & fm = sideFin[cd.side];
 					const auto f = fm.find( cd.k );
 					if ( f == fm.end() || v[0] * f->second.n[0] + v[1] * f->second.n[1] + v[2] * f->second.n[2] > -1.0e-4 ) {
 						turned += e.second.w;
@@ -1019,6 +1054,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 		SurfelMap().swap( ch.surfels );
 	}
 	fin.reserve( all.size() );
+	R.sideHist.assign( 7, 0 );
 	// one surfel record from a side's summed samples, its position kept inside `home`
 	// (the reader keys a surfel by where it is, so a mean outside would land elsewhere)
 	auto makeFinal = [&]( const Bin & a, const Key & home ) {
@@ -1072,6 +1108,49 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 				w = i;
 		if ( !sb.b[w].n )
 			continue;
+		{	// lane SIDES6 measure (every version): does the front the v3/v4 rule keeps merge faces > 45 deg apart?
+			int sides = 0;
+			bool corner = false;
+			for ( int i = 0; i < 6; i++ ) {
+				const Bin & bi = sb.b[i];
+				if ( !bi.n )
+					continue;
+				sides++;
+				const double li = std::sqrt( bi.nrm[0] * bi.nrm[0] + bi.nrm[1] * bi.nrm[1] + bi.nrm[2] * bi.nrm[2] );
+				for ( int j = i + 1; j < 6 && li > 0; j++ ) {
+					const Bin & bj = sb.b[j];
+					if ( !bj.n )
+						continue;
+					const double lj = std::sqrt( bj.nrm[0] * bj.nrm[0] + bj.nrm[1] * bj.nrm[1] + bj.nrm[2] * bj.nrm[2] );
+					const double c = lj > 0 ? ( bi.nrm[0] * bj.nrm[0] + bi.nrm[1] * bj.nrm[1] + bi.nrm[2] * bj.nrm[2] ) / ( li * lj ) : 1.0;
+					const double cw = bi.nrm[0] * sb.b[w].nrm[0] + bi.nrm[1] * sb.b[w].nrm[1] + bi.nrm[2] * sb.b[w].nrm[2];
+					const double cv = bj.nrm[0] * sb.b[w].nrm[0] + bj.nrm[1] * sb.b[w].nrm[1] + bj.nrm[2] * sb.b[w].nrm[2];
+					if ( c < 0.70710678 && cw >= 0 && cv >= 0 )   // both in the kept front, over 45 deg apart
+						corner = true;
+				}
+			}
+			R.sideHist[size_t( sides )]++;
+			R.cellsSampled++;
+			if ( corner ) {
+				cornerKeys.emplace( e.first, quint8( 1 ) );
+				R.cornerCells++;
+			}
+		}
+		if ( v5 ) {
+			// lane SIDES6: every facing bin its own surfel in the cell (the oneside red keeps the most-seen one)
+			int kept = 0;
+			for ( int i = 0; i < 6; i++ ) {
+				if ( !sb.b[i].n || ( redOneSide && i != w ) )
+					continue;
+				Final f = makeFinal( sb.b[i], e.first );
+				f.rec.pad0 = quint8( i );
+				sideFin[i].emplace( e.first, f );
+				kept++;
+			}
+			R.twoSided += kept > 1 ? 1 : 0;
+			R.sideSurfels += kept - 1;
+			continue;
+		}
 		Bin a, back;
 		bool split = false;
 		quint8 mask = 0;
@@ -1158,6 +1237,9 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 		R.linksTinted += ch.tinted;
 		R.decalHits += ch.decal;
 		R.surfelHits += ch.surfHits;
+		R.hitW += ch.hitW;   // lane SIDES6 measure
+		R.offW += ch.offW;
+		R.cornerW += ch.cornerW;
 	}
 	R.msRays = double( tm.nsecsElapsed() ) / 1e6;
 	tm.restart();
@@ -1228,7 +1310,7 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 		};
 		struct Acc { double alb[3] = { 0, 0, 0 }, nrm[3] = { 0, 0, 0 }; quint32 n = 0; };
 		typedef std::unordered_map<Key, Acc, KeyHash> AccMap;
-		std::vector<AccMap> accF( chunks.size() ), accB( chunks.size() );
+		std::vector<std::vector<AccMap>> accS( 6, std::vector<AccMap>( chunks.size() ) );   // lane SIDES6: per side
 		std::vector<qint64> cSamp( chunks.size(), 0 ), cDrop( chunks.size(), 0 ), cExtra( chunks.size(), 0 );
 		std::vector<std::vector<char>> dumps( cubeDumpProbes.size() );
 		auto cubeChunk = [&]( Chunk & ch ) {
@@ -1290,18 +1372,18 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 					float hw[3];
 					hitPoint( o, d, t, hw );
 					const Key k = keyFor( hw, cellS );
-					bool back = false;
-					if ( v4 ) {
-						const auto bm = backMask.find( k );
-						back = bm != backMask.end() && ( bm->second >> bin & 1u );
+					const int slot = slotOf( k, bin );   // lane SIDES6: v4 back = 1, v5 = the bin
+					if ( slot > 5 ) {
+						cDrop[ci]++;
+						continue;
 					}
-					const FinalMap & fm = back ? backFin : fin;
+					const FinalMap & fm = sideFin[slot];
 					const auto it = fm.find( k );
 					if ( it == fm.end() || ( !v4 && it->second.n[0] * fn[0] + it->second.n[1] * fn[1] + it->second.n[2] * fn[2] < 0 ) ) {
 						cDrop[ci]++;
 						continue;
 					}
-					Acc & ac = ( back ? accB : accF )[ci][k];
+					Acc & ac = accS[size_t( slot )][ci][k];
 					for ( int c = 0; c < 3; c++ ) {
 						ac.alb[c] += a[c];
 						ac.nrm[c] += nn[c];
@@ -1323,27 +1405,20 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 		};
 		runAll( cubeChunk );
 		// merge in chunk order (the same sums whatever ran where), then rewrite albedo + normal only
-		AccMap allF, allB;
+		AccMap allS[6];
 		for ( size_t c = 0; c < chunks.size(); c++ ) {
 			R.albSamples += cSamp[c];
 			R.albDropped += cDrop[c];
 			R.albExtra += cExtra[c];
-			for ( const auto & e : accF[c] ) {
-				Acc & z = allF[e.first];
-				for ( int k = 0; k < 3; k++ ) {
-					z.alb[k] += e.second.alb[k];
-					z.nrm[k] += e.second.nrm[k];
+			for ( int s = 0; s < 6; s++ )
+				for ( const auto & e : accS[size_t( s )][c] ) {
+					Acc & z = allS[s][e.first];
+					for ( int k = 0; k < 3; k++ ) {
+						z.alb[k] += e.second.alb[k];
+						z.nrm[k] += e.second.nrm[k];
+					}
+					z.n += e.second.n;
 				}
-				z.n += e.second.n;
-			}
-			for ( const auto & e : accB[c] ) {
-				Acc & z = allB[e.first];
-				for ( int k = 0; k < 3; k++ ) {
-					z.alb[k] += e.second.alb[k];
-					z.nrm[k] += e.second.nrm[k];
-				}
-				z.n += e.second.n;
-			}
 		}
 		auto rewrite = [&]( FinalMap & fm, const AccMap & am ) {
 			for ( auto & e : fm ) {
@@ -1363,8 +1438,8 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 				R.albSurfels++;
 			}
 		};
-		rewrite( fin, allF );
-		rewrite( backFin, allB );
+		for ( int s = 0; s < 6; s++ )
+			rewrite( sideFin[s], allS[s] );
 		if ( !spec.cubeDump.isEmpty() ) {
 			QFile df( spec.cubeDump );
 			if ( df.open( QIODevice::WriteOnly ) )
@@ -1388,13 +1463,13 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 	 * face normal itself always does), so the links stay the tri way's and every link faces. */
 	if ( wayHit || wayCube ) {
 		typedef std::unordered_map<Key, std::vector<std::array<double, 3>>, KeyHash> DirMap;
-		DirMap dF, dB;
+		DirMap dS[6];   // lane SIDES6: per side (v3 0; v4 0/1; v5 the bin)
 		for ( const Chunk & ch : chunks )
 			for ( const ProbeOut & po : ch.probes )
 				for ( size_t i = 0; i < po.links.size(); i++ ) {
 					std::array<double, 3> d;
 					unpackDir( po.links[i].dir, d.data() );
-					( v4 && po.ext[i].side ? dB : dF )[po.linkKeys[i]].push_back( d );
+					dS[v4 ? po.ext[i].side : 0][po.linkKeys[i]].push_back( d );
 				}
 		auto quant = []( const double n[3], qint16 q[3] ) {
 			const double l = std::sqrt( n[0] * n[0] + n[1] * n[1] + n[2] * n[2] );
@@ -1438,8 +1513,8 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 				R.albLeaned++;
 			}
 		};
-		lean( fin, dF );
-		lean( backFin, dB );
+		for ( int s = 0; s < 6; s++ )
+			lean( sideFin[s], dS[s] );
 	}
 
 	// group by sector: each file = its probes, their links, and every surfel they link
@@ -1474,13 +1549,17 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 		std::vector<TbkLinkExt> lex;
 		std::vector<TbkProbeExt> pex;
 		std::map<Key, int> used, usedBack;
+		std::map<std::pair<Key, int>, int> usedSide;   // lane SIDES6: v5, (cell, bin)
 		std::map<quint32, int> roomsHere;
 		for ( const ProbeOut * po : sec.second ) {
 			TbkProbe r = po->rec;
 			r.linkOffset = quint32( lks.size() );
 			lks.insert( lks.end(), po->links.begin(), po->links.end() );
 			for ( size_t i = 0; i < po->linkKeys.size(); i++ )
-				( v4 && po->ext[i].side ? usedBack : used )[po->linkKeys[i]] = 0;
+				if ( v5 )
+					usedSide[{ po->linkKeys[i], int( po->ext[i].side ) }] = 0;
+				else
+					( v4 && po->ext[i].side ? usedBack : used )[po->linkKeys[i]] = 0;
 			prs.push_back( r );
 			if ( v4 ) {
 				lex.insert( lex.end(), po->ext.begin(), po->ext.end() );
@@ -1517,6 +1596,14 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 				bks.push_back( it->second.rec );
 			}
 		}
+		// lane SIDES6: v5 = one table, cell order (z, y, x) then bin; the record's pad0 names the bin
+		for ( const auto & u : usedSide ) {
+			const auto it = sideFin[u.first.second].find( u.first.first );
+			if ( it != sideFin[u.first.second].end() ) {
+				emitOf( it->second, quint32( sfs.size() ) );
+				sfs.push_back( it->second.rec );
+			}
+		}
 		if ( !v4 ) {   // v3 (FO4CS's file) has no place for it
 			R.emitDropped += int( ems.size() );
 			ems.clear();
@@ -1536,11 +1623,11 @@ bool probeBake( const ProbeSoup & soup, const std::vector<ProbePoint> & probesIn
 				}
 		TbkHeader h;
 		if ( v4 ) {
-			h.version = 4u;
-			h.reserved[0] = quint32( bks.size() );
+			h.version = v5 ? 5u : 4u;
+			h.reserved[0] = quint32( bks.size() );   // v5: 0 (every side is in the one table)
 			h.reserved[1] = quint32( bxs.size() );
 			h.reserved[2] = ( redOneSide ? 0u : 1u ) | ( roomBoxes && !redRooms ? 2u : 0u ) | ( doorBoxes.empty() ? 0u : 4u )
-				| ( glassOn ? 8u : 0u );
+				| ( glassOn ? 8u : 0u ) | ( v5 && !redOneSide ? 16u : 0u );   // lane SIDES6: 16 = six sides
 			h.reserved[3] = quint32( ems.size() );   // lane EMISSIVEGI1 (0: no tail)
 		}
 		h.cellX = sec.first.first;
@@ -1608,6 +1695,18 @@ QString probeBakeCensusText( const ProbeBakeResult & r )
 		  << r.boxesWritten << "\n";
 	else
 		t << "bake: .tbk v3 (FO4CS's own format; no back sides, rooms, doors or glass)\n";
+	if ( r.version >= 5 )   // lane SIDES6
+		t << "bake: .tbk v5: six sides a cell, surfels beyond a cell's first " << r.sideSurfels << "\n";
+	if ( r.cellsSampled > 0 ) {   // lane SIDES6 measure
+		t << "bake: sides: cells " << r.cellsSampled << ", by faces seen (1..6)";
+		for ( size_t i = 1; i < r.sideHist.size(); i++ )
+			t << " " << r.sideHist[i];
+		t << "; corner cells (unopposed faces over 45 deg apart) " << r.cornerCells;
+		if ( r.hitW > 0 )
+			t << ", ray weight on a corner cell " << QString::number( r.cornerW / r.hitW, 'f', 4 )
+			  << ", on a surfel over 45 deg off its face " << QString::number( r.offW / r.hitW, 'f', 4 );
+		t << "\n";
+	}
 	if ( r.decalTris > 0 )   // lane GICAL1
 		t << "bake: decals folded into the albedo: " << r.decalTris << " triangles, " << r.decalHits << " of " << r.surfelHits
 		  << " surfel hits under one\n";
@@ -1649,7 +1748,7 @@ int probeBakeCli( const QStringList & args )
 		else if ( a == QLatin1String( "--red" ) ) { bs.red = nx; i++; }
 		else if ( a == QLatin1String( "--no-sky" ) ) { bs.noSky = true; }
 		else if ( a == QLatin1String( "--no-spill" ) ) { bs.spill = false; }
-		else if ( a == QLatin1String( "--tbk" ) ) { bs.tbkVersion = nx.toInt() >= 4 ? 4 : 3; i++; }
+		else if ( a == QLatin1String( "--tbk" ) ) { bs.tbkVersion = qBound( 3, nx.toInt(), 5 ); i++; }
 		else if ( a == QLatin1String( "--max-links" ) ) { bs.maxLinks = quint32( qBound( 8, nx.toInt(), 4096 ) ); i++; }
 		else if ( a == QLatin1String( "--no-openings" ) ) { ps.apertures = false; }
 		else if ( a == QLatin1String( "--no-rooms" ) ) { ps.coverage = false; }
@@ -1661,7 +1760,7 @@ int probeBakeCli( const QStringList & args )
 	const QStringList rc = rect.split( ',' );
 	if ( soupPath.isEmpty() || outDir.isEmpty() || rc.size() != 4 ) {
 		std::fprintf( stderr, "usage: probebake --soup <file> --rect minX,minY,maxX,maxY --out <dir> "
-			"[--rays n] [--threads n] [--spacing s] [--red octant|normal|oneside|rooms|glass|backface] [--no-sky] [--no-spill] [--tbk 3|4] "
+			"[--rays n] [--threads n] [--spacing s] [--red octant|normal|oneside|rooms|glass|backface] [--no-sky] [--no-spill] [--tbk 3|4|5] "
 			"[--max-links n] [--no-openings] [--no-rooms] [--back-max f] [--back-dump tsv] [--place-red floor|...]\n" );
 		return 2;
 	}

@@ -82,11 +82,11 @@ def read_tbk(path):
     h = struct.unpack('<5if4I6I', b[:64])
     magic, ver, kind, cx, cy, cs, ns, np_, nl, flags = h[:10]
     res = h[10:16]
-    if (magic & 0xffffffff) != TBK_MAGIC or ver not in (3, 4) or kind != 1:
+    if (magic & 0xffffffff) != TBK_MAGIC or ver not in (3, 4, 5) or kind != 1:
         raise ValueError('magic/version/kind %x %d %d' % (magic & 0xffffffff, ver, kind))
     need = 64 + 32 * ns + 144 * np_ + 12 * nl
     nb = nbox = nem = 0
-    if ver == 4:
+    if ver >= 4:   # lane SIDES6: v5 = v4's tail (no back list; a surfel's pad0 = its facing bin, a link's side = that bin)
         nb, nbox, nem = res[0], res[1], res[3]   # lane EMISSIVEGI1: res[3] = the emissive tail's count
         need += 32 * nb + 8 * nl + 32 * np_ + 32 * nbox + 16 * nem
     if len(b) != need:
@@ -95,7 +95,7 @@ def read_tbk(path):
     s = np.frombuffer(b, SURFEL, ns, o); o += 32 * ns
     p = np.frombuffer(b, PROBE, np_, o); o += 144 * np_
     lk = np.frombuffer(b, LINK, nl, o); o += 12 * nl
-    if ver == 4:
+    if ver >= 4:
         back = np.frombuffer(b, SURFEL, nb, o); o += 32 * nb
         lx = np.frombuffer(b, LINKEXT, nl, o); o += 8 * nl
         px = np.frombuffer(b, PROBEEXT, np_, o); o += 32 * np_
@@ -110,8 +110,11 @@ def read_tbk(path):
         px['room'][:, 1] = ROOM_NONE
         bx = np.zeros(0, ROOMBOX)
         em = np.zeros(0, EMIT)
-    return dict(emits=em, ver=ver, content=res[2] if ver == 4 else 0, cx=cx, cy=cy, cell=cs, flags=flags, surfels=s,
-                probes=p, links=lk, back=back, lext=lx, pext=px, boxes=bx)
+    # lane SIDES6: the surfel table a link side names. v3/v4: (front, back); v5: the six bins (pad0), each
+    # its own array, so `bysides[side][j]` and a per-side key map read every version the same way
+    bysides = tuple(s[s['pad0'] == b] for b in range(6)) if ver >= 5 else (s, back)
+    return dict(emits=em, ver=ver, content=res[2] if ver >= 4 else 0, cx=cx, cy=cy, cell=cs, flags=flags, surfels=s,
+                probes=p, links=lk, back=back, lext=lx, pext=px, boxes=bx, bysides=bysides)
 
 
 def unpack_dir(d):
@@ -349,15 +352,25 @@ def structure(files, fails):
         want = (1 if len(lk) else 0) | (2 if len(p) else 0)
         if t['flags'] != want:
             fails.append('%s: flags %d, want %d' % (name, t['flags'], want))
-        for nm, arr in (('keys', s), ('keys_back', t['back'])):
+        t['keys_side'] = []   # lane SIDES6: per side (v3/v4 front, back; v5 the six bins), cell -> index
+        for si, arr in enumerate(t['bysides']):
             keys = {}
             for i, sp in enumerate(arr):
                 k = tuple(floordiv(sp['pos'][a], t['cell']) for a in range(3))
                 if k in keys:
-                    fails.append('%s: %s surfel cell %s twice' % (name, 'back' if nm == 'keys_back' else 'front', k))
+                    fails.append('%s: side %d surfel cell %s twice' % (name, si, k))
                     break
                 keys[k] = i
-            t[nm] = keys
+            t['keys_side'].append(keys)
+        t['keys'], t['keys_back'] = t['keys_side'][0], t['keys_side'][1]
+        if t['ver'] >= 5:
+            if len(s) and int(s['pad0'].max()) > 5:
+                fails.append('%s: a surfel bin over 5' % name)
+            # the table's order: cell (z, y, x), then bin
+            order = [(floordiv(sp['pos'][2], t['cell']), floordiv(sp['pos'][1], t['cell']), floordiv(sp['pos'][0], t['cell']),
+                      int(sp['pad0'])) for sp in s]
+            if order != sorted(order) or len(set(order)) != len(order):
+                fails.append('%s: v5 surfels not in cell-then-bin order (or a side twice)' % name)
         nxt = 0
         for i, pr in enumerate(p):
             if pr['off'] != nxt or pr['off'] + pr['cnt'] > len(lk):
@@ -369,9 +382,10 @@ def structure(files, fails):
                 break
         if nxt != len(lk):
             fails.append('%s: %d links not owned by a probe' % (name, len(lk) - nxt))
-        if t['ver'] == 4:
-            if len(t['lext']) and int(t['lext']['side'].max()) > 1:
-                fails.append('%s: a link side other than 0/1' % name)
+        if t['ver'] >= 4:
+            top = 5 if t['ver'] >= 5 else 1
+            if len(t['lext']) and int(t['lext']['side'].max()) > top:
+                fails.append('%s: a link side over %d' % (name, top))
             named = set(int(r) for r in t['pext']['room'].ravel()) - {0, ROOM_NONE}
             for bx in t['boxes']:
                 if int(bx['room']) not in named:
@@ -395,11 +409,14 @@ def per_probe(t, fn):
 def surfel_of(t, pk, l, x, ignore_side=False):
     """The surfel a link names: its cell, on its side (v4); None if the file lacks it."""
     k = tuple(int(pk[a]) + int(l['delta'][a]) for a in range(3))
-    if x['side'] and not ignore_side:
-        j = t['keys_back'].get(k)
-        return None if j is None else t['back'][j]
-    j = t['keys'].get(k)
-    return None if j is None else t['surfels'][j]
+    side = 0 if ignore_side else int(x['side'])
+    if ignore_side and t['ver'] >= 5:   # lane SIDES6: the red reads the cell's first side (its most-seen is not marked)
+        for si in range(6):
+            if k in t['keys_side'][si]:
+                side = si
+                break
+    j = t['keys_side'][side].get(k)
+    return None if j is None else t['bysides'][side][j]
 
 
 def budget_and_facing(tbks, fails, masses=None):
@@ -473,6 +490,12 @@ def model_surfels(tris, alb, probes, dirs, cell, mode='spill'):
         return (nv / np.linalg.norm(nv), tuple(int(round(min(max(x / n, 0), 1) * 255)) for x in al), n)
 
     out, backs, back, mask = {}, [], {}, {}
+    if mode == 'v5':   # lane SIDES6: every facing bin its own surfel; keyed (cell, bin) in `back`
+        for key, bs in bins.items():
+            for i, b in enumerate(bs):
+                if b[0]:
+                    back[(key, i)] = final(b[0], b[1], b[2])
+        return out, {}, back, mask
     for key, bs in bins.items():
         w = max(range(6), key=lambda i: (bs[i][0], -i))
         n, nv, al = 0, np.zeros(3), np.zeros(3)
@@ -512,7 +535,7 @@ def model_surfels(tris, alb, probes, dirs, cell, mode='spill'):
     return out, alt, back, mask
 
 
-def retrace(tbks, tris, alb, n, fails, v4=True, doors=(), glass=None, physics=True):
+def retrace(tbks, tris, alb, n, fails, v4=True, doors=(), glass=None, physics=True, v5=None):
     dirs = fib(n)
     oc = octant(dirs)
     omega = FOUR_PI / n
@@ -522,17 +545,20 @@ def retrace(tbks, tris, alb, n, fails, v4=True, doors=(), glass=None, physics=Tr
               tint_bad=0, tint_n=0, skytint_bad=0, skytint_n=0, door_n=0, side_n=0, glass_share=0.0)
     cell = tbks[0][1]['cell'] if tbks else 70.0
     allp = [pr['pos'].astype(np.float64) for _, t in tbks for pr in t['probes']]
-    model, alt, back, mask = model_surfels(tris, alb, allp, dirs, cell, 'v4' if v4 else 'spill')
+    if v5 is None:   # lane SIDES6: the files say which model they must match
+        v5 = bool(tbks) and all(t['ver'] >= 5 for _, t in tbks)
+    model, alt, back, mask = model_surfels(tris, alb, allp, dirs, cell, 'v5' if v5 else 'v4' if v4 else 'spill')
+    st['six'] = v5
     fn = face_normals(tris)
     gtris = gT = None
     if glass:
         gtris = np.array([p for p, _ in glass], dtype=np.float32).astype(np.float64)
         gT = np.array([tr for _, tr in glass], dtype=np.float64) / 255.0
     for f, t in tbks:
-        for arr, mdl in ((t['surfels'], model), (t['back'], back)):
+        for arr, mdl in ((t['surfels'], back if v5 else model), (t['back'], back)):
             for sp in arr:
                 key = tuple(floordiv(sp['pos'][a], cell) for a in range(3))
-                m = mdl.get(key)
+                m = mdl.get((key, int(sp['pad0'])) if v5 else key)
                 st['sf_n'] += 1
                 st['back_n'] += 1 if mdl is back else 0
                 if m is None:
@@ -578,7 +604,7 @@ def retrace(tbks, tris, alb, n, fails, v4=True, doors=(), glass=None, physics=Tr
             cells = {}
             for j in np.nonzero(use)[0]:
                 kk = tuple(kc[j])
-                side = 1 if (v4 and bis[j] in mask.get(kk, ())) else 0
+                side = int(bis[j]) if v5 else 1 if (v4 and bis[j] in mask.get(kk, ())) else 0
                 key = (kk, side, int(door[j]))
                 c = cells.setdefault(key, [0.0, np.zeros(3), np.zeros(3)])
                 c[0] += omega
@@ -589,7 +615,7 @@ def retrace(tbks, tris, alb, n, fails, v4=True, doors=(), glass=None, physics=Tr
             for key, c in cells.items():
                 kk, side, dr = key
                 if v4:
-                    m = (back if side else model).get(kk)
+                    m = back.get((kk, side)) if v5 else (back if side else model).get(kk)
                     if m is None or np.dot(c[1], m[0]) >= 0:
                         turned += c[0]
                         st['turned'] += 1
@@ -621,7 +647,7 @@ def retrace(tbks, tris, alb, n, fails, v4=True, doors=(), glass=None, physics=Tr
             if l1 > cap / FOUR_PI + q + 4.0 / n:
                 st['link_bad'] += 1
             for key, (w, d, tint) in got.items():
-                st['side_n'] += key[1]
+                st['side_n'] += 1 if key[1] else 0
                 st['door_n'] += 1 if key[2] else 0
                 c = kept.get(key, cells.get(key))
                 if c is None or np.linalg.norm(c[1]) == 0:
@@ -692,7 +718,7 @@ def rooms_check(tbks, tris, rooms, openings, fails):
     P = []   # (pos, cls, room0, room1)
     boxes = []
     for _, t in tbks:
-        if t['ver'] == 4 and not (t['content'] & 2):
+        if t['ver'] >= 4 and not (t['content'] & 2):
             fails.append('a file does not say it modelled rooms')
             break
         for pr, px in zip(t['probes'], t['pext']):
@@ -800,16 +826,62 @@ def v3_leg(exe, base, soup, work, tag, rays, rect, tris, alb, physics, fails):
     fails += ['v3: ' + f for f in f3]
     same = ''
     if base:
-        ob = fresh(os.path.join(work, tag + '_base'))
-        rb = run_bake(base, soup, ob, rays, 0, '', (), rect)
-        ok = rb.returncode == 0 and same_files(ob, out)
-        if not ok:
-            fails.append('--tbk 3 differs from the base exe\'s files')
-        same = ', byte-identical to the base exe' if ok else ', NOT the base exe\'s bytes'
+        # lane SIDES6: v3 AND v4 from this exe are the base exe's bytes (v5 is new; the old versions untouched)
+        oks = []
+        for v in ('3', '4'):
+            ob = fresh(os.path.join(work, tag + '_base_v' + v))
+            rb = run_bake(base, soup, ob, rays, 0, '', ['--tbk', v], rect)
+            if v == '3':
+                mine = out
+            else:
+                mine = fresh(os.path.join(work, tag + '_v4'))
+                run_bake(exe, soup, mine, rays, 0, '', ['--tbk', '4'], rect)
+            ok = rb.returncode == 0 and bool(files_in(ob)) and same_files(ob, mine)
+            if not ok:
+                fails.append('--tbk %s differs from the base exe\'s files' % v)
+            oks.append(ok)
+        same = ', v3 and v4 byte-identical to the base exe' if all(oks) else ', NOT the base exe\'s bytes'
     return 'v3 leg %d files re-traced%s' % (len(tb), same)
 
 
-def synth(exe, work, red, base):
+def corner_check(tbks, tris, alb, n, fails):
+    """lane SIDES6: the corner gate, from this file's own trace. A corner cell = two facing bins with
+    samples whose normals stand more than 45 deg apart and are not opposed (dot >= 0: the v4 front
+    merged them into one surfel). Kept separate = the file holds, in that cell, a surfel within
+    10 deg of each such bin's own mean normal. Every corner cell must be kept; the scene must hold one."""
+    cell = tbks[0][1]['cell'] if tbks else 70.0
+    allp = [pr['pos'].astype(np.float64) for _, t in tbks for pr in t['probes']]
+    _, _, six, _ = model_surfels(tris, alb, allp, fib(n), cell, 'v5')
+    bycell = {}
+    for (key, i), m in six.items():
+        bycell.setdefault(key, []).append(m[0])
+    filed = {}
+    for _, t in tbks:
+        for s in t['surfels']:
+            key = tuple(floordiv(s['pos'][a], cell) for a in range(3))
+            v = s['nrm'].astype(np.float64)
+            filed.setdefault(key, []).append(v / max(np.linalg.norm(v), 1e-9))
+    c45, c10 = math.cos(math.radians(45)), math.cos(math.radians(10))
+    corners = kept = 0
+    for key, ns in bycell.items():
+        want = set()
+        for a in range(len(ns)):
+            for b in range(a + 1, len(ns)):
+                d = float(np.dot(ns[a], ns[b]))
+                if 0 <= d < c45:
+                    want |= {a, b}
+        if not want or key not in filed:   # a cell no probe of these files links lives in another file
+            continue
+        corners += 1
+        kept += all(any(float(np.dot(ns[a], f)) >= c10 for f in filed[key]) for a in want)
+    if not corners:
+        fails.append('no corner cell: the scene tests nothing')
+    elif kept < corners:
+        fails.append('corners: %d of %d corner cells keep floor and wall apart' % (kept, corners))
+    return corners, kept
+
+
+def synth(exe, work, red, base, tbk=''):
     os.makedirs(work, exist_ok=True)
     tris, alb = scene()
     soup = os.path.join(work, 'bake_synth.psp')
@@ -817,8 +889,8 @@ def synth(exe, work, red, base):
     rays = 1024
     outs = []
     for th in (1, 0):
-        out = fresh(os.path.join(work, 'bake_synth%s_t%d' % ('_red_' + red if red else '', th)))
-        rc = run_bake(exe, soup, out, rays, th, red)
+        out = fresh(os.path.join(work, 'bake_synth%s%s_t%d' % ('_red_' + red if red else '', '_tbk' + tbk if tbk else '', th)))
+        rc = run_bake(exe, soup, out, rays, th, red, ['--tbk', tbk] if tbk else [])
         if rc.returncode != 0:
             print('synth FAIL: probebake rc %d %s' % (rc.returncode, rc.stderr.strip()[:300]))
             return 1
@@ -830,18 +902,19 @@ def synth(exe, work, red, base):
     if not same_files(outs[0], outs[1]):
         fails.append('1 thread and all threads wrote different files')
     tbks = structure(fa, fails)
-    if any(t['ver'] != 4 for _, t in tbks):
-        fails.append('the default file is not v4')
+    if any(t['ver'] != 5 for _, t in tbks):
+        fails.append('the default file is not v5')
     # the soup in float32, exactly as the bake reads it
     t32 = tris.astype(np.float32).astype(np.float64)
     st, masses = retrace(tbks, t32, alb, rays, fails)
     bf = budget_and_facing(tbks, fails, masses)
     if not st['side_n']:
         fails.append('no link reaches a back side: the scene tests nothing')
+    corners, ckept = corner_check(tbks, t32, alb, rays, fails)
     # the interior rule (--no-sky): the same links, no sky anywhere, and the sky's weight unlinked instead
     ns_moved = 0
     v3 = ''
-    if not red:
+    if not red and not tbk:
         out = fresh(os.path.join(work, 'bake_synth_nosky'))
         rc = run_bake(exe, soup, out, rays, 0, '', ['--no-sky'])
         fn = files_in(out)
@@ -871,12 +944,14 @@ def synth(exe, work, red, base):
         v3 = '; ' + v3_leg(exe, base, soup, work, 'bake_synth', rays, RECT, t32, alb, True, fails)
     unl = float(np.mean([float(pr['unl']) for _, t in tbks for pr in t['probes']])) if tbks else 0.0
     verdict = 'PASS' if not fails else 'FAIL'
-    print('synth %s%s: v4 %d files, %d probes (%d ground, %d room) re-traced at %d rays, %d links (to a back side %d), '
+    print('synth %s%s: v%s %d files, %d probes (%d ground, %d room) re-traced at %d rays, %d links (to a back side %d), '
           '%d link directions, %d albedo surfels, %d surfels modelled (back %d), %d cell links refused as turned away, '
-          'unlinked mean %.4f, budget worst %.2g, --no-sky moved the sky of %d probes to unlinked%s; %s' % (
-              verdict, ' [red ' + red + ']' if red else '', len(fa), st['probes'], st['ground'], st['room'], rays,
+          'unlinked mean %.4f, budget worst %.2g, --no-sky moved the sky of %d probes to unlinked; '
+          'corners: %d of %d corner cells keep floor and wall apart%s; %s' % (
+              verdict, ' [red ' + red + ']' if red else ' [red tbk ' + tbk + ']' if tbk else '',
+              '/'.join(sorted(set(str(t['ver']) for _, t in tbks))), len(fa), st['probes'], st['ground'], st['room'], rays,
               bf['links'], st['side_n'], st['dirs'], st['alb_n'], st['sf_n'], st['back_n'], st['turned'], unl,
-              bf['worst'], ns_moved, v3, '; '.join(fails[:6]) if fails else 'all as traced'))
+              bf['worst'], ns_moved, ckept, corners, v3, '; '.join(fails[:6]) if fails else 'all as traced'))
     return 0 if not fails else 1
 
 
@@ -899,8 +974,8 @@ def rooms(exe, work, red, base):
     if len(outs) > 1 and not same_files(outs[0], outs[1]):
         fails.append('1 thread and all threads wrote different files')
     tbks = structure(fa, fails)
-    if any(t['ver'] != 4 for _, t in tbks):
-        fails.append('a file is not v4')
+    if any(t['ver'] != 5 for _, t in tbks):
+        fails.append('a file is not v5')
     t32 = tris.astype(np.float32).astype(np.float64)
     st, _ = retrace(tbks, t32, alb, rays, fails, v4=True, doors=doors, glass=glass, physics=False)
     bf = budget_and_facing(tbks, fails)
@@ -913,7 +988,7 @@ def rooms(exe, work, red, base):
         v3 = '; ' + v3_leg(exe, base, soup, work, 'bake_rooms', rays, RECT2, t32, alb, False, fails)
     unl = float(np.mean([float(pr['unl']) for _, t in tbks for pr in t['probes']])) if tbks else 0.0
     verdict = 'PASS' if not fails else 'FAIL'
-    print('rooms %s%s: v4 %d files, %d probes re-traced at %d rays with %d doors and %d glass panes, %d links '
+    print('rooms %s%s: v5 %d files, %d probes re-traced at %d rays with %d doors and %d glass panes, %d links '
           '(back side %d, through a door %d, tinted %d), %d probe-octants see sky through glass (sphere share mean %.3f), '
           '%d surfels modelled (back %d), unlinked mean %.4f; rooms: %d probes named in %d known rooms, %d under open sky '
           'name none, %d openings name both sides, %d room boxes hold %d probes%s; %s' % (
@@ -951,7 +1026,7 @@ if __name__ == '__main__':
     a = sys.argv[1:]
     opt = (lambda k: a[a.index(k) + 1] if k in a else '')
     if a and a[0] == 'synth':
-        sys.exit(synth(a[1], a[2], opt('--red'), opt('--base')))
+        sys.exit(synth(a[1], a[2], opt('--red'), opt('--base'), opt('--tbk')))
     if a and a[0] == 'rooms':
         sys.exit(rooms(a[1], a[2], opt('--red'), opt('--base')))
     if a and a[0] == 'check':

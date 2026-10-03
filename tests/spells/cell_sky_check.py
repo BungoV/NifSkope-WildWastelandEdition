@@ -435,7 +435,7 @@ def dump_rows(tbks, S):
     rows = []
     for _, t in tbks:
         pair = []
-        for arr in (t['surfels'], t['back']):
+        for arr in t['bysides']:   # lane SIDES6: front|back, or v5's six
             r = np.full(len(arr), -1, np.int64)
             nn = arr['nrm'].astype(np.float64)
             nn /= np.maximum(np.linalg.norm(nn, axis=1), 1e-9)[:, None]
@@ -453,10 +453,10 @@ def own_gather(tbks, rows, Bown, sky):
     """every probe's six-axis total: its links' surfels (tinted by the glass on the way, each weighted by the
     solid angle it stands for, the unlinked share filled with the linked mean) + its sky"""
     cubes, unresolved, k0 = [], 0, 0
-    for (name, t), (rf, rb) in zip(tbks, rows):
+    for (name, t), rr6 in zip(tbks, rows):
         cs = float(t['cell'])
         maps = []
-        for arr in (t['surfels'], t['back']):
+        for arr in t['bysides']:
             key = pack3(cell_keys(arr['pos'], cs)) if len(arr) else np.zeros(0, np.int64)
             uk, first = np.unique(key, return_index=True)      # the first surfel of a cell, as the reader keeps it
             maps.append((uk, first))
@@ -469,9 +469,9 @@ def own_gather(tbks, rows, Bown, sky):
         lk, lx, lpi = t['links'][use], t['lext'][use], lp[use]
         pk = cell_keys(pr['pos'], cs)
         key = pack3(pk[lpi] + lk['delta'].astype(np.int64))
-        side = lx['side'].astype(bool)
+        side = lx['side'].astype(np.int64)
         srow = np.full(len(lk), -1, np.int64)
-        for sd, (uk, first), rr in ((False, maps[0], rf), (True, maps[1], rb)):
+        for sd, (uk, first), rr in zip(range(len(maps)), maps, rr6):
             m = side == sd
             if not m.any() or not len(uk):
                 continue
